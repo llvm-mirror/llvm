@@ -179,57 +179,54 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
     Function* LF = *LI;
     const std::set<Function*>& EqClass = FuncECs.getEqClass(LF);
 
-#ifndef NDEBUG
     if (EqClass.size() > 1) {
+#ifndef NDEBUG
       DEBUG(std::cerr <<"  Equivalence set for leader " <<LF->getName()<<" = ");
       for (std::set<Function*>::const_iterator EqI = EqClass.begin(),
              EqEnd = EqClass.end(); EqI != EqEnd; ++EqI)
         DEBUG(std::cerr << " " << (*EqI)->getName() << ",");
       DEBUG(std::cerr << "\n");
-    }
 #endif
 
-    if (EqClass.size() > 1) {
       // This equiv class has multiple functions: merge their graphs.  First,
       // clone the CBU graph for the leader and make it the common graph for the
       // equivalence graph.
-      DSGraph *mergedG = &getOrCreateGraph(*LF);
+      DSGraph &MergedG = getOrCreateGraph(*LF);
 
       // Record the argument nodes for use in merging later below.
       std::vector<DSNodeHandle> ArgNodes;  
 
       for (Function::aiterator AI1 = LF->abegin(); AI1 != LF->aend(); ++AI1)
         if (DS::isPointerType(AI1->getType()))
-          ArgNodes.push_back(mergedG->getNodeForValue(AI1));
+          ArgNodes.push_back(MergedG.getNodeForValue(AI1));
       
       // Merge in the graphs of all other functions in this equiv. class.  Note
       // that two or more functions may have the same graph, and it only needs
-      // to be merged in once.  Use a set to find repetitions.
+      // to be merged in once.
       std::set<DSGraph*> GraphsMerged;
-      for (std::set<Function*>::const_iterator EqI = EqClass.begin(),
-             EqEnd = EqClass.end(); EqI != EqEnd; ++EqI) {
-        Function* F = *EqI;
-        DSGraph*& FG = DSInfo[F];
+      GraphsMerged.insert(&CBU->getDSGraph(*LF));
 
-        if (F == LF || FG == mergedG)
+      for (std::set<Function*>::const_iterator EqI = EqClass.begin(),
+             E = EqClass.end(); EqI != E; ++EqI) {
+        Function *F = *EqI;
+        DSGraph *&FG = DSInfo[F];
+
+        DSGraph &CBUGraph = CBU->getDSGraph(*F); 
+        if (!GraphsMerged.insert(&CBUGraph).second)
           continue;
+        assert(FG == 0 && "Remerged a graph?");
         
         // Record the "folded" graph for the function.
-        FG = mergedG;
+        FG = &MergedG;
         
-        // Clone this member of the equivalence class into mergedG
-        DSGraph* CBUGraph = &CBU->getDSGraph(*F); 
-        if (GraphsMerged.count(CBUGraph) > 0)
-          continue;
-        
-        GraphsMerged.insert(CBUGraph);
+        // Clone this member of the equivalence class into MergedG.
         DSGraph::NodeMapTy NodeMap;    
 
-        mergedG->cloneInto(*CBUGraph, mergedG->getScalarMap(),
-                           mergedG->getReturnNodes(), NodeMap, 0);
+        MergedG.cloneInto(CBUGraph, MergedG.getScalarMap(),
+                           MergedG.getReturnNodes(), NodeMap, 0);
 
         // Merge the return nodes of all functions together.
-        mergedG->getReturnNodes()[LF].mergeWith(mergedG->getReturnNodes()[F]);
+        MergedG.getReturnNodes()[LF].mergeWith(MergedG.getReturnNodes()[F]);
 
         // Merge the function arguments with all argument nodes found so far.
         // If there are extra function args, add them to the vector of argNodes
@@ -237,12 +234,12 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
         for (unsigned arg=0, numArgs = ArgNodes.size();
              arg != numArgs && AI2 != AI2end; ++AI2, ++arg)
           if (DS::isPointerType(AI2->getType()))
-            ArgNodes[arg].mergeWith(mergedG->getNodeForValue(AI2));
+            ArgNodes[arg].mergeWith(MergedG.getNodeForValue(AI2));
 
         for ( ; AI2 != AI2end; ++AI2)
           if (DS::isPointerType(AI2->getType()))
-            ArgNodes.push_back(mergedG->getNodeForValue(AI2));
-        DEBUG(mergedG->AssertGraphOK());
+            ArgNodes.push_back(MergedG.getNodeForValue(AI2));
+        DEBUG(MergedG.AssertGraphOK());
       }
     }
   }
@@ -267,8 +264,7 @@ DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
        I != Graph->getReturnNodes().end(); ++I)
     if (I->first != &F) {
       DSGraph *&FG = DSInfo[I->first];
-      assert(FG == NULL || FG == &CBU->getDSGraph(*I->first) &&
-             "Merging function in SCC twice?");
+      assert(FG == 0 && "Merging function in SCC twice?");
       FG = Graph;
     }
 
