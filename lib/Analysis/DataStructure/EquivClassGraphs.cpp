@@ -21,11 +21,11 @@
 #include "llvm/Analysis/DataStructure/DSGraph.h"
 #include "llvm/Analysis/DataStructure/DataStructure.h"
 #include "llvm/Support/CallSite.h"
-#include "Support/Debug.h"
-#include "Support/SCCIterator.h"
-#include "Support/Statistic.h"
-#include "Support/EquivalenceClasses.h"
-#include "Support/STLExtras.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/EquivalenceClasses.h"
+#include "llvm/ADT/STLExtras.h"
 using namespace llvm;
 
 namespace llvm {
