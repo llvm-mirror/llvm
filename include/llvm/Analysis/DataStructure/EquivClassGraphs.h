@@ -71,6 +71,12 @@ namespace PA {
       return *I->second;
     }
 
+    /// ContainsDSGraphFor - Return true if we have a graph for the specified
+    /// function.
+    bool ContainsDSGraphFor(const Function &F) const {
+      return DSInfo.find(&F) != DSInfo.end();
+    }
+
     /// getSomeCalleeForCallSite - Return any one callee function at
     /// a call site.
     /// 
