@@ -151,8 +151,6 @@ namespace PA {
 
     DSGraph &getOrCreateGraph(Function &F);
 
-    DSGraph* cloneGraph(Function &F);
-
     bool hasFoldedGraph(const Function& F) const {
       hash_map<const Function*, DSGraph*>::const_iterator I =
         FoldedGraphsMap.find(const_cast<Function*>(&F));

@@ -194,7 +194,7 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
       // This equiv class has multiple functions: merge their graphs.  First,
       // clone the CBU graph for the leader and make it the common graph for the
       // equivalence graph.
-      DSGraph* mergedG = cloneGraph(*LF);
+      DSGraph *mergedG = &getOrCreateGraph(*LF);
 
       // Record the argument nodes for use in merging later below
       EquivClassGraphArgsInfo& GraphInfo = getECGraphInfo(mergedG);
@@ -255,13 +255,7 @@ DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
   DSGraph *&Graph = FoldedGraphsMap[&F];
   if (Graph) return *Graph;
 
-  return *cloneGraph(F);
-}
-
-DSGraph *PA::EquivClassGraphs::cloneGraph(Function &F) {
-  DSGraph *&Graph = FoldedGraphsMap[&F];
   DSGraph &CBUGraph = CBU->getDSGraph(F);
-  assert(Graph == 0 && "Cloning a graph twice?");
 
   // Copy the CBU graph...
   Graph = new DSGraph(CBUGraph);           // updates the map via reference
@@ -278,7 +272,7 @@ DSGraph *PA::EquivClassGraphs::cloneGraph(Function &F) {
       FG = Graph;
     }
 
-  return Graph;
+  return *Graph;
 }
 
 
