@@ -16,7 +16,7 @@
 #ifndef LLVM_ANALYSIS_DSGRAPHTRAITS_H
 #define LLVM_ANALYSIS_DSGRAPHTRAITS_H
 
-#include "llvm/Analysis/DSGraph.h"
+#include "llvm/Analysis/DataStructure/DSGraph.h"
 #include "Support/GraphTraits.h"
 #include "Support/iterator"
 #include "Support/STLExtras.h"

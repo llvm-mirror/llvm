@@ -14,7 +14,7 @@
 #ifndef LLVM_ANALYSIS_DSNODE_H
 #define LLVM_ANALYSIS_DSNODE_H
 
-#include "llvm/Analysis/DSSupport.h"
+#include "llvm/Analysis/DataStructure/DSSupport.h"
 
 namespace llvm {
 

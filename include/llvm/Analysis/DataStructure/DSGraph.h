@@ -15,7 +15,7 @@
 #ifndef LLVM_ANALYSIS_DSGRAPH_H
 #define LLVM_ANALYSIS_DSGRAPH_H
 
-#include "llvm/Analysis/DSNode.h"
+#include "llvm/Analysis/DataStructure/DSNode.h"
 
 namespace llvm {
 
