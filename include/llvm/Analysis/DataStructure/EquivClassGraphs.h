@@ -46,7 +46,7 @@ namespace PA {
   /// DS graph for all functions in an equivalence class.  After this merging,
   /// graphs are inlined bottom-up on the SCCs of the final (CBU) call graph.
   ///
-  struct EquivClassGraphs : public Pass {
+  struct EquivClassGraphs : public ModulePass {
     CompleteBUDataStructures *CBU;
 
     // FoldedGraphsMap, one graph for each function
@@ -69,7 +69,7 @@ namespace PA {
     /// EquivClassGraphs - Computes the equivalence classes and then the
     /// folded DS graphs for each class.
     /// 
-    virtual bool run(Module &M) { computeFoldedGraphs(M); return true; }
+    virtual bool runOnModule(Module &M) { computeFoldedGraphs(M); return true; }
 
     /// getCBUDataStructures - Get the CompleteBUDataStructures object
     /// 
