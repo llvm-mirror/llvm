@@ -93,11 +93,10 @@ namespace PA {
   private:
     void buildIndirectFunctionSets(Module &M);
 
-    unsigned processSCC(DSGraph &FG, Function &F, std::vector<Function*> &Stack,
+    unsigned processSCC(DSGraph &FG, std::vector<DSGraph*> &Stack,
                         unsigned &NextID, 
-                        std::map<Function*, unsigned> &ValMap);
-
-    void processGraph(DSGraph &FG, Function &F);
+                        std::map<DSGraph*, unsigned> &ValMap);
+    void processGraph(DSGraph &FG);
 
     DSGraph &getOrCreateGraph(Function &F);
   };

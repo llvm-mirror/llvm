@@ -86,20 +86,20 @@ bool PA::EquivClassGraphs::runOnModule(Module &M) {
   buildIndirectFunctionSets(M);
 
   // Stack of functions used for Tarjan's SCC-finding algorithm.
-  std::vector<Function*> Stack;
-  std::map<Function*, unsigned> ValMap;
+  std::vector<DSGraph*> Stack;
+  std::map<DSGraph*, unsigned> ValMap;
   unsigned NextID = 1;
 
   if (Function *Main = M.getMainFunction()) {
     if (!Main->isExternal())
-      processSCC(getOrCreateGraph(*Main), *Main, Stack, NextID, ValMap);
+      processSCC(getOrCreateGraph(*Main), Stack, NextID, ValMap);
   } else {
     std::cerr << "Fold Graphs: No 'main' function found!\n";
   }
   
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (!I->isExternal() && !ValMap.count(I))
-      processSCC(getOrCreateGraph(*I), *I, Stack, NextID, ValMap);
+    if (!I->isExternal())
+      processSCC(getOrCreateGraph(*I), Stack, NextID, ValMap);
 
   DEBUG(CheckAllGraphs(&M, *this));
 
@@ -272,19 +272,19 @@ DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
 }
 
 
-unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function &F,
-                                          std::vector<Function*> &Stack,
-                                          unsigned &NextID, 
-                                          std::map<Function*,unsigned> &ValMap){
-  DEBUG(std::cerr << "    ProcessSCC for function " << F.getName() << "\n");
-
-  std::map<Function*, unsigned>::iterator It = ValMap.lower_bound(&F);
-  if (It != ValMap.end() && It->first == &F)
+unsigned PA::EquivClassGraphs::
+processSCC(DSGraph &FG, std::vector<DSGraph*> &Stack, unsigned &NextID, 
+           std::map<DSGraph*, unsigned> &ValMap) {
+  std::map<DSGraph*, unsigned>::iterator It = ValMap.lower_bound(&FG);
+  if (It != ValMap.end() && It->first == &FG)
     return It->second;
 
+  DEBUG(std::cerr << "    ProcessSCC for function " << FG.getFunctionNames()
+                  << "\n");
+
   unsigned Min = NextID++, MyID = Min;
-  ValMap[&F] = Min;
-  Stack.push_back(&F);
+  ValMap[&FG] = Min;
+  Stack.push_back(&FG);
 
   // The edges out of the current node are the call site targets...
   for (unsigned i = 0, e = FG.getFunctionCalls().size(); i != e; ++i) {
@@ -295,21 +295,21 @@ unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function &F,
     for (tie(I, E) = getActualCallees().equal_range(Call); I != E; ++I)
       if (!I->second->isExternal()) {
         // Process the callee as necessary.
-        unsigned M = processSCC(getOrCreateGraph(*I->second), *I->second,
+        unsigned M = processSCC(getOrCreateGraph(*I->second),
                                 Stack, NextID, ValMap);
         if (M < Min) Min = M;
       }
   }
 
-  assert(ValMap[&F] == MyID && "SCC construction assumption wrong!");
+  assert(ValMap[&FG] == MyID && "SCC construction assumption wrong!");
   if (Min != MyID)
     return Min;         // This is part of a larger SCC!
 
   // If this is a new SCC, process it now.
   bool IsMultiNodeSCC = false;
-  while (Stack.back() != &F) {
-    DSGraph *NG = &getOrCreateGraph(*Stack.back());
-    ValMap[Stack.back()] = ~0U;
+  while (Stack.back() != &FG) {
+    DSGraph *NG = Stack.back();
+    ValMap[NG] = ~0U;
 
     // Since all SCCs must be the same as those found in CBU, we do not need to
     // do any merging.  Make sure all functions in the SCC share the same graph.
@@ -321,25 +321,24 @@ unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function &F,
 
   Stack.pop_back();
 
-  processGraph(FG, F);
-  ValMap[&F] = ~0U;
+  processGraph(FG);
+  ValMap[&FG] = ~0U;
   return MyID;
 }
 
 
 /// processGraph - Process the CBU graphs for the program in bottom-up order on
 /// the SCC of the __ACTUAL__ call graph.  This builds final folded CBU graphs.
-void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
-  DEBUG(std::cerr << "    ProcessGraph for function " << F.getName() << "\n");
+void PA::EquivClassGraphs::processGraph(DSGraph &G) {
+  DEBUG(std::cerr << "    ProcessGraph for function "
+                  << G.getFunctionNames() << "\n");
 
   hash_set<Instruction*> calls;
 
-  DSGraph* CallerGraph = &getOrCreateGraph(F);
-
   // Else we need to inline some callee graph.  Visit all call sites.
   // The edges out of the current node are the call site targets...
-  for (unsigned i=0, e = CallerGraph->getFunctionCalls().size(); i != e; ++i) {
-    const DSCallSite &CS = CallerGraph->getFunctionCalls()[i];
+  for (unsigned i=0, e = G.getFunctionCalls().size(); i != e; ++i) {
+    const DSCallSite &CS = G.getFunctionCalls()[i];
     Instruction *TheCall = CS.getCallSite().getInstruction();
 
     assert(calls.insert(TheCall).second &&
@@ -369,21 +368,19 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
       // including self-recursion have been folded in the equiv classes.
       // 
       CalleeGraph = &getOrCreateGraph(*CalleeFunc);
-      if (CalleeGraph != CallerGraph) {
+      if (CalleeGraph != &G) {
         ++NumFoldGraphInlines;
-        CallerGraph->mergeInGraph(CS, *CalleeFunc, *CalleeGraph,
-                                  DSGraph::KeepModRefBits |
-                                  DSGraph::StripAllocaBit |
-                                  DSGraph::DontCloneCallNodes |
-                                  DSGraph::DontCloneAuxCallNodes);
+        G.mergeInGraph(CS, *CalleeFunc, *CalleeGraph,
+                       DSGraph::KeepModRefBits | DSGraph::StripAllocaBit |
+                       DSGraph::DontCloneCallNodes |
+                       DSGraph::DontCloneAuxCallNodes);
         DEBUG(std::cerr << "    Inlining graph [" << i << "/" << e-1
               << ":" << TNum << "/" << Num-1 << "] for "
               << CalleeFunc->getName() << "["
               << CalleeGraph->getGraphSize() << "+"
               << CalleeGraph->getAuxFunctionCalls().size()
-              << "] into '" /*<< CallerGraph->getFunctionNames()*/ << "' ["
-              << CallerGraph->getGraphSize() << "+"
-              << CallerGraph->getAuxFunctionCalls().size()
+              << "] into '" /*<< G.getFunctionNames()*/ << "' ["
+              << G.getGraphSize() << "+" << G.getAuxFunctionCalls().size()
               << "]\n");
       }
     }
@@ -400,26 +397,25 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
   }
 
   // Recompute the Incomplete markers.
-  assert(CallerGraph->getInlinedGlobals().empty());
-  CallerGraph->maskIncompleteMarkers();
-  CallerGraph->markIncompleteNodes(DSGraph::MarkFormalArgs);
+  assert(G.getInlinedGlobals().empty());
+  G.maskIncompleteMarkers();
+  G.markIncompleteNodes(DSGraph::MarkFormalArgs);
   
   // Delete dead nodes.  Treat globals that are unreachable but that can
   // reach live nodes as live.
-  CallerGraph->removeDeadNodes(DSGraph::KeepUnreachableGlobals);
+  G.removeDeadNodes(DSGraph::KeepUnreachableGlobals);
 
   // When this graph is finalized, clone the globals in the graph into the
   // globals graph to make sure it has everything, from all graphs.
-  DSScalarMap &MainSM = CallerGraph->getScalarMap();
-  ReachabilityCloner RC(*CallerGraph->getGlobalsGraph(), *CallerGraph,
-                        DSGraph::StripAllocaBit);
+  ReachabilityCloner RC(*G.getGlobalsGraph(), G, DSGraph::StripAllocaBit);
 
   // Clone everything reachable from globals in the function graph into the
   // globals graph.
+  DSScalarMap &MainSM = G.getScalarMap();
   for (DSScalarMap::global_iterator I = MainSM.global_begin(),
          E = MainSM.global_end(); I != E; ++I) 
     RC.getClonedNH(MainSM[*I]);
 
   DEBUG(std::cerr << "  -- DONE ProcessGraph for function "
-                  << F.getName() << "\n");
+                  << G.getFunctionNames() << "\n");
 }
