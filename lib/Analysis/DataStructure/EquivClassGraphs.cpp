@@ -56,13 +56,12 @@ static void CheckAllGraphs(Module *M, GT &ECGraphs) {
 }
 #endif
 
-// getDSGraphForCallSite - Return the common data structure graph for
-// callees at the specified call site.
+// getSomeCalleeForCallSite - Return any one callee function at a call site.
 // 
 Function *PA::EquivClassGraphs::
 getSomeCalleeForCallSite(const CallSite &CS) const {
   Function *thisFunc = CS.getCaller();
-  assert(thisFunc && "getDSGraphForCallSite(): Not a valid call site?");
+  assert(thisFunc && "getSomeCalleeForCallSite(): Not a valid call site?");
   DSGraph &DSG = getDSGraph(*thisFunc);
   DSNode *calleeNode = DSG.getNodeForValue(CS.getCalledValue()).getNode();
   std::map<DSNode*, Function *>::const_iterator I =

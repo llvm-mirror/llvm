@@ -76,21 +76,6 @@ namespace PA {
     /// 
     Function *getSomeCalleeForCallSite(const CallSite &CS) const;
 
-    /// getDSGraphForCallSite - Return the common data structure graph for
-    /// callees at the specified call site.
-    /// 
-    DSGraph &getDSGraphForCallSite(const CallSite &CS) const {
-      return this->getDSGraph(*getSomeCalleeForCallSite(CS));
-    }
-
-    /// getEquivClassForCallSite - Get the set of functions in the equivalence
-    /// class for a given call site.
-    /// 
-    const std::set<Function*>& getEquivClassForCallSite(const CallSite& CS) {
-      Function* leaderF = FuncECs.findClass(getSomeCalleeForCallSite(CS));
-      return FuncECs.getEqClass(leaderF);
-    }
-
     DSGraph &getGlobalsGraph() const {
       return *GlobalsGraph;
     }
@@ -104,10 +89,6 @@ namespace PA {
       AU.setPreservesAll();
       AU.addRequired<CompleteBUDataStructures>();
     }
-
-    /// print - Print out the analysis results...
-    ///
-    void print(std::ostream &O, const Module *M) const {}
 
   private:
     void buildIndirectFunctionSets(Module &M);
