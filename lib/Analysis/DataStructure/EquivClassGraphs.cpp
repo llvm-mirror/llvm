@@ -210,7 +210,7 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
       for (std::set<Function*>::const_iterator EqI = EqClass.begin(),
              EqEnd = EqClass.end(); EqI != EqEnd; ++EqI) {
         Function* F = *EqI;
-        DSGraph*& FG = FoldedGraphsMap[F];
+        DSGraph*& FG = DSInfo[F];
 
         if (F == LF || FG == mergedG)
           continue;
@@ -253,7 +253,7 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
 
 DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
   // Has the graph already been created?
-  DSGraph *&Graph = FoldedGraphsMap[&F];
+  DSGraph *&Graph = DSInfo[&F];
   if (Graph) return *Graph;
 
   DSGraph &CBUGraph = CBU->getDSGraph(F);
@@ -263,11 +263,11 @@ DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
   Graph->setGlobalsGraph(&getGlobalsGraph());
   Graph->setPrintAuxCalls();
 
-  // Make sure to update the FoldedGraphsMap map for all functions in the graph!
+  // Make sure to update the DSInfo map for all functions in the graph!
   for (DSGraph::ReturnNodesTy::iterator I = Graph->getReturnNodes().begin();
        I != Graph->getReturnNodes().end(); ++I)
     if (I->first != &F) {
-      DSGraph*& FG = FoldedGraphsMap[I->first];
+      DSGraph *&FG = DSInfo[I->first];
       assert(FG == NULL || FG == &CBU->getDSGraph(*I->first) &&
              "Merging function in SCC twice?");
       FG = Graph;

@@ -38,8 +38,8 @@ namespace PA {
 
     DSGraph *GlobalsGraph;
 
-    // FoldedGraphsMap, one graph for each function
-    hash_map<const Function*, DSGraph*> FoldedGraphsMap;
+    // DSInfo - one graph for each function.
+    hash_map<const Function*, DSGraph*> DSInfo;
 
     /// ActualCallees - The actual functions callable from indirect call sites.
     ///
@@ -70,9 +70,8 @@ namespace PA {
     /// callees also have the same folded graph as the CBU graph.
     /// 
     DSGraph &getDSGraph(const Function &F) const {
-      hash_map<const Function*, DSGraph*>::const_iterator I =
-        FoldedGraphsMap.find(const_cast<Function*>(&F));
-      assert(I != FoldedGraphsMap.end() && "No folded graph for function!");
+      hash_map<const Function*, DSGraph*>::const_iterator I = DSInfo.find(&F);
+      assert(I != DSInfo.end() && "No graph computed for that function!");
       return *I->second;
     }
 
@@ -124,19 +123,6 @@ namespace PA {
     void processGraph(DSGraph &FG, Function &F);
 
     DSGraph &getOrCreateGraph(Function &F);
-
-    bool hasFoldedGraph(const Function& F) const {
-      hash_map<const Function*, DSGraph*>::const_iterator I =
-        FoldedGraphsMap.find(const_cast<Function*>(&F));
-      return (I != FoldedGraphsMap.end());
-    }
-
-    DSGraph* getOrCreateLeaderGraph(const Function& leader) {
-      DSGraph*& leaderGraph = FoldedGraphsMap[&leader];
-      if (leaderGraph == NULL)
-        leaderGraph = new DSGraph(CBU->getGlobalsGraph().getTargetData());
-      return leaderGraph;
-    }
   };
 
 }; // end PA namespace
