@@ -1,4 +1,4 @@
-//===- Linker.cpp - Link together LLVM objects and libraries --------------===//
+//===- lib/Linker/LinkArchives.cpp - Link LLVM objects and libraries ------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
