@@ -60,10 +60,6 @@ namespace PA {
     /// 
     virtual bool runOnModule(Module &M);
 
-    /// getCBUDataStructures - Get the CompleteBUDataStructures object
-    /// 
-    CompleteBUDataStructures *getCBUDataStructures() { return CBU; }
-
     /// getDSGraph - Return the data structure graph for the specified function.
     /// This returns the folded graph.  The folded graph is the same as the CBU
     /// graph iff the function is in a singleton equivalence class AND all its 
