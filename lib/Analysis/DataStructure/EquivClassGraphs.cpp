@@ -306,18 +306,31 @@ processSCC(DSGraph &FG, std::vector<DSGraph*> &Stack, unsigned &NextID,
     return Min;         // This is part of a larger SCC!
 
   // If this is a new SCC, process it now.
-  bool IsMultiNodeSCC = false;
+  bool MergedGraphs = false;
   while (Stack.back() != &FG) {
     DSGraph *NG = Stack.back();
     ValMap[NG] = ~0U;
 
-    // Since all SCCs must be the same as those found in CBU, we do not need to
-    // do any merging.  Make sure all functions in the SCC share the same graph.
-    assert(NG == &FG && "ECG discovered different SCC's than the CBU pass?");
+    // If the SCC found is not the same as those found in CBU, make sure to
+    // merge the graphs as appropriate.
+    DSGraph::NodeMapTy NodeMap;
+    FG.cloneInto(*NG, FG.getScalarMap(), FG.getReturnNodes(), NodeMap);
+
+    // Update the DSInfo map and delete the old graph...
+    for (DSGraph::ReturnNodesTy::iterator I = NG->getReturnNodes().begin();
+         I != NG->getReturnNodes().end(); ++I)
+      DSInfo[I->first] = &FG;
     
+    // Remove NG from the ValMap since the pointer may get recycled.
+    ValMap.erase(NG);
+    delete NG;
+    MergedGraphs = true;
     Stack.pop_back();
-    IsMultiNodeSCC = true;
   }
+
+  // Clean up the graph before we start inlining a bunch again.
+  if (MergedGraphs)
+    FG.removeTriviallyDeadNodes();
 
   Stack.pop_back();
 
