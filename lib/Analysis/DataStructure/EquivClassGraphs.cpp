@@ -37,7 +37,6 @@ namespace {
                                   "Number of graphs inlined");
 }
 
-
 // getDSGraphForCallSite - Return the common data structure graph for
 // callees at the specified call site.
 // 
@@ -67,7 +66,7 @@ bool PA::EquivClassGraphs::runOnModule(Module &M) {
 
   // Stack of functions used for Tarjan's SCC-finding algorithm.
   std::vector<Function*> Stack;
-  hash_map<Function*, unsigned> ValMap;
+  std::map<Function*, unsigned> ValMap;
   unsigned NextID = 1;
 
   if (Function *Main = M.getMainFunction()) {
@@ -259,13 +258,16 @@ DSGraph *PA::EquivClassGraphs::cloneGraph(Function &F) {
 }
 
 
-unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function& F,
+unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function &F,
                                           std::vector<Function*> &Stack,
                                           unsigned &NextID, 
-                                          hash_map<Function*,unsigned> &ValMap){
+                                          std::map<Function*,unsigned> &ValMap){
   DEBUG(std::cerr << "    ProcessSCC for function " << F.getName() << "\n");
 
-  assert(!ValMap.count(&F) && "Shouldn't revisit functions!");
+  std::map<Function*, unsigned>::iterator It = ValMap.lower_bound(&F);
+  if (It != ValMap.end() && It->first == &F)
+    return It->second;
+
   unsigned Min = NextID++, MyID = Min;
   ValMap[&F] = Min;
   Stack.push_back(&F);
@@ -281,11 +283,8 @@ unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function& F,
         DSGraph &CalleeG = getOrCreateGraph(*I->second);
 
         // Have we visited the destination function yet?
-        hash_map<Function*, unsigned>::iterator It = ValMap.find(I->second);
-        unsigned M = (It == ValMap.end())  // No, visit it now.
-          ? processSCC(CalleeG, *I->second, Stack, NextID, ValMap)
-          : It->second;                    // Yes, get it's number.
-        
+        std::map<Function*, unsigned>::iterator It = ValMap.find(I->second);
+        unsigned M = processSCC(CalleeG, *I->second, Stack, NextID, ValMap);
         if (M < Min) Min = M;
       }
   }

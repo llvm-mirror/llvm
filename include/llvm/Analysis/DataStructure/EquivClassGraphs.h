@@ -141,7 +141,7 @@ namespace PA {
 
     unsigned processSCC(DSGraph &FG, Function &F, std::vector<Function*> &Stack,
                         unsigned &NextID, 
-                        hash_map<Function*, unsigned> &ValMap);
+                        std::map<Function*, unsigned> &ValMap);
 
     void processGraph(DSGraph &FG, Function &F);
 
