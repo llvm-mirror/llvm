@@ -37,6 +37,25 @@ namespace {
                                   "Number of graphs inlined");
 }
 
+#ifndef NDEBUG
+template<typename GT>
+static void CheckAllGraphs(Module *M, GT &ECGraphs) {
+  DSGraph &GG = ECGraphs.getGlobalsGraph();
+
+  for (Module::iterator I = M->begin(), E = M->end(); I != E; ++I)
+    if (!I->isExternal()) {
+      DSGraph &G = ECGraphs.getDSGraph(*I);
+
+      DSGraph::NodeMapTy GlobalsGraphNodeMapping;
+      for (DSScalarMap::global_iterator I = G.getScalarMap().global_begin(),
+             E = G.getScalarMap().global_end(); I != E; ++I)
+        DSGraph::computeNodeMapping(G.getNodeForValue(*I),
+                                    GG.getNodeForValue(*I),
+                                    GlobalsGraphNodeMapping);
+    } 
+}
+#endif
+
 // getDSGraphForCallSite - Return the common data structure graph for
 // callees at the specified call site.
 // 
@@ -56,9 +75,12 @@ getSomeCalleeForCallSite(const CallSite &CS) const {
 //
 bool PA::EquivClassGraphs::runOnModule(Module &M) {
   CBU = &getAnalysis<CompleteBUDataStructures>();
+  CheckAllGraphs(&M, *CBU);
 
   GlobalsGraph = new DSGraph(CBU->getGlobalsGraph());
   GlobalsGraph->setPrintAuxCalls();
+
+  ActualCallees = CBU->getActualCallees();
 
   // Find equivalence classes of functions called from common call sites.
   // Fold the CBU graphs for all functions in an equivalence class.
@@ -77,8 +99,10 @@ bool PA::EquivClassGraphs::runOnModule(Module &M) {
   }
   
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (!I->isExternal() && !FoldedGraphsMap.count(I))
+    if (!I->isExternal() && !ValMap.count(I))
       processSCC(getOrCreateGraph(*I), *I, Stack, NextID, ValMap);
+
+  DEBUG(CheckAllGraphs(&M, *this));
 
   getGlobalsGraph().removeTriviallyDeadNodes();
   return false;
@@ -237,7 +261,7 @@ DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
 DSGraph *PA::EquivClassGraphs::cloneGraph(Function &F) {
   DSGraph *&Graph = FoldedGraphsMap[&F];
   DSGraph &CBUGraph = CBU->getDSGraph(F);
-  assert((Graph == NULL || Graph == &CBUGraph) && "Cloning a graph twice?");
+  assert(Graph == 0 && "Cloning a graph twice?");
 
   // Copy the CBU graph...
   Graph = new DSGraph(CBUGraph);           // updates the map via reference
@@ -280,11 +304,9 @@ unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function &F,
     ActualCalleesTy::const_iterator I, E;
     for (tie(I, E) = getActualCallees().equal_range(Call); I != E; ++I)
       if (!I->second->isExternal()) {
-        DSGraph &CalleeG = getOrCreateGraph(*I->second);
-
-        // Have we visited the destination function yet?
-        std::map<Function*, unsigned>::iterator It = ValMap.find(I->second);
-        unsigned M = processSCC(CalleeG, *I->second, Stack, NextID, ValMap);
+        // Process the callee as necessary.
+        unsigned M = processSCC(getOrCreateGraph(*I->second), *I->second,
+                                Stack, NextID, ValMap);
         if (M < Min) Min = M;
       }
   }
@@ -296,21 +318,16 @@ unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function &F,
   // If this is a new SCC, process it now.
   bool IsMultiNodeSCC = false;
   while (Stack.back() != &F) {
-    DSGraph *NG = &getOrCreateGraph(* Stack.back());
+    DSGraph *NG = &getOrCreateGraph(*Stack.back());
     ValMap[Stack.back()] = ~0U;
 
     // Since all SCCs must be the same as those found in CBU, we do not need to
     // do any merging.  Make sure all functions in the SCC share the same graph.
-    assert(NG == &FG &&
-           "FoldGraphs: Functions in the same SCC have different graphs?");
+    assert(NG == &FG && "ECG discovered different SCC's than the CBU pass?");
     
     Stack.pop_back();
     IsMultiNodeSCC = true;
   }
-
-  // Clean up the graph before we start inlining a bunch again...
-  if (IsMultiNodeSCC)
-    FG.removeTriviallyDeadNodes();
 
   Stack.pop_back();
 
@@ -392,17 +409,14 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
 #endif
   }
 
-  // Recompute the Incomplete markers
-  if (CallerGraph != NULL) {
-    assert(CallerGraph->getInlinedGlobals().empty());
-    CallerGraph->maskIncompleteMarkers();
-    CallerGraph->markIncompleteNodes(DSGraph::MarkFormalArgs);
-
-    // Delete dead nodes.  Treat globals that are unreachable but that can
-    // reach live nodes as live.
-    CallerGraph->removeDeadNodes(DSGraph::KeepUnreachableGlobals);
-  }
-
+  // Recompute the Incomplete markers.
+  assert(CallerGraph->getInlinedGlobals().empty());
+  CallerGraph->maskIncompleteMarkers();
+  CallerGraph->markIncompleteNodes(DSGraph::MarkFormalArgs);
+  
+  // Delete dead nodes.  Treat globals that are unreachable but that can
+  // reach live nodes as live.
+  CallerGraph->removeDeadNodes(DSGraph::KeepUnreachableGlobals);
 
   // When this graph is finalized, clone the globals in the graph into the
   // globals graph to make sure it has everything, from all graphs.
@@ -416,7 +430,6 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
          E = MainSM.global_end(); I != E; ++I) 
     RC.getClonedNH(MainSM[*I]);
 
-
-  DEBUG(std::cerr << "  --DONE ProcessGraph for function " 
+  DEBUG(std::cerr << "  -- DONE ProcessGraph for function "
                   << F.getName() << "\n");
 }

@@ -52,6 +52,10 @@ namespace PA {
 
     // FoldedGraphsMap, one graph for each function
     hash_map<const Function*, DSGraph*> FoldedGraphsMap;
+
+    /// ActualCallees - The actual functions callable from indirect call sites.
+    ///
+    hash_multimap<Instruction*, Function*> ActualCallees;
   
     // Equivalence class where functions that can potentially be called via the
     // same function pointer are in the same class.
@@ -122,9 +126,9 @@ namespace PA {
       return *GlobalsGraph;
     }
     
-    typedef llvm::BUDataStructures::ActualCalleesTy ActualCalleesTy;
+    typedef hash_multimap<Instruction*, Function*> ActualCalleesTy;
     const ActualCalleesTy &getActualCallees() const {
-      return CBU->getActualCallees();
+      return ActualCallees;
     }
 
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
@@ -134,7 +138,7 @@ namespace PA {
 
     /// print - Print out the analysis results...
     ///
-    void print(std::ostream &O, const Module *M) const { CBU->print(O, M); }
+    void print(std::ostream &O, const Module *M) const {}
 
   private:
     void buildIndirectFunctionSets(Module &M);
