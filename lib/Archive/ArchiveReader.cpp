@@ -1,4 +1,4 @@
-//===- ArchiveReader.cpp - Code to read LLVM bytecode from .a files -------===//
+//===- lib/Archive/ArchiveReader.cpp - Read LLVM archive files ------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
