@@ -1,4 +1,4 @@
-//===-- llvm/IntrinsicLowering.h - Intrinsic Function Lowering --*- C++ -*-===//
+//===-- IntrinsicLowering.h - Intrinsic Function Lowering -------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -9,15 +9,15 @@
 // 
 // This file defines the IntrinsicLowering interface.  This interface allows
 // addition of domain-specific or front-end specific intrinsics to LLVM without
-// having to modify all of the target-machines to support the new intrinsic.
-// Later, as desired, code generators can incrementally add support for
-// particular intrinsic functions, as desired, to generate better code.
+// having to modify all of the code generators to support the new intrinsic.
+// Later, as desired, targets can incrementally add support for particular
+// intrinsic functions, as desired, to generate better code.
 //
 // If a code generator cannot handle or does not know about an intrinsic
 // function, it will use the intrinsic lowering interface to change an intrinsic
 // function name into a concrete function name which can be used to implement
-// the functionality of the intrinsic.  For example, llvm.acos can be
-// implemented as a call to the math library 'acos' function if the target
+// the functionality of the intrinsic.  For example, llvm.memcpy can be
+// implemented as a call to the math library 'memcpy' function if the target
 // doesn't have hardware support for the intrinsic, or if it has not yet been
 // implemented yet.
 //
@@ -30,8 +30,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_INTRINSICLOWERING_H
-#define LLVM_INTRINSICLOWERING_H
+#ifndef LLVM_CODEGEN_INTRINSICLOWERING_H
+#define LLVM_CODEGEN_INTRINSICLOWERING_H
 
 #include "llvm/Intrinsics.h"
 
