@@ -292,8 +292,8 @@ processSCC(DSGraph &FG, std::vector<DSGraph*> &Stack, unsigned &NextID,
   Stack.push_back(&FG);
 
   // The edges out of the current node are the call site targets...
-  for (unsigned i = 0, e = FG.getFunctionCalls().size(); i != e; ++i) {
-    Instruction *Call = FG.getFunctionCalls()[i].getCallSite().getInstruction();
+  for (DSGraph::fc_iterator CI = FG.fc_begin(), E = FG.fc_end(); CI != E; ++CI){
+    Instruction *Call = CI->getCallSite().getInstruction();
 
     // Loop over all of the actually called functions...
     ActualCalleesTy::const_iterator I, E;
@@ -355,8 +355,10 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G) {
 
   // Else we need to inline some callee graph.  Visit all call sites.
   // The edges out of the current node are the call site targets...
-  for (unsigned i=0, e = G.getFunctionCalls().size(); i != e; ++i) {
-    const DSCallSite &CS = G.getFunctionCalls()[i];
+  unsigned i = 0;
+  for (DSGraph::fc_iterator CI = G.fc_begin(), E = G.fc_end(); CI != E;
+       ++CI, ++i) {
+    const DSCallSite &CS = *CI;
     Instruction *TheCall = CS.getCallSite().getInstruction();
 
     assert(calls.insert(TheCall).second &&
@@ -392,7 +394,8 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G) {
                        DSGraph::KeepModRefBits | DSGraph::StripAllocaBit |
                        DSGraph::DontCloneCallNodes |
                        DSGraph::DontCloneAuxCallNodes);
-        DEBUG(std::cerr << "    Inlining graph [" << i << "/" << e-1
+        DEBUG(std::cerr << "    Inlining graph [" << i << "/"
+              << G.getFunctionCalls().size()-1
               << ":" << TNum << "/" << Num-1 << "] for "
               << CalleeFunc->getName() << "["
               << CalleeGraph->getGraphSize() << "+"
