@@ -1,4 +1,4 @@
-//===- llvm/Transforms/Utils/Linker.h - Module Linker Interface -*- C++ -*-===//
+//===- llvm/Linker.h - Module Linker Interface ------------------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMATIONS_UTILS_LINKER_H
-#define LLVM_TRANSFORMATIONS_UTILS_LINKER_H
+#ifndef LLVM_LINKER_H
+#define LLVM_LINKER_H
 
 #include <string>
 
