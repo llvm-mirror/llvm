@@ -181,6 +181,7 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
              EqEnd = EqClass.end(); EqI != EqEnd; ++EqI) {
         Function* F = *EqI;
         DSGraph*& FG = FoldedGraphsMap[F];
+
         if (F == LF || FG == mergedG)
           continue;
         
@@ -194,6 +195,7 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
         
         GraphsMerged.insert(CBUGraph);
         DSGraph::NodeMapTy NodeMap;    
+
         mergedG->cloneInto(*CBUGraph, mergedG->getScalarMap(),
                            mergedG->getReturnNodes(), NodeMap, 0);
 
@@ -204,10 +206,14 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
         // If there are extra function args, add them to the vector of argNodes
         Function::aiterator AI2 = F->abegin(), AI2end = F->aend();
         for (unsigned arg=0, numArgs=GraphInfo.argNodes.size();
-             arg < numArgs && AI2 != AI2end; ++AI2, ++arg)
-          GraphInfo.argNodes[arg].mergeWith(mergedG->getNodeForValue(AI2));
+             arg != numArgs && AI2 != AI2end; ++AI2, ++arg)
+          if (DS::isPointerType(AI2->getType()))
+            GraphInfo.argNodes[arg].mergeWith(mergedG->getNodeForValue(AI2));
+
         for ( ; AI2 != AI2end; ++AI2)
-          GraphInfo.argNodes.push_back(mergedG->getNodeForValue(AI2));
+          if (DS::isPointerType(AI2->getType()))
+            GraphInfo.argNodes.push_back(mergedG->getNodeForValue(AI2));
+        DEBUG(mergedG->AssertGraphOK());
       }
     }
   }
@@ -223,7 +229,6 @@ DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
   // Use the CBU graph directly without copying it.
   // This automatically updates the FoldedGraphsMap via the reference.
   Graph = &CBU->getDSGraph(F);
-
   return *Graph;
 }
 
@@ -306,6 +311,7 @@ unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function& F,
     FG.removeTriviallyDeadNodes();
 
   Stack.pop_back();
+
   processGraph(FG, F);
   ValMap[&F] = ~0U;
   return MyID;
@@ -319,7 +325,7 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
 
   hash_set<Instruction*> calls;
 
-  DSGraph* CallerGraph = sameAsCBUGraph(F)? NULL : &getOrCreateGraph(F);
+  DSGraph* CallerGraph = sameAsCBUGraph(F) ? NULL : &getOrCreateGraph(F);
 
   // If the function has not yet been cloned, let's check if any callees
   // need to be inlined before cloning it.
