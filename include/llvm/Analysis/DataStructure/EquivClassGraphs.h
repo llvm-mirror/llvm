@@ -15,8 +15,8 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "llvm/Analysis/DataStructure.h"
-#include "llvm/Analysis/DSGraph.h"
+#include "llvm/Analysis/DataStructure/DataStructure.h"
+#include "llvm/Analysis/DataStructure/DSGraph.h"
 #include "Support/EquivalenceClasses.h"
 #include "Support/STLExtras.h"
 #include <vector>
