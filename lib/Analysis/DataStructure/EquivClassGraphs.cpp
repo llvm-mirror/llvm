@@ -28,26 +28,20 @@
 #include "llvm/ADT/STLExtras.h"
 using namespace llvm;
 
-namespace llvm {
-  namespace PA {
-    Statistic<> NumFoldGraphInlines("Inline equiv-class graphs bottom up",
-                                    "Number of graphs inlined");
-    
-  } // End PA namespace
-} // End llvm namespace
-
-
 namespace {
-  RegisterAnalysis<llvm::PA::EquivClassGraphs> X("equivdatastructure",
+  RegisterAnalysis<PA::EquivClassGraphs> X("equivdatastructure",
                     "Equivalence-class Bottom-up Data Structure Analysis");
   Statistic<> NumEquivBUInlines("equivdatastructures", "Number of graphs inlined");
+  Statistic<> NumFoldGraphInlines("Inline equiv-class graphs bottom up",
+                                  "Number of graphs inlined");
 }
 
 
 // getDSGraphForCallSite - Return the common data structure graph for
 // callees at the specified call site.
 // 
-Function *llvm::PA::EquivClassGraphs::getSomeCalleeForCallSite(const CallSite &CS) const {
+Function *PA::EquivClassGraphs::
+getSomeCalleeForCallSite(const CallSite &CS) const {
   Function *thisFunc = CS.getCaller();
   assert(thisFunc && "getDSGraphForCallSite(): Not a valid call site?");
   DSNode *calleeNode = CBU->getDSGraph(*thisFunc).
@@ -60,7 +54,7 @@ Function *llvm::PA::EquivClassGraphs::getSomeCalleeForCallSite(const CallSite &C
 // computeFoldedGraphs - Calculate the bottom up data structure
 // graphs for each function in the program.
 //
-void llvm::PA::EquivClassGraphs::computeFoldedGraphs(Module &M) {
+void PA::EquivClassGraphs::computeFoldedGraphs(Module &M) {
   CBU = &getAnalysis<CompleteBUDataStructures>();
 
   // Find equivalence classes of functions called from common call sites.
@@ -91,7 +85,7 @@ void llvm::PA::EquivClassGraphs::computeFoldedGraphs(Module &M) {
 // calls to functions.  If a call site can invoke any functions [F1, F2... FN],
 // unify the N functions together in the FuncECs set.
 //
-void llvm::PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
+void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
   const ActualCalleesTy& AC = CBU->getActualCallees();
 
   // Loop over all of the indirect calls in the program.  If a call site can
@@ -118,7 +112,8 @@ void llvm::PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
 	// Instead of storing the lastInst For Indirection call Sites we store
 	// the DSNode for the function ptr arguemnt
 	Function *thisFunc = LastInst->getParent()->getParent();
-	DSNode *calleeNode = CBU->getDSGraph(*thisFunc).getNodeForValue(CS.getCalledValue()).getNode();
+        DSGraph &TFG = CBU->getDSGraph(*thisFunc);
+	DSNode *calleeNode = TFG.getNodeForValue(CS.getCalledValue()).getNode();
         OneCalledFunction[calleeNode] = FirstFunc;
         FuncECs.addElement(I->second);
       } else {
@@ -127,7 +122,8 @@ void llvm::PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
         FuncECs.unionSetsWith(FirstFunc, I->second);
 #ifndef NDEBUG
 	Function *thisFunc = LastInst->getParent()->getParent();
-	DSNode *calleeNode = CBU->getDSGraph(*thisFunc).getNodeForValue(CS.getCalledValue()).getNode();
+        DSGraph &TFG = CBU->getDSGraph(*thisFunc);
+	DSNode *calleeNode = TFG.getNodeForValue(CS.getCalledValue()).getNode();
         assert(OneCalledFunction.count(calleeNode) > 0 && "Missed a call?");
 #endif
       }
@@ -219,7 +215,7 @@ void llvm::PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
 }
 
 
-DSGraph &llvm::PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
+DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
   // Has the graph already been created?
   DSGraph *&Graph = FoldedGraphsMap[&F];
   if (Graph) return *Graph;
@@ -231,7 +227,7 @@ DSGraph &llvm::PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
   return *Graph;
 }
 
-DSGraph* llvm::PA::EquivClassGraphs::cloneGraph(Function &F) {
+DSGraph *PA::EquivClassGraphs::cloneGraph(Function &F) {
   DSGraph *&Graph = FoldedGraphsMap[&F];
   DSGraph &CBUGraph = CBU->getDSGraph(F);
   assert(Graph == NULL || Graph == &CBUGraph && "Cloning a graph twice?");
@@ -255,10 +251,10 @@ DSGraph* llvm::PA::EquivClassGraphs::cloneGraph(Function &F) {
 }
 
 
-unsigned llvm::PA::EquivClassGraphs::processSCC(DSGraph &FG, Function& F,
-                                        std::vector<Function*> &Stack,
-                                        unsigned &NextID, 
-                                        hash_map<Function*, unsigned> &ValMap) {
+unsigned PA::EquivClassGraphs::processSCC(DSGraph &FG, Function& F,
+                                          std::vector<Function*> &Stack,
+                                          unsigned &NextID, 
+                                          hash_map<Function*,unsigned> &ValMap){
   DEBUG(std::cerr << "    ProcessSCC for function " << F.getName() << "\n");
 
   assert(!ValMap.count(&F) && "Shouldn't revisit functions!");
@@ -318,7 +314,7 @@ unsigned llvm::PA::EquivClassGraphs::processSCC(DSGraph &FG, Function& F,
 
 /// processGraph - Process the CBU graphs for the program in bottom-up order on
 /// the SCC of the __ACTUAL__ call graph.  This builds final folded CBU graphs.
-void llvm::PA::EquivClassGraphs::processGraph(DSGraph &G, Function& F) {
+void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
   DEBUG(std::cerr << "    ProcessGraph for function " << F.getName() << "\n");
 
   hash_set<Instruction*> calls;
@@ -424,5 +420,6 @@ void llvm::PA::EquivClassGraphs::processGraph(DSGraph &G, Function& F) {
     CallerGraph->removeDeadNodes(DSGraph::KeepUnreachableGlobals);
   }
 
-  DEBUG(std::cerr << "  --DONE ProcessGraph for function " << F.getName() << "\n");
+  DEBUG(std::cerr << "  --DONE ProcessGraph for function " 
+                  << F.getName() << "\n");
 }
