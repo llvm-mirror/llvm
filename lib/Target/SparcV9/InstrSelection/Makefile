@@ -1,4 +1,4 @@
-##===- lib/CodeGen/InstrSelection/Makefile -----------------*- Makefile -*-===##
+##===- Target/Sparc/InstrSelection/Makefile ----------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #
@@ -6,10 +6,9 @@
 # the University of Illinois Open Source License. See LICENSE.TXT for details.
 # 
 ##===----------------------------------------------------------------------===##
-LEVEL = ../../..
 
+LEVEL = ../../../..
 DIRS  = 
-
 LIBRARYNAME = select
 
 include $(LEVEL)/Makefile.common

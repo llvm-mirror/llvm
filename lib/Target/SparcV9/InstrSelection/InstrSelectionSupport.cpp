@@ -23,7 +23,7 @@
 #include "llvm/Constants.h"
 #include "llvm/BasicBlock.h"
 #include "llvm/DerivedTypes.h"
-#include "../../Target/Sparc/SparcInstrSelectionSupport.h"  // FIXME!
+#include "../SparcInstrSelectionSupport.h"
 
 namespace llvm {
 
