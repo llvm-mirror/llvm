@@ -1,4 +1,0 @@
-
-declare void %foo(...)
-
-
