@@ -1,4 +1,4 @@
-//===- Debug.h - An easy way to add debug output to your code ---*- C++ -*-===//
+//===- llvm/Support/Debug.h - Easy way to add debug output ------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -23,8 +23,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_DEBUG_H
-#define SUPPORT_DEBUG_H
+#ifndef LLVM_SUPPORT_DEBUG_H
+#define LLVM_SUPPORT_DEBUG_H
 
 // Unsurprisingly, most users of this macro use std::cerr too.
 #include <iostream>

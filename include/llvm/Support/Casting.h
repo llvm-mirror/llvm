@@ -1,4 +1,4 @@
-//===-- Support/Casting.h - Allow flexible, checked, casts ------*- C++ -*-===//
+//===-- llvm/Support/Casting.h - Allow flexible, checked, casts -*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_CASTING_H
-#define SUPPORT_CASTING_H
+#ifndef LLVM_SUPPORT_CASTING_H
+#define LLVM_SUPPORT_CASTING_H
 
 namespace llvm {
 

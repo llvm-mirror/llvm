@@ -14,7 +14,7 @@
 #ifndef _CONFIG_SYS_WAIT_H
 #define _CONFIG_SYS_WAIT_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_SYS_WAIT_H
 #include <sys/wait.h>

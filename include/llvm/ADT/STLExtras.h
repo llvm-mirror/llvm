@@ -1,4 +1,4 @@
-//===- STLExtras.h - Useful functions when working with the STL -*- C++ -*-===//
+//===- llvm/ADT/STLExtras.h - Useful STL related functions ------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,12 +14,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_STLEXTRAS_H
-#define SUPPORT_STLEXTRAS_H
+#ifndef LLVM_ADT_STLEXTRAS_H
+#define LLVM_ADT_STLEXTRAS_H
 
 #include <functional>
 #include <utility> // for std::pair
-#include "Support/iterator"
+#include "llvm/ADT/iterator"
 
 namespace llvm {
 

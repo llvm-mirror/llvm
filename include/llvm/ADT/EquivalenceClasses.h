@@ -1,4 +1,4 @@
-//===-- Support/EquivalenceClasses.h ----------------------------*- C++ -*-===//
+//===-- llvm/ADT/EquivalenceClasses.h - Generic Equiv. Classes --*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,8 +14,8 @@
 // 
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_EQUIVALENCECLASSES_H
-#define SUPPORT_EQUIVALENCECLASSES_H
+#ifndef LLVM_ADT_EQUIVALENCECLASSES_H
+#define LLVM_ADT_EQUIVALENCECLASSES_H
 
 #include <map>
 #include <set>

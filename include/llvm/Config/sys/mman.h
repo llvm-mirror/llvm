@@ -18,7 +18,7 @@
 #ifndef _CONFIG_MMAN_H
 #define _CONFIG_MMAN_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #if defined(HAVE_SYS_MMAN_H) && !defined(_MSC_VER)
 #include <sys/mman.h>

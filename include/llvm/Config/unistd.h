@@ -14,7 +14,7 @@
 #ifndef _CONFIG_UNISTD_H
 #define _CONFIG_UNISTD_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #if defined(HAVE_UNISTD_H) && !defined(_MSC_VER)
 #include <unistd.h>

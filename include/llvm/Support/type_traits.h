@@ -1,4 +1,4 @@
-//===- Support/type_traits.h - Simplfied type traits ------------*- C++ -*-===//
+//===- llvm/Support/type_traits.h - Simplfied type traits -------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //

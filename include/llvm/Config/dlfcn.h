@@ -14,7 +14,7 @@
 #ifndef _CONFIG_DLFCN_H
 #define _CONFIG_DLFCN_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_DLFCN_H
 #include <dlfcn.h>

@@ -14,7 +14,7 @@
 #ifndef LLVM_CONFIG_WINDOWS_H
 #define LLVM_CONFIG_WINDOWS_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_WINDOWS_H
 #include <windows.h>

@@ -1,4 +1,4 @@
-//===-- Support/StringExtras.h - Useful string functions --------*- C++ -*-===//
+//===-- llvm/ADT/StringExtras.h - Useful string functions -------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,10 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_STRINGEXTRAS_H
-#define SUPPORT_STRINGEXTRAS_H
+#ifndef LLVM_ADT_STRINGEXTRAS_H
+#define LLVM_ADT_STRINGEXTRAS_H
 
-#include "Support/DataTypes.h"
+#include "llvm/Support/DataTypes.h"
 #include <cctype>
 #include <cstdio>
 #include <string>

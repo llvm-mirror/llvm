@@ -15,7 +15,7 @@
 #ifndef _CONFIG_SYS_TYPES_H
 #define _CONFIG_SYS_TYPES_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>

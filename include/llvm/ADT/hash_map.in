@@ -1,4 +1,4 @@
-//===-- Support/hash_map - "Portable" wrapper around hash_map ---*- C++ -*-===//
+//===-- llvm/ADT/hash_map - "Portable" wrapper around hash_map --*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_HASH_MAP
-#define SUPPORT_HASH_MAP
+#ifndef LLVM_ADT_HASH_MAP
+#define LLVM_ADT_HASH_MAP
 
 // Compiler Support Matrix
 //
@@ -61,6 +61,6 @@ using HASH_NAMESPACE::hash;
 // out specializations like stl_bvector.h, causing link conflicts.
 #include <vector>
 
-#include <Support/HashExtras.h>
+#include <llvm/ADT/HashExtras.h>
 
 #endif

@@ -1,4 +1,4 @@
-//===- SlowOperationInformer.h - Keep the user informed ---------*- C++ -*-===//
+//===- llvm/Support/SlowOperationInformer.h - Keep user informed *- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -28,8 +28,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_SLOW_OPERATION_INFORMER_H
-#define SUPPORT_SLOW_OPERATION_INFORMER_H
+#ifndef LLVM_SUPPORT_SLOW_OPERATION_INFORMER_H
+#define LLVM_SUPPORT_SLOW_OPERATION_INFORMER_H
 
 #include <string>
 #include <cassert>

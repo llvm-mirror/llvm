@@ -1,4 +1,4 @@
-//===- SetVector.h - A set with insertion order iteration -------*- C++ -*-===//
+//===- llvm/ADT/SetVector.h - Set with insert order iteration ---*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_SETVECTOR_H
-#define SUPPORT_SETVECTOR_H
+#ifndef LLVM_ADT_SETVECTOR_H
+#define LLVM_ADT_SETVECTOR_H
 
 #include <set>
 #include <vector>

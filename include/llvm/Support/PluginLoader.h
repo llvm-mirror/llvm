@@ -1,4 +1,4 @@
-//===-- Support/PluginLoader.h - Provide -load option to tool ---*- C++ -*-===//
+//===-- llvm/Support/PluginLoader.h - Plugin Loader for Tools ---*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,10 +14,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_PLUGINLOADER_H
-#define SUPPORT_PLUGINLOADER_H
+#ifndef LLVM_SUPPORT_PLUGINLOADER_H
+#define LLVM_SUPPORT_PLUGINLOADER_H
 
-#include "Support/CommandLine.h"
+#include "llvm/Support/CommandLine.h"
 
 namespace llvm {
   struct PluginLoader {

@@ -12,7 +12,7 @@
 #ifndef PAGESIZE_H
 #define PAGESIZE_H
 
-#include "Config/unistd.h"
+#include "llvm/Config/unistd.h"
 #include <sys/param.h>
 
 namespace llvm {

@@ -1,4 +1,4 @@
-//===-- Support/ThreadSupport-NoSupport.h - Generic impl --------*- C++ -*-===//
+//===-- llvm/Support/ThreadSupport-NoSupport.h - Generic Impl ---*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,7 +16,7 @@
 // Users should never #include this file directly!  As such, no include guards
 // are needed.
 
-#ifndef SUPPORT_THREADSUPPORT_H
+#ifndef LLVM_SUPPORT_THREADSUPPORT_H
 #error "Code should not #include Support/ThreadSupport-NoSupport.h directly!"
 #endif
 

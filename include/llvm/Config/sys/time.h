@@ -15,7 +15,7 @@
 #ifndef _CONFIG_SYS_TIME_H
 #define _CONFIG_SYS_TIME_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #if defined(HAVE_SYS_TIME_H) && !defined(_MSC_VER)
 #include <sys/time.h>

@@ -14,7 +14,7 @@
 #ifndef _CONFIG_FCNTL_H
 #define _CONFIG_FCNTL_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>

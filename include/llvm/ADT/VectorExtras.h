@@ -1,4 +1,4 @@
-//===-- VectorExtras.h - Helper functions for std::vector -------*- C++ -*-===//
+//===-- llvm/ADT/VectorExtras.h - Helpers for std::vector -------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_VECTOREXTRAS_H
-#define SUPPORT_VECTOREXTRAS_H
+#ifndef LLVM_ADT_VECTOREXTRAS_H
+#define LLVM_ADT_VECTOREXTRAS_H
 
 #include <cstdarg>
 

@@ -15,7 +15,7 @@
 #ifndef _CONFIG_ALLOC_H
 #define _CONFIG_ALLOC_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 /*
  * This is a modified version of that suggested by the Autoconf manual.

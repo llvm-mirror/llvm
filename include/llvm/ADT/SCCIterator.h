@@ -1,4 +1,4 @@
-//===-- Support/SCCIterator.h - SCC iterator --------------------*- C++ -*-===//
+//===-- Support/SCCIterator.h - Strongly Connected Comp. Iter. --*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This builds on the Support/GraphTraits.h file to find the strongly connected
+// This builds on the llvm/ADT/GraphTraits.h file to find the strongly connected
 // components (SCCs) of a graph in O(N+E) time using Tarjan's DFS algorithm.
 //
 // The SCC iterator has the important property that if a node in SCC S1 has an
@@ -18,11 +18,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_SCCITERATOR_H
-#define SUPPORT_SCCITERATOR_H
+#ifndef LLVM_ADT_SCCITERATOR_H
+#define LLVM_ADT_SCCITERATOR_H
 
-#include "Support/GraphTraits.h"
-#include "Support/iterator"
+#include "llvm/ADT/GraphTraits.h"
+#include "llvm/ADT/iterator"
 #include <vector>
 #include <map>
 

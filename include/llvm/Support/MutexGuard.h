@@ -18,9 +18,9 @@
 #define SUPPORT_THREADSUPPORT_H
 
 #if @HAVE_PTHREAD_MUTEX_LOCK@
-#include "Support/ThreadSupport-PThreads.h"
+#include "llvm/Support/ThreadSupport-PThreads.h"
 #else
-#include "Support/ThreadSupport-NoSupport.h"
+#include "llvm/Support/ThreadSupport-NoSupport.h"
 #endif // If no system support is available
 
 namespace llvm {

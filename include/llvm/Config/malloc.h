@@ -15,7 +15,7 @@
 #ifndef _SUPPORT_MALLOC_H
 #define _SUPPORT_MALLOC_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_MALLOC_H
 #include <malloc.h>

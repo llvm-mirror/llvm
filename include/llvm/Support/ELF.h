@@ -1,4 +1,4 @@
-//===-- Support/ELF.h - ELF constants and data structures -------*- C++ -*-===//
+//===-- llvm/Support/ELF.h - ELF constants and data structures --*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,7 +18,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Support/DataTypes.h"
+#ifndef LLVM_SUPPORT_ELF_H
+#define LLVM_SUPPORT_ELF_H
+
+#include "llvm/Support/DataTypes.h"
 #include <cstring>
 #include <cstdlib>
 
@@ -293,3 +296,5 @@ enum {
 } // end namespace ELF
 
 } // end namespace llvm
+
+#endif

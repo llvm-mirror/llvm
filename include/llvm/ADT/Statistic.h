@@ -1,4 +1,4 @@
-//===-- Support/Statistic.h - Easy way to expose stats ----------*- C++ -*-===//
+//===-- llvm/ADT/Statistic.h - Easy way to expose stats ---------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -21,8 +21,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_STATISTIC_H
-#define SUPPORT_STATISTIC_H
+#ifndef LLVM_ADT_STATISTIC_H
+#define LLVM_ADT_STATISTIC_H
 
 #include <iostream>
 

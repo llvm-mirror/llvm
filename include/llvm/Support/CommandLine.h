@@ -1,4 +1,4 @@
-//===- Support/CommandLine.h - Flexible Command line parser -----*- C++ -*-===//
+//===- llvm/Support/CommandLine.h - Command line handler --------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,10 +17,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_COMMANDLINE_H
-#define SUPPORT_COMMANDLINE_H
+#ifndef LLVM_SUPPORT_COMMANDLINE_H
+#define LLVM_SUPPORT_COMMANDLINE_H
 
-#include "Support/type_traits.h"
+#include "llvm/Support/type_traits.h"
 #include <string>
 #include <vector>
 #include <utility>

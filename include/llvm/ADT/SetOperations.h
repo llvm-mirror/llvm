@@ -1,4 +1,4 @@
-//===-- Support/SetOperations.h - Generic Set Operations --------*- C++ -*-===//
+//===-- llvm/ADT/SetOperations.h - Generic Set Operations -------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_SETOPERATIONS_H
-#define SUPPORT_SETOPERATIONS_H
+#ifndef LLVM_ADT_SETOPERATIONS_H
+#define LLVM_ADT_SETOPERATIONS_H
 
 namespace llvm {
 

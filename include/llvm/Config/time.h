@@ -24,7 +24,7 @@
 #ifndef _CONFIG_TIME_H
 #define _CONFIG_TIME_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_TIME_H
 #include <time.h>

@@ -1,4 +1,4 @@
-//===-- Support/ilist - Intrusive Linked List Template ----------*- C++ -*-===//
+//===-- llvm/ADT/ilist - Intrusive Linked List Template ---------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -35,10 +35,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_ILIST
-#define SUPPORT_ILIST
+#ifndef LLVM_ADT_ILIST
+#define LLVM_ADT_ILIST
 
-#include <Support/iterator>
+#include <llvm/ADT/iterator>
 #include <cassert>
 
 namespace llvm {

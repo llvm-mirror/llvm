@@ -1,4 +1,4 @@
-//===- Support/FileUtilities.h - File System Utilities ----------*- C++ -*-===//
+//===- llvm/Support/FileUtilities.h - File System Utilities -----*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_FILEUTILITIES_H
-#define SUPPORT_FILEUTILITIES_H
+#ifndef LLVM_SUPPORT_FILEUTILITIES_H
+#define LLVM_SUPPORT_FILEUTILITIES_H
 
 #include <string>
 

@@ -1,4 +1,4 @@
-//===-- Support/MallocAllocator.h - Allocator using malloc/free -*- C++ -*-===//
+//===-- llvm/Support/MallocAllocator.h --------------------------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,8 +17,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_MALLOCALLOCATOR_H
-#define SUPPORT_MALLOCALLOCATOR_H
+#ifndef LLVM_SUPPORT_MALLOCALLOCATOR_H
+#define LLVM_SUPPORT_MALLOCALLOCATOR_H
 
 #include <cstdlib>
 #include <memory>

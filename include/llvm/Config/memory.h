@@ -14,7 +14,7 @@
 #ifndef _CONFIG_MEMORY_H
 #define _CONFIG_MEMORY_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_MEMORY_H
 #include <memory.h>

@@ -1,4 +1,4 @@
-//===- DenseMap.h - A dense map implmentation -------------------*- C++ -*-===//
+//===- llvm/ADT/DenseMap.h - A dense map implmentation ----------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,8 +17,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_DENSEMAP_H
-#define SUPPORT_DENSEMAP_H
+#ifndef LLVM_ADT_DENSEMAP_H
+#define LLVM_ADT_DENSEMAP_H
 
 #include <vector>
 

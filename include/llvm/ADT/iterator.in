@@ -1,4 +1,4 @@
-//===-- Support/iterator - "Portable" wrapper around <iterator> -*- C++ -*-===//
+//===-- llvm/ADT/iterator - Portable wrapper around <iterator> --*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -25,8 +25,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_ITERATOR
-#define SUPPORT_ITERATOR
+#ifndef LLVM_ADT_ITERATOR
+#define LLVM_ADT_ITERATOR
 
 #include <iterator>
 

@@ -1,4 +1,4 @@
-//===-- HashExtras.h - Useful functions for STL hash containers -*- C++ -*-===//
+//===-- llvm/ADT/HashExtras.h - Useful functions for STL hash ---*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,10 +14,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_HASHEXTRAS_H
-#define SUPPORT_HASHEXTRAS_H
+#ifndef LLVM_ADT_HASHEXTRAS_H
+#define LLVM_ADT_HASHEXTRAS_H
 
-#include "Support/hash_map"
+#include "llvm/ADT/hash_map"
 #include <string>
 
 // Cannot specialize hash template from outside of the std namespace.

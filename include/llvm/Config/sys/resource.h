@@ -16,7 +16,7 @@
 #ifndef _CONFIG_SYS_RESOURCE_H
 #define _CONFIG_SYS_RESOURCE_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #if defined(HAVE_SYS_RESOURCE_H) && !defined(_MSC_VER)
 
@@ -25,9 +25,9 @@
  * stuff.  Some man pages say that you also need sys/time.h and unistd.h.
  * So, to be paranoid, we will try to include all three if possible.
  */
-#include "Config/sys/time.h"
+#include "llvm/Config/sys/time.h"
 #include <sys/resource.h>
-#include "Config/unistd.h"
+#include "llvm/Config/unistd.h"
 
 #endif
 

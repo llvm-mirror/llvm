@@ -1,4 +1,4 @@
-//===-- Support/Annotation.h - Annotation classes ---------------*- C++ -*-===//
+//===-- llvm/Support/Annotation.h - Annotation classes ----------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -19,8 +19,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_ANNOTATION_H
-#define SUPPORT_ANNOTATION_H
+#ifndef LLVM_SUPPORT_ANNOTATION_H
+#define LLVM_SUPPORT_ANNOTATION_H
 
 #include <string>
 #include <cassert>

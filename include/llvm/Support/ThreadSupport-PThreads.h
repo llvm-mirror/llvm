@@ -1,4 +1,4 @@
-//===-- Support/ThreadSupport-PThreads.h - PThreads support -----*- C++ -*-===//
+//===-- llvm/Support/ThreadSupport-PThreads.h - PThreads support *- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,7 +15,7 @@
 // Users should never #include this file directly!  As such, no include guards
 // are needed.
 
-#ifndef SUPPORT_THREADSUPPORT_H
+#ifndef LLVM_SUPPORT_THREADSUPPORT_H
 #error "Code should not #include Support/ThreadSupport/PThreads.h directly!"
 #endif
 

@@ -1,4 +1,4 @@
-//===-- Support/GraphWriter.h - Write a graph to a .dot file ----*- C++ -*-===//
+//===-- llvm/Support/GraphWriter.h - Write graph to a .dot file -*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -20,11 +20,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_GRAPHWRITER_H
-#define SUPPORT_GRAPHWRITER_H
+#ifndef LLVM_SUPPORT_GRAPHWRITER_H
+#define LLVM_SUPPORT_GRAPHWRITER_H
 
-#include "Support/DOTGraphTraits.h"
-#include "Support/GraphTraits.h"
+#include "llvm/Support/DOTGraphTraits.h"
+#include "llvm/ADT/GraphTraits.h"
 #include <vector>
 #include <iostream>
 

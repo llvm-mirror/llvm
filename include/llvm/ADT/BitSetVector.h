@@ -1,4 +1,4 @@
-//===-- BitVectorSet.h - A bit-vector representation of sets ----*- C++ -*-===//
+//===-- llvm/ADT/BitVectorSet.h - A bit-vector rep. of sets -----*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -22,8 +22,8 @@
 // 
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_BITSETVECTOR_H
-#define SUPPORT_BITSETVECTOR_H
+#ifndef LLVM_ADT_BITSETVECTOR_H
+#define LLVM_ADT_BITSETVECTOR_H
 
 #include <bitset>
 #include <vector>

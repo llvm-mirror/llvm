@@ -1,4 +1,4 @@
-//===-- DynamicLinker.h - System-indep. DynamicLinker interface -*- C++ -*-===//
+//===-- llvm/Support/DynamicLinker.h - Portable Dynamic Linker --*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_DYNAMICLINKER_H
-#define SUPPORT_DYNAMICLINKER_H
+#ifndef LLVM_SUPPORT_DYNAMICLINKER_H
+#define LLVM_SUPPORT_DYNAMICLINKER_H
 
 #include <string>
 

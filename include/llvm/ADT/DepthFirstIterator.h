@@ -1,4 +1,4 @@
-//===- Support/DepthFirstIterator.h - Depth First iterator ------*- C++ -*-===//
+//===- llvm/ADT/DepthFirstIterator.h - Depth First iterator -----*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This file builds on the Support/GraphTraits.h file to build generic depth
+// This file builds on the ADT/GraphTraits.h file to build generic depth
 // first graph iterator.  This file exposes the following functions/types:
 //
 // df_begin/df_end/df_iterator
@@ -30,11 +30,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_DEPTHFIRSTITERATOR_H
-#define SUPPORT_DEPTHFIRSTITERATOR_H
+#ifndef LLVM_ADT_DEPTHFIRSTITERATOR_H
+#define LLVM_ADT_DEPTHFIRSTITERATOR_H
 
-#include "Support/GraphTraits.h"
-#include "Support/iterator"
+#include "llvm/ADT/GraphTraits.h"
+#include "llvm/ADT/iterator"
 #include <vector>
 #include <set>
 

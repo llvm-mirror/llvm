@@ -1,4 +1,4 @@
-//===- Support/PostOrderIterator.h - Generic PostOrder iterator -*- C++ -*-===//
+//===- llvm/ADT/PostOrderIterator.h - PostOrder iterator --------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,17 +7,17 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This file builds on the Support/GraphTraits.h file to build a generic graph
+// This file builds on the ADT/GraphTraits.h file to build a generic graph
 // post order iterator.  This should work over any graph type that has a
 // GraphTraits specialization.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_POSTORDERITERATOR_H
-#define SUPPORT_POSTORDERITERATOR_H
+#ifndef LLVM_ADT_POSTORDERITERATOR_H
+#define LLVM_ADT_POSTORDERITERATOR_H
 
-#include "Support/GraphTraits.h"
-#include "Support/iterator"
+#include "llvm/ADT/GraphTraits.h"
+#include "llvm/ADT/iterator"
 #include <stack>
 #include <set>
 

@@ -1,4 +1,4 @@
-//===- Support/Tree.h - Generic n-way tree structure ------------*- C++ -*-===//
+//===- llvm/ADT/Tree.h - Generic n-way tree structure -----------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_TREE_H
-#define SUPPORT_TREE_H
+#ifndef LLVM_ADT_TREE_H
+#define LLVM_ADT_TREE_H
 
 #include <vector>
 

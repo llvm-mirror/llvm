@@ -1,4 +1,4 @@
-//===-- Support/GraphTraits.h - Graph traits template -----------*- C++ -*-===//
+//===-- llvm/ADT/GraphTraits.h - Graph traits template ----------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,8 +15,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_GRAPHTRAITS_H
-#define SUPPORT_GRAPHTRAITS_H
+#ifndef LLVM_ADT_GRAPHTRAITS_H
+#define LLVM_ADT_GRAPHTRAITS_H
 
 namespace llvm {
 

@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SYSTEMUTILS_H
-#define SYSTEMUTILS_H
+#ifndef LLVM_SUPPORT_SYSTEMUTILS_H
+#define LLVM_SUPPORT_SYSTEMUTILS_H
 
 #include <string>
 

@@ -1,4 +1,4 @@
-//===- Support/TypeInfo.h - Support class for type_info objects -*- C++ -*-===//
+//===- llvm/Support/TypeInfo.h - Support for type_info objects -*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_TYPEINFO_H
-#define SUPPORT_TYPEINFO_H
+#ifndef LLVM_SUPPORT_TYPEINFO_H
+#define LLVM_SUPPORT_TYPEINFO_H
 
 #include <typeinfo>
 

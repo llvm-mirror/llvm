@@ -14,7 +14,7 @@
 #ifndef _CONFIG_LIMITS_H
 #define _CONFIG_LIMITS_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_LIMITS_H
 #include <limits.h>

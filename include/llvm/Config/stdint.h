@@ -14,7 +14,7 @@
 #ifndef _CONFIG_STDINT_H
 #define _CONFIG_STDINT_H
 
-#include "Config/config.h"
+#include "llvm/Config/config.h"
 
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
