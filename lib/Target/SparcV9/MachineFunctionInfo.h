@@ -1,4 +1,4 @@
-//===-- llvm/CodeGen/MachineFunctionInfo.h ----------------------*- C++ -*-===//
+//===-- MachineFunctionInfo.h -----------------------------------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,10 +15,10 @@
 //   
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CODEGEN_MACHINEFUNCTIONINFO_H
-#define LLVM_CODEGEN_MACHINEFUNCTIONINFO_H
+#ifndef MACHINEFUNCTIONINFO_H
+#define MACHINEFUNCTIONINFO_H
 
-#include "llvm/CodeGen/MachineCodeForInstruction.h"
+#include "MachineCodeForInstruction.h"
 #include "Support/HashExtras.h"
 #include "Support/hash_set"
 

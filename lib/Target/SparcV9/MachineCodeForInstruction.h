@@ -1,4 +1,4 @@
-//===-- llvm/CodeGen/MachineCodeForInstruction.h ----------------*- C++ -*-===//
+//===-- MachineCodeForInstruction.h -----------------------------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -25,8 +25,8 @@
 // 
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CODEGEN_MACHINECODE_FOR_INSTRUCTION_H
-#define LLVM_CODEGEN_MACHINECODE_FOR_INSTRUCTION_H
+#ifndef MACHINECODE_FOR_INSTRUCTION_H
+#define MACHINECODE_FOR_INSTRUCTION_H
 
 #include <vector>
 
