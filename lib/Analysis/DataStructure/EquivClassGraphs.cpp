@@ -74,7 +74,7 @@ getSomeCalleeForCallSite(const CallSite &CS) const {
 //
 bool PA::EquivClassGraphs::runOnModule(Module &M) {
   CBU = &getAnalysis<CompleteBUDataStructures>();
-  CheckAllGraphs(&M, *CBU);
+  DEBUG(CheckAllGraphs(&M, *CBU));
 
   GlobalsGraph = new DSGraph(CBU->getGlobalsGraph());
   GlobalsGraph->setPrintAuxCalls();
