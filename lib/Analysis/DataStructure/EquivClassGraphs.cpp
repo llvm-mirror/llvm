@@ -171,7 +171,8 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
       // Record the argument nodes for use in merging later below
       EquivClassGraphArgsInfo& GraphInfo = getECGraphInfo(mergedG);
       for (Function::aiterator AI1 = LF->abegin(); AI1 != LF->aend(); ++AI1)
-        GraphInfo.argNodes.push_back(mergedG->getNodeForValue(AI1));
+        if (DS::isPointerType(AI1->getType()))
+          GraphInfo.argNodes.push_back(mergedG->getNodeForValue(AI1));
       
       // Merge in the graphs of all other functions in this equiv. class.
       // Note that two or more functions may have the same graph, and it
