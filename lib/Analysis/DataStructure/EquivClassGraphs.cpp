@@ -115,7 +115,7 @@ bool PA::EquivClassGraphs::runOnModule(Module &M) {
 //
 void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
   const ActualCalleesTy& AC = CBU->getActualCallees();
-
+  
   // Loop over all of the indirect calls in the program.  If a call site can
   // call multiple different functions, we need to unify all of the callees into
   // the same equivalence class.
@@ -196,11 +196,12 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
       // equivalence graph.
       DSGraph *mergedG = &getOrCreateGraph(*LF);
 
-      // Record the argument nodes for use in merging later below
-      EquivClassGraphArgsInfo& GraphInfo = getECGraphInfo(mergedG);
+      // Record the argument nodes for use in merging later below.
+      std::vector<DSNodeHandle> ArgNodes;  
+
       for (Function::aiterator AI1 = LF->abegin(); AI1 != LF->aend(); ++AI1)
         if (DS::isPointerType(AI1->getType()))
-          GraphInfo.argNodes.push_back(mergedG->getNodeForValue(AI1));
+          ArgNodes.push_back(mergedG->getNodeForValue(AI1));
       
       // Merge in the graphs of all other functions in this equiv. class.  Note
       // that two or more functions may have the same graph, and it only needs
@@ -234,14 +235,14 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
         // Merge the function arguments with all argument nodes found so far.
         // If there are extra function args, add them to the vector of argNodes
         Function::aiterator AI2 = F->abegin(), AI2end = F->aend();
-        for (unsigned arg=0, numArgs=GraphInfo.argNodes.size();
+        for (unsigned arg=0, numArgs = ArgNodes.size();
              arg != numArgs && AI2 != AI2end; ++AI2, ++arg)
           if (DS::isPointerType(AI2->getType()))
-            GraphInfo.argNodes[arg].mergeWith(mergedG->getNodeForValue(AI2));
+            ArgNodes[arg].mergeWith(mergedG->getNodeForValue(AI2));
 
         for ( ; AI2 != AI2end; ++AI2)
           if (DS::isPointerType(AI2->getType()))
-            GraphInfo.argNodes.push_back(mergedG->getNodeForValue(AI2));
+            ArgNodes.push_back(mergedG->getNodeForValue(AI2));
         DEBUG(mergedG->AssertGraphOK());
       }
     }

@@ -28,18 +28,6 @@ class Module;
 class Function;
 
 namespace PA {
-
-  /// EquivClassGraphArgsInfo - Information about the set of argument nodes 
-  /// in a DS graph (the number of argument nodes is the max of argument nodes
-  /// for all functions folded into the graph).
-  /// FIXME: This class is only used temporarily and could be eliminated.
-  ///  
-  struct EquivClassGraphArgsInfo {
-    const DSGraph* ECGraph;
-    std::vector<DSNodeHandle> argNodes;
-    EquivClassGraphArgsInfo() : ECGraph(NULL) {}
-  };
-
   /// EquivClassGraphs - This is the same as the complete bottom-up graphs, but
   /// with functions partitioned into equivalence classes and a single merged
   /// DS graph for all functions in an equivalence class.  After this merging,
@@ -61,10 +49,6 @@ namespace PA {
     // same function pointer are in the same class.
     EquivalenceClasses<Function*> FuncECs;
 
-    // Each equivalence class graph contains several functions.
-    // Remember their argument nodes (and return nodes?)
-    std::map<const DSGraph*, EquivClassGraphArgsInfo> ECGraphInfo;
-    
     /// OneCalledFunction - For each indirect call, we keep track of one
     /// target of the call.  This is used to find equivalence class called by
     /// a call site.
@@ -110,16 +94,6 @@ namespace PA {
     const std::set<Function*>& getEquivClassForCallSite(const CallSite& CS) {
       Function* leaderF = FuncECs.findClass(getSomeCalleeForCallSite(CS));
       return FuncECs.getEqClass(leaderF);
-    }
-
-    /// getECGraphInfo - Get the graph info object with arg nodes info
-    /// 
-    EquivClassGraphArgsInfo &getECGraphInfo(const DSGraph* G) {
-      assert(G != NULL && "getECGraphInfo: Null graph!");
-      EquivClassGraphArgsInfo& GraphInfo = ECGraphInfo[G];
-      if (GraphInfo.ECGraph == NULL)
-        GraphInfo.ECGraph = G;
-      return GraphInfo;
     }
 
     DSGraph &getGlobalsGraph() const {
