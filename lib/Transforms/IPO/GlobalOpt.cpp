@@ -1,4 +1,4 @@
-//===- GlobalConstifier.cpp - Mark read-only globals constant -------------===//
+//===- GlobalOpt.cpp - Optimize Global Variables --------------------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,19 +7,16 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This pass loops over the non-constant internal global variables in the
-// program.  If it can prove that they are never written to, it marks them
-// constant.
-//
-// NOTE: this should eventually use the alias analysis interfaces to do the
-// transformation, but for now we just stick with a simple solution. DSA in
-// particular could give a much more accurate answer to the mod/ref query, but
-// it's not quite ready for this.
+// This pass transforms simple global variables that never have their address
+// taken.  If obviously true, it marks read/write globals as constant, deletes
+// variables only stored to, etc.
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "globalopt"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Constants.h"
+#include "llvm/DerivedTypes.h"
 #include "llvm/Instructions.h"
 #include "llvm/Module.h"
 #include "llvm/Pass.h"
@@ -30,60 +27,84 @@
 using namespace llvm;
 
 namespace {
-  Statistic<> NumMarked ("constify", "Number of globals marked constant");
-  Statistic<> NumDeleted("constify", "Number of globals deleted");
+  Statistic<> NumMarked ("globalopt", "Number of globals marked constant");
+  Statistic<> NumDeleted("globalopt", "Number of globals deleted");
+  Statistic<> NumFnDeleted("globalopt", "Number of functions deleted");
 
-  struct Constifier : public ModulePass {
+  struct GlobalOpt : public ModulePass {
     bool runOnModule(Module &M);
   };
 
-  RegisterOpt<Constifier> X("constify", "Global Constifier");
+  RegisterOpt<GlobalOpt> X("globalopt", "Global Variable Optimizer");
 }
 
-ModulePass *llvm::createGlobalConstifierPass() { return new Constifier(); }
+ModulePass *llvm::createGlobalOptimizerPass() { return new GlobalOpt(); }
 
-/// A lot of global constants are stored only in trivially dead setter
-/// functions.  Because we don't want to cycle between globaldce and this pass,
-/// just do a simple check to catch the common case.
-static bool ContainingFunctionIsTriviallyDead(Instruction *I) {
-  Function *F = I->getParent()->getParent();
-  if (!F->hasInternalLinkage()) return false;
-  F->removeDeadConstantUsers();
-  return F->use_empty();
-}
+/// GlobalStatus - As we analyze each global, keep track of some information
+/// about it.  If we find out that the address of the global is taken, none of
+/// the other info will be accurate.
+struct GlobalStatus {
+  bool isLoaded;
+  enum StoredType {
+    NotStored, isInitializerStored, isMallocStored, isStored
+  } StoredType;
+  bool isNotSuitableForSRA;
 
+  GlobalStatus() : isLoaded(false), StoredType(NotStored),
+                   isNotSuitableForSRA(false) {}
+};
 
-/// isStoredThrough - Return false if the specified pointer is provably never
-/// stored through.  If we can't tell, we must conservatively assume it might.
+/// AnalyzeGlobal - Look at all uses of the global and fill in the GlobalStatus
+/// structure.  If the global has its address taken, return true to indicate we
+/// can't do anything with it.
 ///
-static bool isStoredThrough(Value *V, std::set<PHINode*> &PHIUsers) {
+static bool AnalyzeGlobal(Value *V, GlobalStatus &GS,
+                          std::set<PHINode*> &PHIUsers) {
   for (Value::use_iterator UI = V->use_begin(), E = V->use_end(); UI != E; ++UI)
     if (ConstantExpr *CE = dyn_cast<ConstantExpr>(*UI)) {
-      if (isStoredThrough(CE, PHIUsers))
-        return true;
+      if (AnalyzeGlobal(CE, GS, PHIUsers)) return true;
+      if (CE->getOpcode() != Instruction::GetElementPtr)
+        GS.isNotSuitableForSRA = true;
     } else if (Instruction *I = dyn_cast<Instruction>(*UI)) {
-      if (!ContainingFunctionIsTriviallyDead(I)) {
-        if (I->getOpcode() == Instruction::GetElementPtr ||
-            I->getOpcode() == Instruction::Select) {
-          if (isStoredThrough(I, PHIUsers)) return true;
-        } else if (PHINode *PN = dyn_cast<PHINode>(I)) {
-          // PHI nodes we can check just like select or GEP instructions, but we
-          // have to be careful about infinite recursion.
-          if (PHIUsers.insert(PN).second)  // Not already visited.
-            if (isStoredThrough(I, PHIUsers)) return true;
-        } else if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
-          // If this store is just storing the initializer into a global
-          // (i.e. not changing the value), ignore it.  For now we just handle
-          // direct stores, no stores to fields of aggregates.
-          if (!isa<GlobalVariable>(SI->getOperand(1)))
-            return true;
-          Constant *GVInit =
-            cast<GlobalVariable>(SI->getOperand(1))->getInitializer();
-          if (SI->getOperand(0) != GVInit)
-            return true;
-        } else if (!isa<LoadInst>(I) && !isa<SetCondInst>(I)) {
-          return true;  // Any other non-load instruction might store!
+      if (isa<LoadInst>(I)) {
+        GS.isLoaded = true;
+      } else if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
+        // If this store is just storing the initializer into a global (i.e. not
+        // changing the value), ignore it.  For now we just handle direct
+        // stores, no stores to fields of aggregates.
+        if (GlobalVariable *GV = dyn_cast<GlobalVariable>(SI->getOperand(1))) {
+          if (SI->getOperand(0) == GV->getInitializer() && 
+              GS.StoredType < GlobalStatus::isInitializerStored)
+            GS.StoredType = GlobalStatus::isInitializerStored;
+          else if (isa<MallocInst>(SI->getOperand(0)) && 
+                   GS.StoredType < GlobalStatus::isMallocStored)
+            GS.StoredType = GlobalStatus::isMallocStored;
+          else
+            GS.StoredType = GlobalStatus::isStored;
+        } else {
+          GS.StoredType = GlobalStatus::isStored;
         }
+      } else if (I->getOpcode() == Instruction::GetElementPtr) {
+        if (AnalyzeGlobal(I, GS, PHIUsers)) return true;
+        if (!GS.isNotSuitableForSRA)
+          for (unsigned i = 1, e = I->getNumOperands(); i != e; ++i)
+            if (!isa<Constant>(I->getOperand(i))) {
+              GS.isNotSuitableForSRA = true;
+              break;
+            }
+      } else if (I->getOpcode() == Instruction::Select) {
+        if (AnalyzeGlobal(I, GS, PHIUsers)) return true;
+        GS.isNotSuitableForSRA = true;
+      } else if (PHINode *PN = dyn_cast<PHINode>(I)) {
+        // PHI nodes we can check just like select or GEP instructions, but we
+        // have to be careful about infinite recursion.
+        if (PHIUsers.insert(PN).second)  // Not already visited.
+          if (AnalyzeGlobal(I, GS, PHIUsers)) return true;
+        GS.isNotSuitableForSRA = true;
+      } else if (isa<SetCondInst>(I)) {
+        GS.isNotSuitableForSRA = true;
+      } else {
+        return true;  // Any other non-load instruction might take address!
       }
     } else {
       // Otherwise must be a global or some other user.
@@ -93,54 +114,136 @@ static bool isStoredThrough(Value *V, std::set<PHINode*> &PHIUsers) {
   return false;
 }
 
+
+
+static Constant *TraverseGEPInitializer(User *GEP, Constant *Init) {
+  if (GEP->getNumOperands() == 1 ||
+      !isa<Constant>(GEP->getOperand(1)) ||
+      !cast<Constant>(GEP->getOperand(1))->isNullValue())
+    return 0;
+
+  for (unsigned i = 2, e = GEP->getNumOperands(); i != e; ++i) {
+    ConstantInt *Idx = dyn_cast<ConstantInt>(GEP->getOperand(i));
+    if (!Idx) return 0;
+    uint64_t IdxV = Idx->getRawValue();
+    if (ConstantStruct *CS = dyn_cast<ConstantStruct>(Init)) {
+      if (IdxV >= CS->getNumOperands()) return 0;
+      Init = CS->getOperand(IdxV);
+    } else if (ConstantArray *CA = dyn_cast<ConstantArray>(Init)) {
+      if (IdxV >= CA->getNumOperands()) return 0;
+      Init = CA->getOperand(IdxV);
+    } else if (ConstantPacked *CP = dyn_cast<ConstantPacked>(Init)) {
+      if (IdxV >= CP->getNumOperands()) return 0;
+      Init = CP->getOperand(IdxV);
+    } else if (ConstantAggregateZero *CAZ = 
+               dyn_cast<ConstantAggregateZero>(Init)) {
+      if (const StructType *STy = dyn_cast<StructType>(Init->getType())) {
+        if (IdxV >= STy->getNumElements()) return 0;
+        Init = Constant::getNullValue(STy->getElementType(IdxV));
+      } else if (const SequentialType *STy =
+                 dyn_cast<SequentialType>(Init->getType())) {
+        Init = Constant::getNullValue(STy->getElementType());
+      } else {
+        return 0;
+      }
+    } else {
+      return 0;
+    }
+  }
+  return Init;
+}
+
 /// CleanupConstantGlobalUsers - We just marked GV constant.  Loop over all
 /// users of the global, cleaning up the obvious ones.  This is largely just a
 /// quick scan over the use list to clean up the easy and obvious cruft.
-static void CleanupConstantGlobalUsers(GlobalVariable *GV) {
-  Constant *Init = GV->getInitializer();
-  if (!Init->getType()->isFirstClassType())
-    return;  // We can't simplify aggregates yet!
-
-  std::vector<User*> Users(GV->use_begin(), GV->use_end());
-
-  std::sort(Users.begin(), Users.end());
-  Users.erase(std::unique(Users.begin(), Users.end()), Users.end());
-  for (unsigned i = 0, e = Users.size(); i != e; ++i) {
-    if (LoadInst *LI = dyn_cast<LoadInst>(Users[i])) {
+static void CleanupConstantGlobalUsers(Value *V, Constant *Init) {
+  for (Value::use_iterator UI = V->use_begin(), E = V->use_end(); UI != E;) {
+    User *U = *UI++;
+    
+    if (LoadInst *LI = dyn_cast<LoadInst>(U)) {
       // Replace the load with the initializer.
       LI->replaceAllUsesWith(Init);
       LI->getParent()->getInstList().erase(LI);
-    } else if (StoreInst *SI = dyn_cast<StoreInst>(Users[i])) {
+    } else if (StoreInst *SI = dyn_cast<StoreInst>(U)) {
       // Store must be unreachable or storing Init into the global.
       SI->getParent()->getInstList().erase(SI);
+    } else if (ConstantExpr *CE = dyn_cast<ConstantExpr>(U)) {
+      if (CE->getOpcode() == Instruction::GetElementPtr) {
+        if (Constant *SubInit = TraverseGEPInitializer(CE, Init))
+          CleanupConstantGlobalUsers(CE, SubInit);
+        if (CE->use_empty()) CE->destroyConstant();
+      }
+    } else if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(U)) {
+      if (Constant *SubInit = TraverseGEPInitializer(GEP, Init))
+        CleanupConstantGlobalUsers(GEP, SubInit);
+      if (GEP->use_empty())
+        GEP->getParent()->getInstList().erase(GEP);
     }
   }
 }
 
-
-bool Constifier::runOnModule(Module &M) {
+bool GlobalOpt::runOnModule(Module &M) {
   bool Changed = false;
+
+  // As a prepass, delete functions that are trivially dead.
+  bool LocalChange = true;
+  while (LocalChange) {
+    LocalChange = false;
+    for (Module::iterator FI = M.begin(), E = M.end(); FI != E; ) {
+      Function *F = FI++;
+      F->removeDeadConstantUsers();
+      if (F->use_empty() && (F->hasInternalLinkage() || F->hasWeakLinkage())) {
+        M.getFunctionList().erase(F);
+        LocalChange = true;
+        ++NumFnDeleted;
+      }
+    }
+    Changed |= LocalChange;
+  }
+
   std::set<PHINode*> PHIUsers;
   for (Module::giterator GVI = M.gbegin(), E = M.gend(); GVI != E;) {
     GlobalVariable *GV = GVI++;
     if (!GV->isConstant() && GV->hasInternalLinkage() && GV->hasInitializer()) {
-      if (!isStoredThrough(GV, PHIUsers)) {
-        DEBUG(std::cerr << "MARKING CONSTANT: " << *GV << "\n");
-        GV->setConstant(true);
-        
-        // Clean up any obviously simplifiable users now.
-        CleanupConstantGlobalUsers(GV);
-
-        // If the global is dead now, just nuke it.
-        if (GV->use_empty()) {
-          M.getGlobalList().erase(GV);
-          ++NumDeleted;
-        }
-
-        ++NumMarked;
-        Changed = true;
-      }
+      GlobalStatus GS;
       PHIUsers.clear();
+      GV->removeDeadConstantUsers();
+      if (!AnalyzeGlobal(GV, GS, PHIUsers)) {
+        // If the global is never loaded (but may be stored to), it is dead.
+        // Delete it now.
+        if (!GS.isLoaded) {
+          DEBUG(std::cerr << "GLOBAL NEVER LOADED: " << *GV);
+          // Delete any stores we can find to the global.  We may not be able to
+          // make it completely dead though.
+          CleanupConstantGlobalUsers(GV, GV->getInitializer());
+
+          // If the global is dead now, delete it.
+          if (GV->use_empty()) {
+            M.getGlobalList().erase(GV);
+            ++NumDeleted;
+          }
+          Changed = true;
+          
+        } else if (GS.StoredType <= GlobalStatus::isInitializerStored) {
+          DEBUG(std::cerr << "MARKING CONSTANT: " << *GV);
+          GV->setConstant(true);
+          
+          // Clean up any obviously simplifiable users now.
+          CleanupConstantGlobalUsers(GV, GV->getInitializer());
+          
+          // If the global is dead now, just nuke it.
+          if (GV->use_empty()) {
+            M.getGlobalList().erase(GV);
+            ++NumDeleted;
+          }
+          
+          ++NumMarked;
+          Changed = true;
+        } else if (!GS.isNotSuitableForSRA &&
+                   !GV->getInitializer()->getType()->isFirstClassType()) {
+          //std::cerr << "COULD SRA: " << *GV;
+        }
+      }
     }
   }
   return Changed;
