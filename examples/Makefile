@@ -1,4 +1,4 @@
-##===- projects/Makefile ------------------------------*- Makefile -*-===##
+##===- examples/Makefile -----------------------------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #
@@ -10,6 +10,6 @@ LEVEL=../..
 
 include $(LEVEL)/Makefile.config
 
-DIRS = Fibonacci HowToUseJIT
+DIRS:= $(patsubst %/Makefile,%,$(wildcard $(SourceDir)/*/Makefile))
 
 include $(BUILD_SRC_ROOT)/Makefile.rules
