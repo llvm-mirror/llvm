@@ -31,7 +31,8 @@ using namespace llvm;
 namespace {
   RegisterAnalysis<PA::EquivClassGraphs> X("equivdatastructure",
                     "Equivalence-class Bottom-up Data Structure Analysis");
-  Statistic<> NumEquivBUInlines("equivdatastructures", "Number of graphs inlined");
+  Statistic<> NumEquivBUInlines("equivdatastructures",
+                                "Number of graphs inlined");
   Statistic<> NumFoldGraphInlines("Inline equiv-class graphs bottom up",
                                   "Number of graphs inlined");
 }
@@ -44,18 +45,21 @@ Function *PA::EquivClassGraphs::
 getSomeCalleeForCallSite(const CallSite &CS) const {
   Function *thisFunc = CS.getCaller();
   assert(thisFunc && "getDSGraphForCallSite(): Not a valid call site?");
-  DSNode *calleeNode = CBU->getDSGraph(*thisFunc).
-    getNodeForValue(CS.getCalledValue()).getNode();
+  DSGraph &DSG = getDSGraph(*thisFunc);
+  DSNode *calleeNode = DSG.getNodeForValue(CS.getCalledValue()).getNode();
   std::map<DSNode*, Function *>::const_iterator I =
     OneCalledFunction.find(calleeNode);
   return (I == OneCalledFunction.end())? NULL : I->second;
 }
 
-// computeFoldedGraphs - Calculate the bottom up data structure
-// graphs for each function in the program.
+// runOnModule - Calculate the bottom up data structure graphs for each function
+// in the program.
 //
-void PA::EquivClassGraphs::computeFoldedGraphs(Module &M) {
+bool PA::EquivClassGraphs::runOnModule(Module &M) {
   CBU = &getAnalysis<CompleteBUDataStructures>();
+
+  GlobalsGraph = new DSGraph(CBU->getGlobalsGraph());
+  GlobalsGraph->setPrintAuxCalls();
 
   // Find equivalence classes of functions called from common call sites.
   // Fold the CBU graphs for all functions in an equivalence class.
@@ -78,6 +82,7 @@ void PA::EquivClassGraphs::computeFoldedGraphs(Module &M) {
       processSCC(getOrCreateGraph(*I), *I, Stack, NextID, ValMap);
 
   getGlobalsGraph().removeTriviallyDeadNodes();
+  return false;
 }
 
 
@@ -163,9 +168,9 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
 #endif
 
     if (EqClass.size() > 1) {
-      // This equiv class has multiple functions: merge their graphs.
-      // First, clone the CBU graph for the leader and make it the 
-      // common graph for the equivalence graph.
+      // This equiv class has multiple functions: merge their graphs.  First,
+      // clone the CBU graph for the leader and make it the common graph for the
+      // equivalence graph.
       DSGraph* mergedG = cloneGraph(*LF);
 
       // Record the argument nodes for use in merging later below
@@ -174,9 +179,9 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
         if (DS::isPointerType(AI1->getType()))
           GraphInfo.argNodes.push_back(mergedG->getNodeForValue(AI1));
       
-      // Merge in the graphs of all other functions in this equiv. class.
-      // Note that two or more functions may have the same graph, and it
-      // only needs to be merged in once.  Use a set to find repetitions.
+      // Merge in the graphs of all other functions in this equiv. class.  Note
+      // that two or more functions may have the same graph, and it only needs
+      // to be merged in once.  Use a set to find repetitions.
       std::set<DSGraph*> GraphsMerged;
       for (std::set<Function*>::const_iterator EqI = EqClass.begin(),
              EqEnd = EqClass.end(); EqI != EqEnd; ++EqI) {
@@ -227,16 +232,13 @@ DSGraph &PA::EquivClassGraphs::getOrCreateGraph(Function &F) {
   DSGraph *&Graph = FoldedGraphsMap[&F];
   if (Graph) return *Graph;
 
-  // Use the CBU graph directly without copying it.
-  // This automatically updates the FoldedGraphsMap via the reference.
-  Graph = &CBU->getDSGraph(F);
-  return *Graph;
+  return *cloneGraph(F);
 }
 
 DSGraph *PA::EquivClassGraphs::cloneGraph(Function &F) {
   DSGraph *&Graph = FoldedGraphsMap[&F];
   DSGraph &CBUGraph = CBU->getDSGraph(F);
-  assert(Graph == NULL || Graph == &CBUGraph && "Cloning a graph twice?");
+  assert((Graph == NULL || Graph == &CBUGraph) && "Cloning a graph twice?");
 
   // Copy the CBU graph...
   Graph = new DSGraph(CBUGraph);           // updates the map via reference
@@ -326,32 +328,7 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
 
   hash_set<Instruction*> calls;
 
-  DSGraph* CallerGraph = sameAsCBUGraph(F) ? NULL : &getOrCreateGraph(F);
-
-  // If the function has not yet been cloned, let's check if any callees
-  // need to be inlined before cloning it.
-  // 
-  for (unsigned i=0, e=G.getFunctionCalls().size(); i!=e && !CallerGraph; ++i) {
-    const DSCallSite &CS = G.getFunctionCalls()[i];
-    Instruction *TheCall = CS.getCallSite().getInstruction();
-    
-    // Loop over all potential callees to find the first non-external callee.
-    // Some inlining is needed if there is such a callee and it has changed.
-    ActualCalleesTy::const_iterator I, E;
-    for (tie(I, E) = getActualCallees().equal_range(TheCall); I != E; ++I)
-      if (!I->second->isExternal() && !sameAsCBUGraph(*I->second)) {
-        // Ok, the caller does need to be cloned... go ahead and do it now.
-        // clone the CBU graph for F now because we have not cloned it so far
-        CallerGraph = cloneGraph(F);
-        break;
-      }
-  }
-
-  if (!CallerGraph) {                   // No inlining is needed.
-    DEBUG(std::cerr << "  --DONE ProcessGraph for function " << F.getName()
-          << " (NO INLINING NEEDED)\n");
-    return;
-  }
+  DSGraph* CallerGraph = &getOrCreateGraph(F);
 
   // Else we need to inline some callee graph.  Visit all call sites.
   // The edges out of the current node are the call site targets...
@@ -377,7 +354,7 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
         break;
 
     // Now check if the graph has changed and if so, clone and inline it.
-    if (I != E && !sameAsCBUGraph(*I->second)) {
+    if (I != E) {
       Function *CalleeFunc = I->second;
       
       // Merge the callee's graph into this graph, if not already the same.
@@ -426,6 +403,20 @@ void PA::EquivClassGraphs::processGraph(DSGraph &G, Function &F) {
     // reach live nodes as live.
     CallerGraph->removeDeadNodes(DSGraph::KeepUnreachableGlobals);
   }
+
+
+  // When this graph is finalized, clone the globals in the graph into the
+  // globals graph to make sure it has everything, from all graphs.
+  DSScalarMap &MainSM = CallerGraph->getScalarMap();
+  ReachabilityCloner RC(*CallerGraph->getGlobalsGraph(), *CallerGraph,
+                        DSGraph::StripAllocaBit);
+
+  // Clone everything reachable from globals in the function graph into the
+  // globals graph.
+  for (DSScalarMap::global_iterator I = MainSM.global_begin(),
+         E = MainSM.global_end(); I != E; ++I) 
+    RC.getClonedNH(MainSM[*I]);
+
 
   DEBUG(std::cerr << "  --DONE ProcessGraph for function " 
                   << F.getName() << "\n");

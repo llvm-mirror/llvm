@@ -1,4 +1,4 @@
-//===-- EquivClassGraphs.h - Merge equiv-class graphs & inline bottom-up --===//
+//===-- EquivClassGraphs.h - Merge equiv-class graphs -----------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,13 +7,12 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This pass is the same as the complete bottom-up graphs, but
-// with functions partitioned into equivalence classes and a single merged
-// DS graph for all functions in an equivalence class.  After this merging,
-// graphs are inlined bottom-up on the SCCs of the final (CBU) call graph.
+// This pass is the same as the complete bottom-up graphs, but with functions
+// partitioned into equivalence classes and a single merged DS graph for all
+// functions in an equivalence class.  After this merging, graphs are inlined
+// bottom-up on the SCCs of the final (CBU) call graph.
 //
 //===----------------------------------------------------------------------===//
-
 
 #include "llvm/Analysis/DataStructure/DataStructure.h"
 #include "llvm/Analysis/DataStructure/DSGraph.h"
@@ -49,6 +48,8 @@ namespace PA {
   struct EquivClassGraphs : public ModulePass {
     CompleteBUDataStructures *CBU;
 
+    DSGraph *GlobalsGraph;
+
     // FoldedGraphsMap, one graph for each function
     hash_map<const Function*, DSGraph*> FoldedGraphsMap;
   
@@ -69,7 +70,7 @@ namespace PA {
     /// EquivClassGraphs - Computes the equivalence classes and then the
     /// folded DS graphs for each class.
     /// 
-    virtual bool runOnModule(Module &M) { computeFoldedGraphs(M); return true; }
+    virtual bool runOnModule(Module &M);
 
     /// getCBUDataStructures - Get the CompleteBUDataStructures object
     /// 
@@ -117,15 +118,8 @@ namespace PA {
       return GraphInfo;
     }
 
-    /// sameAsCBUGraph - Check if the folded graph for this function is
-    /// the same as the CBU graph.
-    bool sameAsCBUGraph(const Function &F) const {
-      DSGraph& foldedGraph = getDSGraph(F);
-      return (&foldedGraph == &CBU->getDSGraph(F));
-    }
-
     DSGraph &getGlobalsGraph() const {
-      return CBU->getGlobalsGraph();
+      return *GlobalsGraph;
     }
     
     typedef llvm::BUDataStructures::ActualCalleesTy ActualCalleesTy;
@@ -143,8 +137,6 @@ namespace PA {
     void print(std::ostream &O, const Module *M) const { CBU->print(O, M); }
 
   private:
-    void computeFoldedGraphs(Module &M);
-
     void buildIndirectFunctionSets(Module &M);
 
     unsigned processSCC(DSGraph &FG, Function &F, std::vector<Function*> &Stack,
