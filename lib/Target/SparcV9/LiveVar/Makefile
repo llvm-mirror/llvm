@@ -1,4 +1,4 @@
-##===- lib/Analysis/LiveVar/Makefile -----------------------*- Makefile -*-===##
+##===- lib/Target/Sparc/LiveVar/Makefile -------------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #
@@ -6,7 +6,8 @@
 # the University of Illinois Open Source License. See LICENSE.TXT for details.
 # 
 ##===----------------------------------------------------------------------===##
-LEVEL = ../../..
+
+LEVEL = ../../../..
 LIBRARYNAME = livevar
 
 include $(LEVEL)/Makefile.common
