@@ -34,9 +34,9 @@
 #include "Support/Debug.h"
 #include "Support/hash_set"
 #include "Support/Statistic.h"
-#include "SparcInternals.h"
-#include "SparcTargetMachine.h"
-#include "SparcRegInfo.h"
+#include "SparcV9Internals.h"
+#include "SparcV9TargetMachine.h"
+#include "SparcV9RegInfo.h"
 #include "SparcV9CodeEmitter.h"
 #include "Config/alloca.h"
 
@@ -48,12 +48,12 @@ namespace {
   Statistic<> CallbackCalls("callback", "Number CompilationCallback() calls");
 }
 
-bool SparcTargetMachine::addPassesToEmitMachineCode(FunctionPassManager &PM,
+bool SparcV9TargetMachine::addPassesToEmitMachineCode(FunctionPassManager &PM,
                                                     MachineCodeEmitter &MCE) {
   MachineCodeEmitter *M = &MCE;
   DEBUG(M = MachineCodeEmitter::createFilePrinterEmitter(MCE));
   PM.add(new SparcV9CodeEmitter(*this, *M));
-  PM.add(createSparcMachineCodeDestructionPass()); //Free stuff no longer needed
+  PM.add(createSparcV9MachineCodeDestructionPass()); //Free stuff no longer needed
   return false;
 }
 
@@ -179,8 +179,8 @@ void JITResolver::insertJumpAtAddr(int64_t JumpTarget, uint64_t &Addr) {
 
 void JITResolver::insertFarJumpAtAddr(int64_t Target, uint64_t Addr) {
   static const unsigned 
-    o6 = SparcIntRegClass::o6, g0 = SparcIntRegClass::g0,
-    g1 = SparcIntRegClass::g1, g5 = SparcIntRegClass::g5;
+    o6 = SparcV9IntRegClass::o6, g0 = SparcV9IntRegClass::g0,
+    g1 = SparcV9IntRegClass::g1, g5 = SparcV9IntRegClass::g5;
 
   MachineInstr* BinaryCode[] = {
     //
@@ -362,7 +362,7 @@ void JITResolver::CompilationCallback() {
   // Rewrite the call target so that we don't fault every time we execute it.
   //
 
-  static const unsigned o6 = SparcIntRegClass::o6;
+  static const unsigned o6 = SparcV9IntRegClass::o6;
 
   // Subtract enough to overwrite up to the 'save' instruction
   // This depends on whether we made a short call (1 instruction) or the
@@ -418,7 +418,7 @@ uint64_t JITResolver::emitStubForFunction(Function *F) {
   DEBUG(std::cerr << "Emitting stub at addr: 0x" 
                   << std::hex << MCE.getCurrentPCValue() << "\n");
 
-  unsigned o6 = SparcIntRegClass::o6, g0 = SparcIntRegClass::g0;
+  unsigned o6 = SparcV9IntRegClass::o6, g0 = SparcV9IntRegClass::g0;
 
   // restore %g0, 0, %g0
   MachineInstr *R = BuildMI(V9::RESTOREi, 3).addMReg(g0).addSImm(0)
@@ -485,8 +485,8 @@ SparcV9CodeEmitter::getRealRegNum(unsigned fakeReg,
   fakeReg = RI.getClassRegNum(fakeReg, regClass);
 
   switch (regClass) {
-  case SparcRegInfo::IntRegClassID: {
-    // Sparc manual, p31
+  case SparcV9RegInfo::IntRegClassID: {
+    // SparcV9 manual, p31
     static const unsigned IntRegMap[] = {
       // "o0", "o1", "o2", "o3", "o4", "o5",       "o7",
       8, 9, 10, 11, 12, 13, 15,
@@ -503,14 +503,14 @@ SparcV9CodeEmitter::getRealRegNum(unsigned fakeReg,
     return IntRegMap[fakeReg];
     break;
   }
-  case SparcRegInfo::FloatRegClassID: {
+  case SparcV9RegInfo::FloatRegClassID: {
     DEBUG(std::cerr << "FP reg: " << fakeReg << "\n");
-    if (regType == SparcRegInfo::FPSingleRegType) {
+    if (regType == SparcV9RegInfo::FPSingleRegType) {
       // only numbered 0-31, hence can already fit into 5 bits (and 6)
       DEBUG(std::cerr << "FP single reg, returning: " << fakeReg << "\n");
-    } else if (regType == SparcRegInfo::FPDoubleRegType) {
+    } else if (regType == SparcV9RegInfo::FPDoubleRegType) {
       // FIXME: This assumes that we only have 5-bit register fields!
-      // From Sparc Manual, page 40.
+      // From SparcV9 Manual, page 40.
       // The bit layout becomes: b[4], b[3], b[2], b[1], b[5]
       fakeReg |= (fakeReg >> 5) & 1;
       fakeReg &= 0x1f;
@@ -518,7 +518,7 @@ SparcV9CodeEmitter::getRealRegNum(unsigned fakeReg,
     }
     return fakeReg;
   }
-  case SparcRegInfo::IntCCRegClassID: {
+  case SparcV9RegInfo::IntCCRegClassID: {
     /*                                   xcc, icc, ccr */
     static const unsigned IntCCReg[] = {  6,   4,   2 };
     
@@ -527,7 +527,7 @@ SparcV9CodeEmitter::getRealRegNum(unsigned fakeReg,
     DEBUG(std::cerr << "IntCC reg: " << IntCCReg[fakeReg] << "\n");
     return IntCCReg[fakeReg];
   }
-  case SparcRegInfo::FloatCCRegClassID: {
+  case SparcV9RegInfo::FloatCCRegClassID: {
     /* These are laid out %fcc0 - %fcc3 => 0 - 3, so are correct */
     DEBUG(std::cerr << "FP CC reg: " << fakeReg << "\n");
     return fakeReg;
@@ -542,9 +542,9 @@ SparcV9CodeEmitter::getRealRegNum(unsigned fakeReg,
 // WARNING: if the call used the delay slot to do meaningful work, that's not
 // being accounted for, and the behavior will be incorrect!!
 inline void SparcV9CodeEmitter::emitFarCall(uint64_t Target, Function *F) {
-  static const unsigned o6 = SparcIntRegClass::o6,
-      o7 = SparcIntRegClass::o7, g0 = SparcIntRegClass::g0,
-      g1 = SparcIntRegClass::g1, g5 = SparcIntRegClass::g5;
+  static const unsigned o6 = SparcV9IntRegClass::o6,
+      o7 = SparcV9IntRegClass::o7, g0 = SparcV9IntRegClass::g0,
+      g1 = SparcV9IntRegClass::g1, g5 = SparcV9IntRegClass::g5;
 
   MachineInstr* BinaryCode[] = {
     //
@@ -582,7 +582,7 @@ inline void SparcV9CodeEmitter::emitFarCall(uint64_t Target, Function *F) {
   }
 }
 
-void SparcJITInfo::replaceMachineCodeForFunction (void *Old, void *New) {
+void SparcV9JITInfo::replaceMachineCodeForFunction (void *Old, void *New) {
   assert (TheJITResolver &&
 	"Can only call replaceMachineCodeForFunction from within JIT");
   uint64_t Target = (uint64_t)(intptr_t)New;
@@ -658,7 +658,7 @@ int64_t SparcV9CodeEmitter::getMachineOpValue(MachineInstr &MI,
     }
   } else if (MO.isRegister() || MO.getType() == MachineOperand::MO_CCRegister)
   {
-    // This is necessary because the Sparc backend doesn't actually lay out
+    // This is necessary because the SparcV9 backend doesn't actually lay out
     // registers in the real fashion -- it skips those that it chooses not to
     // allocate, i.e. those that are the FP, SP, etc.
     unsigned fakeReg = MO.getReg();
@@ -677,17 +677,17 @@ int64_t SparcV9CodeEmitter::getMachineOpValue(MachineInstr &MI,
                                  MI, MO.isPCRelative());
   } else if (MO.isMachineBasicBlock()) {
     // Duplicate code of the above case for VirtualRegister, BasicBlock... 
-    // It should really hit this case, but Sparc backend uses VRegs instead
+    // It should really hit this case, but SparcV9 backend uses VRegs instead
     DEBUG(std::cerr << "Saving reference to MBB\n");
     const BasicBlock *BB = MO.getMachineBasicBlock()->getBasicBlock();
     unsigned* CurrPC = (unsigned*)(intptr_t)MCE.getCurrentPCValue();
     BBRefs.push_back(std::make_pair(BB, std::make_pair(CurrPC, &MI)));
   } else if (MO.isExternalSymbol()) {
-    // Sparc backend doesn't generate this (yet...)
+    // SparcV9 backend doesn't generate this (yet...)
     std::cerr << "ERROR: External symbol unhandled: " << MO << "\n";
     abort();
   } else if (MO.isFrameIndex()) {
-    // Sparc backend doesn't generate this (yet...)
+    // SparcV9 backend doesn't generate this (yet...)
     int FrameIndex = MO.getFrameIndex();
     std::cerr << "ERROR: Frame index unhandled.\n";
     abort();
@@ -703,13 +703,13 @@ int64_t SparcV9CodeEmitter::getMachineOpValue(MachineInstr &MI,
   // are used in SPARC assembly. (Some of these make no sense in combination
   // with some of the above; we'll trust that the instruction selector
   // will not produce nonsense, and not check for valid combinations here.)
-  if (MO.isLoBits32()) {          // %lo(val) == %lo() in Sparc ABI doc
+  if (MO.isLoBits32()) {          // %lo(val) == %lo() in SparcV9 ABI doc
     return rv & 0x03ff;
-  } else if (MO.isHiBits32()) {   // %lm(val) == %hi() in Sparc ABI doc
+  } else if (MO.isHiBits32()) {   // %lm(val) == %hi() in SparcV9 ABI doc
     return (rv >> 10) & 0x03fffff;
-  } else if (MO.isLoBits64()) {   // %hm(val) == %ulo() in Sparc ABI doc
+  } else if (MO.isLoBits64()) {   // %hm(val) == %ulo() in SparcV9 ABI doc
     return (rv >> 32) & 0x03ff;
-  } else if (MO.isHiBits64()) {   // %hh(val) == %uhi() in Sparc ABI doc
+  } else if (MO.isHiBits64()) {   // %hh(val) == %uhi() in SparcV9 ABI doc
     return rv >> 42;
   } else {                        // (unadorned) val
     return rv;

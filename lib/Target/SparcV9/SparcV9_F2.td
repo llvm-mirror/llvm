@@ -1,4 +1,4 @@
-//===- SparcV9_F2.td - Format 2 instructions: Sparc V9 Target -------------===//
+//===- SparcV9_F2.td - Format 2 instructions: SparcV9 V9 Target -------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -32,7 +32,7 @@ class F2_br : F2 {                    // Format 2 Branch instruction
 
 class F2_2<bits<4> cond, string name> : F2_br { // Format 2.2 instructions
   bits<22> disp;
-  bit      annul = 0; // currently unused by Sparc backend
+  bit      annul = 0; // currently unused by SparcV9 backend
 
   let Name        = name;
   let Inst{29}    = annul;
@@ -44,7 +44,7 @@ class F2_3<bits<4> cond, string name> : F2_br { // Format 2.3 instructions
   bits<2>  cc;
   bits<19> disp;
   bit      predict = 1;
-  bit      annul = 0; // currently unused by Sparc backend
+  bit      annul = 0; // currently unused by SparcV9 backend
 
   let Name        = name;
   let Inst{29}    = annul;
@@ -58,7 +58,7 @@ class F2_4<bits<3> rcond, string name> : F2_br { // Format 2.4 instructions
   bits<5>  rs1;
   bits<16> disp;
   bit      predict = 1;
-  bit      annul = 0; // currently unused by Sparc backend
+  bit      annul = 0; // currently unused by SparcV9 backend
 
   let Name        = name;
   let Inst{29}    = annul;

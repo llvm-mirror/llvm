@@ -17,7 +17,7 @@
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/Support/CFG.h"
 #include "Support/SetOperations.h"
-#include "../SparcInternals.h"
+#include "../SparcV9Internals.h"
 
 namespace llvm {
 

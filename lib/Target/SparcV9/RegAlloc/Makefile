@@ -10,7 +10,7 @@ LEVEL = ../../../..
 
 DIRS  = 
 
-LIBRARYNAME = regalloc
+LIBRARYNAME = sparcv9regalloc
 
 BUILD_ARCHIVE = 1
 

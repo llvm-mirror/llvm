@@ -1,4 +1,4 @@
-//===-- Sparc.cpp - General implementation file for the Sparc Target ------===//
+//===-- SparcV9.cpp - General implementation file for the SparcV9 Target ------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,18 +16,18 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionInfo.h"
 #include "llvm/Target/TargetFrameInfo.h"
-#include "SparcFrameInfo.h"
+#include "SparcV9FrameInfo.h"
 
 using namespace llvm;
 
 int
-SparcFrameInfo::getFirstAutomaticVarOffset(MachineFunction&, bool& pos) const {
+SparcV9FrameInfo::getFirstAutomaticVarOffset(MachineFunction&, bool& pos) const {
   pos = false;                          // static stack area grows downwards
   return StaticAreaOffsetFromFP;
 }
 
 int
-SparcFrameInfo::getRegSpillAreaOffset(MachineFunction& mcInfo, bool& pos) const 
+SparcV9FrameInfo::getRegSpillAreaOffset(MachineFunction& mcInfo, bool& pos) const 
 {
   // ensure no more auto vars are added
   mcInfo.getInfo()->freezeAutomaticVarsArea();
@@ -37,7 +37,7 @@ SparcFrameInfo::getRegSpillAreaOffset(MachineFunction& mcInfo, bool& pos) const
   return StaticAreaOffsetFromFP - autoVarsSize; 
 }
 
-int SparcFrameInfo::getTmpAreaOffset(MachineFunction& mcInfo, bool& pos) const {
+int SparcV9FrameInfo::getTmpAreaOffset(MachineFunction& mcInfo, bool& pos) const {
   MachineFunctionInfo *MFI = mcInfo.getInfo();
   MFI->freezeAutomaticVarsArea();     // ensure no more auto vars are added
   MFI->freezeSpillsArea();            // ensure no more spill slots are added
@@ -50,7 +50,7 @@ int SparcFrameInfo::getTmpAreaOffset(MachineFunction& mcInfo, bool& pos) const {
 }
 
 int
-SparcFrameInfo::getDynamicAreaOffset(MachineFunction& mcInfo, bool& pos) const {
+SparcV9FrameInfo::getDynamicAreaOffset(MachineFunction& mcInfo, bool& pos) const {
   // Dynamic stack area grows downwards starting at top of opt-args area.
   // The opt-args, required-args, and register-save areas are empty except
   // during calls and traps, so they are shifted downwards on each

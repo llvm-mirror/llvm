@@ -8,7 +8,7 @@
 ##===----------------------------------------------------------------------===##
 
 LEVEL = ../../../..
-LIBRARYNAME = livevar
+LIBRARYNAME = sparcv9livevar
 
 include $(LEVEL)/Makefile.common
 

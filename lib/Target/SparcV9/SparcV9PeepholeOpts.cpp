@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcInternals.h"
+#include "SparcV9Internals.h"
 #include "llvm/BasicBlock.h"
 #include "llvm/Pass.h"
 #include "llvm/CodeGen/MachineFunction.h"

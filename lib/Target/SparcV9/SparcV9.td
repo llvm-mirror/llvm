@@ -1,4 +1,4 @@
-//===- SparcV9.td - Target Description for Sparc V9 Target ----------------===//
+//===- SparcV9.td - Target Description for SparcV9 V9 Target ----------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -19,7 +19,7 @@ include "SparcV9_Reg.td"
 // Instructions
 //===----------------------------------------------------------------------===//
 
-class InstV9 : Instruction {          // Sparc instruction baseline
+class InstV9 : Instruction {          // SparcV9 instruction baseline
   field bits<32> Inst;
 
   let Namespace = "V9";
@@ -27,7 +27,7 @@ class InstV9 : Instruction {          // Sparc instruction baseline
   bits<2> op;
   let Inst{31-30} = op;               // Top two bits are the 'op' field
 
-  // Bit attributes specific to Sparc instructions
+  // Bit attributes specific to SparcV9 instructions
   bit isPasi       = 0; // Does this instruction affect an alternate addr space?
   bit isDeprecated = 0; // Is this instruction deprecated?
   bit isPrivileged = 0; // Is this a privileged instruction?
@@ -62,7 +62,7 @@ let op2 = 0b011 in {
 }
 
 // Section A.4: Branch on Floating-Point Condition Codes (FBfcc) p140
-// The following deprecated instructions don't seem to play nice on Sparc
+// The following deprecated instructions don't seem to play nice on SparcV9
 /*
 let isDeprecated = 1 in {
   let op2 = 0b110 in {
@@ -107,7 +107,7 @@ let op2 = 0b101 in {
 }
 
 // Section A.5: Branch on FP condition codes with prediction - p143
-// Not used in the Sparc backend (directly)
+// Not used in the SparcV9 backend (directly)
 /*
 let op2 = 0b101 in {
   def FBPA     : F2_3<0b1000, "fba">;              // Branch always
@@ -176,7 +176,7 @@ let op2 = 0b001 in {
 }
 
 // Section A.7: Branch on integer condition codes with prediction - p148
-// Not used in the Sparc backend
+// Not used in the SparcV9 backend
 /*
 let op2 = 0b001 in {
   def BPA     : F2_3<0b1000, "bpa">;              // Branch always
@@ -212,7 +212,7 @@ def CALL : InstV9 {
 
 
 // Section A.10: Divide (64-bit / 32-bit) - p178
-// Not used in the Sparc backend
+// Not used in the SparcV9 backend
 /*
 let isDeprecated = 1 in {
   def UDIVr   : F3_1<2, 0b001110, "udiv">;        // udiv r, r, r
@@ -227,7 +227,7 @@ let isDeprecated = 1 in {
 */
 
 // Section A.11: DONE and RETRY - p181
-// Not used in the Sparc backend
+// Not used in the SparcV9 backend
 /*
 let isPrivileged = 1 in {
   def DONE    : F3_18<0, "done">;                 // done
@@ -247,7 +247,7 @@ def FSUBQ : F3_16<2, 0b110100, 0x47, "fsubq">;    // fsubq frs1, frs2, frd
 def FCMPS  : F3_15<2, 0b110101, 0b001010001, "fcmps">;   // fcmps  %fcc, r1, r2
 def FCMPD  : F3_15<2, 0b110101, 0b001010010, "fcmpd">;   // fcmpd  %fcc, r1, r2
 def FCMPQ  : F3_15<2, 0b110101, 0b001010011, "fcmpq">;   // fcmpq  %fcc, r1, r2
-// Currently unused in the Sparc backend
+// Currently unused in the SparcV9 backend
 /*
 def FCMPES : F3_15<2, 0b110101, 0b001010101, "fcmpes">;  // fcmpes %fcc, r1, r2
 def FCMPED : F3_15<2, 0b110101, 0b001010110, "fcmped">;  // fcmped %fcc, r1, r2
@@ -317,7 +317,7 @@ def FSQRTQ : F3_14<2, 0b110100, 0b000101011, "fsqrts">;  // fsqrts r, r
 // Not currently used
 
 // Section A.24: Jump and Link - p172
-// Mimicking the Sparc's instr def...
+// Mimicking the SparcV9's instr def...
 def JMPLCALLr : F3_1<2, 0b111000, "jmpl">;              // jmpl [rs1+rs2], rd
 def JMPLCALLi : F3_2<2, 0b111000, "jmpl">;              // jmpl [rs1+imm], rd
 def JMPLRETr  : F3_1<2, 0b111000, "jmpl">;              // jmpl [rs1+rs2], rd
@@ -393,7 +393,7 @@ def XNORccr : F3_1<2, 0b010111, "xnorcc">;       // xnorcc rs1, rs2, rd
 def XNORcci : F3_2<2, 0b010111, "xnorcc">;       // xnorcc rs1, imm, rd
 
 // Section A.32: Memory Barrier - p186
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.33: Move Floating-Point Register on Condition (FMOVcc)
 // ======================= Single Floating Point ======================
@@ -622,7 +622,7 @@ def UDIVXr : F3_1<2, 0b001101, "udivx">;       // udivx  r, r, r
 def UDIVXi : F3_2<2, 0b001101, "udivx">;       // udivx  r, i, r
 
 // Section A.38: Multiply (32-bit) - p200
-// Not used in the Sparc backend
+// Not used in the SparcV9 backend
 /*
 let Inst{13} = 0 in {
   def UMULr   : F3_1<2, 0b001010, "umul">;        // umul   r, r, r
@@ -639,7 +639,7 @@ let Inst{13} = 1 in {
 */
 
 // Section A.39: Multiply Step - p202
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.40: No operation - p204
 // NOP is really a pseudo-instruction (special case of SETHI)
@@ -652,13 +652,13 @@ let op2 = 0b100 in {
 }
 
 // Section A.41: Population Count - p205
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.42: Prefetch Data - p206
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.43: Read Privileged Register - p211
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.44: Read State Register
 // The only instr from this section currently used is RDCCR
@@ -679,7 +679,7 @@ def RESTOREr : F3_1<2, 0b111101, "restore">;    // restore r, r, r
 def RESTOREi : F3_2<2, 0b111101, "restore">;    // restore r, i, r
 
 // Section A.47: SAVED and RESTORED - p219
-// Not currently used in Sparc backend
+// Not currently used in SparcV9 backend
 
 // Section A.48: SETHI - p220
 let op2 = 0b100 in {
@@ -687,7 +687,7 @@ let op2 = 0b100 in {
 }
 
 // Section A.49: Shift - p221
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 /*
  uses 5 least significant bits of rs2
 let x = 0 in {
@@ -720,10 +720,10 @@ def SRLXi6 : F3_13<2, 0b100110, "srlx">;                 // srlx r, shcnt64, r
 def SRAXi6 : F3_13<2, 0b100111, "srax">;                 // srax r, shcnt64, r
 
 // Section A.50: Sofware-Initiated Reset - p223
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.51: Store Barrier - p224
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.52: Store Floating-point - p225
 // Store instructions all want their rd register first
@@ -732,7 +732,7 @@ def STFi  : F3_2rd<3, 0b100100, "st">;                      // st r, [r+i]
 def STDFr : F3_1rd<3, 0b100111, "std">;                     // std r, [r+r]
 def STDFi : F3_2rd<3, 0b100111, "std">;                     // std r, [r+i]
 
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 /*
 def STQFr : F3_1rd<3, 0b100110, "stq">;                     // stq r, [r+r]
 def STQFi : F3_2rd<3, 0b100110, "stq">;                     // stq r, [r+i]
@@ -740,7 +740,7 @@ def STQFi : F3_2rd<3, 0b100110, "stq">;                     // stq r, [r+i]
 
 // FIXME: An encoding needs to be chosen here, because STFSRx expect rd=0,
 // while STXFSRx expect rd=1, but assembly syntax dictates %fsr as first arg.
-// These are being disabled because they aren't used in the Sparc backend.
+// These are being disabled because they aren't used in the SparcV9 backend.
 /*
 let isDeprecated = 1 in {
   def STFSRr : F3_1<3, 0b100101, "st">;                   // st  %fsr, [r+r]
@@ -751,7 +751,7 @@ def STXFSRr : F3_1<3, 0b100101, "stx">;                   // stx %fsr, [r+r]
 def STXFSRi : F3_2<3, 0b100101, "stx">;                   // stx %fsr, [r+i]
 
 // Section A.53: Store Floating-Point into Alternate Space - p227
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.54: Store Integer - p229
 // Store instructions all want their rd register first
@@ -765,7 +765,7 @@ def STXr : F3_1rd<3, 0b001110, "stx">;                     // stx r, [r+r]
 def STXi : F3_2rd<3, 0b001110, "stx">;                     // stx r, [r+i]
 
 // Section A.55: Store Integer into Alternate Space - p231
-// Not currently used in the Sparc backend
+// Not currently used in the SparcV9 backend
 
 // Section A.56: Subtract - p233
 def SUBr    : F3_1<2, 0b000100, "sub">;                   // sub r, r, r

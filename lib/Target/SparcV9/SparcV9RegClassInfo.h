@@ -1,4 +1,4 @@
-//===-- SparcRegClassInfo.h - Register class def'ns for Sparc ---*- C++ -*-===//
+//===-- SparcV9RegClassInfo.h - Register class def'ns for SparcV9 ---*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This file defines the register classes used by the Sparc target description.
+// This file defines the register classes used by the SparcV9 target description.
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,8 +22,8 @@ namespace llvm {
 // Integer Register Class
 //-----------------------------------------------------------------------------
 
-struct SparcIntRegClass : public TargetRegClassInfo {
-  SparcIntRegClass(unsigned ID) 
+struct SparcV9IntRegClass : public TargetRegClassInfo {
+  SparcV9IntRegClass(unsigned ID) 
     : TargetRegClassInfo(ID, NumOfAvailRegs, NumOfAllRegs) {  }
 
   void colorIGNode(IGNode *Node,
@@ -87,12 +87,12 @@ struct SparcIntRegClass : public TargetRegClassInfo {
 // Float Register Class
 //-----------------------------------------------------------------------------
 
-class SparcFloatRegClass : public TargetRegClassInfo {
+class SparcV9FloatRegClass : public TargetRegClassInfo {
   int findFloatColor(const LiveRange *LR, unsigned Start,
 		     unsigned End,
                      const std::vector<bool> &IsColorUsedArr) const;
 public:
-  SparcFloatRegClass(unsigned ID) 
+  SparcV9FloatRegClass(unsigned ID) 
     : TargetRegClassInfo(ID, NumOfAvailRegs, NumOfAllRegs) {}
 
   // This method marks the registers used for a given register number.
@@ -116,7 +116,7 @@ public:
   void colorIGNode(IGNode *Node,
                    const std::vector<bool> &IsColorUsedArr) const;
 
-  // according to  Sparc 64 ABI, all %fp regs are volatile
+  // according to  SparcV9 64 ABI, all %fp regs are volatile
   inline bool isRegVolatile(int Reg) const { return true; }
 
   enum {
@@ -153,14 +153,14 @@ public:
 // allocated for the three names.
 //-----------------------------------------------------------------------------
 
-struct SparcIntCCRegClass : public TargetRegClassInfo {
-  SparcIntCCRegClass(unsigned ID) 
+struct SparcV9IntCCRegClass : public TargetRegClassInfo {
+  SparcV9IntCCRegClass(unsigned ID) 
     : TargetRegClassInfo(ID, 1, 3) {  }
   
   void colorIGNode(IGNode *Node,
                    const std::vector<bool> &IsColorUsedArr) const;
 
-  // according to  Sparc 64 ABI,  %ccr is volatile
+  // according to  SparcV9 64 ABI,  %ccr is volatile
   //
   inline bool isRegVolatile(int Reg) const { return true; }
 
@@ -177,14 +177,14 @@ struct SparcIntCCRegClass : public TargetRegClassInfo {
 // Only 4 Float CC registers are available for allocation.
 //-----------------------------------------------------------------------------
 
-struct SparcFloatCCRegClass : public TargetRegClassInfo {
-  SparcFloatCCRegClass(unsigned ID) 
+struct SparcV9FloatCCRegClass : public TargetRegClassInfo {
+  SparcV9FloatCCRegClass(unsigned ID) 
     : TargetRegClassInfo(ID, 4, 5) {  }
 
   void colorIGNode(IGNode *Node,
                    const std::vector<bool> &IsColorUsedArr) const;
   
-  // according to  Sparc 64 ABI, all %fp CC regs are volatile
+  // according to  SparcV9 64 ABI, all %fp CC regs are volatile
   //
   inline bool isRegVolatile(int Reg) const { return true; }
 
@@ -196,17 +196,17 @@ struct SparcFloatCCRegClass : public TargetRegClassInfo {
 };
 
 //-----------------------------------------------------------------------------
-// Sparc special register class.  These registers are not used for allocation
+// SparcV9 special register class.  These registers are not used for allocation
 // but are used as arguments of some instructions.
 //-----------------------------------------------------------------------------
 
-struct SparcSpecialRegClass : public TargetRegClassInfo {
-  SparcSpecialRegClass(unsigned ID) 
+struct SparcV9SpecialRegClass : public TargetRegClassInfo {
+  SparcV9SpecialRegClass(unsigned ID) 
     : TargetRegClassInfo(ID, 0, 1) {  }
 
   void colorIGNode(IGNode *Node,
                    const std::vector<bool> &IsColorUsedArr) const {
-    assert(0 && "SparcSpecialRegClass should never be used for allocation");
+    assert(0 && "SparcV9SpecialRegClass should never be used for allocation");
   }
   
   // all currently included special regs are volatile

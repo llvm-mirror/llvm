@@ -1,4 +1,4 @@
-//===-- SparcRegInfo.h - Define TargetRegInfo for Sparc ---------*- C++ -*-===//
+//===-- SparcV9RegInfo.h - Define TargetRegInfo for SparcV9 ---------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This class implements the virtual class TargetRegInfo for Sparc.
+// This class implements the virtual class TargetRegInfo for SparcV9.
 //
 //----------------------------------------------------------------------------
 
@@ -18,9 +18,9 @@
 
 namespace llvm {
 
-class SparcTargetMachine;
+class SparcV9TargetMachine;
 
-class SparcRegInfo : public TargetRegInfo {
+class SparcV9RegInfo : public TargetRegInfo {
 
 private:
 
@@ -34,7 +34,7 @@ private:
 
   // The following methods are used to color special live ranges (e.g.
   // function args and return values etc.) with specific hardware registers
-  // as required. See SparcRegInfo.cpp for the implementation.
+  // as required. See SparcV9RegInfo.cpp for the implementation.
   //
   void suggestReg4RetAddr(MachineInstr *RetMI, 
 			  LiveRangeInfo &LRI) const;
@@ -45,7 +45,7 @@ private:
   int getRegTypeForClassAndType(unsigned regClassID, const Type* type) const;
 
 public:
-  // Type of registers available in Sparc. There can be several reg types
+  // Type of registers available in SparcV9. There can be several reg types
   // in the same class. For instace, the float reg class has Single/Double
   // types
   //
@@ -58,7 +58,7 @@ public:
     SpecialRegType
   };
 
-  // The actual register classes in the Sparc
+  // The actual register classes in the SparcV9
   //
   // **** WARNING: If this enum order is changed, also modify 
   // getRegisterClassOfValue method below since it assumes this particular 
@@ -72,7 +72,7 @@ public:
     SpecialRegClassID                   // Special (unallocated) registers
   };
 
-  SparcRegInfo(const SparcTargetMachine &tgt);
+  SparcV9RegInfo(const SparcV9TargetMachine &tgt);
 
   // To find the register class used for a specified Type
   //
@@ -115,7 +115,7 @@ public:
   
   // The following methods are used to color special live ranges (e.g.
   // function args and return values etc.) with specific hardware registers
-  // as required. See SparcRegInfo.cpp for the implementation for Sparc.
+  // as required. See SparcV9RegInfo.cpp for the implementation for SparcV9.
   //
   void suggestRegs4MethodArgs(const Function *Meth, 
 			      LiveRangeInfo& LRI) const;
@@ -135,7 +135,7 @@ public:
   void printReg(const LiveRange *LR) const;
   
   // returns the # of bytes of stack space allocated for each register
-  // type. For Sparc, currently we allocate 8 bytes on stack for all 
+  // type. For SparcV9, currently we allocate 8 bytes on stack for all 
   // register types. We can optimize this later if necessary to save stack
   // space (However, should make sure that stack alignment is correct)
   //

@@ -1,4 +1,4 @@
-//===- SparcV9_Reg.td - Sparc V9 Register definitions ---------------------===//
+//===- SparcV9_Reg.td - SparcV9 V9 Register definitions ---------------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
-//  Declarations that describe the Sparc register file 
+//  Declarations that describe the SparcV9 register file 
 //===----------------------------------------------------------------------===//
 
 // Ri - One of the 32 64 bit integer registers

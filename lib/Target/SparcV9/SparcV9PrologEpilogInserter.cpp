@@ -16,8 +16,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcInternals.h"
-#include "SparcRegClassInfo.h"
+#include "SparcV9Internals.h"
+#include "SparcV9RegClassInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineFunctionInfo.h"
 #include "llvm/CodeGen/MachineCodeForInstruction.h"
@@ -31,7 +31,7 @@ namespace llvm {
 
 namespace {
   struct InsertPrologEpilogCode : public MachineFunctionPass {
-    const char *getPassName() const { return "Sparc Prolog/Epilog Inserter"; }
+    const char *getPassName() const { return "SparcV9 Prolog/Epilog Inserter"; }
     
     bool runOnMachineFunction(MachineFunction &F) {
       if (!F.getInfo()->isCompiledAsLeafMethod()) {
@@ -83,7 +83,7 @@ void InsertPrologEpilogCode::InsertPrologCode(MachineFunction &MF)
     //        SETSW -(stackSize), %g1
     int uregNum = TM.getRegInfo().getUnifiedRegNum(
 			 TM.getRegInfo().getRegClassIDOfType(Type::IntTy),
-			 SparcIntRegClass::g1);
+			 SparcV9IntRegClass::g1);
 
     MachineInstr* M = BuildMI(V9::SETHI, 2).addSImm(C)
       .addMReg(uregNum, MachineOperand::Def);
@@ -119,7 +119,7 @@ void InsertPrologEpilogCode::InsertPrologCode(MachineFunction &MF)
       bool ignore;
       int firstArgReg   = TM.getRegInfo().getUnifiedRegNum(
                              TM.getRegInfo().getRegClassIDOfType(Type::IntTy),
-                             SparcIntRegClass::i0);
+                             SparcV9IntRegClass::i0);
       int fpReg         = TM.getFrameInfo().getIncomingArgBaseRegNum();
       int argSize       = TM.getFrameInfo().getSizeOfEachArgOnStack();
       int firstArgOffset=TM.getFrameInfo().getFirstIncomingArgOffset(MF,ignore);

@@ -1,4 +1,4 @@
-//===-- llvm/CodeGen/SparcInstrSelectionSupport.h ---------------*- C++ -*-===//
+//===-- llvm/CodeGen/SparcV9InstrSelectionSupport.h ---------------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,7 +15,7 @@
 #define SPARC_INSTR_SELECTION_SUPPORT_h
 
 #include "llvm/DerivedTypes.h"
-#include "SparcInternals.h"
+#include "SparcV9Internals.h"
 
 namespace llvm {
 
@@ -90,7 +90,7 @@ ChooseAddInstructionByType(const Type* resultType)
 }
 
 
-// Because the Sparc instruction selector likes to re-write operands to
+// Because the SparcV9 instruction selector likes to re-write operands to
 // instructions, making them change from a Value* (virtual register) to a
 // Constant* (making an immediate field), we need to change the opcode from a
 // register-based instruction to an immediate-based instruction, hence this

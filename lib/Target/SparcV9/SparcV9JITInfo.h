@@ -1,4 +1,4 @@
-//===- SparcJITInfo.h - Sparc implementation of the JIT interface -*-C++-*-===//
+//===- SparcV9JITInfo.h - SparcV9 implementation of the JIT interface -*-C++-*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This file contains the Sparc implementation of the TargetJITInfo class.
+// This file contains the SparcV9 implementation of the TargetJITInfo class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,10 +19,10 @@
 namespace llvm {
   class TargetMachine;
 
-  class SparcJITInfo : public TargetJITInfo {
+  class SparcV9JITInfo : public TargetJITInfo {
     TargetMachine &TM;
   public:
-    SparcJITInfo(TargetMachine &tm) : TM(tm) {}
+    SparcV9JITInfo(TargetMachine &tm) : TM(tm) {}
 
     /// addPassesToJITCompile - Add passes to the specified pass manager to
     /// implement a fast dynamic compiler for this target.  Return true if this

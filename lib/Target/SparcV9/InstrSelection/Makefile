@@ -9,6 +9,6 @@
 
 LEVEL = ../../../..
 DIRS  = 
-LIBRARYNAME = select
+LIBRARYNAME = sparcv9select
 
 include $(LEVEL)/Makefile.common

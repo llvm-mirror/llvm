@@ -1,4 +1,4 @@
-//===-- SparcInstrSelection.cpp -------------------------------------------===//
+//===-- SparcV9InstrSelection.cpp -------------------------------------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -24,10 +24,10 @@
 #include "llvm/CodeGen/MachineFunctionInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineInstrAnnot.h"
-#include "SparcInstrSelectionSupport.h"
-#include "SparcInternals.h"
-#include "SparcRegClassInfo.h"
-#include "SparcRegInfo.h"
+#include "SparcV9InstrSelectionSupport.h"
+#include "SparcV9Internals.h"
+#include "SparcV9RegClassInfo.h"
+#include "SparcV9RegInfo.h"
 #include "Support/MathExtras.h"
 #include <algorithm>
 #include <cmath>
@@ -1413,7 +1413,7 @@ static bool CodeGenIntrinsic(Intrinsic::ID iid, CallInst &callInstr,
   }
 
   case Intrinsic::va_end:
-    return true;                        // no-op on Sparc
+    return true;                        // no-op on SparcV9
 
   case Intrinsic::va_copy:
     // Simple copy of current va_list (arg1) to new va_list (result)
@@ -1543,13 +1543,13 @@ GetInstructionsByRule(InstructionNode* subtreeRoot,
         //     -- For non-FP values, create an add-with-0 instruction
         // 
         if (retVal != NULL) {
-          const SparcRegInfo& regInfo =
-            (SparcRegInfo&) target.getRegInfo();
+          const SparcV9RegInfo& regInfo =
+            (SparcV9RegInfo&) target.getRegInfo();
           const Type* retType = retVal->getType();
           unsigned regClassID = regInfo.getRegClassIDOfType(retType);
           unsigned retRegNum = (retType->isFloatingPoint()
-                                ? (unsigned) SparcFloatRegClass::f0
-                                : (unsigned) SparcIntRegClass::i0);
+                                ? (unsigned) SparcV9FloatRegClass::f0
+                                : (unsigned) SparcV9IntRegClass::i0);
           retRegNum = regInfo.getUnifiedRegNum(regClassID, retRegNum);
 
           // () Insert sign-extension instructions for small signed values.
@@ -2450,8 +2450,8 @@ GetInstructionsByRule(InstructionNode* subtreeRoot,
           MachineFunction& MF = MachineFunction::get(currentFunc);
           MachineCodeForInstruction& mcfi =
             MachineCodeForInstruction::get(callInstr); 
-          const SparcRegInfo& regInfo =
-            (SparcRegInfo&) target.getRegInfo();
+          const SparcV9RegInfo& regInfo =
+            (SparcV9RegInfo&) target.getRegInfo();
           const TargetFrameInfo& frameInfo = target.getFrameInfo();
 
           // Create hidden virtual register for return address with type void*
@@ -2701,8 +2701,8 @@ GetInstructionsByRule(InstructionNode* subtreeRoot,
             const Type* retType = callInstr->getType();
 
             int regNum = (retType->isFloatingPoint()
-                          ? (unsigned) SparcFloatRegClass::f0 
-                          : (unsigned) SparcIntRegClass::o0);
+                          ? (unsigned) SparcV9FloatRegClass::f0 
+                          : (unsigned) SparcV9IntRegClass::o0);
             unsigned regClassID = regInfo.getRegClassIDOfType(retType);
             regNum = regInfo.getUnifiedRegNum(regClassID, regNum);
 

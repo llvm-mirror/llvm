@@ -1,4 +1,4 @@
-//===-- UltraSparcSchedInfo.cpp -------------------------------------------===//
+//===-- UltraSparcV9SchedInfo.cpp -------------------------------------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,11 +7,11 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// Describe the scheduling characteristics of the UltraSparc
+// Describe the scheduling characteristics of the UltraSparcV9
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcInternals.h"
+#include "SparcV9Internals.h"
 
 using namespace llvm;
 
@@ -129,7 +129,7 @@ static const CPUResource  FCMPDelayCycle("FCMP delay cycle", 1);
 
 
 //---------------------------------------------------------------------------
-// const InstrClassRUsage SparcRUsageDesc[]
+// const InstrClassRUsage SparcV9RUsageDesc[]
 // 
 // Purpose:
 //   Resource usage information for instruction in each scheduling class.
@@ -396,7 +396,7 @@ static const InstrClassRUsage SingleClassRUsage = {
 };
 
 
-static const InstrClassRUsage SparcRUsageDesc[] = {
+static const InstrClassRUsage SparcV9RUsageDesc[] = {
   NoneClassRUsage,
   IEUNClassRUsage,
   IEU0ClassRUsage,
@@ -412,14 +412,14 @@ static const InstrClassRUsage SparcRUsageDesc[] = {
 
 
 //---------------------------------------------------------------------------
-// const InstrIssueDelta  SparcInstrIssueDeltas[]
+// const InstrIssueDelta  SparcV9InstrIssueDeltas[]
 // 
 // Purpose:
 //   Changes to issue restrictions information in InstrClassRUsage for
 //   instructions that differ from other instructions in their class.
 //---------------------------------------------------------------------------
 
-static const InstrIssueDelta  SparcInstrIssueDeltas[] = {
+static const InstrIssueDelta  SparcV9InstrIssueDeltas[] = {
 
   // opCode,  isSingleIssue,  breaksGroup,  numBubbles
 
@@ -504,14 +504,14 @@ static const InstrIssueDelta  SparcInstrIssueDeltas[] = {
 
 
 //---------------------------------------------------------------------------
-// const InstrRUsageDelta SparcInstrUsageDeltas[]
+// const InstrRUsageDelta SparcV9InstrUsageDeltas[]
 // 
 // Purpose:
 //   Changes to resource usage information in InstrClassRUsage for
 //   instructions that differ from other instructions in their class.
 //---------------------------------------------------------------------------
 
-static const InstrRUsageDelta SparcInstrUsageDeltas[] = {
+static const InstrRUsageDelta SparcV9InstrUsageDeltas[] = {
 
   // MachineOpCode, Resource, Start cycle, Num cycles
 
@@ -601,7 +601,7 @@ static const InstrRUsageDelta SparcInstrUsageDeltas[] = {
 #ifdef EXPLICIT_BUBBLES_NEEDED
   // 
   // MULScc inserts one bubble.
-  // This means it breaks the current group (captured in UltraSparcSchedInfo)
+  // This means it breaks the current group (captured in UltraSparcV9SchedInfo)
   // *and occupies all issue slots for the next cycle
   // 
 //{ V9::MULScc,  AllIssueSlots.rid, 2, 2-1 },
@@ -728,7 +728,7 @@ static const InstrRUsageDelta SparcInstrUsageDeltas[] = {
 
 
 //---------------------------------------------------------------------------
-// class SparcSchedInfo 
+// class SparcV9SchedInfo 
 // 
 // Purpose:
 //   Scheduling information for the UltraSPARC.
@@ -737,14 +737,14 @@ static const InstrRUsageDelta SparcInstrUsageDeltas[] = {
 //---------------------------------------------------------------------------
 
 /*ctor*/
-SparcSchedInfo::SparcSchedInfo(const TargetMachine& tgt)
+SparcV9SchedInfo::SparcV9SchedInfo(const TargetMachine& tgt)
   : TargetSchedInfo(tgt,
                      (unsigned int) SPARC_NUM_SCHED_CLASSES,
-		     SparcRUsageDesc,
-		     SparcInstrUsageDeltas,
-		     SparcInstrIssueDeltas,
-		     sizeof(SparcInstrUsageDeltas)/sizeof(InstrRUsageDelta),
-		     sizeof(SparcInstrIssueDeltas)/sizeof(InstrIssueDelta))
+		     SparcV9RUsageDesc,
+		     SparcV9InstrUsageDeltas,
+		     SparcV9InstrIssueDeltas,
+		     sizeof(SparcV9InstrUsageDeltas)/sizeof(InstrRUsageDelta),
+		     sizeof(SparcV9InstrIssueDeltas)/sizeof(InstrIssueDelta))
 {
   maxNumIssueTotal = 4;
   longestIssueConflict = 0;		// computed from issuesGaps[]
@@ -764,7 +764,7 @@ SparcSchedInfo::SparcSchedInfo(const TargetMachine& tgt)
 }
 
 void
-SparcSchedInfo::initializeResources()
+SparcV9SchedInfo::initializeResources()
 {
   // Compute TargetSchedInfo::instrRUsages and TargetSchedInfo::issueGaps
   TargetSchedInfo::initializeResources();

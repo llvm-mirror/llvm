@@ -1,4 +1,4 @@
-//===-- SparcTargetMachine.h - Define TargetMachine for Sparc ---*- C++ -*-===//
+//===-- SparcV9TargetMachine.h - Define TargetMachine for SparcV9 ---*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,24 +16,24 @@
 
 #include "llvm/Target/TargetFrameInfo.h"
 #include "llvm/Target/TargetMachine.h"
-#include "SparcInstrInfo.h"
-#include "SparcInternals.h"
-#include "SparcRegInfo.h"
-#include "SparcFrameInfo.h"
-#include "SparcJITInfo.h"
+#include "SparcV9InstrInfo.h"
+#include "SparcV9Internals.h"
+#include "SparcV9RegInfo.h"
+#include "SparcV9FrameInfo.h"
+#include "SparcV9JITInfo.h"
 
 namespace llvm {
   class PassManager;
 
-class SparcTargetMachine : public TargetMachine {
-  SparcInstrInfo instrInfo;
-  SparcSchedInfo schedInfo;
-  SparcRegInfo   regInfo;
-  SparcFrameInfo frameInfo;
-  SparcCacheInfo cacheInfo;
-  SparcJITInfo   jitInfo;
+class SparcV9TargetMachine : public TargetMachine {
+  SparcV9InstrInfo instrInfo;
+  SparcV9SchedInfo schedInfo;
+  SparcV9RegInfo   regInfo;
+  SparcV9FrameInfo frameInfo;
+  SparcV9CacheInfo cacheInfo;
+  SparcV9JITInfo   jitInfo;
 public:
-  SparcTargetMachine(IntrinsicLowering *IL);
+  SparcV9TargetMachine(IntrinsicLowering *IL);
   
   virtual const TargetInstrInfo  &getInstrInfo() const { return instrInfo; }
   virtual const TargetSchedInfo  &getSchedInfo() const { return schedInfo; }

@@ -1,4 +1,4 @@
-//===-- SparcRegClassInfo.cpp - Register class def'ns for Sparc -----------===//
+//===-- SparcV9RegClassInfo.cpp - Register class def'ns for SparcV9 -----------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,14 +7,14 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-//  This file defines the register classes used by the Sparc target description.
+//  This file defines the register classes used by the SparcV9 target description.
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Type.h"
-#include "SparcRegClassInfo.h"
-#include "SparcInternals.h"
-#include "SparcRegInfo.h"
+#include "SparcV9RegClassInfo.h"
+#include "SparcV9Internals.h"
+#include "SparcV9RegInfo.h"
 #include "RegAlloc/RegAllocCommon.h"
 #include "RegAlloc/IGNode.h"
 
@@ -33,7 +33,7 @@ namespace llvm {
 //     If both above fail, spill.
 //  
 //-----------------------------------------------------------------------------
-void SparcIntRegClass::colorIGNode(IGNode * Node,
+void SparcV9IntRegClass::colorIGNode(IGNode * Node,
                                const std::vector<bool> &IsColorUsedArr) const
 {
   LiveRange *LR = Node->getParentLR();
@@ -69,16 +69,16 @@ void SparcIntRegClass::colorIGNode(IGNode * Node,
   //if this Node is between calls
   if (! LR->isCallInterference()) { 
     // start with volatiles (we can  allocate volatiles safely)
-    SearchStart = SparcIntRegClass::StartOfAllRegs;  
+    SearchStart = SparcV9IntRegClass::StartOfAllRegs;  
   } else {           
     // start with non volatiles (no non-volatiles)
-    SearchStart =  SparcIntRegClass::StartOfNonVolatileRegs;  
+    SearchStart =  SparcV9IntRegClass::StartOfNonVolatileRegs;  
   }
 
   unsigned c=0;                         // color
  
   // find first unused color
-  for (c=SearchStart; c < SparcIntRegClass::NumOfAvailRegs; c++) { 
+  for (c=SearchStart; c < SparcV9IntRegClass::NumOfAvailRegs; c++) { 
     if (!IsColorUsedArr[c]) {
       ColorFound = true;
       break;
@@ -95,10 +95,10 @@ void SparcIntRegClass::colorIGNode(IGNode * Node,
   //
   else if (LR->isCallInterference()) {
     // start from 0 - try to find even a volatile this time
-    SearchStart = SparcIntRegClass::StartOfAllRegs;  
+    SearchStart = SparcV9IntRegClass::StartOfAllRegs;  
 
     // find first unused volatile color
-    for(c=SearchStart; c < SparcIntRegClass::StartOfNonVolatileRegs; c++) { 
+    for(c=SearchStart; c < SparcV9IntRegClass::StartOfNonVolatileRegs; c++) { 
       if (! IsColorUsedArr[c]) {
         ColorFound = true;
         break;
@@ -140,7 +140,7 @@ void SparcIntRegClass::colorIGNode(IGNode * Node,
 // Note: The third name (%ccr) is essentially an assembly mnemonic and
 // depends solely on the opcode, so the name can be chosen in EmitAssembly.
 //-----------------------------------------------------------------------------
-void SparcIntCCRegClass::colorIGNode(IGNode *Node,
+void SparcV9IntCCRegClass::colorIGNode(IGNode *Node,
                                  const std::vector<bool> &IsColorUsedArr) const
 {
   if (Node->getNumOfNeighbors() > 0)
@@ -173,7 +173,7 @@ void SparcIntCCRegClass::colorIGNode(IGNode *Node,
 }
 
 
-void SparcFloatCCRegClass::colorIGNode(IGNode *Node,
+void SparcV9FloatCCRegClass::colorIGNode(IGNode *Node,
                                 const std::vector<bool> &IsColorUsedArr) const {
   for(unsigned c = 0; c != 4; ++c)
     if (!IsColorUsedArr[c]) { // find unused color
@@ -201,7 +201,7 @@ void SparcFloatCCRegClass::colorIGNode(IGNode *Node,
 //     If a color is still not fond, mark for spilling
 //
 //----------------------------------------------------------------------------
-void SparcFloatRegClass::colorIGNode(IGNode * Node,
+void SparcV9FloatRegClass::colorIGNode(IGNode * Node,
                                  const std::vector<bool> &IsColorUsedArr) const
 {
   LiveRange *LR = Node->getParentLR();
@@ -211,11 +211,11 @@ void SparcFloatRegClass::colorIGNode(IGNode * Node,
   // 
   // FIXME: This is old code that is no longer needed.  Temporarily converting
   // it into a big assertion just to check that the replacement logic
-  // (invoking SparcFloatRegClass::markColorsUsed() directly from
+  // (invoking SparcV9FloatRegClass::markColorsUsed() directly from
   // RegClass::colorIGNode) works correctly.
   // 
   // In fact, this entire function should be identical to
-  // SparcIntRegClass::colorIGNode(), and perhaps can be
+  // SparcV9IntRegClass::colorIGNode(), and perhaps can be
   // made into a general case in CodeGen/RegAlloc/RegClass.cpp.  
   // 
   unsigned NumNeighbors =  Node->getNumOfNeighbors();   // total # of neighbors
@@ -242,7 +242,7 @@ void SparcFloatRegClass::colorIGNode(IGNode * Node,
   // **NOTE: We don't check for call interferences in allocating suggested
   // color in this class since ALL registers are volatile. If this fact
   // changes, we should change the following part 
-  //- see SparcIntRegClass::colorIGNode()
+  //- see SparcV9IntRegClass::colorIGNode()
   // 
   if( LR->hasSuggestedColor() ) {
     if( ! IsColorUsedArr[ LR->getSuggestedColor() ] ) {
@@ -280,10 +280,10 @@ void SparcFloatRegClass::colorIGNode(IGNode * Node,
     //if this Node is between calls (i.e., no call interferences )
     if (! isCallInterf) {
       // start with volatiles (we can  allocate volatiles safely)
-      SearchStart = SparcFloatRegClass::StartOfAllRegs;  
+      SearchStart = SparcV9FloatRegClass::StartOfAllRegs;  
     } else {
       // start with non volatiles (no non-volatiles)
-      SearchStart =  SparcFloatRegClass::StartOfNonVolatileRegs;  
+      SearchStart =  SparcV9FloatRegClass::StartOfNonVolatileRegs;  
     }
     
     ColorFound = findFloatColor(LR, SearchStart, 32, IsColorUsedArr);
@@ -296,8 +296,8 @@ void SparcFloatRegClass::colorIGNode(IGNode * Node,
     // We are here because there is a call interference and no non-volatile
     // color could be found.
     // Now try to allocate even a volatile color
-    ColorFound = findFloatColor(LR, SparcFloatRegClass::StartOfAllRegs, 
-				SparcFloatRegClass::StartOfNonVolatileRegs,
+    ColorFound = findFloatColor(LR, SparcV9FloatRegClass::StartOfAllRegs, 
+				SparcV9FloatRegClass::StartOfNonVolatileRegs,
 				IsColorUsedArr);
   }
 
@@ -316,13 +316,13 @@ void SparcFloatRegClass::colorIGNode(IGNode * Node,
 // for double-precision registers.
 //-----------------------------------------------------------------------------
 
-void SparcFloatRegClass::markColorsUsed(unsigned RegInClass,
+void SparcV9FloatRegClass::markColorsUsed(unsigned RegInClass,
                                         int UserRegType,
                                         int RegTypeWanted,
                                     std::vector<bool> &IsColorUsedArr) const
 {
-  if (UserRegType == SparcRegInfo::FPDoubleRegType ||
-      RegTypeWanted == SparcRegInfo::FPDoubleRegType) {
+  if (UserRegType == SparcV9RegInfo::FPDoubleRegType ||
+      RegTypeWanted == SparcV9RegInfo::FPDoubleRegType) {
     // This register is used as or is needed as a double-precision reg.
     // We need to mark the [even,odd] pair corresponding to this reg.
     // Get the even numbered register corresponding to this reg.
@@ -346,10 +346,10 @@ void SparcFloatRegClass::markColorsUsed(unsigned RegInClass,
 // for double-precision registers
 // It returns -1 if no unused color is found.
 // 
-int SparcFloatRegClass::findUnusedColor(int RegTypeWanted,
+int SparcV9FloatRegClass::findUnusedColor(int RegTypeWanted,
                                 const std::vector<bool> &IsColorUsedArr) const
 {
-  if (RegTypeWanted == SparcRegInfo::FPDoubleRegType) {
+  if (RegTypeWanted == SparcV9RegInfo::FPDoubleRegType) {
     unsigned NC = 2 * this->getNumOfAvailRegs();
     assert(IsColorUsedArr.size() == NC && "Invalid colors-used array");
     for (unsigned c = 0; c < NC; c+=2)
@@ -369,7 +369,7 @@ int SparcFloatRegClass::findUnusedColor(int RegTypeWanted,
 // type of the Node (i.e., float/double)
 //-----------------------------------------------------------------------------
 
-int SparcFloatRegClass::findFloatColor(const LiveRange *LR, 
+int SparcV9FloatRegClass::findFloatColor(const LiveRange *LR, 
                                        unsigned Start,
                                        unsigned End, 
                                const std::vector<bool> &IsColorUsedArr) const
@@ -380,7 +380,7 @@ int SparcFloatRegClass::findFloatColor(const LiveRange *LR,
     for (unsigned c=Start; c < End ; c+= 2)
       if (!IsColorUsedArr[c]) {
         assert(!IsColorUsedArr[c+1] &&
-               "Incorrect marking of used regs for Sparc FP double!");
+               "Incorrect marking of used regs for SparcV9 FP double!");
 	return c;
       }
   } else {

@@ -1,4 +1,4 @@
-//===-- EmitBytecodeToAssembly.cpp - Emit bytecode to Sparc .s File --------==//
+//===-- EmitBytecodeToAssembly.cpp - Emit bytecode to SparcV9 .s File --------==//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,7 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcInternals.h"
+#include "SparcV9Internals.h"
 #include "llvm/Pass.h"
 #include "llvm/Bytecode/Writer.h"
 #include <iostream>
@@ -86,13 +86,13 @@ namespace {
 	<< "\n";
   }
 
-  // SparcBytecodeWriter - Write bytecode out to a stream that is sparc'ified
-  class SparcBytecodeWriter : public Pass {
+  // SparcV9BytecodeWriter - Write bytecode out to a stream that is sparc'ified
+  class SparcV9BytecodeWriter : public Pass {
     std::ostream &Out;
   public:
-    SparcBytecodeWriter(std::ostream &out) : Out(out) {}
+    SparcV9BytecodeWriter(std::ostream &out) : Out(out) {}
 
-    const char *getPassName() const { return "Emit Bytecode to Sparc Assembly";}
+    const char *getPassName() const { return "Emit Bytecode to SparcV9 Assembly";}
     
     virtual bool run(Module &M) {
       // Write an object containing the bytecode to the SPARC assembly stream
@@ -113,7 +113,7 @@ namespace {
 }  // end anonymous namespace
 
 Pass *createBytecodeAsmPrinterPass(std::ostream &Out) {
-  return new SparcBytecodeWriter(Out);
+  return new SparcV9BytecodeWriter(Out);
 }
 
 } // End llvm namespace

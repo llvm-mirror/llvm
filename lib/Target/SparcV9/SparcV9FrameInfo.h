@@ -1,4 +1,4 @@
-//===-- SparcFrameInfo.h - Define TargetFrameInfo for Sparc -----*- C++ -*-===//
+//===-- SparcV9FrameInfo.h - Define TargetFrameInfo for SparcV9 -----*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -22,10 +22,10 @@
 
 namespace llvm {
 
-class SparcFrameInfo: public TargetFrameInfo {
+class SparcV9FrameInfo: public TargetFrameInfo {
   const TargetMachine &target;
 public:
-  SparcFrameInfo(const TargetMachine &TM)
+  SparcV9FrameInfo(const TargetMachine &TM)
     : TargetFrameInfo(StackGrowsDown, StackFrameSizeAlignment, 0), target(TM) {}
   
 public:
@@ -114,10 +114,10 @@ public:
   
 private:
   /*----------------------------------------------------------------------
-    This diagram shows the stack frame layout used by llc on Sparc V9.
+    This diagram shows the stack frame layout used by llc on SparcV9 V9.
     Note that only the location of automatic variables, spill area,
     temporary storage, and dynamically allocated stack area are chosen
-    by us.  The rest conform to the Sparc V9 ABI.
+    by us.  The rest conform to the SparcV9 V9 ABI.
     All stack addresses are offset by OFFSET = 0x7ff (2047).
 
     Alignment assumptions and other invariants:
@@ -156,7 +156,7 @@ private:
 
    *----------------------------------------------------------------------*/
 
-  // All stack addresses must be offset by 0x7ff (2047) on Sparc V9.
+  // All stack addresses must be offset by 0x7ff (2047) on SparcV9 V9.
   static const int OFFSET                                  = (int) 0x7ff;
   static const int StackFrameSizeAlignment                 =  16;
   static const int MinStackFrameSize                       = 176;

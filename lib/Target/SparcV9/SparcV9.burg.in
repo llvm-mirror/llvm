@@ -46,7 +46,7 @@ Xdefine PANIC		printf
 %term Or=OrOPCODE
 %term Xor=XorOPCODE
                 /* Use the next 4 to distinguish bitwise operators from
-                 * logical operators.  This is no longer used for Sparc,
+                 * logical operators.  This is no longer used for SparcV9,
                  * but may be useful for other target machines.
                  * The last one is the bitwise Not(val) == XOR val, 11..1.
                  * Note that it is also a binary operator, not unary.

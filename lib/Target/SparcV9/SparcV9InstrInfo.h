@@ -1,4 +1,4 @@
-//===-- SparcInstrInfo.h - Define TargetInstrInfo for Sparc -----*- C++ -*-===//
+//===-- SparcV9InstrInfo.h - Define TargetInstrInfo for SparcV9 -----*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 // This class contains information about individual instructions.
-// Most information is stored in the SparcMachineInstrDesc array above.
+// Most information is stored in the SparcV9MachineInstrDesc array above.
 // Other information is computed on demand, and most such functions
 // default to member functions in base class TargetInstrInfo. 
 //
@@ -19,12 +19,12 @@
 
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
-#include "SparcInternals.h"
+#include "SparcV9Internals.h"
 
 namespace llvm {
 
-struct SparcInstrInfo : public TargetInstrInfo {
-  SparcInstrInfo();
+struct SparcV9InstrInfo : public TargetInstrInfo {
+  SparcV9InstrInfo();
 
   // All immediate constants are in position 1 except the
   // store instructions and SETxx.
@@ -53,7 +53,7 @@ struct SparcInstrInfo : public TargetInstrInfo {
   /// another instruction, e.g. X86: xchg ax, ax; SparcV9: sethi 0, g0
   ///
   MachineInstr* createNOPinstr() const {
-    return BuildMI(V9::SETHI, 2).addZImm(0).addReg(SparcIntRegClass::g0);
+    return BuildMI(V9::SETHI, 2).addZImm(0).addReg(SparcV9IntRegClass::g0);
   }
 
   /// isNOPinstr - not having a special NOP opcode, we need to know if a given
@@ -66,7 +66,7 @@ struct SparcInstrInfo : public TargetInstrInfo {
       const MachineOperand &op0 = MI.getOperand(0), &op1 = MI.getOperand(1);
       if (op0.isImmediate() && op0.getImmedValue() == 0 &&
           op1.getType() == MachineOperand::MO_MachineRegister &&
-          op1.getMachineRegNum() == SparcIntRegClass::g0)
+          op1.getMachineRegNum() == SparcV9IntRegClass::g0)
       {
         return true;
       }

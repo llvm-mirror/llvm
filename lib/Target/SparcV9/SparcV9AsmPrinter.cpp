@@ -1,4 +1,4 @@
-//===-- EmitAssembly.cpp - Emit Sparc Specific .s File ---------------------==//
+//===-- EmitAssembly.cpp - Emit SparcV9 Specific .s File ---------------------==//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -30,7 +30,7 @@
 #include "llvm/Support/Mangler.h"
 #include "Support/StringExtras.h"
 #include "Support/Statistic.h"
-#include "SparcInternals.h"
+#include "SparcV9Internals.h"
 #include <string>
 using namespace llvm;
 
@@ -251,7 +251,7 @@ namespace {
     }
 
     // getID Wrappers - Ensure consistent usage
-    // Symbol names in Sparc assembly language have these rules:
+    // Symbol names in SparcV9 assembly language have these rules:
     // (a) Must match { letter | _ | . | $ } { letter | _ | . | $ | digit }*
     // (b) A name beginning in "." is treated as a local name.
     std::string getID(const Function *F) {
@@ -504,19 +504,19 @@ std::string AsmPrinter::valToExprString(const Value* V,
 
 
 //===----------------------------------------------------------------------===//
-//   SparcAsmPrinter Code
+//   SparcV9AsmPrinter Code
 //===----------------------------------------------------------------------===//
 
 namespace {
 
-  struct SparcAsmPrinter : public FunctionPass, public AsmPrinter {
-    inline SparcAsmPrinter(std::ostream &os, const TargetMachine &t)
+  struct SparcV9AsmPrinter : public FunctionPass, public AsmPrinter {
+    inline SparcV9AsmPrinter(std::ostream &os, const TargetMachine &t)
       : AsmPrinter(os, t) {}
 
     const Function *currFunction;
 
     const char *getPassName() const {
-      return "Output Sparc Assembly for Functions";
+      return "Output SparcV9 Assembly for Functions";
     }
 
     virtual bool doInitialization(Module &M) {
@@ -565,7 +565,7 @@ namespace {
 } // End anonymous namespace
 
 inline bool
-SparcAsmPrinter::OpIsBranchTargetLabel(const MachineInstr *MI,
+SparcV9AsmPrinter::OpIsBranchTargetLabel(const MachineInstr *MI,
                                        unsigned int opNum) {
   switch (MI->getOpcode()) {
   case V9::JMPLCALLr:
@@ -579,7 +579,7 @@ SparcAsmPrinter::OpIsBranchTargetLabel(const MachineInstr *MI,
 }
 
 inline bool
-SparcAsmPrinter::OpIsMemoryAddressBase(const MachineInstr *MI,
+SparcV9AsmPrinter::OpIsMemoryAddressBase(const MachineInstr *MI,
                                        unsigned int opNum) {
   if (Target.getInstrInfo().isLoad(MI->getOpcode()))
     return (opNum == 0);
@@ -596,7 +596,7 @@ SparcAsmPrinter::OpIsMemoryAddressBase(const MachineInstr *MI,
   printOneOperand(mop2, opCode);
 
 unsigned int
-SparcAsmPrinter::printOperands(const MachineInstr *MI,
+SparcV9AsmPrinter::printOperands(const MachineInstr *MI,
                                unsigned int opNum)
 {
   const MachineOperand& mop = MI->getOperand(opNum);
@@ -616,7 +616,7 @@ SparcAsmPrinter::printOperands(const MachineInstr *MI,
 }
 
 void
-SparcAsmPrinter::printOneOperand(const MachineOperand &mop,
+SparcV9AsmPrinter::printOneOperand(const MachineOperand &mop,
                                  MachineOpCode opCode)
 {
   bool needBitsFlag = true;
@@ -659,7 +659,7 @@ SparcAsmPrinter::printOneOperand(const MachineOperand &mop,
     case MachineOperand::MO_PCRelativeDisp:
       {
         const Value *Val = mop.getVRegValue();
-        assert(Val && "\tNULL Value in SparcAsmPrinter");
+        assert(Val && "\tNULL Value in SparcV9AsmPrinter");
         
         if (const BasicBlock *BB = dyn_cast<BasicBlock>(Val))
           toAsm << getID(BB);
@@ -670,7 +670,7 @@ SparcAsmPrinter::printOneOperand(const MachineOperand &mop,
         else if (const Constant *CV = dyn_cast<Constant>(Val))
           toAsm << getID(CV);
         else
-          assert(0 && "Unrecognized value in SparcAsmPrinter");
+          assert(0 && "Unrecognized value in SparcV9AsmPrinter");
         break;
       }
     
@@ -691,7 +691,7 @@ SparcAsmPrinter::printOneOperand(const MachineOperand &mop,
     toAsm << ")";
 }
 
-void SparcAsmPrinter::emitMachineInst(const MachineInstr *MI) {
+void SparcV9AsmPrinter::emitMachineInst(const MachineInstr *MI) {
   unsigned Opcode = MI->getOpcode();
 
   if (Target.getInstrInfo().isDummyPhiInstr(Opcode))
@@ -715,7 +715,7 @@ void SparcAsmPrinter::emitMachineInst(const MachineInstr *MI) {
   ++EmittedInsts;
 }
 
-void SparcAsmPrinter::emitBasicBlock(const MachineBasicBlock &MBB) {
+void SparcV9AsmPrinter::emitBasicBlock(const MachineBasicBlock &MBB) {
   // Emit a label for the basic block
   toAsm << getID(MBB.getBasicBlock()) << ":\n";
 
@@ -726,7 +726,7 @@ void SparcAsmPrinter::emitBasicBlock(const MachineBasicBlock &MBB) {
   toAsm << "\n";  // Separate BB's with newlines
 }
 
-void SparcAsmPrinter::emitFunction(const Function &F) {
+void SparcV9AsmPrinter::emitFunction(const Function &F) {
   std::string methName = getID(&F);
   toAsm << "!****** Outputing Function: " << methName << " ******\n";
 
@@ -760,7 +760,7 @@ void SparcAsmPrinter::emitFunction(const Function &F) {
   toAsm << "\n\n";
 }
 
-void SparcAsmPrinter::printGlobalVariable(const GlobalVariable* GV) {
+void SparcV9AsmPrinter::printGlobalVariable(const GlobalVariable* GV) {
   if (GV->hasExternalLinkage())
     toAsm << "\t.global\t" << getID(GV) << "\n";
   
@@ -776,7 +776,7 @@ void SparcAsmPrinter::printGlobalVariable(const GlobalVariable* GV) {
   }
 }
 
-void SparcAsmPrinter::emitGlobals(const Module &M) {
+void SparcV9AsmPrinter::emitGlobals(const Module &M) {
   // Output global variables...
   for (Module::const_giterator GI = M.gbegin(), GE = M.gend(); GI != GE; ++GI)
     if (! GI->isExternal()) {
@@ -796,5 +796,5 @@ void SparcAsmPrinter::emitGlobals(const Module &M) {
 
 FunctionPass *llvm::createAsmPrinterPass(std::ostream &Out,
                                          const TargetMachine &TM) {
-  return new SparcAsmPrinter(Out, TM);
+  return new SparcV9AsmPrinter(Out, TM);
 }

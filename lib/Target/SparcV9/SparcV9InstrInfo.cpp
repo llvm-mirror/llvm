@@ -1,4 +1,4 @@
-//===-- SparcInstrInfo.cpp ------------------------------------------------===//
+//===-- SparcV9InstrInfo.cpp ------------------------------------------------===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -20,9 +20,9 @@
 #include "llvm/CodeGen/MachineFunctionInfo.h"
 #include "llvm/CodeGen/MachineCodeForInstruction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "SparcInternals.h"
-#include "SparcInstrSelectionSupport.h"
-#include "SparcInstrInfo.h"
+#include "SparcV9Internals.h"
+#include "SparcV9InstrSelectionSupport.h"
+#include "SparcV9InstrInfo.h"
 
 namespace llvm {
 
@@ -42,7 +42,7 @@ static const uint32_t MAXSIMM = (1 << 12) - 1; // set bits in simm13 field of OR
 //---------------------------------------------------------------------------
 
 uint64_t
-SparcInstrInfo::ConvertConstantToIntType(const TargetMachine &target,
+SparcV9InstrInfo::ConvertConstantToIntType(const TargetMachine &target,
                                               const Value *V,
                                               const Type *destType,
                                               bool  &isValidConstant) const
@@ -386,7 +386,7 @@ MaxConstantForInstr(unsigned llvmOpCode)
     default: break;
     };
 
-  return (modelOpCode < 0)? 0: SparcMachineInstrDesc[modelOpCode].maxImmedConst;
+  return (modelOpCode < 0)? 0: SparcV9MachineInstrDesc[modelOpCode].maxImmedConst;
 }
 
 static void
@@ -407,18 +407,18 @@ InitializeMaxConstantsTable()
 
 
 //---------------------------------------------------------------------------
-// class SparcInstrInfo 
+// class SparcV9InstrInfo 
 // 
 // Purpose:
 //   Information about individual instructions.
-//   Most information is stored in the SparcMachineInstrDesc array above.
+//   Most information is stored in the SparcV9MachineInstrDesc array above.
 //   Other information is computed on demand, and most such functions
 //   default to member functions in base class TargetInstrInfo. 
 //---------------------------------------------------------------------------
 
 /*ctor*/
-SparcInstrInfo::SparcInstrInfo()
-  : TargetInstrInfo(SparcMachineInstrDesc,
+SparcV9InstrInfo::SparcV9InstrInfo()
+  : TargetInstrInfo(SparcV9MachineInstrDesc,
                     /*descSize = */ V9::NUM_TOTAL_OPCODES,
                     /*numRealOpCodes = */ V9::NUM_REAL_OPCODES)
 {
@@ -426,7 +426,7 @@ SparcInstrInfo::SparcInstrInfo()
 }
 
 bool
-SparcInstrInfo::ConstantMayNotFitInImmedField(const Constant* CV,
+SparcV9InstrInfo::ConstantMayNotFitInImmedField(const Constant* CV,
                                                    const Instruction* I) const
 {
   if (I->getOpcode() >= MaxConstantsTable.size()) // user-defined op (or bug!)
@@ -456,7 +456,7 @@ SparcInstrInfo::ConstantMayNotFitInImmedField(const Constant* CV,
 // Any stack space required is allocated via MachineFunction.
 // 
 void
-SparcInstrInfo::CreateCodeToLoadConst(const TargetMachine& target,
+SparcV9InstrInfo::CreateCodeToLoadConst(const TargetMachine& target,
                                       Function* F,
                                       Value* val,
                                       Instruction* dest,
@@ -553,7 +553,7 @@ SparcInstrInfo::CreateCodeToLoadConst(const TargetMachine& target,
 // Any stack space required is allocated via MachineFunction.
 // 
 void
-SparcInstrInfo::CreateCodeToCopyIntToFloat(const TargetMachine& target,
+SparcV9InstrInfo::CreateCodeToCopyIntToFloat(const TargetMachine& target,
                                         Function* F,
                                         Value* val,
                                         Instruction* dest,
@@ -614,7 +614,7 @@ SparcInstrInfo::CreateCodeToCopyIntToFloat(const TargetMachine& target,
 // Temporary stack space required is allocated via MachineFunction.
 // 
 void
-SparcInstrInfo::CreateCodeToCopyFloatToInt(const TargetMachine& target,
+SparcV9InstrInfo::CreateCodeToCopyFloatToInt(const TargetMachine& target,
                                         Function* F,
                                         Value* val,
                                         Instruction* dest,
@@ -665,7 +665,7 @@ SparcInstrInfo::CreateCodeToCopyFloatToInt(const TargetMachine& target,
 // Any stack space required is allocated via MachineFunction.
 // 
 void
-SparcInstrInfo::CreateCopyInstructionsByType(const TargetMachine& target,
+SparcV9InstrInfo::CreateCopyInstructionsByType(const TargetMachine& target,
                                              Function *F,
                                              Value* src,
                                              Instruction* dest,
@@ -761,7 +761,7 @@ CreateBitExtensionInstructions(bool signExtend,
 // Any stack space required is allocated via MachineFunction.
 // 
 void
-SparcInstrInfo::CreateSignExtensionInstructions(
+SparcV9InstrInfo::CreateSignExtensionInstructions(
                                         const TargetMachine& target,
                                         Function* F,
                                         Value* srcVal,
@@ -783,7 +783,7 @@ SparcInstrInfo::CreateSignExtensionInstructions(
 // Any stack space required is allocated via MachineFunction.
 // 
 void
-SparcInstrInfo::CreateZeroExtensionInstructions(
+SparcV9InstrInfo::CreateZeroExtensionInstructions(
                                         const TargetMachine& target,
                                         Function* F,
                                         Value* srcVal,
