@@ -15,7 +15,7 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "ECGraphs"
-#include "EquivClassGraphs.h"
+#include "llvm/Analysis/DataStructure/EquivClassGraphs.h"
 #include "llvm/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Analysis/DataStructure/DSGraph.h"
