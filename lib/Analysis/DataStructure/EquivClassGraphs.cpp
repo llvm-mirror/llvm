@@ -214,16 +214,21 @@ void PA::EquivClassGraphs::buildIndirectFunctionSets(Module &M) {
         DSGraph &CBUGraph = CBU->getDSGraph(*F); 
         if (!GraphsMerged.insert(&CBUGraph).second)
           continue;
-        assert(FG == 0 && "Remerged a graph?");
         
         // Record the "folded" graph for the function.
-        FG = &MergedG;
+        for (DSGraph::ReturnNodesTy::iterator
+               I = CBUGraph.getReturnNodes().begin(),
+               E = CBUGraph.getReturnNodes().end();
+             I != E; ++I) {
+          assert(DSInfo[I->first] == 0 && "Graph already exists for Fn!");
+          DSInfo[I->first] = &MergedG;
+        }
         
         // Clone this member of the equivalence class into MergedG.
         DSGraph::NodeMapTy NodeMap;    
 
         MergedG.cloneInto(CBUGraph, MergedG.getScalarMap(),
-                           MergedG.getReturnNodes(), NodeMap, 0);
+                          MergedG.getReturnNodes(), NodeMap, 0);
 
         // Merge the return nodes of all functions together.
         MergedG.getReturnNodes()[LF].mergeWith(MergedG.getReturnNodes()[F]);
