@@ -1,4 +1,4 @@
-//===-- Support/ThreadSupport.h - Generic threading support -----*- C++ -*-===//
+//===-- Support/MutexGuard.h - Acquire/Release Mutex In Scope ---*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,36 +7,35 @@
 // 
 //===----------------------------------------------------------------------===//
 //
-// This file defines platform-agnostic interfaces that can be used to write
-// multi-threaded programs.  Autoconf is used to chose the correct
-// implementation of these interfaces, or default to a non-thread-capable system
-// if no matching system support is available.
+// This file defines a guard for a block of code that ensures a Mutex is locked
+// upon construction and released upon destruction.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_SUPPORT_THREADSUPPORT_H
-#define LLVM_SUPPORT_THREADSUPPORT_H
+#ifndef LLVM_SUPPORT_MUTEXGUARD_H
+#define LLVM_SUPPORT_MUTEXGUARD_H
 
-#undef HAVE_PTHREAD_MUTEX_LOCK
-
-#ifdef HAVE_PTHREAD_MUTEX_LOCK
-#include "llvm/Support/ThreadSupport-PThreads.h"
-#else
-#include "llvm/Support/ThreadSupport-NoSupport.h"
-#endif // If no system support is available
+#include <llvm/System/Mutex.h>
 
 namespace llvm {
-  /// MutexLocker - Instances of this class acquire a given Lock when
-  /// constructed and hold that lock until destruction.
-  ///
-  class MutexLocker {
-    Mutex &M;
-    MutexLocker(const MutexLocker &);    // DO NOT IMPLEMENT
-    void operator=(const MutexLocker &); // DO NOT IMPLEMENT
+  /// Instances of this class acquire a given Mutex Lock when constructed and 
+  /// hold that lock until destruction. The intention is to instantiate one of
+  /// these on the stack at the top of some scope to be assured that C++
+  /// destruction of the object will always release the Mutex and thus avoid
+  /// a host of nasty multi-threading problems in the face of exceptions, etc.
+  /// @brief Guard a section of code with a Mutex.
+  class MutexGuard {
+    sys::Mutex &M;
+    MutexGuard(const MutexGuard &);    // DO NOT IMPLEMENT
+    void operator=(const MutexGuard &); // DO NOT IMPLEMENT
   public:
-    MutexLocker(Mutex &m) : M(m) { M.acquire(); }
-    ~MutexLocker() { M.release(); }
+    MutexGuard(sys::Mutex &m) : M(m) { M.acquire(); }
+    ~MutexGuard() { M.release(); }
+    /// holds - Returns true if this locker instance holds the specified lock.
+    /// This is mostly used in assertions to validate that the correct mutex
+    /// is held.
+    bool holds(const sys::Mutex& lock) const { return &M == &lock; } 
   };
 }
 
-#endif // SUPPORT_THREADSUPPORT_H
+#endif // LLVM_SUPPORT_MUTEXGUARD_H
