@@ -1,0 +1,4 @@
+doxygen.cfg
+doxygen
+doxygen.out
+*.tar.gz

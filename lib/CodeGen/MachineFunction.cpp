@@ -1,0 +1,353 @@
+//===-- MachineFunction.cpp -----------------------------------------------===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file was developed by the LLVM research group and is distributed under
+// the University of Illinois Open Source License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// Collect native machine code information for a function.  This allows
+// target-specific information about the generated code to be stored with each
+// function.
+//
+//===----------------------------------------------------------------------===//
+
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/SSARegMap.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineConstantPool.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetFrameInfo.h"
+#include "llvm/Function.h"
+#include "llvm/Instructions.h"
+#include "llvm/Support/LeakDetector.h"
+#include "llvm/Support/GraphWriter.h"
+#include "llvm/Config/config.h"
+#include <fstream>
+#include <iostream>
+#include <sstream>
+
+using namespace llvm;
+
+static AnnotationID MF_AID(
+  AnnotationManager::getID("CodeGen::MachineCodeForFunction"));
+
+
+namespace {
+  struct Printer : public MachineFunctionPass {
+    std::ostream *OS;
+    const std::string Banner;
+
+    Printer (std::ostream *_OS, const std::string &_Banner) :
+      OS (_OS), Banner (_Banner) { }
+
+    const char *getPassName() const { return "MachineFunction Printer"; }
+
+    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+      AU.setPreservesAll();
+    }
+
+    bool runOnMachineFunction(MachineFunction &MF) {
+      (*OS) << Banner;
+      MF.print (*OS);
+      return false;
+    }
+  };
+}
+
+/// Returns a newly-created MachineFunction Printer pass. The default output
+/// stream is std::cerr; the default banner is empty.
+///
+FunctionPass *llvm::createMachineFunctionPrinterPass(std::ostream *OS,
+                                                     const std::string &Banner){
+  return new Printer(OS, Banner);
+}
+
+namespace {
+  struct Deleter : public MachineFunctionPass {
+    const char *getPassName() const { return "Machine Code Deleter"; }
+
+    bool runOnMachineFunction(MachineFunction &MF) {
+      // Delete the annotation from the function now.
+      MachineFunction::destruct(MF.getFunction());
+      return true;
+    }
+  };
+}
+
+/// MachineCodeDeletion Pass - This pass deletes all of the machine code for
+/// the current function, which should happen after the function has been
+/// emitted to a .s file or to memory.
+FunctionPass *llvm::createMachineCodeDeleter() {
+  return new Deleter();
+}
+
+
+
+//===---------------------------------------------------------------------===//
+// MachineFunction implementation
+//===---------------------------------------------------------------------===//
+
+MachineBasicBlock* ilist_traits<MachineBasicBlock>::createSentinel() {
+  MachineBasicBlock* dummy = new MachineBasicBlock();
+  LeakDetector::removeGarbageObject(dummy);
+  return dummy;
+}
+
+void ilist_traits<MachineBasicBlock>::transferNodesFromList(
+  iplist<MachineBasicBlock, ilist_traits<MachineBasicBlock> >& toList,
+  ilist_iterator<MachineBasicBlock> first,
+  ilist_iterator<MachineBasicBlock> last) {
+  if (Parent != toList.Parent)
+    for (; first != last; ++first)
+      first->Parent = toList.Parent;
+}
+
+MachineFunction::MachineFunction(const Function *F,
+                                 const TargetMachine &TM)
+  : Annotation(MF_AID), Fn(F), Target(TM), UsedPhysRegs(0) {
+  SSARegMapping = new SSARegMap();
+  MFInfo = 0;
+  FrameInfo = new MachineFrameInfo();
+  ConstantPool = new MachineConstantPool();
+  BasicBlocks.Parent = this;
+}
+
+MachineFunction::~MachineFunction() {
+  BasicBlocks.clear();
+  delete SSARegMapping;
+  delete MFInfo;
+  delete FrameInfo;
+  delete ConstantPool;
+  delete[] UsedPhysRegs;
+}
+
+void MachineFunction::dump() const { print(std::cerr); }
+
+void MachineFunction::print(std::ostream &OS) const {
+  OS << "# Machine code for " << Fn->getName () << "():\n";
+
+  // Print Frame Information
+  getFrameInfo()->print(*this, OS);
+
+  // Print Constant Pool
+  getConstantPool()->print(OS);
+  
+  const MRegisterInfo *MRI = getTarget().getRegisterInfo();
+  
+  if (livein_begin() != livein_end()) {
+    OS << "Live Ins:";
+    for (livein_iterator I = livein_begin(), E = livein_end(); I != E; ++I) {
+      if (MRI)
+        OS << " " << MRI->getName(I->first);
+      else
+        OS << " Reg #" << I->first;
+    }
+    OS << "\n";
+  }
+  if (liveout_begin() != liveout_end()) {
+    OS << "Live Outs:";
+    for (liveout_iterator I = liveout_begin(), E = liveout_end(); I != E; ++I)
+      if (MRI)
+        OS << " " << MRI->getName(*I);
+      else
+        OS << " Reg #" << *I;
+    OS << "\n";
+  }
+  
+  for (const_iterator BB = begin(); BB != end(); ++BB)
+    BB->print(OS);
+
+  OS << "\n# End machine code for " << Fn->getName () << "().\n\n";
+}
+
+/// CFGOnly flag - This is used to control whether or not the CFG graph printer
+/// prints out the contents of basic blocks or not.  This is acceptable because
+/// this code is only really used for debugging purposes.
+///
+static bool CFGOnly = false;
+
+namespace llvm {
+  template<>
+  struct DOTGraphTraits<const MachineFunction*> : public DefaultDOTGraphTraits {
+    static std::string getGraphName(const MachineFunction *F) {
+      return "CFG for '" + F->getFunction()->getName() + "' function";
+    }
+
+    static std::string getNodeLabel(const MachineBasicBlock *Node,
+                                    const MachineFunction *Graph) {
+      if (CFGOnly && Node->getBasicBlock() &&
+          !Node->getBasicBlock()->getName().empty())
+        return Node->getBasicBlock()->getName() + ":";
+
+      std::ostringstream Out;
+      if (CFGOnly) {
+        Out << Node->getNumber() << ':';
+        return Out.str();
+      }
+
+      Node->print(Out);
+
+      std::string OutStr = Out.str();
+      if (OutStr[0] == '\n') OutStr.erase(OutStr.begin());
+
+      // Process string output to make it nicer...
+      for (unsigned i = 0; i != OutStr.length(); ++i)
+        if (OutStr[i] == '\n') {                            // Left justify
+          OutStr[i] = '\\';
+          OutStr.insert(OutStr.begin()+i+1, 'l');
+        }
+      return OutStr;
+    }
+  };
+}
+
+void MachineFunction::viewCFG() const
+{
+#ifndef NDEBUG
+  std::string Filename = "/tmp/cfg." + getFunction()->getName() + ".dot";
+  std::cerr << "Writing '" << Filename << "'... ";
+  std::ofstream F(Filename.c_str());
+
+  if (!F) {
+    std::cerr << "  error opening file for writing!\n";
+    return;
+  }
+
+  WriteGraph(F, this);
+  F.close();
+  std::cerr << "\n";
+
+#ifdef HAVE_GRAPHVIZ
+  std::cerr << "Running 'Graphviz' program... " << std::flush;
+  if (system((LLVM_PATH_GRAPHVIZ " " + Filename).c_str())) {
+    std::cerr << "Error viewing graph: 'Graphviz' not in path?\n";
+  } else {
+    system(("rm " + Filename).c_str());
+    return;
+  }
+#endif  // HAVE_GRAPHVIZ
+
+#ifdef HAVE_GV
+  std::cerr << "Running 'dot' program... " << std::flush;
+  if (system(("dot -Tps -Nfontname=Courier -Gsize=7.5,10 " + Filename
+              + " > /tmp/cfg.tempgraph.ps").c_str())) {
+    std::cerr << "Error running dot: 'dot' not in path?\n";
+  } else {
+    std::cerr << "\n";
+    system("gv /tmp/cfg.tempgraph.ps");
+  }
+  system(("rm " + Filename + " /tmp/cfg.tempgraph.ps").c_str());
+  return;
+#endif  // HAVE_GV
+#endif  // NDEBUG
+  std::cerr << "MachineFunction::viewCFG is only available in debug builds on "
+            << "systems with Graphviz or gv!\n";
+
+#ifndef NDEBUG
+  system(("rm " + Filename).c_str());
+#endif
+}
+
+void MachineFunction::viewCFGOnly() const
+{
+  CFGOnly = true;
+  viewCFG();
+  CFGOnly = false;
+}
+
+// The next two methods are used to construct and to retrieve
+// the MachineCodeForFunction object for the given function.
+// construct() -- Allocates and initializes for a given function and target
+// get()       -- Returns a handle to the object.
+//                This should not be called before "construct()"
+//                for a given Function.
+//
+MachineFunction&
+MachineFunction::construct(const Function *Fn, const TargetMachine &Tar)
+{
+  assert(Fn->getAnnotation(MF_AID) == 0 &&
+         "Object already exists for this function!");
+  MachineFunction* mcInfo = new MachineFunction(Fn, Tar);
+  Fn->addAnnotation(mcInfo);
+  return *mcInfo;
+}
+
+void MachineFunction::destruct(const Function *Fn) {
+  bool Deleted = Fn->deleteAnnotation(MF_AID);
+  assert(Deleted && "Machine code did not exist for function!");
+}
+
+MachineFunction& MachineFunction::get(const Function *F)
+{
+  MachineFunction *mc = (MachineFunction*)F->getAnnotation(MF_AID);
+  assert(mc && "Call construct() method first to allocate the object");
+  return *mc;
+}
+
+void MachineFunction::clearSSARegMap() {
+  delete SSARegMapping;
+  SSARegMapping = 0;
+}
+
+//===----------------------------------------------------------------------===//
+//  MachineFrameInfo implementation
+//===----------------------------------------------------------------------===//
+
+/// CreateStackObject - Create a stack object for a value of the specified type.
+///
+int MachineFrameInfo::CreateStackObject(const Type *Ty, const TargetData &TD) {
+  return CreateStackObject((unsigned)TD.getTypeSize(Ty),
+                           TD.getTypeAlignment(Ty));
+}
+
+
+void MachineFrameInfo::print(const MachineFunction &MF, std::ostream &OS) const{
+  int ValOffset = MF.getTarget().getFrameInfo()->getOffsetOfLocalArea();
+
+  for (unsigned i = 0, e = Objects.size(); i != e; ++i) {
+    const StackObject &SO = Objects[i];
+    OS << "  <fi #" << (int)(i-NumFixedObjects) << ">: ";
+    if (SO.Size == 0)
+      OS << "variable sized";
+    else
+      OS << "size is " << SO.Size << " byte" << (SO.Size != 1 ? "s," : ",");
+    OS << " alignment is " << SO.Alignment << " byte"
+       << (SO.Alignment != 1 ? "s," : ",");
+
+    if (i < NumFixedObjects)
+      OS << " fixed";
+    if (i < NumFixedObjects || SO.SPOffset != -1) {
+      int Off = SO.SPOffset - ValOffset;
+      OS << " at location [SP";
+      if (Off > 0)
+        OS << "+" << Off;
+      else if (Off < 0)
+        OS << Off;
+      OS << "]";
+    }
+    OS << "\n";
+  }
+
+  if (HasVarSizedObjects)
+    OS << "  Stack frame contains variable sized objects\n";
+}
+
+void MachineFrameInfo::dump(const MachineFunction &MF) const {
+  print(MF, std::cerr);
+}
+
+
+//===----------------------------------------------------------------------===//
+//  MachineConstantPool implementation
+//===----------------------------------------------------------------------===//
+
+void MachineConstantPool::print(std::ostream &OS) const {
+  for (unsigned i = 0, e = Constants.size(); i != e; ++i)
+    OS << "  <cp #" << i << "> is" << *(Value*)Constants[i] << "\n";
+}
+
+void MachineConstantPool::dump() const { print(std::cerr); }

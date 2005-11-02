@@ -1,0 +1,127 @@
+proc llvm-runtest { programs objdir srcdir subdir target_triplet llvmgcc llvmgxx prcontext} {
+
+    set timeout 60
+
+    set path [file join $objdir $subdir]
+    
+    #Make Output Directory if it does not exist already
+    if { [file exists path] } {
+	cd $path
+    } else {
+	file mkdir $path
+	cd $path
+    }
+    
+    file mkdir Output
+ 
+    foreach test $programs {
+	
+	#Should figure out best way to set the timeout
+	#set timeout 40
+	
+	set filename [file tail $test]
+	set output [file join Output $filename.out]
+	set script $output.script
+	set outcome PASS
+	set tmpFile testscript.
+	append tmpFile $filename .tmp
+
+	#set hasRunline bool to check if testcase has a runline
+	set hasRunline 0
+
+	#check if script files exists, and delete if it does
+	if { [file exists $script] } {
+	    file delete $script
+	}
+	
+	#create script file and write run line out to it
+	set scriptFileId [open $script w 0700]
+	set testFileId [ open $test r]
+	foreach line [split [read $testFileId] \n] {
+	    
+	    #see if this is our run line
+	    if {[regexp {RUN:(.+)} $line match runline]} {
+		set runline
+		set hasRunline 1
+
+		#replace %s with filename
+		regsub -all {%s} $runline $test new_runline
+
+		#replace %t with temp filenames
+		regsub -all {%t} $new_runline [file join Output $tmpFile] new_runline
+
+		#replace %prcontext with prcontext.tcl (Must replace before %p)
+		regsub -all {%prcontext} $new_runline $prcontext new_runline
+
+		#replace %p with path to source, 
+		regsub -all {%p} $new_runline [file join $srcdir $subdir] new_runline
+
+		#replace %llvmgcc with actual path to llvmgcc
+		regsub -all {%llvmgcc} $new_runline $llvmgcc new_runline
+
+		#replace %llvmgxx with actual path to llvmg++
+		regsub -all {%llvmgxx} $new_runline $llvmgxx new_runline
+		
+		puts $scriptFileId $new_runline
+	    } elseif {[regexp {XFAIL:[ *](.+)} $line match targets]} {
+		set targets
+		
+
+		#split up target if more then 1 specified
+		foreach target [split $targets ,] {
+		    if { [regexp {\*} $target match] } {
+			set outcome XFAIL
+		    } elseif { [regexp $target $target_triplet match] } {
+			set outcome XFAIL
+		    }
+		    
+		}
+	    }
+	    
+	}
+	
+	close $testFileId
+	close $scriptFileId
+	
+	
+	if { $hasRunline == 0 } {
+	    fail "$test: \nDoes not have a RUN line\n"
+	} else {
+
+	    #run script and catch errors
+	    set retval [ catch {exec /bin/sh $script >& $output} ]
+	    
+	    if { $retval == 1 } {
+		#Get output
+		set outputFile [open $output {RDONLY}]
+		set result [read $outputFile]
+		close $outputFile
+		file delete $outputFile
+		
+		switch $outcome {
+		    PASS {
+			file delete $output
+			fail "$test: \n$result"
+		    }
+		    XFAIL {
+			xfail "$test: \n$result"
+		    }
+		    default {
+			file delete $output
+			fail "$test: $result"
+		    }
+		}
+	    } else {
+		switch $outcome {
+		    XFAIL {
+			xpass "$test"
+		    }
+		    default {
+			pass "$test"}
+		}
+	    }
+	}
+    }
+}
+
+

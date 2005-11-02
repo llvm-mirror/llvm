@@ -1,0 +1,329 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+                      "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <title>Extending LLVM: Adding instructions, intrinsics, types, etc.</title>
+  <link rel="stylesheet" href="llvm.css" type="text/css">
+</head>
+
+<body>
+
+<div class="doc_title">
+  Extending LLVM: Adding instructions, intrinsics, types, etc.
+</div>
+
+<ol>
+  <li><a href="#introduction">Introduction and Warning</a></li>
+  <li><a href="#intrinsic">Adding a new intrinsic function</a></li>
+  <li><a href="#instruction">Adding a new instruction</a></li>
+  <li><a href="#type">Adding a new type</a>
+  <ol>
+    <li><a href="#fund_type">Adding a new fundamental type</a></li>
+    <li><a href="#derived_type">Adding a new derived type</a></li>
+  </ol></li>
+</ol>
+
+<div class="doc_author">    
+  <p>Written by <a href="http://misha.brukman.net">Misha Brukman</a>,
+  Brad Jones, and <a href="http://nondot.org/sabre">Chris Lattner</a></p>
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="introduction">Introduction and Warning</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p>During the course of using LLVM, you may wish to customize it for your
+research project or for experimentation. At this point, you may realize that
+you need to add something to LLVM, whether it be a new fundamental type, a new
+intrinsic function, or a whole new instruction.</p>
+
+<p>When you come to this realization, stop and think. Do you really need to
+extend LLVM? Is it a new fundamental capability that LLVM does not support at
+its current incarnation or can it be synthesized from already pre-existing LLVM
+elements? If you are not sure, ask on the <a
+href="http://mail.cs.uiuc.edu/mailman/listinfo/llvmdev">LLVM-dev</a> list. The
+reason is that extending LLVM will get involved as you need to update all the
+different passes that you intend to use with your extension, and there are
+<em>many</em> LLVM analyses and transformations, so it may be quite a bit of
+work.</p>
+
+<p>Adding an <a href="#intrinsic">intrinsic function</a> is easier than adding
+an instruction, and is transparent to optimization passes which treat it as an
+unanalyzable function.  If your added functionality can be expressed as a
+function call, an intrinsic function is the method of choice for LLVM
+extension.</p>
+
+<p>Before you invest a significant amount of effort into a non-trivial
+extension, <span class="doc_warning">ask on the list</span> if what you are
+looking to do can be done with already-existing infrastructure, or if maybe
+someone else is already working on it. You will save yourself a lot of time and
+effort by doing so.</p>
+
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="intrinsic">Adding a new intrinsic function</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p>Adding a new intrinsic function to LLVM is much easier than adding a new
+instruction.  Almost all extensions to LLVM should start as an intrinsic
+function and then be turned into an instruction if warranted.</p>
+
+<ol>
+<li><tt>llvm/docs/LangRef.html</tt>:
+    Document the intrinsic.  Decide whether it is code generator specific and
+    what the restrictions are.  Talk to other people about it so that you are
+    sure it's a good idea.</li>
+
+<li><tt>llvm/include/llvm/Intrinsics.h</tt>:
+    add an enum in the <tt>llvm::Intrinsic</tt> namespace</li>
+
+<li><tt>llvm/lib/VMCore/Verifier.cpp</tt>:
+    Add code to check the invariants of the intrinsic are respected.</li>
+
+<li><tt>llvm/lib/VMCore/Function.cpp (<tt>Function::getIntrinsicID()</tt>)</tt>:
+    Identify the new intrinsic function, returning the enum for the intrinsic
+    that you added.</li>
+
+<li><tt>llvm/lib/Analysis/BasicAliasAnalysis.cpp</tt>: If the new intrinsic does
+    not access memory or does not write to memory, add it to the relevant list
+    of functions.</li>
+
+<li><tt>llvm/lib/Transforms/Utils/Local.cpp</tt>: If it is possible to constant
+fold your intrinsic, add support to it in the <tt>canConstantFoldCallTo</tt> and
+<tt>ConstantFoldCall</tt> functions.</li>
+
+<li>Test your intrinsic</li>
+
+<li><tt>llvm/test/Regression/*</tt>: add your test cases to the test suite</li>
+</ol>
+
+<p>Once the intrinsic has been added to the system, you must add code generator
+support for it.  Generally you must do the following steps:</p>
+
+<dl>
+<dt>Add support to the C backend in <tt>lib/Target/CBackend/</tt></dt>
+
+<dd>Depending on the intrinsic, there are a few ways to implement this.  First,
+if it makes sense to lower the intrinsic to an expanded sequence of C code in
+all cases, just emit the expansion in <tt>visitCallInst</tt>.  Second, if the
+intrinsic has some way to express it with GCC (or any other compiler)
+extensions, it can be conditionally supported based on the compiler compiling
+the CBE output (see llvm.prefetch for an example).  Third, if the intrinsic
+really has no way to be lowered, just have the code generator emit code that
+prints an error message and calls abort if executed.
+</dd>
+
+<dt>Add a enum value for the SelectionDAG node in
+<tt>include/llvm/CodeGen/SelectionDAGNodes.h</tt></dt>
+
+<dd>Also, add code to <tt>lib/CodeGen/SelectionDAG/SelectionDAG.cpp</tt> (and
+<tt>SelectionDAGPrinter.cpp</tt>) to print the node.</dd>
+
+<dt>Add code to <tt>SelectionDAG/SelectionDAGISel.cpp</tt> to recognize the
+intrinsic.</dt>
+
+<dd>Presumably the intrinsic should be recognized and turned into the node you
+added above.</dd>
+
+<dt>Add code to <tt>SelectionDAG/LegalizeDAG.cpp</tt> to <a
+href="CodeGenerator.html#selectiondag_legalize">legalize, promote, and
+expand</a> the node as necessary.</dt>
+
+<dd>If the intrinsic can be expanded to primitive operations, legalize can break
+the node down into other elementary operations that are be supported.</dd>
+
+<dt>Add target-specific support to specific code generators.</dt>
+
+<dd>Extend the code generators you are interested in to recognize and support
+the node, emitting the code you want.</dd>
+</dl>
+
+<p>
+Unfortunately, the process of extending the code generator to support a new node
+is not extremely well documented.  As such, it is often helpful to look at other
+intrinsics (e.g. <tt>llvm.ctpop</tt>) to see how they are recognized and turned
+into a node by <tt>SelectionDAGISel.cpp</tt>, legalized by
+<tt>LegalizeDAG.cpp</tt>, then finally emitted by the various code generators.
+</p>
+
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="instruction">Adding a new instruction</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p><span class="doc_warning">WARNING: adding instructions changes the bytecode
+format, and it will take some effort to maintain compatibility with
+the previous version.</span> Only add an instruction if it is absolutely
+necessary.</p>
+
+<ol>
+
+<li><tt>llvm/include/llvm/Instruction.def</tt>:
+    add a number for your instruction and an enum name</li>
+
+<li><tt>llvm/include/llvm/Instructions.h</tt>:
+    add a definition for the class that will represent your instruction</li>
+
+<li><tt>llvm/include/llvm/Support/InstVisitor.h</tt>:
+    add a prototype for a visitor to your new instruction type</li>
+
+<li><tt>llvm/lib/AsmParser/Lexer.l</tt>:
+    add a new token to parse your instruction from assembly text file</li>
+
+<li><tt>llvm/lib/AsmParser/llvmAsmParser.y</tt>:
+    add the grammar on how your instruction can be read and what it will
+    construct as a result</li>
+
+<li><tt>llvm/lib/Bytecode/Reader/Reader.cpp</tt>:
+    add a case for your instruction and how it will be parsed from bytecode</li>
+
+<li><tt>llvm/lib/VMCore/Instruction.cpp</tt>:
+    add a case for how your instruction will be printed out to assembly</li>
+
+<li><tt>llvm/lib/VMCore/Instructions.cpp</tt>:
+    implement the class you defined in
+    <tt>llvm/include/llvm/Instructions.h</tt></li>
+
+<li>Test your instruction</li>
+
+<li><tt>llvm/lib/Target/*</tt>: 
+    Add support for your instruction to code generators, or add a lowering
+    pass.</li>
+
+<li><tt>llvm/test/Regression/*</tt>: add your test cases to the test suite.</li>
+
+</ol>
+
+<p>Also, you need to implement (or modify) any analyses or passes that you want
+to understand this new instruction.</p>
+
+</div>
+
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="type">Adding a new type</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p><span class="doc_warning">WARNING: adding new types changes the bytecode
+format, and will break compatibility with currently-existing LLVM
+installations.</span> Only add new types if it is absolutely necessary.</p>
+
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="fund_type">Adding a fundamental type</a>
+</div>
+
+<div class="doc_text">
+
+<ol>
+
+<li><tt>llvm/include/llvm/Type.h</tt>:
+    add enum for the new type; add static <tt>Type*</tt> for this type</li>
+
+<li><tt>llvm/lib/VMCore/Type.cpp</tt>:
+    add mapping from <tt>TypeID</tt> =&gt; <tt>Type*</tt>;
+    initialize the static <tt>Type*</tt></li>
+
+<li><tt>llvm/lib/AsmReader/Lexer.l</tt>:
+    add ability to parse in the type from text assembly</li>
+
+<li><tt>llvm/lib/AsmReader/llvmAsmParser.y</tt>:
+    add a token for that type</li>
+
+</ol>
+
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="derived_type">Adding a derived type</a>
+</div>
+
+<div class="doc_text">
+
+<ol>
+<li><tt>llvm/include/llvm/Type.h</tt>:
+    add enum for the new type; add a forward declaration of the type
+    also</li>
+
+<li><tt>llvm/include/llvm/DerivedType.h</tt>:
+    add new class to represent new class in the hierarchy; add forward 
+    declaration to the TypeMap value type</li>
+
+<li><tt>llvm/lib/VMCore/Type.cpp</tt>:
+    add support for derived type to: 
+<div class="doc_code">
+<pre>
+std::string getTypeDescription(const Type &amp;Ty,
+  std::vector&lt;const Type*&gt; &amp;TypeStack)
+bool TypesEqual(const Type *Ty, const Type *Ty2,
+  std::map&lt;const Type*, const Type*&gt; &amp; EqTypes)
+</pre>
+</div>
+    add necessary member functions for type, and factory methods</li>
+
+<li><tt>llvm/lib/AsmReader/Lexer.l</tt>:
+    add ability to parse in the type from text assembly</li>
+
+<li><tt>llvm/lib/ByteCode/Writer/Writer.cpp</tt>:
+    modify <tt>void BytecodeWriter::outputType(const Type *T)</tt> to serialize
+    your type</li>
+
+<li><tt>llvm/lib/ByteCode/Reader/Reader.cpp</tt>:
+    modify <tt>const Type *BytecodeReader::ParseType()</tt> to read your data
+    type</li> 
+
+<li><tt>llvm/lib/VMCore/AsmWriter.cpp</tt>:
+    modify
+<div class="doc_code">
+<pre>
+void calcTypeName(const Type *Ty,
+                  std::vector&lt;const Type*&gt; &amp;TypeStack,
+                  std::map&lt;const Type*,std::string&gt; &amp;TypeNames,
+                  std::string &amp; Result)
+</pre>
+</div>
+    to output the new derived type
+</li>  
+ 
+
+</ol>
+
+</div>
+
+<!-- *********************************************************************** -->
+
+<hr>
+<address>
+  <a href="http://jigsaw.w3.org/css-validator/check/referer"><img
+  src="http://jigsaw.w3.org/css-validator/images/vcss" alt="Valid CSS!"></a>
+  <a href="http://validator.w3.org/check/referer"><img
+  src="http://www.w3.org/Icons/valid-html401" alt="Valid HTML 4.01!" /></a>
+
+  <a href="http://llvm.cs.uiuc.edu">The LLVM Compiler Infrastructure</a>
+  <br>
+  Last modified: $Date$
+</address>
+
+</body>
+</html>

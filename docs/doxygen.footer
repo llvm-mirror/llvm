@@ -1,0 +1,10 @@
+<hr>
+
+<p class="footer">
+Generated on $datetime for <a href="http://llvm.cs.uiuc.edu">LLVM</a> by
+<a href="http://www.doxygen.org">doxygen $doxygenversion</a><br/>
+Copyright &copy; 2003,2004 University of Illinois at Urbana-Champaign. All
+Rights Reserved.</p>
+
+</body>
+</html>

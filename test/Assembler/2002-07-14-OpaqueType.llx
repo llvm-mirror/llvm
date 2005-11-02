@@ -1,0 +1,12 @@
+; Test that opaque types are preserved correctly
+; RUN: llvm-as < %s | llvm-dis | llvm-as | llvm-dis
+;
+
+%Ty = type opaque
+
+implementation
+
+%Ty* %func() {
+	ret %Ty* null
+}
+ 

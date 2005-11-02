@@ -1,0 +1,356 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+                      "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <title>How to submit an LLVM bug report</title>
+  <link rel="stylesheet" href="llvm.css" type="text/css">
+</head>
+<body>
+
+<div class="doc_title">
+  How to submit an LLVM bug report
+</div>
+
+<table class="layout" style="width: 90%" >
+<tr class="layout">
+  <td class="left">
+<ol>
+  <li><a href="#introduction">Introduction - Got bugs?</a></li>
+  <li><a href="#crashers">Crashing Bugs</a>
+    <ul>
+    <li><a href="#front-end">Front-end bugs</a>
+    <li><a href="#gccas">GCCAS bugs</a>
+    <li><a href="#gccld">GCCLD bugs</a>
+    <li><a href="#passes">Bugs in LLVM passes</a>
+    </ul></li>
+  <li><a href="#miscompilations">Miscompilations</a></li>
+  <li><a href="#codegen">Incorrect code generation (JIT and LLC)</a></li>
+</ol>
+<div class="doc_author">
+  <p>Written by <a href="mailto:sabre@nondot.org">Chris Lattner</a> and
+                <a href="http://misha.brukman.net">Misha Brukman</a></p>
+</div>
+</td>
+<td class="right">
+  <img src="img/Debugging.gif" alt="Debugging" width="444" height="314">
+</td>
+</tr>
+</table>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="introduction">Introduction - Got bugs?</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p>If you're working with LLVM and run into a bug, we definitely want to know
+about it.  This document describes what you can do to increase the odds of
+getting it fixed quickly.</p>
+
+<p>Basically you have to do two things at a minimum.  First, decide whether the
+bug <a href="#crashers">crashes the compiler</a> (or an LLVM pass), or if the
+compiler is <a href="#miscompilations">miscompiling</a> the program.  Based on
+what type of bug it is, follow the instructions in the linked section to narrow
+down the bug so that the person who fixes it will be able to find the problem
+more easily.</p>
+
+<p>Once you have a reduced test-case, go to <a
+href="http://llvm.cs.uiuc.edu/bugs/enter_bug.cgi">the LLVM Bug Tracking
+System</a>, select the category in which the bug falls, and fill out the form
+with the necessary details.  The bug description should contain the following
+information:</p>
+
+<ul>
+  <li>All information necessary to reproduce the problem.</li>
+  <li>The reduced test-case that triggers the bug.</li>
+  <li>The location where you obtained LLVM (if not from our CVS
+  repository).</li>
+</ul>
+
+<p>Thanks for helping us make LLVM better!</p>
+
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="crashers">Crashing Bugs</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p>More often than not, bugs in the compiler cause it to crash - often due to an
+assertion failure of some sort.  If you are running <tt><b>opt</b></tt> or
+<tt><b>analyze</b></tt> directly, and something crashes, jump to the section on
+<a href="#passes">bugs in LLVM passes</a>.  Otherwise, the most important
+piece of the puzzle is to figure out if it is the GCC-based front-end that is
+buggy or if it's one of the LLVM tools that has problems.</p>
+
+<p>To figure out which program is crashing (the front-end,
+<tt><b>gccas</b></tt>, or <tt><b>gccld</b></tt>), run the
+<tt><b>llvm-gcc</b></tt> command line as you were when the crash occurred, but
+add a <tt>-v</tt> option to the command line.  The compiler will print out a
+bunch of stuff, and should end with telling you that one of
+<tt><b>cc1</b>/<b>cc1plus</b></tt>, <tt><b>gccas</b></tt>, or
+<tt><b>gccld</b></tt> crashed.</p>
+
+<ul>
+
+  <li>If <tt><b>cc1</b></tt> or <tt><b>cc1plus</b></tt> crashed, you found a
+  problem with the front-end.
+  Jump ahead to the section on <a href="#front-end">front-end bugs</a>.</li>
+
+  <li>If <tt><b>gccas</b></tt> crashed, you found a bug in <a href="#gccas">one
+  of the passes in <tt><b>gccas</b></tt></a>.</li>
+
+  <li>If <tt><b>gccld</b></tt> crashed, you found a bug in <a href="#gccld">one
+  of the passes in <tt><b>gccld</b></tt></a>.</li>
+
+  <li>Otherwise, something really weird happened. Email the list with what you
+  have at this point.</li>
+
+</ul>
+
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="front-end">Front-end bugs</a>
+</div>
+
+<div class="doc_text">
+
+<p>If the problem is in the front-end, you should re-run the same
+<tt>llvm-gcc</tt> command that resulted in the crash, but add the
+<tt>-save-temps</tt> option.  The compiler will crash again, but it will leave
+behind a <tt><i>foo</i>.i</tt> file (containing preprocessed C source code) and
+possibly <tt><i>foo</i>.s</tt> (containing LLVM assembly code), for each
+compiled <tt><i>foo</i>.c</tt> file. Send us the <tt><i>foo</i>.i</tt> file,
+along with a brief description of the error it caused.</p>
+
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="gccas">GCCAS bugs</a>
+</div>
+
+<div class="doc_text">
+
+<p>If you find that a bug crashes in the <tt><b>gccas</b></tt> stage of
+compilation, compile your test-case to a <tt>.s</tt> file with the
+<tt>-save-temps</tt> option to <tt><b>llvm-gcc</b></tt>. Then run:</p>
+
+<div class="doc_code">
+<p><tt><b>gccas</b> -debug-pass=Arguments &lt; /dev/null -o - &gt; /dev/null</tt></p>
+</div>
+
+<p>... which will print a list of arguments, indicating the list of passes that
+<tt><b>gccas</b></tt> runs.  Once you have the input file and the list of
+passes, go to the section on <a href="#passes">debugging bugs in LLVM
+passes</a>.</p>
+
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="gccld">GCCLD bugs</a>
+</div>
+
+<div class="doc_text">
+
+<p>If you find that a bug crashes in the <tt><b>gccld</b></tt> stage of
+compilation, gather all of the <tt>.o</tt> bytecode files and libraries that are
+being linked together (the "<tt><b>llvm-gcc</b> -v</tt>" output should include
+the full list of objects linked).  Then run:</p>
+
+<div class="doc_code">
+<p><tt><b>llvm-as</b> &lt; /dev/null &gt; null.bc<br>
+<b>gccld</b> -debug-pass=Arguments null.bc</tt>
+</p>
+</div>
+
+<p>... which will print a list of arguments, indicating the list of passes that
+<tt><b>gccld</b></tt> runs.  Once you have the input files and the list of
+passes, go to the section on <a href="#passes">debugging bugs in LLVM
+passes</a>.</p>
+
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="passes">Bugs in LLVM passes</a>
+</div>
+
+<div class="doc_text">
+
+<p>At this point, you should have some number of LLVM assembly files or bytecode
+files and a list of passes which crash when run on the specified input.  In
+order to reduce the list of passes (which is probably large) and the input to
+something tractable, use the <tt><b>bugpoint</b></tt> tool as follows:</p>
+
+<div class="doc_code">
+<p><tt><b>bugpoint</b> &lt;input files&gt; &lt;list of passes&gt;</tt></p>
+</div>
+
+<p><tt><b>bugpoint</b></tt> will print a bunch of output as it reduces the
+test-case, but it should eventually print something like this:</p>
+
+<div class="doc_code">
+<p><tt>
+...<br>
+Emitted bytecode to 'bugpoint-reduced-simplified.bc'<br>
+<br>
+*** You can reproduce the problem with: opt bugpoint-reduced-simplified.bc -licm<br>
+</tt></p>
+</div>
+
+<p>Once you complete this, please send the LLVM bytecode file and the command
+line to reproduce the problem to the llvmbugs mailing list.</p>
+
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="miscompilations">Miscompilations</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p>A miscompilation occurs when a pass does not correctly transform a program,
+thus producing errors that are only noticed during execution. This is different
+from producing invalid LLVM code (i.e., code not in SSA form, using values
+before defining them, etc.) which the verifier will check for after a pass
+finishes its run.</p>
+
+<p>If it looks like the LLVM compiler is miscompiling a program, the very first
+thing to check is to make sure it is not using undefined behavior.  In
+particular, check to see if the program <a
+href="http://valgrind.kde.org/">valgrind</a>s clean, passes purify, or some
+other memory checker tool.  Many of the "LLVM bugs" that we have chased down
+ended up being bugs in the program being compiled, not LLVM.</p>
+
+<p>Once you determine that the program itself is not buggy, you should choose 
+which code generator you wish to compile the program with (e.g. C backend, the 
+JIT, or LLC) and optionally a series of LLVM passes to run.  For example:</p>
+
+<div class="doc_code">
+<p><tt>
+<b>bugpoint</b> -run-cbe [... optzn passes ...] file-to-test.bc --args -- [program arguments]</tt></p>
+</div>
+
+<p><tt>bugpoint</tt> will try to narrow down your list of passes to the one pass
+that causes an error, and simplify the bytecode file as much as it can to assist
+you. It will print a message letting you know how to reproduce the resulting
+error.</p>
+
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="codegen">Incorrect code generation</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p>Similarly to debugging incorrect compilation by mis-behaving passes, you can
+debug incorrect code generation by either LLC or the JIT, using
+<tt>bugpoint</tt>. The process <tt>bugpoint</tt> follows in this case is to try
+to narrow the code down to a function that is miscompiled by one or the other
+method, but since for correctness, the entire program must be run,
+<tt>bugpoint</tt> will compile the code it deems to not be affected with the C
+Backend, and then link in the shared object it generates.</p>
+
+<p>To debug the JIT:</p>
+
+<div class="doc_code">
+<pre>
+bugpoint -run-jit -output=[correct output file] [bytecode file]  \
+         --tool-args -- [arguments to pass to lli]               \
+         --args -- [program arguments]
+</pre>
+</div>
+
+<p>Similarly, to debug the LLC, one would run:</p>
+
+<div class="doc_code">
+<pre>
+bugpoint -run-llc -output=[correct output file] [bytecode file]  \
+         --tool-args -- [arguments to pass to llc]               \
+         --args -- [program arguments]
+</pre>
+</div>
+
+<p><b>Special note:</b> if you are debugging MultiSource or SPEC tests that
+already exist in the <tt>llvm/test</tt> hierarchy, there is an easier way to
+debug the JIT, LLC, and CBE, using the pre-written Makefile targets, which
+will pass the program options specified in the Makefiles:</p>
+
+<div class="doc_code">
+<p><tt>
+cd llvm/test/../../program<br>
+make bugpoint-jit
+</tt></p>
+</div>
+
+<p>At the end of a successful <tt>bugpoint</tt> run, you will be presented
+with two bytecode files: a <em>safe</em> file which can be compiled with the C
+backend and the <em>test</em> file which either LLC or the JIT
+mis-codegenerates, and thus causes the error.</p>
+
+<p>To reproduce the error that <tt>bugpoint</tt> found, it is sufficient to do
+the following:</p>
+
+<ol>
+
+<li><p>Regenerate the shared object from the safe bytecode file:</p>
+
+<div class="doc_code">
+<p><tt>
+<b>llc</b> -march=c safe.bc -o safe.c<br>
+<b>gcc</b> -shared safe.c -o safe.so
+</tt></p>
+</div></li>
+
+<li><p>If debugging LLC, compile test bytecode native and link with the shared
+    object:</p>
+
+<div class="doc_code">
+<p><tt>
+<b>llc</b> test.bc -o test.s -f<br>
+<b>gcc</b> test.s safe.so -o test.llc<br>
+./test.llc [program options]
+</tt></p>
+</div></li>
+    
+<li><p>If debugging the JIT, load the shared object and supply the test
+    bytecode:</p>
+
+<div class="doc_code">
+<p><tt><b>lli</b> -load=safe.so test.bc [program options]</tt></p>
+</div></li>  
+
+</ol>
+
+</div>
+
+<!-- *********************************************************************** -->
+<hr>
+<address>
+  <a href="http://jigsaw.w3.org/css-validator/check/referer"><img
+  src="http://jigsaw.w3.org/css-validator/images/vcss" alt="Valid CSS!"></a>
+  <a href="http://validator.w3.org/check/referer"><img
+  src="http://www.w3.org/Icons/valid-html401" alt="Valid HTML 4.01!" /></a>
+
+  <a href="mailto:sabre@nondot.org">Chris Lattner</a><br>
+  <a href="http://llvm.cs.uiuc.edu">The LLVM Compiler Infrastructure</a>
+  <br>
+  Last modified: $Date$
+</address>
+
+</body>
+</html>
