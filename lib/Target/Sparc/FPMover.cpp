@@ -1,4 +1,4 @@
-//===-- FPMover.cpp - SparcV8 double-precision floating point move fixer --===//
+//===-- FPMover.cpp - Sparc double-precision floating point move fixer ----===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcV8.h"
-#include "SparcV8Subtarget.h"
+#include "Sparc.h"
+#include "SparcSubtarget.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Target/TargetMachine.h"
@@ -34,7 +34,7 @@ namespace {
     FPMover(TargetMachine &tm) : TM(tm) { }
 
     virtual const char *getPassName() const {
-      return "SparcV8 Double-FP Move Fixer";
+      return "Sparc Double-FP Move Fixer";
     }
 
     bool runOnMachineBasicBlock(MachineBasicBlock &MBB);
@@ -42,10 +42,10 @@ namespace {
   };
 } // end of anonymous namespace
 
-/// createSparcV8FPMoverPass - Returns a pass that turns FpMOVD
+/// createSparcFPMoverPass - Returns a pass that turns FpMOVD
 /// instructions into FMOVS instructions
 ///
-FunctionPass *llvm::createSparcV8FPMoverPass(TargetMachine &tm) {
+FunctionPass *llvm::createSparcFPMoverPass(TargetMachine &tm) {
   return new FPMover(tm);
 }
 
@@ -54,16 +54,16 @@ FunctionPass *llvm::createSparcV8FPMoverPass(TargetMachine &tm) {
 static void getDoubleRegPair(unsigned DoubleReg, unsigned &EvenReg,
                              unsigned &OddReg) {
   static const unsigned EvenHalvesOfPairs[] = {
-    V8::F0, V8::F2, V8::F4, V8::F6, V8::F8, V8::F10, V8::F12, V8::F14,
-    V8::F16, V8::F18, V8::F20, V8::F22, V8::F24, V8::F26, V8::F28, V8::F30
+    SP::F0, SP::F2, SP::F4, SP::F6, SP::F8, SP::F10, SP::F12, SP::F14,
+    SP::F16, SP::F18, SP::F20, SP::F22, SP::F24, SP::F26, SP::F28, SP::F30
   };
   static const unsigned OddHalvesOfPairs[] = {
-    V8::F1, V8::F3, V8::F5, V8::F7, V8::F9, V8::F11, V8::F13, V8::F15,
-    V8::F17, V8::F19, V8::F21, V8::F23, V8::F25, V8::F27, V8::F29, V8::F31
+    SP::F1, SP::F3, SP::F5, SP::F7, SP::F9, SP::F11, SP::F13, SP::F15,
+    SP::F17, SP::F19, SP::F21, SP::F23, SP::F25, SP::F27, SP::F29, SP::F31
   };
   static const unsigned DoubleRegsInOrder[] = {
-    V8::D0, V8::D1, V8::D2, V8::D3, V8::D4, V8::D5, V8::D6, V8::D7, V8::D8,
-    V8::D9, V8::D10, V8::D11, V8::D12, V8::D13, V8::D14, V8::D15
+    SP::D0, SP::D1, SP::D2, SP::D3, SP::D4, SP::D5, SP::D6, SP::D7, SP::D8,
+    SP::D9, SP::D10, SP::D11, SP::D12, SP::D13, SP::D14, SP::D15
   };
   for (unsigned i = 0; i < sizeof(DoubleRegsInOrder)/sizeof(unsigned); ++i)
     if (DoubleRegsInOrder[i] == DoubleReg) {
@@ -80,12 +80,12 @@ bool FPMover::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
   bool Changed = false;
   for (MachineBasicBlock::iterator I = MBB.begin(); I != MBB.end(); ) {
     MachineInstr *MI = I++;
-    if (MI->getOpcode() == V8::FpMOVD || MI->getOpcode() == V8::FpABSD ||
-        MI->getOpcode() == V8::FpNEGD) {
+    if (MI->getOpcode() == SP::FpMOVD || MI->getOpcode() == SP::FpABSD ||
+        MI->getOpcode() == SP::FpNEGD) {
       Changed = true;
       unsigned DestDReg = MI->getOperand(0).getReg();
       unsigned SrcDReg  = MI->getOperand(1).getReg();
-      if (DestDReg == SrcDReg && MI->getOpcode() == V8::FpMOVD) {
+      if (DestDReg == SrcDReg && MI->getOpcode() == SP::FpMOVD) {
         MBB.erase(MI);   // Eliminate the noop copy.
         ++NoopFpDs;
         continue;
@@ -95,12 +95,12 @@ bool FPMover::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
       getDoubleRegPair(DestDReg, EvenDestReg, OddDestReg);
       getDoubleRegPair(SrcDReg, EvenSrcReg, OddSrcReg);
 
-      if (MI->getOpcode() == V8::FpMOVD)
-        MI->setOpcode(V8::FMOVS);
-      else if (MI->getOpcode() == V8::FpNEGD)
-        MI->setOpcode(V8::FNEGS);
-      else if (MI->getOpcode() == V8::FpABSD)
-        MI->setOpcode(V8::FABSS);
+      if (MI->getOpcode() == SP::FpMOVD)
+        MI->setOpcode(SP::FMOVS);
+      else if (MI->getOpcode() == SP::FpNEGD)
+        MI->setOpcode(SP::FNEGS);
+      else if (MI->getOpcode() == SP::FpABSD)
+        MI->setOpcode(SP::FABSS);
       else
         assert(0 && "Unknown opcode!");
         
@@ -109,7 +109,7 @@ bool FPMover::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
       DEBUG(std::cerr << "FPMover: the modified instr is: " << *MI);
       // Insert copy for the other half of the double.
       if (DestDReg != SrcDReg) {
-        MI = BuildMI(MBB, I, V8::FMOVS, 1, OddDestReg).addReg(OddSrcReg);
+        MI = BuildMI(MBB, I, SP::FMOVS, 1, OddDestReg).addReg(OddSrcReg);
         DEBUG(std::cerr << "FPMover: the inserted instr is: " << *MI);
       }
       ++NumFpDs;
@@ -121,7 +121,7 @@ bool FPMover::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
 bool FPMover::runOnMachineFunction(MachineFunction &F) {
   // If the target has V9 instructions, the fp-mover pseudos will never be
   // emitted.  Avoid a scan of the instructions to improve compile time.
-  if (TM.getSubtarget<SparcV8Subtarget>().isV9())
+  if (TM.getSubtarget<SparcSubtarget>().isV9())
     return false;
   
   bool Changed = false;

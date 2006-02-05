@@ -1,4 +1,4 @@
-//===- SparcV8RegisterInfo.h - SparcV8 Register Information Impl -*- C++ -*-==//
+//===- SparcRegisterInfo.h - Sparc Register Information Impl ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,25 +7,25 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the SparcV8 implementation of the MRegisterInfo class.
+// This file contains the Sparc implementation of the MRegisterInfo class.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SPARCV8REGISTERINFO_H
-#define SPARCV8REGISTERINFO_H
+#ifndef SPARCREGISTERINFO_H
+#define SPARCREGISTERINFO_H
 
 #include "llvm/Target/MRegisterInfo.h"
-#include "SparcV8GenRegisterInfo.h.inc"
+#include "SparcGenRegisterInfo.h.inc"
 
 namespace llvm {
 
-class SparcV8Subtarget;
+class SparcSubtarget;
 class Type;
 
-struct SparcV8RegisterInfo : public SparcV8GenRegisterInfo {
-  SparcV8Subtarget &Subtarget;
+struct SparcRegisterInfo : public SparcGenRegisterInfo {
+  SparcSubtarget &Subtarget;
   
-  SparcV8RegisterInfo(SparcV8Subtarget &st);
+  SparcRegisterInfo(SparcSubtarget &st);
 
   /// Code Generation virtual methods...
   void storeRegToStackSlot(MachineBasicBlock &MBB,

@@ -1,4 +1,4 @@
-//===- SparcV8InstrFormats.td - SparcV8 Instr Formats ------*- tablegen -*-===//
+//===- SparcInstrFormats.td - Sparc Instruction Formats ----*- tablegen -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,10 +7,10 @@
 // 
 //===----------------------------------------------------------------------===//
 
-class InstV8<dag ops, string asmstr, list<dag> pattern> : Instruction {
+class InstSP<dag ops, string asmstr, list<dag> pattern> : Instruction {
   field bits<32> Inst;
 
-  let Namespace = "V8";
+  let Namespace = "SP";
 
   bits<2> op;
   let Inst{31-30} = op;               // Top two bits are the 'op' field
@@ -21,12 +21,12 @@ class InstV8<dag ops, string asmstr, list<dag> pattern> : Instruction {
 }
 
 //===----------------------------------------------------------------------===//
-// Format #2 instruction classes in the SparcV8
+// Format #2 instruction classes in the Sparc
 //===----------------------------------------------------------------------===//
 
 // Format 2 instructions
 class F2<dag ops, string asmstr, list<dag> pattern>
-   : InstV8<ops, asmstr, pattern> {
+   : InstSP<ops, asmstr, pattern> {
   bits<3>  op2;
   bits<22> imm22;
   let op          = 0;    // op = 0
@@ -58,11 +58,11 @@ class F2_2<bits<4> condVal, bits<3> op2Val, dag ops, string asmstr,
 }
 
 //===----------------------------------------------------------------------===//
-// Format #3 instruction classes in the SparcV8
+// Format #3 instruction classes in the Sparc
 //===----------------------------------------------------------------------===//
 
 class F3<dag ops, string asmstr, list<dag> pattern>
-    : InstV8<ops, asmstr, pattern> {
+    : InstSP<ops, asmstr, pattern> {
   bits<5> rd;
   bits<6> op3;
   bits<5> rs1;
@@ -76,7 +76,7 @@ class F3<dag ops, string asmstr, list<dag> pattern>
 //
 class F3_1<bits<2> opVal, bits<6> op3val, dag ops,
            string asmstr, list<dag> pattern> : F3<ops, asmstr, pattern> {
-  bits<8> asi = 0; // asi not currently used in SparcV8
+  bits<8> asi = 0; // asi not currently used
   bits<5> rs2;
 
   let op         = opVal;

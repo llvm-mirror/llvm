@@ -1,4 +1,4 @@
-//===-- SparcV8.h - Top-level interface for SparcV8 representation -*- C++ -*-//
+//===-- Sparc.h - Top-level interface for Sparc representation --*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,43 +8,40 @@
 //===----------------------------------------------------------------------===//
 //
 // This file contains the entry points for global functions defined in the LLVM
-// SparcV8 back-end.
+// Sparc back-end.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef TARGET_SPARCV8_H
-#define TARGET_SPARCV8_H
+#ifndef TARGET_SPARC_H
+#define TARGET_SPARC_H
 
 #include <iosfwd>
 #include <cassert>
 
 namespace llvm {
-
   class FunctionPass;
   class TargetMachine;
 
-  FunctionPass *createSparcV8ISelDag(TargetMachine &TM);
-
-  FunctionPass *createSparcV8CodePrinterPass(std::ostream &OS,
-                                             TargetMachine &TM);
-  FunctionPass *createSparcV8DelaySlotFillerPass(TargetMachine &TM);
-  FunctionPass *createSparcV8FPMoverPass(TargetMachine &TM);
+  FunctionPass *createSparcISelDag(TargetMachine &TM);
+  FunctionPass *createSparcCodePrinterPass(std::ostream &OS, TargetMachine &TM);
+  FunctionPass *createSparcDelaySlotFillerPass(TargetMachine &TM);
+  FunctionPass *createSparcFPMoverPass(TargetMachine &TM);
 } // end namespace llvm;
 
-// Defines symbolic names for SparcV8 registers.  This defines a mapping from
+// Defines symbolic names for Sparc registers.  This defines a mapping from
 // register name to register number.
 //
-#include "SparcV8GenRegisterNames.inc"
+#include "SparcGenRegisterNames.inc"
 
-// Defines symbolic names for the SparcV8 instructions.
+// Defines symbolic names for the Sparc instructions.
 //
-#include "SparcV8GenInstrNames.inc"
+#include "SparcGenInstrNames.inc"
 
 
 namespace llvm {
-  // Enums corresponding to SparcV8 condition codes, both icc's and fcc's.  These
+  // Enums corresponding to Sparc condition codes, both icc's and fcc's.  These
   // values must be kept in sync with the ones in the .td file.
-  namespace V8CC {
+  namespace SPCC {
     enum CondCodes {
       //ICC_A   =  8   ,  // Always
       //ICC_N   =  0   ,  // Never
@@ -82,37 +79,37 @@ namespace llvm {
     };
   }
   
-  static const char *SPARCCondCodeToString(V8CC::CondCodes CC) {
+  static const char *SPARCCondCodeToString(SPCC::CondCodes CC) {
     switch (CC) {
     default: assert(0 && "Unknown condition code");
-    case V8CC::ICC_NE:  return "ne";
-    case V8CC::ICC_E:   return "e";
-    case V8CC::ICC_G:   return "g";
-    case V8CC::ICC_LE:  return "le";
-    case V8CC::ICC_GE:  return "ge";
-    case V8CC::ICC_L:   return "l";
-    case V8CC::ICC_GU:  return "gu";
-    case V8CC::ICC_LEU: return "leu";
-    case V8CC::ICC_CC:  return "cc";
-    case V8CC::ICC_CS:  return "cs";
-    case V8CC::ICC_POS: return "pos";
-    case V8CC::ICC_NEG: return "neg";
-    case V8CC::ICC_VC:  return "vc";
-    case V8CC::ICC_VS:  return "vs";
-    case V8CC::FCC_U:   return "u";
-    case V8CC::FCC_G:   return "g";
-    case V8CC::FCC_UG:  return "ug";
-    case V8CC::FCC_L:   return "l";
-    case V8CC::FCC_UL:  return "ul";
-    case V8CC::FCC_LG:  return "lg";
-    case V8CC::FCC_NE:  return "ne";
-    case V8CC::FCC_E:   return "e";
-    case V8CC::FCC_UE:  return "ue";
-    case V8CC::FCC_GE:  return "ge";
-    case V8CC::FCC_UGE: return "uge";
-    case V8CC::FCC_LE:  return "le";
-    case V8CC::FCC_ULE: return "ule";
-    case V8CC::FCC_O:   return "o";
+    case SPCC::ICC_NE:  return "ne";
+    case SPCC::ICC_E:   return "e";
+    case SPCC::ICC_G:   return "g";
+    case SPCC::ICC_LE:  return "le";
+    case SPCC::ICC_GE:  return "ge";
+    case SPCC::ICC_L:   return "l";
+    case SPCC::ICC_GU:  return "gu";
+    case SPCC::ICC_LEU: return "leu";
+    case SPCC::ICC_CC:  return "cc";
+    case SPCC::ICC_CS:  return "cs";
+    case SPCC::ICC_POS: return "pos";
+    case SPCC::ICC_NEG: return "neg";
+    case SPCC::ICC_VC:  return "vc";
+    case SPCC::ICC_VS:  return "vs";
+    case SPCC::FCC_U:   return "u";
+    case SPCC::FCC_G:   return "g";
+    case SPCC::FCC_UG:  return "ug";
+    case SPCC::FCC_L:   return "l";
+    case SPCC::FCC_UL:  return "ul";
+    case SPCC::FCC_LG:  return "lg";
+    case SPCC::FCC_NE:  return "ne";
+    case SPCC::FCC_E:   return "e";
+    case SPCC::FCC_UE:  return "ue";
+    case SPCC::FCC_GE:  return "ge";
+    case SPCC::FCC_UGE: return "uge";
+    case SPCC::FCC_LE:  return "le";
+    case SPCC::FCC_ULE: return "ule";
+    case SPCC::FCC_O:   return "o";
     }       
   }
 }  // end namespace llvm

@@ -1,4 +1,4 @@
-//===-- SparcV8ISelDAGToDAG.cpp - A dag to dag inst selector for SparcV8 --===//
+//===-- SparcISelDAGToDAG.cpp - A dag to dag inst selector for Sparc ------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,12 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines an instruction selector for the V8 target
+// This file defines an instruction selector for the SPARC target.
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcV8.h"
-#include "SparcV8TargetMachine.h"
+#include "Sparc.h"
+#include "SparcTargetMachine.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Function.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -30,9 +30,9 @@ using namespace llvm;
 // TargetLowering Implementation
 //===----------------------------------------------------------------------===//
 
-namespace V8ISD {
+namespace SPISD {
   enum {
-    FIRST_NUMBER = ISD::BUILTIN_OP_END+V8::INSTRUCTION_LIST_END,
+    FIRST_NUMBER = ISD::BUILTIN_OP_END+SP::INSTRUCTION_LIST_END,
     CMPICC,      // Compare two GPR operands, set icc.
     CMPFCC,      // Compare two FP operands, set fcc.
     BRICC,       // Branch to dest on icc condition
@@ -45,56 +45,56 @@ namespace V8ISD {
     FTOI,        // FP to Int within a FP register.
     ITOF,        // Int to FP within a FP register.
 
-    CALL,        // A V8 call instruction.
+    CALL,        // A call instruction.
     RET_FLAG,    // Return with a flag operand.
   };
 }
 
 /// IntCondCCodeToICC - Convert a DAG integer condition code to a SPARC ICC
 /// condition.
-static V8CC::CondCodes IntCondCCodeToICC(ISD::CondCode CC) {
+static SPCC::CondCodes IntCondCCodeToICC(ISD::CondCode CC) {
   switch (CC) {
   default: assert(0 && "Unknown integer condition code!");
-  case ISD::SETEQ:  return V8CC::ICC_E;
-  case ISD::SETNE:  return V8CC::ICC_NE;
-  case ISD::SETLT:  return V8CC::ICC_L;
-  case ISD::SETGT:  return V8CC::ICC_G;
-  case ISD::SETLE:  return V8CC::ICC_LE;
-  case ISD::SETGE:  return V8CC::ICC_GE;
-  case ISD::SETULT: return V8CC::ICC_CS;
-  case ISD::SETULE: return V8CC::ICC_LEU;
-  case ISD::SETUGT: return V8CC::ICC_GU;
-  case ISD::SETUGE: return V8CC::ICC_CC;
+  case ISD::SETEQ:  return SPCC::ICC_E;
+  case ISD::SETNE:  return SPCC::ICC_NE;
+  case ISD::SETLT:  return SPCC::ICC_L;
+  case ISD::SETGT:  return SPCC::ICC_G;
+  case ISD::SETLE:  return SPCC::ICC_LE;
+  case ISD::SETGE:  return SPCC::ICC_GE;
+  case ISD::SETULT: return SPCC::ICC_CS;
+  case ISD::SETULE: return SPCC::ICC_LEU;
+  case ISD::SETUGT: return SPCC::ICC_GU;
+  case ISD::SETUGE: return SPCC::ICC_CC;
   }
 }
 
 /// FPCondCCodeToFCC - Convert a DAG floatingp oint condition code to a SPARC
 /// FCC condition.
-static V8CC::CondCodes FPCondCCodeToFCC(ISD::CondCode CC) {
+static SPCC::CondCodes FPCondCCodeToFCC(ISD::CondCode CC) {
   switch (CC) {
   default: assert(0 && "Unknown fp condition code!");
-  case ISD::SETEQ:  return V8CC::FCC_E;
-  case ISD::SETNE:  return V8CC::FCC_NE;
-  case ISD::SETLT:  return V8CC::FCC_L;
-  case ISD::SETGT:  return V8CC::FCC_G;
-  case ISD::SETLE:  return V8CC::FCC_LE;
-  case ISD::SETGE:  return V8CC::FCC_GE;
-  case ISD::SETULT: return V8CC::FCC_UL;
-  case ISD::SETULE: return V8CC::FCC_ULE;
-  case ISD::SETUGT: return V8CC::FCC_UG;
-  case ISD::SETUGE: return V8CC::FCC_UGE;
-  case ISD::SETUO:  return V8CC::FCC_U;
-  case ISD::SETO:   return V8CC::FCC_O;
-  case ISD::SETONE: return V8CC::FCC_LG;
-  case ISD::SETUEQ: return V8CC::FCC_UE;
+  case ISD::SETEQ:  return SPCC::FCC_E;
+  case ISD::SETNE:  return SPCC::FCC_NE;
+  case ISD::SETLT:  return SPCC::FCC_L;
+  case ISD::SETGT:  return SPCC::FCC_G;
+  case ISD::SETLE:  return SPCC::FCC_LE;
+  case ISD::SETGE:  return SPCC::FCC_GE;
+  case ISD::SETULT: return SPCC::FCC_UL;
+  case ISD::SETULE: return SPCC::FCC_ULE;
+  case ISD::SETUGT: return SPCC::FCC_UG;
+  case ISD::SETUGE: return SPCC::FCC_UGE;
+  case ISD::SETUO:  return SPCC::FCC_U;
+  case ISD::SETO:   return SPCC::FCC_O;
+  case ISD::SETONE: return SPCC::FCC_LG;
+  case ISD::SETUEQ: return SPCC::FCC_UE;
   }
 }
 
 namespace {
-  class SparcV8TargetLowering : public TargetLowering {
+  class SparcTargetLowering : public TargetLowering {
     int VarArgsFrameOffset;   // Frame offset to start of varargs area.
   public:
-    SparcV8TargetLowering(TargetMachine &TM);
+    SparcTargetLowering(TargetMachine &TM);
     virtual SDOperand LowerOperation(SDOperand Op, SelectionDAG &DAG);
     
     /// isMaskedValueZeroForTargetNode - Return true if 'Op & Mask' is known to
@@ -120,13 +120,13 @@ namespace {
   };
 }
 
-SparcV8TargetLowering::SparcV8TargetLowering(TargetMachine &TM)
+SparcTargetLowering::SparcTargetLowering(TargetMachine &TM)
   : TargetLowering(TM) {
   
   // Set up the register classes.
-  addRegisterClass(MVT::i32, V8::IntRegsRegisterClass);
-  addRegisterClass(MVT::f32, V8::FPRegsRegisterClass);
-  addRegisterClass(MVT::f64, V8::DFPRegsRegisterClass);
+  addRegisterClass(MVT::i32, SP::IntRegsRegisterClass);
+  addRegisterClass(MVT::f32, SP::FPRegsRegisterClass);
+  addRegisterClass(MVT::f64, SP::DFPRegsRegisterClass);
 
   // Custom legalize GlobalAddress nodes into LO/HI parts.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
@@ -175,7 +175,7 @@ SparcV8TargetLowering::SparcV8TargetLowering(TargetMachine &TM)
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::f64, Custom);
   
-  // V8 has no intrinsics for these particular operations.
+  // SPARC has no intrinsics for these particular operations.
   setOperationAction(ISD::MEMMOVE, MVT::Other, Expand);
   setOperationAction(ISD::MEMSET, MVT::Other, Expand);
   setOperationAction(ISD::MEMCPY, MVT::Other, Expand);
@@ -218,42 +218,42 @@ SparcV8TargetLowering::SparcV8TargetLowering(TargetMachine &TM)
   setOperationAction(ISD::ConstantFP, MVT::f64, Expand);
   setOperationAction(ISD::ConstantFP, MVT::f32, Expand);
   
-  setStackPointerRegisterToSaveRestore(V8::O6);
+  setStackPointerRegisterToSaveRestore(SP::O6);
 
-  if (TM.getSubtarget<SparcV8Subtarget>().isV9()) {
+  if (TM.getSubtarget<SparcSubtarget>().isV9()) {
     setOperationAction(ISD::CTPOP, MVT::i32, Legal);
   }
   
   computeRegisterProperties();
 }
 
-const char *SparcV8TargetLowering::getTargetNodeName(unsigned Opcode) const {
+const char *SparcTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   default: return 0;
-  case V8ISD::CMPICC:     return "V8ISD::CMPICC";
-  case V8ISD::CMPFCC:     return "V8ISD::CMPFCC";
-  case V8ISD::BRICC:      return "V8ISD::BRICC";
-  case V8ISD::BRFCC:      return "V8ISD::BRFCC";
-  case V8ISD::SELECT_ICC: return "V8ISD::SELECT_ICC";
-  case V8ISD::SELECT_FCC: return "V8ISD::SELECT_FCC";
-  case V8ISD::Hi:         return "V8ISD::Hi";
-  case V8ISD::Lo:         return "V8ISD::Lo";
-  case V8ISD::FTOI:       return "V8ISD::FTOI";
-  case V8ISD::ITOF:       return "V8ISD::ITOF";
-  case V8ISD::CALL:       return "V8ISD::CALL";
-  case V8ISD::RET_FLAG:   return "V8ISD::RET_FLAG";
+  case SPISD::CMPICC:     return "SPISD::CMPICC";
+  case SPISD::CMPFCC:     return "SPISD::CMPFCC";
+  case SPISD::BRICC:      return "SPISD::BRICC";
+  case SPISD::BRFCC:      return "SPISD::BRFCC";
+  case SPISD::SELECT_ICC: return "SPISD::SELECT_ICC";
+  case SPISD::SELECT_FCC: return "SPISD::SELECT_FCC";
+  case SPISD::Hi:         return "SPISD::Hi";
+  case SPISD::Lo:         return "SPISD::Lo";
+  case SPISD::FTOI:       return "SPISD::FTOI";
+  case SPISD::ITOF:       return "SPISD::ITOF";
+  case SPISD::CALL:       return "SPISD::CALL";
+  case SPISD::RET_FLAG:   return "SPISD::RET_FLAG";
   }
 }
 
 /// isMaskedValueZeroForTargetNode - Return true if 'Op & Mask' is known to
 /// be zero. Op is expected to be a target specific node. Used by DAG
 /// combiner.
-bool SparcV8TargetLowering::
+bool SparcTargetLowering::
 isMaskedValueZeroForTargetNode(const SDOperand &Op, uint64_t Mask) const {
   switch (Op.getOpcode()) {
   default: return false; 
-  case V8ISD::SELECT_ICC:
-  case V8ISD::SELECT_FCC:
+  case SPISD::SELECT_ICC:
+  case SPISD::SELECT_FCC:
     assert(MVT::isInteger(Op.getValueType()) && "Not an integer select!");
     // These operations are masked zero if both the left and the right are zero.
     return MaskedValueIsZero(Op.getOperand(0), Mask) &&
@@ -266,13 +266,13 @@ isMaskedValueZeroForTargetNode(const SDOperand &Op, uint64_t Mask) const {
 /// either one or two GPRs, including FP values.  TODO: we should pass FP values
 /// in FP registers for fastcc functions.
 std::vector<SDOperand>
-SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
+SparcTargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
   MachineFunction &MF = DAG.getMachineFunction();
   SSARegMap *RegMap = MF.getSSARegMap();
   std::vector<SDOperand> ArgValues;
   
   static const unsigned ArgRegs[] = {
-    V8::I0, V8::I1, V8::I2, V8::I3, V8::I4, V8::I5
+    SP::I0, SP::I1, SP::I2, SP::I3, SP::I4, SP::I5
   };
   
   const unsigned *CurArgReg = ArgRegs, *ArgRegEnd = ArgRegs+6;
@@ -294,7 +294,7 @@ SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
         if (CurArgReg < ArgRegEnd) ++CurArgReg;
         ArgValues.push_back(DAG.getNode(ISD::UNDEF, ObjectVT));
       } else if (CurArgReg < ArgRegEnd) {  // Lives in an incoming GPR
-        unsigned VReg = RegMap->createVirtualRegister(&V8::IntRegsRegClass);
+        unsigned VReg = RegMap->createVirtualRegister(&SP::IntRegsRegClass);
         MF.addLiveIn(*CurArgReg++, VReg);
         SDOperand Arg = DAG.getCopyFromReg(Root, VReg, MVT::i32);
         if (ObjectVT != MVT::i32) {
@@ -334,7 +334,7 @@ SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
         ArgValues.push_back(DAG.getNode(ISD::UNDEF, ObjectVT));
       } else if (CurArgReg < ArgRegEnd) {  // Lives in an incoming GPR
         // FP value is passed in an integer register.
-        unsigned VReg = RegMap->createVirtualRegister(&V8::IntRegsRegClass);
+        unsigned VReg = RegMap->createVirtualRegister(&SP::IntRegsRegClass);
         MF.addLiveIn(*CurArgReg++, VReg);
         SDOperand Arg = DAG.getCopyFromReg(Root, VReg, MVT::i32);
 
@@ -369,7 +369,7 @@ SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
       } else {
         SDOperand HiVal;
         if (CurArgReg < ArgRegEnd) {  // Lives in an incoming GPR
-          unsigned VRegHi = RegMap->createVirtualRegister(&V8::IntRegsRegClass);
+          unsigned VRegHi = RegMap->createVirtualRegister(&SP::IntRegsRegClass);
           MF.addLiveIn(*CurArgReg++, VRegHi);
           HiVal = DAG.getCopyFromReg(Root, VRegHi, MVT::i32);
         } else {
@@ -380,7 +380,7 @@ SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
         
         SDOperand LoVal;
         if (CurArgReg < ArgRegEnd) {  // Lives in an incoming GPR
-          unsigned VRegLo = RegMap->createVirtualRegister(&V8::IntRegsRegClass);
+          unsigned VRegLo = RegMap->createVirtualRegister(&SP::IntRegsRegClass);
           MF.addLiveIn(*CurArgReg++, VRegLo);
           LoVal = DAG.getCopyFromReg(Root, VRegLo, MVT::i32);
         } else {
@@ -410,7 +410,7 @@ SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
     VarArgsFrameOffset = ArgOffset;
     
     for (; CurArgReg != ArgRegEnd; ++CurArgReg) {
-      unsigned VReg = RegMap->createVirtualRegister(&V8::IntRegsRegClass);
+      unsigned VReg = RegMap->createVirtualRegister(&SP::IntRegsRegClass);
       MF.addLiveIn(*CurArgReg, VReg);
       SDOperand Arg = DAG.getCopyFromReg(DAG.getRoot(), VReg, MVT::i32);
 
@@ -434,17 +434,17 @@ SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
   case MVT::i8:
   case MVT::i16:
   case MVT::i32:
-    MF.addLiveOut(V8::I0);
+    MF.addLiveOut(SP::I0);
     break;
   case MVT::i64:
-    MF.addLiveOut(V8::I0);
-    MF.addLiveOut(V8::I1);
+    MF.addLiveOut(SP::I0);
+    MF.addLiveOut(SP::I1);
     break;
   case MVT::f32:
-    MF.addLiveOut(V8::F0);
+    MF.addLiveOut(SP::F0);
     break;
   case MVT::f64:
-    MF.addLiveOut(V8::D0);
+    MF.addLiveOut(SP::D0);
     break;
   }
   
@@ -452,10 +452,10 @@ SparcV8TargetLowering::LowerArguments(Function &F, SelectionDAG &DAG) {
 }
 
 std::pair<SDOperand, SDOperand>
-SparcV8TargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
-                                   bool isVarArg, unsigned CC,
-                                   bool isTailCall, SDOperand Callee, 
-                                   ArgListTy &Args, SelectionDAG &DAG) {
+SparcTargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
+                                 bool isVarArg, unsigned CC,
+                                 bool isTailCall, SDOperand Callee, 
+                                 ArgListTy &Args, SelectionDAG &DAG) {
   MachineFunction &MF = DAG.getMachineFunction();
   // Count the size of the outgoing arguments.
   unsigned ArgsSize = 0;
@@ -565,7 +565,7 @@ SparcV8TargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
     
     if (ValToStore.Val) {
       if (!StackPtr.Val) {
-        StackPtr = DAG.getRegister(V8::O6, MVT::i32);
+        StackPtr = DAG.getRegister(SP::O6, MVT::i32);
         NullSV = DAG.getSrcValue(NULL);
       }
       SDOperand PtrOff = DAG.getConstant(ArgOffset, getPointerTy());
@@ -581,7 +581,7 @@ SparcV8TargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
     Chain = DAG.getNode(ISD::TokenFactor, MVT::Other, Stores);
   
   static const unsigned ArgRegs[] = {
-    V8::O0, V8::O1, V8::O2, V8::O3, V8::O4, V8::O5
+    SP::O0, SP::O1, SP::O2, SP::O3, SP::O4, SP::O5
   };
   
   // Build a sequence of copy-to-reg nodes chained together with token chain
@@ -605,7 +605,7 @@ SparcV8TargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
   Ops.push_back(Callee);
   if (InFlag.Val)
     Ops.push_back(InFlag);
-  Chain = DAG.getNode(V8ISD::CALL, NodeTys, Ops);
+  Chain = DAG.getNode(SPISD::CALL, NodeTys, Ops);
   InFlag = Chain.getValue(1);
   
   MVT::ValueType RetTyVT = getValueType(RetTy);
@@ -616,7 +616,7 @@ SparcV8TargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
     case MVT::i1:
     case MVT::i8:
     case MVT::i16:
-      RetVal = DAG.getCopyFromReg(Chain, V8::O0, MVT::i32, InFlag);
+      RetVal = DAG.getCopyFromReg(Chain, SP::O0, MVT::i32, InFlag);
       Chain = RetVal.getValue(1);
       
       // Add a note to keep track of whether it is sign or zero extended.
@@ -625,20 +625,20 @@ SparcV8TargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
       RetVal = DAG.getNode(ISD::TRUNCATE, RetTyVT, RetVal);
       break;
     case MVT::i32:
-      RetVal = DAG.getCopyFromReg(Chain, V8::O0, MVT::i32, InFlag);
+      RetVal = DAG.getCopyFromReg(Chain, SP::O0, MVT::i32, InFlag);
       Chain = RetVal.getValue(1);
       break;
     case MVT::f32:
-      RetVal = DAG.getCopyFromReg(Chain, V8::F0, MVT::f32, InFlag);
+      RetVal = DAG.getCopyFromReg(Chain, SP::F0, MVT::f32, InFlag);
       Chain = RetVal.getValue(1);
       break;
     case MVT::f64:
-      RetVal = DAG.getCopyFromReg(Chain, V8::D0, MVT::f64, InFlag);
+      RetVal = DAG.getCopyFromReg(Chain, SP::D0, MVT::f64, InFlag);
       Chain = RetVal.getValue(1);
       break;
     case MVT::i64:
-      SDOperand Lo = DAG.getCopyFromReg(Chain, V8::O1, MVT::i32, InFlag);
-      SDOperand Hi = DAG.getCopyFromReg(Lo.getValue(1), V8::O0, MVT::i32, 
+      SDOperand Lo = DAG.getCopyFromReg(Chain, SP::O1, MVT::i32, InFlag);
+      SDOperand Hi = DAG.getCopyFromReg(Lo.getValue(1), SP::O0, MVT::i32, 
                                         Lo.getValue(2));
       RetVal = DAG.getNode(ISD::BUILD_PAIR, MVT::i64, Lo, Hi);
       Chain = Hi.getValue(1);
@@ -652,64 +652,64 @@ SparcV8TargetLowering::LowerCallTo(SDOperand Chain, const Type *RetTy,
   return std::make_pair(RetVal, Chain);
 }
 
-std::pair<SDOperand, SDOperand> SparcV8TargetLowering::
+std::pair<SDOperand, SDOperand> SparcTargetLowering::
 LowerFrameReturnAddress(bool isFrameAddr, SDOperand Chain, unsigned Depth,
                         SelectionDAG &DAG) {
   assert(0 && "Unimp");
   abort();
 }
 
-// Look at LHS/RHS/CC and see if they are a lowered V8 setcc instruction.  If so
-// set LHS/RHS and V8CC to the LHS/RHS of the setcc and V8CC to the condition.
+// Look at LHS/RHS/CC and see if they are a lowered setcc instruction.  If so
+// set LHS/RHS and SPCC to the LHS/RHS of the setcc and SPCC to the condition.
 static void LookThroughSetCC(SDOperand &LHS, SDOperand &RHS,
-                             ISD::CondCode CC, unsigned &V8CC) {
+                             ISD::CondCode CC, unsigned &SPCC) {
   if (isa<ConstantSDNode>(RHS) && cast<ConstantSDNode>(RHS)->getValue() == 0 &&
       CC == ISD::SETNE && 
-      ((LHS.getOpcode() == V8ISD::SELECT_ICC &&
-        LHS.getOperand(3).getOpcode() == V8ISD::CMPICC) ||
-       (LHS.getOpcode() == V8ISD::SELECT_FCC &&
-        LHS.getOperand(3).getOpcode() == V8ISD::CMPFCC)) &&
+      ((LHS.getOpcode() == SPISD::SELECT_ICC &&
+        LHS.getOperand(3).getOpcode() == SPISD::CMPICC) ||
+       (LHS.getOpcode() == SPISD::SELECT_FCC &&
+        LHS.getOperand(3).getOpcode() == SPISD::CMPFCC)) &&
       isa<ConstantSDNode>(LHS.getOperand(0)) &&
       isa<ConstantSDNode>(LHS.getOperand(1)) &&
       cast<ConstantSDNode>(LHS.getOperand(0))->getValue() == 1 &&
       cast<ConstantSDNode>(LHS.getOperand(1))->getValue() == 0) {
     SDOperand CMPCC = LHS.getOperand(3);
-    V8CC = cast<ConstantSDNode>(LHS.getOperand(2))->getValue();
+    SPCC = cast<ConstantSDNode>(LHS.getOperand(2))->getValue();
     LHS = CMPCC.getOperand(0);
     RHS = CMPCC.getOperand(1);
   }
 }
 
 
-SDOperand SparcV8TargetLowering::
+SDOperand SparcTargetLowering::
 LowerOperation(SDOperand Op, SelectionDAG &DAG) {
   switch (Op.getOpcode()) {
   default: assert(0 && "Should not custom lower this!");
   case ISD::GlobalAddress: {
     GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
     SDOperand GA = DAG.getTargetGlobalAddress(GV, MVT::i32);
-    SDOperand Hi = DAG.getNode(V8ISD::Hi, MVT::i32, GA);
-    SDOperand Lo = DAG.getNode(V8ISD::Lo, MVT::i32, GA);
+    SDOperand Hi = DAG.getNode(SPISD::Hi, MVT::i32, GA);
+    SDOperand Lo = DAG.getNode(SPISD::Lo, MVT::i32, GA);
     return DAG.getNode(ISD::ADD, MVT::i32, Lo, Hi);
   }
   case ISD::ConstantPool: {
     Constant *C = cast<ConstantPoolSDNode>(Op)->get();
     SDOperand CP = DAG.getTargetConstantPool(C, MVT::i32,
                                   cast<ConstantPoolSDNode>(Op)->getAlignment());
-    SDOperand Hi = DAG.getNode(V8ISD::Hi, MVT::i32, CP);
-    SDOperand Lo = DAG.getNode(V8ISD::Lo, MVT::i32, CP);
+    SDOperand Hi = DAG.getNode(SPISD::Hi, MVT::i32, CP);
+    SDOperand Lo = DAG.getNode(SPISD::Lo, MVT::i32, CP);
     return DAG.getNode(ISD::ADD, MVT::i32, Lo, Hi);
   }
   case ISD::FP_TO_SINT:
     // Convert the fp value to integer in an FP register.
     assert(Op.getValueType() == MVT::i32);
-    Op = DAG.getNode(V8ISD::FTOI, MVT::f32, Op.getOperand(0));
+    Op = DAG.getNode(SPISD::FTOI, MVT::f32, Op.getOperand(0));
     return DAG.getNode(ISD::BIT_CONVERT, MVT::i32, Op);
   case ISD::SINT_TO_FP: {
     assert(Op.getOperand(0).getValueType() == MVT::i32);
     SDOperand Tmp = DAG.getNode(ISD::BIT_CONVERT, MVT::f32, Op.getOperand(0));
     // Convert the int value to FP in an FP register.
-    return DAG.getNode(V8ISD::ITOF, Op.getValueType(), Tmp);
+    return DAG.getNode(SPISD::ITOF, Op.getValueType(), Tmp);
   }
   case ISD::BR_CC: {
     SDOperand Chain = Op.getOperand(0);
@@ -717,11 +717,11 @@ LowerOperation(SDOperand Op, SelectionDAG &DAG) {
     SDOperand LHS = Op.getOperand(2);
     SDOperand RHS = Op.getOperand(3);
     SDOperand Dest = Op.getOperand(4);
-    unsigned Opc, V8CC = ~0U;
+    unsigned Opc, SPCC = ~0U;
     
     // If this is a br_cc of a "setcc", and if the setcc got lowered into
     // an CMP[IF]CC/SELECT_[IF]CC pair, find the original compared values.
-    LookThroughSetCC(LHS, RHS, CC, V8CC);
+    LookThroughSetCC(LHS, RHS, CC, SPCC);
     
     // Get the condition flag.
     SDOperand CompareFlag;
@@ -732,16 +732,16 @@ LowerOperation(SDOperand Op, SelectionDAG &DAG) {
       std::vector<SDOperand> Ops;
       Ops.push_back(LHS);
       Ops.push_back(RHS);
-      CompareFlag = DAG.getNode(V8ISD::CMPICC, VTs, Ops).getValue(1);
-      if (V8CC == ~0U) V8CC = IntCondCCodeToICC(CC);
-      Opc = V8ISD::BRICC;
+      CompareFlag = DAG.getNode(SPISD::CMPICC, VTs, Ops).getValue(1);
+      if (SPCC == ~0U) SPCC = IntCondCCodeToICC(CC);
+      Opc = SPISD::BRICC;
     } else {
-      CompareFlag = DAG.getNode(V8ISD::CMPFCC, MVT::Flag, LHS, RHS);
-      if (V8CC == ~0U) V8CC = FPCondCCodeToFCC(CC);
-      Opc = V8ISD::BRFCC;
+      CompareFlag = DAG.getNode(SPISD::CMPFCC, MVT::Flag, LHS, RHS);
+      if (SPCC == ~0U) SPCC = FPCondCCodeToFCC(CC);
+      Opc = SPISD::BRFCC;
     }
     return DAG.getNode(Opc, MVT::Other, Chain, Dest,
-                       DAG.getConstant(V8CC, MVT::i32), CompareFlag);
+                       DAG.getConstant(SPCC, MVT::i32), CompareFlag);
   }
   case ISD::SELECT_CC: {
     SDOperand LHS = Op.getOperand(0);
@@ -749,11 +749,11 @@ LowerOperation(SDOperand Op, SelectionDAG &DAG) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
     SDOperand TrueVal = Op.getOperand(2);
     SDOperand FalseVal = Op.getOperand(3);
-    unsigned Opc, V8CC = ~0U;
+    unsigned Opc, SPCC = ~0U;
 
     // If this is a select_cc of a "setcc", and if the setcc got lowered into
     // an CMP[IF]CC/SELECT_[IF]CC pair, find the original compared values.
-    LookThroughSetCC(LHS, RHS, CC, V8CC);
+    LookThroughSetCC(LHS, RHS, CC, SPCC);
     
     SDOperand CompareFlag;
     if (LHS.getValueType() == MVT::i32) {
@@ -763,22 +763,22 @@ LowerOperation(SDOperand Op, SelectionDAG &DAG) {
       std::vector<SDOperand> Ops;
       Ops.push_back(LHS);
       Ops.push_back(RHS);
-      CompareFlag = DAG.getNode(V8ISD::CMPICC, VTs, Ops).getValue(1);
-      Opc = V8ISD::SELECT_ICC;
-      if (V8CC == ~0U) V8CC = IntCondCCodeToICC(CC);
+      CompareFlag = DAG.getNode(SPISD::CMPICC, VTs, Ops).getValue(1);
+      Opc = SPISD::SELECT_ICC;
+      if (SPCC == ~0U) SPCC = IntCondCCodeToICC(CC);
     } else {
-      CompareFlag = DAG.getNode(V8ISD::CMPFCC, MVT::Flag, LHS, RHS);
-      Opc = V8ISD::SELECT_FCC;
-      if (V8CC == ~0U) V8CC = FPCondCCodeToFCC(CC);
+      CompareFlag = DAG.getNode(SPISD::CMPFCC, MVT::Flag, LHS, RHS);
+      Opc = SPISD::SELECT_FCC;
+      if (SPCC == ~0U) SPCC = FPCondCCodeToFCC(CC);
     }
     return DAG.getNode(Opc, TrueVal.getValueType(), TrueVal, FalseVal, 
-                       DAG.getConstant(V8CC, MVT::i32), CompareFlag);
+                       DAG.getConstant(SPCC, MVT::i32), CompareFlag);
   }
   case ISD::VASTART: {
     // vastart just stores the address of the VarArgsFrameIndex slot into the
     // memory location argument.
     SDOperand Offset = DAG.getNode(ISD::ADD, MVT::i32,
-                                   DAG.getRegister(V8::I6, MVT::i32),
+                                   DAG.getRegister(SP::I6, MVT::i32),
                                 DAG.getConstant(VarArgsFrameOffset, MVT::i32));
     return DAG.getNode(ISD::STORE, MVT::Other, Op.getOperand(0), Offset, 
                        Op.getOperand(1), Op.getOperand(2));
@@ -827,46 +827,46 @@ LowerOperation(SDOperand Op, SelectionDAG &DAG) {
       unsigned ArgReg;
       switch(Op.getOperand(1).getValueType()) {
       default: assert(0 && "Unknown type to return!");
-      case MVT::i32: ArgReg = V8::I0; break;
-      case MVT::f32: ArgReg = V8::F0; break;
-      case MVT::f64: ArgReg = V8::D0; break;
+      case MVT::i32: ArgReg = SP::I0; break;
+      case MVT::f32: ArgReg = SP::F0; break;
+      case MVT::f64: ArgReg = SP::D0; break;
       }
       Copy = DAG.getCopyToReg(Op.getOperand(0), ArgReg, Op.getOperand(1),
                               SDOperand());
       break;
     }
     case 3:
-      Copy = DAG.getCopyToReg(Op.getOperand(0), V8::I0, Op.getOperand(2), 
+      Copy = DAG.getCopyToReg(Op.getOperand(0), SP::I0, Op.getOperand(2), 
                               SDOperand());
-      Copy = DAG.getCopyToReg(Copy, V8::I1, Op.getOperand(1), Copy.getValue(1));
+      Copy = DAG.getCopyToReg(Copy, SP::I1, Op.getOperand(1), Copy.getValue(1));
       break;
     }
-    return DAG.getNode(V8ISD::RET_FLAG, MVT::Other, Copy, Copy.getValue(1));
+    return DAG.getNode(SPISD::RET_FLAG, MVT::Other, Copy, Copy.getValue(1));
   }
   }
 }
 
 MachineBasicBlock *
-SparcV8TargetLowering::InsertAtEndOfBasicBlock(MachineInstr *MI,
-                                               MachineBasicBlock *BB) {
+SparcTargetLowering::InsertAtEndOfBasicBlock(MachineInstr *MI,
+                                             MachineBasicBlock *BB) {
   unsigned BROpcode;
   unsigned CC;
   // Figure out the conditional branch opcode to use for this select_cc.
   switch (MI->getOpcode()) {
   default: assert(0 && "Unknown SELECT_CC!");
-  case V8::SELECT_CC_Int_ICC:
-  case V8::SELECT_CC_FP_ICC:
-  case V8::SELECT_CC_DFP_ICC:
-    BROpcode = V8::BCOND;
+  case SP::SELECT_CC_Int_ICC:
+  case SP::SELECT_CC_FP_ICC:
+  case SP::SELECT_CC_DFP_ICC:
+    BROpcode = SP::BCOND;
     break;
-  case V8::SELECT_CC_Int_FCC:
-  case V8::SELECT_CC_FP_FCC:
-  case V8::SELECT_CC_DFP_FCC:
-    BROpcode = V8::FBCOND;
+  case SP::SELECT_CC_Int_FCC:
+  case SP::SELECT_CC_FP_FCC:
+  case SP::SELECT_CC_DFP_FCC:
+    BROpcode = SP::FBCOND;
     break;
   }
 
-  CC = (V8CC::CondCodes)MI->getOperand(3).getImmedValue();
+  CC = (SPCC::CondCodes)MI->getOperand(3).getImmedValue();
   
   // To "insert" a SELECT_CC instruction, we actually have to insert the diamond
   // control-flow pattern.  The incoming instruction knows the destination vreg
@@ -904,7 +904,7 @@ SparcV8TargetLowering::InsertAtEndOfBasicBlock(MachineInstr *MI,
   //   %Result = phi [ %FalseValue, copy0MBB ], [ %TrueValue, thisMBB ]
   //  ...
   BB = sinkMBB;
-  BuildMI(BB, V8::PHI, 4, MI->getOperand(0).getReg())
+  BuildMI(BB, SP::PHI, 4, MI->getOperand(0).getReg())
     .addReg(MI->getOperand(2).getReg()).addMBB(copy0MBB)
     .addReg(MI->getOperand(1).getReg()).addMBB(thisMBB);
   
@@ -917,20 +917,20 @@ SparcV8TargetLowering::InsertAtEndOfBasicBlock(MachineInstr *MI,
 //===----------------------------------------------------------------------===//
 
 //===--------------------------------------------------------------------===//
-/// SparcV8DAGToDAGISel - SPARC specific code to select Sparc V8 machine
+/// SparcDAGToDAGISel - SPARC specific code to select SPARC machine
 /// instructions for SelectionDAG operations.
 ///
 namespace {
-class SparcV8DAGToDAGISel : public SelectionDAGISel {
-  SparcV8TargetLowering V8Lowering;
+class SparcDAGToDAGISel : public SelectionDAGISel {
+  SparcTargetLowering Lowering;
 
   /// Subtarget - Keep a pointer to the Sparc Subtarget around so that we can
   /// make the right decision when generating code for different targets.
-  const SparcV8Subtarget &Subtarget;
+  const SparcSubtarget &Subtarget;
 public:
-  SparcV8DAGToDAGISel(TargetMachine &TM)
-    : SelectionDAGISel(V8Lowering), V8Lowering(TM),
-      Subtarget(TM.getSubtarget<SparcV8Subtarget>()) {
+  SparcDAGToDAGISel(TargetMachine &TM)
+    : SelectionDAGISel(Lowering), Lowering(TM),
+      Subtarget(TM.getSubtarget<SparcSubtarget>()) {
   }
 
   SDOperand Select(SDOperand Op);
@@ -944,17 +944,17 @@ public:
   virtual void InstructionSelectBasicBlock(SelectionDAG &DAG);
   
   virtual const char *getPassName() const {
-    return "SparcV8 DAG->DAG Pattern Instruction Selection";
+    return "SPARC DAG->DAG Pattern Instruction Selection";
   } 
   
   // Include the pieces autogenerated from the target description.
-#include "SparcV8GenDAGISel.inc"
+#include "SparcGenDAGISel.inc"
 };
 }  // end anonymous namespace
 
 /// InstructionSelectBasicBlock - This callback is invoked by
 /// SelectionDAGISel when it has created a SelectionDAG for us to codegen.
-void SparcV8DAGToDAGISel::InstructionSelectBasicBlock(SelectionDAG &DAG) {
+void SparcDAGToDAGISel::InstructionSelectBasicBlock(SelectionDAG &DAG) {
   DEBUG(BB->dump());
   
   // Select target instructions for the DAG.
@@ -966,7 +966,7 @@ void SparcV8DAGToDAGISel::InstructionSelectBasicBlock(SelectionDAG &DAG) {
   ScheduleAndEmitDAG(DAG);
 }
 
-bool SparcV8DAGToDAGISel::SelectADDRri(SDOperand Addr, SDOperand &Base,
+bool SparcDAGToDAGISel::SelectADDRri(SDOperand Addr, SDOperand &Base,
                                        SDOperand &Offset) {
   if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr)) {
     Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i32);
@@ -988,12 +988,12 @@ bool SparcV8DAGToDAGISel::SelectADDRri(SDOperand Addr, SDOperand &Base,
         return true;
       }
     }
-    if (Addr.getOperand(0).getOpcode() == V8ISD::Lo) {
+    if (Addr.getOperand(0).getOpcode() == SPISD::Lo) {
       Base = Select(Addr.getOperand(1));
       Offset = Addr.getOperand(0).getOperand(0);
       return true;
     }
-    if (Addr.getOperand(1).getOpcode() == V8ISD::Lo) {
+    if (Addr.getOperand(1).getOpcode() == SPISD::Lo) {
       Base = Select(Addr.getOperand(0));
       Offset = Addr.getOperand(1).getOperand(0);
       return true;
@@ -1004,15 +1004,15 @@ bool SparcV8DAGToDAGISel::SelectADDRri(SDOperand Addr, SDOperand &Base,
   return true;
 }
 
-bool SparcV8DAGToDAGISel::SelectADDRrr(SDOperand Addr, SDOperand &R1, 
-                                       SDOperand &R2) {
+bool SparcDAGToDAGISel::SelectADDRrr(SDOperand Addr, SDOperand &R1, 
+                                     SDOperand &R2) {
   if (Addr.getOpcode() == ISD::FrameIndex) return false; 
   if (Addr.getOpcode() == ISD::ADD) {
     if (isa<ConstantSDNode>(Addr.getOperand(1)) &&
         Predicate_simm13(Addr.getOperand(1).Val))
       return false;  // Let the reg+imm pattern catch this!
-    if (Addr.getOperand(0).getOpcode() == V8ISD::Lo ||
-        Addr.getOperand(1).getOpcode() == V8ISD::Lo)
+    if (Addr.getOperand(0).getOpcode() == SPISD::Lo ||
+        Addr.getOperand(1).getOpcode() == SPISD::Lo)
       return false;  // Let the reg+imm pattern catch this!
     R1 = Select(Addr.getOperand(0));
     R2 = Select(Addr.getOperand(1));
@@ -1020,14 +1020,14 @@ bool SparcV8DAGToDAGISel::SelectADDRrr(SDOperand Addr, SDOperand &R1,
   }
 
   R1 = Select(Addr);
-  R2 = CurDAG->getRegister(V8::G0, MVT::i32);
+  R2 = CurDAG->getRegister(SP::G0, MVT::i32);
   return true;
 }
 
-SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
+SDOperand SparcDAGToDAGISel::Select(SDOperand Op) {
   SDNode *N = Op.Val;
   if (N->getOpcode() >= ISD::BUILTIN_OP_END &&
-      N->getOpcode() < V8ISD::FIRST_NUMBER)
+      N->getOpcode() < SPISD::FIRST_NUMBER)
     return Op;   // Already selected.
                  // If this has already been converted, use it.
   std::map<SDOperand, SDOperand>::iterator CGMI = CodeGenMap.find(Op);
@@ -1038,11 +1038,11 @@ SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
   case ISD::FrameIndex: {
     int FI = cast<FrameIndexSDNode>(N)->getIndex();
     if (N->hasOneUse())
-      return CurDAG->SelectNodeTo(N, V8::ADDri, MVT::i32,
+      return CurDAG->SelectNodeTo(N, SP::ADDri, MVT::i32,
                                   CurDAG->getTargetFrameIndex(FI, MVT::i32),
                                   CurDAG->getTargetConstant(0, MVT::i32));
     return CodeGenMap[Op] = 
-      CurDAG->getTargetNode(V8::ADDri, MVT::i32,
+      CurDAG->getTargetNode(SP::ADDri, MVT::i32,
                             CurDAG->getTargetFrameIndex(FI, MVT::i32),
                             CurDAG->getTargetConstant(0, MVT::i32));
   }
@@ -1052,9 +1052,9 @@ SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
     SDOperand RHSL = Select(N->getOperand(2));
     SDOperand RHSH = Select(N->getOperand(3));
     // FIXME, handle immediate RHS.
-    SDOperand Low = CurDAG->getTargetNode(V8::ADDCCrr, MVT::i32, MVT::Flag,
+    SDOperand Low = CurDAG->getTargetNode(SP::ADDCCrr, MVT::i32, MVT::Flag,
                                           LHSL, RHSL);
-    SDOperand Hi  = CurDAG->getTargetNode(V8::ADDXrr, MVT::i32, LHSH, RHSH, 
+    SDOperand Hi  = CurDAG->getTargetNode(SP::ADDXrr, MVT::i32, LHSH, RHSH, 
                                           Low.getValue(1));
     CodeGenMap[SDOperand(N, 0)] = Low;
     CodeGenMap[SDOperand(N, 1)] = Hi;
@@ -1066,9 +1066,9 @@ SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
     SDOperand RHSL = Select(N->getOperand(2));
     SDOperand RHSH = Select(N->getOperand(3));
     // FIXME, handle immediate RHS.
-    SDOperand Low = CurDAG->getTargetNode(V8::SUBCCrr, MVT::i32, MVT::Flag,
+    SDOperand Low = CurDAG->getTargetNode(SP::SUBCCrr, MVT::i32, MVT::Flag,
                                           LHSL, RHSL);
-    SDOperand Hi  = CurDAG->getTargetNode(V8::SUBXrr, MVT::i32, LHSH, RHSH, 
+    SDOperand Hi  = CurDAG->getTargetNode(SP::SUBXrr, MVT::i32, LHSH, RHSH, 
                                           Low.getValue(1));
     CodeGenMap[SDOperand(N, 0)] = Low;
     CodeGenMap[SDOperand(N, 1)] = Hi;
@@ -1083,16 +1083,16 @@ SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
     // Set the Y register to the high-part.
     SDOperand TopPart;
     if (N->getOpcode() == ISD::SDIV) {
-      TopPart = CurDAG->getTargetNode(V8::SRAri, MVT::i32, DivLHS,
+      TopPart = CurDAG->getTargetNode(SP::SRAri, MVT::i32, DivLHS,
                                       CurDAG->getTargetConstant(31, MVT::i32));
     } else {
-      TopPart = CurDAG->getRegister(V8::G0, MVT::i32);
+      TopPart = CurDAG->getRegister(SP::G0, MVT::i32);
     }
-    TopPart = CurDAG->getTargetNode(V8::WRYrr, MVT::Flag, TopPart,
-                                    CurDAG->getRegister(V8::G0, MVT::i32));
+    TopPart = CurDAG->getTargetNode(SP::WRYrr, MVT::Flag, TopPart,
+                                    CurDAG->getRegister(SP::G0, MVT::i32));
 
     // FIXME: Handle div by immediate.
-    unsigned Opcode = N->getOpcode() == ISD::SDIV ? V8::SDIVrr : V8::UDIVrr;
+    unsigned Opcode = N->getOpcode() == ISD::SDIV ? SP::SDIVrr : SP::UDIVrr;
     return CurDAG->SelectNodeTo(N, Opcode, MVT::i32, DivLHS, DivRHS, TopPart);
   }    
   case ISD::MULHU:
@@ -1100,13 +1100,13 @@ SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
     // FIXME: Handle mul by immediate.
     SDOperand MulLHS = Select(N->getOperand(0));
     SDOperand MulRHS = Select(N->getOperand(1));
-    unsigned Opcode = N->getOpcode() == ISD::MULHU ? V8::UMULrr : V8::SMULrr;
+    unsigned Opcode = N->getOpcode() == ISD::MULHU ? SP::UMULrr : SP::SMULrr;
     SDOperand Mul = CurDAG->getTargetNode(Opcode, MVT::i32, MVT::Flag,
                                           MulLHS, MulRHS);
     // The high part is in the Y register.
-    return CurDAG->SelectNodeTo(N, V8::RDY, MVT::i32, Mul.getValue(1));
+    return CurDAG->SelectNodeTo(N, SP::RDY, MVT::i32, Mul.getValue(1));
   }
-  case V8ISD::CALL:
+  case SPISD::CALL:
     // FIXME: This is a workaround for a bug in tblgen.
   { // Pattern #47: (call:Flag (tglobaladdr:i32):$dst, ICC:Flag)
     // Emits: (CALL:void (tglobaladdr:i32):$dst)
@@ -1121,10 +1121,10 @@ SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
     SDOperand Result;
     if (N->getNumOperands() == 3) {
       InFlag = Select(N->getOperand(2));
-      Result = CurDAG->getTargetNode(V8::CALL, MVT::Other, MVT::Flag, Tmp0, 
+      Result = CurDAG->getTargetNode(SP::CALL, MVT::Other, MVT::Flag, Tmp0, 
                                      Chain, InFlag);
     } else {
-      Result = CurDAG->getTargetNode(V8::CALL, MVT::Other, MVT::Flag, Tmp0, 
+      Result = CurDAG->getTargetNode(SP::CALL, MVT::Other, MVT::Flag, Tmp0, 
                                      Chain);
     }
     Chain = CodeGenMap[SDOperand(N, 0)] = Result.getValue(0);
@@ -1139,9 +1139,9 @@ SDOperand SparcV8DAGToDAGISel::Select(SDOperand Op) {
 }
 
 
-/// createSparcV8ISelDag - This pass converts a legalized DAG into a 
+/// createSparcISelDag - This pass converts a legalized DAG into a 
 /// SPARC-specific DAG, ready for instruction scheduling.
 ///
-FunctionPass *llvm::createSparcV8ISelDag(TargetMachine &TM) {
-  return new SparcV8DAGToDAGISel(TM);
+FunctionPass *llvm::createSparcISelDag(TargetMachine &TM) {
+  return new SparcDAGToDAGISel(TM);
 }

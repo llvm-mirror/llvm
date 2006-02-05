@@ -1,4 +1,4 @@
-//===- SparcV8InstrInfo.h - SparcV8 Instruction Information -----*- C++ -*-===//
+//===- SparcInstrInfo.h - Sparc Instruction Information ---------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,22 +7,22 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the SparcV8 implementation of the TargetInstrInfo class.
+// This file contains the Sparc implementation of the TargetInstrInfo class.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SPARCV8INSTRUCTIONINFO_H
-#define SPARCV8INSTRUCTIONINFO_H
+#ifndef SPARCINSTRUCTIONINFO_H
+#define SPARCINSTRUCTIONINFO_H
 
 #include "llvm/Target/TargetInstrInfo.h"
-#include "SparcV8RegisterInfo.h"
+#include "SparcRegisterInfo.h"
 
 namespace llvm {
 
-/// V8II - This namespace holds all of the target specific flags that
+/// SPII - This namespace holds all of the target specific flags that
 /// instruction info tracks.
 ///
-namespace V8II {
+namespace SPII {
   enum {
     Pseudo = (1<<0),
     Load = (1<<1),
@@ -31,10 +31,10 @@ namespace V8II {
   };
 };
 
-class SparcV8InstrInfo : public TargetInstrInfo {
-  const SparcV8RegisterInfo RI;
+class SparcInstrInfo : public TargetInstrInfo {
+  const SparcRegisterInfo RI;
 public:
-  SparcV8InstrInfo(SparcV8Subtarget &ST);
+  SparcInstrInfo(SparcSubtarget &ST);
 
   /// getRegisterInfo - TargetInstrInfo is a superset of MRegister info.  As
   /// such, whenever a client has an instance of instruction info, it should

@@ -1,4 +1,4 @@
-//===- SparcV8Subtarget.cpp - SPARC Subtarget Information -----------------===//
+//===- SparcSubtarget.cpp - SPARC Subtarget Information -------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcV8Subtarget.h"
-#include "SparcV8GenSubtarget.inc"
+#include "SparcSubtarget.h"
+#include "SparcGenSubtarget.inc"
 using namespace llvm;
 
 // FIXME: temporary.
@@ -22,7 +22,7 @@ namespace {
                           cl::desc("Enable V9 instructions in the V8 target"));
 }
 
-SparcV8Subtarget::SparcV8Subtarget(const Module &M, const std::string &FS) {
+SparcSubtarget::SparcSubtarget(const Module &M, const std::string &FS) {
   // Set the default features.
   IsV9 = false;
   V8DeprecatedInsts = false;

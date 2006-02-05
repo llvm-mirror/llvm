@@ -1,4 +1,4 @@
-//===- SparcV8.td - Describe the SparcV8 Target Machine ---------*- C++ -*-===//
+//===- Sparc.td - Describe the Sparc Target Machine -------------*- C++ -*-===//
 // 
 //                     The LLVM Compiler Infrastructure
 //
@@ -34,15 +34,15 @@ def FeatureVIS
 // Register File Description
 //===----------------------------------------------------------------------===//
 
-include "SparcV8RegisterInfo.td"
+include "SparcRegisterInfo.td"
 
 //===----------------------------------------------------------------------===//
 // Instruction Descriptions
 //===----------------------------------------------------------------------===//
 
-include "SparcV8InstrInfo.td"
+include "SparcInstrInfo.td"
 
-def SparcV8InstrInfo : InstrInfo {
+def SparcInstrInfo : InstrInfo {
   // Define how we want to layout our target-specific information field.
   let TSFlagsFields = [];
   let TSFlagsShifts = [];
@@ -74,7 +74,7 @@ def : Proc<"ultrasparc3-vis", [FeatureV9, FeatureV8Deprecated, FeatureVIS]>;
 // Declare the target which we are implementing
 //===----------------------------------------------------------------------===//
 
-def SparcV8 : Target {
+def Sparc : Target {
   // Pointers are 32-bits in size.
   let PointerType = i32;
 
@@ -82,5 +82,5 @@ def SparcV8 : Target {
   let CalleeSavedRegisters = [];
 
   // Pull in Instruction Info:
-  let InstructionSet = SparcV8InstrInfo;
+  let InstructionSet = SparcInstrInfo;
 }

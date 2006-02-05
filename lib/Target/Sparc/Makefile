@@ -1,4 +1,4 @@
-##===- lib/Target/SparcV8/Makefile -------------------------*- Makefile -*-===##
+##===- lib/Target/Sparc/Makefile ---------------------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #
@@ -7,14 +7,14 @@
 # 
 ##===----------------------------------------------------------------------===##
 LEVEL = ../../..
-LIBRARYNAME = LLVMSparcV8
-TARGET = SparcV8
+LIBRARYNAME = LLVMSparc
+TARGET = Sparc
 
 # Make sure that tblgen is run, first thing.
-BUILT_SOURCES = SparcV8GenRegisterInfo.h.inc SparcV8GenRegisterNames.inc \
-                SparcV8GenRegisterInfo.inc SparcV8GenInstrNames.inc \
-                SparcV8GenInstrInfo.inc SparcV8GenAsmWriter.inc \
-                SparcV8GenDAGISel.inc SparcV8GenSubtarget.inc
+BUILT_SOURCES = SparcGenRegisterInfo.h.inc SparcGenRegisterNames.inc \
+                SparcGenRegisterInfo.inc SparcGenInstrNames.inc \
+                SparcGenInstrInfo.inc SparcGenAsmWriter.inc \
+                SparcGenDAGISel.inc SparcGenSubtarget.inc
 
 include $(LEVEL)/Makefile.common
 

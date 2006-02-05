@@ -1,4 +1,4 @@
-//===- SparcV8InstrInfo.cpp - SparcV8 Instruction Information ---*- C++ -*-===//
+//===- SparcInstrInfo.cpp - Sparc Instruction Information -------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,18 +7,18 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the SparcV8 implementation of the TargetInstrInfo class.
+// This file contains the Sparc implementation of the TargetInstrInfo class.
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcV8InstrInfo.h"
-#include "SparcV8.h"
+#include "SparcInstrInfo.h"
+#include "Sparc.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "SparcV8GenInstrInfo.inc"
+#include "SparcGenInstrInfo.inc"
 using namespace llvm;
 
-SparcV8InstrInfo::SparcV8InstrInfo(SparcV8Subtarget &ST)
-  : TargetInstrInfo(SparcV8Insts, sizeof(SparcV8Insts)/sizeof(SparcV8Insts[0])),
+SparcInstrInfo::SparcInstrInfo(SparcSubtarget &ST)
+  : TargetInstrInfo(SparcInsts, sizeof(SparcInsts)/sizeof(SparcInsts[0])),
     RI(ST) {
 }
 
@@ -29,29 +29,29 @@ static bool isZeroImm(const MachineOperand &op) {
 /// Return true if the instruction is a register to register move and
 /// leave the source and dest operands in the passed parameters.
 ///
-bool SparcV8InstrInfo::isMoveInstr(const MachineInstr &MI,
-                                   unsigned &SrcReg, unsigned &DstReg) const {
+bool SparcInstrInfo::isMoveInstr(const MachineInstr &MI,
+                                 unsigned &SrcReg, unsigned &DstReg) const {
   // We look for 3 kinds of patterns here:
   // or with G0 or 0
   // add with G0 or 0
   // fmovs or FpMOVD (pseudo double move).
-  if (MI.getOpcode() == V8::ORrr || MI.getOpcode() == V8::ADDrr) {
-    if (MI.getOperand(1).getReg() == V8::G0) {
+  if (MI.getOpcode() == SP::ORrr || MI.getOpcode() == SP::ADDrr) {
+    if (MI.getOperand(1).getReg() == SP::G0) {
       DstReg = MI.getOperand(0).getReg();
       SrcReg = MI.getOperand(2).getReg();
       return true;
-    } else if (MI.getOperand(2).getReg() == V8::G0) {
+    } else if (MI.getOperand(2).getReg() == SP::G0) {
       DstReg = MI.getOperand(0).getReg();
       SrcReg = MI.getOperand(1).getReg();
       return true;
     }
-  } else if ((MI.getOpcode() == V8::ORri || MI.getOpcode() == V8::ADDri) &&
+  } else if ((MI.getOpcode() == SP::ORri || MI.getOpcode() == SP::ADDri) &&
              isZeroImm(MI.getOperand(2)) && MI.getOperand(1).isRegister()) {
     DstReg = MI.getOperand(0).getReg();
     SrcReg = MI.getOperand(1).getReg();
     return true;
-  } else if (MI.getOpcode() == V8::FMOVS || MI.getOpcode() == V8::FpMOVD ||
-             MI.getOpcode() == V8::FMOVD) {
+  } else if (MI.getOpcode() == SP::FMOVS || MI.getOpcode() == SP::FpMOVD ||
+             MI.getOpcode() == SP::FMOVD) {
     SrcReg = MI.getOperand(1).getReg();
     DstReg = MI.getOperand(0).getReg();
     return true;
@@ -64,11 +64,11 @@ bool SparcV8InstrInfo::isMoveInstr(const MachineInstr &MI,
 /// the destination along with the FrameIndex of the loaded stack slot.  If
 /// not, return 0.  This predicate must return 0 if the instruction has
 /// any side effects other than loading from the stack slot.
-unsigned SparcV8InstrInfo::isLoadFromStackSlot(MachineInstr *MI,
-                                               int &FrameIndex) const {
-  if (MI->getOpcode() == V8::LDri ||
-      MI->getOpcode() == V8::LDFri ||
-      MI->getOpcode() == V8::LDDFri) {
+unsigned SparcInstrInfo::isLoadFromStackSlot(MachineInstr *MI,
+                                             int &FrameIndex) const {
+  if (MI->getOpcode() == SP::LDri ||
+      MI->getOpcode() == SP::LDFri ||
+      MI->getOpcode() == SP::LDDFri) {
     if (MI->getOperand(1).isFrameIndex() && MI->getOperand(2).isImmediate() &&
         MI->getOperand(2).getImmedValue() == 0) {
       FrameIndex = MI->getOperand(1).getFrameIndex();
@@ -83,11 +83,11 @@ unsigned SparcV8InstrInfo::isLoadFromStackSlot(MachineInstr *MI,
 /// the source reg along with the FrameIndex of the loaded stack slot.  If
 /// not, return 0.  This predicate must return 0 if the instruction has
 /// any side effects other than storing to the stack slot.
-unsigned SparcV8InstrInfo::isStoreToStackSlot(MachineInstr *MI,
-                                              int &FrameIndex) const {
-  if (MI->getOpcode() == V8::STri ||
-      MI->getOpcode() == V8::STFri ||
-      MI->getOpcode() == V8::STDFri) {
+unsigned SparcInstrInfo::isStoreToStackSlot(MachineInstr *MI,
+                                            int &FrameIndex) const {
+  if (MI->getOpcode() == SP::STri ||
+      MI->getOpcode() == SP::STFri ||
+      MI->getOpcode() == SP::STDFri) {
     if (MI->getOperand(0).isFrameIndex() && MI->getOperand(1).isImmediate() &&
         MI->getOperand(1).getImmedValue() == 0) {
       FrameIndex = MI->getOperand(0).getFrameIndex();

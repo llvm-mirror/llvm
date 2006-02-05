@@ -1,4 +1,4 @@
-//=====-- SparcV8Subtarget.h - Define Subtarget for the SPARC -*- C++ -*--====//
+//=====-- SparcSubtarget.h - Define Subtarget for the SPARC ----*- C++ -*-====//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -20,12 +20,12 @@
 namespace llvm {
   class Module;
   
-class SparcV8Subtarget : public TargetSubtarget {
+class SparcSubtarget : public TargetSubtarget {
   bool IsV9;
   bool V8DeprecatedInsts;
   bool IsVIS;
 public:
-  SparcV8Subtarget(const Module &M, const std::string &FS);
+  SparcSubtarget(const Module &M, const std::string &FS);
 
   bool isV9() const { return IsV9; }
   bool isVIS() const { return IsVIS; }

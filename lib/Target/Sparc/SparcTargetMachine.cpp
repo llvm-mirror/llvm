@@ -1,4 +1,4 @@
-//===-- SparcV8TargetMachine.cpp - Define TargetMachine for SparcV8 -------===//
+//===-- SparcTargetMachine.cpp - Define TargetMachine for Sparc -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SparcV8TargetMachine.h"
-#include "SparcV8.h"
+#include "SparcTargetMachine.h"
+#include "Sparc.h"
 #include "llvm/Assembly/PrintModulePass.h"
 #include "llvm/Module.h"
 #include "llvm/PassManager.h"
@@ -26,20 +26,19 @@ using namespace llvm;
 
 namespace {
   // Register the target.
-  RegisterTarget<SparcV8TargetMachine> X("sparcv8","  SPARC V8 (experimental)");
+  RegisterTarget<SparcTargetMachine> X("sparc", "  SPARC");
 }
 
-/// SparcV8TargetMachine ctor - Create an ILP32 architecture model
+/// SparcTargetMachine ctor - Create an ILP32 architecture model
 ///
-SparcV8TargetMachine::SparcV8TargetMachine(const Module &M,
-                                           IntrinsicLowering *IL,
-                                           const std::string &FS)
-  : TargetMachine("SparcV8", IL, false, 4, 4),
+SparcTargetMachine::SparcTargetMachine(const Module &M, IntrinsicLowering *IL,
+                                       const std::string &FS)
+  : TargetMachine("Sparc", IL, false, 4, 4),
     Subtarget(M, FS), InstrInfo(Subtarget),
     FrameInfo(TargetFrameInfo::StackGrowsDown, 8, 0) {
 }
 
-unsigned SparcV8TargetMachine::getModuleMatchQuality(const Module &M) {
+unsigned SparcTargetMachine::getModuleMatchQuality(const Module &M) {
   std::string TT = M.getTargetTriple();
   if (TT.size() >= 6 && std::string(TT.begin(), TT.begin()+6) == "sparc-")
     return 20;
@@ -47,7 +46,7 @@ unsigned SparcV8TargetMachine::getModuleMatchQuality(const Module &M) {
   if (M.getEndianness()  == Module::BigEndian &&
       M.getPointerSize() == Module::Pointer32)
 #ifdef __sparc__
-    return 20;   // BE/32 ==> Prefer sparcv8 on sparc
+    return 20;   // BE/32 ==> Prefer sparc on sparc
 #else
     return 5;    // BE/32 ==> Prefer ppc elsewhere
 #endif
@@ -61,10 +60,9 @@ unsigned SparcV8TargetMachine::getModuleMatchQuality(const Module &M) {
 /// addPassesToEmitFile - Add passes to the specified pass manager
 /// to implement a static compiler for this target.
 ///
-bool SparcV8TargetMachine::addPassesToEmitFile(PassManager &PM,
-                                               std::ostream &Out,
-                                               CodeGenFileType FileType,
-                                               bool Fast) {
+bool SparcTargetMachine::addPassesToEmitFile(PassManager &PM, std::ostream &Out,
+                                             CodeGenFileType FileType,
+                                             bool Fast) {
   if (FileType != TargetMachine::AssemblyFile) return true;
 
   // FIXME: Implement efficient support for garbage collection intrinsics.
@@ -83,7 +81,7 @@ bool SparcV8TargetMachine::addPassesToEmitFile(PassManager &PM,
   // Make sure that no unreachable blocks are instruction selected.
   PM.add(createUnreachableBlockEliminationPass());
   
-  PM.add(createSparcV8ISelDag(*this));
+  PM.add(createSparcISelDag(*this));
 
   // Print machine instructions as they were initially generated.
   if (PrintMachineCode)
@@ -97,16 +95,16 @@ bool SparcV8TargetMachine::addPassesToEmitFile(PassManager &PM,
   if (PrintMachineCode)
     PM.add(createMachineFunctionPrinterPass(&std::cerr));
 
-  PM.add(createSparcV8FPMoverPass(*this));
+  PM.add(createSparcFPMoverPass(*this));
 
-  PM.add(createSparcV8DelaySlotFillerPass(*this));
+  PM.add(createSparcDelaySlotFillerPass(*this));
 
   // Print machine instructions after filling delay slots.
   if (PrintMachineCode)
     PM.add(createMachineFunctionPrinterPass(&std::cerr));
 
   // Output assembly language.
-  PM.add(createSparcV8CodePrinterPass(Out, *this));
+  PM.add(createSparcCodePrinterPass(Out, *this));
 
   // Delete the MachineInstrs we generated, since they're no longer needed.
   PM.add(createMachineCodeDeleter());
