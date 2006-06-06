@@ -1,4 +1,4 @@
-//===-- llvm/Support/ToolRunner.h -------------------------------*- C++ -*-===//
+//===-- tools/bugpoint/ToolRunner.h -----------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_SUPPORT_TOOLRUNNER_H
-#define LLVM_SUPPORT_TOOLRUNNER_H
+#ifndef BUGPOINT_TOOLRUNNER_H
+#define BUGPOINT_TOOLRUNNER_H
 
 #include "llvm/Support/SystemUtils.h"
 #include <exception>
@@ -25,7 +25,6 @@ namespace llvm {
 
 class CBE;
 class LLC;
-
 
 /// ToolExecutionError - An instance of this class is thrown by the
 /// AbstractInterpreter instances if there is an error running a tool (e.g., LLC
