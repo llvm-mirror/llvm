@@ -1,4 +1,4 @@
-//===- llvm/ADT/DenseMap.h - A dense map implmentation ----------*- C++ -*-===//
+//===- llvm/ADT/IndexedMap.h - An index map implementation ------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements a dense map. A dense map template takes two
+// This file implements an indexed map. The index map template takes two
 // types. The first is the mapped type and the second is a functor
 // that maps its argument to a size_t. On instantiation a "null" value
 // can be provided to be used as a "does not exist" indicator in the
@@ -17,8 +17,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_ADT_DENSEMAP_H
-#define LLVM_ADT_DENSEMAP_H
+#ifndef LLVM_ADT_INDEXEDMAP_H
+#define LLVM_ADT_INDEXEDMAP_H
 
 #include <functional>
 #include <vector>
@@ -33,7 +33,7 @@ namespace llvm {
   };
 
   template <typename T, typename ToIndexT = IdentityFunctor>
-  class DenseMap {
+  class IndexMap {
     typedef typename ToIndexT::argument_type IndexT;
     typedef std::vector<T> StorageT;
     StorageT storage_;
@@ -41,9 +41,9 @@ namespace llvm {
     ToIndexT toIndex_;
 
   public:
-    DenseMap() : nullVal_(T()) { }
+    IndexMap() : nullVal_(T()) { }
 
-    explicit DenseMap(const T& val) : nullVal_(val) { }
+    explicit IndexMap(const T& val) : nullVal_(val) { }
 
     typename StorageT::reference operator[](IndexT n) {
       assert(toIndex_(n) < storage_.size() && "index out of bounds!");
