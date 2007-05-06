@@ -1,4 +1,4 @@
-##===- lib/Bytecode/Archive/Makefile -----------------------*- Makefile -*-===##
+##===- lib/Archive/Makefile --------------------------------*- Makefile -*-===##
 # 
 #                     The LLVM Compiler Infrastructure
 #
@@ -7,7 +7,7 @@
 # 
 ##===----------------------------------------------------------------------===##
 
-LEVEL = ../../..
+LEVEL = ../..
 LIBRARYNAME = LLVMArchive
 
 # We only want an archive so only those modules actually used by a tool are 
