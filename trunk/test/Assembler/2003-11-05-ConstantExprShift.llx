@@ -1,0 +1,5 @@
+; RUN: llvm-upgrade < %s | llvm-as | llvm-dis
+
+int %test() {
+  ret int shr (int cast (int()* %test to int), ubyte 2)
+}

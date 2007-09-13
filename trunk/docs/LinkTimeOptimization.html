@@ -1,0 +1,392 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" 
+                      "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+ <title>LLVM Link Time Optimization: Design and Implementation</title>
+  <link rel="stylesheet" href="llvm.css" type="text/css">
+</head>
+
+<div class="doc_title">
+  LLVM Link Time Optimization: Design and Implementation
+</div>
+
+<ul>
+  <li><a href="#desc">Description</a></li>
+  <li><a href="#design">Design Philosophy</a>
+  <ul>
+    <li><a href="#example1">Example of link time optimization</a></li>
+    <li><a href="#alternative_approaches">Alternative Approaches</a></li>
+  </ul></li>
+  <li><a href="#multiphase">Multi-phase communication between LLVM and linker</a>
+  <ul>
+    <li><a href="#phase1">Phase 1 : Read LLVM Bytecode Files</a></li>
+    <li><a href="#phase2">Phase 2 : Symbol Resolution</a></li>
+    <li><a href="#phase3">Phase 3 : Optimize Bytecode Files</a></li>
+    <li><a href="#phase4">Phase 4 : Symbol Resolution after optimization</a></li>
+  </ul></li>
+  <li><a href="#lto">LLVMlto</a>
+  <ul>
+    <li><a href="#llvmsymbol">LLVMSymbol</a></li>
+    <li><a href="#readllvmobjectfile">readLLVMObjectFile()</a></li>
+    <li><a href="#optimizemodules">optimizeModules()</a></li>
+    <li><a href="#gettargettriple">getTargetTriple()</a></li>
+    <li><a href="#removemodule">removeModule()</a></li>
+    <li><a href="#getalignment">getAlignment()</a></li>
+  </ul></li>
+  <li><a href="#debug">Debugging Information</a></li>
+</ul>
+
+<div class="doc_author">
+<p>Written by Devang Patel</p>
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+<a name="desc">Description</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+<p>
+LLVM features powerful intermodular optimizations which can be used at link 
+time.  Link Time Optimization is another name for intermodular optimization 
+when performed during the link stage. This document describes the interface 
+and design between the LLVM intermodular optimizer and the linker.</p>
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+<a name="design">Design Philosophy</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+<p>
+The LLVM Link Time Optimizer provides complete transparency, while doing 
+intermodular optimization, in the compiler tool chain. Its main goal is to let 
+the developer take advantage of intermodular optimizations without making any 
+significant changes to the developer's makefiles or build system. This is 
+achieved through tight integration with the linker. In this model, the linker 
+treates LLVM bitcode files like native object files and allows mixing and 
+matching among them. The linker uses <a href="#lto">LLVMlto</a>, a dynamically 
+loaded library, to handle LLVM bitcode files. This tight integration between 
+the linker and LLVM optimizer helps to do optimizations that are not possible 
+in other models. The linker input allows the optimizer to avoid relying on 
+conservative escape analysis.
+</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="example1">Example of link time optimization</a>
+</div>
+
+<div class="doc_text">
+  <p>The following example illustrates the advantages of LTO's integrated
+  approach and clean interface. This example requires a system linker which
+  supports LTO through the interface described in this document.  Here,
+  llvm-gcc transparently invokes system linker. </p>
+  <ul>
+    <li> Input source file <tt>a.c</tt> is compiled into LLVM bitcode form.
+    <li> Input source file <tt>main.c</tt> is compiled into native object code.
+  </ul>
+<div class="doc_code"><pre>
+--- a.h ---
+extern int foo1(void);
+extern void foo2(void);
+extern void foo4(void);
+--- a.c ---
+#include "a.h"
+
+static signed int i = 0;
+
+void foo2(void) {
+ i = -1;
+}
+
+static int foo3() {
+foo4();
+return 10;
+}
+
+int foo1(void) {
+int data = 0;
+
+if (i &lt; 0) { data = foo3(); }
+
+data = data + 42;
+return data;
+}
+
+--- main.c ---
+#include &lt;stdio.h&gt;
+#include "a.h"
+
+void foo4(void) {
+ printf ("Hi\n");
+}
+
+int main() {
+ return foo1();
+}
+
+--- command lines ---
+$ llvm-gcc --emit-llvm -c a.c -o a.o  # &lt;-- a.o is LLVM bitcode file
+$ llvm-gcc -c main.c -o main.o # &lt;-- main.o is native object file
+$ llvm-gcc a.o main.o -o main # &lt;-- standard link command without any modifications
+</pre></div>
+  <p>In this example, the linker recognizes that <tt>foo2()</tt> is an 
+  externally visible symbol defined in LLVM bitcode file. This information 
+  is collected using <a href="#readllvmobjectfile"> readLLVMObjectFile()</a>. 
+  Based on this information, the linker completes its usual symbol resolution 
+  pass and finds that <tt>foo2()</tt> is not used anywhere. This information 
+  is used by the LLVM optimizer and it removes <tt>foo2()</tt>. As soon as 
+  <tt>foo2()</tt> is removed, the optimizer recognizes that condition 
+  <tt>i &lt; 0</tt> is always false, which means <tt>foo3()</tt> is never 
+  used. Hence, the optimizer removes <tt>foo3()</tt>, also.  And this in turn, 
+  enables linker to remove <tt>foo4()</tt>.  This example illustrates the 
+  advantage of tight integration with the linker. Here, the optimizer can not 
+  remove <tt>foo3()</tt> without the linker's input.
+  </p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="alternative_approaches">Alternative Approaches</a>
+</div>
+
+<div class="doc_text">
+  <dl>
+    <dt><b>Compiler driver invokes link time optimizer separately.</b></dt>
+    <dd>In this model the link time optimizer is not able to take advantage of 
+    information collected during the linker's normal symbol resolution phase. 
+    In the above example, the optimizer can not remove <tt>foo2()</tt> without 
+    the linker's input because it is externally visible. This in turn prohibits
+    the optimizer from removing <tt>foo3()</tt>.</dd>
+    <dt><b>Use separate tool to collect symbol information from all object
+    files.</b></dt>
+    <dd>In this model, a new, separate, tool or library replicates the linker's
+    capability to collect information for link time optimization. Not only is
+    this code duplication difficult to justify, but it also has several other 
+    disadvantages.  For example, the linking semantics and the features 
+    provided by the linker on various platform are not unique. This means, 
+    this new tool needs to support all such features and platforms in one 
+    super tool or a separate tool per platform is required. This increases 
+    maintance cost for link time optimizer significantly, which is not 
+    necessary. This approach also requires staying synchronized with linker 
+    developements on various platforms, which is not the main focus of the link 
+    time optimizer. Finally, this approach increases end user's build time due 
+    to the duplication of work done by this separate tool and the linker itself.
+    </dd>
+  </dl>
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="multiphase">Multi-phase communication between LLVM and linker</a>
+</div>
+
+<div class="doc_text">
+  <p>The linker collects information about symbol defininitions and uses in 
+  various link objects which is more accurate than any information collected 
+  by other tools during typical build cycles.  The linker collects this 
+  information by looking at the definitions and uses of symbols in native .o 
+  files and using symbol visibility information. The linker also uses 
+  user-supplied information, such as a list of exported symbols. LLVM 
+  optimizer collects control flow information, data flow information and knows 
+  much more about program structure from the optimizer's point of view. 
+  Our goal is to take advantage of tight intergration between the linker and 
+  the optimizer by sharing this information during various linking phases.
+</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="phase1">Phase 1 : Read LLVM Bitcode Files</a>
+</div>
+
+<div class="doc_text">
+  <p>The linker first reads all object files in natural order and collects 
+  symbol information. This includes native object files as well as LLVM bitcode 
+  files.  In this phase, the linker uses 
+  <a href="#readllvmobjectfile"> readLLVMObjectFile() </a>  to collect symbol
+  information from each LLVM bitcode files and updates its internal global 
+  symbol table accordingly. The intent of this interface is to avoid overhead 
+  in the non LLVM case, where all input object files are native object files, 
+  by putting this code in the error path of the linker. When the linker sees 
+  the first llvm .o file, it <tt>dlopen()</tt>s the dynamic library. This is
+  to allow changes to the LLVM LTO code without relinking the linker.
+</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="phase2">Phase 2 : Symbol Resolution</a>
+</div>
+
+<div class="doc_text">
+  <p>In this stage, the linker resolves symbols using global symbol table 
+  information to report undefined symbol errors, read archive members, resolve 
+  weak symbols, etc. The linker is able to do this seamlessly even though it 
+  does not know the exact content of input LLVM bitcode files because it uses 
+  symbol information provided by 
+  <a href="#readllvmobjectfile">readLLVMObjectFile()</a>.  If dead code 
+  stripping is enabled then the linker collects the list of live symbols.
+  </p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="phase3">Phase 3 : Optimize Bitcode Files</a>
+</div>
+<div class="doc_text">
+  <p>After symbol resolution, the linker updates symbol information supplied 
+  by LLVM bitcode files appropriately. For example, whether certain LLVM 
+  bitcode supplied symbols are used or not. In the example above, the linker 
+  reports that <tt>foo2()</tt> is not used anywhere in the program, including 
+  native <tt>.o</tt> files. This information is used by the LLVM interprocedural
+  optimizer. The linker uses <a href="#optimizemodules">optimizeModules()</a> 
+  and requests an optimized native object file of the LLVM portion of the 
+  program. 
+</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="phase4">Phase 4 : Symbol Resolution after optimization</a>
+</div>
+
+<div class="doc_text">
+  <p>In this phase, the linker reads optimized a native object file and 
+  updates the internal global symbol table to reflect any changes. The linker 
+  also collects information about any changes in use of external symbols by 
+  LLVM bitcode files. In the examle above, the linker notes that 
+  <tt>foo4()</tt> is not used any more. If dead code stripping is enabled then 
+  the linker refreshes the live symbol information appropriately and performs 
+  dead code stripping.</p>
+  <p>After this phase, the linker continues linking as if it never saw LLVM 
+  bitcode files.</p>
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+<a name="lto">LLVMlto</a>
+</div>
+
+<div class="doc_text">
+  <p><tt>LLVMlto</tt> is a dynamic library that is part of the LLVM tools, and 
+  is intended for use by a linker. <tt>LLVMlto</tt> provides an abstract C++ 
+  interface to use the LLVM interprocedural optimizer without exposing details 
+  of LLVM's internals. The intention is to keep the interface as stable as 
+  possible even when the LLVM optimizer continues to evolve.</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="llvmsymbol">LLVMSymbol</a>
+</div>
+
+<div class="doc_text">
+  <p>The <tt>LLVMSymbol</tt> class is used to describe the externally visible 
+  functions and global variables, defined in LLVM bitcode files, to the linker.
+  This includes symbol visibility information. This information is used by 
+  the linker to do symbol resolution. For example: function <tt>foo2()</tt> is 
+  defined inside an LLVM bitcode module and it is an externally visible symbol.
+  This helps the linker connect the use of <tt>foo2()</tt> in native object 
+  files with a future definition of the symbol <tt>foo2()</tt>. The linker 
+  will see the actual definition of <tt>foo2()</tt> when it receives the 
+  optimized native object file in 
+  <a href="#phase4">Symbol Resolution after optimization</a> phase. If the 
+  linker does not find any uses of <tt>foo2()</tt>, it updates LLVMSymbol 
+  visibility information to notify LLVM intermodular optimizer that it is dead.
+  The LLVM intermodular optimizer takes advantage of such information to 
+  generate better code.</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="readllvmobjectfile">readLLVMObjectFile()</a>
+</div>
+
+<div class="doc_text">
+  <p>The <tt>readLLVMObjectFile()</tt> function is used by the linker to read 
+  LLVM bitcode files and collect LLVMSymbol information. This routine also
+  supplies a list of externally defined symbols that are used by LLVM bitcode
+  files. The linker uses this symbol information to do symbol resolution. 
+  Internally, <a href="#lto">LLVMlto</a> maintains LLVM bitcode modules in 
+  memory. This function also provides a list of external references used by 
+  bitcode files.</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="optimizemodules">optimizeModules()</a>
+</div>
+
+<div class="doc_text">
+  <p>The linker invokes <tt>optimizeModules</tt> to optimize already read 
+  LLVM bitcode files by applying LLVM intermodular optimization techniques. 
+  This function runs the LLVM intermodular optimizer and generates native 
+  object code as <tt>.o</tt> files at the name and location provided by the 
+  linker.</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="gettargettriple">getTargetTriple()</a>
+</div>
+
+<div class="doc_text">
+  <p>The linker may use <tt>getTargetTriple()</tt> to query target architecture
+  while validating LLVM bitcode file.</p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="removemodule">removeModule()</a>
+</div>
+
+<div class="doc_text">
+  <p>Internally, <a href="#lto">LLVMlto</a> maintains LLVM bitcode modules in 
+  memory. The linker may use <tt>removeModule()</tt> method to remove desired
+  modules from memory. </p>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="getalignment">getAlignment()</a>
+</div>
+
+<div class="doc_text">
+  <p>The linker may use <a href="#llvmsymbol">LLVMSymbol</a> method 
+  <tt>getAlignment()</tt> to query symbol alignment information.</p>
+</div>
+
+<!-- *********************************************************************** -->
+<div class="doc_section">
+  <a name="debug">Debugging Information</a>
+</div>
+<!-- *********************************************************************** -->
+
+<div class="doc_text">
+
+<p><tt> ... To be completed ... </tt></p>
+
+</div>
+
+<!-- *********************************************************************** -->
+
+<hr>
+<address>
+  <a href="http://jigsaw.w3.org/css-validator/check/referer"><img
+  src="http://jigsaw.w3.org/css-validator/images/vcss" alt="Valid CSS!"></a>
+  <a href="http://validator.w3.org/check/referer"><img
+  src="http://www.w3.org/Icons/valid-html401" alt="Valid HTML 4.01!"></a>
+
+  Devang Patel<br>
+  <a href="http://llvm.org">LLVM Compiler Infrastructure</a><br>
+  Last modified: $Date$
+</address>
+
+</body>
+</html>

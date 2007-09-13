@@ -1,0 +1,4 @@
+; RUN: llvm-upgrade < %s | llvm-as | llc -march=c | grep common | grep X
+
+%X = linkonce global int 5
+

@@ -1,0 +1,3 @@
+; RUN: llvm-as %s |& grep error
+
+void %foo() {
