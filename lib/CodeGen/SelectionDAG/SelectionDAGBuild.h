@@ -20,8 +20,8 @@
 #ifndef NDEBUG
 #include "llvm/ADT/SmallSet.h"
 #endif
-#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/Support/CallSite.h"
 #include <vector>
 #include <set>
@@ -95,7 +95,8 @@ public:
   /// set - Initialize this FunctionLoweringInfo with the given Function
   /// and its associated MachineFunction.
   ///
-  void set(Function &Fn, MachineFunction &MF, bool EnableFastISel);
+  void set(Function &Fn, MachineFunction &MF, SelectionDAG &DAG,
+           bool EnableFastISel);
 
   /// MBBMap - A mapping from LLVM basic blocks to their machine code entry.
   DenseMap<const BasicBlock*, MachineBasicBlock *> MBBMap;
@@ -163,6 +164,9 @@ public:
 ///
 class SelectionDAGLowering {
   MachineBasicBlock *CurMBB;
+
+  /// CurDebugLoc - current file + line number.  Changes as we build the DAG.
+  DebugLoc CurDebugLoc;
 
   DenseMap<const Value*, SDValue> NodeMap;
 
@@ -356,7 +360,8 @@ public:
 
   SelectionDAGLowering(SelectionDAG &dag, TargetLowering &tli,
                        FunctionLoweringInfo &funcinfo)
-    : TLI(tli), DAG(dag), FuncInfo(funcinfo) {
+    : CurDebugLoc(DebugLoc::getUnknownLoc()), 
+      TLI(tli), DAG(dag), FuncInfo(funcinfo) {
   }
 
   void init(GCFunctionInfo *gfi, AliasAnalysis &aa);
@@ -381,6 +386,8 @@ public:
   /// to do this before emitting a terminator instruction.
   ///
   SDValue getControlRoot();
+
+  DebugLoc getCurDebugLoc() const { return CurDebugLoc; }
 
   void CopyValueToVirtualRegister(Value *V, unsigned Reg);
 
@@ -531,6 +538,8 @@ private:
   
   const char *implVisitBinaryAtomic(CallInst& I, ISD::NodeType Op);
   const char *implVisitAluOverflow(CallInst &I, ISD::NodeType Op);
+
+  void setCurDebugLoc(DebugLoc dl) { CurDebugLoc = dl; }
 };
 
 /// AddCatchInfo - Extract the personality and type infos from an eh.selector

@@ -16,6 +16,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/CodeGen/DebugLoc.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 
 namespace llvm {
@@ -55,27 +56,32 @@ protected:
   MachineRegisterInfo &MRI;
   MachineFrameInfo &MFI;
   MachineConstantPool &MCP;
+  DebugLoc DL;
   const TargetMachine &TM;
   const TargetData &TD;
   const TargetInstrInfo &TII;
   const TargetLowering &TLI;
 
 public:
-  /// startNewBlock - Set the current block, to which generated
-  /// machine instructions will be appended, and clear the local
-  /// CSE map.
+  /// startNewBlock - Set the current block to which generated machine
+  /// instructions will be appended, and clear the local CSE map.
   ///
   void startNewBlock(MachineBasicBlock *mbb) {
     setCurrentBlock(mbb);
     LocalValueMap.clear();
   }
 
-  /// setCurrentBlock - Set the current block, to which generated
-  /// machine instructions will be appended.
+  /// setCurrentBlock - Set the current block to which generated machine
+  /// instructions will be appended.
   ///
   void setCurrentBlock(MachineBasicBlock *mbb) {
     MBB = mbb;
   }
+
+  /// setCurDebugLoc - Set the current debug location information, which is used
+  /// when creating a machine instruction.
+  ///
+  void setCurDebugLoc(DebugLoc dl) { DL = dl; }
 
   /// SelectInstruction - Do "fast" instruction selection for the given
   /// LLVM IR instruction, and append generated machine instructions to
@@ -259,8 +265,9 @@ protected:
                           uint64_t Imm);
 
   /// FastEmitInst_extractsubreg - Emit a MachineInstr for an extract_subreg
-  /// from a specified index of a superregister.
-  unsigned FastEmitInst_extractsubreg(unsigned Op0, uint32_t Idx);
+  /// from a specified index of a superregister to a specified type.
+  unsigned FastEmitInst_extractsubreg(MVT::SimpleValueType RetVT,
+                                      unsigned Op0, uint32_t Idx);
 
   /// FastEmitBranch - Emit an unconditional branch to the given block,
   /// unless it is the immediate (fall-through) successor, and update

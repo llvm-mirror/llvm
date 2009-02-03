@@ -399,9 +399,9 @@ SDValue ARMTargetLowering::LowerCALL(SDValue Op, SelectionDAG &DAG) {
   CallSDNode *TheCall = cast<CallSDNode>(Op.getNode());
   MVT RetVT = TheCall->getRetValType(0);
   SDValue Chain    = TheCall->getChain();
-  unsigned CallConv  = TheCall->getCallingConv();
-  assert((CallConv == CallingConv::C ||
-          CallConv == CallingConv::Fast) && "unknown calling convention");
+  assert((TheCall->getCallingConv() == CallingConv::C ||
+          TheCall->getCallingConv() == CallingConv::Fast) &&
+         "unknown calling convention");
   SDValue Callee   = TheCall->getCallee();
   unsigned NumOps    = TheCall->getNumArgs();
   unsigned ArgOffset = 0;   // Frame mechanisms handle retaddr slot
@@ -740,10 +740,12 @@ ARMTargetLowering::LowerToTLSGeneralDynamicModel(GlobalAddressSDNode *GA,
   Entry.Node = Argument;
   Entry.Ty = (const Type *) Type::Int32Ty;
   Args.push_back(Entry);
+  // FIXME: is there useful debug info available here?
   std::pair<SDValue, SDValue> CallResult =
     LowerCallTo(Chain, (const Type *) Type::Int32Ty, false, false, false, false,
                 CallingConv::C, false,
-                DAG.getExternalSymbol("__tls_get_addr", PtrVT), Args, DAG);
+                DAG.getExternalSymbol("__tls_get_addr", PtrVT), Args, DAG,
+                DebugLoc::getUnknownLoc());
   return CallResult.first;
 }
 

@@ -1059,6 +1059,10 @@ public:
 
       std::string Code = "Opc" + utostr(OpcNo);
 
+      if (!isRoot || (InputHasChain && !NodeHasChain))
+        // For call to "getTargetNode()".
+        Code += ", N.getDebugLoc()";
+
       emitOpcode(II.Namespace + "::" + II.TheDef->getName());
 
       // Output order: results, chain, flags
@@ -1825,9 +1829,6 @@ void DAGISelEmitter::EmitInstructionSelector(std::ostream &OS) {
       } else
         OpVTI->second.push_back(OpVTStr);
 
-      OS << "SDNode *Select_" << getLegalCName(OpName)
-         << OpVTStr << "(const SDValue &N) {\n";    
-
       // We want to emit all of the matching code now.  However, we want to emit
       // the matches in order of minimal cost.  Sort the patterns so the least
       // cost one is at the start.
@@ -1869,6 +1870,9 @@ void DAGISelEmitter::EmitInstructionSelector(std::ostream &OS) {
       // Next, reverse the list of patterns itself for the same reason.
       std::reverse(CodeForPatterns.begin(), CodeForPatterns.end());
     
+      OS << "SDNode *Select_" << getLegalCName(OpName)
+         << OpVTStr << "(const SDValue &N) {\n";    
+
       // Emit all of the patterns now, grouped together to share code.
       EmitPatterns(CodeForPatterns, 2, OS);
     

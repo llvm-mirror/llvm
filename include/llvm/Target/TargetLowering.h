@@ -29,6 +29,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/CodeGen/DebugLoc.h"
 #include <climits>
 #include <map>
 #include <vector>
@@ -340,12 +341,20 @@ public:
     return (LegalizeAction)((OpActions[Op] >> (2*VT.getSimpleVT())) & 3);
   }
 
+  /// isOperationLegalOrCustom - Return true if the specified operation is
+  /// legal on this target or can be made legal with custom lowering. This
+  /// is used to help guide high-level lowering decisions.
+  bool isOperationLegalOrCustom(unsigned Op, MVT VT) const {
+    return (VT == MVT::Other || isTypeLegal(VT)) &&
+      (getOperationAction(Op, VT) == Legal ||
+       getOperationAction(Op, VT) == Custom);
+  }
+
   /// isOperationLegal - Return true if the specified operation is legal on this
   /// target.
   bool isOperationLegal(unsigned Op, MVT VT) const {
     return (VT == MVT::Other || isTypeLegal(VT)) &&
-      (getOperationAction(Op, VT) == Legal ||
-       getOperationAction(Op, VT) == Custom);
+           getOperationAction(Op, VT) == Legal;
   }
 
   /// getLoadExtAction - Return how this load with extension should be treated:
@@ -772,13 +781,15 @@ public:
     SDValue CombineTo(SDNode *N, const std::vector<SDValue> &To);
     SDValue CombineTo(SDNode *N, SDValue Res);
     SDValue CombineTo(SDNode *N, SDValue Res0, SDValue Res1);
+
+    void CommitTargetLoweringOpt(const TargetLoweringOpt &TLO);
   };
 
   /// SimplifySetCC - Try to simplify a setcc built with the specified operands 
   /// and cc. If it is unable to simplify it, return a null SDValue.
   SDValue SimplifySetCC(MVT VT, SDValue N0, SDValue N1,
                           ISD::CondCode Cond, bool foldBooleans,
-                          DAGCombinerInfo &DCI) const;
+                          DAGCombinerInfo &DCI, DebugLoc dl) const;
 
   /// isGAPlusOffset - Returns true (and the GlobalValue and the offset) if the
   /// node is a GlobalAddress + offset.
@@ -1049,7 +1060,7 @@ public:
   /// lower the arguments for the specified function, into the specified DAG.
   virtual void
   LowerArguments(Function &F, SelectionDAG &DAG,
-                 SmallVectorImpl<SDValue>& ArgValues);
+                 SmallVectorImpl<SDValue>& ArgValues, DebugLoc dl);
 
   /// LowerCallTo - This hook lowers an abstract call to a function into an
   /// actual call.  This returns a pair of operands.  The first element is the
@@ -1074,7 +1085,7 @@ public:
   LowerCallTo(SDValue Chain, const Type *RetTy, bool RetSExt, bool RetZExt,
               bool isVarArg, bool isInreg, unsigned CallingConv, 
               bool isTailCall, SDValue Callee, ArgListTy &Args, 
-              SelectionDAG &DAG);
+              SelectionDAG &DAG, DebugLoc dl);
 
   /// EmitTargetCodeForMemcpy - Emit target-specific code that performs a
   /// memcpy. This can be used by targets to provide code sequences for cases

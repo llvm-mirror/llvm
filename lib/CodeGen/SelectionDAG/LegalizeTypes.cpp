@@ -81,7 +81,7 @@ void DAGTypeLegalizer::PerformExpensiveChecks() {
         // Check that remapped values are only used by nodes marked NewNode.
         for (SDNode::use_iterator UI = I->use_begin(), UE = I->use_end();
              UI != UE; ++UI)
-          if (UI.getUse().getSDValue().getResNo() == i)
+          if (UI.getUse().getResNo() == i)
             assert(UI->getNodeId() == NewNode &&
                    "Remapped value has non-trivial use!");
 
@@ -328,14 +328,21 @@ ScanOperands:
         continue;
 
       // The node morphed - this is equivalent to legalizing by replacing every
-      // value of N with the corresponding value of M.  So do that now.
-      N->setNodeId(ReadyToProcess);
+      // value of N with the corresponding value of M.  So do that now.  However
+      // there is no need to remember the replacement - morphing will make sure
+      // it is never used non-trivially.
       assert(N->getNumValues() == M->getNumValues() &&
              "Node morphing changed the number of results!");
       for (unsigned i = 0, e = N->getNumValues(); i != e; ++i)
-        // Replacing the value takes care of remapping the new value.
-        ReplaceValueWith(SDValue(N, i), SDValue(M, i));
-      // Fall through.
+        // Replacing the value takes care of remapping the new value.  Do the
+        // replacement without recording it in ReplacedValues.  This does not
+        // expunge From but that is fine - it is not really a new node.
+        ReplaceValueWithHelper(SDValue(N, i), SDValue(M, i));
+      assert(N->getNodeId() == NewNode && "Unexpected node state!");
+      // The node continues to live on as part of the NewNode fungus that
+      // grows on top of the useful nodes.  Nothing more needs to be done
+      // with it - move on to the next node.
+      continue;
     }
 
     if (i == NumOperands) {
@@ -668,16 +675,14 @@ namespace {
 }
 
 
-/// ReplaceValueWith - The specified value was legalized to the specified other
-/// value.  Update the DAG and NodeIds replacing any uses of From to use To
-/// instead.
-void DAGTypeLegalizer::ReplaceValueWith(SDValue From, SDValue To) {
-  assert(From.getNode()->getNodeId() == ReadyToProcess &&
-         "Only the node being processed may be remapped!");
+/// ReplaceValueWithHelper - Internal helper for ReplaceValueWith.  Updates the
+/// DAG causing any uses of From to use To instead, but without expunging From
+/// or recording the replacement in ReplacedValues.  Do not call directly unless
+/// you really know what you are doing!
+void DAGTypeLegalizer::ReplaceValueWithHelper(SDValue From, SDValue To) {
   assert(From.getNode() != To.getNode() && "Potential legalization loop!");
 
   // If expansion produced new nodes, make sure they are properly marked.
-  ExpungeNode(From.getNode());
   AnalyzeNewValue(To); // Expunges To.
 
   // Anything that used the old node should now use the new one.  Note that this
@@ -685,10 +690,6 @@ void DAGTypeLegalizer::ReplaceValueWith(SDValue From, SDValue To) {
   SmallSetVector<SDNode*, 16> NodesToAnalyze;
   NodeUpdateListener NUL(*this, NodesToAnalyze);
   DAG.ReplaceAllUsesOfValueWith(From, To, &NUL);
-
-  // The old node may still be present in a map like ExpandedIntegers or
-  // PromotedIntegers.  Inform maps about the replacement.
-  ReplacedValues[From] = To;
 
   // Process the list of nodes that need to be reanalyzed.
   while (!NodesToAnalyze.empty()) {
@@ -717,6 +718,25 @@ void DAGTypeLegalizer::ReplaceValueWith(SDValue From, SDValue To) {
       // The original node continues to exist in the DAG, marked NewNode.
     }
   }
+}
+
+/// ReplaceValueWith - The specified value was legalized to the specified other
+/// value.  Update the DAG and NodeIds replacing any uses of From to use To
+/// instead.
+void DAGTypeLegalizer::ReplaceValueWith(SDValue From, SDValue To) {
+  assert(From.getNode()->getNodeId() == ReadyToProcess &&
+         "Only the node being processed may be remapped!");
+
+  // If expansion produced new nodes, make sure they are properly marked.
+  ExpungeNode(From.getNode());
+  AnalyzeNewValue(To); // Expunges To.
+
+  // The old node may still be present in a map like ExpandedIntegers or
+  // PromotedIntegers.  Inform maps about the replacement.
+  ReplacedValues[From] = To;
+
+  // Do the replacement.
+  ReplaceValueWithHelper(From, To);
 }
 
 void DAGTypeLegalizer::SetPromotedInteger(SDValue Op, SDValue Result) {
@@ -832,18 +852,20 @@ void DAGTypeLegalizer::SetIgnoredNodeResult(SDNode* N) {
 /// BitConvertToInteger - Convert to an integer of the same size.
 SDValue DAGTypeLegalizer::BitConvertToInteger(SDValue Op) {
   unsigned BitWidth = Op.getValueType().getSizeInBits();
-  return DAG.getNode(ISD::BIT_CONVERT, MVT::getIntegerVT(BitWidth), Op);
+  return DAG.getNode(ISD::BIT_CONVERT, Op.getNode()->getDebugLoc(),
+                     MVT::getIntegerVT(BitWidth), Op);
 }
 
 SDValue DAGTypeLegalizer::CreateStackStoreLoad(SDValue Op,
                                                MVT DestVT) {
+  DebugLoc dl = Op.getNode()->getDebugLoc();
   // Create the stack frame object.  Make sure it is aligned for both
   // the source and destination types.
   SDValue StackPtr = DAG.CreateStackTemporary(Op.getValueType(), DestVT);
   // Emit a store to the stack slot.
-  SDValue Store = DAG.getStore(DAG.getEntryNode(), Op, StackPtr, NULL, 0);
+  SDValue Store = DAG.getStore(DAG.getEntryNode(), dl, Op, StackPtr, NULL, 0);
   // Result is a load from the stack slot.
-  return DAG.getLoad(DestVT, Store, StackPtr, NULL, 0);
+  return DAG.getLoad(DestVT, dl, Store, StackPtr, NULL, 0);
 }
 
 /// CustomLowerResults - Replace the node's results with custom code provided
@@ -900,58 +922,63 @@ void DAGTypeLegalizer::GetSplitDestVTs(MVT InVT, MVT &LoVT, MVT &HiVT) {
 
 SDValue DAGTypeLegalizer::GetVectorElementPointer(SDValue VecPtr, MVT EltVT,
                                                   SDValue Index) {
+  DebugLoc dl = Index.getNode()->getDebugLoc();
   // Make sure the index type is big enough to compute in.
   if (Index.getValueType().bitsGT(TLI.getPointerTy()))
-    Index = DAG.getNode(ISD::TRUNCATE, TLI.getPointerTy(), Index);
+    Index = DAG.getNode(ISD::TRUNCATE, dl, TLI.getPointerTy(), Index);
   else
-    Index = DAG.getNode(ISD::ZERO_EXTEND, TLI.getPointerTy(), Index);
+    Index = DAG.getNode(ISD::ZERO_EXTEND, dl, TLI.getPointerTy(), Index);
 
   // Calculate the element offset and add it to the pointer.
   unsigned EltSize = EltVT.getSizeInBits() / 8; // FIXME: should be ABI size.
 
-  Index = DAG.getNode(ISD::MUL, Index.getValueType(), Index,
+  Index = DAG.getNode(ISD::MUL, dl, Index.getValueType(), Index,
                       DAG.getConstant(EltSize, Index.getValueType()));
-  return DAG.getNode(ISD::ADD, Index.getValueType(), Index, VecPtr);
+  return DAG.getNode(ISD::ADD, dl, Index.getValueType(), Index, VecPtr);
 }
 
 /// JoinIntegers - Build an integer with low bits Lo and high bits Hi.
 SDValue DAGTypeLegalizer::JoinIntegers(SDValue Lo, SDValue Hi) {
+  // Arbitrarily use dlHi for result DebugLoc
+  DebugLoc dlHi = Hi.getNode()->getDebugLoc();
+  DebugLoc dlLo = Lo.getNode()->getDebugLoc();
   MVT LVT = Lo.getValueType();
   MVT HVT = Hi.getValueType();
   MVT NVT = MVT::getIntegerVT(LVT.getSizeInBits() + HVT.getSizeInBits());
 
-  Lo = DAG.getNode(ISD::ZERO_EXTEND, NVT, Lo);
-  Hi = DAG.getNode(ISD::ANY_EXTEND, NVT, Hi);
-  Hi = DAG.getNode(ISD::SHL, NVT, Hi, DAG.getConstant(LVT.getSizeInBits(),
-                                                      TLI.getShiftAmountTy()));
-  return DAG.getNode(ISD::OR, NVT, Lo, Hi);
+  Lo = DAG.getNode(ISD::ZERO_EXTEND, dlLo, NVT, Lo);
+  Hi = DAG.getNode(ISD::ANY_EXTEND, dlHi, NVT, Hi);
+  Hi = DAG.getNode(ISD::SHL, dlHi, NVT, Hi,
+                   DAG.getConstant(LVT.getSizeInBits(), TLI.getPointerTy()));
+  return DAG.getNode(ISD::OR, dlHi, NVT, Lo, Hi);
 }
 
 /// LibCallify - Convert the node into a libcall with the same prototype.
 SDValue DAGTypeLegalizer::LibCallify(RTLIB::Libcall LC, SDNode *N,
                                      bool isSigned) {
   unsigned NumOps = N->getNumOperands();
+  DebugLoc dl = N->getDebugLoc();
   if (NumOps == 0) {
-    return MakeLibCall(LC, N->getValueType(0), 0, 0, isSigned);
+    return MakeLibCall(LC, N->getValueType(0), 0, 0, isSigned, dl);
   } else if (NumOps == 1) {
     SDValue Op = N->getOperand(0);
-    return MakeLibCall(LC, N->getValueType(0), &Op, 1, isSigned);
+    return MakeLibCall(LC, N->getValueType(0), &Op, 1, isSigned, dl);
   } else if (NumOps == 2) {
     SDValue Ops[2] = { N->getOperand(0), N->getOperand(1) };
-    return MakeLibCall(LC, N->getValueType(0), Ops, 2, isSigned);
+    return MakeLibCall(LC, N->getValueType(0), Ops, 2, isSigned, dl);
   }
   SmallVector<SDValue, 8> Ops(NumOps);
   for (unsigned i = 0; i < NumOps; ++i)
     Ops[i] = N->getOperand(i);
 
-  return MakeLibCall(LC, N->getValueType(0), &Ops[0], NumOps, isSigned);
+  return MakeLibCall(LC, N->getValueType(0), &Ops[0], NumOps, isSigned, dl);
 }
 
 /// MakeLibCall - Generate a libcall taking the given operands as arguments and
 /// returning a result of type RetVT.
 SDValue DAGTypeLegalizer::MakeLibCall(RTLIB::Libcall LC, MVT RetVT,
                                       const SDValue *Ops, unsigned NumOps,
-                                      bool isSigned) {
+                                      bool isSigned, DebugLoc dl) {
   TargetLowering::ArgListTy Args;
   Args.reserve(NumOps);
 
@@ -969,7 +996,7 @@ SDValue DAGTypeLegalizer::MakeLibCall(RTLIB::Libcall LC, MVT RetVT,
   const Type *RetTy = RetVT.getTypeForMVT();
   std::pair<SDValue,SDValue> CallInfo =
     TLI.LowerCallTo(DAG.getEntryNode(), RetTy, isSigned, !isSigned, false,
-                    false, CallingConv::C, false, Callee, Args, DAG);
+                    false, CallingConv::C, false, Callee, Args, DAG, dl);
   return CallInfo.first;
 }
 
@@ -977,6 +1004,7 @@ SDValue DAGTypeLegalizer::MakeLibCall(RTLIB::Libcall LC, MVT RetVT,
 /// of the given type.  A target boolean is an integer value, not necessarily of
 /// type i1, the bits of which conform to getBooleanContents.
 SDValue DAGTypeLegalizer::PromoteTargetBoolean(SDValue Bool, MVT VT) {
+  DebugLoc dl = Bool.getNode()->getDebugLoc();
   ISD::NodeType ExtendCode;
   switch (TLI.getBooleanContents()) {
   default:
@@ -995,7 +1023,7 @@ SDValue DAGTypeLegalizer::PromoteTargetBoolean(SDValue Bool, MVT VT) {
     break;
   }
   }
-  return DAG.getNode(ExtendCode, VT, Bool);
+  return DAG.getNode(ExtendCode, dl, VT, Bool);
 }
 
 /// SplitInteger - Return the lower LoVT bits of Op in Lo and the upper HiVT
@@ -1003,13 +1031,13 @@ SDValue DAGTypeLegalizer::PromoteTargetBoolean(SDValue Bool, MVT VT) {
 void DAGTypeLegalizer::SplitInteger(SDValue Op,
                                     MVT LoVT, MVT HiVT,
                                     SDValue &Lo, SDValue &Hi) {
+  DebugLoc dl = Op.getNode()->getDebugLoc();
   assert(LoVT.getSizeInBits() + HiVT.getSizeInBits() ==
          Op.getValueType().getSizeInBits() && "Invalid integer splitting!");
-  Lo = DAG.getNode(ISD::TRUNCATE, LoVT, Op);
-  Hi = DAG.getNode(ISD::SRL, Op.getValueType(), Op,
-                   DAG.getConstant(LoVT.getSizeInBits(),
-                                   TLI.getShiftAmountTy()));
-  Hi = DAG.getNode(ISD::TRUNCATE, HiVT, Hi);
+  Lo = DAG.getNode(ISD::TRUNCATE, dl, LoVT, Op);
+  Hi = DAG.getNode(ISD::SRL, dl, Op.getValueType(), Op,
+                   DAG.getConstant(LoVT.getSizeInBits(), TLI.getPointerTy()));
+  Hi = DAG.getNode(ISD::TRUNCATE, dl, HiVT, Hi);
 }
 
 /// SplitInteger - Return the lower and upper halves of Op's bits in a value

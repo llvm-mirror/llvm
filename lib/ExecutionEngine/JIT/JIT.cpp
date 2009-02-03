@@ -65,7 +65,7 @@ namespace llvm {
 }
 
 
-#if defined (__GNUC__)
+#if defined(__GNUC__) && !defined(__ARM__EABI__)
  
 // libgcc defines the __register_frame function to dynamically register new
 // dwarf frames for exception handling. This functionality is not portable
@@ -86,7 +86,7 @@ namespace llvm {
 
 extern "C" void __register_frame(void*);
 
-#if defined (__APPLE__)
+#if defined(__APPLE__)
 
 namespace {
 
@@ -225,7 +225,7 @@ JIT::JIT(ModuleProvider *MP, TargetMachine &tm, TargetJITInfo &tji,
   }
   
   // Register routine for informing unwinding runtime about new EH frames
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__ARM_EABI__)
 #if defined(__APPLE__)
   struct LibgccObjectInfo* LOI = (struct LibgccObjectInfo*)
     _keymgr_get_and_lock_processwide_ptr(KEYMGR_GCC3_DW2_OBJ_LIST);
@@ -295,6 +295,19 @@ Module *JIT::removeModuleProvider(ModuleProvider *MP, std::string *E) {
   }
   
   return result;
+}
+
+/// deleteModuleProvider - Remove a ModuleProvider from the list of modules,
+/// and deletes the ModuleProvider and owned Module.  Avoids materializing 
+/// the underlying module.
+void JIT::deleteModuleProvider(ModuleProvider *MP, std::string *E) {
+  ExecutionEngine::deleteModuleProvider(MP, E);
+  
+  MutexGuard locked(lock);
+  if (Modules.empty()) {
+    delete jitstate;
+    jitstate = 0;
+  }
 }
 
 /// run - Start execution with the specified function and arguments.

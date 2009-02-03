@@ -298,6 +298,15 @@ namespace llvm {
     const char *Data32bitsDirective;      // Defaults to "\t.long\t"
     const char *Data64bitsDirective;      // Defaults to "\t.quad\t"
 
+    /// getASDirective - Targets can override it to provide different data
+    /// directives for various sizes and non-default address spaces.
+    virtual const char *getASDirective(unsigned size, 
+                                       unsigned AS) const {
+      assert (AS > 0 
+              && "Dont know the directives for default addr space");
+      return NULL;
+    }
+
     //===--- Alignment Information ----------------------------------------===//
 
     /// AlignDirective - The directive used to emit round up to an alignment
@@ -429,27 +438,31 @@ namespace llvm {
     /// HasLEB128 - True if target asm supports leb128 directives.
     ///
     bool HasLEB128; // Defaults to false.
-    
+
     /// hasDotLocAndDotFile - True if target asm supports .loc and .file
     /// directives for emitting debugging information.
     ///
     bool HasDotLocAndDotFile; // Defaults to false.
-    
+
     /// SupportsDebugInformation - True if target supports emission of debugging
     /// information.
     bool SupportsDebugInformation;
-        
+
     /// SupportsExceptionHandling - True if target supports
     /// exception handling.
     ///
     bool SupportsExceptionHandling; // Defaults to false.
-    
+
     /// RequiresFrameSection - true if the Dwarf2 output needs a frame section
     ///
     bool DwarfRequiresFrameSection; // Defaults to true.
 
+    /// SupportsMacInfo - true if the Dwarf output supports macro information
+    ///
+    bool SupportsMacInfoSection;            // Defaults to true
+
     /// NonLocalEHFrameLabel - If set, the EH_frame label needs to be non-local.
-    /// 
+    ///
     bool NonLocalEHFrameLabel;              // Defaults to false.
 
     /// GlobalEHDirective - This is the directive used to make exception frame
@@ -594,6 +607,22 @@ namespace llvm {
 
     static unsigned getULEB128Size(unsigned Value);
 
+    // Data directive accessors
+    //
+    const char *getData8bitsDirective(unsigned AS = 0) const {
+      return AS == 0 ? Data8bitsDirective : getASDirective(8, AS);
+    }
+    const char *getData16bitsDirective(unsigned AS = 0) const {
+      return AS == 0 ? Data16bitsDirective : getASDirective(16, AS);
+    }
+    const char *getData32bitsDirective(unsigned AS = 0) const {
+      return AS == 0 ? Data32bitsDirective : getASDirective(32, AS);
+    }
+    const char *getData64bitsDirective(unsigned AS = 0) const {
+      return AS == 0 ? Data64bitsDirective : getASDirective(64, AS);
+    }
+
+
     // Accessors.
     //
     const Section *getTextSection() const {
@@ -707,18 +736,6 @@ namespace llvm {
     const char *getAscizDirective() const {
       return AscizDirective;
     }
-    const char *getData8bitsDirective() const {
-      return Data8bitsDirective;
-    }
-    const char *getData16bitsDirective() const {
-      return Data16bitsDirective;
-    }
-    const char *getData32bitsDirective() const {
-      return Data32bitsDirective;
-    }
-    const char *getData64bitsDirective() const {
-      return Data64bitsDirective;
-    }
     const char *getJumpTableDirective() const {
       return JumpTableDirective;
     }
@@ -817,6 +834,9 @@ namespace llvm {
     }
     bool doesDwarfRequireFrameSection() const {
       return DwarfRequiresFrameSection;
+    }
+    bool doesSupportMacInfoSection() const {
+      return SupportsMacInfoSection;
     }
     bool doesRequireNonLocalEHFrameLabel() const {
       return NonLocalEHFrameLabel;

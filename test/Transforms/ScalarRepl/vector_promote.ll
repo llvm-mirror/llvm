@@ -1,6 +1,5 @@
-; RUN: llvm-as < %s | opt -scalarrepl | llvm-dis | \
-; RUN:   not grep alloca
-; END.
+; RUN: llvm-as < %s | opt -scalarrepl | llvm-dis | not grep alloca
+; RUN: llvm-as < %s | opt -scalarrepl | llvm-dis | grep {load <4 x float>}
 
 define void @test(<4 x float>* %F, float %f) {
 entry:
@@ -53,3 +52,13 @@ entry:
 	store float %tmp.upgrd.6, float* %f
 	ret void
 }
+
+define i32 @test5(float %X) {  ;; should turn into bitcast.
+	%X_addr = alloca [4 x float]
+        %X1 = getelementptr [4 x float]* %X_addr, i32 0, i32 2
+	store float %X, float* %X1
+	%a = bitcast float* %X1 to i32*
+	%tmp = load i32* %a
+	ret i32 %tmp
+}
+

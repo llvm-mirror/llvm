@@ -55,6 +55,7 @@
           <li><a href="#t_opaque">Opaque Type</a></li>
         </ol>
       </li>
+      <li><a href="#t_uprefs">Type Up-references</a></li>
     </ol>
   </li>
   <li><a href="#constants">Constants</a>
@@ -149,6 +150,8 @@
         <ol>
           <li><a href="#i_icmp">'<tt>icmp</tt>' Instruction</a></li>
           <li><a href="#i_fcmp">'<tt>fcmp</tt>' Instruction</a></li>
+          <li><a href="#i_vicmp">'<tt>vicmp</tt>' Instruction</a></li>
+          <li><a href="#i_vfcmp">'<tt>vfcmp</tt>' Instruction</a></li>
           <li><a href="#i_phi">'<tt>phi</tt>'   Instruction</a></li>
           <li><a href="#i_select">'<tt>select</tt>' Instruction</a></li>
           <li><a href="#i_call">'<tt>call</tt>'  Instruction</a></li>
@@ -719,7 +722,6 @@ unexpected type.  This is an important design point and isn't going to
 change.</p>
 
 </div>
-
 
 <!-- ======================================================================= -->
 <div class="doc_subsection">
@@ -1342,6 +1344,13 @@ value.</p>
   </tr>
   </tbody>
 </table>
+
+<p>Note that the code generator does not yet support large integer types
+to be used as function return types. The specific limit on how large a
+return type the code generator can currently handle is target-dependent;
+currently it's often 64 bits for 32-bit targets and 128 bits for 64-bit
+targets.</p>
+
 </div>
 
 <!-- _______________________________________________________________________ -->
@@ -1401,6 +1410,11 @@ LLVM (e.g. it is illegal to access the 5th element of a 3 element array).
 As a special case, however, zero length arrays are recognized to be variable
 length.  This allows implementation of 'pascal style arrays' with the  LLVM
 type "{ i32, [0 x float]}", for example.</p>
+
+<p>Note that the code generator does not yet support large aggregate types
+to be used as function return types. The specific limit on how large an
+aggregate return type the code generator can currently handle is
+target-dependent, and also dependent on the aggregate element types.</p>
 
 </div>
 
@@ -1487,6 +1501,12 @@ instruction.</p>
       an <tt>i32</tt>.</td>
   </tr>
 </table>
+
+<p>Note that the code generator does not yet support large aggregate types
+to be used as function return types. The specific limit on how large an
+aggregate return type the code generator can currently handle is
+target-dependent, and also dependent on the aggregate element types.</p>
+
 </div>
 
 <!-- _______________________________________________________________________ -->
@@ -1591,6 +1611,12 @@ be any integer or floating point type.</p>
     <td class="left">Vector of 2 64-bit integer values.</td>
   </tr>
 </table>
+
+<p>Note that the code generator does not yet support large vector types
+to be used as function return types. The specific limit on how large a
+vector return type codegen can currently handle is target-dependent;
+currently it's often a few times longer than a hardware vector register.</p>
+
 </div>
 
 <!-- _______________________________________________________________________ -->
@@ -1616,6 +1642,56 @@ structure type).</p>
   <tr class="layout">
     <td class="left"><tt>opaque</tt></td>
     <td class="left">An opaque type.</td>
+  </tr>
+</table>
+</div>
+
+<!-- ======================================================================= -->
+<div class="doc_subsection">
+  <a name="t_uprefs">Type Up-references</a>
+</div>
+
+<div class="doc_text">
+<h5>Overview:</h5>
+<p>
+An "up reference" allows you to refer to a lexically enclosing type without
+requiring it to have a name. For instance, a structure declaration may contain a
+pointer to any of the types it is lexically a member of.  Example of up
+references (with their equivalent as named type declarations) include:</p>
+
+<pre>
+   { \2 * }                %x = type { %t* }
+   { \2 }*                 %y = type { %y }*
+   \1*                     %z = type %z*
+</pre>
+
+<p>
+An up reference is needed by the asmprinter for printing out cyclic types when
+there is no declared name for a type in the cycle.  Because the asmprinter does
+not want to print out an infinite type string, it needs a syntax to handle
+recursive types that have no names (all names are optional in llvm IR).
+</p>
+
+<h5>Syntax:</h5>
+<pre>
+   \&lt;level&gt;
+</pre>
+
+<p>
+The level is the count of the lexical type that is being referred to.
+</p>
+
+<h5>Examples:</h5>
+
+<table class="layout">
+  <tr class="layout">
+    <td class="left"><tt>\1*</tt></td>
+    <td class="left">Self-referential pointer.</td>
+  </tr>
+  <tr class="layout">
+    <td class="left"><tt>{ { \3*, i8 }, i32 }</tt></td>
+    <td class="left">Recursive structure where the upref refers to the out-most
+                     structure.</td>
   </tr>
 </table>
 </div>
@@ -1866,6 +1942,12 @@ following is the syntax for constant expressions:</p>
   <dt><b><tt>fcmp COND ( VAL1, VAL2 )</tt></b></dt>
   <dd>Performs the <a href="#i_fcmp">fcmp operation</a> on constants.</dd>
 
+  <dt><b><tt>vicmp COND ( VAL1, VAL2 )</tt></b></dt>
+  <dd>Performs the <a href="#i_vicmp">vicmp operation</a> on constants.</dd>
+
+  <dt><b><tt>vfcmp COND ( VAL1, VAL2 )</tt></b></dt>
+  <dd>Performs the <a href="#i_vfcmp">vfcmp operation</a> on constants.</dd>
+
   <dt><b><tt>extractelement ( VAL, IDX )</tt></b></dt>
 
   <dd>Perform the <a href="#i_extractelement">extractelement
@@ -2034,8 +2116,13 @@ return value.</p>
   ret { i32, i8 } { i32 4, i8 2 } <i>; Return an aggregate of values 4 and 2</i>
 </pre>
 
-<p>Note that the code generator does not yet fully support larger
-   aggregate return values.</p>
+<p>Note that the code generator does not yet fully support large
+   return values. The specific sizes that are currently supported are
+   dependent on the target. For integers, on 32-bit targets the limit
+   is often 64 bits, and on 64-bit targets the limit is often 128 bits.
+   For aggregate types, the current limits are dependent on the element
+   types; for example targets are often limited to 2 total integer
+   elements and 2 total floating-point elements.</p>
 
 </div>
 <!-- _______________________________________________________________________ -->
@@ -4163,6 +4250,109 @@ always yields an <a href="#t_primitive">i1</a> result, as follows:</p>
 <p>Note that the code generator does not yet support vector types with
    the <tt>fcmp</tt> instruction.</p>
 
+</div>
+
+<!-- _______________________________________________________________________ -->
+<div class="doc_subsubsection">
+  <a name="i_vicmp">'<tt>vicmp</tt>' Instruction</a>
+</div>
+<div class="doc_text">
+<h5>Syntax:</h5>
+<pre>  &lt;result&gt; = vicmp &lt;cond&gt; &lt;ty&gt; &lt;op1&gt;, &lt;op2&gt;   <i>; yields {ty}:result</i>
+</pre>
+<h5>Overview:</h5>
+<p>The '<tt>vicmp</tt>' instruction returns an integer vector value based on
+element-wise comparison of its two integer vector operands.</p>
+<h5>Arguments:</h5>
+<p>The '<tt>vicmp</tt>' instruction takes three operands. The first operand is
+the condition code indicating the kind of comparison to perform. It is not
+a value, just a keyword. The possible condition code are:</p>
+<ol>
+  <li><tt>eq</tt>: equal</li>
+  <li><tt>ne</tt>: not equal </li>
+  <li><tt>ugt</tt>: unsigned greater than</li>
+  <li><tt>uge</tt>: unsigned greater or equal</li>
+  <li><tt>ult</tt>: unsigned less than</li>
+  <li><tt>ule</tt>: unsigned less or equal</li>
+  <li><tt>sgt</tt>: signed greater than</li>
+  <li><tt>sge</tt>: signed greater or equal</li>
+  <li><tt>slt</tt>: signed less than</li>
+  <li><tt>sle</tt>: signed less or equal</li>
+</ol>
+<p>The remaining two arguments must be <a href="#t_vector">vector</a> or
+<a href="#t_integer">integer</a> typed. They must also be identical types.</p>
+<h5>Semantics:</h5>
+<p>The '<tt>vicmp</tt>' instruction compares <tt>op1</tt> and <tt>op2</tt>
+according to the condition code given as <tt>cond</tt>. The comparison yields a 
+<a href="#t_vector">vector</a> of <a href="#t_integer">integer</a> result, of
+identical type as the values being compared.  The most significant bit in each
+element is 1 if the element-wise comparison evaluates to true, and is 0
+otherwise.  All other bits of the result are undefined.  The condition codes
+are evaluated identically to the <a href="#i_icmp">'<tt>icmp</tt>'
+instruction</a>.</p>
+
+<h5>Example:</h5>
+<pre>
+  &lt;result&gt; = vicmp eq &lt;2 x i32&gt; &lt; i32 4, i32 0&gt;, &lt; i32 5, i32 0&gt;   <i>; yields: result=&lt;2 x i32&gt; &lt; i32 0, i32 -1 &gt;</i>
+  &lt;result&gt; = vicmp ult &lt;2 x i8 &gt; &lt; i8 1, i8 2&gt;, &lt; i8 2, i8 2 &gt;        <i>; yields: result=&lt;2 x i8&gt; &lt; i8 -1, i8 0 &gt;</i>
+</pre>
+</div>
+
+<!-- _______________________________________________________________________ -->
+<div class="doc_subsubsection">
+  <a name="i_vfcmp">'<tt>vfcmp</tt>' Instruction</a>
+</div>
+<div class="doc_text">
+<h5>Syntax:</h5>
+<pre>  &lt;result&gt; = vfcmp &lt;cond&gt; &lt;ty&gt; &lt;op1&gt;, &lt;op2&gt;</pre>
+<h5>Overview:</h5>
+<p>The '<tt>vfcmp</tt>' instruction returns an integer vector value based on
+element-wise comparison of its two floating point vector operands.  The output
+elements have the same width as the input elements.</p>
+<h5>Arguments:</h5>
+<p>The '<tt>vfcmp</tt>' instruction takes three operands. The first operand is
+the condition code indicating the kind of comparison to perform. It is not
+a value, just a keyword. The possible condition code are:</p>
+<ol>
+  <li><tt>false</tt>: no comparison, always returns false</li>
+  <li><tt>oeq</tt>: ordered and equal</li>
+  <li><tt>ogt</tt>: ordered and greater than </li>
+  <li><tt>oge</tt>: ordered and greater than or equal</li>
+  <li><tt>olt</tt>: ordered and less than </li>
+  <li><tt>ole</tt>: ordered and less than or equal</li>
+  <li><tt>one</tt>: ordered and not equal</li>
+  <li><tt>ord</tt>: ordered (no nans)</li>
+  <li><tt>ueq</tt>: unordered or equal</li>
+  <li><tt>ugt</tt>: unordered or greater than </li>
+  <li><tt>uge</tt>: unordered or greater than or equal</li>
+  <li><tt>ult</tt>: unordered or less than </li>
+  <li><tt>ule</tt>: unordered or less than or equal</li>
+  <li><tt>une</tt>: unordered or not equal</li>
+  <li><tt>uno</tt>: unordered (either nans)</li>
+  <li><tt>true</tt>: no comparison, always returns true</li>
+</ol>
+<p>The remaining two arguments must be <a href="#t_vector">vector</a> of 
+<a href="#t_floating">floating point</a> typed. They must also be identical
+types.</p>
+<h5>Semantics:</h5>
+<p>The '<tt>vfcmp</tt>' instruction compares <tt>op1</tt> and <tt>op2</tt>
+according to  the condition code given as <tt>cond</tt>. The comparison yields a 
+<a href="#t_vector">vector</a> of <a href="#t_integer">integer</a> result, with
+an identical number of elements as the values being compared, and each element
+having identical with to the width of the floating point elements. The most 
+significant bit in each element is 1 if the element-wise comparison evaluates to
+true, and is 0 otherwise.  All other bits of the result are undefined.  The
+condition codes are evaluated identically to the 
+<a href="#i_fcmp">'<tt>fcmp</tt>' instruction</a>.</p>
+
+<h5>Example:</h5>
+<pre>
+  <i>; yields: result=&lt;2 x i32&gt; &lt; i32 0, i32 -1 &gt;</i>
+  &lt;result&gt; = vfcmp oeq &lt;2 x float&gt; &lt; float 4, float 0 &gt;, &lt; float 5, float 0 &gt;
+  
+  <i>; yields: result=&lt;2 x i64&gt; &lt; i64 -1, i64 0 &gt;</i>
+  &lt;result&gt; = vfcmp ult &lt;2 x double&gt; &lt; double 1, double 2 &gt;, &lt; double 2, double 2&gt;
+</pre>
 </div>
 
 <!-- _______________________________________________________________________ -->

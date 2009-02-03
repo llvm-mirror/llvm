@@ -192,9 +192,10 @@ void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
 /// of `new MachineInstr'.
 ///
 MachineInstr *
-MachineFunction::CreateMachineInstr(const TargetInstrDesc &TID, bool NoImp) {
+MachineFunction::CreateMachineInstr(const TargetInstrDesc &TID,
+                                    DebugLoc DL, bool NoImp) {
   return new (InstructionRecycler.Allocate<MachineInstr>(Allocator))
-             MachineInstr(TID, NoImp);
+    MachineInstr(TID, DL, NoImp);
 }
 
 /// CloneMachineInstr - Create a new MachineInstr which is a copy of the
@@ -376,6 +377,23 @@ MachineFunction& MachineFunction::get(const Function *F)
   MachineFunction *mc = (MachineFunction*)F->getAnnotation(MF_AID);
   assert(mc && "Call construct() method first to allocate the object");
   return *mc;
+}
+
+/// getOrCreateDebugLocID - Look up the DebugLocTuple index with the given
+/// source file, line, and column. If none currently exists, create add a new
+/// new DebugLocTuple and insert it into the DebugIdMap.
+unsigned MachineFunction::getOrCreateDebugLocID(unsigned Src, unsigned Line,
+                                                unsigned Col) {
+  struct DebugLocTuple Tuple(Src, Line, Col);
+  DenseMap<DebugLocTuple, unsigned>::iterator II
+    = DebugLocInfo.DebugIdMap.find(Tuple);
+  if (II != DebugLocInfo.DebugIdMap.end())
+    return II->second;
+  // Add a new tuple.
+  unsigned Id = DebugLocInfo.DebugLocations.size();
+  DebugLocInfo.DebugLocations.push_back(Tuple);
+  DebugLocInfo.DebugIdMap[Tuple] = Id;
+  return Id;
 }
 
 //===----------------------------------------------------------------------===//

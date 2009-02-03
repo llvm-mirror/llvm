@@ -1274,6 +1274,9 @@ private:
   /// of each entry in this vector corresponds to the sources in MMI.
   DenseMap<Value *, CompileUnit *> DW_CUs;
 
+  /// MainCU - Some platform prefers one compile unit per .o file. In such
+  /// cases, all dies are inserted in MainCU.
+  CompileUnit *MainCU;
   /// AbbreviationsSet - Used to uniquely define abbreviations.
   ///
   FoldingSet<DIEAbbrev> AbbreviationsSet;
@@ -1559,16 +1562,8 @@ private:
   void AddSourceLine(DIE *Die, const DIVariable *V) {
     unsigned FileID = 0;
     unsigned Line = V->getLineNumber();
-    if (V->getVersion() <= LLVMDebugVersion6) {
-      // Version6 or earlier. Use compile unit info to get file id.
-      CompileUnit *Unit = FindCompileUnit(V->getCompileUnit());
-      FileID = Unit->getID();
-    } else {
-      // Version7 or newer, use filename and directory info from DIVariable
-      // directly.
-      unsigned DID = Directories.idFor(V->getDirectory());
-      FileID = SrcFiles.idFor(SrcFileInfo(DID, V->getFilename()));
-    }
+    CompileUnit *Unit = FindCompileUnit(V->getCompileUnit());
+    FileID = Unit->getID();
     AddUInt(Die, DW_AT_decl_file, 0, FileID);
     AddUInt(Die, DW_AT_decl_line, 0, Line);
   }
@@ -1578,16 +1573,8 @@ private:
   void AddSourceLine(DIE *Die, const DIGlobal *G) {
     unsigned FileID = 0;
     unsigned Line = G->getLineNumber();
-    if (G->getVersion() <= LLVMDebugVersion6) {
-      // Version6 or earlier. Use compile unit info to get file id.
-      CompileUnit *Unit = FindCompileUnit(G->getCompileUnit());
-      FileID = Unit->getID();
-    } else {
-      // Version7 or newer, use filename and directory info from DIGlobal
-      // directly.
-      unsigned DID = Directories.idFor(G->getDirectory());
-      FileID = SrcFiles.idFor(SrcFileInfo(DID, G->getFilename()));
-    }
+    CompileUnit *Unit = FindCompileUnit(G->getCompileUnit());
+    FileID = Unit->getID();
     AddUInt(Die, DW_AT_decl_file, 0, FileID);
     AddUInt(Die, DW_AT_decl_line, 0, Line);
   }
@@ -1595,16 +1582,11 @@ private:
   void AddSourceLine(DIE *Die, const DIType *Ty) {
     unsigned FileID = 0;
     unsigned Line = Ty->getLineNumber();
-    if (Ty->getVersion() <= LLVMDebugVersion6) {
-      // Version6 or earlier. Use compile unit info to get file id.
-      CompileUnit *Unit = FindCompileUnit(Ty->getCompileUnit());
-      FileID = Unit->getID();
-    } else {
-      // Version7 or newer, use filename and directory info from DIType
-      // directly.
-      unsigned DID = Directories.idFor(Ty->getDirectory());
-      FileID = SrcFiles.idFor(SrcFileInfo(DID, Ty->getFilename()));
-    }
+    DICompileUnit CU = Ty->getCompileUnit();
+    if (CU.isNull())
+      return;
+    CompileUnit *Unit = FindCompileUnit(CU);
+    FileID = Unit->getID();
     AddUInt(Die, DW_AT_decl_file, 0, FileID);
     AddUInt(Die, DW_AT_decl_line, 0, Line);
   }
@@ -1636,30 +1618,6 @@ private:
     AddBlock(Die, Attribute, 0, Block);
   }
 
-  /// AddBasicType - Add a new basic type attribute to the specified entity.
-  ///
-  void AddBasicType(DIE *Entity, CompileUnit *Unit,
-                    const std::string &Name,
-                    unsigned Encoding, unsigned Size) {
-
-    DIE Buffer(DW_TAG_base_type);
-    AddUInt(&Buffer, DW_AT_byte_size, 0, Size);
-    AddUInt(&Buffer, DW_AT_encoding, DW_FORM_data1, Encoding);
-    if (!Name.empty()) AddString(&Buffer, DW_AT_name, DW_FORM_string, Name);
-    DIE *BasicTypeDie = Unit->AddDie(Buffer);
-    AddDIEntry(Entity, DW_AT_type, DW_FORM_ref4, BasicTypeDie);
-  }
-
-  /// AddPointerType - Add a new pointer type attribute to the specified entity.
-  ///
-  void AddPointerType(DIE *Entity, CompileUnit *Unit, const std::string &Name) {
-    DIE Buffer(DW_TAG_pointer_type);
-    AddUInt(&Buffer, DW_AT_byte_size, 0, TD->getPointerSize());
-    if (!Name.empty()) AddString(&Buffer, DW_AT_name, DW_FORM_string, Name);
-    DIE *PointerTypeDie =  Unit->AddDie(Buffer);
-    AddDIEntry(Entity, DW_AT_type, DW_FORM_ref4, PointerTypeDie);
-  }
-
   /// AddType - Add a new type attribute to the specified entity.
   void AddType(CompileUnit *DW_Unit, DIE *Entity, DIType Ty) {
     if (Ty.isNull())
@@ -1687,9 +1645,23 @@ private:
       ConstructTypeDIE(DW_Unit, Buffer, DICompositeType(Ty.getGV()));
     }
     
-    // Add debug information entry to entity and unit.
-    DIE *Die = DW_Unit->AddDie(Buffer);
-    SetDIEntry(Slot, Die);
+    // Add debug information entry to entity and appropriate context.
+    DIE *Die = NULL;
+    DIDescriptor Context = Ty.getContext();
+    if (!Context.isNull())
+      Die = DW_Unit->getDieMapSlotFor(Context.getGV());
+
+    if (Die) {
+      DIE *Child = new DIE(Buffer);
+      Die->AddChild(Child);
+      Buffer.Detach();
+      SetDIEntry(Slot, Child);
+    }
+    else {
+      Die = DW_Unit->AddDie(Buffer);
+      SetDIEntry(Slot, Die);
+    }
+
     Entity->AddValue(DW_AT_type, DW_FORM_ref4, Slot);
   }
 
@@ -1855,6 +1827,8 @@ private:
     if (CTy->getTag() == DW_TAG_vector_type)
       AddUInt(&Buffer, DW_AT_GNU_vector, DW_FORM_flag, 1);
     
+    // Emit derived type.
+    AddType(DW_Unit, &Buffer, CTy->getTypeDerivedFrom());    
     DIArray Elements = CTy->getTypeArray();
 
     // Construct an anonymous type for index type.
@@ -1940,18 +1914,23 @@ private:
     // Add Return Type.
     if (!IsConstructor) 
       AddType(DW_Unit, SPDie, DIType(Args.getElement(0).getGV()));
-    
-    // Add arguments.
-    if (!Args.isNull())
-      for (unsigned i = 1, N =  Args.getNumElements(); i < N; ++i) {
-        DIE *Arg = new DIE(DW_TAG_formal_parameter);
-        AddType(DW_Unit, Arg, DIType(Args.getElement(i).getGV()));
-        AddUInt(Arg, DW_AT_artificial, DW_FORM_flag, 1); // ???
-        SPDie->AddChild(Arg);
-      }
-    
+
+    if (!SP.isDefinition()) {
+      AddUInt(SPDie, DW_AT_declaration, DW_FORM_flag, 1);    
+      // Add arguments.
+      // Do not add arguments for subprogram definition. They will be
+      // handled through RecordVariable.
+      if (!Args.isNull())
+        for (unsigned i = 1, N =  Args.getNumElements(); i < N; ++i) {
+          DIE *Arg = new DIE(DW_TAG_formal_parameter);
+          AddType(DW_Unit, Arg, DIType(Args.getElement(i).getGV()));
+          AddUInt(Arg, DW_AT_artificial, DW_FORM_flag, 1); // ???
+          SPDie->AddChild(Arg);
+        }
+    }
+
     if (!SP.isLocalToUnit())
-      AddUInt(SPDie, DW_AT_external, DW_FORM_flag, 1);                     
+      AddUInt(SPDie, DW_AT_external, DW_FORM_flag, 1);
     return SPDie;
   }
 
@@ -2096,7 +2075,9 @@ private:
     DISubprogram SPD(Desc.getGV());
 
     // Get the compile unit context.
-    CompileUnit *Unit = FindCompileUnit(SPD.getCompileUnit());
+    CompileUnit *Unit = MainCU;
+    if (!Unit)
+      Unit = FindCompileUnit(SPD.getCompileUnit());
 
     // Get the subprogram die.
     DIE *SPDie = Unit->getDieMapSlotFor(SPD.getGV());
@@ -2127,7 +2108,9 @@ private:
 
       if (SPD.getName() == MF->getFunction()->getName()) {
         // Get the compile unit context.
-        CompileUnit *Unit = FindCompileUnit(SPD.getCompileUnit());
+        CompileUnit *Unit = MainCU;
+        if (!Unit)
+          Unit = FindCompileUnit(SPD.getCompileUnit());
 
         // Get the subprogram die.
         DIE *SPDie = Unit->getDieMapSlotFor(SPD.getGV());
@@ -2169,8 +2152,10 @@ private:
     EmitLabel("section_abbrev", 0);
     Asm->SwitchToDataSection(TAI->getDwarfARangesSection());
     EmitLabel("section_aranges", 0);
-    Asm->SwitchToDataSection(TAI->getDwarfMacInfoSection());
-    EmitLabel("section_macinfo", 0);
+    if (TAI->doesSupportMacInfoSection()) {
+      Asm->SwitchToDataSection(TAI->getDwarfMacInfoSection());
+      EmitLabel("section_macinfo", 0);
+    }
     Asm->SwitchToDataSection(TAI->getDwarfLineSection());
     EmitLabel("section_line", 0);
     Asm->SwitchToDataSection(TAI->getDwarfLocSection());
@@ -2297,6 +2282,15 @@ private:
   ///
   void SizeAndOffsets() {
     // Process base compile unit.
+    if (MainCU) {
+      // Compute size of compile unit header
+      unsigned Offset = sizeof(int32_t) + // Length of Compilation Unit Info
+        sizeof(int16_t) + // DWARF version number
+        sizeof(int32_t) + // Offset Into Abbrev. Section
+        sizeof(int8_t);   // Pointer Size (in bytes)
+      SizeAndOffsetDie(MainCU->getDie(), Offset, true);
+      return;
+    }
     for (DenseMap<Value *, CompileUnit *>::iterator CI = DW_CUs.begin(),
            CE = DW_CUs.end(); CI != CE; ++CI) {
       CompileUnit *Unit = CI->second;
@@ -2318,6 +2312,8 @@ private:
     for (DenseMap<Value *, CompileUnit *>::iterator CI = DW_CUs.begin(),
            CE = DW_CUs.end(); CI != CE; ++CI) {
       CompileUnit *Unit = CI->second;
+      if (MainCU)
+        Unit = MainCU;
       DIE *Die = Unit->getDie();
       // Emit the compile units header.
       EmitLabel("info_begin", Unit->getID());
@@ -2343,6 +2339,8 @@ private:
       EmitLabel("info_end", Unit->getID());
       
       Asm->EOL();
+      if (MainCU)
+        return;
     }
   }
 
@@ -2642,6 +2640,8 @@ private:
     for (DenseMap<Value *, CompileUnit *>::iterator CI = DW_CUs.begin(),
            CE = DW_CUs.end(); CI != CE; ++CI) {
       CompileUnit *Unit = CI->second;
+      if (MainCU)
+        Unit = MainCU;
 
       EmitDifference("pubnames_end", Unit->getID(),
                      "pubnames_begin", Unit->getID(), true);
@@ -2675,6 +2675,8 @@ private:
       EmitLabel("pubnames_end", Unit->getID());
       
       Asm->EOL();
+      if (MainCU)
+        return;
     }
   }
 
@@ -2757,10 +2759,12 @@ private:
   /// EmitDebugMacInfo - Emit visible names into a debug macinfo section.
   ///
   void EmitDebugMacInfo() {
-    // Start the dwarf macinfo section.
-    Asm->SwitchToDataSection(TAI->getDwarfMacInfoSection());
+    if (TAI->doesSupportMacInfoSection()) {
+      // Start the dwarf macinfo section.
+      Asm->SwitchToDataSection(TAI->getDwarfMacInfoSection());
 
-    Asm->EOL();
+      Asm->EOL();
+    }
   }
 
   /// ConstructCompileUnits - Create a compile unit DIEs.
@@ -2783,8 +2787,17 @@ private:
       AddString(Die, DW_AT_name, DW_FORM_string, DIUnit.getFilename());
       if (!DIUnit.getDirectory().empty())
         AddString(Die, DW_AT_comp_dir, DW_FORM_string, DIUnit.getDirectory());
+      if (DIUnit.isOptimized())
+        AddUInt(Die, DW_AT_APPLE_optimized, DW_FORM_flag, 1);
+      const std::string &Flags = DIUnit.getFlags();
+      if (!Flags.empty())
+        AddString(Die, DW_AT_APPLE_flags, DW_FORM_string, Flags);
 
       CompileUnit *Unit = new CompileUnit(ID, Die);
+      if (DIUnit.isMain()) {
+        assert (!MainCU && "Multiple main compile units are found!");
+        MainCU = Unit;
+      }
       DW_CUs[DIUnit.getGV()] = Unit;
     }
   }
@@ -2798,7 +2811,9 @@ private:
     for (std::vector<GlobalVariable *>::iterator GVI = Result.begin(),
            GVE = Result.end(); GVI != GVE; ++GVI) {
       DIGlobalVariable DI_GV(*GVI);
-      CompileUnit *DW_Unit = FindCompileUnit(DI_GV.getCompileUnit());
+      CompileUnit *DW_Unit = MainCU;
+      if (!DW_Unit)
+        DW_Unit = FindCompileUnit(DI_GV.getCompileUnit());
 
       // Check for pre-existence.
       DIE *&Slot = DW_Unit->getDieMapSlotFor(DI_GV.getGV());
@@ -2835,11 +2850,18 @@ private:
            RE = Result.end(); RI != RE; ++RI) {
 
       DISubprogram SP(*RI);
-      CompileUnit *Unit = FindCompileUnit(SP.getCompileUnit());
+      CompileUnit *Unit = MainCU;
+      if (!Unit)
+        Unit = FindCompileUnit(SP.getCompileUnit());
 
       // Check for pre-existence.
       DIE *&Slot = Unit->getDieMapSlotFor(SP.getGV());
       if (Slot) continue;
+
+      if (!SP.isDefinition())
+        // This is a method declaration which will be handled while
+        // constructing class type.
+        continue;
 
       DIE *SubprogramDie = CreateSubprogramDIE(Unit, SP);
 
@@ -2858,6 +2880,7 @@ public:
   //
   DwarfDebug(raw_ostream &OS, AsmPrinter *A, const TargetAsmInfo *T)
   : Dwarf(OS, A, T, "dbg")
+  , MainCU(NULL)
   , AbbreviationsSet(InitAbbreviationsSetSize)
   , Abbreviations()
   , ValuesSet(InitValuesSetSize)

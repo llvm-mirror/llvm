@@ -727,6 +727,21 @@ void X86RegisterInfo::emitPrologue(MachineFunction &MF) const {
     X86FI->setCalleeSavedFrameSize(
           X86FI->getCalleeSavedFrameSize() +(-TailCallReturnAddrDelta));
 
+  // If this is x86-64 and the Red Zone is not disabled, if we are a leaf
+  // function, and use up to 128 bytes of stack space, don't have a frame
+  // pointer, calls, or dynamic alloca then we do not need to adjust the
+  // stack pointer (we fit in the Red Zone).
+  if (Is64Bit && !DisableRedZone &&
+      !needsStackRealignment(MF) &&
+      !MFI->hasVarSizedObjects() &&                // No dynamic alloca.
+      !MFI->hasCalls()) {                          // No calls.
+    uint64_t MinSize = X86FI->getCalleeSavedFrameSize();
+    if (hasFP(MF)) MinSize += SlotSize;
+    StackSize = std::max(MinSize,
+                         StackSize > 128 ? StackSize - 128 : 0);
+    MFI->setStackSize(StackSize);
+  }
+
   // Insert stack pointer adjustment for later moving of return addr.  Only
   // applies to tail call optimized functions where the callee argument stack
   // size is bigger than the callers.

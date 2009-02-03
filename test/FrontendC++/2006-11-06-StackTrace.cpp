@@ -10,8 +10,7 @@
 // RUN:   grep {#7  0x.* in main.*(argc=\[12\],.*argv=.*)}
 
 // Only works on ppc, x86 and x86_64.  Should generalize?
-// FIXME: Un-XFAIL this test for Linux when debug stuff is working again.
-// XFAIL: alpha|ia64|arm|linux
+// XFAIL: alpha|ia64|arm
 
 #include <stdlib.h>
 

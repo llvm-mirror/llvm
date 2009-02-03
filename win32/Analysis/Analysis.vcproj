@@ -341,11 +341,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\lib\Analysis\DebugInfo.cpp"
+				RelativePath="..\..\lib\Analysis\DbgInfoPrinter.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\lib\Analysis\EscapeAnalysis.cpp"
+				RelativePath="..\..\lib\Analysis\DebugInfo.cpp"
 				>
 			</File>
 			<File
@@ -433,6 +433,10 @@
 				</File>
 				<File
 					RelativePath="..\..\lib\Analysis\Ipa\CallGraphSCCPass.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\..\lib\Analysis\CaptureTracking.cpp"
 					>
 				</File>
 				<File

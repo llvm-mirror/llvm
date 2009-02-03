@@ -242,40 +242,37 @@ namespace {
 static SDNode *findFlagUse(SDNode *N) {
   unsigned FlagResNo = N->getNumValues()-1;
   for (SDNode::use_iterator I = N->use_begin(), E = N->use_end(); I != E; ++I) {
-    SDNode *User = *I;
-    for (unsigned i = 0, e = User->getNumOperands(); i != e; ++i) {
-      SDValue Op = User->getOperand(i);
-      if (Op.getNode() == N && Op.getResNo() == FlagResNo)
-        return User;
-    }
+    SDUse &Use = I.getUse();
+    if (Use.getResNo() == FlagResNo)
+      return Use.getUser();
   }
   return NULL;
 }
 
-/// findNonImmUse - Return true by reference in "found" if "Use" is an
-/// non-immediate use of "Def". This function recursively traversing
-/// up the operand chain ignoring certain nodes.
-static void findNonImmUse(SDNode *Use, SDNode* Def, SDNode *ImmedUse,
-                          SDNode *Root, bool &found,
+/// findNonImmUse - Return true if "Use" is a non-immediate use of "Def".
+/// This function recursively traverses up the operand chain, ignoring
+/// certain nodes.
+static bool findNonImmUse(SDNode *Use, SDNode* Def, SDNode *ImmedUse,
+                          SDNode *Root,
                           SmallPtrSet<SDNode*, 16> &Visited) {
-  if (found ||
-      Use->getNodeId() < Def->getNodeId() ||
+  if (Use->getNodeId() < Def->getNodeId() ||
       !Visited.insert(Use))
-    return;
-  
-  for (unsigned i = 0, e = Use->getNumOperands(); !found && i != e; ++i) {
+    return false;
+
+  for (unsigned i = 0, e = Use->getNumOperands(); i != e; ++i) {
     SDNode *N = Use->getOperand(i).getNode();
     if (N == Def) {
       if (Use == ImmedUse || Use == Root)
         continue;  // We are not looking for immediate use.
       assert(N != Root);
-      found = true;
-      break;
+      return true;
     }
 
     // Traverse up the operand chain.
-    findNonImmUse(N, Def, ImmedUse, Root, found, Visited);
+    if (findNonImmUse(N, Def, ImmedUse, Root, Visited))
+      return true;
   }
+  return false;
 }
 
 /// isNonImmUse - Start searching from Root up the DAG to check is Def can
@@ -290,9 +287,7 @@ static void findNonImmUse(SDNode *Use, SDNode* Def, SDNode *ImmedUse,
 /// its chain operand.
 static inline bool isNonImmUse(SDNode *Root, SDNode *Def, SDNode *ImmedUse) {
   SmallPtrSet<SDNode*, 16> Visited;
-  bool found = false;
-  findNonImmUse(Root, Def, ImmedUse, Root, found, Visited);
-  return found;
+  return findNonImmUse(Root, Def, ImmedUse, Root, Visited);
 }
 
 
@@ -432,14 +427,27 @@ static bool isRMWLoad(SDValue N, SDValue Chain, SDValue Address,
 /// MoveBelowCallSeqStart - Replace CALLSEQ_START operand with load's chain
 /// operand and move load below the call's chain operand.
 static void MoveBelowCallSeqStart(SelectionDAG *CurDAG, SDValue Load,
-                           SDValue Call, SDValue Chain) {
+                                  SDValue Call, SDValue CallSeqStart) {
   SmallVector<SDValue, 8> Ops;
-  for (unsigned i = 0, e = Chain.getNode()->getNumOperands(); i != e; ++i)
-    if (Load.getNode() == Chain.getOperand(i).getNode())
-      Ops.push_back(Load.getOperand(0));
-    else
-      Ops.push_back(Chain.getOperand(i));
-  CurDAG->UpdateNodeOperands(Chain, &Ops[0], Ops.size());
+  SDValue Chain = CallSeqStart.getOperand(0);
+  if (Chain.getNode() == Load.getNode())
+    Ops.push_back(Load.getOperand(0));
+  else {
+    assert(Chain.getOpcode() == ISD::TokenFactor &&
+           "Unexpected CallSeqStart chain operand");
+    for (unsigned i = 0, e = Chain.getNumOperands(); i != e; ++i)
+      if (Chain.getOperand(i).getNode() == Load.getNode())
+        Ops.push_back(Load.getOperand(0));
+      else
+        Ops.push_back(Chain.getOperand(i));
+    SDValue NewChain =
+      CurDAG->getNode(ISD::TokenFactor, MVT::Other, &Ops[0], Ops.size());
+    Ops.clear();
+    Ops.push_back(NewChain);
+  }
+  for (unsigned i = 1, e = CallSeqStart.getNumOperands(); i != e; ++i)
+    Ops.push_back(CallSeqStart.getOperand(i));
+  CurDAG->UpdateNodeOperands(CallSeqStart, &Ops[0], Ops.size());
   CurDAG->UpdateNodeOperands(Load, Call.getOperand(0),
                              Load.getOperand(1), Load.getOperand(2));
   Ops.clear();
@@ -468,7 +476,13 @@ static bool isCalleeLoad(SDValue Callee, SDValue &Chain) {
       return false;
     Chain = Chain.getOperand(0);
   }
-  return Chain.getOperand(0).getNode() == Callee.getNode();
+  
+  if (Chain.getOperand(0).getNode() == Callee.getNode())
+    return true;
+  if (Chain.getOperand(0).getOpcode() == ISD::TokenFactor &&
+      Callee.getValue(1).isOperandOf(Chain.getOperand(0).getNode()))
+    return true;
+  return false;
 }
 
 

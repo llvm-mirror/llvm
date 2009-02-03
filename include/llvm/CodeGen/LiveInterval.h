@@ -276,7 +276,7 @@ namespace llvm {
     /// are found to be equivalent.  This eliminates V1, replacing all
     /// LiveRanges with the V1 value number with the V2 value number.  This can
     /// cause merging of V1/V2 values numbers and compaction of the value space.
-    void MergeValueNumberInto(VNInfo *V1, VNInfo *V2);
+    VNInfo* MergeValueNumberInto(VNInfo *V1, VNInfo *V2);
 
     /// MergeInClobberRanges - For any live ranges that are not defined in the
     /// current interval, but are defined in the Clobbers interval, mark them
@@ -377,8 +377,12 @@ namespace llvm {
               const int *RHSValNoAssignments,
               SmallVector<VNInfo*, 16> &NewVNInfo);
 
+    /// isInOneLiveRange - Return true if the range specified is entirely in the
+    /// a single LiveRange of the live interval.
+    bool isInOneLiveRange(unsigned Start, unsigned End);
+
     /// removeRange - Remove the specified range from this interval.  Note that
-    /// the range must already be in this interval in its entirety.
+    /// the range must be a single LiveRange in its entirety.
     void removeRange(unsigned Start, unsigned End, bool RemoveDeadValNo = false);
 
     void removeRange(LiveRange LR, bool RemoveDeadValNo = false) {

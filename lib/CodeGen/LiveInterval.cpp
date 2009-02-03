@@ -244,9 +244,19 @@ LiveInterval::addRangeFrom(LiveRange LR, iterator From) {
   return ranges.insert(it, LR);
 }
 
+/// isInOneLiveRange - Return true if the range specified is entirely in the
+/// a single LiveRange of the live interval.
+bool LiveInterval::isInOneLiveRange(unsigned Start, unsigned End) {
+  Ranges::iterator I = std::upper_bound(ranges.begin(), ranges.end(), Start);
+  if (I == ranges.begin())
+    return false;
+  --I;
+  return I->contains(Start) && I->contains(End-1);
+}
+
 
 /// removeRange - Remove the specified range from this interval.  Note that
-/// the range must already be in this interval in its entirety.
+/// the range must be in a single LiveRange in its entirety.
 void LiveInterval::removeRange(unsigned Start, unsigned End,
                                bool RemoveDeadValNo) {
   // Find the LiveRange containing this span.
@@ -581,7 +591,7 @@ void LiveInterval::MergeInClobberRanges(const LiveInterval &Clobbers,
 /// are found to be equivalent.  This eliminates V1, replacing all
 /// LiveRanges with the V1 value number with the V2 value number.  This can
 /// cause merging of V1/V2 values numbers and compaction of the value space.
-void LiveInterval::MergeValueNumberInto(VNInfo *V1, VNInfo *V2) {
+VNInfo* LiveInterval::MergeValueNumberInto(VNInfo *V1, VNInfo *V2) {
   assert(V1 != V2 && "Identical value#'s are always equivalent!");
 
   // This code actually merges the (numerically) larger value number into the
@@ -642,6 +652,8 @@ void LiveInterval::MergeValueNumberInto(VNInfo *V1, VNInfo *V2) {
   } else {
     V1->def = ~1U;
   }
+  
+  return V2;
 }
 
 void LiveInterval::Copy(const LiveInterval &RHS,

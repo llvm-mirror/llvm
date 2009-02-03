@@ -30,6 +30,7 @@
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/RecyclingAllocator.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm/CodeGen/DebugLoc.h"
 #include <cassert>
 
 namespace llvm {
@@ -59,8 +60,19 @@ struct SDVTList {
 namespace ISD {
 
   //===--------------------------------------------------------------------===//
-  /// ISD::NodeType enum - This enum defines all of the operators valid in a
-  /// SelectionDAG.
+  /// ISD::NodeType enum - This enum defines the target-independent operators
+  /// for a SelectionDAG.
+  ///
+  /// Targets may also define target-dependent operator codes for SDNodes. For
+  /// example, on x86, these are the enum values in the X86ISD namespace.
+  /// Targets should aim to use target-independent operators to model their
+  /// instruction sets as much as possible, and only use target-dependent
+  /// operators when they have special requirements.
+  ///
+  /// Finally, during and after selection proper, SNodes may use special
+  /// operator codes that correspond directly with MachineInstr opcodes. These
+  /// are used to represent selected instructions. See the isMachineOpcode()
+  /// and getMachineOpcode() member functions of SDNode.
   ///
   enum NodeType {
     // DELETED_NODE - This is an illegal flag value that is used to catch
@@ -901,6 +913,7 @@ public:
   inline bool isTargetOpcode() const;
   inline bool isMachineOpcode() const;
   inline unsigned getMachineOpcode() const;
+  inline const DebugLoc getDebugLoc() const;
 
   
   /// reachesChainWithoutSideEffects - Return true if this operand (which must
@@ -955,63 +968,77 @@ template<> struct simplify_type<const SDValue> {
   }
 };
 
-/// SDUse - Represents a use of the SDNode referred by
-/// the SDValue.
+/// SDUse - Represents a use of a SDNode. This class holds an SDValue,
+/// which records the SDNode being used and the result number, a
+/// pointer to the SDNode using the value, and Next and Prev pointers,
+/// which link together all the uses of an SDNode.
+///
 class SDUse {
-  SDValue Operand;
-  /// User - Parent node of this operand.
-  SDNode    *User;
-  /// Prev, next - Pointers to the uses list of the SDNode referred by 
+  /// Val - The value being used.
+  SDValue Val;
+  /// User - The user of this value.
+  SDNode *User;
+  /// Prev, Next - Pointers to the uses list of the SDNode referred by 
   /// this operand.
   SDUse **Prev, *Next;
+
+  SDUse(const SDUse &U);          // Do not implement
+  void operator=(const SDUse &U); // Do not implement
+
 public:
-  friend class SDNode;
-  SDUse(): Operand(), User(NULL), Prev(NULL), Next(NULL) {}
+  SDUse() : Val(), User(NULL), Prev(NULL), Next(NULL) {}
 
-  SDUse(SDNode *val, unsigned resno) : 
-    Operand(val,resno), User(NULL), Prev(NULL), Next(NULL) {}
+  /// Normally SDUse will just implicitly convert to an SDValue that it holds.
+  operator const SDValue&() const { return Val; }
 
-  SDUse& operator= (const SDValue& Op) {
-      Operand = Op;
-      Next = NULL;
-      Prev = NULL;
-      return *this;
-  }
-
-  SDUse& operator= (const SDUse& Op) {
-      Operand = Op;
-      Next = NULL;
-      Prev = NULL;
-      return *this;
-  }
-
-  SDUse *getNext() { return Next; }
-
+  /// If implicit conversion to SDValue doesn't work, the get() method returns
+  /// the SDValue.
+  const SDValue &get() const { return Val; }
+  
+  /// getUser - This returns the SDNode that contains this Use.
   SDNode *getUser() { return User; }
+
+  /// getNext - Get the next SDUse in the use list.
+  SDUse *getNext() const { return Next; }
+
+  /// getNode - Convenience function for get().getNode().
+  SDNode *getNode() const { return Val.getNode(); }
+  /// getResNo - Convenience function for get().getResNo().
+  unsigned getResNo() const { return Val.getResNo(); }
+  /// getValueType - Convenience function for get().getValueType().
+  MVT getValueType() const { return Val.getValueType(); }
+
+  /// operator== - Convenience function for get().operator==
+  bool operator==(const SDValue &V) const {
+    return Val == V;
+  }
+  
+  /// operator!= - Convenience function for get().operator!=
+  bool operator!=(const SDValue &V) const {
+    return Val != V;
+  }
+
+  /// operator< - Convenience function for get().operator<
+  bool operator<(const SDValue &V) const {
+    return Val < V;
+  }
+
+private:
+  friend class SelectionDAG;
+  friend class SDNode;
 
   void setUser(SDNode *p) { User = p; }
 
-  operator SDValue() const { return Operand; }
+  /// set - Remove this use from its existing use list, assign it the
+  /// given value, and add it to the new value's node's use list.
+  inline void set(const SDValue &V);
+  /// setInitial - like set, but only supports initializing a newly-allocated
+  /// SDUse with a non-null value.
+  inline void setInitial(const SDValue &V);
+  /// setNode - like set, but only sets the Node portion of the value,
+  /// leaving the ResNo portion unmodified.
+  inline void setNode(SDNode *N);
 
-  const SDValue& getSDValue() const { return Operand; }
-
-  SDValue &getSDValue() { return Operand; }
-  SDNode *getVal() { return Operand.getNode(); }
-  SDNode *getVal() const { return Operand.getNode(); } // FIXME: const correct?
-
-  bool operator==(const SDValue &O) const {
-    return Operand == O;
-  }
-
-  bool operator!=(const SDValue &O) const {
-    return !(Operand == O);
-  }
-
-  bool operator<(const SDValue &O) const {
-    return Operand < O;
-  }
-
-protected:
   void addToList(SDUse **List) {
     Next = *List;
     if (Next) Next->Prev = &Next;
@@ -1025,60 +1052,21 @@ protected:
   }
 };
 
-
 /// simplify_type specializations - Allow casting operators to work directly on
 /// SDValues as if they were SDNode*'s.
 template<> struct simplify_type<SDUse> {
   typedef SDNode* SimpleType;
   static SimpleType getSimplifiedValue(const SDUse &Val) {
-    return static_cast<SimpleType>(Val.getVal());
+    return static_cast<SimpleType>(Val.getNode());
   }
 };
 template<> struct simplify_type<const SDUse> {
   typedef SDNode* SimpleType;
   static SimpleType getSimplifiedValue(const SDUse &Val) {
-    return static_cast<SimpleType>(Val.getVal());
+    return static_cast<SimpleType>(Val.getNode());
   }
 };
 
-
-/// SDOperandPtr - A helper SDValue pointer class, that can handle
-/// arrays of SDUse and arrays of SDValue objects. This is required
-/// in many places inside the SelectionDAG.
-/// 
-class SDOperandPtr {
-  const SDValue *ptr; // The pointer to the SDValue object
-  int object_size;      // The size of the object containg the SDValue
-public:
-  SDOperandPtr() : ptr(0), object_size(0) {}
-
-  SDOperandPtr(SDUse * use_ptr) { 
-    ptr = &use_ptr->getSDValue(); 
-    object_size = (int)sizeof(SDUse); 
-  }
-
-  SDOperandPtr(const SDValue * op_ptr) { 
-    ptr = op_ptr; 
-    object_size = (int)sizeof(SDValue); 
-  }
-
-  const SDValue operator *() { return *ptr; }
-  const SDValue *operator ->() { return ptr; }
-  SDOperandPtr operator ++ () { 
-    ptr = (SDValue*)((char *)ptr + object_size); 
-    return *this; 
-  }
-
-  SDOperandPtr operator ++ (int) { 
-    SDOperandPtr tmp = *this;
-    ptr = (SDValue*)((char *)ptr + object_size); 
-    return tmp; 
-  }
-
-  SDValue operator[] (int idx) const {
-    return *(SDValue*)((char*) ptr + object_size * idx);
-  } 
-};
 
 /// SDNode - Represents one node in the SelectionDAG.
 ///
@@ -1110,14 +1098,20 @@ private:
   /// define multiple values simultaneously.
   const MVT *ValueList;
 
+  /// UseList - List of uses for this SDNode.
+  SDUse *UseList;
+
   /// NumOperands/NumValues - The number of entries in the Operand/Value list.
   unsigned short NumOperands, NumValues;
-  
-  /// Uses - List of uses for this SDNode.
-  SDUse *Uses;
 
-  /// addUse - add SDUse to the list of uses.
-  void addUse(SDUse &U) { U.addToList(&Uses); }
+  /// debugLoc - source line information.
+  DebugLoc debugLoc;
+
+  /// getValueTypeList - Return a pointer to the specified value type.
+  static const MVT *getValueTypeList(MVT VT);
+
+  friend class SelectionDAG;
+  friend struct ilist_traits<SDNode>;
 
 public:
   //===--------------------------------------------------------------------===//
@@ -1148,7 +1142,7 @@ public:
 
   /// use_empty - Return true if there are no uses of this node.
   ///
-  bool use_empty() const { return Uses == NULL; }
+  bool use_empty() const { return UseList == NULL; }
 
   /// hasOneUse - Return true if there is exactly one use of this node.
   ///
@@ -1167,6 +1161,13 @@ public:
 
   /// setNodeId - Set unique node id.
   void setNodeId(int Id) { NodeId = Id; }
+
+  /// getDebugLoc - Return the source location info.
+  const DebugLoc getDebugLoc() const { return debugLoc; }
+
+  /// setDebugLoc - Set source location info.  Try to avoid this, putting
+  /// it in the constructor is preferable.
+  void setDebugLoc(const DebugLoc dl) { debugLoc = dl; }
 
   /// use_iterator - This class provides iterator support for SDUse
   /// operands that use a specific SDNode. 
@@ -1226,7 +1227,7 @@ public:
   /// of an SDNode.
 
   use_iterator use_begin() const {
-    return use_iterator(Uses);
+    return use_iterator(UseList);
   }
 
   static use_iterator use_end() { return use_iterator(0); }
@@ -1265,13 +1266,12 @@ public:
 
   const SDValue &getOperand(unsigned Num) const {
     assert(Num < NumOperands && "Invalid child # of SDNode!");
-    return OperandList[Num].getSDValue();
+    return OperandList[Num];
   }
 
   typedef SDUse* op_iterator;
   op_iterator op_begin() const { return OperandList; }
   op_iterator op_end() const { return OperandList+NumOperands; }
-
 
   SDVTList getVTList() const {
     SDVTList X = { ValueList, NumValues };
@@ -1339,91 +1339,124 @@ public:
   ///
   void Profile(FoldingSetNodeID &ID) const;
 
-protected:
-  friend class SelectionDAG;
-  friend struct ilist_traits<SDNode>;
-  
-  /// getValueTypeList - Return a pointer to the specified value type.
+  /// addUse - This method should only be used by the SDUse class.
   ///
-  static const MVT *getValueTypeList(MVT VT);
+  void addUse(SDUse &U) { U.addToList(&UseList); }
+
+protected:
   static SDVTList getSDVTList(MVT VT) {
     SDVTList Ret = { getValueTypeList(VT), 1 };
     return Ret;
   }
 
+  /// The constructors that supply DebugLoc explicitly should be preferred
+  /// for new code.
   SDNode(unsigned Opc, SDVTList VTs, const SDValue *Ops, unsigned NumOps)
     : NodeType(Opc), OperandsNeedDelete(true), SubclassData(0),
-      NodeId(-1), Uses(NULL) {
-    NumOperands = NumOps;
-    OperandList = NumOps ? new SDUse[NumOperands] : 0;
-    
+      NodeId(-1),
+      OperandList(NumOps ? new SDUse[NumOps] : 0),
+      ValueList(VTs.VTs),
+      UseList(NULL),
+      NumOperands(NumOps), NumValues(VTs.NumVTs),
+      debugLoc(DebugLoc::getUnknownLoc()) {
     for (unsigned i = 0; i != NumOps; ++i) {
-      OperandList[i] = Ops[i];
       OperandList[i].setUser(this);
-      Ops[i].getNode()->addUse(OperandList[i]);
+      OperandList[i].setInitial(Ops[i]);
     }
-    
-    ValueList = VTs.VTs;
-    NumValues = VTs.NumVTs;
-  }
-
-  SDNode(unsigned Opc, SDVTList VTs, const SDUse *Ops, unsigned NumOps)
-    : NodeType(Opc), OperandsNeedDelete(true), SubclassData(0),
-      NodeId(-1), Uses(NULL) {
-    OperandsNeedDelete = true;
-    NumOperands = NumOps;
-    OperandList = NumOps ? new SDUse[NumOperands] : 0;
-    
-    for (unsigned i = 0; i != NumOps; ++i) {
-      OperandList[i] = Ops[i];
-      OperandList[i].setUser(this);
-      Ops[i].getVal()->addUse(OperandList[i]);
-    }
-    
-    ValueList = VTs.VTs;
-    NumValues = VTs.NumVTs;
   }
 
   /// This constructor adds no operands itself; operands can be
   /// set later with InitOperands.
   SDNode(unsigned Opc, SDVTList VTs)
     : NodeType(Opc), OperandsNeedDelete(false), SubclassData(0),
-      NodeId(-1), Uses(NULL) {
-    NumOperands = 0;
-    OperandList = 0;
-    ValueList = VTs.VTs;
-    NumValues = VTs.NumVTs;
-  }
-  
-  /// InitOperands - Initialize the operands list of this node with the
-  /// specified values, which are part of the node (thus they don't need to be
-  /// copied in or allocated).
-  void InitOperands(SDUse *Ops, unsigned NumOps) {
-    assert(OperandList == 0 && "Operands already set!");
-    NumOperands = NumOps;
-    OperandList = Ops;
-    Uses = NULL;
-    
+      NodeId(-1), OperandList(0), ValueList(VTs.VTs), UseList(NULL),
+      NumOperands(0), NumValues(VTs.NumVTs),
+      debugLoc(DebugLoc::getUnknownLoc()) {}
+
+  /// The next two constructors specify DebugLoc explicitly; the intent
+  /// is that they will replace the above two over time, and eventually
+  /// the ones above can be removed.
+  SDNode(unsigned Opc, const DebugLoc dl, SDVTList VTs, const SDValue *Ops, 
+         unsigned NumOps)
+    : NodeType(Opc), OperandsNeedDelete(true), SubclassData(0),
+      NodeId(-1),
+      OperandList(NumOps ? new SDUse[NumOps] : 0),
+      ValueList(VTs.VTs), UseList(NULL),
+      NumOperands(NumOps), NumValues(VTs.NumVTs),
+      debugLoc(dl) {
     for (unsigned i = 0; i != NumOps; ++i) {
       OperandList[i].setUser(this);
-      Ops[i].getVal()->addUse(OperandList[i]);
+      OperandList[i].setInitial(Ops[i]);
     }
+  }
+
+  /// This constructor adds no operands itself; operands can be
+  /// set later with InitOperands.
+  SDNode(unsigned Opc, const DebugLoc dl, SDVTList VTs)
+    : NodeType(Opc), OperandsNeedDelete(false), SubclassData(0),
+      NodeId(-1), OperandList(0), ValueList(VTs.VTs), UseList(NULL),
+      NumOperands(0), NumValues(VTs.NumVTs),
+      debugLoc(dl) {}
+  
+  /// InitOperands - Initialize the operands list of this with 1 operand.
+  void InitOperands(SDUse *Ops, const SDValue &Op0) {
+    Ops[0].setUser(this);
+    Ops[0].setInitial(Op0);
+    NumOperands = 1;
+    OperandList = Ops;
+  }
+
+  /// InitOperands - Initialize the operands list of this with 2 operands.
+  void InitOperands(SDUse *Ops, const SDValue &Op0, const SDValue &Op1) {
+    Ops[0].setUser(this);
+    Ops[0].setInitial(Op0);
+    Ops[1].setUser(this);
+    Ops[1].setInitial(Op1);
+    NumOperands = 2;
+    OperandList = Ops;
+  }
+
+  /// InitOperands - Initialize the operands list of this with 3 operands.
+  void InitOperands(SDUse *Ops, const SDValue &Op0, const SDValue &Op1,
+                    const SDValue &Op2) {
+    Ops[0].setUser(this);
+    Ops[0].setInitial(Op0);
+    Ops[1].setUser(this);
+    Ops[1].setInitial(Op1);
+    Ops[2].setUser(this);
+    Ops[2].setInitial(Op2);
+    NumOperands = 3;
+    OperandList = Ops;
+  }
+
+  /// InitOperands - Initialize the operands list of this with 4 operands.
+  void InitOperands(SDUse *Ops, const SDValue &Op0, const SDValue &Op1,
+                    const SDValue &Op2, const SDValue &Op3) {
+    Ops[0].setUser(this);
+    Ops[0].setInitial(Op0);
+    Ops[1].setUser(this);
+    Ops[1].setInitial(Op1);
+    Ops[2].setUser(this);
+    Ops[2].setInitial(Op2);
+    Ops[3].setUser(this);
+    Ops[3].setInitial(Op3);
+    NumOperands = 4;
+    OperandList = Ops;
+  }
+
+  /// InitOperands - Initialize the operands list of this with N operands.
+  void InitOperands(SDUse *Ops, const SDValue *Vals, unsigned N) {
+    for (unsigned i = 0; i != N; ++i) {
+      Ops[i].setUser(this);
+      Ops[i].setInitial(Vals[i]);
+    }
+    NumOperands = N;
+    OperandList = Ops;
   }
 
   /// DropOperands - Release the operands and set this node to have
   /// zero operands.
   void DropOperands();
-  
-  void addUser(unsigned i, SDNode *User) {
-    assert(User->OperandList[i].getUser() && "Node without parent");
-    addUse(User->OperandList[i]);
-  }
-
-  void removeUser(unsigned i, SDNode *User) {
-    assert(User->OperandList[i].getUser() && "Node without parent");
-    SDUse &Op = User->OperandList[i];
-    Op.removeFromList();
-  }
 };
 
 
@@ -1459,6 +1492,28 @@ inline bool SDValue::use_empty() const {
 inline bool SDValue::hasOneUse() const {
   return Node->hasNUsesOfValue(1, ResNo);
 }
+inline const DebugLoc SDValue::getDebugLoc() const {
+  return Node->getDebugLoc();
+}
+
+// Define inline functions from the SDUse class.
+
+inline void SDUse::set(const SDValue &V) {
+  if (Val.getNode()) removeFromList();
+  Val = V;
+  if (V.getNode()) V.getNode()->addUse(*this);
+}
+
+inline void SDUse::setInitial(const SDValue &V) {
+  Val = V;
+  V.getNode()->addUse(*this);
+}
+
+inline void SDUse::setNode(SDNode *N) {
+  if (Val.getNode()) removeFromList();
+  Val.setNode(N);
+  if (N) N->addUse(*this);
+}
 
 /// UnarySDNode - This class is used for single-operand SDNodes.  This is solely
 /// to allow co-allocation of node operands with the node itself.
@@ -1467,8 +1522,11 @@ class UnarySDNode : public SDNode {
 public:
   UnarySDNode(unsigned Opc, SDVTList VTs, SDValue X)
     : SDNode(Opc, VTs) {
-    Op = X;
-    InitOperands(&Op, 1);
+    InitOperands(&Op, X);
+  }
+  UnarySDNode(unsigned Opc, DebugLoc dl, SDVTList VTs, SDValue X)
+    : SDNode(Opc, dl, VTs) {
+    InitOperands(&Op, X);
   }
 };
 
@@ -1479,9 +1537,11 @@ class BinarySDNode : public SDNode {
 public:
   BinarySDNode(unsigned Opc, SDVTList VTs, SDValue X, SDValue Y)
     : SDNode(Opc, VTs) {
-    Ops[0] = X;
-    Ops[1] = Y;
-    InitOperands(Ops, 2);
+    InitOperands(Ops, X, Y);
+  }
+  BinarySDNode(unsigned Opc, DebugLoc dl, SDVTList VTs, SDValue X, SDValue Y)
+    : SDNode(Opc, dl, VTs) {
+    InitOperands(Ops, X, Y);
   }
 };
 
@@ -1493,10 +1553,12 @@ public:
   TernarySDNode(unsigned Opc, SDVTList VTs, SDValue X, SDValue Y,
                 SDValue Z)
     : SDNode(Opc, VTs) {
-    Ops[0] = X;
-    Ops[1] = Y;
-    Ops[2] = Z;
-    InitOperands(Ops, 3);
+    InitOperands(Ops, X, Y, Z);
+  }
+  TernarySDNode(unsigned Opc, DebugLoc dl, SDVTList VTs, SDValue X, SDValue Y,
+                SDValue Z)
+    : SDNode(Opc, dl, VTs) {
+    InitOperands(Ops, X, Y, Z);
   }
 };
 
@@ -1516,11 +1578,10 @@ public:
   explicit HandleSDNode(SDValue X)
 #endif
     : SDNode(ISD::HANDLENODE, getSDVTList(MVT::Other)) {
-    Op = X;
-    InitOperands(&Op, 1);
+    InitOperands(&Op, X);
   }
   ~HandleSDNode();  
-  const SDValue &getValue() const { return Op.getSDValue(); }
+  const SDValue &getValue() const { return Op; }
 };
 
 /// Abstact virtual class for operations for memory operations
@@ -1535,10 +1596,6 @@ private:
   //! SVOffset - Memory location offset. Note that base is defined in MemSDNode
   int SVOffset;
 
-  /// Flags - the low bit indicates whether this is a volatile reference;
-  /// the remainder is a log2 encoding of the alignment in bytes.
-  unsigned Flags;
-
 public:
   MemSDNode(unsigned Opc, SDVTList VTs, MVT MemoryVT,
             const Value *srcValue, int SVOff,
@@ -1548,10 +1605,26 @@ public:
             MVT MemoryVT, const Value *srcValue, int SVOff,
             unsigned alignment, bool isvolatile);
 
+  MemSDNode(unsigned Opc, DebugLoc dl, SDVTList VTs, MVT MemoryVT,
+            const Value *srcValue, int SVOff,
+            unsigned alignment, bool isvolatile);
+
+  MemSDNode(unsigned Opc, DebugLoc dl, SDVTList VTs, const SDValue *Ops, 
+            unsigned NumOps, MVT MemoryVT, const Value *srcValue, int SVOff,
+            unsigned alignment, bool isvolatile);
+
   /// Returns alignment and volatility of the memory access
-  unsigned getAlignment() const { return (1u << (Flags >> 1)) >> 1; }
-  bool isVolatile() const { return Flags & 1; }
+  unsigned getAlignment() const { return (1u << (SubclassData >> 6)) >> 1; }
+  bool isVolatile() const { return (SubclassData >> 5) & 1; }
   
+  /// getRawSubclassData - Return the SubclassData value, which contains an
+  /// encoding of the alignment and volatile information, as well as bits
+  /// used by subclasses. This function should only be used to compute a
+  /// FoldingSetNodeID value.
+  unsigned getRawSubclassData() const {
+    return SubclassData;
+  }
+
   /// Returns the SrcValue and offset that describes the location of the access
   const Value *getSrcValue() const { return SrcValue; }
   int getSrcValueOffset() const { return SVOffset; }
@@ -1567,10 +1640,6 @@ public:
   const SDValue &getBasePtr() const {
     return getOperand(getOpcode() == ISD::STORE ? 2 : 1);
   }
-
-  /// getRawFlags - Represent the flags as a bunch of bits.
-  ///
-  unsigned getRawFlags() const { return Flags; }
 
   // Methods to support isa and dyn_cast
   static bool classof(const MemSDNode *) { return true; }
@@ -1617,21 +1686,29 @@ public:
                unsigned Align=0)
     : MemSDNode(Opc, VTL, MemVT, SrcVal, /*SVOffset=*/0,
                 Align, /*isVolatile=*/true) {
-    Ops[0] = Chain;
-    Ops[1] = Ptr;
-    Ops[2] = Cmp;
-    Ops[3] = Swp;
-    InitOperands(Ops, 4);
+    InitOperands(Ops, Chain, Ptr, Cmp, Swp);
   }
   AtomicSDNode(unsigned Opc, SDVTList VTL, MVT MemVT,
                SDValue Chain, SDValue Ptr, 
                SDValue Val, const Value* SrcVal, unsigned Align=0)
     : MemSDNode(Opc, VTL, MemVT, SrcVal, /*SVOffset=*/0,
                 Align, /*isVolatile=*/true) {
-    Ops[0] = Chain;
-    Ops[1] = Ptr;
-    Ops[2] = Val;
-    InitOperands(Ops, 3);
+    InitOperands(Ops, Chain, Ptr, Val);
+  }
+  AtomicSDNode(unsigned Opc, DebugLoc dl, SDVTList VTL, MVT MemVT,
+               SDValue Chain, SDValue Ptr,
+               SDValue Cmp, SDValue Swp, const Value* SrcVal,
+               unsigned Align=0)
+    : MemSDNode(Opc, dl, VTL, MemVT, SrcVal, /*SVOffset=*/0,
+                Align, /*isVolatile=*/true) {
+    InitOperands(Ops, Chain, Ptr, Cmp, Swp);
+  }
+  AtomicSDNode(unsigned Opc, DebugLoc dl, SDVTList VTL, MVT MemVT,
+               SDValue Chain, SDValue Ptr, 
+               SDValue Val, const Value* SrcVal, unsigned Align=0)
+    : MemSDNode(Opc, dl, VTL, MemVT, SrcVal, /*SVOffset=*/0,
+                Align, /*isVolatile=*/true) {
+    InitOperands(Ops, Chain, Ptr, Val);
   }
   
   const SDValue &getBasePtr() const { return getOperand(1); }
@@ -1672,6 +1749,13 @@ public:
                      MVT MemoryVT, const Value *srcValue, int SVO,
                      unsigned Align, bool Vol, bool ReadMem, bool WriteMem)
     : MemSDNode(Opc, VTs, Ops, NumOps, MemoryVT, srcValue, SVO, Align, Vol),
+      ReadMem(ReadMem), WriteMem(WriteMem) {
+  }
+  MemIntrinsicSDNode(unsigned Opc, DebugLoc dl, SDVTList VTs,
+                     const SDValue *Ops, unsigned NumOps,
+                     MVT MemoryVT, const Value *srcValue, int SVO,
+                     unsigned Align, bool Vol, bool ReadMem, bool WriteMem)
+    : MemSDNode(Opc, dl, VTs, Ops, NumOps, MemoryVT, srcValue, SVO, Align, Vol),
       ReadMem(ReadMem), WriteMem(WriteMem) {
   }
 
@@ -1892,6 +1976,9 @@ protected:
   explicit BasicBlockSDNode(MachineBasicBlock *mbb)
     : SDNode(ISD::BasicBlock, getSDVTList(MVT::Other)), MBB(mbb) {
   }
+  explicit BasicBlockSDNode(MachineBasicBlock *mbb, DebugLoc dl)
+    : SDNode(ISD::BasicBlock, dl, getSDVTList(MVT::Other)), MBB(mbb) {
+  }
 public:
 
   MachineBasicBlock *getBasicBlock() const { return MBB; }
@@ -1979,8 +2066,7 @@ protected:
                      Value *cu)
     : SDNode(ISD::DBG_STOPPOINT, getSDVTList(MVT::Other)),
       Line(l), Column(c), CU(cu) {
-    Chain = ch;
-    InitOperands(&Chain, 1);
+    InitOperands(&Chain, ch);
   }
 public:
   unsigned getLine() const { return Line; }
@@ -2000,8 +2086,11 @@ protected:
   friend class SelectionDAG;
   LabelSDNode(unsigned NodeTy, SDValue ch, unsigned id)
     : SDNode(NodeTy, getSDVTList(MVT::Other)), LabelID(id) {
-    Chain = ch;
-    InitOperands(&Chain, 1);
+    InitOperands(&Chain, ch);
+  }
+  LabelSDNode(unsigned NodeTy, DebugLoc dl, SDValue ch, unsigned id)
+    : SDNode(NodeTy, dl, getSDVTList(MVT::Other)), LabelID(id) {
+    InitOperands(&Chain, ch);
   }
 public:
   unsigned getLabelID() const { return LabelID; }
@@ -2019,6 +2108,10 @@ protected:
   friend class SelectionDAG;
   ExternalSymbolSDNode(bool isTarget, const char *Sym, MVT VT)
     : SDNode(isTarget ? ISD::TargetExternalSymbol : ISD::ExternalSymbol,
+             getSDVTList(VT)), Symbol(Sym) {
+  }
+  ExternalSymbolSDNode(bool isTarget, DebugLoc dl, const char *Sym, MVT VT)
+    : SDNode(isTarget ? ISD::TargetExternalSymbol : ISD::ExternalSymbol, dl,
              getSDVTList(VT)), Symbol(Sym) {
   }
 public:
@@ -2187,6 +2280,12 @@ protected:
     : SDNode(ISD::CALL, VTs, Operands, numOperands),
       CallingConv(cc), IsVarArg(isvararg), IsTailCall(istailcall),
       Inreg(isinreg) {}
+  CallSDNode(unsigned cc, DebugLoc dl, bool isvararg, bool istailcall, 
+             bool isinreg, SDVTList VTs, const SDValue *Operands, 
+             unsigned numOperands)
+    : SDNode(ISD::CALL, dl, VTs, Operands, numOperands),
+      CallingConv(cc), IsVarArg(isvararg), IsTailCall(istailcall),
+      Inreg(isinreg) {}
 public:
   unsigned getCallingConv() const { return CallingConv; }
   unsigned isVarArg() const { return IsVarArg; }
@@ -2255,11 +2354,21 @@ public:
                SDVTList VTs, ISD::MemIndexedMode AM, MVT VT,
                const Value *SV, int SVO, unsigned Align, bool Vol)
     : MemSDNode(NodeTy, VTs, VT, SV, SVO, Align, Vol) {
-    SubclassData = AM;
-    for (unsigned i = 0; i != numOperands; ++i)
-      Ops[i] = Operands[i];
-    InitOperands(Ops, numOperands);
     assert(Align != 0 && "Loads and stores should have non-zero aligment");
+    SubclassData |= AM << 2;
+    assert(getAddressingMode() == AM && "MemIndexedMode encoding error!");
+    InitOperands(Ops, Operands, numOperands);
+    assert((getOffset().getOpcode() == ISD::UNDEF || isIndexed()) &&
+           "Only indexed loads and stores have a non-undef offset operand");
+  }
+  LSBaseSDNode(ISD::NodeType NodeTy, DebugLoc dl, SDValue *Operands, 
+               unsigned numOperands, SDVTList VTs, ISD::MemIndexedMode AM, 
+               MVT VT, const Value *SV, int SVO, unsigned Align, bool Vol)
+    : MemSDNode(NodeTy, dl, VTs, VT, SV, SVO, Align, Vol) {
+    assert(Align != 0 && "Loads and stores should have non-zero aligment");
+    SubclassData |= AM << 2;
+    assert(getAddressingMode() == AM && "MemIndexedMode encoding error!");
+    InitOperands(Ops, Operands, numOperands);
     assert((getOffset().getOpcode() == ISD::UNDEF || isIndexed()) &&
            "Only indexed loads and stores have a non-undef offset operand");
   }
@@ -2271,7 +2380,7 @@ public:
   /// getAddressingMode - Return the addressing mode for this load or store:
   /// unindexed, pre-inc, pre-dec, post-inc, or post-dec.
   ISD::MemIndexedMode getAddressingMode() const {
-    return ISD::MemIndexedMode(SubclassData & 7);
+    return ISD::MemIndexedMode((SubclassData >> 2) & 7);
   }
 
   /// isIndexed - Return true if this is a pre/post inc/dec load/store.
@@ -2297,14 +2406,23 @@ protected:
              const Value *SV, int O=0, unsigned Align=0, bool Vol=false)
     : LSBaseSDNode(ISD::LOAD, ChainPtrOff, 3,
                    VTs, AM, LVT, SV, O, Align, Vol) {
-    SubclassData |= (unsigned short)ETy << 3;
+    SubclassData |= (unsigned short)ETy;
+    assert(getExtensionType() == ETy && "LoadExtType encoding error!");
+  }
+  LoadSDNode(SDValue *ChainPtrOff, DebugLoc dl, SDVTList VTs,
+             ISD::MemIndexedMode AM, ISD::LoadExtType ETy, MVT LVT,
+             const Value *SV, int O=0, unsigned Align=0, bool Vol=false)
+    : LSBaseSDNode(ISD::LOAD, dl, ChainPtrOff, 3,
+                   VTs, AM, LVT, SV, O, Align, Vol) {
+    SubclassData |= (unsigned short)ETy;
+    assert(getExtensionType() == ETy && "LoadExtType encoding error!");
   }
 public:
 
   /// getExtensionType - Return whether this is a plain node,
   /// or one of the varieties of value-extending loads.
   ISD::LoadExtType getExtensionType() const {
-    return ISD::LoadExtType((SubclassData >> 3) & 3);
+    return ISD::LoadExtType(SubclassData & 3);
   }
 
   const SDValue &getBasePtr() const { return getOperand(1); }
@@ -2326,14 +2444,23 @@ protected:
               const Value *SV, int O=0, unsigned Align=0, bool Vol=false)
     : LSBaseSDNode(ISD::STORE, ChainValuePtrOff, 4,
                    VTs, AM, SVT, SV, O, Align, Vol) {
-    SubclassData |= (unsigned short)isTrunc << 3;
+    SubclassData |= (unsigned short)isTrunc;
+    assert(isTruncatingStore() == isTrunc && "isTrunc encoding error!");
+  }
+  StoreSDNode(SDValue *ChainValuePtrOff, DebugLoc dl, SDVTList VTs,
+              ISD::MemIndexedMode AM, bool isTrunc, MVT SVT,
+              const Value *SV, int O=0, unsigned Align=0, bool Vol=false)
+    : LSBaseSDNode(ISD::STORE, dl, ChainValuePtrOff, 4,
+                   VTs, AM, SVT, SV, O, Align, Vol) {
+    SubclassData |= (unsigned short)isTrunc;
+    assert(isTruncatingStore() == isTrunc && "isTrunc encoding error!");
   }
 public:
 
   /// isTruncatingStore - Return true if the op does a truncation before store.
   /// For integers this is the same as doing a TRUNCATE and storing the result.
   /// For floats, it is the same as doing an FP_ROUND and storing the result.
-  bool isTruncatingStore() const { return (SubclassData >> 3) & 1; }
+  bool isTruncatingStore() const { return SubclassData & 1; }
 
   const SDValue &getValue() const { return getOperand(1); }
   const SDValue &getBasePtr() const { return getOperand(2); }

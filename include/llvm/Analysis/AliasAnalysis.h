@@ -345,6 +345,19 @@ public:
   }
 };
 
+/// isNoAliasCall - Return true if this pointer is returned by a noalias
+/// function.
+bool isNoAliasCall(const Value *V);
+
+/// isIdentifiedObject - Return true if this pointer refers to a distinct and
+/// identifiable object.  This returns true for:
+///    Global Variables and Functions
+///    Allocas and Mallocs
+///    ByVal and NoAlias Arguments
+///    NoAlias returns
+///
+bool isIdentifiedObject(const Value *V);
+
 } // End llvm namespace
 
 // Because of the way .a files work, we must force the BasicAA implementation to

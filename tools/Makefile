@@ -8,6 +8,10 @@
 ##===----------------------------------------------------------------------===##
 
 LEVEL := ..
+
+# Build clang if present.
+OPTIONAL_PARALLEL_DIRS := clang
+
 # NOTE: The tools are organized into five groups of four consisting of one
 # large and three small executables. This is done to minimize memory load
 # in parallel builds.  Please retain this ordering.
@@ -21,8 +25,7 @@ PARALLEL_DIRS := llvm-config  \
 
 include $(LEVEL)/Makefile.config
 
-# only build new lto project on Darwin for now
-ifeq ($(OS),Darwin)
+ifeq ($(ENABLE_PIC),1)
 PARALLEL_DIRS += lto
 endif
 

@@ -59,7 +59,8 @@ char* ExecutionEngine::getMemoryForGV(const GlobalVariable* GV) {
 }
 
 /// removeModuleProvider - Remove a ModuleProvider from the list of modules.
-/// Release module from ModuleProvider.
+/// Relases the Module from the ModuleProvider, materializing it in the
+/// process, and returns the materialized Module.
 Module* ExecutionEngine::removeModuleProvider(ModuleProvider *P, 
                                               std::string *ErrInfo) {
   for(SmallVector<ModuleProvider *, 1>::iterator I = Modules.begin(), 
@@ -72,6 +73,23 @@ Module* ExecutionEngine::removeModuleProvider(ModuleProvider *P,
     }
   }
   return NULL;
+}
+
+/// deleteModuleProvider - Remove a ModuleProvider from the list of modules,
+/// and deletes the ModuleProvider and owned Module.  Avoids materializing 
+/// the underlying module.
+void ExecutionEngine::deleteModuleProvider(ModuleProvider *P, 
+                                           std::string *ErrInfo) {
+  for(SmallVector<ModuleProvider *, 1>::iterator I = Modules.begin(), 
+      E = Modules.end(); I != E; ++I) {
+    ModuleProvider *MP = *I;
+    if (MP == P) {
+      Modules.erase(I);
+      clearGlobalMappingsFromModule(MP->getModule());
+      delete MP;
+      return;
+    }
+  }
 }
 
 /// FindFunctionNamed - Search all of the active modules to find the one that
@@ -692,7 +710,7 @@ static void StoreIntToMemory(const APInt &IntVal, uint8_t *Dst,
   assert((IntVal.getBitWidth()+7)/8 >= StoreBytes && "Integer too small!");
   uint8_t *Src = (uint8_t *)IntVal.getRawData();
 
-  if (sys::littleEndianHost())
+  if (sys::isLittleEndianHost())
     // Little-endian host - the source is ordered from LSB to MSB.  Order the
     // destination from LSB to MSB: Do a straight copy.
     memcpy(Dst, Src, StoreBytes);
@@ -751,7 +769,7 @@ void ExecutionEngine::StoreValueToMemory(const GenericValue &Val,
     cerr << "Cannot store value of type " << *Ty << "!\n";
   }
 
-  if (sys::littleEndianHost() != getTargetData()->isLittleEndian())
+  if (sys::isLittleEndianHost() != getTargetData()->isLittleEndian())
     // Host and target are different endian - reverse the stored bytes.
     std::reverse((uint8_t*)Ptr, StoreBytes + (uint8_t*)Ptr);
 }
@@ -762,7 +780,7 @@ static void LoadIntFromMemory(APInt &IntVal, uint8_t *Src, unsigned LoadBytes) {
   assert((IntVal.getBitWidth()+7)/8 >= LoadBytes && "Integer too small!");
   uint8_t *Dst = (uint8_t *)IntVal.getRawData();
 
-  if (sys::littleEndianHost())
+  if (sys::isLittleEndianHost())
     // Little-endian host - the destination must be ordered from LSB to MSB.
     // The source is ordered from LSB to MSB: Do a straight copy.
     memcpy(Dst, Src, LoadBytes);
@@ -789,7 +807,7 @@ void ExecutionEngine::LoadValueFromMemory(GenericValue &Result,
                                           const Type *Ty) {
   const unsigned LoadBytes = getTargetData()->getTypeStoreSize(Ty);
 
-  if (sys::littleEndianHost() != getTargetData()->isLittleEndian()) {
+  if (sys::isLittleEndianHost() != getTargetData()->isLittleEndian()) {
     // Host and target are different endian - reverse copy the stored
     // bytes into a buffer, and load from that.
     uint8_t *Src = (uint8_t*)Ptr;

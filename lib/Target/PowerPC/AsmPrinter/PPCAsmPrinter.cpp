@@ -641,9 +641,9 @@ bool PPCLinuxAsmPrinter::doInitialization(Module &M) {
   bool Result = AsmPrinter::doInitialization(M);
 
   // Emit initial debug information.
-  MMI = getAnalysisToUpdate<MachineModuleInfo>();
+  MMI = getAnalysisIfAvailable<MachineModuleInfo>();
   assert(MMI);
-  DW = getAnalysisToUpdate<DwarfWriter>();
+  DW = getAnalysisIfAvailable<DwarfWriter>();
   assert(DW && "DwarfWriter is not available");
   DW->BeginModule(&M, MMI, O, this, TAI);
 
@@ -776,6 +776,7 @@ bool PPCDarwinAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   switch (F->getLinkage()) {
   default: assert(0 && "Unknown linkage type!");
+  case Function::PrivateLinkage:
   case Function::InternalLinkage:  // Symbols default to internal.
     break;
   case Function::ExternalLinkage:
@@ -858,9 +859,9 @@ bool PPCDarwinAsmPrinter::doInitialization(Module &M) {
   // Emit initial debug information.
   // We need this for Personality functions.
   // AsmPrinter::doInitialization should have done this analysis.
-  MMI = getAnalysisToUpdate<MachineModuleInfo>();
+  MMI = getAnalysisIfAvailable<MachineModuleInfo>();
   assert(MMI);
-  DW = getAnalysisToUpdate<DwarfWriter>();
+  DW = getAnalysisIfAvailable<DwarfWriter>();
   assert(DW && "DwarfWriter is not available");
   DW->BeginModule(&M, MMI, O, this, TAI);
 
@@ -959,6 +960,7 @@ void PPCDarwinAsmPrinter::printModuleLevelGV(const GlobalVariable* GVar) {
     O << "\t.globl " << name << '\n';
     // FALL THROUGH
    case GlobalValue::InternalLinkage:
+   case GlobalValue::PrivateLinkage:
     break;
    default:
     cerr << "Unknown linkage type!";

@@ -313,9 +313,9 @@ bool SelectionDAGISel::runOnFunction(Function &Fn) {
   RegInfo = &MF->getRegInfo();
   DOUT << "\n\n\n=== " << Fn.getName() << "\n";
 
-  FuncInfo->set(Fn, *MF, EnableFastISel);
-  MachineModuleInfo *MMI = getAnalysisToUpdate<MachineModuleInfo>();
-  DwarfWriter *DW = getAnalysisToUpdate<DwarfWriter>();
+  FuncInfo->set(Fn, *MF, *CurDAG, EnableFastISel);
+  MachineModuleInfo *MMI = getAnalysisIfAvailable<MachineModuleInfo>();
+  DwarfWriter *DW = getAnalysisIfAvailable<DwarfWriter>();
   CurDAG->init(*MF, MMI, DW);
   SDL->init(GFI, *AA);
 
@@ -743,7 +743,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(Function &Fn,
       unsigned LabelID = MMI->addLandingPad(BB);
 
       const TargetInstrDesc &II = TII.get(TargetInstrInfo::EH_LABEL);
-      BuildMI(BB, II).addImm(LabelID);
+      BuildMI(BB, SDL->getCurDebugLoc(), II).addImm(LabelID);
 
       // Mark exception register as live in.
       unsigned Reg = TLI.getExceptionAddressRegister();

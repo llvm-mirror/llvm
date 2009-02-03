@@ -23,7 +23,12 @@ namespace llvm {
 
   struct PIC16TargetAsmInfo : public TargetAsmInfo {
     PIC16TargetAsmInfo(const PIC16TargetMachine &TM);
-    public :
+    private:
+    const char *RomData8bitsDirective;
+    const char *RomData16bitsDirective;
+    const char *RomData32bitsDirective;
+    const char *getRomDirective(unsigned size) const;
+    virtual const char *getASDirective(unsigned size, unsigned AS) const;
   };
 
 } // namespace llvm

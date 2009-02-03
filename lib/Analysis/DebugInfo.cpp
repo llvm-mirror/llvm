@@ -20,6 +20,7 @@
 #include "llvm/Instructions.h"
 #include "llvm/Module.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Support/Streams.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -440,14 +441,20 @@ DISubrange DIFactory::GetOrCreateSubrange(int64_t Lo, int64_t Hi) {
 DICompileUnit DIFactory::CreateCompileUnit(unsigned LangID,
                                            const std::string &Filename,
                                            const std::string &Directory,
-                                           const std::string &Producer) {
+                                           const std::string &Producer,
+                                           bool isMain,
+                                           bool isOptimized,
+                                           const char *Flags) {
   Constant *Elts[] = {
     GetTagConstant(dwarf::DW_TAG_compile_unit),
     getCastToEmpty(GetOrCreateCompileUnitAnchor()),
     ConstantInt::get(Type::Int32Ty, LangID),
     GetStringConstant(Filename),
     GetStringConstant(Directory),
-    GetStringConstant(Producer)
+    GetStringConstant(Producer),
+    ConstantInt::get(Type::Int1Ty, isMain),
+    ConstantInt::get(Type::Int1Ty, isOptimized),
+    GetStringConstant(Flags)
   };
   
   Constant *Init = ConstantStruct::get(Elts, sizeof(Elts)/sizeof(Elts[0]));
@@ -487,9 +494,7 @@ DIBasicType DIFactory::CreateBasicType(DIDescriptor Context,
                                        uint64_t SizeInBits,
                                        uint64_t AlignInBits,
                                        uint64_t OffsetInBits, unsigned Flags,
-                                       unsigned Encoding,
-                                       const std::string *FileName,
-                                       const std::string *Directory) {
+                                       unsigned Encoding) {
   Constant *Elts[] = {
     GetTagConstant(dwarf::DW_TAG_base_type),
     getCastToEmpty(Context),
@@ -500,9 +505,7 @@ DIBasicType DIFactory::CreateBasicType(DIDescriptor Context,
     ConstantInt::get(Type::Int64Ty, AlignInBits),
     ConstantInt::get(Type::Int64Ty, OffsetInBits),
     ConstantInt::get(Type::Int32Ty, Flags),
-    ConstantInt::get(Type::Int32Ty, Encoding),
-    GetStringConstant(FileName ? FileName->c_str() : ""),
-    GetStringConstant(Directory ? Directory->c_str() : "")
+    ConstantInt::get(Type::Int32Ty, Encoding)
   };
   
   Constant *Init = ConstantStruct::get(Elts, sizeof(Elts)/sizeof(Elts[0]));
@@ -526,9 +529,7 @@ DIDerivedType DIFactory::CreateDerivedType(unsigned Tag,
                                            uint64_t AlignInBits,
                                            uint64_t OffsetInBits,
                                            unsigned Flags,
-                                           DIType DerivedFrom,
-                                           const std::string *FileName,
-                                           const std::string *Directory) {
+                                           DIType DerivedFrom) {
   Constant *Elts[] = {
     GetTagConstant(Tag),
     getCastToEmpty(Context),
@@ -539,9 +540,7 @@ DIDerivedType DIFactory::CreateDerivedType(unsigned Tag,
     ConstantInt::get(Type::Int64Ty, AlignInBits),
     ConstantInt::get(Type::Int64Ty, OffsetInBits),
     ConstantInt::get(Type::Int32Ty, Flags),
-    getCastToEmpty(DerivedFrom),
-    GetStringConstant(FileName ? FileName->c_str() : ""),
-    GetStringConstant(Directory ? Directory->c_str() : "")
+    getCastToEmpty(DerivedFrom)
   };
   
   Constant *Init = ConstantStruct::get(Elts, sizeof(Elts)/sizeof(Elts[0]));
@@ -565,9 +564,7 @@ DICompositeType DIFactory::CreateCompositeType(unsigned Tag,
                                                uint64_t OffsetInBits,
                                                unsigned Flags,
                                                DIType DerivedFrom,
-                                               DIArray Elements,
-                                               const std::string *FileName,
-                                               const std::string *Directory) {
+                                               DIArray Elements) {
 
   Constant *Elts[] = {
     GetTagConstant(Tag),
@@ -580,9 +577,7 @@ DICompositeType DIFactory::CreateCompositeType(unsigned Tag,
     ConstantInt::get(Type::Int64Ty, OffsetInBits),
     ConstantInt::get(Type::Int32Ty, Flags),
     getCastToEmpty(DerivedFrom),
-    getCastToEmpty(Elements),
-    GetStringConstant(FileName ? FileName->c_str() : ""),
-    GetStringConstant(Directory ? Directory->c_str() : "")
+    getCastToEmpty(Elements)
   };
   
   Constant *Init = ConstantStruct::get(Elts, sizeof(Elts)/sizeof(Elts[0]));
@@ -606,9 +601,7 @@ DISubprogram DIFactory::CreateSubprogram(DIDescriptor Context,
                                          DICompileUnit CompileUnit,
                                          unsigned LineNo, DIType Type,
                                          bool isLocalToUnit,
-                                         bool isDefinition,
-                                         const std::string *FileName,
-                                         const std::string *Directory) {
+                                         bool isDefinition) {
 
   Constant *Elts[] = {
     GetTagConstant(dwarf::DW_TAG_subprogram),
@@ -621,9 +614,7 @@ DISubprogram DIFactory::CreateSubprogram(DIDescriptor Context,
     ConstantInt::get(Type::Int32Ty, LineNo),
     getCastToEmpty(Type),
     ConstantInt::get(Type::Int1Ty, isLocalToUnit),
-    ConstantInt::get(Type::Int1Ty, isDefinition),
-    GetStringConstant(FileName ? FileName->c_str() : ""),
-    GetStringConstant(Directory ? Directory->c_str() : "")
+    ConstantInt::get(Type::Int1Ty, isDefinition)
   };
   
   Constant *Init = ConstantStruct::get(Elts, sizeof(Elts)/sizeof(Elts[0]));
@@ -643,9 +634,7 @@ DIFactory::CreateGlobalVariable(DIDescriptor Context, const std::string &Name,
                                 const std::string &LinkageName,
                                 DICompileUnit CompileUnit,
                                 unsigned LineNo, DIType Type,bool isLocalToUnit,
-                                bool isDefinition, llvm::GlobalVariable *Val,
-                                const std::string *FileName,
-                                const std::string *Directory) {
+                                bool isDefinition, llvm::GlobalVariable *Val) {
   Constant *Elts[] = {
     GetTagConstant(dwarf::DW_TAG_variable),
     getCastToEmpty(GetOrCreateGlobalVariableAnchor()),
@@ -658,9 +647,7 @@ DIFactory::CreateGlobalVariable(DIDescriptor Context, const std::string &Name,
     getCastToEmpty(Type),
     ConstantInt::get(Type::Int1Ty, isLocalToUnit),
     ConstantInt::get(Type::Int1Ty, isDefinition),
-    ConstantExpr::getBitCast(Val, EmptyStructPtr),
-    GetStringConstant(FileName ? FileName->c_str() : ""),
-    GetStringConstant(Directory ? Directory->c_str() : "")
+    ConstantExpr::getBitCast(Val, EmptyStructPtr)
   };
   
   Constant *Init = ConstantStruct::get(Elts, sizeof(Elts)/sizeof(Elts[0]));
@@ -678,20 +665,14 @@ DIFactory::CreateGlobalVariable(DIDescriptor Context, const std::string &Name,
 DIVariable DIFactory::CreateVariable(unsigned Tag, DIDescriptor Context,
                                      const std::string &Name,
                                      DICompileUnit CompileUnit, unsigned LineNo,
-                                     DIType Type,
-                                     const std::string *FileName,
-                                     const std::string *Directory) {
-
-  
+                                     DIType Type) {
   Constant *Elts[] = {
     GetTagConstant(Tag),
     getCastToEmpty(Context),
     GetStringConstant(Name),
     getCastToEmpty(CompileUnit),
     ConstantInt::get(Type::Int32Ty, LineNo),
-    getCastToEmpty(Type),
-    GetStringConstant(FileName ? FileName->c_str() : ""),
-    GetStringConstant(Directory ? Directory->c_str() : "")
+    getCastToEmpty(Type)
   };
   
   Constant *Init = ConstantStruct::get(Elts, sizeof(Elts)/sizeof(Elts[0]));
@@ -866,3 +847,103 @@ namespace llvm {
   }
 }
 
+/// dump - print compile unit.
+void DICompileUnit::dump() const {
+  cerr << " [" << dwarf::LanguageString(getLanguage()) << "] ";
+  cerr << " [" << getDirectory() << "/" << getFilename() << " ]";
+}
+
+/// dump - print type.
+void DIType::dump() const {
+  if (isNull()) return;
+  if (!getName().empty())
+    cerr << " [" << getName() << "] ";
+  unsigned Tag = getTag();
+  cerr << " [" << dwarf::TagString(Tag) << "] ";
+  // TODO : Print context
+  getCompileUnit().dump();
+  cerr << " [" 
+       << getLineNumber() << ", " 
+       << getSizeInBits() << ", "
+       << getAlignInBits() << ", "
+       << getOffsetInBits() 
+       << "] ";
+  if (isPrivate()) 
+    cerr << " [private] ";
+  else if (isProtected())
+    cerr << " [protected] ";
+  if (isForwardDecl())
+    cerr << " [fwd] ";
+
+  if (isBasicType(Tag))
+    DIBasicType(GV).dump();
+  else if (isDerivedType(Tag))
+    DIDerivedType(GV).dump();
+  else if (isCompositeType(Tag))
+    DICompositeType(GV).dump();
+  else {
+    cerr << "Invalid DIType\n";
+    return;
+  }
+  cerr << "\n";
+}
+
+/// dump - print basic type.
+void DIBasicType::dump() const {
+  cerr << " [" << dwarf::AttributeEncodingString(getEncoding()) << "] ";
+
+}
+
+/// dump - print derived type.
+void DIDerivedType::dump() const {
+  cerr << "\n\t Derived From: "; getTypeDerivedFrom().dump();
+}
+
+/// dump - print composite type.
+void DICompositeType::dump() const {
+  DIArray A = getTypeArray();
+  if (A.isNull())
+    return;
+  cerr << " [" << A.getNumElements() << " elements]";
+}
+
+/// dump - print global.
+void DIGlobal::dump() const {
+
+  if (!getName().empty())
+    cerr << " [" << getName() << "] ";
+  unsigned Tag = getTag();
+  cerr << " [" << dwarf::TagString(Tag) << "] ";
+  // TODO : Print context
+  getCompileUnit().dump();
+  cerr << " [" << getLineNumber() << "] ";
+  if (isLocalToUnit())
+    cerr << " [local] ";
+  if (isDefinition())
+    cerr << " [def] ";
+
+  if (isGlobalVariable(Tag))
+    DIGlobalVariable(GV).dump();
+
+  cerr << "\n";
+}
+
+/// dump - print subprogram.
+void DISubprogram::dump() const {
+  DIGlobal::dump();
+}
+
+/// dump - print global variable.
+void DIGlobalVariable::dump() const {
+  cerr << " ["; getGlobal()->dump(); cerr << "] ";
+}
+
+/// dump - print variable.
+void DIVariable::dump() const {
+  if (!getName().empty())
+    cerr << " [" << getName() << "] ";
+  getCompileUnit().dump();
+  cerr << " [" << getLineNumber() << "] ";
+  getType().dump();
+  cerr << "\n";
+}

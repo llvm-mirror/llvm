@@ -34,10 +34,9 @@ let hasCtrlDep = 1, Defs = [R1], Uses = [R1] in {
 // DWARF debugging Pseudo Instructions
 //===----------------------------------------------------------------------===//
 
-def DWARF_LOC        : Pseudo<(outs), (ins i32imm:$line, i32imm:$col, i32imm:$file),
-                              "${:comment} .loc $file, $line, $col",
-                      [(dwarf_loc (i32 imm:$line), (i32 imm:$col),
-                                  (i32 imm:$file))]>;
+def DWARF_LOC : Pseudo<(outs), (ins i32imm:$line, i32imm:$col, i32imm:$file),
+           ".loc $file, $line, $col",
+           [(dwarf_loc (i32 imm:$line), (i32 imm:$col), (i32 imm:$file))]>;
 
 //===----------------------------------------------------------------------===//
 // Loads:
@@ -624,25 +623,25 @@ defm A : AddInstruction;
 
 class AIInst<dag OOL, dag IOL, list<dag> pattern>:
     RI10Form<0b00111000, OOL, IOL,
-	     "ai\t$rT, $rA, $val", IntegerOp,
-	     pattern>;
+             "ai\t$rT, $rA, $val", IntegerOp,
+             pattern>;
 
 class AIVecInst<ValueType vectype, PatLeaf immpred>:
     AIInst<(outs VECREG:$rT), (ins VECREG:$rA, s10imm:$val),
-	    [(set (vectype VECREG:$rT), (add (vectype VECREG:$rA), immpred:$val))]>;
+            [(set (vectype VECREG:$rT), (add (vectype VECREG:$rA), immpred:$val))]>;
 
 class AIFPVecInst<ValueType vectype, PatLeaf immpred>:
     AIInst<(outs VECREG:$rT), (ins VECREG:$rA, s10imm:$val),
-	    [/* no pattern */]>;
+            [/* no pattern */]>;
 
 class AIRegInst<RegisterClass rclass, PatLeaf immpred>:
     AIInst<(outs rclass:$rT), (ins rclass:$rA, s10imm_i32:$val),
-	   [(set rclass:$rT, (add rclass:$rA, immpred:$val))]>;
+           [(set rclass:$rT, (add rclass:$rA, immpred:$val))]>;
 
 // This is used to add epsilons to floating point numbers in the f32 fdiv code:
 class AIFPInst<RegisterClass rclass, PatLeaf immpred>:
     AIInst<(outs rclass:$rT), (ins rclass:$rA, s10imm_i32:$val),
-	   [/* no pattern */]>;
+           [/* no pattern */]>;
 
 multiclass AddImmediate {
   def v4i32: AIVecInst<v4i32, v4i32SExt10Imm>;
@@ -1259,6 +1258,9 @@ multiclass BitwiseAnd
   def fabs32: ANDInst<(outs R32FP:$rT), (ins R32FP:$rA, R32C:$rB),
                       [/* Intentionally does not match a pattern */]>;
 
+  def fabs64: ANDInst<(outs R64FP:$rT), (ins R64FP:$rA, VECREG:$rB),
+                      [/* Intentionally does not match a pattern */]>;
+
   // Could use v4i32, but won't for clarity
   def fabsvec: ANDInst<(outs VECREG:$rT), (ins VECREG:$rA, VECREG:$rB),
                        [/* Intentionally does not match a pattern */]>;
@@ -1525,17 +1527,17 @@ multiclass BitwiseOr
   // Conversion from R32C to register
   def r32_r16:   ORCvtFormR32Reg<R16C>;
   def r32_r8:    ORCvtFormR32Reg<R8C>;
-  
-  // Conversion from register to R64C:
-  def r32_r64:   ORCvtFormR64Reg<R32C>;
-  def r16_r64:   ORCvtFormR64Reg<R16C>;
-  def r8_r64:    ORCvtFormR64Reg<R8C>;
-  
-  // Conversion from R64C to register
-  def r64_r32:   ORCvtFormRegR64<R32C>;
-  def r64_r16:   ORCvtFormRegR64<R16C>;
-  def r64_r8:    ORCvtFormRegR64<R8C>;
 */
+  
+  // Conversion to register from R64C:
+  def r32_r64:   ORCvtFormR64Reg<R32C>;
+  // def r16_r64:   ORCvtFormR64Reg<R16C>;
+  // def r8_r64:    ORCvtFormR64Reg<R8C>;
+  
+  // Conversion to R64C from register
+  def r64_r32:   ORCvtFormRegR64<R32C>;
+  // def r64_r16:   ORCvtFormRegR64<R16C>;
+  // def r64_r8:    ORCvtFormRegR64<R8C>;
 
   // bitconvert patterns:
   def r32_f32:   ORCvtFormR32Reg<R32FP,
@@ -1910,11 +1912,11 @@ class SELBInst<dag OOL, dag IOL, list<dag> pattern>:
     RRRForm<0b1000, OOL, IOL, "selb\t$rT, $rA, $rB, $rC",
             IntegerOp, pattern>;
 
-class SELBVecInst<ValueType vectype>:
+class SELBVecInst<ValueType vectype, PatFrag vnot_frag = vnot>:
   SELBInst<(outs VECREG:$rT), (ins VECREG:$rA, VECREG:$rB, VECREG:$rC),
            [(set (vectype VECREG:$rT),
                  (or (and (vectype VECREG:$rC), (vectype VECREG:$rB)),
-                     (and (vnot (vectype VECREG:$rC)),
+                     (and (vnot_frag (vectype VECREG:$rC)),
                           (vectype VECREG:$rA))))]>;
 
 class SELBVecVCondInst<ValueType vectype>:
@@ -1947,7 +1949,7 @@ multiclass SelectBits
   def v16i8: SELBVecInst<v16i8>;
   def v8i16: SELBVecInst<v8i16>;
   def v4i32: SELBVecInst<v4i32>;
-  def v2i64: SELBVecInst<v2i64>;
+  def v2i64: SELBVecInst<v2i64, vnot_conv>;
 
   def r128:  SELBRegInst<GPRC>;
   def r64:   SELBRegInst<R64C>;
@@ -1966,11 +1968,11 @@ multiclass SelectBits
   def v2i64_vcond: SELBVecCondInst<v2i64>;
 
   def v4f32_cond:
-	SELBInst<(outs VECREG:$rT), (ins VECREG:$rA, VECREG:$rB, VECREG:$rC),
-		 [(set (v4f32 VECREG:$rT),
-		       (select (v4i32 VECREG:$rC),
-			       (v4f32 VECREG:$rB),
-			       (v4f32 VECREG:$rA)))]>;
+        SELBInst<(outs VECREG:$rT), (ins VECREG:$rA, VECREG:$rB, VECREG:$rC),
+                 [(set (v4f32 VECREG:$rT),
+                       (select (v4i32 VECREG:$rC),
+                               (v4f32 VECREG:$rB),
+                               (v4f32 VECREG:$rA)))]>;
 
   // SELBr64_cond is defined in SPU64InstrInfo.td
   def r32_cond:   SELBRegCondInst<R32C, R32C>;
@@ -3257,7 +3259,7 @@ multiclass CmpGtrWordImm
                                     (v4i32 v4i32SExt16Imm:$val)))]>;
 
   def f32:   CGTIInst<(outs R32C:$rT), (ins R32FP:$rA, s10imm_i32:$val),
-  		      [/* no pattern */]>;
+                      [/* no pattern */]>;
 }
 
 class CLGTBInst<dag OOL, dag IOL, list<dag> pattern> :
@@ -4320,6 +4322,13 @@ def : Pat<(fabs R32FP:$rA),
 def : Pat<(fabs (v4f32 VECREG:$rA)),
           (ANDfabsvec (v4f32 VECREG:$rA),
                       (v4f32 (ANDBIv16i8 (FSMBIv16i8 0xffff), 0x7f)))>;
+
+def : Pat<(fabs R64FP:$rA),
+          (ANDfabs64 R64FP:$rA, (ANDBIv16i8 (FSMBIv16i8 0xffff), 0x7f))>;
+
+def : Pat<(fabs (v2f64 VECREG:$rA)),
+          (ANDfabsvec (v2f64 VECREG:$rA),
+                      (v2f64 (ANDBIv16i8 (FSMBIv16i8 0xffff), 0x7f)))>;
 
 //===----------------------------------------------------------------------===//
 // Hint for branch instructions:

@@ -19,6 +19,7 @@
 #define LLVM_CODEGEN_MACHINEFUNCTION_H
 
 #include "llvm/ADT/ilist.h"
+#include "llvm/CodeGen/DebugLoc.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/Support/Annotation.h"
 #include "llvm/Support/Allocator.h"
@@ -27,11 +28,11 @@
 namespace llvm {
 
 class Function;
-class TargetMachine;
 class MachineRegisterInfo;
 class MachineFrameInfo;
 class MachineConstantPool;
 class MachineJumpTableInfo;
+class TargetMachine;
 
 template <>
 struct ilist_traits<MachineBasicBlock>
@@ -93,6 +94,9 @@ class MachineFunction : private Annotation {
   // List of machine basic blocks in function
   typedef ilist<MachineBasicBlock> BasicBlockListType;
   BasicBlockListType BasicBlocks;
+
+  // Tracks debug locations.
+  DebugLocTracker DebugLocInfo;
 
 public:
   MachineFunction(const Function *Fn, const TargetMachine &TM);
@@ -282,6 +286,7 @@ public:
   /// of `new MachineInstr'.
   ///
   MachineInstr *CreateMachineInstr(const TargetInstrDesc &TID,
+                                   DebugLoc DL,
                                    bool NoImp = false);
 
   /// CloneMachineInstr - Create a new MachineInstr which is a copy of the
@@ -302,6 +307,15 @@ public:
   /// DeleteMachineBasicBlock - Delete the given MachineBasicBlock.
   ///
   void DeleteMachineBasicBlock(MachineBasicBlock *MBB);
+
+  //===--------------------------------------------------------------------===//
+  // Debug location.
+  //
+
+  /// getOrCreateDebugLocID - Look up the DebugLocTuple index with the given
+  /// source file, line, and column. If none currently exists, create add a new
+  /// new DebugLocTuple and insert it into the DebugIdMap.
+  unsigned getOrCreateDebugLocID(unsigned Src, unsigned Line, unsigned Col);
 };
 
 //===--------------------------------------------------------------------===//

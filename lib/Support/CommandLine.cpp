@@ -396,7 +396,12 @@ static void ExpandResponseFiles(int argc, char** argv,
 
         // If we could open the file, parse its contents, otherwise
         // pass the @file option verbatim.
-        // TODO: support recursion.
+
+        // TODO: we should also support recursive loading of response files,
+        // since this is how gcc behaves. (From their man page: "The file may
+        // itself contain additional @file options; any such options will be
+        // processed recursively.")
+
         if (respFilePtr != 0) {
           ParseCStringVector(newArgv, respFilePtr->getBufferStart());
           continue;
@@ -867,6 +872,8 @@ bool parser<bool>::parse(Option &O, const char *ArgName,
     return O.error(": '" + Arg +
                    "' is invalid value for boolean argument! Try 0 or 1");
   }
+  if (IsInvertable && strncmp(ArgName+1, "no-", 3) == 0)
+    Value = !Value;
   return false;
 }
 
@@ -877,7 +884,8 @@ bool parser<boolOrDefault>::parse(Option &O, const char *ArgName,
   if (Arg == "" || Arg == "true" || Arg == "TRUE" || Arg == "True" ||
       Arg == "1") {
     Value = BOU_TRUE;
-  } else if (Arg == "false" || Arg == "FALSE" || Arg == "False" || Arg == "0") {
+  } else if (Arg == "false" || Arg == "FALSE"
+             || Arg == "False" || Arg == "0") {
     Value = BOU_FALSE;
   } else {
     return O.error(": '" + Arg +

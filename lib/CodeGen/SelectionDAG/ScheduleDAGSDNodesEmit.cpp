@@ -219,7 +219,7 @@ unsigned ScheduleDAGSDNodes::getVR(SDValue Op,
       const TargetRegisterClass *RC = TLI->getRegClassFor(Op.getValueType());
       VReg = MRI.createVirtualRegister(RC);
     }
-    BuildMI(BB, TII->get(TargetInstrInfo::IMPLICIT_DEF), VReg);
+    BuildMI(BB, Op.getDebugLoc(), TII->get(TargetInstrInfo::IMPLICIT_DEF),VReg);
     return VReg;
   }
 
@@ -333,33 +333,6 @@ void ScheduleDAGSDNodes::AddOperand(MachineInstr *MI, SDValue Op,
   }  
 }
 
-/// getSubRegisterRegClass - Returns the register class of specified register
-/// class' "SubIdx"'th sub-register class.
-static const TargetRegisterClass*
-getSubRegisterRegClass(const TargetRegisterClass *TRC, unsigned SubIdx) {
-  // Pick the register class of the subregister
-  TargetRegisterInfo::regclass_iterator I =
-    TRC->subregclasses_begin() + SubIdx-1;
-  assert(I < TRC->subregclasses_end() && 
-         "Invalid subregister index for register class");
-  return *I;
-}
-
-/// getSuperRegisterRegClass - Returns the register class of a superreg A whose
-/// "SubIdx"'th sub-register class is the specified register class and whose
-/// type matches the specified type.
-static const TargetRegisterClass*
-getSuperRegisterRegClass(const TargetRegisterClass *TRC,
-                         unsigned SubIdx, MVT VT) {
-  // Pick the register class of the superegister for this type
-  for (TargetRegisterInfo::regclass_iterator I = TRC->superregclasses_begin(),
-         E = TRC->superregclasses_end(); I != E; ++I)
-    if ((*I)->hasType(VT) && getSubRegisterRegClass(*I, SubIdx) == TRC)
-      return *I;
-  assert(false && "Couldn't find the register class");
-  return 0;
-}
-
 /// EmitSubregNode - Generate machine code for subreg nodes.
 ///
 void ScheduleDAGSDNodes::EmitSubregNode(SDNode *Node, 
@@ -386,12 +359,11 @@ void ScheduleDAGSDNodes::EmitSubregNode(SDNode *Node,
     unsigned SubIdx = cast<ConstantSDNode>(Node->getOperand(1))->getZExtValue();
 
     // Create the extract_subreg machine instruction.
-    MachineInstr *MI = BuildMI(MF, TII->get(TargetInstrInfo::EXTRACT_SUBREG));
+    MachineInstr *MI = BuildMI(MF, Node->getDebugLoc(),
+                               TII->get(TargetInstrInfo::EXTRACT_SUBREG));
 
     // Figure out the register class to create for the destreg.
-    unsigned VReg = getVR(Node->getOperand(0), VRBaseMap);
-    const TargetRegisterClass *TRC = MRI.getRegClass(VReg);
-    const TargetRegisterClass *SRC = getSubRegisterRegClass(TRC, SubIdx);
+    const TargetRegisterClass *SRC = TLI->getRegClassFor(Node->getValueType(0));
 
     if (VRBase) {
       // Grab the destination register
@@ -416,7 +388,6 @@ void ScheduleDAGSDNodes::EmitSubregNode(SDNode *Node,
     SDValue N0 = Node->getOperand(0);
     SDValue N1 = Node->getOperand(1);
     SDValue N2 = Node->getOperand(2);
-    unsigned SubReg = getVR(N1, VRBaseMap);
     unsigned SubIdx = cast<ConstantSDNode>(N2)->getZExtValue();
     
       
@@ -425,14 +396,13 @@ void ScheduleDAGSDNodes::EmitSubregNode(SDNode *Node,
     if (VRBase) {
       TRC = MRI.getRegClass(VRBase);
     } else {
-      TRC = getSuperRegisterRegClass(MRI.getRegClass(SubReg), SubIdx, 
-                                     Node->getValueType(0));
+      TRC = TLI->getRegClassFor(Node->getValueType(0));
       assert(TRC && "Couldn't determine register class for insert_subreg");
       VRBase = MRI.createVirtualRegister(TRC); // Create the reg
     }
     
     // Create the insert_subreg or subreg_to_reg machine instruction.
-    MachineInstr *MI = BuildMI(MF, TII->get(Opc));
+    MachineInstr *MI = BuildMI(MF, Node->getDebugLoc(), TII->get(Opc));
     MI->addOperand(MachineOperand::CreateReg(VRBase, true));
     
     // If creating a subreg_to_reg, then the first input operand
@@ -489,7 +459,7 @@ void ScheduleDAGSDNodes::EmitNode(SDNode *Node, bool IsClone, bool IsCloned,
 #endif
 
     // Create the new machine instruction.
-    MachineInstr *MI = BuildMI(MF, II);
+    MachineInstr *MI = BuildMI(MF, Node->getDebugLoc(), II);
     
     // Add result register values for things that are defined by this
     // instruction.
@@ -510,8 +480,9 @@ void ScheduleDAGSDNodes::EmitNode(SDNode *Node, bool IsClone, bool IsCloned,
       // specific inserter which may returns a new basic block.
       BB = TLI->EmitInstrWithCustomInserter(MI, BB);
       Begin = End = BB->end();
-    } else
+    } else {
       BB->insert(End, MI);
+    }
 
     // Additional results must be an physical register def.
     if (HasPhysRegOuts) {
@@ -574,7 +545,8 @@ void ScheduleDAGSDNodes::EmitNode(SDNode *Node, bool IsClone, bool IsCloned,
       --NumOps;  // Ignore the flag operand.
       
     // Create the inline asm machine instruction.
-    MachineInstr *MI = BuildMI(MF, TII->get(TargetInstrInfo::INLINEASM));
+    MachineInstr *MI = BuildMI(MF, Node->getDebugLoc(),
+                               TII->get(TargetInstrInfo::INLINEASM));
 
     // Add the asm string as an external symbol operand.
     const char *AsmStr =

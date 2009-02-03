@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "loop-rotate"
-
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Function.h"
 #include "llvm/Instructions.h"
@@ -26,7 +25,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/SmallVector.h"
-
 using namespace llvm;
 
 #define MAX_HEADER_SIZE 16
@@ -128,7 +126,6 @@ bool LoopRotate::runOnLoop(Loop *Lp, LPPassManager &LPM) {
 
 /// Rotate loop LP. Return true if the loop is rotated.
 bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
-
   L = Lp;
 
   OrigHeader =  L->getHeader();
@@ -139,8 +136,8 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
   if (L->getBlocks().size() == 1)
     return false;
 
-  assert (OrigHeader && OrigLatch && OrigPreHeader &&
-          "Loop is not in canonical form");
+  assert(OrigHeader && OrigLatch && OrigPreHeader &&
+         "Loop is not in canonical form");
 
   // If loop header is not one of the loop exit block then
   // either this loop is already rotated or it is not 
@@ -151,7 +148,7 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
   BranchInst *BI = dyn_cast<BranchInst>(OrigHeader->getTerminator());
   if (!BI)
     return false;
-  assert (BI->isConditional() && "Branch Instruction is not conditional");
+  assert(BI->isConditional() && "Branch Instruction is not conditional");
 
   // Updating PHInodes in loops with multiple exits adds complexity. 
   // Keep it simple, and restrict loop rotation to loops with one exit only.
@@ -170,15 +167,21 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
   // Now, this loop is suitable for rotation.
 
   // Find new Loop header. NewHeader is a Header's one and only successor
-  // that is inside loop.  Header's other successor is out side the
-  // loop. Otherwise loop is not suitable for rotation.
+  // that is inside loop.  Header's other successor is outside the
+  // loop.  Otherwise loop is not suitable for rotation.
   Exit = BI->getSuccessor(0);
   NewHeader = BI->getSuccessor(1);
   if (L->contains(Exit))
     std::swap(Exit, NewHeader);
-  assert (NewHeader && "Unable to determine new loop header");
+  assert(NewHeader && "Unable to determine new loop header");
   assert(L->contains(NewHeader) && !L->contains(Exit) && 
          "Unable to determine loop header and exit blocks");
+  
+  // This code assumes that new header has exactly one predecessor.  Remove any
+  // single entry PHI nodes in it.
+  assert(NewHeader->getSinglePredecessor() &&
+         "New header doesn't have one pred!");
+  FoldSingleEntryPHINodes(NewHeader);
 
   // Copy PHI nodes and other instructions from original header
   // into original pre-header. Unlike original header, original pre-header is
@@ -197,31 +200,29 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
   // receive a clone of original header terminator as a new terminator.
   OrigPreHeader->getInstList().pop_back();
   BasicBlock::iterator I = OrigHeader->begin(), E = OrigHeader->end();
-  PHINode *PN = NULL;
+  PHINode *PN = 0;
   for (; (PN = dyn_cast<PHINode>(I)); ++I) {
-    Instruction *In = I;
-
     // PHI nodes are not copied into original pre-header. Instead their values
     // are directly propagated.
-    Value * NPV = PN->getIncomingValueForBlock(OrigPreHeader);
+    Value *NPV = PN->getIncomingValueForBlock(OrigPreHeader);
 
     // Create new PHI node with two incoming values for NewHeader.
     // One incoming value is from OrigLatch (through OrigHeader) and 
     // second incoming value is from original pre-header.
-    PHINode *NH = PHINode::Create(In->getType(), In->getName(),
+    PHINode *NH = PHINode::Create(PN->getType(), PN->getName(),
                                   NewHeader->begin());
     NH->addIncoming(PN->getIncomingValueForBlock(OrigLatch), OrigHeader);
     NH->addIncoming(NPV, OrigPreHeader);
     
     // "In" can be replaced by NH at various places.
-    LoopHeaderInfo.push_back(RenameData(In, NPV, NH));
+    LoopHeaderInfo.push_back(RenameData(PN, NPV, NH));
   }
 
   // Now, handle non-phi instructions.
   for (; I != E; ++I) {
     Instruction *In = I;
-
-    assert (!isa<PHINode>(In) && "PHINode is not expected here");
+    assert(!isa<PHINode>(In) && "PHINode is not expected here");
+    
     // This is not a PHI instruction. Insert its clone into original pre-header.
     // If this instruction is using a value from same basic block then
     // update it to use value from cloned instruction.
@@ -230,20 +231,11 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
     OrigPreHeader->getInstList().push_back(C);
 
     for (unsigned opi = 0, e = In->getNumOperands(); opi != e; ++opi) {
-      if (Instruction *OpPhi = dyn_cast<PHINode>(In->getOperand(opi))) {
-        if (const RenameData *D = findReplacementData(OpPhi)) {
-          // This is using values from original header PHI node.
-          // Here, directly used incoming value from original pre-header.
-          C->setOperand(opi, D->PreHeader);
-        }
-      }
-      else if (Instruction *OpInsn = 
-               dyn_cast<Instruction>(In->getOperand(opi))) {
-        if (const RenameData *D = findReplacementData(OpInsn))
-          C->setOperand(opi, D->PreHeader);
-      }
+      Instruction *OpInsn = dyn_cast<Instruction>(In->getOperand(opi));
+      if (!OpInsn) continue;  // Ignore non-instruction values.
+      if (const RenameData *D = findReplacementData(OpInsn))
+        C->setOperand(opi, D->PreHeader);
     }
-
 
     // If this instruction is used outside this basic block then
     // create new PHINode for this instruction.
@@ -276,7 +268,7 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
   // 2) Inside loop but not in original header
   //
   //    Replace this use to reflect definition from new header.
-  for(unsigned LHI = 0, LHI_E = LoopHeaderInfo.size(); LHI != LHI_E; ++LHI) {
+  for (unsigned LHI = 0, LHI_E = LoopHeaderInfo.size(); LHI != LHI_E; ++LHI) {
     const RenameData &ILoopHeaderInfo = LoopHeaderInfo[LHI];
 
     if (!ILoopHeaderInfo.Header)
@@ -289,10 +281,8 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
     // not invalidated.
     SmallVector<Instruction *, 16> AllUses;
     for (Value::use_iterator UI = OldPhi->use_begin(), UE = OldPhi->use_end();
-         UI != UE; ++UI) {
-      Instruction *U = cast<Instruction>(UI);
-      AllUses.push_back(U);
-    }
+         UI != UE; ++UI)
+      AllUses.push_back(cast<Instruction>(UI));
 
     for (SmallVector<Instruction *, 16>::iterator UI = AllUses.begin(), 
            UE = AllUses.end(); UI != UE; ++UI) {
@@ -325,7 +315,7 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
       
       // Used inside Exit Block. Since we are in LCSSA form, U must be PHINode.
       if (U->getParent() == Exit) {
-        assert (isa<PHINode>(U) && "Use in Exit Block that is not PHINode");
+        assert(isa<PHINode>(U) && "Use in Exit Block that is not PHINode");
         
         PHINode *UPhi = cast<PHINode>(U);
         // UPhi already has one incoming argument from original header. 
@@ -351,14 +341,9 @@ bool LoopRotate::rotateLoop(Loop *Lp, LPPassManager &LPM) {
   // Removing incoming branch from loop preheader to original header.
   // Now original header is inside the loop.
   for (BasicBlock::iterator I = OrigHeader->begin(), E = OrigHeader->end();
-       I != E; ++I) {
-    Instruction *In = I;
-    PHINode *PN = dyn_cast<PHINode>(In);
-    if (!PN)
-      break;
-
-    PN->removeIncomingValue(OrigPreHeader);
-  }
+       I != E; ++I)
+    if (PHINode *PN = dyn_cast<PHINode>(I))
+      PN->removeIncomingValue(OrigPreHeader);
 
   // Make NewHeader as the new header for the loop.
   L->moveToHeader(NewHeader);
@@ -411,14 +396,11 @@ void LoopRotate::initialize() {
 /// Return true if this instruction is used by any instructions in the loop that
 /// aren't in original header.
 bool LoopRotate::usedOutsideOriginalHeader(Instruction *In) {
-
   for (Value::use_iterator UI = In->use_begin(), UE = In->use_end();
        UI != UE; ++UI) {
-    Instruction *U = cast<Instruction>(UI);
-    if (U->getParent() != OrigHeader) {
-      if (L->contains(U->getParent()))
-        return true;
-    }
+    BasicBlock *UserBB = cast<Instruction>(UI)->getParent();
+    if (UserBB != OrigHeader && L->contains(UserBB))
+      return true;
   }
 
   return false;
@@ -429,7 +411,7 @@ bool LoopRotate::usedOutsideOriginalHeader(Instruction *In) {
 const RenameData *LoopRotate::findReplacementData(Instruction *In) {
 
   // Since LoopHeaderInfo is small, linear walk is OK.
-  for(unsigned LHI = 0, LHI_E = LoopHeaderInfo.size(); LHI != LHI_E; ++LHI) {
+  for (unsigned LHI = 0, LHI_E = LoopHeaderInfo.size(); LHI != LHI_E; ++LHI) {
     const RenameData &ILoopHeaderInfo = LoopHeaderInfo[LHI];
     if (ILoopHeaderInfo.Original == In)
       return &ILoopHeaderInfo;
@@ -457,26 +439,25 @@ void LoopRotate::preserveCanonicalLoopForm(LPPassManager &LPM) {
   if (OrigPH_BI->getSuccessor(0) == NewHeader)
     OrigPH_BI->setSuccessor(0, NewPreHeader);
   else {
-    assert (OrigPH_BI->getSuccessor(1) == NewHeader &&
-            "Unexpected original pre-header terminator");
+    assert(OrigPH_BI->getSuccessor(1) == NewHeader &&
+           "Unexpected original pre-header terminator");
     OrigPH_BI->setSuccessor(1, NewPreHeader);
   }
   
   for (BasicBlock::iterator I = NewHeader->begin(), E = NewHeader->end();
        I != E; ++I) {
-    Instruction *In = I;
-    PHINode *PN = dyn_cast<PHINode>(In);
+    PHINode *PN = dyn_cast<PHINode>(I);
     if (!PN)
       break;
 
     int index = PN->getBasicBlockIndex(OrigPreHeader);
-    assert (index != -1 && "Expected incoming value from Original PreHeader");
+    assert(index != -1 && "Expected incoming value from Original PreHeader");
     PN->setIncomingBlock(index, NewPreHeader);
-    assert (PN->getBasicBlockIndex(OrigPreHeader) == -1 && 
-            "Expected only one incoming value from Original PreHeader");
+    assert(PN->getBasicBlockIndex(OrigPreHeader) == -1 && 
+           "Expected only one incoming value from Original PreHeader");
   }
 
-  if (DominatorTree *DT = getAnalysisToUpdate<DominatorTree>()) {
+  if (DominatorTree *DT = getAnalysisIfAvailable<DominatorTree>()) {
     DT->addNewBlock(NewPreHeader, OrigPreHeader);
     DT->changeImmediateDominator(L->getHeader(), NewPreHeader);
     DT->changeImmediateDominator(Exit, OrigPreHeader);
@@ -492,8 +473,7 @@ void LoopRotate::preserveCanonicalLoopForm(LPPassManager &LPM) {
     DT->changeImmediateDominator(OrigHeader, OrigLatch);
   }
 
-  if(DominanceFrontier *DF = getAnalysisToUpdate<DominanceFrontier>()) {
-
+  if (DominanceFrontier *DF = getAnalysisIfAvailable<DominanceFrontier>()) {
     // New Preheader's dominance frontier is Exit block.
     DominanceFrontier::DomSetType NewPHSet;
     NewPHSet.insert(Exit);
@@ -529,7 +509,7 @@ void LoopRotate::preserveCanonicalLoopForm(LPPassManager &LPM) {
     // If a loop block dominates new loop latch then its frontier is
     // new header and Exit.
     BasicBlock *NewLatch = L->getLoopLatch();
-    DominatorTree *DT = getAnalysisToUpdate<DominatorTree>();
+    DominatorTree *DT = getAnalysisIfAvailable<DominatorTree>();
     for (Loop::block_iterator BI = L->block_begin(), BE = L->block_end();
          BI != BE; ++BI) {
       BasicBlock *B = *BI;
@@ -571,11 +551,10 @@ void LoopRotate::preserveCanonicalLoopForm(LPPassManager &LPM) {
       }
   }
 
-  assert (NewHeader && L->getHeader() == NewHeader 
-          && "Invalid loop header after loop rotation");
-  assert (NewPreHeader && L->getLoopPreheader() == NewPreHeader
-          && "Invalid loop preheader after loop rotation");
-  assert (L->getLoopLatch() 
-          && "Invalid loop latch after loop rotation");
-
+  assert(NewHeader && L->getHeader() == NewHeader &&
+         "Invalid loop header after loop rotation");
+  assert(NewPreHeader && L->getLoopPreheader() == NewPreHeader &&
+         "Invalid loop preheader after loop rotation");
+  assert(L->getLoopLatch() &&
+         "Invalid loop latch after loop rotation");
 }
