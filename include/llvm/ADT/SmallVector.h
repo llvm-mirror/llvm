@@ -20,6 +20,7 @@
 #include <cassert>
 #include <cstring>
 #include <memory>
+#include <cstddef>
 
 #ifdef _MSC_VER
 namespace std {
