@@ -54,12 +54,13 @@
 #include "llvm/Support/ELF.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/MapVector.h"
 using namespace llvm;
 
 namespace {
   class PPCAsmPrinter : public AsmPrinter {
   protected:
-    DenseMap<MCSymbol*, MCSymbol*> TOC;
+    MapVector<MCSymbol*, MCSymbol*> TOC;
     const PPCSubtarget &Subtarget;
     uint64_t TOCLabelID;
   public:
@@ -284,8 +285,22 @@ bool PPCAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                           unsigned AsmVariant,
                                           const char *ExtraCode,
                                           raw_ostream &O) {
-  if (ExtraCode && ExtraCode[0])
-    return true; // Unknown modifier.
+  if (ExtraCode && ExtraCode[0]) {
+    if (ExtraCode[1] != 0) return true; // Unknown modifier.
+
+    switch (ExtraCode[0]) {
+    default: return true;  // Unknown modifier.
+    case 'y': // A memory reference for an X-form instruction
+      {
+        const char *RegName = "r0";
+        if (!Subtarget.isDarwin()) RegName = stripRegisterPrefix(RegName);
+        O << RegName << ", ";
+        printOperand(MI, OpNo, O);
+        return false;
+      }
+    }
+  }
+
   assert(MI->getOperand(OpNo).isReg());
   O << "0(";
   printOperand(MI, OpNo, O);
@@ -451,8 +466,7 @@ bool PPCLinuxAsmPrinter::doFinalization(Module &M) {
         SectionKind::getReadOnly());
     OutStreamer.SwitchSection(Section);
 
-    // FIXME: This is nondeterminstic!
-    for (DenseMap<MCSymbol*, MCSymbol*>::iterator I = TOC.begin(),
+    for (MapVector<MCSymbol*, MCSymbol*>::iterator I = TOC.begin(),
          E = TOC.end(); I != E; ++I) {
       OutStreamer.EmitLabel(I->second);
       MCSymbol *S = OutContext.GetOrCreateSymbol(I->first->getName());

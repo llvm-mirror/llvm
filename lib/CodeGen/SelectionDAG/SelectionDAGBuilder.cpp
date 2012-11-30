@@ -3137,12 +3137,12 @@ void SelectionDAGBuilder::visitGetElementPtr(const User &I) {
        OI != E; ++OI) {
     const Value *Idx = *OI;
     if (StructType *StTy = dyn_cast<StructType>(Ty)) {
-      unsigned Field = cast<ConstantInt>(Idx)->getZExtValue();
+      unsigned Field = cast<Constant>(Idx)->getUniqueInteger().getZExtValue();
       if (Field) {
         // N = N + Offset
         uint64_t Offset = TD->getStructLayout(StTy)->getElementOffset(Field);
         N = DAG.getNode(ISD::ADD, getCurDebugLoc(), N.getValueType(), N,
-                        DAG.getIntPtrConstant(Offset));
+                        DAG.getConstant(Offset, N.getValueType()));
       }
 
       Ty = StTy->getElementType(Field);
@@ -3187,7 +3187,7 @@ void SelectionDAGBuilder::visitGetElementPtr(const User &I) {
                              N.getValueType(), IdxN,
                              DAG.getConstant(Amt, IdxN.getValueType()));
         } else {
-          SDValue Scale = DAG.getConstant(ElementSize, TLI.getPointerTy());
+          SDValue Scale = DAG.getConstant(ElementSize, IdxN.getValueType());
           IdxN = DAG.getNode(ISD::MUL, getCurDebugLoc(),
                              N.getValueType(), IdxN, Scale);
         }
@@ -3737,7 +3737,7 @@ SelectionDAGBuilder::visitExp(const CallInst &I) {
                                TwoToFracPartOfX, IntegerPartOfX);
 
       result = DAG.getNode(ISD::BITCAST, dl, MVT::f32, t6);
-    } else if (LimitFloatPrecision > 6 && LimitFloatPrecision <= 12) {
+    } else if (LimitFloatPrecision <= 12) {
       // For floating-point precision of 12:
       //
       //   TwoToFractionalPartOfX =
@@ -3763,7 +3763,7 @@ SelectionDAGBuilder::visitExp(const CallInst &I) {
                                TwoToFracPartOfX, IntegerPartOfX);
 
       result = DAG.getNode(ISD::BITCAST, dl, MVT::f32, t8);
-    } else { // LimitFloatPrecision > 12 && LimitFloatPrecision <= 18
+    } else { // LimitFloatPrecision <= 18
       // For floating-point precision of 18:
       //
       //   TwoToFractionalPartOfX =
@@ -3834,6 +3834,7 @@ SelectionDAGBuilder::visitLog(const CallInst &I) {
     // exponent of 1.
     SDValue X = GetSignificand(DAG, Op1, dl);
 
+    SDValue LogOfMantissa;
     if (LimitFloatPrecision <= 6) {
       // For floating-point precision of 6:
       //
@@ -3847,12 +3848,9 @@ SelectionDAGBuilder::visitLog(const CallInst &I) {
       SDValue t1 = DAG.getNode(ISD::FADD, dl, MVT::f32, t0,
                                getF32Constant(DAG, 0x3fb3a2b1));
       SDValue t2 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t1, X);
-      SDValue LogOfMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t2,
-                                          getF32Constant(DAG, 0x3f949a29));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, LogOfMantissa);
-    } else if (LimitFloatPrecision > 6 && LimitFloatPrecision <= 12) {
+      LogOfMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t2,
+                                  getF32Constant(DAG, 0x3f949a29));
+    } else if (LimitFloatPrecision <= 12) {
       // For floating-point precision of 12:
       //
       //   LogOfMantissa =
@@ -3873,12 +3871,9 @@ SelectionDAGBuilder::visitLog(const CallInst &I) {
       SDValue t5 = DAG.getNode(ISD::FADD, dl, MVT::f32, t4,
                                getF32Constant(DAG, 0x40348e95));
       SDValue t6 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t5, X);
-      SDValue LogOfMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t6,
-                                          getF32Constant(DAG, 0x3fdef31a));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, LogOfMantissa);
-    } else { // LimitFloatPrecision > 12 && LimitFloatPrecision <= 18
+      LogOfMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t6,
+                                  getF32Constant(DAG, 0x3fdef31a));
+    } else { // LimitFloatPrecision <= 18
       // For floating-point precision of 18:
       //
       //   LogOfMantissa =
@@ -3907,12 +3902,12 @@ SelectionDAGBuilder::visitLog(const CallInst &I) {
       SDValue t9 = DAG.getNode(ISD::FADD, dl, MVT::f32, t8,
                                getF32Constant(DAG, 0x408797cb));
       SDValue t10 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t9, X);
-      SDValue LogOfMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t10,
-                                          getF32Constant(DAG, 0x4006dcab));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, LogOfMantissa);
+      LogOfMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t10,
+                                  getF32Constant(DAG, 0x4006dcab));
     }
+
+    result = DAG.getNode(ISD::FADD, dl,
+                         MVT::f32, LogOfExponent, LogOfMantissa);
   } else {
     // No special expansion.
     result = DAG.getNode(ISD::FLOG, dl,
@@ -3944,6 +3939,7 @@ SelectionDAGBuilder::visitLog2(const CallInst &I) {
 
     // Different possible minimax approximations of significand in
     // floating-point for various degrees of accuracy over [1,2].
+    SDValue Log2ofMantissa;
     if (LimitFloatPrecision <= 6) {
       // For floating-point precision of 6:
       //
@@ -3955,12 +3951,9 @@ SelectionDAGBuilder::visitLog2(const CallInst &I) {
       SDValue t1 = DAG.getNode(ISD::FADD, dl, MVT::f32, t0,
                                getF32Constant(DAG, 0x40019463));
       SDValue t2 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t1, X);
-      SDValue Log2ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t2,
-                                           getF32Constant(DAG, 0x3fd6633d));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, Log2ofMantissa);
-    } else if (LimitFloatPrecision > 6 && LimitFloatPrecision <= 12) {
+      Log2ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t2,
+                                   getF32Constant(DAG, 0x3fd6633d));
+    } else if (LimitFloatPrecision <= 12) {
       // For floating-point precision of 12:
       //
       //   Log2ofMantissa =
@@ -3981,12 +3974,9 @@ SelectionDAGBuilder::visitLog2(const CallInst &I) {
       SDValue t5 = DAG.getNode(ISD::FADD, dl, MVT::f32, t4,
                                getF32Constant(DAG, 0x40823e2f));
       SDValue t6 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t5, X);
-      SDValue Log2ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t6,
-                                           getF32Constant(DAG, 0x4020d29c));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, Log2ofMantissa);
-    } else { // LimitFloatPrecision > 12 && LimitFloatPrecision <= 18
+      Log2ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t6,
+                                   getF32Constant(DAG, 0x4020d29c));
+    } else { // LimitFloatPrecision <= 18
       // For floating-point precision of 18:
       //
       //   Log2ofMantissa =
@@ -4016,12 +4006,12 @@ SelectionDAGBuilder::visitLog2(const CallInst &I) {
       SDValue t9 = DAG.getNode(ISD::FADD, dl, MVT::f32, t8,
                                getF32Constant(DAG, 0x40c39dad));
       SDValue t10 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t9, X);
-      SDValue Log2ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t10,
-                                           getF32Constant(DAG, 0x4042902c));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, Log2ofMantissa);
+      Log2ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t10,
+                                   getF32Constant(DAG, 0x4042902c));
     }
+
+    result = DAG.getNode(ISD::FADD, dl,
+                         MVT::f32, LogOfExponent, Log2ofMantissa);
   } else {
     // No special expansion.
     result = DAG.getNode(ISD::FLOG2, dl,
@@ -4053,6 +4043,7 @@ SelectionDAGBuilder::visitLog10(const CallInst &I) {
     // exponent of 1.
     SDValue X = GetSignificand(DAG, Op1, dl);
 
+    SDValue Log10ofMantissa;
     if (LimitFloatPrecision <= 6) {
       // For floating-point precision of 6:
       //
@@ -4066,12 +4057,9 @@ SelectionDAGBuilder::visitLog10(const CallInst &I) {
       SDValue t1 = DAG.getNode(ISD::FADD, dl, MVT::f32, t0,
                                getF32Constant(DAG, 0x3f1c0789));
       SDValue t2 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t1, X);
-      SDValue Log10ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t2,
-                                            getF32Constant(DAG, 0x3f011300));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, Log10ofMantissa);
-    } else if (LimitFloatPrecision > 6 && LimitFloatPrecision <= 12) {
+      Log10ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t2,
+                                    getF32Constant(DAG, 0x3f011300));
+    } else if (LimitFloatPrecision <= 12) {
       // For floating-point precision of 12:
       //
       //   Log10ofMantissa =
@@ -4088,12 +4076,9 @@ SelectionDAGBuilder::visitLog10(const CallInst &I) {
       SDValue t3 = DAG.getNode(ISD::FADD, dl, MVT::f32, t2,
                                getF32Constant(DAG, 0x3f6ae232));
       SDValue t4 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t3, X);
-      SDValue Log10ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t4,
-                                            getF32Constant(DAG, 0x3f25f7c3));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, Log10ofMantissa);
-    } else { // LimitFloatPrecision > 12 && LimitFloatPrecision <= 18
+      Log10ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t4,
+                                    getF32Constant(DAG, 0x3f25f7c3));
+    } else { // LimitFloatPrecision <= 18
       // For floating-point precision of 18:
       //
       //   Log10ofMantissa =
@@ -4118,12 +4103,12 @@ SelectionDAGBuilder::visitLog10(const CallInst &I) {
       SDValue t7 = DAG.getNode(ISD::FADD, dl, MVT::f32, t6,
                                getF32Constant(DAG, 0x3fc4316c));
       SDValue t8 = DAG.getNode(ISD::FMUL, dl, MVT::f32, t7, X);
-      SDValue Log10ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t8,
-                                            getF32Constant(DAG, 0x3f57ce70));
-
-      result = DAG.getNode(ISD::FADD, dl,
-                           MVT::f32, LogOfExponent, Log10ofMantissa);
+      Log10ofMantissa = DAG.getNode(ISD::FSUB, dl, MVT::f32, t8,
+                                    getF32Constant(DAG, 0x3f57ce70));
     }
+
+    result = DAG.getNode(ISD::FADD, dl,
+                         MVT::f32, LogOfExponent, Log10ofMantissa);
   } else {
     // No special expansion.
     result = DAG.getNode(ISD::FLOG10, dl,
@@ -4176,7 +4161,7 @@ SelectionDAGBuilder::visitExp2(const CallInst &I) {
 
       result = DAG.getNode(ISD::BITCAST, dl,
                            MVT::f32, TwoToFractionalPartOfX);
-    } else if (LimitFloatPrecision > 6 && LimitFloatPrecision <= 12) {
+    } else if (LimitFloatPrecision <= 12) {
       // For floating-point precision of 12:
       //
       //   TwoToFractionalPartOfX =
@@ -4201,7 +4186,7 @@ SelectionDAGBuilder::visitExp2(const CallInst &I) {
 
       result = DAG.getNode(ISD::BITCAST, dl,
                            MVT::f32, TwoToFractionalPartOfX);
-    } else { // LimitFloatPrecision > 12 && LimitFloatPrecision <= 18
+    } else { // LimitFloatPrecision <= 18
       // For floating-point precision of 18:
       //
       //   TwoToFractionalPartOfX =
@@ -4309,7 +4294,7 @@ SelectionDAGBuilder::visitPow(const CallInst &I) {
 
       result = DAG.getNode(ISD::BITCAST, dl,
                            MVT::f32, TwoToFractionalPartOfX);
-    } else if (LimitFloatPrecision > 6 && LimitFloatPrecision <= 12) {
+    } else if (LimitFloatPrecision <= 12) {
       // For floating-point precision of 12:
       //
       //   TwoToFractionalPartOfX =
@@ -4334,7 +4319,7 @@ SelectionDAGBuilder::visitPow(const CallInst &I) {
 
       result = DAG.getNode(ISD::BITCAST, dl,
                            MVT::f32, TwoToFractionalPartOfX);
-    } else { // LimitFloatPrecision > 12 && LimitFloatPrecision <= 18
+    } else { // LimitFloatPrecision <= 18
       // For floating-point precision of 18:
       //
       //   TwoToFractionalPartOfX =
@@ -4949,24 +4934,9 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     setValue(&I, Res);
     return 0;
   }
-  case Intrinsic::sqrt:
-    setValue(&I, DAG.getNode(ISD::FSQRT, dl,
-                             getValue(I.getArgOperand(0)).getValueType(),
-                             getValue(I.getArgOperand(0))));
-    return 0;
   case Intrinsic::powi:
     setValue(&I, ExpandPowI(dl, getValue(I.getArgOperand(0)),
                             getValue(I.getArgOperand(1)), DAG));
-    return 0;
-  case Intrinsic::sin:
-    setValue(&I, DAG.getNode(ISD::FSIN, dl,
-                             getValue(I.getArgOperand(0)).getValueType(),
-                             getValue(I.getArgOperand(0))));
-    return 0;
-  case Intrinsic::cos:
-    setValue(&I, DAG.getNode(ISD::FCOS, dl,
-                             getValue(I.getArgOperand(0)).getValueType(),
-                             getValue(I.getArgOperand(0))));
     return 0;
   case Intrinsic::log:
     visitLog(I);
@@ -4986,16 +4956,34 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
   case Intrinsic::pow:
     visitPow(I);
     return 0;
+  case Intrinsic::sqrt:
   case Intrinsic::fabs:
-    setValue(&I, DAG.getNode(ISD::FABS, dl,
-                             getValue(I.getArgOperand(0)).getValueType(),
-                             getValue(I.getArgOperand(0))));
-    return 0;
+  case Intrinsic::sin:
+  case Intrinsic::cos:
   case Intrinsic::floor:
-    setValue(&I, DAG.getNode(ISD::FFLOOR, dl,
+  case Intrinsic::ceil:
+  case Intrinsic::trunc:
+  case Intrinsic::rint:
+  case Intrinsic::nearbyint: {
+    unsigned Opcode;
+    switch (Intrinsic) {
+    default: llvm_unreachable("Impossible intrinsic");  // Can't reach here.
+    case Intrinsic::sqrt:      Opcode = ISD::FSQRT;      break;
+    case Intrinsic::fabs:      Opcode = ISD::FABS;       break;
+    case Intrinsic::sin:       Opcode = ISD::FSIN;       break;
+    case Intrinsic::cos:       Opcode = ISD::FCOS;       break;
+    case Intrinsic::floor:     Opcode = ISD::FFLOOR;     break;
+    case Intrinsic::ceil:      Opcode = ISD::FCEIL;      break;
+    case Intrinsic::trunc:     Opcode = ISD::FTRUNC;     break;
+    case Intrinsic::rint:      Opcode = ISD::FRINT;      break;
+    case Intrinsic::nearbyint: Opcode = ISD::FNEARBYINT; break;
+    }
+
+    setValue(&I, DAG.getNode(Opcode, dl,
                              getValue(I.getArgOperand(0)).getValueType(),
                              getValue(I.getArgOperand(0))));
     return 0;
+  }
   case Intrinsic::fma:
     setValue(&I, DAG.getNode(ISD::FMA, dl,
                              getValue(I.getArgOperand(0)).getValueType(),

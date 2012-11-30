@@ -69,6 +69,7 @@ static const char *kAsanMappingOffsetName = "__asan_mapping_offset";
 static const char *kAsanMappingScaleName = "__asan_mapping_scale";
 static const char *kAsanStackMallocName = "__asan_stack_malloc";
 static const char *kAsanStackFreeName = "__asan_stack_free";
+static const char *kAsanGenPrefix = "__asan_gen_";
 
 static const int kAsanStackLeftRedzoneMagic = 0xf1;
 static const int kAsanStackMidRedzoneMagic = 0xf2;
@@ -148,6 +149,32 @@ static cl::opt<int> ClDebugMax("asan-debug-max", cl::desc("Debug man inst"),
                                cl::Hidden, cl::init(-1));
 
 namespace {
+/// A set of dynamically initialized globals extracted from metadata.
+class SetOfDynamicallyInitializedGlobals {
+ public:
+  void Init(Module& M) {
+    // Clang generates metadata identifying all dynamically initialized globals.
+    NamedMDNode *DynamicGlobals =
+        M.getNamedMetadata("llvm.asan.dynamically_initialized_globals");
+    if (!DynamicGlobals)
+      return;
+    for (int i = 0, n = DynamicGlobals->getNumOperands(); i < n; ++i) {
+      MDNode *MDN = DynamicGlobals->getOperand(i);
+      assert(MDN->getNumOperands() == 1);
+      Value *VG = MDN->getOperand(0);
+      // The optimizer may optimize away a global entirely, in which case we
+      // cannot instrument access to it.
+      if (!VG)
+        continue;
+      DynInitGlobals.insert(cast<GlobalVariable>(VG));
+    }
+  }
+  bool Contains(GlobalVariable *G) { return DynInitGlobals.count(G) != 0; }
+ private:
+  SmallSet<GlobalValue*, 32> DynInitGlobals;
+};
+
+
 /// AddressSanitizer: instrument the code in module to find memory bugs.
 struct AddressSanitizer : public FunctionPass {
   AddressSanitizer();
@@ -195,7 +222,6 @@ struct AddressSanitizer : public FunctionPass {
                    Value *ShadowBase, bool DoPoison);
   bool LooksLikeCodeInBug11395(Instruction *I);
   void FindDynamicInitializers(Module &M);
-  bool HasDynamicInitializer(GlobalVariable *G);
 
   LLVMContext *C;
   DataLayout *TD;
@@ -214,8 +240,7 @@ struct AddressSanitizer : public FunctionPass {
   // This array is indexed by AccessIsWrite and log2(AccessSize).
   Function *AsanErrorCallback[2][kNumberOfAccessSizes];
   InlineAsm *EmptyAsm;
-  SmallSet<GlobalValue*, 32> DynamicallyInitializedGlobals;
-  SmallSet<GlobalValue*, 32> GlobalsCreatedByAsan;
+  SetOfDynamicallyInitializedGlobals DynamicallyInitializedGlobals;
 };
 
 }  // namespace
@@ -243,7 +268,12 @@ static size_t TypeSizeToSizeIndex(uint32_t TypeSize) {
 static GlobalVariable *createPrivateGlobalForString(Module &M, StringRef Str) {
   Constant *StrConst = ConstantDataArray::getString(M.getContext(), Str);
   return new GlobalVariable(M, StrConst->getType(), true,
-                            GlobalValue::PrivateLinkage, StrConst, "");
+                            GlobalValue::PrivateLinkage, StrConst,
+                            kAsanGenPrefix);
+}
+
+static bool GlobalWasGeneratedByAsan(GlobalVariable *G) {
+  return G->getName().find(kAsanGenPrefix) == 0;
 }
 
 Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
@@ -328,30 +358,6 @@ static Value *isInterestingMemoryAccess(Instruction *I, bool *IsWrite) {
   return NULL;
 }
 
-void AddressSanitizer::FindDynamicInitializers(Module& M) {
-  // Clang generates metadata identifying all dynamically initialized globals.
-  NamedMDNode *DynamicGlobals =
-      M.getNamedMetadata("llvm.asan.dynamically_initialized_globals");
-  if (!DynamicGlobals)
-    return;
-  for (int i = 0, n = DynamicGlobals->getNumOperands(); i < n; ++i) {
-    MDNode *MDN = DynamicGlobals->getOperand(i);
-    assert(MDN->getNumOperands() == 1);
-    Value *VG = MDN->getOperand(0);
-    // The optimizer may optimize away a global entirely, in which case we
-    // cannot instrument access to it.
-    if (!VG)
-      continue;
-
-    GlobalVariable *G = cast<GlobalVariable>(VG);
-    DynamicallyInitializedGlobals.insert(G);
-  }
-}
-// Returns true if a global variable is initialized dynamically in this TU.
-bool AddressSanitizer::HasDynamicInitializer(GlobalVariable *G) {
-  return DynamicallyInitializedGlobals.count(G);
-}
-
 void AddressSanitizer::instrumentMop(Instruction *I) {
   bool IsWrite = false;
   Value *Addr = isInterestingMemoryAccess(I, &IsWrite);
@@ -363,11 +369,9 @@ void AddressSanitizer::instrumentMop(Instruction *I) {
       if (!ClInitializers)
         return;
       // If a global variable does not have dynamic initialization we don't
-      // have to instrument it.  However, if a global has external linkage, we
-      // assume it has dynamic initialization, as it may have an initializer
-      // in a different TU.
-      if (G->getLinkage() != GlobalVariable::ExternalLinkage &&
-          !HasDynamicInitializer(G))
+      // have to instrument it.  However, if a global does not have initailizer
+      // at all, we assume it has dynamic initializer (in other TU).
+      if (G->hasInitializer() && !DynamicallyInitializedGlobals.Contains(G))
         return;
     }
   }
@@ -509,7 +513,7 @@ bool AddressSanitizer::ShouldInstrumentGlobal(GlobalVariable *G) {
   if (BL->isIn(*G)) return false;
   if (!Ty->isSized()) return false;
   if (!G->hasInitializer()) return false;
-  if (GlobalsCreatedByAsan.count(G)) return false; // Our own global.
+  if (GlobalWasGeneratedByAsan(G)) return false;  // Our own global.
   // Touch only those globals that will not be defined in other modules.
   // Don't handle ODR type linkages since other modules may be built w/o asan.
   if (G->getLinkage() != GlobalVariable::ExternalLinkage &&
@@ -590,9 +594,6 @@ bool AddressSanitizer::insertGlobalRedzones(Module &M) {
 
   IRBuilder<> IRB(CtorInsertBefore);
 
-  if (ClInitializers)
-    FindDynamicInitializers(M);
-
   // The addresses of the first and last dynamically initialized globals in
   // this TU.  Used in initialization order checking.
   Value *FirstDynamic = 0, *LastDynamic = 0;
@@ -606,7 +607,8 @@ bool AddressSanitizer::insertGlobalRedzones(Module &M) {
         (RedzoneSize - (SizeInBytes % RedzoneSize));
     Type *RightRedZoneTy = ArrayType::get(IRB.getInt8Ty(), RightRedzoneSize);
     // Determine whether this global should be poisoned in initialization.
-    bool GlobalHasDynamicInitializer = HasDynamicInitializer(G);
+    bool GlobalHasDynamicInitializer =
+        DynamicallyInitializedGlobals.Contains(G);
     // Don't check initialization order if this global is blacklisted.
     GlobalHasDynamicInitializer &= !BL->isInInit(*G);
 
@@ -704,6 +706,7 @@ bool AddressSanitizer::doInitialization(Module &M) {
   if (!TD)
     return false;
   BL.reset(new BlackList(ClBlackListFile));
+  DynamicallyInitializedGlobals.Init(M);
 
   C = &(M.getContext());
   LongSize = TD->getPointerSizeInBits();
@@ -731,8 +734,9 @@ bool AddressSanitizer::doInitialization(Module &M) {
       std::string FunctionName = std::string(kAsanReportErrorTemplate) +
           (AccessIsWrite ? "store" : "load") + itostr(1 << AccessSizeIndex);
       // If we are merging crash callbacks, they have two parameters.
-      AsanErrorCallback[AccessIsWrite][AccessSizeIndex] = cast<Function>(
-          M.getOrInsertFunction(FunctionName, IRB.getVoidTy(), IntptrTy, NULL));
+      AsanErrorCallback[AccessIsWrite][AccessSizeIndex] =
+          checkInterfaceFunction(M.getOrInsertFunction(
+              FunctionName, IRB.getVoidTy(), IntptrTy, NULL));
     }
   }
 
@@ -1092,9 +1096,8 @@ bool AddressSanitizer::poisonStackInFunction(Function &F) {
   Value *BasePlus1 = IRB.CreateAdd(LocalStackBase,
                                    ConstantInt::get(IntptrTy, LongSize/8));
   BasePlus1 = IRB.CreateIntToPtr(BasePlus1, IntptrPtrTy);
-  GlobalVariable *StackDescriptionGlobal = 
+  GlobalVariable *StackDescriptionGlobal =
       createPrivateGlobalForString(*F.getParent(), StackDescription.str());
-  GlobalsCreatedByAsan.insert(StackDescriptionGlobal);
   Value *Description = IRB.CreatePointerCast(StackDescriptionGlobal, IntptrTy);
   IRB.CreateStore(Description, BasePlus1);
 

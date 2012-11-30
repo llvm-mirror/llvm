@@ -231,10 +231,12 @@ public:
                                        unsigned SectionID);
 
   virtual uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
-                                       unsigned SectionID);
+                                       unsigned SectionID, bool IsReadOnly);
 
   virtual void *getPointerToNamedFunction(const std::string &Name,
                                           bool AbortOnFailure = true);
+
+  virtual bool applyPermissions(std::string *ErrMsg) { return false; }
 
   // Invalidate instruction cache for code sections. Some platforms with
   // separate data cache and instruction cache require explicit cache flush,
@@ -301,7 +303,8 @@ public:
 
 uint8_t *LLIMCJITMemoryManager::allocateDataSection(uintptr_t Size,
                                                     unsigned Alignment,
-                                                    unsigned SectionID) {
+                                                    unsigned SectionID,
+                                                    bool IsReadOnly) {
   if (!Alignment)
     Alignment = 16;
   // Ensure that enough memory is requested to allow aligning.
@@ -475,6 +478,10 @@ void layoutRemoteTargetMemory(RemoteTarget *T, RecordingMemoryManager *JMM) {
                  << " to remote: " << format("%p", Addr) << "\n");
 
   }
+
+  // Trigger application of relocations
+  EE->finalizeObject();
+
   // Now load it all to the target.
   for (unsigned i = 0, e = Offsets.size(); i != e; ++i) {
     uint64_t Addr = RemoteAddr + Offsets[i].second;
@@ -508,6 +515,7 @@ int main(int argc, char **argv, char * const *envp) {
   // usable by the JIT.
   InitializeNativeTarget();
   InitializeNativeTargetAsmPrinter();
+  InitializeNativeTargetAsmParser();
 
   cl::ParseCommandLineOptions(argc, argv,
                               "llvm interpreter & dynamic compiler\n");

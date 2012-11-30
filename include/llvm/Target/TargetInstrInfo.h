@@ -435,7 +435,7 @@ public:
                              SmallVectorImpl<MachineOperand> &Cond,
                              unsigned &TrueOp, unsigned &FalseOp,
                              bool &Optimizable) const {
-    assert(MI && MI->isSelect() && "MI must be a select instruction");
+    assert(MI && MI->getDesc().isSelect() && "MI must be a select instruction");
     return true;
   }
 
@@ -618,6 +618,26 @@ public:
   virtual bool shouldScheduleLoadsNear(SDNode *Load1, SDNode *Load2,
                                        int64_t Offset1, int64_t Offset2,
                                        unsigned NumLoads) const {
+    return false;
+  }
+
+  /// \brief Get the base register and byte offset of a load/store instr.
+  virtual bool getLdStBaseRegImmOfs(MachineInstr *LdSt,
+                                    unsigned &BaseReg, unsigned &Offset,
+                                    const TargetRegisterInfo *TRI) const {
+    return false;
+  }
+
+  virtual bool shouldClusterLoads(MachineInstr *FirstLdSt,
+                                  MachineInstr *SecondLdSt,
+                                  unsigned NumLoads) const {
+    return false;
+  }
+
+  /// \brief Can this target fuse the given instructions if they are scheduled
+  /// adjacent.
+  virtual bool shouldScheduleAdjacent(MachineInstr* First,
+                                      MachineInstr *Second) const {
     return false;
   }
 

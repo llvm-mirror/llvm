@@ -18,6 +18,11 @@ Subsystem Documentation
    DebuggingJITedCode
    GoldPlugin
    MarkedUpDisassembly
+   HowToUseInstrMappings
+   SystemLibrary
+
+.. FIXME: once LangRef is Sphinxified, HowToUseInstrMappings should be put
+   under LangRef's toctree instead of this page's toctree.
 
 * `Writing an LLVM Pass <WritingAnLLVMPass.html>`_
     
@@ -67,9 +72,9 @@ Subsystem Documentation
     
    This describes the file format and encoding used for LLVM "bc" files.
     
-* `System Library <SystemLibrary.html>`_
+* :doc:`System Library <SystemLibrary>`
     
-   This document describes the LLVM System Library (<tt>lib/System</tt>) and
+   This document describes the LLVM System Library (``lib/System``) and
    how to keep LLVM source code portable
     
 * :ref:`lto`

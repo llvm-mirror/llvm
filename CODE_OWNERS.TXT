@@ -8,9 +8,26 @@ beautification by scripts.  The fields are: name (N), email (E), web-address
 (W), PGP key ID and fingerprint (P), description (D), and snail-mail address
 (S).
 
+N: Joe Abbey
+E: jabbey@arxan.com
+D: LLVM Bitcode (lib/Bitcode/* include/llvm/Bitcode/*)
+
+N: Owen Anderson
+E: resistor@mac.com
+D: SelectionDAG (lib/CodeGen/SelectionDAG/*)
+
+N: Chandler Carruth
+E: chandlerc@gmail.com
+E: chandlerc@google.com
+D: Config, ADT, Support, inlining & related passse, SROA/mem2reg & related passes, CMake, library layering
+
 N: Evan Cheng
 E: evan.cheng@apple.com
-D: Code generator and all targets
+D: ARM target, parts of code generator not covered by someone else
+
+N: Eric Christopher
+E: echristo@gmail.com
+D: Debug Information, autotools/configure/make build, inline assembly
 
 N: Greg Clayton
 D: LLDB
@@ -18,21 +35,53 @@ D: LLDB
 N: Peter Collingbourne
 D: libclc
 
+N: Anshuman Dasgupta
+E: adasgupt@codeaurora.org
+D: Hexagon Backend
+
+N: Hal Finkel
+E: hfinkel@anl.gov
+D: BBVectorize and the PowerPC target
+
 N: Doug Gregor
-D: Clang Frontend Libraries
+D: All parts of Clang not covered by someone else
 
 N: Tobias Grosser
 D: Polly
 
+N: James Grosbach
+E: grosbach@apple.com
+D: MC layer
+
 N: Howard Hinnant
 D: libc++
 
+N: Justin Holewinski
+E: jholewinski@nvidia.com
+D: NVPTX Target (lib/Target/NVPTX/*)
+
+N: Andy Kaylor
+E: andrew.kaylor@intel.com
+D: MCJIT, RuntimeDyld and JIT event listeners
+
+N: Galina Kistanova
+E: gkistanova@gmail.com
+D: LLVM Buildbot
+
 N: Anton Korobeynikov
-E: asl@math.spbu.ru
-D: Exception handling, debug information, and Windows codegen
+E: anton@korobeynikov.info
+D: Exception handling, Windows codegen, ARM EABI
+
+N: Benjamin Kramer
+E: benny.kra@gmail.com
+D: DWARF Parser
 
 N: Ted Kremenek
 D: Clang Static Analyzer
+
+N: Sergei Larin
+E: slarin@codeaurora.org
+D: VLIW Instruction Scheduling, Packetization
 
 N: Chris Lattner
 E: sabre@nondot.org
@@ -46,6 +95,26 @@ D: Clang LLVM IR generation
 N: Jakob Olesen
 D: Register allocators and TableGen
 
+N: Richard Osborne
+E: richard@xmos.com
+D: XCore Backend
+
+N: Chad Rosier
+E: mcrosier@apple.com
+D: MS-inline asm, Fast-Isel, and the compiler driver
+
+N: Nadav Rotem
+E: nrotem@apple.com
+D: X86 Backend, Loop Vectorizer
+
 N: Duncan Sands
 E: baldrick@free.fr
 D: DragonEgg
+
+N: Richard Smith
+E: richard@metafoo.co.uk
+D: Clang Semantic Analysis (tools/clang/lib/Sema/* tools/clang/include/clang/Sema/*)
+
+N: Andrew Trick
+E: atrick@apple.com
+D: Instruction Scheduling

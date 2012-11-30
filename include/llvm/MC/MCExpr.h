@@ -167,6 +167,7 @@ public:
     VK_ARM_TPOFF,
     VK_ARM_GOTTPOFF,
     VK_ARM_TARGET1,
+    VK_ARM_TARGET2,
 
     VK_PPC_TOC,          // TOC base
     VK_PPC_TOC_ENTRY,    // TOC entry
@@ -196,7 +197,11 @@ public:
     VK_Mips_GOT_PAGE,
     VK_Mips_GOT_OFST,
     VK_Mips_HIGHER,
-    VK_Mips_HIGHEST
+    VK_Mips_HIGHEST,
+    VK_Mips_GOT_HI16,
+    VK_Mips_GOT_LO16,
+    VK_Mips_CALL_HI16,
+    VK_Mips_CALL_LO16
   };
 
 private:
