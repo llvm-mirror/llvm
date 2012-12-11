@@ -283,7 +283,7 @@ unsigned VectorTargetTransformImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
  }
 
 unsigned VectorTargetTransformImpl::getCFInstrCost(unsigned Opcode) const {
-  return 1;
+  return 0;
 }
 
 unsigned VectorTargetTransformImpl::getCmpSelInstrCost(unsigned Opcode,
@@ -344,6 +344,25 @@ VectorTargetTransformImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
 
   // Assume that all loads of legal types cost 1.
   return LT.first;
+}
+
+unsigned
+VectorTargetTransformImpl::getIntrinsicInstrCost(Intrinsic::ID, Type *RetTy,
+                                                 ArrayRef<Type*> Tys) const {
+  // assume that we need to scalarize this intrinsic.
+  unsigned ScalarizationCost = 0;
+  unsigned ScalarCalls = 1;
+  if (RetTy->isVectorTy()) {
+    ScalarizationCost = getScalarizationOverhead(RetTy, true, false);
+    ScalarCalls = std::max(ScalarCalls, RetTy->getVectorNumElements());
+  }
+  for (unsigned i = 0, ie = Tys.size(); i != ie; ++i) {
+    if (Tys[i]->isVectorTy()) {
+      ScalarizationCost += getScalarizationOverhead(Tys[i], false, true);
+      ScalarCalls = std::max(ScalarCalls, RetTy->getVectorNumElements());
+    }
+  }
+  return ScalarCalls + ScalarizationCost;
 }
 
 unsigned

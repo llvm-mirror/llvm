@@ -19,25 +19,25 @@
 #include "X86MachineFunctionInfo.h"
 #include "X86Subtarget.h"
 #include "X86TargetMachine.h"
-#include "llvm/Constants.h"
-#include "llvm/Function.h"
-#include "llvm/Type.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/Constants.h"
+#include "llvm/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/CommandLine.h"
+#include "llvm/Type.h"
 
 #define GET_REGINFO_TARGET_DESC
 #include "X86GenRegisterInfo.inc"
@@ -789,46 +789,3 @@ unsigned getX86SubSuperRegister(unsigned Reg, MVT::SimpleValueType VT,
   }
 }
 }
-
-namespace {
-  struct MSAH : public MachineFunctionPass {
-    static char ID;
-    MSAH() : MachineFunctionPass(ID) {}
-
-    virtual bool runOnMachineFunction(MachineFunction &MF) {
-      const X86TargetMachine *TM =
-        static_cast<const X86TargetMachine *>(&MF.getTarget());
-      const TargetFrameLowering *TFI = TM->getFrameLowering();
-      MachineRegisterInfo &RI = MF.getRegInfo();
-      X86MachineFunctionInfo *FuncInfo = MF.getInfo<X86MachineFunctionInfo>();
-      unsigned StackAlignment = TFI->getStackAlignment();
-
-      // Be over-conservative: scan over all vreg defs and find whether vector
-      // registers are used. If yes, there is a possibility that vector register
-      // will be spilled and thus require dynamic stack realignment.
-      for (unsigned i = 0, e = RI.getNumVirtRegs(); i != e; ++i) {
-        unsigned Reg = TargetRegisterInfo::index2VirtReg(i);
-        if (RI.getRegClass(Reg)->getAlignment() > StackAlignment) {
-          FuncInfo->setForceFramePointer(true);
-          return true;
-        }
-      }
-      // Nothing to do
-      return false;
-    }
-
-    virtual const char *getPassName() const {
-      return "X86 Maximal Stack Alignment Check";
-    }
-
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.setPreservesCFG();
-      MachineFunctionPass::getAnalysisUsage(AU);
-    }
-  };
-
-  char MSAH::ID = 0;
-}
-
-FunctionPass*
-llvm::createX86MaxStackAlignmentHeuristicPass() { return new MSAH(); }

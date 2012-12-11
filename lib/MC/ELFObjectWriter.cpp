@@ -11,17 +11,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCELF.h"
+#include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/ADT/OwningPtr.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCELFObjectWriter.h"
+#include "llvm/MC/MCELF.h"
 #include "llvm/MC/MCELFSymbolFlags.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixupKindInfo.h"
@@ -29,9 +29,8 @@
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ELF.h"
-
+#include "llvm/Support/ErrorHandling.h"
 #include <vector>
 using namespace llvm;
 
@@ -204,7 +203,7 @@ class ELFObjectWriter : public MCObjectWriter {
     void String8(MCDataFragment &F, uint8_t Value) {
       char buf[1];
       buf[0] = Value;
-      F.getContents() += StringRef(buf, 1);
+      F.getContents().append(&buf[0], &buf[1]);
     }
 
     void String16(MCDataFragment &F, uint16_t Value) {
@@ -213,7 +212,7 @@ class ELFObjectWriter : public MCObjectWriter {
         StringLE16(buf, Value);
       else
         StringBE16(buf, Value);
-      F.getContents() += StringRef(buf, 2);
+      F.getContents().append(&buf[0], &buf[2]);
     }
 
     void String32(MCDataFragment &F, uint32_t Value) {
@@ -222,7 +221,7 @@ class ELFObjectWriter : public MCObjectWriter {
         StringLE32(buf, Value);
       else
         StringBE32(buf, Value);
-      F.getContents() += StringRef(buf, 4);
+      F.getContents().append(&buf[0], &buf[4]);
     }
 
     void String64(MCDataFragment &F, uint64_t Value) {
@@ -231,7 +230,7 @@ class ELFObjectWriter : public MCObjectWriter {
         StringLE64(buf, Value);
       else
         StringBE64(buf, Value);
-      F.getContents() += StringRef(buf, 8);
+      F.getContents().append(&buf[0], &buf[8]);
     }
 
     void WriteHeader(uint64_t SectionDataSize,
@@ -1187,7 +1186,7 @@ void ELFObjectWriter::CreateMetadataSections(MCAssembler &Asm,
   // The first entry of a string table holds a null character so skip
   // section 0.
   uint64_t Index = 1;
-  F->getContents() += '\x00';
+  F->getContents().push_back('\x00');
 
   for (unsigned int I = 0, E = Sections.size(); I != E; ++I) {
     const MCSectionELF &Section = *Sections[I];
@@ -1205,8 +1204,8 @@ void ELFObjectWriter::CreateMetadataSections(MCAssembler &Asm,
     SectionStringTableIndex[&Section] = Index;
 
     Index += Name.size() + 1;
-    F->getContents() += Name;
-    F->getContents() += '\x00';
+    F->getContents().append(Name.begin(), Name.end());
+    F->getContents().push_back('\x00');
   }
 }
 
@@ -1381,7 +1380,7 @@ void ELFObjectWriter::WriteDataSectionData(MCAssembler &Asm,
          ++i) {
       const MCFragment &F = *i;
       assert(F.getKind() == MCFragment::FT_Data);
-      WriteBytes(cast<MCDataFragment>(F).getContents().str());
+      WriteBytes(cast<MCDataFragment>(F).getContents());
     }
   } else {
     Asm.writeSectionData(&SD, Layout);

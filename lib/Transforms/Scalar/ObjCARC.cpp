@@ -29,9 +29,9 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "objc-arc"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
 // A handy option to enable/disable all optimizations in this file.
@@ -132,12 +132,12 @@ namespace {
 // ARC Utilities.
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Intrinsics.h"
 #include "llvm/Module.h"
-#include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Support/CallSite.h"
-#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Transforms/Utils/Local.h"
 
 namespace {
   /// InstructionClass - A simple classification for instructions.
@@ -660,9 +660,9 @@ static bool DoesObjCBlockEscape(const Value *BlockPtr) {
 // ARC AliasAnalysis.
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Pass.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/Passes.h"
+#include "llvm/Pass.h"
 
 namespace {
   /// ObjCARCAliasAnalysis - This is a simple alias analysis
@@ -912,8 +912,8 @@ bool ObjCARCExpand::runOnFunction(Function &F) {
 // ARC autorelease pool elimination.
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Constants.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Constants.h"
 
 namespace {
   /// ObjCARCAPElim - Autorelease pool elimination.
@@ -1093,10 +1093,10 @@ bool ObjCARCAPElim::runOnModule(Module &M) {
 
 // TODO: Delete release+retain pairs (rare).
 
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/LLVMContext.h"
 #include "llvm/Support/CFG.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/SmallPtrSet.h"
 
 STATISTIC(NumNoops,       "Number of no-op objc calls eliminated");
 STATISTIC(NumPartialNoops, "Number of partially no-op objc calls eliminated");
@@ -1788,8 +1788,8 @@ Constant *ObjCARCOpt::getRetainRVCallee(Module *M) {
     Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
     Type *Params[] = { I8X };
     FunctionType *FTy = FunctionType::get(I8X, Params, /*isVarArg=*/false);
-    AttrListPtr Attributes =
-      AttrListPtr().addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes =
+      AttributeSet().addAttr(M->getContext(), AttributeSet::FunctionIndex,
                             Attributes::get(C, Attributes::NoUnwind));
     RetainRVCallee =
       M->getOrInsertFunction("objc_retainAutoreleasedReturnValue", FTy,
@@ -1804,8 +1804,8 @@ Constant *ObjCARCOpt::getAutoreleaseRVCallee(Module *M) {
     Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
     Type *Params[] = { I8X };
     FunctionType *FTy = FunctionType::get(I8X, Params, /*isVarArg=*/false);
-    AttrListPtr Attributes =
-      AttrListPtr().addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes =
+      AttributeSet().addAttr(M->getContext(), AttributeSet::FunctionIndex,
                             Attributes::get(C, Attributes::NoUnwind));
     AutoreleaseRVCallee =
       M->getOrInsertFunction("objc_autoreleaseReturnValue", FTy,
@@ -1818,8 +1818,8 @@ Constant *ObjCARCOpt::getReleaseCallee(Module *M) {
   if (!ReleaseCallee) {
     LLVMContext &C = M->getContext();
     Type *Params[] = { PointerType::getUnqual(Type::getInt8Ty(C)) };
-    AttrListPtr Attributes =
-      AttrListPtr().addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes =
+      AttributeSet().addAttr(M->getContext(), AttributeSet::FunctionIndex,
                             Attributes::get(C, Attributes::NoUnwind));
     ReleaseCallee =
       M->getOrInsertFunction(
@@ -1834,8 +1834,8 @@ Constant *ObjCARCOpt::getRetainCallee(Module *M) {
   if (!RetainCallee) {
     LLVMContext &C = M->getContext();
     Type *Params[] = { PointerType::getUnqual(Type::getInt8Ty(C)) };
-    AttrListPtr Attributes =
-      AttrListPtr().addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes =
+      AttributeSet().addAttr(M->getContext(), AttributeSet::FunctionIndex,
                             Attributes::get(C, Attributes::NoUnwind));
     RetainCallee =
       M->getOrInsertFunction(
@@ -1856,7 +1856,7 @@ Constant *ObjCARCOpt::getRetainBlockCallee(Module *M) {
       M->getOrInsertFunction(
         "objc_retainBlock",
         FunctionType::get(Params[0], Params, /*isVarArg=*/false),
-        AttrListPtr());
+        AttributeSet());
   }
   return RetainBlockCallee;
 }
@@ -1865,8 +1865,8 @@ Constant *ObjCARCOpt::getAutoreleaseCallee(Module *M) {
   if (!AutoreleaseCallee) {
     LLVMContext &C = M->getContext();
     Type *Params[] = { PointerType::getUnqual(Type::getInt8Ty(C)) };
-    AttrListPtr Attributes =
-      AttrListPtr().addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes =
+      AttributeSet().addAttr(M->getContext(), AttributeSet::FunctionIndex,
                             Attributes::get(C, Attributes::NoUnwind));
     AutoreleaseCallee =
       M->getOrInsertFunction(
@@ -3756,9 +3756,9 @@ void ObjCARCOpt::releaseMemory() {
 // TODO: ObjCARCContract could insert PHI nodes when uses aren't
 // dominated by single calls.
 
-#include "llvm/Operator.h"
-#include "llvm/InlineAsm.h"
 #include "llvm/Analysis/Dominators.h"
+#include "llvm/InlineAsm.h"
+#include "llvm/Operator.h"
 
 STATISTIC(NumStoreStrongs, "Number objc_storeStrong calls formed");
 
@@ -3840,8 +3840,8 @@ Constant *ObjCARCContract::getStoreStrongCallee(Module *M) {
     Type *I8XX = PointerType::getUnqual(I8X);
     Type *Params[] = { I8XX, I8X };
 
-    AttrListPtr Attributes = AttrListPtr()
-      .addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes = AttributeSet()
+      .addAttr(M->getContext(), AttributeSet::FunctionIndex,
                Attributes::get(C, Attributes::NoUnwind))
       .addAttr(M->getContext(), 1, Attributes::get(C, Attributes::NoCapture));
 
@@ -3860,8 +3860,8 @@ Constant *ObjCARCContract::getRetainAutoreleaseCallee(Module *M) {
     Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
     Type *Params[] = { I8X };
     FunctionType *FTy = FunctionType::get(I8X, Params, /*isVarArg=*/false);
-    AttrListPtr Attributes =
-      AttrListPtr().addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes =
+      AttributeSet().addAttr(M->getContext(), AttributeSet::FunctionIndex,
                             Attributes::get(C, Attributes::NoUnwind));
     RetainAutoreleaseCallee =
       M->getOrInsertFunction("objc_retainAutorelease", FTy, Attributes);
@@ -3875,8 +3875,8 @@ Constant *ObjCARCContract::getRetainAutoreleaseRVCallee(Module *M) {
     Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
     Type *Params[] = { I8X };
     FunctionType *FTy = FunctionType::get(I8X, Params, /*isVarArg=*/false);
-    AttrListPtr Attributes =
-      AttrListPtr().addAttr(M->getContext(), AttrListPtr::FunctionIndex,
+    AttributeSet Attributes =
+      AttributeSet().addAttr(M->getContext(), AttributeSet::FunctionIndex,
                             Attributes::get(C, Attributes::NoUnwind));
     RetainAutoreleaseRVCallee =
       M->getOrInsertFunction("objc_retainAutoreleaseReturnValue", FTy,

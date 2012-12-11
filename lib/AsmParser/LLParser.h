@@ -15,13 +15,14 @@
 #define LLVM_ASMPARSER_LLPARSER_H
 
 #include "LLLexer.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/Attributes.h"
 #include "llvm/Instructions.h"
 #include "llvm/Module.h"
-#include "llvm/Type.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/StringMap.h"
+#include "llvm/Operator.h"
 #include "llvm/Support/ValueHandle.h"
+#include "llvm/Type.h"
 #include <map>
 
 namespace llvm {
@@ -154,6 +155,21 @@ namespace llvm {
       Lex.Lex();
       return true;
     }
+
+    FastMathFlags EatFastMathFlagsIfPresent() {
+      FastMathFlags FMF;
+      while (true)
+        switch (Lex.getKind()) {
+        case lltok::kw_fast: FMF.setUnsafeAlgebra();   Lex.Lex(); continue;
+        case lltok::kw_nnan: FMF.setNoNaNs();          Lex.Lex(); continue;
+        case lltok::kw_ninf: FMF.setNoInfs();          Lex.Lex(); continue;
+        case lltok::kw_nsz:  FMF.setNoSignedZeros();   Lex.Lex(); continue;
+        case lltok::kw_arcp: FMF.setAllowReciprocal(); Lex.Lex(); continue;
+        default: return FMF;
+        }
+      return FMF;
+    }
+
     bool ParseOptionalToken(lltok::Kind T, bool &Present, LocTy *Loc = 0) {
       if (Lex.getKind() != T) {
         Present = false;
@@ -175,7 +191,9 @@ namespace llvm {
     bool ParseTLSModel(GlobalVariable::ThreadLocalMode &TLM);
     bool ParseOptionalThreadLocal(GlobalVariable::ThreadLocalMode &TLM);
     bool ParseOptionalAddrSpace(unsigned &AddrSpace);
-    bool ParseOptionalAttrs(AttrBuilder &Attrs, unsigned AttrKind);
+    bool ParseOptionalFuncAttrs(AttrBuilder &B);
+    bool ParseOptionalParamAttrs(AttrBuilder &B);
+    bool ParseOptionalReturnAttrs(AttrBuilder &B);
     bool ParseOptionalLinkage(unsigned &Linkage, bool &HasLinkage);
     bool ParseOptionalLinkage(unsigned &Linkage) {
       bool HasLinkage; return ParseOptionalLinkage(Linkage, HasLinkage);
@@ -200,8 +218,8 @@ namespace llvm {
     bool ParseTopLevelEntities();
     bool ValidateEndOfModule();
     bool ParseTargetDefinition();
-    bool ParseDepLibs();
     bool ParseModuleAsm();
+    bool ParseDepLibs();        // FIXME: Remove in 4.0.
     bool ParseUnnamedType();
     bool ParseNamedType();
     bool ParseDeclare();

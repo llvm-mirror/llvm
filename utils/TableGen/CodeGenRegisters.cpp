@@ -14,12 +14,12 @@
 
 #include "CodeGenRegisters.h"
 #include "CodeGenTarget.h"
-#include "llvm/TableGen/Error.h"
 #include "llvm/ADT/IntEqClasses.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/TableGen/Error.h"
 
 using namespace llvm;
 
@@ -1588,6 +1588,35 @@ void CodeGenRegBank::computeRegUnitSets() {
         RegClassUnitSets[RCIdx].push_back(USIdx);
     }
     assert(!RegClassUnitSets[RCIdx].empty() && "missing unit set for regclass");
+  }
+
+  // For each register unit, ensure that we have the list of UnitSets that
+  // contain the unit. Normally, this matches an existing list of UnitSets for a
+  // register class. If not, we create a new entry in RegClassUnitSets as a
+  // "fake" register class.
+  for (unsigned UnitIdx = 0, UnitEnd = NumNativeRegUnits;
+       UnitIdx < UnitEnd; ++UnitIdx) {
+    std::vector<unsigned> RUSets;
+    for (unsigned i = 0, e = RegUnitSets.size(); i != e; ++i) {
+      RegUnitSet &RUSet = RegUnitSets[i];
+      if (std::find(RUSet.Units.begin(), RUSet.Units.end(), UnitIdx)
+          == RUSet.Units.end())
+        continue;
+      RUSets.push_back(i);
+    }
+    unsigned RCUnitSetsIdx = 0;
+    for (unsigned e = RegClassUnitSets.size();
+         RCUnitSetsIdx != e; ++RCUnitSetsIdx) {
+      if (RegClassUnitSets[RCUnitSetsIdx] == RUSets) {
+        break;
+      }
+    }
+    RegUnits[UnitIdx].RegClassUnitSetsIdx = RCUnitSetsIdx;
+    if (RCUnitSetsIdx == RegClassUnitSets.size()) {
+      // Create a new list of UnitSets as a "fake" register class.
+      RegClassUnitSets.resize(RCUnitSetsIdx + 1);
+      RegClassUnitSets[RCUnitSetsIdx].swap(RUSets);
+    }
   }
 }
 

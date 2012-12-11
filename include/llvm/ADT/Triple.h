@@ -100,8 +100,8 @@ public:
     Haiku,
     Minix,
     RTEMS,
-    NativeClient,
-    CNK,         // BG/P Compute-Node Kernel
+    NaCl,       // Native Client
+    CNK,        // BG/P Compute-Node Kernel
     Bitrig,
     AIX
   };
@@ -308,6 +308,11 @@ public:
   /// isOSWindows - Is this a "Windows" OS.
   bool isOSWindows() const {
     return getOS() == Triple::Win32 || isOSCygMing();
+  }
+
+  /// \brief Tests whether the OS is NaCl (Native Client)
+  bool isOSNaCl() const {
+    return getOS() == Triple::NaCl;
   }
 
   /// \brief Tests whether the OS uses the ELF binary format.

@@ -20,6 +20,9 @@ Subsystem Documentation
    MarkedUpDisassembly
    HowToUseInstrMappings
    SystemLibrary
+   SourceLevelDebugging
+   WritingAnLLVMBackend
+   GarbageCollection
 
 .. FIXME: once LangRef is Sphinxified, HowToUseInstrMappings should be put
    under LangRef's toctree instead of this page's toctree.
@@ -28,8 +31,8 @@ Subsystem Documentation
     
    Information on how to write LLVM transformations and analyses.
     
-* `Writing an LLVM Backend <WritingAnLLVMBackend.html>`_
-    
+* :doc:`WritingAnLLVMBackend`
+
    Information on how to write LLVM backends for machine targets.
 
 * :ref:`code_generator`
@@ -47,13 +50,13 @@ Subsystem Documentation
     
    Information on how to write a new alias analysis implementation or how to
    use existing analyses.
-    
-* `Accurate Garbage Collection with LLVM <GarbageCollection.html>`_
-    
+
+* :doc:`GarbageCollection`
+
    The interfaces source-language compilers should use for compiling GC'd
    programs.
 
-* `Source Level Debugging with LLVM <SourceLevelDebugging.html>`_
+* :doc:`Source Level Debugging with LLVM <SourceLevelDebugging>`
     
    This document describes the design and philosophy behind the LLVM
    source-level debugger.

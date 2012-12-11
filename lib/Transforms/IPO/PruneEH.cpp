@@ -16,16 +16,16 @@
 
 #define DEBUG_TYPE "prune-eh"
 #include "llvm/Transforms/IPO.h"
-#include "llvm/CallGraphSCCPass.h"
-#include "llvm/Constants.h"
-#include "llvm/Function.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Analysis/CallGraph.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/CallGraph.h"
+#include "llvm/CallGraphSCCPass.h"
+#include "llvm/Constants.h"
+#include "llvm/Function.h"
+#include "llvm/Instructions.h"
+#include "llvm/IntrinsicInst.h"
+#include "llvm/LLVMContext.h"
 #include "llvm/Support/CFG.h"
 #include <algorithm>
 using namespace llvm;
@@ -145,8 +145,8 @@ bool PruneEH::runOnSCC(CallGraphSCC &SCC) {
         NewAttributes.addAttribute(Attributes::NoReturn);
 
       Function *F = (*I)->getFunction();
-      const AttrListPtr &PAL = F->getAttributes();
-      const AttrListPtr &NPAL = PAL.addAttr(F->getContext(), ~0,
+      const AttributeSet &PAL = F->getAttributes();
+      const AttributeSet &NPAL = PAL.addAttr(F->getContext(), ~0,
                                             Attributes::get(F->getContext(),
                                                             NewAttributes));
       if (PAL != NPAL) {

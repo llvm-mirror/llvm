@@ -10,9 +10,9 @@
 #ifndef LLVM_MC_MCOBJECTWRITER_H
 #define LLVM_MC_MCOBJECTWRITER_H
 
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cassert>
 
 namespace llvm {
@@ -173,7 +173,13 @@ public:
     OS << StringRef(Zeros, N % 16);
   }
 
+  void WriteBytes(SmallVectorImpl<char> &ByteVec, unsigned ZeroFillSize = 0) {
+    WriteBytes(StringRef(ByteVec.data(), ByteVec.size()), ZeroFillSize);
+  }
+
   void WriteBytes(StringRef Str, unsigned ZeroFillSize = 0) {
+    // TODO: this version may need to go away once all fragment contents are
+    // converted to SmallVector<char, N>
     assert((ZeroFillSize == 0 || Str.size () <= ZeroFillSize) &&
       "data size greater than fill size, unexpected large write will occur");
     OS << Str;

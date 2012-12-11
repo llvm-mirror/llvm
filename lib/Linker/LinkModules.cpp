@@ -12,21 +12,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Linker.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Instructions.h"
-#include "llvm/Module.h"
-#include "llvm/TypeFinder.h"
+#include "llvm-c/Linker.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Constants.h"
+#include "llvm/DerivedTypes.h"
+#include "llvm/Instructions.h"
+#include "llvm/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
-#include "llvm-c/Linker.h"
+#include "llvm/TypeFinder.h"
 #include <cctype>
 using namespace llvm;
 
@@ -1187,19 +1187,6 @@ bool ModuleLinker::run() {
                                SrcM->getModuleInlineAsm());
   }
 
-  // Update the destination module's dependent libraries list with the libraries
-  // from the source module. There's no opportunity for duplicates here as the
-  // Module ensures that duplicate insertions are discarded.
-  for (Module::lib_iterator SI = SrcM->lib_begin(), SE = SrcM->lib_end();
-       SI != SE; ++SI)
-    DstM->addLibrary(*SI);
-  
-  // If the source library's module id is in the dependent library list of the
-  // destination library, remove it since that module is now linked in.
-  StringRef ModuleId = SrcM->getModuleIdentifier();
-  if (!ModuleId.empty())
-    DstM->removeLibrary(sys::path::stem(ModuleId));
-  
   // Loop over all of the linked values to compute type mappings.
   computeTypeMapping();
 

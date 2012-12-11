@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "TableGenBackends.h" // Declares all backends.
-
 #include "SetTheory.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/PrettyStackTrace.h"
@@ -41,7 +40,8 @@ enum ActionType {
   GenTgtIntrinsic,
   GenEDInfo,
   PrintEnums,
-  PrintSets
+  PrintSets,
+  GenOptParserDefs
 };
 
 namespace {
@@ -83,6 +83,8 @@ namespace {
                                "Print enum values for a class"),
                     clEnumValN(PrintSets, "print-sets",
                                "Print expanded sets for testing DAG exprs"),
+                    clEnumValN(GenOptParserDefs, "gen-opt-parser-defs",
+                               "Generate option definitions"),
                     clEnumValEnd));
 
   cl::opt<std::string>
@@ -138,6 +140,9 @@ bool LLVMTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
     break;
   case GenEDInfo:
     EmitEnhancedDisassemblerInfo(Records, OS);
+    break;
+  case GenOptParserDefs:
+    EmitOptParser(Records, OS);
     break;
   case PrintEnums:
   {

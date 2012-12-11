@@ -22,8 +22,9 @@
 #ifndef LLVM_TRANSFORMS_TARGET_TRANSFORM_INTERFACE
 #define LLVM_TRANSFORMS_TARGET_TRANSFORM_INTERFACE
 
-#include "llvm/Pass.h"
 #include "llvm/AddressingMode.h"
+#include "llvm/Intrinsics.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Type.h"
 
@@ -75,6 +76,18 @@ public:
 /// LSR, and LowerInvoke use this interface.
 class ScalarTargetTransformInfo {
 public:
+  /// PopcntHwSupport - Hardware support for population count. Compared to the
+  /// SW implementation, HW support is supposed to significantly boost the
+  /// performance when the population is dense, and it may or not may degrade
+  /// performance if the population is sparse. A HW support is considered as
+  /// "Fast" if it can outperform, or is on a par with, SW implementaion when
+  /// the population is sparse; otherwise, it is considered as "Slow".
+  enum PopcntHwSupport {
+    None,
+    Fast,
+    Slow
+  };
+
   virtual ~ScalarTargetTransformInfo() {}
 
   /// isLegalAddImmediate - Return true if the specified immediate is legal
@@ -121,6 +134,11 @@ public:
   /// lookup tables for the target.
   virtual bool shouldBuildLookupTables() const {
     return true;
+  }
+
+  /// getPopcntHwSupport - Return hardware support for population count.
+  virtual PopcntHwSupport getPopcntHwSupport(unsigned IntTyWidthInBit) const {
+    return None;
   }
 };
 
@@ -189,6 +207,13 @@ public:
   virtual unsigned getMemoryOpCost(unsigned Opcode, Type *Src,
                                    unsigned Alignment,
                                    unsigned AddressSpace) const {
+    return 1;
+  }
+
+  /// Returns the cost of Intrinsic instructions.
+  virtual unsigned getIntrinsicInstrCost(Intrinsic::ID,
+                                         Type *RetTy,
+                                         ArrayRef<Type*> Tys) const {
     return 1;
   }
 

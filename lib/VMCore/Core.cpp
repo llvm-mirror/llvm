@@ -17,11 +17,11 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/Constants.h"
 #include "llvm/DerivedTypes.h"
-#include "llvm/GlobalVariable.h"
 #include "llvm/GlobalAlias.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/GlobalVariable.h"
 #include "llvm/InlineAsm.h"
 #include "llvm/IntrinsicInst.h"
+#include "llvm/LLVMContext.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
@@ -1380,27 +1380,27 @@ void LLVMSetGC(LLVMValueRef Fn, const char *GC) {
 
 void LLVMAddFunctionAttr(LLVMValueRef Fn, LLVMAttribute PA) {
   Function *Func = unwrap<Function>(Fn);
-  const AttrListPtr PAL = Func->getAttributes();
+  const AttributeSet PAL = Func->getAttributes();
   AttrBuilder B(PA);
-  const AttrListPtr PALnew =
-    PAL.addAttr(Func->getContext(), AttrListPtr::FunctionIndex,
+  const AttributeSet PALnew =
+    PAL.addAttr(Func->getContext(), AttributeSet::FunctionIndex,
                 Attributes::get(Func->getContext(), B));
   Func->setAttributes(PALnew);
 }
 
 void LLVMRemoveFunctionAttr(LLVMValueRef Fn, LLVMAttribute PA) {
   Function *Func = unwrap<Function>(Fn);
-  const AttrListPtr PAL = Func->getAttributes();
+  const AttributeSet PAL = Func->getAttributes();
   AttrBuilder B(PA);
-  const AttrListPtr PALnew =
-    PAL.removeAttr(Func->getContext(), AttrListPtr::FunctionIndex,
+  const AttributeSet PALnew =
+    PAL.removeAttr(Func->getContext(), AttributeSet::FunctionIndex,
                    Attributes::get(Func->getContext(), B));
   Func->setAttributes(PALnew);
 }
 
 LLVMAttribute LLVMGetFunctionAttr(LLVMValueRef Fn) {
   Function *Func = unwrap<Function>(Fn);
-  const AttrListPtr PAL = Func->getAttributes();
+  const AttributeSet PAL = Func->getAttributes();
   Attributes attr = PAL.getFnAttributes();
   return (LLVMAttribute)attr.Raw();
 }

@@ -12,29 +12,29 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "NVPTX.h"
 #include "NVPTXISelLowering.h"
+#include "NVPTX.h"
 #include "NVPTXTargetMachine.h"
 #include "NVPTXTargetObjectFile.h"
 #include "NVPTXUtilities.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/GlobalValue.h"
-#include "llvm/Module.h"
-#include "llvm/Function.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Support/CallSite.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/DerivedTypes.h"
+#include "llvm/Function.h"
+#include "llvm/GlobalValue.h"
+#include "llvm/IntrinsicInst.h"
+#include "llvm/Intrinsics.h"
 #include "llvm/MC/MCSectionELF.h"
+#include "llvm/Module.h"
+#include "llvm/Support/CallSite.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include <sstream>
 
 #undef DEBUG_TYPE
@@ -271,6 +271,9 @@ const char *NVPTXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   }
 }
 
+bool NVPTXTargetLowering::shouldSplitVectorElementType(EVT VT) const {
+  return VT == MVT::i1;
+}
 
 SDValue
 NVPTXTargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const {
@@ -954,7 +957,7 @@ bool llvm::isImageOrSamplerVal(const Value *arg, const Module *context) {
     return false;
 
   const StructType *STy = dyn_cast<StructType>(PTy->getElementType());
-  const std::string TypeName = STy ? STy->getName() : "";
+  const std::string TypeName = STy && !STy->isLiteral() ? STy->getName() : "";
 
   for (int i = 0, e = array_lengthof(specialTypes); i != e; ++i)
     if (TypeName == specialTypes[i])
@@ -973,7 +976,7 @@ NVPTXTargetLowering::LowerFormalArguments(SDValue Chain,
   const DataLayout *TD = getDataLayout();
 
   const Function *F = MF.getFunction();
-  const AttrListPtr &PAL = F->getAttributes();
+  const AttributeSet &PAL = F->getAttributes();
 
   SDValue Root = DAG.getRoot();
   std::vector<SDValue> OutChains;

@@ -12,36 +12,36 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/MC/MCParser/AsmLexer.h"
-#include "llvm/MC/MCParser/MCAsmLexer.h"
+#include "Disassembler.h"
+#include "llvm/ADT/OwningPtr.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCCodeEmitter.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
+#include "llvm/MC/MCParser/AsmLexer.h"
+#include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/MC/SubtargetFeature.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/SourceMgr.h"
-#include "llvm/Support/ToolOutputFile.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/system_error.h"
-#include "Disassembler.h"
 using namespace llvm;
 
 static cl::opt<std::string>
@@ -67,6 +67,9 @@ OutputAsmVariant("output-asm-variant",
 
 static cl::opt<bool>
 RelaxAll("mc-relax-all", cl::desc("Relax all fixups"));
+
+static cl::opt<bool>
+DisableCFI("disable-cfi", cl::desc("Do not use .cfi_* directives"));
 
 static cl::opt<bool>
 NoExecStack("mc-no-exec-stack", cl::desc("File doesn't need an exec stack"));
@@ -159,7 +162,8 @@ enum ActionType {
   AC_Assemble,
   AC_Disassemble,
   AC_EDisassemble,
-  AC_MDisassemble
+  AC_MDisassemble,
+  AC_HDisassemble
 };
 
 static cl::opt<ActionType>
@@ -175,6 +179,9 @@ Action(cl::desc("Action to perform:"),
                              "Enhanced disassembly of strings of hex bytes"),
                   clEnumValN(AC_MDisassemble, "mdis",
                              "Marked up disassembly of strings of hex bytes"),
+                  clEnumValN(AC_HDisassemble, "hdis",
+                             "Disassemble strings of hex bytes printing "
+                             "immediates as hex"),
                   clEnumValEnd));
 
 static const Target *GetTarget(const char *ProgName) {
@@ -415,9 +422,10 @@ int main(int argc, char **argv) {
       CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, *STI, Ctx);
       MAB = TheTarget->createMCAsmBackend(TripleName, MCPU);
     }
+    bool UseCFI = !DisableCFI;
     Str.reset(TheTarget->createAsmStreamer(Ctx, FOS, /*asmverbose*/true,
                                            /*useLoc*/ true,
-                                           /*useCFI*/ true,
+                                           UseCFI,
                                            /*useDwarfDirectory*/ true,
                                            IP, CE, MAB, ShowInst));
 
@@ -433,6 +441,7 @@ int main(int argc, char **argv) {
   }
 
   int Res = 1;
+  bool disassemble = false;
   switch (Action) {
   case AC_AsLex:
     Res = AsLexInput(SrcMgr, *MAI, Out.get());
@@ -442,15 +451,22 @@ int main(int argc, char **argv) {
     break;
   case AC_MDisassemble:
     IP->setUseMarkup(1);
-    // Fall through to do disassembly.
+    disassemble = true;
+    break;
+  case AC_HDisassemble:
+    IP->setPrintImmHex(1);
+    disassemble = true;
+    break;
   case AC_Disassemble:
-    Res = Disassembler::disassemble(*TheTarget, TripleName, *STI, *Str,
-                                    *Buffer, SrcMgr, Out->os());
+    disassemble = true;
     break;
   case AC_EDisassemble:
     Res =  Disassembler::disassembleEnhanced(TripleName, *Buffer, SrcMgr, Out->os());
     break;
   }
+  if (disassemble)
+    Res = Disassembler::disassemble(*TheTarget, TripleName, *STI, *Str,
+                                    *Buffer, SrcMgr, Out->os());
 
   // Keep output if no errors.
   if (Res == 0) Out->keep();

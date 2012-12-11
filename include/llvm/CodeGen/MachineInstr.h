@@ -16,17 +16,17 @@
 #ifndef LLVM_CODEGEN_MACHINEINSTR_H
 #define LLVM_CODEGEN_MACHINEINSTR_H
 
-#include "llvm/CodeGen/MachineOperand.h"
-#include "llvm/MC/MCInstrDesc.h"
-#include "llvm/Target/TargetOpcodes.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/ilist.h"
-#include "llvm/ADT/ilist_node.h"
+#include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/DenseMapInfo.h"
+#include "llvm/ADT/ilist.h"
+#include "llvm/ADT/ilist_node.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/InlineAsm.h"
+#include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Support/DebugLoc.h"
+#include "llvm/Target/TargetOpcodes.h"
 #include <vector>
 
 namespace llvm {
@@ -58,8 +58,8 @@ public:
     NoFlags      = 0,
     FrameSetup   = 1 << 0,              // Instruction is used as a part of
                                         // function frame setup code.
-    InsideBundle = 1 << 1               // Instruction is inside a bundle (not
-                                        // the first MI in a bundle)
+    BundledPred  = 1 << 1,              // Instruction has bundled predecessors.
+    BundledSucc  = 1 << 2               // Instruction has bundled successors.
   };
 private:
   const MCInstrDesc *MCID;              // Instruction descriptor.
@@ -94,20 +94,10 @@ private:
   /// MachineInstr in the given MachineFunction.
   MachineInstr(MachineFunction &, const MachineInstr &);
 
-  /// MachineInstr ctor - This constructor creates a dummy MachineInstr with
-  /// MCID NULL and no operands.
-  MachineInstr();
-
   /// MachineInstr ctor - This constructor create a MachineInstr and add the
   /// implicit operands.  It reserves space for number of operands specified by
   /// MCInstrDesc.  An explicit DebugLoc is supplied.
   MachineInstr(const MCInstrDesc &MCID, const DebugLoc dl, bool NoImp = false);
-
-  /// MachineInstr ctor - Work exactly the same as the ctor above, except that
-  /// the MachineInstr is created and added to the end of the specified basic
-  /// block.
-  MachineInstr(MachineBasicBlock *MBB, const DebugLoc dl,
-               const MCInstrDesc &MCID);
 
   ~MachineInstr();
 
@@ -205,21 +195,43 @@ public:
   /// The first instruction has the special opcode "BUNDLE". It's not "inside"
   /// a bundle, but the next three MIs are.
   bool isInsideBundle() const {
-    return getFlag(InsideBundle);
+    return getFlag(BundledPred);
   }
 
   /// setIsInsideBundle - Set InsideBundle bit.
   ///
   void setIsInsideBundle(bool Val = true) {
     if (Val)
-      setFlag(InsideBundle);
+      setFlag(BundledPred);
     else
-      clearFlag(InsideBundle);
+      clearFlag(BundledPred);
   }
 
   /// isBundled - Return true if this instruction part of a bundle. This is true
   /// if either itself or its following instruction is marked "InsideBundle".
   bool isBundled() const;
+
+  /// Return true if this instruction is part of a bundle, and it is not the
+  /// first instruction in the bundle.
+  bool isBundledWithPred() const { return getFlag(BundledPred); }
+
+  /// Return true if this instruction is part of a bundle, and it is not the
+  /// last instruction in the bundle.
+  bool isBundledWithSucc() const { return getFlag(BundledSucc); }
+
+  /// Bundle this instruction with its predecessor. This can be an unbundled
+  /// instruction, or it can be the first instruction in a bundle.
+  void bundleWithPred();
+
+  /// Bundle this instruction with its successor. This can be an unbundled
+  /// instruction, or it can be the last instruction in a bundle.
+  void bundleWithSucc();
+
+  /// Break bundle above this instruction.
+  void unbundleFromPred();
+
+  /// Break bundle below this instruction.
+  void unbundleFromSucc();
 
   /// getDebugLoc - Returns the debug location id of this MachineInstr.
   ///

@@ -32,6 +32,17 @@ def symbolLo64 : Operand<i64> {
 def tocentry : Operand<iPTR> {
   let MIOperandInfo = (ops i32imm:$imm);
 }
+def memrs : Operand<iPTR> {   // memri where the immediate is a symbolLo64
+  let PrintMethod = "printMemRegImm";
+  let EncoderMethod = "getMemRIXEncoding";
+  let MIOperandInfo = (ops symbolLo64:$off, ptr_rc:$reg);
+}
+def tlsaddr : Operand<i64> {
+  let EncoderMethod = "getTLSOffsetEncoding";
+}
+def tlsreg : Operand<i64> {
+  let EncoderMethod = "getTLSRegEncoding";
+}
 
 //===----------------------------------------------------------------------===//
 // 64-bit transformation functions.
@@ -359,6 +370,11 @@ def XORIS8  : DForm_4<27, (outs G8RC:$dst), (ins G8RC:$src1, u16imm:$src2),
 def ADD8  : XOForm_1<31, 266, 0, (outs G8RC:$rT), (ins G8RC:$rA, G8RC:$rB),
                      "add $rT, $rA, $rB", IntSimple,
                      [(set G8RC:$rT, (add G8RC:$rA, G8RC:$rB))]>;
+// ADD8 has a special form: reg = ADD8(reg, sym@tls) for use by the
+// initial-exec thread-local storage model.
+def ADD8TLS  : XOForm_1<31, 266, 0, (outs G8RC:$rT), (ins G8RC:$rA, tlsreg:$rB),
+                        "add $rT, $rA, $rB", IntSimple,
+                        [(set G8RC:$rT, (add G8RC:$rA, tglobaltlsaddr:$rB))]>;
                      
 let Defs = [CARRY] in {
 def ADDC8 : XOForm_1<31, 10, 0, (outs G8RC:$rT), (ins G8RC:$rA, G8RC:$rB),
@@ -625,6 +641,12 @@ let canFoldAsLoad = 1, PPC970_Unit = 2 in {
 def LD   : DSForm_1<58, 0, (outs G8RC:$rD), (ins memrix:$src),
                     "ld $rD, $src", LdStLD,
                     [(set G8RC:$rD, (load ixaddr:$src))]>, isPPC64;
+def LDrs : DSForm_1<58, 0, (outs G8RC:$rD), (ins memrs:$src),
+                    "ld $rD, $src", LdStLD,
+                    []>, isPPC64;
+// The following three definitions are selected for small code model only.
+// Otherwise, we need to create two instructions to form a 32-bit offset,
+// so we have a custom matcher for TOC_ENTRY in PPCDAGToDAGIsel::Select().
 def LDtoc: Pseudo<(outs G8RC:$rD), (ins tocentry:$disp, G8RC:$reg),
                   "#LDtoc",
                   [(set G8RC:$rD,
@@ -670,6 +692,30 @@ def : Pat<(PPCload ixaddr:$src),
           (LD ixaddr:$src)>;
 def : Pat<(PPCload xaddr:$src),
           (LDX xaddr:$src)>;
+
+// Support for medium code model.
+def ADDIStocHA: Pseudo<(outs G8RC:$rD), (ins G8RC:$reg, tocentry:$disp),
+                       "#ADDIStocHA",
+                       [(set G8RC:$rD,
+                         (PPCaddisTocHA G8RC:$reg, tglobaladdr:$disp))]>,
+                       isPPC64;
+def LDtocL: Pseudo<(outs G8RC:$rD), (ins tocentry:$disp, G8RC:$reg),
+                   "#LDtocL",
+                   [(set G8RC:$rD,
+                     (PPCldTocL tglobaladdr:$disp, G8RC:$reg))]>, isPPC64;
+def ADDItocL: Pseudo<(outs G8RC:$rD), (ins G8RC:$reg, tocentry:$disp),
+                     "#ADDItocL",
+                     [(set G8RC:$rD,
+                       (PPCaddiTocL G8RC:$reg, tglobaladdr:$disp))]>, isPPC64;
+
+// Support for thread-local storage.
+def LDgotTPREL: Pseudo<(outs G8RC:$rD), (ins tlsaddr:$disp, G8RC:$reg),
+                       "#LDgotTPREL",
+                       [(set G8RC:$rD,
+                         (PPCldGotTprel G8RC:$reg, tglobaltlsaddr:$disp))]>,
+                      isPPC64;
+def : Pat<(PPCaddTls G8RC:$in, tglobaltlsaddr:$g),
+          (ADD8TLS G8RC:$in, tglobaltlsaddr:$g)>;
 
 let PPC970_Unit = 2 in {
 // Truncating stores.                       

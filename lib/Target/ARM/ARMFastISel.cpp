@@ -16,31 +16,31 @@
 #include "ARM.h"
 #include "ARMBaseInstrInfo.h"
 #include "ARMCallingConv.h"
-#include "ARMTargetMachine.h"
-#include "ARMSubtarget.h"
 #include "ARMConstantPoolValue.h"
+#include "ARMSubtarget.h"
+#include "ARMTargetMachine.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "llvm/CallingConv.h"
+#include "llvm/CodeGen/Analysis.h"
+#include "llvm/CodeGen/FastISel.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
+#include "llvm/CodeGen/MachineConstantPool.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/DataLayout.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/GlobalVariable.h"
 #include "llvm/Instructions.h"
 #include "llvm/IntrinsicInst.h"
 #include "llvm/Module.h"
 #include "llvm/Operator.h"
-#include "llvm/CodeGen/Analysis.h"
-#include "llvm/CodeGen/FastISel.h"
-#include "llvm/CodeGen/FunctionLoweringInfo.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/CodeGen/MachineConstantPool.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
-#include "llvm/DataLayout.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
@@ -186,7 +186,8 @@ class ARMFastISel : public FastISel {
     bool ARMComputeAddress(const Value *Obj, Address &Addr);
     void ARMSimplifyAddress(Address &Addr, EVT VT, bool useAM3);
     bool ARMIsMemCpySmall(uint64_t Len);
-    bool ARMTryEmitSmallMemCpy(Address Dest, Address Src, uint64_t Len);
+    bool ARMTryEmitSmallMemCpy(Address Dest, Address Src, uint64_t Len,
+                               unsigned Alignment);
     unsigned ARMEmitIntExt(EVT SrcVT, unsigned SrcReg, EVT DestVT, bool isZExt);
     unsigned ARMMaterializeFP(const ConstantFP *CFP, EVT VT);
     unsigned ARMMaterializeInt(const Constant *C, EVT VT);
@@ -563,7 +564,9 @@ unsigned ARMFastISel::ARMMaterializeInt(const Constant *C, EVT VT) {
   const ConstantInt *CI = cast<ConstantInt>(C);
   if (Subtarget->hasV6T2Ops() && isUInt<16>(CI->getZExtValue())) {
     unsigned Opc = isThumb2 ? ARM::t2MOVi16 : ARM::MOVi16;
-    unsigned ImmReg = createResultReg(TLI.getRegClassFor(MVT::i32));
+    const TargetRegisterClass *RC = isThumb2 ? &ARM::rGPRRegClass :
+      &ARM::GPRRegClass;
+    unsigned ImmReg = createResultReg(RC);
     AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL,
                             TII.get(Opc), ImmReg)
                     .addImm(CI->getZExtValue()));
@@ -1665,7 +1668,6 @@ bool ARMFastISel::SelectSelect(const Instruction *I) {
 
   // Things need to be register sized for register moves.
   if (VT != MVT::i32) return false;
-  const TargetRegisterClass *RC = TLI.getRegClassFor(VT);
 
   unsigned CondReg = getRegForValue(I->getOperand(0));
   if (CondReg == 0) return false;
@@ -1698,14 +1700,16 @@ bool ARMFastISel::SelectSelect(const Instruction *I) {
                   .addReg(CondReg).addImm(0));
 
   unsigned MovCCOpc;
+  const TargetRegisterClass *RC;
   if (!UseImm) {
+    RC = isThumb2 ? &ARM::tGPRRegClass : &ARM::GPRRegClass;
     MovCCOpc = isThumb2 ? ARM::t2MOVCCr : ARM::MOVCCr;
   } else {
-    if (!isNegativeImm) {
+    RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRRegClass;
+    if (!isNegativeImm)
       MovCCOpc = isThumb2 ? ARM::t2MOVCCi : ARM::MOVCCi;
-    } else {
+    else
       MovCCOpc = isThumb2 ? ARM::t2MVNCCi : ARM::MVNCCi;
-    }
   }
   unsigned ResultReg = createResultReg(RC);
   if (!UseImm)
@@ -2280,6 +2284,9 @@ bool ARMFastISel::SelectCall(const Instruction *I,
   // Can't handle inline asm.
   if (isa<InlineAsm>(Callee)) return false;
 
+  // Allow SelectionDAG isel to handle tail calls.
+  if (CI->isTailCall()) return false;
+
   // Check the calling convention.
   ImmutableCallSite CS(CI);
   CallingConv::ID CC = CS.getCallingConv();
@@ -2419,21 +2426,30 @@ bool ARMFastISel::ARMIsMemCpySmall(uint64_t Len) {
 }
 
 bool ARMFastISel::ARMTryEmitSmallMemCpy(Address Dest, Address Src,
-                                        uint64_t Len) {
+                                        uint64_t Len, unsigned Alignment) {
   // Make sure we don't bloat code by inlining very large memcpy's.
   if (!ARMIsMemCpySmall(Len))
     return false;
 
-  // We don't care about alignment here since we just emit integer accesses.
   while (Len) {
     MVT VT;
-    if (Len >= 4)
-      VT = MVT::i32;
-    else if (Len >= 2)
-      VT = MVT::i16;
-    else {
-      assert(Len == 1);
-      VT = MVT::i8;
+    if (!Alignment || Alignment >= 4) {
+      if (Len >= 4)
+        VT = MVT::i32;
+      else if (Len >= 2)
+        VT = MVT::i16;
+      else {
+        assert (Len == 1 && "Expected a length of 1!");
+        VT = MVT::i8;
+      }
+    } else {
+      // Bound based on alignment.
+      if (Len >= 2 && Alignment == 2)
+        VT = MVT::i16;
+      else {
+        assert (Alignment == 1 && "Expected an alignment of 1!");
+        VT = MVT::i8;
+      }
     }
 
     bool RV;
@@ -2512,7 +2528,8 @@ bool ARMFastISel::SelectIntrinsicCall(const IntrinsicInst &I) {
         if (!ARMComputeAddress(MTI.getRawDest(), Dest) ||
             !ARMComputeAddress(MTI.getRawSource(), Src))
           return false;
-        if (ARMTryEmitSmallMemCpy(Dest, Src, Len))
+        unsigned Alignment = MTI.getAlignment();
+        if (ARMTryEmitSmallMemCpy(Dest, Src, Len, Alignment))
           return true;
       }
     }
@@ -2577,11 +2594,13 @@ unsigned ARMFastISel::ARMEmitIntExt(EVT SrcVT, unsigned SrcReg, EVT DestVT,
 
   unsigned Opc;
   bool isBoolZext = false;
+  const TargetRegisterClass *RC = TLI.getRegClassFor(MVT::i32);
   if (!SrcVT.isSimple()) return 0;
   switch (SrcVT.getSimpleVT().SimpleTy) {
   default: return 0;
   case MVT::i16:
     if (!Subtarget->hasV6Ops()) return 0;
+    RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRnopcRegClass;
     if (isZExt)
       Opc = isThumb2 ? ARM::t2UXTH : ARM::UXTH;
     else
@@ -2589,6 +2608,7 @@ unsigned ARMFastISel::ARMEmitIntExt(EVT SrcVT, unsigned SrcReg, EVT DestVT,
     break;
   case MVT::i8:
     if (!Subtarget->hasV6Ops()) return 0;
+    RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRnopcRegClass;
     if (isZExt)
       Opc = isThumb2 ? ARM::t2UXTB : ARM::UXTB;
     else
@@ -2596,6 +2616,7 @@ unsigned ARMFastISel::ARMEmitIntExt(EVT SrcVT, unsigned SrcReg, EVT DestVT,
     break;
   case MVT::i1:
     if (isZExt) {
+      RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRRegClass;
       Opc = isThumb2 ? ARM::t2ANDri : ARM::ANDri;
       isBoolZext = true;
       break;
@@ -2603,7 +2624,7 @@ unsigned ARMFastISel::ARMEmitIntExt(EVT SrcVT, unsigned SrcReg, EVT DestVT,
     return 0;
   }
 
-  unsigned ResultReg = createResultReg(TLI.getRegClassFor(MVT::i32));
+  unsigned ResultReg = createResultReg(RC);
   MachineInstrBuilder MIB;
   MIB = BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(Opc), ResultReg)
         .addReg(SrcReg);

@@ -12,14 +12,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "LLLexer.h"
+#include "llvm/ADT/Twine.h"
+#include "llvm/Assembly/Parser.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Instruction.h"
 #include "llvm/LLVMContext.h"
-#include "llvm/ADT/Twine.h"
-#include "llvm/Assembly/Parser.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cctype>
@@ -402,7 +402,7 @@ lltok::Kind LLLexer::LexExclaim() {
   }
   return lltok::exclaim;
 }
-  
+
 /// LexIdentifier: Handle several related productions:
 ///    Label           [-a-zA-Z$._0-9]+:
 ///    IntegerType     i[0-9]+
@@ -486,7 +486,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(target);
   KEYWORD(triple);
   KEYWORD(unwind);
-  KEYWORD(deplibs);
+  KEYWORD(deplibs);             // FIXME: Remove in 4.0.
   KEYWORD(datalayout);
   KEYWORD(volatile);
   KEYWORD(atomic);
@@ -498,6 +498,11 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(seq_cst);
   KEYWORD(singlethread);
 
+  KEYWORD(nnan)
+  KEYWORD(ninf)
+  KEYWORD(nsz)
+  KEYWORD(arcp)
+  KEYWORD(fast)
   KEYWORD(nuw);
   KEYWORD(nsw);
   KEYWORD(exact);

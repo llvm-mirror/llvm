@@ -12,15 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/Constants.h"
-#include "llvm/DebugInfo.h"
-#include "llvm/Function.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Metadata.h"
-#include "llvm/Module.h"
-#include "llvm/Type.h"
-#include "llvm/Value.h"
+#include "llvm/ADT/FoldingSet.h"
+#include "llvm/ADT/Hashing.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Assembly/Writer.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -28,19 +22,25 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/Constants.h"
+#include "llvm/DebugInfo.h"
+#include "llvm/Function.h"
+#include "llvm/InlineAsm.h"
+#include "llvm/LLVMContext.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Metadata.h"
+#include "llvm/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LeakDetector.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/Hashing.h"
+#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Type.h"
+#include "llvm/Value.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -518,16 +518,6 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, const MachineMemOperand &MMO) {
 // MachineInstr Implementation
 //===----------------------------------------------------------------------===//
 
-/// MachineInstr ctor - This constructor creates a dummy MachineInstr with
-/// MCID NULL and no operands.
-MachineInstr::MachineInstr()
-  : MCID(0), Flags(0), AsmPrinterFlags(0),
-    NumMemRefs(0), MemRefs(0),
-    Parent(0) {
-  // Make sure that we get added to a machine basicblock
-  LeakDetector::addGarbageObject(this);
-}
-
 void MachineInstr::addImplicitDefUseOperands() {
   if (MCID->ImplicitDefs)
     for (const uint16_t *ImpDefs = MCID->getImplicitDefs(); *ImpDefs; ++ImpDefs)
@@ -552,23 +542,6 @@ MachineInstr::MachineInstr(const MCInstrDesc &tid, const DebugLoc dl,
     addImplicitDefUseOperands();
   // Make sure that we get added to a machine basicblock
   LeakDetector::addGarbageObject(this);
-}
-
-/// MachineInstr ctor - Work exactly the same as the ctor two above, except
-/// that the MachineInstr is created and added to the end of the specified
-/// basic block.
-MachineInstr::MachineInstr(MachineBasicBlock *MBB, const DebugLoc dl,
-                           const MCInstrDesc &tid)
-  : MCID(&tid), Flags(0), AsmPrinterFlags(0),
-    NumMemRefs(0), MemRefs(0), Parent(0), debugLoc(dl) {
-  assert(MBB && "Cannot use inserting ctor with null basic block!");
-  unsigned NumImplicitOps =
-    MCID->getNumImplicitDefs() + MCID->getNumImplicitUses();
-  Operands.reserve(NumImplicitOps + MCID->getNumOperands());
-  addImplicitDefUseOperands();
-  // Make sure that we get added to a machine basicblock
-  LeakDetector::addGarbageObject(this);
-  MBB->push_back(this);  // Add instruction to end of basic block!
 }
 
 /// MachineInstr ctor - Copies MachineInstr arg exactly
@@ -919,6 +892,38 @@ unsigned MachineInstr::getNumExplicitOperands() const {
       NumOperands++;
   }
   return NumOperands;
+}
+
+void MachineInstr::bundleWithPred() {
+  assert(!isBundledWithPred() && "MI is already bundled with its predecessor");
+  setFlag(BundledPred);
+  MachineBasicBlock::instr_iterator Pred = this;
+  --Pred;
+  Pred->setFlag(BundledSucc);
+}
+
+void MachineInstr::bundleWithSucc() {
+  assert(!isBundledWithSucc() && "MI is already bundled with its successor");
+  setFlag(BundledSucc);
+  MachineBasicBlock::instr_iterator Succ = this;
+  ++Succ;
+  Succ->setFlag(BundledPred);
+}
+
+void MachineInstr::unbundleFromPred() {
+  assert(isBundledWithPred() && "MI isn't bundled with its predecessor");
+  clearFlag(BundledPred);
+  MachineBasicBlock::instr_iterator Pred = this;
+  --Pred;
+  Pred->clearFlag(BundledSucc);
+}
+
+void MachineInstr::unbundleFromSucc() {
+  assert(isBundledWithSucc() && "MI isn't bundled with its successor");
+  clearFlag(BundledSucc);
+  MachineBasicBlock::instr_iterator Succ = this;
+  --Succ;
+  Succ->clearFlag(BundledPred);
 }
 
 /// isBundled - Return true if this instruction part of a bundle. This is true

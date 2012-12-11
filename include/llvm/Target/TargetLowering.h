@@ -22,14 +22,14 @@
 #ifndef LLVM_TARGET_TARGETLOWERING_H
 #define LLVM_TARGET_TARGETLOWERING_H
 
-#include "llvm/AddressingMode.h"
-#include "llvm/CallingConv.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Attributes.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/Support/CallSite.h"
-#include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/AddressingMode.h"
+#include "llvm/Attributes.h"
+#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/RuntimeLibcalls.h"
+#include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/InlineAsm.h"
+#include "llvm/Support/CallSite.h"
 #include "llvm/Support/DebugLoc.h"
 #include "llvm/Target/TargetCallingConv.h"
 #include "llvm/Target/TargetMachine.h"
@@ -158,6 +158,11 @@ public:
   bool isSelectExpensive() const { return SelectIsExpensive; }
 
   virtual bool isSelectSupported(SelectSupportKind kind) const { return true; }
+
+  /// shouldSplitVectorElementType - Return true if a vector of the given type
+  /// should be split (TypeSplitVector) instead of promoted
+  /// (TypePromoteInteger) during type legalization.
+  virtual bool shouldSplitVectorElementType(EVT VT) const { return false; }
 
   /// isIntDivCheap() - Return true if integer divide is usually cheaper than
   /// a sequence of several shifts, adds, and multiplies for this target.
@@ -364,6 +369,16 @@ public:
   /// the FP immediate as a load from a constant pool.
   virtual bool isFPImmLegal(const APFloat &/*Imm*/, EVT /*VT*/) const {
     return false;
+  }
+
+  /// isIntImmLegal - Returns true if the target can instruction select the
+  /// specified integer immediate natively (that is, it's materialized with one
+  /// instruction). The current *assumption* in isel is all of integer
+  /// immediates are "legal" and only the memcpy / memset expansion code is
+  /// making use of this. The rest of isel doesn't have proper cost model for
+  /// immediate materialization.
+  virtual bool isIntImmLegal(const APInt &/*Imm*/, EVT /*VT*/) const {
+    return true;
   }
 
   /// isShuffleMaskLegal - Targets can use this to indicate that they only
@@ -673,12 +688,14 @@ public:
   }
 
   /// This function returns true if the target allows unaligned memory accesses.
-  /// of the specified type. This is used, for example, in situations where an
-  /// array copy/move/set is  converted to a sequence of store operations. It's
-  /// use helps to ensure that such replacements don't generate code that causes
-  /// an alignment error  (trap) on the target machine.
+  /// of the specified type. If true, it also returns whether the unaligned
+  /// memory access is "fast" in the second argument by reference. This is used,
+  /// for example, in situations where an array copy/move/set is  converted to a
+  /// sequence of store operations. It's use helps to ensure that such
+  /// replacements don't generate code that causes an alignment error  (trap) on
+  /// the target machine.
   /// @brief Determine if the target supports unaligned memory accesses.
-  virtual bool allowsUnalignedMemoryAccesses(EVT) const {
+  virtual bool allowsUnalignedMemoryAccesses(EVT, bool *Fast = 0) const {
     return false;
   }
 
@@ -1708,6 +1725,13 @@ public:
     return false;
   }
 
+  /// isZExtFree - Return true if zero-extending the specific node Val to type
+  /// VT2 is free (either because it's implicitly zero-extended such as ARM
+  /// ldrb / ldrh or because it's folded such as X86 zero-extending loads).
+  virtual bool isZExtFree(SDValue Val, EVT VT2) const {
+    return isZExtFree(Val.getValueType(), VT2);
+  }
+
   /// isFNegFree - Return true if an fneg operation is free to the point where
   /// it is never worthwhile to replace it with a bitwise operation.
   virtual bool isFNegFree(EVT) const {
@@ -1741,9 +1765,9 @@ public:
   SDValue BuildExactSDIV(SDValue Op1, SDValue Op2, DebugLoc dl,
                          SelectionDAG &DAG) const;
   SDValue BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-                      std::vector<SDNode*>* Created) const;
+                      std::vector<SDNode*> *Created) const;
   SDValue BuildUDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-                      std::vector<SDNode*>* Created) const;
+                      std::vector<SDNode*> *Created) const;
 
 
   //===--------------------------------------------------------------------===//

@@ -20,17 +20,17 @@
 
 #define DEBUG_TYPE "functionattrs"
 #include "llvm/Transforms/IPO.h"
-#include "llvm/CallGraphSCCPass.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/CallGraph.h"
-#include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/CallGraph.h"
+#include "llvm/Analysis/CaptureTracking.h"
+#include "llvm/CallGraphSCCPass.h"
+#include "llvm/GlobalVariable.h"
+#include "llvm/IntrinsicInst.h"
+#include "llvm/LLVMContext.h"
 #include "llvm/Support/InstIterator.h"
 using namespace llvm;
 
@@ -215,13 +215,13 @@ bool FunctionAttrs::AddReadAttrs(const CallGraphSCC &SCC) {
     AttrBuilder B;
     B.addAttribute(Attributes::ReadOnly)
       .addAttribute(Attributes::ReadNone);
-    F->removeAttribute(AttrListPtr::FunctionIndex,
+    F->removeAttribute(AttributeSet::FunctionIndex,
                        Attributes::get(F->getContext(), B));
 
     // Add in the new attribute.
     B.clear();
     B.addAttribute(ReadsMemory ? Attributes::ReadOnly : Attributes::ReadNone);
-    F->addAttribute(AttrListPtr::FunctionIndex,
+    F->addAttribute(AttributeSet::FunctionIndex,
                     Attributes::get(F->getContext(), B));
 
     if (ReadsMemory)

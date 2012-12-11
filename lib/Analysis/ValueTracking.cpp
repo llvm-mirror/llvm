@@ -13,21 +13,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Constants.h"
-#include "llvm/Instructions.h"
-#include "llvm/GlobalVariable.h"
+#include "llvm/DataLayout.h"
 #include "llvm/GlobalAlias.h"
+#include "llvm/GlobalVariable.h"
+#include "llvm/Instructions.h"
 #include "llvm/IntrinsicInst.h"
 #include "llvm/LLVMContext.h"
 #include "llvm/Metadata.h"
 #include "llvm/Operator.h"
-#include "llvm/DataLayout.h"
 #include "llvm/Support/ConstantRange.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/PatternMatch.h"
-#include "llvm/ADT/SmallPtrSet.h"
 #include <cstring>
 using namespace llvm;
 using namespace llvm::PatternMatch;
@@ -862,6 +862,72 @@ bool llvm::isPowerOfTwo(Value *V, const DataLayout *TD, bool OrZero,
   return false;
 }
 
+/// \brief Test whether a GEP's result is known to be non-null.
+///
+/// Uses properties inherent in a GEP to try to determine whether it is known
+/// to be non-null.
+///
+/// Currently this routine does not support vector GEPs.
+static bool isGEPKnownNonNull(GEPOperator *GEP, const DataLayout *DL,
+                              unsigned Depth) {
+  if (!GEP->isInBounds() || GEP->getPointerAddressSpace() != 0)
+    return false;
+
+  // FIXME: Support vector-GEPs.
+  assert(GEP->getType()->isPointerTy() && "We only support plain pointer GEP");
+
+  // If the base pointer is non-null, we cannot walk to a null address with an
+  // inbounds GEP in address space zero.
+  if (isKnownNonZero(GEP->getPointerOperand(), DL, Depth))
+    return true;
+
+  // Past this, if we don't have DataLayout, we can't do much.
+  if (!DL)
+    return false;
+
+  // Walk the GEP operands and see if any operand introduces a non-zero offset.
+  // If so, then the GEP cannot produce a null pointer, as doing so would
+  // inherently violate the inbounds contract within address space zero.
+  for (gep_type_iterator GTI = gep_type_begin(GEP), GTE = gep_type_end(GEP);
+       GTI != GTE; ++GTI) {
+    // Struct types are easy -- they must always be indexed by a constant.
+    if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+      ConstantInt *OpC = cast<ConstantInt>(GTI.getOperand());
+      unsigned ElementIdx = OpC->getZExtValue();
+      const StructLayout *SL = DL->getStructLayout(STy);
+      uint64_t ElementOffset = SL->getElementOffset(ElementIdx);
+      if (ElementOffset > 0)
+        return true;
+      continue;
+    }
+
+    // If we have a zero-sized type, the index doesn't matter. Keep looping.
+    if (DL->getTypeAllocSize(GTI.getIndexedType()) == 0)
+      continue;
+
+    // Fast path the constant operand case both for efficiency and so we don't
+    // increment Depth when just zipping down an all-constant GEP.
+    if (ConstantInt *OpC = dyn_cast<ConstantInt>(GTI.getOperand())) {
+      if (!OpC->isZero())
+        return true;
+      continue;
+    }
+
+    // We post-increment Depth here because while isKnownNonZero increments it
+    // as well, when we pop back up that increment won't persist. We don't want
+    // to recurse 10k times just because we have 10k GEP operands. We don't
+    // bail completely out because we want to handle constant GEPs regardless
+    // of depth.
+    if (Depth++ >= MaxDepth)
+      continue;
+
+    if (isKnownNonZero(GTI.getOperand(), DL, Depth))
+      return true;
+  }
+
+  return false;
+}
+
 /// isKnownNonZero - Return true if the given value is known to be non-zero
 /// when defined.  For vectors return true if every element is known to be
 /// non-zero when defined.  Supports values with integer or pointer type and
@@ -880,6 +946,13 @@ bool llvm::isKnownNonZero(Value *V, const DataLayout *TD, unsigned Depth) {
   // The remaining tests are all recursive, so bail out if we hit the limit.
   if (Depth++ >= MaxDepth)
     return false;
+
+  // Check for pointer simplifications.
+  if (V->getType()->isPointerTy()) {
+    if (GEPOperator *GEP = dyn_cast<GEPOperator>(V))
+      if (isGEPKnownNonNull(GEP, TD, Depth))
+        return true;
+  }
 
   unsigned BitWidth = getBitWidth(V->getType(), TD);
 
@@ -1312,7 +1385,12 @@ bool llvm::CannotBeNegativeZero(const Value *V, unsigned Depth) {
 
   const Operator *I = dyn_cast<Operator>(V);
   if (I == 0) return false;
-  
+
+  // Check if the nsz fast-math flag is set
+  if (const FPMathOperator *FPO = dyn_cast<FPMathOperator>(I))
+    if (FPO->hasNoSignedZeros())
+      return true;
+
   // (add x, 0.0) is guaranteed to return +0.0, not -0.0.
   if (I->getOpcode() == Instruction::FAdd &&
       isa<ConstantFP>(I->getOperand(1)) && 

@@ -13,19 +13,19 @@
 
 #define DEBUG_TYPE "WinCOFFStreamer"
 
-#include "llvm/MC/MCObjectStreamer.h"
-#include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCSection.h"
-#include "llvm/MC/MCSymbol.h"
-#include "llvm/MC/MCExpr.h"
-#include "llvm/MC/MCValue.h"
-#include "llvm/MC/MCAssembler.h"
-#include "llvm/MC/MCAsmLayout.h"
-#include "llvm/MC/MCCodeEmitter.h"
-#include "llvm/MC/MCSectionCOFF.h"
-#include "llvm/MC/MCWin64EH.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCAsmBackend.h"
-
+#include "llvm/MC/MCAsmLayout.h"
+#include "llvm/MC/MCAssembler.h"
+#include "llvm/MC/MCCodeEmitter.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCObjectStreamer.h"
+#include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCSectionCOFF.h"
+#include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCValue.h"
+#include "llvm/MC/MCWin64EH.h"
 #include "llvm/Support/COFF.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -193,11 +193,7 @@ void WinCOFFStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
   // don't really even do.
 
   if (Value->getKind() != MCExpr::SymbolRef) {
-    // TODO: This is exactly the same as MachOStreamer. Consider merging into
-    // MCObjectStreamer.
-    getAssembler().getOrCreateSymbolData(*Symbol);
-    AddValueSymbols(Value);
-    Symbol->setVariableValue(Value);
+    MCObjectStreamer::EmitAssignment(Symbol, Value);
   } else {
     // FIXME: This is a horrible way to do this :(. This should really be
     // handled after we are done with the MC* objects and immediately before
@@ -292,9 +288,10 @@ void WinCOFFStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol)
 {
   MCDataFragment *DF = getOrCreateDataFragment();
 
-  DF->addFixup(MCFixup::Create(DF->getContents().size(),
-                               MCSymbolRefExpr::Create (Symbol, getContext ()),
-                               FK_SecRel_4));
+  DF->getFixups().push_back(
+      MCFixup::Create(DF->getContents().size(),
+                      MCSymbolRefExpr::Create (Symbol, getContext ()),
+                      FK_SecRel_4));
   DF->getContents().resize(DF->getContents().size() + 4, 0);
 }
 
@@ -343,7 +340,7 @@ void WinCOFFStreamer::EmitInstruction(const MCInst &Instruction) {
   MCInstFragment *Fragment =
     new MCInstFragment(Instruction, getCurrentSectionData());
 
-  raw_svector_ostream VecOS(Fragment->getCode());
+  raw_svector_ostream VecOS(Fragment->getContents());
 
   getAssembler().getEmitter().EncodeInstruction(Instruction, VecOS,
                                                 Fragment->getFixups());

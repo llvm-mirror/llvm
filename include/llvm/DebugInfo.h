@@ -17,8 +17,8 @@
 #ifndef LLVM_ANALYSIS_DEBUGINFO_H
 #define LLVM_ANALYSIS_DEBUGINFO_H
 
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Dwarf.h"
 
@@ -71,6 +71,7 @@ namespace llvm {
       return (unsigned)getUInt64Field(Elt);
     }
     uint64_t getUInt64Field(unsigned Elt) const;
+    int64_t getInt64Field(unsigned Elt) const;
     DIDescriptor getDescriptorField(unsigned Elt) const;
 
     template <typename DescTy>
@@ -141,8 +142,8 @@ namespace llvm {
   public:
     explicit DISubrange(const MDNode *N = 0) : DIDescriptor(N) {}
 
-    uint64_t getLo() const { return getUInt64Field(1); }
-    uint64_t getHi() const { return getUInt64Field(2); }
+    int64_t getLo() const { return getInt64Field(1); }
+    int64_t  getCount() const { return getInt64Field(2); }
   };
 
   /// DIArray - This descriptor holds an array of descriptors.

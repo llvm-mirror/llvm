@@ -13,18 +13,18 @@
 
 
 #include "llvm/PassManagers.h"
-#include "llvm/PassManager.h"
 #include "llvm/Assembly/PrintModulePass.h"
 #include "llvm/Assembly/Writer.h"
+#include "llvm/Module.h"
+#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Timer.h"
-#include "llvm/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/PassNameParser.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Mutex.h"
+#include "llvm/Support/PassNameParser.h"
+#include "llvm/Support/Timer.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <map>
 using namespace llvm;
@@ -309,6 +309,9 @@ public:
   /// whether any of the passes modifies the module, and if so, return true.
   bool runOnModule(Module &M);
 
+  using llvm::Pass::doInitialization;
+  using llvm::Pass::doFinalization;
+
   /// doInitialization - Run all of the initializers for the module passes.
   ///
   bool doInitialization();
@@ -401,6 +404,9 @@ public:
   /// run - Execute all of the passes scheduled for execution.  Keep track of
   /// whether any of the passes modifies the module, and if so, return true.
   bool run(Module &M);
+
+  using llvm::Pass::doInitialization;
+  using llvm::Pass::doFinalization;
 
   /// doInitialization - Run all of the initializers for the module passes.
   ///
@@ -1327,7 +1333,7 @@ bool BBPassManager::doInitialization(Module &M) {
 bool BBPassManager::doFinalization(Module &M) {
   bool Changed = false;
 
-  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
+  for (int Index = getNumContainedPasses() - 1; Index >= 0; --Index)
     Changed |= getContainedPass(Index)->doFinalization(M);
 
   return Changed;
@@ -1417,6 +1423,12 @@ bool FunctionPassManagerImpl::doInitialization(Module &M) {
   dumpArguments();
   dumpPasses();
 
+  SmallVectorImpl<ImmutablePass *>& IPV = getImmutablePasses();
+  for (SmallVectorImpl<ImmutablePass *>::const_iterator I = IPV.begin(),
+       E = IPV.end(); I != E; ++I) {
+    Changed |= (*I)->doInitialization(M);
+  }
+
   for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
     Changed |= getContainedManager(Index)->doInitialization(M);
 
@@ -1426,8 +1438,14 @@ bool FunctionPassManagerImpl::doInitialization(Module &M) {
 bool FunctionPassManagerImpl::doFinalization(Module &M) {
   bool Changed = false;
 
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
+  for (int Index = getNumContainedManagers() - 1; Index >= 0; --Index)
     Changed |= getContainedManager(Index)->doFinalization(M);
+
+  SmallVectorImpl<ImmutablePass *>& IPV = getImmutablePasses();
+  for (SmallVectorImpl<ImmutablePass *>::const_iterator I = IPV.begin(),
+       E = IPV.end(); I != E; ++I) {
+    Changed |= (*I)->doFinalization(M);
+  }
 
   return Changed;
 }
@@ -1528,12 +1546,12 @@ bool FPPassManager::runOnFunction(Function &F) {
 }
 
 bool FPPassManager::runOnModule(Module &M) {
-  bool Changed = doInitialization(M);
+  bool Changed = false;
 
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
     Changed |= runOnFunction(*I);
 
-  return doFinalization(M) || Changed;
+  return Changed;
 }
 
 bool FPPassManager::doInitialization(Module &M) {
@@ -1541,16 +1559,16 @@ bool FPPassManager::doInitialization(Module &M) {
 
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
     Changed |= getContainedPass(Index)->doInitialization(M);
-
+  
   return Changed;
 }
 
 bool FPPassManager::doFinalization(Module &M) {
   bool Changed = false;
 
-  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
+  for (int Index = getNumContainedPasses() - 1; Index >= 0; --Index)
     Changed |= getContainedPass(Index)->doFinalization(M);
-
+  
   return Changed;
 }
 
@@ -1571,6 +1589,10 @@ MPPassManager::runOnModule(Module &M) {
     FunctionPassManagerImpl *FPP = I->second;
     Changed |= FPP->doInitialization(M);
   }
+
+  // Initialize module passes
+  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
+    Changed |= getContainedPass(Index)->doInitialization(M);
 
   for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
     ModulePass *MP = getContainedPass(Index);
@@ -1600,6 +1622,10 @@ MPPassManager::runOnModule(Module &M) {
     removeDeadPasses(MP, M.getModuleIdentifier(), ON_MODULE_MSG);
   }
 
+  // Finalize module passes
+  for (int Index = getNumContainedPasses() - 1; Index >= 0; --Index)
+    Changed |= getContainedPass(Index)->doFinalization(M);
+
   // Finalize on-the-fly passes
   for (std::map<Pass *, FunctionPassManagerImpl *>::iterator
        I = OnTheFlyManagers.begin(), E = OnTheFlyManagers.end();
@@ -1610,29 +1636,7 @@ MPPassManager::runOnModule(Module &M) {
     FPP->releaseMemoryOnTheFly();
     Changed |= FPP->doFinalization(M);
   }
-
-  return Changed;
-}
-
-/// Run all of the initializers for the module passes.
-///
-bool MPPassManager::doInitialization() {
-  bool Changed = false;
-
-  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
-    Changed |= getContainedPass(Index)->doInitialization();
-
-  return Changed;
-}
-
-/// Run all of the finalizers for the module passes.
-///
-bool MPPassManager::doFinalization() {
-  bool Changed = false;
-
-  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
-    Changed |= getContainedPass(Index)->doFinalization();
-
+  
   return Changed;
 }
 
@@ -1680,24 +1684,6 @@ Pass* MPPassManager::getOnTheFlyPass(Pass *MP, AnalysisID PI, Function &F){
 //===----------------------------------------------------------------------===//
 // PassManagerImpl implementation
 
-bool PassManagerImpl::doInitialization() {
-  bool Changed = false;
-
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
-    Changed |= getContainedManager(Index)->doInitialization();
-
-  return Changed;
-}
-
-bool PassManagerImpl::doFinalization() {
-  bool Changed = false;
-
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
-    Changed |= getContainedManager(Index)->doFinalization();
-
-  return Changed;
-}
-
 //
 /// run - Execute all of the passes scheduled for execution.  Keep track of
 /// whether any of the passes modifies the module, and if so, return true.
@@ -1708,9 +1694,21 @@ bool PassManagerImpl::run(Module &M) {
   dumpArguments();
   dumpPasses();
 
+  SmallVectorImpl<ImmutablePass *>& IPV = getImmutablePasses();
+  for (SmallVectorImpl<ImmutablePass *>::const_iterator I = IPV.begin(),
+       E = IPV.end(); I != E; ++I) {
+    Changed |= (*I)->doInitialization(M);
+  }
+
   initializeAllAnalysisInfo();
   for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
     Changed |= getContainedManager(Index)->runOnModule(M);
+
+  for (SmallVectorImpl<ImmutablePass *>::const_iterator I = IPV.begin(),
+       E = IPV.end(); I != E; ++I) {
+    Changed |= (*I)->doFinalization(M);
+  }
+
   return Changed;
 }
 
@@ -1740,18 +1738,6 @@ void PassManager::add(Pass *P) {
 /// whether any of the passes modifies the module, and if so, return true.
 bool PassManager::run(Module &M) {
   return PM->run(M);
-}
-
-/// doInitialization - Run all of the initializers for the module passes.
-///
-bool PassManager::doInitialization() {
-  return PM->doInitialization();
-}
-
-/// doFinalization - Run all of the finalizers for the module passes.
-///
-bool PassManager::doFinalization() {
-  return PM->doFinalization();
 }
 
 //===----------------------------------------------------------------------===//

@@ -16,9 +16,9 @@
 #define Hexagon_ISELLOWERING_H
 
 #include "Hexagon.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/CallingConv.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
   namespace HexagonISD {
@@ -50,6 +50,15 @@ namespace llvm {
       BARRIER,     // Memory barrier.
       WrapperJT,
       WrapperCP,
+      WrapperCombineII,
+      WrapperCombineRR,
+      WrapperPackhl,
+      WrapperSplatB,
+      WrapperSplatH,
+      WrapperShuffEB,
+      WrapperShuffEH,
+      WrapperShuffOB,
+      WrapperShuffOH,
       TC_RETURN
     };
   }

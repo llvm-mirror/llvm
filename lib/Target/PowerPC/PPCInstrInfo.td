@@ -91,6 +91,9 @@ def PPCtoc_entry: SDNode<"PPCISD::TOC_ENTRY", SDTIntBinOp, [SDNPMayLoad]>;
 def PPCvmaddfp  : SDNode<"PPCISD::VMADDFP", SDTFPTernaryOp, []>;
 def PPCvnmsubfp : SDNode<"PPCISD::VNMSUBFP", SDTFPTernaryOp, []>;
 
+def PPCldGotTprel : SDNode<"PPCISD::LD_GOT_TPREL", SDTIntBinOp, [SDNPMayLoad]>;
+def PPCaddTls     : SDNode<"PPCISD::ADD_TLS", SDTIntBinOp, []>;
+
 def PPCvperm    : SDNode<"PPCISD::VPERM", SDT_PPCvperm, []>;
 
 // These nodes represent the 32-bit PPC shifts that operate on 6-bit shift
@@ -166,6 +169,12 @@ def PPClarx      : SDNode<"PPCISD::LARX", SDT_PPClarx,
                           [SDNPHasChain, SDNPMayLoad]>;
 def PPCstcx      : SDNode<"PPCISD::STCX", SDT_PPCstcx,
                           [SDNPHasChain, SDNPMayStore]>;
+
+// Instructions to support medium code model
+def PPCaddisTocHA : SDNode<"PPCISD::ADDIS_TOC_HA", SDTIntBinOp, []>;
+def PPCldTocL     : SDNode<"PPCISD::LD_TOC_L", SDTIntBinOp, [SDNPMayLoad]>;
+def PPCaddiTocL   : SDNode<"PPCISD::ADDI_TOC_L", SDTIntBinOp, []>;
+
 
 // Instructions to support dynamic alloca.
 def SDTDynOp  : SDTypeProfile<1, 2, []>;

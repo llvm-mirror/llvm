@@ -55,12 +55,12 @@
 
 #include "llvm/Analysis/DependenceAnalysis.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Operator.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Operator.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/InstIterator.h"
@@ -583,42 +583,40 @@ void Dependence::dump(raw_ostream &OS) const {
     else if (isInput())
       OS << "input";
     unsigned Levels = getLevels();
-    if (Levels) {
-      OS << " [";
-      for (unsigned II = 1; II <= Levels; ++II) {
-        if (isSplitable(II))
-          Splitable = true;
-        if (isPeelFirst(II))
-          OS << 'p';
-        const SCEV *Distance = getDistance(II);
-        if (Distance)
-          OS << *Distance;
-        else if (isScalar(II))
-          OS << "S";
+    OS << " [";
+    for (unsigned II = 1; II <= Levels; ++II) {
+      if (isSplitable(II))
+        Splitable = true;
+      if (isPeelFirst(II))
+        OS << 'p';
+      const SCEV *Distance = getDistance(II);
+      if (Distance)
+        OS << *Distance;
+      else if (isScalar(II))
+        OS << "S";
+      else {
+        unsigned Direction = getDirection(II);
+        if (Direction == DVEntry::ALL)
+          OS << "*";
         else {
-          unsigned Direction = getDirection(II);
-          if (Direction == DVEntry::ALL)
-            OS << "*";
-          else {
-            if (Direction & DVEntry::LT)
-              OS << "<";
-            if (Direction & DVEntry::EQ)
-              OS << "=";
-            if (Direction & DVEntry::GT)
-              OS << ">";
-          }
+          if (Direction & DVEntry::LT)
+            OS << "<";
+          if (Direction & DVEntry::EQ)
+            OS << "=";
+          if (Direction & DVEntry::GT)
+            OS << ">";
         }
-        if (isPeelLast(II))
-          OS << 'p';
-        if (II < Levels)
-          OS << " ";
       }
-      if (isLoopIndependent())
-        OS << "|<";
-      OS << "]";
-      if (Splitable)
-        OS << " splitable";
+      if (isPeelLast(II))
+        OS << 'p';
+      if (II < Levels)
+        OS << " ";
     }
+    if (isLoopIndependent())
+      OS << "|<";
+    OS << "]";
+    if (Splitable)
+      OS << " splitable";
   }
   OS << "!\n";
 }
@@ -2212,7 +2210,7 @@ const SCEVConstant *getConstantPart(const SCEVMulExpr *Product) {
 //
 // It occurs to me that the presence of loop-invariant variables
 // changes the nature of the test from "greatest common divisor"
-// to "a common divisor!"
+// to "a common divisor".
 bool DependenceAnalysis::gcdMIVtest(const SCEV *Src,
                                     const SCEV *Dst,
                                     FullDependence &Result) const {
@@ -3199,6 +3197,9 @@ static void dumpSmallBitVector(SmallBitVector &BV) {
 Dependence *DependenceAnalysis::depends(Instruction *Src,
                                         Instruction *Dst,
                                         bool PossiblyLoopIndependent) {
+  if (Src == Dst)
+    PossiblyLoopIndependent = false;
+
   if ((!Src->mayReadFromMemory() && !Src->mayWriteToMemory()) ||
       (!Dst->mayReadFromMemory() && !Dst->mayWriteToMemory()))
     // if both instructions don't reference memory, there's no dependence
@@ -3552,7 +3553,7 @@ Dependence *DependenceAnalysis::depends(Instruction *Src,
     }
   }
 
-  // make sure Scalar flags are set correctly
+  // Make sure the Scalar flags are set correctly.
   SmallBitVector CompleteLoops(MaxLevels + 1);
   for (unsigned SI = 0; SI < Pairs; ++SI)
     CompleteLoops |= Pair[SI].Loops;
@@ -3560,14 +3561,29 @@ Dependence *DependenceAnalysis::depends(Instruction *Src,
     if (CompleteLoops[II])
       Result.DV[II - 1].Scalar = false;
 
-  // make sure loopIndepent flag is set correctly
   if (PossiblyLoopIndependent) {
+    // Make sure the LoopIndependent flag is set correctly.
+    // All directions must include equal, otherwise no
+    // loop-independent dependence is possible.
     for (unsigned II = 1; II <= CommonLevels; ++II) {
       if (!(Result.getDirection(II) & Dependence::DVEntry::EQ)) {
         Result.LoopIndependent = false;
         break;
       }
     }
+  }
+  else {
+    // On the other hand, if all directions are equal and there's no
+    // loop-independent dependence possible, then no dependence exists.
+    bool AllEqual = true;
+    for (unsigned II = 1; II <= CommonLevels; ++II) {
+      if (Result.getDirection(II) != Dependence::DVEntry::EQ) {
+        AllEqual = false;
+        break;
+      }
+    }
+    if (AllEqual)
+      return NULL;
   }
 
   FullDependence *Final = new FullDependence(Result);

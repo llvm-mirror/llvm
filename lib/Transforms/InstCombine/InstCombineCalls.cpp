@@ -12,12 +12,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "InstCombine.h"
-#include "llvm/Support/CallSite.h"
-#include "llvm/DataLayout.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/DataLayout.h"
+#include "llvm/Support/CallSite.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+
+STATISTIC(NumSimplified, "Number of library calls simplified");
 
 /// getPromotedType - Return the specified type promoted as it would be to pass
 /// though a va_arg area.
@@ -785,8 +788,10 @@ static bool isSafeToEliminateVarargsCast(const CallSite CS,
 Instruction *InstCombiner::tryOptimizeCall(CallInst *CI, const DataLayout *TD) {
   if (CI->getCalledFunction() == 0) return 0;
 
-  if (Value *With = Simplifier->optimizeCall(CI))
-    return ReplaceInstUsesWith(*CI, With);
+  if (Value *With = Simplifier->optimizeCall(CI)) {
+    ++NumSimplified;
+    return CI->use_empty() ? CI : ReplaceInstUsesWith(*CI, With);
+  }
 
   return 0;
 }
@@ -977,7 +982,7 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
   if (Callee == 0)
     return false;
   Instruction *Caller = CS.getInstruction();
-  const AttrListPtr &CallerPAL = CS.getAttributes();
+  const AttributeSet &CallerPAL = CS.getAttributes();
 
   // Okay, this is a cast from a function to a different type.  Unless doing so
   // would cause a type conversion of one of our arguments, change this call to
@@ -1118,7 +1123,7 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
   // Add the new return attributes.
   if (RAttrs.hasAttributes())
     attrVec.push_back(
-      AttributeWithIndex::get(AttrListPtr::ReturnIndex,
+      AttributeWithIndex::get(AttributeSet::ReturnIndex,
                               Attributes::get(FT->getContext(), RAttrs)));
 
   AI = CS.arg_begin();
@@ -1171,13 +1176,13 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
 
   Attributes FnAttrs = CallerPAL.getFnAttributes();
   if (FnAttrs.hasAttributes())
-    attrVec.push_back(AttributeWithIndex::get(AttrListPtr::FunctionIndex,
+    attrVec.push_back(AttributeWithIndex::get(AttributeSet::FunctionIndex,
                                               FnAttrs));
 
   if (NewRetTy->isVoidTy())
     Caller->setName("");   // Void type should not have a name.
 
-  const AttrListPtr &NewCallerPAL = AttrListPtr::get(Callee->getContext(),
+  const AttributeSet &NewCallerPAL = AttributeSet::get(Callee->getContext(),
                                                      attrVec);
 
   Instruction *NC;
@@ -1238,7 +1243,7 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
   Value *Callee = CS.getCalledValue();
   PointerType *PTy = cast<PointerType>(Callee->getType());
   FunctionType *FTy = cast<FunctionType>(PTy->getElementType());
-  const AttrListPtr &Attrs = CS.getAttributes();
+  const AttributeSet &Attrs = CS.getAttributes();
 
   // If the call already has the 'nest' attribute somewhere then give up -
   // otherwise 'nest' would occur twice after splicing in the chain.
@@ -1253,7 +1258,7 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
   PointerType *NestFPTy = cast<PointerType>(NestF->getType());
   FunctionType *NestFTy = cast<FunctionType>(NestFPTy->getElementType());
 
-  const AttrListPtr &NestAttrs = NestF->getAttributes();
+  const AttributeSet &NestAttrs = NestF->getAttributes();
   if (!NestAttrs.isEmpty()) {
     unsigned NestIdx = 1;
     Type *NestTy = 0;
@@ -1283,7 +1288,7 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
       // Add any result attributes.
       Attributes Attr = Attrs.getRetAttributes();
       if (Attr.hasAttributes())
-        NewAttrs.push_back(AttributeWithIndex::get(AttrListPtr::ReturnIndex,
+        NewAttrs.push_back(AttributeWithIndex::get(AttributeSet::ReturnIndex,
                                                    Attr));
 
       {
@@ -1316,7 +1321,7 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
       // Add any function attributes.
       Attr = Attrs.getFnAttributes();
       if (Attr.hasAttributes())
-        NewAttrs.push_back(AttributeWithIndex::get(AttrListPtr::FunctionIndex,
+        NewAttrs.push_back(AttributeWithIndex::get(AttributeSet::FunctionIndex,
                                                    Attr));
 
       // The trampoline may have been bitcast to a bogus type (FTy).
@@ -1356,7 +1361,7 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
         NestF->getType() == PointerType::getUnqual(NewFTy) ?
         NestF : ConstantExpr::getBitCast(NestF,
                                          PointerType::getUnqual(NewFTy));
-      const AttrListPtr &NewPAL = AttrListPtr::get(FTy->getContext(), NewAttrs);
+      const AttributeSet &NewPAL = AttributeSet::get(FTy->getContext(), NewAttrs);
 
       Instruction *NewCaller;
       if (InvokeInst *II = dyn_cast<InvokeInst>(Caller)) {

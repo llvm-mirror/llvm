@@ -13,9 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <utility>
-#include <string>
-
 #include "BlackList.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallVector.h"
@@ -28,12 +25,14 @@
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/system_error.h"
+#include <string>
+#include <utility>
 
 namespace llvm {
 
 BlackList::BlackList(const StringRef Path) {
   // Validate and open blacklist file.
-  if (!Path.size()) return;
+  if (Path.empty()) return;
   OwningPtr<MemoryBuffer> File;
   if (error_code EC = MemoryBuffer::getFile(Path, File)) {
     report_fatal_error("Can't open blacklist file: " + Path + ": " +
@@ -53,6 +52,10 @@ BlackList::BlackList(const StringRef Path) {
     std::pair<StringRef, StringRef> SplitLine = I->split(":");
     StringRef Prefix = SplitLine.first;
     std::string Regexp = SplitLine.second;
+    if (Regexp.empty()) {
+      // Missing ':' in the line.
+      report_fatal_error("malformed blacklist line: " + SplitLine.first);
+    }
 
     // Replace * with .*
     for (size_t pos = 0; (pos = Regexp.find("*", pos)) != std::string::npos;
@@ -69,7 +72,7 @@ BlackList::BlackList(const StringRef Path) {
     }
 
     // Add this regexp into the proper group by its prefix.
-    if (Regexps[Prefix].size())
+    if (!Regexps[Prefix].empty())
       Regexps[Prefix] += "|";
     Regexps[Prefix] += Regexp;
   }
@@ -110,10 +113,12 @@ bool BlackList::isInInit(const GlobalVariable &G) {
           inSection("global-init-type", GetGVTypeString(G)));
 }
 
-bool BlackList::inSection(const StringRef Section,
-                          const StringRef Query) {
-  Regex *FunctionRegex = Entries[Section];
-  return FunctionRegex ? FunctionRegex->match(Query) : false;
+bool BlackList::inSection(const StringRef Section, const StringRef Query) {
+  StringMap<Regex*>::iterator I = Entries.find(Section);
+  if (I == Entries.end()) return false;
+
+  Regex *FunctionRegex = I->getValue();
+  return FunctionRegex->match(Query);
 }
 
 }  // namespace llvm
