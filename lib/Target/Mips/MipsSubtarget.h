@@ -14,8 +14,8 @@
 #ifndef MIPSSUBTARGET_H
 #define MIPSSUBTARGET_H
 
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
 
 #define GET_SUBTARGETINFO_HEADER
@@ -76,18 +76,14 @@ protected:
   // HasCondMov - Conditional mov (MOVZ, MOVN) instructions.
   bool HasCondMov;
 
-  // HasMulDivAdd - Multiply add and sub (MADD, MADDu, MSUB, MSUBu)
-  // instructions.
-  bool HasMulDivAdd;
-
-  // HasMinMax - MIN and MAX instructions.
-  bool HasMinMax;
-
   // HasSwap - Byte and half swap instructions.
   bool HasSwap;
 
   // HasBitCount - Count leading '1' and '0' bits.
   bool HasBitCount;
+
+  // HasFPIdx -- Floating point indexed load/store instructions.
+  bool HasFPIdx;
 
   // InMips16 -- can process Mips16 instructions
   bool InMips16Mode;
@@ -127,8 +123,6 @@ public:
   bool hasMips64() const { return MipsArchVersion >= Mips64; }
   bool hasMips64r2() const { return MipsArchVersion == Mips64r2; }
 
-  bool hasMips32r2Or64() const { return hasMips32r2() || hasMips64(); }
-
   bool isLittle() const { return IsLittle; }
   bool isFP64bit() const { return IsFP64bit; }
   bool isGP64bit() const { return IsGP64bit; }
@@ -148,10 +142,9 @@ public:
   /// Features related to the presence of specific instructions.
   bool hasSEInReg()   const { return HasSEInReg; }
   bool hasCondMov()   const { return HasCondMov; }
-  bool hasMulDivAdd() const { return HasMulDivAdd; }
-  bool hasMinMax()    const { return HasMinMax; }
   bool hasSwap()      const { return HasSwap; }
   bool hasBitCount()  const { return HasBitCount; }
+  bool hasFPIdx()     const { return HasFPIdx; }
 };
 } // End llvm namespace
 

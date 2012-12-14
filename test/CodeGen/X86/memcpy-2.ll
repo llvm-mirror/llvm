@@ -1,4 +1,5 @@
 ; RUN: llc < %s -mattr=+sse2      -mtriple=i686-apple-darwin -mcpu=core2 | FileCheck %s -check-prefix=SSE2
+; RUN: llc < %s -mattr=+sse2      -mtriple=i686-pc-mingw32 -mcpu=core2 | FileCheck %s -check-prefix=SSE2
 ; RUN: llc < %s -mattr=+sse,-sse2 -mtriple=i686-apple-darwin -mcpu=core2 | FileCheck %s -check-prefix=SSE1
 ; RUN: llc < %s -mattr=-sse       -mtriple=i686-apple-darwin -mcpu=core2 | FileCheck %s -check-prefix=NOSSE
 ; RUN: llc < %s                 -mtriple=x86_64-apple-darwin -mcpu=core2 | FileCheck %s -check-prefix=X86-64
@@ -9,18 +10,18 @@
 define void @t1(i32 %argc, i8** %argv) nounwind  {
 entry:
 ; SSE2: t1:
+; SSE2: movsd _.str+16, %xmm0
+; SSE2: movsd %xmm0, 16(%esp)
 ; SSE2: movaps _.str, %xmm0
 ; SSE2: movaps %xmm0
-; SSE2: movb $0
-; SSE2: movl $0
-; SSE2: movl $0
+; SSE2: movb $0, 24(%esp)
 
 ; SSE1: t1:
+; SSE1: fldl _.str+16
+; SSE1: fstpl 16(%esp)
 ; SSE1: movaps _.str, %xmm0
 ; SSE1: movaps %xmm0
-; SSE1: movb $0
-; SSE1: movl $0
-; SSE1: movl $0
+; SSE1: movb $0, 24(%esp)
 
 ; NOSSE: t1:
 ; NOSSE: movb $0

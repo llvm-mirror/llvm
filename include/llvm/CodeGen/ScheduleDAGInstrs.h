@@ -15,14 +15,14 @@
 #ifndef SCHEDULEDAGINSTRS_H
 #define SCHEDULEDAGINSTRS_H
 
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SparseSet.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SparseSet.h"
 #include <map>
 
 namespace llvm {
@@ -188,6 +188,13 @@ namespace llvm {
 
     /// \brief Get the machine model for instruction scheduling.
     const TargetSchedModel *getSchedModel() const { return &SchedModel; }
+
+    /// \brief Resolve and cache a resolved scheduling class for an SUnit.
+    const MCSchedClassDesc *getSchedClass(SUnit *SU) const {
+      if (!SU->SchedClass)
+        SU->SchedClass = SchedModel.resolveSchedClass(SU->getInstr());
+      return SU->SchedClass;
+    }
 
     /// begin - Return an iterator to the top of the current scheduling region.
     MachineBasicBlock::iterator begin() const { return RegionBegin; }

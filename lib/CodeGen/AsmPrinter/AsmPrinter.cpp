@@ -15,8 +15,10 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "DwarfDebug.h"
 #include "DwarfException.h"
-#include "llvm/DebugInfo.h"
-#include "llvm/Module.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Assembly/Writer.h"
 #include "llvm/CodeGen/GCMetadataPrinter.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -24,7 +26,8 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/DataLayout.h"
+#include "llvm/DebugInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -32,20 +35,17 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Module.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Format.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Timer.h"
 #include "llvm/Target/Mangler.h"
-#include "llvm/DataLayout.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Assembly/Writer.h"
-#include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/Format.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Support/Timer.h"
 using namespace llvm;
 
 static const char *DWARFGroupName = "DWARF Emission";
@@ -90,9 +90,6 @@ static unsigned getGVAlignmentLog2(const GlobalValue *GV, const DataLayout &TD,
   return NumBits;
 }
 
-
-
-
 AsmPrinter::AsmPrinter(TargetMachine &tm, MCStreamer &Streamer)
   : MachineFunctionPass(ID),
     TM(tm), MAI(tm.getMCAsmInfo()),
@@ -130,7 +127,6 @@ const TargetLoweringObjectFile &AsmPrinter::getObjFileLowering() const {
   return TM.getTargetLowering()->getObjFileLowering();
 }
 
-
 /// getDataLayout - Return information about data layout.
 const DataLayout &AsmPrinter::getDataLayout() const {
   return *TM.getDataLayout();
@@ -153,6 +149,8 @@ void AsmPrinter::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool AsmPrinter::doInitialization(Module &M) {
+  OutStreamer.InitStreamer();
+
   MMI = getAnalysisIfAvailable<MachineModuleInfo>();
   MMI->AnalyzeModule(M);
 
@@ -312,8 +310,13 @@ void AsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
       return;
     }
 
-    if (Align == 1 ||
-        MAI->getLCOMMDirectiveAlignmentType() != LCOMM::NoAlignment) {
+    // Use .lcomm only if it supports user-specified alignment.
+    // Otherwise, while it would still be correct to use .lcomm in some
+    // cases (e.g. when Align == 1), the external assembler might enfore
+    // some -unknown- default alignment behavior, which could cause
+    // spurious differences between external and integrated assembler.
+    // Prefer to simply fall back to .local / .comm in this case.
+    if (MAI->getLCOMMDirectiveAlignmentType() != LCOMM::NoAlignment) {
       // .lcomm _foo, 42
       OutStreamer.EmitLocalCommonSymbol(GVSym, Size, Align);
       return;
@@ -1614,7 +1617,7 @@ static int isRepeatedByteSequence(const Value *V, TargetMachine &TM) {
     }
     return Byte;
   }
-  
+
   if (const ConstantDataSequential *CDS = dyn_cast<ConstantDataSequential>(V))
     return isRepeatedByteSequence(CDS);
 
@@ -1623,7 +1626,7 @@ static int isRepeatedByteSequence(const Value *V, TargetMachine &TM) {
 
 static void emitGlobalConstantDataSequential(const ConstantDataSequential *CDS,
                                              unsigned AddrSpace,AsmPrinter &AP){
-  
+
   // See if we can aggregate this into a .fill, if so, emit it as such.
   int Value = isRepeatedByteSequence(CDS, AP.TM);
   if (Value != -1) {
@@ -1632,7 +1635,7 @@ static void emitGlobalConstantDataSequential(const ConstantDataSequential *CDS,
     if (Bytes > 1)
       return AP.OutStreamer.EmitFill(Bytes, Value, AddrSpace);
   }
-  
+
   // If this can be emitted with .ascii/.asciz, emit it as such.
   if (CDS->isString())
     return AP.OutStreamer.EmitBytes(CDS->getAsString(), AddrSpace);
@@ -1656,7 +1659,7 @@ static void emitGlobalConstantDataSequential(const ConstantDataSequential *CDS,
         float F;
         uint32_t I;
       };
-      
+
       F = CDS->getElementAsFloat(i);
       if (AP.isVerbose())
         AP.OutStreamer.GetCommentOS() << "float " << F << '\n';
@@ -1669,7 +1672,7 @@ static void emitGlobalConstantDataSequential(const ConstantDataSequential *CDS,
         double F;
         uint64_t I;
       };
-      
+
       F = CDS->getElementAsDouble(i);
       if (AP.isVerbose())
         AP.OutStreamer.GetCommentOS() << "double " << F << '\n';
@@ -1878,7 +1881,7 @@ static void emitGlobalConstantImpl(const Constant *CV, unsigned AddrSpace,
 
   if (const ConstantDataSequential *CDS = dyn_cast<ConstantDataSequential>(CV))
     return emitGlobalConstantDataSequential(CDS, AddrSpace, AP);
-  
+
   if (const ConstantArray *CVA = dyn_cast<ConstantArray>(CV))
     return emitGlobalConstantArray(CVA, AddrSpace, AP);
 
@@ -1900,10 +1903,10 @@ static void emitGlobalConstantImpl(const Constant *CV, unsigned AddrSpace,
         return emitGlobalConstantImpl(New, AddrSpace, AP);
     }
   }
-  
+
   if (const ConstantVector *V = dyn_cast<ConstantVector>(CV))
     return emitGlobalConstantVector(V, AddrSpace, AP);
-    
+
   // Otherwise, it must be a ConstantExpr.  Lower it to an MCExpr, then emit it
   // thread the streamer with EmitValue.
   AP.OutStreamer.EmitValue(lowerConstant(CV, AP), Size, AddrSpace);

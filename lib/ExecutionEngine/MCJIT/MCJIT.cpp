@@ -8,19 +8,20 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCJIT.h"
+#include "llvm/DataLayout.h"
 #include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
+#include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectBuffer.h"
 #include "llvm/ExecutionEngine/ObjectImage.h"
+#include "llvm/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/MutexGuard.h"
-#include "llvm/DataLayout.h"
 
 using namespace llvm;
 
@@ -57,6 +58,8 @@ MCJIT::MCJIT(Module *m, TargetMachine *tm, RTDyldMemoryManager *MM,
 }
 
 MCJIT::~MCJIT() {
+  if (LoadedObject)
+    NotifyFreeingObject(*LoadedObject.get());
   delete MemMgr;
   delete TM;
 }
@@ -107,8 +110,34 @@ void MCJIT::emitObject(Module *m) {
   // FIXME: Make this optional, maybe even move it to a JIT event listener
   LoadedObject->registerWithDebugger();
 
+  NotifyObjectEmitted(*LoadedObject);
+
   // FIXME: Add support for per-module compilation state
   isCompiled = true;
+}
+
+// FIXME: Add a parameter to identify which object is being finalized when
+// MCJIT supports multiple modules.
+// FIXME: Provide a way to separate code emission, relocations and page 
+// protection in the interface.
+void MCJIT::finalizeObject() {
+  // If the module hasn't been compiled, just do that.
+  if (!isCompiled) {
+    // If the call to Dyld.resolveRelocations() is removed from emitObject()
+    // we'll need to do that here.
+    emitObject(M);
+
+    // Set page permissions.
+    MemMgr->applyPermissions();
+
+    return;
+  }
+
+  // Resolve any relocations.
+  Dyld.resolveRelocations();
+
+  // Set page permissions.
+  MemMgr->applyPermissions();
 }
 
 void *MCJIT::getPointerToBasicBlock(BasicBlock *BB) {
@@ -274,4 +303,34 @@ void *MCJIT::getPointerToNamedFunction(const std::string &Name,
                        "' which could not be resolved!");
   }
   return 0;
+}
+
+void MCJIT::RegisterJITEventListener(JITEventListener *L) {
+  if (L == NULL)
+    return;
+  MutexGuard locked(lock);
+  EventListeners.push_back(L);
+}
+void MCJIT::UnregisterJITEventListener(JITEventListener *L) {
+  if (L == NULL)
+    return;
+  MutexGuard locked(lock);
+  SmallVector<JITEventListener*, 2>::reverse_iterator I=
+      std::find(EventListeners.rbegin(), EventListeners.rend(), L);
+  if (I != EventListeners.rend()) {
+    std::swap(*I, EventListeners.back());
+    EventListeners.pop_back();
+  }
+}
+void MCJIT::NotifyObjectEmitted(const ObjectImage& Obj) {
+  MutexGuard locked(lock);
+  for (unsigned I = 0, S = EventListeners.size(); I < S; ++I) {
+    EventListeners[I]->NotifyObjectEmitted(Obj);
+  }
+}
+void MCJIT::NotifyFreeingObject(const ObjectImage& Obj) {
+  MutexGuard locked(lock);
+  for (unsigned I = 0, S = EventListeners.size(); I < S; ++I) {
+    EventListeners[I]->NotifyFreeingObject(Obj);
+  }
 }

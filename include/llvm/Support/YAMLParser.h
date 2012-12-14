@@ -43,7 +43,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/SMLoc.h"
-
 #include <limits>
 #include <utility>
 
@@ -77,7 +76,11 @@ std::string escape(StringRef Input);
 ///        documents.
 class Stream {
 public:
+  /// @brief This keeps a reference to the string referenced by \p Input.
   Stream(StringRef Input, SourceMgr &);
+
+  /// @brief This takes ownership of \p InputBuffer.
+  Stream(MemoryBuffer *InputBuffer, SourceMgr &);
   ~Stream();
 
   document_iterator begin();

@@ -13,9 +13,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/Passes.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/CaptureTracking.h"
+#include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Constants.h"
+#include "llvm/DataLayout.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Function.h"
 #include "llvm/GlobalAlias.h"
@@ -25,16 +32,9 @@
 #include "llvm/LLVMContext.h"
 #include "llvm/Operator.h"
 #include "llvm/Pass.h"
-#include "llvm/Analysis/CaptureTracking.h"
-#include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/Analysis/InstructionSimplify.h"
-#include "llvm/Analysis/ValueTracking.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Target/TargetLibraryInfo.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
+#include "llvm/Target/TargetLibraryInfo.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -58,12 +58,12 @@ static bool isNonEscapingLocalObject(const Value *V) {
   // then it has not escaped before entering the function.  Check if it escapes
   // inside the function.
   if (const Argument *A = dyn_cast<Argument>(V))
-    if (A->hasByValAttr() || A->hasNoAliasAttr()) {
-      // Don't bother analyzing arguments already known not to escape.
-      if (A->hasNoCaptureAttr())
-        return true;
+    if (A->hasByValAttr() || A->hasNoAliasAttr())
+      // Note even if the argument is marked nocapture we still need to check
+      // for copies made inside the function. The nocapture attribute only
+      // specifies that there are no copies made that outlive the function.
       return !PointerMayBeCaptured(V, false, /*StoreCaptures=*/true);
-    }
+
   return false;
 }
 
@@ -1064,39 +1064,20 @@ BasicAliasAnalysis::aliasPHI(const PHINode *PN, uint64_t PNSize,
                    Location(V2, V2Size, V2TBAAInfo));
       if (PN > V2)
         std::swap(Locs.first, Locs.second);
+      // Analyse the PHIs' inputs under the assumption that the PHIs are
+      // NoAlias.
+      // If the PHIs are May/MustAlias there must be (recursively) an input
+      // operand from outside the PHIs' cycle that is MayAlias/MustAlias or
+      // there must be an operation on the PHIs within the PHIs' value cycle
+      // that causes a MayAlias.
+      // Pretend the phis do not alias.
+      AliasResult Alias = NoAlias;
+      assert(AliasCache.count(Locs) &&
+             "There must exist an entry for the phi node");
+      AliasResult OrigAliasResult = AliasCache[Locs];
+      AliasCache[Locs] = NoAlias;
 
-      AliasResult Alias =
-        aliasCheck(PN->getIncomingValue(0), PNSize, PNTBAAInfo,
-                   PN2->getIncomingValueForBlock(PN->getIncomingBlock(0)),
-                   V2Size, V2TBAAInfo);
-      if (Alias == MayAlias)
-        return MayAlias;
-
-      // If the first source of the PHI nodes NoAlias and the other inputs are
-      // the PHI node itself through some amount of recursion this does not add
-      // any new information so just return NoAlias.
-      // bb:
-      //    ptr = ptr2 + 1
-      // loop:
-      //    ptr_phi = phi [bb, ptr], [loop, ptr_plus_one]
-      //    ptr2_phi = phi [bb, ptr2], [loop, ptr2_plus_one]
-      //    ...
-      //    ptr_plus_one = gep ptr_phi, 1
-      //    ptr2_plus_one = gep ptr2_phi, 1
-      // We assume for the recursion that the the phis (ptr_phi, ptr2_phi) do
-      // not alias each other.
-      bool ArePhisAssumedNoAlias = false;
-      AliasResult OrigAliasResult = NoAlias;
-      if (Alias == NoAlias) {
-        // Pretend the phis do not alias.
-        assert(AliasCache.count(Locs) &&
-               "There must exist an entry for the phi node");
-        OrigAliasResult = AliasCache[Locs];
-        AliasCache[Locs] = NoAlias;
-        ArePhisAssumedNoAlias = true;
-      }
-
-      for (unsigned i = 1, e = PN->getNumIncomingValues(); i != e; ++i) {
+      for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
         AliasResult ThisAlias =
           aliasCheck(PN->getIncomingValue(i), PNSize, PNTBAAInfo,
                      PN2->getIncomingValueForBlock(PN->getIncomingBlock(i)),
@@ -1107,7 +1088,7 @@ BasicAliasAnalysis::aliasPHI(const PHINode *PN, uint64_t PNSize,
       }
 
       // Reset if speculation failed.
-      if (ArePhisAssumedNoAlias && Alias != NoAlias)
+      if (Alias != NoAlias)
         AliasCache[Locs] = OrigAliasResult;
 
       return Alias;
@@ -1245,6 +1226,7 @@ BasicAliasAnalysis::aliasCheck(const Value *V1, uint64_t V1Size,
     std::swap(V1, V2);
     std::swap(V1Size, V2Size);
     std::swap(O1, O2);
+    std::swap(V1TBAAInfo, V2TBAAInfo);
   }
   if (const GEPOperator *GV1 = dyn_cast<GEPOperator>(V1)) {
     AliasResult Result = aliasGEP(GV1, V1Size, V1TBAAInfo, V2, V2Size, V2TBAAInfo, O1, O2);
@@ -1254,6 +1236,7 @@ BasicAliasAnalysis::aliasCheck(const Value *V1, uint64_t V1Size,
   if (isa<PHINode>(V2) && !isa<PHINode>(V1)) {
     std::swap(V1, V2);
     std::swap(V1Size, V2Size);
+    std::swap(V1TBAAInfo, V2TBAAInfo);
   }
   if (const PHINode *PN = dyn_cast<PHINode>(V1)) {
     AliasResult Result = aliasPHI(PN, V1Size, V1TBAAInfo,
@@ -1264,6 +1247,7 @@ BasicAliasAnalysis::aliasCheck(const Value *V1, uint64_t V1Size,
   if (isa<SelectInst>(V2) && !isa<SelectInst>(V1)) {
     std::swap(V1, V2);
     std::swap(V1Size, V2Size);
+    std::swap(V1TBAAInfo, V2TBAAInfo);
   }
   if (const SelectInst *S1 = dyn_cast<SelectInst>(V1)) {
     AliasResult Result = aliasSelect(S1, V1Size, V1TBAAInfo,

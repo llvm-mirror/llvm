@@ -26,8 +26,8 @@
 #ifndef LLVM_SUPPORT_CALLSITE_H
 #define LLVM_SUPPORT_CALLSITE_H
 
-#include "llvm/Attributes.h"
 #include "llvm/ADT/PointerIntPair.h"
+#include "llvm/Attributes.h"
 #include "llvm/BasicBlock.h"
 #include "llvm/CallingConv.h"
 #include "llvm/Instructions.h"
@@ -177,10 +177,10 @@ public:
 
   /// getAttributes/setAttributes - get or set the parameter attributes of
   /// the call.
-  const AttrListPtr &getAttributes() const {
+  const AttributeSet &getAttributes() const {
     CALLSITE_DELEGATE_GETTER(getAttributes());
   }
-  void setAttributes(const AttrListPtr &PAL) {
+  void setAttributes(const AttributeSet &PAL) {
     CALLSITE_DELEGATE_SETTER(setAttributes(PAL));
   }
 

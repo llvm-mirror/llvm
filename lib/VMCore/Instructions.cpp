@@ -12,16 +12,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Instructions.h"
 #include "LLVMContextImpl.h"
 #include "llvm/Constants.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Function.h"
-#include "llvm/Instructions.h"
 #include "llvm/Module.h"
 #include "llvm/Operator.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/ConstantRange.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 using namespace llvm;
 
@@ -331,23 +331,23 @@ CallInst::CallInst(const CallInst &CI)
 }
 
 void CallInst::addAttribute(unsigned i, Attributes attr) {
-  AttrListPtr PAL = getAttributes();
+  AttributeSet PAL = getAttributes();
   PAL = PAL.addAttr(getContext(), i, attr);
   setAttributes(PAL);
 }
 
 void CallInst::removeAttribute(unsigned i, Attributes attr) {
-  AttrListPtr PAL = getAttributes();
+  AttributeSet PAL = getAttributes();
   PAL = PAL.removeAttr(getContext(), i, attr);
   setAttributes(PAL);
 }
 
 bool CallInst::hasFnAttr(Attributes::AttrVal A) const {
-  if (AttributeList.getParamAttributes(AttrListPtr::FunctionIndex)
+  if (AttributeList.getParamAttributes(AttributeSet::FunctionIndex)
       .hasAttribute(A))
     return true;
   if (const Function *F = getCalledFunction())
-    return F->getParamAttributes(AttrListPtr::FunctionIndex).hasAttribute(A);
+    return F->getParamAttributes(AttributeSet::FunctionIndex).hasAttribute(A);
   return false;
 }
 
@@ -572,11 +572,11 @@ void InvokeInst::setSuccessorV(unsigned idx, BasicBlock *B) {
 }
 
 bool InvokeInst::hasFnAttr(Attributes::AttrVal A) const {
-  if (AttributeList.getParamAttributes(AttrListPtr::FunctionIndex).
+  if (AttributeList.getParamAttributes(AttributeSet::FunctionIndex).
       hasAttribute(A))
     return true;
   if (const Function *F = getCalledFunction())
-    return F->getParamAttributes(AttrListPtr::FunctionIndex).hasAttribute(A);
+    return F->getParamAttributes(AttributeSet::FunctionIndex).hasAttribute(A);
   return false;
 }
 
@@ -589,13 +589,13 @@ bool InvokeInst::paramHasAttr(unsigned i, Attributes::AttrVal A) const {
 }
 
 void InvokeInst::addAttribute(unsigned i, Attributes attr) {
-  AttrListPtr PAL = getAttributes();
+  AttributeSet PAL = getAttributes();
   PAL = PAL.addAttr(getContext(), i, attr);
   setAttributes(PAL);
 }
 
 void InvokeInst::removeAttribute(unsigned i, Attributes attr) {
-  AttrListPtr PAL = getAttributes();
+  AttributeSet PAL = getAttributes();
   PAL = PAL.removeAttr(getContext(), i, attr);
   setAttributes(PAL);
 }
@@ -1353,16 +1353,7 @@ GetElementPtrInst::GetElementPtrInst(const GetElementPtrInst &GEPI)
 ///
 template <typename IndexTy>
 static Type *getIndexedTypeInternal(Type *Ptr, ArrayRef<IndexTy> IdxList) {
-  if (Ptr->isVectorTy()) {
-    assert(IdxList.size() == 1 &&
-      "GEP with vector pointers must have a single index");
-    PointerType *PTy = dyn_cast<PointerType>(
-        cast<VectorType>(Ptr)->getElementType());
-    assert(PTy && "Gep with invalid vector pointer found");
-    return PTy->getElementType();
-  }
-
-  PointerType *PTy = dyn_cast<PointerType>(Ptr);
+  PointerType *PTy = dyn_cast<PointerType>(Ptr->getScalarType());
   if (!PTy) return 0;   // Type isn't a pointer type!
   Type *Agg = PTy->getElementType();
 

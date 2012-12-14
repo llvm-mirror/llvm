@@ -8,14 +8,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/MachineInstrBundle.h"
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallVector.h"
 using namespace llvm;
 
 namespace {
@@ -281,7 +281,7 @@ MachineOperandIteratorBase::PhysRegInfo
 MachineOperandIteratorBase::analyzePhysReg(unsigned Reg,
                                            const TargetRegisterInfo *TRI) {
   bool AllDefsDead = true;
-  PhysRegInfo PRI = {false, false, false, false, false, false, false};
+  PhysRegInfo PRI = {false, false, false, false, false, false};
 
   assert(TargetRegisterInfo::isPhysicalRegister(Reg) &&
          "analyzePhysReg not given a physical register!");
@@ -305,7 +305,9 @@ MachineOperandIteratorBase::analyzePhysReg(unsigned Reg,
       // Reg or a super-reg is read, and perhaps killed also.
       PRI.Reads = true;
       PRI.Kills = MO.isKill();
-    } if (IsRegOrOverlapping && MO.readsReg()) {
+    }
+
+    if (IsRegOrOverlapping && MO.readsReg()) {
       PRI.ReadsOverlap = true;// Reg or an overlapping register is read.
     }
 

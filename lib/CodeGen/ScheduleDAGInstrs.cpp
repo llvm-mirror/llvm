@@ -12,8 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "sched-instrs"
-#include "llvm/Operator.h"
+#define DEBUG_TYPE "misched"
+#include "llvm/CodeGen/ScheduleDAGInstrs.h"
+#include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
@@ -22,19 +25,17 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/RegisterPressure.h"
-#include "llvm/CodeGen/ScheduleDAGILP.h"
-#include "llvm/CodeGen/ScheduleDAGInstrs.h"
+#include "llvm/CodeGen/ScheduleDFS.h"
 #include "llvm/MC/MCInstrItineraries.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
+#include "llvm/Operator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
 
 static cl::opt<bool> EnableAASchedMI("enable-aa-sched-mi", cl::Hidden,
@@ -66,7 +67,7 @@ static const Value *getUnderlyingObjectFromInt(const Value *V) {
       // regular getUnderlyingObjectFromInt.
       if (U->getOpcode() == Instruction::PtrToInt)
         return U->getOperand(0);
-      // If we find an add of a constant or a multiplied value, it's
+      // If we find an add of a constant, a multiplied value, or a phi, it's
       // likely that the other operand will lead us to the base
       // object. We don't have to worry about the case where the
       // object address is somehow being computed by the multiply,
@@ -74,7 +75,8 @@ static const Value *getUnderlyingObjectFromInt(const Value *V) {
       // identifiable object.
       if (U->getOpcode() != Instruction::Add ||
           (!isa<ConstantInt>(U->getOperand(1)) &&
-           Operator::getOpcode(U->getOperand(1)) != Instruction::Mul))
+           Operator::getOpcode(U->getOperand(1)) != Instruction::Mul &&
+           !isa<PHINode>(U->getOperand(1))))
         return V;
       V = U->getOperand(0);
     } else {
@@ -84,56 +86,77 @@ static const Value *getUnderlyingObjectFromInt(const Value *V) {
   } while (1);
 }
 
-/// getUnderlyingObject - This is a wrapper around GetUnderlyingObject
+/// getUnderlyingObjects - This is a wrapper around GetUnderlyingObjects
 /// and adds support for basic ptrtoint+arithmetic+inttoptr sequences.
-static const Value *getUnderlyingObject(const Value *V) {
-  // First just call Value::getUnderlyingObject to let it do what it does.
+static void getUnderlyingObjects(const Value *V,
+                                 SmallVectorImpl<Value *> &Objects) {
+  SmallPtrSet<const Value*, 16> Visited;
+  SmallVector<const Value *, 4> Working(1, V);
   do {
-    V = GetUnderlyingObject(V);
-    // If it found an inttoptr, use special code to continue climing.
-    if (Operator::getOpcode(V) != Instruction::IntToPtr)
-      break;
-    const Value *O = getUnderlyingObjectFromInt(cast<User>(V)->getOperand(0));
-    // If that succeeded in finding a pointer, continue the search.
-    if (!O->getType()->isPointerTy())
-      break;
-    V = O;
-  } while (1);
-  return V;
+    V = Working.pop_back_val();
+
+    SmallVector<Value *, 4> Objs;
+    GetUnderlyingObjects(const_cast<Value *>(V), Objs);
+
+    for (SmallVector<Value *, 4>::iterator I = Objs.begin(), IE = Objs.end();
+         I != IE; ++I) {
+      V = *I;
+      if (!Visited.insert(V))
+        continue;
+      if (Operator::getOpcode(V) == Instruction::IntToPtr) {
+        const Value *O =
+          getUnderlyingObjectFromInt(cast<User>(V)->getOperand(0));
+        if (O->getType()->isPointerTy()) {
+          Working.push_back(O);
+          continue;
+        }
+      }
+      Objects.push_back(const_cast<Value *>(V));
+    }
+  } while (!Working.empty());
 }
 
-/// getUnderlyingObjectForInstr - If this machine instr has memory reference
+/// getUnderlyingObjectsForInstr - If this machine instr has memory reference
 /// information and it can be tracked to a normal reference to a known
-/// object, return the Value for that object. Otherwise return null.
-static const Value *getUnderlyingObjectForInstr(const MachineInstr *MI,
-                                                const MachineFrameInfo *MFI,
-                                                bool &MayAlias) {
-  MayAlias = true;
+/// object, return the Value for that object.
+static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
+              const MachineFrameInfo *MFI,
+              SmallVectorImpl<std::pair<const Value *, bool> > &Objects) {
   if (!MI->hasOneMemOperand() ||
       !(*MI->memoperands_begin())->getValue() ||
       (*MI->memoperands_begin())->isVolatile())
-    return 0;
+    return;
 
   const Value *V = (*MI->memoperands_begin())->getValue();
   if (!V)
-    return 0;
+    return;
 
-  V = getUnderlyingObject(V);
-  if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
-    // For now, ignore PseudoSourceValues which may alias LLVM IR values
-    // because the code that uses this function has no way to cope with
-    // such aliases.
-    if (PSV->isAliased(MFI))
-      return 0;
+  SmallVector<Value *, 4> Objs;
+  getUnderlyingObjects(V, Objs);
 
-    MayAlias = PSV->mayAlias(MFI);
-    return V;
+  for (SmallVector<Value *, 4>::iterator I = Objs.begin(), IE = Objs.end();
+       I != IE; ++I) {
+    bool MayAlias = true;
+    V = *I;
+
+    if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
+      // For now, ignore PseudoSourceValues which may alias LLVM IR values
+      // because the code that uses this function has no way to cope with
+      // such aliases.
+
+      if (PSV->isAliased(MFI)) {
+        Objects.clear();
+        return;
+      }
+
+      MayAlias = PSV->mayAlias(MFI);
+    } else if (!isIdentifiedObject(V)) {
+      Objects.clear();
+      return;
+    }
+
+    Objects.push_back(std::make_pair(V, MayAlias));
   }
-
-  if (isIdentifiedObject(V))
-    return V;
-
-  return 0;
 }
 
 void ScheduleDAGInstrs::startBlock(MachineBasicBlock *bb) {
@@ -208,7 +231,8 @@ void ScheduleDAGInstrs::addSchedBarrierDeps() {
         Uses[Reg].push_back(PhysRegSUOper(&ExitSU, -1));
       else {
         assert(!IsPostRA && "Virtual register encountered after regalloc.");
-        addVRegUseDeps(&ExitSU, i);
+        if (MO.readsReg()) // ignore undef operands
+          addVRegUseDeps(&ExitSU, i);
       }
     }
   } else {
@@ -245,21 +269,26 @@ void ScheduleDAGInstrs::addPhysRegDataDeps(SUnit *SU, unsigned OperIdx) {
       if (UseSU == SU)
         continue;
 
-      SDep dep(SU, SDep::Data, 1, *Alias);
-
       // Adjust the dependence latency using operand def/use information,
       // then allow the target to perform its own adjustments.
       int UseOp = UseList[i].OpIdx;
-      MachineInstr *RegUse = UseOp < 0 ? 0 : UseSU->getInstr();
-      dep.setLatency(
+      MachineInstr *RegUse = 0;
+      SDep Dep;
+      if (UseOp < 0)
+        Dep = SDep(SU, SDep::Artificial);
+      else {
+        Dep = SDep(SU, SDep::Data, *Alias);
+        RegUse = UseSU->getInstr();
+        Dep.setMinLatency(
+          SchedModel.computeOperandLatency(SU->getInstr(), OperIdx,
+                                           RegUse, UseOp, /*FindMin=*/true));
+      }
+      Dep.setLatency(
         SchedModel.computeOperandLatency(SU->getInstr(), OperIdx,
                                          RegUse, UseOp, /*FindMin=*/false));
-      dep.setMinLatency(
-        SchedModel.computeOperandLatency(SU->getInstr(), OperIdx,
-                                         RegUse, UseOp, /*FindMin=*/true));
 
-      ST.adjustSchedDependency(SU, UseSU, dep);
-      UseSU->addPred(dep);
+      ST.adjustSchedDependency(SU, UseSU, Dep);
+      UseSU->addPred(Dep);
     }
   }
 }
@@ -291,11 +320,14 @@ void ScheduleDAGInstrs::addPhysRegDeps(SUnit *SU, unsigned OperIdx) {
           (Kind != SDep::Output || !MO.isDead() ||
            !DefSU->getInstr()->registerDefIsDead(*Alias))) {
         if (Kind == SDep::Anti)
-          DefSU->addPred(SDep(SU, Kind, 0, /*Reg=*/*Alias));
+          DefSU->addPred(SDep(SU, Kind, /*Reg=*/*Alias));
         else {
-          unsigned AOLat =
+          SDep Dep(SU, Kind, /*Reg=*/*Alias);
+          unsigned OutLatency =
             SchedModel.computeOutputLatency(MI, OperIdx, DefSU->getInstr());
-          DefSU->addPred(SDep(SU, Kind, AOLat, /*Reg=*/*Alias));
+          Dep.setMinLatency(OutLatency);
+          Dep.setLatency(OutLatency);
+          DefSU->addPred(Dep);
         }
       }
     }
@@ -364,9 +396,12 @@ void ScheduleDAGInstrs::addVRegDefDeps(SUnit *SU, unsigned OperIdx) {
   else {
     SUnit *DefSU = DefI->SU;
     if (DefSU != SU && DefSU != &ExitSU) {
+      SDep Dep(SU, SDep::Output, Reg);
       unsigned OutLatency =
         SchedModel.computeOutputLatency(MI, OperIdx, DefSU->getInstr());
-      DefSU->addPred(SDep(SU, SDep::Output, OutLatency, Reg));
+      Dep.setMinLatency(OutLatency);
+      Dep.setLatency(OutLatency);
+      DefSU->addPred(Dep);
     }
     DefI->SU = SU;
   }
@@ -396,7 +431,7 @@ void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
     if (DefSU) {
       // The reaching Def lives within this scheduling region.
       // Create a data dependence.
-      SDep dep(DefSU, SDep::Data, 1, Reg);
+      SDep dep(DefSU, SDep::Data, Reg);
       // Adjust the dependence latency using operand def/use information, then
       // allow the target to perform its own adjustments.
       int DefOp = Def->findRegisterDefOperandIdx(Reg);
@@ -414,7 +449,7 @@ void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
   // Add antidependence to the following def of the vreg it uses.
   VReg2SUnitMap::iterator DefI = VRegDefs.find(Reg);
   if (DefI != VRegDefs.end() && DefI->SU != SU)
-    DefI->SU->addPred(SDep(SU, SDep::Anti, 0, Reg));
+    DefI->SU->addPred(SDep(SU, SDep::Anti, Reg));
 }
 
 /// Return true if MI is an instruction we are unable to reason about
@@ -439,23 +474,29 @@ static inline bool isUnsafeMemoryObject(MachineInstr *MI,
   if ((*MI->memoperands_begin())->isVolatile() ||
        MI->hasUnmodeledSideEffects())
     return true;
-
   const Value *V = (*MI->memoperands_begin())->getValue();
   if (!V)
     return true;
 
-  V = getUnderlyingObject(V);
-  if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
-    // Similarly to getUnderlyingObjectForInstr:
-    // For now, ignore PseudoSourceValues which may alias LLVM IR values
-    // because the code that uses this function has no way to cope with
-    // such aliases.
-    if (PSV->isAliased(MFI))
+  SmallVector<Value *, 4> Objs;
+  getUnderlyingObjects(V, Objs);
+  for (SmallVector<Value *, 4>::iterator I = Objs.begin(),
+       IE = Objs.end(); I != IE; ++I) {
+    V = *I;
+
+    if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
+      // Similarly to getUnderlyingObjectForInstr:
+      // For now, ignore PseudoSourceValues which may alias LLVM IR values
+      // because the code that uses this function has no way to cope with
+      // such aliases.
+      if (PSV->isAliased(MFI))
+        return true;
+    }
+
+    // Does this pointer refer to a distinct and identifiable object?
+    if (!isIdentifiedObject(V))
       return true;
   }
-  // Does this pointer refer to a distinct and identifiable object?
-  if (!isIdentifiedObject(V))
-    return true;
 
   return false;
 }
@@ -554,8 +595,7 @@ iterateChainSucc(AliasAnalysis *AA, const MachineFrameInfo *MFI,
   // and stop descending.
   if (*Depth > 200 ||
       MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
-    SUb->addPred(SDep(SUa, SDep::Order, /*Latency=*/0, /*Reg=*/0,
-                      /*isNormalMemory=*/true));
+    SUb->addPred(SDep(SUa, SDep::MayAliasMem));
     return *Depth;
   }
   // Track current depth.
@@ -586,9 +626,9 @@ static void adjustChainDeps(AliasAnalysis *AA, const MachineFrameInfo *MFI,
     if (SU == *I)
       continue;
     if (MIsNeedChainEdge(AA, MFI, SU->getInstr(), (*I)->getInstr())) {
-      unsigned Latency = ((*I)->getInstr()->mayLoad()) ? LatencyToLoad : 0;
-      (*I)->addPred(SDep(SU, SDep::Order, Latency, /*Reg=*/0,
-                         /*isNormalMemory=*/true));
+      SDep Dep(SU, SDep::MayAliasMem);
+      Dep.setLatency(((*I)->getInstr()->mayLoad()) ? LatencyToLoad : 0);
+      (*I)->addPred(Dep);
     }
     // Now go through all the chain successors and iterate from them.
     // Keep track of visited nodes.
@@ -611,9 +651,11 @@ void addChainDependency (AliasAnalysis *AA, const MachineFrameInfo *MFI,
   // If this is a false dependency,
   // do not add the edge, but rememeber the rejected node.
   if (!EnableAASchedMI ||
-      MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr()))
-    SUb->addPred(SDep(SUa, SDep::Order, TrueMemOrderLatency, /*Reg=*/0,
-                      isNormalMemory));
+      MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
+    SDep Dep(SUa, isNormalMemory ? SDep::MayAliasMem : SDep::Barrier);
+    Dep.setLatency(TrueMemOrderLatency);
+    SUb->addPred(Dep);
+  }
   else {
     // Duplicate entries should be ignored.
     RejectList.insert(SUb);
@@ -673,8 +715,8 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   // so that they can be given more precise dependencies. We track
   // separately the known memory locations that may alias and those
   // that are known not to alias
-  std::map<const Value *, SUnit *> AliasMemDefs, NonAliasMemDefs;
-  std::map<const Value *, std::vector<SUnit *> > AliasMemUses, NonAliasMemUses;
+  MapVector<const Value *, SUnit *> AliasMemDefs, NonAliasMemDefs;
+  MapVector<const Value *, std::vector<SUnit *> > AliasMemUses, NonAliasMemUses;
   std::set<SUnit*> RejectMemNodes;
 
   // Remove any stale debug info; sometimes BuildSchedGraph is called again
@@ -698,17 +740,17 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   addSchedBarrierDeps();
 
   // Walk the list of instructions, from bottom moving up.
-  MachineInstr *PrevMI = NULL;
+  MachineInstr *DbgMI = NULL;
   for (MachineBasicBlock::iterator MII = RegionEnd, MIE = RegionBegin;
        MII != MIE; --MII) {
     MachineInstr *MI = prior(MII);
-    if (MI && PrevMI) {
-      DbgValues.push_back(std::make_pair(PrevMI, MI));
-      PrevMI = NULL;
+    if (MI && DbgMI) {
+      DbgValues.push_back(std::make_pair(DbgMI, MI));
+      DbgMI = NULL;
     }
 
     if (MI->isDebugValue()) {
-      PrevMI = MI;
+      DbgMI = MI;
       continue;
     }
     if (RPTracker) {
@@ -753,18 +795,21 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
     if (isGlobalMemoryObject(AA, MI)) {
       // Be conservative with these and add dependencies on all memory
       // references, even those that are known to not alias.
-      for (std::map<const Value *, SUnit *>::iterator I =
+      for (MapVector<const Value *, SUnit *>::iterator I =
              NonAliasMemDefs.begin(), E = NonAliasMemDefs.end(); I != E; ++I) {
-        I->second->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
+        I->second->addPred(SDep(SU, SDep::Barrier));
       }
-      for (std::map<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
              NonAliasMemUses.begin(), E = NonAliasMemUses.end(); I != E; ++I) {
-        for (unsigned i = 0, e = I->second.size(); i != e; ++i)
-          I->second[i]->addPred(SDep(SU, SDep::Order, TrueMemOrderLatency));
+        for (unsigned i = 0, e = I->second.size(); i != e; ++i) {
+          SDep Dep(SU, SDep::Barrier);
+          Dep.setLatency(TrueMemOrderLatency);
+          I->second[i]->addPred(Dep);
+        }
       }
       // Add SU to the barrier chain.
       if (BarrierChain)
-        BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
+        BarrierChain->addPred(SDep(SU, SDep::Barrier));
       BarrierChain = SU;
       // This is a barrier event that acts as a pivotal node in the DAG,
       // so it is safe to clear list of exposed nodes.
@@ -788,10 +833,10 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
         addChainDependency(AA, MFI, SU, PendingLoads[k], RejectMemNodes,
                            TrueMemOrderLatency);
-      for (std::map<const Value *, SUnit *>::iterator I = AliasMemDefs.begin(),
+      for (MapVector<const Value *, SUnit *>::iterator I = AliasMemDefs.begin(),
            E = AliasMemDefs.end(); I != E; ++I)
         addChainDependency(AA, MFI, SU, I->second, RejectMemNodes);
-      for (std::map<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
            AliasMemUses.begin(), E = AliasMemUses.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i)
           addChainDependency(AA, MFI, SU, I->second[i], RejectMemNodes,
@@ -803,95 +848,115 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       AliasMemDefs.clear();
       AliasMemUses.clear();
     } else if (MI->mayStore()) {
-      bool MayAlias = true;
-      if (const Value *V = getUnderlyingObjectForInstr(MI, MFI, MayAlias)) {
+      SmallVector<std::pair<const Value *, bool>, 4> Objs;
+      getUnderlyingObjectsForInstr(MI, MFI, Objs);
+
+      if (Objs.empty()) {
+        // Treat all other stores conservatively.
+        goto new_alias_chain;
+      }
+
+      bool MayAlias = false;
+      for (SmallVector<std::pair<const Value *, bool>, 4>::iterator
+           K = Objs.begin(), KE = Objs.end(); K != KE; ++K) {
+        const Value *V = K->first;
+        bool ThisMayAlias = K->second;
+        if (ThisMayAlias)
+          MayAlias = true;
+
         // A store to a specific PseudoSourceValue. Add precise dependencies.
         // Record the def in MemDefs, first adding a dep if there is
         // an existing def.
-        std::map<const Value *, SUnit *>::iterator I =
-          ((MayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
-        std::map<const Value *, SUnit *>::iterator IE =
-          ((MayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
+        MapVector<const Value *, SUnit *>::iterator I =
+          ((ThisMayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
+        MapVector<const Value *, SUnit *>::iterator IE =
+          ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
         if (I != IE) {
-          addChainDependency(AA, MFI, SU, I->second, RejectMemNodes,
-                             0, true);
+          addChainDependency(AA, MFI, SU, I->second, RejectMemNodes, 0, true);
           I->second = SU;
         } else {
-          if (MayAlias)
+          if (ThisMayAlias)
             AliasMemDefs[V] = SU;
           else
             NonAliasMemDefs[V] = SU;
         }
         // Handle the uses in MemUses, if there are any.
-        std::map<const Value *, std::vector<SUnit *> >::iterator J =
-          ((MayAlias) ? AliasMemUses.find(V) : NonAliasMemUses.find(V));
-        std::map<const Value *, std::vector<SUnit *> >::iterator JE =
-          ((MayAlias) ? AliasMemUses.end() : NonAliasMemUses.end());
+        MapVector<const Value *, std::vector<SUnit *> >::iterator J =
+          ((ThisMayAlias) ? AliasMemUses.find(V) : NonAliasMemUses.find(V));
+        MapVector<const Value *, std::vector<SUnit *> >::iterator JE =
+          ((ThisMayAlias) ? AliasMemUses.end() : NonAliasMemUses.end());
         if (J != JE) {
           for (unsigned i = 0, e = J->second.size(); i != e; ++i)
             addChainDependency(AA, MFI, SU, J->second[i], RejectMemNodes,
                                TrueMemOrderLatency, true);
           J->second.clear();
         }
-        if (MayAlias) {
-          // Add dependencies from all the PendingLoads, i.e. loads
-          // with no underlying object.
-          for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
-            addChainDependency(AA, MFI, SU, PendingLoads[k], RejectMemNodes,
-                               TrueMemOrderLatency);
-          // Add dependence on alias chain, if needed.
-          if (AliasChain)
-            addChainDependency(AA, MFI, SU, AliasChain, RejectMemNodes);
-          // But we also should check dependent instructions for the
-          // SU in question.
-          adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
-                          TrueMemOrderLatency);
-        }
-        // Add dependence on barrier chain, if needed.
-        // There is no point to check aliasing on barrier event. Even if
-        // SU and barrier _could_ be reordered, they should not. In addition,
-        // we have lost all RejectMemNodes below barrier.
-        if (BarrierChain)
-          BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
-      } else {
-        // Treat all other stores conservatively.
-        goto new_alias_chain;
       }
+      if (MayAlias) {
+        // Add dependencies from all the PendingLoads, i.e. loads
+        // with no underlying object.
+        for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
+          addChainDependency(AA, MFI, SU, PendingLoads[k], RejectMemNodes,
+                             TrueMemOrderLatency);
+        // Add dependence on alias chain, if needed.
+        if (AliasChain)
+          addChainDependency(AA, MFI, SU, AliasChain, RejectMemNodes);
+        // But we also should check dependent instructions for the
+        // SU in question.
+        adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
+                        TrueMemOrderLatency);
+      }
+      // Add dependence on barrier chain, if needed.
+      // There is no point to check aliasing on barrier event. Even if
+      // SU and barrier _could_ be reordered, they should not. In addition,
+      // we have lost all RejectMemNodes below barrier.
+      if (BarrierChain)
+        BarrierChain->addPred(SDep(SU, SDep::Barrier));
 
       if (!ExitSU.isPred(SU))
         // Push store's up a bit to avoid them getting in between cmp
         // and branches.
-        ExitSU.addPred(SDep(SU, SDep::Order, 0,
-                            /*Reg=*/0, /*isNormalMemory=*/false,
-                            /*isMustAlias=*/false,
-                            /*isArtificial=*/true));
+        ExitSU.addPred(SDep(SU, SDep::Artificial));
     } else if (MI->mayLoad()) {
       bool MayAlias = true;
       if (MI->isInvariantLoad(AA)) {
         // Invariant load, no chain dependencies needed!
       } else {
-        if (const Value *V =
-            getUnderlyingObjectForInstr(MI, MFI, MayAlias)) {
-          // A load from a specific PseudoSourceValue. Add precise dependencies.
-          std::map<const Value *, SUnit *>::iterator I =
-            ((MayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
-          std::map<const Value *, SUnit *>::iterator IE =
-            ((MayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
-          if (I != IE)
-            addChainDependency(AA, MFI, SU, I->second, RejectMemNodes, 0, true);
-          if (MayAlias)
-            AliasMemUses[V].push_back(SU);
-          else
-            NonAliasMemUses[V].push_back(SU);
-        } else {
+        SmallVector<std::pair<const Value *, bool>, 4> Objs;
+        getUnderlyingObjectsForInstr(MI, MFI, Objs);
+
+        if (Objs.empty()) {
           // A load with no underlying object. Depend on all
           // potentially aliasing stores.
-          for (std::map<const Value *, SUnit *>::iterator I =
+          for (MapVector<const Value *, SUnit *>::iterator I =
                  AliasMemDefs.begin(), E = AliasMemDefs.end(); I != E; ++I)
             addChainDependency(AA, MFI, SU, I->second, RejectMemNodes);
 
           PendingLoads.push_back(SU);
           MayAlias = true;
+        } else {
+          MayAlias = false;
+        }
+
+        for (SmallVector<std::pair<const Value *, bool>, 4>::iterator
+             J = Objs.begin(), JE = Objs.end(); J != JE; ++J) {
+          const Value *V = J->first;
+          bool ThisMayAlias = J->second;
+
+          if (ThisMayAlias)
+            MayAlias = true;
+
+          // A load from a specific PseudoSourceValue. Add precise dependencies.
+          MapVector<const Value *, SUnit *>::iterator I =
+            ((ThisMayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
+          MapVector<const Value *, SUnit *>::iterator IE =
+            ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
+          if (I != IE)
+            addChainDependency(AA, MFI, SU, I->second, RejectMemNodes, 0, true);
+          if (ThisMayAlias)
+            AliasMemUses[V].push_back(SU);
+          else
+            NonAliasMemUses[V].push_back(SU);
         }
         if (MayAlias)
           adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes, /*Latency=*/0);
@@ -899,12 +964,12 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         if (MayAlias && AliasChain)
           addChainDependency(AA, MFI, SU, AliasChain, RejectMemNodes);
         if (BarrierChain)
-          BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
+          BarrierChain->addPred(SDep(SU, SDep::Barrier));
       }
     }
   }
-  if (PrevMI)
-    FirstDbgValue = PrevMI;
+  if (DbgMI)
+    FirstDbgValue = DbgMI;
 
   Defs.clear();
   Uses.clear();
@@ -936,6 +1001,120 @@ std::string ScheduleDAGInstrs::getDAGName() const {
   return "dag." + BB->getFullName();
 }
 
+//===----------------------------------------------------------------------===//
+// SchedDFSResult Implementation
+//===----------------------------------------------------------------------===//
+
+namespace llvm {
+/// \brief Internal state used to compute SchedDFSResult.
+class SchedDFSImpl {
+  SchedDFSResult &R;
+
+  /// Join DAG nodes into equivalence classes by their subtree.
+  IntEqClasses SubtreeClasses;
+  /// List PredSU, SuccSU pairs that represent data edges between subtrees.
+  std::vector<std::pair<const SUnit*, const SUnit*> > ConnectionPairs;
+
+public:
+  SchedDFSImpl(SchedDFSResult &r): R(r), SubtreeClasses(R.DFSData.size()) {}
+
+  /// SubtreID is initialized to zero, set to itself to flag the root of a
+  /// subtree, set to the parent to indicate an interior node,
+  /// then set to a representative subtree ID during finalization.
+  bool isVisited(const SUnit *SU) const {
+    return R.DFSData[SU->NodeNum].SubtreeID;
+  }
+
+  /// Initialize this node's instruction count. We don't need to flag the node
+  /// visited until visitPostorder because the DAG cannot have cycles.
+  void visitPreorder(const SUnit *SU) {
+    R.DFSData[SU->NodeNum].InstrCount = SU->getInstr()->isTransient() ? 0 : 1;
+  }
+
+  /// Mark this node as either the root of a subtree or an interior
+  /// node. Increment the parent node's instruction count.
+  void visitPostorder(const SUnit *SU, const SDep *PredDep, const SUnit *Parent) {
+    R.DFSData[SU->NodeNum].SubtreeID = SU->NodeNum;
+
+    // Join the child to its parent if they are connected via data dependence
+    // and do not exceed the limit.
+    if (!Parent || PredDep->getKind() != SDep::Data)
+      return;
+
+    unsigned PredCnt = R.DFSData[SU->NodeNum].InstrCount;
+    if (PredCnt > R.SubtreeLimit)
+      return;
+
+    R.DFSData[SU->NodeNum].SubtreeID = Parent->NodeNum;
+
+    // Add the recently finished predecessor's bottom-up descendent count.
+    R.DFSData[Parent->NodeNum].InstrCount += PredCnt;
+    SubtreeClasses.join(Parent->NodeNum, SU->NodeNum);
+  }
+
+  /// Determine whether the DFS cross edge should be considered a subtree edge
+  /// or a connection between subtrees.
+  void visitCross(const SDep &PredDep, const SUnit *Succ) {
+    if (PredDep.getKind() == SDep::Data) {
+      // If this is a cross edge to a root, join the subtrees. This happens when
+      // the root was first reached by a non-data dependence.
+      unsigned NodeNum = PredDep.getSUnit()->NodeNum;
+      unsigned PredCnt = R.DFSData[NodeNum].InstrCount;
+      if (R.DFSData[NodeNum].SubtreeID == NodeNum && PredCnt < R.SubtreeLimit) {
+        R.DFSData[NodeNum].SubtreeID = Succ->NodeNum;
+        R.DFSData[Succ->NodeNum].InstrCount += PredCnt;
+        SubtreeClasses.join(Succ->NodeNum, NodeNum);
+        return;
+      }
+    }
+    ConnectionPairs.push_back(std::make_pair(PredDep.getSUnit(), Succ));
+  }
+
+  /// Set each node's subtree ID to the representative ID and record connections
+  /// between trees.
+  void finalize() {
+    SubtreeClasses.compress();
+    R.SubtreeConnections.resize(SubtreeClasses.getNumClasses());
+    R.SubtreeConnectLevels.resize(SubtreeClasses.getNumClasses());
+    DEBUG(dbgs() << R.getNumSubtrees() << " subtrees:\n");
+    for (unsigned Idx = 0, End = R.DFSData.size(); Idx != End; ++Idx) {
+      R.DFSData[Idx].SubtreeID = SubtreeClasses[Idx];
+      DEBUG(dbgs() << "  SU(" << Idx << ") in tree "
+            << R.DFSData[Idx].SubtreeID << '\n');
+    }
+    for (std::vector<std::pair<const SUnit*, const SUnit*> >::const_iterator
+           I = ConnectionPairs.begin(), E = ConnectionPairs.end();
+         I != E; ++I) {
+      unsigned PredTree = SubtreeClasses[I->first->NodeNum];
+      unsigned SuccTree = SubtreeClasses[I->second->NodeNum];
+      if (PredTree == SuccTree)
+        continue;
+      unsigned Depth = I->first->getDepth();
+      addConnection(PredTree, SuccTree, Depth);
+      addConnection(SuccTree, PredTree, Depth);
+    }
+  }
+
+protected:
+  /// Called by finalize() to record a connection between trees.
+  void addConnection(unsigned FromTree, unsigned ToTree, unsigned Depth) {
+    if (!Depth)
+      return;
+
+    SmallVectorImpl<SchedDFSResult::Connection> &Connections =
+      R.SubtreeConnections[FromTree];
+    for (SmallVectorImpl<SchedDFSResult::Connection>::iterator
+           I = Connections.begin(), E = Connections.end(); I != E; ++I) {
+      if (I->TreeID == ToTree) {
+        I->Level = std::max(I->Level, Depth);
+        return;
+      }
+    }
+    Connections.push_back(SchedDFSResult::Connection(ToTree, Depth));
+  }
+};
+} // namespace llvm
+
 namespace {
 /// \brief Manage the stack used by a reverse depth-first search over the DAG.
 class SchedDAGReverseDFS {
@@ -948,7 +1127,10 @@ public:
   }
   void advance() { ++DFSStack.back().second; }
 
-  void backtrack() { DFSStack.pop_back(); }
+  const SDep *backtrack() {
+    DFSStack.pop_back();
+    return DFSStack.empty() ? 0 : llvm::prior(DFSStack.back().second);
+  }
 
   const SUnit *getCurr() const { return DFSStack.back().first; }
 
@@ -960,57 +1142,65 @@ public:
 };
 } // anonymous
 
-void ScheduleDAGILP::resize(unsigned NumSUnits) {
-  ILPValues.resize(NumSUnits);
-}
-
-ILPValue ScheduleDAGILP::getILP(const SUnit *SU) {
-  return ILPValues[SU->NodeNum];
-}
-
-// A leaf node has an ILP of 1/1.
-static ILPValue initILP(const SUnit *SU) {
-  unsigned Cnt = SU->getInstr()->isTransient() ? 0 : 1;
-  return ILPValue(Cnt, 1 + SU->getDepth());
-}
-
 /// Compute an ILP metric for all nodes in the subDAG reachable via depth-first
 /// search from this root.
-void ScheduleDAGILP::computeILP(const SUnit *Root) {
+void SchedDFSResult::compute(ArrayRef<SUnit *> Roots) {
   if (!IsBottomUp)
     llvm_unreachable("Top-down ILP metric is unimplemnted");
 
-  SchedDAGReverseDFS DFS;
-  // Mark a node visited by validating it.
-  ILPValues[Root->NodeNum] = initILP(Root);
-  DFS.follow(Root);
-  for (;;) {
-    // Traverse the leftmost path as far as possible.
-    while (DFS.getPred() != DFS.getPredEnd()) {
-      const SUnit *PredSU = DFS.getPred()->getSUnit();
-      DFS.advance();
-      // If the pred is already valid, skip it.
-      if (ILPValues[PredSU->NodeNum].isValid())
-        continue;
-      ILPValues[PredSU->NodeNum] = initILP(PredSU);
-      DFS.follow(PredSU);
+  SchedDFSImpl Impl(*this);
+  for (ArrayRef<const SUnit*>::const_iterator
+         RootI = Roots.begin(), RootE = Roots.end(); RootI != RootE; ++RootI) {
+    SchedDAGReverseDFS DFS;
+    Impl.visitPreorder(*RootI);
+    DFS.follow(*RootI);
+    for (;;) {
+      // Traverse the leftmost path as far as possible.
+      while (DFS.getPred() != DFS.getPredEnd()) {
+        const SDep &PredDep = *DFS.getPred();
+        DFS.advance();
+        // If the pred is already valid, skip it. We may preorder visit a node
+        // with InstrCount==0 more than once, but it won't affect heuristics
+        // because we don't care about cross edges to leaf copies.
+        if (Impl.isVisited(PredDep.getSUnit())) {
+          Impl.visitCross(PredDep, DFS.getCurr());
+          continue;
+        }
+        Impl.visitPreorder(PredDep.getSUnit());
+        DFS.follow(PredDep.getSUnit());
+      }
+      // Visit the top of the stack in postorder and backtrack.
+      const SUnit *Child = DFS.getCurr();
+      const SDep *PredDep = DFS.backtrack();
+      Impl.visitPostorder(Child, PredDep, PredDep ? DFS.getCurr() : 0);
+      if (DFS.isComplete())
+        break;
     }
-    // Visit the top of the stack in postorder and backtrack.
-    unsigned PredCount = ILPValues[DFS.getCurr()->NodeNum].InstrCount;
-    DFS.backtrack();
-    if (DFS.isComplete())
-      break;
-    // Add the recently finished predecessor's bottom-up descendent count.
-    ILPValues[DFS.getCurr()->NodeNum].InstrCount += PredCount;
+  }
+  Impl.finalize();
+}
+
+/// The root of the given SubtreeID was just scheduled. For all subtrees
+/// connected to this tree, record the depth of the connection so that the
+/// nearest connected subtrees can be prioritized.
+void SchedDFSResult::scheduleTree(unsigned SubtreeID) {
+  for (SmallVectorImpl<Connection>::const_iterator
+         I = SubtreeConnections[SubtreeID].begin(),
+         E = SubtreeConnections[SubtreeID].end(); I != E; ++I) {
+    SubtreeConnectLevels[I->TreeID] =
+      std::max(SubtreeConnectLevels[I->TreeID], I->Level);
+    DEBUG(dbgs() << "  Tree: " << I->TreeID
+          << " @" << SubtreeConnectLevels[I->TreeID] << '\n');
   }
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void ILPValue::print(raw_ostream &OS) const {
-  if (!isValid())
+  OS << InstrCount << " / " << Length << " = ";
+  if (!Length)
     OS << "BADILP";
-  OS << InstrCount << " / " << Cycles << " = "
-     << format("%g", ((double)InstrCount / Cycles));
+  else
+    OS << format("%g", ((double)InstrCount / Length));
 }
 
 void ILPValue::dump() const {

@@ -12,29 +12,29 @@
 //===----------------------------------------------------------------------===//
 
 
-#include "NVPTX.h"
 #include "NVPTXISelLowering.h"
+#include "NVPTX.h"
 #include "NVPTXTargetMachine.h"
 #include "NVPTXTargetObjectFile.h"
 #include "NVPTXUtilities.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/GlobalValue.h"
-#include "llvm/Module.h"
-#include "llvm/Function.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Support/CallSite.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/DerivedTypes.h"
+#include "llvm/Function.h"
+#include "llvm/GlobalValue.h"
+#include "llvm/IntrinsicInst.h"
+#include "llvm/Intrinsics.h"
 #include "llvm/MC/MCSectionELF.h"
+#include "llvm/Module.h"
+#include "llvm/Support/CallSite.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include <sstream>
 
 #undef DEBUG_TYPE
@@ -174,10 +174,11 @@ NVPTXTargetLowering::NVPTXTargetLowering(NVPTXTargetMachine &TM)
   setTruncStoreAction(MVT::f64, MVT::f32, Expand);
 
   // PTX does not support load / store predicate registers
-  setOperationAction(ISD::LOAD, MVT::i1, Expand);
+  setOperationAction(ISD::LOAD, MVT::i1, Custom);
+  setOperationAction(ISD::STORE, MVT::i1, Custom);
+
   setLoadExtAction(ISD::SEXTLOAD, MVT::i1, Promote);
   setLoadExtAction(ISD::ZEXTLOAD, MVT::i1, Promote);
-  setOperationAction(ISD::STORE, MVT::i1, Expand);
   setTruncStoreAction(MVT::i64, MVT::i1, Expand);
   setTruncStoreAction(MVT::i32, MVT::i1, Expand);
   setTruncStoreAction(MVT::i16, MVT::i1, Expand);
@@ -270,6 +271,9 @@ const char *NVPTXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   }
 }
 
+bool NVPTXTargetLowering::shouldSplitVectorElementType(EVT VT) const {
+  return VT == MVT::i1;
+}
 
 SDValue
 NVPTXTargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const {
@@ -856,10 +860,63 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::EXTRACT_SUBVECTOR:
     return Op;
   case ISD::CONCAT_VECTORS: return LowerCONCAT_VECTORS(Op, DAG);
+  case ISD::STORE: return LowerSTORE(Op, DAG);
+  case ISD::LOAD: return LowerLOAD(Op, DAG);
   default:
     llvm_unreachable("Custom lowering not defined for operation");
   }
 }
+
+
+// v = ld i1* addr
+//   =>
+// v1 = ld i8* addr
+// v = trunc v1 to i1
+SDValue NVPTXTargetLowering::
+LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
+  SDNode *Node = Op.getNode();
+  LoadSDNode *LD = cast<LoadSDNode>(Node);
+  DebugLoc dl = Node->getDebugLoc();
+  assert(LD->getExtensionType() == ISD::NON_EXTLOAD) ;
+  assert(Node->getValueType(0) == MVT::i1 &&
+         "Custom lowering for i1 load only");
+  SDValue newLD = DAG.getLoad(MVT::i8, dl, LD->getChain(), LD->getBasePtr(),
+                              LD->getPointerInfo(),
+                              LD->isVolatile(), LD->isNonTemporal(),
+                              LD->isInvariant(),
+                              LD->getAlignment());
+  SDValue result = DAG.getNode(ISD::TRUNCATE, dl, MVT::i1, newLD);
+  // The legalizer (the caller) is expecting two values from the legalized
+  // load, so we build a MergeValues node for it. See ExpandUnalignedLoad()
+  // in LegalizeDAG.cpp which also uses MergeValues.
+  SDValue Ops[] = {result, LD->getChain()};
+  return DAG.getMergeValues(Ops, 2, dl);
+}
+
+// st i1 v, addr
+//    =>
+// v1 = zxt v to i8
+// st i8, addr
+SDValue NVPTXTargetLowering::
+LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
+  SDNode *Node = Op.getNode();
+  DebugLoc dl = Node->getDebugLoc();
+  StoreSDNode *ST = cast<StoreSDNode>(Node);
+  SDValue Tmp1 = ST->getChain();
+  SDValue Tmp2 = ST->getBasePtr();
+  SDValue Tmp3 = ST->getValue();
+  assert(Tmp3.getValueType() == MVT::i1 && "Custom lowering for i1 store only");
+  unsigned Alignment = ST->getAlignment();
+  bool isVolatile = ST->isVolatile();
+  bool isNonTemporal = ST->isNonTemporal();
+  Tmp3 = DAG.getNode(ISD::ZERO_EXTEND, dl,
+                     MVT::i8, Tmp3);
+  SDValue Result = DAG.getStore(Tmp1, dl, Tmp3, Tmp2,
+                                ST->getPointerInfo(), isVolatile,
+                                isNonTemporal, Alignment);
+  return Result;
+}
+
 
 SDValue
 NVPTXTargetLowering::getExtSymb(SelectionDAG &DAG, const char *inname, int idx,
@@ -900,7 +957,7 @@ bool llvm::isImageOrSamplerVal(const Value *arg, const Module *context) {
     return false;
 
   const StructType *STy = dyn_cast<StructType>(PTy->getElementType());
-  const std::string TypeName = STy ? STy->getName() : "";
+  const std::string TypeName = STy && !STy->isLiteral() ? STy->getName() : "";
 
   for (int i = 0, e = array_lengthof(specialTypes); i != e; ++i)
     if (TypeName == specialTypes[i])
@@ -919,7 +976,7 @@ NVPTXTargetLowering::LowerFormalArguments(SDValue Chain,
   const DataLayout *TD = getDataLayout();
 
   const Function *F = MF.getFunction();
-  const AttrListPtr &PAL = F->getAttributes();
+  const AttributeSet &PAL = F->getAttributes();
 
   SDValue Root = DAG.getRoot();
   std::vector<SDValue> OutChains;

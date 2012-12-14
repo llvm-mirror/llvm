@@ -15,8 +15,8 @@
 #ifndef LLVM_ATTRIBUTES_H
 #define LLVM_ATTRIBUTES_H
 
-#include "llvm/Support/MathExtras.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/MathExtras.h"
 #include <cassert>
 #include <string>
 
@@ -92,11 +92,6 @@ private:
   Attributes(AttributesImpl *A) : Attrs(A) {}
 public:
   Attributes() : Attrs(0) {}
-  Attributes(const Attributes &A) : Attrs(A.Attrs) {}
-  Attributes &operator=(const Attributes &A) {
-    Attrs = A.Attrs;
-    return *this;
-  }
 
   /// get - Return a uniquified Attributes object. This takes the uniquified
   /// value from the Builder and wraps it in the Attributes class.
@@ -199,7 +194,6 @@ public:
   AttrBuilder() : Bits(0) {}
   explicit AttrBuilder(uint64_t B) : Bits(B) {}
   AttrBuilder(const Attributes &A) : Bits(A.Raw()) {}
-  AttrBuilder(const AttrBuilder &B) : Bits(B.Bits) {}
 
   void clear() { Bits = 0; }
 
@@ -304,45 +298,50 @@ struct AttributeWithIndex {
 };
 
 //===----------------------------------------------------------------------===//
-// AttrListPtr Smart Pointer
+// AttributeSet Smart Pointer
 //===----------------------------------------------------------------------===//
 
 class AttributeListImpl;
 
-/// AttrListPtr - This class manages the ref count for the opaque
+/// AttributeSet - This class manages the ref count for the opaque
 /// AttributeListImpl object and provides accessors for it.
-class AttrListPtr {
+class AttributeSet {
 public:
   enum AttrIndex {
     ReturnIndex = 0U,
     FunctionIndex = ~0U
   };
 private:
-  /// AttrList - The attributes that we are managing.  This can be null to
-  /// represent the empty attributes list.
+  /// @brief The attributes that we are managing.  This can be null to represent
+  /// the empty attributes list.
   AttributeListImpl *AttrList;
+
+  /// @brief The attributes for the specified index are returned.  Attributes
+  /// for the result are denoted with Idx = 0.
+  Attributes getAttributes(unsigned Idx) const;
+
+  explicit AttributeSet(AttributeListImpl *LI) : AttrList(LI) {}
 public:
-  AttrListPtr() : AttrList(0) {}
-  AttrListPtr(const AttrListPtr &P);
-  const AttrListPtr &operator=(const AttrListPtr &RHS);
-  ~AttrListPtr();
+  AttributeSet() : AttrList(0) {}
+  AttributeSet(const AttributeSet &P) : AttrList(P.AttrList) {}
+  const AttributeSet &operator=(const AttributeSet &RHS);
 
   //===--------------------------------------------------------------------===//
   // Attribute List Construction and Mutation
   //===--------------------------------------------------------------------===//
 
   /// get - Return a Attributes list with the specified parameters in it.
-  static AttrListPtr get(ArrayRef<AttributeWithIndex> Attrs);
+  static AttributeSet get(LLVMContext &C, ArrayRef<AttributeWithIndex> Attrs);
 
   /// addAttr - Add the specified attribute at the specified index to this
   /// attribute list.  Since attribute lists are immutable, this
   /// returns the new list.
-  AttrListPtr addAttr(LLVMContext &C, unsigned Idx, Attributes Attrs) const;
+  AttributeSet addAttr(LLVMContext &C, unsigned Idx, Attributes Attrs) const;
 
   /// removeAttr - Remove the specified attribute at the specified index from
   /// this attribute list.  Since attribute lists are immutable, this
   /// returns the new list.
-  AttrListPtr removeAttr(LLVMContext &C, unsigned Idx, Attributes Attrs) const;
+  AttributeSet removeAttr(LLVMContext &C, unsigned Idx, Attributes Attrs) const;
 
   //===--------------------------------------------------------------------===//
   // Attribute List Accessors
@@ -384,9 +383,9 @@ public:
   Attributes &getAttributesAtIndex(unsigned i) const;
 
   /// operator==/!= - Provide equality predicates.
-  bool operator==(const AttrListPtr &RHS) const
+  bool operator==(const AttributeSet &RHS) const
   { return AttrList == RHS.AttrList; }
-  bool operator!=(const AttrListPtr &RHS) const
+  bool operator!=(const AttributeSet &RHS) const
   { return AttrList != RHS.AttrList; }
 
   //===--------------------------------------------------------------------===//
@@ -419,13 +418,6 @@ public:
   const AttributeWithIndex &getSlot(unsigned Slot) const;
 
   void dump() const;
-
-private:
-  explicit AttrListPtr(AttributeListImpl *L);
-
-  /// getAttributes - The attributes for the specified index are
-  /// returned.  Attributes for the result are denoted with Idx = 0.
-  Attributes getAttributes(unsigned Idx) const;
 };
 
 } // End llvm namespace

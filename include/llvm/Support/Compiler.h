@@ -19,23 +19,45 @@
 # define __has_feature(x) 0
 #endif
 
-/// LLVM_HAS_RVALUE_REFERENCES - Does the compiler provide r-value references?
+/// \brief Does the compiler support r-value references?
 /// This implies that <utility> provides the one-argument std::move;  it
 /// does not imply the existence of any other C++ library features.
 #if (__has_feature(cxx_rvalue_references)   \
      || defined(__GXX_EXPERIMENTAL_CXX0X__) \
      || (defined(_MSC_VER) && _MSC_VER >= 1600))
-#define LLVM_USE_RVALUE_REFERENCES 1
+#define LLVM_HAS_RVALUE_REFERENCES 1
 #else
-#define LLVM_USE_RVALUE_REFERENCES 0
+#define LLVM_HAS_RVALUE_REFERENCES 0
+#endif
+
+/// \brief Does the compiler support r-value reference *this?
+///
+/// Sadly, this is separate from just r-value reference support because GCC
+/// implemented everything but this thus far. No release of GCC yet has support
+/// for this feature so it is enabled with Clang only.
+/// FIXME: This should change to a version check when GCC grows support for it.
+#if __has_feature(cxx_rvalue_references)
+#define LLVM_HAS_RVALUE_REFERENCE_THIS 1
+#else
+#define LLVM_HAS_RVALUE_REFERENCE_THIS 0
 #endif
 
 /// llvm_move - Expands to ::std::move if the compiler supports
 /// r-value references; otherwise, expands to the argument.
-#if LLVM_USE_RVALUE_REFERENCES
+#if LLVM_HAS_RVALUE_REFERENCES
 #define llvm_move(value) (::std::move(value))
 #else
 #define llvm_move(value) (value)
+#endif
+
+/// Expands to '&' if r-value references are supported.
+///
+/// This can be used to provide l-value/r-value overrides of member functions.
+/// The r-value override should be guarded by LLVM_HAS_RVALUE_REFERENCE_THIS
+#if LLVM_HAS_RVALUE_REFERENCE_THIS
+#define LLVM_LVALUE_FUNCTION &
+#else
+#define LLVM_LVALUE_FUNCTION
 #endif
 
 /// LLVM_DELETED_FUNCTION - Expands to = delete if the compiler supports it.
@@ -143,8 +165,8 @@
 #define TEMPLATE_INSTANTIATION(X)
 #endif
 
-// LLVM_ATTRIBUTE_NOINLINE - On compilers where we have a directive to do so,
-// mark a method "not for inlining".
+/// LLVM_ATTRIBUTE_NOINLINE - On compilers where we have a directive to do so,
+/// mark a method "not for inlining".
 #if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
 #define LLVM_ATTRIBUTE_NOINLINE __attribute__((noinline))
 #elif defined(_MSC_VER)
@@ -153,10 +175,10 @@
 #define LLVM_ATTRIBUTE_NOINLINE
 #endif
 
-// LLVM_ATTRIBUTE_ALWAYS_INLINE - On compilers where we have a directive to do
-// so, mark a method "always inline" because it is performance sensitive. GCC
-// 3.4 supported this but is buggy in various cases and produces unimplemented
-// errors, just use it in GCC 4.0 and later.
+/// LLVM_ATTRIBUTE_ALWAYS_INLINE - On compilers where we have a directive to do
+/// so, mark a method "always inline" because it is performance sensitive. GCC
+/// 3.4 supported this but is buggy in various cases and produces unimplemented
+/// errors, just use it in GCC 4.0 and later.
 #if __GNUC__ > 3
 #define LLVM_ATTRIBUTE_ALWAYS_INLINE inline __attribute__((always_inline))
 #elif defined(_MSC_VER)
@@ -174,8 +196,8 @@
 #define LLVM_ATTRIBUTE_NORETURN
 #endif
 
-// LLVM_EXTENSION - Support compilers where we have a keyword to suppress
-// pedantic diagnostics.
+/// LLVM_EXTENSION - Support compilers where we have a keyword to suppress
+/// pedantic diagnostics.
 #ifdef __GNUC__
 #define LLVM_EXTENSION __extension__
 #else
@@ -197,16 +219,16 @@
   decl
 #endif
 
-// LLVM_BUILTIN_UNREACHABLE - On compilers which support it, expands
-// to an expression which states that it is undefined behavior for the
-// compiler to reach this point.  Otherwise is not defined.
+/// LLVM_BUILTIN_UNREACHABLE - On compilers which support it, expands
+/// to an expression which states that it is undefined behavior for the
+/// compiler to reach this point.  Otherwise is not defined.
 #if defined(__clang__) || (__GNUC__ > 4) \
  || (__GNUC__ == 4 && __GNUC_MINOR__ >= 5)
 # define LLVM_BUILTIN_UNREACHABLE __builtin_unreachable()
 #endif
 
-// LLVM_BUILTIN_TRAP - On compilers which support it, expands to an expression
-// which causes the program to exit abnormally.
+/// LLVM_BUILTIN_TRAP - On compilers which support it, expands to an expression
+/// which causes the program to exit abnormally.
 #if defined(__clang__) || (__GNUC__ > 4) \
  || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)
 # define LLVM_BUILTIN_TRAP __builtin_trap()

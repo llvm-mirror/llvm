@@ -46,29 +46,29 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/Verifier.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Analysis/Dominators.h"
+#include "llvm/Assembly/Writer.h"
 #include "llvm/CallingConv.h"
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/Constants.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/InlineAsm.h"
+#include "llvm/InstVisitor.h"
 #include "llvm/IntrinsicInst.h"
 #include "llvm/LLVMContext.h"
 #include "llvm/Metadata.h"
 #include "llvm/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/PassManager.h"
-#include "llvm/Analysis/Dominators.h"
-#include "llvm/Assembly/Writer.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/CFG.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/InstVisitor.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/CallSite.h"
 #include "llvm/Support/ConstantRange.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -299,7 +299,7 @@ namespace {
                              SmallVectorImpl<Type*> &ArgTys);
     void VerifyParameterAttrs(Attributes Attrs, Type *Ty,
                               bool isReturnValue, const Value *V);
-    void VerifyFunctionAttrs(FunctionType *FT, const AttrListPtr &Attrs,
+    void VerifyFunctionAttrs(FunctionType *FT, const AttributeSet &Attrs,
                              const Value *V);
 
     void WriteValue(const Value *V) {
@@ -585,7 +585,7 @@ void Verifier::VerifyParameterAttrs(Attributes Attrs, Type *Ty,
 // VerifyFunctionAttrs - Check parameter attributes against a function type.
 // The value V is printed in error messages.
 void Verifier::VerifyFunctionAttrs(FunctionType *FT,
-                                   const AttrListPtr &Attrs,
+                                   const AttributeSet &Attrs,
                                    const Value *V) {
   if (Attrs.isEmpty())
     return;
@@ -651,7 +651,7 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT,
           "'noinline and alwaysinline' are incompatible!", V);
 }
 
-static bool VerifyAttributeCount(const AttrListPtr &Attrs, unsigned Params) {
+static bool VerifyAttributeCount(const AttributeSet &Attrs, unsigned Params) {
   if (Attrs.isEmpty())
     return true;
 
@@ -687,7 +687,7 @@ void Verifier::visitFunction(Function &F) {
   Assert1(!F.hasStructRetAttr() || F.getReturnType()->isVoidTy(),
           "Invalid struct return type!", &F);
 
-  const AttrListPtr &Attrs = F.getAttributes();
+  const AttributeSet &Attrs = F.getAttributes();
 
   Assert1(VerifyAttributeCount(Attrs, FT->getNumParams()),
           "Attributes after last parameter!", &F);
@@ -1200,7 +1200,7 @@ void Verifier::VerifyCallSite(CallSite CS) {
             "Call parameter type does not match function signature!",
             CS.getArgument(i), FTy->getParamType(i), I);
 
-  const AttrListPtr &Attrs = CS.getAttributes();
+  const AttributeSet &Attrs = CS.getAttributes();
 
   Assert1(VerifyAttributeCount(Attrs, CS.arg_size()),
           "Attributes after last parameter!", I);
@@ -1375,34 +1375,31 @@ void Verifier::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     "GEP base pointer is not a vector or a vector of pointers", &GEP);
   Assert1(cast<PointerType>(TargetTy)->getElementType()->isSized(),
           "GEP into unsized type!", &GEP);
+  Assert1(GEP.getPointerOperandType()->isVectorTy() ==
+          GEP.getType()->isVectorTy(), "Vector GEP must return a vector value",
+          &GEP);
 
   SmallVector<Value*, 16> Idxs(GEP.idx_begin(), GEP.idx_end());
   Type *ElTy =
     GetElementPtrInst::getIndexedType(GEP.getPointerOperandType(), Idxs);
   Assert1(ElTy, "Invalid indices for GEP pointer type!", &GEP);
 
-  if (GEP.getPointerOperandType()->isPointerTy()) {
-    // Validate GEPs with scalar indices.
-    Assert2(GEP.getType()->isPointerTy() &&
-           cast<PointerType>(GEP.getType())->getElementType() == ElTy,
-           "GEP is not of right type for indices!", &GEP, ElTy);
-  } else {
-    // Validate GEPs with a vector index.
-    Assert1(Idxs.size() == 1, "Invalid number of indices!", &GEP);
-    Value *Index = Idxs[0];
-    Type  *IndexTy = Index->getType();
-    Assert1(IndexTy->isVectorTy(),
-      "Vector GEP must have vector indices!", &GEP);
-    Assert1(GEP.getType()->isVectorTy(),
-      "Vector GEP must return a vector value", &GEP);
-    Type *ElemPtr = cast<VectorType>(GEP.getType())->getElementType();
-    Assert1(ElemPtr->isPointerTy(),
-      "Vector GEP pointer operand is not a pointer!", &GEP);
-    unsigned IndexWidth = cast<VectorType>(IndexTy)->getNumElements();
-    unsigned GepWidth = cast<VectorType>(GEP.getType())->getNumElements();
-    Assert1(IndexWidth == GepWidth, "Invalid GEP index vector width", &GEP);
-    Assert1(ElTy == cast<PointerType>(ElemPtr)->getElementType(),
-      "Vector GEP type does not match pointer type!", &GEP);
+  Assert2(GEP.getType()->getScalarType()->isPointerTy() &&
+          cast<PointerType>(GEP.getType()->getScalarType())->getElementType()
+          == ElTy, "GEP is not of right type for indices!", &GEP, ElTy);
+
+  if (GEP.getPointerOperandType()->isVectorTy()) {
+    // Additional checks for vector GEPs.
+    unsigned GepWidth = GEP.getPointerOperandType()->getVectorNumElements();
+    Assert1(GepWidth == GEP.getType()->getVectorNumElements(),
+            "Vector GEP result width doesn't match operand's", &GEP);
+    for (unsigned i = 0, e = Idxs.size(); i != e; ++i) {
+      Type *IndexTy = Idxs[i]->getType();
+      Assert1(IndexTy->isVectorTy(),
+              "Vector GEP must have vector indices!", &GEP);
+      unsigned IndexWidth = IndexTy->getVectorNumElements();
+      Assert1(IndexWidth == GepWidth, "Invalid GEP index vector width", &GEP);
+    }
   }
   visitInstruction(GEP);
 }

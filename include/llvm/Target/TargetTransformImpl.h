@@ -15,8 +15,8 @@
 #ifndef LLVM_TARGET_TARGET_TRANSFORMATION_IMPL_H
 #define LLVM_TARGET_TARGET_TRANSFORMATION_IMPL_H
 
-#include "llvm/TargetTransformInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/TargetTransformInfo.h"
 
 namespace llvm {
 
@@ -26,7 +26,7 @@ class TargetLowering;
 /// ScalarTargetTransformInfo interface. Different targets can implement
 /// this interface differently.
 class ScalarTargetTransformImpl : public ScalarTargetTransformInfo {
-private:
+protected:
   const TargetLowering *TLI;
 
 public:
@@ -51,16 +51,18 @@ public:
 };
 
 class VectorTargetTransformImpl : public VectorTargetTransformInfo {
-private:
+protected:
   const TargetLowering *TLI;
 
   /// Estimate the cost of type-legalization and the legalized type.
-  std::pair<unsigned, EVT>
-  getTypeLegalizationCost(LLVMContext &C, EVT Ty) const;
+  std::pair<unsigned, MVT> getTypeLegalizationCost(Type *Ty) const;
 
   /// Estimate the overhead of scalarizing an instruction. Insert and Extract
   /// are set if the result needs to be inserted and/or extracted from vectors.
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
+
+  // Get the ISD node that corresponds to the Instruction class opcode.
+  int InstructionOpcodeToISD(unsigned Opcode) const;
 
 public:
   explicit VectorTargetTransformImpl(const TargetLowering *TL) : TLI(TL) {}
@@ -87,6 +89,9 @@ public:
   virtual unsigned getMemoryOpCost(unsigned Opcode, Type *Src,
                                    unsigned Alignment,
                                    unsigned AddressSpace) const;
+
+  virtual unsigned getIntrinsicInstrCost(Intrinsic::ID, Type *RetTy,
+                                         ArrayRef<Type*> Tys) const;
 
   virtual unsigned getNumberOfParts(Type *Tp) const;
 };

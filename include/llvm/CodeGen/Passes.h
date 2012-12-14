@@ -141,6 +141,10 @@ public:
   /// Add passes to lower exception handling for the code generator.
   void addPassesToHandleExceptions();
 
+  /// Add pass to prepare the LLVM IR for code generation. This should be done
+  /// before exception handling preparation passes.
+  virtual void addCodeGenPrepare();
+
   /// Add common passes that perform LLVM IR to IR transforms in preparation for
   /// instruction selection.
   virtual void addISelPrepare();
@@ -287,9 +291,6 @@ namespace llvm {
 
   /// MachineLoopInfo - This pass is a loop analysis pass.
   extern char &MachineLoopInfoID;
-
-  /// MachineLoopRanges - This pass is an on-demand loop coverage analysis.
-  extern char &MachineLoopRangesID;
 
   /// MachineDominators - This pass is a machine dominators analysis pass.
   extern char &MachineDominatorsID;

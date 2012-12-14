@@ -12,16 +12,16 @@
 //===----------------------------------------------------------------------===//
 
 #include "HexagonInstrInfo.h"
+#include "Hexagon.h"
 #include "HexagonRegisterInfo.h"
 #include "HexagonSubtarget.h"
-#include "Hexagon.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/DFAPacketizer.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/Support/MathExtras.h"
 #define GET_INSTRINFO_CTOR
@@ -314,7 +314,7 @@ void HexagonInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
   if (Hexagon::DoubleRegsRegClass.contains(SrcReg, DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::TFR_64), DestReg).addReg(SrcReg);
+    BuildMI(MBB, I, DL, get(Hexagon::TFR64), DestReg).addReg(SrcReg);
     return;
   }
   if (Hexagon::PredRegsRegClass.contains(SrcReg, DestReg)) {
@@ -941,42 +941,36 @@ unsigned HexagonInstrInfo::getImmExtForm(const MachineInstr* MI) const {
     case Hexagon::TFR_FI:
         return Hexagon::TFR_FI_immext_V4;
 
-    case Hexagon::MEMw_ADDSUBi_indexed_MEM_V4 :
     case Hexagon::MEMw_ADDi_indexed_MEM_V4 :
     case Hexagon::MEMw_SUBi_indexed_MEM_V4 :
     case Hexagon::MEMw_ADDr_indexed_MEM_V4 :
     case Hexagon::MEMw_SUBr_indexed_MEM_V4 :
     case Hexagon::MEMw_ANDr_indexed_MEM_V4 :
     case Hexagon::MEMw_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMw_ADDSUBi_MEM_V4 :
     case Hexagon::MEMw_ADDi_MEM_V4 :
     case Hexagon::MEMw_SUBi_MEM_V4 :
     case Hexagon::MEMw_ADDr_MEM_V4 :
     case Hexagon::MEMw_SUBr_MEM_V4 :
     case Hexagon::MEMw_ANDr_MEM_V4 :
     case Hexagon::MEMw_ORr_MEM_V4 :
-    case Hexagon::MEMh_ADDSUBi_indexed_MEM_V4 :
     case Hexagon::MEMh_ADDi_indexed_MEM_V4 :
     case Hexagon::MEMh_SUBi_indexed_MEM_V4 :
     case Hexagon::MEMh_ADDr_indexed_MEM_V4 :
     case Hexagon::MEMh_SUBr_indexed_MEM_V4 :
     case Hexagon::MEMh_ANDr_indexed_MEM_V4 :
     case Hexagon::MEMh_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMh_ADDSUBi_MEM_V4 :
     case Hexagon::MEMh_ADDi_MEM_V4 :
     case Hexagon::MEMh_SUBi_MEM_V4 :
     case Hexagon::MEMh_ADDr_MEM_V4 :
     case Hexagon::MEMh_SUBr_MEM_V4 :
     case Hexagon::MEMh_ANDr_MEM_V4 :
     case Hexagon::MEMh_ORr_MEM_V4 :
-    case Hexagon::MEMb_ADDSUBi_indexed_MEM_V4 :
     case Hexagon::MEMb_ADDi_indexed_MEM_V4 :
     case Hexagon::MEMb_SUBi_indexed_MEM_V4 :
     case Hexagon::MEMb_ADDr_indexed_MEM_V4 :
     case Hexagon::MEMb_SUBr_indexed_MEM_V4 :
     case Hexagon::MEMb_ANDr_indexed_MEM_V4 :
     case Hexagon::MEMb_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMb_ADDSUBi_MEM_V4 :
     case Hexagon::MEMb_ADDi_MEM_V4 :
     case Hexagon::MEMb_SUBi_MEM_V4 :
     case Hexagon::MEMb_ADDr_MEM_V4 :
@@ -2391,14 +2385,12 @@ isValidOffset(const int Opcode, const int Offset) const {
     return (Offset >= Hexagon_ADDI_OFFSET_MIN) &&
       (Offset <= Hexagon_ADDI_OFFSET_MAX);
 
-  case Hexagon::MEMw_ADDSUBi_indexed_MEM_V4 :
   case Hexagon::MEMw_ADDi_indexed_MEM_V4 :
   case Hexagon::MEMw_SUBi_indexed_MEM_V4 :
   case Hexagon::MEMw_ADDr_indexed_MEM_V4 :
   case Hexagon::MEMw_SUBr_indexed_MEM_V4 :
   case Hexagon::MEMw_ANDr_indexed_MEM_V4 :
   case Hexagon::MEMw_ORr_indexed_MEM_V4 :
-  case Hexagon::MEMw_ADDSUBi_MEM_V4 :
   case Hexagon::MEMw_ADDi_MEM_V4 :
   case Hexagon::MEMw_SUBi_MEM_V4 :
   case Hexagon::MEMw_ADDr_MEM_V4 :
@@ -2408,14 +2400,12 @@ isValidOffset(const int Opcode, const int Offset) const {
     assert ((Offset % 4) == 0 && "MEMOPw offset is not aligned correctly." );
     return (0 <= Offset && Offset <= 255);
 
-  case Hexagon::MEMh_ADDSUBi_indexed_MEM_V4 :
   case Hexagon::MEMh_ADDi_indexed_MEM_V4 :
   case Hexagon::MEMh_SUBi_indexed_MEM_V4 :
   case Hexagon::MEMh_ADDr_indexed_MEM_V4 :
   case Hexagon::MEMh_SUBr_indexed_MEM_V4 :
   case Hexagon::MEMh_ANDr_indexed_MEM_V4 :
   case Hexagon::MEMh_ORr_indexed_MEM_V4 :
-  case Hexagon::MEMh_ADDSUBi_MEM_V4 :
   case Hexagon::MEMh_ADDi_MEM_V4 :
   case Hexagon::MEMh_SUBi_MEM_V4 :
   case Hexagon::MEMh_ADDr_MEM_V4 :
@@ -2425,14 +2415,12 @@ isValidOffset(const int Opcode, const int Offset) const {
     assert ((Offset % 2) == 0 && "MEMOPh offset is not aligned correctly." );
     return (0 <= Offset && Offset <= 127);
 
-  case Hexagon::MEMb_ADDSUBi_indexed_MEM_V4 :
   case Hexagon::MEMb_ADDi_indexed_MEM_V4 :
   case Hexagon::MEMb_SUBi_indexed_MEM_V4 :
   case Hexagon::MEMb_ADDr_indexed_MEM_V4 :
   case Hexagon::MEMb_SUBr_indexed_MEM_V4 :
   case Hexagon::MEMb_ANDr_indexed_MEM_V4 :
   case Hexagon::MEMb_ORr_indexed_MEM_V4 :
-  case Hexagon::MEMb_ADDSUBi_MEM_V4 :
   case Hexagon::MEMb_ADDi_MEM_V4 :
   case Hexagon::MEMb_SUBi_MEM_V4 :
   case Hexagon::MEMb_ADDr_MEM_V4 :
@@ -2491,42 +2479,36 @@ isMemOp(const MachineInstr *MI) const {
   switch (MI->getOpcode())
   {
     default: return false;
-    case Hexagon::MEMw_ADDSUBi_indexed_MEM_V4 :
     case Hexagon::MEMw_ADDi_indexed_MEM_V4 :
     case Hexagon::MEMw_SUBi_indexed_MEM_V4 :
     case Hexagon::MEMw_ADDr_indexed_MEM_V4 :
     case Hexagon::MEMw_SUBr_indexed_MEM_V4 :
     case Hexagon::MEMw_ANDr_indexed_MEM_V4 :
     case Hexagon::MEMw_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMw_ADDSUBi_MEM_V4 :
     case Hexagon::MEMw_ADDi_MEM_V4 :
     case Hexagon::MEMw_SUBi_MEM_V4 :
     case Hexagon::MEMw_ADDr_MEM_V4 :
     case Hexagon::MEMw_SUBr_MEM_V4 :
     case Hexagon::MEMw_ANDr_MEM_V4 :
     case Hexagon::MEMw_ORr_MEM_V4 :
-    case Hexagon::MEMh_ADDSUBi_indexed_MEM_V4 :
     case Hexagon::MEMh_ADDi_indexed_MEM_V4 :
     case Hexagon::MEMh_SUBi_indexed_MEM_V4 :
     case Hexagon::MEMh_ADDr_indexed_MEM_V4 :
     case Hexagon::MEMh_SUBr_indexed_MEM_V4 :
     case Hexagon::MEMh_ANDr_indexed_MEM_V4 :
     case Hexagon::MEMh_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMh_ADDSUBi_MEM_V4 :
     case Hexagon::MEMh_ADDi_MEM_V4 :
     case Hexagon::MEMh_SUBi_MEM_V4 :
     case Hexagon::MEMh_ADDr_MEM_V4 :
     case Hexagon::MEMh_SUBr_MEM_V4 :
     case Hexagon::MEMh_ANDr_MEM_V4 :
     case Hexagon::MEMh_ORr_MEM_V4 :
-    case Hexagon::MEMb_ADDSUBi_indexed_MEM_V4 :
     case Hexagon::MEMb_ADDi_indexed_MEM_V4 :
     case Hexagon::MEMb_SUBi_indexed_MEM_V4 :
     case Hexagon::MEMb_ADDr_indexed_MEM_V4 :
     case Hexagon::MEMb_SUBr_indexed_MEM_V4 :
     case Hexagon::MEMb_ANDr_indexed_MEM_V4 :
     case Hexagon::MEMb_ORr_indexed_MEM_V4 :
-    case Hexagon::MEMb_ADDSUBi_MEM_V4 :
     case Hexagon::MEMb_ADDi_MEM_V4 :
     case Hexagon::MEMb_SUBi_MEM_V4 :
     case Hexagon::MEMb_ADDr_MEM_V4 :

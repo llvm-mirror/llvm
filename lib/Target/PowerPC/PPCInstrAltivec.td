@@ -158,10 +158,6 @@ def vecspltisw : PatLeaf<(build_vector), [{
   return PPC::get_VSPLTI_elt(N, 4, *CurDAG).getNode() != 0;
 }], VSPLTISW_get_imm>;
 
-def V_immneg0 : PatLeaf<(build_vector), [{
-  return PPC::isAllNegativeZeroVector(N);
-}]>;
-
 //===----------------------------------------------------------------------===//
 // Helpers for defining instructions that directly correspond to intrinsics.
 
@@ -585,7 +581,12 @@ def VCMPGTUWo : VCMPo<646, "vcmpgtuw. $vD, $vA, $vB", v4i32>;
 def V_SET0 : VXForm_setzero<1220, (outs VRRC:$vD), (ins),
                       "vxor $vD, $vD, $vD", VecFP,
                       [(set VRRC:$vD, (v4i32 immAllZerosV))]>;
+let IMM=-1 in {
+def V_SETALLONES : VXForm_3<908, (outs VRRC:$vD), (ins),
+                      "vspltisw $vD, -1", VecFP,
+                      [(set VRRC:$vD, (v4i32 immAllOnesV))]>;
 }
+} // VALU Operations.
 
 //===----------------------------------------------------------------------===//
 // Additional Altivec Patterns
@@ -672,7 +673,8 @@ def : Pat<(v4i32 (and VRRC:$A, (vnot_ppc VRRC:$B))),
           (VANDC VRRC:$A, VRRC:$B)>;
 
 def : Pat<(fmul VRRC:$vA, VRRC:$vB),
-          (VMADDFP VRRC:$vA, VRRC:$vB, (v4i32 (V_SET0)))>; 
+          (VMADDFP VRRC:$vA, VRRC:$vB,
+             (v4i32 (VSLW (V_SETALLONES), (V_SETALLONES))))>; 
 
 // Fused multiply add and multiply sub for packed float.  These are represented
 // separately from the real instructions above, for operations that must have
@@ -721,3 +723,13 @@ def : Pat<(v4f32 (sint_to_fp (v4i32 VRRC:$vA))),
            (VCFSX_0 VRRC:$vA)>;
 def : Pat<(v4f32 (uint_to_fp (v4i32 VRRC:$vA))),
            (VCFUX_0 VRRC:$vA)>;
+
+// Floating-point rounding
+def : Pat<(v4f32 (ffloor (v4f32 VRRC:$vA))),
+          (VRFIM VRRC:$vA)>;
+def : Pat<(v4f32 (fceil (v4f32 VRRC:$vA))),
+          (VRFIP VRRC:$vA)>;
+def : Pat<(v4f32 (ftrunc (v4f32 VRRC:$vA))),
+          (VRFIZ VRRC:$vA)>;
+def : Pat<(v4f32 (fnearbyint (v4f32 VRRC:$vA))),
+          (VRFIN VRRC:$vA)>;

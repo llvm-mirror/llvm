@@ -12,12 +12,13 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "dyld"
+#include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "ObjectImageCommon.h"
-#include "RuntimeDyldImpl.h"
 #include "RuntimeDyldELF.h"
+#include "RuntimeDyldImpl.h"
 #include "RuntimeDyldMachO.h"
-#include "llvm/Support/Path.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Path.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -36,7 +37,11 @@ void RuntimeDyldImpl::resolveRelocations() {
   // Just iterate over the sections we have and resolve all the relocations
   // in them. Gross overkill, but it gets the job done.
   for (int i = 0, e = Sections.size(); i != e; ++i) {
-    reassignSectionAddress(i, Sections[i].LoadAddress);
+    uint64_t Addr = Sections[i].LoadAddress;
+    DEBUG(dbgs() << "Resolving relocations Section #" << i
+            << "\t" << format("%p", (uint8_t *)Addr)
+            << "\n");
+    resolveRelocationList(Relocations[i], Addr);
   }
 }
 
@@ -121,9 +126,7 @@ ObjectImage *RuntimeDyldImpl::loadObject(ObjectBuffer *InputBuffer) {
                      << " flags: " << flags
                      << " SID: " << SectionID
                      << " Offset: " << format("%p", SectOffset));
-        bool isGlobal = flags & SymbolRef::SF_Global;
-        if (isGlobal)
-          GlobalSymbolTable[Name] = SymbolLoc(SectionID, SectOffset);
+        GlobalSymbolTable[Name] = SymbolLoc(SectionID, SectOffset);
       }
     }
     DEBUG(dbgs() << "\tType: " << SymType << " Name: " << Name << "\n");
@@ -178,7 +181,7 @@ void RuntimeDyldImpl::emitCommonSymbols(ObjectImage &Obj,
   // Allocate memory for the section
   unsigned SectionID = Sections.size();
   uint8_t *Addr = MemMgr->allocateDataSection(TotalSize, sizeof(void*),
-                                              SectionID);
+                                              SectionID, false);
   if (!Addr)
     report_fatal_error("Unable to allocate memory for common symbols!");
   uint64_t Offset = 0;
@@ -233,11 +236,13 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
   bool IsRequired;
   bool IsVirtual;
   bool IsZeroInit;
+  bool IsReadOnly;
   uint64_t DataSize;
   StringRef Name;
   Check(Section.isRequiredForExecution(IsRequired));
   Check(Section.isVirtual(IsVirtual));
   Check(Section.isZeroInit(IsZeroInit));
+  Check(Section.isReadOnlyData(IsReadOnly));
   Check(Section.getSize(DataSize));
   Check(Section.getName(Name));
 
@@ -252,7 +257,7 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
     Allocate = DataSize + StubBufSize;
     Addr = IsCode
       ? MemMgr->allocateCodeSection(Allocate, Alignment, SectionID)
-      : MemMgr->allocateDataSection(Allocate, Alignment, SectionID);
+      : MemMgr->allocateDataSection(Allocate, Alignment, SectionID, IsReadOnly);
     if (!Addr)
       report_fatal_error("Unable to allocate section memory!");
 
@@ -342,7 +347,7 @@ uint8_t *RuntimeDyldImpl::createStubFunction(uint8_t *Addr) {
     uint32_t *StubAddr = (uint32_t*)Addr;
     *StubAddr = 0xe51ff004; // ldr pc,<label>
     return (uint8_t*)++StubAddr;
-  } else if (Arch == Triple::mipsel) {
+  } else if (Arch == Triple::mipsel || Arch == Triple::mips) {
     uint32_t *StubAddr = (uint32_t*)Addr;
     // 0:   3c190000        lui     t9,%hi(addr).
     // 4:   27390000        addiu   t9,t9,%lo(addr).
@@ -387,31 +392,29 @@ void RuntimeDyldImpl::reassignSectionAddress(unsigned SectionID,
                                              uint64_t Addr) {
   // The address to use for relocation resolution is not
   // the address of the local section buffer. We must be doing
-  // a remote execution environment of some sort. Re-apply any
-  // relocations referencing this section with the given address.
+  // a remote execution environment of some sort. Relocations can't
+  // be applied until all the sections have been moved.  The client must
+  // trigger this with a call to MCJIT::finalize() or
+  // RuntimeDyld::resolveRelocations().
   //
   // Addr is a uint64_t because we can't assume the pointer width
   // of the target is the same as that of the host. Just use a generic
   // "big enough" type.
   Sections[SectionID].LoadAddress = Addr;
-  DEBUG(dbgs() << "Resolving relocations Section #" << SectionID
-          << "\t" << format("%p", (uint8_t *)Addr)
-          << "\n");
-  resolveRelocationList(Relocations[SectionID], Addr);
 }
 
 void RuntimeDyldImpl::resolveRelocationEntry(const RelocationEntry &RE,
                                              uint64_t Value) {
   // Ignore relocations for sections that were not loaded
   if (Sections[RE.SectionID].Address != 0) {
-    uint8_t *Target = Sections[RE.SectionID].Address + RE.Offset;
     DEBUG(dbgs() << "\tSectionID: " << RE.SectionID
-          << " + " << RE.Offset << " (" << format("%p", Target) << ")"
+          << " + " << RE.Offset << " ("
+          << format("%p", Sections[RE.SectionID].Address + RE.Offset) << ")"
           << " RelType: " << RE.RelType
           << " Addend: " << RE.Addend
           << "\n");
 
-    resolveRelocation(Target, Sections[RE.SectionID].LoadAddress + RE.Offset,
+    resolveRelocation(Sections[RE.SectionID], RE.Offset,
                       Value, RE.RelType, RE.Addend);
   }
 }
@@ -449,6 +452,12 @@ void RuntimeDyldImpl::resolveExternalSymbols() {
 //===----------------------------------------------------------------------===//
 // RuntimeDyld class implementation
 RuntimeDyld::RuntimeDyld(RTDyldMemoryManager *mm) {
+  // FIXME: There's a potential issue lurking here if a single instance of
+  // RuntimeDyld is used to load multiple objects.  The current implementation
+  // associates a single memory manager with a RuntimeDyld instance.  Even
+  // though the public class spawns a new 'impl' instance for each load,
+  // they share a single memory manager.  This can become a problem when page
+  // permissions are applied.
   Dyld = 0;
   MM = mm;
 }

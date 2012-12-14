@@ -12,16 +12,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "PPCISelLowering.h"
+#include "MCTargetDesc/PPCPredicates.h"
 #include "PPCMachineFunctionInfo.h"
 #include "PPCPerfectShuffle.h"
 #include "PPCTargetMachine.h"
-#include "MCTargetDesc/PPCPredicates.h"
-#include "llvm/CallingConv.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/Intrinsics.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -29,6 +25,10 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/Constants.h"
+#include "llvm/DerivedTypes.h"
+#include "llvm/Function.h"
+#include "llvm/Intrinsics.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
@@ -347,6 +347,21 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
       setOperationAction(ISD::UREM, VT, Expand);
       setOperationAction(ISD::FDIV, VT, Expand);
       setOperationAction(ISD::FNEG, VT, Expand);
+      setOperationAction(ISD::FSQRT, VT, Expand);
+      setOperationAction(ISD::FLOG, VT, Expand);
+      setOperationAction(ISD::FLOG10, VT, Expand);
+      setOperationAction(ISD::FLOG2, VT, Expand);
+      setOperationAction(ISD::FEXP, VT, Expand);
+      setOperationAction(ISD::FEXP2, VT, Expand);
+      setOperationAction(ISD::FSIN, VT, Expand);
+      setOperationAction(ISD::FCOS, VT, Expand);
+      setOperationAction(ISD::FABS, VT, Expand);
+      setOperationAction(ISD::FPOWI, VT, Expand);
+      setOperationAction(ISD::FFLOOR, VT, Expand);
+      setOperationAction(ISD::FCEIL,  VT, Expand);
+      setOperationAction(ISD::FTRUNC, VT, Expand);
+      setOperationAction(ISD::FRINT,  VT, Expand);
+      setOperationAction(ISD::FNEARBYINT, VT, Expand);
       setOperationAction(ISD::EXTRACT_VECTOR_ELT, VT, Expand);
       setOperationAction(ISD::INSERT_VECTOR_ELT, VT, Expand);
       setOperationAction(ISD::BUILD_VECTOR, VT, Expand);
@@ -361,12 +376,16 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
       setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Expand);
       setOperationAction(ISD::CTTZ, VT, Expand);
       setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
-    }
+      setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
 
-    for (unsigned i = (unsigned)MVT::FIRST_FP_VECTOR_VALUETYPE;
-         i <= (unsigned)MVT::LAST_FP_VECTOR_VALUETYPE; ++i) {
-      MVT::SimpleValueType VT = (MVT::SimpleValueType)i;
-      setOperationAction(ISD::FSQRT, VT, Expand);
+      for (unsigned j = (unsigned)MVT::FIRST_VECTOR_VALUETYPE;
+           j <= (unsigned)MVT::LAST_VECTOR_VALUETYPE; ++j) {
+        MVT::SimpleValueType InnerVT = (MVT::SimpleValueType)j;
+        setTruncStoreAction(VT, InnerVT, Expand);
+      }
+      setLoadExtAction(ISD::SEXTLOAD, VT, Expand);
+      setLoadExtAction(ISD::ZEXTLOAD, VT, Expand);
+      setLoadExtAction(ISD::EXTLOAD, VT, Expand);
     }
 
     // We can custom expand all VECTOR_SHUFFLEs to VPERM, others we can handle
@@ -383,6 +402,10 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
     setOperationAction(ISD::FP_TO_UINT, MVT::v4i32, Legal);
     setOperationAction(ISD::SINT_TO_FP, MVT::v4i32, Legal);
     setOperationAction(ISD::UINT_TO_FP, MVT::v4i32, Legal);
+    setOperationAction(ISD::FFLOOR, MVT::v4f32, Legal);
+    setOperationAction(ISD::FCEIL, MVT::v4f32, Legal);
+    setOperationAction(ISD::FTRUNC, MVT::v4f32, Legal);
+    setOperationAction(ISD::FNEARBYINT, MVT::v4f32, Legal);
 
     addRegisterClass(MVT::v4f32, &PPC::VRRCRegClass);
     addRegisterClass(MVT::v4i32, &PPC::VRRCRegClass);
@@ -552,6 +575,11 @@ const char *PPCTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case PPCISD::TC_RETURN:       return "PPCISD::TC_RETURN";
   case PPCISD::CR6SET:          return "PPCISD::CR6SET";
   case PPCISD::CR6UNSET:        return "PPCISD::CR6UNSET";
+  case PPCISD::ADDIS_TOC_HA:    return "PPCISD::ADDIS_TOC_HA";
+  case PPCISD::LD_TOC_L:        return "PPCISD::LD_TOC_L";
+  case PPCISD::ADDI_TOC_L:      return "PPCISD::ADDI_TOC_L";
+  case PPCISD::LD_GOT_TPREL:    return "PPCISD::LD_GOT_TPREL";
+  case PPCISD::ADD_TLS:         return "PPCISD::ADD_TLS";
   }
 }
 
@@ -1298,19 +1326,34 @@ SDValue PPCTargetLowering::LowerGlobalTLSAddress(SDValue Op,
   EVT PtrVT = getPointerTy();
   bool is64bit = PPCSubTarget.isPPC64();
 
-  TLSModel::Model model = getTargetMachine().getTLSModel(GV);
+  TLSModel::Model Model = getTargetMachine().getTLSModel(GV);
 
-  SDValue TGAHi = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0,
-                                             PPCII::MO_TPREL16_HA);
-  SDValue TGALo = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0,
-                                             PPCII::MO_TPREL16_LO);
+  if (Model == TLSModel::LocalExec) {
+    SDValue TGAHi = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0,
+                                               PPCII::MO_TPREL16_HA);
+    SDValue TGALo = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0,
+                                               PPCII::MO_TPREL16_LO);
+    SDValue TLSReg = DAG.getRegister(is64bit ? PPC::X13 : PPC::R2,
+                                     is64bit ? MVT::i64 : MVT::i32);
+    SDValue Hi = DAG.getNode(PPCISD::Hi, dl, PtrVT, TGAHi, TLSReg);
+    return DAG.getNode(PPCISD::Lo, dl, PtrVT, TGALo, Hi);
+  }
 
-  if (model != TLSModel::LocalExec)
-    llvm_unreachable("only local-exec TLS mode supported");
-  SDValue TLSReg = DAG.getRegister(is64bit ? PPC::X13 : PPC::R2,
+  if (!is64bit)
+    llvm_unreachable("only local-exec is currently supported for ppc32");
+
+  if (Model != TLSModel::InitialExec)
+    llvm_unreachable("only local-exec and initial-exec TLS modes supported");
+
+  SDValue GOTOffset = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0,
+                                                 PPCII::MO_GOT_TPREL16_DS);
+  SDValue TPReg = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0,
+                                             PPCII::MO_TLS);
+  SDValue GOTReg = DAG.getRegister(is64bit ? PPC::X2  : PPC::R2,
                                    is64bit ? MVT::i64 : MVT::i32);
-  SDValue Hi = DAG.getNode(PPCISD::Hi, dl, PtrVT, TGAHi, TLSReg);
-  return DAG.getNode(PPCISD::Lo, dl, PtrVT, TGALo, Hi);
+  SDValue TPOffset = DAG.getNode(PPCISD::LD_GOT_TPREL, dl, PtrVT,
+                                 GOTOffset, GOTReg);
+  return DAG.getNode(PPCISD::ADD_TLS, dl, PtrVT, TPOffset, TPReg);
 }
 
 SDValue PPCTargetLowering::LowerGlobalAddress(SDValue Op,
@@ -3167,12 +3210,32 @@ PPCTargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
   // Copy all of the result registers out of their specified physreg.
   for (unsigned i = 0, e = RVLocs.size(); i != e; ++i) {
     CCValAssign &VA = RVLocs[i];
-    EVT VT = VA.getValVT();
     assert(VA.isRegLoc() && "Can only return in registers!");
-    Chain = DAG.getCopyFromReg(Chain, dl,
-                               VA.getLocReg(), VT, InFlag).getValue(1);
-    InVals.push_back(Chain.getValue(0));
-    InFlag = Chain.getValue(2);
+
+    SDValue Val = DAG.getCopyFromReg(Chain, dl,
+                                     VA.getLocReg(), VA.getLocVT(), InFlag);
+    Chain = Val.getValue(1);
+    InFlag = Val.getValue(2);
+
+    switch (VA.getLocInfo()) {
+    default: llvm_unreachable("Unknown loc info!");
+    case CCValAssign::Full: break;
+    case CCValAssign::AExt:
+      Val = DAG.getNode(ISD::TRUNCATE, dl, VA.getValVT(), Val);
+      break;
+    case CCValAssign::ZExt:
+      Val = DAG.getNode(ISD::AssertZext, dl, VA.getLocVT(), Val,
+                        DAG.getValueType(VA.getValVT()));
+      Val = DAG.getNode(ISD::TRUNCATE, dl, VA.getValVT(), Val);
+      break;
+    case CCValAssign::SExt:
+      Val = DAG.getNode(ISD::AssertSext, dl, VA.getLocVT(), Val,
+                        DAG.getValueType(VA.getValVT()));
+      Val = DAG.getNode(ISD::TRUNCATE, dl, VA.getValVT(), Val);
+      break;
+    }
+
+    InVals.push_back(Val);
   }
 
   return Chain;
@@ -4306,8 +4369,24 @@ PPCTargetLowering::LowerReturn(SDValue Chain,
   for (unsigned i = 0; i != RVLocs.size(); ++i) {
     CCValAssign &VA = RVLocs[i];
     assert(VA.isRegLoc() && "Can only return in registers!");
-    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(),
-                             OutVals[i], Flag);
+
+    SDValue Arg = OutVals[i];
+
+    switch (VA.getLocInfo()) {
+    default: llvm_unreachable("Unknown loc info!");
+    case CCValAssign::Full: break;
+    case CCValAssign::AExt:
+      Arg = DAG.getNode(ISD::ANY_EXTEND, dl, VA.getLocVT(), Arg);
+      break;
+    case CCValAssign::ZExt:
+      Arg = DAG.getNode(ISD::ZERO_EXTEND, dl, VA.getLocVT(), Arg);
+      break;
+    case CCValAssign::SExt:
+      Arg = DAG.getNode(ISD::SIGN_EXTEND, dl, VA.getLocVT(), Arg);
+      break;
+    }
+
+    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Arg, Flag);
     Flag = Chain.getValue(1);
   }
 
@@ -6433,6 +6512,14 @@ PPCTargetLowering::getConstraintType(const std::string &Constraint) const {
     case 'v':
     case 'y':
       return C_RegisterClass;
+    case 'Z':
+      // FIXME: While Z does indicate a memory constraint, it specifically
+      // indicates an r+r address (used in conjunction with the 'y' modifier
+      // in the replacement string). Currently, we're forcing the base
+      // register to be r0 in the asm printer (which is interpreted as zero)
+      // and forming the complete address in the second register. This is
+      // suboptimal.
+      return C_Memory;
     }
   }
   return TargetLowering::getConstraintType(Constraint);
@@ -6474,6 +6561,9 @@ PPCTargetLowering::getSingleConstraintMatchWeight(
     break;
   case 'y':
     weight = CW_Register;
+    break;
+  case 'Z':
+    weight = CW_Memory;
     break;
   }
   return weight;

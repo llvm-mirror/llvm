@@ -13,13 +13,13 @@
 
 #include "X86TargetMachine.h"
 #include "X86.h"
-#include "llvm/PassManager.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Target/TargetOptions.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Target/TargetOptions.h"
 using namespace llvm;
 
 extern "C" void LLVMInitializeX86Target() {
@@ -171,7 +171,6 @@ bool X86PassConfig::addInstSelector() {
 }
 
 bool X86PassConfig::addPreRegAlloc() {
-  addPass(createX86MaxStackAlignmentHeuristicPass());
   return false;  // -print-machineinstr shouldn't print after this.
 }
 

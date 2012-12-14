@@ -13,16 +13,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "HexagonISelLowering.h"
-#include "HexagonTargetMachine.h"
 #include "HexagonMachineFunctionInfo.h"
-#include "HexagonTargetObjectFile.h"
 #include "HexagonSubtarget.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/GlobalAlias.h"
-#include "llvm/Intrinsics.h"
+#include "HexagonTargetMachine.h"
+#include "HexagonTargetObjectFile.h"
 #include "llvm/CallingConv.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -32,6 +26,12 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/DerivedTypes.h"
+#include "llvm/Function.h"
+#include "llvm/GlobalAlias.h"
+#include "llvm/GlobalVariable.h"
+#include "llvm/InlineAsm.h"
+#include "llvm/Intrinsics.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -608,7 +608,7 @@ static bool getIndexedAddressParts(SDNode *Ptr, EVT VT,
 
 // TODO: Put this function along with the other isS* functions in
 // HexagonISelDAGToDAG.cpp into a common file. Or better still, use the
-// functions defined in HexagonImmediates.td.
+// functions defined in HexagonOperands.td.
 static bool Is_PostInc_S4_Offset(SDNode * S, int ShiftAmount) {
   ConstantSDNode *N = cast<ConstantSDNode>(S);
 

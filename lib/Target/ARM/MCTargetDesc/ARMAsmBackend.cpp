@@ -8,9 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/ARMMCTargetDesc.h"
+#include "MCTargetDesc/ARMAddressingModes.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "MCTargetDesc/ARMFixupKinds.h"
-#include "MCTargetDesc/ARMAddressingModes.h"
+#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDirectives.h"
@@ -21,7 +22,6 @@
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
-#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Object/MachOFormat.h"
@@ -113,6 +113,10 @@ public:
                          const MCFixup &Fixup, const MCFragment *DF,
                          MCValue &Target, uint64_t &Value,
                          bool &IsResolved);
+
+
+  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
+                  uint64_t Value) const;
 
   bool mayNeedRelaxation(const MCInst &Inst) const;
 
@@ -216,7 +220,7 @@ void ARMAsmBackend::relaxInstruction(const MCInst &Inst, MCInst &Res) const {
 bool ARMAsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
   const uint16_t Thumb1_16bitNopEncoding = 0x46c0; // using MOV r8,r8
   const uint16_t Thumb2_16bitNopEncoding = 0xbf00; // NOP
-  const uint32_t ARMv4_NopEncoding = 0xe1a0000; // using MOV r0,r0
+  const uint32_t ARMv4_NopEncoding = 0xe1a00000; // using MOV r0,r0
   const uint32_t ARMv6T2_NopEncoding = 0xe320f000; // NOP
   if (isThumb()) {
     const uint16_t nopEncoding = hasNOP() ? Thumb2_16bitNopEncoding
@@ -552,65 +556,6 @@ void ARMAsmBackend::processFixupValue(const MCAssembler &Asm,
   (void)adjustFixupValue(Fixup, Value, &Asm.getContext());
 }
 
-namespace {
-
-// FIXME: This should be in a separate file.
-// ELF is an ELF of course...
-class ELFARMAsmBackend : public ARMAsmBackend {
-public:
-  uint8_t OSABI;
-  ELFARMAsmBackend(const Target &T, const StringRef TT,
-                   uint8_t _OSABI)
-    : ARMAsmBackend(T, TT), OSABI(_OSABI) { }
-
-  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                  uint64_t Value) const;
-
-  MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
-    return createARMELFObjectWriter(OS, OSABI);
-  }
-};
-
-// FIXME: Raise this to share code between Darwin and ELF.
-void ELFARMAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
-                                  unsigned DataSize, uint64_t Value) const {
-  unsigned NumBytes = 4;        // FIXME: 2 for Thumb
-  Value = adjustFixupValue(Fixup, Value);
-  if (!Value) return;           // Doesn't change encoding.
-
-  unsigned Offset = Fixup.getOffset();
-
-  // For each byte of the fragment that the fixup touches, mask in the bits from
-  // the fixup value. The Value has been "split up" into the appropriate
-  // bitfields above.
-  for (unsigned i = 0; i != NumBytes; ++i)
-    Data[Offset + i] |= uint8_t((Value >> (i * 8)) & 0xff);
-}
-
-// FIXME: This should be in a separate file.
-class DarwinARMAsmBackend : public ARMAsmBackend {
-public:
-  const object::mach::CPUSubtypeARM Subtype;
-  DarwinARMAsmBackend(const Target &T, const StringRef TT,
-                      object::mach::CPUSubtypeARM st)
-    : ARMAsmBackend(T, TT), Subtype(st) {
-      HasDataInCodeSupport = true;
-    }
-
-  MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
-    return createARMMachObjectWriter(OS, /*Is64Bit=*/false,
-                                     object::mach::CTM_ARM,
-                                     Subtype);
-  }
-
-  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                  uint64_t Value) const;
-
-  virtual bool doesSectionRequireSymbols(const MCSection &Section) const {
-    return false;
-  }
-};
-
 /// getFixupKindNumBytes - The number of bytes the fixup may change.
 static unsigned getFixupKindNumBytes(unsigned Kind) {
   switch (Kind) {
@@ -659,8 +604,8 @@ static unsigned getFixupKindNumBytes(unsigned Kind) {
   }
 }
 
-void DarwinARMAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
-                                     unsigned DataSize, uint64_t Value) const {
+void ARMAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
+                               unsigned DataSize, uint64_t Value) const {
   unsigned NumBytes = getFixupKindNumBytes(Fixup.getKind());
   Value = adjustFixupValue(Fixup, Value);
   if (!Value) return;           // Doesn't change encoding.
@@ -668,11 +613,49 @@ void DarwinARMAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
   unsigned Offset = Fixup.getOffset();
   assert(Offset + NumBytes <= DataSize && "Invalid fixup offset!");
 
-  // For each byte of the fragment that the fixup touches, mask in the
-  // bits from the fixup value.
+  // For each byte of the fragment that the fixup touches, mask in the bits from
+  // the fixup value. The Value has been "split up" into the appropriate
+  // bitfields above.
   for (unsigned i = 0; i != NumBytes; ++i)
     Data[Offset + i] |= uint8_t((Value >> (i * 8)) & 0xff);
 }
+
+namespace {
+
+// FIXME: This should be in a separate file.
+// ELF is an ELF of course...
+class ELFARMAsmBackend : public ARMAsmBackend {
+public:
+  uint8_t OSABI;
+  ELFARMAsmBackend(const Target &T, const StringRef TT,
+                   uint8_t _OSABI)
+    : ARMAsmBackend(T, TT), OSABI(_OSABI) { }
+
+  MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
+    return createARMELFObjectWriter(OS, OSABI);
+  }
+};
+
+// FIXME: This should be in a separate file.
+class DarwinARMAsmBackend : public ARMAsmBackend {
+public:
+  const object::mach::CPUSubtypeARM Subtype;
+  DarwinARMAsmBackend(const Target &T, const StringRef TT,
+                      object::mach::CPUSubtypeARM st)
+    : ARMAsmBackend(T, TT), Subtype(st) {
+      HasDataInCodeSupport = true;
+    }
+
+  MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
+    return createARMMachObjectWriter(OS, /*Is64Bit=*/false,
+                                     object::mach::CTM_ARM,
+                                     Subtype);
+  }
+
+  virtual bool doesSectionRequireSymbols(const MCSection &Section) const {
+    return false;
+  }
+};
 
 } // end anonymous namespace
 

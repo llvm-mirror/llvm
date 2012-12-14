@@ -12,15 +12,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "PPCTargetMachine.h"
-#include "PPCRelocations.h"
 #include "PPC.h"
-#include "llvm/Module.h"
-#include "llvm/PassManager.h"
+#include "PPCRelocations.h"
+#include "PPCTargetMachine.h"
 #include "llvm/CodeGen/JITCodeEmitter.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/Module.h"
+#include "llvm/PassManager.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetOptions.h"
@@ -68,6 +68,8 @@ namespace {
     unsigned getLO16Encoding(const MachineInstr &MI, unsigned OpNo) const;
     unsigned getMemRIEncoding(const MachineInstr &MI, unsigned OpNo) const;
     unsigned getMemRIXEncoding(const MachineInstr &MI, unsigned OpNo) const;
+    unsigned getTLSOffsetEncoding(const MachineInstr &MI, unsigned OpNo) const;
+    unsigned getTLSRegEncoding(const MachineInstr &MI, unsigned OpNo) const;
 
     const char *getPassName() const { return "PowerPC Machine Code Emitter"; }
 
@@ -240,6 +242,20 @@ unsigned PPCCodeEmitter::getMemRIXEncoding(const MachineInstr &MI,
   
   MCE.addRelocation(GetRelocation(MO, PPC::reloc_absolute_low_ix));
   return RegBits;
+}
+
+
+unsigned PPCCodeEmitter::getTLSOffsetEncoding(const MachineInstr &MI,
+                                           unsigned OpNo) const {
+  llvm_unreachable("TLS not supported on the old JIT.");
+  return 0;
+}
+
+
+unsigned PPCCodeEmitter::getTLSRegEncoding(const MachineInstr &MI,
+                                           unsigned OpNo) const {
+  llvm_unreachable("TLS not supported on the old JIT.");
+  return 0;
 }
 
 

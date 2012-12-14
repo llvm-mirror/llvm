@@ -17,8 +17,8 @@
 
 #include "PPC.h"
 #include "PPCSubtarget.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
   namespace PPCISD {
@@ -178,6 +178,20 @@ namespace llvm {
       CR6SET,
       CR6UNSET,
 
+      /// G8RC = LD_GOT_TPREL Symbol, G8RReg - Used by the initial-exec
+      /// TLS model, produces a LD instruction with base register G8RReg
+      /// and offset sym@got@tprel.  The latter identifies the GOT entry
+      /// containing the offset of "sym" relative to the thread pointer.
+      LD_GOT_TPREL,
+
+      /// G8RC = ADD_TLS G8RReg, Symbol - Used by the initial-exec TLS
+      /// model, produces an ADD instruction that adds the contents of
+      /// G8RReg to the thread pointer.  Symbol contains a relocation
+      /// sym@tls which is to be replaced by the thread pointer and
+      /// identifies to the linker that the instruction is part of a
+      /// TLS sequence.
+      ADD_TLS,
+
       /// STD_32 - This is the STD instruction for use with "32-bit" registers.
       STD_32 = ISD::FIRST_TARGET_MEMORY_OPCODE,
 
@@ -191,7 +205,21 @@ namespace llvm {
       /// byte-swapping load instruction.  It loads "Type" bits, byte swaps it,
       /// then puts it in the bottom bits of the GPRC.  TYPE can be either i16
       /// or i32.
-      LBRX
+      LBRX,
+
+      /// G8RC = ADDIS_TOC_HA %X2, Symbol - For medium code model, produces
+      /// an ADDIS8 instruction that adds the TOC base register to sym@toc@ha.
+      ADDIS_TOC_HA,
+
+      /// G8RC = LD_TOC_L Symbol, G8RReg - For medium code model, produces a
+      /// LD instruction with base register G8RReg and offset sym@toc@l.
+      /// Preceded by an ADDIS_TOC_HA to form a full 32-bit offset.
+      LD_TOC_L,
+
+      /// G8RC = ADDI_TOC_L G8RReg, Symbol - For medium code model, produces
+      /// an ADDI8 instruction that adds G8RReg to sym@toc@l.
+      /// Preceded by an ADDIS_TOC_HA to form a full 32-bit offset.
+      ADDI_TOC_L
     };
   }
 

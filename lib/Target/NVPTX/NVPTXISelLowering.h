@@ -92,6 +92,8 @@ public:
   virtual unsigned getFunctionAlignment(const Function *F) const;
 
   virtual EVT getSetCCResultType(EVT VT) const {
+    if (VT.isVector())
+      return MVT::getVectorVT(MVT::i1, VT.getVectorNumElements());
     return MVT::i1;
   }
 
@@ -129,6 +131,8 @@ public:
     return MVT::i32;
   }
 
+  virtual bool shouldSplitVectorElementType(EVT VT) const;
+
 private:
   const NVPTXSubtarget &nvptxSubtarget;  // cache the subtarget here
 
@@ -138,6 +142,9 @@ private:
   SDValue getParamHelpSymbol(SelectionDAG &DAG, int idx);
 
   SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
 };
 } // namespace llvm
 

@@ -10,6 +10,7 @@ add_llvm_library(LLVMAnalysis
   BranchProbabilityInfo.cpp
   CFGPrinter.cpp
   CaptureTracking.cpp
+  CostModel.cpp
   CodeMetrics.cpp
   ConstantFolding.cpp
   DbgInfoPrinter.cpp
@@ -46,6 +47,7 @@ add_llvm_library(LLVMAnalysis
   ProfileVerifierPass.cpp
   ProfileDataLoader.cpp
   ProfileDataLoaderPass.cpp
+  PtrUseVisitor.cpp
   RegionInfo.cpp
   RegionPass.cpp
   RegionPrinter.cpp

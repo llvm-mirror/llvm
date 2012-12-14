@@ -14,12 +14,12 @@
 #ifndef LLVM_RUNTIME_DYLD_IMPL_H
 #define LLVM_RUNTIME_DYLD_IMPL_H
 
-#include "llvm/ExecutionEngine/RuntimeDyld.h"
-#include "llvm/ExecutionEngine/ObjectImage.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/ExecutionEngine/ObjectImage.h"
+#include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -168,7 +168,7 @@ protected:
   inline unsigned getMaxStubSize() {
     if (Arch == Triple::arm || Arch == Triple::thumb)
       return 8; // 32-bit instruction and 32-bit address
-    else if (Arch == Triple::mipsel)
+    else if (Arch == Triple::mipsel || Arch == Triple::mips)
       return 16;
     else if (Arch == Triple::ppc64)
       return 44;
@@ -272,16 +272,14 @@ protected:
   void resolveRelocationEntry(const RelocationEntry &RE, uint64_t Value);
 
   /// \brief A object file specific relocation resolver
-  /// \param LocalAddress The address to apply the relocation action
-  /// \param FinalAddress If the linker prepare code for remote executon then
-  ///                     FinalAddress has the remote address to apply the
-  ///                     relocation action, otherwise is same as LocalAddress
+  /// \param Section The section where the relocation is being applied
+  /// \param Offset The offset into the section for this relocation
   /// \param Value Target symbol address to apply the relocation action
   /// \param Type object file specific relocation type
   /// \param Addend A constant addend used to compute the value to be stored
   ///        into the relocatable field
-  virtual void resolveRelocation(uint8_t *LocalAddress,
-                                 uint64_t FinalAddress,
+  virtual void resolveRelocation(const SectionEntry &Section,
+                                 uint64_t Offset,
                                  uint64_t Value,
                                  uint32_t Type,
                                  int64_t Addend) = 0;

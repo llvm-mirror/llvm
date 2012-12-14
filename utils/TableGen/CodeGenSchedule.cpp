@@ -16,10 +16,10 @@
 
 #include "CodeGenSchedule.h"
 #include "CodeGenTarget.h"
-#include "llvm/TableGen/Error.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Regex.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/TableGen/Error.h"
 
 using namespace llvm;
 
@@ -1591,7 +1591,7 @@ unsigned CodeGenProcModel::getProcResourceIdx(Record *PRDef) const {
     PrintFatalError(PRDef->getLoc(), "ProcResource def is not included in "
                     "the ProcResources list for " + ModelName);
   // Idx=0 is reserved for invalid.
-  return 1 + PRPos - ProcResourceDefs.begin();
+  return 1 + (PRPos - ProcResourceDefs.begin());
 }
 
 #ifndef NDEBUG

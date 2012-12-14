@@ -17,25 +17,25 @@
 #include "Mips.h"
 #include "MipsAnalyzeImmediate.h"
 #include "MipsInstrInfo.h"
-#include "MipsSubtarget.h"
 #include "MipsMachineFunction.h"
+#include "MipsSubtarget.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/Constants.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/Type.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/Target/TargetFrameLowering.h"
+#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/Type.h"
 
 #define GET_REGINFO_TARGET_DESC
 #include "MipsGenRegisterInfo.inc"
@@ -81,11 +81,11 @@ MipsRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
 BitVector MipsRegisterInfo::
 getReservedRegs(const MachineFunction &MF) const {
   static const uint16_t ReservedCPURegs[] = {
-    Mips::ZERO, Mips::AT, Mips::K0, Mips::K1, Mips::SP
+    Mips::ZERO, Mips::K0, Mips::K1, Mips::SP
   };
 
   static const uint16_t ReservedCPU64Regs[] = {
-    Mips::ZERO_64, Mips::AT_64, Mips::K0_64, Mips::K1_64, Mips::SP_64
+    Mips::ZERO_64, Mips::K0_64, Mips::K1_64, Mips::SP_64
   };
 
   BitVector Reserved(getNumRegs());
@@ -94,20 +94,16 @@ getReservedRegs(const MachineFunction &MF) const {
   for (unsigned I = 0; I < array_lengthof(ReservedCPURegs); ++I)
     Reserved.set(ReservedCPURegs[I]);
 
-  if (Subtarget.hasMips64()) {
-    for (unsigned I = 0; I < array_lengthof(ReservedCPU64Regs); ++I)
-      Reserved.set(ReservedCPU64Regs[I]);
+  for (unsigned I = 0; I < array_lengthof(ReservedCPU64Regs); ++I)
+    Reserved.set(ReservedCPU64Regs[I]);
 
+  if (Subtarget.hasMips64()) {
     // Reserve all registers in AFGR64.
     for (RegIter Reg = Mips::AFGR64RegClass.begin(),
          EReg = Mips::AFGR64RegClass.end(); Reg != EReg; ++Reg)
       Reserved.set(*Reg);
   } else {
-    // Reserve all registers in CPU64Regs & FGR64.
-    for (RegIter Reg = Mips::CPU64RegsRegClass.begin(),
-         EReg = Mips::CPU64RegsRegClass.end(); Reg != EReg; ++Reg)
-      Reserved.set(*Reg);
-
+    // Reserve all registers in FGR64.
     for (RegIter Reg = Mips::FGR64RegClass.begin(),
          EReg = Mips::FGR64RegClass.end(); Reg != EReg; ++Reg)
       Reserved.set(*Reg);

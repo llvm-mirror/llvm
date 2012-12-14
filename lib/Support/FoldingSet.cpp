@@ -8,9 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 // This file implements a hash set that can be used to remove duplication of
-// nodes in a graph.  This code was originally created by Chris Lattner for use
-// with SelectionDAGCSEMap, but was isolated to provide use across the llvm code
-// set. 
+// nodes in a graph.
 //
 //===----------------------------------------------------------------------===//
 
@@ -18,8 +16,8 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Host.h"
+#include "llvm/Support/MathExtras.h"
 #include <cassert>
 #include <cstring>
 using namespace llvm;

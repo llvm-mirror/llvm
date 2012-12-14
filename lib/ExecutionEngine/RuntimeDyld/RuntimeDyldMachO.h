@@ -14,10 +14,10 @@
 #ifndef LLVM_RUNTIME_DYLD_MACHO_H
 #define LLVM_RUNTIME_DYLD_MACHO_H
 
+#include "RuntimeDyldImpl.h"
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/Object/MachOObject.h"
 #include "llvm/Support/Format.h"
-#include "RuntimeDyldImpl.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -55,8 +55,8 @@ protected:
                                     StubMap &Stubs);
 
 public:
-  virtual void resolveRelocation(uint8_t *LocalAddress,
-                                 uint64_t FinalAddress,
+  virtual void resolveRelocation(const SectionEntry &Section,
+                                 uint64_t Offset,
                                  uint64_t Value,
                                  uint32_t Type,
                                  int64_t Addend);

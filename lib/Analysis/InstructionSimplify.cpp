@@ -18,20 +18,20 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "instsimplify"
-#include "llvm/GlobalAlias.h"
-#include "llvm/Operator.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/DataLayout.h"
+#include "llvm/GlobalAlias.h"
+#include "llvm/Operator.h"
 #include "llvm/Support/ConstantRange.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "llvm/Support/PatternMatch.h"
 #include "llvm/Support/ValueHandle.h"
-#include "llvm/DataLayout.h"
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
@@ -886,6 +886,33 @@ Value *llvm::SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
                            RecursionLimit);
 }
 
+/// Given the operands for an FMul, see if we can fold the result
+static Value *SimplifyFMulInst(Value *Op0, Value *Op1,
+                               FastMathFlags FMF,
+                               const Query &Q,
+                               unsigned MaxRecurse) {
+ if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
+    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
+      Constant *Ops[] = { CLHS, CRHS };
+      return ConstantFoldInstOperands(Instruction::FMul, CLHS->getType(),
+                                      Ops, Q.TD, Q.TLI);
+    }
+ }
+
+ // Check for some fast-math optimizations
+ if (FMF.noNaNs()) {
+   if (FMF.noSignedZeros()) {
+     // fmul N S 0, x ==> 0
+     if (match(Op0, m_Zero()))
+       return Op0;
+     if (match(Op1, m_Zero()))
+       return Op1;
+   }
+ }
+
+ return 0;
+}
+
 /// SimplifyMulInst - Given operands for a Mul, see if we can
 /// fold the result.  If not, this returns null.
 static Value *SimplifyMulInst(Value *Op0, Value *Op1, const Query &Q,
@@ -949,6 +976,14 @@ static Value *SimplifyMulInst(Value *Op0, Value *Op1, const Query &Q,
       return V;
 
   return 0;
+}
+
+Value *llvm::SimplifyFMulInst(Value *Op0, Value *Op1,
+                              FastMathFlags FMF,
+                              const DataLayout *TD,
+                              const TargetLibraryInfo *TLI,
+                              const DominatorTree *DT) {
+  return ::SimplifyFMulInst(Op0, Op1, FMF, Query (TD, TLI, DT), RecursionLimit);
 }
 
 Value *llvm::SimplifyMulInst(Value *Op0, Value *Op1, const DataLayout *TD,
@@ -2065,8 +2100,25 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
     if (A && C && (A == C || A == D || B == C || B == D) &&
         NoLHSWrapProblem && NoRHSWrapProblem) {
       // Determine Y and Z in the form icmp (X+Y), (X+Z).
-      Value *Y = (A == C || A == D) ? B : A;
-      Value *Z = (C == A || C == B) ? D : C;
+      Value *Y, *Z;
+      if (A == C) {
+        // C + B == C + D  ->  B == D
+        Y = B;
+        Z = D;
+      } else if (A == D) {
+        // D + B == C + D  ->  B == C
+        Y = B;
+        Z = C;
+      } else if (B == C) {
+        // A + C == C + D  ->  A == D
+        Y = A;
+        Z = D;
+      } else {
+        assert(B == D);
+        // A + D == C + D  ->  A == C
+        Y = A;
+        Z = C;
+      }
       if (Value *V = SimplifyICmpInst(Pred, Y, Z, Q, MaxRecurse-1))
         return V;
     }
@@ -2781,6 +2833,10 @@ Value *llvm::SimplifyInstruction(Instruction *I, const DataLayout *TD,
                              cast<BinaryOperator>(I)->hasNoSignedWrap(),
                              cast<BinaryOperator>(I)->hasNoUnsignedWrap(),
                              TD, TLI, DT);
+    break;
+  case Instruction::FMul:
+    Result = SimplifyFMulInst(I->getOperand(0), I->getOperand(1),
+                              I->getFastMathFlags(), TD, TLI, DT);
     break;
   case Instruction::Mul:
     Result = SimplifyMulInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);

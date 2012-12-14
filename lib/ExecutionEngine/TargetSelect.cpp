@@ -15,13 +15,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
-#include "llvm/Module.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/MC/SubtargetFeature.h"
-#include "llvm/Target/TargetMachine.h"
+#include "llvm/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 
@@ -32,8 +32,18 @@ TargetMachine *EngineBuilder::selectTarget() {
   // must use the host architecture.
   if (UseMCJIT && WhichEngine != EngineKind::Interpreter && M)
     TT.setTriple(M->getTargetTriple());
-  else
+  else {
     TT.setTriple(LLVM_HOSTTRIPLE);
+#if defined(__APPLE__)
+#if defined(__LP64__)
+    if (TT.isArch32Bit())
+      TT = TT.get64BitArchVariant();
+#else
+    if (TT.isArch64Bit())
+      TT = TT.get32BitArchVariant();
+#endif
+#endif // APPLE
+  }
   return selectTarget(TT, MArch, MCPU, MAttrs);
 }
 

@@ -8,21 +8,21 @@
 //===----------------------------------------------------------------------===//
 //
 // This file implements the Attributes, AttributeImpl, AttrBuilder,
-// AttributeListImpl, and AttrListPtr classes.
+// AttributeListImpl, and AttributeSet classes.
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Attributes.h"
 #include "AttributesImpl.h"
 #include "LLVMContextImpl.h"
-#include "llvm/Type.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Atomic.h"
-#include "llvm/Support/Mutex.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/Mutex.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Type.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -281,14 +281,14 @@ bool AttrBuilder::hasAlignmentAttr() const {
 uint64_t AttrBuilder::getAlignment() const {
   if (!hasAlignmentAttr())
     return 0;
-  return 1U <<
+  return 1ULL <<
     (((Bits & AttributesImpl::getAttrMask(Attributes::Alignment)) >> 16) - 1);
 }
 
 uint64_t AttrBuilder::getStackAlignment() const {
   if (!hasAlignmentAttr())
     return 0;
-  return 1U <<
+  return 1ULL <<
     (((Bits & AttributesImpl::getAttrMask(Attributes::StackAlignment))>>26)-1);
 }
 
@@ -355,65 +355,11 @@ uint64_t AttributesImpl::getStackAlignment() const {
 // AttributeListImpl Definition
 //===----------------------------------------------------------------------===//
 
-namespace llvm {
-  class AttributeListImpl;
-}
-
-static ManagedStatic<FoldingSet<AttributeListImpl> > AttributesLists;
-
-namespace llvm {
-static ManagedStatic<sys::SmartMutex<true> > ALMutex;
-
-class AttributeListImpl : public FoldingSetNode {
-  sys::cas_flag RefCount;
-
-  // AttributesList is uniqued, these should not be publicly available.
-  void operator=(const AttributeListImpl &) LLVM_DELETED_FUNCTION;
-  AttributeListImpl(const AttributeListImpl &) LLVM_DELETED_FUNCTION;
-  ~AttributeListImpl();                        // Private implementation
-public:
-  SmallVector<AttributeWithIndex, 4> Attrs;
-
-  AttributeListImpl(ArrayRef<AttributeWithIndex> attrs)
-    : Attrs(attrs.begin(), attrs.end()) {
-    RefCount = 0;
-  }
-
-  void AddRef() {
-    sys::SmartScopedLock<true> Lock(*ALMutex);
-    ++RefCount;
-  }
-  void DropRef() {
-    sys::SmartScopedLock<true> Lock(*ALMutex);
-    if (!AttributesLists.isConstructed())
-      return;
-    sys::cas_flag new_val = --RefCount;
-    if (new_val == 0)
-      delete this;
-  }
-
-  void Profile(FoldingSetNodeID &ID) const {
-    Profile(ID, Attrs);
-  }
-  static void Profile(FoldingSetNodeID &ID, ArrayRef<AttributeWithIndex> Attrs){
-    for (unsigned i = 0, e = Attrs.size(); i != e; ++i) {
-      ID.AddInteger(Attrs[i].Attrs.Raw());
-      ID.AddInteger(Attrs[i].Index);
-    }
-  }
-};
-
-} // end llvm namespace
-
-AttributeListImpl::~AttributeListImpl() {
-  // NOTE: Lock must be acquired by caller.
-  AttributesLists->RemoveNode(this);
-}
-
-AttrListPtr AttrListPtr::get(ArrayRef<AttributeWithIndex> Attrs) {
+AttributeSet AttributeSet::get(LLVMContext &C,
+                             ArrayRef<AttributeWithIndex> Attrs) {
   // If there are no attributes then return a null AttributesList pointer.
   if (Attrs.empty())
-    return AttrListPtr();
+    return AttributeSet();
 
 #ifndef NDEBUG
   for (unsigned i = 0, e = Attrs.size(); i != e; ++i) {
@@ -425,61 +371,46 @@ AttrListPtr AttrListPtr::get(ArrayRef<AttributeWithIndex> Attrs) {
 #endif
 
   // Otherwise, build a key to look up the existing attributes.
+  LLVMContextImpl *pImpl = C.pImpl;
   FoldingSetNodeID ID;
   AttributeListImpl::Profile(ID, Attrs);
-  void *InsertPos;
 
-  sys::SmartScopedLock<true> Lock(*ALMutex);
-
-  AttributeListImpl *PAL =
-    AttributesLists->FindNodeOrInsertPos(ID, InsertPos);
+  void *InsertPoint;
+  AttributeListImpl *PA = pImpl->AttrsLists.FindNodeOrInsertPos(ID,
+                                                                InsertPoint);
 
   // If we didn't find any existing attributes of the same shape then
   // create a new one and insert it.
-  if (!PAL) {
-    PAL = new AttributeListImpl(Attrs);
-    AttributesLists->InsertNode(PAL, InsertPos);
+  if (!PA) {
+    PA = new AttributeListImpl(Attrs);
+    pImpl->AttrsLists.InsertNode(PA, InsertPoint);
   }
 
   // Return the AttributesList that we found or created.
-  return AttrListPtr(PAL);
+  return AttributeSet(PA);
 }
 
 //===----------------------------------------------------------------------===//
-// AttrListPtr Method Implementations
+// AttributeSet Method Implementations
 //===----------------------------------------------------------------------===//
 
-AttrListPtr::AttrListPtr(AttributeListImpl *LI) : AttrList(LI) {
-  if (LI) LI->AddRef();
-}
-
-AttrListPtr::AttrListPtr(const AttrListPtr &P) : AttrList(P.AttrList) {
-  if (AttrList) AttrList->AddRef();
-}
-
-const AttrListPtr &AttrListPtr::operator=(const AttrListPtr &RHS) {
-  sys::SmartScopedLock<true> Lock(*ALMutex);
+const AttributeSet &AttributeSet::operator=(const AttributeSet &RHS) {
   if (AttrList == RHS.AttrList) return *this;
-  if (AttrList) AttrList->DropRef();
-  AttrList = RHS.AttrList;
-  if (AttrList) AttrList->AddRef();
-  return *this;
-}
 
-AttrListPtr::~AttrListPtr() {
-  if (AttrList) AttrList->DropRef();
+  AttrList = RHS.AttrList;
+  return *this;
 }
 
 /// getNumSlots - Return the number of slots used in this attribute list.
 /// This is the number of arguments that have an attribute set on them
 /// (including the function itself).
-unsigned AttrListPtr::getNumSlots() const {
+unsigned AttributeSet::getNumSlots() const {
   return AttrList ? AttrList->Attrs.size() : 0;
 }
 
 /// getSlot - Return the AttributeWithIndex at the specified slot.  This
 /// holds a number plus a set of attributes.
-const AttributeWithIndex &AttrListPtr::getSlot(unsigned Slot) const {
+const AttributeWithIndex &AttributeSet::getSlot(unsigned Slot) const {
   assert(AttrList && Slot < AttrList->Attrs.size() && "Slot # out of range!");
   return AttrList->Attrs[Slot];
 }
@@ -487,7 +418,7 @@ const AttributeWithIndex &AttrListPtr::getSlot(unsigned Slot) const {
 /// getAttributes - The attributes for the specified index are returned.
 /// Attributes for the result are denoted with Idx = 0.  Function notes are
 /// denoted with idx = ~0.
-Attributes AttrListPtr::getAttributes(unsigned Idx) const {
+Attributes AttributeSet::getAttributes(unsigned Idx) const {
   if (AttrList == 0) return Attributes();
 
   const SmallVector<AttributeWithIndex, 4> &Attrs = AttrList->Attrs;
@@ -500,27 +431,28 @@ Attributes AttrListPtr::getAttributes(unsigned Idx) const {
 
 /// hasAttrSomewhere - Return true if the specified attribute is set for at
 /// least one parameter or for the return value.
-bool AttrListPtr::hasAttrSomewhere(Attributes::AttrVal Attr) const {
+bool AttributeSet::hasAttrSomewhere(Attributes::AttrVal Attr) const {
   if (AttrList == 0) return false;
 
   const SmallVector<AttributeWithIndex, 4> &Attrs = AttrList->Attrs;
   for (unsigned i = 0, e = Attrs.size(); i != e; ++i)
     if (Attrs[i].Attrs.hasAttribute(Attr))
       return true;
+
   return false;
 }
 
-unsigned AttrListPtr::getNumAttrs() const {
+unsigned AttributeSet::getNumAttrs() const {
   return AttrList ? AttrList->Attrs.size() : 0;
 }
 
-Attributes &AttrListPtr::getAttributesAtIndex(unsigned i) const {
+Attributes &AttributeSet::getAttributesAtIndex(unsigned i) const {
   assert(AttrList && "Trying to get an attribute from an empty list!");
   assert(i < AttrList->Attrs.size() && "Index out of range!");
   return AttrList->Attrs[i].Attrs;
 }
 
-AttrListPtr AttrListPtr::addAttr(LLVMContext &C, unsigned Idx,
+AttributeSet AttributeSet::addAttr(LLVMContext &C, unsigned Idx,
                                  Attributes Attrs) const {
   Attributes OldAttrs = getAttributes(Idx);
 #ifndef NDEBUG
@@ -562,10 +494,10 @@ AttrListPtr AttrListPtr::addAttr(LLVMContext &C, unsigned Idx,
                        OldAttrList.begin()+i, OldAttrList.end());
   }
 
-  return get(NewAttrList);
+  return get(C, NewAttrList);
 }
 
-AttrListPtr AttrListPtr::removeAttr(LLVMContext &C, unsigned Idx,
+AttributeSet AttributeSet::removeAttr(LLVMContext &C, unsigned Idx,
                                     Attributes Attrs) const {
 #ifndef NDEBUG
   // FIXME it is not obvious how this should work for alignment.
@@ -573,7 +505,7 @@ AttrListPtr AttrListPtr::removeAttr(LLVMContext &C, unsigned Idx,
   assert(!Attrs.hasAttribute(Attributes::Alignment) &&
          "Attempt to exclude alignment!");
 #endif
-  if (AttrList == 0) return AttrListPtr();
+  if (AttrList == 0) return AttributeSet();
 
   Attributes OldAttrs = getAttributes(Idx);
   AttrBuilder NewAttrs =
@@ -601,10 +533,10 @@ AttrListPtr AttrListPtr::removeAttr(LLVMContext &C, unsigned Idx,
   NewAttrList.insert(NewAttrList.end(),
                      OldAttrList.begin()+i, OldAttrList.end());
 
-  return get(NewAttrList);
+  return get(C, NewAttrList);
 }
 
-void AttrListPtr::dump() const {
+void AttributeSet::dump() const {
   dbgs() << "PAL[ ";
   for (unsigned i = 0; i < getNumSlots(); ++i) {
     const AttributeWithIndex &PAWI = getSlot(i);

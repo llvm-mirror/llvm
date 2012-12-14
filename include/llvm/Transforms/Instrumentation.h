@@ -14,6 +14,8 @@
 #ifndef LLVM_TRANSFORMS_INSTRUMENTATION_H
 #define LLVM_TRANSFORMS_INSTRUMENTATION_H
 
+#include "llvm/ADT/StringRef.h"
+
 namespace llvm {
 
 class ModulePass;
@@ -31,19 +33,26 @@ ModulePass *createPathProfilerPass();
 // Insert GCOV profiling instrumentation
 ModulePass *createGCOVProfilerPass(bool EmitNotes = true, bool EmitData = true,
                                    bool Use402Format = false,
-                                   bool UseExtraChecksum = false);
+                                   bool UseExtraChecksum = false,
+                                   bool NoRedZone = false);
 
 // Insert AddressSanitizer (address sanity checking) instrumentation
-FunctionPass *createAddressSanitizerPass();
+FunctionPass *createAddressSanitizerFunctionPass(
+    bool CheckInitOrder = false, bool CheckUseAfterReturn = false,
+    bool CheckLifetime = false, StringRef BlacklistFile = StringRef());
+ModulePass *createAddressSanitizerModulePass(
+    bool CheckInitOrder = false, StringRef BlacklistFile = StringRef());
+
+// Insert MemorySanitizer instrumentation (detection of uninitialized reads)
+FunctionPass *createMemorySanitizerPass();
+
 // Insert ThreadSanitizer (race detection) instrumentation
 FunctionPass *createThreadSanitizerPass();
 
 
 // BoundsChecking - This pass instruments the code to perform run-time bounds
 // checking on loads, stores, and other memory intrinsics.
-// Penalty is the maximum run-time that is acceptable for the user.
-//
-FunctionPass *createBoundsCheckingPass(unsigned Penalty = 5);
+FunctionPass *createBoundsCheckingPass();
 
 } // End llvm namespace
 

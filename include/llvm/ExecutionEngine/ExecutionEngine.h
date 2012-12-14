@@ -15,19 +15,19 @@
 #ifndef LLVM_EXECUTION_ENGINE_H
 #define LLVM_EXECUTION_ENGINE_H
 
-#include "llvm/MC/MCCodeGenInfo.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/ValueMap.h"
-#include "llvm/ADT/DenseMap.h"
+#include "llvm/MC/MCCodeGenInfo.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/Mutex.h"
+#include "llvm/Support/ValueHandle.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include <vector>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace llvm {
 
@@ -248,6 +248,13 @@ public:
     llvm_unreachable("Re-mapping of section addresses not supported with this "
                      "EE!");
   }
+
+  // finalizeObject - This method should be called after sections within an
+  // object have been relocated using mapSectionAddress.  When this method is
+  // called the MCJIT execution engine will reapply relocations for a loaded
+  // object.  This method has no effect for the legacy JIT engine or the
+  // interpeter.
+  virtual void finalizeObject() {}
 
   /// runStaticConstructorsDestructors - This method is used to execute all of
   /// the static constructors or destructors for a program.

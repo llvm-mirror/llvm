@@ -13,8 +13,8 @@
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCMachObjectWriter.h"
-#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Object/MachOFormat.h"
 #include "llvm/Support/ELF.h"
@@ -31,6 +31,7 @@ static unsigned adjustFixupValue(unsigned Kind, uint64_t Value) {
   case FK_Data_4:
   case FK_Data_8:
   case PPC::fixup_ppc_toc:
+  case PPC::fixup_ppc_tlsreg:
     return Value;
   case PPC::fixup_ppc_lo14:
   case PPC::fixup_ppc_toc16_ds:
@@ -61,7 +62,9 @@ public:
   void RecordRelocation(MachObjectWriter *Writer,
                         const MCAssembler &Asm, const MCAsmLayout &Layout,
                         const MCFragment *Fragment, const MCFixup &Fixup,
-                        MCValue Target, uint64_t &FixedValue) {}
+                        MCValue Target, uint64_t &FixedValue) {
+    llvm_unreachable("Relocation emission for MachO/PPC unimplemented!");
+  }
 };
 
 class PPCAsmBackend : public MCAsmBackend {
@@ -81,7 +84,8 @@ public:
       { "fixup_ppc_lo14",        16,     14,   0 },
       { "fixup_ppc_toc",          0,     64,   0 },
       { "fixup_ppc_toc16",       16,     16,   0 },
-      { "fixup_ppc_toc16_ds",    16,     14,   0 }
+      { "fixup_ppc_toc16_ds",    16,     14,   0 },
+      { "fixup_ppc_tlsreg",       0,      0,   0 }
     };
 
     if (Kind < FirstTargetFixupKind)
@@ -90,6 +94,20 @@ public:
     assert(unsigned(Kind - FirstTargetFixupKind) < getNumFixupKinds() &&
            "Invalid kind!");
     return Infos[Kind - FirstTargetFixupKind];
+  }
+
+  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
+                  uint64_t Value) const {
+    Value = adjustFixupValue(Fixup.getKind(), Value);
+    if (!Value) return;           // Doesn't change encoding.
+
+    unsigned Offset = Fixup.getOffset();
+
+    // For each byte of the fragment that the fixup touches, mask in the bits
+    // from the fixup value. The Value has been "split up" into the appropriate
+    // bitfields above.
+    for (unsigned i = 0; i != 4; ++i)
+      Data[Offset + i] |= uint8_t((Value >> ((4 - i - 1)*8)) & 0xff);
   }
 
   bool mayNeedRelaxation(const MCInst &Inst) const {
@@ -135,11 +153,6 @@ namespace {
   public:
     DarwinPPCAsmBackend(const Target &T) : PPCAsmBackend(T) { }
 
-    void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                    uint64_t Value) const {
-      llvm_unreachable("UNIMP");
-    }
-
     MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
       bool is64 = getPointerSize() == 8;
       return createMachObjectWriter(new PPCMachObjectWriter(
@@ -161,19 +174,6 @@ namespace {
     ELFPPCAsmBackend(const Target &T, uint8_t OSABI) :
       PPCAsmBackend(T), OSABI(OSABI) { }
 
-    void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                    uint64_t Value) const {
-      Value = adjustFixupValue(Fixup.getKind(), Value);
-      if (!Value) return;           // Doesn't change encoding.
-
-      unsigned Offset = Fixup.getOffset();
-
-      // For each byte of the fragment that the fixup touches, mask in the bits from
-      // the fixup value. The Value has been "split up" into the appropriate
-      // bitfields above.
-      for (unsigned i = 0; i != 4; ++i)
-        Data[Offset + i] |= uint8_t((Value >> ((4 - i - 1)*8)) & 0xff);
-    }
 
     MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
       bool is64 = getPointerSize() == 8;

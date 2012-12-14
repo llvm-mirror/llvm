@@ -16,11 +16,11 @@
 #ifndef LLVM_TARGET_TARGETREGISTERINFO_H
 #define LLVM_TARGET_TARGETREGISTERINFO_H
 
-#include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/CallingConv.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include <cassert>
 #include <functional>
 
@@ -30,12 +30,13 @@ class BitVector;
 class MachineFunction;
 class RegScavenger;
 template<class T> class SmallVectorImpl;
+class VirtRegMap;
 class raw_ostream;
 
 class TargetRegisterClass {
 public:
-  typedef const uint16_t* iterator;
-  typedef const uint16_t* const_iterator;
+  typedef const MCPhysReg* iterator;
+  typedef const MCPhysReg* const_iterator;
   typedef const MVT::SimpleValueType* vt_iterator;
   typedef const TargetRegisterClass* const * sc_iterator;
 
@@ -45,7 +46,7 @@ public:
   const uint32_t *SubClassMask;
   const uint16_t *SuperRegIndices;
   const sc_iterator SuperClasses;
-  ArrayRef<uint16_t> (*OrderFunc)(const MachineFunction&);
+  ArrayRef<MCPhysReg> (*OrderFunc)(const MachineFunction&);
 
   /// getID() - Return the register class ID number.
   ///
@@ -190,7 +191,7 @@ public:
   ///
   /// By default, this method returns all registers in the class.
   ///
-  ArrayRef<uint16_t> getRawAllocationOrder(const MachineFunction &MF) const {
+  ArrayRef<MCPhysReg> getRawAllocationOrder(const MachineFunction &MF) const {
     return OrderFunc ? OrderFunc(MF) : makeArrayRef(begin(), getNumRegs());
   }
 };
@@ -407,7 +408,7 @@ public:
   /// order of desired callee-save stack frame offset. The first register is
   /// closest to the incoming stack pointer if stack grows down, and vice versa.
   ///
-  virtual const uint16_t* getCalleeSavedRegs(const MachineFunction *MF = 0)
+  virtual const MCPhysReg* getCalleeSavedRegs(const MachineFunction *MF = 0)
                                                                       const = 0;
 
   /// getCallPreservedMask - Return a mask of call-preserved registers for the
@@ -594,9 +595,12 @@ public:
     return 0;
   }
 
-// Get the weight in units of pressure for this register class.
+  /// Get the weight in units of pressure for this register class.
   virtual const RegClassWeight &getRegClassWeight(
     const TargetRegisterClass *RC) const = 0;
+
+  /// Get the weight in units of pressure for this register unit.
+  virtual unsigned getRegUnitWeight(unsigned RegUnit) const = 0;
 
   /// Get the number of dimensions of register pressure.
   virtual unsigned getNumRegPressureSets() const = 0;
@@ -613,27 +617,29 @@ public:
   virtual const int *getRegClassPressureSets(
     const TargetRegisterClass *RC) const = 0;
 
-  /// getRawAllocationOrder - Returns the register allocation order for a
-  /// specified register class with a target-dependent hint. The returned list
-  /// may contain reserved registers that cannot be allocated.
-  ///
-  /// Register allocators need only call this function to resolve
-  /// target-dependent hints, but it should work without hinting as well.
-  virtual ArrayRef<uint16_t>
-  getRawAllocationOrder(const TargetRegisterClass *RC,
-                        unsigned HintType, unsigned HintReg,
-                        const MachineFunction &MF) const {
-    return RC->getRawAllocationOrder(MF);
-  }
+  /// Get the dimensions of register pressure impacted by this register unit.
+  /// Returns a -1 terminated array of pressure set IDs.
+  virtual const int *getRegUnitPressureSets(unsigned RegUnit) const = 0;
 
-  /// ResolveRegAllocHint - Resolves the specified register allocation hint
-  /// to a physical register. Returns the physical register if it is successful.
-  virtual unsigned ResolveRegAllocHint(unsigned Type, unsigned Reg,
-                                       const MachineFunction &MF) const {
-    if (Type == 0 && Reg && isPhysicalRegister(Reg))
-      return Reg;
-    return 0;
-  }
+  /// Get a list of 'hint' registers that the register allocator should try
+  /// first when allocating a physical register for the virtual register
+  /// VirtReg. These registers are effectively moved to the front of the
+  /// allocation order.
+  ///
+  /// The Order argument is the allocation order for VirtReg's register class
+  /// as returned from RegisterClassInfo::getOrder(). The hint registers must
+  /// come from Order, and they must not be reserved.
+  ///
+  /// The default implementation of this function can resolve
+  /// target-independent hints provided to MRI::setRegAllocationHint with
+  /// HintType == 0. Targets that override this function should defer to the
+  /// default implementation if they have no reason to change the allocation
+  /// order for VirtReg. There may be target-independent hints.
+  virtual void getRegAllocationHints(unsigned VirtReg,
+                                     ArrayRef<MCPhysReg> Order,
+                                     SmallVectorImpl<MCPhysReg> &Hints,
+                                     const MachineFunction &MF,
+                                     const VirtRegMap *VRM = 0) const;
 
   /// avoidWriteAfterWrite - Return true if the register allocator should avoid
   /// writing a register from RC in two consecutive instructions.
@@ -876,7 +882,8 @@ class PrintReg {
   unsigned Reg;
   unsigned SubIdx;
 public:
-  PrintReg(unsigned reg, const TargetRegisterInfo *tri = 0, unsigned subidx = 0)
+  explicit PrintReg(unsigned reg, const TargetRegisterInfo *tri = 0,
+                    unsigned subidx = 0)
     : TRI(tri), Reg(reg), SubIdx(subidx) {}
   void print(raw_ostream&) const;
 };

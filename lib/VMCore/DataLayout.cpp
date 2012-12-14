@@ -17,16 +17,16 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DataLayout.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Constants.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Module.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/GetElementPtrTypeIterator.h"
+#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Mutex.h"
-#include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdlib>
 using namespace llvm;
@@ -152,14 +152,7 @@ DataLayout::InvalidPointerElem = PointerAlignElem::get(~0U, 0U, 0U, 0U);
 //                       DataLayout Class Implementation
 //===----------------------------------------------------------------------===//
 
-/// getInt - Get an integer ignoring errors.
-static int getInt(StringRef R) {
-  int Result = 0;
-  R.getAsInteger(10, Result);
-  return Result;
-}
-
-void DataLayout::init() {
+void DataLayout::init(StringRef Desc) {
   initializeDataLayoutPass(*PassRegistry::getPassRegistry());
 
   LayoutMap = 0;
@@ -180,69 +173,81 @@ void DataLayout::init() {
   setAlignment(VECTOR_ALIGN,   16, 16, 128); // v16i8, v8i16, v4i32, ...
   setAlignment(AGGREGATE_ALIGN, 0,  8,  0);  // struct
   setPointerAlignment(0, 8, 8, 8);
+
+  parseSpecifier(Desc);
 }
 
-std::string DataLayout::parseSpecifier(StringRef Desc, DataLayout *td) {
+/// Checked version of split, to ensure mandatory subparts.
+static std::pair<StringRef, StringRef> split(StringRef Str, char Separator) {
+  assert(!Str.empty() && "parse error, string can't be empty here");
+  std::pair<StringRef, StringRef> Split = Str.split(Separator);
+  assert((!Split.second.empty() || Split.first == Str) &&
+         "a trailing separator is not allowed");
+  return Split;
+}
 
-  if (td)
-    td->init();
+/// Get an unsinged integer, including error checks.
+static unsigned getInt(StringRef R) {
+  unsigned Result;
+  bool error = R.getAsInteger(10, Result); (void)error;
+  assert(!error && "not a number, or does not fit in an unsigned int");
+  return Result;
+}
+
+/// Convert bits into bytes. Assert if not a byte width multiple.
+static unsigned inBytes(unsigned Bits) {
+  assert(Bits % 8 == 0 && "number of bits must be a byte width multiple");
+  return Bits / 8;
+}
+
+void DataLayout::parseSpecifier(StringRef Desc) {
 
   while (!Desc.empty()) {
-    std::pair<StringRef, StringRef> Split = Desc.split('-');
-    StringRef Token = Split.first;
+
+    // Split at '-'.
+    std::pair<StringRef, StringRef> Split = split(Desc, '-');
     Desc = Split.second;
 
-    if (Token.empty())
-      continue;
+    // Split at ':'.
+    Split = split(Split.first, ':');
 
-    Split = Token.split(':');
-    StringRef Specifier = Split.first;
-    Token = Split.second;
+    // Aliases used below.
+    StringRef &Tok  = Split.first;  // Current token.
+    StringRef &Rest = Split.second; // The rest of the string.
 
-    assert(!Specifier.empty() && "Can't be empty here");
+    char Specifier = Tok.front();
+    Tok = Tok.substr(1);
 
-    switch (Specifier[0]) {
+    switch (Specifier) {
     case 'E':
-      if (td)
-        td->LittleEndian = false;
+      LittleEndian = false;
       break;
     case 'e':
-      if (td)
-        td->LittleEndian = true;
+      LittleEndian = true;
       break;
     case 'p': {
-      int AddrSpace = 0;
-      if (Specifier.size() > 1) {
-        AddrSpace = getInt(Specifier.substr(1));
-        if (AddrSpace < 0 || AddrSpace > (1 << 24))
-          return "Invalid address space, must be a positive 24bit integer";
-      }
-      Split = Token.split(':');
-      int PointerMemSizeBits = getInt(Split.first);
-      if (PointerMemSizeBits < 0 || PointerMemSizeBits % 8 != 0)
-        return "invalid pointer size, must be a positive 8-bit multiple";
+      // Address space.
+      unsigned AddrSpace = Tok.empty() ? 0 : getInt(Tok);
+      assert(AddrSpace < 1 << 24 &&
+             "Invalid address space, must be a 24bit integer");
 
-      // Pointer ABI alignment.
-      Split = Split.second.split(':');
-      int PointerABIAlignBits = getInt(Split.first);
-      if (PointerABIAlignBits < 0 || PointerABIAlignBits % 8 != 0) {
-        return "invalid pointer ABI alignment, "
-               "must be a positive 8-bit multiple";
-      }
+      // Size.
+      Split = split(Rest, ':');
+      unsigned PointerMemSize = inBytes(getInt(Tok));
 
-      // Pointer preferred alignment.
-      Split = Split.second.split(':');
-      int PointerPrefAlignBits = getInt(Split.first);
-      if (PointerPrefAlignBits < 0 || PointerPrefAlignBits % 8 != 0) {
-        return "invalid pointer preferred alignment, "
-               "must be a positive 8-bit multiple";
+      // ABI alignment.
+      Split = split(Rest, ':');
+      unsigned PointerABIAlign = inBytes(getInt(Tok));
+
+      // Preferred alignment.
+      unsigned PointerPrefAlign = PointerABIAlign;
+      if (!Rest.empty()) {
+        Split = split(Rest, ':');
+        PointerPrefAlign = inBytes(getInt(Tok));
       }
 
-      if (PointerPrefAlignBits == 0)
-        PointerPrefAlignBits = PointerABIAlignBits;
-      if (td)
-        td->setPointerAlignment(AddrSpace, PointerABIAlignBits/8,
-            PointerPrefAlignBits/8, PointerMemSizeBits/8);
+      setPointerAlignment(AddrSpace, PointerABIAlign, PointerPrefAlign,
+                          PointerMemSize);
       break;
     }
     case 'i':
@@ -251,8 +256,7 @@ std::string DataLayout::parseSpecifier(StringRef Desc, DataLayout *td) {
     case 'a':
     case 's': {
       AlignTypeEnum AlignType;
-      char field = Specifier[0];
-      switch (field) {
+      switch (Specifier) {
       default:
       case 'i': AlignType = INTEGER_ALIGN; break;
       case 'v': AlignType = VECTOR_ALIGN; break;
@@ -260,66 +264,44 @@ std::string DataLayout::parseSpecifier(StringRef Desc, DataLayout *td) {
       case 'a': AlignType = AGGREGATE_ALIGN; break;
       case 's': AlignType = STACK_ALIGN; break;
       }
-      int Size = getInt(Specifier.substr(1));
-      if (Size < 0) {
-        return std::string("invalid ") + field + "-size field, "
-               "must be positive";
+
+      // Bit size.
+      unsigned Size = Tok.empty() ? 0 : getInt(Tok);
+
+      // ABI alignment.
+      Split = split(Rest, ':');
+      unsigned ABIAlign = inBytes(getInt(Tok));
+
+      // Preferred alignment.
+      unsigned PrefAlign = ABIAlign;
+      if (!Rest.empty()) {
+        Split = split(Rest, ':');
+        PrefAlign = inBytes(getInt(Tok));
       }
 
-      Split = Token.split(':');
-      int ABIAlignBits = getInt(Split.first);
-      if (ABIAlignBits < 0 || ABIAlignBits % 8 != 0) {
-        return std::string("invalid ") + field +"-abi-alignment field, "
-               "must be a positive 8-bit multiple";
-      }
-      unsigned ABIAlign = ABIAlignBits / 8;
+      setAlignment(AlignType, ABIAlign, PrefAlign, Size);
 
-      Split = Split.second.split(':');
-
-      int PrefAlignBits = getInt(Split.first);
-      if (PrefAlignBits < 0 || PrefAlignBits % 8 != 0) {
-        return std::string("invalid ") + field +"-preferred-alignment field, "
-               "must be a positive 8-bit multiple";
-      }
-      unsigned PrefAlign = PrefAlignBits / 8;
-      if (PrefAlign == 0)
-        PrefAlign = ABIAlign;
-
-      if (td)
-        td->setAlignment(AlignType, ABIAlign, PrefAlign, Size);
       break;
     }
     case 'n':  // Native integer types.
-      Specifier = Specifier.substr(1);
-      do {
-        int Width = getInt(Specifier);
-        if (Width <= 0) {
-          return std::string("invalid native integer size \'") +
-            Specifier.str() + "\', must be a positive integer.";
-        }
-        if (td && Width != 0)
-          td->LegalIntWidths.push_back(Width);
-        Split = Token.split(':');
-        Specifier = Split.first;
-        Token = Split.second;
-      } while (!Specifier.empty() || !Token.empty());
+      for (;;) {
+        unsigned Width = getInt(Tok);
+        assert(Width != 0 && "width must be non-zero");
+        LegalIntWidths.push_back(Width);
+        if (Rest.empty())
+          break;
+        Split = split(Rest, ':');
+      }
       break;
     case 'S': { // Stack natural alignment.
-      int StackNaturalAlignBits = getInt(Specifier.substr(1));
-      if (StackNaturalAlignBits < 0 || StackNaturalAlignBits % 8 != 0) {
-        return "invalid natural stack alignment (S-field), "
-               "must be a positive 8-bit multiple";
-      }
-      if (td)
-        td->StackNaturalAlign = StackNaturalAlignBits / 8;
+      StackNaturalAlign = inBytes(getInt(Tok));
       break;
     }
     default:
+      llvm_unreachable("Unknown specifier in datalayout string");
       break;
     }
   }
-
-  return "";
 }
 
 /// Default ctor.
@@ -333,9 +315,7 @@ DataLayout::DataLayout() : ImmutablePass(ID) {
 
 DataLayout::DataLayout(const Module *M)
   : ImmutablePass(ID) {
-  std::string errMsg = parseSpecifier(M->getDataLayout(), this);
-  assert(errMsg == "" && "Module M has malformed data layout string.");
-  (void)errMsg;
+  init(M->getDataLayout());
 }
 
 void
@@ -543,8 +523,6 @@ uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
     return getStructLayout(cast<StructType>(Ty))->getSizeInBits();
   case Type::IntegerTyID:
     return cast<IntegerType>(Ty)->getBitWidth();
-  case Type::VoidTyID:
-    return 8;
   case Type::HalfTyID:
     return 16;
   case Type::FloatTyID:
@@ -606,7 +584,6 @@ unsigned DataLayout::getAlignment(Type *Ty, bool abi_or_pref) const {
     return std::max(Align, Layout->getAlignment());
   }
   case Type::IntegerTyID:
-  case Type::VoidTyID:
     AlignType = INTEGER_ALIGN;
     break;
   case Type::HalfTyID:
@@ -671,13 +648,8 @@ IntegerType *DataLayout::getIntPtrType(LLVMContext &C,
 /// least as big as that of a pointer of the given pointer (vector of pointer)
 /// type.
 Type *DataLayout::getIntPtrType(Type *Ty) const {
-#if 0
-  // FIXME: This assert should always have been here, but the review comments
-  // weren't addressed in time, and now there is lots of code "depending" on
-  // this. Uncomment once this is cleaned up.
   assert(Ty->isPtrOrPtrVectorTy() &&
          "Expected a pointer or pointer vector type.");
-#endif
   unsigned NumBits = getTypeSizeInBits(Ty->getScalarType());
   IntegerType *IntTy = IntegerType::get(Ty->getContext(), NumBits);
   if (VectorType *VecTy = dyn_cast<VectorType>(Ty))

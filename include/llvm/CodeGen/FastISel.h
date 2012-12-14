@@ -15,8 +15,8 @@
 #define LLVM_CODEGEN_FASTISEL_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/ValueTypes.h"
 
 namespace llvm {
 
@@ -130,6 +130,10 @@ public:
   /// recomputeInsertPt - Reset InsertPt to prepare for inserting instructions
   /// into the current block.
   void recomputeInsertPt();
+
+  /// removeDeadCode - Remove all dead instructions between the I and E.
+  void removeDeadCode(MachineBasicBlock::iterator I,
+                      MachineBasicBlock::iterator E);
 
   struct SavePoint {
     MachineBasicBlock::iterator InsertPt;
@@ -395,10 +399,6 @@ private:
 
   /// hasTrivialKill - Test whether the given value has exactly one use.
   bool hasTrivialKill(const Value *V) const;
-
-  /// removeDeadCode - Remove all dead instructions between the I and E.
-  void removeDeadCode(MachineBasicBlock::iterator I,
-                      MachineBasicBlock::iterator E);
 };
 
 }

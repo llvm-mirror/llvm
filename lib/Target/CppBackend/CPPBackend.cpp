@@ -13,25 +13,25 @@
 //===----------------------------------------------------------------------===//
 
 #include "CPPTargetMachine.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/CallingConv.h"
+#include "llvm/Config/config.h"
 #include "llvm/Constants.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/InlineAsm.h"
 #include "llvm/Instruction.h"
 #include "llvm/Instructions.h"
-#include "llvm/Module.h"
-#include "llvm/Pass.h"
-#include "llvm/PassManager.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Module.h"
+#include "llvm/Pass.h"
+#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/Config/config.h"
 #include <algorithm>
 #include <cstdio>
 #include <map>
@@ -141,7 +141,7 @@ namespace {
     std::string getCppName(const Value* val);
     inline void printCppName(const Value* val);
 
-    void printAttributes(const AttrListPtr &PAL, const std::string &name);
+    void printAttributes(const AttributeSet &PAL, const std::string &name);
     void printType(Type* Ty);
     void printTypes(const Module* M);
 
@@ -464,9 +464,9 @@ void CppWriter::printCppName(const Value* val) {
   printEscapedString(getCppName(val));
 }
 
-void CppWriter::printAttributes(const AttrListPtr &PAL,
+void CppWriter::printAttributes(const AttributeSet &PAL,
                                 const std::string &name) {
-  Out << "AttrListPtr " << name << "_PAL;";
+  Out << "AttributeSet " << name << "_PAL;";
   nl(Out);
   if (!PAL.isEmpty()) {
     Out << '{'; in(); nl(Out);
@@ -518,7 +518,7 @@ void CppWriter::printAttributes(const AttrListPtr &PAL,
       Out << "Attrs.push_back(PAWI);";
       nl(Out);
     }
-    Out << name << "_PAL = AttrListPtr::get(Attrs);";
+    Out << name << "_PAL = AttributeSet::get(mod->getContext(), Attrs);";
     nl(Out);
     out(); nl(Out);
     Out << '}'; nl(Out);
@@ -1941,14 +1941,6 @@ void CppWriter::printModule(const std::string& fname,
   }
   nl(Out);
 
-  // Loop over the dependent libraries and emit them.
-  Module::lib_iterator LI = TheModule->lib_begin();
-  Module::lib_iterator LE = TheModule->lib_end();
-  while (LI != LE) {
-    Out << "mod->addLibrary(\"" << *LI << "\");";
-    nl(Out);
-    ++LI;
-  }
   printModuleBody();
   nl(Out) << "return mod;";
   nl(Out,-1) << "}";

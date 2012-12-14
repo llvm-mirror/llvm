@@ -15,7 +15,6 @@
 #define DEBUG_TYPE "misched"
 
 #include "HexagonMachineScheduler.h"
-
 #include <queue>
 
 using namespace llvm;
@@ -31,8 +30,7 @@ void VLIWMachineScheduler::postprocessDAG() {
       LastSequentialCall = &(SUnits[su]);
     // Look for a compare that defines a predicate.
     else if (SUnits[su].getInstr()->isCompare() && LastSequentialCall)
-      SUnits[su].addPred(SDep(LastSequentialCall, SDep::Order, 0, /*Reg=*/0,
-                              false));
+      SUnits[su].addPred(SDep(LastSequentialCall, SDep::Barrier));
   }
 }
 

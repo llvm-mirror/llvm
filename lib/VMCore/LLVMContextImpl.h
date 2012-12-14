@@ -15,22 +15,22 @@
 #ifndef LLVM_LLVMCONTEXT_IMPL_H
 #define LLVM_LLVMCONTEXT_IMPL_H
 
-#include "llvm/LLVMContext.h"
 #include "AttributesImpl.h"
 #include "ConstantsContext.h"
 #include "LeaksContext.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Metadata.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/Hashing.h"
+#include "llvm/Constants.h"
+#include "llvm/DerivedTypes.h"
+#include "llvm/LLVMContext.h"
+#include "llvm/Metadata.h"
+#include "llvm/Support/ValueHandle.h"
 #include <vector>
 
 namespace llvm {
@@ -46,7 +46,6 @@ struct DenseMapAPIntKeyInfo {
     APInt val;
     Type* type;
     KeyTy(const APInt& V, Type* Ty) : val(V), type(Ty) {}
-    KeyTy(const KeyTy& that) : val(that.val), type(that.type) {}
     bool operator==(const KeyTy& that) const {
       return type == that.type && this->val == that.val;
     }
@@ -71,7 +70,6 @@ struct DenseMapAPFloatKeyInfo {
   struct KeyTy {
     APFloat val;
     KeyTy(const APFloat& V) : val(V){}
-    KeyTy(const KeyTy& that) : val(that.val) {}
     bool operator==(const KeyTy& that) const {
       return this->val.bitwiseIsEqual(that.val);
     }
@@ -102,8 +100,6 @@ struct AnonStructTypeKeyInfo {
     bool isPacked;
     KeyTy(const ArrayRef<Type*>& E, bool P) :
       ETypes(E), isPacked(P) {}
-    KeyTy(const KeyTy& that) :
-      ETypes(that.ETypes), isPacked(that.isPacked) {}
     KeyTy(const StructType* ST) :
       ETypes(ArrayRef<Type*>(ST->element_begin(), ST->element_end())),
       isPacked(ST->isPacked()) {}
@@ -149,10 +145,6 @@ struct FunctionTypeKeyInfo {
     bool isVarArg;
     KeyTy(const Type* R, const ArrayRef<Type*>& P, bool V) :
       ReturnType(R), Params(P), isVarArg(V) {}
-    KeyTy(const KeyTy& that) :
-      ReturnType(that.ReturnType),
-      Params(that.Params),
-      isVarArg(that.isVarArg) {}
     KeyTy(const FunctionType* FT) :
       ReturnType(FT->getReturnType()),
       Params(ArrayRef<Type*>(FT->param_begin(), FT->param_end())),
@@ -256,7 +248,8 @@ public:
   FPMapTy FPConstants;
 
   FoldingSet<AttributesImpl> AttrsSet;
-  
+  FoldingSet<AttributeListImpl> AttrsLists;
+
   StringMap<Value*> MDStringCache;
 
   FoldingSet<MDNode> MDNodeSet;

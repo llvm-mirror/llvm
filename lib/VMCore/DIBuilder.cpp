@@ -12,11 +12,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DIBuilder.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Constants.h"
 #include "llvm/DebugInfo.h"
 #include "llvm/IntrinsicInst.h"
 #include "llvm/Module.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Dwarf.h"
 
@@ -492,7 +492,8 @@ DIType DIBuilder::createStructType(DIDescriptor Context, StringRef Name,
     NULL,
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), RunTimeLang),
-    Constant::getNullValue(Type::getInt32Ty(VMContext))
+    ConstantInt::get(Type::getInt32Ty(VMContext), 0),
+    ConstantInt::get(Type::getInt32Ty(VMContext), 0),
   };
   return DIType(MDNode::get(VMContext, Elts));
 }
@@ -740,11 +741,11 @@ DIArray DIBuilder::getOrCreateArray(ArrayRef<Value *> Elements) {
 
 /// getOrCreateSubrange - Create a descriptor for a value range.  This
 /// implicitly uniques the values returned.
-DISubrange DIBuilder::getOrCreateSubrange(int64_t Lo, int64_t Hi) {
+DISubrange DIBuilder::getOrCreateSubrange(int64_t Lo, int64_t Count) {
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_subrange_type),
     ConstantInt::get(Type::getInt64Ty(VMContext), Lo),
-    ConstantInt::get(Type::getInt64Ty(VMContext), Hi)
+    ConstantInt::get(Type::getInt64Ty(VMContext), Count)
   };
 
   return DISubrange(MDNode::get(VMContext, Elts));

@@ -8,6 +8,8 @@ Development Process Documentation
 
    MakefileGuide
    Projects
+   LLVMBuild
+   HowToReleaseLLVM
 
 * :ref:`projects`
 
@@ -16,7 +18,7 @@ Development Process Documentation
   tree) allow the project code to be located outside (or inside) the ``llvm/``
   tree, while using LLVM header files and libraries.
 
-* `LLVMBuild Documentation <LLVMBuild.html>`_
+* :doc:`LLVMBuild`
 
   Describes the LLVMBuild organization and files used by LLVM to specify
   component descriptions.
@@ -25,6 +27,6 @@ Development Process Documentation
 
   Describes how the LLVM makefiles work and how to use them.
 
-* `How To Release LLVM To The Public <HowToReleaseLLVM.html>`_
+* :doc:`HowToReleaseLLVM`
 
   This is a guide to preparing LLVM releases. Most developers can ignore it.

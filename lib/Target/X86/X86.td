@@ -118,6 +118,8 @@ def FeatureBMI     : SubtargetFeature<"bmi", "HasBMI", "true",
                                       "Support BMI instructions">;
 def FeatureBMI2    : SubtargetFeature<"bmi2", "HasBMI2", "true",
                                       "Support BMI2 instructions">;
+def FeatureRTM     : SubtargetFeature<"rtm", "HasRTM", "true",
+                                      "Support RTM instructions">;
 def FeatureLeaForSP : SubtargetFeature<"lea-sp", "UseLeaForSP", "true",
                                      "Use LEA for adjusting the stack pointer">;
 def FeatureSlowDivide : SubtargetFeature<"idiv-to-divb",
@@ -180,19 +182,20 @@ def : Proc<"westmere",        [FeatureSSE42, FeatureCMPXCHG16B,
 // Sandy Bridge
 // SSE is not listed here since llvm treats AVX as a reimplementation of SSE,
 // rather than a superset.
-def : Proc<"corei7-avx",      [FeatureAVX, FeatureCMPXCHG16B, FeaturePOPCNT,
-                               FeatureAES, FeaturePCLMUL]>;
+def : Proc<"corei7-avx",      [FeatureAVX, FeatureCMPXCHG16B, FeatureFastUAMem,
+                               FeaturePOPCNT, FeatureAES, FeaturePCLMUL]>;
 // Ivy Bridge
-def : Proc<"core-avx-i",      [FeatureAVX, FeatureCMPXCHG16B, FeaturePOPCNT,
-                               FeatureAES, FeaturePCLMUL,
+def : Proc<"core-avx-i",      [FeatureAVX, FeatureCMPXCHG16B, FeatureFastUAMem,
+                               FeaturePOPCNT, FeatureAES, FeaturePCLMUL,
                                FeatureRDRAND, FeatureF16C, FeatureFSGSBase]>;
 
 // Haswell
-def : Proc<"core-avx2",       [FeatureAVX2, FeatureCMPXCHG16B, FeaturePOPCNT,
-                               FeatureAES, FeaturePCLMUL, FeatureRDRAND,
-                               FeatureF16C, FeatureFSGSBase,
+def : Proc<"core-avx2",       [FeatureAVX2, FeatureCMPXCHG16B, FeatureFastUAMem,
+                               FeaturePOPCNT, FeatureAES, FeaturePCLMUL,
+                               FeatureRDRAND, FeatureF16C, FeatureFSGSBase,
                                FeatureMOVBE, FeatureLZCNT, FeatureBMI,
-                               FeatureBMI2, FeatureFMA]>;
+                               FeatureBMI2, FeatureFMA,
+                               FeatureRTM]>;
 
 def : Proc<"k6",              [FeatureMMX]>;
 def : Proc<"k6-2",            [Feature3DNow]>;

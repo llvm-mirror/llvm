@@ -1100,12 +1100,12 @@ entry:
   %imag = getelementptr inbounds { float, float }* %retval, i32 0, i32 1
   store float %phi.real, float* %real
   store float %phi.imag, float* %imag
+  ; CHECK-NEXT: %[[real_convert:.*]] = bitcast float %[[real]] to i32
   ; CHECK-NEXT: %[[imag_convert:.*]] = bitcast float %[[imag]] to i32
   ; CHECK-NEXT: %[[imag_ext:.*]] = zext i32 %[[imag_convert]] to i64
   ; CHECK-NEXT: %[[imag_shift:.*]] = shl i64 %[[imag_ext]], 32
   ; CHECK-NEXT: %[[imag_mask:.*]] = and i64 undef, 4294967295
   ; CHECK-NEXT: %[[imag_insert:.*]] = or i64 %[[imag_mask]], %[[imag_shift]]
-  ; CHECK-NEXT: %[[real_convert:.*]] = bitcast float %[[real]] to i32
   ; CHECK-NEXT: %[[real_ext:.*]] = zext i32 %[[real_convert]] to i64
   ; CHECK-NEXT: %[[real_mask:.*]] = and i64 %[[imag_insert]], -4294967296
   ; CHECK-NEXT: %[[real_insert:.*]] = or i64 %[[real_mask]], %[[real_ext]]
@@ -1133,4 +1133,46 @@ entry:
   call void @llvm.memcpy.p0i8.p0i8.i32(i8* %cast1, i8* %cast2, i32 16, i32 8, i1 true)
   ret void
 ; CHECK: ret
+}
+
+define void @PR14465() {
+; Ensure that we don't crash when analyzing a alloca larger than the maximum
+; integer type width (MAX_INT_BITS) supported by llvm (1048576*32 > (1<<23)-1).
+; CHECK: @PR14465
+
+  %stack = alloca [1048576 x i32], align 16
+; CHECK: alloca [1048576 x i32]
+  %cast = bitcast [1048576 x i32]* %stack to i8*
+  call void @llvm.memset.p0i8.i64(i8* %cast, i8 -2, i64 4194304, i32 16, i1 false)
+  ret void
+; CHECK: ret
+}
+
+define void @PR14548(i1 %x) {
+; Handle a mixture of i1 and i8 loads and stores to allocas. This particular
+; pattern caused crashes and invalid output in the PR, and its nature will
+; trigger a mixture in several permutations as we resolve each alloca
+; iteratively.
+; Note that we don't do a particularly good *job* of handling these mixtures,
+; but the hope is that this is very rare.
+; CHECK: @PR14548
+
+entry:
+  %a = alloca <{ i1 }>, align 8
+  %b = alloca <{ i1 }>, align 8
+; Nothing of interest is simplified here.
+; CHECK: alloca
+; CHECK: alloca
+
+  %b.i1 = bitcast <{ i1 }>* %b to i1*
+  store i1 %x, i1* %b.i1, align 8
+  %b.i8 = bitcast <{ i1 }>* %b to i8*
+  %foo = load i8* %b.i8, align 1
+
+  %a.i8 = bitcast <{ i1 }>* %a to i8*
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %a.i8, i8* %b.i8, i32 1, i32 1, i1 false) nounwind
+  %bar = load i8* %a.i8, align 1
+  %a.i1 = getelementptr inbounds <{ i1 }>* %a, i32 0, i32 0
+  %baz = load i1* %a.i1, align 1
+  ret void
 }
