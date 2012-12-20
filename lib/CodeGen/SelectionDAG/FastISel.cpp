@@ -737,15 +737,15 @@ bool FastISel::SelectBitCast(const User *I) {
   }
 
   // Bitcasts of other values become reg-reg copies or BITCAST operators.
-  EVT SrcVT = TLI.getValueType(I->getOperand(0)->getType());
-  EVT DstVT = TLI.getValueType(I->getType());
-
-  if (SrcVT == MVT::Other || !SrcVT.isSimple() ||
-      DstVT == MVT::Other || !DstVT.isSimple() ||
-      !TLI.isTypeLegal(SrcVT) || !TLI.isTypeLegal(DstVT))
+  EVT SrcEVT = TLI.getValueType(I->getOperand(0)->getType());
+  EVT DstEVT = TLI.getValueType(I->getType());
+  if (SrcEVT == MVT::Other || DstEVT == MVT::Other ||
+      !TLI.isTypeLegal(SrcEVT) || !TLI.isTypeLegal(DstEVT))
     // Unhandled type. Halt "fast" selection and bail.
     return false;
 
+  MVT SrcVT = SrcEVT.getSimpleVT();
+  MVT DstVT = DstEVT.getSimpleVT();
   unsigned Op0 = getRegForValue(I->getOperand(0));
   if (Op0 == 0)
     // Unhandled operand. Halt "fast" selection and bail.
@@ -755,7 +755,7 @@ bool FastISel::SelectBitCast(const User *I) {
 
   // First, try to perform the bitcast by inserting a reg-reg copy.
   unsigned ResultReg = 0;
-  if (SrcVT.getSimpleVT() == DstVT.getSimpleVT()) {
+  if (SrcVT == DstVT) {
     const TargetRegisterClass* SrcClass = TLI.getRegClassFor(SrcVT);
     const TargetRegisterClass* DstClass = TLI.getRegClassFor(DstVT);
     // Don't attempt a cross-class copy. It will likely fail.
@@ -768,8 +768,7 @@ bool FastISel::SelectBitCast(const User *I) {
 
   // If the reg-reg copy failed, select a BITCAST opcode.
   if (!ResultReg)
-    ResultReg = FastEmit_r(SrcVT.getSimpleVT(), DstVT.getSimpleVT(),
-                           ISD::BITCAST, Op0, Op0IsKill);
+    ResultReg = FastEmit_r(SrcVT, DstVT, ISD::BITCAST, Op0, Op0IsKill);
 
   if (!ResultReg)
     return false;

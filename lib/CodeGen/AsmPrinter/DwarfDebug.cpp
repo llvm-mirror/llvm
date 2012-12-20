@@ -935,7 +935,7 @@ void DwarfDebug::endModule() {
     if (useDarwinGDBCompat())
       emitDebugInlineInfo();
   } else {
-    // TODO: Fill this in for Fission sections and separate
+    // TODO: Fill this in for separated debug sections and separate
     // out information into new sections.
 
     // Emit the debug info section and compile units.
@@ -1814,16 +1814,22 @@ void DwarfDebug::emitDIE(DIE *Die) {
   }
 }
 
-void DwarfDebug::emitCompileUnits(const MCSection *Section) {
-  Asm->OutStreamer.SwitchSection(Section);
-  for (DenseMap<const MDNode *, CompileUnit *>::iterator I = CUMap.begin(),
-         E = CUMap.end(); I != E; ++I) {
-    CompileUnit *TheCU = I->second;
+// Emit the various dwarf units to the unit section USection with
+// the abbreviations going into ASection.
+void DwarfUnits::emitUnits(DwarfDebug *DD,
+                           const MCSection *USection,
+                           const MCSection *ASection,
+                           const MCSymbol *ASectionSym) {
+  Asm->OutStreamer.SwitchSection(USection);
+  for (SmallVector<CompileUnit *, 1>::iterator I = CUs.begin(),
+         E = CUs.end(); I != E; ++I) {
+    CompileUnit *TheCU = *I;
     DIE *Die = TheCU->getCUDie();
 
     // Emit the compile units header.
-    Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("info_begin",
-                                                  TheCU->getUniqueID()));
+    Asm->OutStreamer
+      .EmitLabel(Asm->GetTempSymbol(USection->getLabelBeginName(),
+                                    TheCU->getUniqueID()));
 
     // Emit size of content not including length itself
     unsigned ContentSize = Die->getSize() +
@@ -1836,23 +1842,24 @@ void DwarfDebug::emitCompileUnits(const MCSection *Section) {
     Asm->OutStreamer.AddComment("DWARF version number");
     Asm->EmitInt16(dwarf::DWARF_VERSION);
     Asm->OutStreamer.AddComment("Offset Into Abbrev. Section");
-    Asm->EmitSectionOffset(Asm->GetTempSymbol("abbrev_begin"),
-                           DwarfAbbrevSectionSym);
+    Asm->EmitSectionOffset(Asm->GetTempSymbol(ASection->getLabelBeginName()),
+                           ASectionSym);
     Asm->OutStreamer.AddComment("Address Size (in bytes)");
     Asm->EmitInt8(Asm->getDataLayout().getPointerSize());
 
-    emitDIE(Die);
-    Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("info_end",
+    DD->emitDIE(Die);
+    Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol(USection->getLabelEndName(),
                                                   TheCU->getUniqueID()));
   }
 }
 
 // Emit the debug info section.
 void DwarfDebug::emitDebugInfo() {
-  if (!useSplitDwarf())
-    emitCompileUnits(Asm->getObjFileLowering().getDwarfInfoSection());
-  else
-    emitSkeletonCU(Asm->getObjFileLowering().getDwarfInfoSection());
+  DwarfUnits &Holder = useSplitDwarf() ? SkeletonHolder : InfoHolder;
+
+  Holder.emitUnits(this, Asm->getObjFileLowering().getDwarfInfoSection(),
+                   Asm->getObjFileLowering().getDwarfAbbrevSection(),
+                   DwarfAbbrevSectionSym);
 }
 
 // Emit the abbreviation section.
@@ -1860,10 +1867,11 @@ void DwarfDebug::emitAbbreviations() {
   // Check to see if it is worth the effort.
   if (!Abbreviations.empty()) {
     // Start the debug abbrev section.
-    Asm->OutStreamer.SwitchSection(
-                            Asm->getObjFileLowering().getDwarfAbbrevSection());
+    const MCSection *ASec = Asm->getObjFileLowering().getDwarfAbbrevSection();
+    Asm->OutStreamer.SwitchSection(ASec);
 
-    Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("abbrev_begin"));
+    MCSymbol *Begin = Asm->GetTempSymbol(ASec->getLabelBeginName());
+    Asm->OutStreamer.EmitLabel(Begin);
 
     // For each abbrevation.
     for (unsigned i = 0, N = Abbreviations.size(); i < N; ++i) {
@@ -1880,7 +1888,8 @@ void DwarfDebug::emitAbbreviations() {
     // Mark end of abbreviations.
     Asm->EmitULEB128(0, "EOM(3)");
 
-    Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("abbrev_end"));
+    MCSymbol *End = Asm->GetTempSymbol(ASec->getLabelEndName());
+    Asm->OutStreamer.EmitLabel(End);
   }
 }
 
@@ -2046,14 +2055,15 @@ void DwarfDebug::emitDebugPubTypes() {
     Asm->EmitInt16(dwarf::DWARF_VERSION);
 
     Asm->OutStreamer.AddComment("Offset of Compilation Unit Info");
-    Asm->EmitSectionOffset(Asm->GetTempSymbol("info_begin",
+    const MCSection *ISec = Asm->getObjFileLowering().getDwarfInfoSection();
+    Asm->EmitSectionOffset(Asm->GetTempSymbol(ISec->getLabelBeginName(),
                                               TheCU->getUniqueID()),
                            DwarfInfoSectionSym);
 
     Asm->OutStreamer.AddComment("Compilation Unit Length");
-    Asm->EmitLabelDifference(Asm->GetTempSymbol("info_end",
+    Asm->EmitLabelDifference(Asm->GetTempSymbol(ISec->getLabelEndName(),
                                                 TheCU->getUniqueID()),
-                             Asm->GetTempSymbol("info_begin",
+                             Asm->GetTempSymbol(ISec->getLabelBeginName(),
                                                 TheCU->getUniqueID()),
                              4);
 
@@ -2315,7 +2325,7 @@ void DwarfDebug::emitDebugInlineInfo() {
   Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("debug_inlined_end", 1));
 }
 
-// DWARF5 Experimental Fission emitters.
+// DWARF5 Experimental Separate Dwarf emitters.
 
 // This DIE has the following attributes: DW_AT_comp_dir, DW_AT_stmt_list,
 // DW_AT_low_pc, DW_AT_high_pc, DW_AT_ranges, DW_AT_dwo_name, DW_AT_dwo_id,
@@ -2358,7 +2368,7 @@ void DwarfDebug::emitSkeletonCU(const MCSection *Section) {
   DIE *Die = SkeletonCU->getCUDie();
 
   // Emit the compile units header.
-  Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("skel_info_begin",
+  Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol(Section->getLabelBeginName(),
                                                 SkeletonCU->getUniqueID()));
 
   // Emit size of content not including length itself
@@ -2378,15 +2388,18 @@ void DwarfDebug::emitSkeletonCU(const MCSection *Section) {
   Asm->EmitInt8(Asm->getDataLayout().getPointerSize());
 
   emitDIE(Die);
-  Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("skel_info_end",
+  Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol(Section->getLabelEndName(),
                                                 SkeletonCU->getUniqueID()));
 
 
 }
 
-// Emit the .debug_info.dwo section for fission. This contains the compile
-// units that would normally be in debug_info.
+// Emit the .debug_info.dwo section for separated dwarf. This contains the
+// compile units that would normally be in debug_info.
 void DwarfDebug::emitDebugInfoDWO() {
   assert(useSplitDwarf() && "No split dwarf debug info?");
-  emitCompileUnits(Asm->getObjFileLowering().getDwarfInfoDWOSection());
+  // FIXME for Abbrev DWO.
+  InfoHolder.emitUnits(this, Asm->getObjFileLowering().getDwarfInfoDWOSection(),
+                       Asm->getObjFileLowering().getDwarfAbbrevSection(),
+                       DwarfAbbrevSectionSym);
 }

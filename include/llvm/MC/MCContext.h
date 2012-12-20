@@ -94,6 +94,12 @@ namespace llvm {
     /// .secure_log_reset appearing between them.
     bool SecureLogUsed;
 
+    /// The compilation directory to use for DW_AT_comp_dir.
+    std::string CompilationDir;
+
+    /// The main file name if passed in explicitly.
+    std::string MainFileName;
+
     /// The dwarf file and directory tables from the dwarf .file directive.
     std::vector<MCDwarfFile *> MCDwarfFiles;
     std::vector<StringRef> MCDwarfDirs;
@@ -137,16 +143,15 @@ namespace llvm {
 
     void *MachOUniquingMap, *ELFUniquingMap, *COFFUniquingMap;
 
-    /// Do automatic initialization in constructor and finalization in
-    /// destructor
-    bool AutoInitializationFinalization;
+    /// Do automatic reset in destructor
+    bool AutoReset;
 
     MCSymbol *CreateSymbol(StringRef Name);
 
   public:
     explicit MCContext(const MCAsmInfo &MAI, const MCRegisterInfo &MRI,
                        const MCObjectFileInfo *MOFI, const SourceMgr *Mgr = 0,
-                       bool AutoInitializationFinalization = true);
+                       bool DoAutoReset = true);
     ~MCContext();
 
     const SourceMgr *getSourceManager() const { return SrcMgr; }
@@ -162,11 +167,9 @@ namespace llvm {
     /// @name Module Lifetime Management
     /// @{
 
-    /// doInitialization - prepare to process a new module
-    void doInitialization();
-
-    /// doFinalization - clean up state from the current module
-    void doFinalization();
+    /// reset - return object to right after construction state to prepare
+    /// to process a new module
+    void reset();
 
     /// @}
 
@@ -250,6 +253,24 @@ namespace llvm {
 
     /// @name Dwarf Management
     /// @{
+
+    /// \brief Get the compilation directory for DW_AT_comp_dir
+    /// This can be overridden by clients which want to control the reported
+    /// compilation directory and have it be something other than the current
+    /// working directory.
+    const std::string &getCompilationDir() const { return CompilationDir; }
+
+    /// \brief Set the compilation directory for DW_AT_comp_dir
+    /// Override the default (CWD) compilation directory.
+    void setCompilationDir(StringRef S) { CompilationDir = S.str(); }
+
+    /// \brief Get the main file name for use in error messages and debug
+    /// info. This can be set to ensure we've got the correct file name
+    /// after preprocessing or for -save-temps.
+    const std::string &getMainFileName() const { return MainFileName; }
+
+    /// \brief Set the main file name and override the default.
+    void setMainFileName(StringRef S) { MainFileName = S.str(); }
 
     /// GetDwarfFile - creates an entry in the dwarf file and directory tables.
     unsigned GetDwarfFile(StringRef Directory, StringRef FileName,

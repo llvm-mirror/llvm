@@ -513,8 +513,24 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     OutStreamer.EmitInstruction(TmpInst);
     return;
   }
-  case PPC::LDgotTPREL: {
-    // Transform %Xd = LDgotTPREL <ga:@sym>, %Xs
+  case PPC::ADDISgotTprelHA: {
+    // Transform: %Xd = ADDISgotTprelHA %X2, <ga:@sym>
+    // Into:      %Xd = ADDIS8 %X2, sym@got@tlsgd@ha
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymGotTprel =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TPREL16_HA,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::ADDIS8)
+                                .addReg(MI->getOperand(0).getReg())
+                                .addReg(PPC::X2)
+                                .addExpr(SymGotTprel));
+    return;
+  }
+  case PPC::LDgotTprelL: {
+    // Transform %Xd = LDgotTprelL <ga:@sym>, %Xs
     LowerPPCMachineInstrToMCInst(MI, TmpInst, *this, Subtarget.isDarwin());
 
     // Change the opcode to LDrs, which is a form of LD with the offset
@@ -524,10 +540,146 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     const GlobalValue *GValue = MO.getGlobal();
     MCSymbol *MOSymbol = Mang->getSymbol(GValue);
     const MCExpr *Exp =
-      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TPREL16_DS,
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TPREL16_LO,
                               OutContext);
     TmpInst.getOperand(1) = MCOperand::CreateExpr(Exp);
     OutStreamer.EmitInstruction(TmpInst);
+    return;
+  }
+  case PPC::ADDIStlsgdHA: {
+    // Transform: %Xd = ADDIStlsgdHA %X2, <ga:@sym>
+    // Into:      %Xd = ADDIS8 %X2, sym@got@tlsgd@ha
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymGotTlsGD =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSGD16_HA,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::ADDIS8)
+                                .addReg(MI->getOperand(0).getReg())
+                                .addReg(PPC::X2)
+                                .addExpr(SymGotTlsGD));
+    return;
+  }
+  case PPC::ADDItlsgdL: {
+    // Transform: %Xd = ADDItlsgdL %Xs, <ga:@sym>
+    // Into:      %Xd = ADDI8L %Xs, sym@got@tlsgd@l
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymGotTlsGD =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSGD16_LO,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::ADDI8L)
+                                .addReg(MI->getOperand(0).getReg())
+                                .addReg(MI->getOperand(1).getReg())
+                                .addExpr(SymGotTlsGD));
+    return;
+  }
+  case PPC::GETtlsADDR: {
+    // Transform: %X3 = GETtlsADDR %X3, <ga:@sym>
+    // Into:      BL8_NOP_ELF_TLSGD __tls_get_addr(sym@tlsgd)
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+
+    StringRef Name = "__tls_get_addr";
+    MCSymbol *TlsGetAddr = OutContext.GetOrCreateSymbol(Name);
+    const MCSymbolRefExpr *TlsRef = 
+      MCSymbolRefExpr::Create(TlsGetAddr, MCSymbolRefExpr::VK_None, OutContext);
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymVar =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_TLSGD,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::BL8_NOP_ELF_TLSGD)
+                                .addExpr(TlsRef)
+                                .addExpr(SymVar));
+    return;
+  }
+  case PPC::ADDIStlsldHA: {
+    // Transform: %Xd = ADDIStlsldHA %X2, <ga:@sym>
+    // Into:      %Xd = ADDIS8 %X2, sym@got@tlsld@ha
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymGotTlsLD =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSLD16_HA,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::ADDIS8)
+                                .addReg(MI->getOperand(0).getReg())
+                                .addReg(PPC::X2)
+                                .addExpr(SymGotTlsLD));
+    return;
+  }
+  case PPC::ADDItlsldL: {
+    // Transform: %Xd = ADDItlsldL %Xs, <ga:@sym>
+    // Into:      %Xd = ADDI8L %Xs, sym@got@tlsld@l
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymGotTlsLD =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSLD16_LO,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::ADDI8L)
+                                .addReg(MI->getOperand(0).getReg())
+                                .addReg(MI->getOperand(1).getReg())
+                                .addExpr(SymGotTlsLD));
+    return;
+  }
+  case PPC::GETtlsldADDR: {
+    // Transform: %X3 = GETtlsldADDR %X3, <ga:@sym>
+    // Into:      BL8_NOP_ELF_TLSLD __tls_get_addr(sym@tlsld)
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+
+    StringRef Name = "__tls_get_addr";
+    MCSymbol *TlsGetAddr = OutContext.GetOrCreateSymbol(Name);
+    const MCSymbolRefExpr *TlsRef = 
+      MCSymbolRefExpr::Create(TlsGetAddr, MCSymbolRefExpr::VK_None, OutContext);
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymVar =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_TLSLD,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::BL8_NOP_ELF_TLSLD)
+                                .addExpr(TlsRef)
+                                .addExpr(SymVar));
+    return;
+  }
+  case PPC::ADDISdtprelHA: {
+    // Transform: %Xd = ADDISdtprelHA %X3, <ga:@sym>
+    // Into:      %Xd = ADDIS8 %X3, sym@dtprel@ha
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymDtprel =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_DTPREL16_HA,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::ADDIS8)
+                                .addReg(MI->getOperand(0).getReg())
+                                .addReg(PPC::X3)
+                                .addExpr(SymDtprel));
+    return;
+  }
+  case PPC::ADDIdtprelL: {
+    // Transform: %Xd = ADDIdtprelL %Xs, <ga:@sym>
+    // Into:      %Xd = ADDI8L %Xs, sym@dtprel@l
+    assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
+    const MachineOperand &MO = MI->getOperand(2);
+    const GlobalValue *GValue = MO.getGlobal();
+    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    const MCExpr *SymDtprel =
+      MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_DTPREL16_LO,
+                              OutContext);
+    OutStreamer.EmitInstruction(MCInstBuilder(PPC::ADDI8L)
+                                .addReg(MI->getOperand(0).getReg())
+                                .addReg(MI->getOperand(1).getReg())
+                                .addExpr(SymDtprel));
     return;
   }
   case PPC::MFCRpseud:

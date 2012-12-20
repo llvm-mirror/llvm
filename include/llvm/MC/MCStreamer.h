@@ -92,6 +92,10 @@ namespace llvm {
   public:
     virtual ~MCStreamer();
 
+    /// State management
+    ///
+    virtual void reset();
+
     MCContext &getContext() const { return Context; }
 
     unsigned getNumFrameInfos() {
@@ -239,6 +243,8 @@ namespace llvm {
     /// emitted as a label once, and symbols emitted as a label should never be
     /// used in an assignment.
     virtual void EmitLabel(MCSymbol *Symbol);
+
+    virtual void EmitDebugLabel(MCSymbol *Symbol);
 
     virtual void EmitEHSymAttributes(const MCSymbol *Symbol,
                                      MCSymbol *EHSymbol);

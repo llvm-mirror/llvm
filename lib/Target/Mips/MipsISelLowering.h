@@ -174,6 +174,8 @@ namespace llvm {
     virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   private:
 
+    void setMips16HardFloatLibCalls();
+
     /// ByValArgInfo - Byval argument information.
     struct ByValArgInfo {
       unsigned FirstIdx; // Index of the first register used.
@@ -362,7 +364,8 @@ namespace llvm {
     virtual bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const;
 
     virtual EVT getOptimalMemOpType(uint64_t Size, unsigned DstAlign,
-                                    unsigned SrcAlign, bool IsZeroVal,
+                                    unsigned SrcAlign,
+                                    bool IsMemset, bool ZeroMemset,
                                     bool MemcpyStrSrc,
                                     MachineFunction &MF) const;
 

@@ -45,6 +45,11 @@ protected:
                    MCAssembler *_Assembler);
   ~MCObjectStreamer();
 
+public:
+  /// state management
+  virtual void reset();
+
+protected:
   MCSectionData *getCurrentSectionData() const {
     return CurSectionData;
   }
@@ -64,6 +69,7 @@ public:
   /// @{
 
   virtual void EmitLabel(MCSymbol *Symbol);
+  virtual void EmitDebugLabel(MCSymbol *Symbol);
   virtual void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value);
   virtual void EmitValueImpl(const MCExpr *Value, unsigned Size,
                              unsigned AddrSpace);

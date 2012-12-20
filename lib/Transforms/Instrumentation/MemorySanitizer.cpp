@@ -76,6 +76,7 @@ static const uint64_t kShadowMask32 = 1ULL << 31;
 static const uint64_t kShadowMask64 = 1ULL << 46;
 static const uint64_t kOriginOffset32 = 1ULL << 30;
 static const uint64_t kOriginOffset64 = 1ULL << 45;
+static const uint64_t kShadowTLSAlignment = 8;
 
 // This is an important flag that makes the reports much more
 // informative at the cost of greater slowdown. Not fully implemented
@@ -132,14 +133,14 @@ namespace {
 /// MemorySanitizer: instrument the code in module to find
 /// uninitialized reads.
 class MemorySanitizer : public FunctionPass {
-public:
+ public:
   MemorySanitizer() : FunctionPass(ID), TD(0), WarningFn(0) { }
   const char *getPassName() const { return "MemorySanitizer"; }
   bool runOnFunction(Function &F);
   bool doInitialization(Module &M);
   static char ID;  // Pass identification, replacement for typeid.
 
-private:
+ private:
   void initializeCallbacks(Module &M);
 
   DataLayout *TD;
@@ -241,8 +242,8 @@ void MemorySanitizer::initializeCallbacks(Module &M) {
   MsanPoisonStackFn = M.getOrInsertFunction(
     "__msan_poison_stack", IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy, NULL);
   MemmoveFn = M.getOrInsertFunction(
-    "__msan_memmove", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-    IntptrTy, NULL);
+    "__msan_memmove", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
+    IRB.getInt8PtrTy(), IntptrTy, NULL);
   MemcpyFn = M.getOrInsertFunction(
     "__msan_memcpy", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
     IntptrTy, NULL);
@@ -377,7 +378,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
 
   // An unfortunate workaround for asymmetric lowering of va_arg stuff.
   // See a comment in visitCallSite for more details.
-  static const unsigned AMD64GpEndOffset = 48; // AMD64 ABI Draft 0.99.6 p3.5.7
+  static const unsigned AMD64GpEndOffset = 48;  // AMD64 ABI Draft 0.99.6 p3.5.7
   static const unsigned AMD64FpEndOffset = 176;
 
   struct ShadowOriginAndInsertPoint {
@@ -409,7 +410,8 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       Value *Shadow = getShadow(Val);
       Value *ShadowPtr = getShadowPtr(Addr, Shadow->getType(), IRB);
 
-      StoreInst *NewSI = IRB.CreateAlignedStore(Shadow, ShadowPtr, I.getAlignment());
+      StoreInst *NewSI =
+        IRB.CreateAlignedStore(Shadow, ShadowPtr, I.getAlignment());
       DEBUG(dbgs() << "  STORE: " << *NewSI << "\n");
       (void)NewSI;
       // If the store is volatile, add a check.
@@ -420,7 +422,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
 
       if (ClTrackOrigins) {
         if (ClStoreCleanOrigin || isa<StructType>(Shadow->getType())) {
-          IRB.CreateAlignedStore(getOrigin(Val), getOriginPtr(Addr, IRB), I.getAlignment());
+          IRB.CreateStore(getOrigin(Val), getOriginPtr(Addr, IRB));
         } else {
           Value *ConvertedShadow = convertToShadowTyNoVec(Shadow, IRB);
 
@@ -434,10 +436,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
           Value *Cmp = IRB.CreateICmpNE(ConvertedShadow,
               getCleanShadow(ConvertedShadow), "_mscmp");
           Instruction *CheckTerm =
-            SplitBlockAndInsertIfThen(cast<Instruction>(Cmp), false, MS.OriginStoreWeights);
-          IRBuilder<> IRBNewBlock(CheckTerm);
-          IRBNewBlock.CreateAlignedStore(getOrigin(Val),
-              getOriginPtr(Addr, IRBNewBlock), I.getAlignment());
+            SplitBlockAndInsertIfThen(cast<Instruction>(Cmp), false,
+                                      MS.OriginStoreWeights);
+          IRBuilder<> IRBNew(CheckTerm);
+          IRBNew.CreateStore(getOrigin(Val), getOriginPtr(Addr, IRBNew));
         }
       }
     }
@@ -768,7 +770,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       ShadowOriginAndInsertPoint(Shadow, Origin, OrigIns));
   }
 
-  //------------------- Visitors.
+  // ------------------- Visitors.
 
   /// \brief Instrument LoadInst
   ///
@@ -786,7 +788,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       insertCheck(I.getPointerOperand(), &I);
 
     if (ClTrackOrigins)
-      setOrigin(&I, IRB.CreateAlignedLoad(getOriginPtr(Addr, IRB), I.getAlignment()));
+      setOrigin(&I, IRB.CreateLoad(getOriginPtr(Addr, IRB)));
   }
 
   /// \brief Instrument StoreInst
@@ -918,67 +920,133 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     setOriginForNaryOp(I);
   }
 
-  /// \brief Propagate origin for an instruction.
+  /// \brief Default propagation of shadow and/or origin.
   ///
-  /// This is a general case of origin propagation. For an Nary operation,
-  /// is set to the origin of an argument that is not entirely initialized.
-  /// If there is more than one such arguments, the rightmost of them is picked.
-  /// It does not matter which one is picked if all arguments are initialized.
-  void setOriginForNaryOp(Instruction &I) {
-    if (!ClTrackOrigins) return;
-    IRBuilder<> IRB(&I);
-    Value *Origin = getOrigin(&I, 0);
-    for (unsigned Op = 1, n = I.getNumOperands(); Op < n; ++Op) {
-      Value *S = convertToShadowTyNoVec(getShadow(&I, Op), IRB);
-      Origin = IRB.CreateSelect(IRB.CreateICmpNE(S, getCleanShadow(S)),
-                                getOrigin(&I, Op), Origin);
-    }
-    setOrigin(&I, Origin);
-  }
-
-  /// \brief Propagate shadow for a binary operation.
-  ///
-  /// Shadow = Shadow0 | Shadow1, all 3 must have the same type.
-  /// Bitwise OR is selected as an operation that will never lose even a bit of
-  /// poison.
-  void handleShadowOrBinary(Instruction &I) {
-    IRBuilder<> IRB(&I);
-    Value *Shadow0 = getShadow(&I, 0);
-    Value *Shadow1 = getShadow(&I, 1);
-    setShadow(&I, IRB.CreateOr(Shadow0, Shadow1, "_msprop"));
-    setOriginForNaryOp(I);
-  }
-
-  /// \brief Propagate shadow for arbitrary operation.
-  ///
-  /// This is a general case of shadow propagation, used in all cases where we
-  /// don't know and/or care about what the operation actually does.
-  /// It converts all input shadow values to a common type (extending or
-  /// truncating as necessary), and bitwise OR's them.
+  /// This class implements the general case of shadow propagation, used in all
+  /// cases where we don't know and/or don't care about what the operation
+  /// actually does. It converts all input shadow values to a common type
+  /// (extending or truncating as necessary), and bitwise OR's them.
   ///
   /// This is much cheaper than inserting checks (i.e. requiring inputs to be
   /// fully initialized), and less prone to false positives.
-  // FIXME: is the casting actually correct?
-  // FIXME: merge this with handleShadowOrBinary.
-  void handleShadowOr(Instruction &I) {
+  ///
+  /// This class also implements the general case of origin propagation. For a
+  /// Nary operation, result origin is set to the origin of an argument that is
+  /// not entirely initialized. If there is more than one such arguments, the
+  /// rightmost of them is picked. It does not matter which one is picked if all
+  /// arguments are initialized.
+  template <bool CombineShadow>
+  class Combiner {
+    Value *Shadow;
+    Value *Origin;
+    IRBuilder<> &IRB;
+    MemorySanitizerVisitor *MSV;
+
+  public:
+    Combiner(MemorySanitizerVisitor *MSV, IRBuilder<> &IRB) :
+      Shadow(0), Origin(0), IRB(IRB), MSV(MSV) {}
+
+    /// \brief Add a pair of shadow and origin values to the mix.
+    Combiner &Add(Value *OpShadow, Value *OpOrigin) {
+      if (CombineShadow) {
+        assert(OpShadow);
+        if (!Shadow)
+          Shadow = OpShadow;
+        else {
+          OpShadow = MSV->CreateShadowCast(IRB, OpShadow, Shadow->getType());
+          Shadow = IRB.CreateOr(Shadow, OpShadow, "_msprop");
+        }
+      }
+
+      if (ClTrackOrigins) {
+        assert(OpOrigin);
+        if (!Origin) {
+          Origin = OpOrigin;
+        } else {
+          Value *FlatShadow = MSV->convertToShadowTyNoVec(OpShadow, IRB);
+          Value *Cond = IRB.CreateICmpNE(FlatShadow,
+                                         MSV->getCleanShadow(FlatShadow));
+          Origin = IRB.CreateSelect(Cond, OpOrigin, Origin);
+        }
+      }
+      return *this;
+    }
+
+    /// \brief Add an application value to the mix.
+    Combiner &Add(Value *V) {
+      Value *OpShadow = MSV->getShadow(V);
+      Value *OpOrigin = ClTrackOrigins ? MSV->getOrigin(V) : 0;
+      return Add(OpShadow, OpOrigin);
+    }
+
+    /// \brief Set the current combined values as the given instruction's shadow
+    /// and origin.
+    void Done(Instruction *I) {
+      if (CombineShadow) {
+        assert(Shadow);
+        Shadow = MSV->CreateShadowCast(IRB, Shadow, MSV->getShadowTy(I));
+        MSV->setShadow(I, Shadow);
+      }
+      if (ClTrackOrigins) {
+        assert(Origin);
+        MSV->setOrigin(I, Origin);
+      }
+    }
+  };
+
+  typedef Combiner<true> ShadowAndOriginCombiner;
+  typedef Combiner<false> OriginCombiner;
+
+  /// \brief Propagate origin for arbitrary operation.
+  void setOriginForNaryOp(Instruction &I) {
+    if (!ClTrackOrigins) return;
     IRBuilder<> IRB(&I);
-    Value *Shadow = getShadow(&I, 0);
-    for (unsigned Op = 1, n = I.getNumOperands(); Op < n; ++Op)
-      Shadow = IRB.CreateOr(
-        Shadow, IRB.CreateIntCast(getShadow(&I, Op), Shadow->getType(), false),
-        "_msprop");
-    Shadow = IRB.CreateIntCast(Shadow, getShadowTy(&I), false);
-    setShadow(&I, Shadow);
-    setOriginForNaryOp(I);
+    OriginCombiner OC(this, IRB);
+    for (Instruction::op_iterator OI = I.op_begin(); OI != I.op_end(); ++OI)
+      OC.Add(OI->get());
+    OC.Done(&I);
   }
 
-  void visitFAdd(BinaryOperator &I) { handleShadowOrBinary(I); }
-  void visitFSub(BinaryOperator &I) { handleShadowOrBinary(I); }
-  void visitFMul(BinaryOperator &I) { handleShadowOrBinary(I); }
-  void visitAdd(BinaryOperator &I) { handleShadowOrBinary(I); }
-  void visitSub(BinaryOperator &I) { handleShadowOrBinary(I); }
-  void visitXor(BinaryOperator &I) { handleShadowOrBinary(I); }
-  void visitMul(BinaryOperator &I) { handleShadowOrBinary(I); }
+  size_t VectorOrPrimitiveTypeSizeInBits(Type *Ty) {
+    return Ty->isVectorTy() ?
+      Ty->getVectorNumElements() * Ty->getScalarSizeInBits() :
+      Ty->getPrimitiveSizeInBits();
+  }
+
+  /// \brief Cast between two shadow types, extending or truncating as
+  /// necessary.
+  Value *CreateShadowCast(IRBuilder<> &IRB, Value *V, Type *dstTy) {
+    Type *srcTy = V->getType();
+    if (dstTy->isIntegerTy() && srcTy->isIntegerTy())
+      return IRB.CreateIntCast(V, dstTy, false);
+    if (dstTy->isVectorTy() && srcTy->isVectorTy() &&
+        dstTy->getVectorNumElements() == srcTy->getVectorNumElements())
+      return IRB.CreateIntCast(V, dstTy, false);
+    size_t srcSizeInBits = VectorOrPrimitiveTypeSizeInBits(srcTy);
+    size_t dstSizeInBits = VectorOrPrimitiveTypeSizeInBits(dstTy);
+    Value *V1 = IRB.CreateBitCast(V, Type::getIntNTy(*MS.C, srcSizeInBits));
+    Value *V2 =
+      IRB.CreateIntCast(V1, Type::getIntNTy(*MS.C, dstSizeInBits), false);
+    return IRB.CreateBitCast(V2, dstTy);
+    // TODO: handle struct types.
+  }
+
+  /// \brief Propagate shadow for arbitrary operation.
+  void handleShadowOr(Instruction &I) {
+    IRBuilder<> IRB(&I);
+    ShadowAndOriginCombiner SC(this, IRB);
+    for (Instruction::op_iterator OI = I.op_begin(); OI != I.op_end(); ++OI)
+      SC.Add(OI->get());
+    SC.Done(&I);
+  }
+
+  void visitFAdd(BinaryOperator &I) { handleShadowOr(I); }
+  void visitFSub(BinaryOperator &I) { handleShadowOr(I); }
+  void visitFMul(BinaryOperator &I) { handleShadowOr(I); }
+  void visitAdd(BinaryOperator &I) { handleShadowOr(I); }
+  void visitSub(BinaryOperator &I) { handleShadowOr(I); }
+  void visitXor(BinaryOperator &I) { handleShadowOr(I); }
+  void visitMul(BinaryOperator &I) { handleShadowOr(I); }
 
   void handleDiv(Instruction &I) {
     IRBuilder<> IRB(&I);
@@ -1155,9 +1223,11 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
   void visitIntrinsicInst(IntrinsicInst &I) {
     switch (I.getIntrinsicID()) {
     case llvm::Intrinsic::bswap:
-      handleBswap(I); break;
+      handleBswap(I);
+      break;
     default:
-      visitInstruction(I); break;
+      visitInstruction(I);
+      break;
     }
   }
 
@@ -1226,7 +1296,8 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
                                  Size, Alignment);
       } else {
         Size = MS.TD->getTypeAllocSize(A->getType());
-        Store = IRB.CreateStore(ArgShadow, ArgShadowBase);
+        Store = IRB.CreateAlignedStore(ArgShadow, ArgShadowBase,
+                                       kShadowTLSAlignment);
       }
       if (ClTrackOrigins)
         IRB.CreateStore(getOrigin(A),
@@ -1248,7 +1319,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     IRBuilder<> IRBBefore(&I);
     // Untill we have full dynamic coverage, make sure the retval shadow is 0.
     Value *Base = getShadowPtrForRetval(&I, IRBBefore);
-    IRBBefore.CreateStore(getCleanShadow(&I), Base);
+    IRBBefore.CreateAlignedStore(getCleanShadow(&I), Base, kShadowTLSAlignment);
     Instruction *NextInsn = 0;
     if (CS.isCall()) {
       NextInsn = I.getNextNode();
@@ -1267,8 +1338,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
              "Could not find insertion point for retval shadow load");
     }
     IRBuilder<> IRBAfter(NextInsn);
-    setShadow(&I, IRBAfter.CreateLoad(getShadowPtrForRetval(&I, IRBAfter),
-                                      "_msret"));
+    Value *RetvalShadow =
+      IRBAfter.CreateAlignedLoad(getShadowPtrForRetval(&I, IRBAfter),
+                                 kShadowTLSAlignment, "_msret");
+    setShadow(&I, RetvalShadow);
     if (ClTrackOrigins)
       setOrigin(&I, IRBAfter.CreateLoad(getOriginPtrForRetval(IRBAfter)));
   }
@@ -1280,7 +1353,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       Value *Shadow = getShadow(RetVal);
       Value *ShadowPtr = getShadowPtrForRetval(RetVal, IRB);
       DEBUG(dbgs() << "Return: " << *Shadow << "\n" << *ShadowPtr << "\n");
-      IRB.CreateStore(Shadow, ShadowPtr);
+      IRB.CreateAlignedStore(Shadow, ShadowPtr, kShadowTLSAlignment);
       if (ClTrackOrigins)
         IRB.CreateStore(getOrigin(RetVal), getOriginPtrForRetval(IRB));
     }
@@ -1407,7 +1480,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
 struct VarArgAMD64Helper : public VarArgHelper {
   // An unfortunate workaround for asymmetric lowering of va_arg stuff.
   // See a comment in visitCallSite for more details.
-  static const unsigned AMD64GpEndOffset = 48; // AMD64 ABI Draft 0.99.6 p3.5.7
+  static const unsigned AMD64GpEndOffset = 48;  // AMD64 ABI Draft 0.99.6 p3.5.7
   static const unsigned AMD64FpEndOffset = 176;
 
   Function &F;
@@ -1471,7 +1544,7 @@ struct VarArgAMD64Helper : public VarArgHelper {
         Base = getShadowPtrForVAArgument(A, IRB, OverflowOffset);
         OverflowOffset += DataLayout::RoundUpAlignment(ArgSize, 8);
       }
-      IRB.CreateStore(MSV.getShadow(A), Base);
+      IRB.CreateAlignedStore(MSV.getShadow(A), Base, kShadowTLSAlignment);
     }
     Constant *OverflowSize =
       ConstantInt::get(IRB.getInt64Ty(), OverflowOffset - AMD64FpEndOffset);

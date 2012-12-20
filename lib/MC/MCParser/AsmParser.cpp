@@ -46,7 +46,7 @@ static cl::opt<bool>
 FatalAssemblerWarnings("fatal-assembler-warnings",
                        cl::desc("Consider warnings as error"));
 
-MCAsmParserSemaCallback::~MCAsmParserSemaCallback() {} 
+MCAsmParserSemaCallback::~MCAsmParserSemaCallback() {}
 
 namespace {
 
@@ -97,11 +97,14 @@ struct ParseStatementInfo {
   /// Opcode - The opcode from the last parsed instruction.
   unsigned Opcode;
 
+  /// Error - Was there an error parsing the inline assembly?
+  bool ParseError;
+
   SmallVectorImpl<AsmRewrite> *AsmRewrites;
 
-  ParseStatementInfo() : Opcode(~0U), AsmRewrites(0) {}
+  ParseStatementInfo() : Opcode(~0U), ParseError(false), AsmRewrites(0) {}
   ParseStatementInfo(SmallVectorImpl<AsmRewrite> *rewrites)
-    : Opcode(~0), AsmRewrites(rewrites) {}
+    : Opcode(~0), ParseError(false), AsmRewrites(rewrites) {}
 
   ~ParseStatementInfo() {
     // Free any parsed operands.
@@ -189,9 +192,9 @@ public:
   virtual MCAsmLexer &getLexer() { return Lexer; }
   virtual MCContext &getContext() { return Ctx; }
   virtual MCStreamer &getStreamer() { return Out; }
-  virtual unsigned getAssemblerDialect() { 
+  virtual unsigned getAssemblerDialect() {
     if (AssemblerDialect == ~0U)
-      return MAI.getAssemblerDialect(); 
+      return MAI.getAssemblerDialect();
     else
       return AssemblerDialect;
   }
@@ -289,14 +292,15 @@ private:
 
   // Directive Parsing.
 
- // ".ascii", ".asciiz", ".string"
+  // ".ascii", ".asciiz", ".string"
   bool ParseDirectiveAscii(StringRef IDVal, bool ZeroTerminated);
   bool ParseDirectiveValue(unsigned Size); // ".byte", ".long", ...
   bool ParseDirectiveRealValue(const fltSemantics &); // ".single", ...
   bool ParseDirectiveFill(); // ".fill"
   bool ParseDirectiveSpace(); // ".space"
   bool ParseDirectiveZero(); // ".zero"
-  bool ParseDirectiveSet(StringRef IDVal, bool allow_redef); // ".set", ".equ", ".equiv"
+  // ".set", ".equ", ".equiv"
+  bool ParseDirectiveSet(StringRef IDVal, bool allow_redef);
   bool ParseDirectiveOrg(); // ".org"
   // ".align{,32}", ".p2align{,w,l}"
   bool ParseDirectiveAlign(bool IsPow2, unsigned ValueSize);
@@ -609,7 +613,8 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
     getStreamer().EmitLabel(SectionStartSym);
     getContext().setGenDwarfSectionStartSym(SectionStartSym);
     getStreamer().EmitDwarfFileDirective(getContext().nextGenDwarfFileNumber(),
-      StringRef(), SrcMgr.getMemoryBuffer(CurBuffer)->getBufferIdentifier());
+                                         StringRef(),
+                                         getContext().getMainFileName());
   }
 
   // While we have input, parse each statement.
@@ -1385,6 +1390,7 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
   ParseInstructionInfo IInfo(Info.AsmRewrites);
   bool HadError = getTargetParser().ParseInstruction(IInfo, OpcodeStr.str(),
                                                      IDLoc,Info.ParsedOperands);
+  Info.ParseError = HadError;
 
   // Dump the parsed representation, if requested.
   if (getShowParsedOperands()) {
@@ -1405,7 +1411,7 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
   // section is the initial text section then generate a .loc directive for
   // the instruction.
   if (!HadError && getContext().getGenDwarfForAssembly() &&
-      getContext().getGenDwarfSection() == getStreamer().getCurrentSection() ) {
+      getContext().getGenDwarfSection() == getStreamer().getCurrentSection()) {
 
      unsigned Line = SrcMgr.FindLineNumber(IDLoc, CurBuffer);
 
@@ -1417,8 +1423,8 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
      if (CppHashFilename.size() != 0) {
        if(MCDwarfFiles[getContext().getGenDwarfFileNumber()]->getName() !=
           CppHashFilename)
-	 getStreamer().EmitDwarfFileDirective(
-	   getContext().nextGenDwarfFileNumber(), StringRef(), CppHashFilename);
+         getStreamer().EmitDwarfFileDirective(
+           getContext().nextGenDwarfFileNumber(), StringRef(), CppHashFilename);
 
        unsigned CppHashLocLineNo = SrcMgr.FindLineNumber(CppHashLoc,CppHashBuf);
        Line = CppHashLineNumber - 1 + (Line - CppHashLocLineNo);
@@ -1508,7 +1514,7 @@ void AsmParser::DiagHandler(const SMDiagnostic &Diag, void *Context) {
      DiagSrcMgr.PrintIncludeStack(ParentIncludeLoc, OS);
   }
 
-  // If we have not parsed a cpp hash line filename comment or the source 
+  // If we have not parsed a cpp hash line filename comment or the source
   // manager changed or buffer changed (like in a nested include) then just
   // print the normal diagnostic using its Filename and LineNo.
   if (!Parser->CppHashLineNumber ||
@@ -1521,7 +1527,7 @@ void AsmParser::DiagHandler(const SMDiagnostic &Diag, void *Context) {
     return;
   }
 
-  // Use the CppHashFilename and calculate a line number based on the 
+  // Use the CppHashFilename and calculate a line number based on the
   // CppHashLoc and CppHashLineNumber relative to this Diag's SMLoc for
   // the diagnostic.
   const std::string Filename = Parser->CppHashFilename;
@@ -3703,6 +3709,9 @@ bool AsmParser::ParseMSInlineAsm(void *AsmLoc, std::string &AsmString,
   while (getLexer().isNot(AsmToken::Eof)) {
     ParseStatementInfo Info(&AsmStrRewrites);
     if (ParseStatement(Info))
+      return true;
+
+    if (Info.ParseError)
       return true;
 
     if (Info.Opcode != ~0U) {

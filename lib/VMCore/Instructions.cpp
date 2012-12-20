@@ -15,6 +15,7 @@
 #include "llvm/Instructions.h"
 #include "LLVMContextImpl.h"
 #include "llvm/Constants.h"
+#include "llvm/DataLayout.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Function.h"
 #include "llvm/Module.h"
@@ -1421,6 +1422,12 @@ void GetElementPtrInst::setIsInBounds(bool B) {
 
 bool GetElementPtrInst::isInBounds() const {
   return cast<GEPOperator>(this)->isInBounds();
+}
+
+bool GetElementPtrInst::accumulateConstantOffset(const DataLayout &DL,
+                                                 APInt &Offset) const {
+  // Delegate to the generic GEPOperator implementation.
+  return cast<GEPOperator>(this)->accumulateConstantOffset(DL, Offset);
 }
 
 //===----------------------------------------------------------------------===//
