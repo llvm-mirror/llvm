@@ -237,6 +237,12 @@ namespace llvm {
       /// sym@got@dtprel@l.
       ADDI_DTPREL_L,
 
+      /// VRRC = VADD_SPLAT Elt, EltSize - Temporary node to be expanded
+      /// during instruction selection to optimize a BUILD_VECTOR into
+      /// operations on splats.  This is necessary to avoid losing these
+      /// optimizations due to constant folding.
+      VADD_SPLAT,
+
       /// STD_32 - This is the STD instruction for use with "32-bit" registers.
       STD_32 = ISD::FIRST_TARGET_MEMORY_OPCODE,
 
@@ -252,13 +258,14 @@ namespace llvm {
       /// or i32.
       LBRX,
 
-      /// G8RC = ADDIS_TOC_HA %X2, Symbol - For medium code model, produces
-      /// an ADDIS8 instruction that adds the TOC base register to sym@toc@ha.
+      /// G8RC = ADDIS_TOC_HA %X2, Symbol - For medium and large code model,
+      /// produces an ADDIS8 instruction that adds the TOC base register to
+      /// sym@toc@ha.
       ADDIS_TOC_HA,
 
-      /// G8RC = LD_TOC_L Symbol, G8RReg - For medium code model, produces a
-      /// LD instruction with base register G8RReg and offset sym@toc@l.
-      /// Preceded by an ADDIS_TOC_HA to form a full 32-bit offset.
+      /// G8RC = LD_TOC_L Symbol, G8RReg - For medium and large code model,
+      /// produces a LD instruction with base register G8RReg and offset
+      /// sym@toc@l.  Preceded by an ADDIS_TOC_HA to form a full 32-bit offset.
       LD_TOC_L,
 
       /// G8RC = ADDI_TOC_L G8RReg, Symbol - For medium code model, produces
@@ -322,7 +329,7 @@ namespace llvm {
     /// DAG node.
     virtual const char *getTargetNodeName(unsigned Opcode) const;
 
-    virtual MVT getShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
+    virtual MVT getScalarShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
 
     /// getSetCCResultType - Return the ISD::SETCC ValueType
     virtual EVT getSetCCResultType(EVT VT) const;

@@ -17,7 +17,7 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CallGraph.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -50,6 +50,8 @@ namespace {
     explicit InternalizePass();
     explicit InternalizePass(ArrayRef<const char *> exportList);
     void LoadFile(const char *Filename);
+    void ClearExportList();
+    void AddToExportList(const std::string &val);
     virtual bool runOnModule(Module &M);
 
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
@@ -95,6 +97,14 @@ void InternalizePass::LoadFile(const char *Filename) {
     if (!Symbol.empty())
       ExternalNames.insert(Symbol);
   }
+}
+
+void InternalizePass::ClearExportList() {
+  ExternalNames.clear();
+}
+
+void InternalizePass::AddToExportList(const std::string &val) {
+  ExternalNames.insert(val);
 }
 
 bool InternalizePass::runOnModule(Module &M) {

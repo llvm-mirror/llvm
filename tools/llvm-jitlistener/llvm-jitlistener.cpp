@@ -13,7 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/LLVMContext.h"
 #include "../../lib/ExecutionEngine/IntelJITEvents/IntelJITEventsWrapper.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/Triple.h"
@@ -21,7 +21,7 @@
 #include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectImage.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/IRReader.h"
@@ -137,7 +137,7 @@ protected:
     // Override the triple to generate ELF on Windows since that's supported
     Triple Tuple(TheModule->getTargetTriple());
     if (Tuple.getTriple().empty())
-      Tuple.setTriple(LLVM_HOSTTRIPLE);
+      Tuple.setTriple(sys::getProcessTriple());
 
     if (Tuple.isOSWindows() && Triple::ELF != Tuple.getEnvironment()) {
       Tuple.setEnvironment(Triple::ELF);

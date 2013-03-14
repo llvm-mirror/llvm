@@ -18,10 +18,10 @@
 #include "R600InstrInfo.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/Constants.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCExpr.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;

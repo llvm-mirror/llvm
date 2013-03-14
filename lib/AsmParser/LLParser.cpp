@@ -14,16 +14,16 @@
 #include "LLParser.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/AutoUpgrade.h"
-#include "llvm/CallingConv.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Instructions.h"
-#include "llvm/Module.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ValueSymbolTable.h"
 using namespace llvm;
 
 static std::string getTypeString(Type *T) {
@@ -65,6 +65,64 @@ bool LLParser::ValidateEndOfModule() {
     ForwardRefInstMetadata.clear();
   }
 
+  // Handle any function attribute group forward references.
+  for (std::map<Value*, std::vector<unsigned> >::iterator
+         I = ForwardRefAttrGroups.begin(), E = ForwardRefAttrGroups.end();
+         I != E; ++I) {
+    Value *V = I->first;
+    std::vector<unsigned> &Vec = I->second;
+    AttrBuilder B;
+
+    for (std::vector<unsigned>::iterator VI = Vec.begin(), VE = Vec.end();
+         VI != VE; ++VI)
+      B.merge(NumberedAttrBuilders[*VI]);
+
+    if (Function *Fn = dyn_cast<Function>(V)) {
+      AttributeSet AS = Fn->getAttributes();
+      AttrBuilder FnAttrs(AS.getFnAttributes(), AttributeSet::FunctionIndex);
+      AS = AS.removeAttributes(Context, AttributeSet::FunctionIndex,
+                               AS.getFnAttributes());
+
+      FnAttrs.merge(B);
+
+      // If the alignment was parsed as an attribute, move to the alignment
+      // field.
+      if (FnAttrs.hasAlignmentAttr()) {
+        Fn->setAlignment(FnAttrs.getAlignment());
+        FnAttrs.removeAttribute(Attribute::Alignment);
+      }
+
+      AS = AS.addAttributes(Context, AttributeSet::FunctionIndex,
+                            AttributeSet::get(Context,
+                                              AttributeSet::FunctionIndex,
+                                              FnAttrs));
+      Fn->setAttributes(AS);
+    } else if (CallInst *CI = dyn_cast<CallInst>(V)) {
+      AttributeSet AS = CI->getAttributes();
+      AttrBuilder FnAttrs(AS.getFnAttributes(), AttributeSet::FunctionIndex);
+      AS = AS.removeAttributes(Context, AttributeSet::FunctionIndex,
+                               AS.getFnAttributes());
+      FnAttrs.merge(B);
+      AS = AS.addAttributes(Context, AttributeSet::FunctionIndex,
+                            AttributeSet::get(Context,
+                                              AttributeSet::FunctionIndex,
+                                              FnAttrs));
+      CI->setAttributes(AS);
+    } else if (InvokeInst *II = dyn_cast<InvokeInst>(V)) {
+      AttributeSet AS = II->getAttributes();
+      AttrBuilder FnAttrs(AS.getFnAttributes(), AttributeSet::FunctionIndex);
+      AS = AS.removeAttributes(Context, AttributeSet::FunctionIndex,
+                               AS.getFnAttributes());
+      FnAttrs.merge(B);
+      AS = AS.addAttributes(Context, AttributeSet::FunctionIndex,
+                            AttributeSet::get(Context,
+                                              AttributeSet::FunctionIndex,
+                                              FnAttrs));
+      II->setAttributes(AS);
+    } else {
+      llvm_unreachable("invalid object with forward attribute group reference");
+    }
+  }
 
   // If there are entries in ForwardRefBlockAddresses at this point, they are
   // references after the function was defined.  Resolve those now.
@@ -174,7 +232,7 @@ bool LLParser::ParseTopLevelEntities() {
     case lltok::GlobalID:   if (ParseUnnamedGlobal()) return true; break;
     case lltok::GlobalVar:  if (ParseNamedGlobal()) return true; break;
     case lltok::exclaim:    if (ParseStandaloneMetadata()) return true; break;
-    case lltok::MetadataVar: if (ParseNamedMetadata()) return true; break;
+    case lltok::MetadataVar:if (ParseNamedMetadata()) return true; break;
 
     // The Global variable production with no name can have many different
     // optional leading prefixes, the production is:
@@ -220,6 +278,8 @@ bool LLParser::ParseTopLevelEntities() {
     case lltok::kw_global:        // GlobalType
       if (ParseGlobal("", SMLoc(), 0, false, 0)) return true;
       break;
+
+    case lltok::kw_attributes: if (ParseUnnamedAttrGrp()) return true; break;
     }
   }
 }
@@ -632,9 +692,11 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
 
 /// ParseGlobal
 ///   ::= GlobalVar '=' OptionalLinkage OptionalVisibility OptionalThreadLocal
-///       OptionalAddrSpace OptionalUnNammedAddr GlobalType Type Const
+///       OptionalAddrSpace OptionalUnNammedAddr
+///       OptionalExternallyInitialized GlobalType Type Const
 ///   ::= OptionalLinkage OptionalVisibility OptionalThreadLocal
-///       OptionalAddrSpace OptionalUnNammedAddr GlobalType Type Const
+///       OptionalAddrSpace OptionalUnNammedAddr
+///       OptionalExternallyInitialized GlobalType Type Const
 ///
 /// Everything through visibility has been parsed already.
 ///
@@ -642,9 +704,10 @@ bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
                            unsigned Linkage, bool HasLinkage,
                            unsigned Visibility) {
   unsigned AddrSpace;
-  bool IsConstant, UnnamedAddr;
+  bool IsConstant, UnnamedAddr, IsExternallyInitialized;
   GlobalVariable::ThreadLocalMode TLM;
   LocTy UnnamedAddrLoc;
+  LocTy IsExternallyInitializedLoc;
   LocTy TyLoc;
 
   Type *Ty = 0;
@@ -652,6 +715,9 @@ bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
       ParseOptionalAddrSpace(AddrSpace) ||
       ParseOptionalToken(lltok::kw_unnamed_addr, UnnamedAddr,
                          &UnnamedAddrLoc) ||
+      ParseOptionalToken(lltok::kw_externally_initialized,
+                         IsExternallyInitialized,
+                         &IsExternallyInitializedLoc) ||
       ParseGlobalType(IsConstant) ||
       ParseType(Ty, TyLoc))
     return true;
@@ -709,6 +775,7 @@ bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
   GV->setConstant(IsConstant);
   GV->setLinkage((GlobalValue::LinkageTypes)Linkage);
   GV->setVisibility((GlobalValue::VisibilityTypes)Visibility);
+  GV->setExternallyInitialized(IsExternallyInitialized);
   GV->setThreadLocalMode(TLM);
   GV->setUnnamedAddr(UnnamedAddr);
 
@@ -733,6 +800,159 @@ bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
   return false;
 }
 
+/// ParseUnnamedAttrGrp
+///   ::= 'attributes' AttrGrpID '=' '{' AttrValPair+ '}'
+bool LLParser::ParseUnnamedAttrGrp() {
+  assert(Lex.getKind() == lltok::kw_attributes);
+  LocTy AttrGrpLoc = Lex.getLoc();
+  Lex.Lex();
+
+  assert(Lex.getKind() == lltok::AttrGrpID);
+  unsigned VarID = Lex.getUIntVal();
+  std::vector<unsigned> unused;
+  LocTy NoBuiltinLoc;
+  Lex.Lex();
+
+  if (ParseToken(lltok::equal, "expected '=' here") ||
+      ParseToken(lltok::lbrace, "expected '{' here") ||
+      ParseFnAttributeValuePairs(NumberedAttrBuilders[VarID], unused, true,
+                                 NoBuiltinLoc) ||
+      ParseToken(lltok::rbrace, "expected end of attribute group"))
+    return true;
+
+  if (!NumberedAttrBuilders[VarID].hasAttributes())
+    return Error(AttrGrpLoc, "attribute group has no attributes");
+
+  return false;
+}
+
+/// ParseFnAttributeValuePairs
+///   ::= <attr> | <attr> '=' <value>
+bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
+                                          std::vector<unsigned> &FwdRefAttrGrps,
+                                          bool inAttrGrp, LocTy &NoBuiltinLoc) {
+  bool HaveError = false;
+
+  B.clear();
+
+  while (true) {
+    lltok::Kind Token = Lex.getKind();
+    if (Token == lltok::kw_nobuiltin)
+      NoBuiltinLoc = Lex.getLoc();
+    switch (Token) {
+    default:
+      if (!inAttrGrp) return HaveError;
+      return Error(Lex.getLoc(), "unterminated attribute group");
+    case lltok::rbrace:
+      // Finished.
+      return false;
+
+    case lltok::AttrGrpID: {
+      // Allow a function to reference an attribute group:
+      //
+      //   define void @foo() #1 { ... }
+      if (inAttrGrp)
+        HaveError |=
+          Error(Lex.getLoc(),
+              "cannot have an attribute group reference in an attribute group");
+
+      unsigned AttrGrpNum = Lex.getUIntVal();
+      if (inAttrGrp) break;
+
+      // Save the reference to the attribute group. We'll fill it in later.
+      FwdRefAttrGrps.push_back(AttrGrpNum);
+      break;
+    }
+    // Target-dependent attributes:
+    case lltok::StringConstant: {
+      std::string Attr = Lex.getStrVal();
+      Lex.Lex();
+      std::string Val;
+      if (EatIfPresent(lltok::equal) &&
+          ParseStringConstant(Val))
+        return true;
+
+      B.addAttribute(Attr, Val);
+      continue;
+    }
+
+    // Target-independent attributes:
+    case lltok::kw_align: {
+      // As a hack, we allow "align 2" on functions as a synonym for "alignstack
+      // 2".
+      unsigned Alignment;
+      if (inAttrGrp) {
+        Lex.Lex();
+        if (ParseToken(lltok::equal, "expected '=' here") ||
+            ParseUInt32(Alignment))
+          return true;
+      } else {
+        if (ParseOptionalAlignment(Alignment))
+          return true;
+      }
+      B.addAlignmentAttr(Alignment);
+      continue;
+    }
+    case lltok::kw_alignstack: {
+      unsigned Alignment;
+      if (inAttrGrp) {
+        Lex.Lex();
+        if (ParseToken(lltok::equal, "expected '=' here") ||
+            ParseUInt32(Alignment))
+          return true;
+      } else {
+        if (ParseOptionalStackAlignment(Alignment))
+          return true;
+      }
+      B.addStackAlignmentAttr(Alignment);
+      continue;
+    }
+    case lltok::kw_alwaysinline:      B.addAttribute(Attribute::AlwaysInline); break;
+    case lltok::kw_inlinehint:        B.addAttribute(Attribute::InlineHint); break;
+    case lltok::kw_minsize:           B.addAttribute(Attribute::MinSize); break;
+    case lltok::kw_naked:             B.addAttribute(Attribute::Naked); break;
+    case lltok::kw_nobuiltin:         B.addAttribute(Attribute::NoBuiltin); break;
+    case lltok::kw_noduplicate:       B.addAttribute(Attribute::NoDuplicate); break;
+    case lltok::kw_noimplicitfloat:   B.addAttribute(Attribute::NoImplicitFloat); break;
+    case lltok::kw_noinline:          B.addAttribute(Attribute::NoInline); break;
+    case lltok::kw_nonlazybind:       B.addAttribute(Attribute::NonLazyBind); break;
+    case lltok::kw_noredzone:         B.addAttribute(Attribute::NoRedZone); break;
+    case lltok::kw_noreturn:          B.addAttribute(Attribute::NoReturn); break;
+    case lltok::kw_nounwind:          B.addAttribute(Attribute::NoUnwind); break;
+    case lltok::kw_optsize:           B.addAttribute(Attribute::OptimizeForSize); break;
+    case lltok::kw_readnone:          B.addAttribute(Attribute::ReadNone); break;
+    case lltok::kw_readonly:          B.addAttribute(Attribute::ReadOnly); break;
+    case lltok::kw_returns_twice:     B.addAttribute(Attribute::ReturnsTwice); break;
+    case lltok::kw_ssp:               B.addAttribute(Attribute::StackProtect); break;
+    case lltok::kw_sspreq:            B.addAttribute(Attribute::StackProtectReq); break;
+    case lltok::kw_sspstrong:         B.addAttribute(Attribute::StackProtectStrong); break;
+    case lltok::kw_sanitize_address:  B.addAttribute(Attribute::SanitizeAddress); break;
+    case lltok::kw_sanitize_thread:   B.addAttribute(Attribute::SanitizeThread); break;
+    case lltok::kw_sanitize_memory:   B.addAttribute(Attribute::SanitizeMemory); break;
+    case lltok::kw_uwtable:           B.addAttribute(Attribute::UWTable); break;
+
+    // Error handling.
+    case lltok::kw_inreg:
+    case lltok::kw_signext:
+    case lltok::kw_zeroext:
+      HaveError |=
+        Error(Lex.getLoc(),
+              "invalid use of attribute on a function");
+      break;
+    case lltok::kw_byval:
+    case lltok::kw_nest:
+    case lltok::kw_noalias:
+    case lltok::kw_nocapture:
+    case lltok::kw_sret:
+      HaveError |=
+        Error(Lex.getLoc(),
+              "invalid use of parameter-only attribute on a function");
+      break;
+    }
+
+    Lex.Lex();
+  }
+}
 
 //===----------------------------------------------------------------------===//
 // GlobalValue Reference/Resolution Routines.
@@ -912,70 +1132,6 @@ bool LLParser::ParseOptionalAddrSpace(unsigned &AddrSpace) {
          ParseToken(lltok::rparen, "expected ')' in address space");
 }
 
-/// ParseOptionalFuncAttrs - Parse a potentially empty list of function attributes.
-bool LLParser::ParseOptionalFuncAttrs(AttrBuilder &B) {
-  bool HaveError = false;
-
-  B.clear();
-
-  while (1) {
-    lltok::Kind Token = Lex.getKind();
-    switch (Token) {
-    default:  // End of attributes.
-      return HaveError;
-    case lltok::kw_alignstack: {
-      unsigned Alignment;
-      if (ParseOptionalStackAlignment(Alignment))
-        return true;
-      B.addStackAlignmentAttr(Alignment);
-      continue;
-    }
-    case lltok::kw_align: {
-      // As a hack, we allow "align 2" on functions as a synonym for "alignstack
-      // 2".
-      unsigned Alignment;
-      if (ParseOptionalAlignment(Alignment))
-        return true;
-      B.addAlignmentAttr(Alignment);
-      continue;
-    }
-    case lltok::kw_address_safety:  B.addAttribute(Attributes::AddressSafety); break;
-    case lltok::kw_alwaysinline:    B.addAttribute(Attributes::AlwaysInline); break;
-    case lltok::kw_inlinehint:      B.addAttribute(Attributes::InlineHint); break;
-    case lltok::kw_minsize:         B.addAttribute(Attributes::MinSize); break;
-    case lltok::kw_naked:           B.addAttribute(Attributes::Naked); break;
-    case lltok::kw_noinline:        B.addAttribute(Attributes::NoInline); break;
-    case lltok::kw_nonlazybind:     B.addAttribute(Attributes::NonLazyBind); break;
-    case lltok::kw_noredzone:       B.addAttribute(Attributes::NoRedZone); break;
-    case lltok::kw_noimplicitfloat: B.addAttribute(Attributes::NoImplicitFloat); break;
-    case lltok::kw_noreturn:        B.addAttribute(Attributes::NoReturn); break;
-    case lltok::kw_nounwind:        B.addAttribute(Attributes::NoUnwind); break;
-    case lltok::kw_optsize:         B.addAttribute(Attributes::OptimizeForSize); break;
-    case lltok::kw_readnone:        B.addAttribute(Attributes::ReadNone); break;
-    case lltok::kw_readonly:        B.addAttribute(Attributes::ReadOnly); break;
-    case lltok::kw_returns_twice:   B.addAttribute(Attributes::ReturnsTwice); break;
-    case lltok::kw_ssp:             B.addAttribute(Attributes::StackProtect); break;
-    case lltok::kw_sspreq:          B.addAttribute(Attributes::StackProtectReq); break;
-    case lltok::kw_uwtable:         B.addAttribute(Attributes::UWTable); break;
-
-    // Error handling.
-    case lltok::kw_zeroext:
-    case lltok::kw_signext:
-    case lltok::kw_inreg:
-      HaveError |= Error(Lex.getLoc(), "invalid use of attribute on a function");
-      break;
-    case lltok::kw_sret:      case lltok::kw_noalias:
-    case lltok::kw_nocapture: case lltok::kw_byval:
-    case lltok::kw_nest:
-      HaveError |=
-        Error(Lex.getLoc(), "invalid use of parameter-only attribute on a function");
-      break;
-    }
-
-    Lex.Lex();
-  }
-}
-
 /// ParseOptionalParamAttrs - Parse a potentially empty list of parameter attributes.
 bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
   bool HaveError = false;
@@ -994,25 +1150,26 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
       B.addAlignmentAttr(Alignment);
       continue;
     }
-    case lltok::kw_byval:           B.addAttribute(Attributes::ByVal); break;
-    case lltok::kw_inreg:           B.addAttribute(Attributes::InReg); break;
-    case lltok::kw_nest:            B.addAttribute(Attributes::Nest); break;
-    case lltok::kw_noalias:         B.addAttribute(Attributes::NoAlias); break;
-    case lltok::kw_nocapture:       B.addAttribute(Attributes::NoCapture); break;
-    case lltok::kw_signext:         B.addAttribute(Attributes::SExt); break;
-    case lltok::kw_sret:            B.addAttribute(Attributes::StructRet); break;
-    case lltok::kw_zeroext:         B.addAttribute(Attributes::ZExt); break;
+    case lltok::kw_byval:           B.addAttribute(Attribute::ByVal); break;
+    case lltok::kw_inreg:           B.addAttribute(Attribute::InReg); break;
+    case lltok::kw_nest:            B.addAttribute(Attribute::Nest); break;
+    case lltok::kw_noalias:         B.addAttribute(Attribute::NoAlias); break;
+    case lltok::kw_nocapture:       B.addAttribute(Attribute::NoCapture); break;
+    case lltok::kw_signext:         B.addAttribute(Attribute::SExt); break;
+    case lltok::kw_sret:            B.addAttribute(Attribute::StructRet); break;
+    case lltok::kw_zeroext:         B.addAttribute(Attribute::ZExt); break;
 
-    case lltok::kw_noreturn:       case lltok::kw_nounwind:
-    case lltok::kw_uwtable:        case lltok::kw_returns_twice:
-    case lltok::kw_noinline:       case lltok::kw_readnone:
-    case lltok::kw_readonly:       case lltok::kw_inlinehint:
-    case lltok::kw_alwaysinline:   case lltok::kw_optsize:
-    case lltok::kw_ssp:            case lltok::kw_sspreq:
-    case lltok::kw_noredzone:      case lltok::kw_noimplicitfloat:
-    case lltok::kw_naked:          case lltok::kw_nonlazybind:
-    case lltok::kw_address_safety: case lltok::kw_minsize:
-    case lltok::kw_alignstack:
+    case lltok::kw_alignstack:      case lltok::kw_nounwind:
+    case lltok::kw_alwaysinline:    case lltok::kw_optsize:
+    case lltok::kw_inlinehint:      case lltok::kw_readnone:
+    case lltok::kw_minsize:         case lltok::kw_readonly:
+    case lltok::kw_naked:           case lltok::kw_returns_twice:
+    case lltok::kw_nobuiltin:       case lltok::kw_sanitize_address:
+    case lltok::kw_noimplicitfloat: case lltok::kw_sanitize_memory:
+    case lltok::kw_noinline:        case lltok::kw_sanitize_thread:
+    case lltok::kw_nonlazybind:     case lltok::kw_ssp:
+    case lltok::kw_noredzone:       case lltok::kw_sspreq:
+    case lltok::kw_noreturn:        case lltok::kw_uwtable:
       HaveError |= Error(Lex.getLoc(), "invalid use of function-only attribute");
       break;
     }
@@ -1032,26 +1189,30 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
     switch (Token) {
     default:  // End of attributes.
       return HaveError;
-    case lltok::kw_inreg:           B.addAttribute(Attributes::InReg); break;
-    case lltok::kw_noalias:         B.addAttribute(Attributes::NoAlias); break;
-    case lltok::kw_signext:         B.addAttribute(Attributes::SExt); break;
-    case lltok::kw_zeroext:         B.addAttribute(Attributes::ZExt); break;
+    case lltok::kw_inreg:           B.addAttribute(Attribute::InReg); break;
+    case lltok::kw_noalias:         B.addAttribute(Attribute::NoAlias); break;
+    case lltok::kw_signext:         B.addAttribute(Attribute::SExt); break;
+    case lltok::kw_zeroext:         B.addAttribute(Attribute::ZExt); break;
 
     // Error handling.
     case lltok::kw_sret:  case lltok::kw_nocapture:
     case lltok::kw_byval: case lltok::kw_nest:
       HaveError |= Error(Lex.getLoc(), "invalid use of parameter-only attribute");
       break;
-    case lltok::kw_noreturn:       case lltok::kw_nounwind:
-    case lltok::kw_uwtable:        case lltok::kw_returns_twice:
-    case lltok::kw_noinline:       case lltok::kw_readnone:
-    case lltok::kw_readonly:       case lltok::kw_inlinehint:
-    case lltok::kw_alwaysinline:   case lltok::kw_optsize:
-    case lltok::kw_ssp:            case lltok::kw_sspreq:
-    case lltok::kw_noredzone:      case lltok::kw_noimplicitfloat:
-    case lltok::kw_naked:          case lltok::kw_nonlazybind:
-    case lltok::kw_address_safety: case lltok::kw_minsize:
-    case lltok::kw_alignstack:     case lltok::kw_align:
+
+    case lltok::kw_align:                 case lltok::kw_noreturn:
+    case lltok::kw_alignstack:            case lltok::kw_nounwind:
+    case lltok::kw_alwaysinline:          case lltok::kw_optsize:
+    case lltok::kw_inlinehint:            case lltok::kw_readnone:
+    case lltok::kw_minsize:               case lltok::kw_readonly:
+    case lltok::kw_naked:                 case lltok::kw_returns_twice:
+    case lltok::kw_nobuiltin:             case lltok::kw_sanitize_address:
+    case lltok::kw_noduplicate:           case lltok::kw_sanitize_memory:
+    case lltok::kw_noimplicitfloat:       case lltok::kw_sanitize_thread:
+    case lltok::kw_noinline:              case lltok::kw_ssp:
+    case lltok::kw_nonlazybind:           case lltok::kw_sspreq:
+    case lltok::kw_noredzone:             case lltok::kw_sspstrong:
+                                          case lltok::kw_uwtable:
       HaveError |= Error(Lex.getLoc(), "invalid use of function-only attribute");
       break;
     }
@@ -1468,6 +1629,7 @@ bool LLParser::ParseParameterList(SmallVectorImpl<ParamInfo> &ArgList,
   if (ParseToken(lltok::lparen, "expected '(' in call"))
     return true;
 
+  unsigned AttrIndex = 1;
   while (Lex.getKind() != lltok::rparen) {
     // If this isn't the first argument, we need a comma.
     if (!ArgList.empty() &&
@@ -1485,8 +1647,9 @@ bool LLParser::ParseParameterList(SmallVectorImpl<ParamInfo> &ArgList,
     // Otherwise, handle normal operands.
     if (ParseOptionalParamAttrs(ArgAttrs) || ParseValue(ArgTy, V, PFS))
       return true;
-    ArgList.push_back(ParamInfo(ArgLoc, V, Attributes::get(V->getContext(),
-                                                           ArgAttrs)));
+    ArgList.push_back(ParamInfo(ArgLoc, V, AttributeSet::get(V->getContext(),
+                                                             AttrIndex++,
+                                                             ArgAttrs)));
   }
 
   Lex.Lex();  // Lex the ')'.
@@ -1535,9 +1698,10 @@ bool LLParser::ParseArgumentList(SmallVectorImpl<ArgInfo> &ArgList,
     if (!FunctionType::isValidArgumentType(ArgTy))
       return Error(TypeLoc, "invalid type for function argument");
 
+    unsigned AttrIndex = 1;
     ArgList.push_back(ArgInfo(TypeLoc, ArgTy,
-                              Attributes::get(ArgTy->getContext(),
-                                              Attrs), Name));
+                              AttributeSet::get(ArgTy->getContext(),
+                                                AttrIndex++, Attrs), Name));
 
     while (EatIfPresent(lltok::comma)) {
       // Handle ... at end of arg list.
@@ -1564,7 +1728,8 @@ bool LLParser::ParseArgumentList(SmallVectorImpl<ArgInfo> &ArgList,
         return Error(TypeLoc, "invalid type for function argument");
 
       ArgList.push_back(ArgInfo(TypeLoc, ArgTy,
-                                Attributes::get(ArgTy->getContext(), Attrs),
+                                AttributeSet::get(ArgTy->getContext(),
+                                                  AttrIndex++, Attrs),
                                 Name));
     }
   }
@@ -1589,7 +1754,7 @@ bool LLParser::ParseFunctionType(Type *&Result) {
   for (unsigned i = 0, e = ArgList.size(); i != e; ++i) {
     if (!ArgList[i].Name.empty())
       return Error(ArgList[i].Loc, "argument name invalid in function type");
-    if (ArgList[i].Attrs.hasAttributes())
+    if (ArgList[i].Attrs.hasAttributes(i + 1))
       return Error(ArgList[i].Loc,
                    "argument attributes invalid in function type");
   }
@@ -2153,7 +2318,8 @@ bool LLParser::ParseValID(ValID &ID, PerFunctionState *PFS) {
     return false;
 
   case lltok::kw_asm: {
-    // ValID ::= 'asm' SideEffect? AlignStack? STRINGCONSTANT ',' STRINGCONSTANT
+    // ValID ::= 'asm' SideEffect? AlignStack? IntelDialect? STRINGCONSTANT ','
+    //             STRINGCONSTANT
     bool HasSideEffect, AlignStack, AsmDialect;
     Lex.Lex();
     if (ParseOptionalToken(lltok::kw_sideeffect, HasSideEffect) ||
@@ -2783,6 +2949,8 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   SmallVector<ArgInfo, 8> ArgList;
   bool isVarArg;
   AttrBuilder FuncAttrs;
+  std::vector<unsigned> FwdRefAttrGrps;
+  LocTy NoBuiltinLoc;
   std::string Section;
   unsigned Alignment;
   std::string GC;
@@ -2792,7 +2960,8 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   if (ParseArgumentList(ArgList, isVarArg) ||
       ParseOptionalToken(lltok::kw_unnamed_addr, UnnamedAddr,
                          &UnnamedAddrLoc) ||
-      ParseOptionalFuncAttrs(FuncAttrs) ||
+      ParseFnAttributeValuePairs(FuncAttrs, FwdRefAttrGrps, false,
+                                 NoBuiltinLoc) ||
       (EatIfPresent(lltok::kw_section) &&
        ParseStringConstant(Section)) ||
       ParseOptionalAlignment(Alignment) ||
@@ -2800,39 +2969,41 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
        ParseStringConstant(GC)))
     return true;
 
+  if (FuncAttrs.contains(Attribute::NoBuiltin))
+    return Error(NoBuiltinLoc, "'nobuiltin' attribute not valid on function");
+
   // If the alignment was parsed as an attribute, move to the alignment field.
   if (FuncAttrs.hasAlignmentAttr()) {
     Alignment = FuncAttrs.getAlignment();
-    FuncAttrs.removeAttribute(Attributes::Alignment);
+    FuncAttrs.removeAttribute(Attribute::Alignment);
   }
 
   // Okay, if we got here, the function is syntactically valid.  Convert types
   // and do semantic checks.
   std::vector<Type*> ParamTypeList;
-  SmallVector<AttributeWithIndex, 8> Attrs;
+  SmallVector<AttributeSet, 8> Attrs;
 
   if (RetAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::ReturnIndex,
-                              Attributes::get(RetType->getContext(),
-                                              RetAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::ReturnIndex,
+                                      RetAttrs));
 
   for (unsigned i = 0, e = ArgList.size(); i != e; ++i) {
     ParamTypeList.push_back(ArgList[i].Ty);
-    if (ArgList[i].Attrs.hasAttributes())
-      Attrs.push_back(AttributeWithIndex::get(i+1, ArgList[i].Attrs));
+    if (ArgList[i].Attrs.hasAttributes(i + 1)) {
+      AttrBuilder B(ArgList[i].Attrs, i + 1);
+      Attrs.push_back(AttributeSet::get(RetType->getContext(), i + 1, B));
+    }
   }
 
   if (FuncAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::FunctionIndex,
-                              Attributes::get(RetType->getContext(),
-                                              FuncAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::FunctionIndex,
+                                      FuncAttrs));
 
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
 
-  if (PAL.getParamAttributes(1).hasAttribute(Attributes::StructRet) &&
-      !RetType->isVoidTy())
+  if (PAL.hasAttribute(1, Attribute::StructRet) && !RetType->isVoidTy())
     return Error(RetTypeLoc, "functions with 'sret' argument must return void");
 
   FunctionType *FT =
@@ -2893,6 +3064,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   Fn->setAlignment(Alignment);
   Fn->setSection(Section);
   if (!GC.empty()) Fn->setGC(GC.c_str());
+  ForwardRefAttrGroups[Fn] = FwdRefAttrGrps;
 
   // Add all of the arguments we parsed to the function.
   Function::arg_iterator ArgIt = Fn->arg_begin();
@@ -3118,7 +3290,7 @@ int LLParser::ParseInstruction(Instruction *&Inst, BasicBlock *BB,
 bool LLParser::ParseCmpPredicate(unsigned &P, unsigned Opc) {
   if (Opc == Instruction::FCmp) {
     switch (Lex.getKind()) {
-    default: TokError("expected fcmp predicate (e.g. 'oeq')");
+    default: return TokError("expected fcmp predicate (e.g. 'oeq')");
     case lltok::kw_oeq: P = CmpInst::FCMP_OEQ; break;
     case lltok::kw_one: P = CmpInst::FCMP_ONE; break;
     case lltok::kw_olt: P = CmpInst::FCMP_OLT; break;
@@ -3138,7 +3310,7 @@ bool LLParser::ParseCmpPredicate(unsigned &P, unsigned Opc) {
     }
   } else {
     switch (Lex.getKind()) {
-    default: TokError("expected icmp predicate (e.g. 'eq')");
+    default: return TokError("expected icmp predicate (e.g. 'eq')");
     case lltok::kw_eq:  P = CmpInst::ICMP_EQ; break;
     case lltok::kw_ne:  P = CmpInst::ICMP_NE; break;
     case lltok::kw_slt: P = CmpInst::ICMP_SLT; break;
@@ -3312,6 +3484,8 @@ bool LLParser::ParseIndirectBr(Instruction *&Inst, PerFunctionState &PFS) {
 bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
   LocTy CallLoc = Lex.getLoc();
   AttrBuilder RetAttrs, FnAttrs;
+  std::vector<unsigned> FwdRefAttrGrps;
+  LocTy NoBuiltinLoc;
   CallingConv::ID CC;
   Type *RetType = 0;
   LocTy RetTypeLoc;
@@ -3324,7 +3498,8 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
       ParseType(RetType, RetTypeLoc, true /*void allowed*/) ||
       ParseValID(CalleeID) ||
       ParseParameterList(ArgList, PFS) ||
-      ParseOptionalFuncAttrs(FnAttrs) ||
+      ParseFnAttributeValuePairs(FnAttrs, FwdRefAttrGrps, false,
+                                 NoBuiltinLoc) ||
       ParseToken(lltok::kw_to, "expected 'to' in invoke") ||
       ParseTypeAndBasicBlock(NormalBB, PFS) ||
       ParseToken(lltok::kw_unwind, "expected 'unwind' in invoke") ||
@@ -3354,13 +3529,12 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
   Value *Callee;
   if (ConvertValIDToValue(PFTy, CalleeID, Callee, &PFS)) return true;
 
-  // Set up the Attributes for the function.
-  SmallVector<AttributeWithIndex, 8> Attrs;
+  // Set up the Attribute for the function.
+  SmallVector<AttributeSet, 8> Attrs;
   if (RetAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::ReturnIndex,
-                              Attributes::get(Callee->getContext(),
-                                              RetAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::ReturnIndex,
+                                      RetAttrs));
 
   SmallVector<Value*, 8> Args;
 
@@ -3380,25 +3554,27 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
       return Error(ArgList[i].Loc, "argument is not of expected type '" +
                    getTypeString(ExpectedTy) + "'");
     Args.push_back(ArgList[i].V);
-    if (ArgList[i].Attrs.hasAttributes())
-      Attrs.push_back(AttributeWithIndex::get(i+1, ArgList[i].Attrs));
+    if (ArgList[i].Attrs.hasAttributes(i + 1)) {
+      AttrBuilder B(ArgList[i].Attrs, i + 1);
+      Attrs.push_back(AttributeSet::get(RetType->getContext(), i + 1, B));
+    }
   }
 
   if (I != E)
     return Error(CallLoc, "not enough parameters specified for call");
 
   if (FnAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::FunctionIndex,
-                              Attributes::get(Callee->getContext(),
-                                              FnAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::FunctionIndex,
+                                      FnAttrs));
 
-  // Finish off the Attributes and check them
+  // Finish off the Attribute and check them
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
 
   InvokeInst *II = InvokeInst::Create(Callee, NormalBB, UnwindBB, Args);
   II->setCallingConv(CC);
   II->setAttributes(PAL);
+  ForwardRefAttrGroups[II] = FwdRefAttrGrps;
   Inst = II;
   return false;
 }
@@ -3717,6 +3893,8 @@ bool LLParser::ParseLandingPad(Instruction *&Inst, PerFunctionState &PFS) {
 bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
                          bool isTail) {
   AttrBuilder RetAttrs, FnAttrs;
+  std::vector<unsigned> FwdRefAttrGrps;
+  LocTy NoBuiltinLoc;
   CallingConv::ID CC;
   Type *RetType = 0;
   LocTy RetTypeLoc;
@@ -3730,7 +3908,8 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
       ParseType(RetType, RetTypeLoc, true /*void allowed*/) ||
       ParseValID(CalleeID) ||
       ParseParameterList(ArgList, PFS) ||
-      ParseOptionalFuncAttrs(FnAttrs))
+      ParseFnAttributeValuePairs(FnAttrs, FwdRefAttrGrps, false,
+                                 NoBuiltinLoc))
     return true;
 
   // If RetType is a non-function pointer type, then this is the short syntax
@@ -3756,13 +3935,12 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
   Value *Callee;
   if (ConvertValIDToValue(PFTy, CalleeID, Callee, &PFS)) return true;
 
-  // Set up the Attributes for the function.
-  SmallVector<AttributeWithIndex, 8> Attrs;
+  // Set up the Attribute for the function.
+  SmallVector<AttributeSet, 8> Attrs;
   if (RetAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::ReturnIndex,
-                              Attributes::get(Callee->getContext(),
-                                              RetAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::ReturnIndex,
+                                      RetAttrs));
 
   SmallVector<Value*, 8> Args;
 
@@ -3782,26 +3960,28 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
       return Error(ArgList[i].Loc, "argument is not of expected type '" +
                    getTypeString(ExpectedTy) + "'");
     Args.push_back(ArgList[i].V);
-    if (ArgList[i].Attrs.hasAttributes())
-      Attrs.push_back(AttributeWithIndex::get(i+1, ArgList[i].Attrs));
+    if (ArgList[i].Attrs.hasAttributes(i + 1)) {
+      AttrBuilder B(ArgList[i].Attrs, i + 1);
+      Attrs.push_back(AttributeSet::get(RetType->getContext(), i + 1, B));
+    }
   }
 
   if (I != E)
     return Error(CallLoc, "not enough parameters specified for call");
 
   if (FnAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::FunctionIndex,
-                              Attributes::get(Callee->getContext(),
-                                              FnAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::FunctionIndex,
+                                      FnAttrs));
 
-  // Finish off the Attributes and check them
+  // Finish off the Attribute and check them
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
 
   CallInst *CI = CallInst::Create(Callee, Args);
   CI->setTailCall(isTail);
   CI->setCallingConv(CC);
   CI->setAttributes(PAL);
+  ForwardRefAttrGroups[CI] = FwdRefAttrGrps;
   Inst = CI;
   return false;
 }

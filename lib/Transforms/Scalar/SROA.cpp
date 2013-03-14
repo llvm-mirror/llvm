@@ -33,24 +33,22 @@
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/PtrUseVisitor.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Constants.h"
 #include "llvm/DIBuilder.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/IRBuilder.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/InstVisitor.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Module.h"
-#include "llvm/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -411,9 +409,9 @@ static Value *foldSelectInst(SelectInst &SI) {
   // early on.
   if (ConstantInt *CI = dyn_cast<ConstantInt>(SI.getCondition()))
     return SI.getOperand(1+CI->isZero());
-  if (SI.getOperand(1) == SI.getOperand(2)) {
+  if (SI.getOperand(1) == SI.getOperand(2))
     return SI.getOperand(1);
-  }
+
   return 0;
 }
 
@@ -621,7 +619,7 @@ private:
   }
 
   // Disable SRoA for any intrinsics except for lifetime invariants.
-  // FIXME: What about debug instrinsics? This matches old behavior, but
+  // FIXME: What about debug intrinsics? This matches old behavior, but
   // doesn't make sense.
   void visitIntrinsicInst(IntrinsicInst &II) {
     if (!IsOffsetKnown)
@@ -1099,13 +1097,12 @@ Type *AllocaPartitioning::getCommonType(iterator I) const {
       continue;
 
     Type *UserTy = 0;
-    if (LoadInst *LI = dyn_cast<LoadInst>(UI->U->getUser())) {
+    if (LoadInst *LI = dyn_cast<LoadInst>(UI->U->getUser()))
       UserTy = LI->getType();
-    } else if (StoreInst *SI = dyn_cast<StoreInst>(UI->U->getUser())) {
+    else if (StoreInst *SI = dyn_cast<StoreInst>(UI->U->getUser()))
       UserTy = SI->getValueOperand()->getType();
-    } else {
+    else
       return 0; // Bail if we have weird uses.
-    }
 
     if (IntegerType *ITy = dyn_cast<IntegerType>(UserTy)) {
       // If the type is larger than the partition, skip it. We only encounter
@@ -1141,8 +1138,7 @@ void AllocaPartitioning::print(raw_ostream &OS, const_iterator I,
 
 void AllocaPartitioning::printUsers(raw_ostream &OS, const_iterator I,
                                     StringRef Indent) const {
-  for (const_use_iterator UI = use_begin(I), UE = use_end(I);
-       UI != UE; ++UI) {
+  for (const_use_iterator UI = use_begin(I), UE = use_end(I); UI != UE; ++UI) {
     if (!UI->U)
       continue; // Skip dead uses.
     OS << Indent << "  [" << UI->BeginOffset << "," << UI->EndOffset << ") "
@@ -1170,8 +1166,7 @@ void AllocaPartitioning::print(raw_ostream &OS) const {
   }
 
   OS << "Partitioning of alloca: " << AI << "\n";
-  unsigned Num = 0;
-  for (const_iterator I = begin(), E = end(); I != E; ++I, ++Num) {
+  for (const_iterator I = begin(), E = end(); I != E; ++I) {
     print(OS, I);
     printUsers(OS, I);
   }
@@ -1242,7 +1237,7 @@ public:
     for (SmallVector<DbgValueInst *, 4>::const_iterator I = DVIs.begin(),
            E = DVIs.end(); I != E; ++I) {
       DbgValueInst *DVI = *I;
-      Value *Arg = NULL;
+      Value *Arg = 0;
       if (StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
         // If an argument is zero extended then use argument directly. The ZExt
         // may be zapped by an optimization pass in future.
@@ -1277,7 +1272,7 @@ namespace {
 /// 1) It takes allocations of aggregates and analyzes the ways in which they
 ///    are used to try to split them into smaller allocations, ideally of
 ///    a single scalar data type. It will split up memcpy and memset accesses
-///    as necessary and try to isolate invidual scalar accesses.
+///    as necessary and try to isolate individual scalar accesses.
 /// 2) It will transform accesses into forms which are suitable for SSA value
 ///    promotion. This can be replacing a memset with a scalar store of an
 ///    integer value, or it can involve speculating operations on a PHI or
@@ -1439,8 +1434,7 @@ private:
     // We can only transform this if it is safe to push the loads into the
     // predecessor blocks. The only thing to watch out for is that we can't put
     // a possibly trapping load in the predecessor if it is a critical edge.
-    for (unsigned Idx = 0, Num = PN.getNumIncomingValues(); Idx != Num;
-         ++Idx) {
+    for (unsigned Idx = 0, Num = PN.getNumIncomingValues(); Idx != Num; ++Idx) {
       TerminatorInst *TI = PN.getIncomingBlock(Idx)->getTerminator();
       Value *InVal = PN.getIncomingValue(Idx);
 
@@ -1483,7 +1477,7 @@ private:
                                           PN.getName() + ".sroa.speculated");
 
     // Get the TBAA tag and alignment to use from one of the loads.  It doesn't
-    // matter which one we get and if any differ, it doesn't matter.
+    // matter which one we get and if any differ.
     LoadInst *SomeLoad = cast<LoadInst>(Loads.back());
     MDNode *TBAATag = SomeLoad->getMetadata(LLVMContext::MD_tbaa);
     unsigned Align = SomeLoad->getAlignment();
@@ -1576,13 +1570,13 @@ private:
 
   void visitSelectInst(SelectInst &SI) {
     DEBUG(dbgs() << "    original: " << SI << "\n");
-    IRBuilder<> IRB(&SI);
 
     // If the select isn't safe to speculate, just use simple logic to emit it.
     SmallVector<LoadInst *, 4> Loads;
     if (!isSafeSelectToSpeculate(SI, Loads))
       return;
 
+    IRBuilder<> IRB(&SI);
     Use *Ops[2] = { &SI.getOperandUse(1), &SI.getOperandUse(2) };
     AllocaPartitioning::iterator PIs[2];
     AllocaPartitioning::PartitionUse PUs[2];
@@ -1640,44 +1634,6 @@ private:
     }
   }
 };
-}
-
-/// \brief Accumulate the constant offsets in a GEP into a single APInt offset.
-///
-/// If the provided GEP is all-constant, the total byte offset formed by the
-/// GEP is computed and Offset is set to it. If the GEP has any non-constant
-/// operands, the function returns false and the value of Offset is unmodified.
-static bool accumulateGEPOffsets(const DataLayout &TD, GEPOperator &GEP,
-                                 APInt &Offset) {
-  APInt GEPOffset(Offset.getBitWidth(), 0);
-  for (gep_type_iterator GTI = gep_type_begin(GEP), GTE = gep_type_end(GEP);
-       GTI != GTE; ++GTI) {
-    ConstantInt *OpC = dyn_cast<ConstantInt>(GTI.getOperand());
-    if (!OpC)
-      return false;
-    if (OpC->isZero()) continue;
-
-    // Handle a struct index, which adds its field offset to the pointer.
-    if (StructType *STy = dyn_cast<StructType>(*GTI)) {
-      unsigned ElementIdx = OpC->getZExtValue();
-      const StructLayout *SL = TD.getStructLayout(STy);
-      GEPOffset += APInt(Offset.getBitWidth(),
-                         SL->getElementOffset(ElementIdx));
-      continue;
-    }
-
-    APInt TypeSize(Offset.getBitWidth(),
-                   TD.getTypeAllocSize(GTI.getIndexedType()));
-    if (VectorType *VTy = dyn_cast<VectorType>(*GTI)) {
-      assert((VTy->getScalarSizeInBits() % 8) == 0 &&
-             "vector element size is not a multiple of 8, cannot GEP over it");
-      TypeSize = VTy->getScalarSizeInBits() / 8;
-    }
-
-    GEPOffset += OpC->getValue().sextOrTrunc(Offset.getBitWidth()) * TypeSize;
-  }
-  Offset = GEPOffset;
-  return true;
 }
 
 /// \brief Build a GEP out of a base pointer and indices.
@@ -1762,7 +1718,7 @@ static Value *getNaturalGEPRecursively(IRBuilder<> &IRB, const DataLayout &TD,
   // extremely poorly defined currently. The long-term goal is to remove GEPing
   // over a vector from the IR completely.
   if (VectorType *VecTy = dyn_cast<VectorType>(Ty)) {
-    unsigned ElementSizeInBits = VecTy->getScalarSizeInBits();
+    unsigned ElementSizeInBits = TD.getTypeSizeInBits(VecTy->getScalarType());
     if (ElementSizeInBits % 8)
       return 0; // GEPs over non-multiple of 8 size vector elements are invalid.
     APInt ElementSize(Offset.getBitWidth(), ElementSizeInBits / 8);
@@ -1854,7 +1810,7 @@ static Value *getNaturalGEPWithOffset(IRBuilder<> &IRB, const DataLayout &TD,
 /// The strategy for finding the more natural GEPs is to peel off layers of the
 /// pointer, walking back through bit casts and GEPs, searching for a base
 /// pointer from which we can compute a natural GEP with the desired
-/// properities. The algorithm tries to fold as many constant indices into
+/// properties. The algorithm tries to fold as many constant indices into
 /// a single GEP as possible, thus making each GEP more independent of the
 /// surrounding code.
 static Value *getAdjustedPtr(IRBuilder<> &IRB, const DataLayout &TD,
@@ -1882,7 +1838,7 @@ static Value *getAdjustedPtr(IRBuilder<> &IRB, const DataLayout &TD,
     // First fold any existing GEPs into the offset.
     while (GEPOperator *GEP = dyn_cast<GEPOperator>(Ptr)) {
       APInt GEPOffset(Offset.getBitWidth(), 0);
-      if (!accumulateGEPOffsets(TD, *GEP, GEPOffset))
+      if (!GEP->accumulateConstantOffset(TD, GEPOffset))
         break;
       Offset += GEPOffset;
       Ptr = GEP->getPointerOperand();
@@ -2009,15 +1965,14 @@ static bool isVectorPromotionViable(const DataLayout &TD,
   if (!Ty)
     return false;
 
-  uint64_t VecSize = TD.getTypeSizeInBits(Ty);
-  uint64_t ElementSize = Ty->getScalarSizeInBits();
+  uint64_t ElementSize = TD.getTypeSizeInBits(Ty->getScalarType());
 
   // While the definition of LLVM vectors is bitpacked, we don't support sizes
   // that aren't byte sized.
   if (ElementSize % 8)
     return false;
-  assert((VecSize % 8) == 0 && "vector size not a multiple of element size?");
-  VecSize /= 8;
+  assert((TD.getTypeSizeInBits(Ty) % 8) == 0 &&
+         "vector size not a multiple of element size?");
   ElementSize /= 8;
 
   for (; I != E; ++I) {
@@ -2101,9 +2056,9 @@ static bool isIntegerWideningViable(const DataLayout &TD,
 
   uint64_t Size = TD.getTypeStoreSize(AllocaTy);
 
-  // Check the uses to ensure the uses are (likely) promoteable integer uses.
+  // Check the uses to ensure the uses are (likely) promotable integer uses.
   // Also ensure that the alloca has a covering load or store. We don't want
-  // to widen the integer operotains only to fail to promote due to some other
+  // to widen the integer operations only to fail to promote due to some other
   // unsplittable entry (which we may make splittable later).
   bool WholeAllocaOp = false;
   for (; I != E; ++I) {
@@ -2322,7 +2277,7 @@ class AllocaPartitionRewriter : public InstVisitor<AllocaPartitionRewriter,
 
   // If we are rewriting an alloca partition which can be written as pure
   // vector operations, we stash extra information here. When VecTy is
-  // non-null, we have some strict guarantees about the rewriten alloca:
+  // non-null, we have some strict guarantees about the rewritten alloca:
   //   - The new alloca is exactly the size of the vector type here.
   //   - The accesses all either map to the entire vector or to a single
   //     element.
@@ -2370,9 +2325,9 @@ public:
       ++NumVectorized;
       VecTy = cast<VectorType>(NewAI.getAllocatedType());
       ElementTy = VecTy->getElementType();
-      assert((VecTy->getScalarSizeInBits() % 8) == 0 &&
+      assert((TD.getTypeSizeInBits(VecTy->getScalarType()) % 8) == 0 &&
              "Only multiple-of-8 sized vector elements are viable");
-      ElementSize = VecTy->getScalarSizeInBits() / 8;
+      ElementSize = TD.getTypeSizeInBits(VecTy->getScalarType()) / 8;
     } else if (isIntegerWideningViable(TD, NewAI.getAllocatedType(),
                                        NewAllocaBeginOffset, P, I, E)) {
       IntTy = Type::getIntNTy(NewAI.getContext(),
@@ -2494,7 +2449,6 @@ private:
     DEBUG(dbgs() << "    original: " << LI << "\n");
     Value *OldOp = LI.getOperand(0);
     assert(OldOp == OldPtr);
-    IRBuilder<> IRB(&LI);
 
     uint64_t Size = EndOffset - BeginOffset;
     bool IsSplitIntLoad = Size < TD.getTypeStoreSize(LI.getType());
@@ -2515,6 +2469,7 @@ private:
       return true;
     }
 
+    IRBuilder<> IRB(&LI);
     Type *TargetTy = IsSplitIntLoad ? Type::getIntNTy(LI.getContext(), Size * 8)
                                     : LI.getType();
     bool IsPtrAdjusted = false;
@@ -2675,7 +2630,7 @@ private:
   ///
   /// Note that this routine assumes an i8 is a byte. If that isn't true, don't
   /// call this routine.
-  /// FIXME: Heed the abvice above.
+  /// FIXME: Heed the advice above.
   ///
   /// \param V The i8 value to splat.
   /// \param Size The number of bytes in the output (assuming i8 is one byte)
@@ -2699,18 +2654,7 @@ private:
 
   /// \brief Compute a vector splat for a given element value.
   Value *getVectorSplat(IRBuilder<> &IRB, Value *V, unsigned NumElements) {
-    assert(NumElements > 0 && "Cannot splat to an empty vector.");
-
-    // First insert it into a one-element vector so we can shuffle it. It is
-    // really silly that LLVM's IR requires this in order to form a splat.
-    Value *Undef = UndefValue::get(VectorType::get(V->getType(), 1));
-    V = IRB.CreateInsertElement(Undef, V, IRB.getInt32(0),
-                                getName(".splatinsert"));
-
-    // Shuffle the value across the desired number of elements.
-    SmallVector<Constant*, 8> Mask(NumElements, IRB.getInt32(0));
-    V = IRB.CreateShuffleVector(V, Undef, ConstantVector::get(Mask),
-                                getName(".splat"));
+    V = IRB.CreateVectorSplat(NumElements, V, NamePrefix);
     DEBUG(dbgs() << "       splat: " << *V << "\n");
     return V;
   }
@@ -2762,8 +2706,7 @@ private:
     // a sensible representation for the alloca type. This is essentially
     // splatting the byte to a sufficiently wide integer, splatting it across
     // any desired vector width, and bitcasting to the final type.
-    uint64_t Size = EndOffset - BeginOffset;
-    Value *V = getIntegerSplat(IRB, II.getValue(), Size);
+    Value *V;
 
     if (VecTy) {
       // If this is a memset of a vectorized alloca, insert it.
@@ -2789,6 +2732,7 @@ private:
       // set integer.
       assert(!II.isVolatile());
 
+      uint64_t Size = EndOffset - BeginOffset;
       V = getIntegerSplat(IRB, II.getValue(), Size);
 
       if (IntTy && (BeginOffset != NewAllocaBeginOffset ||
@@ -3021,6 +2965,7 @@ private:
     else
       New = IRB.CreateLifetimeEnd(Ptr, Size);
 
+    (void)New;
     DEBUG(dbgs() << "          to: " << *New << "\n");
     return true;
   }
@@ -3197,9 +3142,8 @@ private:
     void emitFunc(Type *Ty, Value *&Agg, const Twine &Name) {
       assert(Ty->isSingleValueType());
       // Load the single value and insert it using the indices.
-      Value *Load = IRB.CreateLoad(IRB.CreateInBoundsGEP(Ptr, GEPIndices,
-                                                         Name + ".gep"),
-                                   Name + ".load");
+      Value *GEP = IRB.CreateInBoundsGEP(Ptr, GEPIndices, Name + ".gep");
+      Value *Load = IRB.CreateLoad(GEP, Name + ".load");
       Agg = IRB.CreateInsertValue(Agg, Load, Indices, Name + ".insert");
       DEBUG(dbgs() << "          to: " << *Load << "\n");
     }
@@ -3472,7 +3416,7 @@ bool SROA::rewriteAllocaPartition(AllocaInst &AI,
   // Check for the case where we're going to rewrite to a new alloca of the
   // exact same type as the original, and with the same access offsets. In that
   // case, re-use the existing alloca, but still run through the rewriter to
-  // performe phi and select speculation.
+  // perform phi and select speculation.
   AllocaInst *NewAI;
   if (AllocaTy == AI.getAllocatedType()) {
     assert(PI->BeginOffset == 0 &&
@@ -3639,7 +3583,7 @@ void SROA::deleteDeadInstructions(SmallPtrSet<AllocaInst*, 4> &DeletedAllocas) {
 /// If there is a domtree available, we attempt to promote using the full power
 /// of mem2reg. Otherwise, we build and use the AllocaPromoter above which is
 /// based on the SSAUpdater utilities. This function returns whether any
-/// promotion occured.
+/// promotion occurred.
 bool SROA::promoteAllocas(Function &F) {
   if (PromotableAllocas.empty())
     return false;

@@ -15,17 +15,17 @@
 #include "CPPTargetMachine.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/CallingConv.h"
 #include "llvm/Config/config.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Instruction.h"
-#include "llvm/Instructions.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
@@ -470,18 +470,19 @@ void CppWriter::printAttributes(const AttributeSet &PAL,
   nl(Out);
   if (!PAL.isEmpty()) {
     Out << '{'; in(); nl(Out);
-    Out << "SmallVector<AttributeWithIndex, 4> Attrs;"; nl(Out);
-    Out << "AttributeWithIndex PAWI;"; nl(Out);
+    Out << "SmallVector<AttributeSet, 4> Attrs;"; nl(Out);
+    Out << "AttributeSet PAS;"; in(); nl(Out);
     for (unsigned i = 0; i < PAL.getNumSlots(); ++i) {
-      unsigned index = PAL.getSlot(i).Index;
-      AttrBuilder attrs(PAL.getSlot(i).Attrs);
-      Out << "PAWI.Index = " << index << "U;\n";
-      Out << " {\n    AttrBuilder B;\n";
+      unsigned index = PAL.getSlotIndex(i);
+      AttrBuilder attrs(PAL.getSlotAttributes(i), index);
+      Out << "{"; in(); nl(Out);
+      Out << "AttrBuilder B;"; nl(Out);
 
-#define HANDLE_ATTR(X)                                     \
-      if (attrs.hasAttribute(Attributes::X))               \
-        Out << "    B.addAttribute(Attributes::" #X ");\n"; \
-      attrs.removeAttribute(Attributes::X);
+#define HANDLE_ATTR(X)                                                  \
+      if (attrs.contains(Attribute::X)) {                               \
+        Out << "B.addAttribute(Attribute::" #X ");"; nl(Out);           \
+        attrs.removeAttribute(Attribute::X);                            \
+      }
 
       HANDLE_ATTR(SExt);
       HANDLE_ATTR(ZExt);
@@ -499,6 +500,7 @@ void CppWriter::printAttributes(const AttributeSet &PAL,
       HANDLE_ATTR(OptimizeForSize);
       HANDLE_ATTR(StackProtect);
       HANDLE_ATTR(StackProtectReq);
+      HANDLE_ATTR(StackProtectStrong);
       HANDLE_ATTR(NoCapture);
       HANDLE_ATTR(NoRedZone);
       HANDLE_ATTR(NoImplicitFloat);
@@ -509,14 +511,23 @@ void CppWriter::printAttributes(const AttributeSet &PAL,
       HANDLE_ATTR(NonLazyBind);
       HANDLE_ATTR(MinSize);
 #undef HANDLE_ATTR
-      if (attrs.hasAttribute(Attributes::StackAlignment))
-        Out << "    B.addStackAlignmentAttr(" << attrs.getStackAlignment() << ")\n";
-      attrs.removeAttribute(Attributes::StackAlignment);
+
+      if (attrs.contains(Attribute::StackAlignment)) {
+        Out << "B.addStackAlignmentAttr(" << attrs.getStackAlignment()<<')';
+        nl(Out);
+        attrs.removeAttribute(Attribute::StackAlignment);
+      }
+
       assert(!attrs.hasAttributes() && "Unhandled attribute!");
-      Out << "    PAWI.Attrs = Attributes::get(mod->getContext(), B);\n }";
+      Out << "PAS = AttributeSet::get(mod->getContext(), ";
+      if (index == ~0U)
+        Out << "~0U,";
+      else
+        Out << index << "U,";
+      Out << " B);"; out(); nl(Out);
+      Out << "}"; out(); nl(Out);
       nl(Out);
-      Out << "Attrs.push_back(PAWI);";
-      nl(Out);
+      Out << "Attrs.push_back(PAS);"; nl(Out);
     }
     Out << name << "_PAL = AttributeSet::get(mod->getContext(), Attrs);";
     nl(Out);
@@ -1888,23 +1899,24 @@ void CppWriter::printModuleBody() {
 
 void CppWriter::printProgram(const std::string& fname,
                              const std::string& mName) {
-  Out << "#include <llvm/LLVMContext.h>\n";
-  Out << "#include <llvm/Module.h>\n";
-  Out << "#include <llvm/DerivedTypes.h>\n";
-  Out << "#include <llvm/Constants.h>\n";
-  Out << "#include <llvm/GlobalVariable.h>\n";
-  Out << "#include <llvm/Function.h>\n";
-  Out << "#include <llvm/CallingConv.h>\n";
-  Out << "#include <llvm/BasicBlock.h>\n";
-  Out << "#include <llvm/Instructions.h>\n";
-  Out << "#include <llvm/InlineAsm.h>\n";
-  Out << "#include <llvm/Support/FormattedStream.h>\n";
-  Out << "#include <llvm/Support/MathExtras.h>\n";
   Out << "#include <llvm/Pass.h>\n";
   Out << "#include <llvm/PassManager.h>\n";
+
   Out << "#include <llvm/ADT/SmallVector.h>\n";
   Out << "#include <llvm/Analysis/Verifier.h>\n";
   Out << "#include <llvm/Assembly/PrintModulePass.h>\n";
+  Out << "#include <llvm/IR/BasicBlock.h>\n";
+  Out << "#include <llvm/IR/CallingConv.h>\n";
+  Out << "#include <llvm/IR/Constants.h>\n";
+  Out << "#include <llvm/IR/DerivedTypes.h>\n";
+  Out << "#include <llvm/IR/Function.h>\n";
+  Out << "#include <llvm/IR/GlobalVariable.h>\n";
+  Out << "#include <llvm/IR/InlineAsm.h>\n";
+  Out << "#include <llvm/IR/Instructions.h>\n";
+  Out << "#include <llvm/IR/LLVMContext.h>\n";
+  Out << "#include <llvm/IR/Module.h>\n";
+  Out << "#include <llvm/Support/FormattedStream.h>\n";
+  Out << "#include <llvm/Support/MathExtras.h>\n";
   Out << "#include <algorithm>\n";
   Out << "using namespace llvm;\n\n";
   Out << "Module* " << fname << "();\n\n";

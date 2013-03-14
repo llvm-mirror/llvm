@@ -27,7 +27,8 @@ class PPCFrameLowering: public TargetFrameLowering {
 
 public:
   PPCFrameLowering(const PPCSubtarget &sti)
-    : TargetFrameLowering(TargetFrameLowering::StackGrowsDown, 16, 0),
+    : TargetFrameLowering(TargetFrameLowering::StackGrowsDown,
+        (sti.hasQPX() || sti.isBGQ()) ? 32 : 16, 0),
       Subtarget(sti) {
   }
 
@@ -49,6 +50,10 @@ public:
                                  MachineBasicBlock::iterator MI,
                                  const std::vector<CalleeSavedInfo> &CSI,
                                  const TargetRegisterInfo *TRI) const;
+
+  void eliminateCallFramePseudoInstr(MachineFunction &MF,
+                                     MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator I) const;
 
   bool restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator MI,

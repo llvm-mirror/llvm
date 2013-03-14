@@ -14,7 +14,7 @@
 #define DEBUG_TYPE "asm-printer"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
@@ -46,7 +46,7 @@ void AsmPrinter::EmitULEB128(unsigned Value, const char *Desc,
   if (isVerbose() && Desc)
     OutStreamer.AddComment(Desc);
 
-  OutStreamer.EmitULEB128IntValue(Value, 0/*addrspace*/, PadTo);
+  OutStreamer.EmitULEB128IntValue(Value, PadTo);
 }
 
 /// EmitCFAByte - Emit a .byte 42 directive for a DW_CFA_xxx value.
@@ -58,7 +58,7 @@ void AsmPrinter::EmitCFAByte(unsigned Val) const {
     else
       OutStreamer.AddComment(dwarf::CallFrameString(Val));
   }
-  OutStreamer.EmitIntValue(Val, 1, 0/*addrspace*/);
+  OutStreamer.EmitIntValue(Val, 1);
 }
 
 static const char *DecodeDWARFEncoding(unsigned Encoding) {
@@ -102,7 +102,7 @@ void AsmPrinter::EmitEncodingByte(unsigned Val, const char *Desc) const {
                              DecodeDWARFEncoding(Val));
   }
 
-  OutStreamer.EmitIntValue(Val, 1, 0/*addrspace*/);
+  OutStreamer.EmitIntValue(Val, 1);
 }
 
 /// GetSizeOfEncodedValue - Return the size of the encoding in bytes.
@@ -126,9 +126,9 @@ void AsmPrinter::EmitTTypeReference(const GlobalValue *GV,
 
     const MCExpr *Exp =
       TLOF.getTTypeGlobalReference(GV, Mang, MMI, Encoding, OutStreamer);
-    OutStreamer.EmitValue(Exp, GetSizeOfEncodedValue(Encoding), /*addrspace*/0);
+    OutStreamer.EmitValue(Exp, GetSizeOfEncodedValue(Encoding));
   } else
-    OutStreamer.EmitIntValue(0, GetSizeOfEncodedValue(Encoding), 0);
+    OutStreamer.EmitIntValue(0, GetSizeOfEncodedValue(Encoding));
 }
 
 /// EmitSectionOffset - Emit the 4-byte offset of Label from the start of its
@@ -157,7 +157,7 @@ void AsmPrinter::EmitSectionOffset(const MCSymbol *Label,
   // If the section in question will end up with an address of 0 anyway, we can
   // just emit an absolute reference to save a relocation.
   if (Section.isBaseAddressKnownZero()) {
-    OutStreamer.EmitSymbolValue(Label, 4, 0/*AddrSpace*/);
+    OutStreamer.EmitSymbolValue(Label, 4);
     return;
   }
 

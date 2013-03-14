@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TARGET_ASM_INFO_H
-#define LLVM_TARGET_ASM_INFO_H
+#ifndef LLVM_MC_MCASMINFO_H
+#define LLVM_MC_MCASMINFO_H
 
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MachineLocation.h"
@@ -47,6 +47,11 @@ namespace llvm {
     /// PointerSize - Pointer size in bytes.
     ///               Default is 4.
     unsigned PointerSize;
+
+    /// CalleeSaveStackSlotSize - Size of the stack slot reserved for
+    ///                           callee-saved registers, in bytes.
+    ///                           Default is same as pointer size.
+    unsigned CalleeSaveStackSlotSize;
 
     /// IsLittleEndian - True if target is little endian.
     ///                  Default is true.
@@ -343,7 +348,13 @@ namespace llvm {
       return PointerSize;
     }
 
-    /// islittleendian - True if the target is little endian.
+    /// getCalleeSaveStackSlotSize - Get the callee-saved register stack slot
+    /// size in bytes.
+    unsigned getCalleeSaveStackSlotSize() const {
+      return CalleeSaveStackSlotSize;
+    }
+
+    /// isLittleEndian - True if the target is little endian.
     bool isLittleEndian() const {
       return IsLittleEndian;
     }

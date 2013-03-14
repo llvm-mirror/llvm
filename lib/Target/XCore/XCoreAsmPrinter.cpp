@@ -14,9 +14,9 @@
 
 #define DEBUG_TYPE "asm-printer"
 #include "XCore.h"
+#include "InstPrinter/XCoreInstPrinter.h"
 #include "XCoreInstrInfo.h"
 #include "XCoreMCInstLower.h"
-#include "InstPrinter/XCoreInstPrinter.h"
 #include "XCoreSubtarget.h"
 #include "XCoreTargetMachine.h"
 #include "llvm/ADT/SmallString.h"
@@ -27,15 +27,15 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -171,7 +171,7 @@ void XCoreAsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
   // The ABI requires that unsigned scalar types smaller than 32 bits
   // are padded to 32 bits.
   if (Size < 4)
-    OutStreamer.EmitZeros(4 - Size, 0);
+    OutStreamer.EmitZeros(4 - Size);
   
   // Mark the end of the global
   OutStreamer.EmitRawText("\t.cc_bottom " + Twine(GVSym->getName()) + ".data");

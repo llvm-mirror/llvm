@@ -21,13 +21,13 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/DataLayout.h"
-#include "llvm/GlobalAlias.h"
-#include "llvm/Operator.h"
+#include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Support/ConstantRange.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "llvm/Support/PatternMatch.h"
@@ -663,12 +663,20 @@ Value *llvm::SimplifyAddInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
 /// accumulates the total constant offset applied in the returned constant. It
 /// returns 0 if V is not a pointer, and returns the constant '0' if there are
 /// no constant offsets applied.
-static Constant *stripAndComputeConstantOffsets(const DataLayout &TD,
+///
+/// This is very similar to GetPointerBaseWithConstantOffset except it doesn't
+/// follow non-inbounds geps. This allows it to remain usable for icmp ult/etc.
+/// folding.
+static Constant *stripAndComputeConstantOffsets(const DataLayout *TD,
                                                 Value *&V) {
-  if (!V->getType()->isPointerTy())
-    return 0;
+  assert(V->getType()->getScalarType()->isPointerTy());
 
-  unsigned IntPtrWidth = TD.getPointerSizeInBits();
+  // Without DataLayout, just be conservative for now. Theoretically, more could
+  // be done in this case.
+  if (!TD)
+    return ConstantInt::get(IntegerType::get(V->getContext(), 64), 0);
+
+  unsigned IntPtrWidth = TD->getPointerSizeInBits();
   APInt Offset = APInt::getNullValue(IntPtrWidth);
 
   // Even though we don't look through PHI nodes, we could be called on an
@@ -677,7 +685,7 @@ static Constant *stripAndComputeConstantOffsets(const DataLayout &TD,
   Visited.insert(V);
   do {
     if (GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
-      if (!GEP->isInBounds() || !GEP->accumulateConstantOffset(TD, Offset))
+      if (!GEP->isInBounds() || !GEP->accumulateConstantOffset(*TD, Offset))
         break;
       V = GEP->getPointerOperand();
     } else if (Operator::getOpcode(V) == Instruction::BitCast) {
@@ -689,23 +697,24 @@ static Constant *stripAndComputeConstantOffsets(const DataLayout &TD,
     } else {
       break;
     }
-    assert(V->getType()->isPointerTy() && "Unexpected operand type!");
+    assert(V->getType()->getScalarType()->isPointerTy() &&
+           "Unexpected operand type!");
   } while (Visited.insert(V));
 
-  Type *IntPtrTy = TD.getIntPtrType(V->getContext());
-  return ConstantInt::get(IntPtrTy, Offset);
+  Type *IntPtrTy = TD->getIntPtrType(V->getContext());
+  Constant *OffsetIntPtr = ConstantInt::get(IntPtrTy, Offset);
+  if (V->getType()->isVectorTy())
+    return ConstantVector::getSplat(V->getType()->getVectorNumElements(),
+                                    OffsetIntPtr);
+  return OffsetIntPtr;
 }
 
 /// \brief Compute the constant difference between two pointer values.
 /// If the difference is not a constant, returns zero.
-static Constant *computePointerDifference(const DataLayout &TD,
+static Constant *computePointerDifference(const DataLayout *TD,
                                           Value *LHS, Value *RHS) {
   Constant *LHSOffset = stripAndComputeConstantOffsets(TD, LHS);
-  if (!LHSOffset)
-    return 0;
   Constant *RHSOffset = stripAndComputeConstantOffsets(TD, RHS);
-  if (!RHSOffset)
-    return 0;
 
   // If LHS and RHS are not related via constant offsets to the same base
   // value, there is nothing we can do here.
@@ -819,9 +828,9 @@ static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
           return W;
 
   // Variations on GEP(base, I, ...) - GEP(base, i, ...) -> GEP(null, I-i, ...).
-  if (Q.TD && match(Op0, m_PtrToInt(m_Value(X))) &&
+  if (match(Op0, m_PtrToInt(m_Value(X))) &&
       match(Op1, m_PtrToInt(m_Value(Y))))
-    if (Constant *Result = computePointerDifference(*Q.TD, X, Y))
+    if (Constant *Result = computePointerDifference(Q.TD, X, Y))
       return ConstantExpr::getIntegerCast(Result, Op0->getType(), true);
 
   // Mul distributes over Sub.  Try some generic simplifications based on this.
@@ -1684,9 +1693,48 @@ static Value *ExtractEquivalentCondition(Value *V, CmpInst::Predicate Pred,
   return 0;
 }
 
-static Constant *computePointerICmp(const DataLayout &TD,
+// A significant optimization not implemented here is assuming that alloca
+// addresses are not equal to incoming argument values. They don't *alias*,
+// as we say, but that doesn't mean they aren't equal, so we take a
+// conservative approach.
+//
+// This is inspired in part by C++11 5.10p1:
+//   "Two pointers of the same type compare equal if and only if they are both
+//    null, both point to the same function, or both represent the same
+//    address."
+//
+// This is pretty permissive.
+//
+// It's also partly due to C11 6.5.9p6:
+//   "Two pointers compare equal if and only if both are null pointers, both are
+//    pointers to the same object (including a pointer to an object and a
+//    subobject at its beginning) or function, both are pointers to one past the
+//    last element of the same array object, or one is a pointer to one past the
+//    end of one array object and the other is a pointer to the start of a
+//    different array object that happens to immediately follow the ﬁrst array
+//    object in the address space.)
+//
+// C11's version is more restrictive, however there's no reason why an argument
+// couldn't be a one-past-the-end value for a stack object in the caller and be
+// equal to the beginning of a stack object in the callee.
+//
+// If the C and C++ standards are ever made sufficiently restrictive in this
+// area, it may be possible to update LLVM's semantics accordingly and reinstate
+// this optimization.
+static Constant *computePointerICmp(const DataLayout *TD,
+                                    const TargetLibraryInfo *TLI,
                                     CmpInst::Predicate Pred,
                                     Value *LHS, Value *RHS) {
+  // First, skip past any trivial no-ops.
+  LHS = LHS->stripPointerCasts();
+  RHS = RHS->stripPointerCasts();
+
+  // A non-null pointer is not equal to a null pointer.
+  if (llvm::isKnownNonNull(LHS) && isa<ConstantPointerNull>(RHS) &&
+      (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE))
+    return ConstantInt::get(GetCompareTy(LHS),
+                            !CmpInst::isTrueWhenEqual(Pred));
+
   // We can only fold certain predicates on pointer comparisons.
   switch (Pred) {
   default:
@@ -1709,19 +1757,83 @@ static Constant *computePointerICmp(const DataLayout &TD,
     break;
   }
 
+  // Strip off any constant offsets so that we can reason about them.
+  // It's tempting to use getUnderlyingObject or even just stripInBoundsOffsets
+  // here and compare base addresses like AliasAnalysis does, however there are
+  // numerous hazards. AliasAnalysis and its utilities rely on special rules
+  // governing loads and stores which don't apply to icmps. Also, AliasAnalysis
+  // doesn't need to guarantee pointer inequality when it says NoAlias.
   Constant *LHSOffset = stripAndComputeConstantOffsets(TD, LHS);
-  if (!LHSOffset)
-    return 0;
   Constant *RHSOffset = stripAndComputeConstantOffsets(TD, RHS);
-  if (!RHSOffset)
-    return 0;
 
-  // If LHS and RHS are not related via constant offsets to the same base
-  // value, there is nothing we can do here.
-  if (LHS != RHS)
-    return 0;
+  // If LHS and RHS are related via constant offsets to the same base
+  // value, we can replace it with an icmp which just compares the offsets.
+  if (LHS == RHS)
+    return ConstantExpr::getICmp(Pred, LHSOffset, RHSOffset);
 
-  return ConstantExpr::getICmp(Pred, LHSOffset, RHSOffset);
+  // Various optimizations for (in)equality comparisons.
+  if (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE) {
+    // Different non-empty allocations that exist at the same time have
+    // different addresses (if the program can tell). Global variables always
+    // exist, so they always exist during the lifetime of each other and all
+    // allocas. Two different allocas usually have different addresses...
+    //
+    // However, if there's an @llvm.stackrestore dynamically in between two
+    // allocas, they may have the same address. It's tempting to reduce the
+    // scope of the problem by only looking at *static* allocas here. That would
+    // cover the majority of allocas while significantly reducing the likelihood
+    // of having an @llvm.stackrestore pop up in the middle. However, it's not
+    // actually impossible for an @llvm.stackrestore to pop up in the middle of
+    // an entry block. Also, if we have a block that's not attached to a
+    // function, we can't tell if it's "static" under the current definition.
+    // Theoretically, this problem could be fixed by creating a new kind of
+    // instruction kind specifically for static allocas. Such a new instruction
+    // could be required to be at the top of the entry block, thus preventing it
+    // from being subject to a @llvm.stackrestore. Instcombine could even
+    // convert regular allocas into these special allocas. It'd be nifty.
+    // However, until then, this problem remains open.
+    //
+    // So, we'll assume that two non-empty allocas have different addresses
+    // for now.
+    //
+    // With all that, if the offsets are within the bounds of their allocations
+    // (and not one-past-the-end! so we can't use inbounds!), and their
+    // allocations aren't the same, the pointers are not equal.
+    //
+    // Note that it's not necessary to check for LHS being a global variable
+    // address, due to canonicalization and constant folding.
+    if (isa<AllocaInst>(LHS) &&
+        (isa<AllocaInst>(RHS) || isa<GlobalVariable>(RHS))) {
+      ConstantInt *LHSOffsetCI = dyn_cast<ConstantInt>(LHSOffset);
+      ConstantInt *RHSOffsetCI = dyn_cast<ConstantInt>(RHSOffset);
+      uint64_t LHSSize, RHSSize;
+      if (LHSOffsetCI && RHSOffsetCI &&
+          getObjectSize(LHS, LHSSize, TD, TLI) &&
+          getObjectSize(RHS, RHSSize, TD, TLI)) {
+        const APInt &LHSOffsetValue = LHSOffsetCI->getValue();
+        const APInt &RHSOffsetValue = RHSOffsetCI->getValue();
+        if (!LHSOffsetValue.isNegative() &&
+            !RHSOffsetValue.isNegative() &&
+            LHSOffsetValue.ult(LHSSize) &&
+            RHSOffsetValue.ult(RHSSize)) {
+          return ConstantInt::get(GetCompareTy(LHS),
+                                  !CmpInst::isTrueWhenEqual(Pred));
+        }
+      }
+
+      // Repeat the above check but this time without depending on DataLayout
+      // or being able to compute a precise size.
+      if (!cast<PointerType>(LHS->getType())->isEmptyTy() &&
+          !cast<PointerType>(RHS->getType())->isEmptyTy() &&
+          LHSOffset->isNullValue() &&
+          RHSOffset->isNullValue())
+        return ConstantInt::get(GetCompareTy(LHS),
+                                !CmpInst::isTrueWhenEqual(Pred));
+    }
+  }
+
+  // Otherwise, fail.
+  return 0;
 }
 
 /// SimplifyICmpInst - Given operands for an ICmpInst, see if we can
@@ -1783,62 +1895,6 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       if (match(RHS, m_One()))
         return LHS;
       break;
-    }
-  }
-
-  // icmp <object*>, <object*/null> - Different identified objects have
-  // different addresses (unless null), and what's more the address of an
-  // identified local is never equal to another argument (again, barring null).
-  // Note that generalizing to the case where LHS is a global variable address
-  // or null is pointless, since if both LHS and RHS are constants then we
-  // already constant folded the compare, and if only one of them is then we
-  // moved it to RHS already.
-  Value *LHSPtr = LHS->stripPointerCasts();
-  Value *RHSPtr = RHS->stripPointerCasts();
-  if (LHSPtr == RHSPtr)
-    return ConstantInt::get(ITy, CmpInst::isTrueWhenEqual(Pred));
-
-  // Be more aggressive about stripping pointer adjustments when checking a
-  // comparison of an alloca address to another object.  We can rip off all
-  // inbounds GEP operations, even if they are variable.
-  LHSPtr = LHSPtr->stripInBoundsOffsets();
-  if (llvm::isIdentifiedObject(LHSPtr)) {
-    RHSPtr = RHSPtr->stripInBoundsOffsets();
-    if (llvm::isKnownNonNull(LHSPtr) || llvm::isKnownNonNull(RHSPtr)) {
-      // If both sides are different identified objects, they aren't equal
-      // unless they're null.
-      if (LHSPtr != RHSPtr && llvm::isIdentifiedObject(RHSPtr) &&
-          Pred == CmpInst::ICMP_EQ)
-        return ConstantInt::get(ITy, false);
-
-      // A local identified object (alloca or noalias call) can't equal any
-      // incoming argument, unless they're both null or they belong to
-      // different functions. The latter happens during inlining.
-      if (Instruction *LHSInst = dyn_cast<Instruction>(LHSPtr))
-        if (Argument *RHSArg = dyn_cast<Argument>(RHSPtr))
-          if (LHSInst->getParent()->getParent() == RHSArg->getParent() &&
-              Pred == CmpInst::ICMP_EQ)
-            return ConstantInt::get(ITy, false);
-    }
-
-    // Assume that the constant null is on the right.
-    if (llvm::isKnownNonNull(LHSPtr) && isa<ConstantPointerNull>(RHSPtr)) {
-      if (Pred == CmpInst::ICMP_EQ)
-        return ConstantInt::get(ITy, false);
-      else if (Pred == CmpInst::ICMP_NE)
-        return ConstantInt::get(ITy, true);
-    }
-  } else if (Argument *LHSArg = dyn_cast<Argument>(LHSPtr)) {
-    RHSPtr = RHSPtr->stripInBoundsOffsets();
-    // An alloca can't be equal to an argument unless they come from separate
-    // functions via inlining.
-    if (AllocaInst *RHSInst = dyn_cast<AllocaInst>(RHSPtr)) {
-      if (LHSArg->getParent() == RHSInst->getParent()->getParent()) {
-        if (Pred == CmpInst::ICMP_EQ)
-          return ConstantInt::get(ITy, false);
-        else if (Pred == CmpInst::ICMP_NE)
-          return ConstantInt::get(ITy, true);
-      }
     }
   }
 
@@ -2468,8 +2524,8 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 
   // Simplify comparisons of related pointers using a powerful, recursive
   // GEP-walk when we have target data available..
-  if (Q.TD && LHS->getType()->isPointerTy() && RHS->getType()->isPointerTy())
-    if (Constant *C = computePointerICmp(*Q.TD, Pred, LHS, RHS))
+  if (LHS->getType()->isPointerTy())
+    if (Constant *C = computePointerICmp(Q.TD, Q.TLI, Pred, LHS, RHS))
       return C;
 
   if (GetElementPtrInst *GLHS = dyn_cast<GetElementPtrInst>(LHS)) {
@@ -2869,12 +2925,86 @@ Value *llvm::SimplifyCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
                            RecursionLimit);
 }
 
-static Value *SimplifyCallInst(CallInst *CI, const Query &) {
-  // call undef -> undef
-  if (isa<UndefValue>(CI->getCalledValue()))
-    return UndefValue::get(CI->getType());
+static bool IsIdempotent(Intrinsic::ID ID) {
+  switch (ID) {
+  default: return false;
+
+  // Unary idempotent: f(f(x)) = f(x)
+  case Intrinsic::fabs:
+  case Intrinsic::floor:
+  case Intrinsic::ceil:
+  case Intrinsic::trunc:
+  case Intrinsic::rint:
+  case Intrinsic::nearbyint:
+    return true;
+  }
+}
+
+template <typename IterTy>
+static Value *SimplifyIntrinsic(Intrinsic::ID IID, IterTy ArgBegin, IterTy ArgEnd,
+                                const Query &Q, unsigned MaxRecurse) {
+  // Perform idempotent optimizations
+  if (!IsIdempotent(IID))
+    return 0;
+
+  // Unary Ops
+  if (std::distance(ArgBegin, ArgEnd) == 1)
+    if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(*ArgBegin))
+      if (II->getIntrinsicID() == IID)
+        return II;
 
   return 0;
+}
+
+template <typename IterTy>
+static Value *SimplifyCall(Value *V, IterTy ArgBegin, IterTy ArgEnd,
+                           const Query &Q, unsigned MaxRecurse) {
+  Type *Ty = V->getType();
+  if (PointerType *PTy = dyn_cast<PointerType>(Ty))
+    Ty = PTy->getElementType();
+  FunctionType *FTy = cast<FunctionType>(Ty);
+
+  // call undef -> undef
+  if (isa<UndefValue>(V))
+    return UndefValue::get(FTy->getReturnType());
+
+  Function *F = dyn_cast<Function>(V);
+  if (!F)
+    return 0;
+
+  if (unsigned IID = F->getIntrinsicID())
+    if (Value *Ret =
+        SimplifyIntrinsic((Intrinsic::ID) IID, ArgBegin, ArgEnd, Q, MaxRecurse))
+      return Ret;
+
+  if (!canConstantFoldCallTo(F))
+    return 0;
+
+  SmallVector<Constant *, 4> ConstantArgs;
+  ConstantArgs.reserve(ArgEnd - ArgBegin);
+  for (IterTy I = ArgBegin, E = ArgEnd; I != E; ++I) {
+    Constant *C = dyn_cast<Constant>(*I);
+    if (!C)
+      return 0;
+    ConstantArgs.push_back(C);
+  }
+
+  return ConstantFoldCall(F, ConstantArgs, Q.TLI);
+}
+
+Value *llvm::SimplifyCall(Value *V, User::op_iterator ArgBegin,
+                          User::op_iterator ArgEnd, const DataLayout *TD,
+                          const TargetLibraryInfo *TLI,
+                          const DominatorTree *DT) {
+  return ::SimplifyCall(V, ArgBegin, ArgEnd, Query(TD, TLI, DT),
+                        RecursionLimit);
+}
+
+Value *llvm::SimplifyCall(Value *V, ArrayRef<Value *> Args,
+                          const DataLayout *TD, const TargetLibraryInfo *TLI,
+                          const DominatorTree *DT) {
+  return ::SimplifyCall(V, Args.begin(), Args.end(), Query(TD, TLI, DT),
+                        RecursionLimit);
 }
 
 /// SimplifyInstruction - See if we can compute a simplified version of this
@@ -2985,9 +3115,12 @@ Value *llvm::SimplifyInstruction(Instruction *I, const DataLayout *TD,
   case Instruction::PHI:
     Result = SimplifyPHINode(cast<PHINode>(I), Query (TD, TLI, DT));
     break;
-  case Instruction::Call:
-    Result = SimplifyCallInst(cast<CallInst>(I), Query (TD, TLI, DT));
+  case Instruction::Call: {
+    CallSite CS(cast<CallInst>(I));
+    Result = SimplifyCall(CS.getCalledValue(), CS.arg_begin(), CS.arg_end(),
+                          TD, TLI, DT);
     break;
+  }
   case Instruction::Trunc:
     Result = SimplifyTruncInst(I->getOperand(0), I->getType(), TD, TLI, DT);
     break;

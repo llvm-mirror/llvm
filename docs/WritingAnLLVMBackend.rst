@@ -2,7 +2,10 @@
 Writing an LLVM Compiler Backend
 ================================
 
-.. sectionauthor:: Mason Woo <http://www.woo.com> and Misha Brukman <http://misha.brukman.net>
+.. toctree::
+   :hidden:
+
+   HowToUseInstrMappings
 
 .. contents::
    :local:

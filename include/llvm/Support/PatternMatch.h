@@ -29,10 +29,10 @@
 #ifndef LLVM_SUPPORT_PATTERNMATCH_H
 #define LLVM_SUPPORT_PATTERNMATCH_H
 
-#include "llvm/Constants.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Support/CallSite.h"
 
 namespace llvm {
@@ -780,6 +780,25 @@ inline fneg_match<LHS> m_FNeg(const LHS &L) { return L; }
 //===----------------------------------------------------------------------===//
 // Matchers for control flow.
 //
+
+struct br_match {
+  BasicBlock *&Succ;
+  br_match(BasicBlock *&Succ)
+    : Succ(Succ) {
+  }
+
+  template<typename OpTy>
+  bool match(OpTy *V) {
+    if (BranchInst *BI = dyn_cast<BranchInst>(V))
+      if (BI->isUnconditional()) {
+        Succ = BI->getSuccessor(0);
+        return true;
+      }
+    return false;
+  }
+};
+
+inline br_match m_UnconditionalBr(BasicBlock *&Succ) { return br_match(Succ); }
 
 template<typename Cond_t>
 struct brc_match {

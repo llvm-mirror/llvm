@@ -29,12 +29,13 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalVariable.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
@@ -164,20 +165,14 @@ const MCExpr *nvptx::LowerConstant(const Constant *CV, AsmPrinter &AP) {
   case Instruction::GetElementPtr: {
     const DataLayout &TD = *AP.TM.getDataLayout();
     // Generate a symbolic expression for the byte address
-    const Constant *PtrVal = CE->getOperand(0);
-    SmallVector<Value*, 8> IdxVec(CE->op_begin()+1, CE->op_end());
-    int64_t Offset = TD.getIndexedOffset(PtrVal->getType(), IdxVec);
+    APInt OffsetAI(TD.getPointerSizeInBits(), 0);
+    cast<GEPOperator>(CE)->accumulateConstantOffset(TD, OffsetAI);
 
     const MCExpr *Base = LowerConstant(CE->getOperand(0), AP);
-    if (Offset == 0)
+    if (!OffsetAI)
       return Base;
 
-    // Truncate/sext the offset to the pointer size.
-    if (TD.getPointerSizeInBits() != 64) {
-      int SExtAmount = 64-TD.getPointerSizeInBits();
-      Offset = (Offset << SExtAmount) >> SExtAmount;
-    }
-
+    int64_t Offset = OffsetAI.getSExtValue();
     return MCBinaryExpr::CreateAdd(Base, MCConstantExpr::Create(Offset, Ctx),
                                    Ctx);
   }
@@ -508,21 +503,7 @@ NVPTXAsmPrinter::getVirtualRegisterName(unsigned vr, bool isVec,
     O << getNVPTXRegClassStr(RC) << mapped_vr;
     return;
   }
-  // Vector virtual register
-  if (getNVPTXVectorSize(RC) == 4)
-    O << "{"
-    << getNVPTXRegClassStr(RC) << mapped_vr << "_0, "
-    << getNVPTXRegClassStr(RC) << mapped_vr << "_1, "
-    << getNVPTXRegClassStr(RC) << mapped_vr << "_2, "
-    << getNVPTXRegClassStr(RC) << mapped_vr << "_3"
-    << "}";
-  else if (getNVPTXVectorSize(RC) == 2)
-    O << "{"
-    << getNVPTXRegClassStr(RC) << mapped_vr << "_0, "
-    << getNVPTXRegClassStr(RC) << mapped_vr << "_1"
-    << "}";
-  else
-    llvm_unreachable("Unsupported vector size");
+  report_fatal_error("Bad register!");
 }
 
 void
@@ -1319,7 +1300,8 @@ void NVPTXAsmPrinter::emitPTXAddressSpace(unsigned int AddressSpace,
     O << "shared" ;
     break;
   default:
-    llvm_unreachable("unexpected address space");
+    report_fatal_error("Bad address space found while emitting PTX");
+    break;
   }
 }
 
@@ -1521,8 +1503,7 @@ void NVPTXAsmPrinter::emitFunctionParamList(const Function *F,
       continue;
     }
 
-    if (PAL.getParamAttributes(paramIndex+1).
-          hasAttribute(Attributes::ByVal) == false) {
+    if (PAL.hasAttribute(paramIndex+1, Attribute::ByVal) == false) {
       // Just a scalar
       const PointerType *PTy = dyn_cast<PointerType>(Ty);
       if (isKernelFunc) {
@@ -2029,29 +2010,9 @@ bool NVPTXAsmPrinter::ignoreLoc(const MachineInstr &MI)
   case NVPTX::StoreParamI64:  case NVPTX::StoreParamI8:
   case NVPTX::StoreParamS32I8:  case NVPTX::StoreParamU32I8:
   case NVPTX::StoreParamS32I16:  case NVPTX::StoreParamU32I16:
-  case NVPTX::StoreParamScalar2F32:  case NVPTX::StoreParamScalar2F64:
-  case NVPTX::StoreParamScalar2I16:  case NVPTX::StoreParamScalar2I32:
-  case NVPTX::StoreParamScalar2I64:  case NVPTX::StoreParamScalar2I8:
-  case NVPTX::StoreParamScalar4F32:  case NVPTX::StoreParamScalar4I16:
-  case NVPTX::StoreParamScalar4I32:  case NVPTX::StoreParamScalar4I8:
-  case NVPTX::StoreParamV2F32:  case NVPTX::StoreParamV2F64:
-  case NVPTX::StoreParamV2I16:  case NVPTX::StoreParamV2I32:
-  case NVPTX::StoreParamV2I64:  case NVPTX::StoreParamV2I8:
-  case NVPTX::StoreParamV4F32:  case NVPTX::StoreParamV4I16:
-  case NVPTX::StoreParamV4I32:  case NVPTX::StoreParamV4I8:
   case NVPTX::StoreRetvalF32:  case NVPTX::StoreRetvalF64:
   case NVPTX::StoreRetvalI16:  case NVPTX::StoreRetvalI32:
   case NVPTX::StoreRetvalI64:  case NVPTX::StoreRetvalI8:
-  case NVPTX::StoreRetvalScalar2F32:  case NVPTX::StoreRetvalScalar2F64:
-  case NVPTX::StoreRetvalScalar2I16:  case NVPTX::StoreRetvalScalar2I32:
-  case NVPTX::StoreRetvalScalar2I64:  case NVPTX::StoreRetvalScalar2I8:
-  case NVPTX::StoreRetvalScalar4F32:  case NVPTX::StoreRetvalScalar4I16:
-  case NVPTX::StoreRetvalScalar4I32:  case NVPTX::StoreRetvalScalar4I8:
-  case NVPTX::StoreRetvalV2F32:  case NVPTX::StoreRetvalV2F64:
-  case NVPTX::StoreRetvalV2I16:  case NVPTX::StoreRetvalV2I32:
-  case NVPTX::StoreRetvalV2I64:  case NVPTX::StoreRetvalV2I8:
-  case NVPTX::StoreRetvalV4F32:  case NVPTX::StoreRetvalV4I16:
-  case NVPTX::StoreRetvalV4I32:  case NVPTX::StoreRetvalV4I8:
   case NVPTX::LastCallArgF32:  case NVPTX::LastCallArgF64:
   case NVPTX::LastCallArgI16:  case NVPTX::LastCallArgI32:
   case NVPTX::LastCallArgI32imm:  case NVPTX::LastCallArgI64:
@@ -2062,16 +2023,6 @@ bool NVPTXAsmPrinter::ignoreLoc(const MachineInstr &MI)
   case NVPTX::LoadParamRegF32:  case NVPTX::LoadParamRegF64:
   case NVPTX::LoadParamRegI16:  case NVPTX::LoadParamRegI32:
   case NVPTX::LoadParamRegI64:  case NVPTX::LoadParamRegI8:
-  case NVPTX::LoadParamScalar2F32:  case NVPTX::LoadParamScalar2F64:
-  case NVPTX::LoadParamScalar2I16:  case NVPTX::LoadParamScalar2I32:
-  case NVPTX::LoadParamScalar2I64:  case NVPTX::LoadParamScalar2I8:
-  case NVPTX::LoadParamScalar4F32:  case NVPTX::LoadParamScalar4I16:
-  case NVPTX::LoadParamScalar4I32:  case NVPTX::LoadParamScalar4I8:
-  case NVPTX::LoadParamV2F32:  case NVPTX::LoadParamV2F64:
-  case NVPTX::LoadParamV2I16:  case NVPTX::LoadParamV2I32:
-  case NVPTX::LoadParamV2I64:  case NVPTX::LoadParamV2I8:
-  case NVPTX::LoadParamV4F32:  case NVPTX::LoadParamV4I16:
-  case NVPTX::LoadParamV4I32:  case NVPTX::LoadParamV4I8:
   case NVPTX::PrototypeInst:   case NVPTX::DBG_VALUE:
     return true;
   }

@@ -15,13 +15,13 @@
 #ifndef AMDGPU_TARGET_MACHINE_H
 #define AMDGPU_TARGET_MACHINE_H
 
+#include "AMDGPUFrameLowering.h"
 #include "AMDGPUInstrInfo.h"
 #include "AMDGPUSubtarget.h"
-#include "AMDILFrameLowering.h"
 #include "AMDILIntrinsicInfo.h"
 #include "R600ISelLowering.h"
 #include "llvm/ADT/OwningPtr.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
 
 namespace llvm {
 

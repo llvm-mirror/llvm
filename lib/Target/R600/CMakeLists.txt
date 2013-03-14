@@ -17,7 +17,6 @@ add_llvm_target(R600CodeGen
   AMDILDevice.cpp
   AMDILDeviceInfo.cpp
   AMDILEvergreenDevice.cpp
-  AMDILFrameLowering.cpp
   AMDILIntrinsicInfo.cpp
   AMDILISelDAGToDAG.cpp
   AMDILISelLowering.cpp
@@ -25,8 +24,11 @@ add_llvm_target(R600CodeGen
   AMDILPeepholeOptimizer.cpp
   AMDILSIDevice.cpp
   AMDGPUAsmPrinter.cpp
+  AMDGPUFrameLowering.cpp
+  AMDGPUIndirectAddressing.cpp
   AMDGPUMCInstLower.cpp
   AMDGPUSubtarget.cpp
+  AMDGPUStructurizeCFG.cpp
   AMDGPUTargetMachine.cpp
   AMDGPUISelLowering.cpp
   AMDGPUConvertToISA.cpp
@@ -36,15 +38,15 @@ add_llvm_target(R600CodeGen
   R600InstrInfo.cpp
   R600ISelLowering.cpp
   R600MachineFunctionInfo.cpp
+  R600MachineScheduler.cpp
   R600RegisterInfo.cpp
-  SIAssignInterpRegs.cpp
+  SIAnnotateControlFlow.cpp
+  SIInsertWaits.cpp
   SIInstrInfo.cpp
   SIISelLowering.cpp
-  SILowerLiteralConstants.cpp
   SILowerControlFlow.cpp
   SIMachineFunctionInfo.cpp
   SIRegisterInfo.cpp
-  SIFixSGPRLiveness.cpp
   )
 
 add_dependencies(LLVMR600CodeGen intrinsics_gen)

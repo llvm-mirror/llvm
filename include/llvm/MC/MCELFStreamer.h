@@ -15,7 +15,6 @@
 #include "llvm/MC/MCObjectStreamer.h"
 #include "llvm/MC/SectionKind.h"
 #include "llvm/Support/DataTypes.h"
-
 #include <vector>
 
 namespace llvm {
@@ -29,15 +28,20 @@ class MCSymbolData;
 class raw_ostream;
 
 class MCELFStreamer : public MCObjectStreamer {
-public:
-  MCELFStreamer(MCContext &Context, MCAsmBackend &TAB,
+protected:
+  MCELFStreamer(StreamerKind Kind, MCContext &Context, MCAsmBackend &TAB,
                 raw_ostream &OS, MCCodeEmitter *Emitter)
-    : MCObjectStreamer(Context, TAB, OS, Emitter) {}
+      : MCObjectStreamer(Kind, Context, TAB, OS, Emitter) {}
 
-  MCELFStreamer(MCContext &Context, MCAsmBackend &TAB,
-                raw_ostream &OS, MCCodeEmitter *Emitter,
-                MCAssembler *Assembler)
-    : MCObjectStreamer(Context, TAB, OS, Emitter, Assembler) {}
+public:
+  MCELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
+                MCCodeEmitter *Emitter)
+      : MCObjectStreamer(SK_ELFStreamer, Context, TAB, OS, Emitter) {}
+
+  MCELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
+                MCCodeEmitter *Emitter, MCAssembler *Assembler)
+      : MCObjectStreamer(SK_ELFStreamer, Context, TAB, OS, Emitter,
+                         Assembler) {}
 
   virtual ~MCELFStreamer();
 
@@ -45,6 +49,7 @@ public:
   /// @{
 
   virtual void InitSections();
+  virtual void InitToTextSection();
   virtual void ChangeSection(const MCSection *Section);
   virtual void EmitLabel(MCSymbol *Symbol);
   virtual void EmitDebugLabel(MCSymbol *Symbol);
@@ -59,6 +64,8 @@ public:
   virtual void EmitCOFFSymbolStorageClass(int StorageClass);
   virtual void EmitCOFFSymbolType(int Type);
   virtual void EndCOFFSymbolDef();
+
+  virtual MCSymbolData &getOrCreateSymbolData(MCSymbol *Symbol);
 
   virtual void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value);
 
@@ -76,12 +83,22 @@ public:
 
   virtual void EmitTCEntry(const MCSymbol &S);
 
+  virtual void EmitValueToAlignment(unsigned, int64_t, unsigned, unsigned);
+
   virtual void FinishImpl();
   /// @}
+
+  static bool classof(const MCStreamer *S) {
+    return S->getKind() == SK_ELFStreamer || S->getKind() == SK_ARMELFStreamer;
+  }
 
 private:
   virtual void EmitInstToFragment(const MCInst &Inst);
   virtual void EmitInstToData(const MCInst &Inst);
+
+  virtual void EmitBundleAlignMode(unsigned AlignPow2);
+  virtual void EmitBundleLock(bool AlignToEnd);
+  virtual void EmitBundleUnlock();
 
   void fixSymbolsInTLSFixups(const MCExpr *expr);
 

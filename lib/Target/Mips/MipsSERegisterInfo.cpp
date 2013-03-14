@@ -25,9 +25,10 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/Constants.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/Function.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -36,7 +37,6 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Type.h"
 
 using namespace llvm;
 
@@ -54,28 +54,6 @@ requiresFrameIndexScavenging(const MachineFunction &MF) const {
   return true;
 }
 
-// This function eliminate ADJCALLSTACKDOWN,
-// ADJCALLSTACKUP pseudo instructions
-void MipsSERegisterInfo::
-eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator I) const {
-  const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
-
-  if (!TFI->hasReservedCallFrame(MF)) {
-    int64_t Amount = I->getOperand(0).getImm();
-
-    if (I->getOpcode() == Mips::ADJCALLSTACKDOWN)
-      Amount = -Amount;
-
-    const MipsSEInstrInfo *II = static_cast<const MipsSEInstrInfo*>(&TII);
-    unsigned SP = Subtarget.isABI_N64() ? Mips::SP_64 : Mips::SP;
-
-    II->adjustStackPtr(SP, Amount, MBB, I);
-  }
-
-  MBB.erase(I);
-}
-
 void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
                                      unsigned OpNo, int FrameIndex,
                                      uint64_t StackSize,
@@ -83,6 +61,7 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
   MachineInstr &MI = *II;
   MachineFunction &MF = *MI.getParent()->getParent();
   MachineFrameInfo *MFI = MF.getFrameInfo();
+  MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
 
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
   int MinCSFI = 0;
@@ -93,15 +72,18 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
     MaxCSFI = CSI[CSI.size() - 1].getFrameIdx();
   }
 
+  bool EhDataRegFI = MipsFI->isEhDataRegFI(FrameIndex);
+
   // The following stack frame objects are always referenced relative to $sp:
   //  1. Outgoing arguments.
   //  2. Pointer to dynamically allocated stack space.
   //  3. Locations for callee-saved registers.
+  //  4. Locations for eh data registers.
   // Everything else is referenced relative to whatever register
   // getFrameRegister() returns.
   unsigned FrameReg;
 
-  if (FrameIndex >= MinCSFI && FrameIndex <= MaxCSFI)
+  if ((FrameIndex >= MinCSFI && FrameIndex <= MaxCSFI) || EhDataRegFI)
     FrameReg = Subtarget.isABI_N64() ? Mips::SP_64 : Mips::SP;
   else
     FrameReg = getFrameRegister(MF);

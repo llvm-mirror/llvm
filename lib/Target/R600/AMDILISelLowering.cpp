@@ -14,29 +14,24 @@
 
 #include "AMDGPUISelLowering.h"
 #include "AMDGPURegisterInfo.h"
+#include "AMDGPUSubtarget.h"
 #include "AMDILDevices.h"
 #include "AMDILIntrinsicInfo.h"
-#include "AMDGPUSubtarget.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Instructions.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetOptions.h"
 
 using namespace llvm;
-//===----------------------------------------------------------------------===//
-// Calling Convention Implementation
-//===----------------------------------------------------------------------===//
-#include "AMDGPUGenCallingConv.inc"
-
 //===----------------------------------------------------------------------===//
 // TargetLowering Implementation Help Functions End
 //===----------------------------------------------------------------------===//
@@ -220,9 +215,9 @@ void AMDGPUTargetLowering::InitAMDILLowering() {
   setSelectIsExpensive(true);
   setJumpIsExpensive(true);
 
-  maxStoresPerMemcpy  = 4096;
-  maxStoresPerMemmove = 4096;
-  maxStoresPerMemset  = 4096;
+  MaxStoresPerMemcpy  = 4096;
+  MaxStoresPerMemmove = 4096;
+  MaxStoresPerMemset  = 4096;
 
 }
 
@@ -451,7 +446,8 @@ AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
   SDValue fqneg = DAG.getNode(ISD::FNEG, DL, FLTTY, fq);
 
   // float fr = mad(fqneg, fb, fa);
-  SDValue fr = DAG.getNode(AMDGPUISD::MAD, DL, FLTTY, fqneg, fb, fa);
+  SDValue fr = DAG.getNode(ISD::FADD, DL, FLTTY,
+      DAG.getNode(ISD::MUL, DL, FLTTY, fqneg, fb), fa);
 
   // int iq = (int)fq;
   SDValue iq = DAG.getNode(ISD::FP_TO_SINT, DL, INTTY, fq);

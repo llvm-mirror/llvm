@@ -14,10 +14,25 @@
 // ("and i32 %x, %x" -> "%x").  If the simplification is also an instruction
 // then it dominates the original instruction.
 //
+// These routines implicitly resolve undef uses. The easiest way to be safe when
+// using these routines to obtain simplified values for existing instructions is
+// to always replace all uses of the instructions with the resulting simplified
+// values. This will prevent other code from seeing the same undef uses and
+// resolving them to different values.
+//
+// These routines are designed to tolerate moderately incomplete IR, such as
+// instructions that are not connected to basic blocks yet. However, they do
+// require that all the IR that they encounter be valid. In particular, they
+// require that all non-constant values be defined in the same function, and the
+// same call context of that function (and not split between caller and callee
+// contexts of a directly recursive call, for example).
+//
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_ANALYSIS_INSTRUCTIONSIMPLIFY_H
 #define LLVM_ANALYSIS_INSTRUCTIONSIMPLIFY_H
+
+#include "llvm/IR/User.h"
 
 namespace llvm {
   template<typename T>
@@ -204,6 +219,24 @@ namespace llvm {
                        const DataLayout *TD = 0,
                        const TargetLibraryInfo *TLI = 0,
                        const DominatorTree *DT = 0);
+
+  /// \brief Given a function and iterators over arguments, see if we can fold
+  /// the result.
+  ///
+  /// If this call could not be simplified returns null.
+  Value *SimplifyCall(Value *V, User::op_iterator ArgBegin,
+                      User::op_iterator ArgEnd, const DataLayout *TD = 0,
+                      const TargetLibraryInfo *TLI = 0,
+                      const DominatorTree *DT = 0);
+
+  /// \brief Given a function and set of arguments, see if we can fold the
+  /// result.
+  ///
+  /// If this call could not be simplified returns null.
+  Value *SimplifyCall(Value *V, ArrayRef<Value *> Args,
+                      const DataLayout *TD = 0,
+                      const TargetLibraryInfo *TLI = 0,
+                      const DominatorTree *DT = 0);
 
   /// SimplifyInstruction - See if we can compute a simplified version of this
   /// instruction.  If not, this returns null.

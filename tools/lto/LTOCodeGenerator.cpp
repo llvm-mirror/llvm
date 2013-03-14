@@ -19,17 +19,16 @@
 #include "llvm/Analysis/Verifier.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/Config/config.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Linker.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/SubtargetFeature.h"
-#include "llvm/Module.h"
 #include "llvm/PassManager.h"
-#include "llvm/TargetTransformInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
@@ -46,6 +45,10 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 using namespace llvm;
+
+static cl::opt<bool>
+DisableOpt("disable-opt", cl::init(false),
+  cl::desc("Do not run any optimization passes"));
 
 static cl::opt<bool>
 DisableInline("disable-inlining", cl::init(false),
@@ -372,16 +375,17 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
 
   // Add an appropriate DataLayout instance for this module...
   passes.add(new DataLayout(*_target->getDataLayout()));
-  passes.add(new TargetTransformInfo(_target->getScalarTargetTransformInfo(),
-                                     _target->getVectorTargetTransformInfo()));
+  _target->addAnalysisPasses(passes);
 
   // Enabling internalize here would use its AllButMain variant. It
   // keeps only main if it exists and does nothing for libraries. Instead
   // we create the pass ourselves with the symbol list provided by the linker.
-  PassManagerBuilder().populateLTOPassManager(passes,
+  if (!DisableOpt) {
+    PassManagerBuilder().populateLTOPassManager(passes,
                                               /*Internalize=*/false,
                                               !DisableInline,
                                               DisableGVNLoadPRE);
+  }
 
   // Make sure everything is still good.
   passes.add(createVerifierPass());
@@ -389,6 +393,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   FunctionPassManager *codeGenPasses = new FunctionPassManager(mergedModule);
 
   codeGenPasses->add(new DataLayout(*_target->getDataLayout()));
+  _target->addAnalysisPasses(*codeGenPasses);
 
   formatted_raw_ostream Out(out);
 

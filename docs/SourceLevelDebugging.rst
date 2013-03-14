@@ -2,8 +2,6 @@
 Source Level Debugging with LLVM
 ================================
 
-.. sectionauthor:: Chris Lattner <sabre@nondot.org> and Jim Laskey <jlaskey@mac.com>
-
 .. contents::
    :local:
 
@@ -300,7 +298,6 @@ Subprogram descriptors
     metadata, ;; Reference to type descriptor
     i1,       ;; True if the global is local to compile unit (static)
     i1,       ;; True if the global is defined in the compile unit (not extern)
-    i32,      ;; Line number where the scope of the subprogram begins
     i32,      ;; Virtuality, e.g. dwarf::DW_VIRTUALITY__virtual
     i32,      ;; Index into a virtual function
     metadata, ;; indicates which base type contains the vtable pointer for the
@@ -310,7 +307,8 @@ Subprogram descriptors
     Function * , ;; Pointer to LLVM function
     metadata, ;; Lists function template parameters
     metadata, ;; Function declaration descriptor
-    metadata  ;; List of function variables
+    metadata, ;; List of function variables
+    i32       ;; Line number where the scope of the subprogram begins
   }
 
 These descriptors provide debug information about functions, methods and
@@ -408,7 +406,8 @@ Derived type descriptors
     i32,      ;; Flags to encode attributes, e.g. private
     metadata, ;; Reference to type derived from
     metadata, ;; (optional) Name of the Objective C property associated with
-              ;; Objective-C an ivar
+              ;; Objective-C an ivar, or the type of which this
+              ;; pointer-to-member is pointing to members of.
     metadata, ;; (optional) Name of the Objective C property getter selector.
     metadata, ;; (optional) Name of the Objective C property setter selector.
     i32       ;; (optional) Objective C property attributes.
@@ -420,14 +419,15 @@ values:
 
 .. code-block:: llvm
 
-  DW_TAG_formal_parameter = 5
-  DW_TAG_member           = 13
-  DW_TAG_pointer_type     = 15
-  DW_TAG_reference_type   = 16
-  DW_TAG_typedef          = 22
-  DW_TAG_const_type       = 38
-  DW_TAG_volatile_type    = 53
-  DW_TAG_restrict_type    = 55
+  DW_TAG_formal_parameter   = 5
+  DW_TAG_member             = 13
+  DW_TAG_pointer_type       = 15
+  DW_TAG_reference_type     = 16
+  DW_TAG_typedef            = 22
+  DW_TAG_ptr_to_member_type = 31
+  DW_TAG_const_type         = 38
+  DW_TAG_volatile_type      = 53
+  DW_TAG_restrict_type      = 55
 
 ``DW_TAG_member`` is used to define a member of a :ref:`composite type
 <format_composite_type>` or :ref:`subprogram <format_subprograms>`.  The type
@@ -482,14 +482,13 @@ are possible tag values:
   DW_TAG_enumeration_type = 4
   DW_TAG_structure_type   = 19
   DW_TAG_union_type       = 23
-  DW_TAG_vector_type      = 259
   DW_TAG_subroutine_type  = 21
   DW_TAG_inheritance      = 28
 
 The vector flag indicates that an array type is a native packed vector.
 
-The members of array types (tag = ``DW_TAG_array_type``) or vector types (tag =
-``DW_TAG_vector_type``) are :ref:`subrange descriptors <format_subrange>`, each
+The members of array types (tag = ``DW_TAG_array_type``) are
+:ref:`subrange descriptors <format_subrange>`, each
 representing the range of subscripts at that level of indexing.
 
 The members of enumeration types (tag = ``DW_TAG_enumeration_type``) are
@@ -583,12 +582,10 @@ value of the tag depends on the usage of the variable:
 
   DW_TAG_auto_variable   = 256
   DW_TAG_arg_variable    = 257
-  DW_TAG_return_variable = 258
 
 An auto variable is any variable declared in the body of the function.  An
 argument variable is any variable that appears as a formal argument to the
-function.  A return variable is used to track the result of a function and has
-no source correspondent.
+function.
 
 The context is either the subprogram or block where the variable is defined.
 Name the source variable name.  Context and line indicate where the variable

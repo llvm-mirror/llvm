@@ -469,8 +469,7 @@ public:
 
   template<class Opt>
   void apply(Opt &O) const {
-    for (unsigned i = 0, e = static_cast<unsigned>(Values.size());
-         i != e; ++i)
+    for (size_t i = 0, e = Values.size(); i != e; ++i)
       O.getParser().addLiteralOption(Values[i].first, Values[i].second.first,
                                      Values[i].second.second);
   }
@@ -629,8 +628,7 @@ public:
     else
       ArgVal = ArgName;
 
-    for (unsigned i = 0, e = static_cast<unsigned>(Values.size());
-         i != e; ++i)
+    for (size_t i = 0, e = Values.size(); i != e; ++i)
       if (Values[i].Name == ArgVal) {
         V = Values[i].V.getValue();
         return false;
@@ -1092,7 +1090,7 @@ public:
 
   // Make sure we initialize the value with the default constructor for the
   // type.
-  opt_storage() : Value(DataType()) {}
+  opt_storage() : Value(DataType()), Default(DataType()) {}
 
   template<class T>
   void setValue(const T &V, bool initial = false) {

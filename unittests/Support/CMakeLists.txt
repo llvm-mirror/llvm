@@ -6,12 +6,14 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_unittest(SupportTests
   AlignOfTest.cpp
   AllocatorTest.cpp
+  ArrayRecyclerTest.cpp
   BlockFrequencyTest.cpp
   Casting.cpp
   CommandLineTest.cpp
   ConstantRangeTest.cpp
   DataExtractorTest.cpp
   EndianTest.cpp
+  ErrorOrTest.cpp
   FileOutputBufferTest.cpp
   IntegersSubsetTest.cpp
   LeakDetectorTest.cpp
@@ -20,6 +22,7 @@ add_llvm_unittest(SupportTests
   MemoryBufferTest.cpp
   MemoryTest.cpp
   Path.cpp
+  ProcessTest.cpp
   RegexTest.cpp
   SwapByteOrderTest.cpp
   TimeValue.cpp

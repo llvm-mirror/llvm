@@ -10,6 +10,7 @@
 #ifndef LLVM_MC_MCOBJECTWRITER_H
 #define LLVM_MC_MCOBJECTWRITER_H
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/raw_ostream.h"
@@ -61,15 +62,15 @@ public:
   /// @name High-Level API
   /// @{
 
-  /// Perform any late binding of symbols (for example, to assign symbol indices
-  /// for use when generating relocations).
+  /// \brief Perform any late binding of symbols (for example, to assign symbol
+  /// indices for use when generating relocations).
   ///
   /// This routine is called by the assembler after layout and relaxation is
   /// complete.
   virtual void ExecutePostLayoutBinding(MCAssembler &Asm,
                                         const MCAsmLayout &Layout) = 0;
 
-  /// Record a relocation entry.
+  /// \brief Record a relocation entry.
   ///
   /// This routine is called by the assembler after layout and relaxation, and
   /// post layout binding. The implementation is responsible for storing
@@ -99,8 +100,7 @@ public:
                                          bool InSet,
                                          bool IsPCRel) const;
 
-
-  /// Write the object file.
+  /// \brief Write the object file.
   ///
   /// This routine is called by the assembler after layout and relaxation is
   /// complete, fixups have been evaluated and applied, and relocations
@@ -176,7 +176,7 @@ public:
     OS << StringRef(Zeros, N % 16);
   }
 
-  void WriteBytes(SmallVectorImpl<char> &ByteVec, unsigned ZeroFillSize = 0) {
+  void WriteBytes(const SmallVectorImpl<char> &ByteVec, unsigned ZeroFillSize = 0) {
     WriteBytes(StringRef(ByteVec.data(), ByteVec.size()), ZeroFillSize);
   }
 

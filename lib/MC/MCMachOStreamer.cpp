@@ -34,19 +34,21 @@ private:
   void EmitDataRegion(DataRegionData::KindTy Kind);
   void EmitDataRegionEnd();
 public:
-  MCMachOStreamer(MCContext &Context, MCAsmBackend &MAB,
-                  raw_ostream &OS, MCCodeEmitter *Emitter)
-    : MCObjectStreamer(Context, MAB, OS, Emitter) {}
+  MCMachOStreamer(MCContext &Context, MCAsmBackend &MAB, raw_ostream &OS,
+                  MCCodeEmitter *Emitter)
+      : MCObjectStreamer(SK_MachOStreamer, Context, MAB, OS, Emitter) {}
 
   /// @name MCStreamer Interface
   /// @{
 
   virtual void InitSections();
+  virtual void InitToTextSection();
   virtual void EmitLabel(MCSymbol *Symbol);
   virtual void EmitDebugLabel(MCSymbol *Symbol);
   virtual void EmitEHSymAttributes(const MCSymbol *Symbol,
                                    MCSymbol *EHSymbol);
   virtual void EmitAssemblerFlag(MCAssemblerFlag Flag);
+  virtual void EmitLinkerOptions(ArrayRef<std::string> Options);
   virtual void EmitDataRegion(MCDataRegionType Kind);
   virtual void EmitThumbFunc(MCSymbol *Func);
   virtual void EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute);
@@ -85,15 +87,23 @@ public:
   virtual void FinishImpl();
 
   /// @}
+
+  static bool classof(const MCStreamer *S) {
+    return S->getKind() == SK_MachOStreamer;
+  }
 };
 
 } // end anonymous namespace.
 
 void MCMachOStreamer::InitSections() {
-  SwitchSection(getContext().getMachOSection("__TEXT", "__text",
-                                    MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS,
-                                    0, SectionKind::getText()));
+  InitToTextSection();
+}
 
+void MCMachOStreamer::InitToTextSection() {
+  SwitchSection(getContext().getMachOSection(
+                                    "__TEXT", "__text",
+                                    MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS, 0,
+                                    SectionKind::getText()));
 }
 
 void MCMachOStreamer::EmitEHSymAttributes(const MCSymbol *Symbol,
@@ -171,6 +181,10 @@ void MCMachOStreamer::EmitAssemblerFlag(MCAssemblerFlag Flag) {
     getAssembler().setSubsectionsViaSymbols(true);
     return;
   }
+}
+
+void MCMachOStreamer::EmitLinkerOptions(ArrayRef<std::string> Options) {
+  getAssembler().getLinkerOptions().push_back(Options);
 }
 
 void MCMachOStreamer::EmitDataRegion(MCDataRegionType Kind) {

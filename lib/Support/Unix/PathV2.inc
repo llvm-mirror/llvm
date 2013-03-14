@@ -417,16 +417,23 @@ retry_random_path:
       RandomPath[i] = "0123456789abcdef"[sys::Process::GetRandomNumber() & 15];
   }
 
+  // Make sure we don't fall into an infinite loop by constantly trying
+  // to create the parent path.
+  bool TriedToCreateParent = false;
+
   // Try to open + create the file.
 rety_open_create:
   int RandomFD = ::open(RandomPath.c_str(), O_RDWR | O_CREAT | O_EXCL, mode);
   if (RandomFD == -1) {
+    int SavedErrno = errno;
     // If the file existed, try again, otherwise, error.
-    if (errno == errc::file_exists)
+    if (SavedErrno == errc::file_exists)
       goto retry_random_path;
     // If path prefix doesn't exist, try to create it.
-    if (errno == errc::no_such_file_or_directory &&
-        !exists(path::parent_path(RandomPath))) {
+    if (SavedErrno == errc::no_such_file_or_directory &&
+        !exists(path::parent_path(RandomPath)) &&
+        !TriedToCreateParent) {
+      TriedToCreateParent = true;
       StringRef p(RandomPath);
       SmallString<64> dir_to_create;
       for (path::const_iterator i = path::begin(p),
@@ -440,13 +447,15 @@ rety_open_create:
                                (*i)[1] == '/' &&
                                (*i)[2] != '/')
             return make_error_code(errc::no_such_file_or_directory);
-          if (::mkdir(dir_to_create.c_str(), 0700) == -1)
+          if (::mkdir(dir_to_create.c_str(), 0700) == -1 &&
+              errno != errc::file_exists)
             return error_code(errno, system_category());
         }
       }
       goto rety_open_create;
     }
-    return error_code(errno, system_category());
+
+    return error_code(SavedErrno, system_category());
   }
 
    // Make the path absolute.
@@ -575,7 +584,7 @@ const char *mapped_file_region::const_data() const {
 }
 
 int mapped_file_region::alignment() {
-  return Process::GetPageSize();
+  return process::get_self()->page_size();
 }
 
 error_code detail::directory_iterator_construct(detail::DirIterState &it,

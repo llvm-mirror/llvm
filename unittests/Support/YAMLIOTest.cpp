@@ -600,8 +600,14 @@ TEST(YAMLIO, TestReadWriteMyFlowSequence) {
     map.numbers.push_back(1024);
 
     llvm::raw_string_ostream ostr(intermediate);
-    Output yout(ostr);
+    Output yout(ostr); 
     yout << map;
+    
+    // Verify sequences were written in flow style
+    ostr.flush();
+    llvm::StringRef flowOut(intermediate);
+    EXPECT_NE(llvm::StringRef::npos, flowOut.find("one, two"));
+    EXPECT_NE(llvm::StringRef::npos, flowOut.find("10, -30, 1024"));
   }
 
   {
@@ -632,7 +638,7 @@ LLVM_YAML_STRONG_TYPEDEF(uint32_t, TotalSeconds)
 
 typedef std::vector<TotalSeconds> SecondsSequence;
 
-LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(TotalSeconds)
+LLVM_YAML_IS_SEQUENCE_VECTOR(TotalSeconds)
 
 
 namespace llvm {
@@ -745,7 +751,7 @@ struct KindAndFlags {
 
 typedef std::vector<KindAndFlags> KindAndFlagsSequence;
 
-LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(KindAndFlags)
+LLVM_YAML_IS_SEQUENCE_VECTOR(KindAndFlags)
 
 namespace llvm {
 namespace yaml {
@@ -776,11 +782,17 @@ namespace yaml {
   struct MappingTraits<KindAndFlags> {
     static void mapping(IO &io, KindAndFlags& kf) {
       io.mapRequired("kind",  kf.kind);
-      // type of flags field varies depending on kind field
-      if ( kf.kind == kindA )
-        io.mapRequired("flags", *((AFlags*)&kf.flags));
-      else
-        io.mapRequired("flags", *((BFlags*)&kf.flags));
+      // Type of "flags" field varies depending on "kind" field.
+      // Use memcpy here to avoid breaking strict aliasing rules.
+      if (kf.kind == kindA) {
+        AFlags aflags = static_cast<AFlags>(kf.flags);
+        io.mapRequired("flags", aflags);
+        kf.flags = aflags;
+      } else {
+        BFlags bflags = static_cast<BFlags>(kf.flags);
+        io.mapRequired("flags", bflags);
+        kf.flags = bflags;
+      }
     }
   };
 }

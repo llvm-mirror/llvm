@@ -52,18 +52,21 @@ private:
   void lowerImplicitParameter(MachineInstr *MI, MachineBasicBlock &BB,
       MachineRegisterInfo & MRI, unsigned dword_offset) const;
 
-  SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
-
   /// \brief Lower ROTL opcode to BITALIGN
   SDValue LowerROTL(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFPTOUINT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFPOW(SDValue Op, SelectionDAG &DAG) const;
-  
+  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue stackPtrToRegIndex(SDValue Ptr, unsigned StackWidth,
+                                          SelectionDAG &DAG) const;
+  void getStackAddress(unsigned StackWidth, unsigned ElemIdx,
+                       unsigned &Channel, unsigned &PtrIncr) const;
   bool isZero(SDValue Op) const;
 };
 

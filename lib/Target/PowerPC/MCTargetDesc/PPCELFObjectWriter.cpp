@@ -77,8 +77,13 @@ unsigned PPCELFObjectWriter::getRelocTypeInner(const MCValue &Target,
     case PPC::fixup_ppc_br24:
       Type = ELF::R_PPC_REL24;
       break;
+    case FK_Data_4:
     case FK_PCRel_4:
       Type = ELF::R_PPC_REL32;
+      break;
+    case FK_Data_8:
+    case FK_PCRel_8:
+      Type = ELF::R_PPC64_REL64;
       break;
     }
   } else {
@@ -146,7 +151,24 @@ unsigned PPCELFObjectWriter::getRelocTypeInner(const MCValue &Target,
       Type = ELF::R_PPC64_TOC;
       break;
     case PPC::fixup_ppc_toc16:
-      Type = ELF::R_PPC64_TOC16;
+      switch (Modifier) {
+      default: llvm_unreachable("Unsupported Modifier");
+      case MCSymbolRefExpr::VK_PPC_TPREL16_LO:
+        Type = ELF::R_PPC64_TPREL16_LO;
+        break;
+      case MCSymbolRefExpr::VK_PPC_DTPREL16_LO:
+        Type = ELF::R_PPC64_DTPREL16_LO;
+        break;
+      case MCSymbolRefExpr::VK_None:
+        Type = ELF::R_PPC64_TOC16;
+	break;
+      case MCSymbolRefExpr::VK_PPC_TOC16_LO:
+        Type = ELF::R_PPC64_TOC16_LO;
+        break;
+      case MCSymbolRefExpr::VK_PPC_GOT_TLSLD16_LO:
+        Type = ELF::R_PPC64_GOT_TLSLD16_LO;
+        break;
+      }
       break;
     case PPC::fixup_ppc_toc16_ds:
       switch (Modifier) {

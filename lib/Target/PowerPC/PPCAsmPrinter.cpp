@@ -32,9 +32,10 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/Constants.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -44,7 +45,6 @@
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ELF.h"
@@ -426,20 +426,25 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     bool IsExternal = false;
     bool IsFunction = false;
     bool IsCommon = false;
+    bool IsAvailExt = false;
 
     if (MO.isGlobal()) {
       const GlobalValue *GValue = MO.getGlobal();
-      MOSymbol = Mang->getSymbol(GValue);
-      const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GValue);
+      const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
+      const GlobalValue *RealGValue = GAlias ?
+        GAlias->resolveAliasedGlobal(false) : GValue;
+      MOSymbol = Mang->getSymbol(RealGValue);
+      const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
       IsExternal = GVar && !GVar->hasInitializer();
-      IsCommon = GVar && GValue->hasCommonLinkage();
+      IsCommon = GVar && RealGValue->hasCommonLinkage();
       IsFunction = !GVar;
+      IsAvailExt = GVar && RealGValue->hasAvailableExternallyLinkage();
     } else if (MO.isCPI())
       MOSymbol = GetCPISymbol(MO.getIndex());
     else if (MO.isJTI())
       MOSymbol = GetJTISymbol(MO.getIndex());
 
-    if (IsExternal || IsFunction || IsCommon || MO.isJTI())
+    if (IsExternal || IsFunction || IsCommon || IsAvailExt || MO.isJTI())
       MOSymbol = lookUpOrCreateTOCEntry(MOSymbol);
 
     const MCExpr *Exp =
@@ -459,17 +464,24 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // associated TOC entry.  Otherwise reference the symbol directly.
     TmpInst.setOpcode(PPC::LDrs);
     const MachineOperand &MO = MI->getOperand(1);
-    assert((MO.isGlobal() || MO.isJTI()) && "Invalid operand for LDtocL!");
+    assert((MO.isGlobal() || MO.isJTI() || MO.isCPI()) &&
+           "Invalid operand for LDtocL!");
     MCSymbol *MOSymbol = 0;
 
     if (MO.isJTI())
       MOSymbol = lookUpOrCreateTOCEntry(GetJTISymbol(MO.getIndex()));
-    else {
+    else if (MO.isCPI())
+      MOSymbol = GetCPISymbol(MO.getIndex());
+    else if (MO.isGlobal()) {
       const GlobalValue *GValue = MO.getGlobal();
-      MOSymbol = Mang->getSymbol(GValue);
-      const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GValue);
+      const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
+      const GlobalValue *RealGValue = GAlias ?
+        GAlias->resolveAliasedGlobal(false) : GValue;
+      MOSymbol = Mang->getSymbol(RealGValue);
+      const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
     
-      if (!GVar || !GVar->hasInitializer() || GValue->hasCommonLinkage())
+      if (!GVar || !GVar->hasInitializer() || RealGValue->hasCommonLinkage() ||
+          RealGValue->hasAvailableExternallyLinkage())
         MOSymbol = lookUpOrCreateTOCEntry(MOSymbol);
     }
 
@@ -496,8 +508,11 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     if (MO.isGlobal()) {
       const GlobalValue *GValue = MO.getGlobal();
-      MOSymbol = Mang->getSymbol(GValue);
-      const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GValue);
+      const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
+      const GlobalValue *RealGValue = GAlias ?
+        GAlias->resolveAliasedGlobal(false) : GValue;
+      MOSymbol = Mang->getSymbol(RealGValue);
+      const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
       IsExternal = GVar && !GVar->hasInitializer();
       IsFunction = !GVar;
     } else if (MO.isCPI())
@@ -720,14 +735,14 @@ void PPCLinuxAsmPrinter::EmitFunctionEntryLabel() {
   // Generates a R_PPC64_ADDR64 (from FK_DATA_8) relocation for the function
   // entry point.
   OutStreamer.EmitValue(MCSymbolRefExpr::Create(Symbol1, OutContext),
-                        8/*size*/, 0/*addrspace*/);
+			8 /*size*/);
   MCSymbol *Symbol2 = OutContext.GetOrCreateSymbol(StringRef(".TOC."));
   // Generates a R_PPC64_TOC relocation for TOC base insertion.
   OutStreamer.EmitValue(MCSymbolRefExpr::Create(Symbol2,
                         MCSymbolRefExpr::VK_PPC_TOC, OutContext),
-                        8/*size*/, 0/*addrspace*/);
+                        8/*size*/);
   // Emit a null environment pointer.
-  OutStreamer.EmitIntValue(0, 8 /* size */, 0 /* addrspace */);
+  OutStreamer.EmitIntValue(0, 8 /* size */);
   OutStreamer.SwitchSection(Current);
 
   MCSymbol *RealFnSym = OutContext.GetOrCreateSymbol(
@@ -754,6 +769,25 @@ bool PPCLinuxAsmPrinter::doFinalization(Module &M) {
       MCSymbol *S = OutContext.GetOrCreateSymbol(I->first->getName());
       OutStreamer.EmitTCEntry(*S);
     }
+  }
+
+  MachineModuleInfoELF &MMIELF =
+    MMI->getObjFileInfo<MachineModuleInfoELF>();
+
+  MachineModuleInfoELF::SymbolListTy Stubs = MMIELF.GetGVStubList();
+  if (!Stubs.empty()) {
+    OutStreamer.SwitchSection(getObjFileLowering().getDataSection());
+    for (unsigned i = 0, e = Stubs.size(); i != e; ++i) {
+      // L_foo$stub:
+      OutStreamer.EmitLabel(Stubs[i].first);
+      //   .long _foo
+      OutStreamer.EmitValue(MCSymbolRefExpr::Create(Stubs[i].second.getPointer(),
+                                                    OutContext),
+                            isPPC64 ? 8 : 4/*size*/, 0/*addrspace*/);
+    }
+
+    Stubs.clear();
+    OutStreamer.AddBlankLine();
   }
 
   return AsmPrinter::doFinalization(M);
@@ -790,7 +824,12 @@ void PPCDarwinAsmPrinter::EmitStartOfAsmFile(Module &M) {
     "ppcA2",
     "ppce500mc",
     "ppce5500",
+    "power3",
+    "power4",
+    "power5",
+    "power5x",
     "power6",
+    "power6x",
     "power7",
     "ppc64"
   };
@@ -805,8 +844,11 @@ void PPCDarwinAsmPrinter::EmitStartOfAsmFile(Module &M) {
   assert(Directive <= PPC::DIR_64 && "Directive out of range.");
   
   // FIXME: This is a total hack, finish mc'izing the PPC backend.
-  if (OutStreamer.hasRawTextSupport())
+  if (OutStreamer.hasRawTextSupport()) {
+    assert(Directive < sizeof(CPUDirectives) / sizeof(*CPUDirectives) &&
+           "CPUDirectives[] might not be up-to-date!");
     OutStreamer.EmitRawText("\t.machine " + Twine(CPUDirectives[Directive]));
+  }
 
   // Prime text sections so they are adjacent.  This reduces the likelihood a
   // large data or debug section causes a branch to exceed 16M limit.
@@ -1019,7 +1061,7 @@ bool PPCDarwinAsmPrinter::doFinalization(Module &M) {
 
       if (MCSym.getInt())
         // External to current translation unit.
-        OutStreamer.EmitIntValue(0, isPPC64 ? 8 : 4/*size*/, 0/*addrspace*/);
+        OutStreamer.EmitIntValue(0, isPPC64 ? 8 : 4/*size*/);
       else
         // Internal to current translation unit.
         //
@@ -1029,7 +1071,7 @@ bool PPCDarwinAsmPrinter::doFinalization(Module &M) {
         // fill in the value for the NLP in those cases.
         OutStreamer.EmitValue(MCSymbolRefExpr::Create(MCSym.getPointer(),
                                                       OutContext),
-                              isPPC64 ? 8 : 4/*size*/, 0/*addrspace*/);
+                              isPPC64 ? 8 : 4/*size*/);
     }
 
     Stubs.clear();
@@ -1048,7 +1090,7 @@ bool PPCDarwinAsmPrinter::doFinalization(Module &M) {
       OutStreamer.EmitValue(MCSymbolRefExpr::
                             Create(Stubs[i].second.getPointer(),
                                    OutContext),
-                            isPPC64 ? 8 : 4/*size*/, 0/*addrspace*/);
+                            isPPC64 ? 8 : 4/*size*/);
     }
 
     Stubs.clear();

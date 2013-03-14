@@ -120,11 +120,16 @@ def FeatureBMI2    : SubtargetFeature<"bmi2", "HasBMI2", "true",
                                       "Support BMI2 instructions">;
 def FeatureRTM     : SubtargetFeature<"rtm", "HasRTM", "true",
                                       "Support RTM instructions">;
+def FeatureADX     : SubtargetFeature<"adx", "HasADX", "true",
+                                      "Support ADX instructions">;
 def FeatureLeaForSP : SubtargetFeature<"lea-sp", "UseLeaForSP", "true",
                                      "Use LEA for adjusting the stack pointer">;
 def FeatureSlowDivide : SubtargetFeature<"idiv-to-divb",
-                          "HasSlowDivide", "true",
-                          "Use small divide for positive values less than 256">;
+                                     "HasSlowDivide", "true",
+                                     "Use small divide for positive values less than 256">;
+def FeaturePadShortFunctions : SubtargetFeature<"pad-short-functions",
+                                     "PadShortFunctions", "true",
+                                     "Pad short functions">;
 
 //===----------------------------------------------------------------------===//
 // X86 processors supported.
@@ -167,7 +172,7 @@ def : Proc<"penryn",          [FeatureSSE41, FeatureCMPXCHG16B,
                                FeatureSlowBTMem]>;
 def : AtomProc<"atom",        [ProcIntelAtom, FeatureSSSE3, FeatureCMPXCHG16B,
                                FeatureMOVBE, FeatureSlowBTMem, FeatureLeaForSP,
-                               FeatureSlowDivide]>;
+                               FeatureSlowDivide, FeaturePadShortFunctions]>;
 // "Arrandale" along with corei3 and corei5
 def : Proc<"corei7",          [FeatureSSE42, FeatureCMPXCHG16B,
                                FeatureSlowBTMem, FeatureFastUAMem,

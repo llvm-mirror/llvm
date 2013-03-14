@@ -26,7 +26,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -1468,7 +1468,7 @@ void ARMConstantIslands::removeDeadCPEMI(MachineInstr *CPEMI) {
   if (CPEBB->empty()) {
     BBInfo[CPEBB->getNumber()].Size = 0;
 
-    // This block no longer needs to be aligned. <rdar://problem/10534709>.
+    // This block no longer needs to be aligned.
     CPEBB->setAlignment(0);
   } else
     // Entries are sorted by descending alignment, so realign from the front.

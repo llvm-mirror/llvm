@@ -90,7 +90,7 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   if (Mips::CPURegsRegClass.contains(DestReg)) { // Copy to CPU Reg.
     if (Mips::CPURegsRegClass.contains(SrcReg))
-      Opc = Mips::ADDu, ZeroReg = Mips::ZERO;
+      Opc = Mips::OR, ZeroReg = Mips::ZERO;
     else if (Mips::CCRRegClass.contains(SrcReg))
       Opc = Mips::CFC1;
     else if (Mips::FGR32RegClass.contains(SrcReg))
@@ -120,7 +120,7 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Opc = Mips::MOVCCRToCCR;
   else if (Mips::CPU64RegsRegClass.contains(DestReg)) { // Copy to CPU64 Reg.
     if (Mips::CPU64RegsRegClass.contains(SrcReg))
-      Opc = Mips::DADDu, ZeroReg = Mips::ZERO_64;
+      Opc = Mips::OR64, ZeroReg = Mips::ZERO_64;
     else if (SrcReg == Mips::HI64)
       Opc = Mips::MFHI64, SrcReg = 0;
     else if (SrcReg == Mips::LO64)
@@ -144,11 +144,11 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   if (DestReg)
     MIB.addReg(DestReg, RegState::Define);
 
-  if (ZeroReg)
-    MIB.addReg(ZeroReg);
-
   if (SrcReg)
     MIB.addReg(SrcReg, getKillRegState(KillSrc));
+
+  if (ZeroReg)
+    MIB.addReg(ZeroReg);
 }
 
 void MipsSEInstrInfo::
@@ -219,6 +219,10 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
     break;
   case Mips::ExtractElementF64:
     ExpandExtractElementF64(MBB, MI);
+    break;
+  case Mips::MIPSeh_return32:
+  case Mips::MIPSeh_return64:
+    ExpandEhReturn(MBB, MI);
     break;
   }
 
@@ -354,6 +358,31 @@ void MipsSEInstrInfo::ExpandBuildPairF64(MachineBasicBlock &MBB,
     .addReg(LoReg);
   BuildMI(MBB, I, dl, Mtc1Tdd, TRI.getSubReg(DstReg, Mips::sub_fpodd))
     .addReg(HiReg);
+}
+
+void MipsSEInstrInfo::ExpandEhReturn(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator I) const {
+  // This pseudo instruction is generated as part of the lowering of
+  // ISD::EH_RETURN. We convert it to a stack increment by OffsetReg, and
+  // indirect jump to TargetReg
+  const MipsSubtarget &STI = TM.getSubtarget<MipsSubtarget>();
+  unsigned ADDU = STI.isABI_N64() ? Mips::DADDu : Mips::ADDu;
+  unsigned OR = STI.isABI_N64() ? Mips::OR64 : Mips::OR;
+  unsigned JR = STI.isABI_N64() ? Mips::JR64 : Mips::JR;
+  unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
+  unsigned RA = STI.isABI_N64() ? Mips::RA_64 : Mips::RA;
+  unsigned ZERO = STI.isABI_N64() ? Mips::ZERO_64 : Mips::ZERO;
+  unsigned OffsetReg = I->getOperand(0).getReg();
+  unsigned TargetReg = I->getOperand(1).getReg();
+
+  // or   $ra, $v0, $zero
+  // addu $sp, $sp, $v1
+  // jr   $ra
+  BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(OR), RA)
+      .addReg(TargetReg).addReg(ZERO);
+  BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(ADDU), SP)
+      .addReg(SP).addReg(OffsetReg);
+  BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(JR)).addReg(RA);
 }
 
 const MipsInstrInfo *llvm::createMipsSEInstrInfo(MipsTargetMachine &TM) {

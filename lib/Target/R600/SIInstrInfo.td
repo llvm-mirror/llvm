@@ -1,4 +1,4 @@
-//===-- SIInstrInfo.td - SI Instruction Encodings ---------*- tablegen -*--===//
+//===-- SIInstrInfo.td - SI Instruction Infos -------------*- tablegen -*--===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,530 +8,280 @@
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
-// SI DAG Profiles
-//===----------------------------------------------------------------------===//
-def SDTVCCBinaryOp : SDTypeProfile<1, 2, [
-  SDTCisInt<0>, SDTCisInt<1>, SDTCisSameAs<1, 2>
-]>;
-
-//===----------------------------------------------------------------------===//
 // SI DAG Nodes
 //===----------------------------------------------------------------------===//
 
-// and operation on 64-bit wide vcc
-def SIsreg1_and : SDNode<"SIISD::VCC_AND", SDTVCCBinaryOp,
-  [SDNPCommutative, SDNPAssociative]
+// SMRD takes a 64bit memory address and can only add an 32bit offset
+def SIadd64bit32bit : SDNode<"ISD::ADD",
+  SDTypeProfile<1, 2, [SDTCisSameAs<0, 1>, SDTCisVT<0, i64>, SDTCisVT<2, i32>]>
 >;
 
-// Special bitcast node for sharing VCC register between VALU and SALU
-def SIsreg1_bitcast : SDNode<"SIISD::VCC_BITCAST",
-  SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisInt<1>]>
->;
+// Transformation function, extract the lower 32bit of a 64bit immediate
+def LO32 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getZExtValue() & 0xffffffff, MVT::i32);
+}]>;
 
-// and operation on 64-bit wide vcc
-def SIvcc_and : SDNode<"SIISD::VCC_AND", SDTVCCBinaryOp,
-  [SDNPCommutative, SDNPAssociative]
->;
+// Transformation function, extract the upper 32bit of a 64bit immediate
+def HI32 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getZExtValue() >> 32, MVT::i32);
+}]>;
 
-// Special bitcast node for sharing VCC register between VALU and SALU
-def SIvcc_bitcast : SDNode<"SIISD::VCC_BITCAST",
-  SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisInt<1>]>
->;
-
-class InstSI <dag outs, dag ins, string asm, list<dag> pattern> :
-    AMDGPUInst<outs, ins, asm, pattern> {
-
-  field bits<4> EncodingType = 0;
-  field bits<1> NeedWait = 0;
-
-  let TSFlags{3-0} = EncodingType;
-  let TSFlags{4} = NeedWait;
-
-}
-
-class Enc32 <dag outs, dag ins, string asm, list<dag> pattern> :
-    InstSI <outs, ins, asm, pattern> {
-
-  field bits<32> Inst;
-}
-
-class Enc64 <dag outs, dag ins, string asm, list<dag> pattern> :
-    InstSI <outs, ins, asm, pattern> {
-
-  field bits<64> Inst;
-}
-
-class SIOperand <ValueType vt, dag opInfo>: Operand <vt> {
-  let EncoderMethod = "encodeOperand";
-  let MIOperandInfo = opInfo;
-}
-
-def IMM16bit : ImmLeaf <
-  i16,
-  [{return isInt<16>(Imm);}]
->;
-
-def IMM8bit : ImmLeaf <
-  i32,
-  [{return (int32_t)Imm >= 0 && (int32_t)Imm <= 0xff;}]
+def IMM8bitDWORD : ImmLeaf <
+  i32, [{
+    return (Imm & ~0x3FC) == 0;
+  }], SDNodeXForm<imm, [{
+    return CurDAG->getTargetConstant(
+      N->getZExtValue() >> 2, MVT::i32);
+  }]>
 >;
 
 def IMM12bit : ImmLeaf <
   i16,
-  [{return (int16_t)Imm >= 0 && (int16_t)Imm <= 0xfff;}]
+  [{return isUInt<12>(Imm);}]
 >;
 
-def IMM32bitIn64bit : ImmLeaf <
-  i64,
-  [{return isInt<32>(Imm);}]
+class InlineImm <ValueType vt> : PatLeaf <(vt imm), [{
+  return ((const SITargetLowering &)TLI).analyzeImmediate(N) == 0;
+}]>;
+
+//===----------------------------------------------------------------------===//
+// SI assembler operands
+//===----------------------------------------------------------------------===//
+
+def SIOperand {
+  int ZERO = 0x80;
+  int VCC = 0x6A;
+}
+
+include "SIInstrFormats.td"
+
+//===----------------------------------------------------------------------===//
+//
+// SI Instruction multiclass helpers.
+//
+// Instructions with _32 take 32-bit operands.
+// Instructions with _64 take 64-bit operands.
+//
+// VOP_* instructions can use either a 32-bit or 64-bit encoding.  The 32-bit
+// encoding is the standard encoding, but instruction that make use of
+// any of the instruction modifiers must use the 64-bit encoding.
+//
+// Instructions with _e32 use the 32-bit encoding.
+// Instructions with _e64 use the 64-bit encoding.
+//
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
+// Scalar classes
+//===----------------------------------------------------------------------===//
+
+class SOP1_32 <bits<8> op, string opName, list<dag> pattern> : SOP1 <
+  op, (outs SReg_32:$dst), (ins SSrc_32:$src0),
+  opName#" $dst, $src0", pattern
 >;
 
-class GPR4Align <RegisterClass rc> : Operand <vAny> {
-  let EncoderMethod = "GPR4AlignEncode";
-  let MIOperandInfo = (ops rc:$reg); 
+class SOP1_64 <bits<8> op, string opName, list<dag> pattern> : SOP1 <
+  op, (outs SReg_64:$dst), (ins SSrc_64:$src0),
+  opName#" $dst, $src0", pattern
+>;
+
+class SOP2_32 <bits<7> op, string opName, list<dag> pattern> : SOP2 <
+  op, (outs SReg_32:$dst), (ins SSrc_32:$src0, SSrc_32:$src1),
+  opName#" $dst, $src0, $src1", pattern
+>;
+
+class SOP2_64 <bits<7> op, string opName, list<dag> pattern> : SOP2 <
+  op, (outs SReg_64:$dst), (ins SSrc_64:$src0, SSrc_64:$src1),
+  opName#" $dst, $src0, $src1", pattern
+>;
+
+class SOPC_32 <bits<7> op, string opName, list<dag> pattern> : SOPC <
+  op, (outs SCCReg:$dst), (ins SSrc_32:$src0, SSrc_32:$src1),
+  opName#" $dst, $src0, $src1", pattern
+>;
+
+class SOPC_64 <bits<7> op, string opName, list<dag> pattern> : SOPC <
+  op, (outs SCCReg:$dst), (ins SSrc_64:$src0, SSrc_64:$src1),
+  opName#" $dst, $src0, $src1", pattern
+>;
+
+class SOPK_32 <bits<5> op, string opName, list<dag> pattern> : SOPK <
+  op, (outs SReg_32:$dst), (ins i16imm:$src0),
+  opName#" $dst, $src0", pattern
+>;
+
+class SOPK_64 <bits<5> op, string opName, list<dag> pattern> : SOPK <
+  op, (outs SReg_64:$dst), (ins i16imm:$src0),
+  opName#" $dst, $src0", pattern
+>;
+
+multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass dstClass> {
+  def _IMM : SMRD <
+    op, 1, (outs dstClass:$dst),
+    (ins SReg_64:$sbase, i32imm:$offset),
+    asm#" $dst, $sbase, $offset", []
+  >;
+
+  def _SGPR : SMRD <
+    op, 0, (outs dstClass:$dst),
+    (ins SReg_64:$sbase, SReg_32:$soff),
+    asm#" $dst, $sbase, $soff", []
+  >;
 }
 
-class GPR2Align <RegisterClass rc, ValueType vt> : Operand <vt> {
-  let EncoderMethod = "GPR2AlignEncode";
-  let MIOperandInfo = (ops rc:$reg);
+//===----------------------------------------------------------------------===//
+// Vector ALU classes
+//===----------------------------------------------------------------------===//
+
+class VOP <string opName> {
+  string OpName = opName;
 }
 
-def SMRDmemrr : Operand<iPTR> {
-  let MIOperandInfo = (ops SReg_64, SReg_32);
-  let EncoderMethod = "GPR2AlignEncode";
+multiclass VOP1_Helper <bits<8> op, RegisterClass drc, RegisterClass src,
+                        string opName, list<dag> pattern> {
+
+  def _e32 : VOP1 <
+    op, (outs drc:$dst), (ins src:$src0),
+    opName#"_e32 $dst, $src0", pattern
+  >, VOP <opName>;
+
+  def _e64 : VOP3 <
+    {1, 1, op{6}, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
+    (outs drc:$dst),
+    (ins src:$src0,
+         i32imm:$abs, i32imm:$clamp,
+         i32imm:$omod, i32imm:$neg),
+    opName#"_e64 $dst, $src0, $abs, $clamp, $omod, $neg", []
+  >, VOP <opName> {
+    let SRC1 = SIOperand.ZERO;
+    let SRC2 = SIOperand.ZERO;
+  }
 }
 
-def SMRDmemri : Operand<iPTR> {
-  let MIOperandInfo = (ops SReg_64, i32imm);
-  let EncoderMethod = "SMRDmemriEncode";
+multiclass VOP1_32 <bits<8> op, string opName, list<dag> pattern>
+  : VOP1_Helper <op, VReg_32, VSrc_32, opName, pattern>;
+
+multiclass VOP1_64 <bits<8> op, string opName, list<dag> pattern>
+  : VOP1_Helper <op, VReg_64, VSrc_64, opName, pattern>;
+
+multiclass VOP2_Helper <bits<6> op, RegisterClass vrc, RegisterClass arc,
+                        string opName, list<dag> pattern> {
+  def _e32 : VOP2 <
+    op, (outs vrc:$dst), (ins arc:$src0, vrc:$src1),
+    opName#"_e32 $dst, $src0, $src1", pattern
+  >, VOP <opName>;
+
+  def _e64 : VOP3 <
+    {1, 0, 0, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
+    (outs vrc:$dst),
+    (ins arc:$src0, arc:$src1,
+         i32imm:$abs, i32imm:$clamp,
+         i32imm:$omod, i32imm:$neg),
+    opName#"_e64 $dst, $src0, $src1, $abs, $clamp, $omod, $neg", []
+  >, VOP <opName> {
+    let SRC2 = SIOperand.ZERO;
+  }
 }
 
-def ADDR_Reg     : ComplexPattern<i64, 2, "SelectADDRReg", [], []>;
-def ADDR_Offset8 : ComplexPattern<i64, 2, "SelectADDR8BitOffset", [], []>;
+multiclass VOP2_32 <bits<6> op, string opName, list<dag> pattern>
+  : VOP2_Helper <op, VReg_32, VSrc_32, opName, pattern>;
 
-let Uses = [EXEC] in {
+multiclass VOP2_64 <bits<6> op, string opName, list<dag> pattern>
+  : VOP2_Helper <op, VReg_64, VSrc_64, opName, pattern>;
 
-def EXP : Enc64<
-  (outs),
-  (ins i32imm:$en, i32imm:$tgt, i32imm:$compr, i32imm:$done, i32imm:$vm,
-       VReg_32:$src0, VReg_32:$src1, VReg_32:$src2, VReg_32:$src3),
-  "EXP $en, $tgt, $compr, $done, $vm, $src0, $src1, $src2, $src3",
-  [] > {
+multiclass VOP2b_32 <bits<6> op, string opName, list<dag> pattern> {
 
-  bits<4> EN;
-  bits<6> TGT;
-  bits<1> COMPR;
-  bits<1> DONE;
-  bits<1> VM;
-  bits<8> VSRC0;
-  bits<8> VSRC1;
-  bits<8> VSRC2;
-  bits<8> VSRC3;
+  def _e32 : VOP2 <
+    op, (outs VReg_32:$dst), (ins VSrc_32:$src0, VReg_32:$src1),
+    opName#"_e32 $dst, $src0, $src1", pattern
+  >, VOP <opName>;
 
-  let Inst{3-0} = EN;
-  let Inst{9-4} = TGT;
-  let Inst{10} = COMPR;
-  let Inst{11} = DONE;
-  let Inst{12} = VM;
-  let Inst{31-26} = 0x3e;
-  let Inst{39-32} = VSRC0;
-  let Inst{47-40} = VSRC1;
-  let Inst{55-48} = VSRC2;
-  let Inst{63-56} = VSRC3;
-  let EncodingType = 0; //SIInstrEncodingType::EXP
-
-  let NeedWait = 1;
-  let usesCustomInserter = 1;
+  def _e64 : VOP3b <
+    {1, 0, 0, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
+    (outs VReg_32:$dst),
+    (ins VSrc_32:$src0, VSrc_32:$src1,
+         i32imm:$abs, i32imm:$clamp,
+         i32imm:$omod, i32imm:$neg),
+    opName#"_e64 $dst, $src0, $src1, $abs, $clamp, $omod, $neg", []
+  >, VOP <opName> {
+    let SRC2 = SIOperand.ZERO;
+    /* the VOP2 variant puts the carry out into VCC, the VOP3 variant
+       can write it into any SGPR. We currently don't use the carry out,
+       so for now hardcode it to VCC as well */
+    let SDST = SIOperand.VCC;
+  }
 }
 
-class MIMG <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc64 <outs, ins, asm, pattern> {
+multiclass VOPC_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
+                        string opName, ValueType vt, PatLeaf cond> {
 
-  bits<8> VDATA;
-  bits<4> DMASK;
-  bits<1> UNORM;
-  bits<1> GLC;
-  bits<1> DA;
-  bits<1> R128;
-  bits<1> TFE;
-  bits<1> LWE;
-  bits<1> SLC;
-  bits<8> VADDR;
-  bits<5> SRSRC;
-  bits<5> SSAMP; 
+  def _e32 : VOPC <
+    op, (ins arc:$src0, vrc:$src1),
+    opName#"_e32 $dst, $src0, $src1", []
+  >, VOP <opName>;
 
-  let Inst{11-8} = DMASK;
-  let Inst{12} = UNORM;
-  let Inst{13} = GLC;
-  let Inst{14} = DA;
-  let Inst{15} = R128;
-  let Inst{16} = TFE;
-  let Inst{17} = LWE;
-  let Inst{24-18} = op;
-  let Inst{25} = SLC;
-  let Inst{31-26} = 0x3c;
-  let Inst{39-32} = VADDR;
-  let Inst{47-40} = VDATA;
-  let Inst{52-48} = SRSRC;
-  let Inst{57-53} = SSAMP;
-
-  let EncodingType = 2; //SIInstrEncodingType::MIMG
-
-  let NeedWait = 1;
-  let usesCustomInserter = 1;
+  def _e64 : VOP3 <
+    {0, op{7}, op{6}, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
+    (outs SReg_64:$dst),
+    (ins arc:$src0, arc:$src1,
+         InstFlag:$abs, InstFlag:$clamp,
+         InstFlag:$omod, InstFlag:$neg),
+    opName#"_e64 $dst, $src0, $src1, $abs, $clamp, $omod, $neg",
+    !if(!eq(!cast<string>(cond), "COND_NULL"), []<dag>,
+      [(set SReg_64:$dst, (i1 (setcc (vt arc:$src0), arc:$src1, cond)))]
+    )
+  >, VOP <opName> {
+    let SRC2 = SIOperand.ZERO;
+  }
 }
 
-class MTBUF <bits<3> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc64<outs, ins, asm, pattern> {
+multiclass VOPC_32 <bits<8> op, string opName,
+  ValueType vt = untyped, PatLeaf cond = COND_NULL>
+  : VOPC_Helper <op, VReg_32, VSrc_32, opName, vt, cond>;
 
-  bits<8> VDATA;
-  bits<12> OFFSET;
-  bits<1> OFFEN;
-  bits<1> IDXEN;
-  bits<1> GLC;
-  bits<1> ADDR64;
-  bits<4> DFMT;
-  bits<3> NFMT;
-  bits<8> VADDR;
-  bits<5> SRSRC;
-  bits<1> SLC;
-  bits<1> TFE;
-  bits<8> SOFFSET;
+multiclass VOPC_64 <bits<8> op, string opName,
+  ValueType vt = untyped, PatLeaf cond = COND_NULL>
+  : VOPC_Helper <op, VReg_64, VSrc_64, opName, vt, cond>;
 
-  let Inst{11-0} = OFFSET;
-  let Inst{12} = OFFEN;
-  let Inst{13} = IDXEN;
-  let Inst{14} = GLC;
-  let Inst{15} = ADDR64;
-  let Inst{18-16} = op;
-  let Inst{22-19} = DFMT;
-  let Inst{25-23} = NFMT;
-  let Inst{31-26} = 0x3a; //encoding
-  let Inst{39-32} = VADDR;
-  let Inst{47-40} = VDATA;
-  let Inst{52-48} = SRSRC;
-  let Inst{54} = SLC;
-  let Inst{55} = TFE;
-  let Inst{63-56} = SOFFSET;
-  let EncodingType = 3; //SIInstrEncodingType::MTBUF
+class VOP3_32 <bits<9> op, string opName, list<dag> pattern> : VOP3 <
+  op, (outs VReg_32:$dst),
+  (ins VSrc_32:$src0, VSrc_32:$src1, VSrc_32:$src2,
+   i32imm:$abs, i32imm:$clamp, i32imm:$omod, i32imm:$neg),
+  opName#" $dst, $src0, $src1, $src2, $abs, $clamp, $omod, $neg", pattern
+>, VOP <opName>;
 
-  let NeedWait = 1;
-  let usesCustomInserter = 1;
-  let neverHasSideEffects = 1;
-}
+class VOP3_64 <bits<9> op, string opName, list<dag> pattern> : VOP3 <
+  op, (outs VReg_64:$dst),
+  (ins VSrc_64:$src0, VSrc_64:$src1, VSrc_64:$src2,
+   i32imm:$abs, i32imm:$clamp, i32imm:$omod, i32imm:$neg),
+  opName#" $dst, $src0, $src1, $src2, $abs, $clamp, $omod, $neg", pattern
+>, VOP <opName>;
 
-class MUBUF <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc64<outs, ins, asm, pattern> {
+//===----------------------------------------------------------------------===//
+// Vector I/O classes
+//===----------------------------------------------------------------------===//
 
-  bits<8> VDATA;
-  bits<12> OFFSET;
-  bits<1> OFFEN;
-  bits<1> IDXEN;
-  bits<1> GLC;
-  bits<1> ADDR64;
-  bits<1> LDS;
-  bits<8> VADDR;
-  bits<5> SRSRC;
-  bits<1> SLC;
-  bits<1> TFE;
-  bits<8> SOFFSET;
-
-  let Inst{11-0} = OFFSET;
-  let Inst{12} = OFFEN;
-  let Inst{13} = IDXEN;
-  let Inst{14} = GLC;
-  let Inst{15} = ADDR64;
-  let Inst{16} = LDS;
-  let Inst{24-18} = op;
-  let Inst{31-26} = 0x38; //encoding
-  let Inst{39-32} = VADDR;
-  let Inst{47-40} = VDATA;
-  let Inst{52-48} = SRSRC;
-  let Inst{54} = SLC;
-  let Inst{55} = TFE;
-  let Inst{63-56} = SOFFSET;
-  let EncodingType = 4; //SIInstrEncodingType::MUBUF
-
-  let NeedWait = 1;
-  let usesCustomInserter = 1;
-  let neverHasSideEffects = 1;
-}
-
-} // End Uses = [EXEC]
-
-class SMRD <bits<5> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc32<outs, ins, asm, pattern> {
-
-  bits<7> SDST;
-  bits<15> PTR;
-  bits<8> OFFSET = PTR{7-0};
-  bits<1> IMM    = PTR{8};
-  bits<6> SBASE  = PTR{14-9};
-  
-  let Inst{7-0} = OFFSET;
-  let Inst{8} = IMM;
-  let Inst{14-9} = SBASE;
-  let Inst{21-15} = SDST;
-  let Inst{26-22} = op;
-  let Inst{31-27} = 0x18; //encoding
-  let EncodingType = 5; //SIInstrEncodingType::SMRD
-
-  let NeedWait = 1;
-  let usesCustomInserter = 1;
-}
-
-class SOP1 <bits<8> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc32<outs, ins, asm, pattern> {
-
-  bits<7> SDST;
-  bits<8> SSRC0;
-
-  let Inst{7-0} = SSRC0;
-  let Inst{15-8} = op;
-  let Inst{22-16} = SDST;
-  let Inst{31-23} = 0x17d; //encoding;
-  let EncodingType = 6; //SIInstrEncodingType::SOP1
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class SOP2 <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc32 <outs, ins, asm, pattern> {
-  
-  bits<7> SDST;
-  bits<8> SSRC0;
-  bits<8> SSRC1;
-
-  let Inst{7-0} = SSRC0;
-  let Inst{15-8} = SSRC1;
-  let Inst{22-16} = SDST;
-  let Inst{29-23} = op;
-  let Inst{31-30} = 0x2; // encoding
-  let EncodingType = 7; // SIInstrEncodingType::SOP2  
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class SOPC <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
-  Enc32<outs, ins, asm, pattern> {
-
-  bits<8> SSRC0;
-  bits<8> SSRC1;
-
-  let Inst{7-0} = SSRC0;
-  let Inst{15-8} = SSRC1;
-  let Inst{22-16} = op;
-  let Inst{31-23} = 0x17e;
-  let EncodingType = 8; // SIInstrEncodingType::SOPC
-
-  let DisableEncoding = "$dst";
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class SOPK <bits<5> op, dag outs, dag ins, string asm, list<dag> pattern> :
-   Enc32 <outs, ins , asm, pattern> {
-
-  bits <7> SDST;
-  bits <16> SIMM16;
-  
-  let Inst{15-0} = SIMM16;
-  let Inst{22-16} = SDST;
-  let Inst{27-23} = op;
-  let Inst{31-28} = 0xb; //encoding
-  let EncodingType = 9; // SIInstrEncodingType::SOPK
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class SOPP <bits<7> op, dag ins, string asm, list<dag> pattern> : Enc32 <
-  (outs),
-  ins,
-  asm,
-  pattern > {
-
-  bits <16> SIMM16;
-
-  let Inst{15-0} = SIMM16;
-  let Inst{22-16} = op;
-  let Inst{31-23} = 0x17f; // encoding
-  let EncodingType = 10; // SIInstrEncodingType::SOPP
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-    
-let Uses = [EXEC] in {
-
-class VINTRP <bits <2> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc32 <outs, ins, asm, pattern> {
-
-  bits<8> VDST;
-  bits<8> VSRC;
-  bits<2> ATTRCHAN;
-  bits<6> ATTR;
-
-  let Inst{7-0} = VSRC;
-  let Inst{9-8} = ATTRCHAN;
-  let Inst{15-10} = ATTR;
-  let Inst{17-16} = op;
-  let Inst{25-18} = VDST;
-  let Inst{31-26} = 0x32; // encoding
-  let EncodingType = 11; // SIInstrEncodingType::VINTRP
-
-  let neverHasSideEffects = 1;
-  let mayLoad = 1;
-  let mayStore = 0;
-}
-
-class VOP1 <bits<8> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc32 <outs, ins, asm, pattern> {
-
-  bits<8> VDST;
-  bits<9> SRC0;
-  
-  let Inst{8-0} = SRC0;
-  let Inst{16-9} = op;
-  let Inst{24-17} = VDST;
-  let Inst{31-25} = 0x3f; //encoding
-  
-  let EncodingType = 12; // SIInstrEncodingType::VOP1
-  let PostEncoderMethod = "VOPPostEncode";
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class VOP2 <bits<6> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc32 <outs, ins, asm, pattern> {
-
-  bits<8> VDST;
-  bits<9> SRC0;
-  bits<8> VSRC1;
-  
-  let Inst{8-0} = SRC0;
-  let Inst{16-9} = VSRC1;
-  let Inst{24-17} = VDST;
-  let Inst{30-25} = op;
-  let Inst{31} = 0x0; //encoding
-  
-  let EncodingType = 13; // SIInstrEncodingType::VOP2
-  let PostEncoderMethod = "VOPPostEncode";
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class VOP3 <bits<9> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc64 <outs, ins, asm, pattern> {
-
-  bits<8> VDST;
-  bits<9> SRC0;
-  bits<9> SRC1;
-  bits<9> SRC2;
-  bits<3> ABS; 
-  bits<1> CLAMP;
-  bits<2> OMOD;
-  bits<3> NEG;
-
-  let Inst{7-0} = VDST;
-  let Inst{10-8} = ABS;
-  let Inst{11} = CLAMP;
-  let Inst{25-17} = op;
-  let Inst{31-26} = 0x34; //encoding
-  let Inst{40-32} = SRC0;
-  let Inst{49-41} = SRC1;
-  let Inst{58-50} = SRC2;
-  let Inst{60-59} = OMOD;
-  let Inst{63-61} = NEG;
-  
-  let EncodingType = 14; // SIInstrEncodingType::VOP3
-  let PostEncoderMethod = "VOPPostEncode";
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class VOP3b <bits<9> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    Enc64 <outs, ins, asm, pattern> {
-
-  bits<8> VDST;
-  bits<9> SRC0;
-  bits<9> SRC1;
-  bits<9> SRC2;
-  bits<7> SDST;
-  bits<2> OMOD;
-  bits<3> NEG;
-
-  let Inst{7-0} = VDST;
-  let Inst{14-8} = SDST;
-  let Inst{25-17} = op;
-  let Inst{31-26} = 0x34; //encoding
-  let Inst{40-32} = SRC0;
-  let Inst{49-41} = SRC1;
-  let Inst{58-50} = SRC2;
-  let Inst{60-59} = OMOD;
-  let Inst{63-61} = NEG;
-
-  let EncodingType = 14; // SIInstrEncodingType::VOP3
-  let PostEncoderMethod = "VOPPostEncode";
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-class VOPC <bits<8> op, dag ins, string asm, list<dag> pattern> :
-    Enc32 <(outs VCCReg:$dst), ins, asm, pattern> {
-
-  bits<9> SRC0;
-  bits<8> VSRC1;
-
-  let Inst{8-0} = SRC0;
-  let Inst{16-9} = VSRC1;
-  let Inst{24-17} = op;
-  let Inst{31-25} = 0x3e;
- 
-  let EncodingType = 15; //SIInstrEncodingType::VOPC
-  let PostEncoderMethod = "VOPPostEncode";
-  let DisableEncoding = "$dst";
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-}
-
-} // End Uses = [EXEC]
-
-class MIMG_Load_Helper <bits<7> op, string asm> : MIMG <
+class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
   op,
-  (outs VReg_128:$vdata),
-  (ins i32imm:$dmask, i1imm:$unorm, i1imm:$glc, i1imm:$da, i1imm:$r128,
-       i1imm:$tfe, i1imm:$lwe, i1imm:$slc, VReg_128:$vaddr,
-       GPR4Align<SReg_256>:$srsrc, GPR4Align<SReg_128>:$ssamp),
-  asm,
+  (outs),
+  (ins regClass:$vdata, i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc,
+   i1imm:$addr64, i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr,
+   SReg_128:$srsrc, i1imm:$slc, i1imm:$tfe, SSrc_32:$soffset),
+  asm#" $vdata, $offset, $offen, $idxen, $glc, $addr64, $dfmt,"
+     #" $nfmt, $vaddr, $srsrc, $slc, $tfe, $soffset",
   []> {
-  let mayLoad = 1;
-  let mayStore = 0;
+  let mayStore = 1;
+  let mayLoad = 0;
 }
 
 class MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> : MUBUF <
   op,
   (outs regClass:$dst),
   (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
-       i1imm:$lds, VReg_32:$vaddr, GPR4Align<SReg_128>:$srsrc, i1imm:$slc,
-       i1imm:$tfe, SReg_32:$soffset),
-  asm,
+       i1imm:$lds, VReg_32:$vaddr, SReg_128:$srsrc, i1imm:$slc,
+       i1imm:$tfe, SSrc_32:$soffset),
+  asm#" $dst, $offset, $offen, $idxen, $glc, $addr64, "
+     #"$lds, $vaddr, $srsrc, $slc, $tfe, $soffset",
   []> {
   let mayLoad = 1;
   let mayStore = 0;
@@ -541,49 +291,39 @@ class MTBUF_Load_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF
   op,
   (outs regClass:$dst),
   (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
-       i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr, GPR4Align<SReg_128>:$srsrc,
-       i1imm:$slc, i1imm:$tfe, SReg_32:$soffset),
-  asm,
+       i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr, SReg_128:$srsrc,
+       i1imm:$slc, i1imm:$tfe, SSrc_32:$soffset),
+  asm#" $dst, $offset, $offen, $idxen, $glc, $addr64, $dfmt,"
+     #" $nfmt, $vaddr, $srsrc, $slc, $tfe, $soffset",
   []> {
   let mayLoad = 1;
   let mayStore = 0;
 }
 
-class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
+class MIMG_Load_Helper <bits<7> op, string asm> : MIMG <
   op,
-  (outs),
-  (ins regClass:$vdata, i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc,
-   i1imm:$addr64, i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr,
-   GPR4Align<SReg_128>:$srsrc, i1imm:$slc, i1imm:$tfe, SReg_32:$soffset),
-  asm,
+  (outs VReg_128:$vdata),
+  (ins i32imm:$dmask, i1imm:$unorm, i1imm:$glc, i1imm:$da, i1imm:$r128,
+       i1imm:$tfe, i1imm:$lwe, i1imm:$slc, VReg_32:$vaddr,
+       SReg_256:$srsrc, SReg_128:$ssamp),
+  asm#" $vdata, $dmask, $unorm, $glc, $da, $r128,"
+     #" $tfe, $lwe, $slc, $vaddr, $srsrc, $ssamp",
   []> {
-  let mayStore = 1;
-  let mayLoad = 0;
+  let mayLoad = 1;
+  let mayStore = 0;
 }
 
-multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass dstClass,
-                        ValueType vt> {
-  def _IMM : SMRD <
-              op,
-              (outs dstClass:$dst),
-              (ins SMRDmemri:$src0),
-              asm,
-              [(set (vt dstClass:$dst), (constant_load ADDR_Offset8:$src0))]
-  >;
+//===----------------------------------------------------------------------===//
+// Vector instruction mappings
+//===----------------------------------------------------------------------===//
 
-  def _SGPR : SMRD <
-              op,
-              (outs dstClass:$dst),
-              (ins SMRDmemrr:$src0),
-              asm,
-              [(set (vt dstClass:$dst), (constant_load ADDR_Reg:$src0))]
-  >;
+// Maps an opcode in e32 form to its e64 equivalent
+def getVOPe64 : InstrMapping {
+  let FilterClass = "VOP";
+  let RowFields = ["OpName"];
+  let ColFields = ["Size"];
+  let KeyCol = ["4"];
+  let ValueCols = [["8"]];
 }
 
-multiclass SMRD_32 <bits<5> op, string asm, RegisterClass dstClass> {
-  defm _F32 : SMRD_Helper <op, asm, dstClass, f32>;
-  defm _I32 : SMRD_Helper <op, asm, dstClass, i32>;
-}
-
-include "SIInstrFormats.td"
 include "SIInstructions.td"

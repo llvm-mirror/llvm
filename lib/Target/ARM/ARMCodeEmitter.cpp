@@ -28,9 +28,9 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -371,12 +371,16 @@ FunctionPass *llvm::createARMJITCodeEmitterPass(ARMBaseTargetMachine &TM,
 }
 
 bool ARMCodeEmitter::runOnMachineFunction(MachineFunction &MF) {
-  assert((MF.getTarget().getRelocationModel() != Reloc::Default ||
-          MF.getTarget().getRelocationModel() != Reloc::Static) &&
+  TargetMachine &Target = const_cast<TargetMachine&>(MF.getTarget());
+
+  assert((Target.getRelocationModel() != Reloc::Default ||
+          Target.getRelocationModel() != Reloc::Static) &&
          "JIT relocation model must be set to static or default!");
-  JTI = ((ARMBaseTargetMachine &)MF.getTarget()).getJITInfo();
-  II = (const ARMBaseInstrInfo *)MF.getTarget().getInstrInfo();
-  TD = MF.getTarget().getDataLayout();
+
+  JTI = static_cast<ARMJITInfo*>(Target.getJITInfo());
+  II = static_cast<const ARMBaseInstrInfo*>(Target.getInstrInfo());
+  TD = Target.getDataLayout();
+
   Subtarget = &TM.getSubtarget<ARMSubtarget>();
   MCPEs = &MF.getConstantPool()->getConstants();
   MJTEs = 0;

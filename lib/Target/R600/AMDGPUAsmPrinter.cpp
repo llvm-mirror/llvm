@@ -22,8 +22,8 @@
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 
 using namespace llvm;
 
@@ -47,6 +47,9 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 #endif
   }
   SetupMachineFunction(MF);
+  if (OutStreamer.hasRawTextSupport()) {
+    OutStreamer.EmitRawText("@" + MF.getName() + ":");
+  }
   OutStreamer.SwitchSection(getObjFileLowering().getTextSection());
   if (STM.device()->getGeneration() > AMDGPUDeviceInfo::HD6XXX) {
     EmitProgramInfo(MF);
@@ -88,8 +91,6 @@ void AMDGPUAsmPrinter::EmitProgramInfo(MachineFunction &MF) {
         switch (reg) {
         default: break;
         case AMDGPU::EXEC:
-        case AMDGPU::SI_LITERAL_CONSTANT:
-        case AMDGPU::SREG_LIT_0:
         case AMDGPU::M0:
           continue;
         }
@@ -115,10 +116,16 @@ void AMDGPUAsmPrinter::EmitProgramInfo(MachineFunction &MF) {
         } else if (AMDGPU::SReg_256RegClass.contains(reg)) {
           isSGPR = true;
           width = 8;
+        } else if (AMDGPU::VReg_256RegClass.contains(reg)) {
+          isSGPR = false;
+          width = 8;
+        } else if (AMDGPU::VReg_512RegClass.contains(reg)) {
+          isSGPR = false;
+          width = 16;
         } else {
           assert(!"Unknown register class");
         }
-        hwReg = RI->getEncodingValue(reg);
+        hwReg = RI->getEncodingValue(reg) & 0xff;
         maxUsed = hwReg + width - 1;
         if (isSGPR) {
           MaxSGPR = maxUsed > MaxSGPR ? maxUsed : MaxSGPR;
@@ -134,5 +141,5 @@ void AMDGPUAsmPrinter::EmitProgramInfo(MachineFunction &MF) {
   SIMachineFunctionInfo * MFI = MF.getInfo<SIMachineFunctionInfo>();
   OutStreamer.EmitIntValue(MaxSGPR + 1, 4);
   OutStreamer.EmitIntValue(MaxVGPR + 1, 4);
-  OutStreamer.EmitIntValue(MFI->SPIPSInputAddr, 4);
+  OutStreamer.EmitIntValue(MFI->PSInputAddr, 4);
 }

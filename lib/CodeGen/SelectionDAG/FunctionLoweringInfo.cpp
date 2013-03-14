@@ -21,14 +21,14 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Module.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
@@ -66,8 +66,7 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf) {
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(Fn->getReturnType(),
-                Fn->getAttributes().getRetAttributes(), Outs, TLI);
+  GetReturnInfo(Fn->getReturnType(), Fn->getAttributes(), Outs, TLI);
   CanLowerReturn = TLI.CanLowerReturn(Fn->getCallingConv(), *MF,
                                       Fn->isVarArg(),
                                       Outs, Fn->getContext());
@@ -226,7 +225,7 @@ unsigned FunctionLoweringInfo::CreateRegs(Type *Ty) {
   unsigned FirstReg = 0;
   for (unsigned Value = 0, e = ValueVTs.size(); Value != e; ++Value) {
     EVT ValueVT = ValueVTs[Value];
-    MVT RegisterVT = TLI.getRegisterType(Ty->getContext(), ValueVT).getSimpleVT();
+    MVT RegisterVT = TLI.getRegisterType(Ty->getContext(), ValueVT);
 
     unsigned NumRegs = TLI.getNumRegisters(Ty->getContext(), ValueVT);
     for (unsigned i = 0; i != NumRegs; ++i) {

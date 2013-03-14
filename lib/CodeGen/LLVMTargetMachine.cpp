@@ -79,6 +79,10 @@ LLVMTargetMachine::LLVMTargetMachine(const Target &T, StringRef Triple,
          "and that InitializeAllTargetMCs() is being invoked!");
 }
 
+void LLVMTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
+  PM.add(createBasicTargetTransformInfoPass(getTargetLowering()));
+}
+
 /// addPassesToX helper drives creation and initialization of TargetPassConfig.
 static MCContext *addPassesToGenerateCode(LLVMTargetMachine *TM,
                                           PassManagerBase &PM,
@@ -222,7 +226,6 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
 
   PM.add(Printer);
 
-  PM.add(createGCInfoDeleter());
   return false;
 }
 
@@ -241,7 +244,6 @@ bool LLVMTargetMachine::addPassesToEmitMachineCode(PassManagerBase &PM,
     return true;
 
   addCodeEmitter(PM, JCE);
-  PM.add(createGCInfoDeleter());
 
   return false; // success!
 }

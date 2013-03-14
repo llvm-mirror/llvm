@@ -13,14 +13,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "BlackList.h"
+#include "llvm/Transforms/Utils/BlackList.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/Module.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
@@ -78,21 +78,21 @@ BlackList::BlackList(const StringRef Path) {
   }
 
   // Iterate through each of the prefixes, and create Regexs for them.
-  for (StringMap<std::string>::iterator I = Regexps.begin(), E = Regexps.end();
-       I != E; ++I) {
+  for (StringMap<std::string>::const_iterator I = Regexps.begin(),
+       E = Regexps.end(); I != E; ++I) {
     Entries[I->getKey()] = new Regex(I->getValue());
   }
 }
 
-bool BlackList::isIn(const Function &F) {
+bool BlackList::isIn(const Function &F) const {
   return isIn(*F.getParent()) || inSection("fun", F.getName());
 }
 
-bool BlackList::isIn(const GlobalVariable &G) {
+bool BlackList::isIn(const GlobalVariable &G) const {
   return isIn(*G.getParent()) || inSection("global", G.getName());
 }
 
-bool BlackList::isIn(const Module &M) {
+bool BlackList::isIn(const Module &M) const {
   return inSection("src", M.getModuleIdentifier());
 }
 
@@ -107,14 +107,15 @@ static StringRef GetGVTypeString(const GlobalVariable &G) {
   return "<unknown type>";
 }
 
-bool BlackList::isInInit(const GlobalVariable &G) {
+bool BlackList::isInInit(const GlobalVariable &G) const {
   return (isIn(*G.getParent()) ||
           inSection("global-init", G.getName()) ||
           inSection("global-init-type", GetGVTypeString(G)));
 }
 
-bool BlackList::inSection(const StringRef Section, const StringRef Query) {
-  StringMap<Regex*>::iterator I = Entries.find(Section);
+bool BlackList::inSection(const StringRef Section,
+                          const StringRef Query) const {
+  StringMap<Regex*>::const_iterator I = Entries.find(Section);
   if (I == Entries.end()) return false;
 
   Regex *FunctionRegex = I->getValue();

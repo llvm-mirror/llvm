@@ -15,12 +15,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef CONSTANTRANGESSET_H_
-#define CONSTANTRANGESSET_H_
+#ifndef LLVM_SUPPORT_INTEGERSSUBSET_H
+#define LLVM_SUPPORT_INTEGERSSUBSET_H
 
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/LLVMContext.h"
 #include <list>
 
 namespace llvm {
@@ -537,4 +537,4 @@ public:
 
 }
 
-#endif /* CONSTANTRANGESSET_H_ */
+#endif /* CLLVM_SUPPORT_INTEGERSSUBSET_H */

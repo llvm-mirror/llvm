@@ -17,6 +17,7 @@
 #include "X86COFFMachineModuleInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+#include "llvm/IR/Type.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -26,7 +27,6 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Target/Mangler.h"
-#include "llvm/Type.h"
 using namespace llvm;
 
 namespace {
@@ -239,7 +239,8 @@ static void lower_lea64_32mem(MCInst *MI, unsigned OpNo) {
     if (!MI->getOperand(OpNo+i).isReg()) continue;
 
     unsigned Reg = MI->getOperand(OpNo+i).getReg();
-    if (Reg == 0) continue;
+    // LEAs can use RIP-relative addressing, and RIP has no sub/super register.
+    if (Reg == 0 || Reg == X86::RIP) continue;
 
     MI->getOperand(OpNo+i).setReg(getX86SubSuperRegister(Reg, MVT::i64));
   }

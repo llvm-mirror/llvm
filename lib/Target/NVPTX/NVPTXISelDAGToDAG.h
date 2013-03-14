@@ -18,7 +18,7 @@
 #include "NVPTXRegisterInfo.h"
 #include "NVPTXTargetMachine.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/Compiler.h"
 using namespace llvm;
 
@@ -72,8 +72,11 @@ private:
 #include "NVPTXGenDAGISel.inc"
 
   SDNode *Select(SDNode *N);
-  SDNode* SelectLoad(SDNode *N);
-  SDNode* SelectStore(SDNode *N);
+  SDNode *SelectLoad(SDNode *N);
+  SDNode *SelectLoadVector(SDNode *N);
+  SDNode *SelectLDGLDUVector(SDNode *N);
+  SDNode *SelectStore(SDNode *N);
+  SDNode *SelectStoreVector(SDNode *N);
 
   inline SDValue getI32Imm(unsigned Imm) {
     return CurDAG->getTargetConstant(Imm, MVT::i32);

@@ -13,6 +13,7 @@
 #ifndef R600MACHINEFUNCTIONINFO_H
 #define R600MACHINEFUNCTIONINFO_H
 
+#include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include <vector>
@@ -23,15 +24,9 @@ class R600MachineFunctionInfo : public MachineFunctionInfo {
 
 public:
   R600MachineFunctionInfo(const MachineFunction &MF);
-  std::vector<unsigned> ReservedRegs;
+  SmallVector<unsigned, 4> LiveOuts;
+  std::vector<unsigned> IndirectRegs;
   SDNode *Outputs[16];
-  SDNode *StreamOutputs[64][4];
-  bool HasLinearInterpolation;
-  bool HasPerspectiveInterpolation;
-
-  unsigned GetIJLinearIndex() const;
-  unsigned GetIJPerspectiveIndex() const;
-
 };
 
 } // End llvm namespace

@@ -23,7 +23,6 @@
 
 #define DEBUG_TYPE "stackcoloring"
 #include "llvm/CodeGen/Passes.h"
-#include "MachineTraceMetrics.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/PostOrderIterator.h"
@@ -40,16 +39,15 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
-#include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/Function.h"
-#include "llvm/Instructions.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCInstrItineraries.h"
-#include "llvm/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -104,12 +102,13 @@ class StackColoring : public MachineFunctionPass {
   };
 
   /// Maps active slots (per bit) for each basic block.
-  DenseMap<MachineBasicBlock*, BlockLifetimeInfo> BlockLiveness;
+  typedef DenseMap<const MachineBasicBlock*, BlockLifetimeInfo> LivenessMap;
+  LivenessMap BlockLiveness;
 
   /// Maps serial numbers to basic blocks.
-  DenseMap<MachineBasicBlock*, int> BasicBlocks;
+  DenseMap<const MachineBasicBlock*, int> BasicBlocks;
   /// Maps basic blocks to a serial number.
-  SmallVector<MachineBasicBlock*, 8> BasicBlockNumbering;
+  SmallVector<const MachineBasicBlock*, 8> BasicBlockNumbering;
 
   /// Maps liveness intervals for each slot.
   SmallVector<LiveInterval*, 16> Intervals;
@@ -146,7 +145,7 @@ public:
 
 private:
   /// Debug.
-  void dump();
+  void dump() const;
 
   /// Removes all of the lifetime marker instructions from the function.
   /// \returns true if any markers were removed.
@@ -201,31 +200,35 @@ void StackColoring::getAnalysisUsage(AnalysisUsage &AU) const {
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
-void StackColoring::dump() {
+void StackColoring::dump() const {
   for (df_iterator<MachineFunction*> FI = df_begin(MF), FE = df_end(MF);
        FI != FE; ++FI) {
-    unsigned Num = BasicBlocks[*FI];
-    DEBUG(dbgs()<<"Inspecting block #"<<Num<<" ["<<FI->getName()<<"]\n");
-    Num = 0;
+    DEBUG(dbgs()<<"Inspecting block #"<<BasicBlocks.lookup(*FI)<<
+          " ["<<FI->getName()<<"]\n");
+
+    LivenessMap::const_iterator BI = BlockLiveness.find(*FI);
+    assert(BI != BlockLiveness.end() && "Block not found");
+    const BlockLifetimeInfo &BlockInfo = BI->second;
+
     DEBUG(dbgs()<<"BEGIN  : {");
-    for (unsigned i=0; i < BlockLiveness[*FI].Begin.size(); ++i)
-      DEBUG(dbgs()<<BlockLiveness[*FI].Begin.test(i)<<" ");
+    for (unsigned i=0; i < BlockInfo.Begin.size(); ++i)
+      DEBUG(dbgs()<<BlockInfo.Begin.test(i)<<" ");
     DEBUG(dbgs()<<"}\n");
 
     DEBUG(dbgs()<<"END    : {");
-    for (unsigned i=0; i < BlockLiveness[*FI].End.size(); ++i)
-      DEBUG(dbgs()<<BlockLiveness[*FI].End.test(i)<<" ");
+    for (unsigned i=0; i < BlockInfo.End.size(); ++i)
+      DEBUG(dbgs()<<BlockInfo.End.test(i)<<" ");
 
     DEBUG(dbgs()<<"}\n");
 
     DEBUG(dbgs()<<"LIVE_IN: {");
-    for (unsigned i=0; i < BlockLiveness[*FI].LiveIn.size(); ++i)
-      DEBUG(dbgs()<<BlockLiveness[*FI].LiveIn.test(i)<<" ");
+    for (unsigned i=0; i < BlockInfo.LiveIn.size(); ++i)
+      DEBUG(dbgs()<<BlockInfo.LiveIn.test(i)<<" ");
 
     DEBUG(dbgs()<<"}\n");
     DEBUG(dbgs()<<"LIVEOUT: {");
-    for (unsigned i=0; i < BlockLiveness[*FI].LiveOut.size(); ++i)
-      DEBUG(dbgs()<<BlockLiveness[*FI].LiveOut.test(i)<<" ");
+    for (unsigned i=0; i < BlockInfo.LiveOut.size(); ++i)
+      DEBUG(dbgs()<<BlockInfo.LiveOut.test(i)<<" ");
     DEBUG(dbgs()<<"}\n");
   }
 }
@@ -243,8 +246,11 @@ unsigned StackColoring::collectMarkers(unsigned NumSlot) {
     BasicBlocks[*FI] = BasicBlockNumbering.size();
     BasicBlockNumbering.push_back(*FI);
 
-    BlockLiveness[*FI].Begin.resize(NumSlot);
-    BlockLiveness[*FI].End.resize(NumSlot);
+    // Keep a reference to avoid repeated lookups.
+    BlockLifetimeInfo &BlockInfo = BlockLiveness[*FI];
+
+    BlockInfo.Begin.resize(NumSlot);
+    BlockInfo.End.resize(NumSlot);
 
     for (MachineBasicBlock::iterator BI = (*FI)->begin(), BE = (*FI)->end();
          BI != BE; ++BI) {
@@ -256,7 +262,7 @@ unsigned StackColoring::collectMarkers(unsigned NumSlot) {
       Markers.push_back(BI);
 
       bool IsStart = BI->getOpcode() == TargetOpcode::LIFETIME_START;
-      MachineOperand &MI = BI->getOperand(0);
+      const MachineOperand &MI = BI->getOperand(0);
       unsigned Slot = MI.getIndex();
 
       MarkersFound++;
@@ -268,15 +274,15 @@ unsigned StackColoring::collectMarkers(unsigned NumSlot) {
       }
 
       if (IsStart) {
-        BlockLiveness[*FI].Begin.set(Slot);
+        BlockInfo.Begin.set(Slot);
       } else {
-        if (BlockLiveness[*FI].Begin.test(Slot)) {
+        if (BlockInfo.Begin.test(Slot)) {
           // Allocas that start and end within a single block are handled
           // specially when computing the LiveIntervals to avoid pessimizing
           // the liveness propagation.
-          BlockLiveness[*FI].Begin.reset(Slot);
+          BlockInfo.Begin.reset(Slot);
         } else {
-          BlockLiveness[*FI].End.set(Slot);
+          BlockInfo.End.set(Slot);
         }
       }
     }
@@ -293,47 +299,58 @@ void StackColoring::calculateLocalLiveness() {
   // formulation, and END is equivalent to GEN.  The result of this computation
   // is a map from blocks to bitvectors where the bitvectors represent which
   // allocas are live in/out of that block.
-  SmallPtrSet<MachineBasicBlock*, 8> BBSet(BasicBlockNumbering.begin(),
-                                           BasicBlockNumbering.end());
+  SmallPtrSet<const MachineBasicBlock*, 8> BBSet(BasicBlockNumbering.begin(),
+                                                 BasicBlockNumbering.end());
   unsigned NumSSMIters = 0;
   bool changed = true;
   while (changed) {
     changed = false;
     ++NumSSMIters;
 
-    SmallPtrSet<MachineBasicBlock*, 8> NextBBSet;
+    SmallPtrSet<const MachineBasicBlock*, 8> NextBBSet;
 
-    for (SmallVector<MachineBasicBlock*, 8>::iterator
+    for (SmallVector<const MachineBasicBlock*, 8>::iterator
          PI = BasicBlockNumbering.begin(), PE = BasicBlockNumbering.end();
          PI != PE; ++PI) {
 
-      MachineBasicBlock *BB = *PI;
+      const MachineBasicBlock *BB = *PI;
       if (!BBSet.count(BB)) continue;
+
+      // Use an iterator to avoid repeated lookups.
+      LivenessMap::iterator BI = BlockLiveness.find(BB);
+      assert(BI != BlockLiveness.end() && "Block not found");
+      BlockLifetimeInfo &BlockInfo = BI->second;
 
       BitVector LocalLiveIn;
       BitVector LocalLiveOut;
 
       // Forward propagation from begins to ends.
-      for (MachineBasicBlock::pred_iterator PI = BB->pred_begin(),
-           PE = BB->pred_end(); PI != PE; ++PI)
-        LocalLiveIn |= BlockLiveness[*PI].LiveOut;
-      LocalLiveIn |= BlockLiveness[BB].End;
-      LocalLiveIn.reset(BlockLiveness[BB].Begin);
+      for (MachineBasicBlock::const_pred_iterator PI = BB->pred_begin(),
+           PE = BB->pred_end(); PI != PE; ++PI) {
+        LivenessMap::const_iterator I = BlockLiveness.find(*PI);
+        assert(I != BlockLiveness.end() && "Predecessor not found");
+        LocalLiveIn |= I->second.LiveOut;
+      }
+      LocalLiveIn |= BlockInfo.End;
+      LocalLiveIn.reset(BlockInfo.Begin);
 
       // Reverse propagation from ends to begins.
-      for (MachineBasicBlock::succ_iterator SI = BB->succ_begin(),
-           SE = BB->succ_end(); SI != SE; ++SI)
-        LocalLiveOut |= BlockLiveness[*SI].LiveIn;
-      LocalLiveOut |= BlockLiveness[BB].Begin;
-      LocalLiveOut.reset(BlockLiveness[BB].End);
+      for (MachineBasicBlock::const_succ_iterator SI = BB->succ_begin(),
+           SE = BB->succ_end(); SI != SE; ++SI) {
+        LivenessMap::const_iterator I = BlockLiveness.find(*SI);
+        assert(I != BlockLiveness.end() && "Successor not found");
+        LocalLiveOut |= I->second.LiveIn;
+      }
+      LocalLiveOut |= BlockInfo.Begin;
+      LocalLiveOut.reset(BlockInfo.End);
 
       LocalLiveIn |= LocalLiveOut;
       LocalLiveOut |= LocalLiveIn;
 
       // After adopting the live bits, we need to turn-off the bits which
       // are de-activated in this block.
-      LocalLiveOut.reset(BlockLiveness[BB].End);
-      LocalLiveIn.reset(BlockLiveness[BB].Begin);
+      LocalLiveOut.reset(BlockInfo.End);
+      LocalLiveIn.reset(BlockInfo.Begin);
 
       // If we have both BEGIN and END markers in the same basic block then
       // we know that the BEGIN marker comes after the END, because we already
@@ -342,25 +359,25 @@ void StackColoring::calculateLocalLiveness() {
       // Want to enable the LIVE_IN and LIVE_OUT of slots that have both
       // BEGIN and END because it means that the value lives before and after
       // this basic block.
-      BitVector LocalEndBegin = BlockLiveness[BB].End;
-      LocalEndBegin &= BlockLiveness[BB].Begin;
+      BitVector LocalEndBegin = BlockInfo.End;
+      LocalEndBegin &= BlockInfo.Begin;
       LocalLiveIn |= LocalEndBegin;
       LocalLiveOut |= LocalEndBegin;
 
-      if (LocalLiveIn.test(BlockLiveness[BB].LiveIn)) {
+      if (LocalLiveIn.test(BlockInfo.LiveIn)) {
         changed = true;
-        BlockLiveness[BB].LiveIn |= LocalLiveIn;
+        BlockInfo.LiveIn |= LocalLiveIn;
 
-        for (MachineBasicBlock::pred_iterator PI = BB->pred_begin(),
+        for (MachineBasicBlock::const_pred_iterator PI = BB->pred_begin(),
              PE = BB->pred_end(); PI != PE; ++PI)
           NextBBSet.insert(*PI);
       }
 
-      if (LocalLiveOut.test(BlockLiveness[BB].LiveOut)) {
+      if (LocalLiveOut.test(BlockInfo.LiveOut)) {
         changed = true;
-        BlockLiveness[BB].LiveOut |= LocalLiveOut;
+        BlockInfo.LiveOut |= LocalLiveOut;
 
-        for (MachineBasicBlock::succ_iterator SI = BB->succ_begin(),
+        for (MachineBasicBlock::const_succ_iterator SI = BB->succ_begin(),
              SE = BB->succ_end(); SI != SE; ++SI)
           NextBBSet.insert(*SI);
       }
@@ -384,9 +401,9 @@ void StackColoring::calculateLiveIntervals(unsigned NumSlots) {
     Finishes.resize(NumSlots);
 
     // Create the interval for the basic blocks with lifetime markers in them.
-    for (SmallVector<MachineInstr*, 8>::iterator it = Markers.begin(),
+    for (SmallVectorImpl<MachineInstr*>::const_iterator it = Markers.begin(),
          e = Markers.end(); it != e; ++it) {
-      MachineInstr *MI = *it;
+      const MachineInstr *MI = *it;
       if (MI->getParent() != MBB)
         continue;
 
@@ -395,7 +412,7 @@ void StackColoring::calculateLiveIntervals(unsigned NumSlots) {
              "Invalid Lifetime marker");
 
       bool IsStart = MI->getOpcode() == TargetOpcode::LIFETIME_START;
-      MachineOperand &Mo = MI->getOperand(0);
+      const MachineOperand &Mo = MI->getOperand(0);
       int Slot = Mo.getIndex();
       assert(Slot >= 0 && "Invalid slot");
 
@@ -482,7 +499,7 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
 
   // Keep a list of *allocas* which need to be remapped.
   DenseMap<const AllocaInst*, const AllocaInst*> Allocas;
-  for (DenseMap<int, int>::iterator it = SlotRemap.begin(),
+  for (DenseMap<int, int>::const_iterator it = SlotRemap.begin(),
        e = SlotRemap.end(); it != e; ++it) {
     const AllocaInst *From = MFI->getObjectAllocation(it->first);
     const AllocaInst *To = MFI->getObjectAllocation(it->second);
@@ -577,8 +594,8 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
 }
 
 void StackColoring::removeInvalidSlotRanges() {
-  MachineFunction::iterator BB, BBE;
-  MachineBasicBlock::iterator I, IE;
+  MachineFunction::const_iterator BB, BBE;
+  MachineBasicBlock::const_iterator I, IE;
   for (BB = MF->begin(), BBE = MF->end(); BB != BBE; ++BB)
     for (I = BB->begin(), IE = BB->end(); I != IE; ++I) {
 
@@ -597,7 +614,7 @@ void StackColoring::removeInvalidSlotRanges() {
 
       // Check all of the machine operands.
       for (unsigned i = 0 ; i <  I->getNumOperands(); ++i) {
-        MachineOperand &MO = I->getOperand(i);
+        const MachineOperand &MO = I->getOperand(i);
 
         if (!MO.isFI())
           continue;

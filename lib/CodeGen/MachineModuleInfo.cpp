@@ -13,12 +13,12 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/GlobalVariable.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Module.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
@@ -266,7 +266,6 @@ MachineModuleInfo::MachineModuleInfo()
 }
 
 MachineModuleInfo::~MachineModuleInfo() {
-  delete ObjFileMMI;
 }
 
 bool MachineModuleInfo::doInitialization(Module &M) {
@@ -293,6 +292,9 @@ bool MachineModuleInfo::doFinalization(Module &M) {
   AddrLabelSymbols = 0;
 
   Context.reset();
+
+  delete ObjFileMMI;
+  ObjFileMMI = 0;
 
   return false;
 }

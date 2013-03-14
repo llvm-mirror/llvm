@@ -893,7 +893,20 @@ void SubtargetEmitter::GenSchedClassTables(const CodeGenProcModel &ProcModel,
             WPREntry.Cycles = Cycles[PRIdx];
           else
             WPREntry.Cycles = 1;
-          WriteProcResources.push_back(WPREntry);
+          // If this resource is already used in this sequence, add the current
+          // entry's cycles so that the same resource appears to be used
+          // serially, rather than multiple parallel uses. This is important for
+          // in-order machine where the resource consumption is a hazard.
+          unsigned WPRIdx = 0, WPREnd = WriteProcResources.size();
+          for( ; WPRIdx != WPREnd; ++WPRIdx) {
+            if (WriteProcResources[WPRIdx].ProcResourceIdx
+                == WPREntry.ProcResourceIdx) {
+              WriteProcResources[WPRIdx].Cycles += WPREntry.Cycles;
+              break;
+            }
+          }
+          if (WPRIdx == WPREnd)
+            WriteProcResources.push_back(WPREntry);
         }
       }
       WriteLatencies.push_back(WLEntry);
@@ -1108,6 +1121,7 @@ void SubtargetEmitter::EmitProcessorModels(raw_ostream &OS) {
     EmitProcessorProp(OS, PI->ModelDef, "MinLatency", ',');
     EmitProcessorProp(OS, PI->ModelDef, "LoadLatency", ',');
     EmitProcessorProp(OS, PI->ModelDef, "HighLatency", ',');
+    EmitProcessorProp(OS, PI->ModelDef, "ILPWindow", ',');
     EmitProcessorProp(OS, PI->ModelDef, "MispredictPenalty", ',');
     OS << "  " << PI->Index << ", // Processor ID\n";
     if (PI->hasInstrSchedModel())

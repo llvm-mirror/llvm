@@ -17,11 +17,10 @@
 #define LLVM_CODEGEN_SCHEDULEDAG_H
 
 #include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
@@ -53,11 +52,21 @@ namespace llvm {
       Order        ///< Any other ordering dependency.
     };
 
+    // Strong dependencies must be respected by the scheduler. Artificial
+    // dependencies may be removed only if they are redundant with another
+    // strong depedence.
+    //
+    // Weak dependencies may be violated by the scheduling strategy, but only if
+    // the strategy can prove it is correct to do so.
+    //
+    // Strong OrderKinds must occur before "Weak".
+    // Weak OrderKinds must occur after "Weak".
     enum OrderKind {
       Barrier,      ///< An unknown scheduling barrier.
       MayAliasMem,  ///< Nonvolatile load/Store instructions that may alias.
       MustAliasMem, ///< Nonvolatile load/Store instructions that must alias.
-      Artificial,   ///< Arbitrary weak DAG edge (no actual dependence).
+      Artificial,   ///< Arbitrary strong DAG edge (no real dependence).
+      Weak,         ///< Arbitrary weak DAG edge.
       Cluster       ///< Weak DAG edge linking a chain of clustered instrs.
     };
 
@@ -206,7 +215,7 @@ namespace llvm {
     /// not force ordering. Breaking a weak edge may require the scheduler to
     /// compensate, for example by inserting a copy.
     bool isWeak() const {
-      return getKind() == Order && Contents.OrdKind == Cluster;
+      return getKind() == Order && Contents.OrdKind >= Weak;
     }
 
     /// isArtificial - Test if this is an Order dependence that is marked
@@ -258,6 +267,8 @@ namespace llvm {
   /// SUnit - Scheduling unit. This is a node in the scheduling DAG.
   class SUnit {
   private:
+    enum { BoundaryID = ~0u };
+
     SDNode *Node;                       // Representative node.
     MachineInstr *Instr;                // Alternatively, a MachineInstr.
   public:
@@ -343,7 +354,7 @@ namespace llvm {
 
     /// SUnit - Construct a placeholder SUnit.
     SUnit()
-      : Node(0), Instr(0), OrigNode(0), SchedClass(0), NodeNum(~0u),
+      : Node(0), Instr(0), OrigNode(0), SchedClass(0), NodeNum(BoundaryID),
         NodeQueueId(0), NumPreds(0), NumSuccs(0), NumPredsLeft(0),
         NumSuccsLeft(0), WeakPredsLeft(0), WeakSuccsLeft(0), NumRegDefsLeft(0),
         Latency(0), isVRegCycle(false), isCall(false), isCallOp(false),
@@ -353,6 +364,15 @@ namespace llvm {
         isCloned(false), SchedulingPref(Sched::None),
         isDepthCurrent(false), isHeightCurrent(false), Depth(0), Height(0),
         TopReadyCycle(0), BotReadyCycle(0), CopyDstRC(NULL), CopySrcRC(NULL) {}
+
+    /// \brief Boundary nodes are placeholders for the boundary of the
+    /// scheduling region.
+    ///
+    /// BoundaryNodes can have DAG edges, including Data edges, but they do not
+    /// correspond to schedulable entities (e.g. instructions) and do not have a
+    /// valid ID. Consequently, always check for boundary nodes before accessing
+    /// an assoicative data structure keyed on node ID.
+    bool isBoundaryNode() const { return NodeNum == BoundaryID; };
 
     /// setNode - Assign the representative SDNode for this SUnit.
     /// This may be used during pre-regalloc scheduling.
@@ -454,6 +474,10 @@ namespace llvm {
     bool isBottomReady() const {
       return NumSuccsLeft == 0;
     }
+
+    /// \brief Order this node's predecessor edges such that the critical path
+    /// edge occurs first.
+    void biasCriticalPath();
 
     void dump(const ScheduleDAG *G) const;
     void dumpAll(const ScheduleDAG *G) const;
@@ -563,8 +587,8 @@ namespace llvm {
     /// viewGraph - Pop up a GraphViz/gv window with the ScheduleDAG rendered
     /// using 'dot'.
     ///
-    void viewGraph(const Twine &Name, const Twine &Title);
-    void viewGraph();
+    virtual void viewGraph(const Twine &Name, const Twine &Title);
+    virtual void viewGraph();
 
     virtual void dumpNode(const SUnit *SU) const = 0;
 

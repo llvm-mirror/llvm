@@ -1,8 +1,9 @@
-.. _getting_started:
-
 ====================================
 Getting Started with the LLVM System  
 ====================================
+
+.. contents::
+   :local:
 
 Overview
 ========
@@ -68,27 +69,24 @@ Here's the short story for getting up and running quickly with LLVM:
    * ``../llvm/configure [options]``
      Some common options:
 
-     * ``--prefix=directory`` ---
+     * ``--prefix=directory`` --- Specify for *directory* the full pathname of
+       where you want the LLVM tools and libraries to be installed (default
+       ``/usr/local``).
 
-       Specify for *directory* the full pathname of where you want the LLVM
-       tools and libraries to be installed (default ``/usr/local``).
+     * ``--enable-optimized`` --- Compile with optimizations enabled (default
+       is NO).
 
-     * ``--enable-optimized`` ---
-
-       Compile with optimizations enabled (default is NO).
-
-     * ``--enable-assertions`` ---
-
-       Compile with assertion checks enabled (default is YES).
+     * ``--enable-assertions`` --- Compile with assertion checks enabled
+       (default is YES).
 
    * ``make [-j]`` --- The ``-j`` specifies the number of jobs (commands) to run
      simultaneously.  This builds both LLVM and Clang for Debug+Asserts mode.
-     The --enabled-optimized configure option is used to specify a Release
+     The ``--enabled-optimized`` configure option is used to specify a Release
      build.
 
    * ``make check-all`` --- This run the regression tests to ensure everything
      is in working order.
-  
+
    * ``make update`` --- This command is used to update all the svn repositories
      at once, rather then having to ``cd`` into the individual repositories and
      running ``svn update``.
@@ -126,6 +124,8 @@ LLVM is known to work on the following platforms:
 +-----------------+----------------------+-------------------------+
 |Linux            | amd64                | GCC                     |
 +-----------------+----------------------+-------------------------+
+|Linux            | ARM\ :sup:`13`       | GCC                     |
++-----------------+----------------------+-------------------------+
 |Solaris          | V9 (Ultrasparc)      | GCC                     |
 +-----------------+----------------------+-------------------------+
 |FreeBSD          | x86\ :sup:`1`        | GCC                     |
@@ -161,8 +161,6 @@ LLVM has partial support for the following platforms:
 
 .. note::
 
-  Code generation supported for Pentium processors and up
-
   #. Code generation supported for Pentium processors and up
   #. Code generation supported for 32-bit ABI only
   #. No native code generation
@@ -182,9 +180,9 @@ LLVM has partial support for the following platforms:
      Windows-specifics that will cause the build to fail.
   #. To use LLVM modules on Win32-based system, you may configure LLVM
      with ``--enable-shared``.
-
   #. To compile SPU backend, you need to add ``LDFLAGS=-Wl,--stack,16777216`` to
      configure.
+  #. MCJIT not working well pre-v7, old JIT engine not supported any more.
 
 Note that you will need about 1-3 GB of space for a full LLVM build in Debug
 mode, depending on the system (it is so large because of all the debugging
@@ -219,11 +217,7 @@ uses the package and provides other details.
 +--------------------------------------------------------------+-----------------+---------------------------------------------+
 | `SVN <http://subversion.tigris.org/project_packages.html>`_  | >=1.3           | Subversion access to LLVM\ :sup:`2`         |
 +--------------------------------------------------------------+-----------------+---------------------------------------------+
-| `DejaGnu <http://savannah.gnu.org/projects/dejagnu>`_        | 1.4.2           | Automated test suite\ :sup:`3`              |
-+--------------------------------------------------------------+-----------------+---------------------------------------------+
-| `tcl <http://www.tcl.tk/software/tcltk/>`_                   | 8.3, 8.4        | Automated test suite\ :sup:`3`              |
-+--------------------------------------------------------------+-----------------+---------------------------------------------+
-| `expect <http://expect.nist.gov/>`_                          | 5.38.0          | Automated test suite\ :sup:`3`              |
+| `python <http://www.python.org/>`_                           | >=2.4           | Automated test suite\ :sup:`3`              |
 +--------------------------------------------------------------+-----------------+---------------------------------------------+
 | `perl <http://www.perl.com/download.csp>`_                   | >=5.6.0         | Utilities                                   |
 +--------------------------------------------------------------+-----------------+---------------------------------------------+
@@ -368,6 +362,9 @@ optimizations are turned on. The symptom is an infinite loop in
 ``-O0``. A test failure in ``test/Assembler/alignstack.ll`` is one symptom of
 the problem.
 
+**GCC 4.6.3 on ARM**: Miscompiles ``llvm-readobj`` at ``-O3``. A test failure
+in ``test/Object/readobj-shared-object.test`` is one symptom of the problem.
+
 **GNU ld 2.16.X**. Some 2.16.X versions of the ld linker will produce very long
 warning messages complaining that some "``.gnu.linkonce.t.*``" symbol was
 defined in a discarded section. You can safely ignore these messages as they are
@@ -383,6 +380,14 @@ to a newer version (2.17.50.0.4 or later).
 intermittent failures when building LLVM with position independent code.  The
 symptom is an error about cyclic dependencies.  We recommend upgrading to a
 newer version of Gold.
+
+**Clang 3.0 with libstdc++ 4.7.x**: a few Linux distributions (Ubuntu 12.10,
+Fedora 17) have both Clang 3.0 and libstdc++ 4.7 in their repositories.  Clang
+3.0 does not implement a few builtins that are used in this library.  We
+recommend using the system GCC to compile LLVM and Clang in this case.
+
+**Clang 3.0 on Mageia 2**.  There's a packaging issue: Clang can not find at
+least some (``cxxabi.h``) libstdc++ headers.
 
 .. _Getting Started with LLVM:
 
@@ -458,6 +463,8 @@ The files are as follows, with *x.y* marking the version number:
 ``llvm-gcc-4.2-x.y-platform.tar.gz``
 
   Binary release of the llvm-gcc-4.2 front end for a specific platform.
+
+.. _checkout:
 
 Checkout LLVM from Subversion
 -----------------------------
@@ -633,8 +640,49 @@ upstream git repo, run:
 
 This leaves your working directories on their master branches, so you'll need to
 ``checkout`` each working branch individually and ``rebase`` it on top of its
-parent branch.  (Note: This script is intended for relative newbies to git.  If
-you have more experience, you can likely improve on it.)
+parent branch.
+
+For those who wish to be able to update an llvm repo in a simpler fashion,
+consider placing the following git script in your path under the name
+``git-svnup``:
+
+.. code-block:: bash
+
+  #!/bin/bash
+
+  STATUS=$(git status -s | grep -v "??")
+
+  if [ ! -z "$STATUS" ]; then
+      STASH="yes"
+      git stash >/dev/null
+  fi
+
+  git fetch
+  OLD_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+  git checkout master 2> /dev/null
+  git svn rebase -l
+  git checkout $OLD_BRANCH 2> /dev/null
+
+  if [ ! -z $STASH ]; then
+      git stash pop >/dev/null
+  fi
+
+Then to perform the aforementioned update steps go into your source directory
+and just type ``git-svnup`` or ``git svnup`` and everything will just work.
+
+To commit back changes via git-svn, use ``dcommit``:
+
+.. code-block:: console
+
+  % git svn dcommit
+
+Note that git-svn will create one SVN commit for each Git commit you have pending,
+so squash and edit each commit before executing ``dcommit`` to make sure they all
+conform to the coding standards and the developers' policy.
+
+On success, ``dcommit`` will rebase against the HEAD of SVN, so to avoid conflict,
+please make sure your current branch is up-to-date (via fetch/rebase) before
+proceeding.
 
 The git-svn metadata can get out of sync after you mess around with branches and
 ``dcommit``. When that happens, ``git svn dcommit`` stops working, complaining
@@ -644,6 +692,8 @@ about files with uncommitted changes. The fix is to rebuild the metadata:
 
   % rm -rf .git/svn
   % git svn rebase -l
+
+Please, refer to the Git-SVN manual (``man git-svn``) for more information.
 
 Local LLVM Configuration
 ------------------------
@@ -661,14 +711,15 @@ configure the build system:
 | Variable   | Purpose                                                   |
 +============+===========================================================+
 | CC         | Tells ``configure`` which C compiler to use.  By default, |
-|            | ``configure`` will look for the first GCC C compiler in   |
-|            | ``PATH``.  Use this variable to override ``configure``\'s |
-|            | default behavior.                                         |
+|            | ``configure`` will check ``PATH`` for ``clang`` and GCC C |
+|            | compilers (in this order).  Use this variable to override |
+|            | ``configure``\'s  default behavior.                       |
 +------------+-----------------------------------------------------------+
 | CXX        | Tells ``configure`` which C++ compiler to use.  By        |
-|            | default, ``configure`` will look for the first GCC C++    |
-|            | compiler in ``PATH``.  Use this variable to override      |
-|            | ``configure``'s default behavior.                         |
+|            | default, ``configure`` will check ``PATH`` for            |
+|            | ``clang++`` and GCC C++ compilers (in this order).  Use   |
+|            | this variable to override  ``configure``'s default        |
+|            | behavior.                                                 |
 +------------+-----------------------------------------------------------+
 
 The following options can be used to set or enable LLVM specific options:

@@ -119,6 +119,7 @@ namespace X86Local {
 #define TWO_BYTE_EXTENSION_TABLES \
   EXTENSION_TABLE(00)             \
   EXTENSION_TABLE(01)             \
+  EXTENSION_TABLE(0d)             \
   EXTENSION_TABLE(18)             \
   EXTENSION_TABLE(71)             \
   EXTENSION_TABLE(72)             \
@@ -762,6 +763,17 @@ void RecognizableInstr::emitInstructionSpecifier(DisassemblerTables &tables) {
     // operand 2 is a 16-bit immediate
     HANDLE_OPERAND(immediate)
     HANDLE_OPERAND(immediate)
+    break;
+  case X86Local::MRM_F8:
+    if (Opcode == 0xc6) {
+      assert(numPhysicalOperands == 1 &&
+             "Unexpected number of operands for X86Local::MRM_F8");
+      HANDLE_OPERAND(immediate)
+    } else if (Opcode == 0xc7) {
+      assert(numPhysicalOperands == 1 &&
+             "Unexpected number of operands for X86Local::MRM_F8");
+      HANDLE_OPERAND(relocation)
+    }
     break;
   case X86Local::MRMInitReg:
     // Ignored.

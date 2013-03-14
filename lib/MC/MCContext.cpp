@@ -33,14 +33,14 @@ typedef StringMap<const MCSectionCOFF*> COFFUniqueMapTy;
 
 MCContext::MCContext(const MCAsmInfo &mai, const MCRegisterInfo &mri,
                      const MCObjectFileInfo *mofi, const SourceMgr *mgr,
-                     bool DoAutoReset ) :
+                     bool DoAutoReset) :
   SrcMgr(mgr), MAI(mai), MRI(mri), MOFI(mofi),
   Allocator(), Symbols(Allocator), UsedNames(Allocator),
   NextUniqueID(0),
   CompilationDir(llvm::sys::Path::GetCurrentDirectory().str()),
   CurrentDwarfLoc(0,0,0,DWARF2_FLAG_IS_STMT,0,0), 
   DwarfLocSeen(false), GenDwarfForAssembly(false), GenDwarfFileNumber(0),
-  AllowTemporaryLabels(true), AutoReset(DoAutoReset) {
+  AllowTemporaryLabels(true), DwarfCompileUnitID(0), AutoReset(DoAutoReset) {
 
   MachOUniquingMap = 0;
   ELFUniquingMap = 0;
@@ -77,12 +77,14 @@ void MCContext::reset() {
   Symbols.clear();
   Allocator.Reset();
   Instances.clear();
-  MCDwarfFiles.clear();
-  MCDwarfDirs.clear();
+  MCDwarfFilesCUMap.clear();
+  MCDwarfDirsCUMap.clear();
   MCGenDwarfLabelEntries.clear();
   DwarfDebugFlags = StringRef();
   MCLineSections.clear();
   MCLineSectionOrder.clear();
+  DwarfCompileUnitID = 0;
+  MCLineTableSymbols.clear();
   CurrentDwarfLoc = MCDwarfLoc(0,0,0,DWARF2_FLAG_IS_STMT,0,0);
 
   // If we have the MachO uniquing map, free it.
@@ -297,11 +299,13 @@ const MCSection *MCContext::getCOFFSection(StringRef Section,
 /// error and zero is returned and the client reports the error, else the
 /// allocated file number is returned.  The file numbers may be in any order.
 unsigned MCContext::GetDwarfFile(StringRef Directory, StringRef FileName,
-                                 unsigned FileNumber) {
+                                 unsigned FileNumber, unsigned CUID) {
   // TODO: a FileNumber of zero says to use the next available file number.
   // Note: in GenericAsmParser::ParseDirectiveFile() FileNumber was checked
   // to not be less than one.  This needs to be change to be not less than zero.
 
+  std::vector<MCDwarfFile *>& MCDwarfFiles = MCDwarfFilesCUMap[CUID];
+  std::vector<StringRef>& MCDwarfDirs = MCDwarfDirsCUMap[CUID];
   // Make space for this FileNumber in the MCDwarfFiles vector if needed.
   if (FileNumber >= MCDwarfFiles.size()) {
     MCDwarfFiles.resize(FileNumber + 1);
@@ -361,7 +365,8 @@ unsigned MCContext::GetDwarfFile(StringRef Directory, StringRef FileName,
 
 /// isValidDwarfFileNumber - takes a dwarf file number and returns true if it
 /// currently is assigned and false otherwise.
-bool MCContext::isValidDwarfFileNumber(unsigned FileNumber) {
+bool MCContext::isValidDwarfFileNumber(unsigned FileNumber, unsigned CUID) {
+  std::vector<MCDwarfFile *>& MCDwarfFiles = MCDwarfFilesCUMap[CUID];
   if(FileNumber == 0 || FileNumber >= MCDwarfFiles.size())
     return false;
 

@@ -16,10 +16,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Bitcode/Archive.h"
 #include "llvm/Bitcode/ReaderWriter.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/CommandLine.h"
@@ -384,7 +384,9 @@ static void DumpSymbolNamesFromFile(std::string &Filename) {
         OwningPtr<Binary> child;
         if (i->getAsBinary(child)) {
           // Try opening it as a bitcode file.
-          OwningPtr<MemoryBuffer> buff(i->getBuffer());
+          OwningPtr<MemoryBuffer> buff;
+          if (error(i->getMemoryBuffer(buff)))
+            return;
           Module *Result = 0;
           if (buff)
             Result = ParseBitcodeFile(buff.get(), Context, &ErrorMessage);

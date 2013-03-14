@@ -18,7 +18,7 @@
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/Constants.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/GraphWriter.h"
 #include "llvm/Support/raw_ostream.h"
@@ -39,6 +39,10 @@ namespace llvm {
 
     static bool renderGraphFromBottomUp() {
       return true;
+    }
+
+    static bool isNodeHidden(const SUnit *Node) {
+      return (Node->NumPreds > 10 || Node->NumSuccs > 10);
     }
 
     static bool hasNodeAddressLabel(const SUnit *Node,

@@ -19,6 +19,7 @@ ELF32:Address Size: 32 bits
 ELF32:Load Name   : libfoo.so
 
 ELF:Symbols:
+ELF:  Name                   Type            Address        Size           FileOffset     Flags
 ELF:  .dynsym                DBG             {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  formatspecific
 ELF:  .dynstr                DBG             {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  formatspecific
 ELF:  .text                  DBG             {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  formatspecific
@@ -42,6 +43,7 @@ ELF:  _edata                 ?               {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-
 ELF:  Total: 21
 
 ELF:Dynamic Symbols:
+ELF:  Name                   Type            Address        Size           FileOffset     Flags
 ELF:  common_sym             DATA            {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  global
 ELF:  tls_sym                DATA            {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  global,threadlocal
 ELF:  defined_sym            DATA            {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  global
@@ -50,6 +52,37 @@ ELF:  _end                   ?               {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-
 ELF:  global_func            FUNC            {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  global
 ELF:  _edata                 ?               {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  global,absolute
 ELF:  Total: {{[0-9a-f]+}}
+
+ELF:Sections:
+ELF:  Name                        Address        Size           Align          Flags
+ELF:                              {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  rodata
+ELF:  .hash                       {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  required,rodata
+ELF:  .dynsym                     {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  required,rodata
+ELF:  .dynstr                     {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  required,rodata
+ELF:  .text                       {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  text,{{(data,)?}}required
+ELF:  .eh_frame                   {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  data,required,rodata
+ELF:  .tdata                      {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  data,required
+ELF:  .dynamic                    {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  required
+ELF:  .got.plt                    {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  data,required
+ELF:  .data                       {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  data,required
+ELF:  .bss                        {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  bss,required,virtual,zeroinit
+ELF:  .shstrtab                   {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  rodata
+ELF:  .symtab                     {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  rodata
+ELF:  .strtab                     {{[0-9a-f]+}}  {{[0-9a-f]+}}  {{[0-9a-f]+}}  rodata
+ELF:  Total: 14
+
+ELF:Dynamic section contains 9 entries
+ELF:  Tag        Type                 Name/Value
+ELF: 00000001 (NEEDED)             Shared library: [libc.so.6]
+ELF: 00000001 (NEEDED)             Shared library: [libm.so.6]
+ELF: 0000000e (SONAME)             Library soname: [libfoo.so]
+ELF: 00000004 (HASH)               {{[0-9a-f]+}}
+ELF: 00000005 (STRTAB)             {{[0-9a-f]+}}
+ELF: 00000006 (SYMTAB)             {{[0-9a-f]+}}
+ELF: 0000000a (STRSZ)              {{[0-9]+}} (bytes)
+ELF: 0000000b (SYMENT)             {{[0-9]+}} (bytes)
+ELF: 00000000 (NULL)               0x0
+ELF:  Total: 9
 
 ELF:Libraries needed:
 ELF:  libc.so.6

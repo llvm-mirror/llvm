@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
 #define GET_INSTRINFO_CTOR
+#define GET_INSTRMAP_INFO
 #include "AMDGPUGenInstrInfo.inc"
 
 using namespace llvm;
@@ -234,7 +235,16 @@ AMDGPUInstrInfo::isSafeToMoveRegClassDefs(const TargetRegisterClass *RC) const {
   // TODO: Implement this function
   return true;
 }
- 
+
+bool AMDGPUInstrInfo::isRegisterStore(const MachineInstr &MI) const {
+  return get(MI.getOpcode()).TSFlags & AMDGPU_FLAG_REGISTER_STORE;
+}
+
+bool AMDGPUInstrInfo::isRegisterLoad(const MachineInstr &MI) const {
+  return get(MI.getOpcode()).TSFlags & AMDGPU_FLAG_REGISTER_LOAD;
+}
+
+
 void AMDGPUInstrInfo::convertToISA(MachineInstr & MI, MachineFunction &MF,
     DebugLoc DL) const {
   MachineRegisterInfo &MRI = MF.getRegInfo();

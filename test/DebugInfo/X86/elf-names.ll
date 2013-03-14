@@ -1,5 +1,6 @@
 ; RUN: llc -mtriple=x86_64-unknown-linux-gnu %s -o %t -filetype=obj
-; RUN: llvm-dwarfdump %t | FileCheck %s
+; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
+; RUN: llvm-as < %s | llvm-dis | FileCheck --check-prefix=CHECK-DIS %s
 
 ; CHECK: 0x0000000b: DW_TAG_compile_unit
 ; CHECK: 0x00000012:   DW_AT_name [DW_FORM_strp] ( .debug_str[0x00000035] = "foo.cpp")
@@ -8,6 +9,8 @@
 ; CHECK: 0x00000044:     DW_TAG_member
 ; CHECK: 0x00000045:       DW_AT_name [DW_FORM_strp]     ( .debug_str[0x0000005d] = "c1")
 ; CHECK: 0x0000008d:       DW_AT_artificial [DW_FORM_flag_present]       (true)
+
+; CHECK-DIS: [artificial]
 
 %class.D = type { i32, i32, i32, i32 }
 
@@ -56,10 +59,8 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !llvm.dbg.cu = !{!0}
 
 !0 = metadata !{i32 786449, i32 0, i32 4, metadata !"foo.cpp", metadata !"/usr/local/google/home/echristo", metadata !"clang version 3.2 (trunk 167506) (llvm/trunk 167505)", i1 true, i1 true, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !1} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/foo.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !2}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !5, metadata !31}
+!1 = metadata !{i32 0}
+!3 = metadata !{metadata !5, metadata !31}
 !5 = metadata !{i32 786478, i32 0, null, metadata !"D", metadata !"D", metadata !"_ZN1DC2Ev", metadata !6, i32 12, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, void (%class.D*)* @_ZN1DC2Ev, null, metadata !17, metadata !27, i32 12} ; [ DW_TAG_subprogram ] [line 12] [def] [D]
 !6 = metadata !{i32 786473, metadata !"foo.cpp", metadata !"/usr/local/google/home/echristo", null} ; [ DW_TAG_file_type ]
 !7 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]

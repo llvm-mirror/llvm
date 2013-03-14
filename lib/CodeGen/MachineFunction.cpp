@@ -25,9 +25,9 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/Function.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/Debug.h"
@@ -60,13 +60,15 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   MFInfo = 0;
   FrameInfo = new (Allocator) MachineFrameInfo(*TM.getFrameLowering(),
                                                TM.Options.RealignStack);
-  if (Fn->getFnAttributes().hasAttribute(Attributes::StackAlignment))
+  if (Fn->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                       Attribute::StackAlignment))
     FrameInfo->ensureMaxAlignment(Fn->getAttributes().
-                                  getFnAttributes().getStackAlignment());
+                                getStackAlignment(AttributeSet::FunctionIndex));
   ConstantPool = new (Allocator) MachineConstantPool(TM.getDataLayout());
   Alignment = TM.getTargetLowering()->getMinFunctionAlignment();
   // FIXME: Shouldn't use pref alignment if explicit alignment is set on Fn.
-  if (!Fn->getFnAttributes().hasAttribute(Attributes::OptimizeForSize))
+  if (!Fn->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                        Attribute::OptimizeForSize))
     Alignment = std::max(Alignment,
                          TM.getTargetLowering()->getPrefFunctionAlignment());
   FunctionNumber = FunctionNum;
@@ -74,8 +76,15 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
 }
 
 MachineFunction::~MachineFunction() {
-  BasicBlocks.clear();
+  // Don't call destructors on MachineInstr and MachineOperand. All of their
+  // memory comes from the BumpPtrAllocator which is about to be purged.
+  //
+  // Do call MachineBasicBlock destructors, it contains std::vectors.
+  for (iterator I = begin(), E = end(); I != E; I = BasicBlocks.erase(I))
+    I->Insts.clearAndLeakNodesUnsafely();
+
   InstructionRecycler.clear(Allocator);
+  OperandRecycler.clear(Allocator);
   BasicBlockRecycler.clear(Allocator);
   if (RegInfo) {
     RegInfo->~MachineRegisterInfo();
@@ -158,7 +167,7 @@ MachineInstr *
 MachineFunction::CreateMachineInstr(const MCInstrDesc &MCID,
                                     DebugLoc DL, bool NoImp) {
   return new (InstructionRecycler.Allocate<MachineInstr>(Allocator))
-    MachineInstr(MCID, DL, NoImp);
+    MachineInstr(*this, MCID, DL, NoImp);
 }
 
 /// CloneMachineInstr - Create a new MachineInstr which is a copy of the
@@ -173,9 +182,17 @@ MachineFunction::CloneMachineInstr(const MachineInstr *Orig) {
 
 /// DeleteMachineInstr - Delete the given MachineInstr.
 ///
+/// This function also serves as the MachineInstr destructor - the real
+/// ~MachineInstr() destructor must be empty.
 void
 MachineFunction::DeleteMachineInstr(MachineInstr *MI) {
-  MI->~MachineInstr();
+  // Strip it for parts. The operand array and the MI object itself are
+  // independently recyclable.
+  if (MI->Operands)
+    deallocateOperandArray(MI->CapOperands, MI->Operands);
+  // Don't call ~MachineInstr() which must be trivial anyway because
+  // ~MachineFunction drops whole lists of MachineInstrs wihout calling their
+  // destructors.
   InstructionRecycler.Deallocate(Allocator, MI);
 }
 
@@ -327,13 +344,6 @@ void MachineFunction::print(raw_ostream &OS, SlotIndexes *Indexes) const {
       if (llvm::next(I) != E)
         OS << ", ";
     }
-    OS << '\n';
-  }
-  if (RegInfo && !RegInfo->liveout_empty()) {
-    OS << "Function Live Outs:";
-    for (MachineRegisterInfo::liveout_iterator
-         I = RegInfo->liveout_begin(), E = RegInfo->liveout_end(); I != E; ++I)
-      OS << ' ' << PrintReg(*I, TRI);
     OS << '\n';
   }
 

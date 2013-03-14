@@ -19,8 +19,8 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/Function.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/GraphWriter.h"
 #include "llvm/Support/raw_ostream.h"
@@ -140,6 +140,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FSQRT:                      return "fsqrt";
   case ISD::FSIN:                       return "fsin";
   case ISD::FCOS:                       return "fcos";
+  case ISD::FSINCOS:                    return "fsincos";
   case ISD::FTRUNC:                     return "ftrunc";
   case ISD::FFLOOR:                     return "ffloor";
   case ISD::FCEIL:                      return "fceil";

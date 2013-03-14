@@ -1,10 +1,6 @@
-.. _how_to_use_instruction_mappings:
-
 ===============================
 How To Use Instruction Mappings
 ===============================
-
-.. sectionauthor:: Jyotsna Verma <jverma@codeaurora.org>
 
 .. contents::
    :local:

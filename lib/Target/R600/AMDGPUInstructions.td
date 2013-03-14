@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 class AMDGPUInst <dag outs, dag ins, string asm, list<dag> pattern> : Instruction {
-  field bits<16> AMDILOp = 0;
-  field bits<3> Gen = 0;
+  field bit isRegisterLoad = 0;
+  field bit isRegisterStore = 0;
 
   let Namespace = "AMDGPU";
   let OutOperandList = outs;
@@ -22,8 +22,9 @@ class AMDGPUInst <dag outs, dag ins, string asm, list<dag> pattern> : Instructio
   let AsmString = asm;
   let Pattern = pattern;
   let Itinerary = NullALU;
-  let TSFlags{42-40} = Gen;
-  let TSFlags{63-48} = AMDILOp;
+
+  let TSFlags{63} = isRegisterLoad;
+  let TSFlags{62} = isRegisterStore;
 }
 
 class AMDGPUShaderInst <dag outs, dag ins, string asm, list<dag> pattern>
@@ -76,6 +77,11 @@ def COND_LE : PatLeaf <
                      case ISD::SETLE: return true;}}}]
 >;
 
+def COND_NULL : PatLeaf <
+  (cond),
+  [{return false;}]
+>;
+
 //===----------------------------------------------------------------------===//
 // Load/Store Pattern Fragments
 //===----------------------------------------------------------------------===//
@@ -101,7 +107,9 @@ def FP_ONE : PatLeaf <
   [{return N->isExactlyValue(1.0);}]
 >;
 
-let isCodeGenOnly = 1, isPseudo = 1, usesCustomInserter = 1  in {
+let isCodeGenOnly = 1, isPseudo = 1 in {
+
+let usesCustomInserter = 1  in {
 
 class CLAMP <RegisterClass rc> : AMDGPUShaderInst <
   (outs rc:$dst),
@@ -124,14 +132,31 @@ class FNEG <RegisterClass rc> : AMDGPUShaderInst <
   [(set rc:$dst, (fneg rc:$src0))]
 >;
 
-def SHADER_TYPE : AMDGPUShaderInst <
-  (outs),
-  (ins i32imm:$type),
-  "SHADER_TYPE $type",
-  [(int_AMDGPU_shader_type imm:$type)]
->;
+} // usesCustomInserter = 1
 
-} // End isCodeGenOnly = 1, isPseudo = 1, hasCustomInserter = 1
+multiclass RegisterLoadStore <RegisterClass dstClass, Operand addrClass,
+                    ComplexPattern addrPat> {
+  def RegisterLoad : AMDGPUShaderInst <
+    (outs dstClass:$dst),
+    (ins addrClass:$addr, i32imm:$chan),
+    "RegisterLoad $dst, $addr",
+    [(set (i32 dstClass:$dst), (AMDGPUregister_load addrPat:$addr,
+                                                    (i32 timm:$chan)))]
+  > {
+    let isRegisterLoad = 1;
+  }
+
+  def RegisterStore : AMDGPUShaderInst <
+    (outs),
+    (ins dstClass:$val, addrClass:$addr, i32imm:$chan),
+    "RegisterStore $val, $addr",
+    [(AMDGPUregister_store (i32 dstClass:$val), addrPat:$addr, (i32 timm:$chan))]
+  > {
+    let isRegisterStore = 1;
+  }
+}
+
+} // End isCodeGenOnly = 1, isPseudo = 1
 
 /* Generic helper patterns for intrinsics */
 /* -------------------------------------- */
@@ -164,13 +189,64 @@ class Insert_Element <ValueType elem_type, ValueType vec_type,
 >;
 
 // Vector Build pattern
+class Vector1_Build <ValueType vecType, RegisterClass vectorClass,
+                     ValueType elemType, RegisterClass elemClass> : Pat <
+  (vecType (build_vector (elemType elemClass:$src))),
+  (vecType elemClass:$src)
+>;
+
+class Vector2_Build <ValueType vecType, RegisterClass vectorClass,
+                     ValueType elemType, RegisterClass elemClass> : Pat <
+  (vecType (build_vector (elemType elemClass:$sub0), (elemType elemClass:$sub1))),
+  (INSERT_SUBREG (INSERT_SUBREG
+  (vecType (IMPLICIT_DEF)), elemClass:$sub0, sub0), elemClass:$sub1, sub1)
+>;
+
 class Vector_Build <ValueType vecType, RegisterClass vectorClass,
                     ValueType elemType, RegisterClass elemClass> : Pat <
   (vecType (build_vector (elemType elemClass:$x), (elemType elemClass:$y),
                          (elemType elemClass:$z), (elemType elemClass:$w))),
   (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-  (vecType (IMPLICIT_DEF)), elemClass:$x, sel_x), elemClass:$y, sel_y),
-                            elemClass:$z, sel_z), elemClass:$w, sel_w)
+  (vecType (IMPLICIT_DEF)), elemClass:$x, sub0), elemClass:$y, sub1),
+                            elemClass:$z, sub2), elemClass:$w, sub3)
+>;
+
+class Vector8_Build <ValueType vecType, RegisterClass vectorClass,
+                     ValueType elemType, RegisterClass elemClass> : Pat <
+  (vecType (build_vector (elemType elemClass:$sub0), (elemType elemClass:$sub1),
+                         (elemType elemClass:$sub2), (elemType elemClass:$sub3),
+                         (elemType elemClass:$sub4), (elemType elemClass:$sub5),
+                         (elemType elemClass:$sub6), (elemType elemClass:$sub7))),
+  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
+  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
+  (vecType (IMPLICIT_DEF)), elemClass:$sub0, sub0), elemClass:$sub1, sub1),
+                            elemClass:$sub2, sub2), elemClass:$sub3, sub3),
+                            elemClass:$sub4, sub4), elemClass:$sub5, sub5),
+                            elemClass:$sub6, sub6), elemClass:$sub7, sub7)
+>;
+
+class Vector16_Build <ValueType vecType, RegisterClass vectorClass,
+                      ValueType elemType, RegisterClass elemClass> : Pat <
+  (vecType (build_vector (elemType elemClass:$sub0), (elemType elemClass:$sub1),
+                         (elemType elemClass:$sub2), (elemType elemClass:$sub3),
+                         (elemType elemClass:$sub4), (elemType elemClass:$sub5),
+                         (elemType elemClass:$sub6), (elemType elemClass:$sub7),
+                         (elemType elemClass:$sub8), (elemType elemClass:$sub9),
+                         (elemType elemClass:$sub10), (elemType elemClass:$sub11),
+                         (elemType elemClass:$sub12), (elemType elemClass:$sub13),
+                         (elemType elemClass:$sub14), (elemType elemClass:$sub15))),
+  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
+  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
+  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
+  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
+  (vecType (IMPLICIT_DEF)), elemClass:$sub0, sub0), elemClass:$sub1, sub1),
+                            elemClass:$sub2, sub2), elemClass:$sub3, sub3),
+                            elemClass:$sub4, sub4), elemClass:$sub5, sub5),
+                            elemClass:$sub6, sub6), elemClass:$sub7, sub7),
+                            elemClass:$sub8, sub8), elemClass:$sub9, sub9),
+                            elemClass:$sub10, sub10), elemClass:$sub11, sub11),
+                            elemClass:$sub12, sub12), elemClass:$sub13, sub13),
+                            elemClass:$sub14, sub14), elemClass:$sub15, sub15)
 >;
 
 // bitconvert pattern

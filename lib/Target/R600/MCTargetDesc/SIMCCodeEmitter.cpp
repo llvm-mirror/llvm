@@ -17,52 +17,36 @@
 #include "MCTargetDesc/AMDGPUMCCodeEmitter.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/MC/MCFixup.h"
 #include "llvm/Support/raw_ostream.h"
-
-#define VGPR_BIT(src_idx) (1ULL << (9 * src_idx - 1))
-#define SI_INSTR_FLAGS_ENCODING_MASK 0xf
-
-// These must be kept in sync with SIInstructions.td and also the
-// InstrEncodingInfo array in SIInstrInfo.cpp.
-//
-// NOTE: This enum is only used to identify the encoding type within LLVM,
-// the actual encoding type that is part of the instruction format is different
-namespace SIInstrEncodingType {
-  enum Encoding {
-    EXP = 0,
-    LDS = 1,
-    MIMG = 2,
-    MTBUF = 3,
-    MUBUF = 4,
-    SMRD = 5,
-    SOP1 = 6,
-    SOP2 = 7,
-    SOPC = 8,
-    SOPK = 9,
-    SOPP = 10,
-    VINTRP = 11,
-    VOP1 = 12,
-    VOP2 = 13,
-    VOP3 = 14,
-    VOPC = 15
-  };
-}
 
 using namespace llvm;
 
 namespace {
+
+/// \brief Helper type used in encoding
+typedef union {
+  int32_t I;
+  float F;
+} IntFloatUnion;
+
 class SIMCCodeEmitter : public  AMDGPUMCCodeEmitter {
-  SIMCCodeEmitter(const SIMCCodeEmitter &); // DO NOT IMPLEMENT
-  void operator=(const SIMCCodeEmitter &); // DO NOT IMPLEMENT
+  SIMCCodeEmitter(const SIMCCodeEmitter &) LLVM_DELETED_FUNCTION;
+  void operator=(const SIMCCodeEmitter &) LLVM_DELETED_FUNCTION;
   const MCInstrInfo &MCII;
   const MCRegisterInfo &MRI;
   const MCSubtargetInfo &STI;
   MCContext &Ctx;
+
+  /// \brief Can this operand also contain immediate values?
+  bool isSrcOperand(const MCInstrDesc &Desc, unsigned OpNo) const;
+
+  /// \brief Encode an fp or int literal
+  uint32_t getLitEncoding(const MCOperand &MO) const;
 
 public:
   SIMCCodeEmitter(const MCInstrInfo &mcii, const MCRegisterInfo &mri,
@@ -78,42 +62,6 @@ public:
   /// \returns the encoding for an MCOperand.
   virtual uint64_t getMachineOpValue(const MCInst &MI, const MCOperand &MO,
                                      SmallVectorImpl<MCFixup> &Fixups) const;
-
-public:
-
-  /// \brief Encode a sequence of registers with the correct alignment.
-  unsigned GPRAlign(const MCInst &MI, unsigned OpNo, unsigned shift) const;
-
-  /// \brief Encoding for when 2 consecutive registers are used
-  virtual unsigned GPR2AlignEncode(const MCInst &MI, unsigned OpNo,
-                                   SmallVectorImpl<MCFixup> &Fixup) const;
-
-  /// \brief Encoding for when 4 consectuive registers are used
-  virtual unsigned GPR4AlignEncode(const MCInst &MI, unsigned OpNo,
-                                   SmallVectorImpl<MCFixup> &Fixup) const;
-
-  /// \brief Encoding for SMRD indexed loads
-  virtual uint32_t SMRDmemriEncode(const MCInst &MI, unsigned OpNo,
-                                   SmallVectorImpl<MCFixup> &Fixup) const;
-
-  /// \brief Post-Encoder method for VOP instructions
-  virtual uint64_t VOPPostEncode(const MCInst &MI, uint64_t Value) const;
-
-private:
-
-  /// \returns this SIInstrEncodingType for this instruction.
-  unsigned getEncodingType(const MCInst &MI) const;
-
-  /// \brief Get then size in bytes of this instructions encoding.
-  unsigned getEncodingBytes(const MCInst &MI) const;
-
-  /// \returns the hardware encoding for a register
-  unsigned getRegBinaryCode(unsigned reg) const;
-
-  /// \brief Generated function that returns the hardware encoding for
-  /// a register
-  unsigned getHWRegNum(unsigned reg) const;
-
 };
 
 } // End anonymous namespace
@@ -125,174 +73,131 @@ MCCodeEmitter *llvm::createSIMCCodeEmitter(const MCInstrInfo &MCII,
   return new SIMCCodeEmitter(MCII, MRI, STI, Ctx);
 }
 
+bool SIMCCodeEmitter::isSrcOperand(const MCInstrDesc &Desc,
+                                   unsigned OpNo) const {
+
+  unsigned RegClass = Desc.OpInfo[OpNo].RegClass;
+  return (AMDGPU::SSrc_32RegClassID == RegClass) ||
+         (AMDGPU::SSrc_64RegClassID == RegClass) ||
+         (AMDGPU::VSrc_32RegClassID == RegClass) ||
+         (AMDGPU::VSrc_64RegClassID == RegClass);
+}
+
+uint32_t SIMCCodeEmitter::getLitEncoding(const MCOperand &MO) const {
+
+  IntFloatUnion Imm;
+  if (MO.isImm())
+    Imm.I = MO.getImm();
+  else if (MO.isFPImm())
+    Imm.F = MO.getFPImm();
+  else
+    return ~0;
+
+  if (Imm.I >= 0 && Imm.I <= 64)
+    return 128 + Imm.I;
+
+  if (Imm.I >= -16 && Imm.I <= -1)
+    return 192 + abs(Imm.I);
+
+  if (Imm.F == 0.5f)
+    return 240;
+
+  if (Imm.F == -0.5f)
+    return 241;
+
+  if (Imm.F == 1.0f)
+    return 242;
+
+  if (Imm.F == -1.0f)
+    return 243;
+
+  if (Imm.F == 2.0f)
+    return 244;
+
+  if (Imm.F == -2.0f)
+    return 245;
+
+  if (Imm.F == 4.0f)
+    return 246;
+
+  if (Imm.F == -4.0f)
+    return 247;
+
+  return 255;
+}
+
 void SIMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
                                        SmallVectorImpl<MCFixup> &Fixups) const {
+
   uint64_t Encoding = getBinaryCodeForInstr(MI, Fixups);
-  unsigned bytes = getEncodingBytes(MI);
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  unsigned bytes = Desc.getSize();
+
   for (unsigned i = 0; i < bytes; i++) {
     OS.write((uint8_t) ((Encoding >> (8 * i)) & 0xff));
+  }
+
+  if (bytes > 4)
+    return;
+
+  // Check for additional literals in SRC0/1/2 (Op 1/2/3)
+  for (unsigned i = 0, e = MI.getNumOperands(); i < e; ++i) {
+
+    // Check if this operand should be encoded as [SV]Src
+    if (!isSrcOperand(Desc, i))
+      continue;
+
+    // Is this operand a literal immediate?
+    const MCOperand &Op = MI.getOperand(i);
+    if (getLitEncoding(Op) != 255)
+      continue;
+
+    // Yes! Encode it
+    IntFloatUnion Imm;
+    if (Op.isImm())
+      Imm.I = Op.getImm();
+    else
+      Imm.F = Op.getFPImm();
+
+    for (unsigned j = 0; j < 4; j++) {
+      OS.write((uint8_t) ((Imm.I >> (8 * j)) & 0xff));
+    }
+
+    // Only one literal value allowed
+    break;
   }
 }
 
 uint64_t SIMCCodeEmitter::getMachineOpValue(const MCInst &MI,
                                             const MCOperand &MO,
                                        SmallVectorImpl<MCFixup> &Fixups) const {
-  if (MO.isReg()) {
-    return getRegBinaryCode(MO.getReg());
-  } else if (MO.isImm()) {
-    return MO.getImm();
-  } else if (MO.isFPImm()) {
-    // XXX: Not all instructions can use inline literals
-    // XXX: We should make sure this is a 32-bit constant
-    union {
-      float F;
-      uint32_t I;
-    } Imm;
-    Imm.F = MO.getFPImm();
-    return Imm.I;
-  } else if (MO.isExpr()) {
+  if (MO.isReg())
+    return MRI.getEncodingValue(MO.getReg());
+
+  if (MO.isExpr()) {
     const MCExpr *Expr = MO.getExpr();
     MCFixupKind Kind = MCFixupKind(FK_PCRel_4);
     Fixups.push_back(MCFixup::Create(0, Expr, Kind, MI.getLoc()));
     return 0;
-  } else{
-    llvm_unreachable("Encoding of this operand type is not supported yet.");
   }
+
+  // Figure out the operand number, needed for isSrcOperand check
+  unsigned OpNo = 0;
+  for (unsigned e = MI.getNumOperands(); OpNo < e; ++OpNo) {
+    if (&MO == &MI.getOperand(OpNo))
+      break;
+  }
+
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  if (isSrcOperand(Desc, OpNo)) {
+    uint32_t Enc = getLitEncoding(MO);
+    if (Enc != ~0U && (Enc != 255 || Desc.getSize() == 4))
+      return Enc;
+
+  } else if (MO.isImm())
+    return MO.getImm();
+
+  llvm_unreachable("Encoding of this operand type is not supported yet.");
   return 0;
-}
-
-//===----------------------------------------------------------------------===//
-// Custom Operand Encodings
-//===----------------------------------------------------------------------===//
-
-unsigned SIMCCodeEmitter::GPRAlign(const MCInst &MI, unsigned OpNo,
-                                   unsigned shift) const {
-  unsigned regCode = getRegBinaryCode(MI.getOperand(OpNo).getReg());
-  return regCode >> shift;
-  return 0;
-}
-unsigned SIMCCodeEmitter::GPR2AlignEncode(const MCInst &MI,
-                                          unsigned OpNo ,
-                                        SmallVectorImpl<MCFixup> &Fixup) const {
-  return GPRAlign(MI, OpNo, 1);
-}
-
-unsigned SIMCCodeEmitter::GPR4AlignEncode(const MCInst &MI,
-                                          unsigned OpNo,
-                                        SmallVectorImpl<MCFixup> &Fixup) const {
-  return GPRAlign(MI, OpNo, 2);
-}
-
-#define SMRD_OFFSET_MASK 0xff
-#define SMRD_IMM_SHIFT 8
-#define SMRD_SBASE_MASK 0x3f
-#define SMRD_SBASE_SHIFT 9
-/// This function is responsibe for encoding the offset
-/// and the base ptr for SMRD instructions it should return a bit string in
-/// this format:
-///
-/// OFFSET = bits{7-0}
-/// IMM    = bits{8}
-/// SBASE  = bits{14-9}
-///
-uint32_t SIMCCodeEmitter::SMRDmemriEncode(const MCInst &MI, unsigned OpNo,
-                                        SmallVectorImpl<MCFixup> &Fixup) const {
-  uint32_t Encoding;
-
-  const MCOperand &OffsetOp = MI.getOperand(OpNo + 1);
-
-  //XXX: Use this function for SMRD loads with register offsets
-  assert(OffsetOp.isImm());
-
-  Encoding =
-      (getMachineOpValue(MI, OffsetOp, Fixup) & SMRD_OFFSET_MASK)
-    | (1 << SMRD_IMM_SHIFT) //XXX If the Offset is a register we shouldn't set this bit
-    | ((GPR2AlignEncode(MI, OpNo, Fixup) & SMRD_SBASE_MASK) << SMRD_SBASE_SHIFT)
-    ;
-
-  return Encoding;
-}
-
-//===----------------------------------------------------------------------===//
-// Post Encoder Callbacks
-//===----------------------------------------------------------------------===//
-
-uint64_t SIMCCodeEmitter::VOPPostEncode(const MCInst &MI, uint64_t Value) const{
-  unsigned encodingType = getEncodingType(MI);
-  unsigned numSrcOps;
-  unsigned vgprBitOffset;
-
-  if (encodingType == SIInstrEncodingType::VOP3) {
-    numSrcOps = 3;
-    vgprBitOffset = 32;
-  } else {
-    numSrcOps = 1;
-    vgprBitOffset = 0;
-  }
-
-  // Add one to skip over the destination reg operand.
-  for (unsigned opIdx = 1; opIdx < numSrcOps + 1; opIdx++) {
-    const MCOperand &MO = MI.getOperand(opIdx);
-    if (MO.isReg()) {
-      unsigned reg = MI.getOperand(opIdx).getReg();
-      if (AMDGPUMCRegisterClasses[AMDGPU::VReg_32RegClassID].contains(reg) ||
-          AMDGPUMCRegisterClasses[AMDGPU::VReg_64RegClassID].contains(reg)) {
-        Value |= (VGPR_BIT(opIdx)) << vgprBitOffset;
-      }
-    } else if (MO.isFPImm()) {
-      union {
-        float f;
-        uint32_t i;
-      } Imm;
-      // XXX: Not all instructions can use inline literals
-      // XXX: We should make sure this is a 32-bit constant
-      Imm.f = MO.getFPImm();
-      Value |= ((uint64_t)Imm.i) << 32;
-    }
-  }
-  return Value;
-}
-
-//===----------------------------------------------------------------------===//
-// Encoding helper functions
-//===----------------------------------------------------------------------===//
-
-unsigned SIMCCodeEmitter::getEncodingType(const MCInst &MI) const {
-  return MCII.get(MI.getOpcode()).TSFlags & SI_INSTR_FLAGS_ENCODING_MASK;
-}
-
-unsigned SIMCCodeEmitter::getEncodingBytes(const MCInst &MI) const {
-
-  // These instructions aren't real instructions with an encoding type, so
-  // we need to manually specify their size.
-  switch (MI.getOpcode()) {
-  default: break;
-  case AMDGPU::SI_LOAD_LITERAL_I32:
-  case AMDGPU::SI_LOAD_LITERAL_F32:
-    return 4;
-  }
-
-  unsigned encoding_type = getEncodingType(MI);
-  switch (encoding_type) {
-    case SIInstrEncodingType::EXP:
-    case SIInstrEncodingType::LDS:
-    case SIInstrEncodingType::MUBUF:
-    case SIInstrEncodingType::MTBUF:
-    case SIInstrEncodingType::MIMG:
-    case SIInstrEncodingType::VOP3:
-      return 8;
-    default:
-      return 4;
-  }
-}
-
-
-unsigned SIMCCodeEmitter::getRegBinaryCode(unsigned reg) const {
-  switch (reg) {
-    case AMDGPU::M0: return 124;
-    case AMDGPU::SREG_LIT_0: return 128;
-    case AMDGPU::SI_LITERAL_CONSTANT: return 255;
-    default: return MRI.getEncodingValue(reg);
-  }
 }
 

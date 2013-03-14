@@ -25,7 +25,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Scalar.h"
 
@@ -89,7 +88,7 @@ PrintMachineInstrs("print-machineinstrs", cl::ValueOptional,
                    cl::desc("Print machine instrs"),
                    cl::value_desc("pass-name"), cl::init("option-unspecified"));
 
-// Experimental option to run live inteerval analysis early.
+// Experimental option to run live interval analysis early.
 static cl::opt<bool> EarlyLiveIntervals("early-live-intervals", cl::Hidden,
     cl::desc("Run live interval analysis earlier in the pipeline"));
 
@@ -238,9 +237,6 @@ TargetPassConfig::TargetPassConfig(TargetMachine *tm, PassManagerBase &pm)
   substitutePass(&EarlyTailDuplicateID, &TailDuplicateID);
   substitutePass(&PostRAMachineLICMID, &MachineLICMID);
 
-  // Disable early if-conversion. Targets that are ready can enable it.
-  disablePass(&EarlyIfConverterID);
-
   // Temporarily disable experimental passes.
   const TargetSubtargetInfo &ST = TM->getSubtarget<TargetSubtargetInfo>();
   if (!ST.enableMachineScheduler())
@@ -362,7 +358,7 @@ void TargetPassConfig::addIRPasses() {
 
   // Run loop strength reduction before anything else.
   if (getOptLevel() != CodeGenOpt::None && !DisableLSR) {
-    addPass(createLoopStrengthReducePass(getTargetLowering()));
+    addPass(createLoopStrengthReducePass());
     if (PrintLSR)
       addPass(createPrintFunctionPass("\n\n*** Code after LSR ***\n", &dbgs()));
   }
@@ -513,9 +509,10 @@ void TargetPassConfig::addMachinePasses() {
   }
 
   // GC
-  addPass(&GCMachineCodeAnalysisID);
-  if (PrintGCInfo)
-    addPass(createGCInfoPrinter(dbgs()));
+  if (addGCPasses()) {
+    if (PrintGCInfo)
+      addPass(createGCInfoPrinter(dbgs()));
+  }
 
   // Basic block placement.
   if (getOptLevel() != CodeGenOpt::None)
@@ -550,7 +547,12 @@ void TargetPassConfig::addMachineSSAOptimization() {
   addPass(&DeadMachineInstructionElimID);
   printAndVerify("After codegen DCE pass");
 
-  addPass(&EarlyIfConverterID);
+  // Allow targets to insert passes that improve instruction level parallelism,
+  // like if-conversion. Such passes will typically need dominator trees and
+  // loop info, just like LICM and CSE below.
+  if (addILPOpts())
+    printAndVerify("After ILP optimizations");
+
   addPass(&MachineLICMID);
   addPass(&MachineCSEID);
   addPass(&MachineSinkingID);
@@ -730,6 +732,12 @@ void TargetPassConfig::addMachineLateOptimization() {
   // Copy propagation.
   if (addPass(&MachineCopyPropagationID))
     printAndVerify("After copy propagation pass");
+}
+
+/// Add standard GC passes.
+bool TargetPassConfig::addGCPasses() {
+  addPass(&GCMachineCodeAnalysisID);
+  return true;
 }
 
 /// Add standard basic block placement passes.

@@ -17,6 +17,7 @@
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/raw_ostream.h"
+#include <map>
 #include <vector> // FIXME: Shouldn't be needed.
 
 namespace llvm {
@@ -101,8 +102,12 @@ namespace llvm {
     std::string MainFileName;
 
     /// The dwarf file and directory tables from the dwarf .file directive.
-    std::vector<MCDwarfFile *> MCDwarfFiles;
-    std::vector<StringRef> MCDwarfDirs;
+    /// We now emit a line table for each compile unit. To reduce the prologue
+    /// size of each line table, the files and directories used by each compile
+    /// unit are separated.
+    typedef std::map<unsigned, std::vector<MCDwarfFile *> > MCDwarfFilesMap;
+    MCDwarfFilesMap MCDwarfFilesCUMap;
+    std::map<unsigned, std::vector<StringRef> > MCDwarfDirsCUMap;
 
     /// The current dwarf line information from the last dwarf .loc directive.
     MCDwarfLoc CurrentDwarfLoc;
@@ -129,6 +134,10 @@ namespace llvm {
     /// non-empty.
     StringRef DwarfDebugFlags;
 
+    /// The string to embed in as the dwarf AT_producer for the compile unit, if
+    /// non-empty.
+    StringRef DwarfDebugProducer;
+
     /// Honor temporary labels, this is useful for debugging semantic
     /// differences between temporary and non-temporary labels (primarily on
     /// Darwin).
@@ -140,6 +149,10 @@ namespace llvm {
     /// We need a deterministic iteration order, so we remember the order
     /// the elements were added.
     std::vector<const MCSection *> MCLineSectionOrder;
+    /// The Compile Unit ID that we are currently processing.
+    unsigned DwarfCompileUnitID;
+    /// The line table start symbol for each Compile Unit.
+    DenseMap<unsigned, MCSymbol *> MCLineTableSymbols;
 
     void *MachOUniquingMap, *ELFUniquingMap, *COFFUniquingMap;
 
@@ -274,19 +287,25 @@ namespace llvm {
 
     /// GetDwarfFile - creates an entry in the dwarf file and directory tables.
     unsigned GetDwarfFile(StringRef Directory, StringRef FileName,
-                          unsigned FileNumber);
+                          unsigned FileNumber, unsigned CUID);
 
-    bool isValidDwarfFileNumber(unsigned FileNumber);
+    bool isValidDwarfFileNumber(unsigned FileNumber, unsigned CUID = 0);
 
     bool hasDwarfFiles() const {
-      return !MCDwarfFiles.empty();
+      // Traverse MCDwarfFilesCUMap and check whether each entry is empty.
+      MCDwarfFilesMap::const_iterator MapB, MapE;
+      for (MapB = MCDwarfFilesCUMap.begin(), MapE = MCDwarfFilesCUMap.end();
+           MapB != MapE; MapB++)
+        if (!MapB->second.empty())
+           return true;
+      return false;
     }
 
-    const std::vector<MCDwarfFile *> &getMCDwarfFiles() {
-      return MCDwarfFiles;
+    const std::vector<MCDwarfFile *> &getMCDwarfFiles(unsigned CUID = 0) {
+      return MCDwarfFilesCUMap[CUID];
     }
-    const std::vector<StringRef> &getMCDwarfDirs() {
-      return MCDwarfDirs;
+    const std::vector<StringRef> &getMCDwarfDirs(unsigned CUID = 0) {
+      return MCDwarfDirsCUMap[CUID];
     }
 
     const DenseMap<const MCSection *, MCLineSection *>
@@ -299,6 +318,25 @@ namespace llvm {
     void addMCLineSection(const MCSection *Sec, MCLineSection *Line) {
       MCLineSections[Sec] = Line;
       MCLineSectionOrder.push_back(Sec);
+    }
+    unsigned getDwarfCompileUnitID() {
+      return DwarfCompileUnitID;
+    }
+    void setDwarfCompileUnitID(unsigned CUIndex) {
+      DwarfCompileUnitID = CUIndex;
+    }
+    const DenseMap<unsigned, MCSymbol *> &getMCLineTableSymbols() const {
+      return MCLineTableSymbols;
+    }
+    MCSymbol *getMCLineTableSymbol(unsigned ID) const {
+      DenseMap<unsigned, MCSymbol *>::const_iterator CIter =
+        MCLineTableSymbols.find(ID);
+      if (CIter == MCLineTableSymbols.end())
+        return NULL;
+      return CIter->second;
+    }
+    void setMCLineTableSymbol(MCSymbol *Sym, unsigned ID) {
+      MCLineTableSymbols[ID] = Sym;
     }
 
     /// setCurrentDwarfLoc - saves the information from the currently parsed
@@ -345,6 +383,9 @@ namespace llvm {
 
     void setDwarfDebugFlags(StringRef S) { DwarfDebugFlags = S; }
     StringRef getDwarfDebugFlags() { return DwarfDebugFlags; }
+
+    void setDwarfDebugProducer(StringRef S) { DwarfDebugProducer = S; }
+    StringRef getDwarfDebugProducer() { return DwarfDebugProducer; }
 
     /// @}
 

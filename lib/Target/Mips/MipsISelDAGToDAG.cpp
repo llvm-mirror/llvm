@@ -26,15 +26,15 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
-#include "llvm/GlobalValue.h"
-#include "llvm/Instructions.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Type.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Type.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -96,13 +96,20 @@ private:
   SDNode *Select(SDNode *N);
 
   // Complex Pattern.
-  bool SelectAddr(SDNode *Parent, SDValue N, SDValue &Base, SDValue &Offset);
+  /// (reg + imm).
+  bool selectAddrRegImm(SDValue Addr, SDValue &Base, SDValue &Offset) const;
+
+  /// Fall back on this function if all else fails.
+  bool selectAddrDefault(SDValue Addr, SDValue &Base, SDValue &Offset) const;
+
+  /// Match integer address pattern.
+  bool selectIntAddr(SDValue Addr, SDValue &Base, SDValue &Offset) const;
 
   bool SelectAddr16(SDNode *Parent, SDValue N, SDValue &Base, SDValue &Offset,
        SDValue &Alias);
 
   // getImm - Return a target constant with the specified value.
-  inline SDValue getImm(const SDNode *Node, unsigned Imm) {
+  inline SDValue getImm(const SDNode *Node, uint64_t Imm) {
     return CurDAG->getTargetConstant(Imm, Node->getValueType(0));
   }
 
@@ -323,8 +330,8 @@ SDValue MipsDAGToDAGISel::getMips16SPAliasReg() {
 
 /// ComplexPattern used on MipsInstrInfo
 /// Used on Mips Load/Store instructions
-bool MipsDAGToDAGISel::
-SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
+bool MipsDAGToDAGISel::selectAddrRegImm(SDValue Addr, SDValue &Base,
+                                        SDValue &Offset) const {
   EVT ValTy = Addr.getValueType();
 
   // if Address is FI, get the TargetFrameIndex.
@@ -384,19 +391,22 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
         return true;
       }
     }
-
-    // If an indexed floating point load/store can be emitted, return false.
-    const LSBaseSDNode *LS = dyn_cast<LSBaseSDNode>(Parent);
-
-    if (LS &&
-        (LS->getMemoryVT() == MVT::f32 || LS->getMemoryVT() == MVT::f64) &&
-        Subtarget.hasFPIdx())
-      return false;
   }
 
-  Base   = Addr;
-  Offset = CurDAG->getTargetConstant(0, ValTy);
+  return false;
+}
+
+bool MipsDAGToDAGISel::selectAddrDefault(SDValue Addr, SDValue &Base,
+                                         SDValue &Offset) const {
+  Base = Addr;
+  Offset = CurDAG->getTargetConstant(0, Addr.getValueType());
   return true;
+}
+
+bool MipsDAGToDAGISel::selectIntAddr(SDValue Addr, SDValue &Base,
+                                     SDValue &Offset) const {
+  return selectAddrRegImm(Addr, Base, Offset) ||
+    selectAddrDefault(Addr, Base, Offset);
 }
 
 void MipsDAGToDAGISel::getMips16SPRefReg(SDNode *Parent, SDValue &AliasReg) {

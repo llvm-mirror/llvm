@@ -19,19 +19,19 @@
 #include "X86RegisterInfo.h"
 #include "X86Subtarget.h"
 #include "X86TargetMachine.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/GlobalAlias.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
@@ -74,6 +74,8 @@ public:
   /// possible.
   virtual bool TryToFoldLoad(MachineInstr *MI, unsigned OpNo,
                              const LoadInst *LI);
+
+  virtual bool FastLowerArguments();
 
 #include "X86GenFastISel.inc"
 
@@ -326,12 +328,11 @@ bool X86FastISel::X86FastEmitExtend(ISD::NodeType Opc, EVT DstVT,
                                     unsigned &ResultReg) {
   unsigned RR = FastEmit_r(SrcVT.getSimpleVT(), DstVT.getSimpleVT(), Opc,
                            Src, /*TODO: Kill=*/false);
-
-  if (RR != 0) {
-    ResultReg = RR;
-    return true;
-  } else
+  if (RR == 0)
     return false;
+
+  ResultReg = RR;
+  return true;
 }
 
 /// X86SelectAddress - Attempt to fill in an address from the given value.
@@ -727,7 +728,7 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
 
   // Don't handle popping bytes on return for now.
   if (X86MFInfo->getBytesToPopOnReturn() != 0)
-    return 0;
+    return false;
 
   // fastcc with -tailcallopt is intended to provide a guaranteed
   // tail call optimization. Fastisel doesn't know how to do that.
@@ -738,10 +739,12 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
   if (F.isVarArg())
     return false;
 
+  // Build a list of return value registers.
+  SmallVector<unsigned, 4> RetRegs;
+
   if (Ret->getNumOperands() > 0) {
     SmallVector<ISD::OutputArg, 4> Outs;
-    GetReturnInfo(F.getReturnType(), F.getAttributes().getRetAttributes(),
-                  Outs, TLI);
+    GetReturnInfo(F.getReturnType(), F.getAttributes(), Outs, TLI);
 
     // Analyze operands of the call, assigning locations to each operand.
     SmallVector<CCValAssign, 16> ValLocs;
@@ -806,8 +809,8 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(TargetOpcode::COPY),
             DstReg).addReg(SrcReg);
 
-    // Mark the register as live out of the function.
-    MRI.addLiveOut(VA.getLocReg());
+    // Add register to return instruction.
+    RetRegs.push_back(VA.getLocReg());
   }
 
   // The x86-64 ABI for returning structs by value requires that we copy
@@ -820,11 +823,14 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
            "SRetReturnReg should have been set in LowerFormalArguments()!");
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(TargetOpcode::COPY),
             X86::RAX).addReg(Reg);
-    MRI.addLiveOut(X86::RAX);
+    RetRegs.push_back(X86::RAX);
   }
 
   // Now emit the RET.
-  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(X86::RET));
+  MachineInstrBuilder MIB =
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(X86::RET));
+  for (unsigned i = 0, e = RetRegs.size(); i != e; ++i)
+    MIB.addReg(RetRegs[i], RegState::Implicit);
   return true;
 }
 
@@ -1373,7 +1379,6 @@ bool X86FastISel::TryEmitSmallMemcpy(X86AddressMode DestAM,
     else if (Len >= 2)
       VT = MVT::i16;
     else {
-      assert(Len == 1);
       VT = MVT::i8;
     }
 
@@ -1517,6 +1522,78 @@ bool X86FastISel::X86VisitIntrinsicCall(const IntrinsicInst &I) {
   }
 }
 
+bool X86FastISel::FastLowerArguments() {
+  if (!FuncInfo.CanLowerReturn)
+    return false;
+
+  const Function *F = FuncInfo.Fn;
+  if (F->isVarArg())
+    return false;
+
+  CallingConv::ID CC = F->getCallingConv();
+  if (CC != CallingConv::C)
+    return false;
+  
+  if (!Subtarget->is64Bit())
+    return false;
+  
+  // Only handle simple cases. i.e. Up to 6 i32/i64 scalar arguments.
+  unsigned Idx = 1;
+  for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end();
+       I != E; ++I, ++Idx) {
+    if (Idx > 6)
+      return false;
+
+    if (F->getAttributes().hasAttribute(Idx, Attribute::ByVal) ||
+        F->getAttributes().hasAttribute(Idx, Attribute::InReg) ||
+        F->getAttributes().hasAttribute(Idx, Attribute::StructRet) ||
+        F->getAttributes().hasAttribute(Idx, Attribute::Nest))
+      return false;
+
+    Type *ArgTy = I->getType();
+    if (ArgTy->isStructTy() || ArgTy->isArrayTy() || ArgTy->isVectorTy())
+      return false;
+
+    EVT ArgVT = TLI.getValueType(ArgTy);
+    if (!ArgVT.isSimple()) return false;
+    switch (ArgVT.getSimpleVT().SimpleTy) {
+    case MVT::i32:
+    case MVT::i64:
+      break;
+    default:
+      return false;
+    }
+  }
+
+  static const uint16_t GPR32ArgRegs[] = {
+    X86::EDI, X86::ESI, X86::EDX, X86::ECX, X86::R8D, X86::R9D
+  };
+  static const uint16_t GPR64ArgRegs[] = {
+    X86::RDI, X86::RSI, X86::RDX, X86::RCX, X86::R8 , X86::R9
+  };
+
+  Idx = 0;
+  const TargetRegisterClass *RC32 = TLI.getRegClassFor(MVT::i32);
+  const TargetRegisterClass *RC64 = TLI.getRegClassFor(MVT::i64);
+  for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end();
+       I != E; ++I, ++Idx) {
+    if (I->use_empty())
+      continue;
+    bool is32Bit = TLI.getValueType(I->getType()) == MVT::i32;
+    const TargetRegisterClass *RC = is32Bit ? RC32 : RC64;
+    unsigned SrcReg = is32Bit ? GPR32ArgRegs[Idx] : GPR64ArgRegs[Idx];
+    unsigned DstReg = FuncInfo.MF->addLiveIn(SrcReg, RC);
+    // FIXME: Unfortunately it's necessary to emit a copy from the livein copy.
+    // Without this, EmitLiveInCopies may eliminate the livein if its only
+    // use is a bitcast (which isn't turned into an instruction).
+    unsigned ResultReg = createResultReg(RC);
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(TargetOpcode::COPY),
+            ResultReg).addReg(DstReg, getKillRegState(true));
+    UpdateValueMap(I, ResultReg);
+  }
+  return true;
+}
+
 bool X86FastISel::X86SelectCall(const Instruction *I) {
   const CallInst *CI = cast<CallInst>(I);
   const Value *Callee = CI->getCalledValue();
@@ -1545,9 +1622,9 @@ static unsigned computeBytesPoppedByCallee(const X86Subtarget &Subtarget,
   CallingConv::ID CC = CS.getCallingConv();
   if (CC == CallingConv::Fast || CC == CallingConv::GHC)
     return 0;
-  if (!CS.paramHasAttr(1, Attributes::StructRet))
+  if (!CS.paramHasAttr(1, Attribute::StructRet))
     return 0;
-  if (CS.paramHasAttr(1, Attributes::InReg))
+  if (CS.paramHasAttr(1, Attribute::InReg))
     return 0;
   return 4;
 }
@@ -1585,8 +1662,7 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(I->getType(), CS.getAttributes().getRetAttributes(),
-                Outs, TLI);
+  GetReturnInfo(I->getType(), CS.getAttributes(), Outs, TLI);
   bool CanLowerReturn = TLI.CanLowerReturn(CS.getCallingConv(),
                                            *FuncInfo.MF, FTy->isVarArg(),
                                            Outs, FTy->getContext());
@@ -1626,12 +1702,12 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
     Value *ArgVal = *i;
     ISD::ArgFlagsTy Flags;
     unsigned AttrInd = i - CS.arg_begin() + 1;
-    if (CS.paramHasAttr(AttrInd, Attributes::SExt))
+    if (CS.paramHasAttr(AttrInd, Attribute::SExt))
       Flags.setSExt();
-    if (CS.paramHasAttr(AttrInd, Attributes::ZExt))
+    if (CS.paramHasAttr(AttrInd, Attribute::ZExt))
       Flags.setZExt();
 
-    if (CS.paramHasAttr(AttrInd, Attributes::ByVal)) {
+    if (CS.paramHasAttr(AttrInd, Attribute::ByVal)) {
       PointerType *Ty = cast<PointerType>(ArgVal->getType());
       Type *ElementTy = Ty->getElementType();
       unsigned FrameSize = TD.getTypeAllocSize(ElementTy);
@@ -1645,9 +1721,9 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
         return false;
     }
 
-    if (CS.paramHasAttr(AttrInd, Attributes::InReg))
+    if (CS.paramHasAttr(AttrInd, Attribute::InReg))
       Flags.setInReg();
-    if (CS.paramHasAttr(AttrInd, Attributes::Nest))
+    if (CS.paramHasAttr(AttrInd, Attribute::Nest))
       Flags.setNest();
 
     // If this is an i1/i8/i16 argument, promote to i32 to avoid an extra
@@ -1909,17 +1985,17 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
   ComputeValueVTs(TLI, I->getType(), RetTys);
   for (unsigned i = 0, e = RetTys.size(); i != e; ++i) {
     EVT VT = RetTys[i];
-    EVT RegisterVT = TLI.getRegisterType(I->getParent()->getContext(), VT);
+    MVT RegisterVT = TLI.getRegisterType(I->getParent()->getContext(), VT);
     unsigned NumRegs = TLI.getNumRegisters(I->getParent()->getContext(), VT);
     for (unsigned j = 0; j != NumRegs; ++j) {
       ISD::InputArg MyFlags;
-      MyFlags.VT = RegisterVT.getSimpleVT();
+      MyFlags.VT = RegisterVT;
       MyFlags.Used = !CS.getInstruction()->use_empty();
-      if (CS.paramHasAttr(0, Attributes::SExt))
+      if (CS.paramHasAttr(0, Attribute::SExt))
         MyFlags.Flags.setSExt();
-      if (CS.paramHasAttr(0, Attributes::ZExt))
+      if (CS.paramHasAttr(0, Attribute::ZExt))
         MyFlags.Flags.setZExt();
-      if (CS.paramHasAttr(0, Attributes::InReg))
+      if (CS.paramHasAttr(0, Attribute::InReg))
         MyFlags.Flags.setInReg();
       Ins.push_back(MyFlags);
     }

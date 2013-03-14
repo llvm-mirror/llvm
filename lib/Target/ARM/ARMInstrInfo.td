@@ -117,7 +117,7 @@ def ARMcall_nolink   : SDNode<"ARMISD::CALL_NOLINK", SDT_ARMcall,
                                SDNPVariadic]>;
 
 def ARMretflag       : SDNode<"ARMISD::RET_FLAG", SDTNone,
-                              [SDNPHasChain, SDNPOptInGlue]>;
+                              [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 def ARMcmov          : SDNode<"ARMISD::CMOV", SDT_ARMCMov,
                               [SDNPInGlue]>;
@@ -239,6 +239,9 @@ def IsARM            : Predicate<"!Subtarget->isThumb()">,
 def IsIOS            : Predicate<"Subtarget->isTargetIOS()">;
 def IsNotIOS         : Predicate<"!Subtarget->isTargetIOS()">;
 def IsNaCl           : Predicate<"Subtarget->isTargetNaCl()">;
+def UseNaClTrap      : Predicate<"Subtarget->useNaClTrap()">,
+                                 AssemblerPredicate<"FeatureNaClTrap", "NaCl">;
+def DontUseNaClTrap  : Predicate<"!Subtarget->useNaClTrap()">;
 
 // FIXME: Eventually this will be just "hasV6T2Ops".
 def UseMovt          : Predicate<"Subtarget->useMovt()">;
@@ -1762,11 +1765,32 @@ def DBG : AI<(outs), (ins imm0_15:$opt), MiscFrm, NoItinerary, "dbg", "\t$opt",
   let Inst{3-0} = opt;
 }
 
-// A5.4 Permanently UNDEFINED instructions.
+/*
+ * A5.4 Permanently UNDEFINED instructions.
+ *
+ * For most targets use UDF #65006, for which the OS will generate SIGTRAP.
+ * Other UDF encodings generate SIGILL.
+ *
+ * NaCl's OS instead chooses an ARM UDF encoding that's also a UDF in Thumb.
+ * Encoding A1:
+ *  1110 0111 1111 iiii iiii iiii 1111 iiii
+ * Encoding T1:
+ *  1101 1110 iiii iiii
+ * It uses the following encoding:
+ *  1110 0111 1111 1110 1101 1110 1111 0000
+ *  - In ARM: UDF #60896;
+ *  - In Thumb: UDF #254 followed by a branch-to-self.
+ */
+let isBarrier = 1, isTerminator = 1 in
+def TRAPNaCl : AXI<(outs), (ins), MiscFrm, NoItinerary,
+               "trap", [(trap)]>,
+           Requires<[IsARM,UseNaClTrap]> {
+  let Inst = 0xe7fedef0;
+}
 let isBarrier = 1, isTerminator = 1 in
 def TRAP : AXI<(outs), (ins), MiscFrm, NoItinerary,
                "trap", [(trap)]>,
-           Requires<[IsARM]> {
+           Requires<[IsARM,DontUseNaClTrap]> {
   let Inst = 0xe7ffdefe;
 }
 
@@ -2078,6 +2102,18 @@ def SRSIB : SRSI<0, "srsib\tsp, $mode"> {
 def SRSIB_UPD : SRSI<1, "srsib\tsp!, $mode"> {
   let Inst{24-23} = 0b11;
 }
+
+def : ARMInstAlias<"srsda $mode", (SRSDA imm0_31:$mode)>;
+def : ARMInstAlias<"srsda $mode!", (SRSDA_UPD imm0_31:$mode)>;
+
+def : ARMInstAlias<"srsdb $mode", (SRSDB imm0_31:$mode)>;
+def : ARMInstAlias<"srsdb $mode!", (SRSDB_UPD imm0_31:$mode)>;
+
+def : ARMInstAlias<"srsia $mode", (SRSIA imm0_31:$mode)>;
+def : ARMInstAlias<"srsia $mode!", (SRSIA_UPD imm0_31:$mode)>;
+
+def : ARMInstAlias<"srsib $mode", (SRSIB imm0_31:$mode)>;
+def : ARMInstAlias<"srsib $mode!", (SRSIB_UPD imm0_31:$mode)>;
 
 // Return From Exception
 class RFEI<bit wb, string asm>

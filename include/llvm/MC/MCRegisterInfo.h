@@ -152,6 +152,7 @@ private:
   const MCRegisterDesc *Desc;                 // Pointer to the descriptor array
   unsigned NumRegs;                           // Number of entries in the array
   unsigned RAReg;                             // Return address register
+  unsigned PCReg;                             // Program counter register
   const MCRegisterClass *Classes;             // Pointer to the regclass array
   unsigned NumClasses;                        // Number of entries in the array
   unsigned NumRegUnits;                       // Number of regunits.
@@ -229,9 +230,10 @@ public:
   friend class MCRegUnitIterator;
   friend class MCRegUnitRootIterator;
 
-  /// InitMCRegisterInfo - Initialize MCRegisterInfo, called by TableGen
+  /// \brief Initialize MCRegisterInfo, called by TableGen
   /// auto-generated routines. *DO NOT USE*.
   void InitMCRegisterInfo(const MCRegisterDesc *D, unsigned NR, unsigned RA,
+                          unsigned PC,
                           const MCRegisterClass *C, unsigned NC,
                           const uint16_t (*RURoots)[2],
                           unsigned NRU,
@@ -243,6 +245,7 @@ public:
     Desc = D;
     NumRegs = NR;
     RAReg = RA;
+    PCReg = PC;
     Classes = C;
     DiffLists = DL;
     RegStrings = Strings;
@@ -254,7 +257,7 @@ public:
     RegEncodingTable = RET;
   }
 
-  /// mapLLVMRegsToDwarfRegs - Used to initialize LLVM register to Dwarf
+  /// \brief Used to initialize LLVM register to Dwarf
   /// register number mapping. Called by TableGen auto-generated routines.
   /// *DO NOT USE*.
   void mapLLVMRegsToDwarfRegs(const DwarfLLVMRegPair *Map, unsigned Size,
@@ -268,7 +271,7 @@ public:
     }
   }
 
-  /// mapDwarfRegsToLLVMRegs - Used to initialize Dwarf register to LLVM
+  /// \brief Used to initialize Dwarf register to LLVM
   /// register number mapping. Called by TableGen auto-generated routines.
   /// *DO NOT USE*.
   void mapDwarfRegsToLLVMRegs(const DwarfLLVMRegPair *Map, unsigned Size,
@@ -291,10 +294,15 @@ public:
     L2SEHRegs[LLVMReg] = SEHReg;
   }
 
-  /// getRARegister - This method should return the register where the return
+  /// \brief This method should return the register where the return
   /// address can be found.
   unsigned getRARegister() const {
     return RAReg;
+  }
+
+  /// Return the register which is the program counter.
+  unsigned getProgramCounter() const {
+    return PCReg;
   }
 
   const MCRegisterDesc &operator[](unsigned RegNo) const {
@@ -303,65 +311,63 @@ public:
     return Desc[RegNo];
   }
 
-  /// Provide a get method, equivalent to [], but more useful if we have a
+  /// \brief Provide a get method, equivalent to [], but more useful with a
   /// pointer to this object.
-  ///
   const MCRegisterDesc &get(unsigned RegNo) const {
     return operator[](RegNo);
   }
 
-  /// getSubReg - Returns the physical register number of sub-register "Index"
+  /// \brief Returns the physical register number of sub-register "Index"
   /// for physical register RegNo. Return zero if the sub-register does not
   /// exist.
   unsigned getSubReg(unsigned Reg, unsigned Idx) const;
 
-  /// getMatchingSuperReg - Return a super-register of the specified register
+  /// \brief Return a super-register of the specified register
   /// Reg so its sub-register of index SubIdx is Reg.
   unsigned getMatchingSuperReg(unsigned Reg, unsigned SubIdx,
                                const MCRegisterClass *RC) const;
 
-  /// getSubRegIndex - For a given register pair, return the sub-register index
+  /// \brief For a given register pair, return the sub-register index
   /// if the second register is a sub-register of the first. Return zero
   /// otherwise.
   unsigned getSubRegIndex(unsigned RegNo, unsigned SubRegNo) const;
 
-  /// getName - Return the human-readable symbolic target-specific name for the
+  /// \brief Return the human-readable symbolic target-specific name for the
   /// specified physical register.
   const char *getName(unsigned RegNo) const {
     return RegStrings + get(RegNo).Name;
   }
 
-  /// getNumRegs - Return the number of registers this target has (useful for
+  /// \brief Return the number of registers this target has (useful for
   /// sizing arrays holding per register information)
   unsigned getNumRegs() const {
     return NumRegs;
   }
 
-  /// getNumSubRegIndices - Return the number of sub-register indices
+  /// \brief Return the number of sub-register indices
   /// understood by the target. Index 0 is reserved for the no-op sub-register,
   /// while 1 to getNumSubRegIndices() - 1 represent real sub-registers.
   unsigned getNumSubRegIndices() const {
     return NumSubRegIndices;
   }
 
-  /// getNumRegUnits - Return the number of (native) register units in the
+  /// \brief Return the number of (native) register units in the
   /// target. Register units are numbered from 0 to getNumRegUnits() - 1. They
   /// can be accessed through MCRegUnitIterator defined below.
   unsigned getNumRegUnits() const {
     return NumRegUnits;
   }
 
-  /// getDwarfRegNum - Map a target register to an equivalent dwarf register
+  /// \brief Map a target register to an equivalent dwarf register
   /// number.  Returns -1 if there is no equivalent value.  The second
   /// parameter allows targets to use different numberings for EH info and
   /// debugging info.
   int getDwarfRegNum(unsigned RegNum, bool isEH) const;
 
-  /// getLLVMRegNum - Map a dwarf register back to a target register.
-  ///
+  /// \brief Map a dwarf register back to a target register.
   int getLLVMRegNum(unsigned RegNum, bool isEH) const;
 
-  /// getSEHRegNum - Map a target register to an equivalent SEH register
+  /// \brief Map a target register to an equivalent SEH register
   /// number.  Returns LLVM register number if there is no equivalent value.
   int getSEHRegNum(unsigned RegNum) const;
 
@@ -372,18 +378,37 @@ public:
     return (unsigned)(regclass_end()-regclass_begin());
   }
 
-  /// getRegClass - Returns the register class associated with the enumeration
+  /// \brief Returns the register class associated with the enumeration
   /// value.  See class MCOperandInfo.
   const MCRegisterClass& getRegClass(unsigned i) const {
     assert(i < getNumRegClasses() && "Register Class ID out of range");
     return Classes[i];
   }
 
-   /// getEncodingValue - Returns the encoding for RegNo
+   /// \brief Returns the encoding for RegNo
   uint16_t getEncodingValue(unsigned RegNo) const {
     assert(RegNo < NumRegs &&
            "Attempting to get encoding for invalid register number!");
     return RegEncodingTable[RegNo];
+  }
+
+  /// \brief Returns true if RegB is a sub-register of RegA.
+  bool isSubRegister(unsigned RegA, unsigned RegB) const {
+    return isSuperRegister(RegB, RegA);
+  }
+
+  /// \brief Returns true if RegB is a super-register of RegA.
+  bool isSuperRegister(unsigned RegA, unsigned RegB) const;
+
+  /// \brief Returns true if RegB is a sub-register of RegA or if RegB == RegA.
+  bool isSubRegisterEq(unsigned RegA, unsigned RegB) const {
+    return isSuperRegisterEq(RegB, RegA);
+  }
+
+  /// \brief Returns true if RegB is a super-register of RegA or if
+  /// RegB == RegA.
+  bool isSuperRegisterEq(unsigned RegA, unsigned RegB) const {
+    return RegA == RegB || isSuperRegister(RegA, RegB);
   }
 
 };
@@ -426,6 +451,15 @@ public:
   }
 };
 
+// Definition for isSuperRegister. Put it down here since it needs the
+// iterator defined above in addition to the MCRegisterInfo class itself.
+inline bool MCRegisterInfo::isSuperRegister(unsigned RegA, unsigned RegB) const{
+  for (MCSuperRegIterator I(RegA, this); I.isValid(); ++I)
+    if (*I == RegB)
+      return true;
+  return false;
+}
+
 //===----------------------------------------------------------------------===//
 //                               Register Units
 //===----------------------------------------------------------------------===//
@@ -445,6 +479,7 @@ public:
   /// MCRegUnitIterator - Create an iterator that traverses the register units
   /// in Reg.
   MCRegUnitIterator(unsigned Reg, const MCRegisterInfo *MCRI) {
+    assert(Reg && "Null register has no regunits");
     // Decode the RegUnits MCRegisterDesc field.
     unsigned RU = MCRI->get(Reg).RegUnits;
     unsigned Scale = RU & 15;
@@ -484,17 +519,17 @@ public:
     Reg1 = MCRI->RegUnitRoots[RegUnit][1];
   }
 
-  /// Dereference to get the current root register.
+  /// \brief Dereference to get the current root register.
   unsigned operator*() const {
     return Reg0;
   }
 
-  /// isValid - Check if the iterator is at the end of the list.
+  /// \brief Check if the iterator is at the end of the list.
   bool isValid() const {
     return Reg0;
   }
 
-  /// Preincrement to move to the next root register.
+  /// \brief Preincrement to move to the next root register.
   void operator++() {
     assert(isValid() && "Cannot move off the end of the list.");
     Reg0 = Reg1;

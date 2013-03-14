@@ -23,7 +23,6 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetTransformImpl.h"
 
 namespace llvm {
   namespace X86ISD {
@@ -197,6 +196,12 @@ namespace llvm {
       /// FHSUB - Floating point horizontal sub.
       FHSUB,
 
+      /// UMAX, UMIN - Unsigned integer max and min.
+      UMAX, UMIN,
+
+      /// SMAX, SMIN - Signed integer max and min.
+      SMAX, SMIN,
+
       /// FMAX, FMIN - Floating point max and min.
       ///
       FMAX, FMIN,
@@ -229,11 +234,8 @@ namespace llvm {
       // EH_SJLJ_LONGJMP - SjLj exception handling longjmp.
       EH_SJLJ_LONGJMP,
 
-      /// TC_RETURN - Tail call return.
-      ///   operand #0 chain
-      ///   operand #1 callee (register or absolute)
-      ///   operand #2 stack adjustment
-      ///   operand #3 optional in flag
+      /// TC_RETURN - Tail call return. See X86TargetLowering::LowerCall for
+      /// the list of operands.
       TC_RETURN,
 
       // VZEXT_MOVL - Vector move low and zero extend.
@@ -289,7 +291,7 @@ namespace llvm {
       TESTP,
 
       // Several flavors of instructions with vector shuffle behaviors.
-      PALIGN,
+      PALIGNR,
       PSHUFD,
       PSHUFHW,
       PSHUFLW,
@@ -469,7 +471,7 @@ namespace llvm {
 
     virtual unsigned getJumpTableEncoding() const;
 
-    virtual MVT getShiftAmountTy(EVT LHSTy) const { return MVT::i8; }
+    virtual MVT getScalarShiftAmountTy(EVT LHSTy) const { return MVT::i8; }
 
     virtual const MCExpr *
     LowerCustomJumpTableEntry(const MachineJumpTableInfo *MJTI,
@@ -716,7 +718,7 @@ namespace llvm {
 
   protected:
     std::pair<const TargetRegisterClass*, uint8_t>
-    findRepresentativeClass(EVT VT) const;
+    findRepresentativeClass(MVT VT) const;
 
   private:
     /// Subtarget - Keep a pointer to the X86Subtarget around so that we can
@@ -789,9 +791,7 @@ namespace llvm {
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerEXTRACT_VECTOR_ELT_SSE4(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerINSERT_VECTOR_ELT_SSE4(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(const GlobalValue *GV, DebugLoc dl,
@@ -806,18 +806,18 @@ namespace llvm {
     SDValue LowerUINT_TO_FP_i64(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerUINT_TO_FP_i32(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerUINT_TO_FP_vec(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerZERO_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerZERO_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerANY_EXTEND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_SINT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_UINT(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFABS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFNEG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFCOPYSIGN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerToBT(SDValue And, ISD::CondCode CC,
                       DebugLoc dl, SelectionDAG &DAG) const;
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerVSETCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerMEMSET(SDValue Op, SelectionDAG &DAG) const;
@@ -834,8 +834,9 @@ namespace llvm {
     SDValue LowerINIT_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFLT_ROUNDS_(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerShift(SDValue Op, SelectionDAG &DAG) const;
-
+    SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
 
     // Utility functions to help LowerVECTOR_SHUFFLE & LowerBUILD_VECTOR
     SDValue LowerVectorBroadcast(SDValue Op, SelectionDAG &DAG) const;
@@ -844,7 +845,7 @@ namespace llvm {
 
     SDValue LowerVectorAllZeroTest(SDValue Op, SelectionDAG &DAG) const;
 
-    SDValue lowerVectorIntExtend(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerVectorIntExtend(SDValue Op, SelectionDAG &DAG) const;
 
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
@@ -867,9 +868,8 @@ namespace llvm {
 
     virtual bool mayBeEmittedAsTailCall(CallInst *CI) const;
 
-    virtual EVT
-    getTypeForExtArgOrReturn(LLVMContext &Context, EVT VT,
-                             ISD::NodeType ExtendKind) const;
+    virtual MVT
+    getTypeForExtArgOrReturn(MVT VT, ISD::NodeType ExtendKind) const;
 
     virtual bool
     CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
@@ -938,31 +938,6 @@ namespace llvm {
     FastISel *createFastISel(FunctionLoweringInfo &funcInfo,
                              const TargetLibraryInfo *libInfo);
   }
-
-  class X86ScalarTargetTransformImpl : public ScalarTargetTransformImpl {
-  public:
-    explicit X86ScalarTargetTransformImpl(const TargetLowering *TL) :
-      ScalarTargetTransformImpl(TL) {};
-
-    virtual PopcntHwSupport getPopcntHwSupport(unsigned TyWidth) const;
-  };
-
-  class X86VectorTargetTransformInfo : public VectorTargetTransformImpl {
-  public:
-    explicit X86VectorTargetTransformInfo(const TargetLowering *TL) :
-    VectorTargetTransformImpl(TL) {}
-
-    virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const;
-
-    virtual unsigned getVectorInstrCost(unsigned Opcode, Type *Val,
-                                        unsigned Index) const;
-
-    unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
-                                Type *CondTy) const;
-
-    virtual unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
-                                      Type *Src) const;
-  };
 }
 
 #endif    // X86ISELLOWERING_H

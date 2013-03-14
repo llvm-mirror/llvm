@@ -16,10 +16,12 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCWin64EH.h"
 #include "llvm/Support/DataTypes.h"
+#include <string>
 
 namespace llvm {
   class MCAsmBackend;
@@ -45,6 +47,23 @@ namespace llvm {
   /// a .s file, and implementations that write out .o files of various formats.
   ///
   class MCStreamer {
+  public:
+    enum StreamerKind {
+      SK_AsmStreamer,
+      SK_NullStreamer,
+      SK_RecordStreamer,
+
+      // MCObjectStreamer subclasses.
+      SK_ELFStreamer,
+      SK_ARMELFStreamer,
+      SK_MachOStreamer,
+      SK_PureStreamer,
+      SK_MipsELFStreamer,
+      SK_WinCOFFStreamer
+    };
+
+  private:
+    const StreamerKind Kind;
     MCContext &Context;
 
     MCStreamer(const MCStreamer&) LLVM_DELETED_FUNCTION;
@@ -73,7 +92,7 @@ namespace llvm {
     bool AutoInitSections;
 
   protected:
-    MCStreamer(MCContext &Ctx);
+    MCStreamer(StreamerKind Kind, MCContext &Ctx);
 
     const MCExpr *BuildSymbolDiff(MCContext &Context, const MCSymbol *A,
                                   const MCSymbol *B);
@@ -91,6 +110,8 @@ namespace llvm {
 
   public:
     virtual ~MCStreamer();
+
+    StreamerKind getKind() const { return Kind; }
 
     /// State management
     ///
@@ -234,6 +255,9 @@ namespace llvm {
     /// InitSections - Create the default sections and set the initial one.
     virtual void InitSections() = 0;
 
+    /// InitToTextSection - Create a text section and switch the streamer to it.
+    virtual void InitToTextSection() = 0;
+
     /// EmitLabel - Emit a label for @p Symbol into the current section.
     ///
     /// This corresponds to an assembler statement such as:
@@ -252,12 +276,19 @@ namespace llvm {
     /// EmitAssemblerFlag - Note in the output the specified @p Flag.
     virtual void EmitAssemblerFlag(MCAssemblerFlag Flag) = 0;
 
+    /// EmitLinkerOptions - Emit the given list @p Options of strings as linker
+    /// options into the output.
+    virtual void EmitLinkerOptions(ArrayRef<std::string> Kind) {}
+
     /// EmitDataRegion - Note in the output the specified region @p Kind.
     virtual void EmitDataRegion(MCDataRegionType Kind) {}
 
     /// EmitThumbFunc - Note in the output that the specified @p Func is
     /// a Thumb mode function (ARM target only).
     virtual void EmitThumbFunc(MCSymbol *Func) = 0;
+
+    /// getOrCreateSymbolData - Get symbol data for given symbol.
+    virtual MCSymbolData &getOrCreateSymbolData(MCSymbol *Symbol);
 
     /// EmitAssignment - Emit an assignment of @p Value to @p Symbol.
     ///
@@ -366,7 +397,7 @@ namespace llvm {
     ///
     /// This is used to implement assembler directives such as .byte, .ascii,
     /// etc.
-    virtual void EmitBytes(StringRef Data, unsigned AddrSpace) = 0;
+    virtual void EmitBytes(StringRef Data, unsigned AddrSpace = 0) = 0;
 
     /// EmitValue - Emit the expression @p Value into the output as a native
     /// integer of the given @p Size bytes.
@@ -400,8 +431,8 @@ namespace llvm {
 
     /// EmitULEB128Value - Special case of EmitULEB128Value that avoids the
     /// client having to pass in a MCExpr for constant integers.
-    void EmitULEB128IntValue(uint64_t Value, unsigned AddrSpace = 0,
-                             unsigned Padding = 0);
+    void EmitULEB128IntValue(uint64_t Value, unsigned Padding = 0,
+                             unsigned AddrSpace = 0);
 
     /// EmitSLEB128Value - Special case of EmitSLEB128Value that avoids the
     /// client having to pass in a MCExpr for constant integers.
@@ -429,14 +460,13 @@ namespace llvm {
     /// EmitFill - Emit NumBytes bytes worth of the value specified by
     /// FillValue.  This implements directives such as '.space'.
     virtual void EmitFill(uint64_t NumBytes, uint8_t FillValue,
-                          unsigned AddrSpace);
+                          unsigned AddrSpace = 0);
 
     /// EmitZeros - Emit NumBytes worth of zeros.  This is a convenience
     /// function that just wraps EmitFill.
-    void EmitZeros(uint64_t NumBytes, unsigned AddrSpace) {
+    void EmitZeros(uint64_t NumBytes, unsigned AddrSpace = 0) {
       EmitFill(NumBytes, 0, AddrSpace);
     }
-
 
     /// EmitValueToAlignment - Emit some number of copies of @p Value until
     /// the byte alignment @p ByteAlignment is reached.
@@ -495,7 +525,7 @@ namespace llvm {
     /// file number.  This implements the DWARF2 '.file 4 "foo.c"' assembler
     /// directive.
     virtual bool EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                        StringRef Filename);
+                                        StringRef Filename, unsigned CUID = 0);
 
     /// EmitDwarfLocDirective - This implements the DWARF2
     // '.loc fileno lineno ...' assembler directive.
@@ -556,6 +586,20 @@ namespace llvm {
     /// EmitInstruction - Emit the given @p Instruction into the current
     /// section.
     virtual void EmitInstruction(const MCInst &Inst) = 0;
+
+    /// \brief Set the bundle alignment mode from now on in the section.
+    /// The argument is the power of 2 to which the alignment is set. The
+    /// value 0 means turn the bundle alignment off.
+    virtual void EmitBundleAlignMode(unsigned AlignPow2) = 0;
+
+    /// \brief The following instructions are a bundle-locked group.
+    ///
+    /// \param AlignToEnd - If true, the bundle-locked group will be aligned to
+    ///                     the end of a bundle.
+    virtual void EmitBundleLock(bool AlignToEnd) = 0;
+
+    /// \brief Ends a bundle-locked group.
+    virtual void EmitBundleUnlock() = 0;
 
     /// EmitRawText - If this file is backed by a assembly streamer, this dumps
     /// the specified string in the output .s file.  This capability is

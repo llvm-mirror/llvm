@@ -27,9 +27,9 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
-#include "llvm/Constants.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalValue.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/CommandLine.h"
@@ -464,8 +464,9 @@ PredicateInstruction(MachineInstr *MI,
   unsigned Opc = MI->getOpcode();
   if (isUncondBranchOpcode(Opc)) {
     MI->setDesc(get(getMatchingCondBranchOpcode(Opc)));
-    MI->addOperand(MachineOperand::CreateImm(Pred[0].getImm()));
-    MI->addOperand(MachineOperand::CreateReg(Pred[1].getReg(), false));
+    MachineInstrBuilder(*MI->getParent()->getParent(), MI)
+      .addImm(Pred[0].getImm())
+      .addReg(Pred[1].getReg());
     return true;
   }
 
@@ -1154,6 +1155,7 @@ bool ARMBaseInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const{
 
   // All clear, widen the COPY.
   DEBUG(dbgs() << "widening:    " << *MI);
+  MachineInstrBuilder MIB(*MI->getParent()->getParent(), MI);
 
   // Get rid of the old <imp-def> of DstRegD.  Leave it if it defines a Q-reg
   // or some other super-register.
@@ -1165,14 +1167,14 @@ bool ARMBaseInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const{
   MI->setDesc(get(ARM::VMOVD));
   MI->getOperand(0).setReg(DstRegD);
   MI->getOperand(1).setReg(SrcRegD);
-  AddDefaultPred(MachineInstrBuilder(MI));
+  AddDefaultPred(MIB);
 
   // We are now reading SrcRegD instead of SrcRegS.  This may upset the
   // register scavenger and machine verifier, so we need to indicate that we
   // are reading an undefined value from SrcRegD, but a proper value from
   // SrcRegS.
   MI->getOperand(1).setIsUndef();
-  MachineInstrBuilder(MI).addReg(SrcRegS, RegState::Implicit);
+  MIB.addReg(SrcRegS, RegState::Implicit);
 
   // SrcRegD may actually contain an unrelated value in the ssub_1
   // sub-register.  Don't kill it.  Only kill the ssub_0 sub-register.
@@ -1716,7 +1718,7 @@ MachineInstr *ARMBaseInstrInfo::optimizeSelect(MachineInstr *MI,
   // same register as operand 0.
   MachineOperand FalseReg = MI->getOperand(Invert ? 2 : 1);
   FalseReg.setImplicit();
-  NewMI->addOperand(FalseReg);
+  NewMI.addOperand(FalseReg);
   NewMI->tieOperands(0, NewMI->getNumOperands() - 1);
 
   // The caller will erase MI, but not DefMI.
@@ -2717,7 +2719,6 @@ ARMBaseInstrInfo::getNumMicroOps(const InstrItineraryData *ItinData,
   case ARM::t2STMDB_UPD: {
     unsigned NumRegs = MI->getNumOperands() - Desc.getNumOperands() + 1;
     if (Subtarget.isSwift()) {
-      // rdar://8402126
       int UOps = 1 + NumRegs;  // One for address computation, one for each ld / st.
       switch (Opc) {
       default: break;
@@ -3327,8 +3328,9 @@ ARMBaseInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
     // instructions).
     if (Latency > 0 && Subtarget.isThumb2()) {
       const MachineFunction *MF = DefMI->getParent()->getParent();
-      if (MF->getFunction()->getFnAttributes().
-            hasAttribute(Attributes::OptimizeForSize))
+      if (MF->getFunction()->getAttributes().
+            hasAttribute(AttributeSet::FunctionIndex,
+                         Attribute::OptimizeForSize))
         --Latency;
     }
     return Latency;
@@ -3819,7 +3821,7 @@ void
 ARMBaseInstrInfo::setExecutionDomain(MachineInstr *MI, unsigned Domain) const {
   unsigned DstReg, SrcReg, DReg;
   unsigned Lane;
-  MachineInstrBuilder MIB(MI);
+  MachineInstrBuilder MIB(*MI->getParent()->getParent(), MI);
   const TargetRegisterInfo *TRI = &getRegisterInfo();
   switch (MI->getOpcode()) {
     default:
@@ -4044,7 +4046,6 @@ getPartialRegUpdateClearance(const MachineInstr *MI,
   case ARM::VLDRS:
   case ARM::FCONSTS:
   case ARM::VMOVSR:
-    // rdar://problem/8791586
   case ARM::VMOVv8i8:
   case ARM::VMOVv4i16:
   case ARM::VMOVv2i32:

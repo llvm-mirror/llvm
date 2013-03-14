@@ -24,11 +24,11 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/PHITransAddr.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Function.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/PredIteratorCache.h"
 using namespace llvm;
@@ -262,7 +262,7 @@ isLoadLoadClobberIfExtendedToFullWidth(const AliasAnalysis::Location &MemLoc,
 
   // If we haven't already computed the base/offset of MemLoc, do so now.
   if (MemLocBase == 0)
-    MemLocBase = GetPointerBaseWithConstantOffset(MemLoc.Ptr, MemLocOffs, *TD);
+    MemLocBase = GetPointerBaseWithConstantOffset(MemLoc.Ptr, MemLocOffs, TD);
 
   unsigned Size = MemoryDependenceAnalysis::
     getLoadLoadClobberFullWidthSize(MemLocBase, MemLocOffs, MemLoc.Size,
@@ -283,11 +283,17 @@ getLoadLoadClobberFullWidthSize(const Value *MemLocBase, int64_t MemLocOffs,
                                 const DataLayout &TD) {
   // We can only extend simple integer loads.
   if (!isa<IntegerType>(LI->getType()) || !LI->isSimple()) return 0;
+
+  // Load widening is hostile to ThreadSanitizer: it may cause false positives
+  // or make the reports more cryptic (access sizes are wrong).
+  if (LI->getParent()->getParent()->getAttributes().
+      hasAttribute(AttributeSet::FunctionIndex, Attribute::SanitizeThread))
+    return 0;
   
   // Get the base of this load.
   int64_t LIOffs = 0;
   const Value *LIBase = 
-    GetPointerBaseWithConstantOffset(LI->getPointerOperand(), LIOffs, TD);
+    GetPointerBaseWithConstantOffset(LI->getPointerOperand(), LIOffs, &TD);
   
   // If the two pointers are not based on the same pointer, we can't tell that
   // they are related.
@@ -327,8 +333,8 @@ getLoadLoadClobberFullWidthSize(const Value *MemLocBase, int64_t MemLocOffs,
       return 0;
 
     if (LIOffs+NewLoadByteSize > MemLocEnd &&
-        LI->getParent()->getParent()->getFnAttributes().
-          hasAttribute(Attributes::AddressSafety))
+        LI->getParent()->getParent()->getAttributes().
+          hasAttribute(AttributeSet::FunctionIndex, Attribute::SanitizeAddress))
       // We will be reading past the location accessed by the original program.
       // While this is safe in a regular build, Address Safety analysis tools
       // may start reporting false warnings. So, don't do widening.
@@ -345,15 +351,23 @@ getLoadLoadClobberFullWidthSize(const Value *MemLocBase, int64_t MemLocOffs,
 /// getPointerDependencyFrom - Return the instruction on which a memory
 /// location depends.  If isLoad is true, this routine ignores may-aliases with
 /// read-only operations.  If isLoad is false, this routine ignores may-aliases
-/// with reads from read-only locations.
+/// with reads from read-only locations.  If possible, pass the query
+/// instruction as well; this function may take advantage of the metadata
+/// annotated to the query instruction to refine the result.
 MemDepResult MemoryDependenceAnalysis::
 getPointerDependencyFrom(const AliasAnalysis::Location &MemLoc, bool isLoad, 
-                         BasicBlock::iterator ScanIt, BasicBlock *BB) {
+                         BasicBlock::iterator ScanIt, BasicBlock *BB,
+                         Instruction *QueryInst) {
 
   const Value *MemLocBase = 0;
   int64_t MemLocOffset = 0;
-
   unsigned Limit = BlockScanLimit;
+  bool isInvariantLoad = false;
+  if (isLoad && QueryInst) {
+    LoadInst *LI = dyn_cast<LoadInst>(QueryInst);
+    if (LI && LI->getMetadata(LLVMContext::MD_invariant_load) != 0)
+      isInvariantLoad = true;
+  }
 
   // Walk backwards through the basic block, looking for dependencies.
   while (ScanIt != BB->begin()) {
@@ -468,6 +482,8 @@ getPointerDependencyFrom(const AliasAnalysis::Location &MemLoc, bool isLoad,
         continue;
       if (R == AliasAnalysis::MustAlias)
         return MemDepResult::getDef(Inst);
+      if (isInvariantLoad)
+       continue;
       return MemDepResult::getClobber(Inst);
     }
 
@@ -565,7 +581,7 @@ MemDepResult MemoryDependenceAnalysis::getDependency(Instruction *QueryInst) {
         isLoad |= II->getIntrinsicID() == Intrinsic::lifetime_start;
 
       LocalCache = getPointerDependencyFrom(MemLoc, isLoad, ScanPos,
-                                            QueryParent);
+                                            QueryParent, QueryInst);
     } else if (isa<CallInst>(QueryInst) || isa<InvokeInst>(QueryInst)) {
       CallSite QueryCS(QueryInst);
       bool isReadOnly = AA->onlyReadsMemory(QueryCS);

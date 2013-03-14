@@ -14,13 +14,13 @@
 #include "ValueEnumerator.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Instructions.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ValueSymbolTable.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -418,14 +418,25 @@ void ValueEnumerator::EnumerateOperandType(const Value *V) {
     EnumerateMetadata(V);
 }
 
-void ValueEnumerator::EnumerateAttributes(const AttributeSet &PAL) {
+void ValueEnumerator::EnumerateAttributes(AttributeSet PAL) {
   if (PAL.isEmpty()) return;  // null is always 0.
+
   // Do a lookup.
-  unsigned &Entry = AttributeMap[PAL.getRawPointer()];
+  unsigned &Entry = AttributeMap[PAL];
   if (Entry == 0) {
     // Never saw this before, add it.
-    Attributes.push_back(PAL);
-    Entry = Attributes.size();
+    Attribute.push_back(PAL);
+    Entry = Attribute.size();
+  }
+
+  // Do lookups for all attribute groups.
+  for (unsigned i = 0, e = PAL.getNumSlots(); i != e; ++i) {
+    AttributeSet AS = PAL.getSlotAttributes(i);
+    unsigned &Entry = AttributeGroupMap[AS];
+    if (Entry == 0) {
+      AttributeGroups.push_back(AS);
+      Entry = AttributeGroups.size();
+    }
   }
 }
 

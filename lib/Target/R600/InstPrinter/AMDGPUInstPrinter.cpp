@@ -11,6 +11,7 @@
 #include "AMDGPUInstPrinter.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCExpr.h"
 
 using namespace llvm;
 
@@ -35,8 +36,26 @@ void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     O << Op.getImm();
   } else if (Op.isFPImm()) {
     O << Op.getFPImm();
+  } else if (Op.isExpr()) {
+    const MCExpr *Exp = Op.getExpr();
+    Exp->print(O);
   } else {
     assert(!"unknown operand type in printOperand");
+  }
+}
+
+void AMDGPUInstPrinter::printInterpSlot(const MCInst *MI, unsigned OpNum,
+                                        raw_ostream &O) {
+  unsigned Imm = MI->getOperand(OpNum).getImm();
+
+  if (Imm == 2) {
+    O << "P0";
+  } else if (Imm == 1) {
+    O << "P20";
+  } else if (Imm == 0) {
+    O << "P10";
+  } else {
+    assert(!"Invalid interpolation parameter slot");
   }
 }
 
@@ -105,10 +124,7 @@ void AMDGPUInstPrinter::printOMOD(const MCInst *MI, unsigned OpNo,
 
 void AMDGPUInstPrinter::printRel(const MCInst *MI, unsigned OpNo,
                                  raw_ostream &O) {
-  const MCOperand &Op = MI->getOperand(OpNo);
-  if (Op.getImm() != 0) {
-    O << " + " << Op.getImm();
-  }
+  printIfSet(MI, OpNo, O, "+");
 }
 
 void AMDGPUInstPrinter::printUpdateExecMask(const MCInst *MI, unsigned OpNo,
@@ -127,6 +143,30 @@ void AMDGPUInstPrinter::printWrite(const MCInst *MI, unsigned OpNo,
   if (Op.getImm() == 0) {
     O << " (MASKED)";
   }
+}
+
+void AMDGPUInstPrinter::printSel(const MCInst *MI, unsigned OpNo,
+                                  raw_ostream &O) {
+  const char * chans = "XYZW";
+  int sel = MI->getOperand(OpNo).getImm();
+
+  int chan = sel & 3;
+  sel >>= 2;
+
+  if (sel >= 512) {
+    sel -= 512;
+    int cb = sel >> 12;
+    sel &= 4095;
+    O << cb << "[" << sel << "]";
+  } else if (sel >= 448) {
+    sel -= 448;
+    O << sel;
+  } else if (sel >= 0){
+    O << sel;
+  }
+
+  if (sel >= 0)
+    O << "." << chans[chan];
 }
 
 #include "AMDGPUGenAsmWriter.inc"
