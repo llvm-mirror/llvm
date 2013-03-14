@@ -41,7 +41,7 @@
 #define LLVM_ANALYSIS_DEPENDENCEANALYSIS_H
 
 #include "llvm/ADT/SmallBitVector.h"
-#include "llvm/Instructions.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Pass.h"
 
 namespace llvm {
@@ -175,7 +175,7 @@ namespace llvm {
 
   /// FullDependence - This class represents a dependence between two memory
   /// references in a function. It contains detailed information about the
-  /// dependence (direction vectors, etc) and is used when the compiler is
+  /// dependence (direction vectors, etc.) and is used when the compiler is
   /// able to accurately analyze the interaction of the references; that is,
   /// it is not a confused dependence (see Dependence). In most cases
   /// (for output, flow, and anti dependences), the dependence implies an
@@ -188,7 +188,7 @@ namespace llvm {
                    bool LoopIndependent,
                    unsigned Levels);
     ~FullDependence() {
-      delete DV;
+      delete[] DV;
     }
 
     /// isLoopIndependent - Returns true if this is a loop-independent
@@ -244,8 +244,8 @@ namespace llvm {
   /// DependenceAnalysis - This class is the main dependence-analysis driver.
   ///
   class DependenceAnalysis : public FunctionPass {
-    void operator=(const DependenceAnalysis &);     // do not implement
-    DependenceAnalysis(const DependenceAnalysis &); // do not implement
+    void operator=(const DependenceAnalysis &) LLVM_DELETED_FUNCTION;
+    DependenceAnalysis(const DependenceAnalysis &) LLVM_DELETED_FUNCTION;
   public:
     /// depends - Tests for a dependence between the Src and Dst instructions.
     /// Returns NULL if no dependence; otherwise, returns a Dependence (or a
@@ -257,7 +257,7 @@ namespace llvm {
                         Instruction *Dst,
                         bool PossiblyLoopIndependent);
 
-    /// getSplitIteration - Give a dependence that's splitable at some
+    /// getSplitIteration - Give a dependence that's splittable at some
     /// particular level, return the iteration that should be used to split
     /// the loop.
     ///

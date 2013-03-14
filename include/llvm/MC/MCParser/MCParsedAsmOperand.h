@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_MC_MCASMOPERAND_H
-#define LLVM_MC_MCASMOPERAND_H
+#ifndef LLVM_MC_MCPARSER_MCPARSEDASMOPERAND_H
+#define LLVM_MC_MCPARSER_MCPARSEDASMOPERAND_H
 
 namespace llvm {
 class SMLoc;
@@ -69,6 +69,10 @@ public:
   /// function to determine if the target-dependent parser has already taken
   /// care of the rewrites.  Only valid when parsing MS-style inline assembly.
   virtual bool needAsmRewrite() const { return true; }
+
+  /// needAddressOf - Do we need to emit code to get the address of the
+  /// variable/label?   Only valid when parsing MS-style inline assembly.
+  virtual bool needAddressOf() const { return false; }
 
   /// isOffsetOf - Do we need to emit code to get the offset of the variable,
   /// rather then the value of the variable?   Only valid when parsing MS-style

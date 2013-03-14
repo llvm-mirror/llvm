@@ -28,14 +28,14 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRelocation.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/JITMemoryManager.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Disassembler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -969,14 +969,24 @@ bool JITEmitter::finishFunction(MachineFunction &F) {
     SavedBufferBegin = BufferBegin;
     SavedBufferEnd = BufferEnd;
     SavedCurBufferPtr = CurBufferPtr;
+    uint8_t *FrameRegister;
 
-    BufferBegin = CurBufferPtr = MemMgr->startExceptionTable(F.getFunction(),
-                                                             ActualSize);
-    BufferEnd = BufferBegin+ActualSize;
-    EmittedFunctions[F.getFunction()].ExceptionTable = BufferBegin;
-    uint8_t *EhStart;
-    uint8_t *FrameRegister = DE->EmitDwarfTable(F, *this, FnStart, FnEnd,
-                                                EhStart);
+    while (true) {
+      BufferBegin = CurBufferPtr = MemMgr->startExceptionTable(F.getFunction(),
+                                                               ActualSize);
+      BufferEnd = BufferBegin+ActualSize;
+      EmittedFunctions[F.getFunction()].ExceptionTable = BufferBegin;
+      uint8_t *EhStart;
+      FrameRegister = DE->EmitDwarfTable(F, *this, FnStart, FnEnd, EhStart);
+
+      // If the buffer was large enough to hold the table then we are done.
+      if (CurBufferPtr != BufferEnd)
+        break;
+
+      // Try again with twice as much space.
+      ActualSize = (CurBufferPtr - BufferBegin) * 2;
+      MemMgr->deallocateExceptionTable(BufferBegin);
+    }
     MemMgr->endExceptionTable(F.getFunction(), BufferBegin, CurBufferPtr,
                               FrameRegister);
     BufferBegin = SavedBufferBegin;

@@ -12,11 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LOOP_PASS_H
-#define LLVM_LOOP_PASS_H
+#ifndef LLVM_ANALYSIS_LOOPPASS_H
+#define LLVM_ANALYSIS_LOOPPASS_H
 
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Function.h"
 #include "llvm/Pass.h"
 #include "llvm/PassManagers.h"
 #include <deque>

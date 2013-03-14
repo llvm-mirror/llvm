@@ -120,11 +120,16 @@ def FeatureBMI2    : SubtargetFeature<"bmi2", "HasBMI2", "true",
                                       "Support BMI2 instructions">;
 def FeatureRTM     : SubtargetFeature<"rtm", "HasRTM", "true",
                                       "Support RTM instructions">;
+def FeatureADX     : SubtargetFeature<"adx", "HasADX", "true",
+                                      "Support ADX instructions">;
 def FeatureLeaForSP : SubtargetFeature<"lea-sp", "UseLeaForSP", "true",
                                      "Use LEA for adjusting the stack pointer">;
 def FeatureSlowDivide : SubtargetFeature<"idiv-to-divb",
-                          "HasSlowDivide", "true",
-                          "Use small divide for positive values less than 256">;
+                                     "HasSlowDivide", "true",
+                                     "Use small divide for positive values less than 256">;
+def FeaturePadShortFunctions : SubtargetFeature<"pad-short-functions",
+                                     "PadShortFunctions", "true",
+                                     "Pad short functions">;
 
 //===----------------------------------------------------------------------===//
 // X86 processors supported.
@@ -155,7 +160,8 @@ def : Proc<"pentium3m",       [FeatureSSE1, FeatureSlowBTMem]>;
 def : Proc<"pentium-m",       [FeatureSSE2, FeatureSlowBTMem]>;
 def : Proc<"pentium4",        [FeatureSSE2]>;
 def : Proc<"pentium4m",       [FeatureSSE2, FeatureSlowBTMem]>;
-def : Proc<"x86-64",          [FeatureSSE2, Feature64Bit, FeatureSlowBTMem]>;
+def : Proc<"x86-64",          [FeatureSSE2, Feature64Bit, FeatureSlowBTMem,
+                               FeatureFastUAMem]>;
 def : Proc<"yonah",           [FeatureSSE3, FeatureSlowBTMem]>;
 def : Proc<"prescott",        [FeatureSSE3, FeatureSlowBTMem]>;
 def : Proc<"nocona",          [FeatureSSE3, FeatureCMPXCHG16B,
@@ -166,7 +172,7 @@ def : Proc<"penryn",          [FeatureSSE41, FeatureCMPXCHG16B,
                                FeatureSlowBTMem]>;
 def : AtomProc<"atom",        [ProcIntelAtom, FeatureSSSE3, FeatureCMPXCHG16B,
                                FeatureMOVBE, FeatureSlowBTMem, FeatureLeaForSP,
-                               FeatureSlowDivide]>;
+                               FeatureSlowDivide, FeaturePadShortFunctions]>;
 // "Arrandale" along with corei3 and corei5
 def : Proc<"corei7",          [FeatureSSE42, FeatureCMPXCHG16B,
                                FeatureSlowBTMem, FeatureFastUAMem,

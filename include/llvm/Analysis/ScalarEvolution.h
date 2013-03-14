@@ -23,9 +23,9 @@
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/Function.h"
-#include "llvm/Instructions.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/ConstantRange.h"
@@ -831,7 +831,7 @@ namespace llvm {
 
     /// SimplifyICmpOperands - Simplify LHS and RHS in a comparison with
     /// predicate Pred. Return true iff any changes were made. If the
-    /// operands are provably equal or inequal, LHS and RHS are set to
+    /// operands are provably equal or unequal, LHS and RHS are set to
     /// the same value and Pred is set to either ICMP_EQ or ICMP_NE.
     ///
     bool SimplifyICmpOperands(ICmpInst::Predicate &Pred,

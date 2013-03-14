@@ -62,7 +62,7 @@ namespace {
   class MachineLICM : public MachineFunctionPass {
     const TargetMachine   *TM;
     const TargetInstrInfo *TII;
-    const TargetLowering *TLI;
+    const TargetLoweringBase *TLI;
     const TargetRegisterInfo *TRI;
     const MachineFrameInfo *MFI;
     MachineRegisterInfo *MRI;
@@ -780,7 +780,7 @@ MachineLICM::getRegisterClassIDAndCost(const MachineInstr *MI,
                                        unsigned Reg, unsigned OpIdx,
                                        unsigned &RCId, unsigned &RCCost) const {
   const TargetRegisterClass *RC = MRI->getRegClass(Reg);
-  EVT VT = *RC->vt_begin();
+  MVT VT = *RC->vt_begin();
   if (VT == MVT::Untyped) {
     RCId = RC->getID();
     RCCost = 1;

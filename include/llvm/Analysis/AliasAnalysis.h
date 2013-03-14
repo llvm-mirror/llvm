@@ -34,8 +34,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_ANALYSIS_ALIAS_ANALYSIS_H
-#define LLVM_ANALYSIS_ALIAS_ANALYSIS_H
+#ifndef LLVM_ANALYSIS_ALIASANALYSIS_H
+#define LLVM_ANALYSIS_ALIASANALYSIS_H
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/CallSite.h"
@@ -592,11 +592,6 @@ bool isNoAliasCall(const Value *V);
 ///    NoAlias returns (e.g. calls to malloc)
 ///
 bool isIdentifiedObject(const Value *V);
-
-/// isKnownNonNull - Return true if this pointer couldn't possibly be null by
-/// its definition.  This returns true for allocas, non-extern-weak globals and
-/// byval arguments.
-bool isKnownNonNull(const Value *V);
 
 } // End llvm namespace
 

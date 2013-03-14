@@ -54,6 +54,7 @@ check_include_file(ndir.h HAVE_NDIR_H)
 if( NOT PURE_WINDOWS )
   check_include_file(pthread.h HAVE_PTHREAD_H)
 endif()
+check_include_file(sanitizer/msan_interface.h HAVE_SANITIZER_MSAN_INTERFACE_H)
 check_include_file(setjmp.h HAVE_SETJMP_H)
 check_include_file(signal.h HAVE_SIGNAL_H)
 check_include_file(stdint.h HAVE_STDINT_H)
@@ -99,6 +100,7 @@ if( NOT PURE_WINDOWS )
     endif()
   endif()
   check_library_exists(dl dlopen "" HAVE_LIBDL)
+  check_library_exists(rt clock_gettime "" HAVE_LIBRT)
 endif()
 
 # function checks
@@ -117,6 +119,12 @@ check_symbol_exists(isnan math.h HAVE_ISNAN_IN_MATH_H)
 check_symbol_exists(ceilf math.h HAVE_CEILF)
 check_symbol_exists(floorf math.h HAVE_FLOORF)
 check_symbol_exists(fmodf math.h HAVE_FMODF)
+check_symbol_exists(log math.h HAVE_LOG)
+check_symbol_exists(log2 math.h HAVE_LOG2)
+check_symbol_exists(log10 math.h HAVE_LOG10)
+check_symbol_exists(exp math.h HAVE_EXP)
+check_symbol_exists(exp2 math.h HAVE_EXP2)
+check_symbol_exists(exp10 math.h HAVE_EXP10)
 if( HAVE_SETJMP_H )
   check_symbol_exists(longjmp setjmp.h HAVE_LONGJMP)
   check_symbol_exists(setjmp setjmp.h HAVE_SETJMP)
@@ -294,9 +302,32 @@ else()
   set(ENABLE_PIC 0)
 endif()
 
+find_package(LibXml2)
+if (LIBXML2_FOUND)
+  set(CLANG_HAVE_LIBXML 1)
+endif ()
+
 include(CheckCXXCompilerFlag)
 
 check_cxx_compiler_flag("-Wno-variadic-macros" SUPPORTS_NO_VARIADIC_MACROS_FLAG)
+
+set(USE_NO_MAYBE_UNINITIALIZED 0)
+set(USE_NO_UNINITIALIZED 0)
+
+# Disable gcc's potentially uninitialized use analysis as it presents lots of
+# false positives.
+if (CMAKE_COMPILER_IS_GNUCXX)
+  check_cxx_compiler_flag("-Wmaybe-uninitialized" HAS_MAYBE_UNINITIALIZED)
+  if (HAS_MAYBE_UNINITIALIZED)
+    set(USE_NO_MAYBE_UNINITIALIZED 1)
+  else()
+    # Only recent versions of gcc make the distinction between -Wuninitialized
+    # and -Wmaybe-uninitialized. If -Wmaybe-uninitialized isn't supported, just
+    # turn off all uninitialized use warnings.
+    check_cxx_compiler_flag("-Wuninitialized" HAS_UNINITIALIZED)
+    set(USE_NO_UNINITIALIZED ${HAS_UNINITIALIZED})
+  endif()
+endif()
 
 include(GetHostTriple)
 get_host_triple(LLVM_HOST_TRIPLE)

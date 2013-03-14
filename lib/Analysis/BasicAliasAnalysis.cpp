@@ -21,16 +21,16 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalAlias.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
@@ -88,7 +88,7 @@ static uint64_t getObjectSize(const Value *V, const DataLayout &TD,
                               const TargetLibraryInfo &TLI,
                               bool RoundToAlign = false) {
   uint64_t Size;
-  if (getObjectSize(V, Size, &TD, &TLI, RoundToAlign))
+  if (getUnderlyingObjectSize(V, Size, &TD, &TLI, RoundToAlign))
     return Size;
   return AliasAnalysis::UnknownSize;
 }
@@ -631,7 +631,7 @@ BasicAliasAnalysis::getModRefBehavior(const Function *F) {
   // For intrinsics, we can check the table.
   if (unsigned iid = F->getIntrinsicID()) {
 #define GET_INTRINSIC_MODREF_BEHAVIOR
-#include "llvm/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.gen"
 #undef GET_INTRINSIC_MODREF_BEHAVIOR
   }
 

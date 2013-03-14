@@ -14,8 +14,8 @@
 #include "InstCombine.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/Loads.h"
-#include "llvm/DataLayout.h"
-#include "llvm/IntrinsicInst.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
@@ -802,6 +802,13 @@ bool InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
   InsertNewInstBefore(NewSI, *BBI);
   NewSI->setDebugLoc(OtherStore->getDebugLoc()); 
 
+  // If the two stores had the same TBAA tag, preserve it.
+  if (MDNode *TBAATag = SI.getMetadata(LLVMContext::MD_tbaa))
+    if ((TBAATag = MDNode::getMostGenericTBAA(TBAATag,
+                               OtherStore->getMetadata(LLVMContext::MD_tbaa))))
+      NewSI->setMetadata(LLVMContext::MD_tbaa, TBAATag);
+
+  
   // Nuke the old stores.
   EraseInstFromFunction(SI);
   EraseInstFromFunction(*OtherStore);

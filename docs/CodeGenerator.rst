@@ -1,5 +1,3 @@
-.. _code_generator:
-
 ==========================================
 The LLVM Target-Independent Code Generator
 ==========================================
@@ -17,6 +15,8 @@ The LLVM Target-Independent Code Generator
     .partial { background-color: #F88017 }
     .yes { background-color: #0F0; }
     .yes:before { content: "Y" }
+    .na { background-color: #6666FF; }
+    .na:before { content: "N/A" }
   </style>
 
 .. contents::
@@ -285,12 +285,10 @@ The ``TargetInstrInfo`` class
 -----------------------------
 
 The ``TargetInstrInfo`` class is used to describe the machine instructions
-supported by the target. It is essentially an array of ``TargetInstrDescriptor``
-objects, each of which describes one instruction the target
-supports. Descriptors define things like the mnemonic for the opcode, the number
-of operands, the list of implicit register uses and defs, whether the
-instruction has certain target-independent properties (accesses memory, is
-commutable, etc), and holds any target-specific flags.
+supported by the target.  Descriptions define things like the mnemonic for
+the opcode, the number of operands, the list of implicit register uses and defs,
+whether the instruction has certain target-independent properties (accesses
+memory, is commutable, etc), and holds any target-specific flags.
 
 The ``TargetFrameInfo`` class
 -----------------------------
@@ -1748,12 +1746,14 @@ the key:
 :raw-html:`<table border="1" cellspacing="0">`
 :raw-html:`<tr>`
 :raw-html:`<th>Unknown</th>`
+:raw-html:`<th>Not Applicable</th>`
 :raw-html:`<th>No support</th>`
 :raw-html:`<th>Partial Support</th>`
 :raw-html:`<th>Complete Support</th>`
 :raw-html:`</tr>`
 :raw-html:`<tr>`
 :raw-html:`<td class="unknown"></td>`
+:raw-html:`<td class="na"></td>`
 :raw-html:`<td class="no"></td>`
 :raw-html:`<td class="partial"></td>`
 :raw-html:`<td class="yes"></td>`
@@ -1773,7 +1773,7 @@ Here is the table:
 :raw-html:`<th>MBlaze</th>`
 :raw-html:`<th>MSP430</th>`
 :raw-html:`<th>Mips</th>`
-:raw-html:`<th>PTX</th>`
+:raw-html:`<th>NVPTX</th>`
 :raw-html:`<th>PowerPC</th>`
 :raw-html:`<th>Sparc</th>`
 :raw-html:`<th>X86</th>`
@@ -1787,7 +1787,7 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- MBlaze -->`
 :raw-html:`<td class="unknown"></td> <!-- MSP430 -->`
 :raw-html:`<td class="yes"></td> <!-- Mips -->`
-:raw-html:`<td class="no"></td> <!-- PTX -->`
+:raw-html:`<td class="yes"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="yes"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
@@ -1801,7 +1801,7 @@ Here is the table:
 :raw-html:`<td class="yes"></td> <!-- MBlaze -->`
 :raw-html:`<td class="no"></td> <!-- MSP430 -->`
 :raw-html:`<td class="no"></td> <!-- Mips -->`
-:raw-html:`<td class="no"></td> <!-- PTX -->`
+:raw-html:`<td class="no"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
@@ -1815,7 +1815,7 @@ Here is the table:
 :raw-html:`<td class="yes"></td> <!-- MBlaze -->`
 :raw-html:`<td class="no"></td> <!-- MSP430 -->`
 :raw-html:`<td class="no"></td> <!-- Mips -->`
-:raw-html:`<td class="no"></td> <!-- PTX -->`
+:raw-html:`<td class="na"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
@@ -1829,7 +1829,7 @@ Here is the table:
 :raw-html:`<td class="yes"></td> <!-- MBlaze -->`
 :raw-html:`<td class="unknown"></td> <!-- MSP430 -->`
 :raw-html:`<td class="no"></td> <!-- Mips -->`
-:raw-html:`<td class="unknown"></td> <!-- PTX -->`
+:raw-html:`<td class="yes"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="unknown"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
@@ -1843,7 +1843,7 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- MBlaze -->`
 :raw-html:`<td class="unknown"></td> <!-- MSP430 -->`
 :raw-html:`<td class="yes"></td> <!-- Mips -->`
-:raw-html:`<td class="unknown"></td> <!-- PTX -->`
+:raw-html:`<td class="na"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="unknown"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
@@ -1857,7 +1857,7 @@ Here is the table:
 :raw-html:`<td class="yes"></td> <!-- MBlaze -->`
 :raw-html:`<td class="no"></td> <!-- MSP430 -->`
 :raw-html:`<td class="no"></td> <!-- Mips -->`
-:raw-html:`<td class="no"></td> <!-- PTX -->`
+:raw-html:`<td class="na"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
@@ -1871,7 +1871,7 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- MBlaze -->`
 :raw-html:`<td class="unknown"></td> <!-- MSP430 -->`
 :raw-html:`<td class="no"></td> <!-- Mips -->`
-:raw-html:`<td class="unknown"></td> <!-- PTX -->`
+:raw-html:`<td class="no"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="unknown"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
@@ -1885,7 +1885,7 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- MBlaze -->`
 :raw-html:`<td class="no"></td> <!-- MSP430 -->`
 :raw-html:`<td class="no"></td> <!-- Mips -->`
-:raw-html:`<td class="no"></td> <!-- PTX -->`
+:raw-html:`<td class="no"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
 :raw-html:`<td class="partial"><a href="#feat_segstacks_x86">*</a></td> <!-- X86 -->`
@@ -2367,17 +2367,17 @@ Dynamic Allocation
 
   TODO - More to come.
 
-The PTX backend
----------------
+The NVPTX backend
+-----------------
 
-The PTX code generator lives in the lib/Target/PTX directory. It is currently a
-work-in-progress, but already supports most of the code generation functionality
-needed to generate correct PTX kernels for CUDA devices.
+The NVPTX code generator under lib/Target/NVPTX is an open-source version of
+the NVIDIA NVPTX code generator for LLVM.  It is contributed by NVIDIA and is
+a port of the code generator used in the CUDA compiler (nvcc).  It targets the
+PTX 3.0/3.1 ISA and can target any compute capability greater than or equal to
+2.0 (Fermi).
 
-The code generator can target PTX 2.0+, and shader model 1.0+.  The PTX ISA
-Reference Manual is used as the primary source of ISA information, though an
-effort is made to make the output of the code generator match the output of the
-NVidia nvcc compiler, whenever possible.
+This target is of production quality and should be completely compatible with
+the official NVIDIA toolchain.
 
 Code Generator Options:
 
@@ -2387,39 +2387,28 @@ Code Generator Options:
 :raw-html:`<th>Description</th>`
 :raw-html:`</tr>`
 :raw-html:`<tr>`
-:raw-html:`<td>``double``</td>`
-:raw-html:`<td align="left">If enabled, the map_f64_to_f32 directive is disabled in the PTX output, allowing native double-precision arithmetic</td>`
+:raw-html:`<td>sm_20</td>`
+:raw-html:`<td align="left">Set shader model/compute capability to 2.0</td>`
 :raw-html:`</tr>`
 :raw-html:`<tr>`
-:raw-html:`<td>``no-fma``</td>`
-:raw-html:`<td align="left">Disable generation of Fused-Multiply Add instructions, which may be beneficial for some devices</td>`
+:raw-html:`<td>sm_21</td>`
+:raw-html:`<td align="left">Set shader model/compute capability to 2.1</td>`
 :raw-html:`</tr>`
 :raw-html:`<tr>`
-:raw-html:`<td>``smxy / computexy``</td>`
-:raw-html:`<td align="left">Set shader model/compute capability to x.y, e.g. sm20 or compute13</td>`
+:raw-html:`<td>sm_30</td>`
+:raw-html:`<td align="left">Set shader model/compute capability to 3.0</td>`
+:raw-html:`</tr>`
+:raw-html:`<tr>`
+:raw-html:`<td>sm_35</td>`
+:raw-html:`<td align="left">Set shader model/compute capability to 3.5</td>`
+:raw-html:`</tr>`
+:raw-html:`<tr>`
+:raw-html:`<td>ptx30</td>`
+:raw-html:`<td align="left">Target PTX 3.0</td>`
+:raw-html:`</tr>`
+:raw-html:`<tr>`
+:raw-html:`<td>ptx31</td>`
+:raw-html:`<td align="left">Target PTX 3.1</td>`
 :raw-html:`</tr>`
 :raw-html:`</table>`
 
-Working:
-
-* Arithmetic instruction selection (including combo FMA)
-
-* Bitwise instruction selection
-
-* Control-flow instruction selection
-
-* Function calls (only on SM 2.0+ and no return arguments)
-
-* Addresses spaces (0 = global, 1 = constant, 2 = local, 4 = shared)
-
-* Thread synchronization (bar.sync)
-
-* Special register reads ([N]TID, [N]CTAID, PMx, CLOCK, etc.)
-
-In Progress:
-
-* Robust call instruction selection
-
-* Stack frame allocation
-
-* Device-specific instruction scheduling optimizations

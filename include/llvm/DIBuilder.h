@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_ANALYSIS_DIBUILDER_H
-#define LLVM_ANALYSIS_DIBUILDER_H
+#ifndef LLVM_DIBUILDER_H
+#define LLVM_DIBUILDER_H
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
@@ -28,6 +28,9 @@ namespace llvm {
   class LLVMContext;
   class MDNode;
   class StringRef;
+  class DIBasicType;
+  class DICompositeType;
+  class DIDerivedType;
   class DIDescriptor;
   class DIFile;
   class DIEnumerator;
@@ -88,9 +91,12 @@ namespace llvm {
     ///                 by a tool analyzing generated debugging information.
     /// @param RV       This indicates runtime version for languages like 
     ///                 Objective-C.
+    /// @param SplitName The name of the file that we'll split debug info out
+    ///                  into.
     void createCompileUnit(unsigned Lang, StringRef File, StringRef Dir, 
-                           StringRef Producer,
-                           bool isOptimized, StringRef Flags, unsigned RV);
+                           StringRef Producer, bool isOptimized,
+                           StringRef Flags, unsigned RV,
+                           StringRef SplitName = StringRef());
 
     /// createFile - Create a file descriptor to hold debugging information
     /// for a file.
@@ -108,27 +114,32 @@ namespace llvm {
     /// @param SizeInBits  Size of the type.
     /// @param AlignInBits Type alignment.
     /// @param Encoding    DWARF encoding code, e.g. dwarf::DW_ATE_float.
-    DIType createBasicType(StringRef Name, uint64_t SizeInBits, 
-                           uint64_t AlignInBits, unsigned Encoding);
+    DIBasicType createBasicType(StringRef Name, uint64_t SizeInBits,
+                                uint64_t AlignInBits, unsigned Encoding);
 
     /// createQualifiedType - Create debugging information entry for a qualified
     /// type, e.g. 'const int'.
     /// @param Tag         Tag identifing type, e.g. dwarf::TAG_volatile_type
     /// @param FromTy      Base Type.
-    DIType createQualifiedType(unsigned Tag, DIType FromTy);
+    DIDerivedType createQualifiedType(unsigned Tag, DIType FromTy);
 
     /// createPointerType - Create debugging information entry for a pointer.
     /// @param PointeeTy   Type pointed by this pointer.
     /// @param SizeInBits  Size.
     /// @param AlignInBits Alignment. (optional)
     /// @param Name        Pointer type name. (optional)
-    DIType createPointerType(DIType PointeeTy, uint64_t SizeInBits,
-                             uint64_t AlignInBits = 0, 
-                             StringRef Name = StringRef());
+    DIDerivedType
+    createPointerType(DIType PointeeTy, uint64_t SizeInBits,
+                      uint64_t AlignInBits = 0, StringRef Name = StringRef());
+
+    /// \brief Create debugging information entry for a pointer to member.
+    /// @param PointeeTy Type pointed to by this pointer.
+    /// @param Class Type for which this pointer points to members of.
+    DIDerivedType createMemberPointerType(DIType PointeeTy, DIType Class);
 
     /// createReferenceType - Create debugging information entry for a c++
     /// style reference or rvalue reference type.
-    DIType createReferenceType(unsigned Tag, DIType RTy);
+    DIDerivedType createReferenceType(unsigned Tag, DIType RTy);
 
     /// createTypedef - Create debugging information entry for a typedef.
     /// @param Ty          Original type.
@@ -136,8 +147,8 @@ namespace llvm {
     /// @param File        File where this type is defined.
     /// @param LineNo      Line number.
     /// @param Context     The surrounding context for the typedef.
-    DIType createTypedef(DIType Ty, StringRef Name, DIFile File, 
-                         unsigned LineNo, DIDescriptor Context);
+    DIDerivedType createTypedef(DIType Ty, StringRef Name, DIFile File,
+                                unsigned LineNo, DIDescriptor Context);
 
     /// createFriend - Create debugging information entry for a 'friend'.
     DIType createFriend(DIType Ty, DIType FriendTy);
@@ -149,8 +160,8 @@ namespace llvm {
     /// @param BaseOffset   Base offset.
     /// @param Flags        Flags to describe inheritance attribute, 
     ///                     e.g. private
-    DIType createInheritance(DIType Ty, DIType BaseTy, uint64_t BaseOffset,
-                             unsigned Flags);
+    DIDerivedType createInheritance(DIType Ty, DIType BaseTy,
+                                    uint64_t BaseOffset, unsigned Flags);
 
     /// createMemberType - Create debugging information entry for a member.
     /// @param Scope        Member scope.
@@ -162,10 +173,23 @@ namespace llvm {
     /// @param OffsetInBits Member offset.
     /// @param Flags        Flags to encode member attribute, e.g. private
     /// @param Ty           Parent type.
-    DIType createMemberType(DIDescriptor Scope, StringRef Name, DIFile File,
-                            unsigned LineNo, uint64_t SizeInBits, 
-                            uint64_t AlignInBits, uint64_t OffsetInBits, 
-                            unsigned Flags, DIType Ty);
+    DIDerivedType
+    createMemberType(DIDescriptor Scope, StringRef Name, DIFile File,
+                     unsigned LineNo, uint64_t SizeInBits, uint64_t AlignInBits,
+                     uint64_t OffsetInBits, unsigned Flags, DIType Ty);
+
+    /// createStaticMemberType - Create debugging information entry for a
+    /// C++ static data member.
+    /// @param Scope      Member scope.
+    /// @param Name       Member name.
+    /// @param File       File where this member is declared.
+    /// @param LineNo     Line number.
+    /// @param Ty         Type of the static member.
+    /// @param Flags      Flags to encode member attribute, e.g. private.
+    /// @param Val        Const initializer of the member.
+    DIType createStaticMemberType(DIDescriptor Scope, StringRef Name,
+                                  DIFile File, unsigned LineNo, DIType Ty,
+                                  unsigned Flags, llvm::Value *Val);
 
     /// createObjCIVar - Create debugging information entry for Objective-C
     /// instance variable.
@@ -258,10 +282,12 @@ namespace llvm {
     /// @param Flags        Flags to encode member attribute, e.g. private
     /// @param Elements     Struct elements.
     /// @param RunTimeLang  Optional parameter, Objective-C runtime version.
-    DIType createStructType(DIDescriptor Scope, StringRef Name, DIFile File,
-                            unsigned LineNumber, uint64_t SizeInBits,
-                            uint64_t AlignInBits, unsigned Flags,
-                            DIArray Elements, unsigned RunTimeLang = 0);
+    DICompositeType createStructType(DIDescriptor Scope, StringRef Name,
+                                     DIFile File, unsigned LineNumber,
+                                     uint64_t SizeInBits, uint64_t AlignInBits,
+                                     unsigned Flags, DIType DerivedFrom,
+                                     DIArray Elements, unsigned RunTimeLang = 0,
+                                     MDNode *VTableHolder = 0);
 
     /// createUnionType - Create debugging information entry for an union.
     /// @param Scope        Scope in which this union is defined.
@@ -273,10 +299,10 @@ namespace llvm {
     /// @param Flags        Flags to encode member attribute, e.g. private
     /// @param Elements     Union elements.
     /// @param RunTimeLang  Optional parameter, Objective-C runtime version.
-    DIType createUnionType(DIDescriptor Scope, StringRef Name, DIFile File,
-                           unsigned LineNumber, uint64_t SizeInBits,
-                           uint64_t AlignInBits, unsigned Flags,
-                           DIArray Elements, unsigned RunTimeLang = 0);
+    DICompositeType createUnionType(
+        DIDescriptor Scope, StringRef Name, DIFile File, unsigned LineNumber,
+        uint64_t SizeInBits, uint64_t AlignInBits, unsigned Flags,
+        DIArray Elements, unsigned RunTimeLang = 0);
 
     /// createTemplateTypeParameter - Create debugging information for template
     /// type parameter.
@@ -311,8 +337,8 @@ namespace llvm {
     /// @param AlignInBits  Alignment.
     /// @param Ty           Element type.
     /// @param Subscripts   Subscripts.
-    DIType createArrayType(uint64_t Size, uint64_t AlignInBits, 
-                           DIType Ty, DIArray Subscripts);
+    DICompositeType createArrayType(uint64_t Size, uint64_t AlignInBits,
+                                    DIType Ty, DIArray Subscripts);
 
     /// createVectorType - Create debugging information entry for a vector type.
     /// @param Size         Array size.
@@ -331,16 +357,16 @@ namespace llvm {
     /// @param SizeInBits   Member size.
     /// @param AlignInBits  Member alignment.
     /// @param Elements     Enumeration elements.
-    DIType createEnumerationType(DIDescriptor Scope, StringRef Name, 
-                                 DIFile File, unsigned LineNumber, 
-                                 uint64_t SizeInBits, uint64_t AlignInBits,
-                                 DIArray Elements, DIType ClassType);
+    DICompositeType createEnumerationType(
+        DIDescriptor Scope, StringRef Name, DIFile File, unsigned LineNumber,
+        uint64_t SizeInBits, uint64_t AlignInBits, DIArray Elements,
+        DIType ClassType);
 
     /// createSubroutineType - Create subroutine type.
     /// @param File           File in which this subroutine is defined.
     /// @param ParameterTypes An array of subroutine parameter types. This
     ///                       includes return type at 0th index.
-    DIType createSubroutineType(DIFile File, DIArray ParameterTypes);
+    DICompositeType createSubroutineType(DIFile File, DIArray ParameterTypes);
 
     /// createArtificialType - Create a new DIType with "artificial" flag set.
     DIType createArtificialType(DIType Ty);
@@ -397,10 +423,12 @@ namespace llvm {
     /// @param isLocalToUnit Boolean flag indicate whether this variable is
     ///                      externally visible or not.
     /// @param Val         llvm::Value of the variable.
+    /// @param Decl        Reference to the corresponding declaration.
     DIGlobalVariable
     createStaticVariable(DIDescriptor Context, StringRef Name, 
                          StringRef LinkageName, DIFile File, unsigned LineNo, 
-                         DIType Ty, bool isLocalToUnit, llvm::Value *Val);
+                         DIType Ty, bool isLocalToUnit, llvm::Value *Val,
+                         MDNode *Decl = NULL);
 
 
     /// createLocalVariable - Create a new descriptor for the specified 

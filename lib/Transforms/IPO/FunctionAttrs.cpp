@@ -26,11 +26,11 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/CaptureTracking.h"
-#include "llvm/CallGraphSCCPass.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/InstIterator.h"
 using namespace llvm;
 
@@ -213,16 +213,15 @@ bool FunctionAttrs::AddReadAttrs(const CallGraphSCC &SCC) {
 
     // Clear out any existing attributes.
     AttrBuilder B;
-    B.addAttribute(Attributes::ReadOnly)
-      .addAttribute(Attributes::ReadNone);
-    F->removeAttribute(AttributeSet::FunctionIndex,
-                       Attributes::get(F->getContext(), B));
+    B.addAttribute(Attribute::ReadOnly)
+      .addAttribute(Attribute::ReadNone);
+    F->removeAttributes(AttributeSet::FunctionIndex,
+                        AttributeSet::get(F->getContext(),
+                                          AttributeSet::FunctionIndex, B));
 
     // Add in the new attribute.
-    B.clear();
-    B.addAttribute(ReadsMemory ? Attributes::ReadOnly : Attributes::ReadNone);
     F->addAttribute(AttributeSet::FunctionIndex,
-                    Attributes::get(F->getContext(), B));
+                    ReadsMemory ? Attribute::ReadOnly : Attribute::ReadNone);
 
     if (ReadsMemory)
       ++NumReadOnly;
@@ -358,7 +357,7 @@ bool FunctionAttrs::AddNoCaptureAttrs(const CallGraphSCC &SCC) {
   ArgumentGraph AG;
 
   AttrBuilder B;
-  B.addAttribute(Attributes::NoCapture);
+  B.addAttribute(Attribute::NoCapture);
 
   // Check each function in turn, determining which pointer arguments are not
   // captured.
@@ -381,7 +380,7 @@ bool FunctionAttrs::AddNoCaptureAttrs(const CallGraphSCC &SCC) {
       for (Function::arg_iterator A = F->arg_begin(), E = F->arg_end();
            A != E; ++A) {
         if (A->getType()->isPointerTy() && !A->hasNoCaptureAttr()) {
-          A->addAttr(Attributes::get(F->getContext(), B));
+          A->addAttr(AttributeSet::get(F->getContext(), A->getArgNo() + 1, B));
           ++NumNoCapture;
           Changed = true;
         }
@@ -396,7 +395,7 @@ bool FunctionAttrs::AddNoCaptureAttrs(const CallGraphSCC &SCC) {
         if (!Tracker.Captured) {
           if (Tracker.Uses.empty()) {
             // If it's trivially not captured, mark it nocapture now.
-            A->addAttr(Attributes::get(F->getContext(), B));
+            A->addAttr(AttributeSet::get(F->getContext(), A->getArgNo()+1, B));
             ++NumNoCapture;
             Changed = true;
           } else {
@@ -431,7 +430,9 @@ bool FunctionAttrs::AddNoCaptureAttrs(const CallGraphSCC &SCC) {
           ArgumentSCC[0]->Uses[0] == ArgumentSCC[0]) {
         ArgumentSCC[0]->
           Definition->
-          addAttr(Attributes::get(ArgumentSCC[0]->Definition->getContext(), B));
+          addAttr(AttributeSet::get(ArgumentSCC[0]->Definition->getContext(),
+                                    ArgumentSCC[0]->Definition->getArgNo() + 1,
+                                    B));
         ++NumNoCapture;
         Changed = true;
       }
@@ -473,7 +474,7 @@ bool FunctionAttrs::AddNoCaptureAttrs(const CallGraphSCC &SCC) {
 
     for (unsigned i = 0, e = ArgumentSCC.size(); i != e; ++i) {
       Argument *A = ArgumentSCC[i]->Definition;
-      A->addAttr(Attributes::get(A->getContext(), B));
+      A->addAttr(AttributeSet::get(A->getContext(), A->getArgNo() + 1, B));
       ++NumNoCapture;
       Changed = true;
     }
@@ -530,7 +531,7 @@ bool FunctionAttrs::IsFunctionMallocLike(Function *F,
         case Instruction::Call:
         case Instruction::Invoke: {
           CallSite CS(RVI);
-          if (CS.paramHasAttr(0, Attributes::NoAlias))
+          if (CS.paramHasAttr(0, Attribute::NoAlias))
             break;
           if (CS.getCalledFunction() &&
               SCCNodes.count(CS.getCalledFunction()))

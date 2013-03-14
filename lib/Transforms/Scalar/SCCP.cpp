@@ -26,11 +26,11 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/InstVisitor.h"
-#include "llvm/Instructions.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
@@ -270,13 +270,6 @@ public:
     assert(I != ValueState.end() && "V is not in valuemap!");
     return I->second;
   }
-
-  /*LatticeVal getStructLatticeValueFor(Value *V, unsigned i) const {
-    DenseMap<std::pair<Value*, unsigned>, LatticeVal>::const_iterator I =
-      StructValueState.find(std::make_pair(V, i));
-    assert(I != StructValueState.end() && "V is not in valuemap!");
-    return I->second;
-  }*/
 
   /// getTrackedRetVals - Get the inferred return value map.
   ///
@@ -709,9 +702,6 @@ void SCCPSolver::visitPHINode(PHINode &PN) {
   if (OperandVal)
     markConstant(&PN, OperandVal);      // Acquire operand value
 }
-
-
-
 
 void SCCPSolver::visitReturnInst(ReturnInst &I) {
   if (I.getNumOperands() == 0) return;  // ret void
@@ -1185,7 +1175,7 @@ void SCCPSolver::Solve() {
       DEBUG(dbgs() << "\nPopped off OI-WL: " << *I << '\n');
 
       // "I" got into the work list because it either made the transition from
-      // bottom to constant
+      // bottom to constant, or to overdefined.
       //
       // Anything on this worklist that is overdefined need not be visited
       // since all of its users will have already been marked as overdefined

@@ -1,5 +1,5 @@
 ; RUN: llc -mtriple=x86_64-apple-darwin -O0 -filetype=obj -o %t < %s
-; RUN: llvm-dwarfdump %t | FileCheck %s
+; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
 ; <rdar://problem/12566646>
 
 %struct.foo = type { i32, [1 x i32] }
@@ -29,41 +29,39 @@ declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
 ; should.
 
 ; CHECK:      0x00000074:   DW_TAG_base_type [5]  
-; CHECK-NEXT: 0x00000075:     DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000043] = "int")
-; CHECK-NEXT: 0x00000079:     DW_AT_encoding [DW_FORM_data1]   (0x05)
-; CHECK-NEXT: 0x0000007a:     DW_AT_byte_size [DW_FORM_data1]  (0x04)
+; CHECK-NEXT: DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000043] = "int")
+; CHECK-NEXT: DW_AT_encoding [DW_FORM_data1]   (0x05)
+; CHECK-NEXT: DW_AT_byte_size [DW_FORM_data1]  (0x04)
 
 ; int[1]:
-; CHECK:      0x0000007e:   DW_TAG_array_type [7] *
-; CHECK-NEXT: 0x0000007f:     DW_AT_type [DW_FORM_ref4]    (cu + 0x0074 => {0x00000074})
-; CHECK:      0x00000083:     DW_TAG_subrange_type [8]  
-; CHECK-NEXT: 0x00000084:       DW_AT_type [DW_FORM_ref4]  (cu + 0x007b => {0x0000007b})
-; CHECK-NEXT: 0x00000088:       DW_AT_upper_bound [DW_FORM_data1]  (0x00)
+; CHECK:      0x00000082:   DW_TAG_array_type [7] *
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]    (cu + 0x0074 => {0x00000074})
+; CHECK:      0x00000087:     DW_TAG_subrange_type [8]
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x007b => {0x0000007b})
+; CHECK-NEXT: DW_AT_upper_bound [DW_FORM_data1]  (0x00)
 
 ; int foo::b[1]:
-; CHECK:      0x000000a1:     DW_TAG_member [10]  
-; CHECK-NEXT: 0x000000a2:       DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000050] = "b")
-; CHECK-NEXT: 0x000000a6:       DW_AT_type [DW_FORM_ref4]  (cu + 0x007e => {0x0000007e})
+; CHECK:      0x000000a5:     DW_TAG_member [10]
+; CHECK-NEXT: DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000050] = "b")
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x0082 => {0x00000082})
 
 ; int[0]:
-; CHECK:      0x000000b1:   DW_TAG_array_type [7] *
-; CHECK-NEXT: 0x000000b2:     DW_AT_type [DW_FORM_ref4]    (cu + 0x0074 => {0x00000074})
-; CHECK:      0x000000b6:     DW_TAG_subrange_type [11]  
-; CHECK-NEXT: 0x000000b7:       DW_AT_type [DW_FORM_ref4]  (cu + 0x007b => {0x0000007b})
+; CHECK:      0x000000b5:   DW_TAG_array_type [7] *
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]    (cu + 0x0074 => {0x00000074})
+; CHECK:      0x000000ba:     DW_TAG_subrange_type [11]
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x007b => {0x0000007b})
 ; CHECK-NOT:  DW_AT_upper_bound
 
 ; int bar::b[0]:
-; CHECK:      0x000000d3:     DW_TAG_member [10]  
-; CHECK-NEXT: 0x000000d4:       DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000050] = "b")
-; CHECK-NEXT: 0x000000d8:       DW_AT_type [DW_FORM_ref4]  (cu + 0x00b1 => {0x000000b1})
+; CHECK:      0x000000d7:     DW_TAG_member [10]
+; CHECK-NEXT: DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000050] = "b")
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x00b5 => {0x000000b5})
 
 !llvm.dbg.cu = !{!0}
 
 !0 = metadata !{i32 786449, i32 0, i32 12, metadata !"test.c", metadata !"/Volumes/Sandbox/llvm", metadata !"clang version 3.3 (trunk 169136)", i1 true, i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !1} ; [ DW_TAG_compile_unit ] [/Volumes/Sandbox/llvm/test.c] [DW_LANG_C99]
-!1 = metadata !{metadata !2}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !5}
+!1 = metadata !{i32 0}
+!3 = metadata !{metadata !5}
 !5 = metadata !{i32 786478, i32 0, metadata !6, metadata !"func", metadata !"func", metadata !"", metadata !6, i32 11, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, i32 ()* @func, null, null, metadata !1, i32 11} ; [ DW_TAG_subprogram ] [line 11] [def] [func]
 !6 = metadata !{i32 786473, metadata !"test.c", metadata !"/Volumes/Sandbox/llvm", null} ; [ DW_TAG_file_type ]
 !7 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]

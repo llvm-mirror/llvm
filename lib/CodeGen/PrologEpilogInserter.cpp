@@ -31,14 +31,13 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
-#include "llvm/InlineAsm.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include <climits>
 
@@ -96,7 +95,8 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
   placeCSRSpillsAndRestores(Fn);
 
   // Add the code to save and restore the callee saved registers
-  if (!F->getFnAttributes().hasAttribute(Attributes::Naked))
+  if (!F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                       Attribute::Naked))
     insertCSRSpillsAndRestores(Fn);
 
   // Allow the target machine to make final modifications to the function
@@ -111,7 +111,8 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
   // called functions.  Because of this, calculateCalleeSavedRegisters()
   // must be called before this function in order to set the AdjustsStack
   // and MaxCallFrameSize variables.
-  if (!F->getFnAttributes().hasAttribute(Attributes::Naked))
+  if (!F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                       Attribute::Naked))
     insertPrologEpilogCode(Fn);
 
   // Replace all MO_FrameIndex operands with physical register references
@@ -137,7 +138,6 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
 /// variables for the function's frame information and eliminate call frame
 /// pseudo instructions.
 void PEI::calculateCallsInformation(MachineFunction &Fn) {
-  const TargetRegisterInfo *RegInfo = Fn.getTarget().getRegisterInfo();
   const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
   const TargetFrameLowering *TFI = Fn.getTarget().getFrameLowering();
   MachineFrameInfo *MFI = Fn.getFrameInfo();
@@ -184,20 +184,20 @@ void PEI::calculateCallsInformation(MachineFunction &Fn) {
     // here. The sub/add sp instruction pairs are still inserted, but we don't
     // need to track the SP adjustment for frame index elimination.
     if (TFI->canSimplifyCallFramePseudos(Fn))
-      RegInfo->eliminateCallFramePseudoInstr(Fn, *I->getParent(), I);
+      TFI->eliminateCallFramePseudoInstr(Fn, *I->getParent(), I);
   }
 }
 
 
 /// calculateCalleeSavedRegisters - Scan the function for modified callee saved
 /// registers.
-void PEI::calculateCalleeSavedRegisters(MachineFunction &Fn) {
-  const TargetRegisterInfo *RegInfo = Fn.getTarget().getRegisterInfo();
-  const TargetFrameLowering *TFI = Fn.getTarget().getFrameLowering();
-  MachineFrameInfo *MFI = Fn.getFrameInfo();
+void PEI::calculateCalleeSavedRegisters(MachineFunction &F) {
+  const TargetRegisterInfo *RegInfo = F.getTarget().getRegisterInfo();
+  const TargetFrameLowering *TFI = F.getTarget().getFrameLowering();
+  MachineFrameInfo *MFI = F.getFrameInfo();
 
   // Get the callee saved register list...
-  const uint16_t *CSRegs = RegInfo->getCalleeSavedRegs(&Fn);
+  const uint16_t *CSRegs = RegInfo->getCalleeSavedRegs(&F);
 
   // These are used to keep track the callee-save area. Initialize them.
   MinCSFrameIndex = INT_MAX;
@@ -208,13 +208,14 @@ void PEI::calculateCalleeSavedRegisters(MachineFunction &Fn) {
     return;
 
   // In Naked functions we aren't going to save any registers.
-  if (Fn.getFunction()->getFnAttributes().hasAttribute(Attributes::Naked))
+  if (F.getFunction()->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                                    Attribute::Naked))
     return;
 
   std::vector<CalleeSavedInfo> CSI;
   for (unsigned i = 0; CSRegs[i]; ++i) {
     unsigned Reg = CSRegs[i];
-    if (Fn.getRegInfo().isPhysRegUsed(Reg)) {
+    if (F.getRegInfo().isPhysRegUsed(Reg)) {
       // If the reg is modified, save it!
       CSI.push_back(CalleeSavedInfo(Reg));
     }
@@ -235,7 +236,7 @@ void PEI::calculateCalleeSavedRegisters(MachineFunction &Fn) {
     const TargetRegisterClass *RC = RegInfo->getMinimalPhysRegClass(Reg);
 
     int FrameIdx;
-    if (RegInfo->hasReservedSpillSlot(Fn, Reg, FrameIdx)) {
+    if (RegInfo->hasReservedSpillSlot(F, Reg, FrameIdx)) {
       I->setFrameIdx(FrameIdx);
       continue;
     }
@@ -690,6 +691,14 @@ void PEI::insertPrologEpilogCode(MachineFunction &Fn) {
   // space in small chunks instead of one large contiguous block.
   if (Fn.getTarget().Options.EnableSegmentedStacks)
     TFI.adjustForSegmentedStacks(Fn);
+
+  // Emit additional code that is required to explicitly handle the stack in
+  // HiPE native code (if needed) when loaded in the Erlang/OTP runtime. The
+  // approach is rather similar to that of Segmented Stacks, but it uses a
+  // different conditional check and another BIF for allocating more stack
+  // space.
+  if (Fn.getFunction()->getCallingConv() == CallingConv::HiPE)
+    TFI.adjustForHiPEPrologue(Fn);
 }
 
 /// replaceFrameIndices - Replace all MO_FrameIndex operands with physical
@@ -736,7 +745,7 @@ void PEI::replaceFrameIndices(MachineFunction &Fn) {
 
         MachineBasicBlock::iterator PrevI = BB->end();
         if (I != BB->begin()) PrevI = prior(I);
-        TRI.eliminateCallFramePseudoInstr(Fn, *BB, I);
+        TFI->eliminateCallFramePseudoInstr(Fn, *BB, I);
 
         // Visit the instructions created by eliminateCallFramePseudoInstr().
         if (PrevI == BB->end())
@@ -748,33 +757,35 @@ void PEI::replaceFrameIndices(MachineFunction &Fn) {
 
       MachineInstr *MI = I;
       bool DoIncr = true;
-      for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i)
-        if (MI->getOperand(i).isFI()) {
-          // Some instructions (e.g. inline asm instructions) can have
-          // multiple frame indices and/or cause eliminateFrameIndex
-          // to insert more than one instruction. We need the register
-          // scavenger to go through all of these instructions so that
-          // it can update its register information. We keep the
-          // iterator at the point before insertion so that we can
-          // revisit them in full.
-          bool AtBeginning = (I == BB->begin());
-          if (!AtBeginning) --I;
+      for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+        if (!MI->getOperand(i).isFI())
+            continue;
 
-          // If this instruction has a FrameIndex operand, we need to
-          // use that target machine register info object to eliminate
-          // it.
-          TRI.eliminateFrameIndex(MI, SPAdj,
-                                  FrameIndexVirtualScavenging ?  NULL : RS);
+        // Some instructions (e.g. inline asm instructions) can have
+        // multiple frame indices and/or cause eliminateFrameIndex
+        // to insert more than one instruction. We need the register
+        // scavenger to go through all of these instructions so that
+        // it can update its register information. We keep the
+        // iterator at the point before insertion so that we can
+        // revisit them in full.
+        bool AtBeginning = (I == BB->begin());
+        if (!AtBeginning) --I;
 
-          // Reset the iterator if we were at the beginning of the BB.
-          if (AtBeginning) {
-            I = BB->begin();
-            DoIncr = false;
-          }
+        // If this instruction has a FrameIndex operand, we need to
+        // use that target machine register info object to eliminate
+        // it.
+        TRI.eliminateFrameIndex(MI, SPAdj, i,
+                                FrameIndexVirtualScavenging ?  NULL : RS);
 
-          MI = 0;
-          break;
+        // Reset the iterator if we were at the beginning of the BB.
+        if (AtBeginning) {
+          I = BB->begin();
+          DoIncr = false;
         }
+
+        MI = 0;
+        break;
+      }
 
       if (DoIncr && I != BB->end()) ++I;
 

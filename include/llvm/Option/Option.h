@@ -7,11 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_SUPPORT_OPTION_H_
-#define LLVM_SUPPORT_OPTION_H_
+#ifndef LLVM_OPTION_OPTION_H
+#define LLVM_OPTION_OPTION_H
 
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Option/OptTable.h"
 #include "llvm/Support/ErrorHandling.h"
 

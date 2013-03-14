@@ -39,7 +39,12 @@ def DirectiveE500mc : SubtargetFeature<"", "DarwinDirective",
                                        "PPC::DIR_E500mc", "">;
 def DirectiveE5500  : SubtargetFeature<"", "DarwinDirective", 
                                        "PPC::DIR_E5500", "">;
+def DirectivePwr3: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR3", "">;
+def DirectivePwr4: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR4", "">;
+def DirectivePwr5: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR5", "">;
+def DirectivePwr5x: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR5X", "">;
 def DirectivePwr6: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR6", "">;
+def DirectivePwr6x: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR6X", "">;
 def DirectivePwr7: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR7", "">;
 
 def Feature64Bit     : SubtargetFeature<"64bit","Has64BitSupport", "true",
@@ -58,6 +63,25 @@ def FeatureISEL      : SubtargetFeature<"isel","HasISEL", "true",
                                         "Enable the isel instruction">;
 def FeatureBookE     : SubtargetFeature<"booke", "IsBookE", "true",
                                         "Enable Book E instructions">;
+def FeatureQPX       : SubtargetFeature<"qpx","HasQPX", "true",
+                                        "Enable QPX instructions">;
+
+// Note: Future features to add when support is extended to more
+// recent ISA levels:
+//
+// CMPB         p6, p6x, p7        cmpb
+// DFP          p6, p6x, p7        decimal floating-point instructions
+// FLT_CVT      p7                 fcfids, fcfidu, fcfidus, fcfiduz, fctiwuz
+// FPRND        p5x, p6, p6x, p7   frim, frin, frip, friz
+// FRE          p5 through p7      fre (vs. fres, available since p3)
+// FRSQRTES     p5 through p7      frsqrtes (vs. frsqrte, available since p3)
+// LDBRX        p7                 load with byte reversal
+// LFIWAX       p6, p6x, p7        lfiwax
+// LFIWZX       p7                 lfiwzx
+// POPCNTB      p5 through p7      popcntb and related instructions
+// POPCNTD      p7                 popcntd and related instructions
+// RECIP_PREC   p6, p6x, p7        higher precision reciprocal estimates
+// VSX          p7                 vector-scalar instruction set
 
 //===----------------------------------------------------------------------===//
 // Register File Description
@@ -109,10 +133,30 @@ def : Processor<"a2", PPCA2Itineraries, [DirectiveA2, FeatureBookE,
                                          FeatureSTFIWX, FeatureISEL,
                                          Feature64Bit
                                      /*, Feature64BitRegs */]>;
+def : Processor<"a2q", PPCA2Itineraries, [DirectiveA2, FeatureBookE,
+                                          FeatureMFOCRF, FeatureFSqrt,
+                                          FeatureSTFIWX, FeatureISEL,
+                                          Feature64Bit /*, Feature64BitRegs */,
+                                          FeatureQPX]>;
+def : Processor<"pwr3", G5Itineraries,
+                  [DirectivePwr3, FeatureAltivec, FeatureMFOCRF,
+                   FeatureSTFIWX, Feature64Bit]>;
+def : Processor<"pwr4", G5Itineraries,
+                  [DirectivePwr4, FeatureAltivec, FeatureMFOCRF,
+                   FeatureFSqrt, FeatureSTFIWX, Feature64Bit]>;
+def : Processor<"pwr5", G5Itineraries,
+                  [DirectivePwr5, FeatureAltivec, FeatureMFOCRF,
+                   FeatureFSqrt, FeatureSTFIWX, Feature64Bit]>;
+def : Processor<"pwr5x", G5Itineraries,
+                  [DirectivePwr5x, FeatureAltivec, FeatureMFOCRF,
+                   FeatureFSqrt, FeatureSTFIWX, Feature64Bit]>;
 def : Processor<"pwr6", G5Itineraries,
                   [DirectivePwr6, FeatureAltivec,
                    FeatureMFOCRF, FeatureFSqrt, FeatureSTFIWX,
                    Feature64Bit /*, Feature64BitRegs */]>;
+def : Processor<"pwr6x", G5Itineraries,
+                  [DirectivePwr5x, FeatureAltivec, FeatureMFOCRF,
+                   FeatureFSqrt, FeatureSTFIWX, Feature64Bit]>;
 def : Processor<"pwr7", G5Itineraries,
                   [DirectivePwr7, FeatureAltivec,
                    FeatureMFOCRF, FeatureFSqrt, FeatureSTFIWX,

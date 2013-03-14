@@ -26,12 +26,12 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetLibraryInfo.h"
@@ -376,10 +376,10 @@ static OverwriteResult isOverwrite(const AliasAnalysis::Location &Later,
   // Check to see if the later store is to the entire object (either a global,
   // an alloca, or a byval argument).  If so, then it clearly overwrites any
   // other store to the same object.
-  const DataLayout &TD = *AA.getDataLayout();
+  const DataLayout *TD = AA.getDataLayout();
 
-  const Value *UO1 = GetUnderlyingObject(P1, &TD),
-              *UO2 = GetUnderlyingObject(P2, &TD);
+  const Value *UO1 = GetUnderlyingObject(P1, TD),
+              *UO2 = GetUnderlyingObject(P2, TD);
 
   // If we can't resolve the same pointers to the same object, then we can't
   // analyze them at all.

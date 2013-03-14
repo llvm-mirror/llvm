@@ -115,11 +115,9 @@ Pass *createLICMPass();
 //===----------------------------------------------------------------------===//
 //
 // LoopStrengthReduce - This pass is strength reduces GEP instructions that use
-// a loop's canonical induction variable as one of their indices.  It takes an
-// optional parameter used to consult the target machine whether certain
-// transformations are profitable.
+// a loop's canonical induction variable as one of their indices.
 //
-Pass *createLoopStrengthReducePass(const TargetLowering *TLI = 0);
+Pass *createLoopStrengthReducePass();
 
 Pass *createGlobalMergePass(const TargetLowering *TLI = 0);
 
@@ -333,30 +331,6 @@ Pass *createLowerAtomicPass();
 // ValuePropagation - Propagate CFG-derived value information
 //
 Pass *createCorrelatedValuePropagationPass();
-
-//===----------------------------------------------------------------------===//
-//
-// ObjCARCAPElim - ObjC ARC autorelease pool elimination.
-//
-Pass *createObjCARCAPElimPass();
-
-//===----------------------------------------------------------------------===//
-//
-// ObjCARCExpand - ObjC ARC preliminary simplifications.
-//
-Pass *createObjCARCExpandPass();
-
-//===----------------------------------------------------------------------===//
-//
-// ObjCARCContract - Late ObjC ARC cleanups.
-//
-Pass *createObjCARCContractPass();
-
-//===----------------------------------------------------------------------===//
-//
-// ObjCARCOpt - ObjC ARC optimization.
-//
-Pass *createObjCARCOptPass();
 
 //===----------------------------------------------------------------------===//
 //

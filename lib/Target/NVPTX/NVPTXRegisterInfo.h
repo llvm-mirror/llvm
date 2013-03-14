@@ -55,12 +55,8 @@ public:
   virtual BitVector getReservedRegs(const MachineFunction &MF) const;
 
   virtual void eliminateFrameIndex(MachineBasicBlock::iterator MI,
-                                   int SPAdj,
+                                   int SPAdj, unsigned FIOperandNum,
                                    RegScavenger *RS=NULL) const;
-
-  void eliminateCallFramePseudoInstr(MachineFunction &MF,
-                                     MachineBasicBlock &MBB,
-                                     MachineBasicBlock::iterator I) const;
 
   virtual int getDwarfRegNum(unsigned RegNum, bool isEH) const;
   virtual unsigned getFrameRegister(const MachineFunction &MF) const;
@@ -81,10 +77,6 @@ public:
 
 std::string getNVPTXRegClassName (const TargetRegisterClass *RC);
 std::string getNVPTXRegClassStr (const TargetRegisterClass *RC);
-bool isNVPTXVectorRegClass (const TargetRegisterClass *RC);
-std::string getNVPTXElemClassName (const TargetRegisterClass *RC);
-int getNVPTXVectorSize (const TargetRegisterClass *RC);
-const TargetRegisterClass *getNVPTXElemClass(const TargetRegisterClass *RC);
 
 } // end namespace llvm
 

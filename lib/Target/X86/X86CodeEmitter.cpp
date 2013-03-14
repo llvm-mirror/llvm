@@ -25,7 +25,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -124,7 +124,7 @@ template<class CodeEmitter>
 } // end anonymous namespace.
 
 /// createX86CodeEmitterPass - Return a pass that emits the collected X86 code
-/// to the specified templated MachineCodeEmitter object.
+/// to the specified JITCodeEmitter object.
 FunctionPass *llvm::createX86JITCodeEmitterPass(X86TargetMachine &TM,
                                                 JITCodeEmitter &JCE) {
   return new Emitter<JITCodeEmitter>(TM, JCE);

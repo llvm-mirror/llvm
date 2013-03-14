@@ -7,10 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/OwningPtr.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
-
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -61,8 +61,12 @@ const char *Args[] = {
 TEST(Support, OptionParsing) {
   TestOptTable T;
   unsigned MAI, MAC;
-  InputArgList *AL = T.ParseArgs(Args, Args + (sizeof(Args) / sizeof(Args[0])), MAI, MAC);
-  
+  OwningPtr<InputArgList>
+    AL(T.ParseArgs(Args,
+                   Args + (sizeof(Args) / sizeof(Args[0])),
+                   MAI,
+                   MAC));
+
   // Check they all exist.
   EXPECT_TRUE(AL->hasArg(OPT_A));
   EXPECT_TRUE(AL->hasArg(OPT_B));

@@ -21,7 +21,6 @@
 #include "PPCSubtarget.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -29,8 +28,10 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/Constants.h"
-#include "llvm/Function.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -40,7 +41,6 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Type.h"
 #include <cstdlib>
 
 #define GET_REGINFO_TARGET_DESC
@@ -71,7 +71,7 @@ PPCRegisterInfo::PPCRegisterInfo(const PPCSubtarget &ST,
   : PPCGenRegisterInfo(ST.isPPC64() ? PPC::LR8 : PPC::LR,
                        ST.isPPC64() ? 0 : 1,
                        ST.isPPC64() ? 0 : 1),
-    Subtarget(ST), TII(tii), CRSpillFrameIdx(0) {
+    Subtarget(ST), TII(tii) {
   ImmToIdxMap[PPC::LD]   = PPC::LDX;    ImmToIdxMap[PPC::STD]  = PPC::STDX;
   ImmToIdxMap[PPC::LBZ]  = PPC::LBZX;   ImmToIdxMap[PPC::STB]  = PPC::STBX;
   ImmToIdxMap[PPC::LHZ]  = PPC::LHZX;   ImmToIdxMap[PPC::LHA]  = PPC::LHAX;
@@ -110,11 +110,6 @@ PPCRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   if (Subtarget.isDarwinABI())
     return Subtarget.isPPC64() ? CSR_Darwin64_SaveList :
                                  CSR_Darwin32_SaveList;
-
-  // For 32-bit SVR4, also initialize the frame index associated with
-  // the CR spill slot.
-  if (!Subtarget.isPPC64())
-    CRSpillFrameIdx = 0;
 
   return Subtarget.isPPC64() ? CSR_SVR464_SaveList : CSR_SVR432_SaveList;
 }
@@ -221,45 +216,6 @@ PPCRegisterInfo::avoidWriteAfterWrite(const TargetRegisterClass *RC) const {
 //===----------------------------------------------------------------------===//
 // Stack Frame Processing methods
 //===----------------------------------------------------------------------===//
-
-void PPCRegisterInfo::
-eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator I) const {
-  if (MF.getTarget().Options.GuaranteedTailCallOpt &&
-      I->getOpcode() == PPC::ADJCALLSTACKUP) {
-    // Add (actually subtract) back the amount the callee popped on return.
-    if (int CalleeAmt =  I->getOperand(1).getImm()) {
-      bool is64Bit = Subtarget.isPPC64();
-      CalleeAmt *= -1;
-      unsigned StackReg = is64Bit ? PPC::X1 : PPC::R1;
-      unsigned TmpReg = is64Bit ? PPC::X0 : PPC::R0;
-      unsigned ADDIInstr = is64Bit ? PPC::ADDI8 : PPC::ADDI;
-      unsigned ADDInstr = is64Bit ? PPC::ADD8 : PPC::ADD4;
-      unsigned LISInstr = is64Bit ? PPC::LIS8 : PPC::LIS;
-      unsigned ORIInstr = is64Bit ? PPC::ORI8 : PPC::ORI;
-      MachineInstr *MI = I;
-      DebugLoc dl = MI->getDebugLoc();
-
-      if (isInt<16>(CalleeAmt)) {
-        BuildMI(MBB, I, dl, TII.get(ADDIInstr), StackReg)
-          .addReg(StackReg, RegState::Kill)
-          .addImm(CalleeAmt);
-      } else {
-        MachineBasicBlock::iterator MBBI = I;
-        BuildMI(MBB, MBBI, dl, TII.get(LISInstr), TmpReg)
-          .addImm(CalleeAmt >> 16);
-        BuildMI(MBB, MBBI, dl, TII.get(ORIInstr), TmpReg)
-          .addReg(TmpReg, RegState::Kill)
-          .addImm(CalleeAmt & 0xFFFF);
-        BuildMI(MBB, MBBI, dl, TII.get(ADDInstr), StackReg)
-          .addReg(StackReg, RegState::Kill)
-          .addReg(TmpReg);
-      }
-    }
-  }
-  // Simply discard ADJCALLSTACKDOWN, ADJCALLSTACKUP instructions.
-  MBB.erase(I);
-}
 
 /// findScratchRegister - Find a 'free' PPC register. Try for a call-clobbered
 /// register first and then a spilled callee-saved register if that fails.
@@ -489,19 +445,14 @@ PPCRegisterInfo::hasReservedSpillSlot(const MachineFunction &MF,
   // For the nonvolatile condition registers (CR2, CR3, CR4) in an SVR4
   // ABI, return true to prevent allocating an additional frame slot.
   // For 64-bit, the CR save area is at SP+8; the value of FrameIdx = 0
-  // is arbitrary and will be subsequently ignored.  For 32-bit, we must
-  // create exactly one stack slot and return its FrameIdx for all
-  // nonvolatiles.
+  // is arbitrary and will be subsequently ignored.  For 32-bit, we have
+  // previously created the stack slot if needed, so return its FrameIdx.
   if (Subtarget.isSVR4ABI() && PPC::CR2 <= Reg && Reg <= PPC::CR4) {
-    if (Subtarget.isPPC64()) {
+    if (Subtarget.isPPC64())
       FrameIdx = 0;
-    } else if (CRSpillFrameIdx) {
-      FrameIdx = CRSpillFrameIdx;
-    } else {
-      MachineFrameInfo *MFI = 
-        (const_cast<MachineFunction &>(MF)).getFrameInfo();
-      FrameIdx = MFI->CreateFixedObject((uint64_t)4, (int64_t)-4, true);
-      CRSpillFrameIdx = FrameIdx;
+    else {
+      const PPCFunctionInfo *FI = MF.getInfo<PPCFunctionInfo>();
+      FrameIdx = FI->getCRSpillFrameIndex();
     }
     return true;
   }
@@ -510,7 +461,8 @@ PPCRegisterInfo::hasReservedSpillSlot(const MachineFunction &MF,
 
 void
 PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
-                                     int SPAdj, RegScavenger *RS) const {
+                                     int SPAdj, unsigned FIOperandNum,
+                                     RegScavenger *RS) const {
   assert(SPAdj == 0 && "Unexpected");
 
   // Get the instruction.
@@ -524,20 +476,13 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
   DebugLoc dl = MI.getDebugLoc();
 
-  // Find out which operand is the frame index.
-  unsigned FIOperandNo = 0;
-  while (!MI.getOperand(FIOperandNo).isFI()) {
-    ++FIOperandNo;
-    assert(FIOperandNo != MI.getNumOperands() &&
-           "Instr doesn't have FrameIndex operand!");
-  }
   // Take into account whether it's an add or mem instruction
-  unsigned OffsetOperandNo = (FIOperandNo == 2) ? 1 : 2;
+  unsigned OffsetOperandNo = (FIOperandNum == 2) ? 1 : 2;
   if (MI.isInlineAsm())
-    OffsetOperandNo = FIOperandNo-1;
+    OffsetOperandNo = FIOperandNum-1;
 
   // Get the frame index.
-  int FrameIndex = MI.getOperand(FIOperandNo).getIndex();
+  int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
 
   // Get the frame pointer save index.  Users of this index are primarily
   // DYNALLOC instructions.
@@ -567,7 +512,7 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // Replace the FrameIndex with base register with GPR1 (SP) or GPR31 (FP).
 
   bool is64Bit = Subtarget.isPPC64();
-  MI.getOperand(FIOperandNo).ChangeToRegister(TFI->hasFP(MF) ?
+  MI.getOperand(FIOperandNum).ChangeToRegister(TFI->hasFP(MF) ?
                                               (is64Bit ? PPC::X31 : PPC::R31) :
                                                 (is64Bit ? PPC::X1 : PPC::R1),
                                               false);
@@ -597,7 +542,8 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // to Offset to get the correct offset.
   // Naked functions have stack size 0, although getStackSize may not reflect that
   // because we didn't call all the pieces that compute it for naked functions.
-  if (!MF.getFunction()->getFnAttributes().hasAttribute(Attributes::Naked))
+  if (!MF.getFunction()->getAttributes().
+        hasAttribute(AttributeSet::FunctionIndex, Attribute::Naked))
     Offset += MFI->getStackSize();
 
   // If we can, encode the offset directly into the instruction.  If this is a
@@ -648,7 +594,7 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     OperandBase = OffsetOperandNo;
   }
 
-  unsigned StackReg = MI.getOperand(FIOperandNo).getReg();
+  unsigned StackReg = MI.getOperand(FIOperandNum).getReg();
   MI.getOperand(OperandBase).ChangeToRegister(StackReg, false);
   MI.getOperand(OperandBase + 1).ChangeToRegister(SReg, false, false, true);
 }

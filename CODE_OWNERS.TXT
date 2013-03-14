@@ -90,6 +90,10 @@ E: sabre@nondot.org
 W: http://nondot.org/~sabre/
 D: Everything not covered by someone else
 
+N: Tim Northover
+E: Tim.Northover@arm.com
+D: AArch64 backend
+
 N: Jakob Olesen
 D: Register allocators and TableGen
 
@@ -108,6 +112,15 @@ D: X86 Backend, Loop Vectorizer
 N: Duncan Sands
 E: baldrick@free.fr
 D: DragonEgg
+
+N: Michael Spencer
+E: bigcheesegs@gmail.com
+D: Windows parts of Support, Object, ar, nm, objdump, ranlib, size
+
+N: Tom Stellard
+E: thomas.stellard@amd.com
+E: mesa-dev@lists.freedesktop.org
+D: R600 Backend
 
 N: Andrew Trick
 E: atrick@apple.com

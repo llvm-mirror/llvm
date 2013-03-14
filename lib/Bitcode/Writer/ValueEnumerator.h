@@ -16,7 +16,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Attributes.h"
+#include "llvm/IR/Attributes.h"
 #include <vector>
 
 namespace llvm {
@@ -52,9 +52,13 @@ private:
   SmallVector<const MDNode *, 8> FunctionLocalMDs;
   ValueMapType MDValueMap;
 
-  typedef DenseMap<void*, unsigned> AttributeMapType;
+  typedef DenseMap<AttributeSet, unsigned> AttributeGroupMapType;
+  AttributeGroupMapType AttributeGroupMap;
+  std::vector<AttributeSet> AttributeGroups;
+
+  typedef DenseMap<AttributeSet, unsigned> AttributeMapType;
   AttributeMapType AttributeMap;
-  std::vector<AttributeSet> Attributes;
+  std::vector<AttributeSet> Attribute;
 
   /// GlobalBasicBlockIDs - This map memoizes the basic block ID's referenced by
   /// the "getGlobalBasicBlockID" method.
@@ -98,10 +102,17 @@ public:
   unsigned getInstructionID(const Instruction *I) const;
   void setInstructionID(const Instruction *I);
 
-  unsigned getAttributeID(const AttributeSet &PAL) const {
+  unsigned getAttributeID(AttributeSet PAL) const {
     if (PAL.isEmpty()) return 0;  // Null maps to zero.
-    AttributeMapType::const_iterator I = AttributeMap.find(PAL.getRawPointer());
+    AttributeMapType::const_iterator I = AttributeMap.find(PAL);
     assert(I != AttributeMap.end() && "Attribute not in ValueEnumerator!");
+    return I->second;
+  }
+
+  unsigned getAttributeGroupID(AttributeSet PAL) const {
+    if (PAL.isEmpty()) return 0;  // Null maps to zero.
+    AttributeGroupMapType::const_iterator I = AttributeGroupMap.find(PAL);
+    assert(I != AttributeGroupMap.end() && "Attribute not in ValueEnumerator!");
     return I->second;
   }
 
@@ -122,7 +133,10 @@ public:
     return BasicBlocks;
   }
   const std::vector<AttributeSet> &getAttributes() const {
-    return Attributes;
+    return Attribute;
+  }
+  const std::vector<AttributeSet> &getAttributeGroups() const {
+    return AttributeGroups;
   }
 
   /// getGlobalBasicBlockID - This returns the function-specific ID for the
@@ -146,7 +160,7 @@ private:
   void EnumerateValue(const Value *V);
   void EnumerateType(Type *T);
   void EnumerateOperandType(const Value *V);
-  void EnumerateAttributes(const AttributeSet &PAL);
+  void EnumerateAttributes(AttributeSet PAL);
 
   void EnumerateValueSymbolTable(const ValueSymbolTable &ST);
   void EnumerateNamedMetadata(const Module *M);

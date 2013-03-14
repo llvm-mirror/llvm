@@ -2,7 +2,10 @@
 Writing an LLVM Compiler Backend
 ================================
 
-.. sectionauthor:: Mason Woo <http://www.woo.com> and Misha Brukman <http://misha.brukman.net>
+.. toctree::
+   :hidden:
+
+   HowToUseInstrMappings
 
 .. contents::
    :local:
@@ -54,8 +57,8 @@ These essential documents must be read before reading this document:
   file (``.td`` suffix) and generates C++ code that can be used for code
   generation.
 
-* `Writing an LLVM Pass <WritingAnLLVMPass.html>`_ --- The assembly printer is
-  a ``FunctionPass``, as are several SelectionDAG processing steps.
+* :doc:`WritingAnLLVMPass` --- The assembly printer is a ``FunctionPass``, as
+  are several ``SelectionDAG`` processing steps.
 
 To follow the SPARC examples in this document, have a copy of `The SPARC
 Architecture Manual, Version 8 <http://www.sparc.org/standards/V8.pdf>`_ for

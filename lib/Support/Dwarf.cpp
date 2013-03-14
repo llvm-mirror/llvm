@@ -80,8 +80,6 @@ const char *llvm::dwarf::TagString(unsigned Tag) {
   case DW_TAG_hi_user:                   return "DW_TAG_hi_user";
   case DW_TAG_auto_variable:             return "DW_TAG_auto_variable";
   case DW_TAG_arg_variable:              return "DW_TAG_arg_variable";
-  case DW_TAG_return_variable:           return "DW_TAG_return_variable";
-  case DW_TAG_vector_type:               return "DW_TAG_vector_type";
   case DW_TAG_rvalue_reference_type:     return "DW_TAG_rvalue_reference_type";
   case DW_TAG_template_alias:            return "DW_TAG_template_alias";
   case DW_TAG_MIPS_loop:                 return "DW_TAG_MIPS_loop";
@@ -249,7 +247,7 @@ const char *llvm::dwarf::AttributeString(unsigned Attribute) {
   case DW_AT_APPLE_property:             return "DW_AT_APPLE_property";
   case DW_AT_APPLE_objc_complete_type:   return "DW_AT_APPLE_objc_complete_type";
 
-    // DWARF5 Fission Extension Attributes
+    // DWARF5 Fission Extension Attribute
   case DW_AT_GNU_dwo_name:               return "DW_AT_GNU_dwo_name";
   case DW_AT_GNU_dwo_id:                 return "DW_AT_GNU_dwo_id";
   case DW_AT_GNU_ranges_base:            return "DW_AT_GNU_ranges_base";
@@ -690,6 +688,7 @@ const char *llvm::dwarf::MacinfoString(unsigned Encoding) {
 /// encodings.
 const char *llvm::dwarf::CallFrameString(unsigned Encoding) {
   switch (Encoding) {
+  case DW_CFA_nop:                       return "DW_CFA_nop";
   case DW_CFA_advance_loc:               return "DW_CFA_advance_loc";
   case DW_CFA_offset:                    return "DW_CFA_offset";
   case DW_CFA_restore:                   return "DW_CFA_restore";

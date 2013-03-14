@@ -14,9 +14,9 @@
 
 #include "llvm-c/Target.h"
 #include "llvm-c/Initialization.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/InitializePasses.h"
-#include "llvm/LLVMContext.h"
 #include "llvm/PassManager.h"
 #include "llvm/Target/TargetLibraryInfo.h"
 #include <cstring>
@@ -26,7 +26,6 @@ using namespace llvm;
 void llvm::initializeTarget(PassRegistry &Registry) {
   initializeDataLayoutPass(Registry);
   initializeTargetLibraryInfoPass(Registry);
-  initializeTargetTransformInfoPass(Registry);
 }
 
 void LLVMInitializeTarget(LLVMPassRegistryRef R) {

@@ -23,9 +23,11 @@
 namespace llvm {
 
 class DwarfDebug;
+class DwarfUnits;
 class MachineLocation;
 class MachineOperand;
 class ConstantInt;
+class ConstantFP;
 class DbgVariable;
 
 //===----------------------------------------------------------------------===//
@@ -47,7 +49,9 @@ class CompileUnit {
   /// Asm - Target of Dwarf emission.
   AsmPrinter *Asm;
 
+  // Holders for some common dwarf information.
   DwarfDebug *DD;
+  DwarfUnits *DU;
 
   /// IndexTyDie - An anonymous type for index type.  Owned by CUDie.
   DIE *IndexTyDie;
@@ -59,6 +63,10 @@ class CompileUnit {
   /// MDNodeToDIEEntryMap - Tracks the mapping of unit level debug informaton
   /// descriptors to debug information entries using a DIEEntry proxy.
   DenseMap<const MDNode *, DIEEntry *> MDNodeToDIEEntryMap;
+
+  /// GlobalNames - A map of globally visible named entities for this unit.
+  ///
+  StringMap<DIE*> GlobalNames;
 
   /// GlobalTypes - A map of globally visible types for this unit.
   ///
@@ -83,14 +91,19 @@ class CompileUnit {
   /// DWARF version doesn't handle the language, return -1.
   int64_t getDefaultLowerBound() const;
 
+  /// getOrCreateContextDIE - Get context owner's DIE.
+  DIE *getOrCreateContextDIE(DIDescriptor Context);
+
 public:
-  CompileUnit(unsigned UID, unsigned L, DIE *D, AsmPrinter *A, DwarfDebug *DW);
+  CompileUnit(unsigned UID, unsigned L, DIE *D, AsmPrinter *A, DwarfDebug *DW,
+              DwarfUnits *);
   ~CompileUnit();
 
   // Accessors.
   unsigned getUniqueID()            const { return UniqueID; }
   unsigned getLanguage()            const { return Language; }
   DIE* getCUDie()                   const { return CUDie.get(); }
+  const StringMap<DIE*> &getGlobalNames() const { return GlobalNames; }
   const StringMap<DIE*> &getGlobalTypes() const { return GlobalTypes; }
 
   const StringMap<std::vector<DIE*> > &getAccelNames() const {
@@ -106,10 +119,14 @@ public:
   &getAccelTypes() const {
     return AccelTypes;
   }
-  
+
   /// hasContent - Return true if this compile unit has something to write out.
   ///
   bool hasContent() const { return !CUDie->getChildren().empty(); }
+
+  /// addGlobalName - Add a new global entity to the compile unit.
+  ///
+  void addGlobalName(StringRef Name, DIE *Die) { GlobalNames[Name] = Die; }
 
   /// addGlobalType - Add a new global type to the compile unit.
   ///
@@ -133,12 +150,12 @@ public:
     std::vector<std::pair<DIE*, unsigned > > &DIEs = AccelTypes[Name];
     DIEs.push_back(Die);
   }
-  
+
   /// getDIE - Returns the debug information entry map slot for the
   /// specified debug variable.
   DIE *getDIE(const MDNode *N) { return MDNodeToDieMap.lookup(N); }
 
-  DIEBlock *getDIEBlock() { 
+  DIEBlock *getDIEBlock() {
     return new (DIEValueAllocator) DIEBlock();
   }
 
@@ -181,7 +198,7 @@ public:
 
   /// addFlag - Add a flag that is true to the DIE.
   void addFlag(DIE *Die, unsigned Attribute);
-  
+
   /// addUInt - Add an unsigned integer attribute data and value.
   ///
   void addUInt(DIE *Die, unsigned Attribute, unsigned Form, uint64_t Integer);
@@ -194,10 +211,24 @@ public:
   ///
   void addString(DIE *Die, unsigned Attribute, const StringRef Str);
 
+  /// addLocalString - Add a string attribute data and value.
+  ///
+  void addLocalString(DIE *Die, unsigned Attribute, const StringRef Str);
+
   /// addLabel - Add a Dwarf label attribute data and value.
   ///
   void addLabel(DIE *Die, unsigned Attribute, unsigned Form,
                 const MCSymbol *Label);
+
+  /// addLabelAddress - Add a dwarf label attribute data and value using
+  /// either DW_FORM_addr or DW_FORM_GNU_addr_index.
+  ///
+  void addLabelAddress(DIE *Die, unsigned Attribute, MCSymbol *Label);
+
+  /// addOpAddress - Add a dwarf op address data and value using the
+  /// form given and an op of either DW_FORM_addr or DW_FORM_GNU_addr_index.
+  ///
+  void addOpAddress(DIE *Die, MCSymbol *Label);
 
   /// addDelta - Add a label delta attribute data and value.
   ///
@@ -207,7 +238,7 @@ public:
   /// addDIEEntry - Add a DIE attribute data and value.
   ///
   void addDIEEntry(DIE *Die, unsigned Attribute, unsigned Form, DIE *Entry);
-  
+
   /// addBlock - Add block data.
   ///
   void addBlock(DIE *Die, unsigned Attribute, unsigned Form, DIEBlock *Block);
@@ -229,9 +260,11 @@ public:
   /// addConstantValue - Add constant value entry in variable DIE.
   bool addConstantValue(DIE *Die, const MachineOperand &MO, DIType Ty);
   bool addConstantValue(DIE *Die, const ConstantInt *CI, bool Unsigned);
+  bool addConstantValue(DIE *Die, const APInt &Val, bool Unsigned);
 
   /// addConstantFPValue - Add constant value entry in variable DIE.
   bool addConstantFPValue(DIE *Die, const MachineOperand &MO);
+  bool addConstantFPValue(DIE *Die, const ConstantFP *CFP);
 
   /// addTemplateParams - Add template parameters in buffer.
   void addTemplateParams(DIE &Buffer, DIArray TParams);
@@ -260,7 +293,7 @@ public:
   void addBlockByrefAddress(DbgVariable *&DV, DIE *Die, unsigned Attribute,
                             const MachineLocation &Location);
 
-  /// addVariableAddress - Add DW_AT_location attribute for a 
+  /// addVariableAddress - Add DW_AT_location attribute for a
   /// DbgVariable based on provided MachineLocation.
   void addVariableAddress(DbgVariable *&DV, DIE *Die, MachineLocation Location);
 
@@ -282,7 +315,7 @@ public:
   /// given DIType.
   DIE *getOrCreateTypeDIE(const MDNode *N);
 
-  /// getOrCreateTemplateTypeParameterDIE - Find existing DIE or create new DIE 
+  /// getOrCreateTemplateTypeParameterDIE - Find existing DIE or create new DIE
   /// for the given DITemplateTypeParameter.
   DIE *getOrCreateTemplateTypeParameterDIE(DITemplateTypeParameter TP);
 
@@ -315,7 +348,7 @@ public:
   void constructSubrangeDIE(DIE &Buffer, DISubrange SR, DIE *IndexTy);
 
   /// constructArrayTypeDIE - Construct array type DIE from DICompositeType.
-  void constructArrayTypeDIE(DIE &Buffer, 
+  void constructArrayTypeDIE(DIE &Buffer,
                              DICompositeType *CTy);
 
   /// constructEnumTypeDIE - Construct enum type DIE from DIEnumerator.
@@ -330,6 +363,9 @@ public:
 
   /// createMemberDIE - Create new member DIE.
   DIE *createMemberDIE(DIDerivedType DT);
+
+  /// createStaticMemberDIE - Create new static data member DIE.
+  DIE *createStaticMemberDIE(DIDerivedType DT);
 
 private:
 

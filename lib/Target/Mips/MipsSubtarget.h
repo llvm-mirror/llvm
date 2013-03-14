@@ -14,6 +14,7 @@
 #ifndef MIPSSUBTARGET_H
 #define MIPSSUBTARGET_H
 
+#include "MCTargetDesc/MipsReginfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
@@ -88,13 +89,19 @@ protected:
   // InMips16 -- can process Mips16 instructions
   bool InMips16Mode;
 
+  // InMicroMips -- can process MicroMips instructions
+  bool InMicroMipsMode;
+
   // HasDSP, HasDSPR2 -- supports DSP ASE.
   bool HasDSP, HasDSPR2;
 
-  // IsAndroid -- target is android
-  bool IsAndroid;
-
   InstrItineraryData InstrItins;
+
+  // The instance to the register info section object
+  MipsReginfo MRI;
+
+  // Relocation Model
+  Reloc::Model RM;
 
 public:
   virtual bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
@@ -131,9 +138,9 @@ public:
   bool isNotSingleFloat() const { return !IsSingleFloat; }
   bool hasVFPU() const { return HasVFPU; }
   bool inMips16Mode() const { return InMips16Mode; }
+  bool inMicroMipsMode() const { return InMicroMipsMode; }
   bool hasDSP() const { return HasDSP; }
   bool hasDSPR2() const { return HasDSPR2; }
-  bool isAndroid() const { return IsAndroid; }
   bool isLinux() const { return IsLinux; }
   bool useSmallSection() const { return UseSmallSection; }
 
@@ -145,6 +152,12 @@ public:
   bool hasSwap()      const { return HasSwap; }
   bool hasBitCount()  const { return HasBitCount; }
   bool hasFPIdx()     const { return HasFPIdx; }
+
+  // Grab MipsRegInfo object
+  const MipsReginfo &getMReginfo() const { return MRI; }
+
+  // Grab relocation model
+  Reloc::Model getRelocationModel() const {return RM;}
 };
 } // End llvm namespace
 

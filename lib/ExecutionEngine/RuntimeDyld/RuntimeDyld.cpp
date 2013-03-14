@@ -107,20 +107,18 @@ ObjectImage *RuntimeDyldImpl::loadObject(ObjectBuffer *InputBuffer) {
           SymType == object::SymbolRef::ST_Unknown) {
         uint64_t FileOffset;
         StringRef SectionData;
+        bool IsCode;
         section_iterator si = obj->end_sections();
         Check(i->getFileOffset(FileOffset));
         Check(i->getSection(si));
         if (si == obj->end_sections()) continue;
         Check(si->getContents(SectionData));
+        Check(si->isText(IsCode));
         const uint8_t* SymPtr = (const uint8_t*)InputBuffer->getBufferStart() +
                                 (uintptr_t)FileOffset;
         uintptr_t SectOffset = (uintptr_t)(SymPtr -
                                            (const uint8_t*)SectionData.begin());
-        unsigned SectionID =
-          findOrEmitSection(*obj,
-                            *si,
-                            SymType == object::SymbolRef::ST_Function,
-                            LocalSections);
+        unsigned SectionID = findOrEmitSection(*obj, *si, IsCode, LocalSections);
         LocalSymbols[Name.data()] = SymbolLoc(SectionID, SectOffset);
         DEBUG(dbgs() << "\tFileOffset: " << format("%p", (uintptr_t)FileOffset)
                      << " flags: " << flags
@@ -434,14 +432,20 @@ void RuntimeDyldImpl::resolveExternalSymbols() {
     RelocationList &Relocs = i->second;
     SymbolTableMap::const_iterator Loc = GlobalSymbolTable.find(Name);
     if (Loc == GlobalSymbolTable.end()) {
-      // This is an external symbol, try to get it address from
-      // MemoryManager.
-      uint8_t *Addr = (uint8_t*) MemMgr->getPointerToNamedFunction(Name.data(),
+      if (Name.size() == 0) {
+        // This is an absolute symbol, use an address of zero.
+        DEBUG(dbgs() << "Resolving absolute relocations." << "\n");
+        resolveRelocationList(Relocs, 0);
+      } else {
+        // This is an external symbol, try to get its address from
+        // MemoryManager.
+        uint8_t *Addr = (uint8_t*) MemMgr->getPointerToNamedFunction(Name.data(),
                                                                    true);
-      DEBUG(dbgs() << "Resolving relocations Name: " << Name
-              << "\t" << format("%p", Addr)
-              << "\n");
-      resolveRelocationList(Relocs, (uintptr_t)Addr);
+        DEBUG(dbgs() << "Resolving relocations Name: " << Name
+                << "\t" << format("%p", Addr)
+                << "\n");
+        resolveRelocationList(Relocs, (uintptr_t)Addr);
+      }
     } else {
       report_fatal_error("Expected external symbol");
     }

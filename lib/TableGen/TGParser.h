@@ -96,7 +96,7 @@ public:
   bool TokError(const Twine &Msg) const {
     return Error(Lex.getLoc(), Msg);
   }
-  const std::vector<std::string> &getDependencies() const {
+  const TGLexer::DependenciesMapTy &getDependencies() const {
     return Lex.getDependencies();
   }
 
@@ -134,7 +134,7 @@ private:  // Parser methods.
   Record *InstantiateMulticlassDef(MultiClass &MC,
                                    Record *DefProto,
                                    Init *DefmPrefix,
-                                   SMLoc DefmPrefixLoc);
+                                   SMRange DefmPrefixRange);
   bool ResolveMulticlassDefArgs(MultiClass &MC,
                                 Record *DefProto,
                                 SMLoc DefmPrefixLoc,
@@ -183,7 +183,7 @@ private:  // Parser methods.
   Init *ParseObjectName(MultiClass *CurMultiClass);
   Record *ParseClassID();
   MultiClass *ParseMultiClassID();
-  Record *ParseDefmID();
+  bool ApplyLetStack(Record *CurRec);
 };
 
 } // end namespace llvm

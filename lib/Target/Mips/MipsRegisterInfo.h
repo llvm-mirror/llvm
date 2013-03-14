@@ -42,6 +42,8 @@ public:
   void adjustMipsStackFrame(MachineFunction &MF) const;
 
   /// Code Generation virtual methods...
+  unsigned getRegPressureLimit(const TargetRegisterClass *RC,
+                               MachineFunction &MF) const;
   const uint16_t *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
   const uint32_t *getCallPreservedMask(CallingConv::ID) const;
 
@@ -53,7 +55,8 @@ public:
 
   /// Stack Frame Processing Methods
   void eliminateFrameIndex(MachineBasicBlock::iterator II,
-                           int SPAdj, RegScavenger *RS = NULL) const;
+                           int SPAdj, unsigned FIOperandNum,
+                           RegScavenger *RS = NULL) const;
 
   void processFunctionBeforeFrameFinalized(MachineFunction &MF) const;
 

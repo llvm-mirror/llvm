@@ -135,20 +135,14 @@ void SUnit::removePred(const SDep &D) {
   for (SmallVector<SDep, 4>::iterator I = Preds.begin(), E = Preds.end();
        I != E; ++I)
     if (*I == D) {
-      bool FoundSucc = false;
       // Find the corresponding successor in N.
       SDep P = D;
       P.setSUnit(this);
       SUnit *N = D.getSUnit();
-      for (SmallVector<SDep, 4>::iterator II = N->Succs.begin(),
-             EE = N->Succs.end(); II != EE; ++II)
-        if (*II == P) {
-          FoundSucc = true;
-          N->Succs.erase(II);
-          break;
-        }
-      assert(FoundSucc && "Mismatching preds / succs lists!");
-      (void)FoundSucc;
+      SmallVectorImpl<SDep>::iterator Succ = std::find(N->Succs.begin(),
+                                                       N->Succs.end(), P);
+      assert(Succ != N->Succs.end() && "Mismatching preds / succs lists!");
+      N->Succs.erase(Succ);
       Preds.erase(I);
       // Update the bookkeeping.
       if (P.getKind() == SDep::Data) {
@@ -301,6 +295,21 @@ void SUnit::ComputeHeight() {
   } while (!WorkList.empty());
 }
 
+void SUnit::biasCriticalPath() {
+  if (NumPreds < 2)
+    return;
+
+  SUnit::pred_iterator BestI = Preds.begin();
+  unsigned MaxDepth = BestI->getSUnit()->getDepth();
+  for (SUnit::pred_iterator
+         I = llvm::next(BestI), E = Preds.end(); I != E; ++I) {
+    if (I->getKind() == SDep::Data && I->getSUnit()->getDepth() > MaxDepth)
+      BestI = I;
+  }
+  if (BestI != Preds.begin())
+    std::swap(*Preds.begin(), *BestI);
+}
+
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 /// SUnit - Scheduling unit. It's an wrapper around either a single SDNode or
 /// a group of nodes flagged together.
@@ -320,8 +329,8 @@ void SUnit::dumpAll(const ScheduleDAG *G) const {
     dbgs() << "  # weak succs left  : " << WeakSuccsLeft << "\n";
   dbgs() << "  # rdefs left       : " << NumRegDefsLeft << "\n";
   dbgs() << "  Latency            : " << Latency << "\n";
-  dbgs() << "  Depth              : " << Depth << "\n";
-  dbgs() << "  Height             : " << Height << "\n";
+  dbgs() << "  Depth              : " << getDepth() << "\n";
+  dbgs() << "  Height             : " << getHeight() << "\n";
 
   if (Preds.size() != 0) {
     dbgs() << "  Predecessors:\n";
@@ -358,6 +367,8 @@ void SUnit::dumpAll(const ScheduleDAG *G) const {
       if (I->isArtificial())
         dbgs() << " *";
       dbgs() << ": Latency=" << I->getLatency();
+      if (I->isAssignedRegDep())
+        dbgs() << " Reg=" << PrintReg(I->getReg(), G->TRI);
       dbgs() << "\n";
     }
   }

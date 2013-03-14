@@ -74,6 +74,7 @@ set(LLVM_EXAMPLES_BINARY_DIR ${LLVM_BINARY_DIR}/examples)
 set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
 
 set(LLVM_ALL_TARGETS
+  AArch64
   ARM
   CppBackend
   Hexagon
@@ -185,7 +186,7 @@ endif( LLVM_USE_INTEL_JITEVENTS )
 option(LLVM_USE_OPROFILE
   "Use opagent JIT interface to inform OProfile about JIT code" OFF)
 
-# If enabled, ierify we are on a platform that supports oprofile.
+# If enabled, verify we are on a platform that supports oprofile.
 if( LLVM_USE_OPROFILE )
   if( NOT CMAKE_SYSTEM_NAME MATCHES "Linux" )
     message(FATAL_ERROR "OProfile support is available on Linux only.") 
@@ -375,6 +376,13 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include_directories( ${LLVM_BINARY_DIR}/include ${LLVM_MAIN_INCLUDE_DIR})
 
+if( ${CMAKE_SYSTEM_NAME} MATCHES FreeBSD )
+  # On FreeBSD, /usr/local/* is not used by default. In order to build LLVM
+  # with libxml2, iconv.h, etc., we must add /usr/local paths.
+  include_directories("/usr/local/include")
+  link_directories("/usr/local/lib")
+endif( ${CMAKE_SYSTEM_NAME} MATCHES FreeBSD )
+
 if( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include llvm/Support/Solaris.h")
 endif( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
@@ -426,7 +434,7 @@ if( LLVM_INCLUDE_TESTS )
   add_subdirectory(utils/unittest)
   add_subdirectory(unittests)
   if (MSVC)
-    # This utility is used to prevent chrashing tests from calling Dr. Watson on
+    # This utility is used to prevent crashing tests from calling Dr. Watson on
     # Windows.
     add_subdirectory(utils/KillTheDoctor)
   endif()

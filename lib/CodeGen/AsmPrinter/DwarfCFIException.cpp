@@ -19,7 +19,8 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -27,7 +28,6 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MachineLocation.h"
-#include "llvm/Module.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
@@ -122,8 +122,9 @@ void DwarfCFIException::BeginFunction(const MachineFunction *MF) {
   const MCSymbol *Sym = TLOF.getCFIPersonalitySymbol(Per, Asm->Mang, MMI);
   Asm->OutStreamer.EmitCFIPersonality(Sym, PerEncoding);
 
-  Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("eh_func_begin",
-                                                Asm->getFunctionNumber()));
+  Asm->OutStreamer.EmitDebugLabel
+    (Asm->GetTempSymbol("eh_func_begin",
+                        Asm->getFunctionNumber()));
 
   // Provide LSDA information.
   if (!shouldEmitLSDA)

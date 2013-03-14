@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 // Include all information about LLVM intrinsics.
-include "llvm/Intrinsics.td"
+include "llvm/IR/Intrinsics.td"
 
 //===----------------------------------------------------------------------===//
 // Register file description - These classes are used to fill in the target
@@ -367,8 +367,9 @@ class Instruction {
   //  hasSideEffects - The instruction has side effects that are not
   //    captured by any operands of the instruction or other flags.
   //
-  //  neverHasSideEffects - Set on an instruction with no pattern if it has no
-  //    side effects.
+  //  neverHasSideEffects (deprecated) - Set on an instruction with no pattern
+  //    if it has no side effects. This is now equivalent to setting
+  //    "hasSideEffects = 0".
   bit hasSideEffects = ?;
   bit neverHasSideEffects = 0;
 

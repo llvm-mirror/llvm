@@ -15,13 +15,13 @@
 #define BITCODE_READER_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/Attributes.h"
 #include "llvm/Bitcode/BitstreamReader.h"
 #include "llvm/Bitcode/LLVMBitCodes.h"
 #include "llvm/GVMaterializer.h"
-#include "llvm/OperandTraits.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/OperandTraits.h"
+#include "llvm/IR/Type.h"
 #include "llvm/Support/ValueHandle.h"
-#include "llvm/Type.h"
 #include <vector>
 
 namespace llvm {
@@ -147,6 +147,9 @@ class BitcodeReader : public GVMaterializer {
   /// file is for null, and is thus not represented here.  As such all indices
   /// are off by one.
   std::vector<AttributeSet> MAttributes;
+
+  /// \brief The set of attribute groups.
+  std::map<unsigned, AttributeSet> MAttributeGroups;
 
   /// FunctionBBs - While parsing a function body, this is a list of the basic
   /// blocks for the function.
@@ -320,6 +323,7 @@ private:
 
   bool ParseModule(bool Resume);
   bool ParseAttributeBlock();
+  bool ParseAttributeGroupBlock();
   bool ParseTypeTable();
   bool ParseTypeTableBody();
 

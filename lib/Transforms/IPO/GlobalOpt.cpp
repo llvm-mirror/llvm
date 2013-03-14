@@ -22,14 +22,14 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/CallingConv.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Module.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
@@ -448,8 +448,8 @@ static bool CleanupPointerRootUsers(GlobalVariable *GV,
       Dead[i].second->eraseFromParent();
       Instruction *I = Dead[i].first;
       do {
-	if (isAllocationFn(I, TLI))
-	  break;
+        if (isAllocationFn(I, TLI))
+          break;
         Instruction *J = dyn_cast<Instruction>(I->getOperand(0));
         if (!J)
           break;
@@ -1825,7 +1825,8 @@ static bool TryToShrinkGlobalToBoolean(GlobalVariable *GV, Constant *OtherVal) {
                                              GlobalValue::InternalLinkage,
                                         ConstantInt::getFalse(GV->getContext()),
                                              GV->getName()+".b",
-                                             GV->getThreadLocalMode());
+                                             GV->getThreadLocalMode(),
+                                             GV->getType()->getAddressSpace());
   GV->getParent()->getGlobalList().insert(GV, NewGV);
 
   Constant *InitVal = GV->getInitializer();
@@ -1845,10 +1846,10 @@ static bool TryToShrinkGlobalToBoolean(GlobalVariable *GV, Constant *OtherVal) {
       bool StoringOther = SI->getOperand(0) == OtherVal;
       // Only do this if we weren't storing a loaded value.
       Value *StoreVal;
-      if (StoringOther || SI->getOperand(0) == InitVal)
+      if (StoringOther || SI->getOperand(0) == InitVal) {
         StoreVal = ConstantInt::get(Type::getInt1Ty(GV->getContext()),
                                     StoringOther);
-      else {
+      } else {
         // Otherwise, we are storing a previously loaded copy.  To do this,
         // change the copy from copying the original value to just copying the
         // bool.
@@ -1887,6 +1888,9 @@ static bool TryToShrinkGlobalToBoolean(GlobalVariable *GV, Constant *OtherVal) {
     UI->eraseFromParent();
   }
 
+  // Retain the name of the old global variable. People who are debugging their
+  // programs may expect these variables to be named the same.
+  NewGV->takeName(GV);
   GV->eraseFromParent();
   return true;
 }
@@ -1989,7 +1993,7 @@ bool GlobalOpt::ProcessInternalGlobal(GlobalVariable *GV,
     return Changed;
 
   } else if (GS.StoredType <= GlobalStatus::isInitializerStored) {
-    DEBUG(dbgs() << "MARKING CONSTANT: " << *GV);
+    DEBUG(dbgs() << "MARKING CONSTANT: " << *GV << "\n");
     GV->setConstant(true);
 
     // Clean up any obviously simplifiable users now.
@@ -2067,12 +2071,12 @@ static void ChangeCalleesToFastCall(Function *F) {
 
 static AttributeSet StripNest(LLVMContext &C, const AttributeSet &Attrs) {
   for (unsigned i = 0, e = Attrs.getNumSlots(); i != e; ++i) {
-    if (!Attrs.getSlot(i).Attrs.hasAttribute(Attributes::Nest))
+    unsigned Index = Attrs.getSlotIndex(i);
+    if (!Attrs.getSlotAttributes(i).hasAttribute(Index, Attribute::Nest))
       continue;
 
     // There can be only one.
-    return Attrs.removeAttr(C, Attrs.getSlot(i).Index,
-                            Attributes::get(C, Attributes::Nest));
+    return Attrs.removeAttribute(C, Index, Attribute::Nest);
   }
 
   return Attrs;
@@ -2113,7 +2117,7 @@ bool GlobalOpt::OptimizeFunctions(Module &M) {
         Changed = true;
       }
 
-      if (F->getAttributes().hasAttrSomewhere(Attributes::Nest) &&
+      if (F->getAttributes().hasAttrSomewhere(Attribute::Nest) &&
           !F->hasAddressTaken()) {
         // The function is not used by a trampoline intrinsic, so it is safe
         // to remove the 'nest' attribute.
@@ -2584,24 +2588,38 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
   while (1) {
     Constant *InstResult = 0;
 
+    DEBUG(dbgs() << "Evaluating Instruction: " << *CurInst << "\n");
+
     if (StoreInst *SI = dyn_cast<StoreInst>(CurInst)) {
-      if (!SI->isSimple()) return false;  // no volatile/atomic accesses.
+      if (!SI->isSimple()) {
+        DEBUG(dbgs() << "Store is not simple! Can not evaluate.\n");
+        return false;  // no volatile/atomic accesses.
+      }
       Constant *Ptr = getVal(SI->getOperand(1));
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Ptr))
+      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Ptr)) {
+        DEBUG(dbgs() << "Folding constant ptr expression: " << *Ptr);
         Ptr = ConstantFoldConstantExpression(CE, TD, TLI);
-      if (!isSimpleEnoughPointerToCommit(Ptr))
+        DEBUG(dbgs() << "; To: " << *Ptr << "\n");
+      }
+      if (!isSimpleEnoughPointerToCommit(Ptr)) {
         // If this is too complex for us to commit, reject it.
+        DEBUG(dbgs() << "Pointer is too complex for us to evaluate store.");
         return false;
+      }
 
       Constant *Val = getVal(SI->getOperand(0));
 
       // If this might be too difficult for the backend to handle (e.g. the addr
       // of one global variable divided by another) then we can't commit it.
-      if (!isSimpleEnoughValueToCommit(Val, SimpleConstants, TD))
+      if (!isSimpleEnoughValueToCommit(Val, SimpleConstants, TD)) {
+        DEBUG(dbgs() << "Store value is too complex to evaluate store. " << *Val
+              << "\n");
         return false;
+      }
 
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Ptr))
+      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Ptr)) {
         if (CE->getOpcode() == Instruction::BitCast) {
+          DEBUG(dbgs() << "Attempting to resolve bitcast on constant ptr.\n");
           // If we're evaluating a store through a bitcast, then we need
           // to pull the bitcast off the pointer type and push it onto the
           // stored value.
@@ -2630,6 +2648,8 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
             // If we can't improve the situation by introspecting NewTy,
             // we have to give up.
             } else {
+              DEBUG(dbgs() << "Failed to bitcast constant ptr, can not "
+                    "evaluate.\n");
               return false;
             }
           }
@@ -2637,25 +2657,36 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
           // If we found compatible types, go ahead and push the bitcast
           // onto the stored value.
           Val = ConstantExpr::getBitCast(Val, NewTy);
+
+          DEBUG(dbgs() << "Evaluated bitcast: " << *Val << "\n");
         }
+      }
 
       MutatedMemory[Ptr] = Val;
     } else if (BinaryOperator *BO = dyn_cast<BinaryOperator>(CurInst)) {
       InstResult = ConstantExpr::get(BO->getOpcode(),
                                      getVal(BO->getOperand(0)),
                                      getVal(BO->getOperand(1)));
+      DEBUG(dbgs() << "Found a BinaryOperator! Simplifying: " << *InstResult
+            << "\n");
     } else if (CmpInst *CI = dyn_cast<CmpInst>(CurInst)) {
       InstResult = ConstantExpr::getCompare(CI->getPredicate(),
                                             getVal(CI->getOperand(0)),
                                             getVal(CI->getOperand(1)));
+      DEBUG(dbgs() << "Found a CmpInst! Simplifying: " << *InstResult
+            << "\n");
     } else if (CastInst *CI = dyn_cast<CastInst>(CurInst)) {
       InstResult = ConstantExpr::getCast(CI->getOpcode(),
                                          getVal(CI->getOperand(0)),
                                          CI->getType());
+      DEBUG(dbgs() << "Found a Cast! Simplifying: " << *InstResult
+            << "\n");
     } else if (SelectInst *SI = dyn_cast<SelectInst>(CurInst)) {
       InstResult = ConstantExpr::getSelect(getVal(SI->getOperand(0)),
                                            getVal(SI->getOperand(1)),
                                            getVal(SI->getOperand(2)));
+      DEBUG(dbgs() << "Found a Select! Simplifying: " << *InstResult
+            << "\n");
     } else if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(CurInst)) {
       Constant *P = getVal(GEP->getOperand(0));
       SmallVector<Constant*, 8> GEPOps;
@@ -2665,41 +2696,70 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
       InstResult =
         ConstantExpr::getGetElementPtr(P, GEPOps,
                                        cast<GEPOperator>(GEP)->isInBounds());
+      DEBUG(dbgs() << "Found a GEP! Simplifying: " << *InstResult
+            << "\n");
     } else if (LoadInst *LI = dyn_cast<LoadInst>(CurInst)) {
-      if (!LI->isSimple()) return false;  // no volatile/atomic accesses.
+
+      if (!LI->isSimple()) {
+        DEBUG(dbgs() << "Found a Load! Not a simple load, can not evaluate.\n");
+        return false;  // no volatile/atomic accesses.
+      }
+
       Constant *Ptr = getVal(LI->getOperand(0));
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Ptr))
+      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Ptr)) {
         Ptr = ConstantFoldConstantExpression(CE, TD, TLI);
+        DEBUG(dbgs() << "Found a constant pointer expression, constant "
+              "folding: " << *Ptr << "\n");
+      }
       InstResult = ComputeLoadResult(Ptr);
-      if (InstResult == 0) return false; // Could not evaluate load.
+      if (InstResult == 0) {
+        DEBUG(dbgs() << "Failed to compute load result. Can not evaluate load."
+              "\n");
+        return false; // Could not evaluate load.
+      }
+
+      DEBUG(dbgs() << "Evaluated load: " << *InstResult << "\n");
     } else if (AllocaInst *AI = dyn_cast<AllocaInst>(CurInst)) {
-      if (AI->isArrayAllocation()) return false;  // Cannot handle array allocs.
+      if (AI->isArrayAllocation()) {
+        DEBUG(dbgs() << "Found an array alloca. Can not evaluate.\n");
+        return false;  // Cannot handle array allocs.
+      }
       Type *Ty = AI->getType()->getElementType();
       AllocaTmps.push_back(new GlobalVariable(Ty, false,
                                               GlobalValue::InternalLinkage,
                                               UndefValue::get(Ty),
                                               AI->getName()));
       InstResult = AllocaTmps.back();
+      DEBUG(dbgs() << "Found an alloca. Result: " << *InstResult << "\n");
     } else if (isa<CallInst>(CurInst) || isa<InvokeInst>(CurInst)) {
       CallSite CS(CurInst);
 
       // Debug info can safely be ignored here.
       if (isa<DbgInfoIntrinsic>(CS.getInstruction())) {
+        DEBUG(dbgs() << "Ignoring debug info.\n");
         ++CurInst;
         continue;
       }
 
       // Cannot handle inline asm.
-      if (isa<InlineAsm>(CS.getCalledValue())) return false;
+      if (isa<InlineAsm>(CS.getCalledValue())) {
+        DEBUG(dbgs() << "Found inline asm, can not evaluate.\n");
+        return false;
+      }
 
       if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(CS.getInstruction())) {
         if (MemSetInst *MSI = dyn_cast<MemSetInst>(II)) {
-          if (MSI->isVolatile()) return false;
+          if (MSI->isVolatile()) {
+            DEBUG(dbgs() << "Can not optimize a volatile memset " <<
+                  "intrinsic.\n");
+            return false;
+          }
           Constant *Ptr = getVal(MSI->getDest());
           Constant *Val = getVal(MSI->getValue());
           Constant *DestVal = ComputeLoadResult(getVal(Ptr));
           if (Val->isNullValue() && DestVal && DestVal->isNullValue()) {
             // This memset is a no-op.
+            DEBUG(dbgs() << "Ignoring no-op memset.\n");
             ++CurInst;
             continue;
           }
@@ -2707,6 +2767,7 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
 
         if (II->getIntrinsicID() == Intrinsic::lifetime_start ||
             II->getIntrinsicID() == Intrinsic::lifetime_end) {
+          DEBUG(dbgs() << "Ignoring lifetime intrinsic.\n");
           ++CurInst;
           continue;
         }
@@ -2714,8 +2775,10 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
         if (II->getIntrinsicID() == Intrinsic::invariant_start) {
           // We don't insert an entry into Values, as it doesn't have a
           // meaningful return value.
-          if (!II->use_empty())
+          if (!II->use_empty()) {
+            DEBUG(dbgs() << "Found unused invariant_start. Cant evaluate.\n");
             return false;
+          }
           ConstantInt *Size = cast<ConstantInt>(II->getArgOperand(0));
           Value *PtrArg = getVal(II->getArgOperand(1));
           Value *Ptr = PtrArg->stripPointerCasts();
@@ -2723,20 +2786,30 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
             Type *ElemTy = cast<PointerType>(GV->getType())->getElementType();
             if (!Size->isAllOnesValue() &&
                 Size->getValue().getLimitedValue() >=
-                TD->getTypeStoreSize(ElemTy))
+                TD->getTypeStoreSize(ElemTy)) {
               Invariants.insert(GV);
+              DEBUG(dbgs() << "Found a global var that is an invariant: " << *GV
+                    << "\n");
+            } else {
+              DEBUG(dbgs() << "Found a global var, but can not treat it as an "
+                    "invariant.\n");
+            }
           }
           // Continue even if we do nothing.
           ++CurInst;
           continue;
         }
+
+        DEBUG(dbgs() << "Unknown intrinsic. Can not evaluate.\n");
         return false;
       }
 
       // Resolve function pointers.
       Function *Callee = dyn_cast<Function>(getVal(CS.getCalledValue()));
-      if (!Callee || Callee->mayBeOverridden())
+      if (!Callee || Callee->mayBeOverridden()) {
+        DEBUG(dbgs() << "Can not resolve function pointer.\n");
         return false;  // Cannot resolve.
+      }
 
       SmallVector<Constant*, 8> Formals;
       for (User::op_iterator i = CS.arg_begin(), e = CS.arg_end(); i != e; ++i)
@@ -2746,22 +2819,38 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
         // If this is a function we can constant fold, do it.
         if (Constant *C = ConstantFoldCall(Callee, Formals, TLI)) {
           InstResult = C;
+          DEBUG(dbgs() << "Constant folded function call. Result: " <<
+                *InstResult << "\n");
         } else {
+          DEBUG(dbgs() << "Can not constant fold function call.\n");
           return false;
         }
       } else {
-        if (Callee->getFunctionType()->isVarArg())
+        if (Callee->getFunctionType()->isVarArg()) {
+          DEBUG(dbgs() << "Can not constant fold vararg function call.\n");
           return false;
+        }
 
-        Constant *RetVal;
+        Constant *RetVal = 0;
         // Execute the call, if successful, use the return value.
         ValueStack.push_back(new DenseMap<Value*, Constant*>);
-        if (!EvaluateFunction(Callee, RetVal, Formals))
+        if (!EvaluateFunction(Callee, RetVal, Formals)) {
+          DEBUG(dbgs() << "Failed to evaluate function.\n");
           return false;
+        }
         delete ValueStack.pop_back_val();
         InstResult = RetVal;
+
+        if (InstResult != NULL) {
+          DEBUG(dbgs() << "Successfully evaluated function. Result: " <<
+                InstResult << "\n\n");
+        } else {
+          DEBUG(dbgs() << "Successfully evaluated function. Result: 0\n\n");
+        }
       }
     } else if (isa<TerminatorInst>(CurInst)) {
+      DEBUG(dbgs() << "Found a terminator instruction.\n");
+
       if (BranchInst *BI = dyn_cast<BranchInst>(CurInst)) {
         if (BI->isUnconditional()) {
           NextBB = BI->getSuccessor(0);
@@ -2787,13 +2876,17 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
         NextBB = 0;
       } else {
         // invoke, unwind, resume, unreachable.
+        DEBUG(dbgs() << "Can not handle terminator.");
         return false;  // Cannot handle this terminator.
       }
 
       // We succeeded at evaluating this block!
+      DEBUG(dbgs() << "Successfully evaluated block.\n");
       return true;
     } else {
       // Did not know how to evaluate this!
+      DEBUG(dbgs() << "Failed to evaluate block due to unhandled instruction."
+            "\n");
       return false;
     }
 
@@ -2807,6 +2900,7 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
     // If we just processed an invoke, we finished evaluating the block.
     if (InvokeInst *II = dyn_cast<InvokeInst>(CurInst)) {
       NextBB = II->getNormalDest();
+      DEBUG(dbgs() << "Found an invoke instruction. Finished Block.\n\n");
       return true;
     }
 
@@ -2845,6 +2939,8 @@ bool Evaluator::EvaluateFunction(Function *F, Constant *&RetVal,
 
   while (1) {
     BasicBlock *NextBB = 0; // Initialized to avoid compiler warnings.
+    DEBUG(dbgs() << "Trying to evaluate BB: " << *CurBB << "\n");
+
     if (!EvaluateBlock(CurInst, NextBB))
       return false;
 
@@ -2924,6 +3020,7 @@ bool GlobalOpt::OptimizeGlobalCtorsList(GlobalVariable *&GCL) {
       }
       break;
     }
+    DEBUG(dbgs() << "Optimizing Global Constructor: " << *F << "\n");
 
     // We cannot simplify external ctor functions.
     if (F->empty()) continue;

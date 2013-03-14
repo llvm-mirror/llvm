@@ -22,30 +22,30 @@
 #define DEBUG_TYPE "tsan"
 
 #include "llvm/Transforms/Instrumentation.h"
-#include "BlackList.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Function.h"
-#include "llvm/IRBuilder.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Metadata.h"
-#include "llvm/Module.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/BlackList.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
-#include "llvm/Type.h"
 
 using namespace llvm;
 
-static cl::opt<std::string>  ClBlackListFile("tsan-blacklist",
+static cl::opt<std::string>  ClBlacklistFile("tsan-blacklist",
        cl::desc("Blacklist file"), cl::Hidden);
 static cl::opt<bool>  ClInstrumentMemoryAccesses(
     "tsan-instrument-memory-accesses", cl::init(true),
@@ -71,7 +71,11 @@ namespace {
 
 /// ThreadSanitizer: instrument the code in module to find races.
 struct ThreadSanitizer : public FunctionPass {
-  ThreadSanitizer();
+  ThreadSanitizer(StringRef BlacklistFile = StringRef())
+      : FunctionPass(ID),
+        TD(0),
+        BlacklistFile(BlacklistFile.empty() ? ClBlacklistFile
+                                            : BlacklistFile) { }
   const char *getPassName() const;
   bool runOnFunction(Function &F);
   bool doInitialization(Module &M);
@@ -87,6 +91,7 @@ struct ThreadSanitizer : public FunctionPass {
   int getMemoryAccessFuncIndex(Value *Addr);
 
   DataLayout *TD;
+  SmallString<64> BlacklistFile;
   OwningPtr<BlackList> BL;
   IntegerType *OrdTy;
   // Callbacks to run-time library are computed in doInitialization.
@@ -115,13 +120,8 @@ const char *ThreadSanitizer::getPassName() const {
   return "ThreadSanitizer";
 }
 
-ThreadSanitizer::ThreadSanitizer()
-  : FunctionPass(ID),
-  TD(NULL) {
-}
-
-FunctionPass *llvm::createThreadSanitizerPass() {
-  return new ThreadSanitizer();
+FunctionPass *llvm::createThreadSanitizerPass(StringRef BlacklistFile) {
+  return new ThreadSanitizer(BlacklistFile);
 }
 
 static Function *checkInterfaceFunction(Constant *FuncOrBitcast) {
@@ -206,7 +206,7 @@ bool ThreadSanitizer::doInitialization(Module &M) {
   TD = getAnalysisIfAvailable<DataLayout>();
   if (!TD)
     return false;
-  BL.reset(new BlackList(ClBlackListFile));
+  BL.reset(new BlackList(BlacklistFile));
 
   // Always insert a call to __tsan_init into the module's CTORs.
   IRBuilder<> IRB(M.getContext());

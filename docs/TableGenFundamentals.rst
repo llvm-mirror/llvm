@@ -1,5 +1,3 @@
-.. _tablegen:
-
 =====================
 TableGen Fundamentals
 =====================
@@ -121,11 +119,11 @@ this (at the time of this writing):
   ...
 
 This definition corresponds to the 32-bit register-register ``add`` instruction
-of the the x86 architecture.  ``def ADD32rr`` defines a record named
+of the x86 architecture.  ``def ADD32rr`` defines a record named
 ``ADD32rr``, and the comment at the end of the line indicates the superclasses
 of the definition.  The body of the record contains all of the data that
 TableGen assembled for the record, indicating that the instruction is part of
-the "X86" namespace, the pattern indicating how the the instruction should be
+the "X86" namespace, the pattern indicating how the instruction should be
 emitted into the assembly file, that it is a two-address instruction, has a
 particular encoding, etc.  The contents and semantics of the information in the
 record are specific to the needs of the X86 backend, and are only shown as an
@@ -792,6 +790,10 @@ Expressions used by code generator to describe instructions and isel patterns:
 
 TableGen backends
 =================
+
+Until we get a step-by-step HowTo for writing TableGen backends, you can at
+least grab the boilerplate (build system, new files, etc.) from Clang's
+r173931.
 
 TODO: How they work, how to write one.  This section should not contain details
 about any particular backend, except maybe ``-print-enums`` as an example.  This

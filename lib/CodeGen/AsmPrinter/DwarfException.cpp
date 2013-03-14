@@ -19,21 +19,20 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Module.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Target/Mangler.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 using namespace llvm;
@@ -608,7 +607,7 @@ void DwarfException::EmitExceptionTable() {
       if (!S.PadLabel) {
         if (VerboseAsm)
           Asm->OutStreamer.AddComment("    has no landing pad");
-        Asm->OutStreamer.EmitIntValue(0, 4/*size*/, 0/*addrspace*/);
+        Asm->OutStreamer.EmitIntValue(0, 4/*size*/);
       } else {
         if (VerboseAsm)
           Asm->OutStreamer.AddComment(Twine("    jumps to ") +

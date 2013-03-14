@@ -91,8 +91,19 @@ def PPCtoc_entry: SDNode<"PPCISD::TOC_ENTRY", SDTIntBinOp, [SDNPMayLoad]>;
 def PPCvmaddfp  : SDNode<"PPCISD::VMADDFP", SDTFPTernaryOp, []>;
 def PPCvnmsubfp : SDNode<"PPCISD::VNMSUBFP", SDTFPTernaryOp, []>;
 
-def PPCldGotTprel : SDNode<"PPCISD::LD_GOT_TPREL", SDTIntBinOp, [SDNPMayLoad]>;
+def PPCaddisGotTprelHA : SDNode<"PPCISD::ADDIS_GOT_TPREL_HA", SDTIntBinOp>;
+def PPCldGotTprelL : SDNode<"PPCISD::LD_GOT_TPREL_L", SDTIntBinOp,
+                            [SDNPMayLoad]>;
 def PPCaddTls     : SDNode<"PPCISD::ADD_TLS", SDTIntBinOp, []>;
+def PPCaddisTlsgdHA : SDNode<"PPCISD::ADDIS_TLSGD_HA", SDTIntBinOp>;
+def PPCaddiTlsgdL   : SDNode<"PPCISD::ADDI_TLSGD_L", SDTIntBinOp>;
+def PPCgetTlsAddr   : SDNode<"PPCISD::GET_TLS_ADDR", SDTIntBinOp>;
+def PPCaddisTlsldHA : SDNode<"PPCISD::ADDIS_TLSLD_HA", SDTIntBinOp>;
+def PPCaddiTlsldL   : SDNode<"PPCISD::ADDI_TLSLD_L", SDTIntBinOp>;
+def PPCgetTlsldAddr : SDNode<"PPCISD::GET_TLSLD_ADDR", SDTIntBinOp>;
+def PPCaddisDtprelHA : SDNode<"PPCISD::ADDIS_DTPREL_HA", SDTIntBinOp,
+                              [SDNPHasChain]>;
+def PPCaddiDtprelL   : SDNode<"PPCISD::ADDI_DTPREL_L", SDTIntBinOp>;
 
 def PPCvperm    : SDNode<"PPCISD::VPERM", SDT_PPCvperm, []>;
 
@@ -170,7 +181,7 @@ def PPClarx      : SDNode<"PPCISD::LARX", SDT_PPClarx,
 def PPCstcx      : SDNode<"PPCISD::STCX", SDT_PPCstcx,
                           [SDNPHasChain, SDNPMayStore]>;
 
-// Instructions to support medium code model
+// Instructions to support medium and large code model
 def PPCaddisTocHA : SDNode<"PPCISD::ADDIS_TOC_HA", SDTIntBinOp, []>;
 def PPCldTocL     : SDNode<"PPCISD::LD_TOC_L", SDTIntBinOp, [SDNPMayLoad]>;
 def PPCaddiTocL   : SDNode<"PPCISD::ADDI_TOC_L", SDTIntBinOp, []>;
@@ -335,7 +346,7 @@ def crbitm: Operand<i8> {
 // Address operands
 def memri : Operand<iPTR> {
   let PrintMethod = "printMemRegImm";
-  let MIOperandInfo = (ops i32imm:$imm, ptr_rc:$reg);
+  let MIOperandInfo = (ops symbolLo:$imm, ptr_rc:$reg);
   let EncoderMethod = "getMemRIEncoding";
 }
 def memrr : Operand<iPTR> {
@@ -344,7 +355,7 @@ def memrr : Operand<iPTR> {
 }
 def memrix : Operand<iPTR> {   // memri where the imm is shifted 2 bits.
   let PrintMethod = "printMemRegImmShifted";
-  let MIOperandInfo = (ops i32imm:$imm, ptr_rc:$reg);
+  let MIOperandInfo = (ops symbolLo:$imm, ptr_rc:$reg);
   let EncoderMethod = "getMemRIXEncoding";
 }
 

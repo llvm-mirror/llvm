@@ -17,9 +17,9 @@
 #define LLVM_TARGET_TARGETREGISTERINFO_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/IR/CallingConv.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include <cassert>
 #include <functional>
@@ -388,21 +388,6 @@ public:
     return false;
   }
 
-  /// isSubRegister - Returns true if regB is a sub-register of regA.
-  ///
-  bool isSubRegister(unsigned regA, unsigned regB) const {
-    return isSuperRegister(regB, regA);
-  }
-
-  /// isSuperRegister - Returns true if regB is a super-register of regA.
-  ///
-  bool isSuperRegister(unsigned RegA, unsigned RegB) const {
-    for (MCSuperRegIterator I(RegA, this); I.isValid(); ++I)
-      if (*I == RegB)
-        return true;
-    return false;
-  }
-
   /// getCalleeSavedRegs - Return a null-terminated list of all of the
   /// callee saved registers on this target. The register should be in the
   /// order of desired callee-save stack frame offset. The first register is
@@ -748,21 +733,6 @@ public:
     llvm_unreachable("isFrameOffsetLegal does not exist on this target");
   }
 
-  /// eliminateCallFramePseudoInstr - This method is called during prolog/epilog
-  /// code insertion to eliminate call frame setup and destroy pseudo
-  /// instructions (but only if the Target is using them).  It is responsible
-  /// for eliminating these instructions, replacing them with concrete
-  /// instructions.  This method need only be implemented if using call frame
-  /// setup/destroy pseudo instructions.
-  ///
-  virtual void
-  eliminateCallFramePseudoInstr(MachineFunction &MF,
-                                MachineBasicBlock &MBB,
-                                MachineBasicBlock::iterator MI) const {
-    llvm_unreachable("Call Frame Pseudo Instructions do not exist on this "
-                     "target!");
-  }
-
 
   /// saveScavengerRegister - Spill the register so it can be used by the
   /// register scavenger. Return true if the register was spilled, false
@@ -782,10 +752,11 @@ public:
   /// referenced by the iterator contains an MO_FrameIndex operand which must be
   /// eliminated by this method.  This method may modify or replace the
   /// specified instruction, as long as it keeps the iterator pointing at the
-  /// finished product. SPAdj is the SP adjustment due to call frame setup
-  /// instruction.
+  /// finished product.  SPAdj is the SP adjustment due to call frame setup
+  /// instruction.  FIOperandNum is the FI operand number.
   virtual void eliminateFrameIndex(MachineBasicBlock::iterator MI,
-                                   int SPAdj, RegScavenger *RS=NULL) const = 0;
+                                   int SPAdj, unsigned FIOperandNum,
+                                   RegScavenger *RS = NULL) const = 0;
 
   //===--------------------------------------------------------------------===//
   /// Debug information queries.

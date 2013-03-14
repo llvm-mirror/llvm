@@ -22,7 +22,6 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCParser/AsmLexer.h"
-#include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
@@ -157,11 +156,18 @@ static cl::opt<bool>
 GenDwarfForAssembly("g", cl::desc("Generate dwarf debugging info for assembly "
                                   "source files"));
 
+static cl::opt<std::string>
+DebugCompilationDir("fdebug-compilation-dir",
+                    cl::desc("Specifies the debug info's compilation dir"));
+
+static cl::opt<std::string>
+MainFileName("main-file-name",
+             cl::desc("Specifies the name we should consider the input file"));
+
 enum ActionType {
   AC_AsLex,
   AC_Assemble,
   AC_Disassemble,
-  AC_EDisassemble,
   AC_MDisassemble,
   AC_HDisassemble
 };
@@ -175,8 +181,6 @@ Action(cl::desc("Action to perform:"),
                              "Assemble a .s file (default)"),
                   clEnumValN(AC_Disassemble, "disassemble",
                              "Disassemble strings of hex bytes"),
-                  clEnumValN(AC_EDisassemble, "edis",
-                             "Enhanced disassembly of strings of hex bytes"),
                   clEnumValN(AC_MDisassemble, "mdis",
                              "Marked up disassembly of strings of hex bytes"),
                   clEnumValN(AC_HDisassemble, "hdis",
@@ -231,6 +235,13 @@ static void setDwarfDebugFlags(int argc, char **argv) {
   }
 }
 
+static std::string DwarfDebugProducer;
+static void setDwarfDebugProducer(void) {
+  if(!getenv("DEBUG_PRODUCER"))
+    return;
+  DwarfDebugProducer += getenv("DEBUG_PRODUCER");
+}
+
 static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI, tool_output_file *Out) {
 
   AsmLexer Lexer(MAI);
@@ -257,9 +268,6 @@ static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI, tool_output_file *Out) 
       break;
     case AsmToken::Real:
       Out->os() << "real: " << Lexer.getTok().getString();
-      break;
-    case AsmToken::Register:
-      Out->os() << "register: " << Lexer.getTok().getRegVal();
       break;
     case AsmToken::String:
       Out->os() << "string: " << Lexer.getTok().getString();
@@ -351,6 +359,8 @@ int main(int argc, char **argv) {
   TripleName = Triple::normalize(TripleName);
   setDwarfDebugFlags(argc, argv);
 
+  setDwarfDebugProducer();
+
   const char *ProgName = argv[0];
   const Target *TheTarget = GetTarget(ProgName);
   if (!TheTarget)
@@ -372,7 +382,6 @@ int main(int argc, char **argv) {
   // it later.
   SrcMgr.setIncludeDirs(IncludeDirs);
 
-
   llvm::OwningPtr<MCAsmInfo> MAI(TheTarget->createMCAsmInfo(TripleName));
   assert(MAI && "Unable to create target asm info!");
 
@@ -389,8 +398,14 @@ int main(int argc, char **argv) {
     Ctx.setAllowTemporaryLabels(false);
 
   Ctx.setGenDwarfForAssembly(GenDwarfForAssembly);
-  if (!DwarfDebugFlags.empty()) 
+  if (!DwarfDebugFlags.empty())
     Ctx.setDwarfDebugFlags(StringRef(DwarfDebugFlags));
+  if (!DwarfDebugProducer.empty())
+    Ctx.setDwarfDebugProducer(StringRef(DwarfDebugProducer));
+  if (!DebugCompilationDir.empty())
+    Ctx.setCompilationDir(DebugCompilationDir);
+  if (!MainFileName.empty())
+    Ctx.setMainFileName(MainFileName);
 
   // Package up features to be passed to target/subtarget
   std::string FeaturesStr;
@@ -412,7 +427,7 @@ int main(int argc, char **argv) {
   OwningPtr<MCSubtargetInfo>
     STI(TheTarget->createMCSubtargetInfo(TripleName, MCPU, FeaturesStr));
 
-  MCInstPrinter *IP;
+  MCInstPrinter *IP = NULL;
   if (FileType == OFT_AssemblyFile) {
     IP =
       TheTarget->createMCInstPrinter(OutputAsmVariant, *MAI, *MCII, *MRI, *STI);
@@ -450,18 +465,17 @@ int main(int argc, char **argv) {
     Res = AssembleInput(ProgName, TheTarget, SrcMgr, Ctx, *Str, *MAI, *STI);
     break;
   case AC_MDisassemble:
+    assert(IP && "Expected assembly output");
     IP->setUseMarkup(1);
     disassemble = true;
     break;
   case AC_HDisassemble:
+    assert(IP && "Expected assembly output");
     IP->setPrintImmHex(1);
     disassemble = true;
     break;
   case AC_Disassemble:
     disassemble = true;
-    break;
-  case AC_EDisassemble:
-    Res =  Disassembler::disassembleEnhanced(TripleName, *Buffer, SrcMgr, Out->os());
     break;
   }
   if (disassemble)

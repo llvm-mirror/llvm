@@ -17,11 +17,12 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalVariable.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSectionCOFF.h"
@@ -29,14 +30,12 @@
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Module.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/Mangler.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
 using namespace llvm;
 using namespace dwarf;
 
@@ -406,14 +405,14 @@ TargetLoweringObjectFileELF::InitializeELF(bool UseInitArray_) {
 //                                 MachO
 //===----------------------------------------------------------------------===//
 
-/// emitModuleFlags - Emit the module flags that specify the garbage collection
-/// information.
+/// emitModuleFlags - Perform code emission for module flags.
 void TargetLoweringObjectFileMachO::
 emitModuleFlags(MCStreamer &Streamer,
                 ArrayRef<Module::ModuleFlagEntry> ModuleFlags,
                 Mangler *Mang, const TargetMachine &TM) const {
   unsigned VersionVal = 0;
   unsigned ImageInfoFlags = 0;
+  MDNode *LinkerOptions = 0;
   StringRef SectionVal;
 
   for (ArrayRef<Module::ModuleFlagEntry>::iterator
@@ -427,14 +426,33 @@ emitModuleFlags(MCStreamer &Streamer,
     StringRef Key = MFE.Key->getString();
     Value *Val = MFE.Val;
 
-    if (Key == "Objective-C Image Info Version")
+    if (Key == "Objective-C Image Info Version") {
       VersionVal = cast<ConstantInt>(Val)->getZExtValue();
-    else if (Key == "Objective-C Garbage Collection" ||
-             Key == "Objective-C GC Only" ||
-             Key == "Objective-C Is Simulated")
+    } else if (Key == "Objective-C Garbage Collection" ||
+               Key == "Objective-C GC Only" ||
+               Key == "Objective-C Is Simulated") {
       ImageInfoFlags |= cast<ConstantInt>(Val)->getZExtValue();
-    else if (Key == "Objective-C Image Info Section")
+    } else if (Key == "Objective-C Image Info Section") {
       SectionVal = cast<MDString>(Val)->getString();
+    } else if (Key == "Linker Options") {
+      LinkerOptions = cast<MDNode>(Val);
+    }
+  }
+
+  // Emit the linker options if present.
+  if (LinkerOptions) {
+    for (unsigned i = 0, e = LinkerOptions->getNumOperands(); i != e; ++i) {
+      MDNode *MDOptions = cast<MDNode>(LinkerOptions->getOperand(i));
+      SmallVector<std::string, 4> StrOptions;
+
+      // Convert to strings.
+      for (unsigned ii = 0, ie = MDOptions->getNumOperands(); ii != ie; ++ii) {
+        MDString *MDOption = cast<MDString>(MDOptions->getOperand(ii));
+        StrOptions.push_back(MDOption->getString());
+      }
+
+      Streamer.EmitLinkerOptions(StrOptions);
+    }
   }
 
   // The section is mandatory. If we don't have it, then we don't have GC info.

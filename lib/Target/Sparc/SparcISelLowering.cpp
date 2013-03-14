@@ -22,9 +22,9 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/Module.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
 
@@ -95,15 +95,10 @@ SparcTargetLowering::LowerReturn(SDValue Chain,
   // Analize return values.
   CCInfo.AnalyzeReturn(Outs, RetCC_Sparc32);
 
-  // If this is the first return lowered for this function, add the regs to the
-  // liveout set for the function.
-  if (MF.getRegInfo().liveout_empty()) {
-    for (unsigned i = 0; i != RVLocs.size(); ++i)
-      if (RVLocs[i].isRegLoc())
-        MF.getRegInfo().addLiveOut(RVLocs[i].getLocReg());
-  }
-
   SDValue Flag;
+  SmallVector<SDValue, 4> RetOps(1, Chain);
+  // Make room for the return address offset.
+  RetOps.push_back(SDValue());
 
   // Copy the result values into the output registers.
   for (unsigned i = 0; i != RVLocs.size(); ++i) {
@@ -115,6 +110,7 @@ SparcTargetLowering::LowerReturn(SDValue Chain,
 
     // Guarantee that all emitted copies are stuck together with flags.
     Flag = Chain.getValue(1);
+    RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
 
   unsigned RetAddrOffset = 8; //Call Inst + Delay Slot
@@ -127,18 +123,19 @@ SparcTargetLowering::LowerReturn(SDValue Chain,
     SDValue Val = DAG.getCopyFromReg(Chain, dl, Reg, getPointerTy());
     Chain = DAG.getCopyToReg(Chain, dl, SP::I0, Val, Flag);
     Flag = Chain.getValue(1);
-    if (MF.getRegInfo().liveout_empty())
-      MF.getRegInfo().addLiveOut(SP::I0);
+    RetOps.push_back(DAG.getRegister(SP::I0, getPointerTy()));
     RetAddrOffset = 12; // CallInst + Delay Slot + Unimp
   }
 
-  SDValue RetAddrOffsetNode = DAG.getConstant(RetAddrOffset, MVT::i32);
+  RetOps[0] = Chain;  // Update chain.
+  RetOps[1] = DAG.getConstant(RetAddrOffset, MVT::i32);
 
+  // Add the flag if we have it.
   if (Flag.getNode())
-    return DAG.getNode(SPISD::RET_FLAG, dl, MVT::Other, Chain,
-                       RetAddrOffsetNode, Flag);
-  return DAG.getNode(SPISD::RET_FLAG, dl, MVT::Other, Chain,
-                     RetAddrOffsetNode);
+    RetOps.push_back(Flag);
+
+  return DAG.getNode(SPISD::RET_FLAG, dl, MVT::Other,
+                     &RetOps[0], RetOps.size());
 }
 
 /// LowerFormalArguments - V8 uses a very simple ABI, where all values are
@@ -759,10 +756,12 @@ SparcTargetLowering::SparcTargetLowering(TargetMachine &TM)
 
   setOperationAction(ISD::FSIN , MVT::f64, Expand);
   setOperationAction(ISD::FCOS , MVT::f64, Expand);
+  setOperationAction(ISD::FSINCOS, MVT::f64, Expand);
   setOperationAction(ISD::FREM , MVT::f64, Expand);
   setOperationAction(ISD::FMA  , MVT::f64, Expand);
   setOperationAction(ISD::FSIN , MVT::f32, Expand);
   setOperationAction(ISD::FCOS , MVT::f32, Expand);
+  setOperationAction(ISD::FSINCOS, MVT::f32, Expand);
   setOperationAction(ISD::FREM , MVT::f32, Expand);
   setOperationAction(ISD::FMA  , MVT::f32, Expand);
   setOperationAction(ISD::CTPOP, MVT::i32, Expand);
@@ -956,9 +955,7 @@ static SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) {
   // Get the condition flag.
   SDValue CompareFlag;
   if (LHS.getValueType() == MVT::i32) {
-    std::vector<EVT> VTs;
-    VTs.push_back(MVT::i32);
-    VTs.push_back(MVT::Glue);
+    EVT VTs[] = { MVT::i32, MVT::Glue };
     SDValue Ops[2] = { LHS, RHS };
     CompareFlag = DAG.getNode(SPISD::CMPICC, dl, VTs, Ops, 2).getValue(1);
     if (SPCC == ~0U) SPCC = IntCondCCodeToICC(CC);
@@ -987,9 +984,8 @@ static SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) {
 
   SDValue CompareFlag;
   if (LHS.getValueType() == MVT::i32) {
-    std::vector<EVT> VTs;
-    VTs.push_back(LHS.getValueType());   // subcc returns a value
-    VTs.push_back(MVT::Glue);
+    // subcc returns a value
+    EVT VTs[] = { LHS.getValueType(), MVT::Glue };
     SDValue Ops[2] = { LHS, RHS };
     CompareFlag = DAG.getNode(SPISD::CMPICC, dl, VTs, Ops, 2).getValue(1);
     Opc = SPISD::SELECT_ICC;

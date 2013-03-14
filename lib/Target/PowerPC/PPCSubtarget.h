@@ -43,7 +43,12 @@ namespace PPC {
     DIR_A2,
     DIR_E500mc,
     DIR_E5500,
+    DIR_PWR3,
+    DIR_PWR4,
+    DIR_PWR5,
+    DIR_PWR5X,
     DIR_PWR6,
+    DIR_PWR6X,
     DIR_PWR7,
     DIR_64
   };
@@ -70,6 +75,7 @@ protected:
   bool Use64BitRegs;
   bool IsPPC64;
   bool HasAltivec;
+  bool HasQPX;
   bool HasFSQRT;
   bool HasSTFIWX;
   bool HasISEL;
@@ -150,6 +156,7 @@ public:
   bool hasFSQRT() const { return HasFSQRT; }
   bool hasSTFIWX() const { return HasSTFIWX; }
   bool hasAltivec() const { return HasAltivec; }
+  bool hasQPX() const { return HasQPX; }
   bool hasMFOCRF() const { return HasMFOCRF; }
   bool hasISEL() const { return HasISEL; }
   bool isBookE() const { return IsBookE; }
@@ -160,6 +167,8 @@ public:
   bool isDarwin() const { return TargetTriple.isMacOSX(); }
   /// isBGP - True if this is a BG/P platform.
   bool isBGP() const { return TargetTriple.getVendor() == Triple::BGP; }
+  /// isBGQ - True if this is a BG/Q platform.
+  bool isBGQ() const { return TargetTriple.getVendor() == Triple::BGQ; }
 
   bool isDarwinABI() const { return isDarwin(); }
   bool isSVR4ABI() const { return !isDarwin(); }

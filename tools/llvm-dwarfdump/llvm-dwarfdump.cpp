@@ -52,6 +52,25 @@ static cl::opt<bool>
 PrintInlining("inlining", cl::init(false),
               cl::desc("Print all inlined frames for a given address"));
 
+static cl::opt<DIDumpType>
+DumpType("debug-dump", cl::init(DIDT_All),
+  cl::desc("Dump of debug sections:"),
+  cl::values(
+        clEnumValN(DIDT_All, "all", "Dump all debug sections"),
+        clEnumValN(DIDT_Abbrev, "abbrev", ".debug_abbrev"),
+        clEnumValN(DIDT_AbbrevDwo, "abbrev.dwo", ".debug_abbrev.dwo"),
+        clEnumValN(DIDT_Aranges, "aranges", ".debug_aranges"),
+        clEnumValN(DIDT_Info, "info", ".debug_info"),
+        clEnumValN(DIDT_InfoDwo, "info.dwo", ".debug_info.dwo"),
+        clEnumValN(DIDT_Line, "line", ".debug_line"),
+        clEnumValN(DIDT_Frames, "frames", ".debug_frame"),
+        clEnumValN(DIDT_Ranges, "ranges", ".debug_ranges"),
+        clEnumValN(DIDT_Pubnames, "pubnames", ".debug_pubnames"),
+        clEnumValN(DIDT_Str, "str", ".debug_str"),
+        clEnumValN(DIDT_StrDwo, "str.dwo", ".debug_str.dwo"),
+        clEnumValN(DIDT_StrOffsetsDwo, "str_offsets.dwo", ".debug_str_offsets.dwo"),
+        clEnumValEnd));
+
 static void PrintDILineInfo(DILineInfo dli) {
   if (PrintFunctions)
     outs() << (dli.getFunctionName() ? dli.getFunctionName() : "<unknown>")
@@ -69,13 +88,18 @@ static void DumpInput(const StringRef &Filename) {
   }
 
   OwningPtr<ObjectFile> Obj(ObjectFile::createObjectFile(Buff.take()));
-  OwningPtr<DIContext> dictx(DIContext::getDWARFContext(Obj.get()));
+  if (!Obj) {
+    errs() << Filename << ": Unknown object file format\n";
+    return;
+  }
+
+  OwningPtr<DIContext> DICtx(DIContext::getDWARFContext(Obj.get()));
 
   if (Address == -1ULL) {
     outs() << Filename
            << ":\tfile format " << Obj->getFileFormatName() << "\n\n";
     // Dump the complete DWARF structure.
-    dictx->dump(outs());
+    DICtx->dump(outs(), DumpType);
   } else {
     // Print line info for the specified address.
     int SpecFlags = DILineInfoSpecifier::FileLineInfo |
@@ -84,7 +108,7 @@ static void DumpInput(const StringRef &Filename) {
       SpecFlags |= DILineInfoSpecifier::FunctionName;
     if (PrintInlining) {
       DIInliningInfo InliningInfo =
-        dictx->getInliningInfoForAddress(Address, SpecFlags);
+        DICtx->getInliningInfoForAddress(Address, SpecFlags);
       uint32_t n = InliningInfo.getNumberOfFrames();
       if (n == 0) {
         // Print one empty debug line info in any case.
@@ -96,7 +120,7 @@ static void DumpInput(const StringRef &Filename) {
         }
       }
     } else {
-      DILineInfo dli = dictx->getLineInfoForAddress(Address, SpecFlags);
+      DILineInfo dli = DICtx->getLineInfoForAddress(Address, SpecFlags);
       PrintDILineInfo(dli);
     }
   }

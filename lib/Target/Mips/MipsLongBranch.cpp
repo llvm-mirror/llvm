@@ -10,10 +10,10 @@
 // This pass expands a branch or jump instruction into a long branch if its
 // offset is too large to fit into its immediate field.
 //
-// FIXME: 
-// 1. Fix pc-region jump instructions which cross 256MB segment boundaries. 
+// FIXME:
+// 1. Fix pc-region jump instructions which cross 256MB segment boundaries.
 // 2. If program has inline assembly statements whose size cannot be
-//    determined accurately, load branch target addresses from the GOT. 
+//    determined accurately, load branch target addresses from the GOT.
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "mips-long-branch"
@@ -24,7 +24,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/Function.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetInstrInfo.h"

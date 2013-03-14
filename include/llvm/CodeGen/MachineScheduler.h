@@ -24,8 +24,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MACHINESCHEDULER_H
-#define MACHINESCHEDULER_H
+#ifndef LLVM_CODEGEN_MACHINESCHEDULER_H
+#define LLVM_CODEGEN_MACHINESCHEDULER_H
 
 #include "llvm/CodeGen/MachinePassRegistry.h"
 #include "llvm/CodeGen/RegisterPressure.h"
@@ -43,6 +43,7 @@ class MachineDominatorTree;
 class MachineLoopInfo;
 class RegisterClassInfo;
 class ScheduleDAGInstrs;
+class SchedDFSResult;
 
 /// MachineSchedContext provides enough context from the MachineScheduler pass
 /// for the target to instantiate a scheduler.
@@ -119,6 +120,9 @@ public:
   /// be scheduled at the bottom.
   virtual SUnit *pickNode(bool &IsTopNode) = 0;
 
+  /// \brief Scheduler callback to notify that a new subtree is scheduled.
+  virtual void scheduleTree(unsigned SubtreeID) {}
+
   /// Notify MachineSchedStrategy that ScheduleDAGMI has scheduled an
   /// instruction and updated scheduled/remaining flags in the DAG nodes.
   virtual void schedNode(SUnit *SU, bool IsTopNode) = 0;
@@ -164,6 +168,8 @@ public:
 
   iterator end() { return Queue.end(); }
 
+  ArrayRef<SUnit*> elements() { return Queue; }
+
   iterator find(SUnit *SU) {
     return std::find(Queue.begin(), Queue.end(), SU);
   }
@@ -201,6 +207,11 @@ protected:
   AliasAnalysis *AA;
   RegisterClassInfo *RegClassInfo;
   MachineSchedStrategy *SchedImpl;
+
+  /// Information about DAG subtrees. If DFSResult is NULL, then SchedulerTrees
+  /// will be empty.
+  SchedDFSResult *DFSResult;
+  BitVector ScheduledTrees;
 
   /// Topo - A topological ordering for SUnits which permits fast IsReachable
   /// and similar queries.
@@ -243,7 +254,7 @@ protected:
 public:
   ScheduleDAGMI(MachineSchedContext *C, MachineSchedStrategy *S):
     ScheduleDAGInstrs(*C->MF, *C->MLI, *C->MDT, /*IsPostRA=*/false, C->LIS),
-    AA(C->AA), RegClassInfo(C->RegClassInfo), SchedImpl(S),
+    AA(C->AA), RegClassInfo(C->RegClassInfo), SchedImpl(S), DFSResult(0),
     Topo(SUnits, &ExitSU), RPTracker(RegPressure), CurrentTop(),
     TopRPTracker(TopPressure), CurrentBottom(), BotRPTracker(BotPressure),
     NextClusterPred(NULL), NextClusterSucc(NULL) {
@@ -252,10 +263,7 @@ public:
 #endif
   }
 
-  virtual ~ScheduleDAGMI() {
-    DeleteContainerPointers(Mutations);
-    delete SchedImpl;
-  }
+  virtual ~ScheduleDAGMI();
 
   /// Add a postprocessing step to the DAG builder.
   /// Mutations are applied in the order that they are added after normal DAG
@@ -308,6 +316,18 @@ public:
 
   const SUnit *getNextClusterSucc() const { return NextClusterSucc; }
 
+  /// Compute a DFSResult after DAG building is complete, and before any
+  /// queue comparisons.
+  void computeDFSResult();
+
+  /// Return a non-null DFS result if the scheduling strategy initialized it.
+  const SchedDFSResult *getDFSResult() const { return DFSResult; }
+
+  BitVector &getScheduledTrees() { return ScheduledTrees; }
+
+  void viewGraph(const Twine &Name, const Twine &Title) LLVM_OVERRIDE;
+  void viewGraph() LLVM_OVERRIDE;
+
 protected:
   // Top-Level entry points for the schedule() driver...
 
@@ -321,8 +341,8 @@ protected:
   /// instances of ScheduleDAGMI to perform custom DAG postprocessing.
   void postprocessDAG();
 
-  /// Identify DAG roots and setup scheduler queues.
-  void initQueues();
+  /// Release ExitSU predecessors and setup scheduler queues.
+  void initQueues(ArrayRef<SUnit*> TopRoots, ArrayRef<SUnit*> BotRoots);
 
   /// Move an instruction and update register pressure.
   void scheduleMI(SUnit *SU, bool IsTopNode);
@@ -340,12 +360,13 @@ protected:
 
   void initRegPressure();
 
-  void updateScheduledPressure(std::vector<unsigned> NewMaxPressure);
+  void updateScheduledPressure(const std::vector<unsigned> &NewMaxPressure);
 
   void moveInstruction(MachineInstr *MI, MachineBasicBlock::iterator InsertPos);
   bool checkSchedLimit();
 
-  void releaseRoots();
+  void findRootsAndBiasEdges(SmallVectorImpl<SUnit*> &TopRoots,
+                             SmallVectorImpl<SUnit*> &BotRoots);
 
   void releaseSucc(SUnit *SU, SDep *SuccEdge);
   void releaseSuccessors(SUnit *SU);

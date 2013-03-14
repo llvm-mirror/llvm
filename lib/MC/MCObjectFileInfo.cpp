@@ -186,6 +186,10 @@ void MCObjectFileInfo::InitMachOMCObjectFileInfo(Triple T) {
     Ctx->getMachOSection("__DWARF", "__debug_frame",
                          MCSectionMachO::S_ATTR_DEBUG,
                          SectionKind::getMetadata());
+  DwarfPubNamesSection =
+    Ctx->getMachOSection("__DWARF", "__debug_pubnames",
+                         MCSectionMachO::S_ATTR_DEBUG,
+                         SectionKind::getMetadata());
   DwarfPubTypesSection =
     Ctx->getMachOSection("__DWARF", "__debug_pubtypes",
                          MCSectionMachO::S_ATTR_DEBUG,
@@ -256,6 +260,33 @@ void MCObjectFileInfo::InitELFMCObjectFileInfo(Triple T) {
       TTypeEncoding = (CMModel == CodeModel::Small)
         ? dwarf::DW_EH_PE_udata4 : dwarf::DW_EH_PE_absptr;
     }
+  }  else if (T.getArch() ==  Triple::aarch64) {
+    FDECFIEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
+
+    // The small model guarantees static code/data size < 4GB, but not where it
+    // will be in memory. Most of these could end up >2GB away so even a signed
+    // pc-relative 32-bit address is insufficient, theoretically.
+    if (RelocM == Reloc::PIC_) {
+      PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
+        dwarf::DW_EH_PE_sdata8;
+      LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata8;
+      FDEEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
+      TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
+        dwarf::DW_EH_PE_sdata8;
+    } else {
+      PersonalityEncoding = dwarf::DW_EH_PE_absptr;
+      LSDAEncoding = dwarf::DW_EH_PE_absptr;
+      FDEEncoding = dwarf::DW_EH_PE_udata4;
+      TTypeEncoding = dwarf::DW_EH_PE_absptr;
+    }
+  } else if (T.getArch() == Triple::ppc64) {
+    PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
+      dwarf::DW_EH_PE_udata8;
+    FDECFIEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
+    LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_udata8;
+    FDEEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_udata8;
+    TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
+      dwarf::DW_EH_PE_udata8;
   }
 
   // Solaris requires different flags for .eh_frame to seemingly every other
@@ -373,6 +404,9 @@ void MCObjectFileInfo::InitELFMCObjectFileInfo(Triple T) {
   DwarfFrameSection =
     Ctx->getELFSection(".debug_frame", ELF::SHT_PROGBITS, 0,
                        SectionKind::getMetadata());
+  DwarfPubNamesSection =
+    Ctx->getELFSection(".debug_pubnames", ELF::SHT_PROGBITS, 0,
+                       SectionKind::getMetadata());
   DwarfPubTypesSection =
     Ctx->getELFSection(".debug_pubtypes", ELF::SHT_PROGBITS, 0,
                        SectionKind::getMetadata());
@@ -425,6 +459,12 @@ void MCObjectFileInfo::InitELFMCObjectFileInfo(Triple T) {
                        SectionKind::getMetadata());
   DwarfLocDWOSection =
     Ctx->getELFSection(".debug_loc.dwo", ELF::SHT_PROGBITS, 0,
+                       SectionKind::getMetadata());
+  DwarfStrOffDWOSection =
+    Ctx->getELFSection(".debug_str_offsets.dwo", ELF::SHT_PROGBITS, 0,
+                       SectionKind::getMetadata());
+  DwarfAddrSection =
+    Ctx->getELFSection(".debug_addr", ELF::SHT_PROGBITS, 0,
                        SectionKind::getMetadata());
 }
 
@@ -507,6 +547,11 @@ void MCObjectFileInfo::InitCOFFMCObjectFileInfo(Triple T) {
                         SectionKind::getMetadata());
   DwarfFrameSection =
     Ctx->getCOFFSection(".debug_frame",
+                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
+                        COFF::IMAGE_SCN_MEM_READ,
+                        SectionKind::getMetadata());
+  DwarfPubNamesSection =
+    Ctx->getCOFFSection(".debug_pubnames",
                         COFF::IMAGE_SCN_MEM_DISCARDABLE |
                         COFF::IMAGE_SCN_MEM_READ,
                         SectionKind::getMetadata());

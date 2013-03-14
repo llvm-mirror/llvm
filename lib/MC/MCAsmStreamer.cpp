@@ -71,7 +71,7 @@ public:
                 MCInstPrinter *printer, MCCodeEmitter *emitter,
                 MCAsmBackend *asmbackend,
                 bool showInst)
-    : MCStreamer(Context), OS(os), MAI(Context.getAsmInfo()),
+    : MCStreamer(SK_AsmStreamer, Context), OS(os), MAI(Context.getAsmInfo()),
       InstPrinter(printer), Emitter(emitter), AsmBackend(asmbackend),
       CommentStream(CommentToEmit), IsVerboseAsm(isVerboseAsm),
       ShowInst(showInst), UseLoc(useLoc), UseCFI(useCFI),
@@ -127,17 +127,25 @@ public:
   virtual void ChangeSection(const MCSection *Section);
 
   virtual void InitSections() {
+    InitToTextSection();
+  }
+
+  virtual void InitToTextSection() {
     // FIXME, this is MachO specific, but the testsuite
     // expects this.
-    SwitchSection(getContext().getMachOSection("__TEXT", "__text",
-                         MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS,
-                         0, SectionKind::getText()));
+    SwitchSection(getContext().getMachOSection(
+                                      "__TEXT", "__text",
+                                      MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS,
+                                      0, SectionKind::getText()));
   }
 
   virtual void EmitLabel(MCSymbol *Symbol);
+  virtual void EmitDebugLabel(MCSymbol *Symbol);
+
   virtual void EmitEHSymAttributes(const MCSymbol *Symbol,
                                    MCSymbol *EHSymbol);
   virtual void EmitAssemblerFlag(MCAssemblerFlag Flag);
+  virtual void EmitLinkerOptions(ArrayRef<std::string> Options);
   virtual void EmitDataRegion(MCDataRegionType Kind);
   virtual void EmitThumbFunc(MCSymbol *Func);
 
@@ -207,7 +215,7 @@ public:
 
   virtual void EmitFileDirective(StringRef Filename);
   virtual bool EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                      StringRef Filename);
+                                      StringRef Filename, unsigned CUID = 0);
   virtual void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                                      unsigned Column, unsigned Flags,
                                      unsigned Isa, unsigned Discriminator,
@@ -257,6 +265,10 @@ public:
 
   virtual void EmitInstruction(const MCInst &Inst);
 
+  virtual void EmitBundleAlignMode(unsigned AlignPow2);
+  virtual void EmitBundleLock(bool AlignToEnd);
+  virtual void EmitBundleUnlock();
+
   /// EmitRawText - If this file is backed by an assembly streamer, this dumps
   /// the specified string in the output .s file.  This capability is
   /// indicated by the hasRawTextSupport() predicate.
@@ -265,6 +277,10 @@ public:
   virtual void FinishImpl();
 
   /// @}
+
+  static bool classof(const MCStreamer *S) {
+    return S->getKind() == SK_AsmStreamer;
+  }
 };
 
 } // end anonymous namespace.
@@ -345,6 +361,14 @@ void MCAsmStreamer::EmitLabel(MCSymbol *Symbol) {
   EmitEOL();
 }
 
+void MCAsmStreamer::EmitDebugLabel(MCSymbol *Symbol) {
+  assert(Symbol->isUndefined() && "Cannot define a symbol twice!");
+  MCStreamer::EmitDebugLabel(Symbol);
+
+  OS << *Symbol << MAI.getDebugLabelSuffix();
+  EmitEOL();
+}
+
 void MCAsmStreamer::EmitAssemblerFlag(MCAssemblerFlag Flag) {
   switch (Flag) {
   case MCAF_SyntaxUnified:         OS << "\t.syntax unified"; break;
@@ -354,6 +378,16 @@ void MCAsmStreamer::EmitAssemblerFlag(MCAssemblerFlag Flag) {
   case MCAF_Code64:                OS << '\t'<< MAI.getCode64Directive(); break;
   }
   EmitEOL();
+}
+
+void MCAsmStreamer::EmitLinkerOptions(ArrayRef<std::string> Options) {
+  assert(!Options.empty() && "At least one option is required!");
+  OS << "\t.linker_option \"" << Options[0] << '"';
+  for (ArrayRef<std::string>::iterator it = Options.begin() + 1,
+         ie = Options.end(); it != ie; ++it) {
+    OS << ", " << '"' << *it << '"';
+  }
+  OS << "\n";
 }
 
 void MCAsmStreamer::EmitDataRegion(MCDataRegionType Kind) {
@@ -794,14 +828,14 @@ void MCAsmStreamer::EmitFileDirective(StringRef Filename) {
 }
 
 bool MCAsmStreamer::EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                           StringRef Filename) {
+                                           StringRef Filename, unsigned CUID) {
   if (!UseDwarfDirectory && !Directory.empty()) {
     if (sys::path::is_absolute(Filename))
-      return EmitDwarfFileDirective(FileNo, "", Filename);
+      return EmitDwarfFileDirective(FileNo, "", Filename, CUID);
 
     SmallString<128> FullPathName = Directory;
     sys::path::append(FullPathName, Filename);
-    return EmitDwarfFileDirective(FileNo, "", FullPathName);
+    return EmitDwarfFileDirective(FileNo, "", FullPathName, CUID);
   }
 
   if (UseLoc) {
@@ -812,8 +846,11 @@ bool MCAsmStreamer::EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
     }
     PrintQuotedString(Filename, OS);
     EmitEOL();
+    // All .file will belong to a single CUID.
+    CUID = 0;
   }
-  return this->MCStreamer::EmitDwarfFileDirective(FileNo, Directory, Filename);
+  return this->MCStreamer::EmitDwarfFileDirective(FileNo, Directory, Filename,
+                                                  CUID);
 }
 
 void MCAsmStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
@@ -1348,6 +1385,23 @@ void MCAsmStreamer::EmitInstruction(const MCInst &Inst) {
     InstPrinter->printInst(&Inst, OS, "");
   else
     Inst.print(OS, &MAI);
+  EmitEOL();
+}
+
+void MCAsmStreamer::EmitBundleAlignMode(unsigned AlignPow2) {
+  OS << "\t.bundle_align_mode " << AlignPow2;
+  EmitEOL();
+}
+
+void MCAsmStreamer::EmitBundleLock(bool AlignToEnd) {
+  OS << "\t.bundle_lock";
+  if (AlignToEnd)
+    OS << " align_to_end";
+  EmitEOL();
+}
+
+void MCAsmStreamer::EmitBundleUnlock() {
+  OS << "\t.bundle_unlock";
   EmitEOL();
 }
 

@@ -23,10 +23,10 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Config/config.h"            // FIXME: Shouldn't depend on host!
-#include "llvm/DataLayout.h"
-#include "llvm/IRBuilder.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Module.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -165,7 +165,7 @@ bool SimplifyLibCalls::runOnFunction(Function &F) {
     for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ) {
       // Ignore non-calls.
       CallInst *CI = dyn_cast<CallInst>(I++);
-      if (!CI) continue;
+      if (!CI || CI->hasFnAttr(Attribute::NoBuiltin)) continue;
 
       // Ignore indirect calls and calls to non-external functions.
       Function *Callee = CI->getCalledFunction();

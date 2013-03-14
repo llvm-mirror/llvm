@@ -21,7 +21,7 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
-#include "llvm/Function.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Target/TargetOptions.h"
 
 using namespace llvm;
@@ -119,12 +119,21 @@ static void HandleVRSaveUpdate(MachineInstr *MI, const TargetInstrInfo &TII) {
     if (VRRegNo[RegNo] == I->first)        // If this really is a vector reg.
       UsedRegMask &= ~(1 << (31-RegNo));   // Doesn't need to be marked.
   }
-  for (MachineRegisterInfo::liveout_iterator
-       I = MF->getRegInfo().liveout_begin(),
-       E = MF->getRegInfo().liveout_end(); I != E; ++I) {
-    unsigned RegNo = getPPCRegisterNumbering(*I);
-    if (VRRegNo[RegNo] == *I)              // If this really is a vector reg.
-      UsedRegMask &= ~(1 << (31-RegNo));   // Doesn't need to be marked.
+
+  // Live out registers appear as use operands on return instructions.
+  for (MachineFunction::const_iterator BI = MF->begin(), BE = MF->end();
+       UsedRegMask != 0 && BI != BE; ++BI) {
+    const MachineBasicBlock &MBB = *BI;
+    if (MBB.empty() || !MBB.back().isReturn())
+      continue;
+    const MachineInstr &Ret = MBB.back();
+    for (unsigned I = 0, E = Ret.getNumOperands(); I != E; ++I) {
+      const MachineOperand &MO = Ret.getOperand(I);
+      if (!MO.isReg() || !PPC::VRRCRegClass.contains(MO.getReg()))
+        continue;
+      unsigned RegNo = getPPCRegisterNumbering(MO.getReg());
+      UsedRegMask &= ~(1 << (31-RegNo));
+    }
   }
 
   // If no registers are used, turn this into a copy.
@@ -198,13 +207,14 @@ void PPCFrameLowering::determineFrameLayout(MachineFunction &MF) const {
   // to adjust the stack pointer (we fit in the Red Zone).  For 64-bit
   // SVR4, we also require a stack frame if we need to spill the CR,
   // since this spill area is addressed relative to the stack pointer.
-  bool DisableRedZone = MF.getFunction()->getFnAttributes().
-    hasAttribute(Attributes::NoRedZone);
-  // FIXME SVR4 The 32-bit SVR4 ABI has no red zone.  However, it can
-  // still generate stackless code if all local vars are reg-allocated.
-  // Try: (FrameSize <= 224
-  //       || (FrameSize == 0 && Subtarget.isPPC32 && Subtarget.isSVR4ABI()))
+  // The 32-bit SVR4 ABI has no Red Zone. However, it can still generate
+  // stackless code if all local vars are reg-allocated.
+  bool DisableRedZone = MF.getFunction()->getAttributes().
+    hasAttribute(AttributeSet::FunctionIndex, Attribute::NoRedZone);
   if (!DisableRedZone &&
+      (Subtarget.isPPC64() ||                      // 32-bit SVR4, no stack-
+       !Subtarget.isSVR4ABI() ||                   //   allocated locals.
+	FrameSize == 0) &&
       FrameSize <= 224 &&                          // Fits in red zone.
       !MFI->hasVarSizedObjects() &&                // No dynamic alloca.
       !MFI->adjustsStack() &&                      // No calls.
@@ -261,7 +271,8 @@ bool PPCFrameLowering::needsFP(const MachineFunction &MF) const {
 
   // Naked functions have no stack frame pushed, so we don't have a frame
   // pointer.
-  if (MF.getFunction()->getFnAttributes().hasAttribute(Attributes::Naked))
+  if (MF.getFunction()->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                                     Attribute::Naked))
     return false;
 
   return MF.getTarget().Options.DisableFramePointerElim(MF) ||
@@ -776,7 +787,8 @@ PPCFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
   PPCFunctionInfo *FI = MF.getInfo<PPCFunctionInfo>();
   unsigned LR = RegInfo->getRARegister();
   FI->setMustSaveLR(MustSaveLR(MF, LR));
-  MF.getRegInfo().setPhysRegUnused(LR);
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  MRI.setPhysRegUnused(LR);
 
   //  Save R31 if necessary
   int FPSI = FI->getFramePointerSaveIndex();
@@ -799,6 +811,16 @@ PPCFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
   if (MF.getTarget().Options.GuaranteedTailCallOpt &&
       (TCSPDelta = FI->getTailCallSPDelta()) < 0) {
     MFI->CreateFixedObject(-1 * TCSPDelta, TCSPDelta, true);
+  }
+
+  // For 32-bit SVR4, allocate the nonvolatile CR spill slot iff the 
+  // function uses CR 2, 3, or 4.
+  if (!isPPC64 && !isDarwinABI && 
+      (MRI.isPhysRegUsed(PPC::CR2) ||
+       MRI.isPhysRegUsed(PPC::CR3) ||
+       MRI.isPhysRegUsed(PPC::CR4))) {
+    int FrameIdx = MFI->CreateFixedObject((uint64_t)4, (int64_t)-4, true);
+    FI->setCRSpillFrameIndex(FrameIdx);
   }
 
   // Reserve a slot closest to SP or frame pointer if we have a dynalloc or
@@ -1112,6 +1134,47 @@ restoreCRs(bool isPPC64, bool CR2Spilled, bool CR3Spilled, bool CR4Spilled,
   if (CR4Spilled)
     MBB.insert(MI, BuildMI(*MF, DL, TII.get(RestoreOp), PPC::CR4)
 	       .addReg(MoveReg));
+}
+
+void PPCFrameLowering::
+eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator I) const {
+  const PPCInstrInfo &TII =
+    *static_cast<const PPCInstrInfo*>(MF.getTarget().getInstrInfo());
+  if (MF.getTarget().Options.GuaranteedTailCallOpt &&
+      I->getOpcode() == PPC::ADJCALLSTACKUP) {
+    // Add (actually subtract) back the amount the callee popped on return.
+    if (int CalleeAmt =  I->getOperand(1).getImm()) {
+      bool is64Bit = Subtarget.isPPC64();
+      CalleeAmt *= -1;
+      unsigned StackReg = is64Bit ? PPC::X1 : PPC::R1;
+      unsigned TmpReg = is64Bit ? PPC::X0 : PPC::R0;
+      unsigned ADDIInstr = is64Bit ? PPC::ADDI8 : PPC::ADDI;
+      unsigned ADDInstr = is64Bit ? PPC::ADD8 : PPC::ADD4;
+      unsigned LISInstr = is64Bit ? PPC::LIS8 : PPC::LIS;
+      unsigned ORIInstr = is64Bit ? PPC::ORI8 : PPC::ORI;
+      MachineInstr *MI = I;
+      DebugLoc dl = MI->getDebugLoc();
+
+      if (isInt<16>(CalleeAmt)) {
+        BuildMI(MBB, I, dl, TII.get(ADDIInstr), StackReg)
+          .addReg(StackReg, RegState::Kill)
+          .addImm(CalleeAmt);
+      } else {
+        MachineBasicBlock::iterator MBBI = I;
+        BuildMI(MBB, MBBI, dl, TII.get(LISInstr), TmpReg)
+          .addImm(CalleeAmt >> 16);
+        BuildMI(MBB, MBBI, dl, TII.get(ORIInstr), TmpReg)
+          .addReg(TmpReg, RegState::Kill)
+          .addImm(CalleeAmt & 0xFFFF);
+        BuildMI(MBB, MBBI, dl, TII.get(ADDInstr), StackReg)
+          .addReg(StackReg, RegState::Kill)
+          .addReg(TmpReg);
+      }
+    }
+  }
+  // Simply discard ADJCALLSTACKDOWN, ADJCALLSTACKUP instructions.
+  MBB.erase(I);
 }
 
 bool 

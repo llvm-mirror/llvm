@@ -19,10 +19,13 @@ namespace {
 
   class MCNullStreamer : public MCStreamer {
   public:
-    MCNullStreamer(MCContext &Context) : MCStreamer(Context) {}
+    MCNullStreamer(MCContext &Context) : MCStreamer(SK_NullStreamer, Context) {}
 
     /// @name MCStreamer Interface
     /// @{
+
+    virtual void InitToTextSection() {
+    }
 
     virtual void InitSections() {
     }
@@ -35,7 +38,9 @@ namespace {
       assert(getCurrentSection() && "Cannot emit before setting section!");
       Symbol->setSection(*getCurrentSection());
     }
-
+    virtual void EmitDebugLabel(MCSymbol *Symbol) {
+      EmitLabel(Symbol);
+    }
     virtual void EmitAssemblerFlag(MCAssemblerFlag Flag) {}
     virtual void EmitThumbFunc(MCSymbol *Func) {}
 
@@ -84,7 +89,7 @@ namespace {
 
     virtual void EmitFileDirective(StringRef Filename) {}
     virtual bool EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                        StringRef Filename) {
+                                        StringRef Filename, unsigned CUID = 0) {
       return false;
     }
     virtual void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
@@ -93,6 +98,10 @@ namespace {
                                        StringRef FileName) {}
     virtual void EmitInstruction(const MCInst &Inst) {}
 
+    virtual void EmitBundleAlignMode(unsigned AlignPow2) {}
+    virtual void EmitBundleLock(bool AlignToEnd) {}
+    virtual void EmitBundleUnlock() {}
+
     virtual void FinishImpl() {}
 
     virtual void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) {
@@ -100,6 +109,11 @@ namespace {
     }
 
     /// @}
+
+    static bool classof(const MCStreamer *S) {
+      return S->getKind() == SK_NullStreamer;
+    }
+
   };
 
 }

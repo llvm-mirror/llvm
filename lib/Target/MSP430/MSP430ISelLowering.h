@@ -73,7 +73,7 @@ namespace llvm {
   public:
     explicit MSP430TargetLowering(MSP430TargetMachine &TM);
 
-    virtual MVT getShiftAmountTy(EVT LHSTy) const { return MVT::i8; }
+    virtual MVT getScalarShiftAmountTy(EVT LHSTy) const { return MVT::i8; }
 
     /// LowerOperation - Provide custom lowering hooks for some operations.
     virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
@@ -116,6 +116,7 @@ namespace llvm {
     /// out to 16 bits.
     virtual bool isZExtFree(Type *Ty1, Type *Ty2) const;
     virtual bool isZExtFree(EVT VT1, EVT VT2) const;
+    virtual bool isZExtFree(SDValue Val, EVT VT2) const;
 
     MachineBasicBlock* EmitInstrWithCustomInserter(MachineInstr *MI,
                                                    MachineBasicBlock *BB) const;
