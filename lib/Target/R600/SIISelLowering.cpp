@@ -58,6 +58,11 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   computeRegisterProperties();
 
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v8i32, Expand);
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v8f32, Expand);
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v16i32, Expand);
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v16f32, Expand);
+
   setOperationAction(ISD::ADD, MVT::i64, Legal);
   setOperationAction(ISD::ADD, MVT::i32, Legal);
 
@@ -227,6 +232,10 @@ void SITargetLowering::LowerSI_WQM(MachineInstr *MI, MachineBasicBlock &BB,
 
 EVT SITargetLowering::getSetCCResultType(EVT VT) const {
   return MVT::i1;
+}
+
+MVT SITargetLowering::getScalarShiftAmountTy(EVT VT) const {
+  return MVT::i32;
 }
 
 //===----------------------------------------------------------------------===//

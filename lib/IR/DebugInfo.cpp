@@ -66,16 +66,26 @@ bool DIDescriptor::Verify() const {
           DITemplateValueParameter(DbgNode).Verify());
 }
 
-StringRef
-DIDescriptor::getStringField(unsigned Elt) const {
-  if (DbgNode == 0)
-    return StringRef();
+static Value *getField(const MDNode *DbgNode, unsigned Elt) {
+  if (DbgNode == 0 || Elt >= DbgNode->getNumOperands())
+    return 0;
+  return DbgNode->getOperand(Elt);
+}
 
-  if (Elt < DbgNode->getNumOperands())
-    if (MDString *MDS = dyn_cast_or_null<MDString>(DbgNode->getOperand(Elt)))
-      return MDS->getString();
+static const MDNode *getNodeField(const MDNode *DbgNode, unsigned Elt) {
+  if (const MDNode *R = dyn_cast_or_null<MDNode>(getField(DbgNode, Elt)))
+    return R;
+  return 0;
+}
 
+static StringRef getStringField(const MDNode *DbgNode, unsigned Elt) {
+  if (MDString *MDS = dyn_cast_or_null<MDString>(getField(DbgNode, Elt)))
+    return MDS->getString();
   return StringRef();
+}
+
+StringRef DIDescriptor::getStringField(unsigned Elt) const {
+  return ::getStringField(DbgNode, Elt);
 }
 
 uint64_t DIDescriptor::getUInt64Field(unsigned Elt) const {
@@ -407,7 +417,7 @@ bool DICompileUnit::Verify() const {
   if (N.empty())
     return false;
   // It is possible that directory and produce string is empty.
-  return DbgNode->getNumOperands() == 15;
+  return DbgNode->getNumOperands() == 12;
 }
 
 /// Verify - Verify that an ObjC property is well formed.
@@ -475,7 +485,7 @@ bool DISubprogram::Verify() const {
   DICompositeType Ty = getType();
   if (!Ty.Verify())
     return false;
-  return DbgNode->getNumOperands() == 21;
+  return DbgNode->getNumOperands() == 20;
 }
 
 /// Verify - Verify that a global variable descriptor is well formed.
@@ -529,9 +539,14 @@ bool DINameSpace::Verify() const {
   return DbgNode->getNumOperands() == 5;
 }
 
+/// \brief Retrieve the MDNode for the directory/file pair.
+MDNode *DIFile::getFileNode() const {
+  return const_cast<MDNode*>(getNodeField(DbgNode, 1));
+}
+
 /// \brief Verify that the file descriptor is well formed.
 bool DIFile::Verify() const {
-  return isFile() && DbgNode->getNumOperands() == 4;
+  return isFile() && DbgNode->getNumOperands() == 2;
 }
 
 /// \brief Verify that the enumerator descriptor is well formed.
@@ -627,21 +642,21 @@ bool DISubprogram::describes(const Function *F) {
 
 unsigned DISubprogram::isOptimized() const {
   assert (DbgNode && "Invalid subprogram descriptor!");
-  if (DbgNode->getNumOperands() == 16)
-    return getUnsignedField(15);
+  if (DbgNode->getNumOperands() == 15)
+    return getUnsignedField(14);
   return 0;
 }
 
 MDNode *DISubprogram::getVariablesNodes() const {
-  if (!DbgNode || DbgNode->getNumOperands() <= 19)
+  if (!DbgNode || DbgNode->getNumOperands() <= 18)
     return NULL;
-  return dyn_cast_or_null<MDNode>(DbgNode->getOperand(19));
+  return dyn_cast_or_null<MDNode>(DbgNode->getOperand(18));
 }
 
 DIArray DISubprogram::getVariables() const {
-  if (!DbgNode || DbgNode->getNumOperands() <= 19)
+  if (!DbgNode || DbgNode->getNumOperands() <= 18)
     return DIArray();
-  if (MDNode *T = dyn_cast_or_null<MDNode>(DbgNode->getOperand(19)))
+  if (MDNode *T = dyn_cast_or_null<MDNode>(DbgNode->getOperand(18)))
     return DIArray(T);
   return DIArray();
 }
@@ -653,17 +668,7 @@ StringRef DIScope::getFilename() const {
     return DILexicalBlockFile(DbgNode).getFilename();
   if (isLexicalBlock())
     return DILexicalBlock(DbgNode).getFilename();
-  if (isSubprogram())
-    return DISubprogram(DbgNode).getFilename();
-  if (isCompileUnit())
-    return DICompileUnit(DbgNode).getFilename();
-  if (isNameSpace())
-    return DINameSpace(DbgNode).getFilename();
-  if (isType())
-    return DIType(DbgNode).getFilename();
-  if (isFile())
-    return DIFile(DbgNode).getFilename();
-  llvm_unreachable("Invalid DIScope!");
+  return ::getStringField(getNodeField(DbgNode, 1), 0);
 }
 
 StringRef DIScope::getDirectory() const {
@@ -673,52 +678,42 @@ StringRef DIScope::getDirectory() const {
     return DILexicalBlockFile(DbgNode).getDirectory();
   if (isLexicalBlock())
     return DILexicalBlock(DbgNode).getDirectory();
-  if (isSubprogram())
-    return DISubprogram(DbgNode).getDirectory();
-  if (isCompileUnit())
-    return DICompileUnit(DbgNode).getDirectory();
-  if (isNameSpace())
-    return DINameSpace(DbgNode).getDirectory();
-  if (isType())
-    return DIType(DbgNode).getDirectory();
-  if (isFile())
-    return DIFile(DbgNode).getDirectory();
-  llvm_unreachable("Invalid DIScope!");
+  return ::getStringField(getNodeField(DbgNode, 1), 1);
 }
 
 DIArray DICompileUnit::getEnumTypes() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 14)
+  if (!DbgNode || DbgNode->getNumOperands() < 12)
     return DIArray();
 
-  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(10)))
+  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(7)))
     return DIArray(N);
   return DIArray();
 }
 
 DIArray DICompileUnit::getRetainedTypes() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 14)
+  if (!DbgNode || DbgNode->getNumOperands() < 12)
     return DIArray();
 
-  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(11)))
+  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(8)))
     return DIArray(N);
   return DIArray();
 }
 
 DIArray DICompileUnit::getSubprograms() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 14)
+  if (!DbgNode || DbgNode->getNumOperands() < 12)
     return DIArray();
 
-  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(12)))
+  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(9)))
     return DIArray(N);
   return DIArray();
 }
 
 
 DIArray DICompileUnit::getGlobalVariables() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 14)
+  if (!DbgNode || DbgNode->getNumOperands() < 12)
     return DIArray();
 
-  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(13)))
+  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(10)))
     return DIArray(N);
   return DIArray();
 }
@@ -1026,6 +1021,8 @@ void DIDescriptor::print(raw_ostream &OS) const {
     DIVariable(DbgNode).printInternal(OS);
   } else if (this->isObjCProperty()) {
     DIObjCProperty(DbgNode).printInternal(OS);
+  } else if (this->isNameSpace()) {
+    DINameSpace(DbgNode).printInternal(OS);
   } else if (this->isScope()) {
     DIScope(DbgNode).printInternal(OS);
   }
@@ -1097,6 +1094,14 @@ void DICompositeType::printInternal(raw_ostream &OS) const {
   DIType::printInternal(OS);
   DIArray A = getTypeArray();
   OS << " [" << A.getNumElements() << " elements]";
+}
+
+void DINameSpace::printInternal(raw_ostream &OS) const {
+  StringRef Name = getName();
+  if (!Name.empty())
+    OS << " [" << Name << ']';
+
+  OS << " [line " << getLineNumber() << ']';
 }
 
 void DISubprogram::printInternal(raw_ostream &OS) const {

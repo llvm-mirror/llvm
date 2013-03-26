@@ -375,10 +375,6 @@ namespace llvm {
     /// flag set.
     DIType createObjectPointerType(DIType Ty);
 
-    /// createTemporaryType - Create a temporary forward-declared type.
-    DIType createTemporaryType();
-    DIType createTemporaryType(DIFile F);
-
     /// createForwardDecl - Create a temporary forward-declared type.
     DIType createForwardDecl(unsigned Tag, StringRef Name, DIDescriptor Scope,
                              DIFile F, unsigned Line, unsigned RuntimeLang = 0,
@@ -411,6 +407,19 @@ namespace llvm {
     createGlobalVariable(StringRef Name, DIFile File, unsigned LineNo,
                          DIType Ty, bool isLocalToUnit, llvm::Value *Val);
 
+    /// \brief Create a new descriptor for the specified global.
+    /// @param Name        Name of the variable.
+    /// @param LinkageName Mangled variable name.
+    /// @param File        File where this variable is defined.
+    /// @param LineNo      Line number.
+    /// @param Ty          Variable Type.
+    /// @param isLocalToUnit Boolean flag indicate whether this variable is
+    ///                      externally visible or not.
+    /// @param Val         llvm::Value of the variable.
+    DIGlobalVariable
+    createGlobalVariable(StringRef Name, StringRef LinkageName, DIFile File,
+                         unsigned LineNo, DIType Ty, bool isLocalToUnit,
+                         llvm::Value *Val);
 
     /// createStaticVariable - Create a new descriptor for the specified 
     /// variable.

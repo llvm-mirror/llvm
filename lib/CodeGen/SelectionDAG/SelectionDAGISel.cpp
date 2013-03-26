@@ -362,6 +362,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   TargetSubtargetInfo &ST =
     const_cast<TargetSubtargetInfo&>(TM.getSubtarget<TargetSubtargetInfo>());
   ST.resetSubtargetFeatures(MF);
+  TM.resetTargetOptions(MF);
 
   DEBUG(dbgs() << "\n\n\n=== " << Fn.getName() << "\n");
 
@@ -784,8 +785,12 @@ void SelectionDAGISel::DoInstructionSelection() {
       if (ResNode == Node || Node->getOpcode() == ISD::DELETED_NODE)
         continue;
       // Replace node.
-      if (ResNode)
+      if (ResNode) {
+        // Propagate ordering
+        CurDAG->AssignOrdering(ResNode, CurDAG->GetOrdering(Node));
+
         ReplaceUses(Node, ResNode);
+      }
 
       // If after the replacement this node is not used any more,
       // remove this dead node.

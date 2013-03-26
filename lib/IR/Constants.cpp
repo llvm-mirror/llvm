@@ -47,6 +47,16 @@ bool Constant::isNegativeZeroValue() const {
   if (const ConstantFP *CFP = dyn_cast<ConstantFP>(this))
     return CFP->isZero() && CFP->isNegative();
 
+  // Equivalent for a vector of -0.0's.
+  if (const ConstantDataVector *CV = dyn_cast<ConstantDataVector>(this))
+    if (ConstantFP *SplatCFP = dyn_cast_or_null<ConstantFP>(CV->getSplatValue()))
+      if (SplatCFP && SplatCFP->isZero() && SplatCFP->isNegative())
+        return true;
+
+  // We've already handled true FP case; any other FP vectors can't represent -0.0.
+  if (getType()->isFPOrFPVectorTy())
+    return false;
+
   // Otherwise, just use +0.0.
   return isNullValue();
 }

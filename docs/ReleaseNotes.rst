@@ -90,6 +90,13 @@ in fairly early stages, but we expect successful compilation when:
 Some additional functionality is also implemented, notably DWARF debugging,
 GNU-style thread local storage and inline assembly.
 
+Hexagon Target
+--------------
+
+- Removed support for legacy hexagonv2 and hexagonv3 processor
+  architectures which are no longer in use. Currently supported
+  architectures are hexagonv4 and hexagonv5.
+
 Loop Vectorizer
 ---------------
 

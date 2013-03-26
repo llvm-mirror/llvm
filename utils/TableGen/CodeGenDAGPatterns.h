@@ -59,7 +59,7 @@ namespace EEVT {
   public:
     TypeSet() {}
     TypeSet(MVT::SimpleValueType VT, TreePattern &TP);
-    TypeSet(const std::vector<MVT::SimpleValueType> &VTList);
+    TypeSet(ArrayRef<MVT::SimpleValueType> VTList);
 
     bool isCompletelyUnknown() const { return TypeVec.empty(); }
 
@@ -462,6 +462,11 @@ public:   // Higher level manipulation routines.
                       TreePattern &TP) {
     return Types[ResNo].MergeInTypeInfo(EEVT::TypeSet(InTy, TP), TP);
   }
+
+  // Update node type with types inferred from an instruction operand or result
+  // def from the ins/outs lists.
+  // Return true if the type changed.
+  bool UpdateNodeTypeFromInst(unsigned ResNo, Record *Operand, TreePattern &TP);
 
   /// ContainsUnresolvedType - Return true if this tree contains any
   /// unresolved types.

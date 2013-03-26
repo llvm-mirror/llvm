@@ -28,6 +28,11 @@ EnableGlobalMerge("global-merge", cl::Hidden,
                   cl::desc("Enable global merge pass"),
                   cl::init(true));
 
+static cl::opt<bool>
+DisableA15SDOptimization("disable-a15-sd-optimization", cl::Hidden,
+                   cl::desc("Inhibit optimization of S->D register accesses on A15"),
+                   cl::init(false));
+
 extern "C" void LLVMInitializeARMTarget() {
   // Register the target.
   RegisterTargetMachine<ARMTargetMachine> X(TheARMTarget);
@@ -43,7 +48,7 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
                                            Reloc::Model RM, CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS),
+    Subtarget(TT, CPU, FS, Options),
     JITInfo(),
     InstrItins(Subtarget.getInstrItineraryData()) {
   // Default to soft float ABI
@@ -164,6 +169,12 @@ bool ARMPassConfig::addPreRegAlloc() {
     addPass(createARMLoadStoreOptimizationPass(true));
   if (getOptLevel() != CodeGenOpt::None && getARMSubtarget().isLikeA9())
     addPass(createMLxExpansionPass());
+  // Since the A15SDOptimizer pass can insert VDUP instructions, it can only be
+  // enabled when NEON is available.
+  if (getOptLevel() != CodeGenOpt::None && getARMSubtarget().isCortexA15() &&
+    getARMSubtarget().hasNEON() && !DisableA15SDOptimization) {
+    addPass(createA15SDOptimizerPass());
+  }
   return true;
 }
 
@@ -174,7 +185,8 @@ bool ARMPassConfig::addPreSched2() {
       addPass(createARMLoadStoreOptimizationPass());
       printAndVerify("After ARM load / store optimizer");
     }
-    if (getARMSubtarget().hasNEON())
+    if ((DisableA15SDOptimization || !getARMSubtarget().isCortexA15()) &&
+      getARMSubtarget().hasNEON())
       addPass(createExecutionDependencyFixPass(&ARM::DPRRegClass));
   }
 

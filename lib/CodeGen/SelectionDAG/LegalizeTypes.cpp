@@ -735,6 +735,9 @@ void DAGTypeLegalizer::SetPromotedInteger(SDValue Op, SDValue Result) {
   SDValue &OpEntry = PromotedIntegers[Op];
   assert(OpEntry.getNode() == 0 && "Node is already promoted!");
   OpEntry = Result;
+
+  // Propagate node ordering
+  DAG.AssignOrdering(Result.getNode(), DAG.GetOrdering(Op.getNode()));
 }
 
 void DAGTypeLegalizer::SetSoftenedFloat(SDValue Op, SDValue Result) {
@@ -746,6 +749,9 @@ void DAGTypeLegalizer::SetSoftenedFloat(SDValue Op, SDValue Result) {
   SDValue &OpEntry = SoftenedFloats[Op];
   assert(OpEntry.getNode() == 0 && "Node is already converted to integer!");
   OpEntry = Result;
+
+  // Propagate node ordering
+  DAG.AssignOrdering(Result.getNode(), DAG.GetOrdering(Op.getNode()));
 }
 
 void DAGTypeLegalizer::SetScalarizedVector(SDValue Op, SDValue Result) {
@@ -760,6 +766,9 @@ void DAGTypeLegalizer::SetScalarizedVector(SDValue Op, SDValue Result) {
   SDValue &OpEntry = ScalarizedVectors[Op];
   assert(OpEntry.getNode() == 0 && "Node is already scalarized!");
   OpEntry = Result;
+
+  // Propagate node ordering
+  DAG.AssignOrdering(Result.getNode(), DAG.GetOrdering(Op.getNode()));
 }
 
 void DAGTypeLegalizer::GetExpandedInteger(SDValue Op, SDValue &Lo,
@@ -787,6 +796,10 @@ void DAGTypeLegalizer::SetExpandedInteger(SDValue Op, SDValue Lo,
   assert(Entry.first.getNode() == 0 && "Node already expanded");
   Entry.first = Lo;
   Entry.second = Hi;
+
+  // Propagate ordering
+  DAG.AssignOrdering(Lo.getNode(), DAG.GetOrdering(Op.getNode()));
+  DAG.AssignOrdering(Hi.getNode(), DAG.GetOrdering(Op.getNode()));
 }
 
 void DAGTypeLegalizer::GetExpandedFloat(SDValue Op, SDValue &Lo,
@@ -814,6 +827,10 @@ void DAGTypeLegalizer::SetExpandedFloat(SDValue Op, SDValue Lo,
   assert(Entry.first.getNode() == 0 && "Node already expanded");
   Entry.first = Lo;
   Entry.second = Hi;
+
+  // Propagate ordering
+  DAG.AssignOrdering(Lo.getNode(), DAG.GetOrdering(Op.getNode()));
+  DAG.AssignOrdering(Hi.getNode(), DAG.GetOrdering(Op.getNode()));
 }
 
 void DAGTypeLegalizer::GetSplitVector(SDValue Op, SDValue &Lo,
@@ -843,6 +860,10 @@ void DAGTypeLegalizer::SetSplitVector(SDValue Op, SDValue Lo,
   assert(Entry.first.getNode() == 0 && "Node already split");
   Entry.first = Lo;
   Entry.second = Hi;
+
+  // Propagate ordering
+  DAG.AssignOrdering(Lo.getNode(), DAG.GetOrdering(Op.getNode()));
+  DAG.AssignOrdering(Hi.getNode(), DAG.GetOrdering(Op.getNode()));
 }
 
 void DAGTypeLegalizer::SetWidenedVector(SDValue Op, SDValue Result) {
@@ -854,6 +875,9 @@ void DAGTypeLegalizer::SetWidenedVector(SDValue Op, SDValue Result) {
   SDValue &OpEntry = WidenedVectors[Op];
   assert(OpEntry.getNode() == 0 && "Node already widened!");
   OpEntry = Result;
+
+  // Propagate node ordering
+  DAG.AssignOrdering(Result.getNode(), DAG.GetOrdering(Op.getNode()));
 }
 
 
@@ -919,8 +943,11 @@ bool DAGTypeLegalizer::CustomLowerNode(SDNode *N, EVT VT, bool LegalizeResult) {
   // Make everything that once used N's values now use those in Results instead.
   assert(Results.size() == N->getNumValues() &&
          "Custom lowering returned the wrong number of results!");
-  for (unsigned i = 0, e = Results.size(); i != e; ++i)
+  for (unsigned i = 0, e = Results.size(); i != e; ++i) {
     ReplaceValueWith(SDValue(N, i), Results[i]);
+    // Propagate node ordering
+    DAG.AssignOrdering(Results[i].getNode(), DAG.GetOrdering(N));
+  }
   return true;
 }
 

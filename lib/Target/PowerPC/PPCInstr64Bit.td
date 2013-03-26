@@ -30,12 +30,12 @@ def symbolLo64 : Operand<i64> {
   let EncoderMethod = "getLO16Encoding";
 }
 def tocentry : Operand<iPTR> {
-  let MIOperandInfo = (ops i32imm:$imm);
+  let MIOperandInfo = (ops i64imm:$imm);
 }
 def memrs : Operand<iPTR> {   // memri where the immediate is a symbolLo64
   let PrintMethod = "printMemRegImm";
   let EncoderMethod = "getMemRIXEncoding";
-  let MIOperandInfo = (ops symbolLo64:$off, ptr_rc:$reg);
+  let MIOperandInfo = (ops symbolLo64:$off, ptr_rc_nor0:$reg);
 }
 def tlsreg : Operand<i64> {
   let EncoderMethod = "getTLSRegEncoding";
@@ -273,6 +273,19 @@ def MFCR8 : XFXForm_3<31, 19, (outs G8RC:$rT), (ins),
                      "mfcr $rT", SprMFCR>,
                      PPC970_MicroCode, PPC970_Unit_CRU;
 
+let hasSideEffects = 1, isBarrier = 1, isCodeGenOnly = 1,
+    usesCustomInserter = 1 in {
+  def EH_SjLj_SetJmp64  : Pseudo<(outs GPRC:$dst), (ins memr:$buf),
+                            "#EH_SJLJ_SETJMP64",
+                            [(set GPRC:$dst, (PPCeh_sjlj_setjmp addr:$buf))]>,
+                          Requires<[In64BitMode]>;
+  let isTerminator = 1 in
+  def EH_SjLj_LongJmp64 : Pseudo<(outs), (ins memr:$buf),
+                            "#EH_SJLJ_LONGJMP64",
+                            [(PPCeh_sjlj_longjmp addr:$buf)]>,
+                          Requires<[In64BitMode]>;
+}
+
 //===----------------------------------------------------------------------===//
 // 64-bit SPR manipulation instrs.
 
@@ -393,15 +406,16 @@ def ADDIC8 : DForm_2<12, (outs G8RC:$rD), (ins G8RC:$rA, s16imm64:$imm),
                      "addic $rD, $rA, $imm", IntGeneral,
                      [(set G8RC:$rD, (addc G8RC:$rA, immSExt16:$imm))]>;
 }
-def ADDI8  : DForm_2<14, (outs G8RC:$rD), (ins G8RC:$rA, s16imm64:$imm),
+def ADDI8  : DForm_2<14, (outs G8RC:$rD), (ins G8RC_NOX0:$rA, s16imm64:$imm),
                      "addi $rD, $rA, $imm", IntSimple,
-                     [(set G8RC:$rD, (add G8RC:$rA, immSExt16:$imm))]>;
-def ADDI8L  : DForm_2<14, (outs G8RC:$rD), (ins G8RC:$rA, symbolLo64:$imm),
+                     [(set G8RC:$rD, (add G8RC_NOX0:$rA, immSExt16:$imm))]>;
+def ADDI8L  : DForm_2<14, (outs G8RC:$rD), (ins G8RC_NOX0:$rA, symbolLo64:$imm),
                      "addi $rD, $rA, $imm", IntSimple,
-                     [(set G8RC:$rD, (add G8RC:$rA, immSExt16:$imm))]>;
-def ADDIS8 : DForm_2<15, (outs G8RC:$rD), (ins G8RC:$rA, symbolHi64:$imm),
+                     [(set G8RC:$rD, (add G8RC_NOX0:$rA, immSExt16:$imm))]>;
+def ADDIS8 : DForm_2<15, (outs G8RC:$rD), (ins G8RC_NOX0:$rA, symbolHi64:$imm),
                      "addis $rD, $rA, $imm", IntSimple,
-                     [(set G8RC:$rD, (add G8RC:$rA, imm16ShiftedSExt:$imm))]>;
+                     [(set G8RC:$rD, (add G8RC_NOX0:$rA,
+                                          imm16ShiftedSExt:$imm))]>;
 
 let Defs = [CARRY] in {
 def SUBFIC8: DForm_2< 8, (outs G8RC:$rD), (ins G8RC:$rA, s16imm64:$imm),
@@ -536,7 +550,7 @@ def RLWINM8 : MForm_2<21,
                      []>;
 
 def ISEL8   : AForm_4<31, 15,
-                     (outs G8RC:$rT), (ins G8RC:$rA, G8RC:$rB, pred:$cond),
+                     (outs G8RC:$rT), (ins G8RC_NOX0:$rA, G8RC:$rB, pred:$cond),
                      "isel $rT, $rA, $rB, $cond", IntGeneral,
                      []>;
 }  // End FXU Operations.
@@ -555,7 +569,8 @@ def LHA8: DForm_1<42, (outs G8RC:$rD), (ins memri:$src),
                   PPC970_DGroup_Cracked;
 def LWA  : DSForm_1<58, 2, (outs G8RC:$rD), (ins memrix:$src),
                     "lwa $rD, $src", LdStLWA,
-                    [(set G8RC:$rD, (sextloadi32 ixaddr:$src))]>, isPPC64,
+                    [(set G8RC:$rD,
+                          (aligned4sextloadi32 ixaddr:$src))]>, isPPC64,
                     PPC970_DGroup_Cracked;
 def LHAX8: XForm_1<31, 343, (outs G8RC:$rD), (ins memrr:$src),
                    "lhax $rD, $src", LdStLHA,
@@ -567,24 +582,25 @@ def LWAX : XForm_1<31, 341, (outs G8RC:$rD), (ins memrr:$src),
                    PPC970_DGroup_Cracked;
 
 // Update forms.
-let mayLoad = 1 in
-def LHAU8 : DForm_1a<43, (outs G8RC:$rD, ptr_rc:$ea_result), (ins symbolLo:$disp,
-                            ptr_rc:$rA),
-                    "lhau $rD, $disp($rA)", LdStLHAU,
-                    []>, RegConstraint<"$rA = $ea_result">,
+let mayLoad = 1 in {
+def LHAU8 : DForm_1<43, (outs G8RC:$rD, ptr_rc_nor0:$ea_result),
+                    (ins memri:$addr),
+                    "lhau $rD, $addr", LdStLHAU,
+                    []>, RegConstraint<"$addr.reg = $ea_result">,
                     NoEncode<"$ea_result">;
 // NO LWAU!
 
-def LHAUX8 : XForm_1<31, 375, (outs G8RC:$rD, ptr_rc:$ea_result),
+def LHAUX8 : XForm_1<31, 375, (outs G8RC:$rD, ptr_rc_nor0:$ea_result),
                     (ins memrr:$addr),
                     "lhaux $rD, $addr", LdStLHAU,
                     []>, RegConstraint<"$addr.offreg = $ea_result">,
                     NoEncode<"$ea_result">;
-def LWAUX : XForm_1<31, 373, (outs G8RC:$rD, ptr_rc:$ea_result),
+def LWAUX : XForm_1<31, 373, (outs G8RC:$rD, ptr_rc_nor0:$ea_result),
                     (ins memrr:$addr),
                     "lwaux $rD, $addr", LdStLHAU,
                     []>, RegConstraint<"$addr.offreg = $ea_result">,
                     NoEncode<"$ea_result">, isPPC64;
+}
 }
 
 // Zero extending loads.
@@ -612,30 +628,30 @@ def LWZX8 : XForm_1<31,  23, (outs G8RC:$rD), (ins memrr:$src),
                    
 // Update forms.
 let mayLoad = 1 in {
-def LBZU8 : DForm_1<35, (outs G8RC:$rD, ptr_rc:$ea_result), (ins memri:$addr),
+def LBZU8 : DForm_1<35, (outs G8RC:$rD, ptr_rc_nor0:$ea_result), (ins memri:$addr),
                     "lbzu $rD, $addr", LdStLoadUpd,
                     []>, RegConstraint<"$addr.reg = $ea_result">,
                     NoEncode<"$ea_result">;
-def LHZU8 : DForm_1<41, (outs G8RC:$rD, ptr_rc:$ea_result), (ins memri:$addr),
+def LHZU8 : DForm_1<41, (outs G8RC:$rD, ptr_rc_nor0:$ea_result), (ins memri:$addr),
                     "lhzu $rD, $addr", LdStLoadUpd,
                     []>, RegConstraint<"$addr.reg = $ea_result">,
                     NoEncode<"$ea_result">;
-def LWZU8 : DForm_1<33, (outs G8RC:$rD, ptr_rc:$ea_result), (ins memri:$addr),
+def LWZU8 : DForm_1<33, (outs G8RC:$rD, ptr_rc_nor0:$ea_result), (ins memri:$addr),
                     "lwzu $rD, $addr", LdStLoadUpd,
                     []>, RegConstraint<"$addr.reg = $ea_result">,
                     NoEncode<"$ea_result">;
 
-def LBZUX8 : XForm_1<31, 119, (outs G8RC:$rD, ptr_rc:$ea_result),
+def LBZUX8 : XForm_1<31, 119, (outs G8RC:$rD, ptr_rc_nor0:$ea_result),
                    (ins memrr:$addr),
                    "lbzux $rD, $addr", LdStLoadUpd,
                    []>, RegConstraint<"$addr.offreg = $ea_result">,
                    NoEncode<"$ea_result">;
-def LHZUX8 : XForm_1<31, 311, (outs G8RC:$rD, ptr_rc:$ea_result),
+def LHZUX8 : XForm_1<31, 311, (outs G8RC:$rD, ptr_rc_nor0:$ea_result),
                    (ins memrr:$addr),
                    "lhzux $rD, $addr", LdStLoadUpd,
                    []>, RegConstraint<"$addr.offreg = $ea_result">,
                    NoEncode<"$ea_result">;
-def LWZUX8 : XForm_1<31, 55, (outs G8RC:$rD, ptr_rc:$ea_result),
+def LWZUX8 : XForm_1<31, 55, (outs G8RC:$rD, ptr_rc_nor0:$ea_result),
                    (ins memrr:$addr),
                    "lwzux $rD, $addr", LdStLoadUpd,
                    []>, RegConstraint<"$addr.offreg = $ea_result">,
@@ -648,7 +664,7 @@ def LWZUX8 : XForm_1<31, 55, (outs G8RC:$rD, ptr_rc:$ea_result),
 let canFoldAsLoad = 1, PPC970_Unit = 2 in {
 def LD   : DSForm_1<58, 0, (outs G8RC:$rD), (ins memrix:$src),
                     "ld $rD, $src", LdStLD,
-                    [(set G8RC:$rD, (load ixaddr:$src))]>, isPPC64;
+                    [(set G8RC:$rD, (aligned4load ixaddr:$src))]>, isPPC64;
 def LDrs : DSForm_1<58, 0, (outs G8RC:$rD), (ins memrs:$src),
                     "ld $rD, $src", LdStLD,
                     []>, isPPC64;
@@ -684,12 +700,12 @@ def LDX  : XForm_1<31,  21, (outs G8RC:$rD), (ins memrr:$src),
                    [(set G8RC:$rD, (load xaddr:$src))]>, isPPC64;
                    
 let mayLoad = 1 in
-def LDU  : DSForm_1<58, 1, (outs G8RC:$rD, ptr_rc:$ea_result), (ins memrix:$addr),
+def LDU  : DSForm_1<58, 1, (outs G8RC:$rD, ptr_rc_nor0:$ea_result), (ins memrix:$addr),
                     "ldu $rD, $addr", LdStLDU,
                     []>, RegConstraint<"$addr.reg = $ea_result">, isPPC64,
                     NoEncode<"$ea_result">;
 
-def LDUX : XForm_1<31, 53, (outs G8RC:$rD, ptr_rc:$ea_result),
+def LDUX : XForm_1<31, 53, (outs G8RC:$rD, ptr_rc_nor0:$ea_result),
                    (ins memrr:$addr),
                    "ldux $rD, $addr", LdStLDU,
                    []>, RegConstraint<"$addr.offreg = $ea_result">,
@@ -798,82 +814,11 @@ def STWX8 : XForm_8<31, 151, (outs), (ins G8RC:$rS, memrr:$dst),
 // Normal 8-byte stores.
 def STD  : DSForm_1<62, 0, (outs), (ins G8RC:$rS, memrix:$dst),
                     "std $rS, $dst", LdStSTD,
-                    [(store G8RC:$rS, ixaddr:$dst)]>, isPPC64;
+                    [(aligned4store G8RC:$rS, ixaddr:$dst)]>, isPPC64;
 def STDX  : XForm_8<31, 149, (outs), (ins G8RC:$rS, memrr:$dst),
                    "stdx $rS, $dst", LdStSTD,
                    [(store G8RC:$rS, xaddr:$dst)]>, isPPC64,
                    PPC970_DGroup_Cracked;
-}
-
-let PPC970_Unit = 2 in {
-
-def STBU8 : DForm_1a<39, (outs ptr_rc:$ea_res), (ins G8RC:$rS,
-                             symbolLo:$ptroff, ptr_rc:$ptrreg),
-                    "stbu $rS, $ptroff($ptrreg)", LdStStoreUpd,
-                    [(set ptr_rc:$ea_res,
-                          (pre_truncsti8 G8RC:$rS, ptr_rc:$ptrreg, 
-                                         iaddroff:$ptroff))]>,
-                    RegConstraint<"$ptrreg = $ea_res">, NoEncode<"$ea_res">;
-def STHU8 : DForm_1a<45, (outs ptr_rc:$ea_res), (ins G8RC:$rS,
-                             symbolLo:$ptroff, ptr_rc:$ptrreg),
-                    "sthu $rS, $ptroff($ptrreg)", LdStStoreUpd,
-                    [(set ptr_rc:$ea_res,
-                        (pre_truncsti16 G8RC:$rS, ptr_rc:$ptrreg, 
-                                        iaddroff:$ptroff))]>,
-                    RegConstraint<"$ptrreg = $ea_res">, NoEncode<"$ea_res">;
-
-def STWU8 : DForm_1a<37, (outs ptr_rc:$ea_res), (ins G8RC:$rS,
-                             symbolLo:$ptroff, ptr_rc:$ptrreg),
-                    "stwu $rS, $ptroff($ptrreg)", LdStStoreUpd,
-                    [(set ptr_rc:$ea_res,
-                          (pre_truncsti32 G8RC:$rS, ptr_rc:$ptrreg,
-                                          iaddroff:$ptroff))]>,
-                    RegConstraint<"$ptrreg = $ea_res">, NoEncode<"$ea_res">;
-
-def STDU : DSForm_1a<62, 1, (outs ptr_rc:$ea_res), (ins G8RC:$rS,
-                                        s16immX4:$ptroff, ptr_rc:$ptrreg),
-                    "stdu $rS, $ptroff($ptrreg)", LdStSTDU,
-                    [(set ptr_rc:$ea_res, (pre_store G8RC:$rS, ptr_rc:$ptrreg, 
-                                                     iaddroff:$ptroff))]>,
-                    RegConstraint<"$ptrreg = $ea_res">, NoEncode<"$ea_res">,
-                    isPPC64;
-
-
-def STBUX8 : XForm_8<31, 247, (outs ptr_rc:$ea_res),
-                              (ins G8RC:$rS, ptr_rc:$ptroff, ptr_rc:$ptrreg),
-                    "stbux $rS, $ptroff, $ptrreg", LdStStoreUpd,
-                    [(set ptr_rc:$ea_res,
-                       (pre_truncsti8 G8RC:$rS,
-                                      ptr_rc:$ptrreg, xaddroff:$ptroff))]>,
-                    RegConstraint<"$ptroff = $ea_res">, NoEncode<"$ea_res">,
-                    PPC970_DGroup_Cracked;
-
-def STHUX8 : XForm_8<31, 439, (outs ptr_rc:$ea_res),
-                              (ins G8RC:$rS, ptr_rc:$ptroff, ptr_rc:$ptrreg),
-                    "sthux $rS, $ptroff, $ptrreg", LdStStoreUpd,
-                    [(set ptr_rc:$ea_res,
-                       (pre_truncsti16 G8RC:$rS,
-                                       ptr_rc:$ptrreg, xaddroff:$ptroff))]>,
-                    RegConstraint<"$ptroff = $ea_res">, NoEncode<"$ea_res">,
-                    PPC970_DGroup_Cracked;
-
-def STWUX8 : XForm_8<31, 183, (outs ptr_rc:$ea_res),
-                              (ins G8RC:$rS, ptr_rc:$ptroff, ptr_rc:$ptrreg),
-                    "stwux $rS, $ptroff, $ptrreg", LdStStoreUpd,
-                    [(set ptr_rc:$ea_res,
-                       (pre_truncsti32 G8RC:$rS,
-                                       ptr_rc:$ptrreg, xaddroff:$ptroff))]>,
-                    RegConstraint<"$ptroff = $ea_res">, NoEncode<"$ea_res">,
-                    PPC970_DGroup_Cracked;
-
-def STDUX : XForm_8<31, 181, (outs ptr_rc:$ea_res),
-                              (ins G8RC:$rS, ptr_rc:$ptroff, ptr_rc:$ptrreg),
-                    "stdux $rS, $ptroff, $ptrreg", LdStSTDU,
-                    [(set ptr_rc:$ea_res,
-                       (pre_store G8RC:$rS, ptr_rc:$ptrreg, xaddroff:$ptroff))]>,
-                    RegConstraint<"$ptroff = $ea_res">, NoEncode<"$ea_res">,
-                    PPC970_DGroup_Cracked, isPPC64;
-
 // STD_32/STDX_32 - Just like STD/STDX, but uses a '32-bit' input register.
 def STD_32  : DSForm_1<62, 0, (outs), (ins GPRC:$rT, memrix:$dst),
                        "std $rT, $dst", LdStSTD,
@@ -884,6 +829,60 @@ def STDX_32  : XForm_8<31, 149, (outs), (ins GPRC:$rT, memrr:$dst),
                        PPC970_DGroup_Cracked;
 }
 
+// Stores with Update (pre-inc).
+let PPC970_Unit = 2, mayStore = 1 in {
+def STBU8 : DForm_1<39, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memri:$dst),
+                   "stbu $rS, $dst", LdStStoreUpd, []>,
+                   RegConstraint<"$dst.reg = $ea_res">, NoEncode<"$ea_res">;
+def STHU8 : DForm_1<45, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memri:$dst),
+                   "sthu $rS, $dst", LdStStoreUpd, []>,
+                   RegConstraint<"$dst.reg = $ea_res">, NoEncode<"$ea_res">;
+def STWU8 : DForm_1<37, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memri:$dst),
+                   "stwu $rS, $dst", LdStStoreUpd, []>,
+                   RegConstraint<"$dst.reg = $ea_res">, NoEncode<"$ea_res">;
+def STDU : DSForm_1<62, 1, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memrix:$dst),
+                   "stdu $rS, $dst", LdStSTDU, []>,
+                   RegConstraint<"$dst.reg = $ea_res">, NoEncode<"$ea_res">,
+                   isPPC64;
+
+def STBUX8: XForm_8<31, 247, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memrr:$dst),
+                    "stbux $rS, $dst", LdStStoreUpd, []>,
+                    RegConstraint<"$dst.offreg = $ea_res">, NoEncode<"$ea_res">,
+                    PPC970_DGroup_Cracked;
+def STHUX8: XForm_8<31, 439, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memrr:$dst),
+                    "sthux $rS, $dst", LdStStoreUpd, []>,
+                    RegConstraint<"$dst.offreg = $ea_res">, NoEncode<"$ea_res">,
+                    PPC970_DGroup_Cracked;
+def STWUX8: XForm_8<31, 183, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memrr:$dst),
+                    "stwux $rS, $dst", LdStStoreUpd, []>,
+                    RegConstraint<"$dst.offreg = $ea_res">, NoEncode<"$ea_res">,
+                    PPC970_DGroup_Cracked;
+def STDUX : XForm_8<31, 181, (outs ptr_rc_nor0:$ea_res), (ins G8RC:$rS, memrr:$dst),
+                    "stdux $rS, $dst", LdStSTDU, []>,
+                    RegConstraint<"$dst.offreg = $ea_res">, NoEncode<"$ea_res">,
+                    PPC970_DGroup_Cracked, isPPC64;
+}
+
+// Patterns to match the pre-inc stores.  We can't put the patterns on
+// the instruction definitions directly as ISel wants the address base
+// and offset to be separate operands, not a single complex operand.
+def : Pat<(pre_truncsti8 G8RC:$rS, ptr_rc_nor0:$ptrreg, iaddroff:$ptroff),
+          (STBU8 G8RC:$rS, iaddroff:$ptroff, ptr_rc_nor0:$ptrreg)>;
+def : Pat<(pre_truncsti16 G8RC:$rS, ptr_rc_nor0:$ptrreg, iaddroff:$ptroff),
+          (STHU8 G8RC:$rS, iaddroff:$ptroff, ptr_rc_nor0:$ptrreg)>;
+def : Pat<(pre_truncsti32 G8RC:$rS, ptr_rc_nor0:$ptrreg, iaddroff:$ptroff),
+          (STWU8 G8RC:$rS, iaddroff:$ptroff, ptr_rc_nor0:$ptrreg)>;
+def : Pat<(aligned4pre_store G8RC:$rS, ptr_rc_nor0:$ptrreg, iaddroff:$ptroff),
+          (STDU G8RC:$rS, iaddroff:$ptroff, ptr_rc_nor0:$ptrreg)>;
+
+def : Pat<(pre_truncsti8 G8RC:$rS, ptr_rc:$ptrreg, xaddroff:$ptroff),
+          (STBUX8 G8RC:$rS, xaddroff:$ptroff, ptr_rc:$ptrreg)>;
+def : Pat<(pre_truncsti16 G8RC:$rS, ptr_rc:$ptrreg, xaddroff:$ptroff),
+          (STHUX8 G8RC:$rS, xaddroff:$ptroff, ptr_rc:$ptrreg)>;
+def : Pat<(pre_truncsti32 G8RC:$rS, ptr_rc:$ptrreg, xaddroff:$ptroff),
+          (STWUX8 G8RC:$rS, xaddroff:$ptroff, ptr_rc:$ptrreg)>;
+def : Pat<(pre_store G8RC:$rS, ptr_rc:$ptrreg, xaddroff:$ptroff),
+          (STDUX G8RC:$rS, xaddroff:$ptroff, ptr_rc:$ptrreg)>;
 
 
 //===----------------------------------------------------------------------===//
@@ -979,3 +978,13 @@ def : Pat<(add G8RC:$in, (PPChi tjumptable:$g, 0)),
           (ADDIS8 G8RC:$in, tjumptable:$g)>;
 def : Pat<(add G8RC:$in, (PPChi tblockaddress:$g, 0)),
           (ADDIS8 G8RC:$in, tblockaddress:$g)>;
+
+// Patterns to match r+r indexed loads and stores for
+// addresses without at least 4-byte alignment.
+def : Pat<(i64 (unaligned4sextloadi32 xoaddr:$src)),
+          (LWAX xoaddr:$src)>;
+def : Pat<(i64 (unaligned4load xoaddr:$src)),
+          (LDX xoaddr:$src)>;
+def : Pat<(unaligned4store G8RC:$rS, xoaddr:$dst),
+          (STDX G8RC:$rS, xoaddr:$dst)>;
+

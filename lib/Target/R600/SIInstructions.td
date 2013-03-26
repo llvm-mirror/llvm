@@ -403,9 +403,9 @@ def BUFFER_LOAD_FORMAT_XYZW : MUBUF_Load_Helper <0x00000003, "BUFFER_LOAD_FORMAT
 //def BUFFER_LOAD_SBYTE : MUBUF_ <0x00000009, "BUFFER_LOAD_SBYTE", []>;
 //def BUFFER_LOAD_USHORT : MUBUF_ <0x0000000a, "BUFFER_LOAD_USHORT", []>;
 //def BUFFER_LOAD_SSHORT : MUBUF_ <0x0000000b, "BUFFER_LOAD_SSHORT", []>;
-//def BUFFER_LOAD_DWORD : MUBUF_ <0x0000000c, "BUFFER_LOAD_DWORD", []>;
-//def BUFFER_LOAD_DWORDX2 : MUBUF_DWORDX2 <0x0000000d, "BUFFER_LOAD_DWORDX2", []>;
-//def BUFFER_LOAD_DWORDX4 : MUBUF_DWORDX4 <0x0000000e, "BUFFER_LOAD_DWORDX4", []>;
+def BUFFER_LOAD_DWORD : MUBUF_Load_Helper <0x0000000c, "BUFFER_LOAD_DWORD", VReg_32>;
+def BUFFER_LOAD_DWORDX2 : MUBUF_Load_Helper <0x0000000d, "BUFFER_LOAD_DWORDX2", VReg_64>;
+def BUFFER_LOAD_DWORDX4 : MUBUF_Load_Helper <0x0000000e, "BUFFER_LOAD_DWORDX4", VReg_128>;
 //def BUFFER_STORE_BYTE : MUBUF_ <0x00000018, "BUFFER_STORE_BYTE", []>;
 //def BUFFER_STORE_SHORT : MUBUF_ <0x0000001a, "BUFFER_STORE_SHORT", []>;
 //def BUFFER_STORE_DWORD : MUBUF_ <0x0000001c, "BUFFER_STORE_DWORD", []>;
@@ -458,17 +458,31 @@ def TBUFFER_LOAD_FORMAT_XYZW : MTBUF_Load_Helper <0x00000003, "TBUFFER_LOAD_FORM
 
 let mayLoad = 1 in {
 
-defm S_LOAD_DWORD : SMRD_Helper <0x00000000, "S_LOAD_DWORD", SReg_32>;
+defm S_LOAD_DWORD : SMRD_Helper <0x00, "S_LOAD_DWORD", SReg_64, SReg_32>;
+defm S_LOAD_DWORDX2 : SMRD_Helper <0x01, "S_LOAD_DWORDX2", SReg_64, SReg_64>;
+defm S_LOAD_DWORDX4 : SMRD_Helper <0x02, "S_LOAD_DWORDX4", SReg_64, SReg_128>;
+defm S_LOAD_DWORDX8 : SMRD_Helper <0x03, "S_LOAD_DWORDX8", SReg_64, SReg_256>;
+defm S_LOAD_DWORDX16 : SMRD_Helper <0x04, "S_LOAD_DWORDX16", SReg_64, SReg_512>;
 
-//def S_LOAD_DWORDX2 : SMRD_DWORDX2 <0x00000001, "S_LOAD_DWORDX2", []>;
-defm S_LOAD_DWORDX4 : SMRD_Helper <0x00000002, "S_LOAD_DWORDX4", SReg_128>;
-defm S_LOAD_DWORDX8 : SMRD_Helper <0x00000003, "S_LOAD_DWORDX8", SReg_256>;
-//def S_LOAD_DWORDX16 : SMRD_DWORDX16 <0x00000004, "S_LOAD_DWORDX16", []>;
-//def S_BUFFER_LOAD_DWORD : SMRD_ <0x00000008, "S_BUFFER_LOAD_DWORD", []>;
-//def S_BUFFER_LOAD_DWORDX2 : SMRD_DWORDX2 <0x00000009, "S_BUFFER_LOAD_DWORDX2", []>;
-//def S_BUFFER_LOAD_DWORDX4 : SMRD_DWORDX4 <0x0000000a, "S_BUFFER_LOAD_DWORDX4", []>;
-//def S_BUFFER_LOAD_DWORDX8 : SMRD_DWORDX8 <0x0000000b, "S_BUFFER_LOAD_DWORDX8", []>;
-//def S_BUFFER_LOAD_DWORDX16 : SMRD_DWORDX16 <0x0000000c, "S_BUFFER_LOAD_DWORDX16", []>;
+defm S_BUFFER_LOAD_DWORD : SMRD_Helper <
+  0x08, "S_BUFFER_LOAD_DWORD", SReg_128, SReg_32
+>;
+
+defm S_BUFFER_LOAD_DWORDX2 : SMRD_Helper <
+  0x09, "S_BUFFER_LOAD_DWORDX2", SReg_128, SReg_64
+>;
+
+defm S_BUFFER_LOAD_DWORDX4 : SMRD_Helper <
+  0x0a, "S_BUFFER_LOAD_DWORDX4", SReg_128, SReg_128
+>;
+
+defm S_BUFFER_LOAD_DWORDX8 : SMRD_Helper <
+  0x0b, "S_BUFFER_LOAD_DWORDX8", SReg_128, SReg_256
+>;
+
+defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
+  0x0c, "S_BUFFER_LOAD_DWORDX16", SReg_128, SReg_512
+>;
 
 } // mayLoad = 1
 
@@ -840,7 +854,9 @@ defm V_LSHR_B32 : VOP2_32 <0x00000015, "V_LSHR_B32", []>;
 defm V_LSHRREV_B32 : VOP2_32 <0x00000016, "V_LSHRREV_B32", []>;
 defm V_ASHR_I32 : VOP2_32 <0x00000017, "V_ASHR_I32", []>;
 defm V_ASHRREV_I32 : VOP2_32 <0x00000018, "V_ASHRREV_I32", []>;
-defm V_LSHL_B32 : VOP2_32 <0x00000019, "V_LSHL_B32", []>;
+defm V_LSHL_B32 : VOP2_32 <0x00000019, "V_LSHL_B32",
+  [(set VReg_32:$dst, (shl VSrc_32:$src0, (i32 VReg_32:$src1)))]
+>;
 defm V_LSHLREV_B32 : VOP2_32 <0x0000001a, "V_LSHLREV_B32", []>;
 
 let isCommutable = 1 in {
@@ -1133,6 +1149,31 @@ def SI_KILL : InstSI <
 } // end mayLoad = 1, mayStore = 1, hasSideEffects = 1
   // Uses = [EXEC], Defs = [EXEC]
 
+let Uses = [EXEC], Defs = [EXEC,VCC,M0] in {
+
+def SI_INDIRECT_SRC : InstSI <
+  (outs VReg_32:$dst, SReg_64:$temp),
+  (ins unknown:$src, VSrc_32:$idx, i32imm:$off),
+  "SI_INDIRECT_SRC $dst, $temp, $src, $idx, $off",
+  []
+>;
+
+class SI_INDIRECT_DST<RegisterClass rc> : InstSI <
+  (outs rc:$dst, SReg_64:$temp),
+  (ins unknown:$src, VSrc_32:$idx, i32imm:$off, VReg_32:$val),
+  "SI_INDIRECT_DST $dst, $temp, $src, $idx, $off, $val",
+  []
+> {
+  let Constraints = "$src = $dst";
+}
+
+def SI_INDIRECT_DST_V2 : SI_INDIRECT_DST<VReg_64>;
+def SI_INDIRECT_DST_V4 : SI_INDIRECT_DST<VReg_128>;
+def SI_INDIRECT_DST_V8 : SI_INDIRECT_DST<VReg_256>;
+def SI_INDIRECT_DST_V16 : SI_INDIRECT_DST<VReg_512>;
+
+} // Uses = [EXEC,VCC,M0], Defs = [EXEC,VCC,M0]
+
 } // end IsCodeGenOnly, isPseudo
 
 def : Pat<
@@ -1241,22 +1282,83 @@ defm : SamplePatterns<VReg_128, v4i32>;
 defm : SamplePatterns<VReg_256, v8i32>;
 defm : SamplePatterns<VReg_512, v16i32>;
 
-def : Extract_Element <f32, v4f32, VReg_128, 0, sub0>;
-def : Extract_Element <f32, v4f32, VReg_128, 1, sub1>;
-def : Extract_Element <f32, v4f32, VReg_128, 2, sub2>;
-def : Extract_Element <f32, v4f32, VReg_128, 3, sub3>;
+/********** ============================================ **********/
+/********** Extraction, Insertion, Building and Casting  **********/
+/********** ============================================ **********/
 
-def : Insert_Element <f32, v4f32, VReg_32, VReg_128, 4, sub0>;
-def : Insert_Element <f32, v4f32, VReg_32, VReg_128, 5, sub1>;
-def : Insert_Element <f32, v4f32, VReg_32, VReg_128, 6, sub2>;
-def : Insert_Element <f32, v4f32, VReg_32, VReg_128, 7, sub3>;
+foreach Index = 0-2 in {
+  def Extract_Element_v2i32_#Index : Extract_Element <
+    i32, v2i32, VReg_64, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v2i32_#Index : Insert_Element <
+    i32, v2i32, VReg_32, VReg_64, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+
+  def Extract_Element_v2f32_#Index : Extract_Element <
+    f32, v2f32, VReg_64, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v2f32_#Index : Insert_Element <
+    f32, v2f32, VReg_32, VReg_64, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+}
+
+foreach Index = 0-3 in {
+  def Extract_Element_v4i32_#Index : Extract_Element <
+    i32, v4i32, VReg_128, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v4i32_#Index : Insert_Element <
+    i32, v4i32, VReg_32, VReg_128, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+
+  def Extract_Element_v4f32_#Index : Extract_Element <
+    f32, v4f32, VReg_128, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v4f32_#Index : Insert_Element <
+    f32, v4f32, VReg_32, VReg_128, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+}
+
+foreach Index = 0-7 in {
+  def Extract_Element_v8i32_#Index : Extract_Element <
+    i32, v8i32, VReg_256, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v8i32_#Index : Insert_Element <
+    i32, v8i32, VReg_32, VReg_256, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+
+  def Extract_Element_v8f32_#Index : Extract_Element <
+    f32, v8f32, VReg_256, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v8f32_#Index : Insert_Element <
+    f32, v8f32, VReg_32, VReg_256, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+}
+
+foreach Index = 0-15 in {
+  def Extract_Element_v16i32_#Index : Extract_Element <
+    i32, v16i32, VReg_512, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v16i32_#Index : Insert_Element <
+    i32, v16i32, VReg_32, VReg_512, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+
+  def Extract_Element_v16f32_#Index : Extract_Element <
+    f32, v16f32, VReg_512, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+  def Insert_Element_v16f32_#Index : Insert_Element <
+    f32, v16f32, VReg_32, VReg_512, Index, !cast<SubRegIndex>(sub#Index)
+  >;
+}
 
 def : Vector1_Build <v1i32, VReg_32, i32, VReg_32>;
 def : Vector2_Build <v2i32, VReg_64, i32, VReg_32>;
-def : Vector_Build <v4f32, VReg_128, f32, VReg_32>;
-def : Vector_Build <v4i32, VReg_128, i32, VReg_32>;
+def : Vector2_Build <v2f32, VReg_64, f32, VReg_32>;
+def : Vector4_Build <v4i32, VReg_128, i32, VReg_32>;
+def : Vector4_Build <v4f32, VReg_128, f32, VReg_32>;
 def : Vector8_Build <v8i32, VReg_256, i32, VReg_32>;
+def : Vector8_Build <v8f32, VReg_256, f32, VReg_32>;
 def : Vector16_Build <v16i32, VReg_512, i32, VReg_32>;
+def : Vector16_Build <v16f32, VReg_512, f32, VReg_32>;
 
 def : BitConvert <i32, f32, SReg_32>;
 def : BitConvert <i32, f32, VReg_32>;
@@ -1389,6 +1491,24 @@ def : Pat <
   (V_CNDMASK_B32_e64 (i32 0), (i32 -1), SReg_64:$src0)
 >;
 
+// 1. Offset as 8bit DWORD immediate
+def : Pat <
+  (int_SI_load_const SReg_128:$sbase, IMM8bitDWORD:$offset),
+  (S_BUFFER_LOAD_DWORD_IMM SReg_128:$sbase, IMM8bitDWORD:$offset)
+>;
+
+// 2. Offset loaded in an 32bit SGPR
+def : Pat <
+  (int_SI_load_const SReg_128:$sbase, imm:$offset),
+  (S_BUFFER_LOAD_DWORD_SGPR SReg_128:$sbase, (S_MOV_B32 imm:$offset))
+>;
+
+// 3. Offset in an 32Bit VGPR
+def : Pat <
+  (int_SI_load_const SReg_128:$sbase, VReg_32:$voff),
+  (BUFFER_LOAD_DWORD 0, 1, 0, 0, 0, 0, VReg_32:$voff, SReg_128:$sbase, 0, 0, 0)
+>;
+
 /********** ================== **********/
 /**********   VOP3 Patterns    **********/
 /********** ================== **********/
@@ -1425,5 +1545,49 @@ defm : SMRD_Pattern <S_LOAD_DWORD_IMM, S_LOAD_DWORD_SGPR, f32>;
 defm : SMRD_Pattern <S_LOAD_DWORD_IMM, S_LOAD_DWORD_SGPR, i32>;
 defm : SMRD_Pattern <S_LOAD_DWORDX4_IMM, S_LOAD_DWORDX4_SGPR, v16i8>;
 defm : SMRD_Pattern <S_LOAD_DWORDX8_IMM, S_LOAD_DWORDX8_SGPR, v32i8>;
+
+/********** ====================== **********/
+/**********   Indirect adressing   **********/
+/********** ====================== **********/
+
+multiclass SI_INDIRECT_Pattern <RegisterClass rc, ValueType vt,
+                                SI_INDIRECT_DST IndDst> {
+  // 1. Extract with offset
+  def : Pat<
+    (vector_extract (vt rc:$vec),
+      (i64 (zext (i32 (add VReg_32:$idx, imm:$off))))
+    ),
+    (f32 (SI_INDIRECT_SRC (IMPLICIT_DEF), rc:$vec, VReg_32:$idx, imm:$off))
+  >;
+
+  // 2. Extract without offset
+  def : Pat<
+    (vector_extract (vt rc:$vec),
+      (i64 (zext (i32 VReg_32:$idx)))
+    ),
+    (f32 (SI_INDIRECT_SRC (IMPLICIT_DEF), rc:$vec, VReg_32:$idx, 0))
+  >;
+
+  // 3. Insert with offset
+  def : Pat<
+    (vector_insert (vt rc:$vec), (f32 VReg_32:$val),
+      (i64 (zext (i32 (add VReg_32:$idx, imm:$off))))
+    ),
+    (vt (IndDst (IMPLICIT_DEF), rc:$vec, VReg_32:$idx, imm:$off, VReg_32:$val))
+  >;
+
+  // 4. Insert without offset
+  def : Pat<
+    (vector_insert (vt rc:$vec), (f32 VReg_32:$val),
+      (i64 (zext (i32 VReg_32:$idx)))
+    ),
+    (vt (IndDst (IMPLICIT_DEF), rc:$vec, VReg_32:$idx, 0, VReg_32:$val))
+  >;
+}
+
+defm : SI_INDIRECT_Pattern <VReg_64, v2f32, SI_INDIRECT_DST_V2>;
+defm : SI_INDIRECT_Pattern <VReg_128, v4f32, SI_INDIRECT_DST_V4>;
+defm : SI_INDIRECT_Pattern <VReg_256, v8f32, SI_INDIRECT_DST_V8>;
+defm : SI_INDIRECT_Pattern <VReg_512, v16f32, SI_INDIRECT_DST_V16>;
 
 } // End isSI predicate

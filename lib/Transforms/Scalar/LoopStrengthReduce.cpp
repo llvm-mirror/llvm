@@ -895,7 +895,7 @@ void Cost::RatePrimaryRegister(const SCEV *Reg,
   }
   if (Regs.insert(Reg)) {
     RateRegister(Reg, Regs, L, SE, DT);
-    if (isLoser())
+    if (LoserRegs && isLoser())
       LoserRegs->insert(Reg);
   }
 }
@@ -2716,6 +2716,7 @@ void LSRInstance::GenerateIVChain(const IVChain &Chain, SCEVExpander &Rewriter,
   // by LSR.
   const IVInc &Head = Chain.Incs[0];
   User::op_iterator IVOpEnd = Head.UserInst->op_end();
+  // findIVOperand returns IVOpEnd if it can no longer find a valid IV user.
   User::op_iterator IVOpIter = findIVOperand(Head.UserInst->op_begin(),
                                              IVOpEnd, L, SE);
   Value *IVSrc = 0;
