@@ -7,13 +7,13 @@ add_llvm_library(LLVMCodeGen
   CalcSpillWeights.cpp
   CallingConvLower.cpp
   CodeGen.cpp
-  CodePlacementOpt.cpp
   CriticalAntiDepBreaker.cpp
   DFAPacketizer.cpp
   DeadMachineInstructionElim.cpp
   DwarfEHPrepare.cpp
   EarlyIfConversion.cpp
   EdgeBundles.cpp
+  ErlangGC.cpp
   ExecutionDepsFix.cpp
   ExpandISelPseudos.cpp
   ExpandPostRAPseudos.cpp

@@ -17,12 +17,13 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/IRReader.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/SystemUtils.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include <memory>
@@ -110,9 +111,6 @@ int main(int argc, char **argv) {
       return 1;
     }
   }
-
-  // TODO: Iterate over the -l list and link in any modules containing
-  // global symbols that have not been resolved so far.
 
   if (DumpAsm) errs() << "Here's the assembly:\n" << *Composite;
 

@@ -1634,6 +1634,63 @@ error_code ELFObjectFile<ELFT>::getRelocationTypeName(
       res = "Unknown";
     }
     break;
+  case ELF::EM_MIPS:
+    switch (type) {
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_NONE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_REL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_26);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GPREL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_LITERAL);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_PC16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_CALL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SHIFT5);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SHIFT6);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_DISP);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_PAGE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_OFST);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SUB);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_INSERT_A);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_INSERT_B);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_DELETE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_HIGHER);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_HIGHEST);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_CALL_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_CALL_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SCN_DISP);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_REL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_ADD_IMMEDIATE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_PJUMP);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_RELGOT);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_JALR);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPMOD32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPMOD64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_GD);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_LDM);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_GOTTPREL);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GLOB_DAT);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_COPY);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_JUMP_SLOT);
+    default:
+      res = "Unknown";
+    }
+    break;
   case ELF::EM_AARCH64:
     switch (type) {
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_AARCH64_NONE);
@@ -2303,8 +2360,9 @@ ELFObjectFile<ELFT>::end_dynamic_table(bool NULLEnd) const {
 
     if (NULLEnd) {
       Elf_Dyn_iterator Start = begin_dynamic_table();
-      for (; Start != Ret && Start->getTag() != ELF::DT_NULL; ++Start)
-        ;
+      while (Start != Ret && Start->getTag() != ELF::DT_NULL)
+        ++Start;
+
       // Include the DT_NULL.
       if (Start != Ret)
         ++Start;
@@ -2321,10 +2379,9 @@ StringRef ELFObjectFile<ELFT>::getLoadName() const {
     // Find the DT_SONAME entry
     Elf_Dyn_iterator it = begin_dynamic_table();
     Elf_Dyn_iterator ie = end_dynamic_table();
-    for (; it != ie; ++it) {
-      if (it->getTag() == ELF::DT_SONAME)
-        break;
-    }
+    while (it != ie && it->getTag() != ELF::DT_SONAME)
+      ++it;
+
     if (it != ie) {
       if (dot_dynstr_sec == NULL)
         report_fatal_error("Dynamic string table is missing");
@@ -2341,10 +2398,8 @@ library_iterator ELFObjectFile<ELFT>::begin_libraries_needed() const {
   // Find the first DT_NEEDED entry
   Elf_Dyn_iterator i = begin_dynamic_table();
   Elf_Dyn_iterator e = end_dynamic_table();
-  for (; i != e; ++i) {
-    if (i->getTag() == ELF::DT_NEEDED)
-      break;
-  }
+  while (i != e && i->getTag() != ELF::DT_NEEDED)
+    ++i;
 
   DataRefImpl DRI;
   DRI.p = reinterpret_cast<uintptr_t>(i.get());
@@ -2359,11 +2414,10 @@ error_code ELFObjectFile<ELFT>::getLibraryNext(DataRefImpl Data,
                                         reinterpret_cast<const char *>(Data.p));
   Elf_Dyn_iterator e = end_dynamic_table();
 
-  // Skip the current dynamic table entry.
-  ++i;
-
-  // Find the next DT_NEEDED entry.
-  for (; i != e && i->getTag() != ELF::DT_NEEDED; ++i);
+  // Skip the current dynamic table entry and find the next DT_NEEDED entry.
+  do
+    ++i;
+  while (i != e && i->getTag() != ELF::DT_NEEDED);
 
   DataRefImpl DRI;
   DRI.p = reinterpret_cast<uintptr_t>(i.get());
@@ -2702,6 +2756,21 @@ static inline error_code GetELFSymbolVersion(const ObjectFile *Obj,
     return ELFObj->getSymbolVersion(Sym, Version, IsDefault);
 
   llvm_unreachable("Object passed to GetELFSymbolVersion() is not ELF");
+}
+
+/// This function returns the hash value for a symbol in the .dynsym section
+/// Name of the API remains consistent as specified in the libelf
+/// REF : http://www.sco.com/developers/gabi/latest/ch5.dynamic.html#hash
+static inline unsigned elf_hash(StringRef &symbolName) {
+  unsigned h = 0, g;
+  for (unsigned i = 0, j = symbolName.size(); i < j; i++) {
+    h = (h << 4) + symbolName[i];
+    g = h & 0xf0000000L;
+    if (g != 0)
+      h ^= g >> 24;
+    h &= ~g;
+  }
+  return h;
 }
 
 }

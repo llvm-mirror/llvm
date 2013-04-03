@@ -60,6 +60,11 @@ endif
 
 ifeq ($(shell test -f $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/Makefile && echo OK), OK)
 LIT_ALL_TESTSUITES += $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/test
+
+# Force creation of Clang Tools' lit.site.cfg.
+clang-tools-site-cfg: FORCE
+	$(MAKE) -C $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/test lit.site.cfg
+extra-site-cfgs:: clang-tools-site-cfg
 endif
 endif
 endif
@@ -75,8 +80,9 @@ ULIMIT=ulimit -t 600 ; ulimit -d 512000 ; ulimit -v 512000 ;
 else # !AuroraUX
 # Newer versions of python try to allocate an insane amount of address space for
 # its thread-local storage, don't set a limit here.
+# When -v is not used, then -s has to be used to limit the stack size.
 # FIXME: Those limits should be enforced by lit instead of globally.
-ULIMIT=ulimit -t 600 ; ulimit -d 512000 ; ulimit -m 512000 ;
+ULIMIT=ulimit -t 600 ; ulimit -d 512000 ; ulimit -m 512000 ; ulimit -s 8192 ;
 endif # AuroraUX
 endif # SunOS
 

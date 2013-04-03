@@ -895,7 +895,7 @@ void Cost::RatePrimaryRegister(const SCEV *Reg,
   }
   if (Regs.insert(Reg)) {
     RateRegister(Reg, Regs, L, SE, DT);
-    if (isLoser())
+    if (LoserRegs && isLoser())
       LoserRegs->insert(Reg);
   }
 }
@@ -1895,15 +1895,13 @@ ICmpInst *LSRInstance::OptimizeMax(ICmpInst *Cond, IVStrideUse* &CondUse) {
   if (ICmpInst::isTrueWhenEqual(Pred)) {
     // Look for n+1, and grab n.
     if (AddOperator *BO = dyn_cast<AddOperator>(Sel->getOperand(1)))
-      if (isa<ConstantInt>(BO->getOperand(1)) &&
-          cast<ConstantInt>(BO->getOperand(1))->isOne() &&
-          SE.getSCEV(BO->getOperand(0)) == MaxRHS)
-        NewRHS = BO->getOperand(0);
+      if (ConstantInt *BO1 = dyn_cast<ConstantInt>(BO->getOperand(1)))
+         if (BO1->isOne() && SE.getSCEV(BO->getOperand(0)) == MaxRHS)
+           NewRHS = BO->getOperand(0);
     if (AddOperator *BO = dyn_cast<AddOperator>(Sel->getOperand(2)))
-      if (isa<ConstantInt>(BO->getOperand(1)) &&
-          cast<ConstantInt>(BO->getOperand(1))->isOne() &&
-          SE.getSCEV(BO->getOperand(0)) == MaxRHS)
-        NewRHS = BO->getOperand(0);
+      if (ConstantInt *BO1 = dyn_cast<ConstantInt>(BO->getOperand(1)))
+        if (BO1->isOne() && SE.getSCEV(BO->getOperand(0)) == MaxRHS)
+          NewRHS = BO->getOperand(0);
     if (!NewRHS)
       return Cond;
   } else if (SE.getSCEV(Sel->getOperand(1)) == MaxRHS)
@@ -2716,6 +2714,7 @@ void LSRInstance::GenerateIVChain(const IVChain &Chain, SCEVExpander &Rewriter,
   // by LSR.
   const IVInc &Head = Chain.Incs[0];
   User::op_iterator IVOpEnd = Head.UserInst->op_end();
+  // findIVOperand returns IVOpEnd if it can no longer find a valid IV user.
   User::op_iterator IVOpIter = findIVOperand(Head.UserInst->op_begin(),
                                              IVOpEnd, L, SE);
   Value *IVSrc = 0;

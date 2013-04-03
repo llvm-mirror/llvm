@@ -224,16 +224,7 @@ Below is an example of legal RUN lines in a ``.ll`` file:
     ; RUN: diff %t1 %t2
 
 As with a Unix shell, the RUN lines permit pipelines and I/O
-redirection to be used. However, the usage is slightly different than
-for Bash. In general, it's useful to read the code of other tests to figure out
-what you can use in yours. The major differences are:
-
--  You can't do ``2>&1``. That will cause :program:`lit` to write to a file
-   named ``&1``. Usually this is done to get stderr to go through a pipe. You
-   can do that with ``|&`` so replace this idiom:
-   ``... 2>&1 | FileCheck`` with ``... |& FileCheck``
--  You can only redirect to a file, not to another descriptor and not
-   from a here document.
+redirection to be used.
 
 There are some quoting rules that you must pay attention to when writing
 your RUN lines. In general nothing needs to be quoted. :program:`lit` won't
@@ -243,7 +234,7 @@ everything enclosed as one value.
 
 In general, you should strive to keep your RUN lines as simple as possible,
 using them only to run tools that generate textual output you can then examine.
-The recommended way to examine output to figure out if the test passes it using
+The recommended way to examine output to figure out if the test passes is using
 the :doc:`FileCheck tool <CommandGuide/FileCheck>`. *[The usage of grep in RUN
 lines is deprecated - please do not send or commit patches that use it.]*
 

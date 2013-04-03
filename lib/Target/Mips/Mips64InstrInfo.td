@@ -66,6 +66,14 @@ let usesCustomInserter = 1, Predicates = [HasStdEnc],
   defm ATOMIC_CMP_SWAP_I64  : AtomicCmpSwap64<atomic_cmp_swap_64>;
 }
 
+/// Pseudo instructions for loading, storing and copying accumulator registers.
+let isPseudo = 1 in {
+  defm LOAD_AC128  : LoadM<"load_ac128", ACRegs128>;
+  defm STORE_AC128 : StoreM<"store_ac128", ACRegs128>;
+}
+
+def COPY_AC128 : PseudoSE<(outs ACRegs128:$dst), (ins ACRegs128:$src), []>;
+
 //===----------------------------------------------------------------------===//
 // Instruction definition
 //===----------------------------------------------------------------------===//
@@ -179,10 +187,16 @@ def DMULT  : Mult<"dmult", IIImul, CPU64RegsOpnd, [HI64, LO64]>,
              MULT_FM<0, 0x1c>;
 def DMULTu : Mult<"dmultu", IIImul, CPU64RegsOpnd, [HI64, LO64]>,
              MULT_FM<0, 0x1d>;
-def DSDIV  : Div<MipsDivRem, "ddiv", IIIdiv, CPU64RegsOpnd, [HI64, LO64]>,
-             MULT_FM<0, 0x1e>;
-def DUDIV  : Div<MipsDivRemU, "ddivu", IIIdiv, CPU64RegsOpnd, [HI64, LO64]>,
-             MULT_FM<0, 0x1f>;
+def PseudoDMULT  : MultDivPseudo<DMULT, ACRegs128, CPU64RegsOpnd, MipsMult,
+                                 IIImul>;
+def PseudoDMULTu : MultDivPseudo<DMULTu, ACRegs128, CPU64RegsOpnd, MipsMultu,
+                                 IIImul>;
+def DSDIV : Div<"ddiv", IIIdiv, CPU64RegsOpnd, [HI64, LO64]>, MULT_FM<0, 0x1e>;
+def DUDIV : Div<"ddivu", IIIdiv, CPU64RegsOpnd, [HI64, LO64]>, MULT_FM<0, 0x1f>;
+def PseudoDSDIV : MultDivPseudo<DSDIV, ACRegs128, CPU64RegsOpnd, MipsDivRem,
+                                IIIdiv, 0>;
+def PseudoDUDIV : MultDivPseudo<DUDIV, ACRegs128, CPU64RegsOpnd, MipsDivRemU,
+                                IIIdiv, 0>;
 
 def MTHI64 : MoveToLOHI<"mthi", CPU64Regs, [HI64]>, MTLO_FM<0x11>;
 def MTLO64 : MoveToLOHI<"mtlo", CPU64Regs, [LO64]>, MTLO_FM<0x13>;
@@ -306,6 +320,10 @@ def : MipsPat<(i64 (sext_inreg CPU64Regs:$src, i32)),
 // bswap MipsPattern
 def : MipsPat<(bswap CPU64Regs:$rt), (DSHD (DSBH CPU64Regs:$rt))>;
 
+// mflo/hi patterns.
+def : MipsPat<(i64 (ExtractLOHI ACRegs128:$ac, imm:$lohi_idx)),
+              (EXTRACT_SUBREG ACRegs128:$ac, imm:$lohi_idx)>;
+
 //===----------------------------------------------------------------------===//
 // Instruction aliases
 //===----------------------------------------------------------------------===//
@@ -332,13 +350,19 @@ def : InstAlias<"not $rt, $rs",
 def : InstAlias<"j $rs", (JR64 CPU64Regs:$rs), 0>, Requires<[HasMips64]>;
 def : InstAlias<"jalr $rs", (JALR64 RA_64, CPU64Regs:$rs)>,
       Requires<[HasMips64]>;
+def : InstAlias<"jal $rs", (JALR64 RA_64, CPU64Regs:$rs), 0>,
+                 Requires<[HasMips64]>;
+def : InstAlias<"jal $rd,$rs", (JALR64 CPU64Regs:$rd, CPU64Regs:$rs), 0>,
+                 Requires<[HasMips64]>;
 def : InstAlias<"daddu $rs, $rt, $imm",
                 (DADDiu CPU64RegsOpnd:$rs, CPU64RegsOpnd:$rt, simm16_64:$imm),
                 1>;
 def : InstAlias<"dadd $rs, $rt, $imm",
                 (DADDi CPU64RegsOpnd:$rs, CPU64RegsOpnd:$rt, simm16_64:$imm),
                 1>;
-
+def : InstAlias<"or $rs, $rt, $imm",
+                (ORi64 CPU64RegsOpnd:$rs, CPU64RegsOpnd:$rt, uimm16_64:$imm),
+                1>, Requires<[HasMips64]>;
 /// Move between CPU and coprocessor registers
 
 let DecoderNamespace = "Mips64" in {

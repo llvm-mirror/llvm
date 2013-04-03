@@ -33,6 +33,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
@@ -211,6 +212,9 @@ static bool DoesRetainableObjPtrEscape(const User *Ptr) {
         // These special functions make copies of their pointer arguments.
         return true;
       }
+      case IC_IntrinsicUser:
+        // Use by the use intrinsic is not an escape.
+        continue;
       case IC_User:
       case IC_None:
         // Use by an instruction which copies the value is an escape if the
@@ -387,10 +391,6 @@ namespace {
     /// KnownSafe is true when either of these conditions is satisfied.
     bool KnownSafe;
 
-    /// True if the Calls are objc_retainBlock calls (as opposed to objc_retain
-    /// calls).
-    bool IsRetainBlock;
-
     /// True of the objc_release calls are all marked with the "tail" keyword.
     bool IsTailCallRelease;
 
@@ -407,9 +407,7 @@ namespace {
     SmallPtrSet<Instruction *, 2> ReverseInsertPts;
 
     RRInfo() :
-      KnownSafe(false), IsRetainBlock(false),
-      IsTailCallRelease(false),
-      ReleaseMetadata(0) {}
+      KnownSafe(false), IsTailCallRelease(false), ReleaseMetadata(0) {}
 
     void clear();
   };
@@ -417,7 +415,6 @@ namespace {
 
 void RRInfo::clear() {
   KnownSafe = false;
-  IsRetainBlock = false;
   IsTailCallRelease = false;
   ReleaseMetadata = 0;
   Calls.clear();
@@ -451,11 +448,11 @@ namespace {
       KnownPositiveRefCount = true;
     }
 
-    void ClearRefCount() {
+    void ClearKnownPositiveRefCount() {
       KnownPositiveRefCount = false;
     }
 
-    bool IsKnownIncremented() const {
+    bool HasKnownPositiveRefCount() const {
       return KnownPositiveRefCount;
     }
 
@@ -485,10 +482,6 @@ void
 PtrState::Merge(const PtrState &Other, bool TopDown) {
   Seq = MergeSeqs(Seq, Other.Seq, TopDown);
   KnownPositiveRefCount = KnownPositiveRefCount && Other.KnownPositiveRefCount;
-
-  // We can't merge a plain objc_retain with an objc_retainBlock.
-  if (RRI.IsRetainBlock != Other.RRI.IsRetainBlock)
-    Seq = S_None;
 
   // If we're not in a sequence (anymore), drop all associated state.
   if (Seq == S_None) {
@@ -698,6 +691,228 @@ void BBState::MergeSucc(const BBState &Other) {
       MI->second.Merge(PtrState(), /*TopDown=*/false);
 }
 
+// Only enable ARC Annotations if we are building a debug version of
+// libObjCARCOpts.
+#ifndef NDEBUG
+#define ARC_ANNOTATIONS
+#endif
+
+// Define some macros along the lines of DEBUG and some helper functions to make
+// it cleaner to create annotations in the source code and to no-op when not
+// building in debug mode.
+#ifdef ARC_ANNOTATIONS
+
+#include "llvm/Support/CommandLine.h"
+
+/// Enable/disable ARC sequence annotations.
+static cl::opt<bool>
+EnableARCAnnotations("enable-objc-arc-annotations", cl::init(false));
+
+/// This function appends a unique ARCAnnotationProvenanceSourceMDKind id to an
+/// instruction so that we can track backwards when post processing via the llvm
+/// arc annotation processor tool. If the function is an
+static MDString *AppendMDNodeToSourcePtr(unsigned NodeId,
+                                         Value *Ptr) {
+  MDString *Hash = 0;
+
+  // If pointer is a result of an instruction and it does not have a source
+  // MDNode it, attach a new MDNode onto it. If pointer is a result of
+  // an instruction and does have a source MDNode attached to it, return a
+  // reference to said Node. Otherwise just return 0.
+  if (Instruction *Inst = dyn_cast<Instruction>(Ptr)) {
+    MDNode *Node;
+    if (!(Node = Inst->getMetadata(NodeId))) {
+      // We do not have any node. Generate and attatch the hash MDString to the
+      // instruction.
+
+      // We just use an MDString to ensure that this metadata gets written out
+      // of line at the module level and to provide a very simple format
+      // encoding the information herein. Both of these makes it simpler to
+      // parse the annotations by a simple external program.
+      std::string Str;
+      raw_string_ostream os(Str);
+      os << "(" << Inst->getParent()->getParent()->getName() << ",%"
+         << Inst->getName() << ")";
+
+      Hash = MDString::get(Inst->getContext(), os.str());
+      Inst->setMetadata(NodeId, MDNode::get(Inst->getContext(),Hash));
+    } else {
+      // We have a node. Grab its hash and return it.
+      assert(Node->getNumOperands() == 1 &&
+        "An ARCAnnotationProvenanceSourceMDKind can only have 1 operand.");
+      Hash = cast<MDString>(Node->getOperand(0));
+    }
+  } else if (Argument *Arg = dyn_cast<Argument>(Ptr)) {
+    std::string str;
+    raw_string_ostream os(str);
+    os << "(" << Arg->getParent()->getName() << ",%" << Arg->getName()
+       << ")";
+    Hash = MDString::get(Arg->getContext(), os.str());
+  }
+
+  return Hash;
+}
+
+static std::string SequenceToString(Sequence A) {
+  std::string str;
+  raw_string_ostream os(str);
+  os << A;
+  return os.str();
+}
+
+/// Helper function to change a Sequence into a String object using our overload
+/// for raw_ostream so we only have printing code in one location.
+static MDString *SequenceToMDString(LLVMContext &Context,
+                                    Sequence A) {
+  return MDString::get(Context, SequenceToString(A));
+}
+
+/// A simple function to generate a MDNode which describes the change in state
+/// for Value *Ptr caused by Instruction *Inst.
+static void AppendMDNodeToInstForPtr(unsigned NodeId,
+                                     Instruction *Inst,
+                                     Value *Ptr,
+                                     MDString *PtrSourceMDNodeID,
+                                     Sequence OldSeq,
+                                     Sequence NewSeq) {
+  MDNode *Node = 0;
+  Value *tmp[3] = {PtrSourceMDNodeID,
+                   SequenceToMDString(Inst->getContext(),
+                                      OldSeq),
+                   SequenceToMDString(Inst->getContext(),
+                                      NewSeq)};
+  Node = MDNode::get(Inst->getContext(),
+                     ArrayRef<Value*>(tmp, 3));
+
+  Inst->setMetadata(NodeId, Node);
+}
+
+/// Add to the beginning of the basic block llvm.ptr.annotations which show the
+/// state of a pointer at the entrance to a basic block.
+static void GenerateARCBBEntranceAnnotation(const char *Name, BasicBlock *BB,
+                                            Value *Ptr, Sequence Seq) {
+  Module *M = BB->getParent()->getParent();
+  LLVMContext &C = M->getContext();
+  Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
+  Type *I8XX = PointerType::getUnqual(I8X);
+  Type *Params[] = {I8XX, I8XX};
+  FunctionType *FTy = FunctionType::get(Type::getVoidTy(C),
+                                        ArrayRef<Type*>(Params, 2),
+                                        /*isVarArg=*/false);
+  Constant *Callee = M->getOrInsertFunction(Name, FTy);
+
+  IRBuilder<> Builder(BB, BB->getFirstInsertionPt());
+
+  Value *PtrName;
+  StringRef Tmp = Ptr->getName();
+  if (0 == (PtrName = M->getGlobalVariable(Tmp, true))) {
+    Value *ActualPtrName = Builder.CreateGlobalStringPtr(Tmp,
+                                                         Tmp + "_STR");
+    PtrName = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
+                                 cast<Constant>(ActualPtrName), Tmp);
+  }
+
+  Value *S;
+  std::string SeqStr = SequenceToString(Seq);
+  if (0 == (S = M->getGlobalVariable(SeqStr, true))) {
+    Value *ActualPtrName = Builder.CreateGlobalStringPtr(SeqStr,
+                                                         SeqStr + "_STR");
+    S = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
+                           cast<Constant>(ActualPtrName), SeqStr);
+  }
+
+  Builder.CreateCall2(Callee, PtrName, S);
+}
+
+/// Add to the end of the basic block llvm.ptr.annotations which show the state
+/// of the pointer at the bottom of the basic block.
+static void GenerateARCBBTerminatorAnnotation(const char *Name, BasicBlock *BB,
+                                              Value *Ptr, Sequence Seq) {
+  Module *M = BB->getParent()->getParent();
+  LLVMContext &C = M->getContext();
+  Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
+  Type *I8XX = PointerType::getUnqual(I8X);
+  Type *Params[] = {I8XX, I8XX};
+  FunctionType *FTy = FunctionType::get(Type::getVoidTy(C),
+                                        ArrayRef<Type*>(Params, 2),
+                                        /*isVarArg=*/false);
+  Constant *Callee = M->getOrInsertFunction(Name, FTy);
+
+  IRBuilder<> Builder(BB, llvm::prior(BB->end()));
+
+  Value *PtrName;
+  StringRef Tmp = Ptr->getName();
+  if (0 == (PtrName = M->getGlobalVariable(Tmp, true))) {
+    Value *ActualPtrName = Builder.CreateGlobalStringPtr(Tmp,
+                                                         Tmp + "_STR");
+    PtrName = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
+                                 cast<Constant>(ActualPtrName), Tmp);
+  }
+
+  Value *S;
+  std::string SeqStr = SequenceToString(Seq);
+  if (0 == (S = M->getGlobalVariable(SeqStr, true))) {
+    Value *ActualPtrName = Builder.CreateGlobalStringPtr(SeqStr,
+                                                         SeqStr + "_STR");
+    S = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
+                           cast<Constant>(ActualPtrName), SeqStr);
+  }
+  Builder.CreateCall2(Callee, PtrName, S);
+}
+
+/// Adds a source annotation to pointer and a state change annotation to Inst
+/// referencing the source annotation and the old/new state of pointer.
+static void GenerateARCAnnotation(unsigned InstMDId,
+                                  unsigned PtrMDId,
+                                  Instruction *Inst,
+                                  Value *Ptr,
+                                  Sequence OldSeq,
+                                  Sequence NewSeq) {
+  if (EnableARCAnnotations) {
+    // First generate the source annotation on our pointer. This will return an
+    // MDString* if Ptr actually comes from an instruction implying we can put
+    // in a source annotation. If AppendMDNodeToSourcePtr returns 0 (i.e. NULL),
+    // then we know that our pointer is from an Argument so we put a reference
+    // to the argument number.
+    //
+    // The point of this is to make it easy for the
+    // llvm-arc-annotation-processor tool to cross reference where the source
+    // pointer is in the LLVM IR since the LLVM IR parser does not submit such
+    // information via debug info for backends to use (since why would anyone
+    // need such a thing from LLVM IR besides in non standard cases
+    // [i.e. this]).
+    MDString *SourcePtrMDNode =
+      AppendMDNodeToSourcePtr(PtrMDId, Ptr);
+    AppendMDNodeToInstForPtr(InstMDId, Inst, Ptr, SourcePtrMDNode, OldSeq,
+                             NewSeq);
+  }
+}
+
+// The actual interface for accessing the above functionality is defined via
+// some simple macros which are defined below. We do this so that the user does
+// not need to pass in what metadata id is needed resulting in cleaner code and
+// additionally since it provides an easy way to conditionally no-op all
+// annotation support in a non-debug build.
+
+/// Use this macro to annotate a sequence state change when processing
+/// instructions bottom up,
+#define ANNOTATE_BOTTOMUP(inst, ptr, old, new)                          \
+  GenerateARCAnnotation(ARCAnnotationBottomUpMDKind,                    \
+                        ARCAnnotationProvenanceSourceMDKind, (inst),    \
+                        const_cast<Value*>(ptr), (old), (new))
+/// Use this macro to annotate a sequence state change when processing
+/// instructions top down.
+#define ANNOTATE_TOPDOWN(inst, ptr, old, new)                           \
+  GenerateARCAnnotation(ARCAnnotationTopDownMDKind,                     \
+                        ARCAnnotationProvenanceSourceMDKind, (inst),    \
+                        const_cast<Value*>(ptr), (old), (new))
+
+#else // !ARC_ANNOTATION
+// If annotations are off, noop.
+#define ANNOTATE_BOTTOMUP(inst, ptr, old, new)
+#define ANNOTATE_TOPDOWN(inst, ptr, old, new)
+#endif // !ARC_ANNOTATION
+
 namespace {
   /// \brief The main ARC optimization pass.
   class ObjCARCOpt : public FunctionPass {
@@ -738,6 +953,15 @@ namespace {
     /// The Metadata Kind for clang.arc.no_objc_arc_exceptions metadata.
     unsigned NoObjCARCExceptionsMDKind;
 
+#ifdef ARC_ANNOTATIONS
+    /// The Metadata Kind for llvm.arc.annotation.bottomup metadata.
+    unsigned ARCAnnotationBottomUpMDKind;
+    /// The Metadata Kind for llvm.arc.annotation.topdown metadata.
+    unsigned ARCAnnotationTopDownMDKind;
+    /// The Metadata Kind for llvm.arc.annotation.provenancesource metadata.
+    unsigned ARCAnnotationProvenanceSourceMDKind;
+#endif // ARC_ANNOATIONS
+
     Constant *getRetainRVCallee(Module *M);
     Constant *getAutoreleaseRVCallee(Module *M);
     Constant *getReleaseCallee(Module *M);
@@ -751,6 +975,8 @@ namespace {
     bool OptimizeRetainRVCall(Function &F, Instruction *RetainRV);
     void OptimizeAutoreleaseRVCall(Function &F, Instruction *AutoreleaseRV,
                                    InstructionClass &Class);
+    bool OptimizeRetainBlockCall(Function &F, Instruction *RetainBlock,
+                                 InstructionClass &Class);
     void OptimizeIndividualCalls(Function &F);
 
     void CheckForCFGHazards(const BasicBlock *BB,
@@ -958,7 +1184,7 @@ ObjCARCOpt::OptimizeRetainCall(Function &F, Instruction *Retain) {
   // Check that the call is next to the retain.
   BasicBlock::const_iterator I = Call;
   ++I;
-  while (isNoopInstruction(I)) ++I;
+  while (IsNoopInstruction(I)) ++I;
   if (&*I != Retain)
     return;
 
@@ -990,14 +1216,14 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
     if (Call->getParent() == RetainRV->getParent()) {
       BasicBlock::const_iterator I = Call;
       ++I;
-      while (isNoopInstruction(I)) ++I;
+      while (IsNoopInstruction(I)) ++I;
       if (&*I == RetainRV)
         return false;
     } else if (const InvokeInst *II = dyn_cast<InvokeInst>(Call)) {
       BasicBlock *RetainRVParent = RetainRV->getParent();
       if (II->getNormalDest() == RetainRVParent) {
         BasicBlock::const_iterator I = RetainRVParent->begin();
-        while (isNoopInstruction(I)) ++I;
+        while (IsNoopInstruction(I)) ++I;
         if (&*I == RetainRV)
           return false;
       }
@@ -1008,7 +1234,7 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
   // pointer. In this case, we can delete the pair.
   BasicBlock::iterator I = RetainRV, Begin = RetainRV->getParent()->begin();
   if (I != Begin) {
-    do --I; while (I != Begin && isNoopInstruction(I));
+    do --I; while (I != Begin && IsNoopInstruction(I));
     if (GetBasicInstructionClass(I) == IC_AutoreleaseRV &&
         GetObjCArg(I) == Arg) {
       Changed = true;
@@ -1084,6 +1310,35 @@ ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F, Instruction *AutoreleaseRV,
 
 }
 
+// \brief Attempt to strength reduce objc_retainBlock calls to objc_retain
+// calls.
+//
+// Specifically: If an objc_retainBlock call has the copy_on_escape metadata and
+// does not escape (following the rules of block escaping), strength reduce the
+// objc_retainBlock to an objc_retain.
+//
+// TODO: If an objc_retainBlock call is dominated period by a previous
+// objc_retainBlock call, strength reduce the objc_retainBlock to an
+// objc_retain.
+bool
+ObjCARCOpt::OptimizeRetainBlockCall(Function &F, Instruction *Inst,
+                                    InstructionClass &Class) {
+  assert(GetBasicInstructionClass(Inst) == Class);
+  assert(IC_RetainBlock == Class);
+
+  // If we can not optimize Inst, return false.
+  if (!IsRetainBlockOptimizable(Inst))
+    return false;
+
+  CallInst *RetainBlock = cast<CallInst>(Inst);
+  RetainBlock->setCalledFunction(getRetainCallee(F.getParent()));
+  // Remove copy_on_escape metadata.
+  RetainBlock->setMetadata(CopyOnEscapeMDKind, 0);
+  Class = IC_Retain;
+
+  return true;
+}
+
 /// Visit each call, one at a time, and make simplifications without doing any
 /// additional analysis.
 void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
@@ -1125,7 +1380,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     case IC_InitWeak:
     case IC_DestroyWeak: {
       CallInst *CI = cast<CallInst>(Inst);
-      if (isNullOrUndef(CI->getArgOperand(0))) {
+      if (IsNullOrUndef(CI->getArgOperand(0))) {
         Changed = true;
         Type *Ty = CI->getArgOperand(0)->getType();
         new StoreInst(UndefValue::get(cast<PointerType>(Ty)->getElementType()),
@@ -1146,8 +1401,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     case IC_CopyWeak:
     case IC_MoveWeak: {
       CallInst *CI = cast<CallInst>(Inst);
-      if (isNullOrUndef(CI->getArgOperand(0)) ||
-          isNullOrUndef(CI->getArgOperand(1))) {
+      if (IsNullOrUndef(CI->getArgOperand(0)) ||
+          IsNullOrUndef(CI->getArgOperand(1))) {
         Changed = true;
         Type *Ty = CI->getArgOperand(0)->getType();
         new StoreInst(UndefValue::get(cast<PointerType>(Ty)->getElementType()),
@@ -1167,6 +1422,12 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
       }
       break;
     }
+    case IC_RetainBlock:
+      // If we strength reduce an objc_retainBlock to amn objc_retain, continue
+      // onto the objc_retain peephole optimizations. Otherwise break.
+      if (!OptimizeRetainBlockCall(F, Inst, Class))
+        break;
+      // FALLTHROUGH
     case IC_Retain:
       OptimizeRetainCall(F, Inst);
       break;
@@ -1245,7 +1506,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     const Value *Arg = GetObjCArg(Inst);
 
     // ARC calls with null are no-ops. Delete them.
-    if (isNullOrUndef(Arg)) {
+    if (IsNullOrUndef(Arg)) {
       Changed = true;
       ++NumNoops;
       DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: ARC calls with "
@@ -1280,7 +1541,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
       for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
         Value *Incoming =
           StripPointerCastsAndObjCCalls(PN->getIncomingValue(i));
-        if (isNullOrUndef(Incoming))
+        if (IsNullOrUndef(Incoming))
           HasNull = true;
         else if (cast<TerminatorInst>(PN->getIncomingBlock(i)->back())
                    .getNumSuccessors() != 1) {
@@ -1334,7 +1595,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
           for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
             Value *Incoming =
               StripPointerCastsAndObjCCalls(PN->getIncomingValue(i));
-            if (!isNullOrUndef(Incoming)) {
+            if (!IsNullOrUndef(Incoming)) {
               CallInst *Clone = cast<CallInst>(CInst->clone());
               Value *Op = PN->getIncomingValue(i);
               Instruction *InsertPos = &PN->getIncomingBlock(i)->back();
@@ -1502,21 +1763,21 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
     }
 
     MDNode *ReleaseMetadata = Inst->getMetadata(ImpreciseReleaseMDKind);
-    S.ResetSequenceProgress(ReleaseMetadata ? S_MovableRelease : S_Release);
+    Sequence NewSeq = ReleaseMetadata ? S_MovableRelease : S_Release;
+    ANNOTATE_BOTTOMUP(Inst, Arg, S.GetSeq(), NewSeq);
+    S.ResetSequenceProgress(NewSeq);
     S.RRI.ReleaseMetadata = ReleaseMetadata;
-    S.RRI.KnownSafe = S.IsKnownIncremented();
+    S.RRI.KnownSafe = S.HasKnownPositiveRefCount();
     S.RRI.IsTailCallRelease = cast<CallInst>(Inst)->isTailCall();
     S.RRI.Calls.insert(Inst);
-
     S.SetKnownPositiveRefCount();
     break;
   }
   case IC_RetainBlock:
-    // An objc_retainBlock call with just a use may need to be kept,
-    // because it may be copying a block from the stack to the heap.
-    if (!IsRetainBlockOptimizable(Inst))
-      break;
-    // FALLTHROUGH
+    // In OptimizeIndividualCalls, we have strength reduced all optimizable
+    // objc_retainBlocks to objc_retains. Thus at this point any
+    // objc_retainBlocks that we see are not optimizable.
+    break;
   case IC_Retain:
   case IC_RetainRV: {
     Arg = GetObjCArg(Inst);
@@ -1524,7 +1785,8 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
     PtrState &S = MyStates.getPtrBottomUpState(Arg);
     S.SetKnownPositiveRefCount();
 
-    switch (S.GetSeq()) {
+    Sequence OldSeq = S.GetSeq();
+    switch (OldSeq) {
     case S_Stop:
     case S_Release:
     case S_MovableRelease:
@@ -1534,10 +1796,8 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
     case S_CanRelease:
       // Don't do retain+release tracking for IC_RetainRV, because it's
       // better to let it remain as the first instruction after a call.
-      if (Class != IC_RetainRV) {
-        S.RRI.IsRetainBlock = Class == IC_RetainBlock;
+      if (Class != IC_RetainRV)
         Retains[Inst] = S.RRI;
-      }
       S.ClearSequenceProgress();
       break;
     case S_None:
@@ -1545,6 +1805,7 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
     case S_Retain:
       llvm_unreachable("bottom-up pointer in retain state!");
     }
+    ANNOTATE_BOTTOMUP(Inst, Arg, OldSeq, S.GetSeq());
     return NestingDetected;
   }
   case IC_AutoreleasepoolPop:
@@ -1571,10 +1832,11 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
 
     // Check for possible releases.
     if (CanAlterRefCount(Inst, Ptr, PA, Class)) {
-      S.ClearRefCount();
+      S.ClearKnownPositiveRefCount();
       switch (Seq) {
       case S_Use:
         S.SetSeq(S_CanRelease);
+        ANNOTATE_BOTTOMUP(Inst, Ptr, Seq, S.GetSeq());
         continue;
       case S_CanRelease:
       case S_Release:
@@ -1601,10 +1863,11 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
         else
           S.RRI.ReverseInsertPts.insert(llvm::next(BasicBlock::iterator(Inst)));
         S.SetSeq(S_Use);
-      } else if (Seq == S_Release &&
-                 (Class == IC_User || Class == IC_CallOrUser)) {
+        ANNOTATE_BOTTOMUP(Inst, Ptr, Seq, S_Use);
+      } else if (Seq == S_Release && IsUser(Class)) {
         // Non-movable releases depend on any possible objc pointer use.
         S.SetSeq(S_Stop);
+        ANNOTATE_BOTTOMUP(Inst, Ptr, S_Release, S_Stop);
         assert(S.RRI.ReverseInsertPts.empty());
         // As above; handle invoke specially.
         if (isa<InvokeInst>(Inst))
@@ -1614,8 +1877,10 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
       }
       break;
     case S_Stop:
-      if (CanUse(Inst, Ptr, PA, Class))
+      if (CanUse(Inst, Ptr, PA, Class)) {
         S.SetSeq(S_Use);
+        ANNOTATE_BOTTOMUP(Inst, Ptr, Seq, S_Use);
+      }
       break;
     case S_CanRelease:
     case S_Use:
@@ -1654,6 +1919,21 @@ ObjCARCOpt::VisitBottomUp(BasicBlock *BB,
     }
   }
 
+#ifdef ARC_ANNOTATIONS
+  if (EnableARCAnnotations) {
+    // If ARC Annotations are enabled, output the current state of pointers at the
+    // bottom of the basic block.
+    for(BBState::ptr_const_iterator I = MyStates.bottom_up_ptr_begin(),
+          E = MyStates.bottom_up_ptr_end(); I != E; ++I) {
+      Value *Ptr = const_cast<Value*>(I->first);
+      Sequence Seq = I->second.GetSeq();
+      GenerateARCBBTerminatorAnnotation("llvm.arc.annotation.bottomup.bbend",
+                                        BB, Ptr, Seq);
+    }
+  }
+#endif
+
+
   // Visit all the instructions, bottom-up.
   for (BasicBlock::iterator I = BB->end(), E = BB->begin(); I != E; --I) {
     Instruction *Inst = llvm::prior(I);
@@ -1677,6 +1957,20 @@ ObjCARCOpt::VisitBottomUp(BasicBlock *BB,
       NestingDetected |= VisitInstructionBottomUp(II, BB, Retains, MyStates);
   }
 
+#ifdef ARC_ANNOTATIONS
+  if (EnableARCAnnotations) {
+    // If ARC Annotations are enabled, output the current state of pointers at the
+    // top of the basic block.
+    for(BBState::ptr_const_iterator I = MyStates.bottom_up_ptr_begin(),
+          E = MyStates.bottom_up_ptr_end(); I != E; ++I) {
+      Value *Ptr = const_cast<Value*>(I->first);
+      Sequence Seq = I->second.GetSeq();
+      GenerateARCBBEntranceAnnotation("llvm.arc.annotation.bottomup.bbstart",
+                                      BB, Ptr, Seq);
+    }
+  }
+#endif
+
   return NestingDetected;
 }
 
@@ -1690,11 +1984,10 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
 
   switch (Class) {
   case IC_RetainBlock:
-    // An objc_retainBlock call with just a use may need to be kept,
-    // because it may be copying a block from the stack to the heap.
-    if (!IsRetainBlockOptimizable(Inst))
-      break;
-    // FALLTHROUGH
+    // In OptimizeIndividualCalls, we have strength reduced all optimizable
+    // objc_retainBlocks to objc_retains. Thus at this point any
+    // objc_retainBlocks that we see are not optimizable.
+    break;
   case IC_Retain:
   case IC_RetainRV: {
     Arg = GetObjCArg(Inst);
@@ -1714,9 +2007,9 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
       if (S.GetSeq() == S_Retain)
         NestingDetected = true;
 
+      ANNOTATE_TOPDOWN(Inst, Arg, S.GetSeq(), S_Retain);
       S.ResetSequenceProgress(S_Retain);
-      S.RRI.IsRetainBlock = Class == IC_RetainBlock;
-      S.RRI.KnownSafe = S.IsKnownIncremented();
+      S.RRI.KnownSafe = S.HasKnownPositiveRefCount();
       S.RRI.Calls.insert(Inst);
     }
 
@@ -1730,7 +2023,7 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
     Arg = GetObjCArg(Inst);
 
     PtrState &S = MyStates.getPtrTopDownState(Arg);
-    S.ClearRefCount();
+    S.ClearKnownPositiveRefCount();
 
     switch (S.GetSeq()) {
     case S_Retain:
@@ -1741,6 +2034,7 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
       S.RRI.ReleaseMetadata = Inst->getMetadata(ImpreciseReleaseMDKind);
       S.RRI.IsTailCallRelease = cast<CallInst>(Inst)->isTailCall();
       Releases[Inst] = S.RRI;
+      ANNOTATE_TOPDOWN(Inst, Arg, S.GetSeq(), S_None);
       S.ClearSequenceProgress();
       break;
     case S_None:
@@ -1776,10 +2070,11 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
 
     // Check for possible releases.
     if (CanAlterRefCount(Inst, Ptr, PA, Class)) {
-      S.ClearRefCount();
+      S.ClearKnownPositiveRefCount();
       switch (Seq) {
       case S_Retain:
         S.SetSeq(S_CanRelease);
+        ANNOTATE_TOPDOWN(Inst, Ptr, Seq, S_CanRelease);
         assert(S.RRI.ReverseInsertPts.empty());
         S.RRI.ReverseInsertPts.insert(Inst);
 
@@ -1801,8 +2096,10 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
     // Check for possible direct uses.
     switch (Seq) {
     case S_CanRelease:
-      if (CanUse(Inst, Ptr, PA, Class))
+      if (CanUse(Inst, Ptr, PA, Class)) {
         S.SetSeq(S_Use);
+        ANNOTATE_TOPDOWN(Inst, Ptr, Seq, S_Use);
+      }
       break;
     case S_Retain:
     case S_Use:
@@ -1843,6 +2140,20 @@ ObjCARCOpt::VisitTopDown(BasicBlock *BB,
     }
   }
 
+#ifdef ARC_ANNOTATIONS
+  if (EnableARCAnnotations) {
+    // If ARC Annotations are enabled, output the current state of pointers at the
+    // top of the basic block.
+    for(BBState::ptr_const_iterator I = MyStates.top_down_ptr_begin(),
+          E = MyStates.top_down_ptr_end(); I != E; ++I) {
+      Value *Ptr = const_cast<Value*>(I->first);
+      Sequence Seq = I->second.GetSeq();
+      GenerateARCBBEntranceAnnotation("llvm.arc.annotation.topdown.bbstart",
+                                      BB, Ptr, Seq);
+    }
+  }
+#endif
+
   // Visit all the instructions, top-down.
   for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I) {
     Instruction *Inst = I;
@@ -1851,6 +2162,20 @@ ObjCARCOpt::VisitTopDown(BasicBlock *BB,
 
     NestingDetected |= VisitInstructionTopDown(Inst, Releases, MyStates);
   }
+
+#ifdef ARC_ANNOTATIONS
+  if (EnableARCAnnotations) {
+    // If ARC Annotations are enabled, output the current state of pointers at the
+    // bottom of the basic block.
+    for(BBState::ptr_const_iterator I = MyStates.top_down_ptr_begin(),
+          E = MyStates.top_down_ptr_end(); I != E; ++I) {
+      Value *Ptr = const_cast<Value*>(I->first);
+      Sequence Seq = I->second.GetSeq();
+      GenerateARCBBTerminatorAnnotation("llvm.arc.annotation.topdown.bbend",
+                                        BB, Ptr, Seq);
+    }
+  }
+#endif
 
   CheckForCFGHazards(BB, BBStates, MyStates);
   return NestingDetected;
@@ -1991,15 +2316,9 @@ void ObjCARCOpt::MoveCalls(Value *Arg,
     Value *MyArg = ArgTy == ParamTy ? Arg :
                    new BitCastInst(Arg, ParamTy, "", InsertPt);
     CallInst *Call =
-      CallInst::Create(RetainsToMove.IsRetainBlock ?
-                         getRetainBlockCallee(M) : getRetainCallee(M),
-                       MyArg, "", InsertPt);
+      CallInst::Create(getRetainCallee(M), MyArg, "", InsertPt);
     Call->setDoesNotThrow();
-    if (RetainsToMove.IsRetainBlock)
-      Call->setMetadata(CopyOnEscapeMDKind,
-                        MDNode::get(M->getContext(), ArrayRef<Value *>()));
-    else
-      Call->setTailCall();
+    Call->setTailCall();
 
     DEBUG(dbgs() << "ObjCARCOpt::MoveCalls: Inserting new Release: " << *Call
                  << "\n"
@@ -2075,7 +2394,6 @@ ObjCARCOpt::ConnectTDBUTraversals(DenseMap<const BasicBlock *, BBState>
   unsigned OldCount = 0;
   unsigned NewCount = 0;
   bool FirstRelease = true;
-  bool FirstRetain = true;
   for (;;) {
     for (SmallVectorImpl<Instruction *>::const_iterator
            NI = NewRetains.begin(), NE = NewRetains.end(); NI != NE; ++NI) {
@@ -2155,16 +2473,6 @@ ObjCARCOpt::ConnectTDBUTraversals(DenseMap<const BasicBlock *, BBState>
             BBStates[NewReleaseRetain->getParent()].GetAllPathCount();
           OldDelta += PathCount;
           OldCount += PathCount;
-
-          // Merge the IsRetainBlock values.
-          if (FirstRetain) {
-            RetainsToMove.IsRetainBlock = NewReleaseRetainRRI.IsRetainBlock;
-            FirstRetain = false;
-          } else if (ReleasesToMove.IsRetainBlock !=
-                     NewReleaseRetainRRI.IsRetainBlock)
-            // It's not possible to merge the sequences if one uses
-            // objc_retain and the other uses objc_retainBlock.
-            return false;
 
           // Collect the optimal insertion points.
           if (!KnownSafe)
@@ -2270,6 +2578,12 @@ ObjCARCOpt::PerformCodePlacement(DenseMap<const BasicBlock *, BBState>
                             NewReleases, DeadInsts, RetainsToMove,
                             ReleasesToMove, Arg, KnownSafe,
                             AnyPairsCompletelyEliminated);
+
+#ifdef ARC_ANNOTATIONS
+    // Do not move calls if ARC annotations are requested. If we were to move
+    // calls in this case, we would not be able
+    PerformMoveCalls = PerformMoveCalls && !EnableARCAnnotations;
+#endif // ARC_ANNOTATIONS
 
     if (PerformMoveCalls) {
       // Ok, everything checks out and we're all set. Let's move/delete some
@@ -2392,6 +2706,7 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
         goto clobbered;
       case IC_AutoreleasepoolPush:
       case IC_None:
+      case IC_IntrinsicUser:
       case IC_User:
         // Weak pointers are only modified through the weak entry points
         // (and arbitrary calls, which could call the weak entry points).
@@ -2617,6 +2932,14 @@ bool ObjCARCOpt::doInitialization(Module &M) {
     M.getContext().getMDKindID("clang.arc.copy_on_escape");
   NoObjCARCExceptionsMDKind =
     M.getContext().getMDKindID("clang.arc.no_objc_arc_exceptions");
+#ifdef ARC_ANNOTATIONS
+  ARCAnnotationBottomUpMDKind =
+    M.getContext().getMDKindID("llvm.arc.annotation.bottomup");
+  ARCAnnotationTopDownMDKind =
+    M.getContext().getMDKindID("llvm.arc.annotation.topdown");
+  ARCAnnotationProvenanceSourceMDKind =
+    M.getContext().getMDKindID("llvm.arc.annotation.provenancesource");
+#endif // ARC_ANNOTATIONS
 
   // Intuitively, objc_retain and others are nocapture, however in practice
   // they are not, because they return their argument value. And objc_release

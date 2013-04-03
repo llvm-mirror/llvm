@@ -16,6 +16,7 @@
 #define LLVM_TARGET_POWERPC_PPC32ISELLOWERING_H
 
 #include "PPC.h"
+#include "PPCRegisterInfo.h"
 #include "PPCSubtarget.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
@@ -35,14 +36,18 @@ namespace llvm {
       /// was temporarily in the f64 operand.
       FCFID,
 
+      /// Newer FCFID[US] integer-to-floating-point conversion instructions for
+      /// unsigned integers and single-precision outputs.
+      FCFIDU, FCFIDS, FCFIDUS,
+
       /// FCTI[D,W]Z - The FCTIDZ and FCTIWZ instructions, taking an f32 or f64
       /// operand, producing an f64 value containing the integer representation
       /// of that FP value.
       FCTIDZ, FCTIWZ,
 
-      /// STFIWX - The STFIWX instruction.  The first operand is an input token
-      /// chain, then an f64 value to store, then an address to store it to.
-      STFIWX,
+      /// Newer FCTI[D,W]UZ floating-point-to-integer conversion instructions for
+      /// unsigned integers.
+      FCTIDUZ, FCTIWUZ,
 
       // VMADDFP, VNMSUBFP - The VMADDFP and VNMSUBFP instructions, taking
       // three v4f32 operands and producing a v4f32 result.
@@ -90,17 +95,10 @@ namespace llvm {
       /// code.
       SRL, SRA, SHL,
 
-      /// EXTSW_32 - This is the EXTSW instruction for use with "32-bit"
-      /// registers.
-      EXTSW_32,
-
       /// CALL - A direct function call.
-      /// CALL_NOP_SVR4 is a call with the special  NOP which follows 64-bit
+      /// CALL_NOP is a call with the special NOP which follows 64-bit
       /// SVR4 calls.
-      CALL_Darwin, CALL_SVR4, CALL_NOP_SVR4,
-
-      /// NOP - Special NOP which follows 64-bit SVR4 calls.
-      NOP,
+      CALL, CALL_NOP,
 
       /// CHAIN,FLAG = MTCTR(VAL, CHAIN[, INFLAG]) - Directly corresponds to a
       /// MTCTR instruction.
@@ -108,7 +106,7 @@ namespace llvm {
 
       /// CHAIN,FLAG = BCTRL(CHAIN, INFLAG) - Directly corresponds to a
       /// BCTRL instruction.
-      BCTRL_Darwin, BCTRL_SVR4,
+      BCTRL,
 
       /// Return with a flag operand, matched by 'blr'
       RET_FLAG,
@@ -118,6 +116,12 @@ namespace llvm {
       /// CRREG into the resultant GPR.  Bits corresponding to other CR regs
       /// are undefined.
       MFCR,
+
+      // EH_SJLJ_SETJMP - SjLj exception handling setjmp.
+      EH_SJLJ_SETJMP,
+
+      // EH_SJLJ_LONGJMP - SjLj exception handling longjmp.
+      EH_SJLJ_LONGJMP,
 
       /// RESVEC = VCMP(LHS, RHS, OPC) - Represents one of the altivec VCMP*
       /// instructions.  For lack of better number, we use the opcode number
@@ -138,26 +142,13 @@ namespace llvm {
       /// an optional input flag argument.
       COND_BRANCH,
 
-      // The following 5 instructions are used only as part of the
-      // long double-to-int conversion sequence.
-
-      /// OUTFLAG = MFFS F8RC - This moves the FPSCR (not modelled) into the
-      /// register.
-      MFFS,
-
-      /// OUTFLAG = MTFSB0 INFLAG - This clears a bit in the FPSCR.
-      MTFSB0,
-
-      /// OUTFLAG = MTFSB1 INFLAG - This sets a bit in the FPSCR.
-      MTFSB1,
-
-      /// F8RC, OUTFLAG = FADDRTZ F8RC, F8RC, INFLAG - This is an FADD done with
-      /// rounding towards zero.  It has flags added so it won't move past the
-      /// FPSCR-setting instructions.
+      /// F8RC = FADDRTZ F8RC, F8RC - This is an FADD done with rounding
+      /// towards zero.  Used only as part of the long double-to-int
+      /// conversion sequence.
       FADDRTZ,
 
-      /// MTFSF = F8RC, INFLAG - This moves the register into the FPSCR.
-      MTFSF,
+      /// F8RC = MFFS - This moves the FPSCR (not modeled) into the register.
+      MFFS,
 
       /// LARX = This corresponds to PPC l{w|d}arx instrcution: load and
       /// reserve indexed. This is used to implement atomic operations.
@@ -243,20 +234,31 @@ namespace llvm {
       /// optimizations due to constant folding.
       VADD_SPLAT,
 
-      /// STD_32 - This is the STD instruction for use with "32-bit" registers.
-      STD_32 = ISD::FIRST_TARGET_MEMORY_OPCODE,
-
       /// CHAIN = STBRX CHAIN, GPRC, Ptr, Type - This is a
       /// byte-swapping store instruction.  It byte-swaps the low "Type" bits of
       /// the GPRC input, then stores it through Ptr.  Type can be either i16 or
       /// i32.
-      STBRX,
+      STBRX = ISD::FIRST_TARGET_MEMORY_OPCODE,
 
       /// GPRC, CHAIN = LBRX CHAIN, Ptr, Type - This is a
       /// byte-swapping load instruction.  It loads "Type" bits, byte swaps it,
       /// then puts it in the bottom bits of the GPRC.  TYPE can be either i16
       /// or i32.
       LBRX,
+
+      /// STFIWX - The STFIWX instruction.  The first operand is an input token
+      /// chain, then an f64 value to store, then an address to store it to.
+      STFIWX,
+
+      /// GPRC, CHAIN = LFIWAX CHAIN, Ptr - This is a floating-point
+      /// load which sign-extends from a 32-bit integer value into the
+      /// destination 64-bit register.
+      LFIWAX,
+
+      /// GPRC, CHAIN = LFIWZX CHAIN, Ptr - This is a floating-point
+      /// load which zero-extends from a 32-bit integer value into the
+      /// destination 64-bit register.
+      LFIWZX,
 
       /// G8RC = ADDIS_TOC_HA %X2, Symbol - For medium and large code model,
       /// produces an ADDIS8 instruction that adds the TOC base register to
@@ -321,6 +323,7 @@ namespace llvm {
 
   class PPCTargetLowering : public TargetLowering {
     const PPCSubtarget &PPCSubTarget;
+    const PPCRegisterInfo *PPCRegInfo;
 
   public:
     explicit PPCTargetLowering(PPCTargetMachine &TM);
@@ -395,6 +398,12 @@ namespace llvm {
                                                 MachineBasicBlock *MBB,
                                             bool is8bit, unsigned Opcode) const;
 
+    MachineBasicBlock *emitEHSjLjSetJmp(MachineInstr *MI,
+                                        MachineBasicBlock *MBB) const;
+
+    MachineBasicBlock *emitEHSjLjLongJmp(MachineInstr *MI,
+                                         MachineBasicBlock *MBB) const;
+
     ConstraintType getConstraintType(const std::string &Constraint) const;
 
     /// Examine constraint string and operand type and determine a weight value.
@@ -449,6 +458,10 @@ namespace llvm {
                         bool IsMemset, bool ZeroMemset, bool MemcpyStrSrc,
                         MachineFunction &MF) const;
 
+    /// Is unaligned memory access allowed for the given type, and is it fast
+    /// relative to software emulation.
+    virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast = 0) const;
+
     /// isFMAFasterThanMulAndAdd - Return true if an FMA operation is faster than
     /// a pair of mul and add instructions. fmuladd intrinsics will be expanded to
     /// FMAs when this method returns true (and FMAs are legal), otherwise fmuladd
@@ -494,7 +507,7 @@ namespace llvm {
                                       const PPCSubtarget &Subtarget) const;
     SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG, DebugLoc dl) const;
-    SDValue LowerSINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFLT_ROUNDS_(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSRL_PARTS(SDValue Op, SelectionDAG &DAG) const;
@@ -604,6 +617,9 @@ namespace llvm {
                      const SmallVectorImpl<ISD::InputArg> &Ins,
                      DebugLoc dl, SelectionDAG &DAG,
                      SmallVectorImpl<SDValue> &InVals) const;
+
+    SDValue lowerEH_SJLJ_SETJMP(SDValue Op, SelectionDAG &DAG) const;
+    SDValue lowerEH_SJLJ_LONGJMP(SDValue Op, SelectionDAG &DAG) const;
   };
 }
 

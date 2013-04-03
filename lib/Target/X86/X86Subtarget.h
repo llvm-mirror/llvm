@@ -121,8 +121,17 @@ protected:
   /// HasRTM - Processor has RTM instructions.
   bool HasRTM;
 
+  /// HasHLE - Processor has HLE.
+  bool HasHLE;
+
   /// HasADX - Processor has ADX instructions.
   bool HasADX;
+
+  /// HasPRFCHW - Processor has PRFCHW instructions.
+  bool HasPRFCHW;
+
+  /// HasRDSEED - Processor has RDSEED instructions.
+  bool HasRDSEED;
 
   /// IsBTMemSlow - True if BT (bit test) of memory instructions are slow.
   bool IsBTMemSlow;
@@ -152,6 +161,10 @@ protected:
   /// PadShortFunctions - True if the short functions should be padded to prevent
   /// a stall when returning too early.
   bool PadShortFunctions;
+
+  /// CallRegIndirect - True if the Calls with memory reference should be converted
+  /// to a register-based indirect call.
+  bool CallRegIndirect;
 
   /// stackAlignment - The minimum alignment known to hold of the stack frame on
   /// entry to the function and which must be maintained by every function.
@@ -253,7 +266,10 @@ public:
   bool hasBMI() const { return HasBMI; }
   bool hasBMI2() const { return HasBMI2; }
   bool hasRTM() const { return HasRTM; }
+  bool hasHLE() const { return HasHLE; }
   bool hasADX() const { return HasADX; }
+  bool hasPRFCHW() const { return HasPRFCHW; }
+  bool hasRDSEED() const { return HasRDSEED; }
   bool isBTMemSlow() const { return IsBTMemSlow; }
   bool isUnalignedMemAccessFast() const { return IsUAMemFast; }
   bool hasVectorUAMem() const { return HasVectorUAMem; }
@@ -261,6 +277,7 @@ public:
   bool useLeaForSP() const { return UseLeaForSP; }
   bool hasSlowDivide() const { return HasSlowDivide; }
   bool padShortFunctions() const { return PadShortFunctions; }
+  bool callRegIndirect() const { return CallRegIndirect; }
 
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
 

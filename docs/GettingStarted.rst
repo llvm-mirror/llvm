@@ -521,13 +521,13 @@ By placing it in the ``llvm/projects``, it will be automatically configured by
 the LLVM configure script as well as automatically updated when you run ``svn
 update``.
 
-GIT mirror
+Git Mirror
 ----------
 
-GIT mirrors are available for a number of LLVM subprojects. These mirrors sync
+Git mirrors are available for a number of LLVM subprojects. These mirrors sync
 automatically with each Subversion commit and contain all necessary git-svn
 marks (so, you can recreate git-svn metadata locally). Note that right now
-mirrors reflect only ``trunk`` for each project. You can do the read-only GIT
+mirrors reflect only ``trunk`` for each project. You can do the read-only Git
 clone of LLVM via:
 
 .. code-block:: console
@@ -538,9 +538,22 @@ If you want to check out clang too, run:
 
 .. code-block:: console
 
-  % git clone http://llvm.org/git/llvm.git
   % cd llvm/tools
   % git clone http://llvm.org/git/clang.git
+
+If you want to check out compiler-rt too, run:
+
+.. code-block:: console
+
+  % cd llvm/projects
+  % git clone http://llvm.org/git/compiler-rt.git
+
+If you want to check out the Test Suite Source Code (optional), run:
+
+.. code-block:: console
+
+  % cd llvm/projects
+  % git clone http://llvm.org/git/test-suite.git
 
 Since the upstream repository is in Subversion, you should use ``git
 pull --rebase`` instead of ``git pull`` to avoid generating a non-linear history
@@ -626,8 +639,10 @@ To set up clone from which you can submit code using ``git-svn``, run:
   % git config svn-remote.svn.fetch :refs/remotes/origin/master
   % git svn rebase -l
 
+Likewise for compiler-rt and test-suite.
+
 To update this clone without generating git-svn tags that conflict with the
-upstream git repo, run:
+upstream Git repo, run:
 
 .. code-block:: console
 
@@ -638,12 +653,14 @@ upstream git repo, run:
      git checkout master &&
      git svn rebase -l)
 
+Likewise for compiler-rt and test-suite.
+
 This leaves your working directories on their master branches, so you'll need to
 ``checkout`` each working branch individually and ``rebase`` it on top of its
 parent branch.
 
 For those who wish to be able to update an llvm repo in a simpler fashion,
-consider placing the following git script in your path under the name
+consider placing the following Git script in your path under the name
 ``git-svnup``:
 
 .. code-block:: bash
@@ -991,7 +1008,7 @@ Optional Configuration Items
 ----------------------------
 
 If you're running on a Linux system that supports the `binfmt_misc
-<http://www.tat.physik.uni-tuebingen.de/~rguenth/linux/binfmt_misc.html>`_
+<http://en.wikipedia.org/wiki/binfmt_misc>`_
 module, and you have root access on the system, you can set your system up to
 execute LLVM bitcode files directly. To do this, use commands like this (the
 first command may not be required if you are already using the module):

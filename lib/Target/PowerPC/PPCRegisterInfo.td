@@ -27,40 +27,40 @@ class PPCReg<string n> : Register<n> {
 
 // GPR - One of the 32 32-bit general-purpose registers
 class GPR<bits<5> num, string n> : PPCReg<n> {
-  field bits<5> Num = num;
+  let HWEncoding{4-0} = num;
 }
 
 // GP8 - One of the 32 64-bit general-purpose registers
 class GP8<GPR SubReg, string n> : PPCReg<n> {
-  field bits<5> Num = SubReg.Num;
+  let HWEncoding = SubReg.HWEncoding;
   let SubRegs = [SubReg];
   let SubRegIndices = [sub_32];
 }
 
 // SPR - One of the 32-bit special-purpose registers
 class SPR<bits<10> num, string n> : PPCReg<n> {
-  field bits<10> Num = num;
+  let HWEncoding{9-0} = num;
 }
 
 // FPR - One of the 32 64-bit floating-point registers
 class FPR<bits<5> num, string n> : PPCReg<n> {
-  field bits<5> Num = num;
+  let HWEncoding{4-0} = num;
 }
 
 // VR - One of the 32 128-bit vector registers
 class VR<bits<5> num, string n> : PPCReg<n> {
-  field bits<5> Num = num;
+  let HWEncoding{4-0} = num;
 }
 
 // CR - One of the 8 4-bit condition registers
 class CR<bits<3> num, string n, list<Register> subregs> : PPCReg<n> {
-  field bits<3> Num = num;
+  let HWEncoding{2-0} = num;
   let SubRegs = subregs;
 }
 
 // CRBIT - One of the 32 1-bit condition register fields
 class CRBIT<bits<5> num, string n> : PPCReg<n> {
-  field bits<5> Num = num;
+  let HWEncoding{4-0} = num;
 }
 
 // General-purpose registers
@@ -85,6 +85,14 @@ foreach Index = 0-31 in {
   def V#Index : VR<Index, "v"#Index>,
                 DwarfRegNum<[!add(Index, 77), !add(Index, 77)]>;
 }
+
+// The reprsentation of r0 when treated as the constant 0.
+def ZERO  : GPR<0, "0">;
+def ZERO8 : GP8<ZERO, "0">;
+
+// Representations of the frame pointer used by ISD::FRAMEADDR.
+def FP   : GPR<0 /* arbitrary */, "**FRAME POINTER**">;
+def FP8  : GP8<FP, "**FRAME POINTER**">;
 
 // Condition register bits
 def CR0LT : CRBIT< 0, "0">;
@@ -164,11 +172,17 @@ def RM: SPR<512, "**ROUNDING MODE**">;
 // then nonvolatiles in reverse order since stmw/lmw save from rN to r31
 def GPRC : RegisterClass<"PPC", [i32], 32, (add (sequence "R%u", 2, 12),
                                                 (sequence "R%u", 30, 13),
-                                                R31, R0, R1, LR)>;
+                                                R31, R0, R1, FP)>;
 
 def G8RC : RegisterClass<"PPC", [i64], 64, (add (sequence "X%u", 2, 12),
                                                 (sequence "X%u", 30, 14),
-                                                X31, X13, X0, X1, LR8)>;
+                                                X31, X13, X0, X1, FP8)>;
+
+// For some instructions r0 is special (representing the value 0 instead of
+// the value in the r0 register), and we use these register subclasses to
+// prevent r0 from being allocated for use by those instructions.
+def GPRC_NOR0 : RegisterClass<"PPC", [i32], 32, (add (sub GPRC, R0), ZERO)>;
+def G8RC_NOX0 : RegisterClass<"PPC", [i64], 64, (add (sub G8RC, X0), ZERO8)>;
 
 // Allocate volatiles first, then non-volatiles in reverse order. With the SVR4
 // ABI the size of the Floating-point register save area is determined by the

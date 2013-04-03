@@ -480,6 +480,8 @@ enum {
   R_PPC64_TOC16_LO            = 48,
   R_PPC64_TOC16_HA            = 50,
   R_PPC64_TOC                 = 51,
+  R_PPC64_ADDR16_DS           = 56,
+  R_PPC64_ADDR16_LO_DS        = 57,
   R_PPC64_TOC16_DS            = 63,
   R_PPC64_TOC16_LO_DS         = 64,
   R_PPC64_TLS                 = 67,
@@ -588,6 +590,8 @@ enum {
 
 // ARM Specific e_flags
 enum {
+  EF_ARM_SOFT_FLOAT =     0x00000200U,
+  EF_ARM_VFP_FLOAT =      0x00000400U,
   EF_ARM_EABI_UNKNOWN =   0x00000000U,
   EF_ARM_EABI_VER1 =      0x01000000U,
   EF_ARM_EABI_VER2 =      0x02000000U,

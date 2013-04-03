@@ -306,7 +306,12 @@ raw_ostream &raw_ostream::write(const char *Ptr, size_t Size) {
     if (LLVM_UNLIKELY(OutBufCur == OutBufStart)) {
       size_t BytesToWrite = Size - (Size % NumBytes);
       write_impl(Ptr, BytesToWrite);
-      copy_to_buffer(Ptr + BytesToWrite, Size - BytesToWrite);
+      size_t BytesRemaining = Size - BytesToWrite;
+      if (BytesRemaining > size_t(OutBufEnd - OutBufCur)) {
+        // Too much left over to copy into our buffer.
+        return write(Ptr + BytesToWrite, BytesRemaining);
+      }
+      copy_to_buffer(Ptr + BytesToWrite, BytesRemaining);
       return *this;
     }
 
@@ -512,7 +517,7 @@ raw_fd_ostream::~raw_fd_ostream() {
   // has_error() and clear the error flag with clear_error() before
   // destructing raw_ostream objects which may have errors.
   if (has_error())
-    report_fatal_error("IO failure on output stream.");
+    report_fatal_error("IO failure on output stream.", /*GenCrashDiag=*/false);
 }
 
 

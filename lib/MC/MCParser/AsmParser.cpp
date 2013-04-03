@@ -626,7 +626,7 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
     return TokError("unmatched .ifs or .elses");
 
   // Check to see there are no empty DwarfFile slots.
-  const std::vector<MCDwarfFile *> &MCDwarfFiles =
+  const SmallVectorImpl<MCDwarfFile *> &MCDwarfFiles =
     getContext().getMCDwarfFiles();
   for (unsigned i = 1; i < MCDwarfFiles.size(); i++) {
     if (!MCDwarfFiles[i])
@@ -1495,7 +1495,7 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
     // If we previously parsed a cpp hash file line comment then make sure the
     // current Dwarf File is for the CppHashFilename if not then emit the
     // Dwarf File table for it and adjust the line number for the .loc.
-    const std::vector<MCDwarfFile *> &MCDwarfFiles = 
+    const SmallVectorImpl<MCDwarfFile *> &MCDwarfFiles = 
       getContext().getMCDwarfFiles();
     if (CppHashFilename.size() != 0) {
       if (MCDwarfFiles[getContext().getGenDwarfFileNumber()]->getName() !=
@@ -4105,12 +4105,8 @@ AsmParser::parseMSInlineAsm(void *AsmLoc, std::string &AsmString,
       MCParsedAsmOperand *Operand = Info.ParsedOperands[i];
 
       // Immediate.
-      if (Operand->isImm()) {
-        if (Operand->needAsmRewrite())
-          AsmStrRewrites.push_back(AsmRewrite(AOK_ImmPrefix,
-                                              Operand->getStartLoc()));
+      if (Operand->isImm())
         continue;
-      }
 
       // Register operand.
       if (Operand->isReg() && !Operand->needAddressOf()) {
@@ -4131,11 +4127,6 @@ AsmParser::parseMSInlineAsm(void *AsmLoc, std::string &AsmString,
         continue;
 
       bool isOutput = (i == 1) && Desc.mayStore();
-      if (Operand->isMem() && Operand->needSizeDirective())
-        AsmStrRewrites.push_back(AsmRewrite(AOK_SizeDirective,
-                                            Operand->getStartLoc(), /*Len*/0,
-                                            Operand->getMemSize()));
-
       if (isOutput) {
         ++InputIdx;
         OutputDecls.push_back(OpDecl);
@@ -4184,28 +4175,31 @@ AsmParser::parseMSInlineAsm(void *AsmLoc, std::string &AsmString,
 
   // Build the IR assembly string.
   std::string AsmStringIR;
-  AsmRewriteKind PrevKind = AOK_Imm;
   raw_string_ostream OS(AsmStringIR);
-  const char *Start = SrcMgr.getMemoryBuffer(0)->getBufferStart();
+  const char *AsmStart = SrcMgr.getMemoryBuffer(0)->getBufferStart();
+  const char *AsmEnd = SrcMgr.getMemoryBuffer(0)->getBufferEnd();
   array_pod_sort(AsmStrRewrites.begin(), AsmStrRewrites.end(), RewritesSort);
   for (SmallVectorImpl<AsmRewrite>::iterator I = AsmStrRewrites.begin(),
                                              E = AsmStrRewrites.end();
        I != E; ++I) {
     const char *Loc = (*I).Loc.getPointer();
-    assert(Loc >= Start && "Expected Loc to be after Start!");
+    assert(Loc >= AsmStart && "Expected Loc to be at or after Start!");
 
     unsigned AdditionalSkip = 0;
     AsmRewriteKind Kind = (*I).Kind;
 
-    // Emit everything up to the immediate/expression.  If the previous rewrite
-    // was a size directive, then this has already been done.
-    if (PrevKind != AOK_SizeDirective)
-      OS << StringRef(Start, Loc - Start);
-    PrevKind = Kind;
+    // Emit everything up to the immediate/expression.
+    unsigned Len = Loc - AsmStart;
+    if (Len) {
+      // For Input/Output operands we need to remove the brackets, if present.
+      if ((Kind == AOK_Input || Kind == AOK_Output) && Loc[-1] == '[')
+        --Len;
+      OS << StringRef(AsmStart, Len);
+    }
 
     // Skip the original expression.
     if (Kind == AOK_Skip) {
-      Start = Loc + (*I).Len;
+      AsmStart = Loc + (*I).Len;
       continue;
     }
 
@@ -4254,14 +4248,17 @@ AsmParser::parseMSInlineAsm(void *AsmLoc, std::string &AsmString,
     }
 
     // Skip the original expression.
-    if (Kind != AOK_SizeDirective)
-      Start = Loc + (*I).Len + AdditionalSkip;
+    AsmStart = Loc + (*I).Len + AdditionalSkip;
+
+    // For Input/Output operands we need to remove the brackets, if present.
+    if ((Kind == AOK_Input || Kind == AOK_Output) && AsmStart != AsmEnd &&
+        *AsmStart == ']')
+      ++AsmStart;
   }
 
   // Emit the remainder of the asm string.
-  const char *AsmEnd = SrcMgr.getMemoryBuffer(0)->getBufferEnd();
-  if (Start != AsmEnd)
-    OS << StringRef(Start, AsmEnd - Start);
+  if (AsmStart != AsmEnd)
+    OS << StringRef(AsmStart, AsmEnd - AsmStart);
 
   AsmString = OS.str();
   return false;

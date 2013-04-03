@@ -446,38 +446,58 @@ def MUX_ii : ALU32_ii<(outs IntRegs:$dst), (ins PredRegs:$src1, s8Ext:$src2,
                                                     s8ExtPred:$src2,
                                                     s8ImmPred:$src3)))]>;
 
-// Shift halfword.
-let isPredicable = 1 in
-def ASLH : ALU32_rr<(outs IntRegs:$dst), (ins IntRegs:$src1),
-           "$dst = aslh($src1)",
-           [(set (i32 IntRegs:$dst), (shl 16, (i32 IntRegs:$src1)))]>;
+// ALU32 - aslh, asrh, sxtb, sxth, zxtb, zxth
+multiclass ALU32_2op_Pbase<string mnemonic, bit isNot, bit isPredNew> {
+  let isPredicatedNew = isPredNew in
+  def NAME : ALU32Inst<(outs IntRegs:$dst),
+                       (ins PredRegs:$src1, IntRegs:$src2),
+            !if(isNot, "if (!$src1", "if ($src1")#!if(isPredNew,".new) $dst = ",
+            ") $dst = ")#mnemonic#"($src2)">,
+            Requires<[HasV4T]>;
+}
 
-let isPredicable = 1 in
-def ASRH : ALU32_rr<(outs IntRegs:$dst), (ins IntRegs:$src1),
-           "$dst = asrh($src1)",
-           [(set (i32 IntRegs:$dst), (sra 16, (i32 IntRegs:$src1)))]>;
+multiclass ALU32_2op_Pred<string mnemonic, bit PredNot> {
+  let isPredicatedFalse = PredNot in {
+    defm _c#NAME : ALU32_2op_Pbase<mnemonic, PredNot, 0>;
+    // Predicate new
+    defm _cdn#NAME : ALU32_2op_Pbase<mnemonic, PredNot, 1>;
+  }
+}
 
-// Sign extend.
-let isPredicable = 1 in
-def SXTB : ALU32_rr<(outs IntRegs:$dst), (ins IntRegs:$src1),
-           "$dst = sxtb($src1)",
-           [(set (i32 IntRegs:$dst), (sext_inreg (i32 IntRegs:$src1), i8))]>;
+multiclass ALU32_2op_base<string mnemonic> {
+  let BaseOpcode = mnemonic in {
+    let isPredicable = 1, neverHasSideEffects = 1 in
+    def NAME : ALU32Inst<(outs IntRegs:$dst),
+                         (ins IntRegs:$src1),
+            "$dst = "#mnemonic#"($src1)">;
 
-let isPredicable = 1 in
-def SXTH : ALU32_rr<(outs IntRegs:$dst), (ins IntRegs:$src1),
-           "$dst = sxth($src1)",
-           [(set (i32 IntRegs:$dst), (sext_inreg (i32 IntRegs:$src1), i16))]>;
+    let Predicates = [HasV4T], validSubTargets = HasV4SubT, isPredicated = 1,
+    neverHasSideEffects = 1 in {
+      defm Pt_V4    : ALU32_2op_Pred<mnemonic, 0>;
+      defm NotPt_V4 : ALU32_2op_Pred<mnemonic, 1>;
+    }
+  }
+}
 
-// Zero extend.
-let isPredicable = 1, neverHasSideEffects = 1 in
-def ZXTB : ALU32_rr<(outs IntRegs:$dst), (ins IntRegs:$src1),
-           "$dst = zxtb($src1)",
-           []>;
+defm ASLH : ALU32_2op_base<"aslh">, PredNewRel;
+defm ASRH : ALU32_2op_base<"asrh">, PredNewRel;
+defm SXTB : ALU32_2op_base<"sxtb">, PredNewRel;
+defm SXTH : ALU32_2op_base<"sxth">,  PredNewRel;
+defm ZXTB : ALU32_2op_base<"zxtb">, PredNewRel;
+defm ZXTH : ALU32_2op_base<"zxth">,  PredNewRel;
 
-let isPredicable = 1, neverHasSideEffects = 1 in
-def ZXTH : ALU32_rr<(outs IntRegs:$dst), (ins IntRegs:$src1),
-                    "$dst = zxth($src1)",
-                    []>;
+def : Pat <(shl (i32 IntRegs:$src1), (i32 16)),
+           (ASLH IntRegs:$src1)>;
+
+def : Pat <(sra (i32 IntRegs:$src1), (i32 16)),
+           (ASRH IntRegs:$src1)>;
+
+def : Pat <(sext_inreg (i32 IntRegs:$src1), i8),
+           (SXTB IntRegs:$src1)>;
+
+def : Pat <(sext_inreg (i32 IntRegs:$src1), i16),
+           (SXTH IntRegs:$src1)>;
+
 //===----------------------------------------------------------------------===//
 // ALU32/PERM -
 //===----------------------------------------------------------------------===//
@@ -488,29 +508,30 @@ def ZXTH : ALU32_rr<(outs IntRegs:$dst), (ins IntRegs:$src1),
 //===----------------------------------------------------------------------===//
 
 // Conditional combine.
-let neverHasSideEffects = 1, isPredicated = 1 in
+let neverHasSideEffects = 1, isPredicated = 1 in {
 def COMBINE_rr_cPt : ALU32_rr<(outs DoubleRegs:$dst),
             (ins PredRegs:$src1, IntRegs:$src2, IntRegs:$src3),
             "if ($src1) $dst = combine($src2, $src3)",
             []>;
 
-let neverHasSideEffects = 1, isPredicated = 1 in
+let isPredicatedFalse = 1 in
 def COMBINE_rr_cNotPt : ALU32_rr<(outs DoubleRegs:$dst),
             (ins PredRegs:$src1, IntRegs:$src2, IntRegs:$src3),
             "if (!$src1) $dst = combine($src2, $src3)",
             []>;
 
-let neverHasSideEffects = 1, isPredicated = 1 in
+let isPredicatedNew = 1 in
 def COMBINE_rr_cdnPt : ALU32_rr<(outs DoubleRegs:$dst),
             (ins PredRegs:$src1, IntRegs:$src2, IntRegs:$src3),
             "if ($src1.new) $dst = combine($src2, $src3)",
             []>;
 
-let neverHasSideEffects = 1, isPredicated = 1 in
+let isPredicatedNew = 1, isPredicatedFalse = 1 in
 def COMBINE_rr_cdnNotPt : ALU32_rr<(outs DoubleRegs:$dst),
             (ins PredRegs:$src1, IntRegs:$src2, IntRegs:$src3),
             "if (!$src1.new) $dst = combine($src2, $src3)",
             []>;
+}
 
 // Compare.
 defm CMPGTU : CMP32_rr_ri_u9<"cmp.gtu", "CMPGTU", setugt>, ImmRegRel;
@@ -1009,20 +1030,6 @@ def : Pat < (i64 (load (add IntRegs:$src1, s11_3ExtPred:$offset))),
             (LDrid_indexed IntRegs:$src1, s11_3ExtPred:$offset) >;
 }
 
-let neverHasSideEffects = 1 in
-def LDrid_GP : LDInst2<(outs DoubleRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst = memd(#$global+$offset)",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def LDd_GP : LDInst2<(outs DoubleRegs:$dst),
-            (ins globaladdress:$global),
-            "$dst = memd(#$global)",
-            []>,
-            Requires<[NoV4T]>;
-
 //===----------------------------------------------------------------------===//
 // Post increment load
 // Make sure that in post increment load, the first operand is always the post
@@ -1095,54 +1102,12 @@ let AddedComplexity = 20 in
 def : Pat < (i32 (extloadi8 (add IntRegs:$src1, s11_0ImmPred:$offset))),
             (i32 (LDrib_indexed IntRegs:$src1, s11_0ImmPred:$offset)) >;
 
-let neverHasSideEffects = 1 in
-def LDrib_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst = memb(#$global+$offset)",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def LDb_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global),
-            "$dst = memb(#$global)",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def LDub_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global),
-            "$dst = memub(#$global)",
-            []>,
-            Requires<[NoV4T]>;
-
 def : Pat < (i32 (extloadi16 ADDRriS11_1:$addr)),
             (i32 (LDrih ADDRriS11_1:$addr))>;
 
 let AddedComplexity = 20 in
 def : Pat < (i32 (extloadi16 (add IntRegs:$src1, s11_1ImmPred:$offset))),
             (i32 (LDrih_indexed IntRegs:$src1, s11_1ImmPred:$offset)) >;
-
-let neverHasSideEffects = 1 in
-def LDrih_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst = memh(#$global+$offset)",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def LDh_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global),
-            "$dst = memh(#$global)",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def LDuh_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global),
-            "$dst = memuh(#$global)",
-            []>,
-            Requires<[NoV4T]>;
 
 let AddedComplexity = 10 in
 def : Pat < (i32 (zextloadi1 ADDRriS11_0:$addr)),
@@ -1152,21 +1117,6 @@ let AddedComplexity = 20 in
 def : Pat < (i32 (zextloadi1 (add IntRegs:$src1, s11_0ImmPred:$offset))),
             (i32 (LDriub_indexed IntRegs:$src1, s11_0ImmPred:$offset))>;
 
-let neverHasSideEffects = 1 in
-def LDriub_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst = memub(#$global+$offset)",
-            []>,
-            Requires<[NoV4T]>;
-
-// Load unsigned halfword.
-let neverHasSideEffects = 1 in
-def LDriuh_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst = memuh(#$global+$offset)",
-            []>,
-            Requires<[NoV4T]>;
-
 // Load predicate.
 let isExtendable = 1, opExtendable = 2, isExtentSigned = 1, opExtentBits = 13,
 isPseudo = 1, Defs = [R10,R11,D5], neverHasSideEffects = 1 in
@@ -1174,21 +1124,6 @@ def LDriw_pred : LDInst2<(outs PredRegs:$dst),
             (ins MEMri:$addr),
             "Error; should not emit",
             []>;
-
-// Indexed load.
-let neverHasSideEffects = 1 in
-def LDriw_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global, u16Imm:$offset),
-            "$dst = memw(#$global+$offset)",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def LDw_GP : LDInst2<(outs IntRegs:$dst),
-            (ins globaladdress:$global),
-            "$dst = memw(#$global)",
-            []>,
-            Requires<[NoV4T]>;
 
 // Deallocate stack frame.
 let Defs = [R29, R30, R31], Uses = [R29], neverHasSideEffects = 1 in {
@@ -1423,27 +1358,7 @@ def SUBri_acc : MInst_acc<(outs IntRegs: $dst), (ins IntRegs:$src1,
 // ST +
 //===----------------------------------------------------------------------===//
 ///
-/// Assumptions::: ****** DO NOT IGNORE ********
-/// 1. Make sure that in post increment store, the zero'th operand is always the
-///    post increment operand.
-/// 2. Make sure that the store value operand(Rt/Rtt) in a store is always the
-///    last operand.
-///
 // Store doubleword.
-
-let neverHasSideEffects = 1 in
-def STrid_GP : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, DoubleRegs:$src),
-            "memd(#$global+$offset) = $src",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def STd_GP : STInst2<(outs),
-            (ins globaladdress:$global, DoubleRegs:$src),
-            "memd(#$global) = $src",
-            []>,
-            Requires<[NoV4T]>;
 
 //===----------------------------------------------------------------------===//
 // Post increment store
@@ -1655,36 +1570,6 @@ def : Pat<(store (i64 DoubleRegs:$src1), (add IntRegs:$src2,
                          (i64 DoubleRegs:$src1))>;
 }
 
-// memb(gp+#u16:0)=Rt
-let neverHasSideEffects = 1 in
-def STrib_GP : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memb(#$global+$offset) = $src",
-            []>,
-            Requires<[NoV4T]>;
-
-// memb(#global)=Rt
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def STb_GP : STInst2<(outs),
-            (ins globaladdress:$global, IntRegs:$src),
-            "memb(#$global) = $src",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1 in
-def STrih_GP : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memh(#$global+$offset) = $src",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def STh_GP   : STInst2<(outs),
-            (ins globaladdress:$global, IntRegs:$src),
-            "memh(#$global) = $src",
-            []>,
-            Requires<[NoV4T]>;
-
 // memh(Rx++#s4:1)=Rt.H
 
 // Store word.
@@ -1694,20 +1579,6 @@ def STriw_pred : STInst2<(outs),
             (ins MEMri:$addr, PredRegs:$src1),
             "Error; should not emit",
             []>;
-
-let neverHasSideEffects = 1 in
-def STriw_GP : STInst2<(outs),
-            (ins globaladdress:$global, u16Imm:$offset, IntRegs:$src),
-            "memw(#$global+$offset) = $src",
-            []>,
-            Requires<[NoV4T]>;
-
-let neverHasSideEffects = 1, validSubTargets = NoV4SubT in
-def STw_GP : STInst2<(outs),
-            (ins globaladdress:$global, IntRegs:$src),
-            "memw(#$global) = $src",
-            []>,
-            Requires<[NoV4T]>;
 
 // Allocate stack frame.
 let Defs = [R29, R30], Uses = [R31, R30], neverHasSideEffects = 1 in {
@@ -2183,50 +2054,18 @@ def : Pat<(HexagonTCRet (i32 IntRegs:$dst)),
 
 // Atomic load and store support
 // 8 bit atomic load
-def : Pat<(atomic_load_8 (HexagonCONST32_GP tglobaladdr:$global)),
-          (i32 (LDub_GP tglobaladdr:$global))>,
-            Requires<[NoV4T]>;
-
-def : Pat<(atomic_load_8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                              u16ImmPred:$offset)),
-          (i32 (LDriub_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[NoV4T]>;
-
 def : Pat<(atomic_load_8 ADDRriS11_0:$src1),
           (i32 (LDriub ADDRriS11_0:$src1))>;
 
 def : Pat<(atomic_load_8 (add (i32 IntRegs:$src1), s11_0ImmPred:$offset)),
           (i32 (LDriub_indexed (i32 IntRegs:$src1), s11_0ImmPred:$offset))>;
 
-
-
 // 16 bit atomic load
-def : Pat<(atomic_load_16 (HexagonCONST32_GP tglobaladdr:$global)),
-          (i32 (LDuh_GP tglobaladdr:$global))>,
-            Requires<[NoV4T]>;
-
-def : Pat<(atomic_load_16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                               u16ImmPred:$offset)),
-          (i32 (LDriuh_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[NoV4T]>;
-
 def : Pat<(atomic_load_16 ADDRriS11_1:$src1),
           (i32 (LDriuh ADDRriS11_1:$src1))>;
 
 def : Pat<(atomic_load_16 (add (i32 IntRegs:$src1), s11_1ImmPred:$offset)),
           (i32 (LDriuh_indexed (i32 IntRegs:$src1), s11_1ImmPred:$offset))>;
-
-
-
-// 32 bit atomic load
-def : Pat<(atomic_load_32 (HexagonCONST32_GP tglobaladdr:$global)),
-          (i32 (LDw_GP tglobaladdr:$global))>,
-            Requires<[NoV4T]>;
-
-def : Pat<(atomic_load_32 (add (HexagonCONST32_GP tglobaladdr:$global),
-                               u16ImmPred:$offset)),
-          (i32 (LDriw_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-            Requires<[NoV4T]>;
 
 def : Pat<(atomic_load_32 ADDRriS11_2:$src1),
           (i32 (LDriw ADDRriS11_2:$src1))>;
@@ -2234,47 +2073,13 @@ def : Pat<(atomic_load_32 ADDRriS11_2:$src1),
 def : Pat<(atomic_load_32 (add (i32 IntRegs:$src1), s11_2ImmPred:$offset)),
           (i32 (LDriw_indexed (i32 IntRegs:$src1), s11_2ImmPred:$offset))>;
 
-
 // 64 bit atomic load
-def : Pat<(atomic_load_64 (HexagonCONST32_GP tglobaladdr:$global)),
-          (i64 (LDd_GP tglobaladdr:$global))>,
-            Requires<[NoV4T]>;
-
-def : Pat<(atomic_load_64 (add (HexagonCONST32_GP tglobaladdr:$global),
-                               u16ImmPred:$offset)),
-          (i64 (LDrid_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-          Requires<[NoV4T]>;
-
 def : Pat<(atomic_load_64 ADDRriS11_3:$src1),
           (i64 (LDrid ADDRriS11_3:$src1))>;
 
 def : Pat<(atomic_load_64 (add (i32 IntRegs:$src1), s11_3ImmPred:$offset)),
           (i64 (LDrid_indexed (i32 IntRegs:$src1), s11_3ImmPred:$offset))>;
 
-
-// 64 bit atomic store
-def : Pat<(atomic_store_64 (HexagonCONST32_GP tglobaladdr:$global),
-                           (i64 DoubleRegs:$src1)),
-          (STd_GP tglobaladdr:$global, (i64 DoubleRegs:$src1))>,
-          Requires<[NoV4T]>;
-
-def : Pat<(atomic_store_64 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset),
-                           (i64 DoubleRegs:$src1)),
-          (STrid_GP tglobaladdr:$global, u16ImmPred:$offset,
-                    (i64 DoubleRegs:$src1))>, Requires<[NoV4T]>;
-
-// 8 bit atomic store
-def : Pat<(atomic_store_8 (HexagonCONST32_GP tglobaladdr:$global),
-                          (i32 IntRegs:$src1)),
-          (STb_GP tglobaladdr:$global, (i32 IntRegs:$src1))>,
-          Requires<[NoV4T]>;
-
-def : Pat<(atomic_store_8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                               u16ImmPred:$offset),
-                          (i32 IntRegs:$src1)),
-          (STrib_GP tglobaladdr:$global, u16ImmPred:$offset,
-                    (i32 IntRegs:$src1))>, Requires<[NoV4T]>;
 
 def : Pat<(atomic_store_8 ADDRriS11_0:$src2, (i32 IntRegs:$src1)),
           (STrib ADDRriS11_0:$src2, (i32 IntRegs:$src1))>;
@@ -2285,18 +2090,6 @@ def : Pat<(atomic_store_8 (add (i32 IntRegs:$src2), s11_0ImmPred:$offset),
                          (i32 IntRegs:$src1))>;
 
 
-// 16 bit atomic store
-def : Pat<(atomic_store_16 (HexagonCONST32_GP tglobaladdr:$global),
-                           (i32 IntRegs:$src1)),
-          (STh_GP tglobaladdr:$global, (i32 IntRegs:$src1))>,
-          Requires<[NoV4T]>;
-
-def : Pat<(atomic_store_16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset),
-                           (i32 IntRegs:$src1)),
-          (STrih_GP tglobaladdr:$global, u16ImmPred:$offset,
-                    (i32 IntRegs:$src1))>, Requires<[NoV4T]>;
-
 def : Pat<(atomic_store_16 ADDRriS11_1:$src2, (i32 IntRegs:$src1)),
           (STrih ADDRriS11_1:$src2, (i32 IntRegs:$src1))>;
 
@@ -2304,20 +2097,6 @@ def : Pat<(atomic_store_16 (i32 IntRegs:$src1),
                           (add (i32 IntRegs:$src2), s11_1ImmPred:$offset)),
           (STrih_indexed (i32 IntRegs:$src2), s11_1ImmPred:$offset,
                          (i32 IntRegs:$src1))>;
-
-
-// 32 bit atomic store
-def : Pat<(atomic_store_32 (HexagonCONST32_GP tglobaladdr:$global),
-                           (i32 IntRegs:$src1)),
-          (STw_GP tglobaladdr:$global, (i32 IntRegs:$src1))>,
-          Requires<[NoV4T]>;
-
-def : Pat<(atomic_store_32 (add (HexagonCONST32_GP tglobaladdr:$global),
-                                u16ImmPred:$offset),
-                           (i32 IntRegs:$src1)),
-          (STriw_GP tglobaladdr:$global, u16ImmPred:$offset,
-                                         (i32 IntRegs:$src1))>,
-            Requires<[NoV4T]>;
 
 def : Pat<(atomic_store_32 ADDRriS11_2:$src2, (i32 IntRegs:$src1)),
           (STriw ADDRriS11_2:$src2, (i32 IntRegs:$src1))>;
@@ -2387,198 +2166,8 @@ def : Pat <(brcond (not PredRegs:$src1), bb:$offset),
 def : Pat <(and PredRegs:$src1, (not PredRegs:$src2)),
       (i1 (AND_pnotp (i1 PredRegs:$src1), (i1 PredRegs:$src2)))>;
 
-// Map from store(globaladdress + x) -> memd(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(store (i64 DoubleRegs:$src1),
-                  (add (HexagonCONST32_GP tglobaladdr:$global),
-                       u16ImmPred:$offset)),
-      (STrid_GP tglobaladdr:$global, u16ImmPred:$offset,
-                (i64 DoubleRegs:$src1))>, Requires<[NoV4T]>;
-
-// Map from store(globaladdress) -> memd(#foo).
-let AddedComplexity = 100 in
-def : Pat <(store (i64 DoubleRegs:$src1),
-                  (HexagonCONST32_GP tglobaladdr:$global)),
-      (STd_GP tglobaladdr:$global, (i64 DoubleRegs:$src1))>,
-      Requires<[NoV4T]>;
-
-// Map from store(globaladdress + x) -> memw(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(store (i32 IntRegs:$src1),
-              (add (HexagonCONST32_GP tglobaladdr:$global),
-                                      u16ImmPred:$offset)),
-      (STriw_GP tglobaladdr:$global, u16ImmPred:$offset, (i32 IntRegs:$src1))>,
-      Requires<[NoV4T]>;
-
-// Map from store(globaladdress) -> memw(#foo + 0).
-let AddedComplexity = 100 in
-def : Pat <(store (i32 IntRegs:$src1), (HexagonCONST32_GP tglobaladdr:$global)),
-      (STriw_GP tglobaladdr:$global, 0, (i32 IntRegs:$src1))>;
-
-// Map from store(globaladdress) -> memw(#foo).
-let AddedComplexity = 100 in
-def : Pat <(store (i32 IntRegs:$src1), (HexagonCONST32_GP tglobaladdr:$global)),
-      (STriw_GP tglobaladdr:$global, 0, (i32 IntRegs:$src1))>,
-      Requires<[NoV4T]>;
-
-// Map from store(globaladdress + x) -> memh(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(truncstorei16 (i32 IntRegs:$src1),
-                          (add (HexagonCONST32_GP tglobaladdr:$global),
-                               u16ImmPred:$offset)),
-      (STrih_GP tglobaladdr:$global, u16ImmPred:$offset, (i32 IntRegs:$src1))>,
-      Requires<[NoV4T]>;
-
-// Map from store(globaladdress) -> memh(#foo).
-let AddedComplexity = 100 in
-def : Pat <(truncstorei16 (i32 IntRegs:$src1),
-                          (HexagonCONST32_GP tglobaladdr:$global)),
-      (STh_GP tglobaladdr:$global, (i32 IntRegs:$src1))>,
-      Requires<[NoV4T]>;
-
-// Map from store(globaladdress + x) -> memb(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(truncstorei8 (i32 IntRegs:$src1),
-                         (add (HexagonCONST32_GP tglobaladdr:$global),
-                              u16ImmPred:$offset)),
-      (STrib_GP tglobaladdr:$global, u16ImmPred:$offset, (i32 IntRegs:$src1))>,
-      Requires<[NoV4T]>;
-
-// Map from store(globaladdress) -> memb(#foo).
-let AddedComplexity = 100 in
-def : Pat <(truncstorei8 (i32 IntRegs:$src1),
-                         (HexagonCONST32_GP tglobaladdr:$global)),
-      (STb_GP tglobaladdr:$global, (i32 IntRegs:$src1))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memw(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i32 (load (add (HexagonCONST32_GP tglobaladdr:$global),
-                      u16ImmPred:$offset))),
-      (i32 (LDriw_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memw(#foo).
-let AddedComplexity = 100 in
-def : Pat <(i32 (load (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDw_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memd(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i64 (load (add (HexagonCONST32_GP tglobaladdr:$global),
-                           u16ImmPred:$offset))),
-      (i64 (LDrid_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memw(#foo + 0).
-let AddedComplexity = 100 in
-def : Pat <(i64 (load (HexagonCONST32_GP tglobaladdr:$global))),
-      (i64 (LDd_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-// Map from Pd = load(globaladdress) -> Rd = memb(globaladdress), Pd = Rd.
-let AddedComplexity = 100 in
-def : Pat <(i1 (load (HexagonCONST32_GP tglobaladdr:$global))),
-      (i1 (TFR_PdRs (i32 (LDb_GP tglobaladdr:$global))))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memh(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i32 (extloadi16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                            u16ImmPred:$offset))),
-      (i32 (LDrih_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memh(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i32 (sextloadi16 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDrih_GP tglobaladdr:$global, 0))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memuh(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi16 (add (HexagonCONST32_GP tglobaladdr:$global),
-                             u16ImmPred:$offset))),
-      (i32 (LDriuh_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memuh(#foo).
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi16 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDriuh_GP tglobaladdr:$global, 0))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memh(#foo).
-let AddedComplexity = 100 in
-def : Pat <(i32 (sextloadi16 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDh_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memuh(#foo).
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi16 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDuh_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memb(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i32 (extloadi8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                           u16ImmPred:$offset))),
-      (i32 (LDrib_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memb(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i32 (sextloadi8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                            u16ImmPred:$offset))),
-      (i32 (LDrib_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress + x) -> memub(#foo + x).
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi8 (add (HexagonCONST32_GP tglobaladdr:$global),
-                            u16ImmPred:$offset))),
-      (i32 (LDriub_GP tglobaladdr:$global, u16ImmPred:$offset))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memb(#foo).
-let AddedComplexity = 100 in
-def : Pat <(i32 (extloadi8 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDb_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memb(#foo).
-let AddedComplexity = 100 in
-def : Pat <(i32 (sextloadi8 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDb_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-// Map from load(globaladdress) -> memub(#foo).
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi8 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDub_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-// When the Interprocedural Global Variable optimizer realizes that a
-// certain global variable takes only two constant values, it shrinks the
-// global to a boolean. Catch those loads here in the following 3 patterns.
-let AddedComplexity = 100 in
-def : Pat <(i32 (extloadi1 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDb_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-let AddedComplexity = 100 in
-def : Pat <(i32 (sextloadi1 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDb_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
-let AddedComplexity = 100 in
-def : Pat <(i32 (zextloadi1 (HexagonCONST32_GP tglobaladdr:$global))),
-      (i32 (LDub_GP tglobaladdr:$global))>,
-      Requires<[NoV4T]>;
-
 // Map from i1 loads to 32 bits. This assumes that the i1* is byte aligned.
+let AddedComplexity = 10 in
 def : Pat <(i32 (zextloadi1 ADDRriS11_0:$addr)),
       (i32 (AND_rr (i32 (LDrib ADDRriS11_0:$addr)), (TFRI 0x1)))>;
 
@@ -2694,12 +2283,6 @@ def : Pat<(truncstorei32 (i64 DoubleRegs:$src), ADDRriS11_0:$addr),
 def : Pat<(store (i1 -1), ADDRriS11_2:$addr),
       (STrib ADDRriS11_2:$addr, (TFRI 1))>;
 
-let AddedComplexity = 100 in
-// Map from i1 = constant<-1>; memw(CONST32(#foo)) = i1 -> r0 = 1;
-// memw(#foo) = r0
-def : Pat<(store (i1 -1), (HexagonCONST32_GP tglobaladdr:$global)),
-      (STb_GP tglobaladdr:$global, (TFRI 1))>,
-      Requires<[NoV4T]>;
 
 // Map from i1 = constant<-1>; store i1 -> r0 = 1; store r0.
 def : Pat<(store (i1 -1), ADDRriS11_2:$addr),

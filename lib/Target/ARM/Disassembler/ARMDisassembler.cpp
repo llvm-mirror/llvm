@@ -3049,9 +3049,9 @@ static DecodeStatus DecodeT2BROperand(MCInst &Inst, unsigned Val,
 
 static DecodeStatus DecodeThumbCmpBROperand(MCInst &Inst, unsigned Val,
                                  uint64_t Address, const void *Decoder) {
-  if (!tryAddingSymbolicOperand(Address, Address + SignExtend32<7>(Val<<1) + 4,
+  if (!tryAddingSymbolicOperand(Address, Address + (Val<<1) + 4,
                                 true, 2, Inst, Decoder))
-    Inst.addOperand(MCOperand::CreateImm(SignExtend32<7>(Val << 1)));
+    Inst.addOperand(MCOperand::CreateImm(Val << 1));
   return MCDisassembler::Success;
 }
 
@@ -3278,7 +3278,7 @@ static DecodeStatus DecodeT2LdStPre(MCInst &Inst, unsigned Insn,
       return MCDisassembler::Fail;
   }
 
-  if (!Check(S, DecoderGPRRegisterClass(Inst, Rt, Address, Decoder)))
+  if (!Check(S, DecodeGPRRegisterClass(Inst, Rt, Address, Decoder)))
     return MCDisassembler::Fail;
 
   if (load) {

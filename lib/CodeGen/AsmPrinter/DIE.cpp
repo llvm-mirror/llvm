@@ -112,6 +112,17 @@ DIE::~DIE() {
     delete Children[i];
 }
 
+/// Climb up the parent chain to get the compile unit DIE this DIE belongs to.
+DIE *DIE::getCompileUnit() const{
+  DIE *p = getParent();
+  while (p) {
+    if (p->getTag() == dwarf::DW_TAG_compile_unit)
+      return p;
+    p = p->getParent();
+  }
+  llvm_unreachable("We should not have orphaned DIEs.");
+}
+
 #ifndef NDEBUG
 void DIE::print(raw_ostream &O, unsigned IncIndent) {
   IndentCount += IncIndent;
@@ -133,7 +144,7 @@ void DIE::print(raw_ostream &O, unsigned IncIndent) {
     O << "Size: " << Size << "\n";
   }
 
-  const SmallVector<DIEAbbrevData, 8> &Data = Abbrev.getData();
+  const SmallVectorImpl<DIEAbbrevData> &Data = Abbrev.getData();
 
   IndentCount += 2;
   for (unsigned i = 0, N = Data.size(); i < N; ++i) {
@@ -313,7 +324,7 @@ void DIEEntry::print(raw_ostream &O) {
 ///
 unsigned DIEBlock::ComputeSize(AsmPrinter *AP) {
   if (!Size) {
-    const SmallVector<DIEAbbrevData, 8> &AbbrevData = Abbrev.getData();
+    const SmallVectorImpl<DIEAbbrevData> &AbbrevData = Abbrev.getData();
     for (unsigned i = 0, N = Values.size(); i < N; ++i)
       Size += Values[i]->SizeOf(AP, AbbrevData[i].getForm());
   }
@@ -332,7 +343,7 @@ void DIEBlock::EmitValue(AsmPrinter *Asm, unsigned Form) const {
   case dwarf::DW_FORM_block:  Asm->EmitULEB128(Size); break;
   }
 
-  const SmallVector<DIEAbbrevData, 8> &AbbrevData = Abbrev.getData();
+  const SmallVectorImpl<DIEAbbrevData> &AbbrevData = Abbrev.getData();
   for (unsigned i = 0, N = Values.size(); i < N; ++i)
     Values[i]->EmitValue(Asm, AbbrevData[i].getForm());
 }

@@ -356,9 +356,16 @@ namespace llvm {
       // RDRAND - Get a random integer and indicate whether it is valid in CF.
       RDRAND,
 
+      // RDSEED - Get a NIST SP800-90B & C compliant random integer and
+      // indicate whether it is valid in CF.
+      RDSEED,
+
       // PCMP*STRI
       PCMPISTRI,
       PCMPESTRI,
+
+      // XTEST - Test if in transactional execution.
+      XTEST,
 
       // ATOMADD64_DAG, ATOMSUB64_DAG, ATOMOR64_DAG, ATOMAND64_DAG,
       // ATOMXOR64_DAG, ATOMNAND64_DAG, ATOMSWAP64_DAG -

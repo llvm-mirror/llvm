@@ -438,6 +438,12 @@ DataLayout::~DataLayout() {
   delete static_cast<StructLayoutMap*>(LayoutMap);
 }
 
+bool DataLayout::doFinalization(Module &M) {
+  delete static_cast<StructLayoutMap*>(LayoutMap);
+  LayoutMap = 0;
+  return false;
+}
+
 const StructLayout *DataLayout::getStructLayout(StructType *Ty) const {
   if (!LayoutMap)
     LayoutMap = new StructLayoutMap();
@@ -503,47 +509,6 @@ std::string DataLayout::getStringRepresentation() const {
   return OS.str();
 }
 
-
-uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
-  assert(Ty->isSized() && "Cannot getTypeInfo() on a type that is unsized!");
-  switch (Ty->getTypeID()) {
-  case Type::LabelTyID:
-    return getPointerSizeInBits(0);
-  case Type::PointerTyID: {
-    unsigned AS = dyn_cast<PointerType>(Ty)->getAddressSpace();
-    return getPointerSizeInBits(AS);
-  }
-  case Type::ArrayTyID: {
-    ArrayType *ATy = cast<ArrayType>(Ty);
-    return getTypeAllocSizeInBits(ATy->getElementType())*ATy->getNumElements();
-  }
-  case Type::StructTyID:
-    // Get the layout annotation... which is lazily created on demand.
-    return getStructLayout(cast<StructType>(Ty))->getSizeInBits();
-  case Type::IntegerTyID:
-    return cast<IntegerType>(Ty)->getBitWidth();
-  case Type::HalfTyID:
-    return 16;
-  case Type::FloatTyID:
-    return 32;
-  case Type::DoubleTyID:
-  case Type::X86_MMXTyID:
-    return 64;
-  case Type::PPC_FP128TyID:
-  case Type::FP128TyID:
-    return 128;
-  // In memory objects this is always aligned to a higher boundary, but
-  // only 80 bits contain information.
-  case Type::X86_FP80TyID:
-    return 80;
-  case Type::VectorTyID: {
-    VectorType *VTy = cast<VectorType>(Ty);
-    return VTy->getNumElements()*getTypeSizeInBits(VTy->getElementType());
-  }
-  default:
-    llvm_unreachable("DataLayout::getTypeSizeInBits(): Unsupported type");
-  }
-}
 
 /*!
   \param abi_or_pref Flag that determines which alignment is returned. true
@@ -654,6 +619,13 @@ Type *DataLayout::getIntPtrType(Type *Ty) const {
   if (VectorType *VecTy = dyn_cast<VectorType>(Ty))
     return VectorType::get(IntTy, VecTy->getNumElements());
   return IntTy;
+}
+
+Type *DataLayout::getSmallestLegalIntType(LLVMContext &C, unsigned Width) const {
+  for (unsigned i = 0, e = (unsigned)LegalIntWidths.size(); i != e; ++i)
+    if (Width <= LegalIntWidths[i])
+      return Type::getIntNTy(C, LegalIntWidths[i]);
+  return 0;
 }
 
 uint64_t DataLayout::getIndexedOffset(Type *ptrTy,

@@ -22,7 +22,6 @@ Several introductory papers and presentations.
    :hidden:
 
    LangRef
-   GetElementPtr
 
 :doc:`LangRef`
   Defines the LLVM intermediate representation.
@@ -48,10 +47,6 @@ Several introductory papers and presentations.
 
   .. __: http://llvm.org/pubs/2002-12-LattnerMSThesis.html
 
-:doc:`GetElementPtr`
-  Answers to some very frequent questions about LLVM's most frequently
-  misunderstood instruction.
-
 `Publications mentioning LLVM <http://llvm.org/pubs>`_
    ..
 
@@ -72,7 +67,6 @@ representation.
    CMake
    HowToBuildOnARM
    CommandGuide/index
-   DeveloperPolicy
    GettingStarted
    GettingStartedVS
    FAQ
@@ -87,6 +81,7 @@ representation.
    ReleaseNotes
    Passes
    YamlIO
+   GetElementPtr
 
 :doc:`GettingStarted`
    Discusses how to get up and running quickly with the LLVM infrastructure.
@@ -107,9 +102,6 @@ representation.
 :doc:`tutorial/index`
    Tutorials about using LLVM. Includes a tutorial about making a custom
    language with LLVM.
-
-:doc:`DeveloperPolicy`
-   The LLVM project's policy towards developers and their contributions.
 
 :doc:`LLVM Command Guide <CommandGuide/index>`
    A reference manual for the LLVM command line utilities ("man" pages for LLVM
@@ -149,25 +141,9 @@ representation.
 :doc:`YamlIO`
    A reference guide for using LLVM's YAML I/O library.
 
-IRC
-===
-
-Users and developers of the LLVM project (including subprojects such as Clang)
-can be found in #llvm on `irc.oftc.net <irc://irc.oftc.net/llvm>`_.
-
-This channel has several bots.
-
-* Buildbot reporters
-
-  * llvmbb - Bot for the main LLVM buildbot master.
-    http://lab.llvm.org:8011/console
-  * bb-chapuni - An individually run buildbot master. http://bb.pgr.jp/console
-  * smooshlab - Apple's internal buildbot master.
-
-* robot - Bugzilla linker. %bug <number>
-
-* clang-bot - A `geordi <http://www.eelis.net/geordi/>`_ instance running
-  near-trunk clang instead of gcc.
+:doc:`GetElementPtr`
+  Answers to some very frequent questions about LLVM's most frequently
+  misunderstood instruction.
 
 Programming Documentation
 =========================
@@ -248,6 +224,7 @@ For API clients and LLVM developers.
    WritingAnLLVMPass
    TableGen/LangRef
    HowToUseAttributes
+   NVPTXUsage
 
 :doc:`WritingAnLLVMPass`
    Information on how to write LLVM transformations and analyses.
@@ -316,6 +293,10 @@ For API clients and LLVM developers.
 :doc:`HowToUseAttributes`
   Answers some questions about the new Attributes infrastructure.
 
+:doc:`NVPTXUsage`
+   This document describes using the NVPTX back-end to compile GPU kernels.
+
+
 Development Process Documentation
 =================================
 
@@ -324,11 +305,15 @@ Information about LLVM's development process.
 .. toctree::
    :hidden:
 
+   DeveloperPolicy
    MakefileGuide
    Projects
    LLVMBuild
    HowToReleaseLLVM
    Packaging
+
+:doc:`DeveloperPolicy`
+   The LLVM project's policy towards developers and their contributions.
 
 :doc:`Projects`
   How-to guide and templates for new projects that *use* the LLVM
@@ -349,45 +334,74 @@ Information about LLVM's development process.
 :doc:`Packaging`
    Advice on packaging LLVM into a distribution.
 
+Community
+=========
+
+LLVM has a thriving community of friendly and helpful developers.
+The two primary communication mechanisms in the LLVM community are mailing
+lists and IRC.
+
 Mailing Lists
-=============
+-------------
 
 If you can't find what you need in these docs, try consulting the mailing
 lists.
 
-`LLVM Announcements List`__
-  This is a low volume list that provides important announcements regarding
-  LLVM.  It gets email about once a month.
-
-  .. __: http://lists.cs.uiuc.edu/mailman/listinfo/llvm-announce
-
-`Developer's List`__
+`Developer's List (llvmdev)`__
   This list is for people who want to be included in technical discussions of
   LLVM. People post to this list when they have questions about writing code
   for or using the LLVM tools. It is relatively low volume.
 
   .. __: http://lists.cs.uiuc.edu/mailman/listinfo/llvmdev
 
-`Bugs & Patches Archive`__
-  This list gets emailed every time a bug is opened and closed, and when people
-  submit patches to be included in LLVM.  It is higher volume than the LLVMdev
-  list.
-
-  .. __: http://lists.cs.uiuc.edu/pipermail/llvmbugs/
-
-`Commits Archive`__
+`Commits Archive (llvm-commits)`__
   This list contains all commit messages that are made when LLVM developers
-  commit code changes to the repository. It is useful for those who want to
-  stay on the bleeding edge of LLVM development. This list is very high volume.
+  commit code changes to the repository. It also serves as a forum for
+  patch review (i.e. send patches here). It is useful for those who want to
+  stay on the bleeding edge of LLVM development. This list is very high
+  volume.
 
   .. __: http://lists.cs.uiuc.edu/pipermail/llvm-commits/
 
-`Test Results Archive`__
+`Bugs & Patches Archive (llvmbugs)`__
+  This list gets emailed every time a bug is opened and closed. It is
+  higher volume than the LLVMdev list.
+
+  .. __: http://lists.cs.uiuc.edu/pipermail/llvmbugs/
+
+`Test Results Archive (llvm-testresults)`__
   A message is automatically sent to this list by every active nightly tester
   when it completes.  As such, this list gets email several times each day,
   making it a high volume list.
 
   .. __: http://lists.cs.uiuc.edu/pipermail/llvm-testresults/
+
+`LLVM Announcements List (llvm-announce)`__
+  This is a low volume list that provides important announcements regarding
+  LLVM.  It gets email about once a month.
+
+  .. __: http://lists.cs.uiuc.edu/mailman/listinfo/llvm-announce
+
+IRC
+---
+
+Users and developers of the LLVM project (including subprojects such as Clang)
+can be found in #llvm on `irc.oftc.net <irc://irc.oftc.net/llvm>`_.
+
+This channel has several bots.
+
+* Buildbot reporters
+
+  * llvmbb - Bot for the main LLVM buildbot master.
+    http://lab.llvm.org:8011/console
+  * bb-chapuni - An individually run buildbot master. http://bb.pgr.jp/console
+  * smooshlab - Apple's internal buildbot master.
+
+* robot - Bugzilla linker. %bug <number>
+
+* clang-bot - A `geordi <http://www.eelis.net/geordi/>`_ instance running
+  near-trunk clang instead of gcc.
+
 
 Indices and tables
 ==================

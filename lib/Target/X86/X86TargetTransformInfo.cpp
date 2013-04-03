@@ -169,6 +169,29 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
+  static const CostTblEntry<MVT> AVX2CostTable[] = {
+    // Shifts on v4i64/v8i32 on AVX2 is legal even though we declare to
+    // customize them to detect the cases where shift amount is a scalar one.
+    { ISD::SHL,     MVT::v4i32,    1 },
+    { ISD::SRL,     MVT::v4i32,    1 },
+    { ISD::SRA,     MVT::v4i32,    1 },
+    { ISD::SHL,     MVT::v8i32,    1 },
+    { ISD::SRL,     MVT::v8i32,    1 },
+    { ISD::SRA,     MVT::v8i32,    1 },
+    { ISD::SHL,     MVT::v2i64,    1 },
+    { ISD::SRL,     MVT::v2i64,    1 },
+    { ISD::SHL,     MVT::v4i64,    1 },
+    { ISD::SRL,     MVT::v4i64,    1 },
+  };
+
+  // Look for AVX2 lowering tricks.
+  if (ST->hasAVX2()) {
+    int Idx = CostTableLookup<MVT>(AVX2CostTable, array_lengthof(AVX2CostTable),
+                                   ISD, LT.second);
+    if (Idx != -1)
+      return LT.first * AVX2CostTable[Idx].Cost;
+  }
+
   static const CostTblEntry<MVT> AVX1CostTable[] = {
     // We don't have to scalarize unsupported ops. We can issue two half-sized
     // operations and we only need to extract the upper YMM half.
@@ -248,17 +271,40 @@ unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
     { ISD::ZERO_EXTEND, MVT::v4i64, MVT::v4i32, 1 },
     { ISD::TRUNCATE,    MVT::v4i32, MVT::v4i64, 1 },
     { ISD::TRUNCATE,    MVT::v8i16, MVT::v8i32, 1 },
-    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i8,  1 },
-    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i8,  1 },
-    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i8,  1 },
-    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i8,  1 },
+
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i1,  8 },
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i8,  8 },
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i16, 5 },
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i32, 1 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i1,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i8,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i16, 3 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i32, 1 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i1,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i8,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i16, 3 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i32, 1 },
+
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i1,  6 },
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i8,  5 },
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i16, 5 },
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i32, 9 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i1,  7 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i8,  2 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i16, 2 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i32, 6 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i1,  7 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i8,  2 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i16, 2 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i32, 6 },
+
     { ISD::FP_TO_SINT,  MVT::v8i8,  MVT::v8f32, 1 },
     { ISD::FP_TO_SINT,  MVT::v4i8,  MVT::v4f32, 1 },
     { ISD::ZERO_EXTEND, MVT::v8i32, MVT::v8i1,  6 },
     { ISD::SIGN_EXTEND, MVT::v8i32, MVT::v8i1,  9 },
     { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i1,  8 },
-    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i8,  8 },
-    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i16, 8 },
+    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i8,  6 },
+    { ISD::SIGN_EXTEND, MVT::v4i64, MVT::v4i16, 6 },
     { ISD::TRUNCATE,    MVT::v8i32, MVT::v8i64, 3 },
   };
 

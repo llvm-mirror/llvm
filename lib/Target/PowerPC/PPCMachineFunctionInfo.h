@@ -37,8 +37,18 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   /// PEI.
   bool MustSaveLR;
 
+  /// Does this function have any stack spills.
+  bool HasSpills;
+
+  /// Does this function spill using instructions with only r+r (not r+i)
+  /// forms.
+  bool HasNonRISpills;
+
   /// SpillsCR - Indicates whether CR is spilled in the current function.
   bool SpillsCR;
+
+  /// Indicates whether VRSAVE is spilled in the current function.
+  bool SpillsVRSAVE;
 
   /// LRStoreRequired - The bool indicates whether there is some explicit use of
   /// the LR/LR8 stack slot that is not obvious from scanning the code.  This
@@ -78,7 +88,10 @@ public:
   explicit PPCFunctionInfo(MachineFunction &MF) 
     : FramePointerSaveIndex(0),
       ReturnAddrSaveIndex(0),
+      HasSpills(false),
+      HasNonRISpills(false),
       SpillsCR(false),
+      SpillsVRSAVE(false),
       LRStoreRequired(false),
       MinReservedArea(0),
       TailCallSPDelta(0),
@@ -109,8 +122,17 @@ public:
   void setMustSaveLR(bool U) { MustSaveLR = U; }
   bool mustSaveLR() const    { return MustSaveLR; }
 
+  void setHasSpills()      { HasSpills = true; }
+  bool hasSpills() const   { return HasSpills; }
+
+  void setHasNonRISpills()    { HasNonRISpills = true; }
+  bool hasNonRISpills() const { return HasNonRISpills; }
+
   void setSpillsCR()       { SpillsCR = true; }
   bool isCRSpilled() const { return SpillsCR; }
+
+  void setSpillsVRSAVE()       { SpillsVRSAVE = true; }
+  bool isVRSAVESpilled() const { return SpillsVRSAVE; }
 
   void setLRStoreRequired() { LRStoreRequired = true; }
   bool isLRStoreRequired() const { return LRStoreRequired; }

@@ -352,11 +352,16 @@ DIE *DwarfDebug::updateSubprogramScopeDIE(CompileUnit *SPCU,
   // If we're updating an abstract DIE, then we will be adding the children and
   // object pointer later on. But what we don't want to do is process the
   // concrete DIE twice.
-  if (DIE *AbsSPDIE = AbstractSPDies.lookup(SPNode)) {
+  DIE *AbsSPDIE = AbstractSPDies.lookup(SPNode);
+  if (AbsSPDIE) {
+    bool InSameCU = (AbsSPDIE->getCompileUnit() == SPCU->getCUDie());
     // Pick up abstract subprogram DIE.
     SPDie = new DIE(dwarf::DW_TAG_subprogram);
+    // If AbsSPDIE belongs to a different CU, use DW_FORM_ref_addr instead of
+    // DW_FORM_ref4.
     SPCU->addDIEEntry(SPDie, dwarf::DW_AT_abstract_origin,
-                      dwarf::DW_FORM_ref4, AbsSPDIE);
+                      InSameCU ? dwarf::DW_FORM_ref4 : dwarf::DW_FORM_ref_addr,
+                      AbsSPDIE);
     SPCU->addDie(SPDie);
   } else {
     DISubprogram SPDecl = SP.getFunctionDeclaration();
@@ -716,13 +721,6 @@ CompileUnit *DwarfDebug::constructCompileUnit(const MDNode *N) {
   if (!FirstCU)
     FirstCU = NewCU;
 
-  if (useSplitDwarf()) {
-    // This should be a unique identifier when we want to build .dwp files.
-    NewCU->addUInt(Die, dwarf::DW_AT_GNU_dwo_id, dwarf::DW_FORM_data8, 0);
-    // Now construct the skeleton CU associated.
-    constructSkeletonCU(N);
-  }
-
   InfoHolder.addUnit(NewCU);
 
   CUMap.insert(std::make_pair(N, NewCU));
@@ -789,6 +787,14 @@ void DwarfDebug::beginModule() {
     DIArray RetainedTypes = CUNode.getRetainedTypes();
     for (unsigned i = 0, e = RetainedTypes.getNumElements(); i != e; ++i)
       CU->getOrCreateTypeDIE(RetainedTypes.getElement(i));
+    // If we're splitting the dwarf out now that we've got the entire
+    // CU then construct a skeleton CU based upon it.
+    if (useSplitDwarf()) {
+    // This should be a unique identifier when we want to build .dwp files.
+      CU->addUInt(CU->getCUDie(), dwarf::DW_AT_GNU_dwo_id, dwarf::DW_FORM_data8, 0);
+      // Now construct the skeleton CU associated.
+      constructSkeletonCU(CUNode);
+    }
   }
 
   // Tell MMI that we have debug info.
@@ -1666,8 +1672,8 @@ DwarfUnits::computeSizeAndOffset(DIE *Die, unsigned Offset) {
   // Start the size with the size of abbreviation code.
   Offset += MCAsmInfo::getULEB128Size(AbbrevNumber);
 
-  const SmallVector<DIEValue*, 32> &Values = Die->getValues();
-  const SmallVector<DIEAbbrevData, 8> &AbbrevData = Abbrev->getData();
+  const SmallVectorImpl<DIEValue*> &Values = Die->getValues();
+  const SmallVectorImpl<DIEAbbrevData> &AbbrevData = Abbrev->getData();
 
   // Size the DIE attribute values.
   for (unsigned i = 0, N = Values.size(); i < N; ++i)
@@ -1692,15 +1698,19 @@ DwarfUnits::computeSizeAndOffset(DIE *Die, unsigned Offset) {
 
 // Compute the size and offset of all the DIEs.
 void DwarfUnits::computeSizeAndOffsets() {
-  for (SmallVector<CompileUnit *, 1>::iterator I = CUs.begin(),
+  // Offset from the beginning of debug info section.
+  unsigned AccuOffset = 0;
+  for (SmallVectorImpl<CompileUnit *>::iterator I = CUs.begin(),
          E = CUs.end(); I != E; ++I) {
+    (*I)->setDebugInfoOffset(AccuOffset);
     unsigned Offset =
       sizeof(int32_t) + // Length of Compilation Unit Info
       sizeof(int16_t) + // DWARF version number
       sizeof(int32_t) + // Offset Into Abbrev. Section
       sizeof(int8_t);   // Pointer Size (in bytes)
 
-    computeSizeAndOffset((*I)->getCUDie(), Offset);
+    unsigned EndOffset = computeSizeAndOffset((*I)->getCUDie(), Offset);
+    AccuOffset += EndOffset;
   }
 }
 
@@ -1757,8 +1767,8 @@ void DwarfDebug::emitDIE(DIE *Die, std::vector<DIEAbbrev *> *Abbrevs) {
                                 dwarf::TagString(Abbrev->getTag()));
   Asm->EmitULEB128(AbbrevNumber);
 
-  const SmallVector<DIEValue*, 32> &Values = Die->getValues();
-  const SmallVector<DIEAbbrevData, 8> &AbbrevData = Abbrev->getData();
+  const SmallVectorImpl<DIEValue*> &Values = Die->getValues();
+  const SmallVectorImpl<DIEAbbrevData> &AbbrevData = Abbrev->getData();
 
   // Emit the DIE attribute values.
   for (unsigned i = 0, N = Values.size(); i < N; ++i) {
@@ -1774,6 +1784,13 @@ void DwarfDebug::emitDIE(DIE *Die, std::vector<DIEAbbrev *> *Abbrevs) {
       DIEEntry *E = cast<DIEEntry>(Values[i]);
       DIE *Origin = E->getEntry();
       unsigned Addr = Origin->getOffset();
+      if (Form == dwarf::DW_FORM_ref_addr) {
+        // For DW_FORM_ref_addr, output the offset from beginning of debug info
+        // section. Origin->getOffset() returns the offset from start of the
+        // compile unit.
+        DwarfUnits &Holder = useSplitDwarf() ? SkeletonHolder : InfoHolder;
+        Addr += Holder.getCUOffset(Origin->getCompileUnit());
+      }
       Asm->EmitInt32(Addr);
       break;
     }
@@ -1839,7 +1856,7 @@ void DwarfUnits::emitUnits(DwarfDebug *DD,
                            const MCSection *ASection,
                            const MCSymbol *ASectionSym) {
   Asm->OutStreamer.SwitchSection(USection);
-  for (SmallVector<CompileUnit *, 1>::iterator I = CUs.begin(),
+  for (SmallVectorImpl<CompileUnit *>::iterator I = CUs.begin(),
          E = CUs.end(); I != E; ++I) {
     CompileUnit *TheCU = *I;
     DIE *Die = TheCU->getCUDie();
@@ -1869,6 +1886,19 @@ void DwarfUnits::emitUnits(DwarfDebug *DD,
     Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol(USection->getLabelEndName(),
                                                   TheCU->getUniqueID()));
   }
+}
+
+/// For a given compile unit DIE, returns offset from beginning of debug info.
+unsigned DwarfUnits::getCUOffset(DIE *Die) {
+  assert(Die->getTag() == dwarf::DW_TAG_compile_unit  &&
+         "Input DIE should be compile unit in getCUOffset.");
+  for (SmallVectorImpl<CompileUnit *>::iterator I = CUs.begin(),
+       E = CUs.end(); I != E; ++I) {
+    CompileUnit *TheCU = *I;
+    if (TheCU->getCUDie() == Die)
+      return TheCU->getDebugInfoOffset();
+  }
+  llvm_unreachable("The compile unit DIE should belong to CUs in DwarfUnits.");
 }
 
 // Emit the debug info section.
@@ -2255,7 +2285,7 @@ void DwarfDebug::emitDebugLoc() {
   if (DotDebugLocEntries.empty())
     return;
 
-  for (SmallVector<DotDebugLocEntry, 4>::iterator
+  for (SmallVectorImpl<DotDebugLocEntry>::iterator
          I = DotDebugLocEntries.begin(), E = DotDebugLocEntries.end();
        I != E; ++I) {
     DotDebugLocEntry &Entry = *I;
@@ -2269,7 +2299,7 @@ void DwarfDebug::emitDebugLoc() {
   unsigned char Size = Asm->getDataLayout().getPointerSize();
   Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("debug_loc", 0));
   unsigned index = 1;
-  for (SmallVector<DotDebugLocEntry, 4>::iterator
+  for (SmallVectorImpl<DotDebugLocEntry>::iterator
          I = DotDebugLocEntries.begin(), E = DotDebugLocEntries.end();
        I != E; ++I, ++index) {
     DotDebugLocEntry &Entry = *I;
@@ -2362,7 +2392,7 @@ void DwarfDebug::emitDebugRanges() {
   Asm->OutStreamer.SwitchSection(
     Asm->getObjFileLowering().getDwarfRangesSection());
   unsigned char Size = Asm->getDataLayout().getPointerSize();
-  for (SmallVector<const MCSymbol *, 8>::iterator
+  for (SmallVectorImpl<const MCSymbol *>::iterator
          I = DebugRangeSymbols.begin(), E = DebugRangeSymbols.end();
        I != E; ++I) {
     if (*I)
@@ -2420,13 +2450,13 @@ void DwarfDebug::emitDebugInlineInfo() {
   Asm->OutStreamer.AddComment("Address Size (in bytes)");
   Asm->EmitInt8(Asm->getDataLayout().getPointerSize());
 
-  for (SmallVector<const MDNode *, 4>::iterator I = InlinedSPNodes.begin(),
+  for (SmallVectorImpl<const MDNode *>::iterator I = InlinedSPNodes.begin(),
          E = InlinedSPNodes.end(); I != E; ++I) {
 
     const MDNode *Node = *I;
     DenseMap<const MDNode *, SmallVector<InlineInfoLabels, 4> >::iterator II
       = InlineInfo.find(Node);
-    SmallVector<InlineInfoLabels, 4> &Labels = II->second;
+    SmallVectorImpl<InlineInfoLabels> &Labels = II->second;
     DISubprogram SP(Node);
     StringRef LName = SP.getLinkageName();
     StringRef Name = SP.getName();
@@ -2445,7 +2475,7 @@ void DwarfDebug::emitDebugInlineInfo() {
                            DwarfStrSectionSym);
     Asm->EmitULEB128(Labels.size(), "Inline count");
 
-    for (SmallVector<InlineInfoLabels, 4>::iterator LI = Labels.begin(),
+    for (SmallVectorImpl<InlineInfoLabels>::iterator LI = Labels.begin(),
            LE = Labels.end(); LI != LE; ++LI) {
       if (Asm->isVerbose()) Asm->OutStreamer.AddComment("DIE offset");
       Asm->EmitInt32(LI->second->getOffset());

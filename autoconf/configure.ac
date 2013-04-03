@@ -1270,7 +1270,6 @@ dnl Check optional compiler flags.
 AC_MSG_CHECKING([optional compiler flags])
 CXX_FLAG_CHECK(NO_VARIADIC_MACROS, [-Wno-variadic-macros])
 CXX_FLAG_CHECK(NO_MISSING_FIELD_INITIALIZERS, [-Wno-missing-field-initializers])
-CXX_FLAG_CHECK(NO_NESTED_ANON_TYPES, [-Wno-nested-anon-types])
 CXX_FLAG_CHECK(COVERED_SWITCH_DEFAULT, [-Wcovered-switch-default])
 
 dnl GCC's potential uninitialized use analysis is weak and presents lots of
@@ -1288,7 +1287,7 @@ then
     CXX_FLAG_CHECK(NO_UNINITIALIZED, [-Wno-uninitialized])
   fi
 fi
-AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $NO_NESTED_ANON_TYPES $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED])
+AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED])
 
 AC_ARG_WITH([python],
             [AS_HELP_STRING([--with-python], [path to python])],
@@ -1494,6 +1493,7 @@ AC_CHECK_HEADERS([sys/mman.h sys/param.h sys/resource.h sys/time.h sys/uio.h])
 AC_CHECK_HEADERS([sys/types.h sys/ioctl.h malloc/malloc.h mach/mach.h])
 AC_CHECK_HEADERS([valgrind/valgrind.h])
 AC_CHECK_HEADERS([fenv.h])
+AC_CHECK_DECLS([FE_ALL_EXCEPT, FE_INEXACT], [], [], [[#include <fenv.h>]])
 if test "$LLVM_ENABLE_THREADS" -eq 1 && test "$ENABLE_PTHREADS" -eq 1 ; then
   AC_CHECK_HEADERS(pthread.h,
                    AC_SUBST(HAVE_PTHREAD, 1),

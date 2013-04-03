@@ -410,7 +410,7 @@ bool ObjCARCContract::runOnFunction(Function &F) {
           break;
         }
         --BBI;
-      } while (isNoopInstruction(BBI));
+      } while (IsNoopInstruction(BBI));
 
       if (&*BBI == GetObjCArg(Inst)) {
         DEBUG(dbgs() << "ObjCARCContract: Adding inline asm marker for "
@@ -429,7 +429,7 @@ bool ObjCARCContract::runOnFunction(Function &F) {
     case IC_InitWeak: {
       // objc_initWeak(p, null) => *p = null
       CallInst *CI = cast<CallInst>(Inst);
-      if (isNullOrUndef(CI->getArgOperand(1))) {
+      if (IsNullOrUndef(CI->getArgOperand(1))) {
         Value *Null =
           ConstantPointerNull::get(cast<PointerType>(CI->getType()));
         Changed = true;
@@ -452,6 +452,10 @@ bool ObjCARCContract::runOnFunction(Function &F) {
       // but this is sufficient to handle some interesting cases.
       if (isa<AllocaInst>(Inst))
         TailOkForStoreStrongs = false;
+      continue;
+    case IC_IntrinsicUser:
+      // Remove calls to @clang.arc.use(...).
+      Inst->eraseFromParent();
       continue;
     default:
       continue;

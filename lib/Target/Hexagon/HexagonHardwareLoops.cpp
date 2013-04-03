@@ -701,7 +701,7 @@ CountValue *HexagonHardwareLoops::computeCount(MachineLoop *Loop,
 
   // If the induction variable bump is not a power of 2, quit.
   // Othwerise we'd need a general integer division.
-  if (!isPowerOf2_64(abs(IVBump)))
+  if (!isPowerOf2_64(abs64(IVBump)))
     return 0;
 
   MachineBasicBlock *PH = Loop->getLoopPreheader();
@@ -1430,7 +1430,6 @@ MachineBasicBlock *HexagonHardwareLoops::createPreheaderForLoop(
     return 0;
 
   typedef MachineBasicBlock::instr_iterator instr_iterator;
-  typedef MachineBasicBlock::pred_iterator pred_iterator;
 
   // Verify that all existing predecessors have analyzable branches
   // (or no branches at all).

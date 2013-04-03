@@ -151,7 +151,9 @@ bool AMDGPUPassConfig::addPreEmitPass() {
   if (ST.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX) {
     addPass(createAMDGPUCFGPreparationPass(*TM));
     addPass(createAMDGPUCFGStructurizerPass(*TM));
+    addPass(createR600EmitClauseMarkers(*TM));
     addPass(createR600ExpandSpecialInstrsPass(*TM));
+    addPass(createR600ControlFlowFinalizer(*TM));
     addPass(&FinalizeMachineBundlesID);
   } else {
     addPass(createSILowerControlFlowPass(*TM));

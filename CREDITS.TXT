@@ -423,7 +423,6 @@ D: Thread Local Storage implementation
 
 N: Bill Wendling
 E: wendling@apple.com
-D: Exception handling
 D: Bunches of stuff
 
 N: Bob Wilson

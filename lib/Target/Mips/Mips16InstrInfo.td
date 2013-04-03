@@ -15,7 +15,7 @@
 // Mips Address
 //
 def addr16 :
-  ComplexPattern<iPTR, 3, "SelectAddr16", [frameindex], [SDNPWantParent]>;
+  ComplexPattern<iPTR, 3, "selectAddr16", [frameindex], [SDNPWantParent]>;
 
 //
 // Address operand
@@ -1466,14 +1466,14 @@ def: Mips16Pat<(i32 immZExt16:$in), (LiRxImmX16 immZExt16:$in)>;
 // MipsDivRem
 //
 def: Mips16Pat
-  <(MipsDivRem CPU16Regs:$rx, CPU16Regs:$ry),
+  <(MipsDivRem16 CPU16Regs:$rx, CPU16Regs:$ry),
    (DivRxRy16 CPU16Regs:$rx, CPU16Regs:$ry)>;
 
 //
 // MipsDivRemU
 //
 def: Mips16Pat
-  <(MipsDivRemU CPU16Regs:$rx, CPU16Regs:$ry),
+  <(MipsDivRemU16 CPU16Regs:$rx, CPU16Regs:$ry),
    (DivuRxRy16 CPU16Regs:$rx, CPU16Regs:$ry)>;
 
 //  signed a,b

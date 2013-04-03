@@ -136,6 +136,12 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     else if (Mips::FGR64RegClass.contains(DestReg))
       Opc = Mips::DMTC1;
   }
+  else if (Mips::ACRegsRegClass.contains(DestReg, SrcReg))
+    Opc = Mips::COPY_AC64;
+  else if (Mips::ACRegsDSPRegClass.contains(DestReg, SrcReg))
+    Opc = Mips::COPY_AC_DSP;
+  else if (Mips::ACRegs128RegClass.contains(DestReg, SrcReg))
+    Opc = Mips::COPY_AC128;
 
   assert(Opc && "Cannot copy registers");
 
@@ -152,10 +158,10 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 }
 
 void MipsSEInstrInfo::
-storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-                    unsigned SrcReg, bool isKill, int FI,
-                    const TargetRegisterClass *RC,
-                    const TargetRegisterInfo *TRI) const {
+storeRegToStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                unsigned SrcReg, bool isKill, int FI,
+                const TargetRegisterClass *RC, const TargetRegisterInfo *TRI,
+                int64_t Offset) const {
   DebugLoc DL;
   if (I != MBB.end()) DL = I->getDebugLoc();
   MachineMemOperand *MMO = GetMemOperand(MBB, FI, MachineMemOperand::MOStore);
@@ -166,6 +172,12 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     Opc = IsN64 ? Mips::SW_P8 : Mips::SW;
   else if (Mips::CPU64RegsRegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::SD_P8 : Mips::SD;
+  else if (Mips::ACRegsRegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::STORE_AC64_P8 : Mips::STORE_AC64;
+  else if (Mips::ACRegsDSPRegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::STORE_AC_DSP_P8 : Mips::STORE_AC_DSP;
+  else if (Mips::ACRegs128RegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::STORE_AC128_P8 : Mips::STORE_AC128;
   else if (Mips::FGR32RegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::SWC1_P8 : Mips::SWC1;
   else if (Mips::AFGR64RegClass.hasSubClassEq(RC))
@@ -175,15 +187,13 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
   assert(Opc && "Register class not handled!");
   BuildMI(MBB, I, DL, get(Opc)).addReg(SrcReg, getKillRegState(isKill))
-    .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+    .addFrameIndex(FI).addImm(Offset).addMemOperand(MMO);
 }
 
 void MipsSEInstrInfo::
-loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-                     unsigned DestReg, int FI,
-                     const TargetRegisterClass *RC,
-                     const TargetRegisterInfo *TRI) const
-{
+loadRegFromStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                 unsigned DestReg, int FI, const TargetRegisterClass *RC,
+                 const TargetRegisterInfo *TRI, int64_t Offset) const {
   DebugLoc DL;
   if (I != MBB.end()) DL = I->getDebugLoc();
   MachineMemOperand *MMO = GetMemOperand(MBB, FI, MachineMemOperand::MOLoad);
@@ -193,6 +203,12 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     Opc = IsN64 ? Mips::LW_P8 : Mips::LW;
   else if (Mips::CPU64RegsRegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::LD_P8 : Mips::LD;
+  else if (Mips::ACRegsRegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::LOAD_AC64_P8 : Mips::LOAD_AC64;
+  else if (Mips::ACRegsDSPRegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::LOAD_AC_DSP_P8 : Mips::LOAD_AC_DSP;
+  else if (Mips::ACRegs128RegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::LOAD_AC128_P8 : Mips::LOAD_AC128;
   else if (Mips::FGR32RegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::LWC1_P8 : Mips::LWC1;
   else if (Mips::AFGR64RegClass.hasSubClassEq(RC))
@@ -201,7 +217,7 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     Opc = IsN64 ? Mips::LDC164_P8 : Mips::LDC164;
 
   assert(Opc && "Register class not handled!");
-  BuildMI(MBB, I, DL, get(Opc), DestReg).addFrameIndex(FI).addImm(0)
+  BuildMI(MBB, I, DL, get(Opc), DestReg).addFrameIndex(FI).addImm(Offset)
     .addMemOperand(MMO);
 }
 

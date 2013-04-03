@@ -58,6 +58,11 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   computeRegisterProperties();
 
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v8i32, Expand);
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v8f32, Expand);
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v16i32, Expand);
+  setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v16f32, Expand);
+
   setOperationAction(ISD::ADD, MVT::i64, Legal);
   setOperationAction(ISD::ADD, MVT::i32, Legal);
 
@@ -69,7 +74,7 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   setTargetDAGCombine(ISD::SETCC);
 
-  setSchedulingPreference(Sched::Source);
+  setSchedulingPreference(Sched::RegPressure);
 }
 
 SDValue SITargetLowering::LowerFormalArguments(
@@ -203,30 +208,21 @@ SDValue SITargetLowering::LowerFormalArguments(
 
 MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     MachineInstr * MI, MachineBasicBlock * BB) const {
-  MachineRegisterInfo & MRI = BB->getParent()->getRegInfo();
-  MachineBasicBlock::iterator I = MI;
 
   switch (MI->getOpcode()) {
   default:
     return AMDGPUTargetLowering::EmitInstrWithCustomInserter(MI, BB);
   case AMDGPU::BRANCH: return BB;
-  case AMDGPU::SI_WQM:
-    LowerSI_WQM(MI, *BB, I, MRI);
-    break;
   }
   return BB;
 }
 
-void SITargetLowering::LowerSI_WQM(MachineInstr *MI, MachineBasicBlock &BB,
-    MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const {
-  BuildMI(BB, I, BB.findDebugLoc(I), TII->get(AMDGPU::S_WQM_B64), AMDGPU::EXEC)
-          .addReg(AMDGPU::EXEC);
-
-  MI->eraseFromParent();
-}
-
 EVT SITargetLowering::getSetCCResultType(EVT VT) const {
   return MVT::i1;
+}
+
+MVT SITargetLowering::getScalarShiftAmountTy(EVT VT) const {
+  return MVT::i32;
 }
 
 //===----------------------------------------------------------------------===//
@@ -488,22 +484,23 @@ bool SITargetLowering::fitsRegClass(SelectionDAG &DAG, SDValue &Op,
   MachineRegisterInfo &MRI = DAG.getMachineFunction().getRegInfo(); 
   SDNode *Node = Op.getNode();
 
-  int OpClass;
+  const TargetRegisterClass *OpClass;
   if (MachineSDNode *MN = dyn_cast<MachineSDNode>(Node)) {
     const MCInstrDesc &Desc = TII->get(MN->getMachineOpcode());
-    OpClass = Desc.OpInfo[Op.getResNo()].RegClass;
+    int OpClassID = Desc.OpInfo[Op.getResNo()].RegClass;
+    if (OpClassID == -1)
+      OpClass = getRegClassFor(Op.getSimpleValueType());
+    else
+      OpClass = TRI->getRegClass(OpClassID);
 
   } else if (Node->getOpcode() == ISD::CopyFromReg) {
     RegisterSDNode *Reg = cast<RegisterSDNode>(Node->getOperand(1).getNode());
-    OpClass = MRI.getRegClass(Reg->getReg())->getID();
+    OpClass = MRI.getRegClass(Reg->getReg());
 
   } else
     return false;
 
-  if (OpClass == -1)
-    return false;
-
-  return TRI->getRegClass(RegClass)->hasSubClassEq(TRI->getRegClass(OpClass));
+  return TRI->getRegClass(RegClass)->hasSubClassEq(OpClass);
 }
 
 /// \brief Make sure that we don't exeed the number of allowed scalars
@@ -546,6 +543,13 @@ SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
 
   unsigned NumDefs = Desc->getNumDefs();
   unsigned NumOps = Desc->getNumOperands();
+
+  // Commuted opcode if available
+  int OpcodeRev = Desc->isCommutable() ? TII->commuteOpcode(Opcode) : -1;
+  const MCInstrDesc *DescRev = OpcodeRev == -1 ? 0 : &TII->get(OpcodeRev);
+
+  assert(!DescRev || DescRev->getNumDefs() == NumDefs);
+  assert(!DescRev || DescRev->getNumOperands() == NumOps);
 
   // e64 version if available, -1 otherwise
   int OpcodeE64 = AMDGPU::getVOPe64(Opcode);
@@ -599,41 +603,54 @@ SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
 
     // Is this a VSrc or SSrc operand ?
     unsigned RegClass = Desc->OpInfo[Op].RegClass;
-    if (!isVSrc(RegClass) && !isSSrc(RegClass)) {
+    if (isVSrc(RegClass) || isSSrc(RegClass)) {
+      // Try to fold the immediates
+      if (!foldImm(Ops[i], Immediate, ScalarSlotUsed)) {
+        // Folding didn't worked, make sure we don't hit the SReg limit
+        ensureSRegLimit(DAG, Ops[i], RegClass, ScalarSlotUsed);
+      }
+      continue;
+    }
 
-      if (i == 1 && Desc->isCommutable() &&
-          fitsRegClass(DAG, Ops[0], RegClass) &&
-          foldImm(Ops[1], Immediate, ScalarSlotUsed)) {
+    if (i == 1 && DescRev && fitsRegClass(DAG, Ops[0], RegClass)) {
 
-        assert(isVSrc(Desc->OpInfo[NumDefs].RegClass) ||
-               isSSrc(Desc->OpInfo[NumDefs].RegClass));
+      unsigned OtherRegClass = Desc->OpInfo[NumDefs].RegClass;
+      assert(isVSrc(OtherRegClass) || isSSrc(OtherRegClass));
+
+      // Test if it makes sense to swap operands
+      if (foldImm(Ops[1], Immediate, ScalarSlotUsed) ||
+          (!fitsRegClass(DAG, Ops[1], RegClass) &&
+           fitsRegClass(DAG, Ops[1], OtherRegClass))) {
 
         // Swap commutable operands
         SDValue Tmp = Ops[1];
         Ops[1] = Ops[0];
         Ops[0] = Tmp;
 
-      } else if (DescE64 && !Immediate) {
-        // Test if it makes sense to switch to e64 encoding
-
-        RegClass = DescE64->OpInfo[Op].RegClass;
-        int32_t TmpImm = -1;
-        if ((isVSrc(RegClass) || isSSrc(RegClass)) &&
-            foldImm(Ops[i], TmpImm, ScalarSlotUsed)) {
-
-          Immediate = -1;
-          Promote2e64 = true;
-          Desc = DescE64;
-          DescE64 = 0;
-        }
+        Desc = DescRev;
+        DescRev = 0;
+        continue;
       }
-      continue;
     }
 
-    // Try to fold the immediates
-    if (!foldImm(Ops[i], Immediate, ScalarSlotUsed)) {
-      // Folding didn't worked, make sure we don't hit the SReg limit
-      ensureSRegLimit(DAG, Ops[i], RegClass, ScalarSlotUsed);
+    if (DescE64 && !Immediate) {
+
+      // Test if it makes sense to switch to e64 encoding
+      unsigned OtherRegClass = DescE64->OpInfo[Op].RegClass;
+      if (!isVSrc(OtherRegClass) && !isSSrc(OtherRegClass))
+        continue;
+
+      int32_t TmpImm = -1;
+      if (foldImm(Ops[i], TmpImm, ScalarSlotUsed) ||
+          (!fitsRegClass(DAG, Ops[i], RegClass) &&
+           fitsRegClass(DAG, Ops[1], OtherRegClass))) {
+
+        // Switch to e64 encoding
+        Immediate = -1;
+        Promote2e64 = true;
+        Desc = DescE64;
+        DescE64 = 0;
+      }
     }
   }
 
@@ -647,10 +664,7 @@ SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
   for (unsigned i = NumOps - NumDefs, e = Node->getNumOperands(); i < e; ++i)
     Ops.push_back(Node->getOperand(i));
 
-  // Either create a complete new or update the current instruction
-  if (Promote2e64)
-    return DAG.getMachineNode(OpcodeE64, Node->getDebugLoc(),
-                              Node->getVTList(), Ops.data(), Ops.size());
-  else
-    return DAG.UpdateNodeOperands(Node, Ops.data(), Ops.size());
+  // Create a complete new instruction
+  return DAG.getMachineNode(Desc->Opcode, Node->getDebugLoc(),
+                            Node->getVTList(), Ops.data(), Ops.size());
 }

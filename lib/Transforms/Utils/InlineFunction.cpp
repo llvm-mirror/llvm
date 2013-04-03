@@ -82,7 +82,8 @@ namespace {
     /// a simple branch. When there is more than one predecessor, we need to
     /// split the landing pad block after the landingpad instruction and jump
     /// to there.
-    void forwardResume(ResumeInst *RI);
+    void forwardResume(ResumeInst *RI,
+                       SmallPtrSet<LandingPadInst*, 16> &InlinedLPads);
 
     /// addIncomingPHIValuesFor - Add incoming-PHI values to the unwind
     /// destination block for the given basic block, using the values for the
@@ -140,8 +141,10 @@ BasicBlock *InvokeInliningInfo::getInnerResumeDest() {
 /// block. When the landing pad block has only one predecessor, this is a simple
 /// branch. When there is more than one predecessor, we need to split the
 /// landing pad block after the landingpad instruction and jump to there.
-void InvokeInliningInfo::forwardResume(ResumeInst *RI) {
+void InvokeInliningInfo::forwardResume(ResumeInst *RI,
+                               SmallPtrSet<LandingPadInst*, 16> &InlinedLPads) {
   BasicBlock *Dest = getInnerResumeDest();
+  LandingPadInst *OuterLPad = getLandingPadInst();
   BasicBlock *Src = RI->getParent();
 
   BranchInst::Create(Dest, Src);
@@ -152,6 +155,16 @@ void InvokeInliningInfo::forwardResume(ResumeInst *RI) {
 
   InnerEHValuesPHI->addIncoming(RI->getOperand(0), Src);
   RI->eraseFromParent();
+
+  // Append the clauses from the outer landing pad instruction into the inlined
+  // landing pad instructions.
+  for (SmallPtrSet<LandingPadInst*, 16>::iterator I = InlinedLPads.begin(),
+         E = InlinedLPads.end(); I != E; ++I) {
+    LandingPadInst *InlinedLPad = *I;
+    for (unsigned OuterIdx = 0, OuterNum = OuterLPad->getNumClauses();
+         OuterIdx != OuterNum; ++OuterIdx)
+      InlinedLPad->addClause(OuterLPad->getClause(OuterIdx));
+  }
 }
 
 /// HandleCallsInBlockInlinedThroughInvoke - When we inline a basic block into
@@ -229,19 +242,15 @@ static void HandleInlinedInvoke(InvokeInst *II, BasicBlock *FirstNewBlock,
 
   // The inlined code is currently at the end of the function, scan from the
   // start of the inlined code to its end, checking for stuff we need to
-  // rewrite.  If the code doesn't have calls or unwinds, we know there is
-  // nothing to rewrite.
-  if (!InlinedCodeInfo.ContainsCalls) {
-    // Now that everything is happy, we have one final detail.  The PHI nodes in
-    // the exception destination block still have entries due to the original
-    // invoke instruction.  Eliminate these entries (which might even delete the
-    // PHI node) now.
-    InvokeDest->removePredecessor(II->getParent());
-    return;
-  }
-
+  // rewrite.
   InvokeInliningInfo Invoke(II);
-  
+
+  // Get all of the inlined landing pad instructions.
+  SmallPtrSet<LandingPadInst*, 16> InlinedLPads;
+  for (Function::iterator I = FirstNewBlock, E = Caller->end(); I != E; ++I)
+    if (InvokeInst *II = dyn_cast<InvokeInst>(I->getTerminator()))
+      InlinedLPads.insert(II->getLandingPadInst());
+
   for (Function::iterator BB = FirstNewBlock, E = Caller->end(); BB != E; ++BB){
     if (InlinedCodeInfo.ContainsCalls)
       if (HandleCallsInBlockInlinedThroughInvoke(BB, Invoke)) {
@@ -250,13 +259,14 @@ static void HandleInlinedInvoke(InvokeInst *II, BasicBlock *FirstNewBlock,
         continue;
       }
 
+    // Forward any resumes that are remaining here.
     if (ResumeInst *RI = dyn_cast<ResumeInst>(BB->getTerminator()))
-      Invoke.forwardResume(RI);
+      Invoke.forwardResume(RI, InlinedLPads);
   }
 
   // Now that everything is happy, we have one final detail.  The PHI nodes in
   // the exception destination block still have entries due to the original
-  // invoke instruction.  Eliminate these entries (which might even delete the
+  // invoke instruction. Eliminate these entries (which might even delete the
   // PHI node) now.
   InvokeDest->removePredecessor(II->getParent());
 }

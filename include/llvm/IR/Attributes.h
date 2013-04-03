@@ -226,11 +226,6 @@ private:
   explicit AttributeSet(AttributeSetImpl *LI) : pImpl(LI) {}
 public:
   AttributeSet() : pImpl(0) {}
-  AttributeSet(const AttributeSet &P) : pImpl(P.pImpl) {}
-  const AttributeSet &operator=(const AttributeSet &RHS) {
-    pImpl = RHS.pImpl;
-    return *this;
-  }
 
   //===--------------------------------------------------------------------===//
   // AttributeSet Construction and Mutation
@@ -246,6 +241,11 @@ public:
   /// attribute sets are immutable, this returns a new set.
   AttributeSet addAttribute(LLVMContext &C, unsigned Idx,
                             Attribute::AttrKind Attr) const;
+
+  /// \brief Add an attribute to the attribute set at the given index. Since
+  /// attribute sets are immutable, this returns a new set.
+  AttributeSet addAttribute(LLVMContext &C, unsigned Idx,
+                            StringRef Kind) const;
 
   /// \brief Add attributes to the attribute set at the given index. Since
   /// attribute sets are immutable, this returns a new set.
