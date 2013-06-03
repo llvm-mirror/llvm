@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetInstrInfo.h"
 
@@ -27,6 +28,10 @@
 #include "SparcGenRegisterInfo.inc"
 
 using namespace llvm;
+
+static cl::opt<bool>
+ReserveAppRegisters("sparc-reserve-app-registers", cl::Hidden, cl::init(false),
+                    cl::desc("Reserve application registers (%g2-%g4)"));
 
 SparcRegisterInfo::SparcRegisterInfo(SparcSubtarget &st,
                                      const TargetInstrInfo &tii)
@@ -43,17 +48,30 @@ BitVector SparcRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   // FIXME: G1 reserved for now for large imm generation by frame code.
   Reserved.set(SP::G1);
-  Reserved.set(SP::G2);
-  Reserved.set(SP::G3);
-  Reserved.set(SP::G4);
+
+  //G1-G4 can be used in applications.
+  if (ReserveAppRegisters) {
+    Reserved.set(SP::G2);
+    Reserved.set(SP::G3);
+    Reserved.set(SP::G4);
+  }
+  //G5 is not reserved in 64 bit mode.
+  if (!Subtarget.is64Bit())
+    Reserved.set(SP::G5);
+
   Reserved.set(SP::O6);
   Reserved.set(SP::I6);
   Reserved.set(SP::I7);
   Reserved.set(SP::G0);
-  Reserved.set(SP::G5);
   Reserved.set(SP::G6);
   Reserved.set(SP::G7);
   return Reserved;
+}
+
+const TargetRegisterClass*
+SparcRegisterInfo::getPointerRegClass(const MachineFunction &MF,
+                                      unsigned Kind) const {
+  return Subtarget.is64Bit() ? &SP::I64RegsRegClass : &SP::IntRegsRegClass;
 }
 
 void
@@ -68,8 +86,9 @@ SparcRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
   // Addressable stack objects are accessed using neg. offsets from %fp
   MachineFunction &MF = *MI.getParent()->getParent();
-  int Offset = MF.getFrameInfo()->getObjectOffset(FrameIndex) +
-               MI.getOperand(FIOperandNum + 1).getImm();
+  int64_t Offset = MF.getFrameInfo()->getObjectOffset(FrameIndex) +
+                   MI.getOperand(FIOperandNum + 1).getImm() +
+                   Subtarget.getStackPointerBias();
 
   // Replace frame index with a frame pointer reference.
   if (Offset >= -4096 && Offset <= 4095) {

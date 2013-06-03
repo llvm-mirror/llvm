@@ -47,6 +47,18 @@ define i1 @test4(i32 %X) {
 ; CHECK-NEXT: ret i1 %R
 }
 
+define i1 @test4_i16(i16 %X) {
+  %P = getelementptr inbounds [10 x i16]* @G16, i32 0, i16 %X
+  %Q = load i16* %P
+  %R = icmp sle i16 %Q, 73
+  ret i1 %R
+; CHECK: @test4_i16
+; CHECK-NEXT: lshr i16 933, %X
+; CHECK-NEXT: and i16 {{.*}}, 1
+; CHECK-NEXT: %R = icmp ne i16 {{.*}}, 0
+; CHECK-NEXT: ret i1 %R
+}
+
 define i1 @test5(i32 %X) {
   %P = getelementptr inbounds [10 x i16]* @G16, i32 0, i32 %X
   %Q = load i16* %P
@@ -88,8 +100,8 @@ define i1 @test8(i32 %X) {
   %S = icmp eq i16 %R, 0
   ret i1 %S
 ; CHECK: @test8
-; CHECK-NEXT: add i32 %X, -8
-; CHECK-NEXT: icmp ult i32 {{.*}}, 2
+; CHECK-NEXT: and i32 %X, -2
+; CHECK-NEXT: icmp eq i32 {{.*}}, 8
 ; CHECK-NEXT: ret i1
 }
 

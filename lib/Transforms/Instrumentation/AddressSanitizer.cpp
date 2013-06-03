@@ -41,7 +41,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/system_error.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/BlackList.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -71,7 +70,7 @@ static const char *kAsanRegisterGlobalsName = "__asan_register_globals";
 static const char *kAsanUnregisterGlobalsName = "__asan_unregister_globals";
 static const char *kAsanPoisonGlobalsName = "__asan_before_dynamic_init";
 static const char *kAsanUnpoisonGlobalsName = "__asan_after_dynamic_init";
-static const char *kAsanInitName = "__asan_init_v2";
+static const char *kAsanInitName = "__asan_init_v3";
 static const char *kAsanHandleNoReturnName = "__asan_handle_no_return";
 static const char *kAsanMappingOffsetName = "__asan_mapping_offset";
 static const char *kAsanMappingScaleName = "__asan_mapping_scale";
@@ -274,8 +273,6 @@ struct AddressSanitizer : public FunctionPass {
                                    Instruction *InsertBefore, bool IsWrite);
   Value *memToShadow(Value *Shadow, IRBuilder<> &IRB);
   bool runOnFunction(Function &F);
-  void createInitializerPoisonCalls(Module &M,
-                                    Value *FirstAddr, Value *LastAddr);
   bool maybeInsertAsanInitAtFunctionEntry(Function &F);
   void emitShadowMapping(Module &M, IRBuilder<> &IRB) const;
   virtual bool doInitialization(Module &M);
@@ -333,8 +330,7 @@ class AddressSanitizerModule : public ModulePass {
   void initializeCallbacks(Module &M);
 
   bool ShouldInstrumentGlobal(GlobalVariable *G);
-  void createInitializerPoisonCalls(Module &M, Value *FirstAddr,
-                                    Value *LastAddr);
+  void createInitializerPoisonCalls(Module &M, GlobalValue *ModuleName);
   size_t RedzoneSize() const {
     return RedzoneSizeForScale(Mapping.Scale);
   }
@@ -753,7 +749,7 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
 }
 
 void AddressSanitizerModule::createInitializerPoisonCalls(
-    Module &M, Value *FirstAddr, Value *LastAddr) {
+    Module &M, GlobalValue *ModuleName) {
   // We do all of our poisoning and unpoisoning within _GLOBAL__I_a.
   Function *GlobalInit = M.getFunction("_GLOBAL__I_a");
   // If that function is not present, this TU contains no globals, or they have
@@ -765,7 +761,8 @@ void AddressSanitizerModule::createInitializerPoisonCalls(
   IRBuilder<> IRB(GlobalInit->begin()->getFirstInsertionPt());
 
   // Add a call to poison all external globals before the given function starts.
-  IRB.CreateCall2(AsanPoisonGlobals, FirstAddr, LastAddr);
+  Value *ModuleNameAddr = ConstantExpr::getPointerCast(ModuleName, IntptrTy);
+  IRB.CreateCall(AsanPoisonGlobals, ModuleNameAddr);
 
   // Add calls to unpoison all globals before each return instruction.
   for (Function::iterator I = GlobalInit->begin(), E = GlobalInit->end();
@@ -839,7 +836,7 @@ void AddressSanitizerModule::initializeCallbacks(Module &M) {
   IRBuilder<> IRB(*C);
   // Declare our poisoning and unpoisoning functions.
   AsanPoisonGlobals = checkInterfaceFunction(M.getOrInsertFunction(
-      kAsanPoisonGlobalsName, IRB.getVoidTy(), IntptrTy, IntptrTy, NULL));
+      kAsanPoisonGlobalsName, IRB.getVoidTy(), IntptrTy, NULL));
   AsanPoisonGlobals->setLinkage(Function::ExternalLinkage);
   AsanUnpoisonGlobals = checkInterfaceFunction(M.getOrInsertFunction(
       kAsanUnpoisonGlobalsName, IRB.getVoidTy(), NULL));
@@ -901,12 +898,13 @@ bool AddressSanitizerModule::runOnModule(Module &M) {
   assert(CtorFunc);
   IRBuilder<> IRB(CtorFunc->getEntryBlock().getTerminator());
 
-  // The addresses of the first and last dynamically initialized globals in
-  // this TU.  Used in initialization order checking.
-  Value *FirstDynamic = 0, *LastDynamic = 0;
+  bool HasDynamicallyInitializedGlobals = false;
 
   GlobalVariable *ModuleName = createPrivateGlobalForString(
       M, M.getModuleIdentifier());
+  // We shouldn't merge same module names, as this string serves as unique
+  // module ID in runtime.
+  ModuleName->setUnnamedAddr(false);
 
   for (size_t i = 0; i < n; i++) {
     static const uint64_t kMaxGlobalRedzone = 1 << 18;
@@ -966,11 +964,8 @@ bool AddressSanitizerModule::runOnModule(Module &M) {
         NULL);
 
     // Populate the first and last globals declared in this TU.
-    if (CheckInitOrder && GlobalHasDynamicInitializer) {
-      LastDynamic = ConstantExpr::getPointerCast(NewGlobal, IntptrTy);
-      if (FirstDynamic == 0)
-        FirstDynamic = LastDynamic;
-    }
+    if (CheckInitOrder && GlobalHasDynamicInitializer)
+      HasDynamicallyInitializedGlobals = true;
 
     DEBUG(dbgs() << "NEW GLOBAL: " << *NewGlobal << "\n");
   }
@@ -981,8 +976,8 @@ bool AddressSanitizerModule::runOnModule(Module &M) {
       ConstantArray::get(ArrayOfGlobalStructTy, Initializers), "");
 
   // Create calls for poisoning before initializers run and unpoisoning after.
-  if (CheckInitOrder && FirstDynamic && LastDynamic)
-    createInitializerPoisonCalls(M, FirstDynamic, LastDynamic);
+  if (CheckInitOrder && HasDynamicallyInitializedGlobals)
+    createInitializerPoisonCalls(M, ModuleName);
   IRB.CreateCall2(AsanRegisterGlobals,
                   IRB.CreatePointerCast(AllGlobals, IntptrTy),
                   ConstantInt::get(IntptrTy, n));
@@ -1317,10 +1312,10 @@ void FunctionStackPoisoner::poisonStack() {
         ConstantInt::get(IntptrTy, LocalStackSize), OrigStackBase);
   }
 
-  // This string will be parsed by the run-time (DescribeStackAddress).
+  // This string will be parsed by the run-time (DescribeAddressIfStack).
   SmallString<2048> StackDescriptionStorage;
   raw_svector_ostream StackDescription(StackDescriptionStorage);
-  StackDescription << F.getName() << " " << AllocaVec.size() << " ";
+  StackDescription << AllocaVec.size() << " ";
 
   // Insert poison calls for lifetime intrinsics for alloca.
   bool HavePoisonedAllocas = false;
@@ -1353,19 +1348,26 @@ void FunctionStackPoisoner::poisonStack() {
   }
   assert(Pos == LocalStackSize);
 
-  // Write the Magic value and the frame description constant to the redzone.
+  // The left-most redzone has enough space for at least 4 pointers.
+  // Write the Magic value to redzone[0].
   Value *BasePlus0 = IRB.CreateIntToPtr(LocalStackBase, IntptrPtrTy);
   IRB.CreateStore(ConstantInt::get(IntptrTy, kCurrentStackFrameMagic),
                   BasePlus0);
-  Value *BasePlus1 = IRB.CreateAdd(LocalStackBase,
-                                   ConstantInt::get(IntptrTy,
-                                                    ASan.LongSize/8));
-  BasePlus1 = IRB.CreateIntToPtr(BasePlus1, IntptrPtrTy);
+  // Write the frame description constant to redzone[1].
+  Value *BasePlus1 = IRB.CreateIntToPtr(
+    IRB.CreateAdd(LocalStackBase, ConstantInt::get(IntptrTy, ASan.LongSize/8)),
+    IntptrPtrTy);
   GlobalVariable *StackDescriptionGlobal =
       createPrivateGlobalForString(*F.getParent(), StackDescription.str());
   Value *Description = IRB.CreatePointerCast(StackDescriptionGlobal,
                                              IntptrTy);
   IRB.CreateStore(Description, BasePlus1);
+  // Write the PC to redzone[2].
+  Value *BasePlus2 = IRB.CreateIntToPtr(
+    IRB.CreateAdd(LocalStackBase, ConstantInt::get(IntptrTy,
+                                                   2 * ASan.LongSize/8)),
+    IntptrPtrTy);
+  IRB.CreateStore(IRB.CreatePointerCast(&F, IntptrTy), BasePlus2);
 
   // Poison the stack redzones at the entry.
   Value *ShadowBase = ASan.memToShadow(LocalStackBase, IRB);

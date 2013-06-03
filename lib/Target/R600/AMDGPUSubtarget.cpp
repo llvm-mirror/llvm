@@ -33,9 +33,11 @@ AMDGPUSubtarget::AMDGPUSubtarget(StringRef TT, StringRef CPU, StringRef FS) :
   DefaultSize[0] = 64;
   DefaultSize[1] = 1;
   DefaultSize[2] = 1;
+  HasVertexCache = false;
   ParseSubtargetFeatures(GPU, FS);
   DevName = GPU;
   Device = AMDGPUDeviceInfo::getDeviceFromName(DevName, this, Is64bit);
+  TexVTXClauseSize = (Device->getGeneration() >= AMDGPUDeviceInfo::HD4XXX)?16:8;
 }
 
 AMDGPUSubtarget::~AMDGPUSubtarget() {
@@ -51,6 +53,14 @@ AMDGPUSubtarget::isOverride(AMDGPUDeviceInfo::Caps caps) const {
 bool
 AMDGPUSubtarget::is64bit() const  {
   return Is64bit;
+}
+bool
+AMDGPUSubtarget::hasVertexCache() const {
+  return HasVertexCache;
+}
+short
+AMDGPUSubtarget::getTexVTXClauseSize() const {
+  return TexVTXClauseSize;
 }
 bool
 AMDGPUSubtarget::isTargetELF() const {

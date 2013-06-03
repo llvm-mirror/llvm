@@ -20,10 +20,14 @@ ARM
 
 * `ABI <http://www.arm.com/products/DevTools/ABI.html>`_
 
+* `ARM C Language Extensions <http://infocenter.arm.com/help/topic/com.arm.doc.ihi0053a/IHI0053A_acle.pdf>`_
+
 AArch64
 -------
 
 * `ARMv8 Instruction Set Overview <http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.genc010197a/index.html>`_
+
+* `ARM C Language Extensions <http://infocenter.arm.com/help/topic/com.arm.doc.ihi0053a/IHI0053A_acle.pdf>`_
 
 Itanium (ia64)
 --------------
@@ -106,6 +110,12 @@ OS X
 
 * `Mach-O Runtime Architecture <http://developer.apple.com/documentation/Darwin/RuntimeArchitecture-date.html>`_
 * `Notes on Mach-O ABI <http://www.unsanity.org/archives/000044.php>`_
+
+NVPTX
+=====
+
+* `CUDA Documentation <http://docs.nvidia.com/cuda/index.html>`_ includes the PTX
+  ISA and Driver API documentation
 
 Miscellaneous Resources
 =======================

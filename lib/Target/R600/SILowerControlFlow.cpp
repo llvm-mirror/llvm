@@ -197,7 +197,8 @@ void SILowerControlFlowPass::Else(MachineInstr &MI) {
   unsigned Dst = MI.getOperand(0).getReg();
   unsigned Src = MI.getOperand(1).getReg();
 
-  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_OR_SAVEEXEC_B64), Dst)
+  BuildMI(MBB, MBB.getFirstNonPHI(), DL,
+          TII->get(AMDGPU::S_OR_SAVEEXEC_B64), Dst)
           .addReg(Src); // Saved EXEC
 
   BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_XOR_B64), AMDGPU::EXEC)
@@ -409,6 +410,7 @@ void SILowerControlFlowPass::IndirectDst(MachineInstr &MI) {
 bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
 
   bool HaveKill = false;
+  bool NeedWQM = false;
   unsigned Depth = 0;
 
   for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();
@@ -478,8 +480,21 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
         case AMDGPU::SI_INDIRECT_DST_V16:
           IndirectDst(MI);
           break;
+
+        case AMDGPU::V_INTERP_P1_F32:
+        case AMDGPU::V_INTERP_P2_F32:
+        case AMDGPU::V_INTERP_MOV_F32:
+          NeedWQM = true;
+          break;
+
       }
     }
+  }
+
+  if (NeedWQM) {
+    MachineBasicBlock &MBB = MF.front();
+    BuildMI(MBB, MBB.getFirstNonPHI(), DebugLoc(), TII->get(AMDGPU::S_WQM_B64),
+            AMDGPU::EXEC).addReg(AMDGPU::EXEC);
   }
 
   return true;

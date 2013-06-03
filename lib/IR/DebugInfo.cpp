@@ -25,6 +25,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Dwarf.h"
+#include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 using namespace llvm::dwarf;
@@ -63,7 +64,8 @@ bool DIDescriptor::Verify() const {
           DISubrange(DbgNode).Verify() || DIEnumerator(DbgNode).Verify() ||
           DIObjCProperty(DbgNode).Verify() ||
           DITemplateTypeParameter(DbgNode).Verify() ||
-          DITemplateValueParameter(DbgNode).Verify());
+          DITemplateValueParameter(DbgNode).Verify() ||
+          DIImportedEntity(DbgNode).Verify());
 }
 
 static Value *getField(const MDNode *DbgNode, unsigned Elt) {
@@ -331,10 +333,18 @@ bool DIDescriptor::isEnumerator() const {
   return DbgNode && getTag() == dwarf::DW_TAG_enumerator;
 }
 
-/// isObjCProperty - Return true if the specified tag is DW_TAG
+/// isObjCProperty - Return true if the specified tag is DW_TAG_APPLE_property.
 bool DIDescriptor::isObjCProperty() const {
   return DbgNode && getTag() == dwarf::DW_TAG_APPLE_property;
 }
+
+/// \brief Return true if the specified tag is DW_TAG_imported_module or
+/// DW_TAG_imported_declaration.
+bool DIDescriptor::isImportedEntity() const {
+  return DbgNode && (getTag() == dwarf::DW_TAG_imported_module ||
+                     getTag() == dwarf::DW_TAG_imported_declaration);
+}
+
 //===----------------------------------------------------------------------===//
 // Simple Descriptor Constructors and other Methods
 //===----------------------------------------------------------------------===//
@@ -417,7 +427,7 @@ bool DICompileUnit::Verify() const {
   if (N.empty())
     return false;
   // It is possible that directory and produce string is empty.
-  return DbgNode->getNumOperands() == 12;
+  return DbgNode->getNumOperands() == 13;
 }
 
 /// Verify - Verify that an ObjC property is well formed.
@@ -579,6 +589,12 @@ bool DITemplateValueParameter::Verify() const {
   return isTemplateValueParameter() && DbgNode->getNumOperands() == 8;
 }
 
+/// \brief Verify that the imported module descriptor is well formed.
+bool DIImportedEntity::Verify() const {
+  return isImportedEntity() &&
+         (DbgNode->getNumOperands() == 4 || DbgNode->getNumOperands() == 5);
+}
+
 /// getOriginalTypeSize - If this type is derived from a base type then
 /// return base type size.
 uint64_t DIDerivedType::getOriginalTypeSize() const {
@@ -613,6 +629,25 @@ MDNode *DIDerivedType::getObjCProperty() const {
   if (DbgNode->getNumOperands() <= 10)
     return NULL;
   return dyn_cast_or_null<MDNode>(DbgNode->getOperand(10));
+}
+
+/// \brief Set the array of member DITypes.
+void DICompositeType::setTypeArray(DIArray Elements, DIArray TParams) {
+  assert((!TParams || DbgNode->getNumOperands() == 14) &&
+         "If you're setting the template parameters this should include a slot "
+         "for that!");
+  TrackingVH<MDNode> N(*this);
+  N->replaceOperandWith(10, Elements);
+  if (TParams)
+    N->replaceOperandWith(13, TParams);
+  DbgNode = N;
+}
+
+/// \brief Set the containing type.
+void DICompositeType::setContainingType(DICompositeType ContainingType) {
+  TrackingVH<MDNode> N(*this);
+  N->replaceOperandWith(12, ContainingType);
+  DbgNode = N;
 }
 
 /// isInlinedFnArgument - Return true if this variable provides debugging
@@ -661,28 +696,31 @@ DIArray DISubprogram::getVariables() const {
   return DIArray();
 }
 
+Value *DITemplateValueParameter::getValue() const {
+  return getField(DbgNode, 4);
+}
+
+void DIScope::setFilename(StringRef Name, LLVMContext &Context) {
+  if (!DbgNode)
+    return;
+  MDString *MDName(MDString::get(Context, Name));
+  const_cast<MDNode*>(getNodeField(DbgNode, 1))->replaceOperandWith(0, MDName);
+}
+
 StringRef DIScope::getFilename() const {
   if (!DbgNode)
     return StringRef();
-  if (isLexicalBlockFile())
-    return DILexicalBlockFile(DbgNode).getFilename();
-  if (isLexicalBlock())
-    return DILexicalBlock(DbgNode).getFilename();
   return ::getStringField(getNodeField(DbgNode, 1), 0);
 }
 
 StringRef DIScope::getDirectory() const {
   if (!DbgNode)
     return StringRef();
-  if (isLexicalBlockFile())
-    return DILexicalBlockFile(DbgNode).getDirectory();
-  if (isLexicalBlock())
-    return DILexicalBlock(DbgNode).getDirectory();
   return ::getStringField(getNodeField(DbgNode, 1), 1);
 }
 
 DIArray DICompileUnit::getEnumTypes() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 12)
+  if (!DbgNode || DbgNode->getNumOperands() < 13)
     return DIArray();
 
   if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(7)))
@@ -691,7 +729,7 @@ DIArray DICompileUnit::getEnumTypes() const {
 }
 
 DIArray DICompileUnit::getRetainedTypes() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 12)
+  if (!DbgNode || DbgNode->getNumOperands() < 13)
     return DIArray();
 
   if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(8)))
@@ -700,7 +738,7 @@ DIArray DICompileUnit::getRetainedTypes() const {
 }
 
 DIArray DICompileUnit::getSubprograms() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 12)
+  if (!DbgNode || DbgNode->getNumOperands() < 13)
     return DIArray();
 
   if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(9)))
@@ -710,10 +748,19 @@ DIArray DICompileUnit::getSubprograms() const {
 
 
 DIArray DICompileUnit::getGlobalVariables() const {
-  if (!DbgNode || DbgNode->getNumOperands() < 12)
+  if (!DbgNode || DbgNode->getNumOperands() < 13)
     return DIArray();
 
   if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(10)))
+    return DIArray(N);
+  return DIArray();
+}
+
+DIArray DICompileUnit::getImportedEntities() const {
+  if (!DbgNode || DbgNode->getNumOperands() < 13)
+    return DIArray();
+
+  if (MDNode *N = dyn_cast_or_null<MDNode>(DbgNode->getOperand(11)))
     return DIArray(N);
   return DIArray();
 }
@@ -1042,8 +1089,13 @@ void DIScope::printInternal(raw_ostream &OS) const {
 
 void DICompileUnit::printInternal(raw_ostream &OS) const {
   DIScope::printInternal(OS);
-  if (const char *Lang = dwarf::LanguageString(getLanguage()))
-    OS << " [" << Lang << ']';
+  OS << " [";
+  unsigned Lang = getLanguage();
+  if (const char *LangStr = dwarf::LanguageString(Lang))
+    OS << LangStr;
+  else
+    (OS << "lang 0x").write_hex(Lang);
+  OS << ']';
 }
 
 void DIEnumerator::printInternal(raw_ostream &OS) const {

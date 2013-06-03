@@ -75,6 +75,12 @@ ARMBaseRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
 }
 
 const uint32_t*
+ARMBaseRegisterInfo::getThisReturnPreservedMask(CallingConv::ID) const {
+  return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
+    ? CSR_iOS_ThisReturn_RegMask : CSR_AAPCS_ThisReturn_RegMask;
+}
+
+const uint32_t*
 ARMBaseRegisterInfo::getNoPreservedMask() const {
   return CSR_NoRegs_RegMask;
 }
@@ -88,6 +94,7 @@ getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(ARM::SP);
   Reserved.set(ARM::PC);
   Reserved.set(ARM::FPSCR);
+  Reserved.set(ARM::APSR_NZCV);
   if (TFI->hasFP(MF))
     Reserved.set(FramePtr);
   if (hasBasePointer(MF))
@@ -680,7 +687,7 @@ ARMBaseRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // means the stack pointer cannot be used to access the emergency spill slot
   // when !hasReservedCallFrame().
 #ifndef NDEBUG
-  if (RS && FrameReg == ARM::SP && FrameIndex == RS->getScavengingFrameIndex()){
+  if (RS && FrameReg == ARM::SP && RS->isScavengingFrameIndex(FrameIndex)){
     assert(TFI->hasReservedCallFrame(MF) &&
            "Cannot use SP to access the emergency spill slot in "
            "functions without a reserved call frame");

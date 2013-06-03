@@ -86,7 +86,9 @@ public:
   virtual unsigned getNumberOfRegisters(bool Vector) const;
   virtual unsigned getRegisterBitWidth(bool Vector) const;
   virtual unsigned getMaximumUnrollFactor() const;
-  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const;
+  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                          OperandValueKind,
+                                          OperandValueKind) const;
   virtual unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
                                   int Index, Type *SubTp) const;
   virtual unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
@@ -122,9 +124,8 @@ llvm::createPPCTargetTransformInfoPass(const PPCTargetMachine *TM) {
 
 PPCTTI::PopcntSupportKind PPCTTI::getPopcntSupport(unsigned TyWidth) const {
   assert(isPowerOf2_32(TyWidth) && "Ty width must be power of 2");
-  // FIXME: PPC currently does not have custom popcnt lowering even though
-  // there is hardware support. Once this is fixed, update this function
-  // to reflect the real capabilities of the hardware.
+  if (ST->hasPOPCNTD() && TyWidth <= 64)
+    return PSK_FastHardware;
   return PSK_Software;
 }
 
@@ -167,11 +168,14 @@ unsigned PPCTTI::getMaximumUnrollFactor() const {
   return 2;
 }
 
-unsigned PPCTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
+unsigned PPCTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                        OperandValueKind Op1Info,
+                                        OperandValueKind Op2Info) const {
   assert(TLI->InstructionOpcodeToISD(Opcode) && "Invalid opcode");
 
   // Fallback to the default implementation.
-  return TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty);
+  return TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty, Op1Info,
+                                                     Op2Info);
 }
 
 unsigned PPCTTI::getShuffleCost(ShuffleKind Kind, Type *Tp, int Index,

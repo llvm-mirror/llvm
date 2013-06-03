@@ -100,6 +100,10 @@ MipsRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
   return CSR_N64_RegMask;
 }
 
+const uint32_t *MipsRegisterInfo::getMips16RetHelperMask() {
+  return CSR_Mips16RetHelper_RegMask;
+}
+
 BitVector MipsRegisterInfo::
 getReservedRegs(const MachineFunction &MF) const {
   static const uint16_t ReservedCPURegs[] = {
@@ -145,7 +149,11 @@ getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(Mips::HWR29_64);
 
   // Reserve DSP control register.
-  Reserved.set(Mips::DSPCtrl);
+  Reserved.set(Mips::DSPPos);
+  Reserved.set(Mips::DSPSCount);
+  Reserved.set(Mips::DSPCarry);
+  Reserved.set(Mips::DSPEFI);
+  Reserved.set(Mips::DSPOutFlag);
 
   // Reserve RA if in mips16 mode.
   if (Subtarget.inMips16Mode()) {

@@ -141,6 +141,10 @@ public:
 
   MachineInstr *commuteInstruction(MachineInstr*, bool=false) const;
 
+  const MachineInstrBuilder &AddDReg(MachineInstrBuilder &MIB, unsigned Reg,
+                                     unsigned SubIdx, unsigned State,
+                                     const TargetRegisterInfo *TRI) const;
+
   virtual bool produceSameValue(const MachineInstr *MI0,
                                 const MachineInstr *MI1,
                                 const MachineRegisterInfo *MRI) const;
@@ -314,6 +318,10 @@ public:
   bool canCauseFpMLxStall(unsigned Opcode) const {
     return MLxHazardOpcodes.count(Opcode);
   }
+
+  /// Returns true if the instruction has a shift by immediate that can be
+  /// executed in one cycle less.
+  bool isSwiftFastImmShift(const MachineInstr *MI) const;
 };
 
 static inline

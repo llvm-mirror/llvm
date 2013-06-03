@@ -25,6 +25,7 @@ namespace llvm {
   class BlockAddress;
   class GCStrategy;
   class Constant;
+  class ConstantArray;
   class GCMetadataPrinter;
   class GlobalValue;
   class GlobalVariable;
@@ -37,8 +38,8 @@ namespace llvm {
   class MachineConstantPoolValue;
   class MachineJumpTableInfo;
   class MachineModuleInfo;
-  class MachineMove;
   class MCAsmInfo;
+  class MCCFIInstruction;
   class MCContext;
   class MCSection;
   class MCStreamer;
@@ -133,6 +134,9 @@ namespace llvm {
 
     /// getDataLayout - Return information about data layout.
     const DataLayout &getDataLayout() const;
+
+    /// getTargetTriple - Return the target triple string.
+    StringRef getTargetTriple() const;
 
     /// getCurrentSection() - Return the current section we are emitting to.
     const MCSection *getCurrentSection() const;
@@ -413,9 +417,8 @@ namespace llvm {
     // Dwarf Lowering Routines
     //===------------------------------------------------------------------===//
 
-    /// EmitCFIFrameMove - Emit frame instruction to describe the layout of the
-    /// frame.
-    void EmitCFIFrameMove(const MachineMove &Move) const;
+    /// \brief Emit frame instruction to describe the layout of the frame.
+    void emitCFIInstruction(const MCCFIInstruction &Inst) const;
 
     //===------------------------------------------------------------------===//
     // Inline Asm Support
@@ -480,7 +483,7 @@ namespace llvm {
     void EmitJumpTableEntry(const MachineJumpTableInfo *MJTI,
                             const MachineBasicBlock *MBB,
                             unsigned uid) const;
-    void EmitLLVMUsedList(const Constant *List);
+    void EmitLLVMUsedList(const ConstantArray *InitList);
     void EmitXXStructorList(const Constant *List, bool isCtor);
     GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy *C);
   };

@@ -32,6 +32,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/DebugLoc.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InstIterator.h"
 #include "llvm/Support/PathV2.h"
 #include "llvm/Support/raw_ostream.h"
@@ -381,7 +382,11 @@ std::string GCOVProfiler::mangleName(DICompileUnit CU, const char *NewStem) {
 
   SmallString<128> Filename = CU.getFilename();
   sys::path::replace_extension(Filename, NewStem);
-  return sys::path::filename(Filename.str());
+  StringRef FName = sys::path::filename(Filename);
+  SmallString<128> CurPath;
+  if (sys::fs::current_path(CurPath)) return FName;
+  sys::path::append(CurPath, FName.str());
+  return CurPath.str();
 }
 
 bool GCOVProfiler::runOnModule(Module &M) {

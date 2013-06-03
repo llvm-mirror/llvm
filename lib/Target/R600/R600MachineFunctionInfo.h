@@ -14,18 +14,18 @@
 #define R600MACHINEFUNCTIONINFO_H
 
 #include "llvm/ADT/BitVector.h"
-#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "AMDGPUMachineFunction.h"
 #include <vector>
 
 namespace llvm {
 
-class R600MachineFunctionInfo : public MachineFunctionInfo {
-
+class R600MachineFunctionInfo : public AMDGPUMachineFunction {
 public:
   R600MachineFunctionInfo(const MachineFunction &MF);
   SmallVector<unsigned, 4> LiveOuts;
   std::vector<unsigned> IndirectRegs;
+  unsigned StackSize;
 };
 
 } // End llvm namespace

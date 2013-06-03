@@ -168,21 +168,20 @@ def ldawb : PatFrag<(ops node:$addr, node:$offset),
                      (sub node:$addr, (shl node:$offset, 2))>;
 
 // Instruction operand types
-def calltarget  : Operand<i32>;
+def pcrel_imm  : Operand<i32>;
+def pcrel_imm_neg  : Operand<i32> {
+  let DecoderMethod = "DecodeNegImmOperand";
+}
 def brtarget : Operand<OtherVT>;
-def pclabel : Operand<i32>;
+def brtarget_neg : Operand<OtherVT> {
+  let DecoderMethod = "DecodeNegImmOperand";
+}
 
 // Addressing modes
 def ADDRspii : ComplexPattern<i32, 2, "SelectADDRspii", [add, frameindex], []>;
-def ADDRdpii : ComplexPattern<i32, 2, "SelectADDRdpii", [add, dprelwrapper],
-                 []>;
-def ADDRcpii : ComplexPattern<i32, 2, "SelectADDRcpii", [add, cprelwrapper],
-                 []>;
 
 // Address operands
 def MEMii : Operand<i32> {
-  let PrintMethod = "printMemOperand";
-  let DecoderMethod = "DecodeMEMiiOperand";
   let MIOperandInfo = (ops i32imm, i32imm);
 }
 
@@ -274,16 +273,16 @@ multiclass FRU6_LRU6_branch<bits<6> opc, string OpcStr> {
 }
 
 multiclass FRU6_LRU6_backwards_branch<bits<6> opc, string OpcStr> {
-  def _ru6: _FRU6<opc, (outs), (ins GRRegs:$a, brtarget:$b),
-                  !strconcat(OpcStr, " $a, -$b"), []>;
-  def _lru6: _FLRU6<opc, (outs), (ins GRRegs:$a, brtarget:$b),
-                    !strconcat(OpcStr, " $a, -$b"), []>;
+  def _ru6: _FRU6<opc, (outs), (ins GRRegs:$a, brtarget_neg:$b),
+                  !strconcat(OpcStr, " $a, $b"), []>;
+  def _lru6: _FLRU6<opc, (outs), (ins GRRegs:$a, brtarget_neg:$b),
+                    !strconcat(OpcStr, " $a, $b"), []>;
 }
 
 multiclass FRU6_LRU6_cp<bits<6> opc, string OpcStr> {
-  def _ru6: _FRU6<opc, (outs GRRegs:$a), (ins i32imm:$b),
+  def _ru6: _FRU6<opc, (outs RRegs:$a), (ins i32imm:$b),
                   !strconcat(OpcStr, " $a, cp[$b]"), []>;
-  def _lru6: _FLRU6<opc, (outs GRRegs:$a), (ins i32imm:$b),
+  def _lru6: _FLRU6<opc, (outs RRegs:$a), (ins i32imm:$b),
                     !strconcat(OpcStr, " $a, cp[$b]"), []>;
 }
 
@@ -515,29 +514,29 @@ def LMUL_l6r : _FL6R<
 
 //let Uses = [DP] in ...
 let neverHasSideEffects = 1, isReMaterializable = 1 in
-def LDAWDP_ru6: _FRU6<0b011000, (outs GRRegs:$a), (ins MEMii:$b),
+def LDAWDP_ru6: _FRU6<0b011000, (outs RRegs:$a), (ins i32imm:$b),
                       "ldaw $a, dp[$b]", []>;
 
 let isReMaterializable = 1 in                    
-def LDAWDP_lru6: _FLRU6<0b011000, (outs GRRegs:$a), (ins MEMii:$b),
+def LDAWDP_lru6: _FLRU6<0b011000, (outs RRegs:$a), (ins i32imm:$b),
                         "ldaw $a, dp[$b]",
-                        [(set GRRegs:$a, ADDRdpii:$b)]>;
+                        [(set RRegs:$a, (dprelwrapper tglobaladdr:$b))]>;
 
 let mayLoad=1 in
-def LDWDP_ru6: _FRU6<0b010110, (outs GRRegs:$a), (ins MEMii:$b),
+def LDWDP_ru6: _FRU6<0b010110, (outs RRegs:$a), (ins i32imm:$b),
                      "ldw $a, dp[$b]", []>;
 
-def LDWDP_lru6: _FLRU6<0b010110, (outs GRRegs:$a), (ins MEMii:$b),
+def LDWDP_lru6: _FLRU6<0b010110, (outs RRegs:$a), (ins i32imm:$b),
                        "ldw $a, dp[$b]",
-                       [(set GRRegs:$a, (load ADDRdpii:$b))]>;
+                       [(set RRegs:$a, (load (dprelwrapper tglobaladdr:$b)))]>;
 
 let mayStore=1 in
-def STWDP_ru6 : _FRU6<0b010100, (outs), (ins GRRegs:$a, MEMii:$b),
+def STWDP_ru6 : _FRU6<0b010100, (outs), (ins RRegs:$a, i32imm:$b),
                       "stw $a, dp[$b]", []>;
 
-def STWDP_lru6 : _FLRU6<0b010100, (outs), (ins GRRegs:$a, MEMii:$b),
+def STWDP_lru6 : _FLRU6<0b010100, (outs), (ins RRegs:$a, i32imm:$b),
                         "stw $a, dp[$b]",
-                        [(store GRRegs:$a, ADDRdpii:$b)]>;
+                        [(store RRegs:$a, (dprelwrapper tglobaladdr:$b))]>;
 
 //let Uses = [CP] in ..
 let mayLoad = 1, isReMaterializable = 1, neverHasSideEffects = 1 in
@@ -545,46 +544,38 @@ defm LDWCP : FRU6_LRU6_cp<0b011011, "ldw">;
 
 let Uses = [SP] in {
 let mayStore=1 in {
-def STWSP_ru6 : _FRU6<0b010101, (outs), (ins GRRegs:$a, i32imm:$b),
+def STWSP_ru6 : _FRU6<0b010101, (outs), (ins RRegs:$a, i32imm:$b),
                       "stw $a, sp[$b]",
-                      [(XCoreStwsp GRRegs:$a, immU6:$b)]>;
+                      [(XCoreStwsp RRegs:$a, immU6:$b)]>;
 
-def STWSP_lru6 : _FLRU6<0b010101, (outs), (ins GRRegs:$a, i32imm:$b),
+def STWSP_lru6 : _FLRU6<0b010101, (outs), (ins RRegs:$a, i32imm:$b),
                         "stw $a, sp[$b]",
-                        [(XCoreStwsp GRRegs:$a, immU16:$b)]>;
+                        [(XCoreStwsp RRegs:$a, immU16:$b)]>;
 }
 
 let mayLoad=1 in {
-def LDWSP_ru6 : _FRU6<0b010111, (outs GRRegs:$a), (ins i32imm:$b),
+def LDWSP_ru6 : _FRU6<0b010111, (outs RRegs:$a), (ins i32imm:$b),
                       "ldw $a, sp[$b]", []>;
 
-def LDWSP_lru6 : _FLRU6<0b010111, (outs GRRegs:$a), (ins i32imm:$b),
+def LDWSP_lru6 : _FLRU6<0b010111, (outs RRegs:$a), (ins i32imm:$b),
                         "ldw $a, sp[$b]", []>;
 }
 
 let neverHasSideEffects = 1 in {
-def LDAWSP_ru6 : _FRU6<0b011001, (outs GRRegs:$a), (ins i32imm:$b),
+def LDAWSP_ru6 : _FRU6<0b011001, (outs RRegs:$a), (ins i32imm:$b),
                        "ldaw $a, sp[$b]", []>;
 
-def LDAWSP_lru6 : _FLRU6<0b011001, (outs GRRegs:$a), (ins i32imm:$b),
+def LDAWSP_lru6 : _FLRU6<0b011001, (outs RRegs:$a), (ins i32imm:$b),
                          "ldaw $a, sp[$b]", []>;
-
-let isCodeGenOnly = 1 in
-def LDAWSP_ru6_RRegs : _FRU6<0b011001, (outs RRegs:$a), (ins i32imm:$b),
-                             "ldaw $a, sp[$b]", []>;
-
-let isCodeGenOnly = 1 in
-def LDAWSP_lru6_RRegs : _FLRU6<0b011001, (outs RRegs:$a), (ins i32imm:$b),
-                               "ldaw $a, sp[$b]", []>;
 }
 }
 
 let isReMaterializable = 1 in {
-def LDC_ru6 : _FRU6<0b011010, (outs GRRegs:$a), (ins i32imm:$b),
-                    "ldc $a, $b", [(set GRRegs:$a, immU6:$b)]>;
+def LDC_ru6 : _FRU6<0b011010, (outs RRegs:$a), (ins i32imm:$b),
+                    "ldc $a, $b", [(set RRegs:$a, immU6:$b)]>;
 
-def LDC_lru6 : _FLRU6<0b011010, (outs GRRegs:$a), (ins i32imm:$b),
-                      "ldc $a, $b", [(set GRRegs:$a, immU16:$b)]>;
+def LDC_lru6 : _FLRU6<0b011010, (outs RRegs:$a), (ins i32imm:$b),
+                      "ldc $a, $b", [(set RRegs:$a, immU16:$b)]>;
 }
 
 def SETC_ru6 : _FRU6<0b111010, (outs), (ins GRRegs:$a, i32imm:$b),
@@ -623,9 +614,9 @@ let Uses = [R11], isCall=1 in
 defm BLAT : FU6_LU6_np<0b0111001101, "blat">;
 
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in {
-def BRBU_u6 : _FU6<0b0111011100, (outs), (ins brtarget:$a), "bu -$a", []>;
+def BRBU_u6 : _FU6<0b0111011100, (outs), (ins brtarget_neg:$a), "bu $a", []>;
 
-def BRBU_lu6 : _FLU6<0b0111011100, (outs), (ins brtarget:$a), "bu -$a", []>;
+def BRBU_lu6 : _FLU6<0b0111011100, (outs), (ins brtarget_neg:$a), "bu $a", []>;
 
 def BRFU_u6 : _FU6<0b0111001100, (outs), (ins brtarget:$a), "bu $a", []>;
 
@@ -634,12 +625,12 @@ def BRFU_lu6 : _FLU6<0b0111001100, (outs), (ins brtarget:$a), "bu $a", []>;
 
 //let Uses = [CP] in ...
 let Defs = [R11], neverHasSideEffects = 1, isReMaterializable = 1 in
-def LDAWCP_u6: _FU6<0b0111111101, (outs), (ins MEMii:$a), "ldaw r11, cp[$a]",
+def LDAWCP_u6: _FU6<0b0111111101, (outs), (ins i32imm:$a), "ldaw r11, cp[$a]",
                     []>;
 
 let Defs = [R11], isReMaterializable = 1 in
-def LDAWCP_lu6: _FLU6<0b0111111101, (outs), (ins MEMii:$a), "ldaw r11, cp[$a]",
-                      [(set R11, ADDRcpii:$a)]>;
+def LDAWCP_lu6: _FLU6<0b0111111101, (outs), (ins i32imm:$a), "ldaw r11, cp[$a]",
+                      [(set R11, (cprelwrapper tglobaladdr:$a))]>;
 
 let Defs = [R11] in
 defm GETSR : FU6_LU6_np<0b0111111100, "getsr r11,">;
@@ -666,16 +657,26 @@ defm KRESTSP : FU6_LU6_np<0b0111101111, "krestsp">;
 
 // U10
 
-let Defs = [R11], isReMaterializable = 1, neverHasSideEffects = 1 in
-def LDAPF_u10 : _FU10<0b110110, (outs), (ins i32imm:$a), "ldap r11, $a", []>;
+let Defs = [R11], isReMaterializable = 1 in {
+let neverHasSideEffects = 1 in
+def LDAPF_u10 : _FU10<0b110110, (outs), (ins pcrel_imm:$a), "ldap r11, $a", []>;
 
-let Defs = [R11], isReMaterializable = 1 in
-def LDAPF_lu10 : _FLU10<0b110110, (outs), (ins i32imm:$a), "ldap r11, $a",
+def LDAPF_lu10 : _FLU10<0b110110, (outs), (ins pcrel_imm:$a), "ldap r11, $a",
                         [(set R11, (pcrelwrapper tglobaladdr:$a))]>;
 
-let Defs = [R11], isReMaterializable = 1, isCodeGenOnly = 1 in
-def LDAPF_lu10_ba : _FLU10<0b110110, (outs), (ins i32imm:$a), "ldap r11, $a",
+let neverHasSideEffects = 1 in
+def LDAPB_u10 : _FU10<0b110111, (outs), (ins pcrel_imm_neg:$a), "ldap r11, $a",
+                      []>;
+
+let neverHasSideEffects = 1 in
+def LDAPB_lu10 : _FLU10<0b110111, (outs), (ins pcrel_imm_neg:$a),
+                        "ldap r11, $a",
+                        [(set R11, (pcrelwrapper tglobaladdr:$a))]>;
+
+let isCodeGenOnly = 1 in
+def LDAPF_lu10_ba : _FLU10<0b110110, (outs), (ins pcrel_imm:$a), "ldap r11, $a",
                            [(set R11, (pcrelwrapper tblockaddress:$a))]>;
+}
 
 let isCall=1,
 // All calls clobber the link register and the non-callee-saved registers:
@@ -684,11 +685,15 @@ def BLACP_u10 : _FU10<0b111000, (outs), (ins i32imm:$a), "bla cp[$a]", []>;
 
 def BLACP_lu10 : _FLU10<0b111000, (outs), (ins i32imm:$a), "bla cp[$a]", []>;
 
-def BLRF_u10 : _FU10<0b110100, (outs), (ins calltarget:$a), "bl $a",
+def BLRF_u10 : _FU10<0b110100, (outs), (ins pcrel_imm:$a), "bl $a",
                      [(XCoreBranchLink immU10:$a)]>;
 
-def BLRF_lu10 : _FLU10<0b110100, (outs), (ins calltarget:$a), "bl $a",
+def BLRF_lu10 : _FLU10<0b110100, (outs), (ins pcrel_imm:$a), "bl $a",
                        [(XCoreBranchLink immU20:$a)]>;
+
+def BLRB_u10 : _FU10<0b110101, (outs), (ins pcrel_imm_neg:$a), "bl $a", []>;
+
+def BLRB_lu10 : _FLU10<0b110101, (outs), (ins pcrel_imm_neg:$a), "bl $a", []>;
 }
 
 let Defs = [R11], mayLoad = 1, isReMaterializable = 1,
@@ -931,6 +936,9 @@ let isBranch=1, isIndirectBranch=1, isTerminator=1, isBarrier = 1 in
 def BR_JT32 : PseudoInstXCore<(outs), (ins InlineJT32:$t, GRRegs:$i),
                               "bru $i\n$t",
                               [(XCoreBR_JT32 tjumptable:$t, GRRegs:$i)]>;
+
+let isBranch=1, isIndirectBranch=1, isTerminator=1, isBarrier = 1 in
+def BRU_1r : _F1R<0b001010, (outs), (ins GRRegs:$a), "bru $a", []>;
 
 let Defs=[SP], neverHasSideEffects=1 in
 def SETSP_1r : _F1R<0b001011, (outs), (ins GRRegs:$a), "set sp, $a", []>;

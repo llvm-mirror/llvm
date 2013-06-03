@@ -217,7 +217,7 @@ int64_t MipsLongBranch::computeOffset(const MachineInstr *Br) {
 // MachineBasicBlock operand MBBOpnd.
 void MipsLongBranch::replaceBranch(MachineBasicBlock &MBB, Iter Br,
                                    DebugLoc DL, MachineBasicBlock *MBBOpnd) {
-  unsigned NewOpc = TII->GetOppositeBranchOpc(Br->getOpcode());
+  unsigned NewOpc = TII->getOppositeBranchOpc(Br->getOpcode());
   const MCInstrDesc &NewDesc = TII->get(NewOpc);
 
   MachineInstrBuilder MIB = BuildMI(MBB, Br, DL, NewDesc);
@@ -399,6 +399,8 @@ static void emitGPDisp(MachineFunction &F, const MipsInstrInfo *TII) {
 }
 
 bool MipsLongBranch::runOnMachineFunction(MachineFunction &F) {
+  if (TM.getSubtarget<MipsSubtarget>().inMips16Mode())
+    return false;
   if ((TM.getRelocationModel() == Reloc::PIC_) &&
       TM.getSubtarget<MipsSubtarget>().isABI_O32() &&
       F.getInfo<MipsFunctionInfo>()->globalBaseRegSet())

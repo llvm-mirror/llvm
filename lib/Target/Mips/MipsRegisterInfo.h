@@ -46,6 +46,7 @@ public:
                                MachineFunction &MF) const;
   const uint16_t *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
   const uint32_t *getCallPreservedMask(CallingConv::ID) const;
+  static const uint32_t *getMips16RetHelperMask();
 
   BitVector getReservedRegs(const MachineFunction &MF) const;
 
@@ -67,6 +68,9 @@ public:
   /// Exception handling queries.
   unsigned getEHExceptionRegister() const;
   unsigned getEHHandlerRegister() const;
+
+  /// \brief Return GPR register class.
+  virtual const TargetRegisterClass *intRegClass(unsigned Size) const = 0;
 
 private:
   virtual void eliminateFI(MachineBasicBlock::iterator II, unsigned OpNo,

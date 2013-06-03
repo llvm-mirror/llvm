@@ -171,13 +171,13 @@ public:
   /// Initialize target data from properties stored in the module.
   explicit DataLayout(const Module *M);
 
-  DataLayout(const DataLayout &TD) :
+  DataLayout(const DataLayout &DL) :
     ImmutablePass(ID),
-    LittleEndian(TD.isLittleEndian()),
-    StackNaturalAlign(TD.StackNaturalAlign),
-    LegalIntWidths(TD.LegalIntWidths),
-    Alignments(TD.Alignments),
-    Pointers(TD.Pointers),
+    LittleEndian(DL.isLittleEndian()),
+    StackNaturalAlign(DL.StackNaturalAlign),
+    LegalIntWidths(DL.LegalIntWidths),
+    Alignments(DL.Alignments),
+    Pointers(DL.Pointers),
     LayoutMap(0)
   { }
 
@@ -352,6 +352,10 @@ public:
   /// type.
   Type *getIntPtrType(Type *) const;
 
+  /// getSmallestLegalIntType - Return the smallest integer type with size at
+  /// least as big as Width bits.
+  Type *getSmallestLegalIntType(LLVMContext &C, unsigned Width = 0) const;
+
   /// getIndexedOffset - return the offset from the beginning of the type for
   /// the specified indices.  This is used to implement getelementptr.
   uint64_t getIndexedOffset(Type *Ty, ArrayRef<Value *> Indices) const;
@@ -422,7 +426,7 @@ public:
 
 private:
   friend class DataLayout;   // Only DataLayout can create this class
-  StructLayout(StructType *ST, const DataLayout &TD);
+  StructLayout(StructType *ST, const DataLayout &DL);
 };
 
 

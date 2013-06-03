@@ -60,6 +60,20 @@ endif
 
 ifeq ($(shell test -f $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/Makefile && echo OK), OK)
 LIT_ALL_TESTSUITES += $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/test
+
+# Force creation of Clang Tools' lit.site.cfg.
+clang-tools-site-cfg: FORCE
+	$(MAKE) -C $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/test lit.site.cfg
+extra-site-cfgs:: clang-tools-site-cfg
+endif
+
+ifeq ($(shell test -f $(PROJ_OBJ_DIR)/../tools/polly/Makefile && echo OK), OK)
+LIT_ALL_TESTSUITES += $(PROJ_OBJ_DIR)/../tools/polly/test
+
+# Force creation of Polly's lit.site.cfg.
+polly-tools-site-cfg: FORCE
+	$(MAKE) -C $(PROJ_OBJ_DIR)/../tools/polly/test lit.site.cfg
+extra-site-cfgs:: polly-tools-site-cfg
 endif
 endif
 endif
@@ -95,13 +109,6 @@ check-local-all:: lit.site.cfg Unit/lit.site.cfg extra-site-cfgs
 clean::
 	$(RM) -rf `find $(LLVM_OBJ_ROOT)/test -name Output -type d -print`
 
-# dsymutil is used on the Darwin to manipulate DWARF debugging information.
-ifeq ($(TARGET_OS),Darwin)
-DSYMUTIL=dsymutil
-else
-DSYMUTIL=true
-endif
-
 ifneq ($(OCAMLOPT),)
 CC_FOR_OCAMLOPT := $(shell $(OCAMLOPT) -config | grep native_c_compiler | sed -e 's/native_c_compiler: //')
 CXX_FOR_OCAMLOPT := $(subst gcc,g++,$(CC_FOR_OCAMLOPT))
@@ -127,7 +134,7 @@ endif
 
 lit.site.cfg: FORCE
 	@echo "Making LLVM 'lit.site.cfg' file..."
-	@$(ECHOPATH) s=@LLVM_HOSTTRIPLE@=$(HOST_TRIPLE)=g > lit.tmp
+	@$(ECHOPATH) s=@LLVM_HOST_TRIPLE@=$(HOST_TRIPLE)=g > lit.tmp
 	@$(ECHOPATH) s=@TARGET_TRIPLE@=$(TARGET_TRIPLE)=g >> lit.tmp
 	@$(ECHOPATH) s=@LLVM_SOURCE_DIR@=$(LLVM_SRC_ROOT)=g >> lit.tmp
 	@$(ECHOPATH) s=@LLVM_BINARY_DIR@=$(LLVM_OBJ_ROOT)=g >> lit.tmp
@@ -143,6 +150,7 @@ lit.site.cfg: FORCE
 	@$(ECHOPATH) s=@LLVM_BINDINGS@=$(BINDINGS_TO_BUILD)=g >> lit.tmp
 	@$(ECHOPATH) s=@HOST_OS@=$(HOST_OS)=g >> lit.tmp
 	@$(ECHOPATH) s=@HOST_ARCH@=$(HOST_ARCH)=g >> lit.tmp
+	@$(ECHOPATH) s=@HAVE_LIBZ@=$(HAVE_LIBZ)=g >> lit.tmp
 	@sed -f lit.tmp $(PROJ_SRC_DIR)/lit.site.cfg.in > $@
 	@-rm -f lit.tmp
 

@@ -865,7 +865,7 @@ bool ARMLoadStoreOpt::MergeBaseUpdateLoadStore(MachineBasicBlock &MBB,
   bool isLd = isi32Load(Opcode) || Opcode == ARM::VLDRS || Opcode == ARM::VLDRD;
   // Can't do the merge if the destination register is the same as the would-be
   // writeback register.
-  if (isLd && MI->getOperand(0).getReg() == Base)
+  if (MI->getOperand(0).getReg() == Base)
     return false;
 
   unsigned PredReg = 0;
@@ -1258,6 +1258,22 @@ bool ARMLoadStoreOpt::LoadStoreMultipleOpti(MachineBasicBlock &MBB) {
       // merge the ldr's so far, including this one. But don't try to
       // combine the following ldr(s).
       Clobber = (isi32Load(Opcode) && Base == MBBI->getOperand(0).getReg());
+
+      // Watch out for:
+      // r4 := ldr [r0, #8]
+      // r4 := ldr [r0, #4]
+      //
+      // The optimization may reorder the second ldr in front of the first
+      // ldr, which violates write after write(WAW) dependence. The same as
+      // str. Try to merge inst(s) already in MemOps.
+      bool Overlap = false;
+      for (MemOpQueueIter I = MemOps.begin(), E = MemOps.end(); I != E; ++I) {
+        if (TRI->regsOverlap(Reg, I->MBBI->getOperand(0).getReg())) {
+          Overlap = true;
+          break;
+        }
+      }
+
       if (CurrBase == 0 && !Clobber) {
         // Start of a new chain.
         CurrBase = Base;
@@ -1268,7 +1284,7 @@ bool ARMLoadStoreOpt::LoadStoreMultipleOpti(MachineBasicBlock &MBB) {
         MemOps.push_back(MemOpQueueEntry(Offset, Reg, isKill, Position, MBBI));
         ++NumMemOps;
         Advance = true;
-      } else {
+      } else if (!Overlap) {
         if (Clobber) {
           TryMerge = true;
           Advance = true;

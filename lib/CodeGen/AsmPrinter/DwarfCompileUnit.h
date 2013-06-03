@@ -56,11 +56,11 @@ class CompileUnit {
   /// IndexTyDie - An anonymous type for index type.  Owned by CUDie.
   DIE *IndexTyDie;
 
-  /// MDNodeToDieMap - Tracks the mapping of unit level debug informaton
+  /// MDNodeToDieMap - Tracks the mapping of unit level debug information
   /// variables to debug information entries.
   DenseMap<const MDNode *, DIE *> MDNodeToDieMap;
 
-  /// MDNodeToDIEEntryMap - Tracks the mapping of unit level debug informaton
+  /// MDNodeToDIEEntryMap - Tracks the mapping of unit level debug information
   /// descriptors to debug information entries using a DIEEntry proxy.
   DenseMap<const MDNode *, DIEEntry *> MDNodeToDIEEntryMap;
 
@@ -94,12 +94,9 @@ class CompileUnit {
   /// DWARF version doesn't handle the language, return -1.
   int64_t getDefaultLowerBound() const;
 
-  /// getOrCreateContextDIE - Get context owner's DIE.
-  DIE *getOrCreateContextDIE(DIDescriptor Context);
-
 public:
-  CompileUnit(unsigned UID, unsigned L, DIE *D, AsmPrinter *A, DwarfDebug *DW,
-              DwarfUnits *);
+  CompileUnit(unsigned UID, unsigned L, DIE *D, const MDNode *N, AsmPrinter *A,
+	      DwarfDebug *DW, DwarfUnits *DWU);
   ~CompileUnit();
 
   // Accessors.
@@ -371,6 +368,9 @@ public:
 
   /// createStaticMemberDIE - Create new static data member DIE.
   DIE *createStaticMemberDIE(DIDerivedType DT);
+
+  /// getOrCreateContextDIE - Get context owner's DIE.
+  DIE *getOrCreateContextDIE(DIDescriptor Context);
 
 private:
 

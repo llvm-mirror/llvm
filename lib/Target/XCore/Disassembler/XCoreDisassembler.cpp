@@ -89,11 +89,16 @@ static DecodeStatus DecodeGRRegsRegisterClass(MCInst &Inst,
                                               uint64_t Address,
                                               const void *Decoder);
 
+static DecodeStatus DecodeRRegsRegisterClass(MCInst &Inst,
+                                             unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder);
+
 static DecodeStatus DecodeBitpOperand(MCInst &Inst, unsigned Val,
                                       uint64_t Address, const void *Decoder);
 
-static DecodeStatus DecodeMEMiiOperand(MCInst &Inst, unsigned Val,
-                                       uint64_t Address, const void *Decoder);
+static DecodeStatus DecodeNegImmOperand(MCInst &Inst, unsigned Val,
+                                        uint64_t Address, const void *Decoder);
 
 static DecodeStatus Decode2RInstruction(MCInst &Inst,
                                         unsigned Insn,
@@ -214,6 +219,18 @@ static DecodeStatus DecodeGRRegsRegisterClass(MCInst &Inst,
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeRRegsRegisterClass(MCInst &Inst,
+                                             unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder)
+{
+  if (RegNo > 15)
+    return MCDisassembler::Fail;
+  unsigned Reg = getReg(Decoder, XCore::RRegsRegClassID, RegNo);
+  Inst.addOperand(MCOperand::CreateReg(Reg));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus DecodeBitpOperand(MCInst &Inst, unsigned Val,
                                       uint64_t Address, const void *Decoder) {
   if (Val > 11)
@@ -225,10 +242,9 @@ static DecodeStatus DecodeBitpOperand(MCInst &Inst, unsigned Val,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeMEMiiOperand(MCInst &Inst, unsigned Val,
-                                       uint64_t Address, const void *Decoder) {
-  Inst.addOperand(MCOperand::CreateImm(Val));
-  Inst.addOperand(MCOperand::CreateImm(0));
+static DecodeStatus DecodeNegImmOperand(MCInst &Inst, unsigned Val,
+                                        uint64_t Address, const void *Decoder) {
+  Inst.addOperand(MCOperand::CreateImm(-(int64_t)Val));
   return MCDisassembler::Success;
 }
 

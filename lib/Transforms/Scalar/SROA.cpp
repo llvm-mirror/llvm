@@ -929,7 +929,7 @@ private:
     uint64_t Size = Length ? Length->getLimitedValue()
                            : AllocSize - Offset.getLimitedValue();
 
-    MemTransferOffsets &Offsets = P.MemTransferInstData[&II];
+    const MemTransferOffsets &Offsets = P.MemTransferInstData[&II];
     if (!II.isVolatile() && Offsets.DestEnd && Offsets.SourceEnd &&
         Offsets.DestBegin == Offsets.SourceBegin)
       return markAsDead(II); // Skip identity transfers without side-effects.
@@ -1318,12 +1318,12 @@ public:
         // may be zapped by an optimization pass in future.
         if (ZExtInst *ZExt = dyn_cast<ZExtInst>(SI->getOperand(0)))
           Arg = dyn_cast<Argument>(ZExt->getOperand(0));
-        if (SExtInst *SExt = dyn_cast<SExtInst>(SI->getOperand(0)))
+        else if (SExtInst *SExt = dyn_cast<SExtInst>(SI->getOperand(0)))
           Arg = dyn_cast<Argument>(SExt->getOperand(0));
         if (!Arg)
-          Arg = SI->getOperand(0);
+          Arg = SI->getValueOperand();
       } else if (LoadInst *LI = dyn_cast<LoadInst>(Inst)) {
-        Arg = LI->getOperand(0);
+        Arg = LI->getPointerOperand();
       } else {
         continue;
       }
@@ -2322,17 +2322,15 @@ static Value *insertVector(IRBuilderTy &IRB, Value *Old, Value *V,
   V = IRB.CreateShuffleVector(V, UndefValue::get(V->getType()),
                               ConstantVector::get(Mask),
                               Name + ".expand");
-  DEBUG(dbgs() << "    shuffle1: " << *V << "\n");
+  DEBUG(dbgs() << "    shuffle: " << *V << "\n");
 
   Mask.clear();
   for (unsigned i = 0; i != VecTy->getNumElements(); ++i)
-    if (i >= BeginIndex && i < EndIndex)
-      Mask.push_back(IRB.getInt32(i));
-    else
-      Mask.push_back(IRB.getInt32(i + VecTy->getNumElements()));
-  V = IRB.CreateShuffleVector(V, Old, ConstantVector::get(Mask),
-                              Name + "insert");
-  DEBUG(dbgs() << "    shuffle2: " << *V << "\n");
+    Mask.push_back(IRB.getInt1(i >= BeginIndex && i < EndIndex));
+
+  V = IRB.CreateSelect(ConstantVector::get(Mask), V, Old, Name + "blend");
+
+  DEBUG(dbgs() << "    blend: " << *V << "\n");
   return V;
 }
 
@@ -2671,6 +2669,7 @@ private:
 
     StoreInst *NewSI;
     if (BeginOffset == NewAllocaBeginOffset &&
+        EndOffset == NewAllocaEndOffset &&
         canConvertValue(TD, V->getType(), NewAllocaTy)) {
       V = convertValue(TD, IRB, V, NewAllocaTy);
       NewSI = IRB.CreateAlignedStore(V, &NewAI, NewAI.getAlignment(),
@@ -3050,16 +3049,16 @@ private:
 
   bool visitSelectInst(SelectInst &SI) {
     DEBUG(dbgs() << "    original: " << SI << "\n");
-
-    // Find the operand we need to rewrite here.
-    bool IsTrueVal = SI.getTrueValue() == OldPtr;
-    if (IsTrueVal)
-      assert(SI.getFalseValue() != OldPtr && "Pointer is both operands!");
-    else
-      assert(SI.getFalseValue() == OldPtr && "Pointer isn't an operand!");
+    assert((SI.getTrueValue() == OldPtr || SI.getFalseValue() == OldPtr) &&
+           "Pointer isn't an operand!");
 
     Value *NewPtr = getAdjustedAllocaPtr(IRB, OldPtr->getType());
-    SI.setOperand(IsTrueVal ? 1 : 2, NewPtr);
+    // Replace the operands which were using the old pointer.
+    if (SI.getOperand(1) == OldPtr)
+      SI.setOperand(1, NewPtr);
+    if (SI.getOperand(2) == OldPtr)
+      SI.setOperand(2, NewPtr);
+
     DEBUG(dbgs() << "          to: " << SI << "\n");
     deleteIfTriviallyDead(OldPtr);
     return false;
@@ -3336,12 +3335,13 @@ static Type *getTypePartition(const DataLayout &TD, Type *Ty,
     Type *ElementTy = SeqTy->getElementType();
     uint64_t ElementSize = TD.getTypeAllocSize(ElementTy);
     uint64_t NumSkippedElements = Offset / ElementSize;
-    if (ArrayType *ArrTy = dyn_cast<ArrayType>(SeqTy))
+    if (ArrayType *ArrTy = dyn_cast<ArrayType>(SeqTy)) {
       if (NumSkippedElements >= ArrTy->getNumElements())
         return 0;
-    if (VectorType *VecTy = dyn_cast<VectorType>(SeqTy))
+    } else if (VectorType *VecTy = dyn_cast<VectorType>(SeqTy)) {
       if (NumSkippedElements >= VecTy->getNumElements())
         return 0;
+    }
     Offset -= NumSkippedElements * ElementSize;
 
     // First check if we need to recurse.

@@ -70,7 +70,7 @@ namespace llvm {
 
     typedef unsigned (*TripleMatchQualityFnTy)(const std::string &TT);
 
-    typedef MCAsmInfo *(*MCAsmInfoCtorFnTy)(const Target &T,
+    typedef MCAsmInfo *(*MCAsmInfoCtorFnTy)(const MCRegisterInfo &MRI,
                                             StringRef TT);
     typedef MCCodeGenInfo *(*MCCodeGenInfoCtorFnTy)(StringRef TT,
                                                     Reloc::Model RM,
@@ -266,10 +266,11 @@ namespace llvm {
     /// feature set; it should always be provided. Generally this should be
     /// either the target triple from the module, or the target triple of the
     /// host if that does not exist.
-    MCAsmInfo *createMCAsmInfo(StringRef Triple) const {
+    MCAsmInfo *createMCAsmInfo(const MCRegisterInfo &MRI,
+                               StringRef Triple) const {
       if (!MCAsmInfoCtorFn)
         return 0;
-      return MCAsmInfoCtorFn(*this, Triple);
+      return MCAsmInfoCtorFn(MRI, Triple);
     }
 
     /// createMCCodeGenInfo - Create a MCCodeGenInfo implementation.
@@ -804,8 +805,8 @@ namespace llvm {
       TargetRegistry::RegisterMCAsmInfo(T, &Allocator);
     }
   private:
-    static MCAsmInfo *Allocator(const Target &T, StringRef TT) {
-      return new MCAsmInfoImpl(T, TT);
+    static MCAsmInfo *Allocator(const MCRegisterInfo &MRI, StringRef TT) {
+      return new MCAsmInfoImpl(TT);
     }
 
   };

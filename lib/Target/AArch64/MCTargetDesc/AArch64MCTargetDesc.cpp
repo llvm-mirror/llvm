@@ -57,13 +57,14 @@ static MCRegisterInfo *createAArch64MCRegisterInfo(StringRef Triple) {
   return X;
 }
 
-static MCAsmInfo *createAArch64MCAsmInfo(const Target &T, StringRef TT) {
+static MCAsmInfo *createAArch64MCAsmInfo(const MCRegisterInfo &MRI,
+                                         StringRef TT) {
   Triple TheTriple(TT);
 
   MCAsmInfo *MAI = new AArch64ELFMCAsmInfo();
-  MachineLocation Dst(MachineLocation::VirtualFP);
-  MachineLocation Src(AArch64::XSP, 0);
-  MAI->addInitialFrameState(0, Dst, Src);
+  unsigned Reg = MRI.getDwarfRegNum(AArch64::XSP, true);
+  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(0, Reg, 0);
+  MAI->addInitialFrameState(Inst);
 
   return MAI;
 }
@@ -81,6 +82,12 @@ static MCCodeGenInfo *createAArch64MCCodeGenInfo(StringRef TT, Reloc::Model RM,
 
   if (CM == CodeModel::Default)
     CM = CodeModel::Small;
+  else if (CM == CodeModel::JITDefault) {
+    // The default MCJIT memory managers make no guarantees about where they can
+    // find an executable page; JITed code needs to be able to refer to globals
+    // no matter how far away they are.
+    CM = CodeModel::Large;
+  }
 
   X->InitMCCodeGenInfo(RM, CM, OL);
   return X;

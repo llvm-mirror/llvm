@@ -58,7 +58,7 @@ public:
   void *getPointerToNamedFunction(const std::string &Name,
                                   bool AbortOnFailure = true);
 
-  bool applyPermissions(std::string *ErrMsg) { return false; }
+  bool finalizeMemory(std::string *ErrMsg) { return false; }
 
   // The following obsolete JITMemoryManager calls are stubbed out for
   // this model.
@@ -75,11 +75,6 @@ public:
   uint8_t *allocateSpace(intptr_t Size, unsigned Alignment);
   uint8_t *allocateGlobal(uintptr_t Size, unsigned Alignment);
   void deallocateFunctionBody(void *Body);
-  uint8_t* startExceptionTable(const Function* F, uintptr_t &ActualSize);
-  void endExceptionTable(const Function *F, uint8_t *TableStart,
-                         uint8_t *TableEnd, uint8_t* FrameRegister);
-  void deallocateExceptionTable(void *ET);
-
 };
 
 } // end namespace llvm

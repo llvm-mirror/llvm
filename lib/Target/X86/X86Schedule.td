@@ -67,6 +67,10 @@ defm WriteFMul  : X86SchedWritePair; // Floating point multiplication.
 defm WriteFDiv  : X86SchedWritePair; // Floating point division.
 defm WriteFSqrt : X86SchedWritePair; // Floating point square root.
 defm WriteFRcp  : X86SchedWritePair; // Floating point reciprocal.
+defm WriteFMA   : X86SchedWritePair; // Fused Multiply Add.
+
+// FMA Scheduling helper class.
+class FMASC { X86FoldableSchedWrite Sched = WriteFAdd; }
 
 // Vector integer operations.
 defm WriteVecALU   : X86SchedWritePair; // Vector integer ALU op, no logicals.
@@ -91,7 +95,6 @@ def WriteMicrocoded : SchedWrite;
 
 //===----------------------------------------------------------------------===//
 // Instruction Itinerary classes used for X86
-def IIC_DEFAULT     : InstrItinClass;
 def IIC_ALU_MEM     : InstrItinClass;
 def IIC_ALU_NONMEM  : InstrItinClass;
 def IIC_LEA         : InstrItinClass;
@@ -263,10 +266,14 @@ def IIC_SSE_PINSRW : InstrItinClass;
 def IIC_SSE_PABS_RR : InstrItinClass;
 def IIC_SSE_PABS_RM : InstrItinClass;
 
-def IIC_SSE_SQRTP_RR : InstrItinClass;
-def IIC_SSE_SQRTP_RM : InstrItinClass;
-def IIC_SSE_SQRTS_RR : InstrItinClass;
-def IIC_SSE_SQRTS_RM : InstrItinClass;
+def IIC_SSE_SQRTPS_RR : InstrItinClass;
+def IIC_SSE_SQRTPS_RM : InstrItinClass;
+def IIC_SSE_SQRTSS_RR : InstrItinClass;
+def IIC_SSE_SQRTSS_RM : InstrItinClass;
+def IIC_SSE_SQRTPD_RR : InstrItinClass;
+def IIC_SSE_SQRTPD_RM : InstrItinClass;
+def IIC_SSE_SQRTSD_RR : InstrItinClass;
+def IIC_SSE_SQRTSD_RM : InstrItinClass;
 
 def IIC_SSE_RCPP_RR : InstrItinClass;
 def IIC_SSE_RCPP_RM : InstrItinClass;
@@ -566,3 +573,5 @@ def GenericModel : SchedMachineModel {
 }
 
 include "X86ScheduleAtom.td"
+include "X86SchedSandyBridge.td"
+include "X86SchedHaswell.td"

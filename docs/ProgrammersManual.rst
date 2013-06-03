@@ -626,6 +626,33 @@ SmallVectors are most useful when on the stack.
 SmallVector also provides a nice portable and efficient replacement for
 ``alloca``.
 
+.. note::
+
+   Prefer to use ``SmallVectorImpl<T>`` as a parameter type.
+
+   In APIs that don't care about the "small size" (most?), prefer to use
+   the ``SmallVectorImpl<T>`` class, which is basically just the "vector
+   header" (and methods) without the elements allocated after it. Note that
+   ``SmallVector<T, N>`` inherits from ``SmallVectorImpl<T>`` so the
+   conversion is implicit and costs nothing. E.g.
+
+   .. code-block:: c++
+
+      // BAD: Clients cannot pass e.g. SmallVector<Foo, 4>.
+      hardcodedSmallSize(SmallVector<Foo, 2> &Out);
+      // GOOD: Clients can pass any SmallVector<Foo, N>.
+      allowsAnySmallSize(SmallVectorImpl<Foo> &Out);
+
+      void someFunc() {
+        SmallVector<Foo, 8> Vec;
+        hardcodedSmallSize(Vec); // Error.
+        allowsAnySmallSize(Vec); // Works.
+      }
+
+   Even though it has "``Impl``" in the name, this is so widely used that
+   it really isn't "private to the implementation" anymore. A name like
+   ``SmallVectorHeader`` would be more appropriate.
+
 .. _dss_vector:
 
 <vector>
@@ -989,7 +1016,9 @@ coupled with a good choice of :ref:`sequential container <ds_sequential>`.
 This combination provides the several nice properties: the result data is
 contiguous in memory (good for cache locality), has few allocations, is easy to
 address (iterators in the final vector are just indices or pointers), and can be
-efficiently queried with a standard binary or radix search.
+efficiently queried with a standard binary search (e.g.
+``std::lower_bound``; if you want the whole range of elements comparing
+equal, use ``std::equal_range``).
 
 .. _dss_smallset:
 

@@ -112,6 +112,21 @@ static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
 #endif
 }
 
+static bool OSHasAVXSupport() {
+#if defined(__GNUC__)
+  // Check xgetbv; this uses a .byte sequence instead of the instruction
+  // directly because older assemblers do not include support for xgetbv and
+  // there is no easy way to conditionally compile based on the assembler used.
+  int rEAX, rEDX;
+  __asm__ (".byte 0x0f, 0x01, 0xd0" : "=a" (rEAX), "=d" (rEDX) : "c" (0));
+#elif defined(_MSC_FULL_VER) && defined(_XCR_XFEATURE_ENABLED_MASK)
+  unsigned long long rEAX = _xgetbv(_XCR_XFEATURE_ENABLED_MASK);
+#else
+  int rEAX = 0; // Ensures we return false
+#endif
+  return (rEAX & 6) == 6;
+}
+
 static void DetectX86FamilyModel(unsigned EAX, unsigned &Family,
                                  unsigned &Model) {
   Family = (EAX >> 8) & 0xf; // Bits 8 - 11
@@ -134,6 +149,11 @@ std::string sys::getHostCPUName() {
   DetectX86FamilyModel(EAX, Family, Model);
 
   bool HasSSE3 = (ECX & 0x1);
+  // If CPUID indicates support for XSAVE, XRESTORE and AVX, and XGETBV 
+  // indicates that the AVX registers will be saved and restored on context
+  // switch, then we have full AVX support.
+  const unsigned AVXBits = (1 << 27) | (1 << 28);
+  bool HasAVX = ((ECX & AVXBits) == AVXBits) && OSHasAVXSupport();
   GetX86CpuIDAndInfo(0x80000001, &EAX, &EBX, &ECX, &EDX);
   bool Em64T = (EDX >> 29) & 0x1;
 
@@ -243,11 +263,15 @@ std::string sys::getHostCPUName() {
       case 42: // Intel Core i7 processor. All processors are manufactured
                // using the 32 nm process.
       case 45:
-        return "corei7-avx";
+        // Not all Sandy Bridge processors support AVX (such as the Pentium
+        // versions instead of the i7 versions).
+        return HasAVX ? "corei7-avx" : "corei7";
 
       // Ivy Bridge:
       case 58:
-        return "core-avx-i";
+        // Not all Ivy Bridge processors support AVX (such as the Pentium
+        // versions instead of the i7 versions).
+        return HasAVX ? "core-avx-i" : "corei7";
 
       case 28: // Most 45 nm Intel Atom processors
       case 38: // 45 nm Atom Lincroft
@@ -331,10 +355,15 @@ std::string sys::getHostCPUName() {
       case 20:
         return "btver1";
       case 21:
-        if (Model <= 15)
-          return "bdver1";
-        else if (Model <= 31)
+        if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
+          return "btver1";
+        if (Model > 15 && Model <= 31)
           return "bdver2";
+        return "bdver1";
+      case 22:
+        if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
+          return "btver1";
+        return "btver2";
     default:
       return "generic";
     }
@@ -584,7 +613,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features){
 #endif
 
 std::string sys::getProcessTriple() {
-  Triple PT(LLVM_HOSTTRIPLE);
+  Triple PT(LLVM_HOST_TRIPLE);
 
   if (sizeof(void *) == 8 && PT.isArch32Bit())
     PT = PT.get64BitArchVariant();

@@ -17,7 +17,7 @@
 #include "llvm/ExecutionEngine/ObjectBuffer.h"
 #include "llvm/ExecutionEngine/ObjectImage.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
-#include "llvm/Object/MachOObject.h"
+#include "llvm/Object/MachO.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Memory.h"
@@ -69,7 +69,7 @@ public:
     return 0;
   }
 
-  bool applyPermissions(std::string *ErrMsg) { return false; }
+  bool finalizeMemory(std::string *ErrMsg) { return false; }
 
   // Invalidate instruction cache for sections with execute permissions.
   // Some platforms with separate data cache and instruction cache require

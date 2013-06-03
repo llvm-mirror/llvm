@@ -17,6 +17,7 @@
 #define LLVM_MC_MCASMINFO_H
 
 #include "llvm/MC/MCDirectives.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MachineLocation.h"
 #include <cassert>
 #include <vector>
@@ -217,6 +218,8 @@ namespace llvm {
     /// convention.
     bool HasMicrosoftFastStdCallMangling;    // Defaults to false.
 
+    bool NeedsDwarfSectionOffsetDirective;
+
     //===--- Alignment Information ----------------------------------------===//
 
     /// AlignDirective - The directive used to emit round up to an alignment
@@ -320,9 +323,6 @@ namespace llvm {
     /// encode inline subroutine information.
     bool DwarfUsesInlineInfoSection;         // Defaults to false.
 
-    /// DwarfSectionOffsetDirective - Special section offset directive.
-    const char* DwarfSectionOffsetDirective; // Defaults to NULL
-
     /// DwarfUsesRelocationsAcrossSections - True if Dwarf2 output generally
     /// uses relocations for references to other .debug_* sections.
     bool DwarfUsesRelocationsAcrossSections;
@@ -333,7 +333,7 @@ namespace llvm {
 
     //===--- Prologue State ----------------------------------------------===//
 
-    std::vector<MachineMove> InitialFrameState;
+    std::vector<MCCFIInstruction> InitialFrameState;
 
   public:
     explicit MCAsmInfo();
@@ -410,6 +410,10 @@ namespace llvm {
 
     bool hasMicrosoftFastStdCallMangling() const {
       return HasMicrosoftFastStdCallMangling;
+    }
+
+    bool needsDwarfSectionOffsetDirective() const {
+      return NeedsDwarfSectionOffsetDirective;
     }
 
     // Accessors.
@@ -557,9 +561,6 @@ namespace llvm {
     bool doesDwarfUseInlineInfoSection() const {
       return DwarfUsesInlineInfoSection;
     }
-    const char *getDwarfSectionOffsetDirective() const {
-      return DwarfSectionOffsetDirective;
-    }
     bool doesDwarfUseRelocationsAcrossSections() const {
       return DwarfUsesRelocationsAcrossSections;
     }
@@ -567,11 +568,11 @@ namespace llvm {
       return DwarfRegNumForCFI;
     }
 
-    void addInitialFrameState(MCSymbol *label, const MachineLocation &D,
-                              const MachineLocation &S) {
-      InitialFrameState.push_back(MachineMove(label, D, S));
+    void addInitialFrameState(const MCCFIInstruction &Inst) {
+      InitialFrameState.push_back(Inst);
     }
-    const std::vector<MachineMove> &getInitialFrameState() const {
+
+    const std::vector<MCCFIInstruction> &getInitialFrameState() const {
       return InitialFrameState;
     }
   };

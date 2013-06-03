@@ -38,7 +38,7 @@ public:
                                       const SmallVectorImpl<ISD::InputArg> &Ins,
                                       DebugLoc DL, SelectionDAG &DAG,
                                       SmallVectorImpl<SDValue> &InVals) const;
-  virtual EVT getSetCCResultType(EVT VT) const;
+  virtual EVT getSetCCResultType(LLVMContext &, EVT VT) const;
 private:
   const R600InstrInfo * TII;
 
@@ -59,7 +59,6 @@ private:
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFPTOUINT(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFPOW(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const;
 

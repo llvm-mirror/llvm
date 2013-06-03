@@ -270,7 +270,7 @@ namespace llvm {
     }
 
     /// getSetCCResultType - Return the value type to use for ISD::SETCC.
-    virtual EVT getSetCCResultType(EVT VT) const;
+    virtual EVT getSetCCResultType(LLVMContext &Context, EVT VT) const;
 
     virtual MachineBasicBlock *
       EmitInstrWithCustomInserter(MachineInstr *MI,
@@ -464,7 +464,8 @@ namespace llvm {
                             CallingConv::ID CallConv, bool isVarArg,
                             const SmallVectorImpl<ISD::InputArg> &Ins,
                             DebugLoc dl, SelectionDAG &DAG,
-                            SmallVectorImpl<SDValue> &InVals) const;
+                            SmallVectorImpl<SDValue> &InVals,
+                            bool isThisReturn, SDValue ThisVal) const;
 
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
@@ -473,16 +474,25 @@ namespace llvm {
                            DebugLoc dl, SelectionDAG &DAG,
                            SmallVectorImpl<SDValue> &InVals) const;
 
+    int StoreByValRegs(CCState &CCInfo, SelectionDAG &DAG,
+                       DebugLoc dl, SDValue &Chain,
+                       const Value *OrigArg,
+                       unsigned InRegsParamRecordIdx,
+                       unsigned OffsetFromOrigArg,
+                       unsigned ArgOffset,
+                       unsigned ArgSize,
+                       bool ForceMutable) const;
+
     void VarArgStyleRegisters(CCState &CCInfo, SelectionDAG &DAG,
                               DebugLoc dl, SDValue &Chain,
-                              const Value *OrigArg,
-                              unsigned OffsetFromOrigArg,
                               unsigned ArgOffset,
-                              bool ForceMutable = false)
-      const;
+                              bool ForceMutable = false) const;
 
     void computeRegArea(CCState &CCInfo, MachineFunction &MF,
-                        unsigned &VARegSize, unsigned &VARegSaveSize) const;
+                        unsigned InRegsParamRecordIdx,
+                        unsigned ArgSize,
+                        unsigned &ArgRegsSize,
+                        unsigned &ArgRegsSaveSize) const;
 
     virtual SDValue
       LowerCall(TargetLowering::CallLoweringInfo &CLI,

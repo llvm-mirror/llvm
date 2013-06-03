@@ -66,7 +66,7 @@ namespace llvm {
 
     /// Data - Raw data bytes for abbreviation.
     ///
-    SmallVector<DIEAbbrevData, 8> Data;
+    SmallVector<DIEAbbrevData, 12> Data;
 
   public:
     DIEAbbrev(uint16_t T, uint16_t C) : Tag(T), ChildrenFlag(C), Data() {}
@@ -75,7 +75,7 @@ namespace llvm {
     uint16_t getTag() const { return Tag; }
     unsigned getNumber() const { return Number; }
     uint16_t getChildrenFlag() const { return ChildrenFlag; }
-    const SmallVector<DIEAbbrevData, 8> &getData() const { return Data; }
+    const SmallVectorImpl<DIEAbbrevData> &getData() const { return Data; }
     void setTag(uint16_t T) { Tag = T; }
     void setChildrenFlag(uint16_t CF) { ChildrenFlag = CF; }
     void setNumber(unsigned N) { Number = N; }
@@ -108,7 +108,7 @@ namespace llvm {
 
   //===--------------------------------------------------------------------===//
   /// DIE - A structured debug information entry.  Has an abbreviation which
-  /// describes it's organization.
+  /// describes its organization.
   class DIEValue;
 
   class DIE {
@@ -133,14 +133,13 @@ namespace llvm {
 
     /// Attribute values.
     ///
-    SmallVector<DIEValue*, 32> Values;
+    SmallVector<DIEValue*, 12> Values;
 
     // Private data for print()
     mutable unsigned IndentCount;
   public:
     explicit DIE(unsigned Tag)
-      : Offset(0), Size(0), Abbrev(Tag, dwarf::DW_CHILDREN_no), Parent(0),
-        IndentCount(0) {}
+      : Offset(0), Size(0), Abbrev(Tag, dwarf::DW_CHILDREN_no), Parent(0) {}
     virtual ~DIE();
 
     // Accessors.
@@ -150,11 +149,11 @@ namespace llvm {
     unsigned getOffset() const { return Offset; }
     unsigned getSize() const { return Size; }
     const std::vector<DIE *> &getChildren() const { return Children; }
-    const SmallVector<DIEValue*, 32> &getValues() const { return Values; }
+    const SmallVectorImpl<DIEValue*> &getValues() const { return Values; }
     DIE *getParent() const { return Parent; }
     /// Climb up the parent chain to get the compile unit DIE this DIE belongs
     /// to.
-    DIE *getCompileUnit() const;
+    DIE *getCompileUnit();
     void setTag(unsigned Tag) { Abbrev.setTag(Tag); }
     void setOffset(unsigned O) { Offset = O; }
     void setSize(unsigned S) { Size = S; }
@@ -179,7 +178,7 @@ namespace llvm {
     }
 
 #ifndef NDEBUG
-    void print(raw_ostream &O, unsigned IncIndent = 0);
+    void print(raw_ostream &O, unsigned IndentCount = 0) const;
     void dump();
 #endif
   };
@@ -326,7 +325,9 @@ namespace llvm {
   class DIEEntry : public DIEValue {
     DIE *const Entry;
   public:
-    explicit DIEEntry(DIE *E) : DIEValue(isEntry), Entry(E) {}
+    explicit DIEEntry(DIE *E) : DIEValue(isEntry), Entry(E) {
+      assert(E && "Cannot construct a DIEEntry with a null DIE");
+    }
 
     DIE *getEntry() const { return Entry; }
 

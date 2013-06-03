@@ -64,6 +64,22 @@ Non-comprehensive list of changes in this release
   attributes, which are useful for passing information to code generation. See
   :doc:`HowToUseAttributes` for more details.
 
+* TableGen's syntax for instruction selection patterns has been simplified.
+  Instead of specifying types indirectly with register classes, you should now
+  specify types directly in the input patterns. See ``SparcInstrInfo.td`` for
+  examples of the new syntax. The old syntax using register classes still
+  works, but it will be removed in a future LLVM release.
+
+* MCJIT now supports exception handling. Support for it in the old jit will be
+  removed in the 3.4 release.
+
+* Command line options can now be grouped into categories which are shown in
+  the output of ``-help``. See :ref:`grouping options into categories`.
+
+* The appearance of command line options in ``-help`` that are inherited by
+  linking with libraries that use the LLVM Command line support library can now
+  be modified at runtime. See :ref:`cl::getRegisteredOptions`.
+
 * ... next change ...
 
 .. NOTE
@@ -103,15 +119,25 @@ Loop Vectorizer
 We've continued the work on the loop vectorizer. The loop vectorizer now
 has the following features:
 
-- Loops with unknown trip count.
-- Runtime checks of pointers
-- Reductions, Inductions
-- If Conversion
-- Pointer induction variables
-- Reverse iterators
-- Vectorization of mixed types
-- Vectorization of function calls
-- Partial unrolling during vectorization
+- Loops with unknown trip counts.
+- Runtime checks of pointers.
+- Reductions, Inductions.
+- Min/Max reductions of integers.
+- If Conversion.
+- Pointer induction variables.
+- Reverse iterators.
+- Vectorization of mixed types.
+- Vectorization of function calls.
+- Partial unrolling during vectorization.
+
+The loop vectorizer is now enabled by default for -O3.
+
+SLP Vectorizer
+--------------
+
+LLVM now has a new SLP vectorizer. The new SLP vectorizer is not enabled by
+default but can be enabled using the clang flag -fslp-vectorize. The BB-vectorizer
+can also be enabled using the command line flag -fslp-vectorize-aggressive.
 
 R600 Backend
 ------------
@@ -121,7 +147,64 @@ The R600 backend was added in this release, it supports AMD GPUs
 graphics / compute drivers which are developed as part of the `Mesa3D
 <http://www.mesa3d.org>`_ project.
 
+SystemZ/s390x Backend
+---------------------
 
+LLVM and clang now support IBM's z/Architecture.  At present this support
+is restricted to GNU/Linux (GNU triplet s390x-linux-gnu) and requires
+z10 or greater.
+
+
+External Open Source Projects Using LLVM 3.3
+============================================
+
+An exciting aspect of LLVM is that it is used as an enabling technology for
+a lot of other language and tools projects. This section lists some of the
+projects that have already been updated to work with LLVM 3.3.
+
+
+Portable Computing Language (pocl)
+----------------------------------
+
+In addition to producing an easily portable open source OpenCL
+implementation, another major goal of `pocl <http://pocl.sourceforge.net/>`_ 
+is improving performance portability of OpenCL programs with
+compiler optimizations, reducing the need for target-dependent manual
+optimizations. An important part of pocl is a set of LLVM passes used to
+statically parallelize multiple work-items with the kernel compiler, even in
+the presence of work-group barriers. This enables static parallelization of
+the fine-grained static concurrency in the work groups in multiple ways.
+
+TTA-based Co-design Environment (TCE)
+-------------------------------------
+
+`TCE <http://tce.cs.tut.fi/>`_ is a toolset for designing new 
+processors based on the Transport triggered architecture (TTA). 
+The toolset provides a complete co-design flow from C/C++
+programs down to synthesizable VHDL/Verilog and parallel program binaries.
+Processor customization points include the register files, function units,
+supported operations, and the interconnection network.
+
+TCE uses Clang and LLVM for C/C++/OpenCL C language support, target independent
+optimizations and also for parts of code generation. It generates new
+LLVM-based code generators "on the fly" for the designed TTA processors and
+loads them in to the compiler backend as runtime libraries to avoid
+per-target recompilation of larger parts of the compiler chain.
+
+Just-in-time Adaptive Decoder Engine (Jade)
+-------------------------------------------
+
+`Jade <https://github.com/orcc/jade>`_ (Just-in-time Adaptive Decoder Engine)
+is a generic video decoder engine using LLVM for just-in-time compilation of
+video decoder configurations. Those configurations are designed by MPEG
+Reconfigurable Video Coding (RVC) committee. MPEG RVC standard is built on a
+stream-based dataflow representation of decoders. It is composed of a standard
+library of coding tools written in RVC-CAL language and a dataflow
+configuration --- block diagram --- of a decoder.
+
+Jade project is hosted as part of the Open RVC-CAL Compiler
+(`Orcc <http://orcc.sf.net>`_) and requires it to translate the RVC-CAL standard
+library of video coding tools into an LLVM assembly code.
 
 Additional Information
 ======================

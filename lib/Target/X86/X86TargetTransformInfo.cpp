@@ -86,7 +86,9 @@ public:
   virtual unsigned getNumberOfRegisters(bool Vector) const;
   virtual unsigned getRegisterBitWidth(bool Vector) const;
   virtual unsigned getMaximumUnrollFactor() const;
-  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const;
+  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                          OperandValueKind,
+                                          OperandValueKind) const;
   virtual unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
                                   int Index, Type *SubTp) const;
   virtual unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
@@ -162,7 +164,9 @@ unsigned X86TTI::getMaximumUnrollFactor() const {
   return 2;
 }
 
-unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
+unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                        OperandValueKind Op1Info,
+                                        OperandValueKind Op2Info) const {
   // Legalize the type.
   std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Ty);
 
@@ -182,6 +186,16 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
     { ISD::SRL,     MVT::v2i64,    1 },
     { ISD::SHL,     MVT::v4i64,    1 },
     { ISD::SRL,     MVT::v4i64,    1 },
+
+    { ISD::SHL,  MVT::v32i8,  42 }, // cmpeqb sequence.
+    { ISD::SHL,  MVT::v16i16,  16*10 }, // Scalarized.
+
+    { ISD::SRL,  MVT::v32i8,  32*10 }, // Scalarized.
+    { ISD::SRL,  MVT::v16i16,  8*10 }, // Scalarized.
+
+    { ISD::SRA,  MVT::v32i8,  32*10 }, // Scalarized.
+    { ISD::SRA,  MVT::v16i16,  16*10 }, // Scalarized.
+    { ISD::SRA,  MVT::v4i64,  4*10 }, // Scalarized.
   };
 
   // Look for AVX2 lowering tricks.
@@ -190,6 +204,67 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
                                    ISD, LT.second);
     if (Idx != -1)
       return LT.first * AVX2CostTable[Idx].Cost;
+  }
+
+  static const CostTblEntry<MVT> SSE2UniformConstCostTable[] = {
+    // We don't correctly identify costs of casts because they are marked as
+    // custom.
+    // Constant splats are cheaper for the following instructions.
+    { ISD::SHL,  MVT::v16i8,  1 }, // psllw.
+    { ISD::SHL,  MVT::v8i16,  1 }, // psllw.
+    { ISD::SHL,  MVT::v4i32,  1 }, // pslld
+    { ISD::SHL,  MVT::v2i64,  1 }, // psllq.
+
+    { ISD::SRL,  MVT::v16i8,  1 }, // psrlw.
+    { ISD::SRL,  MVT::v8i16,  1 }, // psrlw.
+    { ISD::SRL,  MVT::v4i32,  1 }, // psrld.
+    { ISD::SRL,  MVT::v2i64,  1 }, // psrlq.
+
+    { ISD::SRA,  MVT::v16i8,  4 }, // psrlw, pand, pxor, psubb.
+    { ISD::SRA,  MVT::v8i16,  1 }, // psraw.
+    { ISD::SRA,  MVT::v4i32,  1 }, // psrad.
+  };
+
+  if (Op2Info == TargetTransformInfo::OK_UniformConstantValue &&
+      ST->hasSSE2()) {
+    int Idx = CostTableLookup<MVT>(SSE2UniformConstCostTable,
+                                   array_lengthof(SSE2UniformConstCostTable),
+                                   ISD, LT.second);
+    if (Idx != -1)
+      return LT.first * SSE2UniformConstCostTable[Idx].Cost;
+  }
+
+
+  static const CostTblEntry<MVT> SSE2CostTable[] = {
+    // We don't correctly identify costs of casts because they are marked as
+    // custom.
+    // For some cases, where the shift amount is a scalar we would be able
+    // to generate better code. Unfortunately, when this is the case the value
+    // (the splat) will get hoisted out of the loop, thereby making it invisible
+    // to ISel. The cost model must return worst case assumptions because it is
+    // used for vectorization and we don't want to make vectorized code worse
+    // than scalar code.
+    { ISD::SHL,  MVT::v16i8,  30 }, // cmpeqb sequence.
+    { ISD::SHL,  MVT::v8i16,  8*10 }, // Scalarized.
+    { ISD::SHL,  MVT::v4i32,  2*5 }, // We optimized this using mul.
+    { ISD::SHL,  MVT::v2i64,  2*10 }, // Scalarized.
+
+    { ISD::SRL,  MVT::v16i8,  16*10 }, // Scalarized.
+    { ISD::SRL,  MVT::v8i16,  8*10 }, // Scalarized.
+    { ISD::SRL,  MVT::v4i32,  4*10 }, // Scalarized.
+    { ISD::SRL,  MVT::v2i64,  2*10 }, // Scalarized.
+
+    { ISD::SRA,  MVT::v16i8,  16*10 }, // Scalarized.
+    { ISD::SRA,  MVT::v8i16,  8*10 }, // Scalarized.
+    { ISD::SRA,  MVT::v4i32,  4*10 }, // Scalarized.
+    { ISD::SRA,  MVT::v2i64,  2*10 }, // Scalarized.
+  };
+
+  if (ST->hasSSE2()) {
+    int Idx = CostTableLookup<MVT>(SSE2CostTable, array_lengthof(SSE2CostTable),
+                                   ISD, LT.second);
+    if (Idx != -1)
+      return LT.first * SSE2CostTable[Idx].Cost;
   }
 
   static const CostTblEntry<MVT> AVX1CostTable[] = {
@@ -236,7 +311,8 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
     return 6;
 
   // Fallback to the default implementation.
-  return TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty);
+  return TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty, Op1Info,
+                                                     Op2Info);
 }
 
 unsigned X86TTI::getShuffleCost(ShuffleKind Kind, Type *Tp, int Index,
@@ -258,9 +334,44 @@ unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
+  std::pair<unsigned, MVT> LTSrc = TLI->getTypeLegalizationCost(Src);
+  std::pair<unsigned, MVT> LTDest = TLI->getTypeLegalizationCost(Dst);
+
+  static const TypeConversionCostTblEntry<MVT> SSE2ConvTbl[] = {
+    // These are somewhat magic numbers justified by looking at the output of
+    // Intel's IACA, running some kernels and making sure when we take
+    // legalization into account the throughput will be overestimated.
+    { ISD::UINT_TO_FP, MVT::v2f64, MVT::v2i64, 2*10 },
+    { ISD::UINT_TO_FP, MVT::v2f64, MVT::v4i32, 4*10 },
+    { ISD::UINT_TO_FP, MVT::v2f64, MVT::v8i16, 8*10 },
+    { ISD::UINT_TO_FP, MVT::v2f64, MVT::v16i8, 16*10 },
+    { ISD::SINT_TO_FP, MVT::v2f64, MVT::v2i64, 2*10 },
+    { ISD::SINT_TO_FP, MVT::v2f64, MVT::v4i32, 4*10 },
+    { ISD::SINT_TO_FP, MVT::v2f64, MVT::v8i16, 8*10 },
+    { ISD::SINT_TO_FP, MVT::v2f64, MVT::v16i8, 16*10 },
+    // There are faster sequences for float conversions.
+    { ISD::UINT_TO_FP, MVT::v4f32, MVT::v2i64, 15 },
+    { ISD::UINT_TO_FP, MVT::v4f32, MVT::v4i32, 15 },
+    { ISD::UINT_TO_FP, MVT::v4f32, MVT::v8i16, 15 },
+    { ISD::UINT_TO_FP, MVT::v4f32, MVT::v16i8, 8 },
+    { ISD::SINT_TO_FP, MVT::v4f32, MVT::v2i64, 15 },
+    { ISD::SINT_TO_FP, MVT::v4f32, MVT::v4i32, 15 },
+    { ISD::SINT_TO_FP, MVT::v4f32, MVT::v8i16, 15 },
+    { ISD::SINT_TO_FP, MVT::v4f32, MVT::v16i8, 8 },
+  };
+
+  if (ST->hasSSE2() && !ST->hasAVX()) {
+    int Idx = ConvertCostTableLookup<MVT>(SSE2ConvTbl,
+                                          array_lengthof(SSE2ConvTbl),
+                                          ISD, LTDest.second, LTSrc.second);
+    if (Idx != -1)
+      return LTSrc.first * SSE2ConvTbl[Idx].Cost;
+  }
+
   EVT SrcTy = TLI->getValueType(Src);
   EVT DstTy = TLI->getValueType(Dst);
 
+  // The function getSimpleVT only handles simple value types.
   if (!SrcTy.isSimple() || !DstTy.isSimple())
     return TargetTransformInfo::getCastInstrCost(Opcode, Dst, Src);
 
@@ -271,10 +382,33 @@ unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
     { ISD::ZERO_EXTEND, MVT::v4i64, MVT::v4i32, 1 },
     { ISD::TRUNCATE,    MVT::v4i32, MVT::v4i64, 1 },
     { ISD::TRUNCATE,    MVT::v8i16, MVT::v8i32, 1 },
-    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i8,  1 },
-    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i8,  1 },
-    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i8,  1 },
-    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i8,  1 },
+
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i1,  8 },
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i8,  8 },
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i16, 5 },
+    { ISD::SINT_TO_FP,  MVT::v8f32, MVT::v8i32, 1 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i1,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i8,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i16, 3 },
+    { ISD::SINT_TO_FP,  MVT::v4f32, MVT::v4i32, 1 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i1,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i8,  3 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i16, 3 },
+    { ISD::SINT_TO_FP,  MVT::v4f64, MVT::v4i32, 1 },
+
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i1,  6 },
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i8,  5 },
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i16, 5 },
+    { ISD::UINT_TO_FP,  MVT::v8f32, MVT::v8i32, 9 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i1,  7 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i8,  2 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i16, 2 },
+    { ISD::UINT_TO_FP,  MVT::v4f32, MVT::v4i32, 6 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i1,  7 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i8,  2 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i16, 2 },
+    { ISD::UINT_TO_FP,  MVT::v4f64, MVT::v4i32, 6 },
+
     { ISD::FP_TO_SINT,  MVT::v8i8,  MVT::v8f32, 1 },
     { ISD::FP_TO_SINT,  MVT::v4i8,  MVT::v4f32, 1 },
     { ISD::ZERO_EXTEND, MVT::v8i32, MVT::v8i1,  6 },

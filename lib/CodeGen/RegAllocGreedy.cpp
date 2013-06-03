@@ -78,7 +78,7 @@ class RAGreedy : public MachineFunctionPass,
   LiveDebugVariables *DebugVars;
 
   // state
-  std::auto_ptr<Spiller> SpillerInstance;
+  OwningPtr<Spiller> SpillerInstance;
   std::priority_queue<std::pair<unsigned, unsigned> > Queue;
   unsigned NextCascade;
 
@@ -166,8 +166,8 @@ class RAGreedy : public MachineFunctionPass,
   };
 
   // splitting state.
-  std::auto_ptr<SplitAnalysis> SA;
-  std::auto_ptr<SplitEditor> SE;
+  OwningPtr<SplitAnalysis> SA;
+  OwningPtr<SplitEditor> SE;
 
   /// Cached per-block interference maps
   InterferenceCache IntfCache;
@@ -713,7 +713,7 @@ bool RAGreedy::addSplitConstraints(InterferenceCache::Cursor Intf,
     Intf.moveToBlock(BC.Number);
     BC.Entry = BI.LiveIn ? SpillPlacement::PrefReg : SpillPlacement::DontCare;
     BC.Exit = BI.LiveOut ? SpillPlacement::PrefReg : SpillPlacement::DontCare;
-    BC.ChangesValue = BI.FirstDef;
+    BC.ChangesValue = BI.FirstDef.isValid();
 
     if (!Intf.hasInterference())
       continue;

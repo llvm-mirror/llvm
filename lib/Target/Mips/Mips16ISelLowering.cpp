@@ -13,6 +13,7 @@
 #define DEBUG_TYPE "mips-lower"
 #include "Mips16ISelLowering.h"
 #include "MipsRegisterInfo.h"
+#include "MipsTargetMachine.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/CommandLine.h"
@@ -20,11 +21,6 @@
 #include <set>
 
 using namespace llvm;
-
-static cl::opt<bool>
-Mips16HardFloat("mips16-hard-float", cl::NotHidden,
-                cl::desc("MIPS: mips16 hard float enable."),
-                cl::init(false));
 
 static cl::opt<bool> DontExpandCondPseudos16(
   "mips16-dont-expand-cond-pseudo",
@@ -50,10 +46,13 @@ Mips16TargetLowering::Mips16TargetLowering(MipsTargetMachine &TM)
   // Set up the register classes
   addRegisterClass(MVT::i32, &Mips::CPU16RegsRegClass);
 
-  if (Mips16HardFloat)
+  if (Subtarget->inMips16HardFloat()) {
     setMips16HardFloatLibCalls();
-
-  setOperationAction(ISD::MEMBARRIER,         MVT::Other, Expand);
+    NoHelperNeeded.insert("__mips16_ret_sf");
+    NoHelperNeeded.insert("__mips16_ret_df");
+    NoHelperNeeded.insert("__mips16_ret_sc");
+    NoHelperNeeded.insert("__mips16_ret_dc");
+  }
   setOperationAction(ISD::ATOMIC_FENCE,       MVT::Other, Expand);
   setOperationAction(ISD::ATOMIC_CMP_SWAP,    MVT::i32,   Expand);
   setOperationAction(ISD::ATOMIC_SWAP,        MVT::i32,   Expand);
@@ -375,7 +374,8 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
   const char* Mips16HelperFunction = 0;
   bool NeedMips16Helper = false;
 
-  if (getTargetMachine().Options.UseSoftFloat && Mips16HardFloat) {
+  if (getTargetMachine().Options.UseSoftFloat &&
+      Subtarget->inMips16HardFloat()) {
     //
     // currently we don't have symbols tagged with the mips16 or mips32
     // qualifier so we will assume that we don't know what kind it is.
@@ -384,6 +384,13 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
     bool LookupHelper = true;
     if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(CLI.Callee)) {
       if (NoHelperNeeded.find(S->getSymbol()) != NoHelperNeeded.end()) {
+        LookupHelper = false;
+      }
+    }
+    else if (GlobalAddressSDNode *G = 
+             dyn_cast<GlobalAddressSDNode>(CLI.Callee)) {
+      if (NoHelperNeeded.find(G->getGlobal()->getName().data()) != 
+                              NoHelperNeeded.end()) {
         LookupHelper = false;
       }
     }
@@ -614,7 +621,8 @@ MachineBasicBlock
   unsigned regX = MI->getOperand(0).getReg();
   unsigned regY = MI->getOperand(1).getReg();
   MachineBasicBlock *target = MI->getOperand(2).getMBB();
-  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(CmpOpc)).addReg(regX).addReg(regY);
+  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(CmpOpc)).addReg(regX)
+    .addReg(regY);
   BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(BtOpc)).addMBB(target);
   MI->eraseFromParent();   // The pseudo instruction is gone now.
   return BB;
@@ -636,7 +644,8 @@ MachineBasicBlock *Mips16TargetLowering::emitFEXT_T8I8I16_ins(
     CmpOpc = CmpiXOpc;
   else
     llvm_unreachable("immediate field not usable");
-  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(CmpOpc)).addReg(regX).addImm(imm);
+  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(CmpOpc)).addReg(regX)
+    .addImm(imm);
   BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(BtOpc)).addMBB(target);
   MI->eraseFromParent();   // The pseudo instruction is gone now.
   return BB;

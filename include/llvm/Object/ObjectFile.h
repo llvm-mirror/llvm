@@ -119,7 +119,6 @@ public:
   ///
   /// This is for display purposes only.
   error_code getTypeName(SmallVectorImpl<char> &Result) const;
-  error_code getAdditionalInfo(int64_t &Result) const;
 
   /// @brief Get a string that represents the calculation of the value of this
   ///        relocation.
@@ -128,6 +127,7 @@ public:
   error_code getValueString(SmallVectorImpl<char> &Result) const;
 
   DataRefImpl getRawDataRefImpl() const;
+  const ObjectFile *getObjectFile() const;
 };
 typedef content_iterator<RelocationRef> relocation_iterator;
 
@@ -217,6 +217,8 @@ public:
   /// mapped).
   error_code getAddress(uint64_t &Result) const;
   error_code getFileOffset(uint64_t &Result) const;
+  /// @brief Get the alignment of this symbol as the actual value (not log 2).
+  error_code getAlignment(uint32_t &Result) const;
   error_code getSize(uint64_t &Result) const;
   error_code getType(SymbolRef::Type &Result) const;
 
@@ -226,9 +228,6 @@ public:
 
   /// Get symbol flags (bitwise OR of SymbolRef::Flags)
   error_code getFlags(uint32_t &Result) const;
-
-  /// @brief Return true for common symbols such as uninitialized globals
-  error_code isCommon(bool &Result) const;
 
   /// @brief Get section this symbol is defined in reference to. Result is
   /// end_sections() if it is undefined or is an absolute symbol.
@@ -276,7 +275,7 @@ class ObjectFile : public Binary {
   ObjectFile(const ObjectFile &other) LLVM_DELETED_FUNCTION;
 
 protected:
-  ObjectFile(unsigned int Type, MemoryBuffer *source, error_code &ec);
+  ObjectFile(unsigned int Type, MemoryBuffer *source);
 
   const uint8_t *base() const {
     return reinterpret_cast<const uint8_t *>(Data->getBufferStart());
@@ -295,6 +294,7 @@ protected:
   virtual error_code getSymbolName(DataRefImpl Symb, StringRef &Res) const = 0;
   virtual error_code getSymbolAddress(DataRefImpl Symb, uint64_t &Res) const = 0;
   virtual error_code getSymbolFileOffset(DataRefImpl Symb, uint64_t &Res)const=0;
+  virtual error_code getSymbolAlignment(DataRefImpl Symb, uint32_t &Res) const;
   virtual error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const = 0;
   virtual error_code getSymbolType(DataRefImpl Symb,
                                    SymbolRef::Type &Res) const = 0;
@@ -342,8 +342,6 @@ protected:
                                        uint64_t &Res) const = 0;
   virtual error_code getRelocationTypeName(DataRefImpl Rel,
                                        SmallVectorImpl<char> &Result) const = 0;
-  virtual error_code getRelocationAdditionalInfo(DataRefImpl Rel,
-                                                 int64_t &Res) const = 0;
   virtual error_code getRelocationValueString(DataRefImpl Rel,
                                        SmallVectorImpl<char> &Result) const = 0;
   virtual error_code getRelocationHidden(DataRefImpl Rel, bool &Result) const {
@@ -426,6 +424,10 @@ inline error_code SymbolRef::getAddress(uint64_t &Result) const {
 
 inline error_code SymbolRef::getFileOffset(uint64_t &Result) const {
   return OwningObject->getSymbolFileOffset(SymbolPimpl, Result);
+}
+
+inline error_code SymbolRef::getAlignment(uint32_t &Result) const {
+  return OwningObject->getSymbolAlignment(SymbolPimpl, Result);
 }
 
 inline error_code SymbolRef::getSize(uint64_t &Result) const {
@@ -575,10 +577,6 @@ inline error_code RelocationRef::getTypeName(SmallVectorImpl<char> &Result)
   return OwningObject->getRelocationTypeName(RelocationPimpl, Result);
 }
 
-inline error_code RelocationRef::getAdditionalInfo(int64_t &Result) const {
-  return OwningObject->getRelocationAdditionalInfo(RelocationPimpl, Result);
-}
-
 inline error_code RelocationRef::getValueString(SmallVectorImpl<char> &Result)
   const {
   return OwningObject->getRelocationValueString(RelocationPimpl, Result);
@@ -590,6 +588,10 @@ inline error_code RelocationRef::getHidden(bool &Result) const {
 
 inline DataRefImpl RelocationRef::getRawDataRefImpl() const {
   return RelocationPimpl;
+}
+
+inline const ObjectFile *RelocationRef::getObjectFile() const {
+  return OwningObject;
 }
 
 // Inline function definitions.

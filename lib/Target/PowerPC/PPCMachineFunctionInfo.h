@@ -47,6 +47,9 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   /// SpillsCR - Indicates whether CR is spilled in the current function.
   bool SpillsCR;
 
+  /// Indicates whether VRSAVE is spilled in the current function.
+  bool SpillsVRSAVE;
+
   /// LRStoreRequired - The bool indicates whether there is some explicit use of
   /// the LR/LR8 stack slot that is not obvious from scanning the code.  This
   /// requires that the code generator produce a store of LR to the stack on
@@ -81,6 +84,11 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   /// CRSpillFrameIndex - FrameIndex for CR spill slot for 32-bit SVR4.
   int CRSpillFrameIndex;
 
+  /// If any of CR[2-4] need to be saved in the prologue and restored in the
+  /// epilogue then they are added to this array. This is used for the
+  /// 64-bit SVR4 ABI.
+  SmallVector<unsigned, 3> MustSaveCRs;
+
 public:
   explicit PPCFunctionInfo(MachineFunction &MF) 
     : FramePointerSaveIndex(0),
@@ -88,6 +96,7 @@ public:
       HasSpills(false),
       HasNonRISpills(false),
       SpillsCR(false),
+      SpillsVRSAVE(false),
       LRStoreRequired(false),
       MinReservedArea(0),
       TailCallSPDelta(0),
@@ -127,6 +136,9 @@ public:
   void setSpillsCR()       { SpillsCR = true; }
   bool isCRSpilled() const { return SpillsCR; }
 
+  void setSpillsVRSAVE()       { SpillsVRSAVE = true; }
+  bool isVRSAVESpilled() const { return SpillsVRSAVE; }
+
   void setLRStoreRequired() { LRStoreRequired = true; }
   bool isLRStoreRequired() const { return LRStoreRequired; }
 
@@ -147,6 +159,10 @@ public:
 
   int getCRSpillFrameIndex() const { return CRSpillFrameIndex; }
   void setCRSpillFrameIndex(int idx) { CRSpillFrameIndex = idx; }
+
+  const SmallVector<unsigned, 3> &
+    getMustSaveCRs() const { return MustSaveCRs; }
+  void addMustSaveCR(unsigned Reg) { MustSaveCRs.push_back(Reg); }
 };
 
 } // end of namespace llvm

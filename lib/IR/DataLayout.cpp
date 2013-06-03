@@ -41,7 +41,7 @@ char DataLayout::ID = 0;
 // Support for StructLayout
 //===----------------------------------------------------------------------===//
 
-StructLayout::StructLayout(StructType *ST, const DataLayout &TD) {
+StructLayout::StructLayout(StructType *ST, const DataLayout &DL) {
   assert(!ST->isOpaque() && "Cannot get layout of opaque structs");
   StructAlignment = 0;
   StructSize = 0;
@@ -50,7 +50,7 @@ StructLayout::StructLayout(StructType *ST, const DataLayout &TD) {
   // Loop over each of the elements, placing them in memory.
   for (unsigned i = 0, e = NumElements; i != e; ++i) {
     Type *Ty = ST->getElementType(i);
-    unsigned TyAlign = ST->isPacked() ? 1 : TD.getABITypeAlignment(Ty);
+    unsigned TyAlign = ST->isPacked() ? 1 : DL.getABITypeAlignment(Ty);
 
     // Add padding if necessary to align the data element properly.
     if ((StructSize & (TyAlign-1)) != 0)
@@ -60,7 +60,7 @@ StructLayout::StructLayout(StructType *ST, const DataLayout &TD) {
     StructAlignment = std::max(TyAlign, StructAlignment);
 
     MemberOffsets[i] = StructSize;
-    StructSize += TD.getTypeAllocSize(Ty); // Consume space for this data item
+    StructSize += DL.getTypeAllocSize(Ty); // Consume space for this data item
   }
 
   // Empty structures have alignment of 1 byte.
@@ -601,16 +601,11 @@ unsigned DataLayout::getPreferredTypeAlignmentShift(Type *Ty) const {
   return Log2_32(Align);
 }
 
-/// getIntPtrType - Return an integer type with size at least as big as that
-/// of a pointer in the given address space.
 IntegerType *DataLayout::getIntPtrType(LLVMContext &C,
                                        unsigned AddressSpace) const {
   return IntegerType::get(C, getPointerSizeInBits(AddressSpace));
 }
 
-/// getIntPtrType - Return an integer (vector of integer) type with size at
-/// least as big as that of a pointer of the given pointer (vector of pointer)
-/// type.
 Type *DataLayout::getIntPtrType(Type *Ty) const {
   assert(Ty->isPtrOrPtrVectorTy() &&
          "Expected a pointer or pointer vector type.");
@@ -619,6 +614,13 @@ Type *DataLayout::getIntPtrType(Type *Ty) const {
   if (VectorType *VecTy = dyn_cast<VectorType>(Ty))
     return VectorType::get(IntTy, VecTy->getNumElements());
   return IntTy;
+}
+
+Type *DataLayout::getSmallestLegalIntType(LLVMContext &C, unsigned Width) const {
+  for (unsigned i = 0, e = (unsigned)LegalIntWidths.size(); i != e; ++i)
+    if (Width <= LegalIntWidths[i])
+      return Type::getIntNTy(C, LegalIntWidths[i]);
+  return 0;
 }
 
 uint64_t DataLayout::getIndexedOffset(Type *ptrTy,

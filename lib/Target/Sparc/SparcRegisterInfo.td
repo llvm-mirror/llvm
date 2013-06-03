@@ -43,7 +43,7 @@ class Rd<bits<5> num, string n, list<Register> subregs> : SparcReg<n> {
 }
 
 // Control Registers
-def ICC : SparcCtrlReg<"ICC">;
+def ICC : SparcCtrlReg<"ICC">; // This represents icc and xcc in 64-bit code.
 def FCC : SparcCtrlReg<"FCC">;
 
 // Y register
@@ -140,21 +140,32 @@ def D15 : Rd<30, "F30", [F30, F31]>, DwarfRegNum<[87]>;
 // FIXME: the register order should be defined in terms of the preferred
 // allocation order...
 //
-def IntRegs : RegisterClass<"SP", [i32], 32,
-                            (add L0, L1, L2, L3, L4, L5, L6,
-                                 L7, I0, I1, I2, I3, I4, I5,
-                                 O0, O1, O2, O3, O4, O5, O7,
+// This register class should not be used to hold i64 values, use the I64Regs
+// register class for that. The i64 type is included here to allow i64 patterns
+// using the integer instructions.
+def IntRegs : RegisterClass<"SP", [i32, i64], 32,
+                            (add I0, I1, I2, I3, I4, I5,
                                  G1,
-                                 // Non-allocatable regs:
-                                 G2, G3, G4, // FIXME: OK for use only in
+                                 G2, G3, G4, // OK for use only in
                                              // applications, not libraries.
+                                 G5,         // OK for use in 64 bit mode.
+                                 L0, L1, L2, L3, L4, L5, L6, L7,
+                                 O0, O1, O2, O3, O4, O5, O7,
+                                 // Non-allocatable regs:
                                  O6, // stack ptr
                                  I6, // frame ptr
                                  I7, // return address
                                  G0, // constant zero
-                                 G5, G6, G7 // reserved for kernel
+                                 G6, G7 // reserved for kernel
                                  )>;
 
+// Register class for 64-bit mode, with a 64-bit spill slot size.
+// These are the same as the 32-bit registers, so TableGen will consider this
+// to be a sub-class of IntRegs. That works out because requiring a 64-bit
+// spill slot is a stricter constraint than only requiring a 32-bit spill slot.
+def I64Regs : RegisterClass<"SP", [i64], 64, (add IntRegs)>;
+
+// Floating point register classes.
 def FPRegs : RegisterClass<"SP", [f32], 32, (sequence "F%u", 0, 31)>;
 
 def DFPRegs : RegisterClass<"SP", [f64], 64, (sequence "D%u", 0, 15)>;

@@ -197,6 +197,8 @@ static inline void EmitDwarfLineTable(MCStreamer *MCOS,
   // actually a DW_LNE_end_sequence.
 
   // Switch to the section to be able to create a symbol at its end.
+  // TODO: keep track of the last subsection so that this symbol appears in the
+  // correct place.
   MCOS->SwitchSection(Section);
 
   MCContext &context = MCOS->getContext();
@@ -787,7 +789,7 @@ void MCGenDwarfLabelEntry::Make(MCSymbol *Symbol, MCStreamer *MCOS,
   if (Symbol->isTemporary())
     return;
   MCContext &context = MCOS->getContext();
-  if (context.getGenDwarfSection() != MCOS->getCurrentSection())
+  if (context.getGenDwarfSection() != MCOS->getCurrentSection().first)
     return;
 
   // The dwarf label's name does not have the symbol name's leading
@@ -871,17 +873,6 @@ static void EmitPersonality(MCStreamer &streamer, const MCSymbol &symbol,
   streamer.EmitValue(v, size);
 }
 
-static const MachineLocation TranslateMachineLocation(
-                                                  const MCRegisterInfo &MRI,
-                                                  const MachineLocation &Loc) {
-  unsigned Reg = Loc.getReg() == MachineLocation::VirtualFP ?
-    MachineLocation::VirtualFP :
-    unsigned(MRI.getDwarfRegNum(Loc.getReg(), true));
-  const MachineLocation &NewLoc = Loc.isReg() ?
-    MachineLocation(Reg) : MachineLocation(Reg, Loc.getOffset());
-  return NewLoc;
-}
-
 namespace {
   class FrameEmitterImpl {
     int CFAOffset;
@@ -899,7 +890,7 @@ namespace {
     /// EmitCompactUnwind - Emit the unwind information in a compact way. If
     /// we're successful, return 'true'. Otherwise, return 'false' and it will
     /// emit the normal CIE and FDE.
-    bool EmitCompactUnwind(MCStreamer &streamer,
+    void EmitCompactUnwind(MCStreamer &streamer,
                            const MCDwarfFrameInfo &frame);
 
     const MCSymbol &EmitCIE(MCStreamer &streamer,
@@ -1139,7 +1130,7 @@ void FrameEmitterImpl::EmitCFIInstructions(MCStreamer &streamer,
 /// EmitCompactUnwind - Emit the unwind information in a compact way. If we're
 /// successful, return 'true'. Otherwise, return 'false' and it will emit the
 /// normal CIE and FDE.
-bool FrameEmitterImpl::EmitCompactUnwind(MCStreamer &Streamer,
+void FrameEmitterImpl::EmitCompactUnwind(MCStreamer &Streamer,
                                          const MCDwarfFrameInfo &Frame) {
   MCContext &Context = Streamer.getContext();
   const MCObjectFileInfo *MOFI = Context.getObjectFileInfo();
@@ -1168,13 +1159,12 @@ bool FrameEmitterImpl::EmitCompactUnwind(MCStreamer &Streamer,
   //   .quad except_tab1
 
   uint32_t Encoding = Frame.CompactUnwindEncoding;
-  if (!Encoding) return false;
+  if (!Encoding) return;
+  bool DwarfEHFrameOnly = (Encoding == MOFI->getCompactUnwindDwarfEHFrameOnly());
 
   // The encoding needs to know we have an LSDA.
-  if (Frame.Lsda)
+  if (!DwarfEHFrameOnly && Frame.Lsda)
     Encoding |= 0x40000000;
-
-  Streamer.SwitchSection(MOFI->getCompactUnwindSection());
 
   // Range Start
   unsigned FDEEncoding = MOFI->getFDEEncoding(UsingCFI);
@@ -1194,11 +1184,10 @@ bool FrameEmitterImpl::EmitCompactUnwind(MCStreamer &Streamer,
                                       Twine::utohexstr(Encoding));
   Streamer.EmitIntValue(Encoding, Size);
 
-
   // Personality Function
   Size = getSizeForEncoding(Streamer, dwarf::DW_EH_PE_absptr);
   if (VerboseAsm) Streamer.AddComment("Personality Function");
-  if (Frame.Personality)
+  if (!DwarfEHFrameOnly && Frame.Personality)
     Streamer.EmitSymbolValue(Frame.Personality, Size);
   else
     Streamer.EmitIntValue(0, Size); // No personality fn
@@ -1206,12 +1195,10 @@ bool FrameEmitterImpl::EmitCompactUnwind(MCStreamer &Streamer,
   // LSDA
   Size = getSizeForEncoding(Streamer, Frame.LsdaEncoding);
   if (VerboseAsm) Streamer.AddComment("LSDA");
-  if (Frame.Lsda)
+  if (!DwarfEHFrameOnly && Frame.Lsda)
     Streamer.EmitSymbolValue(Frame.Lsda, Size);
   else
     Streamer.EmitIntValue(0, Size); // No LSDA
-
-  return true;
 }
 
 const MCSymbol &FrameEmitterImpl::EmitCIE(MCStreamer &streamer,
@@ -1318,32 +1305,8 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(MCStreamer &streamer,
   // Initial Instructions
 
   const MCAsmInfo &MAI = context.getAsmInfo();
-  const std::vector<MachineMove> &Moves = MAI.getInitialFrameState();
-  std::vector<MCCFIInstruction> Instructions;
-
-  for (int i = 0, n = Moves.size(); i != n; ++i) {
-    MCSymbol *Label = Moves[i].getLabel();
-    const MachineLocation &Dst =
-      TranslateMachineLocation(MRI, Moves[i].getDestination());
-    const MachineLocation &Src =
-      TranslateMachineLocation(MRI, Moves[i].getSource());
-
-    if (Dst.isReg()) {
-      assert(Dst.getReg() == MachineLocation::VirtualFP);
-      assert(!Src.isReg());
-      MCCFIInstruction Inst =
-        MCCFIInstruction::createDefCfa(Label, Src.getReg(), -Src.getOffset());
-      Instructions.push_back(Inst);
-    } else {
-      assert(Src.isReg());
-      unsigned Reg = Src.getReg();
-      int Offset = Dst.getOffset();
-      MCCFIInstruction Inst =
-        MCCFIInstruction::createOffset(Label, Reg, Offset);
-      Instructions.push_back(Inst);
-    }
-  }
-
+  const std::vector<MCCFIInstruction> &Instructions =
+      MAI.getInitialFrameState();
   EmitCFIInstructions(streamer, Instructions, NULL);
 
   // Padding
@@ -1421,7 +1384,6 @@ MCSymbol *FrameEmitterImpl::EmitFDE(MCStreamer &streamer,
   }
 
   // Call Frame Instructions
-
   EmitCFIInstructions(streamer, frame.Instructions, frame.Begin);
 
   // Padding
@@ -1482,12 +1444,19 @@ void MCDwarfFrameEmitter::Emit(MCStreamer &Streamer,
   ArrayRef<MCDwarfFrameInfo> FrameArray = Streamer.getFrameInfos();
 
   // Emit the compact unwind info if available.
-  if (IsEH && MOFI->getCompactUnwindSection())
-    for (unsigned i = 0, n = Streamer.getNumFrameInfos(); i < n; ++i) {
-      const MCDwarfFrameInfo &Frame = Streamer.getFrameInfo(i);
-      if (Frame.CompactUnwindEncoding)
-        Emitter.EmitCompactUnwind(Streamer, Frame);
+  if (IsEH && MOFI->getCompactUnwindSection()) {
+    bool SectionEmitted = false;
+    for (unsigned i = 0, n = FrameArray.size(); i < n; ++i) {
+      const MCDwarfFrameInfo &Frame = FrameArray[i];
+      if (Frame.CompactUnwindEncoding == 0) continue;
+      if (!SectionEmitted) {
+        Streamer.SwitchSection(MOFI->getCompactUnwindSection());
+        Streamer.EmitValueToAlignment(Context.getAsmInfo().getPointerSize());
+        SectionEmitted = true;
+      }
+      Emitter.EmitCompactUnwind(Streamer, Frame);
     }
+  }
 
   const MCSection &Section = IsEH ? *MOFI->getEHFrameSection() :
                                     *MOFI->getDwarfFrameSection();

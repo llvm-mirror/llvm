@@ -26,17 +26,18 @@
 #include "llvm/DebugInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/LinkAllIR.h"
 #include "llvm/LinkAllPasses.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/IRReader.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PassNameParser.h"
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/SystemUtils.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
@@ -566,6 +567,7 @@ int main(int argc, char **argv) {
   // Initialize passes
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
   initializeCore(Registry);
+  initializeDebugIRPass(Registry);
   initializeScalarOpts(Registry);
   initializeObjCARCOpts(Registry);
   initializeVectorization(Registry);
@@ -588,7 +590,7 @@ int main(int argc, char **argv) {
   SMDiagnostic Err;
 
   // Load the input module...
-  std::auto_ptr<Module> M;
+  OwningPtr<Module> M;
   M.reset(ParseIRFile(InputFilename, Err, Context));
 
   if (M.get() == 0) {
@@ -655,7 +657,7 @@ int main(int argc, char **argv) {
   TargetMachine *Machine = 0;
   if (ModuleTriple.getArch())
     Machine = GetTargetMachine(Triple(ModuleTriple));
-  std::auto_ptr<TargetMachine> TM(Machine);
+  OwningPtr<TargetMachine> TM(Machine);
 
   // Add internal analysis passes from the target machine.
   if (TM.get())

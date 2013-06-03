@@ -14,25 +14,26 @@
 
 #include "HexagonRegisterInfo.h"
 #include "Hexagon.h"
-#include "HexagonMachineFunctionInfo.h"
 #include "HexagonSubtarget.h"
 #include "HexagonTargetMachine.h"
+#include "HexagonMachineFunctionInfo.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
 #include "llvm/MC/MachineLocation.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
 
@@ -215,28 +216,41 @@ void HexagonRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
         MI.getOperand(FIOperandNum).ChangeToRegister(resReg, false, false,true);
         MI.getOperand(FIOperandNum+1).ChangeToImmediate(0);
       } else if (TII.isMemOp(&MI)) {
-        unsigned resReg = HEXAGON_RESERVED_REG_1;
-        if (!MFI.hasVarSizedObjects() &&
-            TII.isValidOffset(MI.getOpcode(), (FrameSize+Offset))) {
-          MI.getOperand(FIOperandNum).ChangeToRegister(getStackRegister(),
-                                                       false, false, true);
-          MI.getOperand(FIOperandNum+1).ChangeToImmediate(FrameSize+Offset);
-        } else if (!TII.isValidOffset(Hexagon::ADD_ri, Offset)) {
-          BuildMI(*MI.getParent(), II, MI.getDebugLoc(),
-                  TII.get(Hexagon::CONST32_Int_Real), resReg).addImm(Offset);
-          BuildMI(*MI.getParent(), II, MI.getDebugLoc(),
-                  TII.get(Hexagon::ADD_rr),
-                  resReg).addReg(FrameReg).addReg(resReg);
-          MI.getOperand(FIOperandNum).ChangeToRegister(resReg, false, false,
-                                                       true);
-          MI.getOperand(FIOperandNum+1).ChangeToImmediate(0);
+        // use the constant extender if the instruction provides it
+        // and we are V4TOps.
+        if (Subtarget.hasV4TOps()) {
+          if (TII.isConstExtended(&MI)) {
+            MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
+            MI.getOperand(FIOperandNum+1).ChangeToImmediate(Offset);
+            TII.immediateExtend(&MI);
+          } else {
+            llvm_unreachable("Need to implement for memops");
+          }
         } else {
-          BuildMI(*MI.getParent(), II, MI.getDebugLoc(),
-                  TII.get(Hexagon::ADD_ri),
-                  resReg).addReg(FrameReg).addImm(Offset);
-          MI.getOperand(FIOperandNum).ChangeToRegister(resReg, false, false,
-                                                       true);
-          MI.getOperand(FIOperandNum+1).ChangeToImmediate(0);
+          // Only V3 and older instructions here.
+          unsigned ResReg = HEXAGON_RESERVED_REG_1;
+          if (!MFI.hasVarSizedObjects() &&
+              TII.isValidOffset(MI.getOpcode(), (FrameSize+Offset))) {
+            MI.getOperand(FIOperandNum).ChangeToRegister(getStackRegister(),
+                                                         false, false, false);
+            MI.getOperand(FIOperandNum+1).ChangeToImmediate(FrameSize+Offset);
+          } else if (!TII.isValidOffset(Hexagon::ADD_ri, Offset)) {
+            BuildMI(*MI.getParent(), II, MI.getDebugLoc(),
+                    TII.get(Hexagon::CONST32_Int_Real), ResReg).addImm(Offset);
+            BuildMI(*MI.getParent(), II, MI.getDebugLoc(),
+                    TII.get(Hexagon::ADD_rr), ResReg).addReg(FrameReg).
+              addReg(ResReg);
+            MI.getOperand(FIOperandNum).ChangeToRegister(ResReg, false, false,
+                                                         true);
+            MI.getOperand(FIOperandNum+1).ChangeToImmediate(0);
+          } else {
+            BuildMI(*MI.getParent(), II, MI.getDebugLoc(),
+                    TII.get(Hexagon::ADD_ri), ResReg).addReg(FrameReg).
+              addImm(Offset);
+            MI.getOperand(FIOperandNum).ChangeToRegister(ResReg, false, false,
+                                                         true);
+            MI.getOperand(FIOperandNum+1).ChangeToImmediate(0);
+          }
         }
       } else {
         unsigned dstReg = MI.getOperand(0).getReg();
@@ -279,16 +293,6 @@ unsigned HexagonRegisterInfo::getFrameRegister() const {
 
 unsigned HexagonRegisterInfo::getStackRegister() const {
   return Hexagon::R29;
-}
-
-void HexagonRegisterInfo::getInitialFrameState(std::vector<MachineMove>
-                                               &Moves)  const
-{
-  // VirtualFP = (R30 + #0).
-  unsigned FPReg = getFrameRegister();
-  MachineLocation Dst(MachineLocation::VirtualFP);
-  MachineLocation Src(FPReg, 0);
-  Moves.push_back(MachineMove(0, Dst, Src));
 }
 
 unsigned HexagonRegisterInfo::getEHExceptionRegister() const {

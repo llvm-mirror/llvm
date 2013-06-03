@@ -1,4 +1,4 @@
-;RUN: llc < %s -march=r600 -mcpu=SI | FileCheck %s
+;RUN: llc < %s -march=r600 -mcpu=verde | FileCheck %s
 
 ;CHECK: S_MOV_B32
 ;CHECK-NEXT: V_INTERP_MOV_F32
@@ -14,7 +14,7 @@ main_body:
 
 declare void @llvm.AMDGPU.shader.type(i32)
 
-declare float @llvm.SI.fs.constant(i32, i32, i32) readonly
+declare float @llvm.SI.fs.constant(i32, i32, i32) readnone
 
 declare i32 @llvm.SI.packf16(float, float) readnone
 

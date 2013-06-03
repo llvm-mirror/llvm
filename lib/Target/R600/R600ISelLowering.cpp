@@ -28,7 +28,6 @@ using namespace llvm;
 R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
     AMDGPUTargetLowering(TM),
     TII(static_cast<const R600InstrInfo*>(TM.getInstrInfo())) {
-  setOperationAction(ISD::MUL, MVT::i64, Expand);
   addRegisterClass(MVT::v4f32, &AMDGPU::R600_Reg128RegClass);
   addRegisterClass(MVT::f32, &AMDGPU::R600_Reg32RegClass);
   addRegisterClass(MVT::v4i32, &AMDGPU::R600_Reg128RegClass);
@@ -44,11 +43,25 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::AND,  MVT::v4i32, Expand);
   setOperationAction(ISD::FP_TO_SINT, MVT::v4i32, Expand);
   setOperationAction(ISD::FP_TO_UINT, MVT::v4i32, Expand);
+  setOperationAction(ISD::MUL,  MVT::v2i32, Expand);
+  setOperationAction(ISD::MUL,  MVT::v4i32, Expand);
+  setOperationAction(ISD::OR, MVT::v4i32, Expand);
+  setOperationAction(ISD::OR, MVT::v2i32, Expand);
   setOperationAction(ISD::SINT_TO_FP, MVT::v4i32, Expand);
+  setOperationAction(ISD::SHL, MVT::v4i32, Expand);
+  setOperationAction(ISD::SHL, MVT::v2i32, Expand);
+  setOperationAction(ISD::SRL, MVT::v4i32, Expand);
+  setOperationAction(ISD::SRL, MVT::v2i32, Expand);
+  setOperationAction(ISD::SRA, MVT::v4i32, Expand);
+  setOperationAction(ISD::SRA, MVT::v2i32, Expand);
+  setOperationAction(ISD::SUB, MVT::v4i32, Expand);
+  setOperationAction(ISD::SUB, MVT::v2i32, Expand);
   setOperationAction(ISD::UINT_TO_FP, MVT::v4i32, Expand);
   setOperationAction(ISD::UDIV, MVT::v4i32, Expand);
   setOperationAction(ISD::UREM, MVT::v4i32, Expand);
   setOperationAction(ISD::SETCC, MVT::v4i32, Expand);
+  setOperationAction(ISD::XOR, MVT::v4i32, Expand);
+  setOperationAction(ISD::XOR, MVT::v2i32, Expand);
 
   setOperationAction(ISD::BR_CC, MVT::i32, Expand);
   setOperationAction(ISD::BR_CC, MVT::f32, Expand);
@@ -58,9 +71,6 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i1, Custom);
-  setOperationAction(ISD::FPOW, MVT::f32, Custom);
-
-  setOperationAction(ISD::ROTL, MVT::i32, Custom);
 
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
@@ -71,6 +81,9 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
 
   setOperationAction(ISD::SELECT, MVT::i32, Custom);
   setOperationAction(ISD::SELECT, MVT::f32, Custom);
+
+  setOperationAction(ISD::VSELECT, MVT::v4i32, Expand);
+  setOperationAction(ISD::VSELECT, MVT::v2i32, Expand);
 
   // Legalize loads and stores to the private address space.
   setOperationAction(ISD::LOAD, MVT::i32, Custom);
@@ -95,6 +108,7 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setTargetDAGCombine(ISD::SELECT_CC);
 
   setBooleanContents(ZeroOrNegativeOneBooleanContent);
+  setBooleanVectorContents(ZeroOrNegativeOneBooleanContent);
   setSchedulingPreference(Sched::VLIW);
 }
 
@@ -172,23 +186,99 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
   case AMDGPU::TXD: {
     unsigned T0 = MRI.createVirtualRegister(&AMDGPU::R600_Reg128RegClass);
     unsigned T1 = MRI.createVirtualRegister(&AMDGPU::R600_Reg128RegClass);
+    MachineOperand &RID = MI->getOperand(4);
+    MachineOperand &SID = MI->getOperand(5);
+    unsigned TextureId = MI->getOperand(6).getImm();
+    unsigned SrcX = 0, SrcY = 1, SrcZ = 2, SrcW = 3;
+    unsigned CTX = 1, CTY = 1, CTZ = 1, CTW = 1;
 
+    switch (TextureId) {
+    case 5: // Rect
+      CTX = CTY = 0;
+      break;
+    case 6: // Shadow1D
+      SrcW = SrcZ;
+      break;
+    case 7: // Shadow2D
+      SrcW = SrcZ;
+      break;
+    case 8: // ShadowRect
+      CTX = CTY = 0;
+      SrcW = SrcZ;
+      break;
+    case 9: // 1DArray
+      SrcZ = SrcY;
+      CTZ = 0;
+      break;
+    case 10: // 2DArray
+      CTZ = 0;
+      break;
+    case 11: // Shadow1DArray
+      SrcZ = SrcY;
+      CTZ = 0;
+      break;
+    case 12: // Shadow2DArray
+      CTZ = 0;
+      break;
+    }
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::TEX_SET_GRADIENTS_H), T0)
             .addOperand(MI->getOperand(3))
-            .addOperand(MI->getOperand(4))
-            .addOperand(MI->getOperand(5))
-            .addOperand(MI->getOperand(6));
+            .addImm(SrcX)
+            .addImm(SrcY)
+            .addImm(SrcZ)
+            .addImm(SrcW)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(1)
+            .addImm(2)
+            .addImm(3)
+            .addOperand(RID)
+            .addOperand(SID)
+            .addImm(CTX)
+            .addImm(CTY)
+            .addImm(CTZ)
+            .addImm(CTW);
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::TEX_SET_GRADIENTS_V), T1)
             .addOperand(MI->getOperand(2))
-            .addOperand(MI->getOperand(4))
-            .addOperand(MI->getOperand(5))
-            .addOperand(MI->getOperand(6));
+            .addImm(SrcX)
+            .addImm(SrcY)
+            .addImm(SrcZ)
+            .addImm(SrcW)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(1)
+            .addImm(2)
+            .addImm(3)
+            .addOperand(RID)
+            .addOperand(SID)
+            .addImm(CTX)
+            .addImm(CTY)
+            .addImm(CTZ)
+            .addImm(CTW);
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::TEX_SAMPLE_G))
             .addOperand(MI->getOperand(0))
             .addOperand(MI->getOperand(1))
-            .addOperand(MI->getOperand(4))
-            .addOperand(MI->getOperand(5))
-            .addOperand(MI->getOperand(6))
+            .addImm(SrcX)
+            .addImm(SrcY)
+            .addImm(SrcZ)
+            .addImm(SrcW)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(1)
+            .addImm(2)
+            .addImm(3)
+            .addOperand(RID)
+            .addOperand(SID)
+            .addImm(CTX)
+            .addImm(CTY)
+            .addImm(CTZ)
+            .addImm(CTW)
             .addReg(T0, RegState::Implicit)
             .addReg(T1, RegState::Implicit);
     break;
@@ -197,23 +287,100 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
   case AMDGPU::TXD_SHADOW: {
     unsigned T0 = MRI.createVirtualRegister(&AMDGPU::R600_Reg128RegClass);
     unsigned T1 = MRI.createVirtualRegister(&AMDGPU::R600_Reg128RegClass);
+    MachineOperand &RID = MI->getOperand(4);
+    MachineOperand &SID = MI->getOperand(5);
+    unsigned TextureId = MI->getOperand(6).getImm();
+    unsigned SrcX = 0, SrcY = 1, SrcZ = 2, SrcW = 3;
+    unsigned CTX = 1, CTY = 1, CTZ = 1, CTW = 1;
+
+    switch (TextureId) {
+    case 5: // Rect
+      CTX = CTY = 0;
+      break;
+    case 6: // Shadow1D
+      SrcW = SrcZ;
+      break;
+    case 7: // Shadow2D
+      SrcW = SrcZ;
+      break;
+    case 8: // ShadowRect
+      CTX = CTY = 0;
+      SrcW = SrcZ;
+      break;
+    case 9: // 1DArray
+      SrcZ = SrcY;
+      CTZ = 0;
+      break;
+    case 10: // 2DArray
+      CTZ = 0;
+      break;
+    case 11: // Shadow1DArray
+      SrcZ = SrcY;
+      CTZ = 0;
+      break;
+    case 12: // Shadow2DArray
+      CTZ = 0;
+      break;
+    }
 
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::TEX_SET_GRADIENTS_H), T0)
             .addOperand(MI->getOperand(3))
-            .addOperand(MI->getOperand(4))
-            .addOperand(MI->getOperand(5))
-            .addOperand(MI->getOperand(6));
+            .addImm(SrcX)
+            .addImm(SrcY)
+            .addImm(SrcZ)
+            .addImm(SrcW)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(1)
+            .addImm(2)
+            .addImm(3)
+            .addOperand(RID)
+            .addOperand(SID)
+            .addImm(CTX)
+            .addImm(CTY)
+            .addImm(CTZ)
+            .addImm(CTW);
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::TEX_SET_GRADIENTS_V), T1)
             .addOperand(MI->getOperand(2))
-            .addOperand(MI->getOperand(4))
-            .addOperand(MI->getOperand(5))
-            .addOperand(MI->getOperand(6));
+            .addImm(SrcX)
+            .addImm(SrcY)
+            .addImm(SrcZ)
+            .addImm(SrcW)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(1)
+            .addImm(2)
+            .addImm(3)
+            .addOperand(RID)
+            .addOperand(SID)
+            .addImm(CTX)
+            .addImm(CTY)
+            .addImm(CTZ)
+            .addImm(CTW);
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::TEX_SAMPLE_C_G))
             .addOperand(MI->getOperand(0))
             .addOperand(MI->getOperand(1))
-            .addOperand(MI->getOperand(4))
-            .addOperand(MI->getOperand(5))
-            .addOperand(MI->getOperand(6))
+            .addImm(SrcX)
+            .addImm(SrcY)
+            .addImm(SrcZ)
+            .addImm(SrcW)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(0)
+            .addImm(1)
+            .addImm(2)
+            .addImm(3)
+            .addOperand(RID)
+            .addOperand(SID)
+            .addImm(CTX)
+            .addImm(CTY)
+            .addImm(CTZ)
+            .addImm(CTW)
             .addReg(T0, RegState::Implicit)
             .addReg(T1, RegState::Implicit);
     break;
@@ -311,12 +478,10 @@ using namespace llvm::AMDGPUIntrinsic;
 SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
-  case ISD::ROTL: return LowerROTL(Op, DAG);
   case ISD::SELECT_CC: return LowerSELECT_CC(Op, DAG);
   case ISD::SELECT: return LowerSELECT(Op, DAG);
   case ISD::STORE: return LowerSTORE(Op, DAG);
   case ISD::LOAD: return LowerLOAD(Op, DAG);
-  case ISD::FPOW: return LowerFPOW(Op, DAG);
   case ISD::FrameIndex: return LowerFrameIndex(Op, DAG);
   case ISD::INTRINSIC_VOID: {
     SDValue Chain = Op.getOperand(0);
@@ -362,7 +527,11 @@ SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const 
     case AMDGPUIntrinsic::R600_load_input: {
       int64_t RegIndex = cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
       unsigned Reg = AMDGPU::R600_TReg32RegClass.getRegister(RegIndex);
-      return CreateLiveInRegister(DAG, &AMDGPU::R600_TReg32RegClass, Reg, VT);
+      MachineFunction &MF = DAG.getMachineFunction();
+      MachineRegisterInfo &MRI = MF.getRegInfo();
+      MRI.addLiveIn(Reg);
+      return DAG.getCopyFromReg(DAG.getEntryNode(),
+          DAG.getEntryNode().getDebugLoc(), Reg, VT);
     }
 
     case AMDGPUIntrinsic::R600_interp_input: {
@@ -393,6 +562,96 @@ SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const 
                 AMDGPU::R600_TReg32RegClass.getRegister(2 * ijb), MVT::f32));
 
       return SDValue(interp, slot % 2);
+    }
+    case AMDGPUIntrinsic::R600_tex:
+    case AMDGPUIntrinsic::R600_texc:
+    case AMDGPUIntrinsic::R600_txl:
+    case AMDGPUIntrinsic::R600_txlc:
+    case AMDGPUIntrinsic::R600_txb:
+    case AMDGPUIntrinsic::R600_txbc:
+    case AMDGPUIntrinsic::R600_txf:
+    case AMDGPUIntrinsic::R600_txq:
+    case AMDGPUIntrinsic::R600_ddx:
+    case AMDGPUIntrinsic::R600_ddy: {
+      unsigned TextureOp;
+      switch (IntrinsicID) {
+      case AMDGPUIntrinsic::R600_tex:
+        TextureOp = 0;
+        break;
+      case AMDGPUIntrinsic::R600_texc:
+        TextureOp = 1;
+        break;
+      case AMDGPUIntrinsic::R600_txl:
+        TextureOp = 2;
+        break;
+      case AMDGPUIntrinsic::R600_txlc:
+        TextureOp = 3;
+        break;
+      case AMDGPUIntrinsic::R600_txb:
+        TextureOp = 4;
+        break;
+      case AMDGPUIntrinsic::R600_txbc:
+        TextureOp = 5;
+        break;
+      case AMDGPUIntrinsic::R600_txf:
+        TextureOp = 6;
+        break;
+      case AMDGPUIntrinsic::R600_txq:
+        TextureOp = 7;
+        break;
+      case AMDGPUIntrinsic::R600_ddx:
+        TextureOp = 8;
+        break;
+      case AMDGPUIntrinsic::R600_ddy:
+        TextureOp = 9;
+        break;
+      default:
+        llvm_unreachable("Unknow Texture Operation");
+      }
+
+      SDValue TexArgs[19] = {
+        DAG.getConstant(TextureOp, MVT::i32),
+        Op.getOperand(1),
+        DAG.getConstant(0, MVT::i32),
+        DAG.getConstant(1, MVT::i32),
+        DAG.getConstant(2, MVT::i32),
+        DAG.getConstant(3, MVT::i32),
+        Op.getOperand(2),
+        Op.getOperand(3),
+        Op.getOperand(4),
+        DAG.getConstant(0, MVT::i32),
+        DAG.getConstant(1, MVT::i32),
+        DAG.getConstant(2, MVT::i32),
+        DAG.getConstant(3, MVT::i32),
+        Op.getOperand(5),
+        Op.getOperand(6),
+        Op.getOperand(7),
+        Op.getOperand(8),
+        Op.getOperand(9),
+        Op.getOperand(10)
+      };
+      return DAG.getNode(AMDGPUISD::TEXTURE_FETCH, DL, MVT::v4f32, TexArgs, 19);
+    }
+    case AMDGPUIntrinsic::AMDGPU_dp4: {
+      SDValue Args[8] = {
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(1),
+          DAG.getConstant(0, MVT::i32)),
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(2),
+          DAG.getConstant(0, MVT::i32)),
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(1),
+          DAG.getConstant(1, MVT::i32)),
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(2),
+          DAG.getConstant(1, MVT::i32)),
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(1),
+          DAG.getConstant(2, MVT::i32)),
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(2),
+          DAG.getConstant(2, MVT::i32)),
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(1),
+          DAG.getConstant(3, MVT::i32)),
+      DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::f32, Op.getOperand(2),
+          DAG.getConstant(3, MVT::i32))
+      };
+      return DAG.getNode(AMDGPUISD::DOT4, DL, MVT::f32, Args, 8);
     }
 
     case r600_read_ngroups_x:
@@ -501,18 +760,6 @@ SDValue R600TargetLowering::LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const
   unsigned FrameIndex = FIN->getIndex();
   unsigned Offset = TFL->getFrameIndexOffset(MF, FrameIndex);
   return DAG.getConstant(Offset * 4 * TFL->getStackWidth(MF), MVT::i32);
-}
-
-SDValue R600TargetLowering::LowerROTL(SDValue Op, SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
-  EVT VT = Op.getValueType();
-
-  return DAG.getNode(AMDGPUISD::BITALIGN, DL, VT,
-                     Op.getOperand(0),
-                     Op.getOperand(0),
-                     DAG.getNode(ISD::SUB, DL, VT,
-                                 DAG.getConstant(32, MVT::i32),
-                                 Op.getOperand(1)));
 }
 
 bool R600TargetLowering::isZero(SDValue Op) const {
@@ -918,15 +1165,6 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const
   return DAG.getMergeValues(Ops, 2, DL);
 }
 
-SDValue R600TargetLowering::LowerFPOW(SDValue Op,
-    SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
-  EVT VT = Op.getValueType();
-  SDValue LogBase = DAG.getNode(ISD::FLOG2, DL, VT, Op.getOperand(0));
-  SDValue MulLogBase = DAG.getNode(ISD::FMUL, DL, VT, Op.getOperand(1), LogBase);
-  return DAG.getNode(ISD::FEXP2, DL, VT, MulLogBase);
-}
-
 /// XXX Only kernel functions are supported, so we can assume for now that
 /// every function is a kernel function, but in the future we should use
 /// separate calling conventions for kernel and non-kernel functions.
@@ -966,7 +1204,7 @@ SDValue R600TargetLowering::LowerFormalArguments(
   return Chain;
 }
 
-EVT R600TargetLowering::getSetCCResultType(EVT VT) const {
+EVT R600TargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
    if (!VT.isVector()) return MVT::i32;
    return VT.changeVectorElementTypeToInteger();
 }

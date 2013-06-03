@@ -55,3 +55,4 @@ add_llvm_unittest(JITTests
 if(MINGW OR CYGWIN)
   set_property(TARGET JITTests PROPERTY LINK_FLAGS -Wl,--export-all-symbols)
 endif()
+set_target_properties(JITTests PROPERTIES ENABLE_EXPORTS 1)

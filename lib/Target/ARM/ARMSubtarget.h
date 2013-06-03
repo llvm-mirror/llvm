@@ -148,6 +148,9 @@ protected:
   /// precision.
   bool FPOnlySP;
 
+  /// HasTrustZone - if true, processor supports TrustZone security extensions
+  bool HasTrustZone;
+
   /// AllowsUnalignedMem - If true, the subtarget allows unaligned memory
   /// accesses for some types.  For details, see
   /// ARMTargetLowering::allowsUnalignedMemoryAccesses().
@@ -251,6 +254,7 @@ public:
   bool hasVMLxForwarding() const { return HasVMLxForwarding; }
   bool isFPBrccSlow() const { return SlowFPBrcc; }
   bool isFPOnlySP() const { return FPOnlySP; }
+  bool hasTrustZone() const { return HasTrustZone; }
   bool prefers32BitThumb() const { return Pref32BitThumb; }
   bool avoidCPSRPartialUpdate() const { return AvoidCPSRPartialUpdate; }
   bool avoidMOVsShifterOperand() const { return AvoidMOVsShifterOperand; }
@@ -266,9 +270,8 @@ public:
 
   bool isTargetIOS() const { return TargetTriple.getOS() == Triple::IOS; }
   bool isTargetDarwin() const { return TargetTriple.isOSDarwin(); }
-  bool isTargetNaCl() const {
-    return TargetTriple.getOS() == Triple::NaCl;
-  }
+  bool isTargetNaCl() const { return TargetTriple.getOS() == Triple::NaCl; }
+  bool isTargetLinux() const { return TargetTriple.getOS() == Triple::Linux; }
   bool isTargetELF() const { return !isTargetDarwin(); }
 
   bool isAPCS_ABI() const { return TargetABI == ARM_ABI_APCS; }

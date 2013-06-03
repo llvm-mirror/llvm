@@ -82,7 +82,8 @@ namespace {
     /// a simple branch. When there is more than one predecessor, we need to
     /// split the landing pad block after the landingpad instruction and jump
     /// to there.
-    void forwardResume(ResumeInst *RI, BasicBlock *FirstNewBlock);
+    void forwardResume(ResumeInst *RI,
+                       SmallPtrSet<LandingPadInst*, 16> &InlinedLPads);
 
     /// addIncomingPHIValuesFor - Add incoming-PHI values to the unwind
     /// destination block for the given basic block, using the values for the
@@ -141,7 +142,7 @@ BasicBlock *InvokeInliningInfo::getInnerResumeDest() {
 /// branch. When there is more than one predecessor, we need to split the
 /// landing pad block after the landingpad instruction and jump to there.
 void InvokeInliningInfo::forwardResume(ResumeInst *RI,
-                                       BasicBlock *FirstNewBlock) {
+                               SmallPtrSet<LandingPadInst*, 16> &InlinedLPads) {
   BasicBlock *Dest = getInnerResumeDest();
   LandingPadInst *OuterLPad = getLandingPadInst();
   BasicBlock *Src = RI->getParent();
@@ -155,34 +156,14 @@ void InvokeInliningInfo::forwardResume(ResumeInst *RI,
   InnerEHValuesPHI->addIncoming(RI->getOperand(0), Src);
   RI->eraseFromParent();
 
-  // Get all of the inlined landing pad instructions.
-  SmallPtrSet<LandingPadInst*, 16> InlinedLPads;
-  Function *Caller = FirstNewBlock->getParent();
-  for (Function::iterator I = FirstNewBlock, E = Caller->end(); I != E; ++I)
-    if (InvokeInst *II = dyn_cast<InvokeInst>(I->getTerminator())) {
-      LandingPadInst *LPI = II->getLandingPadInst();
-      if (!LPI->hasCatchAll())
-        InlinedLPads.insert(LPI);
-    }
-
-  // Merge the catch clauses from the outer landing pad instruction into the
-  // inlined landing pad instructions.
+  // Append the clauses from the outer landing pad instruction into the inlined
+  // landing pad instructions.
   for (SmallPtrSet<LandingPadInst*, 16>::iterator I = InlinedLPads.begin(),
          E = InlinedLPads.end(); I != E; ++I) {
     LandingPadInst *InlinedLPad = *I;
     for (unsigned OuterIdx = 0, OuterNum = OuterLPad->getNumClauses();
-         OuterIdx != OuterNum; ++OuterIdx) {
-      bool hasClause = false;
-      if (OuterLPad->isFilter(OuterIdx)) continue;
-      Value *OuterClause = OuterLPad->getClause(OuterIdx);
-      for (unsigned Idx = 0, N = InlinedLPad->getNumClauses(); Idx != N; ++Idx)
-        if (OuterClause == InlinedLPad->getClause(Idx)) {
-          hasClause = true;
-          break;
-        }
-      if (!hasClause)
-        InlinedLPad->addClause(OuterClause);
-    }
+         OuterIdx != OuterNum; ++OuterIdx)
+      InlinedLPad->addClause(OuterLPad->getClause(OuterIdx));
   }
 }
 
@@ -264,6 +245,12 @@ static void HandleInlinedInvoke(InvokeInst *II, BasicBlock *FirstNewBlock,
   // rewrite.
   InvokeInliningInfo Invoke(II);
 
+  // Get all of the inlined landing pad instructions.
+  SmallPtrSet<LandingPadInst*, 16> InlinedLPads;
+  for (Function::iterator I = FirstNewBlock, E = Caller->end(); I != E; ++I)
+    if (InvokeInst *II = dyn_cast<InvokeInst>(I->getTerminator()))
+      InlinedLPads.insert(II->getLandingPadInst());
+
   for (Function::iterator BB = FirstNewBlock, E = Caller->end(); BB != E; ++BB){
     if (InlinedCodeInfo.ContainsCalls)
       if (HandleCallsInBlockInlinedThroughInvoke(BB, Invoke)) {
@@ -274,7 +261,7 @@ static void HandleInlinedInvoke(InvokeInst *II, BasicBlock *FirstNewBlock,
 
     // Forward any resumes that are remaining here.
     if (ResumeInst *RI = dyn_cast<ResumeInst>(BB->getTerminator()))
-      Invoke.forwardResume(RI, FirstNewBlock);
+      Invoke.forwardResume(RI, InlinedLPads);
   }
 
   // Now that everything is happy, we have one final detail.  The PHI nodes in
@@ -771,8 +758,10 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
 
     // If the call site was an invoke instruction, add a branch to the normal
     // destination.
-    if (InvokeInst *II = dyn_cast<InvokeInst>(TheCall))
-      BranchInst::Create(II->getNormalDest(), TheCall);
+    if (InvokeInst *II = dyn_cast<InvokeInst>(TheCall)) {
+      BranchInst *NewBr = BranchInst::Create(II->getNormalDest(), TheCall);
+      NewBr->setDebugLoc(Returns[0]->getDebugLoc());
+    }
 
     // If the return instruction returned a value, replace uses of the call with
     // uses of the returned value.
@@ -800,15 +789,16 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   // "starter" and "ender" blocks.  How we accomplish this depends on whether
   // this is an invoke instruction or a call instruction.
   BasicBlock *AfterCallBB;
+  BranchInst *CreatedBranchToNormalDest = NULL;
   if (InvokeInst *II = dyn_cast<InvokeInst>(TheCall)) {
 
     // Add an unconditional branch to make this look like the CallInst case...
-    BranchInst *NewBr = BranchInst::Create(II->getNormalDest(), TheCall);
+    CreatedBranchToNormalDest = BranchInst::Create(II->getNormalDest(), TheCall);
 
     // Split the basic block.  This guarantees that no PHI nodes will have to be
     // updated due to new incoming edges, and make the invoke case more
     // symmetric to the call case.
-    AfterCallBB = OrigBB->splitBasicBlock(NewBr,
+    AfterCallBB = OrigBB->splitBasicBlock(CreatedBranchToNormalDest,
                                           CalledFunc->getName()+".exit");
 
   } else {  // It's a call
@@ -863,11 +853,20 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
 
 
     // Add a branch to the merge points and remove return instructions.
+    DebugLoc Loc;
     for (unsigned i = 0, e = Returns.size(); i != e; ++i) {
       ReturnInst *RI = Returns[i];
-      BranchInst::Create(AfterCallBB, RI);
+      BranchInst* BI = BranchInst::Create(AfterCallBB, RI);
+      Loc = RI->getDebugLoc();
+      BI->setDebugLoc(Loc);
       RI->eraseFromParent();
     }
+    // We need to set the debug location to *somewhere* inside the
+    // inlined function. The line number may be nonsensical, but the
+    // instruction will at least be associated with the right
+    // function.
+    if (CreatedBranchToNormalDest)
+      CreatedBranchToNormalDest->setDebugLoc(Loc);
   } else if (!Returns.empty()) {
     // Otherwise, if there is exactly one return value, just replace anything
     // using the return value of the call with the computed value.
@@ -886,6 +885,9 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // to, which contains the code that was after the call.
     AfterCallBB->getInstList().splice(AfterCallBB->begin(),
                                       ReturnBB->getInstList());
+
+    if (CreatedBranchToNormalDest)
+      CreatedBranchToNormalDest->setDebugLoc(Returns[0]->getDebugLoc());
 
     // Delete the return instruction now and empty ReturnBB now.
     Returns[0]->eraseFromParent();

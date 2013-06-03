@@ -14,6 +14,7 @@
 #ifndef LLVM_SUPPORT_PROGRAM_H
 #define LLVM_SUPPORT_PROGRAM_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/Path.h"
 
 namespace llvm {
@@ -125,7 +126,8 @@ namespace sys {
                               const sys::Path** redirects = 0,
                               unsigned secondsToWait = 0,
                               unsigned memoryLimit = 0,
-                              std::string* ErrMsg = 0);
+                              std::string* ErrMsg = 0,
+                              bool *ExecutionFailed = 0);
 
     /// A convenience function equivalent to Program prg; prg.Execute(..);
     /// @see Execute
@@ -139,6 +141,10 @@ namespace sys {
     /// @}
 
   };
+
+  // Return true if the given arguments fit within system-specific
+  // argument length limits.
+  bool argumentsFitWithinSystemLimits(ArrayRef<const char*> Args);
 }
 }
 

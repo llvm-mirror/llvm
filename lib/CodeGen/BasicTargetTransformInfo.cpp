@@ -85,7 +85,9 @@ public:
   virtual unsigned getNumberOfRegisters(bool Vector) const;
   virtual unsigned getMaximumUnrollFactor() const;
   virtual unsigned getRegisterBitWidth(bool Vector) const;
-  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const;
+  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                          OperandValueKind,
+                                          OperandValueKind) const;
   virtual unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
                                   int Index, Type *SubTp) const;
   virtual unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
@@ -193,27 +195,34 @@ unsigned BasicTTI::getMaximumUnrollFactor() const {
   return 1;
 }
 
-unsigned BasicTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
+unsigned BasicTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                          OperandValueKind,
+                                          OperandValueKind) const {
   // Check if any of the operands are vector operands.
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
   std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Ty);
 
+  bool IsFloat = Ty->getScalarType()->isFloatingPointTy();
+  // Assume that floating point arithmetic operations cost twice as much as
+  // integer operations.
+  unsigned OpCost = (IsFloat ? 2 : 1);
+
   if (TLI->isOperationLegalOrPromote(ISD, LT.second)) {
     // The operation is legal. Assume it costs 1.
-    // If the type is split to multiple registers, assume that thre is some
+    // If the type is split to multiple registers, assume that there is some
     // overhead to this.
     // TODO: Once we have extract/insert subvector cost we need to use them.
     if (LT.first > 1)
-      return LT.first * 2;
-    return LT.first * 1;
+      return LT.first * 2 * OpCost;
+    return LT.first * 1 * OpCost;
   }
 
   if (!TLI->isOperationExpand(ISD, LT.second)) {
     // If the operation is custom lowered then assume
     // thare the code is twice as expensive.
-    return LT.first * 2;
+    return LT.first * 2 * OpCost;
   }
 
   // Else, assume that we need to scalarize this op.
@@ -226,7 +235,7 @@ unsigned BasicTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
   }
 
   // We don't know anything about this scalar instruction.
-  return 1;
+  return OpCost;
 }
 
 unsigned BasicTTI::getShuffleCost(ShuffleKind Kind, Type *Tp, int Index,

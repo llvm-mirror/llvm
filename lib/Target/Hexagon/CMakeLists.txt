@@ -28,12 +28,14 @@ add_llvm_target(HexagonCodeGen
   HexagonRegisterInfo.cpp
   HexagonRemoveSZExtArgs.cpp
   HexagonSelectionDAGInfo.cpp
+  HexagonSplitConst32AndConst64.cpp
   HexagonSplitTFRCondSets.cpp
   HexagonSubtarget.cpp
   HexagonTargetMachine.cpp
   HexagonTargetObjectFile.cpp
   HexagonVLIWPacketizer.cpp
   HexagonNewValueJump.cpp
+  HexagonCopyToCombine.cpp
 )
 
 add_subdirectory(TargetInfo)

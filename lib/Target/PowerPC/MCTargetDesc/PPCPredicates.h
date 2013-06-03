@@ -25,7 +25,6 @@ namespace llvm {
 namespace PPC {
   /// Predicate - These are "(BI << 5) | BO"  for various predicates.
   enum Predicate {
-    PRED_ALWAYS = (0 << 5) | 20,
     PRED_LT     = (0 << 5) | 12,
     PRED_LE     = (1 << 5) |  4,
     PRED_EQ     = (2 << 5) | 12,
@@ -38,6 +37,10 @@ namespace PPC {
   
   /// Invert the specified predicate.  != -> ==, < -> >=.
   Predicate InvertPredicate(Predicate Opcode);
+
+  /// Assume the condition register is set by MI(a,b), return the predicate if
+  /// we modify the instructions such that condition register is set by MI(b,a).
+  Predicate getSwappedPredicate(Predicate Opcode);
 }
 }
 

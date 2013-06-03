@@ -187,10 +187,12 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
   NewRHS = DAG.getConstant(0, RetVT);
   CCCode = getCmpLibcallCC(LC1);
   if (LC2 != RTLIB::UNKNOWN_LIBCALL) {
-    SDValue Tmp = DAG.getNode(ISD::SETCC, dl, getSetCCResultType(RetVT),
+    SDValue Tmp = DAG.getNode(ISD::SETCC, dl,
+                              getSetCCResultType(*DAG.getContext(), RetVT),
                               NewLHS, NewRHS, DAG.getCondCode(CCCode));
     NewLHS = makeLibCall(DAG, LC2, RetVT, Ops, 2, false/*sign irrelevant*/, dl);
-    NewLHS = DAG.getNode(ISD::SETCC, dl, getSetCCResultType(RetVT), NewLHS,
+    NewLHS = DAG.getNode(ISD::SETCC, dl,
+                         getSetCCResultType(*DAG.getContext(), RetVT), NewLHS,
                          NewRHS, DAG.getCondCode(getCmpLibcallCC(LC2)));
     NewLHS = DAG.getNode(ISD::OR, dl, Tmp.getValueType(), Tmp, NewLHS);
     NewRHS = SDValue();
@@ -1160,7 +1162,8 @@ TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
       }
 
       // Make sure we're not losing bits from the constant.
-      if (MinBits < C1.getBitWidth() && MinBits > C1.getActiveBits()) {
+      if (MinBits > 0 &&
+          MinBits < C1.getBitWidth() && MinBits >= C1.getActiveBits()) {
         EVT MinVT = EVT::getIntegerVT(*DAG.getContext(), MinBits);
         if (isTypeDesirableForOp(ISD::SETCC, MinVT)) {
           // Will get folded away.

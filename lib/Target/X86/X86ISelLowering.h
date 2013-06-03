@@ -356,9 +356,16 @@ namespace llvm {
       // RDRAND - Get a random integer and indicate whether it is valid in CF.
       RDRAND,
 
+      // RDSEED - Get a NIST SP800-90B & C compliant random integer and
+      // indicate whether it is valid in CF.
+      RDSEED,
+
       // PCMP*STRI
       PCMPISTRI,
       PCMPESTRI,
+
+      // XTEST - Test if in transactional execution.
+      XTEST,
 
       // ATOMADD64_DAG, ATOMSUB64_DAG, ATOMOR64_DAG, ATOMAND64_DAG,
       // ATOMXOR64_DAG, ATOMNAND64_DAG, ATOMSWAP64_DAG -
@@ -504,7 +511,7 @@ namespace llvm {
     /// It returns EVT::Other if the type should be determined using generic
     /// target-independent logic.
     virtual EVT
-    getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign, 
+    getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign,
                         bool IsMemset, bool ZeroMemset, bool MemcpyStrSrc,
                         MachineFunction &MF) const;
 
@@ -556,7 +563,7 @@ namespace llvm {
     virtual const char *getTargetNodeName(unsigned Opcode) const;
 
     /// getSetCCResultType - Return the value type to use for ISD::SETCC.
-    virtual EVT getSetCCResultType(EVT VT) const;
+    virtual EVT getSetCCResultType(LLVMContext &Context, EVT VT) const;
 
     /// computeMaskedBitsForTargetNode - Determine which of the bits specified
     /// in Mask are known to be either zero or one and return them in the
@@ -716,6 +723,9 @@ namespace llvm {
     SDValue BuildFILD(SDValue Op, EVT SrcVT, SDValue Chain, SDValue StackSlot,
                       SelectionDAG &DAG) const;
 
+    /// \brief Reset the operation actions based on target options.
+    virtual void resetOperationActions();
+
   protected:
     std::pair<const TargetRegisterClass*, uint8_t>
     findRepresentativeClass(MVT VT) const;
@@ -726,6 +736,10 @@ namespace llvm {
     const X86Subtarget *Subtarget;
     const X86RegisterInfo *RegInfo;
     const DataLayout *TD;
+
+    /// Used to store the TargetOptions so that we don't waste time resetting
+    /// the operation actions unless we have to.
+    TargetOptions TO;
 
     /// X86ScalarSSEf32, X86ScalarSSEf64 - Select between SSE or x87
     /// floating point ops.

@@ -314,7 +314,7 @@ static SDValue getCopyFromPartsVector(SelectionDAG &DAG, DebugLoc DL,
     } else {
       Ctx.emitError(ErrMsg);
     }
-    report_fatal_error("Cannot handle scalar-to-vector conversion!");
+    return DAG.getUNDEF(ValueVT);
   }
 
   if (ValueVT.getVectorNumElements() == 1 &&
@@ -1710,8 +1710,10 @@ void SelectionDAGBuilder::visitJumpTableHeader(JumpTable &JT,
   // for the switch statement if the value being switched on exceeds the largest
   // case in the switch.
   SDValue CMP = DAG.getSetCC(getCurDebugLoc(),
-                             TLI.getSetCCResultType(Sub.getValueType()), Sub,
-                             DAG.getConstant(JTH.Last-JTH.First,VT),
+                             TLI.getSetCCResultType(*DAG.getContext(),
+                                                    Sub.getValueType()),
+                             Sub,
+                             DAG.getConstant(JTH.Last - JTH.First,VT),
                              ISD::SETUGT);
 
   // Set NextBlock to be the MBB immediately after the current one, if any.
@@ -1745,7 +1747,8 @@ void SelectionDAGBuilder::visitBitTestHeader(BitTestBlock &B,
 
   // Check range
   SDValue RangeCmp = DAG.getSetCC(getCurDebugLoc(),
-                                  TLI.getSetCCResultType(Sub.getValueType()),
+                                  TLI.getSetCCResultType(*DAG.getContext(),
+                                                         Sub.getValueType()),
                                   Sub, DAG.getConstant(B.Range, VT),
                                   ISD::SETUGT);
 
@@ -1811,14 +1814,14 @@ void SelectionDAGBuilder::visitBitTestCase(BitTestBlock &BB,
     // Testing for a single bit; just compare the shift count with what it
     // would need to be to shift a 1 bit in that position.
     Cmp = DAG.getSetCC(getCurDebugLoc(),
-                       TLI.getSetCCResultType(VT),
+                       TLI.getSetCCResultType(*DAG.getContext(), VT),
                        ShiftOp,
                        DAG.getConstant(CountTrailingZeros_64(B.Mask), VT),
                        ISD::SETEQ);
   } else if (PopCount == BB.Range) {
     // There is only one zero bit in the range, test for it directly.
     Cmp = DAG.getSetCC(getCurDebugLoc(),
-                       TLI.getSetCCResultType(VT),
+                       TLI.getSetCCResultType(*DAG.getContext(), VT),
                        ShiftOp,
                        DAG.getConstant(CountTrailingOnes_64(B.Mask), VT),
                        ISD::SETNE);
@@ -1831,7 +1834,7 @@ void SelectionDAGBuilder::visitBitTestCase(BitTestBlock &BB,
     SDValue AndOp = DAG.getNode(ISD::AND, getCurDebugLoc(),
                                 VT, SwitchVal, DAG.getConstant(B.Mask, VT));
     Cmp = DAG.getSetCC(getCurDebugLoc(),
-                       TLI.getSetCCResultType(VT),
+                       TLI.getSetCCResultType(*DAG.getContext(), VT),
                        AndOp, DAG.getConstant(0, VT),
                        ISD::SETNE);
   }
@@ -4914,7 +4917,6 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
   case Intrinsic::fmuladd: {
     EVT VT = TLI.getValueType(I.getType());
     if (TM.Options.AllowFPOpFusion != FPOpFusion::Strict &&
-        TLI.isOperationLegalOrCustom(ISD::FMA, VT) &&
         TLI.isFMAFasterThanMulAndAdd(VT)){
       setValue(&I, DAG.getNode(ISD::FMA, dl,
                                getValue(I.getArgOperand(0)).getValueType(),
@@ -5233,6 +5235,7 @@ void SelectionDAGBuilder::LowerCallTo(ImmutableCallSite CS, SDValue Callee,
     Entry.isSRet = true;
     Entry.isNest = false;
     Entry.isByVal = false;
+    Entry.isReturned = false;
     Entry.Alignment = Align;
     Args.push_back(Entry);
     RetTy = Type::getVoidTy(FTy->getContext());
@@ -5250,13 +5253,14 @@ void SelectionDAGBuilder::LowerCallTo(ImmutableCallSite CS, SDValue Callee,
     Entry.Node = ArgNode; Entry.Ty = V->getType();
 
     unsigned attrInd = i - CS.arg_begin() + 1;
-    Entry.isSExt  = CS.paramHasAttr(attrInd, Attribute::SExt);
-    Entry.isZExt  = CS.paramHasAttr(attrInd, Attribute::ZExt);
-    Entry.isInReg = CS.paramHasAttr(attrInd, Attribute::InReg);
-    Entry.isSRet  = CS.paramHasAttr(attrInd, Attribute::StructRet);
-    Entry.isNest  = CS.paramHasAttr(attrInd, Attribute::Nest);
-    Entry.isByVal = CS.paramHasAttr(attrInd, Attribute::ByVal);
-    Entry.Alignment = CS.getParamAlignment(attrInd);
+    Entry.isSExt     = CS.paramHasAttr(attrInd, Attribute::SExt);
+    Entry.isZExt     = CS.paramHasAttr(attrInd, Attribute::ZExt);
+    Entry.isInReg    = CS.paramHasAttr(attrInd, Attribute::InReg);
+    Entry.isSRet     = CS.paramHasAttr(attrInd, Attribute::StructRet);
+    Entry.isNest     = CS.paramHasAttr(attrInd, Attribute::Nest);
+    Entry.isByVal    = CS.paramHasAttr(attrInd, Attribute::ByVal);
+    Entry.isReturned = CS.paramHasAttr(attrInd, Attribute::Returned);
+    Entry.Alignment  = CS.getParamAlignment(attrInd);
     Args.push_back(Entry);
   }
 
@@ -6170,10 +6174,17 @@ void SelectionDAGBuilder::visitInlineAsm(ImmutableCallSite CS) {
           MatchedRegs.RegVTs.push_back(RegVT);
           MachineRegisterInfo &RegInfo = DAG.getMachineFunction().getRegInfo();
           for (unsigned i = 0, e = InlineAsm::getNumOperandRegisters(OpFlag);
-               i != e; ++i)
-            MatchedRegs.Regs.push_back
-              (RegInfo.createVirtualRegister(TLI.getRegClassFor(RegVT)));
-
+               i != e; ++i) {
+            if (const TargetRegisterClass *RC = TLI.getRegClassFor(RegVT))
+              MatchedRegs.Regs.push_back(RegInfo.createVirtualRegister(RC));
+            else {
+              LLVMContext &Ctx = *DAG.getContext();
+              Ctx.emitError(CS.getInstruction(), "inline asm error: This value"
+                            " type register class is not natively supported!");
+              report_fatal_error("inline asm error: This value type register "
+                                 "class is not natively supported!");
+            }
+          }
           // Use the produced MatchedRegs object to
           MatchedRegs.getCopyToRegs(InOperandVal, DAG, getCurDebugLoc(),
                                     Chain, &Flag, CS.getInstruction());
@@ -6390,6 +6401,28 @@ void SelectionDAGBuilder::visitVACopy(const CallInst &I) {
 /// migrated to using LowerCall, this hook should be integrated into SDISel.
 std::pair<SDValue, SDValue>
 TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
+  // Handle the incoming return values from the call.
+  CLI.Ins.clear();
+  SmallVector<EVT, 4> RetTys;
+  ComputeValueVTs(*this, CLI.RetTy, RetTys);
+  for (unsigned I = 0, E = RetTys.size(); I != E; ++I) {
+    EVT VT = RetTys[I];
+    MVT RegisterVT = getRegisterType(CLI.RetTy->getContext(), VT);
+    unsigned NumRegs = getNumRegisters(CLI.RetTy->getContext(), VT);
+    for (unsigned i = 0; i != NumRegs; ++i) {
+      ISD::InputArg MyFlags;
+      MyFlags.VT = RegisterVT;
+      MyFlags.Used = CLI.IsReturnValueUsed;
+      if (CLI.RetSExt)
+        MyFlags.Flags.setSExt();
+      if (CLI.RetZExt)
+        MyFlags.Flags.setZExt();
+      if (CLI.IsInReg)
+        MyFlags.Flags.setInReg();
+      CLI.Ins.push_back(MyFlags);
+    }
+  }
+
   // Handle all of the outgoing arguments.
   CLI.Outs.clear();
   CLI.OutVals.clear();
@@ -6443,6 +6476,26 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
       else if (Args[i].isZExt)
         ExtendKind = ISD::ZERO_EXTEND;
 
+      // Conservatively only handle 'returned' on non-vectors for now
+      if (Args[i].isReturned && !Op.getValueType().isVector()) {
+        assert(CLI.RetTy == Args[i].Ty && RetTys.size() == NumValues &&
+               "unexpected use of 'returned'");
+        // Before passing 'returned' to the target lowering code, ensure that
+        // either the register MVT and the actual EVT are the same size or that
+        // the return value and argument are extended in the same way; in these
+        // cases it's safe to pass the argument register value unchanged as the
+        // return register value (although it's at the target's option whether
+        // to do so)
+        // TODO: allow code generation to take advantage of partially preserved
+        // registers rather than clobbering the entire register when the
+        // parameter extension method is not compatible with the return
+        // extension method
+        if ((NumParts * PartVT.getSizeInBits() == VT.getSizeInBits()) ||
+            (ExtendKind != ISD::ANY_EXTEND &&
+             CLI.RetSExt == Args[i].isSExt && CLI.RetZExt == Args[i].isZExt))
+        Flags.setReturned();
+      }
+
       getCopyToParts(CLI.DAG, CLI.DL, Op, &Parts[0], NumParts,
                      PartVT, CLI.CS ? CLI.CS->getInstruction() : 0, ExtendKind);
 
@@ -6459,28 +6512,6 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
         CLI.Outs.push_back(MyFlags);
         CLI.OutVals.push_back(Parts[j]);
       }
-    }
-  }
-
-  // Handle the incoming return values from the call.
-  CLI.Ins.clear();
-  SmallVector<EVT, 4> RetTys;
-  ComputeValueVTs(*this, CLI.RetTy, RetTys);
-  for (unsigned I = 0, E = RetTys.size(); I != E; ++I) {
-    EVT VT = RetTys[I];
-    MVT RegisterVT = getRegisterType(CLI.RetTy->getContext(), VT);
-    unsigned NumRegs = getNumRegisters(CLI.RetTy->getContext(), VT);
-    for (unsigned i = 0; i != NumRegs; ++i) {
-      ISD::InputArg MyFlags;
-      MyFlags.VT = RegisterVT;
-      MyFlags.Used = CLI.IsReturnValueUsed;
-      if (CLI.RetSExt)
-        MyFlags.Flags.setSExt();
-      if (CLI.RetZExt)
-        MyFlags.Flags.setZExt();
-      if (CLI.IsInReg)
-        MyFlags.Flags.setInReg();
-      CLI.Ins.push_back(MyFlags);
     }
   }
 
@@ -6725,8 +6756,14 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
 
     // If this argument is unused then remember its value. It is used to generate
     // debugging information.
-    if (I->use_empty() && NumValues)
+    if (I->use_empty() && NumValues) {
       SDB->setUnusedArgValue(I, InVals[i]);
+
+      // Also remember any frame index for use in FastISel.
+      if (FrameIndexSDNode *FI =
+          dyn_cast<FrameIndexSDNode>(InVals[i].getNode()))
+        FuncInfo->setArgumentFrameIndex(I, FI->getIndex());
+    }
 
     for (unsigned Val = 0; Val != NumValues; ++Val) {
       EVT VT = ValueVTs[Val];
