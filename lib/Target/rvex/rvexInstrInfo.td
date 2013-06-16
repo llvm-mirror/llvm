@@ -27,6 +27,13 @@ def SDT_rvexDivRem       : SDTypeProfile<0, 2,
                                          [SDTCisInt<0>,
                                           SDTCisSameAs<0, 1>]>;
 
+def SDT_rvexJmpLink      : SDTypeProfile<0, 1, [SDTCisVT<0, iPTR>]>;
+
+// Call
+def rvexJmpLink : SDNode<"rvexISD::JmpLink",SDT_rvexJmpLink,
+                         [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                          SDNPVariadic]>;
+
 // Hi and Lo nodes are used to handle global addresses. Used on
 // rvexISelLowering to lower stuff like GlobalAddress, ExternalSymbol
 // static model. (nothing to do with rvex Registers Hi and Lo)
@@ -59,6 +66,10 @@ def brtarget    : Operand<OtherVT> {
   let EncoderMethod = "getBranchTargetOpValue";
   let OperandType = "OPERAND_PCREL";
   let DecoderMethod = "DecodeBranchTarget";
+}
+
+def calltarget  : Operand<iPTR> {
+  let EncoderMethod = "getJumpTargetOpValue";
 }
 
 
@@ -159,11 +170,31 @@ class ArithLogicR<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
+class CmpInstr<bits<8> op, string instr_asm, 
+               InstrItinClass itin, RegisterClass RC, RegisterClass RD, 
+               bit isComm = 0, CType type>:
+  FA<op, (outs RD:$rc), (ins RC:$ra, RC:$rb),
+     !strconcat(instr_asm, "\t$rc = $ra, $rb"), [], itin, type> {
+  let rc = 0;
+  let shamt = 0;
+  let isCommutable = isComm;
+}
+
+class CmpInstrImm<bits<8> op, string instr_asm, 
+               InstrItinClass itin, RegisterClass RC, RegisterClass RD,
+               Operand Od, PatLeaf imm_type, 
+               bit isComm = 0, CType type>:
+  FL<op, (outs RD:$rc), (ins RC:$ra, Od:$imm16),
+     !strconcat(instr_asm, "\t$rc = $ra, $imm16"),
+     [], itin, type> {
+  let isReMaterializable = 1;
+}
+
 // Arithmetic and logical instructions with 2 register operands.
 class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
-     !strconcat(instr_asm, "\t\t$ra = $rb, $imm16"),
+     !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
      [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm16))], IIAlu, TypeIIAlu> {
   let isReMaterializable = 1;
 }
@@ -172,7 +203,7 @@ class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
 class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm),
-     !strconcat(instr_asm, "\t\t$ra = $imm"),
+     !strconcat(instr_asm, "\t$ra = $imm"),
      [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm))], IIAlu, TypeIIAlu> {
   let rb = 0;
   let isReMaterializable = 1;
@@ -241,6 +272,17 @@ multiclass StoreM32<bits<8> op, string instr_asm, PatFrag OpNode,
   def #NAME# : StoreM<op, instr_asm, OpNode, CPURegs, mem, Pseudo>;
 }
 
+// Conditional Branch
+class CBranch<bits<8> op, string instr_asm, RegisterClass RC>:
+  FJ<op, (outs), (ins RC:$ra, brtarget:$addr),
+             !strconcat(instr_asm, "\t$ra, $addr"),
+             [(brcond RC:$ra, bb:$addr)], IIBranch, TypeIIBranch> {
+  let isBranch = 1;
+  let isTerminator = 1;
+  let hasDelaySlot = 0;
+  let neverHasSideEffects = 1;
+}
+
 // Unconditional branch, such as JMP
 class UncondBranch<bits<8> op, string instr_asm>:
   FJ<op, (outs), (ins brtarget:$addr),
@@ -250,6 +292,24 @@ class UncondBranch<bits<8> op, string instr_asm>:
   let isBarrier = 1;
   let hasDelaySlot = 0;
   let DecoderMethod = "DecodeJumpRelativeTarget";
+}
+
+// Jump and Link (Call)
+let isCall=1, hasDelaySlot=0 in {
+  class JumpLink<bits<8> op, string instr_asm>:
+    FJ<op, (outs), (ins calltarget:$target, variable_ops),
+       !strconcat(instr_asm, "\t$target"), [(rvexJmpLink imm:$target)],
+       IIBranch, TypeIIBranch> {
+       }
+
+  class JumpLinkReg<bits<8> op, string instr_asm,
+                    RegisterClass RC>:
+    FA<op, (outs), (ins RC:$rb, variable_ops),
+       !strconcat(instr_asm, "\t$rb"), [(rvexJmpLink RC:$rb)], IIBranch, TypeIIBranch> {
+    let rc = 0;
+    let ra = 14;
+    let shamt = 0;
+  }
 }
 
 // Mul, Div
@@ -323,8 +383,9 @@ defm LHu    : LoadM32<0x07, "ldhu", zextloadi16_a>;
 defm SH     : StoreM32<0x08, "sth ", truncstorei16_a>;
 
 /// Arithmetic Instructions (ALU Immediate)
-def LDI     : MoveImm<0x08, "mov", add, simm16, immSExt32, CPURegs>;
-// add defined in include/llvm/Target/TargetSelectionDAG.td, line 315 (def add).
+//def MOV     
+def LDI     : ArithLogicI<0x09, "add", add, simm16, immSExt16, CPURegs>;
+def MOV     : MoveImm<0x08, "mov", add, simm16, immSExt32, CPURegs>;
 def ADDiu   : ArithLogicI<0x09, "add", add, simm16, immSExt16, CPURegs>;
 def XORiu   : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
@@ -337,6 +398,29 @@ def UDIV    : Div32<rvexDivRemU, 0x17, "divu", IIIdiv>;
 def AND     : ArithLogicR<0x18, "and", and, IIAlu, CPURegs, 1, TypeIIAlu>;
 def OR      : ArithLogicR<0x19, "or", or, IIAlu, CPURegs, 1, TypeIIAlu>;
 def XOR     : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
+
+def CMPEQ   : CmpInstr<0x10, "cmpeq", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPEQi  : CmpInstrImm<0x10, "cmpeq", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPNEQ   : CmpInstr<0x10, "cmpne", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPNEQi  : CmpInstrImm<0x10, "cmpne", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGT   : CmpInstr<0x10, "cmpgt", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGTi  : CmpInstrImm<0x10, "cmpgt", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGTU   : CmpInstr<0x10, "cmpgtu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGTUi  : CmpInstrImm<0x10, "cmpgtu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLT   : CmpInstr<0x10, "cmplt", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLTi  : CmpInstrImm<0x10, "cmplt", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLTU   : CmpInstr<0x10, "cmpltu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLTUi  : CmpInstrImm<0x10, "cmpltu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGE   : CmpInstr<0x10, "cmpge", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGEi  : CmpInstrImm<0x10, "cmpge", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGEU   : CmpInstr<0x10, "cmpgeu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGEUi  : CmpInstrImm<0x10, "cmpgeu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLE   : CmpInstr<0x10, "cmple", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLEi  : CmpInstrImm<0x10, "cmple", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLEU   : CmpInstr<0x10, "cmpleu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLEUi  : CmpInstrImm<0x10, "cmpleu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+
+
 
 def MULT    : Mult32<0x50, "mult", IIImul>;
 def MULTu   : Mult32<0x51, "multu", IIImul>;
@@ -355,12 +439,21 @@ def SHL     : shift_rotate_imm32<0x1E, 0x00, "shl", shl>;
 // work, srl for lshr llvm IR instruction
 def SHR     : shift_rotate_imm32<0x1F, 0x00, "shr", srl>;
 
+def BR      : CBranch<0x25, "br", BRRegs>;
+def BRF     : CBranch<0x25, "brf", BRRegs>;
+
 def JMP     : UncondBranch<0x26, "jmp">;
 
+/// Jump and Branch Instructions
+def SWI     : JumpLink<0x2A, "swi">;
+def JSUB    : JumpLink<0x2B, "jsub">;
+
 let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
-    isBarrier=1, hasCtrlDep=1 in
-  def RET : FJ <0x2C, (outs), (ins CPURegs:$target),
+    isBarrier=1, hasCtrlDep=1, addr=0 in
+  def RET   : FJ <0x2C, (outs), (ins CPURegs:$target),
                 "ret\t$target", [(rvexRet CPURegs:$target)], IIBranch, TypeIIBranch>;
+
+def JALR    : JumpLinkReg<0x2E, "jalr", CPURegs>;
 
 /// No operation
 let addr=0 in
@@ -380,7 +473,10 @@ def LEA_ADDiu : EffectiveAddress<"add\t\t$ra = $addr", CPURegs, mem_ea> {
 
 // Small immediates
 def : Pat<(i32 imm:$in),
-          (LDI R0, imm:$in)>;
+          (MOV R0, imm:$in)>;
+
+def : Pat<(rvexJmpLink (i32 tglobaladdr:$dst)),
+          (JSUB tglobaladdr:$dst)>;
 
 // hi/lo relocs
 def : Pat<(rvexHi tglobaladdr:$in), (SHL (ADDiu R0, tglobaladdr:$in), 16)>;
@@ -403,39 +499,110 @@ def : Pat<(i32 (extloadi8  addr:$src)), (LBu addr:$src)>;
 def : Pat<(i32 (extloadi16_a addr:$src)), (LHu addr:$src)>;
 
 // brcond patterns
-multiclass BrcondPats<RegisterClass RC, Instruction JEQOp, Instruction JNEOp, 
-Instruction JLTOp, Instruction JGTOp, Instruction JLEOp, Instruction JGEOp, 
-Instruction CMPOp, Register ZEROReg> {
+multiclass BrcondPats<RegisterClass RC,
+Instruction JEQOp, Instruction JNEOp, 
+Instruction CMPEQOp, Instruction CMPEQiOp,
+Instruction CMPNEQOp, Instruction CMPNEQiOp,
+Instruction CMPGTOp, Instruction CMPGTiOp,
+Instruction CMPGTUOp, Instruction CMPGTUiOp,
+Instruction CMPLTOp, Instruction CMPLTiOp,
+Instruction CMPLTUOp, Instruction CMPLTUiOp,
+Instruction CMPGEOp, Instruction CMPGEiOp,
+Instruction CMPGEUOp, Instruction CMPGEUiOp,
+Instruction CMPLEOp, Instruction CMPLEiOp,
+Instruction CMPLEUOp, Instruction CMPLEUiOp,
+
+Register ZEROReg> {
+
+//seteq
 def : Pat<(brcond (i32 (seteq RC:$lhs, RC:$rhs)), bb:$dst),
-          (JEQOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
+          (JEQOp (CMPEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
 def : Pat<(brcond (i32 (setueq RC:$lhs, RC:$rhs)), bb:$dst),
-          (JEQOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
+          (JEQOp (CMPEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (seteq RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (setueq RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+//setne          
 def : Pat<(brcond (i32 (setne RC:$lhs, RC:$rhs)), bb:$dst),
-          (JNEOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
+          (JEQOp (CMPNEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (setne RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPNEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;          
+
+//setune                    
 def : Pat<(brcond (i32 (setune RC:$lhs, RC:$rhs)), bb:$dst),
-          (JNEOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
-def : Pat<(brcond (i32 (setlt RC:$lhs, RC:$rhs)), bb:$dst),
-          (JLTOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
-def : Pat<(brcond (i32 (setult RC:$lhs, RC:$rhs)), bb:$dst),
-          (JLTOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
+          (JNEOp (CMPEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (setune RC:$lhs, imm:$rhs)), bb:$dst),
+          (JNEOp (CMPEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;
+
+//setgt
 def : Pat<(brcond (i32 (setgt RC:$lhs, RC:$rhs)), bb:$dst),
-          (JGTOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
+          (JEQOp (CMPGTOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setgt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGTiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+//setugt
 def : Pat<(brcond (i32 (setugt RC:$lhs, RC:$rhs)), bb:$dst),
-          (JGTOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
-def : Pat<(brcond (i32 (setle RC:$lhs, RC:$rhs)), bb:$dst),
-          (JLEOp (CMPOp RC:$rhs, RC:$lhs), bb:$dst)>;
-def : Pat<(brcond (i32 (setule RC:$lhs, RC:$rhs)), bb:$dst),
-          (JLEOp (CMPOp RC:$rhs, RC:$lhs), bb:$dst)>;
+          (JEQOp (CMPGTUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setugt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGTUiOp RC:$lhs, imm:$rhs), bb:$dst)>; 
+
+//setlt
+def : Pat<(brcond (i32 (setlt RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLTOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setlt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLTiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+//setult
+def : Pat<(brcond (i32 (setult RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLTUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setult RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLTUiOp RC:$lhs, imm:$rhs), bb:$dst)>;           
+
+//setge
 def : Pat<(brcond (i32 (setge RC:$lhs, RC:$rhs)), bb:$dst),
-          (JGEOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
+          (JEQOp (CMPGEOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setgt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGEiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+//setuge
 def : Pat<(brcond (i32 (setuge RC:$lhs, RC:$rhs)), bb:$dst),
-          (JGEOp (CMPOp RC:$lhs, RC:$rhs), bb:$dst)>;
+          (JEQOp (CMPGEUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setugt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGEUiOp RC:$lhs, imm:$rhs), bb:$dst)>; 
+
+//setle
+def : Pat<(brcond (i32 (setle RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLEOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setlt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLEiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+//setule
+def : Pat<(brcond (i32 (setule RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLEUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setult RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLEUiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
 
 def : Pat<(brcond RC:$cond, bb:$dst),
-          (JNEOp (CMPOp RC:$cond, ZEROReg), bb:$dst)>;
+          (JNEOp (CMPEQOp RC:$cond, ZEROReg), bb:$dst)>;
 }
 
-//defm : BrcondPats<CPURegs, JEQ, JNE, JLT, JGT, JLE, JGE, CMP, ZERO>;
+defm : BrcondPats<CPURegs, BR, BRF, 
+CMPEQ, CMPEQi, 
+CMPNEQ, CMPNEQi, 
+
+CMPGT, CMPGTi,
+CMPGTU, CMPGTUi,
+CMPLT, CMPLTi,
+CMPLTU, CMPLTUi,
+
+CMPGE, CMPGEi,
+CMPGEU, CMPGEUi,
+CMPLE, CMPLEi,
+CMPLEU, CMPLEUi,
+
+R0>;
 
 // setcc patterns
 multiclass SeteqPats<RegisterClass RC, Instruction XOROp> {

@@ -46,10 +46,11 @@ MCOperand rvexMCInstLower::LowerSymbolOperand(const MachineOperand &MO,
 
   switch(MO.getTargetFlags()) {
   default:                   llvm_unreachable("Invalid target flag!");
+  case rvexII::MO_NO_FLAG:   Kind = MCSymbolRefExpr::VK_None; break;
 // rvex_GPREL is for llc -march=rvex -relocation-model=static -rvex-islinux-
 //  format=false (global var in .sdata).
   case rvexII::MO_GPREL:     Kind = MCSymbolRefExpr::VK_Cpu0_GPREL; break;
-
+  case rvexII::MO_GOT_CALL:  Kind = MCSymbolRefExpr::VK_Cpu0_GOT_CALL; break;
   case rvexII::MO_GOT16:     Kind = MCSymbolRefExpr::VK_Cpu0_GOT16; break;
   case rvexII::MO_GOT:       Kind = MCSymbolRefExpr::VK_Cpu0_GOT; break;
 // ABS_HI and ABS_LO is for llc -march=rvex -relocation-model=static (global 
@@ -59,6 +60,10 @@ MCOperand rvexMCInstLower::LowerSymbolOperand(const MachineOperand &MO,
   }
 
   switch (MOTy) {
+  case MachineOperand::MO_MachineBasicBlock:
+    Symbol = MO.getMBB()->getSymbol();
+    break;
+
   case MachineOperand::MO_GlobalAddress:
     Symbol = Mang->getSymbol(MO.getGlobal());
     break;
@@ -92,11 +97,14 @@ MCOperand rvexMCInstLower::LowerOperand(const MachineOperand& MO,
     return MCOperand::CreateReg(MO.getReg());
   case MachineOperand::MO_Immediate:
     return MCOperand::CreateImm(MO.getImm() + offset);
+  case MachineOperand::MO_MachineBasicBlock:
   case MachineOperand::MO_GlobalAddress:
+  case MachineOperand::MO_BlockAddress:
     return LowerSymbolOperand(MO, MOTy, offset);
   case MachineOperand::MO_RegisterMask:
     break;
  }
+
 
   return MCOperand();
 }

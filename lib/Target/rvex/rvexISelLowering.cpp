@@ -16,6 +16,7 @@
 #include "rvexISelLowering.h"
 #include "rvexMachineFunction.h"
 #include "rvexTargetMachine.h"
+#include "rvexMachineFunction.h"
 #include "rvexTargetObjectFile.h"
 #include "rvexSubtarget.h"
 #include "MCTargetDesc/rvexBaseInfo.h"
@@ -72,6 +73,13 @@ rvexTargetLowering(rvexTargetMachine &TM)
   //TODO: scheduling modes: None, Source, RegPressure, Hybrid, ILP, VLIW
   bool isVLIWEnabled = static_cast<rvexTargetMachine*>(&TM)->getSubtargetImpl()->isVLIWEnabled();
   setSchedulingPreference(isVLIWEnabled ? Sched::VLIW : Sched::Hybrid);
+
+  // Used by legalize types to correctly generate the setcc result.
+  // Without this, every float setcc comes with a AND/OR with the result,
+  // we don't want this, since the fpcmp result goes to a flag register,
+  // which is used implicitly by brcond and select operations.
+  AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
+  setOperationAction(ISD::BRCOND,             MVT::Other, Custom);
   
   setOperationAction(ISD::SDIV, MVT::i32, Expand);
   setOperationAction(ISD::SREM, MVT::i32, Expand);
@@ -151,6 +159,7 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
   switch (Op.getOpcode())
   {
     default: llvm_unreachable("Don't know how to custom lower this!");
+    case ISD::BRCOND:             return LowerBRCOND(Op, DAG);
     case ISD::GlobalAddress:      return LowerGlobalAddress(Op, DAG);
   }
   return SDValue();
@@ -163,6 +172,12 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
 //===----------------------------------------------------------------------===//
 //  Misc Lower Operation implementation
 //===----------------------------------------------------------------------===//
+
+SDValue rvexTargetLowering::
+LowerBRCOND(SDValue Op, SelectionDAG &DAG) const
+{
+  return Op;
+}
 
 SDValue rvexTargetLowering::LowerGlobalAddress(SDValue Op,
                                                SelectionDAG &DAG) const {
@@ -223,6 +238,58 @@ rvexTargetLowering::LowerFormalArguments(SDValue Chain,
                                          DebugLoc dl, SelectionDAG &DAG,
                                          SmallVectorImpl<SDValue> &InVals)
                                           const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  rvexFunctionInfo *rvexFI = MF.getInfo<rvexFunctionInfo>();
+
+  rvexFI->setVarArgsFrameIndex(0);
+
+  // Used with vargs to acumulate store chains.
+  std::vector<SDValue> OutChains;
+
+  // Assign locations to all of the incoming arguments.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
+                 getTargetMachine(), ArgLocs, *DAG.getContext());
+                         
+  CCInfo.AnalyzeFormalArguments(Ins, CC_rvex);
+
+  Function::const_arg_iterator FuncArg =
+    DAG.getMachineFunction().getFunction()->arg_begin();
+  int LastFI = 0;// rvexFI->LastInArgFI is 0 at the entry of this function.
+
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i, ++FuncArg) {
+    CCValAssign &VA = ArgLocs[i];
+    EVT ValVT = VA.getValVT();
+    ISD::ArgFlagsTy Flags = Ins[i].Flags;
+    bool IsRegLoc = VA.isRegLoc();
+
+    if (Flags.isByVal()) {
+      assert(Flags.getByValSize() &&
+             "ByVal args of size 0 should have been ignored by front-end."); 
+      continue;
+    }
+    // sanity check
+    assert(VA.isMemLoc());
+
+    // The stack pointer offset is relative to the caller stack frame.
+    LastFI = MFI->CreateFixedObject(ValVT.getSizeInBits()/8,
+                                    VA.getLocMemOffset(), true);
+
+    // Create load nodes to retrieve arguments from the stack
+    SDValue FIN = DAG.getFrameIndex(LastFI, getPointerTy());
+    InVals.push_back(DAG.getLoad(ValVT, dl, Chain, FIN,
+                                 MachinePointerInfo::getFixedStack(LastFI),
+                                 false, false, false, 0));
+  }
+  rvexFI->setLastInArgFI(LastFI);
+  // All stores are grouped in one node to allow the matching between
+  // the size of Ins and InVals. This only happens when on varg functions
+  if (!OutChains.empty()) {
+    OutChains.push_back(Chain);
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                        &OutChains[0], OutChains.size());
+  }
   return Chain;
 }
 

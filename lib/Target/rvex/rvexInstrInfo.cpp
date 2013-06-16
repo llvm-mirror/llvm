@@ -13,6 +13,7 @@
 
 #include "rvexInstrInfo.h"
 #include "rvexTargetMachine.h"
+#include "rvexMachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #define GET_INSTRINFO_CTOR
 //#define GET_INSTRINFO_ENUM
@@ -48,12 +49,18 @@ copyPhysReg(MachineBasicBlock &MBB,
       Opc = rvex::MFHI, SrcReg = 0;
     else if (SrcReg == rvex::LO)
       Opc = rvex::MFLO, SrcReg = 0;
+    else if (SrcReg == rvex::B0)
+      Opc = rvex::ADD, ZeroReg = rvex::R0;
   }
   else if (rvex::CPURegsRegClass.contains(SrcReg)) { // Copy from CPU Reg.
     if (DestReg == rvex::HI)
       Opc = rvex::MTHI, DestReg = 0;
     else if (DestReg == rvex::LO)
       Opc = rvex::MTLO, DestReg = 0;
+    // Only possibility in (DestReg==SW, SrcReg==rvexRegs) is 
+    //  cmp $SW, $ZERO, $rc
+    else if (DestReg == rvex::B0)
+      Opc = rvex::CMPEQ, ZeroReg = rvex::R0;
   }
 
   assert(Opc && "Cannot copy registers");
@@ -70,6 +77,33 @@ copyPhysReg(MachineBasicBlock &MBB,
     MIB.addReg(SrcReg, getKillRegState(KillSrc));
 }
 
+static MachineMemOperand* GetMemOperand(MachineBasicBlock &MBB, int FI,
+                                        unsigned Flag) {
+  MachineFunction &MF = *MBB.getParent();
+  MachineFrameInfo &MFI = *MF.getFrameInfo();
+  unsigned Align = MFI.getObjectAlignment(FI);
+
+  return MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(FI), Flag,
+                                 MFI.getObjectSize(FI), Align);
+}
+
+void rvexInstrInfo::
+loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                     unsigned DestReg, int FI,
+                     const TargetRegisterClass *RC,
+                     const TargetRegisterInfo *TRI) const
+{
+  DebugLoc DL;
+  if (I != MBB.end()) DL = I->getDebugLoc();
+  MachineMemOperand *MMO = GetMemOperand(MBB, FI, MachineMemOperand::MOLoad);
+  unsigned Opc = 0;
+
+  if (rvex::CPURegsRegClass.hasSubClassEq(RC))
+    Opc = rvex::LD;
+  assert(Opc && "Register class not handled!");
+  BuildMI(MBB, I, DL, get(Opc), DestReg).addFrameIndex(FI).addImm(0)
+    .addMemOperand(MMO);
+}
 
 DFAPacketizer *rvexInstrInfo::
 CreateTargetScheduleState(const TargetMachine *TM,

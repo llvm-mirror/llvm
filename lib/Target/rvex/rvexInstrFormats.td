@@ -90,6 +90,13 @@ class rvexInst<dag outs, dag ins, string asmstr, list<dag> pattern,
   field bits<32> SoftFail = 0;
 }
 
+// rvex Pseudo Instructions Format
+class rvexPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>:
+      rvexInst<outs, ins, asmstr, pattern, IIPseudo, Pseudo, TypeIIPseudo> {
+  let isCodeGenOnly = 1;
+  let isPseudo = 1;
+}
+
 //===----------------------------------------------------------------------===//
 // Format A instruction class in rvex : <|opcode|ra|rb|rc|cx|>
 //===----------------------------------------------------------------------===//
@@ -143,37 +150,4 @@ class FJ<bits<8> op, dag outs, dag ins, string asmstr, list<dag> pattern,
   let Inst{23-0} = addr;
 }
 
-/*
-class InstIIAlu   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIIAlu> {}
 
-class InstIILoad   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIILoad> {}   
-
-class InstIIStore   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIIStore> {}
-
-class InstIIBranch   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIIBranch> {} 
-
-class InstIIHiLo   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIIHiLo> {}
-
-class InstIIImul   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIIImul> {}   
-
-class InstIIIdiv   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIIIdiv> {}
-
-class InstIIPseudo   <bits<8> op, dag outs, dag ins, string asmstr,
-                  list<dag> pattern, InstrItinClass itin>: rvexInst<outs, ins, asmstr, pattern,
-                                              itin, FrmR, TypeIIPseudo> {}   
-
-*/
