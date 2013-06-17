@@ -97,6 +97,7 @@ eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
   MachineInstr &MI = *II;
   MachineFunction &MF = *MI.getParent()->getParent();
   MachineFrameInfo *MFI = MF.getFrameInfo();
+  rvexFunctionInfo *rvexFI = MF.getInfo<rvexFunctionInfo>();
 
   unsigned i = 0;
   while (!MI.getOperand(i).isFI()) {
@@ -133,6 +134,10 @@ eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
   // getFrameRegister() returns.
   unsigned FrameReg;
 
+  if (rvexFI->isOutArgFI(FrameIndex) || rvexFI->isDynAllocFI(FrameIndex) ||
+      (FrameIndex >= MinCSFI && FrameIndex <= MaxCSFI))
+    FrameReg = rvex::R1;
+  else
     FrameReg = getFrameRegister(MF);
 
   // Calculate final offset.
@@ -143,7 +148,11 @@ eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
   //   by adding the size of the stack:
   //   incoming argument, callee-saved register location or local variable.
   int64_t Offset;
-  Offset = spOffset + (int64_t)stackSize;
+  if (rvexFI->isOutArgFI(FrameIndex) || rvexFI->isGPFI(FrameIndex) ||
+      rvexFI->isDynAllocFI(FrameIndex))
+    Offset = spOffset;
+  else
+    Offset = spOffset + (int64_t)stackSize;
 
   Offset    += MI.getOperand(i+1).getImm();
 

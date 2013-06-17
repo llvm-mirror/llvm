@@ -87,6 +87,26 @@ static MachineMemOperand* GetMemOperand(MachineBasicBlock &MBB, int FI,
                                  MFI.getObjectSize(FI), Align);
 }
 
+//- st SrcReg, MMO(FI)
+void rvexInstrInfo::
+storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                    unsigned SrcReg, bool isKill, int FI,
+                    const TargetRegisterClass *RC,
+                    const TargetRegisterInfo *TRI) const {
+  DebugLoc DL;
+  if (I != MBB.end()) DL = I->getDebugLoc();
+  MachineMemOperand *MMO = GetMemOperand(MBB, FI, MachineMemOperand::MOStore);
+
+  unsigned Opc = 0;
+
+  if (rvex::CPURegsRegClass.hasSubClassEq(RC))
+    Opc = rvex::ST;
+  assert(Opc && "Register class not handled!");
+  BuildMI(MBB, I, DL, get(Opc)).addReg(SrcReg, getKillRegState(isKill))
+    .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+}
+
+
 void rvexInstrInfo::
 loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
                      unsigned DestReg, int FI,

@@ -228,6 +228,238 @@ SDValue rvexTargetLowering::LowerGlobalAddress(SDValue Op,
 
 #include "rvexGenCallingConv.inc"
 
+SDValue
+rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
+                              SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG                     = CLI.DAG;
+  DebugLoc &dl                          = CLI.DL;
+  SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
+  SmallVector<SDValue, 32> &OutVals     = CLI.OutVals;
+  SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
+  SDValue InChain                       = CLI.Chain;
+  SDValue Callee                        = CLI.Callee;
+  bool &isTailCall                      = CLI.IsTailCall;
+  CallingConv::ID CallConv              = CLI.CallConv;
+  bool isVarArg                         = CLI.IsVarArg;
+
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  const TargetFrameLowering *TFL = MF.getTarget().getFrameLowering();
+  bool IsPIC = getTargetMachine().getRelocationModel() == Reloc::PIC_;
+  rvexFunctionInfo *rvexFI = MF.getInfo<rvexFunctionInfo>();
+
+  // Analyze operands of the call, assigning locations to each operand.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
+                 getTargetMachine(), ArgLocs, *DAG.getContext());
+
+  CCInfo.AnalyzeCallOperands(Outs, CC_rvex);
+
+  // Get a count of how many bytes are to be pushed on the stack.
+  unsigned NextStackOffset = CCInfo.getNextStackOffset();
+
+  // If this is the first call, create a stack frame object that points to
+  // a location to which .cprestore saves $gp.
+  if (IsPIC && rvexFI->globalBaseRegFixed() && !rvexFI->getGPFI())
+    rvexFI->setGPFI(MFI->CreateFixedObject(4, 0, true));
+  // Get the frame index of the stack frame object that points to the location
+  // of dynamically allocated area on the stack.
+  int DynAllocFI = rvexFI->getDynAllocFI();
+  unsigned MaxCallFrameSize = rvexFI->getMaxCallFrameSize();
+
+  if (MaxCallFrameSize < NextStackOffset) {
+    rvexFI->setMaxCallFrameSize(NextStackOffset);
+
+    // Set the offsets relative to $sp of the $gp restore slot and dynamically
+    // allocated stack space. These offsets must be aligned to a boundary
+    // determined by the stack alignment of the ABI.
+    unsigned StackAlignment = TFL->getStackAlignment();
+    NextStackOffset = (NextStackOffset + StackAlignment - 1) /
+                      StackAlignment * StackAlignment;
+
+    MFI->setObjectOffset(DynAllocFI, NextStackOffset);
+  }
+  // Chain is the output chain of the last Load/Store or CopyToReg node.
+  // ByValChain is the output chain of the last Memcpy node created for copying
+  // byval arguments to the stack.
+  SDValue Chain, CallSeqStart, ByValChain;
+  SDValue NextStackOffsetVal = DAG.getIntPtrConstant(NextStackOffset, true);
+  Chain = CallSeqStart = DAG.getCALLSEQ_START(InChain, NextStackOffsetVal);
+  ByValChain = InChain;
+
+  // With EABI is it possible to have 16 args on registers.
+  SmallVector<std::pair<unsigned, SDValue>, 16> RegsToPass;
+  SmallVector<SDValue, 8> MemOpChains;
+
+  int FirstFI = -MFI->getNumFixedObjects() - 1, LastFI = 0;
+
+  // Walk the register/memloc assignments, inserting copies/loads.
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    SDValue Arg = OutVals[i];
+    CCValAssign &VA = ArgLocs[i];
+    MVT ValVT = VA.getValVT(), LocVT = VA.getLocVT();
+    ISD::ArgFlagsTy Flags = Outs[i].Flags;
+
+    // ByVal Arg.
+    if (Flags.isByVal()) {
+      assert("!!!Error!!!, Flags.isByVal()==true");
+      assert(Flags.getByValSize() &&
+             "ByVal args of size 0 should have been ignored by front-end.");
+      continue;
+    }
+
+    // Register can't get to this point...
+    assert(VA.isMemLoc());
+
+    // Create the frame index object for this incoming parameter
+    LastFI = MFI->CreateFixedObject(ValVT.getSizeInBits()/8,
+                                    VA.getLocMemOffset(), true);
+    SDValue PtrOff = DAG.getFrameIndex(LastFI, getPointerTy());
+
+    // emit ISD::STORE whichs stores the
+    // parameter value to a stack Location
+    MemOpChains.push_back(DAG.getStore(Chain, dl, Arg, PtrOff,
+                                       MachinePointerInfo(), false, false, 0));
+  }
+
+  // Extend range of indices of frame objects for outgoing arguments that were
+  // created during this function call. Skip this step if no such objects were
+  // created.
+  if (LastFI)
+    rvexFI->extendOutArgFIRange(FirstFI, LastFI);
+
+  // If a memcpy has been created to copy a byval arg to a stack, replace the
+  // chain input of CallSeqStart with ByValChain.
+  if (InChain != ByValChain)
+    DAG.UpdateNodeOperands(CallSeqStart.getNode(), ByValChain,
+                           NextStackOffsetVal);
+
+  // Transform all store nodes into one single node because all store
+  // nodes are independent of each other.
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                        &MemOpChains[0], MemOpChains.size());
+
+  // If the callee is a GlobalAddress/ExternalSymbol node (quite common, every
+  // direct call is) turn it into a TargetGlobalAddress/TargetExternalSymbol
+  // node so that legalize doesn't hack it.
+  unsigned char OpFlag;
+  bool IsPICCall = IsPIC; // true if calls are translated to jalr $25
+  bool GlobalOrExternal = false;
+  SDValue CalleeLo;
+
+  if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    OpFlag = IsPICCall ? rvexII::MO_GOT_CALL : rvexII::MO_NO_FLAG;
+    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), dl,
+                                          getPointerTy(), 0, OpFlag);
+    GlobalOrExternal = true;
+  }
+  else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    if (!IsPIC) // static
+      OpFlag = rvexII::MO_NO_FLAG;
+    else // O32 & PIC
+      OpFlag = rvexII::MO_GOT_CALL;
+    Callee = DAG.getTargetExternalSymbol(S->getSymbol(), getPointerTy(),
+                                         OpFlag);
+    GlobalOrExternal = true;
+  }
+
+  SDValue InFlag;
+
+  // Create nodes that load address of callee and copy it to T9
+  if (IsPICCall) {
+    if (GlobalOrExternal) {
+      // Load callee address
+      Callee = DAG.getNode(rvexISD::Wrapper, dl, getPointerTy(),
+                           GetGlobalReg(DAG, getPointerTy()), Callee);
+      SDValue LoadValue = DAG.getLoad(getPointerTy(), dl, DAG.getEntryNode(),
+                                      Callee, MachinePointerInfo::getGOT(),
+                                      false, false, false, 0);
+
+      // Use GOT+LO if callee has internal linkage.
+      if (CalleeLo.getNode()) {
+        SDValue Lo = DAG.getNode(rvexISD::Lo, dl, getPointerTy(), CalleeLo);
+        Callee = DAG.getNode(ISD::ADD, dl, getPointerTy(), LoadValue, Lo);
+      } else
+        Callee = LoadValue;
+    }
+  }
+
+  // T9 should contain the address of the callee function if
+  // -reloction-model=pic or it is an indirect call.
+  if (IsPICCall || !GlobalOrExternal) {
+    // copy to T9
+    unsigned T9Reg = rvex::LR;
+    Chain = DAG.getCopyToReg(Chain, dl, T9Reg, Callee, SDValue(0, 0));
+    InFlag = Chain.getValue(1);
+    Callee = DAG.getRegister(T9Reg, getPointerTy());
+  }
+
+  // rvexJmpLink = #chain, #target_address, #opt_in_flags...
+  //             = Chain, Callee, Reg#1, Reg#2, ...
+  //
+  // Returns a chain & a flag for retval copy to use.
+  SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+  SmallVector<SDValue, 8> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+
+  // Add argument registers to the end of the list so that they are
+  // known live into the call.
+  for (unsigned i = 0, e = RegsToPass.size(); i != e; ++i)
+    Ops.push_back(DAG.getRegister(RegsToPass[i].first,
+                                  RegsToPass[i].second.getValueType()));
+
+  // Add a register mask operand representing the call-preserved registers.
+  const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
+  const uint32_t *Mask = TRI->getCallPreservedMask(CallConv);
+  assert(Mask && "Missing call preserved mask for calling convention");
+  Ops.push_back(DAG.getRegisterMask(Mask));
+
+  if (InFlag.getNode())
+    Ops.push_back(InFlag);
+
+  Chain  = DAG.getNode(rvexISD::JmpLink, dl, NodeTys, &Ops[0], Ops.size());
+  InFlag = Chain.getValue(1);
+
+  // Create the CALLSEQ_END node.
+  Chain = DAG.getCALLSEQ_END(Chain,
+                             DAG.getIntPtrConstant(NextStackOffset, true),
+                             DAG.getIntPtrConstant(0, true), InFlag);
+  InFlag = Chain.getValue(1);
+
+  // Handle result values, copying them out of physregs into vregs that we
+  // return.
+  return LowerCallResult(Chain, InFlag, CallConv, isVarArg,
+                         Ins, dl, DAG, InVals);
+}
+
+/// LowerCallResult - Lower the result values of a call into the
+/// appropriate copies out of appropriate physical registers.
+SDValue
+rvexTargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
+                                    CallingConv::ID CallConv, bool isVarArg,
+                                    const SmallVectorImpl<ISD::InputArg> &Ins,
+                                    DebugLoc dl, SelectionDAG &DAG,
+                                    SmallVectorImpl<SDValue> &InVals) const {
+  // Assign locations to each value returned by this call.
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
+     getTargetMachine(), RVLocs, *DAG.getContext());
+
+  CCInfo.AnalyzeCallResult(Ins, RetCC_rvex);
+
+  // Copy all of the result registers out of their specified physreg.
+  for (unsigned i = 0; i != RVLocs.size(); ++i) {
+    Chain = DAG.getCopyFromReg(Chain, dl, RVLocs[i].getLocReg(),
+                               RVLocs[i].getValVT(), InFlag).getValue(1);
+    InFlag = Chain.getValue(2);
+    InVals.push_back(Chain.getValue(0));
+  }
+
+  return Chain;
+}
+
 /// LowerFormalArguments - transform physical registers into virtual registers
 /// and generate load operations for arguments places on the stack.
 SDValue

@@ -101,14 +101,14 @@ let Namespace = "rvex" in {
   def LR   : rvexGPRReg< 64, "l0.0">,   DwarfRegNum<[64]>;
   def PC   : rvexGPRReg< 65, "PC">,   DwarfRegNum<[65]>;
 
-  def B0 : rvexBRReg< 0, "b0.0">, DwarfRegNum<[66]>;
-  def B1 : rvexBRReg< 1, "b0.1">, DwarfRegNum<[67]>;
-  def B2 : rvexBRReg< 2, "b0.2">, DwarfRegNum<[68]>;
-  def B3 : rvexBRReg< 3, "b0.3">, DwarfRegNum<[69]>;
-  def B4 : rvexBRReg< 4, "b0.4">, DwarfRegNum<[70]>;
-  def B5 : rvexBRReg< 5, "b0.5">, DwarfRegNum<[71]>;
-  def B6 : rvexBRReg< 6, "b0.6">, DwarfRegNum<[72]>;
-  def B7 : rvexBRReg< 7, "b0.7">, DwarfRegNum<[73]>;
+  def B0 : rvexBRReg< 66, "b0.0">, DwarfRegNum<[66]>;
+  def B1 : rvexBRReg< 67, "b0.1">, DwarfRegNum<[67]>;
+  def B2 : rvexBRReg< 68, "b0.2">, DwarfRegNum<[68]>;
+  def B3 : rvexBRReg< 69, "b0.3">, DwarfRegNum<[69]>;
+  def B4 : rvexBRReg< 70, "b0.4">, DwarfRegNum<[70]>;
+  def B5 : rvexBRReg< 71, "b0.5">, DwarfRegNum<[71]>;
+  def B6 : rvexBRReg< 72, "b0.6">, DwarfRegNum<[72]>;
+  def B7 : rvexBRReg< 73, "b0.7">, DwarfRegNum<[73]>;
 
 
 

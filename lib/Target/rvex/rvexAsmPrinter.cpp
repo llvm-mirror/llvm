@@ -158,8 +158,14 @@ void rvexAsmPrinter::printSavedRegsBitmask(raw_ostream &O) {
   // Set CPU Bitmask.
   for (; i != e; ++i) {
     unsigned Reg = CSI[i].getReg();
-      unsigned RegNum = rvexII::getrvexRegisterNumbering(Reg);
-    CPUBitmask |= (1 << RegNum);
+
+    //unsigned RegNum = rvexII::getrvexRegisterNumbering(Reg);
+    //CPUBitmask |= (1 << RegNum);
+
+    // Not sure if this hack works. Normally getrvexregisternumbering is used to determine
+    // the correct Reg number but considering Reg is already a number is this step really required?
+    DEBUG(errs() << "reg number:" << Reg << "\n");
+    CPUBitmask |= (1 << Reg);
   }
 
   CPUTopSavedRegOff = CPUBitmask ? -CPURegSize : 0;
