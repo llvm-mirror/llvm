@@ -185,6 +185,16 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
 
 }
 
+// This function eliminate ADJCALLSTACKDOWN,
+// ADJCALLSTACKUP pseudo instructions
+void rvexFrameLowering::
+eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator I) const {
+  // Simply discard ADJCALLSTACKDOWN, ADJCALLSTACKUP instructions.
+  MBB.erase(I);
+}
+
+
 // This method is called immediately before PrologEpilogInserter scans the 
 //  physical registers used to determine what callee saved registers should be 
 //  spilled. This method is optional. 

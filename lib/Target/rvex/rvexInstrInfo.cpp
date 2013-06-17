@@ -27,7 +27,7 @@
 using namespace llvm;
 
 rvexInstrInfo::rvexInstrInfo(rvexTargetMachine &tm)
-  : 
+  : rvexGenInstrInfo(rvex::ADJCALLSTACKDOWN, rvex::ADJCALLSTACKUP), 
     TM(tm),
     RI(*TM.getSubtargetImpl(), *this) {}
 
