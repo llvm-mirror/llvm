@@ -59,6 +59,7 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
   case MCSymbolRefExpr::VK_None:           break;
 // rvex_GPREL is for llc -march=rvex -relocation-model=static
   case MCSymbolRefExpr::VK_Cpu0_GPREL:     OS << "%gp_rel("; break;
+  case MCSymbolRefExpr::VK_Cpu0_GOT_CALL:  OS << "%call24("; break;
   case MCSymbolRefExpr::VK_Cpu0_GOT16:     OS << "%got(";    break;
   case MCSymbolRefExpr::VK_Cpu0_GOT:       OS << "%got(";    break;
   case MCSymbolRefExpr::VK_Cpu0_ABS_HI:    OS << "%hi(";     break;

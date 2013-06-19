@@ -106,6 +106,8 @@ namespace llvm {
                   const SmallVectorImpl<ISD::OutputArg> &Outs,
                   const SmallVectorImpl<SDValue> &OutVals,
                   DebugLoc dl, SelectionDAG &DAG) const;
+
+    virtual bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const;
   };
 }
 
