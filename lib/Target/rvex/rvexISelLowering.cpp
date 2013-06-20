@@ -535,14 +535,13 @@ rvexTargetLowering::LowerReturn(SDValue Chain,
                                 const SmallVectorImpl<ISD::OutputArg> &Outs,
                                 const SmallVectorImpl<SDValue> &OutVals,
                                 DebugLoc dl, SelectionDAG &DAG) const {
-
   // CCValAssign - represent the assignment of
   // the return value to a location
   SmallVector<CCValAssign, 16> RVLocs;
 
   // CCState - Info about the registers and stack slot.
   CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
-     getTargetMachine(), RVLocs, *DAG.getContext());
+                 getTargetMachine(), RVLocs, *DAG.getContext());
 
   // Analize return values.
   CCInfo.AnalyzeReturn(Outs, RetCC_rvex);
@@ -550,31 +549,29 @@ rvexTargetLowering::LowerReturn(SDValue Chain,
   SDValue Flag;
   SmallVector<SDValue, 4> RetOps(1, Chain);
 
+  RetOps.push_back(DAG.getRegister(rvex::LR, MVT::i32));
+
   // Copy the result values into the output registers.
   for (unsigned i = 0; i != RVLocs.size(); ++i) {
     CCValAssign &VA = RVLocs[i];
     assert(VA.isRegLoc() && "Can only return in registers!");
 
-    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), OutVals[i], Flag);
+    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(),
+                             OutVals[i], Flag);
 
-    // Guarantee that all emitted copies are stuck together with flags.
+    // guarantee that all emitted copies are
+    // stuck together, avoiding something bad
     Flag = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
-  
+
   RetOps[0] = Chain;  // Update chain.
 
-  // Return on rvex is always a "ret $lr"
-  if (Flag.getNode()) {
-    // Add the flag if we have it.
+  // Add the flag if we have it.
+  if (Flag.getNode())
     RetOps.push_back(Flag);
-    return DAG.getNode(rvexISD::Ret, dl, MVT::Other, &RetOps[0], RetOps.size());
-  }
-  else {
-    // Return Void
-    return DAG.getNode(rvexISD::Ret, dl, MVT::Other,
-                       Chain, DAG.getRegister(rvex::LR, MVT::i32));
-  }
+
+  return DAG.getNode(rvexISD::Ret, dl, MVT::Other, &RetOps[0], RetOps.size());
 }
 
 bool

@@ -46,7 +46,7 @@ def rvexGPRel : SDNode<"rvexISD::GPRel", SDTIntUnaryOp>;
 
 // Return
 def rvexRet : SDNode<"rvexISD::Ret", SDT_rvexRet, [SDNPHasChain,
-                     SDNPOptInGlue]>;
+                     SDNPOptInGlue, SDNPVariadic]>;
 
 // These are target-independent nodes, but have target-specific formats.
 def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_rvexCallSeqStart,
@@ -474,7 +474,10 @@ def JSUB    : JumpLink<0x2B, "jsub">;
 let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
     isBarrier=1, hasCtrlDep=1, addr=0 in
   def RET   : FJ <0x2C, (outs), (ins CPURegs:$target),
-                "ret\t$target", [(rvexRet CPURegs:$target)], IIBranch, TypeIIBranch>;
+                "return\t$target", [(rvexRet CPURegs:$target)], IIBranch, TypeIIBranch>;
+                //"return l0.0", [(rvexRet CPURegs:$target)], IIBranch, TypeIIBranch>;
+
+//def : Pat<(rvexRet CPURegs:$target), (RET CPURegs:$target, 0x8)>;
 
 def JALR    : JumpLinkReg<0x2E, "jalr", CPURegs>;
 
