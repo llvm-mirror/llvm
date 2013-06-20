@@ -15,8 +15,7 @@ class CCIfSubtarget<string F, CCAction A>:
 
 def RetCC_rvexEABI : CallingConv<[
   // i32 are returned in registers V0, V1, A0, A1
-  //CCIfType<[i32], CCAssignToReg<[R3, R4, R5, R6, R7, R8, R9, R10]>>
-  CCIfType<[i32], CCAssignToReg<[R3, R4]>>
+  CCIfType<[i32], CCAssignToReg<[R3, R4, R5, R6, R7, R8, R9, R10]>>
 ]>;
 
 //===----------------------------------------------------------------------===//

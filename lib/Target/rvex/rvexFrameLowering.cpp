@@ -24,6 +24,10 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Support/CommandLine.h"
 
+
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
 //- emitPrologue() and emitEpilogue must exist for main(). 
@@ -162,6 +166,27 @@ void rvexFrameLowering::emitPrologue(MachineFunction &MF) const {
 
 void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
                                  MachineBasicBlock &MBB) const {
+
+  MachineBasicBlock::iterator MBBI = prior(MBB.end());
+  DebugLoc dl = MBBI->getDebugLoc();
+  MachineBasicBlock::iterator MBBI_end = MBB.end();
+
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  int NumBytes = (int) MFI->getStackSize();
+
+  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+
+  // Replace return with return that can change the stackpointer
+
+  // Remove return node.
+  MBB.erase(MBBI);
+  // Add return with sp add
+  BuildMI(MBB, MBBI_end, dl, TII.get(rvex::test_ret), rvex::R1).addReg(rvex::R1).addImm(NumBytes).addReg(rvex::LR);
+
+    
+  //}
+
+/*
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   MachineFrameInfo *MFI            = MF.getFrameInfo();
   const rvexInstrInfo &TII =
@@ -178,11 +203,12 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
 
   // Adjust stack.
   if (isInt<16>(StackSize)) // addiu sp, sp, (stacksize)
-    BuildMI(MBB, MBBI, dl, TII.get(ADDiu), SP).addReg(SP).addImm(StackSize);
+    //BuildMI(MBB, MBBI, dl, TII.get(ADDiu), SP).addReg(SP).addImm(StackSize);
+    BuildMI(MBB, MBBI, dl, TII.get(rvex::test_ret), SP).addReg(SP).addImm(StackSize).addReg(rvex::LR);
   else // Expand immediate that doesn't fit in 16-bit.
 	assert("No expandLargeImm(SP, StackSize, false, TII, MBB, MBBI, dl);");
 //    expandLargeImm(SP, StackSize, false, TII, MBB, MBBI, dl);
-
+*/
 }
 
 // This function eliminate ADJCALLSTACKDOWN,

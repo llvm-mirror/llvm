@@ -168,14 +168,23 @@ def store_a         : AlignedStore<store>;
 // Instructions specific format
 //===----------------------------------------------------------------------===//
 
+// Arithmetic and logical instructions with 2 register operands.
+class ReturnLogic<bits<8> op, string instr_asm, SDNode OpNode,
+                  Operand Od, PatLeaf imm_type, RegisterClass RC> :
+  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16, RC:$rc),
+     !strconcat(instr_asm, "\t$ra = $rb, $imm16, $rc"),
+     [], IIAlu, TypeIIAlu> {
+  let isReMaterializable = 1;
+}
+
 // Arithmetic and logical instructions with 3 register operands.
 class ArithLogicR<bits<8> op, string instr_asm, SDNode OpNode,
                   InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
   FA<op, (outs RC:$ra), (ins RC:$rb, RC:$rc),
-     !strconcat(instr_asm, "\t\t$ra = $rb, $rc"),
+     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
      [(set RC:$ra, (OpNode RC:$rb, RC:$rc))], itin, type> {
   let shamt = 0;
-  let isCommutable = isComm;	// e.g. add rb rc =  add rc rb
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
 
@@ -306,8 +315,8 @@ class UncondBranch<bits<8> op, string instr_asm>:
 // Jump and Link (Call)
 let isCall=1, hasDelaySlot=0 in {
   class JumpLink<bits<8> op, string instr_asm>:
-    FJ<op, (outs), (ins calltarget:$target, variable_ops),
-       !strconcat(instr_asm, "\t$target"), [(rvexJmpLink imm:$target)],
+    FJ<op, (outs), (ins CPURegs:$link, calltarget:$target, variable_ops),
+       !strconcat(instr_asm, "\t$link = $target"), [],
        IIBranch, TypeIIBranch> {
        }
 
@@ -407,20 +416,22 @@ defm SH     : StoreM32<0x08, "sth ", truncstorei16_a>;
 
 /// Arithmetic Instructions (ALU Immediate)
 //def MOV     
-def LDI     : ArithLogicI<0x09, "add", add, simm16, immSExt16, CPURegs>;
-def MOV     : MoveImm<0x08, "mov", add, simm16, immSExt32, CPURegs>;
-def ADDiu   : ArithLogicI<0x09, "add", add, simm16, immSExt16, CPURegs>;
+def LDI     : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
+def MOV     : MoveImm<0x08, "mov ", add, simm16, immSExt32, CPURegs>;
+def ADDiu   : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
 def XORiu   : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
+def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
+
 /// Arithmetic Instructions (3-Operand, R-Type)
-def ADD     : ArithLogicR<0x13, "add", add, IIAlu, CPURegs, 1, TypeIIAlu>;
-def SUB     : ArithLogicR<0x14, "sub", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
-def MUL     : ArithLogicR<0x15, "mul", mul, IIImul, CPURegs, 1, TypeIIImul>;
-def SDIV    : Div32<rvexDivRem, 0x16, "div", IIIdiv>;
+def ADD     : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
+def SUB     : ArithLogicR<0x14, "sub ", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MUL     : ArithLogicR<0x15, "mul ", mul, IIImul, CPURegs, 1, TypeIIImul>;
+def SDIV    : Div32<rvexDivRem, 0x16, "div ", IIIdiv>;
 def UDIV    : Div32<rvexDivRemU, 0x17, "divu", IIIdiv>;
-def AND     : ArithLogicR<0x18, "and", and, IIAlu, CPURegs, 1, TypeIIAlu>;
-def OR      : ArithLogicR<0x19, "or", or, IIAlu, CPURegs, 1, TypeIIAlu>;
-def XOR     : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
+def AND     : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
+def OR      : ArithLogicR<0x19, "or  ", or, IIAlu, CPURegs, 1, TypeIIAlu>;
+def XOR     : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 def CMPEQ   : CmpInstr<0x10, "cmpeq", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
 def CMPEQi  : CmpInstrImm<0x10, "cmpeq", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
@@ -469,7 +480,9 @@ def JMP     : UncondBranch<0x26, "jmp">;
 
 /// Jump and Branch Instructions
 def SWI     : JumpLink<0x2A, "swi">;
-def JSUB    : JumpLink<0x2B, "jsub">;
+def CALL    : JumpLink<0x2B, "call">;
+
+
 
 let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
     isBarrier=1, hasCtrlDep=1, addr=0 in
@@ -489,7 +502,7 @@ let addr=0 in
 // instructions. The same not happens for stack address copies, so an
 // add op with mem ComplexPattern is used and the stack address copy
 // can be matched. It's similar to Sparc LEA_ADDRi
-def LEA_ADDiu : EffectiveAddress<"add\t\t$ra = $addr", CPURegs, mem_ea> {
+def LEA_ADDiu : EffectiveAddress<"add \t$ra = $addr", CPURegs, mem_ea> {
   let isCodeGenOnly = 1;
 }
 
@@ -502,7 +515,8 @@ def : Pat<(i32 imm:$in),
           (MOV R0, imm:$in)>;
 
 def : Pat<(rvexJmpLink (i32 tglobaladdr:$dst)),
-          (JSUB tglobaladdr:$dst)>;
+          (CALL (i32 LR), tglobaladdr:$dst)>;
+         
 
 // hi/lo relocs
 def : Pat<(rvexHi tglobaladdr:$in), (SHL (ADDiu R0, tglobaladdr:$in), 16)>;
