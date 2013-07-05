@@ -197,11 +197,11 @@ void rvexAsmPrinter::emitFrameDirective() {
   unsigned returnReg = RI.getRARegister();
   unsigned stackSize = MF->getFrameInfo()->getStackSize();
 
-  if (OutStreamer.hasRawTextSupport())
+/*  if (OutStreamer.hasRawTextSupport())
     OutStreamer.EmitRawText("\t.frame\t$" +
            StringRef(rvexInstPrinter::getRegisterName(stackReg)).lower() +
            "," + Twine(stackSize) + ",$" +
-           StringRef(rvexInstPrinter::getRegisterName(returnReg)).lower());
+           StringRef(rvexInstPrinter::getRegisterName(returnReg)).lower());*/
 }
 
 /// Emit Set directives.
@@ -217,8 +217,17 @@ const char *rvexAsmPrinter::getCurrentABIString() const {
 //	main:
 void rvexAsmPrinter::EmitFunctionEntryLabel() {
   if (OutStreamer.hasRawTextSupport())
-    OutStreamer.EmitRawText("\t.ent\t" + Twine(CurrentFnSym->getName()));
-  OutStreamer.EmitLabel(CurrentFnSym);
+  {
+    OutStreamer.EmitRawText(StringRef("\n\t.section .bss"));
+    EmitAlignment(5);
+    OutStreamer.EmitRawText(StringRef("\t.section .data"));
+    EmitAlignment(5);
+    OutStreamer.EmitRawText(StringRef("\t.section .text"));
+    OutStreamer.EmitRawText(StringRef("\t.proc"));
+    OutStreamer.EmitRawText(StringRef("\t.entry caller")); //TODO enhance entry caller
+    OutStreamer.EmitRawText(Twine(CurrentFnSym->getName())+"::");
+  }
+  
 }
 
 
@@ -231,28 +240,12 @@ void rvexAsmPrinter::EmitFunctionEntryLabel() {
 void rvexAsmPrinter::EmitFunctionBodyStart() {
   MCInstLowering.Initialize(Mang, &MF->getContext());
 
-  emitFrameDirective();
+  //emitFrameDirective();
   bool EmitCPLoad = (MF->getTarget().getRelocationModel() == Reloc::PIC_) &&
     rvexFI->globalBaseRegSet() &&
     rvexFI->globalBaseRegFixed();
 
-  if (OutStreamer.hasRawTextSupport()) {
-    SmallString<128> Str;
-    raw_svector_ostream OS(Str);
-    printSavedRegsBitmask(OS);
-    OutStreamer.EmitRawText(OS.str());
 
-    OutStreamer.EmitRawText(StringRef("\t.set\tnoreorder"));
-
-    // Emit .cpload directive if needed.
-    if (EmitCPLoad)
-	//- .cpload	$t9
-      OutStreamer.EmitRawText(StringRef("\t.cpload\t$t9"));
-	//- .cpload	$10
-    //  OutStreamer.EmitRawText(StringRef("\t.cpload\t$6"));
-
-    OutStreamer.EmitRawText(StringRef("\t.set\tnomacro"));
-  }
 }
 
 //->	.set	macro
@@ -264,26 +257,21 @@ void rvexAsmPrinter::EmitFunctionBodyEnd() {
   // There are instruction for this macros, but they must
   // always be at the function end, and we can't emit and
   // break with BB logic.
-  if (OutStreamer.hasRawTextSupport()) {
+  OutStreamer.EmitRawText(StringRef("\t.endp"));
+/*  if (OutStreamer.hasRawTextSupport()) {
     OutStreamer.EmitRawText(StringRef("\t.set\tmacro"));
     OutStreamer.EmitRawText(StringRef("\t.set\treorder"));
     OutStreamer.EmitRawText("\t.end\t" + Twine(CurrentFnSym->getName()));
-  }
+  }*/
 }
 
 //	.section .mdebug.abi32
 //	.previous
 void rvexAsmPrinter::EmitStartOfAsmFile(Module &M) {
-  // FIXME: Use SwitchSection.
 
-  // Tell the assembler which ABI we are using
-  if (OutStreamer.hasRawTextSupport())
-    OutStreamer.EmitRawText("\t.section .mdebug." +
-                            Twine(getCurrentABIString()));
 
-  // return to previous section
-  if (OutStreamer.hasRawTextSupport())
-    OutStreamer.EmitRawText(StringRef("\t.previous"));
+
+
 }
 
 MachineLocation

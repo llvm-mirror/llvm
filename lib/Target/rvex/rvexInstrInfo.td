@@ -473,10 +473,10 @@ def SHL     : shift_rotate_imm32<0x1E, 0x00, "shl", shl>;
 // work, srl for lshr llvm IR instruction
 def SHR     : shift_rotate_imm32<0x1F, 0x00, "shr", srl>;
 
-def BR      : CBranch<0x25, "br", BRRegs>;
-def BRF     : CBranch<0x25, "brf", BRRegs>;
+def BR      : CBranch<0x25, "br  ", BRRegs>;
+def BRF     : CBranch<0x25, "brf ", BRRegs>;
 
-def JMP     : UncondBranch<0x26, "jmp">;
+def JMP     : UncondBranch<0x26, "goto">;
 
 /// Jump and Branch Instructions
 def SWI     : JumpLink<0x2A, "swi">;

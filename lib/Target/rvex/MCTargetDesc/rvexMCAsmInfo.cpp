@@ -29,6 +29,10 @@ using namespace llvm;
 rvexELFMCAsmInfo::rvexELFMCAsmInfo(const Target &T, StringRef TT) {
   //Only members with inappropriate default values are listed here.
 
+  CommentString = "##";
+
+  HasSingleParameterDotFile = false;
+
   MaxInstLength = 10;
 
   Data32bitsDirective = "\t.word\t";
@@ -41,5 +45,10 @@ rvexELFMCAsmInfo::rvexELFMCAsmInfo(const Target &T, StringRef TT) {
   SupportsDebugInformation = true;
   
   UsesELFSectionDirectiveForBSS = true;
+
+  //===--- Alignment Information ----------------------------------------===//
+  AlignDirective = "\t.align\t";
+  AlignmentIsInBytes = true;
+  TextAlignFillValue = 0;
 }
 
