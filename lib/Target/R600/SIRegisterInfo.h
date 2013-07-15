@@ -21,15 +21,16 @@
 namespace llvm {
 
 class AMDGPUTargetMachine;
-class TargetInstrInfo;
 
 struct SIRegisterInfo : public AMDGPURegisterInfo {
   AMDGPUTargetMachine &TM;
-  const TargetInstrInfo &TII;
 
-  SIRegisterInfo(AMDGPUTargetMachine &tm, const TargetInstrInfo &tii);
+  SIRegisterInfo(AMDGPUTargetMachine &tm);
 
   virtual BitVector getReservedRegs(const MachineFunction &MF) const;
+
+  virtual unsigned getRegPressureLimit(const TargetRegisterClass *RC,
+                                       MachineFunction &MF) const;
 
   /// \param RC is an AMDIL reg class.
   ///

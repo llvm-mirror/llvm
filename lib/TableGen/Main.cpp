@@ -83,7 +83,7 @@ int TableGenMain(char *argv0, TableGenMainFn *MainFn) {
   // Parse the input file.
   OwningPtr<MemoryBuffer> File;
   if (error_code ec =
-        MemoryBuffer::getFileOrSTDIN(InputFilename.c_str(), File)) {
+        MemoryBuffer::getFileOrSTDIN(InputFilename, File)) {
     errs() << "Could not open input file '" << InputFilename << "': "
            << ec.message() <<"\n";
     return 1;
@@ -117,11 +117,14 @@ int TableGenMain(char *argv0, TableGenMainFn *MainFn) {
   if (MainFn(Out.os(), Records))
     return 1;
 
+  if (ErrorsPrinted > 0) {
+    errs() << argv0 << ": " << ErrorsPrinted << " errors.\n";
+    return 1;
+  }
+
   // Declare success.
   Out.keep();
   return 0;
-
-  return 1;
 }
 
 }

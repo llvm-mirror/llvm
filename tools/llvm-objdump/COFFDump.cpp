@@ -178,7 +178,7 @@ static error_code resolveSymbol(const std::vector<RelocationRef> &Rels,
     uint64_t Ofs;
     if (error_code ec = I->getOffset(Ofs)) return ec;
     if (Ofs == Offset) {
-      if (error_code ec = I->getSymbol(Sym)) return ec;
+      Sym = *I->getSymbol();
       break;
     }
   }
@@ -229,7 +229,7 @@ static void printCOFFSymbolAddress(llvm::raw_ostream &Out,
 
 void llvm::printCOFFUnwindInfo(const COFFObjectFile *Obj) {
   const coff_file_header *Header;
-  if (error(Obj->getHeader(Header))) return;
+  if (error(Obj->getCOFFHeader(Header))) return;
 
   if (Header->Machine != COFF::IMAGE_FILE_MACHINE_AMD64) {
     errs() << "Unsupported image machine type "

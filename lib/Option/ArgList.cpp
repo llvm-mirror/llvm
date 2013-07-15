@@ -206,6 +206,13 @@ bool ArgList::hasFlag(OptSpecifier Pos, OptSpecifier Neg, bool Default) const {
   return Default;
 }
 
+bool ArgList::hasFlag(OptSpecifier Pos, OptSpecifier PosAlias, OptSpecifier Neg,
+                      bool Default) const {
+  if (Arg *A = getLastArg(Pos, PosAlias, Neg))
+    return A->getOption().matches(Pos) || A->getOption().matches(PosAlias);
+  return Default;
+}
+
 StringRef ArgList::getLastArgValue(OptSpecifier Id,
                                          StringRef Default) const {
   if (Arg *A = getLastArg(Id))
@@ -221,6 +228,14 @@ std::vector<std::string> ArgList::getAllArgValues(OptSpecifier Id) const {
 
 void ArgList::AddLastArg(ArgStringList &Output, OptSpecifier Id) const {
   if (Arg *A = getLastArg(Id)) {
+    A->claim();
+    A->render(*this, Output);
+  }
+}
+
+void ArgList::AddLastArg(ArgStringList &Output, OptSpecifier Id0,
+                         OptSpecifier Id1) const {
+  if (Arg *A = getLastArg(Id0, Id1)) {
     A->claim();
     A->render(*this, Output);
   }
@@ -308,9 +323,18 @@ InputArgList::~InputArgList() {
 unsigned InputArgList::MakeIndex(StringRef String0) const {
   unsigned Index = ArgStrings.size();
 
+  // If necessary, make a copy so we can null terminate it.
+  std::string NullTerminated;
+  if (String0.back() != '\0') {
+    NullTerminated.append(String0.data(), String0.size());
+    NullTerminated.push_back('\0');
+    String0 = StringRef(&NullTerminated[0], NullTerminated.size());
+  }
+
   // Tuck away so we have a reliable const char *.
-  SynthesizedStrings.push_back(String0);
-  ArgStrings.push_back(SynthesizedStrings.back().c_str());
+  String0 = SynthesizedStrings.GetOrCreateValue(String0).getKey();
+  assert(String0.back() == '\0');
+  ArgStrings.push_back(String0.data());
 
   return Index;
 }

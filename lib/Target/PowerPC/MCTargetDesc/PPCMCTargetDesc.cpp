@@ -58,7 +58,7 @@ static MCSubtargetInfo *createPPCMCSubtargetInfo(StringRef TT, StringRef CPU,
   return X;
 }
 
-static MCAsmInfo *createPPCMCAsmInfo(const Target &T, StringRef TT) {
+static MCAsmInfo *createPPCMCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
   Triple TheTriple(TT);
   bool isPPC64 = TheTriple.getArch() == Triple::ppc64;
 
@@ -69,9 +69,10 @@ static MCAsmInfo *createPPCMCAsmInfo(const Target &T, StringRef TT) {
     MAI = new PPCLinuxMCAsmInfo(isPPC64);
 
   // Initial state of the frame pointer is R1.
-  MachineLocation Dst(MachineLocation::VirtualFP);
-  MachineLocation Src(isPPC64? PPC::X1 : PPC::R1, 0);
-  MAI->addInitialFrameState(0, Dst, Src);
+  unsigned Reg = isPPC64 ? PPC::X1 : PPC::R1;
+  MCCFIInstruction Inst =
+      MCCFIInstruction::createDefCfa(0, MRI.getDwarfRegNum(Reg, true), 0);
+  MAI->addInitialFrameState(Inst);
 
   return MAI;
 }
@@ -116,7 +117,8 @@ static MCInstPrinter *createPPCMCInstPrinter(const Target &T,
                                              const MCInstrInfo &MII,
                                              const MCRegisterInfo &MRI,
                                              const MCSubtargetInfo &STI) {
-  return new PPCInstPrinter(MAI, MII, MRI, SyntaxVariant);
+  bool isDarwin = Triple(STI.getTargetTriple()).isOSDarwin();
+  return new PPCInstPrinter(MAI, MII, MRI, isDarwin);
 }
 
 extern "C" void LLVMInitializePowerPCTargetMC() {

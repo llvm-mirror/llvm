@@ -22,6 +22,8 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/DataTypes.h"
 
@@ -169,13 +171,13 @@ public:
   /// Initialize target data from properties stored in the module.
   explicit DataLayout(const Module *M);
 
-  DataLayout(const DataLayout &TD) :
+  DataLayout(const DataLayout &DL) :
     ImmutablePass(ID),
-    LittleEndian(TD.isLittleEndian()),
-    StackNaturalAlign(TD.StackNaturalAlign),
-    LegalIntWidths(TD.LegalIntWidths),
-    Alignments(TD.Alignments),
-    Pointers(TD.Pointers),
+    LittleEndian(DL.isLittleEndian()),
+    StackNaturalAlign(DL.StackNaturalAlign),
+    LegalIntWidths(DL.LegalIntWidths),
+    Alignments(DL.Alignments),
+    Pointers(DL.Pointers),
     LayoutMap(0)
   { }
 
@@ -235,13 +237,14 @@ public:
   /// Layout pointer alignment
   /// FIXME: The defaults need to be removed once all of
   /// the backends/clients are updated.
-  unsigned getPointerABIAlignment(unsigned AS = 0)  const {
+  unsigned getPointerABIAlignment(unsigned AS = 0) const {
     DenseMap<unsigned, PointerAlignElem>::const_iterator val = Pointers.find(AS);
     if (val == Pointers.end()) {
       val = Pointers.find(0);
     }
     return val->second.ABIAlign;
   }
+
   /// Return target's alignment for stack-based pointers
   /// FIXME: The defaults need to be removed once all of
   /// the backends/clients are updated.
@@ -255,7 +258,7 @@ public:
   /// Layout pointer size
   /// FIXME: The defaults need to be removed once all of
   /// the backends/clients are updated.
-  unsigned getPointerSize(unsigned AS = 0)          const {
+  unsigned getPointerSize(unsigned AS = 0) const {
     DenseMap<unsigned, PointerAlignElem>::const_iterator val = Pointers.find(AS);
     if (val == Pointers.end()) {
       val = Pointers.find(0);
@@ -265,7 +268,7 @@ public:
   /// Layout pointer size, in bits
   /// FIXME: The defaults need to be removed once all of
   /// the backends/clients are updated.
-  unsigned getPointerSizeInBits(unsigned AS = 0)    const {
+  unsigned getPointerSizeInBits(unsigned AS = 0) const {
     return getPointerSize(AS) * 8;
   }
   /// Size examples:
@@ -350,6 +353,10 @@ public:
   /// type.
   Type *getIntPtrType(Type *) const;
 
+  /// getSmallestLegalIntType - Return the smallest integer type with size at
+  /// least as big as Width bits.
+  Type *getSmallestLegalIntType(LLVMContext &C, unsigned Width = 0) const;
+
   /// getIndexedOffset - return the offset from the beginning of the type for
   /// the specified indices.  This is used to implement getelementptr.
   uint64_t getIndexedOffset(Type *Ty, ArrayRef<Value *> Indices) const;
@@ -420,8 +427,51 @@ public:
 
 private:
   friend class DataLayout;   // Only DataLayout can create this class
-  StructLayout(StructType *ST, const DataLayout &TD);
+  StructLayout(StructType *ST, const DataLayout &DL);
 };
+
+
+// The implementation of this method is provided inline as it is particularly
+// well suited to constant folding when called on a specific Type subclass.
+inline uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
+  assert(Ty->isSized() && "Cannot getTypeInfo() on a type that is unsized!");
+  switch (Ty->getTypeID()) {
+  case Type::LabelTyID:
+    return getPointerSizeInBits(0);
+  case Type::PointerTyID:
+    return getPointerSizeInBits(cast<PointerType>(Ty)->getAddressSpace());
+  case Type::ArrayTyID: {
+    ArrayType *ATy = cast<ArrayType>(Ty);
+    return ATy->getNumElements() *
+           getTypeAllocSizeInBits(ATy->getElementType());
+  }
+  case Type::StructTyID:
+    // Get the layout annotation... which is lazily created on demand.
+    return getStructLayout(cast<StructType>(Ty))->getSizeInBits();
+  case Type::IntegerTyID:
+    return cast<IntegerType>(Ty)->getBitWidth();
+  case Type::HalfTyID:
+    return 16;
+  case Type::FloatTyID:
+    return 32;
+  case Type::DoubleTyID:
+  case Type::X86_MMXTyID:
+    return 64;
+  case Type::PPC_FP128TyID:
+  case Type::FP128TyID:
+    return 128;
+    // In memory objects this is always aligned to a higher boundary, but
+  // only 80 bits contain information.
+  case Type::X86_FP80TyID:
+    return 80;
+  case Type::VectorTyID: {
+    VectorType *VTy = cast<VectorType>(Ty);
+    return VTy->getNumElements() * getTypeSizeInBits(VTy->getElementType());
+  }
+  default:
+    llvm_unreachable("DataLayout::getTypeSizeInBits(): Unsupported type");
+  }
+}
 
 } // End llvm namespace
 

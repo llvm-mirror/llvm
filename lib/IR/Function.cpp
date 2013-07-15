@@ -124,6 +124,22 @@ bool Argument::hasStructRetAttr() const {
     hasAttribute(1, Attribute::StructRet);
 }
 
+/// hasReturnedAttr - Return true if this argument has the returned attribute on
+/// it in its containing function.
+bool Argument::hasReturnedAttr() const {
+  return getParent()->getAttributes().
+    hasAttribute(getArgNo()+1, Attribute::Returned);
+}
+
+/// Return true if this argument has the readonly or readnone attribute on it
+/// in its containing function.
+bool Argument::onlyReadsMemory() const {
+  return getParent()->getAttributes().
+      hasAttribute(getArgNo()+1, Attribute::ReadOnly) ||
+      getParent()->getAttributes().
+      hasAttribute(getArgNo()+1, Attribute::ReadNone);
+}
+
 /// addAttr - Add attributes to an argument.
 void Argument::addAttr(AttributeSet AS) {
   assert(AS.getNumSlots() <= 1 &&
@@ -211,7 +227,7 @@ Function::~Function() {
   clearGC();
 
   // Remove the intrinsicID from the Cache.
-  if(getValueName() && isIntrinsic())
+  if (getValueName() && isIntrinsic())
     getContext().pImpl->IntrinsicIDCache.erase(this);
 }
 
@@ -352,7 +368,7 @@ unsigned Function::getIntrinsicID() const {
 
   LLVMContextImpl::IntrinsicIDCacheTy &IntrinsicIDCache =
     getContext().pImpl->IntrinsicIDCache;
-  if(!IntrinsicIDCache.count(this)) {
+  if (!IntrinsicIDCache.count(this)) {
     unsigned Id = lookupIntrinsicID();
     IntrinsicIDCache[this]=Id;
     return Id;
@@ -704,4 +720,3 @@ bool Function::callsFunctionThatReturnsTwice() const {
 
   return false;
 }
-

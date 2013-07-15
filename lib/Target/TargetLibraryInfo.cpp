@@ -43,6 +43,9 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "__isoc99_scanf",
     "__isoc99_sscanf",
     "__memcpy_chk",
+    "__sqrt_finite",
+    "__sqrtf_finite",
+    "__sqrtl_finite",
     "__strdup",
     "__strndup",
     "__strtok_r",
@@ -165,6 +168,7 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "getlogin_r",
     "getpwnam",
     "gets",
+    "gettimeofday",
     "htonl",
     "htons",
     "iprintf",
@@ -487,6 +491,7 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::getitimer);
     TLI.setUnavailable(LibFunc::getlogin_r);
     TLI.setUnavailable(LibFunc::getpwnam);
+    TLI.setUnavailable(LibFunc::gettimeofday);
     TLI.setUnavailable(LibFunc::htonl);
     TLI.setUnavailable(LibFunc::htons);
     TLI.setUnavailable(LibFunc::lchown);

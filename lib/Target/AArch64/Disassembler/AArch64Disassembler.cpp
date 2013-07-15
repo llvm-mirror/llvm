@@ -38,7 +38,7 @@ typedef MCDisassembler::DecodeStatus DecodeStatus;
 namespace {
 /// AArch64 disassembler for all AArch64 platforms.
 class AArch64Disassembler : public MCDisassembler {
-  const MCRegisterInfo *RegInfo;
+  OwningPtr<const MCRegisterInfo> RegInfo;
 public:
   /// Initializes the disassembler.
   ///
@@ -46,8 +46,7 @@ public:
     : MCDisassembler(STI), RegInfo(Info) {
   }
 
-  ~AArch64Disassembler() {
-  }
+  ~AArch64Disassembler() {}
 
   /// See MCDisassembler.
   DecodeStatus getInstruction(MCInst &instr,
@@ -57,7 +56,7 @@ public:
                               raw_ostream &vStream,
                               raw_ostream &cStream) const;
 
-  const MCRegisterInfo *getRegInfo() const { return RegInfo; }
+  const MCRegisterInfo *getRegInfo() const { return RegInfo.get(); }
 };
 
 }
@@ -208,7 +207,7 @@ DecodeStatus AArch64Disassembler::getInstruction(MCInst &MI, uint64_t &Size,
   uint8_t bytes[4];
 
   // We want to read exactly 4 bytes of data.
-  if (Region.readBytes(Address, 4, (uint8_t*)bytes, NULL) == -1) {
+  if (Region.readBytes(Address, 4, bytes) == -1) {
     Size = 0;
     return MCDisassembler::Fail;
   }

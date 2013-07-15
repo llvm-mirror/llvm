@@ -55,6 +55,18 @@ class NoCapture<int argNo> : IntrinsicProperty {
   int ArgNo = argNo;
 }
 
+// ReadOnly - The specified argument pointer is not written to through the
+// pointer by the intrinsic.
+class ReadOnly<int argNo> : IntrinsicProperty {
+  int ArgNo = argNo;
+}
+
+// ReadNone - The specified argument pointer is not dereferenced by the
+// intrinsic.
+class ReadNone<int argNo> : IntrinsicProperty {
+  int ArgNo = argNo;
+}
+
 def IntrNoReturn : IntrinsicProperty;
 
 //===----------------------------------------------------------------------===//
@@ -253,11 +265,13 @@ def int_stackprotector : Intrinsic<[], [llvm_ptr_ty, llvm_ptrptr_ty], []>;
 def int_memcpy  : Intrinsic<[],
                              [llvm_anyptr_ty, llvm_anyptr_ty, llvm_anyint_ty,
                               llvm_i32_ty, llvm_i1_ty],
-                            [IntrReadWriteArgMem, NoCapture<0>, NoCapture<1>]>;
+                            [IntrReadWriteArgMem, NoCapture<0>, NoCapture<1>,
+                             ReadOnly<1>]>;
 def int_memmove : Intrinsic<[],
                             [llvm_anyptr_ty, llvm_anyptr_ty, llvm_anyint_ty,
                              llvm_i32_ty, llvm_i1_ty],
-                            [IntrReadWriteArgMem, NoCapture<0>, NoCapture<1>]>;
+                            [IntrReadWriteArgMem, NoCapture<0>, NoCapture<1>,
+                             ReadOnly<1>]>;
 def int_memset  : Intrinsic<[],
                             [llvm_anyptr_ty, llvm_i8_ty, llvm_anyint_ty,
                              llvm_i32_ty, llvm_i1_ty],
@@ -347,6 +361,9 @@ def int_eh_typeid_for : Intrinsic<[llvm_i32_ty], [llvm_ptr_ty], [IntrNoMem]>;
 def int_eh_return_i32 : Intrinsic<[], [llvm_i32_ty, llvm_ptr_ty]>;
 def int_eh_return_i64 : Intrinsic<[], [llvm_i64_ty, llvm_ptr_ty]>;
 
+// __builtin_unwind_init is an undocumented GCC intrinsic that causes all
+// callee-saved registers to be saved and restored (regardless of whether they
+// are used) in the calling function. It is used by libgcc_eh.
 def int_eh_unwind_init: Intrinsic<[]>,
                         GCCBuiltin<"__builtin_unwind_init">;
 

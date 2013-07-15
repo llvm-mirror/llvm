@@ -2951,6 +2951,11 @@ const SCEV *DependenceAnalysis::addToCoefficient(const SCEV *Expr,
                              AddRec->getLoop(),
                              AddRec->getNoWrapFlags());
   }
+  if (SE->isLoopInvariant(AddRec, TargetLoop))
+    return SE->getAddRecExpr(AddRec,
+			     Value,
+			     TargetLoop,
+			     SCEV::FlagAnyWrap);
   return SE->getAddRecExpr(addToCoefficient(AddRec->getStart(),
                                             TargetLoop, Value),
                            AddRec->getStepRecurrence(*SE),
@@ -2972,7 +2977,7 @@ const SCEV *DependenceAnalysis::addToCoefficient(const SCEV *Expr,
 bool DependenceAnalysis::propagate(const SCEV *&Src,
                                    const SCEV *&Dst,
                                    SmallBitVector &Loops,
-                                   SmallVector<Constraint, 4> &Constraints,
+                                   SmallVectorImpl<Constraint> &Constraints,
                                    bool &Consistent) {
   bool Result = false;
   for (int LI = Loops.find_first(); LI >= 0; LI = Loops.find_next(LI)) {

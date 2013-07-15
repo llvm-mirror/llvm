@@ -100,11 +100,12 @@ public:
   /// added to the per-module passes.
   Pass *Inliner;
 
-  bool DisableSimplifyLibCalls;
   bool DisableUnitAtATime;
   bool DisableUnrollLoops;
-  bool Vectorize;
+  bool BBVectorize;
+  bool SLPVectorize;
   bool LoopVectorize;
+  bool LateVectorize;
 
 private:
   /// ExtensionList - This is list of all of the extensions that are registered.

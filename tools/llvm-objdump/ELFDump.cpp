@@ -63,7 +63,7 @@ void printProgramHeaders(
            << format(Fmt, (uint64_t)pi->p_vaddr)
            << "paddr "
            << format(Fmt, (uint64_t)pi->p_paddr)
-           << format("align 2**%u\n", CountTrailingZeros_64(pi->p_align))
+           << format("align 2**%u\n", countTrailingZeros<uint64_t>(pi->p_align))
            << "         filesz "
            << format(Fmt, (uint64_t)pi->p_filesz)
            << "memsz "
@@ -79,22 +79,18 @@ void printProgramHeaders(
 
 void llvm::printELFFileHeader(const object::ObjectFile *Obj) {
   // Little-endian 32-bit
-  if (const ELFObjectFile<ELFType<support::little, 4, false> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::little, 4, false> > >(Obj))
+  if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
     printProgramHeaders(ELFObj);
 
   // Big-endian 32-bit
-  if (const ELFObjectFile<ELFType<support::big, 4, false> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::big, 4, false> > >(Obj))
+  if (const ELF32BEObjectFile *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
     printProgramHeaders(ELFObj);
 
   // Little-endian 64-bit
-  if (const ELFObjectFile<ELFType<support::little, 8, true> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::little, 8, true> > >(Obj))
+  if (const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
     printProgramHeaders(ELFObj);
 
   // Big-endian 64-bit
-  if (const ELFObjectFile<ELFType<support::big, 8, true> > *ELFObj =
-          dyn_cast<ELFObjectFile<ELFType<support::big, 8, true> > >(Obj))
+  if (const ELF64BEObjectFile *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
     printProgramHeaders(ELFObj);
 }

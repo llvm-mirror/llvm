@@ -17,17 +17,25 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-objdump.h"
-#include "MCFunction.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCAtom.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler.h"
+#include "llvm/MC/MCFunction.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstPrinter.h"
+#include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCModule.h"
+#include "llvm/MC/MCObjectDisassembler.h"
+#include "llvm/MC/MCObjectFileInfo.h"
+#include "llvm/MC/MCObjectSymbolizer.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCRelocationInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFF.h"
@@ -123,6 +131,14 @@ static cl::alias
 PrivateHeadersShort("p", cl::desc("Alias for --private-headers"),
                     cl::aliasopt(PrivateHeaders));
 
+static cl::opt<bool>
+Symbolize("symbolize", cl::desc("When disassembling instructions, "
+                                "try to symbolize operands."));
+
+static cl::opt<bool>
+CFG("cfg", cl::desc("Create a CFG for every function found in the object"
+                      " and write it to a graphviz file"));
+
 static StringRef ToolName;
 
 bool llvm::error(error_code ec) {
@@ -137,8 +153,13 @@ static const Target *getTarget(const ObjectFile *Obj = NULL) {
   // Figure out the target triple.
   llvm::Triple TheTriple("unknown-unknown-unknown");
   if (TripleName.empty()) {
-    if (Obj)
+    if (Obj) {
       TheTriple.setArch(Triple::ArchType(Obj->getArch()));
+      // TheTriple defaults to ELF, and COFF doesn't have an environment:
+      // the best we can do here is indicate that it is mach-o.
+      if (Obj->isMachO())
+        TheTriple.setEnvironment(Triple::MachO);
+    }
   } else
     TheTriple.setTriple(Triple::normalize(TripleName));
 
@@ -156,7 +177,51 @@ static const Target *getTarget(const ObjectFile *Obj = NULL) {
   return TheTarget;
 }
 
-void llvm::StringRefMemoryObject::anchor() { }
+// Write a graphviz file for the CFG inside an MCFunction.
+static void emitDOTFile(const char *FileName, const MCFunction &f,
+                        MCInstPrinter *IP) {
+  // Start a new dot file.
+  std::string Error;
+  raw_fd_ostream Out(FileName, Error);
+  if (!Error.empty()) {
+    errs() << "llvm-objdump: warning: " << Error << '\n';
+    return;
+  }
+
+  Out << "digraph \"" << f.getName() << "\" {\n";
+  Out << "graph [ rankdir = \"LR\" ];\n";
+  for (MCFunction::const_iterator i = f.begin(), e = f.end(); i != e; ++i) {
+    // Only print blocks that have predecessors.
+    bool hasPreds = (*i)->pred_begin() != (*i)->pred_end();
+
+    if (!hasPreds && i != f.begin())
+      continue;
+
+    Out << '"' << (*i)->getInsts()->getBeginAddr() << "\" [ label=\"<a>";
+    // Print instructions.
+    for (unsigned ii = 0, ie = (*i)->getInsts()->size(); ii != ie;
+        ++ii) {
+      if (ii != 0) // Not the first line, start a new row.
+        Out << '|';
+      if (ii + 1 == ie) // Last line, add an end id.
+        Out << "<o>";
+
+      // Escape special chars and print the instruction in mnemonic form.
+      std::string Str;
+      raw_string_ostream OS(Str);
+      IP->printInst(&(*i)->getInsts()->at(ii).Inst, OS, "");
+      Out << DOT::EscapeString(OS.str());
+    }
+    Out << "\" shape=\"record\" ];\n";
+
+    // Add edges.
+    for (MCBasicBlock::succ_const_iterator si = (*i)->succ_begin(),
+        se = (*i)->succ_end(); si != se; ++si)
+      Out << (*i)->getInsts()->getBeginAddr() << ":o -> "
+          << (*si)->getInsts()->getBeginAddr() << ":a\n";
+  }
+  Out << "}\n";
+}
 
 void llvm::DumpBytes(StringRef bytes) {
   static const char hex_rep[] = "0123456789abcdef";
@@ -186,8 +251,8 @@ void llvm::DumpBytes(StringRef bytes) {
 
 bool llvm::RelocAddressLess(RelocationRef a, RelocationRef b) {
   uint64_t a_addr, b_addr;
-  if (error(a.getAddress(a_addr))) return false;
-  if (error(b.getAddress(b_addr))) return false;
+  if (error(a.getOffset(a_addr))) return false;
+  if (error(b.getOffset(b_addr))) return false;
   return a_addr < b_addr;
 }
 
@@ -206,6 +271,96 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       Features.AddFeature(MAttrs[i]);
     FeaturesStr = Features.getString();
   }
+
+  OwningPtr<const MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TripleName));
+  if (!MRI) {
+    errs() << "error: no register info for target " << TripleName << "\n";
+    return;
+  }
+
+  // Set up disassembler.
+  OwningPtr<const MCAsmInfo> AsmInfo(
+    TheTarget->createMCAsmInfo(*MRI, TripleName));
+  if (!AsmInfo) {
+    errs() << "error: no assembly info for target " << TripleName << "\n";
+    return;
+  }
+
+  OwningPtr<const MCSubtargetInfo> STI(
+    TheTarget->createMCSubtargetInfo(TripleName, "", FeaturesStr));
+  if (!STI) {
+    errs() << "error: no subtarget info for target " << TripleName << "\n";
+    return;
+  }
+
+  OwningPtr<const MCInstrInfo> MII(TheTarget->createMCInstrInfo());
+  if (!MII) {
+    errs() << "error: no instruction info for target " << TripleName << "\n";
+    return;
+  }
+
+  OwningPtr<MCDisassembler> DisAsm(TheTarget->createMCDisassembler(*STI));
+  if (!DisAsm) {
+    errs() << "error: no disassembler for target " << TripleName << "\n";
+    return;
+  }
+
+  OwningPtr<const MCObjectFileInfo> MOFI;
+  OwningPtr<MCContext> Ctx;
+
+  if (Symbolize) {
+    MOFI.reset(new MCObjectFileInfo);
+    Ctx.reset(new MCContext(AsmInfo.get(), MRI.get(), MOFI.get()));
+    OwningPtr<MCRelocationInfo> RelInfo(
+      TheTarget->createMCRelocationInfo(TripleName, *Ctx.get()));
+    if (RelInfo) {
+      OwningPtr<MCSymbolizer> Symzer(
+        MCObjectSymbolizer::createObjectSymbolizer(*Ctx.get(), RelInfo, Obj));
+      if (Symzer)
+        DisAsm->setSymbolizer(Symzer);
+    }
+  }
+
+  OwningPtr<const MCInstrAnalysis>
+    MIA(TheTarget->createMCInstrAnalysis(MII.get()));
+
+  int AsmPrinterVariant = AsmInfo->getAssemblerDialect();
+  OwningPtr<MCInstPrinter> IP(TheTarget->createMCInstPrinter(
+      AsmPrinterVariant, *AsmInfo, *MII, *MRI, *STI));
+  if (!IP) {
+    errs() << "error: no instruction printer for target " << TripleName
+      << '\n';
+    return;
+  }
+
+  if (CFG) {
+    OwningPtr<MCObjectDisassembler> OD(
+      new MCObjectDisassembler(*Obj, *DisAsm, *MIA));
+    OwningPtr<MCModule> Mod(OD->buildModule(/* withCFG */ true));
+    for (MCModule::const_atom_iterator AI = Mod->atom_begin(),
+                                       AE = Mod->atom_end();
+                                       AI != AE; ++AI) {
+      outs() << "Atom " << (*AI)->getName() << ": \n";
+      if (const MCTextAtom *TA = dyn_cast<MCTextAtom>(*AI)) {
+        for (MCTextAtom::const_iterator II = TA->begin(), IE = TA->end();
+             II != IE;
+             ++II) {
+          IP->printInst(&II->Inst, outs(), "");
+          outs() << "\n";
+        }
+      }
+    }
+    for (MCModule::const_func_iterator FI = Mod->func_begin(),
+                                       FE = Mod->func_end();
+                                       FI != FE; ++FI) {
+      static int filenum = 0;
+      emitDOTFile((Twine((*FI)->getName()) + "_" +
+                   utostr(filenum) + ".dot").str().c_str(),
+                    **FI, IP.get());
+      ++filenum;
+    }
+  }
+
 
   error_code ec;
   for (section_iterator i = Obj->begin_sections(),
@@ -228,6 +383,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       if (!error(i->containsSymbol(*si, contains)) && contains) {
         uint64_t Address;
         if (error(si->getAddress(Address))) break;
+        if (Address == UnknownAddressOrSize) continue;
         Address -= SectionAddr;
 
         StringRef Name;
@@ -254,10 +410,10 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     std::sort(Rels.begin(), Rels.end(), RelocAddressLess);
 
     StringRef SegmentName = "";
-    if (const MachOObjectFile *MachO = dyn_cast<const MachOObjectFile>(Obj)) {
+    if (const MachOObjectFile *MachO =
+        dyn_cast<const MachOObjectFile>(Obj)) {
       DataRefImpl DR = i->getRawDataRefImpl();
-      if (error(MachO->getSectionFinalSegmentName(DR, SegmentName)))
-        break;
+      SegmentName = MachO->getSectionFinalSegmentName(DR);
     }
     StringRef name;
     if (error(i->getName(name))) break;
@@ -271,53 +427,13 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     if (Symbols.empty())
       Symbols.push_back(std::make_pair(0, name));
 
-    // Set up disassembler.
-    OwningPtr<const MCAsmInfo> AsmInfo(TheTarget->createMCAsmInfo(TripleName));
 
-    if (!AsmInfo) {
-      errs() << "error: no assembly info for target " << TripleName << "\n";
-      return;
-    }
-
-    OwningPtr<const MCSubtargetInfo> STI(
-      TheTarget->createMCSubtargetInfo(TripleName, "", FeaturesStr));
-
-    if (!STI) {
-      errs() << "error: no subtarget info for target " << TripleName << "\n";
-      return;
-    }
-
-    OwningPtr<const MCDisassembler> DisAsm(
-      TheTarget->createMCDisassembler(*STI));
-    if (!DisAsm) {
-      errs() << "error: no disassembler for target " << TripleName << "\n";
-      return;
-    }
-
-    OwningPtr<const MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TripleName));
-    if (!MRI) {
-      errs() << "error: no register info for target " << TripleName << "\n";
-      return;
-    }
-
-    OwningPtr<const MCInstrInfo> MII(TheTarget->createMCInstrInfo());
-    if (!MII) {
-      errs() << "error: no instruction info for target " << TripleName << "\n";
-      return;
-    }
-
-    int AsmPrinterVariant = AsmInfo->getAssemblerDialect();
-    OwningPtr<MCInstPrinter> IP(TheTarget->createMCInstPrinter(
-                                AsmPrinterVariant, *AsmInfo, *MII, *MRI, *STI));
-    if (!IP) {
-      errs() << "error: no instruction printer for target " << TripleName
-             << '\n';
-      return;
-    }
+    SmallString<40> Comments;
+    raw_svector_ostream CommentStream(Comments);
 
     StringRef Bytes;
     if (error(i->getContents(Bytes))) break;
-    StringRefMemoryObject memoryObject(Bytes);
+    StringRefMemoryObject memoryObject(Bytes, SectionAddr);
     uint64_t Size;
     uint64_t Index;
     uint64_t SectSize;
@@ -351,14 +467,17 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       for (Index = Start; Index < End; Index += Size) {
         MCInst Inst;
 
-        if (DisAsm->getInstruction(Inst, Size, memoryObject, Index,
-                                   DebugOut, nulls())) {
+        if (DisAsm->getInstruction(Inst, Size, memoryObject,
+                                   SectionAddr + Index,
+                                   DebugOut, CommentStream)) {
           outs() << format("%8" PRIx64 ":", SectionAddr + Index);
           if (!NoShowRawInsn) {
             outs() << "\t";
             DumpBytes(StringRef(Bytes.data() + Index, Size));
           }
           IP->printInst(&Inst, outs(), "");
+          outs() << CommentStream.str();
+          Comments.clear();
           outs() << "\n";
         } else {
           errs() << ToolName << ": warning: invalid instruction encoding\n";
@@ -377,7 +496,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
           if (error(rel_cur->getHidden(hidden))) goto skip_print_rel;
           if (hidden) goto skip_print_rel;
 
-          if (error(rel_cur->getAddress(addr))) goto skip_print_rel;
+          if (error(rel_cur->getOffset(addr))) goto skip_print_rel;
           // Stop when rel_cur's address is past the current instruction.
           if (addr >= Index + Size) break;
           if (error(rel_cur->getTypeName(name))) goto skip_print_rel;
@@ -416,7 +535,7 @@ static void PrintRelocations(const ObjectFile *o) {
       if (error(ri->getHidden(hidden))) continue;
       if (hidden) continue;
       if (error(ri->getTypeName(relocname))) continue;
-      if (error(ri->getAddress(address))) continue;
+      if (error(ri->getOffset(address))) continue;
       if (error(ri->getValueString(valuestr))) continue;
       outs() << address << " " << relocname << " " << valuestr << "\n";
     }
@@ -459,11 +578,19 @@ static void PrintSectionContents(const ObjectFile *o) {
     StringRef Name;
     StringRef Contents;
     uint64_t BaseAddr;
+    bool BSS;
     if (error(si->getName(Name))) continue;
     if (error(si->getContents(Contents))) continue;
     if (error(si->getAddress(BaseAddr))) continue;
+    if (error(si->isBSS(BSS))) continue;
 
     outs() << "Contents of section " << Name << ":\n";
+    if (BSS) {
+      outs() << format("<skipping contents of bss section at [%04" PRIx64
+                       ", %04" PRIx64 ")>\n", BaseAddr,
+                       BaseAddr + Contents.size());
+      continue;
+    }
 
     // Dump out the content as hex and printable ascii characters.
     for (std::size_t addr = 0, end = Contents.size(); addr < end; addr += 16) {
@@ -591,11 +718,10 @@ static void PrintSymbolTable(const ObjectFile *o) {
       else if (Section == o->end_sections())
         outs() << "*UND*";
       else {
-        if (const MachOObjectFile *MachO = dyn_cast<const MachOObjectFile>(o)) {
-          StringRef SegmentName;
+        if (const MachOObjectFile *MachO =
+            dyn_cast<const MachOObjectFile>(o)) {
           DataRefImpl DR = Section->getRawDataRefImpl();
-          if (error(MachO->getSectionFinalSegmentName(DR, SegmentName)))
-            SegmentName = "";
+          StringRef SegmentName = MachO->getSectionFinalSegmentName(DR);
           outs() << SegmentName << ",";
         }
         StringRef SectionName;

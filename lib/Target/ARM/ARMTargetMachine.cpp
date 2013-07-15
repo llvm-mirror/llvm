@@ -48,7 +48,7 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
                                            Reloc::Model RM, CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS),
+    Subtarget(TT, CPU, FS, Options),
     JITInfo(),
     InstrItins(Subtarget.getInstrItineraryData()) {
   // Default to soft float ABI
@@ -60,7 +60,7 @@ void ARMBaseTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
   // Add first the target-independent BasicTTI pass, then our ARM pass. This
   // allows the ARM pass to delegate to the target independent layer when
   // appropriate.
-  PM.add(createBasicTargetTransformInfoPass(getTargetLowering()));
+  PM.add(createBasicTargetTransformInfoPass(this));
   PM.add(createARMTargetTransformInfoPass(this));
 }
 
@@ -85,6 +85,7 @@ ARMTargetMachine::ARMTargetMachine(const Target &T, StringRef TT,
     TLInfo(*this),
     TSInfo(*this),
     FrameLowering(Subtarget) {
+  initAsmInfo();
   if (!Subtarget.hasARMOps())
     report_fatal_error("CPU: '" + Subtarget.getCPUString() + "' does not "
                        "support ARM mode execution!");
@@ -117,6 +118,7 @@ ThumbTargetMachine::ThumbTargetMachine(const Target &T, StringRef TT,
     FrameLowering(Subtarget.hasThumb2()
               ? new ARMFrameLowering(Subtarget)
               : (ARMFrameLowering*)new Thumb1FrameLowering(Subtarget)) {
+  initAsmInfo();
 }
 
 namespace {
@@ -148,7 +150,7 @@ TargetPassConfig *ARMBaseTargetMachine::createPassConfig(PassManagerBase &PM) {
 
 bool ARMPassConfig::addPreISel() {
   if (TM->getOptLevel() != CodeGenOpt::None && EnableGlobalMerge)
-    addPass(createGlobalMergePass(TM->getTargetLowering()));
+    addPass(createGlobalMergePass(TM));
 
   return false;
 }
@@ -185,8 +187,7 @@ bool ARMPassConfig::addPreSched2() {
       addPass(createARMLoadStoreOptimizationPass());
       printAndVerify("After ARM load / store optimizer");
     }
-    if ((DisableA15SDOptimization || !getARMSubtarget().isCortexA15()) &&
-      getARMSubtarget().hasNEON())
+    if (getARMSubtarget().hasNEON())
       addPass(createExecutionDependencyFixPass(&ARM::DPRRegClass));
   }
 

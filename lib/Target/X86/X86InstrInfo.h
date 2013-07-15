@@ -192,6 +192,19 @@ public:
                      const MachineInstr *Orig,
                      const TargetRegisterInfo &TRI) const;
 
+  /// Given an operand within a MachineInstr, insert preceding code to put it
+  /// into the right format for a particular kind of LEA instruction. This may
+  /// involve using an appropriate super-register instead (with an implicit use
+  /// of the original) or creating a new virtual register and inserting COPY
+  /// instructions to get the data into the right class.
+  ///
+  /// Reference parameters are set to indicate how caller should add this
+  /// operand to the LEA instruction.
+  bool classifyLEAReg(MachineInstr *MI, const MachineOperand &Src,
+                      unsigned LEAOpcode, bool AllowSP,
+                      unsigned &NewSrc, bool &isKill,
+                      bool &isUndef, MachineOperand &ImplicitOp) const;
+
   /// convertToThreeAddress - This method must be implemented by targets that
   /// set the M_CONVERTIBLE_TO_3_ADDR flag.  When this flag is set, the target
   /// may be able to convert a two-address instruction into a true
@@ -262,12 +275,6 @@ public:
 
   virtual bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const;
 
-  virtual
-  MachineInstr *emitFrameIndexDebugValue(MachineFunction &MF,
-                                         int FrameIx, uint64_t Offset,
-                                         const MDNode *MDPtr,
-                                         DebugLoc DL) const;
-
   /// foldMemoryOperand - If this target supports it, fold a load or store of
   /// the specified stack slot into the specified machine instruction for the
   /// specified operand(s).  If this is possible, the target should perform the
@@ -331,6 +338,9 @@ public:
   virtual bool shouldScheduleLoadsNear(SDNode *Load1, SDNode *Load2,
                                        int64_t Offset1, int64_t Offset2,
                                        unsigned NumLoads) const;
+
+  virtual bool shouldScheduleAdjacent(MachineInstr* First,
+                                      MachineInstr *Second) const LLVM_OVERRIDE;
 
   virtual void getNoopForMachoTarget(MCInst &NopInst) const;
 

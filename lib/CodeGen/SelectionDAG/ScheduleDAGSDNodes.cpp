@@ -700,11 +700,10 @@ namespace {
 }
 
 /// ProcessSDDbgValues - Process SDDbgValues associated with this node.
-static void ProcessSDDbgValues(SDNode *N, SelectionDAG *DAG,
-                               InstrEmitter &Emitter,
-                    SmallVector<std::pair<unsigned, MachineInstr*>, 32> &Orders,
-                            DenseMap<SDValue, unsigned> &VRBaseMap,
-                            unsigned Order) {
+static void
+ProcessSDDbgValues(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
+                   SmallVectorImpl<std::pair<unsigned, MachineInstr*> > &Orders,
+                   DenseMap<SDValue, unsigned> &VRBaseMap, unsigned Order) {
   if (!N->getHasDebugValue())
     return;
 
@@ -731,12 +730,12 @@ static void ProcessSDDbgValues(SDNode *N, SelectionDAG *DAG,
 // ProcessSourceNode - Process nodes with source order numbers. These are added
 // to a vector which EmitSchedule uses to determine how to insert dbg_value
 // instructions in the right order.
-static void ProcessSourceNode(SDNode *N, SelectionDAG *DAG,
-                           InstrEmitter &Emitter,
-                           DenseMap<SDValue, unsigned> &VRBaseMap,
-                    SmallVector<std::pair<unsigned, MachineInstr*>, 32> &Orders,
-                           SmallSet<unsigned, 8> &Seen) {
-  unsigned Order = DAG->GetOrdering(N);
+static void
+ProcessSourceNode(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
+                  DenseMap<SDValue, unsigned> &VRBaseMap,
+                  SmallVectorImpl<std::pair<unsigned, MachineInstr*> > &Orders,
+                  SmallSet<unsigned, 8> &Seen) {
+  unsigned Order = N->getIROrder();
   if (!Order || !Seen.insert(Order)) {
     // Process any valid SDDbgValues even if node does not have any order
     // assigned.
@@ -883,7 +882,7 @@ EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
             // Insert at the instruction, which may be in a different
             // block, if the block was split by a custom inserter.
             MachineBasicBlock::iterator Pos = MI;
-            MI->getParent()->insert(llvm::next(Pos), DbgMI);
+            MI->getParent()->insert(Pos, DbgMI);
           }
         }
       }

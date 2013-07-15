@@ -442,7 +442,7 @@ raw_fd_ostream::raw_fd_ostream(const char *Filename, std::string &ErrorInfo,
     // If user requested binary then put stdout into binary mode if
     // possible.
     if (Flags & F_Binary)
-      sys::Program::ChangeStdoutToBinary();
+      sys::ChangeStdoutToBinary();
     // Close stdout when we're done, to detect any output errors.
     ShouldClose = true;
     return;
@@ -517,7 +517,7 @@ raw_fd_ostream::~raw_fd_ostream() {
   // has_error() and clear the error flag with clear_error() before
   // destructing raw_ostream objects which may have errors.
   if (has_error())
-    report_fatal_error("IO failure on output stream.");
+    report_fatal_error("IO failure on output stream.", /*GenCrashDiag=*/false);
 }
 
 

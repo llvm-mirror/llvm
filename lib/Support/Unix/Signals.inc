@@ -27,9 +27,11 @@
 #if HAVE_SYS_STAT_H
 #include <sys/stat.h>
 #endif
-#if HAVE_DLFCN_H && __GNUG__
-#include <dlfcn.h>
+#if HAVE_CXXABI_H
 #include <cxxabi.h>
+#endif
+#if HAVE_DLFCN_H
+#include <dlfcn.h>
 #endif
 #if HAVE_MACH_MACH_H
 #include <mach/mach.h>
@@ -53,8 +55,7 @@ static std::vector<std::pair<void(*)(void*), void*> > CallBacksToRun;
 static const int IntSigs[] = {
   SIGHUP, SIGINT, SIGPIPE, SIGTERM, SIGUSR1, SIGUSR2
 };
-static const int *const IntSigsEnd =
-  IntSigs + sizeof(IntSigs) / sizeof(IntSigs[0]);
+static const int *const IntSigsEnd = array_endof(IntSigs);
 
 // KillSigs - Signals that represent that we have a bug, and our prompt
 // termination has been ordered.
@@ -73,8 +74,7 @@ static const int KillSigs[] = {
   , SIGEMT
 #endif
 };
-static const int *const KillSigsEnd =
-  KillSigs + sizeof(KillSigs) / sizeof(KillSigs[0]);
+static const int *const KillSigsEnd = array_endof(KillSigs);
 
 static unsigned NumRegisteredSignals = 0;
 static struct {
@@ -184,6 +184,15 @@ static RETSIGTYPE SignalHandler(int Sig) {
   // Otherwise if it is a fault (like SEGV) run any handler.
   for (unsigned i = 0, e = CallBacksToRun.size(); i != e; ++i)
     CallBacksToRun[i].first(CallBacksToRun[i].second);
+
+#ifdef __s390__
+  // On S/390, certain signals are delivered with PSW Address pointing to
+  // *after* the faulting instruction.  Simply returning from the signal
+  // handler would continue execution after that point, instead of
+  // re-raising the signal.  Raise the signal manually in those cases.
+  if (Sig == SIGILL || Sig == SIGFPE || Sig == SIGTRAP)
+    raise(Sig);
+#endif
 }
 
 void llvm::sys::RunInterruptHandlers() {
@@ -200,11 +209,11 @@ void llvm::sys::SetInterruptFunction(void (*IF)()) {
 }
 
 // RemoveFileOnSignal - The public API
-bool llvm::sys::RemoveFileOnSignal(const sys::Path &Filename,
+bool llvm::sys::RemoveFileOnSignal(StringRef Filename,
                                    std::string* ErrMsg) {
   SignalsMutex.acquire();
   std::string *OldPtr = FilesToRemove.empty() ? 0 : &FilesToRemove[0];
-  FilesToRemove.push_back(Filename.str());
+  FilesToRemove.push_back(Filename);
 
   // We want to call 'c_str()' on every std::string in this vector so that if
   // the underlying implementation requires a re-allocation, it happens here
@@ -224,10 +233,10 @@ bool llvm::sys::RemoveFileOnSignal(const sys::Path &Filename,
 }
 
 // DontRemoveFileOnSignal - The public API
-void llvm::sys::DontRemoveFileOnSignal(const sys::Path &Filename) {
+void llvm::sys::DontRemoveFileOnSignal(StringRef Filename) {
   SignalsMutex.acquire();
   std::vector<std::string>::reverse_iterator RI =
-    std::find(FilesToRemove.rbegin(), FilesToRemove.rend(), Filename.str());
+    std::find(FilesToRemove.rbegin(), FilesToRemove.rend(), Filename);
   std::vector<std::string>::iterator I = FilesToRemove.end();
   if (RI != FilesToRemove.rend())
     I = FilesToRemove.erase(RI.base()-1);
@@ -290,9 +299,13 @@ void llvm::sys::PrintStackTrace(FILE *FD) {
             (int)(sizeof(void*) * 2) + 2, (unsigned long)StackTrace[i]);
 
     if (dlinfo.dli_sname != NULL) {
-      int res;
       fputc(' ', FD);
+#  if HAVE_CXXABI_H
+      int res;
       char* d = abi::__cxa_demangle(dlinfo.dli_sname, NULL, NULL, &res);
+#  else
+      char* d = NULL;
+#  endif
       if (d == NULL) fputs(dlinfo.dli_sname, FD);
       else           fputs(d, FD);
       free(d);

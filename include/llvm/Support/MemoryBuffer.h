@@ -15,8 +15,10 @@
 #define LLVM_SUPPORT_MEMORYBUFFER_H
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm-c/Core.h"
 
 namespace llvm {
 
@@ -117,11 +119,7 @@ public:
   static error_code getFileOrSTDIN(StringRef Filename,
                                    OwningPtr<MemoryBuffer> &result,
                                    int64_t FileSize = -1);
-  static error_code getFileOrSTDIN(const char *Filename,
-                                   OwningPtr<MemoryBuffer> &result,
-                                   int64_t FileSize = -1);
-  
-  
+
   //===--------------------------------------------------------------------===//
   // Provided for performance analysis.
   //===--------------------------------------------------------------------===//
@@ -136,6 +134,9 @@ public:
   /// MemoryBuffer.
   virtual BufferKind getBufferKind() const = 0;  
 };
+
+// Create wrappers for C Binding types (see CBindingWrapping.h).
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(MemoryBuffer, LLVMMemoryBufferRef)
 
 } // end namespace llvm
 

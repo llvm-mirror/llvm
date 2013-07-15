@@ -8,8 +8,10 @@ entry:
   %0 = alloca double                              ; <double*> [#uses=2]
   %"alloca point" = bitcast i32 0 to i32          ; <i32> [#uses=0]
   call void @llvm.dbg.declare(metadata !{i32* %i_addr}, metadata !0), !dbg !8
-; CHECK: call void @llvm.dbg.value(metadata !{i32 %i}, i64 0, metadata !1)
-; CHECK: call void @llvm.dbg.value(metadata !{double %j}, i64 0, metadata !9)
+; CHECK: call void @llvm.dbg.value(metadata !{i32 %i}, i64 0, metadata ![[IVAR:[0-9]*]])
+; CHECK: call void @llvm.dbg.value(metadata !{double %j}, i64 0, metadata ![[JVAR:[0-9]*]])
+; CHECK: ![[IVAR]] = {{.*}} ; [ DW_TAG_arg_variable ] [i]
+; CHECK: ![[JVAR]] = {{.*}} ; [ DW_TAG_arg_variable ] [j]
   store i32 %i, i32* %i_addr
   call void @llvm.dbg.declare(metadata !{double* %j_addr}, metadata !9), !dbg !8
   store double %j, double* %j_addr
@@ -33,8 +35,8 @@ declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
 !llvm.dbg.cu = !{!3}
 
 !0 = metadata !{i32 786689, metadata !1, metadata !"i", metadata !2, i32 2, metadata !7, i32 0, null} ; [ DW_TAG_arg_variable ]
-!1 = metadata !{i32 786478, i32 0, metadata !2, metadata !"testfunc", metadata !"testfunc", metadata !"testfunc", metadata !2, i32 2, metadata !4, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, double (i32, double)* @testfunc, null, null, null, i32 2} ; [ DW_TAG_subprogram ]
-!2 = metadata !{i32 786473, metadata !"testfunc.c", metadata !"/tmp"} ; [ DW_TAG_file_type ]
+!1 = metadata !{i32 786478, metadata !2, metadata !"testfunc", metadata !"testfunc", metadata !"testfunc", metadata !2, i32 2, metadata !4, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, double (i32, double)* @testfunc, null, null, null, i32 2} ; [ DW_TAG_subprogram ]
+!2 = metadata !{i32 786473, metadata !12} ; [ DW_TAG_file_type ]
 !3 = metadata !{i32 786449, i32 0, i32 1, metadata !"testfunc.c", metadata !"/tmp", metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", i1 true, i1 false, metadata !"", i32 0} ; [ DW_TAG_compile_unit ]
 !4 = metadata !{i32 786453, metadata !2, metadata !"", metadata !2, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !5, i32 0, null} ; [ DW_TAG_subroutine_type ]
 !5 = metadata !{metadata !6, metadata !7, metadata !6}
@@ -44,4 +46,4 @@ declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
 !9 = metadata !{i32 786689, metadata !1, metadata !"j", metadata !2, i32 2, metadata !6, i32 0, null} ; [ DW_TAG_arg_variable ]
 !10 = metadata !{i32 3, i32 0, metadata !11, null}
 !11 = metadata !{i32 786443, metadata !1, i32 2, i32 0} ; [ DW_TAG_lexical_block ]
-
+!12 = metadata !{metadata !"testfunc.c", metadata !"/tmp"}

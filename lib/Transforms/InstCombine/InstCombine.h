@@ -1,4 +1,4 @@
-//===- InstCombine.h - Main InstCombine pass definition -------------------===//
+//===- InstCombine.h - Main InstCombine pass definition ---------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -233,6 +233,8 @@ private:
   Instruction *transformSExtICmp(ICmpInst *ICI, Instruction &CI);
   bool WillNotOverflowSignedAdd(Value *LHS, Value *RHS);
   Value *EmitGEPOffset(User *GEP);
+  Instruction *scalarizePHI(ExtractElementInst &EI, PHINode *PN);
+  Value *EvaluateInDifferentElementOrder(Value *V, ArrayRef<int> Mask);
 
 public:
   // InsertNewInstBefore - insert an instruction New before instruction Old

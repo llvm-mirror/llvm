@@ -37,6 +37,7 @@ SparcTargetMachine::SparcTargetMachine(const Target &T, StringRef TT,
     InstrInfo(Subtarget),
     TLInfo(*this), TSInfo(*this),
     FrameLowering(Subtarget) {
+  initAsmInfo();
 }
 
 namespace {
@@ -68,7 +69,6 @@ bool SparcPassConfig::addInstSelector() {
 /// passes immediately before machine code is emitted.  This should return
 /// true if -print-machineinstrs should print out the code after the passes.
 bool SparcPassConfig::addPreEmitPass(){
-  addPass(createSparcFPMoverPass(getSparcTargetMachine()));
   addPass(createSparcDelaySlotFillerPass(getSparcTargetMachine()));
   return true;
 }

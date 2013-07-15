@@ -17,6 +17,7 @@
 #define LLVM_MC_MCASMINFO_H
 
 #include "llvm/MC/MCDirectives.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MachineLocation.h"
 #include <cassert>
 #include <vector>
@@ -87,6 +88,10 @@ namespace llvm {
     /// MaxInstLength - This is the maximum possible length of an instruction,
     /// which is needed to compute the size of an inline asm.
     unsigned MaxInstLength;                  // Defaults to 4.
+
+    /// MinInstAlignment - Every possible instruction length is a multiple of
+    /// this value.  Factored out in .debug_frame and .debug_line.
+    unsigned MinInstAlignment;                  // Defaults to 1.
 
     /// PCSymbol - The symbol used to represent the current PC.  Used in PC
     /// relative expressions.
@@ -195,13 +200,6 @@ namespace llvm {
     /// on Mips or .gprel32 on Alpha.
     const char *GPRel32Directive;            // Defaults to NULL.
 
-    /// getDataASDirective - Return the directive that should be used to emit
-    /// data of the specified size to the specified numeric address space.
-    virtual const char *getDataASDirective(unsigned Size, unsigned AS) const {
-      assert(AS != 0 && "Don't know the directives for default addr space");
-      return 0;
-    }
-
     /// SunStyleELFSectionSwitchSyntax - This is true if this target uses "Sun
     /// Style" syntax for section switching ("#alloc,#write" etc) instead of the
     /// normal ELF syntax (,"a,w") in .section directives.
@@ -216,6 +214,8 @@ namespace llvm {
     /// style mangling for functions with X86_StdCall/X86_FastCall calling
     /// convention.
     bool HasMicrosoftFastStdCallMangling;    // Defaults to false.
+
+    bool NeedsDwarfSectionOffsetDirective;
 
     //===--- Alignment Information ----------------------------------------===//
 
@@ -320,9 +320,6 @@ namespace llvm {
     /// encode inline subroutine information.
     bool DwarfUsesInlineInfoSection;         // Defaults to false.
 
-    /// DwarfSectionOffsetDirective - Special section offset directive.
-    const char* DwarfSectionOffsetDirective; // Defaults to NULL
-
     /// DwarfUsesRelocationsAcrossSections - True if Dwarf2 output generally
     /// uses relocations for references to other .debug_* sections.
     bool DwarfUsesRelocationsAcrossSections;
@@ -333,15 +330,15 @@ namespace llvm {
 
     //===--- Prologue State ----------------------------------------------===//
 
-    std::vector<MachineMove> InitialFrameState;
+    std::vector<MCCFIInstruction> InitialFrameState;
 
   public:
     explicit MCAsmInfo();
     virtual ~MCAsmInfo();
 
     // FIXME: move these methods to DwarfPrinter when the JIT stops using them.
-    static unsigned getSLEB128Size(int Value);
-    static unsigned getULEB128Size(unsigned Value);
+    static unsigned getSLEB128Size(int64_t Value);
+    static unsigned getULEB128Size(uint64_t Value);
 
     /// getPointerSize - Get the pointer size in bytes.
     unsigned getPointerSize() const {
@@ -368,17 +365,17 @@ namespace llvm {
 
     // Data directive accessors.
     //
-    const char *getData8bitsDirective(unsigned AS = 0) const {
-      return AS == 0 ? Data8bitsDirective : getDataASDirective(8, AS);
+    const char *getData8bitsDirective() const {
+      return Data8bitsDirective;
     }
-    const char *getData16bitsDirective(unsigned AS = 0) const {
-      return AS == 0 ? Data16bitsDirective : getDataASDirective(16, AS);
+    const char *getData16bitsDirective() const {
+      return Data16bitsDirective;
     }
-    const char *getData32bitsDirective(unsigned AS = 0) const {
-      return AS == 0 ? Data32bitsDirective : getDataASDirective(32, AS);
+    const char *getData32bitsDirective() const {
+      return Data32bitsDirective;
     }
-    const char *getData64bitsDirective(unsigned AS = 0) const {
-      return AS == 0 ? Data64bitsDirective : getDataASDirective(64, AS);
+    const char *getData64bitsDirective() const {
+      return Data64bitsDirective;
     }
     const char *getGPRel64Directive() const { return GPRel64Directive; }
     const char *getGPRel32Directive() const { return GPRel32Directive; }
@@ -412,6 +409,10 @@ namespace llvm {
       return HasMicrosoftFastStdCallMangling;
     }
 
+    bool needsDwarfSectionOffsetDirective() const {
+      return NeedsDwarfSectionOffsetDirective;
+    }
+
     // Accessors.
     //
     bool hasMachoZeroFillDirective() const { return HasMachoZeroFillDirective; }
@@ -424,6 +425,9 @@ namespace llvm {
     }
     unsigned getMaxInstLength() const {
       return MaxInstLength;
+    }
+    unsigned getMinInstAlignment() const {
+      return MinInstAlignment;
     }
     const char *getPCSymbol() const {
       return PCSymbol;
@@ -557,9 +561,6 @@ namespace llvm {
     bool doesDwarfUseInlineInfoSection() const {
       return DwarfUsesInlineInfoSection;
     }
-    const char *getDwarfSectionOffsetDirective() const {
-      return DwarfSectionOffsetDirective;
-    }
     bool doesDwarfUseRelocationsAcrossSections() const {
       return DwarfUsesRelocationsAcrossSections;
     }
@@ -567,11 +568,11 @@ namespace llvm {
       return DwarfRegNumForCFI;
     }
 
-    void addInitialFrameState(MCSymbol *label, const MachineLocation &D,
-                              const MachineLocation &S) {
-      InitialFrameState.push_back(MachineMove(label, D, S));
+    void addInitialFrameState(const MCCFIInstruction &Inst) {
+      InitialFrameState.push_back(Inst);
     }
-    const std::vector<MachineMove> &getInitialFrameState() const {
+
+    const std::vector<MCCFIInstruction> &getInitialFrameState() const {
       return InitialFrameState;
     }
   };

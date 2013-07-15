@@ -523,11 +523,6 @@ getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
 const MCSection *TargetLoweringObjectFileMachO::
 SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
                        Mangler *Mang, const TargetMachine &TM) const {
-
-  // Handle thread local data.
-  if (Kind.isThreadBSS()) return TLSBSSSection;
-  if (Kind.isThreadData()) return TLSDataSection;
-
   if (Kind.isText())
     return GV->isWeakForLinker() ? TextCoalSection : TextSection;
 
@@ -579,6 +574,10 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
   // with the .zerofill directive (aka .lcomm).
   if (Kind.isBSSLocal())
     return DataBSSSection;
+
+  // Handle thread local data.
+  if (Kind.isThreadBSS()) return TLSBSSSection;
+  if (Kind.isThreadData()) return TLSDataSection;
 
   // Otherwise, just drop the variable in the normal data section.
   return DataSection;
@@ -733,8 +732,8 @@ getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
   }
   return getContext().getCOFFSection(Name,
                                      Characteristics,
-                                     Selection,
-                                     Kind);
+                                     Kind,
+                                     Selection);
 }
 
 static const char *getCOFFSectionPrefixForUniqueGlobal(SectionKind Kind) {
@@ -742,8 +741,11 @@ static const char *getCOFFSectionPrefixForUniqueGlobal(SectionKind Kind) {
     return ".text$";
   if (Kind.isBSS ())
     return ".bss$";
-  if (Kind.isThreadLocal())
-    return ".tls$";
+  if (Kind.isThreadLocal()) {
+    // 'LLVM' is just an arbitary string to ensure that the section name gets
+    // sorted in between '.tls$AAA' and '.tls$ZZZ' by the linker.
+    return ".tls$LLVM";
+  }
   if (Kind.isWriteable())
     return ".data$";
   return ".rdata$";
@@ -767,7 +769,7 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
     Characteristics |= COFF::IMAGE_SCN_LNK_COMDAT;
 
     return getContext().getCOFFSection(Name.str(), Characteristics,
-                          COFF::IMAGE_COMDAT_SELECT_ANY, Kind);
+                                       Kind, COFF::IMAGE_COMDAT_SELECT_ANY);
   }
 
   if (Kind.isText())
@@ -779,3 +781,49 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
   return getDataSection();
 }
 
+void TargetLoweringObjectFileCOFF::
+emitModuleFlags(MCStreamer &Streamer,
+                ArrayRef<Module::ModuleFlagEntry> ModuleFlags,
+                Mangler *Mang, const TargetMachine &TM) const {
+  MDNode *LinkerOptions = 0;
+
+  // Look for the "Linker Options" flag, since it's the only one we support.
+  for (ArrayRef<Module::ModuleFlagEntry>::iterator
+       i = ModuleFlags.begin(), e = ModuleFlags.end(); i != e; ++i) {
+    const Module::ModuleFlagEntry &MFE = *i;
+    StringRef Key = MFE.Key->getString();
+    Value *Val = MFE.Val;
+    if (Key == "Linker Options") {
+      LinkerOptions = cast<MDNode>(Val);
+      break;
+    }
+  }
+  if (!LinkerOptions)
+    return;
+
+  // Emit the linker options to the linker .drectve section.  According to the
+  // spec, this section is a space-separated string containing flags for linker.
+  const MCSection *Sec = getDrectveSection();
+  Streamer.SwitchSection(Sec);
+  for (unsigned i = 0, e = LinkerOptions->getNumOperands(); i != e; ++i) {
+    MDNode *MDOptions = cast<MDNode>(LinkerOptions->getOperand(i));
+    for (unsigned ii = 0, ie = MDOptions->getNumOperands(); ii != ie; ++ii) {
+      MDString *MDOption = cast<MDString>(MDOptions->getOperand(ii));
+      StringRef Op = MDOption->getString();
+      // Lead with a space for consistency with our dllexport implementation.
+      std::string Escaped(" ");
+      if (Op.find(" ") != StringRef::npos) {
+        // The PE-COFF spec says args with spaces must be quoted.  It doesn't say
+        // how to escape quotes, but it probably uses this algorithm:
+        // http://msdn.microsoft.com/en-us/library/17w5ykft(v=vs.85).aspx
+        // FIXME: Reuse escaping code from Support/Windows/Program.inc
+        Escaped.push_back('\"');
+        Escaped.append(Op);
+        Escaped.push_back('\"');
+      } else {
+        Escaped.append(Op);
+      }
+      Streamer.EmitBytes(Escaped);
+    }
+  }
+}

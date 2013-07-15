@@ -225,32 +225,6 @@ MCOperand X86MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
 }
 
 
-
-static void lower_subreg32(MCInst *MI, unsigned OpNo) {
-  // Convert registers in the addr mode according to subreg32.
-  unsigned Reg = MI->getOperand(OpNo).getReg();
-  if (Reg != 0)
-    MI->getOperand(OpNo).setReg(getX86SubSuperRegister(Reg, MVT::i32));
-}
-
-static void lower_lea64_32mem(MCInst *MI, unsigned OpNo) {
-  // Convert registers in the addr mode according to subreg64.
-  for (unsigned i = 0; i != 4; ++i) {
-    if (!MI->getOperand(OpNo+i).isReg()) continue;
-
-    unsigned Reg = MI->getOperand(OpNo+i).getReg();
-    // LEAs can use RIP-relative addressing, and RIP has no sub/super register.
-    if (Reg == 0 || Reg == X86::RIP) continue;
-
-    MI->getOperand(OpNo+i).setReg(getX86SubSuperRegister(Reg, MVT::i64));
-  }
-}
-
-/// LowerSubReg32_Op0 - Things like MOVZX16rr8 -> MOVZX32rr8.
-static void LowerSubReg32_Op0(MCInst &OutMI, unsigned NewOpc) {
-  OutMI.setOpcode(NewOpc);
-  lower_subreg32(&OutMI, 0);
-}
 /// LowerUnaryToTwoAddr - R = setb   -> R = sbb R, R
 static void LowerUnaryToTwoAddr(MCInst &OutMI, unsigned NewOpc) {
   OutMI.setOpcode(NewOpc);
@@ -278,6 +252,34 @@ static void SimplifyShortImmForm(MCInst &Inst, unsigned Opcode) {
   Inst = MCInst();
   Inst.setOpcode(Opcode);
   Inst.addOperand(Saved);
+}
+
+/// \brief If a movsx instruction has a shorter encoding for the used register
+/// simplify the instruction to use it instead.
+static void SimplifyMOVSX(MCInst &Inst) {
+  unsigned NewOpcode = 0;
+  unsigned Op0 = Inst.getOperand(0).getReg(), Op1 = Inst.getOperand(1).getReg();
+  switch (Inst.getOpcode()) {
+  default:
+    llvm_unreachable("Unexpected instruction!");
+  case X86::MOVSX16rr8:  // movsbw %al, %ax   --> cbtw
+    if (Op0 == X86::AX && Op1 == X86::AL)
+      NewOpcode = X86::CBW;
+    break;
+  case X86::MOVSX32rr16: // movswl %ax, %eax  --> cwtl
+    if (Op0 == X86::EAX && Op1 == X86::AX)
+      NewOpcode = X86::CWDE;
+    break;
+  case X86::MOVSX64rr32: // movslq %eax, %rax --> cltq
+    if (Op0 == X86::RAX && Op1 == X86::EAX)
+      NewOpcode = X86::CDQE;
+    break;
+  }
+
+  if (NewOpcode != 0) {
+    Inst = MCInst();
+    Inst.setOpcode(NewOpcode);
+  }
 }
 
 /// \brief Simplify things like MOV32rm to MOV32o32a.
@@ -376,9 +378,7 @@ void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
   // Handle a few special cases to eliminate operand modifiers.
 ReSimplify:
   switch (OutMI.getOpcode()) {
-  case X86::LEA64_32r: // Handle 'subreg rewriting' for the lea64_32mem operand.
-    lower_lea64_32mem(&OutMI, 1);
-    // FALL THROUGH.
+  case X86::LEA64_32r:
   case X86::LEA64r:
   case X86::LEA16r:
   case X86::LEA32r:
@@ -388,23 +388,10 @@ ReSimplify:
     assert(OutMI.getOperand(1+X86::AddrSegmentReg).getReg() == 0 &&
            "LEA has segment specified!");
     break;
-  case X86::MOVZX64rr32:  LowerSubReg32_Op0(OutMI, X86::MOV32rr); break;
-  case X86::MOVZX64rm32:  LowerSubReg32_Op0(OutMI, X86::MOV32rm); break;
-  case X86::MOV64ri64i32: LowerSubReg32_Op0(OutMI, X86::MOV32ri); break;
-  case X86::MOVZX64rr8:   LowerSubReg32_Op0(OutMI, X86::MOVZX32rr8); break;
-  case X86::MOVZX64rm8:   LowerSubReg32_Op0(OutMI, X86::MOVZX32rm8); break;
-  case X86::MOVZX64rr16:  LowerSubReg32_Op0(OutMI, X86::MOVZX32rr16); break;
-  case X86::MOVZX64rm16:  LowerSubReg32_Op0(OutMI, X86::MOVZX32rm16); break;
-  case X86::MOV8r0:       LowerUnaryToTwoAddr(OutMI, X86::XOR8rr); break;
   case X86::MOV32r0:      LowerUnaryToTwoAddr(OutMI, X86::XOR32rr); break;
 
-  case X86::MOV16r0:
-    LowerSubReg32_Op0(OutMI, X86::MOV32r0);   // MOV16r0 -> MOV32r0
-    LowerUnaryToTwoAddr(OutMI, X86::XOR32rr); // MOV32r0 -> XOR32rr
-    break;
-  case X86::MOV64r0:
-    LowerSubReg32_Op0(OutMI, X86::MOV32r0);   // MOV64r0 -> MOV32r0
-    LowerUnaryToTwoAddr(OutMI, X86::XOR32rr); // MOV32r0 -> XOR32rr
+  case X86::MOV32ri64:
+    OutMI.setOpcode(X86::MOV32ri);
     break;
 
   // Commute operands to get a smaller encoding by using VEX.R instead of VEX.B
@@ -598,6 +585,13 @@ ReSimplify:
   case X86::XOR32ri:    SimplifyShortImmForm(OutMI, X86::XOR32i32);  break;
   case X86::XOR64ri32:  SimplifyShortImmForm(OutMI, X86::XOR64i32);  break;
 
+  // Try to shrink some forms of movsx.
+  case X86::MOVSX16rr8:
+  case X86::MOVSX32rr16:
+  case X86::MOVSX64rr32:
+    SimplifyMOVSX(OutMI);
+    break;
+
   case X86::MORESTACK_RET:
     OutMI.setOpcode(X86::RET);
     break;
@@ -695,13 +689,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(Mang, *MF, *this);
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
-    if (isVerbose() && OutStreamer.hasRawTextSupport()) {
-      std::string TmpStr;
-      raw_string_ostream OS(TmpStr);
-      PrintDebugValueComment(MI, OS);
-      OutStreamer.EmitRawText(StringRef(OS.str()));
-    }
-    return;
+    llvm_unreachable("Should be handled target independently");
 
   // Emit nothing here but a comment if we can.
   case X86::Int_MemBarrier:

@@ -389,7 +389,7 @@ namespace llvm {
     void join(LiveInterval &Other,
               const int *ValNoAssignments,
               const int *RHSValNoAssignments,
-              SmallVector<VNInfo*, 16> &NewVNInfo,
+              SmallVectorImpl<VNInfo *> &NewVNInfo,
               MachineRegisterInfo *MRI);
 
     /// isInOneLiveRange - Return true if the range specified is entirely in the
@@ -397,6 +397,15 @@ namespace llvm {
     bool isInOneLiveRange(SlotIndex Start, SlotIndex End) const {
       const_iterator r = find(Start);
       return r != end() && r->containsRange(Start, End);
+    }
+
+    /// True iff this live range is a single segment that lies between the
+    /// specified boundaries, exclusively. Vregs live across a backedge are not
+    /// considered local. The boundaries are expected to lie within an extended
+    /// basic block, so vregs that are not live out should contain no holes.
+    bool isLocal(SlotIndex Start, SlotIndex End) const {
+      return beginIndex() > Start.getBaseIndex() &&
+        endIndex() < End.getBoundaryIndex();
     }
 
     /// removeRange - Remove the specified range from this interval.  Note that

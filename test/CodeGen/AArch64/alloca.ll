@@ -3,7 +3,7 @@
 declare void @use_addr(i8*)
 
 define void @test_simple_alloca(i64 %n) {
-; CHECK: test_simple_alloca:
+; CHECK-LABEL: test_simple_alloca:
 
   %buf = alloca i8, i64 %n
   ; Make sure we align the stack change to 16 bytes:
@@ -30,7 +30,7 @@ define void @test_simple_alloca(i64 %n) {
 declare void @use_addr_loc(i8*, i64*)
 
 define i64 @test_alloca_with_local(i64 %n) {
-; CHECK: test_alloca_with_local:
+; CHECK-LABEL: test_alloca_with_local:
 ; CHECK: sub sp, sp, #32
 ; CHECK: stp x29, x30, [sp, #16]
 
@@ -66,13 +66,13 @@ define i64 @test_alloca_with_local(i64 %n) {
 }
 
 define void @test_variadic_alloca(i64 %n, ...) {
-; CHECK: test_variadic_alloca:
+; CHECK-LABEL: test_variadic_alloca:
 
 ; CHECK: sub     sp, sp, #208
 ; CHECK: stp     x29, x30, [sp, #192]
 ; CHECK: add     x29, sp, #192
-; CHECK: sub     x9, x29, #192
-; CHECK: add     x8, x9, #0
+; CHECK: sub     [[TMP:x[0-9]+]], x29, #192
+; CHECK: add     x8, [[TMP]], #0
 ; CHECK: str     q7, [x8, #112]
 ; [...]
 ; CHECK: str     q1, [x8, #16]
@@ -89,7 +89,7 @@ define void @test_variadic_alloca(i64 %n, ...) {
 }
 
 define void @test_alloca_large_frame(i64 %n) {
-; CHECK: test_alloca_large_frame:
+; CHECK-LABEL: test_alloca_large_frame:
 
 ; CHECK: sub sp, sp, #496
 ; CHECK: stp x29, x30, [sp, #480]

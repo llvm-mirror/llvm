@@ -46,7 +46,7 @@ public:
                                               MachineBasicBlock::iterator &MBBI,
                                               LiveVariables *LV) const;
 
-  virtual const ARMBaseRegisterInfo &getRegisterInfo() const =0;
+  virtual const ARMBaseRegisterInfo &getRegisterInfo() const = 0;
   const ARMSubtarget &getSubtarget() const { return Subtarget; }
 
   ScheduleHazardRecognizer *
@@ -125,12 +125,6 @@ public:
 
   virtual bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const;
 
-  virtual MachineInstr *emitFrameIndexDebugValue(MachineFunction &MF,
-                                                 int FrameIx,
-                                                 uint64_t Offset,
-                                                 const MDNode *MDPtr,
-                                                 DebugLoc DL) const;
-
   virtual void reMaterialize(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator MI,
                              unsigned DestReg, unsigned SubIdx,
@@ -140,6 +134,10 @@ public:
   MachineInstr *duplicate(MachineInstr *Orig, MachineFunction &MF) const;
 
   MachineInstr *commuteInstruction(MachineInstr*, bool=false) const;
+
+  const MachineInstrBuilder &AddDReg(MachineInstrBuilder &MIB, unsigned Reg,
+                                     unsigned SubIdx, unsigned State,
+                                     const TargetRegisterInfo *TRI) const;
 
   virtual bool produceSameValue(const MachineInstr *MI0,
                                 const MachineInstr *MI1,
@@ -314,6 +312,10 @@ public:
   bool canCauseFpMLxStall(unsigned Opcode) const {
     return MLxHazardOpcodes.count(Opcode);
   }
+
+  /// Returns true if the instruction has a shift by immediate that can be
+  /// executed in one cycle less.
+  bool isSwiftFastImmShift(const MachineInstr *MI) const;
 };
 
 static inline

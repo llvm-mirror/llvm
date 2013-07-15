@@ -1038,6 +1038,24 @@ for your target.  It has the following strengths:
   are used to manipulate the input immediate (in this case, take the high or low
   16-bits of the immediate).
 
+* When using the 'Pat' class to map a pattern to an instruction that has one
+  or more complex operands (like e.g. `X86 addressing mode`_), the pattern may
+  either specify the operand as a whole using a ``ComplexPattern``, or else it
+  may specify the components of the complex operand separately.  The latter is
+  done e.g. for pre-increment instructions by the PowerPC back end:
+
+  ::
+
+    def STWU  : DForm_1<37, (outs ptr_rc:$ea_res), (ins GPRC:$rS, memri:$dst),
+                    "stwu $rS, $dst", LdStStoreUpd, []>,
+                    RegConstraint<"$dst.reg = $ea_res">, NoEncode<"$ea_res">;
+
+    def : Pat<(pre_store GPRC:$rS, ptr_rc:$ptrreg, iaddroff:$ptroff),
+              (STWU GPRC:$rS, iaddroff:$ptroff, ptr_rc:$ptrreg)>;
+
+  Here, the pair of ``ptroff`` and ``ptrreg`` operands is matched onto the
+  complex operand ``dst`` of class ``memri`` in the ``STWU`` instruction.
+
 * While the system does automate a lot, it still allows you to write custom C++
   code to match special cases if there is something that is hard to
   express.
@@ -1776,6 +1794,7 @@ Here is the table:
 :raw-html:`<th>NVPTX</th>`
 :raw-html:`<th>PowerPC</th>`
 :raw-html:`<th>Sparc</th>`
+:raw-html:`<th>SystemZ</th>`
 :raw-html:`<th>X86</th>`
 :raw-html:`<th>XCore</th>`
 :raw-html:`</tr>`
@@ -1790,8 +1809,9 @@ Here is the table:
 :raw-html:`<td class="yes"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="yes"></td> <!-- Sparc -->`
+:raw-html:`<td class="yes"></td> <!-- SystemZ -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
-:raw-html:`<td class="unknown"></td> <!-- XCore -->`
+:raw-html:`<td class="yes"></td> <!-- XCore -->`
 :raw-html:`</tr>`
 
 :raw-html:`<tr>`
@@ -1804,6 +1824,7 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
+:raw-html:`<td class="yes"></td> <!-- SystemZ -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
 :raw-html:`<td class="no"></td> <!-- XCore -->`
 :raw-html:`</tr>`
@@ -1817,9 +1838,10 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- Mips -->`
 :raw-html:`<td class="na"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
+:raw-html:`<td class="yes"></td> <!-- SystemZ -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
-:raw-html:`<td class="no"></td> <!-- XCore -->`
+:raw-html:`<td class="yes"></td> <!-- XCore -->`
 :raw-html:`</tr>`
 
 :raw-html:`<tr>`
@@ -1832,8 +1854,9 @@ Here is the table:
 :raw-html:`<td class="yes"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="unknown"></td> <!-- Sparc -->`
+:raw-html:`<td class="yes"></td> <!-- SystemZ -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
-:raw-html:`<td class="unknown"></td> <!-- XCore -->`
+:raw-html:`<td class="yes"></td> <!-- XCore -->`
 :raw-html:`</tr>`
 
 :raw-html:`<tr>`
@@ -1846,8 +1869,9 @@ Here is the table:
 :raw-html:`<td class="na"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="unknown"></td> <!-- Sparc -->`
+:raw-html:`<td class="yes"></td> <!-- SystemZ -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
-:raw-html:`<td class="unknown"></td> <!-- XCore -->`
+:raw-html:`<td class="no"></td> <!-- XCore -->`
 :raw-html:`</tr>`
 
 :raw-html:`<tr>`
@@ -1860,6 +1884,7 @@ Here is the table:
 :raw-html:`<td class="na"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
+:raw-html:`<td class="yes"></td> <!-- SystemZ -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
 :raw-html:`<td class="no"></td> <!-- XCore -->`
 :raw-html:`</tr>`
@@ -1874,8 +1899,9 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- NVPTX -->`
 :raw-html:`<td class="yes"></td> <!-- PowerPC -->`
 :raw-html:`<td class="unknown"></td> <!-- Sparc -->`
+:raw-html:`<td class="no"></td> <!-- SystemZ -->`
 :raw-html:`<td class="yes"></td> <!-- X86 -->`
-:raw-html:`<td class="unknown"></td> <!-- XCore -->`
+:raw-html:`<td class="no"></td> <!-- XCore -->`
 :raw-html:`</tr>`
 
 :raw-html:`<tr>`
@@ -1888,6 +1914,7 @@ Here is the table:
 :raw-html:`<td class="no"></td> <!-- NVPTX -->`
 :raw-html:`<td class="no"></td> <!-- PowerPC -->`
 :raw-html:`<td class="no"></td> <!-- Sparc -->`
+:raw-html:`<td class="no"></td> <!-- SystemZ -->`
 :raw-html:`<td class="partial"><a href="#feat_segstacks_x86">*</a></td> <!-- X86 -->`
 :raw-html:`<td class="no"></td> <!-- XCore -->`
 :raw-html:`</tr>`

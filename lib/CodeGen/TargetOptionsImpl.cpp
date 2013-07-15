@@ -49,4 +49,3 @@ bool TargetOptions::HonorSignDependentRoundingFPMath() const {
 StringRef TargetOptions::getTrapFunctionName() const {
   return TrapFuncName;
 }
-

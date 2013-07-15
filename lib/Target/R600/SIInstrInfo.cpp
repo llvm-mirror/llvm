@@ -24,7 +24,7 @@ using namespace llvm;
 
 SIInstrInfo::SIInstrInfo(AMDGPUTargetMachine &tm)
   : AMDGPUInstrInfo(tm),
-    RI(tm, *this)
+    RI(tm)
     { }
 
 const SIRegisterInfo &SIInstrInfo::getRegisterInfo() const {
@@ -42,28 +42,52 @@ SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // never be necessary.
   assert(DestReg != AMDGPU::SCC && SrcReg != AMDGPU::SCC);
 
-  const int16_t Sub0_15[] = {
+  static const int16_t Sub0_15[] = {
     AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, AMDGPU::sub3,
     AMDGPU::sub4, AMDGPU::sub5, AMDGPU::sub6, AMDGPU::sub7,
     AMDGPU::sub8, AMDGPU::sub9, AMDGPU::sub10, AMDGPU::sub11,
     AMDGPU::sub12, AMDGPU::sub13, AMDGPU::sub14, AMDGPU::sub15, 0
   };
 
-  const int16_t Sub0_7[] = {
+  static const int16_t Sub0_7[] = {
     AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, AMDGPU::sub3,
     AMDGPU::sub4, AMDGPU::sub5, AMDGPU::sub6, AMDGPU::sub7, 0
   };
 
-  const int16_t Sub0_3[] = {
+  static const int16_t Sub0_3[] = {
     AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, AMDGPU::sub3, 0
   };
 
-  const int16_t Sub0_1[] = {
+  static const int16_t Sub0_2[] = {
+    AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, 0
+  };
+
+  static const int16_t Sub0_1[] = {
     AMDGPU::sub0, AMDGPU::sub1, 0
   };
 
   unsigned Opcode;
   const int16_t *SubIndices;
+
+  if (AMDGPU::M0 == DestReg) {
+    // Check if M0 isn't already set to this value
+    for (MachineBasicBlock::reverse_iterator E = MBB.rend(),
+      I = MachineBasicBlock::reverse_iterator(MI); I != E; ++I) {
+
+      if (!I->definesRegister(AMDGPU::M0))
+        continue;
+
+      unsigned Opc = I->getOpcode();
+      if (Opc != TargetOpcode::COPY && Opc != AMDGPU::S_MOV_B32)
+        break;
+
+      if (!I->readsRegister(SrcReg))
+        break;
+
+      // The copy isn't necessary
+      return;
+    }
+  }
 
   if (AMDGPU::SReg_32RegClass.contains(DestReg)) {
     assert(AMDGPU::SReg_32RegClass.contains(SrcReg));
@@ -105,6 +129,11 @@ SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Opcode = AMDGPU::V_MOV_B32_e32;
     SubIndices = Sub0_1;
 
+  } else if (AMDGPU::VReg_96RegClass.contains(DestReg)) {
+    assert(AMDGPU::VReg_96RegClass.contains(SrcReg));
+    Opcode = AMDGPU::V_MOV_B32_e32;
+    SubIndices = Sub0_2;
+
   } else if (AMDGPU::VReg_128RegClass.contains(DestReg)) {
     assert(AMDGPU::VReg_128RegClass.contains(SrcReg) ||
 	   AMDGPU::SReg_128RegClass.contains(SrcReg));
@@ -138,6 +167,21 @@ SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
 }
 
+unsigned SIInstrInfo::commuteOpcode(unsigned Opcode) const {
+
+  int NewOpc;
+
+  // Try to map original to commuted opcode
+  if ((NewOpc = AMDGPU::getCommuteRev(Opcode)) != -1)
+    return NewOpc;
+
+  // Try to map commuted to original opcode
+  if ((NewOpc = AMDGPU::getCommuteOrig(Opcode)) != -1)
+    return NewOpc;
+
+  return Opcode;
+}
+
 MachineInstr *SIInstrInfo::commuteInstruction(MachineInstr *MI,
                                               bool NewMI) const {
 
@@ -145,7 +189,12 @@ MachineInstr *SIInstrInfo::commuteInstruction(MachineInstr *MI,
       !MI->getOperand(2).isReg())
     return 0;
 
-  return TargetInstrInfo::commuteInstruction(MI, NewMI);
+  MI = TargetInstrInfo::commuteInstruction(MI, NewMI);
+
+  if (MI)
+    MI->setDesc(get(commuteOpcode(MI->getOpcode())));
+
+  return MI;
 }
 
 MachineInstr * SIInstrInfo::getMovImmInstr(MachineFunction *MF, unsigned DstReg,

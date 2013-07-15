@@ -6,7 +6,7 @@ define i64 @test_trivial() {
  %A = tail call i64 @testi()
  ret i64 %A
 }
-; CHECK: test_trivial:
+; CHECK-LABEL: test_trivial:
 ; CHECK: jmp	_testi                  ## TAILCALL
 
 
@@ -15,7 +15,7 @@ define i64 @test_noop_bitcast() {
  %B = bitcast i64 %A to i64
  ret i64 %B
 }
-; CHECK: test_noop_bitcast:
+; CHECK-LABEL: test_noop_bitcast:
 ; CHECK: jmp	_testi                  ## TAILCALL
 
 
@@ -26,7 +26,7 @@ define i8* @test_inttoptr() {
   ret i8* %B
 }
 
-; CHECK: test_inttoptr:
+; CHECK-LABEL: test_inttoptr:
 ; CHECK: jmp	_testi                  ## TAILCALL
 
 
@@ -37,7 +37,7 @@ define <4 x i32> @test_vectorbitcast() {
   %B = bitcast <4 x float> %A to <4 x i32>
   ret <4 x i32> %B
 }
-; CHECK: test_vectorbitcast:
+; CHECK-LABEL: test_vectorbitcast:
 ; CHECK: jmp	_testv                  ## TAILCALL
 
 
@@ -47,12 +47,21 @@ define {i64, i64} @test_pair_trivial() {
   %A = tail call { i64, i64} @testp()
   ret { i64, i64} %A
 }
-; CHECK: test_pair_trivial:
+; CHECK-LABEL: test_pair_trivial:
 ; CHECK: jmp	_testp                  ## TAILCALL
 
+define {i64, i64} @test_pair_notail() {
+  %A = tail call i64 @testi()
 
+  %b = insertvalue {i64, i64} undef, i64 %A, 0
+  %c = insertvalue {i64, i64} %b, i64 %A, 1
 
-define {i64, i64} @test_pair_trivial_extract() {
+  ret { i64, i64} %c
+}
+; CHECK-LABEL: test_pair_notail:
+; CHECK-NOT: jmp	_testi
+
+define {i64, i64} @test_pair_extract_trivial() {
   %A = tail call { i64, i64} @testp()
   %x = extractvalue { i64, i64} %A, 0
   %y = extractvalue { i64, i64} %A, 1
@@ -63,10 +72,24 @@ define {i64, i64} @test_pair_trivial_extract() {
   ret { i64, i64} %c
 }
 
-; CHECK: test_pair_trivial_extract:
+; CHECK-LABEL: test_pair_extract_trivial:
 ; CHECK: jmp	_testp                  ## TAILCALL
 
-define {i8*, i64} @test_pair_conv_extract() {
+define {i64, i64} @test_pair_extract_notail() {
+  %A = tail call { i64, i64} @testp()
+  %x = extractvalue { i64, i64} %A, 0
+  %y = extractvalue { i64, i64} %A, 1
+  
+  %b = insertvalue {i64, i64} undef, i64 %y, 0
+  %c = insertvalue {i64, i64} %b, i64 %x, 1
+  
+  ret { i64, i64} %c
+}
+
+; CHECK-LABEL: test_pair_extract_notail:
+; CHECK-NOT: jmp	_testp
+
+define {i8*, i64} @test_pair_extract_conv() {
   %A = tail call { i64, i64} @testp()
   %x = extractvalue { i64, i64} %A, 0
   %y = extractvalue { i64, i64} %A, 1
@@ -79,10 +102,75 @@ define {i8*, i64} @test_pair_conv_extract() {
   ret { i8*, i64} %c
 }
 
-; CHECK: test_pair_conv_extract:
+; CHECK-LABEL: test_pair_extract_conv:
 ; CHECK: jmp	_testp                  ## TAILCALL
 
+define {i64, i64} @test_pair_extract_multiple() {
+  %A = tail call { i64, i64} @testp()
+  %x = extractvalue { i64, i64} %A, 0
+  %y = extractvalue { i64, i64} %A, 1
+  
+  %b = insertvalue {i64, i64} undef, i64 %x, 0
+  %c = insertvalue {i64, i64} %b, i64 %y, 1
 
+  %x1 = extractvalue { i64, i64} %b, 0
+  %y1 = extractvalue { i64, i64} %c, 1
+
+  %d = insertvalue {i64, i64} undef, i64 %x1, 0
+  %e = insertvalue {i64, i64} %b, i64 %y1, 1
+  
+  ret { i64, i64} %e
+}
+
+; CHECK-LABEL: test_pair_extract_multiple:
+; CHECK: jmp	_testp                  ## TAILCALL
+
+define {i64, i64} @test_pair_extract_undef() {
+  %A = tail call { i64, i64} @testp()
+  %x = extractvalue { i64, i64} %A, 0
+  
+  %b = insertvalue {i64, i64} undef, i64 %x, 0
+  
+  ret { i64, i64} %b
+}
+
+; CHECK-LABEL: test_pair_extract_undef:
+; CHECK: jmp	_testp                  ## TAILCALL
+
+declare { i64, { i32, i32 } } @testn()
+
+define {i64, {i32, i32}} @test_nest() {
+  %A = tail call { i64, { i32, i32 } } @testn()
+  %x = extractvalue { i64, { i32, i32}} %A, 0
+  %y = extractvalue { i64, { i32, i32}} %A, 1
+  %y1 = extractvalue { i32, i32} %y, 0
+  %y2 = extractvalue { i32, i32} %y, 1
+  
+  %b = insertvalue {i64, {i32, i32}} undef, i64 %x, 0
+  %c1 = insertvalue {i32, i32} undef, i32 %y1, 0
+  %c2 = insertvalue {i32, i32} %c1, i32 %y2, 1
+  %c = insertvalue {i64, {i32, i32}} %b, {i32, i32} %c2, 1
+ 
+  ret { i64, { i32, i32}} %c
+}
+
+; CHECK-LABEL: test_nest:
+; CHECK: jmp	_testn                  ## TAILCALL
+
+%struct.A = type { i32 }
+%struct.B = type { %struct.A, i32 }
+
+declare %struct.B* @testu()
+
+define %struct.A* @test_upcast() {
+entry:
+  %A = tail call %struct.B* @testu()
+  %x = getelementptr inbounds %struct.B* %A, i32 0, i32 0
+  ret %struct.A* %x
+}
+
+; CHECK-LABEL: test_upcast:
+; CHECK: jmp	_testu                  ## TAILCALL
 
 ; PR13006
 define { i64, i64 } @crash(i8* %this) {
@@ -118,7 +206,7 @@ entry:
 ;   return funcs[n](0, 0, 0, 0, 0, 0);
 ; }
 ;
-; CHECK: rdar12282281
+; CHECK-LABEL: rdar12282281
 ; CHECK: jmpq *%r11 # TAILCALL
 @funcs = external constant [0 x i32 (i8*, ...)*]
 
@@ -133,7 +221,7 @@ entry:
 
 define x86_fp80 @fp80_call(x86_fp80 %x) nounwind  {
 entry:
-; CHECK: fp80_call:
+; CHECK-LABEL: fp80_call:
 ; CHECK: jmp _fp80_callee
   %call = tail call x86_fp80 @fp80_callee(x86_fp80 %x) nounwind
   ret x86_fp80 %call
@@ -144,7 +232,7 @@ declare x86_fp80 @fp80_callee(x86_fp80)
 ; rdar://12229511
 define x86_fp80 @trunc_fp80(x86_fp80 %x) nounwind  {
 entry:
-; CHECK: trunc_fp80
+; CHECK-LABEL: trunc_fp80
 ; CHECK: callq _trunc
 ; CHECK-NOT: jmp _trunc
 ; CHECK: ret

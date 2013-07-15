@@ -8,10 +8,11 @@ declare void @use_pointer(i8*)
 
 @x = external global i8*
 
-; CHECK: define void @test0(
+; CHECK-LABEL: define void @test0(
 ; CHECK: entry:
 ; CHECK-NEXT: tail call void @objc_storeStrong(i8** @x, i8* %p) [[NUW:#[0-9]+]]
 ; CHECK-NEXT: ret void
+; CHECK-NEXT: }
 define void @test0(i8* %p) {
 entry:
   %0 = tail call i8* @objc_retain(i8* %p) nounwind
@@ -107,6 +108,7 @@ entry:
 ; CHECK: define i1 @test5(i8* %newValue, i8* %foo) {
 ; CHECK: %t = icmp eq i8* %x1, %foo
 ; CHECK: tail call void @objc_storeStrong(i8** @x, i8* %newValue) [[NUW]]
+; CHECK: }
 define i1 @test5(i8* %newValue, i8* %foo) {
 entry:
   %x0 = tail call i8* @objc_retain(i8* %newValue) nounwind
@@ -122,6 +124,7 @@ entry:
 ; CHECK: define i1 @test6(i8* %newValue, i8* %foo) {
 ; CHECK: %t = icmp eq i8* %x1, %foo
 ; CHECK: tail call void @objc_storeStrong(i8** @x, i8* %newValue) [[NUW]]
+; CHECK: }
 define i1 @test6(i8* %newValue, i8* %foo) {
 entry:
   %x0 = tail call i8* @objc_retain(i8* %newValue) nounwind
@@ -134,7 +137,7 @@ entry:
 
 ; Like test0, but there's no store, so don't form an objc_storeStrong.
 
-;      CHECK: define void @test7(
+;      CHECK-LABEL: define void @test7(
 ; CHECK-NEXT: entry:
 ; CHECK-NEXT:   %0 = tail call i8* @objc_retain(i8* %p) [[NUW]]
 ; CHECK-NEXT:   %tmp = load i8** @x, align 8
@@ -151,7 +154,7 @@ entry:
 
 ; Like test0, but there's no retain, so don't form an objc_storeStrong.
 
-;      CHECK: define void @test8(
+;      CHECK-LABEL: define void @test8(
 ; CHECK-NEXT: entry:
 ; CHECK-NEXT:   %tmp = load i8** @x, align 8
 ; CHECK-NEXT:   store i8* %p, i8** @x, align 8

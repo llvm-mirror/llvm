@@ -21,13 +21,12 @@
 namespace llvm {
 
 class R600TargetMachine;
-class TargetInstrInfo;
 
 struct R600RegisterInfo : public AMDGPURegisterInfo {
   AMDGPUTargetMachine &TM;
-  const TargetInstrInfo &TII;
+  RegClassWeight RCW;
 
-  R600RegisterInfo(AMDGPUTargetMachine &tm, const TargetInstrInfo &tii);
+  R600RegisterInfo(AMDGPUTargetMachine &tm);
 
   virtual BitVector getReservedRegs(const MachineFunction &MF) const;
 
@@ -47,6 +46,8 @@ struct R600RegisterInfo : public AMDGPURegisterInfo {
   /// \returns the sub reg enum value for the given \p Channel
   /// (e.g. getSubRegFromChannel(0) -> AMDGPU::sel_x)
   unsigned getSubRegFromChannel(unsigned Channel) const;
+
+  virtual const RegClassWeight &getRegClassWeight(const TargetRegisterClass *RC) const;
 
 };
 

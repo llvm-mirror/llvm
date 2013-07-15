@@ -30,6 +30,7 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -44,6 +45,7 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Transforms/ObjCARC.h"
 using namespace llvm;
 
 static cl::opt<bool>
@@ -68,7 +70,7 @@ const char* LTOCodeGenerator::getVersionString() {
 
 LTOCodeGenerator::LTOCodeGenerator()
   : _context(getGlobalContext()),
-    _linker("LinkTimeOptimizer", "ld-temp.o", _context), _target(NULL),
+    _linker(new Module("ld-temp.o", _context)), _target(NULL),
     _emitDwarfDebugInfo(false), _scopeRestrictionsDone(false),
     _codeModel(LTO_CODEGEN_PIC_MODEL_DYNAMIC),
     _nativeObjectFile(NULL) {
@@ -80,6 +82,7 @@ LTOCodeGenerator::LTOCodeGenerator()
 LTOCodeGenerator::~LTOCodeGenerator() {
   delete _target;
   delete _nativeObjectFile;
+  delete _linker.getModule();
 
   for (std::vector<char*>::iterator I = _codegenOptions.begin(),
          E = _codegenOptions.end(); I != E; ++I)
@@ -87,7 +90,7 @@ LTOCodeGenerator::~LTOCodeGenerator() {
 }
 
 bool LTOCodeGenerator::addModule(LTOModule* mod, std::string& errMsg) {
-  bool ret = _linker.LinkInModule(mod->getLLVVMModule(), &errMsg);
+  bool ret = _linker.linkInModule(mod->getLLVVMModule(), &errMsg);
 
   const std::vector<const char*> &undefs = mod->getAsmUndefinedRefs();
   for (int i = 0, e = undefs.size(); i != e; ++i)
@@ -127,8 +130,10 @@ bool LTOCodeGenerator::writeMergedModules(const char *path,
   if (determineTarget(errMsg))
     return true;
 
-  // mark which symbols can not be internalized
-  applyScopeRestrictions();
+  // Run the verifier on the merged modules.
+  PassManager passes;
+  passes.add(createVerifierPass());
+  passes.run(*_linker.getModule());
 
   // create output file
   std::string ErrInfo;
@@ -157,36 +162,32 @@ bool LTOCodeGenerator::writeMergedModules(const char *path,
 
 bool LTOCodeGenerator::compile_to_file(const char** name, std::string& errMsg) {
   // make unique temp .o file to put generated object file
-  sys::PathWithStatus uniqueObjPath("lto-llvm.o");
-  if (uniqueObjPath.createTemporaryFileOnDisk(false, &errMsg)) {
-    uniqueObjPath.eraseFromDisk();
+  SmallString<128> Filename;
+  int FD;
+  error_code EC = sys::fs::createTemporaryFile("lto-llvm", "o", FD, Filename);
+  if (EC) {
+    errMsg = EC.message();
     return true;
   }
-  sys::RemoveFileOnSignal(uniqueObjPath);
 
   // generate object file
-  bool genResult = false;
-  tool_output_file objFile(uniqueObjPath.c_str(), errMsg);
-  if (!errMsg.empty()) {
-    uniqueObjPath.eraseFromDisk();
-    return true;
-  }
+  tool_output_file objFile(Filename.c_str(), FD);
 
-  genResult = this->generateObjectFile(objFile.os(), errMsg);
+  bool genResult = generateObjectFile(objFile.os(), errMsg);
   objFile.os().close();
   if (objFile.os().has_error()) {
     objFile.os().clear_error();
-    uniqueObjPath.eraseFromDisk();
+    sys::fs::remove(Twine(Filename));
     return true;
   }
 
   objFile.keep();
   if (genResult) {
-    uniqueObjPath.eraseFromDisk();
+    sys::fs::remove(Twine(Filename));
     return true;
   }
 
-  _nativeObjectPath = uniqueObjPath.str();
+  _nativeObjectPath = Filename.c_str();
   *name = _nativeObjectPath.c_str();
   return false;
 }
@@ -203,13 +204,13 @@ const void* LTOCodeGenerator::compile(size_t* length, std::string& errMsg) {
   OwningPtr<MemoryBuffer> BuffPtr;
   if (error_code ec = MemoryBuffer::getFile(name, BuffPtr, -1, false)) {
     errMsg = ec.message();
-    sys::Path(_nativeObjectPath).eraseFromDisk();
+    sys::fs::remove(_nativeObjectPath);
     return NULL;
   }
   _nativeObjectFile = BuffPtr.take();
 
   // remove temp files
-  sys::Path(_nativeObjectPath).eraseFromDisk();
+  sys::fs::remove(_nativeObjectPath);
 
   // return buffer, unless error
   if (_nativeObjectFile == NULL)
@@ -218,9 +219,14 @@ const void* LTOCodeGenerator::compile(size_t* length, std::string& errMsg) {
   return _nativeObjectFile->getBufferStart();
 }
 
-bool LTOCodeGenerator::determineTarget(std::string& errMsg) {
+bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
   if (_target != NULL)
     return false;
+
+  // if options were requested, set them
+  if (!_codegenOptions.empty())
+    cl::ParseCommandLineOptions(_codegenOptions.size(),
+                                const_cast<char **>(&_codegenOptions[0]));
 
   std::string TripleStr = _linker.getModule()->getTargetTriple();
   if (TripleStr.empty())
@@ -286,9 +292,7 @@ static void findUsedValues(GlobalVariable *LLVMUsed,
                            SmallPtrSet<GlobalValue*, 8> &UsedValues) {
   if (LLVMUsed == 0) return;
 
-  ConstantArray *Inits = dyn_cast<ConstantArray>(LLVMUsed->getInitializer());
-  if (Inits == 0) return;
-
+  ConstantArray *Inits = cast<ConstantArray>(LLVMUsed->getInitializer());
   for (unsigned i = 0, e = Inits->getNumOperands(); i != e; ++i)
     if (GlobalValue *GV =
         dyn_cast<GlobalValue>(Inits->getOperand(i)->stripPointerCasts()))
@@ -304,8 +308,8 @@ void LTOCodeGenerator::applyScopeRestrictions() {
   passes.add(createVerifierPass());
 
   // mark which symbols can not be internalized
-  MCContext Context(*_target->getMCAsmInfo(), *_target->getRegisterInfo(),NULL);
-  Mangler mangler(Context, *_target->getDataLayout());
+  MCContext Context(_target->getMCAsmInfo(), _target->getRegisterInfo(), NULL);
+  Mangler mangler(Context, _target);
   std::vector<const char*> mustPreserveList;
   SmallPtrSet<GlobalValue*, 8> asmUsed;
 
@@ -325,23 +329,25 @@ void LTOCodeGenerator::applyScopeRestrictions() {
   if (LLVMCompilerUsed)
     LLVMCompilerUsed->eraseFromParent();
 
-  llvm::Type *i8PTy = llvm::Type::getInt8PtrTy(_context);
-  std::vector<Constant*> asmUsed2;
-  for (SmallPtrSet<GlobalValue*, 16>::const_iterator i = asmUsed.begin(),
-         e = asmUsed.end(); i !=e; ++i) {
-    GlobalValue *GV = *i;
-    Constant *c = ConstantExpr::getBitCast(GV, i8PTy);
-    asmUsed2.push_back(c);
+  if (!asmUsed.empty()) {
+    llvm::Type *i8PTy = llvm::Type::getInt8PtrTy(_context);
+    std::vector<Constant*> asmUsed2;
+    for (SmallPtrSet<GlobalValue*, 16>::const_iterator i = asmUsed.begin(),
+           e = asmUsed.end(); i !=e; ++i) {
+      GlobalValue *GV = *i;
+      Constant *c = ConstantExpr::getBitCast(GV, i8PTy);
+      asmUsed2.push_back(c);
+    }
+
+    llvm::ArrayType *ATy = llvm::ArrayType::get(i8PTy, asmUsed2.size());
+    LLVMCompilerUsed =
+      new llvm::GlobalVariable(*mergedModule, ATy, false,
+                               llvm::GlobalValue::AppendingLinkage,
+                               llvm::ConstantArray::get(ATy, asmUsed2),
+                               "llvm.compiler.used");
+
+    LLVMCompilerUsed->setSection("llvm.metadata");
   }
-
-  llvm::ArrayType *ATy = llvm::ArrayType::get(i8PTy, asmUsed2.size());
-  LLVMCompilerUsed =
-    new llvm::GlobalVariable(*mergedModule, ATy, false,
-                             llvm::GlobalValue::AppendingLinkage,
-                             llvm::ConstantArray::get(ATy, asmUsed2),
-                             "llvm.compiler.used");
-
-  LLVMCompilerUsed->setSection("llvm.metadata");
 
   passes.add(createInternalizePass(mustPreserveList));
 
@@ -359,12 +365,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
 
   Module* mergedModule = _linker.getModule();
 
-  // if options were requested, set them
-  if (!_codegenOptions.empty())
-    cl::ParseCommandLineOptions(_codegenOptions.size(),
-                                const_cast<char **>(&_codegenOptions[0]));
-
-  // mark which symbols can not be internalized
+  // Mark which symbols can not be internalized
   this->applyScopeRestrictions();
 
   // Instantiate the pass manager to organize the passes.
@@ -380,12 +381,11 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   // Enabling internalize here would use its AllButMain variant. It
   // keeps only main if it exists and does nothing for libraries. Instead
   // we create the pass ourselves with the symbol list provided by the linker.
-  if (!DisableOpt) {
+  if (!DisableOpt)
     PassManagerBuilder().populateLTOPassManager(passes,
                                               /*Internalize=*/false,
                                               !DisableInline,
                                               DisableGVNLoadPRE);
-  }
 
   // Make sure everything is still good.
   passes.add(createVerifierPass());
@@ -396,6 +396,10 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   _target->addAnalysisPasses(codeGenPasses);
 
   formatted_raw_ostream Out(out);
+
+  // If the bitcode files contain ARC code and were compiled with optimization,
+  // the ObjCARCContractPass must be run, so do it unconditionally here.
+  codeGenPasses.add(createObjCARCContractPass());
 
   if (_target->addPassesToEmitFile(codeGenPasses, Out,
                                    TargetMachine::CGFT_ObjectFile)) {

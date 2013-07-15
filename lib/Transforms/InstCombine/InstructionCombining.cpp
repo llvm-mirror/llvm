@@ -1483,7 +1483,7 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
       Module *M = II->getParent()->getParent()->getParent();
       Function *F = Intrinsic::getDeclaration(M, Intrinsic::donothing);
       InvokeInst::Create(F, II->getNormalDest(), II->getUnwindDest(),
-                         ArrayRef<Value *>(), "", II->getParent());
+                         None, "", II->getParent());
     }
     return EraseInstFromFunction(MI);
   }
@@ -2042,7 +2042,7 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
         continue;
       // If Filter is a subset of LFilter, i.e. every element of Filter is also
       // an element of LFilter, then discard LFilter.
-      SmallVector<Value *, 16>::iterator J = NewClauses.begin() + j;
+      SmallVectorImpl<Value *>::iterator J = NewClauses.begin() + j;
       // If Filter is empty then it is a subset of LFilter.
       if (!FElts) {
         // Discard LFilter.

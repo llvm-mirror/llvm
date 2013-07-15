@@ -47,7 +47,7 @@ class SIInsertWaits : public MachineFunctionPass {
 private:
   static char ID;
   const SIInstrInfo *TII;
-  const SIRegisterInfo &TRI;
+  const SIRegisterInfo *TRI;
   const MachineRegisterInfo *MRI;
 
   /// \brief Constant hardware limits
@@ -97,8 +97,8 @@ private:
 public:
   SIInsertWaits(TargetMachine &tm) :
     MachineFunctionPass(ID),
-    TII(static_cast<const SIInstrInfo*>(tm.getInstrInfo())),
-    TRI(TII->getRegisterInfo()) { }
+    TII(0),
+    TRI(0) { }
 
   virtual bool runOnMachineFunction(MachineFunction &MF);
 
@@ -134,10 +134,12 @@ Counters SIInsertWaits::getHwCounts(MachineInstr &MI) {
   if (TSFlags & SIInstrFlags::LGKM_CNT) {
 
     MachineOperand &Op = MI.getOperand(0);
+    if (!Op.isReg())
+      Op = MI.getOperand(1);
     assert(Op.isReg() && "First LGKM operand must be a register!");
 
     unsigned Reg = Op.getReg();
-    unsigned Size = TRI.getMinimalPhysRegClass(Reg)->getSize();
+    unsigned Size = TRI->getMinimalPhysRegClass(Reg)->getSize();
     Result.Named.LGKM = Size > 4 ? 2 : 1;
 
   } else {
@@ -182,12 +184,12 @@ RegInterval SIInsertWaits::getRegInterval(MachineOperand &Op) {
     return std::make_pair(0, 0);
 
   unsigned Reg = Op.getReg();
-  unsigned Size = TRI.getMinimalPhysRegClass(Reg)->getSize();
+  unsigned Size = TRI->getMinimalPhysRegClass(Reg)->getSize();
 
   assert(Size >= 4);
 
   RegInterval Result;
-  Result.first = TRI.getEncodingValue(Reg);
+  Result.first = TRI->getEncodingValue(Reg);
   Result.second = Result.first + Size / 4;
 
   return Result;
@@ -302,21 +304,8 @@ static void increaseCounters(Counters &Dst, const Counters &Src) {
     Dst.Array[i] = std::max(Dst.Array[i], Src.Array[i]);
 }
 
-bool SIInsertWaits::unorderedDefines(MachineInstr &MI) {
-
-  uint64_t TSFlags = TII->get(MI.getOpcode()).TSFlags;
-  if (TSFlags & SIInstrFlags::LGKM_CNT)
-    return true;
-
-  if (TSFlags & SIInstrFlags::EXP_CNT)
-    return ExpInstrTypesSeen == 3;
-
-  return false;
-}
-
 Counters SIInsertWaits::handleOperands(MachineInstr &MI) {
 
-  bool UnorderedDefines = unorderedDefines(MI);
   Counters Result = ZeroCounts;
 
   // For each register affected by this
@@ -329,8 +318,7 @@ Counters SIInsertWaits::handleOperands(MachineInstr &MI) {
 
       if (Op.isDef()) {
         increaseCounters(Result, UsedRegs[j]);
-        if (UnorderedDefines)
-          increaseCounters(Result, DefinedRegs[j]);
+        increaseCounters(Result, DefinedRegs[j]);
       }
 
       if (Op.isUse())
@@ -342,8 +330,10 @@ Counters SIInsertWaits::handleOperands(MachineInstr &MI) {
 }
 
 bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
-
   bool Changes = false;
+
+  TII = static_cast<const SIInstrInfo*>(MF.getTarget().getInstrInfo());
+  TRI = static_cast<const SIRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
   MRI = &MF.getRegInfo();
 

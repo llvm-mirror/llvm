@@ -381,7 +381,8 @@ private:
           BlobData = 0;
         } else {
           for (unsigned e = Vals.size(); RecordIdx != e; ++RecordIdx) {
-            assert(Vals[RecordIdx] < 256 && "Value too large to emit as blob");
+            assert(isUInt<8>(Vals[RecordIdx]) &&
+                   "Value too large to emit as blob");
             WriteByte((unsigned char)Vals[RecordIdx]);
           }
         }
@@ -458,7 +459,7 @@ public:
   template<typename uintty>
   void EmitRecordWithArray(unsigned Abbrev, SmallVectorImpl<uintty> &Vals,
                           const char *ArrayData, unsigned ArrayLen) {
-    return EmitRecordWithAbbrevImpl(Abbrev, Vals, StringRef(ArrayData, 
+    return EmitRecordWithAbbrevImpl(Abbrev, Vals, StringRef(ArrayData,
                                                             ArrayLen));
   }
 

@@ -195,10 +195,9 @@ static void findUsedValues(GlobalVariable *LLVMUsed,
                            SmallPtrSet<const GlobalValue*, 8> &UsedValues) {
   if (LLVMUsed == 0) return;
   UsedValues.insert(LLVMUsed);
-  
-  ConstantArray *Inits = dyn_cast<ConstantArray>(LLVMUsed->getInitializer());
-  if (Inits == 0) return;
-  
+
+  ConstantArray *Inits = cast<ConstantArray>(LLVMUsed->getInitializer());
+
   for (unsigned i = 0, e = Inits->getNumOperands(); i != e; ++i)
     if (GlobalValue *GV = 
           dyn_cast<GlobalValue>(Inits->getOperand(i)->stripPointerCasts()))
@@ -333,16 +332,6 @@ bool StripDebugDeclare::runOnModule(Module &M) {
   return true;
 }
 
-/// getRealLinkageName - If special LLVM prefix that is used to inform the asm 
-/// printer to not emit usual symbol prefix before the symbol name is used then
-/// return linkage name after skipping this special LLVM prefix.
-static StringRef getRealLinkageName(StringRef LinkageName) {
-  char One = '\1';
-  if (LinkageName.startswith(StringRef(&One, 1)))
-    return LinkageName.substr(1);
-  return LinkageName;
-}
-
 bool StripDeadDebugInfo::runOnModule(Module &M) {
   bool Changed = false;
 
@@ -355,14 +344,17 @@ bool StripDeadDebugInfo::runOnModule(Module &M) {
   if (NamedMDNode *NMD = M.getNamedMetadata("llvm.dbg.gv")) {
     SmallVector<MDNode *, 8> MDs;
     for (unsigned i = 0, e = NMD->getNumOperands(); i != e; ++i)
-      if (DIGlobalVariable(NMD->getOperand(i)).Verify())
+      if (NMD->getOperand(i)) {
+        assert(DIGlobalVariable(NMD->getOperand(i)).isGlobalVariable() &&
+          "A MDNode in llvm.dbg.gv should be a DIGlobalVariable.");
         MDs.push_back(NMD->getOperand(i));
+      }
       else
         Changed = true;
     NMD->eraseFromParent();
     NMD = NULL;
 
-    for (SmallVector<MDNode *, 8>::iterator I = MDs.begin(),
+    for (SmallVectorImpl<MDNode *>::iterator I = MDs.begin(),
            E = MDs.end(); I != E; ++I) {
       GlobalVariable *GV = DIGlobalVariable(*I).getGlobal();
       if (GV && M.getGlobalVariable(GV->getName(), true)) {
@@ -379,14 +371,17 @@ bool StripDeadDebugInfo::runOnModule(Module &M) {
   if (NamedMDNode *NMD = M.getNamedMetadata("llvm.dbg.sp")) {
     SmallVector<MDNode *, 8> MDs;
     for (unsigned i = 0, e = NMD->getNumOperands(); i != e; ++i)
-      if (DISubprogram(NMD->getOperand(i)).Verify())
+      if (NMD->getOperand(i)) {
+        assert(DISubprogram(NMD->getOperand(i)).isSubprogram() &&
+          "A MDNode in llvm.dbg.sp should be a DISubprogram.");
         MDs.push_back(NMD->getOperand(i));
+      }
       else
         Changed = true;
     NMD->eraseFromParent();
     NMD = NULL;
 
-    for (SmallVector<MDNode *, 8>::iterator I = MDs.begin(),
+    for (SmallVectorImpl<MDNode *>::iterator I = MDs.begin(),
            E = MDs.end(); I != E; ++I) {
       bool FnIsLive = false;
       if (Function *F = DISubprogram(*I).getFunction())
@@ -402,9 +397,8 @@ bool StripDeadDebugInfo::runOnModule(Module &M) {
         StringRef FName = DISubprogram(*I).getLinkageName();
         if (FName.empty())
           FName = DISubprogram(*I).getName();
-        if (NamedMDNode *LVNMD = 
-            M.getNamedMetadata(Twine("llvm.dbg.lv.", 
-                                     getRealLinkageName(FName)))) 
+        if (NamedMDNode *LVNMD = M.getNamedMetadata(
+                "llvm.dbg.lv." + Function::getRealLinkageName(FName)))
           LVNMD->eraseFromParent();
       }
     }

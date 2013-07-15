@@ -58,18 +58,19 @@ AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, StringRef TT,
   LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OptLevel),
   Subtarget(TT, CPU, FS),
   Layout(Subtarget.getDataLayout()),
-  FrameLowering(TargetFrameLowering::StackGrowsUp,
-      Subtarget.device()->getStackAlignment(), 0),
+  FrameLowering(TargetFrameLowering::StackGrowsUp, 16 // Stack Alignment
+                                                 , 0),
   IntrinsicInfo(this),
   InstrItins(&Subtarget.getInstrItineraryData()) {
   // TLInfo uses InstrInfo so it must be initialized after.
-  if (Subtarget.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX) {
-    InstrInfo = new R600InstrInfo(*this);
-    TLInfo = new R600TargetLowering(*this);
+  if (Subtarget.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
+    InstrInfo.reset(new R600InstrInfo(*this));
+    TLInfo.reset(new R600TargetLowering(*this));
   } else {
-    InstrInfo = new SIInstrInfo(*this);
-    TLInfo = new SITargetLowering(*this);
+    InstrInfo.reset(new SIInstrInfo(*this));
+    TLInfo.reset(new SITargetLowering(*this));
   }
+  initAsmInfo();
 }
 
 AMDGPUTargetMachine::~AMDGPUTargetMachine() {
@@ -81,7 +82,7 @@ public:
   AMDGPUPassConfig(AMDGPUTargetMachine *TM, PassManagerBase &PM)
     : TargetPassConfig(TM, PM) {
     const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
-    if (ST.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX) {
+    if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
       enablePass(&MachineSchedulerID);
       MachineSchedRegistry::setDefault(createR600MachineScheduler);
     }
@@ -107,19 +108,20 @@ TargetPassConfig *AMDGPUTargetMachine::createPassConfig(PassManagerBase &PM) {
 bool
 AMDGPUPassConfig::addPreISel() {
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
-  if (ST.device()->getGeneration() > AMDGPUDeviceInfo::HD6XXX) {
-    addPass(createAMDGPUStructurizeCFGPass());
+  if (ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
+    addPass(createStructurizeCFGPass());
     addPass(createSIAnnotateControlFlowPass());
+  } else {
+    addPass(createR600TextureIntrinsicsReplacer());
   }
   return false;
 }
 
 bool AMDGPUPassConfig::addInstSelector() {
-  addPass(createAMDGPUPeepholeOpt(*TM));
   addPass(createAMDGPUISelDag(getAMDGPUTargetMachine()));
 
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
-  if (ST.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX) {
+  if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
     // This callbacks this pass uses are not implemented yet on SI.
     addPass(createAMDGPUIndirectAddressingPass(*TM));
   }
@@ -128,31 +130,42 @@ bool AMDGPUPassConfig::addInstSelector() {
 
 bool AMDGPUPassConfig::addPreRegAlloc() {
   addPass(createAMDGPUConvertToISAPass(*TM));
+  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+
+  if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
+    addPass(createR600VectorRegMerger(*TM));
+  }
   return false;
 }
 
 bool AMDGPUPassConfig::addPostRegAlloc() {
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
 
-  if (ST.device()->getGeneration() > AMDGPUDeviceInfo::HD6XXX) {
+  if (ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
     addPass(createSIInsertWaits(*TM));
   }
   return false;
 }
 
 bool AMDGPUPassConfig::addPreSched2() {
+  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
 
+  if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
+    addPass(createR600EmitClauseMarkers(*TM));
+  }
   addPass(&IfConverterID);
   return false;
 }
 
 bool AMDGPUPassConfig::addPreEmitPass() {
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
-  if (ST.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX) {
+  if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
     addPass(createAMDGPUCFGPreparationPass(*TM));
     addPass(createAMDGPUCFGStructurizerPass(*TM));
     addPass(createR600ExpandSpecialInstrsPass(*TM));
     addPass(&FinalizeMachineBundlesID);
+    addPass(createR600Packetizer(*TM));
+    addPass(createR600ControlFlowFinalizer(*TM));
   } else {
     addPass(createSILowerControlFlowPass(*TM));
   }

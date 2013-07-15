@@ -33,8 +33,7 @@
 #include <unistd.h>
 #else
 #include <io.h>
-// Simplistic definitinos of these macros to allow files to be read with
-// MapInFilePages.
+// Simplistic definitinos of these macros for use in getOpenFile.
 #ifndef S_ISREG
 #define S_ISREG(x) (1)
 #endif
@@ -72,10 +71,12 @@ static void CopyStringRef(char *Memory, StringRef Data) {
   Memory[Data.size()] = 0; // Null terminate string.
 }
 
+namespace {
 struct NamedBufferAlloc {
   StringRef Name;
   NamedBufferAlloc(StringRef Name) : Name(Name) {}
 };
+}
 
 void *operator new(size_t N, const NamedBufferAlloc &Alloc) {
   char *Mem = static_cast<char *>(operator new(N + Alloc.Name.size() + 1));
@@ -168,14 +169,6 @@ error_code MemoryBuffer::getFileOrSTDIN(StringRef Filename,
                                         OwningPtr<MemoryBuffer> &result,
                                         int64_t FileSize) {
   if (Filename == "-")
-    return getSTDIN(result);
-  return getFile(Filename, result, FileSize);
-}
-
-error_code MemoryBuffer::getFileOrSTDIN(const char *Filename,
-                                        OwningPtr<MemoryBuffer> &result,
-                                        int64_t FileSize) {
-  if (strcmp(Filename, "-") == 0)
     return getSTDIN(result);
   return getFile(Filename, result, FileSize);
 }
@@ -418,7 +411,7 @@ error_code MemoryBuffer::getSTDIN(OwningPtr<MemoryBuffer> &result) {
   //
   // FIXME: That isn't necessarily true, we should try to mmap stdin and
   // fallback if it fails.
-  sys::Program::ChangeStdinToBinary();
+  sys::ChangeStdinToBinary();
 
   return getMemoryBufferForStream(0, "<stdin>", result);
 }

@@ -247,4 +247,110 @@ _main:
     mov [16][eax][ebx*4], ecx
 // CHECK: movl %ecx, -16(%eax,%ebx,4)
     mov [eax][ebx*4 - 16], ecx
-	ret
+
+// CHECK: prefetchnta 12800(%esi)
+    prefetchnta [esi + (200*64)]
+// CHECK: prefetchnta 32(%esi)
+    prefetchnta [esi + (64/2)]
+// CHECK: prefetchnta 128(%esi)
+    prefetchnta [esi + (64/2*4)]
+// CHECK: prefetchnta 8(%esi)
+    prefetchnta [esi + (64/(2*4))]
+// CHECK: prefetchnta 48(%esi)
+    prefetchnta [esi + (64/(2*4)+40)]
+
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax][ebx*4 - 2*8], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax][4*ebx - 2*8], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax + 4*ebx - 2*8], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [12 + eax + (4*ebx) - 2*14], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax][ebx*4 - 2*2*2*2], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax][ebx*4 - (2*8)], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax][ebx*4 - 2 * 8 + 4 - 4], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax + ebx*4 - 2 * 8 + 4 - 4], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax + ebx*4 - 2 * ((8 + 4) - 4)], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [-2 * ((8 + 4) - 4) + eax + ebx*4], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [((-2) * ((8 + 4) - 4)) + eax + ebx*4], ecx
+// CHECK: movl %ecx, -16(%eax,%ebx,4)
+    mov [eax + ((-2) * ((8 + 4) - 4)) + ebx*4], ecx
+// CHECK: movl %ecx, 96(%eax,%ebx,4)
+    mov [eax + ((-2) * ((8 + 4) * -4)) + ebx*4], ecx
+// CHECK: movl %ecx, -8(%eax,%ebx,4)
+    mov [eax][-8][ebx*4], ecx
+// CHECK: movl %ecx, -2(%eax,%ebx,4)
+    mov [eax][16/-8][ebx*4], ecx
+// CHECK: movl %ecx, -2(%eax,%ebx,4)
+    mov [eax][(16)/-8][ebx*4], ecx
+
+// CHECK: setb %al
+    setc al
+// CHECK: sete %al
+    setz al
+// CHECK: setbe %al
+    setna al
+// CHECK: setae %al
+    setnb al
+// CHECK: setae %al
+    setnc al
+// CHECK: setle %al
+    setng al
+// CHECK: setge %al
+    setnl al
+// CHECK: setne %al
+    setnz al
+// CHECK: setp %al
+    setpe al
+// CHECK: setnp %al
+    setpo al
+// CHECK: setb %al
+    setnae al
+// CHECK: seta %al
+    setnbe al
+// CHECK: setl %al
+    setnge al
+// CHECK: setg %al
+    setnle al
+// CHECK: jne _foo
+    jnz _foo
+// CHECK: outb %al, $4
+    out 4, al
+    ret
+
+// CHECK: cmovbl %ebx, %eax
+    cmovc eax, ebx
+// CHECK: cmovel %ebx, %eax
+    cmovz eax, ebx
+// CHECK: cmovbel %ebx, %eax
+    cmovna eax, ebx
+// CHECK: cmovael %ebx, %eax
+    cmovnb eax, ebx
+// CHECK: cmovael %ebx, %eax
+    cmovnc eax, ebx
+// CHECK: cmovlel %ebx, %eax
+    cmovng eax, ebx
+// CHECK: cmovgel %ebx, %eax
+    cmovnl eax, ebx
+// CHECK: cmovnel %ebx, %eax
+    cmovnz eax, ebx
+// CHECK: cmovpl %ebx, %eax
+    cmovpe eax, ebx
+// CHECK: cmovnpl %ebx, %eax
+    cmovpo eax, ebx
+// CHECK: cmovbl %ebx, %eax
+    cmovnae eax, ebx
+// CHECK: cmoval %ebx, %eax
+    cmovnbe eax, ebx
+// CHECK: cmovll %ebx, %eax
+    cmovnge eax, ebx
+// CHECK: cmovgl %ebx, %eax
+    cmovnle eax, ebx

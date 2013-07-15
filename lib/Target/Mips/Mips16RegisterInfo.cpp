@@ -1,5 +1,4 @@
-
-//===-- Mips16RegisterInfo.cpp - MIPS16 Register Information -== ----------===//
+//===-- Mips16RegisterInfo.cpp - MIPS16 Register Information --------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -42,17 +41,16 @@
 
 using namespace llvm;
 
-Mips16RegisterInfo::Mips16RegisterInfo(const MipsSubtarget &ST,
-    const Mips16InstrInfo &I)
-  : MipsRegisterInfo(ST), TII(I) {}
+Mips16RegisterInfo::Mips16RegisterInfo(const MipsSubtarget &ST)
+  : MipsRegisterInfo(ST) {}
 
 bool Mips16RegisterInfo::requiresRegisterScavenging
   (const MachineFunction &MF) const {
-  return true;
+  return false;
 }
 bool Mips16RegisterInfo::requiresFrameIndexScavenging
   (const MachineFunction &MF) const {
-  return true;
+  return false;
 }
 
 bool Mips16RegisterInfo::useFPForScavengingIndex
@@ -67,9 +65,16 @@ bool Mips16RegisterInfo::saveScavengerRegister
    const TargetRegisterClass *RC,
    unsigned Reg) const {
   DebugLoc DL;
+  const TargetInstrInfo &TII = *MBB.getParent()->getTarget().getInstrInfo();
   TII.copyPhysReg(MBB, I, DL, Mips::T0, Reg, true);
   TII.copyPhysReg(MBB, UseMI, DL, Reg, Mips::T0, true);
   return true;
+}
+
+const TargetRegisterClass *
+Mips16RegisterInfo::intRegClass(unsigned Size) const {
+  assert(Size == 4);
+  return &Mips::CPU16RegsRegClass;
 }
 
 void Mips16RegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
@@ -134,6 +139,9 @@ void Mips16RegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
     MachineBasicBlock &MBB = *MI.getParent();
     DebugLoc DL = II->getDebugLoc();
     unsigned NewImm;
+    const Mips16InstrInfo &TII =
+      *static_cast<const Mips16InstrInfo*>(
+        MBB.getParent()->getTarget().getInstrInfo());
     FrameReg = TII.loadImmediate(FrameReg, Offset, MBB, II, DL, NewImm);
     Offset = SignExtend64<16>(NewImm);
     IsKill = true;

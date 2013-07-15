@@ -30,7 +30,6 @@ namespace llvm {
   class MachineInstr;
   class TargetLowering;
   class TargetLibraryInfo;
-  class TargetInstrInfo;
   class TargetTransformInfo;
   class FunctionLoweringInfo;
   class ScheduleHazardRecognizer;
@@ -42,8 +41,7 @@ namespace llvm {
 /// pattern-matching instruction selectors.
 class SelectionDAGISel : public MachineFunctionPass {
 public:
-  const TargetMachine &TM;
-  const TargetLowering &TLI;
+  TargetMachine &TM;
   const TargetLibraryInfo *LibInfo;
   const TargetTransformInfo *TTI;
   FunctionLoweringInfo *FuncInfo;
@@ -56,11 +54,13 @@ public:
   CodeGenOpt::Level OptLevel;
   static char ID;
 
-  explicit SelectionDAGISel(const TargetMachine &tm,
+  explicit SelectionDAGISel(TargetMachine &tm,
                             CodeGenOpt::Level OL = CodeGenOpt::Default);
   virtual ~SelectionDAGISel();
 
-  const TargetLowering &getTargetLowering() { return TLI; }
+  const TargetLowering *getTargetLowering() const {
+    return TM.getTargetLowering();
+  }
 
   virtual void getAnalysisUsage(AnalysisUsage &AU) const;
 
@@ -259,9 +259,6 @@ private:
   void SelectBasicBlock(BasicBlock::const_iterator Begin,
                         BasicBlock::const_iterator End,
                         bool &HadTailCall);
-
-  bool TryToFoldFastISelLoad(const LoadInst *LI, const Instruction *FoldInst,
-                             FastISel *FastIS);
   void FinishBasicBlock();
 
   void CodeGenAndEmitDAG();

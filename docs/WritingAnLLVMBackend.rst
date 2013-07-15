@@ -1,6 +1,6 @@
-================================
-Writing an LLVM Compiler Backend
-================================
+=======================
+Writing an LLVM Backend
+=======================
 
 .. toctree::
    :hidden:
@@ -760,7 +760,7 @@ target description file (``IntRegs``).
 
   def LDrr : F3_1 <3, 0b000000, (outs IntRegs:$dst), (ins MEMrr:$addr),
                    "ld [$addr], $dst",
-                   [(set IntRegs:$dst, (load ADDRrr:$addr))]>;
+                   [(set i32:$dst, (load ADDRrr:$addr))]>;
 
 The fourth parameter is the input source, which uses the address operand
 ``MEMrr`` that is defined earlier in ``SparcInstrInfo.td``:
@@ -788,7 +788,7 @@ class is defined:
 
   def LDri : F3_2 <3, 0b000000, (outs IntRegs:$dst), (ins MEMri:$addr),
                    "ld [$addr], $dst",
-                   [(set IntRegs:$dst, (load ADDRri:$addr))]>;
+                   [(set i32:$dst, (load ADDRri:$addr))]>;
 
 Writing these definitions for so many similar instructions can involve a lot of
 cut and paste.  In ``.td`` files, the ``multiclass`` directive enables the
@@ -803,11 +803,11 @@ pattern ``F3_12`` is defined to create 2 instruction classes each time
     def rr  : F3_1 <2, Op3Val,
                    (outs IntRegs:$dst), (ins IntRegs:$b, IntRegs:$c),
                    !strconcat(OpcStr, " $b, $c, $dst"),
-                   [(set IntRegs:$dst, (OpNode IntRegs:$b, IntRegs:$c))]>;
+                   [(set i32:$dst, (OpNode i32:$b, i32:$c))]>;
     def ri  : F3_2 <2, Op3Val,
                    (outs IntRegs:$dst), (ins IntRegs:$b, i32imm:$c),
                    !strconcat(OpcStr, " $b, $c, $dst"),
-                   [(set IntRegs:$dst, (OpNode IntRegs:$b, simm13:$c))]>;
+                   [(set i32:$dst, (OpNode i32:$b, simm13:$c))]>;
   }
 
 So when the ``defm`` directive is used for the ``XOR`` and ``ADD``
@@ -856,7 +856,7 @@ format instruction having three operands.
   def XNORrr  : F3_1<2, 0b000111,
                      (outs IntRegs:$dst), (ins IntRegs:$b, IntRegs:$c),
                      "xnor $b, $c, $dst",
-                     [(set IntRegs:$dst, (not (xor IntRegs:$b, IntRegs:$c)))]>;
+                     [(set i32:$dst, (not (xor i32:$b, i32:$c)))]>;
 
 The instruction templates in ``SparcInstrFormats.td`` show the base class for
 ``F3_1`` is ``InstSP``.
@@ -910,6 +910,47 @@ fields.  ``F3`` format instructions will bind the operands ``rd``, ``op3``, and
 format instructions will bind the operands to the ``rd``, ``rs1``, and ``rs2``
 fields.  This results in the ``XNORrr`` instruction binding ``$dst``, ``$b``,
 and ``$c`` operands to the ``rd``, ``rs1``, and ``rs2`` fields respectively.
+
+TableGen will also generate a function called getNamedOperandIdx() which
+can be used to look up an operand's index in a MachineInstr based on its
+TableGen name.  Setting the UseNamedOperandTable bit in an instruction's
+TableGen definition will add all of its operands to an enumeration in the
+llvm::XXX:OpName namespace and also add an entry for it into the OperandMap
+table, which can be queried using getNamedOperandIdx()
+
+.. code-block:: llvm
+
+  int DstIndex = SP::getNamedOperandIdx(SP::XNORrr, SP::OpName::dst); // => 0
+  int BIndex = SP::getNamedOperandIdx(SP::XNORrr, SP::OpName::b);     // => 1
+  int CIndex = SP::getNamedOperandIdx(SP::XNORrr, SP::OpName::c);     // => 2
+  int DIndex = SP::getNamedOperandIdx(SP::XNORrr, SP::OpName::d);     // => -1
+
+  ...
+
+The entries in the OpName enum are taken verbatim from the TableGen definitions,
+so operands with lowercase names will have lower case entries in the enum.
+
+To include the getNamedOperandIdx() function in your backend, you will need
+to define a few preprocessor macros in XXXInstrInfo.cpp and XXXInstrInfo.h.
+For example:
+
+XXXInstrInfo.cpp:
+
+.. code-block:: c++ 
+
+  #define GET_INSTRINFO_NAMED_OPS // For getNamedOperandIdx() function
+  #include "XXXGenInstrInfo.inc"
+
+XXXInstrInfo.h:
+
+.. code-block:: c++
+
+  #define GET_INSTRINFO_OPERAND_ENUM // For OpName enum
+  #include "XXXGenInstrInfo.inc"
+
+  namespace XXX {
+    int16_t getNamedOperandIdx(uint16_t Opcode, uint16_t NamedIndex);
+  } // End namespace XXX
 
 Instruction Relation Mapping
 ----------------------------
@@ -1124,7 +1165,7 @@ a pattern with the store DAG operator.
 .. code-block:: llvm
 
   def STrr  : F3_1< 3, 0b000100, (outs), (ins MEMrr:$addr, IntRegs:$src),
-                   "st $src, [$addr]", [(store IntRegs:$src, ADDRrr:$addr)]>;
+                   "st $src, [$addr]", [(store i32:$src, ADDRrr:$addr)]>;
 
 ``ADDRrr`` is a memory mode that is also defined in ``SparcInstrInfo.td``:
 
@@ -1185,7 +1226,7 @@ instruction.
       SDValue CPTmp0;
       SDValue CPTmp1;
 
-      // Pattern: (st:void IntRegs:i32:$src,
+      // Pattern: (st:void i32:i32:$src,
       //           ADDRrr:i32:$addr)<<P:Predicate_store>>
       // Emits: (STrr:void ADDRrr:i32:$addr, IntRegs:i32:$src)
       // Pattern complexity = 13  cost = 1  size = 0

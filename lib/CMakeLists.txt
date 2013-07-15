@@ -1,6 +1,7 @@
 # `Support' and `TableGen' libraries are added on the top-level CMakeLists.txt
 
 add_subdirectory(IR)
+add_subdirectory(IRReader)
 add_subdirectory(CodeGen)
 add_subdirectory(Bitcode)
 add_subdirectory(Transforms)
@@ -13,4 +14,3 @@ add_subdirectory(DebugInfo)
 add_subdirectory(ExecutionEngine)
 add_subdirectory(Target)
 add_subdirectory(AsmParser)
-add_subdirectory(Archive)

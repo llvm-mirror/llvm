@@ -22,7 +22,7 @@
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
-static unsigned adjustFixupValue(unsigned Kind, uint64_t Value) {
+static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
   switch (Kind) {
   default:
     llvm_unreachable("Unknown fixup kind!");
@@ -30,26 +30,41 @@ static unsigned adjustFixupValue(unsigned Kind, uint64_t Value) {
   case FK_Data_2:
   case FK_Data_4:
   case FK_Data_8:
-  case PPC::fixup_ppc_toc:
-  case PPC::fixup_ppc_tlsreg:
   case PPC::fixup_ppc_nofixup:
     return Value;
-  case PPC::fixup_ppc_lo14:
-  case PPC::fixup_ppc_toc16_ds:
-    return (Value & 0xffff) << 2;
   case PPC::fixup_ppc_brcond14:
+  case PPC::fixup_ppc_brcond14abs:
     return Value & 0xfffc;
   case PPC::fixup_ppc_br24:
+  case PPC::fixup_ppc_br24abs:
     return Value & 0x3fffffc;
-#if 0
-  case PPC::fixup_ppc_hi16:
-    return (Value >> 16) & 0xffff;
-#endif
-  case PPC::fixup_ppc_ha16:
-    return ((Value >> 16) + ((Value & 0x8000) ? 1 : 0)) & 0xffff;
-  case PPC::fixup_ppc_lo16:
-  case PPC::fixup_ppc_toc16:
+  case PPC::fixup_ppc_half16:
     return Value & 0xffff;
+  case PPC::fixup_ppc_half16ds:
+    return Value & 0xfffc;
+  }
+}
+
+static unsigned getFixupKindNumBytes(unsigned Kind) {
+  switch (Kind) {
+  default:
+    llvm_unreachable("Unknown fixup kind!");
+  case FK_Data_1:
+    return 1;
+  case FK_Data_2:
+  case PPC::fixup_ppc_half16:
+  case PPC::fixup_ppc_half16ds:
+    return 2;
+  case FK_Data_4:
+  case PPC::fixup_ppc_brcond14:
+  case PPC::fixup_ppc_brcond14abs:
+  case PPC::fixup_ppc_br24:
+  case PPC::fixup_ppc_br24abs:
+    return 4;
+  case FK_Data_8:
+    return 8;
+  case PPC::fixup_ppc_nofixup:
+    return 0;
   }
 }
 
@@ -80,13 +95,10 @@ public:
       // name                    offset  bits  flags
       { "fixup_ppc_br24",        6,      24,   MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_ppc_brcond14",    16,     14,   MCFixupKindInfo::FKF_IsPCRel },
-      { "fixup_ppc_lo16",        16,     16,   0 },
-      { "fixup_ppc_ha16",        16,     16,   0 },
-      { "fixup_ppc_lo14",        16,     14,   0 },
-      { "fixup_ppc_toc",          0,     64,   0 },
-      { "fixup_ppc_toc16",       16,     16,   0 },
-      { "fixup_ppc_toc16_ds",    16,     14,   0 },
-      { "fixup_ppc_tlsreg",       0,      0,   0 },
+      { "fixup_ppc_br24abs",     6,      24,   0 },
+      { "fixup_ppc_brcond14abs", 16,     14,   0 },
+      { "fixup_ppc_half16",       0,     16,   0 },
+      { "fixup_ppc_half16ds",     0,     14,   0 },
       { "fixup_ppc_nofixup",      0,      0,   0 }
     };
 
@@ -104,12 +116,13 @@ public:
     if (!Value) return;           // Doesn't change encoding.
 
     unsigned Offset = Fixup.getOffset();
+    unsigned NumBytes = getFixupKindNumBytes(Fixup.getKind());
 
     // For each byte of the fragment that the fixup touches, mask in the bits
     // from the fixup value. The Value has been "split up" into the appropriate
     // bitfields above.
-    for (unsigned i = 0; i != 4; ++i)
-      Data[Offset + i] |= uint8_t((Value >> ((4 - i - 1)*8)) & 0xff);
+    for (unsigned i = 0; i != NumBytes; ++i)
+      Data[Offset + i] |= uint8_t((Value >> ((NumBytes - i - 1)*8)) & 0xff);
   }
 
   bool mayNeedRelaxation(const MCInst &Inst) const {
@@ -132,10 +145,14 @@ public:
   }
 
   bool writeNopData(uint64_t Count, MCObjectWriter *OW) const {
-    // FIXME: Zero fill for now. That's not right, but at least will get the
-    // section size right.
-    for (uint64_t i = 0; i != Count; ++i)
-      OW->Write8(0);
+    // Can't emit NOP with size not multiple of 32-bits
+    if (Count % 4 != 0)
+      return false;
+
+    uint64_t NumNops = Count / 4;
+    for (uint64_t i = 0; i != NumNops; ++i)
+      OW->Write32(0x60000000);
+
     return true;
   }
 

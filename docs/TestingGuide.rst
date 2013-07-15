@@ -224,16 +224,7 @@ Below is an example of legal RUN lines in a ``.ll`` file:
     ; RUN: diff %t1 %t2
 
 As with a Unix shell, the RUN lines permit pipelines and I/O
-redirection to be used. However, the usage is slightly different than
-for Bash. In general, it's useful to read the code of other tests to figure out
-what you can use in yours. The major differences are:
-
--  You can't do ``2>&1``. That will cause :program:`lit` to write to a file
-   named ``&1``. Usually this is done to get stderr to go through a pipe. You
-   can do that with ``|&`` so replace this idiom:
-   ``... 2>&1 | FileCheck`` with ``... |& FileCheck``
--  You can only redirect to a file, not to another descriptor and not
-   from a here document.
+redirection to be used.
 
 There are some quoting rules that you must pay attention to when writing
 your RUN lines. In general nothing needs to be quoted. :program:`lit` won't
@@ -243,7 +234,7 @@ everything enclosed as one value.
 
 In general, you should strive to keep your RUN lines as simple as possible,
 using them only to run tools that generate textual output you can then examine.
-The recommended way to examine output to figure out if the test passes it using
+The recommended way to examine output to figure out if the test passes is using
 the :doc:`FileCheck tool <CommandGuide/FileCheck>`. *[The usage of grep in RUN
 lines is deprecated - please do not send or commit patches that use it.]*
 
@@ -283,6 +274,66 @@ This test will fail if placed into a ``download`` directory.
 
 To make your tests robust, always use ``opt ... < %s`` in the RUN line.
 :program:`opt` does not output a ``ModuleID`` when input comes from stdin.
+
+Platform-Specific Tests
+-----------------------
+
+Whenever adding tests that require the knowledge of a specific platform,
+either related to code generated, specific output or back-end features,
+you must make sure to isolate the features, so that buildbots that
+run on different architectures (and don't even compile all back-ends),
+don't fail.
+
+The first problem is to check for target-specific output, for example sizes
+of structures, paths and architecture names, for example:
+
+* Tests containing Windows paths will fail on Linux and vice-versa.
+* Tests that check for ``x86_64`` somewhere in the text will fail anywhere else.
+* Tests where the debug information calculates the size of types and structures.
+
+Also, if the test rely on any behaviour that is coded in any back-end, it must
+go in its own directory. So, for instance, code generator tests for ARM go
+into ``test/CodeGen/ARM`` and so on. Those directories contain a special
+``lit`` configuration file that ensure all tests in that directory will
+only run if a specific back-end is compiled and available.
+
+For instance, on ``test/CodeGen/ARM``, the ``lit.local.cfg`` is:
+
+.. code-block:: python
+
+  config.suffixes = ['.ll', '.c', '.cpp', '.test']
+  targets = set(config.root.targets_to_build.split())
+  if not 'ARM' in targets:
+    config.unsupported = True
+
+Other platform-specific tests are those that depend on a specific feature
+of a specific sub-architecture, for example only to Intel chips that support ``AVX2``.
+
+For instance, ``test/CodeGen/X86/psubus.ll`` tests three sub-architecture
+variants:
+
+.. code-block:: llvm
+
+  ; RUN: llc -mcpu=core2 < %s | FileCheck %s -check-prefix=SSE2
+  ; RUN: llc -mcpu=corei7-avx < %s | FileCheck %s -check-prefix=AVX1
+  ; RUN: llc -mcpu=core-avx2 < %s | FileCheck %s -check-prefix=AVX2
+
+And the checks are different:
+
+.. code-block:: llvm
+
+  ; SSE2: @test1
+  ; SSE2: psubusw LCPI0_0(%rip), %xmm0
+  ; AVX1: @test1
+  ; AVX1: vpsubusw LCPI0_0(%rip), %xmm0, %xmm0
+  ; AVX2: @test1
+  ; AVX2: vpsubusw LCPI0_0(%rip), %xmm0, %xmm0
+
+So, if you're testing for a behaviour that you know is platform-specific or
+depends on special features of sub-architectures, you must add the specific
+triple, test with the specific FileCheck and put it into the specific
+directory that will filter out all other architectures.
+
 
 Variables and substitutions
 ---------------------------

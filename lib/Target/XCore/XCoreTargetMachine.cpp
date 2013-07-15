@@ -33,6 +33,7 @@ XCoreTargetMachine::XCoreTargetMachine(const Target &T, StringRef TT,
     FrameLowering(Subtarget),
     TLInfo(*this),
     TSInfo(*this) {
+  initAsmInfo();
 }
 
 namespace {
@@ -46,12 +47,18 @@ public:
     return getTM<XCoreTargetMachine>();
   }
 
+  virtual bool addPreISel();
   virtual bool addInstSelector();
 };
 } // namespace
 
 TargetPassConfig *XCoreTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new XCorePassConfig(this, PM);
+}
+
+bool XCorePassConfig::addPreISel() {
+  addPass(createXCoreLowerThreadLocalPass());
+  return false;
 }
 
 bool XCorePassConfig::addInstSelector() {

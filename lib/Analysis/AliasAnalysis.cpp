@@ -450,6 +450,7 @@ AliasAnalysis::callCapturesBefore(const Instruction *I,
     return AliasAnalysis::ModRef;
 
   unsigned ArgNo = 0;
+  AliasAnalysis::ModRefResult R = AliasAnalysis::NoModRef;
   for (ImmutableCallSite::arg_iterator CI = CS.arg_begin(), CE = CS.arg_end();
        CI != CE; ++CI, ++ArgNo) {
     // Only look at the no-capture or byval pointer arguments.  If this
@@ -463,12 +464,18 @@ AliasAnalysis::callCapturesBefore(const Instruction *I,
     // is impossible to alias the pointer we're checking.  If not, we have to
     // assume that the call could touch the pointer, even though it doesn't
     // escape.
-    if (!isNoAlias(AliasAnalysis::Location(*CI),
-                   AliasAnalysis::Location(Object))) {
-      return AliasAnalysis::ModRef;
+    if (isNoAlias(AliasAnalysis::Location(*CI),
+		  AliasAnalysis::Location(Object)))
+      continue;
+    if (CS.doesNotAccessMemory(ArgNo))
+      continue;
+    if (CS.onlyReadsMemory(ArgNo)) {
+      R = AliasAnalysis::Ref;
+      continue;
     }
+    return AliasAnalysis::ModRef;
   }
-  return AliasAnalysis::NoModRef;
+  return R;
 }
 
 // AliasAnalysis destructor: DO NOT move this to the header file for
@@ -534,6 +541,15 @@ bool llvm::isNoAliasCall(const Value *V) {
   if (isa<CallInst>(V) || isa<InvokeInst>(V))
     return ImmutableCallSite(cast<Instruction>(V))
       .paramHasAttr(0, Attribute::NoAlias);
+  return false;
+}
+
+/// isNoAliasArgument - Return true if this is an argument with the noalias
+/// attribute.
+bool llvm::isNoAliasArgument(const Value *V)
+{
+  if (const Argument *A = dyn_cast<Argument>(V))
+    return A->hasNoAliasAttr();
   return false;
 }
 

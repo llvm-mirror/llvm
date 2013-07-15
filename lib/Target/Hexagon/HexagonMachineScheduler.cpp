@@ -195,7 +195,6 @@ void VLIWMachineScheduler::schedule() {
 void ConvergingVLIWScheduler::initialize(ScheduleDAGMI *dag) {
   DAG = static_cast<VLIWMachineScheduler*>(dag);
   SchedModel = DAG->getSchedModel();
-  TRI = DAG->TRI;
 
   Top.init(DAG, SchedModel);
   Bot.init(DAG, SchedModel);
@@ -223,7 +222,7 @@ void ConvergingVLIWScheduler::releaseTopNode(SUnit *SU) {
   for (SUnit::succ_iterator I = SU->Preds.begin(), E = SU->Preds.end();
        I != E; ++I) {
     unsigned PredReadyCycle = I->getSUnit()->TopReadyCycle;
-    unsigned MinLatency = I->getMinLatency();
+    unsigned MinLatency = I->getLatency();
 #ifndef NDEBUG
     Top.MaxMinLatency = std::max(MinLatency, Top.MaxMinLatency);
 #endif
@@ -242,7 +241,7 @@ void ConvergingVLIWScheduler::releaseBottomNode(SUnit *SU) {
   for (SUnit::succ_iterator I = SU->Succs.begin(), E = SU->Succs.end();
        I != E; ++I) {
     unsigned SuccReadyCycle = I->getSUnit()->BotReadyCycle;
-    unsigned MinLatency = I->getMinLatency();
+    unsigned MinLatency = I->getLatency();
 #ifndef NDEBUG
     Bot.MaxMinLatency = std::max(MinLatency, Bot.MaxMinLatency);
 #endif
@@ -409,7 +408,7 @@ void ConvergingVLIWScheduler::traceCandidate(const char *Label,
                                              SUnit *SU, PressureElement P) {
   dbgs() << Label << " " << Q.getName() << " ";
   if (P.isValid())
-    dbgs() << TRI->getRegPressureSetName(P.PSetID) << ":" << P.UnitIncrease
+    dbgs() << DAG->TRI->getRegPressureSetName(P.PSetID) << ":" << P.UnitIncrease
            << " ";
   else
     dbgs() << "     ";

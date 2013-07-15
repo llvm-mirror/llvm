@@ -864,7 +864,7 @@ void DAGTypeLegalizer::SetWidenedVector(SDValue Op, SDValue Result) {
 /// BitConvertToInteger - Convert to an integer of the same size.
 SDValue DAGTypeLegalizer::BitConvertToInteger(SDValue Op) {
   unsigned BitWidth = Op.getValueType().getSizeInBits();
-  return DAG.getNode(ISD::BITCAST, Op.getDebugLoc(),
+  return DAG.getNode(ISD::BITCAST, SDLoc(Op),
                      EVT::getIntegerVT(*DAG.getContext(), BitWidth), Op);
 }
 
@@ -875,13 +875,13 @@ SDValue DAGTypeLegalizer::BitConvertVectorToIntegerVector(SDValue Op) {
   unsigned EltWidth = Op.getValueType().getVectorElementType().getSizeInBits();
   EVT EltNVT = EVT::getIntegerVT(*DAG.getContext(), EltWidth);
   unsigned NumElts = Op.getValueType().getVectorNumElements();
-  return DAG.getNode(ISD::BITCAST, Op.getDebugLoc(),
+  return DAG.getNode(ISD::BITCAST, SDLoc(Op),
                      EVT::getVectorVT(*DAG.getContext(), EltNVT, NumElts), Op);
 }
 
 SDValue DAGTypeLegalizer::CreateStackStoreLoad(SDValue Op,
                                                EVT DestVT) {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   // Create the stack frame object.  Make sure it is aligned for both
   // the source and destination types.
   SDValue StackPtr = DAG.CreateStackTemporary(Op.getValueType(), DestVT);
@@ -919,8 +919,9 @@ bool DAGTypeLegalizer::CustomLowerNode(SDNode *N, EVT VT, bool LegalizeResult) {
   // Make everything that once used N's values now use those in Results instead.
   assert(Results.size() == N->getNumValues() &&
          "Custom lowering returned the wrong number of results!");
-  for (unsigned i = 0, e = Results.size(); i != e; ++i)
+  for (unsigned i = 0, e = Results.size(); i != e; ++i) {
     ReplaceValueWith(SDValue(N, i), Results[i]);
+  }
   return true;
 }
 
@@ -972,7 +973,7 @@ void DAGTypeLegalizer::GetSplitDestVTs(EVT InVT, EVT &LoVT, EVT &HiVT) {
 /// high parts of the given value.
 void DAGTypeLegalizer::GetPairElements(SDValue Pair,
                                        SDValue &Lo, SDValue &Hi) {
-  DebugLoc dl = Pair.getDebugLoc();
+  SDLoc dl(Pair);
   EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), Pair.getValueType());
   Lo = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, NVT, Pair,
                    DAG.getIntPtrConstant(0));
@@ -982,7 +983,7 @@ void DAGTypeLegalizer::GetPairElements(SDValue Pair,
 
 SDValue DAGTypeLegalizer::GetVectorElementPointer(SDValue VecPtr, EVT EltVT,
                                                   SDValue Index) {
-  DebugLoc dl = Index.getDebugLoc();
+  SDLoc dl(Index);
   // Make sure the index type is big enough to compute in.
   if (Index.getValueType().bitsGT(TLI.getPointerTy()))
     Index = DAG.getNode(ISD::TRUNCATE, dl, TLI.getPointerTy(), Index);
@@ -999,9 +1000,9 @@ SDValue DAGTypeLegalizer::GetVectorElementPointer(SDValue VecPtr, EVT EltVT,
 
 /// JoinIntegers - Build an integer with low bits Lo and high bits Hi.
 SDValue DAGTypeLegalizer::JoinIntegers(SDValue Lo, SDValue Hi) {
-  // Arbitrarily use dlHi for result DebugLoc
-  DebugLoc dlHi = Hi.getDebugLoc();
-  DebugLoc dlLo = Lo.getDebugLoc();
+  // Arbitrarily use dlHi for result SDLoc
+  SDLoc dlHi(Hi);
+  SDLoc dlLo(Lo);
   EVT LVT = Lo.getValueType();
   EVT HVT = Hi.getValueType();
   EVT NVT = EVT::getIntegerVT(*DAG.getContext(),
@@ -1018,7 +1019,7 @@ SDValue DAGTypeLegalizer::JoinIntegers(SDValue Lo, SDValue Hi) {
 SDValue DAGTypeLegalizer::LibCallify(RTLIB::Libcall LC, SDNode *N,
                                      bool isSigned) {
   unsigned NumOps = N->getNumOperands();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   if (NumOps == 0) {
     return TLI.makeLibCall(DAG, LC, N->getValueType(0), 0, 0, isSigned, dl);
   } else if (NumOps == 1) {
@@ -1063,7 +1064,7 @@ DAGTypeLegalizer::ExpandChainLibCall(RTLIB::Libcall LC,
   CallLoweringInfo CLI(InChain, RetTy, isSigned, !isSigned, false, false,
                     0, TLI.getLibcallCallingConv(LC), /*isTailCall=*/false,
                     /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                    Callee, Args, DAG, Node->getDebugLoc());
+                    Callee, Args, DAG, SDLoc(Node));
   std::pair<SDValue, SDValue> CallInfo = TLI.LowerCallTo(CLI);
 
   return CallInfo;
@@ -1073,7 +1074,7 @@ DAGTypeLegalizer::ExpandChainLibCall(RTLIB::Libcall LC,
 /// of the given type.  A target boolean is an integer value, not necessarily of
 /// type i1, the bits of which conform to getBooleanContents.
 SDValue DAGTypeLegalizer::PromoteTargetBoolean(SDValue Bool, EVT VT) {
-  DebugLoc dl = Bool.getDebugLoc();
+  SDLoc dl(Bool);
   ISD::NodeType ExtendCode =
     TargetLowering::getExtendForContent(TLI.getBooleanContents(VT.isVector()));
   return DAG.getNode(ExtendCode, dl, VT, Bool);
@@ -1084,7 +1085,7 @@ SDValue DAGTypeLegalizer::PromoteTargetBoolean(SDValue Bool, EVT VT) {
 void DAGTypeLegalizer::SplitInteger(SDValue Op,
                                     EVT LoVT, EVT HiVT,
                                     SDValue &Lo, SDValue &Hi) {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   assert(LoVT.getSizeInBits() + HiVT.getSizeInBits() ==
          Op.getValueType().getSizeInBits() && "Invalid integer splitting!");
   Lo = DAG.getNode(ISD::TRUNCATE, dl, LoVT, Op);

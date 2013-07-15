@@ -28,7 +28,6 @@
 
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Instructions.h"
 
@@ -79,7 +78,7 @@ public:
 
   InstrTy *getInstruction() const { return I.getPointer(); }
   InstrTy *operator->() const { return I.getPointer(); }
-  operator bool() const { return I.getPointer(); }
+  LLVM_EXPLICIT operator bool() const { return I.getPointer(); }
 
   /// getCalledValue - Return the pointer to function that is being called.
   ///
@@ -199,6 +198,12 @@ public:
     CALLSITE_DELEGATE_GETTER(getParamAlignment(i));
   }
 
+  /// \brief Return true if the call should not be treated as a call to a
+  /// builtin.
+  bool isNoBuiltin() const {
+    CALLSITE_DELEGATE_GETTER(isNoBuiltin());
+  }
+
   /// @brief Return true if the call should not be inlined.
   bool isNoInline() const {
     CALLSITE_DELEGATE_GETTER(isNoInline());
@@ -250,6 +255,15 @@ public:
   /// @brief Determine whether this argument is passed by value.
   bool isByValArgument(unsigned ArgNo) const {
     return paramHasAttr(ArgNo + 1, Attribute::ByVal);
+  }
+
+  bool doesNotAccessMemory(unsigned ArgNo) const {
+    return paramHasAttr(ArgNo + 1, Attribute::ReadNone);
+  }
+
+  bool onlyReadsMemory(unsigned ArgNo) const {
+    return paramHasAttr(ArgNo + 1, Attribute::ReadOnly) ||
+           paramHasAttr(ArgNo + 1, Attribute::ReadNone);
   }
 
   /// hasArgument - Returns true if this CallSite passes the given Value* as an

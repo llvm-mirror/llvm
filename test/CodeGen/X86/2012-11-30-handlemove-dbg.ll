@@ -18,7 +18,7 @@ define signext i16 @subdivp(%struct.node.0.27* nocapture %p, double %dsq, double
 entry:
   call void @llvm.dbg.declare(metadata !{%struct.hgstruct.2.29* %hg}, metadata !4)
   %type = getelementptr inbounds %struct.node.0.27* %p, i64 0, i32 0
-  %0 = load i16* %type, align 2, !tbaa !8
+  %0 = load i16* %type, align 2
   %cmp = icmp eq i16 %0, 1
   br i1 %cmp, label %return, label %for.cond.preheader
 
@@ -42,9 +42,7 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !2 = metadata !{i32 0}
 !3 = metadata !{null}
 !4 = metadata !{i32 786689, null, metadata !"hg", metadata !5, i32 67109589, metadata !6, i32 0, i32 0} ; [ DW_TAG_arg_variable ] [hg] [line 725]
-!5 = metadata !{i32 786473, metadata !"MultiSource/Benchmarks/Olden/bh/newbh.c", metadata !"MultiSource/Benchmarks/Olden/bh", null} ; [ DW_TAG_file_type ]
-!6 = metadata !{i32 786454, null, metadata !"hgstruct", metadata !5, i32 492, i64 0, i64 0, i64 0, i32 0, metadata !7} ; [ DW_TAG_typedef ] [hgstruct] [line 492, size 0, align 0, offset 0] [from ]
-!7 = metadata !{i32 786451, null, metadata !"", metadata !5, i32 487, i64 512, i64 64, i32 0, i32 0, null, null, i32 0, i32 0, i32 0} ; [ DW_TAG_structure_type ] [line 487, size 512, align 64, offset 0] [from ]
-!8 = metadata !{metadata !"short", metadata !9}
-!9 = metadata !{metadata !"omnipotent char", metadata !10}
-!10 = metadata !{metadata !"Simple C/C++ TBAA"}
+!5 = metadata !{i32 786473, metadata !11} ; [ DW_TAG_file_type ]
+!6 = metadata !{i32 786454, metadata !11, null, metadata !"hgstruct", i32 492, i64 0, i64 0, i64 0, i32 0, metadata !7} ; [ DW_TAG_typedef ] [hgstruct] [line 492, size 0, align 0, offset 0] [from ]
+!7 = metadata !{i32 786451, metadata !11, null, metadata !"", i32 487, i64 512, i64 64, i32 0, i32 0, null, null, i32 0, i32 0, i32 0} ; [ DW_TAG_structure_type ] [line 487, size 512, align 64, offset 0] [from ]
+!11 = metadata !{metadata !"MultiSource/Benchmarks/Olden/bh/newbh.c", metadata !"MultiSource/Benchmarks/Olden/bh"}

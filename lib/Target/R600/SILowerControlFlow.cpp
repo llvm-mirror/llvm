@@ -66,6 +66,7 @@ private:
   static const unsigned SkipThreshold = 12;
 
   static char ID;
+  const TargetRegisterInfo *TRI;
   const TargetInstrInfo *TII;
 
   bool shouldSkip(MachineBasicBlock *From, MachineBasicBlock *To);
@@ -84,9 +85,13 @@ private:
   void Kill(MachineInstr &MI);
   void Branch(MachineInstr &MI);
 
+  void LoadM0(MachineInstr &MI, MachineInstr *MovRel);
+  void IndirectSrc(MachineInstr &MI);
+  void IndirectDst(MachineInstr &MI);
+
 public:
   SILowerControlFlowPass(TargetMachine &tm) :
-    MachineFunctionPass(ID), TII(tm.getInstrInfo()) { }
+    MachineFunctionPass(ID), TRI(0), TII(0) { }
 
   virtual bool runOnMachineFunction(MachineFunction &MF);
 
@@ -191,7 +196,8 @@ void SILowerControlFlowPass::Else(MachineInstr &MI) {
   unsigned Dst = MI.getOperand(0).getReg();
   unsigned Src = MI.getOperand(1).getReg();
 
-  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_OR_SAVEEXEC_B64), Dst)
+  BuildMI(MBB, MBB.getFirstNonPHI(), DL,
+          TII->get(AMDGPU::S_OR_SAVEEXEC_B64), Dst)
           .addReg(Src); // Saved EXEC
 
   BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_XOR_B64), AMDGPU::EXEC)
@@ -302,9 +308,111 @@ void SILowerControlFlowPass::Kill(MachineInstr &MI) {
   MI.eraseFromParent();
 }
 
+void SILowerControlFlowPass::LoadM0(MachineInstr &MI, MachineInstr *MovRel) {
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  DebugLoc DL = MI.getDebugLoc();
+  MachineBasicBlock::iterator I = MI;
+
+  unsigned Save = MI.getOperand(1).getReg();
+  unsigned Idx = MI.getOperand(3).getReg();
+
+  if (AMDGPU::SReg_32RegClass.contains(Idx)) {
+    BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B32), AMDGPU::M0)
+            .addReg(Idx);
+    MBB.insert(I, MovRel);
+    MI.eraseFromParent();
+    return;
+  }
+
+  assert(AMDGPU::SReg_64RegClass.contains(Save));
+  assert(AMDGPU::VReg_32RegClass.contains(Idx));
+
+  // Save the EXEC mask
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B64), Save)
+          .addReg(AMDGPU::EXEC);
+
+  // Read the next variant into VCC (lower 32 bits) <- also loop target
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::V_READFIRSTLANE_B32_e32), AMDGPU::VCC)
+          .addReg(Idx);
+
+  // Move index from VCC into M0
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B32), AMDGPU::M0)
+          .addReg(AMDGPU::VCC);
+
+  // Compare the just read M0 value to all possible Idx values
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::V_CMP_EQ_U32_e32), AMDGPU::VCC)
+          .addReg(AMDGPU::M0)
+          .addReg(Idx);
+
+  // Update EXEC, save the original EXEC value to VCC
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_AND_SAVEEXEC_B64), AMDGPU::VCC)
+          .addReg(AMDGPU::VCC);
+
+  // Do the actual move
+  MBB.insert(I, MovRel);
+
+  // Update EXEC, switch all done bits to 0 and all todo bits to 1
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_XOR_B64), AMDGPU::EXEC)
+          .addReg(AMDGPU::EXEC)
+          .addReg(AMDGPU::VCC);
+
+  // Loop back to V_READFIRSTLANE_B32 if there are still variants to cover
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_CBRANCH_EXECNZ))
+          .addImm(-7)
+          .addReg(AMDGPU::EXEC);
+
+  // Restore EXEC
+  BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B64), AMDGPU::EXEC)
+          .addReg(Save);
+
+  MI.eraseFromParent();
+}
+
+void SILowerControlFlowPass::IndirectSrc(MachineInstr &MI) {
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  DebugLoc DL = MI.getDebugLoc();
+
+  unsigned Dst = MI.getOperand(0).getReg();
+  unsigned Vec = MI.getOperand(2).getReg();
+  unsigned Off = MI.getOperand(4).getImm();
+
+  MachineInstr *MovRel = 
+    BuildMI(*MBB.getParent(), DL, TII->get(AMDGPU::V_MOVRELS_B32_e32), Dst)
+            .addReg(TRI->getSubReg(Vec, AMDGPU::sub0) + Off)
+            .addReg(AMDGPU::M0, RegState::Implicit)
+            .addReg(Vec, RegState::Implicit);
+
+  LoadM0(MI, MovRel);
+}
+
+void SILowerControlFlowPass::IndirectDst(MachineInstr &MI) {
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  DebugLoc DL = MI.getDebugLoc();
+
+  unsigned Dst = MI.getOperand(0).getReg();
+  unsigned Off = MI.getOperand(4).getImm();
+  unsigned Val = MI.getOperand(5).getReg();
+
+  MachineInstr *MovRel = 
+    BuildMI(*MBB.getParent(), DL, TII->get(AMDGPU::V_MOVRELD_B32_e32))
+            .addReg(TRI->getSubReg(Dst, AMDGPU::sub0) + Off, RegState::Define)
+            .addReg(Val)
+            .addReg(AMDGPU::M0, RegState::Implicit)
+            .addReg(Dst, RegState::Implicit);
+
+  LoadM0(MI, MovRel);
+}
+
 bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
+  TII = MF.getTarget().getInstrInfo();
+  TRI = MF.getTarget().getRegisterInfo();
 
   bool HaveKill = false;
+  bool NeedM0 = false;
+  bool NeedWQM = false;
   unsigned Depth = 0;
 
   for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();
@@ -363,8 +471,47 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
         case AMDGPU::S_BRANCH:
           Branch(MI);
           break;
+
+        case AMDGPU::SI_INDIRECT_SRC:
+          IndirectSrc(MI);
+          break;
+
+        case AMDGPU::SI_INDIRECT_DST_V2:
+        case AMDGPU::SI_INDIRECT_DST_V4:
+        case AMDGPU::SI_INDIRECT_DST_V8:
+        case AMDGPU::SI_INDIRECT_DST_V16:
+          IndirectDst(MI);
+          break;
+
+        case AMDGPU::DS_READ_B32:
+          NeedWQM = true;
+          // Fall through
+        case AMDGPU::DS_WRITE_B32:
+          NeedM0 = true;
+          break;
+
+        case AMDGPU::V_INTERP_P1_F32:
+        case AMDGPU::V_INTERP_P2_F32:
+        case AMDGPU::V_INTERP_MOV_F32:
+          NeedWQM = true;
+          break;
+
       }
     }
+  }
+
+  if (NeedM0) {
+    MachineBasicBlock &MBB = MF.front();
+    // Initialize M0 to a value that won't cause LDS access to be discarded
+    // due to offset clamping
+    BuildMI(MBB, MBB.getFirstNonPHI(), DebugLoc(), TII->get(AMDGPU::S_MOV_B32),
+            AMDGPU::M0).addImm(0xffffffff);
+  }
+
+  if (NeedWQM) {
+    MachineBasicBlock &MBB = MF.front();
+    BuildMI(MBB, MBB.getFirstNonPHI(), DebugLoc(), TII->get(AMDGPU::S_WQM_B64),
+            AMDGPU::EXEC).addReg(AMDGPU::EXEC);
   }
 
   return true;

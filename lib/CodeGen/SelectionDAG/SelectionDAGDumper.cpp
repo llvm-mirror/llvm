@@ -54,7 +54,6 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::DELETED_NODE:               return "<<Deleted Node!>>";
 #endif
   case ISD::PREFETCH:                   return "Prefetch";
-  case ISD::MEMBARRIER:                 return "MemBarrier";
   case ISD::ATOMIC_FENCE:               return "AtomicFence";
   case ISD::ATOMIC_CMP_SWAP:            return "AtomicCmpSwap";
   case ISD::ATOMIC_SWAP:                return "AtomicSwap";
@@ -93,9 +92,6 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::RETURNADDR:                 return "RETURNADDR";
   case ISD::FRAMEADDR:                  return "FRAMEADDR";
   case ISD::FRAME_TO_ARGS_OFFSET:       return "FRAME_TO_ARGS_OFFSET";
-  case ISD::EXCEPTIONADDR:              return "EXCEPTIONADDR";
-  case ISD::LSDAADDR:                   return "LSDAADDR";
-  case ISD::EHSELECTION:                return "EHSELECTION";
   case ISD::EH_RETURN:                  return "EH_RETURN";
   case ISD::EH_SJLJ_SETJMP:             return "EH_SJLJ_SETJMP";
   case ISD::EH_SJLJ_LONGJMP:            return "EH_SJLJ_LONGJMP";
@@ -490,8 +486,7 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
       OS << " [TF=" << TF << ']';
   }
 
-  if (G)
-    if (unsigned Order = G->GetOrdering(this))
+  if (unsigned Order = getIROrder())
       OS << " [ORD=" << Order << ']';
 
   if (getNodeId() != -1)
@@ -502,8 +497,10 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     DIScope
       Scope(dl.getScope(G->getMachineFunction().getFunction()->getContext()));
     OS << " dbg:";
+    assert((!Scope || Scope.isScope()) &&
+      "Scope of a DebugLoc should be null or a DIScope.");
     // Omit the directory, since it's usually long and uninteresting.
-    if (Scope.Verify())
+    if (Scope)
       OS << Scope.getFilename();
     else
       OS << "<unknown>";

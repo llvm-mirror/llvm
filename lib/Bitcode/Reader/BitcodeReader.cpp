@@ -405,7 +405,7 @@ Value *BitcodeReaderMDValueList::getValueFwdRef(unsigned Idx) {
   }
 
   // Create and return a placeholder, which will later be RAUW'd.
-  Value *V = MDNode::getTemporary(Context, ArrayRef<Value*>());
+  Value *V = MDNode::getTemporary(Context, None);
   MDValuePtrs[Idx] = V;
   return V;
 }
@@ -3010,7 +3010,7 @@ bool BitcodeReader::InitLazyStream() {
   Stream.init(*StreamFile);
 
   unsigned char buf[16];
-  if (Bytes->readBytes(0, 16, buf, NULL) == -1)
+  if (Bytes->readBytes(0, 16, buf) == -1)
     return Error("Bitcode stream must be at least 16 bytes in length");
 
   if (!isBitcode(buf, buf + 16))

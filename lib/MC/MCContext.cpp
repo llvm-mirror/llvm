@@ -21,6 +21,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
@@ -31,16 +32,19 @@ typedef StringMap<const MCSectionELF*> ELFUniqueMapTy;
 typedef StringMap<const MCSectionCOFF*> COFFUniqueMapTy;
 
 
-MCContext::MCContext(const MCAsmInfo &mai, const MCRegisterInfo &mri,
+MCContext::MCContext(const MCAsmInfo *mai, const MCRegisterInfo *mri,
                      const MCObjectFileInfo *mofi, const SourceMgr *mgr,
                      bool DoAutoReset) :
   SrcMgr(mgr), MAI(mai), MRI(mri), MOFI(mofi),
   Allocator(), Symbols(Allocator), UsedNames(Allocator),
   NextUniqueID(0),
-  CompilationDir(llvm::sys::Path::GetCurrentDirectory().str()),
   CurrentDwarfLoc(0,0,0,DWARF2_FLAG_IS_STMT,0,0), 
   DwarfLocSeen(false), GenDwarfForAssembly(false), GenDwarfFileNumber(0),
   AllowTemporaryLabels(true), DwarfCompileUnitID(0), AutoReset(DoAutoReset) {
+
+  error_code EC = llvm::sys::fs::current_path(CompilationDir);
+  assert(!EC && "Could not determine the current directory");
+  (void)EC;
 
   MachOUniquingMap = 0;
   ELFUniquingMap = 0;
@@ -126,7 +130,7 @@ MCSymbol *MCContext::CreateSymbol(StringRef Name) {
   // Determine whether this is an assembler temporary or normal label, if used.
   bool isTemporary = false;
   if (AllowTemporaryLabels)
-    isTemporary = Name.startswith(MAI.getPrivateGlobalPrefix());
+    isTemporary = Name.startswith(MAI->getPrivateGlobalPrefix());
 
   StringMapEntry<bool> *NameEntry = &UsedNames.GetOrCreateValue(Name);
   if (NameEntry->getValue()) {
@@ -156,7 +160,7 @@ MCSymbol *MCContext::GetOrCreateSymbol(const Twine &Name) {
 MCSymbol *MCContext::CreateTempSymbol() {
   SmallString<128> NameSV;
   raw_svector_ostream(NameSV)
-    << MAI.getPrivateGlobalPrefix() << "tmp" << NextUniqueID++;
+    << MAI->getPrivateGlobalPrefix() << "tmp" << NextUniqueID++;
   return CreateSymbol(NameSV);
 }
 
@@ -175,14 +179,14 @@ unsigned MCContext::GetInstance(int64_t LocalLabelVal) {
 }
 
 MCSymbol *MCContext::CreateDirectionalLocalSymbol(int64_t LocalLabelVal) {
-  return GetOrCreateSymbol(Twine(MAI.getPrivateGlobalPrefix()) +
+  return GetOrCreateSymbol(Twine(MAI->getPrivateGlobalPrefix()) +
                            Twine(LocalLabelVal) +
                            "\2" +
                            Twine(NextInstance(LocalLabelVal)));
 }
 MCSymbol *MCContext::GetDirectionalLocalSymbol(int64_t LocalLabelVal,
                                                int bORf) {
-  return GetOrCreateSymbol(Twine(MAI.getPrivateGlobalPrefix()) +
+  return GetOrCreateSymbol(Twine(MAI->getPrivateGlobalPrefix()) +
                            Twine(LocalLabelVal) +
                            "\2" +
                            Twine(GetInstance(LocalLabelVal) + bORf));
@@ -270,10 +274,10 @@ const MCSectionELF *MCContext::CreateELFGroupSection() {
   return Result;
 }
 
-const MCSection *MCContext::getCOFFSection(StringRef Section,
-                                           unsigned Characteristics,
-                                           int Selection,
-                                           SectionKind Kind) {
+const MCSectionCOFF *MCContext::getCOFFSection(StringRef Section,
+                                               unsigned Characteristics,
+                                               SectionKind Kind, int Selection,
+                                               const MCSectionCOFF *Assoc) {
   if (COFFUniquingMap == 0)
     COFFUniquingMap = new COFFUniqueMapTy();
   COFFUniqueMapTy &Map = *(COFFUniqueMapTy*)COFFUniquingMap;
@@ -284,10 +288,18 @@ const MCSection *MCContext::getCOFFSection(StringRef Section,
 
   MCSectionCOFF *Result = new (*this) MCSectionCOFF(Entry.getKey(),
                                                     Characteristics,
-                                                    Selection, Kind);
+                                                    Selection, Assoc, Kind);
 
   Entry.setValue(Result);
   return Result;
+}
+
+const MCSectionCOFF *MCContext::getCOFFSection(StringRef Section) {
+  if (COFFUniquingMap == 0)
+    COFFUniquingMap = new COFFUniqueMapTy();
+  COFFUniqueMapTy &Map = *(COFFUniqueMapTy*)COFFUniquingMap;
+
+  return Map.lookup(Section);
 }
 
 //===----------------------------------------------------------------------===//

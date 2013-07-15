@@ -7,7 +7,7 @@
 
 ; Completely unroll loops without a canonical IV.
 ;
-; CHECK: @sansCanonical
+; CHECK-LABEL: @sansCanonical(
 ; CHECK-NOT: phi
 ; CHECK-NOT: icmp
 ; CHECK: ret
@@ -35,7 +35,7 @@ exit:
 ; latch block. Canonical unrolling incorrectly unrolls it, but SCEV
 ; unrolling does not.
 ;
-; CHECK: @earlyLoopTest
+; CHECK-LABEL: @earlyLoopTest(
 ; CHECK: tail:
 ; CHECK-NOT: br
 ; CHECK: br i1 %cmp2, label %loop, label %exit2
@@ -66,13 +66,16 @@ exit2:
 
 ; SCEV properly unrolls multi-exit loops.
 ;
-; CHECK: @multiExit
-; CHECK: getelementptr i32* %base, i32 10
-; CHECK-NEXT: load i32*
-; CHECK: br i1 false, label %l2.10, label %exit1
-; CHECK: l2.10:
-; CHECK-NOT: br
-; CHECK: ret i32
+; SCEV cannot currently unroll this loop.
+; It should ideally detect a trip count of 5.
+; rdar:14038809 [SCEV]: Optimize trip count computation for multi-exit loops.
+; CHECK-LABEL: @multiExit(
+; CHECKFIXME: getelementptr i32* %base, i32 10
+; CHECKFIXME-NEXT: load i32*
+; CHECKFIXME: br i1 false, label %l2.10, label %exit1
+; CHECKFIXME: l2.10:
+; CHECKFIXME-NOT: br
+; CHECKFIXME: ret i32
 define i32 @multiExit(i32* %base) nounwind {
 entry:
   br label %l1
@@ -100,7 +103,7 @@ exit2:
 ; LoopUnroll utility uses this assumption to optimize the latch
 ; block's branch.
 ;
-; CHECK: @multiExit
+; CHECK-LABEL: @multiExitIncomplete(
 ; CHECK: l3:
 ; CHECK-NOT: br
 ; CHECK:   br i1 %cmp3, label %l1, label %exit3
@@ -134,7 +137,7 @@ exit3:
 ; When loop unroll merges a loop exit with one of its parent loop's
 ; exits, SCEV must forget its ExitNotTaken info.
 ;
-; CHECK: @nestedUnroll
+; CHECK-LABEL: @nestedUnroll(
 ; CHECK-NOT: br i1
 ; CHECK: for.body87:
 define void @nestedUnroll() nounwind {
@@ -170,3 +173,38 @@ for.body87:
   br label %for.body87
 }
 
+; PR16130: clang produces incorrect code with loop/expression at -O2
+; rdar:14036816 loop-unroll makes assumptions about undefined behavior
+;
+; The loop latch is assumed to exit after the first iteration because
+; of the induction variable's NSW flag. However, the loop latch's
+; equality test is skipped and the loop exits after the second
+; iteration via the early exit. So loop unrolling cannot assume that
+; the loop latch's exit count of zero is an upper bound on the number
+; of iterations.
+;
+; CHECK-LABEL: @nsw_latch(
+; CHECK: for.body:
+; CHECK: %b.03 = phi i32 [ 0, %entry ], [ %add, %for.cond ]
+; CHECK: return:
+; CHECK: %b.03.lcssa = phi i32 [ %b.03, %for.body ], [ %b.03, %for.cond ]
+define void @nsw_latch(i32* %a) nounwind {
+entry:
+  br label %for.body
+
+for.body:                                         ; preds = %for.cond, %entry
+  %b.03 = phi i32 [ 0, %entry ], [ %add, %for.cond ]
+  %tobool = icmp eq i32 %b.03, 0
+  %add = add nsw i32 %b.03, 8
+  br i1 %tobool, label %for.cond, label %return
+
+for.cond:                                         ; preds = %for.body
+  %cmp = icmp eq i32 %add, 13
+  br i1 %cmp, label %return, label %for.body
+
+return:                                           ; preds = %for.body, %for.cond
+  %b.03.lcssa = phi i32 [ %b.03, %for.body ], [ %b.03, %for.cond ]
+  %retval.0 = phi i32 [ 1, %for.body ], [ 0, %for.cond ]
+  store i32 %b.03.lcssa, i32* %a, align 4
+  ret void
+}

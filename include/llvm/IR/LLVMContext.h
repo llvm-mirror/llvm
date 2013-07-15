@@ -15,7 +15,9 @@
 #ifndef LLVM_IR_LLVMCONTEXT_H
 #define LLVM_IR_LLVMCONTEXT_H
 
+#include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm-c/Core.h"
 
 namespace llvm {
 
@@ -28,7 +30,7 @@ class SMDiagnostic;
 template <typename T> class SmallVectorImpl;
 
 /// This is an important class for using LLVM in a threaded context.  It
-/// (opaquely) owns and manages the core "global" data of LLVM's core 
+/// (opaquely) owns and manages the core "global" data of LLVM's core
 /// infrastructure, including the type and constant uniquing tables.
 /// LLVMContext itself provides no locking guarantees, so you should be careful
 /// to have one context per thread.
@@ -37,7 +39,7 @@ public:
   LLVMContextImpl *const pImpl;
   LLVMContext();
   ~LLVMContext();
-  
+
   // Pinned metadata names, which always have the same value.  This is a
   // compile-time performance optimization, not a correctness optimization.
   enum {
@@ -49,19 +51,19 @@ public:
     MD_tbaa_struct = 5, // "tbaa.struct"
     MD_invariant_load = 6 // "invariant.load"
   };
-  
+
   /// getMDKindID - Return a unique non-zero ID for the specified metadata kind.
   /// This ID is uniqued across modules in the current LLVMContext.
   unsigned getMDKindID(StringRef Name) const;
-  
+
   /// getMDKindNames - Populate client supplied SmallVector with the name for
   /// custom metadata IDs registered in this LLVMContext.
   void getMDKindNames(SmallVectorImpl<StringRef> &Result) const;
-  
-  
+
+
   typedef void (*InlineAsmDiagHandlerTy)(const SMDiagnostic&, void *Context,
                                          unsigned LocCookie);
-  
+
   /// setInlineAsmDiagnosticHandler - This method sets a handler that is invoked
   /// when problems with inline asm are detected by the backend.  The first
   /// argument is a function pointer and the second is a context pointer that
@@ -79,8 +81,8 @@ public:
   /// getInlineAsmDiagnosticContext - Return the diagnostic context set by
   /// setInlineAsmDiagnosticHandler.
   void *getInlineAsmDiagnosticContext() const;
-  
-  
+
+
   /// emitError - Emit an error message to the currently installed error handler
   /// with optional location information.  This function returns, so code should
   /// be prepared to drop the erroneous construct on the floor and "not crash".
@@ -97,10 +99,10 @@ private:
   /// addModule - Register a module as being instantiated in this context.  If
   /// the context is deleted, the module will be deleted as well.
   void addModule(Module*);
-  
+
   /// removeModule - Unregister a module from this context.
   void removeModule(Module*);
-  
+
   // Module needs access to the add/removeModule methods.
   friend class Module;
 };
@@ -108,6 +110,19 @@ private:
 /// getGlobalContext - Returns a global context.  This is for LLVM clients that
 /// only care about operating on a single thread.
 extern LLVMContext &getGlobalContext();
+
+// Create wrappers for C Binding types (see CBindingWrapping.h).
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LLVMContext, LLVMContextRef)
+
+/* Specialized opaque context conversions.
+ */
+inline LLVMContext **unwrap(LLVMContextRef* Tys) {
+  return reinterpret_cast<LLVMContext**>(Tys);
+}
+
+inline LLVMContextRef *wrap(const LLVMContext **Tys) {
+  return reinterpret_cast<LLVMContextRef*>(const_cast<LLVMContext**>(Tys));
+}
 
 }
 

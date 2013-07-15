@@ -39,8 +39,14 @@ namespace llvm {
     std::string Namespace;
 
   public:
+    uint16_t Size;
+    uint16_t Offset;
     const unsigned EnumValue;
     unsigned LaneMask;
+
+    // Are all super-registers containing this SubRegIndex covered by their
+    // sub-registers?
+    bool AllSuperRegsCovered;
 
     CodeGenSubRegIndex(Record *R, unsigned Enum);
     CodeGenSubRegIndex(StringRef N, StringRef Nspace, unsigned Enum);
@@ -75,6 +81,15 @@ namespace llvm {
       assert(A && B);
       std::pair<CompMap::iterator, bool> Ins =
         Composed.insert(std::make_pair(A, B));
+      // Synthetic subreg indices that aren't contiguous (for instance ARM
+      // register tuples) don't have a bit range, so it's OK to let
+      // B->Offset == -1. For the other cases, accumulate the offset and set
+      // the size here. Only do so if there is no offset yet though.
+      if ((Offset != (uint16_t)-1 && A->Offset != (uint16_t)-1) &&
+          (B->Offset == (uint16_t)-1)) {
+        B->Offset = Offset + A->Offset;
+        B->Size = A->Size;
+      }
       return (Ins.second || Ins.first->second == B) ? 0 : Ins.first->second;
     }
 
@@ -201,9 +216,6 @@ namespace llvm {
     // Canonically ordered set.
     typedef std::set<const CodeGenRegister*, Less> Set;
 
-    // Compute the set of registers overlapping this.
-    void computeOverlaps(Set &Overlaps, const CodeGenRegBank&) const;
-
   private:
     bool SubRegsComplete;
     bool SuperRegsComplete;
@@ -261,7 +273,7 @@ namespace llvm {
   public:
     unsigned EnumValue;
     std::string Namespace;
-    std::vector<MVT::SimpleValueType> VTs;
+    SmallVector<MVT::SimpleValueType, 4> VTs;
     unsigned SpillSize;
     unsigned SpillAlignment;
     int CopyCost;
@@ -274,7 +286,7 @@ namespace llvm {
 
     const std::string &getName() const { return Name; }
     std::string getQualifiedName() const;
-    const std::vector<MVT::SimpleValueType> &getValueTypes() const {return VTs;}
+    ArrayRef<MVT::SimpleValueType> getValueTypes() const {return VTs;}
     unsigned getNumValueTypes() const { return VTs.size(); }
 
     MVT::SimpleValueType getValueTypeNum(unsigned VTNum) const {
@@ -522,10 +534,10 @@ namespace llvm {
     // Find or create a sub-register index representing the concatenation of
     // non-overlapping sibling indices.
     CodeGenSubRegIndex *
-      getConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex*, 8>&);
+      getConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex *, 8>&);
 
     void
-    addConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex*, 8> &Parts,
+    addConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex *, 8> &Parts,
                          CodeGenSubRegIndex *Idx) {
       ConcatIdx.insert(std::make_pair(Parts, Idx));
     }
@@ -649,6 +661,11 @@ namespace llvm {
     // This is used to compute the mask of call-preserved registers from a list
     // of callee-saves.
     BitVector computeCoveredRegisters(ArrayRef<Record*> Regs);
+
+    // Bit mask of lanes that cover their registers. A sub-register index whose
+    // LaneMask is contained in CoveringLanes will be completely covered by
+    // another sub-register with the same or larger lane mask.
+    unsigned CoveringLanes;
   };
 }
 

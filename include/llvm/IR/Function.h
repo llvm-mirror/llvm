@@ -181,6 +181,13 @@ public:
                                              AttributeSet::FunctionIndex, N));
   }
 
+  /// removeFnAttr - Remove function attributes from this function.
+  ///
+  void removeFnAttr(Attribute::AttrKind N) {
+    setAttributes(AttributeSets.removeAttribute(
+        getContext(), AttributeSet::FunctionIndex, N));
+  }
+
   /// addFnAttr - Add function attributes to this function.
   ///
   void addFnAttr(StringRef Kind) {
@@ -301,6 +308,21 @@ public:
   }
   void setDoesNotCapture(unsigned n) {
     addAttribute(n, Attribute::NoCapture);
+  }
+
+  bool doesNotAccessMemory(unsigned n) const {
+    return AttributeSets.hasAttribute(n, Attribute::ReadNone);
+  }
+  void setDoesNotAccessMemory(unsigned n) {
+    addAttribute(n, Attribute::ReadNone);
+  }
+
+  bool onlyReadsMemory(unsigned n) const {
+    return doesNotAccessMemory(n) ||
+      AttributeSets.hasAttribute(n, Attribute::ReadOnly);
+  }
+  void setOnlyReadsMemory(unsigned n) {
+    addAttribute(n, Attribute::ReadOnly);
   }
 
   /// copyAttributesFrom - copy all additional attributes (those not needed to

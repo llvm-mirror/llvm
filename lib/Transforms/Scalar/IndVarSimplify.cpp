@@ -532,8 +532,47 @@ void IndVarSimplify::RewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
         // and varies predictably *inside* the loop.  Evaluate the value it
         // contains when the loop exits, if possible.
         const SCEV *ExitValue = SE->getSCEVAtScope(Inst, L->getParentLoop());
-        if (!SE->isLoopInvariant(ExitValue, L))
+        if (!SE->isLoopInvariant(ExitValue, L) || !isSafeToExpand(ExitValue))
           continue;
+
+        // Computing the value outside of the loop brings no benefit if :
+        //  - it is definitely used inside the loop in a way which can not be
+        //    optimized away.
+        //  - no use outside of the loop can take advantage of hoisting the
+        //    computation out of the loop
+        if (ExitValue->getSCEVType()>=scMulExpr) {
+          unsigned NumHardInternalUses = 0;
+          unsigned NumSoftExternalUses = 0;
+          unsigned NumUses = 0;
+          for (Value::use_iterator IB=Inst->use_begin(), IE=Inst->use_end();
+               IB!=IE && NumUses<=6 ; ++IB) {
+            Instruction *UseInstr = cast<Instruction>(*IB);
+            unsigned Opc = UseInstr->getOpcode();
+            NumUses++;
+            if (L->contains(UseInstr)) {
+              if (Opc == Instruction::Call || Opc == Instruction::Ret)
+                NumHardInternalUses++;
+            } else {
+              if (Opc == Instruction::PHI) {
+                // Do not count the Phi as a use. LCSSA may have inserted
+                // plenty of trivial ones.
+                NumUses--;
+                for (Value::use_iterator PB=UseInstr->use_begin(),
+                                         PE=UseInstr->use_end();
+                     PB!=PE && NumUses<=6 ; ++PB, ++NumUses) {
+                  unsigned PhiOpc = cast<Instruction>(*PB)->getOpcode();
+                  if (PhiOpc != Instruction::Call && PhiOpc != Instruction::Ret)
+                    NumSoftExternalUses++;
+                }
+                continue;
+              }
+              if (Opc != Instruction::Call && Opc != Instruction::Ret)
+                NumSoftExternalUses++;
+            }
+          }
+          if (NumUses <= 6 && NumHardInternalUses && !NumSoftExternalUses)
+            continue;
+        }
 
         Value *ExitVal = Rewriter.expandCodeFor(ExitValue, PN->getType(), Inst);
 
@@ -1513,44 +1552,23 @@ LinearFunctionTestReplace(Loop *L,
                           SCEVExpander &Rewriter) {
   assert(canExpandBackedgeTakenCount(L, SE) && "precondition");
 
-  // LFTR can ignore IV overflow and truncate to the width of
-  // BECount. This avoids materializing the add(zext(add)) expression.
-  Type *CntTy = BackedgeTakenCount->getType();
-
+  // Initialize CmpIndVar and IVCount to their preincremented values.
+  Value *CmpIndVar = IndVar;
   const SCEV *IVCount = BackedgeTakenCount;
 
   // If the exiting block is the same as the backedge block, we prefer to
   // compare against the post-incremented value, otherwise we must compare
   // against the preincremented value.
-  Value *CmpIndVar;
   if (L->getExitingBlock() == L->getLoopLatch()) {
     // Add one to the "backedge-taken" count to get the trip count.
-    // If this addition may overflow, we have to be more pessimistic and
-    // cast the induction variable before doing the add.
-    const SCEV *N =
-      SE->getAddExpr(IVCount, SE->getConstant(IVCount->getType(), 1));
-    if (CntTy == IVCount->getType())
-      IVCount = N;
-    else {
-      const SCEV *Zero = SE->getConstant(IVCount->getType(), 0);
-      if ((isa<SCEVConstant>(N) && !N->isZero()) ||
-          SE->isLoopEntryGuardedByCond(L, ICmpInst::ICMP_NE, N, Zero)) {
-        // No overflow. Cast the sum.
-        IVCount = SE->getTruncateOrZeroExtend(N, CntTy);
-      } else {
-        // Potential overflow. Cast before doing the add.
-        IVCount = SE->getTruncateOrZeroExtend(IVCount, CntTy);
-        IVCount = SE->getAddExpr(IVCount, SE->getConstant(CntTy, 1));
-      }
-    }
+    // This addition may overflow, which is valid as long as the comparison is
+    // truncated to BackedgeTakenCount->getType().
+    IVCount = SE->getAddExpr(BackedgeTakenCount,
+                             SE->getConstant(BackedgeTakenCount->getType(), 1));
     // The BackedgeTaken expression contains the number of times that the
     // backedge branches to the loop header.  This is one less than the
     // number of times the loop executes, so use the incremented indvar.
     CmpIndVar = IndVar->getIncomingValueForBlock(L->getExitingBlock());
-  } else {
-    // We must use the preincremented value...
-    IVCount = SE->getTruncateOrZeroExtend(IVCount, CntTy);
-    CmpIndVar = IndVar;
   }
 
   Value *ExitCnt = genLoopLimit(IndVar, IVCount, L, Rewriter, SE);
@@ -1573,12 +1591,40 @@ LinearFunctionTestReplace(Loop *L,
                << "  IVCount:\t" << *IVCount << "\n");
 
   IRBuilder<> Builder(BI);
-  if (SE->getTypeSizeInBits(CmpIndVar->getType())
-      > SE->getTypeSizeInBits(ExitCnt->getType())) {
-    CmpIndVar = Builder.CreateTrunc(CmpIndVar, ExitCnt->getType(),
-                                    "lftr.wideiv");
-  }
 
+  // LFTR can ignore IV overflow and truncate to the width of
+  // BECount. This avoids materializing the add(zext(add)) expression.
+  unsigned CmpIndVarSize = SE->getTypeSizeInBits(CmpIndVar->getType());
+  unsigned ExitCntSize = SE->getTypeSizeInBits(ExitCnt->getType());
+  if (CmpIndVarSize > ExitCntSize) {
+    const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(SE->getSCEV(IndVar));
+    const SCEV *ARStart = AR->getStart();
+    const SCEV *ARStep = AR->getStepRecurrence(*SE);
+    // For constant IVCount, avoid truncation.
+    if (isa<SCEVConstant>(ARStart) && isa<SCEVConstant>(IVCount)) {
+      const APInt &Start = cast<SCEVConstant>(ARStart)->getValue()->getValue();
+      APInt Count = cast<SCEVConstant>(IVCount)->getValue()->getValue();
+      // Note that the post-inc value of BackedgeTakenCount may have overflowed
+      // above such that IVCount is now zero.
+      if (IVCount != BackedgeTakenCount && Count == 0) {
+        Count = APInt::getMaxValue(Count.getBitWidth()).zext(CmpIndVarSize);
+        ++Count;
+      }
+      else
+        Count = Count.zext(CmpIndVarSize);
+      APInt NewLimit;
+      if (cast<SCEVConstant>(ARStep)->getValue()->isNegative())
+        NewLimit = Start - Count;
+      else
+        NewLimit = Start + Count;
+      ExitCnt = ConstantInt::get(CmpIndVar->getType(), NewLimit);
+
+      DEBUG(dbgs() << "  Widen RHS:\t" << *ExitCnt << "\n");
+    } else {
+      CmpIndVar = Builder.CreateTrunc(CmpIndVar, ExitCnt->getType(),
+                                      "lftr.wideiv");
+    }
+  }
   Value *Cond = Builder.CreateICmp(P, CmpIndVar, ExitCnt, "exitcond");
   Value *OrigCond = BI->getCondition();
   // It's tempting to use replaceAllUsesWith here to fully replace the old

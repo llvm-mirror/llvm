@@ -45,9 +45,12 @@
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Scalar.h"
 
-
 using namespace llvm;
 
+namespace llvm {
+void initializeNVVMReflectPass(PassRegistry&);
+void initializeGenericToNVVMPass(PassRegistry&);
+}
 
 extern "C" void LLVMInitializeNVPTXTarget() {
   // Register the target.
@@ -57,65 +60,78 @@ extern "C" void LLVMInitializeNVPTXTarget() {
   RegisterMCAsmInfo<NVPTXMCAsmInfo> A(TheNVPTXTarget32);
   RegisterMCAsmInfo<NVPTXMCAsmInfo> B(TheNVPTXTarget64);
 
+  // FIXME: This pass is really intended to be invoked during IR optimization,
+  // but it's very NVPTX-specific.
+  initializeNVVMReflectPass(*PassRegistry::getPassRegistry());
+  initializeGenericToNVVMPass(*PassRegistry::getPassRegistry());
 }
 
-NVPTXTargetMachine::NVPTXTargetMachine(const Target &T,
-                                       StringRef TT,
-                                       StringRef CPU,
-                                       StringRef FS,
-                                       const TargetOptions& Options,
-                                       Reloc::Model RM,
-                                       CodeModel::Model CM,
-                                       CodeGenOpt::Level OL,
-                                       bool is64bit)
-: LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-  Subtarget(TT, CPU, FS, is64bit),
-  DL(Subtarget.getDataLayout()),
-  InstrInfo(*this), TLInfo(*this), TSInfo(*this), FrameLowering(*this,is64bit)
-/*FrameInfo(TargetFrameInfo::StackGrowsUp, 8, 0)*/ {
+NVPTXTargetMachine::NVPTXTargetMachine(
+    const Target &T, StringRef TT, StringRef CPU, StringRef FS,
+    const TargetOptions &Options, Reloc::Model RM, CodeModel::Model CM,
+    CodeGenOpt::Level OL, bool is64bit)
+    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+      Subtarget(TT, CPU, FS, is64bit), DL(Subtarget.getDataLayout()),
+      InstrInfo(*this), TLInfo(*this), TSInfo(*this),
+      FrameLowering(
+          *this, is64bit) /*FrameInfo(TargetFrameInfo::StackGrowsUp, 8, 0)*/ {
+  initAsmInfo();
 }
-
-
 
 void NVPTXTargetMachine32::anchor() {}
 
-NVPTXTargetMachine32::NVPTXTargetMachine32(const Target &T, StringRef TT,
-                                           StringRef CPU, StringRef FS,
-                                           const TargetOptions &Options,
-                                           Reloc::Model RM, CodeModel::Model CM,
-                                           CodeGenOpt::Level OL)
-: NVPTXTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {
-}
+NVPTXTargetMachine32::NVPTXTargetMachine32(
+    const Target &T, StringRef TT, StringRef CPU, StringRef FS,
+    const TargetOptions &Options, Reloc::Model RM, CodeModel::Model CM,
+    CodeGenOpt::Level OL)
+    : NVPTXTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
 void NVPTXTargetMachine64::anchor() {}
 
-NVPTXTargetMachine64::NVPTXTargetMachine64(const Target &T, StringRef TT,
-                                           StringRef CPU, StringRef FS,
-                                           const TargetOptions &Options,
-                                           Reloc::Model RM, CodeModel::Model CM,
-                                           CodeGenOpt::Level OL)
-: NVPTXTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {
-}
+NVPTXTargetMachine64::NVPTXTargetMachine64(
+    const Target &T, StringRef TT, StringRef CPU, StringRef FS,
+    const TargetOptions &Options, Reloc::Model RM, CodeModel::Model CM,
+    CodeGenOpt::Level OL)
+    : NVPTXTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
 
-
-namespace llvm {
+namespace {
 class NVPTXPassConfig : public TargetPassConfig {
 public:
   NVPTXPassConfig(NVPTXTargetMachine *TM, PassManagerBase &PM)
-  : TargetPassConfig(TM, PM) {}
+      : TargetPassConfig(TM, PM) {}
 
   NVPTXTargetMachine &getNVPTXTargetMachine() const {
     return getTM<NVPTXTargetMachine>();
   }
 
+  virtual void addIRPasses();
   virtual bool addInstSelector();
   virtual bool addPreRegAlloc();
+  virtual bool addPostRegAlloc();
+
+  virtual FunctionPass *createTargetRegisterAllocator(bool) LLVM_OVERRIDE;
+  virtual void addFastRegAlloc(FunctionPass *RegAllocPass);
+  virtual void addOptimizedRegAlloc(FunctionPass *RegAllocPass);
 };
-}
+} // end anonymous namespace
 
 TargetPassConfig *NVPTXTargetMachine::createPassConfig(PassManagerBase &PM) {
   NVPTXPassConfig *PassConfig = new NVPTXPassConfig(this, PM);
   return PassConfig;
+}
+
+void NVPTXPassConfig::addIRPasses() {
+  // The following passes are known to not play well with virtual regs hanging
+  // around after register allocation (which in our case, is *all* registers).
+  // We explicitly disable them here.  We do, however, need some functionality
+  // of the PrologEpilogCodeInserter pass, so we emulate that behavior in the
+  // NVPTXPrologEpilog pass (see NVPTXPrologEpilogPass.cpp).
+  disablePass(&PrologEpilogCodeInserterID);
+  disablePass(&MachineCopyPropagationID);
+  disablePass(&BranchFolderPassID);
+
+  TargetPassConfig::addIRPasses();
+  addPass(createGenericToNVVMPass());
 }
 
 bool NVPTXPassConfig::addInstSelector() {
@@ -126,6 +142,22 @@ bool NVPTXPassConfig::addInstSelector() {
   return false;
 }
 
-bool NVPTXPassConfig::addPreRegAlloc() {
+bool NVPTXPassConfig::addPreRegAlloc() { return false; }
+bool NVPTXPassConfig::addPostRegAlloc() {
+  addPass(createNVPTXPrologEpilogPass());
   return false;
+}
+
+FunctionPass *NVPTXPassConfig::createTargetRegisterAllocator(bool) {
+  return 0; // No reg alloc
+}
+
+void NVPTXPassConfig::addFastRegAlloc(FunctionPass *RegAllocPass) {
+  assert(!RegAllocPass && "NVPTX uses no regalloc!");
+  addPass(&StrongPHIEliminationID);
+}
+
+void NVPTXPassConfig::addOptimizedRegAlloc(FunctionPass *RegAllocPass) {
+  assert(!RegAllocPass && "NVPTX uses no regalloc!");
+  addPass(&StrongPHIEliminationID);
 }

@@ -30,13 +30,14 @@ namespace {
     virtual void InitSections() {
     }
 
-    virtual void ChangeSection(const MCSection *Section) {
+    virtual void ChangeSection(const MCSection *Section,
+                               const MCExpr *Subsection) {
     }
 
     virtual void EmitLabel(MCSymbol *Symbol) {
       assert(Symbol->isUndefined() && "Cannot define a symbol twice!");
-      assert(getCurrentSection() && "Cannot emit before setting section!");
-      Symbol->setSection(*getCurrentSection());
+      assert(getCurrentSection().first &&"Cannot emit before setting section!");
+      Symbol->setSection(*getCurrentSection().first);
     }
     virtual void EmitDebugLabel(MCSymbol *Symbol) {
       EmitLabel(Symbol);
@@ -70,10 +71,9 @@ namespace {
                               uint64_t Size = 0, unsigned ByteAlignment = 0) {}
     virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
                                 uint64_t Size, unsigned ByteAlignment) {}
-    virtual void EmitBytes(StringRef Data, unsigned AddrSpace) {}
+    virtual void EmitBytes(StringRef Data) {}
 
-    virtual void EmitValueImpl(const MCExpr *Value, unsigned Size,
-                               unsigned AddrSpace) {}
+    virtual void EmitValueImpl(const MCExpr *Value, unsigned Size) {}
     virtual void EmitULEB128Value(const MCExpr *Value) {}
     virtual void EmitSLEB128Value(const MCExpr *Value) {}
     virtual void EmitGPRel32Value(const MCExpr *Value) {}

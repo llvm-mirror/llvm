@@ -33,6 +33,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/TimeValue.h"
 #include "llvm/Support/system_error.h"
 #include <ctime>
 #include <iterator>
@@ -95,30 +96,28 @@ struct space_info {
   uint64_t available;
 };
 
-
 enum perms {
-  no_perms     = 0,
-  owner_read   = 0400, 
-  owner_write  = 0200, 
-  owner_exe    = 0100, 
-  owner_all    = owner_read | owner_write | owner_exe,
-  group_read   =  040, 
-  group_write  =  020, 
-  group_exe    =  010, 
-  group_all    = group_read | group_write | group_exe,
-  others_read  =   04, 
-  others_write =   02, 
-  others_exe   =   01, 
-  others_all   = others_read | others_write | others_exe, 
-  all_all      = owner_all | group_all | others_all,
-  set_uid_on_exe  = 04000, 
-  set_gid_on_exe  = 02000, 
-  sticky_bit      = 01000,
-  perms_mask      = all_all | set_uid_on_exe | set_gid_on_exe | sticky_bit, 
-  perms_not_known = 0xFFFF,
-  add_perms       = 0x1000,
-  remove_perms    = 0x2000, 
-  symlink_perms   = 0x4000
+  no_perms = 0,
+  owner_read = 0400,
+  owner_write = 0200,
+  owner_exe = 0100,
+  owner_all = owner_read | owner_write | owner_exe,
+  group_read = 040,
+  group_write = 020,
+  group_exe = 010,
+  group_all = group_read | group_write | group_exe,
+  others_read = 04,
+  others_write = 02,
+  others_exe = 01,
+  others_all = others_read | others_write | others_exe,
+  all_read = owner_read | group_read | others_read,
+  all_write = owner_write | group_write | others_write,
+  all_exe = owner_exe | group_exe | others_exe,
+  all_all = owner_all | group_all | others_all,
+  set_uid_on_exe = 04000,
+  set_gid_on_exe = 02000,
+  sticky_bit = 01000,
+  perms_not_known = 0xFFFF
 };
 
 // Helper functions so that you can use & and | to manipulate perms bits:
@@ -151,6 +150,10 @@ class file_status
   #if defined(LLVM_ON_UNIX)
   dev_t fs_st_dev;
   ino_t fs_st_ino;
+  time_t fs_st_mtime;
+  uid_t fs_st_uid;
+  gid_t fs_st_gid;
+  off_t fs_st_size;
   #elif defined (LLVM_ON_WIN32)
   uint32_t LastWriteTimeHigh;
   uint32_t LastWriteTimeLow;
@@ -162,6 +165,7 @@ class file_status
   #endif
   friend bool equivalent(file_status A, file_status B);
   friend error_code status(const Twine &path, file_status &result);
+  friend error_code getUniqueID(const Twine Path, uint64_t &Result);
   file_type Type;
   perms Perms;
 public:
@@ -172,7 +176,24 @@ public:
   // getters
   file_type type() const { return Type; }
   perms permissions() const { return Perms; }
-  
+  TimeValue getLastModificationTime() const;
+
+  #if defined(LLVM_ON_UNIX)
+  uint32_t getUser() const { return fs_st_uid; }
+  uint32_t getGroup() const { return fs_st_gid; }
+  uint64_t getSize() const { return fs_st_size; }
+  #elif defined (LLVM_ON_WIN32)
+  uint32_t getUser() const {
+    return 9999; // Not applicable to Windows, so...
+  }
+  uint32_t getGroup() const {
+    return 9999; // Not applicable to Windows, so...
+  }
+  uint64_t getSize() const {
+    return (uint64_t(FileSizeHigh) << 32) + FileSizeLow;
+  }
+  #endif
+
   // setters
   void type(file_type v) { Type = v; }
   void permissions(perms p) { Perms = p; }
@@ -181,7 +202,7 @@ public:
 /// file_magic - An "enum class" enumeration of file types based on magic (the first
 ///         N bytes of the file).
 struct file_magic {
-  enum _ {
+  enum Impl {
     unknown = 0,              ///< Unrecognized file
     bitcode,                  ///< Bitcode file
     archive,                  ///< ar style archive file
@@ -193,27 +214,27 @@ struct file_magic {
     macho_executable,         ///< Mach-O Executable
     macho_fixed_virtual_memory_shared_lib, ///< Mach-O Shared Lib, FVM
     macho_core,               ///< Mach-O Core File
-    macho_preload_executabl,  ///< Mach-O Preloaded Executable
+    macho_preload_executable, ///< Mach-O Preloaded Executable
     macho_dynamically_linked_shared_lib, ///< Mach-O dynlinked shared lib
     macho_dynamic_linker,     ///< The Mach-O dynamic linker
     macho_bundle,             ///< Mach-O Bundle file
     macho_dynamically_linked_shared_lib_stub, ///< Mach-O Shared lib stub
     macho_dsym_companion,     ///< Mach-O dSYM companion file
+    macho_universal_binary,   ///< Mach-O universal binary
     coff_object,              ///< COFF object file
     pecoff_executable         ///< PECOFF executable file
   };
 
   bool is_object() const {
-    return v_ == unknown ? false : true;
+    return V == unknown ? false : true;
   }
 
-  file_magic() : v_(unknown) {}
-  file_magic(_ v) : v_(v) {}
-  explicit file_magic(int v) : v_(_(v)) {}
-  operator int() const {return v_;}
+  file_magic() : V(unknown) {}
+  file_magic(Impl V) : V(V) {}
+  operator Impl() const { return V; }
 
 private:
-  int v_;
+  Impl V;
 };
 
 /// @}
@@ -253,6 +274,13 @@ error_code copy_file(const Twine &from, const Twine &to,
 ///          otherwise a platform specific error_code.
 error_code create_directories(const Twine &path, bool &existed);
 
+/// @brief Convenience function for clients that don't need to know if the
+///        directory existed or not.
+inline error_code create_directories(const Twine &Path) {
+  bool Existed;
+  return create_directories(Path, Existed);
+}
+
 /// @brief Create the directory in path.
 ///
 /// @param path Directory to create.
@@ -260,6 +288,13 @@ error_code create_directories(const Twine &path, bool &existed);
 /// @returns errc::success if is_directory(path) and existed have been set,
 ///          otherwise a platform specific error_code.
 error_code create_directory(const Twine &path, bool &existed);
+
+/// @brief Convenience function for clients that don't need to know if the
+///        directory existed or not.
+inline error_code create_directory(const Twine &Path) {
+  bool Existed;
+  return create_directory(Path, Existed);
+}
 
 /// @brief Create a hard link from \a from to \a to.
 ///
@@ -293,6 +328,13 @@ error_code current_path(SmallVectorImpl<char> &result);
 ///          successfully set, otherwise a platform specific error_code.
 error_code remove(const Twine &path, bool &existed);
 
+/// @brief Convenience function for clients that don't need to know if the file
+///        existed or not.
+inline error_code remove(const Twine &Path) {
+  bool Existed;
+  return remove(Path, Existed);
+}
+
 /// @brief Recursively remove all files below \a path, then \a path. Files are
 ///        removed as if by POSIX remove().
 ///
@@ -301,6 +343,13 @@ error_code remove(const Twine &path, bool &existed);
 /// @returns errc::success if path has been removed and num_removed has been
 ///          successfully set, otherwise a platform specific error_code.
 error_code remove_all(const Twine &path, uint32_t &num_removed);
+
+/// @brief Convenience function for clients that don't need to know how many
+///        files were removed.
+inline error_code remove_all(const Twine &Path) {
+  uint32_t Removed;
+  return remove_all(Path, Removed);
+}
 
 /// @brief Rename \a from to \a to. Files are renamed as if by POSIX rename().
 ///
@@ -343,6 +392,18 @@ inline bool exists(const Twine &path) {
   return !exists(path, result) && result;
 }
 
+/// @brief Can we execute this file?
+///
+/// @param Path Input path.
+/// @returns True if we can execute it, false otherwise.
+bool can_execute(const Twine &Path);
+
+/// @brief Can we write this file?
+///
+/// @param Path Input path.
+/// @returns True if we can write to it, false otherwise.
+bool can_write(const Twine &Path);
+
 /// @brief Do file_status's represent the same thing?
 ///
 /// @param A Input file_status.
@@ -375,11 +436,18 @@ inline bool equivalent(const Twine &A, const Twine &B) {
 
 /// @brief Get file size.
 ///
-/// @param path Input path.
-/// @param result Set to the size of the file in \a path.
+/// @param Path Input path.
+/// @param Result Set to the size of the file in \a Path.
 /// @returns errc::success if result has been successfully set, otherwise a
 ///          platform specific error_code.
-error_code file_size(const Twine &path, uint64_t &result);
+inline error_code file_size(const Twine &Path, uint64_t &Result) {
+  file_status Status;
+  error_code EC = status(Path, Status);
+  if (EC)
+    return EC;
+  Result = Status.getSize();
+  return error_code::success();
+}
 
 /// @brief Does status represent a directory?
 ///
@@ -410,6 +478,15 @@ bool is_regular_file(file_status status);
 /// @returns errc::success if result has been successfully set, otherwise a
 ///          platform specific error_code.
 error_code is_regular_file(const Twine &path, bool &result);
+
+/// @brief Simpler version of is_regular_file for clients that don't need to
+///        differentiate between an error and false.
+inline bool is_regular_file(const Twine &Path) {
+  bool Result;
+  if (is_regular_file(Path, Result))
+    return false;
+  return Result;
+}
 
 /// @brief Does this status represent something that exists but is not a
 ///        directory, regular file, or symlink?
@@ -452,12 +529,7 @@ error_code is_symlink(const Twine &path, bool &result);
 ///          platform specific error_code.
 error_code status(const Twine &path, file_status &result);
 
-/// @brief Modifies permission bits on a file
-///
-/// @param path Input path.
-/// @returns errc::success if permissions have been changed, otherwise a
-///          platform specific error_code.
-error_code permissions(const Twine &path, perms prms);
+error_code setLastModificationAndAccessTime(int FD, TimeValue Time);
 
 /// @brief Is status available?
 ///
@@ -473,28 +545,53 @@ bool status_known(file_status s);
 ///          platform specific error_code.
 error_code status_known(const Twine &path, bool &result);
 
-/// @brief Generate a unique path and open it as a file.
+/// @brief Create a uniquely named file.
 ///
 /// Generates a unique path suitable for a temporary file and then opens it as a
 /// file. The name is based on \a model with '%' replaced by a random char in
 /// [0-9a-f]. If \a model is not an absolute path, a suitable temporary
 /// directory will be prepended.
 ///
+/// Example: clang-%%-%%-%%-%%-%%.s => clang-a0-b1-c2-d3-e4.s
+///
 /// This is an atomic operation. Either the file is created and opened, or the
 /// file system is left untouched.
 ///
-/// clang-%%-%%-%%-%%-%%.s => /tmp/clang-a0-b1-c2-d3-e4.s
+/// The intendend use is for files that are to be kept, possibly after
+/// renaming them. For example, when running 'clang -c foo.o', the file can
+/// be first created as foo-abc123.o and then renamed.
 ///
-/// @param model Name to base unique path off of.
-/// @param result_fd Set to the opened file's file descriptor.
-/// @param result_path Set to the opened file's absolute path.
-/// @param makeAbsolute If true and \a model is not an absolute path, a temp
-///        directory will be prepended.
-/// @returns errc::success if result_{fd,path} have been successfully set,
+/// @param Model Name to base unique path off of.
+/// @param ResultFD Set to the opened file's file descriptor.
+/// @param ResultPath Set to the opened file's absolute path.
+/// @returns errc::success if Result{FD,Path} have been successfully set,
 ///          otherwise a platform specific error_code.
-error_code unique_file(const Twine &model, int &result_fd,
-                       SmallVectorImpl<char> &result_path,
-                       bool makeAbsolute = true, unsigned mode = 0600);
+error_code createUniqueFile(const Twine &Model, int &ResultFD,
+                            SmallVectorImpl<char> &ResultPath,
+                            unsigned Mode = all_read | all_write);
+
+/// @brief Simpler version for clients that don't want an open file.
+error_code createUniqueFile(const Twine &Model,
+                            SmallVectorImpl<char> &ResultPath);
+
+/// @brief Create a file in the system temporary directory.
+///
+/// The filename is of the form prefix-random_chars.suffix. Since the directory
+/// is not know to the caller, Prefix and Suffix cannot have path separators.
+/// The files are created with mode 0600.
+///
+/// This should be used for things like a temporary .s that is removed after
+/// running the assembler.
+error_code createTemporaryFile(const Twine &Prefix, StringRef Suffix,
+                               int &ResultFD,
+                               SmallVectorImpl<char> &ResultPath);
+
+/// @brief Simpler version for clients that don't want an open file.
+error_code createTemporaryFile(const Twine &Prefix, StringRef Suffix,
+                               SmallVectorImpl<char> &ResultPath);
+
+error_code createUniqueDirectory(const Twine &Prefix,
+                                 SmallVectorImpl<char> &ResultPath);
 
 /// @brief Canonicalize path.
 ///
@@ -534,48 +631,12 @@ file_magic identify_magic(StringRef magic);
 /// @brief Get and identify \a path's type based on its content.
 ///
 /// @param path Input path.
-/// @param result Set to the type of file, or LLVMFileType::Unknown_FileType.
+/// @param result Set to the type of file, or file_magic::unknown.
 /// @returns errc::success if result has been successfully set, otherwise a
 ///          platform specific error_code.
 error_code identify_magic(const Twine &path, file_magic &result);
 
-/// @brief Get library paths the system linker uses.
-///
-/// @param result Set to the list of system library paths.
-/// @returns errc::success if result has been successfully set, otherwise a
-///          platform specific error_code.
-error_code GetSystemLibraryPaths(SmallVectorImpl<std::string> &result);
-
-/// @brief Get bitcode library paths the system linker uses
-///        + LLVM_LIB_SEARCH_PATH + LLVM_LIBDIR.
-///
-/// @param result Set to the list of bitcode library paths.
-/// @returns errc::success if result has been successfully set, otherwise a
-///          platform specific error_code.
-error_code GetBitcodeLibraryPaths(SmallVectorImpl<std::string> &result);
-
-/// @brief Find a library.
-///
-/// Find the path to a library using its short name. Use the system
-/// dependent library paths to locate the library.
-///
-/// c => /usr/lib/libc.so
-///
-/// @param short_name Library name one would give to the system linker.
-/// @param result Set to the absolute path \a short_name represents.
-/// @returns errc::success if result has been successfully set, otherwise a
-///          platform specific error_code.
-error_code FindLibrary(const Twine &short_name, SmallVectorImpl<char> &result);
-
-/// @brief Get absolute path of main executable.
-///
-/// @param argv0 The program name as it was spelled on the command line.
-/// @param MainAddr Address of some symbol in the executable (not in a library).
-/// @param result Set to the absolute path of the current executable.
-/// @returns errc::success if result has been successfully set, otherwise a
-///          platform specific error_code.
-error_code GetMainExecutable(const char *argv0, void *MainAddr,
-                             SmallVectorImpl<char> &result);
+error_code getUniqueID(const Twine Path, uint64_t &Result);
 
 /// This class represents a memory mapped file. It is based on
 /// boost::iostreams::mapped_file.
@@ -649,7 +710,7 @@ public:
   char *data() const;
 
   /// Get a const view of the data. Modifying this memory has undefined
-  /// behaivor.
+  /// behavior.
   const char *const_data() const;
 
   /// \returns The minimum alignment offset must be.
@@ -680,7 +741,10 @@ error_code map_file_pages(const Twine &path, off_t file_offset, size_t size,
 ///          platform specific error_code.
 error_code unmap_file_pages(void *base, size_t size);
 
-
+/// Return the path to the main executable, given the value of argv[0] from
+/// program startup and the address of main itself. In extremis, this function
+/// may fail and return an empty path.
+std::string getMainExecutable(const char *argv0, void *MainExecAddr);
 
 /// @}
 /// @name Iterators

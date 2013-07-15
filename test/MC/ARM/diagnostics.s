@@ -371,3 +371,39 @@
 @ CHECK-ERRORS: error: invalid operand for instruction
 @ CHECK-ERRORS:         msr foo, #0
 @ CHECK-ERRORS:             ^
+
+        isb #-1
+        isb #16
+@ CHECK-ERRORS: error: immediate value out of range
+@ CHECK-ERRORS: error: immediate value out of range
+
+        nop.n
+@ CHECK-ERRORS: error: instruction with .n (narrow) qualifier not allowed in arm mode
+
+	dmbeq #5
+	dsble #15
+	isblo #7
+@ CHECK-ERRORS: error: instruction 'dmb' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'dsb' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'isb' is not predicable, but condition code specified
+
+	dmblt
+	dsbne
+	isbeq
+@ CHECK-ERRORS: error: instruction 'dmb' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'dsb' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'isb' is not predicable, but condition code specified
+
+        mcr2le  p7, #1, r5, c1, c1, #4
+        mcrr2ne p7, #15, r5, r4, c1
+        mrc2lo  p14, #0, r1, c1, c2, #4
+        mrrc2lo  p7, #1, r5, r4, c1
+        cdp2hi   p10, #0, c6, c12, c0, #7
+@ CHECK-ERRORS: error: instruction 'mcr2' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'mcrr2' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'mrc2' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'mrrc2' is not predicable, but condition code specified
+@ CHECK-ERRORS: error: instruction 'cdp2' is not predicable, but condition code specified
+
+        bkpteq #7
+@ CHECK-ERRORS: error: instruction 'bkpt' is not predicable, but condition code specified

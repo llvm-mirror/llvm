@@ -41,7 +41,7 @@ char DataLayout::ID = 0;
 // Support for StructLayout
 //===----------------------------------------------------------------------===//
 
-StructLayout::StructLayout(StructType *ST, const DataLayout &TD) {
+StructLayout::StructLayout(StructType *ST, const DataLayout &DL) {
   assert(!ST->isOpaque() && "Cannot get layout of opaque structs");
   StructAlignment = 0;
   StructSize = 0;
@@ -50,7 +50,7 @@ StructLayout::StructLayout(StructType *ST, const DataLayout &TD) {
   // Loop over each of the elements, placing them in memory.
   for (unsigned i = 0, e = NumElements; i != e; ++i) {
     Type *Ty = ST->getElementType(i);
-    unsigned TyAlign = ST->isPacked() ? 1 : TD.getABITypeAlignment(Ty);
+    unsigned TyAlign = ST->isPacked() ? 1 : DL.getABITypeAlignment(Ty);
 
     // Add padding if necessary to align the data element properly.
     if ((StructSize & (TyAlign-1)) != 0)
@@ -60,7 +60,7 @@ StructLayout::StructLayout(StructType *ST, const DataLayout &TD) {
     StructAlignment = std::max(TyAlign, StructAlignment);
 
     MemberOffsets[i] = StructSize;
-    StructSize += TD.getTypeAllocSize(Ty); // Consume space for this data item
+    StructSize += DL.getTypeAllocSize(Ty); // Consume space for this data item
   }
 
   // Empty structures have alignment of 1 byte.
@@ -200,9 +200,7 @@ static unsigned inBytes(unsigned Bits) {
 }
 
 void DataLayout::parseSpecifier(StringRef Desc) {
-
   while (!Desc.empty()) {
-
     // Split at '-'.
     std::pair<StringRef, StringRef> Split = split(Desc, '-');
     Desc = Split.second;
@@ -482,7 +480,7 @@ std::string DataLayout::getStringRepresentation() const {
     addrSpaces.push_back(pib->first);
   }
   std::sort(addrSpaces.begin(), addrSpaces.end());
-  for (SmallVector<unsigned, 8>::iterator asb = addrSpaces.begin(),
+  for (SmallVectorImpl<unsigned>::iterator asb = addrSpaces.begin(),
       ase = addrSpaces.end(); asb != ase; ++asb) {
     const PointerAlignElem &PI = Pointers.find(*asb)->second;
     OS << "-p";
@@ -509,47 +507,6 @@ std::string DataLayout::getStringRepresentation() const {
   return OS.str();
 }
 
-
-uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
-  assert(Ty->isSized() && "Cannot getTypeInfo() on a type that is unsized!");
-  switch (Ty->getTypeID()) {
-  case Type::LabelTyID:
-    return getPointerSizeInBits(0);
-  case Type::PointerTyID: {
-    unsigned AS = dyn_cast<PointerType>(Ty)->getAddressSpace();
-    return getPointerSizeInBits(AS);
-  }
-  case Type::ArrayTyID: {
-    ArrayType *ATy = cast<ArrayType>(Ty);
-    return getTypeAllocSizeInBits(ATy->getElementType())*ATy->getNumElements();
-  }
-  case Type::StructTyID:
-    // Get the layout annotation... which is lazily created on demand.
-    return getStructLayout(cast<StructType>(Ty))->getSizeInBits();
-  case Type::IntegerTyID:
-    return cast<IntegerType>(Ty)->getBitWidth();
-  case Type::HalfTyID:
-    return 16;
-  case Type::FloatTyID:
-    return 32;
-  case Type::DoubleTyID:
-  case Type::X86_MMXTyID:
-    return 64;
-  case Type::PPC_FP128TyID:
-  case Type::FP128TyID:
-    return 128;
-  // In memory objects this is always aligned to a higher boundary, but
-  // only 80 bits contain information.
-  case Type::X86_FP80TyID:
-    return 80;
-  case Type::VectorTyID: {
-    VectorType *VTy = cast<VectorType>(Ty);
-    return VTy->getNumElements()*getTypeSizeInBits(VTy->getElementType());
-  }
-  default:
-    llvm_unreachable("DataLayout::getTypeSizeInBits(): Unsupported type");
-  }
-}
 
 /*!
   \param abi_or_pref Flag that determines which alignment is returned. true
@@ -623,7 +580,6 @@ unsigned DataLayout::getABIIntegerTypeAlignment(unsigned BitWidth) const {
   return getAlignmentInfo(INTEGER_ALIGN, BitWidth, true, 0);
 }
 
-
 unsigned DataLayout::getCallFrameTypeAlignment(Type *Ty) const {
   for (unsigned i = 0, e = Alignments.size(); i != e; ++i)
     if (Alignments[i].AlignType == STACK_ALIGN)
@@ -642,16 +598,11 @@ unsigned DataLayout::getPreferredTypeAlignmentShift(Type *Ty) const {
   return Log2_32(Align);
 }
 
-/// getIntPtrType - Return an integer type with size at least as big as that
-/// of a pointer in the given address space.
 IntegerType *DataLayout::getIntPtrType(LLVMContext &C,
                                        unsigned AddressSpace) const {
   return IntegerType::get(C, getPointerSizeInBits(AddressSpace));
 }
 
-/// getIntPtrType - Return an integer (vector of integer) type with size at
-/// least as big as that of a pointer of the given pointer (vector of pointer)
-/// type.
 Type *DataLayout::getIntPtrType(Type *Ty) const {
   assert(Ty->isPtrOrPtrVectorTy() &&
          "Expected a pointer or pointer vector type.");
@@ -660,6 +611,13 @@ Type *DataLayout::getIntPtrType(Type *Ty) const {
   if (VectorType *VecTy = dyn_cast<VectorType>(Ty))
     return VectorType::get(IntTy, VecTy->getNumElements());
   return IntTy;
+}
+
+Type *DataLayout::getSmallestLegalIntType(LLVMContext &C, unsigned Width) const {
+  for (unsigned i = 0, e = (unsigned)LegalIntWidths.size(); i != e; ++i)
+    if (Width <= LegalIntWidths[i])
+      return Type::getIntNTy(C, LegalIntWidths[i]);
+  return 0;
 }
 
 uint64_t DataLayout::getIndexedOffset(Type *ptrTy,

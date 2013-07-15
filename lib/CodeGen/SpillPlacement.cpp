@@ -29,9 +29,10 @@
 
 #define DEBUG_TYPE "spillplacement"
 #include "SpillPlacement.h"
+#include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/EdgeBundles.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/Passes.h"
@@ -52,6 +53,7 @@ char &llvm::SpillPlacementID = SpillPlacement::ID;
 
 void SpillPlacement::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
+  AU.addRequired<MachineBlockFrequencyInfo>();
   AU.addRequiredTransitive<EdgeBundles>();
   AU.addRequiredTransitive<MachineLoopInfo>();
   MachineFunctionPass::getAnalysisUsage(AU);
@@ -177,9 +179,10 @@ bool SpillPlacement::runOnMachineFunction(MachineFunction &mf) {
 
   // Compute total ingoing and outgoing block frequencies for all bundles.
   BlockFrequency.resize(mf.getNumBlockIDs());
+  MachineBlockFrequencyInfo &MBFI = getAnalysis<MachineBlockFrequencyInfo>();
+  float EntryFreq = BlockFrequency::getEntryFrequency();
   for (MachineFunction::iterator I = mf.begin(), E = mf.end(); I != E; ++I) {
-    float Freq = LiveIntervals::getSpillWeight(true, false,
-                                               loops->getLoopDepth(I));
+    float Freq = MBFI.getBlockFreq(I).getFrequency() / EntryFreq;
     unsigned Num = I->getNumber();
     BlockFrequency[Num] = Freq;
     nodes[bundles->getBundle(Num, 1)].Scale[0] += Freq;

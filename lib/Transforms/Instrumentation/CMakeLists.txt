@@ -1,7 +1,7 @@
 add_llvm_library(LLVMInstrumentation
   AddressSanitizer.cpp
-  BlackList.cpp
   BoundsChecking.cpp
+  DebugIR.cpp
   EdgeProfiling.cpp
   GCOVProfiling.cpp
   MemorySanitizer.cpp

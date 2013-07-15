@@ -138,10 +138,20 @@ static DecodeStatus DecodeHWRegs64RegisterClass(MCInst &Inst,
                                                 uint64_t Address,
                                                 const void *Decoder);
 
-static DecodeStatus DecodeACRegsRegisterClass(MCInst &Inst,
-                                              unsigned RegNo,
-                                              uint64_t Address,
-                                              const void *Decoder);
+static DecodeStatus DecodeACRegsDSPRegisterClass(MCInst &Inst,
+                                                 unsigned RegNo,
+                                                 uint64_t Address,
+                                                 const void *Decoder);
+
+static DecodeStatus DecodeHIRegsDSPRegisterClass(MCInst &Inst,
+                                                 unsigned RegNo,
+                                                 uint64_t Address,
+                                                 const void *Decoder);
+
+static DecodeStatus DecodeLORegsDSPRegisterClass(MCInst &Inst,
+                                                 unsigned RegNo,
+                                                 uint64_t Address,
+                                                 const void *Decoder);
 
 static DecodeStatus DecodeBranchTarget(MCInst &Inst,
                                        unsigned Offset,
@@ -242,7 +252,7 @@ static DecodeStatus readInstruction32(const MemoryObject &region,
   uint8_t Bytes[4];
 
   // We want to read exactly 4 Bytes of data.
-  if (region.readBytes(address, 4, (uint8_t*)Bytes, NULL) == -1) {
+  if (region.readBytes(address, 4, Bytes) == -1) {
     size = 0;
     return MCDisassembler::Fail;
   }
@@ -395,7 +405,10 @@ static DecodeStatus DecodeCCRRegisterClass(MCInst &Inst,
                                            unsigned RegNo,
                                            uint64_t Address,
                                            const void *Decoder) {
-  Inst.addOperand(MCOperand::CreateReg(RegNo));
+  if (RegNo > 31)
+    return MCDisassembler::Fail;
+  unsigned Reg = getReg(Decoder, Mips::CCRRegClassID, RegNo);
+  Inst.addOperand(MCOperand::CreateReg(Reg));
   return MCDisassembler::Success;
 }
 
@@ -484,14 +497,38 @@ static DecodeStatus DecodeHWRegs64RegisterClass(MCInst &Inst,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeACRegsRegisterClass(MCInst &Inst,
-                                              unsigned RegNo,
-                                              uint64_t Address,
-                                              const void *Decoder) {
+static DecodeStatus DecodeACRegsDSPRegisterClass(MCInst &Inst,
+                                                 unsigned RegNo,
+                                                 uint64_t Address,
+                                                 const void *Decoder) {
   if (RegNo >= 4)
     return MCDisassembler::Fail;
 
-  unsigned Reg = getReg(Decoder, Mips::ACRegsRegClassID, RegNo);
+  unsigned Reg = getReg(Decoder, Mips::ACRegsDSPRegClassID, RegNo);
+  Inst.addOperand(MCOperand::CreateReg(Reg));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeHIRegsDSPRegisterClass(MCInst &Inst,
+                                                 unsigned RegNo,
+                                                 uint64_t Address,
+                                                 const void *Decoder) {
+  if (RegNo >= 4)
+    return MCDisassembler::Fail;
+
+  unsigned Reg = getReg(Decoder, Mips::HIRegsDSPRegClassID, RegNo);
+  Inst.addOperand(MCOperand::CreateReg(Reg));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeLORegsDSPRegisterClass(MCInst &Inst,
+                                                 unsigned RegNo,
+                                                 uint64_t Address,
+                                                 const void *Decoder) {
+  if (RegNo >= 4)
+    return MCDisassembler::Fail;
+
+  unsigned Reg = getReg(Decoder, Mips::LORegsDSPRegClassID, RegNo);
   Inst.addOperand(MCOperand::CreateReg(Reg));
   return MCDisassembler::Success;
 }

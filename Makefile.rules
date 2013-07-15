@@ -275,8 +275,10 @@ ifeq ($(ENABLE_OPTIMIZED),1)
   BuildMode := Release
   # Don't use -fomit-frame-pointer on Darwin or FreeBSD.
   ifneq ($(HOST_OS),FreeBSD)
+  ifneq ($(HOST_OS),GNU/kFreeBSD)
   ifneq ($(HOST_OS),Darwin)
     OmitFramePointer := -fomit-frame-pointer
+  endif
   endif
   endif
 
@@ -287,7 +289,6 @@ ifeq ($(ENABLE_OPTIMIZED),1)
     BuildMode := $(BuildMode)+Debug
     CXX.Flags += -g
     C.Flags   += -g
-    LD.Flags  += -g
     KEEP_SYMBOLS := 1
   endif
 else
@@ -295,13 +296,16 @@ else
     BuildMode := Unoptimized
     CXX.Flags +=
     C.Flags   +=
-    LD.Flags  +=
     KEEP_SYMBOLS := 1
   else
     BuildMode := Debug
+    ifeq ($(ENABLE_SPLIT_DWARF), 1)
+    CXX.Flags += -gsplit-dwarf
+    C.Flags   += -gsplit-dwarf
+    else
     CXX.Flags += -g
     C.Flags   += -g
-    LD.Flags  += -g
+    endif
     KEEP_SYMBOLS := 1
   endif
 endif
@@ -324,7 +328,7 @@ ifeq ($(ENABLE_PROFILING),1)
   BuildMode := $(BuildMode)+Profile
   CXX.Flags := $(filter-out -fomit-frame-pointer,$(CXX.Flags)) -pg -g
   C.Flags   := $(filter-out -fomit-frame-pointer,$(C.Flags)) -pg -g
-  LD.Flags  := $(filter-out -fomit-frame-pointer,$(LD.Flags)) -pg -g
+  LD.Flags  := $(filter-out -fomit-frame-pointer,$(LD.Flags)) -pg
   KEEP_SYMBOLS := 1
 endif
 
@@ -639,22 +643,17 @@ endif
 ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
   ifneq ($(HOST_OS), Darwin)
     ifdef TOOLNAME
-      LD.Flags += $(RPATH) -Wl,'$$ORIGIN/../lib'
-      ifdef EXAMPLE_TOOL
-        LD.Flags += $(RPATH) -Wl,$(ExmplDir) $(DynamicFlag)
-      else
-        LD.Flags += $(RPATH) -Wl,$(ToolDir) $(DynamicFlag)
+      LD.Flags += $(RPATH) -Wl,'$$ORIGIN/../lib' $(DynamicFlag)
+    endif
+  else
+    ifneq ($(DARWIN_MAJVERS),4)
+      LD.Flags += $(RPATH) -Wl,@executable_path/../lib
+    endif
+    ifeq ($(RC_XBS),YES)
+      TempFile := $(shell mkdir -p ${OBJROOT}/dSYMs ; mktemp ${OBJROOT}/dSYMs/llvm-lto.XXXXXX)
+      LD.Flags += -Wl,-object_path_lto -Wl,$(TempFile)
     endif
   endif
-else
-  ifneq ($(DARWIN_MAJVERS),4)
-    LD.Flags += $(RPATH) -Wl,@executable_path/../lib
-  endif
-  ifeq ($(RC_XBS),YES)
-    TempFile := $(shell mkdir -p ${OBJROOT}/dSYMs ; mktemp ${OBJROOT}/dSYMs/llvm-lto.XXXXXX)
-    LD.Flags += -Wl,-object_path_lto -Wl,$(TempFile)
-  endif
-endif
 endif
 
 
@@ -696,9 +695,9 @@ ifdef UNIVERSAL
     UNIVERSAL_ARCH := i386 ppc
   endif
   UNIVERSAL_ARCH_OPTIONS := $(UNIVERSAL_ARCH:%=-arch %)
-  CompileCommonOpts += $(UNIVERSAL_ARCH_OPTIONS)
+  TargetCommonOpts += $(UNIVERSAL_ARCH_OPTIONS)
   ifdef UNIVERSAL_SDK_PATH
-    CompileCommonOpts += -isysroot $(UNIVERSAL_SDK_PATH)
+    TargetCommonOpts += -isysroot $(UNIVERSAL_SDK_PATH)
   endif
 
   # Building universal cannot compute dependencies automatically.
@@ -760,8 +759,8 @@ Preprocess.CXX= $(Compile.Wrapper) \
 	          $(CXX) $(CPP.Flags) $(TargetCommonOpts) $(CPPFLAGS) \
                 $(CompileCommonOpts) $(CXX.Flags) -E
 Link          = $(Compile.Wrapper) \
-	          $(CXX) $(CPP.Flags) $(CXX.Flags) $(CXXFLAGS) $(LD.Flags) \
-                $(LDFLAGS) $(TargetCommonOpts)  $(CompileCommonOpts) $(Strip)
+	          $(CXX) $(CXXFLAGS) $(LD.Flags) $(LDFLAGS) \
+                $(TargetCommonOpts) $(Strip)
 
 BCCompile.C   = $(LLVMCC) $(CPP.Flags) $(C.Flags) $(CFLAGS) $(CPPFLAGS) \
                 $(TargetCommonOpts) $(CompileCommonOpts)
@@ -1454,7 +1453,7 @@ LD.Flags += -Wl,-exported_symbol,_main
 endif
 endif
 
-ifeq ($(HOST_OS), $(filter $(HOST_OS), Linux NetBSD FreeBSD GNU))
+ifeq ($(HOST_OS), $(filter $(HOST_OS), Linux NetBSD FreeBSD GNU/kFreeBSD GNU))
 ifneq ($(ARCH), Mips)
   LD.Flags += -Wl,--version-script=$(LLVM_SRC_ROOT)/autoconf/ExportMap.map
 endif
@@ -1515,6 +1514,8 @@ $(ToolBuildPath): $(ToolDir)/.dir
 endif
 
 ifdef CODESIGN_TOOLS
+TOOL_CODESIGN_IDENTITY ?= -
+
 $(ToolBuildPath): $(ObjectsO) $(ProjLibsPaths) $(LLVMLibsPaths)
 	$(Echo) Linking $(BuildMode) executable $(TOOLNAME) $(StripWarnMsg)
 	$(Verb) $(Link) -o $@ $(TOOLLINKOPTS) $(ObjectsO) $(ProjLibsOptions) \
@@ -1522,7 +1523,7 @@ $(ToolBuildPath): $(ObjectsO) $(ProjLibsPaths) $(LLVMLibsPaths)
 	$(Echo) ======= Finished Linking $(BuildMode) Executable $(TOOLNAME) \
           $(StripWarnMsg)
 	$(Echo) ======= Code-Signing $(BuildMode) Executable $(TOOLNAME)
-	$(Verb) codesign -s - $@
+	$(Verb) codesign -s $(TOOL_CODESIGN_IDENTITY) $@
 else
 $(ToolBuildPath): $(ObjectsO) $(ProjLibsPaths) $(LLVMLibsPaths)
 	$(Echo) Linking $(BuildMode) executable $(TOOLNAME) $(StripWarnMsg)
@@ -1967,7 +1968,7 @@ endif
 # CHECK: Running the test suite
 ###############################################################################
 
-check::
+check:: all
 	$(Verb) if test -d "$(PROJ_OBJ_ROOT)/test" ; then \
 	  if test -f "$(PROJ_OBJ_ROOT)/test/Makefile" ; then \
 	    $(EchoCmd) Running test suite ; \

@@ -42,6 +42,7 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/DebugInfo.h"
 #include "llvm/IR/Function.h"
@@ -67,14 +68,14 @@ DisableColoring("no-stack-coloring",
 /// code. If this flag is enabled, we try to save the user.
 static cl::opt<bool>
 ProtectFromEscapedAllocas("protect-from-escaped-allocas",
-        cl::init(false), cl::Hidden,
-        cl::desc("Do not optimize lifetime zones that are broken"));
+                          cl::init(false), cl::Hidden,
+                          cl::desc("Do not optimize lifetime zones that "
+                                   "are broken"));
 
 STATISTIC(NumMarkerSeen,  "Number of lifetime markers found.");
 STATISTIC(StackSpaceSaved, "Number of bytes saved due to merging slots.");
 STATISTIC(StackSlotMerged, "Number of stack slot merged.");
-STATISTIC(EscapedAllocas,
-          "Number of allocas that escaped the lifetime region");
+STATISTIC(EscapedAllocas, "Number of allocas that escaped the lifetime region");
 
 //===----------------------------------------------------------------------===//
 //                           StackColoring Pass
@@ -309,9 +310,9 @@ void StackColoring::calculateLocalLiveness() {
 
     SmallPtrSet<const MachineBasicBlock*, 8> NextBBSet;
 
-    for (SmallVector<const MachineBasicBlock*, 8>::iterator
-         PI = BasicBlockNumbering.begin(), PE = BasicBlockNumbering.end();
-         PI != PE; ++PI) {
+    for (SmallVectorImpl<const MachineBasicBlock *>::iterator
+           PI = BasicBlockNumbering.begin(), PE = BasicBlockNumbering.end();
+           PI != PE; ++PI) {
 
       const MachineBasicBlock *BB = *PI;
       if (!BBSet.count(BB)) continue;
@@ -428,17 +429,14 @@ void StackColoring::calculateLiveIntervals(unsigned NumSlots) {
     }
 
     // Create the interval of the blocks that we previously found to be 'alive'.
-    BitVector Alive = BlockLiveness[MBB].LiveIn;
-    Alive |= BlockLiveness[MBB].LiveOut;
-
-    if (Alive.any()) {
-      for (int pos = Alive.find_first(); pos != -1;
-           pos = Alive.find_next(pos)) {
-        if (!Starts[pos].isValid())
-          Starts[pos] = Indexes->getMBBStartIdx(MBB);
-        if (!Finishes[pos].isValid())
-          Finishes[pos] = Indexes->getMBBEndIdx(MBB);
-      }
+    BlockLifetimeInfo &MBBLiveness = BlockLiveness[MBB];
+    for (int pos = MBBLiveness.LiveIn.find_first(); pos != -1;
+         pos = MBBLiveness.LiveIn.find_next(pos)) {
+      Starts[pos] = Indexes->getMBBStartIdx(MBB);
+    }
+    for (int pos = MBBLiveness.LiveOut.find_first(); pos != -1;
+         pos = MBBLiveness.LiveOut.find_next(pos)) {
+      Finishes[pos] = Indexes->getMBBEndIdx(MBB);
     }
 
     for (unsigned i = 0; i < NumSlots; ++i) {
@@ -528,6 +526,10 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
         if (!V)
           continue;
 
+        const PseudoSourceValue *PSV = dyn_cast<const PseudoSourceValue>(V);
+        if (PSV && PSV->isConstant(MFI))
+          continue;
+
         // Climb up and find the original alloca.
         V = GetUnderlyingObject(V);
         // If we did not find one, or if the one that we found is not in our
@@ -577,7 +579,7 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
           SlotIndex Index = Indexes->getInstructionIndex(I);
           LiveInterval *Interval = Intervals[FromSlot];
           assert(Interval->find(Index) != Interval->end() &&
-               "Found instruction usage outside of live range.");
+                 "Found instruction usage outside of live range.");
         }
 #endif
 
@@ -741,9 +743,9 @@ bool StackColoring::runOnMachineFunction(MachineFunction &Func) {
   std::stable_sort(SortedSlots.begin(), SortedSlots.end(),
                    SlotSizeSorter(MFI));
 
-  bool Chanded = true;
-  while (Chanded) {
-    Chanded = false;
+  bool Changed = true;
+  while (Changed) {
+    Changed = false;
     for (unsigned I = 0; I < NumSlots; ++I) {
       if (SortedSlots[I] == -1)
         continue;
@@ -760,7 +762,7 @@ bool StackColoring::runOnMachineFunction(MachineFunction &Func) {
 
         // Merge disjoint slots.
         if (!First->overlaps(*Second)) {
-          Chanded = true;
+          Changed = true;
           First->MergeRangesInAsValue(*Second, First->getValNumInfo(0));
           SlotRemap[SecondSlot] = FirstSlot;
           SortedSlots[J] = -1;

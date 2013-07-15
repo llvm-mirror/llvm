@@ -18,7 +18,7 @@ else
     MAKE=make
 fi
 
-projects="llvm cfe dragonegg compiler-rt test-suite"
+projects="llvm cfe dragonegg compiler-rt libcxx test-suite clang-tools-extra"
 
 # Base SVN URL for the sources.
 Base_url="http://llvm.org/svn/llvm-project"
@@ -210,12 +210,19 @@ function export_sources() {
     if [ ! -h clang ]; then
         ln -s ../../cfe.src clang
     fi
+    cd $BuildDir/llvm.src/tools/clang/tools
+    if [ ! -h clang-tools-extra ]; then
+        ln -s ../../../../clang-tools-extra.src extra
+    fi
     cd $BuildDir/llvm.src/projects
-    if [ ! -h llvm-test ]; then
-        ln -s ../../test-suite.src llvm-test
+    if [ ! -h test-suite ]; then
+        ln -s ../../test-suite.src test-suite
     fi
     if [ ! -h compiler-rt ]; then
         ln -s ../../compiler-rt.src compiler-rt
+    fi
+    if [ ! -h libcxx ]; then
+        ln -s ../../libcxx.src libcxx
     fi
     cd $BuildDir
 }
@@ -473,7 +480,7 @@ for Flavor in $Flavors ; do
         build_dragonegg 2 $Flavor $llvmCore_de_phase2_installdir $dragonegg_phase2_objdir
 
         ########################################################################
-        # Phase 3: Build llvmCore with newly built clang from phase 2.
+        # Phase 3: Build llvmCore with newly built dragonegg from phase 2.
         c_compiler="$gcc_compiler -fplugin=$dragonegg_phase2_objdir/dragonegg.so"
         cxx_compiler="$gxx_compiler -fplugin=$dragonegg_phase2_objdir/dragonegg.so"
         echo "# Phase 3: Building llvmCore with dragonegg"

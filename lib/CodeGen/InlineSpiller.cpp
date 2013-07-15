@@ -14,6 +14,7 @@
 
 #define DEBUG_TYPE "regalloc"
 #include "Spiller.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -21,8 +22,10 @@
 #include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/CodeGen/LiveStackAnalysis.h"
 #include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -63,6 +66,7 @@ class InlineSpiller : public Spiller {
   MachineRegisterInfo &MRI;
   const TargetInstrInfo &TII;
   const TargetRegisterInfo &TRI;
+  const MachineBlockFrequencyInfo &MBFI;
 
   // Variables that are valid during spill(), but used by multiple methods.
   LiveRangeEdit *Edit;
@@ -146,7 +150,8 @@ public:
       MFI(*mf.getFrameInfo()),
       MRI(mf.getRegInfo()),
       TII(*mf.getTarget().getInstrInfo()),
-      TRI(*mf.getTarget().getRegisterInfo()) {}
+      TRI(*mf.getTarget().getRegisterInfo()),
+      MBFI(pass.getAnalysis<MachineBlockFrequencyInfo>()) {}
 
   void spill(LiveRangeEdit &);
 
@@ -337,10 +342,12 @@ static raw_ostream &operator<<(raw_ostream &OS,
 /// propagateSiblingValue - Propagate the value in SVI to dependents if it is
 /// known.  Otherwise remember the dependency for later.
 ///
-/// @param SVI SibValues entry to propagate.
+/// @param SVIIter SibValues entry to propagate.
 /// @param VNI Dependent value, or NULL to propagate to all saved dependents.
-void InlineSpiller::propagateSiblingValue(SibValueMap::iterator SVI,
+void InlineSpiller::propagateSiblingValue(SibValueMap::iterator SVIIter,
                                           VNInfo *VNI) {
+  SibValueMap::value_type *SVI = &*SVIIter;
+
   // When VNI is non-NULL, add it to SVI's deps, and only propagate to that.
   TinyPtrVector<VNInfo*> FirstDeps;
   if (VNI) {
@@ -352,14 +359,12 @@ void InlineSpiller::propagateSiblingValue(SibValueMap::iterator SVI,
   if (!SVI->second.hasDef())
     return;
 
-  // Work list of values to propagate.  It would be nice to use a SetVector
-  // here, but then we would be forced to use a SmallSet.
-  SmallVector<SibValueMap::iterator, 8> WorkList(1, SVI);
-  SmallPtrSet<VNInfo*, 8> WorkSet;
+  // Work list of values to propagate.
+  SmallSetVector<SibValueMap::value_type *, 8> WorkList;
+  WorkList.insert(SVI);
 
   do {
     SVI = WorkList.pop_back_val();
-    WorkSet.erase(SVI->first);
     TinyPtrVector<VNInfo*> *Deps = VNI ? &FirstDeps : &SVI->second.Deps;
     VNI = 0;
 
@@ -450,8 +455,7 @@ void InlineSpiller::propagateSiblingValue(SibValueMap::iterator SVI,
         continue;
 
       // Something changed in DepSVI. Propagate to dependents.
-      if (WorkSet.insert(DepSVI->first))
-        WorkList.push_back(DepSVI);
+      WorkList.insert(&*DepSVI);
 
       DEBUG(dbgs() << "  update " << DepSVI->first->id << '@'
             << DepSVI->first->def << " to:\t" << DepSV);
@@ -955,18 +959,21 @@ void InlineSpiller::reMaterializeAll() {
   Edit->eliminateDeadDefs(DeadDefs, RegsToSpill);
 
   // Get rid of deleted and empty intervals.
-  for (unsigned i = RegsToSpill.size(); i != 0; --i) {
-    unsigned Reg = RegsToSpill[i-1];
-    if (!LIS.hasInterval(Reg)) {
-      RegsToSpill.erase(RegsToSpill.begin() + (i - 1));
+  unsigned ResultPos = 0;
+  for (unsigned i = 0, e = RegsToSpill.size(); i != e; ++i) {
+    unsigned Reg = RegsToSpill[i];
+    if (!LIS.hasInterval(Reg))
+      continue;
+
+    LiveInterval &LI = LIS.getInterval(Reg);
+    if (LI.empty()) {
+      Edit->eraseVirtReg(Reg);
       continue;
     }
-    LiveInterval &LI = LIS.getInterval(Reg);
-    if (!LI.empty())
-      continue;
-    Edit->eraseVirtReg(Reg);
-    RegsToSpill.erase(RegsToSpill.begin() + (i - 1));
+
+    RegsToSpill[ResultPos++] = Reg;
   }
+  RegsToSpill.erase(RegsToSpill.begin() + ResultPos, RegsToSpill.end());
   DEBUG(dbgs() << RegsToSpill.size() << " registers to spill after remat.\n");
 }
 
@@ -1047,6 +1054,34 @@ foldMemoryOperand(ArrayRef<std::pair<MachineInstr*, unsigned> > Ops,
                        : TII.foldMemoryOperand(MI, FoldOps, StackSlot);
   if (!FoldMI)
     return false;
+
+  // Remove LIS for any dead defs in the original MI not in FoldMI.
+  for (MIBundleOperands MO(MI); MO.isValid(); ++MO) {
+    if (!MO->isReg())
+      continue;
+    unsigned Reg = MO->getReg();
+    if (!Reg || TargetRegisterInfo::isVirtualRegister(Reg) ||
+        MRI.isReserved(Reg)) {
+      continue;
+    }
+    MIBundleOperands::PhysRegInfo RI =
+      MIBundleOperands(FoldMI).analyzePhysReg(Reg, &TRI);
+    if (MO->readsReg()) {
+      assert(RI.Reads && "Cannot fold physreg reader");
+      continue;
+    }
+    if (RI.Defines)
+      continue;
+    // FoldMI does not define this physreg. Remove the LI segment.
+    assert(MO->isDead() && "Cannot fold physreg def");
+    for (MCRegUnitIterator Units(Reg, &TRI); Units.isValid(); ++Units) {
+      if (LiveInterval *LI = LIS.getCachedRegUnit(*Units)) {
+        SlotIndex Idx = LIS.getInstructionIndex(MI).getRegSlot();
+        if (VNInfo *VNI = LI->getVNInfoAt(Idx))
+          LI->removeValNo(VNI);
+      }
+    }
+  }
   LIS.ReplaceMachineInstrInMaps(MI, FoldMI);
   MI->eraseFromParent();
 
@@ -1117,18 +1152,14 @@ void InlineSpiller::spillAroundUses(unsigned Reg) {
     // Debug values are not allowed to affect codegen.
     if (MI->isDebugValue()) {
       // Modify DBG_VALUE now that the value is in a spill slot.
-      uint64_t Offset = MI->getOperand(1).getImm();
+      bool IsIndirect = MI->getOperand(1).isImm();
+      uint64_t Offset = IsIndirect ? MI->getOperand(1).getImm() : 0;
       const MDNode *MDPtr = MI->getOperand(2).getMetadata();
       DebugLoc DL = MI->getDebugLoc();
-      if (MachineInstr *NewDV = TII.emitFrameIndexDebugValue(MF, StackSlot,
-                                                           Offset, MDPtr, DL)) {
-        DEBUG(dbgs() << "Modifying debug info due to spill:" << "\t" << *MI);
-        MachineBasicBlock *MBB = MI->getParent();
-        MBB->insert(MBB->erase(MI), NewDV);
-      } else {
-        DEBUG(dbgs() << "Removing debug info due to spill:" << "\t" << *MI);
-        MI->eraseFromParent();
-      }
+      DEBUG(dbgs() << "Modifying debug info due to spill:" << "\t" << *MI);
+      MachineBasicBlock *MBB = MI->getParent();
+      BuildMI(*MBB, MBB->erase(MI), DL, TII.get(TargetOpcode::DBG_VALUE))
+          .addFrameIndex(StackSlot).addImm(Offset).addMetadata(MDPtr);
       continue;
     }
 
@@ -1291,5 +1322,5 @@ void InlineSpiller::spill(LiveRangeEdit &edit) {
   if (!RegsToSpill.empty())
     spillAll();
 
-  Edit->calculateRegClassAndHint(MF, Loops);
+  Edit->calculateRegClassAndHint(MF, Loops, MBFI);
 }

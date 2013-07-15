@@ -12,9 +12,10 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Option/OptSpecifier.h"
 #include "llvm/Option/Option.h"
-#include <list>
+#include "llvm/Support/Allocator.h"
 #include <string>
 #include <vector>
 
@@ -222,8 +223,17 @@ public:
   /// negation are present, the last one wins.
   bool hasFlag(OptSpecifier Pos, OptSpecifier Neg, bool Default=true) const;
 
+  /// hasFlag - Given an option \p Pos, an alias \p PosAlias and its negative
+  /// form \p Neg, return true if the option or its alias is present, false if
+  /// the negation is present, and \p Default if none of the options are
+  /// given. If multiple options are present, the last one wins.
+  bool hasFlag(OptSpecifier Pos, OptSpecifier PosAlias, OptSpecifier Neg,
+               bool Default = true) const;
+
   /// AddLastArg - Render only the last argument match \p Id0, if present.
   void AddLastArg(ArgStringList &Output, OptSpecifier Id0) const;
+  void AddLastArg(ArgStringList &Output, OptSpecifier Id0,
+                  OptSpecifier Id1) const;
 
   /// AddAllArgs - Render all arguments matching the given ids.
   void AddAllArgs(ArgStringList &Output, OptSpecifier Id0,
@@ -289,7 +299,7 @@ private:
   /// This is mutable since we treat the ArgList as being the list
   /// of Args, and allow routines to add new strings (to have a
   /// convenient place to store the memory) via MakeIndex.
-  mutable std::list<std::string> SynthesizedStrings;
+  mutable StringSet<BumpPtrAllocator> SynthesizedStrings;
 
   /// The number of original input argument strings.
   unsigned NumInputArgStrings;

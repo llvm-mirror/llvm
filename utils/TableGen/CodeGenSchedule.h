@@ -266,10 +266,13 @@ public:
     return ProcModels[I->second];
   }
 
-  const CodeGenProcModel &getProcModel(Record *ModelDef) const {
+  CodeGenProcModel &getProcModel(Record *ModelDef) {
     ProcModelMapTy::const_iterator I = ProcModelMap.find(ModelDef);
     assert(I != ProcModelMap.end() && "missing machine model");
     return ProcModels[I->second];
+  }
+  const CodeGenProcModel &getProcModel(Record *ModelDef) const {
+    return const_cast<CodeGenSchedModels*>(this)->getProcModel(ModelDef);
   }
 
   // Iterate over the unique processor models.
@@ -379,6 +382,9 @@ private:
                    unsigned FromClassIdx, const IdxVec &ProcIndices);
   void inferFromItinClass(Record *ItinClassDef, unsigned FromClassIdx);
   void inferFromInstRWs(unsigned SCIdx);
+
+  bool hasSuperGroup(RecVec &SubUnits, CodeGenProcModel &PM);
+  void verifyProcResourceGroups(CodeGenProcModel &PM);
 
   void collectProcResources();
 

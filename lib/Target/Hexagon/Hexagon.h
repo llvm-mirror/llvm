@@ -31,24 +31,27 @@ namespace llvm {
 
   FunctionPass *createHexagonISelDag(HexagonTargetMachine &TM,
                                      CodeGenOpt::Level OptLevel);
-  FunctionPass *createHexagonDelaySlotFillerPass(TargetMachine &TM);
-  FunctionPass *createHexagonFPMoverPass(TargetMachine &TM);
-  FunctionPass *createHexagonRemoveExtendOps(HexagonTargetMachine &TM);
-  FunctionPass *createHexagonCFGOptimizer(HexagonTargetMachine &TM);
+  FunctionPass *createHexagonDelaySlotFillerPass(const TargetMachine &TM);
+  FunctionPass *createHexagonFPMoverPass(const TargetMachine &TM);
+  FunctionPass *createHexagonRemoveExtendArgs(const HexagonTargetMachine &TM);
+  FunctionPass *createHexagonCFGOptimizer(const HexagonTargetMachine &TM);
 
-  FunctionPass *createHexagonSplitTFRCondSets(HexagonTargetMachine &TM);
-  FunctionPass *createHexagonExpandPredSpillCode(HexagonTargetMachine &TM);
-
+  FunctionPass *createHexagonSplitTFRCondSets(const HexagonTargetMachine &TM);
+  FunctionPass *createHexagonSplitConst32AndConst64(
+                      const HexagonTargetMachine &TM);
+  FunctionPass *createHexagonExpandPredSpillCode(
+                      const HexagonTargetMachine &TM);
   FunctionPass *createHexagonHardwareLoops();
   FunctionPass *createHexagonPeephole();
   FunctionPass *createHexagonFixupHwLoops();
+  FunctionPass *createHexagonNewValueJump();
+  FunctionPass *createHexagonCopyToCombine();
   FunctionPass *createHexagonPacketizer();
   FunctionPass *createHexagonNewValueJump();
 
-
 /* TODO: object output.
   MCCodeEmitter *createHexagonMCCodeEmitter(const Target &,
-                                            TargetMachine &TM,
+                                            const TargetMachine &TM,
                                             MCContext &Ctx);
 */
 /* TODO: assembler input.

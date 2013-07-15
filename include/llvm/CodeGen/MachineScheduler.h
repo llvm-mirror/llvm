@@ -30,7 +30,6 @@
 #include "llvm/CodeGen/MachinePassRegistry.h"
 #include "llvm/CodeGen/RegisterPressure.h"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
-#include "llvm/Target/TargetInstrInfo.h"
 
 namespace llvm {
 
@@ -274,6 +273,10 @@ public:
     Mutations.push_back(Mutation);
   }
 
+  /// \brief True if an edge can be added from PredSU to SuccSU without creating
+  /// a cycle.
+  bool canAddEdge(SUnit *SuccSU, SUnit *PredSU);
+
   /// \brief Add a DAG edge to the given SU with the given predecessor
   /// dependence data.
   ///
@@ -296,6 +299,10 @@ public:
   /// Implement ScheduleDAGInstrs interface for scheduling a sequence of
   /// reorderable instructions.
   virtual void schedule();
+
+  /// Change the position of an instruction within the basic block and update
+  /// live ranges and region boundary iterators.
+  void moveInstruction(MachineInstr *MI, MachineBasicBlock::iterator InsertPos);
 
   /// Get current register pressure for the top scheduled instructions.
   const IntervalPressure &getTopPressure() const { return TopPressure; }
@@ -362,7 +369,6 @@ protected:
 
   void updateScheduledPressure(const std::vector<unsigned> &NewMaxPressure);
 
-  void moveInstruction(MachineInstr *MI, MachineBasicBlock::iterator InsertPos);
   bool checkSchedLimit();
 
   void findRootsAndBiasEdges(SmallVectorImpl<SUnit*> &TopRoots,

@@ -19,6 +19,7 @@
 #define LLVM_IR_GLOBALVALUE_H
 
 #include "llvm/IR/Constant.h"
+#include "llvm/IR/DerivedTypes.h"
 
 namespace llvm {
 
@@ -105,7 +106,7 @@ public:
 
   /// getType - Global values are always pointers.
   inline PointerType *getType() const {
-    return reinterpret_cast<PointerType*>(User::getType());
+    return cast<PointerType>(User::getType());
   }
 
   static LinkageTypes getLinkOnceLinkage(bool ODR) {
@@ -237,6 +238,15 @@ public:
   /// copyAttributesFrom - copy all additional attributes (those not needed to
   /// create a GlobalValue) from the GlobalValue Src to this one.
   virtual void copyAttributesFrom(const GlobalValue *Src);
+
+  /// getRealLinkageName - If special LLVM prefix that is used to inform the asm
+  /// printer to not emit usual symbol prefix before the symbol name is used
+  /// then return linkage name after skipping this special LLVM prefix.
+  static StringRef getRealLinkageName(StringRef Name) {
+    if (!Name.empty() && Name[0] == '\1')
+      return Name.substr(1);
+    return Name;
+  }
 
 /// @name Materialization
 /// Materialization is used to construct functions only as they're needed. This
