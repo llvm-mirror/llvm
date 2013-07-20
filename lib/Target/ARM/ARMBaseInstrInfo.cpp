@@ -113,8 +113,7 @@ ScheduleHazardRecognizer *ARMBaseInstrInfo::
 CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
                                    const ScheduleDAG *DAG) const {
   if (Subtarget.isThumb2() || Subtarget.hasVFP2())
-    return (ScheduleHazardRecognizer *)
-      new ARMHazardRecognizer(II, *this, getRegisterInfo(), Subtarget, DAG);
+    return (ScheduleHazardRecognizer *)new ARMHazardRecognizer(II, DAG);
   return TargetInstrInfo::CreateTargetPostRAHazardRecognizer(II, DAG);
 }
 
@@ -746,6 +745,9 @@ void ARMBaseInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     if (Opc == ARM::VORRq)
       Mov.addReg(Src);
     Mov = AddDefaultPred(Mov);
+    // MOVr can set CC.
+    if (Opc == ARM::MOVr)
+      Mov = AddDefaultCC(Mov);
   }
   // Add implicit super-register defs and kills to the last instruction.
   Mov->addRegisterDefined(DestReg, TRI);
@@ -1212,16 +1214,6 @@ bool ARMBaseInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const{
 
   DEBUG(dbgs() << "replaced by: " << *MI);
   return true;
-}
-
-MachineInstr*
-ARMBaseInstrInfo::emitFrameIndexDebugValue(MachineFunction &MF,
-                                           int FrameIx, uint64_t Offset,
-                                           const MDNode *MDPtr,
-                                           DebugLoc DL) const {
-  MachineInstrBuilder MIB = BuildMI(MF, DL, get(ARM::DBG_VALUE))
-    .addFrameIndex(FrameIx).addImm(0).addImm(Offset).addMetadata(MDPtr);
-  return &*MIB;
 }
 
 /// Create a copy of a const pool value. Update CPI to the new index and return
@@ -3685,8 +3677,7 @@ hasHighOperandLatency(const InstrItineraryData *ItinData,
     return true;
 
   // Hoist VFP / NEON instructions with 4 or higher latency.
-  int Latency = computeOperandLatency(ItinData, DefMI, DefIdx, UseMI, UseIdx,
-                                      /*FindMin=*/false);
+  int Latency = computeOperandLatency(ItinData, DefMI, DefIdx, UseMI, UseIdx);
   if (Latency < 0)
     Latency = getInstrLatency(ItinData, DefMI);
   if (Latency <= 3)
@@ -4152,6 +4143,8 @@ bool ARMBaseInstrInfo::hasNOP() const {
 }
 
 bool ARMBaseInstrInfo::isSwiftFastImmShift(const MachineInstr *MI) const {
+  if (MI->getNumOperands() < 4)
+    return true;
   unsigned ShOpVal = MI->getOperand(3).getImm();
   unsigned ShImm = ARM_AM::getSORegOffset(ShOpVal);
   // Swift supports faster shifts for: lsl 2, lsl 1, and lsr 1.

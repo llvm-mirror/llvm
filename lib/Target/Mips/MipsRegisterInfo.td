@@ -11,16 +11,16 @@
 //  Declarations that describe the MIPS register file
 //===----------------------------------------------------------------------===//
 let Namespace = "Mips" in {
-def sub_fpeven : SubRegIndex;
-def sub_fpodd  : SubRegIndex;
-def sub_32     : SubRegIndex;
-def sub_lo     : SubRegIndex;
-def sub_hi     : SubRegIndex;
-def sub_dsp16_19 : SubRegIndex;
-def sub_dsp20    : SubRegIndex;
-def sub_dsp21    : SubRegIndex;
-def sub_dsp22    : SubRegIndex;
-def sub_dsp23    : SubRegIndex;
+def sub_fpeven : SubRegIndex<32>;
+def sub_fpodd  : SubRegIndex<32, 32>;
+def sub_32     : SubRegIndex<32>;
+def sub_lo     : SubRegIndex<32>;
+def sub_hi     : SubRegIndex<32, 32>;
+def sub_dsp16_19 : SubRegIndex<4, 16>;
+def sub_dsp20    : SubRegIndex<1, 20>;
+def sub_dsp21    : SubRegIndex<1, 21>;
+def sub_dsp22    : SubRegIndex<1, 22>;
+def sub_dsp23    : SubRegIndex<1, 23>;
 }
 
 class Unallocatable {
@@ -248,8 +248,9 @@ let Namespace = "Mips" in {
   def LO64  : RegisterWithSubRegs<"lo", [LO]>;
   }
 
-  // Status flags register
-  def FCR31 : Register<"31">;
+  // FP control registers.
+  foreach I = 0-31 in
+  def FCR#I : MipsReg<#I, ""#I>;
 
   // fcc0 register
   def FCC0 : MipsReg<0, "fcc0">;
@@ -357,8 +358,12 @@ def AFGR64 : RegisterClass<"Mips", [f64], 64, (add
 
 def FGR64 : RegisterClass<"Mips", [f64], 64, (sequence "D%u_64", 0, 31)>;
 
-// Condition Register for floating point operations
-def CCR  : RegisterClass<"Mips", [i32], 32, (add FCR31,FCC0)>, Unallocatable;
+// FP control registers.
+def CCR : RegisterClass<"Mips", [i32], 32, (sequence "FCR%u", 0, 31)>,
+          Unallocatable;
+
+// FP condition code registers.
+def FCC : RegisterClass<"Mips", [i32], 32, (add FCC0)>, Unallocatable;
 
 // Hi/Lo Registers
 def LORegs : RegisterClass<"Mips", [i32], 32, (add LO)>;
@@ -388,19 +393,38 @@ def ACRegsDSP : RegisterClass<"Mips", [untyped], 64, (sequence "AC%u", 0, 3)> {
 def DSPCC : RegisterClass<"Mips", [v4i8, v2i16], 32, (add DSPCCond)>;
 
 // Register Operands.
-def CPURegsAsmOperand : AsmOperandClass {
+
+class MipsAsmRegOperand : AsmOperandClass {
+  let RenderMethod = "addRegAsmOperands";
+}
+def CPURegsAsmOperand : MipsAsmRegOperand {
   let Name = "CPURegsAsm";
   let ParserMethod = "parseCPURegs";
 }
 
-def CPU64RegsAsmOperand : AsmOperandClass {
+def CPU64RegsAsmOperand : MipsAsmRegOperand {
   let Name = "CPU64RegsAsm";
   let ParserMethod = "parseCPU64Regs";
 }
 
-def CCRAsmOperand : AsmOperandClass {
+def CCRAsmOperand : MipsAsmRegOperand {
   let Name = "CCRAsm";
   let ParserMethod = "parseCCRRegs";
+}
+
+def AFGR64AsmOperand : MipsAsmRegOperand {
+  let Name = "AFGR64Asm";
+  let ParserMethod = "parseAFGR64Regs";
+}
+
+def FGR64AsmOperand : MipsAsmRegOperand {
+  let Name = "FGR64Asm";
+  let ParserMethod = "parseFGR64Regs";
+}
+
+def FGR32AsmOperand : MipsAsmRegOperand {
+  let Name = "FGR32Asm";
+  let ParserMethod = "parseFGR32Regs";
 }
 
 def CPURegsOpnd : RegisterOperand<CPURegs, "printCPURegs"> {
@@ -415,12 +439,12 @@ def CCROpnd : RegisterOperand<CCR, "printCPURegs"> {
   let ParserMatchClass = CCRAsmOperand;
 }
 
-def HWRegsAsmOperand : AsmOperandClass {
+def HWRegsAsmOperand : MipsAsmRegOperand {
   let Name = "HWRegsAsm";
   let ParserMethod = "parseHWRegs";
 }
 
-def HW64RegsAsmOperand : AsmOperandClass {
+def HW64RegsAsmOperand : MipsAsmRegOperand {
   let Name = "HW64RegsAsm";
   let ParserMethod = "parseHW64Regs";
 }
@@ -431,4 +455,16 @@ def HWRegsOpnd : RegisterOperand<HWRegs, "printCPURegs"> {
 
 def HW64RegsOpnd : RegisterOperand<HWRegs64, "printCPURegs"> {
   let ParserMatchClass = HW64RegsAsmOperand;
+}
+
+def AFGR64RegsOpnd : RegisterOperand<AFGR64> {
+  let ParserMatchClass = AFGR64AsmOperand;
+}
+
+def FGR64RegsOpnd : RegisterOperand<FGR64> {
+  let ParserMatchClass = FGR64AsmOperand;
+}
+
+def FGR32RegsOpnd : RegisterOperand<FGR32> {
+  let ParserMatchClass = FGR32AsmOperand;
 }

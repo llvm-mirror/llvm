@@ -120,7 +120,7 @@ ReduceMiscompilingPasses::doTest(std::vector<std::string> &Prefix,
     return InternalError;
   if (Diff) {
     outs() << " nope.\n";
-    sys::Path(BitcodeResult).eraseFromDisk();
+    sys::fs::remove(BitcodeResult);
     return KeepPrefix;
   }
   outs() << " yup.\n";      // No miscompilation!
@@ -135,7 +135,7 @@ ReduceMiscompilingPasses::doTest(std::vector<std::string> &Prefix,
            << BitcodeResult << "'!\n";
     exit(1);
   }
-  sys::Path(BitcodeResult).eraseFromDisk();  // No longer need the file on disk
+  sys::fs::remove(BitcodeResult);
 
   // Don't check if there are no passes in the suffix.
   if (Suffix.empty())
@@ -926,14 +926,16 @@ static bool TestCodeGenerator(BugDriver &BD, Module *Test, Module *Safe,
                               std::string &Error) {
   CleanupAndPrepareModules(BD, Test, Safe);
 
-  sys::Path TestModuleBC("bugpoint.test.bc");
-  std::string ErrMsg;
-  if (TestModuleBC.makeUnique(true, &ErrMsg)) {
+  SmallString<128> TestModuleBC;
+  int TestModuleFD;
+  error_code EC = sys::fs::createTemporaryFile("bugpoint.test", "bc",
+                                               TestModuleFD, TestModuleBC);
+  if (EC) {
     errs() << BD.getToolName() << "Error making unique filename: "
-           << ErrMsg << "\n";
+           << EC.message() << "\n";
     exit(1);
   }
-  if (BD.writeProgramToFile(TestModuleBC.str(), Test)) {
+  if (BD.writeProgramToFile(TestModuleBC.str(), TestModuleFD, Test)) {
     errs() << "Error writing bitcode to `" << TestModuleBC.str()
            << "'\nExiting.";
     exit(1);
@@ -943,14 +945,17 @@ static bool TestCodeGenerator(BugDriver &BD, Module *Test, Module *Safe,
   FileRemover TestModuleBCRemover(TestModuleBC.str(), !SaveTemps);
 
   // Make the shared library
-  sys::Path SafeModuleBC("bugpoint.safe.bc");
-  if (SafeModuleBC.makeUnique(true, &ErrMsg)) {
+  SmallString<128> SafeModuleBC;
+  int SafeModuleFD;
+  EC = sys::fs::createTemporaryFile("bugpoint.safe", "bc", SafeModuleFD,
+                                    SafeModuleBC);
+  if (EC) {
     errs() << BD.getToolName() << "Error making unique filename: "
-           << ErrMsg << "\n";
+           << EC.message() << "\n";
     exit(1);
   }
 
-  if (BD.writeProgramToFile(SafeModuleBC.str(), Safe)) {
+  if (BD.writeProgramToFile(SafeModuleBC.str(), SafeModuleFD, Safe)) {
     errs() << "Error writing bitcode to `" << SafeModuleBC.str()
            << "'\nExiting.";
     exit(1);
@@ -1015,15 +1020,17 @@ bool BugDriver::debugCodeGenerator(std::string *Error) {
   // Condition the modules
   CleanupAndPrepareModules(*this, ToCodeGen, ToNotCodeGen);
 
-  sys::Path TestModuleBC("bugpoint.test.bc");
-  std::string ErrMsg;
-  if (TestModuleBC.makeUnique(true, &ErrMsg)) {
+  SmallString<128> TestModuleBC;
+  int TestModuleFD;
+  error_code EC = sys::fs::createTemporaryFile("bugpoint.test", "bc",
+                                               TestModuleFD, TestModuleBC);
+  if (EC) {
     errs() << getToolName() << "Error making unique filename: "
-           << ErrMsg << "\n";
+           << EC.message() << "\n";
     exit(1);
   }
 
-  if (writeProgramToFile(TestModuleBC.str(), ToCodeGen)) {
+  if (writeProgramToFile(TestModuleBC.str(), TestModuleFD, ToCodeGen)) {
     errs() << "Error writing bitcode to `" << TestModuleBC.str()
            << "'\nExiting.";
     exit(1);
@@ -1031,14 +1038,17 @@ bool BugDriver::debugCodeGenerator(std::string *Error) {
   delete ToCodeGen;
 
   // Make the shared library
-  sys::Path SafeModuleBC("bugpoint.safe.bc");
-  if (SafeModuleBC.makeUnique(true, &ErrMsg)) {
+  SmallString<128> SafeModuleBC;
+  int SafeModuleFD;
+  EC = sys::fs::createTemporaryFile("bugpoint.safe", "bc", SafeModuleFD,
+                                    SafeModuleBC);
+  if (EC) {
     errs() << getToolName() << "Error making unique filename: "
-           << ErrMsg << "\n";
+           << EC.message() << "\n";
     exit(1);
   }
 
-  if (writeProgramToFile(SafeModuleBC.str(), ToNotCodeGen)) {
+  if (writeProgramToFile(SafeModuleBC.str(), SafeModuleFD, ToNotCodeGen)) {
     errs() << "Error writing bitcode to `" << SafeModuleBC.str()
            << "'\nExiting.";
     exit(1);

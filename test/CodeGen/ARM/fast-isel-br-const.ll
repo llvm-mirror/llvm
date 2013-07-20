@@ -1,10 +1,11 @@
 ; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios | FileCheck %s --check-prefix=ARM
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi | FileCheck %s --check-prefix=ARM
 ; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios | FileCheck %s --check-prefix=THUMB
 
 define i32 @t1(i32 %a, i32 %b) nounwind uwtable ssp {
 entry:
-; THUMB: t1:
-; ARM: t1:
+; THUMB-LABEL: t1:
+; ARM-LABEL: t1:
   %x = add i32 %a, %b  
   br i1 1, label %if.then, label %if.else
 ; THUMB-NOT: b {{\.?}}LBB0_1

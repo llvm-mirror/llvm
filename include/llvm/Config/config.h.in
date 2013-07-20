@@ -166,6 +166,12 @@
 /* Define to 1 if you have the `fmodf' function. */
 #undef HAVE_FMODF
 
+/* Define to 1 if you have the `futimens' function. */
+#undef HAVE_FUTIMENS
+
+/* Define to 1 if you have the `futimes' function. */
+#undef HAVE_FUTIMES
+
 /* Define to 1 if you have the `getcwd' function. */
 #undef HAVE_GETCWD
 
@@ -506,8 +512,8 @@
 /* Define to 1 if you have the `writev' function. */
 #undef HAVE_WRITEV
 
-/* Define if the xdot.py program is available */
-#undef HAVE_XDOT_PY
+/* Define if the xdot program is available */
+#undef HAVE_XDOT
 
 /* Define to 1 if you have the <zlib.h> header file. */
 #undef HAVE_ZLIB_H
@@ -602,9 +608,6 @@
 /* Installation directory for .info files */
 #undef LLVM_INFODIR
 
-/* Installation directory for libraries */
-#undef LLVM_LIBDIR
-
 /* Installation directory for man pages */
 #undef LLVM_MANDIR
 
@@ -659,8 +662,8 @@
 /* Define to path to twopi program if found or 'echo twopi' otherwise */
 #undef LLVM_PATH_TWOPI
 
-/* Define to path to xdot.py program if found or 'echo xdot.py' otherwise */
-#undef LLVM_PATH_XDOT_PY
+/* Define to path to xdot program if found or 'echo xdot' otherwise */
+#undef LLVM_PATH_XDOT
 
 /* Installation prefix directory */
 #undef LLVM_PREFIX
@@ -683,10 +686,6 @@
 /* Define to the sub-directory in which libtool stores uninstalled libraries.
    */
 #undef LTDL_OBJDIR
-
-/* Define to the name of the environment variable that determines the dynamic
-   library search path. */
-#undef LTDL_SHLIBPATH_VAR
 
 /* Define to the extension used for shared libraries, say, ".so". */
 #undef LTDL_SHLIB_EXT

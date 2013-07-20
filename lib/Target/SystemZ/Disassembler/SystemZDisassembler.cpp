@@ -226,6 +226,18 @@ static DecodeStatus decodeBDXAddr20Operand(MCInst &Inst, uint64_t Field,
   return MCDisassembler::Success;
 }
 
+static DecodeStatus decodeBDLAddr12Len8Operand(MCInst &Inst, uint64_t Field,
+                                               const unsigned *Regs) {
+  uint64_t Length = Field >> 16;
+  uint64_t Base = (Field >> 12) & 0xf;
+  uint64_t Disp = Field & 0xfff;
+  assert(Length < 256 && "Invalid BDLAddr12Len8");
+  Inst.addOperand(MCOperand::CreateReg(Base == 0 ? 0 : Regs[Base]));
+  Inst.addOperand(MCOperand::CreateImm(Disp));
+  Inst.addOperand(MCOperand::CreateImm(Length + 1));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus decodeBDAddr32Disp12Operand(MCInst &Inst, uint64_t Field,
                                                 uint64_t Address,
                                                 const void *Decoder) {
@@ -262,6 +274,13 @@ static DecodeStatus decodeBDXAddr64Disp20Operand(MCInst &Inst, uint64_t Field,
   return decodeBDXAddr20Operand(Inst, Field, SystemZMC::GR64Regs);
 }
 
+static DecodeStatus decodeBDLAddr64Disp12Len8Operand(MCInst &Inst,
+                                                     uint64_t Field,
+                                                     uint64_t Address,
+                                                     const void *Decoder) {
+  return decodeBDLAddr12Len8Operand(Inst, Field, SystemZMC::GR64Regs);
+}
+
 #include "SystemZGenDisassemblerTables.inc"
 
 DecodeStatus SystemZDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
@@ -272,7 +291,7 @@ DecodeStatus SystemZDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   // Get the first two bytes of the instruction.
   uint8_t Bytes[6];
   Size = 0;
-  if (Region.readBytes(Address, 2, Bytes, 0) == -1)
+  if (Region.readBytes(Address, 2, Bytes) == -1)
     return MCDisassembler::Fail;
 
   // The top 2 bits of the first byte specify the size.
@@ -289,7 +308,7 @@ DecodeStatus SystemZDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   }
 
   // Read any remaining bytes.
-  if (Size > 2 && Region.readBytes(Address + 2, Size - 2, Bytes + 2, 0) == -1)
+  if (Size > 2 && Region.readBytes(Address + 2, Size - 2, Bytes + 2) == -1)
     return MCDisassembler::Fail;
 
   // Construct the instruction.

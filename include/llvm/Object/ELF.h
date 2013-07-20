@@ -53,8 +53,8 @@ inline std::pair<unsigned char, unsigned char>
 getElfArchType(MemoryBuffer *Object) {
   if (Object->getBufferSize() < ELF::EI_NIDENT)
     return std::make_pair((uint8_t)ELF::ELFCLASSNONE,(uint8_t)ELF::ELFDATANONE);
-  return std::make_pair( (uint8_t)Object->getBufferStart()[ELF::EI_CLASS]
-                       , (uint8_t)Object->getBufferStart()[ELF::EI_DATA]);
+  return std::make_pair((uint8_t) Object->getBufferStart()[ELF::EI_CLASS],
+                        (uint8_t) Object->getBufferStart()[ELF::EI_DATA]);
 }
 
 // Templates to choose Elf_Addr and Elf_Off depending on is64Bits.
@@ -316,8 +316,8 @@ struct Elf_Rel_Base;
 template<endianness TargetEndianness, std::size_t MaxAlign>
 struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, false>, false> {
   LLVM_ELF_IMPORT_TYPES(TargetEndianness, MaxAlign, false)
-  Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
-  Elf_Word      r_info;  // Symbol table index and type of relocation to apply
+  Elf_Addr r_offset;     // Location (file byte offset, or program virtual addr)
+  Elf_Word r_info;       // Symbol table index and type of relocation to apply
 
   uint32_t getRInfo(bool isMips64EL) const {
     assert(!isMips64EL);
@@ -331,19 +331,18 @@ struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, false>, false> {
 template<endianness TargetEndianness, std::size_t MaxAlign>
 struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, true>, false> {
   LLVM_ELF_IMPORT_TYPES(TargetEndianness, MaxAlign, true)
-  Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
-  Elf_Xword     r_info;   // Symbol table index and type of relocation to apply
+  Elf_Addr  r_offset; // Location (file byte offset, or program virtual addr)
+  Elf_Xword r_info;   // Symbol table index and type of relocation to apply
 
   uint64_t getRInfo(bool isMips64EL) const {
     uint64_t t = r_info;
     if (!isMips64EL)
       return t;
-    // Mip64 little endian has a "special" encoding of r_info. Instead of one
-    // 64 bit little endian number, it is a little ending 32 bit number followed
+    // Mips64 little endian has a "special" encoding of r_info. Instead of one
+    // 64 bit little endian number, it is a little endian 32 bit number followed
     // by a 32 bit big endian number.
     return (t << 32) | ((t >> 8) & 0xff000000) | ((t >> 24) & 0x00ff0000) |
       ((t >> 40) & 0x0000ff00) | ((t >> 56) & 0x000000ff);
-    return r_info;
   }
   void setRInfo(uint64_t R) {
     // FIXME: Add mips64el support.
@@ -354,9 +353,9 @@ struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, true>, false> {
 template<endianness TargetEndianness, std::size_t MaxAlign>
 struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, false>, true> {
   LLVM_ELF_IMPORT_TYPES(TargetEndianness, MaxAlign, false)
-  Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
-  Elf_Word      r_info;   // Symbol table index and type of relocation to apply
-  Elf_Sword     r_addend; // Compute value for relocatable field by adding this
+  Elf_Addr  r_offset; // Location (file byte offset, or program virtual addr)
+  Elf_Word  r_info;   // Symbol table index and type of relocation to apply
+  Elf_Sword r_addend; // Compute value for relocatable field by adding this
 
   uint32_t getRInfo(bool isMips64EL) const {
     assert(!isMips64EL);
@@ -370,13 +369,13 @@ struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, false>, true> {
 template<endianness TargetEndianness, std::size_t MaxAlign>
 struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, true>, true> {
   LLVM_ELF_IMPORT_TYPES(TargetEndianness, MaxAlign, true)
-  Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
-  Elf_Xword     r_info;   // Symbol table index and type of relocation to apply
-  Elf_Sxword    r_addend; // Compute value for relocatable field by adding this.
+  Elf_Addr   r_offset; // Location (file byte offset, or program virtual addr)
+  Elf_Xword  r_info;   // Symbol table index and type of relocation to apply
+  Elf_Sxword r_addend; // Compute value for relocatable field by adding this.
 
   uint64_t getRInfo(bool isMips64EL) const {
-    // Mip64 little endian has a "special" encoding of r_info. Instead of one
-    // 64 bit little endian number, it is a little ending 32 bit number followed
+    // Mips64 little endian has a "special" encoding of r_info. Instead of one
+    // 64 bit little endian number, it is a little endian 32 bit number followed
     // by a 32 bit big endian number.
     uint64_t t = r_info;
     if (!isMips64EL)
@@ -581,20 +580,14 @@ protected:
   bool isDyldELFObject;
 
 private:
-  typedef SmallVector<const Elf_Shdr *, 2> Sections_t;
-  typedef DenseMap<unsigned, unsigned> IndexMap_t;
-  typedef DenseMap<const Elf_Shdr*, SmallVector<uint32_t, 1> > RelocMap_t;
-
   const Elf_Ehdr *Header;
   const Elf_Shdr *SectionHeaderTable;
   const Elf_Shdr *dot_shstrtab_sec; // Section header string table.
   const Elf_Shdr *dot_strtab_sec;   // Symbol header string table.
   const Elf_Shdr *dot_dynstr_sec;   // Dynamic symbol string table.
 
-  // SymbolTableSections[0] always points to the dynamic string table section
-  // header, or NULL if there is no dynamic string table.
-  Sections_t SymbolTableSections;
-  IndexMap_t SymbolTableSectionsIndexMap;
+  int SymbolTableIndex;
+  int DynamicSymbolTableIndex;
   DenseMap<const Elf_Sym*, ELF::Elf64_Word> ExtendedSymbolTable;
 
   const Elf_Shdr *dot_dynamic_sec;       // .dynamic
@@ -635,19 +628,15 @@ private:
   void LoadVersionNeeds(const Elf_Shdr *ec) const;
   void LoadVersionMap() const;
 
-  /// @brief Map sections to an array of relocation sections that reference
-  ///        them sorted by section index.
-  RelocMap_t SectionRelocMap;
-
   /// @brief Get the relocation section that contains \a Rel.
   const Elf_Shdr *getRelSection(DataRefImpl Rel) const {
-    return getSection(Rel.w.b);
+    return getSection(Rel.d.a);
   }
 
 public:
   bool            isRelocationHasAddend(DataRefImpl Rel) const;
   template<typename T>
-  const T        *getEntry(uint16_t Section, uint32_t Entry) const;
+  const T        *getEntry(uint32_t Section, uint32_t Entry) const;
   template<typename T>
   const T        *getEntry(const Elf_Shdr *Section, uint32_t Entry) const;
   const Elf_Shdr *getSection(DataRefImpl index) const;
@@ -663,7 +652,7 @@ public:
   void VerifyStrTab(const Elf_Shdr *sh) const;
 
 protected:
-  const Elf_Sym  *getSymbol(DataRefImpl Symb) const; // FIXME: Should be private?
+  const Elf_Sym *getSymbol(DataRefImpl Symb) const; // FIXME: Should be private?
   void            validateSymbol(DataRefImpl Symb) const;
   StringRef       getRelocationTypeName(uint32_t Type) const;
 
@@ -687,7 +676,8 @@ protected:
   virtual error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const;
   virtual error_code getSymbolNMTypeChar(DataRefImpl Symb, char &Res) const;
   virtual error_code getSymbolFlags(DataRefImpl Symb, uint32_t &Res) const;
-  virtual error_code getSymbolType(DataRefImpl Symb, SymbolRef::Type &Res) const;
+  virtual error_code getSymbolType(DataRefImpl Symb,
+                                   SymbolRef::Type &Res) const;
   virtual error_code getSymbolSection(DataRefImpl Symb,
                                       section_iterator &Res) const;
   virtual error_code getSymbolValue(DataRefImpl Symb, uint64_t &Val) const;
@@ -713,6 +703,7 @@ protected:
                                            bool &Result) const;
   virtual relocation_iterator getSectionRelBegin(DataRefImpl Sec) const;
   virtual relocation_iterator getSectionRelEnd(DataRefImpl Sec) const;
+  virtual section_iterator getRelocatedSection(DataRefImpl Sec) const;
 
   virtual error_code getRelocationNext(DataRefImpl Rel,
                                        RelocationRef &Res) const;
@@ -720,8 +711,7 @@ protected:
                                           uint64_t &Res) const;
   virtual error_code getRelocationOffset(DataRefImpl Rel,
                                          uint64_t &Res) const;
-  virtual error_code getRelocationSymbol(DataRefImpl Rel,
-                                         SymbolRef &Res) const;
+  virtual symbol_iterator getRelocationSymbol(DataRefImpl Rel) const;
   virtual error_code getRelocationType(DataRefImpl Rel,
                                        uint64_t &Res) const;
   virtual error_code getRelocationTypeName(DataRefImpl Rel,
@@ -751,7 +741,7 @@ public:
   virtual library_iterator end_libraries_needed() const;
 
   const Elf_Shdr *getDynamicSymbolTableSectionHeader() const {
-    return SymbolTableSections[0];
+    return getSection(DynamicSymbolTableIndex);
   }
 
   const Elf_Shdr *getDynamicStringTableSectionHeader() const {
@@ -764,7 +754,7 @@ public:
   Elf_Dyn_iterator end_dynamic_table(bool NULLEnd = false) const;
 
   Elf_Sym_iterator begin_elf_dynamic_symbols() const {
-    const Elf_Shdr *DynSymtab = SymbolTableSections[0];
+    const Elf_Shdr *DynSymtab = getDynamicSymbolTableSectionHeader();
     if (DynSymtab)
       return Elf_Sym_iterator(DynSymtab->sh_entsize,
                               (const char *)base() + DynSymtab->sh_offset);
@@ -772,7 +762,7 @@ public:
   }
 
   Elf_Sym_iterator end_elf_dynamic_symbols() const {
-    const Elf_Shdr *DynSymtab = SymbolTableSections[0];
+    const Elf_Shdr *DynSymtab = getDynamicSymbolTableSectionHeader();
     if (DynSymtab)
       return Elf_Sym_iterator(DynSymtab->sh_entsize, (const char *)base() +
                               DynSymtab->sh_offset + DynSymtab->sh_size);
@@ -908,7 +898,8 @@ void ELFObjectFile<ELFT>::LoadVersionNeeds(const Elf_Shdr *sec) const {
 template<class ELFT>
 void ELFObjectFile<ELFT>::LoadVersionMap() const {
   // If there is no dynamic symtab or version table, there is nothing to do.
-  if (SymbolTableSections[0] == NULL || dot_gnu_version_sec == NULL)
+  if (getDynamicStringTableSectionHeader() == NULL ||
+      dot_gnu_version_sec == NULL)
     return;
 
   // Has the VersionMap already been loaded?
@@ -931,7 +922,7 @@ template<class ELFT>
 void ELFObjectFile<ELFT>::validateSymbol(DataRefImpl Symb) const {
 #ifndef NDEBUG
   const Elf_Sym  *symb = getSymbol(Symb);
-  const Elf_Shdr *SymbolTableSection = SymbolTableSections[Symb.d.b];
+  const Elf_Shdr *SymbolTableSection = getSection(Symb.d.b);
   // FIXME: We really need to do proper error handling in the case of an invalid
   //        input file. Because we don't use exceptions, I think we'll just pass
   //        an error object around.
@@ -951,25 +942,7 @@ template<class ELFT>
 error_code ELFObjectFile<ELFT>::getSymbolNext(DataRefImpl Symb,
                                               SymbolRef &Result) const {
   validateSymbol(Symb);
-  const Elf_Shdr *SymbolTableSection = SymbolTableSections[Symb.d.b];
-
   ++Symb.d.a;
-  // Check to see if we are at the end of this symbol table.
-  if (Symb.d.a >= SymbolTableSection->getEntityCount()) {
-    // We are at the end. If there are other symbol tables, jump to them.
-    // If the symbol table is .dynsym, we are iterating dynamic symbols,
-    // and there is only one table of these.
-    if (Symb.d.b != 0) {
-      ++Symb.d.b;
-      Symb.d.a = 1; // The 0th symbol in ELF is fake.
-    }
-    // Otherwise return the terminator.
-    if (Symb.d.b == 0 || Symb.d.b >= SymbolTableSections.size()) {
-      Symb.d.a = std::numeric_limits<uint32_t>::max();
-      Symb.d.b = std::numeric_limits<uint32_t>::max();
-    }
-  }
-
   Result = SymbolRef(Symb, this);
   return object_error::success;
 }
@@ -979,7 +952,7 @@ error_code ELFObjectFile<ELFT>::getSymbolName(DataRefImpl Symb,
                                               StringRef &Result) const {
   validateSymbol(Symb);
   const Elf_Sym *symb = getSymbol(Symb);
-  return getSymbolName(SymbolTableSections[Symb.d.b], symb, Result);
+  return getSymbolName(getSection(Symb.d.b), symb, Result);
 }
 
 template<class ELFT>
@@ -989,8 +962,7 @@ error_code ELFObjectFile<ELFT>::getSymbolVersion(SymbolRef SymRef,
   DataRefImpl Symb = SymRef.getRawDataRefImpl();
   validateSymbol(Symb);
   const Elf_Sym *symb = getSymbol(Symb);
-  return getSymbolVersion(SymbolTableSections[Symb.d.b], symb,
-                          Version, IsDefault);
+  return getSymbolVersion(getSection(Symb.d.b), symb, Version, IsDefault);
 }
 
 template<class ELFT>
@@ -1035,7 +1007,7 @@ const typename ELFObjectFile<ELFT>::Elf_Sym *
 ELFObjectFile<ELFT>::getElfSymbol(uint32_t index) const {
   DataRefImpl SymbolData;
   SymbolData.d.a = index;
-  SymbolData.d.b = 1;
+  SymbolData.d.b = SymbolTableIndex;
   return getSymbol(SymbolData);
 }
 
@@ -1459,13 +1431,9 @@ template<class ELFT>
 relocation_iterator
 ELFObjectFile<ELFT>::getSectionRelBegin(DataRefImpl Sec) const {
   DataRefImpl RelData;
-  const Elf_Shdr *sec = reinterpret_cast<const Elf_Shdr *>(Sec.p);
-  typename RelocMap_t::const_iterator ittr = SectionRelocMap.find(sec);
-  if (sec != 0 && ittr != SectionRelocMap.end()) {
-    RelData.w.a = getSection(ittr->second[0])->sh_info;
-    RelData.w.b = ittr->second[0];
-    RelData.w.c = 0;
-  }
+  uintptr_t SHT = reinterpret_cast<uintptr_t>(SectionHeaderTable);
+  RelData.d.a = (Sec.p - SHT) / Header->e_shentsize;
+  RelData.d.b = 0;
   return relocation_iterator(RelocationRef(RelData, this));
 }
 
@@ -1473,53 +1441,49 @@ template<class ELFT>
 relocation_iterator
 ELFObjectFile<ELFT>::getSectionRelEnd(DataRefImpl Sec) const {
   DataRefImpl RelData;
-  const Elf_Shdr *sec = reinterpret_cast<const Elf_Shdr *>(Sec.p);
-  typename RelocMap_t::const_iterator ittr = SectionRelocMap.find(sec);
-  if (sec != 0 && ittr != SectionRelocMap.end()) {
-    // Get the index of the last relocation section for this section.
-    std::size_t relocsecindex = ittr->second[ittr->second.size() - 1];
-    const Elf_Shdr *relocsec = getSection(relocsecindex);
-    RelData.w.a = relocsec->sh_info;
-    RelData.w.b = relocsecindex;
-    RelData.w.c = relocsec->sh_size / relocsec->sh_entsize;
-  }
+  uintptr_t SHT = reinterpret_cast<uintptr_t>(SectionHeaderTable);
+  const Elf_Shdr *S = reinterpret_cast<const Elf_Shdr *>(Sec.p);
+  RelData.d.a = (Sec.p - SHT) / Header->e_shentsize;
+  if (S->sh_type != ELF::SHT_RELA && S->sh_type != ELF::SHT_REL)
+    RelData.d.b = 0;
+  else
+    RelData.d.b = S->sh_size / S->sh_entsize;
+
   return relocation_iterator(RelocationRef(RelData, this));
+}
+
+template <class ELFT>
+section_iterator
+ELFObjectFile<ELFT>::getRelocatedSection(DataRefImpl Sec) const {
+  if (Header->e_type != ELF::ET_REL)
+    return end_sections();
+
+  const Elf_Shdr *S = reinterpret_cast<const Elf_Shdr *>(Sec.p);
+  unsigned sh_type = S->sh_type;
+  if (sh_type != ELF::SHT_RELA && sh_type != ELF::SHT_REL)
+    return end_sections();
+
+  assert(S->sh_info != 0);
+  const Elf_Shdr *R = getSection(S->sh_info);
+  DataRefImpl D;
+  D.p = reinterpret_cast<uintptr_t>(R);
+  return section_iterator(SectionRef(D, this));
 }
 
 // Relocations
 template<class ELFT>
 error_code ELFObjectFile<ELFT>::getRelocationNext(DataRefImpl Rel,
                                                   RelocationRef &Result) const {
-  ++Rel.w.c;
-  const Elf_Shdr *relocsec = getSection(Rel.w.b);
-  if (Rel.w.c >= (relocsec->sh_size / relocsec->sh_entsize)) {
-    // We have reached the end of the relocations for this section. See if there
-    // is another relocation section.
-    typename RelocMap_t::mapped_type relocseclist =
-      SectionRelocMap.lookup(getSection(Rel.w.a));
-
-    // Do a binary search for the current reloc section index (which must be
-    // present). Then get the next one.
-    typename RelocMap_t::mapped_type::const_iterator loc =
-      std::lower_bound(relocseclist.begin(), relocseclist.end(), Rel.w.b);
-    ++loc;
-
-    // If there is no next one, don't do anything. The ++Rel.w.c above sets Rel
-    // to the end iterator.
-    if (loc != relocseclist.end()) {
-      Rel.w.b = *loc;
-      Rel.w.a = 0;
-    }
-  }
+  ++Rel.d.b;
   Result = RelocationRef(Rel, this);
   return object_error::success;
 }
 
-template<class ELFT>
-error_code ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel,
-                                                    SymbolRef &Result) const {
+template <class ELFT>
+symbol_iterator
+ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel) const {
   uint32_t symbolIdx;
-  const Elf_Shdr *sec = getSection(Rel.w.b);
+  const Elf_Shdr *sec = getRelSection(Rel);
   switch (sec->sh_type) {
     default :
       report_fatal_error("Invalid section type in Rel!");
@@ -1532,14 +1496,13 @@ error_code ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel,
       break;
     }
   }
+  if (!symbolIdx)
+    return end_symbols();
+
   DataRefImpl SymbolData;
-  IndexMap_t::const_iterator it = SymbolTableSectionsIndexMap.find(sec->sh_link);
-  if (it == SymbolTableSectionsIndexMap.end())
-    report_fatal_error("Relocation symbol table not found!");
   SymbolData.d.a = symbolIdx;
-  SymbolData.d.b = it->second;
-  Result = SymbolRef(SymbolData, this);
-  return object_error::success;
+  SymbolData.d.b = sec->sh_link;
+  return symbol_iterator(SymbolRef(SymbolData, this));
 }
 
 template<class ELFT>
@@ -1562,7 +1525,7 @@ error_code ELFObjectFile<ELFT>::getRelocationOffset(DataRefImpl Rel,
 
 template<class ELFT>
 uint64_t ELFObjectFile<ELFT>::getROffset(DataRefImpl Rel) const {
-  const Elf_Shdr *sec = getSection(Rel.w.b);
+  const Elf_Shdr *sec = getRelSection(Rel);
   switch (sec->sh_type) {
   default:
     report_fatal_error("Invalid section type in Rel!");
@@ -1576,7 +1539,7 @@ uint64_t ELFObjectFile<ELFT>::getROffset(DataRefImpl Rel) const {
 template<class ELFT>
 error_code ELFObjectFile<ELFT>::getRelocationType(DataRefImpl Rel,
                                                   uint64_t &Result) const {
-  const Elf_Shdr *sec = getSection(Rel.w.b);
+  const Elf_Shdr *sec = getRelSection(Rel);
   switch (sec->sh_type) {
     default :
       report_fatal_error("Invalid section type in Rel!");
@@ -2065,9 +2028,45 @@ StringRef ELFObjectFile<ELFT>::getRelocationTypeName(uint32_t Type) const {
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL14);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL14_BRTAKEN);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL14_BRNTAKEN);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT16_HA);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TLS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_DTPMOD32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TPREL16);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TPREL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TPREL16_HI);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_DTPREL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_DTPREL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_DTPREL16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_DTPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_DTPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSGD16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSGD16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSGD16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSGD16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSLD16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSLD16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSLD16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TLSLD16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TPREL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TPREL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TPREL16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_TPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_DTPREL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_DTPREL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_DTPREL16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_GOT_DTPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TLSGD);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_TLSLD);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC_REL16_HA);
     default: break;
     }
     break;
@@ -2087,32 +2086,74 @@ StringRef ELFObjectFile<ELFT>::getRelocationTypeName(uint32_t Type) const {
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL14);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL14_BRTAKEN);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL14_BRNTAKEN);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT16_HA);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL32);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR64);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_HIGHER);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_HIGHERA);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_HIGHEST);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_HIGHESTA);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL64);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TOC16);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TOC16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TOC16_HI);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TOC16_HA);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TOC);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_DS);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_ADDR16_LO_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT16_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT16_LO_DS);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TOC16_DS);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TOC16_LO_DS);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TLS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPMOD64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_HI);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_HI);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSGD16);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSGD16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSGD16_HI);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSGD16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSLD16);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSLD16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSLD16_HI);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TLSLD16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TPREL16_DS);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TPREL16_LO_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TPREL16_HI);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_TPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_DTPREL16_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_DTPREL16_LO_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_DTPREL16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_GOT_DTPREL16_HA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_LO_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_HIGHER);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_HIGHERA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_HIGHEST);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TPREL16_HIGHESTA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_LO_DS);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_HIGHER);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_HIGHERA);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_HIGHEST);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_DTPREL16_HIGHESTA);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TLSGD);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_TLSLD);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL16_LO);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL16_HI);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_PPC64_REL16_HA);
     default: break;
     }
     break;
@@ -2193,7 +2234,7 @@ StringRef ELFObjectFile<ELFT>::getRelocationTypeName(uint32_t Type) const {
 template<class ELFT>
 error_code ELFObjectFile<ELFT>::getRelocationTypeName(
     DataRefImpl Rel, SmallVectorImpl<char> &Result) const {
-  const Elf_Shdr *sec = getSection(Rel.w.b);
+  const Elf_Shdr *sec = getRelSection(Rel);
   uint32_t type;
   switch (sec->sh_type) {
     default :
@@ -2235,7 +2276,7 @@ error_code ELFObjectFile<ELFT>::getRelocationTypeName(
 template<class ELFT>
 error_code ELFObjectFile<ELFT>::getRelocationAddend(
     DataRefImpl Rel, int64_t &Result) const {
-  const Elf_Shdr *sec = getSection(Rel.w.b);
+  const Elf_Shdr *sec = getRelSection(Rel);
   switch (sec->sh_type) {
     default :
       report_fatal_error("Invalid section type in Rel!");
@@ -2253,7 +2294,7 @@ error_code ELFObjectFile<ELFT>::getRelocationAddend(
 template<class ELFT>
 error_code ELFObjectFile<ELFT>::getRelocationValueString(
     DataRefImpl Rel, SmallVectorImpl<char> &Result) const {
-  const Elf_Shdr *sec = getSection(Rel.w.b);
+  const Elf_Shdr *sec = getRelSection(Rel);
   uint8_t type;
   StringRef res;
   int64_t addend = 0;
@@ -2307,7 +2348,16 @@ error_code ELFObjectFile<ELFT>::getRelocationValueString(
       res = "Unknown";
     }
     break;
-  case ELF::EM_AARCH64:
+  case ELF::EM_AARCH64: {
+    std::string fmtbuf;
+    raw_string_ostream fmt(fmtbuf);
+    fmt << symname;
+    if (addend != 0)
+      fmt << (addend < 0 ? "" : "+") << addend;
+    fmt.flush();
+    Result.append(fmtbuf.begin(), fmtbuf.end());
+    break;
+  }
   case ELF::EM_ARM:
   case ELF::EM_HEXAGON:
     res = symname;
@@ -2377,8 +2427,8 @@ ELFObjectFile<ELFT>::ELFObjectFile(MemoryBuffer *Object, error_code &ec)
   const Elf_Shdr* SymbolTableSectionHeaderIndex = 0;
   const Elf_Shdr* sh = SectionHeaderTable;
 
-  // Reserve SymbolTableSections[0] for .dynsym
-  SymbolTableSections.push_back(NULL);
+  SymbolTableIndex = -1;
+  DynamicSymbolTableIndex = -1;
 
   for (uint64_t i = 0, e = getNumSections(); i != e; ++i) {
     switch (sh->sh_type) {
@@ -2390,23 +2440,21 @@ ELFObjectFile<ELFT>::ELFObjectFile(MemoryBuffer *Object, error_code &ec)
       break;
     }
     case ELF::SHT_SYMTAB: {
-      SymbolTableSectionsIndexMap[i] = SymbolTableSections.size();
-      SymbolTableSections.push_back(sh);
+      if (SymbolTableIndex != -1)
+        report_fatal_error("More than one SHT_SYMTAB!");
+      SymbolTableIndex = i;
       break;
     }
     case ELF::SHT_DYNSYM: {
-      if (SymbolTableSections[0] != NULL)
+      if (DynamicSymbolTableIndex != -1)
         // FIXME: Proper error handling.
-        report_fatal_error("More than one .dynsym!");
-      SymbolTableSectionsIndexMap[i] = 0;
-      SymbolTableSections[0] = sh;
+        report_fatal_error("More than one SHT_DYNSYM!");
+      DynamicSymbolTableIndex = i;
       break;
     }
     case ELF::SHT_REL:
-    case ELF::SHT_RELA: {
-      SectionRelocMap[getSection(sh->sh_info)].push_back(i);
+    case ELF::SHT_RELA:
       break;
-    }
     case ELF::SHT_DYNAMIC: {
       if (dot_dynamic_sec != NULL)
         // FIXME: Proper error handling.
@@ -2437,12 +2485,6 @@ ELFObjectFile<ELFT>::ELFObjectFile(MemoryBuffer *Object, error_code &ec)
     }
     }
     ++sh;
-  }
-
-  // Sort section relocation lists by index.
-  for (typename RelocMap_t::iterator i = SectionRelocMap.begin(),
-                                     e = SectionRelocMap.end(); i != e; ++i) {
-    std::sort(i->second.begin(), i->second.end());
   }
 
   // Get string table sections.
@@ -2494,8 +2536,7 @@ ELFObjectFile<ELFT>::ELFObjectFile(MemoryBuffer *Object, error_code &ec)
 // Get the symbol table index in the symtab section given a symbol
 template<class ELFT>
 uint64_t ELFObjectFile<ELFT>::getSymbolIndex(const Elf_Sym *Sym) const {
-  assert(SymbolTableSections.size() == 1 && "Only one symbol table supported!");
-  const Elf_Shdr *SymTab = *SymbolTableSections.begin();
+  const Elf_Shdr *SymTab = getSection(SymbolTableIndex);
   uintptr_t SymLoc = uintptr_t(Sym);
   uintptr_t SymTabLoc = uintptr_t(base() + SymTab->sh_offset);
   assert(SymLoc > SymTabLoc && "Symbol not in symbol table!");
@@ -2508,12 +2549,12 @@ uint64_t ELFObjectFile<ELFT>::getSymbolIndex(const Elf_Sym *Sym) const {
 template<class ELFT>
 symbol_iterator ELFObjectFile<ELFT>::begin_symbols() const {
   DataRefImpl SymbolData;
-  if (SymbolTableSections.size() <= 1) {
-    SymbolData.d.a = std::numeric_limits<uint32_t>::max();
-    SymbolData.d.b = std::numeric_limits<uint32_t>::max();
+  if (SymbolTableIndex == -1) {
+    SymbolData.d.a = 0;
+    SymbolData.d.b = 0;
   } else {
-    SymbolData.d.a = 1; // The 0th symbol in ELF is fake.
-    SymbolData.d.b = 1; // The 0th table is .dynsym
+    SymbolData.d.a = 0;
+    SymbolData.d.b = SymbolTableIndex;
   }
   return symbol_iterator(SymbolRef(SymbolData, this));
 }
@@ -2521,20 +2562,26 @@ symbol_iterator ELFObjectFile<ELFT>::begin_symbols() const {
 template<class ELFT>
 symbol_iterator ELFObjectFile<ELFT>::end_symbols() const {
   DataRefImpl SymbolData;
-  SymbolData.d.a = std::numeric_limits<uint32_t>::max();
-  SymbolData.d.b = std::numeric_limits<uint32_t>::max();
+  if (SymbolTableIndex == -1) {
+    SymbolData.d.a = 0;
+    SymbolData.d.b = 0;
+  } else {
+    const Elf_Shdr *SymbolTableSection = getSection(SymbolTableIndex);
+    SymbolData.d.a = SymbolTableSection->getEntityCount();
+    SymbolData.d.b = SymbolTableIndex;
+  }
   return symbol_iterator(SymbolRef(SymbolData, this));
 }
 
 template<class ELFT>
 symbol_iterator ELFObjectFile<ELFT>::begin_dynamic_symbols() const {
   DataRefImpl SymbolData;
-  if (SymbolTableSections[0] == NULL) {
-    SymbolData.d.a = std::numeric_limits<uint32_t>::max();
-    SymbolData.d.b = std::numeric_limits<uint32_t>::max();
+  if (DynamicSymbolTableIndex == -1) {
+    SymbolData.d.a = 0;
+    SymbolData.d.b = 0;
   } else {
-    SymbolData.d.a = 1; // The 0th symbol in ELF is fake.
-    SymbolData.d.b = 0; // The 0th table is .dynsym
+    SymbolData.d.a = 0;
+    SymbolData.d.b = DynamicSymbolTableIndex;
   }
   return symbol_iterator(SymbolRef(SymbolData, this));
 }
@@ -2542,8 +2589,14 @@ symbol_iterator ELFObjectFile<ELFT>::begin_dynamic_symbols() const {
 template<class ELFT>
 symbol_iterator ELFObjectFile<ELFT>::end_dynamic_symbols() const {
   DataRefImpl SymbolData;
-  SymbolData.d.a = std::numeric_limits<uint32_t>::max();
-  SymbolData.d.b = std::numeric_limits<uint32_t>::max();
+  if (DynamicSymbolTableIndex == -1) {
+    SymbolData.d.a = 0;
+    SymbolData.d.b = 0;
+  } else {
+    const Elf_Shdr *SymbolTableSection = getSection(DynamicSymbolTableIndex);
+    SymbolData.d.a = SymbolTableSection->getEntityCount();
+    SymbolData.d.b = DynamicSymbolTableIndex;
+  }
   return symbol_iterator(SymbolRef(SymbolData, this));
 }
 
@@ -2773,7 +2826,7 @@ ELFObjectFile<ELFT>::getStringTableIndex() const {
 template<class ELFT>
 template<typename T>
 inline const T *
-ELFObjectFile<ELFT>::getEntry(uint16_t Section, uint32_t Entry) const {
+ELFObjectFile<ELFT>::getEntry(uint32_t Section, uint32_t Entry) const {
   return getEntry<T>(getSection(Section), Entry);
 }
 
@@ -2790,19 +2843,19 @@ ELFObjectFile<ELFT>::getEntry(const Elf_Shdr * Section, uint32_t Entry) const {
 template<class ELFT>
 const typename ELFObjectFile<ELFT>::Elf_Sym *
 ELFObjectFile<ELFT>::getSymbol(DataRefImpl Symb) const {
-  return getEntry<Elf_Sym>(SymbolTableSections[Symb.d.b], Symb.d.a);
+  return getEntry<Elf_Sym>(Symb.d.b, Symb.d.a);
 }
 
 template<class ELFT>
 const typename ELFObjectFile<ELFT>::Elf_Rel *
 ELFObjectFile<ELFT>::getRel(DataRefImpl Rel) const {
-  return getEntry<Elf_Rel>(Rel.w.b, Rel.w.c);
+  return getEntry<Elf_Rel>(Rel.d.a, Rel.d.b);
 }
 
 template<class ELFT>
 const typename ELFObjectFile<ELFT>::Elf_Rela *
 ELFObjectFile<ELFT>::getRela(DataRefImpl Rela) const {
-  return getEntry<Elf_Rela>(Rela.w.b, Rela.w.c);
+  return getEntry<Elf_Rela>(Rela.d.a, Rela.d.b);
 }
 
 template<class ELFT>
@@ -2858,7 +2911,8 @@ error_code ELFObjectFile<ELFT>::getSymbolName(const Elf_Shdr *section,
     return object_error::success;
   }
 
-  if (section == SymbolTableSections[0]) {
+  if (DynamicSymbolTableIndex != -1 &&
+      section == getSection(DynamicSymbolTableIndex)) {
     // Symbol is in .dynsym, use .dynstr string table
     Result = getString(dot_dynstr_sec, symb->st_name);
   } else {
@@ -2881,7 +2935,7 @@ error_code ELFObjectFile<ELFT>::getSymbolVersion(const Elf_Shdr *section,
                                                  StringRef &Version,
                                                  bool &IsDefault) const {
   // Handle non-dynamic symbols.
-  if (section != SymbolTableSections[0]) {
+  if (section != getSection(DynamicSymbolTableIndex)) {
     // Non-dynamic symbols can have versions in their names
     // A name of the form 'foo@V1' indicates version 'V1', non-default.
     // A name of the form 'foo@@V2' indicates version 'V2', default version.

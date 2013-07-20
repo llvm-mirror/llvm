@@ -27,7 +27,7 @@ namespace llvm {
 
 class HexagonInstrInfo : public HexagonGenInstrInfo {
   const HexagonRegisterInfo RI;
-  const HexagonSubtarget& Subtarget;
+  const HexagonSubtarget &Subtarget;
   typedef unsigned Opcode_t;
 
 public:
@@ -148,11 +148,6 @@ public:
   isProfitableToDupForIfCvt(MachineBasicBlock &MBB,unsigned NumCycles,
                             const BranchProbability &Probability) const;
 
-  virtual MachineInstr *emitFrameIndexDebugValue(MachineFunction &MF,
-                                                 int FrameIx,
-                                                 uint64_t Offset,
-                                                 const MDNode *MDPtr,
-                                                 DebugLoc DL) const;
   virtual DFAPacketizer*
   CreateTargetScheduleState(const TargetMachine *TM,
                             const ScheduleDAG *DAG) const;

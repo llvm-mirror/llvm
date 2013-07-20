@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "InstCombine.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
@@ -488,7 +489,7 @@ Value *FAddCombine::performFactorization(Instruction *I) {
                       createFSub(AddSub0, AddSub1);
   if (ConstantFP *CFP = dyn_cast<ConstantFP>(NewAddSub)) {
     const APFloat &F = CFP->getValueAPF();
-    if (!F.isNormal() || F.isDenormal())
+    if (!F.isNormal())
       return 0;
   }
 
@@ -659,7 +660,7 @@ Value *FAddCombine::simplifyFAdd(AddendVect& Addends, unsigned InstrQuota) {
     }
   }
 
-  assert((NextTmpIdx <= sizeof(TmpResult)/sizeof(TmpResult[0]) + 1) &&
+  assert((NextTmpIdx <= array_lengthof(TmpResult) + 1) &&
          "out-of-bound access");
 
   if (ConstAdd)
@@ -876,7 +877,7 @@ static inline Value *dyn_castFoldableMul(Value *V, ConstantInt *&CST) {
       uint32_t BitWidth = cast<IntegerType>(V->getType())->getBitWidth();
       uint32_t CSTVal = CST->getLimitedValue(BitWidth);
       CST = ConstantInt::get(V->getType()->getContext(),
-                             APInt(BitWidth, 1).shl(CSTVal));
+                             APInt::getOneBitSet(BitWidth, CSTVal));
       return I->getOperand(0);
     }
   return 0;
@@ -1262,6 +1263,49 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
     }
   }
 
+  // A * (1 - uitofp i1 C) + B * (uitofp i1 C) -> select C, B, A
+  {
+    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
+      Value *M1L, *M1R, *M2L, *M2R;
+      if (match(LHS, m_FMul(m_Value(M1L), m_Value(M1R))) &&
+          match(RHS, m_FMul(m_Value(M2L), m_Value(M2R)))) {
+
+        Value *A, *B, *C1, *C2;
+        if (!match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))))
+          std::swap(M1L, M1R);
+        if (!match(M2R, m_UIToFp(m_Value(C2)))) 
+          std::swap(M2L, M2R);
+
+        if (match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))) &&
+            match(M2R, m_UIToFp(m_Value(C2))) &&
+            C2->getType()->isIntegerTy(1) &&
+            C1 == C2) {
+          A = M1L;
+          B = M2L;
+          return SelectInst::Create(C1, B, A);
+        }
+        
+        std::swap(M1L, M2L);
+        std::swap(M1R, M2R);
+        
+        if (!match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))))
+          std::swap(M1L, M1R);
+        if (!match(M2R, m_UIToFp(m_Value(C2)))) 
+          std::swap(M2L, M2R);
+
+        if (match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))) &&
+            match(M2R, m_UIToFp(m_Value(C2))) &&
+            C2->getType()->isIntegerTy(1) &&
+            C1 == C2) {
+          A = M1L;
+          B = M2L;
+          return SelectInst::Create(C1, B, A);
+        }
+      }
+    }
+  }
+
+  
   if (I.hasUnsafeAlgebra()) {
     if (Value *V = FAddCombine(Builder).simplify(&I))
       return ReplaceInstUsesWith(I, V);

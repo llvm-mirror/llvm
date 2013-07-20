@@ -33,7 +33,6 @@ namespace {
 
 class AArch64DAGToDAGISel : public SelectionDAGISel {
   AArch64TargetMachine &TM;
-  const AArch64InstrInfo *TII;
 
   /// Keep a pointer to the AArch64Subtarget around so that we can
   /// make the right decision when generating code for different targets.
@@ -43,7 +42,6 @@ public:
   explicit AArch64DAGToDAGISel(AArch64TargetMachine &tm,
                                CodeGenOpt::Level OptLevel)
     : SelectionDAGISel(tm, OptLevel), TM(tm),
-      TII(static_cast<const AArch64InstrInfo*>(TM.getInstrInfo())),
       Subtarget(&TM.getSubtarget<AArch64Subtarget>()) {
   }
 
@@ -72,10 +70,11 @@ public:
 
   /// Used for pre-lowered address-reference nodes, so we already know
   /// the fields match. This operand's job is simply to add an
-  /// appropriate shift operand (i.e. 0) to the MOVZ/MOVK instruction.
+  /// appropriate shift operand to the MOVZ/MOVK instruction.
+  template<unsigned LogShift>
   bool SelectMOVWAddressRef(SDValue N, SDValue &Imm, SDValue &Shift) {
     Imm = N;
-    Shift = CurDAG->getTargetConstant(0, MVT::i32);
+    Shift = CurDAG->getTargetConstant(LogShift, MVT::i32);
     return true;
   }
 
@@ -102,7 +101,7 @@ public:
 
   /// Put the given constant into a pool and return a DAG which will give its
   /// address.
-  SDValue getConstantPoolItemAddress(DebugLoc DL, const Constant *CV);
+  SDValue getConstantPoolItemAddress(SDLoc DL, const Constant *CV);
 
   SDNode *TrySelectToMoveImm(SDNode *N);
   SDNode *LowerToFPLitPool(SDNode *Node);
@@ -191,7 +190,7 @@ bool AArch64DAGToDAGISel::SelectLogicalImm(SDValue N, SDValue &Imm) {
 
 SDNode *AArch64DAGToDAGISel::TrySelectToMoveImm(SDNode *Node) {
   SDNode *ResNode;
-  DebugLoc dl = Node->getDebugLoc();
+  SDLoc dl(Node);
   EVT DestType = Node->getValueType(0);
   unsigned DestWidth = DestType.getSizeInBits();
 
@@ -241,14 +240,14 @@ SDNode *AArch64DAGToDAGISel::TrySelectToMoveImm(SDNode *Node) {
 }
 
 SDValue
-AArch64DAGToDAGISel::getConstantPoolItemAddress(DebugLoc DL,
+AArch64DAGToDAGISel::getConstantPoolItemAddress(SDLoc DL,
                                                 const Constant *CV) {
-  EVT PtrVT = TLI.getPointerTy();
+  EVT PtrVT = getTargetLowering()->getPointerTy();
 
-  switch (TLI.getTargetMachine().getCodeModel()) {
+  switch (getTargetLowering()->getTargetMachine().getCodeModel()) {
   case CodeModel::Small: {
     unsigned Alignment =
-        TLI.getDataLayout()->getABITypeAlignment(CV->getType());
+      getTargetLowering()->getDataLayout()->getABITypeAlignment(CV->getType());
     return CurDAG->getNode(
         AArch64ISD::WrapperSmall, DL, PtrVT,
         CurDAG->getTargetConstantPool(CV, PtrVT, 0, 0, AArch64II::MO_NO_FLAG),
@@ -281,7 +280,7 @@ AArch64DAGToDAGISel::getConstantPoolItemAddress(DebugLoc DL,
 }
 
 SDNode *AArch64DAGToDAGISel::SelectToLitPool(SDNode *Node) {
-  DebugLoc DL = Node->getDebugLoc();
+  SDLoc DL(Node);
   uint64_t UnsignedVal = cast<ConstantSDNode>(Node)->getZExtValue();
   int64_t SignedVal = cast<ConstantSDNode>(Node)->getSExtValue();
   EVT DestType = Node->getValueType(0);
@@ -312,7 +311,8 @@ SDNode *AArch64DAGToDAGISel::SelectToLitPool(SDNode *Node) {
                                                   MemType.getSizeInBits()),
                                   UnsignedVal);
   SDValue PoolAddr = getConstantPoolItemAddress(DL, CV);
-  unsigned Alignment = TLI.getDataLayout()->getABITypeAlignment(CV->getType());
+  unsigned Alignment =
+    getTargetLowering()->getDataLayout()->getABITypeAlignment(CV->getType());
 
   return CurDAG->getExtLoad(Extension, DL, DestType, CurDAG->getEntryNode(),
                             PoolAddr,
@@ -323,11 +323,12 @@ SDNode *AArch64DAGToDAGISel::SelectToLitPool(SDNode *Node) {
 }
 
 SDNode *AArch64DAGToDAGISel::LowerToFPLitPool(SDNode *Node) {
-  DebugLoc DL = Node->getDebugLoc();
+  SDLoc DL(Node);
   const ConstantFP *FV = cast<ConstantFPSDNode>(Node)->getConstantFPValue();
   EVT DestType = Node->getValueType(0);
 
-  unsigned Alignment = TLI.getDataLayout()->getABITypeAlignment(FV->getType());
+  unsigned Alignment =
+    getTargetLowering()->getDataLayout()->getABITypeAlignment(FV->getType());
   SDValue PoolAddr = getConstantPoolItemAddress(DL, FV);
 
   return CurDAG->getLoad(DestType, DL, CurDAG->getEntryNode(), PoolAddr,
@@ -473,7 +474,7 @@ SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
                         AArch64::ATOMIC_CMP_SWAP_I64);
   case ISD::FrameIndex: {
     int FI = cast<FrameIndexSDNode>(Node)->getIndex();
-    EVT PtrTy = TLI.getPointerTy();
+    EVT PtrTy = getTargetLowering()->getPointerTy();
     SDValue TFI = CurDAG->getTargetFrameIndex(FI, PtrTy);
     return CurDAG->SelectNodeTo(Node, AArch64::ADDxxi_lsl0_s, PtrTy,
                                 TFI, CurDAG->getTargetConstant(0, PtrTy));
@@ -497,7 +498,7 @@ SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
       assert((Ty == MVT::i32 || Ty == MVT::i64) && "unexpected type");
       uint16_t Register = Ty == MVT::i32 ? AArch64::WZR : AArch64::XZR;
       ResNode = CurDAG->getCopyFromReg(CurDAG->getEntryNode(),
-                                       Node->getDebugLoc(),
+                                       SDLoc(Node),
                                        Register, Ty).getNode();
     }
 

@@ -37,7 +37,10 @@
  * compile-time configuration.
  */
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/MD5.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cstring>
 
 // The basic MD5 functions.
@@ -69,12 +72,13 @@ namespace llvm {
 
 /// \brief This processes one or more 64-byte data blocks, but does NOT update
 ///the bit counters.  There are no alignment requirements.
-void *MD5::body(void *data, unsigned long size) {
-  unsigned char *ptr;
+const uint8_t *MD5::body(ArrayRef<uint8_t> Data) {
+  const uint8_t *ptr;
   MD5_u32plus a, b, c, d;
   MD5_u32plus saved_a, saved_b, saved_c, saved_d;
+  unsigned long Size = Data.size();
 
-  ptr = (unsigned char *)data;
+  ptr = Data.data();
 
   a = this->a;
   b = this->b;
@@ -165,7 +169,7 @@ void *MD5::body(void *data, unsigned long size) {
     d += saved_d;
 
     ptr += 64;
-  } while (size -= 64);
+  } while (Size -= 64);
 
   this->a = a;
   this->b = b;
@@ -179,43 +183,53 @@ MD5::MD5()
     : a(0x67452301), b(0xefcdab89), c(0x98badcfe), d(0x10325476), hi(0), lo(0) {
 }
 
-/// Incrementally add \p size of \p data to the hash.
-void MD5::Update(void *data, unsigned long size) {
+/// Incrementally add the bytes in \p Data to the hash.
+void MD5::update(ArrayRef<uint8_t> Data) {
   MD5_u32plus saved_lo;
   unsigned long used, free;
+  const uint8_t *Ptr = Data.data();
+  unsigned long Size = Data.size();
 
   saved_lo = lo;
-  if ((lo = (saved_lo + size) & 0x1fffffff) < saved_lo)
+  if ((lo = (saved_lo + Size) & 0x1fffffff) < saved_lo)
     hi++;
-  hi += size >> 29;
+  hi += Size >> 29;
 
   used = saved_lo & 0x3f;
 
   if (used) {
     free = 64 - used;
 
-    if (size < free) {
-      memcpy(&buffer[used], data, size);
+    if (Size < free) {
+      memcpy(&buffer[used], Ptr, Size);
       return;
     }
 
-    memcpy(&buffer[used], data, free);
-    data = (unsigned char *)data + free;
-    size -= free;
-    body(buffer, 64);
+    memcpy(&buffer[used], Ptr, free);
+    Ptr = Ptr + free;
+    Size -= free;
+    body(ArrayRef<uint8_t>(buffer, 64));
   }
 
-  if (size >= 64) {
-    data = body(data, size & ~(unsigned long) 0x3f);
-    size &= 0x3f;
+  if (Size >= 64) {
+    Ptr = body(ArrayRef<uint8_t>(Ptr, Size & ~(unsigned long) 0x3f));
+    Size &= 0x3f;
   }
 
-  memcpy(buffer, data, size);
+  memcpy(buffer, Ptr, Size);
+}
+
+/// Add the bytes in the StringRef \p Str to the hash.
+// Note that this isn't a string and so this won't include any trailing NULL
+// bytes.
+void MD5::update(StringRef Str) {
+  ArrayRef<uint8_t> SVal((const uint8_t *)Str.data(), Str.size());
+  update(SVal);
 }
 
 /// \brief Finish the hash and place the resulting hash into \p result.
 /// \param result is assumed to be a minimum of 16-bytes in size.
-void MD5::Final(unsigned char *result) {
+void MD5::final(MD5Result &result) {
   unsigned long used, free;
 
   used = lo & 0x3f;
@@ -226,7 +240,7 @@ void MD5::Final(unsigned char *result) {
 
   if (free < 8) {
     memset(&buffer[used], 0, free);
-    body(buffer, 64);
+    body(ArrayRef<uint8_t>(buffer, 64));
     used = 0;
     free = 64;
   }
@@ -243,7 +257,7 @@ void MD5::Final(unsigned char *result) {
   buffer[62] = hi >> 16;
   buffer[63] = hi >> 24;
 
-  body(buffer, 64);
+  body(ArrayRef<uint8_t>(buffer, 64));
 
   result[0] = a;
   result[1] = a >> 8;
@@ -261,6 +275,12 @@ void MD5::Final(unsigned char *result) {
   result[13] = d >> 8;
   result[14] = d >> 16;
   result[15] = d >> 24;
+}
+
+void MD5::stringifyResult(MD5Result &result, SmallString<32> &Str) {
+  raw_svector_ostream Res(Str);
+  for (int i = 0; i < 16; ++i)
+    Res << format("%.2x", result[i]);
 }
 
 }

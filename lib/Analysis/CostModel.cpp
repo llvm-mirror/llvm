@@ -81,7 +81,7 @@ CostModelAnalysis::runOnFunction(Function &F) {
  return false;
 }
 
-static bool isReverseVectorMask(SmallVector<int, 16> &Mask) {
+static bool isReverseVectorMask(SmallVectorImpl<int> &Mask) {
   for (unsigned i = 0, MaskSize = Mask.size(); i < MaskSize; ++i)
     if (Mask[i] > 0 && Mask[i] != (int)(MaskSize - 1 - i))
       return false;
@@ -193,14 +193,14 @@ unsigned CostModelAnalysis::getInstructionCost(const Instruction *I) const {
                                    EEI->getOperand(0)->getType(), Idx);
   }
   case Instruction::InsertElement: {
-      const InsertElementInst * IE = cast<InsertElementInst>(I);
-      ConstantInt *CI = dyn_cast<ConstantInt>(IE->getOperand(2));
-      unsigned Idx = -1;
-      if (CI)
-        Idx = CI->getZExtValue();
-      return TTI->getVectorInstrCost(I->getOpcode(),
-                                     IE->getType(), Idx);
-    }
+    const InsertElementInst * IE = cast<InsertElementInst>(I);
+    ConstantInt *CI = dyn_cast<ConstantInt>(IE->getOperand(2));
+    unsigned Idx = -1;
+    if (CI)
+      Idx = CI->getZExtValue();
+    return TTI->getVectorInstrCost(I->getOpcode(),
+                                   IE->getType(), Idx);
+  }
   case Instruction::ShuffleVector: {
     const ShuffleVectorInst *Shuffle = cast<ShuffleVectorInst>(I);
     Type *VecTypOp0 = Shuffle->getOperand(0)->getType();

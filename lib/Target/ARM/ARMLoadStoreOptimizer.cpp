@@ -109,12 +109,12 @@ namespace {
                         unsigned PredReg,
                         unsigned Scratch,
                         DebugLoc dl,
-                        SmallVector<MachineBasicBlock::iterator, 4> &Merges);
+                        SmallVectorImpl<MachineBasicBlock::iterator> &Merges);
     void MergeLDR_STR(MachineBasicBlock &MBB, unsigned SIndex, unsigned Base,
                       int Opcode, unsigned Size,
                       ARMCC::CondCodes Pred, unsigned PredReg,
                       unsigned Scratch, MemOpQueue &MemOps,
-                      SmallVector<MachineBasicBlock::iterator, 4> &Merges);
+                      SmallVectorImpl<MachineBasicBlock::iterator> &Merges);
 
     void AdvanceRS(MachineBasicBlock &MBB, MemOpQueue &MemOps);
     bool FixInvalidRegPairOp(MachineBasicBlock &MBB,
@@ -371,7 +371,7 @@ void ARMLoadStoreOpt::MergeOpsUpdate(MachineBasicBlock &MBB,
                                      ARMCC::CondCodes Pred, unsigned PredReg,
                                      unsigned Scratch,
                                      DebugLoc dl,
-                          SmallVector<MachineBasicBlock::iterator, 4> &Merges) {
+                         SmallVectorImpl<MachineBasicBlock::iterator> &Merges) {
   // First calculate which of the registers should be killed by the merged
   // instruction.
   const unsigned insertPos = memOps[insertAfter].Position;
@@ -444,10 +444,10 @@ void ARMLoadStoreOpt::MergeOpsUpdate(MachineBasicBlock &MBB,
 /// load / store multiple instructions.
 void
 ARMLoadStoreOpt::MergeLDR_STR(MachineBasicBlock &MBB, unsigned SIndex,
-                          unsigned Base, int Opcode, unsigned Size,
-                          ARMCC::CondCodes Pred, unsigned PredReg,
-                          unsigned Scratch, MemOpQueue &MemOps,
-                          SmallVector<MachineBasicBlock::iterator, 4> &Merges) {
+                         unsigned Base, int Opcode, unsigned Size,
+                         ARMCC::CondCodes Pred, unsigned PredReg,
+                         unsigned Scratch, MemOpQueue &MemOps,
+                         SmallVectorImpl<MachineBasicBlock::iterator> &Merges) {
   bool isNotVFP = isi32Load(Opcode) || isi32Store(Opcode);
   int Offset = MemOps[SIndex].Offset;
   int SOffset = Offset;
@@ -1484,7 +1484,7 @@ namespace {
                           unsigned &PredReg, ARMCC::CondCodes &Pred,
                           bool &isT2);
     bool RescheduleOps(MachineBasicBlock *MBB,
-                       SmallVector<MachineInstr*, 4> &Ops,
+                       SmallVectorImpl<MachineInstr *> &Ops,
                        unsigned Base, bool isLd,
                        DenseMap<MachineInstr*, unsigned> &MI2LocMap);
     bool RescheduleLoadStoreInstrs(MachineBasicBlock *MBB);
@@ -1602,8 +1602,9 @@ ARMPreAllocLoadStoreOpt::CanFormLdStDWord(MachineInstr *Op0, MachineInstr *Op1,
     return false;
 
   // Make sure the base address satisfies i64 ld / st alignment requirement.
+  // At the moment, we ignore the memoryoperand's value.
+  // If we want to use AliasAnalysis, we should check it accordingly.
   if (!Op0->hasOneMemOperand() ||
-      !(*Op0->memoperands_begin())->getValue() ||
       (*Op0->memoperands_begin())->isVolatile())
     return false;
 
@@ -1655,7 +1656,7 @@ namespace {
 }
 
 bool ARMPreAllocLoadStoreOpt::RescheduleOps(MachineBasicBlock *MBB,
-                                 SmallVector<MachineInstr*, 4> &Ops,
+                                 SmallVectorImpl<MachineInstr *> &Ops,
                                  unsigned Base, bool isLd,
                                  DenseMap<MachineInstr*, unsigned> &MI2LocMap) {
   bool RetVal = false;
@@ -1857,9 +1858,7 @@ ARMPreAllocLoadStoreOpt::RescheduleLoadStoreInstrs(MachineBasicBlock *MBB) {
           if (!StopHere)
             BI->second.push_back(MI);
         } else {
-          SmallVector<MachineInstr*, 4> MIs;
-          MIs.push_back(MI);
-          Base2LdsMap[Base] = MIs;
+          Base2LdsMap[Base].push_back(MI);
           LdBases.push_back(Base);
         }
       } else {
@@ -1875,9 +1874,7 @@ ARMPreAllocLoadStoreOpt::RescheduleLoadStoreInstrs(MachineBasicBlock *MBB) {
           if (!StopHere)
             BI->second.push_back(MI);
         } else {
-          SmallVector<MachineInstr*, 4> MIs;
-          MIs.push_back(MI);
-          Base2StsMap[Base] = MIs;
+          Base2StsMap[Base].push_back(MI);
           StBases.push_back(Base);
         }
       }
@@ -1893,7 +1890,7 @@ ARMPreAllocLoadStoreOpt::RescheduleLoadStoreInstrs(MachineBasicBlock *MBB) {
     // Re-schedule loads.
     for (unsigned i = 0, e = LdBases.size(); i != e; ++i) {
       unsigned Base = LdBases[i];
-      SmallVector<MachineInstr*, 4> &Lds = Base2LdsMap[Base];
+      SmallVectorImpl<MachineInstr *> &Lds = Base2LdsMap[Base];
       if (Lds.size() > 1)
         RetVal |= RescheduleOps(MBB, Lds, Base, true, MI2LocMap);
     }
@@ -1901,7 +1898,7 @@ ARMPreAllocLoadStoreOpt::RescheduleLoadStoreInstrs(MachineBasicBlock *MBB) {
     // Re-schedule stores.
     for (unsigned i = 0, e = StBases.size(); i != e; ++i) {
       unsigned Base = StBases[i];
-      SmallVector<MachineInstr*, 4> &Sts = Base2StsMap[Base];
+      SmallVectorImpl<MachineInstr *> &Sts = Base2StsMap[Base];
       if (Sts.size() > 1)
         RetVal |= RescheduleOps(MBB, Sts, Base, false, MI2LocMap);
     }

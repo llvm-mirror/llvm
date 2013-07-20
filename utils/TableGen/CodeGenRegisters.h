@@ -39,6 +39,8 @@ namespace llvm {
     std::string Namespace;
 
   public:
+    uint16_t Size;
+    uint16_t Offset;
     const unsigned EnumValue;
     unsigned LaneMask;
 
@@ -79,6 +81,15 @@ namespace llvm {
       assert(A && B);
       std::pair<CompMap::iterator, bool> Ins =
         Composed.insert(std::make_pair(A, B));
+      // Synthetic subreg indices that aren't contiguous (for instance ARM
+      // register tuples) don't have a bit range, so it's OK to let
+      // B->Offset == -1. For the other cases, accumulate the offset and set
+      // the size here. Only do so if there is no offset yet though.
+      if ((Offset != (uint16_t)-1 && A->Offset != (uint16_t)-1) &&
+          (B->Offset == (uint16_t)-1)) {
+        B->Offset = Offset + A->Offset;
+        B->Size = A->Size;
+      }
       return (Ins.second || Ins.first->second == B) ? 0 : Ins.first->second;
     }
 
@@ -204,9 +215,6 @@ namespace llvm {
 
     // Canonically ordered set.
     typedef std::set<const CodeGenRegister*, Less> Set;
-
-    // Compute the set of registers overlapping this.
-    void computeOverlaps(Set &Overlaps, const CodeGenRegBank&) const;
 
   private:
     bool SubRegsComplete;
@@ -526,10 +534,10 @@ namespace llvm {
     // Find or create a sub-register index representing the concatenation of
     // non-overlapping sibling indices.
     CodeGenSubRegIndex *
-      getConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex*, 8>&);
+      getConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex *, 8>&);
 
     void
-    addConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex*, 8> &Parts,
+    addConcatSubRegIndex(const SmallVector<CodeGenSubRegIndex *, 8> &Parts,
                          CodeGenSubRegIndex *Idx) {
       ConcatIdx.insert(std::make_pair(Parts, Idx));
     }

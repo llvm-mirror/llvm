@@ -14,14 +14,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPUISelLowering.h"
+#include "AMDGPU.h"
 #include "AMDGPURegisterInfo.h"
-#include "AMDILIntrinsicInfo.h"
 #include "AMDGPUSubtarget.h"
+#include "AMDILIntrinsicInfo.h"
+#include "SIMachineFunctionInfo.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/IR/DataLayout.h"
 
 using namespace llvm;
 
@@ -57,17 +60,45 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::STORE, MVT::v4f32, Promote);
   AddPromotedToType(ISD::STORE, MVT::v4f32, MVT::v4i32);
 
+  setOperationAction(ISD::STORE, MVT::f64, Promote);
+  AddPromotedToType(ISD::STORE, MVT::f64, MVT::i64);
+
   setOperationAction(ISD::LOAD, MVT::f32, Promote);
   AddPromotedToType(ISD::LOAD, MVT::f32, MVT::i32);
 
   setOperationAction(ISD::LOAD, MVT::v4f32, Promote);
   AddPromotedToType(ISD::LOAD, MVT::v4f32, MVT::v4i32);
 
+  setOperationAction(ISD::LOAD, MVT::f64, Promote);
+  AddPromotedToType(ISD::LOAD, MVT::f64, MVT::i64);
+
   setOperationAction(ISD::MUL, MVT::i64, Expand);
 
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
   setOperationAction(ISD::UDIVREM, MVT::i32, Custom);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
+
+  static const int types[] = {
+    (int)MVT::v2i32,
+    (int)MVT::v4i32
+  };
+  const size_t NumTypes = array_lengthof(types);
+
+  for (unsigned int x  = 0; x < NumTypes; ++x) {
+    MVT::SimpleValueType VT = (MVT::SimpleValueType)types[x];
+    //Expand the following operations for the current type by default
+    setOperationAction(ISD::ADD,  VT, Expand);
+    setOperationAction(ISD::AND,  VT, Expand);
+    setOperationAction(ISD::MUL,  VT, Expand);
+    setOperationAction(ISD::OR,   VT, Expand);
+    setOperationAction(ISD::SHL,  VT, Expand);
+    setOperationAction(ISD::SRL,  VT, Expand);
+    setOperationAction(ISD::SRA,  VT, Expand);
+    setOperationAction(ISD::SUB,  VT, Expand);
+    setOperationAction(ISD::UDIV, VT, Expand);
+    setOperationAction(ISD::UREM, VT, Expand);
+    setOperationAction(ISD::XOR,  VT, Expand);
+  }
 }
 
 //===---------------------------------------------------------------------===//
@@ -86,7 +117,7 @@ SDValue AMDGPUTargetLowering::LowerReturn(
                                      bool isVarArg,
                                      const SmallVectorImpl<ISD::OutputArg> &Outs,
                                      const SmallVectorImpl<SDValue> &OutVals,
-                                     DebugLoc DL, SelectionDAG &DAG) const {
+                                     SDLoc DL, SelectionDAG &DAG) const {
   return DAG.getNode(AMDGPUISD::RET_FLAG, DL, MVT::Other, Chain);
 }
 
@@ -114,10 +145,30 @@ SDValue AMDGPUTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG)
   return Op;
 }
 
+SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
+                                                 SDValue Op,
+                                                 SelectionDAG &DAG) const {
+
+  const DataLayout *TD = getTargetMachine().getDataLayout();
+  GlobalAddressSDNode *G = cast<GlobalAddressSDNode>(Op);
+  // XXX: What does the value of G->getOffset() mean?
+  assert(G->getOffset() == 0 &&
+         "Do not know what to do with an non-zero offset");
+
+  unsigned Offset = MFI->LDSSize;
+  const GlobalValue *GV = G->getGlobal();
+  uint64_t Size = TD->getTypeAllocSize(GV->getType()->getElementType());
+
+  // XXX: Account for alignment?
+  MFI->LDSSize += Size;
+
+  return DAG.getConstant(Offset, TD->getPointerSize() == 8 ? MVT::i64 : MVT::i32);
+}
+
 SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
     SelectionDAG &DAG) const {
   unsigned IntrinsicID = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT VT = Op.getValueType();
 
   switch (IntrinsicID) {
@@ -157,7 +208,7 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
 SDValue AMDGPUTargetLowering::LowerIntrinsicIABS(SDValue Op,
     SelectionDAG &DAG) const {
 
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT VT = Op.getValueType();
   SDValue Neg = DAG.getNode(ISD::SUB, DL, VT, DAG.getConstant(0, VT),
                                               Op.getOperand(1));
@@ -169,7 +220,7 @@ SDValue AMDGPUTargetLowering::LowerIntrinsicIABS(SDValue Op,
 /// LRP(a, b, c) = muladd(a,  b, (1 - a) * c)
 SDValue AMDGPUTargetLowering::LowerIntrinsicLRP(SDValue Op,
     SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT VT = Op.getValueType();
   SDValue OneSubA = DAG.getNode(ISD::FSUB, DL, VT,
                                 DAG.getConstantFP(1.0f, MVT::f32),
@@ -184,7 +235,7 @@ SDValue AMDGPUTargetLowering::LowerIntrinsicLRP(SDValue Op,
 /// \brief Generate Min/Max node
 SDValue AMDGPUTargetLowering::LowerMinMax(SDValue Op,
     SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT VT = Op.getValueType();
 
   SDValue LHS = Op.getOperand(0);
@@ -245,7 +296,7 @@ SDValue AMDGPUTargetLowering::LowerMinMax(SDValue Op,
 
 SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
     SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   EVT VT = Op.getValueType();
 
   SDValue Num = Op.getOperand(0);

@@ -9,7 +9,7 @@
 
 #include "obj2yaml.h"
 #include "llvm/Object/COFF.h"
-#include "llvm/Object/COFFYaml.h"
+#include "llvm/Object/COFFYAML.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/YAMLTraits.h"
 
@@ -23,8 +23,6 @@ class COFFDumper {
   void dumpHeader(const object::coff_file_header *Header);
   void dumpSections(unsigned numSections);
   void dumpSymbols(unsigned numSymbols);
-  StringRef getHexString(ArrayRef<uint8_t> Data);
-  std::vector<std::string> Strings;
 
 public:
   COFFDumper(const object::COFFObjectFile &Obj);
@@ -40,7 +38,7 @@ static void check(error_code ec) {
 
 COFFDumper::COFFDumper(const object::COFFObjectFile &Obj) : Obj(Obj) {
   const object::coff_file_header *Header;
-  check(Obj.getHeader(Header));
+  check(Obj.getCOFFHeader(Header));
   dumpHeader(Header);
   dumpSections(Header->NumberOfSections);
   dumpSymbols(Header->NumberOfSymbols);
@@ -66,15 +64,17 @@ void COFFDumper::dumpSections(unsigned NumSections) {
 
     ArrayRef<uint8_t> sectionData;
     Obj.getSectionContents(Sect, sectionData);
-    Sec.SectionData = getHexString(sectionData);
+    Sec.SectionData = object::yaml::BinaryRef(sectionData);
 
-    std::vector<COFF::relocation> Relocations;
+    std::vector<COFFYAML::Relocation> Relocations;
     for (object::relocation_iterator rIter = iter->begin_relocations();
                        rIter != iter->end_relocations(); rIter.increment(ec)) {
       const object::coff_relocation *reloc = Obj.getCOFFRelocation(rIter);
-      COFF::relocation Rel;
+      COFFYAML::Relocation Rel;
+      object::symbol_iterator Sym = rIter->getSymbol();
+      StringRef Name;
+      Sym->getName(Rel.SymbolName);
       Rel.VirtualAddress = reloc->VirtualAddress;
-      Rel.SymbolTableIndex = reloc->SymbolTableIndex;
       Rel.Type = reloc->Type;
       Relocations.push_back(Rel);
     }
@@ -98,21 +98,9 @@ void COFFDumper::dumpSymbols(unsigned NumSymbols) {
     Sym.Header.Value = Symbol->Value;
     Sym.Header.SectionNumber = Symbol->SectionNumber;
     Sym.Header.NumberOfAuxSymbols = Symbol->NumberOfAuxSymbols;
-    Sym.AuxiliaryData = getHexString(Obj.getSymbolAuxData(Symbol));
+    Sym.AuxiliaryData = object::yaml::BinaryRef(Obj.getSymbolAuxData(Symbol));
     Symbols.push_back(Sym);
   }
-}
-
-StringRef COFFDumper::getHexString(ArrayRef<uint8_t> Data) {
-  std::string S;
-  for (ArrayRef<uint8_t>::iterator I = Data.begin(), E = Data.end(); I != E;
-       ++I) {
-    uint8_t Byte = *I;
-    S.push_back(hexdigit(Byte >> 4));
-    S.push_back(hexdigit(Byte & 0xf));
-  }
-  Strings.push_back(S);
-  return Strings.back();
 }
 
 COFFYAML::Object &COFFDumper::getYAMLObj() {

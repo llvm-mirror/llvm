@@ -91,8 +91,7 @@ private:
 
 public:
   SILowerControlFlowPass(TargetMachine &tm) :
-    MachineFunctionPass(ID), TRI(tm.getRegisterInfo()),
-    TII(tm.getInstrInfo()) { }
+    MachineFunctionPass(ID), TRI(0), TII(0) { }
 
   virtual bool runOnMachineFunction(MachineFunction &MF);
 
@@ -408,8 +407,11 @@ void SILowerControlFlowPass::IndirectDst(MachineInstr &MI) {
 }
 
 bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
+  TII = MF.getTarget().getInstrInfo();
+  TRI = MF.getTarget().getRegisterInfo();
 
   bool HaveKill = false;
+  bool NeedM0 = false;
   bool NeedWQM = false;
   unsigned Depth = 0;
 
@@ -481,6 +483,13 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
           IndirectDst(MI);
           break;
 
+        case AMDGPU::DS_READ_B32:
+          NeedWQM = true;
+          // Fall through
+        case AMDGPU::DS_WRITE_B32:
+          NeedM0 = true;
+          break;
+
         case AMDGPU::V_INTERP_P1_F32:
         case AMDGPU::V_INTERP_P2_F32:
         case AMDGPU::V_INTERP_MOV_F32:
@@ -489,6 +498,14 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
 
       }
     }
+  }
+
+  if (NeedM0) {
+    MachineBasicBlock &MBB = MF.front();
+    // Initialize M0 to a value that won't cause LDS access to be discarded
+    // due to offset clamping
+    BuildMI(MBB, MBB.getFirstNonPHI(), DebugLoc(), TII->get(AMDGPU::S_MOV_B32),
+            AMDGPU::M0).addImm(0xffffffff);
   }
 
   if (NeedWQM) {

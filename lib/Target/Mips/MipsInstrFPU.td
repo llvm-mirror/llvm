@@ -151,7 +151,7 @@ class MTC1_FT_CCR<string opstr, RegisterOperand DstRC, RegisterClass SrcRC,
   InstSE<(outs DstRC:$fs), (ins SrcRC:$rt), !strconcat(opstr, "\t$rt, $fs"),
          [(set DstRC:$fs, (OpNode SrcRC:$rt))], Itin, FrmFR>;
 
-class LW_FT<string opstr, RegisterClass RC, InstrItinClass Itin,
+class LW_FT<string opstr, RegisterOperand RC, InstrItinClass Itin,
             Operand MemOpnd, SDPatternOperator OpNode= null_frag> :
   InstSE<(outs RC:$rt), (ins MemOpnd:$addr), !strconcat(opstr, "\t$rt, $addr"),
          [(set RC:$rt, (OpNode addrDefault:$addr))], Itin, FrmFI> {
@@ -159,7 +159,7 @@ class LW_FT<string opstr, RegisterClass RC, InstrItinClass Itin,
   let mayLoad = 1;
 }
 
-class SW_FT<string opstr, RegisterClass RC, InstrItinClass Itin,
+class SW_FT<string opstr, RegisterOperand RC, InstrItinClass Itin,
             Operand MemOpnd, SDPatternOperator OpNode= null_frag> :
   InstSE<(outs), (ins RC:$rt, MemOpnd:$addr), !strconcat(opstr, "\t$rt, $addr"),
          [(OpNode RC:$rt, addrDefault:$addr)], Itin, FrmFI> {
@@ -180,7 +180,7 @@ class NMADDS_FT<string opstr, RegisterClass RC, InstrItinClass Itin,
          [(set RC:$fd, (fsub fpimm0, (OpNode (fmul RC:$fs, RC:$ft), RC:$fr)))],
          Itin, FrmFR>;
 
-class LWXC1_FT<string opstr, RegisterClass DRC, RegisterClass PRC,
+class LWXC1_FT<string opstr, RegisterOperand DRC, RegisterOperand PRC,
                InstrItinClass Itin, SDPatternOperator OpNode = null_frag> :
   InstSE<(outs DRC:$fd), (ins PRC:$base, PRC:$index),
          !strconcat(opstr, "\t$fd, ${index}(${base})"),
@@ -188,7 +188,7 @@ class LWXC1_FT<string opstr, RegisterClass DRC, RegisterClass PRC,
   let AddedComplexity = 20;
 }
 
-class SWXC1_FT<string opstr, RegisterClass DRC, RegisterClass PRC,
+class SWXC1_FT<string opstr, RegisterOperand DRC, RegisterOperand PRC,
                InstrItinClass Itin, SDPatternOperator OpNode = null_frag> :
   InstSE<(outs), (ins DRC:$fs, PRC:$base, PRC:$index),
          !strconcat(opstr, "\t$fs, ${index}(${base})"),
@@ -289,10 +289,12 @@ defm FSQRT : ABSS_M<"sqrt.d", IIFsqrtDouble, fsqrt>, ABSS_FM<0x4, 17>;
 /// Move Control Registers From/To CPU Registers
 def CFC1 : MFC1_FT_CCR<"cfc1", CPURegs, CCROpnd, IIFmove>, MFC1_FM<2>;
 def CTC1 : MTC1_FT_CCR<"ctc1", CCROpnd, CPURegs, IIFmove>, MFC1_FM<6>;
-def MFC1 : MFC1_FT<"mfc1", CPURegs, FGR32, IIFmove, bitconvert>, MFC1_FM<0>;
-def MTC1 : MTC1_FT<"mtc1", FGR32, CPURegs, IIFmove, bitconvert>, MFC1_FM<4>;
-def DMFC1 : MFC1_FT<"dmfc1", CPU64Regs, FGR64, IIFmove, bitconvert>, MFC1_FM<1>;
-def DMTC1 : MTC1_FT<"dmtc1", FGR64, CPU64Regs, IIFmove, bitconvert>, MFC1_FM<5>;
+def MFC1 : MFC1_FT<"mfc1", CPURegs, FGR32, IIFmoveC1, bitconvert>, MFC1_FM<0>;
+def MTC1 : MTC1_FT<"mtc1", FGR32, CPURegs, IIFmoveC1, bitconvert>, MFC1_FM<4>;
+def DMFC1 : MFC1_FT<"dmfc1", CPU64Regs, FGR64, IIFmoveC1, bitconvert>,
+            MFC1_FM<1>;
+def DMTC1 : MTC1_FT<"dmtc1", FGR64, CPU64Regs, IIFmoveC1, bitconvert>,
+            MFC1_FM<5>;
 
 def FMOV_S   : ABSS_FT<"mov.s", FGR32, FGR32, IIFmove>, ABSS_FM<0x6, 16>;
 def FMOV_D32 : ABSS_FT<"mov.d", AFGR64, AFGR64, IIFmove>, ABSS_FM<0x6, 17>,
@@ -304,73 +306,87 @@ def FMOV_D64 : ABSS_FT<"mov.d", FGR64, FGR64, IIFmove>, ABSS_FM<0x6, 17>,
 
 /// Floating Point Memory Instructions
 let Predicates = [IsN64, HasStdEnc], DecoderNamespace = "Mips64" in {
-  def LWC1_P8 : LW_FT<"lwc1", FGR32, IILoad, mem64, load>, LW_FM<0x31>;
-  def SWC1_P8 : SW_FT<"swc1", FGR32, IIStore, mem64, store>, LW_FM<0x39>;
-  def LDC164_P8 : LW_FT<"ldc1", FGR64, IILoad, mem64, load>, LW_FM<0x35> {
+  def LWC1_P8 : LW_FT<"lwc1", FGR32RegsOpnd, IIFLoad, mem64, load>, LW_FM<0x31>;
+  def SWC1_P8 : SW_FT<"swc1", FGR32RegsOpnd, IIFStore, mem64, store>,
+                LW_FM<0x39>;
+  def LDC164_P8 : LW_FT<"ldc1", FGR64RegsOpnd, IIFLoad, mem64, load>,
+                  LW_FM<0x35> {
     let isCodeGenOnly =1;
   }
-  def SDC164_P8 : SW_FT<"sdc1", FGR64, IIStore, mem64, store>, LW_FM<0x3d> {
+  def SDC164_P8 : SW_FT<"sdc1", FGR64RegsOpnd, IIFStore, mem64, store>,
+                  LW_FM<0x3d> {
     let isCodeGenOnly =1;
   }
 }
 
 let Predicates = [NotN64, HasStdEnc] in {
-  def LWC1 : LW_FT<"lwc1", FGR32, IILoad, mem, load>, LW_FM<0x31>;
-  def SWC1 : SW_FT<"swc1", FGR32, IIStore, mem, store>, LW_FM<0x39>;
+  def LWC1 : LW_FT<"lwc1", FGR32RegsOpnd, IIFLoad, mem, load>, LW_FM<0x31>;
+  def SWC1 : SW_FT<"swc1", FGR32RegsOpnd, IIFStore, mem, store>, LW_FM<0x39>;
 }
 
 let Predicates = [NotN64, HasMips64, HasStdEnc],
   DecoderNamespace = "Mips64" in {
-  def LDC164 : LW_FT<"ldc1", FGR64, IILoad, mem, load>, LW_FM<0x35>;
-  def SDC164 : SW_FT<"sdc1", FGR64, IIStore, mem, store>, LW_FM<0x3d>;
+  def LDC164 : LW_FT<"ldc1", FGR64RegsOpnd, IIFLoad, mem, load>, LW_FM<0x35>;
+  def SDC164 : SW_FT<"sdc1", FGR64RegsOpnd, IIFStore, mem, store>, LW_FM<0x3d>;
 }
 
 let Predicates = [NotN64, NotMips64, HasStdEnc] in {
   let isPseudo = 1, isCodeGenOnly = 1 in {
-    def PseudoLDC1 : LW_FT<"", AFGR64, IILoad, mem, load>;
-    def PseudoSDC1 : SW_FT<"", AFGR64, IIStore, mem, store>;
+    def PseudoLDC1 : LW_FT<"", AFGR64RegsOpnd, IIFLoad, mem, load>;
+    def PseudoSDC1 : SW_FT<"", AFGR64RegsOpnd, IIFStore, mem, store>;
   }
-  def LDC1 : LW_FT<"ldc1", AFGR64, IILoad, mem>, LW_FM<0x35>;
-  def SDC1 : SW_FT<"sdc1", AFGR64, IIStore, mem>, LW_FM<0x3d>;
+  def LDC1 : LW_FT<"ldc1", AFGR64RegsOpnd, IIFLoad, mem>, LW_FM<0x35>;
+  def SDC1 : SW_FT<"sdc1", AFGR64RegsOpnd, IIFStore, mem>, LW_FM<0x3d>;
 }
 
 // Indexed loads and stores.
 let Predicates = [HasFPIdx, HasStdEnc] in {
-  def LWXC1 : LWXC1_FT<"lwxc1", FGR32, CPURegs, IILoad, load>, LWXC1_FM<0>;
-  def SWXC1 : SWXC1_FT<"swxc1", FGR32, CPURegs, IIStore, store>, SWXC1_FM<8>;
+  def LWXC1 : LWXC1_FT<"lwxc1", FGR32RegsOpnd, CPURegsOpnd, IIFLoad, load>,
+              LWXC1_FM<0>;
+  def SWXC1 : SWXC1_FT<"swxc1", FGR32RegsOpnd, CPURegsOpnd, IIFStore, store>,
+              SWXC1_FM<8>;
 }
 
 let Predicates = [HasMips32r2, NotMips64, HasStdEnc] in {
-  def LDXC1 : LWXC1_FT<"ldxc1", AFGR64, CPURegs, IILoad, load>, LWXC1_FM<1>;
-  def SDXC1 : SWXC1_FT<"sdxc1", AFGR64, CPURegs, IIStore, store>, SWXC1_FM<9>;
+  def LDXC1 : LWXC1_FT<"ldxc1", AFGR64RegsOpnd, CPURegsOpnd, IIFLoad, load>,
+              LWXC1_FM<1>;
+  def SDXC1 : SWXC1_FT<"sdxc1", AFGR64RegsOpnd, CPURegsOpnd, IIFStore, store>,
+              SWXC1_FM<9>;
 }
 
 let Predicates = [HasMips64, NotN64, HasStdEnc], DecoderNamespace="Mips64" in {
-  def LDXC164 : LWXC1_FT<"ldxc1", FGR64, CPURegs, IILoad, load>, LWXC1_FM<1>;
-  def SDXC164 : SWXC1_FT<"sdxc1", FGR64, CPURegs, IIStore, store>, SWXC1_FM<9>;
+  def LDXC164 : LWXC1_FT<"ldxc1", FGR64RegsOpnd, CPURegsOpnd, IIFLoad, load>,
+                LWXC1_FM<1>;
+  def SDXC164 : SWXC1_FT<"sdxc1", FGR64RegsOpnd, CPURegsOpnd, IIFStore, store>,
+                SWXC1_FM<9>;
 }
 
 // n64
 let Predicates = [IsN64, HasStdEnc], isCodeGenOnly=1 in {
-  def LWXC1_P8 : LWXC1_FT<"lwxc1", FGR32, CPU64Regs, IILoad, load>, LWXC1_FM<0>;
-  def LDXC164_P8 : LWXC1_FT<"ldxc1", FGR64, CPU64Regs, IILoad, load>,
-                   LWXC1_FM<1>;
-  def SWXC1_P8 : SWXC1_FT<"swxc1", FGR32, CPU64Regs, IIStore, store>,
-                 SWXC1_FM<8>;
-  def SDXC164_P8 : SWXC1_FT<"sdxc1", FGR64, CPU64Regs, IIStore, store>,
-                   SWXC1_FM<9>;
+  def LWXC1_P8 : LWXC1_FT<"lwxc1", FGR32RegsOpnd, CPU64RegsOpnd, IIFLoad, load>,
+                 LWXC1_FM<0>;
+  def LDXC164_P8 : LWXC1_FT<"ldxc1", FGR64RegsOpnd, CPU64RegsOpnd, IIFLoad,
+                             load>, LWXC1_FM<1>;
+  def SWXC1_P8 : SWXC1_FT<"swxc1", FGR32RegsOpnd, CPU64RegsOpnd, IIFStore,
+                          store>, SWXC1_FM<8>;
+  def SDXC164_P8 : SWXC1_FT<"sdxc1", FGR64RegsOpnd, CPU64RegsOpnd, IIFStore,
+                            store>, SWXC1_FM<9>;
 }
 
 // Load/store doubleword indexed unaligned.
 let Predicates = [NotMips64, HasStdEnc] in {
-  def LUXC1 : LWXC1_FT<"luxc1", AFGR64, CPURegs, IILoad>, LWXC1_FM<0x5>;
-  def SUXC1 : SWXC1_FT<"suxc1", AFGR64, CPURegs, IIStore>, SWXC1_FM<0xd>;
+  def LUXC1 : LWXC1_FT<"luxc1", AFGR64RegsOpnd, CPURegsOpnd, IIFLoad>,
+              LWXC1_FM<0x5>;
+  def SUXC1 : SWXC1_FT<"suxc1", AFGR64RegsOpnd, CPURegsOpnd, IIFStore>,
+              SWXC1_FM<0xd>;
 }
 
 let Predicates = [HasMips64, HasStdEnc],
   DecoderNamespace="Mips64" in {
-  def LUXC164 : LWXC1_FT<"luxc1", FGR64, CPURegs, IILoad>, LWXC1_FM<0x5>;
-  def SUXC164 : SWXC1_FT<"suxc1", FGR64, CPURegs, IIStore>, SWXC1_FM<0xd>;
+  def LUXC164 : LWXC1_FT<"luxc1", FGR64RegsOpnd, CPURegsOpnd, IIFLoad>,
+                LWXC1_FM<0x5>;
+  def SUXC164 : SWXC1_FT<"suxc1", FGR64RegsOpnd, CPURegsOpnd, IIFStore>,
+                SWXC1_FM<0xd>;
 }
 
 /// Floating-point Aritmetic

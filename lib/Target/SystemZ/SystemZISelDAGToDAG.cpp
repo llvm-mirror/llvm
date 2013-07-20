@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SystemZTargetMachine.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -199,6 +200,16 @@ class SystemZDAGToDAGISel : public SelectionDAGISel {
                          Addr, Base, Disp, Index);
   }
 
+  // Return an undefined i64 value.
+  SDValue getUNDEF64(SDLoc DL);
+
+  // Convert N to VT, if it isn't already.
+  SDValue convertTo(SDLoc DL, EVT VT, SDValue N);
+
+  // Try to use RISBG to implement ISD::AND node N.  Return the selected
+  // node on success, otherwise return null.
+  SDNode *tryRISBGForAND(SDNode *N);
+
   // If Op0 is null, then Node is a constant that can be loaded using:
   //
   //   (Opcode UpperVal LowerVal)
@@ -208,6 +219,8 @@ class SystemZDAGToDAGISel : public SelectionDAGISel {
   //   (Opcode (Opcode Op0 UpperVal) LowerVal)
   SDNode *splitLargeImmediate(unsigned Opcode, SDNode *Node, SDValue Op0,
                               uint64_t UpperVal, uint64_t LowerVal);
+
+  bool storeLoadCanUseMVC(SDNode *N) const;
 
 public:
   SystemZDAGToDAGISel(SystemZTargetMachine &TM, CodeGenOpt::Level OptLevel)
@@ -474,7 +487,7 @@ void SystemZDAGToDAGISel::getAddressOperands(const SystemZAddressingMode &AM,
     // Truncate values from i64 to i32, for shifts.
     assert(VT == MVT::i32 && Base.getValueType() == MVT::i64 &&
            "Unexpected truncation");
-    DebugLoc DL = Base.getDebugLoc();
+    SDLoc DL(Base);
     SDValue Trunc = CurDAG->getNode(ISD::TRUNCATE, DL, VT, Base);
     insertDAGNode(CurDAG, Base.getNode(), Trunc);
     Base = Trunc;
@@ -518,11 +531,173 @@ bool SystemZDAGToDAGISel::selectBDXAddr(SystemZAddressingMode::AddrForm Form,
   return true;
 }
 
+// Return true if Mask matches the regexp 0*1+0*, given that zero masks
+// have already been filtered out.  Store the first set bit in LSB and
+// the number of set bits in Length if so.
+static bool isStringOfOnes(uint64_t Mask, unsigned &LSB, unsigned &Length) {
+  unsigned First = findFirstSet(Mask);
+  uint64_t Top = (Mask >> First) + 1;
+  if ((Top & -Top) == Top)
+    {
+      LSB = First;
+      Length = findFirstSet(Top);
+      return true;
+    }
+  return false;
+}
+
+// Return a mask with Count low bits set.
+static uint64_t allOnes(unsigned int Count) {
+  return Count == 0 ? 0 : (uint64_t(1) << (Count - 1) << 1) - 1;
+}
+
+// Return true if RISBG can be used to extract the bits in Mask from
+// a value that has BitSize bits.  Store the start and end operands
+// (I3 and I4) in Start and End if so.
+static bool isRISBGMask(uint64_t Mask, unsigned BitSize, unsigned &Start,
+                        unsigned &End) {
+  // Reject trivial all-zero and all-one masks.
+  uint64_t Used = allOnes(BitSize);
+  if (Mask == 0 || Mask == Used)
+    return false;
+
+  // Handle the 1+0+ or 0+1+0* cases.  Start then specifies the index of
+  // the msb and End specifies the index of the lsb.
+  unsigned LSB, Length;
+  if (isStringOfOnes(Mask, LSB, Length))
+    {
+      Start = 63 - (LSB + Length - 1);
+      End = 63 - LSB;
+      return true;
+    }
+
+  // Handle the wrap-around 1+0+1+ cases.  Start then specifies the msb
+  // of the low 1s and End specifies the lsb of the high 1s.
+  if (isStringOfOnes(Mask ^ Used, LSB, Length))
+    {
+      assert(LSB > 0 && "Bottom bit must be set");
+      assert(LSB + Length < BitSize && "Top bit must be set");
+      Start = 63 - (LSB - 1);
+      End = 63 - (LSB + Length);
+      return true;
+    }
+
+  return false;
+}
+
+SDValue SystemZDAGToDAGISel::getUNDEF64(SDLoc DL) {
+  SDNode *N = CurDAG->getMachineNode(TargetOpcode::IMPLICIT_DEF, DL, MVT::i64);
+  return SDValue(N, 0);
+}
+
+SDValue SystemZDAGToDAGISel::convertTo(SDLoc DL, EVT VT, SDValue N) {
+  if (N.getValueType() == MVT::i32 && VT == MVT::i64) {
+    SDValue Index = CurDAG->getTargetConstant(SystemZ::subreg_32bit, MVT::i64);
+    SDNode *Insert = CurDAG->getMachineNode(TargetOpcode::INSERT_SUBREG,
+                                            DL, VT, getUNDEF64(DL), N, Index);
+    return SDValue(Insert, 0);
+  }
+  if (N.getValueType() == MVT::i64 && VT == MVT::i32) {
+    SDValue Index = CurDAG->getTargetConstant(SystemZ::subreg_32bit, MVT::i64);
+    SDNode *Extract = CurDAG->getMachineNode(TargetOpcode::EXTRACT_SUBREG,
+                                             DL, VT, N, Index);
+    return SDValue(Extract, 0);
+  }
+  assert(N.getValueType() == VT && "Unexpected value types");
+  return N;
+}
+
+SDNode *SystemZDAGToDAGISel::tryRISBGForAND(SDNode *N) {
+  EVT VT = N->getValueType(0);
+  unsigned BitSize = VT.getSizeInBits();
+  unsigned Start, End;
+  ConstantSDNode *MaskNode =
+    dyn_cast<ConstantSDNode>(N->getOperand(1).getNode());
+  if (!MaskNode)
+    return 0;
+
+  SDValue Input = N->getOperand(0);
+  uint64_t Mask = MaskNode->getZExtValue();
+  if (!isRISBGMask(Mask, BitSize, Start, End)) {
+    APInt KnownZero, KnownOne;
+    CurDAG->ComputeMaskedBits(Input, KnownZero, KnownOne);
+    Mask |= KnownZero.getZExtValue();
+    if (!isRISBGMask(Mask, BitSize, Start, End))
+      return 0;
+  }
+
+  unsigned Rotate = 0;
+  if (Input->getOpcode() == ISD::ROTL && BitSize == 64) {
+    // Any 64-bit rotate left can be merged into the RISBG.
+    if (ConstantSDNode *CountNode =
+        dyn_cast<ConstantSDNode>(Input.getOperand(1).getNode())) {
+      Rotate = CountNode->getZExtValue() & (BitSize - 1);
+      Input = Input->getOperand(0);
+    }
+  } else if (Input->getOpcode() == ISD::SHL) {
+    // Try to convert (and (shl X, count), mask) into
+    // (and (rotl X, count), mask&(~0<<count)), where the new mask
+    // removes bits from the original mask that are zeroed by the shl
+    // but that are not necessarily zero in X.
+    if (ConstantSDNode *CountNode =
+        dyn_cast<ConstantSDNode>(Input.getOperand(1).getNode())) {
+      uint64_t Count = CountNode->getZExtValue();
+      if (Count > 0 &&
+          Count < BitSize &&
+          isRISBGMask(Mask & (allOnes(BitSize - Count) << Count),
+                      BitSize, Start, End)) {
+        Rotate = Count;
+        Input = Input->getOperand(0);
+      }
+    }
+  } else if (Input->getOpcode() == ISD::SRL) {
+    // Try to convert (and (srl X, count), mask) into
+    // (and (rotl X, size-count), mask&(~0>>count)), which is similar
+    // to SLL above.
+    if (ConstantSDNode *CountNode =
+        dyn_cast<ConstantSDNode>(Input.getOperand(1).getNode())) {
+      uint64_t Count = CountNode->getZExtValue();
+      if (Count > 0 &&
+          Count < BitSize &&
+          isRISBGMask(Mask & allOnes(BitSize - Count), BitSize, Start, End)) {
+        Rotate = 64 - Count;
+        Input = Input->getOperand(0);
+      }
+    }
+  } else if (Start <= End && Input->getOpcode() == ISD::SRA) {
+    // Try to convert (and (sra X, count), mask) into
+    // (and (rotl X, size-count), mask).  The mask must not include
+    // any sign bits.
+    if (ConstantSDNode *CountNode =
+        dyn_cast<ConstantSDNode>(Input.getOperand(1).getNode())) {
+      uint64_t Count = CountNode->getZExtValue();
+      if (Count > 0 && Count < BitSize && Start >= 64 - (BitSize - Count)) {
+        Rotate = 64 - Count;
+        Input = Input->getOperand(0);
+      }
+    }
+  }
+
+  // Prefer register extensions like LLC over RSIBG.
+  if (Rotate == 0 && (Start == 32 || Start == 48 || Start == 56) && End == 63)
+    return 0;
+
+  SDValue Ops[5] = {
+    getUNDEF64(SDLoc(N)),
+    convertTo(SDLoc(N), MVT::i64, Input),
+    CurDAG->getTargetConstant(Start, MVT::i32),
+    CurDAG->getTargetConstant(End | 128, MVT::i32),
+    CurDAG->getTargetConstant(Rotate, MVT::i32)
+  };
+  N = CurDAG->getMachineNode(SystemZ::RISBG, SDLoc(N), MVT::i64, Ops);
+  return convertTo(SDLoc(N), VT, SDValue(N, 0)).getNode();
+}
+
 SDNode *SystemZDAGToDAGISel::splitLargeImmediate(unsigned Opcode, SDNode *Node,
                                                  SDValue Op0, uint64_t UpperVal,
                                                  uint64_t LowerVal) {
   EVT VT = Node->getValueType(0);
-  DebugLoc DL = Node->getDebugLoc();
+  SDLoc DL(Node);
   SDValue Upper = CurDAG->getConstant(UpperVal, VT);
   if (Op0.getNode())
     Upper = CurDAG->getNode(Opcode, DL, VT, Op0, Upper);
@@ -531,6 +706,49 @@ SDNode *SystemZDAGToDAGISel::splitLargeImmediate(unsigned Opcode, SDNode *Node,
   SDValue Lower = CurDAG->getConstant(LowerVal, VT);
   SDValue Or = CurDAG->getNode(Opcode, DL, VT, Upper, Lower);
   return Or.getNode();
+}
+
+// N is a (store (load ...), ...) pattern.  Return true if it can use MVC.
+bool SystemZDAGToDAGISel::storeLoadCanUseMVC(SDNode *N) const {
+  StoreSDNode *Store = cast<StoreSDNode>(N);
+  LoadSDNode *Load = cast<LoadSDNode>(Store->getValue().getNode());
+
+  // MVC is logically a bytewise copy, so can't be used for volatile accesses.
+  if (Load->isVolatile() || Store->isVolatile())
+    return false;
+
+  // Prefer not to use MVC if either address can use ... RELATIVE LONG
+  // instructions.
+  assert(Load->getMemoryVT() == Store->getMemoryVT() &&
+         "Should already have checked that the types match");
+  uint64_t Size = Load->getMemoryVT().getStoreSize();
+  if (Size > 1 && Size <= 8) {
+    // Prefer LHRL, LRL and LGRL.
+    if (Load->getBasePtr().getOpcode() == SystemZISD::PCREL_WRAPPER)
+      return false;
+    // Prefer STHRL, STRL and STGRL.
+    if (Store->getBasePtr().getOpcode() == SystemZISD::PCREL_WRAPPER)
+      return false;
+  }
+
+  // There's no chance of overlap if the load is invariant.
+  if (Load->isInvariant())
+    return true;
+
+  // If both operands are aligned, they must be equal or not overlap.
+  if (Load->getAlignment() >= Size && Store->getAlignment() >= Size)
+    return true;
+
+  // Otherwise we need to check whether there's an alias.
+  const Value *V1 = Load->getSrcValue();
+  const Value *V2 = Store->getSrcValue();
+  if (!V1 || !V2)
+    return false;
+
+  int64_t End1 = Load->getSrcValueOffset() + Size;
+  int64_t End2 = Store->getSrcValueOffset() + Size;
+  return !AA->alias(AliasAnalysis::Location(V1, End1, Load->getTBAAInfo()),
+                    AliasAnalysis::Location(V2, End2, Store->getTBAAInfo()));
 }
 
 SDNode *SystemZDAGToDAGISel::Select(SDNode *Node) {
@@ -544,6 +762,7 @@ SDNode *SystemZDAGToDAGISel::Select(SDNode *Node) {
   }
 
   unsigned Opcode = Node->getOpcode();
+  SDNode *ResNode = 0;
   switch (Opcode) {
   case ISD::OR:
   case ISD::XOR:
@@ -556,6 +775,10 @@ SDNode *SystemZDAGToDAGISel::Select(SDNode *Node) {
           Node = splitLargeImmediate(Opcode, Node, Node->getOperand(0),
                                      Val - uint32_t(Val), uint32_t(Val));
       }
+    break;
+
+  case ISD::AND:
+    ResNode = tryRISBGForAND(Node);
     break;
 
   case ISD::Constant:
@@ -585,7 +808,8 @@ SDNode *SystemZDAGToDAGISel::Select(SDNode *Node) {
   }
 
   // Select the default instruction
-  SDNode *ResNode = SelectCode(Node);
+  if (!ResNode)
+    ResNode = SelectCode(Node);
 
   DEBUG(errs() << "=> ";
         if (ResNode == NULL || ResNode == Node)

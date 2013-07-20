@@ -19,11 +19,11 @@ entry:
 ; R600-CHECK: @rotl
 ; R600-CHECK: SUB_INT {{\** T[0-9]+\.[XYZW]}}, literal.x
 ; R600-CHECK-NEXT: 32
-; R600-CHECK: BIT_ALIGN_INT {{\** T[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW], PV.[xyzw]}}
+; R600-CHECK: BIT_ALIGN_INT {{\** T[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW], PV.[XYZW]}}
 
 ; SI-CHECK: @rotl
-; SI-CHECK: V_SUB_I32_e32 [[DST:VGPR[0-9]+]], 32, {{VGPR[0-9]+}}
-; SI-CHECK: V_ALIGNBIT_B32 {{VGPR[0-9]+, VGPR[0-9]+, VGPR[0-9]+}}, [[DST]]
+; SI-CHECK: V_SUB_I32_e64 [[DST:VGPR[0-9]+]], 32, {{[SV]GPR[0-9]+}}
+; SI-CHECK: V_ALIGNBIT_B32 {{VGPR[0-9]+, [SV]GPR[0-9]+, VGPR[0-9]+}}, [[DST]]
 define void @rotl(i32 addrspace(1)* %in, i32 %x, i32 %y) {
 entry:
   %0 = shl i32 %x, %y

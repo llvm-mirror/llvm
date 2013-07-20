@@ -30,12 +30,13 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
   case FK_Data_2:
   case FK_Data_4:
   case FK_Data_8:
-  case PPC::fixup_ppc_tlsreg:
   case PPC::fixup_ppc_nofixup:
     return Value;
   case PPC::fixup_ppc_brcond14:
+  case PPC::fixup_ppc_brcond14abs:
     return Value & 0xfffc;
   case PPC::fixup_ppc_br24:
+  case PPC::fixup_ppc_br24abs:
     return Value & 0x3fffffc;
   case PPC::fixup_ppc_half16:
     return Value & 0xffff;
@@ -56,11 +57,12 @@ static unsigned getFixupKindNumBytes(unsigned Kind) {
     return 2;
   case FK_Data_4:
   case PPC::fixup_ppc_brcond14:
+  case PPC::fixup_ppc_brcond14abs:
   case PPC::fixup_ppc_br24:
+  case PPC::fixup_ppc_br24abs:
     return 4;
   case FK_Data_8:
     return 8;
-  case PPC::fixup_ppc_tlsreg:
   case PPC::fixup_ppc_nofixup:
     return 0;
   }
@@ -93,9 +95,10 @@ public:
       // name                    offset  bits  flags
       { "fixup_ppc_br24",        6,      24,   MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_ppc_brcond14",    16,     14,   MCFixupKindInfo::FKF_IsPCRel },
+      { "fixup_ppc_br24abs",     6,      24,   0 },
+      { "fixup_ppc_brcond14abs", 16,     14,   0 },
       { "fixup_ppc_half16",       0,     16,   0 },
       { "fixup_ppc_half16ds",     0,     14,   0 },
-      { "fixup_ppc_tlsreg",       0,      0,   0 },
       { "fixup_ppc_nofixup",      0,      0,   0 }
     };
 
@@ -142,10 +145,14 @@ public:
   }
 
   bool writeNopData(uint64_t Count, MCObjectWriter *OW) const {
-    // FIXME: Zero fill for now. That's not right, but at least will get the
-    // section size right.
-    for (uint64_t i = 0; i != Count; ++i)
-      OW->Write8(0);
+    // Can't emit NOP with size not multiple of 32-bits
+    if (Count % 4 != 0)
+      return false;
+
+    uint64_t NumNops = Count / 4;
+    for (uint64_t i = 0; i != NumNops; ++i)
+      OW->Write32(0x60000000);
+
     return true;
   }
 

@@ -1301,7 +1301,7 @@ public:
   }
 
   virtual void updateDebugInfo(Instruction *Inst) const {
-    for (SmallVector<DbgDeclareInst *, 4>::const_iterator I = DDIs.begin(),
+    for (SmallVectorImpl<DbgDeclareInst *>::const_iterator I = DDIs.begin(),
            E = DDIs.end(); I != E; ++I) {
       DbgDeclareInst *DDI = *I;
       if (StoreInst *SI = dyn_cast<StoreInst>(Inst))
@@ -1309,7 +1309,7 @@ public:
       else if (LoadInst *LI = dyn_cast<LoadInst>(Inst))
         ConvertDebugDeclareToDebugValue(DDI, LI, DIB);
     }
-    for (SmallVector<DbgValueInst *, 4>::const_iterator I = DVIs.begin(),
+    for (SmallVectorImpl<DbgValueInst *>::const_iterator I = DVIs.begin(),
            E = DVIs.end(); I != E; ++I) {
       DbgValueInst *DVI = *I;
       Value *Arg = 0;
@@ -2591,22 +2591,23 @@ private:
 
   bool rewriteVectorizedStoreInst(Value *V,
                                   StoreInst &SI, Value *OldOp) {
-    unsigned BeginIndex = getIndex(BeginOffset);
-    unsigned EndIndex = getIndex(EndOffset);
-    assert(EndIndex > BeginIndex && "Empty vector!");
-    unsigned NumElements = EndIndex - BeginIndex;
-    assert(NumElements <= VecTy->getNumElements() && "Too many elements!");
-    Type *PartitionTy
-      = (NumElements == 1) ? ElementTy
-                           : VectorType::get(ElementTy, NumElements);
-    if (V->getType() != PartitionTy)
-      V = convertValue(TD, IRB, V, PartitionTy);
+    if (V->getType() != VecTy) {
+      unsigned BeginIndex = getIndex(BeginOffset);
+      unsigned EndIndex = getIndex(EndOffset);
+      assert(EndIndex > BeginIndex && "Empty vector!");
+      unsigned NumElements = EndIndex - BeginIndex;
+      assert(NumElements <= VecTy->getNumElements() && "Too many elements!");
+      Type *PartitionTy
+        = (NumElements == 1) ? ElementTy
+        : VectorType::get(ElementTy, NumElements);
+      if (V->getType() != PartitionTy)
+        V = convertValue(TD, IRB, V, PartitionTy);
 
-    // Mix in the existing elements.
-    Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                       "load");
-    V = insertVector(IRB, Old, V, BeginIndex, "vec");
-
+      // Mix in the existing elements.
+      Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
+                                         "load");
+      V = insertVector(IRB, Old, V, BeginIndex, "vec");
+    }
     StoreInst *Store = IRB.CreateAlignedStore(V, &NewAI, NewAI.getAlignment());
     Pass.DeadInsts.insert(&SI);
 

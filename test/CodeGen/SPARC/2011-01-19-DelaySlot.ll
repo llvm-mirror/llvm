@@ -40,7 +40,7 @@ bb:                                               ; preds = %entry, %bb
   %a_addr.0 = add i32 %.pn, %a_addr.18
   %3 = add nsw i32 %1, 1
   %exitcond = icmp eq i32 %3, %b
-;CHECK:      subcc
+;CHECK:      cmp
 ;CHECK:      bne
 ;CHECK-NOT:  nop
   br i1 %exitcond, label %bb5, label %bb
@@ -48,7 +48,7 @@ bb:                                               ; preds = %entry, %bb
 bb5:                                              ; preds = %bb, %entry
   %a_addr.1.lcssa = phi i32 [ %a, %entry ], [ %a_addr.0, %bb ]
 ;CHECK:      jmp
-;CHECK-NEXT: restore
+;CHECK-NOT: restore
   ret i32 %a_addr.1.lcssa
 }
 
@@ -57,9 +57,9 @@ entry:
 ;CHECK:      test_inlineasm
 ;CHECK:      sethi
 ;CHECK:      !NO_APP
-;CHECK-NEXT: subcc
+;CHECK-NEXT: cmp
 ;CHECK-NEXT: bg
-;CHECK-NEXT: nop
+;CHECK-NEXT: or
   tail call void asm sideeffect "sethi 0, %g0", ""() nounwind
   %0 = icmp slt i32 %a, 0
   br i1 %0, label %bb, label %bb1
@@ -105,3 +105,79 @@ entry:
 
 
 declare i32 @func(i32*)
+
+
+define i32 @restore_add(i32 %a, i32 %b) {
+entry:
+;CHECK-LABEL:  restore_add:
+;CHECK:  jmp %i7+8
+;CHECK:  restore %o0, %i1, %o0
+  %0 = tail call i32 @bar(i32 %a) nounwind
+  %1 = add nsw i32 %0, %b
+  ret i32 %1
+}
+
+define i32 @restore_add_imm(i32 %a) {
+entry:
+;CHECK-LABEL:  restore_add_imm:
+;CHECK:  jmp %i7+8
+;CHECK:  restore %o0, 20, %o0
+  %0 = tail call i32 @bar(i32 %a) nounwind
+  %1 = add nsw i32 %0, 20
+  ret i32 %1
+}
+
+define i32 @restore_or(i32 %a) {
+entry:
+;CHECK-LABEL:  restore_or:
+;CHECK:  jmp %i7+8
+;CHECK:  restore %g0, %o0, %o0
+  %0 = tail call i32 @bar(i32 %a) nounwind
+  ret i32 %0
+}
+
+define i32 @restore_or_imm(i32 %a) {
+entry:
+;CHECK-LABEL:  restore_or_imm:
+;CHECK:  or %o0, 20, %i0
+;CHECK:  jmp %i7+8
+;CHECK:  restore %g0, %g0, %g0
+  %0 = tail call i32 @bar(i32 %a) nounwind
+  %1 = or i32 %0, 20
+  ret i32 %1
+}
+
+
+define i32 @restore_sethi(i32 %a) {
+entry:
+;CHECK: restore_sethi
+;CHECK-NOT: sethi  3
+;CHECK: restore %g0, 3072, %o0
+  %0 = tail call i32 @bar(i32 %a) nounwind
+  %1 = icmp ne i32 %0, 0
+  %2 = select i1 %1, i32 3072, i32 0
+  ret i32 %2
+}
+
+define i32 @restore_sethi_3bit(i32 %a) {
+entry:
+;CHECK: restore_sethi
+;CHECK: sethi  6
+;CHECK-NOT: restore %g0, 6144, %o0
+  %0 = tail call i32 @bar(i32 %a) nounwind
+  %1 = icmp ne i32 %0, 0
+  %2 = select i1 %1, i32 6144, i32 0
+  ret i32 %2
+}
+
+define i32 @restore_sethi_large(i32 %a) {
+entry:
+;CHECK: restore_sethi
+;CHECK: sethi  4000, %i0
+;CHECK: restore %g0, %g0, %g0
+  %0 = tail call i32 @bar(i32 %a) nounwind
+  %1 = icmp ne i32 %0, 0
+  %2 = select i1 %1, i32 4096000, i32 0
+  ret i32 %2
+}
+

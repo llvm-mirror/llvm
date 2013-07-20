@@ -19,16 +19,17 @@
 
 #include "AMDGPUAsmPrinter.h"
 #include "AMDGPU.h"
-#include "SIDefines.h"
-#include "SIMachineFunctionInfo.h"
-#include "SIRegisterInfo.h"
 #include "R600Defines.h"
 #include "R600MachineFunctionInfo.h"
 #include "R600RegisterInfo.h"
+#include "SIDefines.h"
+#include "SIMachineFunctionInfo.h"
+#include "SIRegisterInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/ELF.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 
@@ -63,7 +64,7 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
                                               ELF::SHT_PROGBITS, 0,
                                               SectionKind::getReadOnly());
   OutStreamer.SwitchSection(ConfigSection);
-  if (STM.device()->getGeneration() > AMDGPUDeviceInfo::HD6XXX) {
+  if (STM.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
     EmitProgramInfoSI(MF);
   } else {
     EmitProgramInfoR600(MF);
@@ -105,7 +106,7 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(MachineFunction &MF) {
   }
 
   unsigned RsrcReg;
-  if (STM.device()->getGeneration() >= AMDGPUDeviceInfo::HD5XXX) {
+  if (STM.getGeneration() >= AMDGPUSubtarget::EVERGREEN) {
     // Evergreen / Northern Islands
     switch (MFI->ShaderType) {
     default: // Fall through
@@ -130,6 +131,11 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(MachineFunction &MF) {
                            S_STACK_SIZE(MFI->StackSize), 4);
   OutStreamer.EmitIntValue(R_02880C_DB_SHADER_CONTROL, 4);
   OutStreamer.EmitIntValue(S_02880C_KILL_ENABLE(killPixel), 4);
+
+  if (MFI->ShaderType == ShaderType::COMPUTE) {
+    OutStreamer.EmitIntValue(R_0288E8_SQ_LDS_ALLOC, 4);
+    OutStreamer.EmitIntValue(RoundUpToAlignment(MFI->LDSSize, 4) >> 2, 4);
+  }
 }
 
 void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
@@ -227,7 +233,14 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
 
   OutStreamer.EmitIntValue(RsrcReg, 4);
   OutStreamer.EmitIntValue(S_00B028_VGPRS(MaxVGPR / 4) | S_00B028_SGPRS(MaxSGPR / 8), 4);
+
+  if (MFI->ShaderType == ShaderType::COMPUTE) {
+    OutStreamer.EmitIntValue(R_00B84C_COMPUTE_PGM_RSRC2, 4);
+    OutStreamer.EmitIntValue(S_00B84C_LDS_SIZE(RoundUpToAlignment(MFI->LDSSize, 256) >> 8), 4);
+  }
   if (MFI->ShaderType == ShaderType::PIXEL) {
+    OutStreamer.EmitIntValue(R_00B02C_SPI_SHADER_PGM_RSRC2_PS, 4);
+    OutStreamer.EmitIntValue(S_00B02C_EXTRA_LDS_SIZE(RoundUpToAlignment(MFI->LDSSize, 256) >> 8), 4);
     OutStreamer.EmitIntValue(R_0286CC_SPI_PS_INPUT_ENA, 4);
     OutStreamer.EmitIntValue(MFI->PSInputAddr, 4);
   }

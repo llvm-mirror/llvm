@@ -387,6 +387,8 @@ More calling conventions can be added/defined on an as-needed basis, to
 support Pascal conventions or any other well-known target-independent
 convention.
 
+.. _visibilitystyles:
+
 Visibility Styles
 -----------------
 
@@ -411,6 +413,8 @@ styles:
     placed in the dynamic symbol table, but that references within the
     defining module will bind to the local symbol. That is, the symbol
     cannot be overridden by another module.
+
+.. _namedtypes:
 
 Named Types
 -----------
@@ -596,6 +600,8 @@ Syntax::
            [fn Attrs] [section "name"] [align N]
            [gc] { ... }
 
+.. _langref_aliases:
+
 Aliases
 -------
 
@@ -697,7 +703,7 @@ Currently, only the following parameter attributes are defined:
     the first parameter. This is not a valid attribute for return
     values.
 ``noalias``
-    This indicates that pointer values `*based* <pointeraliasing>` on
+    This indicates that pointer values :ref:`based <pointeraliasing>` on
     the argument or return value do not alias pointer values which are
     not *based* on it, ignoring certain "irrelevant" dependencies. For a
     call to the parent function, dependencies between memory references
@@ -727,14 +733,13 @@ Currently, only the following parameter attributes are defined:
     attribute for return values and can only be applied to one parameter.
 
 ``returned``
-    This indicates that the value of the function always returns the value
-    of the parameter as its return value. This is an optimization hint to
-    the code generator when generating the caller, allowing tail call
-    optimization and omission of register saves and restores in some cases;
-    it is not checked or enforced when generating the callee. The parameter
-    and the function return type must be valid operands for the
-    :ref:`bitcast instruction <i_bitcast>`. This is not a valid attribute for
-    return values and can only be applied to one parameter.
+    This indicates that the function always returns the argument as its return
+    value. This is an optimization hint to the code generator when generating
+    the caller, allowing tail call optimization and omission of register saves
+    and restores in some cases; it is not checked or enforced when generating
+    the callee. The parameter and the function return type must be valid
+    operands for the :ref:`bitcast instruction <i_bitcast>`. This is not a
+    valid attribute for return values and can only be applied to one parameter.
 
 .. _gc:
 
@@ -812,6 +817,17 @@ example:
     This attribute indicates that the inliner should attempt to inline
     this function into callers whenever possible, ignoring any active
     inlining size threshold for this caller.
+``builtin``
+    This indicates that the callee function at a call site should be
+    recognized as a built-in function, even though the function's declaration
+    uses the ``nobuiltin`` attribute. This is only valid at call sites for
+    direct calls to functions which are declared with the ``nobuiltin``
+    attribute.
+``cold``
+    This attribute indicates that this function is rarely called. When
+    computing edge weights, basic blocks post-dominated by a cold
+    function call are also considered to be cold; and, thus, given low
+    weight.
 ``nonlazybind``
     This attribute suppresses lazy symbol binding for the function. This
     may make calls to the function faster, at the cost of extra program
@@ -825,11 +841,11 @@ example:
     This attribute disables prologue / epilogue emission for the
     function. This can have very system-specific consequences.
 ``nobuiltin``
-    This indicates that the callee function at a call site is not
-    recognized as a built-in function. LLVM will retain the original call
-    and not replace it with equivalent code based on the semantics of the
-    built-in function. This is only valid at call sites, not on function
-    declarations or definitions.
+    This indicates that the callee function at a call site is not recognized as
+    a built-in function. LLVM will retain the original call and not replace it
+    with equivalent code based on the semantics of the built-in function, unless
+    the call site uses the ``builtin`` attribute. This is valid at call sites
+    and on function declarations and definitions.
 ``noduplicate``
     This attribute indicates that calls to the function cannot be
     duplicated. A call to a ``noduplicate`` function may be moved
@@ -863,17 +879,21 @@ example:
     passes make choices that keep the code size of this function low,
     and otherwise do optimizations specifically to reduce code size.
 ``readnone``
-    This attribute indicates that the function computes its result (or
-    decides to unwind an exception) based strictly on its arguments,
+    On a function, this attribute indicates that the function computes its
+    result (or decides to unwind an exception) based strictly on its arguments,
     without dereferencing any pointer arguments or otherwise accessing
     any mutable state (e.g. memory, control registers, etc) visible to
     caller functions. It does not write through any pointer arguments
     (including ``byval`` arguments) and never changes any state visible
     to callers. This means that it cannot unwind exceptions by calling
     the ``C++`` exception throwing methods.
+    
+    On an argument, this attribute indicates that the function does not
+    dereference that pointer argument, even though it may read or write the
+    memory that the pointer points to if accessed through other pointers.
 ``readonly``
-    This attribute indicates that the function does not write through
-    any pointer arguments (including ``byval`` arguments) or otherwise
+    On a function, this attribute indicates that the function does not write
+    through any pointer arguments (including ``byval`` arguments) or otherwise
     modify any state (e.g. memory, control registers, etc) visible to
     caller functions. It may dereference pointer arguments and read
     state that may be set in the caller. A readonly function always
@@ -881,6 +901,10 @@ example:
     called with the same set of arguments and global state. It cannot
     unwind an exception by calling the ``C++`` exception throwing
     methods.
+    
+    On an argument, this attribute indicates that the function does not write
+    through this pointer argument, even though it may write to the memory that
+    the pointer points to.
 ``returns_twice``
     This attribute indicates that this function can return twice. The C
     ``setjmp`` is an example of such a function. The compiler disables
@@ -964,6 +988,8 @@ two digit hex code for the number.
 
 The inline asm code is simply printed to the machine code .s file when
 assembly code is generated.
+
+.. _langref_datalayout:
 
 Data Layout
 -----------
@@ -1353,6 +1379,8 @@ directly, without having to do extra analyses on the side before the
 transformation. A strong type system makes it easier to read the
 generated code and enables novel analyses and transformations that are
 not feasible to perform on normal three address code representations.
+
+.. _typeclassifications:
 
 Type Classifications
 --------------------
@@ -1867,6 +1895,8 @@ followed by 4 hexadecimal digits. All hexadecimal formats are big-endian
 
 There are no constants of type x86mmx.
 
+.. _complexconstants:
+
 Complex Constants
 -----------------
 
@@ -2188,6 +2218,8 @@ instruction.
 Finally, some targets may provide defined semantics when using the value
 as the operand to an inline assembly, but that is target specific.
 
+.. _constantexprs:
+
 Constant Expressions
 --------------------
 
@@ -2291,6 +2323,8 @@ The following is the syntax for constant expressions:
 
 Other Values
 ============
+
+.. _inlineasmexprs:
 
 Inline Assembler Expressions
 ----------------------------
@@ -2549,8 +2583,8 @@ Examples:
 It is sometimes useful to attach information to loop constructs. Currently,
 loop metadata is implemented as metadata attached to the branch instruction
 in the loop latch block. This type of metadata refer to a metadata node that is
-guaranteed to be separate for each loop. The loop-level metadata is prefixed
-with ``llvm.loop``.
+guaranteed to be separate for each loop. The loop identifier metadata is 
+specified with the name ``llvm.loop``.
 
 The loop identifier metadata is implemented using a metadata that refers to
 itself to avoid merging it with any other identifier metadata, e.g.,
@@ -2564,32 +2598,17 @@ constructs:
     !0 = metadata !{ metadata !0 }
     !1 = metadata !{ metadata !1 }
 
+The loop identifier metadata can be used to specify additional per-loop
+metadata. Any operands after the first operand can be treated as user-defined
+metadata. For example the ``llvm.vectorizer.unroll`` metadata is understood
+by the loop vectorizer to indicate how many times to unroll the loop:
 
-'``llvm.loop.parallel``' Metadata
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. code-block:: llvm
 
-This loop metadata can be used to communicate that a loop should be considered
-a parallel loop. The semantics of parallel loops in this case is the one
-with the strongest cross-iteration instruction ordering freedom: the
-iterations in the loop can be considered completely independent of each
-other (also known as embarrassingly parallel loops).
-
-This metadata can originate from a programming language with parallel loop
-constructs. In such a case it is completely the programmer's responsibility
-to ensure the instructions from the different iterations of the loop can be
-executed in an arbitrary order, in parallel, or intertwined. No loop-carried
-dependency checking at all must be expected from the compiler.
-
-In order to fulfill the LLVM requirement for metadata to be safely ignored,
-it is important to ensure that a parallel loop is converted to
-a sequential loop in case an optimization (agnostic of the parallel loop
-semantics) converts the loop back to such. This happens when new memory
-accesses that do not fulfill the requirement of free ordering across iterations
-are added to the loop. Therefore, this metadata is required, but not
-sufficient, to consider the loop at hand a parallel loop. For a loop
-to be parallel,  all its memory accessing instructions need to be
-marked with the ``llvm.mem.parallel_loop_access`` metadata that refer
-to the same loop identifier metadata that identify the loop at hand.
+      br i1 %exitcond, label %._crit_edge, label %.lr.ph, !llvm.loop !0
+    ...
+    !0 = metadata !{ metadata !0, metadata !1 }
+    !1 = metadata !{ metadata !"llvm.vectorizer.unroll", i32 2 }
 
 '``llvm.mem``'
 ^^^^^^^^^^^^^^^
@@ -2601,29 +2620,28 @@ for optimizations are prefixed with ``llvm.mem``.
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For a loop to be parallel, in addition to using
-the ``llvm.loop.parallel`` metadata to mark the loop latch branch instruction,
+the ``llvm.loop`` metadata to mark the loop latch branch instruction,
 also all of the memory accessing instructions in the loop body need to be
 marked with the ``llvm.mem.parallel_loop_access`` metadata. If there
 is at least one memory accessing instruction not marked with the metadata,
-the loop, despite it possibly using the ``llvm.loop.parallel`` metadata,
-must be considered a sequential loop. This causes parallel loops to be
+the loop must be considered a sequential loop. This causes parallel loops to be
 converted to sequential loops due to optimization passes that are unaware of
 the parallel semantics and that insert new memory instructions to the loop
 body.
 
 Example of a loop that is considered parallel due to its correct use of
-both ``llvm.loop.parallel`` and ``llvm.mem.parallel_loop_access``
+both ``llvm.loop`` and ``llvm.mem.parallel_loop_access``
 metadata types that refer to the same loop identifier metadata.
 
 .. code-block:: llvm
 
    for.body:
-   ...
-   %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
-   ...
-   store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
-   ...
-   br i1 %exitcond, label %for.end, label %for.body, !llvm.loop.parallel !0
+     ...
+     %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+     ...
+     store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+     ...
+     br i1 %exitcond, label %for.end, label %for.body, !llvm.loop !0
 
    for.end:
    ...
@@ -2639,27 +2657,75 @@ the loop identifier metadata node directly:
    ...
 
    inner.for.body:
-   ...
-   %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
-   ...
-   store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
-   ...
-   br i1 %exitcond, label %inner.for.end, label %inner.for.body, !llvm.loop.parallel !1
+     ...
+     %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+     ...
+     store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+     ...
+     br i1 %exitcond, label %inner.for.end, label %inner.for.body, !llvm.loop !1
 
    inner.for.end:
-   ...
-   %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
-   ...
-   store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
-   ...
-   br i1 %exitcond, label %outer.for.end, label %outer.for.body, !llvm.loop.parallel !2
+     ...
+     %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+     ...
+     store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+     ...
+     br i1 %exitcond, label %outer.for.end, label %outer.for.body, !llvm.loop !2
 
    outer.for.end:                                          ; preds = %for.body
    ...
-   !0 = metadata !{ metadata !1, metadata !2 } ; a list of parallel loop identifiers
-   !1 = metadata !{ metadata !1 } ; an identifier for the inner parallel loop
-   !2 = metadata !{ metadata !2 } ; an identifier for the outer parallel loop
+   !0 = metadata !{ metadata !1, metadata !2 } ; a list of loop identifiers
+   !1 = metadata !{ metadata !1 } ; an identifier for the inner loop
+   !2 = metadata !{ metadata !2 } ; an identifier for the outer loop
 
+'``llvm.vectorizer``'
+^^^^^^^^^^^^^^^^^^^^^
+
+Metadata prefixed with ``llvm.vectorizer`` is used to control per-loop
+vectorization parameters such as vectorization factor and unroll factor.
+
+``llvm.vectorizer`` metadata should be used in conjunction with ``llvm.loop``
+loop identification metadata.
+
+'``llvm.vectorizer.unroll``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This metadata instructs the loop vectorizer to unroll the specified
+loop exactly ``N`` times.
+
+The first operand is the string ``llvm.vectorizer.unroll`` and the second
+operand is an integer specifying the unroll factor. For example:
+
+.. code-block:: llvm
+
+   !0 = metadata !{ metadata !"llvm.vectorizer.unroll", i32 4 }
+
+Note that setting ``llvm.vectorizer.unroll`` to 1 disables unrolling of the
+loop.
+
+If ``llvm.vectorizer.unroll`` is set to 0 then the amount of unrolling will be
+determined automatically.
+
+'``llvm.vectorizer.width``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This metadata sets the target width of the vectorizer to ``N``. Without
+this metadata, the vectorizer will choose a width automatically.
+Regardless of this metadata, the vectorizer will only vectorize loops if
+it believes it is valid to do so.
+
+The first operand is the string ``llvm.vectorizer.width`` and the second
+operand is an integer specifying the width. For example:
+
+.. code-block:: llvm
+
+   !0 = metadata !{ metadata !"llvm.vectorizer.width", i32 4 }
+
+Note that setting ``llvm.vectorizer.width`` to 1 disables vectorization of the
+loop.
+
+If ``llvm.vectorizer.width`` is set to 0 then the width will be determined
+automatically.
 
 Module Flags Metadata
 =====================
@@ -2861,6 +2927,8 @@ Each individual option is required to be either a valid option for the target's
 linker, or an option that is reserved by the target specific assembly writer or
 object file emitter. No other aspect of these options is defined by the IR.
 
+.. _intrinsicglobalvariables:
+
 Intrinsic Global Variables
 ==========================
 
@@ -2870,13 +2938,15 @@ All globals of this sort should have a section specified as
 "``llvm.metadata``". This section and all globals that start with
 "``llvm.``" are reserved for use by LLVM.
 
+.. _gv_llvmused:
+
 The '``llvm.used``' Global Variable
 -----------------------------------
 
 The ``@llvm.used`` global is an array which has
- :ref:`appending linkage <linkage_appending>`. This array contains a list of
-pointers to global variables, functions and aliases which may optionally have a
-pointer cast formed of bitcast or getelementptr. For example, a legal
+:ref:`appending linkage <linkage_appending>`. This array contains a list of
+pointers to named global variables, functions and aliases which may optionally
+have a pointer cast formed of bitcast or getelementptr. For example, a legal
 use of it is:
 
 .. code-block:: llvm
@@ -2891,15 +2961,17 @@ use of it is:
 
 If a symbol appears in the ``@llvm.used`` list, then the compiler, assembler,
 and linker are required to treat the symbol as if there is a reference to the
-symbol that it cannot see. For example, if a variable has internal linkage and
-no references other than that from the ``@llvm.used`` list, it cannot be
-deleted. This is commonly used to represent references from inline asms and
-other things the compiler cannot "see", and corresponds to
-"``attribute((used))``" in GNU C.
+symbol that it cannot see (which is why they have to be named). For example, if
+a variable has internal linkage and no references other than that from the
+``@llvm.used`` list, it cannot be deleted. This is commonly used to represent
+references from inline asms and other things the compiler cannot "see", and
+corresponds to "``attribute((used))``" in GNU C.
 
 On some targets, the code generator must emit a directive to the
 assembler or object file to prevent the assembler and linker from
 molesting the symbol.
+
+.. _gv_llvmcompilerused:
 
 The '``llvm.compiler.used``' Global Variable
 --------------------------------------------
@@ -2912,6 +2984,8 @@ by ``@llvm.used``.
 
 This is a rare construct that should only be used in rare circumstances,
 and should not be exposed to source languages.
+
+.. _gv_llvmglobalctors:
 
 The '``llvm.global_ctors``' Global Variable
 -------------------------------------------
@@ -2926,6 +3000,8 @@ functions and associated priorities. The functions referenced by this
 array will be called in ascending order of priority (i.e. lowest first)
 when the module is loaded. The order of functions with the same priority
 is not defined.
+
+.. _llvmglobaldtors:
 
 The '``llvm.global_dtors``' Global Variable
 -------------------------------------------
@@ -4578,16 +4654,16 @@ alignment results in undefined behavior. Underestimating the alignment
 may produce less efficient code. An alignment of 1 is always safe.
 
 The optional ``!nontemporal`` metadata must reference a single
-metatadata name ``<index>`` corresponding to a metadata node with one
+metadata name ``<index>`` corresponding to a metadata node with one
 ``i32`` entry of value 1. The existence of the ``!nontemporal``
-metatadata on the instruction tells the optimizer and code generator
+metadata on the instruction tells the optimizer and code generator
 that this load is not expected to be reused in the cache. The code
 generator may select special instructions to save cache bandwidth, such
 as the ``MOVNT`` instruction on x86.
 
 The optional ``!invariant.load`` metadata must reference a single
-metatadata name ``<index>`` corresponding to a metadata node with no
-entries. The existence of the ``!invariant.load`` metatadata on the
+metadata name ``<index>`` corresponding to a metadata node with no
+entries. The existence of the ``!invariant.load`` metadata on the
 instruction tells the optimizer and code generator that this load
 address points to memory which does not change value during program
 execution. The optimizer may then move this load around, for example, by
@@ -4663,9 +4739,9 @@ alignment results in undefined behavior. Underestimating the
 alignment may produce less efficient code. An alignment of 1 is always
 safe.
 
-The optional ``!nontemporal`` metadata must reference a single metatadata
+The optional ``!nontemporal`` metadata must reference a single metadata
 name ``<index>`` corresponding to a metadata node with one ``i32`` entry of
-value 1. The existence of the ``!nontemporal`` metatadata on the instruction
+value 1. The existence of the ``!nontemporal`` metadata on the instruction
 tells the optimizer and code generator that this load is not expected to
 be reused in the cache. The code generator may select special
 instructions to save cache bandwidth, such as the MOVNT instruction on
@@ -6662,6 +6738,9 @@ When directly supported, reading the cycle counter should not modify any
 memory. Implementations are allowed to either return a application
 specific value or a system wide value. On backends without support, this
 is lowered to a constant 0.
+
+Note that runtime support may be conditional on the privilege-level code is
+running at and the host platform.
 
 Standard C Library Intrinsics
 -----------------------------

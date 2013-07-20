@@ -173,6 +173,14 @@ public:
                                    const MachineMemOperand *&MMO,
                                    int &FrameIndex) const;
 
+  /// isStackSlotCopy - Return true if the specified machine instruction
+  /// is a copy of one stack slot to another and has no other effect.
+  /// Provide the identity of the two frame indices.
+  virtual bool isStackSlotCopy(const MachineInstr *MI, int &DestFrameIndex,
+                               int &SrcFrameIndex) const {
+    return false;
+  }
+
   /// reMaterialize - Re-issue the specified 'original' instruction at the
   /// specific location targeting a new destination register.
   /// The register in Orig->getOperand(0).getReg() will be substituted by
@@ -505,22 +513,6 @@ public:
     return false;
   }
 
-  /// emitFrameIndexDebugValue - Emit a target-dependent form of
-  /// DBG_VALUE encoding the address of a frame index.  Addresses would
-  /// normally be lowered the same way as other addresses on the target,
-  /// e.g. in load instructions.  For targets that do not support this
-  /// the debug info is simply lost.
-  /// If you add this for a target you should handle this DBG_VALUE in the
-  /// target-specific AsmPrinter code as well; you will probably get invalid
-  /// assembly output if you don't.
-  virtual MachineInstr *emitFrameIndexDebugValue(MachineFunction &MF,
-                                                 int FrameIx,
-                                                 uint64_t Offset,
-                                                 const MDNode *MDPtr,
-                                                 DebugLoc dl) const {
-    return 0;
-  }
-
   /// foldMemoryOperand - Attempt to fold a load or store of the specified stack
   /// slot into the specified machine instruction for the specified operand(s).
   /// If this is possible, a new instruction is returned with the specified
@@ -817,12 +809,10 @@ public:
 
   /// computeOperandLatency - Compute and return the latency of the given data
   /// dependent def and use when the operand indices are already known.
-  ///
-  /// FindMin may be set to get the minimum vs. expected latency.
   unsigned computeOperandLatency(const InstrItineraryData *ItinData,
                                  const MachineInstr *DefMI, unsigned DefIdx,
-                                 const MachineInstr *UseMI, unsigned UseIdx,
-                                 bool FindMin = false) const;
+                                 const MachineInstr *UseMI, unsigned UseIdx)
+    const;
 
   /// getInstrLatency - Compute the instruction latency of a given instruction.
   /// If the instruction has higher cost when predicated, it's returned via
@@ -839,7 +829,7 @@ public:
                              const MachineInstr *DefMI) const;
 
   int computeDefOperandLatency(const InstrItineraryData *ItinData,
-                               const MachineInstr *DefMI, bool FindMin) const;
+                               const MachineInstr *DefMI) const;
 
   /// isHighLatencyDef - Return true if this opcode has high latency to its
   /// result.

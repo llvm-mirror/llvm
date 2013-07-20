@@ -37,12 +37,19 @@
 // are actually relatively cheap.  It therefore doesn't seem worth spending
 // much compilation time on the problem.  Instead, the approach we take is:
 //
-// (1) Check whether all branches can be short (the usual case).  Exit the
-//     pass if so.
-// (2) If one branch needs to be long, work out the address that each block
-//     would have if all branches need to be long, as for shortening above.
-// (3) Relax any branch that is out of range according to this pessimistic
-//     assumption.
+// (1) Work out the address that each block would have if no branches
+//     need relaxing.  Exit the pass early if all branches are in range
+//     according to this assumption.
+//
+// (2) Work out the address that each block would have if all branches
+//     need relaxing.
+//
+// (3) Walk through the block calculating the final address of each instruction
+//     and relaxing those that need to be relaxed.  For backward branches,
+//     this check uses the final address of the target block, as calculated
+//     earlier in the walk.  For forward branches, this check uses the
+//     address of the target block that was calculated in (2).  Both checks
+//     give a conservatively-correct range.
 //
 //===----------------------------------------------------------------------===//
 
@@ -68,10 +75,7 @@ namespace {
 
   // Represents positional information about a basic block.
   struct MBBInfo {
-    // The address that we currently assume the block has, relative to
-    // the start of the function.  This is designed so that taking the
-    // difference between two addresses gives a conservative upper bound
-    // on the distance between them.
+    // The address that we currently assume the block has.
     uint64_t Address;
 
     // The size of the block in bytes, excluding terminators.
@@ -95,8 +99,7 @@ namespace {
     // instruction, otherwise it is null.
     MachineInstr *Branch;
 
-    // The current address of the terminator, in the same form as
-    // for BlockInfo.
+    // The address that we currently assume the terminator has.
     uint64_t Address;
 
     // The current size of the terminator in bytes.
@@ -115,8 +118,7 @@ namespace {
 
   // Used to keep track of the current position while iterating over the blocks.
   struct BlockPosition {
-    // The offset from the start of the function, in the same form
-    // as BlockInfo.
+    // The address that we assume this position has.
     uint64_t Address;
 
     // The number of low bits in Address that are known to be the same
@@ -131,8 +133,7 @@ namespace {
   public:
     static char ID;
     SystemZLongBranch(const SystemZTargetMachine &tm)
-      : MachineFunctionPass(ID),
-        TII(static_cast<const SystemZInstrInfo *>(tm.getInstrInfo())) {}
+      : MachineFunctionPass(ID), TII(0) {}
 
     virtual const char *getPassName() const {
       return "SystemZ Long Branch";
@@ -146,9 +147,10 @@ namespace {
                         bool AssumeRelaxed);
     TerminatorInfo describeTerminator(MachineInstr *MI);
     uint64_t initMBBInfo();
-    bool mustRelaxBranch(const TerminatorInfo &Terminator);
+    bool mustRelaxBranch(const TerminatorInfo &Terminator, uint64_t Address);
     bool mustRelaxABranch();
     void setWorstCaseAddresses();
+    void splitCompareBranch(MachineInstr *MI, unsigned CompareOpcode);
     void relaxBranch(TerminatorInfo &Terminator);
     void relaxBranches();
 
@@ -209,22 +211,34 @@ TerminatorInfo SystemZLongBranch::describeTerminator(MachineInstr *MI) {
   TerminatorInfo Terminator;
   Terminator.Size = TII->getInstSizeInBytes(MI);
   if (MI->isConditionalBranch() || MI->isUnconditionalBranch()) {
-    Terminator.Branch = MI;
     switch (MI->getOpcode()) {
     case SystemZ::J:
       // Relaxes to JG, which is 2 bytes longer.
-      Terminator.TargetBlock = MI->getOperand(0).getMBB()->getNumber();
       Terminator.ExtraRelaxSize = 2;
       break;
     case SystemZ::BRC:
-      // Relaxes to BRCL, which is 2 bytes longer.  Operand 0 is the
-      // condition code mask.
-      Terminator.TargetBlock = MI->getOperand(1).getMBB()->getNumber();
+      // Relaxes to BRCL, which is 2 bytes longer.
       Terminator.ExtraRelaxSize = 2;
+      break;
+    case SystemZ::CRJ:
+      // Relaxes to a CR/BRCL sequence, which is 2 bytes longer.
+      Terminator.ExtraRelaxSize = 2;
+      break;
+    case SystemZ::CGRJ:
+      // Relaxes to a CGR/BRCL sequence, which is 4 bytes longer.
+      Terminator.ExtraRelaxSize = 4;
+      break;
+    case SystemZ::CIJ:
+    case SystemZ::CGIJ:
+      // Relaxes to a C(G)HI/BRCL sequence, which is 4 bytes longer.
+      Terminator.ExtraRelaxSize = 4;
       break;
     default:
       llvm_unreachable("Unrecognized branch instruction");
     }
+    Terminator.Branch = MI;
+    Terminator.TargetBlock =
+      TII->getBranchInfo(MI).Target->getMBB()->getNumber();
   }
   return Terminator;
 }
@@ -274,17 +288,19 @@ uint64_t SystemZLongBranch::initMBBInfo() {
   return Position.Address;
 }
 
-// Return true if, under current assumptions, Terminator needs to be relaxed.
-bool SystemZLongBranch::mustRelaxBranch(const TerminatorInfo &Terminator) {
+// Return true if, under current assumptions, Terminator would need to be
+// relaxed if it were placed at address Address.
+bool SystemZLongBranch::mustRelaxBranch(const TerminatorInfo &Terminator,
+                                        uint64_t Address) {
   if (!Terminator.Branch)
     return false;
 
   const MBBInfo &Target = MBBs[Terminator.TargetBlock];
-  if (Target.Address < Terminator.Address) {
-    if (Terminator.Address - Target.Address <= MaxBackwardRange)
+  if (Address >= Target.Address) {
+    if (Address - Target.Address <= MaxBackwardRange)
       return false;
   } else {
-    if (Target.Address - Terminator.Address <= MaxForwardRange)
+    if (Target.Address - Address <= MaxForwardRange)
       return false;
   }
 
@@ -294,9 +310,9 @@ bool SystemZLongBranch::mustRelaxBranch(const TerminatorInfo &Terminator) {
 // Return true if, under current assumptions, any terminator needs
 // to be relaxed.
 bool SystemZLongBranch::mustRelaxABranch() {
-  for (SmallVector<TerminatorInfo, 16>::iterator TI = Terminators.begin(),
+  for (SmallVectorImpl<TerminatorInfo>::iterator TI = Terminators.begin(),
          TE = Terminators.end(); TI != TE; ++TI)
-    if (mustRelaxBranch(*TI))
+    if (mustRelaxBranch(*TI, TI->Address))
       return true;
   return false;
 }
@@ -306,7 +322,7 @@ bool SystemZLongBranch::mustRelaxABranch() {
 void SystemZLongBranch::setWorstCaseAddresses() {
   SmallVector<TerminatorInfo, 16>::iterator TI = Terminators.begin();
   BlockPosition Position(MF->getAlignment());
-  for (SmallVector<MBBInfo, 16>::iterator BI = MBBs.begin(), BE = MBBs.end();
+  for (SmallVectorImpl<MBBInfo>::iterator BI = MBBs.begin(), BE = MBBs.end();
        BI != BE; ++BI) {
     skipNonTerminators(Position, *BI);
     for (unsigned BTI = 0, BTE = BI->NumTerminators; BTI != BTE; ++BTI) {
@@ -314,6 +330,23 @@ void SystemZLongBranch::setWorstCaseAddresses() {
       ++TI;
     }
   }
+}
+
+// Split MI into the comparison given by CompareOpcode followed
+// a BRCL on the result.
+void SystemZLongBranch::splitCompareBranch(MachineInstr *MI,
+                                           unsigned CompareOpcode) {
+  MachineBasicBlock *MBB = MI->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  BuildMI(*MBB, MI, DL, TII->get(CompareOpcode))
+    .addOperand(MI->getOperand(0))
+    .addOperand(MI->getOperand(1));
+  MachineInstr *BRCL = BuildMI(*MBB, MI, DL, TII->get(SystemZ::BRCL))
+    .addOperand(MI->getOperand(2))
+    .addOperand(MI->getOperand(3));
+  // The implicit use of CC is a killing use.
+  BRCL->getOperand(2).setIsKill();
+  MI->eraseFromParent();
 }
 
 // Relax the branch described by Terminator.
@@ -326,6 +359,18 @@ void SystemZLongBranch::relaxBranch(TerminatorInfo &Terminator) {
   case SystemZ::BRC:
     Branch->setDesc(TII->get(SystemZ::BRCL));
     break;
+  case SystemZ::CRJ:
+    splitCompareBranch(Branch, SystemZ::CR);
+    break;
+  case SystemZ::CGRJ:
+    splitCompareBranch(Branch, SystemZ::CGR);
+    break;
+  case SystemZ::CIJ:
+    splitCompareBranch(Branch, SystemZ::CHI);
+    break;
+  case SystemZ::CGIJ:
+    splitCompareBranch(Branch, SystemZ::CGHI);
+    break;
   default:
     llvm_unreachable("Unrecognized branch");
   }
@@ -337,15 +382,26 @@ void SystemZLongBranch::relaxBranch(TerminatorInfo &Terminator) {
   ++LongBranches;
 }
 
-// Relax any branches that need to be relaxed, under current assumptions.
+// Run a shortening pass and relax any branches that need to be relaxed.
 void SystemZLongBranch::relaxBranches() {
-  for (SmallVector<TerminatorInfo, 16>::iterator TI = Terminators.begin(),
-         TE = Terminators.end(); TI != TE; ++TI)
-    if (mustRelaxBranch(*TI))
-      relaxBranch(*TI);
+  SmallVector<TerminatorInfo, 16>::iterator TI = Terminators.begin();
+  BlockPosition Position(MF->getAlignment());
+  for (SmallVectorImpl<MBBInfo>::iterator BI = MBBs.begin(), BE = MBBs.end();
+       BI != BE; ++BI) {
+    skipNonTerminators(Position, *BI);
+    for (unsigned BTI = 0, BTE = BI->NumTerminators; BTI != BTE; ++BTI) {
+      assert(Position.Address <= TI->Address &&
+             "Addresses shouldn't go forwards");
+      if (mustRelaxBranch(*TI, Position.Address))
+        relaxBranch(*TI);
+      skipTerminator(Position, *TI, false);
+      ++TI;
+    }
+  }
 }
 
 bool SystemZLongBranch::runOnMachineFunction(MachineFunction &F) {
+  TII = static_cast<const SystemZInstrInfo *>(F.getTarget().getInstrInfo());
   MF = &F;
   uint64_t Size = initMBBInfo();
   if (Size <= MaxForwardRange || !mustRelaxABranch())

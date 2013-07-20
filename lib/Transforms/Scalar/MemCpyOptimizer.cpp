@@ -465,7 +465,7 @@ Instruction *MemCpyOpt::tryMergingIntoMemset(Instruction *StartInst,
       AMemSet->setDebugLoc(Range.TheStores[0]->getDebugLoc());
 
     // Zap all the stores.
-    for (SmallVector<Instruction*, 16>::const_iterator
+    for (SmallVectorImpl<Instruction *>::const_iterator
          SI = Range.TheStores.begin(),
          SE = Range.TheStores.end(); SI != SE; ++SI) {
       MD->removeInstruction(*SI);
@@ -626,8 +626,14 @@ bool MemCpyOpt::performCallSlotOptzn(Instruction *cpy,
       return false;
 
     Type *StructTy = cast<PointerType>(A->getType())->getElementType();
-    uint64_t destSize = TD->getTypeAllocSize(StructTy);
+    if (!StructTy->isSized()) {
+      // The call may never return and hence the copy-instruction may never
+      // be executed, and therefore it's not safe to say "the destination
+      // has at least <cpyLen> bytes, as implied by the copy-instruction",
+      return false;
+    }
 
+    uint64_t destSize = TD->getTypeAllocSize(StructTy);
     if (destSize < srcSize)
       return false;
   } else {

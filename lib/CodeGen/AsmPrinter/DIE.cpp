@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "DIE.h"
+#include "DwarfDebug.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/IR/DataLayout.h"
@@ -55,11 +56,9 @@ void DIEAbbrev::Profile(FoldingSetNodeID &ID) const {
 ///
 void DIEAbbrev::Emit(AsmPrinter *AP) const {
   // Emit its Dwarf tag type.
-  // FIXME: Doing work even in non-asm-verbose runs.
   AP->EmitULEB128(Tag, dwarf::TagString(Tag));
 
   // Emit whether it has children DIEs.
-  // FIXME: Doing work even in non-asm-verbose runs.
   AP->EmitULEB128(ChildrenFlag, dwarf::ChildrenString(ChildrenFlag));
 
   // For each attribute description.
@@ -67,12 +66,10 @@ void DIEAbbrev::Emit(AsmPrinter *AP) const {
     const DIEAbbrevData &AttrData = Data[i];
 
     // Emit attribute type.
-    // FIXME: Doing work even in non-asm-verbose runs.
     AP->EmitULEB128(AttrData.getAttribute(),
                     dwarf::AttributeString(AttrData.getAttribute()));
 
     // Emit form type.
-    // FIXME: Doing work even in non-asm-verbose runs.
     AP->EmitULEB128(AttrData.getForm(),
                     dwarf::FormEncodingString(AttrData.getForm()));
   }
@@ -178,7 +175,7 @@ void DIE::dump() {
 void DIEValue::anchor() { }
 
 #ifndef NDEBUG
-void DIEValue::dump() {
+void DIEValue::dump() const {
   print(dbgs());
 }
 #endif
@@ -244,9 +241,35 @@ unsigned DIEInteger::SizeOf(AsmPrinter *AP, unsigned Form) const {
 }
 
 #ifndef NDEBUG
-void DIEInteger::print(raw_ostream &O) {
+void DIEInteger::print(raw_ostream &O) const {
   O << "Int: " << (int64_t)Integer << "  0x";
   O.write_hex(Integer);
+}
+#endif
+
+//===----------------------------------------------------------------------===//
+// DIEExpr Implementation
+//===----------------------------------------------------------------------===//
+
+/// EmitValue - Emit expression value.
+///
+void DIEExpr::EmitValue(AsmPrinter *AP, unsigned Form) const {
+  AP->OutStreamer.EmitValue(Expr, SizeOf(AP, Form));
+}
+
+/// SizeOf - Determine size of expression value in bytes.
+///
+unsigned DIEExpr::SizeOf(AsmPrinter *AP, unsigned Form) const {
+  if (Form == dwarf::DW_FORM_data4) return 4;
+  if (Form == dwarf::DW_FORM_sec_offset) return 4;
+  if (Form == dwarf::DW_FORM_strp) return 4;
+  return AP->getDataLayout().getPointerSize();
+}
+
+#ifndef NDEBUG
+void DIEExpr::print(raw_ostream &O) const {
+  O << "Expr: ";
+  Expr->print(O);
 }
 #endif
 
@@ -257,7 +280,7 @@ void DIEInteger::print(raw_ostream &O) {
 /// EmitValue - Emit label value.
 ///
 void DIELabel::EmitValue(AsmPrinter *AP, unsigned Form) const {
-  AP->OutStreamer.EmitSymbolValue(Label, SizeOf(AP, Form));
+  AP->EmitLabelReference(Label, SizeOf(AP, Form));
 }
 
 /// SizeOf - Determine size of label value in bytes.
@@ -270,7 +293,7 @@ unsigned DIELabel::SizeOf(AsmPrinter *AP, unsigned Form) const {
 }
 
 #ifndef NDEBUG
-void DIELabel::print(raw_ostream &O) {
+void DIELabel::print(raw_ostream &O) const {
   O << "Lbl: " << Label->getName();
 }
 #endif
@@ -294,7 +317,7 @@ unsigned DIEDelta::SizeOf(AsmPrinter *AP, unsigned Form) const {
 }
 
 #ifndef NDEBUG
-void DIEDelta::print(raw_ostream &O) {
+void DIEDelta::print(raw_ostream &O) const {
   O << "Del: " << LabelHi->getName() << "-" << LabelLo->getName();
 }
 #endif
@@ -309,8 +332,18 @@ void DIEEntry::EmitValue(AsmPrinter *AP, unsigned Form) const {
   AP->EmitInt32(Entry->getOffset());
 }
 
+unsigned DIEEntry::getRefAddrSize(AsmPrinter *AP) {
+  // DWARF4: References that use the attribute form DW_FORM_ref_addr are
+  // specified to be four bytes in the DWARF 32-bit format and eight bytes
+  // in the DWARF 64-bit format, while DWARF Version 2 specifies that such
+  // references have the same size as an address on the target system.
+  if (AP->getDwarfDebug()->getDwarfVersion() == 2)
+    return AP->getDataLayout().getPointerSize();
+  return sizeof(int32_t);
+}
+
 #ifndef NDEBUG
-void DIEEntry::print(raw_ostream &O) {
+void DIEEntry::print(raw_ostream &O) const {
   O << format("Die: 0x%lx", (long)(intptr_t)Entry);
 }
 #endif
@@ -360,7 +393,7 @@ unsigned DIEBlock::SizeOf(AsmPrinter *AP, unsigned Form) const {
 }
 
 #ifndef NDEBUG
-void DIEBlock::print(raw_ostream &O) {
+void DIEBlock::print(raw_ostream &O) const {
   O << "Blk: ";
   DIE::print(O, 5);
 }

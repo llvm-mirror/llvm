@@ -198,6 +198,10 @@ private:
                     const char *Modifier = 0);
   void printLdStCode(const MachineInstr *MI, int opNum, raw_ostream &O,
                      const char *Modifier = 0);
+  void printCvtMode(const MachineInstr *MI, int OpNum, raw_ostream &O,
+                    const char *Modifier = 0);
+  void printCmpMode(const MachineInstr *MI, int OpNum, raw_ostream &O,
+                    const char *Modifier = 0);
   void printVecModifiedImmediate(const MachineOperand &MO, const char *Modifier,
                                  raw_ostream &O);
   void printMemOperand(const MachineInstr *MI, int opNum, raw_ostream &O,
@@ -243,7 +247,9 @@ private:
   // The contents are specific for each
   // MachineFunction. But the size of the
   // array is not.
-  std::map<unsigned, unsigned> *VRidGlobal2LocalMap;
+  typedef DenseMap<unsigned, unsigned> VRegMap;
+  typedef DenseMap<const TargetRegisterClass *, VRegMap> VRegRCMap;
+  VRegRCMap VRegMapping;
   // cache the subtarget here.
   const NVPTXSubtarget &nvptxSubtarget;
   // Build the map between type name and ID based on module's type
@@ -281,7 +287,6 @@ public:
       : AsmPrinter(TM, Streamer),
         nvptxSubtarget(TM.getSubtarget<NVPTXSubtarget>()) {
     CurrentBankselLabelInBasicBlock = "";
-    VRidGlobal2LocalMap = NULL;
     reader = NULL;
   }
 

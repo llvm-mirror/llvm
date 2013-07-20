@@ -30,6 +30,7 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -129,8 +130,10 @@ bool LTOCodeGenerator::writeMergedModules(const char *path,
   if (determineTarget(errMsg))
     return true;
 
-  // mark which symbols can not be internalized
-  applyScopeRestrictions();
+  // Run the verifier on the merged modules.
+  PassManager passes;
+  passes.add(createVerifierPass());
+  passes.run(*_linker.getModule());
 
   // create output file
   std::string ErrInfo;
@@ -159,36 +162,32 @@ bool LTOCodeGenerator::writeMergedModules(const char *path,
 
 bool LTOCodeGenerator::compile_to_file(const char** name, std::string& errMsg) {
   // make unique temp .o file to put generated object file
-  sys::PathWithStatus uniqueObjPath("lto-llvm.o");
-  if (uniqueObjPath.createTemporaryFileOnDisk(false, &errMsg)) {
-    uniqueObjPath.eraseFromDisk();
+  SmallString<128> Filename;
+  int FD;
+  error_code EC = sys::fs::createTemporaryFile("lto-llvm", "o", FD, Filename);
+  if (EC) {
+    errMsg = EC.message();
     return true;
   }
-  sys::RemoveFileOnSignal(uniqueObjPath);
 
   // generate object file
-  bool genResult = false;
-  tool_output_file objFile(uniqueObjPath.c_str(), errMsg);
-  if (!errMsg.empty()) {
-    uniqueObjPath.eraseFromDisk();
-    return true;
-  }
+  tool_output_file objFile(Filename.c_str(), FD);
 
-  genResult = this->generateObjectFile(objFile.os(), errMsg);
+  bool genResult = generateObjectFile(objFile.os(), errMsg);
   objFile.os().close();
   if (objFile.os().has_error()) {
     objFile.os().clear_error();
-    uniqueObjPath.eraseFromDisk();
+    sys::fs::remove(Twine(Filename));
     return true;
   }
 
   objFile.keep();
   if (genResult) {
-    uniqueObjPath.eraseFromDisk();
+    sys::fs::remove(Twine(Filename));
     return true;
   }
 
-  _nativeObjectPath = uniqueObjPath.str();
+  _nativeObjectPath = Filename.c_str();
   *name = _nativeObjectPath.c_str();
   return false;
 }
@@ -205,13 +204,13 @@ const void* LTOCodeGenerator::compile(size_t* length, std::string& errMsg) {
   OwningPtr<MemoryBuffer> BuffPtr;
   if (error_code ec = MemoryBuffer::getFile(name, BuffPtr, -1, false)) {
     errMsg = ec.message();
-    sys::Path(_nativeObjectPath).eraseFromDisk();
+    sys::fs::remove(_nativeObjectPath);
     return NULL;
   }
   _nativeObjectFile = BuffPtr.take();
 
   // remove temp files
-  sys::Path(_nativeObjectPath).eraseFromDisk();
+  sys::fs::remove(_nativeObjectPath);
 
   // return buffer, unless error
   if (_nativeObjectFile == NULL)
@@ -220,9 +219,14 @@ const void* LTOCodeGenerator::compile(size_t* length, std::string& errMsg) {
   return _nativeObjectFile->getBufferStart();
 }
 
-bool LTOCodeGenerator::determineTarget(std::string& errMsg) {
+bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
   if (_target != NULL)
     return false;
+
+  // if options were requested, set them
+  if (!_codegenOptions.empty())
+    cl::ParseCommandLineOptions(_codegenOptions.size(),
+                                const_cast<char **>(&_codegenOptions[0]));
 
   std::string TripleStr = _linker.getModule()->getTargetTriple();
   if (TripleStr.empty())
@@ -304,8 +308,8 @@ void LTOCodeGenerator::applyScopeRestrictions() {
   passes.add(createVerifierPass());
 
   // mark which symbols can not be internalized
-  MCContext Context(*_target->getMCAsmInfo(), *_target->getRegisterInfo(),NULL);
-  Mangler mangler(Context, *_target->getDataLayout());
+  MCContext Context(_target->getMCAsmInfo(), _target->getRegisterInfo(), NULL);
+  Mangler mangler(Context, _target);
   std::vector<const char*> mustPreserveList;
   SmallPtrSet<GlobalValue*, 8> asmUsed;
 
@@ -361,12 +365,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
 
   Module* mergedModule = _linker.getModule();
 
-  // if options were requested, set them
-  if (!_codegenOptions.empty())
-    cl::ParseCommandLineOptions(_codegenOptions.size(),
-                                const_cast<char **>(&_codegenOptions[0]));
-
-  // mark which symbols can not be internalized
+  // Mark which symbols can not be internalized
   this->applyScopeRestrictions();
 
   // Instantiate the pass manager to organize the passes.
@@ -382,12 +381,11 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   // Enabling internalize here would use its AllButMain variant. It
   // keeps only main if it exists and does nothing for libraries. Instead
   // we create the pass ourselves with the symbol list provided by the linker.
-  if (!DisableOpt) {
+  if (!DisableOpt)
     PassManagerBuilder().populateLTOPassManager(passes,
                                               /*Internalize=*/false,
                                               !DisableInline,
                                               DisableGVNLoadPRE);
-  }
 
   // Make sure everything is still good.
   passes.add(createVerifierPass());

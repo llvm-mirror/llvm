@@ -338,6 +338,13 @@ bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
             CI->getDestTy()->getScalarType()->isIntegerTy(64))
           ))
         return true;
+    } else if (TT.isArch32Bit() &&
+               J->getType()->getScalarType()->isIntegerTy(64) &&
+               (J->getOpcode() == Instruction::UDiv ||
+                J->getOpcode() == Instruction::SDiv ||
+                J->getOpcode() == Instruction::URem ||
+                J->getOpcode() == Instruction::SRem)) {
+      return true;
     } else if (isa<IndirectBrInst>(J) || isa<InvokeInst>(J)) {
       // On PowerPC, indirect jumps use the counter register.
       return true;
@@ -395,7 +402,7 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
   BasicBlock *CountedExitBlock = 0;
   const SCEV *ExitCount = 0;
   BranchInst *CountedExitBranch = 0;
-  for (SmallVector<BasicBlock*, 4>::iterator I = ExitingBlocks.begin(),
+  for (SmallVectorImpl<BasicBlock *>::iterator I = ExitingBlocks.begin(),
        IE = ExitingBlocks.end(); I != IE; ++I) {
     const SCEV *EC = SE->getExitCount(L, *I);
     DEBUG(dbgs() << "Exit Count for " << *L << " from block " <<
@@ -406,6 +413,9 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
       if (ConstEC->getValue()->isZero())
         continue;
     } else if (!SE->isLoopInvariant(EC, L))
+      continue;
+
+    if (SE->getTypeSizeInBits(EC->getType()) > (TT.isArch64Bit() ? 64 : 32))
       continue;
 
     // We now have a loop-invariant count of loop iterations (which is not the

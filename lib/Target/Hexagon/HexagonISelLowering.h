@@ -106,7 +106,7 @@ namespace llvm {
     SDValue LowerFormalArguments(SDValue Chain,
                                  CallingConv::ID CallConv, bool isVarArg,
                                  const SmallVectorImpl<ISD::InputArg> &Ins,
-                                 DebugLoc dl, SelectionDAG &DAG,
+                                 SDLoc dl, SelectionDAG &DAG,
                                  SmallVectorImpl<SDValue> &InVals) const;
     SDValue LowerGLOBALADDRESS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -117,7 +117,7 @@ namespace llvm {
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
                             const SmallVectorImpl<ISD::InputArg> &Ins,
-                            DebugLoc dl, SelectionDAG &DAG,
+                            SDLoc dl, SelectionDAG &DAG,
                             SmallVectorImpl<SDValue> &InVals,
                             const SmallVectorImpl<SDValue> &OutVals,
                             SDValue Callee) const;
@@ -131,7 +131,7 @@ namespace llvm {
                         CallingConv::ID CallConv, bool isVarArg,
                         const SmallVectorImpl<ISD::OutputArg> &Outs,
                         const SmallVectorImpl<SDValue> &OutVals,
-                        DebugLoc dl, SelectionDAG &DAG) const;
+                        SDLoc dl, SelectionDAG &DAG) const;
 
     virtual MachineBasicBlock
     *EmitInstrWithCustomInserter(MachineInstr *MI,
@@ -150,7 +150,7 @@ namespace llvm {
 
     std::pair<unsigned, const TargetRegisterClass*>
     getRegForInlineAsmConstraint(const std::string &Constraint,
-                                 EVT VT) const;
+                                 MVT VT) const;
 
     // Intrinsics
     virtual SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op,

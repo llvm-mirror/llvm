@@ -121,6 +121,8 @@ namespace llvm {
   public:
     virtual ~AsmPrinter();
 
+    const DwarfDebug *getDwarfDebug() const { return DD; }
+
     /// isVerbose - Return true if assembly output should contain comments.
     ///
     bool isVerbose() const { return VerboseAsm; }
@@ -233,8 +235,8 @@ namespace llvm {
     /// it if appropriate.
     void EmitBasicBlockStart(const MachineBasicBlock *MBB) const;
 
-    /// EmitGlobalConstant - Print a general LLVM constant to the .s file.
-    void EmitGlobalConstant(const Constant *CV, unsigned AddrSpace = 0);
+    /// \brief Print a general LLVM constant to the .s file.
+    void EmitGlobalConstant(const Constant *CV);
 
 
     //===------------------------------------------------------------------===//
@@ -371,10 +373,10 @@ namespace llvm {
     //===------------------------------------------------------------------===//
 
     /// EmitSLEB128 - emit the specified signed leb128 value.
-    void EmitSLEB128(int Value, const char *Desc = 0) const;
+    void EmitSLEB128(int64_t Value, const char *Desc = 0) const;
 
     /// EmitULEB128 - emit the specified unsigned leb128 value.
-    void EmitULEB128(unsigned Value, const char *Desc = 0,
+    void EmitULEB128(uint64_t Value, const char *Desc = 0,
                      unsigned PadTo = 0) const;
 
     /// EmitCFAByte - Emit a .byte 42 directive for a DW_CFA_xxx value.
@@ -402,16 +404,13 @@ namespace llvm {
     void EmitSectionOffset(const MCSymbol *Label,
                            const MCSymbol *SectionLabel) const;
 
-    /// getDebugValueLocation - Get location information encoded by DBG_VALUE
-    /// operands.
-    virtual MachineLocation getDebugValueLocation(const MachineInstr *MI) const;
-
     /// getISAEncoding - Get the value for DW_AT_APPLE_isa. Zero if no isa
     /// encoding specified.
     virtual unsigned getISAEncoding() { return 0; }
 
     /// EmitDwarfRegOp - Emit dwarf register operation.
-    virtual void EmitDwarfRegOp(const MachineLocation &MLoc) const;
+    virtual void EmitDwarfRegOp(const MachineLocation &MLoc,
+                                bool Indirect) const;
 
     //===------------------------------------------------------------------===//
     // Dwarf Lowering Routines

@@ -41,6 +41,10 @@ class LLVM_LIBRARY_VISIBILITY NVPTXDAGToDAGISel : public SelectionDAGISel {
   //    Otherwise, use div.full
   int do_DIVF32_PREC;
 
+  // If true, generate sqrt.rn, else generate sqrt.approx. If FTZ
+  // is true, then generate the corresponding FTZ version.
+  bool do_SQRTF32_PREC;
+
   // If true, add .ftz to f32 instructions.
   // This is only meaningful for sm_20 and later, as the default
   // is not ftz.
@@ -76,7 +80,10 @@ private:
   SDNode *SelectLDGLDUVector(SDNode *N);
   SDNode *SelectStore(SDNode *N);
   SDNode *SelectStoreVector(SDNode *N);
-
+  SDNode *SelectLoadParam(SDNode *N);
+  SDNode *SelectStoreRetval(SDNode *N);
+  SDNode *SelectStoreParam(SDNode *N);
+        
   inline SDValue getI32Imm(unsigned Imm) {
     return CurDAG->getTargetConstant(Imm, MVT::i32);
   }

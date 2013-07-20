@@ -222,10 +222,15 @@ AC_CACHE_CHECK([type of operating system we're going to host on],
     llvm_cv_no_link_all_option="-Wl,-noall_load"
     llvm_cv_os_type="Minix"
     llvm_cv_platform_type="Unix" ;;
-  *-*-freebsd* | *-*-kfreebsd-gnu)
+  *-*-freebsd*)
     llvm_cv_link_all_option="-Wl,--whole-archive"
     llvm_cv_no_link_all_option="-Wl,--no-whole-archive"
     llvm_cv_os_type="FreeBSD"
+    llvm_cv_platform_type="Unix" ;;
+  *-*-kfreebsd-gnu)
+    llvm_cv_link_all_option="-Wl,--whole-archive"
+    llvm_cv_no_link_all_option="-Wl,--no-whole-archive"
+    llvm_cv_os_type="GNU/kFreeBSD"
     llvm_cv_platform_type="Unix" ;;
   *-*-openbsd*)
     llvm_cv_link_all_option="-Wl,--whole-archive"
@@ -317,8 +322,10 @@ AC_CACHE_CHECK([type of operating system we're going to target],
     llvm_cv_target_os_type="Darwin" ;;
   *-*-minix*)
     llvm_cv_target_os_type="Minix" ;;
-  *-*-freebsd* | *-*-kfreebsd-gnu)
+  *-*-freebsd*)
     llvm_cv_target_os_type="FreeBSD" ;;
+  *-*-kfreebsd-gnu)
+    llvm_cv_target_os_type="GNU/kFreeBSD" ;;
   *-*-openbsd*)
     llvm_cv_target_os_type="OpenBSD" ;;
   *-*-netbsd*)
@@ -508,6 +515,19 @@ case "$enableval" in
   no)  AC_SUBST(ENABLE_CXX11,[0]) ;;
   default) AC_SUBST(ENABLE_CXX11,[0]);;
   *) AC_MSG_ERROR([Invalid setting for --enable-cxx11. Use "yes" or "no"]) ;;
+esac
+
+dnl --enable-fission : check whether or not to use -gsplit-dwarf on the command
+dnl line
+AC_ARG_ENABLE(split-dwarf,
+              AS_HELP_STRING([--enable-split-dwarf],
+                             [Use split-dwarf if available (default is NO)]),,
+                             enableval=default)
+case "$enableval" in
+  yes) AC_SUBST(ENABLE_SPLIT_DWARF,[1]) ;;
+  no)  AC_SUBST(ENABLE_SPLIT_DWARF,[0]) ;;
+  default) AC_SUBST(ENABLE_SPLIT_DWARF,[0]);;
+  *) AC_MSG_ERROR([Invalid setting for --enable-split-dwarf. Use "yes" or "no"]) ;;
 esac
 
 dnl --enable-clang-arcmt: check whether to enable clang arcmt
@@ -798,13 +818,13 @@ TARGETS_TO_BUILD=""
 AC_ARG_ENABLE([targets],AS_HELP_STRING([--enable-targets],
     [Build specific host targets: all or target1,target2,... Valid targets are:
      host, x86, x86_64, sparc, powerpc, arm, aarch64, mips, hexagon,
-     xcore, msp430, nvptx, systemz, and cpp (default=all)]),,
+     xcore, msp430, nvptx, systemz, r600, and cpp (default=all)]),,
     enableval=all)
 if test "$enableval" = host-only ; then
   enableval=host
 fi
 case "$enableval" in
-  all) TARGETS_TO_BUILD="X86 Sparc PowerPC AArch64 ARM Mips XCore MSP430 CppBackend MBlaze NVPTX Hexagon SystemZ" ;;
+  all) TARGETS_TO_BUILD="X86 Sparc PowerPC AArch64 ARM Mips XCore MSP430 CppBackend MBlaze NVPTX Hexagon SystemZ R600" ;;
   *)for a_target in `echo $enableval|sed -e 's/,/ /g' ` ; do
       case "$a_target" in
         x86)      TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
@@ -824,6 +844,7 @@ case "$enableval" in
         mblaze)   TARGETS_TO_BUILD="MBlaze $TARGETS_TO_BUILD" ;;
         nvptx)    TARGETS_TO_BUILD="NVPTX $TARGETS_TO_BUILD" ;;
         systemz)  TARGETS_TO_BUILD="SystemZ $TARGETS_TO_BUILD" ;;
+        r600)     TARGETS_TO_BUILD="R600 $TARGETS_TO_BUILD" ;;
         host) case "$llvm_cv_target_arch" in
             x86)         TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
             x86_64)      TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
@@ -1179,15 +1200,15 @@ if test "$DOTTY" != "echo dotty" ; then
   AC_DEFINE_UNQUOTED([LLVM_PATH_DOTTY],"$DOTTY${EXEEXT}",
    [Define to path to dotty program if found or 'echo dotty' otherwise])
 fi
-AC_PATH_PROG(XDOT_PY, [xdot.py], [echo xdot.py])
-if test "$XDOT_PY" != "echo xdot.py" ; then
-  AC_DEFINE([HAVE_XDOT_PY],[1],[Define if the xdot.py program is available])
+AC_PATH_PROGS(XDOT, [xdot xdot.py], [echo xdot])
+if test "$XDOT" != "echo xdot" ; then
+  AC_DEFINE([HAVE_XDOT],[1],[Define if the xdot program is available])
   dnl If we're targeting for mingw we should emit windows paths, not msys
   if test "$llvm_cv_os_type" = "MingW" ; then
-    XDOT_PY=`echo $XDOT_PY | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
+    XDOT=`echo $XDOT | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
   fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_XDOT_PY],"$XDOT_PY${EXEEXT}",
-   [Define to path to xdot.py program if found or 'echo xdot.py' otherwise])
+  AC_DEFINE_UNQUOTED([LLVM_PATH_XDOT],"$XDOT${EXEEXT}",
+   [Define to path to xdot program if found or 'echo xdot' otherwise])
 fi
 
 dnl Find the install program
@@ -1598,6 +1619,7 @@ AC_CHECK_FUNCS([mktemp posix_spawn pread realpath sbrk setrlimit strdup ])
 AC_CHECK_FUNCS([strerror strerror_r setenv arc4random ])
 AC_CHECK_FUNCS([strtoll strtoq sysconf malloc_zone_statistics ])
 AC_CHECK_FUNCS([setjmp longjmp sigsetjmp siglongjmp writev])
+AC_CHECK_FUNCS([futimes futimens])
 AC_C_PRINTF_A
 AC_FUNC_RAND48
 
@@ -1736,7 +1758,6 @@ if test "${prefix}" = "NONE" ; then
 fi
 eval LLVM_PREFIX="${prefix}";
 eval LLVM_BINDIR="${prefix}/bin";
-eval LLVM_LIBDIR="${prefix}/lib";
 eval LLVM_DATADIR="${prefix}/share/llvm";
 eval LLVM_DOCSDIR="${prefix}/share/doc/llvm";
 eval LLVM_ETCDIR="${prefix}/etc/llvm";
@@ -1746,7 +1767,6 @@ eval LLVM_MANDIR="${prefix}/man";
 LLVM_CONFIGTIME=`date`
 AC_SUBST(LLVM_PREFIX)
 AC_SUBST(LLVM_BINDIR)
-AC_SUBST(LLVM_LIBDIR)
 AC_SUBST(LLVM_DATADIR)
 AC_SUBST(LLVM_DOCSDIR)
 AC_SUBST(LLVM_ETCDIR)
@@ -1766,8 +1786,6 @@ AC_DEFINE_UNQUOTED(LLVM_PREFIX,"$LLVM_PREFIX",
                    [Installation prefix directory])
 AC_DEFINE_UNQUOTED(LLVM_BINDIR, "$LLVM_BINDIR",
                    [Installation directory for binary executables])
-AC_DEFINE_UNQUOTED(LLVM_LIBDIR, "$LLVM_LIBDIR",
-                   [Installation directory for libraries])
 AC_DEFINE_UNQUOTED(LLVM_DATADIR, "$LLVM_DATADIR",
                    [Installation directory for data files])
 AC_DEFINE_UNQUOTED(LLVM_DOCSDIR, "$LLVM_DOCSDIR",
@@ -1827,7 +1845,7 @@ for a_binding in $BINDINGS_TO_BUILD ; do
         AC_SUBST(OCAML_LIBDIR,$ocaml_stdlib)
       else
         # ocaml stdlib is outside our prefix; use libdir/ocaml
-        AC_SUBST(OCAML_LIBDIR,$LLVM_LIBDIR/ocaml)
+        AC_SUBST(OCAML_LIBDIR,${prefix}/lib/ocaml)
       fi
     fi
     ;;

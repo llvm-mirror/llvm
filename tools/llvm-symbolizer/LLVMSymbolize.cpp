@@ -15,6 +15,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 
 #include <sstream>
@@ -63,15 +64,23 @@ ModuleInfo::ModuleInfo(ObjectFile *Obj, DIContext *DICtx)
         SymbolAddress == UnknownAddressOrSize)
       continue;
     uint64_t SymbolSize;
-    if (error(si->getSize(SymbolSize)) || SymbolSize == UnknownAddressOrSize)
+    // Getting symbol size is linear for Mach-O files, so assume that symbol
+    // occupies the memory range up to the following symbol.
+    if (isa<MachOObjectFile>(Obj))
+      SymbolSize = 0;
+    else if (error(si->getSize(SymbolSize)) ||
+             SymbolSize == UnknownAddressOrSize)
       continue;
     StringRef SymbolName;
     if (error(si->getName(SymbolName)))
       continue;
+    // Mach-O symbol table names have leading underscore, skip it.
+    if (Module->isMachO() && SymbolName.size() > 0 && SymbolName[0] == '_')
+      SymbolName = SymbolName.drop_front();
     // FIXME: If a function has alias, there are two entries in symbol table
     // with same address size. Make sure we choose the correct one.
     SymbolMapTy &M = SymbolType == SymbolRef::ST_Function ? Functions : Objects;
-    SymbolDesc SD = { SymbolAddress, SymbolAddress + SymbolSize };
+    SymbolDesc SD = { SymbolAddress, SymbolSize };
     M.insert(std::make_pair(SD, SymbolName));
   }
 }
@@ -80,15 +89,18 @@ bool ModuleInfo::getNameFromSymbolTable(SymbolRef::Type Type, uint64_t Address,
                                         std::string &Name, uint64_t &Addr,
                                         uint64_t &Size) const {
   const SymbolMapTy &M = Type == SymbolRef::ST_Function ? Functions : Objects;
-  SymbolDesc SD = { Address, Address + 1 };
-  SymbolMapTy::const_iterator it = M.find(SD);
-  if (it == M.end())
+  if (M.empty())
     return false;
-  if (Address < it->first.Addr || Address >= it->first.AddrEnd)
+  SymbolDesc SD = { Address, Address };
+  SymbolMapTy::const_iterator it = M.upper_bound(SD);
+  if (it == M.begin())
+    return false;
+  --it;
+  if (it->first.Size != 0 && it->first.Addr + it->first.Size <= Address)
     return false;
   Name = it->second.str();
   Addr = it->first.Addr;
-  Size = it->first.AddrEnd - it->first.Addr;
+  Size = it->first.Size;
   return true;
 }
 
@@ -178,8 +190,8 @@ std::string LLVMSymbolizer::symbolizeData(const std::string &ModuleName,
   uint64_t Size = 0;
   if (Opts.UseSymbolTable) {
     if (ModuleInfo *Info = getOrCreateModuleInfo(ModuleName)) {
-      if (Info->symbolizeData(ModuleOffset, Name, Start, Size))
-        DemangleName(Name);
+      if (Info->symbolizeData(ModuleOffset, Name, Start, Size) && Opts.Demangle)
+        Name = DemangleName(Name);
     }
   }
   std::stringstream ss;
@@ -189,23 +201,12 @@ std::string LLVMSymbolizer::symbolizeData(const std::string &ModuleName,
 
 void LLVMSymbolizer::flush() {
   DeleteContainerSeconds(Modules);
+  DeleteContainerPointers(ParsedBinariesAndObjects);
+  BinaryForPath.clear();
+  ObjectFileForArch.clear();
 }
 
-// Returns true if the object endianness is known.
-static bool getObjectEndianness(const ObjectFile *Obj, bool &IsLittleEndian) {
-  // FIXME: Implement this when libLLVMObject allows to do it easily.
-  IsLittleEndian = true;
-  return true;
-}
-
-static ObjectFile *getObjectFile(const std::string &Path) {
-  OwningPtr<MemoryBuffer> Buff;
-  if (error_code ec = MemoryBuffer::getFile(Path, Buff))
-    error(ec);
-  return ObjectFile::createObjectFile(Buff.take());
-}
-
-static std::string getDarwinDWARFResourceForModule(const std::string &Path) {
+static std::string getDarwinDWARFResourceForPath(const std::string &Path) {
   StringRef Basename = sys::path::filename(Path);
   const std::string &DSymDirectory = Path + ".dSYM";
   SmallString<16> ResourceName = StringRef(DSymDirectory);
@@ -214,36 +215,90 @@ static std::string getDarwinDWARFResourceForModule(const std::string &Path) {
   return ResourceName.str();
 }
 
+LLVMSymbolizer::BinaryPair
+LLVMSymbolizer::getOrCreateBinary(const std::string &Path) {
+  BinaryMapTy::iterator I = BinaryForPath.find(Path);
+  if (I != BinaryForPath.end())
+    return I->second;
+  Binary *Bin = 0;
+  Binary *DbgBin = 0;
+  OwningPtr<Binary> ParsedBinary;
+  OwningPtr<Binary> ParsedDbgBinary;
+  if (!error(createBinary(Path, ParsedBinary))) {
+    // Check if it's a universal binary.
+    Bin = ParsedBinary.take();
+    ParsedBinariesAndObjects.push_back(Bin);
+    if (Bin->isMachO() || Bin->isMachOUniversalBinary()) {
+      // On Darwin we may find DWARF in separate object file in
+      // resource directory.
+      const std::string &ResourcePath =
+          getDarwinDWARFResourceForPath(Path);
+      bool ResourceFileExists = false;
+      if (!sys::fs::exists(ResourcePath, ResourceFileExists) &&
+          ResourceFileExists &&
+          !error(createBinary(ResourcePath, ParsedDbgBinary))) {
+        DbgBin = ParsedDbgBinary.take();
+        ParsedBinariesAndObjects.push_back(DbgBin);
+      }
+    }
+  }
+  if (DbgBin == 0)
+    DbgBin = Bin;
+  BinaryPair Res = std::make_pair(Bin, DbgBin);
+  BinaryForPath[Path] = Res;
+  return Res;
+}
+
+ObjectFile *
+LLVMSymbolizer::getObjectFileFromBinary(Binary *Bin, const std::string &ArchName) {
+  if (Bin == 0)
+    return 0;
+  ObjectFile *Res = 0;
+  if (MachOUniversalBinary *UB = dyn_cast<MachOUniversalBinary>(Bin)) {
+    ObjectFileForArchMapTy::iterator I = ObjectFileForArch.find(
+        std::make_pair(UB, ArchName));
+    if (I != ObjectFileForArch.end())
+      return I->second;
+    OwningPtr<ObjectFile> ParsedObj;
+    if (!UB->getObjectForArch(Triple(ArchName).getArch(), ParsedObj)) {
+      Res = ParsedObj.take();
+      ParsedBinariesAndObjects.push_back(Res);
+    }
+    ObjectFileForArch[std::make_pair(UB, ArchName)] = Res;
+  } else if (Bin->isObject()) {
+    Res = cast<ObjectFile>(Bin);
+  }
+  return Res;
+}
+
 ModuleInfo *
 LLVMSymbolizer::getOrCreateModuleInfo(const std::string &ModuleName) {
   ModuleMapTy::iterator I = Modules.find(ModuleName);
   if (I != Modules.end())
     return I->second;
+  std::string BinaryName = ModuleName;
+  std::string ArchName = Opts.DefaultArch;
+  size_t ColonPos = ModuleName.find(':');
+#if defined(_WIN32)
+  // Recognize a drive letter on win32.
+  if (ColonPos == 1 && isalpha(ModuleName[0]))
+    ColonPos = ModuleName.find(':', 2);
+#endif
+  if (ColonPos != std::string::npos) {
+    BinaryName = ModuleName.substr(0, ColonPos);
+    ArchName = ModuleName.substr(ColonPos + 1);
+  }
+  BinaryPair Binaries = getOrCreateBinary(BinaryName);
+  ObjectFile *Obj = getObjectFileFromBinary(Binaries.first, ArchName);
+  ObjectFile *DbgObj = getObjectFileFromBinary(Binaries.second, ArchName);
 
-  ObjectFile *Obj = getObjectFile(ModuleName);
   if (Obj == 0) {
-    // Module name doesn't point to a valid object file.
+    // Failed to find valid object file.
     Modules.insert(make_pair(ModuleName, (ModuleInfo *)0));
     return 0;
   }
-
-  DIContext *Context = 0;
-  bool IsLittleEndian;
-  if (getObjectEndianness(Obj, IsLittleEndian)) {
-    // On Darwin we may find DWARF in separate object file in
-    // resource directory.
-    ObjectFile *DbgObj = Obj;
-    if (isa<MachOObjectFile>(Obj)) {
-      const std::string &ResourceName =
-          getDarwinDWARFResourceForModule(ModuleName);
-      ObjectFile *ResourceObj = getObjectFile(ResourceName);
-      if (ResourceObj != 0)
-        DbgObj = ResourceObj;
-    }
-    Context = DIContext::getDWARFContext(DbgObj);
-    assert(Context);
-  }
-
+  DIContext *Context = DIContext::getDWARFContext(DbgObj);
+  assert(Context);
   ModuleInfo *Info = new ModuleInfo(Obj, Context);
   Modules.insert(make_pair(ModuleName, Info));
   return Info;
@@ -258,7 +313,8 @@ std::string LLVMSymbolizer::printDILineInfo(DILineInfo LineInfo) const {
     std::string FunctionName = LineInfo.getFunctionName();
     if (FunctionName == kDILineInfoBadString)
       FunctionName = kBadString;
-    DemangleName(FunctionName);
+    else if (Opts.Demangle)
+      FunctionName = DemangleName(FunctionName);
     Result << FunctionName << "\n";
   }
   std::string Filename = LineInfo.getFileName();
@@ -275,16 +331,17 @@ extern "C" char *__cxa_demangle(const char *mangled_name, char *output_buffer,
                                 size_t *length, int *status);
 #endif
 
-void LLVMSymbolizer::DemangleName(std::string &Name) const {
+std::string LLVMSymbolizer::DemangleName(const std::string &Name) {
 #if !defined(_MSC_VER)
-  if (!Opts.Demangle)
-    return;
   int status = 0;
   char *DemangledName = __cxa_demangle(Name.c_str(), 0, 0, &status);
   if (status != 0)
-    return;
-  Name = DemangledName;
+    return Name;
+  std::string Result = DemangledName;
   free(DemangledName);
+  return Result;
+#else
+  return Name;
 #endif
 }
 

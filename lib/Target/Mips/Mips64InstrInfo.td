@@ -131,17 +131,17 @@ let Predicates = [HasMips64r2, HasStdEnc],
 let DecoderNamespace = "Mips64" in {
 /// Load and Store Instructions
 ///  aligned
-defm LB64  : LoadM<"lb", CPU64Regs, sextloadi8>, LW_FM<0x20>;
-defm LBu64 : LoadM<"lbu", CPU64Regs, zextloadi8>, LW_FM<0x24>;
-defm LH64  : LoadM<"lh", CPU64Regs, sextloadi16>, LW_FM<0x21>;
-defm LHu64 : LoadM<"lhu", CPU64Regs, zextloadi16>, LW_FM<0x25>;
-defm LW64  : LoadM<"lw", CPU64Regs, sextloadi32>, LW_FM<0x23>;
-defm LWu64 : LoadM<"lwu", CPU64Regs, zextloadi32>, LW_FM<0x27>;
-defm SB64  : StoreM<"sb", CPU64Regs, truncstorei8>, LW_FM<0x28>;
-defm SH64  : StoreM<"sh", CPU64Regs, truncstorei16>, LW_FM<0x29>;
-defm SW64  : StoreM<"sw", CPU64Regs, truncstorei32>, LW_FM<0x2b>;
-defm LD    : LoadM<"ld", CPU64Regs, load>, LW_FM<0x37>;
-defm SD    : StoreM<"sd", CPU64Regs, store>, LW_FM<0x3f>;
+defm LB64  : LoadM<"lb", CPU64Regs, sextloadi8, IILoad>, LW_FM<0x20>;
+defm LBu64 : LoadM<"lbu", CPU64Regs, zextloadi8, IILoad>, LW_FM<0x24>;
+defm LH64  : LoadM<"lh", CPU64Regs, sextloadi16, IILoad>, LW_FM<0x21>;
+defm LHu64 : LoadM<"lhu", CPU64Regs, zextloadi16, IILoad>, LW_FM<0x25>;
+defm LW64  : LoadM<"lw", CPU64Regs, sextloadi32, IILoad>, LW_FM<0x23>;
+defm LWu64 : LoadM<"lwu", CPU64Regs, zextloadi32, IILoad>, LW_FM<0x27>;
+defm SB64  : StoreM<"sb", CPU64Regs, truncstorei8, IIStore>, LW_FM<0x28>;
+defm SH64  : StoreM<"sh", CPU64Regs, truncstorei16, IIStore>, LW_FM<0x29>;
+defm SW64  : StoreM<"sw", CPU64Regs, truncstorei32, IIStore>, LW_FM<0x2b>;
+defm LD    : LoadM<"ld", CPU64Regs, load, IILoad>, LW_FM<0x37>;
+defm SD    : StoreM<"sd", CPU64Regs, store, IIStore>, LW_FM<0x3f>;
 
 /// load/store left/right
 defm LWL64 : LoadLeftRightM<"lwl", MipsLWL, CPU64Regs>, LW_FM<0x22>;
@@ -181,14 +181,14 @@ def TAILCALL64_R : JumpFR<CPU64Regs, MipsTailCall>, MTLO_FM<8>, IsTailCall;
 
 let DecoderNamespace = "Mips64" in {
 /// Multiply and Divide Instructions.
-def DMULT  : Mult<"dmult", IIImul, CPU64RegsOpnd, [HI64, LO64]>,
+def DMULT  : Mult<"dmult", IIImult, CPU64RegsOpnd, [HI64, LO64]>,
              MULT_FM<0, 0x1c>;
-def DMULTu : Mult<"dmultu", IIImul, CPU64RegsOpnd, [HI64, LO64]>,
+def DMULTu : Mult<"dmultu", IIImult, CPU64RegsOpnd, [HI64, LO64]>,
              MULT_FM<0, 0x1d>;
 def PseudoDMULT  : MultDivPseudo<DMULT, ACRegs128, CPU64RegsOpnd, MipsMult,
-                                 IIImul>;
+                                 IIImult>;
 def PseudoDMULTu : MultDivPseudo<DMULTu, ACRegs128, CPU64RegsOpnd, MipsMultu,
-                                 IIImul>;
+                                 IIImult>;
 def DSDIV : Div<"ddiv", IIIdiv, CPU64RegsOpnd, [HI64, LO64]>, MULT_FM<0, 0x1e>;
 def DUDIV : Div<"ddivu", IIIdiv, CPU64RegsOpnd, [HI64, LO64]>, MULT_FM<0, 0x1f>;
 def PseudoDSDIV : MultDivPseudo<DSDIV, ACRegs128, CPU64RegsOpnd, MipsDivRem,
@@ -293,6 +293,11 @@ def : WrapperPat<tglobaltlsaddr, DADDiu, CPU64Regs>;
 
 defm : BrcondPats<CPU64Regs, BEQ64, BNE64, SLT64, SLTu64, SLTi64, SLTiu64,
                   ZERO_64>;
+
+def : MipsPat<(brcond (i32 (setlt i64:$lhs, 1)), bb:$dst),
+              (BLEZ64 i64:$lhs, bb:$dst)>;
+def : MipsPat<(brcond (i32 (setgt i64:$lhs, -1)), bb:$dst),
+              (BGEZ64 i64:$lhs, bb:$dst)>;
 
 // setcc patterns
 defm : SeteqPats<CPU64Regs, SLTiu64, XOR64, SLTu64, ZERO_64>;

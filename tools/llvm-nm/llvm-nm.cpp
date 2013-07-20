@@ -17,10 +17,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/Bitcode/Archive.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Object/Archive.h"
+#include "llvm/Object/MachOUniversal.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
@@ -121,6 +121,8 @@ namespace {
 
   bool MultipleFiles = false;
 
+  bool HadError = false;
+
   std::string ToolName;
 }
 
@@ -132,6 +134,7 @@ static void error(Twine message, Twine path = Twine()) {
 static bool error(error_code ec, Twine path = Twine()) {
   if (ec) {
     error(ec.message(), path);
+    HadError = true;
     return true;
   }
   return false;
@@ -362,21 +365,24 @@ static void DumpSymbolNamesFromFile(std::string &Filename) {
 
     if (object::Archive *a = dyn_cast<object::Archive>(arch.get())) {
       if (ArchiveMap) {
-        outs() << "Archive map" << "\n";
-        for (object::Archive::symbol_iterator i = a->begin_symbols(), 
-             e = a->end_symbols(); i != e; ++i) {
-          object::Archive::child_iterator c;
-          StringRef symname;
-          StringRef filename;
-          if (error(i->getMember(c))) 
+        object::Archive::symbol_iterator I = a->begin_symbols();
+        object::Archive::symbol_iterator E = a->end_symbols();
+        if (I !=E) {
+          outs() << "Archive map" << "\n";
+          for (; I != E; ++I) {
+            object::Archive::child_iterator c;
+            StringRef symname;
+            StringRef filename;
+            if (error(I->getMember(c)))
               return;
-          if (error(i->getName(symname)))
+            if (error(I->getName(symname)))
               return;
-          if (error(c->getName(filename)))
+            if (error(c->getName(filename)))
               return;
-          outs() << symname << " in " << filename << "\n";
+            outs() << symname << " in " << filename << "\n";
+          }
+          outs() << "\n";
         }
-        outs() << "\n";
       }
 
       for (object::Archive::child_iterator i = a->begin_children(),
@@ -403,6 +409,23 @@ static void DumpSymbolNamesFromFile(std::string &Filename) {
         }
       }
     }
+  } else if (magic == sys::fs::file_magic::macho_universal_binary) {
+    OwningPtr<Binary> Bin;
+    if (error(object::createBinary(Buffer.take(), Bin), Filename))
+      return;
+
+    object::MachOUniversalBinary *UB =
+        cast<object::MachOUniversalBinary>(Bin.get());
+    for (object::MachOUniversalBinary::object_iterator
+             I = UB->begin_objects(),
+             E = UB->end_objects();
+         I != E; ++I) {
+      OwningPtr<ObjectFile> Obj;
+      if (!I->getAsObjectFile(Obj)) {
+        outs() << Obj->getFileName() << ":\n";
+        DumpSymbolNamesFromObject(Obj.get());
+      }
+    }
   } else if (magic.is_object()) {
     OwningPtr<Binary> obj;
     if (error(object::createBinary(Buffer.take(), obj), Filename))
@@ -412,6 +435,7 @@ static void DumpSymbolNamesFromFile(std::string &Filename) {
   } else {
     errs() << ToolName << ": " << Filename << ": "
            << "unrecognizable file type\n";
+    HadError = true;
     return;
   }
 }
@@ -425,7 +449,7 @@ int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "llvm symbol table dumper\n");
 
   // llvm-nm only reads binary files.
-  if (error(sys::Program::ChangeStdinToBinary()))
+  if (error(sys::ChangeStdinToBinary()))
     return 1;
 
   ToolName = argv[0];
@@ -446,5 +470,9 @@ int main(int argc, char **argv) {
 
   std::for_each(InputFilenames.begin(), InputFilenames.end(),
                 DumpSymbolNamesFromFile);
+
+  if (HadError)
+    return 1;
+
   return 0;
 }

@@ -58,7 +58,7 @@ const int Hexagon_MEMB_AUTOINC_MIN = -8;
 
 HexagonInstrInfo::HexagonInstrInfo(HexagonSubtarget &ST)
   : HexagonGenInstrInfo(Hexagon::ADJCALLSTACKDOWN, Hexagon::ADJCALLSTACKUP),
-    RI(ST, *this), Subtarget(ST) {
+    RI(ST), Subtarget(ST) {
 }
 
 
@@ -556,16 +556,6 @@ MachineInstr *HexagonInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
                                                     int FI) const {
   // Hexagon_TODO: Implement.
   return(0);
-}
-
-MachineInstr*
-HexagonInstrInfo::emitFrameIndexDebugValue(MachineFunction &MF,
-                                           int FrameIx, uint64_t Offset,
-                                           const MDNode *MDPtr,
-                                           DebugLoc DL) const {
-  MachineInstrBuilder MIB = BuildMI(MF, DL, get(Hexagon::DBG_VALUE))
-    .addImm(0).addImm(Offset).addMetadata(MDPtr);
-  return &*MIB;
 }
 
 unsigned HexagonInstrInfo::createVR(MachineFunction* MF, MVT VT) const {

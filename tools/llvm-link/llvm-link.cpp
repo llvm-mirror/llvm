@@ -55,18 +55,11 @@ DumpAsm("d", cl::desc("Print assembly as linked"), cl::Hidden);
 //
 static inline Module *LoadFile(const char *argv0, const std::string &FN,
                                LLVMContext& Context) {
-  sys::Path Filename;
-  if (!Filename.set(FN)) {
-    errs() << "Invalid file name: '" << FN << "'\n";
-    return NULL;
-  }
-
   SMDiagnostic Err;
-  if (Verbose) errs() << "Loading '" << Filename.c_str() << "'\n";
+  if (Verbose) errs() << "Loading '" << FN << "'\n";
   Module* Result = 0;
-  
-  const std::string &FNStr = Filename.str();
-  Result = ParseIRFile(FNStr, Err, Context);
+
+  Result = ParseIRFile(FN, Err, Context);
   if (Result) return Result;   // Load successful!
 
   Err.print(argv0, errs());

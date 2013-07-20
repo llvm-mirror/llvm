@@ -14,7 +14,6 @@ add_subdirectory(llvm-dis)
 add_subdirectory(llvm-mc)
 
 add_subdirectory(llc)
-add_subdirectory(llvm-ranlib)
 add_subdirectory(llvm-ar)
 add_subdirectory(llvm-nm)
 add_subdirectory(llvm-size)
@@ -59,8 +58,11 @@ if( LLVM_ENABLE_PIC )
 endif()
 
 add_llvm_external_project(clang)
-add_llvm_external_project(lld)
-add_llvm_external_project(lldb)
-add_llvm_external_project(polly)
+
+if( NOT LLVM_INCLUDE_TOOLS STREQUAL "bootstrap-only" )
+  add_llvm_external_project(lld)
+  add_llvm_external_project(lldb)
+  add_llvm_external_project(polly)
+endif()
 
 set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} PARENT_SCOPE)

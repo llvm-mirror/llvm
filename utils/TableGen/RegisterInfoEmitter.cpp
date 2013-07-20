@@ -58,8 +58,6 @@ private:
   void EmitRegMappingTables(raw_ostream &o,
                             const std::vector<CodeGenRegister*> &Regs,
                             bool isCtor);
-  void EmitRegClasses(raw_ostream &OS, CodeGenTarget &Target);
-
   void EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
                            const std::string &ClassName);
   void emitComposeSubRegIndices(raw_ostream &OS, CodeGenRegBank &RegBank,
@@ -311,7 +309,7 @@ RegisterInfoEmitter::EmitRegMappingTables(raw_ostream &OS,
                                        const std::vector<CodeGenRegister*> &Regs,
                                           bool isCtor) {
   // Collect all information about dwarf register numbers
-  typedef std::map<Record*, std::vector<int64_t>, LessRecord> DwarfRegNumsMapTy;
+  typedef std::map<Record*, std::vector<int64_t>, LessRecordRegister> DwarfRegNumsMapTy;
   DwarfRegNumsMapTy DwarfRegNums;
 
   // First, just pull all provided information to the map
@@ -703,15 +701,15 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
 
   const std::vector<CodeGenRegister*> &Regs = RegBank.getRegisters();
 
-  // The lists of sub-registers, super-registers, and overlaps all go in the
-  // same array. That allows us to share suffixes.
+  ArrayRef<CodeGenSubRegIndex*> SubRegIndices = RegBank.getSubRegIndices();
+  // The lists of sub-registers and super-registers go in the same array.  That
+  // allows us to share suffixes.
   typedef std::vector<const CodeGenRegister*> RegVec;
 
   // Differentially encoded lists.
   SequenceToOffsetTable<DiffVec> DiffSeqs;
   SmallVector<DiffVec, 4> SubRegLists(Regs.size());
   SmallVector<DiffVec, 4> SuperRegLists(Regs.size());
-  SmallVector<DiffVec, 4> OverlapLists(Regs.size());
   SmallVector<DiffVec, 4> RegUnitLists(Regs.size());
   SmallVector<unsigned, 4> RegUnitInitScale(Regs.size());
 
@@ -746,15 +744,6 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
     diffEncode(SuperRegLists[i], Reg->EnumValue,
                SuperRegList.begin(), SuperRegList.end());
     DiffSeqs.add(SuperRegLists[i]);
-
-    // The list of overlaps doesn't need to have any particular order, and Reg
-    // itself must be omitted.
-    DiffVec &OverlapList = OverlapLists[i];
-    CodeGenRegister::Set OSet;
-    Reg->computeOverlaps(OSet, RegBank);
-    OSet.erase(Reg);
-    diffEncode(OverlapList, Reg->EnumValue, OSet.begin(), OSet.end());
-    DiffSeqs.add(OverlapList);
 
     // Differentially encode the register unit list, seeded by register number.
     // First compute a scale factor that allows more diff-lists to be reused:
@@ -800,6 +789,19 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   SubRegIdxSeqs.emit(OS, printSubRegIndex);
   OS << "};\n\n";
 
+  // Emit the table of sub-register index sizes.
+  OS << "extern const MCRegisterInfo::SubRegCoveredBits "
+     << TargetName << "SubRegIdxRanges[] = {\n";
+  OS << "  { " << (uint16_t)-1 << ", " << (uint16_t)-1 << " },\n";
+  for (ArrayRef<CodeGenSubRegIndex*>::const_iterator
+         SRI = SubRegIndices.begin(), SRE = SubRegIndices.end();
+         SRI != SRE; ++SRI) {
+    OS << "  { " << (*SRI)->Offset << ", "
+                 << (*SRI)->Size
+       << " },\t// " << (*SRI)->getName() << "\n";
+  }
+  OS << "};\n\n";
+
   // Emit the string table.
   RegStrings.layout();
   OS << "extern const char " << TargetName << "RegStrings[] = {\n";
@@ -808,13 +810,12 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
 
   OS << "extern const MCRegisterDesc " << TargetName
      << "RegDesc[] = { // Descriptors\n";
-  OS << "  { " << RegStrings.get("") << ", 0, 0, 0, 0, 0 },\n";
+  OS << "  { " << RegStrings.get("") << ", 0, 0, 0, 0 },\n";
 
   // Emit the register descriptors now.
   for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
     const CodeGenRegister *Reg = Regs[i];
     OS << "  { " << RegStrings.get(Reg->getName()) << ", "
-       << DiffSeqs.get(OverlapLists[i]) << ", "
        << DiffSeqs.get(SubRegLists[i]) << ", "
        << DiffSeqs.get(SuperRegLists[i]) << ", "
        << SubRegIdxSeqs.get(SubRegIdxLists[i]) << ", "
@@ -897,8 +898,6 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
 
   OS << "};\n\n";
 
-  ArrayRef<CodeGenSubRegIndex*> SubRegIndices = RegBank.getSubRegIndices();
-
   EmitRegMappingTables(OS, Regs, false);
 
   // Emit Reg encoding table
@@ -931,6 +930,7 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
      << TargetName << "RegStrings, "
      << TargetName << "SubRegIdxLists, "
      << (SubRegIndices.size() + 1) << ",\n"
+     << TargetName << "SubRegIdxRanges, "
      << "  " << TargetName << "RegEncodingTable);\n\n";
 
   EmitRegMapping(OS, Regs, false);
@@ -1262,6 +1262,8 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
   OS << "extern const char " << TargetName << "RegStrings[];\n";
   OS << "extern const uint16_t " << TargetName << "RegUnitRoots[][2];\n";
   OS << "extern const uint16_t " << TargetName << "SubRegIdxLists[];\n";
+  OS << "extern const MCRegisterInfo::SubRegCoveredBits "
+     << TargetName << "SubRegIdxRanges[];\n";
   OS << "extern const uint16_t " << TargetName << "RegEncodingTable[];\n";
 
   EmitRegMappingTables(OS, Regs, true);
@@ -1282,6 +1284,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
      << "                     " << TargetName << "RegStrings,\n"
      << "                     " << TargetName << "SubRegIdxLists,\n"
      << "                     " << SubRegIndices.size() + 1 << ",\n"
+     << "                     " << TargetName << "SubRegIdxRanges,\n"
      << "                     " << TargetName << "RegEncodingTable);\n\n";
 
   EmitRegMapping(OS, Regs, true);

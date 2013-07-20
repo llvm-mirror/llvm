@@ -483,8 +483,8 @@ ConstantInt *ConstantInt::get(LLVMContext &Context, const APInt &V) {
   // Get the corresponding integer type for the bit width of the value.
   IntegerType *ITy = IntegerType::get(Context, V.getBitWidth());
   // get an existing value or the insertion position
-  DenseMapAPIntKeyInfo::KeyTy Key(V, ITy);
-  ConstantInt *&Slot = Context.pImpl->IntConstants[Key]; 
+  LLVMContextImpl *pImpl = Context.pImpl;
+  ConstantInt *&Slot = pImpl->IntConstants[DenseMapAPIntKeyInfo::KeyTy(V, ITy)];
   if (!Slot) Slot = new ConstantInt(ITy, V);
   return Slot;
 }
@@ -608,11 +608,9 @@ Constant *ConstantFP::getZeroValueForNegation(Type *Ty) {
 
 // ConstantFP accessors.
 ConstantFP* ConstantFP::get(LLVMContext &Context, const APFloat& V) {
-  DenseMapAPFloatKeyInfo::KeyTy Key(V);
-
   LLVMContextImpl* pImpl = Context.pImpl;
 
-  ConstantFP *&Slot = pImpl->FPConstants[Key];
+  ConstantFP *&Slot = pImpl->FPConstants[DenseMapAPFloatKeyInfo::KeyTy(V)];
 
   if (!Slot) {
     Type *Ty;
@@ -1391,7 +1389,7 @@ void BlockAddress::replaceUsesOfWithOnConstant(Value *From, Value *To, Use *U) {
   BasicBlock *NewBB = getBasicBlock();
 
   if (U == &Op<0>())
-    NewF = cast<Function>(To);
+    NewF = cast<Function>(To->stripPointerCasts());
   else
     NewBB = cast<BasicBlock>(To);
 
@@ -1956,14 +1954,22 @@ Constant *ConstantExpr::getShuffleVector(Constant *V1, Constant *V2,
 
 Constant *ConstantExpr::getInsertValue(Constant *Agg, Constant *Val,
                                        ArrayRef<unsigned> Idxs) {
+  assert(Agg->getType()->isFirstClassType() &&
+         "Non-first-class type for constant insertvalue expression");
+
   assert(ExtractValueInst::getIndexedType(Agg->getType(),
                                           Idxs) == Val->getType() &&
          "insertvalue indices invalid!");
-  assert(Agg->getType()->isFirstClassType() &&
-         "Non-first-class type for constant insertvalue expression");
-  Constant *FC = ConstantFoldInsertValueInstruction(Agg, Val, Idxs);
-  assert(FC && "insertvalue constant expr couldn't be folded!");
-  return FC;
+  Type *ReqTy = Val->getType();
+
+  if (Constant *FC = ConstantFoldInsertValueInstruction(Agg, Val, Idxs))
+    return FC;
+
+  Constant *ArgVec[] = { Agg, Val };
+  const ExprMapKeyType Key(Instruction::InsertValue, ArgVec, 0, 0, Idxs);
+
+  LLVMContextImpl *pImpl = Agg->getContext().pImpl;
+  return pImpl->ExprConstants.getOrCreate(ReqTy, Key);
 }
 
 Constant *ConstantExpr::getExtractValue(Constant *Agg,
@@ -1977,9 +1983,14 @@ Constant *ConstantExpr::getExtractValue(Constant *Agg,
 
   assert(Agg->getType()->isFirstClassType() &&
          "Non-first-class type for constant extractvalue expression");
-  Constant *FC = ConstantFoldExtractValueInstruction(Agg, Idxs);
-  assert(FC && "ExtractValue constant expr couldn't be folded!");
-  return FC;
+  if (Constant *FC = ConstantFoldExtractValueInstruction(Agg, Idxs))
+    return FC;
+
+  Constant *ArgVec[] = { Agg };
+  const ExprMapKeyType Key(Instruction::ExtractValue, ArgVec, 0, 0, Idxs);
+
+  LLVMContextImpl *pImpl = Agg->getContext().pImpl;
+  return pImpl->ExprConstants.getOrCreate(ReqTy, Key);
 }
 
 Constant *ConstantExpr::getNeg(Constant *C, bool HasNUW, bool HasNSW) {

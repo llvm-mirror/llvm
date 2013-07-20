@@ -523,8 +523,7 @@ def i64i8imm   : Operand<i64> {
 
 def lea64_32mem : Operand<i32> {
   let PrintMethod = "printi32mem";
-  let AsmOperandLowerMethod = "lower_lea64_32mem";
-  let MIOperandInfo = (ops GR32, i8imm, GR32_NOSP, i32imm, i8imm);
+  let MIOperandInfo = (ops GR64, i8imm, GR64_NOSP, i32imm, i8imm);
   let ParserMatchClass = X86MemAsmOperand;
 }
 
@@ -546,7 +545,7 @@ def lea32addr : ComplexPattern<i32, 5, "SelectLEAAddr",
                                [add, sub, mul, X86mul_imm, shl, or, frameindex],
                                []>;
 // In 64-bit mode 32-bit LEAs can use RIP-relative addressing.
-def lea64_32addr : ComplexPattern<i32, 5, "SelectLEAAddr",
+def lea64_32addr : ComplexPattern<i32, 5, "SelectLEA64_32Addr",
                                   [add, sub, mul, X86mul_imm, shl, or,
                                    frameindex, X86WrapperRIP],
                                   []>;
@@ -804,11 +803,11 @@ def POP32r  : I<0x58, AddRegFrm, (outs GR32:$reg), (ins), "pop{l}\t$reg", [],
                 IIC_POP_REG>;
 def POP16rmr: I<0x8F, MRM0r, (outs GR16:$reg), (ins), "pop{w}\t$reg", [],
                 IIC_POP_REG>, OpSize;
-def POP16rmm: I<0x8F, MRM0m, (outs i16mem:$dst), (ins), "pop{w}\t$dst", [],
+def POP16rmm: I<0x8F, MRM0m, (outs), (ins i16mem:$dst), "pop{w}\t$dst", [],
                 IIC_POP_MEM>, OpSize;
 def POP32rmr: I<0x8F, MRM0r, (outs GR32:$reg), (ins), "pop{l}\t$reg", [],
                 IIC_POP_REG>;
-def POP32rmm: I<0x8F, MRM0m, (outs i32mem:$dst), (ins), "pop{l}\t$dst", [],
+def POP32rmm: I<0x8F, MRM0m, (outs), (ins i32mem:$dst), "pop{l}\t$dst", [],
                 IIC_POP_MEM>;
 
 def POPF16   : I<0x9D, RawFrm, (outs), (ins), "popf{w}", [], IIC_POP_F>, OpSize;
@@ -852,7 +851,7 @@ def POP64r   : I<0x58, AddRegFrm,
                  (outs GR64:$reg), (ins), "pop{q}\t$reg", [], IIC_POP_REG>;
 def POP64rmr: I<0x8F, MRM0r, (outs GR64:$reg), (ins), "pop{q}\t$reg", [],
                 IIC_POP_REG>;
-def POP64rmm: I<0x8F, MRM0m, (outs i64mem:$dst), (ins), "pop{q}\t$dst", [],
+def POP64rmm: I<0x8F, MRM0m, (outs), (ins i64mem:$dst), "pop{q}\t$dst", [],
                 IIC_POP_MEM>;
 } // mayLoad, SchedRW
 let mayStore = 1, SchedRW = [WriteStore] in {
@@ -1922,29 +1921,31 @@ def : MnemonicAlias<"fucomip",  "fucompi",  "att">;
 def : MnemonicAlias<"fwait",    "wait",     "att">;
 
 
-class CondCodeAlias<string Prefix,string Suffix, string OldCond, string NewCond>
+class CondCodeAlias<string Prefix,string Suffix, string OldCond, string NewCond,
+                    string VariantName>
   : MnemonicAlias<!strconcat(Prefix, OldCond, Suffix),
-                  !strconcat(Prefix, NewCond, Suffix)>;
+                  !strconcat(Prefix, NewCond, Suffix), VariantName>;
 
 /// IntegerCondCodeMnemonicAlias - This multiclass defines a bunch of
 /// MnemonicAlias's that canonicalize the condition code in a mnemonic, for
 /// example "setz" -> "sete".
-multiclass IntegerCondCodeMnemonicAlias<string Prefix, string Suffix> {
-  def C   : CondCodeAlias<Prefix, Suffix, "c",   "b">;   // setc   -> setb
-  def Z   : CondCodeAlias<Prefix, Suffix, "z" ,  "e">;   // setz   -> sete
-  def NA  : CondCodeAlias<Prefix, Suffix, "na",  "be">;  // setna  -> setbe
-  def NB  : CondCodeAlias<Prefix, Suffix, "nb",  "ae">;  // setnb  -> setae
-  def NC  : CondCodeAlias<Prefix, Suffix, "nc",  "ae">;  // setnc  -> setae
-  def NG  : CondCodeAlias<Prefix, Suffix, "ng",  "le">;  // setng  -> setle
-  def NL  : CondCodeAlias<Prefix, Suffix, "nl",  "ge">;  // setnl  -> setge
-  def NZ  : CondCodeAlias<Prefix, Suffix, "nz",  "ne">;  // setnz  -> setne
-  def PE  : CondCodeAlias<Prefix, Suffix, "pe",  "p">;   // setpe  -> setp
-  def PO  : CondCodeAlias<Prefix, Suffix, "po",  "np">;  // setpo  -> setnp
+multiclass IntegerCondCodeMnemonicAlias<string Prefix, string Suffix,
+                                        string V = ""> {
+  def C   : CondCodeAlias<Prefix, Suffix, "c",   "b",  V>; // setc   -> setb
+  def Z   : CondCodeAlias<Prefix, Suffix, "z" ,  "e",  V>; // setz   -> sete
+  def NA  : CondCodeAlias<Prefix, Suffix, "na",  "be", V>; // setna  -> setbe
+  def NB  : CondCodeAlias<Prefix, Suffix, "nb",  "ae", V>; // setnb  -> setae
+  def NC  : CondCodeAlias<Prefix, Suffix, "nc",  "ae", V>; // setnc  -> setae
+  def NG  : CondCodeAlias<Prefix, Suffix, "ng",  "le", V>; // setng  -> setle
+  def NL  : CondCodeAlias<Prefix, Suffix, "nl",  "ge", V>; // setnl  -> setge
+  def NZ  : CondCodeAlias<Prefix, Suffix, "nz",  "ne", V>; // setnz  -> setne
+  def PE  : CondCodeAlias<Prefix, Suffix, "pe",  "p",  V>; // setpe  -> setp
+  def PO  : CondCodeAlias<Prefix, Suffix, "po",  "np", V>; // setpo  -> setnp
 
-  def NAE : CondCodeAlias<Prefix, Suffix, "nae", "b">;   // setnae -> setb
-  def NBE : CondCodeAlias<Prefix, Suffix, "nbe", "a">;   // setnbe -> seta
-  def NGE : CondCodeAlias<Prefix, Suffix, "nge", "l">;   // setnge -> setl
-  def NLE : CondCodeAlias<Prefix, Suffix, "nle", "g">;   // setnle -> setg
+  def NAE : CondCodeAlias<Prefix, Suffix, "nae", "b",  V>; // setnae -> setb
+  def NBE : CondCodeAlias<Prefix, Suffix, "nbe", "a",  V>; // setnbe -> seta
+  def NGE : CondCodeAlias<Prefix, Suffix, "nge", "l",  V>; // setnge -> setl
+  def NLE : CondCodeAlias<Prefix, Suffix, "nle", "g",  V>; // setnle -> setg
 }
 
 // Aliases for set<CC>
@@ -1952,9 +1953,11 @@ defm : IntegerCondCodeMnemonicAlias<"set", "">;
 // Aliases for j<CC>
 defm : IntegerCondCodeMnemonicAlias<"j", "">;
 // Aliases for cmov<CC>{w,l,q}
-defm : IntegerCondCodeMnemonicAlias<"cmov", "w">;
-defm : IntegerCondCodeMnemonicAlias<"cmov", "l">;
-defm : IntegerCondCodeMnemonicAlias<"cmov", "q">;
+defm : IntegerCondCodeMnemonicAlias<"cmov", "w", "att">;
+defm : IntegerCondCodeMnemonicAlias<"cmov", "l", "att">;
+defm : IntegerCondCodeMnemonicAlias<"cmov", "q", "att">;
+// No size suffix for intel-style asm.
+defm : IntegerCondCodeMnemonicAlias<"cmov", "", "intel">;
 
 
 //===----------------------------------------------------------------------===//

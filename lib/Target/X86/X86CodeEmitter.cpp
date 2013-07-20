@@ -53,13 +53,8 @@ namespace {
     static char ID;
     explicit Emitter(X86TargetMachine &tm, CodeEmitter &mce)
       : MachineFunctionPass(ID), II(0), TD(0), TM(tm),
-      MCE(mce), PICBaseOffset(0), Is64BitMode(false),
-      IsPIC(TM.getRelocationModel() == Reloc::PIC_) {}
-    Emitter(X86TargetMachine &tm, CodeEmitter &mce,
-            const X86InstrInfo &ii, const DataLayout &td, bool is64)
-      : MachineFunctionPass(ID), II(&ii), TD(&td), TM(tm),
-      MCE(mce), PICBaseOffset(0), Is64BitMode(is64),
-      IsPIC(TM.getRelocationModel() == Reloc::PIC_) {}
+        MCE(mce), PICBaseOffset(0), Is64BitMode(false),
+        IsPIC(TM.getRelocationModel() == Reloc::PIC_) {}
 
     bool runOnMachineFunction(MachineFunction &MF);
 
@@ -1270,7 +1265,7 @@ void Emitter<CodeEmitter>::emitInstruction(MachineInstr &MI,
 
     unsigned rt = Is64BitMode ? X86::reloc_pcrel_word
       : (IsPIC ? X86::reloc_picrel_word : X86::reloc_absolute_word);
-    if (Opcode == X86::MOV64ri64i32)
+    if (Opcode == X86::MOV32ri64)
       rt = X86::reloc_absolute_word;  // FIXME: add X86II flag?
     // This should not occur on Darwin for relocatable objects.
     if (Opcode == X86::MOV64ri)

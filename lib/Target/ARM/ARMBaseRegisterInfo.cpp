@@ -43,9 +43,8 @@
 
 using namespace llvm;
 
-ARMBaseRegisterInfo::ARMBaseRegisterInfo(const ARMBaseInstrInfo &tii,
-                                         const ARMSubtarget &sti)
-  : ARMGenRegisterInfo(ARM::LR, 0, 0, ARM::PC), TII(tii), STI(sti),
+ARMBaseRegisterInfo::ARMBaseRegisterInfo(const ARMSubtarget &sti)
+  : ARMGenRegisterInfo(ARM::LR, 0, 0, ARM::PC), STI(sti),
     FramePtr((STI.isTargetDarwin() || STI.isThumb()) ? ARM::R7 : ARM::R11),
     BasePtr(ARM::R6) {
 }
@@ -59,30 +58,44 @@ ARMBaseRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     ghcCall = (F ? F->getCallingConv() == CallingConv::GHC : false);
   }
  
-  if (ghcCall) {
-      return CSR_GHC_SaveList;
-  }
-  else {
-  return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
-    ? CSR_iOS_SaveList : CSR_AAPCS_SaveList;
-  }
+  if (ghcCall)
+    // GHC set of callee saved regs is empty as all those regs are
+    // used for passing STG regs around
+    return CSR_NoRegs_SaveList;
+  else
+    return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
+      ? CSR_iOS_SaveList : CSR_AAPCS_SaveList;
 }
 
 const uint32_t*
-ARMBaseRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
+ARMBaseRegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
+  if (CC == CallingConv::GHC)
+    // This is academic becase all GHC calls are (supposed to be) tail calls
+    return CSR_NoRegs_RegMask;
   return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
     ? CSR_iOS_RegMask : CSR_AAPCS_RegMask;
 }
 
 const uint32_t*
-ARMBaseRegisterInfo::getThisReturnPreservedMask(CallingConv::ID) const {
-  return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
-    ? CSR_iOS_ThisReturn_RegMask : CSR_AAPCS_ThisReturn_RegMask;
+ARMBaseRegisterInfo::getNoPreservedMask() const {
+  return CSR_NoRegs_RegMask;
 }
 
 const uint32_t*
-ARMBaseRegisterInfo::getNoPreservedMask() const {
-  return CSR_NoRegs_RegMask;
+ARMBaseRegisterInfo::getThisReturnPreservedMask(CallingConv::ID CC) const {
+  // This should return a register mask that is the same as that returned by
+  // getCallPreservedMask but that additionally preserves the register used for
+  // the first i32 argument (which must also be the register used to return a
+  // single i32 return value)
+  //
+  // In case that the calling convention does not use the same register for
+  // both or otherwise does not want to enable this optimization, the function
+  // should return NULL
+  if (CC == CallingConv::GHC)
+    // This is academic becase all GHC calls are (supposed to be) tail calls
+    return NULL;
+  return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
+    ? CSR_iOS_ThisReturn_RegMask : CSR_AAPCS_ThisReturn_RegMask;
 }
 
 BitVector ARMBaseRegisterInfo::
@@ -376,6 +389,7 @@ emitLoadConstPool(MachineBasicBlock &MBB,
                   ARMCC::CondCodes Pred,
                   unsigned PredReg, unsigned MIFlags) const {
   MachineFunction &MF = *MBB.getParent();
+  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
   MachineConstantPool *ConstantPool = MF.getConstantPool();
   const Constant *C =
         ConstantInt::get(Type::getInt32Ty(MF.getFunction()->getContext()), Val);
@@ -557,9 +571,10 @@ materializeFrameBaseRegister(MachineBasicBlock *MBB,
   if (Ins != MBB->end())
     DL = Ins->getDebugLoc();
 
-  const MCInstrDesc &MCID = TII.get(ADDriOpc);
-  MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
   const MachineFunction &MF = *MBB->getParent();
+  MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+  const MCInstrDesc &MCID = TII.get(ADDriOpc);
   MRI.constrainRegClass(BaseReg, TII.getRegClass(MCID, 0, this, MF));
 
   MachineInstrBuilder MIB = AddDefaultPred(BuildMI(*MBB, Ins, DL, MCID, BaseReg)
@@ -575,6 +590,8 @@ ARMBaseRegisterInfo::resolveFrameIndex(MachineBasicBlock::iterator I,
   MachineInstr &MI = *I;
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
+  const ARMBaseInstrInfo &TII =
+    *static_cast<const ARMBaseInstrInfo*>(MF.getTarget().getInstrInfo());
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
   int Off = Offset; // ARM doesn't need the general 64-bit offsets
   unsigned i = 0;
@@ -672,6 +689,8 @@ ARMBaseRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MachineInstr &MI = *II;
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
+  const ARMBaseInstrInfo &TII =
+    *static_cast<const ARMBaseInstrInfo*>(MF.getTarget().getInstrInfo());
   const ARMFrameLowering *TFI =
     static_cast<const ARMFrameLowering*>(MF.getTarget().getFrameLowering());
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
@@ -697,12 +716,7 @@ ARMBaseRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   }
 #endif // NDEBUG
 
-  // Special handling of dbg_value instructions.
-  if (MI.isDebugValue()) {
-    MI.getOperand(FIOperandNum).  ChangeToRegister(FrameReg, false /*isDef*/);
-    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
-    return;
-  }
+  assert(!MI.isDebugValue() && "DBG_VALUEs should be handled in target-independent code");
 
   // Modify MI as necessary to handle as much of 'Offset' as possible
   bool Done = false;

@@ -14,22 +14,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef R600PACKETIZER_CPP
-#define R600PACKETIZER_CPP
-
 #define DEBUG_TYPE "packets"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/CodeGen/DFAPacketizer.h"
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/CodeGen/MachineLoopInfo.h"
-#include "llvm/CodeGen/ScheduleDAG.h"
 #include "AMDGPU.h"
 #include "R600InstrInfo.h"
+#include "llvm/CodeGen/DFAPacketizer.h"
+#include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/Support/raw_ostream.h"
 
-namespace llvm {
+using namespace llvm;
+
+namespace {
 
 class R600Packetizer : public MachineFunctionPass {
 
@@ -78,17 +77,24 @@ private:
     do {
       if (TII->isPredicated(BI))
         continue;
-      if (TII->isTransOnly(BI))
+      int OperandIdx = TII->getOperandIdx(BI->getOpcode(), AMDGPU::OpName::write);
+      if (OperandIdx > -1 && BI->getOperand(OperandIdx).getImm() == 0)
         continue;
-      int OperandIdx = TII->getOperandIdx(BI->getOpcode(), R600Operands::WRITE);
-      if (OperandIdx < 0)
+      int DstIdx = TII->getOperandIdx(BI->getOpcode(), AMDGPU::OpName::dst);
+      if (DstIdx == -1) {
         continue;
-      if (BI->getOperand(OperandIdx).getImm() == 0)
+      }
+      unsigned Dst = BI->getOperand(DstIdx).getReg();
+      if (TII->isTransOnly(BI)) {
+        Result[Dst] = AMDGPU::PS;
         continue;
-      unsigned Dst = BI->getOperand(0).getReg();
+      }
       if (BI->getOpcode() == AMDGPU::DOT4_r600 ||
           BI->getOpcode() == AMDGPU::DOT4_eg) {
         Result[Dst] = AMDGPU::PV_X;
+        continue;
+      }
+      if (Dst == AMDGPU::OQAP) {
         continue;
       }
       unsigned PVReg = 0;
@@ -115,10 +121,10 @@ private:
 
   void substitutePV(MachineInstr *MI, const DenseMap<unsigned, unsigned> &PVs)
       const {
-    R600Operands::Ops Ops[] = {
-      R600Operands::SRC0,
-      R600Operands::SRC1,
-      R600Operands::SRC2
+    unsigned Ops[] = {
+      AMDGPU::OpName::src0,
+      AMDGPU::OpName::src1,
+      AMDGPU::OpName::src2
     };
     for (unsigned i = 0; i < 3; i++) {
       int OperandIdx = TII->getOperandIdx(MI->getOpcode(), Ops[i]);
@@ -153,9 +159,7 @@ public:
       return true;
     if (!TII->isALUInstr(MI->getOpcode()))
       return true;
-    if (TII->get(MI->getOpcode()).TSFlags & R600_InstFlag::TRANS_ONLY)
-      return true;
-    if (TII->isTransOnly(MI))
+    if (MI->getOpcode() == AMDGPU::GROUP_BARRIER)
       return true;
     return false;
   }
@@ -164,11 +168,11 @@ public:
   // together.
   bool isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) {
     MachineInstr *MII = SUI->getInstr(), *MIJ = SUJ->getInstr();
-    if (getSlot(MII) <= getSlot(MIJ))
+    if (getSlot(MII) <= getSlot(MIJ) && !TII->isTransOnly(MII))
       return false;
     // Does MII and MIJ share the same pred_sel ?
-    int OpI = TII->getOperandIdx(MII->getOpcode(), R600Operands::PRED_SEL),
-        OpJ = TII->getOperandIdx(MIJ->getOpcode(), R600Operands::PRED_SEL);
+    int OpI = TII->getOperandIdx(MII->getOpcode(), AMDGPU::OpName::pred_sel),
+        OpJ = TII->getOperandIdx(MIJ->getOpcode(), AMDGPU::OpName::pred_sel);
     unsigned PredI = (OpI > -1)?MII->getOperand(OpI).getReg():0,
         PredJ = (OpJ > -1)?MIJ->getOperand(OpJ).getReg():0;
     if (PredI != PredJ)
@@ -194,15 +198,20 @@ public:
   bool isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ) {return false;}
 
   void setIsLastBit(MachineInstr *MI, unsigned Bit) const {
-    unsigned LastOp = TII->getOperandIdx(MI->getOpcode(), R600Operands::LAST);
+    unsigned LastOp = TII->getOperandIdx(MI->getOpcode(), AMDGPU::OpName::last);
     MI->getOperand(LastOp).setImm(Bit);
   }
 
-  MachineBasicBlock::iterator addToPacket(MachineInstr *MI) {
+  bool isBundlableWithCurrentPMI(MachineInstr *MI,
+                                 const DenseMap<unsigned, unsigned> &PV,
+                                 std::vector<R600InstrInfo::BankSwizzle> &BS,
+                                 bool &isTransSlot) {
+    isTransSlot = TII->isTransOnly(MI);
+
+    // Are the Constants limitations met ?
     CurrentPacketMIs.push_back(MI);
-    bool FitsConstLimits = TII->canBundle(CurrentPacketMIs);
-    DEBUG(
-      if (!FitsConstLimits) {
+    if (!TII->fitsConstReadLimitations(CurrentPacketMIs)) {
+      DEBUG(
         dbgs() << "Couldn't pack :\n";
         MI->dump();
         dbgs() << "with the following packets :\n";
@@ -211,14 +220,15 @@ public:
           dbgs() << "\n";
         }
         dbgs() << "because of Consts read limitations\n";
-      });
-    const DenseMap<unsigned, unsigned> &PV =
-        getPreviousVector(CurrentPacketMIs.front());
-    std::vector<R600InstrInfo::BankSwizzle> BS;
-    bool FitsReadPortLimits =
-        TII->fitsReadPortLimitations(CurrentPacketMIs, PV, BS);
-    DEBUG(
-      if (!FitsReadPortLimits) {
+      );
+      CurrentPacketMIs.pop_back();
+      return false;
+    }
+
+    // Is there a BankSwizzle set that meet Read Port limitations ?
+    if (!TII->fitsReadPortLimitations(CurrentPacketMIs,
+            PV, BS, isTransSlot)) {
+      DEBUG(
         dbgs() << "Couldn't pack :\n";
         MI->dump();
         dbgs() << "with the following packets :\n";
@@ -227,25 +237,43 @@ public:
           dbgs() << "\n";
         }
         dbgs() << "because of Read port limitations\n";
-      });
-    bool isBundlable = FitsConstLimits && FitsReadPortLimits;
-    if (isBundlable) {
+      );
+      CurrentPacketMIs.pop_back();
+      return false;
+    }
+
+    CurrentPacketMIs.pop_back();
+    return true;
+  }
+
+  MachineBasicBlock::iterator addToPacket(MachineInstr *MI) {
+    MachineBasicBlock::iterator FirstInBundle =
+        CurrentPacketMIs.empty() ? MI : CurrentPacketMIs.front();
+    const DenseMap<unsigned, unsigned> &PV =
+        getPreviousVector(FirstInBundle);
+    std::vector<R600InstrInfo::BankSwizzle> BS;
+    bool isTransSlot;
+
+    if (isBundlableWithCurrentPMI(MI, PV, BS, isTransSlot)) {
       for (unsigned i = 0, e = CurrentPacketMIs.size(); i < e; i++) {
         MachineInstr *MI = CurrentPacketMIs[i];
-            unsigned Op = TII->getOperandIdx(MI->getOpcode(),
-                R600Operands::BANK_SWIZZLE);
-            MI->getOperand(Op).setImm(BS[i]);
+        unsigned Op = TII->getOperandIdx(MI->getOpcode(),
+            AMDGPU::OpName::bank_swizzle);
+        MI->getOperand(Op).setImm(BS[i]);
       }
+      unsigned Op = TII->getOperandIdx(MI->getOpcode(),
+          AMDGPU::OpName::bank_swizzle);
+      MI->getOperand(Op).setImm(BS.back());
+      if (!CurrentPacketMIs.empty())
+        setIsLastBit(CurrentPacketMIs.back(), 0);
+      substitutePV(MI, PV);
+      MachineBasicBlock::iterator It = VLIWPacketizerList::addToPacket(MI);
+      if (isTransSlot) {
+        endPacket(llvm::next(It)->getParent(), llvm::next(It));
+      }
+      return It;
     }
-    CurrentPacketMIs.pop_back();
-    if (!isBundlable) {
-      endPacket(MI->getParent(), MI);
-      substitutePV(MI, getPreviousVector(MI));
-      return VLIWPacketizerList::addToPacket(MI);
-    }
-    if (!CurrentPacketMIs.empty())
-      setIsLastBit(CurrentPacketMIs.back(), 0);
-    substitutePV(MI, PV);
+    endPacket(MI->getParent(), MI);
     return VLIWPacketizerList::addToPacket(MI);
   }
 };
@@ -276,7 +304,8 @@ bool R600Packetizer::runOnMachineFunction(MachineFunction &Fn) {
     MachineBasicBlock::iterator End = MBB->end();
     MachineBasicBlock::iterator MI = MBB->begin();
     while (MI != End) {
-      if (MI->isKill()) {
+      if (MI->isKill() ||
+          (MI->getOpcode() == AMDGPU::CF_ALU && !MI->getOperand(8).getImm())) {
         MachineBasicBlock::iterator DeleteMI = MI;
         ++MI;
         MBB->erase(DeleteMI);
@@ -324,10 +353,8 @@ bool R600Packetizer::runOnMachineFunction(MachineFunction &Fn) {
 
 }
 
-}
+} // end anonymous namespace
 
 llvm::FunctionPass *llvm::createR600Packetizer(TargetMachine &tm) {
   return new R600Packetizer(tm);
 }
-
-#endif // R600PACKETIZER_CPP

@@ -199,7 +199,7 @@ private:
   /// final size.
   SDValue SExtPromotedInteger(SDValue Op) {
     EVT OldVT = Op.getValueType();
-    DebugLoc dl = Op.getDebugLoc();
+    SDLoc dl(Op);
     Op = GetPromotedInteger(Op);
     return DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, Op.getValueType(), Op,
                        DAG.getValueType(OldVT));
@@ -209,7 +209,7 @@ private:
   /// final size.
   SDValue ZExtPromotedInteger(SDValue Op) {
     EVT OldVT = Op.getValueType();
-    DebugLoc dl = Op.getDebugLoc();
+    SDLoc dl(Op);
     Op = GetPromotedInteger(Op);
     return DAG.getZeroExtendInReg(Op, dl, OldVT.getScalarType());
   }
@@ -361,7 +361,7 @@ private:
   SDValue ExpandIntOp_ATOMIC_STORE(SDNode *N);
 
   void IntegerExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                  ISD::CondCode &CCCode, DebugLoc dl);
+                                  ISD::CondCode &CCCode, SDLoc dl);
 
   //===--------------------------------------------------------------------===//
   // Float to Integer Conversion Support: LegalizeFloatTypes.cpp
@@ -488,7 +488,7 @@ private:
   SDValue ExpandFloatOp_STORE(SDNode *N, unsigned OpNo);
 
   void FloatExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                ISD::CondCode &CCCode, DebugLoc dl);
+                                ISD::CondCode &CCCode, SDLoc dl);
 
   //===--------------------------------------------------------------------===//
   // Scalarization Support: LegalizeVectorTypes.cpp
@@ -653,7 +653,7 @@ private:
   /// loads to load a vector with a resulting wider type. It takes
   ///   LdChain: list of chains for the load to be generated.
   ///   Ld:      load to widen
-  SDValue GenWidenVectorLoads(SmallVector<SDValue, 16>& LdChain,
+  SDValue GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
                               LoadSDNode *LD);
 
   /// GenWidenVectorExtLoads - Helper function to generate a set of extension
@@ -661,20 +661,20 @@ private:
   ///   LdChain: list of chains for the load to be generated.
   ///   Ld:      load to widen
   ///   ExtType: extension element type
-  SDValue GenWidenVectorExtLoads(SmallVector<SDValue, 16>& LdChain,
+  SDValue GenWidenVectorExtLoads(SmallVectorImpl<SDValue> &LdChain,
                                  LoadSDNode *LD, ISD::LoadExtType ExtType);
 
   /// Helper genWidenVectorStores - Helper function to generate a set of
   /// stores to store a widen vector into non widen memory
   ///   StChain: list of chains for the stores we have generated
   ///   ST:      store of a widen value
-  void GenWidenVectorStores(SmallVector<SDValue, 16>& StChain, StoreSDNode *ST);
+  void GenWidenVectorStores(SmallVectorImpl<SDValue> &StChain, StoreSDNode *ST);
 
   /// Helper genWidenVectorTruncStores - Helper function to generate a set of
   /// stores to store a truncate widen vector into non widen memory
   ///   StChain: list of chains for the stores we have generated
   ///   ST:      store of a widen value
-  void GenWidenVectorTruncStores(SmallVector<SDValue, 16>& StChain,
+  void GenWidenVectorTruncStores(SmallVectorImpl<SDValue> &StChain,
                                  StoreSDNode *ST);
 
   /// Modifies a vector input (widen or narrows) to a vector of NVT.  The

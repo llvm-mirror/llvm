@@ -11,11 +11,11 @@
 //===----------------------------------------------------------------------===//
 
 let Namespace = "PPC" in {
-def sub_lt : SubRegIndex;
-def sub_gt : SubRegIndex;
-def sub_eq : SubRegIndex;
-def sub_un : SubRegIndex;
-def sub_32 : SubRegIndex;
+def sub_lt : SubRegIndex<1>;
+def sub_gt : SubRegIndex<1, 1>;
+def sub_eq : SubRegIndex<1, 2>;
+def sub_un : SubRegIndex<1, 3>;
+def sub_32 : SubRegIndex<32>;
 }
 
 
@@ -150,7 +150,7 @@ def CTR  : SPR<9, "ctr">, DwarfRegNum<[-2, 66]>;
 def CTR8 : SPR<9, "ctr">, DwarfRegNum<[66, -2]>;
 
 // VRsave register
-def VRSAVE: SPR<256, "VRsave">, DwarfRegNum<[109]>;
+def VRSAVE: SPR<256, "vrsave">, DwarfRegNum<[109]>;
 
 // Carry bit.  In the architecture this is really bit 0 of the XER register
 // (which really is SPR register 1);  this is the only bit interesting to a

@@ -1,8 +1,11 @@
 ; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios | FileCheck %s --check-prefix=ARM
+; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi | FileCheck %s --check-prefix=ARM
 ; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios | FileCheck %s --check-prefix=THUMB
 ; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios -arm-long-calls | FileCheck %s --check-prefix=ARM-LONG
+; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi -arm-long-calls | FileCheck %s --check-prefix=ARM-LONG
 ; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios -arm-long-calls | FileCheck %s --check-prefix=THUMB-LONG
 ; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios -mattr=-vfp2 | FileCheck %s --check-prefix=ARM-NOVFP
+; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi -mattr=-vfp2 | FileCheck %s --check-prefix=ARM-NOVFP
 ; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios -mattr=-vfp2 | FileCheck %s --check-prefix=THUMB-NOVFP
 
 ; Note that some of these tests assume that relocations are either
@@ -48,9 +51,9 @@ define void @foo(i8 %a, i16 %b) nounwind {
 ; THUMB: sxtb	r2, r1
 ; THUMB: mov r0, r2
   %2 = call i32 @t1(i8 signext %a)
-; ARM: uxtb	r2, r1
+; ARM: and	r2, r1, #255
 ; ARM: mov r0, r2
-; THUMB: uxtb	r2, r1
+; THUMB: and	r2, r1, #255
 ; THUMB: mov r0, r2
   %3 = call i32 @t2(i8 zeroext %a)
 ; ARM: sxth	r2, r1
@@ -89,7 +92,7 @@ declare signext i8 @t7();
 declare zeroext i8 @t8();
 declare zeroext i1 @t9();
 
-define i32 @t10(i32 %argc, i8** nocapture %argv) {
+define i32 @t10() {
 entry:
 ; ARM: @t10
 ; ARM: movw [[R0:l?r[0-9]*]], #0
@@ -98,13 +101,13 @@ entry:
 ; ARM: movw [[R3:l?r[0-9]*]], #28
 ; ARM: movw [[R4:l?r[0-9]*]], #40
 ; ARM: movw [[R5:l?r[0-9]*]], #186
-; ARM: uxtb [[R0]], [[R0]]
-; ARM: uxtb [[R1]], [[R1]]
-; ARM: uxtb [[R2]], [[R2]]
-; ARM: uxtb [[R3]], [[R3]]
-; ARM: uxtb [[R4]], [[R4]]
+; ARM: and [[R0]], [[R0]], #255
+; ARM: and [[R1]], [[R1]], #255
+; ARM: and [[R2]], [[R2]], #255
+; ARM: and [[R3]], [[R3]], #255
+; ARM: and [[R4]], [[R4]], #255
 ; ARM: str [[R4]], [sp]
-; ARM: uxtb [[R4]], [[R5]]
+; ARM: and [[R4]], [[R5]], #255
 ; ARM: str [[R4]], [sp, #4]
 ; ARM: bl {{_?}}bar
 ; ARM-LONG: @t10
@@ -125,13 +128,13 @@ entry:
 ; THUMB: movt [[R4]], #0
 ; THUMB: movw [[R5:l?r[0-9]*]], #186
 ; THUMB: movt [[R5]], #0
-; THUMB: uxtb [[R0]], [[R0]]
-; THUMB: uxtb [[R1]], [[R1]]
-; THUMB: uxtb [[R2]], [[R2]]
-; THUMB: uxtb [[R3]], [[R3]]
-; THUMB: uxtb.w [[R4]], [[R4]]
+; THUMB: and [[R0]], [[R0]], #255
+; THUMB: and [[R1]], [[R1]], #255
+; THUMB: and [[R2]], [[R2]], #255
+; THUMB: and [[R3]], [[R3]], #255
+; THUMB: and [[R4]], [[R4]], #255
 ; THUMB: str.w [[R4]], [sp]
-; THUMB: uxtb.w [[R4]], [[R5]]
+; THUMB: and [[R4]], [[R5]], #255
 ; THUMB: str.w [[R4]], [sp, #4]
 ; THUMB: bl {{_?}}bar
 ; THUMB-LONG: @t10

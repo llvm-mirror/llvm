@@ -610,7 +610,7 @@ namespace llvm {
     /// error, this returns a register number of 0.
     std::pair<unsigned, const TargetRegisterClass*>
       getRegForInlineAsmConstraint(const std::string &Constraint,
-                                   EVT VT) const;
+                                   MVT VT) const;
 
     /// isLegalAddressingMode - Return true if the addressing mode represented
     /// by AM is legal for this target, for a load/store of the specified type.
@@ -646,11 +646,11 @@ namespace llvm {
     virtual bool isZExtFree(EVT VT1, EVT VT2) const;
     virtual bool isZExtFree(SDValue Val, EVT VT2) const;
 
-    /// isFMAFasterThanMulAndAdd - Return true if an FMA operation is faster than
-    /// a pair of mul and add instructions. fmuladd intrinsics will be expanded to
-    /// FMAs when this method returns true (and FMAs are legal), otherwise fmuladd
-    /// is expanded to mul + add.
-    virtual bool isFMAFasterThanMulAndAdd(EVT) const { return true; }
+    /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
+    /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
+    /// expanded to FMAs when this method returns true, otherwise fmuladd is
+    /// expanded to fmul + fadd.
+    virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const;
 
     /// isNarrowingProfitable - Return true if it's profitable to narrow
     /// operations of type VT1 to VT2. e.g. on x86, it's profitable to narrow
@@ -734,7 +734,6 @@ namespace llvm {
     /// Subtarget - Keep a pointer to the X86Subtarget around so that we can
     /// make the right decision when generating code for different targets.
     const X86Subtarget *Subtarget;
-    const X86RegisterInfo *RegInfo;
     const DataLayout *TD;
 
     /// Used to store the TargetOptions so that we don't waste time resetting
@@ -760,16 +759,16 @@ namespace llvm {
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
                             const SmallVectorImpl<ISD::InputArg> &Ins,
-                            DebugLoc dl, SelectionDAG &DAG,
+                            SDLoc dl, SelectionDAG &DAG,
                             SmallVectorImpl<SDValue> &InVals) const;
     SDValue LowerMemArgument(SDValue Chain,
                              CallingConv::ID CallConv,
                              const SmallVectorImpl<ISD::InputArg> &ArgInfo,
-                             DebugLoc dl, SelectionDAG &DAG,
+                             SDLoc dl, SelectionDAG &DAG,
                              const CCValAssign &VA,  MachineFrameInfo *MFI,
                               unsigned i) const;
     SDValue LowerMemOpCallTo(SDValue Chain, SDValue StackPtr, SDValue Arg,
-                             DebugLoc dl, SelectionDAG &DAG,
+                             SDLoc dl, SelectionDAG &DAG,
                              const CCValAssign &VA,
                              ISD::ArgFlagsTy Flags) const;
 
@@ -791,7 +790,7 @@ namespace llvm {
     bool IsCalleePop(bool isVarArg, CallingConv::ID CallConv) const;
     SDValue EmitTailCallLoadRetAddr(SelectionDAG &DAG, SDValue &OutRetAddr,
                                 SDValue Chain, bool IsTailCall, bool Is64Bit,
-                                int FPDiff, DebugLoc dl) const;
+                                int FPDiff, SDLoc dl) const;
 
     unsigned GetAlignedArgumentStackSize(unsigned StackSize,
                                          SelectionDAG &DAG) const;
@@ -800,7 +799,7 @@ namespace llvm {
                                                bool isSigned,
                                                bool isReplace) const;
 
-    SDValue LowerAsSplatVectorLoad(SDValue SrcOp, EVT VT, DebugLoc dl,
+    SDValue LowerAsSplatVectorLoad(SDValue SrcOp, EVT VT, SDLoc dl,
                                    SelectionDAG &DAG) const;
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
@@ -808,7 +807,7 @@ namespace llvm {
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerGlobalAddress(const GlobalValue *GV, DebugLoc dl,
+    SDValue LowerGlobalAddress(const GlobalValue *GV, SDLoc dl,
                                int64_t Offset, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -830,7 +829,7 @@ namespace llvm {
     SDValue LowerFNEG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFCOPYSIGN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerToBT(SDValue And, ISD::CondCode CC,
-                      DebugLoc dl, SelectionDAG &DAG) const;
+                      SDLoc dl, SelectionDAG &DAG) const;
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
@@ -865,7 +864,7 @@ namespace llvm {
       LowerFormalArguments(SDValue Chain,
                            CallingConv::ID CallConv, bool isVarArg,
                            const SmallVectorImpl<ISD::InputArg> &Ins,
-                           DebugLoc dl, SelectionDAG &DAG,
+                           SDLoc dl, SelectionDAG &DAG,
                            SmallVectorImpl<SDValue> &InVals) const;
     virtual SDValue
       LowerCall(CallLoweringInfo &CLI,
@@ -876,7 +875,7 @@ namespace llvm {
                   CallingConv::ID CallConv, bool isVarArg,
                   const SmallVectorImpl<ISD::OutputArg> &Outs,
                   const SmallVectorImpl<SDValue> &OutVals,
-                  DebugLoc dl, SelectionDAG &DAG) const;
+                  SDLoc dl, SelectionDAG &DAG) const;
 
     virtual bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const;
 

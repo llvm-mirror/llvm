@@ -11,8 +11,8 @@
 #define DEBUGME 0
 #define DEBUG_TYPE "structcfg"
 
+#include "AMDGPU.h"
 #include "AMDGPUInstrInfo.h"
-#include "AMDIL.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -28,8 +28,11 @@
 #include "llvm/CodeGen/MachinePostDominators.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
+
+#define DEFAULT_VEC_SLOTS 8
 
 // TODO: move-begin.
 
@@ -57,7 +60,7 @@ STATISTIC(numClonedInstr,           "CFGStructurizer cloned instructions");
 // Miscellaneous utility for CFGStructurizer.
 //
 //===----------------------------------------------------------------------===//
-namespace llvmCFGStruct {
+namespace {
 #define SHOWNEWINSTR(i) \
   if (DEBUGME) errs() << "New instr: " << *i << "\n"
 
@@ -89,7 +92,7 @@ void PrintLoopinfo(const LoopinfoT &LoopInfo, llvm::raw_ostream &OS) {
 }
 
 template<class NodeT>
-void ReverseVector(SmallVector<NodeT *, DEFAULT_VEC_SLOTS> &Src) {
+void ReverseVector(SmallVectorImpl<NodeT *> &Src) {
   size_t sz = Src.size();
   for (size_t i = 0; i < sz/2; ++i) {
     NodeT *t = Src[i];
@@ -98,7 +101,7 @@ void ReverseVector(SmallVector<NodeT *, DEFAULT_VEC_SLOTS> &Src) {
   }
 }
 
-} //end namespace llvmCFGStruct
+} // end anonymous namespace
 
 //===----------------------------------------------------------------------===//
 //
@@ -106,7 +109,7 @@ void ReverseVector(SmallVector<NodeT *, DEFAULT_VEC_SLOTS> &Src) {
 //
 //===----------------------------------------------------------------------===//
 
-namespace llvmCFGStruct {
+namespace {
 template<class PassT>
 struct CFGStructTraits {
 };
@@ -142,7 +145,7 @@ public:
   LandInformation() : landBlk(NULL) {}
 };
 
-} //end of namespace llvmCFGStruct
+} // end anonymous namespace
 
 //===----------------------------------------------------------------------===//
 //
@@ -150,7 +153,7 @@ public:
 //
 //===----------------------------------------------------------------------===//
 
-namespace llvmCFGStruct {
+namespace {
 // bixia TODO: port it to BasicBlock, not just MachineBasicBlock.
 template<class PassT>
 class  CFGStructurizer {
@@ -255,7 +258,7 @@ private:
   BlockT *normalizeInfiniteLoopExit(LoopT *LoopRep);
   void removeUnconditionalBranch(BlockT *SrcBlock);
   void removeRedundantConditionalBranch(BlockT *SrcBlock);
-  void addDummyExitBlock(SmallVector<BlockT *, DEFAULT_VEC_SLOTS> &RetBlocks);
+  void addDummyExitBlock(SmallVectorImpl<BlockT *> &RetBlocks);
 
   void removeSuccessor(BlockT *SrcBlock);
   BlockT *cloneBlockForPredecessor(BlockT *CurBlock, BlockT *PredBlock);
@@ -288,8 +291,8 @@ private:
   bool hasBackEdge(BlockT *curBlock);
   unsigned getLoopDepth  (LoopT *LoopRep);
   int countActiveBlock(
-    typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::const_iterator IterStart,
-    typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::const_iterator IterEnd);
+    typename SmallVectorImpl<BlockT *>::const_iterator IterStart,
+    typename SmallVectorImpl<BlockT *>::const_iterator IterEnd);
     BlockT *findNearestCommonPostDom(std::set<BlockT *>&);
   BlockT *findNearestCommonPostDom(BlockT *Block1, BlockT *Block2);
 
@@ -364,7 +367,7 @@ bool CFGStructurizer<PassT>::prepare(FuncT &func, PassT &pass,
   // Remove unconditional branch instr.
   // Add dummy exit block iff there are multiple returns.
 
-  for (typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::const_iterator
+  for (typename SmallVectorImpl<BlockT *>::const_iterator
        iterBlk = orderedBlks.begin(), iterEndBlk = orderedBlks.end();
        iterBlk != iterEndBlk;
        ++iterBlk) {
@@ -438,12 +441,12 @@ bool CFGStructurizer<PassT>::run(FuncT &func, PassT &pass,
              << ", numRemaintedBlk = " << numRemainedBlk << "\n";
     }
 
-    typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::const_iterator
+    typename SmallVectorImpl<BlockT *>::const_iterator
       iterBlk = orderedBlks.begin();
-    typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::const_iterator
+    typename SmallVectorImpl<BlockT *>::const_iterator
       iterBlkEnd = orderedBlks.end();
 
-    typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::const_iterator
+    typename SmallVectorImpl<BlockT *>::const_iterator
       sccBeginIter = iterBlk;
     BlockT *sccBeginBlk = NULL;
     int sccNumBlk = 0;  // The number of active blocks, init to a
@@ -568,7 +571,7 @@ bool CFGStructurizer<PassT>::run(FuncT &func, PassT &pass,
 template<class PassT>
 void CFGStructurizer<PassT>::printOrderedBlocks(llvm::raw_ostream &os) {
   size_t i = 0;
-  for (typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::const_iterator
+  for (typename SmallVectorImpl<BlockT *>::const_iterator
       iterBlk = orderedBlks.begin(), iterBlkEnd = orderedBlks.end();
        iterBlk != iterBlkEnd;
        ++iterBlk, ++i) {
@@ -990,7 +993,7 @@ int CFGStructurizer<PassT>::loopcontPatternMatch(LoopT *loopRep,
     }
   }
 
-  for (typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::iterator
+  for (typename SmallVectorImpl<BlockT *>::iterator
        iter = contBlk.begin(), iterEnd = contBlk.end();
        iter != iterEnd; ++iter) {
     (*iter)->removeSuccessor(loopHeader);
@@ -2073,13 +2076,13 @@ void CFGStructurizer<PassT>::removeRedundantConditionalBranch(BlockT *srcBlk) {
 } //removeRedundantConditionalBranch
 
 template<class PassT>
-void CFGStructurizer<PassT>::addDummyExitBlock(SmallVector<BlockT*,
-                                               DEFAULT_VEC_SLOTS> &retBlks) {
+void CFGStructurizer<PassT>::addDummyExitBlock(SmallVectorImpl<BlockT *>
+                                               &retBlks) {
   BlockT *dummyExitBlk = funcRep->CreateMachineBasicBlock();
   funcRep->push_back(dummyExitBlk);  //insert to function
   CFGTraits::insertInstrEnd(dummyExitBlk, AMDGPU::RETURN, passRep);
 
-  for (typename SmallVector<BlockT *, DEFAULT_VEC_SLOTS>::iterator iter =
+  for (typename SmallVectorImpl<BlockT *>::iterator iter =
          retBlks.begin(),
        iterEnd = retBlks.end(); iter != iterEnd; ++iter) {
     BlockT *curBlk = *iter;
@@ -2203,7 +2206,7 @@ CFGStructurizer<PassT>::recordLoopLandBlock(LoopT *loopRep, BlockT *landBlk,
     newLandBlk = funcRep->CreateMachineBasicBlock();
     funcRep->push_back(newLandBlk);  //insert to function
     newLandBlk->addSuccessor(landBlk);
-    for (typename SmallVector<BlockT*, DEFAULT_VEC_SLOTS>::iterator iter =
+    for (typename SmallVectorImpl<BlockT *>::iterator iter =
          inpathBlks.begin(),
          iterEnd = inpathBlks.end(); iter != iterEnd; ++iter) {
       BlockT *curBlk = *iter;
@@ -2367,8 +2370,8 @@ unsigned CFGStructurizer<PassT>::getLoopDepth(LoopT *loopRep) {
 
 template<class PassT>
 int CFGStructurizer<PassT>::countActiveBlock
-(typename SmallVector<BlockT*, DEFAULT_VEC_SLOTS>::const_iterator iterStart,
- typename SmallVector<BlockT*, DEFAULT_VEC_SLOTS>::const_iterator iterEnd) {
+(typename SmallVectorImpl<BlockT *>::const_iterator iterStart,
+ typename SmallVectorImpl<BlockT *>::const_iterator iterEnd) {
   int count = 0;
   while (iterStart != iterEnd) {
     if (!isRetiredBlock(*iterStart)) {
@@ -2446,7 +2449,7 @@ CFGStructurizer<PassT>::findNearestCommonPostDom
   return commonDom;
 } //findNearestCommonPostDom
 
-} //end namespace llvm
+} // end anonymous namespace
 
 //todo: move-end
 
@@ -2458,9 +2461,7 @@ CFGStructurizer<PassT>::findNearestCommonPostDom
 //===----------------------------------------------------------------------===//
 
 
-using namespace llvmCFGStruct;
-
-namespace llvm {
+namespace {
 class AMDGPUCFGStructurizer : public MachineFunctionPass {
 public:
   typedef MachineInstr              InstructionType;
@@ -2474,26 +2475,26 @@ public:
 
 protected:
   TargetMachine &TM;
-  const TargetInstrInfo *TII;
-  const AMDGPURegisterInfo *TRI;
 
 public:
   AMDGPUCFGStructurizer(char &pid, TargetMachine &tm);
   const TargetInstrInfo *getTargetInstrInfo() const;
-
-private:
-
+  const AMDGPURegisterInfo *getTargetRegisterInfo() const;
 };
 
-} //end of namespace llvm
+} // end anonymous namespace
 AMDGPUCFGStructurizer::AMDGPUCFGStructurizer(char &pid, TargetMachine &tm)
-: MachineFunctionPass(pid), TM(tm), TII(tm.getInstrInfo()),
-  TRI(static_cast<const AMDGPURegisterInfo *>(tm.getRegisterInfo())) {
+  : MachineFunctionPass(pid), TM(tm) {
 }
 
 const TargetInstrInfo *AMDGPUCFGStructurizer::getTargetInstrInfo() const {
-  return TII;
+  return TM.getInstrInfo();
 }
+
+const AMDGPURegisterInfo *AMDGPUCFGStructurizer::getTargetRegisterInfo() const {
+  return static_cast<const AMDGPURegisterInfo *>(TM.getRegisterInfo());
+}
+
 //===----------------------------------------------------------------------===//
 //
 // CFGPrepare
@@ -2501,9 +2502,7 @@ const TargetInstrInfo *AMDGPUCFGStructurizer::getTargetInstrInfo() const {
 //===----------------------------------------------------------------------===//
 
 
-using namespace llvmCFGStruct;
-
-namespace llvm {
+namespace {
 class AMDGPUCFGPrepare : public AMDGPUCFGStructurizer {
 public:
   static char ID;
@@ -2515,13 +2514,10 @@ public:
   virtual void getAnalysisUsage(AnalysisUsage &AU) const;
 
   bool runOnMachineFunction(MachineFunction &F);
-
-private:
-
 };
 
 char AMDGPUCFGPrepare::ID = 0;
-} //end of namespace llvm
+} // end anonymous namespace
 
 AMDGPUCFGPrepare::AMDGPUCFGPrepare(TargetMachine &tm)
   : AMDGPUCFGStructurizer(ID, tm )  {
@@ -2545,9 +2541,7 @@ void AMDGPUCFGPrepare::getAnalysisUsage(AnalysisUsage &AU) const {
 //===----------------------------------------------------------------------===//
 
 
-using namespace llvmCFGStruct;
-
-namespace llvm {
+namespace {
 class AMDGPUCFGPerform : public AMDGPUCFGStructurizer {
 public:
   static char ID;
@@ -2557,13 +2551,10 @@ public:
   virtual const char *getPassName() const;
   virtual void getAnalysisUsage(AnalysisUsage &AU) const;
   bool runOnMachineFunction(MachineFunction &F);
-
-private:
-
 };
 
 char AMDGPUCFGPerform::ID = 0;
-} //end of namespace llvm
+} // end anonymous namespace
 
   AMDGPUCFGPerform::AMDGPUCFGPerform(TargetMachine &tm)
 : AMDGPUCFGStructurizer(ID, tm) {
@@ -2587,7 +2578,7 @@ void AMDGPUCFGPerform::getAnalysisUsage(AnalysisUsage &AU) const {
 //
 //===----------------------------------------------------------------------===//
 
-namespace llvmCFGStruct {
+namespace {
 // this class is tailor to the AMDGPU backend
 template<>
 struct CFGStructTraits<AMDGPUCFGStructurizer> {
@@ -3024,28 +3015,24 @@ struct CFGStructTraits<AMDGPUCFGStructurizer> {
     return &pass.getAnalysis<MachineLoopInfo>();
   }
 }; // template class CFGStructTraits
-} //end of namespace llvm
+} // end anonymous namespace
 
 // createAMDGPUCFGPreparationPass- Returns a pass
-FunctionPass *llvm::createAMDGPUCFGPreparationPass(TargetMachine &tm
-                                                 ) {
-  return new AMDGPUCFGPrepare(tm );
+FunctionPass *llvm::createAMDGPUCFGPreparationPass(TargetMachine &tm) {
+  return new AMDGPUCFGPrepare(tm);
 }
 
 bool AMDGPUCFGPrepare::runOnMachineFunction(MachineFunction &func) {
-  return llvmCFGStruct::CFGStructurizer<AMDGPUCFGStructurizer>().prepare(func,
-                                                                        *this,
-                                                                        TRI);
+  return CFGStructurizer<AMDGPUCFGStructurizer>().prepare(func, *this,
+                                                       getTargetRegisterInfo());
 }
 
 // createAMDGPUCFGStructurizerPass- Returns a pass
-FunctionPass *llvm::createAMDGPUCFGStructurizerPass(TargetMachine &tm
-                                                  ) {
-  return new AMDGPUCFGPerform(tm );
+FunctionPass *llvm::createAMDGPUCFGStructurizerPass(TargetMachine &tm) {
+  return new AMDGPUCFGPerform(tm);
 }
 
 bool AMDGPUCFGPerform::runOnMachineFunction(MachineFunction &func) {
-  return llvmCFGStruct::CFGStructurizer<AMDGPUCFGStructurizer>().run(func,
-                                                                    *this,
-                                                                    TRI);
+  return CFGStructurizer<AMDGPUCFGStructurizer>().run(func, *this,
+                                                      getTargetRegisterInfo());
 }

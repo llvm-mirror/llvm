@@ -33,7 +33,6 @@ void initializeX86TTIPass(PassRegistry &);
 namespace {
 
 class X86TTI : public ImmutablePass, public TargetTransformInfo {
-  const X86TargetMachine *TM;
   const X86Subtarget *ST;
   const X86TargetLowering *TLI;
 
@@ -42,12 +41,12 @@ class X86TTI : public ImmutablePass, public TargetTransformInfo {
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
 public:
-  X86TTI() : ImmutablePass(ID), TM(0), ST(0), TLI(0) {
+  X86TTI() : ImmutablePass(ID), ST(0), TLI(0) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
   X86TTI(const X86TargetMachine *TM)
-      : ImmutablePass(ID), TM(TM), ST(TM->getSubtargetImpl()),
+      : ImmutablePass(ID), ST(TM->getSubtargetImpl()),
         TLI(TM->getTargetLowering()) {
     initializeX86TTIPass(*PassRegistry::getPassRegistry());
   }
@@ -100,6 +99,8 @@ public:
   virtual unsigned getMemoryOpCost(unsigned Opcode, Type *Src,
                                    unsigned Alignment,
                                    unsigned AddressSpace) const;
+
+  virtual unsigned getAddressComputationCost(Type *PtrTy, bool IsComplex) const;
 
   /// @}
 };
@@ -196,6 +197,16 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
     { ISD::SRA,  MVT::v32i8,  32*10 }, // Scalarized.
     { ISD::SRA,  MVT::v16i16,  16*10 }, // Scalarized.
     { ISD::SRA,  MVT::v4i64,  4*10 }, // Scalarized.
+
+    // Vectorizing division is a bad idea. See the SSE2 table for more comments.
+    { ISD::SDIV,  MVT::v32i8,  32*20 },
+    { ISD::SDIV,  MVT::v16i16, 16*20 },
+    { ISD::SDIV,  MVT::v8i32,  8*20 },
+    { ISD::SDIV,  MVT::v4i64,  4*20 },
+    { ISD::UDIV,  MVT::v32i8,  32*20 },
+    { ISD::UDIV,  MVT::v16i16, 16*20 },
+    { ISD::UDIV,  MVT::v8i32,  8*20 },
+    { ISD::UDIV,  MVT::v4i64,  4*20 },
   };
 
   // Look for AVX2 lowering tricks.
@@ -258,6 +269,21 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
     { ISD::SRA,  MVT::v8i16,  8*10 }, // Scalarized.
     { ISD::SRA,  MVT::v4i32,  4*10 }, // Scalarized.
     { ISD::SRA,  MVT::v2i64,  2*10 }, // Scalarized.
+
+    // It is not a good idea to vectorize division. We have to scalarize it and
+    // in the process we will often end up having to spilling regular
+    // registers. The overhead of division is going to dominate most kernels
+    // anyways so try hard to prevent vectorization of division - it is
+    // generally a bad idea. Assume somewhat arbitrarily that we have to be able
+    // to hide "20 cycles" for each lane.
+    { ISD::SDIV,  MVT::v16i8,  16*20 },
+    { ISD::SDIV,  MVT::v8i16,  8*20 },
+    { ISD::SDIV,  MVT::v4i32,  4*20 },
+    { ISD::SDIV,  MVT::v2i64,  2*20 },
+    { ISD::UDIV,  MVT::v16i8,  16*20 },
+    { ISD::UDIV,  MVT::v8i16,  8*20 },
+    { ISD::UDIV,  MVT::v4i32,  4*20 },
+    { ISD::UDIV,  MVT::v2i64,  2*20 },
   };
 
   if (ST->hasSSE2()) {
@@ -467,19 +493,22 @@ unsigned X86TTI::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
   };
 
   if (ST->hasAVX2()) {
-    int Idx = CostTableLookup<MVT>(AVX2CostTbl, array_lengthof(AVX2CostTbl), ISD, MTy);
+    int Idx = CostTableLookup<MVT>(AVX2CostTbl, array_lengthof(AVX2CostTbl),
+                                   ISD, MTy);
     if (Idx != -1)
       return LT.first * AVX2CostTbl[Idx].Cost;
   }
 
   if (ST->hasAVX()) {
-    int Idx = CostTableLookup<MVT>(AVX1CostTbl, array_lengthof(AVX1CostTbl), ISD, MTy);
+    int Idx = CostTableLookup<MVT>(AVX1CostTbl, array_lengthof(AVX1CostTbl),
+                                   ISD, MTy);
     if (Idx != -1)
       return LT.first * AVX1CostTbl[Idx].Cost;
   }
 
   if (ST->hasSSE42()) {
-    int Idx = CostTableLookup<MVT>(SSE42CostTbl, array_lengthof(SSE42CostTbl), ISD, MTy);
+    int Idx = CostTableLookup<MVT>(SSE42CostTbl, array_lengthof(SSE42CostTbl),
+                                   ISD, MTy);
     if (Idx != -1)
       return LT.first * SSE42CostTbl[Idx].Cost;
   }
@@ -511,8 +540,51 @@ unsigned X86TTI::getVectorInstrCost(unsigned Opcode, Type *Val,
   return TargetTransformInfo::getVectorInstrCost(Opcode, Val, Index);
 }
 
+unsigned X86TTI::getScalarizationOverhead(Type *Ty, bool Insert,
+                                            bool Extract) const {
+  assert (Ty->isVectorTy() && "Can only scalarize vectors");
+  unsigned Cost = 0;
+
+  for (int i = 0, e = Ty->getVectorNumElements(); i < e; ++i) {
+    if (Insert)
+      Cost += TopTTI->getVectorInstrCost(Instruction::InsertElement, Ty, i);
+    if (Extract)
+      Cost += TopTTI->getVectorInstrCost(Instruction::ExtractElement, Ty, i);
+  }
+
+  return Cost;
+}
+
 unsigned X86TTI::getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
                                  unsigned AddressSpace) const {
+  // Handle non power of two vectors such as <3 x float>
+  if (VectorType *VTy = dyn_cast<VectorType>(Src)) {
+    unsigned NumElem = VTy->getVectorNumElements();
+
+    // Handle a few common cases:
+    // <3 x float>
+    if (NumElem == 3 && VTy->getScalarSizeInBits() == 32)
+      // Cost = 64 bit store + extract + 32 bit store.
+      return 3;
+
+    // <3 x double>
+    if (NumElem == 3 && VTy->getScalarSizeInBits() == 64)
+      // Cost = 128 bit store + unpack + 64 bit store.
+      return 3;
+
+    // Assume that all other non power-of-two numbers are scalarized.
+    if (!isPowerOf2_32(NumElem)) {
+      unsigned Cost = TargetTransformInfo::getMemoryOpCost(Opcode,
+                                                           VTy->getScalarType(),
+                                                           Alignment,
+                                                           AddressSpace);
+      unsigned SplitCost = getScalarizationOverhead(Src,
+                                                    Opcode == Instruction::Load,
+                                                    Opcode==Instruction::Store);
+      return NumElem * Cost + SplitCost;
+    }
+  }
+
   // Legalize the type.
   std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Src);
   assert((Opcode == Instruction::Load || Opcode == Instruction::Store) &&
@@ -527,4 +599,17 @@ unsigned X86TTI::getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
     Cost*=2;
 
   return Cost;
+}
+
+unsigned X86TTI::getAddressComputationCost(Type *Ty, bool IsComplex) const {
+  // Address computations in vectorized code with non-consecutive addresses will
+  // likely result in more instructions compared to scalar code where the
+  // computation can more often be merged into the index mode. The resulting
+  // extra micro-ops can significantly decrease throughput.
+  unsigned NumVectorInstToHideOverhead = 10;
+
+  if (Ty->isVectorTy() && IsComplex)
+    return NumVectorInstToHideOverhead;
+
+  return TargetTransformInfo::getAddressComputationCost(Ty, IsComplex);
 }

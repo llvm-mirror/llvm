@@ -160,6 +160,13 @@ private:
   int64_t CppHashLineNumber;
   SMLoc CppHashLoc;
   int CppHashBuf;
+  /// When generating dwarf for assembly source files we need to calculate the
+  /// logical line number based on the last parsed cpp hash file line comment
+  /// and current line. Since this is slow and messes up the SourceMgr's 
+  /// cache we save the last info we queried with SrcMgr.FindLineNumber().
+  SMLoc LastQueryIDLoc;
+  int LastQueryBuffer;
+  unsigned LastQueryLine;
 
   /// AssemblerDialect. ~OU means unset value and use value provided by MAI.
   unsigned AssemblerDialect;
@@ -555,8 +562,7 @@ bool AsmParser::ProcessIncbinFile(const std::string &Filename) {
     return true;
 
   // Pick up the bytes from the file and emit them.
-  getStreamer().EmitBytes(SrcMgr.getMemoryBuffer(NewBuf)->getBuffer(),
-                          DEFAULT_ADDRSPACE);
+  getStreamer().EmitBytes(SrcMgr.getMemoryBuffer(NewBuf)->getBuffer());
   return false;
 }
 
@@ -805,11 +811,21 @@ bool AsmParser::ParsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
     // Look for 'b' or 'f' following an Integer as a directional label
     if (Lexer.getKind() == AsmToken::Identifier) {
       StringRef IDVal = getTok().getString();
+      // Lookup the symbol variant if used.
+      std::pair<StringRef, StringRef> Split = IDVal.split('@');
+      MCSymbolRefExpr::VariantKind Variant = MCSymbolRefExpr::VK_None;
+      if (Split.first.size() != IDVal.size()) {
+        Variant = MCSymbolRefExpr::getVariantKindForName(Split.second);
+        if (Variant == MCSymbolRefExpr::VK_Invalid) {
+          Variant = MCSymbolRefExpr::VK_None;
+          return TokError("invalid variant '" + Split.second + "'");
+        }
+	IDVal = Split.first;
+      }
       if (IDVal == "f" || IDVal == "b"){
         MCSymbol *Sym = Ctx.GetDirectionalLocalSymbol(IntVal,
                                                       IDVal == "f" ? 1 : 0);
-        Res = MCSymbolRefExpr::Create(Sym, MCSymbolRefExpr::VK_None,
-                                      getContext());
+        Res = MCSymbolRefExpr::Create(Sym, Variant, getContext());
         if (IDVal == "b" && Sym->isUndefined())
           return Error(Loc, "invalid reference to undefined symbol");
         EndLoc = Lexer.getTok().getEndLoc();
@@ -1311,11 +1327,11 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
       case DK_DOUBLE:
         return ParseDirectiveRealValue(APFloat::IEEEdouble);
       case DK_ALIGN: {
-        bool IsPow2 = !getContext().getAsmInfo().getAlignmentIsInBytes();
+        bool IsPow2 = !getContext().getAsmInfo()->getAlignmentIsInBytes();
         return ParseDirectiveAlign(IsPow2, /*ExprSize=*/1);
       }
       case DK_ALIGN32: {
-        bool IsPow2 = !getContext().getAsmInfo().getAlignmentIsInBytes();
+        bool IsPow2 = !getContext().getAsmInfo()->getAlignmentIsInBytes();
         return ParseDirectiveAlign(IsPow2, /*ExprSize=*/4);
       }
       case DK_BALIGN:
@@ -1509,7 +1525,18 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
         getStreamer().EmitDwarfFileDirective(
           getContext().nextGenDwarfFileNumber(), StringRef(), CppHashFilename);
 
-       unsigned CppHashLocLineNo = SrcMgr.FindLineNumber(CppHashLoc,CppHashBuf);
+       // Since SrcMgr.FindLineNumber() is slow and messes up the SourceMgr's 
+       // cache with the different Loc from the call above we save the last
+       // info we queried here with SrcMgr.FindLineNumber().
+       unsigned CppHashLocLineNo;
+       if (LastQueryIDLoc == CppHashLoc && LastQueryBuffer == CppHashBuf)
+         CppHashLocLineNo = LastQueryLine;
+       else {
+         CppHashLocLineNo = SrcMgr.FindLineNumber(CppHashLoc, CppHashBuf);
+         LastQueryLine = CppHashLocLineNo;
+         LastQueryIDLoc = CppHashLoc;
+         LastQueryBuffer = CppHashBuf;
+       }
        Line = CppHashLineNumber - 1 + (Line - CppHashLocLineNo);
     }
 
@@ -2192,9 +2219,9 @@ bool AsmParser::ParseDirectiveAscii(StringRef IDVal, bool ZeroTerminated) {
       if (parseEscapedString(Data))
         return true;
 
-      getStreamer().EmitBytes(Data, DEFAULT_ADDRSPACE);
+      getStreamer().EmitBytes(Data);
       if (ZeroTerminated)
-        getStreamer().EmitBytes(StringRef("\0", 1), DEFAULT_ADDRSPACE);
+        getStreamer().EmitBytes(StringRef("\0", 1));
 
       Lex();
 
@@ -2229,9 +2256,9 @@ bool AsmParser::ParseDirectiveValue(unsigned Size) {
         uint64_t IntValue = MCE->getValue();
         if (!isUIntN(8 * Size, IntValue) && !isIntN(8 * Size, IntValue))
           return Error(ExprLoc, "literal value out of range for directive");
-        getStreamer().EmitIntValue(IntValue, Size, DEFAULT_ADDRSPACE);
+        getStreamer().EmitIntValue(IntValue, Size);
       } else
-        getStreamer().EmitValue(Value, Size, DEFAULT_ADDRSPACE);
+        getStreamer().EmitValue(Value, Size);
 
       if (getLexer().is(AsmToken::EndOfStatement))
         break;
@@ -2290,7 +2317,7 @@ bool AsmParser::ParseDirectiveRealValue(const fltSemantics &Semantics) {
       // Emit the value as an integer.
       APInt AsInt = Value.bitcastToAPInt();
       getStreamer().EmitIntValue(AsInt.getLimitedValue(),
-                                 AsInt.getBitWidth() / 8, DEFAULT_ADDRSPACE);
+                                 AsInt.getBitWidth() / 8);
 
       if (getLexer().is(AsmToken::EndOfStatement))
         break;
@@ -2326,7 +2353,7 @@ bool AsmParser::ParseDirectiveZero() {
 
   Lex();
 
-  getStreamer().EmitFill(NumBytes, Val, DEFAULT_ADDRSPACE);
+  getStreamer().EmitFill(NumBytes, Val);
 
   return false;
 }
@@ -2365,7 +2392,7 @@ bool AsmParser::ParseDirectiveFill() {
     return TokError("invalid '.fill' size, expected 1, 2, 4, or 8");
 
   for (uint64_t i = 0, e = NumValues; i != e; ++i)
-    getStreamer().EmitIntValue(FillExpr, FillSize, DEFAULT_ADDRSPACE);
+    getStreamer().EmitIntValue(FillExpr, FillSize);
 
   return false;
 }
@@ -2730,7 +2757,7 @@ bool AsmParser::ParseRegisterOrRegisterNumber(int64_t &Register,
   if (getLexer().isNot(AsmToken::Integer)) {
     if (getTargetParser().ParseRegister(RegNo, DirectiveLoc, DirectiveLoc))
       return true;
-    Register = getContext().getRegisterInfo().getDwarfRegNum(RegNo, true);
+    Register = getContext().getRegisterInfo()->getDwarfRegNum(RegNo, true);
   } else
     return parseAbsoluteExpression(Register);
 
@@ -3303,7 +3330,7 @@ bool AsmParser::ParseDirectiveSpace(StringRef IDVal) {
                     Twine(IDVal) + "' directive");
 
   // FIXME: Sometimes the fill expr is 'nop' if it isn't supplied, instead of 0.
-  getStreamer().EmitFill(NumBytes, FillExpr, DEFAULT_ADDRSPACE);
+  getStreamer().EmitFill(NumBytes, FillExpr);
 
   return false;
 }

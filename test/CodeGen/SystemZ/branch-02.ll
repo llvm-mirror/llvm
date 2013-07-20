@@ -1,10 +1,11 @@
 ; Test all condition-code masks that are relevant for signed integer
-; comparisons.
+; comparisons, in cases where a separate branch is better than COMPARE
+; AND BRANCH.
 ;
 ; RUN: llc < %s -mtriple=s390x-linux-gnu | FileCheck %s
 
 define void @f1(i32 *%src, i32 %target) {
-; CHECK: f1:
+; CHECK-LABEL: f1:
 ; CHECK: .cfi_startproc
 ; CHECK: .L[[LABEL:.*]]:
 ; CHECK: c %r3, 0(%r2)
@@ -19,7 +20,7 @@ exit:
 }
 
 define void @f2(i32 *%src, i32 %target) {
-; CHECK: f2:
+; CHECK-LABEL: f2:
 ; CHECK: .cfi_startproc
 ; CHECK: .L[[LABEL:.*]]:
 ; CHECK: c %r3, 0(%r2)
@@ -34,7 +35,7 @@ exit:
 }
 
 define void @f3(i32 *%src, i32 %target) {
-; CHECK: f3:
+; CHECK-LABEL: f3:
 ; CHECK: .cfi_startproc
 ; CHECK: .L[[LABEL:.*]]:
 ; CHECK: c %r3, 0(%r2)
@@ -49,7 +50,7 @@ exit:
 }
 
 define void @f4(i32 *%src, i32 %target) {
-; CHECK: f4:
+; CHECK-LABEL: f4:
 ; CHECK: .cfi_startproc
 ; CHECK: .L[[LABEL:.*]]:
 ; CHECK: c %r3, 0(%r2)
@@ -64,7 +65,7 @@ exit:
 }
 
 define void @f5(i32 *%src, i32 %target) {
-; CHECK: f5:
+; CHECK-LABEL: f5:
 ; CHECK: .cfi_startproc
 ; CHECK: .L[[LABEL:.*]]:
 ; CHECK: c %r3, 0(%r2)
@@ -79,7 +80,7 @@ exit:
 }
 
 define void @f6(i32 *%src, i32 %target) {
-; CHECK: f6:
+; CHECK-LABEL: f6:
 ; CHECK: .cfi_startproc
 ; CHECK: .L[[LABEL:.*]]:
 ; CHECK: c %r3, 0(%r2)

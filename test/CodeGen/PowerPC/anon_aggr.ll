@@ -1,4 +1,4 @@
-; RUN: llc -O0 -mcpu=pwr7 -mtriple=powerpc64-unknown-linux-gnu < %s | FileCheck %s
+; RUN: llc -O0 -mcpu=pwr7 -mtriple=powerpc64-unknown-linux-gnu -fast-isel=false < %s | FileCheck %s
 ; RUN: llc -O0 -mcpu=g4 -mtriple=powerpc-apple-darwin8 < %s | FileCheck -check-prefix=DARWIN32 %s
 ; RUN: llc -O0 -mcpu=ppc970 -mtriple=powerpc64-apple-darwin8 < %s | FileCheck -check-prefix=DARWIN64 %s
 
@@ -20,10 +20,10 @@ unequal:
   ret i8* %ptr
 }
 
-; CHECK: func1:
+; CHECK-LABEL: func1:
 ; CHECK: cmpld {{[0-9]+}}, 4, 5
-; CHECK: std 4, -[[OFFSET1:[0-9]+]]
-; CHECK: std 5, -[[OFFSET2:[0-9]+]]
+; CHECK-DAG: std 4, -[[OFFSET1:[0-9]+]]
+; CHECK-DAG: std 5, -[[OFFSET2:[0-9]+]]
 ; CHECK: ld 3, -[[OFFSET1]](1)
 ; CHECK: ld 3, -[[OFFSET2]](1)
 
@@ -61,12 +61,12 @@ unequal:
   ret i8* %array2_ptr
 }
 
-; CHECK: func2:
+; CHECK-LABEL: func2:
 ; CHECK: addi [[REG1:[0-9]+]], 1, 64
 ; CHECK: ld [[REG2:[0-9]+]], 8([[REG1]])
 ; CHECK: cmpld {{[0-9]+}}, 4, [[REG2]]
-; CHECK: std [[REG2]], -[[OFFSET1:[0-9]+]]
-; CHECK: std 4, -[[OFFSET2:[0-9]+]]
+; CHECK-DAG: std [[REG2]], -[[OFFSET1:[0-9]+]]
+; CHECK-DAG: std 4, -[[OFFSET2:[0-9]+]]
 ; CHECK: ld 3, -[[OFFSET2]](1)
 ; CHECK: ld 3, -[[OFFSET1]](1)
 
@@ -107,7 +107,7 @@ unequal:
   ret i8* %array2_ptr
 }
 
-; CHECK: func3:
+; CHECK-LABEL: func3:
 ; CHECK: addi [[REG1:[0-9]+]], 1, 64
 ; CHECK: addi [[REG2:[0-9]+]], 1, 48
 ; CHECK: ld [[REG3:[0-9]+]], 8([[REG1]])
@@ -156,7 +156,7 @@ unequal:
   ret i8* %array2_ptr
 }
 
-; CHECK: func4:
+; CHECK-LABEL: func4:
 ; CHECK: addi [[REG1:[0-9]+]], 1, 128
 ; CHECK: ld [[REG2:[0-9]+]], 120(1)
 ; CHECK: ld [[REG3:[0-9]+]], 8([[REG1]])

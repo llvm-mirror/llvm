@@ -203,9 +203,43 @@ namespace llvm {
     /// via the llvm.fma.* intrinsic) will always be honored, regardless of
     /// the value of this option.
     FPOpFusion::FPOpFusionMode AllowFPOpFusion;
-
-    bool operator==(const TargetOptions &);
   };
+
+// Comparison operators:
+
+
+inline bool operator==(const TargetOptions &LHS,
+                       const TargetOptions &RHS) {
+#define ARE_EQUAL(X) LHS.X == RHS.X
+  return
+    ARE_EQUAL(UnsafeFPMath) &&
+    ARE_EQUAL(NoInfsFPMath) &&
+    ARE_EQUAL(NoNaNsFPMath) &&
+    ARE_EQUAL(HonorSignDependentRoundingFPMathOption) &&
+    ARE_EQUAL(UseSoftFloat) &&
+    ARE_EQUAL(NoZerosInBSS) &&
+    ARE_EQUAL(JITEmitDebugInfo) &&
+    ARE_EQUAL(JITEmitDebugInfoToDisk) &&
+    ARE_EQUAL(GuaranteedTailCallOpt) &&
+    ARE_EQUAL(DisableTailCalls) &&
+    ARE_EQUAL(StackAlignmentOverride) &&
+    ARE_EQUAL(RealignStack) &&
+    ARE_EQUAL(SSPBufferSize) &&
+    ARE_EQUAL(EnableFastISel) &&
+    ARE_EQUAL(PositionIndependentExecutable) &&
+    ARE_EQUAL(EnableSegmentedStacks) &&
+    ARE_EQUAL(UseInitArray) &&
+    ARE_EQUAL(TrapFuncName) &&
+    ARE_EQUAL(FloatABIType) &&
+    ARE_EQUAL(AllowFPOpFusion);
+#undef ARE_EQUAL
+}
+
+inline bool operator!=(const TargetOptions &LHS,
+                       const TargetOptions &RHS) {
+  return !(LHS == RHS);
+}
+
 } // End llvm namespace
 
 #endif

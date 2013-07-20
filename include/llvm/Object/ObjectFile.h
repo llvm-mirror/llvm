@@ -28,12 +28,8 @@ namespace object {
 class ObjectFile;
 
 union DataRefImpl {
-  struct {
-    // ELF needs this for relocations. This entire union should probably be a
-    // char[max(8, sizeof(uintptr_t))] and require the impl to cast.
-    uint16_t a, b;
-    uint32_t c;
-  } w;
+  // This entire union should probably be a
+  // char[max(8, sizeof(uintptr_t))] and require the impl to cast.
   struct {
     uint32_t a, b;
   } d;
@@ -89,6 +85,7 @@ inline bool operator<(const DataRefImpl &a, const DataRefImpl &b) {
 }
 
 class SymbolRef;
+typedef content_iterator<SymbolRef> symbol_iterator;
 
 /// RelocationRef - This is a value type class that represents a single
 /// relocation in the list of relocations in the object file.
@@ -107,7 +104,7 @@ public:
 
   error_code getAddress(uint64_t &Result) const;
   error_code getOffset(uint64_t &Result) const;
-  error_code getSymbol(SymbolRef &Result) const;
+  symbol_iterator getSymbol() const;
   error_code getType(uint64_t &Result) const;
 
   /// @brief Indicates whether this relocation should hidden when listing
@@ -133,6 +130,8 @@ typedef content_iterator<RelocationRef> relocation_iterator;
 
 /// SectionRef - This is a value type class that represents a single section in
 /// the list of sections in the object file.
+class SectionRef;
+typedef content_iterator<SectionRef> section_iterator;
 class SectionRef {
   friend class SymbolRef;
   DataRefImpl SectionPimpl;
@@ -169,10 +168,10 @@ public:
 
   relocation_iterator begin_relocations() const;
   relocation_iterator end_relocations() const;
+  section_iterator getRelocatedSection() const;
 
   DataRefImpl getRawDataRefImpl() const;
 };
-typedef content_iterator<SectionRef> section_iterator;
 
 /// SymbolRef - This is a value type class that represents a single symbol in
 /// the list of symbols in the object file.
@@ -238,7 +237,6 @@ public:
 
   DataRefImpl getRawDataRefImpl() const;
 };
-typedef content_iterator<SymbolRef> symbol_iterator;
 
 /// LibraryRef - This is a value type class that represents a single library in
 /// the list of libraries needed by a shared or dynamic object.
@@ -326,7 +324,7 @@ protected:
                                            bool &Result) const = 0;
   virtual relocation_iterator getSectionRelBegin(DataRefImpl Sec) const = 0;
   virtual relocation_iterator getSectionRelEnd(DataRefImpl Sec) const = 0;
-
+  virtual section_iterator getRelocatedSection(DataRefImpl Sec) const;
 
   // Same as above for RelocationRef.
   friend class RelocationRef;
@@ -336,8 +334,7 @@ protected:
                                           uint64_t &Res) const =0;
   virtual error_code getRelocationOffset(DataRefImpl Rel,
                                          uint64_t &Res) const =0;
-  virtual error_code getRelocationSymbol(DataRefImpl Rel,
-                                         SymbolRef &Res) const = 0;
+  virtual symbol_iterator getRelocationSymbol(DataRefImpl Rel) const = 0;
   virtual error_code getRelocationType(DataRefImpl Rel,
                                        uint64_t &Res) const = 0;
   virtual error_code getRelocationTypeName(DataRefImpl Rel,
@@ -538,6 +535,10 @@ inline relocation_iterator SectionRef::end_relocations() const {
   return OwningObject->getSectionRelEnd(SectionPimpl);
 }
 
+inline section_iterator SectionRef::getRelocatedSection() const {
+  return OwningObject->getRelocatedSection(SectionPimpl);
+}
+
 inline DataRefImpl SectionRef::getRawDataRefImpl() const {
   return SectionPimpl;
 }
@@ -564,8 +565,8 @@ inline error_code RelocationRef::getOffset(uint64_t &Result) const {
   return OwningObject->getRelocationOffset(RelocationPimpl, Result);
 }
 
-inline error_code RelocationRef::getSymbol(SymbolRef &Result) const {
-  return OwningObject->getRelocationSymbol(RelocationPimpl, Result);
+inline symbol_iterator RelocationRef::getSymbol() const {
+  return OwningObject->getRelocationSymbol(RelocationPimpl);
 }
 
 inline error_code RelocationRef::getType(uint64_t &Result) const {

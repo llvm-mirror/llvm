@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Object/COFFYaml.h"
+#include "llvm/Object/COFFYAML.h"
 
 #define ECase(X) IO.enumCase(Value, #X, COFF::X);
 namespace llvm {
@@ -229,11 +229,12 @@ struct NType {
 
 }
 
-void MappingTraits<COFF::relocation>::mapping(IO &IO, COFF::relocation &Rel) {
+void MappingTraits<COFFYAML::Relocation>::mapping(IO &IO,
+                                                  COFFYAML::Relocation &Rel) {
   MappingNormalization<NType, uint16_t> NT(IO, Rel.Type);
 
   IO.mapRequired("VirtualAddress", Rel.VirtualAddress);
-  IO.mapRequired("SymbolTableIndex", Rel.SymbolTableIndex);
+  IO.mapRequired("SymbolName", Rel.SymbolName);
   IO.mapRequired("Type", NT->Type);
 }
 
@@ -255,8 +256,9 @@ void MappingTraits<COFFYAML::Symbol>::mapping(IO &IO, COFFYAML::Symbol &S) {
   IO.mapRequired("SimpleType", S.SimpleType);
   IO.mapRequired("ComplexType", S.ComplexType);
   IO.mapRequired("StorageClass", NS->StorageClass);
-  IO.mapOptional("NumberOfAuxSymbols", S.Header.NumberOfAuxSymbols);
-  IO.mapOptional("AuxiliaryData", S.AuxiliaryData);
+  IO.mapOptional("NumberOfAuxSymbols", S.Header.NumberOfAuxSymbols,
+                 (uint8_t) 0);
+  IO.mapOptional("AuxiliaryData", S.AuxiliaryData, object::yaml::BinaryRef());
 }
 
 void MappingTraits<COFFYAML::Section>::mapping(IO &IO, COFFYAML::Section &Sec) {

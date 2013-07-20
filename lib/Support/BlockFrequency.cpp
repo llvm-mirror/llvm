@@ -18,10 +18,8 @@
 
 using namespace llvm;
 
-namespace {
-
-/// mult96bit - Multiply FREQ by N and store result in W array.
-void mult96bit(uint64_t freq, uint32_t N, uint64_t W[2]) {
+/// Multiply FREQ by N and store result in W array.
+static void mult96bit(uint64_t freq, uint32_t N, uint64_t W[2]) {
   uint64_t u0 = freq & UINT32_MAX;
   uint64_t u1 = freq >> 32;
 
@@ -42,14 +40,18 @@ void mult96bit(uint64_t freq, uint32_t N, uint64_t W[2]) {
 }
 
 
-/// div96bit - Divide 96-bit value stored in W array by D. Return 64-bit frequency.
-uint64_t div96bit(uint64_t W[2], uint32_t D) {
+/// Divide 96-bit value stored in W array by D.
+/// Return 64-bit quotient, saturated to UINT64_MAX on overflow.
+static uint64_t div96bit(uint64_t W[2], uint32_t D) {
   uint64_t y = W[0];
   uint64_t x = W[1];
-  int i;
+  unsigned i;
 
-  for (i = 1; i <= 64 && x; ++i) {
-    uint32_t t = (int)x >> 31;
+  assert(x != 0 && "This is really a 64-bit division");
+
+  // This long division algorithm automatically saturates on overflow.
+  for (i = 0; i < 64 && x; ++i) {
+    uint32_t t = -((x >> 31) & 1); // Splat bit 31 to bits 0-31.
     x = (x << 1) | (y >> 63);
     y = y << 1;
     if ((x | t) >= D) {
@@ -58,36 +60,34 @@ uint64_t div96bit(uint64_t W[2], uint32_t D) {
     }
   }
 
-  return y << (64 - i + 1);
+  return y << (64 - i);
 }
 
-}
 
+void BlockFrequency::scale(uint32_t N, uint32_t D) {
+  assert(D != 0 && "Division by zero");
 
-BlockFrequency &BlockFrequency::operator*=(const BranchProbability &Prob) {
-  uint32_t n = Prob.getNumerator();
-  uint32_t d = Prob.getDenominator();
+  // Calculate Frequency * N.
+  uint64_t MulLo = (Frequency & UINT32_MAX) * N;
+  uint64_t MulHi = (Frequency >> 32) * N;
+  uint64_t MulRes = (MulHi << 32) + MulLo;
 
-  assert(n <= d && "Probability must be less or equal to 1.");
-
-  // Calculate Frequency * n.
-  uint64_t mulLo = (Frequency & UINT32_MAX) * n;
-  uint64_t mulHi = (Frequency >> 32) * n;
-  uint64_t mulRes = (mulHi << 32) + mulLo;
-
-  // If there was overflow use 96-bit operations.
-  if (mulHi > UINT32_MAX || mulRes < mulLo) {
-    // 96-bit value represented as W[1]:W[0].
-    uint64_t W[2];
-
-    // Probability is less or equal to 1 which means that results must fit
-    // 64-bit.
-    mult96bit(Frequency, n, W);
-    Frequency = div96bit(W, d);
-    return *this;
+  // If the product fits in 64 bits, just use built-in division.
+  if (MulHi <= UINT32_MAX && MulRes >= MulLo) {
+    Frequency = MulRes / D;
+    return;
   }
 
-  Frequency = mulRes / d;
+  // Product overflowed, use 96-bit operations.
+  // 96-bit value represented as W[1]:W[0].
+  uint64_t W[2];
+  mult96bit(Frequency, N, W);
+  Frequency = div96bit(W, D);
+  return;
+}
+
+BlockFrequency &BlockFrequency::operator*=(const BranchProbability &Prob) {
+  scale(Prob.getNumerator(), Prob.getDenominator());
   return *this;
 }
 
@@ -95,6 +95,17 @@ const BlockFrequency
 BlockFrequency::operator*(const BranchProbability &Prob) const {
   BlockFrequency Freq(Frequency);
   Freq *= Prob;
+  return Freq;
+}
+
+BlockFrequency &BlockFrequency::operator/=(const BranchProbability &Prob) {
+  scale(Prob.getDenominator(), Prob.getNumerator());
+  return *this;
+}
+
+BlockFrequency BlockFrequency::operator/(const BranchProbability &Prob) const {
+  BlockFrequency Freq(Frequency);
+  Freq /= Prob;
   return Freq;
 }
 
@@ -117,7 +128,16 @@ BlockFrequency::operator+(const BlockFrequency &Prob) const {
 }
 
 void BlockFrequency::print(raw_ostream &OS) const {
-  OS << Frequency;
+  // Convert fixed-point number to decimal.
+  OS << Frequency / getEntryFrequency() << ".";
+  uint64_t Rem = Frequency % getEntryFrequency();
+  uint64_t Eps = 1;
+  do {
+    Rem *= 10;
+    Eps *= 10;
+    OS << Rem / getEntryFrequency();
+    Rem = Rem % getEntryFrequency();
+  } while (Rem >= Eps/2);
 }
 
 namespace llvm {

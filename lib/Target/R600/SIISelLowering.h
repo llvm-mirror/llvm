@@ -21,11 +21,10 @@
 namespace llvm {
 
 class SITargetLowering : public AMDGPUTargetLowering {
-  const SIInstrInfo * TII;
-  const TargetRegisterInfo * TRI;
-
-  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerParameter(SelectionDAG &DAG, EVT VT, SDLoc DL,
+                         SDValue Chain, unsigned Offset) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
 
   bool foldImm(SDValue &Operand, int32_t &Immediate,
@@ -37,14 +36,16 @@ class SITargetLowering : public AMDGPUTargetLowering {
 
   SDNode *foldOperands(MachineSDNode *N, SelectionDAG &DAG) const;
   void adjustWritemask(MachineSDNode *&N, SelectionDAG &DAG) const;
+  MachineSDNode *AdjustRegClass(MachineSDNode *N, SelectionDAG &DAG) const;
 
 public:
   SITargetLowering(TargetMachine &tm);
+  bool allowsUnalignedMemoryAccesses(EVT  VT, bool *IsFast) const;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool isVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
-                               DebugLoc DL, SelectionDAG &DAG,
+                               SDLoc DL, SelectionDAG &DAG,
                                SmallVectorImpl<SDValue> &InVals) const;
 
   virtual MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr * MI,
@@ -58,6 +59,8 @@ public:
                                              SDNode *Node) const;
 
   int32_t analyzeImmediate(const SDNode *N) const;
+  SDValue CreateLiveInRegister(SelectionDAG &DAG, const TargetRegisterClass *RC,
+                               unsigned Reg, EVT VT) const;
 };
 
 } // End namespace llvm

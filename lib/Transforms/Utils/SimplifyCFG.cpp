@@ -40,12 +40,14 @@
 #include "llvm/Support/ConstantRange.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/NoFolder.h"
+#include "llvm/Support/PatternMatch.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <algorithm>
 #include <map>
 #include <set>
 using namespace llvm;
+using namespace PatternMatch;
 
 static cl::opt<unsigned>
 PHINodeFoldingThreshold("phi-node-folding-threshold", cl::Hidden, cl::init(1),
@@ -281,7 +283,7 @@ static Value *GetIfCondition(BasicBlock *BB, BasicBlock *&IfTrue,
   return BI->getCondition();
 }
 
-/// ComputeSpeculuationCost - Compute an abstract "cost" of speculating the
+/// ComputeSpeculationCost - Compute an abstract "cost" of speculating the
 /// given instruction, which is assumed to be safe to speculate. 1 means
 /// cheap, 2 means less cheap, and UINT_MAX means prohibitively expensive.
 static unsigned ComputeSpeculationCost(const User *I) {
@@ -432,7 +434,24 @@ GatherConstantCompares(Value *V, std::vector<ConstantInt*> &Vals, Value *&Extra,
   // If this is an icmp against a constant, handle this as one of the cases.
   if (ICmpInst *ICI = dyn_cast<ICmpInst>(I)) {
     if (ConstantInt *C = GetConstantInt(I->getOperand(1), TD)) {
+      Value *RHSVal;
+      ConstantInt *RHSC;
+
       if (ICI->getPredicate() == (isEQ ? ICmpInst::ICMP_EQ:ICmpInst::ICMP_NE)) {
+        // (x & ~2^x) == y --> x == y || x == y|2^x
+        // This undoes a transformation done by instcombine to fuse 2 compares.
+        if (match(ICI->getOperand(0),
+                  m_And(m_Value(RHSVal), m_ConstantInt(RHSC)))) {
+          APInt Not = ~RHSC->getValue();
+          if (Not.isPowerOf2()) {
+            Vals.push_back(C);
+            Vals.push_back(
+                ConstantInt::get(C->getContext(), C->getValue() | Not));
+            UsedICmps++;
+            return RHSVal;
+          }
+        }
+
         UsedICmps++;
         Vals.push_back(C);
         return I->getOperand(0);
@@ -442,6 +461,13 @@ GatherConstantCompares(Value *V, std::vector<ConstantInt*> &Vals, Value *&Extra,
       // the set.
       ConstantRange Span =
         ConstantRange::makeICmpRegion(ICI->getPredicate(), C->getValue());
+
+      // Shift the range if the compare is fed by an add. This is the range
+      // compare idiom as emitted by instcombine.
+      bool hasAdd =
+          match(I->getOperand(0), m_Add(m_Value(RHSVal), m_ConstantInt(RHSC)));
+      if (hasAdd)
+        Span = Span.subtract(RHSC->getValue());
 
       // If this is an and/!= check then we want to optimize "x ugt 2" into
       // x != 0 && x != 1.
@@ -455,7 +481,7 @@ GatherConstantCompares(Value *V, std::vector<ConstantInt*> &Vals, Value *&Extra,
       for (APInt Tmp = Span.getLower(); Tmp != Span.getUpper(); ++Tmp)
         Vals.push_back(ConstantInt::get(V->getContext(), Tmp));
       UsedICmps++;
-      return I->getOperand(0);
+      return hasAdd ? RHSVal : I->getOperand(0);
     }
     return 0;
   }
@@ -533,9 +559,7 @@ Value *SimplifyCFGOpt::isValueEqualityComparison(TerminatorInst *TI) {
   } else if (BranchInst *BI = dyn_cast<BranchInst>(TI))
     if (BI->isConditional() && BI->getCondition()->hasOneUse())
       if (ICmpInst *ICI = dyn_cast<ICmpInst>(BI->getCondition()))
-        if ((ICI->getPredicate() == ICmpInst::ICMP_EQ ||
-             ICI->getPredicate() == ICmpInst::ICMP_NE) &&
-            GetConstantInt(ICI->getOperand(1), TD))
+        if (ICI->isEquality() && GetConstantInt(ICI->getOperand(1), TD))
           CV = ICI->getOperand(0);
 
   // Unwrap any lossless ptrtoint cast.
@@ -1083,9 +1107,9 @@ static bool HoistThenElseCodeToIf(BranchInst *BI) {
       (isa<InvokeInst>(I1) && !isSafeToHoistInvoke(BB1, BB2, I1, I2)))
     return false;
 
-  // If we get here, we can hoist at least one instruction.
   BasicBlock *BIParent = BI->getParent();
 
+  bool Changed = false;
   do {
     // If we are hoisting the terminator instruction, don't move one (making a
     // broken BB), instead clone it, and remove BI.
@@ -1100,6 +1124,7 @@ static bool HoistThenElseCodeToIf(BranchInst *BI) {
       I2->replaceAllUsesWith(I1);
     I1->intersectOptionalDataWith(I2);
     I2->eraseFromParent();
+    Changed = true;
 
     I1 = BB1_Itr++;
     I2 = BB2_Itr++;
@@ -1119,7 +1144,23 @@ static bool HoistThenElseCodeToIf(BranchInst *BI) {
 HoistTerminator:
   // It may not be possible to hoist an invoke.
   if (isa<InvokeInst>(I1) && !isSafeToHoistInvoke(BB1, BB2, I1, I2))
-    return true;
+    return Changed;
+
+  for (succ_iterator SI = succ_begin(BB1), E = succ_end(BB1); SI != E; ++SI) {
+    PHINode *PN;
+    for (BasicBlock::iterator BBI = SI->begin();
+         (PN = dyn_cast<PHINode>(BBI)); ++BBI) {
+      Value *BB1V = PN->getIncomingValueForBlock(BB1);
+      Value *BB2V = PN->getIncomingValueForBlock(BB2);
+      if (BB1V == BB2V)
+        continue;
+
+      if (isa<ConstantExpr>(BB1V) && !isSafeToSpeculativelyExecute(BB1V))
+        return Changed;
+      if (isa<ConstantExpr>(BB2V) && !isSafeToSpeculativelyExecute(BB2V))
+        return Changed;
+    }
+  }
 
   // Okay, it is safe to hoist the terminator.
   Instruction *NT = I1->clone();
@@ -1362,8 +1403,8 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
 ///
 /// \return The pointer to the value of the previous store if the store can be
 ///         hoisted into the predecessor block. 0 otherwise.
-Value *isSafeToSpeculateStore(Instruction *I, BasicBlock *BrBB,
-                              BasicBlock *StoreBB, BasicBlock *EndBB) {
+static Value *isSafeToSpeculateStore(Instruction *I, BasicBlock *BrBB,
+                                     BasicBlock *StoreBB, BasicBlock *EndBB) {
   StoreInst *StoreToHoist = dyn_cast<StoreInst>(I);
   if (!StoreToHoist)
     return 0;
@@ -1522,18 +1563,23 @@ static bool SpeculativelyExecuteBB(BranchInst *BI, BasicBlock *ThenBB) {
     Value *OrigV = PN->getIncomingValueForBlock(BB);
     Value *ThenV = PN->getIncomingValueForBlock(ThenBB);
 
+    // FIXME: Try to remove some of the duplication with HoistThenElseCodeToIf.
     // Skip PHIs which are trivial.
     if (ThenV == OrigV)
       continue;
 
     HaveRewritablePHIs = true;
-    ConstantExpr *CE = dyn_cast<ConstantExpr>(ThenV);
-    if (!CE)
+    ConstantExpr *OrigCE = dyn_cast<ConstantExpr>(OrigV);
+    ConstantExpr *ThenCE = dyn_cast<ConstantExpr>(ThenV);
+    if (!OrigCE && !ThenCE)
       continue; // Known safe and cheap.
 
-    if (!isSafeToSpeculativelyExecute(CE))
+    if ((ThenCE && !isSafeToSpeculativelyExecute(ThenCE)) ||
+        (OrigCE && !isSafeToSpeculativelyExecute(OrigCE)))
       return false;
-    if (ComputeSpeculationCost(CE) > PHINodeFoldingThreshold)
+    unsigned OrigCost = OrigCE ? ComputeSpeculationCost(OrigCE) : 0;
+    unsigned ThenCost = ThenCE ? ComputeSpeculationCost(ThenCE) : 0;
+    if (OrigCost + ThenCost > 2 * PHINodeFoldingThreshold)
       return false;
 
     // Account for the cost of an unfolded ConstantExpr which could end up
@@ -3307,7 +3353,7 @@ static bool ForwardSwitchConditionToPHI(SwitchInst *SI) {
   for (ForwardingNodesMap::iterator I = ForwardingNodes.begin(),
        E = ForwardingNodes.end(); I != E; ++I) {
     PHINode *Phi = I->first;
-    SmallVector<int,4> &Indexes = I->second;
+    SmallVectorImpl<int> &Indexes = I->second;
 
     if (Indexes.size() < 2) continue;
 
@@ -3392,11 +3438,12 @@ static Constant *ConstantFold(Instruction *I,
 /// at the common destination basic block, *CommonDest, for one of the case
 /// destionations CaseDest corresponding to value CaseVal (0 for the default
 /// case), of a switch instruction SI.
-static bool GetCaseResults(SwitchInst *SI,
-                           ConstantInt *CaseVal,
-                           BasicBlock *CaseDest,
-                           BasicBlock **CommonDest,
-                           SmallVector<std::pair<PHINode*,Constant*>, 4> &Res) {
+static bool
+GetCaseResults(SwitchInst *SI,
+               ConstantInt *CaseVal,
+               BasicBlock *CaseDest,
+               BasicBlock **CommonDest,
+               SmallVectorImpl<std::pair<PHINode*,Constant*> > &Res) {
   // The block from which we enter the common destination.
   BasicBlock *Pred = SI->getParent();
 
@@ -3469,7 +3516,7 @@ namespace {
     SwitchLookupTable(Module &M,
                       uint64_t TableSize,
                       ConstantInt *Offset,
-               const SmallVector<std::pair<ConstantInt*, Constant*>, 4>& Values,
+             const SmallVectorImpl<std::pair<ConstantInt*, Constant*> >& Values,
                       Constant *DefaultValue,
                       const DataLayout *TD);
 
@@ -3516,7 +3563,7 @@ namespace {
 SwitchLookupTable::SwitchLookupTable(Module &M,
                                      uint64_t TableSize,
                                      ConstantInt *Offset,
-               const SmallVector<std::pair<ConstantInt*, Constant*>, 4>& Values,
+             const SmallVectorImpl<std::pair<ConstantInt*, Constant*> >& Values,
                                      Constant *DefaultValue,
                                      const DataLayout *TD)
     : SingleValue(0), BitMap(0), BitMapElementTy(0), Array(0) {
@@ -3643,7 +3690,7 @@ bool SwitchLookupTable::WouldFitInRegister(const DataLayout *TD,
 }
 
 /// ShouldBuildLookupTable - Determine whether a lookup table should be built
-/// for this switch, based on the number of caes, size of the table and the
+/// for this switch, based on the number of cases, size of the table and the
 /// types of the results.
 static bool ShouldBuildLookupTable(SwitchInst *SI,
                                    uint64_t TableSize,

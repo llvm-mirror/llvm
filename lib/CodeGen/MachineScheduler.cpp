@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/CodeGen/ScheduleDFS.h"
@@ -30,6 +31,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GraphWriter.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetInstrInfo.h"
 #include <queue>
 
 using namespace llvm;
@@ -50,11 +52,6 @@ static cl::opt<unsigned> MISchedCutoff("misched-cutoff", cl::Hidden,
 #else
 static bool ViewMISchedDAGs = false;
 #endif // NDEBUG
-
-// FIXME: remove this flag after initial testing. It should always be a good
-// thing.
-static cl::opt<bool> EnableCopyConstrain("misched-vcopy", cl::Hidden,
-    cl::desc("Constrain vreg copies."), cl::init(true));
 
 static cl::opt<bool> EnableLoadCluster("misched-cluster", cl::Hidden,
   cl::desc("Enable load clustering."), cl::init(true));
@@ -309,7 +306,7 @@ void MachineScheduler::print(raw_ostream &O, const Module* m) const {
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void ReadyQueue::dump() {
-  dbgs() << "  " << Name << ": ";
+  dbgs() << Name << ": ";
   for (unsigned i = 0, e = Queue.size(); i < e; ++i)
     dbgs() << Queue[i]->NodeNum << " ";
   dbgs() << "\n";
@@ -491,12 +488,13 @@ void ScheduleDAGMI::initRegPressure() {
   const std::vector<unsigned> &RegionPressure =
     RPTracker.getPressure().MaxSetPressure;
   for (unsigned i = 0, e = RegionPressure.size(); i < e; ++i) {
-    unsigned Limit = TRI->getRegPressureSetLimit(i);
-    DEBUG(dbgs() << TRI->getRegPressureSetName(i)
-          << "Limit " << Limit
-          << " Actual " << RegionPressure[i] << "\n");
-    if (RegionPressure[i] > Limit)
+    unsigned Limit = RegClassInfo->getRegPressureSetLimit(i);
+    if (RegionPressure[i] > Limit) {
+      DEBUG(dbgs() << TRI->getRegPressureSetName(i)
+            << " Limit " << Limit
+            << " Actual " << RegionPressure[i] << "\n");
       RegionCriticalPSets.push_back(PressureElement(i, 0));
+    }
   }
   DEBUG(dbgs() << "Excess PSets: ";
         for (unsigned i = 0, e = RegionCriticalPSets.size(); i != e; ++i)
@@ -517,7 +515,7 @@ updateScheduledPressure(const std::vector<unsigned> &NewMaxPressure) {
   }
   DEBUG(
     for (unsigned i = 0, e = NewMaxPressure.size(); i < e; ++i) {
-      unsigned Limit = TRI->getRegPressureSetLimit(i);
+      unsigned Limit = RegClassInfo->getRegPressureSetLimit(i);
       if (NewMaxPressure[i] > Limit ) {
         dbgs() << "  " << TRI->getRegPressureSetName(i) << ": "
                << NewMaxPressure[i] << " > " << Limit << "\n";
@@ -1101,7 +1099,7 @@ void CopyConstrain::apply(ScheduleDAGMI *DAG) {
 }
 
 //===----------------------------------------------------------------------===//
-// ConvergingScheduler - Implementation of the standard MachineSchedStrategy.
+// ConvergingScheduler - Implementation of the generic MachineSchedStrategy.
 //===----------------------------------------------------------------------===//
 
 namespace {
@@ -1112,10 +1110,9 @@ public:
   /// Represent the type of SchedCandidate found within a single queue.
   /// pickNodeBidirectional depends on these listed by decreasing priority.
   enum CandReason {
-    NoCand, PhysRegCopy, SingleExcess, SingleCritical, Cluster, Weak,
+    NoCand, PhysRegCopy, RegExcess, RegCritical, Cluster, Weak, RegMax,
     ResourceReduce, ResourceDemand, BotHeightReduce, BotPathReduce,
-    TopDepthReduce, TopPathReduce, SingleMax, MultiPressure, NextDefUse,
-    NodeOrder};
+    TopDepthReduce, TopPathReduce, NextDefUse, NodeOrder};
 
 #ifndef NDEBUG
   static const char *getReasonStr(ConvergingScheduler::CandReason Reason);
@@ -1160,6 +1157,9 @@ public:
     // The reason for this candidate.
     CandReason Reason;
 
+    // Set of reasons that apply to multiple candidates.
+    uint32_t RepeatReasonSet;
+
     // Register pressure values for the best candidate.
     RegPressureDelta RPDelta;
 
@@ -1167,7 +1167,7 @@ public:
     SchedResourceDelta ResDelta;
 
     SchedCandidate(const CandPolicy &policy)
-    : Policy(policy), SU(NULL), Reason(NoCand) {}
+      : Policy(policy), SU(NULL), Reason(NoCand), RepeatReasonSet(0) {}
 
     bool isValid() const { return SU; }
 
@@ -1180,6 +1180,9 @@ public:
       ResDelta = Best.ResDelta;
     }
 
+    bool isRepeat(CandReason R) { return RepeatReasonSet & (1 << R); }
+    void setRepeat(CandReason R) { RepeatReasonSet |= (1 << R); }
+
     void initResourceDelta(const ScheduleDAGMI *DAG,
                            const TargetSchedModel *SchedModel);
   };
@@ -1189,32 +1192,21 @@ public:
     // Critical path through the DAG in expected latency.
     unsigned CriticalPath;
 
+    // Scaled count of micro-ops left to schedule.
+    unsigned RemIssueCount;
+
     // Unscheduled resources
     SmallVector<unsigned, 16> RemainingCounts;
-    // Critical resource for the unscheduled zone.
-    unsigned CritResIdx;
-    // Number of micro-ops left to schedule.
-    unsigned RemainingMicroOps;
 
     void reset() {
       CriticalPath = 0;
+      RemIssueCount = 0;
       RemainingCounts.clear();
-      CritResIdx = 0;
-      RemainingMicroOps = 0;
     }
 
     SchedRemainder() { reset(); }
 
     void init(ScheduleDAGMI *DAG, const TargetSchedModel *SchedModel);
-
-    unsigned getMaxRemainingCount(const TargetSchedModel *SchedModel) const {
-      if (!SchedModel->hasInstrSchedModel())
-        return 0;
-
-      return std::max(
-        RemainingMicroOps * SchedModel->getMicroOpFactor(),
-        RemainingCounts[CritResIdx]);
-    }
   };
 
   /// Each Scheduling boundary is associated with ready queues. It tracks the
@@ -1235,8 +1227,13 @@ public:
 
     ScheduleHazardRecognizer *HazardRec;
 
+    /// Number of cycles it takes to issue the instructions scheduled in this
+    /// zone. It is defined as: scheduled-micro-ops / issue-width + stalls.
+    /// See getStalls().
     unsigned CurrCycle;
-    unsigned IssueCount;
+
+    /// Micro-ops issued in the current cycle
+    unsigned CurrMOps;
 
     /// MinReadyCycle - Cycle of the soonest available instruction.
     unsigned MinReadyCycle;
@@ -1244,20 +1241,35 @@ public:
     // The expected latency of the critical path in this scheduled zone.
     unsigned ExpectedLatency;
 
-    // Resources used in the scheduled zone beyond this boundary.
-    SmallVector<unsigned, 16> ResourceCounts;
+    // The latency of dependence chains leading into this zone.
+    // For each node scheduled top-down: DLat = max DLat, N.Depth.
+    // For each cycle scheduled: DLat -= 1.
+    unsigned DependentLatency;
+
+    /// Count the scheduled (issued) micro-ops that can be retired by
+    /// time=CurrCycle assuming the first scheduled instr is retired at time=0.
+    unsigned RetiredMOps;
+
+    // Count scheduled resources that have been executed. Resources are
+    // considered executed if they become ready in the time that it takes to
+    // saturate any resource including the one in question. Counts are scaled
+    // for direct comparison with other resources. Counts ca be compared with
+    // MOps * getMicroOpFactor and Latency * getLatencyFactor.
+    SmallVector<unsigned, 16> ExecutedResCounts;
+
+    /// Cache the max count for a single resource.
+    unsigned MaxExecutedResCount;
 
     // Cache the critical resources ID in this scheduled zone.
-    unsigned CritResIdx;
+    unsigned ZoneCritResIdx;
 
     // Is the scheduled region resource limited vs. latency limited.
     bool IsResourceLimited;
 
-    unsigned ExpectedCount;
-
 #ifndef NDEBUG
-    // Remember the greatest min operand latency.
-    unsigned MaxMinLatency;
+    // Remember the greatest operand latency as an upper bound on the number of
+    // times we should retry the pending queue because of a hazard.
+    unsigned MaxObservedLatency;
 #endif
 
     void reset() {
@@ -1270,19 +1282,20 @@ public:
       NextSUs.clear();
       HazardRec = 0;
       CurrCycle = 0;
-      IssueCount = 0;
+      CurrMOps = 0;
       MinReadyCycle = UINT_MAX;
       ExpectedLatency = 0;
-      ResourceCounts.resize(1);
-      assert(!ResourceCounts[0] && "nonzero count for bad resource");
-      CritResIdx = 0;
+      DependentLatency = 0;
+      RetiredMOps = 0;
+      MaxExecutedResCount = 0;
+      ZoneCritResIdx = 0;
       IsResourceLimited = false;
-      ExpectedCount = 0;
 #ifndef NDEBUG
-      MaxMinLatency = 0;
+      MaxObservedLatency = 0;
 #endif
       // Reserve a zero-count for invalid CritResIdx.
-      ResourceCounts.resize(1);
+      ExecutedResCounts.resize(1);
+      assert(!ExecutedResCounts[0] && "nonzero count for bad resource");
     }
 
     /// Pending queues extend the ready queues with the same ID and the
@@ -1303,25 +1316,60 @@ public:
       return Available.getID() == ConvergingScheduler::TopQID;
     }
 
-    unsigned getUnscheduledLatency(SUnit *SU) const {
-      if (isTop())
-        return SU->getHeight();
-      return SU->getDepth() + SU->Latency;
+#ifndef NDEBUG
+    const char *getResourceName(unsigned PIdx) {
+      if (!PIdx)
+        return "MOps";
+      return SchedModel->getProcResource(PIdx)->Name;
+    }
+#endif
+
+    /// Get the number of latency cycles "covered" by the scheduled
+    /// instructions. This is the larger of the critical path within the zone
+    /// and the number of cycles required to issue the instructions.
+    unsigned getScheduledLatency() const {
+      return std::max(ExpectedLatency, CurrCycle);
     }
 
+    unsigned getUnscheduledLatency(SUnit *SU) const {
+      return isTop() ? SU->getHeight() : SU->getDepth();
+    }
+
+    unsigned getResourceCount(unsigned ResIdx) const {
+      return ExecutedResCounts[ResIdx];
+    }
+
+    /// Get the scaled count of scheduled micro-ops and resources, including
+    /// executed resources.
     unsigned getCriticalCount() const {
-      return ResourceCounts[CritResIdx];
+      if (!ZoneCritResIdx)
+        return RetiredMOps * SchedModel->getMicroOpFactor();
+      return getResourceCount(ZoneCritResIdx);
+    }
+
+    /// Get a scaled count for the minimum execution time of the scheduled
+    /// micro-ops that are ready to execute by getExecutedCount. Notice the
+    /// feedback loop.
+    unsigned getExecutedCount() const {
+      return std::max(CurrCycle * SchedModel->getLatencyFactor(),
+                      MaxExecutedResCount);
     }
 
     bool checkHazard(SUnit *SU);
 
-    void setLatencyPolicy(CandPolicy &Policy);
+    unsigned findMaxLatency(ArrayRef<SUnit*> ReadySUs);
+
+    unsigned getOtherResourceCount(unsigned &OtherCritIdx);
+
+    void setPolicy(CandPolicy &Policy, SchedBoundary &OtherZone);
 
     void releaseNode(SUnit *SU, unsigned ReadyCycle);
 
-    void bumpCycle();
+    void bumpCycle(unsigned NextCycle);
 
-    void countResource(unsigned PIdx, unsigned Cycles);
+    void incExecutedResources(unsigned PIdx, unsigned Count);
+
+    unsigned countResource(unsigned PIdx, unsigned Cycles, unsigned ReadyCycle);
 
     void bumpNode(SUnit *SU);
 
@@ -1330,6 +1378,10 @@ public:
     void removeReady(SUnit *SU);
 
     SUnit *pickOnlyChoice();
+
+#ifndef NDEBUG
+    void dumpScheduledState();
+#endif
   };
 
 private:
@@ -1366,15 +1418,6 @@ public:
   virtual void registerRoots();
 
 protected:
-  void balanceZones(
-    ConvergingScheduler::SchedBoundary &CriticalZone,
-    ConvergingScheduler::SchedCandidate &CriticalCand,
-    ConvergingScheduler::SchedBoundary &OppositeZone,
-    ConvergingScheduler::SchedCandidate &OppositeCand);
-
-  void checkResourceLimits(ConvergingScheduler::SchedCandidate &TopCand,
-                           ConvergingScheduler::SchedCandidate &BotCand);
-
   void tryCandidate(SchedCandidate &Cand,
                     SchedCandidate &TryCand,
                     SchedBoundary &Zone,
@@ -1404,20 +1447,14 @@ init(ScheduleDAGMI *DAG, const TargetSchedModel *SchedModel) {
   for (std::vector<SUnit>::iterator
          I = DAG->SUnits.begin(), E = DAG->SUnits.end(); I != E; ++I) {
     const MCSchedClassDesc *SC = DAG->getSchedClass(&*I);
-    RemainingMicroOps += SchedModel->getNumMicroOps(I->getInstr(), SC);
+    RemIssueCount += SchedModel->getNumMicroOps(I->getInstr(), SC)
+      * SchedModel->getMicroOpFactor();
     for (TargetSchedModel::ProcResIter
            PI = SchedModel->getWriteProcResBegin(SC),
            PE = SchedModel->getWriteProcResEnd(SC); PI != PE; ++PI) {
       unsigned PIdx = PI->ProcResourceIdx;
       unsigned Factor = SchedModel->getResourceFactor(PIdx);
       RemainingCounts[PIdx] += (Factor * PI->Cycles);
-    }
-  }
-  for (unsigned PIdx = 0, PEnd = SchedModel->getNumProcResourceKinds();
-       PIdx != PEnd; ++PIdx) {
-    if ((int)(RemainingCounts[PIdx] - RemainingCounts[CritResIdx])
-        >= (int)SchedModel->getLatencyFactor()) {
-      CritResIdx = PIdx;
     }
   }
 }
@@ -1429,7 +1466,7 @@ init(ScheduleDAGMI *dag, const TargetSchedModel *smodel, SchedRemainder *rem) {
   SchedModel = smodel;
   Rem = rem;
   if (SchedModel->hasInstrSchedModel())
-    ResourceCounts.resize(SchedModel->getNumProcResourceKinds());
+    ExecutedResCounts.resize(SchedModel->getNumProcResourceKinds());
 }
 
 void ConvergingScheduler::initialize(ScheduleDAGMI *dag) {
@@ -1460,13 +1497,15 @@ void ConvergingScheduler::releaseTopNode(SUnit *SU) {
 
   for (SUnit::pred_iterator I = SU->Preds.begin(), E = SU->Preds.end();
        I != E; ++I) {
+    if (I->isWeak())
+      continue;
     unsigned PredReadyCycle = I->getSUnit()->TopReadyCycle;
-    unsigned MinLatency = I->getMinLatency();
+    unsigned Latency = I->getLatency();
 #ifndef NDEBUG
-    Top.MaxMinLatency = std::max(MinLatency, Top.MaxMinLatency);
+    Top.MaxObservedLatency = std::max(Latency, Top.MaxObservedLatency);
 #endif
-    if (SU->TopReadyCycle < PredReadyCycle + MinLatency)
-      SU->TopReadyCycle = PredReadyCycle + MinLatency;
+    if (SU->TopReadyCycle < PredReadyCycle + Latency)
+      SU->TopReadyCycle = PredReadyCycle + Latency;
   }
   Top.releaseNode(SU, SU->TopReadyCycle);
 }
@@ -1482,12 +1521,12 @@ void ConvergingScheduler::releaseBottomNode(SUnit *SU) {
     if (I->isWeak())
       continue;
     unsigned SuccReadyCycle = I->getSUnit()->BotReadyCycle;
-    unsigned MinLatency = I->getMinLatency();
+    unsigned Latency = I->getLatency();
 #ifndef NDEBUG
-    Bot.MaxMinLatency = std::max(MinLatency, Bot.MaxMinLatency);
+    Bot.MaxObservedLatency = std::max(Latency, Bot.MaxObservedLatency);
 #endif
-    if (SU->BotReadyCycle < SuccReadyCycle + MinLatency)
-      SU->BotReadyCycle = SuccReadyCycle + MinLatency;
+    if (SU->BotReadyCycle < SuccReadyCycle + Latency)
+      SU->BotReadyCycle = SuccReadyCycle + Latency;
   }
   Bot.releaseNode(SU, SU->BotReadyCycle);
 }
@@ -1521,7 +1560,7 @@ bool ConvergingScheduler::SchedBoundary::checkHazard(SUnit *SU) {
     return HazardRec->getHazardType(SU) != ScheduleHazardRecognizer::NoHazard;
 
   unsigned uops = SchedModel->getNumMicroOps(SU->getInstr());
-  if ((IssueCount > 0) && (IssueCount + uops > SchedModel->getIssueWidth())) {
+  if ((CurrMOps > 0) && (CurrMOps + uops > SchedModel->getIssueWidth())) {
     DEBUG(dbgs() << "  SU(" << SU->NodeNum << ") uops="
           << SchedModel->getNumMicroOps(SU->getInstr()) << '\n');
     return true;
@@ -1529,45 +1568,125 @@ bool ConvergingScheduler::SchedBoundary::checkHazard(SUnit *SU) {
   return false;
 }
 
-/// Compute the remaining latency to determine whether ILP should be increased.
-void ConvergingScheduler::SchedBoundary::setLatencyPolicy(CandPolicy &Policy) {
-  // FIXME: compile time. In all, we visit four queues here one we should only
-  // need to visit the one that was last popped if we cache the result.
+// Find the unscheduled node in ReadySUs with the highest latency.
+unsigned ConvergingScheduler::SchedBoundary::
+findMaxLatency(ArrayRef<SUnit*> ReadySUs) {
+  SUnit *LateSU = 0;
   unsigned RemLatency = 0;
-  for (ReadyQueue::iterator I = Available.begin(), E = Available.end();
+  for (ArrayRef<SUnit*>::iterator I = ReadySUs.begin(), E = ReadySUs.end();
        I != E; ++I) {
     unsigned L = getUnscheduledLatency(*I);
-    DEBUG(dbgs() << "  " << Available.getName()
-          << " RemLatency SU(" << (*I)->NodeNum << ") " << L << '\n');
-    if (L > RemLatency)
+    if (L > RemLatency) {
       RemLatency = L;
+      LateSU = *I;
+    }
   }
-  for (ReadyQueue::iterator I = Pending.begin(), E = Pending.end();
-       I != E; ++I) {
-    unsigned L = getUnscheduledLatency(*I);
-    if (L > RemLatency)
-      RemLatency = L;
+  if (LateSU) {
+    DEBUG(dbgs() << Available.getName() << " RemLatency SU("
+          << LateSU->NodeNum << ") " << RemLatency << "c\n");
   }
-  unsigned CriticalPathLimit = Rem->CriticalPath + SchedModel->getILPWindow();
-  DEBUG(dbgs() << "  " << Available.getName()
-        << " ExpectedLatency " << ExpectedLatency
-        << " CP Limit " << CriticalPathLimit << '\n');
-  if (RemLatency + ExpectedLatency >= CriticalPathLimit
-      && RemLatency > Rem->getMaxRemainingCount(SchedModel)) {
-    Policy.ReduceLatency = true;
-    DEBUG(dbgs() << "  Increase ILP: " << Available.getName() << '\n');
+  return RemLatency;
+}
+
+// Count resources in this zone and the remaining unscheduled
+// instruction. Return the max count, scaled. Set OtherCritIdx to the critical
+// resource index, or zero if the zone is issue limited.
+unsigned ConvergingScheduler::SchedBoundary::
+getOtherResourceCount(unsigned &OtherCritIdx) {
+  if (!SchedModel->hasInstrSchedModel())
+    return 0;
+
+  unsigned OtherCritCount = Rem->RemIssueCount
+    + (RetiredMOps * SchedModel->getMicroOpFactor());
+  DEBUG(dbgs() << "  " << Available.getName() << " + Remain MOps: "
+        << OtherCritCount / SchedModel->getMicroOpFactor() << '\n');
+  OtherCritIdx = 0;
+  for (unsigned PIdx = 1, PEnd = SchedModel->getNumProcResourceKinds();
+       PIdx != PEnd; ++PIdx) {
+    unsigned OtherCount = getResourceCount(PIdx) + Rem->RemainingCounts[PIdx];
+    if (OtherCount > OtherCritCount) {
+      OtherCritCount = OtherCount;
+      OtherCritIdx = PIdx;
+    }
   }
+  if (OtherCritIdx) {
+    DEBUG(dbgs() << "  " << Available.getName() << " + Remain CritRes: "
+          << OtherCritCount / SchedModel->getResourceFactor(OtherCritIdx)
+          << " " << getResourceName(OtherCritIdx) << "\n");
+  }
+  return OtherCritCount;
+}
+
+/// Set the CandPolicy for this zone given the current resources and latencies
+/// inside and outside the zone.
+void ConvergingScheduler::SchedBoundary::setPolicy(CandPolicy &Policy,
+                                                   SchedBoundary &OtherZone) {
+  // Now that potential stalls have been considered, apply preemptive heuristics
+  // based on the the total latency and resources inside and outside this
+  // zone.
+
+  // Compute remaining latency. We need this both to determine whether the
+  // overall schedule has become latency-limited and whether the instructions
+  // outside this zone are resource or latency limited.
+  //
+  // The "dependent" latency is updated incrementally during scheduling as the
+  // max height/depth of scheduled nodes minus the cycles since it was
+  // scheduled:
+  //   DLat = max (N.depth - (CurrCycle - N.ReadyCycle) for N in Zone
+  //
+  // The "independent" latency is the max ready queue depth:
+  //   ILat = max N.depth for N in Available|Pending
+  //
+  // RemainingLatency is the greater of independent and dependent latency.
+  unsigned RemLatency = DependentLatency;
+  RemLatency = std::max(RemLatency, findMaxLatency(Available.elements()));
+  RemLatency = std::max(RemLatency, findMaxLatency(Pending.elements()));
+
+  // Compute the critical resource outside the zone.
+  unsigned OtherCritIdx;
+  unsigned OtherCount = OtherZone.getOtherResourceCount(OtherCritIdx);
+
+  bool OtherResLimited = false;
+  if (SchedModel->hasInstrSchedModel()) {
+    unsigned LFactor = SchedModel->getLatencyFactor();
+    OtherResLimited = (int)(OtherCount - (RemLatency * LFactor)) > (int)LFactor;
+  }
+  if (!OtherResLimited && (RemLatency + CurrCycle > Rem->CriticalPath)) {
+    Policy.ReduceLatency |= true;
+    DEBUG(dbgs() << "  " << Available.getName() << " RemainingLatency "
+          << RemLatency << " + " << CurrCycle << "c > CritPath "
+          << Rem->CriticalPath << "\n");
+  }
+  // If the same resource is limiting inside and outside the zone, do nothing.
+  if (IsResourceLimited && OtherResLimited && (ZoneCritResIdx == OtherCritIdx))
+    return;
+
+  DEBUG(
+    if (IsResourceLimited) {
+      dbgs() << "  " << Available.getName() << " ResourceLimited: "
+             << getResourceName(ZoneCritResIdx) << "\n";
+    }
+    if (OtherResLimited)
+      dbgs() << "  RemainingLimit: " << getResourceName(OtherCritIdx) << "\n";
+    if (!IsResourceLimited && !OtherResLimited)
+      dbgs() << "  Latency limited both directions.\n");
+
+  if (IsResourceLimited && !Policy.ReduceResIdx)
+    Policy.ReduceResIdx = ZoneCritResIdx;
+
+  if (OtherResLimited)
+    Policy.DemandResIdx = OtherCritIdx;
 }
 
 void ConvergingScheduler::SchedBoundary::releaseNode(SUnit *SU,
                                                      unsigned ReadyCycle) {
-
   if (ReadyCycle < MinReadyCycle)
     MinReadyCycle = ReadyCycle;
 
   // Check for interlocks first. For the purpose of other heuristics, an
   // instruction that cannot issue appears as if it's not in the ReadyQueue.
-  if (ReadyCycle > CurrCycle || checkHazard(SU))
+  bool IsBuffered = SchedModel->getMicroOpBufferSize() != 0;
+  if ((!IsBuffered && ReadyCycle > CurrCycle) || checkHazard(SU))
     Pending.push(SU);
   else
     Available.push(SU);
@@ -1577,16 +1696,21 @@ void ConvergingScheduler::SchedBoundary::releaseNode(SUnit *SU,
 }
 
 /// Move the boundary of scheduled code by one cycle.
-void ConvergingScheduler::SchedBoundary::bumpCycle() {
-  unsigned Width = SchedModel->getIssueWidth();
-  IssueCount = (IssueCount <= Width) ? 0 : IssueCount - Width;
-
-  unsigned NextCycle = CurrCycle + 1;
-  assert(MinReadyCycle < UINT_MAX && "MinReadyCycle uninitialized");
-  if (MinReadyCycle > NextCycle) {
-    IssueCount = 0;
-    NextCycle = MinReadyCycle;
+void ConvergingScheduler::SchedBoundary::bumpCycle(unsigned NextCycle) {
+  if (SchedModel->getMicroOpBufferSize() == 0) {
+    assert(MinReadyCycle < UINT_MAX && "MinReadyCycle uninitialized");
+    if (MinReadyCycle > NextCycle)
+      NextCycle = MinReadyCycle;
   }
+  // Update the current micro-ops, which will issue in the next cycle.
+  unsigned DecMOps = SchedModel->getIssueWidth() * (NextCycle - CurrCycle);
+  CurrMOps = (CurrMOps <= DecMOps) ? 0 : CurrMOps - DecMOps;
+
+  // Decrement DependentLatency based on the next cycle.
+  if ((NextCycle - CurrCycle) > DependentLatency)
+    DependentLatency = 0;
+  else
+    DependentLatency -= (NextCycle - CurrCycle);
 
   if (!HazardRec->isEnabled()) {
     // Bypass HazardRec virtual calls.
@@ -1602,34 +1726,52 @@ void ConvergingScheduler::SchedBoundary::bumpCycle() {
     }
   }
   CheckPending = true;
-  IsResourceLimited = getCriticalCount() > std::max(ExpectedLatency, CurrCycle);
+  unsigned LFactor = SchedModel->getLatencyFactor();
+  IsResourceLimited =
+    (int)(getCriticalCount() - (getScheduledLatency() * LFactor))
+    > (int)LFactor;
 
-  DEBUG(dbgs() << "  " << Available.getName()
-        << " Cycle: " << CurrCycle << '\n');
+  DEBUG(dbgs() << "Cycle: " << CurrCycle << ' ' << Available.getName() << '\n');
+}
+
+void ConvergingScheduler::SchedBoundary::incExecutedResources(unsigned PIdx,
+                                                              unsigned Count) {
+  ExecutedResCounts[PIdx] += Count;
+  if (ExecutedResCounts[PIdx] > MaxExecutedResCount)
+    MaxExecutedResCount = ExecutedResCounts[PIdx];
 }
 
 /// Add the given processor resource to this scheduled zone.
-void ConvergingScheduler::SchedBoundary::countResource(unsigned PIdx,
-                                                       unsigned Cycles) {
+///
+/// \param Cycles indicates the number of consecutive (non-pipelined) cycles
+/// during which this resource is consumed.
+///
+/// \return the next cycle at which the instruction may execute without
+/// oversubscribing resources.
+unsigned ConvergingScheduler::SchedBoundary::
+countResource(unsigned PIdx, unsigned Cycles, unsigned ReadyCycle) {
   unsigned Factor = SchedModel->getResourceFactor(PIdx);
-  DEBUG(dbgs() << "  " << SchedModel->getProcResource(PIdx)->Name
-        << " +(" << Cycles << "x" << Factor
-        << ") / " << SchedModel->getLatencyFactor() << '\n');
-
   unsigned Count = Factor * Cycles;
-  ResourceCounts[PIdx] += Count;
+  DEBUG(dbgs() << "  " << getResourceName(PIdx)
+        << " +" << Cycles << "x" << Factor << "u\n");
+
+  // Update Executed resources counts.
+  incExecutedResources(PIdx, Count);
   assert(Rem->RemainingCounts[PIdx] >= Count && "resource double counted");
   Rem->RemainingCounts[PIdx] -= Count;
 
   // Check if this resource exceeds the current critical resource by a full
   // cycle. If so, it becomes the critical resource.
-  if ((int)(ResourceCounts[PIdx] - ResourceCounts[CritResIdx])
-      >= (int)SchedModel->getLatencyFactor()) {
-    CritResIdx = PIdx;
+  if (ZoneCritResIdx != PIdx
+      && ((int)(getResourceCount(PIdx) - getCriticalCount())
+          >= (int)SchedModel->getLatencyFactor())) {
+    ZoneCritResIdx = PIdx;
     DEBUG(dbgs() << "  *** Critical resource "
-          << SchedModel->getProcResource(PIdx)->Name << " x"
-          << ResourceCounts[PIdx] << '\n');
+          << getResourceName(PIdx) << ": "
+          << getResourceCount(PIdx) / SchedModel->getLatencyFactor() << "c\n");
   }
+  // TODO: We don't yet model reserved resources. It's not hard though.
+  return CurrCycle;
 }
 
 /// Move the boundary of scheduled code by one SUnit.
@@ -1643,40 +1785,96 @@ void ConvergingScheduler::SchedBoundary::bumpNode(SUnit *SU) {
     }
     HazardRec->EmitInstruction(SU);
   }
-  // Update resource counts and critical resource.
-  if (SchedModel->hasInstrSchedModel()) {
-    const MCSchedClassDesc *SC = DAG->getSchedClass(SU);
-    Rem->RemainingMicroOps -= SchedModel->getNumMicroOps(SU->getInstr(), SC);
-    for (TargetSchedModel::ProcResIter
-           PI = SchedModel->getWriteProcResBegin(SC),
-           PE = SchedModel->getWriteProcResEnd(SC); PI != PE; ++PI) {
-      countResource(PI->ProcResourceIdx, PI->Cycles);
-    }
-  }
-  if (isTop()) {
-    if (SU->getDepth() > ExpectedLatency)
-      ExpectedLatency = SU->getDepth();
-  }
-  else {
-    if (SU->getHeight() > ExpectedLatency)
-      ExpectedLatency = SU->getHeight();
-  }
-
-  IsResourceLimited = getCriticalCount() > std::max(ExpectedLatency, CurrCycle);
-
-  // Check the instruction group dispatch limit.
-  // TODO: Check if this SU must end a dispatch group.
-  IssueCount += SchedModel->getNumMicroOps(SU->getInstr());
-
+  const MCSchedClassDesc *SC = DAG->getSchedClass(SU);
+  unsigned IncMOps = SchedModel->getNumMicroOps(SU->getInstr());
+  CurrMOps += IncMOps;
   // checkHazard prevents scheduling multiple instructions per cycle that exceed
   // issue width. However, we commonly reach the maximum. In this case
   // opportunistically bump the cycle to avoid uselessly checking everything in
   // the readyQ. Furthermore, a single instruction may produce more than one
   // cycle's worth of micro-ops.
-  if (IssueCount >= SchedModel->getIssueWidth()) {
-    DEBUG(dbgs() << "  *** Max instrs at cycle " << CurrCycle << '\n');
-    bumpCycle();
+  //
+  // TODO: Also check if this SU must end a dispatch group.
+  unsigned NextCycle = CurrCycle;
+  if (CurrMOps >= SchedModel->getIssueWidth()) {
+    ++NextCycle;
+    DEBUG(dbgs() << "  *** Max MOps " << CurrMOps
+          << " at cycle " << CurrCycle << '\n');
   }
+  unsigned ReadyCycle = (isTop() ? SU->TopReadyCycle : SU->BotReadyCycle);
+  DEBUG(dbgs() << "  Ready @" << ReadyCycle << "c\n");
+
+  switch (SchedModel->getMicroOpBufferSize()) {
+  case 0:
+    assert(ReadyCycle <= CurrCycle && "Broken PendingQueue");
+    break;
+  case 1:
+    if (ReadyCycle > NextCycle) {
+      NextCycle = ReadyCycle;
+      DEBUG(dbgs() << "  *** Stall until: " << ReadyCycle << "\n");
+    }
+    break;
+  default:
+    // We don't currently model the OOO reorder buffer, so consider all
+    // scheduled MOps to be "retired".
+    break;
+  }
+  RetiredMOps += IncMOps;
+
+  // Update resource counts and critical resource.
+  if (SchedModel->hasInstrSchedModel()) {
+    unsigned DecRemIssue = IncMOps * SchedModel->getMicroOpFactor();
+    assert(Rem->RemIssueCount >= DecRemIssue && "MOps double counted");
+    Rem->RemIssueCount -= DecRemIssue;
+    if (ZoneCritResIdx) {
+      // Scale scheduled micro-ops for comparing with the critical resource.
+      unsigned ScaledMOps =
+        RetiredMOps * SchedModel->getMicroOpFactor();
+
+      // If scaled micro-ops are now more than the previous critical resource by
+      // a full cycle, then micro-ops issue becomes critical.
+      if ((int)(ScaledMOps - getResourceCount(ZoneCritResIdx))
+          >= (int)SchedModel->getLatencyFactor()) {
+        ZoneCritResIdx = 0;
+        DEBUG(dbgs() << "  *** Critical resource NumMicroOps: "
+              << ScaledMOps / SchedModel->getLatencyFactor() << "c\n");
+      }
+    }
+    for (TargetSchedModel::ProcResIter
+           PI = SchedModel->getWriteProcResBegin(SC),
+           PE = SchedModel->getWriteProcResEnd(SC); PI != PE; ++PI) {
+      unsigned RCycle =
+        countResource(PI->ProcResourceIdx, PI->Cycles, ReadyCycle);
+      if (RCycle > NextCycle)
+        NextCycle = RCycle;
+    }
+  }
+  // Update ExpectedLatency and DependentLatency.
+  unsigned &TopLatency = isTop() ? ExpectedLatency : DependentLatency;
+  unsigned &BotLatency = isTop() ? DependentLatency : ExpectedLatency;
+  if (SU->getDepth() > TopLatency) {
+    TopLatency = SU->getDepth();
+    DEBUG(dbgs() << "  " << Available.getName()
+          << " TopLatency SU(" << SU->NodeNum << ") " << TopLatency << "c\n");
+  }
+  if (SU->getHeight() > BotLatency) {
+    BotLatency = SU->getHeight();
+    DEBUG(dbgs() << "  " << Available.getName()
+          << " BotLatency SU(" << SU->NodeNum << ") " << BotLatency << "c\n");
+  }
+  // If we stall for any reason, bump the cycle.
+  if (NextCycle > CurrCycle) {
+    bumpCycle(NextCycle);
+  }
+  else {
+    // After updating ZoneCritResIdx and ExpectedLatency, check if we're
+    // resource limited. If a stall occured, bumpCycle does this.
+    unsigned LFactor = SchedModel->getLatencyFactor();
+    IsResourceLimited =
+      (int)(getCriticalCount() - (getScheduledLatency() * LFactor))
+      > (int)LFactor;
+  }
+  DEBUG(dumpScheduledState());
 }
 
 /// Release pending ready nodes in to the available queue. This makes them
@@ -1688,6 +1886,7 @@ void ConvergingScheduler::SchedBoundary::releasePending() {
 
   // Check to see if any of the pending instructions are ready to issue.  If
   // so, add them to the available queue.
+  bool IsBuffered = SchedModel->getMicroOpBufferSize() != 0;
   for (unsigned i = 0, e = Pending.size(); i != e; ++i) {
     SUnit *SU = *(Pending.begin()+i);
     unsigned ReadyCycle = isTop() ? SU->TopReadyCycle : SU->BotReadyCycle;
@@ -1695,7 +1894,7 @@ void ConvergingScheduler::SchedBoundary::releasePending() {
     if (ReadyCycle < MinReadyCycle)
       MinReadyCycle = ReadyCycle;
 
-    if (ReadyCycle > CurrCycle)
+    if (!IsBuffered && ReadyCycle > CurrCycle)
       continue;
 
     if (checkHazard(SU))
@@ -1726,7 +1925,7 @@ SUnit *ConvergingScheduler::SchedBoundary::pickOnlyChoice() {
   if (CheckPending)
     releasePending();
 
-  if (IssueCount > 0) {
+  if (CurrMOps > 0) {
     // Defer any ready instrs that now have a hazard.
     for (ReadyQueue::iterator I = Available.begin(); I != Available.end();) {
       if (checkHazard(*I)) {
@@ -1738,9 +1937,9 @@ SUnit *ConvergingScheduler::SchedBoundary::pickOnlyChoice() {
     }
   }
   for (unsigned i = 0; Available.empty(); ++i) {
-    assert(i <= (HazardRec->getMaxLookAhead() + MaxMinLatency) &&
+    assert(i <= (HazardRec->getMaxLookAhead() + MaxObservedLatency) &&
            "permanent hazard"); (void)i;
-    bumpCycle();
+    bumpCycle(CurrCycle + 1);
     releasePending();
   }
   if (Available.size() == 1)
@@ -1748,104 +1947,31 @@ SUnit *ConvergingScheduler::SchedBoundary::pickOnlyChoice() {
   return NULL;
 }
 
-/// Record the candidate policy for opposite zones with different critical
-/// resources.
-///
-/// If the CriticalZone is latency limited, don't force a policy for the
-/// candidates here. Instead, setLatencyPolicy sets ReduceLatency if needed.
-void ConvergingScheduler::balanceZones(
-  ConvergingScheduler::SchedBoundary &CriticalZone,
-  ConvergingScheduler::SchedCandidate &CriticalCand,
-  ConvergingScheduler::SchedBoundary &OppositeZone,
-  ConvergingScheduler::SchedCandidate &OppositeCand) {
-
-  if (!CriticalZone.IsResourceLimited)
-    return;
-  assert(SchedModel->hasInstrSchedModel() && "required schedmodel");
-
-  SchedRemainder *Rem = CriticalZone.Rem;
-
-  // If the critical zone is overconsuming a resource relative to the
-  // remainder, try to reduce it.
-  unsigned RemainingCritCount =
-    Rem->RemainingCounts[CriticalZone.CritResIdx];
-  if ((int)(Rem->getMaxRemainingCount(SchedModel) - RemainingCritCount)
-      > (int)SchedModel->getLatencyFactor()) {
-    CriticalCand.Policy.ReduceResIdx = CriticalZone.CritResIdx;
-    DEBUG(dbgs() << "  Balance " << CriticalZone.Available.getName()
-          << " reduce "
-          << SchedModel->getProcResource(CriticalZone.CritResIdx)->Name
-          << '\n');
+#ifndef NDEBUG
+// This is useful information to dump after bumpNode.
+// Note that the Queue contents are more useful before pickNodeFromQueue.
+void ConvergingScheduler::SchedBoundary::dumpScheduledState() {
+  unsigned ResFactor;
+  unsigned ResCount;
+  if (ZoneCritResIdx) {
+    ResFactor = SchedModel->getResourceFactor(ZoneCritResIdx);
+    ResCount = getResourceCount(ZoneCritResIdx);
   }
-  // If the other zone is underconsuming a resource relative to the full zone,
-  // try to increase it.
-  unsigned OppositeCount =
-    OppositeZone.ResourceCounts[CriticalZone.CritResIdx];
-  if ((int)(OppositeZone.ExpectedCount - OppositeCount)
-      > (int)SchedModel->getLatencyFactor()) {
-    OppositeCand.Policy.DemandResIdx = CriticalZone.CritResIdx;
-    DEBUG(dbgs() << "  Balance " << OppositeZone.Available.getName()
-          << " demand "
-          << SchedModel->getProcResource(OppositeZone.CritResIdx)->Name
-          << '\n');
+  else {
+    ResFactor = SchedModel->getMicroOpFactor();
+    ResCount = RetiredMOps * SchedModel->getMicroOpFactor();
   }
+  unsigned LFactor = SchedModel->getLatencyFactor();
+  dbgs() << Available.getName() << " @" << CurrCycle << "c\n"
+         << "  Retired: " << RetiredMOps;
+  dbgs() << "\n  Executed: " << getExecutedCount() / LFactor << "c";
+  dbgs() << "\n  Critical: " << ResCount / LFactor << "c, "
+         << ResCount / ResFactor << " " << getResourceName(ZoneCritResIdx)
+         << "\n  ExpectedLatency: " << ExpectedLatency << "c\n"
+         << (IsResourceLimited ? "  - Resource" : "  - Latency")
+         << " limited.\n";
 }
-
-/// Determine if the scheduled zones exceed resource limits or critical path and
-/// set each candidate's ReduceHeight policy accordingly.
-void ConvergingScheduler::checkResourceLimits(
-  ConvergingScheduler::SchedCandidate &TopCand,
-  ConvergingScheduler::SchedCandidate &BotCand) {
-
-  // Set ReduceLatency to true if needed.
-  Bot.setLatencyPolicy(BotCand.Policy);
-  Top.setLatencyPolicy(TopCand.Policy);
-
-  // Handle resource-limited regions.
-  if (Top.IsResourceLimited && Bot.IsResourceLimited
-      && Top.CritResIdx == Bot.CritResIdx) {
-    // If the scheduled critical resource in both zones is no longer the
-    // critical remaining resource, attempt to reduce resource height both ways.
-    if (Top.CritResIdx != Rem.CritResIdx) {
-      TopCand.Policy.ReduceResIdx = Top.CritResIdx;
-      BotCand.Policy.ReduceResIdx = Bot.CritResIdx;
-      DEBUG(dbgs() << "  Reduce scheduled "
-            << SchedModel->getProcResource(Top.CritResIdx)->Name << '\n');
-    }
-    return;
-  }
-  // Handle latency-limited regions.
-  if (!Top.IsResourceLimited && !Bot.IsResourceLimited) {
-    // If the total scheduled expected latency exceeds the region's critical
-    // path then reduce latency both ways.
-    //
-    // Just because a zone is not resource limited does not mean it is latency
-    // limited. Unbuffered resource, such as max micro-ops may cause CurrCycle
-    // to exceed expected latency.
-    if ((Top.ExpectedLatency + Bot.ExpectedLatency >= Rem.CriticalPath)
-        && (Rem.CriticalPath > Top.CurrCycle + Bot.CurrCycle)) {
-      TopCand.Policy.ReduceLatency = true;
-      BotCand.Policy.ReduceLatency = true;
-      DEBUG(dbgs() << "  Reduce scheduled latency " << Top.ExpectedLatency
-            << " + " << Bot.ExpectedLatency << '\n');
-    }
-    return;
-  }
-  // The critical resource is different in each zone, so request balancing.
-
-  // Compute the cost of each zone.
-  Top.ExpectedCount = std::max(Top.ExpectedLatency, Top.CurrCycle);
-  Top.ExpectedCount = std::max(
-    Top.getCriticalCount(),
-    Top.ExpectedCount * SchedModel->getLatencyFactor());
-  Bot.ExpectedCount = std::max(Bot.ExpectedLatency, Bot.CurrCycle);
-  Bot.ExpectedCount = std::max(
-    Bot.getCriticalCount(),
-    Bot.ExpectedCount * SchedModel->getLatencyFactor());
-
-  balanceZones(Top, TopCand, Bot, BotCand);
-  balanceZones(Bot, BotCand, Top, TopCand);
-}
+#endif
 
 void ConvergingScheduler::SchedCandidate::
 initResourceDelta(const ScheduleDAGMI *DAG,
@@ -1864,6 +1990,7 @@ initResourceDelta(const ScheduleDAGMI *DAG,
   }
 }
 
+
 /// Return true if this heuristic determines order.
 static bool tryLess(int TryVal, int CandVal,
                     ConvergingScheduler::SchedCandidate &TryCand,
@@ -1878,6 +2005,7 @@ static bool tryLess(int TryVal, int CandVal,
       Cand.Reason = Reason;
     return true;
   }
+  Cand.setRepeat(Reason);
   return false;
 }
 
@@ -1894,6 +2022,7 @@ static bool tryGreater(int TryVal, int CandVal,
       Cand.Reason = Reason;
     return true;
   }
+  Cand.setRepeat(Reason);
   return false;
 }
 
@@ -1964,18 +2093,14 @@ void ConvergingScheduler::tryCandidate(SchedCandidate &Cand,
 
   // Avoid exceeding the target's limit.
   if (tryLess(TryCand.RPDelta.Excess.UnitIncrease,
-              Cand.RPDelta.Excess.UnitIncrease, TryCand, Cand, SingleExcess))
+              Cand.RPDelta.Excess.UnitIncrease, TryCand, Cand, RegExcess))
     return;
-  if (Cand.Reason == SingleExcess)
-    Cand.Reason = MultiPressure;
 
   // Avoid increasing the max critical pressure in the scheduled region.
   if (tryLess(TryCand.RPDelta.CriticalMax.UnitIncrease,
               Cand.RPDelta.CriticalMax.UnitIncrease,
-              TryCand, Cand, SingleCritical))
+              TryCand, Cand, RegCritical))
     return;
-  if (Cand.Reason == SingleCritical)
-    Cand.Reason = MultiPressure;
 
   // Keep clustered nodes together to encourage downstream peephole
   // optimizations which may reduce resource requirements.
@@ -1990,17 +2115,16 @@ void ConvergingScheduler::tryCandidate(SchedCandidate &Cand,
     return;
 
   // Weak edges are for clustering and other constraints.
-  //
-  // Deferring TryCand here does not change Cand's reason. This is good in the
-  // sense that a bad candidate shouldn't affect a previous candidate's
-  // goodness, but bad in that it is assymetric and depends on queue order.
-  CandReason OrigReason = Cand.Reason;
   if (tryLess(getWeakLeft(TryCand.SU, Zone.isTop()),
               getWeakLeft(Cand.SU, Zone.isTop()),
               TryCand, Cand, Weak)) {
-    Cand.Reason = OrigReason;
     return;
   }
+  // Avoid increasing the max pressure of the entire region.
+  if (tryLess(TryCand.RPDelta.CurrentMax.UnitIncrease,
+              Cand.RPDelta.CurrentMax.UnitIncrease, TryCand, Cand, RegMax))
+    return;
+
   // Avoid critical resource consumption and balance the schedule.
   TryCand.initResourceDelta(DAG, SchedModel);
   if (tryLess(TryCand.ResDelta.CritResources, Cand.ResDelta.CritResources,
@@ -2014,8 +2138,7 @@ void ConvergingScheduler::tryCandidate(SchedCandidate &Cand,
   // Avoid serializing long latency dependence chains.
   if (Cand.Policy.ReduceLatency) {
     if (Zone.isTop()) {
-      if (Cand.SU->getDepth() * SchedModel->getLatencyFactor()
-          > Zone.ExpectedCount) {
+      if (Cand.SU->getDepth() > Zone.getScheduledLatency()) {
         if (tryLess(TryCand.SU->getDepth(), Cand.SU->getDepth(),
                     TryCand, Cand, TopDepthReduce))
           return;
@@ -2025,8 +2148,7 @@ void ConvergingScheduler::tryCandidate(SchedCandidate &Cand,
         return;
     }
     else {
-      if (Cand.SU->getHeight() * SchedModel->getLatencyFactor()
-          > Zone.ExpectedCount) {
+      if (Cand.SU->getHeight() > Zone.getScheduledLatency()) {
         if (tryLess(TryCand.SU->getHeight(), Cand.SU->getHeight(),
                     TryCand, Cand, BotHeightReduce))
           return;
@@ -2037,16 +2159,9 @@ void ConvergingScheduler::tryCandidate(SchedCandidate &Cand,
     }
   }
 
-  // Avoid increasing the max pressure of the entire region.
-  if (tryLess(TryCand.RPDelta.CurrentMax.UnitIncrease,
-              Cand.RPDelta.CurrentMax.UnitIncrease, TryCand, Cand, SingleMax))
-    return;
-  if (Cand.Reason == SingleMax)
-    Cand.Reason = MultiPressure;
-
   // Prefer immediate defs/users of the last scheduled instruction. This is a
-  // nice pressure avoidance strategy that also conserves the processor's
-  // register renaming resources and keeps the machine code readable.
+  // local pressure avoidance strategy that also makes the machine code
+  // readable.
   if (tryGreater(Zone.NextSUs.count(TryCand.SU), Zone.NextSUs.count(Cand.SU),
                  TryCand, Cand, NextDefUse))
     return;
@@ -2058,49 +2173,17 @@ void ConvergingScheduler::tryCandidate(SchedCandidate &Cand,
   }
 }
 
-/// pickNodeFromQueue helper that returns true if the LHS reg pressure effect is
-/// more desirable than RHS from scheduling standpoint.
-static bool compareRPDelta(const RegPressureDelta &LHS,
-                           const RegPressureDelta &RHS) {
-  // Compare each component of pressure in decreasing order of importance
-  // without checking if any are valid. Invalid PressureElements are assumed to
-  // have UnitIncrease==0, so are neutral.
-
-  // Avoid increasing the max critical pressure in the scheduled region.
-  if (LHS.Excess.UnitIncrease != RHS.Excess.UnitIncrease) {
-    DEBUG(dbgs() << "  RP excess top - bot: "
-          << (LHS.Excess.UnitIncrease - RHS.Excess.UnitIncrease) << '\n');
-    return LHS.Excess.UnitIncrease < RHS.Excess.UnitIncrease;
-  }
-  // Avoid increasing the max critical pressure in the scheduled region.
-  if (LHS.CriticalMax.UnitIncrease != RHS.CriticalMax.UnitIncrease) {
-    DEBUG(dbgs() << "  RP critical top - bot: "
-          << (LHS.CriticalMax.UnitIncrease - RHS.CriticalMax.UnitIncrease)
-          << '\n');
-    return LHS.CriticalMax.UnitIncrease < RHS.CriticalMax.UnitIncrease;
-  }
-  // Avoid increasing the max pressure of the entire region.
-  if (LHS.CurrentMax.UnitIncrease != RHS.CurrentMax.UnitIncrease) {
-    DEBUG(dbgs() << "  RP current top - bot: "
-          << (LHS.CurrentMax.UnitIncrease - RHS.CurrentMax.UnitIncrease)
-          << '\n');
-    return LHS.CurrentMax.UnitIncrease < RHS.CurrentMax.UnitIncrease;
-  }
-  return false;
-}
-
 #ifndef NDEBUG
 const char *ConvergingScheduler::getReasonStr(
   ConvergingScheduler::CandReason Reason) {
   switch (Reason) {
   case NoCand:         return "NOCAND    ";
   case PhysRegCopy:    return "PREG-COPY";
-  case SingleExcess:   return "REG-EXCESS";
-  case SingleCritical: return "REG-CRIT  ";
+  case RegExcess:      return "REG-EXCESS";
+  case RegCritical:    return "REG-CRIT  ";
   case Cluster:        return "CLUSTER   ";
   case Weak:           return "WEAK      ";
-  case SingleMax:      return "REG-MAX   ";
-  case MultiPressure:  return "REG-MULTI ";
+  case RegMax:         return "REG-MAX   ";
   case ResourceReduce: return "RES-REDUCE";
   case ResourceDemand: return "RES-DEMAND";
   case TopDepthReduce: return "TOP-DEPTH ";
@@ -2120,13 +2203,13 @@ void ConvergingScheduler::traceCandidate(const SchedCandidate &Cand) {
   switch (Cand.Reason) {
   default:
     break;
-  case SingleExcess:
+  case RegExcess:
     P = Cand.RPDelta.Excess;
     break;
-  case SingleCritical:
+  case RegCritical:
     P = Cand.RPDelta.CriticalMax;
     break;
-  case SingleMax:
+  case RegMax:
     P = Cand.RPDelta.CurrentMax;
     break;
   case ResourceReduce:
@@ -2208,18 +2291,19 @@ SUnit *ConvergingScheduler::pickNodeBidirectional(bool &IsTopNode) {
   // efficient, but also provides the best heuristics for CriticalPSets.
   if (SUnit *SU = Bot.pickOnlyChoice()) {
     IsTopNode = false;
-    DEBUG(dbgs() << "Pick Top NOCAND\n");
+    DEBUG(dbgs() << "Pick Bot NOCAND\n");
     return SU;
   }
   if (SUnit *SU = Top.pickOnlyChoice()) {
     IsTopNode = true;
-    DEBUG(dbgs() << "Pick Bot NOCAND\n");
+    DEBUG(dbgs() << "Pick Top NOCAND\n");
     return SU;
   }
   CandPolicy NoPolicy;
   SchedCandidate BotCand(NoPolicy);
   SchedCandidate TopCand(NoPolicy);
-  checkResourceLimits(TopCand, BotCand);
+  Bot.setPolicy(BotCand.Policy, Top);
+  Top.setPolicy(TopCand.Policy, Bot);
 
   // Prefer bottom scheduling when heuristics are silent.
   pickNodeFromQueue(Bot, DAG->getBotRPTracker(), BotCand);
@@ -2232,7 +2316,10 @@ SUnit *ConvergingScheduler::pickNodeBidirectional(bool &IsTopNode) {
   // affects picking from either Q. If scheduling in one direction must
   // increase pressure for one of the excess PSets, then schedule in that
   // direction first to provide more freedom in the other direction.
-  if (BotCand.Reason == SingleExcess || BotCand.Reason == SingleCritical) {
+  if ((BotCand.Reason == RegExcess && !BotCand.isRepeat(RegExcess))
+      || (BotCand.Reason == RegCritical
+          && !BotCand.isRepeat(RegCritical)))
+  {
     IsTopNode = false;
     tracePick(BotCand, IsTopNode);
     return BotCand.SU;
@@ -2241,30 +2328,13 @@ SUnit *ConvergingScheduler::pickNodeBidirectional(bool &IsTopNode) {
   pickNodeFromQueue(Top, DAG->getTopRPTracker(), TopCand);
   assert(TopCand.Reason != NoCand && "failed to find the first candidate");
 
-  // If either Q has a single candidate that minimizes pressure above the
-  // original region's pressure pick it.
-  if (TopCand.Reason <= SingleMax || BotCand.Reason <= SingleMax) {
-    if (TopCand.Reason < BotCand.Reason) {
-      IsTopNode = true;
-      tracePick(TopCand, IsTopNode);
-      return TopCand.SU;
-    }
-    IsTopNode = false;
-    tracePick(BotCand, IsTopNode);
-    return BotCand.SU;
-  }
-  // Check for a salient pressure difference and pick the best from either side.
-  if (compareRPDelta(TopCand.RPDelta, BotCand.RPDelta)) {
-    IsTopNode = true;
-    tracePick(TopCand, IsTopNode);
-    return TopCand.SU;
-  }
-  // Otherwise prefer the bottom candidate, in node order if all else failed.
+  // Choose the queue with the most important (lowest enum) reason.
   if (TopCand.Reason < BotCand.Reason) {
     IsTopNode = true;
     tracePick(TopCand, IsTopNode);
     return TopCand.SU;
   }
+  // Otherwise prefer the bottom candidate, in node order if all else failed.
   IsTopNode = false;
   tracePick(BotCand, IsTopNode);
   return BotCand.SU;
@@ -2348,13 +2418,13 @@ void ConvergingScheduler::reschedulePhysRegCopies(SUnit *SU, bool isTop) {
 /// them here. See comments in biasPhysRegCopy.
 void ConvergingScheduler::schedNode(SUnit *SU, bool IsTopNode) {
   if (IsTopNode) {
-    SU->TopReadyCycle = Top.CurrCycle;
+    SU->TopReadyCycle = std::max(SU->TopReadyCycle, Top.CurrCycle);
     Top.bumpNode(SU);
     if (SU->hasPhysRegUses)
       reschedulePhysRegCopies(SU, true);
   }
   else {
-    SU->BotReadyCycle = Bot.CurrCycle;
+    SU->BotReadyCycle = std::max(SU->BotReadyCycle, Bot.CurrCycle);
     Bot.bumpNode(SU);
     if (SU->hasPhysRegDefs)
       reschedulePhysRegCopies(SU, false);
@@ -2372,8 +2442,7 @@ static ScheduleDAGInstrs *createConvergingSched(MachineSchedContext *C) {
   // FIXME: extend the mutation API to allow earlier mutations to instantiate
   // data and pass it to later mutations. Have a single mutation that gathers
   // the interesting nodes in one pass.
-  if (EnableCopyConstrain)
-    DAG->addMutation(new CopyConstrain(DAG->TII, DAG->TRI));
+  DAG->addMutation(new CopyConstrain(DAG->TII, DAG->TRI));
   if (EnableLoadCluster)
     DAG->addMutation(new LoadClusterMutation(DAG->TII, DAG->TRI));
   if (EnableMacroFusion)

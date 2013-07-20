@@ -292,7 +292,9 @@ bool DIDescriptor::isTemplateTypeParameter() const {
 /// isTemplateValueParameter - Return true if the specified tag is
 /// DW_TAG_template_value_parameter.
 bool DIDescriptor::isTemplateValueParameter() const {
-  return DbgNode && getTag() == dwarf::DW_TAG_template_value_parameter;
+  return DbgNode && (getTag() == dwarf::DW_TAG_template_value_parameter ||
+                     getTag() == dwarf::DW_TAG_GNU_template_template_param ||
+                     getTag() == dwarf::DW_TAG_GNU_template_parameter_pack);
 }
 
 /// isCompileUnit - Return true if the specified tag is DW_TAG_compile_unit.
@@ -351,9 +353,8 @@ bool DIDescriptor::isImportedEntity() const {
 
 DIType::DIType(const MDNode *N) : DIScope(N) {
   if (!N) return;
-  if (!isBasicType() && !isDerivedType() && !isCompositeType()) {
+  if (!isType())
     DbgNode = 0;
-  }
 }
 
 unsigned DIArray::getNumElements() const {
@@ -511,9 +512,6 @@ bool DIGlobalVariable::Verify() const {
 
   DIType Ty = getType();
   if (!Ty.Verify())
-    return false;
-
-  if (!getGlobal() && !getConstant())
     return false;
 
   return DbgNode->getNumOperands() == 13;
@@ -765,12 +763,20 @@ DIArray DICompileUnit::getImportedEntities() const {
   return DIArray();
 }
 
-/// fixupObjcLikeName - Replace contains special characters used
+/// fixupSubprogramName - Replace contains special characters used
 /// in a typical Objective-C names with '.' in a given string.
-static void fixupObjcLikeName(StringRef Str, SmallVectorImpl<char> &Out) {
+static void fixupSubprogramName(DISubprogram Fn, SmallVectorImpl<char> &Out) {
+  StringRef FName =
+      Fn.getFunction() ? Fn.getFunction()->getName() : Fn.getName();
+  FName = Function::getRealLinkageName(FName);
+
+  StringRef Prefix("llvm.dbg.lv.");
+  Out.reserve(FName.size() + Prefix.size());
+  Out.append(Prefix.begin(), Prefix.end());
+
   bool isObjCLike = false;
-  for (size_t i = 0, e = Str.size(); i < e; ++i) {
-    char C = Str[i];
+  for (size_t i = 0, e = FName.size(); i < e; ++i) {
+    char C = FName[i];
     if (C == '[')
       isObjCLike = true;
 
@@ -785,33 +791,16 @@ static void fixupObjcLikeName(StringRef Str, SmallVectorImpl<char> &Out) {
 /// getFnSpecificMDNode - Return a NameMDNode, if available, that is
 /// suitable to hold function specific information.
 NamedMDNode *llvm::getFnSpecificMDNode(const Module &M, DISubprogram Fn) {
-  SmallString<32> Name = StringRef("llvm.dbg.lv.");
-  StringRef FName = "fn";
-  if (Fn.getFunction())
-    FName = Fn.getFunction()->getName();
-  else
-    FName = Fn.getName();
-  char One = '\1';
-  if (FName.startswith(StringRef(&One, 1)))
-    FName = FName.substr(1);
-  fixupObjcLikeName(FName, Name);
+  SmallString<32> Name;
+  fixupSubprogramName(Fn, Name);
   return M.getNamedMetadata(Name.str());
 }
 
 /// getOrInsertFnSpecificMDNode - Return a NameMDNode that is suitable
 /// to hold function specific information.
 NamedMDNode *llvm::getOrInsertFnSpecificMDNode(Module &M, DISubprogram Fn) {
-  SmallString<32> Name = StringRef("llvm.dbg.lv.");
-  StringRef FName = "fn";
-  if (Fn.getFunction())
-    FName = Fn.getFunction()->getName();
-  else
-    FName = Fn.getName();
-  char One = '\1';
-  if (FName.startswith(StringRef(&One, 1)))
-    FName = FName.substr(1);
-  fixupObjcLikeName(FName, Name);
-
+  SmallString<32> Name;
+  fixupSubprogramName(Fn, Name);
   return M.getOrInsertNamedMetadata(Name.str());
 }
 
@@ -1130,7 +1119,12 @@ void DIType::printInternal(raw_ostream &OS) const {
     OS << " [artificial]";
 
   if (isForwardDecl())
-    OS << " [fwd]";
+    OS << " [decl]";
+  else if (getTag() == dwarf::DW_TAG_structure_type ||
+           getTag() == dwarf::DW_TAG_union_type ||
+           getTag() == dwarf::DW_TAG_enumeration_type ||
+           getTag() == dwarf::DW_TAG_class_type)
+    OS << " [def]";
   if (isVector())
     OS << " [vector]";
   if (isStaticMember())
@@ -1216,11 +1210,10 @@ static void printDebugLoc(DebugLoc DL, raw_ostream &CommentOS,
                           const LLVMContext &Ctx) {
   if (!DL.isUnknown()) {          // Print source line info.
     DIScope Scope(DL.getScope(Ctx));
+    assert(Scope.isScope() &&
+      "Scope of a DebugLoc should be a DIScope.");
     // Omit the directory, because it's likely to be long and uninteresting.
-    if (Scope.Verify())
-      CommentOS << Scope.getFilename();
-    else
-      CommentOS << "<unknown>";
+    CommentOS << Scope.getFilename();
     CommentOS << ':' << DL.getLine();
     if (DL.getCol() != 0)
       CommentOS << ':' << DL.getCol();

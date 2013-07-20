@@ -557,6 +557,15 @@ printFCCOperand(const MachineInstr *MI, int opNum, raw_ostream &O,
 void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
   // FIXME: Use SwitchSection.
 
+  // TODO: Need to add -mabicalls and -mno-abicalls flags.
+  // Currently we assume that -mabicalls is the default.
+  if (OutStreamer.hasRawTextSupport()) {
+    OutStreamer.EmitRawText(StringRef("\t.abicalls"));
+    Reloc::Model RM = Subtarget->getRelocationModel();
+    if (RM == Reloc::Static && !Subtarget->hasMips64())
+      OutStreamer.EmitRawText(StringRef("\t.option\tpic0"));
+  }
+
   // Tell the assembler which ABI we are using
   if (OutStreamer.hasRawTextSupport())
     OutStreamer.EmitRawText("\t.section .mdebug." +
@@ -587,16 +596,6 @@ void MipsAsmPrinter::EmitEndOfAsmFile(Module &M) {
              OutStreamer, getObjFileLowering(), *Subtarget);
   if (MipsELFStreamer *MES = dyn_cast<MipsELFStreamer>(&OutStreamer))
     MES->emitELFHeaderFlagsCG(*Subtarget);
-}
-
-MachineLocation
-MipsAsmPrinter::getDebugValueLocation(const MachineInstr *MI) const {
-  // Handles frame addresses emitted in MipsInstrInfo::emitFrameIndexDebugValue.
-  assert(MI->getNumOperands() == 4 && "Invalid no. of machine operands!");
-  assert(MI->getOperand(0).isReg() && MI->getOperand(1).isImm() &&
-         "Unexpected MachineOperand types");
-  return MachineLocation(MI->getOperand(0).getReg(),
-                         MI->getOperand(1).getImm());
 }
 
 void MipsAsmPrinter::PrintDebugValueComment(const MachineInstr *MI,

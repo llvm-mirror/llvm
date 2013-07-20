@@ -90,6 +90,19 @@ def zextloadi8_global : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
     return isGlobalLoad(dyn_cast<LoadSDNode>(N));
 }]>;
 
+def zextloadi8_constant : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
+    return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def local_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+    return isLocalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def local_store : PatFrag<(ops node:$val, node:$ptr),
+                             (store node:$val, node:$ptr), [{
+    return isLocalStore(dyn_cast<StoreSDNode>(N));
+}]>;
+
 class Constants {
 int TWO_PI = 0x40c90fdb;
 int PI = 0x40490fdb;

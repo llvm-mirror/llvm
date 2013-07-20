@@ -177,7 +177,7 @@ namespace {
   class Filler : public MachineFunctionPass {
   public:
     Filler(TargetMachine &tm)
-      : MachineFunctionPass(ID), TM(tm), TII(tm.getInstrInfo()) { }
+      : MachineFunctionPass(ID), TM(tm) { }
 
     virtual const char *getPassName() const {
       return "Mips Delay Slot Filler";
@@ -243,7 +243,6 @@ namespace {
     bool terminateSearch(const MachineInstr &Candidate) const;
 
     TargetMachine &TM;
-    const TargetInstrInfo *TII;
 
     static char ID;
   };
@@ -438,7 +437,7 @@ bool MemDefsUses::hasHazard_(const MachineInstr &MI) {
 
   // Check underlying object list.
   if (getUnderlyingObjects(MI, Objs)) {
-    for (SmallVector<const Value *, 4>::const_iterator I = Objs.begin();
+    for (SmallVectorImpl<const Value *>::const_iterator I = Objs.begin();
          I != Objs.end(); ++I)
       HasHazard |= updateDefsUses(*I, MI.mayStore());
 
@@ -474,7 +473,7 @@ getUnderlyingObjects(const MachineInstr &MI,
   SmallVector<Value *, 4> Objs;
   GetUnderlyingObjects(const_cast<Value *>(V), Objs);
 
-  for (SmallVector<Value*, 4>::iterator I = Objs.begin(), E = Objs.end();
+  for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), E = Objs.end();
        I != E; ++I) {
     if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(*I)) {
       if (PSV->isAliased(MFI))
@@ -514,6 +513,8 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
     }
 
     // Bundle the NOP to the instruction with the delay slot.
+    const MipsInstrInfo *TII =
+      static_cast<const MipsInstrInfo*>(TM.getInstrInfo());
     BuildMI(MBB, llvm::next(I), I->getDebugLoc(), TII->get(Mips::NOP));
     MIBundleBuilder(MBB, I, llvm::next(llvm::next(I)));
   }

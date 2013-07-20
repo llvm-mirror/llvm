@@ -99,11 +99,13 @@ void R600MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   } else if (IS_VTX(Desc)) {
     uint64_t InstWord01 = getBinaryCodeForInstr(MI, Fixups);
     uint32_t InstWord2 = MI.getOperand(2).getImm(); // Offset
-    InstWord2 |= 1 << 19;
+    if (!(STI.getFeatureBits() & AMDGPU::FeatureCaymanISA)) {
+      InstWord2 |= 1 << 19; // Mega-Fetch bit
+    }
 
     Emit(InstWord01, OS);
     Emit(InstWord2, OS);
-    Emit((u_int32_t) 0, OS);
+    Emit((uint32_t) 0, OS);
   } else if (IS_TEX(Desc)) {
       int64_t Sampler = MI.getOperand(14).getImm();
 
@@ -113,7 +115,7 @@ void R600MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
         MI.getOperand(4).getImm(),
         MI.getOperand(5).getImm()
       };
-      long Offsets[3] = {
+      int64_t Offsets[3] = {
         MI.getOperand(6).getImm() & 0x1F,
         MI.getOperand(7).getImm() & 0x1F,
         MI.getOperand(8).getImm() & 0x1F
@@ -127,7 +129,7 @@ void R600MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
 
       Emit(Word01, OS);
       Emit(Word2, OS);
-      Emit((u_int32_t) 0, OS);
+      Emit((uint32_t) 0, OS);
   } else {
     uint64_t Inst = getBinaryCodeForInstr(MI, Fixups);
     if ((STI.getFeatureBits() & AMDGPU::FeatureR600ALUInst) &&

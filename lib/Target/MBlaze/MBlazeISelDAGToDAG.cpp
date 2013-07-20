@@ -181,14 +181,15 @@ SelectAddrRegImm(SDValue N, SDValue &Base, SDValue &Disp) {
 /// GOT address into a register.
 SDNode *MBlazeDAGToDAGISel::getGlobalBaseReg() {
   unsigned GlobalBaseReg = getInstrInfo()->getGlobalBaseReg(MF);
-  return CurDAG->getRegister(GlobalBaseReg, TLI.getPointerTy()).getNode();
+  return CurDAG->getRegister(GlobalBaseReg,
+                             getTargetLowering()->getPointerTy()).getNode();
 }
 
 /// Select instructions not customized! Used for
 /// expanded, promoted and normal instructions
 SDNode* MBlazeDAGToDAGISel::Select(SDNode *Node) {
   unsigned Opcode = Node->getOpcode();
-  DebugLoc dl = Node->getDebugLoc();
+  SDLoc dl(Node);
 
   // If we have a custom node, we already have selected!
   if (Node->isMachineOpcode())

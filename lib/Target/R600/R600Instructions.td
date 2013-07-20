@@ -12,44 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 include "R600Intrinsics.td"
-
-class InstR600 <dag outs, dag ins, string asm, list<dag> pattern,
-                InstrItinClass itin>
-    : AMDGPUInst <outs, ins, asm, pattern> {
-
-  field bits<64> Inst;
-  bit TransOnly = 0;
-  bit Trig = 0;
-  bit Op3 = 0;
-  bit isVector = 0;
-  bits<2> FlagOperandIdx = 0;
-  bit Op1 = 0;
-  bit Op2 = 0;
-  bit HasNativeOperands = 0;
-  bit VTXInst = 0;
-  bit TEXInst = 0;
-
-  let Namespace = "AMDGPU";
-  let OutOperandList = outs;
-  let InOperandList = ins;
-  let AsmString = asm;
-  let Pattern = pattern;
-  let Itinerary = itin;
-
-  let TSFlags{0} = TransOnly;
-  let TSFlags{4} = Trig;
-  let TSFlags{5} = Op3;
-
-  // Vector instructions are instructions that must fill all slots in an
-  // instruction group
-  let TSFlags{6} = isVector;
-  let TSFlags{8-7} = FlagOperandIdx;
-  let TSFlags{9} = HasNativeOperands;
-  let TSFlags{10} = Op1;
-  let TSFlags{11} = Op2;
-  let TSFlags{12} = VTXInst;
-  let TSFlags{13} = TEXInst;
-}
+include "R600InstrFormats.td"
 
 class InstR600ISA <dag outs, dag ins, string asm, list<dag> pattern> :
     InstR600 <outs, ins, asm, pattern, NullALU> {
@@ -114,235 +77,6 @@ def ADDRGA_CONST_OFFSET : ComplexPattern<i32, 1, "SelectGlobalValueConstantOffse
 def ADDRGA_VAR_OFFSET : ComplexPattern<i32, 2, "SelectGlobalValueVariableOffset", [], []>;
 def ADDRIndirect : ComplexPattern<iPTR, 2, "SelectADDRIndirect", [], []>;
 
-class R600ALU_Word0 {
-  field bits<32> Word0;
-
-  bits<11> src0;
-  bits<1>  src0_neg;
-  bits<1>  src0_rel;
-  bits<11> src1;
-  bits<1>  src1_rel;
-  bits<1>  src1_neg;
-  bits<3>  index_mode = 0;
-  bits<2>  pred_sel;
-  bits<1>  last;
-
-  bits<9>  src0_sel  = src0{8-0};
-  bits<2>  src0_chan = src0{10-9};
-  bits<9>  src1_sel  = src1{8-0};
-  bits<2>  src1_chan = src1{10-9};
-
-  let Word0{8-0}   = src0_sel;
-  let Word0{9}     = src0_rel;
-  let Word0{11-10} = src0_chan;
-  let Word0{12}    = src0_neg;
-  let Word0{21-13} = src1_sel;
-  let Word0{22}    = src1_rel;
-  let Word0{24-23} = src1_chan;
-  let Word0{25}    = src1_neg;
-  let Word0{28-26} = index_mode;
-  let Word0{30-29} = pred_sel;
-  let Word0{31}    = last;
-}
-
-class R600ALU_Word1 {
-  field bits<32> Word1;
-
-  bits<11> dst;
-  bits<3>  bank_swizzle;
-  bits<1>  dst_rel;
-  bits<1>  clamp;
-
-  bits<7>  dst_sel  = dst{6-0};
-  bits<2>  dst_chan = dst{10-9};
-
-  let Word1{20-18} = bank_swizzle;
-  let Word1{27-21} = dst_sel;
-  let Word1{28}    = dst_rel;
-  let Word1{30-29} = dst_chan;
-  let Word1{31}    = clamp;
-}
-
-class R600ALU_Word1_OP2 <bits<11> alu_inst> : R600ALU_Word1{
-
-  bits<1>  src0_abs;
-  bits<1>  src1_abs;
-  bits<1>  update_exec_mask;
-  bits<1>  update_pred;
-  bits<1>  write;
-  bits<2>  omod;
-
-  let Word1{0}     = src0_abs;
-  let Word1{1}     = src1_abs;
-  let Word1{2}     = update_exec_mask;
-  let Word1{3}     = update_pred;
-  let Word1{4}     = write;
-  let Word1{6-5}   = omod;
-  let Word1{17-7}  = alu_inst;
-}
-
-class R600ALU_Word1_OP3 <bits<5> alu_inst> : R600ALU_Word1{
-
-  bits<11> src2;
-  bits<1>  src2_rel;
-  bits<1>  src2_neg;
-
-  bits<9>  src2_sel = src2{8-0};
-  bits<2>  src2_chan = src2{10-9};
-
-  let Word1{8-0}   = src2_sel;
-  let Word1{9}     = src2_rel;
-  let Word1{11-10} = src2_chan;
-  let Word1{12}    = src2_neg;
-  let Word1{17-13} = alu_inst;
-}
-
-class VTX_WORD0 {
-  field bits<32> Word0;
-  bits<7> SRC_GPR;
-  bits<5> VC_INST;
-  bits<2> FETCH_TYPE;
-  bits<1> FETCH_WHOLE_QUAD;
-  bits<8> BUFFER_ID;
-  bits<1> SRC_REL;
-  bits<2> SRC_SEL_X;
-  bits<6> MEGA_FETCH_COUNT;
-
-  let Word0{4-0}   = VC_INST;
-  let Word0{6-5}   = FETCH_TYPE;
-  let Word0{7}     = FETCH_WHOLE_QUAD;
-  let Word0{15-8}  = BUFFER_ID;
-  let Word0{22-16} = SRC_GPR;
-  let Word0{23}    = SRC_REL;
-  let Word0{25-24} = SRC_SEL_X;
-  let Word0{31-26} = MEGA_FETCH_COUNT;
-}
-
-class VTX_WORD1_GPR {
-  field bits<32> Word1;
-  bits<7> DST_GPR;
-  bits<1> DST_REL;
-  bits<3> DST_SEL_X;
-  bits<3> DST_SEL_Y;
-  bits<3> DST_SEL_Z;
-  bits<3> DST_SEL_W;
-  bits<1> USE_CONST_FIELDS;
-  bits<6> DATA_FORMAT;
-  bits<2> NUM_FORMAT_ALL;
-  bits<1> FORMAT_COMP_ALL;
-  bits<1> SRF_MODE_ALL;
-
-  let Word1{6-0} = DST_GPR;
-  let Word1{7}    = DST_REL;
-  let Word1{8}    = 0; // Reserved
-  let Word1{11-9} = DST_SEL_X;
-  let Word1{14-12} = DST_SEL_Y;
-  let Word1{17-15} = DST_SEL_Z;
-  let Word1{20-18} = DST_SEL_W;
-  let Word1{21}    = USE_CONST_FIELDS;
-  let Word1{27-22} = DATA_FORMAT;
-  let Word1{29-28} = NUM_FORMAT_ALL;
-  let Word1{30}    = FORMAT_COMP_ALL;
-  let Word1{31}    = SRF_MODE_ALL;
-}
-
-class TEX_WORD0 {
-  field bits<32> Word0;
-
-  bits<5> TEX_INST;
-  bits<2> INST_MOD;
-  bits<1> FETCH_WHOLE_QUAD;
-  bits<8> RESOURCE_ID;
-  bits<7> SRC_GPR;
-  bits<1> SRC_REL;
-  bits<1> ALT_CONST;
-  bits<2> RESOURCE_INDEX_MODE;
-  bits<2> SAMPLER_INDEX_MODE;
-
-  let Word0{4-0} = TEX_INST;
-  let Word0{6-5} = INST_MOD;
-  let Word0{7} = FETCH_WHOLE_QUAD;
-  let Word0{15-8} = RESOURCE_ID;
-  let Word0{22-16} = SRC_GPR;
-  let Word0{23} = SRC_REL;
-  let Word0{24} = ALT_CONST;
-  let Word0{26-25} = RESOURCE_INDEX_MODE;
-  let Word0{28-27} = SAMPLER_INDEX_MODE;
-}
-
-class TEX_WORD1 {
-  field bits<32> Word1;
-
-  bits<7> DST_GPR;
-  bits<1> DST_REL;
-  bits<3> DST_SEL_X;
-  bits<3> DST_SEL_Y;
-  bits<3> DST_SEL_Z;
-  bits<3> DST_SEL_W;
-  bits<7> LOD_BIAS;
-  bits<1> COORD_TYPE_X;
-  bits<1> COORD_TYPE_Y;
-  bits<1> COORD_TYPE_Z;
-  bits<1> COORD_TYPE_W;
-
-  let Word1{6-0} = DST_GPR;
-  let Word1{7} = DST_REL;
-  let Word1{11-9} = DST_SEL_X;
-  let Word1{14-12} = DST_SEL_Y;
-  let Word1{17-15} = DST_SEL_Z;
-  let Word1{20-18} = DST_SEL_W;
-  let Word1{27-21} = LOD_BIAS;
-  let Word1{28} = COORD_TYPE_X;
-  let Word1{29} = COORD_TYPE_Y;
-  let Word1{30} = COORD_TYPE_Z;
-  let Word1{31} = COORD_TYPE_W;
-}
-
-class TEX_WORD2 {
-  field bits<32> Word2;
-
-  bits<5> OFFSET_X;
-  bits<5> OFFSET_Y;
-  bits<5> OFFSET_Z;
-  bits<5> SAMPLER_ID;
-  bits<3> SRC_SEL_X;
-  bits<3> SRC_SEL_Y;
-  bits<3> SRC_SEL_Z;
-  bits<3> SRC_SEL_W;
-
-  let Word2{4-0} = OFFSET_X;
-  let Word2{9-5} = OFFSET_Y;
-  let Word2{14-10} = OFFSET_Z;
-  let Word2{19-15} = SAMPLER_ID;
-  let Word2{22-20} = SRC_SEL_X;
-  let Word2{25-23} = SRC_SEL_Y;
-  let Word2{28-26} = SRC_SEL_Z;
-  let Word2{31-29} = SRC_SEL_W;
-}
-
-/*
-XXX: R600 subtarget uses a slightly different encoding than the other
-subtargets.  We currently handle this in R600MCCodeEmitter, but we may
-want to use these instruction classes in the future.
-
-class R600ALU_Word1_OP2_r600 : R600ALU_Word1_OP2 {
-
-  bits<1>  fog_merge;
-  bits<10> alu_inst;
-
-  let Inst{37}    = fog_merge;
-  let Inst{39-38} = omod;
-  let Inst{49-40} = alu_inst;
-}
-
-class R600ALU_Word1_OP2_r700 : R600ALU_Word1_OP2 {
-
-  bits<11> alu_inst;
-
-  let Inst{38-37} = omod;
-  let Inst{49-39} = alu_inst;
-}
-*/
 
 def R600_Pred : PredicateOperand<i32, (ops R600_Predicate),
                                      (ops PRED_SEL_OFF)>;
@@ -380,7 +114,9 @@ class R600_1OP <bits<11> inst, string opName, list<dag> pattern,
   let update_pred = 0;
   let HasNativeOperands = 1;
   let Op1 = 1;
+  let ALUInst = 1;
   let DisableEncoding = "$literal";
+  let UseNamedOperandTable = 1;
 
   let Inst{31-0}  = Word0;
   let Inst{63-32} = Word1;
@@ -392,7 +128,7 @@ class R600_1OP_Helper <bits<11> inst, string opName, SDPatternOperator node,
               [(set R600_Reg32:$dst, (node R600_Reg32:$src0))]
 >;
 
-// If you add our change the operands for R600_2OP instructions, you must
+// If you add or change the operands for R600_2OP instructions, you must
 // also update the R600Op2OperandIndex::ROI enum in R600Defines.h,
 // R600InstrInfo::buildDefaultInstruction(), and R600InstrInfo::getOperandIdx().
 class R600_2OP <bits<11> inst, string opName, list<dag> pattern,
@@ -416,7 +152,9 @@ class R600_2OP <bits<11> inst, string opName, list<dag> pattern,
 
   let HasNativeOperands = 1;
   let Op2 = 1;
+  let ALUInst = 1;
   let DisableEncoding = "$literal";
+  let UseNamedOperandTable = 1;
 
   let Inst{31-0}  = Word0;
   let Inst{63-32} = Word1;
@@ -456,6 +194,8 @@ class R600_3OP <bits<5> inst, string opName, list<dag> pattern,
   let HasNativeOperands = 1;
   let DisableEncoding = "$literal";
   let Op3 = 1;
+  let UseNamedOperandTable = 1;
+  let ALUInst = 1;
 
   let Inst{31-0}  = Word0;
   let Inst{63-32} = Word1;
@@ -501,45 +241,74 @@ def TEX_SHADOW_ARRAY : PatLeaf<
   }]
 >;
 
-class EG_CF_RAT <bits <8> cf_inst, bits <6> rat_inst, bits<4> rat_id, dag outs,
+class EG_CF_RAT <bits <8> cfinst, bits <6> ratinst, bits<4> mask, dag outs,
                  dag ins, string asm, list<dag> pattern> :
-    InstR600ISA <outs, ins, asm, pattern> {
-  bits<7>  RW_GPR;
-  bits<7>  INDEX_GPR;
+    InstR600ISA <outs, ins, asm, pattern>,
+    CF_ALLOC_EXPORT_WORD0_RAT, CF_ALLOC_EXPORT_WORD1_BUF  {
 
-  bits<2>  RIM;
-  bits<2>  TYPE;
-  bits<1>  RW_REL;
-  bits<2>  ELEM_SIZE;
+  let rat_id = 0;
+  let rat_inst = ratinst;
+  let rim         = 0;
+  // XXX: Have a separate instruction for non-indexed writes.
+  let type        = 1;
+  let rw_rel      = 0;
+  let elem_size   = 0;
 
-  bits<12> ARRAY_SIZE;
-  bits<4>  COMP_MASK;
-  bits<4>  BURST_COUNT;
-  bits<1>  VPM;
-  bits<1>  eop;
-  bits<1>  MARK;
-  bits<1>  BARRIER;
+  let array_size  = 0;
+  let comp_mask   = mask;
+  let burst_count = 0;
+  let vpm         = 0;
+  let cf_inst = cfinst;
+  let mark        = 0;
+  let barrier     = 1;
 
-  // CF_ALLOC_EXPORT_WORD0_RAT
-  let Inst{3-0}   = rat_id;
-  let Inst{9-4}   = rat_inst;
-  let Inst{10}    = 0; // Reserved
-  let Inst{12-11} = RIM;
-  let Inst{14-13} = TYPE;
-  let Inst{21-15} = RW_GPR;
-  let Inst{22}    = RW_REL;
-  let Inst{29-23} = INDEX_GPR;
-  let Inst{31-30} = ELEM_SIZE;
+  let Inst{31-0} = Word0;
+  let Inst{63-32} = Word1;
 
-  // CF_ALLOC_EXPORT_WORD1_BUF
-  let Inst{43-32} = ARRAY_SIZE;
-  let Inst{47-44} = COMP_MASK;
-  let Inst{51-48} = BURST_COUNT;
-  let Inst{52}    = VPM;
-  let Inst{53}    = eop;
-  let Inst{61-54} = cf_inst;
-  let Inst{62}    = MARK;
-  let Inst{63}    = BARRIER;
+}
+
+class VTX_READ <string name, bits<8> buffer_id, dag outs, list<dag> pattern>
+    : InstR600ISA <outs, (ins MEMxi:$src_gpr), name, pattern>,
+      VTX_WORD1_GPR {
+
+  // Static fields
+  let DST_REL = 0;
+  // The docs say that if this bit is set, then DATA_FORMAT, NUM_FORMAT_ALL,
+  // FORMAT_COMP_ALL, SRF_MODE_ALL, and ENDIAN_SWAP fields will be ignored,
+  // however, based on my testing if USE_CONST_FIELDS is set, then all
+  // these fields need to be set to 0.
+  let USE_CONST_FIELDS = 0;
+  let NUM_FORMAT_ALL = 1;
+  let FORMAT_COMP_ALL = 0;
+  let SRF_MODE_ALL = 0;
+
+  let Inst{63-32} = Word1;
+  // LLVM can only encode 64-bit instructions, so these fields are manually
+  // encoded in R600CodeEmitter
+  //
+  // bits<16> OFFSET;
+  // bits<2>  ENDIAN_SWAP = 0;
+  // bits<1>  CONST_BUF_NO_STRIDE = 0;
+  // bits<1>  MEGA_FETCH = 0;
+  // bits<1>  ALT_CONST = 0;
+  // bits<2>  BUFFER_INDEX_MODE = 0;
+
+  // VTX_WORD2 (LLVM can only encode 64-bit instructions, so WORD2 encoding
+  // is done in R600CodeEmitter
+  //
+  // Inst{79-64} = OFFSET;
+  // Inst{81-80} = ENDIAN_SWAP;
+  // Inst{82}    = CONST_BUF_NO_STRIDE;
+  // Inst{83}    = MEGA_FETCH;
+  // Inst{84}    = ALT_CONST;
+  // Inst{86-85} = BUFFER_INDEX_MODE;
+  // Inst{95-86} = 0; Reserved
+
+  // VTX_WORD3 (Padding)
+  //
+  // Inst{127-96} = 0;
+
+  let VTXInst = 1;
 }
 
 class LoadParamFrag <PatFrag load_type> : PatFrag <
@@ -551,26 +320,21 @@ def load_param : LoadParamFrag<load>;
 def load_param_zexti8 : LoadParamFrag<zextloadi8>;
 def load_param_zexti16 : LoadParamFrag<zextloadi16>;
 
-def isR600 : Predicate<"Subtarget.device()"
-                            "->getGeneration() == AMDGPUDeviceInfo::HD4XXX">;
-def isR700 : Predicate<"Subtarget.device()"
-                            "->getGeneration() == AMDGPUDeviceInfo::HD4XXX &&"
-                            "Subtarget.device()->getDeviceFlag()"
-                            ">= OCL_DEVICE_RV710">;
+def isR600 : Predicate<"Subtarget.getGeneration() <= AMDGPUSubtarget::R700">;
+def isR700 : Predicate<"Subtarget.getGeneration() == AMDGPUSubtarget::R700">;
 def isEG : Predicate<
-  "Subtarget.device()->getGeneration() >= AMDGPUDeviceInfo::HD5XXX && "
-  "Subtarget.device()->getGeneration() < AMDGPUDeviceInfo::HD7XXX && "
-  "Subtarget.device()->getDeviceFlag() != OCL_DEVICE_CAYMAN">;
+  "Subtarget.getGeneration() >= AMDGPUSubtarget::EVERGREEN && "
+  "Subtarget.getGeneration() < AMDGPUSubtarget::SOUTHERN_ISLANDS && "
+  "!Subtarget.hasCaymanISA()">;
 
-def isCayman : Predicate<"Subtarget.device()"
-                            "->getDeviceFlag() == OCL_DEVICE_CAYMAN">;
-def isEGorCayman : Predicate<"Subtarget.device()"
-                            "->getGeneration() == AMDGPUDeviceInfo::HD5XXX"
-                            "|| Subtarget.device()->getGeneration() =="
-                            "AMDGPUDeviceInfo::HD6XXX">;
+def isCayman : Predicate<"Subtarget.hasCaymanISA()">;
+def isEGorCayman : Predicate<"Subtarget.getGeneration() == "
+                             "AMDGPUSubtarget::EVERGREEN"
+                            "|| Subtarget.getGeneration() =="
+                            "AMDGPUSubtarget::NORTHERN_ISLANDS">;
 
 def isR600toCayman : Predicate<
-                     "Subtarget.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX">;
+                     "Subtarget.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS">;
 
 //===----------------------------------------------------------------------===//
 // R600 SDNodes
@@ -578,13 +342,13 @@ def isR600toCayman : Predicate<
 
 def INTERP_PAIR_XY :  AMDGPUShaderInst <
   (outs R600_TReg32_X:$dst0, R600_TReg32_Y:$dst1),
-  (ins i32imm:$src0, R600_Reg32:$src1, R600_Reg32:$src2),
+  (ins i32imm:$src0, R600_TReg32_Y:$src1, R600_TReg32_X:$src2),
   "INTERP_PAIR_XY $src0 $src1 $src2 : $dst0 dst1",
   []>;
 
 def INTERP_PAIR_ZW :  AMDGPUShaderInst <
   (outs R600_TReg32_Z:$dst0, R600_TReg32_W:$dst1),
-  (ins i32imm:$src0, R600_Reg32:$src1, R600_Reg32:$src2),
+  (ins i32imm:$src0, R600_TReg32_Y:$src1, R600_TReg32_X:$src2),
   "INTERP_PAIR_ZW $src0 $src1 $src2 : $dst0 dst1",
   []>;
 
@@ -598,6 +362,14 @@ def DOT4 : SDNode<"AMDGPUISD::DOT4",
       SDTCisVT<3, f32>, SDTCisVT<4, f32>, SDTCisVT<5, f32>,
       SDTCisVT<6, f32>, SDTCisVT<7, f32>, SDTCisVT<8, f32>]>,
   []
+>;
+
+def COS_HW : SDNode<"AMDGPUISD::COS_HW",
+  SDTypeProfile<1, 1, [SDTCisFP<0>, SDTCisFP<1>]>
+>;
+
+def SIN_HW : SDNode<"AMDGPUISD::SIN_HW",
+  SDTypeProfile<1, 1, [SDTCisFP<0>, SDTCisFP<1>]>
 >;
 
 def TEXTURE_FETCH_Type : SDTypeProfile<1, 19, [SDTCisFP<0>]>;
@@ -758,9 +530,9 @@ let usesCustomInserter = 1, isNotDuplicable = 1 in {
 class ExportSwzInst : InstR600ISA<(
     outs),
     (ins R600_Reg128:$gpr, i32imm:$type, i32imm:$arraybase,
-    i32imm:$sw_x, i32imm:$sw_y, i32imm:$sw_z, i32imm:$sw_w, i32imm:$inst,
+    RSel:$sw_x, RSel:$sw_y, RSel:$sw_z, RSel:$sw_w, i32imm:$inst,
     i32imm:$eop),
-    !strconcat("EXPORT", " $gpr"),
+    !strconcat("EXPORT", " $gpr.$sw_x$sw_y$sw_z$sw_w"),
     []>, ExportWord0, ExportSwzWord1 {
   let elem_size = 3;
   let Inst{31-0} = Word0;
@@ -784,41 +556,6 @@ class ExportBufInst : InstR600ISA<(
 // Control Flow Instructions
 //===----------------------------------------------------------------------===//
 
-class CF_ALU_WORD0 {
-  field bits<32> Word0;
-
-  bits<22> ADDR;
-  bits<4> KCACHE_BANK0;
-  bits<4> KCACHE_BANK1;
-  bits<2> KCACHE_MODE0;
-
-  let Word0{21-0} = ADDR;
-  let Word0{25-22} = KCACHE_BANK0;
-  let Word0{29-26} = KCACHE_BANK1;
-  let Word0{31-30} = KCACHE_MODE0;
-}
-
-class CF_ALU_WORD1 {
-  field bits<32> Word1;
-
-  bits<2> KCACHE_MODE1;
-  bits<8> KCACHE_ADDR0;
-  bits<8> KCACHE_ADDR1;
-  bits<7> COUNT;
-  bits<1> ALT_CONST;
-  bits<4> CF_INST;
-  bits<1> WHOLE_QUAD_MODE;
-  bits<1> BARRIER;
-
-  let Word1{1-0} = KCACHE_MODE1;
-  let Word1{9-2} = KCACHE_ADDR0;
-  let Word1{17-10} = KCACHE_ADDR1;
-  let Word1{24-18} = COUNT;
-  let Word1{25} = ALT_CONST;
-  let Word1{29-26} = CF_INST;
-  let Word1{30} = WHOLE_QUAD_MODE;
-  let Word1{31} = BARRIER;
-}
 
 def KCACHE : InstFlag<"printKCache">;
 
@@ -826,7 +563,7 @@ class ALU_CLAUSE<bits<4> inst, string OpName> : AMDGPUInst <(outs),
 (ins i32imm:$ADDR, i32imm:$KCACHE_BANK0, i32imm:$KCACHE_BANK1,
 KCACHE:$KCACHE_MODE0, KCACHE:$KCACHE_MODE1,
 i32imm:$KCACHE_ADDR0, i32imm:$KCACHE_ADDR1,
-i32imm:$COUNT),
+i32imm:$COUNT, i32imm:$Enabled),
 !strconcat(OpName, " $COUNT, @$ADDR, "
 "KC0[$KCACHE_MODE0], KC1[$KCACHE_MODE1]"),
 [] >, CF_ALU_WORD0, CF_ALU_WORD1 {
@@ -849,82 +586,24 @@ class CF_WORD0_R600 {
   let Word0 = ADDR;
 }
 
-class CF_WORD1_R600 {
-  field bits<32> Word1;
-
-  bits<3> POP_COUNT;
-  bits<5> CF_CONST;
-  bits<2> COND;
-  bits<3> COUNT;
-  bits<6> CALL_COUNT;
-  bits<1> COUNT_3;
-  bits<1> END_OF_PROGRAM;
-  bits<1> VALID_PIXEL_MODE;
-  bits<7> CF_INST;
-  bits<1> WHOLE_QUAD_MODE;
-  bits<1> BARRIER;
-
-  let Word1{2-0} = POP_COUNT;
-  let Word1{7-3} = CF_CONST;
-  let Word1{9-8} = COND;
-  let Word1{12-10} = COUNT;
-  let Word1{18-13} = CALL_COUNT;
-  let Word1{19} = COUNT_3;
-  let Word1{21} = END_OF_PROGRAM;
-  let Word1{22} = VALID_PIXEL_MODE;
-  let Word1{29-23} = CF_INST;
-  let Word1{30} = WHOLE_QUAD_MODE;
-  let Word1{31} = BARRIER;
-}
-
 class CF_CLAUSE_R600 <bits<7> inst, dag ins, string AsmPrint> : AMDGPUInst <(outs),
 ins, AsmPrint, [] >, CF_WORD0_R600, CF_WORD1_R600 {
   field bits<64> Inst;
+  bits<4> CNT;
 
   let CF_INST = inst;
   let BARRIER = 1;
   let CF_CONST = 0;
   let VALID_PIXEL_MODE = 0;
   let COND = 0;
+  let COUNT = CNT{2-0};
   let CALL_COUNT = 0;
-  let COUNT_3 = 0;
+  let COUNT_3 = CNT{3};
   let END_OF_PROGRAM = 0;
   let WHOLE_QUAD_MODE = 0;
 
   let Inst{31-0} = Word0;
   let Inst{63-32} = Word1;
-}
-
-class CF_WORD0_EG {
-  field bits<32> Word0;
-
-  bits<24> ADDR;
-  bits<3> JUMPTABLE_SEL;
-
-  let Word0{23-0} = ADDR;
-  let Word0{26-24} = JUMPTABLE_SEL;
-}
-
-class CF_WORD1_EG {
-  field bits<32> Word1;
-
-  bits<3> POP_COUNT;
-  bits<5> CF_CONST;
-  bits<2> COND;
-  bits<6> COUNT;
-  bits<1> VALID_PIXEL_MODE;
-  bits<1> END_OF_PROGRAM;
-  bits<8> CF_INST;
-  bits<1> BARRIER;
-
-  let Word1{2-0} = POP_COUNT;
-  let Word1{7-3} = CF_CONST;
-  let Word1{9-8} = COND;
-  let Word1{15-10} = COUNT;
-  let Word1{20} = VALID_PIXEL_MODE;
-  let Word1{21} = END_OF_PROGRAM;
-  let Word1{29-22} = CF_INST;
-  let Word1{31} = BARRIER;
 }
 
 class CF_CLAUSE_EG <bits<8> inst, dag ins, string AsmPrint> : AMDGPUInst <(outs),
@@ -1266,7 +945,11 @@ class R600_VEC2OP<list<dag> pattern> : InstR600 <(outs R600_Reg32:$dst), (ins
    LITERAL:$literal0, LITERAL:$literal1),
   "",
   pattern,
-  AnyALU> {}
+  AnyALU> {
+
+  let UseNamedOperandTable = 1;
+
+}
 }
 
 def DOT_4 : R600_VEC2OP<[(set R600_Reg32:$dst, (DOT4
@@ -1284,12 +967,13 @@ multiclass CUBE_Common <bits<11> inst> {
 
   def _pseudo : InstR600 <
     (outs R600_Reg128:$dst),
-    (ins R600_Reg128:$src),
-    "CUBE $dst $src",
-    [(set v4f32:$dst, (int_AMDGPU_cube v4f32:$src))],
+    (ins R600_Reg128:$src0),
+    "CUBE $dst $src0",
+    [(set v4f32:$dst, (int_AMDGPU_cube v4f32:$src0))],
     VecALU
   > {
     let isPseudo = 1;
+    let UseNamedOperandTable = 1;
   }
 
   def _real : R600_2OP <inst, "CUBE", []>;
@@ -1404,14 +1088,14 @@ class RECIPSQRT_IEEE_Common <bits<11> inst> : R600_1OP <
 }
 
 class SIN_Common <bits<11> inst> : R600_1OP <
-  inst, "SIN", []>{
+  inst, "SIN", [(set f32:$dst, (SIN_HW f32:$src0))]>{
   let Trig = 1;
   let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class COS_Common <bits<11> inst> : R600_1OP <
-  inst, "COS", []> {
+  inst, "COS", [(set f32:$dst, (COS_HW f32:$src0))]> {
   let Trig = 1;
   let TransOnly = 1;
   let Itinerary = TransALU;
@@ -1499,70 +1183,58 @@ let Predicates = [isR600] in {
   }
   defm : SteamOutputExportPattern<R600_ExportBuf, 0x20, 0x21, 0x22, 0x23>;
 
-  def CF_TC_R600 : CF_CLAUSE_R600<1, (ins i32imm:$ADDR, i32imm:$COUNT),
-  "TEX $COUNT @$ADDR"> {
+  def CF_TC_R600 : CF_CLAUSE_R600<1, (ins i32imm:$ADDR, i32imm:$CNT),
+  "TEX $CNT @$ADDR"> {
     let POP_COUNT = 0;
   }
-  def CF_VC_R600 : CF_CLAUSE_R600<2, (ins i32imm:$ADDR, i32imm:$COUNT),
-  "VTX $COUNT @$ADDR"> {
+  def CF_VC_R600 : CF_CLAUSE_R600<2, (ins i32imm:$ADDR, i32imm:$CNT),
+  "VTX $CNT @$ADDR"> {
     let POP_COUNT = 0;
   }
   def WHILE_LOOP_R600 : CF_CLAUSE_R600<6, (ins i32imm:$ADDR),
   "LOOP_START_DX10 @$ADDR"> {
     let POP_COUNT = 0;
-    let COUNT = 0;
+    let CNT = 0;
   }
   def END_LOOP_R600 : CF_CLAUSE_R600<5, (ins i32imm:$ADDR), "END_LOOP @$ADDR"> {
     let POP_COUNT = 0;
-    let COUNT = 0;
+    let CNT = 0;
   }
   def LOOP_BREAK_R600 : CF_CLAUSE_R600<9, (ins i32imm:$ADDR),
   "LOOP_BREAK @$ADDR"> {
     let POP_COUNT = 0;
-    let COUNT = 0;
+    let CNT = 0;
   }
   def CF_CONTINUE_R600 : CF_CLAUSE_R600<8, (ins i32imm:$ADDR),
   "CONTINUE @$ADDR"> {
     let POP_COUNT = 0;
-    let COUNT = 0;
+    let CNT = 0;
   }
   def CF_JUMP_R600 : CF_CLAUSE_R600<10, (ins i32imm:$ADDR, i32imm:$POP_COUNT),
   "JUMP @$ADDR POP:$POP_COUNT"> {
-    let COUNT = 0;
+    let CNT = 0;
   }
   def CF_ELSE_R600 : CF_CLAUSE_R600<13, (ins i32imm:$ADDR, i32imm:$POP_COUNT),
   "ELSE @$ADDR POP:$POP_COUNT"> {
-    let COUNT = 0;
+    let CNT = 0;
   }
   def CF_CALL_FS_R600 : CF_CLAUSE_R600<19, (ins), "CALL_FS"> {
     let ADDR = 0;
-    let COUNT = 0;
+    let CNT = 0;
     let POP_COUNT = 0;
   }
   def POP_R600 : CF_CLAUSE_R600<14, (ins i32imm:$ADDR, i32imm:$POP_COUNT),
   "POP @$ADDR POP:$POP_COUNT"> {
-    let COUNT = 0;
+    let CNT = 0;
   }
   def CF_END_R600 : CF_CLAUSE_R600<0, (ins), "CF_END"> {
-    let COUNT = 0;
+    let CNT = 0;
     let POP_COUNT = 0;
     let ADDR = 0;
     let END_OF_PROGRAM = 1;
   }
 
 }
-
-// Helper pattern for normalizing inputs to triginomic instructions for R700+
-// cards.
-class COS_PAT <InstR600 trig> : Pat<
-  (fcos f32:$src),
-  (trig (MUL_IEEE (MOV_IMM_I32 CONST.TWO_PI_INV), $src))
->;
-
-class SIN_PAT <InstR600 trig> : Pat<
-  (fsin f32:$src),
-  (trig (MUL_IEEE (MOV_IMM_I32 CONST.TWO_PI_INV), $src))
->;
 
 //===----------------------------------------------------------------------===//
 // R700 Only instructions
@@ -1571,10 +1243,6 @@ class SIN_PAT <InstR600 trig> : Pat<
 let Predicates = [isR700] in {
   def SIN_r700 : SIN_Common<0x6E>;
   def COS_r700 : COS_Common<0x6F>;
-
-  // R700 normalizes inputs to SIN/COS the same as EG
-  def : SIN_PAT <SIN_r700>;
-  def : COS_PAT <COS_r700>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1600,9 +1268,161 @@ def SIN_eg : SIN_Common<0x8D>;
 def COS_eg : COS_Common<0x8E>;
 
 def : POW_Common <LOG_IEEE_eg, EXP_IEEE_eg, MUL>;
-def : SIN_PAT <SIN_eg>;
-def : COS_PAT <COS_eg>;
 def : Pat<(fsqrt f32:$src), (MUL $src, (RECIPSQRT_CLAMPED_eg $src))>;
+
+//===----------------------------------------------------------------------===//
+// Memory read/write instructions
+//===----------------------------------------------------------------------===//
+let usesCustomInserter = 1 in {
+
+class RAT_WRITE_CACHELESS_eg <dag ins, bits<4> mask, string name,
+                              list<dag> pattern>
+    : EG_CF_RAT <0x57, 0x2, mask, (outs), ins, name, pattern> {
+}
+
+} // End usesCustomInserter = 1
+
+// 32-bit store
+def RAT_WRITE_CACHELESS_32_eg : RAT_WRITE_CACHELESS_eg <
+  (ins R600_TReg32_X:$rw_gpr, R600_TReg32_X:$index_gpr, InstFlag:$eop),
+  0x1, "RAT_WRITE_CACHELESS_32_eg $rw_gpr, $index_gpr, $eop",
+  [(global_store i32:$rw_gpr, i32:$index_gpr)]
+>;
+
+//128-bit store
+def RAT_WRITE_CACHELESS_128_eg : RAT_WRITE_CACHELESS_eg <
+  (ins R600_Reg128:$rw_gpr, R600_TReg32_X:$index_gpr, InstFlag:$eop),
+  0xf, "RAT_WRITE_CACHELESS_128 $rw_gpr.XYZW, $index_gpr, $eop",
+  [(global_store v4i32:$rw_gpr, i32:$index_gpr)]
+>;
+
+class VTX_READ_eg <string name, bits<8> buffer_id, dag outs, list<dag> pattern>
+    : VTX_WORD0_eg, VTX_READ<name, buffer_id, outs, pattern> {
+
+  // Static fields
+  let VC_INST = 0;
+  let FETCH_TYPE = 2;
+  let FETCH_WHOLE_QUAD = 0;
+  let BUFFER_ID = buffer_id;
+  let SRC_REL = 0;
+  // XXX: We can infer this field based on the SRC_GPR.  This would allow us
+  // to store vertex addresses in any channel, not just X.
+  let SRC_SEL_X = 0;
+
+  let Inst{31-0} = Word0;
+}
+
+class VTX_READ_8_eg <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_eg <"VTX_READ_8 $dst_gpr, $src_gpr", buffer_id,
+                   (outs R600_TReg32_X:$dst_gpr), pattern> {
+
+  let MEGA_FETCH_COUNT = 1;
+  let DST_SEL_X = 0;
+  let DST_SEL_Y = 7;   // Masked
+  let DST_SEL_Z = 7;   // Masked
+  let DST_SEL_W = 7;   // Masked
+  let DATA_FORMAT = 1; // FMT_8
+}
+
+class VTX_READ_16_eg <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_eg <"VTX_READ_16 $dst_gpr, $src_gpr", buffer_id,
+                   (outs R600_TReg32_X:$dst_gpr), pattern> {
+  let MEGA_FETCH_COUNT = 2;
+  let DST_SEL_X = 0;
+  let DST_SEL_Y = 7;   // Masked
+  let DST_SEL_Z = 7;   // Masked
+  let DST_SEL_W = 7;   // Masked
+  let DATA_FORMAT = 5; // FMT_16
+
+}
+
+class VTX_READ_32_eg <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_eg <"VTX_READ_32 $dst_gpr, $src_gpr", buffer_id,
+                   (outs R600_TReg32_X:$dst_gpr), pattern> {
+
+  let MEGA_FETCH_COUNT = 4;
+  let DST_SEL_X        = 0;
+  let DST_SEL_Y        = 7;   // Masked
+  let DST_SEL_Z        = 7;   // Masked
+  let DST_SEL_W        = 7;   // Masked
+  let DATA_FORMAT      = 0xD; // COLOR_32
+
+  // This is not really necessary, but there were some GPU hangs that appeared
+  // to be caused by ALU instructions in the next instruction group that wrote
+  // to the $src_gpr registers of the VTX_READ.
+  // e.g.
+  // %T3_X<def> = VTX_READ_PARAM_32_eg %T2_X<kill>, 24
+  // %T2_X<def> = MOV %ZERO
+  //Adding this constraint prevents this from happening.
+  let Constraints = "$src_gpr.ptr = $dst_gpr";
+}
+
+class VTX_READ_128_eg <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_eg <"VTX_READ_128 $dst_gpr.XYZW, $src_gpr", buffer_id,
+                   (outs R600_Reg128:$dst_gpr), pattern> {
+
+  let MEGA_FETCH_COUNT = 16;
+  let DST_SEL_X        =  0;
+  let DST_SEL_Y        =  1;
+  let DST_SEL_Z        =  2;
+  let DST_SEL_W        =  3;
+  let DATA_FORMAT      =  0x22; // COLOR_32_32_32_32
+
+  // XXX: Need to force VTX_READ_128 instructions to write to the same register
+  // that holds its buffer address to avoid potential hangs.  We can't use
+  // the same constraint as VTX_READ_32_eg, because the $src_gpr.ptr and $dst
+  // registers are different sizes.
+}
+
+//===----------------------------------------------------------------------===//
+// VTX Read from parameter memory space
+//===----------------------------------------------------------------------===//
+
+def VTX_READ_PARAM_8_eg : VTX_READ_8_eg <0,
+  [(set i32:$dst_gpr, (load_param_zexti8 ADDRVTX_READ:$src_gpr))]
+>;
+
+def VTX_READ_PARAM_16_eg : VTX_READ_16_eg <0,
+  [(set i32:$dst_gpr, (load_param_zexti16 ADDRVTX_READ:$src_gpr))]
+>;
+
+def VTX_READ_PARAM_32_eg : VTX_READ_32_eg <0,
+  [(set i32:$dst_gpr, (load_param ADDRVTX_READ:$src_gpr))]
+>;
+
+def VTX_READ_PARAM_128_eg : VTX_READ_128_eg <0,
+  [(set v4i32:$dst_gpr, (load_param ADDRVTX_READ:$src_gpr))]
+>;
+
+//===----------------------------------------------------------------------===//
+// VTX Read from global memory space
+//===----------------------------------------------------------------------===//
+
+// 8-bit reads
+def VTX_READ_GLOBAL_8_eg : VTX_READ_8_eg <1,
+  [(set i32:$dst_gpr, (zextloadi8_global ADDRVTX_READ:$src_gpr))]
+>;
+
+// 32-bit reads
+def VTX_READ_GLOBAL_32_eg : VTX_READ_32_eg <1,
+  [(set i32:$dst_gpr, (global_load ADDRVTX_READ:$src_gpr))]
+>;
+
+// 128-bit reads
+def VTX_READ_GLOBAL_128_eg : VTX_READ_128_eg <1,
+  [(set v4i32:$dst_gpr, (global_load ADDRVTX_READ:$src_gpr))]
+>;
+
+//===----------------------------------------------------------------------===//
+// Constant Loads
+// XXX: We are currently storing all constants in the global address space.
+//===----------------------------------------------------------------------===//
+
+def CONSTANT_LOAD_eg : VTX_READ_32_eg <1,
+  [(set i32:$dst_gpr, (constant_load ADDRVTX_READ:$src_gpr))]
+>;
+
+
 } // End Predicates = [isEG]
 
 //===----------------------------------------------------------------------===//
@@ -1659,6 +1479,8 @@ let hasSideEffects = 1 in {
 
   def FLT_TO_INT_eg : FLT_TO_INT_Common<0x50> {
     let Pattern = [];
+    let TransOnly = 0;
+    let Itinerary = AnyALU;
   }
 
   def INT_TO_FLT_eg : INT_TO_FLT_Common<0x9B>;
@@ -1668,6 +1490,111 @@ let hasSideEffects = 1 in {
   }
 
   def UINT_TO_FLT_eg : UINT_TO_FLT_Common<0x9C>;
+
+def GROUP_BARRIER : InstR600 <
+    (outs), (ins), "  GROUP_BARRIER", [(int_AMDGPU_barrier_local)], AnyALU>,
+    R600ALU_Word0,
+    R600ALU_Word1_OP2 <0x54> {
+
+  let dst = 0;
+  let dst_rel = 0;
+  let src0 = 0;
+  let src0_rel = 0;
+  let src0_neg = 0;
+  let src0_abs = 0;
+  let src1 = 0;
+  let src1_rel = 0;
+  let src1_neg = 0;
+  let src1_abs = 0;
+  let write = 0;
+  let omod = 0;
+  let clamp = 0;
+  let last = 1;
+  let bank_swizzle = 0;
+  let pred_sel = 0;
+  let update_exec_mask = 0;
+  let update_pred = 0;
+
+  let Inst{31-0}  = Word0;
+  let Inst{63-32} = Word1;
+
+  let ALUInst = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// LDS Instructions
+//===----------------------------------------------------------------------===//
+class R600_LDS  <bits<6> op, dag outs, dag ins, string asm,
+                 list<dag> pattern = []> :
+
+    InstR600 <outs, ins, asm, pattern, XALU>,
+    R600_ALU_LDS_Word0,
+    R600LDS_Word1 {
+
+  bits<6>  offset = 0;
+  let lds_op = op;
+
+  let Word1{27} = offset{0};
+  let Word1{12} = offset{1};
+  let Word1{28} = offset{2};
+  let Word1{31} = offset{3};
+  let Word0{12} = offset{4};
+  let Word0{25} = offset{5};
+
+
+  let Inst{31-0}  = Word0;
+  let Inst{63-32} = Word1;
+
+  let ALUInst = 1;
+  let HasNativeOperands = 1;
+  let UseNamedOperandTable = 1;
+}
+
+class R600_LDS_1A <bits<6> lds_op, string name, list<dag> pattern> : R600_LDS <
+  lds_op,
+  (outs R600_Reg32:$dst),
+  (ins R600_Reg32:$src0, REL:$src0_rel, SEL:$src0_sel,
+       LAST:$last, R600_Pred:$pred_sel,
+       BANK_SWIZZLE:$bank_swizzle),
+  "  "#name#" $last OQAP, $src0$src0_rel $pred_sel",
+  pattern
+  > {
+
+  let src1 = 0;
+  let src1_rel = 0;
+  let src2 = 0;
+  let src2_rel = 0;
+
+  let Defs = [OQAP];
+  let usesCustomInserter = 1;
+  let LDS_1A = 1;
+  let DisableEncoding = "$dst";
+}
+
+class R600_LDS_1A1D <bits<6> lds_op, string name, list<dag> pattern> :
+    R600_LDS <
+  lds_op,
+  (outs),
+  (ins R600_Reg32:$src0, REL:$src0_rel, SEL:$src0_sel,
+       R600_Reg32:$src1, REL:$src1_rel, SEL:$src1_sel,
+       LAST:$last, R600_Pred:$pred_sel,
+       BANK_SWIZZLE:$bank_swizzle),
+  "  "#name#" $last $src0$src0_rel, $src1$src1_rel, $pred_sel",
+  pattern
+  > {
+
+  let src2 = 0;
+  let src2_rel = 0;
+  let LDS_1A1D = 1;
+}
+
+def LDS_READ_RET : R600_LDS_1A <0x32, "LDS_READ_RET",
+  [(set (i32 R600_Reg32:$dst), (local_load R600_Reg32:$src0))]
+>;
+
+def LDS_WRITE : R600_LDS_1A1D <0xD, "LDS_WRITE",
+  [(local_store (i32 R600_Reg32:$src1), R600_Reg32:$src0)]
+>;
 
   // TRUNC is used for the FLT_TO_INT instructions to work around a
   // perceived problem where the rounding modes are applied differently
@@ -1757,216 +1684,17 @@ let hasSideEffects = 1 in {
     let END_OF_PROGRAM = 1;
   }
 
-//===----------------------------------------------------------------------===//
-// Memory read/write instructions
-//===----------------------------------------------------------------------===//
-let usesCustomInserter = 1 in {
-
-class RAT_WRITE_CACHELESS_eg <dag ins, bits<4> comp_mask, string name,
-                              list<dag> pattern>
-    : EG_CF_RAT <0x57, 0x2, 0, (outs), ins, name, pattern> {
-  let RIM         = 0;
-  // XXX: Have a separate instruction for non-indexed writes.
-  let TYPE        = 1;
-  let RW_REL      = 0;
-  let ELEM_SIZE   = 0;
-
-  let ARRAY_SIZE  = 0;
-  let COMP_MASK   = comp_mask;
-  let BURST_COUNT = 0;
-  let VPM         = 0;
-  let MARK        = 0;
-  let BARRIER     = 1;
-}
-
-} // End usesCustomInserter = 1
-
-// 32-bit store
-def RAT_WRITE_CACHELESS_32_eg : RAT_WRITE_CACHELESS_eg <
-  (ins R600_TReg32_X:$rw_gpr, R600_TReg32_X:$index_gpr, InstFlag:$eop),
-  0x1, "RAT_WRITE_CACHELESS_32_eg $rw_gpr, $index_gpr, $eop",
-  [(global_store i32:$rw_gpr, i32:$index_gpr)]
->;
-
-//128-bit store
-def RAT_WRITE_CACHELESS_128_eg : RAT_WRITE_CACHELESS_eg <
-  (ins R600_Reg128:$rw_gpr, R600_TReg32_X:$index_gpr, InstFlag:$eop),
-  0xf, "RAT_WRITE_CACHELESS_128 $rw_gpr.XYZW, $index_gpr, $eop",
-  [(global_store v4i32:$rw_gpr, i32:$index_gpr)]
->;
-
-class VTX_READ_eg <string name, bits<8> buffer_id, dag outs, list<dag> pattern>
-    : InstR600ISA <outs, (ins MEMxi:$ptr), name, pattern>,
-      VTX_WORD1_GPR, VTX_WORD0 {
-
-  // Static fields
-  let VC_INST = 0;
-  let FETCH_TYPE = 2;
-  let FETCH_WHOLE_QUAD = 0;
-  let BUFFER_ID = buffer_id;
-  let SRC_REL = 0;
-  // XXX: We can infer this field based on the SRC_GPR.  This would allow us
-  // to store vertex addresses in any channel, not just X.
-  let SRC_SEL_X = 0;
-  let DST_REL = 0;
-  // The docs say that if this bit is set, then DATA_FORMAT, NUM_FORMAT_ALL,
-  // FORMAT_COMP_ALL, SRF_MODE_ALL, and ENDIAN_SWAP fields will be ignored,
-  // however, based on my testing if USE_CONST_FIELDS is set, then all
-  // these fields need to be set to 0.
-  let USE_CONST_FIELDS = 0;
-  let NUM_FORMAT_ALL = 1;
-  let FORMAT_COMP_ALL = 0;
-  let SRF_MODE_ALL = 0;
-
-  let Inst{31-0} = Word0;
-  let Inst{63-32} = Word1;
-  // LLVM can only encode 64-bit instructions, so these fields are manually
-  // encoded in R600CodeEmitter
-  //
-  // bits<16> OFFSET;
-  // bits<2>  ENDIAN_SWAP = 0;
-  // bits<1>  CONST_BUF_NO_STRIDE = 0;
-  // bits<1>  MEGA_FETCH = 0;
-  // bits<1>  ALT_CONST = 0;
-  // bits<2>  BUFFER_INDEX_MODE = 0;
-
-
-
-  // VTX_WORD2 (LLVM can only encode 64-bit instructions, so WORD2 encoding
-  // is done in R600CodeEmitter
-  //
-  // Inst{79-64} = OFFSET;
-  // Inst{81-80} = ENDIAN_SWAP;
-  // Inst{82}    = CONST_BUF_NO_STRIDE;
-  // Inst{83}    = MEGA_FETCH;
-  // Inst{84}    = ALT_CONST;
-  // Inst{86-85} = BUFFER_INDEX_MODE;
-  // Inst{95-86} = 0; Reserved
-
-  // VTX_WORD3 (Padding)
-  //
-  // Inst{127-96} = 0;
-
-  let VTXInst = 1;
-}
-
-class VTX_READ_8_eg <bits<8> buffer_id, list<dag> pattern>
-    : VTX_READ_eg <"VTX_READ_8 $dst, $ptr", buffer_id, (outs R600_TReg32_X:$dst),
-                   pattern> {
-
-  let MEGA_FETCH_COUNT = 1;
-  let DST_SEL_X = 0;
-  let DST_SEL_Y = 7;   // Masked
-  let DST_SEL_Z = 7;   // Masked
-  let DST_SEL_W = 7;   // Masked
-  let DATA_FORMAT = 1; // FMT_8
-}
-
-class VTX_READ_16_eg <bits<8> buffer_id, list<dag> pattern>
-    : VTX_READ_eg <"VTX_READ_16 $dst, $ptr", buffer_id, (outs R600_TReg32_X:$dst),
-                    pattern> {
-  let MEGA_FETCH_COUNT = 2;
-  let DST_SEL_X = 0;
-  let DST_SEL_Y = 7;   // Masked
-  let DST_SEL_Z = 7;   // Masked
-  let DST_SEL_W = 7;   // Masked
-  let DATA_FORMAT = 5; // FMT_16
-
-}
-
-class VTX_READ_32_eg <bits<8> buffer_id, list<dag> pattern>
-    : VTX_READ_eg <"VTX_READ_32 $dst, $ptr", buffer_id, (outs R600_TReg32_X:$dst),
-                   pattern> {
-
-  let MEGA_FETCH_COUNT = 4;
-  let DST_SEL_X        = 0;
-  let DST_SEL_Y        = 7;   // Masked
-  let DST_SEL_Z        = 7;   // Masked
-  let DST_SEL_W        = 7;   // Masked
-  let DATA_FORMAT      = 0xD; // COLOR_32
-
-  // This is not really necessary, but there were some GPU hangs that appeared
-  // to be caused by ALU instructions in the next instruction group that wrote
-  // to the $ptr registers of the VTX_READ.
-  // e.g.
-  // %T3_X<def> = VTX_READ_PARAM_32_eg %T2_X<kill>, 24
-  // %T2_X<def> = MOV %ZERO
-  //Adding this constraint prevents this from happening.
-  let Constraints = "$ptr.ptr = $dst";
-}
-
-class VTX_READ_128_eg <bits<8> buffer_id, list<dag> pattern>
-    : VTX_READ_eg <"VTX_READ_128 $dst.XYZW, $ptr", buffer_id, (outs R600_Reg128:$dst),
-                   pattern> {
-
-  let MEGA_FETCH_COUNT = 16;
-  let DST_SEL_X        =  0;
-  let DST_SEL_Y        =  1;
-  let DST_SEL_Z        =  2;
-  let DST_SEL_W        =  3;
-  let DATA_FORMAT      =  0x22; // COLOR_32_32_32_32
-
-  // XXX: Need to force VTX_READ_128 instructions to write to the same register
-  // that holds its buffer address to avoid potential hangs.  We can't use
-  // the same constraint as VTX_READ_32_eg, because the $ptr.ptr and $dst
-  // registers are different sizes.
-}
-
-//===----------------------------------------------------------------------===//
-// VTX Read from parameter memory space
-//===----------------------------------------------------------------------===//
-
-def VTX_READ_PARAM_8_eg : VTX_READ_8_eg <0,
-  [(set i32:$dst, (load_param_zexti8 ADDRVTX_READ:$ptr))]
->;
-
-def VTX_READ_PARAM_16_eg : VTX_READ_16_eg <0,
-  [(set i32:$dst, (load_param_zexti16 ADDRVTX_READ:$ptr))]
->;
-
-def VTX_READ_PARAM_32_eg : VTX_READ_32_eg <0,
-  [(set i32:$dst, (load_param ADDRVTX_READ:$ptr))]
->;
-
-def VTX_READ_PARAM_128_eg : VTX_READ_128_eg <0,
-  [(set v4i32:$dst, (load_param ADDRVTX_READ:$ptr))]
->;
-
-//===----------------------------------------------------------------------===//
-// VTX Read from global memory space
-//===----------------------------------------------------------------------===//
-
-// 8-bit reads
-def VTX_READ_GLOBAL_8_eg : VTX_READ_8_eg <1,
-  [(set i32:$dst, (zextloadi8_global ADDRVTX_READ:$ptr))]
->;
-
-// 32-bit reads
-def VTX_READ_GLOBAL_32_eg : VTX_READ_32_eg <1,
-  [(set i32:$dst, (global_load ADDRVTX_READ:$ptr))]
->;
-
-// 128-bit reads
-def VTX_READ_GLOBAL_128_eg : VTX_READ_128_eg <1,
-  [(set v4i32:$dst, (global_load ADDRVTX_READ:$ptr))]
->;
-
-//===----------------------------------------------------------------------===//
-// Constant Loads
-// XXX: We are currently storing all constants in the global address space.
-//===----------------------------------------------------------------------===//
-
-def CONSTANT_LOAD_eg : VTX_READ_32_eg <1,
-  [(set i32:$dst, (constant_load ADDRVTX_READ:$ptr))]
->;
-
-}
+} // End Predicates = [isEGorCayman]
 
 //===----------------------------------------------------------------------===//
 // Regist loads and stores - for indirect addressing
 //===----------------------------------------------------------------------===//
 
 defm R600_ : RegisterLoadStore <R600_Reg32, FRAMEri, ADDRIndirect>;
+
+//===----------------------------------------------------------------------===//
+// Cayman Instructions
+//===----------------------------------------------------------------------===//
 
 let Predicates = [isCayman] in {
 
@@ -1988,8 +1716,6 @@ def COS_cm : COS_Common<0x8E>;
 } // End isVector = 1
 
 def : POW_Common <LOG_IEEE_cm, EXP_IEEE_cm, MUL>;
-def : SIN_PAT <SIN_cm>;
-def : COS_PAT <COS_cm>;
 
 defm DIV_cm : DIV_Common<RECIP_IEEE_cm>;
 
@@ -2008,6 +1734,141 @@ def : Pat <
   }
 
 def : Pat<(fsqrt f32:$src), (MUL R600_Reg32:$src, (RECIPSQRT_CLAMPED_cm $src))>;
+
+
+def RAT_STORE_DWORD_cm : EG_CF_RAT <
+  0x57, 0x14, 0x1, (outs),
+  (ins R600_TReg32_X:$rw_gpr, R600_TReg32_X:$index_gpr),
+  "EXPORT_RAT_INST_STORE_DWORD $rw_gpr, $index_gpr",
+  [(global_store i32:$rw_gpr, i32:$index_gpr)]
+> {
+  let eop = 0; // This bit is not used on Cayman.
+}
+
+class VTX_READ_cm <string name, bits<8> buffer_id, dag outs, list<dag> pattern>
+    : VTX_WORD0_cm, VTX_READ<name, buffer_id, outs, pattern> {
+
+  // Static fields
+  let VC_INST = 0;
+  let FETCH_TYPE = 2;
+  let FETCH_WHOLE_QUAD = 0;
+  let BUFFER_ID = buffer_id;
+  let SRC_REL = 0;
+  // XXX: We can infer this field based on the SRC_GPR.  This would allow us
+  // to store vertex addresses in any channel, not just X.
+  let SRC_SEL_X = 0;
+  let SRC_SEL_Y = 0;
+  let STRUCTURED_READ = 0;
+  let LDS_REQ = 0;
+  let COALESCED_READ = 0;
+
+  let Inst{31-0} = Word0;
+}
+
+class VTX_READ_8_cm <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_cm <"VTX_READ_8 $dst_gpr, $src_gpr", buffer_id,
+                   (outs R600_TReg32_X:$dst_gpr), pattern> {
+
+  let DST_SEL_X = 0;
+  let DST_SEL_Y = 7;   // Masked
+  let DST_SEL_Z = 7;   // Masked
+  let DST_SEL_W = 7;   // Masked
+  let DATA_FORMAT = 1; // FMT_8
+}
+
+class VTX_READ_16_cm <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_cm <"VTX_READ_16 $dst_gpr, $src_gpr", buffer_id,
+                   (outs R600_TReg32_X:$dst_gpr), pattern> {
+  let DST_SEL_X = 0;
+  let DST_SEL_Y = 7;   // Masked
+  let DST_SEL_Z = 7;   // Masked
+  let DST_SEL_W = 7;   // Masked
+  let DATA_FORMAT = 5; // FMT_16
+
+}
+
+class VTX_READ_32_cm <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_cm <"VTX_READ_32 $dst_gpr, $src_gpr", buffer_id,
+                   (outs R600_TReg32_X:$dst_gpr), pattern> {
+
+  let DST_SEL_X        = 0;
+  let DST_SEL_Y        = 7;   // Masked
+  let DST_SEL_Z        = 7;   // Masked
+  let DST_SEL_W        = 7;   // Masked
+  let DATA_FORMAT      = 0xD; // COLOR_32
+
+  // This is not really necessary, but there were some GPU hangs that appeared
+  // to be caused by ALU instructions in the next instruction group that wrote
+  // to the $src_gpr registers of the VTX_READ.
+  // e.g.
+  // %T3_X<def> = VTX_READ_PARAM_32_eg %T2_X<kill>, 24
+  // %T2_X<def> = MOV %ZERO
+  //Adding this constraint prevents this from happening.
+  let Constraints = "$src_gpr.ptr = $dst_gpr";
+}
+
+class VTX_READ_128_cm <bits<8> buffer_id, list<dag> pattern>
+    : VTX_READ_cm <"VTX_READ_128 $dst_gpr.XYZW, $src_gpr", buffer_id,
+                   (outs R600_Reg128:$dst_gpr), pattern> {
+
+  let DST_SEL_X        =  0;
+  let DST_SEL_Y        =  1;
+  let DST_SEL_Z        =  2;
+  let DST_SEL_W        =  3;
+  let DATA_FORMAT      =  0x22; // COLOR_32_32_32_32
+
+  // XXX: Need to force VTX_READ_128 instructions to write to the same register
+  // that holds its buffer address to avoid potential hangs.  We can't use
+  // the same constraint as VTX_READ_32_eg, because the $src_gpr.ptr and $dst
+  // registers are different sizes.
+}
+
+//===----------------------------------------------------------------------===//
+// VTX Read from parameter memory space
+//===----------------------------------------------------------------------===//
+def VTX_READ_PARAM_8_cm : VTX_READ_8_cm <0,
+  [(set i32:$dst_gpr, (load_param_zexti8 ADDRVTX_READ:$src_gpr))]
+>;
+
+def VTX_READ_PARAM_16_cm : VTX_READ_16_cm <0,
+  [(set i32:$dst_gpr, (load_param_zexti16 ADDRVTX_READ:$src_gpr))]
+>;
+
+def VTX_READ_PARAM_32_cm : VTX_READ_32_cm <0,
+  [(set i32:$dst_gpr, (load_param ADDRVTX_READ:$src_gpr))]
+>;
+
+def VTX_READ_PARAM_128_cm : VTX_READ_128_cm <0,
+  [(set v4i32:$dst_gpr, (load_param ADDRVTX_READ:$src_gpr))]
+>;
+
+//===----------------------------------------------------------------------===//
+// VTX Read from global memory space
+//===----------------------------------------------------------------------===//
+
+// 8-bit reads
+def VTX_READ_GLOBAL_8_cm : VTX_READ_8_cm <1,
+  [(set i32:$dst_gpr, (zextloadi8_global ADDRVTX_READ:$src_gpr))]
+>;
+
+// 32-bit reads
+def VTX_READ_GLOBAL_32_cm : VTX_READ_32_cm <1,
+  [(set i32:$dst_gpr, (global_load ADDRVTX_READ:$src_gpr))]
+>;
+
+// 128-bit reads
+def VTX_READ_GLOBAL_128_cm : VTX_READ_128_cm <1,
+  [(set v4i32:$dst_gpr, (global_load ADDRVTX_READ:$src_gpr))]
+>;
+
+//===----------------------------------------------------------------------===//
+// Constant Loads
+// XXX: We are currently storing all constants in the global address space.
+//===----------------------------------------------------------------------===//
+
+def CONSTANT_LOAD_cm : VTX_READ_32_cm <1,
+  [(set i32:$dst_gpr, (constant_load ADDRVTX_READ:$src_gpr))]
+>;
 
 } // End isCayman
 
@@ -2129,7 +1990,7 @@ def CONST_COPY : Instruction {
 def TEX_VTX_CONSTBUF :
   InstR600ISA <(outs R600_Reg128:$dst), (ins MEMxi:$ptr, i32imm:$BUFFER_ID), "VTX_READ_eg $dst, $ptr",
       [(set v4i32:$dst, (CONST_ADDRESS ADDRGA_VAR_OFFSET:$ptr, (i32 imm:$BUFFER_ID)))]>,
-  VTX_WORD1_GPR, VTX_WORD0 {
+  VTX_WORD1_GPR, VTX_WORD0_eg {
 
   let VC_INST = 0;
   let FETCH_TYPE = 2;
@@ -2183,7 +2044,7 @@ def TEX_VTX_CONSTBUF :
 def TEX_VTX_TEXBUF:
   InstR600ISA <(outs R600_Reg128:$dst), (ins MEMxi:$ptr, i32imm:$BUFFER_ID), "TEX_VTX_EXPLICIT_READ $dst, $ptr",
       [(set v4f32:$dst, (int_R600_load_texbuf ADDRGA_VAR_OFFSET:$ptr, imm:$BUFFER_ID))]>,
-VTX_WORD1_GPR, VTX_WORD0 {
+VTX_WORD1_GPR, VTX_WORD0_eg {
 
 let VC_INST = 0;
 let FETCH_TYPE = 2;

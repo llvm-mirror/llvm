@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "gtest/gtest.h"
@@ -55,7 +56,8 @@ TEST(ProgramTest, CreateProcessTrailingSlash) {
     exit(1);
   }
 
-  Path my_exe = Path::GetMainExecutable(TestMainArgv0, &ProgramTestStringArg1);
+  std::string my_exe =
+      sys::fs::getMainExecutable(TestMainArgv0, &ProgramTestStringArg1);
   const char *argv[] = {
     my_exe.c_str(),
     "--gtest_filter=ProgramTest.CreateProcessTrailingSlashChild",
@@ -74,14 +76,14 @@ TEST(ProgramTest, CreateProcessTrailingSlash) {
   bool ExecutionFailed;
   // Redirect stdout and stdin to NUL, but let stderr through.
 #ifdef LLVM_ON_WIN32
-  Path nul("NUL");
+  StringRef nul("NUL");
 #else
-  Path nul("/dev/null");
+  StringRef nul("/dev/null");
 #endif
-  const Path *redirects[] = { &nul, &nul, 0 };
-  int rc = Program::ExecuteAndWait(my_exe, argv, &envp[0], redirects,
-                                   /*secondsToWait=*/10, /*memoryLimit=*/0,
-                                   &error, &ExecutionFailed);
+  const StringRef *redirects[] = { &nul, &nul, 0 };
+  int rc = ExecuteAndWait(my_exe, argv, &envp[0], redirects,
+                          /*secondsToWait=*/ 10, /*memoryLimit=*/ 0, &error,
+                          &ExecutionFailed);
   EXPECT_FALSE(ExecutionFailed) << error;
   EXPECT_EQ(0, rc);
 }

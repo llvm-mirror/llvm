@@ -11,7 +11,7 @@ target triple = "x86_64-apple-macosx10.8.0"
 ;   return 0;
 ; }
 
-; CHECK: @foo
+; CHECK-LABEL: @foo(
 ; CHECK: load <4 x i32>
 ; CHECK: mul <4 x i32>
 ; CHECK: store <4 x i32>
@@ -49,10 +49,11 @@ entry:
 ;   return A[0];
 ; }
 
-; CHECK: @extr_user
+; CHECK-LABEL: @extr_user(
+; CHECK: load <4 x i32>
 ; CHECK: store <4 x i32>
-; CHECK-NEXT: extractelement <4 x i32>
-; CHECK: ret
+; CHECK: extractelement <4 x i32>
+; CHECK-NEXT: ret
 define i32 @extr_user(i32* noalias nocapture %B, i32* noalias nocapture %A, i32 %n, i32 %m) {
 entry:
   %0 = load i32* %A, align 4
@@ -78,10 +79,11 @@ entry:
 }
 
 ; In this example we have an external user that is not the first element in the vector.
-; CHECK: @extr_user1
+; CHECK-LABEL: @extr_user1(
+; CHECK: load <4 x i32>
 ; CHECK: store <4 x i32>
-; CHECK-NEXT: extractelement <4 x i32>
-; CHECK: ret
+; CHECK: extractelement <4 x i32>
+; CHECK-NEXT: ret
 define i32 @extr_user1(i32* noalias nocapture %B, i32* noalias nocapture %A, i32 %n, i32 %m) {
 entry:
   %0 = load i32* %A, align 4

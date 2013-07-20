@@ -307,7 +307,7 @@ void X86FrameLowering::emitCalleeSavedFrameMoves(MachineFunction &MF,
                                                  unsigned FramePtr) const {
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineModuleInfo &MMI = MF.getMMI();
-  const MCRegisterInfo &MRI = MMI.getContext().getRegisterInfo();
+  const MCRegisterInfo *MRI = MMI.getContext().getRegisterInfo();
 
   // Add callee saved registers to move list.
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
@@ -360,7 +360,7 @@ void X86FrameLowering::emitCalleeSavedFrameMoves(MachineFunction &MF,
     if (HasFP && FramePtr == Reg)
       continue;
 
-    unsigned DwarfReg = MRI.getDwarfRegNum(Reg, true);
+    unsigned DwarfReg = MRI->getDwarfRegNum(Reg, true);
     MMI.addFrameInst(MCCFIInstruction::createOffset(Label, DwarfReg, Offset));
   }
 }
@@ -914,11 +914,14 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
       .addReg(X86::EFLAGS, RegState::Define | RegState::Implicit)
       .setMIFlag(MachineInstr::FrameSetup);
 
-    // MSVC x64's __chkstk needs to adjust %rsp.
-    // FIXME: %rax preserves the offset and should be available.
-    if (isSPUpdateNeeded)
-      emitSPUpdate(MBB, MBBI, StackPtr, -(int64_t)NumBytes, Is64Bit, IsLP64,
-                   UseLEA, TII, *RegInfo);
+    // MSVC x64's __chkstk does not adjust %rsp itself.
+    // It also does not clobber %rax so we can reuse it when adjusting %rsp.
+    if (isSPUpdateNeeded) {
+      BuildMI(MBB, MBBI, DL, TII.get(X86::SUB64rr), StackPtr)
+        .addReg(StackPtr)
+        .addReg(X86::RAX)
+        .setMIFlag(MachineInstr::FrameSetup);
+    }
 
     if (isEAXAlive) {
         // Restore EAX

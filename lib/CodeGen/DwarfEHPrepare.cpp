@@ -32,7 +32,7 @@ STATISTIC(NumResumesLowered, "Number of resume calls lowered");
 
 namespace {
   class DwarfEHPrepare : public FunctionPass {
-    const TargetLoweringBase *TLI;
+    const TargetMachine *TM;
 
     // RewindFunction - _Unwind_Resume or the target equivalent.
     Constant *RewindFunction;
@@ -42,8 +42,8 @@ namespace {
 
   public:
     static char ID; // Pass identification, replacement for typeid.
-    DwarfEHPrepare(const TargetLoweringBase *TLI) :
-      FunctionPass(ID), TLI(TLI), RewindFunction(0) {
+    DwarfEHPrepare(const TargetMachine *TM) :
+      FunctionPass(ID), TM(TM), RewindFunction(0) {
         initializeDominatorTreePass(*PassRegistry::getPassRegistry());
       }
 
@@ -59,8 +59,8 @@ namespace {
 
 char DwarfEHPrepare::ID = 0;
 
-FunctionPass *llvm::createDwarfEHPass(const TargetLoweringBase *TLI) {
-  return new DwarfEHPrepare(TLI);
+FunctionPass *llvm::createDwarfEHPass(const TargetMachine *TM) {
+  return new DwarfEHPrepare(TM);
 }
 
 /// GetExceptionObject - Return the exception object from the value passed into
@@ -106,20 +106,18 @@ Value *DwarfEHPrepare::GetExceptionObject(ResumeInst *RI) {
 /// InsertUnwindResumeCalls - Convert the ResumeInsts that are still present
 /// into calls to the appropriate _Unwind_Resume function.
 bool DwarfEHPrepare::InsertUnwindResumeCalls(Function &Fn) {
-  bool UsesNewEH = false;
   SmallVector<ResumeInst*, 16> Resumes;
   for (Function::iterator I = Fn.begin(), E = Fn.end(); I != E; ++I) {
     TerminatorInst *TI = I->getTerminator();
     if (ResumeInst *RI = dyn_cast<ResumeInst>(TI))
       Resumes.push_back(RI);
-    else if (InvokeInst *II = dyn_cast<InvokeInst>(TI))
-      UsesNewEH = II->getUnwindDest()->isLandingPad();
   }
 
   if (Resumes.empty())
-    return UsesNewEH;
+    return false;
 
   // Find the rewind function if we didn't already.
+  const TargetLowering *TLI = TM->getTargetLowering();
   if (!RewindFunction) {
     LLVMContext &Ctx = Resumes[0]->getContext();
     FunctionType *FTy = FunctionType::get(Type::getVoidTy(Ctx),

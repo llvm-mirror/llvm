@@ -16,6 +16,7 @@
 #define LLVM_TARGET_SystemZ_ISELLOWERING_H
 
 #include "SystemZ.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
 
@@ -67,9 +68,17 @@ namespace SystemZISD {
     // first input operands are GR128s.  The trailing numbers are the
     // widths of the second operand in bits.
     UMUL_LOHI64,
+    SDIVREM32,
     SDIVREM64,
     UDIVREM32,
     UDIVREM64,
+
+    // Use MVC to copy bytes from one memory location to another.
+    // The first operand is the target address, the second operand is the
+    // source address, and the third operand is the constant length.
+    // This isn't a memory opcode because we'd need to attach two
+    // MachineMemOperands rather than one.
+    MVC,
 
     // Wrappers around the inner loop of an 8- or 16-bit ATOMIC_SWAP or
     // ATOMIC_LOAD_<op>.
@@ -120,14 +129,13 @@ public:
   virtual EVT getSetCCResultType(LLVMContext &, EVT) const {
     return MVT::i32;
   }
-  virtual bool isFMAFasterThanMulAndAdd(EVT) const LLVM_OVERRIDE {
-    return true;
-  }
+  virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const LLVM_OVERRIDE;
   virtual bool isFPImmLegal(const APFloat &Imm, EVT VT) const;
+  virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const;
   virtual const char *getTargetNodeName(unsigned Opcode) const LLVM_OVERRIDE;
   virtual std::pair<unsigned, const TargetRegisterClass *>
     getRegForInlineAsmConstraint(const std::string &Constraint,
-                                 EVT VT) const LLVM_OVERRIDE;
+                                 MVT VT) const LLVM_OVERRIDE;
   virtual TargetLowering::ConstraintType
     getConstraintType(const std::string &Constraint) const LLVM_OVERRIDE;
   virtual TargetLowering::ConstraintWeight
@@ -147,7 +155,7 @@ public:
     LowerFormalArguments(SDValue Chain,
                          CallingConv::ID CallConv, bool isVarArg,
                          const SmallVectorImpl<ISD::InputArg> &Ins,
-                         DebugLoc DL, SelectionDAG &DAG,
+                         SDLoc DL, SelectionDAG &DAG,
                          SmallVectorImpl<SDValue> &InVals) const LLVM_OVERRIDE;
   virtual SDValue
     LowerCall(CallLoweringInfo &CLI,
@@ -158,7 +166,7 @@ public:
                 CallingConv::ID CallConv, bool IsVarArg,
                 const SmallVectorImpl<ISD::OutputArg> &Outs,
                 const SmallVectorImpl<SDValue> &OutVals,
-                DebugLoc DL, SelectionDAG &DAG) const LLVM_OVERRIDE;
+                SDLoc DL, SelectionDAG &DAG) const LLVM_OVERRIDE;
 
 private:
   const SystemZSubtarget &Subtarget;
@@ -189,9 +197,21 @@ private:
   SDValue lowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
 
+  // If the last instruction before MBBI in MBB was some form of COMPARE,
+  // try to replace it with a COMPARE AND BRANCH just before MBBI.
+  // CCMask and Target are the BRC-like operands for the branch.
+  // Return true if the change was made.
+  bool convertPrevCompareToBranch(MachineBasicBlock *MBB,
+                                  MachineBasicBlock::iterator MBBI,
+                                  unsigned CCMask,
+                                  MachineBasicBlock *Target) const;
+
   // Implement EmitInstrWithCustomInserter for individual operation types.
   MachineBasicBlock *emitSelect(MachineInstr *MI,
                                 MachineBasicBlock *BB) const;
+  MachineBasicBlock *emitCondStore(MachineInstr *MI,
+                                   MachineBasicBlock *BB,
+                                   unsigned StoreOpcode, bool Invert) const;
   MachineBasicBlock *emitExt128(MachineInstr *MI,
                                 MachineBasicBlock *MBB,
                                 bool ClearEven, unsigned SubReg) const;
@@ -206,6 +226,8 @@ private:
                                           unsigned BitSize) const;
   MachineBasicBlock *emitAtomicCmpSwapW(MachineInstr *MI,
                                         MachineBasicBlock *BB) const;
+  MachineBasicBlock *emitMVCWrapper(MachineInstr *MI,
+                                    MachineBasicBlock *BB) const;
 };
 } // end namespace llvm
 

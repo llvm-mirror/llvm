@@ -98,7 +98,7 @@ static void getUnderlyingObjects(const Value *V,
     SmallVector<Value *, 4> Objs;
     GetUnderlyingObjects(const_cast<Value *>(V), Objs);
 
-    for (SmallVector<Value *, 4>::iterator I = Objs.begin(), IE = Objs.end();
+    for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), IE = Objs.end();
          I != IE; ++I) {
       V = *I;
       if (!Visited.insert(V))
@@ -116,12 +116,15 @@ static void getUnderlyingObjects(const Value *V,
   } while (!Working.empty());
 }
 
+typedef SmallVector<PointerIntPair<const Value *, 1, bool>, 4>
+UnderlyingObjectsVector;
+
 /// getUnderlyingObjectsForInstr - If this machine instr has memory reference
 /// information and it can be tracked to a normal reference to a known
 /// object, return the Value for that object.
 static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
-              const MachineFrameInfo *MFI,
-              SmallVectorImpl<std::pair<const Value *, bool> > &Objects) {
+                                         const MachineFrameInfo *MFI,
+                                         UnderlyingObjectsVector &Objects) {
   if (!MI->hasOneMemOperand() ||
       !(*MI->memoperands_begin())->getValue() ||
       (*MI->memoperands_begin())->isVolatile())
@@ -134,8 +137,8 @@ static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
   SmallVector<Value *, 4> Objs;
   getUnderlyingObjects(V, Objs);
 
-  for (SmallVector<Value *, 4>::iterator I = Objs.begin(), IE = Objs.end();
-       I != IE; ++I) {
+  for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), IE = Objs.end();
+         I != IE; ++I) {
     bool MayAlias = true;
     V = *I;
 
@@ -155,7 +158,7 @@ static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
       return;
     }
 
-    Objects.push_back(std::make_pair(V, MayAlias));
+    Objects.push_back(UnderlyingObjectsVector::value_type(V, MayAlias));
   }
 }
 
@@ -267,13 +270,10 @@ void ScheduleDAGInstrs::addPhysRegDataDeps(SUnit *SU, unsigned OperIdx) {
         SU->hasPhysRegDefs = true;
         Dep = SDep(SU, SDep::Data, *Alias);
         RegUse = UseSU->getInstr();
-        Dep.setMinLatency(
-          SchedModel.computeOperandLatency(SU->getInstr(), OperIdx,
-                                           RegUse, UseOp, /*FindMin=*/true));
       }
       Dep.setLatency(
-        SchedModel.computeOperandLatency(SU->getInstr(), OperIdx,
-                                         RegUse, UseOp, /*FindMin=*/false));
+        SchedModel.computeOperandLatency(SU->getInstr(), OperIdx, RegUse,
+                                         UseOp));
 
       ST.adjustSchedDependency(SU, UseSU, Dep);
       UseSU->addPred(Dep);
@@ -310,10 +310,8 @@ void ScheduleDAGInstrs::addPhysRegDeps(SUnit *SU, unsigned OperIdx) {
           DefSU->addPred(SDep(SU, Kind, /*Reg=*/*Alias));
         else {
           SDep Dep(SU, Kind, /*Reg=*/*Alias);
-          unsigned OutLatency =
-            SchedModel.computeOutputLatency(MI, OperIdx, DefSU->getInstr());
-          Dep.setMinLatency(OutLatency);
-          Dep.setLatency(OutLatency);
+          Dep.setLatency(
+            SchedModel.computeOutputLatency(MI, OperIdx, DefSU->getInstr()));
           DefSU->addPred(Dep);
         }
       }
@@ -389,10 +387,8 @@ void ScheduleDAGInstrs::addVRegDefDeps(SUnit *SU, unsigned OperIdx) {
     SUnit *DefSU = DefI->SU;
     if (DefSU != SU && DefSU != &ExitSU) {
       SDep Dep(SU, SDep::Output, Reg);
-      unsigned OutLatency =
-        SchedModel.computeOutputLatency(MI, OperIdx, DefSU->getInstr());
-      Dep.setMinLatency(OutLatency);
-      Dep.setLatency(OutLatency);
+      Dep.setLatency(
+        SchedModel.computeOutputLatency(MI, OperIdx, DefSU->getInstr()));
       DefSU->addPred(Dep);
     }
     DefI->SU = SU;
@@ -427,10 +423,7 @@ void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
       // Adjust the dependence latency using operand def/use information, then
       // allow the target to perform its own adjustments.
       int DefOp = Def->findRegisterDefOperandIdx(Reg);
-      dep.setLatency(
-        SchedModel.computeOperandLatency(Def, DefOp, MI, OperIdx, false));
-      dep.setMinLatency(
-        SchedModel.computeOperandLatency(Def, DefOp, MI, OperIdx, true));
+      dep.setLatency(SchedModel.computeOperandLatency(Def, DefOp, MI, OperIdx));
 
       const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
       ST.adjustSchedDependency(DefSU, SU, const_cast<SDep &>(dep));
@@ -472,8 +465,8 @@ static inline bool isUnsafeMemoryObject(MachineInstr *MI,
 
   SmallVector<Value *, 4> Objs;
   getUnderlyingObjects(V, Objs);
-  for (SmallVector<Value *, 4>::iterator I = Objs.begin(),
-       IE = Objs.end(); I != IE; ++I) {
+  for (SmallVectorImpl<Value *>::iterator I = Objs.begin(),
+         IE = Objs.end(); I != IE; ++I) {
     V = *I;
 
     if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
@@ -855,7 +848,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       AliasMemDefs.clear();
       AliasMemUses.clear();
     } else if (MI->mayStore()) {
-      SmallVector<std::pair<const Value *, bool>, 4> Objs;
+      UnderlyingObjectsVector Objs;
       getUnderlyingObjectsForInstr(MI, MFI, Objs);
 
       if (Objs.empty()) {
@@ -864,10 +857,10 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       }
 
       bool MayAlias = false;
-      for (SmallVector<std::pair<const Value *, bool>, 4>::iterator
-           K = Objs.begin(), KE = Objs.end(); K != KE; ++K) {
-        const Value *V = K->first;
-        bool ThisMayAlias = K->second;
+      for (UnderlyingObjectsVector::iterator K = Objs.begin(), KE = Objs.end();
+           K != KE; ++K) {
+        const Value *V = K->getPointer();
+        bool ThisMayAlias = K->getInt();
         if (ThisMayAlias)
           MayAlias = true;
 
@@ -929,7 +922,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       if (MI->isInvariantLoad(AA)) {
         // Invariant load, no chain dependencies needed!
       } else {
-        SmallVector<std::pair<const Value *, bool>, 4> Objs;
+        UnderlyingObjectsVector Objs;
         getUnderlyingObjectsForInstr(MI, MFI, Objs);
 
         if (Objs.empty()) {
@@ -945,10 +938,10 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
           MayAlias = false;
         }
 
-        for (SmallVector<std::pair<const Value *, bool>, 4>::iterator
+        for (UnderlyingObjectsVector::iterator
              J = Objs.begin(), JE = Objs.end(); J != JE; ++J) {
-          const Value *V = J->first;
-          bool ThisMayAlias = J->second;
+          const Value *V = J->getPointer();
+          bool ThisMayAlias = J->getInt();
 
           if (ThisMayAlias)
             MayAlias = true;

@@ -95,6 +95,25 @@ static bool MultiplyOverflows(ConstantInt *C1, ConstantInt *C2, bool sign) {
   return MulExt.slt(Min) || MulExt.sgt(Max);
 }
 
+/// \brief A helper routine of InstCombiner::visitMul().
+///
+/// If C is a vector of known powers of 2, then this function returns
+/// a new vector obtained from C replacing each element with its logBase2.
+/// Return a null pointer otherwise.
+static Constant *getLogBase2Vector(ConstantDataVector *CV) {
+  const APInt *IVal;
+  SmallVector<Constant *, 4> Elts;
+
+  for (unsigned I = 0, E = CV->getNumElements(); I != E; ++I) {
+    Constant *Elt = CV->getElementAsConstant(I);
+    if (!match(Elt, m_APInt(IVal)) || !IVal->isPowerOf2())
+      return 0;
+    Elts.push_back(ConstantInt::get(Elt->getType(), IVal->logBase2()));
+  }
+
+  return ConstantVector::get(Elts);
+}
+
 Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   bool Changed = SimplifyAssociativeOrCommutative(I);
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
@@ -108,24 +127,37 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   if (match(Op1, m_AllOnes()))  // X * -1 == 0 - X
     return BinaryOperator::CreateNeg(Op0, I.getName());
 
-  if (ConstantInt *CI = dyn_cast<ConstantInt>(Op1)) {
+  // Also allow combining multiply instructions on vectors.
+  {
+    Value *NewOp;
+    Constant *C1, *C2;
+    const APInt *IVal;
+    if (match(&I, m_Mul(m_Shl(m_Value(NewOp), m_Constant(C2)),
+                        m_Constant(C1))) &&
+        match(C1, m_APInt(IVal)))
+      // ((X << C1)*C2) == (X * (C2 << C1))
+      return BinaryOperator::CreateMul(NewOp, ConstantExpr::getShl(C1, C2));
 
-    // ((X << C1)*C2) == (X * (C2 << C1))
-    if (BinaryOperator *SI = dyn_cast<BinaryOperator>(Op0))
-      if (SI->getOpcode() == Instruction::Shl)
-        if (Constant *ShOp = dyn_cast<Constant>(SI->getOperand(1)))
-          return BinaryOperator::CreateMul(SI->getOperand(0),
-                                           ConstantExpr::getShl(CI, ShOp));
+    if (match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
+      Constant *NewCst = 0;
+      if (match(C1, m_APInt(IVal)) && IVal->isPowerOf2())
+        // Replace X*(2^C) with X << C, where C is either a scalar or a splat.
+        NewCst = ConstantInt::get(NewOp->getType(), IVal->logBase2());
+      else if (ConstantDataVector *CV = dyn_cast<ConstantDataVector>(C1))
+        // Replace X*(2^C) with X << C, where C is a vector of known
+        // constant powers of 2.
+        NewCst = getLogBase2Vector(CV);
 
-    const APInt &Val = CI->getValue();
-    if (Val.isPowerOf2()) {          // Replace X*(2^C) with X << C
-      Constant *NewCst = ConstantInt::get(Op0->getType(), Val.logBase2());
-      BinaryOperator *Shl = BinaryOperator::CreateShl(Op0, NewCst);
-      if (I.hasNoSignedWrap()) Shl->setHasNoSignedWrap();
-      if (I.hasNoUnsignedWrap()) Shl->setHasNoUnsignedWrap();
-      return Shl;
+      if (NewCst) {
+        BinaryOperator *Shl = BinaryOperator::CreateShl(NewOp, NewCst);
+        if (I.hasNoSignedWrap()) Shl->setHasNoSignedWrap();
+        if (I.hasNoUnsignedWrap()) Shl->setHasNoUnsignedWrap();
+        return Shl;
+      }
     }
+  }
 
+  if (ConstantInt *CI = dyn_cast<ConstantInt>(Op1)) {
     // Canonicalize (X+C1)*CI -> X*CI+C1*CI.
     { Value *X; ConstantInt *C1;
       if (Op0->hasOneUse() &&
@@ -306,13 +338,13 @@ static bool isFMulOrFDivWithConstant(Value *V) {
   if (C0 && C1)
     return false;
 
-  return (C0 && C0->getValueAPF().isNormal()) ||
-         (C1 && C1->getValueAPF().isNormal());
+  return (C0 && C0->getValueAPF().isFiniteNonZero()) ||
+         (C1 && C1->getValueAPF().isFiniteNonZero());
 }
 
 static bool isNormalFp(const ConstantFP *C) {
   const APFloat &Flt = C->getValueAPF();
-  return Flt.isNormal() && !Flt.isDenormal();
+  return Flt.isNormal();
 }
 
 /// foldFMulConst() is a helper routine of InstCombiner::visitFMul().
@@ -391,7 +423,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
         return NV;
 
     ConstantFP *C = dyn_cast<ConstantFP>(Op1);
-    if (C && AllowReassociate && C->getValueAPF().isNormal()) {
+    if (C && AllowReassociate && C->getValueAPF().isFiniteNonZero()) {
       // Let MDC denote an expression in one of these forms:
       // X * C, C/X, X/C, where C is a constant.
       //
@@ -418,7 +450,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
           Swap = true;
         }
 
-        if (C1 && C1->getValueAPF().isNormal() &&
+        if (C1 && C1->getValueAPF().isFiniteNonZero() &&
             isFMulOrFDivWithConstant(Opnd0)) {
           Value *M1 = ConstantExpr::getFMul(C1, C);
           Value *M0 = isNormalFp(cast<ConstantFP>(M1)) ?
@@ -524,35 +556,6 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
       }
     }
 
-    // B * (uitofp i1 C) -> select C, B, 0
-    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
-      Value *LHS = Op0, *RHS = Op1;
-      Value *B, *C;
-      if (!match(RHS, m_UIToFp(m_Value(C))))
-        std::swap(LHS, RHS);
-
-      if (match(RHS, m_UIToFp(m_Value(C))) && C->getType()->isIntegerTy(1)) {
-        B = LHS;
-        Value *Zero = ConstantFP::getNegativeZero(B->getType());
-        return SelectInst::Create(C, B, Zero);
-      }
-    }
-
-    // A * (1 - uitofp i1 C) -> select C, 0, A
-    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
-      Value *LHS = Op0, *RHS = Op1;
-      Value *A, *C;
-      if (!match(RHS, m_FSub(m_FPOne(), m_UIToFp(m_Value(C)))))
-        std::swap(LHS, RHS);
-
-      if (match(RHS, m_FSub(m_FPOne(), m_UIToFp(m_Value(C)))) &&
-          C->getType()->isIntegerTy(1)) {
-        A = LHS;
-        Value *Zero = ConstantFP::getNegativeZero(A->getType());
-        return SelectInst::Create(C, Zero, A);
-      }
-    }
-
     if (!isa<Constant>(Op1))
       std::swap(Opnd0, Opnd1);
     else
@@ -613,8 +616,7 @@ bool InstCombiner::SimplifyDivRemOfSelect(BinaryOperator &I) {
         *I = SI->getOperand(NonNullOperand);
         Worklist.Add(BBI);
       } else if (*I == SelectCond) {
-        *I = NonNullOperand == 1 ? ConstantInt::getTrue(BBI->getContext()) :
-                                   ConstantInt::getFalse(BBI->getContext());
+        *I = Builder->getInt1(NonNullOperand == 1);
         Worklist.Add(BBI);
       }
     }
@@ -703,6 +705,114 @@ static Value *dyn_castZExtVal(Value *V, Type *Ty) {
   return 0;
 }
 
+namespace {
+const unsigned MaxDepth = 6;
+typedef Instruction *(*FoldUDivOperandCb)(Value *Op0, Value *Op1,
+                                          const BinaryOperator &I,
+                                          InstCombiner &IC);
+
+/// \brief Used to maintain state for visitUDivOperand().
+struct UDivFoldAction {
+  FoldUDivOperandCb FoldAction; ///< Informs visitUDiv() how to fold this
+                                ///< operand.  This can be zero if this action
+                                ///< joins two actions together.
+
+  Value *OperandToFold;         ///< Which operand to fold.
+  union {
+    Instruction *FoldResult;    ///< The instruction returned when FoldAction is
+                                ///< invoked.
+
+    size_t SelectLHSIdx;        ///< Stores the LHS action index if this action
+                                ///< joins two actions together.
+  };
+
+  UDivFoldAction(FoldUDivOperandCb FA, Value *InputOperand)
+      : FoldAction(FA), OperandToFold(InputOperand), FoldResult(0) {}
+  UDivFoldAction(FoldUDivOperandCb FA, Value *InputOperand, size_t SLHS)
+      : FoldAction(FA), OperandToFold(InputOperand), SelectLHSIdx(SLHS) {}
+};
+}
+
+// X udiv 2^C -> X >> C
+static Instruction *foldUDivPow2Cst(Value *Op0, Value *Op1,
+                                    const BinaryOperator &I, InstCombiner &IC) {
+  const APInt &C = cast<Constant>(Op1)->getUniqueInteger();
+  BinaryOperator *LShr = BinaryOperator::CreateLShr(
+      Op0, ConstantInt::get(Op0->getType(), C.logBase2()));
+  if (I.isExact()) LShr->setIsExact();
+  return LShr;
+}
+
+// X udiv C, where C >= signbit
+static Instruction *foldUDivNegCst(Value *Op0, Value *Op1,
+                                   const BinaryOperator &I, InstCombiner &IC) {
+  Value *ICI = IC.Builder->CreateICmpULT(Op0, cast<ConstantInt>(Op1));
+
+  return SelectInst::Create(ICI, Constant::getNullValue(I.getType()),
+                            ConstantInt::get(I.getType(), 1));
+}
+
+// X udiv (C1 << N), where C1 is "1<<C2"  -->  X >> (N+C2)
+static Instruction *foldUDivShl(Value *Op0, Value *Op1, const BinaryOperator &I,
+                                InstCombiner &IC) {
+  Instruction *ShiftLeft = cast<Instruction>(Op1);
+  if (isa<ZExtInst>(ShiftLeft))
+    ShiftLeft = cast<Instruction>(ShiftLeft->getOperand(0));
+
+  const APInt &CI =
+      cast<Constant>(ShiftLeft->getOperand(0))->getUniqueInteger();
+  Value *N = ShiftLeft->getOperand(1);
+  if (CI != 1)
+    N = IC.Builder->CreateAdd(N, ConstantInt::get(N->getType(), CI.logBase2()));
+  if (ZExtInst *Z = dyn_cast<ZExtInst>(Op1))
+    N = IC.Builder->CreateZExt(N, Z->getDestTy());
+  BinaryOperator *LShr = BinaryOperator::CreateLShr(Op0, N);
+  if (I.isExact()) LShr->setIsExact();
+  return LShr;
+}
+
+// \brief Recursively visits the possible right hand operands of a udiv
+// instruction, seeing through select instructions, to determine if we can
+// replace the udiv with something simpler.  If we find that an operand is not
+// able to simplify the udiv, we abort the entire transformation.
+static size_t visitUDivOperand(Value *Op0, Value *Op1, const BinaryOperator &I,
+                               SmallVectorImpl<UDivFoldAction> &Actions,
+                               unsigned Depth = 0) {
+  // Check to see if this is an unsigned division with an exact power of 2,
+  // if so, convert to a right shift.
+  if (match(Op1, m_Power2())) {
+    Actions.push_back(UDivFoldAction(foldUDivPow2Cst, Op1));
+    return Actions.size();
+  }
+
+  if (ConstantInt *C = dyn_cast<ConstantInt>(Op1))
+    // X udiv C, where C >= signbit
+    if (C->getValue().isNegative()) {
+      Actions.push_back(UDivFoldAction(foldUDivNegCst, C));
+      return Actions.size();
+    }
+
+  // X udiv (C1 << N), where C1 is "1<<C2"  -->  X >> (N+C2)
+  if (match(Op1, m_Shl(m_Power2(), m_Value())) ||
+      match(Op1, m_ZExt(m_Shl(m_Power2(), m_Value())))) {
+    Actions.push_back(UDivFoldAction(foldUDivShl, Op1));
+    return Actions.size();
+  }
+
+  // The remaining tests are all recursive, so bail out if we hit the limit.
+  if (Depth++ == MaxDepth)
+    return 0;
+
+  if (SelectInst *SI = dyn_cast<SelectInst>(Op1))
+    if (size_t LHSIdx = visitUDivOperand(Op0, SI->getOperand(1), I, Actions))
+      if (visitUDivOperand(Op0, SI->getOperand(2), I, Actions)) {
+        Actions.push_back(UDivFoldAction((FoldUDivOperandCb)0, Op1, LHSIdx-1));
+        return Actions.size();
+      }
+
+  return 0;
+}
+
 Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
 
@@ -712,30 +822,6 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
   // Handle the integer div common cases
   if (Instruction *Common = commonIDivTransforms(I))
     return Common;
-
-  {
-    // X udiv 2^C -> X >> C
-    // Check to see if this is an unsigned division with an exact power of 2,
-    // if so, convert to a right shift.
-    const APInt *C;
-    if (match(Op1, m_Power2(C))) {
-      BinaryOperator *LShr =
-      BinaryOperator::CreateLShr(Op0,
-                                 ConstantInt::get(Op0->getType(),
-                                                  C->logBase2()));
-      if (I.isExact()) LShr->setIsExact();
-      return LShr;
-    }
-  }
-
-  if (ConstantInt *C = dyn_cast<ConstantInt>(Op1)) {
-    // X udiv C, where C >= signbit
-    if (C->getValue().isNegative()) {
-      Value *IC = Builder->CreateICmpULT(Op0, C);
-      return SelectInst::Create(IC, Constant::getNullValue(I.getType()),
-                                ConstantInt::get(I.getType(), 1));
-    }
-  }
 
   // (x lshr C1) udiv C2 --> x udiv (C2 << C1)
   if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op1)) {
@@ -747,44 +833,43 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
     }
   }
 
-  // X udiv (C1 << N), where C1 is "1<<C2"  -->  X >> (N+C2)
-  { const APInt *CI; Value *N;
-    if (match(Op1, m_Shl(m_Power2(CI), m_Value(N))) ||
-        match(Op1, m_ZExt(m_Shl(m_Power2(CI), m_Value(N))))) {
-      if (*CI != 1)
-        N = Builder->CreateAdd(N,
-                               ConstantInt::get(N->getType(), CI->logBase2()));
-      if (ZExtInst *Z = dyn_cast<ZExtInst>(Op1))
-        N = Builder->CreateZExt(N, Z->getDestTy());
-      if (I.isExact())
-        return BinaryOperator::CreateExactLShr(Op0, N);
-      return BinaryOperator::CreateLShr(Op0, N);
-    }
-  }
-
-  // udiv X, (Select Cond, C1, C2) --> Select Cond, (shr X, C1), (shr X, C2)
-  // where C1&C2 are powers of two.
-  { Value *Cond; const APInt *C1, *C2;
-    if (match(Op1, m_Select(m_Value(Cond), m_Power2(C1), m_Power2(C2)))) {
-      // Construct the "on true" case of the select
-      Value *TSI = Builder->CreateLShr(Op0, C1->logBase2(), Op1->getName()+".t",
-                                       I.isExact());
-
-      // Construct the "on false" case of the select
-      Value *FSI = Builder->CreateLShr(Op0, C2->logBase2(), Op1->getName()+".f",
-                                       I.isExact());
-
-      // construct the select instruction and return it.
-      return SelectInst::Create(Cond, TSI, FSI);
-    }
-  }
-
   // (zext A) udiv (zext B) --> zext (A udiv B)
   if (ZExtInst *ZOp0 = dyn_cast<ZExtInst>(Op0))
     if (Value *ZOp1 = dyn_castZExtVal(Op1, ZOp0->getSrcTy()))
       return new ZExtInst(Builder->CreateUDiv(ZOp0->getOperand(0), ZOp1, "div",
                                               I.isExact()),
                           I.getType());
+
+  // (LHS udiv (select (select (...)))) -> (LHS >> (select (select (...))))
+  SmallVector<UDivFoldAction, 6> UDivActions;
+  if (visitUDivOperand(Op0, Op1, I, UDivActions))
+    for (unsigned i = 0, e = UDivActions.size(); i != e; ++i) {
+      FoldUDivOperandCb Action = UDivActions[i].FoldAction;
+      Value *ActionOp1 = UDivActions[i].OperandToFold;
+      Instruction *Inst;
+      if (Action)
+        Inst = Action(Op0, ActionOp1, I, *this);
+      else {
+        // This action joins two actions together.  The RHS of this action is
+        // simply the last action we processed, we saved the LHS action index in
+        // the joining action.
+        size_t SelectRHSIdx = i - 1;
+        Value *SelectRHS = UDivActions[SelectRHSIdx].FoldResult;
+        size_t SelectLHSIdx = UDivActions[i].SelectLHSIdx;
+        Value *SelectLHS = UDivActions[SelectLHSIdx].FoldResult;
+        Inst = SelectInst::Create(cast<SelectInst>(ActionOp1)->getCondition(),
+                                  SelectLHS, SelectRHS);
+      }
+
+      // If this is the last action to process, return it to the InstCombiner.
+      // Otherwise, we insert it before the UDiv and record it so that we may
+      // use it as part of a joining action (i.e., a SelectInst).
+      if (e - i != 1) {
+        Inst->insertBefore(&I);
+        UDivActions[i].FoldResult = Inst;
+      } else
+        return Inst;
+    }
 
   return 0;
 }
@@ -856,7 +941,7 @@ static Instruction *CvtFDivConstToReciprocal(Value *Dividend,
   APFloat Reciprocal(FpVal.getSemantics());
   bool Cvt = FpVal.getExactInverse(&Reciprocal);
 
-  if (!Cvt && AllowReciprocal && FpVal.isNormal()) {
+  if (!Cvt && AllowReciprocal && FpVal.isFiniteNonZero()) {
     Reciprocal = APFloat(FpVal.getSemantics(), 1.0f);
     (void)Reciprocal.divide(FpVal, APFloat::rmNearestTiesToEven);
     Cvt = !Reciprocal.isDenormal();
@@ -891,14 +976,14 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
         //
         Constant *C = ConstantExpr::getFDiv(C1, C2);
         const APFloat &F = cast<ConstantFP>(C)->getValueAPF();
-        if (F.isNormal() && !F.isDenormal())
+        if (F.isNormal())
           Res = BinaryOperator::CreateFMul(X, C);
       } else if (match(Op0, m_FDiv(m_Value(X), m_ConstantFP(C1)))) {
         // (X/C1)/C2 => X /(C2*C1) [=> X * 1/(C2*C1) if reciprocal is allowed]
         //
         Constant *C = ConstantExpr::getFMul(C1, C2);
         const APFloat &F = cast<ConstantFP>(C)->getValueAPF();
-        if (F.isNormal() && !F.isDenormal()) {
+        if (F.isNormal()) {
           Res = CvtFDivConstToReciprocal(X, cast<ConstantFP>(C),
                                          AllowReciprocal);
           if (!Res)
@@ -939,7 +1024,7 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
 
     if (Fold) {
       const APFloat &FoldC = cast<ConstantFP>(Fold)->getValueAPF();
-      if (FoldC.isNormal() && !FoldC.isDenormal()) {
+      if (FoldC.isNormal()) {
         Instruction *R = CreateDiv ?
                          BinaryOperator::CreateFDiv(Fold, X) :
                          BinaryOperator::CreateFMul(X, Fold);
@@ -1038,6 +1123,13 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
     Constant *N1 = Constant::getAllOnesValue(I.getType());
     Value *Add = Builder->CreateAdd(Op1, N1);
     return BinaryOperator::CreateAnd(Op0, Add);
+  }
+
+  // 1 urem X -> zext(X != 1)
+  if (match(Op0, m_One())) {
+    Value *Cmp = Builder->CreateICmpNE(Op1, Op0);
+    Value *Ext = Builder->CreateZExt(Cmp, I.getType());
+    return ReplaceInstUsesWith(I, Ext);
   }
 
   return 0;

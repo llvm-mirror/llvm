@@ -14,6 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "AsmWriter.h"
+
 #include "llvm/Assembly/Writer.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -22,7 +24,6 @@
 #include "llvm/Assembly/AssemblyAnnotationWriter.h"
 #include "llvm/Assembly/PrintModulePass.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/IR/AsmWriter.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -39,6 +40,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
+
 #include <algorithm>
 #include <cctype>
 using namespace llvm;
@@ -82,6 +84,8 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::MSP430_INTR:   Out << "msp430_intrcc"; break;
   case CallingConv::PTX_Kernel:    Out << "ptx_kernel"; break;
   case CallingConv::PTX_Device:    Out << "ptx_device"; break;
+  case CallingConv::X86_64_SysV:   Out << "x86_64_sysvcc"; break;
+  case CallingConv::X86_64_Win64:  Out << "x86_64_win64cc"; break;
   }
 }
 

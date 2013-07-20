@@ -12,23 +12,16 @@ tablegen(LLVM AMDGPUGenAsmWriter.inc -gen-asm-writer)
 add_public_tablegen_target(AMDGPUCommonTableGen)
 
 add_llvm_target(R600CodeGen
-  AMDIL7XXDevice.cpp
   AMDILCFGStructurizer.cpp
-  AMDILDevice.cpp
-  AMDILDeviceInfo.cpp
-  AMDILEvergreenDevice.cpp
   AMDILIntrinsicInfo.cpp
   AMDILISelDAGToDAG.cpp
   AMDILISelLowering.cpp
-  AMDILNIDevice.cpp
-  AMDILSIDevice.cpp
   AMDGPUAsmPrinter.cpp
   AMDGPUFrameLowering.cpp
   AMDGPUIndirectAddressing.cpp
   AMDGPUMCInstLower.cpp
   AMDGPUMachineFunction.cpp
   AMDGPUSubtarget.cpp
-  AMDGPUStructurizeCFG.cpp
   AMDGPUTargetMachine.cpp
   AMDGPUISelLowering.cpp
   AMDGPUConvertToISA.cpp
@@ -41,6 +34,7 @@ add_llvm_target(R600CodeGen
   R600ISelLowering.cpp
   R600MachineFunctionInfo.cpp
   R600MachineScheduler.cpp
+  R600OptimizeVectorRegisters.cpp
   R600Packetizer.cpp
   R600RegisterInfo.cpp
   R600TextureIntrinsicsReplacer.cpp
