@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "rvex.h"
 #include "rvexInstrInfo.h"
 #include "rvexTargetMachine.h"
 #include "rvexMachineFunction.h"
@@ -18,7 +19,23 @@
 #define GET_INSTRINFO_CTOR
 //#define GET_INSTRINFO_ENUM
 #include "rvexGenInstrInfo.inc"
-#include "rvexGenDFAPacketizer.inc"
+
+namespace llvm {
+
+  extern int rvexDFAStateInputTable[][2];
+
+  extern unsigned int rvexDFAStateEntryTable[];
+} // namespace
+
+/*
+#include "llvm/CodeGen/DFAPacketizer.h"
+namespace llvm {
+  DFAPacketizer *rvexGenSubtargetInfo::createDFAPacketizer(const InstrItineraryData *IID) const {
+     return new DFAPacketizer(IID, rvexDFAStateInputTable, rvexDFAStateEntryTable);
+}
+
+} // End llvm namespace 
+*/
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -128,12 +145,12 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 DFAPacketizer *rvexInstrInfo::
 CreateTargetScheduleState(const TargetMachine *TM,
                           const ScheduleDAG *DAG) const {
-  DEBUG(errs() << "Voor DFA!\n");
+  
   const InstrItineraryData *II = TM->getInstrItineraryData();
-  DEBUG(errs() << "Na DFA!\n");
 
-  DFAPacketizer *temp = TM->getSubtarget<rvexGenSubtargetInfo>().createDFAPacketizer(II);
-  DEBUG(errs() << "Na na DFA!\n");
+  //DFAPacketizer *temp = TM->getSubtarget<rvexGenSubtargetInfo>().createDFAPacketizer(II);
+  DFAPacketizer *temp = new DFAPacketizer(II, rvexDFAStateInputTable, rvexDFAStateEntryTable);
+  
   return temp;
 }
 
