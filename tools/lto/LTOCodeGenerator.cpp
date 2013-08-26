@@ -24,6 +24,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Linker.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -77,6 +78,7 @@ LTOCodeGenerator::LTOCodeGenerator()
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmPrinters();
+  initializeLTOPasses();
 }
 
 LTOCodeGenerator::~LTOCodeGenerator() {
@@ -89,6 +91,36 @@ LTOCodeGenerator::~LTOCodeGenerator() {
     free(*I);
 }
 
+// Initialize LTO passes. Please keep this funciton in sync with
+// PassManagerBuilder::populateLTOPassManager(), and make sure all LTO
+// passes are initialized. 
+//
+void LTOCodeGenerator::initializeLTOPasses() {
+  PassRegistry &R = *PassRegistry::getPassRegistry();
+
+  initializeInternalizePassPass(R);
+  initializeIPSCCPPass(R);
+  initializeGlobalOptPass(R);
+  initializeConstantMergePass(R);
+  initializeDAHPass(R);
+  initializeInstCombinerPass(R);
+  initializeSimpleInlinerPass(R);
+  initializePruneEHPass(R);
+  initializeGlobalDCEPass(R);
+  initializeArgPromotionPass(R);
+  initializeJumpThreadingPass(R);
+  initializeSROAPass(R);
+  initializeSROA_DTPass(R);
+  initializeSROA_SSAUpPass(R);
+  initializeFunctionAttrsPass(R);
+  initializeGlobalsModRefPass(R);
+  initializeLICMPass(R);
+  initializeGVNPass(R);
+  initializeMemCpyOptPass(R);
+  initializeDCEPass(R);
+  initializeCFGSimplifyPassPass(R);
+}
+
 bool LTOCodeGenerator::addModule(LTOModule* mod, std::string& errMsg) {
   bool ret = _linker.linkInModule(mod->getLLVVMModule(), &errMsg);
 
@@ -96,53 +128,48 @@ bool LTOCodeGenerator::addModule(LTOModule* mod, std::string& errMsg) {
   for (int i = 0, e = undefs.size(); i != e; ++i)
     _asmUndefinedRefs[undefs[i]] = 1;
 
-  return ret;
+  return !ret;
 }
 
-bool LTOCodeGenerator::setDebugInfo(lto_debug_model debug,
-                                    std::string& errMsg) {
+void LTOCodeGenerator::setDebugInfo(lto_debug_model debug) {
   switch (debug) {
   case LTO_DEBUG_MODEL_NONE:
     _emitDwarfDebugInfo = false;
-    return false;
+    return;
 
   case LTO_DEBUG_MODEL_DWARF:
     _emitDwarfDebugInfo = true;
-    return false;
+    return;
   }
   llvm_unreachable("Unknown debug format!");
 }
 
-bool LTOCodeGenerator::setCodePICModel(lto_codegen_model model,
-                                       std::string& errMsg) {
+void LTOCodeGenerator::setCodePICModel(lto_codegen_model model) {
   switch (model) {
   case LTO_CODEGEN_PIC_MODEL_STATIC:
   case LTO_CODEGEN_PIC_MODEL_DYNAMIC:
   case LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC:
     _codeModel = model;
-    return false;
+    return;
   }
   llvm_unreachable("Unknown PIC model!");
 }
 
 bool LTOCodeGenerator::writeMergedModules(const char *path,
                                           std::string &errMsg) {
-  if (determineTarget(errMsg))
-    return true;
+  if (!determineTarget(errMsg))
+    return false;
 
-  // Run the verifier on the merged modules.
-  PassManager passes;
-  passes.add(createVerifierPass());
-  passes.run(*_linker.getModule());
+  // mark which symbols can not be internalized
+  applyScopeRestrictions();
 
   // create output file
   std::string ErrInfo;
-  tool_output_file Out(path, ErrInfo,
-                       raw_fd_ostream::F_Binary);
+  tool_output_file Out(path, ErrInfo, sys::fs::F_Binary);
   if (!ErrInfo.empty()) {
     errMsg = "could not open bitcode file for writing: ";
     errMsg += path;
-    return true;
+    return false;
   }
 
   // write bitcode to it
@@ -153,11 +180,11 @@ bool LTOCodeGenerator::writeMergedModules(const char *path,
     errMsg = "could not write bitcode file: ";
     errMsg += path;
     Out.os().clear_error();
-    return true;
+    return false;
   }
 
   Out.keep();
-  return false;
+  return true;
 }
 
 bool LTOCodeGenerator::compile_to_file(const char** name, std::string& errMsg) {
@@ -167,7 +194,7 @@ bool LTOCodeGenerator::compile_to_file(const char** name, std::string& errMsg) {
   error_code EC = sys::fs::createTemporaryFile("lto-llvm", "o", FD, Filename);
   if (EC) {
     errMsg = EC.message();
-    return true;
+    return false;
   }
 
   // generate object file
@@ -178,23 +205,23 @@ bool LTOCodeGenerator::compile_to_file(const char** name, std::string& errMsg) {
   if (objFile.os().has_error()) {
     objFile.os().clear_error();
     sys::fs::remove(Twine(Filename));
-    return true;
+    return false;
   }
 
   objFile.keep();
-  if (genResult) {
+  if (!genResult) {
     sys::fs::remove(Twine(Filename));
-    return true;
+    return false;
   }
 
   _nativeObjectPath = Filename.c_str();
   *name = _nativeObjectPath.c_str();
-  return false;
+  return true;
 }
 
 const void* LTOCodeGenerator::compile(size_t* length, std::string& errMsg) {
   const char *name;
-  if (compile_to_file(&name, errMsg))
+  if (!compile_to_file(&name, errMsg))
     return NULL;
 
   // remove old buffer if compile() called twice
@@ -221,7 +248,7 @@ const void* LTOCodeGenerator::compile(size_t* length, std::string& errMsg) {
 
 bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
   if (_target != NULL)
-    return false;
+    return true;
 
   // if options were requested, set them
   if (!_codegenOptions.empty())
@@ -236,7 +263,7 @@ bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
   // create target machine from info for merged modules
   const Target *march = TargetRegistry::lookupTarget(TripleStr, errMsg);
   if (march == NULL)
-    return true;
+    return false;
 
   // The relocation model is actually a static member of TargetMachine and
   // needs to be set before the TargetMachine is instantiated.
@@ -269,7 +296,7 @@ bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
   _target = march->createTargetMachine(TripleStr, _mCpu, FeatureStr, Options,
                                        RelocModel, CodeModel::Default,
                                        CodeGenOpt::Aggressive);
-  return false;
+  return true;
 }
 
 void LTOCodeGenerator::
@@ -360,8 +387,8 @@ void LTOCodeGenerator::applyScopeRestrictions() {
 /// Optimize merged modules using various IPO passes
 bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
                                           std::string &errMsg) {
-  if (this->determineTarget(errMsg))
-    return true;
+  if (!this->determineTarget(errMsg))
+    return false;
 
   Module* mergedModule = _linker.getModule();
 
@@ -404,7 +431,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   if (_target->addPassesToEmitFile(codeGenPasses, Out,
                                    TargetMachine::CGFT_ObjectFile)) {
     errMsg = "target file type not supported";
-    return true;
+    return false;
   }
 
   // Run our queue of passes all at once now, efficiently.
@@ -413,7 +440,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   // Run the code generator, and write assembly file
   codeGenPasses.run(*mergedModule);
 
-  return false; // success
+  return true;
 }
 
 /// setCodeGenDebugOptions - Set codegen debugging options to aid in debugging

@@ -87,7 +87,6 @@ public:
 
   virtual void printRegName(raw_ostream &OS, unsigned RegNo) const;
   virtual void printInst(const MCInst *MI, raw_ostream &O, StringRef Annot);
-  void printCPURegs(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 
   bool printAliasInstr(const MCInst *MI, raw_ostream &OS);
 
@@ -97,6 +96,12 @@ private:
   void printMemOperand(const MCInst *MI, int opNum, raw_ostream &O);
   void printMemOperandEA(const MCInst *MI, int opNum, raw_ostream &O);
   void printFCCOperand(const MCInst *MI, int opNum, raw_ostream &O);
+
+  bool printAlias(const char *Str, const MCInst &MI, unsigned OpNo,
+                  raw_ostream &OS);
+  bool printAlias(const char *Str, const MCInst &MI, unsigned OpNo0,
+                  unsigned OpNo1, raw_ostream &OS);
+  bool printAlias(const MCInst &MI, raw_ostream &OS);
 };
 } // end namespace llvm
 

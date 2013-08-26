@@ -315,6 +315,8 @@ public:
                                           unsigned EncodedValue) const;
   unsigned NEONThumb2DupPostEncoder(const MCInst &MI,
                                     unsigned EncodedValue) const;
+  unsigned NEONThumb2V8PostEncoder(const MCInst &MI,
+                                   unsigned EncodedValue) const;
 
   unsigned VFPThumb2PostEncoder(const MCInst &MI,
                                 unsigned EncodedValue) const;
@@ -384,6 +386,17 @@ unsigned ARMMCCodeEmitter::NEONThumb2DupPostEncoder(const MCInst &MI,
   if (isThumb2()) {
     EncodedValue &= 0x00FFFFFF;
     EncodedValue |= 0xEE000000;
+  }
+
+  return EncodedValue;
+}
+
+/// Post-process encoded NEON v8 instructions, and rewrite them to Thumb2 form
+/// if we are in Thumb2.
+unsigned ARMMCCodeEmitter::NEONThumb2V8PostEncoder(const MCInst &MI,
+                                                 unsigned EncodedValue) const {
+  if (isThumb2()) {
+    EncodedValue |= 0xC000000; // Set bits 27-26
   }
 
   return EncodedValue;
@@ -625,8 +638,14 @@ getARMBLXTargetOpValue(const MCInst &MI, unsigned OpIdx,
 uint32_t ARMMCCodeEmitter::
 getUnconditionalBranchTargetOpValue(const MCInst &MI, unsigned OpIdx,
                        SmallVectorImpl<MCFixup> &Fixups) const {
-  unsigned Val =
-    ::getBranchTargetOpValue(MI, OpIdx, ARM::fixup_t2_uncondbranch, Fixups);
+  unsigned Val = 0;
+  const MCOperand MO = MI.getOperand(OpIdx);
+    
+  if(MO.isExpr())
+    Val = ::getBranchTargetOpValue(MI, OpIdx, ARM::fixup_t2_uncondbranch, Fixups);
+  else 
+    Val = MO.getImm() >> 1;
+
   bool I  = (Val & 0x800000);
   bool J1 = (Val & 0x400000);
   bool J2 = (Val & 0x200000);
@@ -652,7 +671,7 @@ getAdrLabelOpValue(const MCInst &MI, unsigned OpIdx,
   if (MO.isExpr())
     return ::getBranchTargetOpValue(MI, OpIdx, ARM::fixup_arm_adr_pcrel_12,
                                     Fixups);
-  int32_t offset = MO.getImm();
+  int64_t offset = MO.getImm();
   uint32_t Val = 0x2000;
 
   int SoImmVal;

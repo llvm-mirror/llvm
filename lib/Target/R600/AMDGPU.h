@@ -31,12 +31,12 @@ FunctionPass *createR600ExpandSpecialInstrsPass(TargetMachine &tm);
 FunctionPass *createR600EmitClauseMarkers(TargetMachine &tm);
 FunctionPass *createR600Packetizer(TargetMachine &tm);
 FunctionPass *createR600ControlFlowFinalizer(TargetMachine &tm);
-FunctionPass *createAMDGPUCFGPreparationPass(TargetMachine &tm);
 FunctionPass *createAMDGPUCFGStructurizerPass(TargetMachine &tm);
 
 // SI Passes
 FunctionPass *createSIAnnotateControlFlowPass();
 FunctionPass *createSILowerControlFlowPass(TargetMachine &tm);
+FunctionPass *createSIFixSGPRCopiesPass(TargetMachine &tm);
 FunctionPass *createSICodeEmitterPass(formatted_raw_ostream &OS);
 FunctionPass *createSIInsertWaits(TargetMachine &tm);
 
@@ -45,6 +45,10 @@ Pass *createAMDGPUStructurizeCFGPass();
 FunctionPass *createAMDGPUConvertToISAPass(TargetMachine &tm);
 FunctionPass *createAMDGPUIndirectAddressingPass(TargetMachine &tm);
 FunctionPass *createAMDGPUISelDag(TargetMachine &tm);
+
+/// \brief Creates an AMDGPU-specific Target Transformation Info pass.
+ImmutablePass *
+createAMDGPUTargetTransformInfoPass(const AMDGPUTargetMachine *TM);
 
 extern Target TheAMDGPUTarget;
 
@@ -75,6 +79,12 @@ enum AddressSpaces {
   ADDRESS_NONE     = 5, ///< Address space for unknown memory.
   PARAM_D_ADDRESS  = 6, ///< Address space for direct addressible parameter memory (CONST0)
   PARAM_I_ADDRESS  = 7, ///< Address space for indirect addressible parameter memory (VTX1)
+
+  // Do not re-order the CONSTANT_BUFFER_* enums.  Several places depend on this
+  // order to be able to dynamically index a constant buffer, for example:
+  //
+  // ConstantBufferAS = CONSTANT_BUFFER_0 + CBIdx
+
   CONSTANT_BUFFER_0 = 8,
   CONSTANT_BUFFER_1 = 9,
   CONSTANT_BUFFER_2 = 10,

@@ -676,8 +676,8 @@ static Constant *stripAndComputeConstantOffsets(const DataLayout *TD,
   if (!TD)
     return ConstantInt::get(IntegerType::get(V->getContext(), 64), 0);
 
-  unsigned IntPtrWidth = TD->getPointerSizeInBits();
-  APInt Offset = APInt::getNullValue(IntPtrWidth);
+  Type *IntPtrTy = TD->getIntPtrType(V->getType())->getScalarType();
+  APInt Offset = APInt::getNullValue(IntPtrTy->getIntegerBitWidth());
 
   // Even though we don't look through PHI nodes, we could be called on an
   // instruction in an unreachable block, which may be on a cycle.
@@ -701,7 +701,6 @@ static Constant *stripAndComputeConstantOffsets(const DataLayout *TD,
            "Unexpected operand type!");
   } while (Visited.insert(V));
 
-  Type *IntPtrTy = TD->getIntPtrType(V->getContext());
   Constant *OffsetIntPtr = ConstantInt::get(IntPtrTy, Offset);
   if (V->getType()->isVectorTy())
     return ConstantVector::getSplat(V->getType()->getVectorNumElements(),
@@ -2034,7 +2033,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
     // Turn icmp (ptrtoint x), (ptrtoint/constant) into a compare of the input
     // if the integer type is the same size as the pointer type.
     if (MaxRecurse && Q.TD && isa<PtrToIntInst>(LI) &&
-        Q.TD->getPointerSizeInBits() == DstTy->getPrimitiveSizeInBits()) {
+        Q.TD->getTypeSizeInBits(SrcTy) == DstTy->getPrimitiveSizeInBits()) {
       if (Constant *RHSC = dyn_cast<Constant>(RHS)) {
         // Transfer the cast to the constant.
         if (Value *V = SimplifyICmpInst(Pred, SrcOp,
@@ -2947,6 +2946,7 @@ static bool IsIdempotent(Intrinsic::ID ID) {
   case Intrinsic::trunc:
   case Intrinsic::rint:
   case Intrinsic::nearbyint:
+  case Intrinsic::round:
     return true;
   }
 }

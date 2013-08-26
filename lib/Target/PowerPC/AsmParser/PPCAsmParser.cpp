@@ -18,6 +18,7 @@
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -221,7 +222,8 @@ public:
     : MCTargetAsmParser(), STI(_STI), Parser(_Parser) {
     // Check for 64-bit vs. 32-bit pointer mode.
     Triple TheTriple(STI.getTargetTriple());
-    IsPPC64 = TheTriple.getArch() == Triple::ppc64;
+    IsPPC64 = (TheTriple.getArch() == Triple::ppc64 ||
+               TheTriple.getArch() == Triple::ppc64le);
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
@@ -480,6 +482,20 @@ public:
     PPCOperand *Op = new PPCOperand(Token);
     Op->Tok.Data = Str.data();
     Op->Tok.Length = Str.size();
+    Op->StartLoc = S;
+    Op->EndLoc = S;
+    Op->IsPPC64 = IsPPC64;
+    return Op;
+  }
+
+  static PPCOperand *CreateTokenWithStringCopy(StringRef Str, SMLoc S,
+                                               bool IsPPC64) {
+    // Allocate extra memory for the string and copy it.
+    void *Mem = ::operator new(sizeof(PPCOperand) + Str.size());
+    PPCOperand *Op = new (Mem) PPCOperand(Token);
+    Op->Tok.Data = (const char *)(Op + 1);
+    Op->Tok.Length = Str.size();
+    std::memcpy((char *)(Op + 1), Str.data(), Str.size());
     Op->StartLoc = S;
     Op->EndLoc = S;
     Op->IsPPC64 = IsPPC64;
@@ -1182,29 +1198,36 @@ ParseInstruction(ParseInstructionInfo &Info, StringRef Name, SMLoc NameLoc,
   // The first operand is the token for the instruction name.
   // If the next character is a '+' or '-', we need to add it to the
   // instruction name, to match what TableGen is doing.
+  std::string NewOpcode;
   if (getLexer().is(AsmToken::Plus)) {
     getLexer().Lex();
-    char *NewOpcode = new char[Name.size() + 1];
-    memcpy(NewOpcode, Name.data(), Name.size());
-    NewOpcode[Name.size()] = '+';
-    Name = StringRef(NewOpcode, Name.size() + 1);
+    NewOpcode = Name;
+    NewOpcode += '+';
+    Name = NewOpcode;
   }
   if (getLexer().is(AsmToken::Minus)) {
     getLexer().Lex();
-    char *NewOpcode = new char[Name.size() + 1];
-    memcpy(NewOpcode, Name.data(), Name.size());
-    NewOpcode[Name.size()] = '-';
-    Name = StringRef(NewOpcode, Name.size() + 1);
+    NewOpcode = Name;
+    NewOpcode += '-';
+    Name = NewOpcode;
   }
   // If the instruction ends in a '.', we need to create a separate
   // token for it, to match what TableGen is doing.
   size_t Dot = Name.find('.');
   StringRef Mnemonic = Name.slice(0, Dot);
-  Operands.push_back(PPCOperand::CreateToken(Mnemonic, NameLoc, isPPC64()));
+  if (!NewOpcode.empty()) // Underlying memory for Name is volatile.
+    Operands.push_back(
+        PPCOperand::CreateTokenWithStringCopy(Mnemonic, NameLoc, isPPC64()));
+  else
+    Operands.push_back(PPCOperand::CreateToken(Mnemonic, NameLoc, isPPC64()));
   if (Dot != StringRef::npos) {
     SMLoc DotLoc = SMLoc::getFromPointer(NameLoc.getPointer() + Dot);
     StringRef DotStr = Name.slice(Dot, StringRef::npos);
-    Operands.push_back(PPCOperand::CreateToken(DotStr, DotLoc, isPPC64()));
+    if (!NewOpcode.empty()) // Underlying memory for Name is volatile.
+      Operands.push_back(
+          PPCOperand::CreateTokenWithStringCopy(DotStr, DotLoc, isPPC64()));
+    else
+      Operands.push_back(PPCOperand::CreateToken(DotStr, DotLoc, isPPC64()));
   }
 
   // If there are no more operands then finish
@@ -1312,6 +1335,7 @@ bool PPCAsmParser::ParseDirectiveMachine(SMLoc L) {
 extern "C" void LLVMInitializePowerPCAsmParser() {
   RegisterMCAsmParser<PPCAsmParser> A(ThePPC32Target);
   RegisterMCAsmParser<PPCAsmParser> B(ThePPC64Target);
+  RegisterMCAsmParser<PPCAsmParser> C(ThePPC64LETarget);
 }
 
 #define GET_REGISTER_MATCHER

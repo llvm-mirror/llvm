@@ -16,6 +16,20 @@
 
 #include "llvm/ADT/StringRef.h"
 
+#if defined(__GNUC__) && defined(__linux__)
+inline void *getDFSanArgTLSPtrForJIT() {
+  extern __thread __attribute__((tls_model("initial-exec")))
+    void *__dfsan_arg_tls;
+  return (void *)&__dfsan_arg_tls;
+}
+
+inline void *getDFSanRetValTLSPtrForJIT() {
+  extern __thread __attribute__((tls_model("initial-exec")))
+    void *__dfsan_retval_tls;
+  return (void *)&__dfsan_retval_tls;
+}
+#endif
+
 namespace llvm {
 
 class ModulePass;
@@ -74,6 +88,19 @@ FunctionPass *createMemorySanitizerPass(bool TrackOrigins = false,
 // Insert ThreadSanitizer (race detection) instrumentation
 FunctionPass *createThreadSanitizerPass(StringRef BlacklistFile = StringRef());
 
+// Insert DataFlowSanitizer (dynamic data flow analysis) instrumentation
+ModulePass *createDataFlowSanitizerPass(StringRef ABIListFile = StringRef(),
+                                        void *(*getArgTLS)() = 0,
+                                        void *(*getRetValTLS)() = 0);
+
+#if defined(__GNUC__) && defined(__linux__)
+inline ModulePass *createDataFlowSanitizerPassForJIT(StringRef ABIListFile =
+                                                         StringRef()) {
+  return createDataFlowSanitizerPass(ABIListFile, getDFSanArgTLSPtrForJIT,
+                                     getDFSanRetValTLSPtrForJIT);
+}
+#endif
+
 // BoundsChecking - This pass instruments the code to perform run-time bounds
 // checking on loads, stores, and other memory intrinsics.
 FunctionPass *createBoundsCheckingPass();
@@ -91,12 +118,12 @@ FunctionPass *createBoundsCheckingPass();
 ///
 /// @param HideDebugIntrinsics  Omit debug intrinsics in emitted IR source file.
 /// @param HideDebugMetadata    Omit debug metadata in emitted IR source file.
-/// @param Filename             Embed this file name in the debug information.
 /// @param Directory            Embed this directory in the debug information.
+/// @param Filename             Embed this file name in the debug information.
 ModulePass *createDebugIRPass(bool HideDebugIntrinsics,
                               bool HideDebugMetadata,
-                              StringRef Filename = StringRef(),
-                              StringRef Directory = StringRef());
+                              StringRef Directory = StringRef(),
+                              StringRef Filename = StringRef());
 
 /// createDebugIRPass - Enable interactive stepping through LLVM IR in LLDB
 ///                     (or GDB) with an existing IR file on disk. When creating

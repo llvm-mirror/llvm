@@ -39,11 +39,14 @@ class MipsMCCodeEmitter : public MCCodeEmitter {
   MCContext &Ctx;
   const MCSubtargetInfo &STI;
   bool IsLittleEndian;
+  bool IsMicroMips;
 
 public:
   MipsMCCodeEmitter(const MCInstrInfo &mcii, MCContext &Ctx_,
                     const MCSubtargetInfo &sti, bool IsLittle) :
-    MCII(mcii), Ctx(Ctx_), STI (sti), IsLittleEndian(IsLittle) {}
+    MCII(mcii), Ctx(Ctx_), STI (sti), IsLittleEndian(IsLittle) {
+      IsMicroMips = STI.getFeatureBits() & Mips::FeatureMicroMips;
+    }
 
   ~MipsMCCodeEmitter() {}
 
@@ -53,9 +56,17 @@ public:
 
   void EmitInstruction(uint64_t Val, unsigned Size, raw_ostream &OS) const {
     // Output the instruction encoding in little endian byte order.
-    for (unsigned i = 0; i < Size; ++i) {
-      unsigned Shift = IsLittleEndian ? i * 8 : (Size - 1 - i) * 8;
-      EmitByte((Val >> Shift) & 0xff, OS);
+    // Little-endian byte ordering:
+    //   mips32r2:   4 | 3 | 2 | 1
+    //   microMIPS:  2 | 1 | 4 | 3
+    if (IsLittleEndian && Size == 4 && IsMicroMips) {
+      EmitInstruction(Val>>16, 2, OS);
+      EmitInstruction(Val, 2, OS);
+    } else {
+      for (unsigned i = 0; i < Size; ++i) {
+        unsigned Shift = IsLittleEndian ? i * 8 : (Size - 1 - i) * 8;
+        EmitByte((Val >> Shift) & 0xff, OS);
+      }
     }
   }
 
@@ -86,6 +97,8 @@ public:
 
   unsigned getMemEncoding(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups) const;
+  unsigned getMemEncodingMMImm12(const MCInst &MI, unsigned OpNo,
+                                 SmallVectorImpl<MCFixup> &Fixups) const;
   unsigned getSizeExtEncoding(const MCInst &MI, unsigned OpNo,
                               SmallVectorImpl<MCFixup> &Fixups) const;
   unsigned getSizeInsEncoding(const MCInst &MI, unsigned OpNo,
@@ -201,6 +214,7 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
     LowerDextDins(TmpInst);
   }
 
+  unsigned long N = Fixups.size();
   uint32_t Binary = getBinaryCodeForInstr(TmpInst, Fixups);
 
   // Check for unimplemented opcodes.
@@ -213,6 +227,8 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   if (STI.getFeatureBits() & Mips::FeatureMicroMips) {
     int NewOpcode = Mips::Std2MicroMips (Opcode, Mips::Arch_micromips);
     if (NewOpcode != -1) {
+      if (Fixups.size() > N)
+        Fixups.pop_back();
       Opcode = NewOpcode;
       TmpInst.setOpcode (NewOpcode);
       Binary = getBinaryCodeForInstr(TmpInst, Fixups);
@@ -404,6 +420,17 @@ MipsMCCodeEmitter::getMemEncoding(const MCInst &MI, unsigned OpNo,
   unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1), Fixups);
 
   return (OffBits & 0xFFFF) | RegBits;
+}
+
+unsigned MipsMCCodeEmitter::
+getMemEncodingMMImm12(const MCInst &MI, unsigned OpNo,
+                      SmallVectorImpl<MCFixup> &Fixups) const {
+  // Base register is encoded in bits 20-16, offset is encoded in bits 11-0.
+  assert(MI.getOperand(OpNo).isReg());
+  unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo), Fixups) << 16;
+  unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1), Fixups);
+
+  return (OffBits & 0x0FFF) | RegBits;
 }
 
 unsigned

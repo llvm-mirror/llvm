@@ -290,6 +290,21 @@ bool SystemZTargetLowering::allowsUnalignedMemoryAccesses(EVT VT,
   return true;
 }
   
+bool SystemZTargetLowering::isLegalAddressingMode(const AddrMode &AM,
+                                                  Type *Ty) const {
+  // Punt on globals for now, although they can be used in limited
+  // RELATIVE LONG cases.
+  if (AM.BaseGV)
+    return false;
+
+  // Require a 20-bit signed offset.
+  if (!isInt<20>(AM.BaseOffs))
+    return false;
+
+  // Indexing is OK but no scale factor can be applied.
+  return AM.Scale == 0 || AM.Scale == 1;
+}
+
 //===----------------------------------------------------------------------===//
 // Inline asm support
 //===----------------------------------------------------------------------===//
@@ -896,6 +911,29 @@ static unsigned CCMaskForCondCode(ISD::CondCode CC) {
 }
 
 // If a comparison described by IsUnsigned, CCMask, CmpOp0 and CmpOp1
+// can be converted to a comparison against zero, adjust the operands
+// as necessary.
+static void adjustZeroCmp(SelectionDAG &DAG, bool &IsUnsigned,
+                          SDValue &CmpOp0, SDValue &CmpOp1,
+                          unsigned &CCMask) {
+  if (IsUnsigned)
+    return;
+
+  ConstantSDNode *ConstOp1 = dyn_cast<ConstantSDNode>(CmpOp1.getNode());
+  if (!ConstOp1)
+    return;
+
+  int64_t Value = ConstOp1->getSExtValue();
+  if ((Value == -1 && CCMask == SystemZ::CCMASK_CMP_GT) ||
+      (Value == -1 && CCMask == SystemZ::CCMASK_CMP_LE) ||
+      (Value == 1 && CCMask == SystemZ::CCMASK_CMP_LT) ||
+      (Value == 1 && CCMask == SystemZ::CCMASK_CMP_GE)) {
+    CCMask ^= SystemZ::CCMASK_CMP_EQ;
+    CmpOp1 = DAG.getConstant(0, CmpOp1.getValueType());
+  }
+}
+
+// If a comparison described by IsUnsigned, CCMask, CmpOp0 and CmpOp1
 // is suitable for CLI(Y), CHHSI or CLHHSI, adjust the operands as necessary.
 static void adjustSubwordCmp(SelectionDAG &DAG, bool &IsUnsigned,
                              SDValue &CmpOp0, SDValue &CmpOp1,
@@ -939,7 +977,7 @@ static void adjustSubwordCmp(SelectionDAG &DAG, bool &IsUnsigned,
       if (Value == 0 && CCMask == SystemZ::CCMASK_CMP_LT)
         // Test whether the high bit of the byte is set.
         Value = 127, CCMask = SystemZ::CCMASK_CMP_GT, IsUnsigned = true;
-      else if (SignedValue == -1 && CCMask == SystemZ::CCMASK_CMP_GT)
+      else if (Value == 0 && CCMask == SystemZ::CCMASK_CMP_GE)
         // Test whether the high bit of the byte is clear.
         Value = 128, CCMask = SystemZ::CCMASK_CMP_LT, IsUnsigned = true;
       else
@@ -1015,15 +1053,22 @@ static bool preferUnsignedComparison(SelectionDAG &DAG, SDValue CmpOp0,
   return false;
 }
 
-// Return a target node that compares CmpOp0 and CmpOp1.  Set CCMask to the
-// 4-bit condition-code mask for CC.
+// Return a target node that compares CmpOp0 with CmpOp1 and stores a
+// 2-bit result in CC.  Set CCValid to the CCMASK_* of all possible
+// 2-bit results and CCMask to the subset of those results that are
+// associated with Cond.
 static SDValue emitCmp(SelectionDAG &DAG, SDValue CmpOp0, SDValue CmpOp1,
-                       ISD::CondCode CC, unsigned &CCMask) {
+                       ISD::CondCode Cond, unsigned &CCValid,
+                       unsigned &CCMask) {
   bool IsUnsigned = false;
-  CCMask = CCMaskForCondCode(CC);
-  if (!CmpOp0.getValueType().isFloatingPoint()) {
+  CCMask = CCMaskForCondCode(Cond);
+  if (CmpOp0.getValueType().isFloatingPoint())
+    CCValid = SystemZ::CCMASK_FCMP;
+  else {
     IsUnsigned = CCMask & SystemZ::CCMASK_CMP_UO;
-    CCMask &= ~SystemZ::CCMASK_CMP_UO;
+    CCValid = SystemZ::CCMASK_ICMP;
+    CCMask &= CCValid;
+    adjustZeroCmp(DAG, IsUnsigned, CmpOp0, CmpOp1, CCMask);
     adjustSubwordCmp(DAG, IsUnsigned, CmpOp0, CmpOp1, CCMask);
     if (preferUnsignedComparison(DAG, CmpOp0, CmpOp1, CCMask))
       IsUnsigned = true;
@@ -1065,10 +1110,11 @@ SDValue SystemZTargetLowering::lowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest     = Op.getOperand(4);
   SDLoc DL(Op);
 
-  unsigned CCMask;
-  SDValue Flags = emitCmp(DAG, CmpOp0, CmpOp1, CC, CCMask);
+  unsigned CCValid, CCMask;
+  SDValue Flags = emitCmp(DAG, CmpOp0, CmpOp1, CC, CCValid, CCMask);
   return DAG.getNode(SystemZISD::BR_CCMASK, DL, Op.getValueType(),
-                     Chain, DAG.getConstant(CCMask, MVT::i32), Dest, Flags);
+                     Chain, DAG.getConstant(CCValid, MVT::i32),
+                     DAG.getConstant(CCMask, MVT::i32), Dest, Flags);
 }
 
 SDValue SystemZTargetLowering::lowerSELECT_CC(SDValue Op,
@@ -1080,12 +1126,13 @@ SDValue SystemZTargetLowering::lowerSELECT_CC(SDValue Op,
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
   SDLoc DL(Op);
 
-  unsigned CCMask;
-  SDValue Flags = emitCmp(DAG, CmpOp0, CmpOp1, CC, CCMask);
+  unsigned CCValid, CCMask;
+  SDValue Flags = emitCmp(DAG, CmpOp0, CmpOp1, CC, CCValid, CCMask);
 
-  SmallVector<SDValue, 4> Ops;
+  SmallVector<SDValue, 5> Ops;
   Ops.push_back(TrueOp);
   Ops.push_back(FalseOp);
+  Ops.push_back(DAG.getConstant(CCValid, MVT::i32));
   Ops.push_back(DAG.getConstant(CCMask, MVT::i32));
   Ops.push_back(Flags);
 
@@ -1654,6 +1701,8 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
     OPCODE(UDIVREM32);
     OPCODE(UDIVREM64);
     OPCODE(MVC);
+    OPCODE(CLC);
+    OPCODE(IPM);
     OPCODE(ATOMIC_SWAPW);
     OPCODE(ATOMIC_LOADW_ADD);
     OPCODE(ATOMIC_LOADW_SUB);
@@ -1695,34 +1744,6 @@ static MachineBasicBlock *splitBlockAfter(MachineInstr *MI,
   return NewMBB;
 }
 
-bool SystemZTargetLowering::
-convertPrevCompareToBranch(MachineBasicBlock *MBB,
-                           MachineBasicBlock::iterator MBBI,
-                           unsigned CCMask, MachineBasicBlock *Target) const {
-  MachineBasicBlock::iterator Compare = MBBI;
-  MachineBasicBlock::iterator Begin = MBB->begin();
-  do
-    {
-      if (Compare == Begin)
-        return false;
-      --Compare;
-    }
-  while (Compare->isDebugValue());
-
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
-  unsigned FusedOpcode = TII->getCompareAndBranch(Compare->getOpcode(),
-                                                  Compare);
-  if (!FusedOpcode)
-    return false;
-
-  DebugLoc DL = Compare->getDebugLoc();
-  BuildMI(*MBB, MBBI, DL, TII->get(FusedOpcode))
-    .addOperand(Compare->getOperand(0)).addOperand(Compare->getOperand(1))
-    .addImm(CCMask).addMBB(Target);
-  Compare->removeFromParent();
-  return true;
-}
-
 // Implement EmitInstrWithCustomInserter for pseudo Select* instruction MI.
 MachineBasicBlock *
 SystemZTargetLowering::emitSelect(MachineInstr *MI,
@@ -1732,7 +1753,8 @@ SystemZTargetLowering::emitSelect(MachineInstr *MI,
   unsigned DestReg  = MI->getOperand(0).getReg();
   unsigned TrueReg  = MI->getOperand(1).getReg();
   unsigned FalseReg = MI->getOperand(2).getReg();
-  unsigned CCMask   = MI->getOperand(3).getImm();
+  unsigned CCValid  = MI->getOperand(3).getImm();
+  unsigned CCMask   = MI->getOperand(4).getImm();
   DebugLoc DL       = MI->getDebugLoc();
 
   MachineBasicBlock *StartMBB = MBB;
@@ -1742,15 +1764,9 @@ SystemZTargetLowering::emitSelect(MachineInstr *MI,
   //  StartMBB:
   //   BRC CCMask, JoinMBB
   //   # fallthrough to FalseMBB
-  //
-  // The original DAG glues comparisons to their uses, both to ensure
-  // that no CC-clobbering instructions are inserted between them, and
-  // to ensure that comparison results are not reused.  This means that
-  // this Select is the sole user of any preceding comparison instruction
-  // and that we can try to use a fused compare and branch instead.
   MBB = StartMBB;
-  if (!convertPrevCompareToBranch(MBB, MI, CCMask, JoinMBB))
-    BuildMI(MBB, DL, TII->get(SystemZ::BRC)).addImm(CCMask).addMBB(JoinMBB);
+  BuildMI(MBB, DL, TII->get(SystemZ::BRC))
+    .addImm(CCValid).addImm(CCMask).addMBB(JoinMBB);
   MBB->addSuccessor(JoinMBB);
   MBB->addSuccessor(FalseMBB);
 
@@ -1773,25 +1789,41 @@ SystemZTargetLowering::emitSelect(MachineInstr *MI,
 
 // Implement EmitInstrWithCustomInserter for pseudo CondStore* instruction MI.
 // StoreOpcode is the store to use and Invert says whether the store should
-// happen when the condition is false rather than true.
+// happen when the condition is false rather than true.  If a STORE ON
+// CONDITION is available, STOCOpcode is its opcode, otherwise it is 0.
 MachineBasicBlock *
 SystemZTargetLowering::emitCondStore(MachineInstr *MI,
                                      MachineBasicBlock *MBB,
-                                     unsigned StoreOpcode, bool Invert) const {
+                                     unsigned StoreOpcode, unsigned STOCOpcode,
+                                     bool Invert) const {
   const SystemZInstrInfo *TII = TM.getInstrInfo();
 
-  MachineOperand Base = MI->getOperand(0);
-  int64_t Disp        = MI->getOperand(1).getImm();
-  unsigned IndexReg   = MI->getOperand(2).getReg();
-  unsigned SrcReg     = MI->getOperand(3).getReg();
-  unsigned CCMask     = MI->getOperand(4).getImm();
+  unsigned SrcReg     = MI->getOperand(0).getReg();
+  MachineOperand Base = MI->getOperand(1);
+  int64_t Disp        = MI->getOperand(2).getImm();
+  unsigned IndexReg   = MI->getOperand(3).getReg();
+  unsigned CCValid    = MI->getOperand(4).getImm();
+  unsigned CCMask     = MI->getOperand(5).getImm();
   DebugLoc DL         = MI->getDebugLoc();
 
   StoreOpcode = TII->getOpcodeForOffset(StoreOpcode, Disp);
 
+  // Use STOCOpcode if possible.  We could use different store patterns in
+  // order to avoid matching the index register, but the performance trade-offs
+  // might be more complicated in that case.
+  if (STOCOpcode && !IndexReg && TM.getSubtargetImpl()->hasLoadStoreOnCond()) {
+    if (Invert)
+      CCMask ^= CCValid;
+    BuildMI(*MBB, MI, DL, TII->get(STOCOpcode))
+      .addReg(SrcReg).addOperand(Base).addImm(Disp)
+      .addImm(CCValid).addImm(CCMask);
+    MI->eraseFromParent();
+    return MBB;
+  }
+
   // Get the condition needed to branch around the store.
   if (!Invert)
-    CCMask = CCMask ^ SystemZ::CCMASK_ANY;
+    CCMask ^= CCValid;
 
   MachineBasicBlock *StartMBB = MBB;
   MachineBasicBlock *JoinMBB  = splitBlockAfter(MI, MBB);
@@ -1800,15 +1832,9 @@ SystemZTargetLowering::emitCondStore(MachineInstr *MI,
   //  StartMBB:
   //   BRC CCMask, JoinMBB
   //   # fallthrough to FalseMBB
-  //
-  // The original DAG glues comparisons to their uses, both to ensure
-  // that no CC-clobbering instructions are inserted between them, and
-  // to ensure that comparison results are not reused.  This means that
-  // this CondStore is the sole user of any preceding comparison instruction
-  // and that we can try to use a fused compare and branch instead.
   MBB = StartMBB;
-  if (!convertPrevCompareToBranch(MBB, MI, CCMask, JoinMBB))
-    BuildMI(MBB, DL, TII->get(SystemZ::BRC)).addImm(CCMask).addMBB(JoinMBB);
+  BuildMI(MBB, DL, TII->get(SystemZ::BRC))
+    .addImm(CCValid).addImm(CCMask).addMBB(JoinMBB);
   MBB->addSuccessor(JoinMBB);
   MBB->addSuccessor(FalseMBB);
 
@@ -1840,7 +1866,6 @@ SystemZTargetLowering::emitAtomicLoadBinary(MachineInstr *MI,
   const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  unsigned MaskNE = CCMaskForCondCode(ISD::SETNE);
   bool IsSubWord = (BitSize < 32);
 
   // Extract the operands.  Base can be a register or a frame index.
@@ -1940,7 +1965,8 @@ SystemZTargetLowering::emitAtomicLoadBinary(MachineInstr *MI,
       .addReg(RotatedNewVal).addReg(NegBitShift).addImm(0);
   BuildMI(MBB, DL, TII->get(CSOpcode), Dest)
     .addReg(OldVal).addReg(NewVal).addOperand(Base).addImm(Disp);
-  BuildMI(MBB, DL, TII->get(SystemZ::BRC)).addImm(MaskNE).addMBB(LoopMBB);
+  BuildMI(MBB, DL, TII->get(SystemZ::BRC))
+    .addImm(SystemZ::CCMASK_CS).addImm(SystemZ::CCMASK_CS_NE).addMBB(LoopMBB);
   MBB->addSuccessor(LoopMBB);
   MBB->addSuccessor(DoneMBB);
 
@@ -1963,7 +1989,6 @@ SystemZTargetLowering::emitAtomicLoadMinMax(MachineInstr *MI,
   const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  unsigned MaskNE = CCMaskForCondCode(ISD::SETNE);
   bool IsSubWord = (BitSize < 32);
 
   // Extract the operands.  Base can be a register or a frame index.
@@ -2025,17 +2050,10 @@ SystemZTargetLowering::emitAtomicLoadMinMax(MachineInstr *MI,
   if (IsSubWord)
     BuildMI(MBB, DL, TII->get(SystemZ::RLL), RotatedOldVal)
       .addReg(OldVal).addReg(BitShift).addImm(0);
-  unsigned FusedOpcode = TII->getCompareAndBranch(CompareOpcode);
-  if (FusedOpcode)
-    BuildMI(MBB, DL, TII->get(FusedOpcode))
-      .addReg(RotatedOldVal).addReg(Src2)
-      .addImm(KeepOldMask).addMBB(UpdateMBB);
-  else {
-    BuildMI(MBB, DL, TII->get(CompareOpcode))
-      .addReg(RotatedOldVal).addReg(Src2);
-    BuildMI(MBB, DL, TII->get(SystemZ::BRC))
-      .addImm(KeepOldMask).addMBB(UpdateMBB);
-  }
+  BuildMI(MBB, DL, TII->get(CompareOpcode))
+    .addReg(RotatedOldVal).addReg(Src2);
+  BuildMI(MBB, DL, TII->get(SystemZ::BRC))
+    .addImm(SystemZ::CCMASK_ICMP).addImm(KeepOldMask).addMBB(UpdateMBB);
   MBB->addSuccessor(UpdateMBB);
   MBB->addSuccessor(UseAltMBB);
 
@@ -2065,7 +2083,8 @@ SystemZTargetLowering::emitAtomicLoadMinMax(MachineInstr *MI,
       .addReg(RotatedNewVal).addReg(NegBitShift).addImm(0);
   BuildMI(MBB, DL, TII->get(CSOpcode), Dest)
     .addReg(OldVal).addReg(NewVal).addOperand(Base).addImm(Disp);
-  BuildMI(MBB, DL, TII->get(SystemZ::BRC)).addImm(MaskNE).addMBB(LoopMBB);
+  BuildMI(MBB, DL, TII->get(SystemZ::BRC))
+    .addImm(SystemZ::CCMASK_CS).addImm(SystemZ::CCMASK_CS_NE).addMBB(LoopMBB);
   MBB->addSuccessor(LoopMBB);
   MBB->addSuccessor(DoneMBB);
 
@@ -2081,7 +2100,6 @@ SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
   const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  unsigned MaskNE = CCMaskForCondCode(ISD::SETNE);
 
   // Extract the operands.  Base can be a register or a frame index.
   unsigned Dest        = MI->getOperand(0).getReg();
@@ -2137,7 +2155,8 @@ SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
   //                      ^^ Replace the upper 32-BitSize bits of the
   //                         comparison value with those that we loaded,
   //                         so that we can use a full word comparison.
-  //   CRJNE %Dest, %RetryCmpVal, DoneMBB
+  //   CR %Dest, %RetryCmpVal
+  //   JNE DoneMBB
   //   # Fall through to SetMBB
   MBB = LoopMBB;
   BuildMI(MBB, DL, TII->get(SystemZ::PHI), OldVal)
@@ -2153,9 +2172,11 @@ SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
     .addReg(OldVal).addReg(BitShift).addImm(BitSize);
   BuildMI(MBB, DL, TII->get(SystemZ::RISBG32), RetryCmpVal)
     .addReg(CmpVal).addReg(Dest).addImm(32).addImm(63 - BitSize).addImm(0);
-  BuildMI(MBB, DL, TII->get(SystemZ::CRJ))
-    .addReg(Dest).addReg(RetryCmpVal)
-    .addImm(MaskNE).addMBB(DoneMBB);
+  BuildMI(MBB, DL, TII->get(SystemZ::CR))
+    .addReg(Dest).addReg(RetryCmpVal);
+  BuildMI(MBB, DL, TII->get(SystemZ::BRC))
+    .addImm(SystemZ::CCMASK_ICMP)
+    .addImm(SystemZ::CCMASK_CMP_NE).addMBB(DoneMBB);
   MBB->addSuccessor(DoneMBB);
   MBB->addSuccessor(SetMBB);
 
@@ -2175,7 +2196,8 @@ SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
     .addReg(RetrySwapVal).addReg(NegBitShift).addImm(-BitSize);
   BuildMI(MBB, DL, TII->get(CSOpcode), RetryOldVal)
     .addReg(OldVal).addReg(StoreVal).addOperand(Base).addImm(Disp);
-  BuildMI(MBB, DL, TII->get(SystemZ::BRC)).addImm(MaskNE).addMBB(LoopMBB);
+  BuildMI(MBB, DL, TII->get(SystemZ::BRC))
+    .addImm(SystemZ::CCMASK_CS).addImm(SystemZ::CCMASK_CS_NE).addMBB(LoopMBB);
   MBB->addSuccessor(LoopMBB);
   MBB->addSuccessor(DoneMBB);
 
@@ -2219,8 +2241,9 @@ SystemZTargetLowering::emitExt128(MachineInstr *MI,
 }
 
 MachineBasicBlock *
-SystemZTargetLowering::emitMVCWrapper(MachineInstr *MI,
-                                      MachineBasicBlock *MBB) const {
+SystemZTargetLowering::emitMemMemWrapper(MachineInstr *MI,
+                                         MachineBasicBlock *MBB,
+                                         unsigned Opcode) const {
   const SystemZInstrInfo *TII = TM.getInstrInfo();
   DebugLoc DL = MI->getDebugLoc();
 
@@ -2230,7 +2253,7 @@ SystemZTargetLowering::emitMVCWrapper(MachineInstr *MI,
   uint64_t       SrcDisp  = MI->getOperand(3).getImm();
   uint64_t       Length   = MI->getOperand(4).getImm();
 
-  BuildMI(*MBB, MI, DL, TII->get(SystemZ::MVC))
+  BuildMI(*MBB, MI, DL, TII->get(Opcode))
     .addOperand(DestBase).addImm(DestDisp).addImm(Length)
     .addOperand(SrcBase).addImm(SrcDisp);
 
@@ -2249,41 +2272,41 @@ EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const {
     return emitSelect(MI, MBB);
 
   case SystemZ::CondStore8_32:
-    return emitCondStore(MI, MBB, SystemZ::STC32, false);
+    return emitCondStore(MI, MBB, SystemZ::STC32, 0, false);
   case SystemZ::CondStore8_32Inv:
-    return emitCondStore(MI, MBB, SystemZ::STC32, true);
+    return emitCondStore(MI, MBB, SystemZ::STC32, 0, true);
   case SystemZ::CondStore16_32:
-    return emitCondStore(MI, MBB, SystemZ::STH32, false);
+    return emitCondStore(MI, MBB, SystemZ::STH32, 0, false);
   case SystemZ::CondStore16_32Inv:
-    return emitCondStore(MI, MBB, SystemZ::STH32, true);
+    return emitCondStore(MI, MBB, SystemZ::STH32, 0, true);
   case SystemZ::CondStore32_32:
-    return emitCondStore(MI, MBB, SystemZ::ST32, false);
+    return emitCondStore(MI, MBB, SystemZ::ST32, SystemZ::STOC32, false);
   case SystemZ::CondStore32_32Inv:
-    return emitCondStore(MI, MBB, SystemZ::ST32, true);
+    return emitCondStore(MI, MBB, SystemZ::ST32, SystemZ::STOC32, true);
   case SystemZ::CondStore8:
-    return emitCondStore(MI, MBB, SystemZ::STC, false);
+    return emitCondStore(MI, MBB, SystemZ::STC, 0, false);
   case SystemZ::CondStore8Inv:
-    return emitCondStore(MI, MBB, SystemZ::STC, true);
+    return emitCondStore(MI, MBB, SystemZ::STC, 0, true);
   case SystemZ::CondStore16:
-    return emitCondStore(MI, MBB, SystemZ::STH, false);
+    return emitCondStore(MI, MBB, SystemZ::STH, 0, false);
   case SystemZ::CondStore16Inv:
-    return emitCondStore(MI, MBB, SystemZ::STH, true);
+    return emitCondStore(MI, MBB, SystemZ::STH, 0, true);
   case SystemZ::CondStore32:
-    return emitCondStore(MI, MBB, SystemZ::ST, false);
+    return emitCondStore(MI, MBB, SystemZ::ST, SystemZ::STOC, false);
   case SystemZ::CondStore32Inv:
-    return emitCondStore(MI, MBB, SystemZ::ST, true);
+    return emitCondStore(MI, MBB, SystemZ::ST, SystemZ::STOC, true);
   case SystemZ::CondStore64:
-    return emitCondStore(MI, MBB, SystemZ::STG, false);
+    return emitCondStore(MI, MBB, SystemZ::STG, SystemZ::STOCG, false);
   case SystemZ::CondStore64Inv:
-    return emitCondStore(MI, MBB, SystemZ::STG, true);
+    return emitCondStore(MI, MBB, SystemZ::STG, SystemZ::STOCG, true);
   case SystemZ::CondStoreF32:
-    return emitCondStore(MI, MBB, SystemZ::STE, false);
+    return emitCondStore(MI, MBB, SystemZ::STE, 0, false);
   case SystemZ::CondStoreF32Inv:
-    return emitCondStore(MI, MBB, SystemZ::STE, true);
+    return emitCondStore(MI, MBB, SystemZ::STE, 0, true);
   case SystemZ::CondStoreF64:
-    return emitCondStore(MI, MBB, SystemZ::STD, false);
+    return emitCondStore(MI, MBB, SystemZ::STD, 0, false);
   case SystemZ::CondStoreF64Inv:
-    return emitCondStore(MI, MBB, SystemZ::STD, true);
+    return emitCondStore(MI, MBB, SystemZ::STD, 0, true);
 
   case SystemZ::AEXT128_64:
     return emitExt128(MI, MBB, false, SystemZ::subreg_low);
@@ -2461,18 +2484,10 @@ EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const {
 
   case SystemZ::ATOMIC_CMP_SWAPW:
     return emitAtomicCmpSwapW(MI, MBB);
-  case SystemZ::BRC:
-    // The original DAG glues comparisons to their uses, both to ensure
-    // that no CC-clobbering instructions are inserted between them, and
-    // to ensure that comparison results are not reused.  This means that
-    // a BRC is the sole user of a preceding comparison and that we can
-    // try to use a fused compare and branch instead.
-    if (convertPrevCompareToBranch(MBB, MI, MI->getOperand(0).getImm(),
-                                   MI->getOperand(1).getMBB()))
-      MI->eraseFromParent();
-    return MBB;
   case SystemZ::MVCWrapper:
-    return emitMVCWrapper(MI, MBB);
+    return emitMemMemWrapper(MI, MBB, SystemZ::MVC);
+  case SystemZ::CLCWrapper:
+    return emitMemMemWrapper(MI, MBB, SystemZ::CLC);
   default:
     llvm_unreachable("Unexpected instr type to insert");
   }

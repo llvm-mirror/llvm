@@ -136,28 +136,26 @@ def hasLDG : Predicate<"Subtarget.hasLDG()">;
 def hasLDU : Predicate<"Subtarget.hasLDU()">;
 def hasGenericLdSt : Predicate<"Subtarget.hasGenericLdSt()">;
 
-def doF32FTZ : Predicate<"UseF32FTZ==1">;
-def doNoF32FTZ : Predicate<"UseF32FTZ==0">;
+def doF32FTZ : Predicate<"useF32FTZ()">;
+def doNoF32FTZ : Predicate<"!useF32FTZ()">;
 
 def doFMAF32      : Predicate<"doFMAF32">;
-def doFMAF32_ftz  : Predicate<"(doFMAF32 && UseF32FTZ)">;
+def doFMAF32_ftz  : Predicate<"(doFMAF32 && useF32FTZ())">;
 def doFMAF32AGG      : Predicate<"doFMAF32AGG">;
-def doFMAF32AGG_ftz  : Predicate<"(doFMAF32AGG && UseF32FTZ)">;
+def doFMAF32AGG_ftz  : Predicate<"(doFMAF32AGG && useF32FTZ())">;
 def doFMAF64      : Predicate<"doFMAF64">;
 def doFMAF64AGG      : Predicate<"doFMAF64AGG">;
-def doFMADF32     : Predicate<"doFMADF32">;
-def doFMADF32_ftz : Predicate<"(doFMADF32 && UseF32FTZ)">;
 
 def doMulWide      : Predicate<"doMulWide">;
 
 def allowFMA : Predicate<"allowFMA">;
-def allowFMA_ftz : Predicate<"(allowFMA && UseF32FTZ)">;
+def allowFMA_ftz : Predicate<"(allowFMA && useF32FTZ())">;
 
-def do_DIVF32_APPROX : Predicate<"do_DIVF32_PREC==0">;
-def do_DIVF32_FULL : Predicate<"do_DIVF32_PREC==1">;
+def do_DIVF32_APPROX : Predicate<"getDivF32Level()==0">;
+def do_DIVF32_FULL : Predicate<"getDivF32Level()==1">;
 
-def do_SQRTF32_APPROX : Predicate<"do_SQRTF32_PREC==0">;
-def do_SQRTF32_RN : Predicate<"do_SQRTF32_PREC==1">;
+def do_SQRTF32_APPROX : Predicate<"!usePrecSqrtF32()">;
+def do_SQRTF32_RN : Predicate<"usePrecSqrtF32()">;
 
 def hasHWROT32 : Predicate<"Subtarget.hasHWROT32()">;
 
@@ -864,8 +862,6 @@ multiclass FPCONTRACT64<string OpcStr, Predicate Pred> {
 // If we reverse the order of the following two lines, then rrr2 rule will be
 // generated for FMA32, but not for rrr.
 // Therefore, we manually write the rrr2 rule in FPCONTRACT32.
-defm FMAD32_ftz : FPCONTRACT32<"mad.ftz.f32", doFMADF32_ftz>;
-defm FMAD32 : FPCONTRACT32<"mad.f32", doFMADF32>;
 defm FMA32_ftz  : FPCONTRACT32<"fma.rn.ftz.f32", doFMAF32_ftz>;
 defm FMA32  : FPCONTRACT32<"fma.rn.f32", doFMAF32>;
 defm FMA64  : FPCONTRACT64<"fma.rn.f64", doFMAF64>;
@@ -904,8 +900,6 @@ multiclass FPCONTRACT64_SUB_PAT<NVPTXInst Inst, Predicate Pred> {
 
 defm FMAF32ext_ftz  : FPCONTRACT32_SUB_PAT<FMA32_ftzrrr, doFMAF32AGG_ftz>;
 defm FMAF32ext  : FPCONTRACT32_SUB_PAT<FMA32rrr, doFMAF32AGG>;
-defm FMADF32ext_ftz : FPCONTRACT32_SUB_PAT_MAD<FMAD32_ftzrrr, doFMADF32_ftz>;
-defm FMADF32ext : FPCONTRACT32_SUB_PAT_MAD<FMAD32rrr, doFMADF32>;
 defm FMAF64ext  : FPCONTRACT64_SUB_PAT<FMA64rrr, doFMAF64AGG>;
 
 def SINF:  NVPTXInst<(outs Float32Regs:$dst), (ins Float32Regs:$src),
@@ -1326,6 +1320,15 @@ def MOV_ADDR : NVPTXInst<(outs Int32Regs:$dst), (ins imem:$a),
 def MOV_ADDR64 : NVPTXInst<(outs Int64Regs:$dst), (ins imem:$a),
                      "mov.u64 \t$dst, $a;",
                      [(set Int64Regs:$dst, (Wrapper tglobaladdr:$a))]>;
+
+// Get pointer to local stack
+def MOV_DEPOT_ADDR
+  : NVPTXInst<(outs Int32Regs:$d), (ins i32imm:$num),
+              "mov.u32 \t$d, __local_depot$num;", []>;
+def MOV_DEPOT_ADDR_64
+  : NVPTXInst<(outs Int64Regs:$d), (ins i32imm:$num),
+              "mov.u64 \t$d, __local_depot$num;", []>;
+
 
 // copyPhysreg is hard-coded in NVPTXInstrInfo.cpp
 let IsSimpleMove=1 in {
@@ -2205,6 +2208,17 @@ defm STV_f64 : ST_VEC<Float64Regs>;
 
 //---- Conversion ----
 
+class F_BITCONVERT<string SzStr, NVPTXRegClass regclassIn,
+  NVPTXRegClass regclassOut> :
+           NVPTXInst<(outs regclassOut:$d), (ins regclassIn:$a),
+           !strconcat("mov.b", !strconcat(SzStr, " \t $d, $a;")),
+     [(set regclassOut:$d, (bitconvert regclassIn:$a))]>;
+
+def BITCONVERT_32_I2F : F_BITCONVERT<"32", Int32Regs, Float32Regs>;
+def BITCONVERT_32_F2I : F_BITCONVERT<"32", Float32Regs, Int32Regs>;
+def BITCONVERT_64_I2F : F_BITCONVERT<"64", Int64Regs, Float64Regs>;
+def BITCONVERT_64_F2I : F_BITCONVERT<"64", Float64Regs, Int64Regs>;
+
 // NOTE: pred->fp are currently sub-optimal due to an issue in TableGen where
 // we cannot specify floating-point literals in isel patterns.  Therefore, we
 // use an integer selp to select either 1 or 0 and then cvt to floating-point.
@@ -2251,6 +2265,8 @@ def : Pat<(f64 (uint_to_fp Int64Regs:$a)),
 
 
 // f32 -> sint
+def : Pat<(i1 (fp_to_sint Float32Regs:$a)),
+          (SETP_b32ri (BITCONVERT_32_F2I Float32Regs:$a), 0, CmpEQ)>;
 def : Pat<(i16 (fp_to_sint Float32Regs:$a)),
           (CVT_s16_f32 Float32Regs:$a, CvtRZI_FTZ)>, Requires<[doF32FTZ]>;
 def : Pat<(i16 (fp_to_sint Float32Regs:$a)),
@@ -2265,6 +2281,8 @@ def : Pat<(i64 (fp_to_sint Float32Regs:$a)),
           (CVT_s64_f32 Float32Regs:$a, CvtRZI)>;
 
 // f32 -> uint
+def : Pat<(i1 (fp_to_uint Float32Regs:$a)),
+          (SETP_b32ri (BITCONVERT_32_F2I Float32Regs:$a), 0, CmpEQ)>;
 def : Pat<(i16 (fp_to_uint Float32Regs:$a)),
           (CVT_u16_f32 Float32Regs:$a, CvtRZI_FTZ)>, Requires<[doF32FTZ]>;
 def : Pat<(i16 (fp_to_uint Float32Regs:$a)),
@@ -2279,6 +2297,8 @@ def : Pat<(i64 (fp_to_uint Float32Regs:$a)),
           (CVT_u64_f32 Float32Regs:$a, CvtRZI)>;
 
 // f64 -> sint
+def : Pat<(i1 (fp_to_sint Float64Regs:$a)),
+          (SETP_b64ri (BITCONVERT_64_F2I Float64Regs:$a), 0, CmpEQ)>;
 def : Pat<(i16 (fp_to_sint Float64Regs:$a)),
           (CVT_s16_f64 Float64Regs:$a, CvtRZI)>;
 def : Pat<(i32 (fp_to_sint Float64Regs:$a)),
@@ -2287,6 +2307,8 @@ def : Pat<(i64 (fp_to_sint Float64Regs:$a)),
           (CVT_s64_f64 Float64Regs:$a, CvtRZI)>;
 
 // f64 -> uint
+def : Pat<(i1 (fp_to_uint Float64Regs:$a)),
+          (SETP_b64ri (BITCONVERT_64_F2I Float64Regs:$a), 0, CmpEQ)>;
 def : Pat<(i16 (fp_to_uint Float64Regs:$a)),
           (CVT_u16_f64 Float64Regs:$a, CvtRZI)>;
 def : Pat<(i32 (fp_to_uint Float64Regs:$a)),
@@ -2393,17 +2415,6 @@ def : Pat<(select Int32Regs:$pred, Float64Regs:$a, Float64Regs:$b),
           (SELP_f64rr Float64Regs:$a, Float64Regs:$b,
           (SETP_b32ri (ANDb32ri Int32Regs:$pred, 1), 1, CmpEQ))>;
 
-
-class F_BITCONVERT<string SzStr, NVPTXRegClass regclassIn,
-  NVPTXRegClass regclassOut> :
-           NVPTXInst<(outs regclassOut:$d), (ins regclassIn:$a),
-           !strconcat("mov.b", !strconcat(SzStr, " \t $d, $a;")),
-     [(set regclassOut:$d, (bitconvert regclassIn:$a))]>;
-
-def BITCONVERT_32_I2F : F_BITCONVERT<"32", Int32Regs, Float32Regs>;
-def BITCONVERT_32_F2I : F_BITCONVERT<"32", Float32Regs, Int32Regs>;
-def BITCONVERT_64_I2F : F_BITCONVERT<"64", Int64Regs, Float64Regs>;
-def BITCONVERT_64_F2I : F_BITCONVERT<"64", Float64Regs, Int64Regs>;
 
 // pack a set of smaller int registers to a larger int register
 def V4I16toI64 : NVPTXInst<(outs Int64Regs:$d),

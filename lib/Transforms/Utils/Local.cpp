@@ -16,6 +16,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
@@ -42,6 +43,8 @@
 #include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
+
+STATISTIC(NumRemoved, "Number of unreachable basic blocks removed");
 
 //===----------------------------------------------------------------------===//
 //  Local constant propagation.
@@ -84,7 +87,7 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       BI->eraseFromParent();
       return true;
     }
-    
+
     if (Dest2 == Dest1) {       // Conditional branch to same location?
       // This branch matches something like this:
       //     br bool %cond, label %Dest, label %Dest
@@ -104,7 +107,7 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
     }
     return false;
   }
-  
+
   if (SwitchInst *SI = dyn_cast<SwitchInst>(T)) {
     // If we are switching on a constant, we can convert the switch into a
     // single branch instruction!
@@ -188,7 +191,7 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
         RecursivelyDeleteTriviallyDeadInstructions(Cond, TLI);
       return true;
     }
-    
+
     if (SI->getNumCases() == 1) {
       // Otherwise, we can fold this switch into a conditional branch
       // instruction if it has only one non-default destination.
@@ -231,7 +234,7 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       BasicBlock *TheOnlyDest = BA->getBasicBlock();
       // Insert the new branch.
       Builder.CreateBr(TheOnlyDest);
-      
+
       for (unsigned i = 0, e = IBI->getNumDestinations(); i != e; ++i) {
         if (IBI->getDestination(i) == TheOnlyDest)
           TheOnlyDest = 0;
@@ -242,7 +245,7 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       IBI->eraseFromParent();
       if (DeleteDeadConditions)
         RecursivelyDeleteTriviallyDeadInstructions(Address, TLI);
-      
+
       // If we didn't find our destination in the IBI successor list, then we
       // have undefined behavior.  Replace the unconditional branch with an
       // 'unreachable' instruction.
@@ -250,11 +253,11 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
         BB->getTerminator()->eraseFromParent();
         new UnreachableInst(BB->getContext(), BB);
       }
-      
+
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -321,10 +324,10 @@ llvm::RecursivelyDeleteTriviallyDeadInstructions(Value *V,
   Instruction *I = dyn_cast<Instruction>(V);
   if (!I || !I->use_empty() || !isInstructionTriviallyDead(I, TLI))
     return false;
-  
+
   SmallVector<Instruction*, 16> DeadInsts;
   DeadInsts.push_back(I);
-  
+
   do {
     I = DeadInsts.pop_back_val();
 
@@ -333,9 +336,9 @@ llvm::RecursivelyDeleteTriviallyDeadInstructions(Value *V,
     for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i) {
       Value *OpV = I->getOperand(i);
       I->setOperand(i, 0);
-      
+
       if (!OpV->use_empty()) continue;
-    
+
       // If the operand is an instruction that became dead as we nulled out the
       // operand, and if it is 'trivially' dead, delete it in a future loop
       // iteration.
@@ -343,7 +346,7 @@ llvm::RecursivelyDeleteTriviallyDeadInstructions(Value *V,
         if (isInstructionTriviallyDead(OpI, TLI))
           DeadInsts.push_back(OpI);
     }
-    
+
     I->eraseFromParent();
   } while (!DeadInsts.empty());
 
@@ -450,12 +453,12 @@ void llvm::RemovePredecessorAndSimplify(BasicBlock *BB, BasicBlock *Pred,
   // This only adjusts blocks with PHI nodes.
   if (!isa<PHINode>(BB->begin()))
     return;
-  
+
   // Remove the entries for Pred from the PHI nodes in BB, but do not simplify
   // them down.  This will leave us with single entry phi nodes and other phis
   // that can be removed.
   BB->removePredecessor(Pred, true);
-  
+
   WeakVH PhiIt = &BB->front();
   while (PHINode *PN = dyn_cast<PHINode>(PhiIt)) {
     PhiIt = &*++BasicBlock::iterator(cast<Instruction>(PhiIt));
@@ -486,10 +489,10 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB, Pass *P) {
     PN->replaceAllUsesWith(NewVal);
     PN->eraseFromParent();
   }
-  
+
   BasicBlock *PredBB = DestBB->getSinglePredecessor();
   assert(PredBB && "Block doesn't have a single predecessor!");
-  
+
   // Zap anything that took the address of DestBB.  Not doing this will give the
   // address an invalid value.
   if (DestBB->hasAddressTaken()) {
@@ -500,10 +503,10 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB, Pass *P) {
                                                      BA->getType()));
     BA->destroyConstant();
   }
-  
+
   // Anything that branched to PredBB now branches to DestBB.
   PredBB->replaceAllUsesWith(DestBB);
-  
+
   // Splice all the instructions from PredBB to DestBB.
   PredBB->getTerminator()->eraseFromParent();
   DestBB->getInstList().splice(DestBB->begin(), PredBB->getInstList());
@@ -533,14 +536,14 @@ static bool CanMergeValues(Value *First, Value *Second) {
 }
 
 /// CanPropagatePredecessorsForPHIs - Return true if we can fold BB, an
-/// almost-empty BB ending in an unconditional branch to Succ, into succ.
+/// almost-empty BB ending in an unconditional branch to Succ, into Succ.
 ///
 /// Assumption: Succ is the single successor for BB.
 ///
 static bool CanPropagatePredecessorsForPHIs(BasicBlock *BB, BasicBlock *Succ) {
   assert(*succ_begin(BB) == Succ && "Succ is not successor of BB!");
 
-  DEBUG(dbgs() << "Looking to fold " << BB->getName() << " into " 
+  DEBUG(dbgs() << "Looking to fold " << BB->getName() << " into "
         << Succ->getName() << "\n");
   // Shortcut, if there is only a single predecessor it must be BB and merging
   // is always safe
@@ -564,8 +567,8 @@ static bool CanPropagatePredecessorsForPHIs(BasicBlock *BB, BasicBlock *Succ) {
         if (BBPreds.count(IBB) &&
             !CanMergeValues(BBPN->getIncomingValueForBlock(IBB),
                             PN->getIncomingValue(PI))) {
-          DEBUG(dbgs() << "Can't fold, phi node " << PN->getName() << " in " 
-                << Succ->getName() << " is conflicting with " 
+          DEBUG(dbgs() << "Can't fold, phi node " << PN->getName() << " in "
+                << Succ->getName() << " is conflicting with "
                 << BBPN->getName() << " with regard to common predecessor "
                 << IBB->getName() << "\n");
           return false;
@@ -580,7 +583,7 @@ static bool CanPropagatePredecessorsForPHIs(BasicBlock *BB, BasicBlock *Succ) {
         BasicBlock *IBB = PN->getIncomingBlock(PI);
         if (BBPreds.count(IBB) &&
             !CanMergeValues(Val, PN->getIncomingValue(PI))) {
-          DEBUG(dbgs() << "Can't fold, phi node " << PN->getName() << " in " 
+          DEBUG(dbgs() << "Can't fold, phi node " << PN->getName() << " in "
                 << Succ->getName() << " is conflicting with regard to common "
                 << "predecessor " << IBB->getName() << "\n");
           return false;
@@ -737,7 +740,7 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB) {
   // We can't eliminate infinite loops.
   BasicBlock *Succ = cast<BranchInst>(BB->getTerminator())->getSuccessor(0);
   if (BB == Succ) return false;
-  
+
   // Check to see if merging these blocks would cause conflicts for any of the
   // phi nodes in BB or Succ. If not, we can safely merge.
   if (!CanPropagatePredecessorsForPHIs(BB, Succ)) return false;
@@ -771,13 +774,13 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB) {
   }
 
   DEBUG(dbgs() << "Killing Trivial BB: \n" << *BB);
-  
+
   if (isa<PHINode>(Succ->begin())) {
     // If there is more than one pred of succ, and there are PHI nodes in
     // the successor, then we need to add incoming edges for the PHI nodes
     //
     const PredBlockVector BBPreds(pred_begin(BB), pred_end(BB));
-    
+
     // Loop over all of the PHI nodes in the successor of BB.
     for (BasicBlock::iterator I = Succ->begin(); isa<PHINode>(I); ++I) {
       PHINode *PN = cast<PHINode>(I);
@@ -785,7 +788,7 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB) {
       redirectValuesFromPredecessorsToPhi(BB, BBPreds, PN);
     }
   }
-  
+
   if (Succ->getSinglePredecessor()) {
     // BB is the only predecessor of Succ, so Succ will end up with exactly
     // the same predecessors BB had.
@@ -800,7 +803,7 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB) {
       PN->eraseFromParent();
     }
   }
-    
+
   // Everything that jumped to BB now goes to Succ.
   BB->replaceAllUsesWith(Succ);
   if (!Succ->hasName()) Succ->takeName(BB);
@@ -908,7 +911,7 @@ static unsigned enforceKnownAlignment(Value *V, unsigned Align,
     // the final program then it is impossible for us to reliably enforce the
     // preferred alignment.
     if (GV->isWeakForLinker()) return Align;
-    
+
     if (GV->getAlignment() >= PrefAlign)
       return GV->getAlignment();
     // We can only increase the alignment of the global if it has no alignment
@@ -928,26 +931,27 @@ static unsigned enforceKnownAlignment(Value *V, unsigned Align,
 /// and it is more than the alignment of the ultimate object, see if we can
 /// increase the alignment of the ultimate object, making this check succeed.
 unsigned llvm::getOrEnforceKnownAlignment(Value *V, unsigned PrefAlign,
-                                          const DataLayout *TD) {
+                                          const DataLayout *DL) {
   assert(V->getType()->isPointerTy() &&
          "getOrEnforceKnownAlignment expects a pointer!");
-  unsigned BitWidth = TD ? TD->getPointerSizeInBits() : 64;
+  unsigned BitWidth = DL ? DL->getPointerTypeSizeInBits(V->getType()) : 64;
+
   APInt KnownZero(BitWidth, 0), KnownOne(BitWidth, 0);
-  ComputeMaskedBits(V, KnownZero, KnownOne, TD);
+  ComputeMaskedBits(V, KnownZero, KnownOne, DL);
   unsigned TrailZ = KnownZero.countTrailingOnes();
-  
-  // Avoid trouble with rediculously large TrailZ values, such as
+
+  // Avoid trouble with ridiculously large TrailZ values, such as
   // those computed from a null pointer.
   TrailZ = std::min(TrailZ, unsigned(sizeof(unsigned) * CHAR_BIT - 1));
-  
+
   unsigned Align = 1u << std::min(BitWidth - 1, TrailZ);
-  
+
   // LLVM doesn't support alignments larger than this currently.
   Align = std::min(Align, +Value::MaximumAlignment);
-  
+
   if (PrefAlign > Align)
-    Align = enforceKnownAlignment(V, Align, PrefAlign, TD);
-    
+    Align = enforceKnownAlignment(V, Align, PrefAlign, DL);
+
   // We don't need to make any adjustment.
   return Align;
 }
@@ -1014,7 +1018,7 @@ bool llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
 bool llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
                                            LoadInst *LI, DIBuilder &Builder) {
   DIVariable DIVar(DDI->getVariable());
-  assert((!DIVar || DIVar.isVariable()) && 
+  assert((!DIVar || DIVar.isVariable()) &&
          "Variable in DbgDeclareInst should be either null or a DIVariable.");
   if (!DIVar)
     return false;
@@ -1022,10 +1026,10 @@ bool llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
   if (LdStHasDebugValue(DIVar, LI))
     return true;
 
-  Instruction *DbgVal = 
+  Instruction *DbgVal =
     Builder.insertDbgValueIntrinsic(LI->getOperand(0), 0,
                                     DIVar, LI);
-  
+
   // Propagate any debug metadata from the store onto the dbg.value.
   DebugLoc LIDL = LI->getDebugLoc();
   if (!LIDL.isUnknown())
@@ -1089,7 +1093,7 @@ bool llvm::replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
   if (!DDI)
     return false;
   DIVariable DIVar(DDI->getVariable());
-  assert((!DIVar || DIVar.isVariable()) && 
+  assert((!DIVar || DIVar.isVariable()) &&
          "Variable in DbgDeclareInst should be either null or a DIVariable.");
   if (!DIVar)
     return false;
@@ -1120,33 +1124,153 @@ bool llvm::replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
   return true;
 }
 
-bool llvm::removeUnreachableBlocks(Function &F) {
-  SmallPtrSet<BasicBlock*, 16> Reachable;
+/// changeToUnreachable - Insert an unreachable instruction before the specified
+/// instruction, making it and the rest of the code in the block dead.
+static void changeToUnreachable(Instruction *I, bool UseLLVMTrap) {
+  BasicBlock *BB = I->getParent();
+  // Loop over all of the successors, removing BB's entry from any PHI
+  // nodes.
+  for (succ_iterator SI = succ_begin(BB), SE = succ_end(BB); SI != SE; ++SI)
+    (*SI)->removePredecessor(BB);
+
+  // Insert a call to llvm.trap right before this.  This turns the undefined
+  // behavior into a hard fail instead of falling through into random code.
+  if (UseLLVMTrap) {
+    Function *TrapFn =
+      Intrinsic::getDeclaration(BB->getParent()->getParent(), Intrinsic::trap);
+    CallInst *CallTrap = CallInst::Create(TrapFn, "", I);
+    CallTrap->setDebugLoc(I->getDebugLoc());
+  }
+  new UnreachableInst(I->getContext(), I);
+
+  // All instructions after this are dead.
+  BasicBlock::iterator BBI = I, BBE = BB->end();
+  while (BBI != BBE) {
+    if (!BBI->use_empty())
+      BBI->replaceAllUsesWith(UndefValue::get(BBI->getType()));
+    BB->getInstList().erase(BBI++);
+  }
+}
+
+/// changeToCall - Convert the specified invoke into a normal call.
+static void changeToCall(InvokeInst *II) {
+  SmallVector<Value*, 8> Args(II->op_begin(), II->op_end() - 3);
+  CallInst *NewCall = CallInst::Create(II->getCalledValue(), Args, "", II);
+  NewCall->takeName(II);
+  NewCall->setCallingConv(II->getCallingConv());
+  NewCall->setAttributes(II->getAttributes());
+  NewCall->setDebugLoc(II->getDebugLoc());
+  II->replaceAllUsesWith(NewCall);
+
+  // Follow the call by a branch to the normal destination.
+  BranchInst::Create(II->getNormalDest(), II);
+
+  // Update PHI nodes in the unwind destination
+  II->getUnwindDest()->removePredecessor(II->getParent());
+  II->eraseFromParent();
+}
+
+static bool markAliveBlocks(BasicBlock *BB,
+                            SmallPtrSet<BasicBlock*, 128> &Reachable) {
+
   SmallVector<BasicBlock*, 128> Worklist;
-  Worklist.push_back(&F.getEntryBlock());
-  Reachable.insert(&F.getEntryBlock());
+  Worklist.push_back(BB);
+  Reachable.insert(BB);
+  bool Changed = false;
   do {
-    BasicBlock *BB = Worklist.pop_back_val();
+    BB = Worklist.pop_back_val();
+
+    // Do a quick scan of the basic block, turning any obviously unreachable
+    // instructions into LLVM unreachable insts.  The instruction combining pass
+    // canonicalizes unreachable insts into stores to null or undef.
+    for (BasicBlock::iterator BBI = BB->begin(), E = BB->end(); BBI != E;++BBI){
+      if (CallInst *CI = dyn_cast<CallInst>(BBI)) {
+        if (CI->doesNotReturn()) {
+          // If we found a call to a no-return function, insert an unreachable
+          // instruction after it.  Make sure there isn't *already* one there
+          // though.
+          ++BBI;
+          if (!isa<UnreachableInst>(BBI)) {
+            // Don't insert a call to llvm.trap right before the unreachable.
+            changeToUnreachable(BBI, false);
+            Changed = true;
+          }
+          break;
+        }
+      }
+
+      // Store to undef and store to null are undefined and used to signal that
+      // they should be changed to unreachable by passes that can't modify the
+      // CFG.
+      if (StoreInst *SI = dyn_cast<StoreInst>(BBI)) {
+        // Don't touch volatile stores.
+        if (SI->isVolatile()) continue;
+
+        Value *Ptr = SI->getOperand(1);
+
+        if (isa<UndefValue>(Ptr) ||
+            (isa<ConstantPointerNull>(Ptr) &&
+             SI->getPointerAddressSpace() == 0)) {
+          changeToUnreachable(SI, true);
+          Changed = true;
+          break;
+        }
+      }
+    }
+
+    // Turn invokes that call 'nounwind' functions into ordinary calls.
+    if (InvokeInst *II = dyn_cast<InvokeInst>(BB->getTerminator())) {
+      Value *Callee = II->getCalledValue();
+      if (isa<ConstantPointerNull>(Callee) || isa<UndefValue>(Callee)) {
+        changeToUnreachable(II, true);
+        Changed = true;
+      } else if (II->doesNotThrow()) {
+        if (II->use_empty() && II->onlyReadsMemory()) {
+          // jump to the normal destination branch.
+          BranchInst::Create(II->getNormalDest(), II);
+          II->getUnwindDest()->removePredecessor(II->getParent());
+          II->eraseFromParent();
+        } else
+          changeToCall(II);
+        Changed = true;
+      }
+    }
+
+    Changed |= ConstantFoldTerminator(BB, true);
     for (succ_iterator SI = succ_begin(BB), SE = succ_end(BB); SI != SE; ++SI)
       if (Reachable.insert(*SI))
         Worklist.push_back(*SI);
   } while (!Worklist.empty());
+  return Changed;
+}
 
+/// removeUnreachableBlocksFromFn - Remove blocks that are not reachable, even
+/// if they are in a dead cycle.  Return true if a change was made, false
+/// otherwise.
+bool llvm::removeUnreachableBlocks(Function &F) {
+  SmallPtrSet<BasicBlock*, 128> Reachable;
+  bool Changed = markAliveBlocks(F.begin(), Reachable);
+
+  // If there are unreachable blocks in the CFG...
   if (Reachable.size() == F.size())
-    return false;
+    return Changed;
 
   assert(Reachable.size() < F.size());
-  for (Function::iterator I = llvm::next(F.begin()), E = F.end(); I != E; ++I) {
-    if (Reachable.count(I))
+  NumRemoved += F.size()-Reachable.size();
+
+  // Loop over all of the basic blocks that are not reachable, dropping all of
+  // their internal references...
+  for (Function::iterator BB = ++F.begin(), E = F.end(); BB != E; ++BB) {
+    if (Reachable.count(BB))
       continue;
 
-    for (succ_iterator SI = succ_begin(I), SE = succ_end(I); SI != SE; ++SI)
+    for (succ_iterator SI = succ_begin(BB), SE = succ_end(BB); SI != SE; ++SI)
       if (Reachable.count(*SI))
-        (*SI)->removePredecessor(I);
-    I->dropAllReferences();
+        (*SI)->removePredecessor(BB);
+    BB->dropAllReferences();
   }
 
-  for (Function::iterator I = llvm::next(F.begin()), E=F.end(); I != E;)
+  for (Function::iterator I = ++F.begin(); I != F.end();)
     if (!Reachable.count(I))
       I = F.getBasicBlockList().erase(I);
     else

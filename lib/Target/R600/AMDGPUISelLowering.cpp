@@ -18,6 +18,7 @@
 #include "AMDGPURegisterInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "AMDILIntrinsicInfo.h"
+#include "R600MachineFunctionInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -57,6 +58,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::STORE, MVT::f32, Promote);
   AddPromotedToType(ISD::STORE, MVT::f32, MVT::i32);
 
+  setOperationAction(ISD::STORE, MVT::v2f32, Promote);
+  AddPromotedToType(ISD::STORE, MVT::v2f32, MVT::v2i32);
+
   setOperationAction(ISD::STORE, MVT::v4f32, Promote);
   AddPromotedToType(ISD::STORE, MVT::v4f32, MVT::v4i32);
 
@@ -66,17 +70,28 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::LOAD, MVT::f32, Promote);
   AddPromotedToType(ISD::LOAD, MVT::f32, MVT::i32);
 
+  setOperationAction(ISD::LOAD, MVT::v2f32, Promote);
+  AddPromotedToType(ISD::LOAD, MVT::v2f32, MVT::v2i32);
+
   setOperationAction(ISD::LOAD, MVT::v4f32, Promote);
   AddPromotedToType(ISD::LOAD, MVT::v4f32, MVT::v4i32);
 
   setOperationAction(ISD::LOAD, MVT::f64, Promote);
   AddPromotedToType(ISD::LOAD, MVT::f64, MVT::i64);
 
+  setOperationAction(ISD::EXTRACT_SUBVECTOR, MVT::v2i32, Expand);
+  setOperationAction(ISD::EXTRACT_SUBVECTOR, MVT::v2f32, Expand);
+
+  setOperationAction(ISD::FNEG, MVT::v2f32, Expand);
+  setOperationAction(ISD::FNEG, MVT::v4f32, Expand);
+
   setOperationAction(ISD::MUL, MVT::i64, Expand);
 
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
   setOperationAction(ISD::UDIVREM, MVT::i32, Custom);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
+  setOperationAction(ISD::VSELECT, MVT::v2f32, Expand);
+  setOperationAction(ISD::VSELECT, MVT::v4f32, Expand);
 
   static const int types[] = {
     (int)MVT::v2i32,
@@ -89,16 +104,44 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     //Expand the following operations for the current type by default
     setOperationAction(ISD::ADD,  VT, Expand);
     setOperationAction(ISD::AND,  VT, Expand);
+    setOperationAction(ISD::FP_TO_SINT, VT, Expand);
+    setOperationAction(ISD::FP_TO_UINT, VT, Expand);
     setOperationAction(ISD::MUL,  VT, Expand);
     setOperationAction(ISD::OR,   VT, Expand);
     setOperationAction(ISD::SHL,  VT, Expand);
+    setOperationAction(ISD::SINT_TO_FP, VT, Expand);
     setOperationAction(ISD::SRL,  VT, Expand);
     setOperationAction(ISD::SRA,  VT, Expand);
     setOperationAction(ISD::SUB,  VT, Expand);
     setOperationAction(ISD::UDIV, VT, Expand);
+    setOperationAction(ISD::UINT_TO_FP, VT, Expand);
     setOperationAction(ISD::UREM, VT, Expand);
+    setOperationAction(ISD::VSELECT, VT, Expand);
     setOperationAction(ISD::XOR,  VT, Expand);
   }
+}
+
+//===----------------------------------------------------------------------===//
+// Target Information
+//===----------------------------------------------------------------------===//
+
+MVT AMDGPUTargetLowering::getVectorIdxTy() const {
+  return MVT::i32;
+}
+
+
+//===---------------------------------------------------------------------===//
+// Target Properties
+//===---------------------------------------------------------------------===//
+
+bool AMDGPUTargetLowering::isFAbsFree(EVT VT) const {
+  assert(VT.isFloatingPoint());
+  return VT == MVT::f32;
+}
+
+bool AMDGPUTargetLowering::isFNegFree(EVT VT) const {
+  assert(VT.isFloatingPoint());
+  return VT == MVT::f32;
 }
 
 //===---------------------------------------------------------------------===//

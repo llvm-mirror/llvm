@@ -11,11 +11,15 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
+
+namespace {
 
 class MemoryBufferTest : public testing::Test {
 protected:
@@ -25,12 +29,17 @@ protected:
 
   virtual void SetUp() { }
 
+  /// Common testing for different modes of getOpenFileSlice.
+  /// Creates a temporary file with known contents, and uses
+  /// MemoryBuffer::getOpenFileSlice to map it.
+  /// If \p Reopen is true, the file is closed after creating and reopened
+  /// anew before using MemoryBuffer.
+  void testGetOpenFileSlice(bool Reopen);
+
   typedef OwningPtr<MemoryBuffer> OwningBuffer;
 
   std::string data;
 };
-
-namespace {
 
 TEST_F(MemoryBufferTest, get) {
   // Default name and null-terminator flag
@@ -93,6 +102,48 @@ TEST_F(MemoryBufferTest, make_new) {
   EXPECT_TRUE(0 != Four.get());
   for (size_t i = 0; i < 123; ++i)
     EXPECT_EQ(0, Four->getBufferStart()[0]);
+}
+
+void MemoryBufferTest::testGetOpenFileSlice(bool Reopen) {
+  // Test that MemoryBuffer::getOpenFile works properly when no null
+  // terminator is requested and the size is large enough to trigger
+  // the usage of memory mapping.
+  int TestFD;
+  SmallString<64> TestPath;
+  // Create a temporary file and write data into it.
+  sys::fs::createTemporaryFile("prefix", "temp", TestFD, TestPath);
+  // OF is responsible for closing the file; If the file is not 
+  // reopened, it will be unbuffered so that the results are
+  // immediately visible through the fd.
+  raw_fd_ostream OF(TestFD, true, !Reopen);
+  for (int i = 0; i < 60000; ++i) {
+    OF << "0123456789";
+  }
+
+  if (Reopen) {
+    OF.close();
+    EXPECT_FALSE(sys::fs::openFileForRead(TestPath.c_str(), TestFD));
+  }
+
+  OwningBuffer Buf;
+  error_code EC = MemoryBuffer::getOpenFileSlice(TestFD, TestPath.c_str(), Buf,
+                                                 40000, // Size
+                                                 8000   // Offset
+                                                 );
+  EXPECT_FALSE(EC);
+
+  StringRef BufData = Buf->getBuffer();
+  EXPECT_EQ(BufData.size(), 40000U);
+  EXPECT_EQ(BufData[0], '0');
+  EXPECT_EQ(BufData[9], '9');
+}
+
+TEST_F(MemoryBufferTest, getOpenFileNoReopen) {
+  testGetOpenFileSlice(false);
+}
+
+TEST_F(MemoryBufferTest, getOpenFileReopened) {
+  testGetOpenFileSlice(true);
 }
 
 }

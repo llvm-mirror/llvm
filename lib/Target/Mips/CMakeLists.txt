@@ -48,10 +48,11 @@ add_llvm_target(MipsCodeGen
   MipsSelectionDAGInfo.cpp
   )
 
-add_dependencies(LLVMMipsCodeGen intrinsics_gen)
+add_dependencies(LLVMMipsCodeGen MipsCommonTableGen intrinsics_gen)
 
 add_subdirectory(InstPrinter)
 add_subdirectory(Disassembler)
 add_subdirectory(TargetInfo)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(AsmParser)
+

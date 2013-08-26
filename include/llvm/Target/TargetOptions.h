@@ -42,13 +42,13 @@ namespace llvm {
   public:
     TargetOptions()
         : PrintMachineCode(false), NoFramePointerElim(false),
-          NoFramePointerElimNonLeaf(false), LessPreciseFPMADOption(false),
+          LessPreciseFPMADOption(false),
           UnsafeFPMath(false), NoInfsFPMath(false),
           NoNaNsFPMath(false), HonorSignDependentRoundingFPMathOption(false),
           UseSoftFloat(false), NoZerosInBSS(false),
           JITEmitDebugInfo(false), JITEmitDebugInfoToDisk(false),
           GuaranteedTailCallOpt(false), DisableTailCalls(false),
-          StackAlignmentOverride(0), RealignStack(true), SSPBufferSize(0),
+          StackAlignmentOverride(0),
           EnableFastISel(false), PositionIndependentExecutable(false),
           EnableSegmentedStacks(false), UseInitArray(false), TrapFuncName(""),
           FloatABIType(FloatABI::Default), AllowFPOpFusion(FPOpFusion::Standard)
@@ -63,12 +63,6 @@ namespace llvm {
     /// specified on the command line.  If the target supports the frame pointer
     /// elimination optimization, this option should disable it.
     unsigned NoFramePointerElim : 1;
-
-    /// NoFramePointerElimNonLeaf - This flag is enabled when the
-    /// -disable-non-leaf-fp-elim is specified on the command line. If the
-    /// target supports the frame pointer elimination optimization, this option
-    /// should disable it for non-leaf functions.
-    unsigned NoFramePointerElimNonLeaf : 1;
 
     /// DisableFramePointerElim - This returns true if frame pointer elimination
     /// optimization should be disabled for the given machine function.
@@ -147,14 +141,6 @@ namespace llvm {
     /// StackAlignmentOverride - Override default stack alignment for target.
     unsigned StackAlignmentOverride;
 
-    /// RealignStack - This flag indicates whether the stack should be
-    /// automatically realigned, if needed.
-    unsigned RealignStack : 1;
-
-    /// SSPBufferSize - The minimum size of buffers that will receive stack
-    /// smashing protection when -fstack-protection is used.
-    unsigned SSPBufferSize;
-
     /// EnableFastISel - This flag enables fast-path instruction selection
     /// which trades away generated code quality in favor of reducing
     /// compile time.
@@ -223,8 +209,6 @@ inline bool operator==(const TargetOptions &LHS,
     ARE_EQUAL(GuaranteedTailCallOpt) &&
     ARE_EQUAL(DisableTailCalls) &&
     ARE_EQUAL(StackAlignmentOverride) &&
-    ARE_EQUAL(RealignStack) &&
-    ARE_EQUAL(SSPBufferSize) &&
     ARE_EQUAL(EnableFastISel) &&
     ARE_EQUAL(PositionIndependentExecutable) &&
     ARE_EQUAL(EnableSegmentedStacks) &&

@@ -19,6 +19,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -32,29 +33,61 @@
 
 namespace llvm {
 
-SpecialCaseList::SpecialCaseList(const StringRef Path) {
-  // Validate and open blacklist file.
-  if (Path.empty()) return;
+/// Represents a set of regular expressions.  Regular expressions which are
+/// "literal" (i.e. no regex metacharacters) are stored in Strings, while all
+/// others are represented as a single pipe-separated regex in RegEx.  The
+/// reason for doing so is efficiency; StringSet is much faster at matching
+/// literal strings than Regex.
+struct SpecialCaseList::Entry {
+  StringSet<> Strings;
+  Regex *RegEx;
+
+  Entry() : RegEx(0) {}
+
+  bool match(StringRef Query) const {
+    return Strings.count(Query) || (RegEx && RegEx->match(Query));
+  }
+};
+
+SpecialCaseList::SpecialCaseList() : Entries() {}
+
+SpecialCaseList *SpecialCaseList::create(
+    const StringRef Path, std::string &Error) {
+  if (Path.empty())
+    return new SpecialCaseList();
   OwningPtr<MemoryBuffer> File;
   if (error_code EC = MemoryBuffer::getFile(Path, File)) {
-    report_fatal_error("Can't open blacklist file: " + Path + ": " +
-                       EC.message());
+    Error = (Twine("Can't open file '") + Path + "': " + EC.message()).str();
+    return 0;
   }
-
-  init(File.get());
+  return create(File.get(), Error);
 }
 
-SpecialCaseList::SpecialCaseList(const MemoryBuffer *MB) {
-  init(MB);
+SpecialCaseList *SpecialCaseList::create(
+    const MemoryBuffer *MB, std::string &Error) {
+  OwningPtr<SpecialCaseList> SCL(new SpecialCaseList());
+  if (!SCL->parse(MB, Error))
+    return 0;
+  return SCL.take();
 }
 
-void SpecialCaseList::init(const MemoryBuffer *MB) {
+SpecialCaseList *SpecialCaseList::createOrDie(const StringRef Path) {
+  std::string Error;
+  if (SpecialCaseList *SCL = create(Path, Error))
+    return SCL;
+  report_fatal_error(Error);
+}
+
+bool SpecialCaseList::parse(const MemoryBuffer *MB, std::string &Error) {
   // Iterate through each line in the blacklist file.
   SmallVector<StringRef, 16> Lines;
   SplitString(MB->getBuffer(), Lines, "\n\r");
   StringMap<StringMap<std::string> > Regexps;
+  assert(Entries.empty() &&
+         "parse() should be called on an empty SpecialCaseList");
+  int LineNo = 1;
   for (SmallVectorImpl<StringRef>::iterator I = Lines.begin(), E = Lines.end();
-       I != E; ++I) {
+       I != E; ++I, ++LineNo) {
     // Ignore empty lines and lines starting with "#"
     if (I->empty() || I->startswith("#"))
       continue;
@@ -63,7 +96,9 @@ void SpecialCaseList::init(const MemoryBuffer *MB) {
     StringRef Prefix = SplitLine.first;
     if (SplitLine.second.empty()) {
       // Missing ':' in the line.
-      report_fatal_error("malformed blacklist line: " + SplitLine.first);
+      Error = (Twine("Malformed line ") + Twine(LineNo) + ": '" +
+               SplitLine.first + "'").str();
+      return false;
     }
 
     std::pair<StringRef, StringRef> SplitRegexp = SplitLine.second.split("=");
@@ -82,6 +117,12 @@ void SpecialCaseList::init(const MemoryBuffer *MB) {
       Category = "init";
     }
 
+    // See if we can store Regexp in Strings.
+    if (Regex::isLiteralERE(Regexp)) {
+      Entries[Prefix][Category].Strings.insert(Regexp);
+      continue;
+    }
+
     // Replace * with .*
     for (size_t pos = 0; (pos = Regexp.find("*", pos)) != std::string::npos;
          pos += strlen(".*")) {
@@ -90,16 +131,17 @@ void SpecialCaseList::init(const MemoryBuffer *MB) {
 
     // Check that the regexp is valid.
     Regex CheckRE(Regexp);
-    std::string Error;
-    if (!CheckRE.isValid(Error)) {
-      report_fatal_error("malformed blacklist regex: " + SplitLine.second +
-          ": " + Error);
+    std::string REError;
+    if (!CheckRE.isValid(REError)) {
+      Error = (Twine("Malformed regex in line ") + Twine(LineNo) + ": '" +
+               SplitLine.second + "': " + REError).str();
+      return false;
     }
 
     // Add this regexp into the proper group by its prefix.
     if (!Regexps[Prefix][Category].empty())
       Regexps[Prefix][Category] += "|";
-    Regexps[Prefix][Category] += Regexp;
+    Regexps[Prefix][Category] += "^" + Regexp + "$";
   }
 
   // Iterate through each of the prefixes, and create Regexs for them.
@@ -109,16 +151,21 @@ void SpecialCaseList::init(const MemoryBuffer *MB) {
     for (StringMap<std::string>::const_iterator II = I->second.begin(),
                                                 IE = I->second.end();
          II != IE; ++II) {
-      Entries[I->getKey()][II->getKey()] = new Regex(II->getValue());
+      Entries[I->getKey()][II->getKey()].RegEx = new Regex(II->getValue());
     }
   }
+  return true;
 }
 
 SpecialCaseList::~SpecialCaseList() {
-  for (StringMap<StringMap<Regex*> >::iterator I = Entries.begin(),
-                                               E = Entries.end();
+  for (StringMap<StringMap<Entry> >::iterator I = Entries.begin(),
+                                              E = Entries.end();
        I != E; ++I) {
-    DeleteContainerSeconds(I->second);
+    for (StringMap<Entry>::const_iterator II = I->second.begin(),
+                                          IE = I->second.end();
+         II != IE; ++II) {
+      delete II->second.RegEx;
+    }
   }
 }
 
@@ -169,14 +216,13 @@ bool SpecialCaseList::isIn(const Module &M, const StringRef Category) const {
 bool SpecialCaseList::findCategory(const StringRef Section,
                                    const StringRef Query,
                                    StringRef &Category) const {
-  StringMap<StringMap<Regex *> >::const_iterator I = Entries.find(Section);
+  StringMap<StringMap<Entry> >::const_iterator I = Entries.find(Section);
   if (I == Entries.end()) return false;
 
-  for (StringMap<Regex *>::const_iterator II = I->second.begin(),
-                                          IE = I->second.end();
+  for (StringMap<Entry>::const_iterator II = I->second.begin(),
+                                        IE = I->second.end();
        II != IE; ++II) {
-    Regex *FunctionRegex = II->getValue();
-    if (FunctionRegex->match(Query)) {
+    if (II->getValue().match(Query)) {
       Category = II->first();
       return true;
     }
@@ -188,13 +234,12 @@ bool SpecialCaseList::findCategory(const StringRef Section,
 bool SpecialCaseList::inSectionCategory(const StringRef Section,
                                         const StringRef Query,
                                         const StringRef Category) const {
-  StringMap<StringMap<Regex *> >::const_iterator I = Entries.find(Section);
+  StringMap<StringMap<Entry> >::const_iterator I = Entries.find(Section);
   if (I == Entries.end()) return false;
-  StringMap<Regex *>::const_iterator II = I->second.find(Category);
+  StringMap<Entry>::const_iterator II = I->second.find(Category);
   if (II == I->second.end()) return false;
 
-  Regex *FunctionRegex = II->getValue();
-  return FunctionRegex->match(Query);
+  return II->getValue().match(Query);
 }
 
 }  // namespace llvm

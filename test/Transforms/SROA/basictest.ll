@@ -1308,12 +1308,52 @@ end:
 
 define void @PR15805(i1 %a, i1 %b) {
 ; CHECK-LABEL: @PR15805(
-; CHECK: select i1 undef, i64* %c, i64* %c
+; CHECK-NOT: alloca
 ; CHECK: ret void
 
   %c = alloca i64, align 8
   %p.0.c = select i1 undef, i64* %c, i64* %c
   %cond.in = select i1 undef, i64* %p.0.c, i64* %c
   %cond = load i64* %cond.in, align 8
+  ret void
+}
+
+define void @PR16651.1(i8* %a) {
+; This test case caused a crash due to the volatile memcpy in combination with
+; lowering to integer loads and stores of a width other than that of the original
+; memcpy.
+;
+; CHECK-LABEL: @PR16651.1(
+; CHECK: alloca i16
+; CHECK: alloca i8
+; CHECK: alloca i8
+; CHECK: unreachable
+
+entry:
+  %b = alloca i32, align 4
+  %b.cast = bitcast i32* %b to i8*
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %b.cast, i8* %a, i32 4, i32 4, i1 true)
+  %b.gep = getelementptr inbounds i8* %b.cast, i32 2
+  load i8* %b.gep, align 2
+  unreachable
+}
+
+define void @PR16651.2() {
+; This test case caused a crash due to failing to promote given a select that
+; can't be speculated. It shouldn't be promoted, but we missed that fact when
+; analyzing whether we could form a vector promotion because that code didn't
+; bail on select instructions.
+;
+; CHECK-LABEL: @PR16651.2(
+; CHECK: alloca <2 x float>
+; CHECK: ret void
+
+entry:
+  %tv1 = alloca { <2 x float>, <2 x float> }, align 8
+  %0 = getelementptr { <2 x float>, <2 x float> }* %tv1, i64 0, i32 1
+  store <2 x float> undef, <2 x float>* %0, align 8
+  %1 = getelementptr inbounds { <2 x float>, <2 x float> }* %tv1, i64 0, i32 1, i64 0
+  %cond105.in.i.i = select i1 undef, float* null, float* %1
+  %cond105.i.i = load float* %cond105.in.i.i, align 8
   ret void
 }

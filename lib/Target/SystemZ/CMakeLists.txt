@@ -15,6 +15,7 @@ add_llvm_target(SystemZCodeGen
   SystemZAsmPrinter.cpp
   SystemZCallingConv.cpp
   SystemZConstantPoolValue.cpp
+  SystemZElimCompare.cpp
   SystemZFrameLowering.cpp
   SystemZISelDAGToDAG.cpp
   SystemZISelLowering.cpp
@@ -27,7 +28,7 @@ add_llvm_target(SystemZCodeGen
   SystemZTargetMachine.cpp
   )
 
-add_dependencies(LLVMSystemZCodeGen intrinsics_gen)
+add_dependencies(LLVMSystemZCodeGen SystemZCommonTableGen intrinsics_gen)
 
 add_subdirectory(AsmParser)
 add_subdirectory(Disassembler)

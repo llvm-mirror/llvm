@@ -149,6 +149,9 @@ private:
   /// ActiveMacros - Stack of active macro instantiations.
   std::vector<MacroInstantiation*> ActiveMacros;
 
+  /// MacroLikeBodies - List of bodies of anonymous macros.
+  std::deque<MCAsmMacro> MacroLikeBodies;
+
   /// Boolean tracking whether macro substitution is enabled.
   unsigned MacrosEnabledFlag : 1;
 
@@ -3372,7 +3375,8 @@ bool AsmParser::ParseDirectiveSymbolAttribute(MCSymbolAttr Attr) {
       if (Sym->isTemporary())
         return Error(Loc, "non-local symbol required in directive");
 
-      getStreamer().EmitSymbolAttribute(Sym, Attr);
+      if (!getStreamer().EmitSymbolAttribute(Sym, Attr))
+        return Error(Loc, "unable to emit symbol attribute");
 
       if (getLexer().is(AsmToken::EndOfStatement))
         break;
@@ -3858,7 +3862,8 @@ MCAsmMacro *AsmParser::ParseMacroLikeBody(SMLoc DirectiveLoc) {
   // We Are Anonymous.
   StringRef Name;
   MCAsmMacroParameters Parameters;
-  return new MCAsmMacro(Name, Body, Parameters);
+  MacroLikeBodies.push_back(MCAsmMacro(Name, Body, Parameters));
+  return &MacroLikeBodies.back();
 }
 
 void AsmParser::InstantiateMacroLikeBody(MCAsmMacro *M, SMLoc DirectiveLoc,

@@ -1,4 +1,5 @@
-# RUN: not llvm-mc -triple s390x-linux-gnu < %s 2> %t
+# For z10 only.
+# RUN: not llvm-mc -triple s390x-linux-gnu -mcpu=z10 < %s 2> %t
 # RUN: FileCheck < %t %s
 
 #CHECK: error: invalid operand
@@ -68,6 +69,16 @@
 	aghi	%r0, 32768
 	aghi	%r0, foo
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: aghik	%r1, %r2, 3
+
+	aghik	%r1, %r2, 3
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: agrk	%r2,%r3,%r4
+
+	agrk	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: agsi	-524289, 0
 #CHECK: error: invalid operand
@@ -103,6 +114,11 @@
 	ahi	%r0, -32769
 	ahi	%r0, 32768
 	ahi	%r0, foo
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: ahik	%r1, %r2, 3
+
+	ahik	%r1, %r2, 3
 
 #CHECK: error: invalid operand
 #CHECK: ahy	%r0, -524289
@@ -144,6 +160,16 @@
 	alfi	%r0, -1
 	alfi	%r0, (1 << 32)
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: alghsik	%r1, %r2, 3
+
+	alghsik	%r1, %r2, 3
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: alhsik	%r1, %r2, 3
+
+	alhsik	%r1, %r2, 3
+
 #CHECK: error: invalid operand
 #CHECK: alg	%r0, -524289
 #CHECK: error: invalid operand
@@ -168,6 +194,16 @@
 	algfi	%r0, -1
 	algfi	%r0, (1 << 32)
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: algrk	%r2,%r3,%r4
+
+	algrk	%r2,%r3,%r4
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: alrk	%r2,%r3,%r4
+
+	alrk	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: aly	%r0, -524289
 #CHECK: error: invalid operand
@@ -175,6 +211,11 @@
 
 	aly	%r0, -524289
 	aly	%r0, 524288
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: ark	%r2,%r3,%r4
+
+	ark	%r2,%r3,%r4
 
 #CHECK: error: invalid operand
 #CHECK: asi	-524289, 0
@@ -287,6 +328,34 @@
 	brcl	foo, bar
 	brcl	-1, bar
 	brcl	16, bar
+
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, -1
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, 1
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, 0x10000
+
+	brct	%r0, -0x100002
+	brct	%r0, -1
+	brct	%r0, 1
+	brct	%r0, 0x10000
+
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, -1
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, 1
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, 0x10000
+
+	brctg	%r0, -0x100002
+	brctg	%r0, -1
+	brctg	%r0, 1
+	brctg	%r0, 0x10000
 
 #CHECK: error: invalid operand
 #CHECK: c	%r0, -1
@@ -642,6 +711,50 @@
 
 	cl	%r0, -1
 	cl	%r0, 4096
+
+#CHECK: error: missing length in address
+#CHECK: clc	0, 0
+#CHECK: error: missing length in address
+#CHECK: clc	0(%r1), 0(%r1)
+#CHECK: error: invalid use of length addressing
+#CHECK: clc	0(1,%r1), 0(2,%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(0,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(257,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	-1(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	4096(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(1,%r1), -1(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(1,%r1), 4096(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: clc	0(1,%r0), 0(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: clc	0(1,%r1), 0(%r0)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: clc	0(%r1,%r2), 0(%r1)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: clc	0(1,%r2), 0(%r1,%r2)
+#CHECK: error: unknown token in expression
+#CHECK: clc	0(-), 0
+
+	clc	0, 0
+	clc	0(%r1), 0(%r1)
+	clc	0(1,%r1), 0(2,%r1)
+	clc	0(0,%r1), 0(%r1)
+	clc	0(257,%r1), 0(%r1)
+	clc	-1(1,%r1), 0(%r1)
+	clc	4096(1,%r1), 0(%r1)
+	clc	0(1,%r1), -1(%r1)
+	clc	0(1,%r1), 4096(%r1)
+	clc	0(1,%r0), 0(%r1)
+	clc	0(1,%r1), 0(%r0)
+	clc	0(%r1,%r2), 0(%r1)
+	clc	0(1,%r2), 0(%r1,%r2)
+	clc	0(-), 0
 
 #CHECK: error: invalid operand
 #CHECK: clfhsi	-1, 0
@@ -1551,6 +1664,38 @@
 	lrvg	%r0, -524289
 	lrvg	%r0, 524288
 
+#CHECK: error: invalid operand
+#CHECK: lt	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: lt	%r0, 524288
+
+	lt	%r0, -524289
+	lt	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: ltg	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: ltg	%r0, 524288
+
+	ltg	%r0, -524289
+	ltg	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: ltgf	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: ltgf	%r0, 524288
+
+	ltgf	%r0, -524289
+	ltgf	%r0, 524288
+
+#CHECK: error: invalid register pair
+#CHECK: ltxbr	%f0, %f14
+#CHECK: error: invalid register pair
+#CHECK: ltxbr	%f14, %f0
+
+	ltxbr	%f0, %f14
+	ltxbr	%f14, %f0
+
 #CHECK: error: invalid register pair
 #CHECK: lxr	%f0, %f2
 #CHECK: error: invalid register pair
@@ -1899,6 +2044,11 @@
 	ng	%r0, -524289
 	ng	%r0, 524288
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: ngrk	%r2,%r3,%r4
+
+	ngrk	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: ni	-1, 0
 #CHECK: error: invalid operand
@@ -1981,6 +2131,11 @@
 	niy	0, -1
 	niy	0, 256
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: nrk	%r2,%r3,%r4
+
+	nrk	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: ny	%r0, -524289
 #CHECK: error: invalid operand
@@ -2004,6 +2159,11 @@
 
 	og	%r0, -524289
 	og	%r0, 524288
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: ogrk	%r2,%r3,%r4
+
+	ogrk	%r2,%r3,%r4
 
 #CHECK: error: invalid operand
 #CHECK: oi	-1, 0
@@ -2087,6 +2247,11 @@
 	oiy	0, -1
 	oiy	0, 256
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: ork	%r2,%r3,%r4
+
+	ork	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: oy	%r0, -524289
 #CHECK: error: invalid operand
@@ -2114,6 +2279,76 @@
 	risbg	%r0,%r0,0,256,0
 	risbg	%r0,%r0,-1,0,0
 	risbg	%r0,%r0,256,0,0
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: risbhg	%r1, %r2, 0, 0, 0
+
+	risbhg	%r1, %r2, 0, 0, 0
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: risblg	%r1, %r2, 0, 0, 0
+
+	risblg	%r1, %r2, 0, 0, 0
+
+#CHECK: error: invalid operand
+#CHECK: rnsbg	%r0,%r0,0,0,-1
+#CHECK: error: invalid operand
+#CHECK: rnsbg	%r0,%r0,0,0,64
+#CHECK: error: invalid operand
+#CHECK: rnsbg	%r0,%r0,0,-1,0
+#CHECK: error: invalid operand
+#CHECK: rnsbg	%r0,%r0,0,256,0
+#CHECK: error: invalid operand
+#CHECK: rnsbg	%r0,%r0,-1,0,0
+#CHECK: error: invalid operand
+#CHECK: rnsbg	%r0,%r0,256,0,0
+
+	rnsbg	%r0,%r0,0,0,-1
+	rnsbg	%r0,%r0,0,0,64
+	rnsbg	%r0,%r0,0,-1,0
+	rnsbg	%r0,%r0,0,256,0
+	rnsbg	%r0,%r0,-1,0,0
+	rnsbg	%r0,%r0,256,0,0
+
+#CHECK: error: invalid operand
+#CHECK: rosbg	%r0,%r0,0,0,-1
+#CHECK: error: invalid operand
+#CHECK: rosbg	%r0,%r0,0,0,64
+#CHECK: error: invalid operand
+#CHECK: rosbg	%r0,%r0,0,-1,0
+#CHECK: error: invalid operand
+#CHECK: rosbg	%r0,%r0,0,256,0
+#CHECK: error: invalid operand
+#CHECK: rosbg	%r0,%r0,-1,0,0
+#CHECK: error: invalid operand
+#CHECK: rosbg	%r0,%r0,256,0,0
+
+	rosbg	%r0,%r0,0,0,-1
+	rosbg	%r0,%r0,0,0,64
+	rosbg	%r0,%r0,0,-1,0
+	rosbg	%r0,%r0,0,256,0
+	rosbg	%r0,%r0,-1,0,0
+	rosbg	%r0,%r0,256,0,0
+
+#CHECK: error: invalid operand
+#CHECK: rxsbg	%r0,%r0,0,0,-1
+#CHECK: error: invalid operand
+#CHECK: rxsbg	%r0,%r0,0,0,64
+#CHECK: error: invalid operand
+#CHECK: rxsbg	%r0,%r0,0,-1,0
+#CHECK: error: invalid operand
+#CHECK: rxsbg	%r0,%r0,0,256,0
+#CHECK: error: invalid operand
+#CHECK: rxsbg	%r0,%r0,-1,0,0
+#CHECK: error: invalid operand
+#CHECK: rxsbg	%r0,%r0,256,0,0
+
+	rxsbg	%r0,%r0,0,0,-1
+	rxsbg	%r0,%r0,0,0,64
+	rxsbg	%r0,%r0,0,-1,0
+	rxsbg	%r0,%r0,0,256,0
+	rxsbg	%r0,%r0,-1,0,0
+	rxsbg	%r0,%r0,256,0,0
 
 #CHECK: error: invalid operand
 #CHECK: rll	%r0,%r0,-524289
@@ -2182,6 +2417,11 @@
 
 	sgf	%r0, -524289
 	sgf	%r0, 524288
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: sgrk	%r2,%r3,%r4
+
+	sgrk	%r2,%r3,%r4
 
 #CHECK: error: invalid operand
 #CHECK: sh	%r0, -1
@@ -2255,6 +2495,11 @@
 	slgfi	%r0, -1
 	slgfi	%r0, (1 << 32)
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: slgrk	%r2,%r3,%r4
+
+	slgrk	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: sll	%r0,-1
 #CHECK: error: invalid operand
@@ -2282,6 +2527,16 @@
 	sllg	%r0,%r0,524288
 	sllg	%r0,%r0,0(%r0)
 	sllg	%r0,%r0,0(%r1,%r2)
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: sllk	%r2,%r3,4(%r5)
+
+	sllk	%r2,%r3,4(%r5)
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: slrk	%r2,%r3,%r4
+
+	slrk	%r2,%r3,%r4
 
 #CHECK: error: invalid operand
 #CHECK: sly	%r0, -524289
@@ -2343,6 +2598,16 @@
 	srag	%r0,%r0,0(%r0)
 	srag	%r0,%r0,0(%r1,%r2)
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: srak	%r2,%r3,4(%r5)
+
+	srak	%r2,%r3,4(%r5)
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: srk	%r2,%r3,%r4
+
+	srk	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: srl	%r0,-1
 #CHECK: error: invalid operand
@@ -2370,6 +2635,11 @@
 	srlg	%r0,%r0,524288
 	srlg	%r0,%r0,0(%r0)
 	srlg	%r0,%r0,0(%r1,%r2)
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: srlk	%r2,%r3,4(%r5)
+
+	srlk	%r2,%r3,4(%r5)
 
 #CHECK: error: invalid operand
 #CHECK: st	%r0, -1
@@ -2560,6 +2830,11 @@
 	xg	%r0, -524289
 	xg	%r0, 524288
 
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: xgrk	%r2,%r3,%r4
+
+	xgrk	%r2,%r3,%r4
+
 #CHECK: error: invalid operand
 #CHECK: xi	-1, 0
 #CHECK: error: invalid operand
@@ -2609,6 +2884,11 @@
 	xiy	0(%r1,%r2), 0
 	xiy	0, -1
 	xiy	0, 256
+
+#CHECK: error: {{(instruction requires: distinct-ops)?}}
+#CHECK: xrk	%r2,%r3,%r4
+
+	xrk	%r2,%r3,%r4
 
 #CHECK: error: invalid operand
 #CHECK: xy	%r0, -524289

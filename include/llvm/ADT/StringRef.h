@@ -19,7 +19,7 @@
 #include <utility>
 
 namespace llvm {
-  template<typename T>
+  template <typename T>
   class SmallVectorImpl;
   class APInt;
   class hash_code;
@@ -548,6 +548,10 @@ namespace llvm {
   template <typename T> struct isPodLike;
   template <> struct isPodLike<StringRef> { static const bool value = true; };
 
+  /// Construct a string ref from a boolean.
+  inline StringRef toStringRef(bool B) {
+    return StringRef(B ? "true" : "false");
+  }
 }
 
 #endif

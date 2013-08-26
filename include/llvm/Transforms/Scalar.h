@@ -200,6 +200,13 @@ FunctionPass *createCFGSimplificationPass();
 
 //===----------------------------------------------------------------------===//
 //
+// FlattenCFG - flatten CFG, reduce number of conditional branches by using
+// parallel-and and parallel-or mode, etc...
+//
+FunctionPass *createFlattenCFGPass();
+
+//===----------------------------------------------------------------------===//
+//
 // CFG Structurization - Remove irreducible control flow
 //
 Pass *createStructurizeCFGPass();

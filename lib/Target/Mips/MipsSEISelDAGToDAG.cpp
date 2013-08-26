@@ -119,9 +119,9 @@ void MipsSEDAGToDAGISel::initGlobalBaseReg(MachineFunction &MF) {
   const TargetRegisterClass *RC;
 
   if (Subtarget.isABI_N64())
-    RC = (const TargetRegisterClass*)&Mips::CPU64RegsRegClass;
+    RC = (const TargetRegisterClass*)&Mips::GPR64RegClass;
   else
-    RC = (const TargetRegisterClass*)&Mips::CPURegsRegClass;
+    RC = (const TargetRegisterClass*)&Mips::GPR32RegClass;
 
   V0 = RegInfo.createVirtualRegister(RC);
   V1 = RegInfo.createVirtualRegister(RC);
@@ -314,6 +314,37 @@ bool MipsSEDAGToDAGISel::selectIntAddr(SDValue Addr, SDValue &Base,
     selectAddrDefault(Addr, Base, Offset);
 }
 
+/// Used on microMIPS Load/Store unaligned instructions (12-bit offset)
+bool MipsSEDAGToDAGISel::selectAddrRegImm12(SDValue Addr, SDValue &Base,
+                                            SDValue &Offset) const {
+  EVT ValTy = Addr.getValueType();
+
+  // Addresses of the form FI+const or FI|const
+  if (CurDAG->isBaseWithConstantOffset(Addr)) {
+    ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1));
+    if (isInt<12>(CN->getSExtValue())) {
+
+      // If the first operand is a FI, get the TargetFI Node
+      if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>
+                                  (Addr.getOperand(0)))
+        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), ValTy);
+      else
+        Base = Addr.getOperand(0);
+
+      Offset = CurDAG->getTargetConstant(CN->getZExtValue(), ValTy);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool MipsSEDAGToDAGISel::selectIntAddrMM(SDValue Addr, SDValue &Base,
+                                         SDValue &Offset) const {
+  return selectAddrRegImm12(Addr, Base, Offset) ||
+    selectAddrDefault(Addr, Base, Offset);
+}
+
 std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
   unsigned Opcode = Node->getOpcode();
   SDLoc DL(Node);
@@ -403,22 +434,20 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
 
   case MipsISD::ThreadPointer: {
     EVT PtrVT = getTargetLowering()->getPointerTy();
-    unsigned RdhwrOpc, SrcReg, DestReg;
+    unsigned RdhwrOpc, DestReg;
 
     if (PtrVT == MVT::i32) {
       RdhwrOpc = Mips::RDHWR;
-      SrcReg = Mips::HWR29;
       DestReg = Mips::V1;
     } else {
       RdhwrOpc = Mips::RDHWR64;
-      SrcReg = Mips::HWR29_64;
       DestReg = Mips::V1_64;
     }
 
     SDNode *Rdhwr =
       CurDAG->getMachineNode(RdhwrOpc, SDLoc(Node),
                              Node->getValueType(0),
-                             CurDAG->getRegister(SrcReg, PtrVT));
+                             CurDAG->getRegister(Mips::HWR29, MVT::i32));
     SDValue Chain = CurDAG->getCopyToReg(CurDAG->getEntryNode(), DL, DestReg,
                                          SDValue(Rdhwr, 0));
     SDValue ResNode = CurDAG->getCopyFromReg(Chain, DL, DestReg, PtrVT);
@@ -427,8 +456,8 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
   }
 
   case MipsISD::InsertLOHI: {
-    unsigned RCID = Subtarget.hasDSP() ? Mips::ACRegsDSPRegClassID :
-                                         Mips::ACRegsRegClassID;
+    unsigned RCID = Subtarget.hasDSP() ? Mips::ACC64DSPRegClassID :
+                                         Mips::ACC64RegClassID;
     SDValue RegClass = CurDAG->getTargetConstant(RCID, MVT::i32);
     SDValue LoIdx = CurDAG->getTargetConstant(Mips::sub_lo, MVT::i32);
     SDValue HiIdx = CurDAG->getTargetConstant(Mips::sub_hi, MVT::i32);

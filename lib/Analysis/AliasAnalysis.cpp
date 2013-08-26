@@ -26,6 +26,7 @@
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CaptureTracking.h"
+#include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
@@ -361,24 +362,6 @@ AliasAnalysis::getModRefInfo(const AtomicRMWInst *RMW, const Location &Loc) {
 }
 
 namespace {
-  // Conservatively return true. Return false, if there is a single path
-  // starting from "From" and the path does not reach "To".
-  static bool hasPath(const BasicBlock *From, const BasicBlock *To) {
-    const unsigned MaxCheck = 5;
-    const BasicBlock *Current = From;
-    for (unsigned I = 0; I < MaxCheck; I++) {
-      unsigned NumSuccs = Current->getTerminator()->getNumSuccessors();
-      if (NumSuccs > 1)
-        return true;
-      if (NumSuccs == 0)
-        return false;
-      Current = Current->getTerminator()->getSuccessor(0);
-      if (Current == To)
-        return true;
-    }
-    return true;
-  }
-
   /// Only find pointer captures which happen before the given instruction. Uses
   /// the dominator tree to determine whether one instruction is before another.
   /// Only support the case where the Value is defined in the same basic block
@@ -400,7 +383,7 @@ namespace {
       // there is no need to explore the use if BeforeHere dominates use.
       // Check whether there is a path from I to BeforeHere.
       if (BeforeHere != I && DT->dominates(BeforeHere, I) &&
-          !hasPath(BB, BeforeHere->getParent()))
+          !isPotentiallyReachable(I, BeforeHere, DT))
         return false;
       return true;
     }
@@ -412,7 +395,7 @@ namespace {
       if (BeforeHere != I && !DT->isReachableFromEntry(BB))
         return false;
       if (BeforeHere != I && DT->dominates(BeforeHere, I) &&
-          !hasPath(BB, BeforeHere->getParent()))
+          !isPotentiallyReachable(I, BeforeHere, DT))
         return false;
       Captured = true;
       return true;

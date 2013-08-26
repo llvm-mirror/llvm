@@ -24,7 +24,7 @@ def CC_SI : CallingConv<[
 
   CCIfInReg<CCIfType<[i64] , CCAssignToRegWithShadow<
     [ SGPR0, SGPR2, SGPR4, SGPR6, SGPR8, SGPR10, SGPR12, SGPR14 ],
-    [ SGPR1, SGPR3, SGPR5, SGPR7, SGPR9, SGPR11, SGPR12, SGPR15 ]
+    [ SGPR1, SGPR3, SGPR5, SGPR7, SGPR9, SGPR11, SGPR13, SGPR15 ]
   >>>,
 
   CCIfNotInReg<CCIfType<[f32, i32] , CCAssignToReg<[
@@ -36,18 +36,24 @@ def CC_SI : CallingConv<[
 
 ]>;
 
-// Calling convention for SI compute kernels
-def CC_SI_Kernel : CallingConv<[
-  CCIfType<[v4i32, v4f32], CCAssignToStack <16, 4>>,
-  CCIfType<[i64, f64],     CCAssignToStack < 8, 4>>,
-  CCIfType<[i32, f32],     CCAssignToStack < 4, 4>>,
-  CCIfType<[i16],          CCAssignToStack < 2, 4>>,
-  CCIfType<[i8],           CCAssignToStack < 1, 4>>
+// Calling convention for compute kernels
+def CC_AMDGPU_Kernel : CallingConv<[
+  CCIfType<[v4i32, v4f32],               CCAssignToStack <16, 16>>,
+  CCIfType<[i64, f64, v2f32, v2i32],     CCAssignToStack < 8, 8>>,
+  CCIfType<[i32, f32],                   CCAssignToStack < 4, 4>>,
+  CCIfType<[i16],                        CCAssignToStack < 2, 4>>,
+  CCIfType<[i8],                         CCAssignToStack < 1, 4>>
 ]>;
 
 def CC_AMDGPU : CallingConv<[
-  CCIf<"State.getMachineFunction().getInfo<SIMachineFunctionInfo>()->"#
-       "ShaderType == ShaderType::COMPUTE", CCDelegateTo<CC_SI_Kernel>>,
+  CCIf<"State.getTarget().getSubtarget<AMDGPUSubtarget>().getGeneration() == "
+       "AMDGPUSubtarget::SOUTHERN_ISLANDS && "
+       "State.getMachineFunction().getInfo<SIMachineFunctionInfo>()->"#
+       "ShaderType == ShaderType::COMPUTE", CCDelegateTo<CC_AMDGPU_Kernel>>,
+  CCIf<"State.getTarget().getSubtarget<AMDGPUSubtarget>().getGeneration() < "
+       "AMDGPUSubtarget::SOUTHERN_ISLANDS && "
+       "State.getMachineFunction().getInfo<R600MachineFunctionInfo>()->"
+       "ShaderType == ShaderType::COMPUTE", CCDelegateTo<CC_AMDGPU_Kernel>>,
   CCIf<"State.getTarget().getSubtarget<AMDGPUSubtarget>()"#
        ".getGeneration() == AMDGPUSubtarget::SOUTHERN_ISLANDS", CCDelegateTo<CC_SI>>
 ]>;

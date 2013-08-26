@@ -258,6 +258,8 @@ def int_readcyclecounter : Intrinsic<[llvm_i64_ty]>;
 // Stack Protector Intrinsic - The stackprotector intrinsic writes the stack
 // guard to the correct place on the stack frame.
 def int_stackprotector : Intrinsic<[], [llvm_ptr_ty, llvm_ptrptr_ty], []>;
+def int_stackprotectorcheck : Intrinsic<[], [llvm_ptrptr_ty],
+                                        [IntrReadWriteArgMem]>;
 
 //===------------------- Standard C Library Intrinsics --------------------===//
 //
@@ -298,6 +300,7 @@ let Properties = [IntrReadMem] in {
   def int_trunc : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_rint  : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_nearbyint : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
+  def int_round : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
 }
 
 let Properties = [IntrNoMem] in {
@@ -494,6 +497,7 @@ def int_convertuu  : Intrinsic<[llvm_anyint_ty],
 include "llvm/IR/IntrinsicsPowerPC.td"
 include "llvm/IR/IntrinsicsX86.td"
 include "llvm/IR/IntrinsicsARM.td"
+include "llvm/IR/IntrinsicsAArch64.td"
 include "llvm/IR/IntrinsicsXCore.td"
 include "llvm/IR/IntrinsicsHexagon.td"
 include "llvm/IR/IntrinsicsNVVM.td"

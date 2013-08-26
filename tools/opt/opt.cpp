@@ -451,6 +451,8 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
   
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
+
+  Builder.LoopVectorize = OptLevel > 1 && SizeLevel < 2;
 }
 
 static void AddStandardCompilePasses(PassManagerBase &PM) {
@@ -491,7 +493,6 @@ static TargetOptions GetTargetOptions() {
   TargetOptions Options;
   Options.LessPreciseFPMADOption = EnableFPMAD;
   Options.NoFramePointerElim = DisableFPElim;
-  Options.NoFramePointerElimNonLeaf = DisableFPElimNonLeaf;
   Options.AllowFPOpFusion = FuseFPOps;
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
@@ -505,12 +506,10 @@ static TargetOptions GetTargetOptions() {
   Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
   Options.DisableTailCalls = DisableTailCalls;
   Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.RealignStack = EnableRealignStack;
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
   Options.UseInitArray = UseInitArray;
-  Options.SSPBufferSize = SSPBufferSize;
   return Options;
 }
 
@@ -616,7 +615,7 @@ int main(int argc, char **argv) {
 
     std::string ErrorInfo;
     Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
-                                   raw_fd_ostream::F_Binary));
+                                   sys::fs::F_Binary));
     if (!ErrorInfo.empty()) {
       errs() << ErrorInfo << '\n';
       return 1;
@@ -669,6 +668,9 @@ int main(int argc, char **argv) {
     FPasses.reset(new FunctionPassManager(M.get()));
     if (TD)
       FPasses->add(new DataLayout(*TD));
+    if (TM.get())
+      TM->addAnalysisPasses(*FPasses);
+
   }
 
   if (PrintBreakpoints) {
@@ -679,7 +681,7 @@ int main(int argc, char **argv) {
 
       std::string ErrorInfo;
       Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
-                                     raw_fd_ostream::F_Binary));
+                                     sys::fs::F_Binary));
       if (!ErrorInfo.empty()) {
         errs() << ErrorInfo << '\n';
         return 1;

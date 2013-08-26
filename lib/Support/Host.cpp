@@ -52,10 +52,19 @@ using namespace llvm;
 
 /// GetX86CpuIDAndInfo - Execute the specified cpuid and return the 4 values in the
 /// specified arguments.  If we can't run cpuid on the host, return true.
-static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
-                            unsigned *rEBX, unsigned *rECX, unsigned *rEDX) {
-#if defined(__x86_64__) || defined(_M_AMD64) || defined (_M_X64)
-  #if defined(__GNUC__)
+static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
+                               unsigned *rECX, unsigned *rEDX) {
+#if defined(_MSC_VER)
+  // The MSVC intrinsic is portable across x86 and x64.
+  int registers[4];
+  __cpuid(registers, value);
+  *rEAX = registers[0];
+  *rEBX = registers[1];
+  *rECX = registers[2];
+  *rEDX = registers[3];
+  return false;
+#elif defined(__GNUC__)
+  #if defined(__x86_64__) || defined(_M_AMD64) || defined (_M_X64)
     // gcc doesn't know cpuid would clobber ebx/rbx. Preseve it manually.
     asm ("movq\t%%rbx, %%rsi\n\t"
          "cpuid\n\t"
@@ -66,19 +75,7 @@ static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
            "=d" (*rEDX)
          :  "a" (value));
     return false;
-  #elif defined(_MSC_VER)
-    int registers[4];
-    __cpuid(registers, value);
-    *rEAX = registers[0];
-    *rEBX = registers[1];
-    *rECX = registers[2];
-    *rEDX = registers[3];
-    return false;
-  #else
-    return true;
-  #endif
-#elif defined(i386) || defined(__i386__) || defined(__x86__) || defined(_M_IX86)
-  #if defined(__GNUC__)
+  #elif defined(i386) || defined(__i386__) || defined(__x86__) || defined(_M_IX86)
     asm ("movl\t%%ebx, %%esi\n\t"
          "cpuid\n\t"
          "xchgl\t%%ebx, %%esi\n\t"
@@ -87,20 +84,6 @@ static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
            "=c" (*rECX),
            "=d" (*rEDX)
          :  "a" (value));
-    return false;
-  #elif defined(_MSC_VER)
-    __asm {
-      mov   eax,value
-      cpuid
-      mov   esi,rEAX
-      mov   dword ptr [esi],eax
-      mov   esi,rEBX
-      mov   dword ptr [esi],ebx
-      mov   esi,rECX
-      mov   dword ptr [esi],ecx
-      mov   esi,rEDX
-      mov   dword ptr [esi],edx
-    }
     return false;
 // pedantic #else returns to appease -Wunreachable-code (so we don't generate
 // postprocessed code that looks like "return true; return false;")
@@ -149,6 +132,7 @@ std::string sys::getHostCPUName() {
   DetectX86FamilyModel(EAX, Family, Model);
 
   bool HasSSE3 = (ECX & 0x1);
+  bool HasSSE41 = (ECX & 0x80000);
   // If CPUID indicates support for XSAVE, XRESTORE and AVX, and XGETBV 
   // indicates that the AVX registers will be saved and restored on context
   // switch, then we have full AVX support.
@@ -244,7 +228,8 @@ std::string sys::getHostCPUName() {
                // 17h. All processors are manufactured using the 45 nm process.
                //
                // 45nm: Penryn , Wolfdale, Yorkfield (XE)
-        return "penryn";
+        // Not all Penryn processors support SSE 4.1 (such as the Pentium brand)
+        return HasSSE41 ? "penryn" : "core2";
 
       case 26: // Intel Core i7 processor and Intel Xeon processor. All
                // processors are manufactured using the 45 nm process.
@@ -603,7 +588,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features){
 #endif
 
 std::string sys::getProcessTriple() {
-  Triple PT(LLVM_HOST_TRIPLE);
+  Triple PT(Triple::normalize(LLVM_HOST_TRIPLE));
 
   if (sizeof(void *) == 8 && PT.isArch32Bit())
     PT = PT.get64BitArchVariant();

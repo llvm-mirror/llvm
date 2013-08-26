@@ -38,6 +38,7 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -2783,7 +2784,7 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
           Value *Ptr = PtrArg->stripPointerCasts();
           if (GlobalVariable *GV = dyn_cast<GlobalVariable>(Ptr)) {
             Type *ElemTy = cast<PointerType>(GV->getType())->getElementType();
-            if (!Size->isAllOnesValue() &&
+            if (TD && !Size->isAllOnesValue() &&
                 Size->getValue().getLimitedValue() >=
                 TD->getTypeStoreSize(ElemTy)) {
               Invariants.insert(GV);
@@ -3040,24 +3041,6 @@ bool GlobalOpt::OptimizeGlobalCtorsList(GlobalVariable *&GCL) {
   return true;
 }
 
-/// \brief Given "llvm.used" or "llvm.compiler_used" as a global name, collect
-/// the initializer elements of that global in Set and return the global itself.
-static GlobalVariable *
-collectUsedGlobalVariables(const Module &M, const char *Name,
-                           SmallPtrSet<GlobalValue *, 8> &Set) {
-  GlobalVariable *GV = M.getGlobalVariable(Name);
-  if (!GV || !GV->hasInitializer())
-    return GV;
-
-  const ConstantArray *Init = cast<ConstantArray>(GV->getInitializer());
-  for (unsigned I = 0, E = Init->getNumOperands(); I != E; ++I) {
-    Value *Op = Init->getOperand(I);
-    GlobalValue *G = cast<GlobalValue>(Op->stripPointerCastsNoFollowAliases());
-    Set.insert(G);
-  }
-  return GV;
-}
-
 static int compareNames(const void *A, const void *B) {
   const GlobalValue *VA = *reinterpret_cast<GlobalValue* const*>(A);
   const GlobalValue *VB = *reinterpret_cast<GlobalValue* const*>(B);
@@ -3070,6 +3053,11 @@ static int compareNames(const void *A, const void *B) {
 
 static void setUsedInitializer(GlobalVariable &V,
                                SmallPtrSet<GlobalValue *, 8> Init) {
+  if (Init.empty()) {
+    V.eraseFromParent();
+    return;
+  }
+
   SmallVector<llvm::Constant *, 8> UsedArray;
   PointerType *Int8PtrTy = Type::getInt8PtrTy(V.getContext());
 
@@ -3093,7 +3081,7 @@ static void setUsedInitializer(GlobalVariable &V,
 }
 
 namespace {
-/// \brief An easy to access representation of llvm.used and llvm.compiler_used.
+/// \brief An easy to access representation of llvm.used and llvm.compiler.used.
 class LLVMUsed {
   SmallPtrSet<GlobalValue *, 8> Used;
   SmallPtrSet<GlobalValue *, 8> CompilerUsed;
@@ -3101,10 +3089,9 @@ class LLVMUsed {
   GlobalVariable *CompilerUsedV;
 
 public:
-  LLVMUsed(const Module &M) {
-    UsedV = collectUsedGlobalVariables(M, "llvm.used", Used);
-    CompilerUsedV =
-        collectUsedGlobalVariables(M, "llvm.compiler_used", CompilerUsed);
+  LLVMUsed(Module &M) {
+    UsedV = collectUsedGlobalVariables(M, Used, false);
+    CompilerUsedV = collectUsedGlobalVariables(M, CompilerUsed, true);
   }
   typedef SmallPtrSet<GlobalValue *, 8>::iterator iterator;
   iterator usedBegin() { return Used.begin(); }
@@ -3135,13 +3122,13 @@ static bool hasUseOtherThanLLVMUsed(GlobalAlias &GA, const LLVMUsed &U) {
 
   assert((!U.usedCount(&GA) || !U.compilerUsedCount(&GA)) &&
          "We should have removed the duplicated "
-         "element from llvm.compiler_used");
+         "element from llvm.compiler.used");
   if (!GA.hasOneUse())
     // Strictly more than one use. So at least one is not in llvm.used and
-    // llvm.compiler_used.
+    // llvm.compiler.used.
     return true;
 
-  // Exactly one use. Check if it is in llvm.used or llvm.compiler_used.
+  // Exactly one use. Check if it is in llvm.used or llvm.compiler.used.
   return !U.usedCount(&GA) && !U.compilerUsedCount(&GA);
 }
 
@@ -3150,7 +3137,7 @@ static bool hasMoreThanOneUseOtherThanLLVMUsed(GlobalValue &V,
   unsigned N = 2;
   assert((!U.usedCount(&V) || !U.compilerUsedCount(&V)) &&
          "We should have removed the duplicated "
-         "element from llvm.compiler_used");
+         "element from llvm.compiler.used");
   if (U.usedCount(&V) || U.compilerUsedCount(&V))
     ++N;
   return V.hasNUsesOrMore(N);

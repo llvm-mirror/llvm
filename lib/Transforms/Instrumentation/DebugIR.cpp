@@ -220,7 +220,7 @@ public:
         DICompileUnit(CUNode), F.getName(), MangledName, DIFile(FileNode), Line,
         Sig, Local, IsDefinition, ScopeLine, FuncFlags, IsOptimized, &F);
     assert(Sub.isSubprogram());
-    DEBUG(dbgs() << "create subprogram mdnode " << Sub << ": "
+    DEBUG(dbgs() << "create subprogram mdnode " << *Sub << ": "
                  << "\n");
 
     SubprogramDescriptors.insert(std::make_pair(&F, Sub));
@@ -289,9 +289,9 @@ private:
           "LLVM Version " STR(LLVM_VERSION_MAJOR) "." STR(LLVM_VERSION_MINOR);
     }
 
-    Builder.createCompileUnit(dwarf::DW_LANG_C99, Filename, Directory, Producer,
-                              IsOptimized, Flags, RuntimeVersion);
-    CUNode = Builder.getCU();
+    CUNode =
+        Builder.createCompileUnit(dwarf::DW_LANG_C99, Filename, Directory,
+                                  Producer, IsOptimized, Flags, RuntimeVersion);
 
     if (CUToReplace)
       CUToReplace->replaceAllUsesWith(const_cast<MDNode *>(CUNode));

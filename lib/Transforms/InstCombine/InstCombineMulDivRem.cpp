@@ -556,6 +556,35 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
       }
     }
 
+    // B * (uitofp i1 C) -> select C, B, 0
+    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
+      Value *LHS = Op0, *RHS = Op1;
+      Value *B, *C;
+      if (!match(RHS, m_UIToFP(m_Value(C))))
+        std::swap(LHS, RHS);
+
+      if (match(RHS, m_UIToFP(m_Value(C))) && C->getType()->isIntegerTy(1)) {
+        B = LHS;
+        Value *Zero = ConstantFP::getNegativeZero(B->getType());
+        return SelectInst::Create(C, B, Zero);
+      }
+    }
+
+    // A * (1 - uitofp i1 C) -> select C, 0, A
+    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
+      Value *LHS = Op0, *RHS = Op1;
+      Value *A, *C;
+      if (!match(RHS, m_FSub(m_FPOne(), m_UIToFP(m_Value(C)))))
+        std::swap(LHS, RHS);
+
+      if (match(RHS, m_FSub(m_FPOne(), m_UIToFP(m_Value(C)))) &&
+          C->getType()->isIntegerTy(1)) {
+        A = LHS;
+        Value *Zero = ConstantFP::getNegativeZero(A->getType());
+        return SelectInst::Create(C, Zero, A);
+      }
+    }
+
     if (!isa<Constant>(Op1))
       std::swap(Opnd0, Opnd1);
     else
@@ -961,10 +990,19 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
   if (Value *V = SimplifyFDivInst(Op0, Op1, TD))
     return ReplaceInstUsesWith(I, V);
 
+  if (isa<Constant>(Op0))
+    if (SelectInst *SI = dyn_cast<SelectInst>(Op1))
+      if (Instruction *R = FoldOpIntoSelect(I, SI))
+        return R;
+
   bool AllowReassociate = I.hasUnsafeAlgebra();
   bool AllowReciprocal = I.hasAllowReciprocal();
 
   if (ConstantFP *Op1C = dyn_cast<ConstantFP>(Op1)) {
+    if (SelectInst *SI = dyn_cast<SelectInst>(Op0))
+      if (Instruction *R = FoldOpIntoSelect(I, SI))
+        return R;
+
     if (AllowReassociate) {
       ConstantFP *C1 = 0;
       ConstantFP *C2 = Op1C;

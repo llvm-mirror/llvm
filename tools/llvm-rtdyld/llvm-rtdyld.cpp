@@ -124,8 +124,8 @@ static int printLineInfoForInput() {
     InputFileList.push_back("-");
   for(unsigned i = 0, e = InputFileList.size(); i != e; ++i) {
     // Instantiate a dynamic linker.
-    TrivialMemoryManager *MemMgr = new TrivialMemoryManager;
-    RuntimeDyld Dyld(MemMgr);
+    TrivialMemoryManager MemMgr;
+    RuntimeDyld Dyld(&MemMgr);
 
     // Load the input memory buffer.
     OwningPtr<MemoryBuffer> InputBuffer;
@@ -180,8 +180,8 @@ static int printLineInfoForInput() {
 
 static int executeInput() {
   // Instantiate a dynamic linker.
-  TrivialMemoryManager *MemMgr = new TrivialMemoryManager;
-  RuntimeDyld Dyld(MemMgr);
+  TrivialMemoryManager MemMgr;
+  RuntimeDyld Dyld(&MemMgr);
 
   // If we don't have any input files, read from stdin.
   if (!InputFileList.size())
@@ -204,7 +204,7 @@ static int executeInput() {
   // Resolve all the relocations we can.
   Dyld.resolveRelocations();
   // Clear instruction cache before code will be executed.
-  MemMgr->invalidateInstructionCache();
+  MemMgr.invalidateInstructionCache();
 
   // FIXME: Error out if there are unresolved relocations.
 
@@ -214,8 +214,8 @@ static int executeInput() {
     return Error("no definition for '" + EntryPoint + "'");
 
   // Invalidate the instruction cache for each loaded function.
-  for (unsigned i = 0, e = MemMgr->FunctionMemory.size(); i != e; ++i) {
-    sys::MemoryBlock &Data = MemMgr->FunctionMemory[i];
+  for (unsigned i = 0, e = MemMgr.FunctionMemory.size(); i != e; ++i) {
+    sys::MemoryBlock &Data = MemMgr.FunctionMemory[i];
     // Make sure the memory is executable.
     std::string ErrorStr;
     sys::Memory::InvalidateInstructionCache(Data.base(), Data.size());

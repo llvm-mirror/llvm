@@ -233,6 +233,13 @@ bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
 #endif
 
           case Intrinsic::longjmp:
+
+          // Exclude eh_sjlj_setjmp; we don't need to exclude eh_sjlj_longjmp
+          // because, although it does clobber the counter register, the
+          // control can't then return to inside the loop unless there is also
+          // an eh_sjlj_setjmp.
+          case Intrinsic::eh_sjlj_setjmp:
+
           case Intrinsic::memcpy:
           case Intrinsic::memmove:
           case Intrinsic::memset:
@@ -252,6 +259,7 @@ bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
           case Intrinsic::trunc:     Opcode = ISD::FTRUNC;     break;
           case Intrinsic::rint:      Opcode = ISD::FRINT;      break;
           case Intrinsic::nearbyint: Opcode = ISD::FNEARBYINT; break;
+          case Intrinsic::round:     Opcode = ISD::FROUND;     break;
           }
         }
 
@@ -302,6 +310,10 @@ bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
           case LibFunc::rintf:
           case LibFunc::rintl:
             Opcode = ISD::FRINT; break;
+          case LibFunc::round:
+          case LibFunc::roundf:
+          case LibFunc::roundl:
+            Opcode = ISD::FROUND; break;
           case LibFunc::trunc:
           case LibFunc::truncf:
           case LibFunc::truncl:

@@ -3071,11 +3071,12 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       if (Idx < NumElems)
         Ops.push_back(DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, EltVT,
                                   Op0,
-                                  DAG.getIntPtrConstant(Idx)));
+                                  DAG.getConstant(Idx, TLI.getVectorIdxTy())));
       else
         Ops.push_back(DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, EltVT,
                                   Op1,
-                                  DAG.getIntPtrConstant(Idx - NumElems)));
+                                  DAG.getConstant(Idx - NumElems,
+                                                  TLI.getVectorIdxTy())));
     }
 
     Tmp1 = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, &Ops[0], Ops.size());
@@ -3229,6 +3230,13 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
                                       RTLIB::NEARBYINT_F80,
                                       RTLIB::NEARBYINT_F128,
                                       RTLIB::NEARBYINT_PPCF128));
+    break;
+  case ISD::FROUND:
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::ROUND_F32,
+                                      RTLIB::ROUND_F64,
+                                      RTLIB::ROUND_F80,
+                                      RTLIB::ROUND_F128,
+                                      RTLIB::ROUND_PPCF128));
     break;
   case ISD::FPOWI:
     Results.push_back(ExpandFPLibCall(Node, RTLIB::POWI_F32, RTLIB::POWI_F64,
@@ -3688,10 +3696,12 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     for (unsigned Idx = 0; Idx < NumElem; Idx++) {
       SDValue Ex = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl,
                                VT.getScalarType(),
-                               Node->getOperand(0), DAG.getIntPtrConstant(Idx));
+                               Node->getOperand(0), DAG.getConstant(Idx,
+                                                    TLI.getVectorIdxTy()));
       SDValue Sh = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl,
                                VT.getScalarType(),
-                               Node->getOperand(1), DAG.getIntPtrConstant(Idx));
+                               Node->getOperand(1), DAG.getConstant(Idx,
+                                                    TLI.getVectorIdxTy()));
       Scalars.push_back(DAG.getNode(Node->getOpcode(), dl,
                                     VT.getScalarType(), Ex, Sh));
     }

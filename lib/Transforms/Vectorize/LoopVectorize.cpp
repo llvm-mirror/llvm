@@ -1220,7 +1220,8 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr,
         PartPtr = Builder.CreateGEP(PartPtr, Builder.getInt32(1 - VF));
       }
 
-      Value *VecPtr = Builder.CreateBitCast(PartPtr, DataTy->getPointerTo(AddressSpace));
+      Value *VecPtr = Builder.CreateBitCast(PartPtr,
+                                            DataTy->getPointerTo(AddressSpace));
       Builder.CreateStore(StoredVal[Part], VecPtr)->setAlignment(Alignment);
     }
     return;
@@ -1240,7 +1241,8 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr,
       PartPtr = Builder.CreateGEP(PartPtr, Builder.getInt32(1 - VF));
     }
 
-    Value *VecPtr = Builder.CreateBitCast(PartPtr, DataTy->getPointerTo(AddressSpace));
+    Value *VecPtr = Builder.CreateBitCast(PartPtr,
+                                          DataTy->getPointerTo(AddressSpace));
     Value *LI = Builder.CreateLoad(VecPtr, "wide.load");
     cast<LoadInst>(LI)->setAlignment(Alignment);
     Entry[Part] = Reverse ? reverseVector(LI) :  LI;
@@ -1770,9 +1772,12 @@ getIntrinsicIDForCall(CallInst *CI, const TargetLibraryInfo *TLI) {
     case Intrinsic::trunc:
     case Intrinsic::rint:
     case Intrinsic::nearbyint:
+    case Intrinsic::round:
     case Intrinsic::pow:
     case Intrinsic::fma:
     case Intrinsic::fmuladd:
+    case Intrinsic::lifetime_start:
+    case Intrinsic::lifetime_end:
       return II->getIntrinsicID();
     default:
       return Intrinsic::not_intrinsic;
@@ -1846,6 +1851,10 @@ getIntrinsicIDForCall(CallInst *CI, const TargetLibraryInfo *TLI) {
   case LibFunc::nearbyintf:
   case LibFunc::nearbyintl:
     return Intrinsic::nearbyint;
+  case LibFunc::round:
+  case LibFunc::roundf:
+  case LibFunc::roundl:
+    return Intrinsic::round;
   case LibFunc::pow:
   case LibFunc::powf:
   case LibFunc::powl:
@@ -1911,7 +1920,8 @@ Value *createMinMaxOp(IRBuilder<> &Builder,
   }
 
   Value *Cmp;
-  if (RK == LoopVectorizationLegality::MRK_FloatMin || RK == LoopVectorizationLegality::MRK_FloatMax)
+  if (RK == LoopVectorizationLegality::MRK_FloatMin ||
+      RK == LoopVectorizationLegality::MRK_FloatMax)
     Cmp = Builder.CreateFCmp(P, Left, Right, "rdx.minmax.cmp");
   else
     Cmp = Builder.CreateICmp(P, Left, Right, "rdx.minmax.cmp");
@@ -2488,15 +2498,23 @@ InnerLoopVectorizer::vectorizeBlockInLoop(LoopVectorizationLegality *Legal,
       CallInst *CI = cast<CallInst>(it);
       Intrinsic::ID ID = getIntrinsicIDForCall(CI, TLI);
       assert(ID && "Not an intrinsic call!");
-      for (unsigned Part = 0; Part < UF; ++Part) {
-        SmallVector<Value*, 4> Args;
-        for (unsigned i = 0, ie = CI->getNumArgOperands(); i != ie; ++i) {
-          VectorParts &Arg = getVectorValue(CI->getArgOperand(i));
-          Args.push_back(Arg[Part]);
+      switch (ID) {
+      case Intrinsic::lifetime_end:
+      case Intrinsic::lifetime_start:
+        scalarizeInstruction(it);
+        break;
+      default:
+        for (unsigned Part = 0; Part < UF; ++Part) {
+          SmallVector<Value *, 4> Args;
+          for (unsigned i = 0, ie = CI->getNumArgOperands(); i != ie; ++i) {
+            VectorParts &Arg = getVectorValue(CI->getArgOperand(i));
+            Args.push_back(Arg[Part]);
+          }
+          Type *Tys[] = { VectorType::get(CI->getType()->getScalarType(), VF) };
+          Function *F = Intrinsic::getDeclaration(M, ID, Tys);
+          Entry[Part] = Builder.CreateCall(F, Args);
         }
-        Type *Tys[] = { VectorType::get(CI->getType()->getScalarType(), VF) };
-        Function *F = Intrinsic::getDeclaration(M, ID, Tys);
-        Entry[Part] = Builder.CreateCall(F, Args);
+        break;
       }
       break;
     }
@@ -2781,7 +2799,8 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
           continue;
         }
         if (AddReductionVar(Phi, RK_FloatMinMax)) {
-          DEBUG(dbgs() << "LV: Found an float MINMAX reduction PHI."<< *Phi <<"\n");
+          DEBUG(dbgs() << "LV: Found an float MINMAX reduction PHI."<< *Phi <<
+                "\n");
           continue;
         }
 
@@ -3229,8 +3248,8 @@ static int isStridedPtr(ScalarEvolution *SE, DataLayout *DL, Value *Ptr,
   // Make sure that the pointer does not point to aggregate types.
   const PointerType *PtrTy = cast<PointerType>(Ty);
   if (PtrTy->getElementType()->isAggregateType()) {
-    DEBUG(dbgs() << "LV: Bad stride - Not a pointer to a scalar type" << *Ptr
-          << "\n");
+    DEBUG(dbgs() << "LV: Bad stride - Not a pointer to a scalar type" << *Ptr <<
+          "\n");
     return 0;
   }
 
@@ -3244,8 +3263,8 @@ static int isStridedPtr(ScalarEvolution *SE, DataLayout *DL, Value *Ptr,
 
   // The accesss function must stride over the innermost loop.
   if (Lp != AR->getLoop()) {
-    DEBUG(dbgs() << "LV: Bad stride - Not striding over innermost loop " << *Ptr
-          << " SCEV: " << *PtrScev << "\n");
+    DEBUG(dbgs() << "LV: Bad stride - Not striding over innermost loop " <<
+          *Ptr << " SCEV: " << *PtrScev << "\n");
   }
 
   // The address calculation must not wrap. Otherwise, a dependence could be
@@ -4064,7 +4083,8 @@ LoopVectorizationCostModel::selectVectorizationFactor(bool OptForSize,
   unsigned MaxSafeDepDist = -1U;
   if (Legal->getMaxSafeDepDistBytes() != -1U)
     MaxSafeDepDist = Legal->getMaxSafeDepDistBytes() * 8;
-  WidestRegister = WidestRegister < MaxSafeDepDist ?  WidestRegister : MaxSafeDepDist;
+  WidestRegister = ((WidestRegister < MaxSafeDepDist) ?
+                    WidestRegister : MaxSafeDepDist);
   unsigned MaxVectorSize = WidestRegister / WidestType;
   DEBUG(dbgs() << "LV: The Widest type: " << WidestType << " bits.\n");
   DEBUG(dbgs() << "LV: The Widest register is:" << WidestRegister << "bits.\n");
@@ -4390,7 +4410,7 @@ unsigned LoopVectorizationCostModel::expectedCost(unsigned VF) {
         continue;
 
       unsigned C = getInstructionCost(it, VF);
-      Cost += C;
+      BlockCost += C;
       DEBUG(dbgs() << "LV: Found an estimated cost of "<< C <<" for VF " <<
             VF << " For instruction: "<< *it << "\n");
     }
@@ -4398,7 +4418,7 @@ unsigned LoopVectorizationCostModel::expectedCost(unsigned VF) {
     // We assume that if-converted blocks have a 50% chance of being executed.
     // When the code is scalar then some of the blocks are avoided due to CF.
     // When the code is vectorized we execute all code paths.
-    if (Legal->blockNeedsPredication(*bb) && VF == 1)
+    if (VF == 1 && Legal->blockNeedsPredication(*bb))
       BlockCost /= 2;
 
     Cost += BlockCost;

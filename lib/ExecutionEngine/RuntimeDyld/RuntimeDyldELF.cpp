@@ -22,7 +22,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/ExecutionEngine/ObjectBuffer.h"
 #include "llvm/ExecutionEngine/ObjectImage.h"
-#include "llvm/Object/ELF.h"
+#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/ELF.h"
 using namespace llvm;
@@ -304,7 +304,7 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
   }
   case ELF::R_AARCH64_PREL32: {
     uint64_t Result = Value + Addend - FinalAddress;
-    assert(static_cast<int64_t>(Result) >= INT32_MIN && 
+    assert(static_cast<int64_t>(Result) >= INT32_MIN &&
            static_cast<int64_t>(Result) <= UINT32_MAX);
     *TargetPtr = static_cast<uint32_t>(Result & 0xffffffffU);
     break;
@@ -316,7 +316,7 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
     uint64_t BranchImm = Value + Addend - FinalAddress;
 
     // "Check that -2^27 <= result < 2^27".
-    assert(-(1LL << 27) <= static_cast<int64_t>(BranchImm) && 
+    assert(-(1LL << 27) <= static_cast<int64_t>(BranchImm) &&
            static_cast<int64_t>(BranchImm) < (1LL << 27));
 
     // AArch64 code is emitted with .rela relocations. The data already in any
@@ -331,7 +331,7 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
 
     // AArch64 code is emitted with .rela relocations. The data already in any
     // bits affected by the relocation on entry is garbage.
-    *TargetPtr &= 0xff80001fU;
+    *TargetPtr &= 0xffe0001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= Result >> (48 - 5);
     // Shift must be "lsl #48", in bits 22:21
@@ -341,10 +341,9 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
   case ELF::R_AARCH64_MOVW_UABS_G2_NC: {
     uint64_t Result = Value + Addend;
 
-
     // AArch64 code is emitted with .rela relocations. The data already in any
     // bits affected by the relocation on entry is garbage.
-    *TargetPtr &= 0xff80001fU;
+    *TargetPtr &= 0xffe0001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= ((Result & 0xffff00000000ULL) >> (32 - 5));
     // Shift must be "lsl #32", in bits 22:21
@@ -356,7 +355,7 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
 
     // AArch64 code is emitted with .rela relocations. The data already in any
     // bits affected by the relocation on entry is garbage.
-    *TargetPtr &= 0xff80001fU;
+    *TargetPtr &= 0xffe0001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= ((Result & 0xffff0000U) >> (16 - 5));
     // Shift must be "lsl #16", in bits 22:2
@@ -368,7 +367,7 @@ void RuntimeDyldELF::resolveAArch64Relocation(const SectionEntry &Section,
 
     // AArch64 code is emitted with .rela relocations. The data already in any
     // bits affected by the relocation on entry is garbage.
-    *TargetPtr &= 0xff80001fU;
+    *TargetPtr &= 0xffe0001fU;
     // Immediate goes in bits 20:5 of MOVZ/MOVK instruction
     *TargetPtr |= ((Result & 0xffffU) << 5);
     // Shift must be "lsl #0", in bits 22:21.
@@ -456,6 +455,8 @@ void RuntimeDyldELF::resolveMIPSRelocation(const SectionEntry &Section,
                                            uint32_t Value,
                                            uint32_t Type,
                                            int32_t Addend) {
+  uint32_t *Placeholder = reinterpret_cast<uint32_t*>(Section.ObjAddress +
+                                                      Offset);
   uint32_t* TargetPtr = (uint32_t*)(Section.Address + Offset);
   Value += Addend;
 
@@ -473,19 +474,30 @@ void RuntimeDyldELF::resolveMIPSRelocation(const SectionEntry &Section,
     llvm_unreachable("Not implemented relocation type!");
     break;
   case ELF::R_MIPS_32:
-    *TargetPtr = Value + (*TargetPtr);
+    *TargetPtr = Value + (*Placeholder);
     break;
   case ELF::R_MIPS_26:
-    *TargetPtr = ((*TargetPtr) & 0xfc000000) | (( Value & 0x0fffffff) >> 2);
+    *TargetPtr = ((*Placeholder) & 0xfc000000) | (( Value & 0x0fffffff) >> 2);
     break;
   case ELF::R_MIPS_HI16:
     // Get the higher 16-bits. Also add 1 if bit 15 is 1.
-    Value += ((*TargetPtr) & 0x0000ffff) << 16;
+    Value += ((*Placeholder) & 0x0000ffff) << 16;
+    *TargetPtr = ((*Placeholder) & 0xffff0000) |
+                 (((Value + 0x8000) >> 16) & 0xffff);
+    break;
+  case ELF::R_MIPS_LO16:
+    Value += ((*Placeholder) & 0x0000ffff);
+    *TargetPtr = ((*Placeholder) & 0xffff0000) | (Value & 0xffff);
+    break;
+  case ELF::R_MIPS_UNUSED1:
+    // Similar to ELF::R_ARM_PRIVATE_0, R_MIPS_UNUSED1 and R_MIPS_UNUSED2
+    // are used for internal JIT purpose. These relocations are similar to
+    // R_MIPS_HI16 and R_MIPS_LO16, but they do not take any addend into
+    // account.
     *TargetPtr = ((*TargetPtr) & 0xffff0000) |
                  (((Value + 0x8000) >> 16) & 0xffff);
     break;
-   case ELF::R_MIPS_LO16:
-    Value += ((*TargetPtr) & 0x0000ffff);
+  case ELF::R_MIPS_UNUSED2:
     *TargetPtr = ((*TargetPtr) & 0xffff0000) | (Value & 0xffff);
     break;
    }
@@ -757,7 +769,8 @@ void RuntimeDyldELF::resolveRelocation(const SectionEntry &Section,
                           (uint32_t)(Value & 0xffffffffL), Type,
                           (uint32_t)(Addend & 0xffffffffL));
     break;
-  case Triple::ppc64:
+  case Triple::ppc64:   // Fall through.
+  case Triple::ppc64le:
     resolvePPC64Relocation(Section, Offset, Value, Type, Addend);
     break;
   case Triple::systemz:
@@ -954,10 +967,10 @@ void RuntimeDyldELF::processRelocationRef(unsigned SectionID,
       // Creating Hi and Lo relocations for the filled stub instructions.
       RelocationEntry REHi(SectionID,
                            StubTargetAddr - Section.Address,
-                           ELF::R_MIPS_HI16, Value.Addend);
+                           ELF::R_MIPS_UNUSED1, Value.Addend);
       RelocationEntry RELo(SectionID,
                            StubTargetAddr - Section.Address + 4,
-                           ELF::R_MIPS_LO16, Value.Addend);
+                           ELF::R_MIPS_UNUSED2, Value.Addend);
 
       if (Value.SymbolName) {
         addRelocationForSymbol(REHi, Value.SymbolName);
@@ -972,7 +985,7 @@ void RuntimeDyldELF::processRelocationRef(unsigned SectionID,
                         RelType, 0);
       Section.StubOffset += getMaxStubSize();
     }
-  } else if (Arch == Triple::ppc64) {
+  } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
     if (RelType == ELF::R_PPC64_REL24) {
       // A PPC branch relocation will need a stub function if the target is
       // an external symbol (Symbol::ST_Unknown) or if the target address

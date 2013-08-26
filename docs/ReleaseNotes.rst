@@ -41,6 +41,10 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
+* The regression tests now fail if any command in a pipe fails. To disable it in
+  a directory, just add ``config.pipefail = False`` to its ``lit.local.cfg``.
+  See :doc:`Lit <CommandGuide/lit>` for the details.
+
 * Support for exception handling has been removed from the old JIT. Use MCJIT
   if you need EH support.
 
@@ -53,6 +57,18 @@ Non-comprehensive list of changes in this release
 * The library call simplification pass has been removed.  Its functionality
   has been integrated into the instruction combiner and function attribute
   marking passes.
+
+* Support for building using Visual Studio 2008 has been dropped. Use VS 2010
+  or later instead. For more information, see the `Getting Started using Visual
+  Studio <GettingStartedVS.html>`_ page.
+
+* The Loop Vectorizer that was previously enabled for -O3 is now enabled for
+  -Os and -O2.
+
+* The new SLP Vectorizer is now enabled by default.
+
+* llvm-ar now uses the new Object library and produces archives and
+  symbol tables in the gnu format.
 
 * ... next change ...
 

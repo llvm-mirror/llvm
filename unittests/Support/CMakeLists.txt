@@ -12,12 +12,15 @@ add_llvm_unittest(SupportTests
   CommandLineTest.cpp
   CompressionTest.cpp
   ConstantRangeTest.cpp
+  ConvertUTFTest.cpp
   DataExtractorTest.cpp
   EndianTest.cpp
   ErrorOrTest.cpp
   FileOutputBufferTest.cpp
   IntegersSubsetTest.cpp
   LeakDetectorTest.cpp
+  LocaleTest.cpp
+  LockFileManagerTest.cpp
   ManagedStatic.cpp
   MathExtrasTest.cpp
   MD5Test.cpp
@@ -28,7 +31,7 @@ add_llvm_unittest(SupportTests
   ProgramTest.cpp
   RegexTest.cpp
   SwapByteOrderTest.cpp
-  TimeValue.cpp
+  TimeValueTest.cpp
   ValueHandleTest.cpp
   YAMLIOTest.cpp
   YAMLParserTest.cpp

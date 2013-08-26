@@ -79,7 +79,6 @@ set(LLVM_ALL_TARGETS
   CppBackend
   Hexagon
   Mips
-  MBlaze
   MSP430
   NVPTX
   PowerPC
@@ -124,6 +123,8 @@ set(FFI_INCLUDE_DIR "" CACHE PATH "Additional directory, where CMake should sear
 set(LLVM_TARGET_ARCH "host"
   CACHE STRING "Set target to use for LLVM JIT or use \"host\" for automatic detection.")
 
+option(LLVM_ENABLE_TERMINFO "Use terminfo database if available." ON)
+
 option(LLVM_ENABLE_THREADS "Use threads if available." ON)
 
 option(LLVM_ENABLE_ZLIB "Use zlib for compression/decompression if available." ON)
@@ -153,7 +154,7 @@ endif()
 option(LLVM_ENABLE_PEDANTIC "Compile with pedantic enabled." ON)
 option(LLVM_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 
-if( uppercase_CMAKE_BUILD_TYPE STREQUAL "RELEASE" )
+if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" OFF)
 else()
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
@@ -183,6 +184,9 @@ endif( LLVM_USE_OPROFILE )
 
 set(LLVM_USE_SANITIZER "" CACHE STRING
   "Define the sanitizer used to build binaries and tests.")
+
+option(LLVM_USE_SPLIT_DWARF
+  "Use -gsplit-dwarf when compiling llvm." OFF)
 
 # Define an option controlling whether we should build for 32-bit on 64-bit
 # platforms, where supported.

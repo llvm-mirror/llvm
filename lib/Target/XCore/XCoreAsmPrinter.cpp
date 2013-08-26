@@ -83,12 +83,15 @@ void XCoreAsmPrinter::emitArrayBound(MCSymbol *Sym, const GlobalVariable *GV) {
     GV->hasWeakLinkage()) ||
     GV->hasLinkOnceLinkage()) && "Unexpected linkage");
   if (ArrayType *ATy = dyn_cast<ArrayType>(
-    cast<PointerType>(GV->getType())->getElementType())) {
-    OutStreamer.EmitSymbolAttribute(Sym, MCSA_Global);
-    // FIXME: MCStreamerize.
-    OutStreamer.EmitRawText(StringRef(".globound"));
-    OutStreamer.EmitRawText("\t.set\t" + Twine(Sym->getName()));
-    OutStreamer.EmitRawText(".globound," + Twine(ATy->getNumElements()));
+                        cast<PointerType>(GV->getType())->getElementType())) {
+
+    MCSymbol *SymGlob = OutContext.GetOrCreateSymbol(
+                          Twine(Sym->getName() + StringRef(".globound")));
+    OutStreamer.EmitSymbolAttribute(SymGlob, MCSA_Global);
+
+    OutStreamer.EmitRawText("\t.set\t" + Twine(Sym->getName()) +
+                            ".globound," + Twine(ATy->getNumElements()));
+
     if (GV->hasWeakLinkage() || GV->hasLinkOnceLinkage()) {
       // TODO Use COMDAT groups for LinkOnceLinkage
       OutStreamer.EmitRawText(MAI->getWeakDefDirective() +Twine(Sym->getName())+
@@ -240,18 +243,14 @@ void XCoreAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
 bool XCoreAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                                       unsigned AsmVariant,const char *ExtraCode,
                                       raw_ostream &O) {
-  // Does this asm operand have a single letter operand modifier?
-  if (ExtraCode && ExtraCode[0])
-    if (ExtraCode[1] != 0) return true; // Unknown modifier.
+  // Print the operand if there is no operand modifier.
+  if (!ExtraCode || !ExtraCode[0]) {
+    printOperand(MI, OpNo, O);
+    return false;
+  }
 
-    switch (ExtraCode[0]) {
-    default:
-      // See if this is a generic print operand
-      return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, O);
-    }
-
-  printOperand(MI, OpNo, O);
-  return false;
+  // Otherwise fallback on the default implementation.
+  return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, O);
 }
 
 void XCoreAsmPrinter::EmitInstruction(const MachineInstr *MI) {

@@ -129,6 +129,14 @@ struct data_directory {
   support::ulittle32_t Size;
 };
 
+struct import_directory_table_entry {
+  support::ulittle32_t ImportLookupTableRVA;
+  support::ulittle32_t TimeDateStamp;
+  support::ulittle32_t ForwarderChain;
+  support::ulittle32_t NameRVA;
+  support::ulittle32_t ImportAddressTableRVA;
+};
+
 struct coff_symbol {
   struct StringTableOffset {
     support::ulittle32_t Zeroes;
@@ -190,6 +198,7 @@ class COFFObjectFile : public ObjectFile {
 private:
   const coff_file_header *COFFHeader;
   const pe32_header      *PE32Header;
+  const data_directory   *DataDirectory;
   const coff_section     *SectionTable;
   const coff_symbol      *SymbolTable;
   const char             *StringTable;
@@ -275,6 +284,7 @@ public:
   error_code getHeader(const coff_file_header *&Res) const;
   error_code getCOFFHeader(const coff_file_header *&Res) const;
   error_code getPE32Header(const pe32_header *&Res) const;
+  error_code getDataDirectory(uint32_t index, const data_directory *&Res) const;
   error_code getSection(int32_t index, const coff_section *&Res) const;
   error_code getSymbol(uint32_t index, const coff_symbol *&Res) const;
   template <typename T>

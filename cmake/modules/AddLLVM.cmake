@@ -12,6 +12,11 @@ macro(add_llvm_library name)
 
   if( BUILD_SHARED_LIBS )
     llvm_config( ${name} ${LLVM_LINK_COMPONENTS} )
+    if (MSVC)
+      set_target_properties(${name}
+        PROPERTIES
+        IMPORT_SUFFIX ".imp")
+    endif ()
   endif()
 
   # Ensure that the system libraries always comes last on the
@@ -191,7 +196,7 @@ function(add_unittest test_suite test_name)
   if (LLVM_COMPILER_IS_GCC_COMPATIBLE)
     set(target_compile_flags "${target_compile_flags} -fno-rtti")
   elseif (MSVC)
-    set(target_compile_flags "${target_compile_flags} /GR-")
+    llvm_replace_compiler_option(target_compile_flags "/GR" "/GR-")
   endif ()
 
   if (SUPPORTS_NO_VARIADIC_MACROS_FLAG)

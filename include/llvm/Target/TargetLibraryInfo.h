@@ -24,8 +24,12 @@ namespace llvm {
       under_IO_putc,
       /// void operator delete[](void*);
       ZdaPv,
+      /// void operator delete[](void*, nothrow);
+      ZdaPvRKSt9nothrow_t,
       /// void operator delete(void*);
       ZdlPv,
+      /// void operator delete(void*, nothrow);
+      ZdlPvRKSt9nothrow_t,
       /// void *new[](unsigned int);
       Znaj,
       /// void *new[](unsigned int, nothrow);
@@ -691,6 +695,7 @@ public:
     case LibFunc::nearbyint: case LibFunc::nearbyintf: case LibFunc::nearbyintl:
     case LibFunc::ceil:      case LibFunc::ceilf:      case LibFunc::ceill:
     case LibFunc::rint:      case LibFunc::rintf:      case LibFunc::rintl:
+    case LibFunc::round:     case LibFunc::roundf:     case LibFunc::roundl:
     case LibFunc::trunc:     case LibFunc::truncf:     case LibFunc::truncl:
     case LibFunc::log2:      case LibFunc::log2f:      case LibFunc::log2l:
     case LibFunc::exp2:      case LibFunc::exp2f:      case LibFunc::exp2l:

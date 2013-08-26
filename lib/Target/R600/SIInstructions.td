@@ -403,9 +403,9 @@ defm BUFFER_LOAD_FORMAT_XYZW : MUBUF_Load_Helper <0x00000003, "BUFFER_LOAD_FORMA
 //def BUFFER_STORE_FORMAT_XYZ : MUBUF_ <0x00000006, "BUFFER_STORE_FORMAT_XYZ", []>;
 //def BUFFER_STORE_FORMAT_XYZW : MUBUF_ <0x00000007, "BUFFER_STORE_FORMAT_XYZW", []>;
 defm BUFFER_LOAD_UBYTE : MUBUF_Load_Helper <0x00000008, "BUFFER_LOAD_UBYTE", VReg_32>;
-//def BUFFER_LOAD_SBYTE : MUBUF_ <0x00000009, "BUFFER_LOAD_SBYTE", []>;
-//def BUFFER_LOAD_USHORT : MUBUF_ <0x0000000a, "BUFFER_LOAD_USHORT", []>;
-//def BUFFER_LOAD_SSHORT : MUBUF_ <0x0000000b, "BUFFER_LOAD_SSHORT", []>;
+defm BUFFER_LOAD_SBYTE : MUBUF_Load_Helper <0x00000009, "BUFFER_LOAD_SBYTE", VReg_32>;
+defm BUFFER_LOAD_USHORT : MUBUF_Load_Helper <0x0000000a, "BUFFER_LOAD_USHORT", VReg_32>;
+defm BUFFER_LOAD_SSHORT : MUBUF_Load_Helper <0x0000000b, "BUFFER_LOAD_SSHORT", VReg_32>;
 defm BUFFER_LOAD_DWORD : MUBUF_Load_Helper <0x0000000c, "BUFFER_LOAD_DWORD", VReg_32>;
 defm BUFFER_LOAD_DWORDX2 : MUBUF_Load_Helper <0x0000000d, "BUFFER_LOAD_DWORDX2", VReg_64>;
 defm BUFFER_LOAD_DWORDX4 : MUBUF_Load_Helper <0x0000000e, "BUFFER_LOAD_DWORDX4", VReg_128>;
@@ -500,7 +500,7 @@ defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
 
 //def S_MEMTIME : SMRD_ <0x0000001e, "S_MEMTIME", []>;
 //def S_DCACHE_INV : SMRD_ <0x0000001f, "S_DCACHE_INV", []>;
-//def IMAGE_LOAD : MIMG_NoPattern_ <"IMAGE_LOAD", 0x00000000>;
+def IMAGE_LOAD : MIMG_NoSampler_Helper <0x00000000, "IMAGE_LOAD">;
 def IMAGE_LOAD_MIP : MIMG_NoSampler_Helper <0x00000001, "IMAGE_LOAD_MIP">;
 //def IMAGE_LOAD_PCK : MIMG_NoPattern_ <"IMAGE_LOAD_PCK", 0x00000002>;
 //def IMAGE_LOAD_PCK_SGN : MIMG_NoPattern_ <"IMAGE_LOAD_PCK_SGN", 0x00000003>;
@@ -603,15 +603,21 @@ defm V_MOV_B32 : VOP1_32 <0x00000001, "V_MOV_B32", []>;
 } // End neverHasSideEffects = 1, isMoveImm = 1
 
 defm V_READFIRSTLANE_B32 : VOP1_32 <0x00000002, "V_READFIRSTLANE_B32", []>;
-//defm V_CVT_I32_F64 : VOP1_32 <0x00000003, "V_CVT_I32_F64", []>;
-//defm V_CVT_F64_I32 : VOP1_64 <0x00000004, "V_CVT_F64_I32", []>;
+defm V_CVT_I32_F64 : VOP1_32_64 <0x00000003, "V_CVT_I32_F64",
+  [(set i32:$dst, (fp_to_sint f64:$src0))]
+>;
+defm V_CVT_F64_I32 : VOP1_64_32 <0x00000004, "V_CVT_F64_I32",
+  [(set f64:$dst, (sint_to_fp i32:$src0))]
+>;
 defm V_CVT_F32_I32 : VOP1_32 <0x00000005, "V_CVT_F32_I32",
   [(set f32:$dst, (sint_to_fp i32:$src0))]
 >;
 defm V_CVT_F32_U32 : VOP1_32 <0x00000006, "V_CVT_F32_U32",
   [(set f32:$dst, (uint_to_fp i32:$src0))]
 >;
-defm V_CVT_U32_F32 : VOP1_32 <0x00000007, "V_CVT_U32_F32", []>;
+defm V_CVT_U32_F32 : VOP1_32 <0x00000007, "V_CVT_U32_F32",
+  [(set i32:$dst, (fp_to_uint f32:$src0))]
+>;
 defm V_CVT_I32_F32 : VOP1_32 <0x00000008, "V_CVT_I32_F32",
   [(set i32:$dst, (fp_to_sint f32:$src0))]
 >;
@@ -621,8 +627,12 @@ defm V_MOV_FED_B32 : VOP1_32 <0x00000009, "V_MOV_FED_B32", []>;
 //defm V_CVT_RPI_I32_F32 : VOP1_32 <0x0000000c, "V_CVT_RPI_I32_F32", []>;
 //defm V_CVT_FLR_I32_F32 : VOP1_32 <0x0000000d, "V_CVT_FLR_I32_F32", []>;
 //defm V_CVT_OFF_F32_I4 : VOP1_32 <0x0000000e, "V_CVT_OFF_F32_I4", []>;
-//defm V_CVT_F32_F64 : VOP1_32 <0x0000000f, "V_CVT_F32_F64", []>;
-//defm V_CVT_F64_F32 : VOP1_64 <0x00000010, "V_CVT_F64_F32", []>;
+defm V_CVT_F32_F64 : VOP1_32_64 <0x0000000f, "V_CVT_F32_F64",
+  [(set f32:$dst, (fround f64:$src0))]
+>;
+defm V_CVT_F64_F32 : VOP1_64_32 <0x00000010, "V_CVT_F64_F32",
+  [(set f64:$dst, (fextend f32:$src0))]
+>;
 //defm V_CVT_F32_UBYTE0 : VOP1_32 <0x00000011, "V_CVT_F32_UBYTE0", []>;
 //defm V_CVT_F32_UBYTE1 : VOP1_32 <0x00000012, "V_CVT_F32_UBYTE1", []>;
 //defm V_CVT_F32_UBYTE2 : VOP1_32 <0x00000013, "V_CVT_F32_UBYTE2", []>;
@@ -866,14 +876,16 @@ defm V_MUL_F32 : VOP2_32 <0x00000008, "V_MUL_F32",
   [(set f32:$dst, (fmul f32:$src0, f32:$src1))]
 >;
 
-} // End isCommutable = 1
 
-//defm V_MUL_I32_I24 : VOP2_32 <0x00000009, "V_MUL_I32_I24", []>;
+defm V_MUL_I32_I24 : VOP2_32 <0x00000009, "V_MUL_I32_I24",
+  [(set i32:$dst, (mul I24:$src0, I24:$src1))]
+>;
 //defm V_MUL_HI_I32_I24 : VOP2_32 <0x0000000a, "V_MUL_HI_I32_I24", []>;
-//defm V_MUL_U32_U24 : VOP2_32 <0x0000000b, "V_MUL_U32_U24", []>;
+defm V_MUL_U32_U24 : VOP2_32 <0x0000000b, "V_MUL_U32_U24",
+  [(set i32:$dst, (mul U24:$src0, U24:$src1))]
+>;
 //defm V_MUL_HI_U32_U24 : VOP2_32 <0x0000000c, "V_MUL_HI_U32_U24", []>;
 
-let isCommutable = 1 in {
 
 defm V_MIN_LEGACY_F32 : VOP2_32 <0x0000000d, "V_MIN_LEGACY_F32",
   [(set f32:$dst, (AMDGPUfmin f32:$src0, f32:$src1))]
@@ -981,8 +993,12 @@ let neverHasSideEffects = 1 in {
 
 def V_MAD_LEGACY_F32 : VOP3_32 <0x00000140, "V_MAD_LEGACY_F32", []>;
 def V_MAD_F32 : VOP3_32 <0x00000141, "V_MAD_F32", []>;
-//def V_MAD_I32_I24 : VOP3_32 <0x00000142, "V_MAD_I32_I24", []>;
-//def V_MAD_U32_U24 : VOP3_32 <0x00000143, "V_MAD_U32_U24", []>;
+def V_MAD_I32_I24 : VOP3_32 <0x00000142, "V_MAD_I32_I24",
+  [(set i32:$dst, (add (mul I24:$src0, I24:$src1), i32:$src2))]
+>;
+def V_MAD_U32_U24 : VOP3_32 <0x00000143, "V_MAD_U32_U24",
+  [(set i32:$dst, (add (mul U24:$src0, U24:$src1), i32:$src2))]
+>;
 
 } // End neverHasSideEffects
 def V_CUBEID_F32 : VOP3_32 <0x00000144, "V_CUBEID_F32", []>;
@@ -993,8 +1009,12 @@ def V_BFE_U32 : VOP3_32 <0x00000148, "V_BFE_U32", []>;
 def V_BFE_I32 : VOP3_32 <0x00000149, "V_BFE_I32", []>;
 def V_BFI_B32 : VOP3_32 <0x0000014a, "V_BFI_B32", []>;
 defm : BFIPatterns <V_BFI_B32>;
-def V_FMA_F32 : VOP3_32 <0x0000014b, "V_FMA_F32", []>;
-def V_FMA_F64 : VOP3_64 <0x0000014c, "V_FMA_F64", []>;
+def V_FMA_F32 : VOP3_32 <0x0000014b, "V_FMA_F32",
+  [(set f32:$dst, (fma f32:$src0, f32:$src1, f32:$src2))]
+>;
+def V_FMA_F64 : VOP3_64 <0x0000014c, "V_FMA_F64",
+  [(set f64:$dst, (fma f64:$src0, f64:$src1, f64:$src2))]
+>;
 //def V_LERP_U8 : VOP3_U8 <0x0000014d, "V_LERP_U8", []>;
 def V_ALIGNBIT_B32 : VOP3_32 <0x0000014e, "V_ALIGNBIT_B32", []>;
 def : ROTRPattern <V_ALIGNBIT_B32>;
@@ -1024,7 +1044,9 @@ def V_LSHL_B64 : VOP3_64_Shift <0x00000161, "V_LSHL_B64",
 def V_LSHR_B64 : VOP3_64_Shift <0x00000162, "V_LSHR_B64",
   [(set i64:$dst, (srl i64:$src0, i32:$src1))]
 >;
-def V_ASHR_I64 : VOP3_64_Shift <0x00000163, "V_ASHR_I64", []>;
+def V_ASHR_I64 : VOP3_64_Shift <0x00000163, "V_ASHR_I64",
+  [(set i64:$dst, (sra i64:$src0, i32:$src1))]
+>;
 
 let isCommutable = 1 in {
 
@@ -1375,9 +1397,21 @@ class ImageLoadArrayPattern<Intrinsic name, MIMG opcode, ValueType addr_type> : 
     (opcode 0xf, 0, 0, 1, 0, 0, 0, 0, $addr, $rsrc)
 >;
 
+class ImageLoadMSAAPattern<Intrinsic name, MIMG opcode, ValueType addr_type> : Pat <
+    (name addr_type:$addr, v32i8:$rsrc, TEX_MSAA),
+    (opcode 0xf, 0, 0, 0, 0, 0, 0, 0, $addr, $rsrc)
+>;
+
+class ImageLoadArrayMSAAPattern<Intrinsic name, MIMG opcode, ValueType addr_type> : Pat <
+    (name addr_type:$addr, v32i8:$rsrc, TEX_ARRAY_MSAA),
+    (opcode 0xf, 0, 0, 1, 0, 0, 0, 0, $addr, $rsrc)
+>;
+
 multiclass ImageLoadPatterns<ValueType addr_type> {
   def : ImageLoadPattern <int_SI_imageload, IMAGE_LOAD_MIP, addr_type>;
   def : ImageLoadArrayPattern <int_SI_imageload, IMAGE_LOAD_MIP, addr_type>;
+  def : ImageLoadMSAAPattern <int_SI_imageload, IMAGE_LOAD, addr_type>;
+  def : ImageLoadArrayMSAAPattern <int_SI_imageload, IMAGE_LOAD, addr_type>;
 }
 
 defm : ImageLoadPatterns<v2i32>;
@@ -1391,6 +1425,11 @@ def : Pat <
 
 def : Pat <
   (int_SI_resinfo i32:$mipid, v32i8:$rsrc, TEX_ARRAY),
+  (IMAGE_GET_RESINFO 0xf, 0, 0, 1, 0, 0, 0, 0, (V_MOV_B32_e32 $mipid), $rsrc)
+>;
+
+def : Pat <
+  (int_SI_resinfo i32:$mipid, v32i8:$rsrc, TEX_ARRAY_MSAA),
   (IMAGE_GET_RESINFO 0xf, 0, 0, 1, 0, 0, 0, 0, (V_MOV_B32_e32 $mipid), $rsrc)
 >;
 
@@ -1481,6 +1520,17 @@ def : BitConvert <f32, i32, VReg_32>;
 def : BitConvert <i64, f64, VReg_64>;
 
 def : BitConvert <f64, i64, VReg_64>;
+
+def : BitConvert <v2f32, v2i32, VReg_64>;
+def : BitConvert <v2i32, v2f32, VReg_64>;
+
+def : BitConvert <v4f32, v4i32, VReg_128>;
+def : BitConvert <v4i32, v4f32, VReg_128>;
+
+def : BitConvert <v8i32, v32i8, SReg_256>;
+def : BitConvert <v32i8, v8i32, SReg_256>;
+def : BitConvert <v8i32, v32i8, VReg_256>;
+def : BitConvert <v32i8, v8i32, VReg_256>;
 
 /********** =================== **********/
 /********** Src & Dst modifiers **********/
@@ -1702,6 +1752,7 @@ multiclass SMRD_Pattern <SMRD Instr_IMM, SMRD Instr_SGPR, ValueType vt> {
 defm : SMRD_Pattern <S_LOAD_DWORD_IMM, S_LOAD_DWORD_SGPR, f32>;
 defm : SMRD_Pattern <S_LOAD_DWORD_IMM, S_LOAD_DWORD_SGPR, i32>;
 defm : SMRD_Pattern <S_LOAD_DWORDX2_IMM, S_LOAD_DWORDX2_SGPR, i64>;
+defm : SMRD_Pattern <S_LOAD_DWORDX2_IMM, S_LOAD_DWORDX2_SGPR, v2i32>;
 defm : SMRD_Pattern <S_LOAD_DWORDX4_IMM, S_LOAD_DWORDX4_SGPR, v16i8>;
 defm : SMRD_Pattern <S_LOAD_DWORDX8_IMM, S_LOAD_DWORDX8_SGPR, v32i8>;
 
@@ -1732,12 +1783,20 @@ multiclass MUBUFLoad_Pattern <MUBUF Instr_ADDR64, ValueType vt,
   >;
 }
 
-defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORDX2_ADDR64, i64,
-                          global_load, constant_load>;
+defm : MUBUFLoad_Pattern <BUFFER_LOAD_SBYTE_ADDR64, i32,
+                          sextloadi8_global, sextloadi8_constant>;
+defm : MUBUFLoad_Pattern <BUFFER_LOAD_UBYTE_ADDR64, i32,
+                          az_extloadi8_global, az_extloadi8_constant>;
+defm : MUBUFLoad_Pattern <BUFFER_LOAD_SSHORT_ADDR64, i32,
+                          sextloadi16_global, sextloadi16_constant>;
+defm : MUBUFLoad_Pattern <BUFFER_LOAD_USHORT_ADDR64, i32,
+                          az_extloadi16_global, az_extloadi16_constant>;
 defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORD_ADDR64, i32,
                           global_load, constant_load>;
-defm : MUBUFLoad_Pattern <BUFFER_LOAD_UBYTE_ADDR64, i32,
-                          zextloadi8_global, zextloadi8_constant>;
+defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORDX2_ADDR64, i64,
+                          global_load, constant_load>;
+defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORDX2_ADDR64, i64,
+                          az_extloadi32_global, az_extloadi32_constant>;
 defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORDX2_ADDR64, v2i32,
                           global_load, constant_load>;
 defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORDX4_ADDR64, v4i32,
@@ -1769,25 +1828,25 @@ multiclass SI_INDIRECT_Pattern <ValueType vt, SI_INDIRECT_DST IndDst> {
 
   // 1. Extract with offset
   def : Pat<
-    (vector_extract vt:$vec, (i64 (zext (add i32:$idx, imm:$off)))),
+    (vector_extract vt:$vec, (add i32:$idx, imm:$off)),
     (f32 (SI_INDIRECT_SRC (IMPLICIT_DEF), $vec, $idx, imm:$off))
   >;
 
   // 2. Extract without offset
   def : Pat<
-    (vector_extract vt:$vec, (i64 (zext i32:$idx))),
+    (vector_extract vt:$vec, i32:$idx),
     (f32 (SI_INDIRECT_SRC (IMPLICIT_DEF), $vec, $idx, 0))
   >;
 
   // 3. Insert with offset
   def : Pat<
-    (vector_insert vt:$vec, f32:$val, (i64 (zext (add i32:$idx, imm:$off)))),
+    (vector_insert vt:$vec, f32:$val, (add i32:$idx, imm:$off)),
     (IndDst (IMPLICIT_DEF), $vec, $idx, imm:$off, $val)
   >;
 
   // 4. Insert without offset
   def : Pat<
-    (vector_insert vt:$vec, f32:$val, (i64 (zext i32:$idx))),
+    (vector_insert vt:$vec, f32:$val, i32:$idx),
     (IndDst (IMPLICIT_DEF), $vec, $idx, 0, $val)
   >;
 }

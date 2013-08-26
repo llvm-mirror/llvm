@@ -17,9 +17,9 @@ if( LLVM_ENABLE_ASSERTIONS )
   if( NOT MSVC )
     add_definitions( -D_DEBUG )
   endif()
-  # On Release builds cmake automatically defines NDEBUG, so we
+  # On non-Debug builds cmake automatically defines NDEBUG, so we
   # explicitly undefine it:
-  if( uppercase_CMAKE_BUILD_TYPE STREQUAL "RELEASE" )
+  if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
     add_definitions( -UNDEBUG )
     # Also remove /D NDEBUG to avoid MSVC warnings about conflicting defines.
     string (REGEX REPLACE "(^| )[/-]D *NDEBUG($| )" " "
@@ -151,10 +151,16 @@ endif()
 if( MSVC )
   include(ChooseMSVCCRT)
 
-  if( MSVC11 )
+  if( MSVC10 )
+    # MSVC 10 will complain about headers in the STL not being exported, but
+    # will not complain in MSVC 11.
+    add_llvm_definitions(
+      -wd4275 # Suppress 'An exported class was derived from a class that was not exported.'
+    )
+  elseif( MSVC11 )
     add_llvm_definitions(-D_VARIADIC_MAX=10)
   endif()
-
+  
   # Add definitions that make MSVC much less annoying.
   add_llvm_definitions(
     # For some reason MS wants to deprecate a bunch of standard functions...
@@ -166,25 +172,17 @@ if( MSVC )
     -D_SCL_SECURE_NO_WARNINGS
 
     # Disabled warnings.
-    -wd4065 # Suppress 'switch statement contains 'default' but no 'case' labels'
     -wd4146 # Suppress 'unary minus operator applied to unsigned type, result still unsigned'
     -wd4180 # Suppress 'qualifier applied to function type has no meaning; ignored'
-    -wd4181 # Suppress 'qualifier applied to reference type; ignored'
-    -wd4224 # Suppress 'nonstandard extension used : formal parameter 'identifier' was previously defined as a type'
     -wd4244 # Suppress ''argument' : conversion from 'type1' to 'type2', possible loss of data'
     -wd4267 # Suppress ''var' : conversion from 'size_t' to 'type', possible loss of data'
-    -wd4275 # Suppress 'An exported class was derived from a class that was not exported.'
-    -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
     -wd4345 # Suppress 'behavior change: an object of POD type constructed with an initializer of the form () will be default-initialized'
     -wd4351 # Suppress 'new behavior: elements of array 'array' will be default initialized'
     -wd4355 # Suppress ''this' : used in base member initializer list'
     -wd4503 # Suppress ''identifier' : decorated name length exceeded, name was truncated'
-    -wd4551 # Suppress 'function call missing argument list'
     -wd4624 # Suppress ''derived class' : destructor could not be generated because a base class destructor is inaccessible'
-    -wd4715 # Suppress ''function' : not all control paths return a value'
-    -wd4722 # Suppress ''function' : destructor never returns, potential memory leak'
     -wd4800 # Suppress ''type' : forcing value to bool 'true' or 'false' (performance warning)'
-
+    
     # Promoted warnings.
     -w14062 # Promote 'enumerator in switch of enum is not handled' to level 1 warning.
 
@@ -261,6 +259,11 @@ if(LLVM_USE_SANITIZER)
   else()
     message(WARNING "LLVM_USE_SANITIZER is not supported on this platform.")
   endif()
+endif()
+
+# Turn on -gsplit-dwarf if requested
+if(LLVM_USE_SPLIT_DWARF)
+  add_llvm_definitions("-gsplit-dwarf")
 endif()
 
 add_llvm_definitions( -D__STDC_CONSTANT_MACROS )

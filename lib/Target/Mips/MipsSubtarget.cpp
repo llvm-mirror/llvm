@@ -65,7 +65,7 @@ MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
   HasBitCount(false), HasFPIdx(false),
   InMips16Mode(false), InMips16HardFloat(Mips16HardFloat),
   InMicroMipsMode(false), HasDSP(false), HasDSPR2(false),
-  AllowMixed16_32(Mixed16_32 | Mips_Os16), Os16(Mips_Os16),
+  AllowMixed16_32(Mixed16_32 | Mips_Os16), Os16(Mips_Os16), HasMSA(false),
   RM(_RM), OverrideMode(NoOverride), TM(_TM)
 {
   std::string CPUName = CPU;
@@ -104,7 +104,7 @@ MipsSubtarget::enablePostRAScheduler(CodeGenOpt::Level OptLevel,
   Mode = TargetSubtargetInfo::ANTIDEP_NONE;
   CriticalPathRCs.clear();
   CriticalPathRCs.push_back(hasMips64() ?
-                            &Mips::CPU64RegsRegClass : &Mips::CPURegsRegClass);
+                            &Mips::GPR64RegClass : &Mips::GPR32RegClass);
   return OptLevel >= CodeGenOpt::Aggressive;
 }
 

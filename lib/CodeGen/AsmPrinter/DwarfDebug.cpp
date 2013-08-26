@@ -14,6 +14,7 @@
 #define DEBUG_TYPE "dwarfdebug"
 #include "DwarfDebug.h"
 #include "DIE.h"
+#include "DIEHash.h"
 #include "DwarfAccelTable.h"
 #include "DwarfCompileUnit.h"
 #include "llvm/ADT/STLExtras.h"
@@ -36,6 +37,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/MD5.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/ValueHandle.h"
@@ -46,54 +48,65 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 using namespace llvm;
 
-static cl::opt<bool> DisableDebugInfoPrinting("disable-debug-info-print",
-                                              cl::Hidden,
-     cl::desc("Disable debug info printing"));
+static cl::opt<bool>
+DisableDebugInfoPrinting("disable-debug-info-print", cl::Hidden,
+                         cl::desc("Disable debug info printing"));
 
-static cl::opt<bool> UnknownLocations("use-unknown-locations", cl::Hidden,
-     cl::desc("Make an absence of debug location information explicit."),
-     cl::init(false));
+static cl::opt<bool> UnknownLocations(
+    "use-unknown-locations", cl::Hidden,
+    cl::desc("Make an absence of debug location information explicit."),
+    cl::init(false));
 
-static cl::opt<bool> GenerateDwarfPubNamesSection("generate-dwarf-pubnames",
-     cl::Hidden, cl::init(false),
-     cl::desc("Generate DWARF pubnames section"));
+static cl::opt<bool>
+GenerateDwarfPubNamesSection("generate-dwarf-pubnames", cl::Hidden,
+                             cl::init(false),
+                             cl::desc("Generate DWARF pubnames section"));
+
+static cl::opt<bool>
+GenerateODRHash("generate-odr-hash", cl::Hidden,
+                cl::desc("Add an ODR hash to external type DIEs."),
+                cl::init(false));
+
+static cl::opt<bool>
+GenerateCUHash("generate-cu-hash", cl::Hidden,
+               cl::desc("Add the CU hash as the dwo_id."),
+               cl::init(false));
 
 namespace {
-  enum DefaultOnOff {
-    Default, Enable, Disable
-  };
+enum DefaultOnOff {
+  Default,
+  Enable,
+  Disable
+};
 }
 
-static cl::opt<DefaultOnOff> DwarfAccelTables("dwarf-accel-tables", cl::Hidden,
-     cl::desc("Output prototype dwarf accelerator tables."),
-     cl::values(
-                clEnumVal(Default, "Default for platform"),
-                clEnumVal(Enable, "Enabled"),
-                clEnumVal(Disable, "Disabled"),
-                clEnumValEnd),
-     cl::init(Default));
+static cl::opt<DefaultOnOff>
+DwarfAccelTables("dwarf-accel-tables", cl::Hidden,
+                 cl::desc("Output prototype dwarf accelerator tables."),
+                 cl::values(clEnumVal(Default, "Default for platform"),
+                            clEnumVal(Enable, "Enabled"),
+                            clEnumVal(Disable, "Disabled"), clEnumValEnd),
+                 cl::init(Default));
 
-static cl::opt<DefaultOnOff> DarwinGDBCompat("darwin-gdb-compat", cl::Hidden,
-     cl::desc("Compatibility with Darwin gdb."),
-     cl::values(
-                clEnumVal(Default, "Default for platform"),
-                clEnumVal(Enable, "Enabled"),
-                clEnumVal(Disable, "Disabled"),
-                clEnumValEnd),
-     cl::init(Default));
+static cl::opt<DefaultOnOff>
+DarwinGDBCompat("darwin-gdb-compat", cl::Hidden,
+                cl::desc("Compatibility with Darwin gdb."),
+                cl::values(clEnumVal(Default, "Default for platform"),
+                           clEnumVal(Enable, "Enabled"),
+                           clEnumVal(Disable, "Disabled"), clEnumValEnd),
+                cl::init(Default));
 
-static cl::opt<DefaultOnOff> SplitDwarf("split-dwarf", cl::Hidden,
-     cl::desc("Output prototype dwarf split debug info."),
-     cl::values(
-                clEnumVal(Default, "Default for platform"),
-                clEnumVal(Enable, "Enabled"),
-                clEnumVal(Disable, "Disabled"),
-                clEnumValEnd),
-     cl::init(Default));
+static cl::opt<DefaultOnOff>
+SplitDwarf("split-dwarf", cl::Hidden,
+           cl::desc("Output prototype dwarf split debug info."),
+           cl::values(clEnumVal(Default, "Default for platform"),
+                      clEnumVal(Enable, "Enabled"),
+                      clEnumVal(Disable, "Disabled"), clEnumValEnd),
+           cl::init(Default));
 
 namespace {
-  const char *DWARFGroupName = "DWARF Emission";
-  const char *DbgTimerName = "DWARF Debug Writer";
+  const char *const DWARFGroupName = "DWARF Emission";
+  const char *const DbgTimerName = "DWARF Debug Writer";
 
   struct CompareFirst {
     template <typename T> bool operator()(const T &lhs, const T &rhs) const {
@@ -140,7 +153,7 @@ DIType DbgVariable::getType() const {
        the pointers and __Block_byref_x_VarName struct to find the actual
        value of the variable.  The function addBlockByrefType does this.  */
     DIType subType = Ty;
-    unsigned tag = Ty.getTag();
+    uint16_t tag = Ty.getTag();
 
     if (tag == dwarf::DW_TAG_pointer_type) {
       DIDerivedType DTy = DIDerivedType(Ty);
@@ -164,17 +177,10 @@ DIType DbgVariable::getType() const {
 
 /// Return Dwarf Version by checking module flags.
 static unsigned getDwarfVersionFromModule(const Module *M) {
-  SmallVector<Module::ModuleFlagEntry, 8> ModuleFlags;
-  M->getModuleFlagsMetadata(ModuleFlags);
-  for (unsigned I = 0, E = ModuleFlags.size(); I < E; ++I) {
-    const Module::ModuleFlagEntry &MFE = ModuleFlags[I];
-    StringRef Key = MFE.Key->getString();
-    Value *Val = MFE.Val;
-
-    if (Key == "Dwarf Version")
-      return cast<ConstantInt>(Val)->getZExtValue();
-  }
-  return dwarf::DWARF_VERSION;
+  Value *Val = M->getModuleFlag("Dwarf Version");
+  if (!Val)
+    return dwarf::DWARF_VERSION;
+  return cast<ConstantInt>(Val)->getZExtValue();
 }
 
 DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
@@ -392,7 +398,7 @@ DIE *DwarfDebug::updateSubprogramScopeDIE(CompileUnit *SPCU,
         // Add arguments.
         DICompositeType SPTy = SP.getType();
         DIArray Args = SPTy.getTypeArray();
-        unsigned SPTag = SPTy.getTag();
+        uint16_t SPTag = SPTy.getTag();
         if (SPTag == dwarf::DW_TAG_subroutine_type)
           for (unsigned i = 1, N = Args.getNumElements(); i < N; ++i) {
             DIE *Arg = new DIE(dwarf::DW_TAG_formal_parameter);
@@ -734,7 +740,7 @@ CompileUnit *DwarfDebug::constructCompileUnit(const MDNode *N) {
   // is not okay to use line_table_start here.
   if (!useSplitDwarf()) {
     if (Asm->MAI->doesDwarfUseRelocationsAcrossSections())
-      NewCU->addLabel(Die, dwarf::DW_AT_stmt_list, dwarf::DW_FORM_data4,
+      NewCU->addLabel(Die, dwarf::DW_AT_stmt_list, dwarf::DW_FORM_sec_offset,
                       UseTheFirstCU ?
                       Asm->GetTempSymbol("section_line") : LineTableStartSym);
     else if (UseTheFirstCU)
@@ -887,15 +893,6 @@ void DwarfDebug::beginModule() {
     // available.
     for (unsigned i = 0, e = ImportedEntities.getNumElements(); i != e; ++i)
       constructImportedEntityDIE(CU, ImportedEntities.getElement(i));
-    // If we're splitting the dwarf out now that we've got the entire
-    // CU then construct a skeleton CU based upon it.
-    if (useSplitDwarf()) {
-      // This should be a unique identifier when we want to build .dwp files.
-      CU->addUInt(CU->getCUDie(), dwarf::DW_AT_GNU_dwo_id,
-                  dwarf::DW_FORM_data8, 0);
-      // Now construct the skeleton CU associated.
-      constructSkeletonCU(CUNode);
-    }
   }
 
   // Tell MMI that we have debug info.
@@ -951,15 +948,50 @@ void DwarfDebug::collectDeadVariables() {
         for (unsigned vi = 0, ve = Variables.getNumElements(); vi != ve; ++vi) {
           DIVariable DV(Variables.getElement(vi));
           if (!DV.isVariable()) continue;
-          DbgVariable *NewVar = new DbgVariable(DV, NULL);
+          DbgVariable NewVar(DV, NULL);
           if (DIE *VariableDIE =
-              SPCU->constructVariableDIE(NewVar, Scope->isAbstractScope()))
+              SPCU->constructVariableDIE(&NewVar, Scope->isAbstractScope()))
             ScopeDIE->addChild(VariableDIE);
         }
       }
     }
   }
   DeleteContainerSeconds(DeadFnScopeMap);
+}
+
+// Type Signature [7.27] and ODR Hash code.
+
+/// \brief Grabs the string in whichever attribute is passed in and returns
+/// a reference to it. Returns "" if the attribute doesn't exist.
+static StringRef getDIEStringAttr(DIE *Die, unsigned Attr) {
+  DIEValue *V = Die->findAttribute(Attr);
+
+  if (DIEString *S = dyn_cast_or_null<DIEString>(V))
+    return S->getString();
+
+  return StringRef("");
+}
+
+/// Return true if the current DIE is contained within an anonymous namespace.
+static bool isContainedInAnonNamespace(DIE *Die) {
+  DIE *Parent = Die->getParent();
+
+  while (Parent) {
+    if (Parent->getTag() == dwarf::DW_TAG_namespace &&
+        getDIEStringAttr(Parent, dwarf::DW_AT_name) == "")
+      return true;
+    Parent = Parent->getParent();
+  }
+
+  return false;
+}
+
+/// Test if the current CU language is C++ and that we have
+/// a named type that is not contained in an anonymous namespace.
+static bool shouldAddODRHash(CompileUnit *CU, DIE *Die) {
+  return CU->getLanguage() == dwarf::DW_LANG_C_plus_plus &&
+         getDIEStringAttr(Die, dwarf::DW_AT_name) != "" &&
+         !isContainedInAnonNamespace(Die);
 }
 
 void DwarfDebug::finalizeModuleInfo() {
@@ -969,15 +1001,51 @@ void DwarfDebug::finalizeModuleInfo() {
   // Attach DW_AT_inline attribute with inlined subprogram DIEs.
   computeInlinedDIEs();
 
-  // Emit DW_AT_containing_type attribute to connect types with their
-  // vtable holding type.
-  for (DenseMap<const MDNode *, CompileUnit *>::iterator CUI = CUMap.begin(),
-         CUE = CUMap.end(); CUI != CUE; ++CUI) {
-    CompileUnit *TheCU = CUI->second;
-    TheCU->constructContainingTypeDIEs();
+  // Split out type units and conditionally add an ODR tag to the split
+  // out type.
+  // FIXME: Do type splitting.
+  for (unsigned i = 0, e = TypeUnits.size(); i != e; ++i) {
+    DIE *Die = TypeUnits[i];
+    DIEHash Hash;
+    // If we've requested ODR hashes and it's applicable for an ODR hash then
+    // add the ODR signature now.
+    // FIXME: This should be added onto the type unit, not the type, but this
+    // works as an intermediate stage.
+    if (GenerateODRHash && shouldAddODRHash(CUMap.begin()->second, Die))
+      CUMap.begin()->second->addUInt(Die, dwarf::DW_AT_GNU_odr_signature,
+                                     dwarf::DW_FORM_data8,
+                                     Hash.computeDIEODRSignature(Die));
   }
 
-   // Compute DIE offsets and sizes.
+  // Handle anything that needs to be done on a per-cu basis.
+  for (DenseMap<const MDNode *, CompileUnit *>::iterator CUI = CUMap.begin(),
+                                                         CUE = CUMap.end();
+       CUI != CUE; ++CUI) {
+    CompileUnit *TheCU = CUI->second;
+    // Emit DW_AT_containing_type attribute to connect types with their
+    // vtable holding type.
+    TheCU->constructContainingTypeDIEs();
+
+    // If we're splitting the dwarf out now that we've got the entire
+    // CU then construct a skeleton CU based upon it.
+    if (useSplitDwarf()) {
+      uint64_t ID = 0;
+      if (GenerateCUHash) {
+        DIEHash CUHash;
+        ID = CUHash.computeCUSignature(TheCU->getCUDie());
+      }
+      // This should be a unique identifier when we want to build .dwp files.
+      TheCU->addUInt(TheCU->getCUDie(), dwarf::DW_AT_GNU_dwo_id,
+                     dwarf::DW_FORM_data8, ID);
+      // Now construct the skeleton CU associated.
+      CompileUnit *SkCU = constructSkeletonCU(CUI->first);
+      // This should be a unique identifier when we want to build .dwp files.
+      SkCU->addUInt(SkCU->getCUDie(), dwarf::DW_AT_GNU_dwo_id,
+                    dwarf::DW_FORM_data8, ID);
+    }
+  }
+
+  // Compute DIE offsets and sizes.
   InfoHolder.computeSizeAndOffsets();
   if (useSplitDwarf())
     SkeletonHolder.computeSizeAndOffsets();
@@ -2025,8 +2093,8 @@ void DwarfUnits::emitUnits(DwarfDebug *DD,
 unsigned DwarfUnits::getCUOffset(DIE *Die) {
   assert(Die->getTag() == dwarf::DW_TAG_compile_unit  &&
          "Input DIE should be compile unit in getCUOffset.");
-  for (SmallVectorImpl<CompileUnit *>::iterator I = CUs.begin(),
-       E = CUs.end(); I != E; ++I) {
+  for (SmallVectorImpl<CompileUnit *>::iterator I = CUs.begin(), E = CUs.end();
+       I != E; ++I) {
     CompileUnit *TheCU = *I;
     if (TheCU->getCUDie() == Die)
       return TheCU->getDebugInfoOffset();
@@ -2633,9 +2701,6 @@ CompileUnit *DwarfDebug::constructSkeletonCU(const MDNode *N) {
 
   NewCU->addLocalString(Die, dwarf::DW_AT_GNU_dwo_name,
                         DIUnit.getSplitDebugFilename());
-
-  // This should be a unique identifier when we want to build .dwp files.
-  NewCU->addUInt(Die, dwarf::DW_AT_GNU_dwo_id, dwarf::DW_FORM_data8, 0);
 
   // Relocate to the beginning of the addr_base section, else 0 for the
   // beginning of the one for this compile unit.

@@ -25,11 +25,12 @@ set(NVPTXCodeGen_sources
   NVVMReflect.cpp
   NVPTXGenericToNVVM.cpp
   NVPTXPrologEpilogPass.cpp
+  NVPTXMCExpr.cpp
   )
 
 add_llvm_target(NVPTXCodeGen ${NVPTXCodeGen_sources})
 
-add_dependencies(LLVMNVPTXCodeGen intrinsics_gen)
+add_dependencies(LLVMNVPTXCodeGen NVPTXCommonTableGen intrinsics_gen)
 
 add_subdirectory(TargetInfo)
 add_subdirectory(InstPrinter)

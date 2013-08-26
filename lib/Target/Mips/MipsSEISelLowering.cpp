@@ -31,16 +31,16 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
 
   clearRegisterClasses();
 
-  addRegisterClass(MVT::i32, &Mips::CPURegsRegClass);
+  addRegisterClass(MVT::i32, &Mips::GPR32RegClass);
 
   if (HasMips64)
-    addRegisterClass(MVT::i64, &Mips::CPU64RegsRegClass);
+    addRegisterClass(MVT::i64, &Mips::GPR64RegClass);
 
   if (Subtarget->hasDSP()) {
     MVT::SimpleValueType VecTys[2] = {MVT::v2i16, MVT::v4i8};
 
     for (unsigned i = 0; i < array_lengthof(VecTys); ++i) {
-      addRegisterClass(VecTys[i], &Mips::DSPRegsRegClass);
+      addRegisterClass(VecTys[i], &Mips::DSPRRegClass);
 
       // Expand all builtin opcodes.
       for (unsigned Opc = 0; Opc < ISD::BUILTIN_OP_END; ++Opc)
@@ -53,6 +53,20 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
       setOperationAction(ISD::BITCAST, VecTys[i], Legal);
     }
 
+    // Expand all truncating stores and extending loads.
+    unsigned FirstVT = (unsigned)MVT::FIRST_VECTOR_VALUETYPE;
+    unsigned LastVT = (unsigned)MVT::LAST_VECTOR_VALUETYPE;
+
+    for (unsigned VT0 = FirstVT; VT0 <= LastVT; ++VT0) {
+      for (unsigned VT1 = FirstVT; VT1 <= LastVT; ++VT1)
+        setTruncStoreAction((MVT::SimpleValueType)VT0,
+                            (MVT::SimpleValueType)VT1, Expand);
+
+      setLoadExtAction(ISD::SEXTLOAD, (MVT::SimpleValueType)VT0, Expand);
+      setLoadExtAction(ISD::ZEXTLOAD, (MVT::SimpleValueType)VT0, Expand);
+      setLoadExtAction(ISD::EXTLOAD, (MVT::SimpleValueType)VT0, Expand);
+    }
+
     setTargetDAGCombine(ISD::SHL);
     setTargetDAGCombine(ISD::SRA);
     setTargetDAGCombine(ISD::SRL);
@@ -62,6 +76,23 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
 
   if (Subtarget->hasDSPR2())
     setOperationAction(ISD::MUL, MVT::v2i16, Legal);
+
+  if (Subtarget->hasMSA()) {
+    MVT::SimpleValueType VecTys[4] = {MVT::v16i8, MVT::v8i16,
+                                      MVT::v4i32, MVT::v2i64};
+
+    for (unsigned i = 0; i < array_lengthof(VecTys); ++i) {
+      addRegisterClass(VecTys[i], &Mips::MSA128RegClass);
+
+      // Expand all builtin opcodes.
+      for (unsigned Opc = 0; Opc < ISD::BUILTIN_OP_END; ++Opc)
+        setOperationAction(Opc, VecTys[i], Expand);
+
+      setOperationAction(ISD::LOAD, VecTys[i], Legal);
+      setOperationAction(ISD::STORE, VecTys[i], Legal);
+      setOperationAction(ISD::BITCAST, VecTys[i], Legal);
+    }
+  }
 
   if (!TM.Options.UseSoftFloat) {
     addRegisterClass(MVT::f32, &Mips::FGR32RegClass);
@@ -755,7 +786,7 @@ emitBPOSGE32(MachineInstr *MI, MachineBasicBlock *BB) const{
 
   MachineRegisterInfo &RegInfo = BB->getParent()->getRegInfo();
   const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
-  const TargetRegisterClass *RC = &Mips::CPURegsRegClass;
+  const TargetRegisterClass *RC = &Mips::GPR32RegClass;
   DebugLoc DL = MI->getDebugLoc();
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
   MachineFunction::iterator It = llvm::next(MachineFunction::iterator(BB));

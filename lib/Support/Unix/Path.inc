@@ -18,6 +18,8 @@
 
 #include "Unix.h"
 #include "llvm/Support/Process.h"
+#include <limits.h>
+#include <stdio.h>
 #if HAVE_SYS_STAT_H
 #include <sys/stat.h>
 #endif
@@ -42,12 +44,6 @@
 # if HAVE_NDIR_H
 #  include <ndir.h>
 # endif
-#endif
-#if HAVE_STDIO_H
-#include <stdio.h>
-#endif
-#if HAVE_LIMITS_H
-#include <limits.h>
 #endif
 
 #ifdef __APPLE__
@@ -297,7 +293,23 @@ TimeValue file_status::getLastModificationTime() const {
   return Ret;
 }
 
+UniqueID file_status::getUniqueID() const {
+  return UniqueID(fs_st_dev, fs_st_ino);
+}
+
 error_code current_path(SmallVectorImpl<char> &result) {
+  result.clear();
+
+  const char *pwd = ::getenv("PWD");
+  llvm::sys::fs::file_status PWDStatus, DotStatus;
+  if (pwd && llvm::sys::path::is_absolute(pwd) &&
+      !llvm::sys::fs::status(pwd, PWDStatus) &&
+      !llvm::sys::fs::status(".", DotStatus) &&
+      PWDStatus.getUniqueID() == DotStatus.getUniqueID()) {
+    result.append(pwd, pwd + strlen(pwd));
+    return error_code::success();
+  }
+
 #ifdef MAXPATHLEN
   result.reserve(MAXPATHLEN);
 #else
@@ -317,65 +329,6 @@ error_code current_path(SmallVectorImpl<char> &result) {
   }
 
   result.set_size(strlen(result.data()));
-  return error_code::success();
-}
-
-error_code copy_file(const Twine &from, const Twine &to, copy_option copt) {
- // Get arguments.
-  SmallString<128> from_storage;
-  SmallString<128> to_storage;
-  StringRef f = from.toNullTerminatedStringRef(from_storage);
-  StringRef t = to.toNullTerminatedStringRef(to_storage);
-
-  const size_t buf_sz = 32768;
-  char buffer[buf_sz];
-  int from_file = -1, to_file = -1;
-
-  // Open from.
-  if ((from_file = ::open(f.begin(), O_RDONLY)) < 0)
-    return error_code(errno, system_category());
-  AutoFD from_fd(from_file);
-
-  // Stat from.
-  struct stat from_stat;
-  if (::stat(f.begin(), &from_stat) != 0)
-    return error_code(errno, system_category());
-
-  // Setup to flags.
-  int to_flags = O_CREAT | O_WRONLY;
-  if (copt == copy_option::fail_if_exists)
-    to_flags |= O_EXCL;
-
-  // Open to.
-  if ((to_file = ::open(t.begin(), to_flags, from_stat.st_mode)) < 0)
-    return error_code(errno, system_category());
-  AutoFD to_fd(to_file);
-
-  // Copy!
-  ssize_t sz, sz_read = 1, sz_write;
-  while (sz_read > 0 &&
-         (sz_read = ::read(from_fd, buffer, buf_sz)) > 0) {
-    // Allow for partial writes - see Advanced Unix Programming (2nd Ed.),
-    // Marc Rochkind, Addison-Wesley, 2004, page 94
-    sz_write = 0;
-    do {
-      if ((sz = ::write(to_fd, buffer + sz_write, sz_read - sz_write)) < 0) {
-        sz_read = sz;  // cause read loop termination.
-        break;         // error.
-      }
-      sz_write += sz;
-    } while (sz_write < sz_read);
-  }
-
-  // After all the file operations above the return value of close actually
-  // matters.
-  if (::close(from_fd.take()) < 0) sz_read = -1;
-  if (::close(to_fd.take()) < 0) sz_read = -1;
-
-  // Check for errors.
-  if (sz_read < 0)
-    return error_code(errno, system_category());
-
   return error_code::success();
 }
 
@@ -456,17 +409,8 @@ error_code rename(const Twine &from, const Twine &to) {
   StringRef f = from.toNullTerminatedStringRef(from_storage);
   StringRef t = to.toNullTerminatedStringRef(to_storage);
 
-  if (::rename(f.begin(), t.begin()) == -1) {
-    // If it's a cross device link, copy then delete, otherwise return the error
-    if (errno == EXDEV) {
-      if (error_code ec = copy_file(from, to, copy_option::overwrite_if_exists))
-        return ec;
-      bool Existed;
-      if (error_code ec = remove(from, Existed))
-        return ec;
-    } else
-      return error_code(errno, system_category());
-  }
+  if (::rename(f.begin(), t.begin()) == -1)
+    return error_code(errno, system_category());
 
   return error_code::success();
 }
@@ -529,57 +473,53 @@ error_code equivalent(const Twine &A, const Twine &B, bool &result) {
   return error_code::success();
 }
 
-error_code getUniqueID(const Twine Path, uint64_t &Result) {
-  SmallString<128> Storage;
-  StringRef P = Path.toNullTerminatedStringRef(Storage);
-
-  struct stat Status;
-  if (::stat(P.begin(), &Status) != 0)
-    return error_code(errno, system_category());
-
-  Result = Status.st_ino;
-  return error_code::success();
-}
-
-error_code status(const Twine &path, file_status &result) {
-  SmallString<128> path_storage;
-  StringRef p = path.toNullTerminatedStringRef(path_storage);
-
-  struct stat status;
-  if (::stat(p.begin(), &status) != 0) {
+static error_code fillStatus(int StatRet, const struct stat &Status,
+                             file_status &Result) {
+  if (StatRet != 0) {
     error_code ec(errno, system_category());
     if (ec == errc::no_such_file_or_directory)
-      result = file_status(file_type::file_not_found);
+      Result = file_status(file_type::file_not_found);
     else
-      result = file_status(file_type::status_error);
+      Result = file_status(file_type::status_error);
     return ec;
   }
 
-  perms prms = static_cast<perms>(status.st_mode);
-  
-  if (S_ISDIR(status.st_mode))
-    result = file_status(file_type::directory_file, prms);
-  else if (S_ISREG(status.st_mode))
-    result = file_status(file_type::regular_file, prms);
-  else if (S_ISBLK(status.st_mode))
-    result = file_status(file_type::block_file, prms);
-  else if (S_ISCHR(status.st_mode))
-    result = file_status(file_type::character_file, prms);
-  else if (S_ISFIFO(status.st_mode))
-    result = file_status(file_type::fifo_file, prms);
-  else if (S_ISSOCK(status.st_mode))
-    result = file_status(file_type::socket_file, prms);
-  else
-    result = file_status(file_type::type_unknown, prms);
+  file_type Type = file_type::type_unknown;
 
-  result.fs_st_dev = status.st_dev;
-  result.fs_st_ino = status.st_ino;
-  result.fs_st_mtime = status.st_mtime;
-  result.fs_st_uid = status.st_uid;
-  result.fs_st_gid = status.st_gid;
-  result.fs_st_size = status.st_size;
+  if (S_ISDIR(Status.st_mode))
+    Type = file_type::directory_file;
+  else if (S_ISREG(Status.st_mode))
+    Type = file_type::regular_file;
+  else if (S_ISBLK(Status.st_mode))
+    Type = file_type::block_file;
+  else if (S_ISCHR(Status.st_mode))
+    Type = file_type::character_file;
+  else if (S_ISFIFO(Status.st_mode))
+    Type = file_type::fifo_file;
+  else if (S_ISSOCK(Status.st_mode))
+    Type = file_type::socket_file;
+
+  perms Perms = static_cast<perms>(Status.st_mode);
+  Result =
+      file_status(Type, Perms, Status.st_dev, Status.st_ino, Status.st_mtime,
+                  Status.st_uid, Status.st_gid, Status.st_size);
 
   return error_code::success();
+}
+
+error_code status(const Twine &Path, file_status &Result) {
+  SmallString<128> PathStorage;
+  StringRef P = Path.toNullTerminatedStringRef(PathStorage);
+
+  struct stat Status;
+  int StatRet = ::stat(P.begin(), &Status);
+  return fillStatus(StatRet, Status, Result);
+}
+
+error_code status(int FD, file_status &Result) {
+  struct stat Status;
+  int StatRet = ::fstat(FD, &Status);
+  return fillStatus(StatRet, Status, Result);
 }
 
 error_code setLastModificationAndAccessTime(int FD, TimeValue Time) {
@@ -816,6 +756,40 @@ error_code unmap_file_pages(void *base, size_t size) {
   return error_code::success();
 }
 
+error_code openFileForRead(const Twine &Name, int &ResultFD) {
+  SmallString<128> Storage;
+  StringRef P = Name.toNullTerminatedStringRef(Storage);
+  while ((ResultFD = open(P.begin(), O_RDONLY)) < 0) {
+    if (errno != EINTR)
+      return error_code(errno, system_category());
+  }
+  return error_code::success();
+}
+
+error_code openFileForWrite(const Twine &Name, int &ResultFD,
+                            sys::fs::OpenFlags Flags, unsigned Mode) {
+  // Verify that we don't have both "append" and "excl".
+  assert((!(Flags & sys::fs::F_Excl) || !(Flags & sys::fs::F_Append)) &&
+         "Cannot specify both 'excl' and 'append' file creation flags!");
+
+  int OpenFlags = O_WRONLY | O_CREAT;
+
+  if (Flags & F_Append)
+    OpenFlags |= O_APPEND;
+  else
+    OpenFlags |= O_TRUNC;
+
+  if (Flags & F_Excl)
+    OpenFlags |= O_EXCL;
+
+  SmallString<128> Storage;
+  StringRef P = Name.toNullTerminatedStringRef(Storage);
+  while ((ResultFD = open(P.begin(), OpenFlags, Mode)) < 0) {
+    if (errno != EINTR)
+      return error_code(errno, system_category());
+  }
+  return error_code::success();
+}
 
 } // end namespace fs
 } // end namespace sys

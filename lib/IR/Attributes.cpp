@@ -104,24 +104,28 @@ bool Attribute::isStringAttribute() const {
 }
 
 Attribute::AttrKind Attribute::getKindAsEnum() const {
+  if (!pImpl) return None;
   assert((isEnumAttribute() || isAlignAttribute()) &&
          "Invalid attribute type to get the kind as an enum!");
   return pImpl ? pImpl->getKindAsEnum() : None;
 }
 
 uint64_t Attribute::getValueAsInt() const {
+  if (!pImpl) return 0;
   assert(isAlignAttribute() &&
          "Expected the attribute to be an alignment attribute!");
   return pImpl ? pImpl->getValueAsInt() : 0;
 }
 
 StringRef Attribute::getKindAsString() const {
+  if (!pImpl) return StringRef();
   assert(isStringAttribute() &&
          "Invalid attribute type to get the kind as a string!");
   return pImpl ? pImpl->getKindAsString() : StringRef();
 }
 
 StringRef Attribute::getValueAsString() const {
+  if (!pImpl) return StringRef();
   assert(isStringAttribute() &&
          "Invalid attribute type to get the value as a string!");
   return pImpl ? pImpl->getValueAsString() : StringRef();
@@ -504,6 +508,10 @@ uint64_t AttributeSetImpl::Raw(unsigned Index) const {
   return 0;
 }
 
+void AttributeSetImpl::dump() const {
+  AttributeSet(const_cast<AttributeSetImpl *>(this)).dump();
+}
+
 //===----------------------------------------------------------------------===//
 // AttributeSet Construction and Mutation Methods
 //===----------------------------------------------------------------------===//
@@ -617,12 +625,30 @@ AttributeSet AttributeSet::get(LLVMContext &C, unsigned Index,
 
 AttributeSet AttributeSet::get(LLVMContext &C, ArrayRef<AttributeSet> Attrs) {
   if (Attrs.empty()) return AttributeSet();
+  if (Attrs.size() == 1) return Attrs[0];
 
   SmallVector<std::pair<unsigned, AttributeSetNode*>, 8> AttrNodeVec;
-  for (unsigned I = 0, E = Attrs.size(); I != E; ++I) {
+  AttributeSetImpl *A0 = Attrs[0].pImpl;
+  if (A0)
+    AttrNodeVec.append(A0->getNode(0), A0->getNode(A0->getNumAttributes()));
+  // Copy all attributes from Attrs into AttrNodeVec while keeping AttrNodeVec
+  // ordered by index.  Because we know that each list in Attrs is ordered by
+  // index we only need to merge each successive list in rather than doing a
+  // full sort.
+  for (unsigned I = 1, E = Attrs.size(); I != E; ++I) {
     AttributeSetImpl *AS = Attrs[I].pImpl;
     if (!AS) continue;
-    AttrNodeVec.append(AS->getNode(0), AS->getNode(AS->getNumAttributes()));
+    SmallVector<std::pair<unsigned, AttributeSetNode *>, 8>::iterator
+      ANVI = AttrNodeVec.begin(), ANVE;
+    for (const AttributeSetImpl::IndexAttrPair
+             *AI = AS->getNode(0),
+             *AE = AS->getNode(AS->getNumAttributes());
+         AI != AE; ++AI) {
+      ANVE = AttrNodeVec.end();
+      while (ANVI != ANVE && ANVI->first <= AI->first)
+        ++ANVI;
+      ANVI = AttrNodeVec.insert(ANVI, *AI) + 1;
+    }
   }
 
   return getImpl(C, AttrNodeVec);
@@ -638,6 +664,13 @@ AttributeSet AttributeSet::addAttribute(LLVMContext &C, unsigned Index,
                                         StringRef Kind) const {
   llvm::AttrBuilder B;
   B.addAttribute(Kind);
+  return addAttributes(C, Index, AttributeSet::get(C, Index, B));
+}
+
+AttributeSet AttributeSet::addAttribute(LLVMContext &C, unsigned Index,
+                                        StringRef Kind, StringRef Value) const {
+  llvm::AttrBuilder B;
+  B.addAttribute(Kind, Value);
   return addAttributes(C, Index, AttributeSet::get(C, Index, B));
 }
 

@@ -89,7 +89,7 @@ attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
 
-!0 = metadata !{i32 786449, i32 12, metadata !3, metadata !"clang version 3.3 (trunk 175015)", i1 true, metadata !"", i32 0, metadata !1, metadata !10, metadata !11, metadata !29,  metadata !29, metadata !""} ; [ DW_TAG_compile_unit ] [/Users/manmanren/test-Nov/rdar_13183203/test2/dry.c] [DW_LANG_C99]
+!0 = metadata !{i32 786449, metadata !82, i32 12, metadata !"clang version 3.3 (trunk 175015)", i1 true, metadata !"", i32 0, metadata !1, metadata !10, metadata !11, metadata !29,  metadata !29, metadata !""} ; [ DW_TAG_compile_unit ] [/Users/manmanren/test-Nov/rdar_13183203/test2/dry.c] [DW_LANG_C99]
 !1 = metadata !{metadata !2}
 !2 = metadata !{i32 786436, metadata !82, null, metadata !"", i32 128, i64 32, i64 32, i32 0, i32 0, null, metadata !4, i32 0, i32 0} ; [ DW_TAG_enumeration_type ] [line 128, size 32, align 32, offset 0] [from ]
 !3 = metadata !{i32 786473, metadata !82} ; [ DW_TAG_file_type ]
@@ -101,7 +101,7 @@ attributes #1 = { nounwind readnone }
 !9 = metadata !{i32 786472, metadata !"Ident5", i64 10003} ; [ DW_TAG_enumerator ] [Ident5 :: 10003]
 !10 = metadata !{i32 0}
 !11 = metadata !{metadata !12}
-!12 = metadata !{i32 786478, metadata !3, metadata !"Proc8", metadata !"Proc8", metadata !"", metadata !3, i32 180, metadata !13, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 true, void (i32*, [51 x i32]*, i32, i32)* @Proc8, null, null, metadata !22, i32 185} ; [ DW_TAG_subprogram ] [line 180] [def] [scope 185] [Proc8]
+!12 = metadata !{i32 786478, metadata !82, metadata !3, metadata !"Proc8", metadata !"Proc8", metadata !"", i32 180, metadata !13, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 true, void (i32*, [51 x i32]*, i32, i32)* @Proc8, null, null, metadata !22, i32 185} ; [ DW_TAG_subprogram ] [line 180] [def] [scope 185] [Proc8]
 !13 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !14, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !14 = metadata !{null, metadata !15, metadata !17, metadata !21, metadata !21}
 !15 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !16} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from int]
@@ -162,7 +162,7 @@ attributes #1 = { nounwind readnone }
 !73 = metadata !{i32 191, i32 0, metadata !12, null}
 !74 = metadata !{i32 192, i32 0, metadata !12, null}
 !75 = metadata !{i32 193, i32 0, metadata !76, null}
-!76 = metadata !{i32 786443, metadata !12, i32 193, i32 0, metadata !3, i32 0} ; [ DW_TAG_lexical_block ] [/Users/manmanren/test-Nov/rdar_13183203/test2/dry.c]
+!76 = metadata !{i32 786443, metadata !82, metadata !12, i32 193, i32 0, i32 0} ; [ DW_TAG_lexical_block ] [/Users/manmanren/test-Nov/rdar_13183203/test2/dry.c]
 !77 = metadata !{i32 194, i32 0, metadata !76, null}
 !78 = metadata !{i32 195, i32 0, metadata !12, null}
 !79 = metadata !{i32 196, i32 0, metadata !12, null}

@@ -94,20 +94,20 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                   bool KillSrc) const {
   unsigned Opc = 0, ZeroReg = 0;
 
-  if (Mips::CPURegsRegClass.contains(DestReg)) { // Copy to CPU Reg.
-    if (Mips::CPURegsRegClass.contains(SrcReg))
-      Opc = Mips::OR, ZeroReg = Mips::ZERO;
+  if (Mips::GPR32RegClass.contains(DestReg)) { // Copy to CPU Reg.
+    if (Mips::GPR32RegClass.contains(SrcReg))
+      Opc = Mips::ADDu, ZeroReg = Mips::ZERO;
     else if (Mips::CCRRegClass.contains(SrcReg))
       Opc = Mips::CFC1;
     else if (Mips::FGR32RegClass.contains(SrcReg))
       Opc = Mips::MFC1;
-    else if (Mips::HIRegsRegClass.contains(SrcReg))
+    else if (Mips::HI32RegClass.contains(SrcReg))
       Opc = Mips::MFHI, SrcReg = 0;
-    else if (Mips::LORegsRegClass.contains(SrcReg))
+    else if (Mips::LO32RegClass.contains(SrcReg))
       Opc = Mips::MFLO, SrcReg = 0;
-    else if (Mips::HIRegsDSPRegClass.contains(SrcReg))
+    else if (Mips::HI32DSPRegClass.contains(SrcReg))
       Opc = Mips::MFHI_DSP;
-    else if (Mips::LORegsDSPRegClass.contains(SrcReg))
+    else if (Mips::LO32DSPRegClass.contains(SrcReg))
       Opc = Mips::MFLO_DSP;
     else if (Mips::DSPCCRegClass.contains(SrcReg)) {
       BuildMI(MBB, I, DL, get(Mips::RDDSP), DestReg).addImm(1 << 4)
@@ -115,18 +115,18 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       return;
     }
   }
-  else if (Mips::CPURegsRegClass.contains(SrcReg)) { // Copy from CPU Reg.
+  else if (Mips::GPR32RegClass.contains(SrcReg)) { // Copy from CPU Reg.
     if (Mips::CCRRegClass.contains(DestReg))
       Opc = Mips::CTC1;
     else if (Mips::FGR32RegClass.contains(DestReg))
       Opc = Mips::MTC1;
-    else if (Mips::HIRegsRegClass.contains(DestReg))
+    else if (Mips::HI32RegClass.contains(DestReg))
       Opc = Mips::MTHI, DestReg = 0;
-    else if (Mips::LORegsRegClass.contains(DestReg))
+    else if (Mips::LO32RegClass.contains(DestReg))
       Opc = Mips::MTLO, DestReg = 0;
-    else if (Mips::HIRegsDSPRegClass.contains(DestReg))
+    else if (Mips::HI32DSPRegClass.contains(DestReg))
       Opc = Mips::MTHI_DSP;
-    else if (Mips::LORegsDSPRegClass.contains(DestReg))
+    else if (Mips::LO32DSPRegClass.contains(DestReg))
       Opc = Mips::MTLO_DSP;
     else if (Mips::DSPCCRegClass.contains(DestReg)) {
       BuildMI(MBB, I, DL, get(Mips::WRDSP))
@@ -141,22 +141,20 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Opc = Mips::FMOV_D32;
   else if (Mips::FGR64RegClass.contains(DestReg, SrcReg))
     Opc = Mips::FMOV_D64;
-  else if (Mips::CCRRegClass.contains(DestReg, SrcReg))
-    Opc = Mips::MOVCCRToCCR;
-  else if (Mips::CPU64RegsRegClass.contains(DestReg)) { // Copy to CPU64 Reg.
-    if (Mips::CPU64RegsRegClass.contains(SrcReg))
-      Opc = Mips::OR64, ZeroReg = Mips::ZERO_64;
-    else if (Mips::HIRegs64RegClass.contains(SrcReg))
+  else if (Mips::GPR64RegClass.contains(DestReg)) { // Copy to CPU64 Reg.
+    if (Mips::GPR64RegClass.contains(SrcReg))
+      Opc = Mips::DADDu, ZeroReg = Mips::ZERO_64;
+    else if (Mips::HI64RegClass.contains(SrcReg))
       Opc = Mips::MFHI64, SrcReg = 0;
-    else if (Mips::LORegs64RegClass.contains(SrcReg))
+    else if (Mips::LO64RegClass.contains(SrcReg))
       Opc = Mips::MFLO64, SrcReg = 0;
     else if (Mips::FGR64RegClass.contains(SrcReg))
       Opc = Mips::DMFC1;
   }
-  else if (Mips::CPU64RegsRegClass.contains(SrcReg)) { // Copy from CPU64 Reg.
-    if (Mips::HIRegs64RegClass.contains(DestReg))
+  else if (Mips::GPR64RegClass.contains(SrcReg)) { // Copy from CPU64 Reg.
+    if (Mips::HI64RegClass.contains(DestReg))
       Opc = Mips::MTHI64, DestReg = 0;
-    else if (Mips::LORegs64RegClass.contains(DestReg))
+    else if (Mips::LO64RegClass.contains(DestReg))
       Opc = Mips::MTLO64, DestReg = 0;
     else if (Mips::FGR64RegClass.contains(DestReg))
       Opc = Mips::DMTC1;
@@ -187,16 +185,16 @@ storeRegToStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
   unsigned Opc = 0;
 
-  if (Mips::CPURegsRegClass.hasSubClassEq(RC))
+  if (Mips::GPR32RegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::SW_P8 : Mips::SW;
-  else if (Mips::CPU64RegsRegClass.hasSubClassEq(RC))
+  else if (Mips::GPR64RegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::SD_P8 : Mips::SD;
-  else if (Mips::ACRegsRegClass.hasSubClassEq(RC))
-    Opc = IsN64 ? Mips::STORE_AC64_P8 : Mips::STORE_AC64;
-  else if (Mips::ACRegsDSPRegClass.hasSubClassEq(RC))
-    Opc = IsN64 ? Mips::STORE_AC_DSP_P8 : Mips::STORE_AC_DSP;
-  else if (Mips::ACRegs128RegClass.hasSubClassEq(RC))
-    Opc = IsN64 ? Mips::STORE_AC128_P8 : Mips::STORE_AC128;
+  else if (Mips::ACC64RegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::STORE_ACC64_P8 : Mips::STORE_ACC64;
+  else if (Mips::ACC64DSPRegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::STORE_ACC64DSP_P8 : Mips::STORE_ACC64DSP;
+  else if (Mips::ACC128RegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::STORE_ACC128_P8 : Mips::STORE_ACC128;
   else if (Mips::DSPCCRegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::STORE_CCOND_DSP_P8 : Mips::STORE_CCOND_DSP;
   else if (Mips::FGR32RegClass.hasSubClassEq(RC))
@@ -220,16 +218,16 @@ loadRegFromStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   MachineMemOperand *MMO = GetMemOperand(MBB, FI, MachineMemOperand::MOLoad);
   unsigned Opc = 0;
 
-  if (Mips::CPURegsRegClass.hasSubClassEq(RC))
+  if (Mips::GPR32RegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::LW_P8 : Mips::LW;
-  else if (Mips::CPU64RegsRegClass.hasSubClassEq(RC))
+  else if (Mips::GPR64RegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::LD_P8 : Mips::LD;
-  else if (Mips::ACRegsRegClass.hasSubClassEq(RC))
-    Opc = IsN64 ? Mips::LOAD_AC64_P8 : Mips::LOAD_AC64;
-  else if (Mips::ACRegsDSPRegClass.hasSubClassEq(RC))
-    Opc = IsN64 ? Mips::LOAD_AC_DSP_P8 : Mips::LOAD_AC_DSP;
-  else if (Mips::ACRegs128RegClass.hasSubClassEq(RC))
-    Opc = IsN64 ? Mips::LOAD_AC128_P8 : Mips::LOAD_AC128;
+  else if (Mips::ACC64RegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::LOAD_ACC64_P8 : Mips::LOAD_ACC64;
+  else if (Mips::ACC64DSPRegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::LOAD_ACC64DSP_P8 : Mips::LOAD_ACC64DSP;
+  else if (Mips::ACC128RegClass.hasSubClassEq(RC))
+    Opc = IsN64 ? Mips::LOAD_ACC128_P8 : Mips::LOAD_ACC128;
   else if (Mips::DSPCCRegClass.hasSubClassEq(RC))
     Opc = IsN64 ? Mips::LOAD_CCOND_DSP_P8 : Mips::LOAD_CCOND_DSP;
   else if (Mips::FGR32RegClass.hasSubClassEq(RC))
@@ -342,7 +340,7 @@ MipsSEInstrInfo::loadImmediate(int64_t Imm, MachineBasicBlock &MBB,
   unsigned LUi = STI.isABI_N64() ? Mips::LUi64 : Mips::LUi;
   unsigned ZEROReg = STI.isABI_N64() ? Mips::ZERO_64 : Mips::ZERO;
   const TargetRegisterClass *RC = STI.isABI_N64() ?
-    &Mips::CPU64RegsRegClass : &Mips::CPURegsRegClass;
+    &Mips::GPR64RegClass : &Mips::GPR32RegClass;
   bool LastInstrIsADDiu = NewImm;
 
   const MipsAnalyzeImmediate::InstSeq &Seq =
@@ -513,7 +511,6 @@ void MipsSEInstrInfo::expandEhReturn(MachineBasicBlock &MBB,
   // indirect jump to TargetReg
   const MipsSubtarget &STI = TM.getSubtarget<MipsSubtarget>();
   unsigned ADDU = STI.isABI_N64() ? Mips::DADDu : Mips::ADDu;
-  unsigned OR = STI.isABI_N64() ? Mips::OR64 : Mips::OR;
   unsigned JR = STI.isABI_N64() ? Mips::JR64 : Mips::JR;
   unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
   unsigned RA = STI.isABI_N64() ? Mips::RA_64 : Mips::RA;
@@ -522,13 +519,13 @@ void MipsSEInstrInfo::expandEhReturn(MachineBasicBlock &MBB,
   unsigned OffsetReg = I->getOperand(0).getReg();
   unsigned TargetReg = I->getOperand(1).getReg();
 
-  // or   $ra, $v0, $zero
+  // addu $ra, $v0, $zero
   // addu $sp, $sp, $v1
   // jr   $ra
   if (TM.getRelocationModel() == Reloc::PIC_)
-    BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(OR), T9)
+    BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(ADDU), T9)
         .addReg(TargetReg).addReg(ZERO);
-  BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(OR), RA)
+  BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(ADDU), RA)
       .addReg(TargetReg).addReg(ZERO);
   BuildMI(MBB, I, I->getDebugLoc(), TM.getInstrInfo()->get(ADDU), SP)
       .addReg(SP).addReg(OffsetReg);

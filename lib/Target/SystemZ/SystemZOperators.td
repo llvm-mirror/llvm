@@ -15,13 +15,15 @@ def SDT_CallSeqEnd          : SDCallSeqEnd<[SDTCisVT<0, i64>,
                                             SDTCisVT<1, i64>]>;
 def SDT_ZCall               : SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>;
 def SDT_ZCmp                : SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
-def SDT_ZBRCCMask           : SDTypeProfile<0, 2,
+def SDT_ZBRCCMask           : SDTypeProfile<0, 3,
                                             [SDTCisVT<0, i8>,
-                                             SDTCisVT<1, OtherVT>]>;
-def SDT_ZSelectCCMask       : SDTypeProfile<1, 3,
+                                             SDTCisVT<1, i8>,
+                                             SDTCisVT<2, OtherVT>]>;
+def SDT_ZSelectCCMask       : SDTypeProfile<1, 4,
                                             [SDTCisSameAs<0, 1>,
                                              SDTCisSameAs<1, 2>,
-                                             SDTCisVT<3, i8>]>;
+                                             SDTCisVT<3, i8>,
+                                             SDTCisVT<4, i8>]>;
 def SDT_ZWrapPtr            : SDTypeProfile<1, 1,
                                             [SDTCisSameAs<0, 1>,
                                              SDTCisPtrTy<0>]>;
@@ -52,10 +54,11 @@ def SDT_ZAtomicCmpSwapW     : SDTypeProfile<1, 6,
                                              SDTCisVT<4, i32>,
                                              SDTCisVT<5, i32>,
                                              SDTCisVT<6, i32>]>;
-def SDT_ZCopy               : SDTypeProfile<0, 3,
+def SDT_ZMemMemLength       : SDTypeProfile<0, 3,
                                             [SDTCisPtrTy<0>,
                                              SDTCisPtrTy<1>,
                                              SDTCisVT<2, i32>]>;
+def SDT_ZI32Intrinsic       : SDTypeProfile<1, 0, [SDTCisVT<0, i32>]>;
 
 //===----------------------------------------------------------------------===//
 // Node definitions
@@ -107,8 +110,12 @@ def z_atomic_loadw_umin : AtomicWOp<"ATOMIC_LOADW_UMIN">;
 def z_atomic_loadw_umax : AtomicWOp<"ATOMIC_LOADW_UMAX">;
 def z_atomic_cmp_swapw  : AtomicWOp<"ATOMIC_CMP_SWAPW", SDT_ZAtomicCmpSwapW>;
 
-def z_mvc               : SDNode<"SystemZISD::MVC", SDT_ZCopy,
+def z_mvc               : SDNode<"SystemZISD::MVC", SDT_ZMemMemLength,
                                  [SDNPHasChain, SDNPMayStore, SDNPMayLoad]>;
+def z_clc               : SDNode<"SystemZISD::CLC", SDT_ZMemMemLength,
+                                 [SDNPHasChain, SDNPOutGlue, SDNPMayLoad]>;
+def z_ipm               : SDNode<"SystemZISD::IPM", SDT_ZI32Intrinsic,
+                                 [SDNPInGlue]>;
 
 //===----------------------------------------------------------------------===//
 // Pattern fragments

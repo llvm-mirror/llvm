@@ -9,6 +9,7 @@
 
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -79,7 +80,7 @@ private:
       PostfixStack.push_back(std::make_pair(Op, Val));
     }
     
-    void popOperator() { InfixOperatorStack.pop_back_val(); }
+    void popOperator() { InfixOperatorStack.pop_back(); }
     void pushOperator(InfixCalculatorTok Op) {
       // Push the new operator if the stack is empty.
       if (InfixOperatorStack.empty()) {
@@ -117,12 +118,12 @@ private:
         
         if (StackOp == IC_RPAREN) {
           ++ParenCount;
-          InfixOperatorStack.pop_back_val();
+          InfixOperatorStack.pop_back();
         } else if (StackOp == IC_LPAREN) {
           --ParenCount;
-          InfixOperatorStack.pop_back_val();
+          InfixOperatorStack.pop_back();
         } else {
-          InfixOperatorStack.pop_back_val();
+          InfixOperatorStack.pop_back();
           PostfixStack.push_back(std::make_pair(StackOp, 0));
         }
       }
@@ -830,6 +831,18 @@ struct X86Operand : public MCParsedAsmOperand {
     return Kind == Memory && (!Mem.Size || Mem.Size == 64) &&
       getMemIndexReg() >= X86::YMM0 && getMemIndexReg() <= X86::YMM15;
   }
+  bool isMemVZ32() const {
+    return Kind == Memory && (!Mem.Size || Mem.Size == 32) &&
+      getMemIndexReg() >= X86::ZMM0 && getMemIndexReg() <= X86::ZMM31;
+  }
+  bool isMemVZ64() const {
+    return Kind == Memory && (!Mem.Size || Mem.Size == 64) &&
+      getMemIndexReg() >= X86::ZMM0 && getMemIndexReg() <= X86::ZMM31;
+  }
+
+  bool isMem512() const {
+    return Kind == Memory && (!Mem.Size || Mem.Size == 512);
+  }
 
   bool isAbsMem() const {
     return Kind == Memory && !getMemSegReg() && !getMemBaseReg() &&
@@ -887,6 +900,16 @@ struct X86Operand : public MCParsedAsmOperand {
     addMemOperands(Inst, N);
   }
   void addMemVY64Operands(MCInst &Inst, unsigned N) const {
+    addMemOperands(Inst, N);
+  }
+
+  void addMemVZ32Operands(MCInst &Inst, unsigned N) const {
+    addMemOperands(Inst, N);
+  }
+  void addMemVZ64Operands(MCInst &Inst, unsigned N) const {
+    addMemOperands(Inst, N);
+  }
+  void addMem512Operands(MCInst &Inst, unsigned N) const {
     addMemOperands(Inst, N);
   }
 

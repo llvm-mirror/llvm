@@ -1186,9 +1186,15 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
   if (Value *V = SimplifyFAddInst(LHS, RHS, I.getFastMathFlags(), TD))
     return ReplaceInstUsesWith(I, V);
 
-  if (isa<Constant>(RHS) && isa<PHINode>(LHS))
-    if (Instruction *NV = FoldOpIntoPhi(I))
-      return NV;
+  if (isa<Constant>(RHS)) {
+    if (isa<PHINode>(LHS))
+      if (Instruction *NV = FoldOpIntoPhi(I))
+        return NV;
+
+    if (SelectInst *SI = dyn_cast<SelectInst>(LHS))
+      if (Instruction *NV = FoldOpIntoSelect(I, SI))
+        return NV;
+  }
 
   // -A + B  -->  B - A
   // -A + -B  -->  -(A + B)
@@ -1263,49 +1269,6 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
     }
   }
 
-  // A * (1 - uitofp i1 C) + B * (uitofp i1 C) -> select C, B, A
-  {
-    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
-      Value *M1L, *M1R, *M2L, *M2R;
-      if (match(LHS, m_FMul(m_Value(M1L), m_Value(M1R))) &&
-          match(RHS, m_FMul(m_Value(M2L), m_Value(M2R)))) {
-
-        Value *A, *B, *C1, *C2;
-        if (!match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))))
-          std::swap(M1L, M1R);
-        if (!match(M2R, m_UIToFp(m_Value(C2)))) 
-          std::swap(M2L, M2R);
-
-        if (match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))) &&
-            match(M2R, m_UIToFp(m_Value(C2))) &&
-            C2->getType()->isIntegerTy(1) &&
-            C1 == C2) {
-          A = M1L;
-          B = M2L;
-          return SelectInst::Create(C1, B, A);
-        }
-        
-        std::swap(M1L, M2L);
-        std::swap(M1R, M2R);
-        
-        if (!match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))))
-          std::swap(M1L, M1R);
-        if (!match(M2R, m_UIToFp(m_Value(C2)))) 
-          std::swap(M2L, M2R);
-
-        if (match(M1R, m_FSub(m_FPOne(), m_UIToFp(m_Value(C1)))) &&
-            match(M2R, m_UIToFp(m_Value(C2))) &&
-            C2->getType()->isIntegerTy(1) &&
-            C1 == C2) {
-          A = M1L;
-          B = M2L;
-          return SelectInst::Create(C1, B, A);
-        }
-      }
-    }
-  }
-
-  
   if (I.hasUnsafeAlgebra()) {
     if (Value *V = FAddCombine(Builder).simplify(&I))
       return ReplaceInstUsesWith(I, V);
@@ -1560,9 +1523,33 @@ Instruction *InstCombiner::visitFSub(BinaryOperator &I) {
   if (Value *V = SimplifyFSubInst(Op0, Op1, I.getFastMathFlags(), TD))
     return ReplaceInstUsesWith(I, V);
 
-  // If this is a 'B = x-(-A)', change to B = x+A...
-  if (Value *V = dyn_castFNegVal(Op1))
-    return BinaryOperator::CreateFAdd(Op0, V);
+  if (isa<Constant>(Op0))
+    if (SelectInst *SI = dyn_cast<SelectInst>(Op1))
+      if (Instruction *NV = FoldOpIntoSelect(I, SI))
+        return NV;
+
+  // If this is a 'B = x-(-A)', change to B = x+A, potentially looking
+  // through FP extensions/truncations along the way.
+  if (Value *V = dyn_castFNegVal(Op1)) {
+    Instruction *NewI = BinaryOperator::CreateFAdd(Op0, V);
+    NewI->copyFastMathFlags(&I);
+    return NewI;
+  }
+  if (FPTruncInst *FPTI = dyn_cast<FPTruncInst>(Op1)) {
+    if (Value *V = dyn_castFNegVal(FPTI->getOperand(0))) {
+      Value *NewTrunc = Builder->CreateFPTrunc(V, I.getType());
+      Instruction *NewI = BinaryOperator::CreateFAdd(Op0, NewTrunc);
+      NewI->copyFastMathFlags(&I);
+      return NewI;
+    }
+  } else if (FPExtInst *FPEI = dyn_cast<FPExtInst>(Op1)) {
+    if (Value *V = dyn_castFNegVal(FPEI->getOperand(0))) {
+      Value *NewExt = Builder->CreateFPExt(V, I.getType());
+      Instruction *NewI = BinaryOperator::CreateFAdd(Op0, NewExt);
+      NewI->copyFastMathFlags(&I);
+      return NewI;
+    }
+  }
 
   if (I.hasUnsafeAlgebra()) {
     if (Value *V = FAddCombine(Builder).simplify(&I))

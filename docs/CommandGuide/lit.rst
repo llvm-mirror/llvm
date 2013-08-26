@@ -149,12 +149,11 @@ ADDITIONAL OPTIONS
 
 .. option:: --show-suites
 
- List the discovered test suites as part of the standard output.
+ List the discovered test suites and exit.
 
-.. option:: --repeat=N
+.. option:: --show-tests
 
- Run each test ``N`` times.  Currently this is primarily useful for timing
- tests, other results are not collated in any reasonable fashion.
+ List all of the the discovered tests and exit.
 
 EXIT STATUS
 -----------
@@ -315,6 +314,10 @@ executed, two important global variables are predefined:
  arguments: (1) the parent configuration, (2) the new configuration (which the
  *on_clone* function will generally modify), and (3) the test path to the new
  directory being scanned.
+
+ **pipefail** Normally a test using a shell pipe fails if any of the commands
+ on the pipe fail. If this is not desired, setting this variable to false
+ makes the test fail only if the last command in the pipe fails.
 
 TEST DISCOVERY
 ~~~~~~~~~~~~~~

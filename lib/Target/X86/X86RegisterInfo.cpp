@@ -241,6 +241,11 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 
   case CallingConv::Intel_OCL_BI: {
     bool HasAVX = TM.getSubtarget<X86Subtarget>().hasAVX();
+    bool HasAVX512 = TM.getSubtarget<X86Subtarget>().hasAVX512();
+    if (HasAVX512 && IsWin64)
+      return CSR_Win64_Intel_OCL_BI_AVX512_SaveList;
+    if (HasAVX512 && Is64Bit)
+      return CSR_64_Intel_OCL_BI_AVX512_SaveList;
     if (HasAVX && IsWin64)
       return CSR_Win64_Intel_OCL_BI_AVX_SaveList;
     if (HasAVX && Is64Bit)
@@ -275,8 +280,13 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 const uint32_t*
 X86RegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
   bool HasAVX = TM.getSubtarget<X86Subtarget>().hasAVX();
+  bool HasAVX512 = TM.getSubtarget<X86Subtarget>().hasAVX512();
 
   if (CC == CallingConv::Intel_OCL_BI) {
+    if (IsWin64 && HasAVX512)
+      return CSR_Win64_Intel_OCL_BI_AVX512_RegMask;
+    if (Is64Bit && HasAVX512)
+      return CSR_64_Intel_OCL_BI_AVX512_RegMask;
     if (IsWin64 && HasAVX)
       return CSR_Win64_Intel_OCL_BI_AVX_RegMask;
     if (Is64Bit && HasAVX)
@@ -344,14 +354,8 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(X86::GS);
 
   // Mark the floating point stack registers as reserved.
-  Reserved.set(X86::ST0);
-  Reserved.set(X86::ST1);
-  Reserved.set(X86::ST2);
-  Reserved.set(X86::ST3);
-  Reserved.set(X86::ST4);
-  Reserved.set(X86::ST5);
-  Reserved.set(X86::ST6);
-  Reserved.set(X86::ST7);
+  for (unsigned n = 0; n != 8; ++n)
+    Reserved.set(X86::ST0 + n);
 
   // Reserve the registers that only exist in 64-bit mode.
   if (!Is64Bit) {
@@ -364,19 +368,17 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
     for (unsigned n = 0; n != 8; ++n) {
       // R8, R9, ...
-      static const uint16_t GPR64[] = {
-        X86::R8,  X86::R9,  X86::R10, X86::R11,
-        X86::R12, X86::R13, X86::R14, X86::R15
-      };
-      for (MCRegAliasIterator AI(GPR64[n], this, true); AI.isValid(); ++AI)
+      for (MCRegAliasIterator AI(X86::R8 + n, this, true); AI.isValid(); ++AI)
         Reserved.set(*AI);
 
       // XMM8, XMM9, ...
-      static const uint16_t XMMReg[] = {
-        X86::XMM8,  X86::XMM9, X86::XMM10, X86::XMM11,
-        X86::XMM12, X86::XMM13, X86::XMM14, X86::XMM15
-      };
-      for (MCRegAliasIterator AI(XMMReg[n], this, true); AI.isValid(); ++AI)
+      for (MCRegAliasIterator AI(X86::XMM8 + n, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
+    }
+  }
+  if (!Is64Bit || !TM.getSubtarget<X86Subtarget>().hasAVX512()) {
+    for (unsigned n = 16; n != 32; ++n) {
+      for (MCRegAliasIterator AI(X86::XMM0 + n, this, true); AI.isValid(); ++AI)
         Reserved.set(*AI);
     }
   }
@@ -409,10 +411,11 @@ bool X86RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
 }
 
 bool X86RegisterInfo::canRealignStack(const MachineFunction &MF) const {
+  if (MF.getFunction()->hasFnAttribute("no-realign-stack"))
+    return false;
+
   const MachineFrameInfo *MFI = MF.getFrameInfo();
   const MachineRegisterInfo *MRI = &MF.getRegInfo();
-  if (!MF.getTarget().Options.RealignStack)
-    return false;
 
   // Stack realignment requires a frame pointer.  If we already started
   // register allocation with frame pointer elimination, it is too late now.
@@ -690,4 +693,15 @@ unsigned getX86SubSuperRegister(unsigned Reg, MVT::SimpleValueType VT,
     }
   }
 }
+
+unsigned get512BitSuperRegister(unsigned Reg) {
+  if (Reg >= X86::XMM0 && Reg <= X86::XMM31)
+    return X86::ZMM0 + (Reg - X86::XMM0);
+  if (Reg >= X86::YMM0 && Reg <= X86::YMM31)
+    return X86::ZMM0 + (Reg - X86::YMM0);
+  if (Reg >= X86::ZMM0 && Reg <= X86::ZMM31)
+    return Reg;
+  llvm_unreachable("Unexpected SIMD register");
+}
+
 }

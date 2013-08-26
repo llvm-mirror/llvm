@@ -48,7 +48,12 @@ class DWARFContext : public DIContext {
   void parseDWOCompileUnits();
 
 public:
-  DWARFContext() {}
+  DWARFContext() : DIContext(CK_DWARF) {}
+
+  static bool classof(const DIContext *DICtx) {
+    return DICtx->getKind() == CK_DWARF;
+  }
+
   virtual void dump(raw_ostream &OS, DIDumpType DumpType = DIDT_All);
 
   /// Get the number of compile units in this context.
@@ -130,7 +135,7 @@ public:
   virtual const RelocAddrMap &infoDWORelocMap() const = 0;
 
   static bool isSupportedVersion(unsigned version) {
-    return version == 2 || version == 3;
+    return version == 2 || version == 3 || version == 4;
   }
 private:
   /// Return the compile unit that includes an offset (relative to .debug_info).

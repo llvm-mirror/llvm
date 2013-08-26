@@ -10,9 +10,6 @@
 LEVEL = ../..
 include $(LEVEL)/Makefile.config
 
-ifneq ($(strip $(LLVMCC)),)
-BYTECODE_LIBRARY = 1
-endif
 LIBRARYNAME = profile_rt
 LINK_LIBS_IN_SHARED = 1
 SHARED_LIBRARY = 1
@@ -43,7 +40,7 @@ ifeq ($(HOST_OS),Darwin)
     ifneq ($(DARWIN_VERS),8)
        LLVMLibsOptions    := $(LLVMLibsOptions) \
                             -Wl,-install_name \
-                            -Wl,"@executable_path/../lib/lib$(LIBRARYNAME)$(SHLIBEXT)"
+                            -Wl,"@rpath/lib$(LIBRARYNAME)$(SHLIBEXT)"
     endif
 
     # If we're doing an Apple-style build, add the LTO object path.

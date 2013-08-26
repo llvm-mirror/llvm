@@ -38,7 +38,7 @@
 #define LLVM_CODEGEN_REGALLOCBASE
 
 #include "llvm/ADT/OwningPtr.h"
-#include "llvm/CodeGen/LiveIntervalUnion.h"
+#include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 
 namespace llvm {
@@ -93,7 +93,7 @@ protected:
                                  SmallVectorImpl<LiveInterval*> &splitLVRs) = 0;
 
   // Use this group name for NamedRegionTimer.
-  static const char *TimerGroupName;
+  static const char TimerGroupName[];
 
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.

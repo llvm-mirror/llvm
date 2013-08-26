@@ -34,6 +34,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cctype>
 
 using namespace llvm;
 
@@ -385,6 +386,8 @@ MipsTargetLowering(MipsTargetMachine &TM)
     setTruncStoreAction(MVT::i64, MVT::i32, Custom);
   }
 
+  setOperationAction(ISD::TRAP, MVT::Other, Legal);
+
   setTargetDAGCombine(ISD::SDIVREM);
   setTargetDAGCombine(ISD::UDIVREM);
   setTargetDAGCombine(ISD::SELECT);
@@ -422,8 +425,8 @@ static SDValue performDivRemCombine(SDNode *N, SelectionDAG &DAG,
     return SDValue();
 
   EVT Ty = N->getValueType(0);
-  unsigned LO = (Ty == MVT::i32) ? Mips::LO : Mips::LO64;
-  unsigned HI = (Ty == MVT::i32) ? Mips::HI : Mips::HI64;
+  unsigned LO = (Ty == MVT::i32) ? Mips::LO0 : Mips::LO0_64;
+  unsigned HI = (Ty == MVT::i32) ? Mips::HI0 : Mips::HI0_64;
   unsigned Opc = N->getOpcode() == ISD::SDIVREM ? MipsISD::DivRem16 :
                                                   MipsISD::DivRemU16;
   SDLoc DL(N);
@@ -519,9 +522,10 @@ static SDValue createCMovFP(SelectionDAG &DAG, SDValue Cond, SDValue True,
                             SDValue False, SDLoc DL) {
   ConstantSDNode *CC = cast<ConstantSDNode>(Cond.getOperand(2));
   bool invert = invertFPCondCodeUser((Mips::CondCode)CC->getSExtValue());
+  SDValue FCC0 = DAG.getRegister(Mips::FCC0, MVT::i32);
 
   return DAG.getNode((invert ? MipsISD::CMovFP_F : MipsISD::CMovFP_T), DL,
-                     True.getValueType(), True, False, Cond);
+                     True.getValueType(), True, FCC0, False, Cond);
 }
 
 static SDValue performSELECTCombine(SDNode *N, SelectionDAG &DAG,
@@ -1438,8 +1442,9 @@ lowerBRCOND(SDValue Op, SelectionDAG &DAG) const
     (Mips::CondCode)cast<ConstantSDNode>(CCNode)->getZExtValue();
   unsigned Opc = invertFPCondCodeUser(CC) ? Mips::BRANCH_F : Mips::BRANCH_T;
   SDValue BrCode = DAG.getConstant(Opc, MVT::i32);
+  SDValue FCC0 = DAG.getRegister(Mips::FCC0, MVT::i32);
   return DAG.getNode(MipsISD::FPBrcond, DL, Op.getValueType(), Chain, BrCode,
-                     Dest, CondRes);
+                     FCC0, Dest, CondRes);
 }
 
 SDValue MipsTargetLowering::
@@ -2615,9 +2620,9 @@ MipsTargetLowering::LowerFormalArguments(SDValue Chain,
 
       if (RegVT == MVT::i32)
         RC = Subtarget->inMips16Mode()? &Mips::CPU16RegsRegClass :
-                                        &Mips::CPURegsRegClass;
+                                        &Mips::GPR32RegClass;
       else if (RegVT == MVT::i64)
-        RC = &Mips::CPU64RegsRegClass;
+        RC = &Mips::GPR64RegClass;
       else if (RegVT == MVT::f32)
         RC = &Mips::FGR32RegClass;
       else if (RegVT == MVT::f64)
@@ -2876,6 +2881,79 @@ MipsTargetLowering::getSingleConstraintMatchWeight(
   return weight;
 }
 
+/// This is a helper function to parse a physical register string and split it
+/// into non-numeric and numeric parts (Prefix and Reg). The first boolean flag
+/// that is returned indicates whether parsing was successful. The second flag
+/// is true if the numeric part exists.
+static std::pair<bool, bool>
+parsePhysicalReg(const StringRef &C, std::string &Prefix,
+                 unsigned long long &Reg) {
+  if (C.front() != '{' || C.back() != '}')
+    return std::make_pair(false, false);
+
+  // Search for the first numeric character.
+  StringRef::const_iterator I, B = C.begin() + 1, E = C.end() - 1;
+  I = std::find_if(B, E, std::ptr_fun(isdigit));
+
+  Prefix.assign(B, I - B);
+
+  // The second flag is set to false if no numeric characters were found.
+  if (I == E)
+    return std::make_pair(true, false);
+
+  // Parse the numeric characters.
+  return std::make_pair(!getAsUnsignedInteger(StringRef(I, E - I), 10, Reg),
+                        true);
+}
+
+std::pair<unsigned, const TargetRegisterClass *> MipsTargetLowering::
+parseRegForInlineAsmConstraint(const StringRef &C, MVT VT) const {
+  const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
+  const TargetRegisterClass *RC;
+  std::string Prefix;
+  unsigned long long Reg;
+
+  std::pair<bool, bool> R = parsePhysicalReg(C, Prefix, Reg);
+
+  if (!R.first)
+    return std::make_pair((unsigned)0, (const TargetRegisterClass*)0);
+
+  if ((Prefix == "hi" || Prefix == "lo")) { // Parse hi/lo.
+    // No numeric characters follow "hi" or "lo".
+    if (R.second)
+      return std::make_pair((unsigned)0, (const TargetRegisterClass*)0);
+
+    RC = TRI->getRegClass(Prefix == "hi" ?
+                          Mips::HI32RegClassID : Mips::LO32RegClassID);
+    return std::make_pair(*(RC->begin()), RC);
+  }
+
+  if (!R.second)
+    return std::make_pair((unsigned)0, (const TargetRegisterClass*)0);
+
+  if (Prefix == "$f") { // Parse $f0-$f31.
+    // If the size of FP registers is 64-bit or Reg is an even number, select
+    // the 64-bit register class. Otherwise, select the 32-bit register class.
+    if (VT == MVT::Other)
+      VT = (Subtarget->isFP64bit() || !(Reg % 2)) ? MVT::f64 : MVT::f32;
+
+    RC= getRegClassFor(VT);
+
+    if (RC == &Mips::AFGR64RegClass) {
+      assert(Reg % 2 == 0);
+      Reg >>= 1;
+    }
+  } else if (Prefix == "$fcc") { // Parse $fcc0-$fcc7.
+    RC = TRI->getRegClass(Mips::FCCRegClassID);
+  } else { // Parse $0-$31.
+    assert(Prefix == "$");
+    RC = getRegClassFor((VT == MVT::Other) ? MVT::i32 : VT);
+  }
+
+  assert(Reg < RC->getNumRegs());
+  return std::make_pair(*(RC->begin() + Reg), RC);
+}
+
 /// Given a register class constraint, like 'r', if this corresponds directly
 /// to an LLVM register class, return a register of 0 and the register class
 /// pointer.
@@ -2890,12 +2968,12 @@ getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const
       if (VT == MVT::i32 || VT == MVT::i16 || VT == MVT::i8) {
         if (Subtarget->inMips16Mode())
           return std::make_pair(0U, &Mips::CPU16RegsRegClass);
-        return std::make_pair(0U, &Mips::CPURegsRegClass);
+        return std::make_pair(0U, &Mips::GPR32RegClass);
       }
       if (VT == MVT::i64 && !HasMips64)
-        return std::make_pair(0U, &Mips::CPURegsRegClass);
+        return std::make_pair(0U, &Mips::GPR32RegClass);
       if (VT == MVT::i64 && HasMips64)
-        return std::make_pair(0U, &Mips::CPU64RegsRegClass);
+        return std::make_pair(0U, &Mips::GPR64RegClass);
       // This will generate an error message
       return std::make_pair(0u, static_cast<const TargetRegisterClass*>(0));
     case 'f':
@@ -2909,19 +2987,26 @@ getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const
       break;
     case 'c': // register suitable for indirect jump
       if (VT == MVT::i32)
-        return std::make_pair((unsigned)Mips::T9, &Mips::CPURegsRegClass);
+        return std::make_pair((unsigned)Mips::T9, &Mips::GPR32RegClass);
       assert(VT == MVT::i64 && "Unexpected type.");
-      return std::make_pair((unsigned)Mips::T9_64, &Mips::CPU64RegsRegClass);
+      return std::make_pair((unsigned)Mips::T9_64, &Mips::GPR64RegClass);
     case 'l': // register suitable for indirect jump
       if (VT == MVT::i32)
-        return std::make_pair((unsigned)Mips::LO, &Mips::LORegsRegClass);
-      return std::make_pair((unsigned)Mips::LO64, &Mips::LORegs64RegClass);
+        return std::make_pair((unsigned)Mips::LO0, &Mips::LO32RegClass);
+      return std::make_pair((unsigned)Mips::LO0_64, &Mips::LO64RegClass);
     case 'x': // register suitable for indirect jump
       // Fixme: Not triggering the use of both hi and low
       // This will generate an error message
       return std::make_pair(0u, static_cast<const TargetRegisterClass*>(0));
     }
   }
+
+  std::pair<unsigned, const TargetRegisterClass *> R;
+  R = parseRegForInlineAsmConstraint(Constraint, VT);
+
+  if (R.second)
+    return R;
+
   return TargetLowering::getRegForInlineAsmConstraint(Constraint, VT);
 }
 

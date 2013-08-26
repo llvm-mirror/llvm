@@ -346,6 +346,43 @@ exit:
   ret i32 %load
 }
 
+define i32 @test14(i1 %b1, i1 %b2, i32* %ptr) {
+; Check for problems when there are both selects and phis and one is
+; speculatable toward promotion but the other is not. That should block all of
+; the speculation.
+; CHECK-LABEL: @test14(
+; CHECK: alloca
+; CHECK: alloca
+; CHECK: select
+; CHECK: phi
+; CHECK: phi
+; CHECK: select
+; CHECK: ret i32
+
+entry:
+  %f = alloca i32
+  %g = alloca i32
+  store i32 0, i32* %f
+  store i32 0, i32* %g
+  %f.select = select i1 %b1, i32* %f, i32* %ptr
+  br i1 %b2, label %then, label %else
+
+then:
+  br label %exit
+
+else:
+  br label %exit
+
+exit:
+  %f.phi = phi i32* [ %f, %then ], [ %f.select, %else ]
+  %g.phi = phi i32* [ %g, %then ], [ %ptr, %else ]
+  %f.loaded = load i32* %f.phi
+  %g.select = select i1 %b1, i32* %g, i32* %g.phi
+  %g.loaded = load i32* %g.select
+  %result = add i32 %f.loaded, %g.loaded
+  ret i32 %result
+}
+
 define i32 @PR13905() {
 ; Check a pattern where we have a chain of dead phi nodes to ensure they are
 ; deleted and promotion can proceed.
@@ -426,4 +463,41 @@ if.end:
 
   ret i64 %result
 ; CHECK-NEXT: ret i64 %[[result]]
+}
+
+define float @PR16687(i64 %x, i1 %flag) {
+; CHECK-LABEL: @PR16687(
+; Check that even when we try to speculate the same phi twice (in two slices)
+; on an otherwise promotable construct, we don't get ahead of ourselves and try
+; to promote one of the slices prior to speculating it.
+
+entry:
+  %a = alloca i64, align 8
+  store i64 %x, i64* %a
+  br i1 %flag, label %then, label %else
+; CHECK-NOT: alloca
+; CHECK-NOT: store
+; CHECK: %[[lo:.*]] = trunc i64 %x to i32
+; CHECK: %[[shift:.*]] = lshr i64 %x, 32
+; CHECK: %[[hi:.*]] = trunc i64 %[[shift]] to i32
+
+then:
+  %a.f = bitcast i64* %a to float*
+  br label %end
+; CHECK: %[[lo_cast:.*]] = bitcast i32 %[[lo]] to float
+
+else:
+  %a.raw = bitcast i64* %a to i8*
+  %a.raw.4 = getelementptr i8* %a.raw, i64 4
+  %a.raw.4.f = bitcast i8* %a.raw.4 to float*
+  br label %end
+; CHECK: %[[hi_cast:.*]] = bitcast i32 %[[hi]] to float
+
+end:
+  %a.phi.f = phi float* [ %a.f, %then ], [ %a.raw.4.f, %else ]
+  %f = load float* %a.phi.f
+  ret float %f
+; CHECK: %[[phi:.*]] = phi float [ %[[lo_cast]], %then ], [ %[[hi_cast]], %else ]
+; CHECK-NOT: load
+; CHECK: ret float %[[phi]]
 }

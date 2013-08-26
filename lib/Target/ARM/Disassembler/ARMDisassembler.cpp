@@ -499,7 +499,14 @@ DecodeStatus ARMDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   }
 
   MI.clear();
+  result = decodeInstruction(DecoderTablev8NEON32, MI, insn, Address,
+                             this, STI);
+  if (result != MCDisassembler::Fail) {
+    Size = 4;
+    return result;
+  }
 
+  MI.clear();
   Size = 0;
   return MCDisassembler::Fail;
 }
@@ -818,6 +825,17 @@ DecodeStatus ThumbDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
     }
   }
 
+  MI.clear();
+  uint32_t NEONv8Insn = insn32;
+  NEONv8Insn &= 0xF3FFFFFF; // Clear bits 27-26
+  result = decodeInstruction(DecoderTablev8NEON32, MI, NEONv8Insn, Address,
+                             this, STI);
+  if (result != MCDisassembler::Fail) {
+    Size = 4;
+    return result;
+  }
+
+  MI.clear();
   Size = 0;
   return MCDisassembler::Fail;
 }
@@ -3336,6 +3354,7 @@ static DecodeStatus DecodeT2LoadImm8(MCInst &Inst, unsigned Insn,
   switch (Inst.getOpcode()) {
   case ARM::t2PLDi8:
   case ARM::t2PLIi8:
+  case ARM::t2PLDWi8:
     break;
   default:
     if (!Check(S, DecodeGPRRegisterClass(Inst, Rt, Address, Decoder)))
@@ -3399,6 +3418,7 @@ static DecodeStatus DecodeT2LoadImm12(MCInst &Inst, unsigned Insn,
 
   switch (Inst.getOpcode()) {
   case ARM::t2PLDi12:
+  case ARM::t2PLDWi12:
   case ARM::t2PLIi12:
     break;
   default:
