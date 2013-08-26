@@ -38,7 +38,7 @@ class MCSubtargetInfo {
   const MCReadAdvanceEntry *ReadAdvanceTable;
   MCSchedModel CPUSchedModel;
 
-  InstrStage *Stages;            // Instruction itinerary stages
+  const InstrStage *Stages;            // Instruction itinerary stages
   const unsigned *OperandCycles;       // Itinerary operand cycles
   const unsigned *ForwardingPaths;     // Forwarding paths
   uint64_t FeatureBits;                // Feature bits for current CPU + FS
@@ -51,7 +51,7 @@ public:
                            const MCWriteProcResEntry *WPR,
                            const MCWriteLatencyEntry *WL,
                            const MCReadAdvanceEntry *RA,
-                           InstrStage *IS,
+                           const InstrStage *IS,
                            const unsigned *OC, const unsigned *FP);
 
   /// getTargetTriple - Return the target triple string.

@@ -52,7 +52,7 @@
   #else
   #define DBGFIELD(x)
   #endif
-/*
+
   int rvexDFAStateInputTable[][2] = {
     {15, 1},    
     {15, 2},    
@@ -64,9 +64,9 @@
 
   unsigned int rvexDFAStateEntryTable[] = {
     0, 1, 2, 3, 4, 5, 
-  };*/
+  };
 
-  int rvexDFAStateInputTable[][2] = {
+/*  int rvexDFAStateInputTable[][2] = {
     {1, 4},    {2, 2},    {3, 5},    {4, 3},    {7, 1},    
     {1, 10},    {2, 13},    {3, 6},    {4, 8},    {7, 6},    
     {1, 7},    {3, 7},    {4, 12},    {7, 13},    
@@ -86,7 +86,7 @@
 
   unsigned int rvexDFAStateEntryTable[] = {
     0, 5, 10, 14, 18, 22, 27, 32, 34, 38, 39, 43, 46, 49, 53, 
-  };
+  };*/
 
   // Functional units for "rvexGenericItineraries"
   namespace rvexGenericItinerariesFU {
@@ -227,14 +227,28 @@ extern "C" void LLVMInitializervexTargetMC() {
   //rvexStages = rvexStages2;
 
 
+  llvm::InstrStage rvexStages2[] = {
+    { 0, 0, 0, llvm::InstrStage::Required }, // No itinerary
+    { 1, rvexGenericItinerariesFU2::P0 | rvexGenericItinerariesFU2::P1 | rvexGenericItinerariesFU2::P2 | rvexGenericItinerariesFU2::P3, -1, (llvm::InstrStage::ReservationKinds)0 },
+    { 0, 0, 0, llvm::InstrStage::Required } // End stages
+  };
 
-  llvm::InstrStage temp = {0, 0, 0, llvm::InstrStage::Required};
+  int i;
+
+  for (i = 0; i < 3; i++)
+  {
+    rvexStages[i] = rvexStages2[i];
+  }
+
+
+
+/*  llvm::InstrStage temp = {0, 0, 0, llvm::InstrStage::Required};
   llvm::InstrStage temp1 = { 1, rvexGenericItinerariesFU2::P0 | rvexGenericItinerariesFU2::P1 | rvexGenericItinerariesFU2::P2 | rvexGenericItinerariesFU2::P3, -1, (llvm::InstrStage::ReservationKinds)0 };
   llvm::InstrStage temp2 = {0, 0, 0, llvm::InstrStage::Required};
-/*
+
   rvexStages[0] = temp;
   rvexStages[1] = temp1;
-  rvexStages[2] = temp2;
+  rvexStages[2] = temp2;*/
 
   llvm::InstrItinerary itin_temp = { 0, 0, 0, 0, 0 }; // 0 NoInstrModel
   rvexGenericItineraries[0] = itin_temp;
@@ -253,7 +267,7 @@ extern "C" void LLVMInitializervexTargetMC() {
   llvm::InstrItinerary itin_temp7 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
   rvexGenericItineraries[7] = itin_temp7;
   llvm::InstrItinerary itin_temp8 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[8] = itin_temp8;*/
+  rvexGenericItineraries[8] = itin_temp8;
     
 
 

@@ -34,6 +34,8 @@ class rvexSubtarget : public rvexGenSubtargetInfo {
   bool IsVLIWEnabled;
   InstrItineraryData InstrItins;
 
+  const MCSchedModel *SchedModel;
+
 public:
 
   bool isVLIWEnabled() const { return IsVLIWEnabled; }

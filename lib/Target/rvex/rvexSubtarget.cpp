@@ -43,6 +43,8 @@ rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUName);
 
+  SchedModel = getSchedModelForCPU(CPUName);
+
   // Set rvexABI if it hasn't been set yet.
   if (rvexABI == UnknownABI)
     rvexABI = O32;
