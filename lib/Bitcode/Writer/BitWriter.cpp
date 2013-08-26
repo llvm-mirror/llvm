@@ -9,6 +9,7 @@
 
 #include "llvm-c/BitWriter.h"
 #include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -17,7 +18,7 @@ using namespace llvm;
 
 int LLVMWriteBitcodeToFile(LLVMModuleRef M, const char *Path) {
   std::string ErrorInfo;
-  raw_fd_ostream OS(Path, ErrorInfo, raw_fd_ostream::F_Binary);
+  raw_fd_ostream OS(Path, ErrorInfo, sys::fs::F_Binary);
 
   if (!ErrorInfo.empty())
     return -1;

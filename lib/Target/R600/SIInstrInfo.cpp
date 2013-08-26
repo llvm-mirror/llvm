@@ -24,7 +24,7 @@ using namespace llvm;
 
 SIInstrInfo::SIInstrInfo(AMDGPUTargetMachine &tm)
   : AMDGPUInstrInfo(tm),
-    RI(tm, *this)
+    RI(tm)
     { }
 
 const SIRegisterInfo &SIInstrInfo::getRegisterInfo() const {
@@ -42,23 +42,27 @@ SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // never be necessary.
   assert(DestReg != AMDGPU::SCC && SrcReg != AMDGPU::SCC);
 
-  const int16_t Sub0_15[] = {
+  static const int16_t Sub0_15[] = {
     AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, AMDGPU::sub3,
     AMDGPU::sub4, AMDGPU::sub5, AMDGPU::sub6, AMDGPU::sub7,
     AMDGPU::sub8, AMDGPU::sub9, AMDGPU::sub10, AMDGPU::sub11,
     AMDGPU::sub12, AMDGPU::sub13, AMDGPU::sub14, AMDGPU::sub15, 0
   };
 
-  const int16_t Sub0_7[] = {
+  static const int16_t Sub0_7[] = {
     AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, AMDGPU::sub3,
     AMDGPU::sub4, AMDGPU::sub5, AMDGPU::sub6, AMDGPU::sub7, 0
   };
 
-  const int16_t Sub0_3[] = {
+  static const int16_t Sub0_3[] = {
     AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, AMDGPU::sub3, 0
   };
 
-  const int16_t Sub0_1[] = {
+  static const int16_t Sub0_2[] = {
+    AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, 0
+  };
+
+  static const int16_t Sub0_1[] = {
     AMDGPU::sub0, AMDGPU::sub1, 0
   };
 
@@ -124,6 +128,11 @@ SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 	   AMDGPU::SReg_64RegClass.contains(SrcReg));
     Opcode = AMDGPU::V_MOV_B32_e32;
     SubIndices = Sub0_1;
+
+  } else if (AMDGPU::VReg_96RegClass.contains(DestReg)) {
+    assert(AMDGPU::VReg_96RegClass.contains(SrcReg));
+    Opcode = AMDGPU::V_MOV_B32_e32;
+    SubIndices = Sub0_2;
 
   } else if (AMDGPU::VReg_128RegClass.contains(DestReg)) {
     assert(AMDGPU::VReg_128RegClass.contains(SrcReg) ||

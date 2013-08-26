@@ -23,7 +23,9 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/raw_ostream.h"
 #define GET_INSTRINFO_CTOR
 #define GET_INSTRMAP_INFO
 #include "HexagonGenInstrInfo.inc"
@@ -56,7 +58,7 @@ const int Hexagon_MEMB_AUTOINC_MIN = -8;
 
 HexagonInstrInfo::HexagonInstrInfo(HexagonSubtarget &ST)
   : HexagonGenInstrInfo(Hexagon::ADJCALLSTACKDOWN, Hexagon::ADJCALLSTACKUP),
-    RI(ST, *this), Subtarget(ST) {
+    RI(ST), Subtarget(ST) {
 }
 
 
@@ -118,16 +120,16 @@ HexagonInstrInfo::InsertBranch(MachineBasicBlock &MBB,MachineBasicBlock *TBB,
                              DebugLoc DL) const{
 
     int BOpc   = Hexagon::JMP;
-    int BccOpc = Hexagon::JMP_c;
+    int BccOpc = Hexagon::JMP_t;
 
     assert(TBB && "InsertBranch must not be told to insert a fallthrough");
 
     int regPos = 0;
     // Check if ReverseBranchCondition has asked to reverse this branch
     // If we want to reverse the branch an odd number of times, we want
-    // JMP_cNot.
+    // JMP_f.
     if (!Cond.empty() && Cond[0].isImm() && Cond[0].getImm() == 0) {
-      BccOpc = Hexagon::JMP_cNot;
+      BccOpc = Hexagon::JMP_f;
       regPos = 1;
     }
 
@@ -174,8 +176,8 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   FBB = NULL;
 
   // If the block has no terminators, it just falls into the block after it.
-  MachineBasicBlock::iterator I = MBB.end();
-  if (I == MBB.begin())
+  MachineBasicBlock::instr_iterator I = MBB.instr_end();
+  if (I == MBB.instr_begin())
     return false;
 
   // A basic block may looks like this:
@@ -194,13 +196,24 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
     --I;
     if (I->isEHLabel())
       return true;
-  } while (I != MBB.begin());
+  } while (I != MBB.instr_begin());
 
-  I = MBB.end();
+  I = MBB.instr_end();
   --I;
 
   while (I->isDebugValue()) {
-    if (I == MBB.begin())
+    if (I == MBB.instr_begin())
+      return false;
+    --I;
+  }
+
+  // Delete the JMP if it's equivalent to a fall-through.
+  if (AllowModify && I->getOpcode() == Hexagon::JMP &&
+      MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
+    DEBUG(dbgs()<< "\nErasing the jump to successor block\n";);
+    I->eraseFromParent();
+    I = MBB.instr_end();
+    if (I == MBB.instr_begin())
       return false;
     --I;
   }
@@ -209,23 +222,42 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
   // Get the last instruction in the block.
   MachineInstr *LastInst = I;
+  MachineInstr *SecondLastInst = NULL;
+  // Find one more terminator if present.
+  do {
+    if (&*I != LastInst && !I->isBundle() && isUnpredicatedTerminator(I)) {
+      if (!SecondLastInst)
+        SecondLastInst = I;
+      else
+        // This is a third branch.
+        return true;
+    }
+    if (I == MBB.instr_begin())
+      break;
+    --I;
+  } while(I);
+
+  int LastOpcode = LastInst->getOpcode();
+
+  bool LastOpcodeHasJMP_c = PredOpcodeHasJMP_c(LastOpcode);
+  bool LastOpcodeHasNot = PredOpcodeHasNot(LastOpcode);
 
   // If there is only one terminator instruction, process it.
-  if (I == MBB.begin() || !isUnpredicatedTerminator(--I)) {
-    if (LastInst->getOpcode() == Hexagon::JMP) {
+  if (LastInst && !SecondLastInst) {
+    if (LastOpcode == Hexagon::JMP) {
       TBB = LastInst->getOperand(0).getMBB();
       return false;
     }
-    if (LastInst->getOpcode() == Hexagon::JMP_c) {
-      // Block ends with fall-through true condbranch.
-      TBB = LastInst->getOperand(1).getMBB();
+    if (LastOpcode == Hexagon::ENDLOOP0) {
+      TBB = LastInst->getOperand(0).getMBB();
       Cond.push_back(LastInst->getOperand(0));
       return false;
     }
-    if (LastInst->getOpcode() == Hexagon::JMP_cNot) {
-      // Block ends with fall-through false condbranch.
+    if (LastOpcodeHasJMP_c) {
       TBB = LastInst->getOperand(1).getMBB();
-      Cond.push_back(MachineOperand::CreateImm(0));
+      if (LastOpcodeHasNot) {
+        Cond.push_back(MachineOperand::CreateImm(0));
+      }
       Cond.push_back(LastInst->getOperand(0));
       return false;
     }
@@ -233,29 +265,14 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
     return true;
   }
 
-  // Get the instruction before it if it's a terminator.
-  MachineInstr *SecondLastInst = I;
+  int SecLastOpcode = SecondLastInst->getOpcode();
 
-  // If there are three terminators, we don't know what sort of block this is.
-  if (SecondLastInst && I != MBB.begin() &&
-      isUnpredicatedTerminator(--I))
-    return true;
-
-  // If the block ends with Hexagon::BRCOND and Hexagon:JMP, handle it.
-  if (((SecondLastInst->getOpcode() == Hexagon::BRCOND) ||
-      (SecondLastInst->getOpcode() == Hexagon::JMP_c)) &&
-      LastInst->getOpcode() == Hexagon::JMP) {
+  bool SecLastOpcodeHasJMP_c = PredOpcodeHasJMP_c(SecLastOpcode);
+  bool SecLastOpcodeHasNot = PredOpcodeHasNot(SecLastOpcode);
+  if (SecLastOpcodeHasJMP_c && (LastOpcode == Hexagon::JMP)) {
     TBB =  SecondLastInst->getOperand(1).getMBB();
-    Cond.push_back(SecondLastInst->getOperand(0));
-    FBB = LastInst->getOperand(0).getMBB();
-    return false;
-  }
-
-  // If the block ends with Hexagon::JMP_cNot and Hexagon:JMP, handle it.
-  if ((SecondLastInst->getOpcode() == Hexagon::JMP_cNot) &&
-      LastInst->getOpcode() == Hexagon::JMP) {
-    TBB =  SecondLastInst->getOperand(1).getMBB();
-    Cond.push_back(MachineOperand::CreateImm(0));
+    if (SecLastOpcodeHasNot)
+      Cond.push_back(MachineOperand::CreateImm(0));
     Cond.push_back(SecondLastInst->getOperand(0));
     FBB = LastInst->getOperand(0).getMBB();
     return false;
@@ -263,12 +280,20 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
   // If the block ends with two Hexagon:JMPs, handle it.  The second one is not
   // executed, so remove it.
-  if (SecondLastInst->getOpcode() == Hexagon::JMP &&
-      LastInst->getOpcode() == Hexagon::JMP) {
+  if (SecLastOpcode == Hexagon::JMP && LastOpcode == Hexagon::JMP) {
     TBB = SecondLastInst->getOperand(0).getMBB();
     I = LastInst;
     if (AllowModify)
       I->eraseFromParent();
+    return false;
+  }
+
+  // If the block ends with an ENDLOOP, and JMP, handle it.
+  if (SecLastOpcode == Hexagon::ENDLOOP0 &&
+      LastOpcode == Hexagon::JMP) {
+    TBB = SecondLastInst->getOperand(0).getMBB();
+    Cond.push_back(SecondLastInst->getOperand(0));
+    FBB = LastInst->getOperand(0).getMBB();
     return false;
   }
 
@@ -279,8 +304,8 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
 unsigned HexagonInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
   int BOpc   = Hexagon::JMP;
-  int BccOpc = Hexagon::JMP_c;
-  int BccOpcNot = Hexagon::JMP_cNot;
+  int BccOpc = Hexagon::JMP_t;
+  int BccOpcNot = Hexagon::JMP_f;
 
   MachineBasicBlock::iterator I = MBB.end();
   if (I == MBB.begin()) return 0;
@@ -325,8 +350,6 @@ bool HexagonInstrInfo::analyzeCompare(const MachineInstr *MI,
     case Hexagon::CMPGTUrr:
     case Hexagon::CMPGTri:
     case Hexagon::CMPGTrr:
-    case Hexagon::CMPLTUrr:
-    case Hexagon::CMPLTrr:
       SrcReg = MI->getOperand(1).getReg();
       Mask = ~0;
       break;
@@ -366,8 +389,6 @@ bool HexagonInstrInfo::analyzeCompare(const MachineInstr *MI,
     case Hexagon::CMPhEQrr_xor_V4:
     case Hexagon::CMPhGTUrr_V4:
     case Hexagon::CMPhGTrr_shl_V4:
-    case Hexagon::CMPLTUrr:
-    case Hexagon::CMPLTrr:
       SrcReg2 = MI->getOperand(2).getReg();
       return true;
 
@@ -537,16 +558,6 @@ MachineInstr *HexagonInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
   return(0);
 }
 
-MachineInstr*
-HexagonInstrInfo::emitFrameIndexDebugValue(MachineFunction &MF,
-                                           int FrameIx, uint64_t Offset,
-                                           const MDNode *MDPtr,
-                                           DebugLoc DL) const {
-  MachineInstrBuilder MIB = BuildMI(MF, DL, get(Hexagon::DBG_VALUE))
-    .addImm(0).addImm(Offset).addMetadata(MDPtr);
-  return &*MIB;
-}
-
 unsigned HexagonInstrInfo::createVR(MachineFunction* MF, MVT VT) const {
 
   MachineRegisterInfo &RegInfo = MF->getRegInfo();
@@ -605,307 +616,8 @@ bool HexagonInstrInfo::isExtended(const MachineInstr *MI) const {
   return  false;
 }
 
-bool HexagonInstrInfo::isNewValueJump(const MachineInstr *MI) const {
-  switch (MI->getOpcode()) {
-    default: return false;
-    // JMP_EQri
-    case Hexagon::JMP_EQriPt_nv_V4:
-    case Hexagon::JMP_EQriPnt_nv_V4:
-    case Hexagon::JMP_EQriNotPt_nv_V4:
-    case Hexagon::JMP_EQriNotPnt_nv_V4:
-    case Hexagon::JMP_EQriPt_ie_nv_V4:
-    case Hexagon::JMP_EQriPnt_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPt_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPnt_ie_nv_V4:
-
-    // JMP_EQri - with -1
-    case Hexagon::JMP_EQriPtneg_nv_V4:
-    case Hexagon::JMP_EQriPntneg_nv_V4:
-    case Hexagon::JMP_EQriNotPtneg_nv_V4:
-    case Hexagon::JMP_EQriNotPntneg_nv_V4:
-    case Hexagon::JMP_EQriPtneg_ie_nv_V4:
-    case Hexagon::JMP_EQriPntneg_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPtneg_ie_nv_V4:
-    case Hexagon::JMP_EQriNotPntneg_ie_nv_V4:
-
-    // JMP_EQrr
-    case Hexagon::JMP_EQrrPt_nv_V4:
-    case Hexagon::JMP_EQrrPnt_nv_V4:
-    case Hexagon::JMP_EQrrNotPt_nv_V4:
-    case Hexagon::JMP_EQrrNotPnt_nv_V4:
-    case Hexagon::JMP_EQrrPt_ie_nv_V4:
-    case Hexagon::JMP_EQrrPnt_ie_nv_V4:
-    case Hexagon::JMP_EQrrNotPt_ie_nv_V4:
-    case Hexagon::JMP_EQrrNotPnt_ie_nv_V4:
-
-    // JMP_GTri
-    case Hexagon::JMP_GTriPt_nv_V4:
-    case Hexagon::JMP_GTriPnt_nv_V4:
-    case Hexagon::JMP_GTriNotPt_nv_V4:
-    case Hexagon::JMP_GTriNotPnt_nv_V4:
-    case Hexagon::JMP_GTriPt_ie_nv_V4:
-    case Hexagon::JMP_GTriPnt_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPnt_ie_nv_V4:
-
-    // JMP_GTri - with -1
-    case Hexagon::JMP_GTriPtneg_nv_V4:
-    case Hexagon::JMP_GTriPntneg_nv_V4:
-    case Hexagon::JMP_GTriNotPtneg_nv_V4:
-    case Hexagon::JMP_GTriNotPntneg_nv_V4:
-    case Hexagon::JMP_GTriPtneg_ie_nv_V4:
-    case Hexagon::JMP_GTriPntneg_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPtneg_ie_nv_V4:
-    case Hexagon::JMP_GTriNotPntneg_ie_nv_V4:
-
-    // JMP_GTrr
-    case Hexagon::JMP_GTrrPt_nv_V4:
-    case Hexagon::JMP_GTrrPnt_nv_V4:
-    case Hexagon::JMP_GTrrNotPt_nv_V4:
-    case Hexagon::JMP_GTrrNotPnt_nv_V4:
-    case Hexagon::JMP_GTrrPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrPnt_ie_nv_V4:
-    case Hexagon::JMP_GTrrNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrNotPnt_ie_nv_V4:
-
-    // JMP_GTrrdn
-    case Hexagon::JMP_GTrrdnPt_nv_V4:
-    case Hexagon::JMP_GTrrdnPnt_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPt_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPnt_nv_V4:
-    case Hexagon::JMP_GTrrdnPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrdnPnt_ie_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTrrdnNotPnt_ie_nv_V4:
-
-    // JMP_GTUri
-    case Hexagon::JMP_GTUriPt_nv_V4:
-    case Hexagon::JMP_GTUriPnt_nv_V4:
-    case Hexagon::JMP_GTUriNotPt_nv_V4:
-    case Hexagon::JMP_GTUriNotPnt_nv_V4:
-    case Hexagon::JMP_GTUriPt_ie_nv_V4:
-    case Hexagon::JMP_GTUriPnt_ie_nv_V4:
-    case Hexagon::JMP_GTUriNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTUriNotPnt_ie_nv_V4:
-
-    // JMP_GTUrr
-    case Hexagon::JMP_GTUrrPt_nv_V4:
-    case Hexagon::JMP_GTUrrPnt_nv_V4:
-    case Hexagon::JMP_GTUrrNotPt_nv_V4:
-    case Hexagon::JMP_GTUrrNotPnt_nv_V4:
-    case Hexagon::JMP_GTUrrPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrPnt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrNotPnt_ie_nv_V4:
-
-    // JMP_GTUrrdn
-    case Hexagon::JMP_GTUrrdnPt_nv_V4:
-    case Hexagon::JMP_GTUrrdnPnt_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPt_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPnt_nv_V4:
-    case Hexagon::JMP_GTUrrdnPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrdnPnt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPt_ie_nv_V4:
-    case Hexagon::JMP_GTUrrdnNotPnt_ie_nv_V4:
-      return true;
-  }
-}
-
-bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
-  switch (MI->getOpcode()) {
-    default: return false;
-    // Store Byte
-    case Hexagon::STrib_nv_V4:
-    case Hexagon::STrib_indexed_nv_V4:
-    case Hexagon::STrib_indexed_shl_nv_V4:
-    case Hexagon::STrib_shl_nv_V4:
-    case Hexagon::STb_GP_nv_V4:
-    case Hexagon::POST_STbri_nv_V4:
-    case Hexagon::STrib_cPt_nv_V4:
-    case Hexagon::STrib_cdnPt_nv_V4:
-    case Hexagon::STrib_cNotPt_nv_V4:
-    case Hexagon::STrib_cdnNotPt_nv_V4:
-    case Hexagon::STrib_indexed_cPt_nv_V4:
-    case Hexagon::STrib_indexed_cdnPt_nv_V4:
-    case Hexagon::STrib_indexed_cNotPt_nv_V4:
-    case Hexagon::STrib_indexed_cdnNotPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cdnPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cNotPt_nv_V4:
-    case Hexagon::STrib_indexed_shl_cdnNotPt_nv_V4:
-    case Hexagon::POST_STbri_cPt_nv_V4:
-    case Hexagon::POST_STbri_cdnPt_nv_V4:
-    case Hexagon::POST_STbri_cNotPt_nv_V4:
-    case Hexagon::POST_STbri_cdnNotPt_nv_V4:
-    case Hexagon::STb_GP_cPt_nv_V4:
-    case Hexagon::STb_GP_cNotPt_nv_V4:
-    case Hexagon::STb_GP_cdnPt_nv_V4:
-    case Hexagon::STb_GP_cdnNotPt_nv_V4:
-    case Hexagon::STrib_abs_nv_V4:
-    case Hexagon::STrib_abs_cPt_nv_V4:
-    case Hexagon::STrib_abs_cdnPt_nv_V4:
-    case Hexagon::STrib_abs_cNotPt_nv_V4:
-    case Hexagon::STrib_abs_cdnNotPt_nv_V4:
-    case Hexagon::STrib_imm_abs_nv_V4:
-    case Hexagon::STrib_imm_abs_cPt_nv_V4:
-    case Hexagon::STrib_imm_abs_cdnPt_nv_V4:
-    case Hexagon::STrib_imm_abs_cNotPt_nv_V4:
-    case Hexagon::STrib_imm_abs_cdnNotPt_nv_V4:
-
-    // Store Halfword
-    case Hexagon::STrih_nv_V4:
-    case Hexagon::STrih_indexed_nv_V4:
-    case Hexagon::STrih_indexed_shl_nv_V4:
-    case Hexagon::STrih_shl_nv_V4:
-    case Hexagon::STh_GP_nv_V4:
-    case Hexagon::POST_SThri_nv_V4:
-    case Hexagon::STrih_cPt_nv_V4:
-    case Hexagon::STrih_cdnPt_nv_V4:
-    case Hexagon::STrih_cNotPt_nv_V4:
-    case Hexagon::STrih_cdnNotPt_nv_V4:
-    case Hexagon::STrih_indexed_cPt_nv_V4:
-    case Hexagon::STrih_indexed_cdnPt_nv_V4:
-    case Hexagon::STrih_indexed_cNotPt_nv_V4:
-    case Hexagon::STrih_indexed_cdnNotPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cdnPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cNotPt_nv_V4:
-    case Hexagon::STrih_indexed_shl_cdnNotPt_nv_V4:
-    case Hexagon::POST_SThri_cPt_nv_V4:
-    case Hexagon::POST_SThri_cdnPt_nv_V4:
-    case Hexagon::POST_SThri_cNotPt_nv_V4:
-    case Hexagon::POST_SThri_cdnNotPt_nv_V4:
-    case Hexagon::STh_GP_cPt_nv_V4:
-    case Hexagon::STh_GP_cNotPt_nv_V4:
-    case Hexagon::STh_GP_cdnPt_nv_V4:
-    case Hexagon::STh_GP_cdnNotPt_nv_V4:
-    case Hexagon::STrih_abs_nv_V4:
-    case Hexagon::STrih_abs_cPt_nv_V4:
-    case Hexagon::STrih_abs_cdnPt_nv_V4:
-    case Hexagon::STrih_abs_cNotPt_nv_V4:
-    case Hexagon::STrih_abs_cdnNotPt_nv_V4:
-    case Hexagon::STrih_imm_abs_nv_V4:
-    case Hexagon::STrih_imm_abs_cPt_nv_V4:
-    case Hexagon::STrih_imm_abs_cdnPt_nv_V4:
-    case Hexagon::STrih_imm_abs_cNotPt_nv_V4:
-    case Hexagon::STrih_imm_abs_cdnNotPt_nv_V4:
-
-    // Store Word
-    case Hexagon::STriw_nv_V4:
-    case Hexagon::STriw_indexed_nv_V4:
-    case Hexagon::STriw_indexed_shl_nv_V4:
-    case Hexagon::STriw_shl_nv_V4:
-    case Hexagon::STw_GP_nv_V4:
-    case Hexagon::POST_STwri_nv_V4:
-    case Hexagon::STriw_cPt_nv_V4:
-    case Hexagon::STriw_cdnPt_nv_V4:
-    case Hexagon::STriw_cNotPt_nv_V4:
-    case Hexagon::STriw_cdnNotPt_nv_V4:
-    case Hexagon::STriw_indexed_cPt_nv_V4:
-    case Hexagon::STriw_indexed_cdnPt_nv_V4:
-    case Hexagon::STriw_indexed_cNotPt_nv_V4:
-    case Hexagon::STriw_indexed_cdnNotPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cdnPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cNotPt_nv_V4:
-    case Hexagon::STriw_indexed_shl_cdnNotPt_nv_V4:
-    case Hexagon::POST_STwri_cPt_nv_V4:
-    case Hexagon::POST_STwri_cdnPt_nv_V4:
-    case Hexagon::POST_STwri_cNotPt_nv_V4:
-    case Hexagon::POST_STwri_cdnNotPt_nv_V4:
-    case Hexagon::STw_GP_cPt_nv_V4:
-    case Hexagon::STw_GP_cNotPt_nv_V4:
-    case Hexagon::STw_GP_cdnPt_nv_V4:
-    case Hexagon::STw_GP_cdnNotPt_nv_V4:
-    case Hexagon::STriw_abs_nv_V4:
-    case Hexagon::STriw_abs_cPt_nv_V4:
-    case Hexagon::STriw_abs_cdnPt_nv_V4:
-    case Hexagon::STriw_abs_cNotPt_nv_V4:
-    case Hexagon::STriw_abs_cdnNotPt_nv_V4:
-    case Hexagon::STriw_imm_abs_nv_V4:
-    case Hexagon::STriw_imm_abs_cPt_nv_V4:
-    case Hexagon::STriw_imm_abs_cdnPt_nv_V4:
-    case Hexagon::STriw_imm_abs_cNotPt_nv_V4:
-    case Hexagon::STriw_imm_abs_cdnNotPt_nv_V4:
-      return true;
-  }
-}
-
-bool HexagonInstrInfo::isPostIncrement (const MachineInstr* MI) const {
-  switch (MI->getOpcode())
-  {
-    default: return false;
-    // Load Byte
-    case Hexagon::POST_LDrib:
-    case Hexagon::POST_LDrib_cPt:
-    case Hexagon::POST_LDrib_cNotPt:
-    case Hexagon::POST_LDrib_cdnPt_V4:
-    case Hexagon::POST_LDrib_cdnNotPt_V4:
-
-    // Load unsigned byte
-    case Hexagon::POST_LDriub:
-    case Hexagon::POST_LDriub_cPt:
-    case Hexagon::POST_LDriub_cNotPt:
-    case Hexagon::POST_LDriub_cdnPt_V4:
-    case Hexagon::POST_LDriub_cdnNotPt_V4:
-
-    // Load halfword
-    case Hexagon::POST_LDrih:
-    case Hexagon::POST_LDrih_cPt:
-    case Hexagon::POST_LDrih_cNotPt:
-    case Hexagon::POST_LDrih_cdnPt_V4:
-    case Hexagon::POST_LDrih_cdnNotPt_V4:
-
-    // Load unsigned halfword
-    case Hexagon::POST_LDriuh:
-    case Hexagon::POST_LDriuh_cPt:
-    case Hexagon::POST_LDriuh_cNotPt:
-    case Hexagon::POST_LDriuh_cdnPt_V4:
-    case Hexagon::POST_LDriuh_cdnNotPt_V4:
-
-    // Load word
-    case Hexagon::POST_LDriw:
-    case Hexagon::POST_LDriw_cPt:
-    case Hexagon::POST_LDriw_cNotPt:
-    case Hexagon::POST_LDriw_cdnPt_V4:
-    case Hexagon::POST_LDriw_cdnNotPt_V4:
-
-    // Load double word
-    case Hexagon::POST_LDrid:
-    case Hexagon::POST_LDrid_cPt:
-    case Hexagon::POST_LDrid_cNotPt:
-    case Hexagon::POST_LDrid_cdnPt_V4:
-    case Hexagon::POST_LDrid_cdnNotPt_V4:
-
-    // Store byte
-    case Hexagon::POST_STbri:
-    case Hexagon::POST_STbri_cPt:
-    case Hexagon::POST_STbri_cNotPt:
-    case Hexagon::POST_STbri_cdnPt_V4:
-    case Hexagon::POST_STbri_cdnNotPt_V4:
-
-    // Store halfword
-    case Hexagon::POST_SThri:
-    case Hexagon::POST_SThri_cPt:
-    case Hexagon::POST_SThri_cNotPt:
-    case Hexagon::POST_SThri_cdnPt_V4:
-    case Hexagon::POST_SThri_cdnNotPt_V4:
-
-    // Store word
-    case Hexagon::POST_STwri:
-    case Hexagon::POST_STwri_cPt:
-    case Hexagon::POST_STwri_cNotPt:
-    case Hexagon::POST_STwri_cdnPt_V4:
-    case Hexagon::POST_STwri_cdnNotPt_V4:
-
-    // Store double word
-    case Hexagon::POST_STdri:
-    case Hexagon::POST_STdri_cPt:
-    case Hexagon::POST_STdri_cNotPt:
-    case Hexagon::POST_STdri_cdnPt_V4:
-    case Hexagon::POST_STdri_cdnNotPt_V4:
-      return true;
-  }
+bool HexagonInstrInfo::isBranch (const MachineInstr *MI) const {
+  return MI->getDesc().isBranch();
 }
 
 bool HexagonInstrInfo::isNewValueInst(const MachineInstr *MI) const {
@@ -1003,9 +715,6 @@ bool HexagonInstrInfo::isPredicable(MachineInstr *MI) const {
   case Hexagon::ZXTB:
   case Hexagon::ZXTH:
     return Subtarget.hasV4TOps();
-
-  case Hexagon::JMPR:
-    return false;
   }
 
   return true;
@@ -1016,466 +725,40 @@ bool HexagonInstrInfo::isPredicable(MachineInstr *MI) const {
 //  cPt    ---> cNotPt
 //  cNotPt ---> cPt
 //
-// however, these inversiones are NOT included:
-//
-//  cdnPt      -X-> cdnNotPt
-//  cdnNotPt   -X-> cdnPt
-//  cPt_nv     -X-> cNotPt_nv (new value stores)
-//  cNotPt_nv  -X-> cPt_nv    (new value stores)
-//
-// because only the following transformations are allowed:
-//
-//  cNotPt  ---> cdnNotPt
-//  cPt     ---> cdnPt
-//  cNotPt  ---> cNotPt_nv
-//  cPt     ---> cPt_nv
 unsigned HexagonInstrInfo::getInvertedPredicatedOpcode(const int Opc) const {
+  int InvPredOpcode;
+  InvPredOpcode = isPredicatedTrue(Opc) ? Hexagon::getFalsePredOpcode(Opc)
+                                        : Hexagon::getTruePredOpcode(Opc);
+  if (InvPredOpcode >= 0) // Valid instruction with the inverted predicate.
+    return InvPredOpcode;
+
   switch(Opc) {
     default: llvm_unreachable("Unexpected predicated instruction");
-    case Hexagon::TFR_cPt:
-      return Hexagon::TFR_cNotPt;
-    case Hexagon::TFR_cNotPt:
-      return Hexagon::TFR_cPt;
-
-    case Hexagon::TFRI_cPt:
-      return Hexagon::TFRI_cNotPt;
-    case Hexagon::TFRI_cNotPt:
-      return Hexagon::TFRI_cPt;
-
-    case Hexagon::JMP_c:
-      return Hexagon::JMP_cNot;
-    case Hexagon::JMP_cNot:
-      return Hexagon::JMP_c;
-
-    case Hexagon::ADD_ri_cPt:
-      return Hexagon::ADD_ri_cNotPt;
-    case Hexagon::ADD_ri_cNotPt:
-      return Hexagon::ADD_ri_cPt;
-
-    case Hexagon::ADD_rr_cPt:
-      return Hexagon::ADD_rr_cNotPt;
-    case Hexagon::ADD_rr_cNotPt:
-      return Hexagon::ADD_rr_cPt;
-
-    case Hexagon::XOR_rr_cPt:
-      return Hexagon::XOR_rr_cNotPt;
-    case Hexagon::XOR_rr_cNotPt:
-      return Hexagon::XOR_rr_cPt;
-
-    case Hexagon::AND_rr_cPt:
-      return Hexagon::AND_rr_cNotPt;
-    case Hexagon::AND_rr_cNotPt:
-      return Hexagon::AND_rr_cPt;
-
-    case Hexagon::OR_rr_cPt:
-      return Hexagon::OR_rr_cNotPt;
-    case Hexagon::OR_rr_cNotPt:
-      return Hexagon::OR_rr_cPt;
-
-    case Hexagon::SUB_rr_cPt:
-      return Hexagon::SUB_rr_cNotPt;
-    case Hexagon::SUB_rr_cNotPt:
-      return Hexagon::SUB_rr_cPt;
-
     case Hexagon::COMBINE_rr_cPt:
       return Hexagon::COMBINE_rr_cNotPt;
     case Hexagon::COMBINE_rr_cNotPt:
       return Hexagon::COMBINE_rr_cPt;
 
-    case Hexagon::ASLH_cPt_V4:
-      return Hexagon::ASLH_cNotPt_V4;
-    case Hexagon::ASLH_cNotPt_V4:
-      return Hexagon::ASLH_cPt_V4;
-
-    case Hexagon::ASRH_cPt_V4:
-      return Hexagon::ASRH_cNotPt_V4;
-    case Hexagon::ASRH_cNotPt_V4:
-      return Hexagon::ASRH_cPt_V4;
-
-    case Hexagon::SXTB_cPt_V4:
-      return Hexagon::SXTB_cNotPt_V4;
-    case Hexagon::SXTB_cNotPt_V4:
-      return Hexagon::SXTB_cPt_V4;
-
-    case Hexagon::SXTH_cPt_V4:
-      return Hexagon::SXTH_cNotPt_V4;
-    case Hexagon::SXTH_cNotPt_V4:
-      return Hexagon::SXTH_cPt_V4;
-
-    case Hexagon::ZXTB_cPt_V4:
-      return Hexagon::ZXTB_cNotPt_V4;
-    case Hexagon::ZXTB_cNotPt_V4:
-      return Hexagon::ZXTB_cPt_V4;
-
-    case Hexagon::ZXTH_cPt_V4:
-      return Hexagon::ZXTH_cNotPt_V4;
-    case Hexagon::ZXTH_cNotPt_V4:
-      return Hexagon::ZXTH_cPt_V4;
-
-
-    case Hexagon::JMPR_cPt:
-      return Hexagon::JMPR_cNotPt;
-    case Hexagon::JMPR_cNotPt:
-      return Hexagon::JMPR_cPt;
-
-  // V4 indexed+scaled load.
-    case Hexagon::LDrid_indexed_shl_cPt_V4:
-      return Hexagon::LDrid_indexed_shl_cNotPt_V4;
-    case Hexagon::LDrid_indexed_shl_cNotPt_V4:
-      return Hexagon::LDrid_indexed_shl_cPt_V4;
-
-    case Hexagon::LDrib_indexed_shl_cPt_V4:
-      return Hexagon::LDrib_indexed_shl_cNotPt_V4;
-    case Hexagon::LDrib_indexed_shl_cNotPt_V4:
-      return Hexagon::LDrib_indexed_shl_cPt_V4;
-
-    case Hexagon::LDriub_indexed_shl_cPt_V4:
-      return Hexagon::LDriub_indexed_shl_cNotPt_V4;
-    case Hexagon::LDriub_indexed_shl_cNotPt_V4:
-      return Hexagon::LDriub_indexed_shl_cPt_V4;
-
-    case Hexagon::LDrih_indexed_shl_cPt_V4:
-      return Hexagon::LDrih_indexed_shl_cNotPt_V4;
-    case Hexagon::LDrih_indexed_shl_cNotPt_V4:
-      return Hexagon::LDrih_indexed_shl_cPt_V4;
-
-    case Hexagon::LDriuh_indexed_shl_cPt_V4:
-      return Hexagon::LDriuh_indexed_shl_cNotPt_V4;
-    case Hexagon::LDriuh_indexed_shl_cNotPt_V4:
-      return Hexagon::LDriuh_indexed_shl_cPt_V4;
-
-    case Hexagon::LDriw_indexed_shl_cPt_V4:
-      return Hexagon::LDriw_indexed_shl_cNotPt_V4;
-    case Hexagon::LDriw_indexed_shl_cNotPt_V4:
-      return Hexagon::LDriw_indexed_shl_cPt_V4;
-
-    // Byte.
-    case Hexagon::POST_STbri_cPt:
-      return Hexagon::POST_STbri_cNotPt;
-    case Hexagon::POST_STbri_cNotPt:
-      return Hexagon::POST_STbri_cPt;
-
-    case Hexagon::STrib_cPt:
-      return Hexagon::STrib_cNotPt;
-    case Hexagon::STrib_cNotPt:
-      return Hexagon::STrib_cPt;
-
-    case Hexagon::STrib_indexed_cPt:
-      return Hexagon::STrib_indexed_cNotPt;
-    case Hexagon::STrib_indexed_cNotPt:
-      return Hexagon::STrib_indexed_cPt;
-
-    case Hexagon::STrib_imm_cPt_V4:
-      return Hexagon::STrib_imm_cNotPt_V4;
-    case Hexagon::STrib_imm_cNotPt_V4:
-      return Hexagon::STrib_imm_cPt_V4;
-
-    case Hexagon::STrib_indexed_shl_cPt_V4:
-      return Hexagon::STrib_indexed_shl_cNotPt_V4;
-    case Hexagon::STrib_indexed_shl_cNotPt_V4:
-      return Hexagon::STrib_indexed_shl_cPt_V4;
-
-  // Halfword.
-    case Hexagon::POST_SThri_cPt:
-      return Hexagon::POST_SThri_cNotPt;
-    case Hexagon::POST_SThri_cNotPt:
-      return Hexagon::POST_SThri_cPt;
-
-    case Hexagon::STrih_cPt:
-      return Hexagon::STrih_cNotPt;
-    case Hexagon::STrih_cNotPt:
-      return Hexagon::STrih_cPt;
-
-    case Hexagon::STrih_indexed_cPt:
-      return Hexagon::STrih_indexed_cNotPt;
-    case Hexagon::STrih_indexed_cNotPt:
-      return Hexagon::STrih_indexed_cPt;
-
-    case Hexagon::STrih_imm_cPt_V4:
-      return Hexagon::STrih_imm_cNotPt_V4;
-    case Hexagon::STrih_imm_cNotPt_V4:
-      return Hexagon::STrih_imm_cPt_V4;
-
-    case Hexagon::STrih_indexed_shl_cPt_V4:
-      return Hexagon::STrih_indexed_shl_cNotPt_V4;
-    case Hexagon::STrih_indexed_shl_cNotPt_V4:
-      return Hexagon::STrih_indexed_shl_cPt_V4;
-
-  // Word.
-    case Hexagon::POST_STwri_cPt:
-      return Hexagon::POST_STwri_cNotPt;
-    case Hexagon::POST_STwri_cNotPt:
-      return Hexagon::POST_STwri_cPt;
-
-    case Hexagon::STriw_cPt:
-      return Hexagon::STriw_cNotPt;
-    case Hexagon::STriw_cNotPt:
-      return Hexagon::STriw_cPt;
-
-    case Hexagon::STriw_indexed_cPt:
-      return Hexagon::STriw_indexed_cNotPt;
-    case Hexagon::STriw_indexed_cNotPt:
-      return Hexagon::STriw_indexed_cPt;
-
-    case Hexagon::STriw_indexed_shl_cPt_V4:
-      return Hexagon::STriw_indexed_shl_cNotPt_V4;
-    case Hexagon::STriw_indexed_shl_cNotPt_V4:
-      return Hexagon::STriw_indexed_shl_cPt_V4;
-
-    case Hexagon::STriw_imm_cPt_V4:
-      return Hexagon::STriw_imm_cNotPt_V4;
-    case Hexagon::STriw_imm_cNotPt_V4:
-      return Hexagon::STriw_imm_cPt_V4;
-
-  // Double word.
-    case Hexagon::POST_STdri_cPt:
-      return Hexagon::POST_STdri_cNotPt;
-    case Hexagon::POST_STdri_cNotPt:
-      return Hexagon::POST_STdri_cPt;
-
-    case Hexagon::STrid_cPt:
-      return Hexagon::STrid_cNotPt;
-    case Hexagon::STrid_cNotPt:
-      return Hexagon::STrid_cPt;
-
-    case Hexagon::STrid_indexed_cPt:
-      return Hexagon::STrid_indexed_cNotPt;
-    case Hexagon::STrid_indexed_cNotPt:
-      return Hexagon::STrid_indexed_cPt;
-
-    case Hexagon::STrid_indexed_shl_cPt_V4:
-      return Hexagon::STrid_indexed_shl_cNotPt_V4;
-    case Hexagon::STrid_indexed_shl_cNotPt_V4:
-      return Hexagon::STrid_indexed_shl_cPt_V4;
-
-    // V4 Store to global address.
-    case Hexagon::STd_GP_cPt_V4:
-      return Hexagon::STd_GP_cNotPt_V4;
-    case Hexagon::STd_GP_cNotPt_V4:
-      return Hexagon::STd_GP_cPt_V4;
-
-    case Hexagon::STb_GP_cPt_V4:
-      return Hexagon::STb_GP_cNotPt_V4;
-    case Hexagon::STb_GP_cNotPt_V4:
-      return Hexagon::STb_GP_cPt_V4;
-
-    case Hexagon::STh_GP_cPt_V4:
-      return Hexagon::STh_GP_cNotPt_V4;
-    case Hexagon::STh_GP_cNotPt_V4:
-      return Hexagon::STh_GP_cPt_V4;
-
-    case Hexagon::STw_GP_cPt_V4:
-      return Hexagon::STw_GP_cNotPt_V4;
-    case Hexagon::STw_GP_cNotPt_V4:
-      return Hexagon::STw_GP_cPt_V4;
-
-  // Load.
-    case Hexagon::LDrid_cPt:
-      return Hexagon::LDrid_cNotPt;
-    case Hexagon::LDrid_cNotPt:
-      return Hexagon::LDrid_cPt;
-
-    case Hexagon::LDriw_cPt:
-      return Hexagon::LDriw_cNotPt;
-    case Hexagon::LDriw_cNotPt:
-      return Hexagon::LDriw_cPt;
-
-    case Hexagon::LDrih_cPt:
-      return Hexagon::LDrih_cNotPt;
-    case Hexagon::LDrih_cNotPt:
-      return Hexagon::LDrih_cPt;
-
-    case Hexagon::LDriuh_cPt:
-      return Hexagon::LDriuh_cNotPt;
-    case Hexagon::LDriuh_cNotPt:
-      return Hexagon::LDriuh_cPt;
-
-    case Hexagon::LDrib_cPt:
-      return Hexagon::LDrib_cNotPt;
-    case Hexagon::LDrib_cNotPt:
-      return Hexagon::LDrib_cPt;
-
-    case Hexagon::LDriub_cPt:
-      return Hexagon::LDriub_cNotPt;
-    case Hexagon::LDriub_cNotPt:
-      return Hexagon::LDriub_cPt;
-
- // Load Indexed.
-    case Hexagon::LDrid_indexed_cPt:
-      return Hexagon::LDrid_indexed_cNotPt;
-    case Hexagon::LDrid_indexed_cNotPt:
-      return Hexagon::LDrid_indexed_cPt;
-
-    case Hexagon::LDriw_indexed_cPt:
-      return Hexagon::LDriw_indexed_cNotPt;
-    case Hexagon::LDriw_indexed_cNotPt:
-      return Hexagon::LDriw_indexed_cPt;
-
-    case Hexagon::LDrih_indexed_cPt:
-      return Hexagon::LDrih_indexed_cNotPt;
-    case Hexagon::LDrih_indexed_cNotPt:
-      return Hexagon::LDrih_indexed_cPt;
-
-    case Hexagon::LDriuh_indexed_cPt:
-      return Hexagon::LDriuh_indexed_cNotPt;
-    case Hexagon::LDriuh_indexed_cNotPt:
-      return Hexagon::LDriuh_indexed_cPt;
-
-    case Hexagon::LDrib_indexed_cPt:
-      return Hexagon::LDrib_indexed_cNotPt;
-    case Hexagon::LDrib_indexed_cNotPt:
-      return Hexagon::LDrib_indexed_cPt;
-
-    case Hexagon::LDriub_indexed_cPt:
-      return Hexagon::LDriub_indexed_cNotPt;
-    case Hexagon::LDriub_indexed_cNotPt:
-      return Hexagon::LDriub_indexed_cPt;
-
-  // Post Inc Load.
-    case Hexagon::POST_LDrid_cPt:
-      return Hexagon::POST_LDrid_cNotPt;
-    case Hexagon::POST_LDriw_cNotPt:
-      return Hexagon::POST_LDriw_cPt;
-
-    case Hexagon::POST_LDrih_cPt:
-      return Hexagon::POST_LDrih_cNotPt;
-    case Hexagon::POST_LDrih_cNotPt:
-      return Hexagon::POST_LDrih_cPt;
-
-    case Hexagon::POST_LDriuh_cPt:
-      return Hexagon::POST_LDriuh_cNotPt;
-    case Hexagon::POST_LDriuh_cNotPt:
-      return Hexagon::POST_LDriuh_cPt;
-
-    case Hexagon::POST_LDrib_cPt:
-      return Hexagon::POST_LDrib_cNotPt;
-    case Hexagon::POST_LDrib_cNotPt:
-      return Hexagon::POST_LDrib_cPt;
-
-    case Hexagon::POST_LDriub_cPt:
-      return Hexagon::POST_LDriub_cNotPt;
-    case Hexagon::POST_LDriub_cNotPt:
-      return Hexagon::POST_LDriub_cPt;
-
-  // Dealloc_return.
+      // Dealloc_return.
     case Hexagon::DEALLOC_RET_cPt_V4:
       return Hexagon::DEALLOC_RET_cNotPt_V4;
     case Hexagon::DEALLOC_RET_cNotPt_V4:
       return Hexagon::DEALLOC_RET_cPt_V4;
-
-   // New Value Jump.
-   // JMPEQ_ri - with -1.
-    case Hexagon::JMP_EQriPtneg_nv_V4:
-      return Hexagon::JMP_EQriNotPtneg_nv_V4;
-    case Hexagon::JMP_EQriNotPtneg_nv_V4:
-      return Hexagon::JMP_EQriPtneg_nv_V4;
-
-    case Hexagon::JMP_EQriPntneg_nv_V4:
-      return Hexagon::JMP_EQriNotPntneg_nv_V4;
-    case Hexagon::JMP_EQriNotPntneg_nv_V4:
-      return Hexagon::JMP_EQriPntneg_nv_V4;
-
-   // JMPEQ_ri.
-     case Hexagon::JMP_EQriPt_nv_V4:
-      return Hexagon::JMP_EQriNotPt_nv_V4;
-    case Hexagon::JMP_EQriNotPt_nv_V4:
-      return Hexagon::JMP_EQriPt_nv_V4;
-
-     case Hexagon::JMP_EQriPnt_nv_V4:
-      return Hexagon::JMP_EQriNotPnt_nv_V4;
-    case Hexagon::JMP_EQriNotPnt_nv_V4:
-      return Hexagon::JMP_EQriPnt_nv_V4;
-
-   // JMPEQ_rr.
-     case Hexagon::JMP_EQrrPt_nv_V4:
-      return Hexagon::JMP_EQrrNotPt_nv_V4;
-    case Hexagon::JMP_EQrrNotPt_nv_V4:
-      return Hexagon::JMP_EQrrPt_nv_V4;
-
-     case Hexagon::JMP_EQrrPnt_nv_V4:
-      return Hexagon::JMP_EQrrNotPnt_nv_V4;
-    case Hexagon::JMP_EQrrNotPnt_nv_V4:
-      return Hexagon::JMP_EQrrPnt_nv_V4;
-
-   // JMPGT_ri - with -1.
-    case Hexagon::JMP_GTriPtneg_nv_V4:
-      return Hexagon::JMP_GTriNotPtneg_nv_V4;
-    case Hexagon::JMP_GTriNotPtneg_nv_V4:
-      return Hexagon::JMP_GTriPtneg_nv_V4;
-
-    case Hexagon::JMP_GTriPntneg_nv_V4:
-      return Hexagon::JMP_GTriNotPntneg_nv_V4;
-    case Hexagon::JMP_GTriNotPntneg_nv_V4:
-      return Hexagon::JMP_GTriPntneg_nv_V4;
-
-   // JMPGT_ri.
-     case Hexagon::JMP_GTriPt_nv_V4:
-      return Hexagon::JMP_GTriNotPt_nv_V4;
-    case Hexagon::JMP_GTriNotPt_nv_V4:
-      return Hexagon::JMP_GTriPt_nv_V4;
-
-     case Hexagon::JMP_GTriPnt_nv_V4:
-      return Hexagon::JMP_GTriNotPnt_nv_V4;
-    case Hexagon::JMP_GTriNotPnt_nv_V4:
-      return Hexagon::JMP_GTriPnt_nv_V4;
-
-   // JMPGT_rr.
-     case Hexagon::JMP_GTrrPt_nv_V4:
-      return Hexagon::JMP_GTrrNotPt_nv_V4;
-    case Hexagon::JMP_GTrrNotPt_nv_V4:
-      return Hexagon::JMP_GTrrPt_nv_V4;
-
-     case Hexagon::JMP_GTrrPnt_nv_V4:
-      return Hexagon::JMP_GTrrNotPnt_nv_V4;
-    case Hexagon::JMP_GTrrNotPnt_nv_V4:
-      return Hexagon::JMP_GTrrPnt_nv_V4;
-
-   // JMPGT_rrdn.
-     case Hexagon::JMP_GTrrdnPt_nv_V4:
-      return Hexagon::JMP_GTrrdnNotPt_nv_V4;
-    case Hexagon::JMP_GTrrdnNotPt_nv_V4:
-      return Hexagon::JMP_GTrrdnPt_nv_V4;
-
-     case Hexagon::JMP_GTrrdnPnt_nv_V4:
-      return Hexagon::JMP_GTrrdnNotPnt_nv_V4;
-    case Hexagon::JMP_GTrrdnNotPnt_nv_V4:
-      return Hexagon::JMP_GTrrdnPnt_nv_V4;
-
-   // JMPGTU_ri.
-     case Hexagon::JMP_GTUriPt_nv_V4:
-      return Hexagon::JMP_GTUriNotPt_nv_V4;
-    case Hexagon::JMP_GTUriNotPt_nv_V4:
-      return Hexagon::JMP_GTUriPt_nv_V4;
-
-     case Hexagon::JMP_GTUriPnt_nv_V4:
-      return Hexagon::JMP_GTUriNotPnt_nv_V4;
-    case Hexagon::JMP_GTUriNotPnt_nv_V4:
-      return Hexagon::JMP_GTUriPnt_nv_V4;
-
-   // JMPGTU_rr.
-     case Hexagon::JMP_GTUrrPt_nv_V4:
-      return Hexagon::JMP_GTUrrNotPt_nv_V4;
-    case Hexagon::JMP_GTUrrNotPt_nv_V4:
-      return Hexagon::JMP_GTUrrPt_nv_V4;
-
-     case Hexagon::JMP_GTUrrPnt_nv_V4:
-      return Hexagon::JMP_GTUrrNotPnt_nv_V4;
-    case Hexagon::JMP_GTUrrNotPnt_nv_V4:
-      return Hexagon::JMP_GTUrrPnt_nv_V4;
-
-   // JMPGTU_rrdn.
-     case Hexagon::JMP_GTUrrdnPt_nv_V4:
-      return Hexagon::JMP_GTUrrdnNotPt_nv_V4;
-    case Hexagon::JMP_GTUrrdnNotPt_nv_V4:
-      return Hexagon::JMP_GTUrrdnPt_nv_V4;
-
-     case Hexagon::JMP_GTUrrdnPnt_nv_V4:
-      return Hexagon::JMP_GTUrrdnNotPnt_nv_V4;
-    case Hexagon::JMP_GTUrrdnNotPnt_nv_V4:
-      return Hexagon::JMP_GTUrrdnPnt_nv_V4;
   }
 }
 
+// New Value Store instructions.
+bool HexagonInstrInfo::isNewValueStore(const MachineInstr *MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
+
+  return ((F >> HexagonII::NVStorePos) & HexagonII::NVStoreMask);
+}
+
+bool HexagonInstrInfo::isNewValueStore(unsigned Opcode) const {
+  const uint64_t F = get(Opcode).TSFlags;
+
+  return ((F >> HexagonII::NVStorePos) & HexagonII::NVStoreMask);
+}
 
 int HexagonInstrInfo::
 getMatchingCondBranchOpcode(int Opc, bool invertPredicate) const {
@@ -1489,223 +772,21 @@ getMatchingCondBranchOpcode(int Opc, bool invertPredicate) const {
   // This switch case will be removed once all the instructions have been
   // modified to use relation maps.
   switch(Opc) {
-  case Hexagon::TFR:
-    return !invertPredicate ? Hexagon::TFR_cPt :
-                              Hexagon::TFR_cNotPt;
   case Hexagon::TFRI_f:
     return !invertPredicate ? Hexagon::TFRI_cPt_f :
                               Hexagon::TFRI_cNotPt_f;
-  case Hexagon::TFRI:
-    return !invertPredicate ? Hexagon::TFRI_cPt :
-                              Hexagon::TFRI_cNotPt;
-  case Hexagon::JMP:
-    return !invertPredicate ? Hexagon::JMP_c :
-                              Hexagon::JMP_cNot;
-  case Hexagon::JMP_EQrrPt_nv_V4:
-    return !invertPredicate ? Hexagon::JMP_EQrrPt_nv_V4 :
-                              Hexagon::JMP_EQrrNotPt_nv_V4;
-  case Hexagon::JMP_EQriPt_nv_V4:
-    return !invertPredicate ? Hexagon::JMP_EQriPt_nv_V4 :
-                              Hexagon::JMP_EQriNotPt_nv_V4;
   case Hexagon::COMBINE_rr:
     return !invertPredicate ? Hexagon::COMBINE_rr_cPt :
                               Hexagon::COMBINE_rr_cNotPt;
-  case Hexagon::ASLH:
-    return !invertPredicate ? Hexagon::ASLH_cPt_V4 :
-                              Hexagon::ASLH_cNotPt_V4;
-  case Hexagon::ASRH:
-    return !invertPredicate ? Hexagon::ASRH_cPt_V4 :
-                              Hexagon::ASRH_cNotPt_V4;
-  case Hexagon::SXTB:
-    return !invertPredicate ? Hexagon::SXTB_cPt_V4 :
-                              Hexagon::SXTB_cNotPt_V4;
-  case Hexagon::SXTH:
-    return !invertPredicate ? Hexagon::SXTH_cPt_V4 :
-                              Hexagon::SXTH_cNotPt_V4;
-  case Hexagon::ZXTB:
-    return !invertPredicate ? Hexagon::ZXTB_cPt_V4 :
-                              Hexagon::ZXTB_cNotPt_V4;
-  case Hexagon::ZXTH:
-    return !invertPredicate ? Hexagon::ZXTH_cPt_V4 :
-                              Hexagon::ZXTH_cNotPt_V4;
 
-  case Hexagon::JMPR:
-    return !invertPredicate ? Hexagon::JMPR_cPt :
-                              Hexagon::JMPR_cNotPt;
-
-  // V4 indexed+scaled load.
-  case Hexagon::LDrid_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::LDrid_indexed_shl_cPt_V4 :
-                              Hexagon::LDrid_indexed_shl_cNotPt_V4;
-  case Hexagon::LDrib_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::LDrib_indexed_shl_cPt_V4 :
-                              Hexagon::LDrib_indexed_shl_cNotPt_V4;
-  case Hexagon::LDriub_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::LDriub_indexed_shl_cPt_V4 :
-                              Hexagon::LDriub_indexed_shl_cNotPt_V4;
-  case Hexagon::LDrih_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::LDrih_indexed_shl_cPt_V4 :
-                              Hexagon::LDrih_indexed_shl_cNotPt_V4;
-  case Hexagon::LDriuh_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::LDriuh_indexed_shl_cPt_V4 :
-                              Hexagon::LDriuh_indexed_shl_cNotPt_V4;
-  case Hexagon::LDriw_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::LDriw_indexed_shl_cPt_V4 :
-                              Hexagon::LDriw_indexed_shl_cNotPt_V4;
-
-  // V4 Load from global address
-  case Hexagon::LDd_GP_V4:
-    return !invertPredicate ? Hexagon::LDd_GP_cPt_V4 :
-                              Hexagon::LDd_GP_cNotPt_V4;
-  case Hexagon::LDb_GP_V4:
-    return !invertPredicate ? Hexagon::LDb_GP_cPt_V4 :
-                              Hexagon::LDb_GP_cNotPt_V4;
-  case Hexagon::LDub_GP_V4:
-    return !invertPredicate ? Hexagon::LDub_GP_cPt_V4 :
-                              Hexagon::LDub_GP_cNotPt_V4;
-  case Hexagon::LDh_GP_V4:
-    return !invertPredicate ? Hexagon::LDh_GP_cPt_V4 :
-                              Hexagon::LDh_GP_cNotPt_V4;
-  case Hexagon::LDuh_GP_V4:
-    return !invertPredicate ? Hexagon::LDuh_GP_cPt_V4 :
-                              Hexagon::LDuh_GP_cNotPt_V4;
-  case Hexagon::LDw_GP_V4:
-    return !invertPredicate ? Hexagon::LDw_GP_cPt_V4 :
-                              Hexagon::LDw_GP_cNotPt_V4;
-
-    // Byte.
-  case Hexagon::POST_STbri:
-    return !invertPredicate ? Hexagon::POST_STbri_cPt :
-                              Hexagon::POST_STbri_cNotPt;
-  case Hexagon::STrib:
-    return !invertPredicate ? Hexagon::STrib_cPt :
-                              Hexagon::STrib_cNotPt;
-  case Hexagon::STrib_indexed:
-    return !invertPredicate ? Hexagon::STrib_indexed_cPt :
-                              Hexagon::STrib_indexed_cNotPt;
-  case Hexagon::STrib_imm_V4:
-    return !invertPredicate ? Hexagon::STrib_imm_cPt_V4 :
-                              Hexagon::STrib_imm_cNotPt_V4;
-  case Hexagon::STrib_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::STrib_indexed_shl_cPt_V4 :
-                              Hexagon::STrib_indexed_shl_cNotPt_V4;
-  // Halfword.
-  case Hexagon::POST_SThri:
-    return !invertPredicate ? Hexagon::POST_SThri_cPt :
-                              Hexagon::POST_SThri_cNotPt;
-  case Hexagon::STrih:
-    return !invertPredicate ? Hexagon::STrih_cPt :
-                              Hexagon::STrih_cNotPt;
-  case Hexagon::STrih_indexed:
-    return !invertPredicate ? Hexagon::STrih_indexed_cPt :
-                              Hexagon::STrih_indexed_cNotPt;
-  case Hexagon::STrih_imm_V4:
-    return !invertPredicate ? Hexagon::STrih_imm_cPt_V4 :
-                              Hexagon::STrih_imm_cNotPt_V4;
-  case Hexagon::STrih_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::STrih_indexed_shl_cPt_V4 :
-                              Hexagon::STrih_indexed_shl_cNotPt_V4;
   // Word.
-  case Hexagon::POST_STwri:
-    return !invertPredicate ? Hexagon::POST_STwri_cPt :
-                              Hexagon::POST_STwri_cNotPt;
-  case Hexagon::STriw:
+  case Hexagon::STriw_f:
     return !invertPredicate ? Hexagon::STriw_cPt :
                               Hexagon::STriw_cNotPt;
-  case Hexagon::STriw_indexed:
+  case Hexagon::STriw_indexed_f:
     return !invertPredicate ? Hexagon::STriw_indexed_cPt :
                               Hexagon::STriw_indexed_cNotPt;
-  case Hexagon::STriw_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::STriw_indexed_shl_cPt_V4 :
-                              Hexagon::STriw_indexed_shl_cNotPt_V4;
-  case Hexagon::STriw_imm_V4:
-    return !invertPredicate ? Hexagon::STriw_imm_cPt_V4 :
-                              Hexagon::STriw_imm_cNotPt_V4;
-  // Double word.
-  case Hexagon::POST_STdri:
-    return !invertPredicate ? Hexagon::POST_STdri_cPt :
-                              Hexagon::POST_STdri_cNotPt;
-  case Hexagon::STrid:
-    return !invertPredicate ? Hexagon::STrid_cPt :
-                              Hexagon::STrid_cNotPt;
-  case Hexagon::STrid_indexed:
-    return !invertPredicate ? Hexagon::STrid_indexed_cPt :
-                              Hexagon::STrid_indexed_cNotPt;
-  case Hexagon::STrid_indexed_shl_V4:
-    return !invertPredicate ? Hexagon::STrid_indexed_shl_cPt_V4 :
-                              Hexagon::STrid_indexed_shl_cNotPt_V4;
 
-  // V4 Store to global address
-  case Hexagon::STd_GP_V4:
-    return !invertPredicate ? Hexagon::STd_GP_cPt_V4 :
-                              Hexagon::STd_GP_cNotPt_V4;
-  case Hexagon::STb_GP_V4:
-    return !invertPredicate ? Hexagon::STb_GP_cPt_V4 :
-                              Hexagon::STb_GP_cNotPt_V4;
-  case Hexagon::STh_GP_V4:
-    return !invertPredicate ? Hexagon::STh_GP_cPt_V4 :
-                              Hexagon::STh_GP_cNotPt_V4;
-  case Hexagon::STw_GP_V4:
-    return !invertPredicate ? Hexagon::STw_GP_cPt_V4 :
-                              Hexagon::STw_GP_cNotPt_V4;
-
-  // Load.
-  case Hexagon::LDrid:
-    return !invertPredicate ? Hexagon::LDrid_cPt :
-                              Hexagon::LDrid_cNotPt;
-  case Hexagon::LDriw:
-    return !invertPredicate ? Hexagon::LDriw_cPt :
-                              Hexagon::LDriw_cNotPt;
-  case Hexagon::LDrih:
-    return !invertPredicate ? Hexagon::LDrih_cPt :
-                              Hexagon::LDrih_cNotPt;
-  case Hexagon::LDriuh:
-    return !invertPredicate ? Hexagon::LDriuh_cPt :
-                              Hexagon::LDriuh_cNotPt;
-  case Hexagon::LDrib:
-    return !invertPredicate ? Hexagon::LDrib_cPt :
-                              Hexagon::LDrib_cNotPt;
-  case Hexagon::LDriub:
-    return !invertPredicate ? Hexagon::LDriub_cPt :
-                              Hexagon::LDriub_cNotPt;
- // Load Indexed.
-  case Hexagon::LDrid_indexed:
-    return !invertPredicate ? Hexagon::LDrid_indexed_cPt :
-                              Hexagon::LDrid_indexed_cNotPt;
-  case Hexagon::LDriw_indexed:
-    return !invertPredicate ? Hexagon::LDriw_indexed_cPt :
-                              Hexagon::LDriw_indexed_cNotPt;
-  case Hexagon::LDrih_indexed:
-    return !invertPredicate ? Hexagon::LDrih_indexed_cPt :
-                              Hexagon::LDrih_indexed_cNotPt;
-  case Hexagon::LDriuh_indexed:
-    return !invertPredicate ? Hexagon::LDriuh_indexed_cPt :
-                              Hexagon::LDriuh_indexed_cNotPt;
-  case Hexagon::LDrib_indexed:
-    return !invertPredicate ? Hexagon::LDrib_indexed_cPt :
-                              Hexagon::LDrib_indexed_cNotPt;
-  case Hexagon::LDriub_indexed:
-    return !invertPredicate ? Hexagon::LDriub_indexed_cPt :
-                              Hexagon::LDriub_indexed_cNotPt;
-  // Post Increment Load.
-  case Hexagon::POST_LDrid:
-    return !invertPredicate ? Hexagon::POST_LDrid_cPt :
-                              Hexagon::POST_LDrid_cNotPt;
-  case Hexagon::POST_LDriw:
-    return !invertPredicate ? Hexagon::POST_LDriw_cPt :
-                              Hexagon::POST_LDriw_cNotPt;
-  case Hexagon::POST_LDrih:
-    return !invertPredicate ? Hexagon::POST_LDrih_cPt :
-                              Hexagon::POST_LDrih_cNotPt;
-  case Hexagon::POST_LDriuh:
-    return !invertPredicate ? Hexagon::POST_LDriuh_cPt :
-                              Hexagon::POST_LDriuh_cNotPt;
-  case Hexagon::POST_LDrib:
-    return !invertPredicate ? Hexagon::POST_LDrib_cPt :
-                              Hexagon::POST_LDrib_cNotPt;
-  case Hexagon::POST_LDriub:
-    return !invertPredicate ? Hexagon::POST_LDriub_cPt :
-                              Hexagon::POST_LDriub_cNotPt;
   // DEALLOC_RETURN.
   case Hexagon::DEALLOC_RET_V4:
     return !invertPredicate ? Hexagon::DEALLOC_RET_cPt_V4 :
@@ -1830,10 +911,14 @@ PredicateInstruction(MachineInstr *MI,
   // It is better to have an assert here to check this. But I don't know how
   // to write this assert because findFirstPredOperandIdx() would return -1
   if (oper < -1) oper = -1;
+
   MI->getOperand(oper+1).ChangeToRegister(PredMO.getReg(), PredMO.isDef(),
-                                          PredMO.isImplicit(), PredMO.isKill(),
+                                          PredMO.isImplicit(), false,
                                           PredMO.isDead(), PredMO.isUndef(),
                                           PredMO.isDebug());
+
+  MachineRegisterInfo &RegInfo = MI->getParent()->getParent()->getRegInfo();
+  RegInfo.clearKillFlags(PredMO.getReg());
 
   if (hasGAOpnd)
   {
@@ -1883,11 +968,39 @@ isProfitableToIfCvt(MachineBasicBlock &TMBB,
   return true;
 }
 
-
+// Returns true if an instruction is predicated irrespective of the predicate
+// sense. For example, all of the following will return true.
+// if (p0) R1 = add(R2, R3)
+// if (!p0) R1 = add(R2, R3)
+// if (p0.new) R1 = add(R2, R3)
+// if (!p0.new) R1 = add(R2, R3)
 bool HexagonInstrInfo::isPredicated(const MachineInstr *MI) const {
   const uint64_t F = MI->getDesc().TSFlags;
 
   return ((F >> HexagonII::PredicatedPos) & HexagonII::PredicatedMask);
+}
+
+bool HexagonInstrInfo::isPredicated(unsigned Opcode) const {
+  const uint64_t F = get(Opcode).TSFlags;
+
+  return ((F >> HexagonII::PredicatedPos) & HexagonII::PredicatedMask);
+}
+
+bool HexagonInstrInfo::isPredicatedTrue(const MachineInstr *MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
+
+  assert(isPredicated(MI));
+  return (!((F >> HexagonII::PredicatedFalsePos) &
+            HexagonII::PredicatedFalseMask));
+}
+
+bool HexagonInstrInfo::isPredicatedTrue(unsigned Opcode) const {
+  const uint64_t F = get(Opcode).TSFlags;
+
+  // Make sure that the instruction is predicated.
+  assert((F>> HexagonII::PredicatedPos) & HexagonII::PredicatedMask);
+  return (!((F >> HexagonII::PredicatedFalsePos) &
+            HexagonII::PredicatedFalseMask));
 }
 
 bool HexagonInstrInfo::isPredicatedNew(const MachineInstr *MI) const {
@@ -1895,6 +1008,23 @@ bool HexagonInstrInfo::isPredicatedNew(const MachineInstr *MI) const {
 
   assert(isPredicated(MI));
   return ((F >> HexagonII::PredicatedNewPos) & HexagonII::PredicatedNewMask);
+}
+
+bool HexagonInstrInfo::isPredicatedNew(unsigned Opcode) const {
+  const uint64_t F = get(Opcode).TSFlags;
+
+  assert(isPredicated(Opcode));
+  return ((F >> HexagonII::PredicatedNewPos) & HexagonII::PredicatedNewMask);
+}
+
+// Returns true, if a ST insn can be promoted to a new-value store.
+bool HexagonInstrInfo::mayBeNewStore(const MachineInstr *MI) const {
+  const HexagonRegisterInfo& QRI = getRegisterInfo();
+  const uint64_t F = MI->getDesc().TSFlags;
+
+  return ((F >> HexagonII::mayNVStorePos) &
+           HexagonII::mayNVStoreMask &
+           QRI.Subtarget.hasV4TOps());
 }
 
 bool
@@ -2081,6 +1211,8 @@ isValidAutoIncImm(const EVT VT, const int Offset) const {
 
 bool HexagonInstrInfo::
 isMemOp(const MachineInstr *MI) const {
+//  return MI->getDesc().mayLoad() && MI->getDesc().mayStore();
+
   switch (MI->getOpcode())
   {
     default: return false;
@@ -2129,14 +1261,10 @@ bool HexagonInstrInfo::isNewValueJumpCandidate(const MachineInstr *MI) const {
     default: return false;
     case Hexagon::CMPEQrr:
     case Hexagon::CMPEQri:
-    case Hexagon::CMPLTrr:
     case Hexagon::CMPGTrr:
     case Hexagon::CMPGTri:
-    case Hexagon::CMPLTUrr:
     case Hexagon::CMPGTUrr:
     case Hexagon::CMPGTUri:
-    case Hexagon::CMPGEri:
-    case Hexagon::CMPGEUri:
       return true;
   }
 }
@@ -2369,12 +1497,119 @@ isConditionalStore (const MachineInstr* MI) const {
   }
 }
 
+
+bool HexagonInstrInfo::isNewValueJump(const MachineInstr *MI) const {
+  if (isNewValue(MI) && isBranch(MI))
+    return true;
+  return false;
+}
+
+bool HexagonInstrInfo::isPostIncrement (const MachineInstr* MI) const {
+  return (getAddrMode(MI) == HexagonII::PostInc);
+}
+
+bool HexagonInstrInfo::isNewValue(const MachineInstr* MI) const {
+  const uint64_t F = MI->getDesc().TSFlags;
+  return ((F >> HexagonII::NewValuePos) & HexagonII::NewValueMask);
+}
+
 // Returns true, if any one of the operands is a dot new
 // insn, whether it is predicated dot new or register dot new.
 bool HexagonInstrInfo::isDotNewInst (const MachineInstr* MI) const {
   return (isNewValueInst(MI) ||
      (isPredicated(MI) && isPredicatedNew(MI)));
 }
+
+// Returns the most basic instruction for the .new predicated instructions and
+// new-value stores.
+// For example, all of the following instructions will be converted back to the
+// same instruction:
+// 1) if (p0.new) memw(R0+#0) = R1.new  --->
+// 2) if (p0) memw(R0+#0)= R1.new      -------> if (p0) memw(R0+#0) = R1
+// 3) if (p0.new) memw(R0+#0) = R1      --->
+//
+
+int HexagonInstrInfo::GetDotOldOp(const int opc) const {
+  int NewOp = opc;
+  if (isPredicated(NewOp) && isPredicatedNew(NewOp)) { // Get predicate old form
+    NewOp = Hexagon::getPredOldOpcode(NewOp);
+    if (NewOp < 0)
+      assert(0 && "Couldn't change predicate new instruction to its old form.");
+  }
+
+  if (isNewValueStore(NewOp)) { // Convert into non new-value format
+    NewOp = Hexagon::getNonNVStore(NewOp);
+    if (NewOp < 0)
+      assert(0 && "Couldn't change new-value store to its old form.");
+  }
+  return NewOp;
+}
+
+// Return the new value instruction for a given store.
+int HexagonInstrInfo::GetDotNewOp(const MachineInstr* MI) const {
+  int NVOpcode = Hexagon::getNewValueOpcode(MI->getOpcode());
+  if (NVOpcode >= 0) // Valid new-value store instruction.
+    return NVOpcode;
+
+  switch (MI->getOpcode()) {
+  default: llvm_unreachable("Unknown .new type");
+  // store new value byte
+  case Hexagon::STrib_shl_V4:
+    return Hexagon::STrib_shl_nv_V4;
+
+  case Hexagon::STrih_shl_V4:
+    return Hexagon::STrih_shl_nv_V4;
+
+  case Hexagon::STriw_f:
+    return Hexagon::STriw_nv_V4;
+
+  case Hexagon::STriw_indexed_f:
+    return Hexagon::STriw_indexed_nv_V4;
+
+  case Hexagon::STriw_shl_V4:
+    return Hexagon::STriw_shl_nv_V4;
+
+  }
+  return 0;
+}
+
+// Return .new predicate version for an instruction.
+int HexagonInstrInfo::GetDotNewPredOp(MachineInstr *MI,
+                                      const MachineBranchProbabilityInfo
+                                      *MBPI) const {
+
+  int NewOpcode = Hexagon::getPredNewOpcode(MI->getOpcode());
+  if (NewOpcode >= 0) // Valid predicate new instruction
+    return NewOpcode;
+
+  switch (MI->getOpcode()) {
+  default: llvm_unreachable("Unknown .new type");
+  // Condtional Jumps
+  case Hexagon::JMP_t:
+  case Hexagon::JMP_f:
+    return getDotNewPredJumpOp(MI, MBPI);
+
+  case Hexagon::JMPR_t:
+    return Hexagon::JMPR_tnew_tV3;
+
+  case Hexagon::JMPR_f:
+    return Hexagon::JMPR_fnew_tV3;
+
+  case Hexagon::JMPret_t:
+    return Hexagon::JMPret_tnew_tV3;
+
+  case Hexagon::JMPret_f:
+    return Hexagon::JMPret_fnew_tV3;
+
+
+  // Conditional combine
+  case Hexagon::COMBINE_rr_cPt :
+    return Hexagon::COMBINE_rr_cdnPt;
+  case Hexagon::COMBINE_rr_cNotPt :
+    return Hexagon::COMBINE_rr_cdnNotPt;
+  }
+}
+
 
 unsigned HexagonInstrInfo::getAddrMode(const MachineInstr* MI) const {
   const uint64_t F = MI->getDesc().TSFlags;
@@ -2470,6 +1705,34 @@ bool HexagonInstrInfo::isConstExtended(MachineInstr *MI) const {
   return (ImmValue < MinValue || ImmValue > MaxValue);
 }
 
+// Returns the opcode to use when converting MI, which is a conditional jump,
+// into a conditional instruction which uses the .new value of the predicate.
+// We also use branch probabilities to add a hint to the jump.
+int
+HexagonInstrInfo::getDotNewPredJumpOp(MachineInstr *MI,
+                                  const
+                                  MachineBranchProbabilityInfo *MBPI) const {
+
+  // We assume that block can have at most two successors.
+  bool taken = false;
+  MachineBasicBlock *Src = MI->getParent();
+  MachineOperand *BrTarget = &MI->getOperand(1);
+  MachineBasicBlock *Dst = BrTarget->getMBB();
+
+  const BranchProbability Prediction = MBPI->getEdgeProbability(Src, Dst);
+  if (Prediction >= BranchProbability(1,2))
+    taken = true;
+
+  switch (MI->getOpcode()) {
+  case Hexagon::JMP_t:
+    return taken ? Hexagon::JMP_tnew_t : Hexagon::JMP_tnew_nt;
+  case Hexagon::JMP_f:
+    return taken ? Hexagon::JMP_fnew_t : Hexagon::JMP_fnew_nt;
+
+  default:
+    llvm_unreachable("Unexpected jump instruction.");
+  }
+}
 // Returns true if a particular operand is extendable for an instruction.
 bool HexagonInstrInfo::isOperandExtended(const MachineInstr *MI,
                                          unsigned short OperandNum) const {
@@ -2573,4 +1836,19 @@ short HexagonInstrInfo::getNonExtOpcode (const MachineInstr *MI) const {
     }
   }
   return -1;
+}
+
+bool HexagonInstrInfo::PredOpcodeHasJMP_c(Opcode_t Opcode) const {
+  return (Opcode == Hexagon::JMP_t) ||
+         (Opcode == Hexagon::JMP_f) ||
+         (Opcode == Hexagon::JMP_tnew_t) ||
+         (Opcode == Hexagon::JMP_fnew_t) ||
+         (Opcode == Hexagon::JMP_tnew_nt) ||
+         (Opcode == Hexagon::JMP_fnew_nt);
+}
+
+bool HexagonInstrInfo::PredOpcodeHasNot(Opcode_t Opcode) const {
+  return (Opcode == Hexagon::JMP_f) ||
+         (Opcode == Hexagon::JMP_fnew_t) ||
+         (Opcode == Hexagon::JMP_fnew_nt);
 }

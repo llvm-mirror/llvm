@@ -93,11 +93,24 @@ public:
     while (MBBI != I) forward();
   }
 
+  /// Invert the behavior of forward() on the current instruction (undo the
+  /// changes to the available registers made by forward()).
+  void unprocess();
+
+  /// Unprocess instructions until you reach the provided iterator.
+  void unprocess(MachineBasicBlock::iterator I) {
+    while (MBBI != I) unprocess();
+  }
+
   /// skipTo - Move the internal MBB iterator but do not update register states.
   void skipTo(MachineBasicBlock::iterator I) {
     if (I == MachineBasicBlock::iterator(NULL))
       Tracking = false;
     MBBI = I;
+  }
+
+  MachineBasicBlock::iterator getCurrentPosition() const {
+    return MBBI;
   }
 
   /// getRegsUsed - return all registers currently in use in used.
@@ -118,7 +131,7 @@ public:
 
   /// Query whether a frame index is a scavenging frame index.
   bool isScavengingFrameIndex(int FI) const {
-    for (SmallVector<ScavengedInfo, 2>::const_iterator I = Scavenged.begin(),
+    for (SmallVectorImpl<ScavengedInfo>::const_iterator I = Scavenged.begin(),
          IE = Scavenged.end(); I != IE; ++I)
       if (I->FrameIndex == FI)
         return true;
@@ -128,7 +141,7 @@ public:
 
   /// Get an array of scavenging frame indices.
   void getScavengingFrameIndices(SmallVectorImpl<int> &A) const {
-    for (SmallVector<ScavengedInfo, 2>::const_iterator I = Scavenged.begin(),
+    for (SmallVectorImpl<ScavengedInfo>::const_iterator I = Scavenged.begin(),
          IE = Scavenged.end(); I != IE; ++I)
       if (I->FrameIndex >= 0)
         A.push_back(I->FrameIndex);
@@ -170,6 +183,10 @@ private:
   void setUnused(BitVector &Regs) {
     RegsAvailable |= Regs;
   }
+
+  /// Processes the current instruction and fill the KillRegs and DefRegs bit
+  /// vectors.
+  void determineKillsAndDefs();
 
   /// Add Reg and all its sub-registers to BV.
   void addRegWithSubRegs(BitVector &BV, unsigned Reg);

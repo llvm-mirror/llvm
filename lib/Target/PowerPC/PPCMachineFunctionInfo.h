@@ -32,6 +32,9 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   ///
   int ReturnAddrSaveIndex;
 
+  /// Frame index where the old base pointer is stored.
+  int BasePointerSaveIndex;
+
   /// MustSaveLR - Indicates whether LR is defined (or clobbered) in the current
   /// function.  This is only valid after the initial scan of the function by
   /// PEI.
@@ -84,10 +87,16 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   /// CRSpillFrameIndex - FrameIndex for CR spill slot for 32-bit SVR4.
   int CRSpillFrameIndex;
 
+  /// If any of CR[2-4] need to be saved in the prologue and restored in the
+  /// epilogue then they are added to this array. This is used for the
+  /// 64-bit SVR4 ABI.
+  SmallVector<unsigned, 3> MustSaveCRs;
+
 public:
   explicit PPCFunctionInfo(MachineFunction &MF) 
     : FramePointerSaveIndex(0),
       ReturnAddrSaveIndex(0),
+      BasePointerSaveIndex(0),
       HasSpills(false),
       HasNonRISpills(false),
       SpillsCR(false),
@@ -107,6 +116,9 @@ public:
   
   int getReturnAddrSaveIndex() const { return ReturnAddrSaveIndex; }
   void setReturnAddrSaveIndex(int idx) { ReturnAddrSaveIndex = idx; }
+
+  int getBasePointerSaveIndex() const { return BasePointerSaveIndex; }
+  void setBasePointerSaveIndex(int Idx) { BasePointerSaveIndex = Idx; }
 
   unsigned getMinReservedArea() const { return MinReservedArea; }
   void setMinReservedArea(unsigned size) { MinReservedArea = size; }
@@ -154,6 +166,10 @@ public:
 
   int getCRSpillFrameIndex() const { return CRSpillFrameIndex; }
   void setCRSpillFrameIndex(int idx) { CRSpillFrameIndex = idx; }
+
+  const SmallVectorImpl<unsigned> &
+    getMustSaveCRs() const { return MustSaveCRs; }
+  void addMustSaveCR(unsigned Reg) { MustSaveCRs.push_back(Reg); }
 };
 
 } // end of namespace llvm

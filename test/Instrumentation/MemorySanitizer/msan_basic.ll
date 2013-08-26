@@ -1,12 +1,25 @@
 ; RUN: opt < %s -msan -msan-check-access-address=0 -S | FileCheck %s
 ; RUN: opt < %s -msan -msan-check-access-address=0 -msan-track-origins=1 -S | FileCheck -check-prefix=CHECK-ORIGINS %s
+; RUN: opt < %s -msan -msan-check-access-address=1 -S | FileCheck %s -check-prefix=CHECK-AA
+
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
+target triple = "x86_64-unknown-linux-gnu"
 
 ; Check the presence of __msan_init
 ; CHECK: @llvm.global_ctors {{.*}} @__msan_init
 
-; Check the presence and the linkage type of __msan_track_origins
-; CHECK: @__msan_track_origins = weak_odr constant i32 0
+; Check the presence and the linkage type of __msan_track_origins and
+; other interface symbols.
+; CHECK-NOT: @__msan_track_origins
+; CHECK-ORIGINS: @__msan_track_origins = weak_odr constant i32 1
+; CHECK-NOT: @__msan_keep_going = weak_odr constant i32 0
+; CHECK: @__msan_retval_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_retval_origin_tls = external thread_local(initialexec) global i32
+; CHECK: @__msan_param_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_param_origin_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_va_arg_tls = external thread_local(initialexec) global [{{.*}}]
+; CHECK: @__msan_va_arg_overflow_size_tls = external thread_local(initialexec) global i64
+; CHECK: @__msan_origin_tls = external thread_local(initialexec) global i32
 
 
 ; Check instrumentation of stores
@@ -623,3 +636,76 @@ declare void @bar()
 ; CHECK: store {{.*}} @__msan_retval_tls
 ; CHECK-NOT: @__msan_warning
 ; CHECK: ret i32
+
+
+; Test that stack allocations are unpoisoned in functions missing
+; sanitize_memory attribute
+
+define i32 @NoSanitizeMemoryAlloca() {
+entry:
+  %p = alloca i32, align 4
+  %x = call i32 @NoSanitizeMemoryAllocaHelper(i32* %p)
+  ret i32 %x
+}
+
+declare i32 @NoSanitizeMemoryAllocaHelper(i32* %p)
+
+; CHECK: @NoSanitizeMemoryAlloca
+; CHECK: call void @llvm.memset.p0i8.i64(i8* {{.*}}, i8 0, i64 4, i32 4, i1 false)
+; CHECK: call i32 @NoSanitizeMemoryAllocaHelper(i32*
+; CHECK: ret i32
+
+
+; Test that undef is unpoisoned in functions missing
+; sanitize_memory attribute
+
+define i32 @NoSanitizeMemoryUndef() {
+entry:
+  %x = call i32 @NoSanitizeMemoryUndefHelper(i32 undef)
+  ret i32 %x
+}
+
+declare i32 @NoSanitizeMemoryUndefHelper(i32 %x)
+
+; CHECK: @NoSanitizeMemoryAlloca
+; CHECK: store i32 0, i32* {{.*}} @__msan_param_tls
+; CHECK: call i32 @NoSanitizeMemoryUndefHelper(i32 undef)
+; CHECK: ret i32
+
+
+; Test argument shadow alignment
+
+define <2 x i64> @ArgumentShadowAlignment(i64 %a, <2 x i64> %b) sanitize_memory {
+entry:
+  ret <2 x i64> %b
+}
+
+; CHECK: @ArgumentShadowAlignment
+; CHECK: load <2 x i64>* {{.*}} @__msan_param_tls {{.*}}, align 8
+; CHECK: store <2 x i64> {{.*}} @__msan_retval_tls {{.*}}, align 8
+; CHECK: ret <2 x i64>
+
+
+; Test byval argument shadow alignment
+
+define <2 x i64> @ByValArgumentShadowLargeAlignment(<2 x i64>* byval %p) sanitize_memory {
+entry:
+  %x = load <2 x i64>* %p
+  ret <2 x i64> %x
+}
+
+; CHECK-AA: @ByValArgumentShadowLargeAlignment
+; CHECK-AA: call void @llvm.memcpy.p0i8.p0i8.i64(i8* {{.*}}, i8* {{.*}}, i64 16, i32 8, i1 false)
+; CHECK-AA: ret <2 x i64>
+
+
+define i16 @ByValArgumentShadowSmallAlignment(i16* byval %p) sanitize_memory {
+entry:
+  %x = load i16* %p
+  ret i16 %x
+}
+
+; CHECK-AA: @ByValArgumentShadowSmallAlignment
+; CHECK-AA: call void @llvm.memcpy.p0i8.p0i8.i64(i8* {{.*}}, i8* {{.*}}, i64 2, i32 2, i1 false)
+; CHECK-AA: ret i16
+

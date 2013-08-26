@@ -21,7 +21,6 @@ Basic Commands
    lli
    llvm-link
    llvm-ar
-   llvm-ranlib
    llvm-nm
    llvm-prof
    llvm-config
@@ -50,3 +49,4 @@ Developer Tools
    tblgen
    lit
    llvm-build
+   llvm-readobj

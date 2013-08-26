@@ -50,13 +50,14 @@ public:
 
   virtual void InitSections();
   virtual void InitToTextSection();
-  virtual void ChangeSection(const MCSection *Section);
+  virtual void ChangeSection(const MCSection *Section,
+                             const MCExpr *Subsection);
   virtual void EmitLabel(MCSymbol *Symbol);
   virtual void EmitDebugLabel(MCSymbol *Symbol);
   virtual void EmitAssemblerFlag(MCAssemblerFlag Flag);
   virtual void EmitThumbFunc(MCSymbol *Func);
   virtual void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol);
-  virtual void EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute);
+  virtual bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute);
   virtual void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue);
   virtual void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                 unsigned ByteAlignment);
@@ -76,8 +77,7 @@ public:
                             uint64_t Size = 0, unsigned ByteAlignment = 0);
   virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
                               uint64_t Size, unsigned ByteAlignment = 0);
-  virtual void EmitValueImpl(const MCExpr *Value, unsigned Size,
-                             unsigned AddrSpace);
+  virtual void EmitValueImpl(const MCExpr *Value, unsigned Size);
 
   virtual void EmitFileDirective(StringRef Filename);
 

@@ -88,7 +88,7 @@ static uint64_t getObjectSize(const Value *V, const DataLayout &TD,
                               const TargetLibraryInfo &TLI,
                               bool RoundToAlign = false) {
   uint64_t Size;
-  if (getUnderlyingObjectSize(V, Size, &TD, &TLI, RoundToAlign))
+  if (getObjectSize(V, Size, &TD, &TLI, RoundToAlign))
     return Size;
   return AliasAnalysis::UnknownSize;
 }
@@ -98,6 +98,35 @@ static uint64_t getObjectSize(const Value *V, const DataLayout &TD,
 static bool isObjectSmallerThan(const Value *V, uint64_t Size,
                                 const DataLayout &TD,
                                 const TargetLibraryInfo &TLI) {
+  // Note that the meanings of the "object" are slightly different in the
+  // following contexts:
+  //    c1: llvm::getObjectSize()
+  //    c2: llvm.objectsize() intrinsic
+  //    c3: isObjectSmallerThan()
+  // c1 and c2 share the same meaning; however, the meaning of "object" in c3
+  // refers to the "entire object".
+  //
+  //  Consider this example:
+  //     char *p = (char*)malloc(100)
+  //     char *q = p+80;
+  //
+  //  In the context of c1 and c2, the "object" pointed by q refers to the
+  // stretch of memory of q[0:19]. So, getObjectSize(q) should return 20.
+  //
+  //  However, in the context of c3, the "object" refers to the chunk of memory
+  // being allocated. So, the "object" has 100 bytes, and q points to the middle
+  // the "object". In case q is passed to isObjectSmallerThan() as the 1st
+  // parameter, before the llvm::getObjectSize() is called to get the size of
+  // entire object, we should:
+  //    - either rewind the pointer q to the base-address of the object in
+  //      question (in this case rewind to p), or
+  //    - just give up. It is up to caller to make sure the pointer is pointing
+  //      to the base address the object.
+  // 
+  // We go for 2nd option for simplicity.
+  if (!isIdentifiedObject(V))
+    return false;
+
   // This function needs to use the aligned object size because we allow
   // reads a bit past the end given sufficient alignment.
   uint64_t ObjectSize = getObjectSize(V, TD, TLI, /*RoundToAlign*/true);
@@ -112,6 +141,17 @@ static bool isObjectSize(const Value *V, uint64_t Size,
   uint64_t ObjectSize = getObjectSize(V, TD, TLI);
   return ObjectSize != AliasAnalysis::UnknownSize && ObjectSize == Size;
 }
+
+/// isIdentifiedFunctionLocal - Return true if V is umabigously identified
+/// at the function-level. Different IdentifiedFunctionLocals can't alias.
+/// Further, an IdentifiedFunctionLocal can not alias with any function
+/// arguments other than itself, which is not neccessarily true for
+/// IdentifiedObjects.
+static bool isIdentifiedFunctionLocal(const Value *V)
+{
+  return isa<AllocaInst>(V) || isNoAliasCall(V) || isNoAliasArgument(V);
+}
+
 
 //===----------------------------------------------------------------------===//
 // GetElementPtr Instruction Decomposition and Analysis
@@ -817,8 +857,8 @@ BasicAliasAnalysis::getModRefInfo(ImmutableCallSite CS,
   return ModRefResult(AliasAnalysis::getModRefInfo(CS, Loc) & Min);
 }
 
-static bool areVarIndicesEqual(SmallVector<VariableGEPIndex, 4> &Indices1,
-                               SmallVector<VariableGEPIndex, 4> &Indices2) {
+static bool areVarIndicesEqual(SmallVectorImpl<VariableGEPIndex> &Indices1,
+                               SmallVectorImpl<VariableGEPIndex> &Indices2) {
   unsigned Size1 = Indices1.size();
   unsigned Size2 = Indices2.size();
 
@@ -1176,10 +1216,10 @@ BasicAliasAnalysis::aliasCheck(const Value *V1, uint64_t V1Size,
         (isa<Constant>(O2) && isIdentifiedObject(O1) && !isa<Constant>(O1)))
       return NoAlias;
 
-    // Arguments can't alias with local allocations or noalias calls
-    // in the same function.
-    if (((isa<Argument>(O1) && (isa<AllocaInst>(O2) || isNoAliasCall(O2))) ||
-         (isa<Argument>(O2) && (isa<AllocaInst>(O1) || isNoAliasCall(O1)))))
+    // Function arguments can't alias with things that are known to be
+    // unambigously identified at the function level.
+    if ((isa<Argument>(O1) && isIdentifiedFunctionLocal(O2)) ||
+        (isa<Argument>(O2) && isIdentifiedFunctionLocal(O1)))
       return NoAlias;
 
     // Most objects can't alias null.

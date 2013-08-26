@@ -11,7 +11,7 @@
 #include "AMDGPUMCAsmInfo.h"
 
 using namespace llvm;
-AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(const Target &T, StringRef &TT) : MCAsmInfo() {
+AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(StringRef &TT) : MCAsmInfo() {
   HasSingleParameterDotFile = false;
   WeakDefDirective = 0;
   //===------------------------------------------------------------------===//
@@ -68,13 +68,6 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(const Target &T, StringRef &TT) : MCAsmInfo() {
   //===--- Dwarf Emission Directives -----------------------------------===//
   HasLEB128 = true;
   SupportsDebugInformation = true;
-  DwarfSectionOffsetDirective = ".offset";
-
-}
-
-const char*
-AMDGPUMCAsmInfo::getDataASDirective(unsigned int Size, unsigned int AS) const {
-  return 0;
 }
 
 const MCSection*

@@ -49,6 +49,12 @@ def RetCC_X86Common : CallingConv<[
   CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64],
             CCAssignToReg<[YMM0,YMM1,YMM2,YMM3]>>,
 
+  // 512-bit vectors are returned in ZMM0 and ZMM1, when they fit. ZMM2 and ZMM3
+  // can only be used by ABI non-compliant code. This vector type is only
+  // supported while using the AVX-512 target feature.
+  CCIfType<[v16i32, v8i64, v16f32, v8f64],
+            CCAssignToReg<[ZMM0,ZMM1,ZMM2,ZMM3]>>,
+
   // MMX vector types are always returned in MM0. If the target doesn't have
   // MM0, it doesn't support these vector types.
   CCIfType<[x86mmx], CCAssignToReg<[MM0]>>,
@@ -98,6 +104,10 @@ def RetCC_Intel_OCL_BI : CallingConv<[
   // No more than 4 registers
   CCIfType<[v8f32, v4f64, v8i32, v4i64],
             CCAssignToReg<[YMM0,YMM1,YMM2,YMM3]>>,
+
+  // 512-bit FP vectors
+  CCIfType<[v16f32, v8f64, v16i32, v8i64],
+            CCAssignToReg<[ZMM0,ZMM1,ZMM2,ZMM3]>>,
 
   // i32, i64 in the standard way
   CCDelegateTo<RetCC_X86Common>
@@ -156,6 +166,11 @@ def RetCC_X86_32 : CallingConv<[
 def RetCC_X86_64 : CallingConv<[
   // HiPE uses RetCC_X86_64_HiPE
   CCIfCC<"CallingConv::HiPE", CCDelegateTo<RetCC_X86_64_HiPE>>,
+
+  // Handle explicit CC selection
+  CCIfCC<"CallingConv::X86_64_Win64", CCDelegateTo<RetCC_X86_Win64_C>>,
+  CCIfCC<"CallingConv::X86_64_SysV", CCDelegateTo<RetCC_X86_64_C>>,
+
   // Mingw64 and native Win64 use Win64 CC
   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<RetCC_X86_Win64_C>>,
 
@@ -208,9 +223,14 @@ def CC_X86_64_C : CallingConv<[
   // fixed arguments to vararg functions are supposed to be passed in
   // registers.  Actually modeling that would be a lot of work, though.
   CCIfNotVarArg<CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64],
-                          CCIfSubtarget<"hasAVX()",
+                          CCIfSubtarget<"hasFp256()",
                           CCAssignToReg<[YMM0, YMM1, YMM2, YMM3,
                                          YMM4, YMM5, YMM6, YMM7]>>>>,
+
+  // The first 8 512-bit vector arguments are passed in ZMM registers.
+  CCIfNotVarArg<CCIfType<[v16i32, v8i64, v16f32, v8f64],
+            CCIfSubtarget<"hasAVX512()",
+            CCAssignToReg<[ZMM0, ZMM1, ZMM2, ZMM3, ZMM4, ZMM5, ZMM6, ZMM7]>>>>,
 
   // Integer/FP values get stored in stack slots that are 8 bytes in size and
   // 8-byte aligned if there are no more registers to hold them.
@@ -225,7 +245,11 @@ def CC_X86_64_C : CallingConv<[
 
   // 256-bit vectors get 32-byte stack slots that are 32-byte aligned.
   CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64],
-           CCAssignToStack<32, 32>>
+           CCAssignToStack<32, 32>>,
+
+  // 512-bit vectors get 64-byte stack slots that are 64-byte aligned.
+  CCIfType<[v16i32, v8i64, v16f32, v8f64],
+           CCAssignToStack<64, 64>>
 ]>;
 
 // Calling convention used on Win64
@@ -245,6 +269,9 @@ def CC_X86_Win64_C : CallingConv<[
 
   // 256 bit vectors are passed by pointer
   CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64], CCPassIndirect<i64>>,
+
+  // 512 bit vectors are passed by pointer
+  CCIfType<[v16i32, v16f32, v8f64, v8i64], CCPassIndirect<i64>>,
 
   // The first 4 MMX vector arguments are passed in GPRs.
   CCIfType<[x86mmx], CCBitConvertToType<i64>>,
@@ -340,7 +367,7 @@ def CC_X86_32_Common : CallingConv<[
 
   // The first 4 AVX 256-bit vector arguments are passed in YMM registers.
   CCIfNotVarArg<CCIfType<[v32i8, v16i16, v8i32, v4i64, v8f32, v4f64],
-                CCIfSubtarget<"hasAVX()",
+                CCIfSubtarget<"hasFp256()",
                 CCAssignToReg<[YMM0, YMM1, YMM2, YMM3]>>>>,
 
   // Other SSE vectors get 16-byte stack slots that are 16-byte aligned.
@@ -387,8 +414,8 @@ def CC_X86_32_ThisCall : CallingConv<[
   // Promote i8/i16 arguments to i32.
   CCIfType<[i8, i16], CCPromoteToType<i32>>,
 
-  // Pass sret arguments indirectly through EAX
-  CCIfSRet<CCAssignToReg<[EAX]>>,
+  // Pass sret arguments indirectly through stack.
+  CCIfSRet<CCAssignToStack<4, 4>>,
 
   // The first integer argument is passed in ECX
   CCIfType<[i32], CCAssignToReg<[ECX]>>,
@@ -464,6 +491,10 @@ def CC_Intel_OCL_BI : CallingConv<[
   CCIfType<[v8f32, v4f64, v8i32, v4i64],
            CCAssignToReg<[YMM0, YMM1, YMM2, YMM3]>>,
 
+  // The 512-bit vector arguments are passed in ZMM registers.
+  CCIfType<[v16f32, v8f64, v16i32, v8i64],
+           CCAssignToReg<[ZMM0, ZMM1, ZMM2, ZMM3]>>,
+
   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<CC_X86_Win64_C>>,
   CCIfSubtarget<"is64Bit()",       CCDelegateTo<CC_X86_64_C>>,
   CCDelegateTo<CC_X86_32_C>
@@ -489,6 +520,8 @@ def CC_X86_32 : CallingConv<[
 def CC_X86_64 : CallingConv<[
   CCIfCC<"CallingConv::GHC", CCDelegateTo<CC_X86_64_GHC>>,
   CCIfCC<"CallingConv::HiPE", CCDelegateTo<CC_X86_64_HiPE>>,
+  CCIfCC<"CallingConv::X86_64_Win64", CCDelegateTo<CC_X86_Win64_C>>,
+  CCIfCC<"CallingConv::X86_64_SysV", CCDelegateTo<CC_X86_64_C>>,
 
   // Mingw64 and native Win64 use Win64 CC
   CCIfSubtarget<"isTargetWin64()", CCDelegateTo<CC_X86_Win64_C>>,
@@ -528,6 +561,10 @@ def CSR_Win64_Intel_OCL_BI_AVX : CalleeSavedRegs<(add RBX, RBP, RDI, RSI, R12,
                                                   R13, R14, R15, 
                                                   (sequence "YMM%u", 6, 15))>;
 
+def CSR_Win64_Intel_OCL_BI_AVX512 : CalleeSavedRegs<(add RBX, RBP, RDI, RSI,
+                                                     R12, R13, R14, R15, 
+                                                     (sequence "ZMM%u", 6, 21),
+                                                     K4, K5, K6, K7)>;
 //Standard C + XMM 8-15
 def CSR_64_Intel_OCL_BI       : CalleeSavedRegs<(add CSR_64,
                                                  (sequence "XMM%u", 8, 15))>;
@@ -535,3 +572,7 @@ def CSR_64_Intel_OCL_BI       : CalleeSavedRegs<(add CSR_64,
 //Standard C + YMM 8-15
 def CSR_64_Intel_OCL_BI_AVX    : CalleeSavedRegs<(add CSR_64,
                                                   (sequence "YMM%u", 8, 15))>;
+
+def CSR_64_Intel_OCL_BI_AVX512    : CalleeSavedRegs<(add CSR_64,
+                                                  (sequence "ZMM%u", 16, 31),
+                                                  K4, K5, K6, K7)>;

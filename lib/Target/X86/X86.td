@@ -86,6 +86,19 @@ def FeatureAVX     : SubtargetFeature<"avx", "X86SSELevel", "AVX",
 def FeatureAVX2    : SubtargetFeature<"avx2", "X86SSELevel", "AVX2",
                                       "Enable AVX2 instructions",
                                       [FeatureAVX]>;
+def FeatureAVX512   : SubtargetFeature<"avx-512", "X86SSELevel", "AVX512",
+                                      "Enable AVX-512 instructions",
+                                      [FeatureAVX2]>;
+def FeatureERI      : SubtargetFeature<"avx-512-eri", "HasERI", "true",
+                      "Enable AVX-512 Exponential and Reciprocal Instructions",
+                                      [FeatureAVX512]>;
+def FeatureCDI      : SubtargetFeature<"avx-512-cdi", "HasCDI", "true",
+                      "Enable AVX-512 Conflict Detection Instructions",
+                                      [FeatureAVX512]>;
+def FeaturePFI      : SubtargetFeature<"avx-512-pfi", "HasPFI", "true",
+                      "Enable AVX-512 PreFetch Instructions",
+                                      [FeatureAVX512]>;
+
 def FeaturePCLMUL  : SubtargetFeature<"pclmul", "HasPCLMUL", "true",
                          "Enable packed carry-less multiplication instructions",
                                [FeatureSSE2]>;
@@ -139,6 +152,8 @@ def FeaturePadShortFunctions : SubtargetFeature<"pad-short-functions",
 def FeatureCallRegIndirect : SubtargetFeature<"call-reg-indirect",
                                      "CallRegIndirect", "true",
                                      "Call register indirect">;
+def FeatureLEAUsesAG : SubtargetFeature<"lea-uses-ag", "LEAUsesAG", "true",
+                                   "LEA instruction needs inputs at AG stage">;
 
 //===----------------------------------------------------------------------===//
 // X86 processors supported.
@@ -188,6 +203,7 @@ def : ProcessorModel<"atom", AtomModel,
                       FeatureMOVBE, FeatureSlowBTMem, FeatureLeaForSP,
                       FeatureSlowDivide,
                       FeatureCallRegIndirect,
+                      FeatureLEAUsesAG,
                       FeaturePadShortFunctions]>;
 
 // "Arrandale" along with corei3 and corei5
@@ -224,6 +240,15 @@ def : ProcessorModel<"core-avx2", HaswellModel,
                       FeatureBMI, FeatureBMI2, FeatureFMA, FeatureRTM,
                       FeatureHLE]>;
 
+// KNL
+// FIXME: define KNL model
+def : ProcessorModel<"knl", HaswellModel,
+                     [FeatureAVX512, FeatureERI, FeatureCDI, FeaturePFI,
+                      FeatureCMPXCHG16B, FeatureFastUAMem, FeaturePOPCNT,
+                      FeatureAES, FeaturePCLMUL, FeatureRDRAND, FeatureF16C,
+                      FeatureFSGSBase, FeatureMOVBE, FeatureLZCNT, FeatureBMI,
+                      FeatureBMI2, FeatureFMA, FeatureRTM, FeatureHLE]>;
+
 def : Proc<"k6",              [FeatureMMX]>;
 def : Proc<"k6-2",            [Feature3DNow]>;
 def : Proc<"k6-3",            [Feature3DNow]>;
@@ -252,11 +277,16 @@ def : Proc<"amdfam10",        [FeatureSSE4A,
 // Bobcat
 def : Proc<"btver1",          [FeatureSSSE3, FeatureSSE4A, FeatureCMPXCHG16B,
                                FeatureLZCNT, FeaturePOPCNT]>;
+// Jaguar
+def : Proc<"btver2",          [FeatureAVX, FeatureSSE4A, FeatureCMPXCHG16B,
+                               FeatureAES, FeaturePCLMUL, FeatureBMI,
+                               FeatureF16C, FeatureMOVBE, FeatureLZCNT,
+                               FeaturePOPCNT]>;
 // Bulldozer
 def : Proc<"bdver1",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
                                FeatureAES, FeaturePCLMUL,
                                FeatureLZCNT, FeaturePOPCNT]>;
-// Enhanced Bulldozer
+// Piledriver
 def : Proc<"bdver2",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
                                FeatureAES, FeaturePCLMUL,
                                FeatureF16C, FeatureLZCNT,
@@ -300,6 +330,9 @@ def ATTAsmParser : AsmParser {
 def ATTAsmParserVariant : AsmParserVariant {
   int Variant = 0;
 
+  // Variant name.
+  string Name = "att";
+
   // Discard comments in assembly strings.
   string CommentDelimiter = "#";
 
@@ -309,6 +342,9 @@ def ATTAsmParserVariant : AsmParserVariant {
 
 def IntelAsmParserVariant : AsmParserVariant {
   int Variant = 1;
+
+  // Variant name.
+  string Name = "intel";
 
   // Discard comments in assembly strings.
   string CommentDelimiter = ";";

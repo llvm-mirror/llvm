@@ -31,10 +31,15 @@ namespace llvm {
     virtual MachineBasicBlock *
     EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const;
 
+    virtual bool isShuffleMaskLegal(const SmallVectorImpl<int> &Mask,
+                                    EVT VT) const {
+      return false;
+    }
+
     virtual const TargetRegisterClass *getRepRegClassFor(MVT VT) const {
       if (VT == MVT::Untyped)
-        return Subtarget->hasDSP() ? &Mips::ACRegsDSPRegClass :
-                                     &Mips::ACRegsRegClass;
+        return Subtarget->hasDSP() ? &Mips::ACC64DSPRegClass :
+                                     &Mips::ACC64RegClass;
 
       return TargetLowering::getRepRegClassFor(VT);
     }
@@ -53,6 +58,9 @@ namespace llvm {
 
     SDValue lowerMulDiv(SDValue Op, unsigned NewOpc, bool HasLo, bool HasHi,
                         SelectionDAG &DAG) const;
+
+    SDValue lowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+    SDValue lowerINTRINSIC_W_CHAIN(SDValue Op, SelectionDAG &DAG) const;
 
     MachineBasicBlock *emitBPOSGE32(MachineInstr *MI,
                                     MachineBasicBlock *BB) const;

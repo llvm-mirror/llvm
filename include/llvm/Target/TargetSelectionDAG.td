@@ -376,12 +376,14 @@ def fsqrt      : SDNode<"ISD::FSQRT"      , SDTFPUnaryOp>;
 def fsin       : SDNode<"ISD::FSIN"       , SDTFPUnaryOp>;
 def fcos       : SDNode<"ISD::FCOS"       , SDTFPUnaryOp>;
 def fexp2      : SDNode<"ISD::FEXP2"      , SDTFPUnaryOp>;
+def fpow       : SDNode<"ISD::FPOW"       , SDTFPBinOp>;
 def flog2      : SDNode<"ISD::FLOG2"      , SDTFPUnaryOp>;
 def frint      : SDNode<"ISD::FRINT"      , SDTFPUnaryOp>;
 def ftrunc     : SDNode<"ISD::FTRUNC"     , SDTFPUnaryOp>;
 def fceil      : SDNode<"ISD::FCEIL"      , SDTFPUnaryOp>;
 def ffloor     : SDNode<"ISD::FFLOOR"     , SDTFPUnaryOp>;
 def fnearbyint : SDNode<"ISD::FNEARBYINT" , SDTFPUnaryOp>;
+def frnd       : SDNode<"ISD::FROUND"     , SDTFPUnaryOp>;
 
 def fround     : SDNode<"ISD::FP_ROUND"   , SDTFPRoundOp>;
 def fextend    : SDNode<"ISD::FP_EXTEND"  , SDTFPExtendOp>;
@@ -413,9 +415,6 @@ def prefetch   : SDNode<"ISD::PREFETCH"   , SDTPrefetch,
 
 def readcyclecounter : SDNode<"ISD::READCYCLECOUNTER", SDTIntLeaf,
                      [SDNPHasChain, SDNPSideEffect]>;
-
-def membarrier : SDNode<"ISD::MEMBARRIER" , SDTMemBarrier,
-                        [SDNPHasChain, SDNPSideEffect]>;
 
 def atomic_fence : SDNode<"ISD::ATOMIC_FENCE" , SDTAtomicFence,
                           [SDNPHasChain, SDNPSideEffect]>;

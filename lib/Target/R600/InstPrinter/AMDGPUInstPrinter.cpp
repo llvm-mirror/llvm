@@ -10,13 +10,14 @@
 
 #include "AMDGPUInstPrinter.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
-#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCInst.h"
 
 using namespace llvm;
 
 void AMDGPUInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
                              StringRef Annot) {
+  OS.flush();
   printInstruction(MI, OS);
 
   printAnnotation(OS, Annot);
@@ -67,11 +68,14 @@ void AMDGPUInstPrinter::printMemOperand(const MCInst *MI, unsigned OpNo,
 }
 
 void AMDGPUInstPrinter::printIfSet(const MCInst *MI, unsigned OpNo,
-                                    raw_ostream &O, StringRef Asm) {
+                                   raw_ostream &O, StringRef Asm,
+                                   StringRef Default) {
   const MCOperand &Op = MI->getOperand(OpNo);
   assert(Op.isImm());
   if (Op.getImm() == 1) {
     O << Asm;
+  } else {
+    O << Default;
   }
 }
 
@@ -98,7 +102,7 @@ void AMDGPUInstPrinter::printLiteral(const MCInst *MI, unsigned OpNo,
 
 void AMDGPUInstPrinter::printLast(const MCInst *MI, unsigned OpNo,
                                   raw_ostream &O) {
-  printIfSet(MI, OpNo, O, " *");
+  printIfSet(MI, OpNo, O.indent(25 - O.GetNumBytesInBuffer()), "*", " ");
 }
 
 void AMDGPUInstPrinter::printNeg(const MCInst *MI, unsigned OpNo,
@@ -167,6 +171,88 @@ void AMDGPUInstPrinter::printSel(const MCInst *MI, unsigned OpNo,
 
   if (sel >= 0)
     O << "." << chans[chan];
+}
+
+void AMDGPUInstPrinter::printBankSwizzle(const MCInst *MI, unsigned OpNo,
+                                         raw_ostream &O) {
+  int BankSwizzle = MI->getOperand(OpNo).getImm();
+  switch (BankSwizzle) {
+  case 1:
+    O << "BS:VEC_021/SCL_122";
+    break;
+  case 2:
+    O << "BS:VEC_120/SCL_212";
+    break;
+  case 3:
+    O << "BS:VEC_102/SCL_221";
+    break;
+  case 4:
+    O << "BS:VEC_201";
+    break;
+  case 5:
+    O << "BS:VEC_210";
+    break;
+  default:
+    break;
+  }
+  return;
+}
+
+void AMDGPUInstPrinter::printRSel(const MCInst *MI, unsigned OpNo,
+                                  raw_ostream &O) {
+  unsigned Sel = MI->getOperand(OpNo).getImm();
+  switch (Sel) {
+  case 0:
+    O << "X";
+    break;
+  case 1:
+    O << "Y";
+    break;
+  case 2:
+    O << "Z";
+    break;
+  case 3:
+    O << "W";
+    break;
+  case 4:
+    O << "0";
+    break;
+  case 5:
+    O << "1";
+    break;
+  case 7:
+    O << "_";
+    break;
+  default:
+    break;
+  }
+}
+
+void AMDGPUInstPrinter::printCT(const MCInst *MI, unsigned OpNo,
+                                  raw_ostream &O) {
+  unsigned CT = MI->getOperand(OpNo).getImm();
+  switch (CT) {
+  case 0:
+    O << "U";
+    break;
+  case 1:
+    O << "N";
+    break;
+  default:
+    break;
+  }
+}
+
+void AMDGPUInstPrinter::printKCache(const MCInst *MI, unsigned OpNo,
+                                    raw_ostream &O) {
+  int KCacheMode = MI->getOperand(OpNo).getImm();
+  if (KCacheMode > 0) {
+    int KCacheBank = MI->getOperand(OpNo - 2).getImm();
+    O << "CB" << KCacheBank <<":";
+    int KCacheAddr = MI->getOperand(OpNo + 2).getImm();
+    int LineSize = (KCacheMode == 1)?16:32;
+    O << KCacheAddr * 16 << "-" << KCacheAddr * 16 + LineSize;
+  }
 }
 
 #include "AMDGPUGenAsmWriter.inc"

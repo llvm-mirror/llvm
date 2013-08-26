@@ -13,6 +13,8 @@
 
 #include "Unix.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/Support/Mutex.h"
+#include "llvm/Support/MutexGuard.h"
 #include "llvm/Support/TimeValue.h"
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
@@ -224,8 +226,6 @@ static unsigned getColumns(int FileID) {
 #if defined(HAVE_SYS_IOCTL_H) && defined(HAVE_TERMIOS_H)
   // Try to determine the width of the terminal.
   struct winsize ws;
-  // Zero-fill ws to avoid a false positive from MemorySanitizer.
-  memset(&ws, 0, sizeof(ws));
   if (ioctl(FileID, TIOCGWINSZ, &ws) == 0)
     Columns = ws.ws_col;
 #endif
@@ -247,22 +247,51 @@ unsigned Process::StandardErrColumns() {
   return getColumns(2);
 }
 
-static bool terminalHasColors() {
-  if (const char *term = std::getenv("TERM")) {
-    // Most modern terminals support ANSI escape sequences for colors.
-    // We could check terminfo, or have a list of known terms that support
-    // colors, but that would be overkill.
-    // The user can always ask for no colors by setting TERM to dumb, or
-    // using a commandline flag.
-    return strcmp(term, "dumb") != 0;
-  }
+#ifdef HAVE_TERMINFO
+// We manually declare these two extern functions because finding the correct
+// headers from various terminfo, curses, or other sources is harder than
+// writing their specs down.
+extern "C" int setupterm(char *term, int filedes, int *errret);
+extern "C" int tigetnum(char *capname);
+#endif
+
+static bool terminalHasColors(int fd) {
+#ifdef HAVE_TERMINFO
+  // First, acquire a global lock because these C routines are thread hostile.
+  static sys::Mutex M;
+  MutexGuard G(M);
+
+  int errret = 0;
+  if (setupterm((char *)0, fd, &errret) != 0)
+    // Regardless of why, if we can't get terminfo, we shouldn't try to print
+    // colors.
+    return false;
+
+  // Test whether the terminal as set up supports color output. How to do this
+  // isn't entirely obvious. We can use the curses routine 'has_colors' but it
+  // would be nice to avoid a dependency on curses proper when we can make do
+  // with a minimal terminfo parsing library. Also, we don't really care whether
+  // the terminal supports the curses-specific color changing routines, merely
+  // if it will interpret ANSI color escape codes in a reasonable way. Thus, the
+  // strategy here is just to query the baseline colors capability and if it
+  // supports colors at all to assume it will translate the escape codes into
+  // whatever range of colors it does support. We can add more detailed tests
+  // here if users report them as necessary.
+  //
+  // The 'tigetnum' routine returns -2 or -1 on errors, and might return 0 if
+  // the terminfo says that no colors are supported.
+  if (tigetnum(const_cast<char *>("colors")) > 0)
+    return true;
+#endif
+
+  // Otherwise, be conservative.
   return false;
 }
 
 bool Process::FileDescriptorHasColors(int fd) {
   // A file descriptor has colors if it is displayed and the terminal has
   // colors.
-  return FileDescriptorIsDisplayed(fd) && terminalHasColors();
+  return FileDescriptorIsDisplayed(fd) && terminalHasColors(fd);
 }
 
 bool Process::StandardOutHasColors() {

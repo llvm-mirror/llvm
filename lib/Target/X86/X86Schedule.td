@@ -42,6 +42,7 @@ multiclass X86SchedWritePair {
 // Arithmetic.
 defm WriteALU  : X86SchedWritePair; // Simple integer ALU op.
 defm WriteIMul : X86SchedWritePair; // Integer multiplication.
+def  WriteIMulH : SchedWrite;       // Integer multiplication, high part.
 defm WriteIDiv : X86SchedWritePair; // Integer division.
 def  WriteLEA  : SchedWrite;        // LEA instructions can't fold loads.
 
@@ -266,10 +267,14 @@ def IIC_SSE_PINSRW : InstrItinClass;
 def IIC_SSE_PABS_RR : InstrItinClass;
 def IIC_SSE_PABS_RM : InstrItinClass;
 
-def IIC_SSE_SQRTP_RR : InstrItinClass;
-def IIC_SSE_SQRTP_RM : InstrItinClass;
-def IIC_SSE_SQRTS_RR : InstrItinClass;
-def IIC_SSE_SQRTS_RM : InstrItinClass;
+def IIC_SSE_SQRTPS_RR : InstrItinClass;
+def IIC_SSE_SQRTPS_RM : InstrItinClass;
+def IIC_SSE_SQRTSS_RR : InstrItinClass;
+def IIC_SSE_SQRTSS_RM : InstrItinClass;
+def IIC_SSE_SQRTPD_RR : InstrItinClass;
+def IIC_SSE_SQRTPD_RM : InstrItinClass;
+def IIC_SSE_SQRTSD_RR : InstrItinClass;
+def IIC_SSE_SQRTSD_RM : InstrItinClass;
 
 def IIC_SSE_RCPP_RR : InstrItinClass;
 def IIC_SSE_RCPP_RM : InstrItinClass;
@@ -546,8 +551,9 @@ def IIC_NOP : InstrItinClass;
 // Resources beyond the decoder operate on micro-ops and are bufferred
 // so adjacent micro-ops don't directly compete.
 //
-// MinLatency=0 indicates that RAW dependencies can be decoded in the
-// same cycle.
+// MicroOpBufferSize > 1 indicates that RAW dependencies can be
+// decoded in the same cycle. The value 32 is a reasonably arbitrary
+// number of in-flight instructions.
 //
 // HighLatency=10 is optimistic. X86InstrInfo::isHighLatencyDef
 // indicates high latency opcodes. Alternatively, InstrItinData
@@ -555,17 +561,12 @@ def IIC_NOP : InstrItinClass;
 // latencies. Since these latencies are not used for pipeline hazards,
 // they do not need to be exact.
 //
-// ILPWindow=10 is an arbitrary threshold that approximates cycles of
-// latency hidden by instruction buffers. The actual value is not very
-// important but should be zero for inorder and nonzero for OOO processors.
-//
 // The GenericModel contains no instruciton itineraries.
 def GenericModel : SchedMachineModel {
   let IssueWidth = 4;
-  let MinLatency = 0;
+  let MicroOpBufferSize = 32;
   let LoadLatency = 4;
   let HighLatency = 10;
-  let ILPWindow = 10;
 }
 
 include "X86ScheduleAtom.td"

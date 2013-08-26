@@ -24,6 +24,29 @@ namespace llvm {
 
 namespace object {
 
+/// The DOS compatible header at the front of all PE/COFF executables.
+struct dos_header {
+  support::ulittle16_t Magic;
+  support::ulittle16_t UsedBytesInTheLastPage;
+  support::ulittle16_t FileSizeInPages;
+  support::ulittle16_t NumberOfRelocationItems;
+  support::ulittle16_t HeaderSizeInParagraphs;
+  support::ulittle16_t MinimumExtraParagraphs;
+  support::ulittle16_t MaximumExtraParagraphs;
+  support::ulittle16_t InitialRelativeSS;
+  support::ulittle16_t InitialSP;
+  support::ulittle16_t Checksum;
+  support::ulittle16_t InitialIP;
+  support::ulittle16_t InitialRelativeCS;
+  support::ulittle16_t AddressOfRelocationTable;
+  support::ulittle16_t OverlayNumber;
+  support::ulittle16_t Reserved[4];
+  support::ulittle16_t OEMid;
+  support::ulittle16_t OEMinfo;
+  support::ulittle16_t Reserved2[10];
+  support::ulittle32_t AddressOfNewExeHeader;
+};
+
 struct coff_file_header {
   support::ulittle16_t Machine;
   support::ulittle16_t NumberOfSections;
@@ -32,6 +55,86 @@ struct coff_file_header {
   support::ulittle32_t NumberOfSymbols;
   support::ulittle16_t SizeOfOptionalHeader;
   support::ulittle16_t Characteristics;
+};
+
+/// The 32-bit PE header that follows the COFF header.
+struct pe32_header {
+  support::ulittle16_t Magic;
+  uint8_t  MajorLinkerVersion;
+  uint8_t  MinorLinkerVersion;
+  support::ulittle32_t SizeOfCode;
+  support::ulittle32_t SizeOfInitializedData;
+  support::ulittle32_t SizeOfUninitializedData;
+  support::ulittle32_t AddressOfEntryPoint;
+  support::ulittle32_t BaseOfCode;
+  support::ulittle32_t BaseOfData;
+  support::ulittle32_t ImageBase;
+  support::ulittle32_t SectionAlignment;
+  support::ulittle32_t FileAlignment;
+  support::ulittle16_t MajorOperatingSystemVersion;
+  support::ulittle16_t MinorOperatingSystemVersion;
+  support::ulittle16_t MajorImageVersion;
+  support::ulittle16_t MinorImageVersion;
+  support::ulittle16_t MajorSubsystemVersion;
+  support::ulittle16_t MinorSubsystemVersion;
+  support::ulittle32_t Win32VersionValue;
+  support::ulittle32_t SizeOfImage;
+  support::ulittle32_t SizeOfHeaders;
+  support::ulittle32_t CheckSum;
+  support::ulittle16_t Subsystem;
+  support::ulittle16_t DLLCharacteristics;
+  support::ulittle32_t SizeOfStackReserve;
+  support::ulittle32_t SizeOfStackCommit;
+  support::ulittle32_t SizeOfHeapReserve;
+  support::ulittle32_t SizeOfHeapCommit;
+  support::ulittle32_t LoaderFlags;
+  support::ulittle32_t NumberOfRvaAndSize;
+};
+
+/// The 64-bit PE header that follows the COFF header.
+struct pe32plus_header {
+  support::ulittle16_t Magic;
+  uint8_t  MajorLinkerVersion;
+  uint8_t  MinorLinkerVersion;
+  support::ulittle32_t SizeOfCode;
+  support::ulittle32_t SizeOfInitializedData;
+  support::ulittle32_t SizeOfUninitializedData;
+  support::ulittle32_t AddressOfEntryPoint;
+  support::ulittle32_t BaseOfCode;
+  support::ulittle64_t ImageBase;
+  support::ulittle32_t SectionAlignment;
+  support::ulittle32_t FileAlignment;
+  support::ulittle16_t MajorOperatingSystemVersion;
+  support::ulittle16_t MinorOperatingSystemVersion;
+  support::ulittle16_t MajorImageVersion;
+  support::ulittle16_t MinorImageVersion;
+  support::ulittle16_t MajorSubsystemVersion;
+  support::ulittle16_t MinorSubsystemVersion;
+  support::ulittle32_t Win32VersionValue;
+  support::ulittle32_t SizeOfImage;
+  support::ulittle32_t SizeOfHeaders;
+  support::ulittle32_t CheckSum;
+  support::ulittle16_t Subsystem;
+  support::ulittle16_t DLLCharacteristics;
+  support::ulittle64_t SizeOfStackReserve;
+  support::ulittle64_t SizeOfStackCommit;
+  support::ulittle64_t SizeOfHeapReserve;
+  support::ulittle64_t SizeOfHeapCommit;
+  support::ulittle32_t LoaderFlags;
+  support::ulittle32_t NumberOfRvaAndSize;
+};
+
+struct data_directory {
+  support::ulittle32_t RelativeVirtualAddress;
+  support::ulittle32_t Size;
+};
+
+struct import_directory_table_entry {
+  support::ulittle32_t ImportLookupTableRVA;
+  support::ulittle32_t TimeDateStamp;
+  support::ulittle32_t ForwarderChain;
+  support::ulittle32_t NameRVA;
+  support::ulittle32_t ImportAddressTableRVA;
 };
 
 struct coff_symbol {
@@ -93,7 +196,9 @@ struct coff_aux_section_definition {
 
 class COFFObjectFile : public ObjectFile {
 private:
-  const coff_file_header *Header;
+  const coff_file_header *COFFHeader;
+  const pe32_header      *PE32Header;
+  const data_directory   *DataDirectory;
   const coff_section     *SectionTable;
   const coff_symbol      *SymbolTable;
   const char             *StringTable;
@@ -143,14 +248,11 @@ protected:
                                           uint64_t &Res) const;
   virtual error_code getRelocationOffset(DataRefImpl Rel,
                                          uint64_t &Res) const;
-  virtual error_code getRelocationSymbol(DataRefImpl Rel,
-                                         SymbolRef &Res) const;
+  virtual symbol_iterator getRelocationSymbol(DataRefImpl Rel) const;
   virtual error_code getRelocationType(DataRefImpl Rel,
                                        uint64_t &Res) const;
   virtual error_code getRelocationTypeName(DataRefImpl Rel,
                                            SmallVectorImpl<char> &Result) const;
-  virtual error_code getRelocationAdditionalInfo(DataRefImpl Rel,
-                                                 int64_t &Res) const;
   virtual error_code getRelocationValueString(DataRefImpl Rel,
                                            SmallVectorImpl<char> &Result) const;
 
@@ -173,13 +275,16 @@ public:
   const coff_section *getCOFFSection(section_iterator &It) const;
   const coff_symbol *getCOFFSymbol(symbol_iterator &It) const;
   const coff_relocation *getCOFFRelocation(relocation_iterator &It) const;
-  
+
   virtual uint8_t getBytesInAddress() const;
   virtual StringRef getFileFormatName() const;
   virtual unsigned getArch() const;
   virtual StringRef getLoadName() const;
 
   error_code getHeader(const coff_file_header *&Res) const;
+  error_code getCOFFHeader(const coff_file_header *&Res) const;
+  error_code getPE32Header(const pe32_header *&Res) const;
+  error_code getDataDirectory(uint32_t index, const data_directory *&Res) const;
   error_code getSection(int32_t index, const coff_section *&Res) const;
   error_code getSymbol(uint32_t index, const coff_symbol *&Res) const;
   template <typename T>

@@ -720,9 +720,9 @@ bool IfConverter::FeasibilityAnalysis(BBInfo &BBI,
   if (BBI.IsDone || BBI.IsUnpredicable)
     return false;
 
-  // If it is already predicated, check if its predicate subsumes the new
-  // predicate.
-  if (BBI.Predicate.size() && !TII->SubsumesPredicate(BBI.Predicate, Pred))
+  // If it is already predicated, check if the new predicate subsumes
+  // its predicate.
+  if (BBI.Predicate.size() && !TII->SubsumesPredicate(Pred, BBI.Predicate))
     return false;
 
   if (BBI.BrCond.size()) {
@@ -970,8 +970,8 @@ static void InitPredRedefs(MachineBasicBlock *BB, SmallSet<unsigned,4> &Redefs,
   for (MachineBasicBlock::livein_iterator I = BB->livein_begin(),
          E = BB->livein_end(); I != E; ++I) {
     unsigned Reg = *I;
-    Redefs.insert(Reg);
-    for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs)
+    for (MCSubRegIterator SubRegs(Reg, TRI, /*IncludeSelf=*/true);
+         SubRegs.isValid(); ++SubRegs)
       Redefs.insert(*SubRegs);
   }
 }
@@ -990,8 +990,8 @@ static void UpdatePredRedefs(MachineInstr *MI, SmallSet<unsigned,4> &Redefs,
     if (MO.isDef())
       Defs.push_back(Reg);
     else if (MO.isKill()) {
-      Redefs.erase(Reg);
-      for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs)
+      for (MCSubRegIterator SubRegs(Reg, TRI, /*IncludeSelf=*/true);
+           SubRegs.isValid(); ++SubRegs)
         Redefs.erase(*SubRegs);
     }
   }
@@ -1039,6 +1039,10 @@ bool IfConverter::IfConvertSimple(BBInfo &BBI, IfcvtKind Kind) {
     return false;
   }
 
+  if (CvtBBI->BB->hasAddressTaken())
+    // Conservatively abort if-conversion if BB's address is taken.
+    return false;
+
   if (Kind == ICSimpleFalse)
     if (TII->ReverseBranchCondition(Cond))
       llvm_unreachable("Unable to reverse branch condition!");
@@ -1054,6 +1058,10 @@ bool IfConverter::IfConvertSimple(BBInfo &BBI, IfcvtKind Kind) {
     // Copy instructions in the true block, predicate them, and add them to
     // the entry block.
     CopyAndPredicateBlock(BBI, *CvtBBI, Cond, Redefs);
+
+    // RemoveExtraEdges won't work if the block has an unanalyzable branch, so
+    // explicitly remove CvtBBI as a successor.
+    BBI.BB->removeSuccessor(CvtBBI->BB);
   } else {
     PredicateBlock(*CvtBBI, CvtBBI->BB->end(), Cond, Redefs);
 
@@ -1112,6 +1120,10 @@ bool IfConverter::IfConvertTriangle(BBInfo &BBI, IfcvtKind Kind) {
     return false;
   }
 
+  if (CvtBBI->BB->hasAddressTaken())
+    // Conservatively abort if-conversion if BB's address is taken.
+    return false;
+
   if (Kind == ICTriangleFalse || Kind == ICTriangleFRev)
     if (TII->ReverseBranchCondition(Cond))
       llvm_unreachable("Unable to reverse branch condition!");
@@ -1146,6 +1158,10 @@ bool IfConverter::IfConvertTriangle(BBInfo &BBI, IfcvtKind Kind) {
     // Copy instructions in the true block, predicate them, and add them to
     // the entry block.
     CopyAndPredicateBlock(BBI, *CvtBBI, Cond, Redefs, true);
+
+    // RemoveExtraEdges won't work if the block has an unanalyzable branch, so
+    // explicitly remove CvtBBI as a successor.
+    BBI.BB->removeSuccessor(CvtBBI->BB);
   } else {
     // Predicate the 'true' block after removing its branch.
     CvtBBI->NonPredSize -= TII->RemoveBranch(*CvtBBI->BB);
@@ -1176,7 +1192,8 @@ bool IfConverter::IfConvertTriangle(BBInfo &BBI, IfcvtKind Kind) {
     // block. By not merging them, we make it possible to iteratively
     // ifcvt the blocks.
     if (!HasEarlyExit &&
-        NextBBI->BB->pred_size() == 1 && !NextBBI->HasFallThrough) {
+        NextBBI->BB->pred_size() == 1 && !NextBBI->HasFallThrough &&
+        !NextBBI->BB->hasAddressTaken()) {
       MergeBlocks(BBI, *NextBBI);
       FalseBBDead = true;
     } else {
@@ -1225,6 +1242,10 @@ bool IfConverter::IfConvertDiamond(BBInfo &BBI, IfcvtKind Kind,
     FalseBBI.IsAnalyzed = false;
     return false;
   }
+
+  if (TrueBBI.BB->hasAddressTaken() || FalseBBI.BB->hasAddressTaken())
+    // Conservatively abort if-conversion if either BB has its address taken.
+    return false;
 
   // Put the predicated instructions from the 'true' block before the
   // instructions from the 'false' block, unless the true block would clobber
@@ -1341,8 +1362,8 @@ bool IfConverter::IfConvertDiamond(BBInfo &BBI, IfcvtKind Kind,
         } else if (!RedefsByFalse.count(Reg)) {
           // These are defined before ctrl flow reach the 'false' instructions.
           // They cannot be modified by the 'true' instructions.
-          ExtUses.insert(Reg);
-          for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs)
+          for (MCSubRegIterator SubRegs(Reg, TRI, /*IncludeSelf=*/true);
+               SubRegs.isValid(); ++SubRegs)
             ExtUses.insert(*SubRegs);
         }
       }
@@ -1350,8 +1371,8 @@ bool IfConverter::IfConvertDiamond(BBInfo &BBI, IfcvtKind Kind,
       for (unsigned i = 0, e = Defs.size(); i != e; ++i) {
         unsigned Reg = Defs[i];
         if (!ExtUses.count(Reg)) {
-          RedefsByFalse.insert(Reg);
-          for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs)
+          for (MCSubRegIterator SubRegs(Reg, TRI, /*IncludeSelf=*/true);
+               SubRegs.isValid(); ++SubRegs)
             RedefsByFalse.insert(*SubRegs);
         }
       }
@@ -1374,7 +1395,8 @@ bool IfConverter::IfConvertDiamond(BBInfo &BBI, IfcvtKind Kind,
   // tail, add a unconditional branch to it.
   if (TailBB) {
     BBInfo &TailBBI = BBAnalysis[TailBB->getNumber()];
-    bool CanMergeTail = !TailBBI.HasFallThrough;
+    bool CanMergeTail = !TailBBI.HasFallThrough &&
+      !TailBBI.BB->hasAddressTaken();
     // There may still be a fall-through edge from BBI1 or BBI2 to TailBB;
     // check if there are any other predecessors besides those.
     unsigned NumPreds = TailBB->pred_size();
@@ -1543,6 +1565,9 @@ void IfConverter::CopyAndPredicateBlock(BBInfo &ToBBI, BBInfo &FromBBI,
 /// i.e., when FromBBI's branch is being moved, add those successor edges to
 /// ToBBI.
 void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
+  assert(!FromBBI.BB->hasAddressTaken() &&
+         "Removing a BB whose address is taken!");
+
   ToBBI.BB->splice(ToBBI.BB->end(),
                    FromBBI.BB, FromBBI.BB->begin(), FromBBI.BB->end());
 

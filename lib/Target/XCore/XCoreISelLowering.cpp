@@ -36,6 +36,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <algorithm>
+
 using namespace llvm;
 
 const char *XCoreTargetLowering::
@@ -120,9 +122,6 @@ XCoreTargetLowering::XCoreTargetLowering(XCoreTargetMachine &XTM)
   setOperationAction(ISD::GlobalAddress, MVT::i32,   Custom);
   setOperationAction(ISD::BlockAddress, MVT::i32 , Custom);
 
-  // Thread Local Storage
-  setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
-
   // Conversion of i64 -> double produces constantpool nodes
   setOperationAction(ISD::ConstantPool, MVT::i32,   Custom);
 
@@ -172,7 +171,6 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode())
   {
   case ISD::GlobalAddress:      return LowerGlobalAddress(Op, DAG);
-  case ISD::GlobalTLSAddress:   return LowerGlobalTLSAddress(Op, DAG);
   case ISD::BlockAddress:       return LowerBlockAddress(Op, DAG);
   case ISD::ConstantPool:       return LowerConstantPool(Op, DAG);
   case ISD::BR_JT:              return LowerBR_JT(Op, DAG);
@@ -217,7 +215,7 @@ void XCoreTargetLowering::ReplaceNodeResults(SDNode *N,
 SDValue XCoreTargetLowering::
 LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   SDValue Cond = DAG.getNode(ISD::SETCC, dl, MVT::i32, Op.getOperand(2),
                              Op.getOperand(3), Op.getOperand(4));
   return DAG.getNode(ISD::SELECT, dl, MVT::i32, Cond, Op.getOperand(0),
@@ -229,7 +227,7 @@ getGlobalAddressWrapper(SDValue GA, const GlobalValue *GV,
                         SelectionDAG &DAG) const
 {
   // FIXME there is no actual debug info here
-  DebugLoc dl = GA.getDebugLoc();
+  SDLoc dl(GA);
   const GlobalValue *UnderlyingGV = GV;
   // If GV is an alias then use the aliasee to determine the wrapper type
   if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
@@ -245,58 +243,31 @@ getGlobalAddressWrapper(SDValue GA, const GlobalValue *GV,
 SDValue XCoreTargetLowering::
 LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const
 {
-  const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
-  SDValue GA = DAG.getTargetGlobalAddress(GV, Op.getDebugLoc(), MVT::i32);
-  return getGlobalAddressWrapper(GA, GV, DAG);
+  SDLoc DL(Op);
+  const GlobalAddressSDNode *GN = cast<GlobalAddressSDNode>(Op);
+  const GlobalValue *GV = GN->getGlobal();
+  int64_t Offset = GN->getOffset();
+  // We can only fold positive offsets that are a multiple of the word size.
+  int64_t FoldedOffset = std::max(Offset & ~3, (int64_t)0);
+  SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, FoldedOffset);
+  GA = getGlobalAddressWrapper(GA, GV, DAG);
+  // Handle the rest of the offset.
+  if (Offset != FoldedOffset) {
+    SDValue Remaining = DAG.getConstant(Offset - FoldedOffset, MVT::i32);
+    GA = DAG.getNode(ISD::ADD, DL, MVT::i32, GA, Remaining);
+  }
+  return GA;
 }
 
-static inline SDValue BuildGetId(SelectionDAG &DAG, DebugLoc dl) {
+static inline SDValue BuildGetId(SelectionDAG &DAG, SDLoc dl) {
   return DAG.getNode(ISD::INTRINSIC_WO_CHAIN, dl, MVT::i32,
                      DAG.getConstant(Intrinsic::xcore_getid, MVT::i32));
-}
-
-static inline bool isZeroLengthArray(Type *Ty) {
-  ArrayType *AT = dyn_cast_or_null<ArrayType>(Ty);
-  return AT && (AT->getNumElements() == 0);
-}
-
-SDValue XCoreTargetLowering::
-LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const
-{
-  // FIXME there isn't really debug info here
-  DebugLoc dl = Op.getDebugLoc();
-  // transform to label + getid() * size
-  const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
-  SDValue GA = DAG.getTargetGlobalAddress(GV, dl, MVT::i32);
-  const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV);
-  if (!GVar) {
-    // If GV is an alias then use the aliasee to determine size
-    if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      GVar = dyn_cast_or_null<GlobalVariable>(GA->resolveAliasedGlobal());
-  }
-  if (!GVar) {
-    llvm_unreachable("Thread local object not a GlobalVariable?");
-  }
-  Type *Ty = cast<PointerType>(GV->getType())->getElementType();
-  if (!Ty->isSized() || isZeroLengthArray(Ty)) {
-#ifndef NDEBUG
-    errs() << "Size of thread local object " << GVar->getName()
-           << " is unknown\n";
-#endif
-    llvm_unreachable(0);
-  }
-  SDValue base = getGlobalAddressWrapper(GA, GV, DAG);
-  const DataLayout *TD = TM.getDataLayout();
-  unsigned Size = TD->getTypeAllocSize(Ty);
-  SDValue offset = DAG.getNode(ISD::MUL, dl, MVT::i32, BuildGetId(DAG, dl),
-                       DAG.getConstant(Size, MVT::i32));
-  return DAG.getNode(ISD::ADD, dl, MVT::i32, base, offset);
 }
 
 SDValue XCoreTargetLowering::
 LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
 
   const BlockAddress *BA = cast<BlockAddressSDNode>(Op)->getBlockAddress();
   SDValue Result = DAG.getTargetBlockAddress(BA, getPointerTy());
@@ -309,7 +280,7 @@ LowerConstantPool(SDValue Op, SelectionDAG &DAG) const
 {
   ConstantPoolSDNode *CP = cast<ConstantPoolSDNode>(Op);
   // FIXME there isn't really debug info here
-  DebugLoc dl = CP->getDebugLoc();
+  SDLoc dl(CP);
   EVT PtrVT = Op.getValueType();
   SDValue Res;
   if (CP->isMachineConstantPoolEntry()) {
@@ -332,7 +303,7 @@ LowerBR_JT(SDValue Op, SelectionDAG &DAG) const
   SDValue Chain = Op.getOperand(0);
   SDValue Table = Op.getOperand(1);
   SDValue Index = Op.getOperand(2);
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   JumpTableSDNode *JT = cast<JumpTableSDNode>(Table);
   unsigned JTI = JT->getIndex();
   MachineFunction &MF = DAG.getMachineFunction();
@@ -350,55 +321,58 @@ LowerBR_JT(SDValue Op, SelectionDAG &DAG) const
                      ScaledIndex);
 }
 
-static bool
-IsWordAlignedBasePlusConstantOffset(SDValue Addr, SDValue &AlignedBase,
-                                    int64_t &Offset)
+SDValue XCoreTargetLowering::
+lowerLoadWordFromAlignedBasePlusOffset(SDLoc DL, SDValue Chain, SDValue Base,
+                                       int64_t Offset, SelectionDAG &DAG) const
 {
-  if (Addr.getOpcode() != ISD::ADD) {
-    return false;
+  if ((Offset & 0x3) == 0) {
+    return DAG.getLoad(getPointerTy(), DL, Chain, Base, MachinePointerInfo(),
+                       false, false, false, 0);
   }
-  ConstantSDNode *CN = 0;
-  if (!(CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1)))) {
-    return false;
+  // Lower to pair of consecutive word aligned loads plus some bit shifting.
+  int32_t HighOffset = RoundUpToAlignment(Offset, 4);
+  int32_t LowOffset = HighOffset - 4;
+  SDValue LowAddr, HighAddr;
+  if (GlobalAddressSDNode *GASD =
+        dyn_cast<GlobalAddressSDNode>(Base.getNode())) {
+    LowAddr = DAG.getGlobalAddress(GASD->getGlobal(), DL, Base.getValueType(),
+                                   LowOffset);
+    HighAddr = DAG.getGlobalAddress(GASD->getGlobal(), DL, Base.getValueType(),
+                                    HighOffset);
+  } else {
+    LowAddr = DAG.getNode(ISD::ADD, DL, MVT::i32, Base,
+                          DAG.getConstant(LowOffset, MVT::i32));
+    HighAddr = DAG.getNode(ISD::ADD, DL, MVT::i32, Base,
+                           DAG.getConstant(HighOffset, MVT::i32));
   }
-  int64_t off = CN->getSExtValue();
-  const SDValue &Base = Addr.getOperand(0);
-  const SDValue *Root = &Base;
-  if (Base.getOpcode() == ISD::ADD &&
-      Base.getOperand(1).getOpcode() == ISD::SHL) {
-    ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Base.getOperand(1)
-                                                      .getOperand(1));
-    if (CN && (CN->getSExtValue() >= 2)) {
-      Root = &Base.getOperand(0);
-    }
-  }
-  if (isa<FrameIndexSDNode>(*Root)) {
-    // All frame indicies are word aligned
-    AlignedBase = Base;
-    Offset = off;
-    return true;
-  }
-  if (Root->getOpcode() == XCoreISD::DPRelativeWrapper ||
-      Root->getOpcode() == XCoreISD::CPRelativeWrapper) {
-    // All dp / cp relative addresses are word aligned
-    AlignedBase = Base;
-    Offset = off;
-    return true;
-  }
-  // Check for an aligned global variable.
-  if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(*Root)) {
-    const GlobalValue *GV = GA->getGlobal();
-    if (GA->getOffset() == 0 && GV->getAlignment() >= 4) {
-      AlignedBase = Base;
-      Offset = off;
-      return true;
-    }
-  }
-  return false;
+  SDValue LowShift = DAG.getConstant((Offset - LowOffset) * 8, MVT::i32);
+  SDValue HighShift = DAG.getConstant((HighOffset - Offset) * 8, MVT::i32);
+
+  SDValue Low = DAG.getLoad(getPointerTy(), DL, Chain,
+                            LowAddr, MachinePointerInfo(),
+                            false, false, false, 0);
+  SDValue High = DAG.getLoad(getPointerTy(), DL, Chain,
+                             HighAddr, MachinePointerInfo(),
+                             false, false, false, 0);
+  SDValue LowShifted = DAG.getNode(ISD::SRL, DL, MVT::i32, Low, LowShift);
+  SDValue HighShifted = DAG.getNode(ISD::SHL, DL, MVT::i32, High, HighShift);
+  SDValue Result = DAG.getNode(ISD::OR, DL, MVT::i32, LowShifted, HighShifted);
+  Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Low.getValue(1),
+                      High.getValue(1));
+  SDValue Ops[] = { Result, Chain };
+  return DAG.getMergeValues(Ops, 2, DL);
+}
+
+static bool isWordAligned(SDValue Value, SelectionDAG &DAG)
+{
+  APInt KnownZero, KnownOne;
+  DAG.ComputeMaskedBits(Value, KnownZero, KnownOne);
+  return KnownZero.countTrailingOnes() >= 2;
 }
 
 SDValue XCoreTargetLowering::
 LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   LoadSDNode *LD = cast<LoadSDNode>(Op);
   assert(LD->getExtensionType() == ISD::NON_EXTLOAD &&
          "Unexpected extension type");
@@ -414,47 +388,25 @@ LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
 
   SDValue Chain = LD->getChain();
   SDValue BasePtr = LD->getBasePtr();
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
 
-  SDValue Base;
-  int64_t Offset;
-  if (!LD->isVolatile() &&
-      IsWordAlignedBasePlusConstantOffset(BasePtr, Base, Offset)) {
-    if (Offset % 4 == 0) {
-      // We've managed to infer better alignment information than the load
-      // already has. Use an aligned load.
-      //
-      return DAG.getLoad(getPointerTy(), DL, Chain, BasePtr,
-                         MachinePointerInfo(),
-                         false, false, false, 0);
+  if (!LD->isVolatile()) {
+    const GlobalValue *GV;
+    int64_t Offset = 0;
+    if (DAG.isBaseWithConstantOffset(BasePtr) &&
+        isWordAligned(BasePtr->getOperand(0), DAG)) {
+      SDValue NewBasePtr = BasePtr->getOperand(0);
+      Offset = cast<ConstantSDNode>(BasePtr->getOperand(1))->getSExtValue();
+      return lowerLoadWordFromAlignedBasePlusOffset(DL, Chain, NewBasePtr,
+                                                    Offset, DAG);
     }
-    // Lower to
-    // ldw low, base[offset >> 2]
-    // ldw high, base[(offset >> 2) + 1]
-    // shr low_shifted, low, (offset & 0x3) * 8
-    // shl high_shifted, high, 32 - (offset & 0x3) * 8
-    // or result, low_shifted, high_shifted
-    SDValue LowOffset = DAG.getConstant(Offset & ~0x3, MVT::i32);
-    SDValue HighOffset = DAG.getConstant((Offset & ~0x3) + 4, MVT::i32);
-    SDValue LowShift = DAG.getConstant((Offset & 0x3) * 8, MVT::i32);
-    SDValue HighShift = DAG.getConstant(32 - (Offset & 0x3) * 8, MVT::i32);
-
-    SDValue LowAddr = DAG.getNode(ISD::ADD, DL, MVT::i32, Base, LowOffset);
-    SDValue HighAddr = DAG.getNode(ISD::ADD, DL, MVT::i32, Base, HighOffset);
-
-    SDValue Low = DAG.getLoad(getPointerTy(), DL, Chain,
-                              LowAddr, MachinePointerInfo(),
-                              false, false, false, 0);
-    SDValue High = DAG.getLoad(getPointerTy(), DL, Chain,
-                               HighAddr, MachinePointerInfo(),
-                               false, false, false, 0);
-    SDValue LowShifted = DAG.getNode(ISD::SRL, DL, MVT::i32, Low, LowShift);
-    SDValue HighShifted = DAG.getNode(ISD::SHL, DL, MVT::i32, High, HighShift);
-    SDValue Result = DAG.getNode(ISD::OR, DL, MVT::i32, LowShifted, HighShifted);
-    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Low.getValue(1),
-                             High.getValue(1));
-    SDValue Ops[] = { Result, Chain };
-    return DAG.getMergeValues(Ops, 2, DL);
+    if (TLI.isGAPlusOffset(BasePtr.getNode(), GV, Offset) &&
+        MinAlign(GV->getAlignment(), 4) == 4) {
+      SDValue NewBasePtr = DAG.getGlobalAddress(GV, DL,
+                                                BasePtr->getValueType(0));
+      return lowerLoadWordFromAlignedBasePlusOffset(DL, Chain, NewBasePtr,
+                                                    Offset, DAG);
+    }
   }
 
   if (LD->getAlignment() == 2) {
@@ -517,7 +469,7 @@ LowerSTORE(SDValue Op, SelectionDAG &DAG) const
   SDValue Chain = ST->getChain();
   SDValue BasePtr = ST->getBasePtr();
   SDValue Value = ST->getValue();
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
 
   if (ST->getAlignment() == 2) {
     SDValue Low = Value;
@@ -564,7 +516,7 @@ LowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const
 {
   assert(Op.getValueType() == MVT::i32 && Op.getOpcode() == ISD::SMUL_LOHI &&
          "Unexpected operand to lower!");
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
   SDValue Zero = DAG.getConstant(0, MVT::i32);
@@ -581,7 +533,7 @@ LowerUMUL_LOHI(SDValue Op, SelectionDAG &DAG) const
 {
   assert(Op.getValueType() == MVT::i32 && Op.getOpcode() == ISD::UMUL_LOHI &&
          "Unexpected operand to lower!");
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
   SDValue Zero = DAG.getConstant(0, MVT::i32);
@@ -666,7 +618,7 @@ TryExpandADDWithMul(SDNode *N, SelectionDAG &DAG) const
   } else {
     return SDValue();
   }
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   SDValue LL, RL, AddendL, AddendH;
   LL = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32,
                    Mul.getOperand(0),  DAG.getConstant(0, MVT::i32));
@@ -725,7 +677,7 @@ ExpandADDSUB(SDNode *N, SelectionDAG &DAG) const
       return Result;
   }
 
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
 
   // Extract components
   SDValue LHSL = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32,
@@ -755,31 +707,33 @@ ExpandADDSUB(SDNode *N, SelectionDAG &DAG) const
 SDValue XCoreTargetLowering::
 LowerVAARG(SDValue Op, SelectionDAG &DAG) const
 {
-  llvm_unreachable("unimplemented");
-  // FIXME Arguments passed by reference need a extra dereference.
+  // Whist llvm does not support aggregate varargs we can ignore
+  // the possibility of the ValueType being an implicit byVal vararg.
   SDNode *Node = Op.getNode();
-  DebugLoc dl = Node->getDebugLoc();
-  const Value *V = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
-  EVT VT = Node->getValueType(0);
-  SDValue VAList = DAG.getLoad(getPointerTy(), dl, Node->getOperand(0),
-                               Node->getOperand(1), MachinePointerInfo(V),
+  EVT VT = Node->getValueType(0); // not an aggregate
+  SDValue InChain = Node->getOperand(0);
+  SDValue VAListPtr = Node->getOperand(1);
+  EVT PtrVT = VAListPtr.getValueType();
+  const Value *SV = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
+  SDLoc dl(Node);
+  SDValue VAList = DAG.getLoad(PtrVT, dl, InChain,
+                               VAListPtr, MachinePointerInfo(SV),
                                false, false, false, 0);
   // Increment the pointer, VAList, to the next vararg
-  SDValue Tmp3 = DAG.getNode(ISD::ADD, dl, getPointerTy(), VAList,
-                     DAG.getConstant(VT.getSizeInBits(),
-                                     getPointerTy()));
+  SDValue nextPtr = DAG.getNode(ISD::ADD, dl, PtrVT, VAList,
+                                DAG.getIntPtrConstant(VT.getSizeInBits() / 8));
   // Store the incremented VAList to the legalized pointer
-  Tmp3 = DAG.getStore(VAList.getValue(1), dl, Tmp3, Node->getOperand(1),
-                      MachinePointerInfo(V), false, false, 0);
+  InChain = DAG.getStore(VAList.getValue(1), dl, nextPtr, VAListPtr,
+                         MachinePointerInfo(SV), false, false, 0);
   // Load the actual argument out of the pointer VAList
-  return DAG.getLoad(VT, dl, Tmp3, VAList, MachinePointerInfo(),
+  return DAG.getLoad(VT, dl, InChain, VAList, MachinePointerInfo(),
                      false, false, false, 0);
 }
 
 SDValue XCoreTargetLowering::
 LowerVASTART(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   // vastart stores the address of the VarArgsFrameIndex slot into the
   // memory location argument
   MachineFunction &MF = DAG.getMachineFunction();
@@ -791,7 +745,7 @@ LowerVASTART(SDValue Op, SelectionDAG &DAG) const
 
 SDValue XCoreTargetLowering::LowerFRAMEADDR(SDValue Op,
                                             SelectionDAG &DAG) const {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   // Depths > 0 not supported yet!
   if (cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue() > 0)
     return SDValue();
@@ -831,7 +785,7 @@ LowerINIT_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const {
 
   SDValue Addr = Trmp;
 
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   OutChains[0] = DAG.getStore(Chain, dl, DAG.getConstant(0x0a3cd805, MVT::i32),
                               Addr, MachinePointerInfo(TrmpAddr), false, false,
                               0);
@@ -865,7 +819,7 @@ LowerINIT_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue XCoreTargetLowering::
 LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL(Op);
   unsigned IntNo = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
   switch (IntNo) {
     case Intrinsic::xcore_crc8:
@@ -895,10 +849,10 @@ SDValue
 XCoreTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG                     = CLI.DAG;
-  DebugLoc &dl                          = CLI.DL;
-  SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
-  SmallVector<SDValue, 32> &OutVals     = CLI.OutVals;
-  SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
+  SDLoc &dl                             = CLI.DL;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals     = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins   = CLI.Ins;
   SDValue Chain                         = CLI.Chain;
   SDValue Callee                        = CLI.Callee;
   bool &isTailCall                      = CLI.IsTailCall;
@@ -931,7 +885,7 @@ XCoreTargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
                                     const SmallVectorImpl<ISD::OutputArg> &Outs,
                                     const SmallVectorImpl<SDValue> &OutVals,
                                     const SmallVectorImpl<ISD::InputArg> &Ins,
-                                    DebugLoc dl, SelectionDAG &DAG,
+                                    SDLoc dl, SelectionDAG &DAG,
                                     SmallVectorImpl<SDValue> &InVals) const {
 
   // Analyze operands of the call, assigning locations to each operand.
@@ -949,7 +903,7 @@ XCoreTargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
   unsigned NumBytes = CCInfo.getNextStackOffset();
 
   Chain = DAG.getCALLSEQ_START(Chain,DAG.getConstant(NumBytes,
-                                 getPointerTy(), true));
+                                 getPointerTy(), true), dl);
 
   SmallVector<std::pair<unsigned, SDValue>, 4> RegsToPass;
   SmallVector<SDValue, 12> MemOpChains;
@@ -1039,7 +993,7 @@ XCoreTargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
   Chain = DAG.getCALLSEQ_END(Chain,
                              DAG.getConstant(NumBytes, getPointerTy(), true),
                              DAG.getConstant(0, getPointerTy(), true),
-                             InFlag);
+                             InFlag, dl);
   InFlag = Chain.getValue(1);
 
   // Handle result values, copying them out of physregs into vregs that we
@@ -1054,7 +1008,7 @@ SDValue
 XCoreTargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
                                      CallingConv::ID CallConv, bool isVarArg,
                                      const SmallVectorImpl<ISD::InputArg> &Ins,
-                                     DebugLoc dl, SelectionDAG &DAG,
+                                     SDLoc dl, SelectionDAG &DAG,
                                      SmallVectorImpl<SDValue> &InVals) const {
 
   // Assign locations to each value returned by this call.
@@ -1079,13 +1033,17 @@ XCoreTargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
 //             Formal Arguments Calling Convention Implementation
 //===----------------------------------------------------------------------===//
 
+namespace {
+  struct ArgDataPair { SDValue SDV; ISD::ArgFlagsTy Flags; };
+}
+
 /// XCore formal arguments implementation
 SDValue
 XCoreTargetLowering::LowerFormalArguments(SDValue Chain,
                                           CallingConv::ID CallConv,
                                           bool isVarArg,
                                       const SmallVectorImpl<ISD::InputArg> &Ins,
-                                          DebugLoc dl,
+                                          SDLoc dl,
                                           SelectionDAG &DAG,
                                           SmallVectorImpl<SDValue> &InVals)
                                             const {
@@ -1110,7 +1068,7 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
                                        bool isVarArg,
                                        const SmallVectorImpl<ISD::InputArg>
                                          &Ins,
-                                       DebugLoc dl,
+                                       SDLoc dl,
                                        SelectionDAG &DAG,
                                        SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
@@ -1128,9 +1086,22 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
 
   unsigned LRSaveSize = StackSlotSize;
 
+  // All getCopyFromReg ops must precede any getMemcpys to prevent the
+  // scheduler clobbering a register before it has been copied.
+  // The stages are:
+  // 1. CopyFromReg (and load) arg & vararg registers.
+  // 2. Chain CopyFromReg nodes into a TokenFactor.
+  // 3. Memcpy 'byVal' args & push final InVals.
+  // 4. Chain mem ops nodes into a TokenFactor.
+  SmallVector<SDValue, 4> CFRegNode;
+  SmallVector<ArgDataPair, 4> ArgData;
+  SmallVector<SDValue, 4> MemOps;
+
+  // 1a. CopyFromReg (and load) arg registers.
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
 
     CCValAssign &VA = ArgLocs[i];
+    SDValue ArgIn;
 
     if (VA.isRegLoc()) {
       // Arguments passed in registers
@@ -1147,7 +1118,8 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
       case MVT::i32:
         unsigned VReg = RegInfo.createVirtualRegister(&XCore::GRRegsRegClass);
         RegInfo.addLiveIn(VA.getLocReg(), VReg);
-        InVals.push_back(DAG.getCopyFromReg(Chain, dl, VReg, RegVT));
+        ArgIn = DAG.getCopyFromReg(Chain, dl, VReg, RegVT);
+        CFRegNode.push_back(ArgIn.getValue(ArgIn->getNumValues() - 1));
       }
     } else {
       // sanity check
@@ -1167,14 +1139,17 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
       // Create the SelectionDAG nodes corresponding to a load
       //from this parameter
       SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
-      InVals.push_back(DAG.getLoad(VA.getLocVT(), dl, Chain, FIN,
-                                   MachinePointerInfo::getFixedStack(FI),
-                                   false, false, false, 0));
+      ArgIn = DAG.getLoad(VA.getLocVT(), dl, Chain, FIN,
+                          MachinePointerInfo::getFixedStack(FI),
+                          false, false, false, 0);
     }
+    const ArgDataPair ADP = { ArgIn, Ins[i].Flags };
+    ArgData.push_back(ADP);
   }
 
+  // 1b. CopyFromReg vararg registers.
   if (isVarArg) {
-    /* Argument registers */
+    // Argument registers
     static const uint16_t ArgRegs[] = {
       XCore::R0, XCore::R1, XCore::R2, XCore::R3
     };
@@ -1182,7 +1157,6 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
     unsigned FirstVAReg = CCInfo.getFirstUnallocated(ArgRegs,
                                                      array_lengthof(ArgRegs));
     if (FirstVAReg < array_lengthof(ArgRegs)) {
-      SmallVector<SDValue, 4> MemOps;
       int offset = 0;
       // Save remaining registers, storing higher register numbers at a higher
       // address
@@ -1198,20 +1172,54 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
         unsigned VReg = RegInfo.createVirtualRegister(&XCore::GRRegsRegClass);
         RegInfo.addLiveIn(ArgRegs[i], VReg);
         SDValue Val = DAG.getCopyFromReg(Chain, dl, VReg, MVT::i32);
+        CFRegNode.push_back(Val.getValue(Val->getNumValues() - 1));
         // Move argument from virt reg -> stack
         SDValue Store = DAG.getStore(Val.getValue(1), dl, Val, FIN,
                                      MachinePointerInfo(), false, false, 0);
         MemOps.push_back(Store);
       }
-      if (!MemOps.empty())
-        Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
-                            &MemOps[0], MemOps.size());
     } else {
       // This will point to the next argument passed via stack.
       XFI->setVarArgsFrameIndex(
         MFI->CreateFixedObject(4, LRSaveSize + CCInfo.getNextStackOffset(),
                                true));
     }
+  }
+
+  // 2. chain CopyFromReg nodes into a TokenFactor.
+  if (!CFRegNode.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &CFRegNode[0],
+                        CFRegNode.size());
+
+  // 3. Memcpy 'byVal' args & push final InVals.
+  // Aggregates passed "byVal" need to be copied by the callee.
+  // The callee will use a pointer to this copy, rather than the original
+  // pointer.
+  for (SmallVectorImpl<ArgDataPair>::const_iterator ArgDI = ArgData.begin(),
+                                                    ArgDE = ArgData.end();
+       ArgDI != ArgDE; ++ArgDI) {
+    if (ArgDI->Flags.isByVal() && ArgDI->Flags.getByValSize()) {
+      unsigned Size = ArgDI->Flags.getByValSize();
+      unsigned Align = ArgDI->Flags.getByValAlign();
+      // Create a new object on the stack and copy the pointee into it.
+      int FI = MFI->CreateStackObject(Size, Align, false, false);
+      SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
+      InVals.push_back(FIN);
+      MemOps.push_back(DAG.getMemcpy(Chain, dl, FIN, ArgDI->SDV,
+                                     DAG.getConstant(Size, MVT::i32),
+                                     Align, false, false,
+                                     MachinePointerInfo(),
+                                     MachinePointerInfo()));
+    } else {
+      InVals.push_back(ArgDI->SDV);
+    }
+  }
+
+  // 4, chain mem ops nodes into a TokenFactor.
+  if (!MemOps.empty()) {
+    MemOps.push_back(Chain);
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &MemOps[0],
+                        MemOps.size());
   }
 
   return Chain;
@@ -1236,7 +1244,7 @@ XCoreTargetLowering::LowerReturn(SDValue Chain,
                                  CallingConv::ID CallConv, bool isVarArg,
                                  const SmallVectorImpl<ISD::OutputArg> &Outs,
                                  const SmallVectorImpl<SDValue> &OutVals,
-                                 DebugLoc dl, SelectionDAG &DAG) const {
+                                 SDLoc dl, SelectionDAG &DAG) const {
 
   // CCValAssign - represent the assignment of
   // the return value to a location
@@ -1353,7 +1361,7 @@ XCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
                                              DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
   switch (N->getOpcode()) {
   default: break;
   case XCoreISD::LADD: {
@@ -1630,7 +1638,7 @@ XCoreTargetLowering::isLegalAddressingMode(const AddrMode &AM,
 std::pair<unsigned, const TargetRegisterClass*>
 XCoreTargetLowering::
 getRegForInlineAsmConstraint(const std::string &Constraint,
-                             EVT VT) const {
+                             MVT VT) const {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
     default : break;

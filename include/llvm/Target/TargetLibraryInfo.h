@@ -24,8 +24,12 @@ namespace llvm {
       under_IO_putc,
       /// void operator delete[](void*);
       ZdaPv,
+      /// void operator delete[](void*, nothrow);
+      ZdaPvRKSt9nothrow_t,
       /// void operator delete(void*);
       ZdlPv,
+      /// void operator delete(void*, nothrow);
+      ZdlPvRKSt9nothrow_t,
       /// void *new[](unsigned int);
       Znaj,
       /// void *new[](unsigned int, nothrow);
@@ -57,6 +61,12 @@ namespace llvm {
       dunder_isoc99_sscanf,
       /// void *__memcpy_chk(void *s1, const void *s2, size_t n, size_t s1size);
       memcpy_chk,
+      /// double __sqrt_finite(double x);
+      sqrt_finite,
+      /// float __sqrt_finite(float x);
+      sqrtf_finite,
+      /// long double __sqrt_finite(long double x);
+      sqrtl_finite,
       /// char * __strdup(const char *s);
       dunder_strdup,
       /// char *__strndup(const char *s, size_t n);
@@ -302,6 +312,8 @@ namespace llvm {
       getpwnam,
       /// char *gets(char *s);
       gets,
+      /// int gettimeofday(struct timeval *tp, void *tzp);
+      gettimeofday,
       /// uint32_t htonl(uint32_t hostlong);
       htonl,
       /// uint16_t htons(uint16_t hostshort);
@@ -677,10 +689,13 @@ public:
     case LibFunc::sin:       case LibFunc::sinf:       case LibFunc::sinl:
     case LibFunc::cos:       case LibFunc::cosf:       case LibFunc::cosl:
     case LibFunc::sqrt:      case LibFunc::sqrtf:      case LibFunc::sqrtl:
+    case LibFunc::sqrt_finite: case LibFunc::sqrtf_finite:
+                                                  case LibFunc::sqrtl_finite:
     case LibFunc::floor:     case LibFunc::floorf:     case LibFunc::floorl:
     case LibFunc::nearbyint: case LibFunc::nearbyintf: case LibFunc::nearbyintl:
     case LibFunc::ceil:      case LibFunc::ceilf:      case LibFunc::ceill:
     case LibFunc::rint:      case LibFunc::rintf:      case LibFunc::rintl:
+    case LibFunc::round:     case LibFunc::roundf:     case LibFunc::roundl:
     case LibFunc::trunc:     case LibFunc::truncf:     case LibFunc::truncl:
     case LibFunc::log2:      case LibFunc::log2f:      case LibFunc::log2l:
     case LibFunc::exp2:      case LibFunc::exp2f:      case LibFunc::exp2l:

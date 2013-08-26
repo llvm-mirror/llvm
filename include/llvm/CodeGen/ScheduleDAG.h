@@ -90,11 +90,6 @@ namespace llvm {
     /// the value of the Latency field of the predecessor, however advanced
     /// models may provide additional information about specific edges.
     unsigned Latency;
-    /// Record MinLatency seperately from "expected" Latency.
-    ///
-    /// FIXME: this field is not packed on LP64. Convert to 16-bit DAG edge
-    /// latency after introducing saturating truncation.
-    unsigned MinLatency;
 
   public:
     /// SDep - Construct a null SDep. This is only for use by container
@@ -120,10 +115,9 @@ namespace llvm {
         Latency = 1;
         break;
       }
-      MinLatency = Latency;
     }
     SDep(SUnit *S, OrderKind kind)
-      : Dep(S, Order), Contents(), Latency(0), MinLatency(0) {
+      : Dep(S, Order), Contents(), Latency(0) {
       Contents.OrdKind = kind;
     }
 
@@ -142,8 +136,7 @@ namespace llvm {
     }
 
     bool operator==(const SDep &Other) const {
-      return overlaps(Other)
-        && Latency == Other.Latency && MinLatency == Other.MinLatency;
+      return overlaps(Other) && Latency == Other.Latency;
     }
 
     bool operator!=(const SDep &Other) const {
@@ -161,18 +154,6 @@ namespace llvm {
     /// setLatency - Set the latency for this edge.
     void setLatency(unsigned Lat) {
       Latency = Lat;
-    }
-
-    /// getMinLatency - Return the minimum latency for this edge. Minimum
-    /// latency is used for scheduling groups, while normal (expected) latency
-    /// is for instruction cost and critical path.
-    unsigned getMinLatency() const {
-      return MinLatency;
-    }
-
-    /// setMinLatency - Set the minimum latency for this edge.
-    void setMinLatency(unsigned Lat) {
-      MinLatency = Lat;
     }
 
     //// getSUnit - Return the SUnit to which this edge points.
@@ -282,10 +263,10 @@ namespace llvm {
     SmallVector<SDep, 4> Preds;  // All sunit predecessors.
     SmallVector<SDep, 4> Succs;  // All sunit successors.
 
-    typedef SmallVector<SDep, 4>::iterator pred_iterator;
-    typedef SmallVector<SDep, 4>::iterator succ_iterator;
-    typedef SmallVector<SDep, 4>::const_iterator const_pred_iterator;
-    typedef SmallVector<SDep, 4>::const_iterator const_succ_iterator;
+    typedef SmallVectorImpl<SDep>::iterator pred_iterator;
+    typedef SmallVectorImpl<SDep>::iterator succ_iterator;
+    typedef SmallVectorImpl<SDep>::const_iterator const_pred_iterator;
+    typedef SmallVectorImpl<SDep>::const_iterator const_succ_iterator;
 
     unsigned NodeNum;                   // Entry # of node in the node vector.
     unsigned NodeQueueId;               // Queue id of node.
@@ -302,6 +283,7 @@ namespace llvm {
     bool isCallOp         : 1;          // Is a function call operand.
     bool isTwoAddress     : 1;          // Is a two-address instruction.
     bool isCommutable     : 1;          // Is a commutable instruction.
+    bool hasPhysRegUses   : 1;          // Has physreg uses.
     bool hasPhysRegDefs   : 1;          // Has physreg defs that are being used.
     bool hasPhysRegClobbers : 1;        // Has any physreg defs, used or not.
     bool isPending        : 1;          // True once pending.
@@ -331,10 +313,10 @@ namespace llvm {
         NodeQueueId(0), NumPreds(0), NumSuccs(0), NumPredsLeft(0),
         NumSuccsLeft(0), WeakPredsLeft(0), WeakSuccsLeft(0), NumRegDefsLeft(0),
         Latency(0), isVRegCycle(false), isCall(false), isCallOp(false),
-        isTwoAddress(false), isCommutable(false), hasPhysRegDefs(false),
-        hasPhysRegClobbers(false), isPending(false), isAvailable(false),
-        isScheduled(false), isScheduleHigh(false), isScheduleLow(false),
-        isCloned(false), SchedulingPref(Sched::None),
+        isTwoAddress(false), isCommutable(false), hasPhysRegUses(false),
+        hasPhysRegDefs(false), hasPhysRegClobbers(false), isPending(false),
+        isAvailable(false), isScheduled(false), isScheduleHigh(false),
+        isScheduleLow(false), isCloned(false), SchedulingPref(Sched::None),
         isDepthCurrent(false), isHeightCurrent(false), Depth(0), Height(0),
         TopReadyCycle(0), BotReadyCycle(0), CopyDstRC(NULL), CopySrcRC(NULL) {}
 
@@ -345,10 +327,10 @@ namespace llvm {
         NodeQueueId(0), NumPreds(0), NumSuccs(0), NumPredsLeft(0),
         NumSuccsLeft(0), WeakPredsLeft(0), WeakSuccsLeft(0), NumRegDefsLeft(0),
         Latency(0), isVRegCycle(false), isCall(false), isCallOp(false),
-        isTwoAddress(false), isCommutable(false), hasPhysRegDefs(false),
-        hasPhysRegClobbers(false), isPending(false), isAvailable(false),
-        isScheduled(false), isScheduleHigh(false), isScheduleLow(false),
-        isCloned(false), SchedulingPref(Sched::None),
+        isTwoAddress(false), isCommutable(false), hasPhysRegUses(false),
+        hasPhysRegDefs(false), hasPhysRegClobbers(false), isPending(false),
+        isAvailable(false), isScheduled(false), isScheduleHigh(false),
+        isScheduleLow(false), isCloned(false), SchedulingPref(Sched::None),
         isDepthCurrent(false), isHeightCurrent(false), Depth(0), Height(0),
         TopReadyCycle(0), BotReadyCycle(0), CopyDstRC(NULL), CopySrcRC(NULL) {}
 
@@ -358,10 +340,10 @@ namespace llvm {
         NodeQueueId(0), NumPreds(0), NumSuccs(0), NumPredsLeft(0),
         NumSuccsLeft(0), WeakPredsLeft(0), WeakSuccsLeft(0), NumRegDefsLeft(0),
         Latency(0), isVRegCycle(false), isCall(false), isCallOp(false),
-        isTwoAddress(false), isCommutable(false), hasPhysRegDefs(false),
-        hasPhysRegClobbers(false), isPending(false), isAvailable(false),
-        isScheduled(false), isScheduleHigh(false), isScheduleLow(false),
-        isCloned(false), SchedulingPref(Sched::None),
+        isTwoAddress(false), isCommutable(false), hasPhysRegUses(false),
+        hasPhysRegDefs(false), hasPhysRegClobbers(false), isPending(false),
+        isAvailable(false), isScheduled(false), isScheduleHigh(false),
+        isScheduleLow(false), isCloned(false), SchedulingPref(Sched::None),
         isDepthCurrent(false), isHeightCurrent(false), Depth(0), Height(0),
         TopReadyCycle(0), BotReadyCycle(0), CopyDstRC(NULL), CopySrcRC(NULL) {}
 
@@ -726,9 +708,8 @@ namespace llvm {
     /// IsReachable - Checks if SU is reachable from TargetSU.
     bool IsReachable(const SUnit *SU, const SUnit *TargetSU);
 
-    /// WillCreateCycle - Returns true if adding an edge from SU to TargetSU
-    /// will create a cycle.
-    bool WillCreateCycle(SUnit *SU, SUnit *TargetSU);
+    /// WillCreateCycle - Return true if addPred(TargetSU, SU) creates a cycle.
+    bool WillCreateCycle(SUnit *TargetSU, SUnit *SU);
 
     /// AddPred - Updates the topological ordering to accommodate an edge
     /// to be added from SUnit X to SUnit Y.

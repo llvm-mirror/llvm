@@ -16,19 +16,19 @@
 #include "AMDGPUInstrInfo.h"
 #include "AMDGPURegisterInfo.h"
 #include "AMDGPUTargetMachine.h"
-#include "AMDIL.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
 #define GET_INSTRINFO_CTOR
+#define GET_INSTRINFO_NAMED_OPS
 #define GET_INSTRMAP_INFO
 #include "AMDGPUGenInstrInfo.inc"
 
 using namespace llvm;
 
 AMDGPUInstrInfo::AMDGPUInstrInfo(TargetMachine &tm)
-  : AMDGPUGenInstrInfo(0,0), RI(tm, *this), TM(tm) { }
+  : AMDGPUGenInstrInfo(0,0), RI(tm), TM(tm) { }
 
 const AMDGPURegisterInfo &AMDGPUInstrInfo::getRegisterInfo() const {
   return RI;
@@ -97,27 +97,6 @@ bool AMDGPUInstrInfo::getNextBranchInstr(MachineBasicBlock::iterator &iter,
     ++iter;
   }
   return false;
-}
-
-MachineBasicBlock::iterator skipFlowControl(MachineBasicBlock *MBB) {
-  MachineBasicBlock::iterator tmp = MBB->end();
-  if (!MBB->size()) {
-    return MBB->end();
-  }
-  while (--tmp) {
-    if (tmp->getOpcode() == AMDGPU::ENDLOOP
-        || tmp->getOpcode() == AMDGPU::ENDIF
-        || tmp->getOpcode() == AMDGPU::ELSE) {
-      if (tmp == MBB->begin()) {
-        return tmp;
-      } else {
-        continue;
-      }
-    }  else {
-      return ++tmp;
-    }
-  }
-  return MBB->end();
 }
 
 void

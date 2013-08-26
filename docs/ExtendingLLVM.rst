@@ -45,7 +45,7 @@ function and then be turned into an instruction if warranted.
    what the restrictions are.  Talk to other people about it so that you are
    sure it's a good idea.
 
-#. ``llvm/include/llvm/Intrinsics*.td``:
+#. ``llvm/include/llvm/IR/Intrinsics*.td``:
 
    Add an entry for your intrinsic.  Describe its memory access characteristics
    for optimization (this controls whether it will be DCE'd, CSE'd, etc). Note
@@ -281,12 +281,12 @@ Adding a derived type
 
    add ability to parse in the type from text assembly
 
-#. ``llvm/lib/BitCode/Writer/Writer.cpp``:
+#. ``llvm/lib/Bitcode/Writer/Writer.cpp``:
 
    modify ``void BitcodeWriter::outputType(const Type *T)`` to serialize your
    type
 
-#. ``llvm/lib/BitCode/Reader/Reader.cpp``:
+#. ``llvm/lib/Bitcode/Reader/Reader.cpp``:
 
    modify ``const Type *BitcodeReader::ParseType()`` to read your data type
 

@@ -1,4 +1,4 @@
-//===-- LegalizeTypes.h - Definition of the DAG Type Legalizer class ------===//
+//===-- LegalizeTypes.h - DAG Type Legalizer class definition ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -71,6 +71,10 @@ private:
   /// isTypeLegal - Return true if this type is legal on this target.
   bool isTypeLegal(EVT VT) const {
     return TLI.getTypeAction(*DAG.getContext(), VT) == TargetLowering::TypeLegal;
+  }
+
+  EVT getSetCCResultType(EVT VT) const {
+    return TLI.getSetCCResultType(*DAG.getContext(), VT);
   }
 
   /// IgnoreNodeResults - Pretend all of this node's results are legal.
@@ -195,7 +199,7 @@ private:
   /// final size.
   SDValue SExtPromotedInteger(SDValue Op) {
     EVT OldVT = Op.getValueType();
-    DebugLoc dl = Op.getDebugLoc();
+    SDLoc dl(Op);
     Op = GetPromotedInteger(Op);
     return DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, Op.getValueType(), Op,
                        DAG.getValueType(OldVT));
@@ -205,7 +209,7 @@ private:
   /// final size.
   SDValue ZExtPromotedInteger(SDValue Op) {
     EVT OldVT = Op.getValueType();
-    DebugLoc dl = Op.getDebugLoc();
+    SDLoc dl(Op);
     Op = GetPromotedInteger(Op);
     return DAG.getZeroExtendInReg(Op, dl, OldVT.getScalarType());
   }
@@ -270,7 +274,6 @@ private:
   SDValue PromoteIntOp_EXTRACT_ELEMENT(SDNode *N);
   SDValue PromoteIntOp_EXTRACT_VECTOR_ELT(SDNode *N);
   SDValue PromoteIntOp_CONCAT_VECTORS(SDNode *N);
-  SDValue PromoteIntOp_MEMBARRIER(SDNode *N);
   SDValue PromoteIntOp_SCALAR_TO_VECTOR(SDNode *N);
   SDValue PromoteIntOp_SELECT(SDNode *N, unsigned OpNo);
   SDValue PromoteIntOp_SELECT_CC(SDNode *N, unsigned OpNo);
@@ -358,7 +361,7 @@ private:
   SDValue ExpandIntOp_ATOMIC_STORE(SDNode *N);
 
   void IntegerExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                  ISD::CondCode &CCCode, DebugLoc dl);
+                                  ISD::CondCode &CCCode, SDLoc dl);
 
   //===--------------------------------------------------------------------===//
   // Float to Integer Conversion Support: LegalizeFloatTypes.cpp
@@ -407,6 +410,7 @@ private:
   SDValue SoftenFloatRes_FPOWI(SDNode *N);
   SDValue SoftenFloatRes_FREM(SDNode *N);
   SDValue SoftenFloatRes_FRINT(SDNode *N);
+  SDValue SoftenFloatRes_FROUND(SDNode *N);
   SDValue SoftenFloatRes_FSIN(SDNode *N);
   SDValue SoftenFloatRes_FSQRT(SDNode *N);
   SDValue SoftenFloatRes_FSUB(SDNode *N);
@@ -465,7 +469,9 @@ private:
   void ExpandFloatRes_FP_EXTEND (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FPOW      (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FPOWI     (SDNode *N, SDValue &Lo, SDValue &Hi);
+  void ExpandFloatRes_FREM      (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FRINT     (SDNode *N, SDValue &Lo, SDValue &Hi);
+  void ExpandFloatRes_FROUND    (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FSIN      (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FSQRT     (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FSUB      (SDNode *N, SDValue &Lo, SDValue &Hi);
@@ -484,7 +490,7 @@ private:
   SDValue ExpandFloatOp_STORE(SDNode *N, unsigned OpNo);
 
   void FloatExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                ISD::CondCode &CCCode, DebugLoc dl);
+                                ISD::CondCode &CCCode, SDLoc dl);
 
   //===--------------------------------------------------------------------===//
   // Scalarization Support: LegalizeVectorTypes.cpp
@@ -581,6 +587,7 @@ private:
   SDValue SplitVecOp_EXTRACT_VECTOR_ELT(SDNode *N);
   SDValue SplitVecOp_STORE(StoreSDNode *N, unsigned OpNo);
   SDValue SplitVecOp_CONCAT_VECTORS(SDNode *N);
+  SDValue SplitVecOp_TRUNCATE(SDNode *N);
   SDValue SplitVecOp_VSETCC(SDNode *N);
   SDValue SplitVecOp_FP_ROUND(SDNode *N);
 
@@ -648,7 +655,7 @@ private:
   /// loads to load a vector with a resulting wider type. It takes
   ///   LdChain: list of chains for the load to be generated.
   ///   Ld:      load to widen
-  SDValue GenWidenVectorLoads(SmallVector<SDValue, 16>& LdChain,
+  SDValue GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
                               LoadSDNode *LD);
 
   /// GenWidenVectorExtLoads - Helper function to generate a set of extension
@@ -656,20 +663,20 @@ private:
   ///   LdChain: list of chains for the load to be generated.
   ///   Ld:      load to widen
   ///   ExtType: extension element type
-  SDValue GenWidenVectorExtLoads(SmallVector<SDValue, 16>& LdChain,
+  SDValue GenWidenVectorExtLoads(SmallVectorImpl<SDValue> &LdChain,
                                  LoadSDNode *LD, ISD::LoadExtType ExtType);
 
   /// Helper genWidenVectorStores - Helper function to generate a set of
   /// stores to store a widen vector into non widen memory
   ///   StChain: list of chains for the stores we have generated
   ///   ST:      store of a widen value
-  void GenWidenVectorStores(SmallVector<SDValue, 16>& StChain, StoreSDNode *ST);
+  void GenWidenVectorStores(SmallVectorImpl<SDValue> &StChain, StoreSDNode *ST);
 
   /// Helper genWidenVectorTruncStores - Helper function to generate a set of
   /// stores to store a truncate widen vector into non widen memory
   ///   StChain: list of chains for the stores we have generated
   ///   ST:      store of a widen value
-  void GenWidenVectorTruncStores(SmallVector<SDValue, 16>& StChain,
+  void GenWidenVectorTruncStores(SmallVectorImpl<SDValue> &StChain,
                                  StoreSDNode *ST);
 
   /// Modifies a vector input (widen or narrows) to a vector of NVT.  The

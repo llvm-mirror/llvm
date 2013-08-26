@@ -14,6 +14,7 @@
 #include "DWARFDebugAranges.h"
 #include "DWARFDebugFrame.h"
 #include "DWARFDebugLine.h"
+#include "DWARFDebugLoc.h"
 #include "DWARFDebugRangeList.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallVector.h"
@@ -28,6 +29,7 @@ namespace llvm {
 class DWARFContext : public DIContext {
   SmallVector<DWARFCompileUnit, 1> CUs;
   OwningPtr<DWARFDebugAbbrev> Abbrev;
+  OwningPtr<DWARFDebugLoc> Loc;
   OwningPtr<DWARFDebugAranges> Aranges;
   OwningPtr<DWARFDebugLine> Line;
   OwningPtr<DWARFDebugFrame> DebugFrame;
@@ -46,7 +48,12 @@ class DWARFContext : public DIContext {
   void parseDWOCompileUnits();
 
 public:
-  DWARFContext() {}
+  DWARFContext() : DIContext(CK_DWARF) {}
+
+  static bool classof(const DIContext *DICtx) {
+    return DICtx->getKind() == CK_DWARF;
+  }
+
   virtual void dump(raw_ostream &OS, DIDumpType DumpType = DIDT_All);
 
   /// Get the number of compile units in this context.
@@ -80,6 +87,9 @@ public:
   /// Get a pointer to the parsed DebugAbbrev object.
   const DWARFDebugAbbrev *getDebugAbbrev();
 
+  /// Get a pointer to the parsed DebugLoc object.
+  const DWARFDebugLoc *getDebugLoc();
+
   /// Get a pointer to the parsed dwo abbreviations object.
   const DWARFDebugAbbrev *getDebugAbbrevDWO();
 
@@ -104,8 +114,10 @@ public:
   virtual uint8_t getAddressSize() const = 0;
   virtual const RelocAddrMap &infoRelocMap() const = 0;
   virtual const RelocAddrMap &lineRelocMap() const = 0;
+  virtual const RelocAddrMap &locRelocMap() const = 0;
   virtual StringRef getInfoSection() = 0;
   virtual StringRef getAbbrevSection() = 0;
+  virtual StringRef getLocSection() = 0;
   virtual StringRef getARangeSection() = 0;
   virtual StringRef getDebugFrameSection() = 0;
   virtual StringRef getLineSection() = 0;
@@ -123,7 +135,7 @@ public:
   virtual const RelocAddrMap &infoDWORelocMap() const = 0;
 
   static bool isSupportedVersion(unsigned version) {
-    return version == 2 || version == 3;
+    return version == 2 || version == 3 || version == 4;
   }
 private:
   /// Return the compile unit that includes an offset (relative to .debug_info).
@@ -142,9 +154,11 @@ class DWARFContextInMemory : public DWARFContext {
   bool IsLittleEndian;
   uint8_t AddressSize;
   RelocAddrMap InfoRelocMap;
+  RelocAddrMap LocRelocMap;
   RelocAddrMap LineRelocMap;
   StringRef InfoSection;
   StringRef AbbrevSection;
+  StringRef LocSection;
   StringRef ARangeSection;
   StringRef DebugFrameSection;
   StringRef LineSection;
@@ -161,14 +175,19 @@ class DWARFContextInMemory : public DWARFContext {
   StringRef RangeDWOSection;
   StringRef AddrSection;
 
+  SmallVector<MemoryBuffer*, 4> UncompressedSections;
+
 public:
   DWARFContextInMemory(object::ObjectFile *);
+  ~DWARFContextInMemory();
   virtual bool isLittleEndian() const { return IsLittleEndian; }
   virtual uint8_t getAddressSize() const { return AddressSize; }
   virtual const RelocAddrMap &infoRelocMap() const { return InfoRelocMap; }
+  virtual const RelocAddrMap &locRelocMap() const { return LocRelocMap; }
   virtual const RelocAddrMap &lineRelocMap() const { return LineRelocMap; }
   virtual StringRef getInfoSection() { return InfoSection; }
   virtual StringRef getAbbrevSection() { return AbbrevSection; }
+  virtual StringRef getLocSection() { return LocSection; }
   virtual StringRef getARangeSection() { return ARangeSection; }
   virtual StringRef getDebugFrameSection() { return DebugFrameSection; }
   virtual StringRef getLineSection() { return LineSection; }

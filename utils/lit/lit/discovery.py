@@ -38,11 +38,12 @@ def getTestSuite(item, litConfig, cache):
             ts, relative = search(parent)
             return (ts, relative + (base,))
 
-        # We found a config file, load it.
+        # We found a test suite, create a new config for it and load it.
         if litConfig.debug:
             litConfig.note('loading suite config %r' % cfgpath)
 
-        cfg = TestingConfig.frompath(cfgpath, None, litConfig, mustExist = True)
+        cfg = TestingConfig.fromdefaults(litConfig)
+        cfg.load_from_path(cfgpath, litConfig)
         source_root = os.path.realpath(cfg.test_source_root or path)
         exec_root = os.path.realpath(cfg.test_exec_root or path)
         return Test.TestSuite(cfg.name, source_root, exec_root, cfg), ()
@@ -78,14 +79,21 @@ def getLocalConfig(ts, path_in_suite, litConfig, cache):
         else:
             parent = search(path_in_suite[:-1])
 
-        # Load the local configuration.
+        # Check if there is a local configuration file.
         source_path = ts.getSourcePath(path_in_suite)
         cfgpath = os.path.join(source_path, litConfig.local_config_name)
+
+        # If not, just reuse the parent config.
+        if not os.path.exists(cfgpath):
+            return parent
+
+        # Otherwise, copy the current config and load the local configuration
+        # file into it.
+        config = parent.clone()
         if litConfig.debug:
             litConfig.note('loading local config %r' % cfgpath)
-        return TestingConfig.frompath(cfgpath, parent, litConfig,
-                                    mustExist = False,
-                                    config = parent.clone(cfgpath))
+        config.load_from_path(cfgpath, litConfig)
+        return config
 
     def search(path_in_suite):
         key = (ts, path_in_suite)
@@ -137,7 +145,7 @@ def getTestsInSuite(ts, path_in_suite, litConfig,
     # Search subdirectories.
     for filename in os.listdir(source_path):
         # FIXME: This doesn't belong here?
-        if filename in ('Output', '.svn') or filename in lc.excludes:
+        if filename in ('Output', '.svn', '.git') or filename in lc.excludes:
             continue
 
         # Ignore non-directories.
@@ -147,19 +155,30 @@ def getTestsInSuite(ts, path_in_suite, litConfig,
 
         # Check for nested test suites, first in the execpath in case there is a
         # site configuration and then in the source path.
-        file_execpath = ts.getExecPath(path_in_suite + (filename,))
+        subpath = path_in_suite + (filename,)
+        file_execpath = ts.getExecPath(subpath)
         if dirContainsTestSuite(file_execpath, litConfig):
-            sub_ts, subiter = getTests(file_execpath, litConfig,
-                                       testSuiteCache, localConfigCache)
+            sub_ts, subpath_in_suite = getTestSuite(file_execpath, litConfig,
+                                                    testSuiteCache)
         elif dirContainsTestSuite(file_sourcepath, litConfig):
-            sub_ts, subiter = getTests(file_sourcepath, litConfig,
-                                       testSuiteCache, localConfigCache)
+            sub_ts, subpath_in_suite = getTestSuite(file_sourcepath, litConfig,
+                                                    testSuiteCache)
         else:
-            # Otherwise, continue loading from inside this test suite.
-            subiter = getTestsInSuite(ts, path_in_suite + (filename,),
-                                      litConfig, testSuiteCache,
-                                      localConfigCache)
             sub_ts = None
+
+        # If the this directory recursively maps back to the current test suite,
+        # disregard it (this can happen if the exec root is located inside the
+        # current test suite, for example).
+        if sub_ts is ts:
+            continue
+
+        # Otherwise, load from the nested test suite, if present.
+        if sub_ts is not None:
+            subiter = getTestsInSuite(sub_ts, subpath_in_suite, litConfig,
+                                      testSuiteCache, localConfigCache)
+        else:
+            subiter = getTestsInSuite(ts, subpath, litConfig, testSuiteCache,
+                                      localConfigCache)
 
         N = 0
         for res in subiter:
@@ -204,7 +223,7 @@ def find_tests_for_inputs(lit_config, inputs):
 
     # If there were any errors during test discovery, exit now.
     if lit_config.numErrors:
-        print >>sys.stderr, '%d errors, exiting.' % lit_config.numErrors
+        sys.stderr.write('%d errors, exiting.\n' % lit_config.numErrors)
         sys.exit(2)
 
     return tests
@@ -222,7 +241,6 @@ def load_test_suite(inputs):
                                     valgrindLeakCheck = False,
                                     valgrindArgs = [],
                                     noExecute = False,
-                                    ignoreStdErr = False,
                                     debug = False,
                                     isWindows = (platform.system()=='Windows'),
                                     params = {})
@@ -231,4 +249,3 @@ def load_test_suite(inputs):
 
     # Return a unittest test suite which just runs the tests in order.
     return unittest.TestSuite([LitTestCase(test, litConfig) for test in tests])
-

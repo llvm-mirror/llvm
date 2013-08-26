@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/CodeGen/LiveRegMatrix.h"
 #include "llvm/CodeGen/LiveStackAnalysis.h"
+#include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
@@ -63,7 +64,7 @@ class RABasic : public MachineFunctionPass, public RegAllocBase
   MachineFunction *MF;
 
   // state
-  std::auto_ptr<Spiller> SpillerInstance;
+  OwningPtr<Spiller> SpillerInstance;
   std::priority_queue<LiveInterval*, std::vector<LiveInterval*>,
                       CompSpillWeight> Queue;
 
@@ -145,6 +146,8 @@ void RABasic::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<CalculateSpillWeights>();
   AU.addRequired<LiveStacks>();
   AU.addPreserved<LiveStacks>();
+  AU.addRequired<MachineBlockFrequencyInfo>();
+  AU.addPreserved<MachineBlockFrequencyInfo>();
   AU.addRequiredID(MachineDominatorsID);
   AU.addPreservedID(MachineDominatorsID);
   AU.addRequired<MachineLoopInfo>();

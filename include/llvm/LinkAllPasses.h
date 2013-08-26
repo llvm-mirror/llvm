@@ -62,6 +62,7 @@ namespace {
       (void) llvm::createCallGraphPrinterPass();
       (void) llvm::createCallGraphViewerPass();
       (void) llvm::createCFGSimplificationPass();
+      (void) llvm::createStructurizeCFGPass();
       (void) llvm::createConstantMergePass();
       (void) llvm::createConstantPropagationPass();
       (void) llvm::createCostModelAnalysisPass();
@@ -129,7 +130,6 @@ namespace {
       (void) llvm::createRegionViewerPass();
       (void) llvm::createSCCPPass();
       (void) llvm::createScalarReplAggregatesPass();
-      (void) llvm::createSimplifyLibCallsPass();
       (void) llvm::createSingleLoopExtractorPass();
       (void) llvm::createStripSymbolsPass();
       (void) llvm::createStripNonDebugSymbolsPass();
@@ -161,6 +161,7 @@ namespace {
       (void) llvm::createMemDepPrinter();
       (void) llvm::createInstructionSimplifierPass();
       (void) llvm::createLoopVectorizePass();
+      (void) llvm::createSLPVectorizerPass();
       (void) llvm::createBBVectorizePass();
 
       (void)new llvm::IntervalPartition();

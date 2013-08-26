@@ -114,6 +114,7 @@
 #include <cassert>
 #include <map>
 #include <set>
+#include <sstream>
 using namespace llvm;
 
 static cl::opt<std::string>
@@ -836,9 +837,11 @@ void MatchableInfo::tokenizeAsmString(const AsmMatcherInfo &Info) {
     }
 
     case '.':
-      if (InTok)
-        AsmOperands.push_back(AsmOperand(String.slice(Prev, i)));
-      Prev = i;
+      if (!Info.AsmParser->getValueAsBit("MnemonicContainsDot")) {
+        if (InTok)
+          AsmOperands.push_back(AsmOperand(String.slice(Prev, i)));
+        Prev = i;
+      }
       InTok = true;
       break;
 
@@ -1322,27 +1325,6 @@ void AsmMatcherInfo::buildInfo() {
       if (CGI.TheDef->getValueAsBit("isCodeGenOnly"))
         continue;
 
-      // Validate the operand list to ensure we can handle this instruction.
-      for (unsigned i = 0, e = CGI.Operands.size(); i != e; ++i) {
-        const CGIOperandList::OperandInfo &OI = CGI.Operands[i];
-
-        // Validate tied operands.
-        if (OI.getTiedRegister() != -1) {
-          // If we have a tied operand that consists of multiple MCOperands,
-          // reject it.  We reject aliases and ignore instructions for now.
-          if (OI.MINumOperands != 1) {
-            // FIXME: Should reject these.  The ARM backend hits this with $lane
-            // in a bunch of instructions. The right answer is unclear.
-            DEBUG({
-                errs() << "warning: '" << CGI.TheDef->getName() << "': "
-                     << "ignoring instruction with multi-operand tied operand '"
-                     << OI.Name << "'\n";
-              });
-            continue;
-          }
-        }
-      }
-
       OwningPtr<MatchableInfo> II(new MatchableInfo(CGI));
 
       II->initialize(*this, SingletonRegisters, AsmVariantNo, RegisterPrefix);
@@ -1529,7 +1511,9 @@ buildInstructionOperandReference(MatchableInfo *II,
   // we want to canonicalize to:
   //   "inc $dst"
   // so that we know how to provide the $dst operand when filling in the result.
-  int OITied = Operands[Idx].getTiedRegister();
+  int OITied = -1;
+  if (Operands[Idx].MINumOperands == 1)
+    OITied = Operands[Idx].getTiedRegister();
   if (OITied != -1) {
     // The tied operand index is an MIOperand index, find the operand that
     // contains it.
@@ -1578,7 +1562,9 @@ void MatchableInfo::buildInstructionResultOperands() {
     const CGIOperandList::OperandInfo &OpInfo = ResultInst->Operands[i];
 
     // If this is a tied operand, just copy from the previously handled operand.
-    int TiedOp = OpInfo.getTiedRegister();
+    int TiedOp = -1;
+    if (OpInfo.MINumOperands == 1)
+      TiedOp = OpInfo.getTiedRegister();
     if (TiedOp != -1) {
       ResOperands.push_back(ResOperand::getTiedOp(TiedOp));
       continue;
@@ -1586,10 +1572,15 @@ void MatchableInfo::buildInstructionResultOperands() {
 
     // Find out what operand from the asmparser this MCInst operand comes from.
     int SrcOperand = findAsmOperandNamed(OpInfo.Name);
-    if (OpInfo.Name.empty() || SrcOperand == -1)
-      PrintFatalError(TheDef->getLoc(), "Instruction '" +
-                    TheDef->getName() + "' has operand '" + OpInfo.Name +
-                    "' that doesn't appear in asm string!");
+    if (OpInfo.Name.empty() || SrcOperand == -1) {
+      // This may happen for operands that are tied to a suboperand of a
+      // complex operand.  Simply use a dummy value here; nobody should
+      // use this operand slot.
+      // FIXME: The long term goal is for the MCOperand list to not contain
+      // tied operands at all.
+      ResOperands.push_back(ResOperand::getImmOp(0));
+      continue;
+    }
 
     // Check if the one AsmOperand populates the entire operand.
     unsigned NumOperands = OpInfo.MINumOperands;
@@ -1620,7 +1611,9 @@ void MatchableInfo::buildAliasResultOperands() {
     const CGIOperandList::OperandInfo *OpInfo = &ResultInst->Operands[i];
 
     // If this is a tied operand, just copy from the previously handled operand.
-    int TiedOp = OpInfo->getTiedRegister();
+    int TiedOp = -1;
+    if (OpInfo->MINumOperands == 1)
+      TiedOp = OpInfo->getTiedRegister();
     if (TiedOp != -1) {
       ResOperands.push_back(ResOperand::getTiedOp(TiedOp));
       continue;
@@ -1843,13 +1836,12 @@ static void emitConvertFuncs(CodeGenTarget &Target, StringRef ClassName,
       case MatchableInfo::ResOperand::TiedOperand: {
         // If this operand is tied to a previous one, just copy the MCInst
         // operand from the earlier one.We can only tie single MCOperand values.
-        //assert(OpInfo.MINumOperands == 1 && "Not a singular MCOperand");
+        assert(OpInfo.MINumOperands == 1 && "Not a singular MCOperand");
         unsigned TiedOp = OpInfo.TiedOperandNum;
         assert(i > TiedOp && "Tied operand precedes its target!");
         Signature += "__Tie" + utostr(TiedOp);
         ConversionRow.push_back(CVT_Tied);
         ConversionRow.push_back(TiedOp);
-        // FIXME: Handle the operand number lookup for tied operands.
         break;
       }
       case MatchableInfo::ResOperand::ImmOperand: {
@@ -2077,9 +2069,12 @@ static void emitIsSubclass(CodeGenTarget &Target,
   OS << "  if (A == B)\n";
   OS << "    return true;\n\n";
 
-  OS << "  switch (A) {\n";
-  OS << "  default:\n";
-  OS << "    return false;\n";
+  std::string OStr;
+  raw_string_ostream SS(OStr);
+  unsigned Count = 0;
+  SS << "  switch (A) {\n";
+  SS << "  default:\n";
+  SS << "    return false;\n";
   for (std::vector<ClassInfo*>::iterator it = Infos.begin(),
          ie = Infos.end(); it != ie; ++it) {
     ClassInfo &A = **it;
@@ -2095,21 +2090,35 @@ static void emitIsSubclass(CodeGenTarget &Target,
 
     if (SuperClasses.empty())
       continue;
+    ++Count;
 
-    OS << "\n  case " << A.Name << ":\n";
+    SS << "\n  case " << A.Name << ":\n";
 
     if (SuperClasses.size() == 1) {
-      OS << "    return B == " << SuperClasses.back() << ";\n";
+      SS << "    return B == " << SuperClasses.back().str() << ";\n";
       continue;
     }
 
-    OS << "    switch (B) {\n";
-    OS << "    default: return false;\n";
-    for (unsigned i = 0, e = SuperClasses.size(); i != e; ++i)
-      OS << "    case " << SuperClasses[i] << ": return true;\n";
-    OS << "    }\n";
+    if (!SuperClasses.empty()) {
+      SS << "    switch (B) {\n";
+      SS << "    default: return false;\n";
+      for (unsigned i = 0, e = SuperClasses.size(); i != e; ++i)
+        SS << "    case " << SuperClasses[i].str() << ": return true;\n";
+      SS << "    }\n";
+    } else {
+      // No case statement to emit
+      SS << "    return false;\n";
+    }
   }
-  OS << "  }\n";
+  SS << "  }\n";
+
+  // If there were case statements emitted into the string stream, write them
+  // to the output stream, otherwise write the default.
+  if (Count)
+    OS << SS.str();
+  else
+    OS << "  return false;\n";
+
   OS << "}\n\n";
 }
 
@@ -2205,18 +2214,24 @@ static void emitOperandDiagnosticTypes(AsmMatcherInfo &Info, raw_ostream &OS) {
 static void emitGetSubtargetFeatureName(AsmMatcherInfo &Info, raw_ostream &OS) {
   OS << "// User-level names for subtarget features that participate in\n"
      << "// instruction matching.\n"
-     << "static const char *getSubtargetFeatureName(unsigned Val) {\n"
-     << "  switch(Val) {\n";
-  for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
-         it = Info.SubtargetFeatures.begin(),
-         ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
-    SubtargetFeatureInfo &SFI = *it->second;
-    // FIXME: Totally just a placeholder name to get the algorithm working.
-    OS << "  case " << SFI.getEnumName() << ": return \""
-       << SFI.TheDef->getValueAsString("PredicateName") << "\";\n";
+     << "static const char *getSubtargetFeatureName(unsigned Val) {\n";
+  if (!Info.SubtargetFeatures.empty()) {
+    OS << "  switch(Val) {\n";
+    for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
+           it = Info.SubtargetFeatures.begin(),
+           ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
+      SubtargetFeatureInfo &SFI = *it->second;
+      // FIXME: Totally just a placeholder name to get the algorithm working.
+      OS << "  case " << SFI.getEnumName() << ": return \""
+         << SFI.TheDef->getValueAsString("PredicateName") << "\";\n";
+    }
+    OS << "  default: return \"(unknown)\";\n";
+    OS << "  }\n";
+  } else {
+    // Nothing to emit, so skip the switch
+    OS << "  return \"(unknown)\";\n";
   }
-  OS << "  default: return \"(unknown)\";\n";
-  OS << "  }\n}\n\n";
+  OS << "}\n\n";
 }
 
 /// emitComputeAvailableFeatures - Emit the function to compute the list of
@@ -2296,28 +2311,24 @@ static std::string GetAliasRequiredFeatures(Record *R,
   return Result;
 }
 
-/// emitMnemonicAliases - If the target has any MnemonicAlias<> definitions,
-/// emit a function for them and return true, otherwise return false.
-static bool emitMnemonicAliases(raw_ostream &OS, const AsmMatcherInfo &Info) {
-  // Ignore aliases when match-prefix is set.
-  if (!MatchPrefix.empty())
-    return false;
-
-  std::vector<Record*> Aliases =
-    Info.getRecords().getAllDerivedDefinitions("MnemonicAlias");
-  if (Aliases.empty()) return false;
-
-  OS << "static void applyMnemonicAliases(StringRef &Mnemonic, "
-        "unsigned Features) {\n";
-
+static void emitMnemonicAliasVariant(raw_ostream &OS,const AsmMatcherInfo &Info,
+                                     std::vector<Record*> &Aliases,
+                                     unsigned Indent = 0,
+                                  StringRef AsmParserVariantName = StringRef()){
   // Keep track of all the aliases from a mnemonic.  Use an std::map so that the
   // iteration order of the map is stable.
   std::map<std::string, std::vector<Record*> > AliasesFromMnemonic;
 
   for (unsigned i = 0, e = Aliases.size(); i != e; ++i) {
     Record *R = Aliases[i];
+    // FIXME: Allow AssemblerVariantName to be a comma separated list.
+    std::string AsmVariantName = R->getValueAsString("AsmVariantName");
+    if (AsmVariantName != AsmParserVariantName)
+      continue;
     AliasesFromMnemonic[R->getValueAsString("FromMnemonic")].push_back(R);
   }
+  if (AliasesFromMnemonic.empty())
+    return;
 
   // Process each alias a "from" mnemonic at a time, building the code executed
   // by the string remapper.
@@ -2370,8 +2381,39 @@ static bool emitMnemonicAliases(raw_ostream &OS, const AsmMatcherInfo &Info) {
 
     Cases.push_back(std::make_pair(I->first, MatchCode));
   }
+  StringMatcher("Mnemonic", Cases, OS).Emit(Indent);
+}
 
-  StringMatcher("Mnemonic", Cases, OS).Emit();
+/// emitMnemonicAliases - If the target has any MnemonicAlias<> definitions,
+/// emit a function for them and return true, otherwise return false.
+static bool emitMnemonicAliases(raw_ostream &OS, const AsmMatcherInfo &Info,
+                                CodeGenTarget &Target) {
+  // Ignore aliases when match-prefix is set.
+  if (!MatchPrefix.empty())
+    return false;
+
+  std::vector<Record*> Aliases =
+    Info.getRecords().getAllDerivedDefinitions("MnemonicAlias");
+  if (Aliases.empty()) return false;
+
+  OS << "static void applyMnemonicAliases(StringRef &Mnemonic, "
+    "unsigned Features, unsigned VariantID) {\n";
+  OS << "  switch (VariantID) {\n";
+  unsigned VariantCount = Target.getAsmParserVariantCount();
+  for (unsigned VC = 0; VC != VariantCount; ++VC) {
+    Record *AsmVariant = Target.getAsmParserVariant(VC);
+    int AsmParserVariantNo = AsmVariant->getValueAsInt("Variant");
+    std::string AsmParserVariantName = AsmVariant->getValueAsString("Name");
+    OS << "    case " << AsmParserVariantNo << ":\n";
+    emitMnemonicAliasVariant(OS, Info, Aliases, /*Indent=*/2,
+                             AsmParserVariantName);
+    OS << "    break;\n";
+  }
+  OS << "  }\n";
+
+  // Emit aliases that apply to all variants.
+  emitMnemonicAliasVariant(OS, Info, Aliases);
+
   OS << "}\n\n";
 
   return true;
@@ -2616,7 +2658,7 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "&Operands);\n";
   OS << "  void convertToMapAndConstraints(unsigned Kind,\n                ";
   OS << "           const SmallVectorImpl<MCParsedAsmOperand*> &Operands);\n";
-  OS << "  bool mnemonicIsValid(StringRef Mnemonic);\n";
+  OS << "  bool mnemonicIsValid(StringRef Mnemonic, unsigned VariantID);\n";
   OS << "  unsigned MatchInstructionImpl(\n";
   OS.indent(27);
   OS << "const SmallVectorImpl<MCParsedAsmOperand*> &Operands,\n"
@@ -2674,7 +2716,7 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "#undef GET_MATCHER_IMPLEMENTATION\n\n";
 
   // Generate the function that remaps for mnemonic aliases.
-  bool HasMnemonicAliases = emitMnemonicAliases(OS, Info);
+  bool HasMnemonicAliases = emitMnemonicAliases(OS, Info, Target);
 
   // Generate the convertToMCInst function to convert operands into an MCInst.
   // Also, generate the convertToMapAndConstraints function for MS-style inline
@@ -2738,7 +2780,6 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
                << " RequiredFeatures;\n";
   OS << "    " << getMinimalTypeForRange(Info.Classes.size())
                << " Classes[" << MaxNumOperands << "];\n";
-  OS << "    uint8_t AsmVariantID;\n\n";
   OS << "    StringRef getMnemonic() const {\n";
   OS << "      return StringRef(MnemonicTable + Mnemonic + 1,\n";
   OS << "                       MnemonicTable[Mnemonic]);\n";
@@ -2760,51 +2801,73 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   OS << "} // end anonymous namespace.\n\n";
 
-  OS << "static const MatchEntry MatchTable["
-     << Info.Matchables.size() << "] = {\n";
+  unsigned VariantCount = Target.getAsmParserVariantCount();
+  for (unsigned VC = 0; VC != VariantCount; ++VC) {
+    Record *AsmVariant = Target.getAsmParserVariant(VC);
+    std::string CommentDelimiter =
+      AsmVariant->getValueAsString("CommentDelimiter");
+    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
+    int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
 
-  for (std::vector<MatchableInfo*>::const_iterator it =
-       Info.Matchables.begin(), ie = Info.Matchables.end();
-       it != ie; ++it) {
-    MatchableInfo &II = **it;
+    OS << "static const MatchEntry MatchTable" << VC << "[] = {\n";
 
-    // Store a pascal-style length byte in the mnemonic.
-    std::string LenMnemonic = char(II.Mnemonic.size()) + II.Mnemonic.str();
-    OS << "  { " << StringTable.GetOrAddStringOffset(LenMnemonic, false)
-       << " /* " << II.Mnemonic << " */, "
-       << Target.getName() << "::"
-       << II.getResultInst()->TheDef->getName() << ", "
-       << II.ConversionFnKind << ", ";
+    for (std::vector<MatchableInfo*>::const_iterator it =
+         Info.Matchables.begin(), ie = Info.Matchables.end();
+         it != ie; ++it) {
+      MatchableInfo &II = **it;
+      if (II.AsmVariantID != AsmVariantNo)
+        continue;
 
-    // Write the required features mask.
-    if (!II.RequiredFeatures.empty()) {
-      for (unsigned i = 0, e = II.RequiredFeatures.size(); i != e; ++i) {
-        if (i) OS << "|";
-        OS << II.RequiredFeatures[i]->getEnumName();
+      // Store a pascal-style length byte in the mnemonic.
+      std::string LenMnemonic = char(II.Mnemonic.size()) + II.Mnemonic.str();
+      OS << "  { " << StringTable.GetOrAddStringOffset(LenMnemonic, false)
+         << " /* " << II.Mnemonic << " */, "
+         << Target.getName() << "::"
+         << II.getResultInst()->TheDef->getName() << ", "
+         << II.ConversionFnKind << ", ";
+
+      // Write the required features mask.
+      if (!II.RequiredFeatures.empty()) {
+        for (unsigned i = 0, e = II.RequiredFeatures.size(); i != e; ++i) {
+          if (i) OS << "|";
+          OS << II.RequiredFeatures[i]->getEnumName();
+        }
+      } else
+        OS << "0";
+
+      OS << ", { ";
+      for (unsigned i = 0, e = II.AsmOperands.size(); i != e; ++i) {
+        MatchableInfo::AsmOperand &Op = II.AsmOperands[i];
+
+        if (i) OS << ", ";
+        OS << Op.Class->Name;
       }
-    } else
-      OS << "0";
-
-    OS << ", { ";
-    for (unsigned i = 0, e = II.AsmOperands.size(); i != e; ++i) {
-      MatchableInfo::AsmOperand &Op = II.AsmOperands[i];
-
-      if (i) OS << ", ";
-      OS << Op.Class->Name;
+      OS << " }, },\n";
     }
-    OS << " }, " << II.AsmVariantID;
-    OS << "},\n";
-  }
 
-  OS << "};\n\n";
+    OS << "};\n\n";
+  }
 
   // A method to determine if a mnemonic is in the list.
   OS << "bool " << Target.getName() << ClassName << "::\n"
-     << "mnemonicIsValid(StringRef Mnemonic) {\n";
+     << "mnemonicIsValid(StringRef Mnemonic, unsigned VariantID) {\n";
+  OS << "  // Find the appropriate table for this asm variant.\n";
+  OS << "  const MatchEntry *Start, *End;\n";
+  OS << "  switch (VariantID) {\n";
+  OS << "  default: // unreachable\n";
+  for (unsigned VC = 0; VC != VariantCount; ++VC) {
+    Record *AsmVariant = Target.getAsmParserVariant(VC);
+    std::string CommentDelimiter =
+      AsmVariant->getValueAsString("CommentDelimiter");
+    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
+    int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
+    OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
+       << "; End = array_endof(MatchTable" << VC << "); break;\n";
+  }
+  OS << "  }\n";
   OS << "  // Search the table.\n";
   OS << "  std::pair<const MatchEntry*, const MatchEntry*> MnemonicRange =\n";
-  OS << "    std::equal_range(MatchTable, MatchTable+"
-     << Info.Matchables.size() << ", Mnemonic, LessOpcode());\n";
+  OS << "    std::equal_range(Start, End, Mnemonic, LessOpcode());\n";
   OS << "  return MnemonicRange.first != MnemonicRange.second;\n";
   OS << "}\n\n";
 
@@ -2832,9 +2895,7 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   if (HasMnemonicAliases) {
     OS << "  // Process all MnemonicAliases to remap the mnemonic.\n";
-    OS << "  // FIXME : Add an entry in AsmParserVariant to check this.\n";
-    OS << "  if (!VariantID)\n";
-    OS << "    applyMnemonicAliases(Mnemonic, AvailableFeatures);\n\n";
+    OS << "  applyMnemonicAliases(Mnemonic, AvailableFeatures, VariantID);\n\n";
   }
 
   // Emit code to compute the class list for this operand vector.
@@ -2848,10 +2909,23 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "  ErrorInfo = ~0U;\n";
 
   // Emit code to search the table.
+  OS << "  // Find the appropriate table for this asm variant.\n";
+  OS << "  const MatchEntry *Start, *End;\n";
+  OS << "  switch (VariantID) {\n";
+  OS << "  default: // unreachable\n";
+  for (unsigned VC = 0; VC != VariantCount; ++VC) {
+    Record *AsmVariant = Target.getAsmParserVariant(VC);
+    std::string CommentDelimiter =
+      AsmVariant->getValueAsString("CommentDelimiter");
+    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
+    int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
+    OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
+       << "; End = array_endof(MatchTable" << VC << "); break;\n";
+  }
+  OS << "  }\n";
   OS << "  // Search the table.\n";
   OS << "  std::pair<const MatchEntry*, const MatchEntry*> MnemonicRange =\n";
-  OS << "    std::equal_range(MatchTable, MatchTable+"
-     << Info.Matchables.size() << ", Mnemonic, LessOpcode());\n\n";
+  OS << "    std::equal_range(Start, End, Mnemonic, LessOpcode());\n\n";
 
   OS << "  // Return a more specific error code if no mnemonics match.\n";
   OS << "  if (MnemonicRange.first == MnemonicRange.second)\n";
@@ -2865,7 +2939,6 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "    assert(Mnemonic == it->getMnemonic());\n";
 
   // Emit check that the subclasses match.
-  OS << "    if (VariantID != it->AsmVariantID) continue;\n";
   OS << "    bool OperandsValid = true;\n";
   OS << "    for (unsigned i = 0; i != " << MaxNumOperands << "; ++i) {\n";
   OS << "      if (i + 1 >= Operands.size()) {\n";

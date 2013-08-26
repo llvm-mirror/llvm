@@ -29,9 +29,8 @@ class Type;
 class PPCRegisterInfo : public PPCGenRegisterInfo {
   DenseMap<unsigned, unsigned> ImmToIdxMap;
   const PPCSubtarget &Subtarget;
-  const TargetInstrInfo &TII;
 public:
-  PPCRegisterInfo(const PPCSubtarget &SubTarget, const TargetInstrInfo &tii);
+  PPCRegisterInfo(const PPCSubtarget &SubTarget);
   
   /// getPointerRegClass - Return the register class to use to hold pointers.
   /// This is used for addressing modes.
@@ -61,6 +60,10 @@ public:
     return true;
   }
 
+  virtual bool requiresVirtualBaseRegisters(const MachineFunction &MF) const {
+    return true;
+  }
+
   void lowerDynamicAlloc(MachineBasicBlock::iterator II) const;
   void lowerCRSpilling(MachineBasicBlock::iterator II,
                        unsigned FrameIndex) const;
@@ -77,8 +80,23 @@ public:
                            int SPAdj, unsigned FIOperandNum,
                            RegScavenger *RS = NULL) const;
 
+  // Support for virtual base registers.
+  bool needsFrameBaseReg(MachineInstr *MI, int64_t Offset) const;
+  void materializeFrameBaseRegister(MachineBasicBlock *MBB,
+                                    unsigned BaseReg, int FrameIdx,
+                                    int64_t Offset) const;
+  void resolveFrameIndex(MachineBasicBlock::iterator I,
+                         unsigned BaseReg, int64_t Offset) const;
+  bool isFrameOffsetLegal(const MachineInstr *MI, int64_t Offset) const;
+
   // Debug information queries.
   unsigned getFrameRegister(const MachineFunction &MF) const;
+
+  // Base pointer (stack realignment) support.
+  unsigned getBaseRegister(const MachineFunction &MF) const;
+  bool hasBasePointer(const MachineFunction &MF) const;
+  bool canRealignStack(const MachineFunction &MF) const;
+  bool needsStackRealignment(const MachineFunction &MF) const;
 
   // Exception handling queries.
   unsigned getEHExceptionRegister() const;

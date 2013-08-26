@@ -49,6 +49,7 @@ X86_32TargetMachine::X86_32TargetMachine(const Target &T, StringRef TT,
     TLInfo(*this),
     TSInfo(*this),
     JITInfo(*this) {
+  initAsmInfo();
 }
 
 void X86_64TargetMachine::anchor() { }
@@ -69,6 +70,7 @@ X86_64TargetMachine::X86_64TargetMachine(const Target &T, StringRef TT,
     TLInfo(*this),
     TSInfo(*this),
     JITInfo(*this) {
+  initAsmInfo();
 }
 
 /// X86TargetMachine ctor - Create an X86 target.
@@ -130,7 +132,7 @@ void X86TargetMachine::addAnalysisPasses(PassManagerBase &PM) {
   // Add first the target-independent BasicTTI pass, then our X86 pass. This
   // allows the X86 pass to delegate to the target independent layer when
   // appropriate.
-  PM.add(createBasicTargetTransformInfoPass(getTargetLowering()));
+  PM.add(createBasicTargetTransformInfoPass(this));
   PM.add(createX86TargetTransformInfoPass(this));
 }
 
@@ -213,6 +215,11 @@ bool X86PassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOpt::None &&
       getX86Subtarget().padShortFunctions()) {
     addPass(createX86PadShortFunctions());
+    ShouldPrint = true;
+  }
+  if (getOptLevel() != CodeGenOpt::None &&
+      getX86Subtarget().LEAusesAG()){
+    addPass(createX86FixupLEAs());
     ShouldPrint = true;
   }
 

@@ -18,11 +18,11 @@
 namespace llvm {
 
 class AMDGPUMachineFunction : public MachineFunctionInfo {
-private:
-  static const char *ShaderTypeAttribute;
 public:
   AMDGPUMachineFunction(const MachineFunction &MF);
   unsigned ShaderType;
+  /// Number of bytes in the LDS that are being used.
+  unsigned LDSSize;
 };
 
 }

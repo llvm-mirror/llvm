@@ -17,9 +17,8 @@ def SandyBridgeModel : SchedMachineModel {
   // instructions per cycle.
   // FIXME: Identify instructions that aren't a single fused micro-op.
   let IssueWidth = 4;
-  let MinLatency = 0; // 0 = Out-of-order execution.
+  let MicroOpBufferSize = 168; // Based on the reorder buffer.
   let LoadLatency = 4;
-  let ILPWindow = 30;
   let MispredictPenalty = 16;
 }
 
@@ -46,8 +45,13 @@ def SBPort05  : ProcResGroup<[SBPort0, SBPort5]>;
 def SBPort15  : ProcResGroup<[SBPort1, SBPort5]>;
 def SBPort015 : ProcResGroup<[SBPort0, SBPort1, SBPort5]>;
 
-// Integer division issued on port 0, but uses the non-pipelined divider.
-def SBDivider : ProcResource<1> { let Buffered = 0; }
+// 54 Entry Unified Scheduler
+def SBPortAny : ProcResGroup<[SBPort0, SBPort1, SBPort23, SBPort4, SBPort5]> {
+  let BufferSize=54;
+}
+
+// Integer division issued on port 0.
+def SBDivider : ProcResource<1>;
 
 // Loads are 4 cycles, so ReadAfterLd registers needn't be available until 4
 // cycles after the memory operand.
@@ -82,6 +86,7 @@ def : WriteRes<WriteZero,  []>;
 
 defm : SBWriteResPair<WriteALU,   SBPort015, 1>;
 defm : SBWriteResPair<WriteIMul,  SBPort1,   3>;
+def  : WriteRes<WriteIMulH, []> { let Latency = 3; }
 defm : SBWriteResPair<WriteShift, SBPort05,  1>;
 defm : SBWriteResPair<WriteJump,  SBPort5,   1>;
 

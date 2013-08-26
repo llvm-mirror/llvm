@@ -161,6 +161,89 @@ static void WriteStringRecord(unsigned Code, StringRef Str,
   Stream.EmitRecord(Code, Vals, AbbrevToUse);
 }
 
+static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
+  switch (Kind) {
+  case Attribute::Alignment:
+    return bitc::ATTR_KIND_ALIGNMENT;
+  case Attribute::AlwaysInline:
+    return bitc::ATTR_KIND_ALWAYS_INLINE;
+  case Attribute::Builtin:
+    return bitc::ATTR_KIND_BUILTIN;
+  case Attribute::ByVal:
+    return bitc::ATTR_KIND_BY_VAL;
+  case Attribute::Cold:
+    return bitc::ATTR_KIND_COLD;
+  case Attribute::InlineHint:
+    return bitc::ATTR_KIND_INLINE_HINT;
+  case Attribute::InReg:
+    return bitc::ATTR_KIND_IN_REG;
+  case Attribute::MinSize:
+    return bitc::ATTR_KIND_MIN_SIZE;
+  case Attribute::Naked:
+    return bitc::ATTR_KIND_NAKED;
+  case Attribute::Nest:
+    return bitc::ATTR_KIND_NEST;
+  case Attribute::NoAlias:
+    return bitc::ATTR_KIND_NO_ALIAS;
+  case Attribute::NoBuiltin:
+    return bitc::ATTR_KIND_NO_BUILTIN;
+  case Attribute::NoCapture:
+    return bitc::ATTR_KIND_NO_CAPTURE;
+  case Attribute::NoDuplicate:
+    return bitc::ATTR_KIND_NO_DUPLICATE;
+  case Attribute::NoImplicitFloat:
+    return bitc::ATTR_KIND_NO_IMPLICIT_FLOAT;
+  case Attribute::NoInline:
+    return bitc::ATTR_KIND_NO_INLINE;
+  case Attribute::NonLazyBind:
+    return bitc::ATTR_KIND_NON_LAZY_BIND;
+  case Attribute::NoRedZone:
+    return bitc::ATTR_KIND_NO_RED_ZONE;
+  case Attribute::NoReturn:
+    return bitc::ATTR_KIND_NO_RETURN;
+  case Attribute::NoUnwind:
+    return bitc::ATTR_KIND_NO_UNWIND;
+  case Attribute::OptimizeForSize:
+    return bitc::ATTR_KIND_OPTIMIZE_FOR_SIZE;
+  case Attribute::ReadNone:
+    return bitc::ATTR_KIND_READ_NONE;
+  case Attribute::ReadOnly:
+    return bitc::ATTR_KIND_READ_ONLY;
+  case Attribute::Returned:
+    return bitc::ATTR_KIND_RETURNED;
+  case Attribute::ReturnsTwice:
+    return bitc::ATTR_KIND_RETURNS_TWICE;
+  case Attribute::SExt:
+    return bitc::ATTR_KIND_S_EXT;
+  case Attribute::StackAlignment:
+    return bitc::ATTR_KIND_STACK_ALIGNMENT;
+  case Attribute::StackProtect:
+    return bitc::ATTR_KIND_STACK_PROTECT;
+  case Attribute::StackProtectReq:
+    return bitc::ATTR_KIND_STACK_PROTECT_REQ;
+  case Attribute::StackProtectStrong:
+    return bitc::ATTR_KIND_STACK_PROTECT_STRONG;
+  case Attribute::StructRet:
+    return bitc::ATTR_KIND_STRUCT_RET;
+  case Attribute::SanitizeAddress:
+    return bitc::ATTR_KIND_SANITIZE_ADDRESS;
+  case Attribute::SanitizeThread:
+    return bitc::ATTR_KIND_SANITIZE_THREAD;
+  case Attribute::SanitizeMemory:
+    return bitc::ATTR_KIND_SANITIZE_MEMORY;
+  case Attribute::UWTable:
+    return bitc::ATTR_KIND_UW_TABLE;
+  case Attribute::ZExt:
+    return bitc::ATTR_KIND_Z_EXT;
+  case Attribute::EndAttrKinds:
+    llvm_unreachable("Can not encode end-attribute kinds marker.");
+  case Attribute::None:
+    llvm_unreachable("Can not encode none-attribute.");
+  }
+
+  llvm_unreachable("Trying to encode unknown attribute");
+}
+
 static void WriteAttributeGroupTable(const ValueEnumerator &VE,
                                      BitstreamWriter &Stream) {
   const std::vector<AttributeSet> &AttrGrps = VE.getAttributeGroups();
@@ -182,10 +265,10 @@ static void WriteAttributeGroupTable(const ValueEnumerator &VE,
         Attribute Attr = *I;
         if (Attr.isEnumAttribute()) {
           Record.push_back(0);
-          Record.push_back(Attr.getKindAsEnum());
+          Record.push_back(getAttrKindEncoding(Attr.getKindAsEnum()));
         } else if (Attr.isAlignAttribute()) {
           Record.push_back(1);
-          Record.push_back(Attr.getKindAsEnum());
+          Record.push_back(getAttrKindEncoding(Attr.getKindAsEnum()));
           Record.push_back(Attr.getValueAsInt());
         } else {
           StringRef Kind = Attr.getKindAsString();
@@ -614,7 +697,7 @@ static uint64_t GetOptimizationFlags(const Value *V) {
 static void WriteMDNode(const MDNode *N,
                         const ValueEnumerator &VE,
                         BitstreamWriter &Stream,
-                        SmallVector<uint64_t, 64> &Record) {
+                        SmallVectorImpl<uint64_t> &Record) {
   for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i) {
     if (N->getOperand(i)) {
       Record.push_back(VE.getTypeID(N->getOperand(i)->getType()));
@@ -701,7 +784,7 @@ static void WriteFunctionLocalMetadata(const Function &F,
                                        BitstreamWriter &Stream) {
   bool StartedMetadataBlock = false;
   SmallVector<uint64_t, 64> Record;
-  const SmallVector<const MDNode *, 8> &Vals = VE.getFunctionLocalMDValues();
+  const SmallVectorImpl<const MDNode *> &Vals = VE.getFunctionLocalMDValues();
   for (unsigned i = 0, e = Vals.size(); i != e; ++i)
     if (const MDNode *N = Vals[i])
       if (N->isFunctionLocal() && N->getFunction() == &F) {
@@ -1078,7 +1161,7 @@ static void WriteModuleConstants(const ValueEnumerator &VE,
 /// instruction ID, then it is a forward reference, and it also includes the
 /// type ID.  The value ID that is written is encoded relative to the InstID.
 static bool PushValueAndType(const Value *V, unsigned InstID,
-                             SmallVector<unsigned, 64> &Vals,
+                             SmallVectorImpl<unsigned> &Vals,
                              ValueEnumerator &VE) {
   unsigned ValID = VE.getValueID(V);
   // Make encoding relative to the InstID.
@@ -1093,21 +1176,21 @@ static bool PushValueAndType(const Value *V, unsigned InstID,
 /// pushValue - Like PushValueAndType, but where the type of the value is
 /// omitted (perhaps it was already encoded in an earlier operand).
 static void pushValue(const Value *V, unsigned InstID,
-                      SmallVector<unsigned, 64> &Vals,
+                      SmallVectorImpl<unsigned> &Vals,
                       ValueEnumerator &VE) {
   unsigned ValID = VE.getValueID(V);
   Vals.push_back(InstID - ValID);
 }
 
 static void pushValue64(const Value *V, unsigned InstID,
-                        SmallVector<uint64_t, 128> &Vals,
+                        SmallVectorImpl<uint64_t> &Vals,
                         ValueEnumerator &VE) {
   uint64_t ValID = VE.getValueID(V);
   Vals.push_back(InstID - ValID);
 }
 
 static void pushValueSigned(const Value *V, unsigned InstID,
-                            SmallVector<uint64_t, 128> &Vals,
+                            SmallVectorImpl<uint64_t> &Vals,
                             ValueEnumerator &VE) {
   unsigned ValID = VE.getValueID(V);
   int64_t diff = ((int32_t)InstID - (int32_t)ValID);
@@ -1117,7 +1200,7 @@ static void pushValueSigned(const Value *V, unsigned InstID,
 /// WriteInstruction - Emit an instruction to the specified stream.
 static void WriteInstruction(const Instruction &I, unsigned InstID,
                              ValueEnumerator &VE, BitstreamWriter &Stream,
-                             SmallVector<unsigned, 64> &Vals) {
+                             SmallVectorImpl<unsigned> &Vals) {
   unsigned Code = 0;
   unsigned AbbrevToUse = 0;
   VE.setInstructionID(&I);

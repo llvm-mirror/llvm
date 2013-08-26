@@ -68,7 +68,6 @@ AC_REQUIRE([AC_HEADER_DIRENT])
 AC_REQUIRE([_LT_AC_CHECK_DLFCN])
 AC_REQUIRE([AC_LTDL_ENABLE_INSTALL])
 AC_REQUIRE([AC_LTDL_SHLIBEXT])
-AC_REQUIRE([AC_LTDL_SHLIBPATH])
 AC_REQUIRE([AC_LTDL_SYSSEARCHPATH])
 AC_REQUIRE([AC_LTDL_OBJDIR])
 AC_REQUIRE([AC_LTDL_DLPREOPEN])
@@ -78,15 +77,9 @@ AC_REQUIRE([AC_LTDL_DLSYM_USCORE])
 AC_REQUIRE([AC_LTDL_SYS_DLOPEN_DEPLIBS])
 AC_REQUIRE([AC_LTDL_FUNC_ARGZ])
 
-AC_CHECK_HEADERS([assert.h ctype.h errno.h malloc.h memory.h stdlib.h \
-		  stdio.h unistd.h])
-AC_CHECK_HEADERS([dl.h sys/dl.h dld.h mach-o/dyld.h])
-AC_CHECK_HEADERS([string.h strings.h], [break])
+AC_CHECK_HEADERS([errno.h malloc.h memory.h unistd.h])
+AC_CHECK_HEADERS([mach-o/dyld.h])
 
-AC_CHECK_FUNCS([strchr index], [break])
-AC_CHECK_FUNCS([strrchr rindex], [break])
-AC_CHECK_FUNCS([memcpy bcopy], [break])
-AC_CHECK_FUNCS([memmove strcmp])
 AC_CHECK_FUNCS([closedir opendir readdir])
 ])# AC_LIB_LTDL
 
@@ -205,20 +198,6 @@ if test -n "$libltdl_cv_shlibext"; then
     [Define to the extension used for shared libraries, say, ".so".])
 fi
 ])# AC_LTDL_SHLIBEXT
-
-
-# AC_LTDL_SHLIBPATH
-# -----------------
-AC_DEFUN([AC_LTDL_SHLIBPATH],
-[AC_REQUIRE([AC_LIBTOOL_SYS_DYNAMIC_LINKER])
-AC_CACHE_CHECK([which variable specifies run-time library path],
-  [libltdl_cv_shlibpath_var], [libltdl_cv_shlibpath_var="$shlibpath_var"])
-if test -n "$libltdl_cv_shlibpath_var"; then
-  AC_DEFINE_UNQUOTED([LTDL_SHLIBPATH_VAR], ["$libltdl_cv_shlibpath_var"],
-    [Define to the name of the environment variable that determines the dynamic library search path.])
-fi
-])# AC_LTDL_SHLIBPATH
-
 
 # AC_LTDL_SYSSEARCHPATH
 # ---------------------
@@ -400,19 +379,3 @@ if test x"$libltdl_cv_need_uscore" = xyes; then
     [Define if dlsym() requires a leading underscore in symbol names.])
 fi
 ])# AC_LTDL_DLSYM_USCORE
-
-# AC_LTDL_FUNC_ARGZ
-# -----------------
-AC_DEFUN([AC_LTDL_FUNC_ARGZ],
-[AC_CHECK_HEADERS([argz.h])
-
-AC_CHECK_TYPES([error_t],
-  [],
-  [AC_DEFINE([error_t], [int],
-    [Define to a type to use for `error_t' if it is not otherwise available.])],
-  [#if HAVE_ARGZ_H
-#  include <argz.h>
-#endif])
-
-AC_CHECK_FUNCS([argz_append argz_create_sep argz_insert argz_next argz_stringify])
-])# AC_LTDL_FUNC_ARGZ

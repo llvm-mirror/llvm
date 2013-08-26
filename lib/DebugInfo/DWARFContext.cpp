@@ -9,6 +9,9 @@
 
 #include "DWARFContext.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/Compression.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Path.h"
@@ -16,6 +19,7 @@
 #include <algorithm>
 using namespace llvm;
 using namespace dwarf;
+using namespace object;
 
 typedef DWARFDebugLine::LineTable DWARFLineTable;
 
@@ -29,6 +33,11 @@ void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType) {
     OS << "\n.debug_info contents:\n";
     for (unsigned i = 0, e = getNumCompileUnits(); i != e; ++i)
       getCompileUnitAtIndex(i)->dump(OS);
+  }
+
+  if (DumpType == DIDT_All || DumpType == DIDT_Loc) {
+    OS << ".debug_loc contents:\n";
+    getDebugLoc()->dump(OS);
   }
 
   if (DumpType == DIDT_All || DumpType == DIDT_Frames) {
@@ -107,36 +116,43 @@ void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType) {
   }
 
   if (DumpType == DIDT_All || DumpType == DIDT_AbbrevDwo) {
-    OS << "\n.debug_abbrev.dwo contents:\n";
-    getDebugAbbrevDWO()->dump(OS);
-  }
-
-  if (DumpType == DIDT_All || DumpType == DIDT_InfoDwo) {
-    OS << "\n.debug_info.dwo contents:\n";
-    for (unsigned i = 0, e = getNumDWOCompileUnits(); i != e; ++i)
-      getDWOCompileUnitAtIndex(i)->dump(OS);
-  }
-
-  if (DumpType == DIDT_All || DumpType == DIDT_StrDwo) {
-    OS << "\n.debug_str.dwo contents:\n";
-    DataExtractor strDWOData(getStringDWOSection(), isLittleEndian(), 0);
-    offset = 0;
-    uint32_t strDWOOffset = 0;
-    while (const char *s = strDWOData.getCStr(&offset)) {
-      OS << format("0x%8.8x: \"%s\"\n", strDWOOffset, s);
-      strDWOOffset = offset;
+    const DWARFDebugAbbrev *D = getDebugAbbrevDWO();
+    if (D) {
+      OS << "\n.debug_abbrev.dwo contents:\n";
+      getDebugAbbrevDWO()->dump(OS);
     }
   }
 
-  if (DumpType == DIDT_All || DumpType == DIDT_StrOffsetsDwo) {
-    OS << "\n.debug_str_offsets.dwo contents:\n";
-    DataExtractor strOffsetExt(getStringOffsetDWOSection(), isLittleEndian(), 0);
-    offset = 0;
-    while (offset < getStringOffsetDWOSection().size()) {
-      OS << format("0x%8.8x: ", offset);
-      OS << format("%8.8x\n", strOffsetExt.getU32(&offset));
+  if (DumpType == DIDT_All || DumpType == DIDT_InfoDwo)
+    if (getNumDWOCompileUnits()) {
+      OS << "\n.debug_info.dwo contents:\n";
+      for (unsigned i = 0, e = getNumDWOCompileUnits(); i != e; ++i)
+        getDWOCompileUnitAtIndex(i)->dump(OS);
     }
-  }
+
+  if (DumpType == DIDT_All || DumpType == DIDT_StrDwo)
+    if (!getStringDWOSection().empty()) {
+      OS << "\n.debug_str.dwo contents:\n";
+      DataExtractor strDWOData(getStringDWOSection(), isLittleEndian(), 0);
+      offset = 0;
+      uint32_t strDWOOffset = 0;
+      while (const char *s = strDWOData.getCStr(&offset)) {
+        OS << format("0x%8.8x: \"%s\"\n", strDWOOffset, s);
+        strDWOOffset = offset;
+      }
+    }
+
+  if (DumpType == DIDT_All || DumpType == DIDT_StrOffsetsDwo)
+    if (!getStringOffsetDWOSection().empty()) {
+      OS << "\n.debug_str_offsets.dwo contents:\n";
+      DataExtractor strOffsetExt(getStringOffsetDWOSection(), isLittleEndian(), 0);
+      offset = 0;
+      uint64_t size = getStringOffsetDWOSection().size();
+      while (offset < size) {
+        OS << format("0x%8.8x: ", offset);
+        OS << format("%8.8x\n", strOffsetExt.getU32(&offset));
+      }
+    }
 }
 
 const DWARFDebugAbbrev *DWARFContext::getDebugAbbrev() {
@@ -158,6 +174,18 @@ const DWARFDebugAbbrev *DWARFContext::getDebugAbbrevDWO() {
   AbbrevDWO.reset(new DWARFDebugAbbrev());
   AbbrevDWO->parse(abbrData);
   return AbbrevDWO.get();
+}
+
+const DWARFDebugLoc *DWARFContext::getDebugLoc() {
+  if (Loc)
+    return Loc.get();
+
+  DataExtractor LocData(getLocSection(), isLittleEndian(), 0);
+  Loc.reset(new DWARFDebugLoc(locRelocMap()));
+  // assume all compile units have the same address byte size
+  if (getNumCompileUnits())
+    Loc->parse(LocData, getCompileUnitAtIndex(0)->getAddressByteSize());
+  return Loc.get();
 }
 
 const DWARFDebugAranges *DWARFContext::getDebugAranges() {
@@ -348,11 +376,11 @@ DILineInfo DWARFContext::getLineInfoForAddress(uint64_t Address,
     // The address may correspond to instruction in some inlined function,
     // so we have to build the chain of inlined functions and take the
     // name of the topmost function in it.
-    const DWARFDebugInfoEntryMinimal::InlinedChain &InlinedChain =
+    const DWARFDebugInfoEntryInlinedChain &InlinedChain =
         CU->getInlinedChainForAddress(Address);
-    if (InlinedChain.size() > 0) {
-      const DWARFDebugInfoEntryMinimal &TopFunctionDIE = InlinedChain[0];
-      if (const char *Name = TopFunctionDIE.getSubroutineName(CU))
+    if (InlinedChain.DIEs.size() > 0) {
+      const DWARFDebugInfoEntryMinimal &TopFunctionDIE = InlinedChain.DIEs[0];
+      if (const char *Name = TopFunctionDIE.getSubroutineName(InlinedChain.CU))
         FunctionName = Name;
     }
   }
@@ -381,11 +409,11 @@ DILineInfoTable DWARFContext::getLineInfoForAddressRange(uint64_t Address,
     // The address may correspond to instruction in some inlined function,
     // so we have to build the chain of inlined functions and take the
     // name of the topmost function in it.
-    const DWARFDebugInfoEntryMinimal::InlinedChain &InlinedChain =
+    const DWARFDebugInfoEntryInlinedChain &InlinedChain =
         CU->getInlinedChainForAddress(Address);
-    if (InlinedChain.size() > 0) {
-      const DWARFDebugInfoEntryMinimal &TopFunctionDIE = InlinedChain[0];
-      if (const char *Name = TopFunctionDIE.getSubroutineName(CU))
+    if (InlinedChain.DIEs.size() > 0) {
+      const DWARFDebugInfoEntryMinimal &TopFunctionDIE = InlinedChain.DIEs[0];
+      if (const char *Name = TopFunctionDIE.getSubroutineName(InlinedChain.CU))
         FunctionName = Name;
     }
   }
@@ -395,8 +423,8 @@ DILineInfoTable DWARFContext::getLineInfoForAddressRange(uint64_t Address,
   // If the Specifier says we don't need FileLineInfo, just
   // return the top-most function at the starting address.
   if (!Specifier.needs(DILineInfoSpecifier::FileLineInfo)) {
-    Lines.push_back(std::make_pair(Address, 
-                                   DILineInfo(StringRef("<invalid>"), 
+    Lines.push_back(std::make_pair(Address,
+                                   DILineInfo(StringRef("<invalid>"),
                                               FuncNameRef, 0, 0)));
     return Lines;
   }
@@ -418,7 +446,7 @@ DILineInfoTable DWARFContext::getLineInfoForAddressRange(uint64_t Address,
     std::string FileName = "<invalid>";
     getFileNameForCompileUnit(CU, LineTable, Row.File,
                               NeedsAbsoluteFilePath, FileName);
-    Lines.push_back(std::make_pair(Row.Address, 
+    Lines.push_back(std::make_pair(Row.Address,
                                    DILineInfo(StringRef(FileName),
                                          FuncNameRef, Row.Line, Row.Column)));
   }
@@ -432,23 +460,23 @@ DIInliningInfo DWARFContext::getInliningInfoForAddress(uint64_t Address,
   if (!CU)
     return DIInliningInfo();
 
-  const DWARFDebugInfoEntryMinimal::InlinedChain &InlinedChain =
+  const DWARFDebugInfoEntryInlinedChain &InlinedChain =
       CU->getInlinedChainForAddress(Address);
-  if (InlinedChain.size() == 0)
+  if (InlinedChain.DIEs.size() == 0)
     return DIInliningInfo();
 
   DIInliningInfo InliningInfo;
   uint32_t CallFile = 0, CallLine = 0, CallColumn = 0;
   const DWARFLineTable *LineTable = 0;
-  for (uint32_t i = 0, n = InlinedChain.size(); i != n; i++) {
-    const DWARFDebugInfoEntryMinimal &FunctionDIE = InlinedChain[i];
+  for (uint32_t i = 0, n = InlinedChain.DIEs.size(); i != n; i++) {
+    const DWARFDebugInfoEntryMinimal &FunctionDIE = InlinedChain.DIEs[i];
     std::string FileName = "<invalid>";
     std::string FunctionName = "<invalid>";
     uint32_t Line = 0;
     uint32_t Column = 0;
     // Get function name if necessary.
     if (Specifier.needs(DILineInfoSpecifier::FunctionName)) {
-      if (const char *Name = FunctionDIE.getSubroutineName(CU))
+      if (const char *Name = FunctionDIE.getSubroutineName(InlinedChain.CU))
         FunctionName = Name;
     }
     if (Specifier.needs(DILineInfoSpecifier::FileLineInfo)) {
@@ -472,7 +500,8 @@ DIInliningInfo DWARFContext::getInliningInfoForAddress(uint64_t Address,
       }
       // Get call file/line/column of a current DIE.
       if (i + 1 < n) {
-        FunctionDIE.getCallerFrame(CU, CallFile, CallLine, CallColumn);
+        FunctionDIE.getCallerFrame(InlinedChain.CU, CallFile, CallLine,
+                                   CallColumn);
       }
     }
     DILineInfo Frame(StringRef(FileName), StringRef(FunctionName),
@@ -480,6 +509,22 @@ DIInliningInfo DWARFContext::getInliningInfoForAddress(uint64_t Address,
     InliningInfo.addFrame(Frame);
   }
   return InliningInfo;
+}
+
+static bool consumeCompressedDebugSectionHeader(StringRef &data,
+                                                uint64_t &OriginalSize) {
+  // Consume "ZLIB" prefix.
+  if (!data.startswith("ZLIB"))
+    return false;
+  data = data.substr(4);
+  // Consume uncompressed section size (big-endian 8 bytes).
+  DataExtractor extractor(data, false, 8);
+  uint32_t Offset = 0;
+  OriginalSize = extractor.getU64(&Offset);
+  if (Offset == 0)
+    return false;
+  data = data.substr(Offset);
+  return true;
 }
 
 DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile *Obj) :
@@ -495,67 +540,83 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile *Obj) :
     i->getContents(data);
 
     name = name.substr(name.find_first_not_of("._")); // Skip . and _ prefixes.
-    if (name == "debug_info")
-      InfoSection = data;
-    else if (name == "debug_abbrev")
-      AbbrevSection = data;
-    else if (name == "debug_line")
-      LineSection = data;
-    else if (name == "debug_aranges")
-      ARangeSection = data;
-    else if (name == "debug_frame")
-      DebugFrameSection = data;
-    else if (name == "debug_str")
-      StringSection = data;
-    else if (name == "debug_ranges") {
-      // FIXME: Use the other dwo range section when we emit it.
-      RangeDWOSection = data;
-      RangeSection = data;
+
+    // Check if debug info section is compressed with zlib.
+    if (name.startswith("zdebug_")) {
+      uint64_t OriginalSize;
+      if (!zlib::isAvailable() ||
+          !consumeCompressedDebugSectionHeader(data, OriginalSize))
+        continue;
+      OwningPtr<MemoryBuffer> UncompressedSection;
+      if (zlib::uncompress(data, UncompressedSection, OriginalSize) !=
+          zlib::StatusOK)
+        continue;
+      // Make data point to uncompressed section contents and save its contents.
+      name = name.substr(1);
+      data = UncompressedSection->getBuffer();
+      UncompressedSections.push_back(UncompressedSection.take());
     }
-    else if (name == "debug_pubnames")
-      PubNamesSection = data;
-    else if (name == "debug_info.dwo")
-      InfoDWOSection = data;
-    else if (name == "debug_abbrev.dwo")
-      AbbrevDWOSection = data;
-    else if (name == "debug_str.dwo")
-      StringDWOSection = data;
-    else if (name == "debug_str_offsets.dwo")
-      StringOffsetDWOSection = data;
-    else if (name == "debug_addr")
-      AddrSection = data;
-    // Any more debug info sections go here.
-    else
+
+    StringRef *Section = StringSwitch<StringRef*>(name)
+        .Case("debug_info", &InfoSection)
+        .Case("debug_abbrev", &AbbrevSection)
+        .Case("debug_loc", &LocSection)
+        .Case("debug_line", &LineSection)
+        .Case("debug_aranges", &ARangeSection)
+        .Case("debug_frame", &DebugFrameSection)
+        .Case("debug_str", &StringSection)
+        .Case("debug_ranges", &RangeSection)
+        .Case("debug_pubnames", &PubNamesSection)
+        .Case("debug_info.dwo", &InfoDWOSection)
+        .Case("debug_abbrev.dwo", &AbbrevDWOSection)
+        .Case("debug_str.dwo", &StringDWOSection)
+        .Case("debug_str_offsets.dwo", &StringOffsetDWOSection)
+        .Case("debug_addr", &AddrSection)
+        // Any more debug info sections go here.
+        .Default(0);
+    if (Section) {
+      *Section = data;
+      if (name == "debug_ranges") {
+        // FIXME: Use the other dwo range section when we emit it.
+        RangeDWOSection = data;
+      }
+    }
+
+    section_iterator RelocatedSection = i->getRelocatedSection();
+    if (RelocatedSection == Obj->end_sections())
       continue;
+
+    StringRef RelSecName;
+    RelocatedSection->getName(RelSecName);
+    RelSecName = RelSecName.substr(
+        RelSecName.find_first_not_of("._")); // Skip . and _ prefixes.
 
     // TODO: Add support for relocations in other sections as needed.
     // Record relocations for the debug_info and debug_line sections.
-    RelocAddrMap *Map;
-    if (name == "debug_info")
-      Map = &InfoRelocMap;
-    else if (name == "debug_info.dwo")
-      Map = &InfoDWORelocMap;
-    else if (name == "debug_line")
-      Map = &LineRelocMap;
-    else
+    RelocAddrMap *Map = StringSwitch<RelocAddrMap*>(RelSecName)
+        .Case("debug_info", &InfoRelocMap)
+        .Case("debug_loc", &LocRelocMap)
+        .Case("debug_info.dwo", &InfoDWORelocMap)
+        .Case("debug_line", &LineRelocMap)
+        .Default(0);
+    if (!Map)
       continue;
 
     if (i->begin_relocations() != i->end_relocations()) {
       uint64_t SectionSize;
-      i->getSize(SectionSize);
+      RelocatedSection->getSize(SectionSize);
       for (object::relocation_iterator reloc_i = i->begin_relocations(),
              reloc_e = i->end_relocations();
            reloc_i != reloc_e; reloc_i.increment(ec)) {
         uint64_t Address;
-        reloc_i->getAddress(Address);
+        reloc_i->getOffset(Address);
         uint64_t Type;
         reloc_i->getType(Type);
         uint64_t SymAddr = 0;
         // ELF relocations may need the symbol address
         if (Obj->isELF()) {
-          object::SymbolRef Sym;
-          reloc_i->getSymbol(Sym);
-          Sym.getAddress(SymAddr);
+          object::symbol_iterator Sym = reloc_i->getSymbol();
+          Sym->getAddress(SymAddr);
         }
 
         object::RelocVisitor V(Obj->getFileFormatName());
@@ -591,6 +652,10 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile *Obj) :
       }
     }
   }
+}
+
+DWARFContextInMemory::~DWARFContextInMemory() {
+  DeleteContainerPointers(UncompressedSections);
 }
 
 void DWARFContextInMemory::anchor() { }

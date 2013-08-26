@@ -65,8 +65,7 @@ class MipsCodeEmitter : public MachineFunctionPass {
 
 public:
   MipsCodeEmitter(TargetMachine &tm, JITCodeEmitter &mce)
-    : MachineFunctionPass(ID), JTI(0),
-      II((const MipsInstrInfo *) tm.getInstrInfo()), TD(tm.getDataLayout()),
+    : MachineFunctionPass(ID), JTI(0), II(0), TD(0),
       TM(tm), MCE(mce), MCPEs(0), MJTEs(0),
       IsPIC(TM.getRelocationModel() == Reloc::PIC_) {}
 
@@ -109,11 +108,16 @@ private:
 
   unsigned getBranchTargetOpValue(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncoding(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getMemEncodingMMImm12(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getSizeExtEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getSizeInsEncoding(const MachineInstr &MI, unsigned OpNo) const;
 
   void emitGlobalAddressUnaligned(const GlobalValue *GV, unsigned Reloc,
                                   int Offset) const;
+
+  /// Expand pseudo instructions with accumulator register operands.
+  void expandACCInstr(MachineBasicBlock::instr_iterator MI,
+                      MachineBasicBlock &MBB, unsigned Opc) const;
 
   /// \brief Expand pseudo instruction. Return true if MI was expanded.
   bool expandPseudos(MachineBasicBlock::instr_iterator &MI,
@@ -196,6 +200,12 @@ unsigned MipsCodeEmitter::getMemEncoding(const MachineInstr &MI,
   assert(MI.getOperand(OpNo).isReg());
   unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo)) << 16;
   return (getMachineOpValue(MI, MI.getOperand(OpNo+1)) & 0xFFFF) | RegBits;
+}
+
+unsigned MipsCodeEmitter::getMemEncodingMMImm12(const MachineInstr &MI,
+                                                unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
 }
 
 unsigned MipsCodeEmitter::getSizeExtEncoding(const MachineInstr &MI,
@@ -298,6 +308,14 @@ void MipsCodeEmitter::emitWord(unsigned Word) {
     MCE.emitWordBE(Word);
 }
 
+void MipsCodeEmitter::expandACCInstr(MachineBasicBlock::instr_iterator MI,
+                                     MachineBasicBlock &MBB,
+                                     unsigned Opc) const {
+  // Expand "pseudomult $ac0, $t0, $t1" to "mult $t0, $t1".
+  BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Opc))
+    .addReg(MI->getOperand(1).getReg()).addReg(MI->getOperand(2).getReg());
+}
+
 bool MipsCodeEmitter::expandPseudos(MachineBasicBlock::instr_iterator &MI,
                                     MachineBasicBlock &MBB) const {
   switch (MI->getOpcode()) {
@@ -308,6 +326,30 @@ bool MipsCodeEmitter::expandPseudos(MachineBasicBlock::instr_iterator &MI,
   case Mips::JALRPseudo:
     BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::JALR), Mips::RA)
       .addReg(MI->getOperand(0).getReg());
+    break;
+  case Mips::PseudoMULT:
+    expandACCInstr(MI, MBB, Mips::MULT);
+    break;
+  case Mips::PseudoMULTu:
+    expandACCInstr(MI, MBB, Mips::MULTu);
+    break;
+  case Mips::PseudoSDIV:
+    expandACCInstr(MI, MBB, Mips::SDIV);
+    break;
+  case Mips::PseudoUDIV:
+    expandACCInstr(MI, MBB, Mips::UDIV);
+    break;
+  case Mips::PseudoMADD:
+    expandACCInstr(MI, MBB, Mips::MADD);
+    break;
+  case Mips::PseudoMADDU:
+    expandACCInstr(MI, MBB, Mips::MADDU);
+    break;
+  case Mips::PseudoMSUB:
+    expandACCInstr(MI, MBB, Mips::MSUB);
+    break;
+  case Mips::PseudoMSUBU:
+    expandACCInstr(MI, MBB, Mips::MSUBU);
     break;
   default:
     return false;

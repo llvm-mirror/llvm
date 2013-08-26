@@ -10,7 +10,6 @@ add_public_tablegen_target(SparcCommonTableGen)
 
 add_llvm_target(SparcCodeGen
   DelaySlotFiller.cpp
-  FPMover.cpp
   SparcAsmPrinter.cpp
   SparcInstrInfo.cpp
   SparcISelDAGToDAG.cpp
@@ -23,7 +22,7 @@ add_llvm_target(SparcCodeGen
   SparcSelectionDAGInfo.cpp
   )
 
-add_dependencies(LLVMSparcCodeGen intrinsics_gen)
+add_dependencies(LLVMSparcCodeGen SparcCommonTableGen intrinsics_gen)
 
 add_subdirectory(TargetInfo)
 add_subdirectory(MCTargetDesc)

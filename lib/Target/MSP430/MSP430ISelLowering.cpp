@@ -169,6 +169,7 @@ MSP430TargetLowering::MSP430TargetLowering(MSP430TargetMachine &tm) :
   setOperationAction(ISD::VAARG,            MVT::Other, Expand);
   setOperationAction(ISD::VAEND,            MVT::Other, Expand);
   setOperationAction(ISD::VACOPY,           MVT::Other, Expand);
+  setOperationAction(ISD::JumpTable,        MVT::i16,   Custom);
 
   // Libcalls names.
   if (HWMultMode == HWMultIntr) {
@@ -199,6 +200,7 @@ SDValue MSP430TargetLowering::LowerOperation(SDValue Op,
   case ISD::RETURNADDR:       return LowerRETURNADDR(Op, DAG);
   case ISD::FRAMEADDR:        return LowerFRAMEADDR(Op, DAG);
   case ISD::VASTART:          return LowerVASTART(Op, DAG);
+  case ISD::JumpTable:        return LowerJumpTable(Op, DAG);
   default:
     llvm_unreachable("unimplemented operand");
   }
@@ -226,7 +228,7 @@ MSP430TargetLowering::getConstraintType(const std::string &Constraint) const {
 std::pair<unsigned, const TargetRegisterClass*>
 MSP430TargetLowering::
 getRegForInlineAsmConstraint(const std::string &Constraint,
-                             EVT VT) const {
+                             MVT VT) const {
   if (Constraint.size() == 1) {
     // GCC Constraint Letters
     switch (Constraint[0]) {
@@ -254,7 +256,7 @@ MSP430TargetLowering::LowerFormalArguments(SDValue Chain,
                                            bool isVarArg,
                                            const SmallVectorImpl<ISD::InputArg>
                                              &Ins,
-                                           DebugLoc dl,
+                                           SDLoc dl,
                                            SelectionDAG &DAG,
                                            SmallVectorImpl<SDValue> &InVals)
                                              const {
@@ -276,10 +278,10 @@ SDValue
 MSP430TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                 SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG                     = CLI.DAG;
-  DebugLoc &dl                          = CLI.DL;
-  SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
-  SmallVector<SDValue, 32> &OutVals     = CLI.OutVals;
-  SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
+  SDLoc &dl                             = CLI.DL;
+  SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  SmallVectorImpl<SDValue> &OutVals     = CLI.OutVals;
+  SmallVectorImpl<ISD::InputArg> &Ins   = CLI.Ins;
   SDValue Chain                         = CLI.Chain;
   SDValue Callee                        = CLI.Callee;
   bool &isTailCall                      = CLI.IsTailCall;
@@ -310,7 +312,7 @@ MSP430TargetLowering::LowerCCCArguments(SDValue Chain,
                                         bool isVarArg,
                                         const SmallVectorImpl<ISD::InputArg>
                                           &Ins,
-                                        DebugLoc dl,
+                                        SDLoc dl,
                                         SelectionDAG &DAG,
                                         SmallVectorImpl<SDValue> &InVals)
                                           const {
@@ -407,7 +409,7 @@ MSP430TargetLowering::LowerReturn(SDValue Chain,
                                   CallingConv::ID CallConv, bool isVarArg,
                                   const SmallVectorImpl<ISD::OutputArg> &Outs,
                                   const SmallVectorImpl<SDValue> &OutVals,
-                                  DebugLoc dl, SelectionDAG &DAG) const {
+                                  SDLoc dl, SelectionDAG &DAG) const {
 
   // CCValAssign - represent the assignment of the return value to a location
   SmallVector<CCValAssign, 16> RVLocs;
@@ -454,7 +456,7 @@ MSP430TargetLowering::LowerReturn(SDValue Chain,
 
 /// LowerCCCCallTo - functions arguments are copied from virtual regs to
 /// (physical regs)/(stack frame), CALLSEQ_START and CALLSEQ_END are emitted.
-/// TODO: sret.
+// TODO: sret.
 SDValue
 MSP430TargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
                                      CallingConv::ID CallConv, bool isVarArg,
@@ -463,7 +465,7 @@ MSP430TargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
                                        &Outs,
                                      const SmallVectorImpl<SDValue> &OutVals,
                                      const SmallVectorImpl<ISD::InputArg> &Ins,
-                                     DebugLoc dl, SelectionDAG &DAG,
+                                     SDLoc dl, SelectionDAG &DAG,
                                      SmallVectorImpl<SDValue> &InVals) const {
   // Analyze operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -476,7 +478,8 @@ MSP430TargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
   unsigned NumBytes = CCInfo.getNextStackOffset();
 
   Chain = DAG.getCALLSEQ_START(Chain ,DAG.getConstant(NumBytes,
-                                                      getPointerTy(), true));
+                                                      getPointerTy(), true),
+                               dl);
 
   SmallVector<std::pair<unsigned, SDValue>, 4> RegsToPass;
   SmallVector<SDValue, 12> MemOpChains;
@@ -583,7 +586,7 @@ MSP430TargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
   Chain = DAG.getCALLSEQ_END(Chain,
                              DAG.getConstant(NumBytes, getPointerTy(), true),
                              DAG.getConstant(0, getPointerTy(), true),
-                             InFlag);
+                             InFlag, dl);
   InFlag = Chain.getValue(1);
 
   // Handle result values, copying them out of physregs into vregs that we
@@ -599,7 +602,7 @@ SDValue
 MSP430TargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
                                       CallingConv::ID CallConv, bool isVarArg,
                                       const SmallVectorImpl<ISD::InputArg> &Ins,
-                                      DebugLoc dl, SelectionDAG &DAG,
+                                      SDLoc dl, SelectionDAG &DAG,
                                       SmallVectorImpl<SDValue> &InVals) const {
 
   // Assign locations to each value returned by this call.
@@ -625,7 +628,7 @@ SDValue MSP430TargetLowering::LowerShifts(SDValue Op,
   unsigned Opc = Op.getOpcode();
   SDNode* N = Op.getNode();
   EVT VT = Op.getValueType();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl(N);
 
   // Expand non-constant shifts to loops:
   if (!isa<ConstantSDNode>(N->getOperand(1)))
@@ -669,15 +672,15 @@ SDValue MSP430TargetLowering::LowerGlobalAddress(SDValue Op,
   int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
 
   // Create the TargetGlobalAddress node, folding in the constant offset.
-  SDValue Result = DAG.getTargetGlobalAddress(GV, Op.getDebugLoc(),
+  SDValue Result = DAG.getTargetGlobalAddress(GV, SDLoc(Op),
                                               getPointerTy(), Offset);
-  return DAG.getNode(MSP430ISD::Wrapper, Op.getDebugLoc(),
+  return DAG.getNode(MSP430ISD::Wrapper, SDLoc(Op),
                      getPointerTy(), Result);
 }
 
 SDValue MSP430TargetLowering::LowerExternalSymbol(SDValue Op,
                                                   SelectionDAG &DAG) const {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   const char *Sym = cast<ExternalSymbolSDNode>(Op)->getSymbol();
   SDValue Result = DAG.getTargetExternalSymbol(Sym, getPointerTy());
 
@@ -686,7 +689,7 @@ SDValue MSP430TargetLowering::LowerExternalSymbol(SDValue Op,
 
 SDValue MSP430TargetLowering::LowerBlockAddress(SDValue Op,
                                                 SelectionDAG &DAG) const {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   const BlockAddress *BA = cast<BlockAddressSDNode>(Op)->getBlockAddress();
   SDValue Result = DAG.getTargetBlockAddress(BA, getPointerTy());
 
@@ -695,7 +698,7 @@ SDValue MSP430TargetLowering::LowerBlockAddress(SDValue Op,
 
 static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &TargetCC,
                        ISD::CondCode CC,
-                       DebugLoc dl, SelectionDAG &DAG) {
+                       SDLoc dl, SelectionDAG &DAG) {
   // FIXME: Handle bittests someday
   assert(!LHS.getValueType().isFloatingPoint() && "We don't handle FP yet");
 
@@ -782,7 +785,7 @@ SDValue MSP430TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue LHS   = Op.getOperand(2);
   SDValue RHS   = Op.getOperand(3);
   SDValue Dest  = Op.getOperand(4);
-  DebugLoc dl   = Op.getDebugLoc();
+  SDLoc dl  (Op);
 
   SDValue TargetCC;
   SDValue Flag = EmitCMP(LHS, RHS, TargetCC, CC, dl, DAG);
@@ -794,7 +797,7 @@ SDValue MSP430TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
 SDValue MSP430TargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
   SDValue LHS   = Op.getOperand(0);
   SDValue RHS   = Op.getOperand(1);
-  DebugLoc dl   = Op.getDebugLoc();
+  SDLoc dl  (Op);
 
   // If we are doing an AND and testing against zero, then the CMP
   // will not be generated.  The AND (or BIT) will generate the condition codes,
@@ -878,7 +881,7 @@ SDValue MSP430TargetLowering::LowerSELECT_CC(SDValue Op,
   SDValue TrueV  = Op.getOperand(2);
   SDValue FalseV = Op.getOperand(3);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
-  DebugLoc dl    = Op.getDebugLoc();
+  SDLoc dl   (Op);
 
   SDValue TargetCC;
   SDValue Flag = EmitCMP(LHS, RHS, TargetCC, CC, dl, DAG);
@@ -897,7 +900,7 @@ SDValue MSP430TargetLowering::LowerSIGN_EXTEND(SDValue Op,
                                                SelectionDAG &DAG) const {
   SDValue Val = Op.getOperand(0);
   EVT VT      = Op.getValueType();
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
 
   assert(VT == MVT::i16 && "Only support i16 for now!");
 
@@ -929,7 +932,7 @@ SDValue MSP430TargetLowering::LowerRETURNADDR(SDValue Op,
   MFI->setReturnAddressIsTaken(true);
 
   unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
 
   if (Depth > 0) {
     SDValue FrameAddr = LowerFRAMEADDR(Op, DAG);
@@ -953,7 +956,7 @@ SDValue MSP430TargetLowering::LowerFRAMEADDR(SDValue Op,
   MFI->setFrameAddressIsTaken(true);
 
   EVT VT = Op.getValueType();
-  DebugLoc dl = Op.getDebugLoc();  // FIXME probably not meaningful
+  SDLoc dl(Op);  // FIXME probably not meaningful
   unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
   SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), dl,
                                          MSP430::FPW, VT);
@@ -975,9 +978,17 @@ SDValue MSP430TargetLowering::LowerVASTART(SDValue Op,
   const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
 
   // Create a store of the frame index to the location operand
-  return DAG.getStore(Op.getOperand(0), Op.getDebugLoc(), FrameIndex,
+  return DAG.getStore(Op.getOperand(0), SDLoc(Op), FrameIndex,
                       Op.getOperand(1), MachinePointerInfo(SV),
                       false, false, 0);
+}
+
+SDValue MSP430TargetLowering::LowerJumpTable(SDValue Op,
+                                             SelectionDAG &DAG) const {
+    JumpTableSDNode *JT = cast<JumpTableSDNode>(Op);
+    SDValue Result = DAG.getTargetJumpTable(JT->getIndex(), getPointerTy());
+    return DAG.getNode(MSP430ISD::Wrapper, SDLoc(JT),
+                       getPointerTy(), Result);
 }
 
 /// getPostIndexedAddressParts - returns true by value, base pointer and

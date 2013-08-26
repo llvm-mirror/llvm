@@ -7,9 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/PathV2.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
 
@@ -140,6 +141,75 @@ TEST(Support, Path) {
   }
 }
 
+TEST(Support, RelativePathIterator) {
+  SmallString<64> Path(StringRef("c/d/e/foo.txt"));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "/");
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+
+TEST(Support, AbsolutePathIterator) {
+  SmallString<64> Path(StringRef("/c/d/e/foo.txt"));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "/");
+
+  // The root path will also be a component when iterating
+  ExpectedPathComponents[0] = "/";
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+
+#ifdef LLVM_ON_WIN32
+TEST(Support, AbsolutePathIteratorWin32) {
+  SmallString<64> Path(StringRef("c:\\c\\e\\foo.txt"));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "\\");
+
+  // The root path (which comes after the drive name) will also be a component
+  // when iterating.
+  ExpectedPathComponents.insert(ExpectedPathComponents.begin()+1, "\\");
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+#endif // LLVM_ON_WIN32
+
 class FileSystemTest : public testing::Test {
 protected:
   /// Unique temporary directory in which all created filesystem entities must
@@ -147,13 +217,9 @@ protected:
   SmallString<128> TestDirectory;
 
   virtual void SetUp() {
-    int fd;
     ASSERT_NO_ERROR(
-      fs::unique_file("file-system-test-%%-%%-%%-%%/test-directory.anchor", fd,
-                      TestDirectory));
+        fs::createUniqueDirectory("file-system-test", TestDirectory));
     // We don't care about this specific file.
-    ::close(fd);
-    TestDirectory = path::parent_path(TestDirectory);
     errs() << "Test Directory: " << TestDirectory << '\n';
     errs().flush();
   }
@@ -164,12 +230,61 @@ protected:
   }
 };
 
+TEST_F(FileSystemTest, Unique) {
+  // Create a temp file.
+  int FileDescriptor;
+  SmallString<64> TempPath;
+  ASSERT_NO_ERROR(
+      fs::createTemporaryFile("prefix", "temp", FileDescriptor, TempPath));
+
+  // The same file should return an identical unique id.
+  fs::UniqueID F1, F2;
+  ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath), F1));
+  ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath), F2));
+  ASSERT_EQ(F1, F2);
+
+  // Different files should return different unique ids.
+  int FileDescriptor2;
+  SmallString<64> TempPath2;
+  ASSERT_NO_ERROR(
+      fs::createTemporaryFile("prefix", "temp", FileDescriptor2, TempPath2));
+
+  fs::UniqueID D;
+  ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath2), D));
+  ASSERT_NE(D, F1);
+  ::close(FileDescriptor2);
+
+  ASSERT_NO_ERROR(fs::remove(Twine(TempPath2)));
+
+  // Two paths representing the same file on disk should still provide the
+  // same unique id.  We can test this by making a hard link.
+  ASSERT_NO_ERROR(fs::create_hard_link(Twine(TempPath), Twine(TempPath2)));
+  fs::UniqueID D2;
+  ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath2), D2));
+  ASSERT_EQ(D2, F1);
+
+  ::close(FileDescriptor);
+
+  SmallString<128> Dir1;
+  ASSERT_NO_ERROR(
+     fs::createUniqueDirectory("dir1", Dir1));
+  ASSERT_NO_ERROR(fs::getUniqueID(Dir1.c_str(), F1));
+  ASSERT_NO_ERROR(fs::getUniqueID(Dir1.c_str(), F2));
+  ASSERT_EQ(F1, F2);
+
+  SmallString<128> Dir2;
+  ASSERT_NO_ERROR(
+     fs::createUniqueDirectory("dir2", Dir2));
+  ASSERT_NO_ERROR(fs::getUniqueID(Dir2.c_str(), F2));
+  ASSERT_NE(F1, F2);
+}
+
 TEST_F(FileSystemTest, TempFiles) {
   // Create a temp file.
   int FileDescriptor;
   SmallString<64> TempPath;
   ASSERT_NO_ERROR(
-    fs::unique_file("%%-%%-%%-%%.temp", FileDescriptor, TempPath));
+      fs::createTemporaryFile("prefix", "temp", FileDescriptor, TempPath));
 
   // Make sure it exists.
   bool TempFileExists;
@@ -179,7 +294,8 @@ TEST_F(FileSystemTest, TempFiles) {
   // Create another temp tile.
   int FD2;
   SmallString<64> TempPath2;
-  ASSERT_NO_ERROR(fs::unique_file("%%-%%-%%-%%.temp", FD2, TempPath2));
+  ASSERT_NO_ERROR(fs::createTemporaryFile("prefix", "temp", FD2, TempPath2));
+  ASSERT_TRUE(TempPath2.endswith(".temp"));
   ASSERT_NE(TempPath.str(), TempPath2.str());
 
   fs::file_status A, B;
@@ -187,21 +303,23 @@ TEST_F(FileSystemTest, TempFiles) {
   ASSERT_NO_ERROR(fs::status(Twine(TempPath2), B));
   EXPECT_FALSE(fs::equivalent(A, B));
 
-  // Try to copy the first to the second.
-  EXPECT_EQ(
-    fs::copy_file(Twine(TempPath), Twine(TempPath2)), errc::file_exists);
-
   ::close(FD2);
-  // Try again with the proper options.
-  ASSERT_NO_ERROR(fs::copy_file(Twine(TempPath), Twine(TempPath2),
-                                fs::copy_option::overwrite_if_exists));
+
   // Remove Temp2.
   ASSERT_NO_ERROR(fs::remove(Twine(TempPath2), TempFileExists));
   EXPECT_TRUE(TempFileExists);
 
+  error_code EC = fs::status(TempPath2.c_str(), B);
+  EXPECT_EQ(EC, errc::no_such_file_or_directory);
+  EXPECT_EQ(B.type(), fs::file_type::file_not_found);
+
   // Make sure Temp2 doesn't exist.
   ASSERT_NO_ERROR(fs::exists(Twine(TempPath2), TempFileExists));
   EXPECT_FALSE(TempFileExists);
+
+  SmallString<64> TempPath3;
+  ASSERT_NO_ERROR(fs::createTemporaryFile("prefix", "", TempPath3));
+  ASSERT_FALSE(TempPath3.endswith("."));
 
   // Create a hard link to Temp1.
   ASSERT_NO_ERROR(fs::create_hard_link(Twine(TempPath), Twine(TempPath2)));
@@ -233,7 +351,7 @@ TEST_F(FileSystemTest, TempFiles) {
     "abcdefghijklmnopqrstuvwxyz5abcdefghijklmnopqrstuvwxyz4"
     "abcdefghijklmnopqrstuvwxyz3abcdefghijklmnopqrstuvwxyz2"
     "abcdefghijklmnopqrstuvwxyz1abcdefghijklmnopqrstuvwxyz0";
-  EXPECT_EQ(fs::unique_file(Twine(Path270), FileDescriptor, TempPath),
+  EXPECT_EQ(fs::createUniqueFile(Twine(Path270), FileDescriptor, TempPath),
             windows_error::path_not_found);
 #endif
 }
@@ -298,12 +416,19 @@ TEST_F(FileSystemTest, DirectoryIteration) {
   ASSERT_LT(z0, za1);
 }
 
+const char elf[] = {0x7f, 'E', 'L', 'F', 1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+
 TEST_F(FileSystemTest, Magic) {
   struct type {
     const char *filename;
     const char *magic_str;
-    size_t      magic_str_len;
-  } types [] = {{"magic.archive", "!<arch>\x0A", 8}};
+    size_t magic_str_len;
+    fs::file_magic magic;
+  } types [] = {
+    {"magic.archive", "!<arch>\x0A", 8, fs::file_magic::archive},
+    {"magic.elf", elf, sizeof(elf),
+     fs::file_magic::elf_relocatable}
+  };
 
   // Create some files filled with magic.
   for (type *i = types, *e = types + (sizeof(types) / sizeof(type)); i != e;
@@ -311,8 +436,7 @@ TEST_F(FileSystemTest, Magic) {
     SmallString<128> file_pathname(TestDirectory);
     path::append(file_pathname, i->filename);
     std::string ErrMsg;
-    raw_fd_ostream file(file_pathname.c_str(), ErrMsg,
-                        raw_fd_ostream::F_Binary);
+    raw_fd_ostream file(file_pathname.c_str(), ErrMsg, sys::fs::F_Binary);
     ASSERT_FALSE(file.has_error());
     StringRef magic(i->magic_str, i->magic_str_len);
     file << magic;
@@ -320,34 +444,37 @@ TEST_F(FileSystemTest, Magic) {
     bool res = false;
     ASSERT_NO_ERROR(fs::has_magic(file_pathname.c_str(), magic, res));
     EXPECT_TRUE(res);
+    EXPECT_EQ(i->magic, fs::identify_magic(magic));
   }
 }
 
-#if !defined(_WIN32) // FIXME: Win32 has different permission schema.
-TEST_F(FileSystemTest, Permissions) {
-  // Create a temp file.
-  int FileDescriptor;
-  SmallString<64> TempPath;
-  ASSERT_NO_ERROR(
-    fs::unique_file("%%-%%-%%-%%.temp", FileDescriptor, TempPath));
+#ifdef LLVM_ON_WIN32
+TEST_F(FileSystemTest, CarriageReturn) {
+  SmallString<128> FilePathname(TestDirectory);
+  std::string ErrMsg;
+  path::append(FilePathname, "test");
 
-  // Mark file as read-only
-  const fs::perms AllWrite = fs::owner_write|fs::group_write|fs::others_write;
-  ASSERT_NO_ERROR(fs::permissions(Twine(TempPath), fs::remove_perms|AllWrite));
- 
-  // Verify file is read-only
-  fs::file_status Status;
-  ASSERT_NO_ERROR(fs::status(Twine(TempPath), Status));
-  bool AnyWriteBits = (Status.permissions() & AllWrite);
-  EXPECT_FALSE(AnyWriteBits);
-  
-  // Mark file as read-write
-  ASSERT_NO_ERROR(fs::permissions(Twine(TempPath), fs::add_perms|AllWrite));
-  
-  // Verify file is read-write
-  ASSERT_NO_ERROR(fs::status(Twine(TempPath), Status));
-  AnyWriteBits = (Status.permissions() & AllWrite);
-  EXPECT_TRUE(AnyWriteBits);
+  {
+    raw_fd_ostream File(FilePathname.c_str(), ErrMsg);
+    EXPECT_EQ(ErrMsg, "");
+    File << '\n';
+  }
+  {
+    OwningPtr<MemoryBuffer> Buf;
+    MemoryBuffer::getFile(FilePathname, Buf);
+    EXPECT_EQ(Buf->getBuffer(), "\r\n");
+  }
+
+  {
+    raw_fd_ostream File(FilePathname.c_str(), ErrMsg, sys::fs::F_Binary);
+    EXPECT_EQ(ErrMsg, "");
+    File << '\n';
+  }
+  {
+    OwningPtr<MemoryBuffer> Buf;
+    MemoryBuffer::getFile(FilePathname, Buf);
+    EXPECT_EQ(Buf->getBuffer(), "\n");
+  }
 }
 #endif
 
@@ -356,7 +483,7 @@ TEST_F(FileSystemTest, FileMapping) {
   int FileDescriptor;
   SmallString<64> TempPath;
   ASSERT_NO_ERROR(
-    fs::unique_file("%%-%%-%%-%%.temp", FileDescriptor, TempPath));
+      fs::createTemporaryFile("prefix", "temp", FileDescriptor, TempPath));
   // Map in temp file and add some content
   error_code EC;
   StringRef Val("hello there");

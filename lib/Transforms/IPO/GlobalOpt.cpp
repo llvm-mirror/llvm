@@ -38,6 +38,7 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -470,8 +471,9 @@ static bool CleanupPointerRootUsers(GlobalVariable *GV,
 static bool CleanupConstantGlobalUsers(Value *V, Constant *Init,
                                        DataLayout *TD, TargetLibraryInfo *TLI) {
   bool Changed = false;
-  for (Value::use_iterator UI = V->use_begin(), E = V->use_end(); UI != E;) {
-    User *U = *UI++;
+  SmallVector<User*, 8> WorkList(V->use_begin(), V->use_end());
+  while (!WorkList.empty()) {
+    User *U = WorkList.pop_back_val();
 
     if (LoadInst *LI = dyn_cast<LoadInst>(U)) {
       if (Init) {
@@ -534,7 +536,6 @@ static bool CleanupConstantGlobalUsers(Value *V, Constant *Init,
       // us, and if they are all dead, nuke them without remorse.
       if (SafeToDestroyConstant(C)) {
         C->destroyConstant();
-        // This could have invalidated UI, start over from scratch.
         CleanupConstantGlobalUsers(V, Init, TD, TLI);
         return true;
       }
@@ -1940,9 +1941,8 @@ bool GlobalOpt::ProcessInternalGlobal(GlobalVariable *GV,
                                 const SmallPtrSet<const PHINode*, 16> &PHIUsers,
                                       const GlobalStatus &GS) {
   // If this is a first class global and has only one accessing function
-  // and this function is main (which we know is not recursive we can make
-  // this global a local variable) we replace the global with a local alloca
-  // in this function.
+  // and this function is main (which we know is not recursive), we replace
+  // the global with a local alloca in this function.
   //
   // NOTE: It doesn't make sense to promote non single-value types since we
   // are just replacing static memory to stack memory.
@@ -2784,7 +2784,7 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
           Value *Ptr = PtrArg->stripPointerCasts();
           if (GlobalVariable *GV = dyn_cast<GlobalVariable>(Ptr)) {
             Type *ElemTy = cast<PointerType>(GV->getType())->getElementType();
-            if (!Size->isAllOnesValue() &&
+            if (TD && !Size->isAllOnesValue() &&
                 Size->getValue().getLimitedValue() >=
                 TD->getTypeStoreSize(ElemTy)) {
               Invariants.insert(GV);
@@ -3041,8 +3041,154 @@ bool GlobalOpt::OptimizeGlobalCtorsList(GlobalVariable *&GCL) {
   return true;
 }
 
+static int compareNames(const void *A, const void *B) {
+  const GlobalValue *VA = *reinterpret_cast<GlobalValue* const*>(A);
+  const GlobalValue *VB = *reinterpret_cast<GlobalValue* const*>(B);
+  if (VA->getName() < VB->getName())
+    return -1;
+  if (VB->getName() < VA->getName())
+    return 1;
+  return 0;
+}
+
+static void setUsedInitializer(GlobalVariable &V,
+                               SmallPtrSet<GlobalValue *, 8> Init) {
+  if (Init.empty()) {
+    V.eraseFromParent();
+    return;
+  }
+
+  SmallVector<llvm::Constant *, 8> UsedArray;
+  PointerType *Int8PtrTy = Type::getInt8PtrTy(V.getContext());
+
+  for (SmallPtrSet<GlobalValue *, 8>::iterator I = Init.begin(), E = Init.end();
+       I != E; ++I) {
+    Constant *Cast = llvm::ConstantExpr::getBitCast(*I, Int8PtrTy);
+    UsedArray.push_back(Cast);
+  }
+  // Sort to get deterministic order.
+  array_pod_sort(UsedArray.begin(), UsedArray.end(), compareNames);
+  ArrayType *ATy = ArrayType::get(Int8PtrTy, UsedArray.size());
+
+  Module *M = V.getParent();
+  V.removeFromParent();
+  GlobalVariable *NV =
+      new GlobalVariable(*M, ATy, false, llvm::GlobalValue::AppendingLinkage,
+                         llvm::ConstantArray::get(ATy, UsedArray), "");
+  NV->takeName(&V);
+  NV->setSection("llvm.metadata");
+  delete &V;
+}
+
+namespace {
+/// \brief An easy to access representation of llvm.used and llvm.compiler.used.
+class LLVMUsed {
+  SmallPtrSet<GlobalValue *, 8> Used;
+  SmallPtrSet<GlobalValue *, 8> CompilerUsed;
+  GlobalVariable *UsedV;
+  GlobalVariable *CompilerUsedV;
+
+public:
+  LLVMUsed(Module &M) {
+    UsedV = collectUsedGlobalVariables(M, Used, false);
+    CompilerUsedV = collectUsedGlobalVariables(M, CompilerUsed, true);
+  }
+  typedef SmallPtrSet<GlobalValue *, 8>::iterator iterator;
+  iterator usedBegin() { return Used.begin(); }
+  iterator usedEnd() { return Used.end(); }
+  iterator compilerUsedBegin() { return CompilerUsed.begin(); }
+  iterator compilerUsedEnd() { return CompilerUsed.end(); }
+  bool usedCount(GlobalValue *GV) const { return Used.count(GV); }
+  bool compilerUsedCount(GlobalValue *GV) const {
+    return CompilerUsed.count(GV);
+  }
+  bool usedErase(GlobalValue *GV) { return Used.erase(GV); }
+  bool compilerUsedErase(GlobalValue *GV) { return CompilerUsed.erase(GV); }
+  bool usedInsert(GlobalValue *GV) { return Used.insert(GV); }
+  bool compilerUsedInsert(GlobalValue *GV) { return CompilerUsed.insert(GV); }
+
+  void syncVariablesAndSets() {
+    if (UsedV)
+      setUsedInitializer(*UsedV, Used);
+    if (CompilerUsedV)
+      setUsedInitializer(*CompilerUsedV, CompilerUsed);
+  }
+};
+}
+
+static bool hasUseOtherThanLLVMUsed(GlobalAlias &GA, const LLVMUsed &U) {
+  if (GA.use_empty()) // No use at all.
+    return false;
+
+  assert((!U.usedCount(&GA) || !U.compilerUsedCount(&GA)) &&
+         "We should have removed the duplicated "
+         "element from llvm.compiler.used");
+  if (!GA.hasOneUse())
+    // Strictly more than one use. So at least one is not in llvm.used and
+    // llvm.compiler.used.
+    return true;
+
+  // Exactly one use. Check if it is in llvm.used or llvm.compiler.used.
+  return !U.usedCount(&GA) && !U.compilerUsedCount(&GA);
+}
+
+static bool hasMoreThanOneUseOtherThanLLVMUsed(GlobalValue &V,
+                                               const LLVMUsed &U) {
+  unsigned N = 2;
+  assert((!U.usedCount(&V) || !U.compilerUsedCount(&V)) &&
+         "We should have removed the duplicated "
+         "element from llvm.compiler.used");
+  if (U.usedCount(&V) || U.compilerUsedCount(&V))
+    ++N;
+  return V.hasNUsesOrMore(N);
+}
+
+static bool mayHaveOtherReferences(GlobalAlias &GA, const LLVMUsed &U) {
+  if (!GA.hasLocalLinkage())
+    return true;
+
+  return U.usedCount(&GA) || U.compilerUsedCount(&GA);
+}
+
+static bool hasUsesToReplace(GlobalAlias &GA, LLVMUsed &U, bool &RenameTarget) {
+  RenameTarget = false;
+  bool Ret = false;
+  if (hasUseOtherThanLLVMUsed(GA, U))
+    Ret = true;
+
+  // If the alias is externally visible, we may still be able to simplify it.
+  if (!mayHaveOtherReferences(GA, U))
+    return Ret;
+
+  // If the aliasee has internal linkage, give it the name and linkage
+  // of the alias, and delete the alias.  This turns:
+  //   define internal ... @f(...)
+  //   @a = alias ... @f
+  // into:
+  //   define ... @a(...)
+  Constant *Aliasee = GA.getAliasee();
+  GlobalValue *Target = cast<GlobalValue>(Aliasee->stripPointerCasts());
+  if (!Target->hasLocalLinkage())
+    return Ret;
+
+  // Do not perform the transform if multiple aliases potentially target the
+  // aliasee. This check also ensures that it is safe to replace the section
+  // and other attributes of the aliasee with those of the alias.
+  if (hasMoreThanOneUseOtherThanLLVMUsed(*Target, U))
+    return Ret;
+
+  RenameTarget = true;
+  return true;
+}
+
 bool GlobalOpt::OptimizeGlobalAliases(Module &M) {
   bool Changed = false;
+  LLVMUsed Used(M);
+
+  for (SmallPtrSet<GlobalValue *, 8>::iterator I = Used.usedBegin(),
+                                               E = Used.usedEnd();
+       I != E; ++I)
+    Used.compilerUsedErase(*I);
 
   for (Module::alias_iterator I = M.alias_begin(), E = M.alias_end();
        I != E;) {
@@ -3057,43 +3203,37 @@ bool GlobalOpt::OptimizeGlobalAliases(Module &M) {
     Constant *Aliasee = J->getAliasee();
     GlobalValue *Target = cast<GlobalValue>(Aliasee->stripPointerCasts());
     Target->removeDeadConstantUsers();
-    bool hasOneUse = Target->hasOneUse() && Aliasee->hasOneUse();
 
     // Make all users of the alias use the aliasee instead.
-    if (!J->use_empty()) {
-      J->replaceAllUsesWith(Aliasee);
-      ++NumAliasesResolved;
-      Changed = true;
-    }
+    bool RenameTarget;
+    if (!hasUsesToReplace(*J, Used, RenameTarget))
+      continue;
 
-    // If the alias is externally visible, we may still be able to simplify it.
-    if (!J->hasLocalLinkage()) {
-      // If the aliasee has internal linkage, give it the name and linkage
-      // of the alias, and delete the alias.  This turns:
-      //   define internal ... @f(...)
-      //   @a = alias ... @f
-      // into:
-      //   define ... @a(...)
-      if (!Target->hasLocalLinkage())
-        continue;
+    J->replaceAllUsesWith(Aliasee);
+    ++NumAliasesResolved;
+    Changed = true;
 
-      // Do not perform the transform if multiple aliases potentially target the
-      // aliasee. This check also ensures that it is safe to replace the section
-      // and other attributes of the aliasee with those of the alias.
-      if (!hasOneUse)
-        continue;
-
+    if (RenameTarget) {
       // Give the aliasee the name, linkage and other attributes of the alias.
       Target->takeName(J);
       Target->setLinkage(J->getLinkage());
       Target->GlobalValue::copyAttributesFrom(J);
-    }
+
+      if (Used.usedErase(J))
+        Used.usedInsert(Target);
+
+      if (Used.compilerUsedErase(J))
+        Used.compilerUsedInsert(Target);
+    } else if (mayHaveOtherReferences(*J, Used))
+      continue;
 
     // Delete the alias.
     M.getAliasList().erase(J);
     ++NumAliasesRemoved;
     Changed = true;
   }
+
+  Used.syncVariablesAndSets();
 
   return Changed;
 }
@@ -3223,8 +3363,6 @@ bool GlobalOpt::runOnModule(Module &M) {
   // Try to find the llvm.globalctors list.
   GlobalVariable *GlobalCtors = FindGlobalCtors(M);
 
-  Function *CXAAtExitFn = FindCXAAtExit(M, TLI);
-
   bool LocalChange = true;
   while (LocalChange) {
     LocalChange = false;
@@ -3242,7 +3380,9 @@ bool GlobalOpt::runOnModule(Module &M) {
     // Resolve aliases, when possible.
     LocalChange |= OptimizeGlobalAliases(M);
 
-    // Try to remove trivial global destructors.
+    // Try to remove trivial global destructors if they are not removed
+    // already.
+    Function *CXAAtExitFn = FindCXAAtExit(M, TLI);
     if (CXAAtExitFn)
       LocalChange |= OptimizeEmptyGlobalCXXDtors(CXAAtExitFn);
 

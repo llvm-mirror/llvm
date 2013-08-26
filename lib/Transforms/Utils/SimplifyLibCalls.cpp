@@ -1518,6 +1518,12 @@ struct FPrintFOpt : public LibCallOptimization {
     if (!getConstantStringInfo(CI->getArgOperand(1), FormatStr))
       return 0;
 
+    // Do not do any of the following transformations if the fprintf return
+    // value is used, in general the fprintf return value is not compatible
+    // with fwrite(), fputc() or fputs().
+    if (!CI->use_empty())
+      return 0;
+
     // fprintf(F, "foo") --> fwrite("foo", 3, 1, F)
     if (CI->getNumArgOperands() == 2) {
       for (unsigned i = 0, e = FormatStr.size(); i != e; ++i)
@@ -1527,11 +1533,10 @@ struct FPrintFOpt : public LibCallOptimization {
       // These optimizations require DataLayout.
       if (!TD) return 0;
 
-      Value *NewCI = EmitFWrite(CI->getArgOperand(1),
-                                ConstantInt::get(TD->getIntPtrType(*Context),
-                                                 FormatStr.size()),
-                                CI->getArgOperand(0), B, TD, TLI);
-      return NewCI ? ConstantInt::get(CI->getType(), FormatStr.size()) : 0;
+      return EmitFWrite(CI->getArgOperand(1),
+                        ConstantInt::get(TD->getIntPtrType(*Context),
+                                         FormatStr.size()),
+                        CI->getArgOperand(0), B, TD, TLI);
     }
 
     // The remaining optimizations require the format string to be "%s" or "%c"
@@ -1544,14 +1549,12 @@ struct FPrintFOpt : public LibCallOptimization {
     if (FormatStr[1] == 'c') {
       // fprintf(F, "%c", chr) --> fputc(chr, F)
       if (!CI->getArgOperand(2)->getType()->isIntegerTy()) return 0;
-      Value *NewCI = EmitFPutC(CI->getArgOperand(2), CI->getArgOperand(0), B,
-                               TD, TLI);
-      return NewCI ? ConstantInt::get(CI->getType(), 1) : 0;
+      return EmitFPutC(CI->getArgOperand(2), CI->getArgOperand(0), B, TD, TLI);
     }
 
     if (FormatStr[1] == 's') {
       // fprintf(F, "%s", str) --> fputs(str, F)
-      if (!CI->getArgOperand(2)->getType()->isPointerTy() || !CI->use_empty())
+      if (!CI->getArgOperand(2)->getType()->isPointerTy())
         return 0;
       return EmitFPutS(CI->getArgOperand(2), CI->getArgOperand(0), B, TD, TLI);
     }
@@ -1937,7 +1940,7 @@ LibCallSimplifier::~LibCallSimplifier() {
 }
 
 Value *LibCallSimplifier::optimizeCall(CallInst *CI) {
-  if (CI->hasFnAttr(Attribute::NoBuiltin)) return 0;
+  if (CI->isNoBuiltin()) return 0;
   return Impl->optimizeCall(CI);
 }
 
@@ -1947,3 +1950,53 @@ void LibCallSimplifier::replaceAllUsesWith(Instruction *I, Value *With) const {
 }
 
 }
+
+// TODO:
+//   Additional cases that we need to add to this file:
+//
+// cbrt:
+//   * cbrt(expN(X))  -> expN(x/3)
+//   * cbrt(sqrt(x))  -> pow(x,1/6)
+//   * cbrt(sqrt(x))  -> pow(x,1/9)
+//
+// exp, expf, expl:
+//   * exp(log(x))  -> x
+//
+// log, logf, logl:
+//   * log(exp(x))   -> x
+//   * log(x**y)     -> y*log(x)
+//   * log(exp(y))   -> y*log(e)
+//   * log(exp2(y))  -> y*log(2)
+//   * log(exp10(y)) -> y*log(10)
+//   * log(sqrt(x))  -> 0.5*log(x)
+//   * log(pow(x,y)) -> y*log(x)
+//
+// lround, lroundf, lroundl:
+//   * lround(cnst) -> cnst'
+//
+// pow, powf, powl:
+//   * pow(exp(x),y)  -> exp(x*y)
+//   * pow(sqrt(x),y) -> pow(x,y*0.5)
+//   * pow(pow(x,y),z)-> pow(x,y*z)
+//
+// round, roundf, roundl:
+//   * round(cnst) -> cnst'
+//
+// signbit:
+//   * signbit(cnst) -> cnst'
+//   * signbit(nncst) -> 0 (if pstv is a non-negative constant)
+//
+// sqrt, sqrtf, sqrtl:
+//   * sqrt(expN(x))  -> expN(x*0.5)
+//   * sqrt(Nroot(x)) -> pow(x,1/(2*N))
+//   * sqrt(pow(x,y)) -> pow(|x|,y*0.5)
+//
+// strchr:
+//   * strchr(p, 0) -> strlen(p)
+// tan, tanf, tanl:
+//   * tan(atan(x)) -> x
+//
+// trunc, truncf, truncl:
+//   * trunc(cnst) -> cnst'
+//
+//

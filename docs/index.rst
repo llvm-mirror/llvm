@@ -160,6 +160,7 @@ For developers of applications which use LLVM as a library.
    ExtendingLLVM
    HowToSetUpLLVMStyleRTTI
    ProgrammersManual
+   Extensions
 
 :doc:`LLVM Language Reference Manual <LangRef>`
   Defines the LLVM intermediate representation and the assembly form of the
@@ -171,6 +172,9 @@ For developers of applications which use LLVM as a library.
 :doc:`ProgrammersManual`
   Introduction to the general layout of the LLVM sourcebase, important classes
   and APIs, and some tips & tricks.
+
+:doc:`Extensions`
+  LLVM-specific extensions to tools and formats LLVM seeks compatibility with.
 
 :doc:`CommandLine`
   Provides information on using the command line parsing library.
@@ -330,6 +334,9 @@ Information about LLVM's development process.
 
 :doc:`HowToReleaseLLVM`
   This is a guide to preparing LLVM releases. Most developers can ignore it.
+
+:doc:`ReleaseProcess`
+  This is a validate a new release, during the release process. Most developers can ignore it.
 
 :doc:`Packaging`
    Advice on packaging LLVM into a distribution.

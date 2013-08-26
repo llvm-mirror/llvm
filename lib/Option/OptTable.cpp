@@ -160,10 +160,6 @@ const Option OptTable::getOption(OptSpecifier Opt) const {
   return Option(&getInfo(id), this);
 }
 
-bool OptTable::isOptionHelpHidden(OptSpecifier id) const {
-  return getInfo(id).Flags & HelpHidden;
-}
-
 static bool isInput(const llvm::StringSet<> &Prefixes, StringRef Arg) {
   if (Arg == "-")
     return true;
@@ -184,7 +180,9 @@ static unsigned matchOption(const OptTable::Info *I, StringRef Str) {
   return 0;
 }
 
-Arg *OptTable::ParseOneArg(const ArgList &Args, unsigned &Index) const {
+Arg *OptTable::ParseOneArg(const ArgList &Args, unsigned &Index,
+                           unsigned FlagsToInclude,
+                           unsigned FlagsToExclude) const {
   unsigned Prev = Index;
   const char *Str = Args.getArgString(Index);
 
@@ -217,8 +215,15 @@ Arg *OptTable::ParseOneArg(const ArgList &Args, unsigned &Index) const {
     if (Start == End)
       break;
 
+    Option Opt(Start, this);
+
+    if (FlagsToInclude && !Opt.hasFlag(FlagsToInclude))
+      continue;
+    if (Opt.hasFlag(FlagsToExclude))
+      continue;
+
     // See if this option matches.
-    if (Arg *A = Option(Start, this).accept(Args, Index, ArgSize))
+    if (Arg *A = Opt.accept(Args, Index, ArgSize))
       return A;
 
     // Otherwise, see if this argument was missing values.
@@ -226,13 +231,20 @@ Arg *OptTable::ParseOneArg(const ArgList &Args, unsigned &Index) const {
       return 0;
   }
 
+  // If we failed to find an option and this arg started with /, then it's
+  // probably an input path.
+  if (Str[0] == '/')
+    return new Arg(getOption(TheInputOptionID), Str, Index++, Str);
+
   return new Arg(getOption(TheUnknownOptionID), Str, Index++, Str);
 }
 
-InputArgList *OptTable::ParseArgs(const char* const *ArgBegin,
-                                  const char* const *ArgEnd,
+InputArgList *OptTable::ParseArgs(const char *const *ArgBegin,
+                                  const char *const *ArgEnd,
                                   unsigned &MissingArgIndex,
-                                  unsigned &MissingArgCount) const {
+                                  unsigned &MissingArgCount,
+                                  unsigned FlagsToInclude,
+                                  unsigned FlagsToExclude) const {
   InputArgList *Args = new InputArgList(ArgBegin, ArgEnd);
 
   // FIXME: Handle '@' args (or at least error on them).
@@ -241,13 +253,14 @@ InputArgList *OptTable::ParseArgs(const char* const *ArgBegin,
   unsigned Index = 0, End = ArgEnd - ArgBegin;
   while (Index < End) {
     // Ignore empty arguments (other things may still take them as arguments).
-    if (Args->getArgString(Index)[0] == '\0') {
+    StringRef Str = Args->getArgString(Index);
+    if (Str == "") {
       ++Index;
       continue;
     }
 
     unsigned Prev = Index;
-    Arg *A = ParseOneArg(*Args, Index);
+    Arg *A = ParseOneArg(*Args, Index, FlagsToInclude, FlagsToExclude);
     assert(Index > Prev && "Parser failed to consume argument.");
 
     // Check for missing argument error.
@@ -281,6 +294,7 @@ static std::string getOptionHelpName(const OptTable &Opts, OptSpecifier Id) {
     break;
 
   case Option::SeparateClass: case Option::JoinedOrSeparateClass:
+  case Option::RemainingArgsClass:
     Name += ' ';
     // FALLTHROUGH
   case Option::JoinedClass: case Option::CommaJoinedClass:
@@ -346,8 +360,16 @@ static const char *getOptionHelpGroup(const OptTable &Opts, OptSpecifier Id) {
   return getOptionHelpGroup(Opts, GroupID);
 }
 
-void OptTable::PrintHelp(raw_ostream &OS, const char *Name,
-                         const char *Title, bool ShowHidden) const {
+void OptTable::PrintHelp(raw_ostream &OS, const char *Name, const char *Title,
+                         bool ShowHidden) const {
+  PrintHelp(OS, Name, Title, /*Include*/ 0, /*Exclude*/
+            (ShowHidden ? 0 : HelpHidden));
+}
+
+
+void OptTable::PrintHelp(raw_ostream &OS, const char *Name, const char *Title,
+                         unsigned FlagsToInclude,
+                         unsigned FlagsToExclude) const {
   OS << "OVERVIEW: " << Title << "\n";
   OS << '\n';
   OS << "USAGE: " << Name << " [options] <inputs>\n";
@@ -366,7 +388,10 @@ void OptTable::PrintHelp(raw_ostream &OS, const char *Name,
     if (getOptionKind(Id) == Option::GroupClass)
       continue;
 
-    if (!ShowHidden && isOptionHelpHidden(Id))
+    unsigned Flags = getInfo(Id).Flags;
+    if (FlagsToInclude && !(Flags & FlagsToInclude))
+      continue;
+    if (Flags & FlagsToExclude)
       continue;
 
     if (const char *Text = getOptionHelpText(Id)) {

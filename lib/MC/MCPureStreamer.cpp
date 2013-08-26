@@ -12,9 +12,8 @@
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectStreamer.h"
-// FIXME: Remove this.
-#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -41,7 +40,7 @@ public:
   virtual void EmitDebugLabel(MCSymbol *Symbol);
   virtual void EmitZerofill(const MCSection *Section, MCSymbol *Symbol = 0,
                             uint64_t Size = 0, unsigned ByteAlignment = 0);
-  virtual void EmitBytes(StringRef Data, unsigned AddrSpace);
+  virtual void EmitBytes(StringRef Data);
   virtual void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value = 0,
                                     unsigned ValueSize = 1,
                                     unsigned MaxBytesToEmit = 0);
@@ -52,8 +51,9 @@ public:
   virtual void FinishImpl();
 
 
-  virtual void EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) {
+  virtual bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) {
     report_fatal_error("unsupported directive in pure streamer");
+    return false;
   }
   virtual void EmitAssemblerFlag(MCAssemblerFlag Flag) {
     report_fatal_error("unsupported directive in pure streamer");
@@ -113,25 +113,22 @@ void MCPureStreamer::InitSections() {
 }
 
 void MCPureStreamer::InitToTextSection() {
-  // FIMXE: To what!?
-  SwitchSection(getContext().getMachOSection("__TEXT", "__text",
-                                    MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS,
-                                    0, SectionKind::getText()));
+  SwitchSection(getContext().getObjectFileInfo()->getTextSection());
 }
 
 void MCPureStreamer::EmitLabel(MCSymbol *Symbol) {
   assert(Symbol->isUndefined() && "Cannot define a symbol twice!");
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
-  assert(getCurrentSection() && "Cannot emit before setting section!");
+  assert(getCurrentSection().first && "Cannot emit before setting section!");
 
-  Symbol->setSection(*getCurrentSection());
+  Symbol->setSection(*getCurrentSection().first);
 
   MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*Symbol);
 
   // We have to create a new fragment if this is an atom defining symbol,
   // fragments cannot span atoms.
   if (getAssembler().isSymbolLinkerVisible(SD.getSymbol()))
-    new MCDataFragment(getCurrentSectionData());
+    insert(new MCDataFragment());
 
   // FIXME: This is wasteful, we don't necessarily need to create a data
   // fragment. Instead, we should mark the symbol as pointing into the data
@@ -153,7 +150,7 @@ void MCPureStreamer::EmitZerofill(const MCSection *Section, MCSymbol *Symbol,
   report_fatal_error("not yet implemented in pure streamer");
 }
 
-void MCPureStreamer::EmitBytes(StringRef Data, unsigned AddrSpace) {
+void MCPureStreamer::EmitBytes(StringRef Data) {
   // TODO: This is exactly the same as WinCOFFStreamer. Consider merging into
   // MCObjectStreamer.
   getOrCreateDataFragment()->getContents().append(Data.begin(), Data.end());
@@ -166,8 +163,7 @@ void MCPureStreamer::EmitValueToAlignment(unsigned ByteAlignment,
   // MCObjectStreamer.
   if (MaxBytesToEmit == 0)
     MaxBytesToEmit = ByteAlignment;
-  new MCAlignFragment(ByteAlignment, Value, ValueSize, MaxBytesToEmit,
-                      getCurrentSectionData());
+  insert(new MCAlignFragment(ByteAlignment, Value, ValueSize, MaxBytesToEmit));
 
   // Update the maximum alignment on the current section if necessary.
   if (ByteAlignment > getCurrentSectionData()->getAlignment())
@@ -180,8 +176,8 @@ void MCPureStreamer::EmitCodeAlignment(unsigned ByteAlignment,
   // MCObjectStreamer.
   if (MaxBytesToEmit == 0)
     MaxBytesToEmit = ByteAlignment;
-  MCAlignFragment *F = new MCAlignFragment(ByteAlignment, 0, 1, MaxBytesToEmit,
-                                           getCurrentSectionData());
+  MCAlignFragment *F = new MCAlignFragment(ByteAlignment, 0, 1, MaxBytesToEmit);
+  insert(F);
   F->setEmitNops(true);
 
   // Update the maximum alignment on the current section if necessary.
@@ -191,13 +187,13 @@ void MCPureStreamer::EmitCodeAlignment(unsigned ByteAlignment,
 
 bool MCPureStreamer::EmitValueToOffset(const MCExpr *Offset,
                                        unsigned char Value) {
-  new MCOrgFragment(*Offset, Value, getCurrentSectionData());
+  insert(new MCOrgFragment(*Offset, Value));
   return false;
 }
 
 void MCPureStreamer::EmitInstToFragment(const MCInst &Inst) {
-  MCRelaxableFragment *IF =
-    new MCRelaxableFragment(Inst, getCurrentSectionData());
+  MCRelaxableFragment *IF = new MCRelaxableFragment(Inst);
+  insert(IF);
 
   // Add the fixups and data.
   //

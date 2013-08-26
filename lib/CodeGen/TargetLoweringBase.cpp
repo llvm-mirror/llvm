@@ -191,6 +191,11 @@ static void InitLibcallNames(const char **Names, const TargetMachine &TM) {
   Names[RTLIB::NEARBYINT_F80] = "nearbyintl";
   Names[RTLIB::NEARBYINT_F128] = "nearbyintl";
   Names[RTLIB::NEARBYINT_PPCF128] = "nearbyintl";
+  Names[RTLIB::ROUND_F32] = "roundf";
+  Names[RTLIB::ROUND_F64] = "round";
+  Names[RTLIB::ROUND_F80] = "roundl";
+  Names[RTLIB::ROUND_F128] = "roundl";
+  Names[RTLIB::ROUND_PPCF128] = "roundl";
   Names[RTLIB::FLOOR_F32] = "floorf";
   Names[RTLIB::FLOOR_F64] = "floor";
   Names[RTLIB::FLOOR_F80] = "floorl";
@@ -355,6 +360,13 @@ static void InitLibcallNames(const char **Names, const TargetMachine &TM) {
     Names[RTLIB::SINCOS_F80] = 0;
     Names[RTLIB::SINCOS_F128] = 0;
     Names[RTLIB::SINCOS_PPCF128] = 0;
+  }
+
+  if (Triple(TM.getTargetTriple()).getOS() != Triple::OpenBSD) {
+    Names[RTLIB::STACKPROTECTOR_CHECK_FAIL] = "__stack_chk_fail";
+  } else {
+    // These are generally not available.
+    Names[RTLIB::STACKPROTECTOR_CHECK_FAIL] = 0;
   }
 }
 
@@ -620,12 +632,55 @@ static void InitCmpLibcallCCs(ISD::CondCode *CCs) {
 TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm,
                                        const TargetLoweringObjectFile *tlof)
   : TM(tm), TD(TM.getDataLayout()), TLOF(*tlof) {
+  initActions();
+
+  // Perform these initializations only once.
+  IsLittleEndian = TD->isLittleEndian();
+  PointerTy = MVT::getIntegerVT(8*TD->getPointerSize(0));
+  MaxStoresPerMemset = MaxStoresPerMemcpy = MaxStoresPerMemmove = 8;
+  MaxStoresPerMemsetOptSize = MaxStoresPerMemcpyOptSize
+    = MaxStoresPerMemmoveOptSize = 4;
+  UseUnderscoreSetJmp = false;
+  UseUnderscoreLongJmp = false;
+  SelectIsExpensive = false;
+  IntDivIsCheap = false;
+  Pow2DivIsCheap = false;
+  JumpIsExpensive = false;
+  PredictableSelectIsExpensive = false;
+  StackPointerRegisterToSaveRestore = 0;
+  ExceptionPointerRegister = 0;
+  ExceptionSelectorRegister = 0;
+  BooleanContents = UndefinedBooleanContent;
+  BooleanVectorContents = UndefinedBooleanContent;
+  SchedPreferenceInfo = Sched::ILP;
+  JumpBufSize = 0;
+  JumpBufAlignment = 0;
+  MinFunctionAlignment = 0;
+  PrefFunctionAlignment = 0;
+  PrefLoopAlignment = 0;
+  MinStackArgumentAlignment = 1;
+  InsertFencesForAtomic = false;
+  SupportJumpTables = true;
+  MinimumJumpTableEntries = 4;
+
+  InitLibcallNames(LibcallRoutineNames, TM);
+  InitCmpLibcallCCs(CmpLibcallCCs);
+  InitLibcallCallingConvs(LibcallCallingConvs);
+}
+
+TargetLoweringBase::~TargetLoweringBase() {
+  delete &TLOF;
+}
+
+void TargetLoweringBase::initActions() {
   // All operations default to being supported.
   memset(OpActions, 0, sizeof(OpActions));
   memset(LoadExtActions, 0, sizeof(LoadExtActions));
   memset(TruncStoreActions, 0, sizeof(TruncStoreActions));
   memset(IndexedModeActions, 0, sizeof(IndexedModeActions));
   memset(CondCodeActions, 0, sizeof(CondCodeActions));
+  memset(RegClassForVT, 0,MVT::LAST_VALUETYPE*sizeof(TargetRegisterClass*));
+  memset(TargetDAGCombineArray, 0, array_lengthof(TargetDAGCombineArray));
 
   // Set default actions for various operations.
   for (unsigned VT = 0; VT != (unsigned)MVT::LAST_VALUETYPE; ++VT) {
@@ -639,6 +694,9 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm,
     // These operations default to expand.
     setOperationAction(ISD::FGETSIGN, (MVT::SimpleValueType)VT, Expand);
     setOperationAction(ISD::CONCAT_VECTORS, (MVT::SimpleValueType)VT, Expand);
+
+    // These library functions default to expand.
+    setOperationAction(ISD::FROUND, (MVT::SimpleValueType)VT, Expand);
   }
 
   // Most targets ignore the @llvm.prefetch intrinsic.
@@ -702,45 +760,6 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm,
   // here is to inform DAG Legalizer to replace DEBUGTRAP with TRAP.
   //
   setOperationAction(ISD::DEBUGTRAP, MVT::Other, Expand);
-
-  IsLittleEndian = TD->isLittleEndian();
-  PointerTy = MVT::getIntegerVT(8*TD->getPointerSize(0));
-  memset(RegClassForVT, 0,MVT::LAST_VALUETYPE*sizeof(TargetRegisterClass*));
-  memset(TargetDAGCombineArray, 0, array_lengthof(TargetDAGCombineArray));
-  MaxStoresPerMemset = MaxStoresPerMemcpy = MaxStoresPerMemmove = 8;
-  MaxStoresPerMemsetOptSize = MaxStoresPerMemcpyOptSize
-    = MaxStoresPerMemmoveOptSize = 4;
-  UseUnderscoreSetJmp = false;
-  UseUnderscoreLongJmp = false;
-  SelectIsExpensive = false;
-  IntDivIsCheap = false;
-  Pow2DivIsCheap = false;
-  JumpIsExpensive = false;
-  PredictableSelectIsExpensive = false;
-  StackPointerRegisterToSaveRestore = 0;
-  ExceptionPointerRegister = 0;
-  ExceptionSelectorRegister = 0;
-  BooleanContents = UndefinedBooleanContent;
-  BooleanVectorContents = UndefinedBooleanContent;
-  SchedPreferenceInfo = Sched::ILP;
-  JumpBufSize = 0;
-  JumpBufAlignment = 0;
-  MinFunctionAlignment = 0;
-  PrefFunctionAlignment = 0;
-  PrefLoopAlignment = 0;
-  MinStackArgumentAlignment = 1;
-  ShouldFoldAtomicFences = false;
-  InsertFencesForAtomic = false;
-  SupportJumpTables = true;
-  MinimumJumpTableEntries = 4;
-
-  InitLibcallNames(LibcallRoutineNames, TM);
-  InitCmpLibcallCCs(CmpLibcallCCs);
-  InitLibcallCallingConvs(LibcallCallingConvs);
-}
-
-TargetLoweringBase::~TargetLoweringBase() {
-  delete &TLOF;
 }
 
 MVT TargetLoweringBase::getScalarShiftAmountTy(EVT LHSTy) const {
@@ -1029,7 +1048,7 @@ void TargetLoweringBase::computeRegisterProperties() {
   }
 }
 
-EVT TargetLoweringBase::getSetCCResultType(EVT VT) const {
+EVT TargetLoweringBase::getSetCCResultType(LLVMContext &, EVT VT) const {
   assert(!VT.isVector() && "No default SetCC type for vectors!");
   return getPointerTy(0).SimpleTy;
 }

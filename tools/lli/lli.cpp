@@ -45,6 +45,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Instrumentation.h"
 #include <cerrno>
 
 #ifdef __CYGWIN__
@@ -69,6 +70,10 @@ namespace {
 
   cl::opt<bool> UseMCJIT(
     "use-mcjit", cl::desc("Enable use of the MC-based JIT (if available)"),
+    cl::init(false));
+
+  cl::opt<bool> DebugIR(
+    "debug-ir", cl::desc("Generate debug information to allow debugging IR."),
     cl::init(false));
 
   // The MCJIT supports building for a target address space separate from
@@ -157,11 +162,6 @@ namespace {
                      clEnumValN(CodeModel::Large, "large",
                                 "Large code model"),
                      clEnumValEnd));
-
-  cl::opt<bool>
-  EnableJITExceptionHandling("jit-enable-eh",
-    cl::desc("Emit exception handling information"),
-    cl::init(false));
 
   cl::opt<bool>
   GenerateSoftFloatCalls("soft-float",
@@ -259,7 +259,7 @@ void layoutRemoteTargetMemory(RemoteTarget *T, RecordingMemoryManager *JMM) {
     EE->mapSectionAddress(const_cast<void*>(Offsets[i].first), Addr);
 
     DEBUG(dbgs() << "  Mapping local: " << Offsets[i].first
-                 << " to remote: " << format("%p", Addr) << "\n");
+                 << " to remote: 0x" << format("%llx", Addr) << "\n");
 
   }
 
@@ -274,12 +274,12 @@ void layoutRemoteTargetMemory(RemoteTarget *T, RecordingMemoryManager *JMM) {
       T->loadCode(Addr, Offsets[i].first, Sizes[i]);
 
       DEBUG(dbgs() << "  loading code: " << Offsets[i].first
-            << " to remote: " << format("%p", Addr) << "\n");
+            << " to remote: 0x" << format("%llx", Addr) << "\n");
     } else {
       T->loadData(Addr, Offsets[i].first, Sizes[i]);
 
       DEBUG(dbgs() << "  loading data: " << Offsets[i].first
-            << " to remote: " << format("%p", Addr) << "\n");
+            << " to remote: 0x" << format("%llx", Addr) << "\n");
     }
 
   }
@@ -326,6 +326,17 @@ int main(int argc, char **argv, char * const *envp) {
     }
   }
 
+  if (DebugIR) {
+    if (!UseMCJIT) {
+      errs() << "warning: -debug-ir used without -use-mcjit. Only partial debug"
+        << " information will be emitted by the non-MC JIT engine. To see full"
+        << " source debug information, enable the flag '-use-mcjit'.\n";
+
+    }
+    ModulePass *DebugIRPass = createDebugIRPass();
+    DebugIRPass->runOnModule(*Mod);
+  }
+
   EngineBuilder builder(Mod);
   builder.setMArch(MArch);
   builder.setMCPU(MCPU);
@@ -342,14 +353,14 @@ int main(int argc, char **argv, char * const *envp) {
     Mod->setTargetTriple(Triple::normalize(TargetTriple));
 
   // Enable MCJIT if desired.
-  JITMemoryManager *JMM = 0;
+  RTDyldMemoryManager *RTDyldMM = 0;
   if (UseMCJIT && !ForceInterpreter) {
     builder.setUseMCJIT(true);
     if (RemoteMCJIT)
-      JMM = new RecordingMemoryManager();
+      RTDyldMM = new RecordingMemoryManager();
     else
-      JMM = new SectionMemoryManager();
-    builder.setJITMemoryManager(JMM);
+      RTDyldMM = new SectionMemoryManager();
+    builder.setMCJITMemoryManager(RTDyldMM);
   } else {
     if (RemoteMCJIT) {
       errs() << "error: Remote process execution requires -use-mcjit\n";
@@ -381,7 +392,6 @@ int main(int argc, char **argv, char * const *envp) {
 
   // Remote target execution doesn't handle EH or debug registration.
   if (!RemoteMCJIT) {
-    Options.JITExceptionHandling = EnableJITExceptionHandling;
     Options.JITEmitDebugInfo = EmitJitDebugInfo;
     Options.JITEmitDebugInfoToDisk = EmitJitDebugInfoToDisk;
   }
@@ -467,7 +477,7 @@ int main(int argc, char **argv, char * const *envp) {
 
   int Result;
   if (RemoteMCJIT) {
-    RecordingMemoryManager *MM = static_cast<RecordingMemoryManager*>(JMM);
+    RecordingMemoryManager *MM = static_cast<RecordingMemoryManager*>(RTDyldMM);
     // Everything is prepared now, so lay out our program for the target
     // address space, assign the section addresses to resolve any relocations,
     // and send it to the target.
@@ -489,8 +499,8 @@ int main(int argc, char **argv, char * const *envp) {
     // FIXME: argv and envp handling.
     uint64_t Entry = (uint64_t)EE->getPointerToFunction(EntryFn);
 
-    DEBUG(dbgs() << "Executing '" << EntryFn->getName() << "' at "
-                 << format("%p", Entry) << "\n");
+    DEBUG(dbgs() << "Executing '" << EntryFn->getName() << "' at 0x"
+                 << format("%llx", Entry) << "\n");
 
     if (Target.executeCode(Entry, Result))
       errs() << "ERROR: " << Target.getErrorMsg() << "\n";
@@ -501,8 +511,8 @@ int main(int argc, char **argv, char * const *envp) {
     // invalidated will be known.
     (void)EE->getPointerToFunction(EntryFn);
     // Clear instruction cache before code will be executed.
-    if (JMM)
-      static_cast<SectionMemoryManager*>(JMM)->invalidateInstructionCache();
+    if (RTDyldMM)
+      static_cast<SectionMemoryManager*>(RTDyldMM)->invalidateInstructionCache();
 
     // Run main.
     Result = EE->runFunctionAsMain(EntryFn, InputArgv, envp);

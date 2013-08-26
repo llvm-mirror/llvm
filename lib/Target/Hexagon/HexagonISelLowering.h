@@ -62,7 +62,8 @@ namespace llvm {
       WrapperShuffEH,
       WrapperShuffOB,
       WrapperShuffOH,
-      TC_RETURN
+      TC_RETURN,
+      EH_RETURN
     };
   }
 
@@ -94,6 +95,8 @@ namespace llvm {
     virtual bool isTruncateFree(Type *Ty1, Type *Ty2) const;
     virtual bool isTruncateFree(EVT VT1, EVT VT2) const;
 
+    virtual bool allowTruncateForTailCall(Type *Ty1, Type *Ty2) const;
+
     virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
 
     virtual const char *getTargetNodeName(unsigned Opcode) const;
@@ -101,10 +104,11 @@ namespace llvm {
     SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_LABEL(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFormalArguments(SDValue Chain,
                                  CallingConv::ID CallConv, bool isVarArg,
                                  const SmallVectorImpl<ISD::InputArg> &Ins,
-                                 DebugLoc dl, SelectionDAG &DAG,
+                                 SDLoc dl, SelectionDAG &DAG,
                                  SmallVectorImpl<SDValue> &InVals) const;
     SDValue LowerGLOBALADDRESS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -115,14 +119,13 @@ namespace llvm {
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
                             const SmallVectorImpl<ISD::InputArg> &Ins,
-                            DebugLoc dl, SelectionDAG &DAG,
+                            SDLoc dl, SelectionDAG &DAG,
                             SmallVectorImpl<SDValue> &InVals,
                             const SmallVectorImpl<SDValue> &OutVals,
                             SDValue Callee) const;
 
     SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerMEMBARRIER(SDValue Op, SelectionDAG& DAG) const;
     SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
 
@@ -130,7 +133,7 @@ namespace llvm {
                         CallingConv::ID CallConv, bool isVarArg,
                         const SmallVectorImpl<ISD::OutputArg> &Outs,
                         const SmallVectorImpl<SDValue> &OutVals,
-                        DebugLoc dl, SelectionDAG &DAG) const;
+                        SDLoc dl, SelectionDAG &DAG) const;
 
     virtual MachineBasicBlock
     *EmitInstrWithCustomInserter(MachineInstr *MI,
@@ -138,7 +141,7 @@ namespace llvm {
 
     SDValue  LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
     SDValue  LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
-    virtual EVT getSetCCResultType(EVT VT) const {
+    virtual EVT getSetCCResultType(LLVMContext &, EVT) const {
       return MVT::i1;
     }
 
@@ -149,7 +152,7 @@ namespace llvm {
 
     std::pair<unsigned, const TargetRegisterClass*>
     getRegForInlineAsmConstraint(const std::string &Constraint,
-                                 EVT VT) const;
+                                 MVT VT) const;
 
     // Intrinsics
     virtual SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op,

@@ -14,6 +14,7 @@
 
 #define DEBUG_TYPE "jit"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
+#include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
@@ -47,7 +48,7 @@ ExecutionEngine *(*ExecutionEngine::JITCtor)(
 ExecutionEngine *(*ExecutionEngine::MCJITCtor)(
   Module *M,
   std::string *ErrorStr,
-  JITMemoryManager *JMM,
+  RTDyldMemoryManager *MCJMM,
   bool GVsWithCode,
   TargetMachine *TM) = 0;
 ExecutionEngine *(*ExecutionEngine::InterpCtor)(Module *M,
@@ -117,7 +118,7 @@ char *ExecutionEngine::getMemoryForGV(const GlobalVariable *GV) {
 }
 
 bool ExecutionEngine::removeModule(Module *M) {
-  for(SmallVector<Module *, 1>::iterator I = Modules.begin(),
+  for(SmallVectorImpl<Module *>::iterator I = Modules.begin(),
         E = Modules.end(); I != E; ++I) {
     Module *Found = *I;
     if (Found == M) {
@@ -455,10 +456,12 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
   if (sys::DynamicLibrary::LoadLibraryPermanently(0, ErrorStr))
     return 0;
 
+  assert(!(JMM && MCJMM));
+  
   // If the user specified a memory manager but didn't specify which engine to
   // create, we assume they only want the JIT, and we fail if they only want
   // the interpreter.
-  if (JMM) {
+  if (JMM || MCJMM) {
     if (WhichEngine & EngineKind::JIT)
       WhichEngine = EngineKind::JIT;
     else {
@@ -466,6 +469,14 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
         *ErrorStr = "Cannot create an interpreter with a memory manager.";
       return 0;
     }
+  }
+  
+  if (MCJMM && ! UseMCJIT) {
+    if (ErrorStr)
+      *ErrorStr =
+        "Cannot create a legacy JIT with a runtime dyld memory "
+        "manager.";
+    return 0;
   }
 
   // Unless the interpreter was explicitly selected or the JIT is not linked,
@@ -480,7 +491,7 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
 
     if (UseMCJIT && ExecutionEngine::MCJITCtor) {
       ExecutionEngine *EE =
-        ExecutionEngine::MCJITCtor(M, ErrorStr, JMM,
+        ExecutionEngine::MCJITCtor(M, ErrorStr, MCJMM ? MCJMM : JMM,
                                    AllocateGVsWithCode, TheTM.take());
       if (EE) return EE;
     } else if (ExecutionEngine::JITCtor) {
@@ -948,7 +959,7 @@ static void StoreIntToMemory(const APInt &IntVal, uint8_t *Dst,
   assert((IntVal.getBitWidth()+7)/8 >= StoreBytes && "Integer too small!");
   const uint8_t *Src = (const uint8_t *)IntVal.getRawData();
 
-  if (sys::isLittleEndianHost()) {
+  if (sys::IsLittleEndianHost) {
     // Little-endian host - the source is ordered from LSB to MSB.  Order the
     // destination from LSB to MSB: Do a straight copy.
     memcpy(Dst, Src, StoreBytes);
@@ -1009,7 +1020,7 @@ void ExecutionEngine::StoreValueToMemory(const GenericValue &Val,
     break;
   }
 
-  if (sys::isLittleEndianHost() != getDataLayout()->isLittleEndian())
+  if (sys::IsLittleEndianHost != getDataLayout()->isLittleEndian())
     // Host and target are different endian - reverse the stored bytes.
     std::reverse((uint8_t*)Ptr, StoreBytes + (uint8_t*)Ptr);
 }
@@ -1021,7 +1032,7 @@ static void LoadIntFromMemory(APInt &IntVal, uint8_t *Src, unsigned LoadBytes) {
   uint8_t *Dst = reinterpret_cast<uint8_t *>(
                    const_cast<uint64_t *>(IntVal.getRawData()));
 
-  if (sys::isLittleEndianHost())
+  if (sys::IsLittleEndianHost)
     // Little-endian host - the destination must be ordered from LSB to MSB.
     // The source is ordered from LSB to MSB: Do a straight copy.
     memcpy(Dst, Src, LoadBytes);

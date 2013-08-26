@@ -28,6 +28,7 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/IR/Value.h"
+#include "llvm/Support/BlockFrequency.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -50,6 +51,14 @@ INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(SlotIndexes)
 INITIALIZE_PASS_END(LiveIntervals, "liveintervals",
                 "Live Interval Analysis", false, false)
+
+#ifndef NDEBUG
+static cl::opt<bool> EnablePrecomputePhysRegs(
+  "precompute-phys-liveness", cl::Hidden,
+  cl::desc("Eagerly compute live intervals for all physreg units."));
+#else
+static bool EnablePrecomputePhysRegs = false;
+#endif // NDEBUG
 
 void LiveIntervals::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
@@ -94,7 +103,7 @@ void LiveIntervals::releaseMemory() {
   VNInfoAllocator.Reset();
 }
 
-/// runOnMachineFunction - Register allocate the whole function
+/// runOnMachineFunction - calculates LiveIntervals
 ///
 bool LiveIntervals::runOnMachineFunction(MachineFunction &fn) {
   MF = &fn;
@@ -115,6 +124,12 @@ bool LiveIntervals::runOnMachineFunction(MachineFunction &fn) {
   computeRegMasks();
   computeLiveInRegUnits();
 
+  if (EnablePrecomputePhysRegs) {
+    // For stress testing, precompute live ranges of all physical register
+    // units, including reserved registers.
+    for (unsigned i = 0, e = TRI->getNumRegUnits(); i != e; ++i)
+      getRegUnit(i);
+  }
   DEBUG(dump());
   return true;
 }
@@ -229,10 +244,8 @@ void LiveIntervals::computeRegUnitInterval(LiveInterval *LI) {
   // idempotent. It is very rare for a register unit to have multiple roots, so
   // uniquing super-registers is probably not worthwhile.
   for (MCRegUnitRootIterator Roots(Unit, TRI); Roots.isValid(); ++Roots) {
-    unsigned Root = *Roots;
-    if (!MRI->reg_empty(Root))
-      LRCalc->createDeadDefs(LI, Root);
-    for (MCSuperRegIterator Supers(Root, TRI); Supers.isValid(); ++Supers) {
+    for (MCSuperRegIterator Supers(*Roots, TRI, /*IncludeSelf=*/true);
+         Supers.isValid(); ++Supers) {
       if (!MRI->reg_empty(*Supers))
         LRCalc->createDeadDefs(LI, *Supers);
     }
@@ -241,10 +254,8 @@ void LiveIntervals::computeRegUnitInterval(LiveInterval *LI) {
   // Now extend LI to reach all uses.
   // Ignore uses of reserved registers. We only track defs of those.
   for (MCRegUnitRootIterator Roots(Unit, TRI); Roots.isValid(); ++Roots) {
-    unsigned Root = *Roots;
-    if (!MRI->isReserved(Root) && !MRI->reg_empty(Root))
-      LRCalc->extendToUses(LI, Root);
-    for (MCSuperRegIterator Supers(Root, TRI); Supers.isValid(); ++Supers) {
+    for (MCSuperRegIterator Supers(*Roots, TRI, /*IncludeSelf=*/true);
+         Supers.isValid(); ++Supers) {
       unsigned Reg = *Supers;
       if (!MRI->isReserved(Reg) && !MRI->reg_empty(Reg))
         LRCalc->extendToUses(LI, Reg);
@@ -609,21 +620,9 @@ LiveIntervals::hasPHIKill(const LiveInterval &LI, const VNInfo *VNI) const {
 }
 
 float
-LiveIntervals::getSpillWeight(bool isDef, bool isUse, unsigned loopDepth) {
-  // Limit the loop depth ridiculousness.
-  if (loopDepth > 200)
-    loopDepth = 200;
-
-  // The loop depth is used to roughly estimate the number of times the
-  // instruction is executed. Something like 10^d is simple, but will quickly
-  // overflow a float. This expression behaves like 10^d for small d, but is
-  // more tempered for large d. At d=200 we get 6.7e33 which leaves a bit of
-  // headroom before overflow.
-  // By the way, powf() might be unavailable here. For consistency,
-  // We may take pow(double,double).
-  float lc = std::pow(1 + (100.0 / (loopDepth + 10)), (double)loopDepth);
-
-  return (isDef + isUse) * lc;
+LiveIntervals::getSpillWeight(bool isDef, bool isUse, BlockFrequency freq) {
+  const float Scale = 1.0f / BlockFrequency::getEntryFrequency();
+  return (isDef + isUse) * (freq.getFrequency() * Scale);
 }
 
 LiveRange LiveIntervals::addLiveRangeToEndOfBlock(unsigned reg,

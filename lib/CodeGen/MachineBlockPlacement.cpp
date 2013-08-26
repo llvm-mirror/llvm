@@ -39,6 +39,7 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/Support/Allocator.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
@@ -51,6 +52,11 @@ STATISTIC(CondBranchTakenFreq,
           "Potential frequency of taking conditional branches");
 STATISTIC(UncondBranchTakenFreq,
           "Potential frequency of taking unconditional branches");
+
+static cl::opt<unsigned> AlignAllBlock("align-all-blocks",
+                                       cl::desc("Force the alignment of all "
+                                                "blocks in the function."),
+                                       cl::init(0), cl::Hidden);
 
 namespace {
 class BlockChain;
@@ -985,6 +991,28 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
     Cond.clear();
     MachineBasicBlock *TBB = 0, *FBB = 0; // For AnalyzeBranch.
     if (!TII->AnalyzeBranch(*PrevBB, TBB, FBB, Cond)) {
+      // The "PrevBB" is not yet updated to reflect current code layout, so,
+      //   o. it may fall-through to a block without explict "goto" instruction
+      //      before layout, and no longer fall-through it after layout; or 
+      //   o. just opposite.
+      // 
+      // AnalyzeBranch() may return erroneous value for FBB when these two
+      // situations take place. For the first scenario FBB is mistakenly set
+      // NULL; for the 2nd scenario, the FBB, which is expected to be NULL,
+      // is mistakenly pointing to "*BI".
+      //
+      bool needUpdateBr = true;
+      if (!Cond.empty() && (!FBB || FBB == *BI)) {
+        PrevBB->updateTerminator();
+        needUpdateBr = false;
+        Cond.clear();
+        TBB = FBB = 0;
+        if (TII->AnalyzeBranch(*PrevBB, TBB, FBB, Cond)) {
+          // FIXME: This should never take place.
+          TBB = FBB = 0;
+        }
+      }
+
       // If PrevBB has a two-way branch, try to re-order the branches
       // such that we branch to the successor with higher weight first.
       if (TBB && !Cond.empty() && FBB &&
@@ -997,8 +1025,10 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
         DebugLoc dl;  // FIXME: this is nowhere
         TII->RemoveBranch(*PrevBB);
         TII->InsertBranch(*PrevBB, FBB, TBB, Cond, dl);
+        needUpdateBr = true;
       }
-      PrevBB->updateTerminator();
+      if (needUpdateBr)
+        PrevBB->updateTerminator();
     }
   }
 
@@ -1087,6 +1117,12 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &F) {
 
   BlockToChain.clear();
   ChainAllocator.DestroyAll();
+
+  if (AlignAllBlock)
+    // Align all of the blocks in the function to a specific alignment.
+    for (MachineFunction::iterator FI = F.begin(), FE = F.end();
+         FI != FE; ++FI)
+      FI->setAlignment(AlignAllBlock);
 
   // We always return true as we have no way to track whether the final order
   // differs from the original order.

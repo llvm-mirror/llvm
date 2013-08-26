@@ -389,8 +389,11 @@ struct BreakpointPrinter : public ModulePass {
       for (unsigned i = 0, e = NMD->getNumOperands(); i != e; ++i) {
         std::string Name;
         DISubprogram SP(NMD->getOperand(i));
-        if (SP.Verify())
-          getContextName(SP.getContext(), Name);
+        assert((!SP || SP.isSubprogram()) &&
+          "A MDNode in llvm.dbg.sp should be null or a DISubprogram.");
+        if (!SP)
+          continue;
+        getContextName(SP.getContext(), Name);
         Name = Name + SP.getDisplayName().str();
         if (!Name.empty() && Processed.insert(Name)) {
           Out << Name << "\n";
@@ -445,10 +448,11 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
   }
   Builder.DisableUnitAtATime = !UnitAtATime;
   Builder.DisableUnrollLoops = OptLevel == 0;
-  Builder.DisableSimplifyLibCalls = DisableSimplifyLibCalls;
   
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
+
+  Builder.LoopVectorize = OptLevel > 1 && SizeLevel < 2;
 }
 
 static void AddStandardCompilePasses(PassManagerBase &PM) {
@@ -465,7 +469,6 @@ static void AddStandardCompilePasses(PassManagerBase &PM) {
   if (!DisableInline)
     Builder.Inliner = createFunctionInliningPass();
   Builder.OptLevel = 3;
-  Builder.DisableSimplifyLibCalls = DisableSimplifyLibCalls;
   Builder.populateModulePassManager(PM);
 }
 
@@ -490,7 +493,6 @@ static TargetOptions GetTargetOptions() {
   TargetOptions Options;
   Options.LessPreciseFPMADOption = EnableFPMAD;
   Options.NoFramePointerElim = DisableFPElim;
-  Options.NoFramePointerElimNonLeaf = DisableFPElimNonLeaf;
   Options.AllowFPOpFusion = FuseFPOps;
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
@@ -504,12 +506,10 @@ static TargetOptions GetTargetOptions() {
   Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
   Options.DisableTailCalls = DisableTailCalls;
   Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.RealignStack = EnableRealignStack;
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
   Options.UseInitArray = UseInitArray;
-  Options.SSPBufferSize = SSPBufferSize;
   return Options;
 }
 
@@ -567,6 +567,7 @@ int main(int argc, char **argv) {
   // Initialize passes
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
   initializeCore(Registry);
+  initializeDebugIRPass(Registry);
   initializeScalarOpts(Registry);
   initializeObjCARCOpts(Registry);
   initializeVectorization(Registry);
@@ -589,7 +590,7 @@ int main(int argc, char **argv) {
   SMDiagnostic Err;
 
   // Load the input module...
-  std::auto_ptr<Module> M;
+  OwningPtr<Module> M;
   M.reset(ParseIRFile(InputFilename, Err, Context));
 
   if (M.get() == 0) {
@@ -614,7 +615,7 @@ int main(int argc, char **argv) {
 
     std::string ErrorInfo;
     Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
-                                   raw_fd_ostream::F_Binary));
+                                   sys::fs::F_Binary));
     if (!ErrorInfo.empty()) {
       errs() << ErrorInfo << '\n';
       return 1;
@@ -656,7 +657,7 @@ int main(int argc, char **argv) {
   TargetMachine *Machine = 0;
   if (ModuleTriple.getArch())
     Machine = GetTargetMachine(Triple(ModuleTriple));
-  std::auto_ptr<TargetMachine> TM(Machine);
+  OwningPtr<TargetMachine> TM(Machine);
 
   // Add internal analysis passes from the target machine.
   if (TM.get())
@@ -667,6 +668,9 @@ int main(int argc, char **argv) {
     FPasses.reset(new FunctionPassManager(M.get()));
     if (TD)
       FPasses->add(new DataLayout(*TD));
+    if (TM.get())
+      TM->addAnalysisPasses(*FPasses);
+
   }
 
   if (PrintBreakpoints) {
@@ -677,7 +681,7 @@ int main(int argc, char **argv) {
 
       std::string ErrorInfo;
       Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
-                                     raw_fd_ostream::F_Binary));
+                                     sys::fs::F_Binary));
       if (!ErrorInfo.empty()) {
         errs() << ErrorInfo << '\n';
         return 1;

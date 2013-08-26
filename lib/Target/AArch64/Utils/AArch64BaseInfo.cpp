@@ -196,6 +196,44 @@ const NamedImmMapper::Mapping A64SysReg::MRSMapper::MRSPairs[] = {
   {"cntpct_el0", CNTPCT_EL0},
   {"cntvct_el0", CNTVCT_EL0},
 
+  // Trace registers
+  {"trcstatr", TRCSTATR},
+  {"trcidr8", TRCIDR8},
+  {"trcidr9", TRCIDR9},
+  {"trcidr10", TRCIDR10},
+  {"trcidr11", TRCIDR11},
+  {"trcidr12", TRCIDR12},
+  {"trcidr13", TRCIDR13},
+  {"trcidr0", TRCIDR0},
+  {"trcidr1", TRCIDR1},
+  {"trcidr2", TRCIDR2},
+  {"trcidr3", TRCIDR3},
+  {"trcidr4", TRCIDR4},
+  {"trcidr5", TRCIDR5},
+  {"trcidr6", TRCIDR6},
+  {"trcidr7", TRCIDR7},
+  {"trcoslsr", TRCOSLSR},
+  {"trcpdsr", TRCPDSR},
+  {"trcdevaff0", TRCDEVAFF0},
+  {"trcdevaff1", TRCDEVAFF1},
+  {"trclsr", TRCLSR},
+  {"trcauthstatus", TRCAUTHSTATUS},
+  {"trcdevarch", TRCDEVARCH},
+  {"trcdevid", TRCDEVID},
+  {"trcdevtype", TRCDEVTYPE},
+  {"trcpidr4", TRCPIDR4},
+  {"trcpidr5", TRCPIDR5},
+  {"trcpidr6", TRCPIDR6},
+  {"trcpidr7", TRCPIDR7},
+  {"trcpidr0", TRCPIDR0},
+  {"trcpidr1", TRCPIDR1},
+  {"trcpidr2", TRCPIDR2},
+  {"trcpidr3", TRCPIDR3},
+  {"trccidr0", TRCCIDR0},
+  {"trccidr1", TRCCIDR1},
+  {"trccidr2", TRCCIDR2},
+  {"trccidr3", TRCCIDR3},
+
   // GICv3 registers
   {"icc_iar1_el1", ICC_IAR1_EL1},
   {"icc_iar0_el1", ICC_IAR0_EL1},
@@ -216,6 +254,10 @@ const NamedImmMapper::Mapping A64SysReg::MSRMapper::MSRPairs[] = {
   {"dbgdtrtx_el0", DBGDTRTX_EL0},
   {"oslar_el1", OSLAR_EL1},
   {"pmswinc_el0", PMSWINC_EL0},
+
+  // Trace registers
+  {"trcoslar", TRCOSLAR},
+  {"trclar", TRCLAR},
 
   // GICv3 registers
   {"icc_eoir1_el1", ICC_EOIR1_EL1},
@@ -485,6 +527,180 @@ const NamedImmMapper::Mapping A64SysReg::SysRegMapper::SysRegPairs[] = {
   {"pmevtyper28_el0", PMEVTYPER28_EL0},
   {"pmevtyper29_el0", PMEVTYPER29_EL0},
   {"pmevtyper30_el0", PMEVTYPER30_EL0},
+
+  // Trace registers
+  {"trcprgctlr", TRCPRGCTLR},
+  {"trcprocselr", TRCPROCSELR},
+  {"trcconfigr", TRCCONFIGR},
+  {"trcauxctlr", TRCAUXCTLR},
+  {"trceventctl0r", TRCEVENTCTL0R},
+  {"trceventctl1r", TRCEVENTCTL1R},
+  {"trcstallctlr", TRCSTALLCTLR},
+  {"trctsctlr", TRCTSCTLR},
+  {"trcsyncpr", TRCSYNCPR},
+  {"trcccctlr", TRCCCCTLR},
+  {"trcbbctlr", TRCBBCTLR},
+  {"trctraceidr", TRCTRACEIDR},
+  {"trcqctlr", TRCQCTLR},
+  {"trcvictlr", TRCVICTLR},
+  {"trcviiectlr", TRCVIIECTLR},
+  {"trcvissctlr", TRCVISSCTLR},
+  {"trcvipcssctlr", TRCVIPCSSCTLR},
+  {"trcvdctlr", TRCVDCTLR},
+  {"trcvdsacctlr", TRCVDSACCTLR},
+  {"trcvdarcctlr", TRCVDARCCTLR},
+  {"trcseqevr0", TRCSEQEVR0},
+  {"trcseqevr1", TRCSEQEVR1},
+  {"trcseqevr2", TRCSEQEVR2},
+  {"trcseqrstevr", TRCSEQRSTEVR},
+  {"trcseqstr", TRCSEQSTR},
+  {"trcextinselr", TRCEXTINSELR},
+  {"trccntrldvr0", TRCCNTRLDVR0},
+  {"trccntrldvr1", TRCCNTRLDVR1},
+  {"trccntrldvr2", TRCCNTRLDVR2},
+  {"trccntrldvr3", TRCCNTRLDVR3},
+  {"trccntctlr0", TRCCNTCTLR0},
+  {"trccntctlr1", TRCCNTCTLR1},
+  {"trccntctlr2", TRCCNTCTLR2},
+  {"trccntctlr3", TRCCNTCTLR3},
+  {"trccntvr0", TRCCNTVR0},
+  {"trccntvr1", TRCCNTVR1},
+  {"trccntvr2", TRCCNTVR2},
+  {"trccntvr3", TRCCNTVR3},
+  {"trcimspec0", TRCIMSPEC0},
+  {"trcimspec1", TRCIMSPEC1},
+  {"trcimspec2", TRCIMSPEC2},
+  {"trcimspec3", TRCIMSPEC3},
+  {"trcimspec4", TRCIMSPEC4},
+  {"trcimspec5", TRCIMSPEC5},
+  {"trcimspec6", TRCIMSPEC6},
+  {"trcimspec7", TRCIMSPEC7},
+  {"trcrsctlr2", TRCRSCTLR2},
+  {"trcrsctlr3", TRCRSCTLR3},
+  {"trcrsctlr4", TRCRSCTLR4},
+  {"trcrsctlr5", TRCRSCTLR5},
+  {"trcrsctlr6", TRCRSCTLR6},
+  {"trcrsctlr7", TRCRSCTLR7},
+  {"trcrsctlr8", TRCRSCTLR8},
+  {"trcrsctlr9", TRCRSCTLR9},
+  {"trcrsctlr10", TRCRSCTLR10},
+  {"trcrsctlr11", TRCRSCTLR11},
+  {"trcrsctlr12", TRCRSCTLR12},
+  {"trcrsctlr13", TRCRSCTLR13},
+  {"trcrsctlr14", TRCRSCTLR14},
+  {"trcrsctlr15", TRCRSCTLR15},
+  {"trcrsctlr16", TRCRSCTLR16},
+  {"trcrsctlr17", TRCRSCTLR17},
+  {"trcrsctlr18", TRCRSCTLR18},
+  {"trcrsctlr19", TRCRSCTLR19},
+  {"trcrsctlr20", TRCRSCTLR20},
+  {"trcrsctlr21", TRCRSCTLR21},
+  {"trcrsctlr22", TRCRSCTLR22},
+  {"trcrsctlr23", TRCRSCTLR23},
+  {"trcrsctlr24", TRCRSCTLR24},
+  {"trcrsctlr25", TRCRSCTLR25},
+  {"trcrsctlr26", TRCRSCTLR26},
+  {"trcrsctlr27", TRCRSCTLR27},
+  {"trcrsctlr28", TRCRSCTLR28},
+  {"trcrsctlr29", TRCRSCTLR29},
+  {"trcrsctlr30", TRCRSCTLR30},
+  {"trcrsctlr31", TRCRSCTLR31},
+  {"trcssccr0", TRCSSCCR0},
+  {"trcssccr1", TRCSSCCR1},
+  {"trcssccr2", TRCSSCCR2},
+  {"trcssccr3", TRCSSCCR3},
+  {"trcssccr4", TRCSSCCR4},
+  {"trcssccr5", TRCSSCCR5},
+  {"trcssccr6", TRCSSCCR6},
+  {"trcssccr7", TRCSSCCR7},
+  {"trcsscsr0", TRCSSCSR0},
+  {"trcsscsr1", TRCSSCSR1},
+  {"trcsscsr2", TRCSSCSR2},
+  {"trcsscsr3", TRCSSCSR3},
+  {"trcsscsr4", TRCSSCSR4},
+  {"trcsscsr5", TRCSSCSR5},
+  {"trcsscsr6", TRCSSCSR6},
+  {"trcsscsr7", TRCSSCSR7},
+  {"trcsspcicr0", TRCSSPCICR0},
+  {"trcsspcicr1", TRCSSPCICR1},
+  {"trcsspcicr2", TRCSSPCICR2},
+  {"trcsspcicr3", TRCSSPCICR3},
+  {"trcsspcicr4", TRCSSPCICR4},
+  {"trcsspcicr5", TRCSSPCICR5},
+  {"trcsspcicr6", TRCSSPCICR6},
+  {"trcsspcicr7", TRCSSPCICR7},
+  {"trcpdcr", TRCPDCR},
+  {"trcacvr0", TRCACVR0},
+  {"trcacvr1", TRCACVR1},
+  {"trcacvr2", TRCACVR2},
+  {"trcacvr3", TRCACVR3},
+  {"trcacvr4", TRCACVR4},
+  {"trcacvr5", TRCACVR5},
+  {"trcacvr6", TRCACVR6},
+  {"trcacvr7", TRCACVR7},
+  {"trcacvr8", TRCACVR8},
+  {"trcacvr9", TRCACVR9},
+  {"trcacvr10", TRCACVR10},
+  {"trcacvr11", TRCACVR11},
+  {"trcacvr12", TRCACVR12},
+  {"trcacvr13", TRCACVR13},
+  {"trcacvr14", TRCACVR14},
+  {"trcacvr15", TRCACVR15},
+  {"trcacatr0", TRCACATR0},
+  {"trcacatr1", TRCACATR1},
+  {"trcacatr2", TRCACATR2},
+  {"trcacatr3", TRCACATR3},
+  {"trcacatr4", TRCACATR4},
+  {"trcacatr5", TRCACATR5},
+  {"trcacatr6", TRCACATR6},
+  {"trcacatr7", TRCACATR7},
+  {"trcacatr8", TRCACATR8},
+  {"trcacatr9", TRCACATR9},
+  {"trcacatr10", TRCACATR10},
+  {"trcacatr11", TRCACATR11},
+  {"trcacatr12", TRCACATR12},
+  {"trcacatr13", TRCACATR13},
+  {"trcacatr14", TRCACATR14},
+  {"trcacatr15", TRCACATR15},
+  {"trcdvcvr0", TRCDVCVR0},
+  {"trcdvcvr1", TRCDVCVR1},
+  {"trcdvcvr2", TRCDVCVR2},
+  {"trcdvcvr3", TRCDVCVR3},
+  {"trcdvcvr4", TRCDVCVR4},
+  {"trcdvcvr5", TRCDVCVR5},
+  {"trcdvcvr6", TRCDVCVR6},
+  {"trcdvcvr7", TRCDVCVR7},
+  {"trcdvcmr0", TRCDVCMR0},
+  {"trcdvcmr1", TRCDVCMR1},
+  {"trcdvcmr2", TRCDVCMR2},
+  {"trcdvcmr3", TRCDVCMR3},
+  {"trcdvcmr4", TRCDVCMR4},
+  {"trcdvcmr5", TRCDVCMR5},
+  {"trcdvcmr6", TRCDVCMR6},
+  {"trcdvcmr7", TRCDVCMR7},
+  {"trccidcvr0", TRCCIDCVR0},
+  {"trccidcvr1", TRCCIDCVR1},
+  {"trccidcvr2", TRCCIDCVR2},
+  {"trccidcvr3", TRCCIDCVR3},
+  {"trccidcvr4", TRCCIDCVR4},
+  {"trccidcvr5", TRCCIDCVR5},
+  {"trccidcvr6", TRCCIDCVR6},
+  {"trccidcvr7", TRCCIDCVR7},
+  {"trcvmidcvr0", TRCVMIDCVR0},
+  {"trcvmidcvr1", TRCVMIDCVR1},
+  {"trcvmidcvr2", TRCVMIDCVR2},
+  {"trcvmidcvr3", TRCVMIDCVR3},
+  {"trcvmidcvr4", TRCVMIDCVR4},
+  {"trcvmidcvr5", TRCVMIDCVR5},
+  {"trcvmidcvr6", TRCVMIDCVR6},
+  {"trcvmidcvr7", TRCVMIDCVR7},
+  {"trccidcctlr0", TRCCIDCCTLR0},
+  {"trccidcctlr1", TRCCIDCCTLR1},
+  {"trcvmidcctlr0", TRCVMIDCCTLR0},
+  {"trcvmidcctlr1", TRCVMIDCCTLR1},
+  {"trcitctrl", TRCITCTRL},
+  {"trcclaimset", TRCCLAIMSET},
+  {"trcclaimclr", TRCCLAIMCLR},
 
   // GICv3 registers
   {"icc_bpr1_el1", ICC_BPR1_EL1},
@@ -756,7 +972,7 @@ bool A64Imms::isLogicalImm(unsigned RegWidth, uint64_t Imm, uint32_t &Bits) {
     // Now we have to work out the amount of rotation needed. The first part of
     // this calculation is actually independent of RepeatWidth, but the complex
     // case will depend on it.
-    Rotation = CountTrailingZeros_64(Imm);
+    Rotation = countTrailingZeros(Imm);
     if (Rotation == 0) {
       // There were no leading zeros, which means it's either in place or there
       // are 1s at each end (e.g. 0x8003 needs rotating).
@@ -765,8 +981,11 @@ bool A64Imms::isLogicalImm(unsigned RegWidth, uint64_t Imm, uint32_t &Bits) {
       Rotation = RepeatWidth - Rotation;
     }
 
-    uint64_t ReplicatedOnes = (ReplicatedMask >> Rotation)
-      | ((ReplicatedMask << (RepeatWidth - Rotation)) & RepeatMask);
+    uint64_t ReplicatedOnes = ReplicatedMask;
+    if (Rotation != 0 && Rotation != 64)
+      ReplicatedOnes = (ReplicatedMask >> Rotation)
+        | ((ReplicatedMask << (RepeatWidth - Rotation)) & RepeatMask);
+
     // Of course, they may not actually be ones, so we have to check that:
     if (!isMask_64(ReplicatedOnes))
       continue;
@@ -835,13 +1054,14 @@ bool A64Imms::isLogicalImmBits(unsigned RegWidth, uint32_t Bits,
   int Rotation = (ImmR & (Width - 1));
   uint64_t Mask = (1ULL << Num1s) - 1;
   uint64_t WidthMask = Width == 64 ? -1 : (1ULL << Width) - 1;
-  Mask = (Mask >> Rotation)
-    | ((Mask << (Width - Rotation)) & WidthMask);
+  if (Rotation != 0 && Rotation != 64)
+    Mask = (Mask >> Rotation)
+      | ((Mask << (Width - Rotation)) & WidthMask);
 
-  Imm = 0;
-  for (unsigned i = 0; i < RegWidth / Width; ++i) {
-    Imm |= Mask;
+  Imm = Mask;
+  for (unsigned i = 1; i < RegWidth / Width; ++i) {
     Mask <<= Width;
+    Imm |= Mask;
   }
 
   return true;
@@ -884,4 +1104,70 @@ bool A64Imms::isOnlyMOVNImm(int RegWidth, uint64_t Value,
     return false;
 
   return isMOVNImm(RegWidth, Value, UImm16, Shift);
+}
+
+// decodeNeonModShiftImm - Decode a Neon OpCmode value into the
+// the shift amount and the shift type (shift zeros or ones in) and
+// returns whether the OpCmode value implies a shift operation.
+bool A64Imms::decodeNeonModShiftImm(unsigned OpCmode, unsigned &ShiftImm,
+                                    unsigned &ShiftOnesIn) {
+  ShiftImm = 0;
+  ShiftOnesIn = false;
+  bool HasShift = true;
+
+  if (OpCmode == 0xe) {
+    // movi byte
+    HasShift = false;
+  } else if (OpCmode == 0x1e) {
+    // movi 64-bit bytemask
+    HasShift = false;
+  } else if ((OpCmode & 0xc) == 0x8) {
+    // shift zeros, per halfword
+    ShiftImm = ((OpCmode & 0x2) >> 1);
+  } else if ((OpCmode & 0x8) == 0) {
+    // shift zeros, per word
+    ShiftImm = ((OpCmode & 0x6) >> 1);
+  } else if ((OpCmode & 0xe) == 0xc) {
+    // shift ones, per word
+    ShiftOnesIn = true;
+    ShiftImm = (OpCmode & 0x1);
+  } else {
+    // per byte, per bytemask
+    llvm_unreachable("Unsupported Neon modified immediate");
+  }
+
+  return HasShift;
+}
+
+// decodeNeonModImm - Decode a NEON modified immediate and OpCmode values
+// into the element value and the element size in bits.
+uint64_t A64Imms::decodeNeonModImm(unsigned Val, unsigned OpCmode,
+                                   unsigned &EltBits) {
+  uint64_t DecodedVal = Val;
+  EltBits = 0;
+
+  if (OpCmode == 0xe) {
+    // movi byte
+    EltBits = 8;
+  } else if (OpCmode == 0x1e) {
+    // movi 64-bit bytemask
+    DecodedVal = 0;
+    for (unsigned ByteNum = 0; ByteNum < 8; ++ByteNum) {
+      if ((Val >> ByteNum) & 1)
+        DecodedVal |= (uint64_t)0xff << (8 * ByteNum);
+    }
+    EltBits = 64;
+  } else if ((OpCmode & 0xc) == 0x8) {
+    // shift zeros, per halfword
+    EltBits = 16;
+  } else if ((OpCmode & 0x8) == 0) {
+    // shift zeros, per word
+    EltBits = 32;
+  } else if ((OpCmode & 0xe) == 0xc) {
+    // shift ones, per word
+    EltBits = 32;
+  } else {
+    llvm_unreachable("Unsupported Neon modified immediate");
+  }
+  return DecodedVal;
 }

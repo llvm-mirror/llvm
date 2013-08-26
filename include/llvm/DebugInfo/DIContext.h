@@ -21,6 +21,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/RelocVisitor.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/DataTypes.h"
 
 namespace llvm {
@@ -105,6 +106,7 @@ enum DIDumpType {
   DIDT_Info,
   DIDT_InfoDwo,
   DIDT_Line,
+  DIDT_Loc,
   DIDT_Ranges,
   DIDT_Pubnames,
   DIDT_Str,
@@ -121,6 +123,12 @@ typedef DenseMap<uint64_t, std::pair<uint8_t, int64_t> > RelocAddrMap;
 
 class DIContext {
 public:
+  enum DIContextKind {
+    CK_DWARF
+  };
+  DIContextKind getKind() const { return Kind; }
+
+  DIContext(DIContextKind K) : Kind(K) {}
   virtual ~DIContext();
 
   /// getDWARFContext - get a context for binary DWARF data.
@@ -134,6 +142,8 @@ public:
       uint64_t Size, DILineInfoSpecifier Specifier = DILineInfoSpecifier()) = 0;
   virtual DIInliningInfo getInliningInfoForAddress(uint64_t Address,
       DILineInfoSpecifier Specifier = DILineInfoSpecifier()) = 0;
+private:
+  const DIContextKind Kind;
 };
 
 }

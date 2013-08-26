@@ -1883,13 +1883,10 @@ def CortexA9Itineraries : ProcessorItineraries<
 // Cortex-A9 machine model for scheduling and other instruction cost heuristics.
 def CortexA9Model : SchedMachineModel {
   let IssueWidth = 2; // 2 micro-ops are dispatched per cycle.
-  let MinLatency = 0; // Data dependencies are allowed within dispatch groups.
+  let MicroOpBufferSize = 56; // Based on available renamed registers.
   let LoadLatency = 2; // Optimistic load latency assuming bypass.
                        // This is overriden by OperandCycles if the
                        // Itineraries are queried instead.
-  let ILPWindow = 10; // Don't reschedule small blocks to hide
-                      // latency. Minimum latency requirements are already
-                      // modeled strictly by reserving resources.
   let MispredictPenalty = 8; // Based on estimate of pipeline depth.
 
   let Itineraries = CortexA9Itineraries;
@@ -1904,7 +1901,7 @@ def A9UnitALU : ProcResource<2>;
 def A9UnitMul : ProcResource<1> { let Super = A9UnitALU; }
 def A9UnitAGU : ProcResource<1>;
 def A9UnitLS  : ProcResource<1>;
-def A9UnitFP  : ProcResource<1> { let Buffered = 0; }
+def A9UnitFP  : ProcResource<1> { let BufferSize = 0; }
 def A9UnitB   : ProcResource<1>;
 
 //===----------------------------------------------------------------------===//
@@ -1920,7 +1917,7 @@ def A9WriteI : SchedWriteRes<[A9UnitALU]>;
 def A9WriteIsr : SchedWriteRes<[A9UnitALU]> { let Latency = 2; }
 
 // Basic ALU.
-def : WriteRes<WriteALU, [A9UnitALU]>;
+def A9WriteALU : SchedWriteRes<[A9UnitALU]>;
 // ALU with operand shifted by immediate.
 def : WriteRes<WriteALUsi, [A9UnitALU]> { let Latency = 2; }
 // ALU with operand shifted by register.
@@ -2275,10 +2272,10 @@ def A9Read4 : SchedReadAdvance<3>;
 // This table follows the ARM Cortex-A9 Technical Reference Manuals,
 // mostly in order.
 
-def :ItinRW<[A9WriteI], [IIC_iMOVi,IIC_iMOVr,IIC_iMOVsi,
+def :ItinRW<[WriteALU], [IIC_iMOVi,IIC_iMOVr,IIC_iMOVsi,
                          IIC_iMVNi,IIC_iMVNsi,
                          IIC_iCMOVi,IIC_iCMOVr,IIC_iCMOVsi]>;
-def :ItinRW<[A9WriteI,ReadALU],[IIC_iMVNr]>;
+def :ItinRW<[WriteALU, A9ReadALU],[IIC_iMVNr]>;
 def :ItinRW<[A9WriteIsr], [IIC_iMOVsr,IIC_iMVNsr,IIC_iCMOVsr]>;
 
 def :ItinRW<[A9WriteI2],   [IIC_iMOVix2,IIC_iCMOVix2]>;
@@ -2286,13 +2283,13 @@ def :ItinRW<[A9WriteI2pc], [IIC_iMOVix2addpc]>;
 def :ItinRW<[A9WriteI2ld], [IIC_iMOVix2ld]>;
 
 def :ItinRW<[WriteALU], [IIC_iBITi,IIC_iBITr,IIC_iUNAr,IIC_iTSTi,IIC_iTSTr]>;
-def :ItinRW<[WriteALU, ReadALU], [IIC_iALUi, IIC_iCMPi, IIC_iCMPsi]>;
-def :ItinRW<[WriteALU, ReadALU, ReadALU],[IIC_iALUr,IIC_iCMPr]>;
+def :ItinRW<[WriteALU, A9ReadALU], [IIC_iALUi, IIC_iCMPi, IIC_iCMPsi]>;
+def :ItinRW<[WriteALU, A9ReadALU, A9ReadALU],[IIC_iALUr,IIC_iCMPr]>;
 def :ItinRW<[WriteALUsi], [IIC_iBITsi,IIC_iUNAsi,IIC_iEXTr,IIC_iTSTsi]>;
-def :ItinRW<[WriteALUsi, ReadALU], [IIC_iALUsi]>;
-def :ItinRW<[WriteALUsi, ReadDefault, ReadALU], [IIC_iALUsir]>; // RSB
+def :ItinRW<[WriteALUsi, A9ReadALU], [IIC_iALUsi]>;
+def :ItinRW<[WriteALUsi, ReadDefault, A9ReadALU], [IIC_iALUsir]>; // RSB
 def :ItinRW<[A9WriteALUsr], [IIC_iBITsr,IIC_iTSTsr,IIC_iEXTAr,IIC_iEXTAsr]>;
-def :ItinRW<[A9WriteALUsr, ReadALU], [IIC_iALUsr,IIC_iCMPsr]>;
+def :ItinRW<[A9WriteALUsr, A9ReadALU], [IIC_iALUsr,IIC_iCMPsr]>;
 
 // A9WriteHi ignored for MUL32.
 def :ItinRW<[A9WriteM, A9WriteMHi], [IIC_iMUL32,IIC_iMAC32,
@@ -2482,9 +2479,64 @@ def :ItinRW<[A9WriteV9, A9Read2, A9Read2], [IIC_VRECSD]>;
 def :ItinRW<[A9WriteV10, A9Read2, A9Read2], [IIC_VRECSQ]>;
 
 // Map SchedRWs that are identical for cortexa9 to existing resources.
+def : SchedAlias<WriteALU, A9WriteALU>;
 def : SchedAlias<WriteALUsr, A9WriteALUsr>;
 def : SchedAlias<WriteALUSsr, A9WriteALUsr>;
 def : SchedAlias<ReadALU, A9ReadALU>;
 def : SchedAlias<ReadALUsr, A9ReadALU>;
+def : InstRW< [WriteALU],
+      (instregex "ANDri", "ORRri", "EORri", "BICri", "ANDrr", "ORRrr", "EORrr",
+                 "BICrr")>;
+def : InstRW< [WriteALUsi], (instregex "ANDrsi", "ORRrsi", "EORrsi", "BICrsi")>;
+def : InstRW< [WriteALUsr], (instregex "ANDrsr", "ORRrsr", "EORrsr", "BICrsr")>;
 
+
+def : SchedAlias<WriteCMP, A9WriteALU>;
+def : SchedAlias<WriteCMPsi, A9WriteALU>;
+def : SchedAlias<WriteCMPsr, A9WriteALU>;
+
+def : InstRW< [A9WriteIsr], (instregex "MOVsr", "MOVsi", "MVNsr", "MOVCCsi",
+                                       "MOVCCsr")>;
+def : InstRW< [WriteALU, A9ReadALU], (instregex "MVNr")>;
+def : InstRW< [A9WriteI2], (instregex "MOVCCi32imm", "MOVi32imm",
+                                      "MOV_ga_dyn")>;
+def : InstRW< [A9WriteI2pc], (instregex "MOV_ga_pcrel")>;
+def : InstRW< [A9WriteI2ld], (instregex "MOV_ga_pcrel_ldr")>;
+
+def : InstRW< [WriteALU], (instregex "SEL")>;
+
+def : InstRW< [WriteALUsi], (instregex "BFC", "BFI", "UBFX", "SBFX")>;
+
+def : InstRW< [A9WriteM],
+      (instregex "MUL", "MULv5", "SMMUL", "SMMULR", "MLA", "MLAv5", "MLS",
+      "SMMLA", "SMMLAR", "SMMLS", "SMMLSR")>;
+def : InstRW< [A9WriteM, A9WriteMHi],
+      (instregex "SMULL", "SMULLv5", "UMULL", "UMULLv5", "SMLAL$", "UMLAL",
+      "UMAAL", "SMLALv5", "UMLALv5", "UMAALv5", "SMLALBB", "SMLALBT", "SMLALTB",
+      "SMLALTT")>;
+// FIXME: These instructions used to have NoItinerary. Just copied the one from above.
+def : InstRW< [A9WriteM, A9WriteMHi],
+      (instregex "SMLAD", "SMLADX", "SMLALD", "SMLALDX", "SMLSD", "SMLSDX",
+      "SMLSLD", "SMLLDX", "SMUAD", "SMUADX", "SMUSD", "SMUSDX")>;
+
+def : InstRW<[A9WriteM16, A9WriteM16Hi],
+      (instregex "SMULBB", "SMULBT", "SMULTB", "SMULTT", "SMULWB", "SMULWT")>;
+def : InstRW<[A9WriteM16, A9WriteM16Hi],
+      (instregex "SMLABB", "SMLABT", "SMLATB", "SMLATT", "SMLAWB", "SMLAWT")>;
+
+def : InstRW<[A9WriteL], (instregex "LDRi12", "PICLDR$")>;
+def : InstRW<[A9WriteLsi], (instregex "LDRrs")>;
+def : InstRW<[A9WriteLb],
+      (instregex "LDRBi12", "PICLDRH", "PICLDRB", "PICLDRSH", "PICLDRSB",
+      "LDRH", "LDRSH", "LDRSB")>;
+def : InstRW<[A9WriteLbsi], (instregex "LDRrs")>;
+
+def : WriteRes<WriteDiv, []> { let Latency = 0; }
+
+def : WriteRes<WriteBr, [A9UnitB]>;
+def : WriteRes<WriteBrL, [A9UnitB]>;
+def : WriteRes<WriteBrTbl, [A9UnitB]>;
+def : WriteRes<WritePreLd, []>;
+def : SchedAlias<WriteCvtFP, A9WriteF>;
+def : WriteRes<WriteNoop, []> { let Latency = 0; let NumMicroOps = 0; }
 } // SchedModel = CortexA9Model

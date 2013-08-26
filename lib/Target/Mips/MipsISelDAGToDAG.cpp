@@ -17,7 +17,6 @@
 #include "MipsSEISelDAGToDAG.h"
 #include "Mips.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
-#include "MipsAnalyzeImmediate.h"
 #include "MipsMachineFunction.h"
 #include "MipsRegisterInfo.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -58,7 +57,8 @@ bool MipsDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
 /// GOT address into a register.
 SDNode *MipsDAGToDAGISel::getGlobalBaseReg() {
   unsigned GlobalBaseReg = MF->getInfo<MipsFunctionInfo>()->getGlobalBaseReg();
-  return CurDAG->getRegister(GlobalBaseReg, TLI.getPointerTy()).getNode();
+  return CurDAG->getRegister(GlobalBaseReg,
+                             getTargetLowering()->getPointerTy()).getNode();
 }
 
 /// ComplexPattern used on MipsInstrInfo
@@ -77,6 +77,12 @@ bool MipsDAGToDAGISel::selectAddrDefault(SDValue Addr, SDValue &Base,
 
 bool MipsDAGToDAGISel::selectIntAddr(SDValue Addr, SDValue &Base,
                                      SDValue &Offset) const {
+  llvm_unreachable("Unimplemented function.");
+  return false;
+}
+
+bool MipsDAGToDAGISel::selectIntAddrMM(SDValue Addr, SDValue &Base,
+                                       SDValue &Offset) const {
   llvm_unreachable("Unimplemented function.");
   return false;
 }

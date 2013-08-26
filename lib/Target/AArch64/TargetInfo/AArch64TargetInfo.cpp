@@ -19,6 +19,6 @@ using namespace llvm;
 Target llvm::TheAArch64Target;
 
 extern "C" void LLVMInitializeAArch64TargetInfo() {
-  RegisterTarget<Triple::aarch64>
-    X(TheAArch64Target, "aarch64", "AArch64");
+    RegisterTarget<Triple::aarch64, /*HasJIT=*/true>
+    X(TheAArch64Target, "aarch64", "AArch64 (ARM 64-bit target)");
 }

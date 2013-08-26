@@ -468,7 +468,11 @@ namespace {
       // Grow the required block size to account for the block header
       Size += sizeof(*CurBlock);
 
-      // FIXME: Alignement handling.
+      // Alignment handling.
+      if (!Alignment)
+        Alignment = 16;
+      Size += Alignment - 1;
+
       FreeRangeHeader* candidateBlock = FreeMemoryList;
       FreeRangeHeader* head = FreeMemoryList;
       FreeRangeHeader* iter = head->Next;
@@ -500,7 +504,8 @@ namespace {
       FreeMemoryList = candidateBlock->AllocateBlock();
       // Release the memory at the end of this block that isn't needed.
       FreeMemoryList = CurBlock->TrimAllocationToSize(FreeMemoryList, Size);
-      return (uint8_t *)(CurBlock + 1);
+      uintptr_t unalignedAddr = (uintptr_t)CurBlock + sizeof(*CurBlock);
+      return (uint8_t*)RoundUpToAlignment((uint64_t)unalignedAddr, Alignment);
     }
 
     /// allocateDataSection - Allocate memory for a data section.
@@ -509,28 +514,8 @@ namespace {
       return (uint8_t*)DataAllocator.Allocate(Size, Alignment);
     }
 
-    bool applyPermissions(std::string *ErrMsg) {
+    bool finalizeMemory(std::string *ErrMsg) {
       return false;
-    }
-
-    /// startExceptionTable - Use startFunctionBody to allocate memory for the
-    /// function's exception table.
-    uint8_t* startExceptionTable(const Function* F, uintptr_t &ActualSize) {
-      return startFunctionBody(F, ActualSize);
-    }
-
-    /// endExceptionTable - The exception table of F is now allocated,
-    /// and takes the memory in the range [TableStart,TableEnd).
-    void endExceptionTable(const Function *F, uint8_t *TableStart,
-                           uint8_t *TableEnd, uint8_t* FrameRegister) {
-      assert(TableEnd > TableStart);
-      assert(TableStart == (uint8_t *)(CurBlock+1) &&
-             "Mismatched table start/end!");
-
-      uintptr_t BlockSize = TableEnd - (uint8_t *)CurBlock;
-
-      // Release the memory at the end of this block that isn't needed.
-      FreeMemoryList =CurBlock->TrimAllocationToSize(FreeMemoryList, BlockSize);
     }
 
     uint8_t *getGOTBase() const {
@@ -555,12 +540,6 @@ namespace {
     /// function body.
     void deallocateFunctionBody(void *Body) {
       if (Body) deallocateBlock(Body);
-    }
-
-    /// deallocateExceptionTable - Deallocate memory for the specified
-    /// exception table.
-    void deallocateExceptionTable(void *ET) {
-      if (ET) deallocateBlock(ET);
     }
 
     /// setMemoryWritable - When code generation is in progress,

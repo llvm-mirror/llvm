@@ -134,7 +134,7 @@ namespace {
     /// has a computable trip count and, if so, return a value that represents
     /// the trip count expression.
     CountValue *getLoopTripCount(MachineLoop *L,
-                                 SmallVector<MachineInstr*, 2> &OldInsts);
+                                 SmallVectorImpl<MachineInstr *> &OldInsts);
 
     /// \brief Return the expression that represents the number of times
     /// a loop iterates.  The function takes the operands that represent the
@@ -164,7 +164,7 @@ namespace {
 
     /// \brief Return true if the instruction is now dead.
     bool isDead(const MachineInstr *MI,
-                SmallVector<MachineInstr*, 1> &DeadPhis) const;
+                SmallVectorImpl<MachineInstr *> &DeadPhis) const;
 
     /// \brief Remove the instruction if it is now dead.
     void removeIfDead(MachineInstr *MI);
@@ -428,7 +428,7 @@ bool HexagonHardwareLoops::findInductionRegister(MachineLoop *L,
 /// induction variable patterns that are used in the calculation for
 /// the number of time the loop is executed.
 CountValue *HexagonHardwareLoops::getLoopTripCount(MachineLoop *L,
-                                SmallVector<MachineInstr*, 2> &OldInsts) {
+                                    SmallVectorImpl<MachineInstr *> &OldInsts) {
   MachineBasicBlock *TopMBB = L->getTopBlock();
   MachineBasicBlock::pred_iterator PI = TopMBB->pred_begin();
   assert(PI != TopMBB->pred_end() &&
@@ -540,12 +540,6 @@ CountValue *HexagonHardwareLoops::getLoopTripCount(MachineLoop *L,
     case Hexagon::CMPEQri:
     case Hexagon::CMPEQrr:
       Cmp = !Negated ? Comparison::EQ : Comparison::NE;
-      break;
-    case Hexagon::CMPLTrr:
-      Cmp = !Negated ? Comparison::LTs : Comparison::GEs;
-      break;
-    case Hexagon::CMPLTUrr:
-      Cmp = !Negated ? Comparison::LTu : Comparison::GEu;
       break;
     case Hexagon::CMPGTUri:
     case Hexagon::CMPGTUrr:
@@ -896,7 +890,7 @@ bool HexagonHardwareLoops::containsInvalidInstruction(MachineLoop *L) const {
 /// for inline asm, physical registers and instructions with side effects
 /// removed.
 bool HexagonHardwareLoops::isDead(const MachineInstr *MI,
-                             SmallVector<MachineInstr*, 1> &DeadPhis) const {
+                              SmallVectorImpl<MachineInstr *> &DeadPhis) const {
   // Examine each operand.
   for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
     const MachineOperand &MO = MI->getOperand(i);
@@ -1125,8 +1119,8 @@ bool HexagonHardwareLoops::convertToHardwareLoop(MachineLoop *L) {
   // The loop ends with either:
   //  - a conditional branch followed by an unconditional branch, or
   //  - a conditional branch to the loop start.
-  if (LastI->getOpcode() == Hexagon::JMP_c ||
-      LastI->getOpcode() == Hexagon::JMP_cNot) {
+  if (LastI->getOpcode() == Hexagon::JMP_t ||
+      LastI->getOpcode() == Hexagon::JMP_f) {
     // Delete one and change/add an uncond. branch to out of the loop.
     MachineBasicBlock *BranchTarget = LastI->getOperand(1).getMBB();
     LastI = LastMBB->erase(LastI);

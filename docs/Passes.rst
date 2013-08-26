@@ -490,7 +490,7 @@ string is available.
 ``-constprop``: Simple constant propagation
 -------------------------------------------
 
-This file implements constant propagation and merging.  It looks for
+This pass implements constant propagation and merging.  It looks for
 instructions involving only constant operands and replaces them with a constant
 value instead of an instruction.  For example:
 
@@ -505,8 +505,8 @@ becomes
   i32 3
 
 NOTE: this pass has a habit of making definitions be dead.  It is a good idea
-to to run a :ref:`Dead Instruction Elimination <passes-die>` pass sometime
-after running this pass.
+to run a :ref:`Dead Instruction Elimination <passes-die>` pass sometime after
+running this pass.
 
 .. _passes-dce:
 
@@ -1018,8 +1018,8 @@ possible, it transforms the individual ``alloca`` instructions into nice clean
 scalar SSA form.
 
 This combines a simple scalar replacement of aggregates algorithm with the
-:ref:`mem2reg <passes-mem2reg>` algorithm because often interact, especially
-for C++ programs.  As such, iterating between ``scalarrepl``, then
+:ref:`mem2reg <passes-mem2reg>` algorithm because they often interact,
+especially for C++ programs.  As such, iterating between ``scalarrepl``, then
 :ref:`mem2reg <passes-mem2reg>` until we run out of things to promote works
 well.
 
@@ -1037,7 +1037,7 @@ as:
 * Proves conditional branches to be unconditional
 
 Note that this pass has a habit of making definitions be dead.  It is a good
-idea to to run a :ref:`DCE <passes-dce>` pass sometime after running this pass.
+idea to run a :ref:`DCE <passes-dce>` pass sometime after running this pass.
 
 ``-simplify-libcalls``: Simplify well-known library calls
 ---------------------------------------------------------

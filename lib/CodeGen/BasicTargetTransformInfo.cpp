@@ -26,18 +26,20 @@ using namespace llvm;
 namespace {
 
 class BasicTTI : public ImmutablePass, public TargetTransformInfo {
-  const TargetLoweringBase *TLI;
+  const TargetMachine *TM;
 
   /// Estimate the overhead of scalarizing an instruction. Insert and Extract
   /// are set if the result needs to be inserted and/or extracted from vectors.
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
+  const TargetLoweringBase *getTLI() const { return TM->getTargetLowering(); }
+
 public:
-  BasicTTI() : ImmutablePass(ID), TLI(0) {
+  BasicTTI() : ImmutablePass(ID), TM(0) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
-  BasicTTI(const TargetLoweringBase *TLI) : ImmutablePass(ID), TLI(TLI) {
+  BasicTTI(const TargetMachine *TM) : ImmutablePass(ID), TM(TM) {
     initializeBasicTTIPass(*PassRegistry::getPassRegistry());
   }
 
@@ -63,6 +65,8 @@ public:
     return this;
   }
 
+  virtual bool hasBranchDivergence() const;
+
   /// \name Scalar TTI Implementations
   /// @{
 
@@ -71,6 +75,9 @@ public:
   virtual bool isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV,
                                      int64_t BaseOffset, bool HasBaseReg,
                                      int64_t Scale) const;
+  virtual int getScalingFactorCost(Type *Ty, GlobalValue *BaseGV,
+                                   int64_t BaseOffset, bool HasBaseReg,
+                                   int64_t Scale) const;
   virtual bool isTruncateFree(Type *Ty1, Type *Ty2) const;
   virtual bool isTypeLegal(Type *Ty) const;
   virtual unsigned getJumpBufAlignment() const;
@@ -85,7 +92,9 @@ public:
   virtual unsigned getNumberOfRegisters(bool Vector) const;
   virtual unsigned getMaximumUnrollFactor() const;
   virtual unsigned getRegisterBitWidth(bool Vector) const;
-  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const;
+  virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                          OperandValueKind,
+                                          OperandValueKind) const;
   virtual unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
                                   int Index, Type *SubTp) const;
   virtual unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
@@ -101,7 +110,7 @@ public:
   virtual unsigned getIntrinsicInstrCost(Intrinsic::ID, Type *RetTy,
                                          ArrayRef<Type*> Tys) const;
   virtual unsigned getNumberOfParts(Type *Tp) const;
-  virtual unsigned getAddressComputationCost(Type *Ty) const;
+  virtual unsigned getAddressComputationCost(Type *Ty, bool IsComplex) const;
 
   /// @}
 };
@@ -113,17 +122,18 @@ INITIALIZE_AG_PASS(BasicTTI, TargetTransformInfo, "basictti",
 char BasicTTI::ID = 0;
 
 ImmutablePass *
-llvm::createBasicTargetTransformInfoPass(const TargetLoweringBase *TLI) {
-  return new BasicTTI(TLI);
+llvm::createBasicTargetTransformInfoPass(const TargetMachine *TM) {
+  return new BasicTTI(TM);
 }
 
+bool BasicTTI::hasBranchDivergence() const { return false; }
 
 bool BasicTTI::isLegalAddImmediate(int64_t imm) const {
-  return TLI->isLegalAddImmediate(imm);
+  return getTLI()->isLegalAddImmediate(imm);
 }
 
 bool BasicTTI::isLegalICmpImmediate(int64_t imm) const {
-  return TLI->isLegalICmpImmediate(imm);
+  return getTLI()->isLegalICmpImmediate(imm);
 }
 
 bool BasicTTI::isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV,
@@ -134,27 +144,39 @@ bool BasicTTI::isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV,
   AM.BaseOffs = BaseOffset;
   AM.HasBaseReg = HasBaseReg;
   AM.Scale = Scale;
-  return TLI->isLegalAddressingMode(AM, Ty);
+  return getTLI()->isLegalAddressingMode(AM, Ty);
+}
+
+int BasicTTI::getScalingFactorCost(Type *Ty, GlobalValue *BaseGV,
+                                   int64_t BaseOffset, bool HasBaseReg,
+                                   int64_t Scale) const {
+  TargetLoweringBase::AddrMode AM;
+  AM.BaseGV = BaseGV;
+  AM.BaseOffs = BaseOffset;
+  AM.HasBaseReg = HasBaseReg;
+  AM.Scale = Scale;
+  return getTLI()->getScalingFactorCost(AM, Ty);
 }
 
 bool BasicTTI::isTruncateFree(Type *Ty1, Type *Ty2) const {
-  return TLI->isTruncateFree(Ty1, Ty2);
+  return getTLI()->isTruncateFree(Ty1, Ty2);
 }
 
 bool BasicTTI::isTypeLegal(Type *Ty) const {
-  EVT T = TLI->getValueType(Ty);
-  return TLI->isTypeLegal(T);
+  EVT T = getTLI()->getValueType(Ty);
+  return getTLI()->isTypeLegal(T);
 }
 
 unsigned BasicTTI::getJumpBufAlignment() const {
-  return TLI->getJumpBufAlignment();
+  return getTLI()->getJumpBufAlignment();
 }
 
 unsigned BasicTTI::getJumpBufSize() const {
-  return TLI->getJumpBufSize();
+  return getTLI()->getJumpBufSize();
 }
 
 bool BasicTTI::shouldBuildLookupTables() const {
+  const TargetLoweringBase *TLI = getTLI();
   return TLI->supportJumpTables() &&
       (TLI->isOperationLegalOrCustom(ISD::BR_JT, MVT::Other) ||
        TLI->isOperationLegalOrCustom(ISD::BRIND, MVT::Other));
@@ -193,27 +215,35 @@ unsigned BasicTTI::getMaximumUnrollFactor() const {
   return 1;
 }
 
-unsigned BasicTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
+unsigned BasicTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                          OperandValueKind,
+                                          OperandValueKind) const {
   // Check if any of the operands are vector operands.
+  const TargetLoweringBase *TLI = getTLI();
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
   std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Ty);
 
+  bool IsFloat = Ty->getScalarType()->isFloatingPointTy();
+  // Assume that floating point arithmetic operations cost twice as much as
+  // integer operations.
+  unsigned OpCost = (IsFloat ? 2 : 1);
+
   if (TLI->isOperationLegalOrPromote(ISD, LT.second)) {
     // The operation is legal. Assume it costs 1.
-    // If the type is split to multiple registers, assume that thre is some
+    // If the type is split to multiple registers, assume that there is some
     // overhead to this.
     // TODO: Once we have extract/insert subvector cost we need to use them.
     if (LT.first > 1)
-      return LT.first * 2;
-    return LT.first * 1;
+      return LT.first * 2 * OpCost;
+    return LT.first * 1 * OpCost;
   }
 
   if (!TLI->isOperationExpand(ISD, LT.second)) {
     // If the operation is custom lowered then assume
     // thare the code is twice as expensive.
-    return LT.first * 2;
+    return LT.first * 2 * OpCost;
   }
 
   // Else, assume that we need to scalarize this op.
@@ -226,7 +256,7 @@ unsigned BasicTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
   }
 
   // We don't know anything about this scalar instruction.
-  return 1;
+  return OpCost;
 }
 
 unsigned BasicTTI::getShuffleCost(ShuffleKind Kind, Type *Tp, int Index,
@@ -236,6 +266,7 @@ unsigned BasicTTI::getShuffleCost(ShuffleKind Kind, Type *Tp, int Index,
 
 unsigned BasicTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
                                     Type *Src) const {
+  const TargetLoweringBase *TLI = getTLI();
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
@@ -329,6 +360,7 @@ unsigned BasicTTI::getCFInstrCost(unsigned Opcode) const {
 
 unsigned BasicTTI::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
                                       Type *CondTy) const {
+  const TargetLoweringBase *TLI = getTLI();
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
@@ -373,7 +405,7 @@ unsigned BasicTTI::getMemoryOpCost(unsigned Opcode, Type *Src,
                                    unsigned Alignment,
                                    unsigned AddressSpace) const {
   assert(!Src->isVoidTy() && "Invalid type");
-  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Src);
+  std::pair<unsigned, MVT> LT = getTLI()->getTypeLegalizationCost(Src);
 
   // Assume that all loads of legal types cost 1.
   return LT.first;
@@ -414,12 +446,19 @@ unsigned BasicTTI::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
   case Intrinsic::floor:   ISD = ISD::FFLOOR; break;
   case Intrinsic::ceil:    ISD = ISD::FCEIL;  break;
   case Intrinsic::trunc:   ISD = ISD::FTRUNC; break;
+  case Intrinsic::nearbyint:
+                           ISD = ISD::FNEARBYINT; break;
   case Intrinsic::rint:    ISD = ISD::FRINT;  break;
+  case Intrinsic::round:   ISD = ISD::FROUND; break;
   case Intrinsic::pow:     ISD = ISD::FPOW;   break;
   case Intrinsic::fma:     ISD = ISD::FMA;    break;
   case Intrinsic::fmuladd: ISD = ISD::FMA;    break; // FIXME: mul + add?
+  case Intrinsic::lifetime_start:
+  case Intrinsic::lifetime_end:
+    return 0;
   }
 
+  const TargetLoweringBase *TLI = getTLI();
   std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(RetTy);
 
   if (TLI->isOperationLegalOrPromote(ISD, LT.second)) {
@@ -453,10 +492,10 @@ unsigned BasicTTI::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
 }
 
 unsigned BasicTTI::getNumberOfParts(Type *Tp) const {
-  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Tp);
+  std::pair<unsigned, MVT> LT = getTLI()->getTypeLegalizationCost(Tp);
   return LT.first;
 }
 
-unsigned BasicTTI::getAddressComputationCost(Type *Ty) const {
+unsigned BasicTTI::getAddressComputationCost(Type *Ty, bool IsComplex) const {
   return 0;
 }

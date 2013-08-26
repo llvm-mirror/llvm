@@ -325,12 +325,14 @@ void SplitAnalysis::analyze(const LiveInterval *li) {
 SplitEditor::SplitEditor(SplitAnalysis &sa,
                          LiveIntervals &lis,
                          VirtRegMap &vrm,
-                         MachineDominatorTree &mdt)
+                         MachineDominatorTree &mdt,
+                         MachineBlockFrequencyInfo &mbfi)
   : SA(sa), LIS(lis), VRM(vrm),
     MRI(vrm.getMachineFunction().getRegInfo()),
     MDT(mdt),
     TII(*vrm.getMachineFunction().getTarget().getInstrInfo()),
     TRI(*vrm.getMachineFunction().getTarget().getRegisterInfo()),
+    MBFI(mbfi),
     Edit(0),
     OpenIdx(0),
     SpillMode(SM_Partition),
@@ -1090,7 +1092,7 @@ void SplitEditor::finish(SmallVectorImpl<unsigned> *LRMap) {
 
   // Get rid of unused values and set phi-kill flags.
   for (LiveRangeEdit::iterator I = Edit->begin(), E = Edit->end(); I != E; ++I)
-    (*I)->RenumberValues(LIS);
+    (*I)->RenumberValues();
 
   // Provide a reverse mapping from original indices to Edit ranges.
   if (LRMap) {
@@ -1119,7 +1121,7 @@ void SplitEditor::finish(SmallVectorImpl<unsigned> *LRMap) {
   }
 
   // Calculate spill weight and allocation hints for new intervals.
-  Edit->calculateRegClassAndHint(VRM.getMachineFunction(), SA.Loops);
+  Edit->calculateRegClassAndHint(VRM.getMachineFunction(), SA.Loops, MBFI);
 
   assert(!LRMap || LRMap->size() == Edit->size());
 }

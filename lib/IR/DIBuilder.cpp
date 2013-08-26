@@ -30,7 +30,7 @@ static Constant *GetTagConstant(LLVMContext &VMContext, unsigned Tag) {
 }
 
 DIBuilder::DIBuilder(Module &m)
-  : M(m), VMContext(M.getContext()), TheCU(0), TempEnumTypes(0),
+  : M(m), VMContext(M.getContext()), TempEnumTypes(0),
     TempRetainTypes(0), TempSubprograms(0), TempGVs(0), DeclareFn(0),
     ValueFn(0)
 {}
@@ -61,6 +61,9 @@ void DIBuilder::finalize() {
 
   DIArray GVs = getOrCreateArray(AllGVs);
   DIType(TempGVs).replaceAllUsesWith(GVs);
+
+  DIArray IMs = getOrCreateArray(AllImportedModules);
+  DIType(TempImportedModules).replaceAllUsesWith(IMs);
 }
 
 /// getNonCompileUnitScope - If N is compile unit return NULL otherwise return
@@ -83,10 +86,11 @@ static MDNode *createFilePathPair(LLVMContext &VMContext, StringRef Filename,
 
 /// createCompileUnit - A CompileUnit provides an anchor for all debugging
 /// information generated during this instance of compilation.
-void DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
-                                  StringRef Directory, StringRef Producer,
-                                  bool isOptimized, StringRef Flags,
-                                  unsigned RunTimeVer, StringRef SplitName) {
+DICompileUnit DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
+                                           StringRef Directory,
+                                           StringRef Producer, bool isOptimized,
+                                           StringRef Flags, unsigned RunTimeVer,
+                                           StringRef SplitName) {
   assert(((Lang <= dwarf::DW_LANG_Python && Lang >= dwarf::DW_LANG_C89) ||
           (Lang <= dwarf::DW_LANG_hi_user && Lang >= dwarf::DW_LANG_lo_user)) &&
          "Invalid Language tag");
@@ -101,6 +105,8 @@ void DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
 
   TempGVs = MDNode::getTemporary(VMContext, TElts);
 
+  TempImportedModules = MDNode::getTemporary(VMContext, TElts);
+
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_compile_unit),
     createFilePathPair(VMContext, Filename, Directory),
@@ -113,13 +119,76 @@ void DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
     TempRetainTypes,
     TempSubprograms,
     TempGVs,
+    TempImportedModules,
     MDString::get(VMContext, SplitName)
   };
-  TheCU = DICompileUnit(MDNode::get(VMContext, Elts));
+
+  MDNode *CUNode = MDNode::get(VMContext, Elts);
 
   // Create a named metadata so that it is easier to find cu in a module.
   NamedMDNode *NMD = M.getOrInsertNamedMetadata("llvm.dbg.cu");
-  NMD->addOperand(TheCU);
+  NMD->addOperand(CUNode);
+
+  return DICompileUnit(CUNode);
+}
+
+static DIImportedEntity
+createImportedModule(LLVMContext &C, DIScope Context, DIDescriptor NS,
+                     unsigned Line, StringRef Name,
+                     SmallVectorImpl<Value *> &AllImportedModules) {
+  const MDNode *R;
+  if (Name.empty()) {
+    Value *Elts[] = {
+      GetTagConstant(C, dwarf::DW_TAG_imported_module),
+      Context,
+      NS,
+      ConstantInt::get(Type::getInt32Ty(C), Line),
+    };
+    R = MDNode::get(C, Elts);
+  } else {
+    Value *Elts[] = {
+      GetTagConstant(C, dwarf::DW_TAG_imported_module),
+      Context,
+      NS,
+      ConstantInt::get(Type::getInt32Ty(C), Line),
+      MDString::get(C, Name)
+    };
+    R = MDNode::get(C, Elts);
+  }
+  DIImportedEntity M(R);
+  assert(M.Verify() && "Imported module should be valid");
+  AllImportedModules.push_back(M);
+  return M;
+}
+
+DIImportedEntity DIBuilder::createImportedModule(DIScope Context,
+                                                 DINameSpace NS, unsigned Line,
+                                                 StringRef Name) {
+  return ::createImportedModule(VMContext, Context, NS, Line, Name,
+                                AllImportedModules);
+}
+
+DIImportedEntity DIBuilder::createImportedModule(DIScope Context,
+                                                 DIImportedEntity NS,
+                                                 unsigned Line,
+                                                 StringRef Name) {
+  return ::createImportedModule(VMContext, Context, NS, Line, Name,
+                                AllImportedModules);
+}
+
+DIImportedEntity DIBuilder::createImportedDeclaration(DIScope Context,
+                                                      DIDescriptor Decl,
+                                                      unsigned Line) {
+  Value *Elts[] = {
+    GetTagConstant(VMContext, dwarf::DW_TAG_imported_declaration),
+    Context,
+    Decl,
+    ConstantInt::get(Type::getInt32Ty(VMContext), Line),
+  };
+  DIImportedEntity M(MDNode::get(VMContext, Elts));
+  assert(M.Verify() && "Imported module should be valid");
+  AllImportedModules.push_back(M);
+  return M;
 }
 
 /// createFile - Create a file descriptor to hold debugging information
@@ -133,7 +202,7 @@ DIFile DIBuilder::createFile(StringRef Filename, StringRef Directory) {
 }
 
 /// createEnumerator - Create a single enumerator value.
-DIEnumerator DIBuilder::createEnumerator(StringRef Name, uint64_t Val) {
+DIEnumerator DIBuilder::createEnumerator(StringRef Name, int64_t Val) {
   assert(!Name.empty() && "Unable to create enumerator without name");
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_enumerator),
@@ -143,15 +212,15 @@ DIEnumerator DIBuilder::createEnumerator(StringRef Name, uint64_t Val) {
   return DIEnumerator(MDNode::get(VMContext, Elts));
 }
 
-/// createNullPtrType - Create C++0x nullptr type.
-DIType DIBuilder::createNullPtrType(StringRef Name) {
+/// \brief Create a DWARF unspecified type.
+DIBasicType DIBuilder::createUnspecifiedType(StringRef Name) {
   assert(!Name.empty() && "Unable to create type without name");
-  // nullptr is encoded in DIBasicType format. Line number, filename,
-  // ,size, alignment, offset and flags are always empty here.
+  // Unspecified types are encoded in DIBasicType format. Line number, filename,
+  // size, alignment, offset and flags are always empty here.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_unspecified_type),
     NULL, // Filename
-    NULL, //TheCU,
+    NULL, // Unused
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Line
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Size
@@ -160,7 +229,12 @@ DIType DIBuilder::createNullPtrType(StringRef Name) {
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags;
     ConstantInt::get(Type::getInt32Ty(VMContext), 0)  // Encoding
   };
-  return DIType(MDNode::get(VMContext, Elts));
+  return DIBasicType(MDNode::get(VMContext, Elts));
+}
+
+/// \brief Create C++11 nullptr type.
+DIBasicType DIBuilder::createNullPtrType() {
+  return createUnspecifiedType("decltype(nullptr)");
 }
 
 /// createBasicType - Create debugging information entry for a basic
@@ -174,7 +248,7 @@ DIBuilder::createBasicType(StringRef Name, uint64_t SizeInBits,
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_base_type),
     NULL, // File/directory name
-    NULL, //TheCU,
+    NULL, // Unused
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Line
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
@@ -193,7 +267,7 @@ DIDerivedType DIBuilder::createQualifiedType(unsigned Tag, DIType FromTy) {
   Value *Elts[] = {
     GetTagConstant(VMContext, Tag),
     NULL, // Filename
-    NULL, //TheCU,
+    NULL, // Unused
     MDString::get(VMContext, StringRef()), // Empty name.
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Line
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Size
@@ -213,7 +287,7 @@ DIBuilder::createPointerType(DIType PointeeTy, uint64_t SizeInBits,
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_pointer_type),
     NULL, // Filename
-    NULL, //TheCU,
+    NULL, // Unused
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Line
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
@@ -225,12 +299,13 @@ DIBuilder::createPointerType(DIType PointeeTy, uint64_t SizeInBits,
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
 
-DIDerivedType DIBuilder::createMemberPointerType(DIType PointeeTy, DIType Base) {
+DIDerivedType DIBuilder::createMemberPointerType(DIType PointeeTy,
+                                                 DIType Base) {
   // Pointer types are encoded in DIDerivedType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_ptr_to_member_type),
     NULL, // Filename
-    NULL, //TheCU,
+    NULL, // Unused
     NULL,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Line
     ConstantInt::get(Type::getInt64Ty(VMContext), 0),
@@ -246,7 +321,7 @@ DIDerivedType DIBuilder::createMemberPointerType(DIType PointeeTy, DIType Base) 
 /// createReferenceType - Create debugging information entry for a reference
 /// type.
 DIDerivedType DIBuilder::createReferenceType(unsigned Tag, DIType RTy) {
-  assert(RTy.Verify() && "Unable to create reference type");
+  assert(RTy.isType() && "Unable to create reference type");
   // References are encoded in DIDerivedType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, Tag),
@@ -267,7 +342,7 @@ DIDerivedType DIBuilder::createReferenceType(unsigned Tag, DIType RTy) {
 DIDerivedType DIBuilder::createTypedef(DIType Ty, StringRef Name, DIFile File,
                                        unsigned LineNo, DIDescriptor Context) {
   // typedefs are encoded in DIDerivedType format.
-  assert(Ty.Verify() && "Invalid typedef type!");
+  assert(Ty.isType() && "Invalid typedef type!");
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_typedef),
     File.getFileNode(),
@@ -284,10 +359,10 @@ DIDerivedType DIBuilder::createTypedef(DIType Ty, StringRef Name, DIFile File,
 }
 
 /// createFriend - Create debugging information entry for a 'friend'.
-DIType DIBuilder::createFriend(DIType Ty, DIType FriendTy) {
+DIDerivedType DIBuilder::createFriend(DIType Ty, DIType FriendTy) {
   // typedefs are encoded in DIDerivedType format.
-  assert(Ty.Verify() && "Invalid type!");
-  assert(FriendTy.Verify() && "Invalid friend type!");
+  assert(Ty.isType() && "Invalid type!");
+  assert(FriendTy.isType() && "Invalid friend type!");
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_friend),
     NULL,
@@ -300,14 +375,14 @@ DIType DIBuilder::createFriend(DIType Ty, DIType FriendTy) {
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
     FriendTy
   };
-  return DIType(MDNode::get(VMContext, Elts));
+  return DIDerivedType(MDNode::get(VMContext, Elts));
 }
 
 /// createInheritance - Create debugging information entry to establish
 /// inheritance relationship between two types.
 DIDerivedType DIBuilder::createInheritance(
     DIType Ty, DIType BaseTy, uint64_t BaseOffset, unsigned Flags) {
-  assert(Ty.Verify() && "Unable to create inheritance");
+  assert(Ty.isType() && "Unable to create inheritance");
   // TAG_inheritance is encoded in DIDerivedType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_inheritance),
@@ -347,10 +422,11 @@ DIDerivedType DIBuilder::createMemberType(
 
 /// createStaticMemberType - Create debugging information entry for a
 /// C++ static data member.
-DIType DIBuilder::createStaticMemberType(DIDescriptor Scope, StringRef Name,
-                                         DIFile File, unsigned LineNumber,
-                                         DIType Ty, unsigned Flags,
-                                         llvm::Value *Val) {
+DIDerivedType
+DIBuilder::createStaticMemberType(DIDescriptor Scope, StringRef Name,
+                                  DIFile File, unsigned LineNumber,
+                                  DIType Ty, unsigned Flags,
+                                  llvm::Value *Val) {
   // TAG_member is encoded in DIDerivedType format.
   Flags |= DIDescriptor::FlagStaticMember;
   Value *Elts[] = {
@@ -366,18 +442,19 @@ DIType DIBuilder::createStaticMemberType(DIDescriptor Scope, StringRef Name,
     Ty,
     Val
   };
-  return DIType(MDNode::get(VMContext, Elts));
+  return DIDerivedType(MDNode::get(VMContext, Elts));
 }
 
 /// createObjCIVar - Create debugging information entry for Objective-C
 /// instance variable.
-DIType DIBuilder::createObjCIVar(StringRef Name,
-                                 DIFile File, unsigned LineNumber,
-                                 uint64_t SizeInBits, uint64_t AlignInBits,
-                                 uint64_t OffsetInBits, unsigned Flags,
-                                 DIType Ty, StringRef PropertyName,
-                                 StringRef GetterName, StringRef SetterName,
-                                 unsigned PropertyAttributes) {
+DIDerivedType
+DIBuilder::createObjCIVar(StringRef Name,
+                          DIFile File, unsigned LineNumber,
+                          uint64_t SizeInBits, uint64_t AlignInBits,
+                          uint64_t OffsetInBits, unsigned Flags,
+                          DIType Ty, StringRef PropertyName,
+                          StringRef GetterName, StringRef SetterName,
+                          unsigned PropertyAttributes) {
   // TAG_member is encoded in DIDerivedType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_member),
@@ -395,16 +472,17 @@ DIType DIBuilder::createObjCIVar(StringRef Name,
     MDString::get(VMContext, SetterName),
     ConstantInt::get(Type::getInt32Ty(VMContext), PropertyAttributes)
   };
-  return DIType(MDNode::get(VMContext, Elts));
+  return DIDerivedType(MDNode::get(VMContext, Elts));
 }
 
 /// createObjCIVar - Create debugging information entry for Objective-C
 /// instance variable.
-DIType DIBuilder::createObjCIVar(StringRef Name,
-                                 DIFile File, unsigned LineNumber,
-                                 uint64_t SizeInBits, uint64_t AlignInBits,
-                                 uint64_t OffsetInBits, unsigned Flags,
-                                 DIType Ty, MDNode *PropertyNode) {
+DIDerivedType
+DIBuilder::createObjCIVar(StringRef Name,
+                          DIFile File, unsigned LineNumber,
+                          uint64_t SizeInBits, uint64_t AlignInBits,
+                          uint64_t OffsetInBits, unsigned Flags,
+                          DIType Ty, MDNode *PropertyNode) {
   // TAG_member is encoded in DIDerivedType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_member),
@@ -419,7 +497,7 @@ DIType DIBuilder::createObjCIVar(StringRef Name,
     Ty,
     PropertyNode
   };
-  return DIType(MDNode::get(VMContext, Elts));
+  return DIDerivedType(MDNode::get(VMContext, Elts));
 }
 
 /// createObjCProperty - Create debugging information entry for Objective-C
@@ -427,7 +505,7 @@ DIType DIBuilder::createObjCIVar(StringRef Name,
 DIObjCProperty DIBuilder::createObjCProperty(StringRef Name,
                                              DIFile File, unsigned LineNumber,
                                              StringRef GetterName,
-                                             StringRef SetterName, 
+                                             StringRef SetterName,
                                              unsigned PropertyAttributes,
                                              DIType Ty) {
   Value *Elts[] = {
@@ -461,24 +539,55 @@ DIBuilder::createTemplateTypeParameter(DIDescriptor Context, StringRef Name,
   return DITemplateTypeParameter(MDNode::get(VMContext, Elts));
 }
 
-/// createTemplateValueParameter - Create debugging information for template
-/// value parameter.
 DITemplateValueParameter
-DIBuilder::createTemplateValueParameter(DIDescriptor Context, StringRef Name,
-                                        DIType Ty, uint64_t Val,
-                                        MDNode *File, unsigned LineNo,
+DIBuilder::createTemplateValueParameter(unsigned Tag, DIDescriptor Context,
+                                        StringRef Name, DIType Ty,
+                                        Value *Val, MDNode *File,
+                                        unsigned LineNo,
                                         unsigned ColumnNo) {
   Value *Elts[] = {
-    GetTagConstant(VMContext, dwarf::DW_TAG_template_value_parameter),
+    GetTagConstant(VMContext, Tag),
     getNonCompileUnitScope(Context),
     MDString::get(VMContext, Name),
     Ty,
-    ConstantInt::get(Type::getInt64Ty(VMContext), Val),
+    Val,
     File,
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNo),
     ConstantInt::get(Type::getInt32Ty(VMContext), ColumnNo)
   };
   return DITemplateValueParameter(MDNode::get(VMContext, Elts));
+}
+
+/// createTemplateValueParameter - Create debugging information for template
+/// value parameter.
+DITemplateValueParameter
+DIBuilder::createTemplateValueParameter(DIDescriptor Context, StringRef Name,
+                                        DIType Ty, Value *Val,
+                                        MDNode *File, unsigned LineNo,
+                                        unsigned ColumnNo) {
+  return createTemplateValueParameter(dwarf::DW_TAG_template_value_parameter,
+                                      Context, Name, Ty, Val, File, LineNo,
+                                      ColumnNo);
+}
+
+DITemplateValueParameter
+DIBuilder::createTemplateTemplateParameter(DIDescriptor Context, StringRef Name,
+                                           DIType Ty, StringRef Val,
+                                           MDNode *File, unsigned LineNo,
+                                           unsigned ColumnNo) {
+  return createTemplateValueParameter(
+      dwarf::DW_TAG_GNU_template_template_param, Context, Name, Ty,
+      MDString::get(VMContext, Val), File, LineNo, ColumnNo);
+}
+
+DITemplateValueParameter
+DIBuilder::createTemplateParameterPack(DIDescriptor Context, StringRef Name,
+                                       DIType Ty, DIArray Val,
+                                       MDNode *File, unsigned LineNo,
+                                       unsigned ColumnNo) {
+  return createTemplateValueParameter(dwarf::DW_TAG_GNU_template_parameter_pack,
+                                      Context, Name, Ty, Val, File, LineNo,
+                                      ColumnNo);
 }
 
 /// createClassType - Create debugging information entry for a class.
@@ -491,7 +600,7 @@ DICompositeType DIBuilder::createClassType(DIDescriptor Context, StringRef Name,
                                            DIArray Elements,
                                            MDNode *VTableHolder,
                                            MDNode *TemplateParams) {
-  assert((!Context || Context.Verify()) &&
+  assert((!Context || Context.isScope() || Context.isType()) &&
          "createClassType should be called with a valid Context");
   // TAG_class_type is encoded in DICompositeType format.
   Value *Elts[] = {
@@ -511,7 +620,8 @@ DICompositeType DIBuilder::createClassType(DIDescriptor Context, StringRef Name,
     TemplateParams
   };
   DICompositeType R(MDNode::get(VMContext, Elts));
-  assert(R.Verify() && "createClassType should return a verifiable DIType");
+  assert(R.isCompositeType() &&
+         "createClassType should return a DICompositeType");
   return R;
 }
 
@@ -543,15 +653,18 @@ DICompositeType DIBuilder::createStructType(DIDescriptor Context,
     NULL,
   };
   DICompositeType R(MDNode::get(VMContext, Elts));
-  assert(R.Verify() && "createStructType should return a verifiable DIType");
+  assert(R.isCompositeType() &&
+         "createStructType should return a DICompositeType");
   return R;
 }
 
 /// createUnionType - Create debugging information entry for an union.
-DICompositeType DIBuilder::createUnionType(
-    DIDescriptor Scope, StringRef Name, DIFile File, unsigned LineNumber,
-    uint64_t SizeInBits, uint64_t AlignInBits, unsigned Flags, DIArray Elements,
-    unsigned RunTimeLang) {
+DICompositeType DIBuilder::createUnionType(DIDescriptor Scope, StringRef Name,
+                                           DIFile File, unsigned LineNumber,
+                                           uint64_t SizeInBits,
+                                           uint64_t AlignInBits, unsigned Flags,
+                                           DIArray Elements,
+                                           unsigned RunTimeLang) {
   // TAG_union_type is encoded in DICompositeType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_union_type),
@@ -566,7 +679,8 @@ DICompositeType DIBuilder::createUnionType(
     NULL,
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), RunTimeLang),
-    Constant::getNullValue(Type::getInt32Ty(VMContext))
+    Constant::getNullValue(Type::getInt32Ty(VMContext)),
+    NULL
   };
   return DICompositeType(MDNode::get(VMContext, Elts));
 }
@@ -598,7 +712,7 @@ DIBuilder::createSubroutineType(DIFile File, DIArray ParameterTypes) {
 DICompositeType DIBuilder::createEnumerationType(
     DIDescriptor Scope, StringRef Name, DIFile File, unsigned LineNumber,
     uint64_t SizeInBits, uint64_t AlignInBits, DIArray Elements,
-    DIType ClassType) {
+    DIType UnderlyingType) {
   // TAG_enumeration_type is encoded in DICompositeType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_enumeration_type),
@@ -610,7 +724,7 @@ DICompositeType DIBuilder::createEnumerationType(
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    ClassType,
+    UnderlyingType,
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     Constant::getNullValue(Type::getInt32Ty(VMContext))
@@ -627,7 +741,7 @@ DICompositeType DIBuilder::createArrayType(uint64_t Size, uint64_t AlignInBits,
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_array_type),
     NULL, // Filename/Directory,
-    NULL, //TheCU,
+    NULL, // Unused
     MDString::get(VMContext, ""),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt64Ty(VMContext), Size),
@@ -643,14 +757,13 @@ DICompositeType DIBuilder::createArrayType(uint64_t Size, uint64_t AlignInBits,
 }
 
 /// createVectorType - Create debugging information entry for a vector.
-DIType DIBuilder::createVectorType(uint64_t Size, uint64_t AlignInBits,
-                                   DIType Ty, DIArray Subscripts) {
-
+DICompositeType DIBuilder::createVectorType(uint64_t Size, uint64_t AlignInBits,
+                                            DIType Ty, DIArray Subscripts) {
   // A vector is an array type with the FlagVector flag applied.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_array_type),
     NULL, // Filename/Directory,
-    NULL, //TheCU,
+    NULL, // Unused
     MDString::get(VMContext, ""),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt64Ty(VMContext), Size),
@@ -662,7 +775,7 @@ DIType DIBuilder::createVectorType(uint64_t Size, uint64_t AlignInBits,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     Constant::getNullValue(Type::getInt32Ty(VMContext))
   };
-  return DIType(MDNode::get(VMContext, Elts));
+  return DICompositeType(MDNode::get(VMContext, Elts));
 }
 
 /// createArtificialType - Create a new DIType with "artificial" flag set.
@@ -753,9 +866,10 @@ DIType DIBuilder::createForwardDecl(unsigned Tag, StringRef Name,
     ConstantInt::get(Type::getInt32Ty(VMContext), RuntimeLang)
   };
   MDNode *Node = MDNode::getTemporary(VMContext, Elts);
-  assert(DIType(Node).Verify() &&
-         "createForwardDecl result should be verifiable");
-  return DIType(Node);
+  DIType RetTy(Node);
+  assert(RetTy.isType() &&
+         "createForwardDecl result should be a DIType");
+  return RetTy;
 }
 
 /// getOrCreateArray - Get a DIArray, create one if required.
@@ -845,9 +959,9 @@ DIVariable DIBuilder::createLocalVariable(unsigned Tag, DIDescriptor Scope,
                                           bool AlwaysPreserve, unsigned Flags,
                                           unsigned ArgNo) {
   DIDescriptor Context(getNonCompileUnitScope(Scope));
-  assert((!Context || Context.Verify()) &&
+  assert((!Context || Context.isScope()) &&
          "createLocalVariable should be called with a valid Context");
-  assert(Ty.Verify() &&
+  assert(Ty.isType() &&
          "createLocalVariable should be called with a valid type");
   Value *Elts[] = {
     GetTagConstant(VMContext, Tag),
@@ -868,9 +982,10 @@ DIVariable DIBuilder::createLocalVariable(unsigned Tag, DIDescriptor Scope,
     NamedMDNode *FnLocals = getOrInsertFnSpecificMDNode(M, Fn);
     FnLocals->addOperand(Node);
   }
-  assert(DIVariable(Node).Verify() &&
-         "createLocalVariable should return a verifiable DIVariable");
-  return DIVariable(Node);
+  DIVariable RetVar(Node);
+  assert(RetVar.isVariable() &&
+         "createLocalVariable should return a valid DIVariable");
+  return RetVar;
 }
 
 /// createComplexVariable - Create a new descriptor for the specified variable
@@ -900,13 +1015,15 @@ DISubprogram DIBuilder::createFunction(DIDescriptor Context,
                                        StringRef Name,
                                        StringRef LinkageName,
                                        DIFile File, unsigned LineNo,
-                                       DIType Ty,
+                                       DICompositeType Ty,
                                        bool isLocalToUnit, bool isDefinition,
                                        unsigned ScopeLine,
                                        unsigned Flags, bool isOptimized,
                                        Function *Fn,
                                        MDNode *TParams,
                                        MDNode *Decl) {
+  assert(Ty.getTag() == dwarf::DW_TAG_subroutine_type &&
+         "function types should be subroutines");
   Value *TElts[] = { GetTagConstant(VMContext, DW_TAG_base_type) };
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_subprogram),
@@ -936,7 +1053,7 @@ DISubprogram DIBuilder::createFunction(DIDescriptor Context,
   if (isDefinition)
     AllSubprograms.push_back(Node);
   DISubprogram S(Node);
-  assert(S.Verify() && "createFunction should return a valid DISubprogram");
+  assert(S.isSubprogram() && "createFunction should return a valid DISubprogram");
   return S;
 }
 
@@ -945,7 +1062,7 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context,
                                      StringRef Name,
                                      StringRef LinkageName,
                                      DIFile F,
-                                     unsigned LineNo, DIType Ty,
+                                     unsigned LineNo, DICompositeType Ty,
                                      bool isLocalToUnit,
                                      bool isDefinition,
                                      unsigned VK, unsigned VIndex,
@@ -954,6 +1071,8 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context,
                                      bool isOptimized,
                                      Function *Fn,
                                      MDNode *TParam) {
+  assert(Ty.getTag() == dwarf::DW_TAG_subroutine_type &&
+         "function types should be subroutines");
   Value *TElts[] = { GetTagConstant(VMContext, DW_TAG_base_type) };
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_subprogram),
@@ -982,7 +1101,7 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context,
   if (isDefinition)
     AllSubprograms.push_back(Node);
   DISubprogram S(Node);
-  assert(S.Verify() && "createMethod should return a valid DISubprogram");
+  assert(S.isSubprogram() && "createMethod should return a valid DISubprogram");
   return S;
 }
 
@@ -1021,7 +1140,7 @@ DILexicalBlockFile DIBuilder::createLexicalBlockFile(DIDescriptor Scope,
 
 DILexicalBlock DIBuilder::createLexicalBlock(DIDescriptor Scope, DIFile File,
                                              unsigned Line, unsigned Col) {
-  // Defeat MDNode uniqing for lexical blocks by using unique id.
+  // Defeat MDNode uniquing for lexical blocks by using unique id.
   static unsigned int unique_id = 0;
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_lexical_block),
@@ -1041,7 +1160,8 @@ DILexicalBlock DIBuilder::createLexicalBlock(DIDescriptor Scope, DIFile File,
 Instruction *DIBuilder::insertDeclare(Value *Storage, DIVariable VarInfo,
                                       Instruction *InsertBefore) {
   assert(Storage && "no storage passed to dbg.declare");
-  assert(VarInfo.Verify() && "empty DIVariable passed to dbg.declare");
+  assert(VarInfo.isVariable() &&
+         "empty or invalid DIVariable passed to dbg.declare");
   if (!DeclareFn)
     DeclareFn = Intrinsic::getDeclaration(&M, Intrinsic::dbg_declare);
 
@@ -1053,7 +1173,8 @@ Instruction *DIBuilder::insertDeclare(Value *Storage, DIVariable VarInfo,
 Instruction *DIBuilder::insertDeclare(Value *Storage, DIVariable VarInfo,
                                       BasicBlock *InsertAtEnd) {
   assert(Storage && "no storage passed to dbg.declare");
-  assert(VarInfo.Verify() && "invalid DIVariable passed to dbg.declare");
+  assert(VarInfo.isVariable() &&
+         "empty or invalid DIVariable passed to dbg.declare");
   if (!DeclareFn)
     DeclareFn = Intrinsic::getDeclaration(&M, Intrinsic::dbg_declare);
 
@@ -1072,7 +1193,8 @@ Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V, uint64_t Offset,
                                                 DIVariable VarInfo,
                                                 Instruction *InsertBefore) {
   assert(V && "no value passed to dbg.value");
-  assert(VarInfo.Verify() && "invalid DIVariable passed to dbg.value");
+  assert(VarInfo.isVariable() &&
+         "empty or invalid DIVariable passed to dbg.value");
   if (!ValueFn)
     ValueFn = Intrinsic::getDeclaration(&M, Intrinsic::dbg_value);
 
@@ -1087,7 +1209,8 @@ Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V, uint64_t Offset,
                                                 DIVariable VarInfo,
                                                 BasicBlock *InsertAtEnd) {
   assert(V && "no value passed to dbg.value");
-  assert(VarInfo.Verify() && "invalid DIVariable passed to dbg.value");
+  assert(VarInfo.isVariable() &&
+         "empty or invalid DIVariable passed to dbg.value");
   if (!ValueFn)
     ValueFn = Intrinsic::getDeclaration(&M, Intrinsic::dbg_value);
 

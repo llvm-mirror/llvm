@@ -25,6 +25,7 @@ namespace llvm {
   class BlockAddress;
   class GCStrategy;
   class Constant;
+  class ConstantArray;
   class GCMetadataPrinter;
   class GlobalValue;
   class GlobalVariable;
@@ -37,8 +38,8 @@ namespace llvm {
   class MachineConstantPoolValue;
   class MachineJumpTableInfo;
   class MachineModuleInfo;
-  class MachineMove;
   class MCAsmInfo;
+  class MCCFIInstruction;
   class MCContext;
   class MCSection;
   class MCStreamer;
@@ -120,6 +121,8 @@ namespace llvm {
   public:
     virtual ~AsmPrinter();
 
+    const DwarfDebug *getDwarfDebug() const { return DD; }
+
     /// isVerbose - Return true if assembly output should contain comments.
     ///
     bool isVerbose() const { return VerboseAsm; }
@@ -133,6 +136,9 @@ namespace llvm {
 
     /// getDataLayout - Return information about data layout.
     const DataLayout &getDataLayout() const;
+
+    /// getTargetTriple - Return the target triple string.
+    StringRef getTargetTriple() const;
 
     /// getCurrentSection() - Return the current section we are emitting to.
     const MCSection *getCurrentSection() const;
@@ -229,8 +235,8 @@ namespace llvm {
     /// it if appropriate.
     void EmitBasicBlockStart(const MachineBasicBlock *MBB) const;
 
-    /// EmitGlobalConstant - Print a general LLVM constant to the .s file.
-    void EmitGlobalConstant(const Constant *CV, unsigned AddrSpace = 0);
+    /// \brief Print a general LLVM constant to the .s file.
+    void EmitGlobalConstant(const Constant *CV);
 
 
     //===------------------------------------------------------------------===//
@@ -353,13 +359,15 @@ namespace llvm {
     /// where the size in bytes of the directive is specified by Size and Label
     /// specifies the label.  This implicitly uses .set if it is available.
     void EmitLabelPlusOffset(const MCSymbol *Label, uint64_t Offset,
-                                   unsigned Size) const;
+                                   unsigned Size, 
+                                   bool IsSectionRelative = false) const;
 
     /// EmitLabelReference - Emit something like ".long Label"
     /// where the size in bytes of the directive is specified by Size and Label
     /// specifies the label.
-    void EmitLabelReference(const MCSymbol *Label, unsigned Size) const {
-      EmitLabelPlusOffset(Label, 0, Size);
+    void EmitLabelReference(const MCSymbol *Label, unsigned Size, 
+        bool IsSectionRelative = false) const {
+      EmitLabelPlusOffset(Label, 0, Size, IsSectionRelative);
     }
 
     //===------------------------------------------------------------------===//
@@ -367,10 +375,10 @@ namespace llvm {
     //===------------------------------------------------------------------===//
 
     /// EmitSLEB128 - emit the specified signed leb128 value.
-    void EmitSLEB128(int Value, const char *Desc = 0) const;
+    void EmitSLEB128(int64_t Value, const char *Desc = 0) const;
 
     /// EmitULEB128 - emit the specified unsigned leb128 value.
-    void EmitULEB128(unsigned Value, const char *Desc = 0,
+    void EmitULEB128(uint64_t Value, const char *Desc = 0,
                      unsigned PadTo = 0) const;
 
     /// EmitCFAByte - Emit a .byte 42 directive for a DW_CFA_xxx value.
@@ -398,24 +406,20 @@ namespace llvm {
     void EmitSectionOffset(const MCSymbol *Label,
                            const MCSymbol *SectionLabel) const;
 
-    /// getDebugValueLocation - Get location information encoded by DBG_VALUE
-    /// operands.
-    virtual MachineLocation getDebugValueLocation(const MachineInstr *MI) const;
-
     /// getISAEncoding - Get the value for DW_AT_APPLE_isa. Zero if no isa
     /// encoding specified.
     virtual unsigned getISAEncoding() { return 0; }
 
     /// EmitDwarfRegOp - Emit dwarf register operation.
-    virtual void EmitDwarfRegOp(const MachineLocation &MLoc) const;
+    virtual void EmitDwarfRegOp(const MachineLocation &MLoc,
+                                bool Indirect) const;
 
     //===------------------------------------------------------------------===//
     // Dwarf Lowering Routines
     //===------------------------------------------------------------------===//
 
-    /// EmitCFIFrameMove - Emit frame instruction to describe the layout of the
-    /// frame.
-    void EmitCFIFrameMove(const MachineMove &Move) const;
+    /// \brief Emit frame instruction to describe the layout of the frame.
+    void emitCFIInstruction(const MCCFIInstruction &Inst) const;
 
     //===------------------------------------------------------------------===//
     // Inline Asm Support
@@ -480,7 +484,7 @@ namespace llvm {
     void EmitJumpTableEntry(const MachineJumpTableInfo *MJTI,
                             const MachineBasicBlock *MBB,
                             unsigned uid) const;
-    void EmitLLVMUsedList(const Constant *List);
+    void EmitLLVMUsedList(const ConstantArray *InitList);
     void EmitXXStructorList(const Constant *List, bool isCtor);
     GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy *C);
   };

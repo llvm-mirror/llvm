@@ -36,7 +36,7 @@ using namespace llvm;
 
 AArch64InstrInfo::AArch64InstrInfo(const AArch64Subtarget &STI)
   : AArch64GenInstrInfo(AArch64::ADJCALLSTACKDOWN, AArch64::ADJCALLSTACKUP),
-    RI(*this, STI), Subtarget(STI) {}
+    Subtarget(STI) {}
 
 void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator I, DebugLoc DL,
@@ -114,17 +114,6 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     .addReg(ZeroReg)
     .addReg(SrcReg)
     .addImm(0);
-}
-
-MachineInstr *
-AArch64InstrInfo::emitFrameIndexDebugValue(MachineFunction &MF, int FrameIx,
-                                           uint64_t Offset, const MDNode *MDPtr,
-                                           DebugLoc DL) const {
-  MachineInstrBuilder MIB = BuildMI(MF, DL, get(AArch64::DBG_VALUE))
-    .addFrameIndex(FrameIx).addImm(0)
-    .addImm(Offset)
-    .addMetadata(MDPtr);
-  return &*MIB;
 }
 
 /// Does the Opcode represent a conditional branch that we can remove and re-add

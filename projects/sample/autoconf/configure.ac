@@ -310,8 +310,8 @@ AC_CACHE_CHECK([target architecture],[llvm_cv_target_arch],
   xcore-*)                llvm_cv_target_arch="XCore" ;;
   msp430-*)               llvm_cv_target_arch="MSP430" ;;
   hexagon-*)              llvm_cv_target_arch="Hexagon" ;;
-  mblaze-*)               llvm_cv_target_arch="MBlaze" ;;
   nvptx-*)                llvm_cv_target_arch="NVPTX" ;;
+  s390x-*)                llvm_cv_target_arch="SystemZ" ;;
   *)                      llvm_cv_target_arch="Unknown" ;;
 esac])
 
@@ -480,8 +480,8 @@ else
     XCore)       AC_SUBST(TARGET_HAS_JIT,0) ;;
     MSP430)      AC_SUBST(TARGET_HAS_JIT,0) ;;
     Hexagon)     AC_SUBST(TARGET_HAS_JIT,0) ;;
-    MBlaze)      AC_SUBST(TARGET_HAS_JIT,0) ;;
     NVPTX)       AC_SUBST(TARGET_HAS_JIT,0) ;;
+    SystemZ)     AC_SUBST(TARGET_HAS_JIT,1) ;;
     *)           AC_SUBST(TARGET_HAS_JIT,0) ;;
   esac
 fi
@@ -591,42 +591,46 @@ dnl Allow specific targets to be specified for building (or not)
 TARGETS_TO_BUILD=""
 AC_ARG_ENABLE([targets],AS_HELP_STRING([--enable-targets],
     [Build specific host targets: all or target1,target2,... Valid targets are:
-     host, x86, x86_64, sparc, powerpc, arm, mips, spu, hexagon,
-     xcore, msp430, nvptx, cbe, and cpp (default=all)]),,
+     host, x86, x86_64, sparc, powerpc, arm, aarch64, mips, hexagon,
+     xcore, msp430, nvptx, systemz, r600, and cpp (default=all)]),,
     enableval=all)
 if test "$enableval" = host-only ; then
   enableval=host
 fi
 case "$enableval" in
-  all) TARGETS_TO_BUILD="X86 Sparc PowerPC ARM AArch64 Mips XCore MSP430 Hexagon CppBackend MBlaze NVPTX" ;;
+  all) TARGETS_TO_BUILD="X86 Sparc PowerPC AArch64 ARM Mips XCore MSP430 CppBackend NVPTX Hexagon SystemZ R600" ;;
   *)for a_target in `echo $enableval|sed -e 's/,/ /g' ` ; do
       case "$a_target" in
         x86)      TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
         x86_64)   TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
         sparc)    TARGETS_TO_BUILD="Sparc $TARGETS_TO_BUILD" ;;
         powerpc)  TARGETS_TO_BUILD="PowerPC $TARGETS_TO_BUILD" ;;
-        arm)      TARGETS_TO_BUILD="ARM $TARGETS_TO_BUILD" ;;
         aarch64)  TARGETS_TO_BUILD="AArch64 $TARGETS_TO_BUILD" ;;
+        arm)      TARGETS_TO_BUILD="ARM $TARGETS_TO_BUILD" ;;
         mips)     TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
+        mipsel)   TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
+        mips64)   TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
+        mips64el) TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
         xcore)    TARGETS_TO_BUILD="XCore $TARGETS_TO_BUILD" ;;
         msp430)   TARGETS_TO_BUILD="MSP430 $TARGETS_TO_BUILD" ;;
-        hexagon)  TARGETS_TO_BUILD="Hexagon $TARGETS_TO_BUILD" ;;
         cpp)      TARGETS_TO_BUILD="CppBackend $TARGETS_TO_BUILD" ;;
-        mblaze)   TARGETS_TO_BUILD="MBlaze $TARGETS_TO_BUILD" ;;
+        hexagon)  TARGETS_TO_BUILD="Hexagon $TARGETS_TO_BUILD" ;;
         nvptx)    TARGETS_TO_BUILD="NVPTX $TARGETS_TO_BUILD" ;;
+        systemz)  TARGETS_TO_BUILD="SystemZ $TARGETS_TO_BUILD" ;;
+        r600)     TARGETS_TO_BUILD="R600 $TARGETS_TO_BUILD" ;;
         host) case "$llvm_cv_target_arch" in
             x86)         TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
             x86_64)      TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
             Sparc)       TARGETS_TO_BUILD="Sparc $TARGETS_TO_BUILD" ;;
             PowerPC)     TARGETS_TO_BUILD="PowerPC $TARGETS_TO_BUILD" ;;
-            ARM)         TARGETS_TO_BUILD="ARM $TARGETS_TO_BUILD" ;;
             AArch64)     TARGETS_TO_BUILD="AArch64 $TARGETS_TO_BUILD" ;;
+            ARM)         TARGETS_TO_BUILD="ARM $TARGETS_TO_BUILD" ;;
             Mips)        TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
-            MBlaze)      TARGETS_TO_BUILD="MBlaze $TARGETS_TO_BUILD" ;;
             XCore)       TARGETS_TO_BUILD="XCore $TARGETS_TO_BUILD" ;;
             MSP430)      TARGETS_TO_BUILD="MSP430 $TARGETS_TO_BUILD" ;;
             Hexagon)     TARGETS_TO_BUILD="Hexagon $TARGETS_TO_BUILD" ;;
             NVPTX)       TARGETS_TO_BUILD="NVPTX $TARGETS_TO_BUILD" ;;
+            SystemZ)     TARGETS_TO_BUILD="SystemZ $TARGETS_TO_BUILD" ;;
             *)       AC_MSG_ERROR([Can not set target to build]) ;;
           esac ;;
         *) AC_MSG_ERROR([Unrecognized target $a_target]) ;;
@@ -981,7 +985,7 @@ AC_LINK_GET_VERSION
 dnl Determine whether the linker supports the -R option.
 AC_LINK_USE_R
 
-dnl Determine whether the linker supports the -export-dynamic option.
+dnl Determine whether the compiler supports the -rdynamic option.
 AC_LINK_EXPORT_DYNAMIC
 
 dnl Determine whether the linker supports the --version-script option.
@@ -1357,7 +1361,6 @@ if test "${prefix}" = "NONE" ; then
 fi
 eval LLVM_PREFIX="${prefix}";
 eval LLVM_BINDIR="${prefix}/bin";
-eval LLVM_LIBDIR="${prefix}/lib";
 eval LLVM_DATADIR="${prefix}/share/llvm";
 eval LLVM_DOCSDIR="${prefix}/share/doc/llvm";
 eval LLVM_ETCDIR="${prefix}/etc/llvm";
@@ -1367,7 +1370,6 @@ eval LLVM_MANDIR="${prefix}/man";
 LLVM_CONFIGTIME=`date`
 AC_SUBST(LLVM_PREFIX)
 AC_SUBST(LLVM_BINDIR)
-AC_SUBST(LLVM_LIBDIR)
 AC_SUBST(LLVM_DATADIR)
 AC_SUBST(LLVM_DOCSDIR)
 AC_SUBST(LLVM_ETCDIR)
@@ -1382,8 +1384,6 @@ AC_DEFINE_UNQUOTED(LLVM_PREFIX,"$LLVM_PREFIX",
                    [Installation prefix directory])
 AC_DEFINE_UNQUOTED(LLVM_BINDIR, "$LLVM_BINDIR",
                    [Installation directory for binary executables])
-AC_DEFINE_UNQUOTED(LLVM_LIBDIR, "$LLVM_LIBDIR",
-                   [Installation directory for libraries])
 AC_DEFINE_UNQUOTED(LLVM_DATADIR, "$LLVM_DATADIR",
                    [Installation directory for data files])
 AC_DEFINE_UNQUOTED(LLVM_DOCSDIR, "$LLVM_DOCSDIR",
@@ -1441,7 +1441,7 @@ for a_binding in $BINDINGS_TO_BUILD ; do
         AC_SUBST(OCAML_LIBDIR,$ocaml_stdlib)
       else
         # ocaml stdlib is outside our prefix; use libdir/ocaml
-        AC_SUBST(OCAML_LIBDIR,$LLVM_LIBDIR/ocaml)
+        AC_SUBST(OCAML_LIBDIR,${prefix}/lib/ocaml)
       fi
     fi
     ;;
@@ -1464,7 +1464,7 @@ AC_SUBST(RPATH)
 
 dnl Determine linker rdynamic flag
 if test "$llvm_cv_link_use_export_dynamic" = "yes" ; then
-  RDYNAMIC="-Wl,-export-dynamic"
+  RDYNAMIC="-rdynamic"
 else
   RDYNAMIC=""
 fi

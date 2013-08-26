@@ -23,6 +23,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/ConstantFolder.h"
 
 namespace llvm {
@@ -66,6 +67,7 @@ public:
   /// inserted into a block.
   void ClearInsertionPoint() {
     BB = 0;
+    InsertPt = 0;
   }
 
   BasicBlock *GetInsertBlock() const { return BB; }
@@ -84,6 +86,7 @@ public:
   void SetInsertPoint(Instruction *I) {
     BB = I->getParent();
     InsertPt = I;
+    assert(I != BB->end() && "Can't read debug loc from end()");
     SetCurrentDebugLocation(I->getDebugLoc());
   }
 
@@ -268,7 +271,7 @@ public:
   }
 
   /// \brief Fetch the type representing a pointer to an integer value.
-  IntegerType* getIntPtrTy(DataLayout *DL, unsigned AddrSpace = 0) {
+  IntegerType* getIntPtrTy(const DataLayout *DL, unsigned AddrSpace = 0) {
     return DL->getIntPtrType(Context, AddrSpace);
   }
 
@@ -1395,6 +1398,9 @@ public:
     return CreateShuffleVector(V, Undef, Zeros, Name + ".splat");
   }
 };
+
+// Create wrappers for C Binding types (see CBindingWrapping.h).
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(IRBuilder<>, LLVMBuilderRef)
 
 }
 

@@ -73,7 +73,6 @@ define void @add12i32(%i32vec12*  sret %ret, %i32vec12* %ap, %i32vec12* %bp)  {
 ; CHECK: add3i16
 %i16vec3 = type <3 x i16>
 define void @add3i16(%i16vec3* nocapture sret %ret, %i16vec3* %ap, %i16vec3* %bp) nounwind {
-; CHECK: add3i16
 ; CHECK: addl
 ; CHECK: addl
 ; CHECK: addl
@@ -88,7 +87,6 @@ define void @add3i16(%i16vec3* nocapture sret %ret, %i16vec3* %ap, %i16vec3* %bp
 ; CHECK: add4i16
 %i16vec4 = type <4 x i16>
 define void @add4i16(%i16vec4* nocapture sret %ret, %i16vec4* %ap, %i16vec4* %bp) nounwind {
-; CHECK: add4i16
 ; CHECK: paddd
 ; CHECK: movq
 	%a = load %i16vec4* %ap, align 16
@@ -148,7 +146,7 @@ define void @add3i8(%i8vec3* nocapture sret %ret, %i8vec3* %ap, %i8vec3* %bp) no
 	ret void
 }
 
-; CHECK: add31i8:
+; CHECK-LABEL: add31i8:
 %i8vec31 = type <31 x i8>
 define void @add31i8(%i8vec31* nocapture sret %ret, %i8vec31* %ap, %i8vec31* %bp) nounwind {
 ; CHECK: movdqa

@@ -50,7 +50,6 @@ namespace {
     static char ID;
     MipsConstantIslands(TargetMachine &tm)
       : MachineFunctionPass(ID), TM(tm),
-        TII(static_cast<const MipsInstrInfo*>(tm.getInstrInfo())),
         IsPIC(TM.getRelocationModel() == Reloc::PIC_),
         ABI(TM.getSubtarget<MipsSubtarget>().getTargetABI()) {}
 
@@ -61,13 +60,9 @@ namespace {
     bool runOnMachineFunction(MachineFunction &F);
 
   private:
-
-
     const TargetMachine &TM;
-    const MipsInstrInfo *TII;
     bool IsPIC;
     unsigned ABI;
-
   };
 
   char MipsConstantIslands::ID = 0;
@@ -80,6 +75,10 @@ FunctionPass *llvm::createMipsConstantIslandPass(MipsTargetMachine &tm) {
 }
 
 bool MipsConstantIslands::runOnMachineFunction(MachineFunction &F) {
-  return true;
+  // The intention is for this to be a mips16 only pass for now
+  // FIXME:
+  // if (!TM.getSubtarget<MipsSubtarget>().inMips16Mode())
+  //  return false;
+  return false;
 }
 

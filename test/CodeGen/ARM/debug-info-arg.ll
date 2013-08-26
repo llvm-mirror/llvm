@@ -11,7 +11,7 @@ define void @foo(%struct.tag_s* nocapture %this, %struct.tag_s* %c, i64 %x, i64 
   tail call void @llvm.dbg.value(metadata !{%struct.tag_s* %c}, i64 0, metadata !13), !dbg !21
   tail call void @llvm.dbg.value(metadata !{i64 %x}, i64 0, metadata !14), !dbg !22
   tail call void @llvm.dbg.value(metadata !{i64 %y}, i64 0, metadata !17), !dbg !23
-;CHECK:	@DEBUG_VALUE: foo:y <- R7+4294967295
+;CHECK:	@DEBUG_VALUE: foo:y <- [R7+8]
   tail call void @llvm.dbg.value(metadata !{%struct.tag_s* %ptr1}, i64 0, metadata !18), !dbg !24
   tail call void @llvm.dbg.value(metadata !{%struct.tag_s* %ptr2}, i64 0, metadata !19), !dbg !25
   %1 = icmp eq %struct.tag_s* %c, null, !dbg !26
@@ -31,7 +31,7 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
 
-!0 = metadata !{i32 786449, metadata !32, i32 12, metadata !"Apple clang version 3.0 (tags/Apple/clang-211.10.1) (based on LLVM 3.0svn)", i1 true, metadata !"", i32 0, null, null, metadata !30, null, null} ; [ DW_TAG_compile_unit ]
+!0 = metadata !{i32 786449, metadata !32, i32 12, metadata !"Apple clang version 3.0 (tags/Apple/clang-211.10.1) (based on LLVM 3.0svn)", i1 true, metadata !"", i32 0, metadata !4, metadata !4, metadata !30, null,  null, null} ; [ DW_TAG_compile_unit ]
 !1 = metadata !{i32 786478, metadata !2, metadata !2, metadata !"foo", metadata !"foo", metadata !"", i32 11, metadata !3, i1 false, i1 true, i32 0, i32 0, i32 0, i32 256, i1 true, void (%struct.tag_s*, %struct.tag_s*, i64, i64, %struct.tag_s*, %struct.tag_s*)* @foo, null, null, metadata !31, i32 11} ; [ DW_TAG_subprogram ]
 !2 = metadata !{i32 786473, metadata !32} ; [ DW_TAG_file_type ]
 !3 = metadata !{i32 786453, metadata !32, metadata !2, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, i32 0, metadata !4, i32 0, i32 0} ; [ DW_TAG_subroutine_type ]

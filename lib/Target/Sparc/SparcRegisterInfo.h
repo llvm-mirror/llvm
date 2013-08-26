@@ -27,14 +27,16 @@ class Type;
 
 struct SparcRegisterInfo : public SparcGenRegisterInfo {
   SparcSubtarget &Subtarget;
-  const TargetInstrInfo &TII;
 
-  SparcRegisterInfo(SparcSubtarget &st, const TargetInstrInfo &tii);
+  SparcRegisterInfo(SparcSubtarget &st);
 
   /// Code Generation virtual methods...
   const uint16_t *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
 
   BitVector getReservedRegs(const MachineFunction &MF) const;
+
+  const TargetRegisterClass *getPointerRegClass(const MachineFunction &MF,
+                                                unsigned Kind) const;
 
   void eliminateFrameIndex(MachineBasicBlock::iterator II,
                            int SPAdj, unsigned FIOperandNum,

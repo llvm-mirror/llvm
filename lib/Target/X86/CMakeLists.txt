@@ -33,6 +33,7 @@ set(sources
   X86TargetObjectFile.cpp
   X86TargetTransformInfo.cpp
   X86VZeroUpper.cpp
+  X86FixupLEAs.cpp
   )
 
 if( CMAKE_CL_64 )
@@ -52,7 +53,7 @@ endif()
 
 add_llvm_target(X86CodeGen ${sources})
 
-add_dependencies(LLVMX86CodeGen intrinsics_gen)
+add_dependencies(LLVMX86CodeGen X86CommonTableGen intrinsics_gen)
 
 add_subdirectory(AsmParser)
 add_subdirectory(Disassembler)

@@ -42,7 +42,7 @@ VPATH=$(PROJ_SRC_DIR)
 # Reset the list of suffixes we know how to build.
 #--------------------------------------------------------------------
 .SUFFIXES:
-.SUFFIXES: .c .cpp .cc .h .hpp .o .a .bc .td .ps .dot .ll .m .mm
+.SUFFIXES: .c .cpp .cc .h .hpp .o .a .td .ps .dot .m .mm
 .SUFFIXES: $(SHLIBEXT) $(SUFFIXES)
 
 #--------------------------------------------------------------------
@@ -275,8 +275,10 @@ ifeq ($(ENABLE_OPTIMIZED),1)
   BuildMode := Release
   # Don't use -fomit-frame-pointer on Darwin or FreeBSD.
   ifneq ($(HOST_OS),FreeBSD)
+  ifneq ($(HOST_OS),GNU/kFreeBSD)
   ifneq ($(HOST_OS),Darwin)
     OmitFramePointer := -fomit-frame-pointer
+  endif
   endif
   endif
 
@@ -287,7 +289,6 @@ ifeq ($(ENABLE_OPTIMIZED),1)
     BuildMode := $(BuildMode)+Debug
     CXX.Flags += -g
     C.Flags   += -g
-    LD.Flags  += -g
     KEEP_SYMBOLS := 1
   endif
 else
@@ -295,13 +296,16 @@ else
     BuildMode := Unoptimized
     CXX.Flags +=
     C.Flags   +=
-    LD.Flags  +=
     KEEP_SYMBOLS := 1
   else
     BuildMode := Debug
+    ifeq ($(ENABLE_SPLIT_DWARF), 1)
+    CXX.Flags += -gsplit-dwarf
+    C.Flags   += -gsplit-dwarf
+    else
     CXX.Flags += -g
     C.Flags   += -g
-    LD.Flags  += -g
+    endif
     KEEP_SYMBOLS := 1
   endif
 endif
@@ -324,7 +328,7 @@ ifeq ($(ENABLE_PROFILING),1)
   BuildMode := $(BuildMode)+Profile
   CXX.Flags := $(filter-out -fomit-frame-pointer,$(CXX.Flags)) -pg -g
   C.Flags   := $(filter-out -fomit-frame-pointer,$(C.Flags)) -pg -g
-  LD.Flags  := $(filter-out -fomit-frame-pointer,$(LD.Flags)) -pg -g
+  LD.Flags  := $(filter-out -fomit-frame-pointer,$(LD.Flags)) -pg
   KEEP_SYMBOLS := 1
 endif
 
@@ -497,27 +501,6 @@ ifeq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
 endif
 
 #--------------------------------------------------------------------
-# LLVM Capable Compiler
-#--------------------------------------------------------------------
-
-ifneq ($(findstring llvm-gcc,$(LLVMCC_OPTION)),)
-  LLVMCC := $(LLVMGCC)
-  LLVMCXX := $(LLVMGXX)
-else
-  ifneq ($(findstring clang,$(LLVMCC_OPTION)),)
-    ifneq ($(CLANGPATH),)
-      LLVMCC := $(CLANGPATH)
-      LLVMCXX := $(CLANGXXPATH)
-    else
-      ifeq ($(ENABLE_BUILT_CLANG),1)
-        LLVMCC := $(LLVMToolDir)/clang
-        LLVMCXX := $(LLVMToolDir)/clang++
-      endif
-    endif
-  endif
-endif
-
-#--------------------------------------------------------------------
 # Full Paths To Compiled Tools and Utilities
 #--------------------------------------------------------------------
 EchoCmd  := $(ECHO) llvm[$(MAKELEVEL)]:
@@ -629,32 +612,24 @@ ifndef KEEP_SYMBOLS
   Install.StripFlag += -s
 endif
 
-ifdef TOOL_NO_EXPORTS
-  DynamicFlags :=
-else
-  DynamicFlag := $(RDYNAMIC)
-endif
-
 # Adjust linker flags for building an executable
 ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
+  ifndef TOOL_NO_EXPORTS
+    LD.Flags += $(RDYNAMIC)
+  endif
   ifneq ($(HOST_OS), Darwin)
     ifdef TOOLNAME
       LD.Flags += $(RPATH) -Wl,'$$ORIGIN/../lib'
-      ifdef EXAMPLE_TOOL
-        LD.Flags += $(RPATH) -Wl,$(ExmplDir) $(DynamicFlag)
-      else
-        LD.Flags += $(RPATH) -Wl,$(ToolDir) $(DynamicFlag)
+    endif
+  else
+    ifneq ($(DARWIN_MAJVERS),4)
+      LD.Flags += $(RPATH) -Wl,@executable_path/../lib
+    endif
+    ifeq ($(RC_XBS),YES)
+      TempFile := $(shell mkdir -p ${OBJROOT}/dSYMs ; mktemp ${OBJROOT}/dSYMs/llvm-lto.XXXXXX)
+      LD.Flags += -Wl,-object_path_lto -Wl,$(TempFile)
     endif
   endif
-else
-  ifneq ($(DARWIN_MAJVERS),4)
-    LD.Flags += $(RPATH) -Wl,@executable_path/../lib
-  endif
-  ifeq ($(RC_XBS),YES)
-    TempFile := $(shell mkdir -p ${OBJROOT}/dSYMs ; mktemp ${OBJROOT}/dSYMs/llvm-lto.XXXXXX)
-    LD.Flags += -Wl,-object_path_lto -Wl,$(TempFile)
-  endif
-endif
 endif
 
 
@@ -696,9 +671,9 @@ ifdef UNIVERSAL
     UNIVERSAL_ARCH := i386 ppc
   endif
   UNIVERSAL_ARCH_OPTIONS := $(UNIVERSAL_ARCH:%=-arch %)
-  CompileCommonOpts += $(UNIVERSAL_ARCH_OPTIONS)
+  TargetCommonOpts += $(UNIVERSAL_ARCH_OPTIONS)
   ifdef UNIVERSAL_SDK_PATH
-    CompileCommonOpts += -isysroot $(UNIVERSAL_SDK_PATH)
+    TargetCommonOpts += -isysroot $(UNIVERSAL_SDK_PATH)
   endif
 
   # Building universal cannot compute dependencies automatically.
@@ -760,16 +735,11 @@ Preprocess.CXX= $(Compile.Wrapper) \
 	          $(CXX) $(CPP.Flags) $(TargetCommonOpts) $(CPPFLAGS) \
                 $(CompileCommonOpts) $(CXX.Flags) -E
 Link          = $(Compile.Wrapper) \
-	          $(CXX) $(CPP.Flags) $(CXX.Flags) $(CXXFLAGS) $(LD.Flags) \
-                $(LDFLAGS) $(TargetCommonOpts)  $(CompileCommonOpts) $(Strip)
+	          $(CXX) $(CXXFLAGS) $(LD.Flags) $(LDFLAGS) \
+                $(TargetCommonOpts) $(Strip)
 
-BCCompile.C   = $(LLVMCC) $(CPP.Flags) $(C.Flags) $(CFLAGS) $(CPPFLAGS) \
-                $(TargetCommonOpts) $(CompileCommonOpts)
 Preprocess.C  = $(CC) $(CPP.Flags) $(C.Flags) $(CPPFLAGS) \
                 $(TargetCommonOpts) $(CompileCommonOpts) -E
-
-BCCompile.CXX = $(LLVMCXX) $(CPP.Flags) $(CXX.Flags) $(CXXFLAGS) $(CPPFLAGS) \
-                $(TargetCommonOpts) $(CompileCommonOpts)
 
 ProgInstall   = $(INSTALL) $(Install.StripFlag) -m 0755
 ScriptInstall = $(INSTALL) -m 0755
@@ -785,7 +755,6 @@ TableGen.Flags= -I $(call SYSPATH, $(PROJ_SRC_DIR)) \
 LLVMTableGen  = $(LLVM_TBLGEN) $(TableGen.Flags)
 
 Archive       = $(AR) $(AR.Flags)
-LArchive      = $(LLVMToolDir)/llvm-ar rcsf
 ifdef RANLIB
 Ranlib        = $(RANLIB)
 else
@@ -813,7 +782,6 @@ endif
 BaseNameSources := $(sort $(basename $(Sources)))
 
 ObjectsO  := $(BaseNameSources:%=$(ObjDir)/%.o)
-ObjectsBC := $(BaseNameSources:%=$(ObjDir)/%.bc)
 
 #----------------------------------------------------------
 # For Mingw MSYS bash and Python/w32:
@@ -1141,67 +1109,6 @@ endif
 # Library Build Rules: Four ways to build a library
 ###############################################################################
 
-#---------------------------------------------------------
-# Bytecode Module Targets:
-#   If the user set MODULE_NAME then they want to build a
-#   bytecode module from the sources. We compile all the
-#   sources and link it together into a single bytecode
-#   module.
-#---------------------------------------------------------
-
-ifdef MODULE_NAME
-ifeq ($(strip $(LLVMCC)),)
-$(warning Modules require LLVM capable compiler but none is available ****)
-else
-
-Module     := $(LibDir)/$(MODULE_NAME).bc
-LinkModule := $(LLVMLINK)
-
-
-ifdef EXPORTED_SYMBOL_FILE
-LinkModule += -internalize-public-api-file=$(EXPORTED_SYMBOL_FILE)
-endif
-
-$(Module): $(BUILT_SOURCES) $(ObjectsBC) $(LibDir)/.dir $(LLVMLINK)
-	$(Echo) Building $(BuildMode) Bytecode Module $(notdir $@)
-	$(Verb) $(LinkModule) -o $@ $(ObjectsBC)
-
-all-local:: $(Module)
-
-clean-local::
-ifneq ($(strip $(Module)),)
-	-$(Verb) $(RM) -f $(Module)
-endif
-
-ifdef BYTECODE_DESTINATION
-ModuleDestDir := $(BYTECODE_DESTINATION)
-else
-ModuleDestDir := $(DESTDIR)$(PROJ_libdir)
-endif
-
-ifdef NO_INSTALL
-install-local::
-	$(Echo) Install circumvented with NO_INSTALL
-uninstall-local::
-	$(Echo) Uninstall circumvented with NO_INSTALL
-else
-DestModule := $(ModuleDestDir)/$(MODULE_NAME).bc
-
-install-module:: $(DestModule)
-install-local:: $(DestModule)
-
-$(DestModule): $(ModuleDestDir) $(Module)
-	$(Echo) Installing $(BuildMode) Bytecode Module $(DestModule)
-	$(Verb) $(DataInstall) $(Module) $(DestModule)
-
-uninstall-local::
-	$(Echo) Uninstalling $(BuildMode) Bytecode Module $(DestModule)
-	-$(Verb) $(RM) -f $(DestModule)
-endif
-
-endif
-endif
-
 # if we're building a library ...
 ifdef LIBRARYNAME
 
@@ -1217,7 +1124,6 @@ endif
 LibName.A  := $(LibDir)/$(BaseLibName.A)
 LibName.SO := $(SharedLibDir)/$(BaseLibName.SO)
 LibName.O  := $(LibDir)/$(LIBRARYNAME).o
-LibName.BCA:= $(LibDir)/lib$(LIBRARYNAME).bca
 
 #---------------------------------------------------------
 # Shared Library Targets:
@@ -1279,73 +1185,7 @@ $(DestSharedLib): $(LibName.SO) $(DestSharedLibDir)
 
 uninstall-local::
 	$(Echo) Uninstalling $(BuildMode) Shared Library $(DestSharedLib)
-	-$(Verb) $(RM) -f $(DestSharedLibDir)/$(SharedPrefix)$(LIBRARYNAME).*
-endif
-endif
-
-#---------------------------------------------------------
-# Bytecode Library Targets:
-#   If the user asked for a bytecode library to be built
-#   with the BYTECODE_LIBRARY variable, then we provide
-#   targets for building them.
-#---------------------------------------------------------
-ifdef BYTECODE_LIBRARY
-ifeq ($(strip $(LLVMCC)),)
-$(warning Bytecode libraries require LLVM capable compiler but none is available ****)
-else
-
-all-local:: $(LibName.BCA)
-
-ifdef EXPORTED_SYMBOL_FILE
-BCLinkLib = $(LLVMLINK) -internalize-public-api-file=$(EXPORTED_SYMBOL_FILE)
-
-$(LibName.BCA): $(ObjectsBC) $(LibDir)/.dir $(LLVMLINK) \
-                $(LLVMToolDir)/llvm-ar
-	$(Echo) Building $(BuildMode) Bytecode Archive $(notdir $@) \
-	  "(internalize)"
-	$(Verb) $(BCLinkLib) -o $(ObjDir)/$(LIBRARYNAME).internalize $(ObjectsBC)
-	$(Verb) $(RM) -f $@
-	$(Verb) $(LArchive) $@ $(ObjDir)/$(LIBRARYNAME).internalize.bc
-else
-$(LibName.BCA): $(ObjectsBC) $(LibDir)/.dir \
-                $(LLVMToolDir)/llvm-ar
-	$(Echo) Building $(BuildMode) Bytecode Archive $(notdir $@)
-	$(Verb) $(RM) -f $@
-	$(Verb) $(LArchive) $@ $(ObjectsBC)
-
-endif
-
-clean-local::
-ifneq ($(strip $(LibName.BCA)),)
-	-$(Verb) $(RM) -f $(LibName.BCA)
-endif
-
-ifdef BYTECODE_DESTINATION
-BytecodeDestDir := $(BYTECODE_DESTINATION)
-else
-BytecodeDestDir := $(DESTDIR)$(PROJ_libdir)
-endif
-
-DestBytecodeLib = $(BytecodeDestDir)/lib$(LIBRARYNAME).bca
-
-install-bytecode-local:: $(DestBytecodeLib)
-
-ifdef NO_INSTALL
-install-local::
-	$(Echo) Install circumvented with NO_INSTALL
-uninstall-local::
-	$(Echo) Uninstall circumvented with NO_INSTALL
-else
-install-local:: $(DestBytecodeLib)
-
-$(DestBytecodeLib): $(LibName.BCA) $(BytecodeDestDir)
-	$(Echo) Installing $(BuildMode) Bytecode Archive $(DestBytecodeLib)
-	$(Verb) $(DataInstall) $(LibName.BCA) $(DestBytecodeLib)
-
-uninstall-local::
-	$(Echo) Uninstalling $(BuildMode) Bytecode Archive $(DestBytecodeLib)
-	-$(Verb) $(RM) -f $(DestBytecodeLib)
-endif
+	-$(Verb) $(RM) -f $(DestSharedLib)
 endif
 endif
 
@@ -1454,7 +1294,7 @@ LD.Flags += -Wl,-exported_symbol,_main
 endif
 endif
 
-ifeq ($(HOST_OS), $(filter $(HOST_OS), Linux NetBSD FreeBSD GNU))
+ifeq ($(HOST_OS), $(filter $(HOST_OS), Linux NetBSD FreeBSD GNU/kFreeBSD GNU))
 ifneq ($(ARCH), Mips)
   LD.Flags += -Wl,--version-script=$(LLVM_SRC_ROOT)/autoconf/ExportMap.map
 endif
@@ -1515,6 +1355,8 @@ $(ToolBuildPath): $(ToolDir)/.dir
 endif
 
 ifdef CODESIGN_TOOLS
+TOOL_CODESIGN_IDENTITY ?= -
+
 $(ToolBuildPath): $(ObjectsO) $(ProjLibsPaths) $(LLVMLibsPaths)
 	$(Echo) Linking $(BuildMode) executable $(TOOLNAME) $(StripWarnMsg)
 	$(Verb) $(Link) -o $@ $(TOOLLINKOPTS) $(ObjectsO) $(ProjLibsOptions) \
@@ -1522,7 +1364,7 @@ $(ToolBuildPath): $(ObjectsO) $(ProjLibsPaths) $(LLVMLibsPaths)
 	$(Echo) ======= Finished Linking $(BuildMode) Executable $(TOOLNAME) \
           $(StripWarnMsg)
 	$(Echo) ======= Code-Signing $(BuildMode) Executable $(TOOLNAME)
-	$(Verb) codesign -s - $@
+	$(Verb) codesign -s $(TOOL_CODESIGN_IDENTITY) $@
 else
 $(ToolBuildPath): $(ObjectsO) $(ProjLibsPaths) $(LLVMLibsPaths)
 	$(Echo) Linking $(BuildMode) executable $(TOOLNAME) $(StripWarnMsg)
@@ -1634,48 +1476,6 @@ $(ObjDir)/%.o: %.m $(ObjDir)/.dir $(BUILT_SOURCES) $(PROJ_MAKEFILE)
 	$(Verb) if $(Compile.C) $(DEPEND_OPTIONS) $< -o $(ObjDir)/$*.o ; \
 	        $(DEPEND_MOVEFILE)
 
-#---------------------------------------------------------
-# Create .bc files in the ObjDir directory from .cpp .cc and .c files...
-#---------------------------------------------------------
-
-BC_DEPEND_OPTIONS = -MMD -MP -MF "$(ObjDir)/$*.bc.d.tmp" \
-	-MT "$(ObjDir)/$*.ll" -MT "$(ObjDir)/$*.bc.d"
-
-# If the build succeeded, move the dependency file over, otherwise
-# remove it.
-BC_DEPEND_MOVEFILE = then $(MV) -f "$(ObjDir)/$*.bc.d.tmp" "$(ObjDir)/$*.bc.d"; \
-                     else $(RM) "$(ObjDir)/$*.bc.d.tmp"; exit 1; fi
-
-$(ObjDir)/%.ll: %.cpp $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCXX)
-	$(Echo) "Compiling $*.cpp for $(BuildMode) build (bytecode)"
-	$(Verb) if $(BCCompile.CXX) $(BC_DEPEND_OPTIONS) \
-			$< -o $(ObjDir)/$*.ll -S $(LLVMCC_EMITIR_FLAG) ; \
-	        $(BC_DEPEND_MOVEFILE)
-
-$(ObjDir)/%.ll: %.mm $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCXX)
-	$(Echo) "Compiling $*.mm for $(BuildMode) build (bytecode)"
-	$(Verb) if $(BCCompile.CXX) $(BC_DEPEND_OPTIONS) \
-			$< -o $(ObjDir)/$*.ll -S $(LLVMCC_EMITIR_FLAG) ; \
-	        $(BC_DEPEND_MOVEFILE)
-
-$(ObjDir)/%.ll: %.cc $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCXX)
-	$(Echo) "Compiling $*.cc for $(BuildMode) build (bytecode)"
-	$(Verb) if $(BCCompile.CXX) $(BC_DEPEND_OPTIONS) \
-			$< -o $(ObjDir)/$*.ll -S $(LLVMCC_EMITIR_FLAG) ; \
-	        $(BC_DEPEND_MOVEFILE)
-
-$(ObjDir)/%.ll: %.c $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCC)
-	$(Echo) "Compiling $*.c for $(BuildMode) build (bytecode)"
-	$(Verb) if $(BCCompile.C) $(BC_DEPEND_OPTIONS) \
-			$< -o $(ObjDir)/$*.ll -S $(LLVMCC_EMITIR_FLAG) ; \
-	        $(BC_DEPEND_MOVEFILE)
-
-$(ObjDir)/%.ll: %.m $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCC)
-	$(Echo) "Compiling $*.m for $(BuildMode) build (bytecode)"
-	$(Verb) if $(BCCompile.C) $(BC_DEPEND_OPTIONS) \
-			$< -o $(ObjDir)/$*.ll -S $(LLVMCC_EMITIR_FLAG) ; \
-	        $(BC_DEPEND_MOVEFILE)
-
 # Provide alternate rule sets if dependencies are disabled
 else
 
@@ -1698,27 +1498,6 @@ $(ObjDir)/%.o: %.c $(ObjDir)/.dir $(BUILT_SOURCES)
 $(ObjDir)/%.o: %.m $(ObjDir)/.dir $(BUILT_SOURCES)
 	$(Echo) "Compiling $*.m for $(BuildMode) build" $(PIC_FLAG)
 	$(Compile.C) $< -o $@
-
-$(ObjDir)/%.ll: %.cpp $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCXX)
-	$(Echo) "Compiling $*.cpp for $(BuildMode) build (bytecode)"
-	$(BCCompile.CXX) $< -o $@ -S $(LLVMCC_EMITIR_FLAG)
-
-$(ObjDir)/%.ll: %.mm $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCXX)
-	$(Echo) "Compiling $*.mm for $(BuildMode) build (bytecode)"
-	$(BCCompile.CXX) $< -o $@ -S $(LLVMCC_EMITIR_FLAG)
-
-$(ObjDir)/%.ll: %.cc $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCXX)
-	$(Echo) "Compiling $*.cc for $(BuildMode) build (bytecode)"
-	$(BCCompile.CXX) $< -o $@ -S $(LLVMCC_EMITIR_FLAG)
-
-$(ObjDir)/%.ll: %.c $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCC)
-	$(Echo) "Compiling $*.c for $(BuildMode) build (bytecode)"
-	$(BCCompile.C) $< -o $@ -S $(LLVMCC_EMITIR_FLAG)
-
-$(ObjDir)/%.ll: %.m $(ObjDir)/.dir $(BUILT_SOURCES) $(LLVMCC)
-	$(Echo) "Compiling $*.m for $(BuildMode) build (bytecode)"
-	$(BCCompile.C) $< -o $@ -S $(LLVMCC_EMITIR_FLAG)
-
 endif
 
 
@@ -1763,27 +1542,6 @@ $(ObjDir)/%.s: %.c $(ObjDir)/.dir $(BUILT_SOURCES)
 $(ObjDir)/%.s: %.m $(ObjDir)/.dir $(BUILT_SOURCES)
 	$(Echo) "Compiling $*.m to asm for $(BuildMode) build" $(PIC_FLAG)
 	$(Compile.C) $< -o $@ -S
-
-
-# make the C and C++ compilers strip debug info out of bytecode libraries.
-ifdef DEBUG_RUNTIME
-$(ObjectsBC): $(ObjDir)/%.bc: $(ObjDir)/%.ll $(LOPT)
-	$(Echo) "Compiling $*.ll to $*.bc for $(BuildMode) build (bytecode)"
-	$(Verb) $(LOPT) $< -std-compile-opts -o $@
-else
-$(ObjectsBC): $(ObjDir)/%.bc: $(ObjDir)/%.ll $(LOPT)
-	$(Echo) "Compiling $*.ll to $*.bc for $(BuildMode) build (bytecode)"
-	$(Verb) $(LOPT) $< -std-compile-opts -strip-debug -o $@
-endif
-
-
-#---------------------------------------------------------
-# Provide rule to build .bc files from .ll sources,
-# regardless of dependencies
-#---------------------------------------------------------
-$(ObjDir)/%.bc: %.ll $(ObjDir)/.dir $(LLVMAS)
-	$(Echo) "Compiling $*.ll for $(BuildMode) build"
-	$(Verb) $(LLVMAS) $< -f -o $@
 
 ###############################################################################
 # TABLEGEN: Provide rules for running tblgen to produce *.inc files
@@ -1952,11 +1710,6 @@ ifndef IS_CLEANING_TARGET
 DependSourceFiles := $(basename $(filter %.cpp %.c %.cc %.m %.mm, $(Sources)))
 DependFiles := $(DependSourceFiles:%=$(PROJ_OBJ_DIR)/$(BuildMode)/%.d)
 
-# Include bitcode dependency files if using bitcode libraries
-ifdef BYTECODE_LIBRARY
-DependFiles += $(DependSourceFiles:%=$(PROJ_OBJ_DIR)/$(BuildMode)/%.bc.d)
-endif
-
 -include $(DependFiles) ""
 
 endif
@@ -1967,7 +1720,7 @@ endif
 # CHECK: Running the test suite
 ###############################################################################
 
-check::
+check:: all
 	$(Verb) if test -d "$(PROJ_OBJ_ROOT)/test" ; then \
 	  if test -f "$(PROJ_OBJ_ROOT)/test/Makefile" ; then \
 	    $(EchoCmd) Running test suite ; \

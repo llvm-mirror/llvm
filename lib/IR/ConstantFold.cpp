@@ -75,7 +75,7 @@ static unsigned
 foldConstantCastPair(
   unsigned opc,          ///< opcode of the second cast constant expression
   ConstantExpr *Op,      ///< the first cast constant expression
-  Type *DstTy      ///< desintation type of the first cast
+  Type *DstTy            ///< destination type of the first cast
 ) {
   assert(Op && Op->isCast() && "Can't fold cast of cast without a cast!");
   assert(DstTy && DstTy->isFirstClassType() && "Invalid cast destination type");
@@ -87,13 +87,14 @@ foldConstantCastPair(
   Instruction::CastOps firstOp = Instruction::CastOps(Op->getOpcode());
   Instruction::CastOps secondOp = Instruction::CastOps(opc);
 
-  // Assume that pointers are never more than 64 bits wide.
+  // Assume that pointers are never more than 64 bits wide, and only use this
+  // for the middle type. Otherwise we could end up folding away illegal
+  // bitcasts between address spaces with different sizes.
   IntegerType *FakeIntPtrTy = Type::getInt64Ty(DstTy->getContext());
 
   // Let CastInst::isEliminableCastPair do the heavy lifting.
   return CastInst::isEliminableCastPair(firstOp, secondOp, SrcTy, MidTy, DstTy,
-                                        FakeIntPtrTy, FakeIntPtrTy,
-                                        FakeIntPtrTy);
+                                        0, FakeIntPtrTy, 0);
 }
 
 static Constant *FoldBitCast(Constant *V, Type *DestTy) {
@@ -1857,9 +1858,9 @@ Constant *llvm::ConstantFoldCompareInstruction(unsigned short pred,
         if (CE1Inverse == CE1Op0) {
           // Check whether we can safely truncate the right hand side.
           Constant *C2Inverse = ConstantExpr::getTrunc(C2, CE1Op0->getType());
-          if (ConstantExpr::getZExt(C2Inverse, C2->getType()) == C2) {
+          if (ConstantExpr::getCast(CE1->getOpcode(), C2Inverse,
+                                    C2->getType()) == C2)
             return ConstantExpr::getICmp(pred, CE1Inverse, C2Inverse);
-          }
         }
       }
     }

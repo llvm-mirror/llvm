@@ -39,7 +39,7 @@ public:
     DK_Warning,
     DK_Note
   };
-  
+
   /// DiagHandlerTy - Clients that want to handle their own diagnostics in a
   /// custom way can register a function pointer+context as a diagnostic
   /// handler.  It gets called each time PrintMessage is invoked.
@@ -98,7 +98,7 @@ public:
     return Buffers[i].Buffer;
   }
 
-  unsigned getNumBuffers() const {
+  size_t getNumBuffers() const {
     return Buffers.size();
   }
 
@@ -109,20 +109,20 @@ public:
 
   /// AddNewSourceBuffer - Add a new source buffer to this source manager.  This
   /// takes ownership of the memory buffer.
-  unsigned AddNewSourceBuffer(MemoryBuffer *F, SMLoc IncludeLoc) {
+  size_t AddNewSourceBuffer(MemoryBuffer *F, SMLoc IncludeLoc) {
     SrcBuffer NB;
     NB.Buffer = F;
     NB.IncludeLoc = IncludeLoc;
     Buffers.push_back(NB);
-    return Buffers.size()-1;
+    return Buffers.size() - 1;
   }
 
   /// AddIncludeFile - Search for a file with the specified name in the current
   /// directory or in one of the IncludeDirs.  If no file is found, this returns
   /// ~0, otherwise it returns the buffer ID of the stacked file.
   /// The full path to the included file can be found in IncludedFile.
-  unsigned AddIncludeFile(const std::string &Filename, SMLoc IncludeLoc,
-                          std::string &IncludedFile);
+  size_t AddIncludeFile(const std::string &Filename, SMLoc IncludeLoc,
+                        std::string &IncludedFile);
 
   /// FindBufferContainingLoc - Return the ID of the buffer containing the
   /// specified location, returning -1 if not found.
@@ -145,8 +145,8 @@ public:
   /// @param ShowColors - Display colored messages if output is a terminal and
   /// the default error handler is used.
   void PrintMessage(SMLoc Loc, DiagKind Kind, const Twine &Msg,
-                    ArrayRef<SMRange> Ranges = ArrayRef<SMRange>(),
-                    ArrayRef<SMFixIt> FixIts = ArrayRef<SMFixIt>(),
+                    ArrayRef<SMRange> Ranges = None,
+                    ArrayRef<SMFixIt> FixIts = None,
                     bool ShowColors = true) const;
 
 
@@ -155,9 +155,9 @@ public:
   ///
   /// @param Msg If non-null, the kind of message (e.g., "error") which is
   /// prefixed to the message.
-  SMDiagnostic GetMessage(SMLoc Loc, DiagKind Kind, const Twine &Msg, 
-                          ArrayRef<SMRange> Ranges = ArrayRef<SMRange>(),
-                          ArrayRef<SMFixIt> FixIts = ArrayRef<SMFixIt>()) const;
+  SMDiagnostic GetMessage(SMLoc Loc, DiagKind Kind, const Twine &Msg,
+                          ArrayRef<SMRange> Ranges = None,
+                          ArrayRef<SMFixIt> FixIts = None) const;
 
   /// PrintIncludeStack - Prints the names of included files and the line of the
   /// file they were included from.  A diagnostic handler can use this before
@@ -221,13 +221,13 @@ public:
   SMDiagnostic(StringRef filename, SourceMgr::DiagKind Knd, StringRef Msg)
     : SM(0), Filename(filename), LineNo(-1), ColumnNo(-1), Kind(Knd),
       Message(Msg) {}
-  
+
   // Diagnostic with a location.
   SMDiagnostic(const SourceMgr &sm, SMLoc L, StringRef FN,
                int Line, int Col, SourceMgr::DiagKind Kind,
                StringRef Msg, StringRef LineStr,
                ArrayRef<std::pair<unsigned,unsigned> > Ranges,
-               ArrayRef<SMFixIt> FixIts = ArrayRef<SMFixIt>());
+               ArrayRef<SMFixIt> FixIts = None);
 
   const SourceMgr *getSourceMgr() const { return SM; }
   SMLoc getLoc() const { return Loc; }

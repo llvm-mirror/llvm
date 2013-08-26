@@ -41,8 +41,8 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/BlackList.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/Transforms/Utils/SpecialCaseList.h"
 
 using namespace llvm;
 
@@ -99,7 +99,7 @@ struct ThreadSanitizer : public FunctionPass {
   DataLayout *TD;
   Type *IntptrTy;
   SmallString<64> BlacklistFile;
-  OwningPtr<BlackList> BL;
+  OwningPtr<SpecialCaseList> BL;
   IntegerType *OrdTy;
   // Callbacks to run-time library are computed in doInitialization.
   Function *TsanFuncEntry;
@@ -227,7 +227,7 @@ bool ThreadSanitizer::doInitialization(Module &M) {
   TD = getAnalysisIfAvailable<DataLayout>();
   if (!TD)
     return false;
-  BL.reset(new BlackList(BlacklistFile));
+  BL.reset(SpecialCaseList::createOrDie(BlacklistFile));
 
   // Always insert a call to __tsan_init into the module's CTORs.
   IRBuilder<> IRB(M.getContext());
@@ -579,7 +579,7 @@ int ThreadSanitizer::getMemoryAccessFuncIndex(Value *Addr) {
     // Ignore all unusual sizes.
     return -1;
   }
-  size_t Idx = CountTrailingZeros_32(TypeSize / 8);
+  size_t Idx = countTrailingZeros(TypeSize / 8);
   assert(Idx < kNumberOfAccessSizes);
   return Idx;
 }

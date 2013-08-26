@@ -13,6 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Assembly/PrintModulePass.h"
@@ -144,8 +145,9 @@ static tool_output_file *GetOutputStream(const char *TargetName,
 
   // Open the file.
   std::string error;
-  unsigned OpenFlags = 0;
-  if (Binary) OpenFlags |= raw_fd_ostream::F_Binary;
+  sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
+  if (Binary)
+    OpenFlags |= sys::fs::F_Binary;
   tool_output_file *FDOut = new tool_output_file(OutputFilename.c_str(), error,
                                                  OpenFlags);
   if (!error.empty()) {
@@ -200,7 +202,7 @@ int main(int argc, char **argv) {
 static int compileModule(char **argv, LLVMContext &Context) {
   // Load the module to be compiled...
   SMDiagnostic Err;
-  std::auto_ptr<Module> M;
+  OwningPtr<Module> M;
   Module *mod = 0;
   Triple TheTriple;
 
@@ -260,7 +262,6 @@ static int compileModule(char **argv, LLVMContext &Context) {
   TargetOptions Options;
   Options.LessPreciseFPMADOption = EnableFPMAD;
   Options.NoFramePointerElim = DisableFPElim;
-  Options.NoFramePointerElimNonLeaf = DisableFPElimNonLeaf;
   Options.AllowFPOpFusion = FuseFPOps;
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
@@ -274,14 +275,12 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
   Options.DisableTailCalls = DisableTailCalls;
   Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.RealignStack = EnableRealignStack;
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
   Options.UseInitArray = UseInitArray;
-  Options.SSPBufferSize = SSPBufferSize;
 
-  std::auto_ptr<TargetMachine>
+  OwningPtr<TargetMachine>
     target(TheTarget->createTargetMachine(TheTriple.getTriple(),
                                           MCPU, FeaturesStr, Options,
                                           RelocModel, CMModel, OLvl));

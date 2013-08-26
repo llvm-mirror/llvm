@@ -1,12 +1,12 @@
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin | FileCheck %s
 
 define void @t() nounwind ssp {
-; CHECK: t:
+; CHECK-LABEL: t:
 entry:
   br i1 undef, label %return, label %if.end.i
 
 if.end.i:                                         ; preds = %entry
-  %tmp7.i = load i32* undef, align 4, !tbaa !0
+  %tmp7.i = load i32* undef, align 4
   br i1 undef, label %return, label %if.end
 
 if.end:                                           ; preds = %if.end.i
@@ -14,7 +14,7 @@ if.end:                                           ; preds = %if.end.i
 ; CHECK: movl (%{{.*}}), [[REG:%[a-z]+]]
 ; CHECK-NOT: movl [[REG]], [[REG]]
 ; CHECK-NEXT: testl [[REG]], [[REG]]
-; CHECK-NEXT: xorb
+; CHECK-NEXT: xorl
   %tmp138 = select i1 undef, i32 0, i32 %tmp7.i
   %tmp867 = zext i32 %tmp138 to i64
   br label %while.cond
@@ -55,7 +55,3 @@ cond.false280:                                    ; preds = %cond.true225
 return:                                           ; preds = %if.end.i, %entry
   ret void
 }
-
-!0 = metadata !{metadata !"int", metadata !1}
-!1 = metadata !{metadata !"omnipotent char", metadata !2}
-!2 = metadata !{metadata !"Simple C/C++ TBAA", null}

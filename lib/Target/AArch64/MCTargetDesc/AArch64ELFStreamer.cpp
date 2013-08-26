@@ -63,14 +63,15 @@ public:
 
   ~AArch64ELFStreamer() {}
 
-  virtual void ChangeSection(const MCSection *Section) {
+  virtual void ChangeSection(const MCSection *Section,
+                             const MCExpr *Subsection) {
     // We have to keep track of the mapping symbol state of any sections we
     // use. Each one should start off as EMS_None, which is provided as the
     // default constructor by DenseMap::lookup.
-    LastMappingSymbols[getPreviousSection()] = LastEMS;
+    LastMappingSymbols[getPreviousSection().first] = LastEMS;
     LastEMS = LastMappingSymbols.lookup(Section);
 
-    MCELFStreamer::ChangeSection(Section);
+    MCELFStreamer::ChangeSection(Section, Subsection);
   }
 
   /// This function is the one used to emit instruction data into the ELF
@@ -84,18 +85,17 @@ public:
   /// This is one of the functions used to emit data into an ELF section, so the
   /// AArch64 streamer overrides it to add the appropriate mapping symbol ($d)
   /// if necessary.
-  virtual void EmitBytes(StringRef Data, unsigned AddrSpace) {
+  virtual void EmitBytes(StringRef Data) {
     EmitDataMappingSymbol();
-    MCELFStreamer::EmitBytes(Data, AddrSpace);
+    MCELFStreamer::EmitBytes(Data);
   }
 
   /// This is one of the functions used to emit data into an ELF section, so the
   /// AArch64 streamer overrides it to add the appropriate mapping symbol ($d)
   /// if necessary.
-  virtual void EmitValueImpl(const MCExpr *Value, unsigned Size,
-                             unsigned AddrSpace) {
+  virtual void EmitValueImpl(const MCExpr *Value, unsigned Size) {
     EmitDataMappingSymbol();
-    MCELFStreamer::EmitValueImpl(Value, Size, AddrSpace);
+    MCELFStreamer::EmitValueImpl(Value, Size);
   }
 
 private:
@@ -129,7 +129,7 @@ private:
     MCELF::SetType(SD, ELF::STT_NOTYPE);
     MCELF::SetBinding(SD, ELF::STB_LOCAL);
     SD.setExternal(false);
-    Symbol->setSection(*getCurrentSection());
+    Symbol->setSection(*getCurrentSection().first);
 
     const MCExpr *Value = MCSymbolRefExpr::Create(Start, getContext());
     Symbol->setVariableValue(Value);

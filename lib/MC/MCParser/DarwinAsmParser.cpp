@@ -566,10 +566,10 @@ bool DarwinAsmParser::ParseDirectivePopSection(StringRef, SMLoc) {
 /// ParseDirectivePrevious:
 ///   ::= .previous
 bool DarwinAsmParser::ParseDirectivePrevious(StringRef DirName, SMLoc) {
-  const MCSection *PreviousSection = getStreamer().getPreviousSection();
-  if (PreviousSection == NULL)
+  MCSectionSubPair PreviousSection = getStreamer().getPreviousSection();
+  if (PreviousSection.first == NULL)
       return TokError(".previous without corresponding .section");
-  getStreamer().SwitchSection(PreviousSection);
+  getStreamer().SwitchSection(PreviousSection.first, PreviousSection.second);
   return false;
 }
 
@@ -593,7 +593,7 @@ bool DarwinAsmParser::ParseDirectiveSecureLogUnique(StringRef, SMLoc IDLoc) {
   raw_ostream *OS = getContext().getSecureLog();
   if (OS == NULL) {
     std::string Err;
-    OS = new raw_fd_ostream(SecureLogFile, Err, raw_fd_ostream::F_Append);
+    OS = new raw_fd_ostream(SecureLogFile, Err, sys::fs::F_Append);
     if (!Err.empty()) {
        delete OS;
        return Error(IDLoc, Twine("can't open secure log file: ") +

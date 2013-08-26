@@ -24,13 +24,19 @@ public:
   explicit MipsSEDAGToDAGISel(MipsTargetMachine &TM) : MipsDAGToDAGISel(TM) {}
 
 private:
+
+  virtual bool runOnMachineFunction(MachineFunction &MF);
+
+  void addDSPCtrlRegOperands(bool IsDef, MachineInstr &MI,
+                             MachineFunction &MF);
+
   bool replaceUsesWithZeroReg(MachineRegisterInfo *MRI, const MachineInstr&);
 
-  std::pair<SDNode*, SDNode*> selectMULT(SDNode *N, unsigned Opc, DebugLoc dl,
+  std::pair<SDNode*, SDNode*> selectMULT(SDNode *N, unsigned Opc, SDLoc dl,
                                          EVT Ty, bool HasLo, bool HasHi);
 
   SDNode *selectAddESubE(unsigned MOp, SDValue InFlag, SDValue CmpLHS,
-                         DebugLoc DL, SDNode *Node) const;
+                         SDLoc DL, SDNode *Node) const;
 
   virtual bool selectAddrRegImm(SDValue Addr, SDValue &Base,
                                 SDValue &Offset) const;
@@ -40,6 +46,12 @@ private:
 
   virtual bool selectIntAddr(SDValue Addr, SDValue &Base,
                              SDValue &Offset) const;
+
+  virtual bool selectAddrRegImm12(SDValue Addr, SDValue &Base,
+                                  SDValue &Offset) const;
+
+  virtual bool selectIntAddrMM(SDValue Addr, SDValue &Base,
+                               SDValue &Offset) const;
 
   virtual std::pair<bool, SDNode*> selectNode(SDNode *Node);
 

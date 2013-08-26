@@ -22,12 +22,22 @@ include "llvm/IR/Intrinsics.td"
 class RegisterClass; // Forward def
 
 // SubRegIndex - Use instances of SubRegIndex to identify subregisters.
-class SubRegIndex<list<SubRegIndex> comps = []> {
+class SubRegIndex<int size, int offset = 0> {
   string Namespace = "";
+
+  // Size - Size (in bits) of the sub-registers represented by this index.
+  int Size = size;
+
+  // Offset - Offset of the first bit that is part of this sub-register index.
+  // Set it to -1 if the same index is used to represent sub-registers that can
+  // be at different offsets (for example when using an index to access an
+  // element in a register tuple).
+  int Offset = offset;
 
   // ComposedOf - A list of two SubRegIndex instances, [A, B].
   // This indicates that this SubRegIndex is the result of composing A and B.
-  list<SubRegIndex> ComposedOf = comps;
+  // See ComposedSubRegIndex.
+  list<SubRegIndex> ComposedOf = [];
 
   // CoveringSubRegIndices - A list of two or more sub-register indexes that
   // cover this sub-register.
@@ -46,6 +56,16 @@ class SubRegIndex<list<SubRegIndex> comps = []> {
   // the synthetic index dsub_1_dsub_2 unless some SubRegIndex is defined with
   // CoveringSubRegIndices = [dsub_1, dsub_2].
   list<SubRegIndex> CoveringSubRegIndices = [];
+}
+
+// ComposedSubRegIndex - A sub-register that is the result of composing A and B.
+// Offset is set to the sum of A and B's Offsets. Size is set to B's Size.
+class ComposedSubRegIndex<SubRegIndex A, SubRegIndex B>
+  : SubRegIndex<B.Size, !if(!eq(A.Offset, -1), -1,
+                        !if(!eq(B.Offset, -1), -1,
+                            !add(A.Offset, B.Offset)))> {
+  // See SubRegIndex.
+  let ComposedOf = [A, B];
 }
 
 // RegAltNameIndex - The alternate name set to use for register operands of
@@ -425,6 +445,11 @@ class Instruction {
   string TwoOperandAliasConstraint = "";
 
   ///@}
+
+  /// UseNamedOperandTable - If set, the operand indices of this instruction
+  /// can be queried via the getNamedOperandIdx() function which is generated
+  /// by TableGen.
+  bit UseNamedOperandTable = 0;
 }
 
 /// PseudoInstExpansion - Expansion information for a pseudo-instruction.
@@ -790,9 +815,12 @@ class AsmParser {
   // This can be used to perform target specific instruction post-processing.
   string AsmParserInstCleanup  = "";
 
-  //ShouldEmitMatchRegisterName - Set to false if the target needs a hand
-  //written register name matcher
+  // ShouldEmitMatchRegisterName - Set to false if the target needs a hand
+  // written register name matcher
   bit ShouldEmitMatchRegisterName = 1;
+
+  /// Does the instruction mnemonic allow '.'
+  bit MnemonicContainsDot = 0;
 }
 def DefaultAsmParser : AsmParser;
 
@@ -806,6 +834,9 @@ class AsmParserVariant {
   // used to support targets that need to parser multiple formats for the
   // assembly language.
   int Variant = 0;
+
+  // Name - The AsmParser variant name (e.g., AT&T vs Intel).
+  string Name = "";
 
   // CommentDelimiter - If given, the delimiter string used to recognize
   // comments which are hard coded in the .td assembler strings for individual
@@ -860,9 +891,16 @@ class TokenAlias<string From, string To> {
 ///  def : MnemonicAlias<"pushf", "pushfq">, Requires<[In64BitMode]>;
 ///  def : MnemonicAlias<"pushf", "pushfl">, Requires<[In32BitMode]>;
 ///
-class MnemonicAlias<string From, string To> {
+/// Mnemonic aliases can also be constrained to specific variants, e.g.:
+///
+///  def : MnemonicAlias<"pushf", "pushfq", "att">, Requires<[In64BitMode]>;
+///
+/// If no variant (e.g., "att" or "intel") is specified then the alias is
+/// applied unconditionally.
+class MnemonicAlias<string From, string To, string VariantName = ""> {
   string FromMnemonic = From;
   string ToMnemonic = To;
+  string AsmVariantName = VariantName;
 
   // Predicates - Predicates that must be true for this remapping to happen.
   list<Predicate> Predicates = [];

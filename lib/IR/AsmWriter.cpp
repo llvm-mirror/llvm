@@ -14,6 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "AsmWriter.h"
+
 #include "llvm/Assembly/Writer.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -38,6 +40,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
+
 #include <algorithm>
 #include <cctype>
 using namespace llvm;
@@ -81,6 +84,8 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::MSP430_INTR:   Out << "msp430_intrcc"; break;
   case CallingConv::PTX_Kernel:    Out << "ptx_kernel"; break;
   case CallingConv::PTX_Device:    Out << "ptx_device"; break;
+  case CallingConv::X86_64_SysV:   Out << "x86_64_sysvcc"; break;
+  case CallingConv::X86_64_Win64:  Out << "x86_64_win64cc"; break;
   }
 }
 
@@ -153,35 +158,8 @@ static void PrintLLVMName(raw_ostream &OS, const Value *V) {
                 isa<GlobalValue>(V) ? GlobalPrefix : LocalPrefix);
 }
 
-//===----------------------------------------------------------------------===//
-// TypePrinting Class: Type printing machinery
-//===----------------------------------------------------------------------===//
 
-/// TypePrinting - Type printing machinery.
-namespace {
-class TypePrinting {
-  TypePrinting(const TypePrinting &) LLVM_DELETED_FUNCTION;
-  void operator=(const TypePrinting&) LLVM_DELETED_FUNCTION;
-public:
-
-  /// NamedTypes - The named types that are used by the current module.
-  TypeFinder NamedTypes;
-
-  /// NumberedTypes - The numbered types, along with their value.
-  DenseMap<StructType*, unsigned> NumberedTypes;
-
-
-  TypePrinting() {}
-  ~TypePrinting() {}
-
-  void incorporateTypes(const Module &M);
-
-  void print(Type *Ty, raw_ostream &OS);
-
-  void printStructBody(StructType *Ty, raw_ostream &OS);
-};
-} // end anonymous namespace.
-
+namespace llvm {
 
 void TypePrinting::incorporateTypes(const Module &M) {
   NamedTypes.run(M, false);
@@ -313,14 +291,9 @@ void TypePrinting::printStructBody(StructType *STy, raw_ostream &OS) {
     OS << '>';
 }
 
-
-
 //===----------------------------------------------------------------------===//
 // SlotTracker Class: Enumerate slot numbers for unnamed values
 //===----------------------------------------------------------------------===//
-
-namespace {
-
 /// This class provides computation of slot numbers for LLVM Assembly writing.
 ///
 class SlotTracker {
@@ -418,8 +391,9 @@ private:
   void operator=(const SlotTracker &) LLVM_DELETED_FUNCTION;
 };
 
-}  // end anonymous namespace
-
+SlotTracker *createSlotTracker(const Module *M) {
+  return new SlotTracker(M);
+}
 
 static SlotTracker *createSlotTracker(const Value *V) {
   if (const Argument *FA = dyn_cast<Argument>(V))
@@ -1200,8 +1174,8 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Value *V,
     Out << "<badref>";
 }
 
-void llvm::WriteAsOperand(raw_ostream &Out, const Value *V,
-                          bool PrintType, const Module *Context) {
+void WriteAsOperand(raw_ostream &Out, const Value *V,
+                    bool PrintType, const Module *Context) {
 
   // Fast path: Don't construct and populate a TypePrinting object if we
   // won't be needing any types printed.
@@ -1225,50 +1199,27 @@ void llvm::WriteAsOperand(raw_ostream &Out, const Value *V,
   WriteAsOperandInternal(Out, V, &TypePrinter, 0, Context);
 }
 
-namespace {
+void AssemblyWriter::init() {
+  if (TheModule)
+    TypePrinter.incorporateTypes(*TheModule);
+}
 
-class AssemblyWriter {
-  formatted_raw_ostream &Out;
-  SlotTracker &Machine;
-  const Module *TheModule;
-  TypePrinting TypePrinter;
-  AssemblyAnnotationWriter *AnnotationWriter;
 
-public:
-  inline AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
-                        const Module *M,
-                        AssemblyAnnotationWriter *AAW)
-    : Out(o), Machine(Mac), TheModule(M), AnnotationWriter(AAW) {
-    if (M)
-      TypePrinter.incorporateTypes(*M);
-  }
+AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
+                               const Module *M,
+                               AssemblyAnnotationWriter *AAW)
+  : Out(o), TheModule(M), Machine(Mac), AnnotationWriter(AAW) {
+  init();
+}
 
-  void printMDNodeBody(const MDNode *MD);
-  void printNamedMDNode(const NamedMDNode *NMD);
+AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, const Module *M,
+                               AssemblyAnnotationWriter *AAW)
+  : Out(o), TheModule(M), ModuleSlotTracker(createSlotTracker(M)),
+    Machine(*ModuleSlotTracker), AnnotationWriter(AAW) {
+  init();
+}
 
-  void printModule(const Module *M);
-
-  void writeOperand(const Value *Op, bool PrintType);
-  void writeParamOperand(const Value *Operand, AttributeSet Attrs,unsigned Idx);
-  void writeAtomic(AtomicOrdering Ordering, SynchronizationScope SynchScope);
-
-  void writeAllMDNodes();
-  void writeAllAttributeGroups();
-
-  void printTypeIdentities();
-  void printGlobal(const GlobalVariable *GV);
-  void printAlias(const GlobalAlias *GV);
-  void printFunction(const Function *F);
-  void printArgument(const Argument *FA, AttributeSet Attrs, unsigned Idx);
-  void printBasicBlock(const BasicBlock *BB);
-  void printInstruction(const Instruction &I);
-
-private:
-  // printInfoComment - Print a little comment after the instruction indicating
-  // which slot it occupies.
-  void printInfoComment(const Value &V);
-};
-}  // end of anonymous namespace
+AssemblyWriter::~AssemblyWriter() { }
 
 void AssemblyWriter::writeOperand(const Value *Operand, bool PrintType) {
   if (Operand == 0) {
@@ -1605,6 +1556,29 @@ void AssemblyWriter::printFunction(const Function *F) {
   if (F->isMaterializable())
     Out << "; Materializable\n";
 
+  const AttributeSet &Attrs = F->getAttributes();
+  if (Attrs.hasAttributes(AttributeSet::FunctionIndex)) {
+    AttributeSet AS = Attrs.getFnAttributes();
+    std::string AttrStr;
+
+    unsigned Idx = 0;
+    for (unsigned E = AS.getNumSlots(); Idx != E; ++Idx)
+      if (AS.getSlotIndex(Idx) == AttributeSet::FunctionIndex)
+        break;
+
+    for (AttributeSet::iterator I = AS.begin(Idx), E = AS.end(Idx);
+         I != E; ++I) {
+      Attribute Attr = *I;
+      if (!Attr.isStringAttribute()) {
+        if (!AttrStr.empty()) AttrStr += ' ';
+        AttrStr += Attr.getAsString();
+      }
+    }
+
+    if (!AttrStr.empty())
+      Out << "; Function Attrs: " << AttrStr << '\n';
+  }
+
   if (F->isDeclaration())
     Out << "declare ";
   else
@@ -1620,7 +1594,6 @@ void AssemblyWriter::printFunction(const Function *F) {
   }
 
   FunctionType *FT = F->getFunctionType();
-  const AttributeSet &Attrs = F->getAttributes();
   if (Attrs.hasAttributes(AttributeSet::ReturnIndex))
     Out <<  Attrs.getAsString(AttributeSet::ReturnIndex) << ' ';
   TypePrinter.print(F->getReturnType(), Out);
@@ -1750,21 +1723,24 @@ void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
 
   // Output all of the instructions in the basic block...
   for (BasicBlock::const_iterator I = BB->begin(), E = BB->end(); I != E; ++I) {
-    printInstruction(*I);
-    Out << '\n';
+    printInstructionLine(*I);
   }
 
   if (AnnotationWriter) AnnotationWriter->emitBasicBlockEndAnnot(BB, Out);
+}
+
+/// printInstructionLine - Print an instruction and a newline character.
+void AssemblyWriter::printInstructionLine(const Instruction &I) {
+  printInstruction(I);
+  Out << '\n';
 }
 
 /// printInfoComment - Print a little comment after the instruction indicating
 /// which slot it occupies.
 ///
 void AssemblyWriter::printInfoComment(const Value &V) {
-  if (AnnotationWriter) {
+  if (AnnotationWriter)
     AnnotationWriter->printInfoComment(V, Out);
-    return;
-  }
 }
 
 // This member is called for each Instruction in a function..
@@ -2073,9 +2049,9 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
       unsigned Kind = InstMD[i].first;
        if (Kind < MDNames.size()) {
          Out << ", !" << MDNames[Kind];
-      } else {
-        Out << ", !<unknown kind #" << Kind << ">";
-      }
+       } else {
+         Out << ", !<unknown kind #" << Kind << ">";
+       }
       Out << ' ';
       WriteAsOperandInternal(Out, InstMD[i].second, &TypePrinter, &Machine,
                              TheModule);
@@ -2107,6 +2083,11 @@ static void WriteMDNodeComment(const MDNode *Node,
   }
 }
 
+void AssemblyWriter::writeMDNode(unsigned Slot, const MDNode *Node) {
+  Out << '!' << Slot << " = metadata ";
+  printMDNodeBody(Node);
+}
+
 void AssemblyWriter::writeAllMDNodes() {
   SmallVector<const MDNode *, 16> Nodes;
   Nodes.resize(Machine.mdn_size());
@@ -2115,8 +2096,7 @@ void AssemblyWriter::writeAllMDNodes() {
     Nodes[I->second] = cast<MDNode>(I->first);
 
   for (unsigned i = 0, e = Nodes.size(); i != e; ++i) {
-    Out << '!' << i << " = metadata ";
-    printMDNodeBody(Nodes[i]);
+    writeMDNode(i, Nodes[i]);
   }
 }
 
@@ -2139,6 +2119,8 @@ void AssemblyWriter::writeAllAttributeGroups() {
     Out << "attributes #" << I->second << " = { "
         << I->first.getAsString(AttributeSet::FunctionIndex, true) << " }\n";
 }
+
+} // namespace llvm
 
 //===----------------------------------------------------------------------===//
 //                       External Interface declarations

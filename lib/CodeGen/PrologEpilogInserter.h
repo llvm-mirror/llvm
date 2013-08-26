@@ -1,4 +1,4 @@
-//===-- PrologEpilogInserter.h - Prolog/Epilog code insertion -*- C++ -* --===//
+//===-- PrologEpilogInserter.h - Prolog/Epilog code insertion -*- C++ -*---===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -112,13 +112,13 @@ namespace llvm {
     bool calcAvailInOut(MachineBasicBlock* MBB);
     void calculateAnticAvail(MachineFunction &Fn);
     bool addUsesForMEMERegion(MachineBasicBlock* MBB,
-                              SmallVector<MachineBasicBlock*, 4>& blks);
-    bool addUsesForTopLevelLoops(SmallVector<MachineBasicBlock*, 4>& blks);
+                              SmallVectorImpl<MachineBasicBlock *> &blks);
+    bool addUsesForTopLevelLoops(SmallVectorImpl<MachineBasicBlock *> &blks);
     bool calcSpillPlacements(MachineBasicBlock* MBB,
-                             SmallVector<MachineBasicBlock*, 4> &blks,
+                             SmallVectorImpl<MachineBasicBlock *> &blks,
                              CSRegBlockMap &prevSpills);
     bool calcRestorePlacements(MachineBasicBlock* MBB,
-                               SmallVector<MachineBasicBlock*, 4> &blks,
+                               SmallVectorImpl<MachineBasicBlock *> &blks,
                                CSRegBlockMap &prevRestores);
     void placeSpillsAndRestores(MachineFunction &Fn);
     void placeCSRSpillsAndRestores(MachineFunction &Fn);
@@ -127,6 +127,8 @@ namespace llvm {
     void insertCSRSpillsAndRestores(MachineFunction &Fn);
     void calculateFrameObjectOffsets(MachineFunction &Fn);
     void replaceFrameIndices(MachineFunction &Fn);
+    void replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
+                             int &SPAdj);
     void scavengeFrameVirtualRegs(MachineFunction &Fn);
     void insertPrologEpilogCode(MachineFunction &Fn);
 

@@ -6,9 +6,9 @@
 @C.0.2070 = private constant [5 x i8*] [i8* blockaddress(@foo, %L1), i8* blockaddress(@foo, %L2), i8* blockaddress(@foo, %L3), i8* blockaddress(@foo, %L4), i8* blockaddress(@foo, %L5)] ; <[5 x i8*]*> [#uses=1]
 
 define internal i32 @foo(i32 %i) nounwind {
-; ARM: foo:
-; THUMB: foo:
-; THUMB2: foo:
+; ARM-LABEL: foo:
+; THUMB-LABEL: foo:
+; THUMB2-LABEL: foo:
 entry:
   %0 = load i8** @nextaddr, align 4               ; <i8*> [#uses=2]
   %1 = icmp eq i8* %0, null                       ; <i1> [#uses=1]
@@ -51,12 +51,12 @@ L1:                                               ; preds = %L2, %bb2
 ; ARM: ldr [[R1:r[0-9]+]], LCPI
 ; ARM: add [[R1b:r[0-9]+]], pc, [[R1]]
 ; ARM: str [[R1b]]
-; THUMB: ldr.n
+; THUMB: ldr
 ; THUMB: add
-; THUMB: ldr.n [[R2:r[0-9]+]], LCPI
+; THUMB: ldr [[R2:r[0-9]+]], LCPI
 ; THUMB: add [[R2]], pc
 ; THUMB: str [[R2]]
-; THUMB2: ldr.n [[R2:r[0-9]+]], LCPI
+; THUMB2: ldr [[R2:r[0-9]+]], LCPI
 ; THUMB2-NEXT: str{{(.w)?}} [[R2]]
   store i8* blockaddress(@foo, %L5), i8** @nextaddr, align 4
   ret i32 %res.3

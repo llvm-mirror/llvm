@@ -54,9 +54,9 @@ MipsRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   switch (RC->getID()) {
   default:
     return 0;
-  case Mips::CPURegsRegClassID:
-  case Mips::CPU64RegsRegClassID:
-  case Mips::DSPRegsRegClassID: {
+  case Mips::GPR32RegClassID:
+  case Mips::GPR64RegClassID:
+  case Mips::DSPRRegClassID: {
     const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
     return 28 - TFI->hasFP(MF);
   }
@@ -100,24 +100,28 @@ MipsRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
   return CSR_N64_RegMask;
 }
 
+const uint32_t *MipsRegisterInfo::getMips16RetHelperMask() {
+  return CSR_Mips16RetHelper_RegMask;
+}
+
 BitVector MipsRegisterInfo::
 getReservedRegs(const MachineFunction &MF) const {
-  static const uint16_t ReservedCPURegs[] = {
+  static const uint16_t ReservedGPR32[] = {
     Mips::ZERO, Mips::K0, Mips::K1, Mips::SP
   };
 
-  static const uint16_t ReservedCPU64Regs[] = {
+  static const uint16_t ReservedGPR64[] = {
     Mips::ZERO_64, Mips::K0_64, Mips::K1_64, Mips::SP_64
   };
 
   BitVector Reserved(getNumRegs());
   typedef TargetRegisterClass::const_iterator RegIter;
 
-  for (unsigned I = 0; I < array_lengthof(ReservedCPURegs); ++I)
-    Reserved.set(ReservedCPURegs[I]);
+  for (unsigned I = 0; I < array_lengthof(ReservedGPR32); ++I)
+    Reserved.set(ReservedGPR32[I]);
 
-  for (unsigned I = 0; I < array_lengthof(ReservedCPU64Regs); ++I)
-    Reserved.set(ReservedCPU64Regs[I]);
+  for (unsigned I = 0; I < array_lengthof(ReservedGPR64); ++I)
+    Reserved.set(ReservedGPR64[I]);
 
   if (Subtarget.hasMips64()) {
     // Reserve all registers in AFGR64.
@@ -142,15 +146,20 @@ getReservedRegs(const MachineFunction &MF) const {
 
   // Reserve hardware registers.
   Reserved.set(Mips::HWR29);
-  Reserved.set(Mips::HWR29_64);
 
   // Reserve DSP control register.
-  Reserved.set(Mips::DSPCtrl);
+  Reserved.set(Mips::DSPPos);
+  Reserved.set(Mips::DSPSCount);
+  Reserved.set(Mips::DSPCarry);
+  Reserved.set(Mips::DSPEFI);
+  Reserved.set(Mips::DSPOutFlag);
 
   // Reserve RA if in mips16 mode.
   if (Subtarget.inMips16Mode()) {
     Reserved.set(Mips::RA);
     Reserved.set(Mips::RA_64);
+    Reserved.set(Mips::T0);
+    Reserved.set(Mips::T1);
   }
 
   // Reserve GP if small section is used.

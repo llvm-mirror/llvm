@@ -30,6 +30,9 @@
 namespace llvm {
 namespace COFF {
 
+  // The PE signature bytes that follows the DOS stub header.
+  static const char PEMagic[] = { 'P', 'E', '\0', '\0' };
+
   // Sizes in bytes of various things in the COFF format.
   enum {
     HeaderSize     = 20,
@@ -321,7 +324,8 @@ namespace COFF {
     IMAGE_COMDAT_SELECT_SAME_SIZE,
     IMAGE_COMDAT_SELECT_EXACT_MATCH,
     IMAGE_COMDAT_SELECT_ASSOCIATIVE,
-    IMAGE_COMDAT_SELECT_LARGEST
+    IMAGE_COMDAT_SELECT_LARGEST,
+    IMAGE_COMDAT_SELECT_NEWEST
   };
 
   // Auxiliary Symbol Formats
@@ -447,8 +451,6 @@ namespace COFF {
   };
 
   struct PEHeader {
-    uint32_t Signature;
-    header COFFHeader;
     uint16_t Magic;
     uint8_t  MajorLinkerVersion;
     uint8_t  MinorLinkerVersion;
@@ -484,6 +486,24 @@ namespace COFF {
   struct DataDirectory {
     uint32_t RelativeVirtualAddress;
     uint32_t Size;
+  };
+
+  enum DataDirectoryIndex {
+    EXPORT_TABLE = 0,
+    IMPORT_TABLE,
+    RESOURCE_TABLE,
+    EXCEPTION_TABLE,
+    CERTIFICATE_TABLE,
+    BASE_RELOCATION_TABLE,
+    DEBUG,
+    ARCHITECTURE,
+    GLOBAL_PTR,
+    TLS_TABLE,
+    LOAD_CONFIG_TABLE,
+    BOUND_IMPORT,
+    IAT,
+    DELAY_IMPORT_DESCRIPTOR,
+    CLR_RUNTIME_HEADER
   };
 
   enum WindowsSubsystem {

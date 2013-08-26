@@ -23,21 +23,23 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
-namespace llvm {
+using namespace llvm;
+
+namespace {
 
 class R600EmitClauseMarkersPass : public MachineFunctionPass {
 
 private:
   static char ID;
   const R600InstrInfo *TII;
+  int Address;
 
   unsigned OccupiedDwords(MachineInstr *MI) const {
     switch (MI->getOpcode()) {
     case AMDGPU::INTERP_PAIR_XY:
     case AMDGPU::INTERP_PAIR_ZW:
     case AMDGPU::INTERP_VEC_LOAD:
-    case AMDGPU::DOT4_eg_pseudo:
-    case AMDGPU::DOT4_r600_pseudo:
+    case AMDGPU::DOT_4:
       return 4;
     case AMDGPU::KILL:
       return 0;
@@ -61,8 +63,6 @@ private:
   }
 
   bool isALU(const MachineInstr *MI) const {
-    if (MI->getOpcode() == AMDGPU::KILLGT)
-      return false;
     if (TII->isALUInstr(MI->getOpcode()))
       return true;
     if (TII->isVector(*MI) || TII->isCubeOp(MI->getOpcode()))
@@ -73,8 +73,7 @@ private:
     case AMDGPU::INTERP_PAIR_ZW:
     case AMDGPU::INTERP_VEC_LOAD:
     case AMDGPU::COPY:
-    case AMDGPU::DOT4_eg_pseudo:
-    case AMDGPU::DOT4_r600_pseudo:
+    case AMDGPU::DOT_4:
       return true;
     default:
       return false;
@@ -89,31 +88,6 @@ private:
     default:
       return false;
     }
-  }
-
-  // Register Idx, then Const value
-  std::vector<std::pair<unsigned, unsigned> > ExtractConstRead(MachineInstr *MI)
-      const {
-    const R600Operands::Ops OpTable[3][2] = {
-      {R600Operands::SRC0, R600Operands::SRC0_SEL},
-      {R600Operands::SRC1, R600Operands::SRC1_SEL},
-      {R600Operands::SRC2, R600Operands::SRC2_SEL},
-    };
-    std::vector<std::pair<unsigned, unsigned> > Result;
-
-    if (!TII->isALUInstr(MI->getOpcode()))
-      return Result;
-    for (unsigned j = 0; j < 3; j++) {
-      int SrcIdx = TII->getOperandIdx(MI->getOpcode(), OpTable[j][0]);
-      if (SrcIdx < 0)
-        break;
-      if (MI->getOperand(SrcIdx).getReg() == AMDGPU::ALU_CONST) {
-        unsigned Const = MI->getOperand(
-            TII->getOperandIdx(MI->getOpcode(), OpTable[j][1])).getImm();
-        Result.push_back(std::pair<unsigned, unsigned>(SrcIdx, Const));
-      }
-    }
-    return Result;
   }
 
   std::pair<unsigned, unsigned> getAccessedBankLine(unsigned Sel) const {
@@ -133,9 +107,13 @@ private:
   bool SubstituteKCacheBank(MachineInstr *MI,
       std::vector<std::pair<unsigned, unsigned> > &CachedConsts) const {
     std::vector<std::pair<unsigned, unsigned> > UsedKCache;
-    std::vector<std::pair<unsigned, unsigned> > Consts = ExtractConstRead(MI);
-    assert(TII->isALUInstr(MI->getOpcode()) && "Can't assign Const");
+    const SmallVectorImpl<std::pair<MachineOperand *, int64_t> > &Consts =
+        TII->getSrcs(MI);
+    assert((TII->isALUInstr(MI->getOpcode()) ||
+        MI->getOpcode() == AMDGPU::DOT_4) && "Can't assign Const");
     for (unsigned i = 0, n = Consts.size(); i < n; ++i) {
+      if (Consts[i].first->getReg() != AMDGPU::ALU_CONST)
+        continue;
       unsigned Sel = Consts[i].second;
       unsigned Chan = Sel & 3, Index = ((Sel >> 2) - 512) & 31;
       unsigned KCacheIndex = Index * 4 + Chan;
@@ -161,25 +139,28 @@ private:
       return false;
     }
 
-    for (unsigned i = 0, n = Consts.size(); i < n; ++i) {
-      switch(UsedKCache[i].first) {
+    for (unsigned i = 0, j = 0, n = Consts.size(); i < n; ++i) {
+      if (Consts[i].first->getReg() != AMDGPU::ALU_CONST)
+        continue;
+      switch(UsedKCache[j].first) {
       case 0:
-        MI->getOperand(Consts[i].first).setReg(
-            AMDGPU::R600_KC0RegClass.getRegister(UsedKCache[i].second));
+        Consts[i].first->setReg(
+            AMDGPU::R600_KC0RegClass.getRegister(UsedKCache[j].second));
         break;
       case 1:
-        MI->getOperand(Consts[i].first).setReg(
-            AMDGPU::R600_KC1RegClass.getRegister(UsedKCache[i].second));
+        Consts[i].first->setReg(
+            AMDGPU::R600_KC1RegClass.getRegister(UsedKCache[j].second));
         break;
       default:
         llvm_unreachable("Wrong Cache Line");
       }
+      j++;
     }
     return true;
   }
 
   MachineBasicBlock::iterator
-  MakeALUClause(MachineBasicBlock &MBB, MachineBasicBlock::iterator I) const {
+  MakeALUClause(MachineBasicBlock &MBB, MachineBasicBlock::iterator I) {
     MachineBasicBlock::iterator ClauseHead = I;
     std::vector<std::pair<unsigned, unsigned> > KCacheBanks;
     bool PushBeforeModifier = false;
@@ -189,38 +170,59 @@ private:
         continue;
       if (!isALU(I))
         break;
+      if (AluInstCount > TII->getMaxAlusPerClause())
+        break;
       if (I->getOpcode() == AMDGPU::PRED_X) {
         if (TII->getFlagOp(I).getImm() & MO_FLAG_PUSH)
           PushBeforeModifier = true;
         AluInstCount ++;
         continue;
       }
+      // XXX: GROUP_BARRIER instructions cannot be in the same ALU clause as:
+      //
+      // * KILL or INTERP instructions
+      // * Any instruction that sets UPDATE_EXEC_MASK or UPDATE_PRED bits
+      // * Uses waterfalling (i.e. INDEX_MODE = AR.X)
+      //
+      // XXX: These checks have not been implemented yet.
+      if (TII->mustBeLastInClause(I->getOpcode())) {
+        I++;
+        break;
+      }
       if (TII->isALUInstr(I->getOpcode()) &&
           !SubstituteKCacheBank(I, KCacheBanks))
         break;
-      AluInstCount += OccupiedDwords(I);
-      if (AluInstCount > 124)
+      if (I->getOpcode() == AMDGPU::DOT_4 &&
+          !SubstituteKCacheBank(I, KCacheBanks))
         break;
+      AluInstCount += OccupiedDwords(I);
     }
     unsigned Opcode = PushBeforeModifier ?
         AMDGPU::CF_ALU_PUSH_BEFORE : AMDGPU::CF_ALU;
     BuildMI(MBB, ClauseHead, MBB.findDebugLoc(ClauseHead), TII->get(Opcode))
-        .addImm(0) // ADDR
+    // We don't use the ADDR field until R600ControlFlowFinalizer pass, where
+    // it is safe to assume it is 0. However if we always put 0 here, the ifcvt
+    // pass may assume that identical ALU clause starter at the beginning of a 
+    // true and false branch can be factorized which is not the case.
+        .addImm(Address++) // ADDR
         .addImm(KCacheBanks.empty()?0:KCacheBanks[0].first) // KB0
         .addImm((KCacheBanks.size() < 2)?0:KCacheBanks[1].first) // KB1
         .addImm(KCacheBanks.empty()?0:2) // KM0
         .addImm((KCacheBanks.size() < 2)?0:2) // KM1
         .addImm(KCacheBanks.empty()?0:KCacheBanks[0].second) // KLINE0
         .addImm((KCacheBanks.size() < 2)?0:KCacheBanks[1].second) // KLINE1
-        .addImm(AluInstCount); // COUNT
+        .addImm(AluInstCount) // COUNT
+        .addImm(1); // Enabled
     return I;
   }
 
 public:
   R600EmitClauseMarkersPass(TargetMachine &tm) : MachineFunctionPass(ID),
-    TII (static_cast<const R600InstrInfo *>(tm.getInstrInfo())) { }
+    TII(0), Address(0) { }
 
   virtual bool runOnMachineFunction(MachineFunction &MF) {
+    TII = static_cast<const R600InstrInfo *>(MF.getTarget().getInstrInfo());
+
     for (MachineFunction::iterator BB = MF.begin(), BB_E = MF.end();
                                                     BB != BB_E; ++BB) {
       MachineBasicBlock &MBB = *BB;
@@ -244,7 +246,7 @@ public:
 
 char R600EmitClauseMarkersPass::ID = 0;
 
-}
+} // end anonymous namespace
 
 
 llvm::FunctionPass *llvm::createR600EmitClauseMarkers(TargetMachine &TM) {

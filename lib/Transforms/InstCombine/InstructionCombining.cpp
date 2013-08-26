@@ -1231,13 +1231,12 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
       // %t = getelementptr i32* bitcast ([2 x i32]* %str to i32*), i32 %V
       // into:  %t1 = getelementptr [2 x i32]* %str, i32 0, i32 %V; bitcast
       Type *SrcElTy = StrippedPtrTy->getElementType();
-      Type *ResElTy=cast<PointerType>(PtrOp->getType())->getElementType();
+      Type *ResElTy = PtrOp->getType()->getPointerElementType();
       if (TD && SrcElTy->isArrayTy() &&
-          TD->getTypeAllocSize(cast<ArrayType>(SrcElTy)->getElementType()) ==
+          TD->getTypeAllocSize(SrcElTy->getArrayElementType()) ==
           TD->getTypeAllocSize(ResElTy)) {
-        Value *Idx[2];
-        Idx[0] = Constant::getNullValue(Type::getInt32Ty(GEP.getContext()));
-        Idx[1] = GEP.getOperand(1);
+        Type *IdxType = TD->getIntPtrType(GEP.getContext());
+        Value *Idx[2] = { Constant::getNullValue(IdxType), GEP.getOperand(1) };
         Value *NewGEP = GEP.isInBounds() ?
           Builder->CreateInBoundsGEP(StrippedPtr, Idx, GEP.getName()) :
           Builder->CreateGEP(StrippedPtr, Idx, GEP.getName());
@@ -1287,8 +1286,8 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
         // Check that changing to the array element type amounts to dividing the
         // index by a scale factor.
         uint64_t ResSize = TD->getTypeAllocSize(ResElTy);
-        uint64_t ArrayEltSize =
-          TD->getTypeAllocSize(cast<ArrayType>(SrcElTy)->getElementType());
+        uint64_t ArrayEltSize
+          = TD->getTypeAllocSize(SrcElTy->getArrayElementType());
         if (ResSize && ArrayEltSize % ResSize == 0) {
           Value *Idx = GEP.getOperand(1);
           unsigned BitWidth = Idx->getType()->getPrimitiveSizeInBits();
@@ -1304,9 +1303,11 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
             // Successfully decomposed Idx as NewIdx * Scale, form a new GEP.
             // If the multiplication NewIdx * Scale may overflow then the new
             // GEP may not be "inbounds".
-            Value *Off[2];
-            Off[0] = Constant::getNullValue(Type::getInt32Ty(GEP.getContext()));
-            Off[1] = NewIdx;
+            Value *Off[2] = {
+              Constant::getNullValue(TD->getIntPtrType(GEP.getContext())),
+              NewIdx
+            };
+
             Value *NewGEP = GEP.isInBounds() && NSW ?
               Builder->CreateInBoundsGEP(StrippedPtr, Off, GEP.getName()) :
               Builder->CreateGEP(StrippedPtr, Off, GEP.getName());
@@ -1354,8 +1355,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
       // field at Offset in 'A's type.  If so, we can pull the cast through the
       // GEP.
       SmallVector<Value*, 8> NewIndices;
-      Type *InTy =
-        cast<PointerType>(BCI->getOperand(0)->getType())->getElementType();
+      Type *InTy = BCI->getOperand(0)->getType()->getPointerElementType();
       if (FindElementAtOffset(InTy, Offset.getSExtValue(), NewIndices)) {
         Value *NGEP = GEP.isInBounds() ?
           Builder->CreateInBoundsGEP(BCI->getOperand(0), NewIndices) :
@@ -1483,7 +1483,7 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
       Module *M = II->getParent()->getParent()->getParent();
       Function *F = Intrinsic::getDeclaration(M, Intrinsic::donothing);
       InvokeInst::Create(F, II->getNormalDest(), II->getUnwindDest(),
-                         ArrayRef<Value *>(), "", II->getParent());
+                         None, "", II->getParent());
     }
     return EraseInstFromFunction(MI);
   }
@@ -2042,7 +2042,7 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
         continue;
       // If Filter is a subset of LFilter, i.e. every element of Filter is also
       // an element of LFilter, then discard LFilter.
-      SmallVector<Value *, 16>::iterator J = NewClauses.begin() + j;
+      SmallVectorImpl<Value *>::iterator J = NewClauses.begin() + j;
       // If Filter is empty then it is a subset of LFilter.
       if (!FElts) {
         // Discard LFilter.

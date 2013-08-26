@@ -95,6 +95,8 @@ namespace macho {
   enum StructureSizes {
     Header32Size = 28,
     Header64Size = 32,
+    FatHeaderSize = 8,
+    FatArchHeaderSize = 20,
     SegmentLoadCommand32Size = 56,
     SegmentLoadCommand64Size = 72,
     Section32Size = 68,
@@ -128,6 +130,22 @@ namespace macho {
   /// \brief Extended header for 64-bit object files.
   struct Header64Ext {
     uint32_t Reserved;
+  };
+
+  /// \brief Header for universal object files.
+  struct FatHeader {
+    uint32_t Magic;
+    uint32_t NumFatArch;
+  };
+
+  /// \brief Header for a single-architecture object file in a
+  /// universal binary.
+  struct FatArchHeader {
+    uint32_t CPUType;
+    uint32_t CPUSubtype;
+    uint32_t Offset;
+    uint32_t Size;
+    uint32_t Align;
   };
 
   // See <mach-o/loader.h>.
@@ -405,6 +423,25 @@ namespace macho {
     RIT_ARM_Half = 8,
     RIT_ARM_HalfDifference = 9
 
+  };
+
+  /// PPC relocation types from <mach-o/ppc/reloc.h>
+  enum RelocationInfoTypePPC {
+    RIT_PPC_BR14 = RIT_Pair +1,
+    RIT_PPC_BR24,
+    RIT_PPC_HI16,
+    RIT_PPC_LO16,
+    RIT_PPC_HA16,
+    RIT_PPC_LO14,
+    RIT_PPC_SECTDIFF,
+    RIT_PPC_PB_LA_PTR,
+    RIT_PPC_HI16_SECTDIFF,
+    RIT_PPC_LO16_SECTDIFF,
+    RIT_PPC_HA16_SECTDIFF,
+    RIT_PPC_JBSR,
+    RIT_PPC_LO14_SECTDIFF,
+    RIT_PPC_LOCAL_SECTDIFF,
+    RIT_PPC_TLV
   };
 
 } // end namespace macho

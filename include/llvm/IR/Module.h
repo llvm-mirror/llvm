@@ -20,6 +20,7 @@
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/DataTypes.h"
 
 namespace llvm {
@@ -339,10 +340,6 @@ public:
   Constant *getOrInsertFunction(StringRef Name, Type *RetTy, ...)
     END_WITH_NULL;
 
-  Constant *getOrInsertTargetIntrinsic(StringRef Name,
-                                       FunctionType *Ty,
-                                       AttributeSet AttributeList);
-
   /// getFunction - Look up the specified function in the module symbol table.
   /// If it does not exist, return null.
   Function *getFunction(StringRef Name) const;
@@ -355,14 +352,21 @@ public:
   /// symbol table.  If it does not exist, return null. If AllowInternal is set
   /// to true, this function will return types that have InternalLinkage. By
   /// default, these types are not returned.
-  GlobalVariable *getGlobalVariable(StringRef Name,
-                                    bool AllowInternal = false) const;
+  const GlobalVariable *getGlobalVariable(StringRef Name,
+                                          bool AllowInternal = false) const {
+    return const_cast<Module *>(this)->getGlobalVariable(Name, AllowInternal);
+  }
+
+  GlobalVariable *getGlobalVariable(StringRef Name, bool AllowInternal = false);
 
   /// getNamedGlobal - Return the global variable in the module with the
   /// specified name, of arbitrary type.  This method returns null if a global
   /// with the specified name is not found.
-  GlobalVariable *getNamedGlobal(StringRef Name) const {
+  GlobalVariable *getNamedGlobal(StringRef Name) {
     return getGlobalVariable(Name, true);
+  }
+  const GlobalVariable *getNamedGlobal(StringRef Name) const {
+    return const_cast<Module *>(this)->getNamedGlobal(Name);
   }
 
   /// getOrInsertGlobal - Look up the specified global in the module symbol
@@ -407,6 +411,10 @@ public:
 
   /// getModuleFlagsMetadata - Returns the module flags in the provided vector.
   void getModuleFlagsMetadata(SmallVectorImpl<ModuleFlagEntry> &Flags) const;
+
+  /// Return the corresponding value if Key appears in module flags, otherwise
+  /// return null.
+  Value *getModuleFlag(StringRef Key) const;
 
   /// getModuleFlagsMetadata - Returns the NamedMDNode in the module that
   /// represents module-level flags. This method returns null if there are no
@@ -584,6 +592,16 @@ inline raw_ostream &operator<<(raw_ostream &O, const Module &M) {
   return O;
 }
 
+// Create wrappers for C Binding types (see CBindingWrapping.h).
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(Module, LLVMModuleRef)
+
+/* LLVMModuleProviderRef exists for historical reasons, but now just holds a
+ * Module.
+ */
+inline Module *unwrap(LLVMModuleProviderRef MP) {
+  return reinterpret_cast<Module*>(MP);
+}
+  
 } // End llvm namespace
 
 #endif

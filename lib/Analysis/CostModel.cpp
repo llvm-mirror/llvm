@@ -81,11 +81,28 @@ CostModelAnalysis::runOnFunction(Function &F) {
  return false;
 }
 
-static bool isReverseVectorMask(SmallVector<int, 16> &Mask) {
+static bool isReverseVectorMask(SmallVectorImpl<int> &Mask) {
   for (unsigned i = 0, MaskSize = Mask.size(); i < MaskSize; ++i)
     if (Mask[i] > 0 && Mask[i] != (int)(MaskSize - 1 - i))
       return false;
   return true;
+}
+
+static TargetTransformInfo::OperandValueKind getOperandInfo(Value *V) {
+  TargetTransformInfo::OperandValueKind OpInfo =
+    TargetTransformInfo::OK_AnyValue;
+
+  // Check for a splat of a constant.
+  ConstantDataVector *CDV = 0;
+  if ((CDV = dyn_cast<ConstantDataVector>(V)))
+    if (CDV->getSplatValue() != NULL)
+      OpInfo = TargetTransformInfo::OK_UniformConstantValue;
+  ConstantVector *CV = 0;
+  if ((CV = dyn_cast<ConstantVector>(V)))
+    if (CV->getSplatValue() != NULL)
+      OpInfo = TargetTransformInfo::OK_UniformConstantValue;
+
+  return OpInfo;
 }
 
 unsigned CostModelAnalysis::getInstructionCost(const Instruction *I) const {
@@ -121,7 +138,12 @@ unsigned CostModelAnalysis::getInstructionCost(const Instruction *I) const {
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor: {
-    return TTI->getArithmeticInstrCost(I->getOpcode(), I->getType());
+    TargetTransformInfo::OperandValueKind Op1VK =
+      getOperandInfo(I->getOperand(0));
+    TargetTransformInfo::OperandValueKind Op2VK =
+      getOperandInfo(I->getOperand(1));
+    return TTI->getArithmeticInstrCost(I->getOpcode(), I->getType(), Op1VK,
+                                       Op2VK);
   }
   case Instruction::Select: {
     const SelectInst *SI = cast<SelectInst>(I);
@@ -171,14 +193,14 @@ unsigned CostModelAnalysis::getInstructionCost(const Instruction *I) const {
                                    EEI->getOperand(0)->getType(), Idx);
   }
   case Instruction::InsertElement: {
-      const InsertElementInst * IE = cast<InsertElementInst>(I);
-      ConstantInt *CI = dyn_cast<ConstantInt>(IE->getOperand(2));
-      unsigned Idx = -1;
-      if (CI)
-        Idx = CI->getZExtValue();
-      return TTI->getVectorInstrCost(I->getOpcode(),
-                                     IE->getType(), Idx);
-    }
+    const InsertElementInst * IE = cast<InsertElementInst>(I);
+    ConstantInt *CI = dyn_cast<ConstantInt>(IE->getOperand(2));
+    unsigned Idx = -1;
+    if (CI)
+      Idx = CI->getZExtValue();
+    return TTI->getVectorInstrCost(I->getOpcode(),
+                                   IE->getType(), Idx);
+  }
   case Instruction::ShuffleVector: {
     const ShuffleVectorInst *Shuffle = cast<ShuffleVectorInst>(I);
     Type *VecTypOp0 = Shuffle->getOperand(0)->getType();

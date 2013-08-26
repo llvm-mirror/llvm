@@ -211,10 +211,15 @@ def AtomItineraries : ProcessorItineraries<
 
   InstrItinData<IIC_SSE_UNPCK, [InstrStage<1, [Port0]>] >,
 
-  InstrItinData<IIC_SSE_SQRTP_RR, [InstrStage<13, [Port0, Port1]>] >,
-  InstrItinData<IIC_SSE_SQRTP_RM, [InstrStage<14, [Port0, Port1]>] >,
-  InstrItinData<IIC_SSE_SQRTS_RR, [InstrStage<11, [Port0, Port1]>] >,
-  InstrItinData<IIC_SSE_SQRTS_RM, [InstrStage<12, [Port0, Port1]>] >,
+  InstrItinData<IIC_SSE_SQRTPS_RR, [InstrStage<70, [Port0, Port1]>] >,
+  InstrItinData<IIC_SSE_SQRTPS_RM, [InstrStage<70, [Port0, Port1]>] >,
+  InstrItinData<IIC_SSE_SQRTSS_RR, [InstrStage<34, [Port0, Port1]>] >,
+  InstrItinData<IIC_SSE_SQRTSS_RM, [InstrStage<34, [Port0, Port1]>] >,
+
+  InstrItinData<IIC_SSE_SQRTPD_RR, [InstrStage<125, [Port0, Port1]>] >,
+  InstrItinData<IIC_SSE_SQRTPD_RM, [InstrStage<125, [Port0, Port1]>] >,
+  InstrItinData<IIC_SSE_SQRTSD_RR, [InstrStage<62, [Port0, Port1]>] >,
+  InstrItinData<IIC_SSE_SQRTSD_RM, [InstrStage<62, [Port0, Port1]>] >,
 
   InstrItinData<IIC_SSE_RCPP_RR, [InstrStage<9, [Port0, Port1]>] >,
   InstrItinData<IIC_SSE_RCPP_RM, [InstrStage<10, [Port0, Port1]>] >,
@@ -520,11 +525,9 @@ def AtomItineraries : ProcessorItineraries<
 // Atom machine model.
 def AtomModel : SchedMachineModel {
   let IssueWidth = 2;  // Allows 2 instructions per scheduling group.
-  let MinLatency = 1;  // InstrStage cycles overrides MinLatency.
-                       // OperandCycles may be used for expected latency.
+  let MicroOpBufferSize = 0; // In-order execution, always hide latency.
   let LoadLatency = 3; // Expected cycles, may be overriden by OperandCycles.
   let HighLatency = 30;// Expected, may be overriden by OperandCycles.
-  let ILPWindow = 0; // Always try to hide expected latency.
 
   let Itineraries = AtomItineraries;
 }

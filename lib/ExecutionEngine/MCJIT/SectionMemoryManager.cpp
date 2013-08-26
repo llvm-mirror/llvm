@@ -14,18 +14,7 @@
 
 #include "llvm/Config/config.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
-#include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/MathExtras.h"
-
-#ifdef __linux__
-  // These includes used by SectionMemoryManager::getPointerToNamedFunction()
-  // for Glibc trickery. See comments in this function for more information.
-  #ifdef HAVE_SYS_STAT_H
-    #include <sys/stat.h>
-  #endif
-  #include <fcntl.h>
-  #include <unistd.h>
-#endif
 
 namespace llvm {
 
@@ -111,7 +100,7 @@ uint8_t *SectionMemoryManager::allocateSection(MemoryGroup &MemGroup,
   return (uint8_t*)Addr;
 }
 
-bool SectionMemoryManager::applyPermissions(std::string *ErrMsg)
+bool SectionMemoryManager::finalizeMemory(std::string *ErrMsg)
 {
   // FIXME: Should in-progress permissions be reverted if an error occurs?
   error_code ec;
@@ -138,6 +127,11 @@ bool SectionMemoryManager::applyPermissions(std::string *ErrMsg)
 
   // Read-write data memory already has the correct permissions
 
+  // Some platforms with separate data cache and instruction cache require
+  // explicit cache flush, otherwise JIT code manipulations (like resolved
+  // relocations) will get to the data cache but not to the instruction cache.
+  invalidateInstructionCache();
+
   return false;
 }
 
@@ -160,57 +154,6 @@ void SectionMemoryManager::invalidateInstructionCache() {
   for (int i = 0, e = CodeMem.AllocatedMem.size(); i != e; ++i)
     sys::Memory::InvalidateInstructionCache(CodeMem.AllocatedMem[i].base(),
                                             CodeMem.AllocatedMem[i].size());
-}
-
-static int jit_noop() {
-  return 0;
-}
-
-void *SectionMemoryManager::getPointerToNamedFunction(const std::string &Name,
-                                                       bool AbortOnFailure) {
-#if defined(__linux__)
-  //===--------------------------------------------------------------------===//
-  // Function stubs that are invoked instead of certain library calls
-  //
-  // Force the following functions to be linked in to anything that uses the
-  // JIT. This is a hack designed to work around the all-too-clever Glibc
-  // strategy of making these functions work differently when inlined vs. when
-  // not inlined, and hiding their real definitions in a separate archive file
-  // that the dynamic linker can't see. For more info, search for
-  // 'libc_nonshared.a' on Google, or read http://llvm.org/PR274.
-  if (Name == "stat") return (void*)(intptr_t)&stat;
-  if (Name == "fstat") return (void*)(intptr_t)&fstat;
-  if (Name == "lstat") return (void*)(intptr_t)&lstat;
-  if (Name == "stat64") return (void*)(intptr_t)&stat64;
-  if (Name == "fstat64") return (void*)(intptr_t)&fstat64;
-  if (Name == "lstat64") return (void*)(intptr_t)&lstat64;
-  if (Name == "atexit") return (void*)(intptr_t)&atexit;
-  if (Name == "mknod") return (void*)(intptr_t)&mknod;
-#endif // __linux__
-
-  // We should not invoke parent's ctors/dtors from generated main()!
-  // On Mingw and Cygwin, the symbol __main is resolved to
-  // callee's(eg. tools/lli) one, to invoke wrong duplicated ctors
-  // (and register wrong callee's dtors with atexit(3)).
-  // We expect ExecutionEngine::runStaticConstructorsDestructors()
-  // is called before ExecutionEngine::runFunctionAsMain() is called.
-  if (Name == "__main") return (void*)(intptr_t)&jit_noop;
-
-  const char *NameStr = Name.c_str();
-  void *Ptr = sys::DynamicLibrary::SearchForAddressOfSymbol(NameStr);
-  if (Ptr) return Ptr;
-
-  // If it wasn't found and if it starts with an underscore ('_') character,
-  // try again without the underscore.
-  if (NameStr[0] == '_') {
-    Ptr = sys::DynamicLibrary::SearchForAddressOfSymbol(NameStr+1);
-    if (Ptr) return Ptr;
-  }
-
-  if (AbortOnFailure)
-    report_fatal_error("Program used external function '" + Name +
-                      "' which could not be resolved!");
-  return 0;
 }
 
 SectionMemoryManager::~SectionMemoryManager() {

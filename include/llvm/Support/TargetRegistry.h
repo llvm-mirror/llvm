@@ -21,6 +21,7 @@
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm-c/Disassembler.h"
 #include <cassert>
 #include <string>
 
@@ -41,6 +42,8 @@ namespace llvm {
   class MCRegisterInfo;
   class MCStreamer;
   class MCSubtargetInfo;
+  class MCSymbolizer;
+  class MCRelocationInfo;
   class MCTargetAsmParser;
   class TargetMachine;
   class TargetOptions;
@@ -56,6 +59,14 @@ namespace llvm {
                                 MCAsmBackend *TAB,
                                 bool ShowInst);
 
+  MCRelocationInfo *createMCRelocationInfo(StringRef TT, MCContext &Ctx);
+
+  MCSymbolizer *createMCSymbolizer(StringRef TT, LLVMOpInfoCallback GetOpInfo,
+                                   LLVMSymbolLookupCallback SymbolLookUp,
+                                   void *DisInfo,
+                                   MCContext *Ctx,
+                                   MCRelocationInfo *RelInfo);
+
   /// Target - Wrapper for Target specific information.
   ///
   /// For registration purposes, this is a POD type so that targets can be
@@ -70,7 +81,7 @@ namespace llvm {
 
     typedef unsigned (*TripleMatchQualityFnTy)(const std::string &TT);
 
-    typedef MCAsmInfo *(*MCAsmInfoCtorFnTy)(const Target &T,
+    typedef MCAsmInfo *(*MCAsmInfoCtorFnTy)(const MCRegisterInfo &MRI,
                                             StringRef TT);
     typedef MCCodeGenInfo *(*MCCodeGenInfoCtorFnTy)(StringRef TT,
                                                     Reloc::Model RM,
@@ -127,6 +138,14 @@ namespace llvm {
                                              MCCodeEmitter *CE,
                                              MCAsmBackend *TAB,
                                              bool ShowInst);
+    typedef MCRelocationInfo *(*MCRelocationInfoCtorTy)(StringRef TT,
+                                                        MCContext &Ctx);
+    typedef MCSymbolizer *(*MCSymbolizerCtorTy)(StringRef TT,
+                                   LLVMOpInfoCallback GetOpInfo,
+                                   LLVMSymbolLookupCallback SymbolLookUp,
+                                   void *DisInfo,
+                                   MCContext *Ctx,
+                                   MCRelocationInfo *RelInfo);
 
   private:
     /// Next - The next registered target in the linked list, maintained by the
@@ -206,8 +225,18 @@ namespace llvm {
     /// AsmStreamer, if registered (default = llvm::createAsmStreamer).
     AsmStreamerCtorTy AsmStreamerCtorFn;
 
+    /// MCRelocationInfoCtorFn - Construction function for this target's
+    /// MCRelocationInfo, if registered (default = llvm::createMCRelocationInfo)
+    MCRelocationInfoCtorTy MCRelocationInfoCtorFn;
+
+    /// MCSymbolizerCtorFn - Construction function for this target's
+    /// MCSymbolizer, if registered (default = llvm::createMCSymbolizer)
+    MCSymbolizerCtorTy MCSymbolizerCtorFn;
+
   public:
-    Target() : AsmStreamerCtorFn(llvm::createAsmStreamer) {}
+    Target() : AsmStreamerCtorFn(llvm::createAsmStreamer),
+               MCRelocationInfoCtorFn(llvm::createMCRelocationInfo),
+               MCSymbolizerCtorFn(llvm::createMCSymbolizer) {}
 
     /// @name Target Information
     /// @{
@@ -266,10 +295,11 @@ namespace llvm {
     /// feature set; it should always be provided. Generally this should be
     /// either the target triple from the module, or the target triple of the
     /// host if that does not exist.
-    MCAsmInfo *createMCAsmInfo(StringRef Triple) const {
+    MCAsmInfo *createMCAsmInfo(const MCRegisterInfo &MRI,
+                               StringRef Triple) const {
       if (!MCAsmInfoCtorFn)
         return 0;
-      return MCAsmInfoCtorFn(*this, Triple);
+      return MCAsmInfoCtorFn(MRI, Triple);
     }
 
     /// createMCCodeGenInfo - Create a MCCodeGenInfo implementation.
@@ -430,6 +460,33 @@ namespace llvm {
       // AsmStreamerCtorFn is default to llvm::createAsmStreamer
       return AsmStreamerCtorFn(Ctx, OS, isVerboseAsm, useLoc, useCFI,
                                useDwarfDirectory, InstPrint, CE, TAB, ShowInst);
+    }
+
+    /// createMCRelocationInfo - Create a target specific MCRelocationInfo.
+    ///
+    /// \param TT The target triple.
+    /// \param Ctx The target context.
+    MCRelocationInfo *
+      createMCRelocationInfo(StringRef TT, MCContext &Ctx) const {
+      return MCRelocationInfoCtorFn(TT, Ctx);
+    }
+
+    /// createMCSymbolizer - Create a target specific MCSymbolizer.
+    ///
+    /// \param TT The target triple.
+    /// \param GetOpInfo The function to get the symbolic information for operands.
+    /// \param SymbolLookUp The function to lookup a symbol name.
+    /// \param DisInfo The pointer to the block of symbolic information for above call
+    /// back.
+    /// \param Ctx The target context.
+    /// \param RelInfo The relocation information for this target. Takes ownership.
+    MCSymbolizer *
+    createMCSymbolizer(StringRef TT, LLVMOpInfoCallback GetOpInfo,
+                       LLVMSymbolLookupCallback SymbolLookUp,
+                       void *DisInfo,
+                       MCContext *Ctx, MCRelocationInfo *RelInfo) const {
+      return MCSymbolizerCtorFn(TT, GetOpInfo, SymbolLookUp, DisInfo,
+                                Ctx, RelInfo);
     }
 
     /// @}
@@ -759,6 +816,36 @@ namespace llvm {
         T.AsmStreamerCtorFn = Fn;
     }
 
+    /// RegisterMCRelocationInfo - Register an MCRelocationInfo
+    /// implementation for the given target.
+    ///
+    /// Clients are responsible for ensuring that registration doesn't occur
+    /// while another thread is attempting to access the registry. Typically
+    /// this is done by initializing all targets at program startup.
+    ///
+    /// @param T - The target being registered.
+    /// @param Fn - A function to construct an MCRelocationInfo for the target.
+    static void RegisterMCRelocationInfo(Target &T,
+                                         Target::MCRelocationInfoCtorTy Fn) {
+      if (T.MCRelocationInfoCtorFn == llvm::createMCRelocationInfo)
+        T.MCRelocationInfoCtorFn = Fn;
+    }
+
+    /// RegisterMCSymbolizer - Register an MCSymbolizer
+    /// implementation for the given target.
+    ///
+    /// Clients are responsible for ensuring that registration doesn't occur
+    /// while another thread is attempting to access the registry. Typically
+    /// this is done by initializing all targets at program startup.
+    ///
+    /// @param T - The target being registered.
+    /// @param Fn - A function to construct an MCSymbolizer for the target.
+    static void RegisterMCSymbolizer(Target &T,
+                                     Target::MCSymbolizerCtorTy Fn) {
+      if (T.MCSymbolizerCtorFn == llvm::createMCSymbolizer)
+        T.MCSymbolizerCtorFn = Fn;
+    }
+
     /// @}
   };
 
@@ -804,8 +891,8 @@ namespace llvm {
       TargetRegistry::RegisterMCAsmInfo(T, &Allocator);
     }
   private:
-    static MCAsmInfo *Allocator(const Target &T, StringRef TT) {
-      return new MCAsmInfoImpl(T, TT);
+    static MCAsmInfo *Allocator(const MCRegisterInfo &/*MRI*/, StringRef TT) {
+      return new MCAsmInfoImpl(TT);
     }
 
   };
@@ -838,8 +925,9 @@ namespace llvm {
       TargetRegistry::RegisterMCCodeGenInfo(T, &Allocator);
     }
   private:
-    static MCCodeGenInfo *Allocator(StringRef TT, Reloc::Model RM,
-                                    CodeModel::Model CM, CodeGenOpt::Level OL) {
+    static MCCodeGenInfo *Allocator(StringRef /*TT*/, Reloc::Model /*RM*/,
+                                    CodeModel::Model /*CM*/,
+                                    CodeGenOpt::Level /*OL*/) {
       return new MCCodeGenInfoImpl();
     }
   };
@@ -938,7 +1026,7 @@ namespace llvm {
       TargetRegistry::RegisterMCRegInfo(T, &Allocator);
     }
   private:
-    static MCRegisterInfo *Allocator(StringRef TT) {
+    static MCRegisterInfo *Allocator(StringRef /*TT*/) {
       return new MCRegisterInfoImpl();
     }
   };
@@ -971,8 +1059,8 @@ namespace llvm {
       TargetRegistry::RegisterMCSubtargetInfo(T, &Allocator);
     }
   private:
-    static MCSubtargetInfo *Allocator(StringRef TT, StringRef CPU,
-                                      StringRef FS) {
+    static MCSubtargetInfo *Allocator(StringRef /*TT*/, StringRef /*CPU*/,
+                                      StringRef /*FS*/) {
       return new MCSubtargetInfoImpl();
     }
   };
@@ -1091,10 +1179,10 @@ namespace llvm {
     }
 
   private:
-    static MCCodeEmitter *Allocator(const MCInstrInfo &II,
-                                    const MCRegisterInfo &MRI,
-                                    const MCSubtargetInfo &STI,
-                                    MCContext &Ctx) {
+    static MCCodeEmitter *Allocator(const MCInstrInfo &/*II*/,
+                                    const MCRegisterInfo &/*MRI*/,
+                                    const MCSubtargetInfo &/*STI*/,
+                                    MCContext &/*Ctx*/) {
       return new MCCodeEmitterImpl();
     }
   };

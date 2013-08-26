@@ -29,12 +29,14 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
@@ -45,6 +47,11 @@ using namespace llvm;
 
 char PEI::ID = 0;
 char &llvm::PrologEpilogCodeInserterID = PEI::ID;
+
+static cl::opt<unsigned>
+WarnStackSize("warn-stack-size", cl::Hidden, cl::init((unsigned)-1),
+              cl::desc("Warn for stack size bigger than the given"
+                       " number"));
 
 INITIALIZE_PASS_BEGIN(PEI, "prologepilog",
                 "Prologue/Epilogue Insertion", false, false)
@@ -127,6 +134,13 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
 
   // Clear any vregs created by virtual scavenging.
   Fn.getRegInfo().clearVirtRegs();
+
+  // Warn on stack size when we exceeds the given limit.
+  MachineFrameInfo *MFI = Fn.getFrameInfo();
+  if (WarnStackSize.getNumOccurrences() > 0 &&
+      WarnStackSize < MFI->getStackSize())
+    errs() << "warning: Stack size limit exceeded (" << MFI->getStackSize()
+           << ") in " << Fn.getName()  << ".\n";
 
   delete RS;
   clearAllSets();
@@ -214,7 +228,8 @@ void PEI::calculateCalleeSavedRegisters(MachineFunction &F) {
   std::vector<CalleeSavedInfo> CSI;
   for (unsigned i = 0; CSRegs[i]; ++i) {
     unsigned Reg = CSRegs[i];
-    if (F.getRegInfo().isPhysRegUsed(Reg)) {
+    // Functions which call __builtin_unwind_init get all their registers saved.
+    if (F.getRegInfo().isPhysRegUsed(Reg) || F.getMMI().callsUnwindInit()) {
       // If the reg is modified, save it!
       CSI.push_back(CalleeSavedInfo(Reg));
     }
@@ -543,14 +558,18 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
   unsigned MaxAlign = MFI->getMaxAlignment();
 
   // Make sure the special register scavenging spill slot is closest to the
-  // frame pointer if a frame pointer is required.
+  // incoming stack pointer if a frame pointer is required and is closer
+  // to the incoming rather than the final stack pointer.
   const TargetRegisterInfo *RegInfo = Fn.getTarget().getRegisterInfo();
-  if (RS && TFI.hasFP(Fn) && RegInfo->useFPForScavengingIndex(Fn) &&
-      !RegInfo->needsStackRealignment(Fn)) {
+  bool EarlyScavengingSlots = (TFI.hasFP(Fn) &&
+                               TFI.isFPCloseToIncomingSP() &&
+                               RegInfo->useFPForScavengingIndex(Fn) &&
+                               !RegInfo->needsStackRealignment(Fn));
+  if (RS && EarlyScavengingSlots) {
     SmallVector<int, 2> SFIs;
     RS->getScavengingFrameIndices(SFIs);
-    for (SmallVector<int, 2>::iterator I = SFIs.begin(),
-         IE = SFIs.end(); I != IE; ++I)
+    for (SmallVectorImpl<int>::iterator I = SFIs.begin(),
+           IE = SFIs.end(); I != IE; ++I)
       AdjustStackOffset(MFI, *I, StackGrowsDown, Offset, MaxAlign);
   }
 
@@ -630,12 +649,11 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
 
   // Make sure the special register scavenging spill slot is closest to the
   // stack pointer.
-  if (RS && (!TFI.hasFP(Fn) || RegInfo->needsStackRealignment(Fn) ||
-             !RegInfo->useFPForScavengingIndex(Fn))) {
+  if (RS && !EarlyScavengingSlots) {
     SmallVector<int, 2> SFIs;
     RS->getScavengingFrameIndices(SFIs);
-    for (SmallVector<int, 2>::iterator I = SFIs.begin(),
-         IE = SFIs.end(); I != IE; ++I)
+    for (SmallVectorImpl<int>::iterator I = SFIs.begin(),
+           IE = SFIs.end(); I != IE; ++I)
       AdjustStackOffset(MFI, *I, StackGrowsDown, Offset, MaxAlign);
   }
 
@@ -710,6 +728,40 @@ void PEI::insertPrologEpilogCode(MachineFunction &Fn) {
 void PEI::replaceFrameIndices(MachineFunction &Fn) {
   if (!Fn.getFrameInfo()->hasStackObjects()) return; // Nothing to do?
 
+  // Store SPAdj at exit of a basic block.
+  SmallVector<int, 8> SPState;
+  SPState.resize(Fn.getNumBlockIDs());
+  SmallPtrSet<MachineBasicBlock*, 8> Reachable;
+
+  // Iterate over the reachable blocks in DFS order.
+  for (df_ext_iterator<MachineFunction*, SmallPtrSet<MachineBasicBlock*, 8> >
+       DFI = df_ext_begin(&Fn, Reachable), DFE = df_ext_end(&Fn, Reachable);
+       DFI != DFE; ++DFI) {
+    int SPAdj = 0;
+    // Check the exit state of the DFS stack predecessor.
+    if (DFI.getPathLength() >= 2) {
+      MachineBasicBlock *StackPred = DFI.getPath(DFI.getPathLength() - 2);
+      assert(Reachable.count(StackPred) &&
+             "DFS stack predecessor is already visited.\n");
+      SPAdj = SPState[StackPred->getNumber()];
+    }
+    MachineBasicBlock *BB = *DFI;
+    replaceFrameIndices(BB, Fn, SPAdj);
+    SPState[BB->getNumber()] = SPAdj;
+  }
+
+  // Handle the unreachable blocks.
+  for (MachineFunction::iterator BB = Fn.begin(), E = Fn.end(); BB != E; ++BB) {
+    if (Reachable.count(BB))
+      // Already handled in DFS traversal.
+      continue;
+    int SPAdj = 0;
+    replaceFrameIndices(BB, Fn, SPAdj);
+  }
+}
+
+void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
+                              int &SPAdj) {
   const TargetMachine &TM = Fn.getTarget();
   assert(TM.getRegisterInfo() && "TM::getRegisterInfo() must be implemented!");
   const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
@@ -720,89 +772,85 @@ void PEI::replaceFrameIndices(MachineFunction &Fn) {
   int FrameSetupOpcode   = TII.getCallFrameSetupOpcode();
   int FrameDestroyOpcode = TII.getCallFrameDestroyOpcode();
 
-  for (MachineFunction::iterator BB = Fn.begin(),
-         E = Fn.end(); BB != E; ++BB) {
-#ifndef NDEBUG
-    int SPAdjCount = 0; // frame setup / destroy count.
-#endif
-    int SPAdj = 0;  // SP offset due to call frame setup / destroy.
-    if (RS && !FrameIndexVirtualScavenging) RS->enterBasicBlock(BB);
+  if (RS && !FrameIndexVirtualScavenging) RS->enterBasicBlock(BB);
 
-    for (MachineBasicBlock::iterator I = BB->begin(); I != BB->end(); ) {
+  for (MachineBasicBlock::iterator I = BB->begin(); I != BB->end(); ) {
 
-      if (I->getOpcode() == FrameSetupOpcode ||
-          I->getOpcode() == FrameDestroyOpcode) {
-#ifndef NDEBUG
-        // Track whether we see even pairs of them
-        SPAdjCount += I->getOpcode() == FrameSetupOpcode ? 1 : -1;
-#endif
-        // Remember how much SP has been adjusted to create the call
-        // frame.
-        int Size = I->getOperand(0).getImm();
+    if (I->getOpcode() == FrameSetupOpcode ||
+        I->getOpcode() == FrameDestroyOpcode) {
+      // Remember how much SP has been adjusted to create the call
+      // frame.
+      int Size = I->getOperand(0).getImm();
 
-        if ((!StackGrowsDown && I->getOpcode() == FrameSetupOpcode) ||
-            (StackGrowsDown && I->getOpcode() == FrameDestroyOpcode))
-          Size = -Size;
+      if ((!StackGrowsDown && I->getOpcode() == FrameSetupOpcode) ||
+          (StackGrowsDown && I->getOpcode() == FrameDestroyOpcode))
+        Size = -Size;
 
-        SPAdj += Size;
+      SPAdj += Size;
 
-        MachineBasicBlock::iterator PrevI = BB->end();
-        if (I != BB->begin()) PrevI = prior(I);
-        TFI->eliminateCallFramePseudoInstr(Fn, *BB, I);
+      MachineBasicBlock::iterator PrevI = BB->end();
+      if (I != BB->begin()) PrevI = prior(I);
+      TFI->eliminateCallFramePseudoInstr(Fn, *BB, I);
 
-        // Visit the instructions created by eliminateCallFramePseudoInstr().
-        if (PrevI == BB->end())
-          I = BB->begin();     // The replaced instr was the first in the block.
-        else
-          I = llvm::next(PrevI);
+      // Visit the instructions created by eliminateCallFramePseudoInstr().
+      if (PrevI == BB->end())
+        I = BB->begin();     // The replaced instr was the first in the block.
+      else
+        I = llvm::next(PrevI);
+      continue;
+    }
+
+    MachineInstr *MI = I;
+    bool DoIncr = true;
+    for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+      if (!MI->getOperand(i).isFI())
+        continue;
+
+      // Frame indicies in debug values are encoded in a target independent
+      // way with simply the frame index and offset rather than any
+      // target-specific addressing mode.
+      if (MI->isDebugValue()) {
+        assert(i == 0 && "Frame indicies can only appear as the first "
+                         "operand of a DBG_VALUE machine instruction");
+        unsigned Reg;
+        MachineOperand &Offset = MI->getOperand(1);
+        Offset.setImm(Offset.getImm() +
+                      TFI->getFrameIndexReference(
+                          Fn, MI->getOperand(0).getIndex(), Reg));
+        MI->getOperand(0).ChangeToRegister(Reg, false /*isDef*/);
         continue;
       }
 
-      MachineInstr *MI = I;
-      bool DoIncr = true;
-      for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-        if (!MI->getOperand(i).isFI())
-            continue;
+      // Some instructions (e.g. inline asm instructions) can have
+      // multiple frame indices and/or cause eliminateFrameIndex
+      // to insert more than one instruction. We need the register
+      // scavenger to go through all of these instructions so that
+      // it can update its register information. We keep the
+      // iterator at the point before insertion so that we can
+      // revisit them in full.
+      bool AtBeginning = (I == BB->begin());
+      if (!AtBeginning) --I;
 
-        // Some instructions (e.g. inline asm instructions) can have
-        // multiple frame indices and/or cause eliminateFrameIndex
-        // to insert more than one instruction. We need the register
-        // scavenger to go through all of these instructions so that
-        // it can update its register information. We keep the
-        // iterator at the point before insertion so that we can
-        // revisit them in full.
-        bool AtBeginning = (I == BB->begin());
-        if (!AtBeginning) --I;
+      // If this instruction has a FrameIndex operand, we need to
+      // use that target machine register info object to eliminate
+      // it.
+      TRI.eliminateFrameIndex(MI, SPAdj, i,
+                              FrameIndexVirtualScavenging ?  NULL : RS);
 
-        // If this instruction has a FrameIndex operand, we need to
-        // use that target machine register info object to eliminate
-        // it.
-        TRI.eliminateFrameIndex(MI, SPAdj, i,
-                                FrameIndexVirtualScavenging ?  NULL : RS);
-
-        // Reset the iterator if we were at the beginning of the BB.
-        if (AtBeginning) {
-          I = BB->begin();
-          DoIncr = false;
-        }
-
-        MI = 0;
-        break;
+      // Reset the iterator if we were at the beginning of the BB.
+      if (AtBeginning) {
+        I = BB->begin();
+        DoIncr = false;
       }
 
-      if (DoIncr && I != BB->end()) ++I;
-
-      // Update register states.
-      if (RS && !FrameIndexVirtualScavenging && MI) RS->forward(MI);
+      MI = 0;
+      break;
     }
 
-    // If we have evenly matched pairs of frame setup / destroy instructions,
-    // make sure the adjustments come out to zero. If we don't have matched
-    // pairs, we can't be sure the missing bit isn't in another basic block
-    // due to a custom inserter playing tricks, so just asserting SPAdj==0
-    // isn't sufficient. See tMOVCC on Thumb1, for example.
-    assert((SPAdjCount || SPAdj == 0) &&
-           "Unbalanced call frame setup / destroy pairs?");
+    if (DoIncr && I != BB->end()) ++I;
+
+    // Update register states.
+    if (RS && !FrameIndexVirtualScavenging && MI) RS->forward(MI);
   }
 }
 
@@ -824,8 +872,16 @@ void PEI::scavengeFrameVirtualRegs(MachineFunction &Fn) {
     // The instruction stream may change in the loop, so check BB->end()
     // directly.
     for (MachineBasicBlock::iterator I = BB->begin(); I != BB->end(); ) {
+      // We might end up here again with a NULL iterator if we scavenged a
+      // register for which we inserted spill code for definition by what was
+      // originally the first instruction in BB.
+      if (I == MachineBasicBlock::iterator(NULL))
+        I = BB->begin();
+
       MachineInstr *MI = I;
       MachineBasicBlock::iterator J = llvm::next(I);
+      MachineBasicBlock::iterator P = I == BB->begin() ?
+        MachineBasicBlock::iterator(NULL) : llvm::prior(I);
 
       // RS should process this instruction before we might scavenge at this
       // location. This is because we might be replacing a virtual register
@@ -869,8 +925,18 @@ void PEI::scavengeFrameVirtualRegs(MachineFunction &Fn) {
       // problem because we need the spill code before I: Move I to just
       // prior to J.
       if (I != llvm::prior(J)) {
-        BB->splice(J, BB, I++);
-        RS->skipTo(I == BB->begin() ? NULL : llvm::prior(I));
+        BB->splice(J, BB, I);
+
+        // Before we move I, we need to prepare the RS to visit I again.
+        // Specifically, RS will assert if it sees uses of registers that
+        // it believes are undefined. Because we have already processed
+        // register kills in I, when it visits I again, it will believe that
+        // those registers are undefined. To avoid this situation, unprocess
+        // the instruction I.
+        assert(RS->getCurrentPosition() == I &&
+          "The register scavenger has an unexpected position");
+        I = P;
+        RS->unprocess(P);
       } else
         ++I;
     }

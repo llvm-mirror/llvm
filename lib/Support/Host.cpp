@@ -52,10 +52,19 @@ using namespace llvm;
 
 /// GetX86CpuIDAndInfo - Execute the specified cpuid and return the 4 values in the
 /// specified arguments.  If we can't run cpuid on the host, return true.
-static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
-                            unsigned *rEBX, unsigned *rECX, unsigned *rEDX) {
-#if defined(__x86_64__) || defined(_M_AMD64) || defined (_M_X64)
-  #if defined(__GNUC__)
+static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
+                               unsigned *rECX, unsigned *rEDX) {
+#if defined(_MSC_VER)
+  // The MSVC intrinsic is portable across x86 and x64.
+  int registers[4];
+  __cpuid(registers, value);
+  *rEAX = registers[0];
+  *rEBX = registers[1];
+  *rECX = registers[2];
+  *rEDX = registers[3];
+  return false;
+#elif defined(__GNUC__)
+  #if defined(__x86_64__) || defined(_M_AMD64) || defined (_M_X64)
     // gcc doesn't know cpuid would clobber ebx/rbx. Preseve it manually.
     asm ("movq\t%%rbx, %%rsi\n\t"
          "cpuid\n\t"
@@ -66,19 +75,7 @@ static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
            "=d" (*rEDX)
          :  "a" (value));
     return false;
-  #elif defined(_MSC_VER)
-    int registers[4];
-    __cpuid(registers, value);
-    *rEAX = registers[0];
-    *rEBX = registers[1];
-    *rECX = registers[2];
-    *rEDX = registers[3];
-    return false;
-  #else
-    return true;
-  #endif
-#elif defined(i386) || defined(__i386__) || defined(__x86__) || defined(_M_IX86)
-  #if defined(__GNUC__)
+  #elif defined(i386) || defined(__i386__) || defined(__x86__) || defined(_M_IX86)
     asm ("movl\t%%ebx, %%esi\n\t"
          "cpuid\n\t"
          "xchgl\t%%ebx, %%esi\n\t"
@@ -88,20 +85,6 @@ static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
            "=d" (*rEDX)
          :  "a" (value));
     return false;
-  #elif defined(_MSC_VER)
-    __asm {
-      mov   eax,value
-      cpuid
-      mov   esi,rEAX
-      mov   dword ptr [esi],eax
-      mov   esi,rEBX
-      mov   dword ptr [esi],ebx
-      mov   esi,rECX
-      mov   dword ptr [esi],ecx
-      mov   esi,rEDX
-      mov   dword ptr [esi],edx
-    }
-    return false;
 // pedantic #else returns to appease -Wunreachable-code (so we don't generate
 // postprocessed code that looks like "return true; return false;")
   #else
@@ -110,6 +93,21 @@ static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX,
 #else
   return true;
 #endif
+}
+
+static bool OSHasAVXSupport() {
+#if defined(__GNUC__)
+  // Check xgetbv; this uses a .byte sequence instead of the instruction
+  // directly because older assemblers do not include support for xgetbv and
+  // there is no easy way to conditionally compile based on the assembler used.
+  int rEAX, rEDX;
+  __asm__ (".byte 0x0f, 0x01, 0xd0" : "=a" (rEAX), "=d" (rEDX) : "c" (0));
+#elif defined(_MSC_FULL_VER) && defined(_XCR_XFEATURE_ENABLED_MASK)
+  unsigned long long rEAX = _xgetbv(_XCR_XFEATURE_ENABLED_MASK);
+#else
+  int rEAX = 0; // Ensures we return false
+#endif
+  return (rEAX & 6) == 6;
 }
 
 static void DetectX86FamilyModel(unsigned EAX, unsigned &Family,
@@ -134,6 +132,12 @@ std::string sys::getHostCPUName() {
   DetectX86FamilyModel(EAX, Family, Model);
 
   bool HasSSE3 = (ECX & 0x1);
+  bool HasSSE41 = (ECX & 0x80000);
+  // If CPUID indicates support for XSAVE, XRESTORE and AVX, and XGETBV 
+  // indicates that the AVX registers will be saved and restored on context
+  // switch, then we have full AVX support.
+  const unsigned AVXBits = (1 << 27) | (1 << 28);
+  bool HasAVX = ((ECX & AVXBits) == AVXBits) && OSHasAVXSupport();
   GetX86CpuIDAndInfo(0x80000001, &EAX, &EBX, &ECX, &EDX);
   bool Em64T = (EDX >> 29) & 0x1;
 
@@ -224,7 +228,8 @@ std::string sys::getHostCPUName() {
                // 17h. All processors are manufactured using the 45 nm process.
                //
                // 45nm: Penryn , Wolfdale, Yorkfield (XE)
-        return "penryn";
+        // Not all Penryn processors support SSE 4.1 (such as the Pentium brand)
+        return HasSSE41 ? "penryn" : "core2";
 
       case 26: // Intel Core i7 processor and Intel Xeon processor. All
                // processors are manufactured using the 45 nm process.
@@ -243,11 +248,15 @@ std::string sys::getHostCPUName() {
       case 42: // Intel Core i7 processor. All processors are manufactured
                // using the 32 nm process.
       case 45:
-        return "corei7-avx";
+        // Not all Sandy Bridge processors support AVX (such as the Pentium
+        // versions instead of the i7 versions).
+        return HasAVX ? "corei7-avx" : "corei7";
 
       // Ivy Bridge:
       case 58:
-        return "core-avx-i";
+        // Not all Ivy Bridge processors support AVX (such as the Pentium
+        // versions instead of the i7 versions).
+        return HasAVX ? "core-avx-i" : "corei7";
 
       case 28: // Most 45 nm Intel Atom processors
       case 38: // 45 nm Atom Lincroft
@@ -331,10 +340,15 @@ std::string sys::getHostCPUName() {
       case 20:
         return "btver1";
       case 21:
-        if (Model <= 15)
-          return "bdver1";
-        else if (Model <= 31)
+        if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
+          return "btver1";
+        if (Model > 15 && Model <= 31)
           return "bdver2";
+        return "bdver1";
+      case 22:
+        if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
+          return "btver1";
+        return "btver2";
     default:
       return "generic";
     }
@@ -541,41 +555,31 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   SmallVector<StringRef, 32> Lines;
   Str.split(Lines, "\n");
 
-  // Look for the CPU implementer line.
-  StringRef Implementer;
+  SmallVector<StringRef, 32> CPUFeatures;
+
+  // Look for the CPU features.
   for (unsigned I = 0, E = Lines.size(); I != E; ++I)
-    if (Lines[I].startswith("CPU implementer"))
-      Implementer = Lines[I].substr(15).ltrim("\t :");
-
-  if (Implementer == "0x41") { // ARM Ltd.
-    SmallVector<StringRef, 32> CPUFeatures;
-
-    // Look for the CPU features.
-    for (unsigned I = 0, E = Lines.size(); I != E; ++I)
-      if (Lines[I].startswith("Features")) {
-        Lines[I].split(CPUFeatures, " ");
-        break;
-      }
-
-    for (unsigned I = 0, E = CPUFeatures.size(); I != E; ++I) {
-      StringRef LLVMFeatureStr = StringSwitch<StringRef>(CPUFeatures[I])
-        .Case("half", "fp16")
-        .Case("neon", "neon")
-        .Case("vfpv3", "vfp3")
-        .Case("vfpv3d16", "d16")
-        .Case("vfpv4", "vfp4")
-        .Case("idiva", "hwdiv-arm")
-        .Case("idivt", "hwdiv")
-        .Default("");
-
-      if (LLVMFeatureStr != "")
-        Features.GetOrCreateValue(LLVMFeatureStr).setValue(true);
+    if (Lines[I].startswith("Features")) {
+      Lines[I].split(CPUFeatures, " ");
+      break;
     }
 
-    return true;
+  for (unsigned I = 0, E = CPUFeatures.size(); I != E; ++I) {
+    StringRef LLVMFeatureStr = StringSwitch<StringRef>(CPUFeatures[I])
+      .Case("half", "fp16")
+      .Case("neon", "neon")
+      .Case("vfpv3", "vfp3")
+      .Case("vfpv3d16", "d16")
+      .Case("vfpv4", "vfp4")
+      .Case("idiva", "hwdiv-arm")
+      .Case("idivt", "hwdiv")
+      .Default("");
+
+    if (LLVMFeatureStr != "")
+      Features.GetOrCreateValue(LLVMFeatureStr).setValue(true);
   }
 
-  return false;
+  return true;
 }
 #else
 bool sys::getHostCPUFeatures(StringMap<bool> &Features){
@@ -584,7 +588,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features){
 #endif
 
 std::string sys::getProcessTriple() {
-  Triple PT(LLVM_HOSTTRIPLE);
+  Triple PT(Triple::normalize(LLVM_HOST_TRIPLE));
 
   if (sizeof(void *) == 8 && PT.isArch32Bit())
     PT = PT.get64BitArchVariant();

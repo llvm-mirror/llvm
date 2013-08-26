@@ -29,6 +29,7 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Host.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -46,11 +47,6 @@ EnableFPMAD("enable-fp-mad",
 static cl::opt<bool>
 DisableFPElim("disable-fp-elim",
   cl::desc("Disable frame pointer elimination optimization"),
-  cl::init(false));
-
-static cl::opt<bool>
-DisableFPElimNonLeaf("disable-non-leaf-fp-elim",
-  cl::desc("Disable frame pointer elimination optimization for non-leaf funcs"),
   cl::init(false));
 
 static cl::opt<bool>
@@ -125,11 +121,6 @@ OverrideStackAlignment("stack-alignment",
   cl::desc("Override default stack alignment"),
   cl::init(0));
 
-static cl::opt<bool>
-EnableRealignStack("realign-stack",
-  cl::desc("Realign stack if needed"),
-  cl::init(true));
-
 static cl::opt<std::string>
 TrapFuncName("trap-func", cl::Hidden,
   cl::desc("Emit a call to trap function rather than a trap instruction"),
@@ -150,25 +141,23 @@ UseInitArray("use-init-array",
   cl::desc("Use .init_array instead of .ctors."),
   cl::init(false));
 
-static cl::opt<unsigned>
-SSPBufferSize("stack-protector-buffer-size", cl::init(8),
-              cl::desc("Lower bound for a buffer to be considered for "
-                       "stack protection"));
-
 LTOModule::LTOModule(llvm::Module *m, llvm::TargetMachine *t)
   : _module(m), _target(t),
-    _context(*_target->getMCAsmInfo(), *_target->getRegisterInfo(), NULL),
-    _mangler(_context, *_target->getDataLayout()) {}
+    _context(_target->getMCAsmInfo(), _target->getRegisterInfo(), NULL),
+    _mangler(_context, t) {}
 
 /// isBitcodeFile - Returns 'true' if the file (or memory contents) is LLVM
 /// bitcode.
 bool LTOModule::isBitcodeFile(const void *mem, size_t length) {
-  return llvm::sys::IdentifyFileType((const char*)mem, length)
-    == llvm::sys::Bitcode_FileType;
+  return sys::fs::identify_magic(StringRef((const char *)mem, length)) ==
+         sys::fs::file_magic::bitcode;
 }
 
 bool LTOModule::isBitcodeFile(const char *path) {
-  return llvm::sys::Path(path).isBitcodeFile();
+  sys::fs::file_magic type;
+  if (sys::fs::identify_magic(path, type))
+    return false;
+  return type == sys::fs::file_magic::bitcode;
 }
 
 /// isBitcodeFileForTarget - Returns 'true' if the file (or memory contents) is
@@ -210,17 +199,16 @@ LTOModule *LTOModule::makeLTOModule(const char *path, std::string &errMsg) {
 
 LTOModule *LTOModule::makeLTOModule(int fd, const char *path,
                                     size_t size, std::string &errMsg) {
-  return makeLTOModule(fd, path, size, size, 0, errMsg);
+  return makeLTOModule(fd, path, size, 0, errMsg);
 }
 
 LTOModule *LTOModule::makeLTOModule(int fd, const char *path,
-                                    size_t file_size,
                                     size_t map_size,
                                     off_t offset,
                                     std::string &errMsg) {
   OwningPtr<MemoryBuffer> buffer;
-  if (error_code ec = MemoryBuffer::getOpenFile(fd, path, buffer, file_size,
-                                                map_size, offset, false)) {
+  if (error_code ec =
+          MemoryBuffer::getOpenFileSlice(fd, path, buffer, map_size, offset)) {
     errMsg = ec.message();
     return NULL;
   }
@@ -238,7 +226,6 @@ LTOModule *LTOModule::makeLTOModule(const void *mem, size_t length,
 void LTOModule::getTargetOptions(TargetOptions &Options) {
   Options.LessPreciseFPMADOption = EnableFPMAD;
   Options.NoFramePointerElim = DisableFPElim;
-  Options.NoFramePointerElimNonLeaf = DisableFPElimNonLeaf;
   Options.AllowFPOpFusion = FuseFPOps;
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
@@ -252,12 +239,10 @@ void LTOModule::getTargetOptions(TargetOptions &Options) {
   Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
   Options.DisableTailCalls = DisableTailCalls;
   Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.RealignStack = EnableRealignStack;
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
   Options.UseInitArray = UseInitArray;
-  Options.SSPBufferSize = SSPBufferSize;
 }
 
 LTOModule *LTOModule::makeLTOModule(MemoryBuffer *buffer,
@@ -487,7 +472,7 @@ void LTOModule::addDefinedSymbol(const GlobalValue *def, bool isFunction) {
 
   // set alignment part log2() can have rounding errors
   uint32_t align = def->getAlignment();
-  uint32_t attr = align ? CountTrailingZeros_32(def->getAlignment()) : 0;
+  uint32_t attr = align ? countTrailingZeros(def->getAlignment()) : 0;
 
   // set permissions part
   if (isFunction) {
@@ -743,7 +728,7 @@ namespace {
           AddValueSymbols(Inst.getOperand(i).getExpr());
     }
     virtual void EmitLabel(MCSymbol *Symbol) {
-      Symbol->setSection(*getCurrentSection());
+      Symbol->setSection(*getCurrentSection().first);
       markDefined(*Symbol);
     }
     virtual void EmitDebugLabel(MCSymbol *Symbol) {
@@ -753,9 +738,10 @@ namespace {
       // FIXME: should we handle aliases?
       markDefined(*Symbol);
     }
-    virtual void EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) {
+    virtual bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) {
       if (Attribute == MCSA_Global)
         markGlobal(*Symbol);
+      return true;
     }
     virtual void EmitZerofill(const MCSection *Section, MCSymbol *Symbol,
                               uint64_t Size , unsigned ByteAlignment) {
@@ -771,7 +757,8 @@ namespace {
     virtual void EmitBundleUnlock() {}
 
     // Noop calls.
-    virtual void ChangeSection(const MCSection *Section) {}
+    virtual void ChangeSection(const MCSection *Section,
+                               const MCExpr *Subsection) {}
     virtual void InitToTextSection() {}
     virtual void InitSections() {}
     virtual void EmitAssemblerFlag(MCAssemblerFlag Flag) {}
@@ -787,9 +774,8 @@ namespace {
                                        unsigned ByteAlignment) {}
     virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
                                 uint64_t Size, unsigned ByteAlignment) {}
-    virtual void EmitBytes(StringRef Data, unsigned AddrSpace) {}
-    virtual void EmitValueImpl(const MCExpr *Value, unsigned Size,
-                               unsigned AddrSpace) {}
+    virtual void EmitBytes(StringRef Data) {}
+    virtual void EmitValueImpl(const MCExpr *Value, unsigned Size) {}
     virtual void EmitULEB128Value(const MCExpr *Value) {}
     virtual void EmitSLEB128Value(const MCExpr *Value) {}
     virtual void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,

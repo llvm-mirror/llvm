@@ -168,23 +168,6 @@ Constant *Module::getOrInsertFunction(StringRef Name,
   return F;
 }
 
-Constant *Module::getOrInsertTargetIntrinsic(StringRef Name,
-                                             FunctionType *Ty,
-                                             AttributeSet AttributeList) {
-  // See if we have a definition for the specified function already.
-  GlobalValue *F = getNamedValue(Name);
-  if (F == 0) {
-    // Nope, add it
-    Function *New = Function::Create(Ty, GlobalVariable::ExternalLinkage, Name);
-    New->setAttributes(AttributeList);
-    FunctionList.push_back(New);
-    return New; // Return the new prototype.
-  }
-
-  // Otherwise, we just found the existing function or a prototype.
-  return F;
-}
-
 Constant *Module::getOrInsertFunction(StringRef Name,
                                       FunctionType *Ty) {
   return getOrInsertFunction(Name, Ty, AttributeSet());
@@ -250,8 +233,7 @@ Function *Module::getFunction(StringRef Name) const {
 /// If AllowLocal is set to true, this function will return types that
 /// have an local. By default, these types are not returned.
 ///
-GlobalVariable *Module::getGlobalVariable(StringRef Name,
-                                          bool AllowLocal) const {
+GlobalVariable *Module::getGlobalVariable(StringRef Name, bool AllowLocal) {
   if (GlobalVariable *Result =
       dyn_cast_or_null<GlobalVariable>(getNamedValue(Name)))
     if (AllowLocal || !Result->hasLocalLinkage())
@@ -340,6 +322,19 @@ getModuleFlagsMetadata(SmallVectorImpl<ModuleFlagEntry> &Flags) const {
     Flags.push_back(ModuleFlagEntry(ModFlagBehavior(Behavior->getZExtValue()),
                                     Key, Val));
   }
+}
+
+/// Return the corresponding value if Key appears in module flags, otherwise
+/// return null.
+Value *Module::getModuleFlag(StringRef Key) const {
+  SmallVector<Module::ModuleFlagEntry, 8> ModuleFlags;
+  getModuleFlagsMetadata(ModuleFlags);
+  for (unsigned I = 0, E = ModuleFlags.size(); I < E; ++I) {
+    const ModuleFlagEntry &MFE = ModuleFlags[I];
+    if (Key == MFE.Key->getString())
+      return MFE.Val;
+  }
+  return 0;
 }
 
 /// getModuleFlagsMetadata - Returns the NamedMDNode in the module that

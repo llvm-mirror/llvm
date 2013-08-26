@@ -6,12 +6,14 @@ Auto-Vectorization in LLVM
    :local:
 
 LLVM has two vectorizers: The :ref:`Loop Vectorizer <loop-vectorizer>`,
-which operates on Loops, and the :ref:`Basic Block Vectorizer
-<bb-vectorizer>`, which optimizes straight-line code. These vectorizers
+which operates on Loops, and the :ref:`SLP Vectorizer
+<slp-vectorizer>`. These vectorizers
 focus on different optimization opportunities and use different techniques.
-The BB vectorizer merges multiple scalars that are found in the code into
-vectors while the Loop Vectorizer widens instructions in the original loop
-to operate on multiple consecutive loop iterations.
+The SLP vectorizer merges multiple scalars that are found in the code into
+vectors while the Loop Vectorizer widens instructions in loops
+to operate on multiple consecutive iterations.
+
+Both the Loop Vectorizer and the SLP Vectorizer are enabled by default.
 
 .. _loop-vectorizer:
 
@@ -21,19 +23,12 @@ The Loop Vectorizer
 Usage
 -----
 
-LLVM's Loop Vectorizer is now available and will be useful for many people.
-It is not enabled by default, but can be enabled through clang using the
-command line flag:
+The Loop Vectorizer is enabled by default, but it can be disabled
+through clang using the command line flag:
 
 .. code-block:: console
 
-   $ clang -fvectorize -O3 file.c
-
-If the ``-fvectorize`` flag is used then the loop vectorizer will be enabled
-when running with ``-O3``, ``-O2``. When ``-Os`` is used, the loop vectorizer
-will only vectorize loops that do not require a major increase in code size.
-
-We plan to enable the Loop Vectorizer by default as part of the LLVM 3.3 release.
+   $ clang ... -fno-vectorize  file.c
 
 Command line flags
 ^^^^^^^^^^^^^^^^^^
@@ -299,29 +294,18 @@ And Linpack-pc with the same configuration. Result is Mflops, higher is better.
 
 .. image:: linpack-pc.png
 
-.. _bb-vectorizer:
+.. _slp-vectorizer:
 
-The Basic Block Vectorizer
-==========================
-
-Usage
-------
-
-The Basic Block Vectorizer is not enabled by default, but it can be enabled
-through clang using the command line flag:
-
-.. code-block:: console
-
-   $ clang -fslp-vectorize file.c
+The SLP Vectorizer
+==================
 
 Details
 -------
 
-The goal of basic-block vectorization (a.k.a. superword-level parallelism) is
-to combine similar independent instructions within simple control-flow regions
-into vector instructions. Memory accesses, arithemetic operations, comparison
-operations and some math functions can all be vectorized using this technique
-(subject to the capabilities of the target architecture).
+The goal of SLP vectorization (a.k.a. superword-level parallelism) is
+to combine similar independent instructions
+into vector instructions. Memory accesses, arithmetic operations, comparison
+operations, PHI-nodes, can all be vectorized using this technique.
 
 For example, the following function performs very similar operations on its
 inputs (a1, b1) and (a2, b2). The basic-block vectorizer may combine these
@@ -329,10 +313,28 @@ into vector operations.
 
 .. code-block:: c++
 
-  int foo(int a1, int a2, int b1, int b2) {
-    int r1 = a1*(a1 + b1)/b1 + 50*b1/a1;
-    int r2 = a2*(a2 + b2)/b2 + 50*b2/a2;
-    return r1 + r2;
+  void foo(int a1, int a2, int b1, int b2, int *A) {
+    A[0] = a1*(a1 + b1)/b1 + 50*b1/a1;
+    A[1] = a2*(a2 + b2)/b2 + 50*b2/a2;
   }
 
+The SLP-vectorizer processes the code bottom-up, across basic blocks, in search of scalars to combine.
+
+Usage
+------
+
+The SLP Vectorizer is enabled by default, but it can be disabled
+through clang using the command line flag:
+
+.. code-block:: console
+
+   $ clang -fno-slp-vectorize file.c
+
+LLVM has a second basic block vectorization phase
+which is more compile-time intensive (The BB vectorizer). This optimization
+can be enabled through clang using the command line flag:
+
+.. code-block:: console
+
+   $ clang -fslp-vectorize-aggressive file.c
 

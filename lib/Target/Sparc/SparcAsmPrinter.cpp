@@ -16,6 +16,7 @@
 #include "Sparc.h"
 #include "SparcInstrInfo.h"
 #include "SparcTargetMachine.h"
+#include "MCTargetDesc/SparcBaseInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -59,11 +60,9 @@ namespace {
                                raw_ostream &O);
 
     bool printGetPCX(const MachineInstr *MI, unsigned OpNo, raw_ostream &OS);
-    
+
     virtual bool isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB)
                        const;
-
-    virtual MachineLocation getDebugValueLocation(const MachineInstr *MI) const;
   };
 } // end of anonymous namespace
 
@@ -72,15 +71,39 @@ namespace {
 void SparcAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
                                    raw_ostream &O) {
   const MachineOperand &MO = MI->getOperand (opNum);
-  bool CloseParen = false;
-  if (MI->getOpcode() == SP::SETHIi && !MO.isReg() && !MO.isImm()) {
-    O << "%hi(";
-    CloseParen = true;
-  } else if ((MI->getOpcode() == SP::ORri || MI->getOpcode() == SP::ADDri) &&
-             !MO.isReg() && !MO.isImm()) {
-    O << "%lo(";
-    CloseParen = true;
+  unsigned TF = MO.getTargetFlags();
+#ifndef NDEBUG
+  // Verify the target flags.
+  if (MO.isGlobal() || MO.isSymbol() || MO.isCPI()) {
+    if (MI->getOpcode() == SP::CALL)
+      assert(TF == SPII::MO_NO_FLAG &&
+             "Cannot handle target flags on call address");
+    else if (MI->getOpcode() == SP::SETHIi)
+      assert((TF == SPII::MO_HI || TF == SPII::MO_H44 || TF == SPII::MO_HH) &&
+             "Invalid target flags for address operand on sethi");
+    else
+      assert((TF == SPII::MO_LO || TF == SPII::MO_M44 || TF == SPII::MO_L44 ||
+              TF == SPII::MO_HM) &&
+             "Invalid target flags for small address operand");
   }
+#endif
+
+  bool CloseParen = true;
+  switch (TF) {
+  default:
+      llvm_unreachable("Unknown target flags on operand");
+  case SPII::MO_NO_FLAG:
+    CloseParen = false;
+    break;
+  case SPII::MO_LO:  O << "%lo(";  break;
+  case SPII::MO_HI:  O << "%hi(";  break;
+  case SPII::MO_H44: O << "%h44("; break;
+  case SPII::MO_M44: O << "%m44("; break;
+  case SPII::MO_L44: O << "%l44("; break;
+  case SPII::MO_HH:  O << "%hh(";  break;
+  case SPII::MO_HM:  O << "%hm(";  break;
+  }
+
   switch (MO.getType()) {
   case MachineOperand::MO_Register:
     O << "%" << StringRef(getRegisterName(MO.getReg())).lower();
@@ -94,6 +117,9 @@ void SparcAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
     return;
   case MachineOperand::MO_GlobalAddress:
     O << *Mang->getSymbol(MO.getGlobal());
+    break;
+  case MachineOperand::MO_BlockAddress:
+    O <<  GetBlockAddressSymbol(MO.getBlockAddress())->getName();
     break;
   case MachineOperand::MO_ExternalSymbol:
     O << MO.getSymbolName();
@@ -127,14 +153,7 @@ void SparcAsmPrinter::printMemOperand(const MachineInstr *MI, int opNum,
     return;   // don't print "+0"
 
   O << "+";
-  if (MI->getOperand(opNum+1).isGlobal() ||
-      MI->getOperand(opNum+1).isCPI()) {
-    O << "%lo(";
-    printOperand(MI, opNum+1, O);
-    O << ")";
-  } else {
-    printOperand(MI, opNum+1, O);
-  }
+  printOperand(MI, opNum+1, O);
 }
 
 bool SparcAsmPrinter::printGetPCX(const MachineInstr *MI, unsigned opNum,
@@ -146,7 +165,7 @@ bool SparcAsmPrinter::printGetPCX(const MachineInstr *MI, unsigned opNum,
   case MachineOperand::MO_Register:
     assert(TargetRegisterInfo::isPhysicalRegister(MO.getReg()) &&
            "Operand is not a physical register ");
-    assert(MO.getReg() != SP::O7 && 
+    assert(MO.getReg() != SP::O7 &&
            "%o7 is assigned as destination for getpcx!");
     operand = "%" + StringRef(getRegisterName(MO.getReg())).lower();
     break;
@@ -159,15 +178,15 @@ bool SparcAsmPrinter::printGetPCX(const MachineInstr *MI, unsigned opNum,
   O << "\tcall\t.LLGETPC" << mfNum << '_' << bbNum << '\n' ;
 
   O << "\t  sethi\t"
-    << "%hi(_GLOBAL_OFFSET_TABLE_+(.-.LLGETPCH" << mfNum << '_' << bbNum 
+    << "%hi(_GLOBAL_OFFSET_TABLE_+(.-.LLGETPCH" << mfNum << '_' << bbNum
     << ")), "  << operand << '\n' ;
 
   O << ".LLGETPC" << mfNum << '_' << bbNum << ":\n" ;
-  O << "\tor\t" << operand  
+  O << "\tor\t" << operand
     << ", %lo(_GLOBAL_OFFSET_TABLE_+(.-.LLGETPCH" << mfNum << '_' << bbNum
     << ")), " << operand << '\n';
-  O << "\tadd\t" << operand << ", %o7, " << operand << '\n'; 
-  
+  O << "\tadd\t" << operand << ", %o7, " << operand << '\n';
+
   return true;
 }
 
@@ -225,19 +244,19 @@ isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const {
   // then nothing falls through to it.
   if (MBB->isLandingPad() || MBB->pred_empty())
     return false;
-  
+
   // If there isn't exactly one predecessor, it can't be a fall through.
   MachineBasicBlock::const_pred_iterator PI = MBB->pred_begin(), PI2 = PI;
   ++PI2;
   if (PI2 != MBB->pred_end())
     return false;
-  
+
   // The predecessor has to be immediately before this block.
   const MachineBasicBlock *Pred = *PI;
-  
+
   if (!Pred->isLayoutSuccessor(MBB))
     return false;
-  
+
   // Check if the last terminator is an unconditional branch.
   MachineBasicBlock::const_iterator I = Pred->end();
   while (I != Pred->begin() && !(--I)->isTerminator())
@@ -245,17 +264,8 @@ isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const {
   return I == Pred->end() || !I->isBarrier();
 }
 
-MachineLocation SparcAsmPrinter::
-getDebugValueLocation(const MachineInstr *MI) const {
-  assert(MI->getNumOperands() == 4 && "Invalid number of operands!");
-  assert(MI->getOperand(0).isReg() && MI->getOperand(1).isImm() &&
-         "Unexpected MachineOperand types");
-  return MachineLocation(MI->getOperand(0).getReg(),
-                         MI->getOperand(1).getImm());
-}
-
 // Force static initialization.
-extern "C" void LLVMInitializeSparcAsmPrinter() { 
+extern "C" void LLVMInitializeSparcAsmPrinter() {
   RegisterAsmPrinter<SparcAsmPrinter> X(TheSparcTarget);
   RegisterAsmPrinter<SparcAsmPrinter> Y(TheSparcV9Target);
 }

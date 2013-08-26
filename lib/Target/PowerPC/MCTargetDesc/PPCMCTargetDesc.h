@@ -33,6 +33,7 @@ class raw_ostream;
 
 extern Target ThePPC32Target;
 extern Target ThePPC64Target;
+extern Target ThePPC64LETarget;
   
 MCCodeEmitter *createPPCMCCodeEmitter(const MCInstrInfo &MCII,
                                       const MCRegisterInfo &MRI,
@@ -45,6 +46,10 @@ MCAsmBackend *createPPCAsmBackend(const Target &T, StringRef TT, StringRef CPU);
 MCObjectWriter *createPPCELFObjectWriter(raw_ostream &OS,
                                          bool Is64Bit,
                                          uint8_t OSABI);
+/// createPPCELFObjectWriter - Construct a PPC Mach-O object writer.
+MCObjectWriter *createPPCMachObjectWriter(raw_ostream &OS, bool Is64Bit,
+                                          uint32_t CPUType,
+                                          uint32_t CPUSubtype);
 } // End llvm namespace
 
 // Generated files will use "namespace PPC". To avoid symbol clash,

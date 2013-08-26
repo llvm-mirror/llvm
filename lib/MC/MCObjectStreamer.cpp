@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCObjectStreamer.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAssembler.h"
@@ -17,6 +18,7 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCSection.h"
 #include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
 
@@ -45,14 +47,15 @@ void MCObjectStreamer::reset() {
   if (Assembler)
     Assembler->reset();
   CurSectionData = 0;
+  CurInsertionPoint = MCSectionData::iterator();
   MCStreamer::reset();
 }
 
 MCFragment *MCObjectStreamer::getCurrentFragment() const {
   assert(getCurrentSectionData() && "No current section!");
 
-  if (!getCurrentSectionData()->empty())
-    return &getCurrentSectionData()->getFragmentList().back();
+  if (CurInsertionPoint != getCurrentSectionData()->getFragmentList().begin())
+    return prior(CurInsertionPoint);
 
   return 0;
 }
@@ -61,8 +64,10 @@ MCDataFragment *MCObjectStreamer::getOrCreateDataFragment() const {
   MCDataFragment *F = dyn_cast_or_null<MCDataFragment>(getCurrentFragment());
   // When bundling is enabled, we don't want to add data to a fragment that
   // already has instructions (see MCELFStreamer::EmitInstToData for details)
-  if (!F || (Assembler->isBundlingEnabled() && F->hasInstructions()))
-    F = new MCDataFragment(getCurrentSectionData());
+  if (!F || (Assembler->isBundlingEnabled() && F->hasInstructions())) {
+    F = new MCDataFragment();
+    insert(F);
+  }
   return F;
 }
 
@@ -94,15 +99,15 @@ const MCExpr *MCObjectStreamer::AddValueSymbols(const MCExpr *Value) {
   return Value;
 }
 
-void MCObjectStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
-                                     unsigned AddrSpace) {
-  assert(AddrSpace == 0 && "Address space must be 0!");
+void MCObjectStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size) {
   MCDataFragment *DF = getOrCreateDataFragment();
+
+  MCLineEntry::Make(this, getCurrentSection().first);
 
   // Avoid fixups when possible.
   int64_t AbsValue;
   if (AddValueSymbols(Value)->EvaluateAsAbsolute(AbsValue, getAssembler())) {
-    EmitIntValue(AbsValue, Size, AddrSpace);
+    EmitIntValue(AbsValue, Size);
     return;
   }
   DF->getFixups().push_back(
@@ -145,7 +150,7 @@ void MCObjectStreamer::EmitULEB128Value(const MCExpr *Value) {
     return;
   }
   Value = ForceExpAbs(Value);
-  new MCLEBFragment(*Value, false, getCurrentSectionData());
+  insert(new MCLEBFragment(*Value, false));
 }
 
 void MCObjectStreamer::EmitSLEB128Value(const MCExpr *Value) {
@@ -155,7 +160,7 @@ void MCObjectStreamer::EmitSLEB128Value(const MCExpr *Value) {
     return;
   }
   Value = ForceExpAbs(Value);
-  new MCLEBFragment(*Value, true, getCurrentSectionData());
+  insert(new MCLEBFragment(*Value, true));
 }
 
 void MCObjectStreamer::EmitWeakReference(MCSymbol *Alias,
@@ -163,10 +168,20 @@ void MCObjectStreamer::EmitWeakReference(MCSymbol *Alias,
   report_fatal_error("This file format doesn't support weak aliases.");
 }
 
-void MCObjectStreamer::ChangeSection(const MCSection *Section) {
+void MCObjectStreamer::ChangeSection(const MCSection *Section,
+                                     const MCExpr *Subsection) {
   assert(Section && "Cannot switch to a null section!");
 
   CurSectionData = &getAssembler().getOrCreateSectionData(*Section);
+
+  int64_t IntSubsection = 0;
+  if (Subsection &&
+      !Subsection->EvaluateAsAbsolute(IntSubsection, getAssembler()))
+    report_fatal_error("Cannot evaluate subsection number");
+  if (IntSubsection < 0 || IntSubsection > 8192)
+    report_fatal_error("Subsection number out of range");
+  CurInsertionPoint =
+    CurSectionData->getSubsectionInsertionPoint(unsigned(IntSubsection));
 }
 
 void MCObjectStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
@@ -185,7 +200,7 @@ void MCObjectStreamer::EmitInstruction(const MCInst &Inst) {
 
   // Now that a machine instruction has been assembled into this section, make
   // a line entry for any .loc directive that has been seen.
-  MCLineEntry::Make(this, getCurrentSection());
+  MCLineEntry::Make(this, getCurrentSection().first);
 
   // If this instruction doesn't need relaxation, just emit it as data.
   MCAssembler &Assembler = getAssembler();
@@ -216,8 +231,8 @@ void MCObjectStreamer::EmitInstruction(const MCInst &Inst) {
 void MCObjectStreamer::EmitInstToFragment(const MCInst &Inst) {
   // Always create a new, separate fragment here, because its size can change
   // during relaxation.
-  MCRelaxableFragment *IF =
-    new MCRelaxableFragment(Inst, getCurrentSectionData());
+  MCRelaxableFragment *IF = new MCRelaxableFragment(Inst);
+  insert(IF);
 
   SmallString<128> Code;
   raw_svector_ostream VecOS(Code);
@@ -227,7 +242,7 @@ void MCObjectStreamer::EmitInstToFragment(const MCInst &Inst) {
 }
 
 #ifndef NDEBUG
-static const char *BundlingNotImplementedMsg =
+static const char *const BundlingNotImplementedMsg =
   "Aligned bundling is not implemented for this object format";
 #endif
 
@@ -241,6 +256,19 @@ void MCObjectStreamer::EmitBundleLock(bool AlignToEnd) {
 
 void MCObjectStreamer::EmitBundleUnlock() {
   llvm_unreachable(BundlingNotImplementedMsg);
+}
+
+void MCObjectStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
+                                             unsigned Column, unsigned Flags,
+                                             unsigned Isa,
+                                             unsigned Discriminator,
+                                             StringRef FileName) {
+  // In case we see two .loc directives in a row, make sure the
+  // first one gets a line entry.
+  MCLineEntry::Make(this, getCurrentSection().first);
+
+  this->MCStreamer::EmitDwarfLocDirective(FileNo, Line, Column, Flags,
+                                          Isa, Discriminator, FileName);
 }
 
 void MCObjectStreamer::EmitDwarfAdvanceLineAddr(int64_t LineDelta,
@@ -258,7 +286,7 @@ void MCObjectStreamer::EmitDwarfAdvanceLineAddr(int64_t LineDelta,
     return;
   }
   AddrDelta = ForceExpAbs(AddrDelta);
-  new MCDwarfLineAddrFragment(LineDelta, *AddrDelta, getCurrentSectionData());
+  insert(new MCDwarfLineAddrFragment(LineDelta, *AddrDelta));
 }
 
 void MCObjectStreamer::EmitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
@@ -270,11 +298,10 @@ void MCObjectStreamer::EmitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
     return;
   }
   AddrDelta = ForceExpAbs(AddrDelta);
-  new MCDwarfCallFrameFragment(*AddrDelta, getCurrentSectionData());
+  insert(new MCDwarfCallFrameFragment(*AddrDelta));
 }
 
-void MCObjectStreamer::EmitBytes(StringRef Data, unsigned AddrSpace) {
-  assert(AddrSpace == 0 && "Address space must be 0!");
+void MCObjectStreamer::EmitBytes(StringRef Data) {
   getOrCreateDataFragment()->getContents().append(Data.begin(), Data.end());
 }
 
@@ -284,8 +311,7 @@ void MCObjectStreamer::EmitValueToAlignment(unsigned ByteAlignment,
                                             unsigned MaxBytesToEmit) {
   if (MaxBytesToEmit == 0)
     MaxBytesToEmit = ByteAlignment;
-  new MCAlignFragment(ByteAlignment, Value, ValueSize, MaxBytesToEmit,
-                      getCurrentSectionData());
+  insert(new MCAlignFragment(ByteAlignment, Value, ValueSize, MaxBytesToEmit));
 
   // Update the maximum alignment on the current section if necessary.
   if (ByteAlignment > getCurrentSectionData()->getAlignment())
@@ -302,7 +328,7 @@ bool MCObjectStreamer::EmitValueToOffset(const MCExpr *Offset,
                                          unsigned char Value) {
   int64_t Res;
   if (Offset->EvaluateAsAbsolute(Res, getAssembler())) {
-    new MCOrgFragment(*Offset, Value, getCurrentSectionData());
+    insert(new MCOrgFragment(*Offset, Value));
     return false;
   }
 
@@ -338,12 +364,15 @@ void MCObjectStreamer::EmitGPRel64Value(const MCExpr *Value) {
   DF->getContents().resize(DF->getContents().size() + 8, 0);
 }
 
-void MCObjectStreamer::EmitFill(uint64_t NumBytes, uint8_t FillValue,
-                                unsigned AddrSpace) {
-  assert(AddrSpace == 0 && "Address space must be 0!");
+void MCObjectStreamer::EmitFill(uint64_t NumBytes, uint8_t FillValue) {
   // FIXME: A MCFillFragment would be more memory efficient but MCExpr has
   //        problems evaluating expressions across multiple fragments.
   getOrCreateDataFragment()->getContents().append(NumBytes, FillValue);
+}
+
+void MCObjectStreamer::EmitZeros(uint64_t NumBytes) {
+  unsigned ItemSize = getCurrentSection().first->isVirtualSection() ? 0 : 1;
+  insert(new MCFillFragment(0, ItemSize, NumBytes));
 }
 
 void MCObjectStreamer::FinishImpl() {

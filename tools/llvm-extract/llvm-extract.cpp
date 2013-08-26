@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 
   // Use lazy loading, since we only care about selected global values.
   SMDiagnostic Err;
-  std::auto_ptr<Module> M;
+  OwningPtr<Module> M;
   M.reset(getLazyIRFileModule(InputFilename, Err, Context));
 
   if (M.get() == 0) {
@@ -265,8 +265,7 @@ int main(int argc, char **argv) {
   Passes.add(createStripDeadPrototypesPass());   // Remove dead func decls
 
   std::string ErrorInfo;
-  tool_output_file Out(OutputFilename.c_str(), ErrorInfo,
-                       raw_fd_ostream::F_Binary);
+  tool_output_file Out(OutputFilename.c_str(), ErrorInfo, sys::fs::F_Binary);
   if (!ErrorInfo.empty()) {
     errs() << ErrorInfo << '\n';
     return 1;

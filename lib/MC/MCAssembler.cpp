@@ -243,6 +243,36 @@ MCSectionData::MCSectionData(const MCSection &_Section, MCAssembler *A)
     A->getSectionList().push_back(this);
 }
 
+MCSectionData::iterator
+MCSectionData::getSubsectionInsertionPoint(unsigned Subsection) {
+  if (Subsection == 0 && SubsectionFragmentMap.empty())
+    return end();
+
+  SmallVectorImpl<std::pair<unsigned, MCFragment *> >::iterator MI =
+    std::lower_bound(SubsectionFragmentMap.begin(), SubsectionFragmentMap.end(),
+                     std::make_pair(Subsection, (MCFragment *)0));
+  bool ExactMatch = false;
+  if (MI != SubsectionFragmentMap.end()) {
+    ExactMatch = MI->first == Subsection;
+    if (ExactMatch)
+      ++MI;
+  }
+  iterator IP;
+  if (MI == SubsectionFragmentMap.end())
+    IP = end();
+  else
+    IP = MI->second;
+  if (!ExactMatch && Subsection != 0) {
+    // The GNU as documentation claims that subsections have an alignment of 4,
+    // although this appears not to be the case.
+    MCFragment *F = new MCDataFragment();
+    SubsectionFragmentMap.insert(MI, std::make_pair(Subsection, F));
+    getFragmentList().insert(IP, F);
+    F->setParent(this);
+  }
+  return IP;
+}
+
 /* *** */
 
 MCSymbolData::MCSymbolData() : Symbol(0) {}
@@ -550,9 +580,9 @@ static void writeFragment(const MCAssembler &Asm, const MCAsmLayout &Layout,
   case MCFragment::FT_Align: {
     ++stats::EmittedAlignFragments;
     const MCAlignFragment &AF = cast<MCAlignFragment>(F);
-    uint64_t Count = FragmentSize / AF.getValueSize();
-
     assert(AF.getValueSize() && "Invalid virtual align in concrete fragment!");
+
+    uint64_t Count = FragmentSize / AF.getValueSize();
 
     // FIXME: This error shouldn't actually occur (the front end should emit
     // multiple .align directives to enforce the semantics it wants), but is
@@ -678,12 +708,13 @@ void MCAssembler::writeSectionData(const MCSectionData *SD,
       case MCFragment::FT_Align:
         // Check that we aren't trying to write a non-zero value into a virtual
         // section.
-        assert((!cast<MCAlignFragment>(it)->getValueSize() ||
-                !cast<MCAlignFragment>(it)->getValue()) &&
+        assert((cast<MCAlignFragment>(it)->getValueSize() == 0 ||
+                cast<MCAlignFragment>(it)->getValue() == 0) &&
                "Invalid align in virtual section!");
         break;
       case MCFragment::FT_Fill:
-        assert(!cast<MCFillFragment>(it)->getValueSize() &&
+        assert((cast<MCFillFragment>(it)->getValueSize() == 0 ||
+                cast<MCFillFragment>(it)->getValue() == 0) &&
                "Invalid fill in virtual section!");
         break;
       }
@@ -874,6 +905,7 @@ bool MCAssembler::relaxLEB(MCAsmLayout &Layout, MCLEBFragment &LF) {
 
 bool MCAssembler::relaxDwarfLineAddr(MCAsmLayout &Layout,
                                      MCDwarfLineAddrFragment &DF) {
+  MCContext &Context = Layout.getAssembler().getContext();
   int64_t AddrDelta = 0;
   uint64_t OldSize = DF.getContents().size();
   bool IsAbs = DF.getAddrDelta().EvaluateAsAbsolute(AddrDelta, Layout);
@@ -884,13 +916,14 @@ bool MCAssembler::relaxDwarfLineAddr(MCAsmLayout &Layout,
   SmallString<8> &Data = DF.getContents();
   Data.clear();
   raw_svector_ostream OSE(Data);
-  MCDwarfLineAddr::Encode(LineDelta, AddrDelta, OSE);
+  MCDwarfLineAddr::Encode(Context, LineDelta, AddrDelta, OSE);
   OSE.flush();
   return OldSize != Data.size();
 }
 
 bool MCAssembler::relaxDwarfCallFrameFragment(MCAsmLayout &Layout,
                                               MCDwarfCallFrameFragment &DF) {
+  MCContext &Context = Layout.getAssembler().getContext();
   int64_t AddrDelta = 0;
   uint64_t OldSize = DF.getContents().size();
   bool IsAbs = DF.getAddrDelta().EvaluateAsAbsolute(AddrDelta, Layout);
@@ -899,7 +932,7 @@ bool MCAssembler::relaxDwarfCallFrameFragment(MCAsmLayout &Layout,
   SmallString<8> &Data = DF.getContents();
   Data.clear();
   raw_svector_ostream OSE(Data);
-  MCDwarfFrameEmitter::EncodeAdvanceLoc(AddrDelta, OSE);
+  MCDwarfFrameEmitter::EncodeAdvanceLoc(Context, AddrDelta, OSE);
   OSE.flush();
   return OldSize != Data.size();
 }

@@ -1253,32 +1253,6 @@ bool MachineInstr::isSafeToMove(const TargetInstrInfo *TII,
   return true;
 }
 
-/// isSafeToReMat - Return true if it's safe to rematerialize the specified
-/// instruction which defined the specified register instead of copying it.
-bool MachineInstr::isSafeToReMat(const TargetInstrInfo *TII,
-                                 AliasAnalysis *AA,
-                                 unsigned DstReg) const {
-  bool SawStore = false;
-  if (!TII->isTriviallyReMaterializable(this, AA) ||
-      !isSafeToMove(TII, AA, SawStore))
-    return false;
-  for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
-    const MachineOperand &MO = getOperand(i);
-    if (!MO.isReg())
-      continue;
-    // FIXME: For now, do not remat any instruction with register operands.
-    // Later on, we can loosen the restriction is the register operands have
-    // not been modified between the def and use. Note, this is different from
-    // MachineSink because the code is no longer in two-address form (at least
-    // partially).
-    if (MO.isUse())
-      return false;
-    else if (!MO.isDead() && MO.getReg() != DstReg)
-      return false;
-  }
-  return true;
-}
-
 /// hasOrderedMemoryRef - Return true if this instruction may have an ordered
 /// or volatile memory reference, or if the information describing the memory
 /// reference is not available. Return false if it is known to have no ordered
@@ -1411,8 +1385,10 @@ static void printDebugLoc(DebugLoc DL, const MachineFunction *MF,
   const LLVMContext &Ctx = MF->getFunction()->getContext();
   if (!DL.isUnknown()) {          // Print source line info.
     DIScope Scope(DL.getScope(Ctx));
+    assert((!Scope || Scope.isScope()) &&
+      "Scope of a DebugLoc should be null or a DIScope.");
     // Omit the directory, because it's likely to be long and uninteresting.
-    if (Scope.Verify())
+    if (Scope)
       CommentOS << Scope.getFilename();
     else
       CommentOS << "<unknown>";

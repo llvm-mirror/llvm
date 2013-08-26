@@ -60,8 +60,8 @@ namespace llvm {
       CMovFP_T,
       CMovFP_F,
 
-      // Floating Point Rounding
-      FPRound,
+      // FP-to-int truncation node.
+      TruncIntFP,
 
       // Return
       Ret,
@@ -143,6 +143,15 @@ namespace llvm {
       MSUB_DSP,
       MSUBU_DSP,
 
+      // DSP shift nodes.
+      SHLL_DSP,
+      SHRA_DSP,
+      SHRL_DSP,
+
+      // DSP setcc and select_cc nodes.
+      SETCC_DSP,
+      SELECT_CC_DSP,
+
       // Load/Store Left/Right nodes.
       LWL = ISD::FIRST_TARGET_MEMORY_OPCODE,
       LWR,
@@ -186,7 +195,7 @@ namespace llvm {
     virtual const char *getTargetNodeName(unsigned Opcode) const;
 
     /// getSetCCResultType - get the ISD::SETCC result ValueType
-    EVT getSetCCResultType(EVT VT) const;
+    EVT getSetCCResultType(LLVMContext &Context, EVT VT) const;
 
     virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
@@ -231,7 +240,14 @@ namespace llvm {
     /// arguments and inquire about calling convention information.
     class MipsCC {
     public:
-      MipsCC(CallingConv::ID CallConv, bool IsO32, CCState &Info);
+      enum SpecialCallingConvType {
+        Mips16RetHelperConv, NoSpecialCallingConv
+      };
+
+      MipsCC(
+        CallingConv::ID CallConv, bool IsO32, CCState &Info,
+        SpecialCallingConvType SpecialCallingConv = NoSpecialCallingConv);
+
 
       void analyzeCallOperands(const SmallVectorImpl<ISD::OutputArg> &Outs,
                                bool IsVarArg, bool IsSoftFloat,
@@ -266,7 +282,7 @@ namespace llvm {
       /// Return pointer to array of integer argument registers.
       const uint16_t *intArgRegs() const;
 
-      typedef SmallVector<ByValArgInfo, 2>::const_iterator byval_iterator;
+      typedef SmallVectorImpl<ByValArgInfo>::const_iterator byval_iterator;
       byval_iterator byval_begin() const { return ByValArgs.begin(); }
       byval_iterator byval_end() const { return ByValArgs.end(); }
 
@@ -304,20 +320,23 @@ namespace llvm {
       CCState &CCInfo;
       CallingConv::ID CallConv;
       bool IsO32;
+      SpecialCallingConvType SpecialCallingConv;
       SmallVector<ByValArgInfo, 2> ByValArgs;
     };
-
+  protected:
     // Subtarget Info
     const MipsSubtarget *Subtarget;
 
     bool HasMips64, IsN64, IsO32;
 
   private:
+
+    MipsCC::SpecialCallingConvType getSpecialCallingConv(SDValue Callee) const;
     // Lower Operand helpers
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
                             const SmallVectorImpl<ISD::InputArg> &Ins,
-                            DebugLoc dl, SelectionDAG &DAG,
+                            SDLoc dl, SelectionDAG &DAG,
                             SmallVectorImpl<SDValue> &InVals,
                             const SDNode *CallNode, const Type *RetTy) const;
 
@@ -338,16 +357,14 @@ namespace llvm {
     SDValue lowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerMEMBARRIER(SDValue Op, SelectionDAG& DAG) const;
     SDValue lowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue lowerShiftLeftParts(SDValue Op, SelectionDAG& DAG) const;
     SDValue lowerShiftRightParts(SDValue Op, SelectionDAG& DAG,
                                  bool IsSRA) const;
     SDValue lowerLOAD(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerSTORE(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerINTRINSIC_W_CHAIN(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerADD(SDValue Op, SelectionDAG &DAG) const;
+    SDValue lowerFP_TO_SINT(SDValue Op, SelectionDAG &DAG) const;
 
     /// isEligibleForTailCallOptimization - Check whether the call is eligible
     /// for tail call optimization.
@@ -359,7 +376,7 @@ namespace llvm {
     /// copyByValArg - Copy argument registers which were used to pass a byval
     /// argument to the stack. Create a stack frame object for the byval
     /// argument.
-    void copyByValRegs(SDValue Chain, DebugLoc DL,
+    void copyByValRegs(SDValue Chain, SDLoc DL,
                        std::vector<SDValue> &OutChains, SelectionDAG &DAG,
                        const ISD::ArgFlagsTy &Flags,
                        SmallVectorImpl<SDValue> &InVals,
@@ -367,9 +384,9 @@ namespace llvm {
                        const MipsCC &CC, const ByValArgInfo &ByVal) const;
 
     /// passByValArg - Pass a byval argument in registers or on stack.
-    void passByValArg(SDValue Chain, DebugLoc DL,
+    void passByValArg(SDValue Chain, SDLoc DL,
                       std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
-                      SmallVector<SDValue, 8> &MemOpChains, SDValue StackPtr,
+                      SmallVectorImpl<SDValue> &MemOpChains, SDValue StackPtr,
                       MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg,
                       const MipsCC &CC, const ByValArgInfo &ByVal,
                       const ISD::ArgFlagsTy &Flags, bool isLittle) const;
@@ -378,17 +395,17 @@ namespace llvm {
     /// to the stack. Also create a stack frame object for the first variable
     /// argument.
     void writeVarArgRegs(std::vector<SDValue> &OutChains, const MipsCC &CC,
-                         SDValue Chain, DebugLoc DL, SelectionDAG &DAG) const;
+                         SDValue Chain, SDLoc DL, SelectionDAG &DAG) const;
 
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
                            CallingConv::ID CallConv, bool isVarArg,
                            const SmallVectorImpl<ISD::InputArg> &Ins,
-                           DebugLoc dl, SelectionDAG &DAG,
+                           SDLoc dl, SelectionDAG &DAG,
                            SmallVectorImpl<SDValue> &InVals) const;
 
     SDValue passArgOnStack(SDValue StackPtr, unsigned Offset, SDValue Chain,
-                           SDValue Arg, DebugLoc DL, bool IsTailCall,
+                           SDValue Arg, SDLoc DL, bool IsTailCall,
                            SelectionDAG &DAG) const;
 
     virtual SDValue
@@ -406,7 +423,7 @@ namespace llvm {
                   CallingConv::ID CallConv, bool isVarArg,
                   const SmallVectorImpl<ISD::OutputArg> &Outs,
                   const SmallVectorImpl<SDValue> &OutVals,
-                  DebugLoc dl, SelectionDAG &DAG) const;
+                  SDLoc dl, SelectionDAG &DAG) const;
 
     // Inline asm support
     ConstraintType getConstraintType(const std::string &Constraint) const;
@@ -416,9 +433,14 @@ namespace llvm {
     ConstraintWeight getSingleConstraintMatchWeight(
       AsmOperandInfo &info, const char *constraint) const;
 
+    /// This function parses registers that appear in inline-asm constraints.
+    /// It returns pair (0, 0) on failure.
+    std::pair<unsigned, const TargetRegisterClass *>
+    parseRegForInlineAsmConstraint(const StringRef &C, MVT VT) const;
+
     std::pair<unsigned, const TargetRegisterClass*>
               getRegForInlineAsmConstraint(const std::string &Constraint,
-              EVT VT) const;
+                                           MVT VT) const;
 
     /// LowerAsmOperandForConstraint - Lower the specified operand into the Ops
     /// vector.  If it is invalid, don't add anything to Ops. If hasMemory is

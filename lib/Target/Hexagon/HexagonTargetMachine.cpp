@@ -15,6 +15,7 @@
 #include "Hexagon.h"
 #include "HexagonISelLowering.h"
 #include "HexagonMachineScheduler.h"
+#include "HexagonTargetObjectFile.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/PassManager.h"
@@ -25,19 +26,17 @@
 
 using namespace llvm;
 
-static cl::
-opt<bool> DisableHardwareLoops(
-                        "disable-hexagon-hwloops", cl::Hidden,
-                        cl::desc("Disable Hardware Loops for Hexagon target"));
+static cl:: opt<bool> DisableHardwareLoops("disable-hexagon-hwloops",
+      cl::Hidden, cl::desc("Disable Hardware Loops for Hexagon target"));
 
-static cl::
-opt<bool> DisableHexagonMISched("disable-hexagon-misched",
-                                cl::Hidden, cl::ZeroOrMore, cl::init(false),
-                                cl::desc("Disable Hexagon MI Scheduling"));
+static cl::opt<bool> DisableHexagonMISched("disable-hexagon-misched",
+      cl::Hidden, cl::ZeroOrMore, cl::init(false),
+      cl::desc("Disable Hexagon MI Scheduling"));
 
 static cl::opt<bool> DisableHexagonCFGOpt("disable-hexagon-cfgopt",
-    cl::Hidden, cl::ZeroOrMore, cl::init(false),
-    cl::desc("Disable Hexagon CFG Optimization"));
+      cl::Hidden, cl::ZeroOrMore, cl::init(false),
+      cl::desc("Disable Hexagon CFG Optimization"));
+
 
 /// HexagonTargetMachineModule - Note that this is used on hosts that
 /// cannot link in a library unless there are references into the
@@ -80,6 +79,7 @@ HexagonTargetMachine::HexagonTargetMachine(const Target &T, StringRef TT,
     FrameLowering(Subtarget),
     InstrItins(&Subtarget.getInstrItineraryData()) {
     setMCUseCFI(false);
+    initAsmInfo();
 }
 
 // addPassesForOptimizations - Allow the backend (target) to add Target
@@ -126,55 +126,71 @@ TargetPassConfig *HexagonTargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 bool HexagonPassConfig::addInstSelector() {
+  HexagonTargetMachine &TM = getHexagonTargetMachine();
+  bool NoOpt = (getOptLevel() == CodeGenOpt::None);
 
-  if (getOptLevel() != CodeGenOpt::None)
-    addPass(createHexagonRemoveExtendOps(getHexagonTargetMachine()));
+  if (!NoOpt)
+    addPass(createHexagonRemoveExtendArgs(TM));
 
-  addPass(createHexagonISelDag(getHexagonTargetMachine(), getOptLevel()));
+  addPass(createHexagonISelDag(TM, getOptLevel()));
 
-  if (getOptLevel() != CodeGenOpt::None)
+  if (!NoOpt) {
     addPass(createHexagonPeephole());
+    printAndVerify("After hexagon peephole pass");
+  }
 
   return false;
 }
 
-
 bool HexagonPassConfig::addPreRegAlloc() {
-  if (!DisableHardwareLoops && getOptLevel() != CodeGenOpt::None)
-    addPass(createHexagonHardwareLoops());
+  if (getOptLevel() != CodeGenOpt::None)
+    if (!DisableHardwareLoops)
+      addPass(createHexagonHardwareLoops());
   return false;
 }
 
 bool HexagonPassConfig::addPostRegAlloc() {
-  if (!DisableHexagonCFGOpt && getOptLevel() != CodeGenOpt::None)
-    addPass(createHexagonCFGOptimizer(getHexagonTargetMachine()));
-  return true;
+  const HexagonTargetMachine &TM = getHexagonTargetMachine();
+  if (getOptLevel() != CodeGenOpt::None)
+    if (!DisableHexagonCFGOpt)
+      addPass(createHexagonCFGOptimizer(TM));
+  return false;
 }
 
-
 bool HexagonPassConfig::addPreSched2() {
+  const HexagonTargetMachine &TM = getHexagonTargetMachine();
+  const HexagonTargetObjectFile &TLOF =
+    (const HexagonTargetObjectFile &)getTargetLowering()->getObjFileLowering();
+
+  addPass(createHexagonCopyToCombine());
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&IfConverterID);
+  if (!TLOF.IsSmallDataEnabled()) {
+    addPass(createHexagonSplitConst32AndConst64(TM));
+    printAndVerify("After hexagon split const32/64 pass");
+  }
   return true;
 }
 
 bool HexagonPassConfig::addPreEmitPass() {
+  const HexagonTargetMachine &TM = getHexagonTargetMachine();
+  bool NoOpt = (getOptLevel() == CodeGenOpt::None);
 
-  if (!DisableHardwareLoops && getOptLevel() != CodeGenOpt::None)
-    addPass(createHexagonFixupHwLoops());
-
-  if (getOptLevel() != CodeGenOpt::None)
+  if (!NoOpt)
     addPass(createHexagonNewValueJump());
 
   // Expand Spill code for predicate registers.
-  addPass(createHexagonExpandPredSpillCode(getHexagonTargetMachine()));
+  addPass(createHexagonExpandPredSpillCode(TM));
 
   // Split up TFRcondsets into conditional transfers.
-  addPass(createHexagonSplitTFRCondSets(getHexagonTargetMachine()));
+  addPass(createHexagonSplitTFRCondSets(TM));
 
   // Create Packets.
-  if (getOptLevel() != CodeGenOpt::None)
+  if (!NoOpt) {
+    if (!DisableHardwareLoops)
+      addPass(createHexagonFixupHwLoops());
     addPass(createHexagonPacketizer());
+  }
 
   return false;
 }

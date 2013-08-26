@@ -42,7 +42,7 @@ enum Style {
 class X86Subtarget : public X86GenSubtargetInfo {
 protected:
   enum X86SSEEnum {
-    NoMMXSSE, MMX, SSE1, SSE2, SSE3, SSSE3, SSE41, SSE42, AVX, AVX2
+    NoMMXSSE, MMX, SSE1, SSE2, SSE3, SSSE3, SSE41, SSE42, AVX, AVX2, AVX512
   };
 
   enum X863DNowEnum {
@@ -165,7 +165,19 @@ protected:
   /// CallRegIndirect - True if the Calls with memory reference should be converted
   /// to a register-based indirect call.
   bool CallRegIndirect;
+  /// LEAUsesAG - True if the LEA instruction inputs have to be ready at
+  ///             address generation (AG) time.
+  bool LEAUsesAG;
 
+  /// Processor has AVX-512 PreFetch Instructions
+  bool HasPFI;
+  
+  /// Processor has AVX-512 Exponential and Reciprocal Instructions
+  bool HasERI;
+  
+  /// Processor has AVX-512 Conflict Detection Instructions
+  bool HasCDI;
+  
   /// stackAlignment - The minimum alignment known to hold of the stack frame on
   /// entry to the function and which must be maintained by every function.
   unsigned stackAlignment;
@@ -246,6 +258,7 @@ public:
   bool hasSSE42() const { return X86SSELevel >= SSE42; }
   bool hasAVX() const { return X86SSELevel >= AVX; }
   bool hasAVX2() const { return X86SSELevel >= AVX2; }
+  bool hasAVX512() const { return X86SSELevel >= AVX512; }
   bool hasFp256() const { return hasAVX(); }
   bool hasInt256() const { return hasAVX2(); }
   bool hasSSE4A() const { return HasSSE4A; }
@@ -278,6 +291,10 @@ public:
   bool hasSlowDivide() const { return HasSlowDivide; }
   bool padShortFunctions() const { return PadShortFunctions; }
   bool callRegIndirect() const { return CallRegIndirect; }
+  bool LEAusesAG() const { return LEAUsesAG; }
+  bool hasCDI() const { return HasCDI; }
+  bool hasPFI() const { return HasPFI; }
+  bool hasERI() const { return HasERI; }
 
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
 
@@ -334,7 +351,13 @@ public:
   }
   bool isPICStyleStubAny() const {
     return PICStyle == PICStyles::StubDynamicNoPIC ||
-           PICStyle == PICStyles::StubPIC; }
+           PICStyle == PICStyles::StubPIC;
+  }
+
+  bool isCallingConvWin64(CallingConv::ID CC) const {
+    return (isTargetWin64() && CC != CallingConv::X86_64_SysV) ||
+           CC == CallingConv::X86_64_Win64;
+  }
 
   /// ClassifyGlobalReference - Classify a global variable reference for the
   /// current subtarget according to how we should reference it in a non-pcrel

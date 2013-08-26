@@ -13,7 +13,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "ARMRegisterInfo.h"
 #include "ARMUnwindOp.h"
+#include "ARMUnwindOpAsm.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmBackend.h"
@@ -26,6 +28,7 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCObjectStreamer.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
@@ -33,10 +36,14 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ELF.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+static std::string GetAEABIUnwindPersonalityName(unsigned Index) {
+  assert(Index < NUM_PERSONALITY_INDEX && "Invalid personality index");
+  return (Twine("__aeabi_unwind_cpp_pr") + Twine(Index)).str();
+}
 
 namespace {
 
@@ -57,8 +64,9 @@ public:
   ARMELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
                  MCCodeEmitter *Emitter, bool IsThumb)
       : MCELFStreamer(SK_ARMELFStreamer, Context, TAB, OS, Emitter),
-        IsThumb(IsThumb), MappingSymbolCounter(0), LastEMS(EMS_None), ExTab(0),
-        FnStart(0), Personality(0), CantUnwind(false) {}
+        IsThumb(IsThumb), MappingSymbolCounter(0), LastEMS(EMS_None) {
+    Reset();
+  }
 
   ~ARMELFStreamer() {}
 
@@ -75,14 +83,15 @@ public:
   virtual void EmitRegSave(const SmallVectorImpl<unsigned> &RegList,
                            bool isVector);
 
-  virtual void ChangeSection(const MCSection *Section) {
+  virtual void ChangeSection(const MCSection *Section,
+                             const MCExpr *Subsection) {
     // We have to keep track of the mapping symbol state of any sections we
     // use. Each one should start off as EMS_None, which is provided as the
     // default constructor by DenseMap::lookup.
-    LastMappingSymbols[getPreviousSection()] = LastEMS;
+    LastMappingSymbols[getPreviousSection().first] = LastEMS;
     LastEMS = LastMappingSymbols.lookup(Section);
 
-    MCELFStreamer::ChangeSection(Section);
+    MCELFStreamer::ChangeSection(Section, Subsection);
   }
 
   /// This function is the one used to emit instruction data into the ELF
@@ -100,18 +109,17 @@ public:
   /// This is one of the functions used to emit data into an ELF section, so the
   /// ARM streamer overrides it to add the appropriate mapping symbol ($d) if
   /// necessary.
-  virtual void EmitBytes(StringRef Data, unsigned AddrSpace) {
+  virtual void EmitBytes(StringRef Data) {
     EmitDataMappingSymbol();
-    MCELFStreamer::EmitBytes(Data, AddrSpace);
+    MCELFStreamer::EmitBytes(Data);
   }
 
   /// This is one of the functions used to emit data into an ELF section, so the
   /// ARM streamer overrides it to add the appropriate mapping symbol ($d) if
   /// necessary.
-  virtual void EmitValueImpl(const MCExpr *Value, unsigned Size,
-                             unsigned AddrSpace) {
+  virtual void EmitValueImpl(const MCExpr *Value, unsigned Size) {
     EmitDataMappingSymbol();
-    MCELFStreamer::EmitValueImpl(Value, Size, AddrSpace);
+    MCELFStreamer::EmitValueImpl(Value, Size);
   }
 
   virtual void EmitAssemblerFlag(MCAssemblerFlag Flag) {
@@ -175,7 +183,7 @@ private:
     MCELF::SetType(SD, ELF::STT_NOTYPE);
     MCELF::SetBinding(SD, ELF::STB_LOCAL);
     SD.setExternal(false);
-    Symbol->setSection(*getCurrentSection());
+    Symbol->setSection(*getCurrentSection().first);
 
     const MCExpr *Value = MCSymbolRefExpr::Create(Start, getContext());
     Symbol->setVariableValue(Value);
@@ -194,6 +202,8 @@ private:
   void Reset();
 
   void EmitPersonalityFixup(StringRef Name);
+  void FlushPendingOffset();
+  void FlushUnwindOpcodes(bool NoHandlerData);
 
   void SwitchToEHSection(const char *Prefix, unsigned Type, unsigned Flags,
                          SectionKind Kind, const MCSymbol &Fn);
@@ -210,9 +220,17 @@ private:
   MCSymbol *ExTab;
   MCSymbol *FnStart;
   const MCSymbol *Personality;
+  unsigned PersonalityIndex;
+  unsigned FPReg; // Frame pointer register
+  int64_t FPOffset; // Offset: (final frame pointer) - (initial $sp)
+  int64_t SPOffset; // Offset: (final $sp) - (initial $sp)
+  int64_t PendingOffset; // Offset: (final $sp) - (emitted $sp)
+  bool UsedFP;
   bool CantUnwind;
+  SmallVector<uint8_t, 64> Opcodes;
+  UnwindOpcodeAssembler UnwindOpAsm;
 };
-}
+} // end anonymous namespace
 
 inline void ARMELFStreamer::SwitchToEHSection(const char *Prefix,
                                               unsigned Type,
@@ -238,7 +256,7 @@ inline void ARMELFStreamer::SwitchToEHSection(const char *Prefix,
   } else {
     EHSection = getContext().getELFSection(EHSecName, Type, Flags, Kind);
   }
-  assert(EHSection);
+  assert(EHSection && "Failed to get the required EH section");
 
   // Switch to .ARM.extab or .ARM.exidx section
   SwitchSection(EHSection);
@@ -265,7 +283,16 @@ void ARMELFStreamer::Reset() {
   ExTab = NULL;
   FnStart = NULL;
   Personality = NULL;
+  PersonalityIndex = NUM_PERSONALITY_INDEX;
+  FPReg = ARM::SP;
+  FPOffset = 0;
+  SPOffset = 0;
+  PendingOffset = 0;
+  UsedFP = false;
   CantUnwind = false;
+
+  Opcodes.clear();
+  UnwindOpAsm.Reset();
 }
 
 // Add the R_ARM_NONE fixup at the same position
@@ -294,52 +321,45 @@ void ARMELFStreamer::EmitFnEnd() {
   assert(FnStart && ".fnstart must preceeds .fnend");
 
   // Emit unwind opcodes if there is no .handlerdata directive
-  int PersonalityIndex = -1;
-  if (!ExTab && !CantUnwind) {
-    // For __aeabi_unwind_cpp_pr1, we have to emit opcodes in .ARM.extab.
-    SwitchToExTabSection(*FnStart);
-
-    // Create .ARM.extab label for offset in .ARM.exidx
-    ExTab = getContext().CreateTempSymbol();
-    EmitLabel(ExTab);
-
-    PersonalityIndex = 1;
-
-    uint32_t Entry = 0;
-    uint32_t NumExtraEntryWords = 0;
-    Entry |= NumExtraEntryWords << 24;
-    Entry |= (EHT_COMPACT | PersonalityIndex) << 16;
-
-    // TODO: This should be generated according to .save, .vsave, .setfp
-    // directives.  Currently, we are simply generating FINISH opcode.
-    Entry |= UNWIND_OPCODE_FINISH << 8;
-    Entry |= UNWIND_OPCODE_FINISH;
-
-    EmitIntValue(Entry, 4, 0);
-  }
+  if (!ExTab && !CantUnwind)
+    FlushUnwindOpcodes(true);
 
   // Emit the exception index table entry
   SwitchToExIdxSection(*FnStart);
 
-  if (PersonalityIndex == 1)
-    EmitPersonalityFixup("__aeabi_unwind_cpp_pr1");
+  if (PersonalityIndex < NUM_PERSONALITY_INDEX)
+    EmitPersonalityFixup(GetAEABIUnwindPersonalityName(PersonalityIndex));
 
   const MCSymbolRefExpr *FnStartRef =
     MCSymbolRefExpr::Create(FnStart,
                             MCSymbolRefExpr::VK_ARM_PREL31,
                             getContext());
 
-  EmitValue(FnStartRef, 4, 0);
+  EmitValue(FnStartRef, 4);
 
   if (CantUnwind) {
-    EmitIntValue(EXIDX_CANTUNWIND, 4, 0);
-  } else {
+    EmitIntValue(EXIDX_CANTUNWIND, 4);
+  } else if (ExTab) {
+    // Emit a reference to the unwind opcodes in the ".ARM.extab" section.
     const MCSymbolRefExpr *ExTabEntryRef =
       MCSymbolRefExpr::Create(ExTab,
                               MCSymbolRefExpr::VK_ARM_PREL31,
                               getContext());
-    EmitValue(ExTabEntryRef, 4, 0);
+    EmitValue(ExTabEntryRef, 4);
+  } else {
+    // For the __aeabi_unwind_cpp_pr0, we have to emit the unwind opcodes in
+    // the second word of exception index table entry.  The size of the unwind
+    // opcodes should always be 4 bytes.
+    assert(PersonalityIndex == AEABI_UNWIND_CPP_PR0 &&
+           "Compact model must use __aeabi_cpp_unwind_pr0 as personality");
+    assert(Opcodes.size() == 4u &&
+           "Unwind opcode size for __aeabi_cpp_unwind_pr0 must be equal to 4");
+    EmitBytes(StringRef(reinterpret_cast<const char*>(Opcodes.data()),
+                        Opcodes.size()));
   }
+
+  // Switch to the section containing FnStart
+  SwitchSection(&FnStart->getSection());
 
   // Clean exception handling frame information
   Reset();
@@ -349,7 +369,34 @@ void ARMELFStreamer::EmitCantUnwind() {
   CantUnwind = true;
 }
 
-void ARMELFStreamer::EmitHandlerData() {
+void ARMELFStreamer::FlushPendingOffset() {
+  if (PendingOffset != 0) {
+    UnwindOpAsm.EmitSPOffset(-PendingOffset);
+    PendingOffset = 0;
+  }
+}
+
+void ARMELFStreamer::FlushUnwindOpcodes(bool NoHandlerData) {
+  // Emit the unwind opcode to restore $sp.
+  if (UsedFP) {
+    const MCRegisterInfo *MRI = getContext().getRegisterInfo();
+    int64_t LastRegSaveSPOffset = SPOffset - PendingOffset;
+    UnwindOpAsm.EmitSPOffset(LastRegSaveSPOffset - FPOffset);
+    UnwindOpAsm.EmitSetSP(MRI->getEncodingValue(FPReg));
+  } else {
+    FlushPendingOffset();
+  }
+
+  // Finalize the unwind opcode sequence
+  UnwindOpAsm.Finalize(PersonalityIndex, Opcodes);
+
+  // For compact model 0, we have to emit the unwind opcodes in the .ARM.exidx
+  // section.  Thus, we don't have to create an entry in the .ARM.extab
+  // section.
+  if (NoHandlerData && PersonalityIndex == AEABI_UNWIND_CPP_PR0)
+    return;
+
+  // Switch to .ARM.extab section.
   SwitchToExTabSection(*FnStart);
 
   // Create .ARM.extab label for offset in .ARM.exidx
@@ -357,47 +404,92 @@ void ARMELFStreamer::EmitHandlerData() {
   ExTab = getContext().CreateTempSymbol();
   EmitLabel(ExTab);
 
-  // Emit Personality
-  assert(Personality && ".personality directive must preceed .handlerdata");
+  // Emit personality
+  if (Personality) {
+    const MCSymbolRefExpr *PersonalityRef =
+      MCSymbolRefExpr::Create(Personality,
+                              MCSymbolRefExpr::VK_ARM_PREL31,
+                              getContext());
 
-  const MCSymbolRefExpr *PersonalityRef =
-    MCSymbolRefExpr::Create(Personality,
-                            MCSymbolRefExpr::VK_ARM_PREL31,
-                            getContext());
-
-  EmitValue(PersonalityRef, 4, 0);
+    EmitValue(PersonalityRef, 4);
+  }
 
   // Emit unwind opcodes
-  uint32_t Entry = 0;
-  uint32_t NumExtraEntryWords = 0;
+  EmitBytes(StringRef(reinterpret_cast<const char *>(Opcodes.data()),
+                      Opcodes.size()));
 
-  // TODO: This should be generated according to .save, .vsave, .setfp
-  // directives.  Currently, we are simply generating FINISH opcode.
-  Entry |= NumExtraEntryWords << 24;
-  Entry |= UNWIND_OPCODE_FINISH << 16;
-  Entry |= UNWIND_OPCODE_FINISH << 8;
-  Entry |= UNWIND_OPCODE_FINISH;
+  // According to ARM EHABI section 9.2, if the __aeabi_unwind_cpp_pr1() or
+  // __aeabi_unwind_cpp_pr2() is used, then the handler data must be emitted
+  // after the unwind opcodes.  The handler data consists of several 32-bit
+  // words, and should be terminated by zero.
+  //
+  // In case that the .handlerdata directive is not specified by the
+  // programmer, we should emit zero to terminate the handler data.
+  if (NoHandlerData && !Personality)
+    EmitIntValue(0, 4);
+}
 
-  EmitIntValue(Entry, 4, 0);
+void ARMELFStreamer::EmitHandlerData() {
+  FlushUnwindOpcodes(false);
 }
 
 void ARMELFStreamer::EmitPersonality(const MCSymbol *Per) {
   Personality = Per;
+  UnwindOpAsm.setPersonality(Per);
 }
 
-void ARMELFStreamer::EmitSetFP(unsigned NewFpReg,
-                               unsigned NewSpReg,
+void ARMELFStreamer::EmitSetFP(unsigned NewFPReg,
+                               unsigned NewSPReg,
                                int64_t Offset) {
-  // TODO: Not implemented
+  assert((NewSPReg == ARM::SP || NewSPReg == FPReg) &&
+         "the operand of .setfp directive should be either $sp or $fp");
+
+  UsedFP = true;
+  FPReg = NewFPReg;
+
+  if (NewSPReg == ARM::SP)
+    FPOffset = SPOffset + Offset;
+  else
+    FPOffset += Offset;
 }
 
 void ARMELFStreamer::EmitPad(int64_t Offset) {
-  // TODO: Not implemented
+  // Track the change of the $sp offset
+  SPOffset -= Offset;
+
+  // To squash multiple .pad directives, we should delay the unwind opcode
+  // until the .save, .vsave, .handlerdata, or .fnend directives.
+  PendingOffset -= Offset;
 }
 
 void ARMELFStreamer::EmitRegSave(const SmallVectorImpl<unsigned> &RegList,
                                  bool IsVector) {
-  // TODO: Not implemented
+  // Collect the registers in the register list
+  unsigned Count = 0;
+  uint32_t Mask = 0;
+  const MCRegisterInfo *MRI = getContext().getRegisterInfo();
+  for (size_t i = 0; i < RegList.size(); ++i) {
+    unsigned Reg = MRI->getEncodingValue(RegList[i]);
+    assert(Reg < (IsVector ? 32U : 16U) && "Register out of range");
+    unsigned Bit = (1u << Reg);
+    if ((Mask & Bit) == 0) {
+      Mask |= Bit;
+      ++Count;
+    }
+  }
+
+  // Track the change the $sp offset: For the .save directive, the
+  // corresponding push instruction will decrease the $sp by (4 * Count).
+  // For the .vsave directive, the corresponding vpush instruction will
+  // decrease $sp by (8 * Count).
+  SPOffset -= Count * (IsVector ? 8 : 4);
+
+  // Emit the opcode
+  FlushPendingOffset();
+  if (IsVector)
+    UnwindOpAsm.EmitVFPRegSave(Mask);
+  else
+    UnwindOpAsm.EmitRegSave(Mask);
 }
 
 namespace llvm {

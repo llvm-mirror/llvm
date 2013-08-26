@@ -19,31 +19,33 @@
 
 namespace llvm {
 
-/// Triple - Helper class for working with target triples.
+/// Triple - Helper class for working with autoconf configuration names. For
+/// historical reasons, we also call these 'triples' (they used to contain
+/// exactly three fields).
 ///
-/// Target triples are strings in the canonical form:
+/// Configuration names are strings in the canonical form:
 ///   ARCHITECTURE-VENDOR-OPERATING_SYSTEM
 /// or
 ///   ARCHITECTURE-VENDOR-OPERATING_SYSTEM-ENVIRONMENT
 ///
 /// This class is used for clients which want to support arbitrary
-/// target triples, but also want to implement certain special
-/// behavior for particular targets. This class isolates the mapping
-/// from the components of the target triple to well known IDs.
+/// configuration names, but also want to implement certain special
+/// behavior for particular configurations. This class isolates the mapping
+/// from the components of the configuration name to well known IDs.
 ///
 /// At its core the Triple class is designed to be a wrapper for a triple
 /// string; the constructor does not change or normalize the triple string.
 /// Clients that need to handle the non-canonical triples that users often
 /// specify should use the normalize method.
 ///
-/// See autoconf/config.guess for a glimpse into what triples look like in
-/// practice.
+/// See autoconf/config.guess for a glimpse into what configuration names
+/// look like in practice.
 class Triple {
 public:
   enum ArchType {
     UnknownArch,
 
-    arm,     // ARM; arm, armv.*, xscale
+    arm,     // ARM: arm, armv.*, xscale
     aarch64, // AArch64: aarch64
     hexagon, // Hexagon: hexagon
     mips,    // MIPS: mips, mipsallegrex
@@ -53,15 +55,16 @@ public:
     msp430,  // MSP430: msp430
     ppc,     // PPC: powerpc
     ppc64,   // PPC64: powerpc64, ppu
+    ppc64le, // PPC64LE: powerpc64le
     r600,    // R600: AMD GPUs HD2XXX - HD6XXX
     sparc,   // Sparc: sparc
     sparcv9, // Sparcv9: Sparcv9
+    systemz, // SystemZ: s390x
     tce,     // TCE (http://tce.cs.tut.fi/): tce
     thumb,   // Thumb: thumb, thumbv.*
     x86,     // X86: i[3-9]86
     x86_64,  // X86-64: amd64, x86_64
     xcore,   // XCore: xcore
-    mblaze,  // MBlaze: mblaze
     nvptx,   // NVPTX: 32-bit
     nvptx64, // NVPTX: 64-bit
     le32,    // le32: generic little-endian 32-bit CPU (PNaCl / Emscripten)
@@ -78,7 +81,8 @@ public:
     BGP,
     BGQ,
     Freescale,
-    IBM
+    IBM,
+    NVIDIA
   };
   enum OSType {
     UnknownOS,
@@ -104,7 +108,9 @@ public:
     NaCl,       // Native Client
     CNK,        // BG/P Compute-Node Kernel
     Bitrig,
-    AIX
+    AIX,
+    CUDA,       // NVIDIA CUDA
+    NVCL        // NVIDIA OpenCL
   };
   enum EnvironmentType {
     UnknownEnvironment,

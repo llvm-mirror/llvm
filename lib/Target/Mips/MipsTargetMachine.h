@@ -21,6 +21,8 @@
 #include "MipsSelectionDAGInfo.h"
 #include "MipsSubtarget.h"
 #include "llvm/ADT/OwningPtr.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetMachine.h"
@@ -35,7 +37,14 @@ class MipsTargetMachine : public LLVMTargetMachine {
   OwningPtr<const MipsInstrInfo> InstrInfo;
   OwningPtr<const MipsFrameLowering> FrameLowering;
   OwningPtr<const MipsTargetLowering> TLInfo;
+  OwningPtr<const MipsInstrInfo> InstrInfo16;
+  OwningPtr<const MipsFrameLowering> FrameLowering16;
+  OwningPtr<const MipsTargetLowering> TLInfo16;
+  OwningPtr<const MipsInstrInfo> InstrInfoSE;
+  OwningPtr<const MipsFrameLowering> FrameLoweringSE;
+  OwningPtr<const MipsTargetLowering> TLInfoSE;
   MipsSelectionDAGInfo TSInfo;
+  const InstrItineraryData &InstrItins;
   MipsJITInfo JITInfo;
 
 public:
@@ -47,6 +56,8 @@ public:
 
   virtual ~MipsTargetMachine() {}
 
+  virtual void addAnalysisPasses(PassManagerBase &PM);
+
   virtual const MipsInstrInfo *getInstrInfo() const
   { return InstrInfo.get(); }
   virtual const TargetFrameLowering *getFrameLowering() const
@@ -55,6 +66,11 @@ public:
   { return &Subtarget; }
   virtual const DataLayout *getDataLayout()    const
   { return &DL;}
+
+  virtual const InstrItineraryData *getInstrItineraryData() const {
+    return Subtarget.inMips16Mode() ? 0 : &InstrItins;
+  }
+
   virtual MipsJITInfo *getJITInfo()
   { return &JITInfo; }
 
@@ -73,6 +89,13 @@ public:
   // Pass Pipeline Configuration
   virtual TargetPassConfig *createPassConfig(PassManagerBase &PM);
   virtual bool addCodeEmitter(PassManagerBase &PM, JITCodeEmitter &JCE);
+
+  // Set helper classes
+  void setHelperClassesMips16();
+
+  void setHelperClassesMipsSE();
+
+
 };
 
 /// MipsebTargetMachine - Mips32/64 big endian target machine.

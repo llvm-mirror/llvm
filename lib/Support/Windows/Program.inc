@@ -12,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "Windows.h"
+#include "llvm/ADT/OwningPtr.h"
+#include "llvm/Support/FileSystem.h"
 #include <cstdio>
 #include <fcntl.h>
 #include <io.h>
@@ -32,27 +34,12 @@ namespace {
 namespace llvm {
 using namespace sys;
 
-Program::Program() : Data_(0) {}
-
-Program::~Program() {
-  if (Data_) {
-    Win32ProcessInfo* wpi = reinterpret_cast<Win32ProcessInfo*>(Data_);
-    CloseHandle(wpi->hProcess);
-    delete wpi;
-    Data_ = 0;
-  }
-}
-
 // This function just uses the PATH environment variable to find the program.
-Path
-Program::FindProgramByName(const std::string& progName) {
-
+std::string sys::FindProgramByName(const std::string &progName) {
   // Check some degenerate cases
   if (progName.length() == 0) // no program
-    return Path();
-  Path temp;
-  if (!temp.set(progName)) // invalid name
-    return Path();
+    return "";
+  std::string temp = progName;
   // Return paths with slashes verbatim.
   if (progName.find('\\') != std::string::npos ||
       progName.find('/') != std::string::npos)
@@ -60,36 +47,37 @@ Program::FindProgramByName(const std::string& progName) {
 
   // At this point, the file name is valid and does not contain slashes.
   // Let Windows search for it.
-  char buffer[MAX_PATH];
+  std::string buffer;
+  buffer.resize(MAX_PATH);
   char *dummy = NULL;
   DWORD len = SearchPath(NULL, progName.c_str(), ".exe", MAX_PATH,
-                         buffer, &dummy);
+                         &buffer[0], &dummy);
 
   // See if it wasn't found.
   if (len == 0)
-    return Path();
+    return "";
 
   // See if we got the entire path.
   if (len < MAX_PATH)
-    return Path(buffer);
+    return buffer;
 
   // Buffer was too small; grow and retry.
   while (true) {
-    char *b = reinterpret_cast<char *>(_alloca(len+1));
-    DWORD len2 = SearchPath(NULL, progName.c_str(), ".exe", len+1, b, &dummy);
+    buffer.resize(len+1);
+    DWORD len2 = SearchPath(NULL, progName.c_str(), ".exe", len+1, &buffer[0], &dummy);
 
     // It is unlikely the search failed, but it's always possible some file
     // was added or removed since the last search, so be paranoid...
     if (len2 == 0)
-      return Path();
+      return "";
     else if (len2 <= len)
-      return Path(b);
+      return buffer;
 
     len = len2;
   }
 }
 
-static HANDLE RedirectIO(const Path *path, int fd, std::string* ErrMsg) {
+static HANDLE RedirectIO(const StringRef *path, int fd, std::string* ErrMsg) {
   HANDLE h;
   if (path == 0) {
     DuplicateHandle(GetCurrentProcess(), (HANDLE)_get_osfhandle(fd),
@@ -98,19 +86,19 @@ static HANDLE RedirectIO(const Path *path, int fd, std::string* ErrMsg) {
     return h;
   }
 
-  const char *fname;
-  if (path->isEmpty())
+  std::string fname;
+  if (path->empty())
     fname = "NUL";
   else
-    fname = path->c_str();
+    fname = *path;
 
   SECURITY_ATTRIBUTES sa;
   sa.nLength = sizeof(sa);
   sa.lpSecurityDescriptor = 0;
   sa.bInheritHandle = TRUE;
 
-  h = CreateFile(fname, fd ? GENERIC_WRITE : GENERIC_READ, FILE_SHARE_READ,
-                 &sa, fd == 0 ? OPEN_EXISTING : CREATE_ALWAYS,
+  h = CreateFile(fname.c_str(), fd ? GENERIC_WRITE : GENERIC_READ,
+                 FILE_SHARE_READ, &sa, fd == 0 ? OPEN_EXISTING : CREATE_ALWAYS,
                  FILE_ATTRIBUTE_NORMAL, NULL);
   if (h == INVALID_HANDLE_VALUE) {
     MakeErrMsg(ErrMsg, std::string(fname) + ": Can't open file for " +
@@ -126,39 +114,71 @@ static bool ArgNeedsQuotes(const char *Str) {
   return Str[0] == '\0' || strpbrk(Str, "\t \"&\'()*<>\\`^|") != 0;
 }
 
+/// CountPrecedingBackslashes - Returns the number of backslashes preceding Cur
+/// in the C string Start.
+static unsigned int CountPrecedingBackslashes(const char *Start,
+                                              const char *Cur) {
+  unsigned int Count = 0;
+  --Cur;
+  while (Cur >= Start && *Cur == '\\') {
+    ++Count;
+    --Cur;
+  }
+  return Count;
+}
+
+/// EscapePrecedingEscapes - Append a backslash to Dst for every backslash
+/// preceding Cur in the Start string.  Assumes Dst has enough space.
+static char *EscapePrecedingEscapes(char *Dst, const char *Start,
+                                    const char *Cur) {
+  unsigned PrecedingEscapes = CountPrecedingBackslashes(Start, Cur);
+  while (PrecedingEscapes > 0) {
+    *Dst++ = '\\';
+    --PrecedingEscapes;
+  }
+  return Dst;
+}
 
 /// ArgLenWithQuotes - Check whether argument needs to be quoted when calling
 /// CreateProcess and returns length of quoted arg with escaped quotes
 static unsigned int ArgLenWithQuotes(const char *Str) {
-  unsigned int len = ArgNeedsQuotes(Str) ? 2 : 0;
+  const char *Start = Str;
+  bool Quoted = ArgNeedsQuotes(Str);
+  unsigned int len = Quoted ? 2 : 0;
 
   while (*Str != '\0') {
-    if (*Str == '\"')
-      ++len;
+    if (*Str == '\"') {
+      // We need to add a backslash, but ensure that it isn't escaped.
+      unsigned PrecedingEscapes = CountPrecedingBackslashes(Start, Str);
+      len += PrecedingEscapes + 1;
+    }
+    // Note that we *don't* need to escape runs of backslashes that don't
+    // precede a double quote!  See MSDN:
+    // http://msdn.microsoft.com/en-us/library/17w5ykft%28v=vs.85%29.aspx
 
     ++len;
     ++Str;
   }
 
+  if (Quoted) {
+    // Make sure the closing quote doesn't get escaped by a trailing backslash.
+    unsigned PrecedingEscapes = CountPrecedingBackslashes(Start, Str);
+    len += PrecedingEscapes + 1;
+  }
+
   return len;
 }
 
+}
 
-bool
-Program::Execute(const Path& path,
-                 const char** args,
-                 const char** envp,
-                 const Path** redirects,
-                 unsigned memoryLimit,
-                 std::string* ErrMsg) {
-  if (Data_) {
-    Win32ProcessInfo* wpi = reinterpret_cast<Win32ProcessInfo*>(Data_);
-    CloseHandle(wpi->hProcess);
-    delete wpi;
-    Data_ = 0;
-  }
-
-  if (!path.canExecute()) {
+static bool Execute(void **Data,
+                    StringRef Program,
+                    const char** args,
+                    const char** envp,
+                    const StringRef** redirects,
+                    unsigned memoryLimit,
+                    std::string* ErrMsg) {
+  if (!sys::fs::can_execute(Program)) {
     if (ErrMsg)
       *ErrMsg = "program not executable";
     return false;
@@ -175,32 +195,39 @@ Program::Execute(const Path& path,
   }
 
   // Now build the command line.
-  char *command = reinterpret_cast<char *>(_alloca(len+1));
-  char *p = command;
+  OwningArrayPtr<char> command(new char[len+1]);
+  char *p = command.get();
 
   for (unsigned i = 0; args[i]; i++) {
     const char *arg = args[i];
+    const char *start = arg;
 
     bool needsQuoting = ArgNeedsQuotes(arg);
     if (needsQuoting)
       *p++ = '"';
 
     while (*arg != '\0') {
-      if (*arg == '\"')
+      if (*arg == '\"') {
+        // Escape all preceding escapes (if any), and then escape the quote.
+        p = EscapePrecedingEscapes(p, start, arg);
         *p++ = '\\';
+      }
 
       *p++ = *arg++;
     }
 
-    if (needsQuoting)
+    if (needsQuoting) {
+      // Make sure our quote doesn't get escaped by a trailing backslash.
+      p = EscapePrecedingEscapes(p, start, arg);
       *p++ = '"';
+    }
     *p++ = ' ';
   }
 
   *p = 0;
 
   // The pointer to the environment block for the new process.
-  char *envblock = 0;
+  OwningArrayPtr<char> envblock;
 
   if (envp) {
     // An environment block consists of a null-terminated block of
@@ -213,8 +240,8 @@ Program::Execute(const Path& path,
       len += strlen(envp[i]) + 1;
 
     // Now build the environment block.
-    envblock = reinterpret_cast<char *>(_alloca(len+1));
-    p = envblock;
+    envblock.reset(new char[len+1]);
+    p = envblock.get();
 
     for (unsigned i = 0; envp[i]; i++) {
       const char *ev = envp[i];
@@ -271,8 +298,9 @@ Program::Execute(const Path& path,
 
   fflush(stdout);
   fflush(stderr);
-  BOOL rc = CreateProcess(path.c_str(), command, NULL, NULL, TRUE, 0,
-                          envblock, NULL, &si, &pi);
+  std::string ProgramStr = Program;
+  BOOL rc = CreateProcess(ProgramStr.c_str(), command.get(), NULL, NULL, TRUE,
+                          0, envblock.get(), NULL, &si, &pi);
   DWORD err = GetLastError();
 
   // Regardless of whether the process got created or not, we are done with
@@ -285,13 +313,15 @@ Program::Execute(const Path& path,
   if (!rc) {
     SetLastError(err);
     MakeErrMsg(ErrMsg, std::string("Couldn't execute program '") +
-               path.str() + "'");
+               ProgramStr + "'");
     return false;
   }
-  Win32ProcessInfo* wpi = new Win32ProcessInfo;
-  wpi->hProcess = pi.hProcess;
-  wpi->dwProcessId = pi.dwProcessId;
-  Data_ = wpi;
+  if (Data) {
+    Win32ProcessInfo* wpi = new Win32ProcessInfo;
+    wpi->hProcess = pi.hProcess;
+    wpi->dwProcessId = pi.dwProcessId;
+    *Data = wpi;
+  }
 
   // Make sure these get closed no matter what.
   ScopedCommonHandle hThread(pi.hThread);
@@ -321,22 +351,17 @@ Program::Execute(const Path& path,
     }
   }
 
+  // Don't leak the handle if the caller doesn't want it.
+  if (!Data)
+    CloseHandle(pi.hProcess);
+
   return true;
 }
 
-int
-Program::Wait(const Path &path,
-              unsigned secondsToWait,
-              std::string* ErrMsg) {
-  if (Data_ == 0) {
-    MakeErrMsg(ErrMsg, "Process not started!");
-    return -1;
-  }
-
-  Win32ProcessInfo* wpi = reinterpret_cast<Win32ProcessInfo*>(Data_);
-  HANDLE hProcess = wpi->hProcess;
-
+static int WaitAux(Win32ProcessInfo *wpi, unsigned secondsToWait,
+                   std::string *ErrMsg) {
   // Wait for the process to terminate.
+  HANDLE hProcess = wpi->hProcess;
   DWORD millisecondsToWait = INFINITE;
   if (secondsToWait > 0)
     millisecondsToWait = secondsToWait * 1000;
@@ -375,25 +400,54 @@ Program::Wait(const Path &path,
   return 1;
 }
 
-error_code Program::ChangeStdinToBinary(){
+static int Wait(void *&Data, StringRef Program, unsigned secondsToWait,
+                std::string *ErrMsg) {
+  Win32ProcessInfo *wpi = reinterpret_cast<Win32ProcessInfo *>(Data);
+  int Ret = WaitAux(wpi, secondsToWait, ErrMsg);
+
+  CloseHandle(wpi->hProcess);
+  delete wpi;
+  Data = 0;
+
+  return Ret;
+}
+
+namespace llvm {
+error_code sys::ChangeStdinToBinary(){
   int result = _setmode( _fileno(stdin), _O_BINARY );
   if (result == -1)
     return error_code(errno, generic_category());
   return make_error_code(errc::success);
 }
 
-error_code Program::ChangeStdoutToBinary(){
+error_code sys::ChangeStdoutToBinary(){
   int result = _setmode( _fileno(stdout), _O_BINARY );
   if (result == -1)
     return error_code(errno, generic_category());
   return make_error_code(errc::success);
 }
 
-error_code Program::ChangeStderrToBinary(){
+error_code sys::ChangeStderrToBinary(){
   int result = _setmode( _fileno(stderr), _O_BINARY );
   if (result == -1)
     return error_code(errno, generic_category());
   return make_error_code(errc::success);
+}
+
+bool llvm::sys::argumentsFitWithinSystemLimits(ArrayRef<const char*> Args) {
+  // The documented max length of the command line passed to CreateProcess.
+  static const size_t MaxCommandStringLength = 32768;
+  size_t ArgLength = 0;
+  for (ArrayRef<const char*>::iterator I = Args.begin(), E = Args.end();
+       I != E; ++I) {
+    // Account for the trailing space for every arg but the last one and the
+    // trailing NULL of the last argument.
+    ArgLength += ArgLenWithQuotes(*I) + 1;
+    if (ArgLength > MaxCommandStringLength) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }

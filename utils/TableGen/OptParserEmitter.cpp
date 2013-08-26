@@ -178,7 +178,7 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
       OS << "INVALID";
 
     // The other option arguments (unused for groups).
-    OS << ", INVALID, 0, 0";
+    OS << ", INVALID, 0, 0, 0";
 
     // The option help text.
     if (!isa<UnsetInit>(R.getValueInit("HelpText"))) {
@@ -227,6 +227,21 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
       OS << getOptionName(*DI->getDef());
     else
       OS << "INVALID";
+
+    // The option alias arguments (if any).
+    // Emitted as a \0 separated list in a string, e.g. ["foo", "bar"]
+    // would become "foo\0bar\0". Note that the compiler adds an implicit
+    // terminating \0 at the end.
+    OS << ", ";
+    std::vector<std::string> AliasArgs = R.getValueAsListOfStrings("AliasArgs");
+    if (AliasArgs.size() == 0) {
+      OS << "0";
+    } else {
+      OS << "\"";
+      for (size_t i = 0, e = AliasArgs.size(); i != e; ++i)
+        OS << AliasArgs[i] << "\\0";
+      OS << "\"";
+    }
 
     // The option flags.
     const ListInit *LI = R.getValueAsListInit("Flags");

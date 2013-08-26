@@ -53,25 +53,17 @@ DumpAsm("d", cl::desc("Print assembly as linked"), cl::Hidden);
 // LoadFile - Read the specified bitcode file in and return it.  This routine
 // searches the link path for the specified file to try to find it...
 //
-static inline std::auto_ptr<Module> LoadFile(const char *argv0,
-                                             const std::string &FN, 
-                                             LLVMContext& Context) {
-  sys::Path Filename;
-  if (!Filename.set(FN)) {
-    errs() << "Invalid file name: '" << FN << "'\n";
-    return std::auto_ptr<Module>();
-  }
-
+static inline Module *LoadFile(const char *argv0, const std::string &FN,
+                               LLVMContext& Context) {
   SMDiagnostic Err;
-  if (Verbose) errs() << "Loading '" << Filename.c_str() << "'\n";
+  if (Verbose) errs() << "Loading '" << FN << "'\n";
   Module* Result = 0;
-  
-  const std::string &FNStr = Filename.str();
-  Result = ParseIRFile(FNStr, Err, Context);
-  if (Result) return std::auto_ptr<Module>(Result);   // Load successful!
+
+  Result = ParseIRFile(FN, Err, Context);
+  if (Result) return Result;   // Load successful!
 
   Err.print(argv0, errs());
-  return std::auto_ptr<Module>();
+  return NULL;
 }
 
 int main(int argc, char **argv) {
@@ -86,17 +78,17 @@ int main(int argc, char **argv) {
   unsigned BaseArg = 0;
   std::string ErrorMessage;
 
-  std::auto_ptr<Module> Composite(LoadFile(argv[0],
-                                           InputFilenames[BaseArg], Context));
+  OwningPtr<Module> Composite(LoadFile(argv[0],
+                                       InputFilenames[BaseArg], Context));
   if (Composite.get() == 0) {
     errs() << argv[0] << ": error loading file '"
            << InputFilenames[BaseArg] << "'\n";
     return 1;
   }
 
+  Linker L(Composite.get());
   for (unsigned i = BaseArg+1; i < InputFilenames.size(); ++i) {
-    std::auto_ptr<Module> M(LoadFile(argv[0],
-                                     InputFilenames[i], Context));
+    OwningPtr<Module> M(LoadFile(argv[0], InputFilenames[i], Context));
     if (M.get() == 0) {
       errs() << argv[0] << ": error loading file '" <<InputFilenames[i]<< "'\n";
       return 1;
@@ -104,8 +96,7 @@ int main(int argc, char **argv) {
 
     if (Verbose) errs() << "Linking in '" << InputFilenames[i] << "'\n";
 
-    if (Linker::LinkModules(Composite.get(), M.get(), Linker::DestroySource,
-                            &ErrorMessage)) {
+    if (L.linkInModule(M.get(), &ErrorMessage)) {
       errs() << argv[0] << ": link error in '" << InputFilenames[i]
              << "': " << ErrorMessage << "\n";
       return 1;
@@ -115,8 +106,7 @@ int main(int argc, char **argv) {
   if (DumpAsm) errs() << "Here's the assembly:\n" << *Composite;
 
   std::string ErrorInfo;
-  tool_output_file Out(OutputFilename.c_str(), ErrorInfo,
-                       raw_fd_ostream::F_Binary);
+  tool_output_file Out(OutputFilename.c_str(), ErrorInfo, sys::fs::F_Binary);
   if (!ErrorInfo.empty()) {
     errs() << ErrorInfo << '\n';
     return 1;

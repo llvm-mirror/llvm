@@ -15,6 +15,7 @@
 #ifndef LLVM_EXECUTIONENGINE_EXECUTIONENGINE_H
 #define LLVM_EXECUTIONENGINE_EXECUTIONENGINE_H
 
+#include "llvm-c/ExecutionEngine.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -33,6 +34,7 @@ namespace llvm {
 
 struct GenericValue;
 class Constant;
+class DataLayout;
 class ExecutionEngine;
 class Function;
 class GlobalVariable;
@@ -42,7 +44,8 @@ class JITMemoryManager;
 class MachineCodeInfo;
 class Module;
 class MutexGuard;
-class DataLayout;
+class ObjectCache;
+class RTDyldMemoryManager;
 class Triple;
 class Type;
 
@@ -140,7 +143,7 @@ protected:
   static ExecutionEngine *(*MCJITCtor)(
     Module *M,
     std::string *ErrorStr,
-    JITMemoryManager *JMM,
+    RTDyldMemoryManager *MCJMM,
     bool GVsWithCode,
     TargetMachine *TM);
   static ExecutionEngine *(*InterpCtor)(Module *M, std::string *ErrorStr);
@@ -249,11 +252,14 @@ public:
                      "EE!");
   }
 
-  // finalizeObject - This method should be called after sections within an
-  // object have been relocated using mapSectionAddress.  When this method is
-  // called the MCJIT execution engine will reapply relocations for a loaded
-  // object.  This method has no effect for the legacy JIT engine or the
-  // interpeter.
+  /// finalizeObject - ensure the module is fully processed and is usable.
+  ///
+  /// It is the user-level function for completing the process of making the
+  /// object usable for execution.  It should be called after sections within an
+  /// object have been relocated using mapSectionAddress.  When this method is
+  /// called the MCJIT execution engine will reapply relocations for a loaded
+  /// object.  This method has no effect for the legacy JIT engine or the
+  /// interpeter.
   virtual void finalizeObject() {}
 
   /// runStaticConstructorsDestructors - This method is used to execute all of
@@ -370,6 +376,12 @@ public:
   /// which case these functions do nothing.
   virtual void RegisterJITEventListener(JITEventListener *) {}
   virtual void UnregisterJITEventListener(JITEventListener *) {}
+
+  /// Sets the pre-compiled object cache.  The ownership of the ObjectCache is
+  /// not changed.  Supported by MCJIT but not JIT.
+  virtual void setObjectCache(ObjectCache *) {
+    llvm_unreachable("No support for an object cache");
+  }
 
   /// DisableLazyCompilation - When lazy compilation is off (the default), the
   /// JIT will eagerly compile every function reachable from the argument to
@@ -488,6 +500,7 @@ private:
   EngineKind::Kind WhichEngine;
   std::string *ErrorStr;
   CodeGenOpt::Level OptLevel;
+  RTDyldMemoryManager *MCJMM;
   JITMemoryManager *JMM;
   bool AllocateGVsWithCode;
   TargetOptions Options;
@@ -503,6 +516,7 @@ private:
     WhichEngine = EngineKind::Either;
     ErrorStr = NULL;
     OptLevel = CodeGenOpt::Default;
+    MCJMM = NULL;
     JMM = NULL;
     Options = TargetOptions();
     AllocateGVsWithCode = false;
@@ -524,12 +538,29 @@ public:
     WhichEngine = w;
     return *this;
   }
+  
+  /// setMCJITMemoryManager - Sets the MCJIT memory manager to use. This allows
+  /// clients to customize their memory allocation policies for the MCJIT. This
+  /// is only appropriate for the MCJIT; setting this and configuring the builder
+  /// to create anything other than MCJIT will cause a runtime error. If create()
+  /// is called and is successful, the created engine takes ownership of the
+  /// memory manager. This option defaults to NULL. Using this option nullifies
+  /// the setJITMemoryManager() option.
+  EngineBuilder &setMCJITMemoryManager(RTDyldMemoryManager *mcjmm) {
+    MCJMM = mcjmm;
+    JMM = NULL;
+    return *this;
+  }
 
-  /// setJITMemoryManager - Sets the memory manager to use.  This allows
-  /// clients to customize their memory allocation policies.  If create() is
-  /// called and is successful, the created engine takes ownership of the
-  /// memory manager.  This option defaults to NULL.
+  /// setJITMemoryManager - Sets the JIT memory manager to use.  This allows
+  /// clients to customize their memory allocation policies.  This is only
+  /// appropriate for either JIT or MCJIT; setting this and configuring the
+  /// builder to create an interpreter will cause a runtime error. If create()
+  /// is called and is successful, the created engine takes ownership of the
+  /// memory manager.  This option defaults to NULL. This option overrides
+  /// setMCJITMemoryManager() as well.
   EngineBuilder &setJITMemoryManager(JITMemoryManager *jmm) {
+    MCJMM = NULL;
     JMM = jmm;
     return *this;
   }
@@ -624,6 +655,9 @@ public:
 
   ExecutionEngine *create(TargetMachine *TM);
 };
+
+// Create wrappers for C Binding types (see CBindingWrapping.h).
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(ExecutionEngine, LLVMExecutionEngineRef)
 
 } // End llvm namespace
 
