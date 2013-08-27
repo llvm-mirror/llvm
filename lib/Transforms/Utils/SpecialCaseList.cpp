@@ -169,18 +169,12 @@ SpecialCaseList::~SpecialCaseList() {
   }
 }
 
-bool SpecialCaseList::findCategory(const Function &F,
-                                   StringRef &Category) const {
-  return findCategory(*F.getParent(), Category) ||
-         findCategory("fun", F.getName(), Category);
-}
-
 bool SpecialCaseList::isIn(const Function& F, const StringRef Category) const {
   return isIn(*F.getParent(), Category) ||
          inSectionCategory("fun", F.getName(), Category);
 }
 
-static StringRef GetGVTypeString(const GlobalVariable &G) {
+static StringRef GetGlobalTypeString(const GlobalValue &G) {
   // Types of GlobalVariables are always pointer types.
   Type *GType = G.getType()->getElementType();
   // For now we support blacklisting struct types only.
@@ -191,44 +185,27 @@ static StringRef GetGVTypeString(const GlobalVariable &G) {
   return "<unknown type>";
 }
 
-bool SpecialCaseList::findCategory(const GlobalVariable &G,
-                                   StringRef &Category) const {
-  return findCategory(*G.getParent(), Category) ||
-         findCategory("global", G.getName(), Category) ||
-         findCategory("type", GetGVTypeString(G), Category);
-}
-
 bool SpecialCaseList::isIn(const GlobalVariable &G,
                            const StringRef Category) const {
   return isIn(*G.getParent(), Category) ||
          inSectionCategory("global", G.getName(), Category) ||
-         inSectionCategory("type", GetGVTypeString(G), Category);
+         inSectionCategory("type", GetGlobalTypeString(G), Category);
 }
 
-bool SpecialCaseList::findCategory(const Module &M, StringRef &Category) const {
-  return findCategory("src", M.getModuleIdentifier(), Category);
+bool SpecialCaseList::isIn(const GlobalAlias &GA,
+                           const StringRef Category) const {
+  if (isIn(*GA.getParent(), Category))
+    return true;
+
+  if (isa<FunctionType>(GA.getType()->getElementType()))
+    return inSectionCategory("fun", GA.getName(), Category);
+
+  return inSectionCategory("global", GA.getName(), Category) ||
+         inSectionCategory("type", GetGlobalTypeString(GA), Category);
 }
 
 bool SpecialCaseList::isIn(const Module &M, const StringRef Category) const {
   return inSectionCategory("src", M.getModuleIdentifier(), Category);
-}
-
-bool SpecialCaseList::findCategory(const StringRef Section,
-                                   const StringRef Query,
-                                   StringRef &Category) const {
-  StringMap<StringMap<Entry> >::const_iterator I = Entries.find(Section);
-  if (I == Entries.end()) return false;
-
-  for (StringMap<Entry>::const_iterator II = I->second.begin(),
-                                        IE = I->second.end();
-       II != IE; ++II) {
-    if (II->getValue().match(Query)) {
-      Category = II->first();
-      return true;
-    }
-  }
-
-  return false;
 }
 
 bool SpecialCaseList::inSectionCategory(const StringRef Section,

@@ -27,7 +27,7 @@ class TestingProgressDisplay:
 
     def update(self, test):
         # Avoid locking overhead in quiet mode
-        if self.opts.quiet and not test.result.isFailure:
+        if self.opts.quiet and not test.result.code.isFailure:
             self.completed += 1
             return
 
@@ -52,19 +52,19 @@ class TestingProgressDisplay:
             self.progressBar.update(float(self.completed)/self.numTests,
                                     test.getFullName())
 
-        if self.opts.succinct and not test.result.isFailure:
+        if self.opts.succinct and not test.result.code.isFailure:
             return
 
         if self.progressBar:
             self.progressBar.clear()
 
-        print('%s: %s (%d of %d)' % (test.result.name, test.getFullName(),
+        print('%s: %s (%d of %d)' % (test.result.code.name, test.getFullName(),
                                      self.completed, self.numTests))
 
-        if test.result.isFailure and self.opts.showOutput:
+        if test.result.code.isFailure and self.opts.showOutput:
             print("%s TEST '%s' FAILED %s" % ('*'*20, test.getFullName(),
                                               '*'*20))
-            print(test.output)
+            print(test.result.output)
             print("*" * 20)
 
         sys.stdout.flush()
@@ -118,8 +118,15 @@ class Tester(threading.Thread):
         result = None
         startTime = time.time()
         try:
-            result, output = test.config.test_format.execute(test,
-                                                             self.litConfig)
+            result = test.config.test_format.execute(test, self.litConfig)
+
+            # Support deprecated result from execute() which returned the result
+            # code and additional output as a tuple.
+            if isinstance(result, tuple):
+                code, output = result
+                result = lit.Test.Result(code, output)
+            elif not isinstance(result, lit.Test.Result):
+                raise ValueError("unexpected result from test execution")
         except KeyboardInterrupt:
             # This is a sad hack. Unfortunately subprocess goes
             # bonkers with ctrl-c and we start forking merrily.
@@ -128,13 +135,13 @@ class Tester(threading.Thread):
         except:
             if self.litConfig.debug:
                 raise
-            result = lit.Test.UNRESOLVED
             output = 'Exception during script execution:\n'
             output += traceback.format_exc()
             output += '\n'
-        elapsed = time.time() - startTime
+            result = lit.Test.Result(lit.Test.UNRESOLVED, output)
+        result.elapsed = time.time() - startTime
 
-        test.setResult(result, output, elapsed)
+        test.setResult(result)
         self.display.update(test)
 
 def runTests(numThreads, litConfig, provider, display):
@@ -380,18 +387,18 @@ def main(builtinParameters = {}):
         print('Testing Time: %.2fs'%(time.time() - startTime))
 
     # Update results for any tests which weren't run.
-    for t in tests:
-        if t.result is None:
-            t.setResult(lit.Test.UNRESOLVED, '', 0.0)
+    for test in tests:
+        if test.result is None:
+            test.setResult(lit.Test.Result(lit.Test.UNRESOLVED, '', 0.0))
 
     # List test results organized by kind.
     hasFailures = False
     byCode = {}
-    for t in tests:
-        if t.result not in byCode:
-            byCode[t.result] = []
-        byCode[t.result].append(t)
-        if t.result.isFailure:
+    for test in tests:
+        if test.result.code not in byCode:
+            byCode[test.result.code] = []
+        byCode[test.result.code].append(test)
+        if test.result.code.isFailure:
             hasFailures = True
 
     # Print each test in any of the failing groups.
@@ -403,22 +410,16 @@ def main(builtinParameters = {}):
             continue
         print('*'*20)
         print('%s (%d):' % (title, len(elts)))
-        for t in elts:
-            print('    %s' % t.getFullName())
+        for test in elts:
+            print('    %s' % test.getFullName())
         sys.stdout.write('\n')
 
-    if opts.timeTests:
-        # Collate, in case we repeated tests.
-        times = {}
-        for t in tests:
-            key = t.getFullName()
-            times[key] = times.get(key, 0.) + t.elapsed
-
-        byTime = list(times.items())
-        byTime.sort(key = lambda item: item[1])
-        if byTime:
-            lit.util.printHistogram(byTime, title='Tests')
-
+    if opts.timeTests and tests:
+        # Order by time.
+        test_times = [(test.getFullName(), test.result.elapsed)
+                      for test in tests]
+        lit.util.printHistogram(test_times, title='Tests')
+    
     for name,code in (('Expected Passes    ', lit.Test.PASS),
                       ('Expected Failures  ', lit.Test.XFAIL),
                       ('Unsupported Tests  ', lit.Test.UNSUPPORTED),

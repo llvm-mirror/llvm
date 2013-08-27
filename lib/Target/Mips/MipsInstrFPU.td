@@ -143,16 +143,16 @@ class MTC1_FT<string opstr, RegisterOperand DstRC, RegisterOperand SrcRC,
          [(set DstRC:$fs, (OpNode SrcRC:$rt))], Itin, FrmFR>;
 
 class LW_FT<string opstr, RegisterOperand RC, InstrItinClass Itin,
-            Operand MemOpnd, SDPatternOperator OpNode= null_frag> :
-  InstSE<(outs RC:$rt), (ins MemOpnd:$addr), !strconcat(opstr, "\t$rt, $addr"),
+            SDPatternOperator OpNode= null_frag> :
+  InstSE<(outs RC:$rt), (ins mem:$addr), !strconcat(opstr, "\t$rt, $addr"),
          [(set RC:$rt, (OpNode addrDefault:$addr))], Itin, FrmFI> {
   let DecoderMethod = "DecodeFMem";
   let mayLoad = 1;
 }
 
 class SW_FT<string opstr, RegisterOperand RC, InstrItinClass Itin,
-            Operand MemOpnd, SDPatternOperator OpNode= null_frag> :
-  InstSE<(outs), (ins RC:$rt, MemOpnd:$addr), !strconcat(opstr, "\t$rt, $addr"),
+            SDPatternOperator OpNode= null_frag> :
+  InstSE<(outs), (ins RC:$rt, mem:$addr), !strconcat(opstr, "\t$rt, $addr"),
          [(OpNode RC:$rt, addrDefault:$addr)], Itin, FrmFI> {
   let DecoderMethod = "DecodeFMem";
   let mayStore = 1;
@@ -338,6 +338,10 @@ def MFC1 : MFC1_FT<"mfc1", GPR32Opnd, FGR32Opnd, IIFmoveC1, bitconvert>,
            MFC1_FM<0>;
 def MTC1 : MTC1_FT<"mtc1", FGR32Opnd, GPR32Opnd, IIFmoveC1, bitconvert>,
            MFC1_FM<4>;
+def MFHC1 : MFC1_FT<"mfhc1", GPR32Opnd, FGRH32Opnd, IIFmoveC1>,
+            MFC1_FM<3>;
+def MTHC1 : MTC1_FT<"mthc1", FGRH32Opnd, GPR32Opnd, IIFmoveC1>,
+            MFC1_FM<7>;
 def DMFC1 : MFC1_FT<"dmfc1", GPR64Opnd, FGR64Opnd, IIFmoveC1,
             bitconvert>, MFC1_FM<1>;
 def DMTC1 : MTC1_FT<"dmtc1", FGR64Opnd, GPR64Opnd, IIFmoveC1,
@@ -353,39 +357,23 @@ def FMOV_D64 : ABSS_FT<"mov.d", FGR64Opnd, FGR64Opnd, IIFmove>,
 }
 
 /// Floating Point Memory Instructions
-let Predicates = [IsN64, HasStdEnc], DecoderNamespace = "Mips64" in {
-  def LWC1_P8 : LW_FT<"lwc1", FGR32Opnd, IIFLoad, mem64, load>,
-                LW_FM<0x31>;
-  def SWC1_P8 : SW_FT<"swc1", FGR32Opnd, IIFStore, mem64, store>,
-                LW_FM<0x39>;
-  def LDC164_P8 : LW_FT<"ldc1", FGR64Opnd, IIFLoad, mem64, load>,
-                  LW_FM<0x35> {
-    let isCodeGenOnly =1;
-  }
-  def SDC164_P8 : SW_FT<"sdc1", FGR64Opnd, IIFStore, mem64, store>,
-                  LW_FM<0x3d> {
-    let isCodeGenOnly =1;
-  }
+let Predicates = [HasStdEnc] in {
+  def LWC1 : LW_FT<"lwc1", FGR32Opnd, IIFLoad, load>, LW_FM<0x31>;
+  def SWC1 : SW_FT<"swc1", FGR32Opnd, IIFStore, store>, LW_FM<0x39>;
 }
 
-let Predicates = [NotN64, HasStdEnc] in {
-  def LWC1 : LW_FT<"lwc1", FGR32Opnd, IIFLoad, mem, load>, LW_FM<0x31>;
-  def SWC1 : SW_FT<"swc1", FGR32Opnd, IIFStore, mem, store>, LW_FM<0x39>;
+let Predicates = [IsFP64bit, HasStdEnc], DecoderNamespace = "Mips64" in {
+  def LDC164 : LW_FT<"ldc1", FGR64Opnd, IIFLoad, load>, LW_FM<0x35>;
+  def SDC164 : SW_FT<"sdc1", FGR64Opnd, IIFStore, store>, LW_FM<0x3d>;
 }
 
-let Predicates = [NotN64, HasMips64, HasStdEnc],
-  DecoderNamespace = "Mips64" in {
-  def LDC164 : LW_FT<"ldc1", FGR64Opnd, IIFLoad, mem, load>, LW_FM<0x35>;
-  def SDC164 : SW_FT<"sdc1", FGR64Opnd, IIFStore, mem, store>, LW_FM<0x3d>;
-}
-
-let Predicates = [NotN64, NotMips64, HasStdEnc] in {
+let Predicates = [NotFP64bit, HasStdEnc] in {
   let isPseudo = 1, isCodeGenOnly = 1 in {
-    def PseudoLDC1 : LW_FT<"", AFGR64Opnd, IIFLoad, mem, load>;
-    def PseudoSDC1 : SW_FT<"", AFGR64Opnd, IIFStore, mem, store>;
+    def PseudoLDC1 : LW_FT<"", AFGR64Opnd, IIFLoad, load>;
+    def PseudoSDC1 : SW_FT<"", AFGR64Opnd, IIFStore, store>;
   }
-  def LDC1 : LW_FT<"ldc1", AFGR64Opnd, IIFLoad, mem>, LW_FM<0x35>;
-  def SDC1 : SW_FT<"sdc1", AFGR64Opnd, IIFStore, mem>, LW_FM<0x3d>;
+  def LDC1 : LW_FT<"ldc1", AFGR64Opnd, IIFLoad>, LW_FM<0x35>;
+  def SDC1 : SW_FT<"sdc1", AFGR64Opnd, IIFStore>, LW_FM<0x3d>;
 }
 
 // Indexed loads and stores.
@@ -542,20 +530,27 @@ def FCMP_D64 : CEQS_FT<"d", FGR64, IIFcmp, MipsFPCmp>, CEQS_FM<17>,
 
 // This pseudo instr gets expanded into 2 mtc1 instrs after register
 // allocation.
-def BuildPairF64 :
-  PseudoSE<(outs AFGR64Opnd:$dst),
-           (ins GPR32Opnd:$lo, GPR32Opnd:$hi),
-           [(set AFGR64Opnd:$dst,
-            (MipsBuildPairF64 GPR32Opnd:$lo, GPR32Opnd:$hi))]>;
+class BuildPairF64Base<RegisterOperand RO> :
+  PseudoSE<(outs RO:$dst), (ins GPR32Opnd:$lo, GPR32Opnd:$hi),
+           [(set RO:$dst, (MipsBuildPairF64 GPR32Opnd:$lo, GPR32Opnd:$hi))]>;
+
+def BuildPairF64 : BuildPairF64Base<AFGR64Opnd>,
+                   Requires<[NotFP64bit, HasStdEnc]>;
+def BuildPairF64_64 : BuildPairF64Base<FGR64Opnd>,
+                      Requires<[IsFP64bit, HasStdEnc]>;
 
 // This pseudo instr gets expanded into 2 mfc1 instrs after register
 // allocation.
 // if n is 0, lower part of src is extracted.
 // if n is 1, higher part of src is extracted.
-def ExtractElementF64 :
-  PseudoSE<(outs GPR32Opnd:$dst), (ins AFGR64Opnd:$src, i32imm:$n),
-           [(set GPR32Opnd:$dst,
-            (MipsExtractElementF64 AFGR64Opnd:$src, imm:$n))]>;
+class ExtractElementF64Base<RegisterOperand RO> :
+  PseudoSE<(outs GPR32Opnd:$dst), (ins RO:$src, i32imm:$n),
+           [(set GPR32Opnd:$dst, (MipsExtractElementF64 RO:$src, imm:$n))]>;
+
+def ExtractElementF64 : ExtractElementF64Base<AFGR64Opnd>,
+                        Requires<[NotFP64bit, HasStdEnc]>;
+def ExtractElementF64_64 : ExtractElementF64Base<FGR64Opnd>,
+                           Requires<[IsFP64bit, HasStdEnc]>;
 
 //===----------------------------------------------------------------------===//
 // InstAliases.
@@ -592,7 +587,7 @@ let Predicates = [IsFP64bit, HasStdEnc] in {
   def : MipsPat<(f64 (sint_to_fp GPR32Opnd:$src)),
                 (PseudoCVT_D64_W GPR32Opnd:$src)>;
   def : MipsPat<(f32 (sint_to_fp GPR64Opnd:$src)),
-                (EXTRACT_SUBREG (PseudoCVT_S_L GPR64Opnd:$src), sub_32)>;
+                (EXTRACT_SUBREG (PseudoCVT_S_L GPR64Opnd:$src), sub_lo)>;
   def : MipsPat<(f64 (sint_to_fp GPR64Opnd:$src)),
                 (PseudoCVT_D64_L GPR64Opnd:$src)>;
 
@@ -611,24 +606,17 @@ let Predicates = [IsFP64bit, HasStdEnc] in {
 
 // Patterns for loads/stores with a reg+imm operand.
 let AddedComplexity = 40 in {
-  let Predicates = [IsN64, HasStdEnc] in {
-    def : LoadRegImmPat<LWC1_P8, f32, load>;
-    def : StoreRegImmPat<SWC1_P8, f32>;
-    def : LoadRegImmPat<LDC164_P8, f64, load>;
-    def : StoreRegImmPat<SDC164_P8, f64>;
-  }
-
-  let Predicates = [NotN64, HasStdEnc] in {
+  let Predicates = [HasStdEnc] in {
     def : LoadRegImmPat<LWC1, f32, load>;
     def : StoreRegImmPat<SWC1, f32>;
   }
 
-  let Predicates = [NotN64, HasMips64, HasStdEnc] in {
+  let Predicates = [IsFP64bit, HasStdEnc] in {
     def : LoadRegImmPat<LDC164, f64, load>;
     def : StoreRegImmPat<SDC164, f64>;
   }
 
-  let Predicates = [NotN64, NotMips64, HasStdEnc] in {
+  let Predicates = [NotFP64bit, HasStdEnc] in {
     def : LoadRegImmPat<PseudoLDC1, f64, load>;
     def : StoreRegImmPat<PseudoSDC1, f64>;
   }

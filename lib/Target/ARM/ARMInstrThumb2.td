@@ -1855,6 +1855,9 @@ def t2MOVi16 : T2I<(outs rGPR:$Rd), (ins imm0_65535_expr:$imm), IIC_iMOVi,
   let DecoderMethod = "DecodeT2MOVTWInstruction";
 }
 
+def : t2InstAlias<"mov${p} $Rd, $imm", 
+                  (t2MOVi16 rGPR:$Rd, imm256_65535_expr:$imm, pred:$p)>;
+
 def t2MOVi16_ga_pcrel : PseudoInst<(outs rGPR:$Rd),
                                 (ins i32imm:$addr, pclabel:$id), IIC_iMOVi, []>;
 
@@ -3029,93 +3032,67 @@ defm t2TEQ  : T2I_cmp_irs<0b0100, "teq",
                          BinOpFrag<(ARMcmpZ (xor_su node:$LHS, node:$RHS), 0)>>;
 
 // Conditional moves
-// FIXME: should be able to write a pattern for ARMcmov, but can't use
-// a two-value operand where a dag node expects two operands. :(
 let neverHasSideEffects = 1 in {
 
 let isCommutable = 1, isSelect = 1 in
 def t2MOVCCr : t2PseudoInst<(outs rGPR:$Rd),
-                            (ins rGPR:$false, rGPR:$Rm, pred:$p),
+                            (ins rGPR:$false, rGPR:$Rm, cmovpred:$p),
                             4, IIC_iCMOVr,
-   [/*(set rGPR:$Rd, (ARMcmov rGPR:$false, rGPR:$Rm, imm:$cc, CCR:$ccr))*/]>,
-                RegConstraint<"$false = $Rd">,
-                Sched<[WriteALU]>;
+                            [(set rGPR:$Rd, (ARMcmov rGPR:$false, rGPR:$Rm,
+                                                     cmovpred:$p))]>,
+               RegConstraint<"$false = $Rd">, Sched<[WriteALU]>;
 
 let isMoveImm = 1 in
-def t2MOVCCi : t2PseudoInst<(outs rGPR:$Rd),
-                            (ins rGPR:$false, t2_so_imm:$imm, pred:$p),
+def t2MOVCCi
+    : t2PseudoInst<(outs rGPR:$Rd),
+                   (ins rGPR:$false, t2_so_imm:$imm, cmovpred:$p),
                    4, IIC_iCMOVi,
-[/*(set rGPR:$Rd,(ARMcmov rGPR:$false,t2_so_imm:$imm, imm:$cc, CCR:$ccr))*/]>,
-                   RegConstraint<"$false = $Rd">, Sched<[WriteALU]>;
+                   [(set rGPR:$Rd, (ARMcmov rGPR:$false,t2_so_imm:$imm,
+                                            cmovpred:$p))]>,
+      RegConstraint<"$false = $Rd">, Sched<[WriteALU]>;
 
-// FIXME: Pseudo-ize these. For now, just mark codegen only.
 let isCodeGenOnly = 1 in {
 let isMoveImm = 1 in
-def t2MOVCCi16 : T2I<(outs rGPR:$Rd), (ins rGPR:$false, imm0_65535_expr:$imm),
-                      IIC_iCMOVi,
-                      "movw", "\t$Rd, $imm", []>,
-                      RegConstraint<"$false = $Rd">, Sched<[WriteALU]> {
-  let Inst{31-27} = 0b11110;
-  let Inst{25} = 1;
-  let Inst{24-21} = 0b0010;
-  let Inst{20} = 0; // The S bit.
-  let Inst{15} = 0;
-
-  bits<4> Rd;
-  bits<16> imm;
-
-  let Inst{11-8}  = Rd;
-  let Inst{19-16} = imm{15-12};
-  let Inst{26}    = imm{11};
-  let Inst{14-12} = imm{10-8};
-  let Inst{7-0}   = imm{7-0};
-}
+def t2MOVCCi16
+    : t2PseudoInst<(outs rGPR:$Rd),
+                   (ins  rGPR:$false, imm0_65535_expr:$imm, cmovpred:$p),
+                   4, IIC_iCMOVi,
+                   [(set rGPR:$Rd, (ARMcmov rGPR:$false, imm0_65535:$imm,
+                                            cmovpred:$p))]>,
+      RegConstraint<"$false = $Rd">, Sched<[WriteALU]>;
 
 let isMoveImm = 1 in
-def t2MOVCCi32imm : PseudoInst<(outs rGPR:$dst),
-                               (ins rGPR:$false, i32imm:$src, pred:$p),
-                    IIC_iCMOVix2, []>, RegConstraint<"$false = $dst">;
+def t2MVNCCi
+    : t2PseudoInst<(outs rGPR:$Rd),
+                   (ins rGPR:$false, t2_so_imm:$imm, cmovpred:$p),
+                   4, IIC_iCMOVi,
+                   [(set rGPR:$Rd,
+                         (ARMcmov rGPR:$false, t2_so_imm_not:$imm,
+                                  cmovpred:$p))]>,
+      RegConstraint<"$false = $Rd">, Sched<[WriteALU]>;
+
+class MOVCCShPseudo<SDPatternOperator opnode, Operand ty>
+    : t2PseudoInst<(outs rGPR:$Rd),
+                   (ins rGPR:$false, rGPR:$Rm, i32imm:$imm, cmovpred:$p),
+                   4, IIC_iCMOVsi,
+                   [(set rGPR:$Rd, (ARMcmov rGPR:$false,
+                                            (opnode rGPR:$Rm, (i32 ty:$imm)),
+                                            cmovpred:$p))]>,
+      RegConstraint<"$false = $Rd">, Sched<[WriteALU]>;
+
+def t2MOVCClsl : MOVCCShPseudo<shl,  imm0_31>;
+def t2MOVCClsr : MOVCCShPseudo<srl,  imm_sr>;
+def t2MOVCCasr : MOVCCShPseudo<sra,  imm_sr>;
+def t2MOVCCror : MOVCCShPseudo<rotr, imm0_31>;
 
 let isMoveImm = 1 in
-def t2MVNCCi : T2OneRegImm<(outs rGPR:$Rd), (ins rGPR:$false, t2_so_imm:$imm),
-                   IIC_iCMOVi, "mvn", "\t$Rd, $imm",
-[/*(set rGPR:$Rd,(ARMcmov rGPR:$false,t2_so_imm_not:$imm,
-                   imm:$cc, CCR:$ccr))*/]>,
-                   RegConstraint<"$false = $Rd">, Sched<[WriteALU]> {
-  let Inst{31-27} = 0b11110;
-  let Inst{25} = 0;
-  let Inst{24-21} = 0b0011;
-  let Inst{20} = 0; // The S bit.
-  let Inst{19-16} = 0b1111; // Rn
-  let Inst{15} = 0;
-}
-
-class T2I_movcc_sh<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
-                   string opc, string asm, list<dag> pattern>
-  : T2TwoRegShiftImm<oops, iops, itin, opc, asm, pattern>, Sched<[WriteALU]> {
-  let Inst{31-27} = 0b11101;
-  let Inst{26-25} = 0b01;
-  let Inst{24-21} = 0b0010;
-  let Inst{20} = 0; // The S bit.
-  let Inst{19-16} = 0b1111; // Rn
-  let Inst{5-4} = opcod; // Shift type.
-}
-def t2MOVCClsl : T2I_movcc_sh<0b00, (outs rGPR:$Rd),
-                             (ins rGPR:$false, rGPR:$Rm, i32imm:$imm),
-                             IIC_iCMOVsi, "lsl", ".w\t$Rd, $Rm, $imm", []>,
-                 RegConstraint<"$false = $Rd">;
-def t2MOVCClsr : T2I_movcc_sh<0b01, (outs rGPR:$Rd),
-                             (ins rGPR:$false, rGPR:$Rm, i32imm:$imm),
-                             IIC_iCMOVsi, "lsr", ".w\t$Rd, $Rm, $imm", []>,
-                 RegConstraint<"$false = $Rd">;
-def t2MOVCCasr : T2I_movcc_sh<0b10, (outs rGPR:$Rd),
-                             (ins rGPR:$false, rGPR:$Rm, i32imm:$imm),
-                             IIC_iCMOVsi, "asr", ".w\t$Rd, $Rm, $imm", []>,
-                 RegConstraint<"$false = $Rd">;
-def t2MOVCCror : T2I_movcc_sh<0b11, (outs rGPR:$Rd),
-                             (ins rGPR:$false, rGPR:$Rm, i32imm:$imm),
-                             IIC_iCMOVsi, "ror", ".w\t$Rd, $Rm, $imm", []>,
-                 RegConstraint<"$false = $Rd">;
+def t2MOVCCi32imm
+    : t2PseudoInst<(outs rGPR:$dst),
+                   (ins rGPR:$false, i32imm:$src, cmovpred:$p),
+                   8, IIC_iCMOVix2,
+                   [(set rGPR:$dst, (ARMcmov rGPR:$false, imm:$src,
+                                             cmovpred:$p))]>,
+      RegConstraint<"$false = $dst">;
 } // isCodeGenOnly = 1
 
 } // neverHasSideEffects
@@ -4087,7 +4064,8 @@ def : t2InstAlias<"sbc${s}${p} $Rd, $Rn, $ShiftedRm",
 
 // Aliases for ADD without the ".w" optional width specifier.
 def : t2InstAlias<"add${s}${p} $Rd, $Rn, $imm",
-        (t2ADDri rGPR:$Rd, GPRnopc:$Rn, t2_so_imm:$imm, pred:$p, cc_out:$s)>;
+        (t2ADDri GPRnopc:$Rd, GPRnopc:$Rn, t2_so_imm:$imm, pred:$p, 
+         cc_out:$s)>;
 def : t2InstAlias<"add${p} $Rd, $Rn, $imm",
            (t2ADDri12 GPRnopc:$Rd, GPR:$Rn, imm0_4095:$imm, pred:$p)>;
 def : t2InstAlias<"add${s}${p} $Rd, $Rn, $Rm",
@@ -4191,7 +4169,7 @@ def : t2InstAlias<"ldrsh${p} $Rt, $addr",
                   (t2LDRSHs rGPR:$Rt, t2addrmode_so_reg:$addr, pred:$p)>;
 
 def : t2InstAlias<"ldr${p} $Rt, $addr",
-                  (t2LDRpci GPR:$Rt, t2ldrlabel:$addr, pred:$p)>;
+                  (t2LDRpci rGPR:$Rt, t2ldrlabel:$addr, pred:$p)>;
 def : t2InstAlias<"ldrb${p} $Rt, $addr",
                   (t2LDRBpci rGPR:$Rt, t2ldrlabel:$addr, pred:$p)>;
 def : t2InstAlias<"ldrh${p} $Rt, $addr",
@@ -4353,16 +4331,16 @@ def : t2InstAlias<"mvn${p} $Rd, $imm",
                   (t2MOVi rGPR:$Rd, t2_so_imm_not:$imm, pred:$p, zero_reg)>;
 // Same for AND <--> BIC
 def : t2InstAlias<"bic${s}${p} $Rd, $Rn, $imm",
-                  (t2ANDri rGPR:$Rd, rGPR:$Rn, so_imm_not:$imm,
+                  (t2ANDri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
 def : t2InstAlias<"bic${s}${p} $Rdn, $imm",
-                  (t2ANDri rGPR:$Rdn, rGPR:$Rdn, so_imm_not:$imm,
+                  (t2ANDri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
 def : t2InstAlias<"and${s}${p} $Rd, $Rn, $imm",
-                  (t2BICri rGPR:$Rd, rGPR:$Rn, so_imm_not:$imm,
+                  (t2BICri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
 def : t2InstAlias<"and${s}${p} $Rdn, $imm",
-                  (t2BICri rGPR:$Rdn, rGPR:$Rdn, so_imm_not:$imm,
+                  (t2BICri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
 // Likewise, "add Rd, t2_so_imm_neg" -> sub
 def : t2InstAlias<"add${s}${p} $Rd, $Rn, $imm",
@@ -4404,7 +4382,7 @@ def : t2InstAlias<"adr${p} $Rd, $addr",
 
 // LDR(literal) w/ alternate [pc, #imm] syntax.
 def t2LDRpcrel   : t2AsmPseudo<"ldr${p} $Rt, $addr",
-                         (ins GPRnopc:$Rt, t2ldr_pcrel_imm12:$addr, pred:$p)>;
+                         (ins GPR:$Rt, t2ldr_pcrel_imm12:$addr, pred:$p)>;
 def t2LDRBpcrel  : t2AsmPseudo<"ldrb${p} $Rt, $addr",
                          (ins GPRnopc:$Rt, t2ldr_pcrel_imm12:$addr, pred:$p)>;
 def t2LDRHpcrel  : t2AsmPseudo<"ldrh${p} $Rt, $addr",
@@ -4415,7 +4393,7 @@ def t2LDRSHpcrel  : t2AsmPseudo<"ldrsh${p} $Rt, $addr",
                          (ins GPRnopc:$Rt, t2ldr_pcrel_imm12:$addr, pred:$p)>;
     // Version w/ the .w suffix.
 def : t2InstAlias<"ldr${p}.w $Rt, $addr",
-                  (t2LDRpcrel GPRnopc:$Rt, t2ldr_pcrel_imm12:$addr, pred:$p), 0>;
+                  (t2LDRpcrel GPR:$Rt, t2ldr_pcrel_imm12:$addr, pred:$p), 0>;
 def : t2InstAlias<"ldrb${p}.w $Rt, $addr",
                   (t2LDRBpcrel GPRnopc:$Rt, t2ldr_pcrel_imm12:$addr, pred:$p)>;
 def : t2InstAlias<"ldrh${p}.w $Rt, $addr",

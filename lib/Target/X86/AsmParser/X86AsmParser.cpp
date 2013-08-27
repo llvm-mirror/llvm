@@ -814,6 +814,9 @@ struct X86Operand : public MCParsedAsmOperand {
   bool isMem256() const {
     return Kind == Memory && (!Mem.Size || Mem.Size == 256);
   }
+  bool isMem512() const {
+    return Kind == Memory && (!Mem.Size || Mem.Size == 512);
+  }
 
   bool isMemVX32() const {
     return Kind == Memory && (!Mem.Size || Mem.Size == 32) &&
@@ -840,13 +843,26 @@ struct X86Operand : public MCParsedAsmOperand {
       getMemIndexReg() >= X86::ZMM0 && getMemIndexReg() <= X86::ZMM31;
   }
 
-  bool isMem512() const {
-    return Kind == Memory && (!Mem.Size || Mem.Size == 512);
-  }
-
   bool isAbsMem() const {
     return Kind == Memory && !getMemSegReg() && !getMemBaseReg() &&
       !getMemIndexReg() && getMemScale() == 1;
+  }
+
+  bool isMemOffs8() const {
+    return Kind == Memory && !getMemSegReg() && !getMemBaseReg() &&
+      !getMemIndexReg() && getMemScale() == 1 && (!Mem.Size || Mem.Size == 8);
+  }
+  bool isMemOffs16() const {
+    return Kind == Memory && !getMemSegReg() && !getMemBaseReg() &&
+      !getMemIndexReg() && getMemScale() == 1 && (!Mem.Size || Mem.Size == 16);
+  }
+  bool isMemOffs32() const {
+    return Kind == Memory && !getMemSegReg() && !getMemBaseReg() &&
+      !getMemIndexReg() && getMemScale() == 1 && (!Mem.Size || Mem.Size == 32);
+  }
+  bool isMemOffs64() const {
+    return Kind == Memory && !getMemSegReg() && !getMemBaseReg() &&
+      !getMemIndexReg() && getMemScale() == 1 && (!Mem.Size || Mem.Size == 64);
   }
 
   bool isReg() const { return Kind == Register; }
@@ -869,50 +885,6 @@ struct X86Operand : public MCParsedAsmOperand {
     addExpr(Inst, getImm());
   }
 
-  void addMem8Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMem16Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMem32Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMem64Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMem80Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMem128Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMem256Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMemVX32Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMemVY32Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMemVX64Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMemVY64Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-
-  void addMemVZ32Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMemVZ64Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-  void addMem512Operands(MCInst &Inst, unsigned N) const {
-    addMemOperands(Inst, N);
-  }
-
   void addMemOperands(MCInst &Inst, unsigned N) const {
     assert((N == 5) && "Invalid number of operands!");
     Inst.addOperand(MCOperand::CreateReg(getMemBaseReg()));
@@ -923,6 +895,15 @@ struct X86Operand : public MCParsedAsmOperand {
   }
 
   void addAbsMemOperands(MCInst &Inst, unsigned N) const {
+    assert((N == 1) && "Invalid number of operands!");
+    // Add as immediates when possible.
+    if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getMemDisp()))
+      Inst.addOperand(MCOperand::CreateImm(CE->getValue()));
+    else
+      Inst.addOperand(MCOperand::CreateExpr(getMemDisp()));
+  }
+
+  void addMemOffsOperands(MCInst &Inst, unsigned N) const {
     assert((N == 1) && "Invalid number of operands!");
     // Add as immediates when possible.
     if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getMemDisp()))

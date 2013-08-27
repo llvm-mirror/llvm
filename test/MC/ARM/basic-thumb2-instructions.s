@@ -80,6 +80,7 @@ _func:
         adds r2, r2, #56
         adds r2, #56
         add r1, r7, #0xcbcbcbcb
+        add sp, sp, #0x1fe0000
 
         adds.w r2, #-16
         adds.w r2, r2, #-16
@@ -103,6 +104,7 @@ _func:
 @ CHECK: adds	r2, #56                 @ encoding: [0x38,0x32]
 @ CHECK: adds	r2, #56                 @ encoding: [0x38,0x32]
 @ CHECK: add.w  r1, r7, #3419130827     @ encoding: [0x07,0xf1,0xcb,0x31]
+@ CHECK: add.w	sp, sp, #33423360       @ encoding: [0x0d,0xf1,0xff,0x7d]
 
 @ CHECK: subs.w	r2, r2, #16             @ encoding: [0xb2,0xf1,0x10,0x02]
 @ CHECK: subs.w	r2, r2, #16             @ encoding: [0xb2,0xf1,0x10,0x02]
@@ -152,12 +154,15 @@ _func:
         ands r3, r12, #0xf
         and r1, #0xff
         and r1, r1, #0xff
+        and r5, r4, #0xffffffff
+        ands r1, r9, #0xffffffff
 
 @ CHECK: and	r2, r5, #1044480        @ encoding: [0x05,0xf4,0x7f,0x22]
 @ CHECK: ands	r3, r12, #15            @ encoding: [0x1c,0xf0,0x0f,0x03]
 @ CHECK: and	r1, r1, #255            @ encoding: [0x01,0xf0,0xff,0x01]
 @ CHECK: and	r1, r1, #255            @ encoding: [0x01,0xf0,0xff,0x01]
-
+@ CHECK: and	r5, r4, #4294967295     @ encoding: [0x04,0xf0,0xff,0x35]
+@ CHECK: ands	r1, r9, #4294967295     @ encoding: [0x19,0xf0,0xff,0x31]
 
 @------------------------------------------------------------------------------
 @ AND (register)
@@ -259,6 +264,8 @@ _func:
 @ BIC
 @------------------------------------------------------------------------------
         bic r10, r1, #0xf
+        bic r5, r2, #0xffffffff
+        bics r11, r10, #0xffffffff
         bic r12, r3, r6
         bic r11, r2, r6, lsl #12
         bic r8, r4, r1, lsr #11
@@ -276,6 +283,8 @@ _func:
         bic r12, r6, ror #29
 
 @ CHECK: bic	r10, r1, #15            @ encoding: [0x21,0xf0,0x0f,0x0a]
+@ CHECK: bic	r5, r2, #4294967295     @ encoding: [0x22,0xf0,0xff,0x35]
+@ CHECK: bics	r11, r10, #4294967295   @ encoding: [0x3a,0xf0,0xff,0x3b]
 @ CHECK: bic.w	r12, r3, r6             @ encoding: [0x23,0xea,0x06,0x0c]
 @ CHECK: bic.w	r11, r2, r6, lsl #12    @ encoding: [0x22,0xea,0x06,0x3b]
 @ CHECK: bic.w	r8, r4, r1, lsr #11     @ encoding: [0x24,0xea,0xd1,0x28]
@@ -797,23 +806,43 @@ _func:
 @ CHECK: ldr.w	lr, _strcmp-4           @ encoding: [0x5f'A',0xf8'A',A,0xe0'A']
 @ CHECK: @   fixup A - offset: 0, value: _strcmp-4, kind: fixup_t2_ldst_pcrel_12
 
+        ldr r7, [pc, #8]
+        ldr.n r7, [pc, #8]
+        ldr.w r7, [pc, #8]
         ldr r4, [pc, #1020]
         ldr r3, [pc, #-1020]
         ldr r6, [pc, #1024]
         ldr r0, [pc, #-1024]
         ldr r2, [pc, #4095]
         ldr r1, [pc, #-4095]
-        ldr.n r8, [pc, #132]
-        ldr.w r8, [pc, #132]
+        ldr r8, [pc, #132]
+        ldr pc, [pc, #256]
+        ldr pc, [pc, #-400]
 
+@ CHECK: ldr	r7, [pc, #8]            @ encoding: [0x02,0x4f]
+@ CHECK: ldr	r7, [pc, #8]            @ encoding: [0x02,0x4f]
+@ CHECK: ldr.w	r7, [pc, #8]            @ encoding: [0xdf,0xf8,0x08,0x70]
 @ CHECK: ldr	r4, [pc, #1020]       @ encoding: [0xff,0x4c]
-@ CHECK: ldr	r3, [pc, #-1020]      @ encoding: [0x01,0x4b]
+@ CHECK: ldr.w	r3, [pc, #-1020]        @ encoding: [0x5f,0xf8,0xfc,0x33]
 @ CHECK: ldr.w	r6, [pc, #1024]       @ encoding: [0xdf,0xf8,0x00,0x64]
 @ CHECK: ldr.w	r0, [pc, #-1024]      @ encoding: [0x5f,0xf8,0x00,0x04]
 @ CHECK: ldr.w	r2, [pc, #4095]       @ encoding: [0xdf,0xf8,0xff,0x2f]
 @ CHECK: ldr.w	r1, [pc, #-4095]      @ encoding: [0x5f,0xf8,0xff,0x1f]
-@ CHECK: ldr	r8, [pc, #132]        @ encoding: [0x21,0x48]
 @ CHECK: ldr.w	r8, [pc, #132]        @ encoding: [0xdf,0xf8,0x84,0x80]
+@ CHECK: ldr.w	pc, [pc, #256]          @ encoding: [0xdf,0xf8,0x00,0xf1]
+@ CHECK: ldr.w	pc, [pc, #-400]         @ encoding: [0x5f,0xf8,0x90,0xf1]
+
+        ldrb  r9, [pc, #-0]
+        ldrsb r11, [pc, #-0]
+        ldrh  r10, [pc, #-0]
+        ldrsh r1, [pc, #-0]
+        ldr   r5, [pc, #-0]
+
+@ CHECK: ldrb.w	r9, [pc, #-0]           @ encoding: [0x1f,0xf8,0x00,0x90]
+@ CHECK: ldrsb.w	r11, [pc, #-0]        @ encoding: [0x1f,0xf9,0x00,0xb0]
+@ CHECK: ldrh.w	r10, [pc, #-0]          @ encoding: [0x3f,0xf8,0x00,0xa0]
+@ CHECK: ldrsh.w	r1, [pc, #-0]         @ encoding: [0x3f,0xf9,0x00,0x10]
+@ CHECK: ldr.w	r5, [pc, #-0]           @ encoding: [0x5f,0xf8,0x00,0x50]
 
 @------------------------------------------------------------------------------
 @ LDR(register)
@@ -1294,8 +1323,15 @@ _func:
         movlo r1, #-1
 
         @ alias for mvn
-	mov r3, #-3
+        mov r3, #-3
+        mov r11, #0xabcd
+        movs r0, #1
+        it ne
+        movne r3, #15
 
+        itt eq
+        moveq r0, #255
+        moveq r1, #256
 
 @ CHECK: movs	r1, #21                 @ encoding: [0x15,0x21]
 @ CHECK: movs.w	r1, #21                 @ encoding: [0x5f,0xf0,0x15,0x01]
@@ -1314,6 +1350,14 @@ _func:
 @ CHECK: it	lo                      @ encoding: [0x38,0xbf]
 @ CHECK: movlo.w	r1, #-1         @ encoding: [0x4f,0xf0,0xff,0x31]
 @ CHECK: mvn	r3, #2                  @ encoding: [0x6f,0xf0,0x02,0x03]
+@ CHECK: movw	r11, #43981             @ encoding: [0x4a,0xf6,0xcd,0x3b]
+@ CHECK: movs	r0, #1                  @ encoding: [0x01,0x20]
+@ CHECK: it	ne                      @ encoding: [0x18,0xbf]
+@ CHECK: movne	r3, #15                 @ encoding: [0x0f,0x23]
+
+@ CHECK: itt    eq                      @ encoding: [0x04,0xbf]
+@ CHECK: moveq  r0, #255                @ encoding: [0xff,0x20]
+@ CHECK: movweq r1, #256                @ encoding: [0x40,0xf2,0x00,0x11]
 
 @------------------------------------------------------------------------------
 @ MOV(shifted register)

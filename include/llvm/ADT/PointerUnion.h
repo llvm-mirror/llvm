@@ -72,7 +72,7 @@ namespace llvm {
   ///    printf("%d %d", P.is<int*>(), P.is<float*>());  // prints "1 0"
   ///    X = P.get<int*>();     // ok.
   ///    Y = P.get<float*>();   // runtime assertion failure.
-  ///    Z = P.get<double*>();  // runtime assertion failure (regardless of tag)
+  ///    Z = P.get<double*>();  // compile time failure.
   ///    P = (float*)0;
   ///    Y = P.get<float*>();   // ok.
   ///    X = P.get<int*>();     // runtime assertion failure.
@@ -177,10 +177,17 @@ namespace llvm {
   };
 
   template<typename PT1, typename PT2>
-  bool operator==(PointerUnion<PT1, PT2> lhs, PointerUnion<PT1, PT2> rhs) {
+  static bool operator==(PointerUnion<PT1, PT2> lhs,
+                         PointerUnion<PT1, PT2> rhs) {
     return lhs.getOpaqueValue() == rhs.getOpaqueValue();
   }
-  
+
+  template<typename PT1, typename PT2>
+  static bool operator!=(PointerUnion<PT1, PT2> lhs,
+                         PointerUnion<PT1, PT2> rhs) {
+    return lhs.getOpaqueValue() != rhs.getOpaqueValue();
+  }
+
   // Teach SmallPtrSet that PointerUnion is "basically a pointer", that has
   // # low bits available = min(PT1bits,PT2bits)-1.
   template<typename PT1, typename PT2>

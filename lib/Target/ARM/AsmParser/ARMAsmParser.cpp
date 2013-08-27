@@ -647,7 +647,7 @@ public:
       Val = Memory.OffsetImm->getValue();
     }
     else return false;
-    return ((Val % 4) == 0) && (Val >= -1020) && (Val <= 1020);
+    return ((Val % 4) == 0) && (Val >= 0) && (Val <= 1020);
   }
   bool isFPImm() const {
     if (!isImm()) return false;
@@ -867,6 +867,15 @@ public:
     int64_t Value = CE->getValue();
     return Value >= 0 && Value < 65536;
   }
+  bool isImm256_65535Expr() const {
+    if (!isImm()) return false;
+    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
+    // If it's not a constant expression, it'll generate a fixup and be
+    // handled later.
+    if (!CE) return true;
+    int64_t Value = CE->getValue();
+    return Value >= 256 && Value < 65536;
+  }
   bool isImm0_65535Expr() const {
     if (!isImm()) return false;
     const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
@@ -946,7 +955,8 @@ public:
     const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
     if (!CE) return false;
     int64_t Value = CE->getValue();
-    return ARM_AM::getT2SOImmVal(~Value) != -1;
+    return ARM_AM::getT2SOImmVal(Value) == -1 &&
+      ARM_AM::getT2SOImmVal(~Value) != -1;
   }
   bool isT2SOImmNeg() const {
     if (!isImm()) return false;
@@ -1792,8 +1802,6 @@ public:
   void addMemPCRelImm12Operands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     int32_t Imm = Memory.OffsetImm->getValue();
-    // FIXME: Handle #-0
-    if (Imm == INT32_MIN) Imm = 0;
     Inst.addOperand(MCOperand::CreateImm(Imm));
   }
 

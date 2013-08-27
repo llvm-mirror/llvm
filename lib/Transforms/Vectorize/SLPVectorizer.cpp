@@ -75,8 +75,8 @@ private:
   DebugLoc DbgLoc;
 };
 
-/// A helper class for numbering instructions in multible blocks.
-/// Numbers starts at zero for each basic block.
+/// A helper class for numbering instructions in multiple blocks.
+/// Numbers start at zero for each basic block.
 struct BlockNumbering {
 
   BlockNumbering(BasicBlock *Bb) : BB(Bb), Valid(false) {}
@@ -308,7 +308,7 @@ private:
   /// \returns the index of the last instrucion in the BB from \p VL.
   int getLastIndex(ArrayRef<Value *> VL);
 
-  /// \returns the Instrucion in the bundle \p VL.
+  /// \returns the Instruction in the bundle \p VL.
   Instruction *getLastInstruction(ArrayRef<Value *> VL);
 
   /// \returns a vector from a collection of scalars in \p VL.
@@ -992,63 +992,29 @@ bool BoUpSLP::isConsecutiveAccess(Value *A, Value *B) {
   if (PtrA == PtrB || PtrA->getType() != PtrB->getType())
     return false;
 
-  // Calculate a constant offset from the base pointer without using SCEV
-  // in the supported cases.
-  // TODO: Add support for the case where one of the pointers is a GEP that
-  // uses the other pointer.
-  GetElementPtrInst *GepA = dyn_cast<GetElementPtrInst>(PtrA);
-  GetElementPtrInst *GepB = dyn_cast<GetElementPtrInst>(PtrB);
-
-  unsigned BW = DL->getPointerSizeInBits(ASA);
+  unsigned PtrBitWidth = DL->getPointerSizeInBits(ASA);
   Type *Ty = cast<PointerType>(PtrA->getType())->getElementType();
-  int64_t Sz = DL->getTypeStoreSize(Ty);
+  APInt Size(PtrBitWidth, DL->getTypeStoreSize(Ty));
 
-  // Check if PtrA is the base and PtrB is a constant offset.
-  if (GepB && GepB->getPointerOperand() == PtrA) {
-    APInt Offset(BW, 0);
-    if (GepB->accumulateConstantOffset(*DL, Offset))
-      return Offset.getSExtValue() == Sz;
-    return false;
-  }
+  APInt OffsetA(PtrBitWidth, 0), OffsetB(PtrBitWidth, 0);
+  PtrA = PtrA->stripAndAccumulateInBoundsConstantOffsets(*DL, OffsetA);
+  PtrB = PtrB->stripAndAccumulateInBoundsConstantOffsets(*DL, OffsetB);
 
-  // Check if PtrB is the base and PtrA is a constant offset.
-  if (GepA && GepA->getPointerOperand() == PtrB) {
-    APInt Offset(BW, 0);
-    if (GepA->accumulateConstantOffset(*DL, Offset))
-      return Offset.getSExtValue() == -Sz;
-    return false;
-  }
+  APInt OffsetDelta = OffsetB - OffsetA;
 
-  // If both pointers are GEPs:
-  if (GepA && GepB) {
-    // Check that they have the same base pointer and number of indices.
-    if (GepA->getPointerOperand() != GepB->getPointerOperand() ||
-        GepA->getNumIndices() != GepB->getNumIndices())
-      return false;
+  // Check if they are based on the same pointer. That makes the offsets
+  // sufficient.
+  if (PtrA == PtrB)
+    return OffsetDelta == Size;
 
-    // Try to strip the geps. This makes SCEV faster.
-    // Make sure that all of the indices except for the last are identical.
-    int LastIdx = GepA->getNumIndices();
-    for (int i = 0; i < LastIdx - 1; i++) {
-      if (GepA->getOperand(i+1) != GepB->getOperand(i+1))
-          return false;
-    }
+  // Compute the necessary base pointer delta to have the necessary final delta
+  // equal to the size.
+  APInt BaseDelta = Size - OffsetDelta;
 
-    PtrA = GepA->getOperand(LastIdx);
-    PtrB = GepB->getOperand(LastIdx);
-    Sz = 1;
-  }
-
-  ConstantInt *CA = dyn_cast<ConstantInt>(PtrA);
-  ConstantInt *CB = dyn_cast<ConstantInt>(PtrB);
-  if (CA && CB) {
-    return (CA->getSExtValue() + Sz == CB->getSExtValue());
-  }
-
-  // Calculate the distance.
+  // Otherwise compute the distance with SCEV between the base pointers.
   const SCEV *PtrSCEVA = SE->getSCEV(PtrA);
   const SCEV *PtrSCEVB = SE->getSCEV(PtrB);
-  const SCEV *C = SE->getConstant(PtrSCEVA->getType(), Sz);
+  const SCEV *C = SE->getConstant(BaseDelta);
   const SCEV *X = SE->getAddExpr(PtrSCEVA, C);
   return X == PtrSCEVB;
 }
@@ -1195,12 +1161,10 @@ Value *BoUpSLP::vectorizeTree(TreeEntry *E) {
         ValueList Operands;
         BasicBlock *IBB = PH->getIncomingBlock(i);
 
-        if (VisitedBBs.count(IBB)) {
+        if (!VisitedBBs.insert(IBB)) {
           NewPhi->addIncoming(NewPhi->getIncomingValueForBlock(IBB), IBB);
           continue;
         }
-
-        VisitedBBs.insert(IBB);
 
         // Prepare the operand vector.
         for (unsigned j = 0; j < E->Scalars.size(); ++j)
@@ -1592,8 +1556,7 @@ struct SLPVectorizer : public FunctionPass {
       return false;
 
     // Don't vectorize when the attribute NoImplicitFloat is used.
-    if (F.getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                       Attribute::NoImplicitFloat))
+    if (F.hasFnAttribute(Attribute::NoImplicitFloat))
       return false;
 
     DEBUG(dbgs() << "SLP: Analyzing blocks in " << F.getName() << ".\n");
@@ -1875,6 +1838,8 @@ bool SLPVectorizer::tryToVectorize(BinaryOperator *V, BoUpSLP &R) {
 bool SLPVectorizer::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
   bool Changed = false;
   SmallVector<Value *, 4> Incoming;
+  SmallSet<Instruction *, 16> VisitedInstrs;
+
   // Collect the incoming values from the PHIs.
   for (BasicBlock::iterator instr = BB->begin(), ie = BB->end(); instr != ie;
        ++instr) {
@@ -1883,9 +1848,20 @@ bool SLPVectorizer::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
     if (!P)
       break;
 
+    // We may go through BB multiple times so skip the one we have checked.
+    if (!VisitedInstrs.insert(instr))
+      continue;
+
     // Stop constructing the list when you reach a different type.
     if (Incoming.size() && P->getType() != Incoming[0]->getType()) {
-      Changed |= tryToVectorizeList(Incoming, R);
+      if (tryToVectorizeList(Incoming, R)) {
+        // We would like to start over since some instructions are deleted
+        // and the iterator may become invalid value.
+        Changed = true;
+        instr = BB->begin();
+        ie = BB->end();
+      }
+
       Incoming.clear();
     }
 
@@ -1895,7 +1871,14 @@ bool SLPVectorizer::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
   if (Incoming.size() > 1)
     Changed |= tryToVectorizeList(Incoming, R);
 
-  for (BasicBlock::iterator it = BB->begin(), e = BB->end(); it != e; ++it) {
+  VisitedInstrs.clear();
+
+  for (BasicBlock::iterator it = BB->begin(), e = BB->end(); it != e; it++) {
+
+    // We may go through BB multiple times so skip the one we have checked.
+    if (!VisitedInstrs.insert(it))
+      continue;
+
     if (isa<DbgInfoIntrinsic>(it))
       continue;
 
@@ -1917,20 +1900,38 @@ bool SLPVectorizer::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
       if (Inst == P)
         Inst = BI->getOperand(1);
 
-      Changed |= tryToVectorize(dyn_cast<BinaryOperator>(Inst), R);
+      if (tryToVectorize(dyn_cast<BinaryOperator>(Inst), R)) {
+        // We would like to start over since some instructions are deleted
+        // and the iterator may become invalid value.
+        Changed = true;
+        it = BB->begin();
+        e = BB->end();
+      }
       continue;
     }
 
     // Try to vectorize trees that start at compare instructions.
     if (CmpInst *CI = dyn_cast<CmpInst>(it)) {
       if (tryToVectorizePair(CI->getOperand(0), CI->getOperand(1), R)) {
-        Changed |= true;
+        Changed = true;
+        // We would like to start over since some instructions are deleted
+        // and the iterator may become invalid value.
+        it = BB->begin();
+        e = BB->end();
         continue;
       }
-      for (int i = 0; i < 2; ++i)
-        if (BinaryOperator *BI = dyn_cast<BinaryOperator>(CI->getOperand(i)))
-          Changed |=
-              tryToVectorizePair(BI->getOperand(0), BI->getOperand(1), R);
+
+      for (int i = 0; i < 2; ++i) {
+         if (BinaryOperator *BI = dyn_cast<BinaryOperator>(CI->getOperand(i))) {
+            if (tryToVectorizePair(BI->getOperand(0), BI->getOperand(1), R)) {
+              Changed = true;
+              // We would like to start over since some instructions are deleted
+              // and the iterator may become invalid value.
+              it = BB->begin();
+              e = BB->end();
+            }
+         }
+      }
       continue;
     }
   }

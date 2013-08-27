@@ -84,6 +84,26 @@ StringRef RuntimeDyldMachO::getEHFrameSection() {
   return StringRef((char*)EHFrame->Address, EHFrame->Size);
 }
 
+// The target location for the relocation is described by RE.SectionID and
+// RE.Offset.  RE.SectionID can be used to find the SectionEntry.  Each
+// SectionEntry has three members describing its location.
+// SectionEntry::Address is the address at which the section has been loaded
+// into memory in the current (host) process.  SectionEntry::LoadAddress is the
+// address that the section will have in the target process.
+// SectionEntry::ObjAddress is the address of the bits for this section in the
+// original emitted object image (also in the current address space).
+//
+// Relocations will be applied as if the section were loaded at
+// SectionEntry::LoadAddress, but they will be applied at an address based
+// on SectionEntry::Address.  SectionEntry::ObjAddress will be used to refer to
+// Target memory contents if they are required for value calculations.
+//
+// The Value parameter here is the load address of the symbol for the
+// relocation to be applied.  For relocations which refer to symbols in the
+// current object Value will be the LoadAddress of the section in which
+// the symbol resides (RE.Addend provides additional information about the
+// symbol location).  For external symbols, Value will be the address of the
+// symbol in the target address space.
 void RuntimeDyldMachO::resolveRelocation(const RelocationEntry &RE,
                                          uint64_t Value) {
   const SectionEntry &Section = Sections[RE.SectionID];
@@ -339,7 +359,8 @@ void RuntimeDyldMachO::processRelocationRef(unsigned SectionID,
     Value.Addend = Addend - Addr;
   }
 
-  if (Arch == Triple::x86_64 && RelType == macho::RIT_X86_64_GOT) {
+  if (Arch == Triple::x86_64 && (RelType == macho::RIT_X86_64_GOT ||
+                                 RelType == macho::RIT_X86_64_GOTLoad)) {
     assert(IsPCRel);
     assert(Size == 2);
     StubMap::const_iterator i = Stubs.find(Value);
@@ -350,8 +371,7 @@ void RuntimeDyldMachO::processRelocationRef(unsigned SectionID,
       Stubs[Value] = Section.StubOffset;
       uint8_t *GOTEntry = Section.Address + Section.StubOffset;
       RelocationEntry RE(SectionID, Section.StubOffset,
-                         macho::RIT_X86_64_Unsigned, Value.Addend - 4, false,
-                         3);
+                         macho::RIT_X86_64_Unsigned, 0, false, 3);
       if (Value.SymbolName)
         addRelocationForSymbol(RE, Value.SymbolName);
       else
@@ -360,7 +380,7 @@ void RuntimeDyldMachO::processRelocationRef(unsigned SectionID,
       Addr = GOTEntry;
     }
     resolveRelocation(Section, Offset, (uint64_t)Addr,
-                      macho::RIT_X86_64_Unsigned, 4, true, 2);
+                      macho::RIT_X86_64_Unsigned, Value.Addend, true, 2);
   } else if (Arch == Triple::arm &&
              (RelType & 0xf) == macho::RIT_ARM_Branch24Bit) {
     // This is an ARM branch relocation, need to use a stub function.

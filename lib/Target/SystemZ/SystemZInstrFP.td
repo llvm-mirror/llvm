@@ -212,20 +212,55 @@ def SQEB : UnaryRXE<"sqeb", 0xED14, loadu<fsqrt>, FP32, 4>;
 def SQDB : UnaryRXE<"sqdb", 0xED15, loadu<fsqrt>, FP64, 8>;
 
 // Round to an integer, with the second operand (modifier M3) specifying
-// the rounding mode.
-//
-// These forms always check for inexact conditions.  z196 added versions
-// that allow this to suppressed (as for fnearbyint), but we don't yet
-// support -march=z196.
+// the rounding mode.  These forms always check for inexact conditions.
 def FIEBR : UnaryRRF<"fieb", 0xB357, FP32,  FP32>;
 def FIDBR : UnaryRRF<"fidb", 0xB35F, FP64,  FP64>;
 def FIXBR : UnaryRRF<"fixb", 0xB347, FP128, FP128>;
+
+// Extended forms of the previous three instructions.  M4 can be set to 4
+// to suppress detection of inexact conditions.
+def FIEBRA : UnaryRRF4<"fiebra", 0xB357, FP32,  FP32>,
+             Requires<[FeatureFPExtension]>;
+def FIDBRA : UnaryRRF4<"fidbra", 0xB35F, FP64,  FP64>,
+             Requires<[FeatureFPExtension]>;
+def FIXBRA : UnaryRRF4<"fixbra", 0xB347, FP128, FP128>,
+             Requires<[FeatureFPExtension]>;
 
 // frint rounds according to the current mode (modifier 0) and detects
 // inexact conditions.
 def : Pat<(frint FP32:$src),  (FIEBR 0, FP32:$src)>;
 def : Pat<(frint FP64:$src),  (FIDBR 0, FP64:$src)>;
 def : Pat<(frint FP128:$src), (FIXBR 0, FP128:$src)>;
+
+let Predicates = [FeatureFPExtension] in {
+  // fnearbyint is like frint but does not detect inexact conditions.
+  def : Pat<(fnearbyint FP32:$src),  (FIEBRA 0, FP32:$src,  4)>;
+  def : Pat<(fnearbyint FP64:$src),  (FIDBRA 0, FP64:$src,  4)>;
+  def : Pat<(fnearbyint FP128:$src), (FIXBRA 0, FP128:$src, 4)>;
+
+  // floor is no longer allowed to raise an inexact condition,
+  // so restrict it to the cases where the condition can be suppressed.
+  // Mode 7 is round towards -inf.
+  def : Pat<(ffloor FP32:$src),  (FIEBRA 7, FP32:$src,  4)>;
+  def : Pat<(ffloor FP64:$src),  (FIDBRA 7, FP64:$src,  4)>;
+  def : Pat<(ffloor FP128:$src), (FIXBRA 7, FP128:$src, 4)>;
+
+  // Same idea for ceil, where mode 6 is round towards +inf.
+  def : Pat<(fceil FP32:$src),  (FIEBRA 6, FP32:$src,  4)>;
+  def : Pat<(fceil FP64:$src),  (FIDBRA 6, FP64:$src,  4)>;
+  def : Pat<(fceil FP128:$src), (FIXBRA 6, FP128:$src, 4)>;
+
+  // Same idea for trunc, where mode 5 is round towards zero.
+  def : Pat<(ftrunc FP32:$src),  (FIEBRA 5, FP32:$src,  4)>;
+  def : Pat<(ftrunc FP64:$src),  (FIDBRA 5, FP64:$src,  4)>;
+  def : Pat<(ftrunc FP128:$src), (FIXBRA 5, FP128:$src, 4)>;
+
+  // Same idea for round, where mode 1 is round towards nearest with
+  // ties away from zero.
+  def : Pat<(frnd FP32:$src),  (FIEBRA 1, FP32:$src,  4)>;
+  def : Pat<(frnd FP64:$src),  (FIDBRA 1, FP64:$src,  4)>;
+  def : Pat<(frnd FP128:$src), (FIXBRA 1, FP128:$src, 4)>;
+}
 
 //===----------------------------------------------------------------------===//
 // Binary arithmetic

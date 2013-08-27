@@ -40,8 +40,12 @@ SparcRegisterInfo::SparcRegisterInfo(SparcSubtarget &st)
 
 const uint16_t* SparcRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF)
                                                                          const {
-  static const uint16_t CalleeSavedRegs[] = { 0 };
-  return CalleeSavedRegs;
+  return CSR_SaveList;
+}
+
+const uint32_t*
+SparcRegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
+  return CSR_RegMask;
 }
 
 BitVector SparcRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
@@ -65,6 +69,15 @@ BitVector SparcRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(SP::G0);
   Reserved.set(SP::G6);
   Reserved.set(SP::G7);
+
+  // Unaliased double registers are not available in non-V9 targets.
+  if (!Subtarget.isV9()) {
+    for (unsigned n = 0; n != 16; ++n) {
+      for (MCRegAliasIterator AI(SP::D16 + n, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
+    }
+  }
+
   return Reserved;
 }
 

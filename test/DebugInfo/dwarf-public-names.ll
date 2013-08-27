@@ -1,6 +1,6 @@
 ; REQUIRES: object-emission
 
-; RUN: llc -generate-dwarf-pubnames -filetype=obj -o %t.o < %s
+; RUN: llc -generate-dwarf-pubnames=Enable -filetype=obj -o %t.o < %s
 ; RUN: llvm-dwarfdump -debug-dump=pubnames %t.o | FileCheck %s
 ; ModuleID = 'dwarf-public-names.cpp'
 ;
@@ -37,6 +37,7 @@
 
 ; Skip the output to the header of the pubnames section.
 ; CHECK: debug_pubnames
+; CHECK: Version:               2
 
 ; Check for each name in the output.
 ; CHECK: global_namespace_variable

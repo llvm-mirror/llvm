@@ -95,6 +95,12 @@ static cl::opt<bool> ClArgsABI(
     cl::desc("Use the argument ABI rather than the TLS ABI"),
     cl::Hidden);
 
+static cl::opt<bool> ClDebugNonzeroLabels(
+    "dfsan-debug-nonzero-labels",
+    cl::desc("Insert calls to __dfsan_nonzero_label on observing a parameter, "
+             "load or return with a nonzero label"),
+    cl::Hidden);
+
 namespace {
 
 class DataFlowSanitizer : public ModulePass {
@@ -160,10 +166,12 @@ class DataFlowSanitizer : public ModulePass {
   FunctionType *DFSanUnionLoadFnTy;
   FunctionType *DFSanUnimplementedFnTy;
   FunctionType *DFSanSetLabelFnTy;
+  FunctionType *DFSanNonzeroLabelFnTy;
   Constant *DFSanUnionFn;
   Constant *DFSanUnionLoadFn;
   Constant *DFSanUnimplementedFn;
   Constant *DFSanSetLabelFn;
+  Constant *DFSanNonzeroLabelFn;
   MDNode *ColdCallWeights;
   OwningPtr<SpecialCaseList> ABIList;
   DenseMap<Value *, Function *> UnwrappedFnMap;
@@ -171,11 +179,16 @@ class DataFlowSanitizer : public ModulePass {
 
   Value *getShadowAddress(Value *Addr, Instruction *Pos);
   Value *combineShadows(Value *V1, Value *V2, Instruction *Pos);
-  bool isInstrumented(Function *F);
+  bool isInstrumented(const Function *F);
+  bool isInstrumented(const GlobalAlias *GA);
   FunctionType *getArgsFunctionType(FunctionType *T);
   FunctionType *getCustomFunctionType(FunctionType *T);
   InstrumentedABI getInstrumentedABI();
   WrapperKind getWrapperKind(Function *F);
+  void addGlobalNamePrefix(GlobalValue *GV);
+  Function *buildWrapperFunction(Function *F, StringRef NewFName,
+                                 GlobalValue::LinkageTypes NewFLink,
+                                 FunctionType *NewFT);
 
  public:
   DataFlowSanitizer(StringRef ABIListFile = StringRef(),
@@ -197,6 +210,7 @@ struct DFSanFunction {
   DenseMap<AllocaInst *, AllocaInst *> AllocaShadowMap;
   std::vector<std::pair<PHINode *, PHINode *> > PHIFixups;
   DenseSet<Instruction *> SkipInsts;
+  DenseSet<Value *> NonZeroChecks;
 
   DFSanFunction(DataFlowSanitizer &DFS, Function *F, bool IsNativeABI)
       : DFS(DFS), F(F), IA(DFS.getInstrumentedABI()),
@@ -311,6 +325,8 @@ bool DataFlowSanitizer::doInitialization(Module &M) {
   Type *DFSanSetLabelArgs[3] = { ShadowTy, Type::getInt8PtrTy(*Ctx), IntptrTy };
   DFSanSetLabelFnTy = FunctionType::get(Type::getVoidTy(*Ctx),
                                         DFSanSetLabelArgs, /*isVarArg=*/false);
+  DFSanNonzeroLabelFnTy = FunctionType::get(
+      Type::getVoidTy(*Ctx), ArrayRef<Type *>(), /*isVarArg=*/false);
 
   if (GetArgTLSPtr) {
     Type *ArgTLSTy = ArrayType::get(ShadowTy, 64);
@@ -332,8 +348,12 @@ bool DataFlowSanitizer::doInitialization(Module &M) {
   return true;
 }
 
-bool DataFlowSanitizer::isInstrumented(Function *F) {
+bool DataFlowSanitizer::isInstrumented(const Function *F) {
   return !ABIList->isIn(*F, "uninstrumented");
+}
+
+bool DataFlowSanitizer::isInstrumented(const GlobalAlias *GA) {
+  return !ABIList->isIn(*GA, "uninstrumented");
 }
 
 DataFlowSanitizer::InstrumentedABI DataFlowSanitizer::getInstrumentedABI() {
@@ -349,6 +369,52 @@ DataFlowSanitizer::WrapperKind DataFlowSanitizer::getWrapperKind(Function *F) {
     return WK_Custom;
 
   return WK_Warning;
+}
+
+void DataFlowSanitizer::addGlobalNamePrefix(GlobalValue *GV) {
+  std::string GVName = GV->getName(), Prefix = "dfs$";
+  GV->setName(Prefix + GVName);
+
+  // Try to change the name of the function in module inline asm.  We only do
+  // this for specific asm directives, currently only ".symver", to try to avoid
+  // corrupting asm which happens to contain the symbol name as a substring.
+  // Note that the substitution for .symver assumes that the versioned symbol
+  // also has an instrumented name.
+  std::string Asm = GV->getParent()->getModuleInlineAsm();
+  std::string SearchStr = ".symver " + GVName + ",";
+  size_t Pos = Asm.find(SearchStr);
+  if (Pos != std::string::npos) {
+    Asm.replace(Pos, SearchStr.size(),
+                ".symver " + Prefix + GVName + "," + Prefix);
+    GV->getParent()->setModuleInlineAsm(Asm);
+  }
+}
+
+Function *
+DataFlowSanitizer::buildWrapperFunction(Function *F, StringRef NewFName,
+                                        GlobalValue::LinkageTypes NewFLink,
+                                        FunctionType *NewFT) {
+  FunctionType *FT = F->getFunctionType();
+  Function *NewF = Function::Create(NewFT, NewFLink, NewFName,
+                                    F->getParent());
+  NewF->copyAttributesFrom(F);
+  NewF->removeAttributes(
+      AttributeSet::ReturnIndex,
+      AttributeFuncs::typeIncompatible(NewFT->getReturnType(),
+                                       AttributeSet::ReturnIndex));
+
+  BasicBlock *BB = BasicBlock::Create(*Ctx, "entry", NewF);
+  std::vector<Value *> Args;
+  unsigned n = FT->getNumParams();
+  for (Function::arg_iterator ai = NewF->arg_begin(); n != 0; ++ai, --n)
+    Args.push_back(&*ai);
+  CallInst *CI = CallInst::Create(F, Args, "", BB);
+  if (FT->getReturnType()->isVoidTy())
+    ReturnInst::Create(*Ctx, BB);
+  else
+    ReturnInst::Create(*Ctx, CI, BB);
+
+  return NewF;
 }
 
 bool DataFlowSanitizer::runOnModule(Module &M) {
@@ -389,6 +455,8 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
   if (Function *F = dyn_cast<Function>(DFSanSetLabelFn)) {
     F->addAttribute(1, Attribute::ZExt);
   }
+  DFSanNonzeroLabelFn =
+      Mod->getOrInsertFunction("__dfsan_nonzero_label", DFSanNonzeroLabelFnTy);
 
   std::vector<Function *> FnsToInstrument;
   llvm::SmallPtrSet<Function *, 2> FnsWithNativeABI;
@@ -397,8 +465,35 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
         i != DFSanUnionFn &&
         i != DFSanUnionLoadFn &&
         i != DFSanUnimplementedFn &&
-        i != DFSanSetLabelFn)
+        i != DFSanSetLabelFn &&
+        i != DFSanNonzeroLabelFn)
       FnsToInstrument.push_back(&*i);
+  }
+
+  // Give function aliases prefixes when necessary, and build wrappers where the
+  // instrumentedness is inconsistent.
+  for (Module::alias_iterator i = M.alias_begin(), e = M.alias_end(); i != e;) {
+    GlobalAlias *GA = &*i;
+    ++i;
+    // Don't stop on weak.  We assume people aren't playing games with the
+    // instrumentedness of overridden weak aliases.
+    if (Function *F = dyn_cast<Function>(
+            GA->resolveAliasedGlobal(/*stopOnWeak=*/false))) {
+      bool GAInst = isInstrumented(GA), FInst = isInstrumented(F);
+      if (GAInst && FInst) {
+        addGlobalNamePrefix(GA);
+      } else if (GAInst != FInst) {
+        // Non-instrumented alias of an instrumented function, or vice versa.
+        // Replace the alias with a native-ABI wrapper of the aliasee.  The pass
+        // below will take care of instrumenting it.
+        Function *NewF =
+            buildWrapperFunction(F, "", GA->getLinkage(), F->getFunctionType());
+        GA->replaceAllUsesWith(NewF);
+        NewF->takeName(GA);
+        GA->eraseFromParent();
+        FnsToInstrument.push_back(NewF);
+      }
+    }
   }
 
   AttrBuilder B;
@@ -413,12 +508,13 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
     Function &F = **i;
     FunctionType *FT = F.getFunctionType();
 
-    if (FT->getNumParams() == 0 && !FT->isVarArg() &&
-        FT->getReturnType()->isVoidTy())
-      continue;
+    bool IsZeroArgsVoidRet = (FT->getNumParams() == 0 && !FT->isVarArg() &&
+                              FT->getReturnType()->isVoidTy());
 
     if (isInstrumented(&F)) {
-      if (getInstrumentedABI() == IA_Args) {
+      // Instrumented functions get a 'dfs$' prefix.  This allows us to more
+      // easily identify cases of mismatching ABIs.
+      if (getInstrumentedABI() == IA_Args && !IsZeroArgsVoidRet) {
         FunctionType *NewFT = getArgsFunctionType(FT);
         Function *NewF = Function::Create(NewFT, F.getLinkage(), "", &M);
         NewF->copyAttributesFrom(&F);
@@ -449,41 +545,27 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
         NewF->takeName(&F);
         F.eraseFromParent();
         *i = NewF;
+        addGlobalNamePrefix(NewF);
+      } else {
+        addGlobalNamePrefix(&F);
       }
                // Hopefully, nobody will try to indirectly call a vararg
                // function... yet.
     } else if (FT->isVarArg()) {
       UnwrappedFnMap[&F] = &F;
       *i = 0;
-    } else {
+    } else if (!IsZeroArgsVoidRet || getWrapperKind(&F) == WK_Custom) {
       // Build a wrapper function for F.  The wrapper simply calls F, and is
       // added to FnsToInstrument so that any instrumentation according to its
       // WrapperKind is done in the second pass below.
       FunctionType *NewFT = getInstrumentedABI() == IA_Args
                                 ? getArgsFunctionType(FT)
                                 : FT;
-      Function *NewF =
-          Function::Create(NewFT, GlobalValue::LinkOnceODRLinkage,
-                           std::string("dfsw$") + F.getName(), &M);
-      NewF->copyAttributesFrom(&F);
-      NewF->removeAttributes(
-              AttributeSet::ReturnIndex,
-              AttributeFuncs::typeIncompatible(NewFT->getReturnType(),
-                                               AttributeSet::ReturnIndex));
+      Function *NewF = buildWrapperFunction(
+          &F, std::string("dfsw$") + std::string(F.getName()),
+          GlobalValue::LinkOnceODRLinkage, NewFT);
       if (getInstrumentedABI() == IA_TLS)
-        NewF->removeAttributes(AttributeSet::FunctionIndex,
-                               ReadOnlyNoneAttrs);
-
-      BasicBlock *BB = BasicBlock::Create(*Ctx, "entry", NewF);
-      std::vector<Value *> Args;
-      unsigned n = FT->getNumParams();
-      for (Function::arg_iterator ai = NewF->arg_begin(); n != 0; ++ai, --n)
-        Args.push_back(&*ai);
-      CallInst *CI = CallInst::Create(&F, Args, "", BB);
-      if (FT->getReturnType()->isVoidTy())
-        ReturnInst::Create(*Ctx, BB);
-      else
-        ReturnInst::Create(*Ctx, CI, BB);
+        NewF->removeAttributes(AttributeSet::FunctionIndex, ReadOnlyNoneAttrs);
 
       Value *WrappedFnCst =
           ConstantExpr::getBitCast(NewF, PointerType::getUnqual(FT));
@@ -560,6 +642,31 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
             val, DFSF.getShadow(i->first->getIncomingValue(val)));
       }
     }
+
+    // -dfsan-debug-nonzero-labels will split the CFG in all kinds of crazy
+    // places (i.e. instructions in basic blocks we haven't even begun visiting
+    // yet).  To make our life easier, do this work in a pass after the main
+    // instrumentation.
+    if (ClDebugNonzeroLabels) {
+      for (DenseSet<Value *>::iterator i = DFSF.NonZeroChecks.begin(),
+                                       e = DFSF.NonZeroChecks.end();
+           i != e; ++i) {
+        Instruction *Pos;
+        if (Instruction *I = dyn_cast<Instruction>(*i))
+          Pos = I->getNextNode();
+        else
+          Pos = DFSF.F->getEntryBlock().begin();
+        while (isa<PHINode>(Pos) || isa<AllocaInst>(Pos))
+          Pos = Pos->getNextNode();
+        IRBuilder<> IRB(Pos);
+        Instruction *NeInst = cast<Instruction>(
+            IRB.CreateICmpNE(*i, DFSF.DFS.ZeroShadow));
+        BranchInst *BI = cast<BranchInst>(SplitBlockAndInsertIfThen(
+            NeInst, /*Unreachable=*/ false, ColdCallWeights));
+        IRBuilder<> ThenIRB(BI);
+        ThenIRB.CreateCall(DFSF.DFS.DFSanNonzeroLabelFn);
+      }
+    }
   }
 
   return false;
@@ -618,6 +725,7 @@ Value *DFSanFunction::getShadow(Value *V) {
         break;
       }
       }
+      NonZeroChecks.insert(Shadow);
     } else {
       Shadow = DFS.ZeroShadow;
     }
@@ -667,7 +775,7 @@ Value *DataFlowSanitizer::combineShadows(Value *V1, Value *V2,
     BasicBlock *Tail = BI->getSuccessor(0);
     PHINode *Phi = PHINode::Create(ShadowTy, 2, "", Tail->begin());
     Phi->addIncoming(Call, Call->getParent());
-    Phi->addIncoming(ZeroShadow, Head);
+    Phi->addIncoming(V1, Head);
     Pos = Phi;
     return Phi;
   } else {
@@ -814,7 +922,11 @@ void DFSanVisitor::visitLoadInst(LoadInst &LI) {
   Value *LoadedShadow =
       DFSF.loadShadow(LI.getPointerOperand(), Size, Align, &LI);
   Value *PtrShadow = DFSF.getShadow(LI.getPointerOperand());
-  DFSF.setShadow(&LI, DFSF.DFS.combineShadows(LoadedShadow, PtrShadow, &LI));
+  Value *CombinedShadow = DFSF.DFS.combineShadows(LoadedShadow, PtrShadow, &LI);
+  if (CombinedShadow != DFSF.DFS.ZeroShadow)
+    DFSF.NonZeroChecks.insert(CombinedShadow);
+
+  DFSF.setShadow(&LI, CombinedShadow);
 }
 
 void DFSanFunction::storeShadow(Value *Addr, uint64_t Size, uint64_t Align,
@@ -1131,6 +1243,7 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
       LoadInst *LI = NextIRB.CreateLoad(DFSF.getRetvalTLS());
       DFSF.SkipInsts.insert(LI);
       DFSF.setShadow(CS.getInstruction(), LI);
+      DFSF.NonZeroChecks.insert(LI);
     }
   }
 
@@ -1184,6 +1297,7 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
           ExtractValueInst::Create(NewCS.getInstruction(), 1, "", Next);
       DFSF.SkipInsts.insert(ExShadow);
       DFSF.setShadow(ExVal, ExShadow);
+      DFSF.NonZeroChecks.insert(ExShadow);
 
       CS.getInstruction()->replaceAllUsesWith(ExVal);
     }

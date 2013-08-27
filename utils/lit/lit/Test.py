@@ -2,7 +2,9 @@ import os
 
 # Test results.
 
-class TestResult:
+class ResultCode(object):
+    """Test result codes."""
+
     def __init__(self, name, isFailure):
         self.name = name
         self.isFailure = isFailure
@@ -11,20 +13,25 @@ class TestResult:
         return '%s%r' % (self.__class__.__name__,
                          (self.name, self.isFailure))
 
-PASS        = TestResult('PASS', False)
-XFAIL       = TestResult('XFAIL', False)
-FAIL        = TestResult('FAIL', True)
-XPASS       = TestResult('XPASS', True)
-UNRESOLVED  = TestResult('UNRESOLVED', True)
-UNSUPPORTED = TestResult('UNSUPPORTED', False)
+PASS        = ResultCode('PASS', False)
+XFAIL       = ResultCode('XFAIL', False)
+FAIL        = ResultCode('FAIL', True)
+XPASS       = ResultCode('XPASS', True)
+UNRESOLVED  = ResultCode('UNRESOLVED', True)
+UNSUPPORTED = ResultCode('UNSUPPORTED', False)
+
+class Result(object):
+    """Wrapper for the results of executing an individual test."""
+
+    def __init__(self, code, output='', elapsed=None):
+        # The result code.
+        self.code = code
+        # The test output.
+        self.output = output
+        # The wall timing to execute the test, if timing.
+        self.elapsed = elapsed
 
 # Test classes.
-
-class TestFormat:
-    """TestFormat - Test information provider."""
-
-    def __init__(self, name):
-        self.name = name
 
 class TestSuite:
     """TestSuite - Information on a group of tests.
@@ -52,19 +59,28 @@ class Test:
         self.suite = suite
         self.path_in_suite = path_in_suite
         self.config = config
-        # The test result code, once complete.
+        # A list of conditions under which this test is expected to fail. These
+        # can optionally be provided by test format handlers, and will be
+        # honored when the test result is supplied.
+        self.xfails = []
+        # The test result, once complete.
         self.result = None
-        # Any additional output from the test, once complete.
-        self.output = None
-        # The wall time to execute this test, if timing and once complete.
-        self.elapsed = None
 
-    def setResult(self, result, output, elapsed):
-        assert self.result is None, "Test result already set!"
+    def setResult(self, result):
+        if self.result is not None:
+            raise ArgumentError("test result already set")
+        if not isinstance(result, Result):
+            raise ArgumentError("unexpected result type")
+
         self.result = result
-        self.output = output
-        self.elapsed = elapsed
 
+        # Apply the XFAIL handling to resolve the result exit code.
+        if self.isExpectedToFail():
+            if self.result.code == PASS:
+                self.result.code = XPASS
+            elif self.result.code == FAIL:
+                self.result.code = XFAIL
+        
     def getFullName(self):
         return self.suite.config.name + ' :: ' + '/'.join(self.path_in_suite)
 
@@ -73,3 +89,29 @@ class Test:
 
     def getExecPath(self):
         return self.suite.getExecPath(self.path_in_suite)
+
+    def isExpectedToFail(self):
+        """
+        isExpectedToFail() -> bool
+
+        Check whether this test is expected to fail in the current
+        configuration. This check relies on the test xfails property which by
+        some test formats may not be computed until the test has first been
+        executed.
+        """
+
+        # Check if any of the xfails match an available feature or the target.
+        for item in self.xfails:
+            # If this is the wildcard, it always fails.
+            if item == '*':
+                return True
+
+            # If this is an exact match for one of the features, it fails.
+            if item in self.config.available_features:
+                return True
+
+            # If this is a part of the target triple, it fails.
+            if item in self.suite.config.target_triple:
+                return True
+
+        return False

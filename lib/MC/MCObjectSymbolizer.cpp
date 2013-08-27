@@ -26,37 +26,103 @@ using namespace object;
 
 namespace {
 class MCMachObjectSymbolizer : public MCObjectSymbolizer {
+  const MachOObjectFile *MOOF;
+  // __TEXT;__stubs support.
+  uint64_t StubsStart;
+  uint64_t StubsCount;
+  uint64_t StubSize;
+  uint64_t StubsIndSymIndex;
+
 public:
   MCMachObjectSymbolizer(MCContext &Ctx, OwningPtr<MCRelocationInfo> &RelInfo,
-                         const object::MachOObjectFile *MachOOF)
-    : MCObjectSymbolizer(Ctx, RelInfo, MachOOF)
-  {}
+                         const MachOObjectFile *MOOF);
+
+  StringRef findExternalFunctionAt(uint64_t Addr) LLVM_OVERRIDE;
 
   void tryAddingPcLoadReferenceComment(raw_ostream &cStream,
-                                       int64_t Value, uint64_t Address) {
-    AddrToRelocMap::iterator RI = AddrToReloc.find(Address);
-    if (RI != AddrToReloc.end()) {
-      const MCExpr *RelExpr = RelInfo->createExprForRelocation(RI->second);
-      if (!RelExpr || RelExpr->EvaluateAsAbsolute(Value) == false)
-        return;
-    }
-    uint64_t Addr = Value;
-    SortedSectionList::const_iterator SI = findSectionContaining(Addr);
-    if (SI != SortedSections.end()) {
-      const SectionRef &S = *SI;
-      StringRef Name; S.getName(Name);
-      uint64_t SAddr; S.getAddress(SAddr);
-      if (Name == "__cstring") {
-        StringRef Contents;
-        S.getContents(Contents);
-        Contents = Contents.substr(Addr - SAddr);
-        cStream << " ## literal pool for: "
-                << Contents.substr(0, Contents.find_first_of(0));
-      }
-    }
-  }
+                                       int64_t Value,
+                                       uint64_t Address) LLVM_OVERRIDE;
 };
 } // End unnamed namespace
+
+
+MCMachObjectSymbolizer::
+MCMachObjectSymbolizer(MCContext &Ctx, OwningPtr<MCRelocationInfo> &RelInfo,
+                       const MachOObjectFile *MOOF)
+    : MCObjectSymbolizer(Ctx, RelInfo, MOOF), MOOF(MOOF),
+      StubsStart(0), StubsCount(0), StubSize(0), StubsIndSymIndex(0) {
+
+  error_code ec;
+  for (section_iterator SI = MOOF->begin_sections(), SE = MOOF->end_sections();
+       SI != SE; SI.increment(ec)) {
+    if (ec) break;
+    StringRef Name; SI->getName(Name);
+    if (Name == "__stubs") {
+      SectionRef StubsSec = *SI;
+      if (MOOF->is64Bit()) {
+        macho::Section64 S = MOOF->getSection64(StubsSec.getRawDataRefImpl());
+        StubsIndSymIndex = S.Reserved1;
+        StubSize = S.Reserved2;
+      } else {
+        macho::Section S = MOOF->getSection(StubsSec.getRawDataRefImpl());
+        StubsIndSymIndex = S.Reserved1;
+        StubSize = S.Reserved2;
+      }
+      assert(StubSize && "Mach-O stub entry size can't be zero!");
+      StubsSec.getAddress(StubsStart);
+      StubsSec.getSize(StubsCount);
+      StubsCount /= StubSize;
+    }
+  }
+}
+
+StringRef MCMachObjectSymbolizer::findExternalFunctionAt(uint64_t Addr) {
+  // FIXME: also, this can all be done at the very beginning, by iterating over
+  // all stubs and creating the calls to outside functions. Is it worth it
+  // though?
+  if (!StubSize)
+    return StringRef();
+  uint64_t StubIdx = (Addr - StubsStart) / StubSize;
+  if (StubIdx >= StubsCount)
+    return StringRef();
+
+  macho::IndirectSymbolTableEntry ISTE =
+    MOOF->getIndirectSymbolTableEntry(MOOF->getDysymtabLoadCommand(), StubIdx);
+  uint32_t SymtabIdx = ISTE.Index;
+
+  StringRef SymName;
+  symbol_iterator SI = MOOF->begin_symbols();
+  error_code ec;
+  for (uint32_t i = 0; i != SymtabIdx; ++i) {
+    SI.increment(ec);
+  }
+  SI->getName(SymName);
+  assert(SI != MOOF->end_symbols() && "Stub wasn't found in the symbol table!");
+  assert(SymName.front() == '_' && "Mach-O symbol doesn't start with '_'!");
+  return SymName.substr(1);
+}
+
+void MCMachObjectSymbolizer::
+tryAddingPcLoadReferenceComment(raw_ostream &cStream, int64_t Value,
+                                uint64_t Address) {
+  if (const RelocationRef *R = findRelocationAt(Address)) {
+    const MCExpr *RelExpr = RelInfo->createExprForRelocation(*R);
+    if (!RelExpr || RelExpr->EvaluateAsAbsolute(Value) == false)
+      return;
+  }
+  uint64_t Addr = Value;
+  if (const SectionRef *S = findSectionContaining(Addr)) {
+    StringRef Name; S->getName(Name);
+    uint64_t SAddr; S->getAddress(SAddr);
+    if (Name == "__cstring") {
+      StringRef Contents;
+      S->getContents(Contents);
+      Contents = Contents.substr(Addr - SAddr);
+      cStream << " ## literal pool for: "
+              << Contents.substr(0, Contents.find_first_of(0));
+    }
+  }
+}
 
 //===- MCObjectSymbolizer -------------------------------------------------===//
 
@@ -64,11 +130,143 @@ MCObjectSymbolizer::MCObjectSymbolizer(MCContext &Ctx,
                                        OwningPtr<MCRelocationInfo> &RelInfo,
                                        const ObjectFile *Obj)
     : MCSymbolizer(Ctx, RelInfo), Obj(Obj), SortedSections(), AddrToReloc() {
+}
+
+bool MCObjectSymbolizer::
+tryAddingSymbolicOperand(MCInst &MI, raw_ostream &cStream,
+                         int64_t Value, uint64_t Address, bool IsBranch,
+                         uint64_t Offset, uint64_t InstSize) {
+  if (IsBranch) {
+    StringRef ExtFnName = findExternalFunctionAt((uint64_t)Value);
+    if (!ExtFnName.empty()) {
+      MCSymbol *Sym = Ctx.GetOrCreateSymbol(ExtFnName);
+      const MCExpr *Expr = MCSymbolRefExpr::Create(Sym, Ctx);
+      MI.addOperand(MCOperand::CreateExpr(Expr));
+      return true;
+    }
+  }
+
+  if (const RelocationRef *R = findRelocationAt(Address + Offset)) {
+    if (const MCExpr *RelExpr = RelInfo->createExprForRelocation(*R)) {
+      MI.addOperand(MCOperand::CreateExpr(RelExpr));
+      return true;
+    }
+    // Only try to create a symbol+offset expression if there is no relocation.
+    return false;
+  }
+
+  // Interpret Value as a branch target.
+  if (IsBranch == false)
+    return false;
+  uint64_t UValue = Value;
+  // FIXME: map instead of looping each time?
   error_code ec;
-  for (section_iterator SI = Obj->begin_sections(),
-                        SE = Obj->end_sections();
-                        SI != SE;
-                        SI.increment(ec)) {
+  for (symbol_iterator SI = Obj->begin_symbols(), SE = Obj->end_symbols();
+       SI != SE; SI.increment(ec)) {
+    if (ec) break;
+    uint64_t SymAddr; SI->getAddress(SymAddr);
+    uint64_t SymSize; SI->getSize(SymSize);
+    StringRef SymName; SI->getName(SymName);
+    SymbolRef::Type SymType; SI->getType(SymType);
+    if (SymAddr == UnknownAddressOrSize || SymSize == UnknownAddressOrSize
+        || SymName.empty() || SymType != SymbolRef::ST_Function)
+      continue;
+
+    if ( SymAddr == UValue ||
+        (SymAddr <= UValue && SymAddr + SymSize > UValue)) {
+      MCSymbol *Sym = Ctx.GetOrCreateSymbol(SymName);
+      const MCExpr *Expr = MCSymbolRefExpr::Create(Sym, Ctx);
+      if (SymAddr != UValue) {
+        const MCExpr *Off = MCConstantExpr::Create(UValue - SymAddr, Ctx);
+        Expr = MCBinaryExpr::CreateAdd(Expr, Off, Ctx);
+      }
+      MI.addOperand(MCOperand::CreateExpr(Expr));
+      return true;
+    }
+  }
+  return false;
+}
+
+void MCObjectSymbolizer::
+tryAddingPcLoadReferenceComment(raw_ostream &cStream,
+                                int64_t Value, uint64_t Address) {
+}
+
+StringRef MCObjectSymbolizer::findExternalFunctionAt(uint64_t Addr) {
+  return StringRef();
+}
+
+MCObjectSymbolizer *
+MCObjectSymbolizer::createObjectSymbolizer(MCContext &Ctx,
+                                           OwningPtr<MCRelocationInfo> &RelInfo,
+                                           const ObjectFile *Obj) {
+  if (const MachOObjectFile *MOOF = dyn_cast<MachOObjectFile>(Obj))
+    return new MCMachObjectSymbolizer(Ctx, RelInfo, MOOF);
+  return new MCObjectSymbolizer(Ctx, RelInfo, Obj);
+}
+
+// SortedSections implementation.
+
+static bool SectionStartsBefore(const SectionRef &S, uint64_t Addr) {
+  uint64_t SAddr; S.getAddress(SAddr);
+  return SAddr < Addr;
+}
+
+const SectionRef *MCObjectSymbolizer::findSectionContaining(uint64_t Addr) {
+  if (SortedSections.empty())
+    buildSectionList();
+
+  SortedSectionList::iterator
+    EndIt = SortedSections.end(),
+    It = std::lower_bound(SortedSections.begin(), EndIt,
+                          Addr, SectionStartsBefore);
+  if (It == EndIt)
+    return 0;
+  uint64_t SAddr; It->getAddress(SAddr);
+  uint64_t SSize; It->getSize(SSize);
+  if (Addr >= SAddr + SSize)
+    return 0;
+  return &*It;
+}
+
+const RelocationRef *MCObjectSymbolizer::findRelocationAt(uint64_t Addr) {
+  if (AddrToReloc.empty())
+    buildRelocationByAddrMap();
+
+  AddrToRelocMap::const_iterator RI = AddrToReloc.find(Addr);
+  if (RI == AddrToReloc.end())
+    return 0;
+  return &RI->second;
+}
+
+void MCObjectSymbolizer::buildSectionList() {
+  error_code ec;
+  for (section_iterator SI = Obj->begin_sections(), SE = Obj->end_sections();
+                        SI != SE; SI.increment(ec)) {
+    if (ec) break;
+
+    bool RequiredForExec; SI->isRequiredForExecution(RequiredForExec);
+    if (RequiredForExec == false)
+      continue;
+    uint64_t SAddr; SI->getAddress(SAddr);
+    uint64_t SSize; SI->getSize(SSize);
+    SortedSectionList::iterator It = std::lower_bound(SortedSections.begin(),
+                                                      SortedSections.end(),
+                                                      SAddr,
+                                                      SectionStartsBefore);
+    if (It != SortedSections.end()) {
+      uint64_t FoundSAddr; It->getAddress(FoundSAddr);
+      if (FoundSAddr < SAddr + SSize)
+        llvm_unreachable("Inserting overlapping sections");
+    }
+    SortedSections.insert(It, *SI);
+  }
+}
+
+void MCObjectSymbolizer::buildRelocationByAddrMap() {
+  error_code ec;
+  for (section_iterator SI = Obj->begin_sections(), SE = Obj->end_sections();
+                        SI != SE; SI.increment(ec)) {
     if (ec) break;
 
     section_iterator RelSecI = SI->getRelocatedSection();
@@ -80,7 +278,6 @@ MCObjectSymbolizer::MCObjectSymbolizer(MCContext &Ctx,
     bool RequiredForExec; RelSecI->isRequiredForExecution(RequiredForExec);
     if (RequiredForExec == false || Size == 0)
       continue;
-    insertSection(*SI);
     for (relocation_iterator RI = SI->begin_relocations(),
                              RE = SI->end_relocations();
                              RI != RE;
@@ -111,104 +308,4 @@ MCObjectSymbolizer::MCObjectSymbolizer(MCContext &Ctx,
         AddrToReloc[Offset] = *RI;
     }
   }
-}
-
-bool MCObjectSymbolizer::
-tryAddingSymbolicOperand(MCInst &MI, raw_ostream &cStream,
-                         int64_t Value, uint64_t Address, bool IsBranch,
-                         uint64_t Offset, uint64_t InstSize) {
-  AddrToRelocMap::iterator RI = AddrToReloc.find(Address + Offset);
-  if (RI != AddrToReloc.end()) {
-    if (const MCExpr *RelExpr = RelInfo->createExprForRelocation(RI->second)) {
-      MI.addOperand(MCOperand::CreateExpr(RelExpr));
-      return true;
-    }
-    // Only try to create a symbol+offset expression if there is no relocation.
-    return false;
-  }
-
-  // Interpret Value as a branch target.
-  if (IsBranch == false)
-    return false;
-  uint64_t UValue = Value;
-  // FIXME: map instead of looping each time?
-  error_code ec;
-  for (symbol_iterator SI = Obj->begin_symbols(),
-       SE = Obj->end_symbols();
-       SI != SE;
-       SI.increment(ec)) {
-    if (ec) break;
-    uint64_t SymAddr; SI->getAddress(SymAddr);
-    uint64_t SymSize; SI->getSize(SymSize);
-    StringRef SymName; SI->getName(SymName);
-    SymbolRef::Type SymType; SI->getType(SymType);
-    if (SymAddr == UnknownAddressOrSize || SymSize == UnknownAddressOrSize
-        || SymName.empty() || SymType != SymbolRef::ST_Function)
-      continue;
-
-    if ( SymAddr == UValue ||
-        (SymAddr <= UValue && SymAddr + SymSize > UValue)) {
-      MCSymbol *Sym = Ctx.GetOrCreateSymbol(SymName);
-      const MCExpr *Expr = MCSymbolRefExpr::Create(Sym, Ctx);
-      if (SymAddr != UValue) {
-        const MCExpr *Off = MCConstantExpr::Create(UValue - SymAddr, Ctx);
-        Expr = MCBinaryExpr::CreateAdd(Expr, Off, Ctx);
-      }
-      MI.addOperand(MCOperand::CreateExpr(Expr));
-      return true;
-    }
-  }
-  return false;
-}
-
-void MCObjectSymbolizer::
-tryAddingPcLoadReferenceComment(raw_ostream &cStream,
-                                int64_t Value, uint64_t Address) {
-}
-
-MCObjectSymbolizer *
-MCObjectSymbolizer::createObjectSymbolizer(MCContext &Ctx,
-                                           OwningPtr<MCRelocationInfo> &RelInfo,
-                                           const ObjectFile *Obj) {
-  if (const MachOObjectFile *MachOOF = dyn_cast<MachOObjectFile>(Obj)) {
-    return new MCMachObjectSymbolizer(Ctx, RelInfo, MachOOF);
-  }
-  return new MCObjectSymbolizer(Ctx, RelInfo, Obj);
-}
-
-// SortedSections implementation.
-
-static bool SectionStartsBefore(const SectionRef &S, uint64_t Addr) {
-  uint64_t SAddr; S.getAddress(SAddr);
-  return SAddr < Addr;
-}
-
-MCObjectSymbolizer::SortedSectionList::const_iterator
-MCObjectSymbolizer::findSectionContaining(uint64_t Addr) const {
-  SortedSectionList::const_iterator
-    EndIt = SortedSections.end(),
-    It = std::lower_bound(SortedSections.begin(), EndIt,
-                          Addr, SectionStartsBefore);
-  if (It == EndIt)
-    return It;
-  uint64_t SAddr; It->getAddress(SAddr);
-  uint64_t SSize; It->getSize(SSize);
-  if (Addr >= SAddr + SSize)
-    return EndIt;
-  return It;
-}
-
-void MCObjectSymbolizer::insertSection(SectionRef Sec) {
-  uint64_t SAddr; Sec.getAddress(SAddr);
-  uint64_t SSize; Sec.getSize(SSize);
-  SortedSectionList::iterator It = std::lower_bound(SortedSections.begin(),
-                                                    SortedSections.end(),
-                                                    SAddr,
-                                                    SectionStartsBefore);
-  if (It != SortedSections.end()) {
-    uint64_t FoundSAddr; It->getAddress(FoundSAddr);
-    if (FoundSAddr < SAddr + SSize)
-      llvm_unreachable("Inserting overlapping sections");
-  }
-  SortedSections.insert(It, Sec);
 }

@@ -83,6 +83,7 @@ public:
   virtual unsigned getJumpBufAlignment() const;
   virtual unsigned getJumpBufSize() const;
   virtual bool shouldBuildLookupTables() const;
+  virtual bool haveFastSqrt(Type *Ty) const;
 
   /// @}
 
@@ -180,6 +181,12 @@ bool BasicTTI::shouldBuildLookupTables() const {
   return TLI->supportJumpTables() &&
       (TLI->isOperationLegalOrCustom(ISD::BR_JT, MVT::Other) ||
        TLI->isOperationLegalOrCustom(ISD::BRIND, MVT::Other));
+}
+
+bool BasicTTI::haveFastSqrt(Type *Ty) const {
+  const TargetLoweringBase *TLI = getTLI();
+  EVT VT = TLI->getValueType(Ty);
+  return TLI->isTypeLegal(VT) && TLI->isOperationLegalOrCustom(ISD::FSQRT, VT);
 }
 
 //===----------------------------------------------------------------------===//
@@ -443,6 +450,7 @@ unsigned BasicTTI::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
   case Intrinsic::log10:   ISD = ISD::FLOG10; break;
   case Intrinsic::log2:    ISD = ISD::FLOG2;  break;
   case Intrinsic::fabs:    ISD = ISD::FABS;   break;
+  case Intrinsic::copysign: ISD = ISD::FCOPYSIGN; break;
   case Intrinsic::floor:   ISD = ISD::FFLOOR; break;
   case Intrinsic::ceil:    ISD = ISD::FCEIL;  break;
   case Intrinsic::trunc:   ISD = ISD::FTRUNC; break;

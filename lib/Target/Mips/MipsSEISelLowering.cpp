@@ -78,20 +78,13 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
     setOperationAction(ISD::MUL, MVT::v2i16, Legal);
 
   if (Subtarget->hasMSA()) {
-    MVT::SimpleValueType VecTys[4] = {MVT::v16i8, MVT::v8i16,
-                                      MVT::v4i32, MVT::v2i64};
-
-    for (unsigned i = 0; i < array_lengthof(VecTys); ++i) {
-      addRegisterClass(VecTys[i], &Mips::MSA128RegClass);
-
-      // Expand all builtin opcodes.
-      for (unsigned Opc = 0; Opc < ISD::BUILTIN_OP_END; ++Opc)
-        setOperationAction(Opc, VecTys[i], Expand);
-
-      setOperationAction(ISD::LOAD, VecTys[i], Legal);
-      setOperationAction(ISD::STORE, VecTys[i], Legal);
-      setOperationAction(ISD::BITCAST, VecTys[i], Legal);
-    }
+    addMSAType(MVT::v16i8, &Mips::MSA128BRegClass);
+    addMSAType(MVT::v8i16, &Mips::MSA128HRegClass);
+    addMSAType(MVT::v4i32, &Mips::MSA128WRegClass);
+    addMSAType(MVT::v2i64, &Mips::MSA128DRegClass);
+    addMSAType(MVT::v8f16, &Mips::MSA128HRegClass);
+    addMSAType(MVT::v4f32, &Mips::MSA128WRegClass);
+    addMSAType(MVT::v2f64, &Mips::MSA128DRegClass);
   }
 
   if (!TM.Options.UseSoftFloat) {
@@ -99,7 +92,7 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
 
     // When dealing with single precision only, use libcalls
     if (!Subtarget->isSingleFloat()) {
-      if (HasMips64)
+      if (Subtarget->isFP64bit())
         addRegisterClass(MVT::f64, &Mips::FGR64RegClass);
       else
         addRegisterClass(MVT::f64, &Mips::AFGR64RegClass);
@@ -140,6 +133,18 @@ llvm::createMipsSETargetLowering(MipsTargetMachine &TM) {
   return new MipsSETargetLowering(TM);
 }
 
+void MipsSETargetLowering::
+addMSAType(MVT::SimpleValueType Ty, const TargetRegisterClass *RC) {
+  addRegisterClass(Ty, RC);
+
+  // Expand all builtin opcodes.
+  for (unsigned Opc = 0; Opc < ISD::BUILTIN_OP_END; ++Opc)
+    setOperationAction(Opc, Ty, Expand);
+
+  setOperationAction(ISD::LOAD, Ty, Legal);
+  setOperationAction(ISD::STORE, Ty, Legal);
+  setOperationAction(ISD::BITCAST, Ty, Legal);
+}
 
 bool
 MipsSETargetLowering::allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const {

@@ -212,6 +212,16 @@ let isCall = 1, Defs = [R0D, R1D, R2D, R3D, R4D, R5D, R14D,
                      "basr\t%r14, $R2", [(z_call ADDR64:$R2)]>;
 }
 
+// Sibling calls.  Indirect sibling calls must be via R1, since R2 upwards
+// are argument registers and since branching to R0 is a no-op.
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
+    isCodeGenOnly = 1, R1 = 15 in {
+  def CallJG : InstRIL<0xC04, (outs), (ins pcrel32call:$I2),
+                       "jg\t$I2", [(z_sibcall pcrel32call:$I2)]>;
+  let R2 = 1, Uses = [R1D] in
+    def CallBR : InstRR<0x07, (outs), (ins), "br\t%r1", [(z_sibcall R1D)]>;
+}
+
 // Define the general form of the call instructions for the asm parser.
 // These instructions don't hard-code %r14 as the return address register.
 def AsmBRAS  : InstRI<0xA75, (outs), (ins GR64:$R1, brtarget16:$I2),
@@ -335,6 +345,10 @@ def MVGHI : StoreSIL<"mvghi", 0xE548, store,         imm64sx16>;
 // Memory-to-memory moves.
 let mayLoad = 1, mayStore = 1 in
   defm MVC : MemorySS<"mvc", 0xD2, z_mvc>;
+
+// String moves.
+let mayLoad = 1, mayStore = 1, Defs = [CC], Uses = [R0W] in
+  defm MVST : StringRRE<"mvst", 0xB255, z_stpcpy>;
 
 defm LoadStore8_32  : MVCLoadStore<anyextloadi8, truncstorei8, i32,
                                    MVCWrapper, 1>;
@@ -520,8 +534,28 @@ let neverHasSideEffects = 1, isAsCheapAsAMove = 1, isMoveImm = 1,
 }
 
 //===----------------------------------------------------------------------===//
-// Negation
+// Absolute and Negation
 //===----------------------------------------------------------------------===//
+
+let Defs = [CC] in {
+  let CCValues = 0xF, CompareZeroCCMask = 0x8 in {
+    def LPR  : UnaryRR <"lp",  0x10,   z_iabs32, GR32, GR32>;
+    def LPGR : UnaryRRE<"lpg", 0xB900, z_iabs64, GR64, GR64>;
+  }
+  let CCValues = 0xE, CompareZeroCCMask = 0xE in
+    def LPGFR : UnaryRRE<"lpgf", 0xB910, null_frag, GR64, GR32>;
+}
+defm : SXU<z_iabs64, LPGFR>;
+
+let Defs = [CC] in {
+  let CCValues = 0xF, CompareZeroCCMask = 0x8 in {
+    def LNR  : UnaryRR <"ln",  0x11,   z_inegabs32, GR32, GR32>;
+    def LNGR : UnaryRRE<"lng", 0xB901, z_inegabs64, GR64, GR64>;
+  }
+  let CCValues = 0xE, CompareZeroCCMask = 0xE in
+    def LNGFR : UnaryRRE<"lngf", 0xB911, null_frag, GR64, GR32>;
+}
+defm : SXU<z_inegabs64, LNGFR>;
 
 let Defs = [CC] in {
   let CCValues = 0xF, CompareZeroCCMask = 0x8 in {
@@ -996,6 +1030,17 @@ defm : ZXB<z_ucmp, GR64, CLGFR>;
 let mayLoad = 1, Defs = [CC] in
   defm CLC : MemorySS<"clc", 0xD5, z_clc>;
 
+// String comparison.
+let mayLoad = 1, Defs = [CC], Uses = [R0W] in
+  defm CLST : StringRRE<"clst", 0xB25D, z_strcmp>;
+
+//===----------------------------------------------------------------------===//
+// Prefetch
+//===----------------------------------------------------------------------===//
+
+def PFD : PrefetchRXY<"pfd", 0xE336, z_prefetch>;
+def PFDRL : PrefetchRILPC<"pfdrl", 0xC62, z_prefetch>;
+
 //===----------------------------------------------------------------------===//
 // Atomic operations
 //===----------------------------------------------------------------------===//
@@ -1154,6 +1199,10 @@ let usesCustomInserter = 1 in {
   def ZEXT128_32 : Pseudo<(outs GR128:$dst), (ins GR32:$src), []>;
   def ZEXT128_64 : Pseudo<(outs GR128:$dst), (ins GR64:$src), []>;
 }
+
+// Search a block of memory for a character.
+let mayLoad = 1, Defs = [CC], Uses = [R0W] in
+  defm SRST : StringRRE<"srst", 0xb25e, z_search_string>;
 
 //===----------------------------------------------------------------------===//
 // Peepholes.

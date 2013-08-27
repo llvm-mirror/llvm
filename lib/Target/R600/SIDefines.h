@@ -11,6 +11,13 @@
 #ifndef SIDEFINES_H_
 #define SIDEFINES_H_
 
+namespace SIInstrFlags {
+enum {
+  MIMG = 1 << 3,
+  SMRD = 1 << 4
+};
+}
+
 #define R_00B028_SPI_SHADER_PGM_RSRC1_PS                                0x00B028
 #define R_00B02C_SPI_SHADER_PGM_RSRC2_PS                                0x00B02C
 #define   S_00B02C_EXTRA_LDS_SIZE(x)                                  (((x) & 0xFF) << 8)

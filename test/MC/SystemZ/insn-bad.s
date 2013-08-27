@@ -1142,6 +1142,11 @@
 	fidbr	%f0, -1, %f0
 	fidbr	%f0, 16, %f0
 
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: fidbra	%f0, 0, %f0, 0
+
+	fidbra	%f0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: fiebr	%f0, -1, %f0
 #CHECK: error: invalid operand
@@ -1149,6 +1154,11 @@
 
 	fiebr	%f0, -1, %f0
 	fiebr	%f0, 16, %f0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: fiebra	%f0, 0, %f0, 0
+
+	fiebra	%f0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: fixbr	%f0, -1, %f0
@@ -1163,6 +1173,11 @@
 	fixbr	%f0, 16, %f0
 	fixbr	%f0, 0, %f2
 	fixbr	%f2, 0, %f0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: fixbra	%f0, 0, %f0, 0
+
+	fixbra	%f0, 0, %f0, 0
 
 #CHECK: error: invalid register pair
 #CHECK: flogr	%r1, %r0
@@ -2259,6 +2274,40 @@
 
 	oy	%r0, -524289
 	oy	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: pfd	-1, 0
+#CHECK: error: invalid operand
+#CHECK: pfd	16, 0
+#CHECK: error: invalid operand
+#CHECK: pfd	1, -524289
+#CHECK: error: invalid operand
+#CHECK: pfd	1, 524288
+
+	pfd	-1, 0
+	pfd	16, 0
+	pfd	1, -524289
+	pfd	1, 524288
+
+#CHECK: error: invalid operand
+#CHECK: pfdrl	-1, 0
+#CHECK: error: invalid operand
+#CHECK: pfdrl	16, 0
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, -0x1000000002
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, -1
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, 1
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, 0x100000000
+
+	pfdrl	-1, 0
+	pfdrl	16, 0
+	pfdrl	1, -0x1000000002
+	pfdrl	1, -1
+	pfdrl	1, 1
+	pfdrl	1, 0x100000000
 
 #CHECK: error: invalid operand
 #CHECK: risbg	%r0,%r0,0,0,-1

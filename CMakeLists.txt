@@ -15,6 +15,8 @@ set(LLVM_VERSION_MINOR 4)
 
 set(PACKAGE_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}svn")
 
+option(LLVM_INSTALL_TOOLCHAIN_ONLY "Only include toolchain files in the 'install' target." OFF)
+
 option(LLVM_USE_FOLDERS "Enable solution folders in Visual Studio. Disable for Express versions." ON)
 if ( LLVM_USE_FOLDERS )
   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -229,6 +231,10 @@ option(LLVM_BUILD_TESTS
   "Build LLVM unit tests. If OFF, just generate build targets." OFF)
 option(LLVM_INCLUDE_TESTS "Generate build targets for the LLVM unit tests." ON)
 
+option (LLVM_BUILD_DOCS "Build the llvm documentation." OFF)
+option (LLVM_INCLUDE_DOCS "Generate build targets for llvm documentation." ON)
+option (LLVM_ENABLE_DOXYGEN "Use doxygen to generate llvm documentation." OFF)
+
 # All options referred to from HandleLLVMOptions have to be specified
 # BEFORE this include, otherwise options will not be correctly set on
 # first cmake run
@@ -288,7 +294,7 @@ execute_process(
             --enable-optional-components "${LLVMOPTIONALCOMPONENTS}"
             --write-library-table ${LLVMCONFIGLIBRARYDEPENDENCIESINC}
             --write-cmake-fragment ${LLVMBUILDCMAKEFRAG}
-            ERROR_VARIABLE LLVMBUILDOUTPUT
+            OUTPUT_VARIABLE LLVMBUILDOUTPUT
             ERROR_VARIABLE LLVMBUILDERRORS
             OUTPUT_STRIP_TRAILING_WHITESPACE
             ERROR_STRIP_TRAILING_WHITESPACE
@@ -463,37 +469,55 @@ if( LLVM_INCLUDE_TESTS )
     )
 endif()
 
+if (LLVM_INCLUDE_DOCS)
+  add_subdirectory(docs)
+endif()
+
 add_subdirectory(cmake/modules)
 
-install(DIRECTORY include/
-  DESTINATION include
-  FILES_MATCHING
-  PATTERN "*.def"
-  PATTERN "*.h"
-  PATTERN "*.td"
-  PATTERN "*.inc"
-  PATTERN "LICENSE.TXT"
-  PATTERN ".svn" EXCLUDE
-  )
+if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
+  install(DIRECTORY include/
+    DESTINATION include
+    FILES_MATCHING
+    PATTERN "*.def"
+    PATTERN "*.h"
+    PATTERN "*.td"
+    PATTERN "*.inc"
+    PATTERN "LICENSE.TXT"
+    PATTERN ".svn" EXCLUDE
+    )
 
-install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/
-  DESTINATION include
-  FILES_MATCHING
-  PATTERN "*.def"
-  PATTERN "*.h"
-  PATTERN "*.gen"
-  PATTERN "*.inc"
-  # Exclude include/llvm/CMakeFiles/intrinsics_gen.dir, matched by "*.def"
-  PATTERN "CMakeFiles" EXCLUDE
-  PATTERN ".svn" EXCLUDE
-  )
+  install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/
+    DESTINATION include
+    FILES_MATCHING
+    PATTERN "*.def"
+    PATTERN "*.h"
+    PATTERN "*.gen"
+    PATTERN "*.inc"
+    # Exclude include/llvm/CMakeFiles/intrinsics_gen.dir, matched by "*.def"
+    PATTERN "CMakeFiles" EXCLUDE
+    PATTERN ".svn" EXCLUDE
+    )
+endif()
 
-# TODO: make and install documentation.
+if( NOT WIN32 )
+  install(FILES include/llvm-c/lto.h DESTINATION include/llvm-c)
+endif()
+
 
 set(CPACK_PACKAGE_VENDOR "LLVM")
 set(CPACK_PACKAGE_VERSION_MAJOR ${LLVM_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${LLVM_VERSION_MINOR})
-add_version_info_from_vcs(CPACK_PACKAGE_VERSION_PATCH)
+if( LLVM_APPEND_VC_REV )
+  add_version_info_from_vcs(CPACK_PACKAGE_VERSION_PATCH)
+else()
+  set(CPACK_PACKAGE_VERSION_PATCH "svn")
+endif()
+set(CPACK_RESOURCE_FILE_LICENSE "${LLVM_MAIN_SRC_DIR}/LICENSE.TXT")
+if(WIN32 AND NOT UNIX)
+  set(CPACK_PACKAGE_ICON "${LLVM_MAIN_SRC_DIR}\\\\cmake\\\\nsis_logo.bmp")
+  set(CPACK_NSIS_MODIFY_PATH "ON")
+endif()
 include(CPack)
 
 # Workaround for MSVS10 to avoid the Dialog Hell

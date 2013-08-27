@@ -551,7 +551,12 @@ AC_ARG_ENABLE(clang-static-analyzer,
                              enableval="yes")
 case "$enableval" in
   yes) AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[1]) ;;
-  no)  AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[0]) ;;
+  no)  
+    if test ${clang_arcmt} != "no" ; then
+      AC_MSG_ERROR([Cannot enable clang ARC Migration Tool while disabling static analyzer.])
+    fi
+    AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[0]) 
+    ;;
   default) AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[1]);;
   *) AC_MSG_ERROR([Invalid setting for --enable-clang-static-analyzer. Use "yes" or "no"]) ;;
 esac
@@ -1392,7 +1397,7 @@ AC_SEARCH_LIBS(clock_gettime,rt)
 dnl The curses library is optional; used for querying terminal info
 if test "$llvm_cv_enable_terminfo" = "yes" ; then
   dnl We need the has_color functionality in curses for it to be useful.
-  AC_SEARCH_LIBS(setupterm,tinfo curses ncurses ncursesw,
+  AC_SEARCH_LIBS(setupterm,tinfo terminfo curses ncurses ncursesw,
                  AC_DEFINE([HAVE_TERMINFO],[1],
                            [Define if the setupterm() function is supported this platform.]))
 fi

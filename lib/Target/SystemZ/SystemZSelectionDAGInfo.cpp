@@ -126,6 +126,19 @@ EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
   return SDValue();
 }
 
+// Convert the current CC value into an integer that is 0 if CC == 0,
+// less than zero if CC == 1 and greater than zero if CC >= 2.
+// The sequence starts with IPM, which puts CC into bits 29 and 28
+// of an integer and clears bits 30 and 31.
+static SDValue addIPMSequence(SDLoc DL, SDValue Glue, SelectionDAG &DAG) {
+  SDValue IPM = DAG.getNode(SystemZISD::IPM, DL, MVT::i32, Glue);
+  SDValue SRL = DAG.getNode(ISD::SRL, DL, MVT::i32, IPM,
+                            DAG.getConstant(28, MVT::i32));
+  SDValue ROTL = DAG.getNode(ISD::ROTL, DL, MVT::i32, SRL,
+                             DAG.getConstant(31, MVT::i32));
+  return ROTL;
+}
+
 std::pair<SDValue, SDValue> SystemZSelectionDAGInfo::
 EmitTargetCodeForMemcmp(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
                         SDValue Src1, SDValue Src2, SDValue Size,
@@ -139,16 +152,96 @@ EmitTargetCodeForMemcmp(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
       Chain = DAG.getNode(SystemZISD::CLC, DL, VTs, Chain,
                           Src1, Src2, Size);
       SDValue Glue = Chain.getValue(1);
-      // IPM inserts the CC value into bits 29 and 28, with 0 meaning "equal",
-      // 1 meaning "greater" and 2 meaning "less".  Convert them into an
-      // integer that is respectively equal, greater or less than 0.
-      SDValue IPM = DAG.getNode(SystemZISD::IPM, DL, MVT::i32, Glue);
-      SDValue SHL = DAG.getNode(ISD::SHL, DL, MVT::i32, IPM,
-                                DAG.getConstant(2, MVT::i32));
-      SDValue SRA = DAG.getNode(ISD::SRA, DL, MVT::i32, SHL,
-                                DAG.getConstant(30, MVT::i32));
-      return std::make_pair(SRA, Chain);
+      return std::make_pair(addIPMSequence(DL, Glue, DAG), Chain);
     }
   }
   return std::make_pair(SDValue(), SDValue());
+}
+
+std::pair<SDValue, SDValue> SystemZSelectionDAGInfo::
+EmitTargetCodeForMemchr(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
+                        SDValue Src, SDValue Char, SDValue Length,
+                        MachinePointerInfo SrcPtrInfo) const {
+  // Use SRST to find the character.  End is its address on success.
+  EVT PtrVT = Src.getValueType();
+  SDVTList VTs = DAG.getVTList(PtrVT, MVT::Other, MVT::Glue);
+  Length = DAG.getZExtOrTrunc(Length, DL, PtrVT);
+  Char = DAG.getZExtOrTrunc(Char, DL, MVT::i32);
+  Char = DAG.getNode(ISD::AND, DL, MVT::i32, Char,
+                     DAG.getConstant(255, MVT::i32));
+  SDValue Limit = DAG.getNode(ISD::ADD, DL, PtrVT, Src, Length);
+  SDValue End = DAG.getNode(SystemZISD::SEARCH_STRING, DL, VTs, Chain,
+                            Limit, Src, Char);
+  Chain = End.getValue(1);
+  SDValue Glue = End.getValue(2);
+
+  // Now select between End and null, depending on whether the character
+  // was found.
+  SmallVector<SDValue, 5> Ops;
+  Ops.push_back(End);
+  Ops.push_back(DAG.getConstant(0, PtrVT));
+  Ops.push_back(DAG.getConstant(SystemZ::CCMASK_SRST, MVT::i32));
+  Ops.push_back(DAG.getConstant(SystemZ::CCMASK_SRST_FOUND, MVT::i32));
+  Ops.push_back(Glue);
+  VTs = DAG.getVTList(PtrVT, MVT::Glue);
+  End = DAG.getNode(SystemZISD::SELECT_CCMASK, DL, VTs, &Ops[0], Ops.size());
+  return std::make_pair(End, Chain);
+}
+
+std::pair<SDValue, SDValue> SystemZSelectionDAGInfo::
+EmitTargetCodeForStrcpy(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
+                        SDValue Dest, SDValue Src,
+                        MachinePointerInfo DestPtrInfo,
+                        MachinePointerInfo SrcPtrInfo, bool isStpcpy) const {
+  SDVTList VTs = DAG.getVTList(Dest.getValueType(), MVT::Other);
+  SDValue EndDest = DAG.getNode(SystemZISD::STPCPY, DL, VTs, Chain, Dest, Src,
+                                DAG.getConstant(0, MVT::i32));
+  return std::make_pair(isStpcpy ? EndDest : Dest, EndDest.getValue(1));
+}
+
+std::pair<SDValue, SDValue> SystemZSelectionDAGInfo::
+EmitTargetCodeForStrcmp(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
+                        SDValue Src1, SDValue Src2,
+                        MachinePointerInfo Op1PtrInfo,
+                        MachinePointerInfo Op2PtrInfo) const {
+  SDVTList VTs = DAG.getVTList(Src1.getValueType(), MVT::Other, MVT::Glue);
+  SDValue Unused = DAG.getNode(SystemZISD::STRCMP, DL, VTs, Chain, Src1, Src2,
+                               DAG.getConstant(0, MVT::i32));
+  Chain = Unused.getValue(1);
+  SDValue Glue = Chain.getValue(2);
+  return std::make_pair(addIPMSequence(DL, Glue, DAG), Chain);
+}
+
+// Search from Src for a null character, stopping once Src reaches Limit.
+// Return a pair of values, the first being the number of nonnull characters
+// and the second being the out chain.
+//
+// This can be used for strlen by setting Limit to 0.
+static std::pair<SDValue, SDValue> getBoundedStrlen(SelectionDAG &DAG, SDLoc DL,
+                                                    SDValue Chain, SDValue Src,
+                                                    SDValue Limit) {
+  EVT PtrVT = Src.getValueType();
+  SDVTList VTs = DAG.getVTList(PtrVT, MVT::Other, MVT::Glue);
+  SDValue End = DAG.getNode(SystemZISD::SEARCH_STRING, DL, VTs, Chain,
+                            Limit, Src, DAG.getConstant(0, MVT::i32));
+  Chain = End.getValue(1);
+  SDValue Len = DAG.getNode(ISD::SUB, DL, PtrVT, End, Src);
+  return std::make_pair(Len, Chain);
+}    
+
+std::pair<SDValue, SDValue> SystemZSelectionDAGInfo::
+EmitTargetCodeForStrlen(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
+                        SDValue Src, MachinePointerInfo SrcPtrInfo) const {
+  EVT PtrVT = Src.getValueType();
+  return getBoundedStrlen(DAG, DL, Chain, Src, DAG.getConstant(0, PtrVT));
+}
+
+std::pair<SDValue, SDValue> SystemZSelectionDAGInfo::
+EmitTargetCodeForStrnlen(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
+                         SDValue Src, SDValue MaxLength,
+                         MachinePointerInfo SrcPtrInfo) const {
+  EVT PtrVT = Src.getValueType();
+  MaxLength = DAG.getZExtOrTrunc(MaxLength, DL, PtrVT);
+  SDValue Limit = DAG.getNode(ISD::ADD, DL, PtrVT, Src, MaxLength);
+  return getBoundedStrlen(DAG, DL, Chain, Src, Limit);
 }

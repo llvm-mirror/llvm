@@ -44,7 +44,7 @@ void MCAtom::remapForSplit(uint64_t SplitPt,
 
 void MCDataAtom::addData(const MCData &D) {
   Data.push_back(D);
-  if (Data.size() > Begin - End)
+  if (Data.size() > Begin - End - 1)
     remap(Begin, End + 1);
 }
 
@@ -72,8 +72,8 @@ MCDataAtom *MCDataAtom::split(uint64_t SplitPt) {
 // MCTextAtom
 
 void MCTextAtom::addInst(const MCInst &I, uint64_t Size) {
-  if (NextInstAddress > End)
-    remap(Begin, NextInstAddress);
+  if (NextInstAddress + Size - 1 > End)
+    remap(Begin, NextInstAddress + Size - 1);
   Insts.push_back(MCDecodedInst(I, NextInstAddress, Size));
   NextInstAddress += Size;
 }
@@ -106,5 +106,6 @@ MCTextAtom *MCTextAtom::split(uint64_t SplitPt) {
 
   std::copy(I, Insts.end(), std::back_inserter(RightAtom->Insts));
   Insts.erase(I, Insts.end());
+  Parent->splitBasicBlocksForAtom(this, RightAtom);
   return RightAtom;
 }

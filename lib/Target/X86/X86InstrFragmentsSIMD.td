@@ -149,6 +149,9 @@ def X86ptest   : SDNode<"X86ISD::PTEST", SDTX86CmpPTest>;
 def X86testp   : SDNode<"X86ISD::TESTP", SDTX86CmpPTest>;
 def X86kortest : SDNode<"X86ISD::KORTEST", SDTX86CmpPTest>;
 def X86ktest   : SDNode<"X86ISD::KTEST", SDTX86CmpPTest>;
+def X86testm  : SDNode<"X86ISD::TESTM", SDTypeProfile<1, 2, [SDTCisVec<0>,
+                                          SDTCisVec<1>,
+                                          SDTCisSameAs<2, 1>]>>;
 
 def X86pmuludq : SDNode<"X86ISD::PMULUDQ",
                         SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisVec<1>,
@@ -248,13 +251,13 @@ def sse_load_f64 : ComplexPattern<v2f64, 5, "SelectScalarSSELoad", [],
 def ssmem : Operand<v4f32> {
   let PrintMethod = "printf32mem";
   let MIOperandInfo = (ops ptr_rc, i8imm, ptr_rc_nosp, i32imm, i8imm);
-  let ParserMatchClass = X86MemAsmOperand;
+  let ParserMatchClass = X86Mem32AsmOperand;
   let OperandType = "OPERAND_MEMORY";
 }
 def sdmem : Operand<v2f64> {
   let PrintMethod = "printf64mem";
   let MIOperandInfo = (ops ptr_rc, i8imm, ptr_rc_nosp, i32imm, i8imm);
-  let ParserMatchClass = X86MemAsmOperand;
+  let ParserMatchClass = X86Mem64AsmOperand;
   let OperandType = "OPERAND_MEMORY";
 }
 
@@ -277,7 +280,6 @@ def loadv4i64    : PatFrag<(ops node:$ptr), (v4i64 (load node:$ptr))>;
 // 512-bit load pattern fragments
 def loadv16f32   : PatFrag<(ops node:$ptr), (v16f32 (load node:$ptr))>;
 def loadv8f64    : PatFrag<(ops node:$ptr), (v8f64 (load node:$ptr))>;
-def loadv16i32   : PatFrag<(ops node:$ptr), (v16i32 (load node:$ptr))>;
 def loadv8i64    : PatFrag<(ops node:$ptr), (v8i64 (load node:$ptr))>;
 
 // 128-/256-/512-bit extload pattern fragments
@@ -349,10 +351,10 @@ def alignedloadv4i64 : PatFrag<(ops node:$ptr),
 // 512-bit aligned load pattern fragments
 def alignedloadv16f32 : PatFrag<(ops node:$ptr),
                                 (v16f32 (alignedload512 node:$ptr))>;
-def alignedloadv8f64  : PatFrag<(ops node:$ptr),
-                                (v8f64  (alignedload512 node:$ptr))>;
 def alignedloadv16i32 : PatFrag<(ops node:$ptr),
                                 (v16i32 (alignedload512 node:$ptr))>;
+def alignedloadv8f64  : PatFrag<(ops node:$ptr),
+                                (v8f64  (alignedload512 node:$ptr))>;
 def alignedloadv8i64  : PatFrag<(ops node:$ptr),
                                 (v8i64  (alignedload512 node:$ptr))>;
 
@@ -367,6 +369,16 @@ def memop : PatFrag<(ops node:$ptr), (load node:$ptr), [{
          || cast<LoadSDNode>(N)->getAlignment() >= 16;
 }]>;
 
+def memop4 : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+  return    Subtarget->hasVectorUAMem()
+         || cast<LoadSDNode>(N)->getAlignment() >= 4;
+}]>;
+
+def memop8 : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+  return    Subtarget->hasVectorUAMem()
+         || cast<LoadSDNode>(N)->getAlignment() >= 8;
+}]>;
+
 def memopfsf32 : PatFrag<(ops node:$ptr), (f32   (memop node:$ptr))>;
 def memopfsf64 : PatFrag<(ops node:$ptr), (f64   (memop node:$ptr))>;
 
@@ -379,15 +391,14 @@ def memopv2i64 : PatFrag<(ops node:$ptr), (v2i64 (memop node:$ptr))>;
 // 256-bit memop pattern fragments
 // NOTE: all 256-bit integer vector loads are promoted to v4i64
 def memopv8f32 : PatFrag<(ops node:$ptr), (v8f32 (memop node:$ptr))>;
-def memopv8i32 : PatFrag<(ops node:$ptr), (v8i32 (memop node:$ptr))>;
 def memopv4f64 : PatFrag<(ops node:$ptr), (v4f64 (memop node:$ptr))>;
 def memopv4i64 : PatFrag<(ops node:$ptr), (v4i64 (memop node:$ptr))>;
 
 // 512-bit memop pattern fragments
-def memopv16f32 : PatFrag<(ops node:$ptr), (v16f32 (memop node:$ptr))>;
-def memopv8f64 : PatFrag<(ops node:$ptr), (v8f64 (memop node:$ptr))>;
-def memopv16i32 : PatFrag<(ops node:$ptr), (v16i32 (memop node:$ptr))>;
-def memopv8i64 : PatFrag<(ops node:$ptr), (v8i64 (memop node:$ptr))>;
+def memopv16f32 : PatFrag<(ops node:$ptr), (v16f32 (memop4 node:$ptr))>;
+def memopv8f64  : PatFrag<(ops node:$ptr), (v8f64  (memop8 node:$ptr))>;
+def memopv16i32 : PatFrag<(ops node:$ptr), (v16i32 (memop4 node:$ptr))>;
+def memopv8i64  : PatFrag<(ops node:$ptr), (v8i64  (memop8 node:$ptr))>;
 
 // SSSE3 uses MMX registers for some instructions. They aren't aligned on a
 // 16-byte boundary.
@@ -437,6 +448,10 @@ def bc_v32i8 : PatFrag<(ops node:$in), (v32i8 (bitconvert node:$in))>;
 def bc_v16i16 : PatFrag<(ops node:$in), (v16i16 (bitconvert node:$in))>;
 def bc_v8i32 : PatFrag<(ops node:$in), (v8i32 (bitconvert node:$in))>;
 def bc_v4i64 : PatFrag<(ops node:$in), (v4i64 (bitconvert node:$in))>;
+
+// 512-bit bitconvert pattern fragments
+def bc_v16i32 : PatFrag<(ops node:$in), (v16i32 (bitconvert node:$in))>;
+def bc_v8i64 : PatFrag<(ops node:$in), (v8i64 (bitconvert node:$in))>;
 
 def vzmovl_v2i64 : PatFrag<(ops node:$src),
                            (bitconvert (v2i64 (X86vzmovl

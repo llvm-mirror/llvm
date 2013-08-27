@@ -23,11 +23,14 @@ namespace llvm {
 class SITargetLowering : public AMDGPUTargetLowering {
   SDValue LowerParameter(SelectionDAG &DAG, EVT VT, SDLoc DL,
                          SDValue Chain, unsigned Offset) const;
+  SDValue LowerSampleIntrinsic(unsigned Opcode, const SDValue &Op,
+                               SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerZERO_EXTEND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
 
+  SDValue ResourceDescriptorToi128(SDValue Op, SelectionDAG &DAG) const;
   bool foldImm(SDValue &Operand, int32_t &Immediate,
                bool &ScalarSlotUsed) const;
   const TargetRegisterClass *getRegClassForNode(SelectionDAG &DAG,
@@ -44,6 +47,7 @@ class SITargetLowering : public AMDGPUTargetLowering {
 public:
   SITargetLowering(TargetMachine &tm);
   bool allowsUnalignedMemoryAccesses(EVT  VT, bool *IsFast) const;
+  virtual bool shouldSplitVectorElementType(EVT VT) const;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool isVarArg,

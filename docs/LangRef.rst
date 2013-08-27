@@ -879,6 +879,17 @@ example:
     This function attribute indicates that the function never returns
     with an unwind or exceptional control flow. If the function does
     unwind, its runtime behavior is undefined.
+``optnone``
+    This function attribute indicates that the function is not optimized
+    by any optimization or code generator passes with the 
+    exception of interprocedural optimization passes.
+    This attribute cannot be used together with the ``alwaysinline``
+    attribute; this attribute is also incompatible
+    with the ``minsize`` attribute and the ``optsize`` attribute.
+    
+    The inliner should never inline this function in any situation.
+    Only functions with the ``alwaysinline`` attribute are valid
+    candidates for inlining inside the body of this function.
 ``optsize``
     This attribute suggests that optimization passes and code generator
     passes make choices that keep the code size of this function low,
@@ -7352,6 +7363,42 @@ Semantics:
 
 This function returns the same values as the libm ``fabs`` functions
 would, and handles error conditions in the same way.
+
+'``llvm.copysign.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.copysign`` on any
+floating point or vector of floating point type. Not all targets support
+all types however.
+
+::
+
+      declare float     @llvm.copysign.f32(float  %Mag, float  %Sgn)
+      declare double    @llvm.copysign.f64(double %Mag, double %Sgn)
+      declare x86_fp80  @llvm.copysign.f80(x86_fp80  %Mag, x86_fp80  %Sgn)
+      declare fp128     @llvm.copysign.f128(fp128 %Mag, fp128 %Sgn)
+      declare ppc_fp128 @llvm.copysign.ppcf128(ppc_fp128  %Mag, ppc_fp128  %Sgn)
+
+Overview:
+"""""""""
+
+The '``llvm.copysign.*``' intrinsics return a value with the magnitude of the
+first operand and the sign of the second operand.
+
+Arguments:
+""""""""""
+
+The arguments and return value are floating point numbers of the same
+type.
+
+Semantics:
+""""""""""
+
+This function returns the same values as the libm ``copysign``
+functions would, and handles error conditions in the same way.
 
 '``llvm.floor.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

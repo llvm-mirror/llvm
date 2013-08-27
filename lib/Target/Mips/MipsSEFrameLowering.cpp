@@ -70,31 +70,23 @@ bool ExpandPseudo::expand() {
 bool ExpandPseudo::expandInstr(MachineBasicBlock &MBB, Iter I) {
   switch(I->getOpcode()) {
   case Mips::LOAD_CCOND_DSP:
-  case Mips::LOAD_CCOND_DSP_P8:
     expandLoadCCond(MBB, I);
     break;
   case Mips::STORE_CCOND_DSP:
-  case Mips::STORE_CCOND_DSP_P8:
     expandStoreCCond(MBB, I);
     break;
   case Mips::LOAD_ACC64:
-  case Mips::LOAD_ACC64_P8:
   case Mips::LOAD_ACC64DSP:
-  case Mips::LOAD_ACC64DSP_P8:
     expandLoadACC(MBB, I, 4);
     break;
   case Mips::LOAD_ACC128:
-  case Mips::LOAD_ACC128_P8:
     expandLoadACC(MBB, I, 8);
     break;
   case Mips::STORE_ACC64:
-  case Mips::STORE_ACC64_P8:
   case Mips::STORE_ACC64DSP:
-  case Mips::STORE_ACC64DSP_P8:
     expandStoreACC(MBB, I, 4);
     break;
   case Mips::STORE_ACC128:
-  case Mips::STORE_ACC128_P8:
     expandStoreACC(MBB, I, 8);
     break;
   case TargetOpcode::COPY:
@@ -321,9 +313,9 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
       // one for each of the paired single precision registers.
       if (Mips::AFGR64RegClass.contains(Reg)) {
         unsigned Reg0 =
-            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_fpeven), true);
+            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_lo), true);
         unsigned Reg1 =
-            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_fpodd), true);
+            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_hi), true);
 
         if (!STI.isLittle())
           std::swap(Reg0, Reg1);

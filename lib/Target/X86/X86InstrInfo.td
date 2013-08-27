@@ -278,53 +278,52 @@ def ptr_rc_nosp : PointerLikeRegClass<1>;
 
 // *mem - Operand definitions for the funky X86 addressing mode operands.
 //
-def X86MemAsmOperand : AsmOperandClass { 
- let Name = "Mem"; let PredicateMethod = "isMem"; 
+def X86MemAsmOperand : AsmOperandClass {
+ let Name = "Mem";
 }
-def X86Mem8AsmOperand : AsmOperandClass { 
-  let Name = "Mem8"; let PredicateMethod = "isMem8";
+def X86Mem8AsmOperand : AsmOperandClass {
+  let Name = "Mem8"; let RenderMethod = "addMemOperands";
 }
-def X86Mem16AsmOperand : AsmOperandClass { 
-  let Name = "Mem16"; let PredicateMethod = "isMem16";
+def X86Mem16AsmOperand : AsmOperandClass {
+  let Name = "Mem16"; let RenderMethod = "addMemOperands";
 }
-def X86Mem32AsmOperand : AsmOperandClass { 
-  let Name = "Mem32"; let PredicateMethod = "isMem32";
+def X86Mem32AsmOperand : AsmOperandClass {
+  let Name = "Mem32"; let RenderMethod = "addMemOperands";
 }
-def X86Mem64AsmOperand : AsmOperandClass { 
-  let Name = "Mem64"; let PredicateMethod = "isMem64";
+def X86Mem64AsmOperand : AsmOperandClass {
+  let Name = "Mem64"; let RenderMethod = "addMemOperands";
 }
-def X86Mem80AsmOperand : AsmOperandClass { 
-  let Name = "Mem80"; let PredicateMethod = "isMem80";
+def X86Mem80AsmOperand : AsmOperandClass {
+  let Name = "Mem80"; let RenderMethod = "addMemOperands";
 }
-def X86Mem128AsmOperand : AsmOperandClass { 
-  let Name = "Mem128"; let PredicateMethod = "isMem128";
+def X86Mem128AsmOperand : AsmOperandClass {
+  let Name = "Mem128"; let RenderMethod = "addMemOperands";
 }
-def X86Mem256AsmOperand : AsmOperandClass { 
-  let Name = "Mem256"; let PredicateMethod = "isMem256";
+def X86Mem256AsmOperand : AsmOperandClass {
+  let Name = "Mem256"; let RenderMethod = "addMemOperands";
+}
+def X86Mem512AsmOperand : AsmOperandClass {
+  let Name = "Mem512"; let RenderMethod = "addMemOperands";
 }
 
 // Gather mem operands
 def X86MemVX32Operand : AsmOperandClass {
-  let Name = "MemVX32"; let PredicateMethod = "isMemVX32";
+  let Name = "MemVX32"; let RenderMethod = "addMemOperands";
 }
 def X86MemVY32Operand : AsmOperandClass {
-  let Name = "MemVY32"; let PredicateMethod = "isMemVY32";
-}
-def X86MemVX64Operand : AsmOperandClass {
-  let Name = "MemVX64"; let PredicateMethod = "isMemVX64";
-}
-def X86MemVY64Operand : AsmOperandClass {
-  let Name = "MemVY64"; let PredicateMethod = "isMemVY64";
-}
-
-def X86MemVZ64Operand : AsmOperandClass {
-  let Name = "MemVZ64"; let PredicateMethod = "isMemVZ64";
+  let Name = "MemVY32"; let RenderMethod = "addMemOperands";
 }
 def X86MemVZ32Operand : AsmOperandClass {
-  let Name = "MemVZ32"; let PredicateMethod = "isMemVZ32";
+  let Name = "MemVZ32"; let RenderMethod = "addMemOperands";
 }
-def X86Mem512AsmOperand : AsmOperandClass {
-  let Name = "Mem512"; let PredicateMethod = "isMem512";
+def X86MemVX64Operand : AsmOperandClass {
+  let Name = "MemVX64"; let RenderMethod = "addMemOperands";
+}
+def X86MemVY64Operand : AsmOperandClass {
+  let Name = "MemVY64"; let RenderMethod = "addMemOperands";
+}
+def X86MemVZ64Operand : AsmOperandClass {
+  let Name = "MemVZ64"; let RenderMethod = "addMemOperands";
 }
 
 def X86AbsMemAsmOperand : AsmOperandClass {
@@ -343,29 +342,29 @@ def opaque48mem : X86MemOperand<"printopaquemem">;
 def opaque80mem : X86MemOperand<"printopaquemem">;
 def opaque512mem : X86MemOperand<"printopaquemem">;
 
-def i8mem   : X86MemOperand<"printi8mem"> { 
+def i8mem   : X86MemOperand<"printi8mem"> {
   let ParserMatchClass = X86Mem8AsmOperand; }
-def i16mem  : X86MemOperand<"printi16mem"> { 
+def i16mem  : X86MemOperand<"printi16mem"> {
   let ParserMatchClass = X86Mem16AsmOperand; }
-def i32mem  : X86MemOperand<"printi32mem"> { 
+def i32mem  : X86MemOperand<"printi32mem"> {
   let ParserMatchClass = X86Mem32AsmOperand; }
-def i64mem  : X86MemOperand<"printi64mem"> { 
+def i64mem  : X86MemOperand<"printi64mem"> {
   let ParserMatchClass = X86Mem64AsmOperand; }
-def i128mem : X86MemOperand<"printi128mem"> { 
+def i128mem : X86MemOperand<"printi128mem"> {
   let ParserMatchClass = X86Mem128AsmOperand; }
-def i256mem : X86MemOperand<"printi256mem"> { 
+def i256mem : X86MemOperand<"printi256mem"> {
   let ParserMatchClass = X86Mem256AsmOperand; }
-def i512mem : X86MemOperand<"printi512mem"> { 
+def i512mem : X86MemOperand<"printi512mem"> {
   let ParserMatchClass = X86Mem512AsmOperand; }
-def f32mem  : X86MemOperand<"printf32mem"> { 
+def f32mem  : X86MemOperand<"printf32mem"> {
   let ParserMatchClass = X86Mem32AsmOperand; }
-def f64mem  : X86MemOperand<"printf64mem"> { 
+def f64mem  : X86MemOperand<"printf64mem"> {
   let ParserMatchClass = X86Mem64AsmOperand; }
-def f80mem  : X86MemOperand<"printf80mem"> { 
+def f80mem  : X86MemOperand<"printf80mem"> {
   let ParserMatchClass = X86Mem80AsmOperand; }
-def f128mem : X86MemOperand<"printf128mem"> { 
+def f128mem : X86MemOperand<"printf128mem"> {
   let ParserMatchClass = X86Mem128AsmOperand; }
-def f256mem : X86MemOperand<"printf256mem">{ 
+def f256mem : X86MemOperand<"printf256mem">{
   let ParserMatchClass = X86Mem256AsmOperand; }
 def f512mem : X86MemOperand<"printf512mem">{
   let ParserMatchClass = X86Mem512AsmOperand; }
@@ -439,16 +438,48 @@ let OperandType = "OPERAND_PCREL",
 def i32imm_pcrel : Operand<i32>;
 def i16imm_pcrel : Operand<i16>;
 
-def offset8 : Operand<i64>;
-def offset16 : Operand<i64>;
-def offset32 : Operand<i64>;
-def offset64 : Operand<i64>;
-
 // Branch targets have OtherVT type and print as pc-relative values.
 def brtarget : Operand<OtherVT>;
 def brtarget8 : Operand<OtherVT>;
 
 }
+
+def X86MemOffs8AsmOperand : AsmOperandClass {
+  let Name = "MemOffs8";
+  let RenderMethod = "addMemOffsOperands";
+  let SuperClasses = [X86Mem8AsmOperand];
+}
+def X86MemOffs16AsmOperand : AsmOperandClass {
+  let Name = "MemOffs16";
+  let RenderMethod = "addMemOffsOperands";
+  let SuperClasses = [X86Mem16AsmOperand];
+}
+def X86MemOffs32AsmOperand : AsmOperandClass {
+  let Name = "MemOffs32";
+  let RenderMethod = "addMemOffsOperands";
+  let SuperClasses = [X86Mem32AsmOperand];
+}
+def X86MemOffs64AsmOperand : AsmOperandClass {
+  let Name = "MemOffs64";
+  let RenderMethod = "addMemOffsOperands";
+  let SuperClasses = [X86Mem64AsmOperand];
+}
+
+let OperandType = "OPERAND_MEMORY" in {
+def offset8 : Operand<i64> {
+  let ParserMatchClass = X86MemOffs8AsmOperand;
+  let PrintMethod = "printMemOffs8"; }
+def offset16 : Operand<i64> {
+  let ParserMatchClass = X86MemOffs16AsmOperand;
+  let PrintMethod = "printMemOffs16"; }
+def offset32 : Operand<i64> {
+  let ParserMatchClass = X86MemOffs32AsmOperand;
+  let PrintMethod = "printMemOffs32"; }
+def offset64 : Operand<i64> {
+  let ParserMatchClass = X86MemOffs64AsmOperand;
+  let PrintMethod = "printMemOffs64"; }
+}
+
 
 def SSECC : Operand<i8> {
   let PrintMethod = "printSSECC";
@@ -1072,9 +1103,12 @@ def MOV64mi32 : RIi32<0xC7, MRM0m, (outs), (ins i64mem:$dst, i64i32imm:$src),
                       [(store i64immSExt32:$src, addr:$dst)], IIC_MOV_MEM>;
 } // SchedRW
 
+let hasSideEffects = 0 in {
+
 /// moffs8, moffs16 and moffs32 versions of moves.  The immediate is a
 /// 32-bit offset from the PC.  These are only valid in x86-32 mode.
 let SchedRW = [WriteALU] in {
+let mayLoad = 1 in {
 def MOV8o8a : Ii32 <0xA0, RawFrm, (outs), (ins offset8:$src),
                    "mov{b}\t{$src, %al|al, $src}", [], IIC_MOV_MEM>,
                    Requires<[In32BitMode]>;
@@ -1084,6 +1118,8 @@ def MOV16o16a : Ii32 <0xA1, RawFrm, (outs), (ins offset16:$src),
 def MOV32o32a : Ii32 <0xA1, RawFrm, (outs), (ins offset32:$src),
                       "mov{l}\t{$src, %eax|eax, $src}", [], IIC_MOV_MEM>,
                      Requires<[In32BitMode]>;
+}
+let mayStore = 1 in {
 def MOV8ao8 : Ii32 <0xA2, RawFrm, (outs offset8:$dst), (ins),
                    "mov{b}\t{%al, $dst|$dst, al}", [], IIC_MOV_MEM>,
                   Requires<[In32BitMode]>;
@@ -1094,34 +1130,40 @@ def MOV32ao32 : Ii32 <0xA3, RawFrm, (outs offset32:$dst), (ins),
                       "mov{l}\t{%eax, $dst|$dst, eax}", [], IIC_MOV_MEM>,
                      Requires<[In32BitMode]>;
 }
+}
 
 // These forms all have full 64-bit absolute addresses in their instructions
 // and use the movabs mnemonic to indicate this specific form.
-def MOV64o8a : RIi64_NOREX<0xA0, RawFrm, (outs), (ins offset64:$src),
+let mayLoad = 1 in {
+def MOV64o8a : RIi64_NOREX<0xA0, RawFrm, (outs), (ins offset8:$src),
                      "movabs{b}\t{$src, %al|al, $src}", []>,
                      Requires<[In64BitMode]>;
-def MOV64o16a : RIi64_NOREX<0xA1, RawFrm, (outs), (ins offset64:$src),
+def MOV64o16a : RIi64_NOREX<0xA1, RawFrm, (outs), (ins offset16:$src),
                      "movabs{w}\t{$src, %ax|ax, $src}", []>, OpSize,
                      Requires<[In64BitMode]>;
-def MOV64o32a : RIi64_NOREX<0xA1, RawFrm, (outs), (ins offset64:$src),
+def MOV64o32a : RIi64_NOREX<0xA1, RawFrm, (outs), (ins offset32:$src),
                      "movabs{l}\t{$src, %eax|eax, $src}", []>,
                      Requires<[In64BitMode]>;
 def MOV64o64a : RIi64<0xA1, RawFrm, (outs), (ins offset64:$src),
                      "movabs{q}\t{$src, %rax|rax, $src}", []>,
                      Requires<[In64BitMode]>;
+}
 
-def MOV64ao8 : RIi64_NOREX<0xA2, RawFrm, (outs offset64:$dst), (ins),
+let mayStore = 1 in {
+def MOV64ao8 : RIi64_NOREX<0xA2, RawFrm, (outs offset8:$dst), (ins),
                      "movabs{b}\t{%al, $dst|$dst, al}", []>,
                      Requires<[In64BitMode]>;
-def MOV64ao16 : RIi64_NOREX<0xA3, RawFrm, (outs offset64:$dst), (ins),
+def MOV64ao16 : RIi64_NOREX<0xA3, RawFrm, (outs offset16:$dst), (ins),
                      "movabs{w}\t{%ax, $dst|$dst, ax}", []>, OpSize,
                      Requires<[In64BitMode]>;
-def MOV64ao32 : RIi64_NOREX<0xA3, RawFrm, (outs offset64:$dst), (ins),
+def MOV64ao32 : RIi64_NOREX<0xA3, RawFrm, (outs offset32:$dst), (ins),
                      "movabs{l}\t{%eax, $dst|$dst, eax}", []>,
                      Requires<[In64BitMode]>;
 def MOV64ao64 : RIi64<0xA3, RawFrm, (outs offset64:$dst), (ins),
                      "movabs{q}\t{%rax, $dst|$dst, rax}", []>,
                      Requires<[In64BitMode]>;
+}
+} // hasSideEffects = 0
 
 let isCodeGenOnly = 1, hasSideEffects = 0, SchedRW = [WriteMove] in {
 def MOV8rr_REV : I<0x8A, MRMSrcReg, (outs GR8:$dst), (ins GR8:$src),

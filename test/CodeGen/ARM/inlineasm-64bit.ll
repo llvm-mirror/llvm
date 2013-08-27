@@ -85,3 +85,22 @@ define void @strd_test(i64* %p, i32 %lo, i32 %hi) nounwind {
   tail call void asm sideeffect "strd $0, ${0:H}, [$1]", "r,r"(i64 %4, i64* %p) nounwind
   ret void
 }
+
+; Make sure we don't untie operands by mistake.
+define i64 @tied_64bit_test(i64 %in) nounwind {
+; CHECK-LABEL: tied_64bit_test:
+; CHECK: OUT([[OUTREG:r[0-9]+]]), IN([[OUTREG]])
+  %addr = alloca i64
+  call void asm "OUT($0), IN($1)", "=*rm,0"(i64* %addr, i64 %in)
+  ret i64 %in
+}
+
+; If we explicitly name a tied operand, then the code should lookup the operand
+; we were tied to for information about register class and so on.
+define i64 @tied_64bit_lookback_test(i64 %in) nounwind {
+; CHECK-LABEL: tied_64bit_lookback_test:
+; CHECK: OUTLO([[LO:r[0-9]+]]) OUTHI([[HI:r[0-9]+]]) INLO([[LO]]) INHI([[HI]])
+  %vars = call {i64, i32, i64} asm "OUTLO(${2:Q}) OUTHI(${2:R}) INLO(${3:Q}) INHI(${3:R})", "=r,=r,=r,2"(i64 %in)
+  %res = extractvalue {i64, i32, i64} %vars, 2
+  ret i64 %res
+}

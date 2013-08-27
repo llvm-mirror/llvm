@@ -77,6 +77,7 @@ private:
   bool isLocalLoad(const LoadSDNode *N) const;
   bool isRegionLoad(const LoadSDNode *N) const;
 
+  const TargetRegisterClass *getOperandRegClass(SDNode *N, unsigned OpNo) const;
   bool SelectGlobalValueConstantOffset(SDValue Addr, SDValue& IntPtr);
   bool SelectGlobalValueVariableOffset(SDValue Addr,
       SDValue &BaseReg, SDValue& Offset);
@@ -100,6 +101,37 @@ AMDGPUDAGToDAGISel::AMDGPUDAGToDAGISel(TargetMachine &TM)
 }
 
 AMDGPUDAGToDAGISel::~AMDGPUDAGToDAGISel() {
+}
+
+/// \brief Determine the register class for \p OpNo
+/// \returns The register class of the virtual register that will be used for
+/// the given operand number \OpNo or NULL if the register class cannot be
+/// determined.
+const TargetRegisterClass *AMDGPUDAGToDAGISel::getOperandRegClass(SDNode *N,
+                                                          unsigned OpNo) const {
+  if (!N->isMachineOpcode()) {
+    return NULL;
+  }
+  switch (N->getMachineOpcode()) {
+  default: {
+    const MCInstrDesc &Desc = TM.getInstrInfo()->get(N->getMachineOpcode());
+    unsigned OpIdx = Desc.getNumDefs() + OpNo;
+    if (OpIdx >= Desc.getNumOperands())
+      return NULL;
+    int RegClass = Desc.OpInfo[OpIdx].RegClass;
+    if (RegClass == -1) {
+      return NULL;
+    }
+    return TM.getRegisterInfo()->getRegClass(RegClass);
+  }
+  case AMDGPU::REG_SEQUENCE: {
+    const TargetRegisterClass *SuperRC = TM.getRegisterInfo()->getRegClass(
+                      cast<ConstantSDNode>(N->getOperand(0))->getZExtValue());
+    unsigned SubRegIdx =
+            dyn_cast<ConstantSDNode>(N->getOperand(OpNo + 1))->getZExtValue();
+    return TM.getRegisterInfo()->getSubClassWithSubReg(SuperRC, SubRegIdx);
+  }
+  }
 }
 
 SDValue AMDGPUDAGToDAGISel::getSmallIPtrImm(unsigned int Imm) {
@@ -256,35 +288,85 @@ SDNode *AMDGPUDAGToDAGISel::Select(SDNode *N) {
     break;
   }
   case ISD::BUILD_VECTOR: {
+    unsigned RegClassID;
     const AMDGPUSubtarget &ST = TM.getSubtarget<AMDGPUSubtarget>();
-    if (ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
-      break;
+    const AMDGPURegisterInfo *TRI =
+                   static_cast<const AMDGPURegisterInfo*>(TM.getRegisterInfo());
+    const SIRegisterInfo *SIRI =
+                   static_cast<const SIRegisterInfo*>(TM.getRegisterInfo());
+    EVT VT = N->getValueType(0);
+    unsigned NumVectorElts = VT.getVectorNumElements();
+    assert(VT.getVectorElementType().bitsEq(MVT::i32));
+    if (ST.getGeneration() >= AMDGPUSubtarget::SOUTHERN_ISLANDS) {
+      bool UseVReg = true;
+      for (SDNode::use_iterator U = N->use_begin(), E = SDNode::use_end();
+                                                    U != E; ++U) {
+        if (!U->isMachineOpcode()) {
+          continue;
+        }
+        const TargetRegisterClass *RC = getOperandRegClass(*U, U.getOperandNo());
+        if (!RC) {
+          continue;
+        }
+        if (SIRI->isSGPRClass(RC)) {
+          UseVReg = false;
+        }
+      }
+      switch(NumVectorElts) {
+      case 1: RegClassID = UseVReg ? AMDGPU::VReg_32RegClassID :
+                                     AMDGPU::SReg_32RegClassID;
+        break;
+      case 2: RegClassID = UseVReg ? AMDGPU::VReg_64RegClassID :
+                                     AMDGPU::SReg_64RegClassID;
+        break;
+      case 4: RegClassID = UseVReg ? AMDGPU::VReg_128RegClassID :
+                                     AMDGPU::SReg_128RegClassID;
+        break;
+      case 8: RegClassID = UseVReg ? AMDGPU::VReg_256RegClassID :
+                                     AMDGPU::SReg_256RegClassID;
+        break;
+      case 16: RegClassID = UseVReg ? AMDGPU::VReg_512RegClassID :
+                                      AMDGPU::SReg_512RegClassID;
+        break;
+      }
+    } else {
+      // BUILD_VECTOR was lowered into an IMPLICIT_DEF + 4 INSERT_SUBREG
+      // that adds a 128 bits reg copy when going through TwoAddressInstructions
+      // pass. We want to avoid 128 bits copies as much as possible because they
+      // can't be bundled by our scheduler.
+      switch(NumVectorElts) {
+      case 2: RegClassID = AMDGPU::R600_Reg64RegClassID; break;
+      case 4: RegClassID = AMDGPU::R600_Reg128RegClassID; break;
+      default: llvm_unreachable("Do not know how to lower this BUILD_VECTOR");
+      }
     }
 
-    unsigned RegClassID;
-    switch(N->getValueType(0).getVectorNumElements()) {
-    case 2: RegClassID = AMDGPU::R600_Reg64RegClassID; break;
-    case 4: RegClassID = AMDGPU::R600_Reg128RegClassID; break;
-    default: llvm_unreachable("Do not know how to lower this BUILD_VECTOR");
+    SDValue RegClass = CurDAG->getTargetConstant(RegClassID, MVT::i32);
+
+    if (NumVectorElts == 1) {
+      return CurDAG->SelectNodeTo(N, AMDGPU::COPY_TO_REGCLASS,
+                                  VT.getVectorElementType(),
+                                  N->getOperand(0), RegClass);
     }
-    // BUILD_VECTOR is usually lowered into an IMPLICIT_DEF + 4 INSERT_SUBREG
-    // that adds a 128 bits reg copy when going through TwoAddressInstructions
-    // pass. We want to avoid 128 bits copies as much as possible because they
-    // can't be bundled by our scheduler.
-    SDValue RegSeqArgs[9] = {
-      CurDAG->getTargetConstant(RegClassID, MVT::i32),
-      SDValue(), CurDAG->getTargetConstant(AMDGPU::sub0, MVT::i32),
-      SDValue(), CurDAG->getTargetConstant(AMDGPU::sub1, MVT::i32),
-      SDValue(), CurDAG->getTargetConstant(AMDGPU::sub2, MVT::i32),
-      SDValue(), CurDAG->getTargetConstant(AMDGPU::sub3, MVT::i32)
-    };
+
+    assert(NumVectorElts <= 16 && "Vectors with more than 16 elements not "
+                                  "supported yet");
+    // 16 = Max Num Vector Elements
+    // 2 = 2 REG_SEQUENCE operands per element (value, subreg index)
+    // 1 = Vector Register Class
+    SDValue RegSeqArgs[16 * 2 + 1];
+
+    RegSeqArgs[0] = CurDAG->getTargetConstant(RegClassID, MVT::i32);
     bool IsRegSeq = true;
     for (unsigned i = 0; i < N->getNumOperands(); i++) {
+      // XXX: Why is this here?
       if (dyn_cast<RegisterSDNode>(N->getOperand(i))) {
         IsRegSeq = false;
         break;
       }
-      RegSeqArgs[2 * i + 1] = N->getOperand(i);
+      RegSeqArgs[1 + (2 * i)] = N->getOperand(i);
+      RegSeqArgs[1 + (2 * i) + 1] =
+              CurDAG->getTargetConstant(TRI->getSubRegFromChannel(i), MVT::i32);
     }
     if (!IsRegSeq)
       break;
@@ -371,29 +453,32 @@ SDNode *AMDGPUDAGToDAGISel::Select(SDNode *N) {
             continue;
           }
       } else {
-        if (!TII->isALUInstr(Use->getMachineOpcode()) ||
-            (TII->get(Use->getMachineOpcode()).TSFlags &
-            R600_InstFlag::VECTOR)) {
-          continue;
-        }
-
-        int ImmIdx = TII->getOperandIdx(Use->getMachineOpcode(),
-                                        AMDGPU::OpName::literal);
-        if (ImmIdx == -1) {
-          continue;
-        }
-
-        if (TII->getOperandIdx(Use->getMachineOpcode(),
-                               AMDGPU::OpName::dst) != -1) {
-          // subtract one from ImmIdx, because the DST operand is usually index
-          // 0 for MachineInstrs, but we have no DST in the Ops vector.
-          ImmIdx--;
+        switch(Use->getMachineOpcode()) {
+        case AMDGPU::REG_SEQUENCE: break;
+        default:
+          if (!TII->isALUInstr(Use->getMachineOpcode()) ||
+              (TII->get(Use->getMachineOpcode()).TSFlags &
+               R600_InstFlag::VECTOR)) {
+            continue;
+          }
         }
 
         // Check that we aren't already using an immediate.
         // XXX: It's possible for an instruction to have more than one
         // immediate operand, but this is not supported yet.
         if (ImmReg == AMDGPU::ALU_LITERAL_X) {
+          int ImmIdx = TII->getOperandIdx(Use->getMachineOpcode(),
+                                          AMDGPU::OpName::literal);
+          if (ImmIdx == -1) {
+            continue;
+          }
+
+          if (TII->getOperandIdx(Use->getMachineOpcode(),
+                                 AMDGPU::OpName::dst) != -1) {
+            // subtract one from ImmIdx, because the DST operand is usually index
+            // 0 for MachineInstrs, but we have no DST in the Ops vector.
+            ImmIdx--;
+          }
           ConstantSDNode *C = dyn_cast<ConstantSDNode>(Use->getOperand(ImmIdx));
           assert(C);
 

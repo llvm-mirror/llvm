@@ -35,6 +35,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MD5.h"
@@ -56,11 +57,6 @@ static cl::opt<bool> UnknownLocations(
     "use-unknown-locations", cl::Hidden,
     cl::desc("Make an absence of debug location information explicit."),
     cl::init(false));
-
-static cl::opt<bool>
-GenerateDwarfPubNamesSection("generate-dwarf-pubnames", cl::Hidden,
-                             cl::init(false),
-                             cl::desc("Generate DWARF pubnames section"));
 
 static cl::opt<bool>
 GenerateODRHash("generate-odr-hash", cl::Hidden,
@@ -104,16 +100,16 @@ SplitDwarf("split-dwarf", cl::Hidden,
                       clEnumVal(Disable, "Disabled"), clEnumValEnd),
            cl::init(Default));
 
-namespace {
-  const char *const DWARFGroupName = "DWARF Emission";
-  const char *const DbgTimerName = "DWARF Debug Writer";
+static cl::opt<DefaultOnOff>
+DwarfPubNames("generate-dwarf-pubnames", cl::Hidden,
+              cl::desc("Generate DWARF pubnames section"),
+              cl::values(clEnumVal(Default, "Default for platform"),
+                         clEnumVal(Enable, "Enabled"),
+                         clEnumVal(Disable, "Disabled"), clEnumValEnd),
+              cl::init(Default));
 
-  struct CompareFirst {
-    template <typename T> bool operator()(const T &lhs, const T &rhs) const {
-      return lhs.first < rhs.first;
-    }
-  };
-} // end anonymous namespace
+static const char *const DWARFGroupName = "DWARF Emission";
+static const char *const DbgTimerName = "DWARF Debug Writer";
 
 //===----------------------------------------------------------------------===//
 
@@ -202,28 +198,29 @@ DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
   FunctionBeginSym = FunctionEndSym = 0;
 
   // Turn on accelerator tables and older gdb compatibility
-  // for Darwin.
+  // for Darwin by default, pubnames by default for non-Darwin,
+  // and handle split dwarf.
   bool IsDarwin = Triple(A->getTargetTriple()).isOSDarwin();
-  if (DarwinGDBCompat == Default) {
-    if (IsDarwin)
-      IsDarwinGDBCompat = true;
-    else
-      IsDarwinGDBCompat = false;
-  } else
-    IsDarwinGDBCompat = DarwinGDBCompat == Enable ? true : false;
 
-  if (DwarfAccelTables == Default) {
-    if (IsDarwin)
-      HasDwarfAccelTables = true;
-    else
-      HasDwarfAccelTables = false;
-  } else
-    HasDwarfAccelTables = DwarfAccelTables == Enable ? true : false;
+  if (DarwinGDBCompat == Default)
+    IsDarwinGDBCompat = IsDarwin;
+  else
+    IsDarwinGDBCompat = DarwinGDBCompat == Enable;
+
+  if (DwarfAccelTables == Default)
+    HasDwarfAccelTables = IsDarwin;
+  else
+    HasDwarfAccelTables = DwarfAccelTables = Enable;
 
   if (SplitDwarf == Default)
     HasSplitDwarf = false;
   else
-    HasSplitDwarf = SplitDwarf == Enable ? true : false;
+    HasSplitDwarf = SplitDwarf == Enable;
+
+  if (DwarfPubNames == Default)
+    HasDwarfPubNames = !IsDarwin;
+  else
+    HasDwarfPubNames = DwarfPubNames == Enable;
 
   DwarfVersion = getDwarfVersionFromModule(MMI->getModule());
 
@@ -308,12 +305,7 @@ static bool isObjCClass(StringRef Name) {
 static bool hasObjCCategory(StringRef Name) {
   if (!isObjCClass(Name)) return false;
 
-  size_t pos = Name.find(')');
-  if (pos != std::string::npos) {
-    if (Name[pos+1] != ' ') return false;
-    return true;
-  }
-  return false;
+  return Name.find(") ") != StringRef::npos;
 }
 
 static void getObjCClassCategory(StringRef In, StringRef &Class,
@@ -625,7 +617,7 @@ DIE *DwarfDebug::constructScopeDIE(CompileUnit *TheCU, LexicalScope *Scope) {
               ImportedEntityMap::const_iterator> Range = std::equal_range(
         ScopesWithImportedEntities.begin(), ScopesWithImportedEntities.end(),
         std::pair<const MDNode *, const MDNode *>(DS, (const MDNode*)0),
-        CompareFirst());
+        less_first());
     if (Children.empty() && Range.first == Range.second)
       return NULL;
     ScopeDIE = constructLexicalScopeDIE(TheCU, Scope);
@@ -634,7 +626,10 @@ DIE *DwarfDebug::constructScopeDIE(CompileUnit *TheCU, LexicalScope *Scope) {
       constructImportedEntityDIE(TheCU, i->second, ScopeDIE);
   }
 
-  if (!ScopeDIE) return NULL;
+  if (!ScopeDIE) {
+    std::for_each(Children.begin(), Children.end(), deleter<DIE>);
+    return NULL;
+  }
 
   // Add children
   for (SmallVectorImpl<DIE *>::iterator I = Children.begin(),
@@ -797,7 +792,7 @@ void DwarfDebug::constructSubprogramDIE(CompileUnit *TheCU,
   TheCU->addToContextOwner(SubprogramDie, SP.getContext());
 
   // Expose as global, if requested.
-  if (GenerateDwarfPubNamesSection)
+  if (HasDwarfPubNames)
     TheCU->addGlobalName(SP.getName(), SubprogramDie);
 }
 
@@ -876,7 +871,7 @@ void DwarfDebug::beginModule() {
           DIImportedEntity(ImportedEntities.getElement(i)).getContext(),
           ImportedEntities.getElement(i)));
     std::sort(ScopesWithImportedEntities.begin(),
-              ScopesWithImportedEntities.end(), CompareFirst());
+              ScopesWithImportedEntities.end(), less_first());
     DIArray GVs = CUNode.getGlobalVariables();
     for (unsigned i = 0, e = GVs.getNumElements(); i != e; ++i)
       CU->createGlobalVariableDIE(GVs.getElement(i));
@@ -1146,7 +1141,7 @@ void DwarfDebug::endModule() {
   }
 
   // Emit info into a debug pubnames section, if requested.
-  if (GenerateDwarfPubNamesSection)
+  if (HasDwarfPubNames)
     emitDebugPubnames();
 
   // Emit info into a debug pubtypes section.
@@ -1932,7 +1927,7 @@ void DwarfDebug::emitSectionLabels() {
   DwarfLineSectionSym =
     emitSectionSym(Asm, TLOF.getDwarfLineSection(), "section_line");
   emitSectionSym(Asm, TLOF.getDwarfLocSection());
-  if (GenerateDwarfPubNamesSection)
+  if (HasDwarfPubNames)
     emitSectionSym(Asm, TLOF.getDwarfPubNamesSection());
   emitSectionSym(Asm, TLOF.getDwarfPubTypesSection());
   DwarfStrSectionSym =
@@ -2307,8 +2302,8 @@ void DwarfDebug::emitDebugPubnames() {
       continue;
 
     // Start the dwarf pubnames section.
-    Asm->OutStreamer.SwitchSection(
-      Asm->getObjFileLowering().getDwarfPubNamesSection());
+    Asm->OutStreamer
+        .SwitchSection(Asm->getObjFileLowering().getDwarfPubNamesSection());
 
     Asm->OutStreamer.AddComment("Length of Public Names Info");
     Asm->EmitLabelDifference(Asm->GetTempSymbol("pubnames_end", ID),
@@ -2317,7 +2312,7 @@ void DwarfDebug::emitDebugPubnames() {
     Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("pubnames_begin", ID));
 
     Asm->OutStreamer.AddComment("DWARF Version");
-    Asm->EmitInt16(DwarfVersion);
+    Asm->EmitInt16(dwarf::DW_PUBNAMES_VERSION);
 
     Asm->OutStreamer.AddComment("Offset of Compilation Unit Info");
     Asm->EmitSectionOffset(Asm->GetTempSymbol(ISec->getLabelBeginName(), ID),
@@ -2364,7 +2359,7 @@ void DwarfDebug::emitDebugPubTypes() {
                                                   TheCU->getUniqueID()));
 
     if (Asm->isVerbose()) Asm->OutStreamer.AddComment("DWARF Version");
-    Asm->EmitInt16(DwarfVersion);
+    Asm->EmitInt16(dwarf::DW_PUBTYPES_VERSION);
 
     Asm->OutStreamer.AddComment("Offset of Compilation Unit Info");
     const MCSection *ISec = Asm->getObjFileLowering().getDwarfInfoSection();

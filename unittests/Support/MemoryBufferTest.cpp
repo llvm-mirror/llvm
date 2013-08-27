@@ -112,7 +112,7 @@ void MemoryBufferTest::testGetOpenFileSlice(bool Reopen) {
   SmallString<64> TestPath;
   // Create a temporary file and write data into it.
   sys::fs::createTemporaryFile("prefix", "temp", TestFD, TestPath);
-  // OF is responsible for closing the file; If the file is not 
+  // OF is responsible for closing the file; If the file is not
   // reopened, it will be unbuffered so that the results are
   // immediately visible through the fd.
   raw_fd_ostream OF(TestFD, true, !Reopen);
@@ -128,7 +128,7 @@ void MemoryBufferTest::testGetOpenFileSlice(bool Reopen) {
   OwningBuffer Buf;
   error_code EC = MemoryBuffer::getOpenFileSlice(TestFD, TestPath.c_str(), Buf,
                                                  40000, // Size
-                                                 8000   // Offset
+                                                 80000  // Offset
                                                  );
   EXPECT_FALSE(EC);
 

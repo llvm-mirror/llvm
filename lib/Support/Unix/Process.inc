@@ -88,13 +88,10 @@ TimeValue self_process::get_system_time() const {
   return getRUsageTimes().second;
 }
 
+// On Cygwin, getpagesize() returns 64k and offset in mmap(3) should be
+// aligned to its pagesize.
 static unsigned getPageSize() {
-#if defined(__CYGWIN__)
-  // On Cygwin, getpagesize() returns 64k but the page size for the purposes of
-  // memory protection and mmap() is 4k.
-  // See http://www.cygwin.com/ml/cygwin/2009-01/threads.html#00492
-  const int page_size = 0x1000;
-#elif defined(HAVE_GETPAGESIZE)
+#if defined(HAVE_GETPAGESIZE)
   const int page_size = ::getpagesize();
 #elif defined(HAVE_SYSCONF)
   long page_size = ::sysconf(_SC_PAGE_SIZE);
@@ -138,14 +135,6 @@ void Process::GetTimeUsage(TimeValue &elapsed, TimeValue &user_time,
                            TimeValue &sys_time) {
   elapsed = TimeValue::now();
   llvm::tie(user_time, sys_time) = getRUsageTimes();
-}
-
-int Process::GetCurrentUserId() {
-  return getuid();
-}
-
-int Process::GetCurrentGroupId() {
-  return getgid();
 }
 
 #if defined(HAVE_MACH_MACH_H) && !defined(__GNU__)
@@ -248,10 +237,12 @@ unsigned Process::StandardErrColumns() {
 }
 
 #ifdef HAVE_TERMINFO
-// We manually declare these two extern functions because finding the correct
+// We manually declare these extern functions because finding the correct
 // headers from various terminfo, curses, or other sources is harder than
 // writing their specs down.
 extern "C" int setupterm(char *term, int filedes, int *errret);
+extern "C" struct term *set_curterm(struct term *termp);
+extern "C" int del_curterm(struct term *termp);
 extern "C" int tigetnum(char *capname);
 #endif
 
@@ -280,7 +271,15 @@ static bool terminalHasColors(int fd) {
   //
   // The 'tigetnum' routine returns -2 or -1 on errors, and might return 0 if
   // the terminfo says that no colors are supported.
-  if (tigetnum(const_cast<char *>("colors")) > 0)
+  bool HasColors = tigetnum(const_cast<char *>("colors")) > 0;
+
+  // Now extract the structure allocated by setupterm and free its memory
+  // through a really silly dance.
+  struct term *termp = set_curterm((struct term *)0);
+  (void)del_curterm(termp); // Drop any errors here.
+
+  // Return true if we found a color capabilities for the current terminal.
+  if (HasColors)
     return true;
 #endif
 

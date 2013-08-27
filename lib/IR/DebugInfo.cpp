@@ -647,7 +647,7 @@ void DICompositeType::setTypeArray(DIArray Elements, DIArray TParams) {
   DbgNode = N;
 }
 
-void DICompositeType::addMember(DISubprogram S) {
+void DICompositeType::addMember(DIDescriptor D) {
   SmallVector<llvm::Value *, 16> M;
   DIArray OrigM = getTypeArray();
   unsigned Elements = OrigM.getNumElements();
@@ -656,7 +656,7 @@ void DICompositeType::addMember(DISubprogram S) {
   M.reserve(Elements + 1);
   for (unsigned i = 0; i != Elements; ++i)
     M.push_back(OrigM.getElement(i));
-  M.push_back(S);
+  M.push_back(D);
   setTypeArray(DIArray(MDNode::get(DbgNode->getContext(), M)));
 }
 
@@ -923,6 +923,18 @@ void DebugInfoFinder::processModule(const Module &M) {
       DIArray RetainedTypes = CU.getRetainedTypes();
       for (unsigned i = 0, e = RetainedTypes.getNumElements(); i != e; ++i)
         processType(DIType(RetainedTypes.getElement(i)));
+      DIArray Imports = CU.getImportedEntities();
+      for (unsigned i = 0, e = Imports.getNumElements(); i != e; ++i) {
+        DIImportedEntity Import = DIImportedEntity(
+                                    Imports.getElement(i));
+        DIDescriptor Entity = Import.getEntity();
+        if (Entity.isType())
+          processType(DIType(Entity));
+        else if (Entity.isSubprogram())
+          processSubprogram(DISubprogram(Entity));
+        else if (Entity.isNameSpace())
+          processScope(DINameSpace(Entity).getContext());
+      }
       // FIXME: We really shouldn't be bailing out after visiting just one CU
       return;
     }
@@ -1005,6 +1017,19 @@ void DebugInfoFinder::processSubprogram(DISubprogram SP) {
     return;
   processScope(SP.getContext());
   processType(SP.getType());
+  DIArray TParams = SP.getTemplateParams();
+  for (unsigned I = 0, E = TParams.getNumElements(); I != E; ++I) {
+    DIDescriptor Element = TParams.getElement(I);
+    if (Element.isTemplateTypeParameter()) {
+      DITemplateTypeParameter TType(Element);
+      processScope(TType.getContext());
+      processType(TType.getType());
+    } else if (Element.isTemplateValueParameter()) {
+      DITemplateValueParameter TVal(Element);
+      processScope(TVal.getContext());
+      processType(TVal.getType());
+    }
+  }
 }
 
 /// processDeclare - Process DbgDeclareInst.

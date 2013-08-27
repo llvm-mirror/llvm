@@ -56,13 +56,19 @@ namespace llvm {
   /// Use a SparseMultiSet to track physical registers. Storage is only
   /// allocated once for the pass. It can be cleared in constant time and reused
   /// without any frees.
-  typedef SparseMultiSet<PhysRegSUOper, llvm::identity<unsigned>, uint16_t> Reg2SUnitsMap;
+  typedef SparseMultiSet<PhysRegSUOper, llvm::identity<unsigned>, uint16_t>
+  Reg2SUnitsMap;
 
   /// Use SparseSet as a SparseMap by relying on the fact that it never
   /// compares ValueT's, only unsigned keys. This allows the set to be cleared
   /// between scheduling regions in constant time as long as ValueT does not
   /// require a destructor.
   typedef SparseSet<VReg2SUnit, VirtReg2IndexFunctor> VReg2SUnitMap;
+
+  /// Track local uses of virtual registers. These uses are gathered by the DAG
+  /// builder and may be consulted by the scheduler to avoid iterating an entire
+  /// vreg use list.
+  typedef SparseMultiSet<VReg2SUnit, VirtReg2IndexFunctor> VReg2UseMap;
 
   /// ScheduleDAGInstrs - A ScheduleDAG subclass for scheduling lists of
   /// MachineInstrs.
@@ -80,10 +86,6 @@ namespace llvm {
 
     /// isPostRA flag indicates vregs cannot be present.
     bool IsPostRA;
-
-    /// UnitLatencies (misnamed) flag avoids computing def-use latencies, using
-    /// the def-side latency only.
-    bool UnitLatencies;
 
     /// The standard DAG builder does not normally include terminators as DAG
     /// nodes because it does not create the necessary dependencies to prevent
@@ -104,16 +106,17 @@ namespace llvm {
     /// The end of the range to be scheduled.
     MachineBasicBlock::iterator RegionEnd;
 
-    /// The index in BB of RegionEnd.
-    ///
-    /// This is the instruction number from the top of the current block, not
-    /// the SlotIndex. It is only used by the AntiDepBreaker and should be
-    /// removed once that client is obsolete.
-    unsigned EndIndex;
+    /// Instructions in this region (distance(RegionBegin, RegionEnd)).
+    unsigned NumRegionInstrs;
 
     /// After calling BuildSchedGraph, each machine instruction in the current
     /// scheduling region is mapped to an SUnit.
     DenseMap<MachineInstr*, SUnit*> MISUnitMap;
+
+    /// After calling BuildSchedGraph, each vreg used in the scheduling region
+    /// is mapped to a set of SUnits. These include all local vreg uses, not
+    /// just the uses for a singly defined vreg.
+    VReg2UseMap VRegUses;
 
     /// State internal to DAG building.
     /// -------------------------------
@@ -185,7 +188,7 @@ namespace llvm {
     virtual void enterRegion(MachineBasicBlock *bb,
                              MachineBasicBlock::iterator begin,
                              MachineBasicBlock::iterator end,
-                             unsigned endcount);
+                             unsigned regioninstrs);
 
     /// Notify that the scheduler has finished scheduling the current region.
     virtual void exitRegion();
@@ -193,6 +196,9 @@ namespace llvm {
     /// buildSchedGraph - Build SUnits from the MachineBasicBlock that we are
     /// input.
     void buildSchedGraph(AliasAnalysis *AA, RegPressureTracker *RPTracker = 0);
+
+    /// Compute the cyclic critical path through the DAG.
+    unsigned computeCyclicCriticalPath();
 
     /// addSchedBarrierDeps - Add dependencies from instructions in the current
     /// list of instructions being scheduled to scheduling barrier. We want to

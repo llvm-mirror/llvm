@@ -981,9 +981,6 @@ void CompileUnit::constructTypeDIE(DIE &Buffer, DICompositeType CTy) {
   case dwarf::DW_TAG_structure_type:
   case dwarf::DW_TAG_union_type:
   case dwarf::DW_TAG_class_type: {
-    if (CTy.isForwardDecl())
-      break;
-
     // Add elements to structure type.
     DIArray Elements = CTy.getTypeArray();
     for (unsigned i = 0, N = Elements.getNumElements(); i < N; ++i) {
@@ -1577,7 +1574,8 @@ DIE *CompileUnit::constructVariableDIE(DbgVariable *DV,
     addDIEEntry(VariableDie, dwarf::DW_AT_abstract_origin,
                             dwarf::DW_FORM_ref4, AbsDIE);
   else {
-    addString(VariableDie, dwarf::DW_AT_name, Name);
+    if (!Name.empty())
+      addString(VariableDie, dwarf::DW_AT_name, Name);
     addSourceLine(VariableDie, DV->getVariable());
     addType(VariableDie, DV->getType());
   }
