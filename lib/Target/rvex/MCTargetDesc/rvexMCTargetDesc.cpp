@@ -29,6 +29,7 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/TargetRegistry.h"
 
+#include "llvm/Support/CommandLine.h"
 #include "rvexReadConfig.h"
 #include <iostream>
 
@@ -59,21 +60,18 @@
   int rvexDFAStateInputTable[100][2];
 
   unsigned int rvexDFAStateEntryTable[100];
-
-  // Functional units for "rvexGenericItineraries"
-  namespace rvexGenericItinerariesFU {
-    const unsigned P0 = 1 << 0;
-    const unsigned P1 = 1 << 1;
-    const unsigned P2 = 1 << 2;
-  }
-
   llvm::InstrStage rvexStages[10];
 
+  // Functional units for "rvexGenericItineraries"
   namespace rvexGenericItinerariesFU2 {
     const unsigned P0 = 1 << 0;
     const unsigned P1 = 1 << 1;
     const unsigned P2 = 1 << 2;
     const unsigned P3 = 1 << 3;
+    const unsigned P4 = 1 << 4;
+    const unsigned P5 = 1 << 5;
+    const unsigned P6 = 1 << 6;
+    const unsigned P7 = 1 << 7;
   }
 
   extern const unsigned rvexOperandCycles[] = {
@@ -186,12 +184,14 @@ static MCCodeGenInfo *creatervexMCCodeGenInfo(StringRef TT, Reloc::Model RM,
   return X;
 }
 
+extern cl::opt<std::string>
+Config("Config", cl::desc("Path to config file"));
+
 extern "C" void LLVMInitializervexTargetMC() {
   // Register the MC asm info.
   int i;
-  string path = "/Users/mauricedaverveldt/Projects/dev/cpp/hello/hello/input";
   
-  read_config(path);
+  read_config(Config);
 
   llvm::InstrStage EndStage = { 0, 0, 0, llvm::InstrStage::Required };
   for (i = 0; i < (int)Stages.size(); i++)
