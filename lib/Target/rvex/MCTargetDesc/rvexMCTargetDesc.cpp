@@ -29,6 +29,9 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/TargetRegistry.h"
 
+#include "rvexReadConfig.h"
+#include <iostream>
+
 #define GET_INSTRINFO_MC_DESC
 #include "rvexGenInstrInfo.inc"
 
@@ -53,40 +56,9 @@
   #define DBGFIELD(x)
   #endif
 
-  int rvexDFAStateInputTable[][2] = {
-    {15, 1},    
-    {15, 2},    
-    {15, 3},    
-    {15, 4},    
-    {-1, -1},
-    {-1, -1}
-  };
+  int rvexDFAStateInputTable[100][2];
 
-  unsigned int rvexDFAStateEntryTable[] = {
-    0, 1, 2, 3, 4, 5, 
-  };
-
-/*  int rvexDFAStateInputTable[][2] = {
-    {1, 4},    {2, 2},    {3, 5},    {4, 3},    {7, 1},    
-    {1, 10},    {2, 13},    {3, 6},    {4, 8},    {7, 6},    
-    {1, 7},    {3, 7},    {4, 12},    {7, 13},    
-    {1, 11},    {2, 12},    {3, 8},    {7, 8},    
-    {2, 7},    {3, 7},    {4, 11},    {7, 10},    
-    {1, 7},    {2, 7},    {3, 7},    {4, 8},    {7, 6},    
-    {1, 9},    {2, 9},    {3, 9},    {4, 9},    {7, 9},    
-    {4, 9},    {7, 9},    
-    {1, 9},    {2, 9},    {3, 9},    {7, 9},    
-    {-1, -1},
-    {2, 9},    {3, 9},    {4, 9},    {7, 9},    
-    {2, 9},    {3, 9},    {7, 9},    
-    {1, 9},    {3, 9},    {7, 9},    
-    {1, 9},    {3, 9},    {4, 9},    {7, 9},    
-    {-1, -1}
-  };
-
-  unsigned int rvexDFAStateEntryTable[] = {
-    0, 5, 10, 14, 18, 22, 27, 32, 34, 38, 39, 43, 46, 49, 53, 
-  };*/
+  unsigned int rvexDFAStateEntryTable[100];
 
   // Functional units for "rvexGenericItineraries"
   namespace rvexGenericItinerariesFU {
@@ -95,15 +67,7 @@
     const unsigned P2 = 1 << 2;
   }
 
-  llvm::InstrStage rvexStages[] = {
-    { 0, 0, 0, llvm::InstrStage::Required }, // No itinerary
-    { 1, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
-    { 1, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1 | rvexGenericItinerariesFU::P2, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
-    { 1, rvexGenericItinerariesFU::P0, -1, (llvm::InstrStage::ReservationKinds)0 }, // 3
-    { 1, rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 4
-    { 1, rvexGenericItinerariesFU::P2, -1, (llvm::InstrStage::ReservationKinds)0 }, // 5
-    { 0, 0, 0, llvm::InstrStage::Required } // End stages
-  };
+  llvm::InstrStage rvexStages[10];
 
   namespace rvexGenericItinerariesFU2 {
     const unsigned P0 = 1 << 0;
@@ -224,52 +188,35 @@ static MCCodeGenInfo *creatervexMCCodeGenInfo(StringRef TT, Reloc::Model RM,
 
 extern "C" void LLVMInitializervexTargetMC() {
   // Register the MC asm info.
-  //rvexStages = rvexStages2;
-
-
-  llvm::InstrStage rvexStages2[] = {
-    { 0, 0, 0, llvm::InstrStage::Required }, // No itinerary
-    { 1, rvexGenericItinerariesFU2::P0 | rvexGenericItinerariesFU2::P1 | rvexGenericItinerariesFU2::P2 | rvexGenericItinerariesFU2::P3, -1, (llvm::InstrStage::ReservationKinds)0 },
-    { 0, 0, 0, llvm::InstrStage::Required } // End stages
-  };
-
   int i;
+  string path = "/Users/mauricedaverveldt/Projects/dev/cpp/hello/hello/input";
+  
+  read_config(path);
 
-  for (i = 0; i < 3; i++)
+  llvm::InstrStage EndStage = { 0, 0, 0, llvm::InstrStage::Required };
+  for (i = 0; i < (int)Stages.size(); i++)
   {
-    rvexStages[i] = rvexStages2[i];
+    llvm::InstrStage TempStage = {1, Stages[i], -1, (llvm::InstrStage::ReservationKinds)0 };
+    rvexStages[i+1] = TempStage;
+  }
+  rvexStages[i+1] = EndStage;
+
+  for (i = 0; i < (int)Itin.size(); i++)
+  {
+    llvm::InstrItinerary TempItin = {0, Itin[i], Itin[i] + 1, 0, 0};
+    rvexGenericItineraries[i + 1] = TempItin;
   }
 
+  for (i = 0; i < (int)DFAStateInputTable.size(); i++)
+  {
+    rvexDFAStateInputTable[i][0] = DFAStateInputTable[i].num1;
+    rvexDFAStateInputTable[i][1] = DFAStateInputTable[i].num2;    
+  }
 
-
-/*  llvm::InstrStage temp = {0, 0, 0, llvm::InstrStage::Required};
-  llvm::InstrStage temp1 = { 1, rvexGenericItinerariesFU2::P0 | rvexGenericItinerariesFU2::P1 | rvexGenericItinerariesFU2::P2 | rvexGenericItinerariesFU2::P3, -1, (llvm::InstrStage::ReservationKinds)0 };
-  llvm::InstrStage temp2 = {0, 0, 0, llvm::InstrStage::Required};
-
-  rvexStages[0] = temp;
-  rvexStages[1] = temp1;
-  rvexStages[2] = temp2;*/
-
-  llvm::InstrItinerary itin_temp = { 0, 0, 0, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[0] = itin_temp;
-  llvm::InstrItinerary itin_temp1 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[1] = itin_temp1;
-  llvm::InstrItinerary itin_temp2 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[2] = itin_temp2;
-  llvm::InstrItinerary itin_temp3 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[3] = itin_temp3;
-  llvm::InstrItinerary itin_temp4 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[4] = itin_temp4;
-  llvm::InstrItinerary itin_temp5 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[5] = itin_temp5;
-  llvm::InstrItinerary itin_temp6 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[6] = itin_temp6;
-  llvm::InstrItinerary itin_temp7 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[7] = itin_temp7;
-  llvm::InstrItinerary itin_temp8 = { 1, 1, 2, 0, 0 }; // 0 NoInstrModel
-  rvexGenericItineraries[8] = itin_temp8;
-    
-
+  for (i = 0; i < (int)DFAStateEntryTable.size(); i++)
+  {
+    rvexDFAStateEntryTable[i] = DFAStateEntryTable[i];
+  }
 
   RegisterMCAsmInfo<rvexELFMCAsmInfo> X(ThervexTarget);
 
