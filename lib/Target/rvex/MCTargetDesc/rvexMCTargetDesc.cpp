@@ -185,7 +185,7 @@ static MCCodeGenInfo *creatervexMCCodeGenInfo(StringRef TT, Reloc::Model RM,
 }
 
 extern cl::opt<std::string>
-Config("Config", cl::desc("Path to config file"));
+Config("config", cl::desc("Path to config file"));
 
 extern "C" void LLVMInitializervexTargetMC() {
   // Register the MC asm info.

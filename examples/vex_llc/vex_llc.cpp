@@ -71,7 +71,7 @@ static cl::opt<std::string>
 TargetTriple("mtriple", cl::desc("Override target triple for module"));
 
 static cl::opt<std::string>
-Config("Config", cl::desc("Path to config file"));
+Config("config", cl::desc("Path to config file"));
 
 cl::opt<bool> NoVerify("disable-verify", cl::Hidden,
                        cl::desc("Do not verify input module"));
