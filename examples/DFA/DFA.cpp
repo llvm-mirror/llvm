@@ -28,36 +28,6 @@
 
 using namespace llvm;
 
-//
-// class DFAPacketizerEmitter: class that generates and prints out the DFA
-// for resource tracking.
-//
-namespace {
-    class DFAPacketizerEmitter {
-    private:
-        std::string TargetName;
-        //
-        // allInsnClasses is the set of all possible resources consumed by an
-        // InstrStage.
-        //
-        DenseSet<unsigned> allInsnClasses;
-        RecordKeeper &Records;
-        
-    public:
-        DFAPacketizerEmitter(RecordKeeper &R);
-        
-        //
-        // collectAllInsnClasses: Populate allInsnClasses which is a set of units
-        // used in each stage.
-        //
-        void collectAllInsnClasses(const std::string &Name,
-                                   Record *ItinData,
-                                   unsigned &NStages,
-                                   raw_ostream &OS);
-        
-        void run(raw_ostream &OS);
-    };
-} // End anonymous namespace.
 
 //
 //
@@ -265,9 +235,6 @@ void DFA::addState(State *S) {
 
 int State::currentStateNum = 0;
 
-DFAPacketizerEmitter::DFAPacketizerEmitter(RecordKeeper &R):
-TargetName(CodeGenTarget(R).getName()),
-allInsnClasses(), Records(R) {}
 
 
 //
@@ -350,63 +317,6 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
 
 
 //
-// collectAllInsnClasses - Populate allInsnClasses which is a set of units
-// used in each stage.
-//
-void DFAPacketizerEmitter::collectAllInsnClasses(const std::string &Name,
-                                                 Record *ItinData,
-                                                 unsigned &NStages,
-                                                 raw_ostream &OS) {
-    // Collect processor itineraries.
-    std::vector<Record*> ProcItinList =
-    Records.getAllDerivedDefinitions("ProcessorItineraries");
-    
-    // If just no itinerary then don't bother.
-    if (ProcItinList.size() < 2)
-        return;
-    std::map<std::string, unsigned> NameToBitsMap;
-    
-    // Parse functional units for all the itineraries.
-    for (unsigned i = 0, N = ProcItinList.size(); i < N; ++i) {
-        Record *Proc = ProcItinList[i];
-        std::vector<Record*> FUs = Proc->getValueAsListOfDefs("FU");
-        
-        // Convert macros to bits for each stage.
-        for (unsigned i = 0, N = FUs.size(); i < N; ++i)
-            NameToBitsMap[FUs[i]->getName()] = (unsigned) (1U << i);
-    }
-    
-    const std::vector<Record*> &StageList =
-    ItinData->getValueAsListOfDefs("Stages");
-    
-    // The number of stages.
-    NStages = StageList.size();
-    
-    // For each unit.
-    unsigned UnitBitValue = 0;
-    
-    // Compute the bitwise or of each unit used in this stage.
-    for (unsigned i = 0; i < NStages; ++i) {
-        const Record *Stage = StageList[i];
-        
-        // Get unit list.
-        const std::vector<Record*> &UnitList =
-        Stage->getValueAsListOfDefs("Units");
-        
-        for (unsigned j = 0, M = UnitList.size(); j < M; ++j) {
-            // Conduct bitwise or.
-            std::string UnitName = UnitList[j]->getName();
-            assert(NameToBitsMap.count(UnitName));
-            UnitBitValue |= NameToBitsMap[UnitName];
-        }
-        
-        if (UnitBitValue != 0)
-            allInsnClasses.insert(UnitBitValue);
-    }
-}
-
-
-//
 // Run the worklist algorithm to generate the DFA.
 //
 int main (void) {
@@ -428,7 +338,6 @@ int main (void) {
 
 
     std::vector<int> isnStages;
-    int getal;
 
     isnStages.push_back(7);
     isnStages.push_back(4);
@@ -453,7 +362,7 @@ int main (void) {
     while (!WorkList.empty()) {
         State *current = WorkList.pop_back_val();
 
-        for (int i = 0; i < isnStages.size(); i++)
+        for (int i = 0; i < (int)isnStages.size(); i++) //FIXME use vector iterator for i
         {
             unsigned InsnClass = isnStages[i];
 
