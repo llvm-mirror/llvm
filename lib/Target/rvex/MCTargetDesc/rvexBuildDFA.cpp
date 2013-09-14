@@ -15,7 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CodeGenTarget.h"
+//#include "CodeGenTarget.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/TableGen/Record.h"
@@ -23,11 +23,23 @@
 #include <list>
 #include <map>
 #include <string>
-#include <iostream>
 #include <vector>
+
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
+
+#include "rvexBuildDFA.h"
+
+
 
 using namespace llvm;
 
+namespace llvm {
+    int rvexDFAStateInputTable[100][2];
+    unsigned int rvexDFAStateEntryTable[100];
+}
 
 //
 //
@@ -255,74 +267,57 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
     // in DFAStateInputTable.
     std::vector<int> StateEntry(states.size());
     
-    std::cout << "namespace llvm {\n\n";
-    std::cout << "const int " << TargetName << "DFAStateInputTable[][2] = {\n";
-    
     // Tracks the total valid transitions encountered so far. It is used
     // to construct the StateEntry table.
     int ValidTransitions = 0;
+    int counter = 0;
     for (unsigned i = 0; i < states.size(); ++i, ++SI) {
         assert (((*SI)->stateNum == (int) i) && "Mismatch in state numbers");
         StateEntry[i] = ValidTransitions;
         for (State::TransitionMap::iterator
              II = (*SI)->Transitions.begin(), IE = (*SI)->Transitions.end();
              II != IE; ++II) {
-            std::cout << "{" << II->first << ", "
-            << II->second->stateNum
-            << "},    ";
+
+
+            rvexDFAStateInputTable[counter][0] = II->first;
+            rvexDFAStateInputTable[counter][1] = II->second->stateNum;
+            counter++;
         }
         ValidTransitions += (*SI)->Transitions.size();
         
         // If there are no valid transitions from this stage, we need a sentinel
         // transition.
         if (ValidTransitions == StateEntry[i]) {
-            std::cout << SentinelEntry << ",";
+            rvexDFAStateInputTable[counter][0] = -1;
+            rvexDFAStateInputTable[counter][1] = -1;
+            counter++;
             ++ValidTransitions;
         }
         
-        std::cout << "\n";
     }
     
     // Print out a sentinel entry at the end of the StateInputTable. This is
     // needed to iterate over StateInputTable in DFAPacketizer::ReadTable()
-    std::cout << SentinelEntry << "\n";
     
-    std::cout << "};\n\n";
-    std::cout << "const unsigned int " << TargetName << "DFAStateEntryTable[] = {\n";
+    rvexDFAStateInputTable[counter][0] = -1;
+    rvexDFAStateInputTable[counter][1] = -1;
     
     // Multiply i by 2 since each entry in DFAStateInputTable is a set of
     // two numbers.
+
     for (unsigned i = 0; i < states.size(); ++i)
-        std::cout << StateEntry[i] << ", ";
+        rvexDFAStateEntryTable[i] = StateEntry[i];
     
     // Print out the index to the sentinel entry in StateInputTable
-    std::cout << ValidTransitions << ", ";
-    
-    std::cout << "\n};\n";
-    std::cout << "} // namespace\n";
-    
-    
-    //
-    // Emit DFA Packetizer tables if the target is a VLIW machine.
-    //
-    std::string SubTargetClassName = TargetName + "GenSubtargetInfo";
-    std::cout << "\n" << "#include \"llvm/CodeGen/DFAPacketizer.h\"\n";
-    std::cout << "namespace llvm {\n";
-    std::cout << "DFAPacketizer *" << SubTargetClassName << "::"
-    << "createDFAPacketizer(const InstrItineraryData *IID) const {\n"
-    << "   return new DFAPacketizer(IID, " << TargetName
-    << "DFAStateInputTable, " << TargetName << "DFAStateEntryTable);\n}\n\n";
-    std::cout << "} // End llvm namespace \n";
+    rvexDFAStateEntryTable[states.size()] = ValidTransitions;
+
 }
 
 
 //
 // Run the worklist algorithm to generate the DFA.
 //
-int main (void) {
-    
-    
-    
+int rvexBuildDFA (std::vector<int>& isnStages) {
     //
     // Run a worklist algorithm to generate the DFA.
     //
@@ -335,15 +330,6 @@ int main (void) {
     std::map<std::set<unsigned>, State*> Visited;
     
     WorkList.push_back(Initial);
-
-
-    std::vector<int> isnStages;
-
-    isnStages.push_back(3);
-    isnStages.push_back(7);
-    isnStages.push_back(1);
-    isnStages.push_back(2);
-    isnStages.push_back(4);
 
     //
     // Worklist algorithm to create a DFA for processor resource tracking.

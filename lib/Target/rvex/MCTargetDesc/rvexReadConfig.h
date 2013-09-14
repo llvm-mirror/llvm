@@ -21,8 +21,6 @@ using namespace std;
 
 extern vector<int> Stages;
 extern vector<int> Itin;
-extern vector<DFAState> DFAStateInputTable;
-extern vector<int> DFAStateEntryTable;
 
 void read_config (string ConfigFile);
 

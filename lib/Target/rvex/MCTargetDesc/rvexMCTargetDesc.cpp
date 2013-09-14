@@ -30,7 +30,9 @@
 #include "llvm/Support/TargetRegistry.h"
 
 #include "llvm/Support/CommandLine.h"
+
 #include "rvexReadConfig.h"
+#include "rvexBuildDFA.h"
 #include <iostream>
 
 #define GET_INSTRINFO_MC_DESC
@@ -56,10 +58,7 @@
   #else
   #define DBGFIELD(x)
   #endif
-
-  int rvexDFAStateInputTable[100][2];
-
-  unsigned int rvexDFAStateEntryTable[100];
+  
   llvm::InstrStage rvexStages[10];
 
   // Functional units for "rvexGenericItineraries"
@@ -207,16 +206,7 @@ extern "C" void LLVMInitializervexTargetMC() {
     rvexGenericItineraries[i + 1] = TempItin;
   }
 
-  for (i = 0; i < (int)DFAStateInputTable.size(); i++)
-  {
-    rvexDFAStateInputTable[i][0] = DFAStateInputTable[i].num1;
-    rvexDFAStateInputTable[i][1] = DFAStateInputTable[i].num2;    
-  }
-
-  for (i = 0; i < (int)DFAStateEntryTable.size(); i++)
-  {
-    rvexDFAStateEntryTable[i] = DFAStateEntryTable[i];
-  }
+  rvexBuildDFA(Stages);
 
   RegisterMCAsmInfo<rvexELFMCAsmInfo> X(ThervexTarget);
 

@@ -9,8 +9,6 @@ using namespace std;
 
 vector<int> Stages;
 vector<int> Itin;
-vector<DFAState> DFAStateInputTable;
-vector<int> DFAStateEntryTable;
 
 void read_config (string ConfigFile)
 {
@@ -76,64 +74,7 @@ void read_config (string ConfigFile)
         }
     }
     
-    //Reads one string from the file
-    b_file>> str;
-    //Should output 'this'
-    if (str == "DFAStateInputTable")
-    {
-        b_file>> str;
-        if (str == "=")
-        {
-            run = true;
-            while(run)
-            {
-                b_file>> str;
-                b_file>> str2;
-                
-                if (str2.at( str2.length() -1) == ';')
-                    run = false;
-                
-                str.erase(0,1);
-                str.erase(str.length()-1,1);
-                str2.erase(str2.length()-2,2);
-                
-                
-                getal = atoi(str.c_str());
-                getal2 = atoi(str2.c_str());
-                
-                DFAState state;
-                state.num1 = getal;
-                state.num2 = getal2;
-                
-                DFAStateInputTable.push_back (state);
-            }
-            
-        }
-    }
+
     
-    //Reads one string from the file
-    b_file>> str;
-    //Should output 'this'
-    if (str == "DFAStateEntryTable")
-    {
-        b_file>> str;
-        if (str == "=")
-        {
-            run = true;
-            while(run)
-            {
-                b_file>> str;
-                
-                if (str.at( str.length() -1) == ';')
-                    run = false;
-                
-                str.erase(str.length()-1,1);
-                
-                getal = atoi(str.c_str());
-                
-                DFAStateEntryTable.push_back (getal);
-            }
-            
-        }
-    }   
+  
 }

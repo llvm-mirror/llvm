@@ -33,15 +33,15 @@ def IIPseudo           : InstrItinClass;
 //===----------------------------------------------------------------------===//
 // http://llvm.org/docs/doxygen/html/structllvm_1_1InstrStage.html
 
-def rvexGenericItineraries : ProcessorItineraries<[P0, P1, P2, P3], [], [
-  InstrItinData<IIAlu              , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IILoad             , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IIStore            , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IIBranch           , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IIHiLo             , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IIImul             , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IIIdiv             , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IIPseudo           , [InstrStage<1,  [P0, P1, P2, P3]>]>
+def rvexGenericItineraries : ProcessorItineraries<[P0, P1, P2], [], [
+  InstrItinData<IIAlu              , [InstrStage<1,  [P0, P1]>]>,
+  InstrItinData<IILoad             , [InstrStage<1,  [P0, P1]>]>,
+  InstrItinData<IIStore            , [InstrStage<1,  [P0]>]>,
+  InstrItinData<IIBranch           , [InstrStage<1,  [P0]>]>,
+  InstrItinData<IIHiLo             , [InstrStage<1,  [P1]>]>,
+  InstrItinData<IIImul             , [InstrStage<1,  [P1]>]>,
+  InstrItinData<IIIdiv             , [InstrStage<1,  [P2]>]>,
+  InstrItinData<IIPseudo           , [InstrStage<1,  [P0, P1, P2]>]>
 ]>;
 
 /*
@@ -59,6 +59,6 @@ def rvexGenericItineraries : ProcessorItineraries<[P0, P1, P2], [], [
 // Processor itineraries
 def rvexModel : SchedMachineModel {
   // Max issue per cycle == bundle width.
-  let IssueWidth = 4;
+  let IssueWidth = 3;
   let Itineraries = rvexGenericItineraries;
 }
