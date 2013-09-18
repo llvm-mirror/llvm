@@ -7395,37 +7395,49 @@ let Constraints = "$src1 = $dst" in {
 // SHA-NI Instructions
 //===----------------------------------------------------------------------===//
 
-multiclass SHAI_binop<bits<8> Opc, string OpcodeStr> {
+multiclass SHAI_binop<bits<8> Opc, string OpcodeStr, Intrinsic IntId,
+                      bit UsesXMM0 = 0> {
   def rr : I<Opc, MRMSrcReg, (outs VR128:$dst),
              (ins VR128:$src1, VR128:$src2),
-             !strconcat(OpcodeStr, "\t{$src2, $dst|$dst, $src2}"), []>, T8;
+             !strconcat(OpcodeStr, "\t{$src2, $dst|$dst, $src2}"),
+             [!if(UsesXMM0,
+                  (set VR128:$dst, (IntId VR128:$src1, VR128:$src2, XMM0)),
+                  (set VR128:$dst, (IntId VR128:$src1, VR128:$src2)))]>, T8;
 
-  let mayLoad = 1 in
   def rm : I<Opc, MRMSrcMem, (outs VR128:$dst),
              (ins VR128:$src1, i128mem:$src2),
-             !strconcat(OpcodeStr, "\t{$src2, $dst|$dst, $src2}"), []>, T8;
+             !strconcat(OpcodeStr, "\t{$src2, $dst|$dst, $src2}"),
+             [!if(UsesXMM0,
+                  (set VR128:$dst, (IntId VR128:$src1,
+                    (bc_v4i32 (memopv2i64 addr:$src2)), XMM0)),
+                  (set VR128:$dst, (IntId VR128:$src1,
+                    (bc_v4i32 (memopv2i64 addr:$src2)))))]>, T8;
 }
 
-let Constraints = "$src1 = $dst", hasSideEffects = 0, Predicates = [HasSHA] in {
+let Constraints = "$src1 = $dst", Predicates = [HasSHA] in {
   def SHA1RNDS4rri : Ii8<0xCC, MRMSrcReg, (outs VR128:$dst),
                          (ins VR128:$src1, VR128:$src2, i8imm:$src3),
                          "sha1rnds4\t{$src3, $src2, $dst|$dst, $src2, $src3}",
-                         []>, TA;
-  let mayLoad = 1 in
+                         [(set VR128:$dst,
+                           (int_x86_sha1rnds4 VR128:$src1, VR128:$src2,
+                            (i8 imm:$src3)))]>, TA;
   def SHA1RNDS4rmi : Ii8<0xCC, MRMSrcMem, (outs VR128:$dst),
                          (ins VR128:$src1, i128mem:$src2, i8imm:$src3),
                          "sha1rnds4\t{$src3, $src2, $dst|$dst, $src2, $src3}",
-                         []>, TA;
+                         [(set VR128:$dst,
+                           (int_x86_sha1rnds4 VR128:$src1,
+                            (bc_v4i32 (memopv2i64 addr:$src2)),
+                            (i8 imm:$src3)))]>, TA;
 
-  defm SHA1NEXTE : SHAI_binop<0xC8, "sha1nexte">;
-  defm SHA1MSG1  : SHAI_binop<0xC9, "sha1msg1">;
-  defm SHA1MSG2  : SHAI_binop<0xCA, "sha1msg2">;
+  defm SHA1NEXTE : SHAI_binop<0xC8, "sha1nexte", int_x86_sha1nexte>;
+  defm SHA1MSG1  : SHAI_binop<0xC9, "sha1msg1", int_x86_sha1msg1>;
+  defm SHA1MSG2  : SHAI_binop<0xCA, "sha1msg2", int_x86_sha1msg2>;
 
   let Uses=[XMM0] in
-  defm SHA256RNDS2 : SHAI_binop<0xCB, "sha256rnds2">;
+  defm SHA256RNDS2 : SHAI_binop<0xCB, "sha256rnds2", int_x86_sha256rnds2, 1>;
 
-  defm SHA256MSG1 : SHAI_binop<0xCC, "sha256msg1">;
-  defm SHA256MSG2 : SHAI_binop<0xCD, "sha256msg2">;
+  defm SHA256MSG1 : SHAI_binop<0xCC, "sha256msg1", int_x86_sha256msg1>;
+  defm SHA256MSG2 : SHAI_binop<0xCD, "sha256msg2", int_x86_sha256msg2>;
 }
 
 // Aliases with explicit %xmm0
@@ -7704,11 +7716,11 @@ def : Pat<(vinsert128_insert:$ins (v4f64 VR256:$src1), (v2f64 VR128:$src2),
           (VINSERTF128rr VR256:$src1, VR128:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
 
-def : Pat<(vinsert128_insert:$ins (v8f32 VR256:$src1), (memopv4f32 addr:$src2),
+def : Pat<(vinsert128_insert:$ins (v8f32 VR256:$src1), (loadv4f32 addr:$src2),
                                    (iPTR imm)),
           (VINSERTF128rm VR256:$src1, addr:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
-def : Pat<(vinsert128_insert:$ins (v4f64 VR256:$src1), (memopv2f64 addr:$src2),
+def : Pat<(vinsert128_insert:$ins (v4f64 VR256:$src1), (loadv2f64 addr:$src2),
                                    (iPTR imm)),
           (VINSERTF128rm VR256:$src1, addr:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
@@ -7732,22 +7744,22 @@ def : Pat<(vinsert128_insert:$ins (v16i16 VR256:$src1), (v8i16 VR128:$src2),
           (VINSERTF128rr VR256:$src1, VR128:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
 
-def : Pat<(vinsert128_insert:$ins (v4i64 VR256:$src1), (memopv2i64 addr:$src2),
+def : Pat<(vinsert128_insert:$ins (v4i64 VR256:$src1), (loadv2i64 addr:$src2),
                                    (iPTR imm)),
           (VINSERTF128rm VR256:$src1, addr:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
 def : Pat<(vinsert128_insert:$ins (v8i32 VR256:$src1),
-                                   (bc_v4i32 (memopv2i64 addr:$src2)),
+                                   (bc_v4i32 (loadv2i64 addr:$src2)),
                                    (iPTR imm)),
           (VINSERTF128rm VR256:$src1, addr:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
 def : Pat<(vinsert128_insert:$ins (v32i8 VR256:$src1),
-                                   (bc_v16i8 (memopv2i64 addr:$src2)),
+                                   (bc_v16i8 (loadv2i64 addr:$src2)),
                                    (iPTR imm)),
           (VINSERTF128rm VR256:$src1, addr:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
 def : Pat<(vinsert128_insert:$ins (v16i16 VR256:$src1),
-                                   (bc_v8i16 (memopv2i64 addr:$src2)),
+                                   (bc_v8i16 (loadv2i64 addr:$src2)),
                                    (iPTR imm)),
           (VINSERTF128rm VR256:$src1, addr:$src2,
                          (INSERT_get_vinsert128_imm VR256:$ins))>;
@@ -7779,12 +7791,12 @@ def : Pat<(vextract128_extract:$ext VR256:$src1, (iPTR imm)),
                     (v4f64 VR256:$src1),
                     (EXTRACT_get_vextract128_imm VR128:$ext)))>;
 
-def : Pat<(alignedstore (v4f32 (vextract128_extract:$ext (v8f32 VR256:$src1),
-                                (iPTR imm))), addr:$dst),
+def : Pat<(store (v4f32 (vextract128_extract:$ext (v8f32 VR256:$src1),
+                         (iPTR imm))), addr:$dst),
           (VEXTRACTF128mr addr:$dst, VR256:$src1,
            (EXTRACT_get_vextract128_imm VR128:$ext))>;
-def : Pat<(alignedstore (v2f64 (vextract128_extract:$ext (v4f64 VR256:$src1),
-                                (iPTR imm))), addr:$dst),
+def : Pat<(store (v2f64 (vextract128_extract:$ext (v4f64 VR256:$src1),
+                         (iPTR imm))), addr:$dst),
           (VEXTRACTF128mr addr:$dst, VR256:$src1,
            (EXTRACT_get_vextract128_imm VR128:$ext))>;
 }
@@ -8010,7 +8022,7 @@ multiclass f16c_ps2ph<RegisterClass RC, X86MemOperand x86memop, Intrinsic Int> {
                TA, OpSize, VEX;
 }
 
-let Predicates = [HasAVX, HasF16C] in {
+let Predicates = [HasF16C] in {
   defm VCVTPH2PS  : f16c_ph2ps<VR128, f64mem, int_x86_vcvtph2ps_128>;
   defm VCVTPH2PSY : f16c_ph2ps<VR256, f128mem, int_x86_vcvtph2ps_256>, VEX_L;
   defm VCVTPS2PH  : f16c_ps2ph<VR128, f64mem, int_x86_vcvtps2ph_128>;

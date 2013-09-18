@@ -16,6 +16,7 @@
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ELF.h"
 using namespace llvm;
 
@@ -278,13 +279,16 @@ static SectionKind computeSectionKind(unsigned Flags) {
   return SectionKind::getDataRel();
 }
 
-static int parseSectionFlags(StringRef flagsStr) {
-  int flags = 0;
+static unsigned parseSectionFlags(StringRef flagsStr, bool *UseLastGroup) {
+  unsigned flags = 0;
 
   for (unsigned i = 0; i < flagsStr.size(); i++) {
     switch (flagsStr[i]) {
     case 'a':
       flags |= ELF::SHF_ALLOC;
+      break;
+    case 'e':
+      flags |= ELF::SHF_EXCLUDE;
       break;
     case 'x':
       flags |= ELF::SHF_EXECINSTR;
@@ -310,8 +314,11 @@ static int parseSectionFlags(StringRef flagsStr) {
     case 'G':
       flags |= ELF::SHF_GROUP;
       break;
+    case '?':
+      *UseLastGroup = true;
+      break;
     default:
-      return -1;
+      return -1U;
     }
   }
 
@@ -351,6 +358,7 @@ bool ELFAsmParser::ParseSectionArguments(bool IsPush) {
   StringRef GroupName;
   unsigned Flags = 0;
   const MCExpr *Subsection = 0;
+  bool UseLastGroup = false;
 
   // Set the defaults first.
   if (SectionName == ".fini" || SectionName == ".init" ||
@@ -376,13 +384,16 @@ bool ELFAsmParser::ParseSectionArguments(bool IsPush) {
     StringRef FlagsStr = getTok().getStringContents();
     Lex();
 
-    int extraFlags = parseSectionFlags(FlagsStr);
-    if (extraFlags < 0)
+    unsigned extraFlags = parseSectionFlags(FlagsStr, &UseLastGroup);
+    if (extraFlags == -1U)
       return TokError("unknown flag");
     Flags |= extraFlags;
 
     bool Mergeable = Flags & ELF::SHF_MERGE;
     bool Group = Flags & ELF::SHF_GROUP;
+    if (Group && UseLastGroup)
+      return TokError("Section cannot specifiy a group name while also acting "
+                      "as a member of the last group");
 
     if (getLexer().isNot(AsmToken::Comma)) {
       if (Mergeable)
@@ -458,6 +469,16 @@ EndStmt:
       Type = ELF::SHT_X86_64_UNWIND;
     else
       return TokError("unknown section type");
+  }
+
+  if (UseLastGroup) {
+    MCSectionSubPair CurrentSection = getStreamer().getCurrentSection();
+    if (const MCSectionELF *Section =
+            cast_or_null<MCSectionELF>(CurrentSection.first))
+      if (const MCSymbol *Group = Section->getGroup()) {
+        GroupName = Group->getName();
+        Flags |= ELF::SHF_GROUP;
+      }
   }
 
   SectionKind Kind = computeSectionKind(Flags);

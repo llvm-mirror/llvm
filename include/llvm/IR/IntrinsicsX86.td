@@ -2622,7 +2622,9 @@ let TargetPrefix = "x86" in {  // All intrinsics start with "llvm.x86.".
   def int_x86_xtest : GCCBuiltin<"__builtin_ia32_xtest">,
               Intrinsic<[llvm_i32_ty], [], []>;
 }
-// AVX-512
+
+//===----------------------------------------------------------------------===//
+// AVX-512 intrinsics.
 
 let TargetPrefix = "x86" in {  // All intrinsics start with "llvm.x86.".
   // Mask instructions
@@ -2878,4 +2880,25 @@ let TargetPrefix = "x86" in {
   def int_x86_avx512_and_pi : GCCBuiltin<"__builtin_ia32_avx512_andpi512">,
             Intrinsic<[llvm_v16i32_ty], [llvm_v16i32_ty, llvm_v16i32_ty],
          [IntrNoMem]>;
+}
+
+//===----------------------------------------------------------------------===//
+// SHA intrinsics
+let TargetPrefix = "x86" in {
+  def int_x86_sha1rnds4 : GCCBuiltin<"__builtin_ia32_sha1rnds4">,
+        Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v4i32_ty, llvm_i8_ty],
+                  [IntrNoMem]>;
+  def int_x86_sha1nexte : GCCBuiltin<"__builtin_ia32_sha1nexte">,
+      Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v4i32_ty], [IntrNoMem]>;
+  def int_x86_sha1msg1 : GCCBuiltin<"__builtin_ia32_sha1msg1">,
+      Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v4i32_ty], [IntrNoMem]>;
+  def int_x86_sha1msg2 : GCCBuiltin<"__builtin_ia32_sha1msg2">,
+      Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v4i32_ty], [IntrNoMem]>;
+  def int_x86_sha256rnds2 : GCCBuiltin<"__builtin_ia32_sha256rnds2">,
+      Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v4i32_ty, llvm_v4i32_ty],
+                [IntrNoMem]>;
+  def int_x86_sha256msg1 : GCCBuiltin<"__builtin_ia32_sha256msg1">,
+      Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v4i32_ty], [IntrNoMem]>;
+  def int_x86_sha256msg2 : GCCBuiltin<"__builtin_ia32_sha256msg2">,
+      Intrinsic<[llvm_v4i32_ty], [llvm_v4i32_ty, llvm_v4i32_ty], [IntrNoMem]>;
 }
