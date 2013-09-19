@@ -427,11 +427,13 @@ def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 def ADD     : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
 def SUB     : ArithLogicR<0x14, "sub ", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
 def MUL     : ArithLogicR<0x15, "mul ", mul, IIImul, CPURegs, 1, TypeIIImul>;
-def SDIV    : Div32<rvexDivRem, 0x16, "div ", IIIdiv>;
-def UDIV    : Div32<rvexDivRemU, 0x17, "divu", IIIdiv>;
+def SDIV    : Div32<rvexDivRem, 0x16, "divs", IIIdiv>;
+def UDIV    : Div32<rvexDivRemU, 0x17, "divs", IIIdiv>;
 def AND     : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
 def OR      : ArithLogicR<0x19, "or  ", or, IIAlu, CPURegs, 1, TypeIIAlu>;
 def XOR     : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
+
+
 
 def CMPEQ   : CmpInstr<0x10, "cmpeq", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
 def CMPEQi  : CmpInstrImm<0x10, "cmpeq", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
@@ -458,6 +460,8 @@ def CMPLEUi  : CmpInstrImm<0x10, "cmpleu", IIAlu, CPURegs, BRRegs,simm16, immSEx
 
 def MULT    : Mult32<0x50, "mult", IIImul>;
 def MULTu   : Mult32<0x51, "multu", IIImul>;
+
+
 
 def MFHI : MoveFromLOHI<0x40, "mfhi", CPURegs, [HI]>;
 def MFLO : MoveFromLOHI<0x41, "mflo", CPURegs, [LO]>;
@@ -531,12 +535,17 @@ def : Pat<(add CPURegs:$hi, (rvexLo tglobaladdr:$lo)),
 def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
           (ADDiu CPURegs:$gp, tglobaladdr:$in)>;
 
-def : Pat<(not CPURegs:$in),
-          (XOR CPURegs:$in, (ADDiu R0, 1))>;
+//def : Pat<(not CPURegs:$in),
+//          (XOR CPURegs:$in, (ADDiu R0, 1))>;
+
+
+def : Pat<(mul CPURegs:$rb, CPURegs:$rc),
+              (ADD (MULT CPURegs:$rb, CPURegs:$rc), (MULTu CPURegs:$rb, CPURegs:$rc))>;          
 
 def : Pat<(i32 (extloadi1  addr:$src)), (LBu addr:$src)>;
 def : Pat<(i32 (extloadi8  addr:$src)), (LBu addr:$src)>;
 def : Pat<(i32 (extloadi16_a addr:$src)), (LHu addr:$src)>;
+
 
 // brcond patterns
 multiclass BrcondPats<RegisterClass RC,

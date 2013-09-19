@@ -86,6 +86,8 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
 
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+
   setOperationAction(ISD::BR_CC,             MVT::i32, Expand);
 
   setTargetDAGCombine(ISD::SDIVREM);
