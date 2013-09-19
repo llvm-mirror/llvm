@@ -333,8 +333,8 @@ let isCall=1, hasDelaySlot=0 in {
 // Mul, Div
 class Mult<bits<8> op, string instr_asm, InstrItinClass itin,
            RegisterClass RC, list<Register> DefRegs>:
-  FL<op, (outs), (ins RC:$ra, RC:$rb),
-     !strconcat(instr_asm, "\t$ra, $rb"), [], itin, TypeIIImul> {
+  FL<op, (outs RC:$res), (ins RC:$ra, RC:$rb),
+     !strconcat(instr_asm, "\t$res = $ra, $rb"), [], itin, TypeIIImul> {
   let imm16 = 0;
   let isCommutable = 1;
   let Defs = DefRegs;
@@ -426,7 +426,7 @@ def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 /// Arithmetic Instructions (3-Operand, R-Type)
 def ADD     : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
 def SUB     : ArithLogicR<0x14, "sub ", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
-def MUL     : ArithLogicR<0x15, "mul ", mul, IIImul, CPURegs, 1, TypeIIImul>;
+//def MUL     : ArithLogicR<0x15, "mul ", mul, IIImul, CPURegs, 1, TypeIIImul>;
 def SDIV    : Div32<rvexDivRem, 0x16, "divs", IIIdiv>;
 def UDIV    : Div32<rvexDivRemU, 0x17, "divs", IIIdiv>;
 def AND     : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
@@ -458,8 +458,8 @@ def CMPLEUi  : CmpInstrImm<0x10, "cmpleu", IIAlu, CPURegs, BRRegs,simm16, immSEx
 
 
 
-def MULT    : Mult32<0x50, "mult", IIImul>;
-def MULTu   : Mult32<0x51, "multu", IIImul>;
+def MULT    : Mult32<0x50, "mpylu", IIImul>;
+def MULTu   : Mult32<0x51, "mpyhs", IIImul>;
 
 
 
@@ -535,8 +535,8 @@ def : Pat<(add CPURegs:$hi, (rvexLo tglobaladdr:$lo)),
 def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
           (ADDiu CPURegs:$gp, tglobaladdr:$in)>;
 
-//def : Pat<(not CPURegs:$in),
-//          (XOR CPURegs:$in, (ADDiu R0, 1))>;
+def : Pat<(not CPURegs:$in),
+          (XOR CPURegs:$in, (ADDiu R0, 1))>;
 
 
 def : Pat<(mul CPURegs:$rb, CPURegs:$rc),
