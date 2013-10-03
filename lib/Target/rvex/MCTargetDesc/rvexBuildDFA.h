@@ -10,8 +10,9 @@
 #define __hello__BUILDDFA__
 
 #include <vector>
+#include "rvexReadConfig.h"
 
 
-int rvexBuildDFA (std::vector<int>& isnStages);
+int rvexBuildDFA (std::vector<DFAState>& isnStages);
 
 #endif /* defined(__hello__BUILDDFA__) */

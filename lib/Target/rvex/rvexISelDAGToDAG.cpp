@@ -88,6 +88,9 @@ private:
   std::pair<SDNode*, SDNode*> SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl,
                                          EVT Ty, bool HasLo, bool HasHi);
 
+  std::pair<SDNode*, SDNode*> SelectADDC(SDNode *N, unsigned Opc, DebugLoc dl,
+                                         EVT Ty, bool HasLo, bool HasHi);
+
   SDNode *Select(SDNode *N);
   // Complex Pattern.
   bool SelectAddr(SDNode *Parent, SDValue N, SDValue &Base, SDValue &Offset);
@@ -179,6 +182,26 @@ rvexDAGToDAGISel::SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl, EVT Ty,
   return std::make_pair(Lo, Hi);
 }
 
+std::pair<SDNode*, SDNode*>
+rvexDAGToDAGISel::SelectADDC(SDNode *N, unsigned Opc, DebugLoc dl, EVT Ty,
+                             bool HasLo, bool HasHi) {
+  SDNode *Lo = 0, *Hi = 0;
+  SDNode *Mul = CurDAG->getMachineNode(Opc, dl, MVT::Glue, N->getOperand(0),
+                                       N->getOperand(1));
+  SDValue InFlag = SDValue(Mul, 0);
+
+  if (HasLo) {
+    Lo = CurDAG->getMachineNode(rvex::MFLO, dl,
+                                Ty, MVT::Glue, InFlag);
+    InFlag = SDValue(Lo, 1);
+  }
+  if (HasHi)
+    Hi = CurDAG->getMachineNode(rvex::MFHI, dl,
+                                Ty, InFlag);
+
+  return std::make_pair(Lo, Hi);
+}
+
 /// Select instructions not customized! Used for
 /// expanded, promoted and normal instructions
 SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
@@ -203,6 +226,43 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
 
   switch(Opcode) {
   default: break;
+
+
+/*
+  case ISD::ADDE: {
+    SDValue InFlag = Node->getOperand(2), CmpLHS;
+    unsigned Opc = InFlag.getOpcode(); (void)Opc;
+    assert(((Opc == ISD::ADDC || Opc == ISD::ADDE) ||
+            (Opc == ISD::SUBC || Opc == ISD::SUBE)) &&
+           "(ADD|SUB)E flag operand must come from (ADD|SUB)C/E insn");
+
+    unsigned MOp;
+    if (Opcode == ISD::ADDE) {
+      CmpLHS = InFlag.getValue(0);
+      MOp = rvex::ADDC_T;
+    } else {
+      CmpLHS = InFlag.getOperand(0);
+      MOp = rvex::ADDC_T;
+    }
+
+    SDValue Ops[] = { CmpLHS, InFlag.getOperand(1) };
+
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+
+    EVT VT = LHS.getValueType();
+
+    unsigned Sltu_op = rvex::ADDC_T;
+    SDNode *Carry = CurDAG->getMachineNode(Sltu_op, dl, VT, Ops);
+    unsigned Addu_op = rvex::ADDC_T;
+    SDNode *AddCarry = CurDAG->getMachineNode(Addu_op, dl, VT,
+                                              SDValue(Carry,0), RHS);
+
+    SDNode *Result = CurDAG->SelectNodeTo(Node, MOp, VT, MVT::Glue, LHS,
+                                          SDValue(AddCarry,0));
+    return (std::make_pair(true, Result));
+  }
+ */   
 
   case ISD::MULHS:
   case ISD::MULHU: {

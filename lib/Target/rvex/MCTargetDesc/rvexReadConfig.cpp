@@ -7,7 +7,7 @@
 
 using namespace std;
 
-vector<int> Stages;
+vector<DFAState> Stages;
 vector<int> Itin;
 
 void read_config (string ConfigFile)
@@ -34,15 +34,24 @@ void read_config (string ConfigFile)
             while(run)
             {
                 b_file>> str;
+                b_file>> str2;
                 
-                if (str.at( str.length() -1) == ';')
+                if (str2.at( str2.length() -1) == ';')
                     run = false;
                 
+                str.erase(0,1);
                 str.erase(str.length()-1,1);
+                str2.erase(str2.length()-2,2);
+                
                 
                 getal = atoi(str.c_str());
+                getal2 = atoi(str2.c_str());
                 
-                Stages.push_back (getal);
+                DFAState state;
+                state.num1 = getal;
+                state.num2 = getal2;
+                
+                Stages.push_back (state);
             }
             
         }

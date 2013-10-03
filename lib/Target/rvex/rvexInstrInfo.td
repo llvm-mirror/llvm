@@ -25,7 +25,7 @@ def SDT_rvexRet          : SDTypeProfile<0, 1, [SDTCisInt<0>]>;
 
 def SDT_rvexDivRem       : SDTypeProfile<0, 2,
                                          [SDTCisInt<0>,
-                                          SDTCisSameAs<0, 1>]>;
+                                          SDTCisSameAs<0, 1>]>;                                      
 
 def SDT_rvexJmpLink      : SDTypeProfile<0, 1, [SDTCisVT<0, iPTR>]>;
 
@@ -188,6 +188,8 @@ class ArithLogicR<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
+
+
 class CmpInstr<bits<8> op, string instr_asm, 
                InstrItinClass itin, RegisterClass RC, RegisterClass RD, 
                bit isComm = 0, CType type>:
@@ -232,7 +234,7 @@ class shift_rotate_imm<bits<8> op, bits<4> isRotate, string instr_asm,
                        SDNode OpNode, PatFrag PF, Operand ImmOpnd,
                        RegisterClass RC>:
   FA<op, (outs RC:$ra), (ins RC:$rb, ImmOpnd:$shamt),
-     !strconcat(instr_asm, "\t\t$ra = $rb, $shamt"),
+     !strconcat(instr_asm, "\t$ra = $rb, $shamt"),
      [(set RC:$ra, (OpNode RC:$rb, PF:$shamt))], IIAlu, TypeIIAlu> {
   let rc = isRotate;
   let shamt = shamt;
@@ -426,14 +428,33 @@ def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 /// Arithmetic Instructions (3-Operand, R-Type)
 def ADD     : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
 def SUB     : ArithLogicR<0x14, "sub ", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
-//def MUL     : ArithLogicR<0x15, "mul ", mul, IIImul, CPURegs, 1, TypeIIImul>;
 def SDIV    : Div32<rvexDivRem, 0x16, "divs", IIIdiv>;
 def UDIV    : Div32<rvexDivRemU, 0x17, "divs", IIIdiv>;
 def AND     : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
 def OR      : ArithLogicR<0x19, "or  ", or, IIAlu, CPURegs, 1, TypeIIAlu>;
 def XOR     : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
+// Arithmetic and logical instructions with 3 register operands.
+class ArithLogicC<bits<8> op, string instr_asm, SDNode OpNode,
+                  InstrItinClass itin, RegisterClass RC, RegisterClass RB, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins RC:$rb, RC:$rc),
+     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
+     [(set RC:$ra, RB:$co, (OpNode RC:$rb, RC:$rc))], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
 
+// (outs result, carry), (ins ra, rb, carry_in)
+def SDT_rvexAddc         : SDTypeProfile<1, 2, []>;
+def rvexAddc             : SDNode<"rvexISD::Addc", SDT_rvexAddc>;
+def rvexAdde             : SDNode<"rvexISD::Adde", SDT_rvexAddc>;   
+
+//def ADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
+//def ADDE     : ArithLogicC<0x13, "adde", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
+
+def ADDC     : ArithLogicR<0x13, "addcg_X", addc, IIAlu, CPURegs, 1, TypeIIAlu>;
+def ADDE     : ArithLogicR<0x13, "adde_X", adde, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 def CMPEQ   : CmpInstr<0x10, "cmpeq", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
 def CMPEQi  : CmpInstrImm<0x10, "cmpeq", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
@@ -461,8 +482,6 @@ def CMPLEUi  : CmpInstrImm<0x10, "cmpleu", IIAlu, CPURegs, BRRegs,simm16, immSEx
 def MULT    : Mult32<0x50, "mpylu", IIImul>;
 def MULTu   : Mult32<0x51, "mpyhs", IIImul>;
 
-
-
 def MFHI : MoveFromLOHI<0x40, "mfhi", CPURegs, [HI]>;
 def MFLO : MoveFromLOHI<0x41, "mflo", CPURegs, [LO]>;
 def MTHI : MoveToLOHI<0x42, "mthi", CPURegs, [HI]>;
@@ -470,12 +489,12 @@ def MTLO : MoveToLOHI<0x43, "mtlo", CPURegs, [LO]>;
 
 /// Shift Instructions
 // work, sra for ashr llvm IR instruction
-def SRA     : shift_rotate_imm32<0x1B, 0x00, "sra", sra>;
-def ROL     : shift_rotate_imm32<0x1C, 0x01, "rol", rotl>;
-def ROR     : shift_rotate_imm32<0x1D, 0x01, "ror", rotr>;
-def SHL     : shift_rotate_imm32<0x1E, 0x00, "shl", shl>;
+def SRA     : shift_rotate_imm32<0x1B, 0x00, "shr ", sra>;
+def ROL     : shift_rotate_imm32<0x1C, 0x01, "rol ", rotl>;
+def ROR     : shift_rotate_imm32<0x1D, 0x01, "ror ", rotr>;
+def SHL     : shift_rotate_imm32<0x1E, 0x00, "shl ", shl>;
 // work, srl for lshr llvm IR instruction
-def SHR     : shift_rotate_imm32<0x1F, 0x00, "shr", srl>;
+def SHR     : shift_rotate_imm32<0x1F, 0x00, "shru", srl>;
 
 def BR      : CBranch<0x25, "br  ", BRRegs>;
 def BRF     : CBranch<0x25, "brf ", BRRegs>;
@@ -496,7 +515,7 @@ let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
 
 //def : Pat<(rvexRet CPURegs:$target), (RET CPURegs:$target, 0x8)>;
 
-def JALR    : JumpLinkReg<0x2E, "jalr", CPURegs>;
+def JALR    : JumpLinkReg<0x2E, "icall", CPURegs>;
 
 /// No operation
 let addr=0 in
@@ -523,7 +542,7 @@ def : Pat<(rvexJmpLink (i32 tglobaladdr:$dst)),
          
 
 // hi/lo relocs
-def : Pat<(rvexHi tglobaladdr:$in), (SHL (ADDiu R0, tglobaladdr:$in), 16)>;
+def : Pat<(rvexHi tglobaladdr:$in), (MOV R0, tglobaladdr:$in)>;
 // Expect rvex add LUi support, like Mips
 //def : Pat<(rvexHi tglobaladdr:$in), (LUi tglobaladdr:$in)>;
 def : Pat<(rvexLo tglobaladdr:$in), (ADDiu R0, tglobaladdr:$in)>;

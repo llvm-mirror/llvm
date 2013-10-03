@@ -50,9 +50,12 @@ const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case rvexISD::Lo:                return "rvexISD::Lo";
   case rvexISD::GPRel:             return "rvexISD::GPRel";
   case rvexISD::Ret:               return "rvexISD::Ret";
+  case rvexISD::Addc:              return "rvexISD::Addc";
+  case rvexISD::Adde:              return "rvexISD::Adde";
   case rvexISD::DivRem:            return "rvexISD::DivRem";
   case rvexISD::DivRemU:           return "rvexISD::DivRemU";
   case rvexISD::Wrapper:           return "rvexISD::Wrapper";
+
   default:                         return NULL;
   }
 }
@@ -85,6 +88,13 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::SREM, MVT::i32, Expand);
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
+
+
+  // TODO: ADDCG support bouwen
+  //setOperationAction(ISD::ADDE, MVT::i32, Custom);
+  //setOperationAction(ISD::ADDC, MVT::i32, Custom);
+
+
 
   setOperationAction(ISD::BR_CC,             MVT::i32, Expand);
 
@@ -153,6 +163,24 @@ SDValue rvexTargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
 }
 
 SDValue rvexTargetLowering::
+LowerAddCG(SDValue Op, SelectionDAG &DAG) const
+{
+  unsigned Opc = Op.getOpcode();
+  SDNode* N = Op.getNode();
+  EVT VT = Op.getValueType();
+  DebugLoc dl = N->getDebugLoc();
+
+  SDValue SubReg0 = DAG.getTargetConstant(rvex::R0, VT);
+
+  //Reg = SDValue(SubReg0, 0);
+
+  //DEBUG(errs() << N0 << "\n" << N1 << "\n");
+  return DAG.getNode(rvexISD::Addc, dl, VT, N->getOperand(0), N->getOperand(1), SubReg0);
+  //return DAG.getNode(rvexISD::Addc, dl, VT, N->getOperand(0), N->getOperand(1));
+  //return DAG.getNode(Opc, Op.getDebugLoc(), MVT::i32, N0, N1);
+}  
+
+SDValue rvexTargetLowering::
 LowerOperation(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "I am here!\n");
@@ -161,6 +189,8 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
     default: llvm_unreachable("Don't know how to custom lower this!");
     case ISD::BRCOND:             return LowerBRCOND(Op, DAG);
     case ISD::GlobalAddress:      return LowerGlobalAddress(Op, DAG);
+    case ISD::ADDC:               return LowerAddCG(Op, DAG);
+    case ISD::ADDE:               return LowerAddCG(Op, DAG);
   }
   return SDValue();
 }
@@ -200,12 +230,12 @@ SDValue rvexTargetLowering::LowerGlobalAddress(SDValue Op,
     }
     // %hi/%lo relocation
     SDValue GAHi = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
-                                              rvexII::MO_ABS_HI);
+                                              rvexII::MO_NO_FLAG);      //Added MO_NO_FLAG so %Hi(c) is not used
     SDValue GALo = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
                                               rvexII::MO_ABS_LO);
-    SDValue HiPart = DAG.getNode(rvexISD::Hi, dl, VTs, &GAHi, 1);
-    SDValue Lo = DAG.getNode(rvexISD::Lo, dl, MVT::i32, GALo);
-    return DAG.getNode(ISD::ADD, dl, MVT::i32, HiPart, Lo);
+    //SDValue HiPart = DAG.getNode(rvexISD::Hi, dl, VTs, &GAHi, 1);
+    //SDValue Lo = DAG.getNode(rvexISD::Hi, dl, MVT::i32, GALo);
+    return DAG.getNode(rvexISD::Hi, dl, VTs, &GAHi, 1);                 //Use rvexISD::Hi pattern
   }
 
   EVT ValTy = Op.getValueType();

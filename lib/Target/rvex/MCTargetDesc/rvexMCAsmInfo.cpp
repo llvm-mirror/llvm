@@ -35,7 +35,7 @@ rvexELFMCAsmInfo::rvexELFMCAsmInfo(const Target &T, StringRef TT) {
 
   MaxInstLength = 10;
 
-  Data32bitsDirective = "\t.word\t";
+  Data32bitsDirective = "\t.data4\t";
   Data64bitsDirective = 0;
   ZeroDirective = "\t.skip\t";
 

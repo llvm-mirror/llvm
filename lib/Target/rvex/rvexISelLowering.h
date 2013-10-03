@@ -36,6 +36,9 @@ namespace llvm {
       // No relation with rvex Lo register
       Lo,
 
+      Addc,
+      Adde,
+
       // Handle gp_rel (small data/bss sections) relocation.
       GPRel,
 
@@ -46,7 +49,7 @@ namespace llvm {
 
       // DivRem(u)
       DivRem,
-      DivRemU,
+      DivRemU,    
 
       Wrapper,
       DynAlloc,
@@ -98,6 +101,8 @@ namespace llvm {
     virtual SDValue
       LowerCall(TargetLowering::CallLoweringInfo &CLI,
                 SmallVectorImpl<SDValue> &InVals) const;
+
+    SDValue LowerAddCG(SDValue Op, SelectionDAG &DAG) const;  
 
 	//- must be exist without function all
     virtual SDValue

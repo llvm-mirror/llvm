@@ -317,7 +317,7 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
 //
 // Run the worklist algorithm to generate the DFA.
 //
-int rvexBuildDFA (std::vector<int>& isnStages) {
+int rvexBuildDFA (std::vector<DFAState>& isnStages) {
     //
     // Run a worklist algorithm to generate the DFA.
     //
@@ -351,17 +351,17 @@ int rvexBuildDFA (std::vector<int>& isnStages) {
     while (!WorkList.empty()) {
         State *current = WorkList.pop_back_val();
 
-        for (std::vector<int>::iterator i = isnStages.begin(); i < isnStages.end(); i++)
+        for (std::vector<DFAState>::iterator i = isnStages.begin(); i < isnStages.end(); i++)
         {
-            unsigned InsnClass = *i;
+            DFAState InsnClass = *i;
 
             std::set<unsigned> NewStateResources;
 
-            if (!current->hasTransition(InsnClass) &&
-                current->canAddInsnClass(InsnClass))
+            if (!current->hasTransition(InsnClass.num2) &&
+                current->canAddInsnClass(InsnClass.num2))
             {
                 State *NewState = NULL;
-                current->AddInsnClass(InsnClass, NewStateResources);
+                current->AddInsnClass(InsnClass.num2, NewStateResources);
                 assert(NewStateResources.size() && "New states must be generated");
 
                 std::map<std::set<unsigned>, State*>::iterator VI;
@@ -376,7 +376,7 @@ int rvexBuildDFA (std::vector<int>& isnStages) {
                     WorkList.push_back(NewState);
                 }
 
-                current->addTransition(InsnClass, NewState);
+                current->addTransition(InsnClass.num2, NewState);
             }
 
 
