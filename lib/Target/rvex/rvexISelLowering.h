@@ -39,6 +39,9 @@ namespace llvm {
       Addc,
       Adde,
 
+      CMPLTU,
+      ADD,
+
       // Handle gp_rel (small data/bss sections) relocation.
       GPRel,
 

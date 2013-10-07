@@ -325,7 +325,7 @@ let isCall=1, hasDelaySlot=0 in {
   class JumpLinkReg<bits<8> op, string instr_asm,
                     RegisterClass RC>:
     FA<op, (outs), (ins RC:$rb, variable_ops),
-       !strconcat(instr_asm, "\t$rb"), [(rvexJmpLink RC:$rb)], IIBranch, TypeIIBranch> {
+       !strconcat(instr_asm, "\t$rb = $rb"), [(rvexJmpLink RC:$rb)], IIBranch, TypeIIBranch> {
     let rc = 0;
     let ra = 14;
     let shamt = 0;
@@ -436,25 +436,34 @@ def XOR     : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 // Arithmetic and logical instructions with 3 register operands.
 class ArithLogicC<bits<8> op, string instr_asm, SDNode OpNode,
-                  InstrItinClass itin, RegisterClass RC, RegisterClass RB, bit isComm = 0, CType type>:
-  FA<op, (outs RC:$ra), (ins RC:$rb, RC:$rc),
-     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
-     [(set RC:$ra, RB:$co, (OpNode RC:$rb, RC:$rc))], itin, type> {
+                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra, BRRegs:$co), (ins RC:$rb, RC:$rc, BRRegs:$ci),
+     !strconcat(instr_asm, "\t$ra, $co = $rb, $rc, $ci"),
+     [/*(set RC:$ra, (OpNode RC:$rb, RC:$rc, RC:$ci))*/], itin, type> {
   let shamt = 0;
   let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
 
 // (outs result, carry), (ins ra, rb, carry_in)
-def SDT_rvexAddc         : SDTypeProfile<1, 2, []>;
+def SDT_rvexAddc         : SDTypeProfile<2, 3, [//SDTCisVT<0, i32>, 
+                                              //SDTCisVT<1, i1>,
+                                              SDTCisSameAs<0, 2>,
+                                              SDTCisSameAs<0, 3>,
+                                              SDTCisInt<0>, SDTCisVT<0, i32>,
+                                              SDTCisSameAs<1,4>,
+                                              SDTCisInt<1>, SDTCisVT<1, i1>]>;
+                                              //SDTCisOpSmallerThanOp<1,2>,
+                                              //SDTCisOpSmallerThanOp<1,3>,
+                                              //SDTCisOpSmallerThanOp<4,0>]>;
 def rvexAddc             : SDNode<"rvexISD::Addc", SDT_rvexAddc>;
 def rvexAdde             : SDNode<"rvexISD::Adde", SDT_rvexAddc>;   
 
-//def ADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
-//def ADDE     : ArithLogicC<0x13, "adde", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
+def rvexADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
+def rvexADDE     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
-def ADDC     : ArithLogicR<0x13, "addcg_X", addc, IIAlu, CPURegs, 1, TypeIIAlu>;
-def ADDE     : ArithLogicR<0x13, "adde_X", adde, IIAlu, CPURegs, 1, TypeIIAlu>;
+//def ADDC     : ArithLogicR<0x13, "addcg_X", addc, IIAlu, CPURegs, 1, TypeIIAlu>;
+//def ADDE     : ArithLogicC<0x13, "adde_X", adde, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 def CMPEQ   : CmpInstr<0x10, "cmpeq", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
 def CMPEQi  : CmpInstrImm<0x10, "cmpeq", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;

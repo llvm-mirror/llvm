@@ -91,8 +91,8 @@ rvexTargetLowering(rvexTargetMachine &TM)
 
 
   // TODO: ADDCG support bouwen
-  //setOperationAction(ISD::ADDE, MVT::i32, Custom);
-  //setOperationAction(ISD::ADDC, MVT::i32, Custom);
+  setOperationAction(ISD::ADDE, MVT::i32, Custom);
+  setOperationAction(ISD::ADDC, MVT::i32, Custom);
 
 
 
@@ -170,20 +170,36 @@ LowerAddCG(SDValue Op, SelectionDAG &DAG) const
   EVT VT = Op.getValueType();
   DebugLoc dl = N->getDebugLoc();
 
-  SDValue SubReg0 = DAG.getTargetConstant(rvex::R0, VT);
+  DEBUG(errs() << "LowerADDCG!\n");
+  SDValue ADDCG;
 
-  //Reg = SDValue(SubReg0, 0);
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  SDValue Carry;
+  if (Opc == ISD::ADDC)
+  {
+    Carry = DAG.getRegister(rvex::R0, MVT::i32);
+    ADDCG = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), LHS, RHS, Carry );
+  }
+  else
+  {
+    Carry = Op.getOperand(2);
+    ADDCG = DAG.getNode(rvexISD::Adde, dl, DAG.getVTList(MVT::i32, MVT::i32), LHS, RHS, Carry );
+  }
 
-  //DEBUG(errs() << N0 << "\n" << N1 << "\n");
-  return DAG.getNode(rvexISD::Addc, dl, VT, N->getOperand(0), N->getOperand(1), SubReg0);
+  
+
+  return ADDCG;
   //return DAG.getNode(rvexISD::Addc, dl, VT, N->getOperand(0), N->getOperand(1));
   //return DAG.getNode(Opc, Op.getDebugLoc(), MVT::i32, N0, N1);
+
+
 }  
 
 SDValue rvexTargetLowering::
 LowerOperation(SDValue Op, SelectionDAG &DAG) const
 {
-  DEBUG(errs() << "I am here!\n");
+  
   switch (Op.getOpcode())
   {
     default: llvm_unreachable("Don't know how to custom lower this!");
