@@ -39,6 +39,7 @@ void read_config (string ConfigFile)
                 if (str2.at( str2.length() -1) == ';')
                     run = false;
                 
+                // Cleanup string
                 str.erase(0,1);
                 str.erase(str.length()-1,1);
                 str2.erase(str2.length()-2,2);

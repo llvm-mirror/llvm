@@ -60,11 +60,21 @@ def rvexDivRem    : SDNode<"rvexISD::DivRem", SDT_rvexDivRem,
 def rvexDivRemU   : SDNode<"rvexISD::DivRemU", SDT_rvexDivRem,
                            [SDNPOutGlue]>;
 
-//===----------------------------------------------------------------------===//
-// rvex Instruction Predicate Definitions.
-//===----------------------------------------------------------------------===//
-def RelocPIC    :     Predicate<"TM.getRelocationModel() == Reloc::PIC_">,
-                      AssemblerPredicate<"Featurervex32">;
+// Type profile for add carry generate instruction
+// (outs result, carry), (ins ra, rb, carry_in)
+def SDT_rvexAddc         : SDTypeProfile<2, 3, [//SDTCisVT<0, i32>, 
+                                              //SDTCisVT<1, i1>,
+                                              SDTCisSameAs<0, 2>,
+                                              SDTCisSameAs<0, 3>,
+                                              SDTCisInt<0>, SDTCisVT<0, i32>,
+                                              SDTCisSameAs<1,4>,
+                                              SDTCisInt<1>, SDTCisVT<1, i1>]>;
+                                              //SDTCisOpSmallerThanOp<1,2>,
+                                              //SDTCisOpSmallerThanOp<1,3>,
+                                              //SDTCisOpSmallerThanOp<4,0>]>;
+def rvexAddc             : SDNode<"rvexISD::Addc", SDT_rvexAddc>;
+def rvexAdde             : SDNode<"rvexISD::Adde", SDT_rvexAddc>;                              
+
 
 //===----------------------------------------------------------------------===//
 // rvex Operand, Complex Patterns and Transformations Definitions.
@@ -188,7 +198,26 @@ class ArithLogicR<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
+// Arithmetic and logical instructions with 2 register operands.
+class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
+                  Operand Od, PatLeaf imm_type, RegisterClass RC> :
+  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
+     !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
+     [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm16))], IIAlu, TypeIIAlu> {
+  let isReMaterializable = 1;
+}
 
+// Arithmetic and logical instructions with 3 register operands and 2 returns.
+// Used for ADDCG and DIVS
+class ArithLogicC<bits<8> op, string instr_asm, SDNode OpNode,
+                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra, BRRegs:$co), (ins RC:$rb, RC:$rc, BRRegs:$ci),
+     !strconcat(instr_asm, "\t$ra, $co = $rb, $rc, $ci"),
+     [/*(set RC:$ra, (OpNode RC:$rb, RC:$rc, RC:$ci))*/], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
 
 class CmpInstr<bits<8> op, string instr_asm, 
                InstrItinClass itin, RegisterClass RC, RegisterClass RD, 
@@ -210,14 +239,7 @@ class CmpInstrImm<bits<8> op, string instr_asm,
   let isReMaterializable = 1;
 }
 
-// Arithmetic and logical instructions with 2 register operands.
-class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
-                  Operand Od, PatLeaf imm_type, RegisterClass RC> :
-  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
-     !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
-     [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm16))], IIAlu, TypeIIAlu> {
-  let isReMaterializable = 1;
-}
+
 
 // Move immediate imm16 to register ra.
 class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
@@ -434,36 +456,11 @@ def AND     : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
 def OR      : ArithLogicR<0x19, "or  ", or, IIAlu, CPURegs, 1, TypeIIAlu>;
 def XOR     : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
-// Arithmetic and logical instructions with 3 register operands.
-class ArithLogicC<bits<8> op, string instr_asm, SDNode OpNode,
-                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
-  FA<op, (outs RC:$ra, BRRegs:$co), (ins RC:$rb, RC:$rc, BRRegs:$ci),
-     !strconcat(instr_asm, "\t$ra, $co = $rb, $rc, $ci"),
-     [/*(set RC:$ra, (OpNode RC:$rb, RC:$rc, RC:$ci))*/], itin, type> {
-  let shamt = 0;
-  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
-  let isReMaterializable = 1;
-}
 
-// (outs result, carry), (ins ra, rb, carry_in)
-def SDT_rvexAddc         : SDTypeProfile<2, 3, [//SDTCisVT<0, i32>, 
-                                              //SDTCisVT<1, i1>,
-                                              SDTCisSameAs<0, 2>,
-                                              SDTCisSameAs<0, 3>,
-                                              SDTCisInt<0>, SDTCisVT<0, i32>,
-                                              SDTCisSameAs<1,4>,
-                                              SDTCisInt<1>, SDTCisVT<1, i1>]>;
-                                              //SDTCisOpSmallerThanOp<1,2>,
-                                              //SDTCisOpSmallerThanOp<1,3>,
-                                              //SDTCisOpSmallerThanOp<4,0>]>;
-def rvexAddc             : SDNode<"rvexISD::Addc", SDT_rvexAddc>;
-def rvexAdde             : SDNode<"rvexISD::Adde", SDT_rvexAddc>;   
+
 
 def rvexADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 def rvexADDE     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
-
-//def ADDC     : ArithLogicR<0x13, "addcg_X", addc, IIAlu, CPURegs, 1, TypeIIAlu>;
-//def ADDE     : ArithLogicC<0x13, "adde_X", adde, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 def CMPEQ   : CmpInstr<0x10, "cmpeq", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
 def CMPEQi  : CmpInstrImm<0x10, "cmpeq", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;

@@ -90,7 +90,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::UREM, MVT::i32, Expand);
 
 
-  // TODO: ADDCG support bouwen
+  // Custom lowering of ADDE and ADDC
   setOperationAction(ISD::ADDE, MVT::i32, Custom);
   setOperationAction(ISD::ADDC, MVT::i32, Custom);
 
@@ -167,22 +167,24 @@ LowerAddCG(SDValue Op, SelectionDAG &DAG) const
 {
   unsigned Opc = Op.getOpcode();
   SDNode* N = Op.getNode();
-  EVT VT = Op.getValueType();
   DebugLoc dl = N->getDebugLoc();
 
   DEBUG(errs() << "LowerADDCG!\n");
   SDValue ADDCG;
 
+  // LHS and RHS contain General purpose registers
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
   SDValue Carry;
   if (Opc == ISD::ADDC)
   {
-    Carry = DAG.getRegister(rvex::R0, MVT::i32);
+    // For ADDC the branch register should be zero (Carry in is zero)
+    Carry = DAG.getNode(ISD::SETNE, dl, MVT::i32);
     ADDCG = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), LHS, RHS, Carry );
   }
   else
   {
+    // For ADDE the branch register is MVT::Glue in Operand(2) and linked to an ADDC instruction
     Carry = Op.getOperand(2);
     ADDCG = DAG.getNode(rvexISD::Adde, dl, DAG.getVTList(MVT::i32, MVT::i32), LHS, RHS, Carry );
   }
@@ -190,9 +192,19 @@ LowerAddCG(SDValue Op, SelectionDAG &DAG) const
   
 
   return ADDCG;
-  //return DAG.getNode(rvexISD::Addc, dl, VT, N->getOperand(0), N->getOperand(1));
-  //return DAG.getNode(Opc, Op.getDebugLoc(), MVT::i32, N0, N1);
+}
 
+// Custom lowering of DIV instructions
+SDValue rvexTargetLowering::
+LowerSDIV(SDValue Op, SelectionDAG &DAG) const
+{
+  DEBUG(errs() << "LowerSDIV!\n");
+  unsigned Opc = Op.getOpcode();
+  SDNode* N = Op.getNode();
+  DebugLoc dl = N->getDebugLoc();  
+  SDValue Carry = DAG.getNode(ISD::SETNE, dl, MVT::i32);
+
+  return Carry;
 
 }  
 
@@ -207,6 +219,7 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
     case ISD::GlobalAddress:      return LowerGlobalAddress(Op, DAG);
     case ISD::ADDC:               return LowerAddCG(Op, DAG);
     case ISD::ADDE:               return LowerAddCG(Op, DAG);
+    //case ISD::SDIV:               return LowerSDIV(Op, DAG);
   }
   return SDValue();
 }

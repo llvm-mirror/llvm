@@ -39,8 +39,6 @@ namespace llvm {
       Addc,
       Adde,
 
-      CMPLTU,
-      ADD,
 
       // Handle gp_rel (small data/bss sections) relocation.
       GPRel,
@@ -105,7 +103,8 @@ namespace llvm {
       LowerCall(TargetLowering::CallLoweringInfo &CLI,
                 SmallVectorImpl<SDValue> &InVals) const;
 
-    SDValue LowerAddCG(SDValue Op, SelectionDAG &DAG) const;  
+    SDValue LowerAddCG(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;  
 
 	//- must be exist without function all
     virtual SDValue

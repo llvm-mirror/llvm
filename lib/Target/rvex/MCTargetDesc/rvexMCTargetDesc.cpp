@@ -190,8 +190,10 @@ extern "C" void LLVMInitializervexTargetMC() {
   // Register the MC asm info.
   int i;
   
+  // Read configuration file
   read_config(Config);
 
+  // Init InstrStages from config file
   llvm::InstrStage EndStage = { 0, 0, 0, llvm::InstrStage::Required };
   for (i = 0; i < (int)Stages.size(); i++)
   {
@@ -200,12 +202,14 @@ extern "C" void LLVMInitializervexTargetMC() {
   }
   rvexStages[i+1] = EndStage;
 
+  // Init InstrItin from config file
   for (i = 0; i < (int)Itin.size(); i++)
   {
     llvm::InstrItinerary TempItin = {0, Itin[i], Itin[i] + 1, 0, 0};
     rvexGenericItineraries[i + 1] = TempItin;
   }
 
+  // Build VLIW DFA from config stages
   rvexBuildDFA(Stages);
 
   RegisterMCAsmInfo<rvexELFMCAsmInfo> X(ThervexTarget);

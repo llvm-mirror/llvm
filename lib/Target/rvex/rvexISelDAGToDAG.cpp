@@ -163,6 +163,7 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
 std::pair<SDNode*, SDNode*>
 rvexDAGToDAGISel::SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl, EVT Ty,
                              bool HasLo, bool HasHi) {
+  DEBUG(errs() << "SelectMULT!\n");
   SDNode *Lo = 0, *Hi = 0;
   SDNode *Mul = CurDAG->getMachineNode(Opc, dl, MVT::Glue, N->getOperand(0),
                                        N->getOperand(1));
@@ -207,17 +208,18 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
 
 
   
-
+  // Select correct pattern for rvexADDC instruction
   case rvexISD::Addc: {
     DEBUG(errs() << "SelectADDc!\n");
     SDValue LHS = Node->getOperand(0);
     SDValue RHS = Node->getOperand(1);
-    SDValue Cin = Node->getOperand(1);
+    SDValue Cin = Node->getOperand(2);
     return CurDAG->getMachineNode(rvex::rvexADDC, dl, MVT::i32, MVT::i32,
                                   LHS, RHS, Cin);
     break;
   }
 
+  // Select correct pattern for rvexADDE instruction
   case rvexISD::Adde: {
     DEBUG(errs() << "SelectADDe!\n");
     SDValue LHS = Node->getOperand(0);
