@@ -38,6 +38,13 @@ namespace llvm {
 
       Addc,
       Adde,
+      Divs,
+      Orc,
+
+      Max,
+      Maxu,
+      Min,
+      Minu,
 
 
       // Handle gp_rel (small data/bss sections) relocation.
@@ -104,7 +111,8 @@ namespace llvm {
                 SmallVectorImpl<SDValue> &InVals) const;
 
     SDValue LowerAddCG(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;  
+    SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerUDIV(SDValue Op, SelectionDAG &DAG) const;  
 
 	//- must be exist without function all
     virtual SDValue

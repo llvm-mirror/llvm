@@ -261,10 +261,12 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
   const MCInstrDesc &MCIDI = I->getDesc();
   const MCInstrDesc &MCIDJ = J->getDesc();
 
+  DEBUG(errs() << "i en j:" << I->getOpcode() << " " << J->getOpcode() <<"\n");
   //In the case of rvex, two control flow instructions cannot have resource
   //in the same time.
 
   if(SUJ->isSucc(SUI)) {
+    DEBUG(errs() << "succ: i en j:" << I->getOpcode() << " " << J->getOpcode() <<"\n");
     //FIXME: is Succs not a set? -- use the loop only to find the index...
     for(unsigned i = 0;
         (i < SUJ->Succs.size()) && !FoundSequentialDependence;
@@ -303,9 +305,15 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
         // do nothing
       }
 
+      else if(DepType == SDep::Data) {
+        DEBUG(errs() << "data \n");
+        FoundSequentialDependence = true;
+      }
+
       // zero-reg can be targeted by multiple instructions
       else if(DepType == SDep::Output && DepReg != rvex::R0) {
-        FoundSequentialDependence = true;
+        DEBUG(errs() << "zero reg\n");
+        //FoundSequentialDependence = true;
       }
 
       else if(DepType == SDep::Order && Dep.isArtificial()) {
@@ -316,16 +324,18 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
       // Skip over anti-dependences. Two instructions that are
       // anti-dependent can share a packet
       else if(DepType != SDep::Anti) {
-        FoundSequentialDependence = true;
+        DEBUG(errs() << "anti dependencies\n");
+        //FoundSequentialDependence = true;
       }
     }
 
     if(FoundSequentialDependence) {
       Dependence = true;
+      DEBUG(errs() << "false\n");
       return false;
     }
   }
-
+  DEBUG(errs() << "true\n");
   return true;
 }
 

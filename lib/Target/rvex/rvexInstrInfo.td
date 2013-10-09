@@ -73,7 +73,9 @@ def SDT_rvexAddc         : SDTypeProfile<2, 3, [//SDTCisVT<0, i32>,
                                               //SDTCisOpSmallerThanOp<1,3>,
                                               //SDTCisOpSmallerThanOp<4,0>]>;
 def rvexAddc             : SDNode<"rvexISD::Addc", SDT_rvexAddc>;
-def rvexAdde             : SDNode<"rvexISD::Adde", SDT_rvexAddc>;                              
+def rvexAdde             : SDNode<"rvexISD::Adde", SDT_rvexAddc>;
+
+def rvexDivs             : SDNode<"rvexISD::Divs", SDT_rvexAddc>;                              
 
 
 //===----------------------------------------------------------------------===//
@@ -368,17 +370,7 @@ class Mult<bits<8> op, string instr_asm, InstrItinClass itin,
 class Mult32<bits<8> op, string instr_asm, InstrItinClass itin>:
   Mult<op, instr_asm, itin, CPURegs, [HI, LO]>;
 
-class Div<SDNode opNode, bits<8> op, string instr_asm, InstrItinClass itin,
-          RegisterClass RC, list<Register> DefRegs>:
-  FL<op, (outs), (ins RC:$ra, RC:$rb),
-     !strconcat(instr_asm, "\t$ra, $rb"),
-     [(opNode RC:$ra, RC:$rb)], itin, TypeIIIdiv> {
-  let imm16 = 0;
-  let Defs = DefRegs;
-}
 
-class Div32<SDNode opNode, bits<8> op, string instr_asm, InstrItinClass itin>:
-  Div<opNode, op, instr_asm, itin, CPURegs, [HI, LO]>;
 
 // Move from Hi/Lo
 class MoveFromLOHI<bits<8> op, string instr_asm, RegisterClass RC,
@@ -450,14 +442,37 @@ def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 /// Arithmetic Instructions (3-Operand, R-Type)
 def ADD     : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
 def SUB     : ArithLogicR<0x14, "sub ", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
-def SDIV    : Div32<rvexDivRem, 0x16, "divs", IIIdiv>;
-def UDIV    : Div32<rvexDivRemU, 0x17, "divs", IIIdiv>;
 def AND     : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
 def OR      : ArithLogicR<0x19, "or  ", or, IIAlu, CPURegs, 1, TypeIIAlu>;
 def XOR     : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
+def rvexORC     : SDNode<"rvexISD::Orc", SDTIntBinOp, []>;
+def rvexMAX     : SDNode<"rvexISD::Max", SDTIntBinOp, []>;
+def rvexMAXU    : SDNode<"rvexISD::Maxu", SDTIntBinOp, []>;
+def rvexMIN     : SDNode<"rvexISD::Min", SDTIntBinOp, []>;
+def rvexMINU    : SDNode<"rvexISD::Minu", SDTIntBinOp, []>;
+def ORC     : ArithLogicR<0x1A, "orc ", rvexORC, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MAX     : ArithLogicR<0x1A, "max ", rvexMAX, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MAXU    : ArithLogicR<0x1A, "maxu", rvexMAXU, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MIN     : ArithLogicR<0x1A, "min ", rvexMIN, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MINU    : ArithLogicR<0x1A, "minu", rvexMINU, IIAlu, CPURegs, 1, TypeIIAlu>;
+
+// Arithmetic and logical instructions with 3 register operands and 2 returns.
+// Used for ADDCG and DIVS
+class SelectRR<bits<8> op, string instr_asm, SDNode OpNode,
+                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins BRRegs:$ci, RC:$rb, RC:$rc),
+     !strconcat(instr_asm, "\t$ra = $ci, $rb, $rc"),
+     [(set RC:$ra, (OpNode BRRegs:$ci, RC:$rb, RC:$rc))], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
+
+def SLCT  : SelectRR<0x1A, "slct", select, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
 
+def rvexDIVS     : ArithLogicC<0x13, "divs ", rvexDivs, IIIdiv, CPURegs, BRRegs, 1, TypeIIIdiv>;
 
 def rvexADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 def rvexADDE     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;

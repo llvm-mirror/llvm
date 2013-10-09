@@ -76,8 +76,9 @@ copyPhysReg(MachineBasicBlock &MBB,
       Opc = rvex::MTLO, DestReg = 0;
     // Only possibility in (DestReg==SW, SrcReg==rvexRegs) is 
     //  cmp $SW, $ZERO, $rc
-    else if (DestReg == rvex::B0)
-      Opc = rvex::CMPEQ, ZeroReg = rvex::R0;
+    //FIXME Moet werken voor alle branch registers
+    else if (rvex::BRRegsRegClass.contains(DestReg))
+      Opc = rvex::CMPNEQ, ZeroReg = rvex::R0;
   }
 
   assert(Opc && "Cannot copy registers");

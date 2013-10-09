@@ -168,7 +168,7 @@ rvexDAGToDAGISel::SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl, EVT Ty,
   SDNode *Mul = CurDAG->getMachineNode(Opc, dl, MVT::Glue, N->getOperand(0),
                                        N->getOperand(1));
   SDValue InFlag = SDValue(Mul, 0);
-
+/*
   if (HasLo) {
     Lo = CurDAG->getMachineNode(rvex::MFLO, dl,
                                 Ty, MVT::Glue, InFlag);
@@ -177,7 +177,7 @@ rvexDAGToDAGISel::SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl, EVT Ty,
   if (HasHi)
     Hi = CurDAG->getMachineNode(rvex::MFHI, dl,
                                 Ty, InFlag);
-
+*/
   return std::make_pair(Lo, Hi);
 }
 
@@ -230,12 +230,67 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
     break;
   }
 
+  case rvexISD::Orc: {
+    DEBUG(errs() << "SelectORC!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::ORC, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+
+  case rvexISD::Max: {
+    DEBUG(errs() << "SelectMAX!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::MAX, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+  case rvexISD::Maxu: {
+    DEBUG(errs() << "SelectMAXU!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::MAXU, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+  case rvexISD::Min: {
+    DEBUG(errs() << "SelectMIN!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::MIN, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+  case rvexISD::Minu: {
+    DEBUG(errs() << "SelectMINU!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::MINU, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+
+  // Select correct pattern for rvexDIVS instruction
+  case rvexISD::Divs: {
+    DEBUG(errs() << "SelectDIVS!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    SDValue Cin = Node->getOperand(2);
+    return CurDAG->getMachineNode(rvex::rvexDIVS, dl, MVT::i32, MVT::i32,
+                                  LHS, RHS, Cin);
+    break;
+  }
+
   
 
   case ISD::MULHS:
   case ISD::MULHU: {
     MultOpc = (Opcode == ISD::MULHU ? rvex::MULTu : rvex::MULT);
-    return SelectMULT(Node, MultOpc, dl, NodeTy, false, true).second;
+    return CurDAG->getMachineNode(rvex::MULTu, dl, MVT::i32, Node->getOperand(0),
+                                       Node->getOperand(1));
+    //return SelectMULT(Node, MultOpc, dl, NodeTy, false, true).second;
   }
 
   // Get target GOT address.
