@@ -47,6 +47,10 @@ namespace llvm {
       Minu,
       Slct,
 
+      Mpyllu,
+      Mpylhu,
+      Mpyhhu,
+
 
       // Handle gp_rel (small data/bss sections) relocation.
       GPRel,
@@ -114,6 +118,8 @@ namespace llvm {
     SDValue LowerAddCG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerUDIV(SDValue Op, SelectionDAG &DAG) const;  
+    SDValue LowerMULHS(SDValue Op, SelectionDAG &DAG) const;  
+    SDValue LowerMULHU(SDValue Op, SelectionDAG &DAG) const;  
 
 	//- must be exist without function all
     virtual SDValue

@@ -62,6 +62,10 @@ const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case rvexISD::Minu:              return "rvexISD::Minu";
   case rvexISD::Slct:              return "RvexISD::Slct";
 
+  case rvexISD::Mpyllu:            return "RvexISD::Mpyllu";
+  case rvexISD::Mpylhu:            return "RvexISD::Mpylhu";
+  case rvexISD::Mpyhhu:            return "RvexISD::Mpyhhu";
+
   case rvexISD::DivRem:            return "rvexISD::DivRem";
   case rvexISD::DivRemU:           return "rvexISD::DivRemU";
   case rvexISD::Wrapper:           return "rvexISD::Wrapper";
@@ -100,10 +104,12 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::UDIV, MVT::i32, Custom);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
 
-  setOperationAction(ISD::MULHU, MVT::i32, Expand);
-  setOperationAction(ISD::MULHS, MVT::i32, Expand);
-  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);  
-  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);  
+  setOperationAction(ISD::MULHU, MVT::i32, Custom);
+  setOperationAction(ISD::MULHS, MVT::i32, Custom);
+  //setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);  
+  //setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+
+    
 
 
   // Custom lowering of ADDE and ADDC
@@ -397,6 +403,40 @@ LowerSDIV(SDValue Op, SelectionDAG &DAG) const
   
   return DIVS;
 
+}
+
+SDValue rvexTargetLowering::
+LowerMULHU(SDValue Op, SelectionDAG &DAG) const
+{
+  DEBUG(errs() << "LowerMULHS!\n");
+  unsigned Opc = Op.getOpcode();
+  SDNode* N = Op.getNode();
+  DebugLoc dl = N->getDebugLoc();
+
+  return DAG.getNode(rvex::NOP, dl, MVT::i32);
+}  
+
+SDValue rvexTargetLowering::
+LowerMULHS(SDValue Op, SelectionDAG &DAG) const
+{
+  DEBUG(errs() << "LowerMULHU!\n");
+  unsigned Opc = Op.getOpcode();
+  SDNode* N = Op.getNode();
+  DebugLoc dl = N->getDebugLoc();
+
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+
+  SDValue ShiftImm = DAG.getTargetConstant(16, MVT::i32);
+  SDValue MaskImm = DAG.getTargetConstant(0xffff, MVT::i32);
+
+  SDValue t, w3, k;
+
+  t = DAG.getNode(rvexISD::Mpyllu, dl, MVT::i32, LHS, RHS);
+  w3 = DAG.getNode(ISD::AND, dl, MVT::i32, t, MaskImm);
+  k = DAG.getNode(ISD::SRL, dl, MVT::i32, t, ShiftImm);
+
+  return k;
 }  
 
 SDValue rvexTargetLowering::
@@ -412,7 +452,9 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
     case ISD::ADDE:               return LowerAddCG(Op, DAG);
     case ISD::UDIV:               return LowerUDIV(Op, DAG);
     case ISD::SDIV:               return LowerSDIV(Op, DAG);
-    //case ISD::SDIV:               return LowerSDIV(Op, DAG);
+
+    case ISD::MULHS:              return LowerMULHS(Op, DAG);
+    case ISD::MULHU:              return LowerMULHU(Op, DAG);
   }
   return SDValue();
 }

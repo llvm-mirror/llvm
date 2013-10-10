@@ -145,9 +145,6 @@ def immZExt16  : PatLeaf<(imm), [{
     return (uint64_t)N->getZExtValue() == (unsigned short)N->getZExtValue();
 }]>;
 
-// shamt field must fit in 5 bits.
-def immZExt5 : ImmLeaf<i32, [{return Imm == (Imm & 0x1f);}]>;
-
 // rvex Address Mode! SDNode frameindex could possibily be a match
 // since load and store instructions from stack used it.
 def addr : ComplexPattern<iPTR, 2, "SelectAddr", [frameindex], [SDNPWantParent]>;
@@ -237,11 +234,11 @@ class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
 
 // Shifts
 class shift_rotate_imm<bits<8> op, bits<4> isRotate, string instr_asm,
-                       SDNode OpNode, PatFrag PF, Operand ImmOpnd,
+                       SDNode OpNode, Operand ImmOpnd,
                        RegisterClass RC>:
-  FA<op, (outs RC:$ra), (ins RC:$rb, ImmOpnd:$shamt),
+  FA<op, (outs RC:$ra), (ins RC:$rb, RC:$shamt),
      !strconcat(instr_asm, "\t$ra = $rb, $shamt"),
-     [(set RC:$ra, (OpNode RC:$rb, PF:$shamt))], IIAlu, TypeIIAlu> {
+     [(set RC:$ra, (OpNode RC:$rb, RC:$shamt))], IIAlu, TypeIIAlu> {
   let rc = isRotate;
   let shamt = shamt;
 }
@@ -249,7 +246,7 @@ class shift_rotate_imm<bits<8> op, bits<4> isRotate, string instr_asm,
 // 32-bit shift instructions.
 class shift_rotate_imm32<bits<8> func, bits<4> isRotate, string instr_asm,
                          SDNode OpNode>:
-  shift_rotate_imm<func, isRotate, instr_asm, OpNode, immZExt5, shamt, CPURegs>;
+  shift_rotate_imm<func, isRotate, instr_asm, OpNode, shamt, CPURegs>;
 
 // Load Upper Imediate
 class LoadUpper<bits<8> op, string instr_asm, RegisterClass RC, Operand Imm>:
@@ -464,7 +461,13 @@ def rvexADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 
 def rvexADDE     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
 
+def rvexMpyllu    : SDNode<"rvexISD::Mpyllu", SDTIntBinOp, []>;
+def rvexMpylhu    : SDNode<"rvexISD::Mpylhu", SDTIntBinOp, []>;
+def rvexMpyhhu    : SDNode<"rvexISD::Mpyhhu", SDTIntBinOp, []>;
 
+def rvexMPYLLU    : ArithLogicR<0x1A, "mpylly ", rvexMpyllu, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLHU    : ArithLogicR<0x1A, "mpylhy ", rvexMpylhu, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYHHU    : ArithLogicR<0x1A, "mpyhhy ", rvexMpyhhu, IIImul, CPURegs, 1, TypeIIImul>;
 
 
 def MULT    : Mult32<0x50, "mpylu", IIImul>;
