@@ -111,6 +111,10 @@ AddCodeToMergeInOperand(Record *R, BitsInit *BI, const std::string &VarName,
       }
     }
 
+    // edit
+    if (NumberedOp >= NumberOps)
+        return;
+
     OpIdx = NumberedOp++;
   }
   

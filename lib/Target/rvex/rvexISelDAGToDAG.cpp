@@ -230,6 +230,15 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
     break;
   }
 
+  case rvexISD::Slct: {
+    DEBUG(errs() << "SelectSLCT!\n");
+    SDValue COND = Node->getOperand(0);
+    SDValue LHS = Node->getOperand(1);
+    SDValue RHS = Node->getOperand(2);
+    return CurDAG->getMachineNode(rvex::SLCT, dl, MVT::i32, COND, LHS, RHS);
+    break;    
+  }
+
   case rvexISD::Orc: {
     DEBUG(errs() << "SelectORC!\n");
     SDValue LHS = Node->getOperand(0);

@@ -45,6 +45,7 @@ namespace llvm {
       Maxu,
       Min,
       Minu,
+      Slct,
 
 
       // Handle gp_rel (small data/bss sections) relocation.

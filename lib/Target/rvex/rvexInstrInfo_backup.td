@@ -221,7 +221,25 @@ class ArithLogicC<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
+class CmpInstr<bits<8> op, string instr_asm, 
+               InstrItinClass itin, RegisterClass RC, RegisterClass RD, 
+               bit isComm = 0, CType type>:
+  FA<op, (outs RD:$rc), (ins RC:$ra, RC:$rb),
+     !strconcat(instr_asm, "\t$rc = $ra, $rb"), [], itin, type> {
+  let rc = 0;
+  let shamt = 0;
+  let isCommutable = isComm;
+}
 
+class CmpInstrImm<bits<8> op, string instr_asm, 
+               InstrItinClass itin, RegisterClass RC, RegisterClass RD,
+               Operand Od, PatLeaf imm_type, 
+               bit isComm = 0, CType type>:
+  FL<op, (outs RD:$rc), (ins RC:$ra, Od:$imm16),
+     !strconcat(instr_asm, "\t$rc = $ra, $imm16"),
+     [], itin, type> {
+  let isReMaterializable = 1;
+}
 
 
 
@@ -451,11 +469,7 @@ class SelectRR<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
-def SDT_slct         : SDTypeProfile<1, 3, []>;
-def rvexSlct         : SDNode<"rvexISD::Slct", SDT_slct>;
-
-
-def SLCT  : SelectRR<0x1A, "slct", rvexSlct, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
+def SLCT  : SelectRR<0x1A, "slct", select, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
 
 def rvexDIVS     : ArithLogicC<0x13, "divs ", rvexDivs, IIIdiv, CPURegs, BRRegs, 1, TypeIIIdiv>;
@@ -463,7 +477,26 @@ def rvexDIVS     : ArithLogicC<0x13, "divs ", rvexDivs, IIIdiv, CPURegs, BRRegs,
 def rvexADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 def rvexADDE     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
-
+def CMPEQ   : CmpInstr<0x10, "cmpeq", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPEQi  : CmpInstrImm<0x10, "cmpeq", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPNEQ   : CmpInstr<0x10, "cmpne", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPNEQi  : CmpInstrImm<0x10, "cmpne", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGT   : CmpInstr<0x10, "cmpgt", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGTi  : CmpInstrImm<0x10, "cmpgt", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGTU   : CmpInstr<0x10, "cmpgtu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGTUi  : CmpInstrImm<0x10, "cmpgtu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLT   : CmpInstr<0x10, "cmplt", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLTi  : CmpInstrImm<0x10, "cmplt", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLTU   : CmpInstr<0x10, "cmpltu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLTUi  : CmpInstrImm<0x10, "cmpltu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGE   : CmpInstr<0x10, "cmpge", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGEi  : CmpInstrImm<0x10, "cmpge", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPGEU   : CmpInstr<0x10, "cmpgeu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPGEUi  : CmpInstrImm<0x10, "cmpgeu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLE   : CmpInstr<0x10, "cmple", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLEi  : CmpInstrImm<0x10, "cmple", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
+def CMPLEU   : CmpInstr<0x10, "cmpleu", IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def CMPLEUi  : CmpInstrImm<0x10, "cmpleu", IIAlu, CPURegs, BRRegs,simm16, immSExt32, 0, TypeIIAlu>;
 
 
 
@@ -553,101 +586,117 @@ def : Pat<(i32 (extloadi1  addr:$src)), (LBu addr:$src)>;
 def : Pat<(i32 (extloadi8  addr:$src)), (LBu addr:$src)>;
 def : Pat<(i32 (extloadi16_a addr:$src)), (LHu addr:$src)>;
 
-//DEBUG
 
-//class CmpInstr<bits<8> op, string instr_asm, 
-//               InstrItinClass itin, RegisterClass RC, RegisterClass RD, 
-//               bit isComm = 0, CType type>:
-//  FA<op, (outs RD:$rc), (ins RC:$ra, RC:$rb),
-//     !strconcat(instr_asm, "\t$rc = $ra, $rb"), [], itin, type> {
-//  let rc = 0;
-//  let shamt = 0;
-//  let isCommutable = isComm;
-//}
+// brcond patterns
+multiclass BrcondPats<RegisterClass RC,
+Instruction JEQOp, Instruction JNEOp, 
+Instruction CMPEQOp, Instruction CMPEQiOp,
+Instruction CMPNEQOp, Instruction CMPNEQiOp,
+Instruction CMPGTOp, Instruction CMPGTiOp,
+Instruction CMPGTUOp, Instruction CMPGTUiOp,
+Instruction CMPLTOp, Instruction CMPLTiOp,
+Instruction CMPLTUOp, Instruction CMPLTUiOp,
+Instruction CMPGEOp, Instruction CMPGEiOp,
+Instruction CMPGEUOp, Instruction CMPGEUiOp,
+Instruction CMPLEOp, Instruction CMPLEiOp,
+Instruction CMPLEUOp, Instruction CMPLEUiOp,
 
+Register ZEROReg> {
 
-// Comparisons
-class SetCCR<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
-      FA<0, (outs DestRegs:$res), (ins CPURegs:$lhs, CPURegs:$rhs),
-      !strconcat(instr_asm, "  $res, $lhs, $rhs"),
-      [(set DestRegs:$res, (cond_op CPURegs:$lhs, CPURegs:$rhs))], IIAlu, TypeIIAlu>;
+//seteq
+def : Pat<(brcond (i32 (seteq RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (setueq RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (seteq RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (setueq RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
 
-let isReMaterializable = 1, neverHasSideEffects = 1 in
-class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
-      FL<0, (outs DestRegs:$res), (ins CPURegs:$lhs, i32imm:$rhs),
-      !strconcat(instr_asm, "  $res, $lhs, $rhs"),
-      [(set DestRegs:$res, (cond_op CPURegs:$lhs, imm:$rhs))], IIAlu, TypeIIAlu>;
+//setne          
+def : Pat<(brcond (i32 (setne RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPNEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (setne RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPNEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;          
 
-let isCompare = 1 in {
-def CMPEQr  : SetCCR<"cmpeq ", seteq, CPURegs>;
-def CMPGEr  : SetCCR<"cmpge ", setge, CPURegs>;
-def CMPGEUr : SetCCR<"cmpgeu ", setuge, CPURegs>;
-def CMPGTr  : SetCCR<"cmpgt ", setgt, CPURegs>;
-def CMPGTUr : SetCCR<"cmpgtu ", setugt, CPURegs>;
-def CMPLEr  : SetCCR<"cmple ", setle, CPURegs>;
-def CMPLEUr : SetCCR<"cmpleu ", setule, CPURegs>;
-def CMPLTr  : SetCCR<"cmplt ", setlt, CPURegs>;
-def CMPLTUr : SetCCR<"cmpltu ", setult, CPURegs>;
-def CMPNEr  : SetCCR<"cmpne ", setne, CPURegs>;
+//setune                    
+def : Pat<(brcond (i32 (setune RC:$lhs, RC:$rhs)), bb:$dst),
+          (JNEOp (CMPEQOp RC:$lhs, RC:$rhs), bb:$dst)>;
+def : Pat<(brcond (i32 (setune RC:$lhs, imm:$rhs)), bb:$dst),
+          (JNEOp (CMPEQiOp RC:$lhs, imm:$rhs), bb:$dst)>;
 
-def CMPEQri  : SetCCI<"cmpeq ", seteq, CPURegs>;
-def CMPGEri  : SetCCI<"cmpge ", setge, CPURegs>;
-def CMPGEUri : SetCCI<"cmpgeu ", setuge, CPURegs>;
-def CMPGTri  : SetCCI<"cmpgt ", setgt, CPURegs>;
-def CMPGTUri : SetCCI<"cmpgtu ", setugt, CPURegs>;
-def CMPLEri  : SetCCI<"cmple ", setle, CPURegs>;
-def CMPLEUri : SetCCI<"cmpleu ", setule, CPURegs>;
-def CMPLTri  : SetCCI<"cmplt ", setlt, CPURegs>;
-def CMPLTUri : SetCCI<"cmpltu ", setult, CPURegs>;
-def CMPNEri  : SetCCI<"cmpne ", setne, CPURegs>;
+//setgt
+def : Pat<(brcond (i32 (setgt RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPGTOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setgt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGTiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
 
-def CMPEQ  : SetCCR<"cmpeq ", seteq, BRRegs>;
-def CMPGE  : SetCCR<"cmpge ", setge, BRRegs>;
-def CMPGEU : SetCCR<"cmpgeu ", setuge, BRRegs>;
-def CMPGT  : SetCCR<"cmpgt ", setgt, BRRegs>;
-def CMPGTU : SetCCR<"cmpgtu ", setugt, BRRegs>;
-def CMPLE  : SetCCR<"cmple ", setle, BRRegs>;
-def CMPLEU : SetCCR<"cmpleu ", setule, BRRegs>;
-def CMPLT  : SetCCR<"cmplt ", setlt, BRRegs>;
-def CMPLTU : SetCCR<"cmpltu ", setult, BRRegs>;
-def CMPNE  : SetCCR<"cmpne ", setne, BRRegs>;
+//setugt
+def : Pat<(brcond (i32 (setugt RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPGTUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setugt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGTUiOp RC:$lhs, imm:$rhs), bb:$dst)>; 
 
-def CMPEQi  : SetCCI<"cmpeq ", seteq, BRRegs>;
-def CMPGEi  : SetCCI<"cmpge ", setge, BRRegs>;
-def CMPGEUi : SetCCI<"cmpgeu ", setuge, BRRegs>;
-def CMPGTi  : SetCCI<"cmpgt ", setgt, BRRegs>;
-def CMPGTUi : SetCCI<"cmpgtu ", setugt, BRRegs>;
-def CMPLEi  : SetCCI<"cmple ", setle, BRRegs>;
-def CMPLEUi : SetCCI<"cmpleu ", setule, BRRegs>;
-def CMPLTi  : SetCCI<"cmplt ", setlt, BRRegs>;
-def CMPLTUi : SetCCI<"cmpltu ", setult, BRRegs>;
-def CMPNEi  : SetCCI<"cmpne ", setne, BRRegs>;
+//setlt
+def : Pat<(brcond (i32 (setlt RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLTOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setlt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLTiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
 
+//setult
+def : Pat<(brcond (i32 (setult RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLTUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setult RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLTUiOp RC:$lhs, imm:$rhs), bb:$dst)>;           
+
+//setge
+def : Pat<(brcond (i32 (setge RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPGEOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setgt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGEiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+//setuge
+def : Pat<(brcond (i32 (setuge RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPGEUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setugt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPGEUiOp RC:$lhs, imm:$rhs), bb:$dst)>; 
+
+//setle
+def : Pat<(brcond (i32 (setle RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLEOp RC:$lhs, RC:$rhs), bb:$dst)>;  
+def : Pat<(brcond (i32 (setlt RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLEiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+//setule
+def : Pat<(brcond (i32 (setule RC:$lhs, RC:$rhs)), bb:$dst),
+          (JEQOp (CMPLEUOp RC:$lhs, RC:$rhs), bb:$dst)>;             
+def : Pat<(brcond (i32 (setult RC:$lhs, imm:$rhs)), bb:$dst),
+          (JEQOp (CMPLEUiOp RC:$lhs, imm:$rhs), bb:$dst)>;  
+
+def : Pat<(brcond RC:$cond, bb:$dst),
+          (JNEOp (CMPEQOp RC:$cond, ZEROReg), bb:$dst)>;
 }
 
+defm : BrcondPats<CPURegs, BR, BRF, 
+CMPEQ, CMPEQi, 
+CMPNEQ, CMPNEQi, 
 
+CMPGT, CMPGTi,
+CMPGTU, CMPGTUi,
+CMPLT, CMPLTi,
+CMPLTU, CMPLTUi,
 
-multiclass CmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
-  // Peepholes
-  def : Pat<(setcc CPURegs:$lhs, 0, CC),
-            (CmpOpR CPURegs:$lhs, R0)>;
+CMPGE, CMPGEi,
+CMPGEU, CMPGEUi,
+CMPLE, CMPLEi,
+CMPLEU, CMPLEUi,
 
-  def : Pat<(setcc CPURegs:$lhs, CPURegs:$rhs, CC),
-            (CmpOpR CPURegs:$lhs, CPURegs:$rhs)>;
-  def : Pat<(setcc CPURegs:$lhs, imm:$rhs, CC),
-            (CmpOpI CPURegs:$lhs, imm:$rhs)>;
+R0>;
 
+// setcc patterns
+multiclass SeteqPats<RegisterClass RC, Instruction XOROp> {
+  def : Pat<(seteq RC:$lhs, RC:$rhs),
+            (XOROp (XOROp RC:$lhs, RC:$rhs), (ADDiu R0, 1))>;
 }
 
-defm : CmpPats<CMPEQ,   CMPEQi,   SETEQ>;
-defm : CmpPats<CMPNE,   CMPNEi,   SETNE>;
-defm : CmpPats<CMPLT,   CMPLTi,   SETLT>;
-defm : CmpPats<CMPLTU,  CMPLTUi,  SETULT>;
-defm : CmpPats<CMPLE,   CMPLEi,   SETLE>;
-defm : CmpPats<CMPLEU,  CMPLEUi,  SETULE>;
-defm : CmpPats<CMPGT,   CMPGTi,   SETGT>;
-defm : CmpPats<CMPGTU,  CMPGTUi,  SETUGT>;
-defm : CmpPats<CMPGE,   CMPGEi,   SETGE>;
-defm : CmpPats<CMPGEU,  CMPGEUi,  SETUGE>;
-
-
+defm : SeteqPats<CPURegs, XOR>;

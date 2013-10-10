@@ -60,6 +60,7 @@ const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case rvexISD::Maxu:              return "rvexISD::Maxu";
   case rvexISD::Min:               return "rvexISD::Min";
   case rvexISD::Minu:              return "rvexISD::Minu";
+  case rvexISD::Slct:              return "RvexISD::Slct";
 
   case rvexISD::DivRem:            return "rvexISD::DivRem";
   case rvexISD::DivRemU:           return "rvexISD::DivRemU";
@@ -92,7 +93,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   // we don't want this, since the fpcmp result goes to a flag register,
   // which is used implicitly by brcond and select operations.
   AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
-  setOperationAction(ISD::BRCOND,             MVT::Other, Custom);
+  setOperationAction(ISD::BRCOND, MVT::Other, Custom);
   
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
   setOperationAction(ISD::SREM, MVT::i32, Expand);
@@ -225,14 +226,15 @@ LowerUDIV(SDValue Op, SelectionDAG &DAG) const
   SDValue ADDCarry, DIVCarry;
   SDValue ADDRes, DIVRes;
   SDValue Zero = DAG.getRegister(rvex::R0, MVT::i32);
+  SDValue ZeroImm = DAG.getTargetConstant(0, MVT::i32);
 
-  ADDCarry = DAG.getNode(rvex::CMPNEQ, dl, MVT::i32, Zero, Zero);
-  DIVCarry = DAG.getNode(rvex::CMPNEQ, dl, MVT::i32, Zero, Zero);
+  ADDCarry = DAG.getSetCC(dl, MVT::i32, Zero, ZeroImm, ISD::SETNE);
+  DIVCarry = DAG.getSetCC(dl, MVT::i32, Zero, ZeroImm, ISD::SETNE);
 
   DIVS = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), Div, Div, ADDCarry );
   ADDRes = SDValue(DIVS.getNode(), 0);
   ADDCarry = SDValue(DIVS.getNode(), 1);
-
+  
   DIVS = DAG.getNode(rvexISD::Divs, dl, DAG.getVTList(MVT::i32, MVT::i32), Zero, Quot, ADDCarry ); 
   DIVRes = SDValue(DIVS.getNode(), 0);
   ADDCarry = SDValue(DIVS.getNode(), 1);
@@ -281,7 +283,7 @@ LowerUDIV(SDValue Op, SelectionDAG &DAG) const
 
 
     
-
+  
   return DIVS;
 
 }  
@@ -296,16 +298,28 @@ LowerSDIV(SDValue Op, SelectionDAG &DAG) const
 
   SDValue DIVS, DIVSNeg;
 
-    
+  // SDValue Div = Op.getOperand(0);
+  // SDValue Quot = Op.getOperand(1);
+
+  // DIVS = DAG.getSetCC(dl, MVT::i32, Div, Quot, ISD::SETLT);
+
+  // DIVS = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), Div, Quot, DIVS );  
+
+  
   // LHS and RHS contain General purpose registers
   SDValue Div = Op.getOperand(0);
   SDValue Quot = Op.getOperand(1);
   SDValue ADDCarry, DIVCarry;
   SDValue ADDRes, DIVRes, QUOTRes;
+  SDValue PosRes;
   SDValue Zero = DAG.getRegister(rvex::R0, MVT::i32);
+  SDValue ZeroImm = DAG.getTargetConstant(0, MVT::i32);
 
-  ADDCarry = DAG.getNode(rvex::CMPNEQ, dl, MVT::i32, Zero, Zero);
-  DIVCarry = DAG.getNode(rvex::CMPNEQ, dl, MVT::i32, Zero, Zero);
+  ADDCarry = DAG.getSetCC(dl, MVT::i32, Zero, ZeroImm, ISD::SETNE);
+  DIVCarry = DAG.getSetCC(dl, MVT::i32, Zero, ZeroImm, ISD::SETNE);
+
+  PosRes = DAG.getSetCC(dl, MVT::i32, Zero, Div, ISD::SETLT);
+
 
   // Determine if Div is negative or positive
   DIVS = DAG.getNode(ISD::SUB, dl, MVT::i32, Zero, Div); 
@@ -379,8 +393,8 @@ LowerSDIV(SDValue Op, SelectionDAG &DAG) const
   // Saves 1 instruction
   // Replace ORC and SUB by ADD res + 1;
 
-  //DIVS = DAG.getNode(rvex::SLCT, dl, MVT::i32, PosRes, DIVS, DIVSNeg);
-
+  DIVS = DAG.getNode(rvexISD::Slct, dl, MVT::i32, PosRes, DIVS, DIVSNeg);
+  
   return DIVS;
 
 }  
