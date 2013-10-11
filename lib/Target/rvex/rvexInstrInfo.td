@@ -202,7 +202,7 @@ class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
      !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
-     [(set RC:$ra, (OpNode RC:$rb, imm:$imm16))], IIAlu, TypeIIAlu> {
+     [(set RC:$ra, (OpNode RC:$rb, immSExt32:$imm16))], IIAlu, TypeIIAlu> {
   let isCommutable = 0;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
@@ -420,6 +420,7 @@ def XORiu   : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 //Imm types
 def ANDi   : ArithLogicI<0x09, "and ", and, simm16, immSExt16, CPURegs>;
 
+let isReturn=1 in
 def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 
 /// Arithmetic Instructions (3-Operand, R-Type)
@@ -557,6 +558,56 @@ def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
 
 def : Pat<(not CPURegs:$in),
           (XOR CPURegs:$in, (ADDiu R0, 1))>;
+
+// Arithmetic and logical instructions with 3 register operands.
+class ArithLogicS<bits<8> op, string instr_asm,
+                  InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins RC:$rb, RC:$rc),
+     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
+     [], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
+
+// Arithmetic and logical instructions with 3 register operands.
+class ArithLogicSi<bits<8> op, string instr_asm,
+                  InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins RC:$rb, i32imm:$rc),
+     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
+     [], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
+
+def SH1ADD     : ArithLogicS<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH2ADD     : ArithLogicS<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH3ADD     : ArithLogicS<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH4ADD     : ArithLogicS<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+
+def : Pat<(add (shl CPURegs:$lhs, 1), CPURegs:$rhs),
+          (SH1ADD CPURegs:$lhs, CPURegs:$rhs)>; 
+def : Pat<(add (shl CPURegs:$lhs, 2), CPURegs:$rhs),
+          (SH2ADD CPURegs:$lhs, CPURegs:$rhs)>; 
+def : Pat<(add (shl CPURegs:$lhs, 3), CPURegs:$rhs),
+          (SH3ADD CPURegs:$lhs, CPURegs:$rhs)>; 
+def : Pat<(add (shl CPURegs:$lhs, 4), CPURegs:$rhs),
+          (SH4ADD CPURegs:$lhs, CPURegs:$rhs)>; 
+
+def SH1ADDi     : ArithLogicSi<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH2ADDi     : ArithLogicSi<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH3ADDi     : ArithLogicSi<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH4ADDi     : ArithLogicSi<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+
+def : Pat<(add (shl CPURegs:$lhs, 1), imm:$rhs),
+          (SH1ADDi CPURegs:$lhs, imm:$rhs)>; 
+def : Pat<(add (shl CPURegs:$lhs, 2), imm:$rhs),
+          (SH2ADDi CPURegs:$lhs, imm:$rhs)>; 
+def : Pat<(add (shl CPURegs:$lhs, 3), imm:$rhs),
+          (SH3ADDi CPURegs:$lhs, imm:$rhs)>; 
+def : Pat<(add (shl CPURegs:$lhs, 4), imm:$rhs),
+          (SH4ADDi CPURegs:$lhs, imm:$rhs)>;                                                  
 
 
 def : Pat<(mul CPURegs:$rb, CPURegs:$rc),

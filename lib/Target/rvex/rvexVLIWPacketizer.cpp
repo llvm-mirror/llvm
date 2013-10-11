@@ -103,10 +103,7 @@ namespace {
     // with any other instruction, which means that MI itself is a packet.
     virtual bool isSoloInstruction(MachineInstr *MI);
 
-    // canBundleIntoCurrentPacket - return true is instruction MI can be put
-		// into the current packet according to target-specific bundle constraints.
-		// Use after checking if functional units could execute the instruction.
-    virtual bool canBundleIntoCurrentPacket(MachineInstr *MI);
+
 
     // isLegalToPacketizeTogether - Is it legal to packetize SUI and SUJ
     // together.
@@ -222,29 +219,7 @@ bool rvexVLIWPacketizerList::isSoloInstruction(MachineInstr *MI) {
   }	
 }
 
-// canBundleIntoCurrentPacket - check target-specific bundle-constraints, see
-// rvexSchedule.td bundle-approach.
-bool rvexVLIWPacketizerList::canBundleIntoCurrentPacket(MachineInstr *MI) {
-  MachineInstr *MI0, *MI1;
 
-  //Note that physical units could execute current packet and MI, which
-  //simplifies the checking we need to do here.
-  switch(CurrentPacketMIs.size()) {
-  case 0:
-    return true;
-  case 1:
-    MI0 = CurrentPacketMIs[0];
-    return !((isrvexCtrInstruction(MI) && isrvexMemInstruction(MI0)) ||
-             (isrvexCtrInstruction(MI0) && isrvexMemInstruction(MI)));
-  case 2:
-    MI0 = CurrentPacketMIs[0];
-    MI1 = CurrentPacketMIs[1];
-    return (!isrvexLongInstruction(MI) && !isrvexLongInstruction(MI0) &&
-            !isrvexLongInstruction(MI1));
-  default:
-    llvm_unreachable("3 pipelines can't execute more than 3 instructions!");
-  }
-}
 
 // isLegalToPacketizeTogether:
 // SUI is the current instruction that is out side of the current packet.
@@ -284,6 +259,8 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
       }
 
       if((MCIDI.isCall() || MCIDI.isReturn()) && DepType == SDep::Order) {
+        DEBUG(errs() << "return \n");
+        FoundSequentialDependence = true;
         // do nothing
       }
 
