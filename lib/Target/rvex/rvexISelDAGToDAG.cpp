@@ -264,6 +264,31 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
     break;    
   }
 
+  case rvexISD::Mpyll: {
+    DEBUG(errs() << "SelectMPYLL!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::rvexMPYLL, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+  case rvexISD::Mpylh: {
+    DEBUG(errs() << "SelectMPYLH!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::rvexMPYLH, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+  case rvexISD::Mpyhh: {
+    DEBUG(errs() << "SelectMPYHH!\n");
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    return CurDAG->getMachineNode(rvex::rvexMPYHH, dl, MVT::i32,
+                                  LHS, RHS);
+    break;    
+  }
+
   case rvexISD::Orc: {
     DEBUG(errs() << "SelectORC!\n");
     SDValue LHS = Node->getOperand(0);

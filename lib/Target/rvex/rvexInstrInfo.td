@@ -202,7 +202,8 @@ class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
      !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
-     [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm16))], IIAlu, TypeIIAlu> {
+     [(set RC:$ra, (OpNode RC:$rb, imm:$imm16))], IIAlu, TypeIIAlu> {
+  let isCommutable = 0;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
 
@@ -416,6 +417,9 @@ def MOV     : MoveImm<0x08, "mov ", add, simm16, immSExt32, CPURegs>;
 def ADDiu   : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
 def XORiu   : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
+//Imm types
+def ANDi   : ArithLogicI<0x09, "and ", and, simm16, immSExt16, CPURegs>;
+
 def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 
 /// Arithmetic Instructions (3-Operand, R-Type)
@@ -464,10 +468,16 @@ def rvexADDE     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 
 def rvexMpyllu    : SDNode<"rvexISD::Mpyllu", SDTIntBinOp, []>;
 def rvexMpylhu    : SDNode<"rvexISD::Mpylhu", SDTIntBinOp, []>;
 def rvexMpyhhu    : SDNode<"rvexISD::Mpyhhu", SDTIntBinOp, []>;
+def rvexMpyll     : SDNode<"rvexISD::Mpyll", SDTIntBinOp, []>;
+def rvexMpylh     : SDNode<"rvexISD::Mpylh", SDTIntBinOp, []>;
+def rvexMpyhh     : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;
 
-def rvexMPYLLU    : ArithLogicR<0x1A, "mpylly ", rvexMpyllu, IIImul, CPURegs, 1, TypeIIImul>;
-def rvexMPYLHU    : ArithLogicR<0x1A, "mpylhy ", rvexMpylhu, IIImul, CPURegs, 1, TypeIIImul>;
-def rvexMPYHHU    : ArithLogicR<0x1A, "mpyhhy ", rvexMpyhhu, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLLU    : ArithLogicR<0x1A, "mpyllu ", rvexMpyllu, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLHU    : ArithLogicR<0x1A, "mpylhu ", rvexMpylhu, IIImul, CPURegs, 0, TypeIIImul>;
+def rvexMPYHHU    : ArithLogicR<0x1A, "mpyhhu ", rvexMpyhhu, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLL     : ArithLogicR<0x1A, "mpyll ", rvexMpyll, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLH     : ArithLogicR<0x1A, "mpylh ", rvexMpylh, IIImul, CPURegs, 0, TypeIIImul>;
+def rvexMPYHH     : ArithLogicR<0x1A, "mpyhh ", rvexMpyhh, IIImul, CPURegs, 1, TypeIIImul>;
 
 
 def MULT    : Mult32<0x50, "mpylu", IIImul>;
