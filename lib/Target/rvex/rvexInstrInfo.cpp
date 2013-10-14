@@ -58,12 +58,12 @@ const rvexRegisterInfo &rvexInstrInfo::getRegisterInfo() const {
 
 /// CreateTargetPostRAHazardRecognizer - Return the postRA hazard recognizer
 /// to use for this target when scheduling the DAG.
-// ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetPostRAHazardRecognizer(
-//   const InstrItineraryData *II,
-//   const ScheduleDAG *DAG) const {
+ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetPostRAHazardRecognizer(
+  const InstrItineraryData *II,
+  const ScheduleDAG *DAG) const {
 
-//   return new rvexScoreboardHazardRecognizer(II, DAG);
-// }
+  return new rvexHazardRecognizer(II, DAG, "postRA");
+}
 
 void rvexInstrInfo::
 copyPhysReg(MachineBasicBlock &MBB,

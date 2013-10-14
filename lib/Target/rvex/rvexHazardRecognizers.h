@@ -23,7 +23,7 @@ namespace llvm {
 
 /// rvexScoreboardHazardRecognizer - This class implements a scoreboard-based
 /// hazard recognizer for generic rvex processors.
-class rvexScoreboardHazardRecognizer : public ScoreboardHazardRecognizer {
+class rvexHazardRecognizer : public ScheduleHazardRecognizer {
   const ScheduleDAG *DAG;
   // Scoreboard to track function unit usage. Scoreboard[0] is a
   // mask of the FUs in use in the cycle currently being
@@ -97,15 +97,23 @@ public:
   Scoreboard ReservedScoreboard;
   Scoreboard RequiredScoreboard;
 
-  rvexScoreboardHazardRecognizer(const InstrItineraryData *ItinData,
-                         const ScheduleDAG *DAG_) :
-    ScoreboardHazardRecognizer(ItinData, DAG_), DAG(DAG_) {}
+public:
 
-  virtual bool atIssueLimit() const;
+
+  // rvexScoreboardHazardRecognizer(const InstrItineraryData *ItinData,
+  //                        const ScheduleDAG *DAG_) :
+  //   ScoreboardHazardRecognizer(ItinData, DAG_), DAG(DAG_) {}
+
+
+  rvexHazardRecognizer(const InstrItineraryData *II,
+                           const ScheduleDAG *SchedDAG,
+                           const char *ParentDebugType);
   virtual HazardType getHazardType(SUnit *SU, int Stalls);
+  virtual bool atIssueLimit() const;
+  virtual void Reset();
   virtual void EmitInstruction(SUnit *SU);
   virtual void AdvanceCycle();
-  virtual void Reset();
+  //virtual void RecedeCycle();
 };
 }
 

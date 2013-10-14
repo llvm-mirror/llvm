@@ -42,9 +42,9 @@ public:
   ///
   virtual const rvexRegisterInfo &getRegisterInfo() const;
   
-  // ScheduleHazardRecognizer *
-  // CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
-  //                                    const ScheduleDAG *DAG) const; 
+  ScheduleHazardRecognizer *
+  CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
+                                     const ScheduleDAG *DAG) const; 
 
 public:
   virtual void copyPhysReg(MachineBasicBlock &MBB,

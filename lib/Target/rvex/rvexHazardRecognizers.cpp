@@ -31,13 +31,67 @@
 
 using namespace llvm;
 
-void rvexScoreboardHazardRecognizer::Reset() {
+
+
+rvexHazardRecognizer::rvexHazardRecognizer(const InstrItineraryData *II,
+                           const ScheduleDAG *SchedDAG,
+                           const char *ParentDebugType) :
+  ScheduleHazardRecognizer(), ItinData(II), DAG(SchedDAG), IssueWidth(0),
+  IssueCount(0) {
+
+
+
+  // Determine the maximum depth of any itinerary. This determines the depth of
+  // the scoreboard. We always make the scoreboard at least 1 cycle deep to
+  // avoid dealing with the boundary condition.
+  unsigned ScoreboardDepth = 1;
+  if (ItinData && !ItinData->isEmpty()) {
+    for (unsigned idx = 0; ; ++idx) {
+      if (ItinData->isEndMarker(idx))
+        break;
+
+      const InstrStage *IS = ItinData->beginStage(idx);
+      const InstrStage *E = ItinData->endStage(idx);
+      unsigned CurCycle = 0;
+      unsigned ItinDepth = 0;
+      for (; IS != E; ++IS) {
+        unsigned StageDepth = CurCycle + IS->getCycles();
+        if (ItinDepth < StageDepth) ItinDepth = StageDepth;
+        CurCycle += IS->getNextCycles();
+      }
+
+      // Find the next power-of-2 >= ItinDepth
+      while (ItinDepth > ScoreboardDepth) {
+        ScoreboardDepth *= 2;
+        // Don't set MaxLookAhead until we find at least one nonzero stage.
+        // This way, an itinerary with no stages has MaxLookAhead==0, which
+        // completely bypasses the scoreboard hazard logic.
+        MaxLookAhead = ScoreboardDepth;
+      }
+    }
+  }
+
+  ReservedScoreboard.reset(ScoreboardDepth);
+  RequiredScoreboard.reset(ScoreboardDepth);
+
+  // If MaxLookAhead is not set above, then we are not enabled.
+  if (!isEnabled())
+    DEBUG(dbgs() << "Disabled scoreboard hazard recognizer\n");
+  else {
+    // A nonempty itinerary must have a SchedModel.
+    IssueWidth = ItinData->SchedModel->IssueWidth;
+    DEBUG(dbgs() << "Using scoreboard hazard recognizer: Depth = "
+          << ScoreboardDepth << '\n');
+  }
+}
+
+void rvexHazardRecognizer::Reset() {
   IssueCount = 0;
   RequiredScoreboard.reset();
   ReservedScoreboard.reset();
 }
 
-bool rvexScoreboardHazardRecognizer::atIssueLimit() const {
+bool rvexHazardRecognizer::atIssueLimit() const {
   if (IssueWidth == 0)
     return false;
 
@@ -45,7 +99,7 @@ bool rvexScoreboardHazardRecognizer::atIssueLimit() const {
 }
 
 ScheduleHazardRecognizer::HazardType
-rvexScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
+rvexHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
   if (!ItinData || ItinData->isEmpty())
     return NoHazard;
 
@@ -105,7 +159,7 @@ rvexScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
   return NoHazard;
 }
 
-void rvexScoreboardHazardRecognizer::EmitInstruction(SUnit *SU) {
+void rvexHazardRecognizer::EmitInstruction(SUnit *SU) {
   if (!ItinData || ItinData->isEmpty())
     return;
 
@@ -163,9 +217,11 @@ void rvexScoreboardHazardRecognizer::EmitInstruction(SUnit *SU) {
   //DEBUG(RequiredScoreboard.dump());
 }
 
-void rvexScoreboardHazardRecognizer::AdvanceCycle() {
+void rvexHazardRecognizer::AdvanceCycle() {
   IssueCount = 0;
   ReservedScoreboard[0] = 0; ReservedScoreboard.advance();
   RequiredScoreboard[0] = 0; RequiredScoreboard.advance();
 }
+
+
 

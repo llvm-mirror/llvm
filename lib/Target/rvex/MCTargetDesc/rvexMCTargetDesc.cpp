@@ -210,24 +210,22 @@ extern "C" void LLVMInitializervexTargetMC() {
   // Read configuration file
   read_config(Config);
 
-  std::cout << rvexStages[1].Cycles_ <<"\n";
-  rvexStages[1].Cycles_ = 1;
+  
 
   //Init InstrStages from config file
-  llvm::InstrStage EndStage = { 0, 0, 0, llvm::InstrStage::Required };
-  //rvexStages[0] = EndStage;
+
   for (i = 0; i < (int)Stages.size(); i++)
   {
-    //llvm::InstrStage TempStage = {Stages[i].num1, Stages[i].num2, -1, (llvm::InstrStage::ReservationKinds)1 };
+    
     rvexStages[i+1].Cycles_ = Stages[i].num1;
     rvexStages[i+1].Units_ = Stages[i].num2;
-    //rvexStages[i+1] = TempStage;
+    
   }
   rvexStages[i+1].Cycles_ = 0;
   rvexStages[i+1].Units_ = 0; 
   rvexStages[i+1].NextCycles_ = 0;
   rvexStages[i+1].Kind_ = llvm::InstrStage::Required;
-  //rvexStages[i+1] = EndStage;
+  
 
   // Init InstrItin from config file
   for (i = 0; i < (int)Itin.size(); i++)
