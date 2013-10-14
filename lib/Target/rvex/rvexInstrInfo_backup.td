@@ -40,8 +40,7 @@ def rvexJmpLink : SDNode<"rvexISD::JmpLink",SDT_rvexJmpLink,
 // Hi and Lo nodes are used to handle global addresses. Used on
 // rvexISelLowering to lower stuff like GlobalAddress, ExternalSymbol
 // static model. (nothing to do with rvex Registers Hi and Lo)
-def rvexHi    : SDNode<"rvexISD::Hi", SDTIntUnaryOp>;
-def rvexLo    : SDNode<"rvexISD::Lo", SDTIntUnaryOp>;
+def rvexGlob    : SDNode<"rvexISD::Glob", SDTIntUnaryOp>;
 def rvexGPRel : SDNode<"rvexISD::GPRel", SDTIntUnaryOp>;
 
 // Return

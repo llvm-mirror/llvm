@@ -210,16 +210,15 @@ extern "C" void LLVMInitializervexTargetMC() {
   // Read configuration file
   read_config(Config);
 
-  
 
   //Init InstrStages from config file
-
+  
   for (i = 0; i < (int)Stages.size(); i++)
   {
-    
+    //llvm::InstrStage TempStage = {Stages[i].num1, Stages[i].num2, -1, (llvm::InstrStage::ReservationKinds)1 };
     rvexStages[i+1].Cycles_ = Stages[i].num1;
     rvexStages[i+1].Units_ = Stages[i].num2;
-    
+    //rvexStages[i+1] = TempStage;
   }
   rvexStages[i+1].Cycles_ = 0;
   rvexStages[i+1].Units_ = 0; 

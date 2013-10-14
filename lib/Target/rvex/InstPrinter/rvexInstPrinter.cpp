@@ -24,6 +24,11 @@ using namespace llvm;
 
 #include "rvexGenAsmWriter.inc"
 
+#include "rvexInstrInfo.h"
+
+#include "llvm/Support/CommandLine.h"
+extern cl::opt<bool> DisableOutputNops;
+
 void rvexInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
 //- getRegisterName(RegNo) defined in rvexGenAsmWriter.inc which came from 
 //   rvex.td indicate.
@@ -34,9 +39,14 @@ void rvexInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                 StringRef Annot) {
 //- printInstruction(MI, O) defined in rvexGenAsmWriter.inc which came from 
 //   rvex.td indicate.
-  O << "\tc0 ";
-  printInstruction(MI, O);
-  printAnnotation(O, Annot);
+  // Check if nop instruction should be printed or an empty packet be printed
+  if ((MI->getOpcode() != rvex::NOP) || (DisableOutputNops==false))
+  {
+    O << "\tc0 ";
+    printInstruction(MI, O);
+    printAnnotation(O, Annot);    
+  }
+
 }
 
 static void printExpr(const MCExpr *Expr, raw_ostream &OS) {

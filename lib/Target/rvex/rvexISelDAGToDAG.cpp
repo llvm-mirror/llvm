@@ -117,6 +117,7 @@ SDNode *rvexDAGToDAGISel::getGlobalBaseReg() {
 /// Used on rvex Load/Store instructions
 bool rvexDAGToDAGISel::
 SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
+  DEBUG(errs() << "SelectAddr!\n");
   EVT ValTy = Addr.getValueType();
 
   // If Parent is an unaligned f32 load or store, select a (base + index)

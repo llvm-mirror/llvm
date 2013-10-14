@@ -62,7 +62,7 @@ ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetPostRAHazardRecognizer(
   const InstrItineraryData *II,
   const ScheduleDAG *DAG) const {
 
-  return new rvexHazardRecognizer(II, DAG, "postRA");
+  return new rvexHazardRecognizer(II, DAG, "PostRA");
 }
 
 void rvexInstrInfo::

@@ -32,9 +32,8 @@ namespace llvm {
       // Get the Higher 16 bits from a 32-bit immediate
       // No relation with rvex Hi register
       Hi,
-      // Get the Lower 16 bits from a 32-bit immediate
-      // No relation with rvex Lo register
       Lo,
+
 
       Addc,
       Adde,

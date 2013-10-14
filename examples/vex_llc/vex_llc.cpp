@@ -73,6 +73,11 @@ TargetTriple("mtriple", cl::desc("Override target triple for module"));
 static cl::opt<std::string>
 Config("config", cl::desc("Path to config file"));
 
+cl::opt<bool>
+DisableOutputNops("disable-output-nops",
+                        cl::desc("Disable nops in output"),
+                        cl::init(true));
+
 cl::opt<bool> NoVerify("disable-verify", cl::Hidden,
                        cl::desc("Do not verify input module"));
 
