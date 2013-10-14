@@ -290,7 +290,7 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
       // zero-reg can be targeted by multiple instructions
       else if(DepType == SDep::Output && DepReg != rvex::R0) {
         DEBUG(errs() << "zero reg\n");
-        //FoundSequentialDependence = true;
+        FoundSequentialDependence = true;
       }
 
       else if(DepType == SDep::Order && Dep.isArtificial()) {
@@ -302,7 +302,7 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
       // anti-dependent can share a packet
       else if(DepType != SDep::Anti) {
         DEBUG(errs() << "anti dependencies\n");
-        //FoundSequentialDependence = true;
+        FoundSequentialDependence = true;
       }
     }
 
@@ -344,6 +344,8 @@ bool rvexVLIWPacketizerList::
 isrvexSoloInstruction(const MachineInstr *MI) const {
   const uint64_t F = MI->getDesc().TSFlags;
   //return ((F >> SoloPos) & SoloMask);
+  if (MI->getOpcode() == rvex::NOP)
+    return true;
   return false;
 }
 

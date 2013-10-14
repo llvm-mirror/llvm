@@ -58,8 +58,25 @@
   #else
   #define DBGFIELD(x)
   #endif
+
+  namespace rvexGenericItinerariesFU {
+    const unsigned P0 = 1 << 0;
+    const unsigned P1 = 1 << 1;
+  }
+
+
+  llvm::InstrStage rvexStages[] = {
+    { 0, 0, 0, llvm::InstrStage::Required }, // No itinerary
+    { 1, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
+    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
+    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
+    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
+    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
+    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
+    { 0, 0, 0, llvm::InstrStage::Required } // End stages
+  };  
   
-  llvm::InstrStage rvexStages[10];
+  //llvm::InstrStage rvexStages[4];
 
   // Functional units for "rvexGenericItineraries"
   namespace rvexGenericItinerariesFU2 {
@@ -87,13 +104,13 @@
   static llvm::InstrItinerary rvexGenericItineraries[] = {
     { 0, 0, 0, 0, 0 }, // 0 NoInstrModel
     { 1, 1, 2, 0, 0 }, // 1 IIAlu
-    { 1, 2, 3, 0, 0 }, // 2 IIPseudo
-    { 1, 3, 4, 0, 0 }, // 3 IIBranch
-    { 1, 1, 2, 0, 0 }, // 4 IILoad
-    { 1, 4, 5, 0, 0 }, // 5 IIHiLo
-    { 1, 4, 5, 0, 0 }, // 6 IIImul
-    { 1, 3, 4, 0, 0 }, // 7 IIStore
-    { 1, 5, 6, 0, 0 }, // 8 IIIdiv
+    { 1, 1, 2, 0, 0 }, // 2 IIPseudo
+    { 1, 1, 2, 0, 0 }, // 3 IIBranch
+    { 1, 2, 3, 0, 0 }, // 4 IILoad
+    { 1, 1, 2, 0, 0 }, // 5 IIHiLo
+    { 1, 1, 2, 0, 0 }, // 6 IIImul
+    { 1, 1, 2, 0, 0 }, // 7 IIStore
+    { 1, 1, 2, 0, 0 }, // 8 IIIdiv
     { 0, ~0U, ~0U, ~0U, ~0U } // end marker
   };
 
@@ -129,7 +146,7 @@
   static const llvm::MCSchedModel rvexModel(
     4, // IssueWidth
     MCSchedModel::DefaultMinLatency,
-    MCSchedModel::DefaultLoadLatency,
+    2,
     MCSchedModel::DefaultHighLatency,
     MCSchedModel::DefaultILPWindow,
     MCSchedModel::DefaultMispredictPenalty,
@@ -193,19 +210,29 @@ extern "C" void LLVMInitializervexTargetMC() {
   // Read configuration file
   read_config(Config);
 
-  // Init InstrStages from config file
+  std::cout << rvexStages[1].Cycles_ <<"\n";
+  rvexStages[1].Cycles_ = 1;
+
+  //Init InstrStages from config file
   llvm::InstrStage EndStage = { 0, 0, 0, llvm::InstrStage::Required };
+  //rvexStages[0] = EndStage;
   for (i = 0; i < (int)Stages.size(); i++)
   {
-    llvm::InstrStage TempStage = {Stages[i].num1, Stages[i].num2, -1, (llvm::InstrStage::ReservationKinds)0 };
-    rvexStages[i+1] = TempStage;
+    //llvm::InstrStage TempStage = {Stages[i].num1, Stages[i].num2, -1, (llvm::InstrStage::ReservationKinds)1 };
+    rvexStages[i+1].Cycles_ = Stages[i].num1;
+    rvexStages[i+1].Units_ = Stages[i].num2;
+    //rvexStages[i+1] = TempStage;
   }
-  rvexStages[i+1] = EndStage;
+  rvexStages[i+1].Cycles_ = 0;
+  rvexStages[i+1].Units_ = 0; 
+  rvexStages[i+1].NextCycles_ = 0;
+  rvexStages[i+1].Kind_ = llvm::InstrStage::Required;
+  //rvexStages[i+1] = EndStage;
 
   // Init InstrItin from config file
   for (i = 0; i < (int)Itin.size(); i++)
   {
-    llvm::InstrItinerary TempItin = {0, Itin[i], Itin[i] + 1, 0, 0};
+    llvm::InstrItinerary TempItin = {0, Itin[i].num1, Itin[i].num2, 0, 0};
     rvexGenericItineraries[i + 1] = TempItin;
   }
 

@@ -20,7 +20,7 @@ struct DFAState
 using namespace std;
 
 extern vector<DFAState> Stages;
-extern vector<int> Itin;
+extern vector<DFAState> Itin;
 
 void read_config (string ConfigFile);
 

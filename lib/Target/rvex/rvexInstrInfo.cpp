@@ -16,6 +16,8 @@
 #include "rvexTargetMachine.h"
 #include "rvexMachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "rvexHazardRecognizers.h"
+
 #define GET_INSTRINFO_CTOR
 //#define GET_INSTRINFO_ENUM
 #include "rvexGenInstrInfo.inc"
@@ -43,6 +45,8 @@ namespace llvm {
 
 using namespace llvm;
 
+
+
 rvexInstrInfo::rvexInstrInfo(rvexTargetMachine &tm)
   : rvexGenInstrInfo(rvex::ADJCALLSTACKDOWN, rvex::ADJCALLSTACKUP), 
     TM(tm),
@@ -51,6 +55,15 @@ rvexInstrInfo::rvexInstrInfo(rvexTargetMachine &tm)
 const rvexRegisterInfo &rvexInstrInfo::getRegisterInfo() const {
   return RI;
 }
+
+/// CreateTargetPostRAHazardRecognizer - Return the postRA hazard recognizer
+/// to use for this target when scheduling the DAG.
+// ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetPostRAHazardRecognizer(
+//   const InstrItineraryData *II,
+//   const ScheduleDAG *DAG) const {
+
+//   return new rvexScoreboardHazardRecognizer(II, DAG);
+// }
 
 void rvexInstrInfo::
 copyPhysReg(MachineBasicBlock &MBB,
@@ -102,6 +115,12 @@ static MachineMemOperand* GetMemOperand(MachineBasicBlock &MBB, int FI,
 
   return MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(FI), Flag,
                                  MFI.getObjectSize(FI), Align);
+}
+
+void rvexInstrInfo::
+insertNoop(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI) const {
+  DebugLoc DL;
+  BuildMI(MBB, MI, DL, get(rvex::NOP));
 }
 
 //- st SrcReg, MMO(FI)

@@ -13,6 +13,7 @@
 
 #include "rvexSubtarget.h"
 #include "rvex.h"
+#include "rvexRegisterInfo.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 
@@ -49,4 +50,14 @@ rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
   if (rvexABI == UnknownABI)
     rvexABI = O32;
 }
+
+ bool rvexSubtarget::
+ enablePostRAScheduler(CodeGenOpt::Level OptLevel,
+                       TargetSubtargetInfo::AntiDepBreakMode& Mode,
+                       RegClassVector& CriticalPathRCs) const {
+   Mode = TargetSubtargetInfo::ANTIDEP_NONE;
+   CriticalPathRCs.clear();
+   CriticalPathRCs.push_back(&rvex::CPURegsRegClass);
+   return OptLevel >= CodeGenOpt::Default;
+ }
 

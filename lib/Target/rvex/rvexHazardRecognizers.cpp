@@ -13,6 +13,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "rvexHazardRecognizers.h"
+#include "rvex.h"
+#include "rvexInstrInfo.h"
+#include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+
 #include "llvm/CodeGen/ScoreboardHazardRecognizer.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/MC/MCInstrItineraries.h"
@@ -23,92 +31,13 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE ::llvm::ScoreboardHazardRecognizer::DebugType
-
-#ifndef NDEBUG
-const char *ScoreboardHazardRecognizer::DebugType = "";
-#endif
-
-ScoreboardHazardRecognizer::
-ScoreboardHazardRecognizer(const InstrItineraryData *II,
-                           const ScheduleDAG *SchedDAG,
-                           const char *ParentDebugType) :
-  ScheduleHazardRecognizer(), ItinData(II), DAG(SchedDAG), IssueWidth(0),
-  IssueCount(0) {
-
-#ifndef NDEBUG
-  DebugType = ParentDebugType;
-#endif
-
-  // Determine the maximum depth of any itinerary. This determines the depth of
-  // the scoreboard. We always make the scoreboard at least 1 cycle deep to
-  // avoid dealing with the boundary condition.
-  unsigned ScoreboardDepth = 1;
-  if (ItinData && !ItinData->isEmpty()) {
-    for (unsigned idx = 0; ; ++idx) {
-      if (ItinData->isEndMarker(idx))
-        break;
-
-      const InstrStage *IS = ItinData->beginStage(idx);
-      const InstrStage *E = ItinData->endStage(idx);
-      unsigned CurCycle = 0;
-      unsigned ItinDepth = 0;
-      for (; IS != E; ++IS) {
-        unsigned StageDepth = CurCycle + IS->getCycles();
-        if (ItinDepth < StageDepth) ItinDepth = StageDepth;
-        CurCycle += IS->getNextCycles();
-      }
-
-      // Find the next power-of-2 >= ItinDepth
-      while (ItinDepth > ScoreboardDepth) {
-        ScoreboardDepth *= 2;
-        // Don't set MaxLookAhead until we find at least one nonzero stage.
-        // This way, an itinerary with no stages has MaxLookAhead==0, which
-        // completely bypasses the scoreboard hazard logic.
-        MaxLookAhead = ScoreboardDepth;
-      }
-    }
-  }
-
-  ReservedScoreboard.reset(ScoreboardDepth);
-  RequiredScoreboard.reset(ScoreboardDepth);
-
-  // If MaxLookAhead is not set above, then we are not enabled.
-  if (!isEnabled())
-    DEBUG(dbgs() << "Disabled scoreboard hazard recognizer\n");
-  else {
-    // A nonempty itinerary must have a SchedModel.
-    IssueWidth = ItinData->SchedModel.IssueWidth;
-    DEBUG(dbgs() << "Using scoreboard hazard recognizer: Depth = "
-          << ScoreboardDepth << '\n');
-  }
-}
-
-void ScoreboardHazardRecognizer::Reset() {
+void rvexScoreboardHazardRecognizer::Reset() {
   IssueCount = 0;
   RequiredScoreboard.reset();
   ReservedScoreboard.reset();
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void ScoreboardHazardRecognizer::Scoreboard::dump() const {
-  dbgs() << "Scoreboard:\n";
-
-  unsigned last = Depth - 1;
-  while ((last > 0) && ((*this)[last] == 0))
-    last--;
-
-  for (unsigned i = 0; i <= last; i++) {
-    unsigned FUs = (*this)[i];
-    dbgs() << "\t";
-    for (int j = 31; j >= 0; j--)
-      dbgs() << ((FUs & (1 << j)) ? '1' : '0');
-    dbgs() << '\n';
-  }
-}
-#endif
-
-bool ScoreboardHazardRecognizer::atIssueLimit() const {
+bool rvexScoreboardHazardRecognizer::atIssueLimit() const {
   if (IssueWidth == 0)
     return false;
 
@@ -116,7 +45,7 @@ bool ScoreboardHazardRecognizer::atIssueLimit() const {
 }
 
 ScheduleHazardRecognizer::HazardType
-ScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
+rvexScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
   if (!ItinData || ItinData->isEmpty())
     return NoHazard;
 
@@ -127,7 +56,7 @@ ScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
   // free FU's in the scoreboard at the appropriate future cycles.
 
   const MCInstrDesc *MCID = DAG->getInstrDesc(SU);
-  if (!MCID) {
+  if (MCID == NULL) {
     // Don't check hazards for non-machineinstr Nodes.
     return NoHazard;
   }
@@ -176,7 +105,7 @@ ScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
   return NoHazard;
 }
 
-void ScoreboardHazardRecognizer::EmitInstruction(SUnit *SU) {
+void rvexScoreboardHazardRecognizer::EmitInstruction(SUnit *SU) {
   if (!ItinData || ItinData->isEmpty())
     return;
 
@@ -230,20 +159,13 @@ void ScoreboardHazardRecognizer::EmitInstruction(SUnit *SU) {
     cycle += IS->getNextCycles();
   }
 
-  DEBUG(ReservedScoreboard.dump());
-  DEBUG(RequiredScoreboard.dump());
+  //DEBUG(ReservedScoreboard.dump());
+  //DEBUG(RequiredScoreboard.dump());
 }
 
-void ScoreboardHazardRecognizer::AdvanceCycle() {
+void rvexScoreboardHazardRecognizer::AdvanceCycle() {
   IssueCount = 0;
   ReservedScoreboard[0] = 0; ReservedScoreboard.advance();
   RequiredScoreboard[0] = 0; RequiredScoreboard.advance();
 }
 
-void ScoreboardHazardRecognizer::RecedeCycle() {
-  IssueCount = 0;
-  ReservedScoreboard[ReservedScoreboard.getDepth()-1] = 0;
-  ReservedScoreboard.recede();
-  RequiredScoreboard[RequiredScoreboard.getDepth()-1] = 0;
-  RequiredScoreboard.recede();
-}

@@ -41,6 +41,10 @@ public:
   /// always be able to get register info as well (through this method).
   ///
   virtual const rvexRegisterInfo &getRegisterInfo() const;
+  
+  // ScheduleHazardRecognizer *
+  // CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
+  //                                    const ScheduleDAG *DAG) const; 
 
 public:
   virtual void copyPhysReg(MachineBasicBlock &MBB,
@@ -70,6 +74,9 @@ public:
   virtual bool isSchedulingBoundary(const MachineInstr *MI,
                                     const MachineBasicBlock *MBB,
                                     const MachineFunction &MF) const;
+
+  virtual void insertNoop(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator MI) const;
 };
 }
 

@@ -8,7 +8,7 @@
 using namespace std;
 
 vector<DFAState> Stages;
-vector<int> Itin;
+vector<DFAState> Itin;
 
 void read_config (string ConfigFile)
 {
@@ -60,7 +60,6 @@ void read_config (string ConfigFile)
     
     //Reads one string from the file
     b_file>> str;
-    //Should output 'this'
     if (str == "InstrItinerary")
     {
         b_file>> str;
@@ -70,15 +69,24 @@ void read_config (string ConfigFile)
             while(run)
             {
                 b_file>> str;
+                b_file>> str2;
                 
-                if (str.at( str.length() -1) == ';')
+                if (str2.at( str2.length() -1) == ';')
                     run = false;
                 
+                str.erase(0,1);
                 str.erase(str.length()-1,1);
+                str2.erase(str2.length()-2,2);
+                
                 
                 getal = atoi(str.c_str());
+                getal2 = atoi(str2.c_str());
                 
-                Itin.push_back (getal);
+                DFAState Itin2;
+                Itin2.num1 = getal;
+                Itin2.num2 = getal2;
+                
+                Itin.push_back (Itin2);
             }
             
         }

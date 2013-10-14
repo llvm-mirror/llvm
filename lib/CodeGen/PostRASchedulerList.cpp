@@ -622,9 +622,10 @@ void SchedulePostRATDList::ListScheduleTopDown() {
       } else if (!HasNoopHazards) {
         // Otherwise, we have a pipeline stall, but no other problem,
         // just advance the current cycle and try again.
-        DEBUG(dbgs() << "*** Stall in cycle " << CurCycle << '\n');
-        HazardRec->AdvanceCycle();
-        ++NumStalls;
+        DEBUG(dbgs() << "*** Stall in cycle, insert noop " << CurCycle << '\n');
+        HazardRec->EmitNoop();
+        Sequence.push_back(0);   // NULL here means noop
+        ++NumNoops;
       } else {
         // Otherwise, we have no instructions to issue and we have instructions
         // that will fault if we don't do this right.  This is the case for

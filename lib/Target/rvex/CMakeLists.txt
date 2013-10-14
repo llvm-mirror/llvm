@@ -38,6 +38,7 @@ add_llvm_target(rvexCodeGen
   rvexTargetObjectFile.cpp
   rvexSelectionDAGInfo.cpp
   rvexVLIWPacketizer.cpp
+  rvexHazardRecognizers.cpp
   )
 
 # Should match with "subdirectories =  MCTargetDesc TargetInfo" in LLVMBuild.txt
