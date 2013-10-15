@@ -90,37 +90,6 @@ define <4 x float> @vaddQf32(<4 x float>* %A, <4 x float>* %B) nounwind {
 	ret <4 x float> %tmp3
 }
 
-define <8 x i8> @vaddhni16(<8 x i16>* %A, <8 x i16>* %B) nounwind {
-;CHECK-LABEL: vaddhni16:
-;CHECK: vaddhn.i16
-	%tmp1 = load <8 x i16>* %A
-	%tmp2 = load <8 x i16>* %B
-	%tmp3 = call <8 x i8> @llvm.arm.neon.vaddhn.v8i8(<8 x i16> %tmp1, <8 x i16> %tmp2)
-	ret <8 x i8> %tmp3
-}
-
-define <4 x i16> @vaddhni32(<4 x i32>* %A, <4 x i32>* %B) nounwind {
-;CHECK-LABEL: vaddhni32:
-;CHECK: vaddhn.i32
-	%tmp1 = load <4 x i32>* %A
-	%tmp2 = load <4 x i32>* %B
-	%tmp3 = call <4 x i16> @llvm.arm.neon.vaddhn.v4i16(<4 x i32> %tmp1, <4 x i32> %tmp2)
-	ret <4 x i16> %tmp3
-}
-
-define <2 x i32> @vaddhni64(<2 x i64>* %A, <2 x i64>* %B) nounwind {
-;CHECK-LABEL: vaddhni64:
-;CHECK: vaddhn.i64
-	%tmp1 = load <2 x i64>* %A
-	%tmp2 = load <2 x i64>* %B
-	%tmp3 = call <2 x i32> @llvm.arm.neon.vaddhn.v2i32(<2 x i64> %tmp1, <2 x i64> %tmp2)
-	ret <2 x i32> %tmp3
-}
-
-declare <8 x i8>  @llvm.arm.neon.vaddhn.v8i8(<8 x i16>, <8 x i16>) nounwind readnone
-declare <4 x i16> @llvm.arm.neon.vaddhn.v4i16(<4 x i32>, <4 x i32>) nounwind readnone
-declare <2 x i32> @llvm.arm.neon.vaddhn.v2i32(<2 x i64>, <2 x i64>) nounwind readnone
-
 define <8 x i8> @vraddhni16(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 ;CHECK-LABEL: vraddhni16:
 ;CHECK: vraddhn.i16
@@ -151,6 +120,33 @@ define <2 x i32> @vraddhni64(<2 x i64>* %A, <2 x i64>* %B) nounwind {
 declare <8 x i8>  @llvm.arm.neon.vraddhn.v8i8(<8 x i16>, <8 x i16>) nounwind readnone
 declare <4 x i16> @llvm.arm.neon.vraddhn.v4i16(<4 x i32>, <4 x i32>) nounwind readnone
 declare <2 x i32> @llvm.arm.neon.vraddhn.v2i32(<2 x i64>, <2 x i64>) nounwind readnone
+
+define <8 x i8> @vaddhni16_natural(<8 x i16> %A, <8 x i16> %B) nounwind {
+; CHECK-LABEL: vaddhni16_natural:
+; CHECK: vaddhn.i16
+  %sum = add <8 x i16> %A, %B
+  %shift = lshr <8 x i16> %sum, <i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8>
+  %trunc = trunc <8 x i16> %shift to <8 x i8>
+  ret <8 x i8> %trunc
+}
+
+define <4 x i16> @vaddhni32_natural(<4 x i32> %A, <4 x i32> %B) nounwind {
+; CHECK-LABEL: vaddhni32_natural:
+; CHECK: vaddhn.i32
+  %sum = add <4 x i32> %A, %B
+  %shift = lshr <4 x i32> %sum, <i32 16, i32 16, i32 16, i32 16>
+  %trunc = trunc <4 x i32> %shift to <4 x i16>
+  ret <4 x i16> %trunc
+}
+
+define <2 x i32> @vaddhni64_natural(<2 x i64> %A, <2 x i64> %B) nounwind {
+; CHECK-LABEL: vaddhni64_natural:
+; CHECK: vaddhn.i64
+  %sum = add <2 x i64> %A, %B
+  %shift = lshr <2 x i64> %sum, <i64 32, i64 32>
+  %trunc = trunc <2 x i64> %shift to <2 x i32>
+  ret <2 x i32> %trunc
+}
 
 define <8 x i16> @vaddls8(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 ;CHECK-LABEL: vaddls8:

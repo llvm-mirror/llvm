@@ -170,6 +170,10 @@ int LLVMSetDisasmOptions(LLVMDisasmContextRef DC, uint64_t Options);
 #define LLVMDisassembler_Option_PrintImmHex 2
 /* The option use the other assembler printer variant */
 #define LLVMDisassembler_Option_AsmPrinterVariant 4
+/* The option to set comment on instructions */
+#define LLVMDisassembler_Option_SetInstrComments 8
+  /* The option to print latency information alongside instructions */
+#define LLVMDisassembler_Option_PrintLatency 16
 
 /**
  * Dispose of a disassembler context.

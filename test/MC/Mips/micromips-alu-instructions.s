@@ -23,6 +23,7 @@
 # CHECK-EL: slti   $3, $3, 103    # encoding: [0x63,0x90,0x67,0x00]
 # CHECK-EL: sltiu  $3, $3, 103    # encoding: [0x63,0xb0,0x67,0x00]
 # CHECK-EL: sltu   $3, $3, $5     # encoding: [0xa3,0x00,0x90,0x1b]
+# CHECK-EL: lui    $9, 17767      # encoding: [0xa9,0x41,0x67,0x45]
 # CHECK-EL: and    $9, $6, $7     # encoding: [0xe6,0x00,0x50,0x4a]
 # CHECK-EL: andi   $9, $6, 17767  # encoding: [0x26,0xd1,0x67,0x45]
 # CHECK-EL: andi   $9, $6, 17767  # encoding: [0x26,0xd1,0x67,0x45]
@@ -36,6 +37,8 @@
 # CHECK-EL: mul    $9, $6, $7     # encoding: [0xe6,0x00,0x10,0x4a]
 # CHECK-EL: mult   $9, $7         # encoding: [0xe9,0x00,0x3c,0x8b]
 # CHECK-EL: multu  $9, $7         # encoding: [0xe9,0x00,0x3c,0x9b]
+# CHECK-EL: div    $zero, $9, $7  # encoding: [0xe9,0x00,0x3c,0xab]
+# CHECK-EL: divu   $zero, $9, $7  # encoding: [0xe9,0x00,0x3c,0xbb]
 #------------------------------------------------------------------------------
 # Big endian
 #------------------------------------------------------------------------------
@@ -55,6 +58,7 @@
 # CHECK-EB: slti  $3, $3, 103     # encoding: [0x90,0x63,0x00,0x67]
 # CHECK-EB: sltiu $3, $3, 103     # encoding: [0xb0,0x63,0x00,0x67]
 # CHECK-EB: sltu  $3, $3, $5      # encoding: [0x00,0xa3,0x1b,0x90]
+# CHECK-EB: lui $9, 17767         # encoding: [0x41,0xa9,0x45,0x67]
 # CHECK-EB: and $9, $6, $7        # encoding: [0x00,0xe6,0x4a,0x50]
 # CHECK-EB:  andi  $9, $6, 17767  # encoding: [0xd1,0x26,0x45,0x67]
 # CHECK-EB:  andi  $9, $6, 17767  # encoding: [0xd1,0x26,0x45,0x67]
@@ -68,6 +72,8 @@
 # CHECK-EB:  mul $9, $6, $7       # encoding: [0x00,0xe6,0x4a,0x10]
 # CHECK-EB:  mult  $9, $7         # encoding: [0x00,0xe9,0x8b,0x3c]
 # CHECK-EB:  multu $9, $7         # encoding: [0x00,0xe9,0x9b,0x3c]
+# CHECK-EB: div  $zero, $9, $7    # encoding: [0x00,0xe9,0xab,0x3c]
+# CHECK-EB: divu $zero, $9, $7    # encoding: [0x00,0xe9,0xbb,0x3c]
     add    $9, $6, $7
     add    $9, $6, 17767
     addu   $9, $6, -15001
@@ -84,6 +90,7 @@
     slti   $3, $3, 103
     sltiu  $3, $3, 103
     sltu   $3, $3, $5
+    lui    $9, 17767
     and    $9, $6, $7
     and    $9, $6, 17767
     andi   $9, $6, 17767
@@ -97,3 +104,5 @@
     mul    $9, $6, $7
     mult   $9, $7
     multu  $9, $7
+    div    $0, $9, $7
+    divu   $0, $9, $7

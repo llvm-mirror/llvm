@@ -459,15 +459,6 @@ The files are as follows, with *x.y* marking the version number:
 
   Source release for the LLVM test-suite.
 
-``llvm-gcc-4.2-x.y.source.tar.gz``
-
-  Source release of the llvm-gcc-4.2 front end.  See README.LLVM in the root
-  directory for build instructions.
-
-``llvm-gcc-4.2-x.y-platform.tar.gz``
-
-  Binary release of the llvm-gcc-4.2 front end for a specific platform.
-
 .. _checkout:
 
 Checkout LLVM from Subversion
@@ -490,6 +481,8 @@ you can checkout it from the '``tags``' directory (instead of '``trunk``'). The
 following releases are located in the following subdirectories of the '``tags``'
 directory:
 
+* Release 3.3: **RELEASE_33/final**
+* Release 3.2: **RELEASE_32/final**
 * Release 3.1: **RELEASE_31/final**
 * Release 3.0: **RELEASE_30/final**
 * Release 2.9: **RELEASE_29/final**
@@ -938,6 +931,10 @@ GCC compiler supports.
 
 The result of such a build is executables that are not runnable on on the build
 host (--build option) but can be executed on the compile host (--host option).
+
+Check :doc:`HowToCrossCompileLLVM` and `Clang docs on how to cross-compile in general
+<http://clang.llvm.org/docs/CrossCompilation.html>`_ for more information
+about cross-compiling.
 
 The Location of LLVM Object Files
 ---------------------------------

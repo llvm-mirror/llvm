@@ -105,6 +105,13 @@ def X86vsext   : SDNode<"X86ISD::VSEXT",
                          SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>,
                                               SDTCisInt<0>, SDTCisInt<1>]>>;
 
+def X86vtrunc   : SDNode<"X86ISD::VTRUNC",
+                         SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>,
+                                              SDTCisInt<0>, SDTCisInt<1>]>>;
+def X86vtruncm   : SDNode<"X86ISD::VTRUNCM",
+                         SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisVec<1>,
+                                              SDTCisInt<0>, SDTCisInt<1>,
+                                              SDTCisVec<2>, SDTCisInt<2>]>>;
 def X86vfpext  : SDNode<"X86ISD::VFPEXT",
                         SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>,
                                              SDTCisFP<0>, SDTCisFP<1>]>>;
@@ -214,6 +221,8 @@ def X86VPerm2x128 : SDNode<"X86ISD::VPERM2X128", SDTShuff3OpI>;
 
 def X86VBroadcast : SDNode<"X86ISD::VBROADCAST", SDTVBroadcast>;
 def X86VBroadcastm : SDNode<"X86ISD::VBROADCASTM", SDTVBroadcastm>;
+def X86Vinsert   : SDNode<"X86ISD::VINSERT",  SDTypeProfile<1, 3,
+                              [SDTCisSameAs<0, 1>, SDTCisPtrTy<3>]>, []>;
 
 def X86Blendi    : SDNode<"X86ISD::BLENDI",   SDTBlend>;
 def X86Fmadd     : SDNode<"X86ISD::FMADD",     SDTFma>;

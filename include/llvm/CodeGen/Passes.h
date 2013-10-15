@@ -23,8 +23,10 @@ namespace llvm {
 
   class FunctionPass;
   class MachineFunctionPass;
+  struct MachineSchedContext;
   class PassInfo;
   class PassManagerBase;
+  class ScheduleDAGInstrs;
   class TargetLoweringBase;
   class TargetLowering;
   class TargetRegisterClass;
@@ -204,6 +206,20 @@ public:
   /// Fully developed targets will not generally override this.
   virtual void addMachinePasses();
 
+  /// createTargetScheduler - Create an instance of ScheduleDAGInstrs to be run
+  /// within the standard MachineScheduler pass for this function and target at
+  /// the current optimization level.
+  ///
+  /// This can also be used to plug a new MachineSchedStrategy into an instance
+  /// of the standard ScheduleDAGMI:
+  ///   return new ScheduleDAGMI(C, new MyStrategy(C))
+  ///
+  /// Return NULL to select the default (generic) machine scheduler.
+  virtual ScheduleDAGInstrs *
+  createMachineScheduler(MachineSchedContext *C) const {
+    return 0;
+  }
+
 protected:
   // Helper to verify the analysis is really immutable.
   void setOpt(bool &Opt, bool Val);
@@ -364,14 +380,6 @@ namespace llvm {
   /// desired input for some register allocators.  This pass is "required" by
   /// these register allocator like this: AU.addRequiredID(PHIEliminationID);
   extern char &PHIEliminationID;
-
-  /// StrongPHIElimination - This pass eliminates machine instruction PHI
-  /// nodes by inserting copy instructions.  This destroys SSA information, but
-  /// is the desired input for some register allocators.  This pass is
-  /// "required" by these register allocator like this:
-  ///    AU.addRequiredID(PHIEliminationID);
-  ///  This pass is still in development
-  extern char &StrongPHIEliminationID;
 
   /// LiveIntervals - This analysis keeps track of the live ranges of virtual
   /// and physical registers.

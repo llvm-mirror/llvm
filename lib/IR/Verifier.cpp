@@ -170,6 +170,8 @@ namespace {
       Finder.reset();
 
       DL = getAnalysisIfAvailable<DataLayout>();
+      if (!DisableDebugInfoVerifier)
+        Finder.processModule(M);
 
       // We must abort before returning back to the pass manager, or else the
       // pass manager may try to run other passes on the broken module.
@@ -527,8 +529,7 @@ void Verifier::visitGlobalVariable(GlobalVariable &GV) {
 void Verifier::visitGlobalAlias(GlobalAlias &GA) {
   Assert1(!GA.getName().empty(),
           "Alias name cannot be empty!", &GA);
-  Assert1(GA.hasExternalLinkage() || GA.hasLocalLinkage() ||
-          GA.hasWeakLinkage(),
+  Assert1(GlobalAlias::isValidLinkage(GA.getLinkage()),
           "Alias should have external or external weak linkage!", &GA);
   Assert1(GA.getAliasee(),
           "Aliasee cannot be NULL!", &GA);
@@ -1168,27 +1169,12 @@ void Verifier::visitSwitchInst(SwitchInst &SI) {
   // Check to make sure that all of the constants in the switch instruction
   // have the same type as the switched-on value.
   Type *SwitchTy = SI.getCondition()->getType();
-  IntegerType *IntTy = cast<IntegerType>(SwitchTy);
-  IntegersSubsetToBB Mapping;
-  std::map<IntegersSubset::Range, unsigned> RangeSetMap;
+  SmallPtrSet<ConstantInt*, 32> Constants;
   for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end(); i != e; ++i) {
-    IntegersSubset CaseRanges = i.getCaseValueEx();
-    for (unsigned ri = 0, rie = CaseRanges.getNumItems(); ri < rie; ++ri) {
-      IntegersSubset::Range r = CaseRanges.getItem(ri);
-      Assert1(((const APInt&)r.getLow()).getBitWidth() == IntTy->getBitWidth(),
-              "Switch constants must all be same type as switch value!", &SI);
-      Assert1(((const APInt&)r.getHigh()).getBitWidth() == IntTy->getBitWidth(),
-              "Switch constants must all be same type as switch value!", &SI);
-      Mapping.add(r);
-      RangeSetMap[r] = i.getCaseIndex();
-    }
-  }
-
-  IntegersSubsetToBB::RangeIterator errItem;
-  if (!Mapping.verify(errItem)) {
-    unsigned CaseIndex = RangeSetMap[errItem->first];
-    SwitchInst::CaseIt i(&SI, CaseIndex);
-    Assert2(false, "Duplicate integer as switch case", &SI, i.getCaseValueEx());
+    Assert1(i.getCaseValue()->getType() == SwitchTy,
+            "Switch constants must all be same type as switch value!", &SI);
+    Assert2(Constants.insert(i.getCaseValue()),
+            "Duplicate integer as switch case", &SI, i.getCaseValue());
   }
 
   visitTerminatorInst(SI);
@@ -1552,14 +1538,6 @@ void Verifier::VerifyCallSite(CallSite CS) {
       Assert1(!(*PI)->isMetadataTy(),
               "Function has metadata parameter but isn't an intrinsic", I);
   }
-
-  // If the call site has the 'builtin' attribute, verify that it's applied to a
-  // direct call to a function with the 'nobuiltin' attribute.
-  if (CS.hasFnAttr(Attribute::Builtin))
-    Assert1(CS.getCalledFunction() &&
-            CS.getCalledFunction()->hasFnAttribute(Attribute::NoBuiltin),
-            "Attribute 'builtin' can only be used in a call to a function with "
-            "the 'nobuiltin' attribute.", I);
 
   visitInstruction(*I);
 }
@@ -2328,8 +2306,6 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
 void Verifier::verifyDebugInfo(Module &M) {
   // Verify Debug Info.
   if (!DisableDebugInfoVerifier) {
-    Finder.processModule(M);
-
     for (DebugInfoFinder::iterator I = Finder.compile_unit_begin(),
          E = Finder.compile_unit_end(); I != E; ++I)
       Assert1(DICompileUnit(*I).Verify(), "DICompileUnit does not Verify!", *I);

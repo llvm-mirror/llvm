@@ -590,6 +590,7 @@ i32imm:$COUNT, i32imm:$Enabled),
   let ALT_CONST = 0;
   let WHOLE_QUAD_MODE = 0;
   let BARRIER = 1;
+  let UseNamedOperandTable = 1;
 
   let Inst{31-0} = Word0;
   let Inst{63-32} = Word1;
@@ -689,42 +690,42 @@ def MIN : R600_2OP_Helper <0x4, "MIN", AMDGPUfmin>;
 // XXX: Use the defs in TargetSelectionDAG.td instead of intrinsics.
 def SETE : R600_2OP <
   0x08, "SETE",
-  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_EQ))]
+  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_OEQ))]
 >;
 
 def SGT : R600_2OP <
   0x09, "SETGT",
-  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_GT))]
+  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_OGT))]
 >;
 
 def SGE : R600_2OP <
   0xA, "SETGE",
-  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_GE))]
+  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_OGE))]
 >;
 
 def SNE : R600_2OP <
   0xB, "SETNE",
-  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_NE))]
+  [(set f32:$dst, (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_UNE))]
 >;
 
 def SETE_DX10 : R600_2OP <
   0xC, "SETE_DX10",
-  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_EQ))]
+  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_OEQ))]
 >;
 
 def SETGT_DX10 : R600_2OP <
   0xD, "SETGT_DX10",
-  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_GT))]
+  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_OGT))]
 >;
 
 def SETGE_DX10 : R600_2OP <
   0xE, "SETGE_DX10",
-  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_GE))]
+  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_OGE))]
 >;
 
 def SETNE_DX10 : R600_2OP <
   0xF, "SETNE_DX10",
-  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_NE))]
+  [(set i32:$dst, (selectcc f32:$src0, f32:$src1, -1, 0, COND_UNE))]
 >;
 
 def FRACT : R600_1OP_Helper <0x10, "FRACT", AMDGPUfract>;
@@ -880,6 +881,9 @@ def TEX_SAMPLE_C_L : R600_TEX <0x19, "TEX_SAMPLE_C_L">;
 def TEX_SAMPLE_LB : R600_TEX <0x12, "TEX_SAMPLE_LB">;
 def TEX_SAMPLE_C_LB : R600_TEX <0x1A, "TEX_SAMPLE_C_LB">;
 def TEX_LD : R600_TEX <0x03, "TEX_LD">;
+def TEX_LDPTR : R600_TEX <0x03, "TEX_LDPTR"> {
+  let INST_MOD = 1;
+}
 def TEX_GET_TEXTURE_RESINFO : R600_TEX <0x04, "TEX_GET_TEXTURE_RESINFO">;
 def TEX_GET_GRADIENTS_H : R600_TEX <0x07, "TEX_GET_GRADIENTS_H">;
 def TEX_GET_GRADIENTS_V : R600_TEX <0x08, "TEX_GET_GRADIENTS_V">;
@@ -898,6 +902,7 @@ defm : TexPattern<6, TEX_LD, v4i32>;
 defm : TexPattern<7, TEX_GET_TEXTURE_RESINFO, v4i32>;
 defm : TexPattern<8, TEX_GET_GRADIENTS_H>;
 defm : TexPattern<9, TEX_GET_GRADIENTS_V>;
+defm : TexPattern<10, TEX_LDPTR, v4i32>;
 
 //===----------------------------------------------------------------------===//
 // Helper classes for common instructions
@@ -920,18 +925,22 @@ class MULADD_IEEE_Common <bits<5> inst> : R600_3OP <
 
 class CNDE_Common <bits<5> inst> : R600_3OP <
   inst, "CNDE",
-  [(set f32:$dst, (selectcc f32:$src0, FP_ZERO, f32:$src1, f32:$src2, COND_EQ))]
+  [(set f32:$dst, (selectcc f32:$src0, FP_ZERO, f32:$src1, f32:$src2, COND_OEQ))]
 >;
 
 class CNDGT_Common <bits<5> inst> : R600_3OP <
   inst, "CNDGT",
-  [(set f32:$dst, (selectcc f32:$src0, FP_ZERO, f32:$src1, f32:$src2, COND_GT))]
->;
+  [(set f32:$dst, (selectcc f32:$src0, FP_ZERO, f32:$src1, f32:$src2, COND_OGT))]
+> {
+  let Itinerary = VecALU;
+}
 
 class CNDGE_Common <bits<5> inst> : R600_3OP <
   inst, "CNDGE",
-  [(set f32:$dst, (selectcc f32:$src0, FP_ZERO, f32:$src1, f32:$src2, COND_GE))]
->;
+  [(set f32:$dst, (selectcc f32:$src0, FP_ZERO, f32:$src1, f32:$src2, COND_OGE))]
+> {
+  let Itinerary = VecALU;
+}
 
 
 let isCodeGenOnly = 1, isPseudo = 1, Namespace = "AMDGPU"  in {
@@ -1001,35 +1010,30 @@ multiclass CUBE_Common <bits<11> inst> {
 class EXP_IEEE_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "EXP_IEEE", fexp2
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class FLT_TO_INT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "FLT_TO_INT", fp_to_sint
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class INT_TO_FLT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "INT_TO_FLT", sint_to_fp
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class FLT_TO_UINT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "FLT_TO_UINT", fp_to_uint
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class UINT_TO_FLT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "UINT_TO_FLT", uint_to_fp
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
@@ -1040,7 +1044,6 @@ class LOG_CLAMPED_Common <bits<11> inst> : R600_1OP <
 class LOG_IEEE_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "LOG_IEEE", flog2
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
@@ -1050,72 +1053,61 @@ class ASHR_Common <bits<11> inst> : R600_2OP_Helper <inst, "ASHR", sra>;
 class MULHI_INT_Common <bits<11> inst> : R600_2OP_Helper <
   inst, "MULHI_INT", mulhs
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 class MULHI_UINT_Common <bits<11> inst> : R600_2OP_Helper <
   inst, "MULHI", mulhu
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 class MULLO_INT_Common <bits<11> inst> : R600_2OP_Helper <
   inst, "MULLO_INT", mul
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 class MULLO_UINT_Common <bits<11> inst> : R600_2OP <inst, "MULLO_UINT", []> {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class RECIP_CLAMPED_Common <bits<11> inst> : R600_1OP <
   inst, "RECIP_CLAMPED", []
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class RECIP_IEEE_Common <bits<11> inst> : R600_1OP <
   inst, "RECIP_IEEE", [(set f32:$dst, (fdiv FP_ONE, f32:$src0))]
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class RECIP_UINT_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "RECIP_UINT", AMDGPUurecip
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class RECIPSQRT_CLAMPED_Common <bits<11> inst> : R600_1OP_Helper <
   inst, "RECIPSQRT_CLAMPED", int_AMDGPU_rsq
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class RECIPSQRT_IEEE_Common <bits<11> inst> : R600_1OP <
   inst, "RECIPSQRT_IEEE", []
 > {
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class SIN_Common <bits<11> inst> : R600_1OP <
   inst, "SIN", [(set f32:$dst, (SIN_HW f32:$src0))]>{
   let Trig = 1;
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
 class COS_Common <bits<11> inst> : R600_1OP <
   inst, "COS", [(set f32:$dst, (COS_HW f32:$src0))]> {
   let Trig = 1;
-  let TransOnly = 1;
   let Itinerary = TransALU;
 }
 
@@ -1186,7 +1178,7 @@ let Predicates = [isR600] in {
   def R600_ExportSwz : ExportSwzInst {
     let Word1{20-17} = 0; // BURST_COUNT
     let Word1{21} = eop;
-    let Word1{22} = 1; // VALID_PIXEL_MODE
+    let Word1{22} = 0; // VALID_PIXEL_MODE
     let Word1{30-23} = inst;
     let Word1{31} = 1; // BARRIER
   }
@@ -1195,7 +1187,7 @@ let Predicates = [isR600] in {
   def R600_ExportBuf : ExportBufInst {
     let Word1{20-17} = 0; // BURST_COUNT
     let Word1{21} = eop;
-    let Word1{22} = 1; // VALID_PIXEL_MODE
+    let Word1{22} = 0; // VALID_PIXEL_MODE
     let Word1{30-23} = inst;
     let Word1{31} = 1; // BARRIER
   }
@@ -1548,7 +1540,6 @@ let hasSideEffects = 1 in {
 
   def FLT_TO_INT_eg : FLT_TO_INT_Common<0x50> {
     let Pattern = [];
-    let TransOnly = 0;
     let Itinerary = AnyALU;
   }
 
@@ -1640,29 +1631,83 @@ class R600_LDS_1A <bits<6> lds_op, string name, list<dag> pattern> : R600_LDS <
   let DisableEncoding = "$dst";
 }
 
-class R600_LDS_1A1D <bits<6> lds_op, string name, list<dag> pattern> :
+class R600_LDS_1A1D <bits<6> lds_op, dag outs, string name, list<dag> pattern,
+                     string dst =""> :
     R600_LDS <
-  lds_op,
-  (outs),
+  lds_op, outs,
   (ins R600_Reg32:$src0, REL:$src0_rel, SEL:$src0_sel,
        R600_Reg32:$src1, REL:$src1_rel, SEL:$src1_sel,
        LAST:$last, R600_Pred:$pred_sel,
        BANK_SWIZZLE:$bank_swizzle),
-  "  "#name#" $last $src0$src0_rel, $src1$src1_rel, $pred_sel",
+  "  "#name#" $last "#dst#"$src0$src0_rel, $src1$src1_rel, $pred_sel",
   pattern
   > {
+
+  field string BaseOp;
 
   let src2 = 0;
   let src2_rel = 0;
   let LDS_1A1D = 1;
 }
 
+class R600_LDS_1A1D_NORET <bits<6> lds_op, string name, list<dag> pattern> :
+    R600_LDS_1A1D <lds_op, (outs), name, pattern> {
+  let BaseOp = name;
+}
+
+class R600_LDS_1A1D_RET <bits<6> lds_op, string name, list<dag> pattern> :
+    R600_LDS_1A1D <lds_op,  (outs R600_Reg32:$dst), name##"_RET", pattern, "OQAP, "> {
+
+  let BaseOp = name;
+  let usesCustomInserter = 1;
+  let DisableEncoding = "$dst";
+  let Defs = [OQAP];
+}
+
+class R600_LDS_1A2D <bits<6> lds_op, string name, list<dag> pattern> :
+    R600_LDS <
+  lds_op,
+  (outs),
+  (ins R600_Reg32:$src0, REL:$src0_rel, SEL:$src0_sel,
+       R600_Reg32:$src1, REL:$src1_rel, SEL:$src1_sel,
+       R600_Reg32:$src2, REL:$src2_rel, SEL:$src2_sel,
+       LAST:$last, R600_Pred:$pred_sel, BANK_SWIZZLE:$bank_swizzle),
+  "  "#name# "$last $src0$src0_rel, $src1$src1_rel, $src2$src2_rel, $pred_sel",
+  pattern> {
+  let LDS_1A2D = 1;
+}
+
+def LDS_ADD : R600_LDS_1A1D_NORET <0x0, "LDS_ADD", [] >;
+def LDS_SUB : R600_LDS_1A1D_NORET <0x1, "LDS_SUB", [] >;
+def LDS_WRITE : R600_LDS_1A1D_NORET <0xD, "LDS_WRITE",
+  [(local_store (i32 R600_Reg32:$src1), R600_Reg32:$src0)]
+>;
+def LDS_BYTE_WRITE : R600_LDS_1A1D_NORET<0x12, "LDS_BYTE_WRITE",
+  [(truncstorei8_local i32:$src1, i32:$src0)]
+>;
+def LDS_SHORT_WRITE : R600_LDS_1A1D_NORET<0x13, "LDS_SHORT_WRITE",
+  [(truncstorei16_local i32:$src1, i32:$src0)]
+>;
+def LDS_ADD_RET : R600_LDS_1A1D_RET <0x20, "LDS_ADD",
+  [(set i32:$dst, (atomic_load_add_local i32:$src0, i32:$src1))]
+>;
+def LDS_SUB_RET : R600_LDS_1A1D_RET <0x21, "LDS_SUB",
+  [(set i32:$dst, (atomic_load_sub_local i32:$src0, i32:$src1))]
+>;
 def LDS_READ_RET : R600_LDS_1A <0x32, "LDS_READ_RET",
   [(set (i32 R600_Reg32:$dst), (local_load R600_Reg32:$src0))]
 >;
-
-def LDS_WRITE : R600_LDS_1A1D <0xD, "LDS_WRITE",
-  [(local_store (i32 R600_Reg32:$src1), R600_Reg32:$src0)]
+def LDS_BYTE_READ_RET : R600_LDS_1A <0x36, "LDS_BYTE_READ_RET",
+  [(set i32:$dst, (sextloadi8_local i32:$src0))]
+>;
+def LDS_UBYTE_READ_RET : R600_LDS_1A <0x37, "LDS_UBYTE_READ_RET",
+  [(set i32:$dst, (az_extloadi8_local i32:$src0))]
+>;
+def LDS_SHORT_READ_RET : R600_LDS_1A <0x38, "LDS_SHORT_READ_RET",
+  [(set i32:$dst, (sextloadi16_local i32:$src0))]
+>;
+def LDS_USHORT_READ_RET : R600_LDS_1A <0x39, "LDS_USHORT_READ_RET",
+  [(set i32:$dst, (az_extloadi16_local i32:$src0))]
 >;
 
   // TRUNC is used for the FLT_TO_INT instructions to work around a
@@ -1684,7 +1729,7 @@ def LDS_WRITE : R600_LDS_1A1D <0xD, "LDS_WRITE",
 
   def EG_ExportSwz : ExportSwzInst {
     let Word1{19-16} = 0; // BURST_COUNT
-    let Word1{20} = 1; // VALID_PIXEL_MODE
+    let Word1{20} = 0; // VALID_PIXEL_MODE
     let Word1{21} = eop;
     let Word1{29-22} = inst;
     let Word1{30} = 0; // MARK
@@ -1694,7 +1739,7 @@ def LDS_WRITE : R600_LDS_1A1D <0xD, "LDS_WRITE",
 
   def EG_ExportBuf : ExportBufInst {
     let Word1{19-16} = 0; // BURST_COUNT
-    let Word1{20} = 1; // VALID_PIXEL_MODE
+    let Word1{20} = 0; // VALID_PIXEL_MODE
     let Word1{21} = eop;
     let Word1{29-22} = inst;
     let Word1{30} = 0; // MARK
@@ -2198,7 +2243,7 @@ let isTerminator = 1, usesCustomInserter = 1, isBranch = 1, isBarrier = 1 in {
   def BRANCH : ILFormat<(outs), (ins brtarget:$target),
       "; Pseudo unconditional branch instruction",
       [(br bb:$target)]>;
-  defm BRANCH_COND : BranchConditional<IL_brcond>;
+  defm BRANCH_COND : BranchConditional<IL_brcond, R600_Reg32, R600_Reg32>;
 }
 
 //===---------------------------------------------------------------------===//
@@ -2284,86 +2329,6 @@ def KIL : Pat <
   (MASK_WRITE (KILLGT (f32 ZERO), $src0))
 >;
 
-// SGT Reverse args
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_LT),
-  (SGT $src1, $src0)
->;
-
-// SGE Reverse args
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, COND_LE),
-  (SGE $src1, $src0)
->;
-
-// SETGT_DX10 reverse args
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, -1, 0, COND_LT),
-  (SETGT_DX10 $src1, $src0)
->;
-
-// SETGE_DX10 reverse args
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, -1, 0, COND_LE),
-  (SETGE_DX10 $src1, $src0)
->;
-
-// SETGT_INT reverse args
-def : Pat <
-  (selectcc i32:$src0, i32:$src1, -1, 0, SETLT),
-  (SETGT_INT $src1, $src0)
->;
-
-// SETGE_INT reverse args
-def : Pat <
-  (selectcc i32:$src0, i32:$src1, -1, 0, SETLE),
-  (SETGE_INT $src1, $src0)
->;
-
-// SETGT_UINT reverse args
-def : Pat <
-  (selectcc i32:$src0, i32:$src1, -1, 0, SETULT),
-  (SETGT_UINT $src1, $src0)
->;
-
-// SETGE_UINT reverse args
-def : Pat <
-  (selectcc i32:$src0, i32:$src1, -1, 0, SETULE),
-  (SETGE_UINT $src1, $src0)
->;
-
-// The next two patterns are special cases for handling 'true if ordered' and
-// 'true if unordered' conditionals.  The assumption here is that the behavior of
-// SETE and SNE conforms to the Direct3D 10 rules for floating point values
-// described here:
-// http://msdn.microsoft.com/en-us/library/windows/desktop/cc308050.aspx#alpha_32_bit
-// We assume that  SETE returns false when one of the operands is NAN and
-// SNE returns true when on of the operands is NAN
-
-//SETE - 'true if ordered'
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, SETO),
-  (SETE $src0, $src1)
->;
-
-//SETE_DX10 - 'true if ordered'
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, -1, 0, SETO),
-  (SETE_DX10 $src0, $src1)
->;
-
-//SNE - 'true if unordered'
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, FP_ONE, FP_ZERO, SETUO),
-  (SNE $src0, $src1)
->;
-
-//SETNE_DX10 - 'true if ordered'
-def : Pat <
-  (selectcc f32:$src0, f32:$src1, -1, 0, SETUO),
-  (SETNE_DX10 $src0, $src1)
->;
-
 def : Extract_Element <f32, v4f32, 0, sub0>;
 def : Extract_Element <f32, v4f32, 1, sub1>;
 def : Extract_Element <f32, v4f32, 2, sub2>;
@@ -2412,3 +2377,11 @@ def : BitConvert <v4i32, v4f32, R600_Reg128>;
 def : DwordAddrPat  <i32, R600_Reg32>;
 
 } // End isR600toCayman Predicate
+
+def getLDSNoRetOp : InstrMapping {
+  let FilterClass = "R600_LDS_1A1D";
+  let RowFields = ["BaseOp"];
+  let ColFields = ["DisableEncoding"];
+  let KeyCol = ["$dst"];
+  let ValueCols = [[""""]];
+}

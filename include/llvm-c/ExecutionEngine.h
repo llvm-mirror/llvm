@@ -171,6 +171,16 @@ void *LLVMGetPointerToGlobal(LLVMExecutionEngineRef EE, LLVMValueRef Global);
 
 /*===-- Operations on memory managers -------------------------------------===*/
 
+typedef uint8_t *(*LLVMMemoryManagerAllocateCodeSectionCallback)(
+  void *Opaque, uintptr_t Size, unsigned Alignment, unsigned SectionID,
+  const char *SectionName);
+typedef uint8_t *(*LLVMMemoryManagerAllocateDataSectionCallback)(
+  void *Opaque, uintptr_t Size, unsigned Alignment, unsigned SectionID,
+  const char *SectionName, LLVMBool IsReadOnly);
+typedef LLVMBool (*LLVMMemoryManagerFinalizeMemoryCallback)(
+  void *Opaque, char **ErrMsg);
+typedef void (*LLVMMemoryManagerDestroyCallback)(void *Opaque);
+
 /**
  * Create a simple custom MCJIT memory manager. This memory manager can
  * intercept allocations in a module-oblivious way. This will return NULL
@@ -184,14 +194,10 @@ void *LLVMGetPointerToGlobal(LLVMExecutionEngineRef EE, LLVMValueRef Global);
  */
 LLVMMCJITMemoryManagerRef LLVMCreateSimpleMCJITMemoryManager(
   void *Opaque,
-  uint8_t *(*AllocateCodeSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID),
-  uint8_t *(*AllocateDataSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID, LLVMBool IsReadOnly),
-  LLVMBool (*FinalizeMemory)(void *Opaque, char **ErrMsg),
-  void (*Destroy)(void *Opaque));
+  LLVMMemoryManagerAllocateCodeSectionCallback AllocateCodeSection,
+  LLVMMemoryManagerAllocateDataSectionCallback AllocateDataSection,
+  LLVMMemoryManagerFinalizeMemoryCallback FinalizeMemory,
+  LLVMMemoryManagerDestroyCallback Destory);
 
 void LLVMDisposeMCJITMemoryManager(LLVMMCJITMemoryManagerRef MM);
 

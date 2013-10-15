@@ -10,7 +10,8 @@
 ; right now, so we check the asm output:
 ; RUN: llc -O0 -mtriple=x86_64-apple-darwin %s -o - -filetype=asm | FileCheck %s -check-prefix=ASM-CHECK
 ; vla should have a register-indirect address at one point.
-; ASM-CHECK: DEBUG_VALUE: vla <- [RCX+0]
+; ASM-CHECK: DEBUG_VALUE: vla <- RCX
+; ASM-CHECK: DW_OP_breg2
 
 define void @testVLAwithSize(i32 %s) nounwind uwtable ssp {
 entry:
@@ -70,15 +71,15 @@ declare void @llvm.stackrestore(i8*) nounwind
 !3 = metadata !{metadata !5}
 !5 = metadata !{i32 786478, metadata !28, metadata !6, metadata !"testVLAwithSize", metadata !"testVLAwithSize", metadata !"", i32 1, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (i32)* @testVLAwithSize, null, null, metadata !1, i32 2} ; [ DW_TAG_subprogram ]
 !6 = metadata !{i32 786473, metadata !28} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, i32 0} ; [ DW_TAG_subroutine_type ]
+!7 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !8 = metadata !{null, metadata !9}
 !9 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
 !10 = metadata !{i32 786689, metadata !5, metadata !"s", metadata !6, i32 16777217, metadata !9, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
 !11 = metadata !{i32 1, i32 26, metadata !5, null}
 !12 = metadata !{i32 3, i32 13, metadata !13, null}
 !13 = metadata !{i32 786443, metadata !28, metadata !5, i32 2, i32 1, i32 0} ; [ DW_TAG_lexical_block ]
-!14 = metadata !{i32 786688, metadata !13, metadata !"vla", metadata !6, i32 3, metadata !15, i32 0, i32 0, i64 2} ; [ DW_TAG_auto_variable ]
-!15 = metadata !{i32 786433, null, null, metadata !"", i32 0, i64 0, i64 32, i32 0, i32 0, metadata !9, metadata !16, i32 0, i32 0} ; [ DW_TAG_array_type ]
+!14 = metadata !{i32 786688, metadata !13, metadata !"vla", metadata !6, i32 3, metadata !15, i32 8192, i32 0, i64 2} ; [ DW_TAG_auto_variable ]
+!15 = metadata !{i32 786433, null, null, metadata !"", i32 0, i64 0, i64 32, i32 0, i32 0, metadata !9, metadata !16, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 0, align 32, offset 0] [from int]
 !16 = metadata !{metadata !17}
 !17 = metadata !{i32 786465, i64 0, i64 -1}        ; [ DW_TAG_subrange_type ]
 !18 = metadata !{i32 3, i32 7, metadata !13, null}

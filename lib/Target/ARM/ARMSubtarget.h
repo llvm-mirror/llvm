@@ -31,29 +31,36 @@ class TargetOptions;
 class ARMSubtarget : public ARMGenSubtargetInfo {
 protected:
   enum ARMProcFamilyEnum {
-    Others, CortexA5, CortexA8, CortexA9, CortexA15, CortexR5, Swift
+    Others, CortexA5, CortexA8, CortexA9, CortexA15, CortexR5, Swift, CortexA53, CortexA57
+  };
+  enum ARMProcClassEnum {
+    None, AClass, RClass, MClass
   };
 
   /// ARMProcFamily - ARM processor family: Cortex-A8, Cortex-A9, and others.
   ARMProcFamilyEnum ARMProcFamily;
 
+  /// ARMProcClass - ARM processor class: None, AClass, RClass or MClass.
+  ARMProcClassEnum ARMProcClass;
+
   /// HasV4TOps, HasV5TOps, HasV5TEOps,
-  /// HasV6Ops, HasV6T2Ops, HasV7Ops, HasV8Ops -
+  /// HasV6Ops, HasV6MOps, HasV6T2Ops, HasV7Ops, HasV8Ops -
   /// Specify whether target support specific ARM ISA variants.
   bool HasV4TOps;
   bool HasV5TOps;
   bool HasV5TEOps;
   bool HasV6Ops;
+  bool HasV6MOps;
   bool HasV6T2Ops;
   bool HasV7Ops;
   bool HasV8Ops;
 
-  /// HasVFPv2, HasVFPv3, HasVFPv4, HasV8FP, HasNEON - Specify what
+  /// HasVFPv2, HasVFPv3, HasVFPv4, HasFPARMv8, HasNEON - Specify what
   /// floating point ISAs are supported.
   bool HasVFPv2;
   bool HasVFPv3;
   bool HasVFPv4;
-  bool HasV8FP;
+  bool HasFPARMv8;
   bool HasNEON;
 
   /// UseNEONForSinglePrecisionFP - if the NEONFP attribute has been
@@ -81,10 +88,6 @@ protected:
 
   /// HasThumb2 - True if Thumb2 instructions are supported.
   bool HasThumb2;
-
-  /// IsMClass - True if the subtarget belongs to the 'M' profile of CPUs -
-  /// v6m, v7m for example.
-  bool IsMClass;
 
   /// NoARM - True if subtarget does not support ARM mode execution.
   bool NoARM;
@@ -159,6 +162,9 @@ protected:
   /// HasTrustZone - if true, processor supports TrustZone security extensions
   bool HasTrustZone;
 
+  /// HasCrypto - if true, processor supports Cryptography extensions
+  bool HasCrypto;
+
   /// AllowsUnalignedMem - If true, the subtarget allows unaligned memory
   /// accesses for some types.  For details, see
   /// ARMTargetLowering::allowsUnalignedMemoryAccesses().
@@ -228,6 +234,7 @@ public:
   bool hasV5TOps()  const { return HasV5TOps;  }
   bool hasV5TEOps() const { return HasV5TEOps; }
   bool hasV6Ops()   const { return HasV6Ops;   }
+  bool hasV6MOps()  const { return HasV6MOps;  }
   bool hasV6T2Ops() const { return HasV6T2Ops; }
   bool hasV7Ops()   const { return HasV7Ops;  }
   bool hasV8Ops()   const { return HasV8Ops;  }
@@ -246,8 +253,9 @@ public:
   bool hasVFP2() const { return HasVFPv2; }
   bool hasVFP3() const { return HasVFPv3; }
   bool hasVFP4() const { return HasVFPv4; }
-  bool hasV8FP() const { return HasV8FP; }
+  bool hasFPARMv8() const { return HasFPARMv8; }
   bool hasNEON() const { return HasNEON;  }
+  bool hasCrypto() const { return HasCrypto; }
   bool useNEONForSinglePrecisionFP() const {
     return hasNEON() && UseNEONForSinglePrecisionFP; }
 
@@ -275,10 +283,10 @@ public:
 
   const Triple &getTargetTriple() const { return TargetTriple; }
 
-  bool isTargetIOS() const { return TargetTriple.getOS() == Triple::IOS; }
+  bool isTargetIOS() const { return TargetTriple.isiOS(); }
   bool isTargetDarwin() const { return TargetTriple.isOSDarwin(); }
-  bool isTargetNaCl() const { return TargetTriple.getOS() == Triple::NaCl; }
-  bool isTargetLinux() const { return TargetTriple.getOS() == Triple::Linux; }
+  bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
+  bool isTargetLinux() const { return TargetTriple.isOSLinux(); }
   bool isTargetELF() const { return !isTargetDarwin(); }
   // ARM EABI is the bare-metal EABI described in ARM ABI documents and
   // can be accessed via -target arm-none-eabi. This is NOT GNUEABI.
@@ -296,8 +304,9 @@ public:
   bool isThumb1Only() const { return InThumbMode && !HasThumb2; }
   bool isThumb2() const { return InThumbMode && HasThumb2; }
   bool hasThumb2() const { return HasThumb2; }
-  bool isMClass() const { return IsMClass; }
-  bool isARClass() const { return !IsMClass; }
+  bool isMClass() const { return ARMProcClass == MClass; }
+  bool isRClass() const { return ARMProcClass == RClass; }
+  bool isAClass() const { return ARMProcClass == AClass; }
 
   bool isR9Reserved() const { return IsR9Reserved; }
 

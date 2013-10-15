@@ -68,7 +68,7 @@ def Feature3DNowA  : SubtargetFeature<"3dnowa", "X863DNowLevel", "ThreeDNowA",
 def Feature64Bit   : SubtargetFeature<"64bit", "HasX86_64", "true",
                                       "Support 64-bit instructions",
                                       [FeatureCMOV]>;
-def FeatureCMPXCHG16B : SubtargetFeature<"cmpxchg16b", "HasCmpxchg16b", "true",
+def FeatureCMPXCHG16B : SubtargetFeature<"cx16", "HasCmpxchg16b", "true",
                                       "64-bit with cmpxchg16b",
                                       [Feature64Bit]>;
 def FeatureSlowBTMem : SubtargetFeature<"slow-bt-mem", "IsBTMemSlow", "true",
@@ -117,12 +117,15 @@ def FeatureVectorUAMem : SubtargetFeature<"vector-unaligned-mem",
 def FeatureAES     : SubtargetFeature<"aes", "HasAES", "true",
                                       "Enable AES instructions",
                                       [FeatureSSE2]>;
+def FeatureTBM     : SubtargetFeature<"tbm", "HasTBM", "true",
+                                      "Enable TBM instructions">;
 def FeatureMOVBE   : SubtargetFeature<"movbe", "HasMOVBE", "true",
                                       "Support MOVBE instruction">;
 def FeatureRDRAND  : SubtargetFeature<"rdrnd", "HasRDRAND", "true",
                                       "Support RDRAND instruction">;
 def FeatureF16C    : SubtargetFeature<"f16c", "HasF16C", "true",
-                       "Support 16-bit floating point conversion instructions">;
+                       "Support 16-bit floating point conversion instructions",
+                       [FeatureAVX]>;
 def FeatureFSGSBase : SubtargetFeature<"fsgsbase", "HasFSGSBase", "true",
                                        "Support FS/GS Base instructions">;
 def FeatureLZCNT   : SubtargetFeature<"lzcnt", "HasLZCNT", "true",
@@ -137,6 +140,9 @@ def FeatureHLE     : SubtargetFeature<"hle", "HasHLE", "true",
                                       "Support HLE">;
 def FeatureADX     : SubtargetFeature<"adx", "HasADX", "true",
                                       "Support ADX instructions">;
+def FeatureSHA     : SubtargetFeature<"sha", "HasSHA", "true",
+                                      "Enable SHA instructions",
+                                      [FeatureSSE2]>;
 def FeaturePRFCHW  : SubtargetFeature<"prfchw", "HasPRFCHW", "true",
                                       "Support PRFCHW instructions">;
 def FeatureRDSEED  : SubtargetFeature<"rdseed", "HasRDSEED", "true",
@@ -163,6 +169,8 @@ include "X86Schedule.td"
 
 def ProcIntelAtom : SubtargetFeature<"atom", "X86ProcFamily", "IntelAtom",
                     "Intel Atom processors">;
+def ProcIntelSLM  : SubtargetFeature<"slm", "X86ProcFamily", "IntelSLM",
+                    "Intel Silvermont processors">;
 
 class Proc<string Name, list<SubtargetFeature> Features>
  : ProcessorModel<Name, GenericModel, Features>;
@@ -206,6 +214,14 @@ def : ProcessorModel<"atom", AtomModel,
                       FeatureLEAUsesAG,
                       FeaturePadShortFunctions]>;
 
+// Atom Silvermont.
+def : ProcessorModel<"slm",  SLMModel, [ProcIntelSLM,
+                               FeatureSSE42, FeatureCMPXCHG16B,
+                               FeatureMOVBE, FeaturePOPCNT,
+                               FeaturePCLMUL, FeatureAES,
+                               FeatureCallRegIndirect,
+                               FeaturePRFCHW,
+                               FeatureSlowBTMem]>;
 // "Arrandale" along with corei3 and corei5
 def : ProcessorModel<"corei7", SandyBridgeModel,
                      [FeatureSSE42, FeatureCMPXCHG16B, FeatureSlowBTMem,
@@ -290,7 +306,8 @@ def : Proc<"bdver1",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
 def : Proc<"bdver2",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
                                FeatureAES, FeaturePCLMUL,
                                FeatureF16C, FeatureLZCNT,
-                               FeaturePOPCNT, FeatureBMI, FeatureFMA]>;
+                               FeaturePOPCNT, FeatureBMI,  FeatureTBM,
+                               FeatureFMA]>;
 def : Proc<"geode",           [Feature3DNowA]>;
 
 def : Proc<"winchip-c6",      [FeatureMMX]>;

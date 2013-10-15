@@ -100,3 +100,28 @@ define <2 x double> @test12(double* %x) {
    %res = insertelement <2 x double>zeroinitializer, double %y, i32 0
    ret <2 x double>%res
 }
+
+; CHECK-LABEL: @test13
+; CHECK: vmovqz  %rdi
+; CHECK: ret
+define <2 x i64> @test13(i64 %x) {
+   %res = insertelement <2 x i64>zeroinitializer, i64 %x, i32 0
+   ret <2 x i64>%res
+}
+
+; CHECK-LABEL: @test14
+; CHECK: vmovdz  %edi
+; CHECK: ret
+define <4 x i32> @test14(i32 %x) {
+   %res = insertelement <4 x i32>zeroinitializer, i32 %x, i32 0
+   ret <4 x i32>%res
+}
+
+; CHECK-LABEL: @test15
+; CHECK: vmovdz  (%rdi)
+; CHECK: ret
+define <4 x i32> @test15(i32* %x) {
+   %y = load i32* %x, align 4
+   %res = insertelement <4 x i32>zeroinitializer, i32 %y, i32 0
+   ret <4 x i32>%res
+}

@@ -11,10 +11,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMBaseInstrInfo.h"
 #include "ARM.h"
+#include "ARMBaseInstrInfo.h"
 #include "ARMBaseRegisterInfo.h"
 #include "ARMConstantPoolValue.h"
+#include "ARMFeatures.h"
 #include "ARMHazardRecognizer.h"
 #include "ARMMachineFunctionInfo.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
@@ -520,11 +521,17 @@ bool ARMBaseInstrInfo::isPredicable(MachineInstr *MI) const {
   if (!MI->isPredicable())
     return false;
 
-  if ((MI->getDesc().TSFlags & ARMII::DomainMask) == ARMII::DomainNEON) {
-    ARMFunctionInfo *AFI =
-      MI->getParent()->getParent()->getInfo<ARMFunctionInfo>();
-    return AFI->isThumb2Function();
+  ARMFunctionInfo *AFI =
+    MI->getParent()->getParent()->getInfo<ARMFunctionInfo>();
+
+  if (AFI->isThumb2Function()) {
+    if (getSubtarget().hasV8Ops())
+      return isV8EligibleForIT(MI);
+  } else { // non-Thumb
+    if ((MI->getDesc().TSFlags & ARMII::DomainMask) == ARMII::DomainNEON)
+      return false;
   }
+
   return true;
 }
 
@@ -1699,7 +1706,7 @@ MachineInstr *ARMBaseInstrInfo::optimizeSelect(MachineInstr *MI,
                                                bool PreferFalse) const {
   assert((MI->getOpcode() == ARM::MOVCCr || MI->getOpcode() == ARM::t2MOVCCr) &&
          "Unknown select instruction");
-  const MachineRegisterInfo &MRI = MI->getParent()->getParent()->getRegInfo();
+  MachineRegisterInfo &MRI = MI->getParent()->getParent()->getRegInfo();
   MachineInstr *DefMI = canFoldIntoMOVCC(MI->getOperand(2).getReg(), MRI, this);
   bool Invert = !DefMI;
   if (!DefMI)
@@ -1707,11 +1714,17 @@ MachineInstr *ARMBaseInstrInfo::optimizeSelect(MachineInstr *MI,
   if (!DefMI)
     return 0;
 
+  // Find new register class to use.
+  MachineOperand FalseReg = MI->getOperand(Invert ? 2 : 1);
+  unsigned       DestReg  = MI->getOperand(0).getReg();
+  const TargetRegisterClass *PreviousClass = MRI.getRegClass(FalseReg.getReg());
+  if (!MRI.constrainRegClass(DestReg, PreviousClass))
+    return 0;
+
   // Create a new predicated version of DefMI.
   // Rfalse is the first use.
   MachineInstrBuilder NewMI = BuildMI(*MI->getParent(), MI, MI->getDebugLoc(),
-                                      DefMI->getDesc(),
-                                      MI->getOperand(0).getReg());
+                                      DefMI->getDesc(), DestReg);
 
   // Copy all the DefMI operands, excluding its (null) predicate.
   const MCInstrDesc &DefDesc = DefMI->getDesc();
@@ -1734,7 +1747,6 @@ MachineInstr *ARMBaseInstrInfo::optimizeSelect(MachineInstr *MI,
   // register operand tied to the first def.
   // The tie makes the register allocator ensure the FalseReg is allocated the
   // same register as operand 0.
-  MachineOperand FalseReg = MI->getOperand(Invert ? 2 : 1);
   FalseReg.setImplicit();
   NewMI.addOperand(FalseReg);
   NewMI->tieOperands(0, NewMI->getNumOperands() - 1);
@@ -3595,6 +3607,24 @@ ARMBaseInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
   return Latency;
 }
 
+unsigned ARMBaseInstrInfo::getPredicationCost(const MachineInstr *MI) const {
+   if (MI->isCopyLike() || MI->isInsertSubreg() ||
+      MI->isRegSequence() || MI->isImplicitDef())
+    return 0;
+
+  if (MI->isBundle())
+    return 0;
+
+  const MCInstrDesc &MCID = MI->getDesc();
+
+  if (MCID.isCall() || MCID.hasImplicitDefOfPhysReg(ARM::CPSR)) {
+    // When predicated, CPSR is an additional source operand for CPSR updating
+    // instructions, this apparently increases their latencies.
+    return 1;
+  }
+  return 0;
+}
+
 unsigned ARMBaseInstrInfo::getInstrLatency(const InstrItineraryData *ItinData,
                                            const MachineInstr *MI,
                                            unsigned *PredCost) const {
@@ -4127,7 +4157,7 @@ breakPartialRegDependency(MachineBasicBlock::iterator MI,
   // FIXME: In some cases, VLDRS can be changed to a VLD1DUPd32 which defines
   // the full D-register by loading the same value to both lanes.  The
   // instruction is micro-coded with 2 uops, so don't do this until we can
-  // properly schedule micro-coded instuctions.  The dispatcher stalls cause
+  // properly schedule micro-coded instructions.  The dispatcher stalls cause
   // too big regressions.
 
   // Insert the dependency-breaking FCONSTD before MI.

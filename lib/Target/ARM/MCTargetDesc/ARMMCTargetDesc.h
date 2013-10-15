@@ -18,13 +18,16 @@
 #include <string>
 
 namespace llvm {
+class formatted_raw_ostream;
 class MCAsmBackend;
 class MCCodeEmitter;
 class MCContext;
 class MCInstrInfo;
+class MCInstPrinter;
 class MCObjectWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
+class MCStreamer;
 class MCRelocationInfo;
 class StringRef;
 class Target;
@@ -42,12 +45,19 @@ namespace ARM_MC {
                                             StringRef FS);
 }
 
+MCStreamer *createMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
+                                bool isVerboseAsm, bool useLoc, bool useCFI,
+                                bool useDwarfDirectory,
+                                MCInstPrinter *InstPrint, MCCodeEmitter *CE,
+                                MCAsmBackend *TAB, bool ShowInst);
+
 MCCodeEmitter *createARMMCCodeEmitter(const MCInstrInfo &MCII,
                                       const MCRegisterInfo &MRI,
                                       const MCSubtargetInfo &STI,
                                       MCContext &Ctx);
 
-MCAsmBackend *createARMAsmBackend(const Target &T, StringRef TT, StringRef CPU);
+MCAsmBackend *createARMAsmBackend(const Target &T, const MCRegisterInfo &MRI,
+                                  StringRef TT, StringRef CPU);
 
 /// createARMELFObjectWriter - Construct an ELF Mach-O object writer.
 MCObjectWriter *createARMELFObjectWriter(raw_ostream &OS,

@@ -28,10 +28,17 @@
 using namespace llvm;
 
 const unsigned SystemZMC::GR32Regs[16] = {
-  SystemZ::R0W, SystemZ::R1W, SystemZ::R2W, SystemZ::R3W,
-  SystemZ::R4W, SystemZ::R5W, SystemZ::R6W, SystemZ::R7W,
-  SystemZ::R8W, SystemZ::R9W, SystemZ::R10W, SystemZ::R11W,
-  SystemZ::R12W, SystemZ::R13W, SystemZ::R14W, SystemZ::R15W
+  SystemZ::R0L, SystemZ::R1L, SystemZ::R2L, SystemZ::R3L,
+  SystemZ::R4L, SystemZ::R5L, SystemZ::R6L, SystemZ::R7L,
+  SystemZ::R8L, SystemZ::R9L, SystemZ::R10L, SystemZ::R11L,
+  SystemZ::R12L, SystemZ::R13L, SystemZ::R14L, SystemZ::R15L
+};
+
+const unsigned SystemZMC::GRH32Regs[16] = {
+  SystemZ::R0H, SystemZ::R1H, SystemZ::R2H, SystemZ::R3H,
+  SystemZ::R4H, SystemZ::R5H, SystemZ::R6H, SystemZ::R7H,
+  SystemZ::R8H, SystemZ::R9H, SystemZ::R10H, SystemZ::R11H,
+  SystemZ::R12H, SystemZ::R13H, SystemZ::R14H, SystemZ::R15H
 };
 
 const unsigned SystemZMC::GR64Regs[16] = {
@@ -68,6 +75,24 @@ const unsigned SystemZMC::FP128Regs[16] = {
   SystemZ::F8Q, SystemZ::F9Q, 0, 0,
   SystemZ::F12Q, SystemZ::F13Q, 0, 0
 };
+
+unsigned SystemZMC::getFirstReg(unsigned Reg) {
+  static unsigned Map[SystemZ::NUM_TARGET_REGS];
+  static bool Initialized = false;
+  if (!Initialized) {
+    for (unsigned I = 0; I < 16; ++I) {
+      Map[GR32Regs[I]] = I;
+      Map[GRH32Regs[I]] = I;
+      Map[GR64Regs[I]] = I;
+      Map[GR128Regs[I]] = I;
+      Map[FP32Regs[I]] = I;
+      Map[FP64Regs[I]] = I;
+      Map[FP128Regs[I]] = I;
+    }
+  }
+  assert(Reg < SystemZ::NUM_TARGET_REGS);
+  return Map[Reg];
+}
 
 static MCAsmInfo *createSystemZMCAsmInfo(const MCRegisterInfo &MRI,
                                          StringRef TT) {
@@ -162,7 +187,7 @@ static MCStreamer *createSystemZMCObjectStreamer(const Target &T, StringRef TT,
                                                  MCCodeEmitter *Emitter,
                                                  bool RelaxAll,
                                                  bool NoExecStack) {
-  return createELFStreamer(Ctx, MAB, OS, Emitter, RelaxAll, NoExecStack);
+  return createELFStreamer(Ctx, 0, MAB, OS, Emitter, RelaxAll, NoExecStack);
 }
 
 extern "C" void LLVMInitializeSystemZTargetMC() {

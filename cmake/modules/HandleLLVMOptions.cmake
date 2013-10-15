@@ -8,6 +8,8 @@ include(CheckCXXCompilerFlag)
 
 if( CMAKE_COMPILER_IS_GNUCXX )
   set(LLVM_COMPILER_IS_GCC_COMPATIBLE ON)
+elseif( MSVC )
+  set(LLVM_COMPILER_IS_GCC_COMPATIBLE OFF)
 elseif( "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" )
   set(LLVM_COMPILER_IS_GCC_COMPATIBLE ON)
 endif()
@@ -239,6 +241,10 @@ macro(append_common_sanitizer_flags)
   if (NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" AND
       NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
     add_flag_if_supported("-gline-tables-only")
+  endif()
+  # Use -O1 even in debug mode, otherwise sanitizers slowdown is too large.
+  if (uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+    add_flag_if_supported("-O1")
   endif()
 endmacro()
 

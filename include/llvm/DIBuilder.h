@@ -17,7 +17,9 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/DebugInfo.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm/Support/ValueHandle.h"
 
 namespace llvm {
   class BasicBlock;
@@ -65,7 +67,9 @@ namespace llvm {
     Function *ValueFn;       // llvm.dbg.value
 
     SmallVector<Value *, 4> AllEnumTypes;
-    SmallVector<Value *, 4> AllRetainTypes;
+    /// Use TrackingVH to collect RetainTypes, since they can be updated
+    /// later on.
+    SmallVector<TrackingVH<MDNode>, 4> AllRetainTypes;
     SmallVector<Value *, 4> AllSubprograms;
     SmallVector<Value *, 4> AllGVs;
     SmallVector<Value *, 4> AllImportedModules;
@@ -279,13 +283,15 @@ namespace llvm {
     ///                     DW_AT_containing_type. See DWARF documentation
     ///                     for more info.
     /// @param TemplateParms Template type parameters.
+    /// @param UniqueIdentifier A unique identifier for the class.
     DICompositeType createClassType(DIDescriptor Scope, StringRef Name,
                                     DIFile File, unsigned LineNumber,
                                     uint64_t SizeInBits, uint64_t AlignInBits,
                                     uint64_t OffsetInBits, unsigned Flags,
                                     DIType DerivedFrom, DIArray Elements,
-                                    MDNode *VTableHolder = 0,
-                                    MDNode *TemplateParms = 0);
+                                    DIType VTableHolder = NULL,
+                                    MDNode *TemplateParms = 0,
+                                    StringRef UniqueIdentifier = StringRef());
 
     /// createStructType - Create debugging information entry for a struct.
     /// @param Scope        Scope in which this struct is defined.
@@ -297,12 +303,14 @@ namespace llvm {
     /// @param Flags        Flags to encode member attribute, e.g. private
     /// @param Elements     Struct elements.
     /// @param RunTimeLang  Optional parameter, Objective-C runtime version.
+    /// @param UniqueIdentifier A unique identifier for the struct.
     DICompositeType createStructType(DIDescriptor Scope, StringRef Name,
                                      DIFile File, unsigned LineNumber,
                                      uint64_t SizeInBits, uint64_t AlignInBits,
                                      unsigned Flags, DIType DerivedFrom,
                                      DIArray Elements, unsigned RunTimeLang = 0,
-                                     MDNode *VTableHolder = 0);
+                                     DIType VTableHolder = NULL,
+                                     StringRef UniqueIdentifier = StringRef());
 
     /// createUnionType - Create debugging information entry for an union.
     /// @param Scope        Scope in which this union is defined.
@@ -314,10 +322,12 @@ namespace llvm {
     /// @param Flags        Flags to encode member attribute, e.g. private
     /// @param Elements     Union elements.
     /// @param RunTimeLang  Optional parameter, Objective-C runtime version.
+    /// @param UniqueIdentifier A unique identifier for the union.
     DICompositeType createUnionType(
         DIDescriptor Scope, StringRef Name, DIFile File, unsigned LineNumber,
         uint64_t SizeInBits, uint64_t AlignInBits, unsigned Flags,
-        DIArray Elements, unsigned RunTimeLang = 0);
+        DIArray Elements, unsigned RunTimeLang = 0,
+        StringRef UniqueIdentifier = StringRef());
 
     /// createTemplateTypeParameter - Create debugging information for template
     /// type parameter.
@@ -398,12 +408,11 @@ namespace llvm {
     /// @param AlignInBits    Member alignment.
     /// @param Elements       Enumeration elements.
     /// @param UnderlyingType Underlying type of a C++11/ObjC fixed enum.
+    /// @param UniqueIdentifier A unique identifier for the enum.
     DICompositeType createEnumerationType(DIDescriptor Scope, StringRef Name,
-                                          DIFile File, unsigned LineNumber,
-                                          uint64_t SizeInBits,
-                                          uint64_t AlignInBits,
-                                          DIArray Elements,
-                                          DIType UnderlyingType);
+        DIFile File, unsigned LineNumber, uint64_t SizeInBits,
+        uint64_t AlignInBits, DIArray Elements, DIType UnderlyingType,
+        StringRef UniqueIdentifier = StringRef());
 
     /// createSubroutineType - Create subroutine type.
     /// @param File           File in which this subroutine is defined.
@@ -423,7 +432,8 @@ namespace llvm {
                                       DIDescriptor Scope, DIFile F,
                                       unsigned Line, unsigned RuntimeLang = 0,
                                       uint64_t SizeInBits = 0,
-                                      uint64_t AlignInBits = 0);
+                                      uint64_t AlignInBits = 0,
+                                      StringRef UniqueIdentifier = StringRef());
 
     /// retainType - Retain DIType in a module even if it is not referenced
     /// through debug info anchors.
@@ -552,6 +562,20 @@ namespace llvm {
                                 MDNode *TParam = 0,
                                 MDNode *Decl = 0);
 
+    /// FIXME: this is added for dragonegg. Once we update dragonegg
+    /// to call resolve function, this will be removed.
+    DISubprogram createFunction(DIScopeRef Scope, StringRef Name,
+                                StringRef LinkageName,
+                                DIFile File, unsigned LineNo,
+                                DICompositeType Ty, bool isLocalToUnit,
+                                bool isDefinition,
+                                unsigned ScopeLine,
+                                unsigned Flags = 0,
+                                bool isOptimized = false,
+                                Function *Fn = 0,
+                                MDNode *TParam = 0,
+                                MDNode *Decl = 0);
+
     /// createMethod - Create a new descriptor for the specified C++ method.
     /// See comments in DISubprogram for descriptions of these fields.
     /// @param Scope         Function scope.
@@ -577,7 +601,7 @@ namespace llvm {
                               DICompositeType Ty, bool isLocalToUnit,
                               bool isDefinition,
                               unsigned Virtuality = 0, unsigned VTableIndex = 0,
-                              MDNode *VTableHolder = 0,
+                              DIType VTableHolder = NULL,
                               unsigned Flags = 0,
                               bool isOptimized = false,
                               Function *Fn = 0,

@@ -62,7 +62,7 @@ let isCodeGenOnly = 1 in {
 
 // The sign of an FP128 is in the high register.
 def : Pat<(fcopysign FP32:$src1, FP128:$src2),
-          (CPSDRsd FP32:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_high))>;
+          (CPSDRsd FP32:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_h64))>;
 
 // fcopysign with an FP64 result.
 let isCodeGenOnly = 1 in
@@ -71,24 +71,24 @@ def CPSDRdd : BinaryRRF<"cpsd", 0xB372, fcopysign, FP64, FP64>;
 
 // The sign of an FP128 is in the high register.
 def : Pat<(fcopysign FP64:$src1, FP128:$src2),
-          (CPSDRdd FP64:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_high))>;
+          (CPSDRdd FP64:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_h64))>;
 
 // fcopysign with an FP128 result.  Use "upper" as the high half and leave
 // the low half as-is.
 class CopySign128<RegisterOperand cls, dag upper>
   : Pat<(fcopysign FP128:$src1, cls:$src2),
-        (INSERT_SUBREG FP128:$src1, upper, subreg_high)>;
+        (INSERT_SUBREG FP128:$src1, upper, subreg_h64)>;
 
-def : CopySign128<FP32,  (CPSDRds (EXTRACT_SUBREG FP128:$src1, subreg_high),
+def : CopySign128<FP32,  (CPSDRds (EXTRACT_SUBREG FP128:$src1, subreg_h64),
                                   FP32:$src2)>;
-def : CopySign128<FP64,  (CPSDRdd (EXTRACT_SUBREG FP128:$src1, subreg_high),
+def : CopySign128<FP64,  (CPSDRdd (EXTRACT_SUBREG FP128:$src1, subreg_h64),
                                   FP64:$src2)>;
-def : CopySign128<FP128, (CPSDRdd (EXTRACT_SUBREG FP128:$src1, subreg_high),
-                                  (EXTRACT_SUBREG FP128:$src2, subreg_high))>;
+def : CopySign128<FP128, (CPSDRdd (EXTRACT_SUBREG FP128:$src1, subreg_h64),
+                                  (EXTRACT_SUBREG FP128:$src2, subreg_h64))>;
 
-defm LoadStoreF32  : MVCLoadStore<load, store, f32,  MVCWrapper, 4>;
-defm LoadStoreF64  : MVCLoadStore<load, store, f64,  MVCWrapper, 8>;
-defm LoadStoreF128 : MVCLoadStore<load, store, f128, MVCWrapper, 16>;
+defm LoadStoreF32  : MVCLoadStore<load, f32,  MVCSequence, 4>;
+defm LoadStoreF64  : MVCLoadStore<load, f64,  MVCSequence, 8>;
+defm LoadStoreF128 : MVCLoadStore<load, f128, MVCSequence, 16>;
 
 //===----------------------------------------------------------------------===//
 // Load instructions
@@ -134,9 +134,9 @@ def LEXBR : UnaryRRE<"lexb", 0xB346, null_frag, FP128, FP128>;
 def LDXBR : UnaryRRE<"ldxb", 0xB345, null_frag, FP128, FP128>;
 
 def : Pat<(f32 (fround FP128:$src)),
-          (EXTRACT_SUBREG (LEXBR FP128:$src), subreg_32bit)>;
+          (EXTRACT_SUBREG (LEXBR FP128:$src), subreg_hh32)>;
 def : Pat<(f64 (fround FP128:$src)),
-          (EXTRACT_SUBREG (LDXBR FP128:$src), subreg_high)>;
+          (EXTRACT_SUBREG (LDXBR FP128:$src), subreg_h64)>;
 
 // Extend register floating-point values to wider representations.
 def LDEBR : UnaryRRE<"ldeb", 0xB304, fextend, FP64,  FP32>;
@@ -300,26 +300,26 @@ def MDB  : BinaryRXE<"mdb",  0xED1C, fmul, FP64, load, 8>;
 def MDEBR : BinaryRRE<"mdeb", 0xB30C, null_frag, FP64, FP32>;
 def : Pat<(fmul (f64 (fextend FP32:$src1)), (f64 (fextend FP32:$src2))),
           (MDEBR (INSERT_SUBREG (f64 (IMPLICIT_DEF)),
-                                FP32:$src1, subreg_32bit), FP32:$src2)>;
+                                FP32:$src1, subreg_h32), FP32:$src2)>;
 
 // f64 multiplication of an FP32 register and an f32 memory.
 def MDEB : BinaryRXE<"mdeb", 0xED0C, null_frag, FP64, load, 4>;
 def : Pat<(fmul (f64 (fextend FP32:$src1)),
                 (f64 (extloadf32 bdxaddr12only:$addr))),
-          (MDEB (INSERT_SUBREG (f64 (IMPLICIT_DEF)), FP32:$src1, subreg_32bit),
+          (MDEB (INSERT_SUBREG (f64 (IMPLICIT_DEF)), FP32:$src1, subreg_h32),
                 bdxaddr12only:$addr)>;
 
 // f128 multiplication of two FP64 registers.
 def MXDBR : BinaryRRE<"mxdb", 0xB307, null_frag, FP128, FP64>;
 def : Pat<(fmul (f128 (fextend FP64:$src1)), (f128 (fextend FP64:$src2))),
           (MXDBR (INSERT_SUBREG (f128 (IMPLICIT_DEF)),
-                                FP64:$src1, subreg_high), FP64:$src2)>;
+                                FP64:$src1, subreg_h64), FP64:$src2)>;
 
 // f128 multiplication of an FP64 register and an f64 memory.
 def MXDB : BinaryRXE<"mxdb", 0xED07, null_frag, FP128, load, 8>;
 def : Pat<(fmul (f128 (fextend FP64:$src1)),
                 (f128 (extloadf64 bdxaddr12only:$addr))),
-          (MXDB (INSERT_SUBREG (f128 (IMPLICIT_DEF)), FP64:$src1, subreg_high),
+          (MXDB (INSERT_SUBREG (f128 (IMPLICIT_DEF)), FP64:$src1, subreg_h64),
                 bdxaddr12only:$addr)>;
 
 // Fused multiply-add.
@@ -349,12 +349,12 @@ def DDB : BinaryRXE<"ddb", 0xED1D, fdiv, FP64, load, 8>;
 //===----------------------------------------------------------------------===//
 
 let Defs = [CC], CCValues = 0xF in {
-  def CEBR : CompareRRE<"ceb", 0xB309, z_cmp, FP32,  FP32>;
-  def CDBR : CompareRRE<"cdb", 0xB319, z_cmp, FP64,  FP64>;
-  def CXBR : CompareRRE<"cxb", 0xB349, z_cmp, FP128, FP128>;
+  def CEBR : CompareRRE<"ceb", 0xB309, z_fcmp, FP32,  FP32>;
+  def CDBR : CompareRRE<"cdb", 0xB319, z_fcmp, FP64,  FP64>;
+  def CXBR : CompareRRE<"cxb", 0xB349, z_fcmp, FP128, FP128>;
 
-  def CEB : CompareRXE<"ceb", 0xED09, z_cmp, FP32, load, 4>;
-  def CDB : CompareRXE<"cdb", 0xED19, z_cmp, FP64, load, 8>;
+  def CEB : CompareRXE<"ceb", 0xED09, z_fcmp, FP32, load, 4>;
+  def CDB : CompareRXE<"cdb", 0xED19, z_fcmp, FP64, load, 8>;
 }
 
 //===----------------------------------------------------------------------===//

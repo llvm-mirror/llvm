@@ -514,6 +514,19 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
   else
     OS << "OperandInfo" << OpInfo.find(OperandInfo)->second;
 
+  CodeGenTarget &Target = CDP.getTargetInfo();
+  if (Inst.HasComplexDeprecationPredicate)
+    // Emit a function pointer to the complex predicate method.
+    OS << ",0"
+       << ",&get" << Inst.DeprecatedReason << "DeprecationInfo";
+  else if (!Inst.DeprecatedReason.empty())
+    // Emit the Subtarget feature.
+    OS << "," << Target.getInstNamespace() << "::" << Inst.DeprecatedReason
+       << ",0";
+  else
+    // Instruction isn't deprecated.
+    OS << ",0,0";
+
   OS << " },  // Inst #" << Num << " = " << Inst.TheDef->getName() << "\n";
 }
 
@@ -545,7 +558,15 @@ void InstrInfoEmitter::emitEnums(raw_ostream &OS) {
        << "\t= " << i << ",\n";
   }
   OS << "    INSTRUCTION_LIST_END = " << NumberedInstructions.size() << "\n";
-  OS << "  };\n}\n";
+  OS << "  };\n";
+  OS << "namespace Sched {\n";
+  OS << "  enum {\n";
+  for (unsigned i = 0, e = SchedModels.numInstrSchedClasses(); i != e; ++i) {
+    OS << "    " << SchedModels.getSchedClass(i).Name
+       << "\t= " << i << ",\n";
+  }
+  OS << "    SCHED_LIST_END = " << SchedModels.numInstrSchedClasses() << "\n";
+  OS << "  };\n}\n}\n";
   OS << "} // End llvm namespace \n";
 
   OS << "#endif // GET_INSTRINFO_ENUM\n\n";

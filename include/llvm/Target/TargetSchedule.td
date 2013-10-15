@@ -76,7 +76,7 @@ def instregex;
 // See MCSchedule.h for detailed comments.
 class SchedMachineModel {
   int IssueWidth = -1; // Max micro-ops that may be scheduled per cycle.
-  int MinLatency = -1; // Determines which instrucions are allowed in a group.
+  int MinLatency = -1; // Determines which instructions are allowed in a group.
                        // (-1) inorder (0) ooo, (1): inorder +var latencies.
   int MicroOpBufferSize = -1; // Max micro-ops that can be buffered.
   int LoadLatency = -1; // Cycles for loads to access the cache.
@@ -85,6 +85,15 @@ class SchedMachineModel {
 
   // Per-cycle resources tables.
   ProcessorItineraries Itineraries = NoItineraries;
+
+  // Subtargets that define a model for only a subset of instructions
+  // that have a scheduling class (itinerary class or SchedRW list)
+  // and may actually be generated for that subtarget must clear this
+  // bit. Otherwise, the scheduler considers an unmodelled opcode to
+  // be an error. This should only be set during initial bringup,
+  // or there will be no way to catch simple errors in the model
+  // resulting from changes to the instruction definitions.
+  bit CompleteModel = 1;
 
   bit NoModel = 0; // Special tag to indicate missing machine model.
 }

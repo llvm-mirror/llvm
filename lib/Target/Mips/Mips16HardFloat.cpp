@@ -322,10 +322,30 @@ static void assureFPCallStub(Function &F, Module *M,
 }
 
 //
-// Functions that are inline intrinsics don't need helpers.
+// Functions that are llvm intrinsics and don't need helpers.
 //
 static const char *IntrinsicInline[] =
-  {"fabs", "llvm.powi.f64"};
+  {"fabs",
+   "fabsf",
+   "llvm.ceil.f32", "llvm.ceil.f64",
+   "llvm.copysign.f32", "llvm.copysign.f64",
+   "llvm.cos.f32", "llvm.cos.f64",
+   "llvm.exp.f32", "llvm.exp.f64",
+   "llvm.exp2.f32", "llvm.exp2.f64",
+   "llvm.fabs.f32", "llvm.fabs.f64",
+   "llvm.floor.f32", "llvm.floor.f64",
+   "llvm.fma.f32", "llvm.fma.f64",
+   "llvm.log.f32", "llvm.log.f64",
+   "llvm.log10.f32", "llvm.log10.f64",
+   "llvm.nearbyint.f32", "llvm.nearbyint.f64",
+   "llvm.pow.f32", "llvm.pow.f64",
+   "llvm.powi.f32", "llvm.powi.f64",
+   "llvm.rint.f32", "llvm.rint.f64",
+   "llvm.round.f32", "llvm.round.f64",
+   "llvm.sin.f32", "llvm.sin.f64",
+   "llvm.sqrt.f32", "llvm.sqrt.f64",
+   "llvm.trunc.f32", "llvm.trunc.f64",
+  };
 
 static bool isIntrinsicInline(Function *F) {
   return std::binary_search(
@@ -402,7 +422,7 @@ static void createFPFnStub(Function *F, Module *M, FPParamVariant PV,
   std::string Name = F->getName();
   std::string SectionName = ".mips16.fn." + Name;
   std::string StubName = "__fn_stub_" + Name;
-  std::string LocalName = "__fn_local_" + Name;
+  std::string LocalName = "$$__fn_local_" + Name;
   Function *FStub = Function::Create
     (F->getFunctionType(),
      Function::InternalLinkage, StubName, M);
@@ -417,17 +437,34 @@ static void createFPFnStub(Function *F, Module *M, FPParamVariant PV,
   IAH.Out(" .set  macro");
   if (PicMode) {
     IAH.Out(".set noreorder");
-    IAH.Out(".cpload  $$2");
+    IAH.Out(".cpload  $$25");
     IAH.Out(".set reorder");
     IAH.Out(".reloc 0,R_MIPS_NONE," + Name);
     IAH.Out("la $$25," + LocalName);
   }
-  else
-    IAH.Out("la $$25, " + Name);
+  else {
+    IAH.Out(".set reorder");
+    IAH.Out("la $$25," + Name);
+  }
   swapFPIntParams(PV, M, IAH, LE, false);
   IAH.Out("jr $$25");
   IAH.Out(LocalName + " = " + Name);
   new UnreachableInst(FStub->getContext(), BB);
+}
+
+//
+// remove the use-soft-float attribute
+//
+static void removeUseSoftFloat(Function &F) {
+  AttributeSet A;
+  DEBUG(errs() << "removing -use-soft-float\n");
+  A = A.addAttribute(F.getContext(), AttributeSet::FunctionIndex,
+                     "use-soft-float", "false");
+  F.removeAttributes(AttributeSet::FunctionIndex, A);
+  if (F.hasFnAttribute("use-soft-float")) {
+    DEBUG(errs() << "still has -use-soft-float\n");
+  }
+  F.addAttributes(AttributeSet::FunctionIndex, A);
 }
 
 namespace llvm {
@@ -453,6 +490,11 @@ bool Mips16HardFloat::runOnModule(Module &M) {
   DEBUG(errs() << "Run on Module Mips16HardFloat\n");
   bool Modified = false;
   for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
+    if (F->hasFnAttribute("nomips16") &&
+        F->hasFnAttribute("use-soft-float")) {
+      removeUseSoftFloat(*F);
+      continue;
+    }
     if (F->isDeclaration() || F->hasFnAttribute("mips16_fp_stub") ||
         F->hasFnAttribute("nomips16")) continue;
     Modified |= fixupFPReturnAndCall(*F, &M, Subtarget);

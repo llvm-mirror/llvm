@@ -50,7 +50,7 @@ protected:
   };
 
   enum X86ProcFamilyEnum {
-    Others, IntelAtom
+    Others, IntelAtom, IntelSLM
   };
 
   /// X86ProcFamily - X86 processor family: Intel Atom, and others
@@ -97,6 +97,9 @@ protected:
   /// HasXOP - Target has XOP instructions
   bool HasXOP;
 
+  /// HasTBM - Target has TBM instructions.
+  bool HasTBM;
+
   /// HasMOVBE - True if the processor has the MOVBE instruction.
   bool HasMOVBE;
 
@@ -126,6 +129,9 @@ protected:
 
   /// HasADX - Processor has ADX instructions.
   bool HasADX;
+
+  /// HasSHA - Processor has SHA instructions.
+  bool HasSHA;
 
   /// HasPRFCHW - Processor has PRFCHW instructions.
   bool HasPRFCHW;
@@ -271,6 +277,7 @@ public:
   // FIXME: Favor FMA when both are enabled. Is this the right thing to do?
   bool hasFMA4() const { return HasFMA4 && !HasFMA; }
   bool hasXOP() const { return HasXOP; }
+  bool hasTBM() const { return HasTBM; }
   bool hasMOVBE() const { return HasMOVBE; }
   bool hasRDRAND() const { return HasRDRAND; }
   bool hasF16C() const { return HasF16C; }
@@ -281,6 +288,7 @@ public:
   bool hasRTM() const { return HasRTM; }
   bool hasHLE() const { return HasHLE; }
   bool hasADX() const { return HasADX; }
+  bool hasSHA() const { return HasSHA; }
   bool hasPRFCHW() const { return HasPRFCHW; }
   bool hasRDSEED() const { return HasRDSEED; }
   bool isBTMemSlow() const { return IsBTMemSlow; }
@@ -311,10 +319,8 @@ public:
     return (TargetTriple.getEnvironment() == Triple::ELF ||
             TargetTriple.isOSBinFormatELF());
   }
-  bool isTargetLinux() const { return TargetTriple.getOS() == Triple::Linux; }
-  bool isTargetNaCl() const {
-    return TargetTriple.getOS() == Triple::NaCl;
-  }
+  bool isTargetLinux() const { return TargetTriple.isOSLinux(); }
+  bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
   bool isTargetNaCl32() const { return isTargetNaCl() && !is64Bit(); }
   bool isTargetNaCl64() const { return isTargetNaCl() && is64Bit(); }
   bool isTargetWindows() const { return TargetTriple.getOS() == Triple::Win32; }
@@ -328,14 +334,11 @@ public:
   bool isTargetEnvMacho() const { return TargetTriple.isEnvironmentMachO(); }
 
   bool isTargetWin64() const {
-    // FIXME: x86_64-cygwin has not been released yet.
     return In64BitMode && TargetTriple.isOSWindows();
   }
 
   bool isTargetWin32() const {
-    // FIXME: Cygwin is included for isTargetWin64 -- should it be included
-    // here too?
-    return !In64BitMode && (isTargetMingw() || isTargetWindows());
+    return !In64BitMode && (isTargetCygMing() || isTargetWindows());
   }
 
   bool isPICStyleSet() const { return PICStyle != PICStyles::None; }

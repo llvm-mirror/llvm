@@ -33,18 +33,18 @@ entry:
 
 for.body.lr.ph:                                   ; preds = %entry
   %arrayidx = getelementptr inbounds double* %A, i64 4, !dbg !24
-  %0 = load double* %arrayidx, align 8, !dbg !24, !tbaa !26
+  %0 = load double* %arrayidx, align 8, !dbg !24
   %arrayidx1 = getelementptr inbounds double* %A, i64 5, !dbg !29
-  %1 = load double* %arrayidx1, align 8, !dbg !29, !tbaa !26
+  %1 = load double* %arrayidx1, align 8, !dbg !29
   br label %for.end, !dbg !23
 
 for.end:                                          ; preds = %for.body.lr.ph, %entry
   %y1.0.lcssa = phi double [ %1, %for.body.lr.ph ], [ 1.000000e+00, %entry ]
   %y0.0.lcssa = phi double [ %0, %for.body.lr.ph ], [ 0.000000e+00, %entry ]
   %arrayidx2 = getelementptr inbounds double* %A, i64 8, !dbg !30
-  store double %y0.0.lcssa, double* %arrayidx2, align 8, !dbg !30, !tbaa !26
+  store double %y0.0.lcssa, double* %arrayidx2, align 8, !dbg !30
   %arrayidx3 = getelementptr inbounds double* %A, i64 9, !dbg !30
-  store double %y1.0.lcssa, double* %arrayidx3, align 8, !dbg !30, !tbaa !26
+  store double %y1.0.lcssa, double* %arrayidx3, align 8, !dbg !30
   ret i32 undef, !dbg !31
 }
 
@@ -63,7 +63,7 @@ attributes #1 = { nounwind readnone }
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786478, metadata !1, metadata !5, metadata !"depth", metadata !"depth", metadata !"", i32 1, metadata !6, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (double*, i32)* @depth, null, null, metadata !11, i32 1} ; [ DW_TAG_subprogram ] [line 1] [def] [depth]
 !5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/Users/nadav/file.c]
-!6 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !7, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!6 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !7, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !7 = metadata !{metadata !8, metadata !9, metadata !8}
 !8 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
 !9 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !10} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from double]
@@ -83,9 +83,6 @@ attributes #1 = { nounwind readnone }
 !23 = metadata !{i32 3, i32 0, metadata !17, null}
 !24 = metadata !{i32 4, i32 0, metadata !25, null}
 !25 = metadata !{i32 786443, metadata !1, metadata !17, i32 3, i32 0, i32 1} ; [ DW_TAG_lexical_block ] [/Users/nadav/file.c]
-!26 = metadata !{metadata !"double", metadata !27}
-!27 = metadata !{metadata !"omnipotent char", metadata !28}
-!28 = metadata !{metadata !"Simple C/C++ TBAA"}
 !29 = metadata !{i32 5, i32 0, metadata !25, null}
 !30 = metadata !{i32 7, i32 0, metadata !4, null}
 !31 = metadata !{i32 8, i32 0, metadata !4, null} ; [ DW_TAG_imported_declaration ]

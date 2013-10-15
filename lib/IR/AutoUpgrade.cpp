@@ -88,6 +88,20 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
     }
     break;
   }
+  case 'o':
+    // We only need to change the name to match the mangling including the
+    // address space.
+    if (F->arg_size() == 2 && Name.startswith("objectsize.")) {
+      Type *Tys[2] = { F->getReturnType(), F->arg_begin()->getType() };
+      if (F->getName() != Intrinsic::getName(Intrinsic::objectsize, Tys)) {
+        F->setName(Name + ".old");
+        NewFn = Intrinsic::getDeclaration(F->getParent(),
+                                          Intrinsic::objectsize, Tys);
+        return true;
+      }
+    }
+    break;
+
   case 'x': {
     if (Name.startswith("x86.sse2.pcmpeq.") ||
         Name.startswith("x86.sse2.pcmpgt.") ||
@@ -317,6 +331,14 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
     CI->eraseFromParent();
     return;
 
+  case Intrinsic::objectsize:
+    CI->replaceAllUsesWith(Builder.CreateCall2(NewFn,
+                                               CI->getArgOperand(0),
+                                               CI->getArgOperand(1),
+                                               Name));
+    CI->eraseFromParent();
+    return;
+
   case Intrinsic::arm_neon_vclz: {
     // Change name from llvm.arm.neon.vclz.* to llvm.ctlz.*
     CI->replaceAllUsesWith(Builder.CreateCall2(NewFn, CI->getArgOperand(0),
@@ -391,3 +413,30 @@ void llvm::UpgradeCallsToIntrinsic(Function* F) {
   }
 }
 
+void llvm::UpgradeInstWithTBAATag(Instruction *I) {
+  MDNode *MD = I->getMetadata(LLVMContext::MD_tbaa);
+  assert(MD && "UpgradeInstWithTBAATag should have a TBAA tag");
+  // Check if the tag uses struct-path aware TBAA format.
+  if (isa<MDNode>(MD->getOperand(0)) && MD->getNumOperands() >= 3)
+    return;
+
+  if (MD->getNumOperands() == 3) {
+    Value *Elts[] = {
+      MD->getOperand(0),
+      MD->getOperand(1)
+    };
+    MDNode *ScalarType = MDNode::get(I->getContext(), Elts);
+    // Create a MDNode <ScalarType, ScalarType, offset 0, const>
+    Value *Elts2[] = {
+      ScalarType, ScalarType,
+      Constant::getNullValue(Type::getInt64Ty(I->getContext())),
+      MD->getOperand(2)
+    };
+    I->setMetadata(LLVMContext::MD_tbaa, MDNode::get(I->getContext(), Elts2));
+  } else {
+    // Create a MDNode <MD, MD, offset 0>
+    Value *Elts[] = {MD, MD,
+      Constant::getNullValue(Type::getInt64Ty(I->getContext()))};
+    I->setMetadata(LLVMContext::MD_tbaa, MDNode::get(I->getContext(), Elts));
+  }
+}

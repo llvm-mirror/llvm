@@ -22,6 +22,15 @@ if ( LLVM_USE_FOLDERS )
   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 endif()
 
+if(MSVC AND NOT (${CMAKE_VERSION} VERSION_LESS 2.8.11))
+  # set stack reserved size to ~10MB
+  # CMake previously automatically set this value for MSVC builds, but the
+  # behavior was changed in CMake 2.8.11 (Issue 12437) to use the MSVC default
+  # value (1 MB) which is not enough for us in tasks such as parsing recursive
+  # C++ templates in Clang.
+  set(CMAKE_CXX_STACK_SIZE "10000000")
+endif()
+
 include(VersionFromVCS)
 
 option(LLVM_APPEND_VC_REV
@@ -34,6 +43,27 @@ endif()
 set(PACKAGE_NAME LLVM)
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
 set(PACKAGE_BUGREPORT "http://llvm.org/bugs/")
+
+# Configure CPack.
+set(CPACK_PACKAGE_VENDOR "LLVM")
+set(CPACK_PACKAGE_VERSION_MAJOR ${LLVM_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${LLVM_VERSION_MINOR})
+if( LLVM_APPEND_VC_REV )
+  add_version_info_from_vcs(CPACK_PACKAGE_VERSION_PATCH)
+else()
+  set(CPACK_PACKAGE_VERSION_PATCH "svn")
+endif()
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.TXT")
+if(WIN32 AND NOT UNIX)
+  set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}\\\\cmake\\\\nsis_logo.bmp")
+  set(CPACK_NSIS_MODIFY_PATH "ON")
+  set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL "ON")
+  set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
+    "ExecWait '$INSTDIR/tools/msbuild/install.bat'")
+  set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
+    "ExecWait '$INSTDIR/tools/msbuild/uninstall.bat'")
+endif()
+include(CPack)
 
 # Sanity check our source directory to make sure that we are not trying to
 # generate an in-tree build (unless on MSVC_IDE, where it is ok), and to make
@@ -116,6 +146,11 @@ endif()
 option(LLVM_ENABLE_BACKTRACES "Enable embedding backtraces on crash." ON)
 if(LLVM_ENABLE_BACKTRACES)
   set(ENABLE_BACKTRACES 1)
+endif()
+
+option(LLVM_ENABLE_CRASH_OVERRIDES "Enable crash overrides." ON)
+if(LLVM_ENABLE_CRASH_OVERRIDES)
+  set(ENABLE_CRASH_OVERRIDES 1)
 endif()
 
 option(LLVM_ENABLE_FFI "Use libffi to call external functions from the interpreter" OFF)
@@ -211,18 +246,15 @@ if( WIN32 AND NOT CYGWIN )
 endif()
 
 # Define options to control the inclusion and default build behavior for
-# components which may not strictly be necessary (tools, runtime, examples, and
-# tests).
+# components which may not strictly be necessary (tools, examples, and tests).
 #
 # This is primarily to support building smaller or faster project files.
 option(LLVM_INCLUDE_TOOLS "Generate build targets for the LLVM tools." ON)
 option(LLVM_BUILD_TOOLS
   "Build the LLVM tools. If OFF, just generate build targets." ON)
 
-option(LLVM_INCLUDE_RUNTIME "Generate build targets for the LLVM runtimes" ON)
 option(LLVM_BUILD_RUNTIME
-  "Build the LLVM runtime libraries. If OFF, just generate build targets." ON)
-
+  "Build the LLVM runtime libraries." ON)
 option(LLVM_BUILD_EXAMPLES
   "Build the LLVM example programs. If OFF, just generate build targets." OFF)
 option(LLVM_INCLUDE_EXAMPLES "Generate build targets for the LLVM examples" ON)
@@ -436,10 +468,6 @@ if( LLVM_INCLUDE_TOOLS )
   add_subdirectory(tools)
 endif()
 
-if( LLVM_INCLUDE_RUNTIME )
-  add_subdirectory(runtime)
-endif()
-
 if( LLVM_INCLUDE_EXAMPLES )
   add_subdirectory(examples)
 endif()
@@ -499,26 +527,6 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN ".svn" EXCLUDE
     )
 endif()
-
-if( NOT WIN32 )
-  install(FILES include/llvm-c/lto.h DESTINATION include/llvm-c)
-endif()
-
-
-set(CPACK_PACKAGE_VENDOR "LLVM")
-set(CPACK_PACKAGE_VERSION_MAJOR ${LLVM_VERSION_MAJOR})
-set(CPACK_PACKAGE_VERSION_MINOR ${LLVM_VERSION_MINOR})
-if( LLVM_APPEND_VC_REV )
-  add_version_info_from_vcs(CPACK_PACKAGE_VERSION_PATCH)
-else()
-  set(CPACK_PACKAGE_VERSION_PATCH "svn")
-endif()
-set(CPACK_RESOURCE_FILE_LICENSE "${LLVM_MAIN_SRC_DIR}/LICENSE.TXT")
-if(WIN32 AND NOT UNIX)
-  set(CPACK_PACKAGE_ICON "${LLVM_MAIN_SRC_DIR}\\\\cmake\\\\nsis_logo.bmp")
-  set(CPACK_NSIS_MODIFY_PATH "ON")
-endif()
-include(CPack)
 
 # Workaround for MSVS10 to avoid the Dialog Hell
 # FIXME: This could be removed with future version of CMake.

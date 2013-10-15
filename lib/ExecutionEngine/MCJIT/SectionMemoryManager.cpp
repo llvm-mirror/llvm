@@ -19,9 +19,10 @@
 namespace llvm {
 
 uint8_t *SectionMemoryManager::allocateDataSection(uintptr_t Size,
-                                                    unsigned Alignment,
-                                                    unsigned SectionID,
-                                                    bool IsReadOnly) {
+                                                   unsigned Alignment,
+                                                   unsigned SectionID,
+                                                   StringRef SectionName,
+                                                   bool IsReadOnly) {
   if (IsReadOnly)
     return allocateSection(RODataMem, Size, Alignment);
   return allocateSection(RWDataMem, Size, Alignment);
@@ -29,7 +30,8 @@ uint8_t *SectionMemoryManager::allocateDataSection(uintptr_t Size,
 
 uint8_t *SectionMemoryManager::allocateCodeSection(uintptr_t Size,
                                                    unsigned Alignment,
-                                                   unsigned SectionID) {
+                                                   unsigned SectionID,
+                                                   StringRef SectionName) {
   return allocateSection(CodeMem, Size, Alignment);
 }
 
@@ -105,6 +107,9 @@ bool SectionMemoryManager::finalizeMemory(std::string *ErrMsg)
   // FIXME: Should in-progress permissions be reverted if an error occurs?
   error_code ec;
 
+  // Don't allow free memory blocks to be used after setting protection flags.
+  CodeMem.FreeMem.clear();
+
   // Make code memory executable.
   ec = applyMemoryGroupPermissions(CodeMem,
                                    sys::Memory::MF_READ | sys::Memory::MF_EXEC);
@@ -114,6 +119,9 @@ bool SectionMemoryManager::finalizeMemory(std::string *ErrMsg)
     }
     return true;
   }
+
+  // Don't allow free memory blocks to be used after setting protection flags.
+  RODataMem.FreeMem.clear();
 
   // Make read-only data memory read-only.
   ec = applyMemoryGroupPermissions(RODataMem,

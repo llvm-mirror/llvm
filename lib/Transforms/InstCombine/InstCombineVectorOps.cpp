@@ -106,8 +106,8 @@ static Value *FindScalarElement(Value *V, unsigned EltNo) {
 }
 
 // If we have a PHI node with a vector type that has only 2 uses: feed
-// itself and be an operand of extractelemnt at a constant location,
-// try to replace the PHI of the vector type with a PHI of a scalar type
+// itself and be an operand of extractelement at a constant location,
+// try to replace the PHI of the vector type with a PHI of a scalar type.
 Instruction *InstCombiner::scalarizePHI(ExtractElementInst &EI, PHINode *PN) {
   // Verify that the PHI node has exactly 2 uses. Otherwise return NULL.
   if (!PN->hasNUses(2))
@@ -294,7 +294,7 @@ static bool CollectSingleShuffleElements(Value *V, Value *LHS, Value *RHS,
                                          SmallVectorImpl<Constant*> &Mask) {
   assert(V->getType() == LHS->getType() && V->getType() == RHS->getType() &&
          "Invalid CollectSingleShuffleElements");
-  unsigned NumElts = cast<VectorType>(V->getType())->getNumElements();
+  unsigned NumElts = V->getType()->getVectorNumElements();
 
   if (isa<UndefValue>(V)) {
     Mask.assign(NumElts, UndefValue::get(Type::getInt32Ty(V->getContext())));

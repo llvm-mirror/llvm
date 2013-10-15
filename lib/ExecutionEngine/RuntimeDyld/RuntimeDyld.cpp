@@ -29,8 +29,7 @@ RuntimeDyldImpl::~RuntimeDyldImpl() {}
 
 namespace llvm {
 
-StringRef RuntimeDyldImpl::getEHFrameSection() {
-  return StringRef();
+void RuntimeDyldImpl::registerEHFrames() {
 }
 
 // Resolve the relocations for all symbols we currently know about.
@@ -49,6 +48,7 @@ void RuntimeDyldImpl::resolveRelocations() {
             << "\t" << format("%p", (uint8_t *)Addr)
             << "\n");
     resolveRelocationList(Relocations[i], Addr);
+    Relocations.erase(i);
   }
 }
 
@@ -170,7 +170,7 @@ ObjectImage *RuntimeDyldImpl::loadObject(ObjectBuffer *InputBuffer) {
   }
 
   // Give the subclasses a chance to tie-up any loose ends.
-  finalizeLoad();
+  finalizeLoad(LocalSections);
 
   return obj.take();
 }
@@ -181,8 +181,8 @@ void RuntimeDyldImpl::emitCommonSymbols(ObjectImage &Obj,
                                         SymbolTableMap &SymbolTable) {
   // Allocate memory for the section
   unsigned SectionID = Sections.size();
-  uint8_t *Addr = MemMgr->allocateDataSection(TotalSize, sizeof(void*),
-                                              SectionID, false);
+  uint8_t *Addr = MemMgr->allocateDataSection(
+    TotalSize, sizeof(void*), SectionID, StringRef(), false);
   if (!Addr)
     report_fatal_error("Unable to allocate memory for common symbols!");
   uint64_t Offset = 0;
@@ -277,8 +277,9 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
   if (IsRequired) {
     Allocate = DataSize + StubBufSize;
     Addr = IsCode
-      ? MemMgr->allocateCodeSection(Allocate, Alignment, SectionID)
-      : MemMgr->allocateDataSection(Allocate, Alignment, SectionID, IsReadOnly);
+      ? MemMgr->allocateCodeSection(Allocate, Alignment, SectionID, Name)
+      : MemMgr->allocateDataSection(Allocate, Alignment, SectionID, Name,
+                                    IsReadOnly);
     if (!Addr)
       report_fatal_error("Unable to allocate section memory!");
 
@@ -464,31 +465,42 @@ void RuntimeDyldImpl::resolveRelocationList(const RelocationList &Relocs,
 }
 
 void RuntimeDyldImpl::resolveExternalSymbols() {
-  StringMap<RelocationList>::iterator i = ExternalSymbolRelocations.begin(),
-                                      e = ExternalSymbolRelocations.end();
-  for (; i != e; i++) {
+  while(!ExternalSymbolRelocations.empty()) {
+    StringMap<RelocationList>::iterator i = ExternalSymbolRelocations.begin();
+
     StringRef Name = i->first();
     RelocationList &Relocs = i->second;
-    SymbolTableMap::const_iterator Loc = GlobalSymbolTable.find(Name);
-    if (Loc == GlobalSymbolTable.end()) {
-      if (Name.size() == 0) {
-        // This is an absolute symbol, use an address of zero.
-        DEBUG(dbgs() << "Resolving absolute relocations." << "\n");
-        resolveRelocationList(Relocs, 0);
-      } else {
-        // This is an external symbol, try to get its address from
-        // MemoryManager.
-        uint8_t *Addr = (uint8_t*) MemMgr->getPointerToNamedFunction(Name.data(),
-                                                                   true);
-        updateGOTEntries(Name, (uint64_t)Addr);
-        DEBUG(dbgs() << "Resolving relocations Name: " << Name
-                << "\t" << format("%p", Addr)
-                << "\n");
-        resolveRelocationList(Relocs, (uintptr_t)Addr);
-      }
+    if (Name.size() == 0) {
+      // This is an absolute symbol, use an address of zero.
+      DEBUG(dbgs() << "Resolving absolute relocations." << "\n");
+      resolveRelocationList(Relocs, 0);
     } else {
-      report_fatal_error("Expected external symbol");
+      uint64_t Addr = 0;
+      SymbolTableMap::const_iterator Loc = GlobalSymbolTable.find(Name);
+      if (Loc == GlobalSymbolTable.end()) {
+          // This is an external symbol, try to get its address from
+          // MemoryManager.
+          Addr = MemMgr->getSymbolAddress(Name.data());
+      } else {
+        // We found the symbol in our global table.  It was probably in a
+        // Module that we loaded previously.
+        SymbolLoc SymLoc = GlobalSymbolTable.lookup(Name);
+        Addr = getSectionLoadAddress(SymLoc.first) + SymLoc.second;
+      }
+
+      // FIXME: Implement error handling that doesn't kill the host program!
+      if (!Addr)
+        report_fatal_error("Program used external function '" + Name +
+                          "' which could not be resolved!");
+
+      updateGOTEntries(Name, Addr);
+      DEBUG(dbgs() << "Resolving relocations Name: " << Name
+              << "\t" << format("0x%lx", Addr)
+              << "\n");
+      resolveRelocationList(Relocs, Addr);
     }
+
+    ExternalSymbolRelocations.erase(i->first());
   }
 }
 
@@ -550,10 +562,14 @@ ObjectImage *RuntimeDyld::loadObject(ObjectBuffer *InputBuffer) {
 }
 
 void *RuntimeDyld::getSymbolAddress(StringRef Name) {
+  if (!Dyld)
+    return NULL;
   return Dyld->getSymbolAddress(Name);
 }
 
 uint64_t RuntimeDyld::getSymbolLoadAddress(StringRef Name) {
+  if (!Dyld)
+    return 0;
   return Dyld->getSymbolLoadAddress(Name);
 }
 
@@ -575,8 +591,8 @@ StringRef RuntimeDyld::getErrorString() {
   return Dyld->getErrorString();
 }
 
-StringRef RuntimeDyld::getEHFrameSection() {
-  return Dyld->getEHFrameSection();
+void RuntimeDyld::registerEHFrames() {
+  return Dyld->registerEHFrames();
 }
 
 } // end namespace llvm

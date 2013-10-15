@@ -120,7 +120,9 @@ class RAGreedy : public MachineFunctionPass,
     RS_Done
   };
 
+#ifndef NDEBUG
   static const char *const StageName[];
+#endif
 
   // RegInfo - Keep additional information about each live range.
   struct RegInfo {
@@ -220,7 +222,7 @@ class RAGreedy : public MachineFunctionPass,
   /// class.
   SmallVector<GlobalSplitCandidate, 32> GlobalCand;
 
-  enum { NoCand = ~0u };
+  enum LLVM_ENUM_INT_TYPE(unsigned) { NoCand = ~0u };
 
   /// Candidate map. Each edge bundle is assigned to a GlobalCand entry, or to
   /// NoCand which indicates the stack interval.
@@ -1464,9 +1466,9 @@ void RAGreedy::calcGapWeights(unsigned PhysReg,
 
   // Add fixed interference.
   for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
-    const LiveInterval &LI = LIS->getRegUnit(*Units);
-    LiveInterval::const_iterator I = LI.find(StartIdx);
-    LiveInterval::const_iterator E = LI.end();
+    const LiveRange &LR = LIS->getRegUnit(*Units);
+    LiveRange::const_iterator I = LR.find(StartIdx);
+    LiveRange::const_iterator E = LR.end();
 
     // Same loop as above. Mark any overlapped gaps as HUGE_VALF.
     for (unsigned Gap = 0; I != E && I->start < StopIdx; ++I) {

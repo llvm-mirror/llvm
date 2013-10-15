@@ -11,10 +11,10 @@ class UnresolvedError(RuntimeError):
     pass
         
 class LitTestCase(unittest.TestCase):
-    def __init__(self, test, lit_config):
+    def __init__(self, test, run):
         unittest.TestCase.__init__(self)
         self._test = test
-        self._lit_config = lit_config
+        self._run = run
 
     def id(self):
         return self._test.getFullName()
@@ -23,10 +23,12 @@ class LitTestCase(unittest.TestCase):
         return self._test.getFullName()
 
     def runTest(self):
-        tr, output = self._test.config.test_format.execute(
-            self._test, self._lit_config)
+        # Run the test.
+        self._run.execute_test(self._test)
 
-        if tr is lit.Test.UNRESOLVED:
-            raise UnresolvedError(output)
-        elif tr.isFailure:
-            self.fail(output)
+        # Adapt the result to unittest.
+        result = self._test.result
+        if result.code is lit.Test.UNRESOLVED:
+            raise UnresolvedError(result.output)
+        elif result.code.isFailure:
+            self.fail(result.output)

@@ -2590,19 +2590,19 @@ const SCEV *ScalarEvolution::getUMinExpr(const SCEV *LHS,
   return getNotSCEV(getUMaxExpr(getNotSCEV(LHS), getNotSCEV(RHS)));
 }
 
-const SCEV *ScalarEvolution::getSizeOfExpr(Type *AllocTy) {
+const SCEV *ScalarEvolution::getSizeOfExpr(Type *IntTy, Type *AllocTy) {
   // If we have DataLayout, we can bypass creating a target-independent
   // constant expression and then folding it back into a ConstantInt.
   // This is just a compile-time optimization.
   if (TD)
-    return getConstant(TD->getIntPtrType(getContext()),
-                       TD->getTypeAllocSize(AllocTy));
+    return getConstant(IntTy, TD->getTypeAllocSize(AllocTy));
 
   Constant *C = ConstantExpr::getSizeOf(AllocTy);
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(C))
     if (Constant *Folded = ConstantFoldConstantExpression(CE, TD, TLI))
       C = Folded;
   Type *Ty = getEffectiveSCEVType(PointerType::getUnqual(AllocTy));
+  assert(Ty == IntTy && "Effective SCEV type doesn't match");
   return getTruncateOrZeroExtend(getSCEV(C), Ty);
 }
 
@@ -2615,14 +2615,16 @@ const SCEV *ScalarEvolution::getAlignOfExpr(Type *AllocTy) {
   return getTruncateOrZeroExtend(getSCEV(C), Ty);
 }
 
-const SCEV *ScalarEvolution::getOffsetOfExpr(StructType *STy,
+const SCEV *ScalarEvolution::getOffsetOfExpr(Type *IntTy,
+                                             StructType *STy,
                                              unsigned FieldNo) {
   // If we have DataLayout, we can bypass creating a target-independent
   // constant expression and then folding it back into a ConstantInt.
   // This is just a compile-time optimization.
-  if (TD)
-    return getConstant(TD->getIntPtrType(getContext()),
+  if (TD) {
+    return getConstant(IntTy,
                        TD->getStructLayout(STy)->getElementOffset(FieldNo));
+  }
 
   Constant *C = ConstantExpr::getOffsetOf(STy, FieldNo);
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(C))
@@ -2632,7 +2634,8 @@ const SCEV *ScalarEvolution::getOffsetOfExpr(StructType *STy,
   return getTruncateOrZeroExtend(getSCEV(C), Ty);
 }
 
-const SCEV *ScalarEvolution::getOffsetOfExpr(Type *CTy,
+const SCEV *ScalarEvolution::getOffsetOfExpr(Type *IntTy,
+                                             Type *CTy,
                                              Constant *FieldNo) {
   Constant *C = ConstantExpr::getOffsetOf(CTy, FieldNo);
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(C))
@@ -2703,12 +2706,15 @@ uint64_t ScalarEvolution::getTypeSizeInBits(Type *Ty) const {
 Type *ScalarEvolution::getEffectiveSCEVType(Type *Ty) const {
   assert(isSCEVable(Ty) && "Type is not SCEVable!");
 
-  if (Ty->isIntegerTy())
+  if (Ty->isIntegerTy()) {
     return Ty;
+  }
 
   // The only other support type is pointer.
   assert(Ty->isPointerTy() && "Unexpected non-pointer non-integer type!");
-  if (TD) return TD->getIntPtrType(getContext());
+
+  if (TD)
+    return TD->getIntPtrType(Ty);
 
   // Without DataLayout, conservatively assume pointers are 64-bit.
   return Type::getInt64Ty(getContext());
@@ -3177,18 +3183,18 @@ const SCEV *ScalarEvolution::createNodeForPHI(PHINode *PN) {
 /// operations. This allows them to be analyzed by regular SCEV code.
 ///
 const SCEV *ScalarEvolution::createNodeForGEP(GEPOperator *GEP) {
-
-  // Don't blindly transfer the inbounds flag from the GEP instruction to the
-  // Add expression, because the Instruction may be guarded by control flow
-  // and the no-overflow bits may not be valid for the expression in any
-  // context.
-  bool isInBounds = GEP->isInBounds();
-
   Type *IntPtrTy = getEffectiveSCEVType(GEP->getType());
   Value *Base = GEP->getOperand(0);
   // Don't attempt to analyze GEPs over unsized objects.
   if (!cast<PointerType>(Base->getType())->getElementType()->isSized())
     return getUnknown(GEP);
+
+  // Don't blindly transfer the inbounds flag from the GEP instruction to the
+  // Add expression, because the Instruction may be guarded by control flow
+  // and the no-overflow bits may not be valid for the expression in any
+  // context.
+  SCEV::NoWrapFlags Wrap = GEP->isInBounds() ? SCEV::FlagNSW : SCEV::FlagAnyWrap;
+
   const SCEV *TotalOffset = getConstant(IntPtrTy, 0);
   gep_type_iterator GTI = gep_type_begin(GEP);
   for (GetElementPtrInst::op_iterator I = llvm::next(GEP->op_begin()),
@@ -3199,21 +3205,19 @@ const SCEV *ScalarEvolution::createNodeForGEP(GEPOperator *GEP) {
     if (StructType *STy = dyn_cast<StructType>(*GTI++)) {
       // For a struct, add the member offset.
       unsigned FieldNo = cast<ConstantInt>(Index)->getZExtValue();
-      const SCEV *FieldOffset = getOffsetOfExpr(STy, FieldNo);
+      const SCEV *FieldOffset = getOffsetOfExpr(IntPtrTy, STy, FieldNo);
 
       // Add the field offset to the running total offset.
       TotalOffset = getAddExpr(TotalOffset, FieldOffset);
     } else {
       // For an array, add the element offset, explicitly scaled.
-      const SCEV *ElementSize = getSizeOfExpr(*GTI);
+      const SCEV *ElementSize = getSizeOfExpr(IntPtrTy, *GTI);
       const SCEV *IndexS = getSCEV(Index);
       // Getelementptr indices are signed.
       IndexS = getTruncateOrSignExtend(IndexS, IntPtrTy);
 
       // Multiply the index by the element size to compute the element offset.
-      const SCEV *LocalOffset = getMulExpr(IndexS, ElementSize,
-                                           isInBounds ? SCEV::FlagNSW :
-                                           SCEV::FlagAnyWrap);
+      const SCEV *LocalOffset = getMulExpr(IndexS, ElementSize, Wrap);
 
       // Add the element offset to the running total offset.
       TotalOffset = getAddExpr(TotalOffset, LocalOffset);
@@ -3224,8 +3228,7 @@ const SCEV *ScalarEvolution::createNodeForGEP(GEPOperator *GEP) {
   const SCEV *BaseS = getSCEV(Base);
 
   // Add the total offset from all the GEP indices to the base.
-  return getAddExpr(BaseS, TotalOffset,
-                    isInBounds ? SCEV::FlagNSW : SCEV::FlagAnyWrap);
+  return getAddExpr(BaseS, TotalOffset, Wrap);
 }
 
 /// GetMinTrailingZeros - Determine the minimum number of zero bits that S is

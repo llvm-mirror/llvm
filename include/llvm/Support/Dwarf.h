@@ -16,61 +16,59 @@
 #ifndef LLVM_SUPPORT_DWARF_H
 #define LLVM_SUPPORT_DWARF_H
 
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
-
 
 namespace llvm {
 
 //===----------------------------------------------------------------------===//
 // Debug info constants.
 
-enum {
-  LLVMDebugVersion = (12 << 16),        // Current version of debug information.
-  LLVMDebugVersion11 = (11 << 16),      // Constant for version 11.
-  LLVMDebugVersion10 = (10 << 16),      // Constant for version 10.
-  LLVMDebugVersion9 = (9 << 16),        // Constant for version 9.
-  LLVMDebugVersion8 = (8 << 16),        // Constant for version 8.
-  LLVMDebugVersion7 = (7 << 16),        // Constant for version 7.
-  LLVMDebugVersion6 = (6 << 16),        // Constant for version 6.
-  LLVMDebugVersion5 = (5 << 16),        // Constant for version 5.
-  LLVMDebugVersion4 = (4 << 16),        // Constant for version 4.
-  LLVMDebugVersionMask = 0xffff0000     // Mask for version number.
+enum LLVM_ENUM_INT_TYPE(uint32_t) {
+  LLVMDebugVersion = (12 << 16),    // Current version of debug information.
+  LLVMDebugVersion11 = (11 << 16),  // Constant for version 11.
+  LLVMDebugVersion10 = (10 << 16),  // Constant for version 10.
+  LLVMDebugVersion9 = (9 << 16),    // Constant for version 9.
+  LLVMDebugVersion8 = (8 << 16),    // Constant for version 8.
+  LLVMDebugVersion7 = (7 << 16),    // Constant for version 7.
+  LLVMDebugVersion6 = (6 << 16),    // Constant for version 6.
+  LLVMDebugVersion5 = (5 << 16),    // Constant for version 5.
+  LLVMDebugVersion4 = (4 << 16),    // Constant for version 4.
+  LLVMDebugVersionMask = 0xffff0000 // Mask for version number.
 };
 
 namespace dwarf {
 
 //===----------------------------------------------------------------------===//
 // Dwarf constants as gleaned from the DWARF Debugging Information Format V.4
-// reference manual http://dwarf.freestandards.org .
+// reference manual http://dwarf.freestandards.org.
 //
 
 // Do not mix the following two enumerations sets.  DW_TAG_invalid changes the
 // enumeration base type.
 
-enum llvm_dwarf_constants {
+enum LLVMConstants LLVM_ENUM_INT_TYPE(uint32_t) {
   // llvm mock tags
-  DW_TAG_invalid = ~0U,                 // Tag for invalid results.
+  DW_TAG_invalid = ~0U, // Tag for invalid results.
 
-  DW_TAG_auto_variable = 0x100,         // Tag for local (auto) variables.
-  DW_TAG_arg_variable = 0x101,          // Tag for argument variables.
+  DW_TAG_auto_variable = 0x100, // Tag for local (auto) variables.
+  DW_TAG_arg_variable = 0x101,  // Tag for argument variables.
 
-  DW_TAG_user_base = 0x1000,            // Recommended base for user tags.
+  DW_TAG_user_base = 0x1000, // Recommended base for user tags.
 
-  DW_CIE_VERSION = 1,                   // Common frame information version.
-  DW_PUBTYPES_VERSION = 2,              // Section version number for .debug_pubtypes.
-  DW_PUBNAMES_VERSION = 2               // Section version number for .debug_pubnames.
+  DWARF_VERSION = 4,       // Default dwarf version we output.
+  DW_CIE_VERSION = 1,      // Common frame information version.
+  DW_PUBTYPES_VERSION = 2, // Section version number for .debug_pubtypes.
+  DW_PUBNAMES_VERSION = 2, // Section version number for .debug_pubnames.
+  DW_ARANGES_VERSION = 2   // Section version number for .debug_aranges.
 };
-
 
 // Special ID values that distinguish a CIE from a FDE in DWARF CFI.
 // Not inside an enum because a 64-bit value is needed.
 const uint32_t DW_CIE_ID = UINT32_MAX;
 const uint64_t DW64_CIE_ID = UINT64_MAX;
 
-
-enum dwarf_constants {
-  DWARF_VERSION = 2,
-
+enum Constants {
   // Tags
   DW_TAG_array_type = 0x01,
   DW_TAG_class_type = 0x02,
@@ -488,6 +486,9 @@ enum dwarf_constants {
   DW_OP_lo_user = 0xe0,
   DW_OP_hi_user = 0xff,
 
+  // Extensions for GNU-style thread-local storage.
+  DW_OP_GNU_push_tls_address = 0xe0,
+
   // Extensions for Fission proposal.
   DW_OP_GNU_addr_index = 0xfb,
   DW_OP_GNU_const_index = 0xfc,
@@ -767,6 +768,84 @@ const char *MacinfoString(unsigned Encoding);
 /// CallFrameString - Return the string for the specified call frame instruction
 /// encodings.
 const char *CallFrameString(unsigned Encoding);
+
+// Constants for the DWARF5 Accelerator Table Proposal
+enum AcceleratorTable {
+  // Data layout descriptors.
+  DW_ATOM_null = 0u,       // Marker as the end of a list of atoms.
+  DW_ATOM_die_offset = 1u, // DIE offset in the debug_info section.
+  DW_ATOM_cu_offset = 2u, // Offset of the compile unit header that contains the
+                          // item in question.
+  DW_ATOM_die_tag = 3u,   // A tag entry.
+  DW_ATOM_type_flags = 4u, // Set of flags for a type.
+
+  // DW_ATOM_type_flags values.
+
+  // Always set for C++, only set for ObjC if this is the @implementation for a
+  // class.
+  DW_FLAG_type_implementation = 2u,
+
+  // Hash functions.
+
+  // Daniel J. Bernstein hash.
+  DW_hash_function_djb = 0u
+};
+
+/// AtomTypeString - Return the string for the specified Atom type.
+const char *AtomTypeString(unsigned Atom);
+
+// Constants for the GNU pubnames/pubtypes extensions supporting gdb index.
+enum GDBIndexEntryKind {
+  GIEK_NONE,
+  GIEK_TYPE,
+  GIEK_VARIABLE,
+  GIEK_FUNCTION,
+  GIEK_OTHER,
+  GIEK_UNUSED5,
+  GIEK_UNUSED6,
+  GIEK_UNUSED7
+};
+
+const char *GDBIndexEntryKindString(GDBIndexEntryKind Kind);
+
+enum GDBIndexEntryLinkage {
+  GIEL_EXTERNAL,
+  GIEL_STATIC
+};
+
+const char *GDBIndexEntryLinkageString(GDBIndexEntryLinkage Linkage);
+
+/// The gnu_pub* kind looks like:
+///
+/// 0-3  reserved
+/// 4-6  symbol kind
+/// 7    0 == global, 1 == static
+///
+/// A gdb_index descriptor includes the above kind, shifted 24 bits up with the
+/// offset of the cu within the debug_info section stored in those 24 bits.
+struct PubIndexEntryDescriptor {
+  GDBIndexEntryKind Kind;
+  GDBIndexEntryLinkage Linkage;
+  PubIndexEntryDescriptor(GDBIndexEntryKind Kind, GDBIndexEntryLinkage Linkage)
+      : Kind(Kind), Linkage(Linkage) {}
+  /* implicit */ PubIndexEntryDescriptor(GDBIndexEntryKind Kind)
+      : Kind(Kind), Linkage(GIEL_EXTERNAL) {}
+  explicit PubIndexEntryDescriptor(uint8_t Value)
+      : Kind(static_cast<GDBIndexEntryKind>((Value & KIND_MASK) >>
+                                            KIND_OFFSET)),
+        Linkage(static_cast<GDBIndexEntryLinkage>((Value & LINKAGE_MASK) >>
+                                                  LINKAGE_OFFSET)) {}
+  uint8_t toBits() { return Kind << KIND_OFFSET | Linkage << LINKAGE_OFFSET; }
+
+private:
+  enum {
+    KIND_OFFSET = 4,
+    KIND_MASK = 7 << KIND_OFFSET,
+    LINKAGE_OFFSET = 7,
+    LINKAGE_MASK = 1 << LINKAGE_OFFSET
+  };
+};
+
 } // End of namespace dwarf
 
 } // End of namespace llvm

@@ -99,14 +99,13 @@ void RegAllocBase::allocatePhysRegs() {
     // result from splitting.
     DEBUG(dbgs() << "\nselectOrSplit "
                  << MRI->getRegClass(VirtReg->reg)->getName()
-                 << ':' << PrintReg(VirtReg->reg) << ' ' << *VirtReg << '\n');
+                 << ':' << *VirtReg << '\n');
     typedef SmallVector<unsigned, 4> VirtRegVec;
     VirtRegVec SplitVRegs;
     unsigned AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
 
     if (AvailablePhysReg == ~0u) {
       // selectOrSplit failed to find a register!
-      const char *Msg = "ran out of registers during register allocation";
       // Probably caused by an inline asm.
       MachineInstr *MI;
       for (MachineRegisterInfo::reg_iterator I = MRI->reg_begin(VirtReg->reg);
@@ -114,9 +113,9 @@ void RegAllocBase::allocatePhysRegs() {
         if (MI->isInlineAsm())
           break;
       if (MI)
-        MI->emitError(Msg);
+        MI->emitError("inline assembly requires more registers than available");
       else
-        report_fatal_error(Msg);
+        report_fatal_error("ran out of registers during register allocation");
       // Keep going after reporting the error.
       VRM->assignVirt2Phys(VirtReg->reg,
                  RegClassInfo.getOrder(MRI->getRegClass(VirtReg->reg)).front());

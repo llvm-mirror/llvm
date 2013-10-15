@@ -21,6 +21,9 @@
 
 namespace llvm {
 
+class ExecutionEngine;
+class ObjectImage;
+
 // RuntimeDyld clients often want to handle the memory management of
 // what gets placed where. For JIT clients, this is the subset of
 // JITMemoryManager required for dynamic loading of binaries.
@@ -38,17 +41,28 @@ public:
   /// executable code. The SectionID is a unique identifier assigned by the JIT
   /// engine, and optionally recorded by the memory manager to access a loaded
   /// section.
-  virtual uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
-                                       unsigned SectionID) = 0;
+  virtual uint8_t *allocateCodeSection(
+    uintptr_t Size, unsigned Alignment, unsigned SectionID,
+    StringRef SectionName) = 0;
 
   /// Allocate a memory block of (at least) the given size suitable for data.
   /// The SectionID is a unique identifier assigned by the JIT engine, and
   /// optionally recorded by the memory manager to access a loaded section.
-  virtual uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
-                                       unsigned SectionID, bool IsReadOnly) = 0;
+  virtual uint8_t *allocateDataSection(
+    uintptr_t Size, unsigned Alignment, unsigned SectionID,
+    StringRef SectionName, bool IsReadOnly) = 0;
 
   /// Register the EH frames with the runtime so that c++ exceptions work.
-  virtual void registerEHFrames(StringRef SectionData);
+  ///
+  /// \p Addr parameter provides the local address of the EH frame section
+  /// data, while \p LoadAddr provides the address of the data in the target
+  /// address space.  If the section has not been remapped (which will usually
+  /// be the case for local execution) these two values will be the same.
+  virtual void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr, size_t Size);
+
+  /// This method returns the address of the specified function or variable.
+  /// It is used to resolve symbols during module linking.
+  virtual uint64_t getSymbolAddress(const std::string &Name);
 
   /// This method returns the address of the specified function. As such it is
   /// only useful for resolving library symbols, not code generated symbols.
@@ -56,8 +70,24 @@ public:
   /// If \p AbortOnFailure is false and no function with the given name is
   /// found, this function returns a null pointer. Otherwise, it prints a
   /// message to stderr and aborts.
+  ///
+  /// This function is deprecated for memory managers to be used with
+  /// MCJIT or RuntimeDyld.  Use getSymbolAddress instead.
   virtual void *getPointerToNamedFunction(const std::string &Name,
                                           bool AbortOnFailure = true);
+
+  /// This method is called after an object has been loaded into memory but
+  /// before relocations are applied to the loaded sections.  The object load
+  /// may have been initiated by MCJIT to resolve an external symbol for another
+  /// object that is being finalized.  In that case, the object about which
+  /// the memory manager is being notified will be finalized immediately after
+  /// the memory manager returns from this call.
+  ///
+  /// Memory managers which are preparing code for execution in an external
+  /// address space can use this call to remap the section addresses for the
+  /// newly loaded object.
+  virtual void notifyObjectLoaded(ExecutionEngine *EE,
+                                  const ObjectImage *) {}
 
   /// This method is called when object loading is complete and section page
   /// permissions can be applied.  It is up to the memory manager implementation

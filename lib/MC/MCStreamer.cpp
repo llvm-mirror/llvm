@@ -10,6 +10,7 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -21,10 +22,15 @@
 #include <cstdlib>
 using namespace llvm;
 
-MCStreamer::MCStreamer(StreamerKind Kind, MCContext &Ctx)
-    : Kind(Kind), Context(Ctx), EmitEHFrame(true), EmitDebugFrame(false),
-      CurrentW64UnwindInfo(0), LastSymbol(0), AutoInitSections(false) {
+MCTargetStreamer::~MCTargetStreamer() {}
+
+MCStreamer::MCStreamer(MCContext &Ctx, MCTargetStreamer *TargetStreamer)
+    : Context(Ctx), TargetStreamer(TargetStreamer), EmitEHFrame(true),
+      EmitDebugFrame(false), CurrentW64UnwindInfo(0), LastSymbol(0),
+      AutoInitSections(false) {
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
+  if (TargetStreamer)
+    TargetStreamer->setStreamer(this);
 }
 
 MCStreamer::~MCStreamer() {
@@ -70,6 +76,13 @@ const MCExpr *MCStreamer::ForceExpAbs(const MCExpr* Expr) {
 raw_ostream &MCStreamer::GetCommentOS() {
   // By default, discard comments.
   return nulls();
+}
+
+void MCStreamer::generateCompactUnwindEncodings(MCAsmBackend *MAB) {
+  for (std::vector<MCDwarfFrameInfo>::iterator I = FrameInfos.begin(),
+         E = FrameInfos.end(); I != E; ++I)
+    I->CompactUnwindEncoding =
+      (MAB ? MAB->generateCompactUnwindEncoding(I->Instructions) : 0);
 }
 
 void MCStreamer::EmitDwarfSetLineAddr(int64_t LineDelta,
@@ -183,17 +196,28 @@ void MCStreamer::EmitEHSymAttributes(const MCSymbol *Symbol,
                                      MCSymbol *EHSymbol) {
 }
 
+void MCStreamer::AssignSection(MCSymbol *Symbol, const MCSection *Section) {
+  if (Section)
+    Symbol->setSection(*Section);
+  else
+    Symbol->setUndefined();
+
+  // As we emit symbols into a section, track the order so that they can
+  // be sorted upon later. Zero is reserved to mean 'unemitted'.
+  SymbolOrdering[Symbol] = 1 + SymbolOrdering.size();
+}
+
 void MCStreamer::EmitLabel(MCSymbol *Symbol) {
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
   assert(getCurrentSection().first && "Cannot emit before setting section!");
-  Symbol->setSection(*getCurrentSection().first);
+  AssignSection(Symbol, getCurrentSection().first);
   LastSymbol = Symbol;
 }
 
 void MCStreamer::EmitDebugLabel(MCSymbol *Symbol) {
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
   assert(getCurrentSection().first && "Cannot emit before setting section!");
-  Symbol->setSection(*getCurrentSection().first);
+  AssignSection(Symbol, getCurrentSection().first);
   LastSymbol = Symbol;
 }
 
@@ -380,6 +404,14 @@ void MCStreamer::EmitCFIRegister(int64_t Register1, int64_t Register2) {
   CurFrame->Instructions.push_back(Instruction);
 }
 
+void MCStreamer::EmitCFIWindowSave() {
+  MCSymbol *Label = EmitCFICommon();
+  MCCFIInstruction Instruction =
+    MCCFIInstruction::createWindowSave(Label);
+  MCDwarfFrameInfo *CurFrame = getCurrentFrameInfo();
+  CurFrame->Instructions.push_back(Instruction);
+}
+
 void MCStreamer::setCurrentW64UnwindInfo(MCWin64EHUnwindInfo *Frame) {
   W64UnwindInfos.push_back(Frame);
   CurrentW64UnwindInfo = W64UnwindInfos.back();
@@ -470,7 +502,9 @@ void MCStreamer::EmitWin64EHSetFrame(unsigned Register, unsigned Offset) {
     report_fatal_error("Frame register and offset already specified!");
   if (Offset & 0x0F)
     report_fatal_error("Misaligned frame pointer offset!");
-  MCWin64EHInstruction Inst(Win64EH::UOP_SetFPReg, 0, Register, Offset);
+  MCSymbol *Label = getContext().CreateTempSymbol();
+  MCWin64EHInstruction Inst(Win64EH::UOP_SetFPReg, Label, Register, Offset);
+  EmitLabel(Label);
   CurFrame->LastFrameInst = CurFrame->Instructions.size();
   CurFrame->Instructions.push_back(Inst);
 }
@@ -534,50 +568,6 @@ void MCStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol) {
   llvm_unreachable("This file format doesn't support this directive");
 }
 
-void MCStreamer::EmitFnStart() {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitFnEnd() {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitCantUnwind() {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitHandlerData() {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitPersonality(const MCSymbol *Personality) {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitSetFP(unsigned FpReg, unsigned SpReg, int64_t Offset) {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitPad(int64_t Offset) {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitRegSave(const SmallVectorImpl<unsigned> &RegList, bool) {
-  errs() << "Not implemented yet\n";
-  abort();
-}
-
-void MCStreamer::EmitTCEntry(const MCSymbol &S) {
-  llvm_unreachable("Unsupported method");
-}
-
 /// EmitRawText - If this file is backed by an assembly streamer, this dumps
 /// the specified string in the output .s file.  This capability is
 /// indicated by the hasRawTextSupport() predicate.
@@ -593,15 +583,15 @@ void MCStreamer::EmitRawText(const Twine &T) {
   EmitRawText(Str.str());
 }
 
-void MCStreamer::EmitFrames(bool usingCFI) {
+void MCStreamer::EmitFrames(MCAsmBackend *MAB, bool usingCFI) {
   if (!getNumFrameInfos())
     return;
 
   if (EmitEHFrame)
-    MCDwarfFrameEmitter::Emit(*this, usingCFI, true);
+    MCDwarfFrameEmitter::Emit(*this, MAB, usingCFI, true);
 
   if (EmitDebugFrame)
-    MCDwarfFrameEmitter::Emit(*this, usingCFI, false);
+    MCDwarfFrameEmitter::Emit(*this, MAB, usingCFI, false);
 }
 
 void MCStreamer::EmitW64Tables() {

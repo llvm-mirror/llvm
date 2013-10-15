@@ -368,6 +368,14 @@ AArch64InstPrinter::printSImm7ScaledOperand(const MCInst *MI, unsigned OpNum,
   O << "#" << (Imm * MemScale);
 }
 
+void AArch64InstPrinter::printVPRRegister(const MCInst *MI, unsigned OpNo,
+                                          raw_ostream &O) {
+  unsigned Reg = MI->getOperand(OpNo).getReg();
+  std::string Name = getRegisterName(Reg);
+  Name[0] = 'v';
+  O << Name;
+}
+
 void AArch64InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                       raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
@@ -467,6 +475,18 @@ void AArch64InstPrinter::printNeonUImm8Operand(const MCInst *MI, unsigned OpNum,
   O.write_hex(Imm);
 }
 
+void AArch64InstPrinter::printNeonUImm8OperandBare(const MCInst *MI,
+                                               unsigned OpNum,
+                                               raw_ostream &O) {
+  const MCOperand &MOUImm = MI->getOperand(OpNum);
+
+  assert(MOUImm.isImm()
+         && "Immediate operand required for Neon vector immediate inst.");
+
+  unsigned Imm = MOUImm.getImm();
+  O << Imm;
+}
+
 void AArch64InstPrinter::printNeonUImm64MaskOperand(const MCInst *MI,
                                                     unsigned OpNum,
                                                     raw_ostream &O) {
@@ -486,4 +506,34 @@ void AArch64InstPrinter::printNeonUImm64MaskOperand(const MCInst *MI,
 
   O << "#0x";
   O.write_hex(Mask);
+}
+
+// If Count > 1, there are two valid kinds of vector list:
+//   (1) {Vn.layout, Vn+1.layout, ... , Vm.layout}
+//   (2) {Vn.layout - Vm.layout}
+// We choose the first kind as output.
+template <A64Layout::VectorLayout Layout, unsigned Count>
+void AArch64InstPrinter::printVectorList(const MCInst *MI, unsigned OpNum,
+                                         raw_ostream &O) {
+  assert(Count >= 1 && Count <= 4 && "Invalid Number of Vectors");
+
+  unsigned Reg = MI->getOperand(OpNum).getReg();
+  std::string LayoutStr = A64VectorLayoutToString(Layout);
+  O << "{";
+  if (Count > 1) { // Print sub registers separately
+    bool IsVec64 = (Layout < A64Layout::_16B) ? true : false;
+    unsigned SubRegIdx = IsVec64 ? AArch64::dsub_0 : AArch64::qsub_0;
+    for (unsigned I = 0; I < Count; I++) {
+      std::string Name = getRegisterName(MRI.getSubReg(Reg, SubRegIdx++));
+      Name[0] = 'v';
+      O << Name << LayoutStr;
+      if (I != Count - 1)
+        O << ", ";
+    }
+  } else { // Print the register directly when NumVecs is 1.
+    std::string Name = getRegisterName(Reg);
+    Name[0] = 'v';
+    O << Name << LayoutStr;
+  }
+  O << "}";
 }

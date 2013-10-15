@@ -549,8 +549,8 @@ cvttpd2dq	0xdeadbeef(%ebx,%ecx,8),%xmm5
 
 // rdar://8490728 - llvm-mc rejects 'movmskpd'
 movmskpd	%xmm6, %rax
-// CHECK: movmskpd	%xmm6, %rax
-// CHECK: encoding: [0x66,0x48,0x0f,0x50,0xc6]
+// CHECK: movmskpd	%xmm6, %eax
+// CHECK: encoding: [0x66,0x0f,0x50,0xc6]
 movmskpd	%xmm6, %eax
 // CHECK: movmskpd	%xmm6, %eax
 // CHECK: encoding: [0x66,0x0f,0x50,0xc6]
@@ -1375,3 +1375,16 @@ fsub %st(1)
 fsubr %st(1)
 fdiv %st(1)
 fdivr %st(1)
+
+// CHECK: movd %xmm0, %eax
+// CHECK: movd %xmm0, %rax
+// CHECK: movd %xmm0, %rax
+// CHECK: vmovd %xmm0, %eax
+// CHECK: vmovq %xmm0, %rax
+// CHECK: vmovq %xmm0, %rax
+movd %xmm0, %eax
+movd %xmm0, %rax
+movq %xmm0, %rax
+vmovd %xmm0, %eax
+vmovd %xmm0, %rax
+vmovq %xmm0, %rax

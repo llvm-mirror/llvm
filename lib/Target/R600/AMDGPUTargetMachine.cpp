@@ -33,6 +33,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include <llvm/CodeGen/Passes.h>
 
+
 using namespace llvm;
 
 extern "C" void LLVMInitializeR600Target() {
@@ -80,17 +81,20 @@ namespace {
 class AMDGPUPassConfig : public TargetPassConfig {
 public:
   AMDGPUPassConfig(AMDGPUTargetMachine *TM, PassManagerBase &PM)
-    : TargetPassConfig(TM, PM) {
-    const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
-    if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
-      enablePass(&MachineSchedulerID);
-      MachineSchedRegistry::setDefault(createR600MachineScheduler);
-    }
-  }
+    : TargetPassConfig(TM, PM) {}
 
   AMDGPUTargetMachine &getAMDGPUTargetMachine() const {
     return getTM<AMDGPUTargetMachine>();
   }
+
+  virtual ScheduleDAGInstrs *
+  createMachineScheduler(MachineSchedContext *C) const {
+    const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+    if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS)
+      return createR600MachineScheduler(C);
+    return 0;
+  }
+
   virtual bool addPreISel();
   virtual bool addInstSelector();
   virtual bool addPreRegAlloc();
@@ -120,9 +124,12 @@ bool
 AMDGPUPassConfig::addPreISel() {
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
   addPass(createFlattenCFGPass());
-  if (ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
-    addPass(createSITypeRewriter());
+  if (ST.IsIRStructurizerEnabled() ||
+      ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS)
     addPass(createStructurizeCFGPass());
+  if (ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
+    addPass(createSinkingPass());
+    addPass(createSITypeRewriter());
     addPass(createSIAnnotateControlFlowPass());
   } else {
     addPass(createR600TextureIntrinsicsReplacer());
@@ -165,10 +172,11 @@ bool AMDGPUPassConfig::addPostRegAlloc() {
 bool AMDGPUPassConfig::addPreSched2() {
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
 
-  if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
+  if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS)
     addPass(createR600EmitClauseMarkers(*TM));
-  }
   addPass(&IfConverterID);
+  if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS)
+    addPass(createR600ClauseMergePass(*TM));
   return false;
 }
 
@@ -186,4 +194,3 @@ bool AMDGPUPassConfig::addPreEmitPass() {
 
   return false;
 }
-

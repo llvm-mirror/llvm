@@ -39,6 +39,9 @@ void MCObjectFileInfo::InitMachOMCObjectFileInfo(Triple T) {
     = Ctx->getMachOSection("__DATA", "__data", 0,
                            SectionKind::getDataRel());
 
+  // BSSSection might not be expected initialized on msvc.
+  BSSSection = 0;
+
   TLSDataSection // .tdata
     = Ctx->getMachOSection("__DATA", "__thread_data",
                            MCSectionMachO::S_THREAD_LOCAL_REGULAR,
@@ -197,6 +200,14 @@ void MCObjectFileInfo::InitMachOMCObjectFileInfo(Triple T) {
                          SectionKind::getMetadata());
   DwarfPubTypesSection =
     Ctx->getMachOSection("__DWARF", "__debug_pubtypes",
+                         MCSectionMachO::S_ATTR_DEBUG,
+                         SectionKind::getMetadata());
+  DwarfGnuPubNamesSection =
+    Ctx->getMachOSection("__DWARF", "__debug_gnu_pubn",
+                         MCSectionMachO::S_ATTR_DEBUG,
+                         SectionKind::getMetadata());
+  DwarfGnuPubTypesSection =
+    Ctx->getMachOSection("__DWARF", "__debug_gnu_pubt",
                          MCSectionMachO::S_ATTR_DEBUG,
                          SectionKind::getMetadata());
   DwarfStrSection =
@@ -435,6 +446,12 @@ void MCObjectFileInfo::InitELFMCObjectFileInfo(Triple T) {
   DwarfPubTypesSection =
     Ctx->getELFSection(".debug_pubtypes", ELF::SHT_PROGBITS, 0,
                        SectionKind::getMetadata());
+  DwarfGnuPubNamesSection =
+    Ctx->getELFSection(".debug_gnu_pubnames", ELF::SHT_PROGBITS, 0,
+                       SectionKind::getMetadata());
+  DwarfGnuPubTypesSection =
+    Ctx->getELFSection(".debug_gnu_pubtypes", ELF::SHT_PROGBITS, 0,
+                       SectionKind::getMetadata());
   DwarfStrSection =
     Ctx->getELFSection(".debug_str", ELF::SHT_PROGBITS,
                        ELF::SHF_MERGE | ELF::SHF_STRINGS,
@@ -588,6 +605,16 @@ void MCObjectFileInfo::InitCOFFMCObjectFileInfo(Triple T) {
                         SectionKind::getMetadata());
   DwarfPubTypesSection =
     Ctx->getCOFFSection(".debug_pubtypes",
+                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
+                        COFF::IMAGE_SCN_MEM_READ,
+                        SectionKind::getMetadata());
+  DwarfGnuPubNamesSection =
+    Ctx->getCOFFSection(".debug_gnu_pubnames",
+                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
+                        COFF::IMAGE_SCN_MEM_READ,
+                        SectionKind::getMetadata());
+  DwarfGnuPubTypesSection =
+    Ctx->getCOFFSection(".debug_gnu_pubtypes",
                         COFF::IMAGE_SCN_MEM_DISCARDABLE |
                         COFF::IMAGE_SCN_MEM_READ,
                         SectionKind::getMetadata());

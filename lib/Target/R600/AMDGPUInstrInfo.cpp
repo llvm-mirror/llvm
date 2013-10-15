@@ -28,7 +28,7 @@
 using namespace llvm;
 
 AMDGPUInstrInfo::AMDGPUInstrInfo(TargetMachine &tm)
-  : AMDGPUGenInstrInfo(0,0), RI(tm), TM(tm) { }
+  : AMDGPUGenInstrInfo(-1,-1), RI(tm), TM(tm) { }
 
 const AMDGPURegisterInfo &AMDGPUInstrInfo::getRegisterInfo() const {
   return RI;
@@ -242,5 +242,14 @@ void AMDGPUInstrInfo::convertToISA(MachineInstr & MI, MachineFunction &MF,
         MRI.setRegClass(MO.getReg(), newRegClass);
       }
     }
+  }
+}
+
+int AMDGPUInstrInfo::getMaskedMIMGOp(uint16_t Opcode, unsigned Channels) const {
+  switch (Channels) {
+  default: return Opcode;
+  case 1: return AMDGPU::getMaskedMIMGOp(Opcode, AMDGPU::Channels_1);
+  case 2: return AMDGPU::getMaskedMIMGOp(Opcode, AMDGPU::Channels_2);
+  case 3: return AMDGPU::getMaskedMIMGOp(Opcode, AMDGPU::Channels_3);
   }
 }

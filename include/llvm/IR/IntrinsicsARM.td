@@ -45,6 +45,11 @@ def int_arm_strexd : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty,
 def int_arm_ldrexd : Intrinsic<[llvm_i32_ty, llvm_i32_ty], [llvm_ptr_ty]>;
 
 //===----------------------------------------------------------------------===//
+// Data barrier instructions
+def int_arm_dmb : Intrinsic<[], [llvm_i32_ty]>;
+def int_arm_dsb : Intrinsic<[], [llvm_i32_ty]>;
+
+//===----------------------------------------------------------------------===//
 // VFP
 
 def int_arm_get_fpscr : GCCBuiltin<"__builtin_arm_get_fpscr">,
@@ -90,6 +95,26 @@ def int_arm_mcrr : GCCBuiltin<"__builtin_arm_mcrr">,
 def int_arm_mcrr2 : GCCBuiltin<"__builtin_arm_mcrr2">,
    Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
                   llvm_i32_ty, llvm_i32_ty], []>;
+
+//===----------------------------------------------------------------------===//
+// CRC32
+
+def int_arm_crc32b  : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
+    [IntrNoMem]>;
+def int_arm_crc32cb : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
+    [IntrNoMem]>;
+def int_arm_crc32h  : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
+    [IntrNoMem]>;
+def int_arm_crc32ch : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
+    [IntrNoMem]>;
+def int_arm_crc32w  : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
+    [IntrNoMem]>;
+def int_arm_crc32cw : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
+    [IntrNoMem]>;
+
+//===----------------------------------------------------------------------===//
+// HINT
+def int_arm_sevl : Intrinsic<[], []>;
 
 //===----------------------------------------------------------------------===//
 // Advanced SIMD (NEON)
@@ -163,7 +188,6 @@ let Properties = [IntrNoMem, Commutative] in {
   def int_arm_neon_vrhaddu : Neon_2Arg_Intrinsic;
   def int_arm_neon_vqadds : Neon_2Arg_Intrinsic;
   def int_arm_neon_vqaddu : Neon_2Arg_Intrinsic;
-  def int_arm_neon_vaddhn : Neon_2Arg_Narrow_Intrinsic;
   def int_arm_neon_vraddhn : Neon_2Arg_Narrow_Intrinsic;
 
   // Vector Multiply.
@@ -174,10 +198,6 @@ let Properties = [IntrNoMem, Commutative] in {
   def int_arm_neon_vmullu : Neon_2Arg_Long_Intrinsic;
   def int_arm_neon_vmullp : Neon_2Arg_Long_Intrinsic;
   def int_arm_neon_vqdmull : Neon_2Arg_Long_Intrinsic;
-
-  // Vector Multiply and Accumulate/Subtract.
-  def int_arm_neon_vqdmlal : Neon_3Arg_Long_Intrinsic;
-  def int_arm_neon_vqdmlsl : Neon_3Arg_Long_Intrinsic;
 
   // Vector Maximum.
   def int_arm_neon_vmaxs : Neon_2Arg_Intrinsic;
@@ -201,7 +221,6 @@ def int_arm_neon_vhsubs : Neon_2Arg_Intrinsic;
 def int_arm_neon_vhsubu : Neon_2Arg_Intrinsic;
 def int_arm_neon_vqsubs : Neon_2Arg_Intrinsic;
 def int_arm_neon_vqsubu : Neon_2Arg_Intrinsic;
-def int_arm_neon_vsubhn : Neon_2Arg_Narrow_Intrinsic;
 def int_arm_neon_vrsubhn : Neon_2Arg_Narrow_Intrinsic;
 
 // Vector Absolute Compare.
@@ -450,5 +469,22 @@ def int_arm_neon_vst4lane : Intrinsic<[],
 def int_arm_neon_vbsl : Intrinsic<[llvm_anyvector_ty],
                         [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>],
                         [IntrNoMem]>;
+
+
+// Crypto instructions
+def int_arm_neon_aesd : Neon_2Arg_Intrinsic;
+def int_arm_neon_aese : Neon_2Arg_Intrinsic;
+def int_arm_neon_aesimc : Neon_1Arg_Intrinsic;
+def int_arm_neon_aesmc : Neon_1Arg_Intrinsic;
+def int_arm_neon_sha1h : Neon_1Arg_Intrinsic;
+def int_arm_neon_sha1su1 : Neon_2Arg_Intrinsic;
+def int_arm_neon_sha256su0 : Neon_2Arg_Intrinsic;
+def int_arm_neon_sha1c : Neon_3Arg_Intrinsic;
+def int_arm_neon_sha1m : Neon_3Arg_Intrinsic;
+def int_arm_neon_sha1p : Neon_3Arg_Intrinsic;
+def int_arm_neon_sha1su0: Neon_3Arg_Intrinsic;
+def int_arm_neon_sha256h: Neon_3Arg_Intrinsic;
+def int_arm_neon_sha256h2: Neon_3Arg_Intrinsic;
+def int_arm_neon_sha256su1: Neon_3Arg_Intrinsic;
 
 } // end TargetPrefix

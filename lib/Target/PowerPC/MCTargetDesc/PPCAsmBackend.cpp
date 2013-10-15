@@ -16,9 +16,9 @@
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCValue.h"
-#include "llvm/Object/MachOFormat.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MachO.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
@@ -132,13 +132,16 @@ public:
   }
 
   bool writeNopData(uint64_t Count, MCObjectWriter *OW) const {
-    // Can't emit NOP with size not multiple of 32-bits
-    if (Count % 4 != 0)
-      return false;
-
     uint64_t NumNops = Count / 4;
     for (uint64_t i = 0; i != NumNops; ++i)
       OW->Write32(0x60000000);
+
+    switch (Count % 4) {
+    default: break; // No leftover bytes to write
+    case 1: OW->Write8(0); break;
+    case 2: OW->Write16(0); break;
+    case 3: OW->Write16(0); OW->Write8(0); break;
+    }
 
     return true;
   }
@@ -164,8 +167,8 @@ namespace {
       return createPPCMachObjectWriter(
           OS,
           /*Is64Bit=*/is64,
-          (is64 ? object::mach::CTM_PowerPC64 : object::mach::CTM_PowerPC),
-          object::mach::CSPPC_ALL);
+          (is64 ? MachO::CPU_TYPE_POWERPC64 : MachO::CPU_TYPE_POWERPC),
+          MachO::CPU_SUBTYPE_POWERPC_ALL);
     }
 
     virtual bool doesSectionRequireSymbols(const MCSection &Section) const {
@@ -192,10 +195,9 @@ namespace {
 
 } // end anonymous namespace
 
-
-
-
-MCAsmBackend *llvm::createPPCAsmBackend(const Target &T, StringRef TT, StringRef CPU) {
+MCAsmBackend *llvm::createPPCAsmBackend(const Target &T,
+                                        const MCRegisterInfo &MRI,
+                                        StringRef TT, StringRef CPU) {
   if (Triple(TT).isOSDarwin())
     return new DarwinPPCAsmBackend(T);
 

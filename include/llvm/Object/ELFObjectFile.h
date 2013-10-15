@@ -28,6 +28,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <utility>
 
@@ -87,8 +88,8 @@ protected:
   virtual error_code isSectionReadOnlyData(DataRefImpl Sec, bool &Res) const;
   virtual error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
                                            bool &Result) const;
-  virtual relocation_iterator getSectionRelBegin(DataRefImpl Sec) const;
-  virtual relocation_iterator getSectionRelEnd(DataRefImpl Sec) const;
+  virtual relocation_iterator section_rel_begin(DataRefImpl Sec) const;
+  virtual relocation_iterator section_rel_end(DataRefImpl Sec) const;
   virtual section_iterator getRelocatedSection(DataRefImpl Sec) const;
 
   virtual error_code getRelocationNext(DataRefImpl Rel,
@@ -611,7 +612,7 @@ error_code ELFObjectFile<ELFT>::sectionContainsSymbol(DataRefImpl Sec,
 
 template <class ELFT>
 relocation_iterator
-ELFObjectFile<ELFT>::getSectionRelBegin(DataRefImpl Sec) const {
+ELFObjectFile<ELFT>::section_rel_begin(DataRefImpl Sec) const {
   DataRefImpl RelData;
   uintptr_t SHT = reinterpret_cast<uintptr_t>(EF.begin_sections().get());
   RelData.d.a = (Sec.p - SHT) / EF.getHeader()->e_shentsize;
@@ -621,7 +622,7 @@ ELFObjectFile<ELFT>::getSectionRelBegin(DataRefImpl Sec) const {
 
 template <class ELFT>
 relocation_iterator
-ELFObjectFile<ELFT>::getSectionRelEnd(DataRefImpl Sec) const {
+ELFObjectFile<ELFT>::section_rel_end(DataRefImpl Sec) const {
   DataRefImpl RelData;
   uintptr_t SHT = reinterpret_cast<uintptr_t>(EF.begin_sections().get());
   const Elf_Shdr *S = reinterpret_cast<const Elf_Shdr *>(Sec.p);

@@ -54,7 +54,7 @@ PPCMCExpr::EvaluateAsRelocatableImpl(MCValue &Res,
                                      const MCAsmLayout *Layout) const {
   MCValue Value;
 
-  if (!getSubExpr()->EvaluateAsRelocatable(Value, *Layout))
+  if (!Layout || !getSubExpr()->EvaluateAsRelocatable(Value, *Layout))
     return false;
 
   if (Value.isAbsolute()) {

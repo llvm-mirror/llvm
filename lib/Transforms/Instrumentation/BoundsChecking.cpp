@@ -80,7 +80,7 @@ BasicBlock *BoundsChecking::getTrapBB() {
     return TrapBB;
 
   Function *Fn = Inst->getParent()->getParent();
-  BasicBlock::iterator PrevInsertPoint = Builder->GetInsertPoint();
+  IRBuilder<>::InsertPointGuard Guard(*Builder);
   TrapBB = BasicBlock::Create(Fn->getContext(), "trap", Fn);
   Builder->SetInsertPoint(TrapBB);
 
@@ -91,7 +91,6 @@ BasicBlock *BoundsChecking::getTrapBB() {
   TrapCall->setDebugLoc(Inst->getDebugLoc());
   Builder->CreateUnreachable();
 
-  Builder->SetInsertPoint(PrevInsertPoint);
   return TrapBB;
 }
 

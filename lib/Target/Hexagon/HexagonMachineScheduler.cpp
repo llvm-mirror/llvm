@@ -407,11 +407,11 @@ SUnit *ConvergingVLIWScheduler::SchedBoundary::pickOnlyChoice() {
 #ifndef NDEBUG
 void ConvergingVLIWScheduler::traceCandidate(const char *Label,
                                              const ReadyQueue &Q,
-                                             SUnit *SU, PressureElement P) {
+                                             SUnit *SU, PressureChange P) {
   dbgs() << Label << " " << Q.getName() << " ";
   if (P.isValid())
-    dbgs() << DAG->TRI->getRegPressureSetName(P.PSetID) << ":" << P.UnitIncrease
-           << " ";
+    dbgs() << DAG->TRI->getRegPressureSetName(P.getPSet()) << ":"
+           << P.getUnitInc() << " ";
   else
     dbgs() << "     ";
   SU->dump(DAG);
@@ -457,9 +457,7 @@ static SUnit *getSingleUnscheduledSucc(SUnit *SU) {
 // Constants used to denote relative importance of
 // heuristic components for cost computation.
 static const unsigned PriorityOne = 200;
-static const unsigned PriorityTwo = 100;
-static const unsigned PriorityThree = 50;
-static const unsigned PriorityFour = 20;
+static const unsigned PriorityTwo = 50;
 static const unsigned ScaleTwo = 10;
 static const unsigned FactorOne = 2;
 
@@ -517,8 +515,8 @@ int ConvergingVLIWScheduler::SchedulingCost(ReadyQueue &Q, SUnit *SU,
   ResCount += (NumNodesBlocking * ScaleTwo);
 
   // Factor in reg pressure as a heuristic.
-  ResCount -= (Delta.Excess.UnitIncrease*PriorityThree);
-  ResCount -= (Delta.CriticalMax.UnitIncrease*PriorityThree);
+  ResCount -= (Delta.Excess.getUnitInc()*PriorityTwo);
+  ResCount -= (Delta.CriticalMax.getUnitInc()*PriorityTwo);
 
   DEBUG(if (verbose) dbgs() << " Total(" << ResCount << ")");
 

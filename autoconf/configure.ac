@@ -61,8 +61,8 @@ fi
 
 dnl Default to empty (i.e. assigning the null string to) CFLAGS and CXXFLAGS,
 dnl instead of the autoconf default (for example, '-g -O2' for CC=gcc).
-${CFLAGS=}
-${CXXFLAGS=}
+: ${CFLAGS=}
+: ${CXXFLAGS=}
 
 dnl We need to check for the compiler up here to avoid anything else
 dnl starting with a different one.
@@ -800,20 +800,37 @@ esac
 AC_DEFINE_UNQUOTED([ENABLE_TIMESTAMPS],$ENABLE_TIMESTAMPS,
                    [Define if timestamp information (e.g., __DATE__) is allowed])
 
-dnl Enable embedding timestamp information into build.
+dnl Enable support for showing backtraces.
+AC_ARG_ENABLE(backtraces, AS_HELP_STRING(
+  [--enable-backtraces],
+  [Enable embedding backtraces on crash (default is YES)]),
+  [case "$enableval" in
+    yes) llvm_cv_enable_backtraces="yes" ;;
+    no)  llvm_cv_enable_backtraces="no"  ;;
+    *) AC_MSG_ERROR([Invalid setting for --enable-backtraces. Use "yes" or "no"]) ;;
+  esac],
+  llvm_cv_enable_backtraces="yes")
+if test "$llvm_cv_enable_backtraces" = "yes" ; then
+  AC_DEFINE([ENABLE_BACKTRACES],[1],
+            [Define if you want backtraces on crash])
+fi
 
-AC_ARG_ENABLE(backtraces,
-  AS_HELP_STRING([--enable-backtraces],
-                 [Enable embedding backtraces on crash (default is YES)]),,
-                 enableval=default)
-case "$enableval" in
-  yes) AC_SUBST(ENABLE_BACKTRACES,[1]) ;;
-  no)  AC_SUBST(ENABLE_BACKTRACES,[0]) ;;
-  default) AC_SUBST(ENABLE_BACKTRACES,[1]) ;;
-  *) AC_MSG_ERROR([Invalid setting for --enable-backtraces. Use "yes" or "no"]) ;;
-esac
-AC_DEFINE_UNQUOTED([ENABLE_BACKTRACES],$ENABLE_BACKTRACES,
-                   [Define if you want backtraces on crash])
+dnl Enable installing platform specific signal handling overrides, for improved
+dnl CrashRecovery support or interaction with crash reporting software. This
+dnl support may be inappropriate for some clients embedding LLVM as a library.
+AC_ARG_ENABLE(crash-overrides, AS_HELP_STRING(
+  [--enable-crash-overrides],
+  [Enable crash handling overrides (default is YES)]),
+  [case "$enableval" in
+    yes) llvm_cv_enable_crash_overrides="yes" ;;
+    no)  llvm_cv_enable_crash_overrides="no"  ;;
+    *) AC_MSG_ERROR([Invalid setting for --enable-crash-overrides. Use "yes" or "no"]) ;;
+  esac],
+  llvm_cv_enable_crash_overrides="yes")
+if test "$llvm_cv_enable_crash_overrides" = "yes" ; then
+  AC_DEFINE([ENABLE_CRASH_OVERRIDES],[1],
+            [Define to enable crash handling overrides])
+fi
 
 dnl Allow specific targets to be specified for building (or not)
 TARGETS_TO_BUILD=""
@@ -1360,12 +1377,13 @@ else
 fi
 
 AC_MSG_CHECKING([for python >= 2.5])
-ac_python_version=`$PYTHON -c 'import sys; print sys.version.split()[[0]]'`
+ac_python_version=`$PYTHON -V 2>&1 | cut -d' ' -f2`
 ac_python_version_major=`echo $ac_python_version | cut -d'.' -f1`
 ac_python_version_minor=`echo $ac_python_version | cut -d'.' -f2`
 ac_python_version_patch=`echo $ac_python_version | cut -d'.' -f3`
-if   test "$ac_python_version_major" -eq "2" \
-   && test "$ac_python_version_minor" -ge "5" ; then
+if test "$ac_python_version_major" -gt "2" || \
+   (test "$ac_python_version_major" -eq "2" && \
+    test "$ac_python_version_minor" -ge "5") ; then
   AC_MSG_RESULT([$PYTHON ($ac_python_version)])
 else
   AC_MSG_RESULT([not found])
@@ -1382,6 +1400,7 @@ AC_CHECK_LIB(m,sin)
 if test "$llvm_cv_os_type" = "MingW" ; then
   AC_CHECK_LIB(imagehlp, main)
   AC_CHECK_LIB(psapi, main)
+  AC_CHECK_LIB(shell32, main)
 fi
 
 dnl dlopen() is required for plugin support.

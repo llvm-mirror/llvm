@@ -84,6 +84,7 @@ private:
     switch (MI->getOpcode()) {
     case AMDGPU::KILL:
     case AMDGPU::RETURN:
+    case AMDGPU::IMPLICIT_DEF:
       return true;
     default:
       return false;
@@ -173,6 +174,14 @@ private:
       if (AluInstCount > TII->getMaxAlusPerClause())
         break;
       if (I->getOpcode() == AMDGPU::PRED_X) {
+        // We put PRED_X in its own clause to ensure that ifcvt won't create
+        // clauses with more than 128 insts.
+        // IfCvt is indeed checking that "then" and "else" branches of an if
+        // statement have less than ~60 insts thus converted clauses can't be
+        // bigger than ~121 insts (predicate setter needs to be in the same
+        // clause as predicated alus).
+        if (AluInstCount > 0)
+          break;
         if (TII->getFlagOp(I).getImm() & MO_FLAG_PUSH)
           PushBeforeModifier = true;
         AluInstCount ++;

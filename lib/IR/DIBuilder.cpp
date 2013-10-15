@@ -40,7 +40,16 @@ void DIBuilder::finalize() {
   DIArray Enums = getOrCreateArray(AllEnumTypes);
   DIType(TempEnumTypes).replaceAllUsesWith(Enums);
 
-  DIArray RetainTypes = getOrCreateArray(AllRetainTypes);
+  SmallVector<Value *, 16> RetainValues;
+  // Declarations and definitions of the same type may be retained. Some
+  // clients RAUW these pairs, leaving duplicates in the retained types
+  // list. Use a set to remove the duplicates while we transform the
+  // TrackingVHs back into Values.
+  SmallPtrSet<Value *, 16> RetainSet;
+  for (unsigned I = 0, E = AllRetainTypes.size(); I < E; I++)
+    if (RetainSet.insert(AllRetainTypes[I]))
+      RetainValues.push_back(AllRetainTypes[I]);
+  DIArray RetainTypes = getOrCreateArray(RetainValues);
   DIType(TempRetainTypes).replaceAllUsesWith(RetainTypes);
 
   DIArray SPs = getOrCreateArray(AllSubprograms);
@@ -274,7 +283,7 @@ DIDerivedType DIBuilder::createQualifiedType(unsigned Tag, DIType FromTy) {
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Align
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Offset
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
-    FromTy
+    FromTy.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -294,7 +303,7 @@ DIBuilder::createPointerType(DIType PointeeTy, uint64_t SizeInBits,
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Offset
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
-    PointeeTy
+    PointeeTy.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -312,8 +321,8 @@ DIDerivedType DIBuilder::createMemberPointerType(DIType PointeeTy,
     ConstantInt::get(Type::getInt64Ty(VMContext), 0),
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Offset
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
-    PointeeTy,
-    Base
+    PointeeTy.getRef(),
+    Base.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -333,7 +342,7 @@ DIDerivedType DIBuilder::createReferenceType(unsigned Tag, DIType RTy) {
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Align
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Offset
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
-    RTy
+    RTy.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -346,14 +355,14 @@ DIDerivedType DIBuilder::createTypedef(DIType Ty, StringRef Name, DIFile File,
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_typedef),
     File.getFileNode(),
-    getNonCompileUnitScope(Context),
+    DIScope(getNonCompileUnitScope(Context)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNo),
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Size
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Align
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Offset
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
-    Ty
+    Ty.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -366,14 +375,14 @@ DIDerivedType DIBuilder::createFriend(DIType Ty, DIType FriendTy) {
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_friend),
     NULL,
-    Ty,
+    Ty.getRef(),
     NULL, // Name
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Line
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Size
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Align
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Offset
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
-    FriendTy
+    FriendTy.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -387,14 +396,14 @@ DIDerivedType DIBuilder::createInheritance(
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_inheritance),
     NULL,
-    Ty,
+    Ty.getRef(),
     NULL, // Name
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Line
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Size
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Align
     ConstantInt::get(Type::getInt64Ty(VMContext), BaseOffset),
     ConstantInt::get(Type::getInt32Ty(VMContext), Flags),
-    BaseTy
+    BaseTy.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -408,14 +417,14 @@ DIDerivedType DIBuilder::createMemberType(
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_member),
     File.getFileNode(),
-    getNonCompileUnitScope(Scope),
+    DIScope(getNonCompileUnitScope(Scope)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNumber),
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt64Ty(VMContext), OffsetInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), Flags),
-    Ty
+    Ty.getRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -432,14 +441,14 @@ DIBuilder::createStaticMemberType(DIDescriptor Scope, StringRef Name,
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_member),
     File.getFileNode(),
-    getNonCompileUnitScope(Scope),
+    DIScope(getNonCompileUnitScope(Scope)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNumber),
     ConstantInt::get(Type::getInt64Ty(VMContext), 0/*SizeInBits*/),
     ConstantInt::get(Type::getInt64Ty(VMContext), 0/*AlignInBits*/),
     ConstantInt::get(Type::getInt64Ty(VMContext), 0/*OffsetInBits*/),
     ConstantInt::get(Type::getInt32Ty(VMContext), Flags),
-    Ty,
+    Ty.getRef(),
     Val
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
@@ -529,9 +538,9 @@ DIBuilder::createTemplateTypeParameter(DIDescriptor Context, StringRef Name,
                                        unsigned ColumnNo) {
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_template_type_parameter),
-    getNonCompileUnitScope(Context),
+    DIScope(getNonCompileUnitScope(Context)).getRef(),
     MDString::get(VMContext, Name),
-    Ty,
+    Ty.getRef(),
     File,
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNo),
     ConstantInt::get(Type::getInt32Ty(VMContext), ColumnNo)
@@ -547,9 +556,9 @@ DIBuilder::createTemplateValueParameter(unsigned Tag, DIDescriptor Context,
                                         unsigned ColumnNo) {
   Value *Elts[] = {
     GetTagConstant(VMContext, Tag),
-    getNonCompileUnitScope(Context),
+    DIScope(getNonCompileUnitScope(Context)).getRef(),
     MDString::get(VMContext, Name),
-    Ty,
+    Ty.getRef(),
     Val,
     File,
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNo),
@@ -598,30 +607,34 @@ DICompositeType DIBuilder::createClassType(DIDescriptor Context, StringRef Name,
                                            uint64_t OffsetInBits,
                                            unsigned Flags, DIType DerivedFrom,
                                            DIArray Elements,
-                                           MDNode *VTableHolder,
-                                           MDNode *TemplateParams) {
+                                           DIType VTableHolder,
+                                           MDNode *TemplateParams,
+                                           StringRef UniqueIdentifier) {
   assert((!Context || Context.isScope() || Context.isType()) &&
          "createClassType should be called with a valid Context");
   // TAG_class_type is encoded in DICompositeType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_class_type),
     File.getFileNode(),
-    getNonCompileUnitScope(Context),
+    DIScope(getNonCompileUnitScope(Context)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNumber),
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), OffsetInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), Flags),
-    DerivedFrom,
+    DerivedFrom.getRef(),
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    VTableHolder,
-    TemplateParams
+    VTableHolder.getRef(),
+    TemplateParams,
+    UniqueIdentifier.empty() ? NULL : MDString::get(VMContext, UniqueIdentifier)
   };
   DICompositeType R(MDNode::get(VMContext, Elts));
   assert(R.isCompositeType() &&
          "createClassType should return a DICompositeType");
+  if (!UniqueIdentifier.empty())
+    retainType(R);
   return R;
 }
 
@@ -634,27 +647,31 @@ DICompositeType DIBuilder::createStructType(DIDescriptor Context,
                                             unsigned Flags, DIType DerivedFrom,
                                             DIArray Elements,
                                             unsigned RunTimeLang,
-                                            MDNode *VTableHolder) {
+                                            DIType VTableHolder,
+                                            StringRef UniqueIdentifier) {
  // TAG_structure_type is encoded in DICompositeType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_structure_type),
     File.getFileNode(),
-    getNonCompileUnitScope(Context),
+    DIScope(getNonCompileUnitScope(Context)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNumber),
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt32Ty(VMContext), Flags),
-    DerivedFrom,
+    DerivedFrom.getRef(),
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), RunTimeLang),
-    VTableHolder,
+    VTableHolder.getRef(),
     NULL,
+    UniqueIdentifier.empty() ? NULL : MDString::get(VMContext, UniqueIdentifier)
   };
   DICompositeType R(MDNode::get(VMContext, Elts));
   assert(R.isCompositeType() &&
          "createStructType should return a DICompositeType");
+  if (!UniqueIdentifier.empty())
+    retainType(R);
   return R;
 }
 
@@ -664,12 +681,13 @@ DICompositeType DIBuilder::createUnionType(DIDescriptor Scope, StringRef Name,
                                            uint64_t SizeInBits,
                                            uint64_t AlignInBits, unsigned Flags,
                                            DIArray Elements,
-                                           unsigned RunTimeLang) {
+                                           unsigned RunTimeLang,
+                                           StringRef UniqueIdentifier) {
   // TAG_union_type is encoded in DICompositeType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_union_type),
     File.getFileNode(),
-    getNonCompileUnitScope(Scope),
+    DIScope(getNonCompileUnitScope(Scope)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNumber),
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
@@ -679,10 +697,14 @@ DICompositeType DIBuilder::createUnionType(DIDescriptor Scope, StringRef Name,
     NULL,
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), RunTimeLang),
-    Constant::getNullValue(Type::getInt32Ty(VMContext)),
-    NULL
+    NULL,
+    NULL,
+    UniqueIdentifier.empty() ? NULL : MDString::get(VMContext, UniqueIdentifier)
   };
-  return DICompositeType(MDNode::get(VMContext, Elts));
+  DICompositeType R(MDNode::get(VMContext, Elts));
+  if (!UniqueIdentifier.empty())
+    retainType(R);
+  return R;
 }
 
 /// createSubroutineType - Create subroutine type.
@@ -692,7 +714,7 @@ DIBuilder::createSubroutineType(DIFile File, DIArray ParameterTypes) {
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_subroutine_type),
     Constant::getNullValue(Type::getInt32Ty(VMContext)),
-    Constant::getNullValue(Type::getInt32Ty(VMContext)),
+    NULL,
     MDString::get(VMContext, ""),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt64Ty(VMContext), 0),
@@ -702,7 +724,9 @@ DIBuilder::createSubroutineType(DIFile File, DIArray ParameterTypes) {
     NULL,
     ParameterTypes,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    Constant::getNullValue(Type::getInt32Ty(VMContext))
+    NULL,
+    NULL,
+    NULL  // Type Identifer
   };
   return DICompositeType(MDNode::get(VMContext, Elts));
 }
@@ -712,25 +736,29 @@ DIBuilder::createSubroutineType(DIFile File, DIArray ParameterTypes) {
 DICompositeType DIBuilder::createEnumerationType(
     DIDescriptor Scope, StringRef Name, DIFile File, unsigned LineNumber,
     uint64_t SizeInBits, uint64_t AlignInBits, DIArray Elements,
-    DIType UnderlyingType) {
+    DIType UnderlyingType, StringRef UniqueIdentifier) {
   // TAG_enumeration_type is encoded in DICompositeType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_enumeration_type),
     File.getFileNode(),
-    getNonCompileUnitScope(Scope),
+    DIScope(getNonCompileUnitScope(Scope)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNumber),
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    UnderlyingType,
+    UnderlyingType.getRef(),
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    Constant::getNullValue(Type::getInt32Ty(VMContext))
+    NULL,
+    NULL,
+    UniqueIdentifier.empty() ? NULL : MDString::get(VMContext, UniqueIdentifier)
   };
   MDNode *Node = MDNode::get(VMContext, Elts);
   AllEnumTypes.push_back(Node);
+  if (!UniqueIdentifier.empty())
+    retainType(Node);
   return DICompositeType(Node);
 }
 
@@ -748,10 +776,12 @@ DICompositeType DIBuilder::createArrayType(uint64_t Size, uint64_t AlignInBits,
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    Ty,
+    Ty.getRef(),
     Subscripts,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    Constant::getNullValue(Type::getInt32Ty(VMContext))
+    NULL,
+    NULL,
+    NULL  // Type Identifer
   };
   return DICompositeType(MDNode::get(VMContext, Elts));
 }
@@ -770,10 +800,12 @@ DICompositeType DIBuilder::createVectorType(uint64_t Size, uint64_t AlignInBits,
     ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
     ConstantInt::get(Type::getInt32Ty(VMContext), DIType::FlagVector),
-    Ty,
+    Ty.getRef(),
     Subscripts,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    Constant::getNullValue(Type::getInt32Ty(VMContext))
+    NULL,
+    NULL,
+    NULL  // Type Identifer
   };
   return DICompositeType(MDNode::get(VMContext, Elts));
 }
@@ -786,12 +818,8 @@ DIType DIBuilder::createArtificialType(DIType Ty) {
   SmallVector<Value *, 9> Elts;
   MDNode *N = Ty;
   assert (N && "Unexpected input DIType!");
-  for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i) {
-    if (Value *V = N->getOperand(i))
-      Elts.push_back(V);
-    else
-      Elts.push_back(Constant::getNullValue(Type::getInt32Ty(VMContext)));
-  }
+  for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
+    Elts.push_back(N->getOperand(i));
 
   unsigned CurFlags = Ty.getFlags();
   CurFlags = CurFlags | DIType::FlagArtificial;
@@ -811,12 +839,8 @@ DIType DIBuilder::createObjectPointerType(DIType Ty) {
   SmallVector<Value *, 9> Elts;
   MDNode *N = Ty;
   assert (N && "Unexpected input DIType!");
-  for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i) {
-    if (Value *V = N->getOperand(i))
-      Elts.push_back(V);
-    else
-      Elts.push_back(Constant::getNullValue(Type::getInt32Ty(VMContext)));
-  }
+  for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
+    Elts.push_back(N->getOperand(i));
 
   unsigned CurFlags = Ty.getFlags();
   CurFlags = CurFlags | (DIType::FlagObjectPointer | DIType::FlagArtificial);
@@ -830,7 +854,7 @@ DIType DIBuilder::createObjectPointerType(DIType Ty) {
 /// retainType - Retain DIType in a module even if it is not referenced
 /// through debug info anchors.
 void DIBuilder::retainType(DIType T) {
-  AllRetainTypes.push_back(T);
+  AllRetainTypes.push_back(TrackingVH<MDNode>(T));
 }
 
 /// createUnspecifiedParameter - Create unspeicified type descriptor
@@ -848,12 +872,13 @@ DICompositeType DIBuilder::createForwardDecl(unsigned Tag, StringRef Name,
                                     DIDescriptor Scope, DIFile F,
                                     unsigned Line, unsigned RuntimeLang,
                                     uint64_t SizeInBits,
-                                    uint64_t AlignInBits) {
+                                    uint64_t AlignInBits,
+                                    StringRef UniqueIdentifier) {
   // Create a temporary MDNode.
   Value *Elts[] = {
     GetTagConstant(VMContext, Tag),
     F.getFileNode(),
-    getNonCompileUnitScope(Scope),
+    DIScope(getNonCompileUnitScope(Scope)).getRef(),
     MDString::get(VMContext, Name),
     ConstantInt::get(Type::getInt32Ty(VMContext), Line),
     ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
@@ -864,12 +889,16 @@ DICompositeType DIBuilder::createForwardDecl(unsigned Tag, StringRef Name,
     NULL,
     DIArray(),
     ConstantInt::get(Type::getInt32Ty(VMContext), RuntimeLang),
-    NULL
+    NULL,
+    NULL, //TemplateParams
+    UniqueIdentifier.empty() ? NULL : MDString::get(VMContext, UniqueIdentifier)
   };
   MDNode *Node = MDNode::getTemporary(VMContext, Elts);
   DICompositeType RetTy(Node);
   assert(RetTy.isCompositeType() &&
          "createForwardDecl result should be a DIType");
+  if (!UniqueIdentifier.empty())
+    retainType(RetTy);
   return RetTy;
 }
 
@@ -1012,6 +1041,28 @@ DIVariable DIBuilder::createComplexVariable(unsigned Tag, DIDescriptor Scope,
 }
 
 /// createFunction - Create a new descriptor for the specified function.
+/// FIXME: this is added for dragonegg. Once we update dragonegg
+/// to call resolve function, this will be removed.
+DISubprogram DIBuilder::createFunction(DIScopeRef Context,
+                                       StringRef Name,
+                                       StringRef LinkageName,
+                                       DIFile File, unsigned LineNo,
+                                       DICompositeType Ty,
+                                       bool isLocalToUnit, bool isDefinition,
+                                       unsigned ScopeLine,
+                                       unsigned Flags, bool isOptimized,
+                                       Function *Fn,
+                                       MDNode *TParams,
+                                       MDNode *Decl) {
+  // dragonegg does not generate identifier for types, so using an empty map
+  // to resolve the context should be fine.
+  DITypeIdentifierMap EmptyMap;
+  return createFunction(Context.resolve(EmptyMap), Name, LinkageName, File,
+                        LineNo, Ty, isLocalToUnit, isDefinition, ScopeLine,
+                        Flags, isOptimized, Fn, TParams, Decl);
+}
+
+/// createFunction - Create a new descriptor for the specified function.
 DISubprogram DIBuilder::createFunction(DIDescriptor Context,
                                        StringRef Name,
                                        StringRef LinkageName,
@@ -1029,7 +1080,7 @@ DISubprogram DIBuilder::createFunction(DIDescriptor Context,
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_subprogram),
     File.getFileNode(),
-    getNonCompileUnitScope(Context),
+    DIScope(getNonCompileUnitScope(Context)).getRef(),
     MDString::get(VMContext, Name),
     MDString::get(VMContext, Name),
     MDString::get(VMContext, LinkageName),
@@ -1067,7 +1118,7 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context,
                                      bool isLocalToUnit,
                                      bool isDefinition,
                                      unsigned VK, unsigned VIndex,
-                                     MDNode *VTableHolder,
+                                     DIType VTableHolder,
                                      unsigned Flags,
                                      bool isOptimized,
                                      Function *Fn,
@@ -1078,7 +1129,7 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context,
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_subprogram),
     F.getFileNode(),
-    getNonCompileUnitScope(Context),
+    DIScope(getNonCompileUnitScope(Context)).getRef(),
     MDString::get(VMContext, Name),
     MDString::get(VMContext, Name),
     MDString::get(VMContext, LinkageName),
@@ -1088,7 +1139,7 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context,
     ConstantInt::get(Type::getInt1Ty(VMContext), isDefinition),
     ConstantInt::get(Type::getInt32Ty(VMContext), (unsigned)VK),
     ConstantInt::get(Type::getInt32Ty(VMContext), VIndex),
-    VTableHolder,
+    VTableHolder.getRef(),
     ConstantInt::get(Type::getInt32Ty(VMContext), Flags),
     ConstantInt::get(Type::getInt1Ty(VMContext), isOptimized),
     Fn,

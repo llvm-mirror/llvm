@@ -15,6 +15,9 @@
 ;
 ;===------------------------------------------------------------------------===;
 
+[common]
+subdirectories = ChildTarget
+
 [component_0]
 type = Tool
 name = lli

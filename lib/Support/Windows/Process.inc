@@ -11,18 +11,25 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Support/Allocator.h"
+
 #include "Windows.h"
 #include <direct.h>
 #include <io.h>
 #include <malloc.h>
 #include <psapi.h>
+#include <shellapi.h>
 
 #ifdef __MINGW32__
  #if (HAVE_LIBPSAPI != 1)
   #error "libpsapi.a should be present"
  #endif
+ #if (HAVE_LIBSHELL32 != 1)
+  #error "libshell32.a should be present"
+ #endif
 #else
  #pragma comment(lib, "psapi.lib")
+ #pragma comment(lib, "shell32.lib")
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -83,6 +90,8 @@ static unsigned getPageSize() {
   // that LLVM ought to run as 64-bits on a 64-bit system, anyway.
   SYSTEM_INFO info;
   GetSystemInfo(&info);
+  // FIXME: FileOffset in MapViewOfFile() should be aligned to not dwPageSize,
+  // but dwAllocationGranularity.
   return static_cast<unsigned>(info.dwPageSize);
 }
 
@@ -138,6 +147,70 @@ void Process::PreventCoreFiles() {
                SEM_NOOPENFILEERRORBOX);
 }
 
+/// Returns the environment variable \arg Name's value as a string encoded in
+/// UTF-8. \arg Name is assumed to be in UTF-8 encoding.
+Optional<std::string> Process::GetEnv(StringRef Name) {
+  // Convert the argument to UTF-16 to pass it to _wgetenv().
+  SmallVector<wchar_t, 128> NameUTF16;
+  if (error_code ec = windows::UTF8ToUTF16(Name, NameUTF16))
+    return None;
+
+  // Environment variable can be encoded in non-UTF8 encoding, and there's no
+  // way to know what the encoding is. The only reliable way to look up
+  // multibyte environment variable is to use GetEnvironmentVariableW().
+  SmallVector<wchar_t, MAX_PATH> Buf;
+  size_t Size = MAX_PATH;
+  do {
+    Buf.reserve(Size);
+    Size =
+        GetEnvironmentVariableW(NameUTF16.data(), Buf.data(), Buf.capacity());
+    if (Size == 0)
+      return None;
+
+    // Try again with larger buffer.
+  } while (Size > Buf.capacity());
+  Buf.set_size(Size);
+
+  // Convert the result from UTF-16 to UTF-8.
+  SmallVector<char, MAX_PATH> Res;
+  if (error_code ec = windows::UTF16ToUTF8(Buf.data(), Size, Res))
+    return None;
+  return std::string(Res.data());
+}
+
+error_code
+Process::GetArgumentVector(SmallVectorImpl<const char *> &Args,
+                           ArrayRef<const char *>,
+                           SpecificBumpPtrAllocator<char> &ArgAllocator) {
+  int NewArgCount;
+  error_code ec;
+
+  wchar_t **UnicodeCommandLine = CommandLineToArgvW(GetCommandLineW(),
+                                                    &NewArgCount);
+  if (!UnicodeCommandLine)
+    return windows_error(::GetLastError());
+
+  Args.reserve(NewArgCount);
+
+  for (int i = 0; i < NewArgCount; ++i) {
+    SmallVector<char, MAX_PATH> NewArgString;
+    ec = windows::UTF16ToUTF8(UnicodeCommandLine[i],
+                              wcslen(UnicodeCommandLine[i]),
+                              NewArgString);
+    if (ec)
+      break;
+
+    char *Buffer = ArgAllocator.Allocate(NewArgString.size() + 1);
+    ::memcpy(Buffer, NewArgString.data(), NewArgString.size() + 1);
+    Args.push_back(Buffer);
+  }
+  LocalFree(UnicodeCommandLine);
+  if (ec)
+    return ec;
+
+  return error_code::success();
+}
+
 bool Process::StandardInIsUserInput() {
   return FileDescriptorIsDisplayed(0);
 }
@@ -184,6 +257,11 @@ bool Process::StandardErrHasColors() {
   return FileDescriptorHasColors(2);
 }
 
+static bool UseANSI = false;
+void Process::UseANSIEscapeCodes(bool enable) {
+  UseANSI = enable;
+}
+
 namespace {
 class DefaultColors
 {
@@ -205,10 +283,12 @@ DefaultColors defaultColors;
 }
 
 bool Process::ColorNeedsFlush() {
-  return true;
+  return !UseANSI;
 }
 
 const char *Process::OutputBold(bool bg) {
+  if (UseANSI) return "\033[1m";
+
   WORD colors = DefaultColors::GetCurrentColor();
   if (bg)
     colors |= BACKGROUND_INTENSITY;
@@ -219,6 +299,8 @@ const char *Process::OutputBold(bool bg) {
 }
 
 const char *Process::OutputColor(char code, bool bold, bool bg) {
+  if (UseANSI) return colorcodes[bg?1:0][bold?1:0][code&7];
+
   WORD colors;
   if (bg) {
     colors = ((code&1) ? BACKGROUND_RED : 0) |
@@ -244,6 +326,8 @@ static WORD GetConsoleTextAttribute(HANDLE hConsoleOutput) {
 }
 
 const char *Process::OutputReverse() {
+  if (UseANSI) return "\033[7m";
+
   const WORD attributes
    = GetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE));
 
@@ -270,6 +354,7 @@ const char *Process::OutputReverse() {
 }
 
 const char *Process::ResetColor() {
+  if (UseANSI) return "\033[0m";
   SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), defaultColors());
   return 0;
 }

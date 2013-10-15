@@ -374,9 +374,12 @@ Value *InstCombiner::foldFMulConst(Instruction *FMulOrDiv, ConstantFP *C,
   } else {
     if (C0) {
       // (C0 / X) * C => (C0 * C) / X
-      ConstantFP *F = cast<ConstantFP>(ConstantExpr::getFMul(C0, C));
-      if (isNormalFp(F))
-        R = BinaryOperator::CreateFDiv(F, Opnd1);
+      if (FMulOrDiv->hasOneUse()) {
+        // It would otherwise introduce another div.
+        ConstantFP *F = cast<ConstantFP>(ConstantExpr::getFMul(C0, C));
+        if (isNormalFp(F))
+          R = BinaryOperator::CreateFDiv(F, Opnd1);
+      }
     } else {
       // (X / C1) * C => X * (C/C1) if C/C1 is not a denormal
       ConstantFP *F = cast<ConstantFP>(ConstantExpr::getFDiv(C, C1));
@@ -460,10 +463,9 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
             if (Swap && FAddSub->getOpcode() == Instruction::FSub)
               std::swap(M0, M1);
 
-            Value *R = (FAddSub->getOpcode() == Instruction::FAdd) ?
-                        BinaryOperator::CreateFAdd(M0, M1) :
-                        BinaryOperator::CreateFSub(M0, M1);
-            Instruction *RI = cast<Instruction>(R);
+            Instruction *RI = (FAddSub->getOpcode() == Instruction::FAdd)
+                                  ? BinaryOperator::CreateFAdd(M0, M1)
+                                  : BinaryOperator::CreateFSub(M0, M1);
             RI->copyFastMathFlags(&I);
             return RI;
           }
@@ -490,13 +492,13 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
     }
     // if pattern detected emit alternate sequence
     if (OpX && OpY) {
+      BuilderTy::FastMathFlagGuard Guard(*Builder);
+      Builder->SetFastMathFlags(Log2->getFastMathFlags());
       Log2->setArgOperand(0, OpY);
       Value *FMulVal = Builder->CreateFMul(OpX, Log2);
-      Instruction *FMul = cast<Instruction>(FMulVal);
-      FMul->copyFastMathFlags(Log2);
-      Instruction *FSub = BinaryOperator::CreateFSub(FMulVal, OpX);
-      FSub->copyFastMathFlags(Log2);
-      return FSub;
+      Value *FSub = Builder->CreateFSub(FMulVal, OpX);
+      FSub->takeName(&I);
+      return ReplaceInstUsesWith(I, FSub);
     }
   }
 
@@ -506,6 +508,9 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
   for (int i = 0; i < 2; i++) {
     bool IgnoreZeroSign = I.hasNoSignedZeros();
     if (BinaryOperator::isFNeg(Opnd0, IgnoreZeroSign)) {
+      BuilderTy::FastMathFlagGuard Guard(*Builder);
+      Builder->SetFastMathFlags(I.getFastMathFlags());
+
       Value *N0 = dyn_castFNegVal(Opnd0, IgnoreZeroSign);
       Value *N1 = dyn_castFNegVal(Opnd1, IgnoreZeroSign);
 
@@ -516,13 +521,9 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
       if (Opnd0->hasOneUse()) {
         // -X * Y => -(X*Y) (Promote negation as high as possible)
         Value *T = Builder->CreateFMul(N0, Opnd1);
-        cast<Instruction>(T)->setDebugLoc(I.getDebugLoc());
-        Instruction *Neg = BinaryOperator::CreateFNeg(T);
-        if (I.getFastMathFlags().any()) {
-          cast<Instruction>(T)->copyFastMathFlags(&I);
-          Neg->copyFastMathFlags(&I);
-        }
-        return Neg;
+        Value *Neg = Builder->CreateFNeg(T);
+        Neg->takeName(&I);
+        return ReplaceInstUsesWith(I, Neg);
       }
     }
 
@@ -545,13 +546,13 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
           Y = Opnd0_0;
 
         if (Y) {
-          Instruction *T = cast<Instruction>(Builder->CreateFMul(Opnd1, Opnd1));
-          T->copyFastMathFlags(&I);
-          T->setDebugLoc(I.getDebugLoc());
+          BuilderTy::FastMathFlagGuard Guard(*Builder);
+          Builder->SetFastMathFlags(I.getFastMathFlags());
+          Value *T = Builder->CreateFMul(Opnd1, Opnd1);
 
-          Instruction *R = BinaryOperator::CreateFMul(T, Y);
-          R->copyFastMathFlags(&I);
-          return R;
+          Value *R = Builder->CreateFMul(T, Y);
+          R->takeName(&I);
+          return ReplaceInstUsesWith(I, R);
         }
       }
     }

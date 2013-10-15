@@ -33,7 +33,7 @@ RunLoopVectorization("vectorize-loops",
                      cl::desc("Run the Loop vectorization passes"));
 
 static cl::opt<bool>
-LateVectorization("late-vectorize", cl::init(false), cl::Hidden,
+LateVectorization("late-vectorize", cl::init(true), cl::Hidden,
                   cl::desc("Run the vectorization pasess late in the pass "
                            "pipeline (after the inliner)"));
 
@@ -196,7 +196,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(createLoopDeletionPass());          // Delete dead loops
 
   if (!LateVectorize && LoopVectorize)
-      MPM.add(createLoopVectorizePass());
+      MPM.add(createLoopVectorizePass(DisableUnrollLoops));
 
   if (!DisableUnrollLoops)
     MPM.add(createLoopUnrollPass());          // Unroll small loops
@@ -216,22 +216,20 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
 
   addExtensionsToPM(EP_ScalarOptimizerLate, MPM);
 
-  if (!LateVectorize) {
-    if (SLPVectorize)
-      MPM.add(createSLPVectorizerPass());   // Vectorize parallel scalar chains.
+  if (SLPVectorize)
+    MPM.add(createSLPVectorizerPass());   // Vectorize parallel scalar chains.
 
-    if (BBVectorize) {
-      MPM.add(createBBVectorizePass());
-      MPM.add(createInstructionCombiningPass());
-      if (OptLevel > 1 && UseGVNAfterVectorization)
-        MPM.add(createGVNPass());           // Remove redundancies
-      else
-        MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
+  if (BBVectorize) {
+    MPM.add(createBBVectorizePass());
+    MPM.add(createInstructionCombiningPass());
+    if (OptLevel > 1 && UseGVNAfterVectorization)
+      MPM.add(createGVNPass());           // Remove redundancies
+    else
+      MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
 
-      // BBVectorize may have significantly shortened a loop body; unroll again.
-      if (!DisableUnrollLoops)
-        MPM.add(createLoopUnrollPass());
-    }
+    // BBVectorize may have significantly shortened a loop body; unroll again.
+    if (!DisableUnrollLoops)
+      MPM.add(createLoopUnrollPass());
   }
 
   MPM.add(createAggressiveDCEPass());         // Delete dead instructions
@@ -241,7 +239,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   // As an experimental mode, run any vectorization passes in a separate
   // pipeline from the CGSCC pass manager that runs iteratively with the
   // inliner.
-  if (LateVectorize) {
+  if (LateVectorize && LoopVectorize) {
     // FIXME: This is a HACK! The inliner pass above implicitly creates a CGSCC
     // pass manager that we are specifically trying to avoid. To prevent this
     // we must insert a no-op module pass to reset the pass manager.
@@ -249,35 +247,9 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
 
     // Add the various vectorization passes and relevant cleanup passes for
     // them since we are no longer in the middle of the main scalar pipeline.
-    if (LoopVectorize) {
-      MPM.add(createLoopVectorizePass());
-
-      if (!DisableUnrollLoops)
-        MPM.add(createLoopUnrollPass());    // Unroll small loops
-
-      // FIXME: Is this necessary/useful? Should we also do SimplifyCFG?
-      MPM.add(createInstructionCombiningPass());
-    }
-
-    if (SLPVectorize) {
-      MPM.add(createSLPVectorizerPass());   // Vectorize parallel scalar chains.
-
-      // FIXME: Is this necessary/useful? Should we also do SimplifyCFG?
-      MPM.add(createInstructionCombiningPass());
-    }
-
-    if (BBVectorize) {
-      MPM.add(createBBVectorizePass());
-      MPM.add(createInstructionCombiningPass());
-      if (OptLevel > 1 && UseGVNAfterVectorization)
-        MPM.add(createGVNPass());           // Remove redundancies
-      else
-        MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
-
-      // BBVectorize may have significantly shortened a loop body; unroll again.
-      if (!DisableUnrollLoops)
-        MPM.add(createLoopUnrollPass());
-    }
+    MPM.add(createLoopVectorizePass(DisableUnrollLoops));
+    MPM.add(createInstructionCombiningPass());
+    MPM.add(createCFGSimplificationPass());
   }
 
   if (!DisableUnitAtATime) {
@@ -304,11 +276,8 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
   // Now that composite has been compiled, scan through the module, looking
   // for a main function.  If main is defined, mark all other functions
   // internal.
-  if (Internalize) {
-    std::vector<const char*> E;
-    E.push_back("main");
-    PM.add(createInternalizePass(E));
-  }
+  if (Internalize)
+    PM.add(createInternalizePass("main", None));
 
   // Propagate constants at call sites into the functions they call.  This
   // opens opportunities for globalopt (and inlining) by substituting function
@@ -349,6 +318,7 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
   // The IPO passes may leave cruft around.  Clean up after them.
   PM.add(createInstructionCombiningPass());
   PM.add(createJumpThreadingPass());
+
   // Break up allocas
   if (UseNewSROA)
     PM.add(createSROAPass());
@@ -362,6 +332,7 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
   PM.add(createLICMPass());                 // Hoist loop invariants.
   PM.add(createGVNPass(DisableGVNLoadPRE)); // Remove redundancies.
   PM.add(createMemCpyOptPass());            // Remove dead memcpys.
+
   // Nuke dead stores.
   PM.add(createDeadStoreEliminationPass());
 

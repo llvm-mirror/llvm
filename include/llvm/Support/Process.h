@@ -25,11 +25,17 @@
 #ifndef LLVM_SUPPORT_PROCESS_H
 #define LLVM_SUPPORT_PROCESS_H
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/Support/Allocator.h"
+#include "llvm/Support/system_error.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/TimeValue.h"
 
 namespace llvm {
+class StringRef;
+
 namespace sys {
 
 class self_process;
@@ -161,6 +167,18 @@ public:
   /// @brief Prevent core file generation.
   static void PreventCoreFiles();
 
+  // This function returns the environment variable \arg name's value as a UTF-8
+  // string. \arg Name is assumed to be in UTF-8 encoding too.
+  static Optional<std::string> GetEnv(StringRef name);
+
+  /// This function returns a SmallVector containing the arguments passed from
+  /// the operating system to the program.  This function expects to be handed
+  /// the vector passed in from main.
+  static error_code
+  GetArgumentVector(SmallVectorImpl<const char *> &Args,
+                    ArrayRef<const char *> ArgsFromMain,
+                    SpecificBumpPtrAllocator<char> &ArgAllocator);
+
   /// This function determines if the standard input is connected directly
   /// to a user's input (keyboard probably), rather than coming from a file
   /// or pipe.
@@ -208,6 +226,12 @@ public:
   /// error supports colors. If standard error is not connected to a
   /// terminal, this function returns false.
   static bool StandardErrHasColors();
+
+  /// Enables or disables whether ANSI escape sequences are used to output
+  /// colors. This only has an effect on Windows.
+  /// Note: Setting this option is not thread-safe and should only be done
+  /// during initialization.
+  static void UseANSIEscapeCodes(bool enable);
 
   /// Whether changing colors requires the output to be flushed.
   /// This is needed on systems that don't support escape sequences for

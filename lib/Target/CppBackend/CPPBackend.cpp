@@ -33,6 +33,7 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -1140,7 +1141,7 @@ void CppWriter::printInstruction(const Instruction *I,
     nl(Out);
     for (SwitchInst::ConstCaseIt i = SI->case_begin(), e = SI->case_end();
          i != e; ++i) {
-      const IntegersSubset CaseVal = i.getCaseValueEx();
+      const ConstantInt* CaseVal = i.getCaseValue();
       const BasicBlock *BB = i.getCaseSuccessor();
       Out << iName << "->addCase("
           << getOpName(CaseVal) << ", "
@@ -1161,8 +1162,7 @@ void CppWriter::printInstruction(const Instruction *I,
     break;
   }
   case Instruction::Resume: {
-    Out << "ResumeInst::Create(mod->getContext(), " << opNames[0]
-        << ", " << bbname << ");";
+    Out << "ResumeInst::Create(" << opNames[0] << ", " << bbname << ");";
     break;
   }
   case Instruction::Invoke: {
@@ -1176,7 +1176,7 @@ void CppWriter::printInstruction(const Instruction *I,
     }
     // FIXME: This shouldn't use magic numbers -3, -2, and -1.
     Out << "InvokeInst *" << iName << " = InvokeInst::Create("
-        << getOpName(inv->getCalledFunction()) << ", "
+        << getOpName(inv->getCalledValue()) << ", "
         << getOpName(inv->getNormalDest()) << ", "
         << getOpName(inv->getUnwindDest()) << ", "
         << iName << "_params, \"";
@@ -1588,6 +1588,20 @@ void CppWriter::printInstruction(const Instruction *I,
     nl(Out) << iName << "->setName(\"";
     printEscapedString(rmwi->getName());
     Out << "\");";
+    break;
+  }
+  case Instruction::LandingPad: {
+    const LandingPadInst *lpi = cast<LandingPadInst>(I);
+    Out << "LandingPadInst* " << iName << " = LandingPadInst::Create(";
+    printCppName(lpi->getType());
+    Out << ", " << opNames[0] << ", " << lpi->getNumClauses() << ", \"";
+    printEscapedString(lpi->getName());
+    Out << "\", " << bbname << ");";
+    nl(Out) << iName << "->setCleanup("
+            << (lpi->isCleanup() ? "true" : "false")
+            << ");";
+    for (unsigned i = 0, e = lpi->getNumClauses(); i != e; ++i)
+      nl(Out) << iName << "->addClause(" << opNames[i+1] << ");";
     break;
   }
   }

@@ -35,7 +35,7 @@ MCAsmInfo::MCAsmInfo() {
   LinkerRequiresNonEmptyDwarfLines = false;
   MaxInstLength = 4;
   MinInstAlignment = 1;
-  PCSymbol = "$";
+  DollarIsPC = false;
   SeparatorString = ";";
   CommentColumn = 40;
   CommentString = "#";
@@ -87,7 +87,6 @@ MCAsmInfo::MCAsmInfo() {
   HasLEB128 = false;
   SupportsDebugInformation = false;
   ExceptionsType = ExceptionHandling::None;
-  DwarfUsesInlineInfoSection = false;
   DwarfUsesRelocationsAcrossSections = true;
   DwarfRegNumForCFI = false;
   HasMicrosoftFastStdCallMangling = false;

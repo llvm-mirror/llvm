@@ -70,9 +70,17 @@ namespace SystemZII {
     // on the result.
     BranchC,
 
+    // An instruction that peforms a 32-bit unsigned comparison and branches
+    // on the result.
+    BranchCL,
+
     // An instruction that peforms a 64-bit signed comparison and branches
     // on the result.
     BranchCG,
+
+    // An instruction that peforms a 64-bit unsigned comparison and branches
+    // on the result.
+    BranchCLG,
 
     // An instruction that decrements a 32-bit register and branches if
     // the result is nonzero.
@@ -108,7 +116,18 @@ class SystemZInstrInfo : public SystemZGenInstrInfo {
 
   void splitMove(MachineBasicBlock::iterator MI, unsigned NewOpcode) const;
   void splitAdjDynAlloc(MachineBasicBlock::iterator MI) const;
-
+  void expandRIPseudo(MachineInstr *MI, unsigned LowOpcode,
+                      unsigned HighOpcode, bool ConvertHigh) const;
+  void expandRIEPseudo(MachineInstr *MI, unsigned LowOpcode,
+                       unsigned LowOpcodeK, unsigned HighOpcode) const;
+  void expandRXYPseudo(MachineInstr *MI, unsigned LowOpcode,
+                       unsigned HighOpcode) const;
+  void expandZExtPseudo(MachineInstr *MI, unsigned LowOpcode,
+                        unsigned Size) const;
+  void emitGRX32Move(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                     DebugLoc DL, unsigned DestReg, unsigned SrcReg,
+                     unsigned LowLowOpcode, unsigned Size, bool KillSrc) const;
+  
 public:
   explicit SystemZInstrInfo(SystemZTargetMachine &TM);
 

@@ -52,6 +52,7 @@ namespace llvm {
       BR_JT,        // Jumptable branch.
       BR2_JT,       // Jumptable branch (2 level - jumptable entry is a jump).
       RET_FLAG,     // Return with a flag operand.
+      INTRET_FLAG,  // Interrupt return with an LR-offset and a flag operand.
 
       PIC_ADD,      // Add with a PC operand and a PIC label.
 
@@ -94,7 +95,6 @@ namespace llvm {
 
       DYN_ALLOC,    // Dynamic allocation on the stack.
 
-      MEMBARRIER,   // Memory barrier (DMB)
       MEMBARRIER_MCR, // Memory barrier (MCR)
 
       PRELOAD,      // Preload
@@ -224,21 +224,7 @@ namespace llvm {
       VST4_UPD,
       VST2LN_UPD,
       VST3LN_UPD,
-      VST4LN_UPD,
-
-      // 64-bit atomic ops (value split into two registers)
-      ATOMADD64_DAG,
-      ATOMSUB64_DAG,
-      ATOMOR64_DAG,
-      ATOMXOR64_DAG,
-      ATOMAND64_DAG,
-      ATOMNAND64_DAG,
-      ATOMSWAP64_DAG,
-      ATOMCMPXCHG64_DAG,
-      ATOMMIN64_DAG,
-      ATOMUMIN64_DAG,
-      ATOMMAX64_DAG,
-      ATOMUMAX64_DAG
+      VST4LN_UPD
     };
   }
 
@@ -575,6 +561,8 @@ namespace llvm {
                                                unsigned Size,
                                                bool signExtend,
                                                ARMCC::CondCodes Cond) const;
+    MachineBasicBlock *EmitAtomicLoad64(MachineInstr *MI,
+                                        MachineBasicBlock *BB) const;
 
     void SetupEntryBlockForSjLj(MachineInstr *MI,
                                 MachineBasicBlock *MBB,

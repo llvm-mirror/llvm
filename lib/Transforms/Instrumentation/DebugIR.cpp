@@ -25,6 +25,7 @@
 #include "llvm/InstVisitor.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -401,7 +402,7 @@ private:
       Type *PointeeTy = T->getPointerElementType();
       if (!(N = getType(PointeeTy)))
         N = Builder.createPointerType(
-            getOrCreateType(PointeeTy), Layout.getPointerSizeInBits(),
+            getOrCreateType(PointeeTy), Layout.getPointerTypeSizeInBits(T),
             Layout.getPrefTypeAlignment(T), getTypeName(T));
     } else if (T->isArrayTy()) {
       SmallVector<Value *, 1> Subrange;

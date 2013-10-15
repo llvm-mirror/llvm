@@ -66,8 +66,14 @@ namespace llvm {
   bool hasInstrModifiers(unsigned Opcode) const;
   bool isLDSInstr(unsigned Opcode) const;
 
+  /// \returns true if this \p Opcode represents an ALU instruction or an
+  /// instruction that will be lowered in ExpandSpecialInstrs Pass.
+  bool canBeConsideredALU(const MachineInstr *MI) const;
+
   bool isTransOnly(unsigned Opcode) const;
   bool isTransOnly(const MachineInstr *MI) const;
+  bool isVectorOnly(unsigned Opcode) const;
+  bool isVectorOnly(const MachineInstr *MI) const;
   bool isExport(unsigned Opcode) const;
 
   bool usesVertexCache(unsigned Opcode) const;
@@ -76,6 +82,7 @@ namespace llvm {
   bool usesTextureCache(const MachineInstr *MI) const;
 
   bool mustBeLastInClause(unsigned Opcode) const;
+  bool readsLDSSrcReg(const MachineInstr *MI) const;
 
   /// \returns The operand index for the given source number.  Legal values
   /// for SrcNum are 0, 1, and 2.
@@ -178,6 +185,8 @@ namespace llvm {
   bool PredicateInstruction(MachineInstr *MI,
                         const SmallVectorImpl<MachineOperand> &Pred) const;
 
+  unsigned int getPredicationCost(const MachineInstr *) const;
+
   unsigned int getInstrLatency(const InstrItineraryData *ItinData,
                                const MachineInstr *MI,
                                unsigned *PredCost = 0) const;
@@ -272,6 +281,12 @@ namespace llvm {
   /// \brief Clear the specified flag on the instruction.
   void clearFlag(MachineInstr *MI, unsigned Operand, unsigned Flag) const;
 };
+
+namespace AMDGPU {
+
+int getLDSNoRetOp(uint16_t Opcode);
+
+} //End namespace AMDGPU
 
 } // End llvm namespace
 

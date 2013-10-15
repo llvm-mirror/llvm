@@ -170,7 +170,7 @@ private:
   /// slots to use the joint slots.
   void remapInstructions(DenseMap<int, int> &SlotRemap);
 
-  /// The input program may contain intructions which are not inside lifetime
+  /// The input program may contain instructions which are not inside lifetime
   /// markers. This can happen due to a bug in the compiler or due to a bug in
   /// user code (for example, returning a reference to a local variable).
   /// This procedure checks all of the instructions in the function and
@@ -450,14 +450,14 @@ void StackColoring::calculateLiveIntervals(unsigned NumSlots) {
       SlotIndex F = Finishes[i];
       if (S < F) {
         // We have a single consecutive region.
-        Intervals[i]->addRange(LiveRange(S, F, ValNum));
+        Intervals[i]->addSegment(LiveInterval::Segment(S, F, ValNum));
       } else {
         // We have two non consecutive regions. This happens when
         // LIFETIME_START appears after the LIFETIME_END marker.
         SlotIndex NewStart = Indexes->getMBBStartIdx(MBB);
         SlotIndex NewFin = Indexes->getMBBEndIdx(MBB);
-        Intervals[i]->addRange(LiveRange(NewStart, F, ValNum));
-        Intervals[i]->addRange(LiveRange(S, NewFin, ValNum));
+        Intervals[i]->addSegment(LiveInterval::Segment(NewStart, F, ValNum));
+        Intervals[i]->addSegment(LiveInterval::Segment(S, NewFin, ValNum));
       }
     }
   }
@@ -763,7 +763,7 @@ bool StackColoring::runOnMachineFunction(MachineFunction &Func) {
         // Merge disjoint slots.
         if (!First->overlaps(*Second)) {
           Changed = true;
-          First->MergeRangesInAsValue(*Second, First->getValNumInfo(0));
+          First->MergeSegmentsInAsValue(*Second, First->getValNumInfo(0));
           SlotRemap[SecondSlot] = FirstSlot;
           SortedSlots[J] = -1;
           DEBUG(dbgs()<<"Merging #"<<FirstSlot<<" and slots #"<<

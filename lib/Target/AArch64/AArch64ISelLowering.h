@@ -19,7 +19,7 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
-
+#include "llvm/IR/Intrinsics.h"
 
 namespace llvm {
 namespace AArch64ISD {
@@ -134,8 +134,15 @@ namespace AArch64ISD {
     // Vector compare bitwise test
     NEON_TST,
 
-    // Operation for the immediate in vector shift
-    NEON_DUPIMM
+    // Vector saturating shift
+    NEON_QSHLs,
+    NEON_QSHLu,
+
+    // Vector dup
+    NEON_VDUP,
+
+    // Vector dup by lane
+    NEON_VDUPLANE
   };
 }
 
@@ -174,6 +181,8 @@ public:
 
   SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG,
                             const AArch64Subtarget *ST) const;
+
+  SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
 
   void SaveVarArgRegisters(CCState &CCInfo, SelectionDAG &DAG, SDLoc DL,
                            SDValue &Chain) const;
@@ -272,6 +281,10 @@ public:
 
   std::pair<unsigned, const TargetRegisterClass*>
   getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const;
+
+  virtual bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
+                                  unsigned Intrinsic) const LLVM_OVERRIDE;
+
 private:
   const InstrItineraryData *Itins;
 
@@ -283,6 +296,10 @@ enum NeonModImmType {
   Neon_Mov_Imm,
   Neon_Mvn_Imm
 };
+
+extern SDValue ScanBUILD_VECTOR(SDValue Op, bool &isOnlyLowElement,
+                                bool &usesOnlyOneValue, bool &hasDominantValue,
+                                bool &isConstant, bool &isUNDEF);
 } // namespace llvm
 
 #endif // LLVM_TARGET_AARCH64_ISELLOWERING_H

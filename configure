@@ -709,7 +709,6 @@ ENABLE_PIC
 ENABLE_SHARED
 ENABLE_EMBED_STDCXX
 ENABLE_TIMESTAMPS
-ENABLE_BACKTRACES
 TARGETS_TO_BUILD
 LLVM_ENUM_TARGETS
 LLVM_ENUM_ASM_PRINTERS
@@ -1443,6 +1442,8 @@ Optional Features:
                           (default is YES)
   --enable-backtraces     Enable embedding backtraces on crash (default is
                           YES)
+  --enable-crash-overrides
+                          Enable crash handling overrides (default is YES)
   --enable-targets        Build specific host targets: all or
                           target1,target2,... Valid targets are: host, x86,
                           x86_64, sparc, powerpc, arm, aarch64, mips, hexagon,
@@ -1991,8 +1992,8 @@ echo "$as_me: error: Already configured in ${srcdir}" >&2;}
   fi
 fi
 
-${CFLAGS=}
-${CXXFLAGS=}
+: ${CFLAGS=}
+: ${CXXFLAGS=}
 
 ac_ext=c
 ac_cpp='$CPP $CPPFLAGS'
@@ -5632,30 +5633,47 @@ cat >>confdefs.h <<_ACEOF
 _ACEOF
 
 
-
 # Check whether --enable-backtraces was given.
 if test "${enable_backtraces+set}" = set; then
-  enableval=$enable_backtraces;
-else
-  enableval=default
-fi
-
-case "$enableval" in
-  yes) ENABLE_BACKTRACES=1
- ;;
-  no)  ENABLE_BACKTRACES=0
- ;;
-  default) ENABLE_BACKTRACES=1
- ;;
-  *) { { echo "$as_me:$LINENO: error: Invalid setting for --enable-backtraces. Use \"yes\" or \"no\"" >&5
+  enableval=$enable_backtraces; case "$enableval" in
+    yes) llvm_cv_enable_backtraces="yes" ;;
+    no)  llvm_cv_enable_backtraces="no"  ;;
+    *) { { echo "$as_me:$LINENO: error: Invalid setting for --enable-backtraces. Use \"yes\" or \"no\"" >&5
 echo "$as_me: error: Invalid setting for --enable-backtraces. Use \"yes\" or \"no\"" >&2;}
    { (exit 1); exit 1; }; } ;;
-esac
+  esac
+else
+  llvm_cv_enable_backtraces="yes"
+fi
 
-cat >>confdefs.h <<_ACEOF
-#define ENABLE_BACKTRACES $ENABLE_BACKTRACES
+if test "$llvm_cv_enable_backtraces" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_BACKTRACES 1
 _ACEOF
 
+fi
+
+# Check whether --enable-crash-overrides was given.
+if test "${enable_crash_overrides+set}" = set; then
+  enableval=$enable_crash_overrides; case "$enableval" in
+    yes) llvm_cv_enable_crash_overrides="yes" ;;
+    no)  llvm_cv_enable_crash_overrides="no"  ;;
+    *) { { echo "$as_me:$LINENO: error: Invalid setting for --enable-crash-overrides. Use \"yes\" or \"no\"" >&5
+echo "$as_me: error: Invalid setting for --enable-crash-overrides. Use \"yes\" or \"no\"" >&2;}
+   { (exit 1); exit 1; }; } ;;
+  esac
+else
+  llvm_cv_enable_crash_overrides="yes"
+fi
+
+if test "$llvm_cv_enable_crash_overrides" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_CRASH_OVERRIDES 1
+_ACEOF
+
+fi
 
 TARGETS_TO_BUILD=""
 # Check whether --enable-targets was given.
@@ -10568,7 +10586,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<EOF
-#line 10571 "configure"
+#line 10589 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -11797,12 +11815,13 @@ fi
 
 { echo "$as_me:$LINENO: checking for python >= 2.5" >&5
 echo $ECHO_N "checking for python >= 2.5... $ECHO_C" >&6; }
-ac_python_version=`$PYTHON -c 'import sys; print sys.version.split()[0]'`
+ac_python_version=`$PYTHON -V 2>&1 | cut -d' ' -f2`
 ac_python_version_major=`echo $ac_python_version | cut -d'.' -f1`
 ac_python_version_minor=`echo $ac_python_version | cut -d'.' -f2`
 ac_python_version_patch=`echo $ac_python_version | cut -d'.' -f3`
-if   test "$ac_python_version_major" -eq "2" \
-   && test "$ac_python_version_minor" -ge "5" ; then
+if test "$ac_python_version_major" -gt "2" || \
+   (test "$ac_python_version_major" -eq "2" && \
+    test "$ac_python_version_minor" -ge "5") ; then
   { echo "$as_me:$LINENO: result: $PYTHON ($ac_python_version)" >&5
 echo "${ECHO_T}$PYTHON ($ac_python_version)" >&6; }
 else
@@ -12063,6 +12082,87 @@ if test $ac_cv_lib_psapi_main = yes; then
 _ACEOF
 
   LIBS="-lpsapi $LIBS"
+
+fi
+
+
+{ echo "$as_me:$LINENO: checking for main in -lshell32" >&5
+echo $ECHO_N "checking for main in -lshell32... $ECHO_C" >&6; }
+if test "${ac_cv_lib_shell32_main+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lshell32  $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+
+int
+main ()
+{
+return main ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_c_werror_flag" || test ! -s conftest.err'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_shell32_main=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	ac_cv_lib_shell32_main=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ echo "$as_me:$LINENO: result: $ac_cv_lib_shell32_main" >&5
+echo "${ECHO_T}$ac_cv_lib_shell32_main" >&6; }
+if test $ac_cv_lib_shell32_main = yes; then
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_LIBSHELL32 1
+_ACEOF
+
+  LIBS="-lshell32 $LIBS"
 
 fi
 
@@ -23055,7 +23155,6 @@ ENABLE_PIC!$ENABLE_PIC$ac_delim
 ENABLE_SHARED!$ENABLE_SHARED$ac_delim
 ENABLE_EMBED_STDCXX!$ENABLE_EMBED_STDCXX$ac_delim
 ENABLE_TIMESTAMPS!$ENABLE_TIMESTAMPS$ac_delim
-ENABLE_BACKTRACES!$ENABLE_BACKTRACES$ac_delim
 TARGETS_TO_BUILD!$TARGETS_TO_BUILD$ac_delim
 LLVM_ENUM_TARGETS!$LLVM_ENUM_TARGETS$ac_delim
 LLVM_ENUM_ASM_PRINTERS!$LLVM_ENUM_ASM_PRINTERS$ac_delim
@@ -23142,6 +23241,7 @@ LLVM_MANDIR!$LLVM_MANDIR$ac_delim
 LLVM_CONFIGTIME!$LLVM_CONFIGTIME$ac_delim
 BINDINGS_TO_BUILD!$BINDINGS_TO_BUILD$ac_delim
 ALL_BINDINGS!$ALL_BINDINGS$ac_delim
+OCAML_LIBDIR!$OCAML_LIBDIR$ac_delim
 _ACEOF
 
   if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 97; then
@@ -23183,7 +23283,6 @@ _ACEOF
 ac_delim='%!_!# '
 for ac_last_try in false false false false false :; do
   cat >conf$$subs.sed <<_ACEOF
-OCAML_LIBDIR!$OCAML_LIBDIR$ac_delim
 ENABLE_VISIBILITY_INLINES_HIDDEN!$ENABLE_VISIBILITY_INLINES_HIDDEN$ac_delim
 RPATH!$RPATH$ac_delim
 RDYNAMIC!$RDYNAMIC$ac_delim
@@ -23192,7 +23291,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 7; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 6; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

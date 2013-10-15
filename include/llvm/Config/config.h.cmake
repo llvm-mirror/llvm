@@ -21,6 +21,9 @@
 /* Define if you want backtraces on crash */
 #cmakedefine ENABLE_BACKTRACES
 
+/* Define to enable crash overrides */
+#cmakedefine ENABLE_CRASH_OVERRIDES
+
 /* Define if position independent code is enabled */
 #cmakedefine ENABLE_PIC
 
@@ -200,6 +203,9 @@
 /* Define to 1 if you have the `pthread' library (-lpthread). */
 #cmakedefine HAVE_LIBPTHREAD ${HAVE_LIBPTHREAD}
 
+/* Define to 1 if you have the `shell32' library (-lshell32). */
+#cmakedefine HAVE_LIBSHELL32 ${HAVE_LIBSHELL32}
+
 /* Define to 1 if you have the `udis86' library (-ludis86). */
 #undef HAVE_LIBUDIS86
 
@@ -302,7 +308,7 @@
 #cmakedefine HAVE_READDIR ${HAVE_READDIR}
 
 /* Define to 1 if you have the `realpath' function. */
-#undef HAVE_REALPATH
+#cmakedefine HAVE_REALPATH ${HAVE_REALPATH}
 
 /* Define to 1 if you have the `rintf' function. */
 #undef HAVE_RINTF

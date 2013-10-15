@@ -30,16 +30,16 @@ using namespace llvm;
 //===----------------------------------------------------------------------===//
 
 static inline bool isInteger(MVT::SimpleValueType VT) {
-  return EVT(VT).isInteger();
+  return MVT(VT).isInteger();
 }
 static inline bool isFloatingPoint(MVT::SimpleValueType VT) {
-  return EVT(VT).isFloatingPoint();
+  return MVT(VT).isFloatingPoint();
 }
 static inline bool isVector(MVT::SimpleValueType VT) {
-  return EVT(VT).isVector();
+  return MVT(VT).isVector();
 }
 static inline bool isScalar(MVT::SimpleValueType VT) {
-  return !EVT(VT).isVector();
+  return !MVT(VT).isVector();
 }
 
 EEVT::TypeSet::TypeSet(MVT::SimpleValueType VT, TreePattern &TP) {
@@ -385,8 +385,8 @@ bool EEVT::TypeSet::EnforceSmallerThan(EEVT::TypeSet &Other, TreePattern &TP) {
     // Otherwise, if these are both vector types, either this vector
     // must have a larger bitsize than the other, or this element type
     // must be larger than the other.
-    EVT Type(TypeVec[0]);
-    EVT OtherType(Other.TypeVec[0]);
+    MVT Type(TypeVec[0]);
+    MVT OtherType(Other.TypeVec[0]);
 
     if (hasVectorTypes() && Other.hasVectorTypes()) {
       if (Type.getSizeInBits() >= OtherType.getSizeInBits())
@@ -397,8 +397,7 @@ bool EEVT::TypeSet::EnforceSmallerThan(EEVT::TypeSet &Other, TreePattern &TP) {
                    Other.getName() +"'!");
           return false;
         }
-    }
-    else
+    } else
       // For scalar types, the bitsize of this type must be larger
       // than that of the other.
       if (Type.getSizeInBits() >= OtherType.getSizeInBits()) {
@@ -450,8 +449,7 @@ bool EEVT::TypeSet::EnforceSmallerThan(EEVT::TypeSet &Other, TreePattern &TP) {
         MadeChange = true;
         continue;
       }
-    }
-    else if (isFloatingPoint(*TVI)) {
+    } else if (isFloatingPoint(*TVI)) {
       ++OtherFPSize;
       if (*TVI == SmallestFP) {
         TVI = Other.TypeVec.erase(TVI);
@@ -465,8 +463,8 @@ bool EEVT::TypeSet::EnforceSmallerThan(EEVT::TypeSet &Other, TreePattern &TP) {
 
   // If this is the only type in the large set, the constraint can never be
   // satisfied.
-  if ((Other.hasIntegerTypes() && OtherIntSize == 0)
-      || (Other.hasFloatingPointTypes() && OtherFPSize == 0)) {
+  if ((Other.hasIntegerTypes() && OtherIntSize == 0) ||
+      (Other.hasFloatingPointTypes() && OtherFPSize == 0)) {
     TP.error("Type inference contradiction found, '" +
              Other.getName() + "' has nothing larger than '" + getName() +"'!");
     return false;
@@ -508,8 +506,7 @@ bool EEVT::TypeSet::EnforceSmallerThan(EEVT::TypeSet &Other, TreePattern &TP) {
         MadeChange = true;
         continue;
       }
-    }
-    else if (isFloatingPoint(*TVI)) {
+    } else if (isFloatingPoint(*TVI)) {
       ++FPSize;
       if (*TVI == LargestFP) {
         TVI = TypeVec.erase(TVI);
@@ -523,8 +520,8 @@ bool EEVT::TypeSet::EnforceSmallerThan(EEVT::TypeSet &Other, TreePattern &TP) {
 
   // If this is the only type in the small set, the constraint can never be
   // satisfied.
-  if ((hasIntegerTypes() && IntSize == 0)
-      || (hasFloatingPointTypes() && FPSize == 0)) {
+  if ((hasIntegerTypes() && IntSize == 0) ||
+      (hasFloatingPointTypes() && FPSize == 0)) {
     TP.error("Type inference contradiction found, '" +
              getName() + "' has nothing smaller than '" + Other.getName()+"'!");
     return false;
@@ -547,10 +544,10 @@ bool EEVT::TypeSet::EnforceVectorEltTypeIs(EEVT::TypeSet &VTOperand,
 
   // If we know the vector type, it forces the scalar to agree.
   if (isConcrete()) {
-    EVT IVT = getConcrete();
+    MVT IVT = getConcrete();
     IVT = IVT.getVectorElementType();
     return MadeChange |
-      VTOperand.MergeInTypeInfo(IVT.getSimpleVT().SimpleTy, TP);
+      VTOperand.MergeInTypeInfo(IVT.SimpleTy, TP);
   }
 
   // If the scalar type is known, filter out vector types whose element types
@@ -565,7 +562,7 @@ bool EEVT::TypeSet::EnforceVectorEltTypeIs(EEVT::TypeSet &VTOperand,
   // Filter out all the types which don't have the right element type.
   for (unsigned i = 0; i != TypeVec.size(); ++i) {
     assert(isVector(TypeVec[i]) && "EnforceVector didn't work");
-    if (EVT(TypeVec[i]).getVectorElementType().getSimpleVT().SimpleTy != VT) {
+    if (MVT(TypeVec[i]).getVectorElementType().SimpleTy != VT) {
       TypeVec.erase(TypeVec.begin()+i--);
       MadeChange = true;
     }
@@ -593,16 +590,16 @@ bool EEVT::TypeSet::EnforceVectorSubVectorTypeIs(EEVT::TypeSet &VTOperand,
 
   // If we know the vector type, it forces the scalar types to agree.
   if (isConcrete()) {
-    EVT IVT = getConcrete();
+    MVT IVT = getConcrete();
     IVT = IVT.getVectorElementType();
 
-    EEVT::TypeSet EltTypeSet(IVT.getSimpleVT().SimpleTy, TP);
+    EEVT::TypeSet EltTypeSet(IVT.SimpleTy, TP);
     MadeChange |= VTOperand.EnforceVectorEltTypeIs(EltTypeSet, TP);
   } else if (VTOperand.isConcrete()) {
-    EVT IVT = VTOperand.getConcrete();
+    MVT IVT = VTOperand.getConcrete();
     IVT = IVT.getVectorElementType();
 
-    EEVT::TypeSet EltTypeSet(IVT.getSimpleVT().SimpleTy, TP);
+    EEVT::TypeSet EltTypeSet(IVT.SimpleTy, TP);
     MadeChange |= EnforceVectorEltTypeIs(EltTypeSet, TP);
   }
 
@@ -1522,7 +1519,7 @@ bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
       if (VT == MVT::iPTR || VT == MVT::iPTRAny)
         return MadeChange;
 
-      unsigned Size = EVT(VT).getSizeInBits();
+      unsigned Size = MVT(VT).getSizeInBits();
       // Make sure that the value is representable for this type.
       if (Size >= 32) return MadeChange;
 

@@ -421,8 +421,7 @@ bool LoadFromStackOrConst::hasHazard_(const MachineInstr &MI) {
     return false;
 
   if (const PseudoSourceValue *PSV = dyn_cast<const PseudoSourceValue>(V))
-    return !PSV->PseudoSourceValue::isConstant(0) &&
-      (V != PseudoSourceValue::getStack());
+    return !PSV->isConstant(0) && V != PseudoSourceValue::getStack();
 
   return true;
 }
@@ -563,14 +562,13 @@ bool Filler::searchBackward(MachineBasicBlock &MBB, Iter Slot) const {
 
   RegDU.init(*Slot);
 
-  if (searchRange(MBB, ReverseIter(Slot), MBB.rend(), RegDU, MemDU, Filler)) {
-    MBB.splice(llvm::next(Slot), &MBB, llvm::next(Filler).base());
-    MIBundleBuilder(MBB, Slot, llvm::next(llvm::next(Slot)));
-    ++UsefulSlots;
-    return true;
-  }
+  if (!searchRange(MBB, ReverseIter(Slot), MBB.rend(), RegDU, MemDU, Filler))
+    return false;
 
-  return false;
+  MBB.splice(llvm::next(Slot), &MBB, llvm::next(Filler).base());
+  MIBundleBuilder(MBB, Slot, llvm::next(llvm::next(Slot)));
+  ++UsefulSlots;
+  return true;
 }
 
 bool Filler::searchForward(MachineBasicBlock &MBB, Iter Slot) const {
@@ -584,14 +582,13 @@ bool Filler::searchForward(MachineBasicBlock &MBB, Iter Slot) const {
 
   RegDU.setCallerSaved(*Slot);
 
-  if (searchRange(MBB, llvm::next(Slot), MBB.end(), RegDU, NM, Filler)) {
-    MBB.splice(llvm::next(Slot), &MBB, Filler);
-    MIBundleBuilder(MBB, Slot, llvm::next(llvm::next(Slot)));
-    ++UsefulSlots;
-    return true;
-  }
+  if (!searchRange(MBB, llvm::next(Slot), MBB.end(), RegDU, NM, Filler))
+    return false;
 
-  return false;
+  MBB.splice(llvm::next(Slot), &MBB, Filler);
+  MIBundleBuilder(MBB, Slot, llvm::next(llvm::next(Slot)));
+  ++UsefulSlots;
+  return true;
 }
 
 bool Filler::searchSuccBBs(MachineBasicBlock &MBB, Iter Slot) const {

@@ -394,9 +394,12 @@ FoldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP, GlobalVariable *GV,
   // If the index is larger than the pointer size of the target, truncate the
   // index down like the GEP would do implicitly.  We don't have to do this for
   // an inbounds GEP because the index can't be out of range.
-  if (!GEP->isInBounds() &&
-      Idx->getType()->getPrimitiveSizeInBits() > TD->getPointerSizeInBits())
-    Idx = Builder->CreateTrunc(Idx, TD->getIntPtrType(Idx->getContext()));
+  if (!GEP->isInBounds()) {
+    Type *IntPtrTy = TD->getIntPtrType(GEP->getType());
+    unsigned PtrSize = IntPtrTy->getIntegerBitWidth();
+    if (Idx->getType()->getPrimitiveSizeInBits() > PtrSize)
+      Idx = Builder->CreateTrunc(Idx, IntPtrTy);
+  }
 
   // If the comparison is only true for one or two elements, emit direct
   // comparisons.
@@ -739,10 +742,9 @@ Instruction *InstCombiner::FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
 }
 
 /// FoldICmpAddOpCst - Fold "icmp pred (X+CI), X".
-Instruction *InstCombiner::FoldICmpAddOpCst(ICmpInst &ICI,
+Instruction *InstCombiner::FoldICmpAddOpCst(Instruction &ICI,
                                             Value *X, ConstantInt *CI,
-                                            ICmpInst::Predicate Pred,
-                                            Value *TheAdd) {
+                                            ICmpInst::Predicate Pred) {
   // If we have X+0, exit early (simplifying logic below) and let it get folded
   // elsewhere.   icmp X+0, X  -> icmp X, X
   if (CI->isZero()) {
@@ -1783,8 +1785,7 @@ Instruction *InstCombiner::visitICmpInstWithCastAndCast(ICmpInst &ICI) {
   // Turn icmp (ptrtoint x), (ptrtoint/c) into a compare of the input if the
   // integer type is the same size as the pointer type.
   if (TD && LHSCI->getOpcode() == Instruction::PtrToInt &&
-      TD->getPointerSizeInBits() ==
-         cast<IntegerType>(DestTy)->getBitWidth()) {
+      TD->getPointerTypeSizeInBits(SrcTy) == DestTy->getIntegerBitWidth()) {
     Value *RHSOp = 0;
     if (Constant *RHSC = dyn_cast<Constant>(ICI.getOperand(1))) {
       RHSOp = ConstantExpr::getIntToPtr(RHSC, SrcTy);
@@ -2037,14 +2038,59 @@ static APInt DemandedBitsLHSMask(ICmpInst &I,
 
 }
 
+/// \brief Check if the order of \p Op0 and \p Op1 as operand in an ICmpInst
+/// should be swapped.
+/// The descision is based on how many times these two operands are reused
+/// as subtract operands and their positions in those instructions.
+/// The rational is that several architectures use the same instruction for
+/// both subtract and cmp, thus it is better if the order of those operands
+/// match.
+/// \return true if Op0 and Op1 should be swapped.
+static bool swapMayExposeCSEOpportunities(const Value * Op0,
+                                          const Value * Op1) {
+  // Filter out pointer value as those cannot appears directly in subtract.
+  // FIXME: we may want to go through inttoptrs or bitcasts.
+  if (Op0->getType()->isPointerTy())
+    return false;
+  // Count every uses of both Op0 and Op1 in a subtract.
+  // Each time Op0 is the first operand, count -1: swapping is bad, the
+  // subtract has already the same layout as the compare.
+  // Each time Op0 is the second operand, count +1: swapping is good, the
+  // subtract has a diffrent layout as the compare.
+  // At the end, if the benefit is greater than 0, Op0 should come second to
+  // expose more CSE opportunities.
+  int GlobalSwapBenefits = 0;
+  for (Value::const_use_iterator UI = Op0->use_begin(), UIEnd = Op0->use_end(); UI != UIEnd; ++UI) {
+    const BinaryOperator *BinOp = dyn_cast<BinaryOperator>(*UI);
+    if (!BinOp || BinOp->getOpcode() != Instruction::Sub)
+      continue;
+    // If Op0 is the first argument, this is not beneficial to swap the
+    // arguments.
+    int LocalSwapBenefits = -1;
+    unsigned Op1Idx = 1;
+    if (BinOp->getOperand(Op1Idx) == Op0) {
+      Op1Idx = 0;
+      LocalSwapBenefits = 1;
+    }
+    if (BinOp->getOperand(Op1Idx) != Op1)
+      continue;
+    GlobalSwapBenefits += LocalSwapBenefits;
+  }
+  return GlobalSwapBenefits > 0;
+}
+
 Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
   bool Changed = false;
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+  unsigned Op0Cplxity = getComplexity(Op0);
+  unsigned Op1Cplxity = getComplexity(Op1);
 
   /// Orders the operands of the compare so that they are listed from most
   /// complex to least complex.  This puts constants before unary operators,
   /// before binary operators.
-  if (getComplexity(Op0) < getComplexity(Op1)) {
+  if (Op0Cplxity < Op1Cplxity ||
+        (Op0Cplxity == Op1Cplxity &&
+         swapMayExposeCSEOpportunities(Op0, Op1))) {
     I.swapOperands();
     std::swap(Op0, Op1);
     Changed = true;
@@ -2932,19 +2978,14 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
     Value *X; ConstantInt *Cst;
     // icmp X+Cst, X
     if (match(Op0, m_Add(m_Value(X), m_ConstantInt(Cst))) && Op1 == X)
-      return FoldICmpAddOpCst(I, X, Cst, I.getPredicate(), Op0);
+      return FoldICmpAddOpCst(I, X, Cst, I.getPredicate());
 
     // icmp X, X+Cst
     if (match(Op1, m_Add(m_Value(X), m_ConstantInt(Cst))) && Op0 == X)
-      return FoldICmpAddOpCst(I, X, Cst, I.getSwappedPredicate(), Op1);
+      return FoldICmpAddOpCst(I, X, Cst, I.getSwappedPredicate());
   }
   return Changed ? &I : 0;
 }
-
-
-
-
-
 
 /// FoldFCmp_IntToFP_Cst - Fold fcmp ([us]itofp x, cst) if possible.
 ///

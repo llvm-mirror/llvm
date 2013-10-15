@@ -78,7 +78,6 @@ namespace llvm {
     unsigned getNumber() const { return Number; }
     uint16_t getChildrenFlag() const { return ChildrenFlag; }
     const SmallVectorImpl<DIEAbbrevData> &getData() const { return Data; }
-    void setTag(uint16_t T) { Tag = T; }
     void setChildrenFlag(uint16_t CF) { ChildrenFlag = CF; }
     void setNumber(unsigned N) { Number = N; }
 
@@ -149,10 +148,6 @@ namespace llvm {
     const std::vector<DIE *> &getChildren() const { return Children; }
     const SmallVectorImpl<DIEValue*> &getValues() const { return Values; }
     DIE *getParent() const { return Parent; }
-    /// Climb up the parent chain to get the compile unit DIE this DIE belongs
-    /// to.
-    DIE *getCompileUnit();
-    void setTag(uint16_t Tag) { Abbrev.setTag(Tag); }
     void setOffset(unsigned O) { Offset = O; }
     void setSize(unsigned S) { Size = S; }
 
@@ -166,10 +161,7 @@ namespace llvm {
     /// addChild - Add a child to the DIE.
     ///
     void addChild(DIE *Child) {
-      if (Child->getParent()) {
-        assert (Child->getParent() == this && "Unexpected DIE Parent!");
-        return;
-      }
+      assert(!Child->getParent());
       Abbrev.setChildrenFlag(dwarf::DW_CHILDREN_yes);
       Children.push_back(Child);
       Child->Parent = this;

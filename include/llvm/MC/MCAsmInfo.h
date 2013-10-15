@@ -93,9 +93,9 @@ namespace llvm {
     /// this value.  Factored out in .debug_frame and .debug_line.
     unsigned MinInstAlignment;                  // Defaults to 1.
 
-    /// PCSymbol - The symbol used to represent the current PC.  Used in PC
-    /// relative expressions.
-    const char *PCSymbol;                    // Defaults to "$".
+    /// DollarIsPC - The '$' token, when not referencing an identifier or
+    /// constant, refers to the current PC.
+    bool DollarIsPC;                         // Defaults to false.
 
     /// SeparatorString - This string, if specified, is used to separate
     /// instructions from each other when on the same line.
@@ -316,10 +316,6 @@ namespace llvm {
     /// SupportsExceptionHandling - True if target supports exception handling.
     ExceptionHandling::ExceptionsType ExceptionsType; // Defaults to None
 
-    /// DwarfUsesInlineInfoSection - True if DwarfDebugInlineSection is used to
-    /// encode inline subroutine information.
-    bool DwarfUsesInlineInfoSection;         // Defaults to false.
-
     /// DwarfUsesRelocationsAcrossSections - True if Dwarf2 output generally
     /// uses relocations for references to other .debug_* sections.
     bool DwarfUsesRelocationsAcrossSections;
@@ -429,8 +425,8 @@ namespace llvm {
     unsigned getMinInstAlignment() const {
       return MinInstAlignment;
     }
-    const char *getPCSymbol() const {
-      return PCSymbol;
+    bool getDollarIsPC() const {
+      return DollarIsPC;
     }
     const char *getSeparatorString() const {
       return SeparatorString;
@@ -557,9 +553,6 @@ namespace llvm {
         (ExceptionsType == ExceptionHandling::DwarfCFI ||
          ExceptionsType == ExceptionHandling::ARM ||
          ExceptionsType == ExceptionHandling::Win64);
-    }
-    bool doesDwarfUseInlineInfoSection() const {
-      return DwarfUsesInlineInfoSection;
     }
     bool doesDwarfUseRelocationsAcrossSections() const {
       return DwarfUsesRelocationsAcrossSections;

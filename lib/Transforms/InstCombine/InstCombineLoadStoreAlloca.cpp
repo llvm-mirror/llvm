@@ -154,7 +154,7 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
   // Ensure that the alloca array size argument has type intptr_t, so that
   // any casting is exposed early.
   if (TD) {
-    Type *IntPtrTy = TD->getIntPtrType(AI.getContext());
+    Type *IntPtrTy = TD->getIntPtrType(AI.getType());
     if (AI.getArraySize()->getType() != IntPtrTy) {
       Value *V = Builder->CreateIntCast(AI.getArraySize(),
                                         IntPtrTy, false);
@@ -181,7 +181,7 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
       // insert our getelementptr instruction...
       //
       Type *IdxTy = TD
-                  ? TD->getIntPtrType(AI.getContext())
+                  ? TD->getIntPtrType(AI.getType())
                   : Type::getInt64Ty(AI.getContext());
       Value *NullIdx = Constant::getNullValue(IdxTy);
       Value *Idx[2] = { NullIdx, NullIdx };
@@ -304,8 +304,8 @@ static Instruction *InstCombineLoadCast(InstCombiner &IC, LoadInst &LI,
         if (Constant *CSrc = dyn_cast<Constant>(CastOp))
           if (ASrcTy->getNumElements() != 0) {
             Type *IdxTy = TD
-                        ? TD->getIntPtrType(LI.getContext())
-                        : Type::getInt64Ty(LI.getContext());
+                        ? TD->getIntPtrType(SrcTy)
+                        : Type::getInt64Ty(SrcTy->getContext());
             Value *Idx = Constant::getNullValue(IdxTy);
             Value *Idxs[2] = { Idx, Idx };
             CastOp = ConstantExpr::getGetElementPtr(CSrc, Idxs);
@@ -318,7 +318,8 @@ static Instruction *InstCombineLoadCast(InstCombiner &IC, LoadInst &LI,
             SrcPTy->isVectorTy()) &&
           // Do not allow turning this into a load of an integer, which is then
           // casted to a pointer, this pessimizes pointer analysis a lot.
-          (SrcPTy->isPointerTy() == LI.getType()->isPointerTy()) &&
+          (SrcPTy->isPtrOrPtrVectorTy() ==
+           LI.getType()->isPtrOrPtrVectorTy()) &&
           IC.getDataLayout()->getTypeSizeInBits(SrcPTy) ==
                IC.getDataLayout()->getTypeSizeInBits(DestPTy)) {
 

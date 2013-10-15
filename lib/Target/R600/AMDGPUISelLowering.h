@@ -31,6 +31,12 @@ private:
   SDValue LowerEXTRACT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+  /// \brief Lower vector stores by merging the vector elements into an integer
+  /// of the same bitwidth.
+  SDValue MergeVectorStore(const SDValue &Op, SelectionDAG &DAG) const;
+  /// \brief Split a vector store into multiple scalar stores.
+  /// \returns The resulting chain. 
+  SDValue SplitVectorStore(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
 
 protected:
@@ -44,16 +50,14 @@ protected:
                                        unsigned Reg, EVT VT) const;
   SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
                              SelectionDAG &DAG) const;
-
+  /// \brief Split a vector load into multiple scalar loads.
+  SDValue SplitVectorLoad(const SDValue &Op, SelectionDAG &DAG) const;
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
 
   void AnalyzeFormalArguments(CCState &State,
                               const SmallVectorImpl<ISD::InputArg> &Ins) const;
-
-  /// \brief Lower vector stores by merging the vector elements into an integer
-  /// of the same bitwidth.
-  SDValue LowerVectorStore(const SDValue &Op, SelectionDAG &DAG) const;
 
 public:
   AMDGPUTargetLowering(TargetMachine &TM);
@@ -156,6 +160,7 @@ enum {
   FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
   STORE_MSKOR,
   LOAD_CONSTANT,
+  TBUFFER_STORE_FORMAT,
   LAST_AMDGPU_ISD_NUMBER
 };
 

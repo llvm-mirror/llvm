@@ -66,6 +66,7 @@ representation.
 
    CMake
    HowToBuildOnARM
+   HowToCrossCompileLLVM
    CommandGuide/index
    GettingStarted
    GettingStartedVS
@@ -82,6 +83,7 @@ representation.
    Passes
    YamlIO
    GetElementPtr
+   MCJITDesignAndImplementation
 
 :doc:`GettingStarted`
    Discusses how to get up and running quickly with the LLVM infrastructure.
@@ -94,6 +96,9 @@ representation.
 
 :doc:`HowToBuildOnARM`
    Notes on building and testing LLVM/Clang on ARM.
+
+:doc:`HowToCrossCompileLLVM`
+   Notes on cross-building and testing LLVM/Clang.
 
 :doc:`GettingStartedVS`
    An addendum to the main Getting Started guide for those using Visual Studio
@@ -318,6 +323,7 @@ Information about LLVM's development process.
    LLVMBuild
    HowToReleaseLLVM
    Packaging
+   ReleaseProcess
 
 :doc:`DeveloperPolicy`
    The LLVM project's policy towards developers and their contributions.

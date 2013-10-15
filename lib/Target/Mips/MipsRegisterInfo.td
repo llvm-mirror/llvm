@@ -60,6 +60,7 @@ class AFPR<bits<16> Enc, string n, list<Register> subregs>
 class AFPR64<bits<16> Enc, string n, list<Register> subregs>
   : MipsRegWithSubRegs<Enc, n, subregs> {
   let SubRegIndices = [sub_lo, sub_hi];
+  let CoveredBySubRegs = 1;
 }
 
 // Mips 128-bit (aliased) MSA Registers
@@ -200,6 +201,10 @@ let Namespace = "Mips" in {
   foreach I = 0-7 in
   def FCC#I : MipsReg<#I, "fcc"#I>;
 
+  // COP2 registers.
+  foreach I = 0-31 in
+  def COP2#I : MipsReg<#I, ""#I>;
+
   // PC register
   def PC : Register<"pc">;
 
@@ -230,6 +235,16 @@ let Namespace = "Mips" in {
   def DSPOutFlag : RegisterWithSubRegs<"", [DSPOutFlag16_19, DSPOutFlag20,
                                             DSPOutFlag21, DSPOutFlag22,
                                             DSPOutFlag23]>;
+
+  // MSA-ASE control registers.
+  def MSAIR : Register<"0">;
+  def MSACSR : Register<"1">;
+  def MSAAccess : Register<"2">;
+  def MSASave : Register<"3">;
+  def MSAModify : Register<"4">;
+  def MSARequest : Register<"5">;
+  def MSAMap : Register<"6">;
+  def MSAUnmap : Register<"7">;
 }
 
 //===----------------------------------------------------------------------===//
@@ -294,7 +309,8 @@ def CPUSPReg : RegisterClass<"Mips", [i32], 32, (add SP)>, Unallocatable;
 // * FGR32 - 32 32-bit registers (single float only mode)
 def FGR32 : RegisterClass<"Mips", [f32], 32, (sequence "F%u", 0, 31)>;
 
-def FGRH32 : RegisterClass<"Mips", [f32], 32, (sequence "F_HI%u", 0, 31)>;
+def FGRH32 : RegisterClass<"Mips", [f32], 32, (sequence "F_HI%u", 0, 31)>,
+             Unallocatable;
 
 def AFGR64 : RegisterClass<"Mips", [f64], 64, (add
   // Return Values and Arguments
@@ -327,6 +343,9 @@ def MSA128W: RegisterClass<"Mips", [v4i32, v4f32], 128,
 def MSA128D: RegisterClass<"Mips", [v2i64, v2f64], 128,
                            (sequence "W%u", 0, 31)>;
 
+def MSACtrl: RegisterClass<"Mips", [i32], 32, (add
+  MSAIR, MSACSR, MSAAccess, MSASave, MSAModify, MSARequest, MSAMap, MSAUnmap)>;
+
 // Hi/Lo Registers
 def LO32 : RegisterClass<"Mips", [i32], 32, (add LO0)>;
 def HI32 : RegisterClass<"Mips", [i32], 32, (add HI0)>;
@@ -352,6 +371,10 @@ def ACC64DSP : RegisterClass<"Mips", [untyped], 64, (sequence "AC%u", 0, 3)> {
 }
 
 def DSPCC : RegisterClass<"Mips", [v4i8, v2i16], 32, (add DSPCCond)>;
+
+// Coprocessor 2 registers.
+def COP2 : RegisterClass<"Mips", [i32], 32, (sequence "COP2%u", 0, 31)>,
+           Unallocatable;
 
 // Register Operands.
 
@@ -413,6 +436,26 @@ def FCCRegsAsmOperand : MipsAsmRegOperand {
   let ParserMethod = "parseFCCRegs";
 }
 
+def MSA128BAsmOperand : MipsAsmRegOperand {
+  let Name = "MSA128BAsm";
+  let ParserMethod = "parseMSA128BRegs";
+}
+
+def MSA128HAsmOperand : MipsAsmRegOperand {
+  let Name = "MSA128HAsm";
+  let ParserMethod = "parseMSA128HRegs";
+}
+
+def MSA128WAsmOperand : MipsAsmRegOperand {
+  let Name = "MSA128WAsm";
+  let ParserMethod = "parseMSA128WRegs";
+}
+
+def MSA128DAsmOperand : MipsAsmRegOperand {
+  let Name = "MSA128DAsm";
+  let ParserMethod = "parseMSA128DRegs";
+}
+
 def GPR32Opnd : RegisterOperand<GPR32> {
   let ParserMatchClass = GPR32AsmOperand;
 }
@@ -432,6 +475,11 @@ def CCROpnd : RegisterOperand<CCR> {
 def HWRegsAsmOperand : MipsAsmRegOperand {
   let Name = "HWRegsAsm";
   let ParserMethod = "parseHWRegs";
+}
+
+def COP2AsmOperand : MipsAsmRegOperand {
+  let Name = "COP2Asm";
+  let ParserMethod = "parseCOP2";
 }
 
 def HWRegsOpnd : RegisterOperand<HWRegs> {
@@ -469,3 +517,24 @@ def HI32DSPOpnd : RegisterOperand<HI32DSP> {
 def ACC64DSPOpnd : RegisterOperand<ACC64DSP> {
   let ParserMatchClass = ACC64DSPAsmOperand;
 }
+
+def COP2Opnd : RegisterOperand<COP2> {
+  let ParserMatchClass = COP2AsmOperand;
+}
+
+def MSA128BOpnd : RegisterOperand<MSA128B> {
+  let ParserMatchClass = MSA128BAsmOperand;
+}
+
+def MSA128HOpnd : RegisterOperand<MSA128H> {
+  let ParserMatchClass = MSA128HAsmOperand;
+}
+
+def MSA128WOpnd : RegisterOperand<MSA128W> {
+  let ParserMatchClass = MSA128WAsmOperand;
+}
+
+def MSA128DOpnd : RegisterOperand<MSA128D> {
+  let ParserMatchClass = MSA128DAsmOperand;
+}
+

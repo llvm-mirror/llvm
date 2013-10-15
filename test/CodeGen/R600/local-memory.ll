@@ -1,5 +1,5 @@
 ; RUN: llc < %s -march=r600 -mcpu=redwood | FileCheck --check-prefix=EG-CHECK %s
-; RUN: llc < %s -march=r600 -mcpu=verde | FileCheck --check-prefix=SI-CHECK %s
+; RUN: llc < %s -march=r600 -mcpu=verde -verify-machineinstrs | FileCheck --check-prefix=SI-CHECK %s
 
 @local_memory.local_mem = internal addrspace(3) unnamed_addr global [16 x i32] zeroinitializer, align 4
 
@@ -13,6 +13,7 @@
 ; SI-CHECK-NEXT: .long 32768
 
 ; EG-CHECK: LDS_WRITE
+; SI-CHECK_NOT: S_WQM_B64
 ; SI-CHECK: DS_WRITE_B32 0
 
 ; GROUP_BARRIER must be the last instruction in a clause

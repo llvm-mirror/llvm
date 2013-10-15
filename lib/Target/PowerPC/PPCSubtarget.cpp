@@ -15,6 +15,7 @@
 #include "PPC.h"
 #include "PPCRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Function.h"
@@ -89,6 +90,8 @@ void PPCSubtarget::initializeEnvironment() {
   HasPOPCNTD = false;
   HasLDBRX = false;
   IsBookE = false;
+  DeprecatedMFTB = false;
+  DeprecatedDST = false;
   HasLazyResolverStubs = false;
   IsJITCodeModel = false;
 }
@@ -164,14 +167,7 @@ bool PPCSubtarget::enablePostRAScheduler(
            CodeGenOpt::Level OptLevel,
            TargetSubtargetInfo::AntiDepBreakMode& Mode,
            RegClassVector& CriticalPathRCs) const {
-  // FIXME: It would be best to use TargetSubtargetInfo::ANTIDEP_ALL here,
-  // but we can't because we can't reassign the cr registers. There is a
-  // dependence between the cr register and the RLWINM instruction used
-  // to extract its value which the anti-dependency breaker can't currently
-  // see. Maybe we should make a late-expanded pseudo to encode this dependency.
-  // (the relevant code is in PPCDAGToDAGISel::SelectSETCC)
-
-  Mode = TargetSubtargetInfo::ANTIDEP_CRITICAL;
+  Mode = TargetSubtargetInfo::ANTIDEP_ALL;
 
   CriticalPathRCs.clear();
 
@@ -180,9 +176,44 @@ bool PPCSubtarget::enablePostRAScheduler(
   else
     CriticalPathRCs.push_back(&PPC::GPRCRegClass);
     
-  CriticalPathRCs.push_back(&PPC::F8RCRegClass);
-  CriticalPathRCs.push_back(&PPC::VRRCRegClass);
-
   return OptLevel >= CodeGenOpt::Default;
+}
+
+// Embedded cores need aggressive scheduling.
+static bool needsAggressiveScheduling(unsigned Directive) {
+  switch (Directive) {
+  default: return false;
+  case PPC::DIR_440:
+  case PPC::DIR_A2:
+  case PPC::DIR_E500mc:
+  case PPC::DIR_E5500:
+    return true;
+  }
+}
+
+bool PPCSubtarget::enableMachineScheduler() const {
+  // Enable MI scheduling for the embedded cores.
+  // FIXME: Enable this for all cores (some additional modeling
+  // may be necessary).
+  return needsAggressiveScheduling(DarwinDirective);
+}
+
+void PPCSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
+                                       MachineInstr *begin,
+                                       MachineInstr *end,
+                                       unsigned NumRegionInstrs) const {
+  if (needsAggressiveScheduling(DarwinDirective)) {
+    Policy.OnlyTopDown = false;
+    Policy.OnlyBottomUp = false;
+  }
+
+  // Spilling is generally expensive on all PPC cores, so always enable
+  // register-pressure tracking.
+  Policy.ShouldTrackPressure = true;
+}
+
+bool PPCSubtarget::useAA() const {
+  // Use AA during code generation for the embedded cores.
+  return needsAggressiveScheduling(DarwinDirective);
 }
 

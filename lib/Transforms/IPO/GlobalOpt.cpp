@@ -80,7 +80,6 @@ namespace {
     bool OptimizeGlobalCtorsList(GlobalVariable *&GCL);
     bool ProcessGlobal(GlobalVariable *GV,Module::global_iterator &GVI);
     bool ProcessInternalGlobal(GlobalVariable *GV,Module::global_iterator &GVI,
-                               const SmallPtrSet<const PHINode*, 16> &PHIUsers,
                                const GlobalStatus &GS);
     bool OptimizeEmptyGlobalCXXDtors(Function *CXAAtExitFn);
 
@@ -1505,7 +1504,7 @@ static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
     unsigned TypeSize = TD->getTypeAllocSize(FieldTy);
     if (StructType *ST = dyn_cast<StructType>(FieldTy))
       TypeSize = TD->getStructLayout(ST)->getSizeInBytes();
-    Type *IntPtrTy = TD->getIntPtrType(CI->getContext());
+    Type *IntPtrTy = TD->getIntPtrType(CI->getType());
     Value *NMI = CallInst::CreateMalloc(CI, IntPtrTy, FieldTy,
                                         ConstantInt::get(IntPtrTy, TypeSize),
                                         NElems, 0,
@@ -1735,7 +1734,7 @@ static bool TryToOptimizeStoreOfMallocToGlobal(GlobalVariable *GV,
     // If this is a fixed size array, transform the Malloc to be an alloc of
     // structs.  malloc [100 x struct],1 -> malloc struct, 100
     if (ArrayType *AT = dyn_cast<ArrayType>(getMallocAllocatedType(CI, TLI))) {
-      Type *IntPtrTy = TD->getIntPtrType(CI->getContext());
+      Type *IntPtrTy = TD->getIntPtrType(CI->getType());
       unsigned TypeSize = TD->getStructLayout(AllocSTy)->getSizeInBytes();
       Value *AllocSize = ConstantInt::get(IntPtrTy, TypeSize);
       Value *NumElements = ConstantInt::get(IntPtrTy, AT->getNumElements());
@@ -1931,14 +1930,13 @@ bool GlobalOpt::ProcessGlobal(GlobalVariable *GV,
   if (GV->isConstant() || !GV->hasInitializer())
     return false;
 
-  return ProcessInternalGlobal(GV, GVI, PHIUsers, GS);
+  return ProcessInternalGlobal(GV, GVI, GS);
 }
 
 /// ProcessInternalGlobal - Analyze the specified global variable and optimize
 /// it if possible.  If we make a change, return true.
 bool GlobalOpt::ProcessInternalGlobal(GlobalVariable *GV,
                                       Module::global_iterator &GVI,
-                                const SmallPtrSet<const PHINode*, 16> &PHIUsers,
                                       const GlobalStatus &GS) {
   // If this is a first class global and has only one accessing function
   // and this function is main (which we know is not recursive), we replace
@@ -2048,11 +2046,14 @@ bool GlobalOpt::ProcessInternalGlobal(GlobalVariable *GV,
 
     // Otherwise, if the global was not a boolean, we can shrink it to be a
     // boolean.
-    if (Constant *SOVConstant = dyn_cast<Constant>(GS.StoredOnceValue))
-      if (TryToShrinkGlobalToBoolean(GV, SOVConstant)) {
-        ++NumShrunkToBool;
-        return true;
+    if (Constant *SOVConstant = dyn_cast<Constant>(GS.StoredOnceValue)) {
+      if (GS.Ordering == NotAtomic) {
+        if (TryToShrinkGlobalToBoolean(GV, SOVConstant)) {
+          ++NumShrunkToBool;
+          return true;
+        }
       }
+    }
   }
 
   return false;
@@ -3041,14 +3042,8 @@ bool GlobalOpt::OptimizeGlobalCtorsList(GlobalVariable *&GCL) {
   return true;
 }
 
-static int compareNames(const void *A, const void *B) {
-  const GlobalValue *VA = *reinterpret_cast<GlobalValue* const*>(A);
-  const GlobalValue *VB = *reinterpret_cast<GlobalValue* const*>(B);
-  if (VA->getName() < VB->getName())
-    return -1;
-  if (VB->getName() < VA->getName())
-    return 1;
-  return 0;
+static int compareNames(Constant *const *A, Constant *const *B) {
+  return (*A)->getName().compare((*B)->getName());
 }
 
 static void setUsedInitializer(GlobalVariable &V,

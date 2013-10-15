@@ -16,6 +16,9 @@
 #ifndef LLVM_MC_MACHINELOCATION_H
 #define LLVM_MC_MACHINELOCATION_H
 
+#include "llvm/Support/Compiler.h"
+#include "llvm/Support/DataTypes.h"
+
 namespace llvm {
   class MCSymbol;
 
@@ -25,7 +28,7 @@ private:
   unsigned Register;                    // gcc/gdb register number.
   int Offset;                           // Displacement if not register.
 public:
-  enum {
+  enum LLVM_ENUM_INT_TYPE(uint32_t) {
     // The target register number for an abstract frame pointer. The value is
     // an arbitrary value that doesn't collide with any real target register.
     VirtualFP = ~0U
@@ -44,7 +47,8 @@ public:
         Offset == Other.Offset;
   }
 
-  // Accessors
+  // Accessors.
+  /// \return true iff this is a register-indirect location.
   bool isIndirect()      const { return !IsRegister; }
   bool isReg()           const { return IsRegister; }
   unsigned getReg()      const { return Register; }

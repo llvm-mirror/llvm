@@ -89,6 +89,11 @@ MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
           (hasMips64() && (isABI_N32() || isABI_N64()))) &&
          "Invalid  Arch & ABI pair.");
 
+  if (hasMSA() && !isFP64bit())
+    report_fatal_error("MSA requires a 64-bit FPU register file (FR=1 mode). "
+                       "See -mattr=+fp64.",
+                       false);
+
   // Is the target system Linux ?
   if (TT.find("linux") == std::string::npos)
     IsLinux = false;
@@ -155,3 +160,6 @@ void MipsSubtarget::resetSubtarget(MachineFunction *MF) {
   }
 }
 
+bool MipsSubtarget::mipsSEUsesSoftFloat() const {
+  return TM->Options.UseSoftFloat && !InMips16HardFloat;
+}

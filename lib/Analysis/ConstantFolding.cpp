@@ -586,12 +586,13 @@ static Constant *SymbolicallyEvaluateBinop(unsigned Opc, Constant *Op0,
   if (Opc == Instruction::Sub && DL) {
     GlobalValue *GV1, *GV2;
     unsigned PtrSize = DL->getPointerSizeInBits();
-    unsigned OpSize = DL->getTypeSizeInBits(Op0->getType());
     APInt Offs1(PtrSize, 0), Offs2(PtrSize, 0);
 
     if (IsConstantOffsetFromGlobal(Op0, GV1, Offs1, *DL))
       if (IsConstantOffsetFromGlobal(Op1, GV2, Offs2, *DL) &&
           GV1 == GV2) {
+        unsigned OpSize = DL->getTypeSizeInBits(Op0->getType());
+
         // (&GV+C1) - (&GV+C2) -> C1-C2, pointer arithmetic cannot overflow.
         // PtrToInt may change the bitwidth so we have convert to the right size
         // first.
@@ -973,10 +974,11 @@ Constant *llvm::ConstantFoldInstOperands(unsigned Opcode, Type *DestTy,
       if (TD && CE->getOpcode() == Instruction::IntToPtr) {
         Constant *Input = CE->getOperand(0);
         unsigned InWidth = Input->getType()->getScalarSizeInBits();
-        if (TD->getPointerTypeSizeInBits(CE->getType()) < InWidth) {
+        unsigned PtrWidth = TD->getPointerTypeSizeInBits(CE->getType());
+        if (PtrWidth < InWidth) {
           Constant *Mask =
-            ConstantInt::get(CE->getContext(), APInt::getLowBitsSet(InWidth,
-                                                  TD->getPointerSizeInBits()));
+            ConstantInt::get(CE->getContext(),
+                             APInt::getLowBitsSet(InWidth, PtrWidth));
           Input = ConstantExpr::getAnd(Input, Mask);
         }
         // Do a zext or trunc to get to the dest size.

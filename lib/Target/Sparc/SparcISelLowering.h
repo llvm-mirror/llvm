@@ -40,8 +40,12 @@ namespace llvm {
 
       CALL,        // A call instruction.
       RET_FLAG,    // Return with a flag operand.
-      GLOBAL_BASE_REG, // Global base reg for PIC
-      FLUSHW       // FLUSH register windows to stack
+      GLOBAL_BASE_REG, // Global base reg for PIC.
+      FLUSHW,      // FLUSH register windows to stack.
+
+      TLS_ADD,     // For Thread Local Storage (TLS).
+      TLS_LD,
+      TLS_CALL
     };
   }
 
@@ -119,6 +123,7 @@ namespace llvm {
                            SDLoc DL, SelectionDAG &DAG) const;
 
     SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
 
@@ -127,6 +132,23 @@ namespace llvm {
     SDValue makeHiLoPair(SDValue Op, unsigned HiTF, unsigned LoTF,
                          SelectionDAG &DAG) const;
     SDValue makeAddress(SDValue Op, SelectionDAG &DAG) const;
+
+    SDValue LowerF128_LibCallArg(SDValue Chain, ArgListTy &Args,
+                                 SDValue Arg, SDLoc DL,
+                                 SelectionDAG &DAG) const;
+    SDValue LowerF128Op(SDValue Op, SelectionDAG &DAG,
+                        const char *LibFuncName,
+                        unsigned numArgs) const;
+    SDValue LowerF128Compare(SDValue LHS, SDValue RHS,
+                             unsigned &SPCC,
+                             SDLoc DL,
+                             SelectionDAG &DAG) const;
+
+    bool ShouldShrinkFPConstant(EVT VT) const {
+      // Do not shrink FP constpool if VT == MVT::f128.
+      // (ldd, call _Q_fdtoq) is more expensive than two ldds.
+      return VT != MVT::f128;
+    }
   };
 } // end namespace llvm
 

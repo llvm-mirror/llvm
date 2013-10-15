@@ -22,7 +22,7 @@
 namespace llvm {
 
 class LiveIntervals;
-class LiveInterval;
+class LiveRange;
 class RegisterClassInfo;
 class MachineInstr;
 
@@ -89,20 +89,89 @@ struct RegionPressure : RegisterPressure {
   void openBottom(MachineBasicBlock::const_iterator PrevBottom);
 };
 
-/// An element of pressure difference that identifies the pressure set and
-/// amount of increase or decrease in units of pressure.
-struct PressureElement {
-  unsigned PSetID;
-  int UnitIncrease;
+/// Capture a change in pressure for a single pressure set. UnitInc may be
+/// expressed in terms of upward or downward pressure depending on the client
+/// and will be dynamically adjusted for current liveness.
+///
+/// Pressure increments are tiny, typically 1-2 units, and this is only for
+/// heuristics, so we don't check UnitInc overflow. Instead, we may have a
+/// higher level assert that pressure is consistent within a region. We also
+/// effectively ignore dead defs which don't affect heuristics much.
+class PressureChange {
+  uint16_t PSetID; // ID+1. 0=Invalid.
+  int16_t  UnitInc;
+public:
+  PressureChange(): PSetID(0), UnitInc(0) {}
+  PressureChange(unsigned id): PSetID(id+1), UnitInc(0) {
+    assert(id < UINT16_MAX && "PSetID overflow.");
+  }
 
-  PressureElement(): PSetID(~0U), UnitIncrease(0) {}
-  PressureElement(unsigned id, int inc): PSetID(id), UnitIncrease(inc) {}
+  bool isValid() const { return PSetID > 0; }
 
-  bool isValid() const { return PSetID != ~0U; }
+  unsigned getPSet() const {
+    assert(isValid() && "invalid PressureChange");
+    return PSetID - 1;
+  }
+  // If PSetID is invalid, return UINT16_MAX to give it lowest priority.
+  unsigned getPSetOrMax() const { return (PSetID - 1) & UINT16_MAX; }
 
-  // If signed PSetID is negative, it is invalid; convert it to INT_MAX to give
-  // it lowest priority.
-  int PSetRank() const { return PSetID & INT_MAX; }
+  int getUnitInc() const { return UnitInc; }
+
+  void setUnitInc(int Inc) { UnitInc = Inc; }
+
+  bool operator==(const PressureChange &RHS) const {
+    return PSetID == RHS.PSetID && UnitInc == RHS.UnitInc;
+  }
+};
+
+template <> struct isPodLike<PressureChange> {
+   static const bool value = true;
+};
+
+/// List of PressureChanges in order of increasing, unique PSetID.
+///
+/// Use a small fixed number, because we can fit more PressureChanges in an
+/// empty SmallVector than ever need to be tracked per register class. If more
+/// PSets are affected, then we only track the most constrained.
+class PressureDiff {
+  // The initial design was for MaxPSets=4, but that requires PSet partitions,
+  // which are not yet implemented. (PSet partitions are equivalent PSets given
+  // the register classes actually in use within the scheduling region.)
+  enum { MaxPSets = 16 };
+
+  PressureChange PressureChanges[MaxPSets];
+public:
+  typedef PressureChange* iterator;
+  typedef const PressureChange* const_iterator;
+  iterator begin() { return &PressureChanges[0]; }
+  iterator end() { return &PressureChanges[MaxPSets]; }
+  const_iterator begin() const { return &PressureChanges[0]; }
+  const_iterator end() const { return &PressureChanges[MaxPSets]; }
+
+  void addPressureChange(unsigned RegUnit, bool IsDec,
+                         const MachineRegisterInfo *MRI);
+};
+
+/// Array of PressureDiffs.
+class PressureDiffs {
+  PressureDiff *PDiffArray;
+  unsigned Size;
+  unsigned Max;
+public:
+  PressureDiffs(): PDiffArray(0), Size(0), Max(0) {}
+  ~PressureDiffs() { free(PDiffArray); }
+
+  void clear() { Size = 0; }
+
+  void init(unsigned N);
+
+  PressureDiff &operator[](unsigned Idx) {
+    assert(Idx < Size && "PressureDiff index out of bounds");
+    return PDiffArray[Idx];
+  }
+  const PressureDiff &operator[](unsigned Idx) const {
+    return const_cast<PressureDiffs*>(this)->operator[](Idx);
+  }
 };
 
 /// Store the effects of a change in pressure on things that MI scheduler cares
@@ -120,11 +189,19 @@ struct PressureElement {
 /// CurrentMax records the largest increase in the tracker's max pressure that
 /// exceeds the current limit for some pressure set determined by the client.
 struct RegPressureDelta {
-  PressureElement Excess;
-  PressureElement CriticalMax;
-  PressureElement CurrentMax;
+  PressureChange Excess;
+  PressureChange CriticalMax;
+  PressureChange CurrentMax;
 
   RegPressureDelta() {}
+
+  bool operator==(const RegPressureDelta &RHS) const {
+    return Excess == RHS.Excess && CriticalMax == RHS.CriticalMax
+      && CurrentMax == RHS.CurrentMax;
+  }
+  bool operator!=(const RegPressureDelta &RHS) const {
+    return !operator==(RHS);
+  }
 };
 
 /// \brief A set of live virtual registers and physical register units.
@@ -135,7 +212,7 @@ struct LiveRegSet {
   SparseSet<unsigned> PhysRegs;
   SparseSet<unsigned, VirtReg2IndexFunctor> VirtRegs;
 
-  bool contains(unsigned Reg) {
+  bool contains(unsigned Reg) const {
     if (TargetRegisterInfo::isVirtualRegister(Reg))
       return VirtRegs.count(Reg);
     return PhysRegs.count(Reg);
@@ -215,6 +292,8 @@ public:
     MF(0), TRI(0), RCI(0), LIS(0), MBB(0), P(rp), RequireIntervals(false),
     TrackUntiedDefs(false) {}
 
+  void reset();
+
   void init(const MachineFunction *mf, const RegisterClassInfo *rci,
             const LiveIntervals *lis, const MachineBasicBlock *mbb,
             MachineBasicBlock::const_iterator pos,
@@ -239,7 +318,7 @@ public:
   SlotIndex getCurrSlot() const;
 
   /// Recede across the previous instruction.
-  bool recede();
+  bool recede(SmallVectorImpl<unsigned> *LiveUses = 0, PressureDiff *PDiff = 0);
 
   /// Advance across the current instruction.
   bool advance();
@@ -282,9 +361,16 @@ public:
   /// limit based on the tracker's current pressure, and record the number of
   /// excess register units of that pressure set introduced by this instruction.
   void getMaxUpwardPressureDelta(const MachineInstr *MI,
+                                 PressureDiff *PDiff,
                                  RegPressureDelta &Delta,
-                                 ArrayRef<PressureElement> CriticalPSets,
+                                 ArrayRef<PressureChange> CriticalPSets,
                                  ArrayRef<unsigned> MaxPressureLimit);
+
+  void getUpwardPressureDelta(const MachineInstr *MI,
+                              /*const*/ PressureDiff &PDiff,
+                              RegPressureDelta &Delta,
+                              ArrayRef<PressureChange> CriticalPSets,
+                              ArrayRef<unsigned> MaxPressureLimit) const;
 
   /// Consider the pressure increase caused by traversing this instruction
   /// top-down. Find the pressure set with the most change beyond its pressure
@@ -292,21 +378,22 @@ public:
   /// excess register units of that pressure set introduced by this instruction.
   void getMaxDownwardPressureDelta(const MachineInstr *MI,
                                    RegPressureDelta &Delta,
-                                   ArrayRef<PressureElement> CriticalPSets,
+                                   ArrayRef<PressureChange> CriticalPSets,
                                    ArrayRef<unsigned> MaxPressureLimit);
 
   /// Find the pressure set with the most change beyond its pressure limit after
   /// traversing this instruction either upward or downward depending on the
   /// closed end of the current region.
-  void getMaxPressureDelta(const MachineInstr *MI, RegPressureDelta &Delta,
-                           ArrayRef<PressureElement> CriticalPSets,
+  void getMaxPressureDelta(const MachineInstr *MI,
+                           RegPressureDelta &Delta,
+                           ArrayRef<PressureChange> CriticalPSets,
                            ArrayRef<unsigned> MaxPressureLimit) {
     if (isTopClosed())
       return getMaxDownwardPressureDelta(MI, Delta, CriticalPSets,
                                          MaxPressureLimit);
 
     assert(isBottomClosed() && "Uninitialized pressure tracker");
-    return getMaxUpwardPressureDelta(MI, Delta, CriticalPSets,
+    return getMaxUpwardPressureDelta(MI, 0, Delta, CriticalPSets,
                                      MaxPressureLimit);
   }
 
@@ -337,7 +424,7 @@ public:
   void dump() const;
 
 protected:
-  const LiveInterval *getInterval(unsigned Reg) const;
+  const LiveRange *getLiveRange(unsigned Reg) const;
 
   void increaseRegPressure(ArrayRef<unsigned> Regs);
   void decreaseRegPressure(ArrayRef<unsigned> Regs);

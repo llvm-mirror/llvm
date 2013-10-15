@@ -12,22 +12,66 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARMBaseInfo.h"
-#include "ARMELFStreamer.h"
 #include "ARMMCAsmInfo.h"
 #include "ARMMCTargetDesc.h"
 #include "InstPrinter/ARMInstPrinter.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/MC/MCCodeGenInfo.h"
+#include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_REGINFO_MC_DESC
 #include "ARMGenRegisterInfo.inc"
+
+static bool getMCRDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
+                                  std::string &Info) {
+  if (STI.getFeatureBits() & llvm::ARM::HasV7Ops &&
+      (MI.getOperand(0).isImm() && MI.getOperand(0).getImm() == 15) &&
+      (MI.getOperand(1).isImm() && MI.getOperand(1).getImm() == 0) &&
+      // Checks for the deprecated CP15ISB encoding:
+      // mcr p15, #0, rX, c7, c5, #4
+      (MI.getOperand(3).isImm() && MI.getOperand(3).getImm() == 7)) {
+    if ((MI.getOperand(5).isImm() && MI.getOperand(5).getImm() == 4)) {
+      if (MI.getOperand(4).isImm() && MI.getOperand(4).getImm() == 5) {
+        Info = "deprecated since v7, use 'isb'";
+        return true;
+      }
+
+      // Checks for the deprecated CP15DSB encoding:
+      // mcr p15, #0, rX, c7, c10, #4
+      if (MI.getOperand(4).isImm() && MI.getOperand(4).getImm() == 10) {
+        Info = "deprecated since v7, use 'dsb'";
+        return true;
+      }
+    }
+    // Checks for the deprecated CP15DMB encoding:
+    // mcr p15, #0, rX, c7, c10, #5
+    if (MI.getOperand(4).isImm() && MI.getOperand(4).getImm() == 10 &&
+        (MI.getOperand(5).isImm() && MI.getOperand(5).getImm() == 5)) {
+      Info = "deprecated since v7, use 'dmb'";
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool getITDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
+                                  std::string &Info) {
+  if (STI.getFeatureBits() & llvm::ARM::HasV8Ops &&
+      MI.getOperand(1).isImm() && MI.getOperand(1).getImm() != 8) {
+    Info = "applying IT instruction to more than one subsequent instruction is deprecated";
+    return true;
+  }
+
+  return false;
+}
 
 #define GET_INSTRINFO_MC_DESC
 #include "ARMGenInstrInfo.inc"
@@ -35,7 +79,6 @@
 #define GET_SUBTARGETINFO_MC_DESC
 #include "ARMGenSubtargetInfo.inc"
 
-using namespace llvm;
 
 std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
   Triple triple(TT);
@@ -60,8 +103,13 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
   if (Idx) {
     unsigned SubVer = TT[Idx];
     if (SubVer == '8') {
-      // FIXME: Parse v8 features
-      ARMArchFeature = "+v8";
+      if (NoCPU)
+        // v8a: FeatureDB, FeatureFPARMv8, FeatureNEON, FeatureDSPThumb2, FeatureMP,
+        //      FeatureHWDiv, FeatureHWDivARM, FeatureTrustZone, FeatureT2XtPk, FeatureCrypto
+        ARMArchFeature = "+v8,+db,+fp-armv8,+neon,+t2dsp,+mp,+hwdiv,+hwdiv-arm,+trustzone,+t2xtpk,+crypto";
+      else
+        // Use CPU to figure out the exact features
+        ARMArchFeature = "+v8";
     } else if (SubVer == '7') {
       if (Len >= Idx+2 && TT[Idx+1] == 'm') {
         isThumb = true;
@@ -106,7 +154,7 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
         isThumb = true;
         if (NoCPU)
           // v6m: FeatureNoARM, FeatureMClass
-          ARMArchFeature = "+v6,+noarm,+mclass";
+          ARMArchFeature = "+v6m,+noarm,+mclass";
         else
           ARMArchFeature = "+v6";
       } else
@@ -306,6 +354,10 @@ extern "C" void LLVMInitializeARMTargetMC() {
   // Register the object streamer.
   TargetRegistry::RegisterMCObjectStreamer(TheARMTarget, createMCStreamer);
   TargetRegistry::RegisterMCObjectStreamer(TheThumbTarget, createMCStreamer);
+
+  // Register the asm streamer.
+  TargetRegistry::RegisterAsmStreamer(TheARMTarget, createMCAsmStreamer);
+  TargetRegistry::RegisterAsmStreamer(TheThumbTarget, createMCAsmStreamer);
 
   // Register the MCInstPrinter.
   TargetRegistry::RegisterMCInstPrinter(TheARMTarget, createARMMCInstPrinter);

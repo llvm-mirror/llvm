@@ -515,6 +515,17 @@ entry:
   ret void
 }
 
+define <8 x i8> @no_distribute(<8 x i8> %a, <8 x i8> %b) nounwind {
+entry:
+; CHECK: no_distribute
+; CHECK: vadd.i8
+; CHECK: vmul.i8
+; CHECK-NOT: vmla.i8
+  %0 = add <8 x i8> %a, %b
+  %1 = mul <8x i8> %0, %0
+  ret <8 x i8> %1
+}
+
 ; If one operand has a zero-extend and the other a sign-extend, vmull
 ; cannot be used.
 define i16 @vmullWithInconsistentExtensions(<8 x i8> %vec) {
@@ -621,5 +632,23 @@ entry:
   %2 = mul nsw <4 x i32> %1, %1
   %predphi290.v.i = select <4 x i1> undef, <4 x i32> undef, <4 x i32> %2
   store <4 x i32> %predphi290.v.i, <4 x i32>* undef, align 4
+  ret void
+}
+
+define void @foo(<4 x float> * %a, <4 x float>* nocapture %dst, float* nocapture readonly %src) nounwind {
+;   Look for doing a normal scalar FP load rather than an to-all-lanes load.
+;   e.g., "ldr s0, [r2]" rathern than "vld1.32  {d18[], d19[]}, [r2:32]"
+;   Then check that the vector multiply has folded the splat to all lanes
+;   and used a vector * scalar instruction.
+; CHECK: vldr  {{s[0-9]+}}, [r2]
+; CHECK: vmul.f32  q8, q8, d0[0]
+  %tmp = load float* %src, align 4
+  %tmp5 = load <4 x float>* %a, align 4
+  %tmp6 = insertelement <4 x float> undef, float %tmp, i32 0
+  %tmp7 = insertelement <4 x float> %tmp6, float %tmp, i32 1
+  %tmp8 = insertelement <4 x float> %tmp7, float %tmp, i32 2
+  %tmp9 = insertelement <4 x float> %tmp8, float %tmp, i32 3
+  %tmp10 = fmul <4 x float> %tmp9, %tmp5
+  store <4 x float> %tmp10, <4 x float>* %dst, align 4
   ret void
 }

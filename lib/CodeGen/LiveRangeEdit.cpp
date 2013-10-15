@@ -262,9 +262,9 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
       else if (MOI->isDef()) {
         for (MCRegUnitIterator Units(Reg, MRI.getTargetRegisterInfo());
              Units.isValid(); ++Units) {
-          if (LiveInterval *LI = LIS.getCachedRegUnit(*Units)) {
-            if (VNInfo *VNI = LI->getVNInfoAt(Idx))
-              LI->removeValNo(VNI);
+          if (LiveRange *LR = LIS.getCachedRegUnit(*Units)) {
+            if (VNInfo *VNI = LR->getVNInfoAt(Idx))
+              LR->removeValNo(VNI);
           }
         }
       }
@@ -278,7 +278,7 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
     // Always shrink COPY uses that probably come from live range splitting.
     if (MI->readsVirtualRegister(Reg) &&
         (MI->isCopy() || MOI->isDef() || MRI.hasOneNonDBGUse(Reg) ||
-         LI.killedAt(Idx)))
+         LI.Query(Idx).isKill()))
       ToShrink.insert(&LI);
 
     // Remove defined value.

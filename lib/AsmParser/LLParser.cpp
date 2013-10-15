@@ -19,6 +19,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/ValueSymbolTable.h"
@@ -64,6 +65,9 @@ bool LLParser::ValidateEndOfModule() {
     }
     ForwardRefInstMetadata.clear();
   }
+
+  for (unsigned I = 0, E = InstsWithTBAATag.size(); I < E; I++)
+    UpgradeInstWithTBAATag(InstsWithTBAATag[I]);
 
   // Handle any function attribute group forward references.
   for (std::map<Value*, std::vector<unsigned> >::iterator
@@ -623,18 +627,14 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
                           unsigned Visibility) {
   assert(Lex.getKind() == lltok::kw_alias);
   Lex.Lex();
-  unsigned Linkage;
   LocTy LinkageLoc = Lex.getLoc();
-  if (ParseOptionalLinkage(Linkage))
+  unsigned L;
+  if (ParseOptionalLinkage(L))
     return true;
 
-  if (Linkage != GlobalValue::ExternalLinkage &&
-      Linkage != GlobalValue::WeakAnyLinkage &&
-      Linkage != GlobalValue::WeakODRLinkage &&
-      Linkage != GlobalValue::InternalLinkage &&
-      Linkage != GlobalValue::PrivateLinkage &&
-      Linkage != GlobalValue::LinkerPrivateLinkage &&
-      Linkage != GlobalValue::LinkerPrivateWeakLinkage)
+  GlobalValue::LinkageTypes Linkage = (GlobalValue::LinkageTypes) L;
+
+  if(!GlobalAlias::isValidLinkage(Linkage))
     return Error(LinkageLoc, "invalid linkage type for alias");
 
   Constant *Aliasee;
@@ -1426,6 +1426,9 @@ bool LLParser::ParseInstructionMetadata(Instruction *Inst,
         ForwardRefInstMetadata[Inst].push_back(R);
       }
     }
+
+    if (MDK == LLVMContext::MD_tbaa)
+      InstsWithTBAATag.push_back(Inst);
 
     // If this is the end of the list, we're done.
   } while (EatIfPresent(lltok::comma));
@@ -2386,7 +2389,6 @@ bool LLParser::ParseValID(ValID &ID, PerFunctionState *PFS) {
     Lex.Lex();
 
     ValID Fn, Label;
-    LocTy FnLoc, LabelLoc;
 
     if (ParseToken(lltok::lparen, "expected '(' in block address expression") ||
         ParseValID(Fn) ||
@@ -2922,7 +2924,7 @@ bool LLParser::ParseTypeAndBasicBlock(BasicBlock *&BB, LocTy &Loc,
 /// FunctionHeader
 ///   ::= OptionalLinkage OptionalVisibility OptionalCallingConv OptRetAttrs
 ///       OptUnnamedAddr Type GlobalName '(' ArgList ')' OptFuncAttrs OptSection
-///       OptionalAlign OptGC
+///       OptionalAlign OptGC OptionalPrefix
 bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   // Parse the linkage.
   LocTy LinkageLoc = Lex.getLoc();
@@ -3001,6 +3003,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   std::string GC;
   bool UnnamedAddr;
   LocTy UnnamedAddrLoc;
+  Constant *Prefix = 0;
 
   if (ParseArgumentList(ArgList, isVarArg) ||
       ParseOptionalToken(lltok::kw_unnamed_addr, UnnamedAddr,
@@ -3011,7 +3014,9 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
        ParseStringConstant(Section)) ||
       ParseOptionalAlignment(Alignment) ||
       (EatIfPresent(lltok::kw_gc) &&
-       ParseStringConstant(GC)))
+       ParseStringConstant(GC)) ||
+      (EatIfPresent(lltok::kw_prefix) &&
+       ParseGlobalTypeAndValue(Prefix)))
     return true;
 
   if (FuncAttrs.contains(Attribute::Builtin))
@@ -3109,6 +3114,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   Fn->setAlignment(Alignment);
   Fn->setSection(Section);
   if (!GC.empty()) Fn->setGC(GC.c_str());
+  Fn->setPrefixData(Prefix);
   ForwardRefAttrGroups[Fn] = FwdRefAttrGrps;
 
   // Add all of the arguments we parsed to the function.
@@ -3174,7 +3180,6 @@ bool LLParser::ParseBasicBlock(PerFunctionState &PFS) {
 
   // Parse the instructions in this block until we get a terminator.
   Instruction *Inst;
-  SmallVector<std::pair<unsigned, MDNode *>, 4> MetadataOnInst;
   do {
     // This instruction may have three possibilities for a name: a) none
     // specified, b) name specified "%foo =", c) number specified: "%4 =".

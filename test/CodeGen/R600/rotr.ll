@@ -1,5 +1,5 @@
-; RUN: llc < %s -march=r600 -mcpu=redwood -o - | FileCheck --check-prefix=R600-CHECK %s
-; RUN: llc < %s -march=r600 -mcpu=SI -o - | FileCheck --check-prefix=SI-CHECK %s
+; RUN: llc < %s -march=r600 -mcpu=redwood | FileCheck --check-prefix=R600-CHECK %s
+; RUN: llc < %s -march=r600 -mcpu=SI -verify-machineinstrs | FileCheck --check-prefix=SI-CHECK %s
 
 ; R600-CHECK: @rotr
 ; R600-CHECK: BIT_ALIGN_INT
@@ -19,7 +19,8 @@ entry:
 ; R600-CHECK: @rotl
 ; R600-CHECK: SUB_INT {{\** T[0-9]+\.[XYZW]}}, literal.x
 ; R600-CHECK-NEXT: 32
-; R600-CHECK: BIT_ALIGN_INT {{\** T[0-9]+\.[XYZW]}}, KC0[2].Z, KC0[2].Z, PV.{{[XYZW]}}
+; R600-CHECK: BIT_ALIGN_INT {{T[0-9]+\.[XYZW]}}, KC0[2].Z, KC0[2].Z, PV.{{[XYZW]}}
+
 
 ; SI-CHECK: @rotl
 ; SI-CHECK: V_SUB_I32_e64 [[DST:VGPR[0-9]+]], 32, {{[SV]GPR[0-9]+}}

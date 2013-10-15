@@ -13,6 +13,7 @@
 
 #include "Unix.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/MutexGuard.h"
 #include "llvm/Support/TimeValue.h"
@@ -88,8 +89,8 @@ TimeValue self_process::get_system_time() const {
   return getRUsageTimes().second;
 }
 
-// On Cygwin, getpagesize() returns 64k and offset in mmap(3) should be
-// aligned to its pagesize.
+// On Cygwin, getpagesize() returns 64k(AllocationGranularity) and
+// offset in mmap(3) should be aligned to the AllocationGranularity.
 static unsigned getPageSize() {
 #if defined(HAVE_GETPAGESIZE)
   const int page_size = ::getpagesize();
@@ -179,6 +180,22 @@ void Process::PreventCoreFiles() {
   signal(SIGSEGV, _exit);
   signal(SIGBUS,  _exit);
 #endif
+}
+
+Optional<std::string> Process::GetEnv(StringRef Name) {
+  std::string NameStr = Name.str();
+  const char *Val = ::getenv(NameStr.c_str());
+  if (!Val)
+    return None;
+  return std::string(Val);
+}
+
+error_code Process::GetArgumentVector(SmallVectorImpl<const char *> &ArgsOut,
+                                      ArrayRef<const char *> ArgsIn,
+                                      SpecificBumpPtrAllocator<char> &) {
+  ArgsOut.append(ArgsIn.begin(), ArgsIn.end());
+
+  return error_code::success();
 }
 
 bool Process::StandardInIsUserInput() {
@@ -301,28 +318,14 @@ bool Process::StandardErrHasColors() {
   return FileDescriptorHasColors(STDERR_FILENO);
 }
 
+void Process::UseANSIEscapeCodes(bool /*enable*/) {
+  // No effect.
+}
+
 bool Process::ColorNeedsFlush() {
   // No, we use ANSI escape sequences.
   return false;
 }
-
-#define COLOR(FGBG, CODE, BOLD) "\033[0;" BOLD FGBG CODE "m"
-
-#define ALLCOLORS(FGBG,BOLD) {\
-    COLOR(FGBG, "0", BOLD),\
-    COLOR(FGBG, "1", BOLD),\
-    COLOR(FGBG, "2", BOLD),\
-    COLOR(FGBG, "3", BOLD),\
-    COLOR(FGBG, "4", BOLD),\
-    COLOR(FGBG, "5", BOLD),\
-    COLOR(FGBG, "6", BOLD),\
-    COLOR(FGBG, "7", BOLD)\
-  }
-
-static const char colorcodes[2][2][8][10] = {
- { ALLCOLORS("3",""), ALLCOLORS("3","1;") },
- { ALLCOLORS("4",""), ALLCOLORS("4","1;") }
-};
 
 const char *Process::OutputColor(char code, bool bold, bool bg) {
   return colorcodes[bg?1:0][bold?1:0][code&7];

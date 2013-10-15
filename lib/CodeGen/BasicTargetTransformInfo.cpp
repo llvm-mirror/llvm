@@ -84,6 +84,7 @@ public:
   virtual unsigned getJumpBufSize() const;
   virtual bool shouldBuildLookupTables() const;
   virtual bool haveFastSqrt(Type *Ty) const;
+  virtual void getUnrollingPreferences(Loop *L, UnrollingPreferences &UP) const;
 
   /// @}
 
@@ -112,6 +113,7 @@ public:
                                          ArrayRef<Type*> Tys) const;
   virtual unsigned getNumberOfParts(Type *Tp) const;
   virtual unsigned getAddressComputationCost(Type *Ty, bool IsComplex) const;
+  virtual unsigned getReductionCost(unsigned Opcode, Type *Ty, bool IsPairwise) const;
 
   /// @}
 };
@@ -188,6 +190,8 @@ bool BasicTTI::haveFastSqrt(Type *Ty) const {
   EVT VT = TLI->getValueType(Ty);
   return TLI->isTypeLegal(VT) && TLI->isOperationLegalOrCustom(ISD::FSQRT, VT);
 }
+
+void BasicTTI::getUnrollingPreferences(Loop *, UnrollingPreferences &) const { }
 
 //===----------------------------------------------------------------------===//
 //
@@ -506,4 +510,18 @@ unsigned BasicTTI::getNumberOfParts(Type *Tp) const {
 
 unsigned BasicTTI::getAddressComputationCost(Type *Ty, bool IsComplex) const {
   return 0;
+}
+
+unsigned BasicTTI::getReductionCost(unsigned Opcode, Type *Ty,
+                                    bool IsPairwise) const {
+  assert(Ty->isVectorTy() && "Expect a vector type");
+  unsigned NumVecElts = Ty->getVectorNumElements();
+  unsigned NumReduxLevels = Log2_32(NumVecElts);
+  unsigned ArithCost = NumReduxLevels *
+    TopTTI->getArithmeticInstrCost(Opcode, Ty);
+  // Assume the pairwise shuffles add a cost.
+  unsigned ShuffleCost =
+      NumReduxLevels * (IsPairwise + 1) *
+      TopTTI->getShuffleCost(SK_ExtractSubvector, Ty, NumVecElts / 2, Ty);
+  return ShuffleCost + ArithCost + getScalarizationOverhead(Ty, false, true);
 }

@@ -15,7 +15,6 @@ add_llvm_tool_subdirectory(llvm-nm)
 add_llvm_tool_subdirectory(llvm-size)
 
 add_llvm_tool_subdirectory(llvm-cov)
-add_llvm_tool_subdirectory(llvm-prof)
 add_llvm_tool_subdirectory(llvm-link)
 add_llvm_tool_subdirectory(lli)
 
@@ -43,10 +42,12 @@ add_llvm_tool_subdirectory(llvm-symbolizer)
 add_llvm_tool_subdirectory(obj2yaml)
 add_llvm_tool_subdirectory(yaml2obj)
 
-if( NOT WIN32 )
+if( NOT CYGWIN )
   add_llvm_tool_subdirectory(lto)
+  add_llvm_tool_subdirectory(llvm-lto)
 else()
   ignore_llvm_tool_subdirectory(lto)
+  ignore_llvm_tool_subdirectory(llvm-lto)
 endif()
 
 if( LLVM_ENABLE_PIC )
@@ -64,6 +65,10 @@ endif()
 add_llvm_external_project(clang)
 
 if( NOT LLVM_INCLUDE_TOOLS STREQUAL "bootstrap-only" )
+  add_llvm_external_project(lld)
+  add_llvm_external_project(lldb)
+  add_llvm_external_project(polly)
+
   # Automatically add remaining sub-directories containing a 'CMakeLists.txt'
   # file as external projects.
   add_llvm_implicit_external_projects()

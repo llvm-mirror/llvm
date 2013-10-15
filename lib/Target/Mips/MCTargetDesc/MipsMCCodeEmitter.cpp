@@ -155,6 +155,9 @@ static void LowerLargeShift(MCInst& Inst) {
   case Mips::DSRA:
     Inst.setOpcode(Mips::DSRA32);
     return;
+  case Mips::DROTR:
+    Inst.setOpcode(Mips::DROTR32);
+    return;
   }
 }
 
@@ -190,7 +193,7 @@ static void LowerDextDins(MCInst& InstIn) {
 }
 
 /// EncodeInstruction - Emit the instruction.
-/// Size the instruction (currently only 4 bytes
+/// Size the instruction with Desc.getSize().
 void MipsMCCodeEmitter::
 EncodeInstruction(const MCInst &MI, raw_ostream &OS,
                   SmallVectorImpl<MCFixup> &Fixups) const
@@ -206,6 +209,7 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   case Mips::DSLL:
   case Mips::DSRL:
   case Mips::DSRA:
+  case Mips::DROTR:
     LowerLargeShift(TmpInst);
     break;
     // Double extract instruction is chosen by pos and size operands

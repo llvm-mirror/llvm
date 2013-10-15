@@ -94,7 +94,7 @@ static unsigned getGVAlignmentLog2(const GlobalValue *GV, const DataLayout &TD,
 
 AsmPrinter::AsmPrinter(TargetMachine &tm, MCStreamer &Streamer)
   : MachineFunctionPass(ID),
-    TM(tm), MAI(tm.getMCAsmInfo()),
+    TM(tm), MAI(tm.getMCAsmInfo()), MII(tm.getInstrInfo()),
     OutContext(Streamer.getContext()),
     OutStreamer(Streamer),
     LastMI(0), LastFn(0), Counter(~0U), SetCounter(0) {
@@ -284,13 +284,16 @@ void AsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
 
   SectionKind GVKind = TargetLoweringObjectFile::getKindForGlobal(GV, TM);
 
-  const DataLayout *TD = TM.getDataLayout();
-  uint64_t Size = TD->getTypeAllocSize(GV->getType()->getElementType());
+  const DataLayout *DL = TM.getDataLayout();
+  uint64_t Size = DL->getTypeAllocSize(GV->getType()->getElementType());
 
   // If the alignment is specified, we *must* obey it.  Overaligning a global
   // with a specified alignment is a prompt way to break globals emitted to
   // sections and expected to be contiguous (e.g. ObjC metadata).
-  unsigned AlignLog = getGVAlignmentLog2(GV, *TD);
+  unsigned AlignLog = getGVAlignmentLog2(GV, *DL);
+
+  if (DD)
+    DD->setSymbolSize(GVSym, Size);
 
   // Handle common and BSS local symbols (.lcomm).
   if (GVKind.isCommon() || GVKind.isBSSLocal()) {
@@ -395,7 +398,7 @@ void AsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
     //   - __tlv_bootstrap - used to make sure support exists
     //   - spare pointer, used when mapped by the runtime
     //   - pointer to mangled symbol above with initializer
-    unsigned PtrSize = TD->getPointerSizeInBits()/8;
+    unsigned PtrSize = DL->getPointerSizeInBits()/8;
     OutStreamer.EmitSymbolValue(GetExternalSymbolSymbol("_tlv_bootstrap"),
                                 PtrSize);
     OutStreamer.EmitIntValue(0, PtrSize);
@@ -459,6 +462,10 @@ void AsmPrinter::EmitFunctionHeader() {
     OutStreamer.EmitLabel(DeadBlockSyms[i]);
   }
 
+  // Emit the prefix data.
+  if (F->hasPrefixData())
+    EmitGlobalConstant(F->getPrefixData());
+
   // Emit pre-function debug and/or EH information.
   if (DE) {
     NamedRegionTimer T(EHTimerName, DWARFGroupName, TimePassesIsEnabled);
@@ -520,11 +527,11 @@ static void emitComments(const MachineInstr &MI, raw_ostream &CommentOS) {
 
 /// emitImplicitDef - This method emits the specified machine instruction
 /// that is an implicit def.
-static void emitImplicitDef(const MachineInstr *MI, AsmPrinter &AP) {
+void AsmPrinter::emitImplicitDef(const MachineInstr *MI) const {
   unsigned RegNo = MI->getOperand(0).getReg();
-  AP.OutStreamer.AddComment(Twine("implicit-def: ") +
-                            AP.TM.getRegisterInfo()->getName(RegNo));
-  AP.OutStreamer.AddBlankLine();
+  OutStreamer.AddComment(Twine("implicit-def: ") +
+                         TM.getRegisterInfo()->getName(RegNo));
+  OutStreamer.AddBlankLine();
 }
 
 static void emitKill(const MachineInstr *MI, AsmPrinter &AP) {
@@ -714,7 +721,7 @@ void AsmPrinter::EmitFunctionBody() {
         }
         break;
       case TargetOpcode::IMPLICIT_DEF:
-        if (isVerbose()) emitImplicitDef(II, *this);
+        if (isVerbose()) emitImplicitDef(II);
         break;
       case TargetOpcode::KILL:
         if (isVerbose()) emitKill(II, *this);
@@ -877,6 +884,9 @@ bool AsmPrinter::doFinalization(Module &M) {
   if (!ModuleFlags.empty())
     getObjFileLowering().emitModuleFlags(OutStreamer, ModuleFlags, Mang, TM);
 
+  // Make sure we wrote out everything we need.
+  OutStreamer.Flush();
+
   // Finalize debug and EH information.
   if (DE) {
     {
@@ -924,7 +934,7 @@ bool AsmPrinter::doFinalization(Module &M) {
 
       if (I->hasExternalLinkage() || !MAI->getWeakRefDirective())
         OutStreamer.EmitSymbolAttribute(Name, MCSA_Global);
-      else if (I->hasWeakLinkage())
+      else if (I->hasWeakLinkage() || I->hasLinkOnceLinkage())
         OutStreamer.EmitSymbolAttribute(Name, MCSA_WeakReference);
       else
         assert(I->hasLocalLinkage() && "Invalid alias linkage");
@@ -1307,8 +1317,8 @@ void AsmPrinter::EmitXXStructorList(const Constant *List, bool isCtor) {
   }
 
   // Emit the function pointers in the target-specific order
-  const DataLayout *TD = TM.getDataLayout();
-  unsigned Align = Log2_32(TD->getPointerPrefAlignment());
+  const DataLayout *DL = TM.getDataLayout();
+  unsigned Align = Log2_32(DL->getPointerPrefAlignment());
   std::stable_sort(Structors.begin(), Structors.end(), less_first());
   for (unsigned i = 0, e = Structors.size(); i != e; ++i) {
     const MCSection *OutputSection =
@@ -1402,7 +1412,7 @@ void AsmPrinter::EmitLabelOffsetDifference(const MCSymbol *Hi, uint64_t Offset,
 void AsmPrinter::EmitLabelPlusOffset(const MCSymbol *Label, uint64_t Offset,
                                       unsigned Size, bool IsSectionRelative)
   const {
-  if (MAI->needsDwarfSectionOffsetDirective() && IsSectionRelative) { 
+  if (MAI->needsDwarfSectionOffsetDirective() && IsSectionRelative) {
     OutStreamer.EmitCOFFSecRel32(Label);
     return;
   }
@@ -1483,10 +1493,10 @@ static const MCExpr *lowerConstant(const Constant *CV, AsmPrinter &AP) {
       report_fatal_error(OS.str());
     }
   case Instruction::GetElementPtr: {
-    const DataLayout &TD = *AP.TM.getDataLayout();
+    const DataLayout &DL = *AP.TM.getDataLayout();
     // Generate a symbolic expression for the byte address
-    APInt OffsetAI(TD.getPointerSizeInBits(), 0);
-    cast<GEPOperator>(CE)->accumulateConstantOffset(TD, OffsetAI);
+    APInt OffsetAI(DL.getPointerSizeInBits(), 0);
+    cast<GEPOperator>(CE)->accumulateConstantOffset(DL, OffsetAI);
 
     const MCExpr *Base = lowerConstant(CE->getOperand(0), AP);
     if (!OffsetAI)
@@ -1507,17 +1517,17 @@ static const MCExpr *lowerConstant(const Constant *CV, AsmPrinter &AP) {
     return lowerConstant(CE->getOperand(0), AP);
 
   case Instruction::IntToPtr: {
-    const DataLayout &TD = *AP.TM.getDataLayout();
+    const DataLayout &DL = *AP.TM.getDataLayout();
     // Handle casts to pointers by changing them into casts to the appropriate
     // integer type.  This promotes constant folding and simplifies this code.
     Constant *Op = CE->getOperand(0);
-    Op = ConstantExpr::getIntegerCast(Op, TD.getIntPtrType(CV->getContext()),
+    Op = ConstantExpr::getIntegerCast(Op, DL.getIntPtrType(CV->getContext()),
                                       false/*ZExt*/);
     return lowerConstant(Op, AP);
   }
 
   case Instruction::PtrToInt: {
-    const DataLayout &TD = *AP.TM.getDataLayout();
+    const DataLayout &DL = *AP.TM.getDataLayout();
     // Support only foldable casts to/from pointers that can be eliminated by
     // changing the pointer to the appropriately sized integer type.
     Constant *Op = CE->getOperand(0);
@@ -1527,13 +1537,13 @@ static const MCExpr *lowerConstant(const Constant *CV, AsmPrinter &AP) {
 
     // We can emit the pointer value into this slot if the slot is an
     // integer slot equal to the size of the pointer.
-    if (TD.getTypeAllocSize(Ty) == TD.getTypeAllocSize(Op->getType()))
+    if (DL.getTypeAllocSize(Ty) == DL.getTypeAllocSize(Op->getType()))
       return OpExpr;
 
     // Otherwise the pointer is smaller than the resultant integer, mask off
     // the high bits so we are sure to get a proper truncation if the input is
     // a constant expr.
-    unsigned InBits = TD.getTypeAllocSizeInBits(Op->getType());
+    unsigned InBits = DL.getTypeAllocSizeInBits(Op->getType());
     const MCExpr *MaskExpr = MCConstantExpr::Create(~0ULL >> (64-InBits), Ctx);
     return MCBinaryExpr::CreateAnd(OpExpr, MaskExpr, Ctx);
   }
@@ -1684,9 +1694,9 @@ static void emitGlobalConstantDataSequential(const ConstantDataSequential *CDS,
     }
   }
 
-  const DataLayout &TD = *AP.TM.getDataLayout();
-  unsigned Size = TD.getTypeAllocSize(CDS->getType());
-  unsigned EmittedSize = TD.getTypeAllocSize(CDS->getType()->getElementType()) *
+  const DataLayout &DL = *AP.TM.getDataLayout();
+  unsigned Size = DL.getTypeAllocSize(CDS->getType());
+  unsigned EmittedSize = DL.getTypeAllocSize(CDS->getType()->getElementType()) *
                         CDS->getNumElements();
   if (unsigned Padding = Size - EmittedSize)
     AP.OutStreamer.EmitZeros(Padding);
@@ -1712,9 +1722,9 @@ static void emitGlobalConstantVector(const ConstantVector *CV, AsmPrinter &AP) {
   for (unsigned i = 0, e = CV->getType()->getNumElements(); i != e; ++i)
     emitGlobalConstantImpl(CV->getOperand(i), AP);
 
-  const DataLayout &TD = *AP.TM.getDataLayout();
-  unsigned Size = TD.getTypeAllocSize(CV->getType());
-  unsigned EmittedSize = TD.getTypeAllocSize(CV->getType()->getElementType()) *
+  const DataLayout &DL = *AP.TM.getDataLayout();
+  unsigned Size = DL.getTypeAllocSize(CV->getType());
+  unsigned EmittedSize = DL.getTypeAllocSize(CV->getType()->getElementType()) *
                          CV->getType()->getNumElements();
   if (unsigned Padding = Size - EmittedSize)
     AP.OutStreamer.EmitZeros(Padding);
@@ -1722,15 +1732,15 @@ static void emitGlobalConstantVector(const ConstantVector *CV, AsmPrinter &AP) {
 
 static void emitGlobalConstantStruct(const ConstantStruct *CS, AsmPrinter &AP) {
   // Print the fields in successive locations. Pad to align if needed!
-  const DataLayout *TD = AP.TM.getDataLayout();
-  unsigned Size = TD->getTypeAllocSize(CS->getType());
-  const StructLayout *Layout = TD->getStructLayout(CS->getType());
+  const DataLayout *DL = AP.TM.getDataLayout();
+  unsigned Size = DL->getTypeAllocSize(CS->getType());
+  const StructLayout *Layout = DL->getStructLayout(CS->getType());
   uint64_t SizeSoFar = 0;
   for (unsigned i = 0, e = CS->getNumOperands(); i != e; ++i) {
     const Constant *Field = CS->getOperand(i);
 
     // Check if padding is needed and insert one or more 0s.
-    uint64_t FieldSize = TD->getTypeAllocSize(Field->getType());
+    uint64_t FieldSize = DL->getTypeAllocSize(Field->getType());
     uint64_t PadSize = ((i == e-1 ? Size : Layout->getElementOffset(i+1))
                         - Layout->getElementOffset(i)) - FieldSize;
     SizeSoFar += FieldSize + PadSize;
@@ -1787,13 +1797,13 @@ static void emitGlobalConstantFP(const ConstantFP *CFP, AsmPrinter &AP) {
   }
 
   // Emit the tail padding for the long double.
-  const DataLayout &TD = *AP.TM.getDataLayout();
-  AP.OutStreamer.EmitZeros(TD.getTypeAllocSize(CFP->getType()) -
-                           TD.getTypeStoreSize(CFP->getType()));
+  const DataLayout &DL = *AP.TM.getDataLayout();
+  AP.OutStreamer.EmitZeros(DL.getTypeAllocSize(CFP->getType()) -
+                           DL.getTypeStoreSize(CFP->getType()));
 }
 
 static void emitGlobalConstantLargeInt(const ConstantInt *CI, AsmPrinter &AP) {
-  const DataLayout *TD = AP.TM.getDataLayout();
+  const DataLayout *DL = AP.TM.getDataLayout();
   unsigned BitWidth = CI->getBitWidth();
 
   // Copy the value as we may massage the layout for constants whose bit width
@@ -1810,7 +1820,7 @@ static void emitGlobalConstantLargeInt(const ConstantInt *CI, AsmPrinter &AP) {
     // Big endian:
     // * Record the extra bits to emit.
     // * Realign the raw data to emit the chunks of 64-bits.
-    if (TD->isBigEndian()) {
+    if (DL->isBigEndian()) {
       // Basically the structure of the raw data is a chunk of 64-bits cells:
       //    0        1         BitWidth / 64
       // [chunk1][chunk2] ... [chunkN].
@@ -1831,7 +1841,7 @@ static void emitGlobalConstantLargeInt(const ConstantInt *CI, AsmPrinter &AP) {
   // quantities at a time.
   const uint64_t *RawData = Realigned.getRawData();
   for (unsigned i = 0, e = BitWidth / 64; i != e; ++i) {
-    uint64_t Val = TD->isBigEndian() ? RawData[e - i - 1] : RawData[i];
+    uint64_t Val = DL->isBigEndian() ? RawData[e - i - 1] : RawData[i];
     AP.OutStreamer.EmitIntValue(Val, 8);
   }
 
@@ -1849,8 +1859,8 @@ static void emitGlobalConstantLargeInt(const ConstantInt *CI, AsmPrinter &AP) {
 }
 
 static void emitGlobalConstantImpl(const Constant *CV, AsmPrinter &AP) {
-  const DataLayout *TD = AP.TM.getDataLayout();
-  uint64_t Size = TD->getTypeAllocSize(CV->getType());
+  const DataLayout *DL = AP.TM.getDataLayout();
+  uint64_t Size = DL->getTypeAllocSize(CV->getType());
   if (isa<ConstantAggregateZero>(CV) || isa<UndefValue>(CV))
     return AP.OutStreamer.EmitZeros(Size);
 
@@ -1898,7 +1908,7 @@ static void emitGlobalConstantImpl(const Constant *CV, AsmPrinter &AP) {
       // If the constant expression's size is greater than 64-bits, then we have
       // to emit the value in chunks. Try to constant fold the value and emit it
       // that way.
-      Constant *New = ConstantFoldConstantExpression(CE, TD);
+      Constant *New = ConstantFoldConstantExpression(CE, DL);
       if (New && New != CE)
         return emitGlobalConstantImpl(New, AP);
     }

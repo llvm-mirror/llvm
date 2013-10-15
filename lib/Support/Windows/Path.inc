@@ -37,70 +37,18 @@ typedef int errno_t;
 
 using namespace llvm;
 
+using llvm::sys::windows::UTF8ToUTF16;
+using llvm::sys::windows::UTF16ToUTF8;
+
 namespace {
   typedef BOOLEAN (WINAPI *PtrCreateSymbolicLinkW)(
     /*__in*/ LPCWSTR lpSymlinkFileName,
     /*__in*/ LPCWSTR lpTargetFileName,
     /*__in*/ DWORD dwFlags);
 
-  PtrCreateSymbolicLinkW create_symbolic_link_api = PtrCreateSymbolicLinkW(
-    ::GetProcAddress(::GetModuleHandleA("kernel32.dll"),
-                     "CreateSymbolicLinkW"));
-
-  error_code UTF8ToUTF16(StringRef utf8, SmallVectorImpl<wchar_t> &utf16) {
-    int len = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                    utf8.begin(), utf8.size(),
-                                    utf16.begin(), 0);
-
-    if (len == 0)
-      return windows_error(::GetLastError());
-
-    utf16.reserve(len + 1);
-    utf16.set_size(len);
-
-    len = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                    utf8.begin(), utf8.size(),
-                                    utf16.begin(), utf16.size());
-
-    if (len == 0)
-      return windows_error(::GetLastError());
-
-    // Make utf16 null terminated.
-    utf16.push_back(0);
-    utf16.pop_back();
-
-    return error_code::success();
-  }
-
-  error_code UTF16ToUTF8(const wchar_t *utf16, size_t utf16_len,
-                               SmallVectorImpl<char> &utf8) {
-    // Get length.
-    int len = ::WideCharToMultiByte(CP_UTF8, 0,
-                                    utf16, utf16_len,
-                                    utf8.begin(), 0,
-                                    NULL, NULL);
-
-    if (len == 0)
-      return windows_error(::GetLastError());
-
-    utf8.reserve(len);
-    utf8.set_size(len);
-
-    // Now do the actual conversion.
-    len = ::WideCharToMultiByte(CP_UTF8, 0,
-                                utf16, utf16_len,
-                                utf8.data(), utf8.size(),
-                                NULL, NULL);
-
-    if (len == 0)
-      return windows_error(::GetLastError());
-
-    // Make utf8 null terminated.
-    utf8.push_back(0);
-    utf8.pop_back();
-
-    return error_code::success();
-  }
+  PtrCreateSymbolicLinkW create_symbolic_link_api =
+      PtrCreateSymbolicLinkW(::GetProcAddress(
+          ::GetModuleHandleW(L"Kernel32.dll"), "CreateSymbolicLinkW"));
 
   error_code TempDir(SmallVectorImpl<wchar_t> &result) {
   retry_temp_dir:
@@ -180,7 +128,7 @@ retry_random_path:
       BYTE val = 0;
       if (!::CryptGenRandom(CryptoProvider, 1, &val))
           return windows_error(::GetLastError());
-      random_path_utf16.push_back("0123456789abcdef"[val & 15]);
+      random_path_utf16.push_back(L"0123456789abcdef"[val & 15]);
     }
     else
       random_path_utf16.push_back(*i);
@@ -268,9 +216,28 @@ namespace sys  {
 namespace fs {
 
 std::string getMainExecutable(const char *argv0, void *MainExecAddr) {
-  char pathname[MAX_PATH];
-  DWORD ret = ::GetModuleFileNameA(NULL, pathname, MAX_PATH);
-  return ret != MAX_PATH ? pathname : "";
+  SmallVector<wchar_t, MAX_PATH> PathName;
+  DWORD Size = ::GetModuleFileNameW(NULL, PathName.data(), PathName.capacity());
+
+  // A zero return value indicates a failure other than insufficient space.
+  if (Size == 0)
+    return "";
+
+  // Insufficient space is determined by a return value equal to the size of
+  // the buffer passed in.
+  if (Size == PathName.capacity())
+    return "";
+
+  // On success, GetModuleFileNameW returns the number of characters written to
+  // the buffer not including the NULL terminator.
+  PathName.set_size(Size);
+
+  // Convert the result from UTF-16 to UTF-8.
+  SmallVector<char, MAX_PATH> PathNameUTF8;
+  if (UTF16ToUTF8(PathName.data(), PathName.size(), PathNameUTF8))
+    return "";
+
+  return std::string(PathNameUTF8.data());
 }
 
 UniqueID file_status::getUniqueID() const {
@@ -293,22 +260,23 @@ TimeValue file_status::getLastModificationTime() const {
 }
 
 error_code current_path(SmallVectorImpl<char> &result) {
-  SmallVector<wchar_t, 128> cur_path;
-  cur_path.reserve(128);
-retry_cur_dir:
-  DWORD len = ::GetCurrentDirectoryW(cur_path.capacity(), cur_path.data());
+  SmallVector<wchar_t, MAX_PATH> cur_path;
+  DWORD len = MAX_PATH;
 
-  // A zero return value indicates a failure other than insufficient space.
-  if (len == 0)
-    return windows_error(::GetLastError());
-
-  // If there's insufficient space, the len returned is larger than the len
-  // given.
-  if (len > cur_path.capacity()) {
+  do {
     cur_path.reserve(len);
-    goto retry_cur_dir;
-  }
+    len = ::GetCurrentDirectoryW(cur_path.capacity(), cur_path.data());
 
+    // A zero return value indicates a failure other than insufficient space.
+    if (len == 0)
+      return windows_error(::GetLastError());
+
+    // If there's insufficient space, the len returned is larger than the len
+    // given.
+  } while (len > cur_path.capacity());
+
+  // On success, GetCurrentDirectoryW returns the number of characters not
+  // including the null-terminator.
   cur_path.set_size(len);
   return UTF16ToUTF8(cur_path.begin(), cur_path.size(), result);
 }
@@ -723,12 +691,11 @@ error_code mapped_file_region::init(int FD, bool CloseFD, uint64_t Offset) {
   case priv:      flprotect = PAGE_WRITECOPY; break;
   }
 
-  FileMappingHandle = ::CreateFileMapping(FileHandle,
-                                          0,
-                                          flprotect,
-                                          (Offset + Size) >> 32,
-                                          (Offset + Size) & 0xffffffff,
-                                          0);
+  FileMappingHandle =
+      ::CreateFileMappingW(FileHandle, 0, flprotect,
+                           (Offset + Size) >> 32,
+                           (Offset + Size) & 0xffffffff,
+                           0);
   if (FileMappingHandle == NULL) {
     error_code ec = windows_error(GetLastError());
     if (FileDescriptor) {
@@ -1092,7 +1059,64 @@ error_code openFileForWrite(const Twine &Name, int &ResultFD,
   ResultFD = FD;
   return error_code::success();
 }
-
 } // end namespace fs
+
+namespace windows {
+llvm::error_code UTF8ToUTF16(llvm::StringRef utf8,
+                             llvm::SmallVectorImpl<wchar_t> &utf16) {
+  int len = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                  utf8.begin(), utf8.size(),
+                                  utf16.begin(), 0);
+
+  if (len == 0)
+    return llvm::windows_error(::GetLastError());
+
+  utf16.reserve(len + 1);
+  utf16.set_size(len);
+
+  len = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                              utf8.begin(), utf8.size(),
+                              utf16.begin(), utf16.size());
+
+  if (len == 0)
+    return llvm::windows_error(::GetLastError());
+
+  // Make utf16 null terminated.
+  utf16.push_back(0);
+  utf16.pop_back();
+
+  return llvm::error_code::success();
+}
+
+llvm::error_code UTF16ToUTF8(const wchar_t *utf16, size_t utf16_len,
+                             llvm::SmallVectorImpl<char> &utf8) {
+  // Get length.
+  int len = ::WideCharToMultiByte(CP_UTF8, 0,
+                                  utf16, utf16_len,
+                                  utf8.begin(), 0,
+                                  NULL, NULL);
+
+  if (len == 0)
+    return llvm::windows_error(::GetLastError());
+
+  utf8.reserve(len);
+  utf8.set_size(len);
+
+  // Now do the actual conversion.
+  len = ::WideCharToMultiByte(CP_UTF8, 0,
+                              utf16, utf16_len,
+                              utf8.data(), utf8.size(),
+                              NULL, NULL);
+
+  if (len == 0)
+    return llvm::windows_error(::GetLastError());
+
+  // Make utf8 null terminated.
+  utf8.push_back(0);
+  utf8.pop_back();
+
+  return llvm::error_code::success();
+}
+} // end namespace windows
 } // end namespace sys
 } // end namespace llvm

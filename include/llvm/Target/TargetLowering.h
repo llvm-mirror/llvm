@@ -151,7 +151,9 @@ public:
   // Return the pointer type for the given address space, defaults to
   // the pointer type from the data layout.
   // FIXME: The default needs to be removed once all the code is updated.
-  virtual MVT getPointerTy(uint32_t /*AS*/ = 0) const { return PointerTy; }
+  virtual MVT getPointerTy(uint32_t /*AS*/ = 0) const;
+  unsigned getPointerSizeInBits(uint32_t AS = 0) const;
+  unsigned getPointerTypeSizeInBits(Type *Ty) const;
   virtual MVT getScalarShiftAmountTy(EVT LHSTy) const;
 
   EVT getShiftAmountTy(EVT LHSTy) const;
@@ -568,7 +570,7 @@ public:
   /// otherwise it will assert.
   EVT getValueType(Type *Ty, bool AllowUnknown = false) const {
     // Lower scalar pointers to native pointer types.
-    if (Ty->isPointerTy()) return PointerTy;
+    if (Ty->isPointerTy()) return getPointerTy(Ty->getPointerAddressSpace());
 
     if (Ty->isVectorTy()) {
       VectorType *VTy = cast<VectorType>(Ty);
@@ -1181,6 +1183,35 @@ public:
     return false;
   }
 
+  /// Return true if the target supplies and combines to a paired load
+  /// two loaded values of type LoadedType next to each other in memory.
+  /// RequiredAlignment gives the minimal alignment constraints that must be met to
+  /// be able to select this paired load.
+  ///
+  /// This information is *not* used to generate actual paired loads, but it is used
+  /// to generate a sequence of loads that is easier to combine into a paired load.
+  /// For instance, something like this:
+  /// a = load i64* addr
+  /// b = trunc i64 a to i32
+  /// c = lshr i64 a, 32
+  /// d = trunc i64 c to i32
+  /// will be optimized into:
+  /// b = load i32* addr1
+  /// d = load i32* addr2
+  /// Where addr1 = addr2 +/- sizeof(i32).
+  ///
+  /// In other words, unless the target performs a post-isel load combining, this 
+  /// information should not be provided because it will generate more loads.
+  virtual bool hasPairedLoad(Type * /*LoadedType*/,
+                             unsigned & /*RequiredAligment*/) const {
+    return false;
+  }
+
+  virtual bool hasPairedLoad(EVT /*LoadedType*/,
+                             unsigned & /*RequiredAligment*/) const {
+    return false;
+  }
+
   /// Return true if zero-extending the specific node Val to type VT2 is free
   /// (either because it's implicitly zero-extended such as ARM ldrb / ldrh or
   /// because it's folded such as X86 zero-extending loads).
@@ -1471,10 +1502,12 @@ public:
     if (NumElts == 1)
       return LegalizeKind(TypeScalarizeVector, EltVT);
 
-    // Try to widen vector elements until a legal type is found.
+    // Try to widen vector elements until the element type is a power of two and 
+    // promote it to a legal type later on, for example:
+    // <3 x i8> -> <4 x i8> -> <4 x i32>
     if (EltVT.isInteger()) {
       // Vectors with a number of elements that is not a power of two are always
-      // widened, for example <3 x float> -> <4 x float>.
+      // widened, for example <3 x i8> -> <4 x i8>.
       if (!VT.isPow2VectorType()) {
         NumElts = (unsigned)NextPowerOf2(NumElts);
         EVT NVT = EVT::getVectorVT(Context, EltVT, NumElts);

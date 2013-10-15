@@ -260,6 +260,8 @@ entry:
 
 ; CHECK: @Select
 ; CHECK: select
+; CHECK-NEXT: sext i1 {{.*}} to i32
+; CHECK-NEXT: or i32
 ; CHECK-NEXT: select
 ; CHECK: ret i32
 
@@ -274,11 +276,50 @@ entry:
   ret <8 x i16> %cond
 }
 
+; CHECK: @SelectVector
+; CHECK: select <8 x i1>
+; CHECK-NEXT: sext <8 x i1> {{.*}} to <8 x i16>
+; CHECK-NEXT: or <8 x i16>
+; CHECK-NEXT: select <8 x i1>
+; CHECK: ret <8 x i16>
+
 ; CHECK-ORIGINS: @SelectVector
 ; CHECK-ORIGINS: bitcast <8 x i1> {{.*}} to i8
 ; CHECK-ORIGINS: icmp ne i8
 ; CHECK-ORIGINS: select i1
 ; CHECK-ORIGINS: ret <8 x i16>
+
+
+; Check that we propagate origin for "select" with scalar condition and vector
+; arguments. Select condition shadow is sign-extended to the vector type and
+; mixed into the result shadow.
+
+define <8 x i16> @SelectVector2(<8 x i16> %a, <8 x i16> %b, i1 %c) nounwind uwtable readnone sanitize_memory {
+entry:
+  %cond = select i1 %c, <8 x i16> %a, <8 x i16> %b
+  ret <8 x i16> %cond
+}
+
+; CHECK: @SelectVector2
+; CHECK: select i1
+; CHECK: sext i1 {{.*}} to i128
+; CHECK: bitcast i128 {{.*}} to <8 x i16>
+; CHECK: or <8 x i16>
+; CHECK: select i1
+; CHECK: ret <8 x i16>
+
+
+define { i64, i64 } @SelectStruct(i1 zeroext %x, { i64, i64 } %a, { i64, i64 } %b) readnone sanitize_memory {
+entry:
+  %c = select i1 %x, { i64, i64 } %a, { i64, i64 } %b
+  ret { i64, i64 } %c
+}
+
+; CHECK: @SelectStruct
+; CHECK: select i1 {{.*}}, { i64, i64 }
+; CHECK-NEXT: select i1 {{.*}}, { i64, i64 } { i64 -1, i64 -1 }, { i64, i64 }
+; CHECK-NEXT: select i1 {{.*}}, { i64, i64 }
+; CHECK: ret { i64, i64 }
 
 
 define i8* @IntToPtr(i64 %x) nounwind uwtable readnone sanitize_memory {
@@ -420,8 +461,8 @@ define i32 @ShadowLoadAlignmentLarge() nounwind uwtable sanitize_memory {
 }
 
 ; CHECK: @ShadowLoadAlignmentLarge
-; CHECK: load i32* {{.*}} align 64
 ; CHECK: load volatile i32* {{.*}} align 64
+; CHECK: load i32* {{.*}} align 64
 ; CHECK: ret i32
 
 define i32 @ShadowLoadAlignmentSmall() nounwind uwtable sanitize_memory {
@@ -431,14 +472,14 @@ define i32 @ShadowLoadAlignmentSmall() nounwind uwtable sanitize_memory {
 }
 
 ; CHECK: @ShadowLoadAlignmentSmall
-; CHECK: load i32* {{.*}} align 2
 ; CHECK: load volatile i32* {{.*}} align 2
+; CHECK: load i32* {{.*}} align 2
 ; CHECK: ret i32
 
 ; CHECK-ORIGINS: @ShadowLoadAlignmentSmall
+; CHECK-ORIGINS: load volatile i32* {{.*}} align 2
 ; CHECK-ORIGINS: load i32* {{.*}} align 2
 ; CHECK-ORIGINS: load i32* {{.*}} align 4
-; CHECK-ORIGINS: load volatile i32* {{.*}} align 2
 ; CHECK-ORIGINS: ret i32
 
 
@@ -578,8 +619,8 @@ define <8 x i8*> @VectorOfPointers(<8 x i8*>* %p) nounwind uwtable sanitize_memo
 }
 
 ; CHECK: @VectorOfPointers
-; CHECK: load <8 x i64>*
 ; CHECK: load <8 x i8*>*
+; CHECK: load <8 x i64>*
 ; CHECK: store <8 x i64> {{.*}} @__msan_retval_tls
 ; CHECK: ret <8 x i8*>
 

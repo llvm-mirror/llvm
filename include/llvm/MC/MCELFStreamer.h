@@ -28,20 +28,16 @@ class MCSymbolData;
 class raw_ostream;
 
 class MCELFStreamer : public MCObjectStreamer {
-protected:
-  MCELFStreamer(StreamerKind Kind, MCContext &Context, MCAsmBackend &TAB,
-                raw_ostream &OS, MCCodeEmitter *Emitter)
-      : MCObjectStreamer(Kind, Context, TAB, OS, Emitter) {}
-
 public:
-  MCELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
-                MCCodeEmitter *Emitter)
-      : MCObjectStreamer(SK_ELFStreamer, Context, TAB, OS, Emitter) {}
+  MCELFStreamer(MCContext &Context, MCTargetStreamer *TargetStreamer,
+                MCAsmBackend &TAB, raw_ostream &OS, MCCodeEmitter *Emitter)
+      : MCObjectStreamer(Context, TargetStreamer, TAB, OS, Emitter) {}
 
-  MCELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
-                MCCodeEmitter *Emitter, MCAssembler *Assembler)
-      : MCObjectStreamer(SK_ELFStreamer, Context, TAB, OS, Emitter,
-                         Assembler) {}
+  MCELFStreamer(MCContext &Context, MCTargetStreamer *TargetStreamer,
+                MCAsmBackend &TAB, raw_ostream &OS, MCCodeEmitter *Emitter,
+                MCAssembler *Assembler)
+      : MCObjectStreamer(Context, TargetStreamer, TAB, OS, Emitter, Assembler) {
+  }
 
   virtual ~MCELFStreamer();
 
@@ -81,16 +77,11 @@ public:
 
   virtual void EmitFileDirective(StringRef Filename);
 
-  virtual void EmitTCEntry(const MCSymbol &S);
-
   virtual void EmitValueToAlignment(unsigned, int64_t, unsigned, unsigned);
 
-  virtual void FinishImpl();
-  /// @}
+  virtual void Flush();
 
-  static bool classof(const MCStreamer *S) {
-    return S->getKind() == SK_ELFStreamer || S->getKind() == SK_ARMELFStreamer;
-  }
+  virtual void FinishImpl();
 
 private:
   virtual void EmitInstToFragment(const MCInst &Inst);
@@ -119,6 +110,11 @@ private:
   void SetSectionText();
   void SetSectionBss();
 };
+
+MCELFStreamer *createARMELFStreamer(MCContext &Context, MCAsmBackend &TAB,
+                                    raw_ostream &OS, MCCodeEmitter *Emitter,
+                                    bool RelaxAll, bool NoExecStack,
+                                    bool IsThumb);
 
 } // end namespace llvm
 

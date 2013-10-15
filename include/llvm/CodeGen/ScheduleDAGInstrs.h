@@ -28,6 +28,7 @@ namespace llvm {
   class MachineDominatorTree;
   class LiveIntervals;
   class RegPressureTracker;
+  class PressureDiffs;
 
   /// An individual mapping from virtual register number to SUnit.
   struct VReg2SUnit {
@@ -128,7 +129,7 @@ namespace llvm {
     Reg2SUnitsMap Defs;
     Reg2SUnitsMap Uses;
 
-    /// Track the last instructon in this region defining each virtual register.
+    /// Track the last instruction in this region defining each virtual register.
     VReg2SUnitMap VRegDefs;
 
     /// PendingLoads - Remember where unknown loads are after the most recent
@@ -195,10 +196,8 @@ namespace llvm {
 
     /// buildSchedGraph - Build SUnits from the MachineBasicBlock that we are
     /// input.
-    void buildSchedGraph(AliasAnalysis *AA, RegPressureTracker *RPTracker = 0);
-
-    /// Compute the cyclic critical path through the DAG.
-    unsigned computeCyclicCriticalPath();
+    void buildSchedGraph(AliasAnalysis *AA, RegPressureTracker *RPTracker = 0,
+                         PressureDiffs *PDiffs = 0);
 
     /// addSchedBarrierDeps - Add dependencies from instructions in the current
     /// list of instructions being scheduled to scheduling barrier. We want to

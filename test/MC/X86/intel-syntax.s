@@ -63,6 +63,14 @@ _main:
     mov ECX, DWORD PTR [4*ECX + _fnan]
 // CHECK: movq %fs:320, %rax
     mov RAX, QWORD PTR FS:[320]
+// CHECK: movq %fs:320, %rax
+    mov RAX, QWORD PTR FS:320
+// CHECK: movq %rax, %fs:320
+    mov QWORD PTR FS:320, RAX
+// CHECK: movq %rax, %fs:20(%rbx)
+    mov QWORD PTR FS:20[rbx], RAX
+// CHECK: vshufpd $1, %xmm2, %xmm1, %xmm0
+    vshufpd XMM0, XMM1, XMM2, 1
 // CHECK: vpgatherdd %xmm8, (%r15,%xmm9,2), %xmm1
     vpgatherdd XMM10, DWORD PTR [R15 + 2*XMM9], XMM8
 // CHECK: movsd	-8, %xmm5

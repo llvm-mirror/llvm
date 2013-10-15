@@ -38,11 +38,10 @@ public:
   DILineInfo()
     : FileName("<invalid>"), FunctionName("<invalid>"),
       Line(0), Column(0) {}
-  DILineInfo(const SmallString<16> &fileName,
-             const SmallString<16> &functionName,
-             uint32_t line, uint32_t column)
-    : FileName(fileName), FunctionName(functionName),
-      Line(line), Column(column) {}
+  DILineInfo(StringRef fileName, StringRef functionName, uint32_t line,
+             uint32_t column)
+      : FileName(fileName), FunctionName(functionName), Line(line),
+        Column(column) {}
 
   const char *getFileName() { return FileName.c_str(); }
   const char *getFunctionName() { return FunctionName.c_str(); }
@@ -105,10 +104,14 @@ enum DIDumpType {
   DIDT_Frames,
   DIDT_Info,
   DIDT_InfoDwo,
+  DIDT_Types,
   DIDT_Line,
   DIDT_Loc,
   DIDT_Ranges,
   DIDT_Pubnames,
+  DIDT_Pubtypes,
+  DIDT_GnuPubnames,
+  DIDT_GnuPubtypes,
   DIDT_Str,
   DIDT_StrDwo,
   DIDT_StrOffsetsDwo

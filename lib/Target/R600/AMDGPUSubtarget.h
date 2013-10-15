@@ -48,6 +48,7 @@ private:
   enum Generation Gen;
   bool FP64;
   bool CaymanISA;
+  bool EnableIRStructurizer;
 
   InstrItineraryData InstrItins;
 
@@ -63,6 +64,11 @@ public:
   enum Generation getGeneration() const;
   bool hasHWFP64() const;
   bool hasCaymanISA() const;
+  bool IsIRStructurizerEnabled() const;
+
+  virtual bool enableMachineScheduler() const {
+    return getGeneration() <= NORTHERN_ISLANDS;
+  }
 
   // Helper functions to simplify if statements
   bool isTargetELF() const;

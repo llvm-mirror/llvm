@@ -69,6 +69,7 @@ PPCRegisterInfo::PPCRegisterInfo(const PPCSubtarget &ST)
   ImmToIdxMap[PPC::STH]  = PPC::STHX;   ImmToIdxMap[PPC::STW]  = PPC::STWX;
   ImmToIdxMap[PPC::STFS] = PPC::STFSX;  ImmToIdxMap[PPC::STFD] = PPC::STFDX;
   ImmToIdxMap[PPC::ADDI] = PPC::ADD4;
+  ImmToIdxMap[PPC::LWA_32] = PPC::LWAX_32;
 
   // 64-bit
   ImmToIdxMap[PPC::LHA8] = PPC::LHAX8; ImmToIdxMap[PPC::LBZ8] = PPC::LBZX8;
@@ -532,6 +533,7 @@ static bool usesIXAddr(const MachineInstr &MI) {
   default:
     return false;
   case PPC::LWA:
+  case PPC::LWA_32:
   case PPC::LD:
   case PPC::STD:
     return true;
@@ -687,14 +689,6 @@ unsigned PPCRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
     return TFI->hasFP(MF) ? PPC::R31 : PPC::R1;
   else
     return TFI->hasFP(MF) ? PPC::X31 : PPC::X1;
-}
-
-unsigned PPCRegisterInfo::getEHExceptionRegister() const {
-  return !Subtarget.isPPC64() ? PPC::R3 : PPC::X3;
-}
-
-unsigned PPCRegisterInfo::getEHHandlerRegister() const {
-  return !Subtarget.isPPC64() ? PPC::R4 : PPC::X4;
 }
 
 unsigned PPCRegisterInfo::getBaseRegister(const MachineFunction &MF) const {

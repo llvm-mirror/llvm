@@ -114,8 +114,8 @@ namespace ARMBuildAttrs {
     AllowFPv3B = 4, // v3 FP ISA permitted, but only D0-D15, S0-S31 
     AllowFPv4A = 5, // v4 FP ISA permitted (implies use of v3 FP ISA) 
     AllowFPv4B = 6, // v4 FP ISA was permitted, but only D0-D15, S0-S31
-    AllowV8FPA = 7, // Use of the ARM v8-A FP ISA was permitted
-    AllowV8FPB = 8, // Use of the ARM v8-A FP ISA was permitted, but only D0-D15, S0-S31
+    AllowFPARMv8A = 7, // Use of the ARM v8-A FP ISA was permitted
+    AllowFPARMv8B = 8, // Use of the ARM v8-A FP ISA was permitted, but only D0-D15, S0-S31
 
     // Tag_WMMX_arch, (=11), uleb128
     AllowThumb32 = 2, // 32-bit Thumb (implies 16-bit instructions)
@@ -128,7 +128,13 @@ namespace ARMBuildAttrs {
 
     // Tag_ABI_FP_number_model, (=23), uleb128
     AllowRTABI = 2,  // numbers, infinities, and one quiet NaN (see [RTABI])
-    AllowIEE754 = 3 // this code to use all the IEEE 754-defined FP encodings
+    AllowIEE754 = 3, // this code to use all the IEEE 754-defined FP encodings
+
+    // Tag_DIV_use, (=44), uleb128
+    AllowDIVIfExists = 0, // Allow hardware divide if available in arch, or no info exists.
+    DisallowDIV = 1, // Hardware divide explicitly disallowed
+    AllowDIVExt = 2  // Allow hardware divide as optional architecture extension above
+                     // the base arch specified by Tag_CPU_arch and Tag_CPU_arch_profile.
   };
 }
 

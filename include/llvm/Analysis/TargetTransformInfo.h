@@ -29,6 +29,7 @@
 namespace llvm {
 
 class GlobalValue;
+class Loop;
 class Type;
 class User;
 class Value;
@@ -191,6 +192,36 @@ public:
   /// incurs significant execution cost.
   virtual bool isLoweredToCall(const Function *F) const;
 
+  /// Parameters that control the generic loop unrolling transformation.
+  struct UnrollingPreferences {
+    /// The cost threshold for the unrolled loop, compared to
+    /// CodeMetrics.NumInsts aggregated over all basic blocks in the loop body.
+    /// The unrolling factor is set such that the unrolled loop body does not
+    /// exceed this cost. Set this to UINT_MAX to disable the loop body cost
+    /// restriction.
+    unsigned Threshold;
+    /// The cost threshold for the unrolled loop when optimizing for size (set
+    /// to UINT_MAX to disable).
+    unsigned OptSizeThreshold;
+    /// A forced unrolling factor (the number of concatenated bodies of the
+    /// original loop in the unrolled loop body). When set to 0, the unrolling
+    /// transformation will select an unrolling factor based on the current cost
+    /// threshold and other factors.
+    unsigned Count;
+    /// Allow partial unrolling (unrolling of loops to expand the size of the
+    /// loop body, not only to eliminate small constant-trip-count loops).
+    bool     Partial;
+    /// Allow runtime unrolling (unrolling of loops to expand the size of the
+    /// loop body even when the number of loop iterations is not known at compile
+    /// time).
+    bool     Runtime;
+  };
+
+  /// \brief Get target-customized preferences for the generic loop unrolling
+  /// transformation. The caller will initialize UP with the current
+  /// target-independent defaults.
+  virtual void getUnrollingPreferences(Loop *L, UnrollingPreferences &UP) const;
+
   /// @}
 
   /// \name Scalar Target Information
@@ -336,6 +367,22 @@ public:
   virtual unsigned getMemoryOpCost(unsigned Opcode, Type *Src,
                                    unsigned Alignment,
                                    unsigned AddressSpace) const;
+
+  /// \brief Calculate the cost of performing a vector reduction.
+  ///
+  /// This is the cost of reducing the vector value of type \p Ty to a scalar
+  /// value using the operation denoted by \p Opcode. The form of the reduction
+  /// can either be a pairwise reduction or a reduction that splits the vector
+  /// at every reduction level.
+  ///
+  /// Pairwise:
+  ///  (v0, v1, v2, v3)
+  ///  ((v0+v1), (v2, v3), undef, undef)
+  /// Split:
+  ///  (v0, v1, v2, v3)
+  ///  ((v0+v2), (v1+v3), undef, undef)
+  virtual unsigned getReductionCost(unsigned Opcode, Type *Ty,
+                                    bool IsPairwiseForm) const;
 
   /// \returns The cost of Intrinsic instructions.
   virtual unsigned getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,

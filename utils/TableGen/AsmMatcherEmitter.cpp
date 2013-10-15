@@ -97,7 +97,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenTarget.h"
-#include "StringToOffsetTable.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
@@ -110,8 +109,10 @@
 #include "llvm/TableGen/Error.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/StringMatcher.h"
+#include "llvm/TableGen/StringToOffsetTable.h"
 #include "llvm/TableGen/TableGenBackend.h"
 #include <cassert>
+#include <cctype>
 #include <map>
 #include <set>
 #include <sstream>
@@ -124,6 +125,13 @@ MatchPrefix("match-prefix", cl::init(""),
 namespace {
 class AsmMatcherInfo;
 struct SubtargetFeatureInfo;
+
+// Register sets are used as keys in some second-order sets TableGen creates
+// when generating its data structures. This means that the order of two
+// RegisterSets can be seen in the outputted AsmMatcher tables occasionally, and
+// can even affect compiler output (at least seen in diagnostics produced when
+// all matches fail). So we use a type that sorts them consistently.
+typedef std::set<Record*, LessRecordByID> RegisterSet;
 
 class AsmMatcherEmitter {
   RecordKeeper &Records;
@@ -185,7 +193,7 @@ struct ClassInfo {
   std::string ParserMethod;
 
   /// For register classes, the records for all the registers in this class.
-  std::set<Record*> Registers;
+  RegisterSet Registers;
 
   /// For custom match classes, he diagnostic kind for when the predicate fails.
   std::string DiagnosticType;
@@ -213,11 +221,11 @@ public:
       if (!isRegisterClass() || !RHS.isRegisterClass())
         return false;
 
-      std::set<Record*> Tmp;
-      std::insert_iterator< std::set<Record*> > II(Tmp, Tmp.begin());
+      RegisterSet Tmp;
+      std::insert_iterator<RegisterSet> II(Tmp, Tmp.begin());
       std::set_intersection(Registers.begin(), Registers.end(),
                             RHS.Registers.begin(), RHS.Registers.end(),
-                            II);
+                            II, LessRecordByID());
 
       return !Tmp.empty();
     }
@@ -430,6 +438,9 @@ struct MatchableInfo {
   /// function.
   std::string ConversionFnKind;
 
+  /// If this instruction is deprecated in some form.
+  bool HasDeprecation;
+
   MatchableInfo(const CodeGenInstruction &CGI)
     : AsmVariantID(0), TheDef(CGI.TheDef), DefRec(&CGI),
       AsmString(CGI.AsmString) {
@@ -613,7 +624,7 @@ public:
   RegisterClassesTy RegisterClasses;
 
   /// Map of Predicate records to their subtarget information.
-  std::map<Record*, SubtargetFeatureInfo*> SubtargetFeatures;
+  std::map<Record*, SubtargetFeatureInfo*, LessRecordByID> SubtargetFeatures;
 
   /// Map of AsmOperandClass records to their class information.
   std::map<Record*, ClassInfo*> AsmOperandClasses;
@@ -663,7 +674,7 @@ public:
   /// given operand.
   SubtargetFeatureInfo *getSubtargetFeature(Record *Def) const {
     assert(Def->isSubClassOf("Predicate") && "Invalid predicate type!");
-    std::map<Record*, SubtargetFeatureInfo*>::const_iterator I =
+    std::map<Record*, SubtargetFeatureInfo*, LessRecordByID>::const_iterator I =
       SubtargetFeatures.find(Def);
     return I == SubtargetFeatures.end() ? 0 : I->second;
   }
@@ -779,6 +790,13 @@ void MatchableInfo::initialize(const AsmMatcherInfo &Info,
     if (Record *Reg = AsmOperands[i].SingletonReg)
       SingletonRegisters.insert(Reg);
   }
+
+  const RecordVal *DepMask = TheDef->getValue("DeprecatedFeatureMask");
+  if (!DepMask)
+    DepMask = TheDef->getValue("ComplexDeprecationPredicate");
+
+  HasDeprecation =
+      DepMask ? !DepMask->getValue()->getAsUnquotedString().empty() : false;
 }
 
 /// tokenizeAsmString - Tokenize a simplified assembly string.
@@ -1047,6 +1065,18 @@ AsmMatcherInfo::getOperandClass(Record *Rec, int SubOpIdx) {
   PrintFatalError(Rec->getLoc(), "operand has no match class!");
 }
 
+struct LessRegisterSet {
+  bool operator() (const RegisterSet &LHS, const RegisterSet & RHS) const {
+    // std::set<T> defines its own compariso "operator<", but it
+    // performs a lexicographical comparison by T's innate comparison
+    // for some reason. We don't want non-deterministic pointer
+    // comparisons so use this instead.
+    return std::lexicographical_compare(LHS.begin(), LHS.end(),
+                                        RHS.begin(), RHS.end(),
+                                        LessRecordByID());
+  }
+};
+
 void AsmMatcherInfo::
 buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   const std::vector<CodeGenRegister*> &Registers =
@@ -1054,33 +1084,35 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   ArrayRef<CodeGenRegisterClass*> RegClassList =
     Target.getRegBank().getRegClasses();
 
+  typedef std::set<RegisterSet, LessRegisterSet> RegisterSetSet;
+
   // The register sets used for matching.
-  std::set< std::set<Record*> > RegisterSets;
+  RegisterSetSet RegisterSets;
 
   // Gather the defined sets.
   for (ArrayRef<CodeGenRegisterClass*>::const_iterator it =
-       RegClassList.begin(), ie = RegClassList.end(); it != ie; ++it)
-    RegisterSets.insert(std::set<Record*>(
+         RegClassList.begin(), ie = RegClassList.end(); it != ie; ++it)
+    RegisterSets.insert(RegisterSet(
         (*it)->getOrder().begin(), (*it)->getOrder().end()));
 
   // Add any required singleton sets.
   for (SmallPtrSet<Record*, 16>::iterator it = SingletonRegisters.begin(),
        ie = SingletonRegisters.end(); it != ie; ++it) {
     Record *Rec = *it;
-    RegisterSets.insert(std::set<Record*>(&Rec, &Rec + 1));
+    RegisterSets.insert(RegisterSet(&Rec, &Rec + 1));
   }
 
   // Introduce derived sets where necessary (when a register does not determine
   // a unique register set class), and build the mapping of registers to the set
   // they should classify to.
-  std::map<Record*, std::set<Record*> > RegisterMap;
+  std::map<Record*, RegisterSet> RegisterMap;
   for (std::vector<CodeGenRegister*>::const_iterator it = Registers.begin(),
          ie = Registers.end(); it != ie; ++it) {
     const CodeGenRegister &CGR = **it;
     // Compute the intersection of all sets containing this register.
-    std::set<Record*> ContainingSet;
+    RegisterSet ContainingSet;
 
-    for (std::set< std::set<Record*> >::iterator it = RegisterSets.begin(),
+    for (RegisterSetSet::iterator it = RegisterSets.begin(),
            ie = RegisterSets.end(); it != ie; ++it) {
       if (!it->count(CGR.TheDef))
         continue;
@@ -1090,11 +1122,12 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
         continue;
       }
 
-      std::set<Record*> Tmp;
+      RegisterSet Tmp;
       std::swap(Tmp, ContainingSet);
-      std::insert_iterator< std::set<Record*> > II(ContainingSet,
-                                                   ContainingSet.begin());
-      std::set_intersection(Tmp.begin(), Tmp.end(), it->begin(), it->end(), II);
+      std::insert_iterator<RegisterSet> II(ContainingSet,
+                                           ContainingSet.begin());
+      std::set_intersection(Tmp.begin(), Tmp.end(), it->begin(), it->end(), II,
+                            LessRecordByID());
     }
 
     if (!ContainingSet.empty()) {
@@ -1104,9 +1137,9 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   }
 
   // Construct the register classes.
-  std::map<std::set<Record*>, ClassInfo*> RegisterSetClasses;
+  std::map<RegisterSet, ClassInfo*, LessRegisterSet> RegisterSetClasses;
   unsigned Index = 0;
-  for (std::set< std::set<Record*> >::iterator it = RegisterSets.begin(),
+  for (RegisterSetSet::iterator it = RegisterSets.begin(),
          ie = RegisterSets.end(); it != ie; ++it, ++Index) {
     ClassInfo *CI = new ClassInfo();
     CI->Kind = ClassInfo::RegisterClass0 + Index;
@@ -1124,13 +1157,14 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
 
   // Find the superclasses; we could compute only the subgroup lattice edges,
   // but there isn't really a point.
-  for (std::set< std::set<Record*> >::iterator it = RegisterSets.begin(),
+  for (RegisterSetSet::iterator it = RegisterSets.begin(),
          ie = RegisterSets.end(); it != ie; ++it) {
     ClassInfo *CI = RegisterSetClasses[*it];
-    for (std::set< std::set<Record*> >::iterator it2 = RegisterSets.begin(),
+    for (RegisterSetSet::iterator it2 = RegisterSets.begin(),
            ie2 = RegisterSets.end(); it2 != ie2; ++it2)
       if (*it != *it2 &&
-          std::includes(it2->begin(), it2->end(), it->begin(), it->end()))
+          std::includes(it2->begin(), it2->end(), it->begin(), it->end(),
+                        LessRecordByID()))
         CI->SuperClasses.push_back(RegisterSetClasses[*it2]);
   }
 
@@ -1142,8 +1176,8 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
     Record *Def = RC.getDef();
     if (!Def)
       continue;
-    ClassInfo *CI = RegisterSetClasses[std::set<Record*>(RC.getOrder().begin(),
-                                                         RC.getOrder().end())];
+    ClassInfo *CI = RegisterSetClasses[RegisterSet(RC.getOrder().begin(),
+                                                   RC.getOrder().end())];
     if (CI->ValueName.empty()) {
       CI->ClassName = RC.getName();
       CI->Name = "MCK_" + RC.getName();
@@ -1155,7 +1189,7 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   }
 
   // Populate the map for individual registers.
-  for (std::map<Record*, std::set<Record*> >::iterator it = RegisterMap.begin(),
+  for (std::map<Record*, RegisterSet>::iterator it = RegisterMap.begin(),
          ie = RegisterMap.end(); it != ie; ++it)
     RegisterClasses[it->first] = RegisterSetClasses[it->second];
 
@@ -2179,7 +2213,7 @@ static void emitSubtargetFeatureFlagEnumeration(AsmMatcherInfo &Info,
   OS << "// Flags for subtarget features that participate in "
      << "instruction matching.\n";
   OS << "enum SubtargetFeatureFlag {\n";
-  for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
+  for (std::map<Record*, SubtargetFeatureInfo*, LessRecordByID>::const_iterator
          it = Info.SubtargetFeatures.begin(),
          ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
     SubtargetFeatureInfo &SFI = *it->second;
@@ -2217,9 +2251,9 @@ static void emitGetSubtargetFeatureName(AsmMatcherInfo &Info, raw_ostream &OS) {
      << "static const char *getSubtargetFeatureName(unsigned Val) {\n";
   if (!Info.SubtargetFeatures.empty()) {
     OS << "  switch(Val) {\n";
-    for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
-           it = Info.SubtargetFeatures.begin(),
-           ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
+    typedef std::map<Record*, SubtargetFeatureInfo*, LessRecordByID> RecFeatMap;
+    for (RecFeatMap::const_iterator it = Info.SubtargetFeatures.begin(),
+             ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
       SubtargetFeatureInfo &SFI = *it->second;
       // FIXME: Totally just a placeholder name to get the algorithm working.
       OS << "  case " << SFI.getEnumName() << ": return \""
@@ -2244,7 +2278,7 @@ static void emitComputeAvailableFeatures(AsmMatcherInfo &Info,
   OS << "unsigned " << Info.Target.getName() << ClassName << "::\n"
      << "ComputeAvailableFeatures(uint64_t FB) const {\n";
   OS << "  unsigned Features = 0;\n";
-  for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
+  for (std::map<Record*, SubtargetFeatureInfo*, LessRecordByID>::const_iterator
          it = Info.SubtargetFeatures.begin(),
          ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
     SubtargetFeatureInfo &SFI = *it->second;
@@ -2743,11 +2777,13 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   size_t MaxNumOperands = 0;
   unsigned MaxMnemonicIndex = 0;
+  bool HasDeprecation = false;
   for (std::vector<MatchableInfo*>::const_iterator it =
          Info.Matchables.begin(), ie = Info.Matchables.end();
        it != ie; ++it) {
     MatchableInfo &II = **it;
     MaxNumOperands = std::max(MaxNumOperands, II.AsmOperands.size());
+    HasDeprecation |= II.HasDeprecation;
 
     // Store a pascal-style length byte in the mnemonic.
     std::string LenMnemonic = char(II.Mnemonic.size()) + II.Mnemonic.str();
@@ -2804,9 +2840,6 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   unsigned VariantCount = Target.getAsmParserVariantCount();
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
-    std::string CommentDelimiter =
-      AsmVariant->getValueAsString("CommentDelimiter");
-    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
 
     OS << "static const MatchEntry MatchTable" << VC << "[] = {\n";
@@ -2857,9 +2890,6 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "  default: // unreachable\n";
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
-    std::string CommentDelimiter =
-      AsmVariant->getValueAsString("CommentDelimiter");
-    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
     OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
        << "; End = array_endof(MatchTable" << VC << "); break;\n";
@@ -2915,9 +2945,6 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "  default: // unreachable\n";
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
-    std::string CommentDelimiter =
-      AsmVariant->getValueAsString("CommentDelimiter");
-    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
     OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
        << "; End = array_endof(MatchTable" << VC << "); break;\n";
@@ -3017,6 +3044,14 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
     AsmParser->getValueAsString("AsmParserInstCleanup");
   if (!InsnCleanupFn.empty())
     OS << "    " << InsnCleanupFn << "(Inst);\n";
+
+  if (HasDeprecation) {
+    OS << "    std::string Info;\n";
+    OS << "    if (MII.get(Inst.getOpcode()).getDeprecatedInfo(Inst, STI, Info)) {\n";
+    OS << "      SMLoc Loc = ((" << Target.getName() << "Operand*)Operands[0])->getStartLoc();\n";
+    OS << "      Parser.Warning(Loc, Info, None);\n";
+    OS << "    }\n";
+  }
 
   OS << "    return Match_Success;\n";
   OS << "  }\n\n";

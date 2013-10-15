@@ -762,4 +762,31 @@ define i8 @test_gep_bitcast_array_different_size_element_as1([100 x double] addr
   ret i8 %x
 }
 
+define i64 @test40() {
+  %array = alloca [3 x i32], align 4
+  %gep = getelementptr inbounds [3 x i32]* %array, i64 0, i64 2
+  %gepi8 = bitcast i32* %gep to i8*
+  %p = ptrtoint [3 x i32]* %array to i64
+  %np = sub i64 0, %p
+  %gep2 = getelementptr i8* %gepi8, i64 %np
+  %ret = ptrtoint i8* %gep2 to i64
+  ret i64 %ret
+
+; CHECK-LABEL: @test40
+; CHECK-NEXT: ret i64 8
+}
+
+define i16 @test41([3 x i32] addrspace(1)* %array) {
+  %gep = getelementptr inbounds [3 x i32] addrspace(1)* %array, i16 0, i16 2
+  %gepi8 = bitcast i32 addrspace(1)* %gep to i8 addrspace(1)*
+  %p = ptrtoint [3 x i32] addrspace(1)* %array to i16
+  %np = sub i16 0, %p
+  %gep2 = getelementptr i8 addrspace(1)* %gepi8, i16 %np
+  %ret = ptrtoint i8 addrspace(1)* %gep2 to i16
+  ret i16 %ret
+
+; CHECK-LABEL: @test41(
+; CHECK-NEXT: ret i16 8
+}
+
 ; CHECK: attributes [[NUW]] = { nounwind }

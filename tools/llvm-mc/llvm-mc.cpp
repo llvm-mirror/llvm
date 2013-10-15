@@ -319,10 +319,10 @@ static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI, tool_output_file *Out) 
 
 static int AssembleInput(const char *ProgName, const Target *TheTarget, 
                          SourceMgr &SrcMgr, MCContext &Ctx, MCStreamer &Str,
-                         MCAsmInfo &MAI, MCSubtargetInfo &STI) {
+                         MCAsmInfo &MAI, MCSubtargetInfo &STI, MCInstrInfo &MCII) {
   OwningPtr<MCAsmParser> Parser(createMCAsmParser(SrcMgr, Ctx,
                                                   Str, MAI));
-  OwningPtr<MCTargetAsmParser> TAP(TheTarget->createMCAsmParser(STI, *Parser));
+  OwningPtr<MCTargetAsmParser> TAP(TheTarget->createMCAsmParser(STI, *Parser, MCII));
   if (!TAP) {
     errs() << ProgName
            << ": error: this target does not support assembly parsing.\n";
@@ -432,7 +432,7 @@ int main(int argc, char **argv) {
     MCAsmBackend *MAB = 0;
     if (ShowEncoding) {
       CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, *STI, Ctx);
-      MAB = TheTarget->createMCAsmBackend(TripleName, MCPU);
+      MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, MCPU);
     }
     bool UseCFI = !DisableCFI;
     Str.reset(TheTarget->createAsmStreamer(Ctx, FOS, /*asmverbose*/true,
@@ -446,7 +446,7 @@ int main(int argc, char **argv) {
   } else {
     assert(FileType == OFT_ObjectFile && "Invalid file type!");
     MCCodeEmitter *CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, *STI, Ctx);
-    MCAsmBackend *MAB = TheTarget->createMCAsmBackend(TripleName, MCPU);
+    MCAsmBackend *MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, MCPU);
     Str.reset(TheTarget->createMCObjectStreamer(TripleName, Ctx, *MAB,
                                                 FOS, CE, RelaxAll,
                                                 NoExecStack));
@@ -459,7 +459,7 @@ int main(int argc, char **argv) {
     Res = AsLexInput(SrcMgr, *MAI, Out.get());
     break;
   case AC_Assemble:
-    Res = AssembleInput(ProgName, TheTarget, SrcMgr, Ctx, *Str, *MAI, *STI);
+    Res = AssembleInput(ProgName, TheTarget, SrcMgr, Ctx, *Str, *MAI, *STI, *MCII);
     break;
   case AC_MDisassemble:
     assert(IP && "Expected assembly output");

@@ -25,6 +25,46 @@
 	ahik	%r0, %r1, foo
 
 #CHECK: error: invalid operand
+#CHECK: aih	%r0, (-1 << 31) - 1
+#CHECK: error: invalid operand
+#CHECK: aih	%r0, (1 << 31)
+
+	aih	%r0, (-1 << 31) - 1
+	aih	%r0, (1 << 31)
+
+#CHECK: error: invalid operand
+#CHECK: chf	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: chf	%r0, 524288
+
+	chf	%r0, -524289
+	chf	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: cih	%r0, (-1 << 31) - 1
+#CHECK: error: invalid operand
+#CHECK: cih	%r0, (1 << 31)
+
+	cih	%r0, (-1 << 31) - 1
+	cih	%r0, (1 << 31)
+
+#CHECK: error: invalid operand
+#CHECK: clhf	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: clhf	%r0, 524288
+
+	clhf	%r0, -524289
+	clhf	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: clih	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: clih	%r0, (1 << 32)
+
+	clih	%r0, -1
+	clih	%r0, (1 << 32)
+
+#CHECK: error: invalid operand
 #CHECK: fidbra	%f0, 0, %f0, -1
 #CHECK: error: invalid operand
 #CHECK: fidbra	%f0, 0, %f0, 16
@@ -71,6 +111,46 @@
 	fixbra	%f0, 16, %f0, 0
 	fixbra	%f0, 0, %f2, 0
 	fixbra	%f2, 0, %f0, 0
+
+#CHECK: error: invalid operand
+#CHECK: lbh	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: lbh	%r0, 524288
+
+	lbh	%r0, -524289
+	lbh	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: lfh	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: lfh	%r0, 524288
+
+	lfh	%r0, -524289
+	lfh	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: lhh	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: lhh	%r0, 524288
+
+	lhh	%r0, -524289
+	lhh	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: llch	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: llch	%r0, 524288
+
+	llch	%r0, -524289
+	llch	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: llhh	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: llhh	%r0, 524288
+
+	llhh	%r0, -524289
+	llhh	%r0, 524288
 
 #CHECK: error: invalid operand
 #CHECK: loc	%r0,0,-1
@@ -203,6 +283,30 @@
 	srlk	%r0,%r0,524288
 	srlk	%r0,%r0,0(%r0)
 	srlk	%r0,%r0,0(%r1,%r2)
+
+#CHECK: error: invalid operand
+#CHECK: stch	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: stch	%r0, 524288
+
+	stch	%r0, -524289
+	stch	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: sthh	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: sthh	%r0, 524288
+
+	sthh	%r0, -524289
+	sthh	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: stfh	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: stfh	%r0, 524288
+
+	stfh	%r0, -524289
+	stfh	%r0, 524288
 
 #CHECK: error: invalid operand
 #CHECK: stoc	%r0,0,-1

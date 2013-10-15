@@ -150,11 +150,12 @@ class DbgVariable {
   DbgVariable *AbsVar;               // Corresponding Abstract variable, if any.
   const MachineInstr *MInsn;         // DBG_VALUE instruction of the variable.
   int FrameIndex;
+  DwarfDebug *DD;
 public:
   // AbsVar may be NULL.
-  DbgVariable(DIVariable V, DbgVariable *AV)
+  DbgVariable(DIVariable V, DbgVariable *AV, DwarfDebug *DD)
     : Var(V), TheDIE(0), DotDebugLocOffset(~0U), AbsVar(AV), MInsn(0),
-      FrameIndex(~0) {}
+      FrameIndex(~0), DD(DD) {}
 
   // Accessors.
   DIVariable getVariable()           const { return Var; }
@@ -208,6 +209,11 @@ public:
     return Var.getAddrElement(i);
   }
   DIType getType() const;
+
+private:
+  /// resolve - Look in the DwarfDebug map for the MDNode that
+  /// corresponds to the reference.
+  template <typename T> T resolve(DIRef<T> Ref) const;
 };
 
 /// \brief Collects and handles information specific to a particular
@@ -294,10 +300,13 @@ public:
 
   /// \brief Returns the address pool.
   AddrPool *getAddrPool() { return &AddressPool; }
+};
 
-  /// \brief for a given compile unit DIE, returns offset from beginning of
-  /// debug info.
-  unsigned getCUOffset(DIE *Die);
+/// \brief Helper used to pair up a symbol and it's DWARF compile unit.
+struct SymbolCU {
+  SymbolCU(CompileUnit *CU, const MCSymbol *Sym) : Sym(Sym), CU(CU) {}
+  const MCSymbol *Sym;
+  CompileUnit *CU;
 };
 
 /// \brief Collects and handles dwarf debug information.
@@ -332,8 +341,15 @@ class DwarfDebug {
   // separated by a zero byte, mapped to a unique id.
   StringMap<unsigned, BumpPtrAllocator&> SourceIdMap;
 
+  // List of all labels used in aranges generation.
+  std::vector<SymbolCU> ArangeLabels;
+
+  // Size of each symbol emitted (for those symbols that have a specific size).
+  DenseMap <const MCSymbol *, uint64_t> SymSize;
+
   // Provides a unique id per text section.
-  SetVector<const MCSection*> SectionMap;
+  typedef DenseMap<const MCSection *, SmallVector<SymbolCU, 8> > SectionMapType;
+  SectionMapType SectionMap;
 
   // List of arguments for current function.
   SmallVector<DbgVariable *, 8> CurrentFnArguments;
@@ -357,14 +373,6 @@ class DwarfDebug {
   // Collection of subprogram DIEs that are marked (at the end of the module)
   // as DW_AT_inline.
   SmallPtrSet<DIE *, 4> InlinedSubprogramDIEs;
-
-  // Keep track of inlined functions and their location.  This
-  // information is used to populate the debug_inlined section.
-  typedef std::pair<const MCSymbol *, DIE *> InlineInfoLabels;
-  typedef DenseMap<const MDNode *,
-                   SmallVector<InlineInfoLabels, 4> > InlineInfoMap;
-  InlineInfoMap InlineInfo;
-  SmallVector<const MDNode *, 4> InlinedSPNodes;
 
   // This is a collection of subprogram MDNodes that are processed to
   // create DIEs.
@@ -406,6 +414,7 @@ class DwarfDebug {
   MCSymbol *DwarfDebugLocSectionSym, *DwarfLineSectionSym, *DwarfAddrSectionSym;
   MCSymbol *FunctionBeginSym, *FunctionEndSym;
   MCSymbol *DwarfAbbrevDWOSectionSym, *DwarfStrDWOSectionSym;
+  MCSymbol *DwarfGnuPubNamesSectionSym, *DwarfGnuPubTypesSectionSym;
 
   // As an optimization, there is no need to emit an entry in the directory
   // table for the same directory as DW_AT_comp_dir.
@@ -431,12 +440,15 @@ class DwarfDebug {
   // Holder for types that are going to be extracted out into a type unit.
   std::vector<DIE *> TypeUnits;
 
+  // Whether to emit the pubnames/pubtypes sections.
+  bool HasDwarfPubSections;
+
+  // Version of dwarf we're emitting.
+  unsigned DwarfVersion;
+
   // DWARF5 Experimental Options
   bool HasDwarfAccelTables;
   bool HasSplitDwarf;
-  bool HasDwarfPubNames;
-
-  unsigned DwarfVersion;
 
   // Separated Dwarf Variables
   // In general these will all be for bits that are left in the
@@ -455,6 +467,9 @@ class DwarfDebug {
   // Holder for the skeleton information.
   DwarfUnits SkeletonHolder;
 
+  // Maps from a type identifier to the actual MDNode.
+  DITypeIdentifierMap TypeIdentifierMap;
+
 private:
 
   void addScopeVariable(LexicalScope *LS, DbgVariable *Var);
@@ -471,6 +486,9 @@ private:
   /// \brief Construct new DW_TAG_lexical_block for this scope and
   /// attach DW_AT_low_pc/DW_AT_high_pc labels.
   DIE *constructLexicalScopeDIE(CompileUnit *TheCU, LexicalScope *Scope);
+  /// A helper function to check whether the DIE for a given Scope is going
+  /// to be null.
+  bool isLexicalScopeDIENull(LexicalScope *Scope);
 
   /// \brief This scope represents inlined body of a function. Construct
   /// DIE to represent this concrete inlined copy of the function.
@@ -478,6 +496,9 @@ private:
 
   /// \brief Construct a DIE for this scope.
   DIE *constructScopeDIE(CompileUnit *TheCU, LexicalScope *Scope);
+  /// A helper function to create children of a Scope DIE.
+  DIE *createScopeChildrenDIE(CompileUnit *TheCU, LexicalScope *Scope,
+                              SmallVectorImpl<DIE*> &Children);
 
   /// \brief Emit initial Dwarf sections with a label at the start of each one.
   void emitSectionLabels();
@@ -529,10 +550,16 @@ private:
   void emitAccelTypes();
 
   /// \brief Emit visible names into a debug pubnames section.
-  void emitDebugPubnames();
+  /// \param GnuStyle determines whether or not we want to emit
+  /// additional information into the table ala newer gcc for gdb
+  /// index.
+  void emitDebugPubNames(bool GnuStyle = false);
 
   /// \brief Emit visible types into a debug pubtypes section.
-  void emitDebugPubTypes();
+  /// \param GnuStyle determines whether or not we want to emit
+  /// additional information into the table ala newer gcc for gdb
+  /// index.
+  void emitDebugPubTypes(bool GnuStyle = false);
 
   /// \brief Emit visible names into a debug str section.
   void emitDebugStr();
@@ -556,7 +583,7 @@ private:
 
   /// \brief Construct the split debug info compile unit for the debug info
   /// section.
-  CompileUnit *constructSkeletonCU(const MDNode *);
+  CompileUnit *constructSkeletonCU(const CompileUnit *CU);
 
   /// \brief Emit the local split abbreviations.
   void emitSkeletonAbbrevs(const MCSection *);
@@ -659,6 +686,13 @@ public:
   /// type units.
   void addTypeUnitType(DIE *Die) { TypeUnits.push_back(Die); }
 
+  /// \brief Add a label so that arange data can be generated for it.
+  void addArangeLabel(SymbolCU SCU) { ArangeLabels.push_back(SCU); }
+
+  /// \brief For symbols that have a size designated (e.g. common symbols),
+  /// this tracks that size.
+  void setSymbolSize(const MCSymbol *Sym, uint64_t Size) { SymSize[Sym] = Size;}
+
   /// \brief Look up the source id with the given directory and source file
   /// names. If none currently exists, create a new id and insert it in the
   /// SourceIds map.
@@ -684,6 +718,16 @@ public:
 
   /// Returns the Dwarf Version.
   unsigned getDwarfVersion() const { return DwarfVersion; }
+
+  /// Find the MDNode for the given reference.
+  template <typename T> T resolve(DIRef<T> Ref) const {
+    return Ref.resolve(TypeIdentifierMap);
+  }
+
+  /// isSubprogramContext - Return true if Context is either a subprogram
+  /// or another context nested inside a subprogram.
+  bool isSubprogramContext(const MDNode *Context);
+
 };
 } // End of namespace llvm
 

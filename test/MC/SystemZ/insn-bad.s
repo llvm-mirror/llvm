@@ -128,6 +128,11 @@
 	ahy	%r0, -524289
 	ahy	%r0, 524288
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: aih	%r0, 0
+
+	aih	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: al	%r0, -1
 #CHECK: error: invalid operand
@@ -607,6 +612,11 @@
 	ch	%r0, -1
 	ch	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: chf	%r0, 0
+
+	chf	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: chhsi	-1, 0
 #CHECK: error: invalid operand
@@ -673,6 +683,11 @@
 
 	chy	%r0, -524289
 	chy	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: cih	%r0, 0
+
+	cih	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: cij	%r0, -129, 0, 0
@@ -755,6 +770,11 @@
 	clc	0(%r1,%r2), 0(%r1)
 	clc	0(1,%r2), 0(%r1,%r2)
 	clc	0(-), 0
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: clhf	%r0, 0
+
+	clhf	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: clfhsi	-1, 0
@@ -850,6 +870,50 @@
 	clghsi	0, -1
 	clghsi	0, 65536
 
+#CHECK: error: invalid operand
+#CHECK: clgij	%r0, -1, 0, 0
+#CHECK: error: invalid operand
+#CHECK: clgij	%r0, 256, 0, 0
+
+	clgij	%r0, -1, 0, 0
+	clgij	%r0, 256, 0, 0
+
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, 0x10000
+
+	clgij	%r0, 0, 0, -0x100002
+	clgij	%r0, 0, 0, -1
+	clgij	%r0, 0, 0, 1
+	clgij	%r0, 0, 0, 0x10000
+
+#CHECK: error: invalid instruction
+#CHECK:	clgijo	%r0, 0, 0, 0
+#CHECK: error: invalid instruction
+#CHECK:	clgijno	%r0, 0, 0, 0
+
+	clgijo	%r0, 0, 0, 0
+	clgijno	%r0, 0, 0, 0
+
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, 0x10000
+
+	clgrj	%r0, %r0, 0, -0x100002
+	clgrj	%r0, %r0, 0, -1
+	clgrj	%r0, %r0, 0, 1
+	clgrj	%r0, %r0, 0, 0x10000
+
 #CHECK: error: offset out of range
 #CHECK: clgrl	%r0, -0x1000000002
 #CHECK: error: offset out of range
@@ -912,6 +976,41 @@
 	cli	0, -1
 	cli	0, 256
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: clih	%r0, 0
+
+	clih	%r0, 0
+
+#CHECK: error: invalid operand
+#CHECK: clij	%r0, -1, 0, 0
+#CHECK: error: invalid operand
+#CHECK: clij	%r0, 256, 0, 0
+
+	clij	%r0, -1, 0, 0
+	clij	%r0, 256, 0, 0
+
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, 0x10000
+
+	clij	%r0, 0, 0, -0x100002
+	clij	%r0, 0, 0, -1
+	clij	%r0, 0, 0, 1
+	clij	%r0, 0, 0, 0x10000
+
+#CHECK: error: invalid instruction
+#CHECK:	clijo	%r0, 0, 0, 0
+#CHECK: error: invalid instruction
+#CHECK:	clijno	%r0, 0, 0, 0
+
+	clijo	%r0, 0, 0, 0
+	clijno	%r0, 0, 0, 0
+
 #CHECK: error: invalid operand
 #CHECK: cliy	-524289, 0
 #CHECK: error: invalid operand
@@ -928,6 +1027,28 @@
 	cliy	0(%r1,%r2), 0
 	cliy	0, -1
 	cliy	0, 256
+
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, 0x10000
+
+	clrj	%r0, %r0, 0, -0x100002
+	clrj	%r0, %r0, 0, -1
+	clrj	%r0, %r0, 0, 1
+	clrj	%r0, %r0, 0, 0x10000
+
+#CHECK: error: invalid instruction
+#CHECK:	clrjo	%r0, %r0, 0, 0
+#CHECK: error: invalid instruction
+#CHECK:	clrjno	%r0, %r0, 0, 0
+
+	clrjo	%r0, %r0, 0, 0
+	clrjno	%r0, %r0, 0, 0
 
 #CHECK: error: offset out of range
 #CHECK: clrl	%r0, -0x1000000002
@@ -1294,6 +1415,11 @@
 	lb	%r0, -524289
 	lb	%r0, 524288
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: lbh	%r0, 0
+
+	lbh	%r0, 0
+
 #CHECK: error: invalid register pair
 #CHECK: lcxbr	%f0, %f2
 #CHECK: error: invalid register pair
@@ -1357,6 +1483,11 @@
 
 	ley	%f0, -524289
 	ley	%f0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: lfh	%r0, 0
+
+	lfh	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: lg	%r0, -524289
@@ -1459,6 +1590,11 @@
 	lh	%r0, -1
 	lh	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: lhh	%r0, 0
+
+	lhh	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: lhi	%r0, -32769
 #CHECK: error: invalid operand
@@ -1499,6 +1635,11 @@
 
 	llc	%r0, -524289
 	llc	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: llch	%r0, 0
+
+	llch	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: llgc	%r0, -524289
@@ -1559,6 +1700,11 @@
 
 	llh	%r0, -524289
 	llh	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: llhh	%r0, 0
+
+	llhh	%r0, 0
 
 #CHECK: error: offset out of range
 #CHECK: llhrl	%r0, -0x1000000002
@@ -2051,6 +2197,50 @@
 	n	%r0, -1
 	n	%r0, 4096
 
+#CHECK: error: missing length in address
+#CHECK: nc	0, 0
+#CHECK: error: missing length in address
+#CHECK: nc	0(%r1), 0(%r1)
+#CHECK: error: invalid use of length addressing
+#CHECK: nc	0(1,%r1), 0(2,%r1)
+#CHECK: error: invalid operand
+#CHECK: nc	0(0,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: nc	0(257,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: nc	-1(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: nc	4096(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: nc	0(1,%r1), -1(%r1)
+#CHECK: error: invalid operand
+#CHECK: nc	0(1,%r1), 4096(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: nc	0(1,%r0), 0(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: nc	0(1,%r1), 0(%r0)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: nc	0(%r1,%r2), 0(%r1)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: nc	0(1,%r2), 0(%r1,%r2)
+#CHECK: error: unknown token in expression
+#CHECK: nc	0(-), 0
+
+	nc	0, 0
+	nc	0(%r1), 0(%r1)
+	nc	0(1,%r1), 0(2,%r1)
+	nc	0(0,%r1), 0(%r1)
+	nc	0(257,%r1), 0(%r1)
+	nc	-1(1,%r1), 0(%r1)
+	nc	4096(1,%r1), 0(%r1)
+	nc	0(1,%r1), -1(%r1)
+	nc	0(1,%r1), 4096(%r1)
+	nc	0(1,%r0), 0(%r1)
+	nc	0(1,%r1), 0(%r0)
+	nc	0(%r1,%r2), 0(%r1)
+	nc	0(1,%r2), 0(%r1,%r2)
+	nc	0(-), 0
+
 #CHECK: error: invalid operand
 #CHECK: ng	%r0, -524289
 #CHECK: error: invalid operand
@@ -2166,6 +2356,50 @@
 
 	o	%r0, -1
 	o	%r0, 4096
+
+#CHECK: error: missing length in address
+#CHECK: oc	0, 0
+#CHECK: error: missing length in address
+#CHECK: oc	0(%r1), 0(%r1)
+#CHECK: error: invalid use of length addressing
+#CHECK: oc	0(1,%r1), 0(2,%r1)
+#CHECK: error: invalid operand
+#CHECK: oc	0(0,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: oc	0(257,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: oc	-1(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: oc	4096(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: oc	0(1,%r1), -1(%r1)
+#CHECK: error: invalid operand
+#CHECK: oc	0(1,%r1), 4096(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: oc	0(1,%r0), 0(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: oc	0(1,%r1), 0(%r0)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: oc	0(%r1,%r2), 0(%r1)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: oc	0(1,%r2), 0(%r1,%r2)
+#CHECK: error: unknown token in expression
+#CHECK: oc	0(-), 0
+
+	oc	0, 0
+	oc	0(%r1), 0(%r1)
+	oc	0(1,%r1), 0(2,%r1)
+	oc	0(0,%r1), 0(%r1)
+	oc	0(257,%r1), 0(%r1)
+	oc	-1(1,%r1), 0(%r1)
+	oc	4096(1,%r1), 0(%r1)
+	oc	0(1,%r1), -1(%r1)
+	oc	0(1,%r1), 4096(%r1)
+	oc	0(1,%r0), 0(%r1)
+	oc	0(1,%r1), 0(%r0)
+	oc	0(%r1,%r2), 0(%r1)
+	oc	0(1,%r2), 0(%r1,%r2)
+	oc	0(-), 0
 
 #CHECK: error: invalid operand
 #CHECK: og	%r0, -524289
@@ -2706,6 +2940,11 @@
 	stc	%r0, -1
 	stc	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: stch	%r0, 0
+
+	stch	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: stcy	%r0, -524289
 #CHECK: error: invalid operand
@@ -2776,6 +3015,11 @@
 	sth	%r0, -1
 	sth	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: sthh	%r0, 0
+
+	sthh	%r0, 0
+
 #CHECK: error: offset out of range
 #CHECK: sthrl	%r0, -0x1000000002
 #CHECK: error: offset out of range
@@ -2797,6 +3041,11 @@
 
 	sthy	%r0, -524289
 	sthy	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: stfh	%r0, 0
+
+	stfh	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: stmg	%r0, %r0, -524289
@@ -2864,12 +3113,122 @@
 	sy	%r0, 524288
 
 #CHECK: error: invalid operand
+#CHECK: tm	-1, 0
+#CHECK: error: invalid operand
+#CHECK: tm	4096, 0
+#CHECK: error: invalid use of indexed addressing
+#CHECK: tm	0(%r1,%r2), 0
+#CHECK: error: invalid operand
+#CHECK: tm	0, -1
+#CHECK: error: invalid operand
+#CHECK: tm	0, 256
+
+	tm	-1, 0
+	tm	4096, 0
+	tm	0(%r1,%r2), 0
+	tm	0, -1
+	tm	0, 256
+
+#CHECK: error: invalid operand
+#CHECK: tmhh	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmhh	%r0, 0x10000
+
+	tmhh	%r0, -1
+	tmhh	%r0, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: tmhl	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmhl	%r0, 0x10000
+
+	tmhl	%r0, -1
+	tmhl	%r0, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: tmlh	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmlh	%r0, 0x10000
+
+	tmlh	%r0, -1
+	tmlh	%r0, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: tmll	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmll	%r0, 0x10000
+
+	tmll	%r0, -1
+	tmll	%r0, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: tmy	-524289, 0
+#CHECK: error: invalid operand
+#CHECK: tmy	524288, 0
+#CHECK: error: invalid use of indexed addressing
+#CHECK: tmy	0(%r1,%r2), 0
+#CHECK: error: invalid operand
+#CHECK: tmy	0, -1
+#CHECK: error: invalid operand
+#CHECK: tmy	0, 256
+
+	tmy	-524289, 0
+	tmy	524288, 0
+	tmy	0(%r1,%r2), 0
+	tmy	0, -1
+	tmy	0, 256
+
+#CHECK: error: invalid operand
 #CHECK: x	%r0, -1
 #CHECK: error: invalid operand
 #CHECK: x	%r0, 4096
 
 	x	%r0, -1
 	x	%r0, 4096
+
+#CHECK: error: missing length in address
+#CHECK: xc	0, 0
+#CHECK: error: missing length in address
+#CHECK: xc	0(%r1), 0(%r1)
+#CHECK: error: invalid use of length addressing
+#CHECK: xc	0(1,%r1), 0(2,%r1)
+#CHECK: error: invalid operand
+#CHECK: xc	0(0,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: xc	0(257,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: xc	-1(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: xc	4096(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: xc	0(1,%r1), -1(%r1)
+#CHECK: error: invalid operand
+#CHECK: xc	0(1,%r1), 4096(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: xc	0(1,%r0), 0(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: xc	0(1,%r1), 0(%r0)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: xc	0(%r1,%r2), 0(%r1)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: xc	0(1,%r2), 0(%r1,%r2)
+#CHECK: error: unknown token in expression
+#CHECK: xc	0(-), 0
+
+	xc	0, 0
+	xc	0(%r1), 0(%r1)
+	xc	0(1,%r1), 0(2,%r1)
+	xc	0(0,%r1), 0(%r1)
+	xc	0(257,%r1), 0(%r1)
+	xc	-1(1,%r1), 0(%r1)
+	xc	4096(1,%r1), 0(%r1)
+	xc	0(1,%r1), -1(%r1)
+	xc	0(1,%r1), 4096(%r1)
+	xc	0(1,%r0), 0(%r1)
+	xc	0(1,%r1), 0(%r0)
+	xc	0(%r1,%r2), 0(%r1)
+	xc	0(1,%r2), 0(%r1,%r2)
+	xc	0(-), 0
 
 #CHECK: error: invalid operand
 #CHECK: xg	%r0, -524289

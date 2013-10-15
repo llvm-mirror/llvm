@@ -184,6 +184,15 @@ void MipsInstPrinter::printUnsignedImm(const MCInst *MI, int opNum,
     printOperand(MI, opNum, O);
 }
 
+void MipsInstPrinter::printUnsignedImm8(const MCInst *MI, int opNum,
+                                        raw_ostream &O) {
+  const MCOperand &MO = MI->getOperand(opNum);
+  if (MO.isImm())
+    O << (unsigned short int)(unsigned char)MO.getImm();
+  else
+    printOperand(MI, opNum, O);
+}
+
 void MipsInstPrinter::
 printMemOperand(const MCInst *MI, int opNum, raw_ostream &O) {
   // Load/Store memory operands -- imm($reg)
@@ -211,6 +220,11 @@ printFCCOperand(const MCInst *MI, int opNum, raw_ostream &O) {
   O << MipsFCCToString((Mips::CondCode)MO.getImm());
 }
 
+void MipsInstPrinter::
+printSHFMask(const MCInst *MI, int opNum, raw_ostream &O) {
+  llvm_unreachable("TODO");
+}
+
 bool MipsInstPrinter::printAlias(const char *Str, const MCInst &MI,
                                  unsigned OpNo, raw_ostream &OS) {
   OS << "\t" << Str << "\t";
@@ -230,8 +244,11 @@ bool MipsInstPrinter::printAlias(const char *Str, const MCInst &MI,
 bool MipsInstPrinter::printAlias(const MCInst &MI, raw_ostream &OS) {
   switch (MI.getOpcode()) {
   case Mips::BEQ:
+    // beq $zero, $zero, $L2 => b $L2
     // beq $r0, $zero, $L2 => beqz $r0, $L2
-    return isReg<Mips::ZERO>(MI, 1) && printAlias("beqz", MI, 0, 2, OS);
+    return (isReg<Mips::ZERO>(MI, 0) && isReg<Mips::ZERO>(MI, 1) &&
+            printAlias("b", MI, 2, OS)) ||
+           (isReg<Mips::ZERO>(MI, 1) && printAlias("beqz", MI, 0, 2, OS));
   case Mips::BEQ64:
     // beq $r0, $zero, $L2 => beqz $r0, $L2
     return isReg<Mips::ZERO_64>(MI, 1) && printAlias("beqz", MI, 0, 2, OS);

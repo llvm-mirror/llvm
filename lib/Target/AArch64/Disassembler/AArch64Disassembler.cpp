@@ -85,12 +85,28 @@ static DecodeStatus DecodeFPR64RegisterClass(llvm::MCInst &Inst, unsigned RegNo,
 static DecodeStatus DecodeFPR128RegisterClass(llvm::MCInst &Inst,
                                               unsigned RegNo, uint64_t Address,
                                               const void *Decoder);
-static DecodeStatus DecodeVPR64RegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+static DecodeStatus DecodeFPR128LoRegisterClass(llvm::MCInst &Inst,
+                                                unsigned RegNo, uint64_t Address,
+                                                const void *Decoder);
+
+static DecodeStatus DecodeDPairRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
                                              uint64_t Address,
                                              const void *Decoder);
-static DecodeStatus DecodeVPR128RegisterClass(llvm::MCInst &Inst,
-                                              unsigned RegNo, uint64_t Address,
-                                              const void *Decoder);
+static DecodeStatus DecodeQPairRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder);
+static DecodeStatus DecodeDTripleRegisterClass(llvm::MCInst &Inst,
+                                               unsigned RegNo, uint64_t Address,
+                                               const void *Decoder);
+static DecodeStatus DecodeQTripleRegisterClass(llvm::MCInst &Inst,
+                                               unsigned RegNo, uint64_t Address,
+                                               const void *Decoder);
+static DecodeStatus DecodeDQuadRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder);
+static DecodeStatus DecodeQQuadRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder);
 
 static DecodeStatus DecodeAddrRegExtendOperand(llvm::MCInst &Inst,
                                                unsigned OptionHiS,
@@ -112,6 +128,18 @@ static DecodeStatus DecodeFPZeroOperand(llvm::MCInst &Inst,
                                         unsigned RmBits,
                                         uint64_t Address,
                                         const void *Decoder);
+
+static DecodeStatus DecodeShiftRightImm8(MCInst &Inst, unsigned Val,
+                                         uint64_t Address, const void *Decoder);
+static DecodeStatus DecodeShiftRightImm16(MCInst &Inst, unsigned Val,
+                                          uint64_t Address,
+                                          const void *Decoder);
+static DecodeStatus DecodeShiftRightImm32(MCInst &Inst, unsigned Val,
+                                          uint64_t Address,
+                                          const void *Decoder);
+static DecodeStatus DecodeShiftRightImm64(MCInst &Inst, unsigned Val,
+                                          uint64_t Address,
+                                          const void *Decoder);
 
 template<int RegWidth>
 static DecodeStatus DecodeMoveWideImmOperand(llvm::MCInst &Inst,
@@ -343,26 +371,66 @@ DecodeFPR128RegisterClass(llvm::MCInst &Inst, unsigned RegNo,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeVPR64RegisterClass(llvm::MCInst &Inst, unsigned RegNo,
-                                             uint64_t Address,
-                                             const void *Decoder) {
+static DecodeStatus
+DecodeFPR128LoRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                            uint64_t Address, const void *Decoder) {
+  if (RegNo > 15)
+    return MCDisassembler::Fail;
+
+  return DecodeFPR128RegisterClass(Inst, RegNo, Address, Decoder);
+}
+
+static DecodeStatus DecodeRegisterClassByID(llvm::MCInst &Inst, unsigned RegNo,
+                                            unsigned RegID,
+                                            const void *Decoder) {
   if (RegNo > 31)
     return MCDisassembler::Fail;
 
-  uint16_t Register = getReg(Decoder, AArch64::VPR64RegClassID, RegNo);
+  uint16_t Register = getReg(Decoder, RegID, RegNo);
   Inst.addOperand(MCOperand::CreateReg(Register));
   return MCDisassembler::Success;
 }
 
-static DecodeStatus
-DecodeVPR128RegisterClass(llvm::MCInst &Inst, unsigned RegNo,
-						  uint64_t Address, const void *Decoder) {
-  if (RegNo > 31)
-    return MCDisassembler::Fail;
+static DecodeStatus DecodeDPairRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder) {
+  return DecodeRegisterClassByID(Inst, RegNo, AArch64::DPairRegClassID,
+                                 Decoder);
+}
 
-  uint16_t Register = getReg(Decoder, AArch64::VPR128RegClassID, RegNo);
-  Inst.addOperand(MCOperand::CreateReg(Register));
-  return MCDisassembler::Success;
+static DecodeStatus DecodeQPairRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder) {
+  return DecodeRegisterClassByID(Inst, RegNo, AArch64::QPairRegClassID,
+                                 Decoder);
+}
+
+static DecodeStatus DecodeDTripleRegisterClass(llvm::MCInst &Inst,
+                                               unsigned RegNo, uint64_t Address,
+                                               const void *Decoder) {
+  return DecodeRegisterClassByID(Inst, RegNo, AArch64::DTripleRegClassID,
+                                 Decoder);
+}
+
+static DecodeStatus DecodeQTripleRegisterClass(llvm::MCInst &Inst,
+                                               unsigned RegNo, uint64_t Address,
+                                               const void *Decoder) {
+  return DecodeRegisterClassByID(Inst, RegNo, AArch64::QTripleRegClassID,
+                                 Decoder);
+}
+
+static DecodeStatus DecodeDQuadRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder) {
+  return DecodeRegisterClassByID(Inst, RegNo, AArch64::DQuadRegClassID,
+                                 Decoder);
+}
+
+static DecodeStatus DecodeQQuadRegisterClass(llvm::MCInst &Inst, unsigned RegNo,
+                                             uint64_t Address,
+                                             const void *Decoder) {
+  return DecodeRegisterClassByID(Inst, RegNo, AArch64::QQuadRegClassID,
+                                 Decoder);
 }
 
 static DecodeStatus DecodeAddrRegExtendOperand(llvm::MCInst &Inst,
@@ -413,7 +481,33 @@ static DecodeStatus DecodeFPZeroOperand(llvm::MCInst &Inst,
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeShiftRightImm8(MCInst &Inst, unsigned Val,
+                                         uint64_t Address,
+                                         const void *Decoder) {
+  Inst.addOperand(MCOperand::CreateImm(8 - Val));
+  return MCDisassembler::Success;
+}
 
+static DecodeStatus DecodeShiftRightImm16(MCInst &Inst, unsigned Val,
+                                          uint64_t Address,
+                                          const void *Decoder) {
+  Inst.addOperand(MCOperand::CreateImm(16 - Val));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeShiftRightImm32(MCInst &Inst, unsigned Val,
+                                          uint64_t Address,
+                                          const void *Decoder) {
+  Inst.addOperand(MCOperand::CreateImm(32 - Val));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeShiftRightImm64(MCInst &Inst, unsigned Val,
+                                          uint64_t Address,
+                                          const void *Decoder) {
+  Inst.addOperand(MCOperand::CreateImm(64 - Val));
+  return MCDisassembler::Success;
+}
 
 template<int RegWidth>
 static DecodeStatus DecodeMoveWideImmOperand(llvm::MCInst &Inst,
@@ -570,11 +664,11 @@ static DecodeStatus DecodeFMOVLaneInstruction(llvm::MCInst &Inst, unsigned Insn,
   unsigned IsToVec = fieldFromInstruction(Insn, 16, 1);
 
   if (IsToVec) {
-    DecodeVPR128RegisterClass(Inst, Rd, Address, Decoder);
+    DecodeFPR128RegisterClass(Inst, Rd, Address, Decoder);
     DecodeGPR64RegisterClass(Inst, Rn, Address, Decoder);
   } else {
     DecodeGPR64RegisterClass(Inst, Rd, Address, Decoder);
-    DecodeVPR128RegisterClass(Inst, Rn, Address, Decoder);
+    DecodeFPR128RegisterClass(Inst, Rn, Address, Decoder);
   }
 
   // Add the lane

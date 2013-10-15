@@ -85,6 +85,16 @@ macro(add_tablegen target project)
   add_llvm_utility(${target} ${ARGN})
   set(LLVM_LINK_COMPONENTS ${${target}_OLD_LLVM_LINK_COMPONENTS})
 
+  # For Xcode builds, symlink bin/<target> to bin/<Config>/<target> so that
+  # a separately-configured Clang project can still find llvm-tblgen.
+  if (XCODE)
+    add_custom_target(${target}-top ALL
+      ${CMAKE_COMMAND} -E create_symlink 
+        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/${target}${CMAKE_EXECUTABLE_SUFFIX}
+        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${target}${CMAKE_EXECUTABLE_SUFFIX}
+      DEPENDS ${target})
+  endif ()
+
   set(${project}_TABLEGEN "${target}" CACHE
       STRING "Native TableGen executable. Saves building one when cross-compiling.")
 
@@ -118,12 +128,16 @@ macro(add_tablegen target project)
   endif()
 
   if( MINGW )
-    target_link_libraries(${target} imagehlp psapi)
+    target_link_libraries(${target} imagehlp psapi shell32)
     if(CMAKE_SIZEOF_VOID_P MATCHES "8")
       set_target_properties(${target} PROPERTIES LINK_FLAGS -Wl,--stack,16777216)
     endif(CMAKE_SIZEOF_VOID_P MATCHES "8")
   endif( MINGW )
   if( LLVM_ENABLE_THREADS AND HAVE_LIBPTHREAD AND NOT BEOS )
     target_link_libraries(${target} pthread)
+  endif()
+
+  if (${project} STREQUAL LLVM AND NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
+    install(TARGETS ${target} RUNTIME DESTINATION bin)
   endif()
 endmacro()

@@ -22,6 +22,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include <cctype>
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -704,7 +705,11 @@ bool ModuleLinker::linkAppendingVarProto(GlobalVariable *DstGV,
   if (DstGV->getVisibility() != SrcGV->getVisibility())
     return emitError(
             "Appending variables with different visibility need to be linked!");
-  
+
+  if (DstGV->hasUnnamedAddr() != SrcGV->hasUnnamedAddr())
+    return emitError(
+        "Appending variables with different unnamed_addr need to be linked!");
+
   if (DstGV->getSection() != SrcGV->getSection())
     return emitError(
           "Appending variables with different section name need to be linked!");
@@ -746,6 +751,7 @@ bool ModuleLinker::linkAppendingVarProto(GlobalVariable *DstGV,
 bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
   GlobalValue *DGV = getLinkedToGlobal(SGV);
   llvm::Optional<GlobalValue::VisibilityTypes> NewVisibility;
+  bool HasUnnamedAddr = SGV->hasUnnamedAddr();
 
   if (DGV) {
     // Concatenation of appending linkage variables is magic and handled later.
@@ -760,6 +766,7 @@ bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
     if (getLinkageResult(DGV, SGV, NewLinkage, NV, LinkFromSrc))
       return true;
     NewVisibility = NV;
+    HasUnnamedAddr = HasUnnamedAddr && DGV->hasUnnamedAddr();
 
     // If we're not linking from the source, then keep the definition that we
     // have.
@@ -768,10 +775,11 @@ bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
       if (GlobalVariable *DGVar = dyn_cast<GlobalVariable>(DGV))
         if (DGVar->isDeclaration() && SGV->isConstant() && !DGVar->isConstant())
           DGVar->setConstant(true);
-      
-      // Set calculated linkage and visibility.
+
+      // Set calculated linkage, visibility and unnamed_addr.
       DGV->setLinkage(NewLinkage);
       DGV->setVisibility(*NewVisibility);
+      DGV->setUnnamedAddr(HasUnnamedAddr);
 
       // Make sure to remember this mapping.
       ValueMap[SGV] = ConstantExpr::getBitCast(DGV,TypeMap.get(SGV->getType()));
@@ -797,6 +805,7 @@ bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
   copyGVAttributes(NewDGV, SGV);
   if (NewVisibility)
     NewDGV->setVisibility(*NewVisibility);
+  NewDGV->setUnnamedAddr(HasUnnamedAddr);
 
   if (DGV) {
     DGV->replaceAllUsesWith(ConstantExpr::getBitCast(NewDGV, DGV->getType()));
@@ -813,6 +822,7 @@ bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
 bool ModuleLinker::linkFunctionProto(Function *SF) {
   GlobalValue *DGV = getLinkedToGlobal(SF);
   llvm::Optional<GlobalValue::VisibilityTypes> NewVisibility;
+  bool HasUnnamedAddr = SF->hasUnnamedAddr();
 
   if (DGV) {
     GlobalValue::LinkageTypes NewLinkage = GlobalValue::InternalLinkage;
@@ -821,11 +831,13 @@ bool ModuleLinker::linkFunctionProto(Function *SF) {
     if (getLinkageResult(DGV, SF, NewLinkage, NV, LinkFromSrc))
       return true;
     NewVisibility = NV;
+    HasUnnamedAddr = HasUnnamedAddr && DGV->hasUnnamedAddr();
 
     if (!LinkFromSrc) {
       // Set calculated linkage
       DGV->setLinkage(NewLinkage);
       DGV->setVisibility(*NewVisibility);
+      DGV->setUnnamedAddr(HasUnnamedAddr);
 
       // Make sure to remember this mapping.
       ValueMap[SF] = ConstantExpr::getBitCast(DGV, TypeMap.get(SF->getType()));
@@ -853,6 +865,7 @@ bool ModuleLinker::linkFunctionProto(Function *SF) {
   copyGVAttributes(NewDF, SF);
   if (NewVisibility)
     NewDF->setVisibility(*NewVisibility);
+  NewDF->setUnnamedAddr(HasUnnamedAddr);
 
   if (DGV) {
     // Any uses of DF need to change to NewDF, with cast.
@@ -1248,6 +1261,13 @@ bool ModuleLinker::run() {
     // Skip if not linking from source.
     if (DoNotLinkFromSource.count(SF)) continue;
     
+    Function *DF = cast<Function>(ValueMap[SF]);
+    if (SF->hasPrefixData()) {
+      // Link in the prefix data.
+      DF->setPrefixData(MapValue(
+          SF->getPrefixData(), ValueMap, RF_None, &TypeMap, &ValMaterializer));
+    }
+
     // Skip if no body (function is external) or materialize.
     if (SF->isDeclaration()) {
       if (!SF->isMaterializable())
@@ -1256,7 +1276,7 @@ bool ModuleLinker::run() {
         return true;
     }
     
-    linkFunctionBody(cast<Function>(ValueMap[SF]), SF);
+    linkFunctionBody(DF, SF);
     SF->Dematerialize();
   }
 
@@ -1284,6 +1304,14 @@ bool ModuleLinker::run() {
         continue;
 
       Function *DF = cast<Function>(ValueMap[SF]);
+      if (SF->hasPrefixData()) {
+        // Link in the prefix data.
+        DF->setPrefixData(MapValue(SF->getPrefixData(),
+                                   ValueMap,
+                                   RF_None,
+                                   &TypeMap,
+                                   &ValMaterializer));
+      }
 
       // Materialize if necessary.
       if (SF->isDeclaration()) {

@@ -79,7 +79,8 @@ namespace {
     }
 
     bool hasBaseOrIndexReg() const {
-      return IndexReg.getNode() != 0 || Base_Reg.getNode() != 0;
+      return BaseType == FrameIndexBase ||
+             IndexReg.getNode() != 0 || Base_Reg.getNode() != 0;
     }
 
     /// isRIPRelative - Return true if this addressing mode is already RIP
@@ -2056,6 +2057,7 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
 
   if (Node->isMachineOpcode()) {
     DEBUG(dbgs() << "== ";  Node->dump(CurDAG); dbgs() << '\n');
+    Node->setNodeId(-1);
     return NULL;   // Already selected.
   }
 

@@ -369,6 +369,17 @@ public:
   /// least as big as Width bits.
   Type *getSmallestLegalIntType(LLVMContext &C, unsigned Width = 0) const;
 
+  /// getLargestLegalIntType - Return the largest legal integer type, or null if
+  /// none are set.
+  Type *getLargestLegalIntType(LLVMContext &C) const {
+    unsigned LargestSize = getLargestLegalIntTypeSize();
+    return (LargestSize == 0) ? 0 : Type::getIntNTy(C, LargestSize);
+  }
+
+  /// getLargestLegalIntType - Return the size of largest legal integer type
+  /// size, or 0 if none are set.
+  unsigned getLargestLegalIntTypeSize() const;
+
   /// getIndexedOffset - return the offset from the beginning of the type for
   /// the specified indices.  This is used to implement getelementptr.
   uint64_t getIndexedOffset(Type *Ty, ArrayRef<Value *> Indices) const;
@@ -451,7 +462,7 @@ inline uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
   case Type::LabelTyID:
     return getPointerSizeInBits(0);
   case Type::PointerTyID:
-    return getPointerSizeInBits(cast<PointerType>(Ty)->getAddressSpace());
+    return getPointerSizeInBits(Ty->getPointerAddressSpace());
   case Type::ArrayTyID: {
     ArrayType *ATy = cast<ArrayType>(Ty);
     return ATy->getNumElements() *
@@ -461,7 +472,7 @@ inline uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
     // Get the layout annotation... which is lazily created on demand.
     return getStructLayout(cast<StructType>(Ty))->getSizeInBits();
   case Type::IntegerTyID:
-    return cast<IntegerType>(Ty)->getBitWidth();
+    return Ty->getIntegerBitWidth();
   case Type::HalfTyID:
     return 16;
   case Type::FloatTyID:

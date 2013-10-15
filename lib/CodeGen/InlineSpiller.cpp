@@ -578,7 +578,7 @@ MachineInstr *InlineSpiller::traceSiblingValue(unsigned UseReg, VNInfo *UseVNI,
     if (unsigned SrcReg = isFullCopyOf(MI, Reg)) {
       if (isSibling(SrcReg)) {
         LiveInterval &SrcLI = LIS.getInterval(SrcReg);
-        LiveRangeQuery SrcQ(SrcLI, VNI->def);
+        LiveQueryResult SrcQ = SrcLI.Query(VNI->def);
         assert(SrcQ.valueIn() && "Copy from non-existing value");
         // Check if this COPY kills its source.
         SVI->second.KillsSource = SrcQ.isKill();
@@ -1106,10 +1106,10 @@ foldMemoryOperand(ArrayRef<std::pair<MachineInstr*, unsigned> > Ops,
     // FoldMI does not define this physreg. Remove the LI segment.
     assert(MO->isDead() && "Cannot fold physreg def");
     for (MCRegUnitIterator Units(Reg, &TRI); Units.isValid(); ++Units) {
-      if (LiveInterval *LI = LIS.getCachedRegUnit(*Units)) {
+      if (LiveRange *LR = LIS.getCachedRegUnit(*Units)) {
         SlotIndex Idx = LIS.getInstructionIndex(MI).getRegSlot();
-        if (VNInfo *VNI = LI->getVNInfoAt(Idx))
-          LI->removeValNo(VNI);
+        if (VNInfo *VNI = LR->getVNInfoAt(Idx))
+          LR->removeValNo(VNI);
       }
     }
   }
@@ -1191,7 +1191,7 @@ void InlineSpiller::spillAroundUses(unsigned Reg) {
     // Debug values are not allowed to affect codegen.
     if (MI->isDebugValue()) {
       // Modify DBG_VALUE now that the value is in a spill slot.
-      bool IsIndirect = MI->getOperand(1).isImm();
+      bool IsIndirect = MI->isIndirectDebugValue();
       uint64_t Offset = IsIndirect ? MI->getOperand(1).getImm() : 0;
       const MDNode *MDPtr = MI->getOperand(2).getMetadata();
       DebugLoc DL = MI->getDebugLoc();
@@ -1295,8 +1295,8 @@ void InlineSpiller::spillAll() {
 
   assert(StackInt->getNumValNums() == 1 && "Bad stack interval values");
   for (unsigned i = 0, e = RegsToSpill.size(); i != e; ++i)
-    StackInt->MergeRangesInAsValue(LIS.getInterval(RegsToSpill[i]),
-                                   StackInt->getValNumInfo(0));
+    StackInt->MergeSegmentsInAsValue(LIS.getInterval(RegsToSpill[i]),
+                                     StackInt->getValNumInfo(0));
   DEBUG(dbgs() << "Merged spilled regs: " << *StackInt << '\n');
 
   // Spill around uses of all RegsToSpill.
@@ -1337,7 +1337,7 @@ void InlineSpiller::spill(LiveRangeEdit &edit) {
 
   DEBUG(dbgs() << "Inline spilling "
                << MRI.getRegClass(edit.getReg())->getName()
-               << ':' << PrintReg(edit.getReg()) << ' ' << edit.getParent()
+               << ':' << edit.getParent()
                << "\nFrom original " << PrintReg(Original) << '\n');
   assert(edit.getParent().isSpillable() &&
          "Attempting to spill already spilled value.");

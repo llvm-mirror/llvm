@@ -66,6 +66,10 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   setOperationAction(ISD::BITCAST, MVT::i128, Legal);
 
+  // We need to custom lower vector stores from local memory
+  setOperationAction(ISD::LOAD, MVT::v2i32, Custom);
+  setOperationAction(ISD::LOAD, MVT::v4i32, Custom);
+
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
 
@@ -82,12 +86,15 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::v16i8, Custom);
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::v4f32, Custom);
 
+  setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
+
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, Expand);
 
   setLoadExtAction(ISD::EXTLOAD, MVT::f32, Expand);
   setTruncStoreAction(MVT::f64, MVT::f32, Expand);
+  setTruncStoreAction(MVT::i64, MVT::i32, Expand);
 
-  setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
 
   setTargetDAGCombine(ISD::SELECT_CC);
 
@@ -151,7 +158,8 @@ SDValue SITargetLowering::LowerFormalArguments(
     const ISD::InputArg &Arg = Ins[i];
 
     // First check if it's a PS input addr
-    if (Info->ShaderType == ShaderType::PIXEL && !Arg.Flags.isInReg()) {
+    if (Info->ShaderType == ShaderType::PIXEL && !Arg.Flags.isInReg() &&
+        !Arg.Flags.isByVal()) {
 
       assert((PSInputNum <= 15) && "Too many PS inputs!");
 
@@ -368,6 +376,19 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
   case ISD::BRCOND: return LowerBRCOND(Op, DAG);
+  case ISD::LOAD: {
+    LoadSDNode *Load = dyn_cast<LoadSDNode>(Op);
+    if (Load->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS &&
+        Op.getValueType().isVector()) {
+      SDValue MergedValues[2] = {
+        SplitVectorLoad(Op, DAG),
+        Load->getChain()
+      };
+      return DAG.getMergeValues(MergedValues, 2, SDLoc(Op));
+    } else {
+      return SDValue();
+    }
+  }
   case ISD::SELECT_CC: return LowerSELECT_CC(Op, DAG);
   case ISD::SIGN_EXTEND: return LowerSIGN_EXTEND(Op, DAG);
   case ISD::ZERO_EXTEND: return LowerZERO_EXTEND(Op, DAG);
@@ -445,6 +466,43 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
                          Op.getOperand(3));
     }
   }
+
+  case ISD::INTRINSIC_VOID:
+    SDValue Chain = Op.getOperand(0);
+    unsigned IntrinsicID = cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
+
+    switch (IntrinsicID) {
+      case AMDGPUIntrinsic::SI_tbuffer_store: {
+        SDLoc DL(Op);
+        SDValue Ops [] = {
+          Chain,
+          ResourceDescriptorToi128(Op.getOperand(2), DAG),
+          Op.getOperand(3),
+          Op.getOperand(4),
+          Op.getOperand(5),
+          Op.getOperand(6),
+          Op.getOperand(7),
+          Op.getOperand(8),
+          Op.getOperand(9),
+          Op.getOperand(10),
+          Op.getOperand(11),
+          Op.getOperand(12),
+          Op.getOperand(13),
+          Op.getOperand(14)
+        };
+        EVT VT = Op.getOperand(3).getValueType();
+
+        MachineMemOperand *MMO = MF.getMachineMemOperand(
+            MachinePointerInfo(),
+            MachineMemOperand::MOStore,
+            VT.getSizeInBits() / 8, 4);
+        return DAG.getMemIntrinsicNode(AMDGPUISD::TBUFFER_STORE_FORMAT, DL,
+                                       Op->getVTList(), Ops,
+                                       sizeof(Ops)/sizeof(Ops[0]), VT, MMO);
+      }
+      default:
+        break;
+    }
   }
   return SDValue();
 }
@@ -830,8 +888,8 @@ void SITargetLowering::ensureSRegLimit(SelectionDAG &DAG, SDValue &Operand,
     return;
   }
 
-  // This is a conservative aproach, it is possible that we can't determine
-  // the correct register class and copy too often, but better save than sorry.
+  // This is a conservative aproach. It is possible that we can't determine the
+  // correct register class and copy too often, but better safe than sorry.
   SDValue RC = DAG.getTargetConstant(RegClass, MVT::i32);
   SDNode *Node = DAG.getMachineNode(TargetOpcode::COPY_TO_REGCLASS, SDLoc(),
                                     Operand.getValueType(), Operand, RC);
@@ -1105,6 +1163,8 @@ void SITargetLowering::AdjustInstrPostInstrSelection(MachineInstr *MI,
   case 3:  RC = &AMDGPU::VReg_96RegClass; break;
   }
 
+  unsigned NewOpcode = TII->getMaskedMIMGOp(MI->getOpcode(), BitsSet);
+  MI->setDesc(TII->get(NewOpcode));
   MachineRegisterInfo &MRI = MI->getParent()->getParent()->getRegInfo();
   MRI.setRegClass(VReg, RC);
 }

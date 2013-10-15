@@ -16,7 +16,6 @@
 #define LLVM_EXECUTIONENGINE_EXECUTIONENGINE_H
 
 #include "llvm-c/ExecutionEngine.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/ValueMap.h"
@@ -153,15 +152,6 @@ protected:
   /// abort.
   void *(*LazyFunctionCreator)(const std::string &);
 
-  /// ExceptionTableRegister - If Exception Handling is set, the JIT will
-  /// register dwarf tables with this function.
-  typedef void (*EERegisterFn)(void*);
-  EERegisterFn ExceptionTableRegister;
-  EERegisterFn ExceptionTableDeregister;
-  /// This maps functions to their exception tables frames.
-  DenseMap<const Function*, void*> AllExceptionTables;
-
-
 public:
   /// lock - This lock protects the ExecutionEngine, JIT, JITResolver and
   /// JITEmitter classes.  It must be held while changing the internal state of
@@ -240,6 +230,8 @@ public:
   /// found, this function silently returns a null pointer. Otherwise,
   /// it prints a message to stderr and aborts.
   ///
+  /// This function is deprecated for the MCJIT execution engine.
+  ///
   virtual void *getPointerToNamedFunction(const std::string &Name,
                                           bool AbortOnFailure = true) = 0;
 
@@ -251,6 +243,23 @@ public:
     llvm_unreachable("Re-mapping of section addresses not supported with this "
                      "EE!");
   }
+
+  /// generateCodeForModule - Run code generationen for the specified module and
+  /// load it into memory.
+  ///
+  /// When this function has completed, all code and data for the specified
+  /// module, and any module on which this module depends, will be generated
+  /// and loaded into memory, but relocations will not yet have been applied
+  /// and all memory will be readable and writable but not executable.
+  ///
+  /// This function is primarily useful when generating code for an external
+  /// target, allowing the client an opportunity to remap section addresses
+  /// before relocations are applied.  Clients that intend to execute code
+  /// locally can use the getFunctionAddress call, which will generate code
+  /// and apply final preparations all in one step.
+  ///
+  /// This method has no effect for the legacy JIT engine or the interpeter.
+  virtual void generateCodeForModule(Module *M) {}
 
   /// finalizeObject - ensure the module is fully processed and is usable.
   ///
@@ -307,10 +316,16 @@ public:
   /// getPointerToGlobalIfAvailable - This returns the address of the specified
   /// global value if it is has already been codegen'd, otherwise it returns
   /// null.
+  ///
+  /// This function is deprecated for the MCJIT execution engine.  It doesn't
+  /// seem to be needed in that case, but an equivalent can be added if it is.
   void *getPointerToGlobalIfAvailable(const GlobalValue *GV);
 
   /// getPointerToGlobal - This returns the address of the specified global
   /// value. This may involve code generation if it's a function.
+  ///
+  /// This function is deprecated for the MCJIT execution engine.  Use
+  /// getGlobalValueAddress instead.
   void *getPointerToGlobal(const GlobalValue *GV);
 
   /// getPointerToFunction - The different EE's represent function bodies in
@@ -318,20 +333,46 @@ public:
   /// pointer should look like.  When F is destroyed, the ExecutionEngine will
   /// remove its global mapping and free any machine code.  Be sure no threads
   /// are running inside F when that happens.
+  ///
+  /// This function is deprecated for the MCJIT execution engine.  Use
+  /// getFunctionAddress instead.
   virtual void *getPointerToFunction(Function *F) = 0;
 
   /// getPointerToBasicBlock - The different EE's represent basic blocks in
   /// different ways.  Return the representation for a blockaddress of the
   /// specified block.
+  ///
+  /// This function will not be implemented for the MCJIT execution engine.
   virtual void *getPointerToBasicBlock(BasicBlock *BB) = 0;
 
   /// getPointerToFunctionOrStub - If the specified function has been
   /// code-gen'd, return a pointer to the function.  If not, compile it, or use
   /// a stub to implement lazy compilation if available.  See
   /// getPointerToFunction for the requirements on destroying F.
+  ///
+  /// This function is deprecated for the MCJIT execution engine.  Use
+  /// getFunctionAddress instead.
   virtual void *getPointerToFunctionOrStub(Function *F) {
     // Default implementation, just codegen the function.
     return getPointerToFunction(F);
+  }
+
+  /// getGlobalValueAddress - Return the address of the specified global
+  /// value. This may involve code generation.
+  ///
+  /// This function should not be called with the JIT or interpreter engines.
+  virtual uint64_t getGlobalValueAddress(const std::string &Name) {
+    // Default implementation for JIT and interpreter.  MCJIT will override this.
+    // JIT and interpreter clients should use getPointerToGlobal instead.
+    return 0;
+  }
+
+  /// getFunctionAddress - Return the address of the specified function.
+  /// This may involve code generation.
+  virtual uint64_t getFunctionAddress(const std::string &Name) {
+    // Default implementation for JIT and interpreter.  MCJIT will override this.
+    // JIT and interpreter clients should use getPointerToFunction instead.
+    return 0;
   }
 
   // The JIT overrides a version that actually does this.
@@ -366,6 +407,9 @@ public:
   /// getOrEmitGlobalVariable - Return the address of the specified global
   /// variable, possibly emitting it to memory if needed.  This is used by the
   /// Emitter.
+  ///
+  /// This function is deprecated for the MCJIT execution engine.  Use
+  /// getGlobalValueAddress instead.
   virtual void *getOrEmitGlobalVariable(const GlobalVariable *GV) {
     return getPointerToGlobal((const GlobalValue *)GV);
   }
@@ -434,41 +478,6 @@ public:
   void InstallLazyFunctionCreator(void* (*P)(const std::string &)) {
     LazyFunctionCreator = P;
   }
-
-  /// InstallExceptionTableRegister - The JIT will use the given function
-  /// to register the exception tables it generates.
-  void InstallExceptionTableRegister(EERegisterFn F) {
-    ExceptionTableRegister = F;
-  }
-  void InstallExceptionTableDeregister(EERegisterFn F) {
-    ExceptionTableDeregister = F;
-  }
-
-  /// RegisterTable - Registers the given pointer as an exception table.  It
-  /// uses the ExceptionTableRegister function.
-  void RegisterTable(const Function *fn, void* res) {
-    if (ExceptionTableRegister) {
-      ExceptionTableRegister(res);
-      AllExceptionTables[fn] = res;
-    }
-  }
-
-  /// DeregisterTable - Deregisters the exception frame previously registered
-  /// for the given function.
-  void DeregisterTable(const Function *Fn) {
-    if (ExceptionTableDeregister) {
-      DenseMap<const Function*, void*>::iterator frame =
-        AllExceptionTables.find(Fn);
-      if(frame != AllExceptionTables.end()) {
-        ExceptionTableDeregister(frame->second);
-        AllExceptionTables.erase(frame);
-      }
-    }
-  }
-
-  /// DeregisterAllTables - Deregisters all previously registered pointers to an
-  /// exception tables.  It uses the ExceptionTableoDeregister function.
-  void DeregisterAllTables();
 
 protected:
   explicit ExecutionEngine(Module *M);

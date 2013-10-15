@@ -32,6 +32,9 @@
 #define THREEBYTE3A_SYM   x86DisassemblerThreeByte3AOpcodes
 #define THREEBYTEA6_SYM   x86DisassemblerThreeByteA6Opcodes
 #define THREEBYTEA7_SYM   x86DisassemblerThreeByteA7Opcodes
+#define XOP8_MAP_SYM      x86DisassemblerXOP8Opcodes
+#define XOP9_MAP_SYM      x86DisassemblerXOP9Opcodes
+#define XOPA_MAP_SYM      x86DisassemblerXOPAOpcodes
 
 #define INSTRUCTIONS_STR  "x86DisassemblerInstrSpecifiers"
 #define CONTEXTS_STR      "x86DisassemblerContexts"
@@ -41,6 +44,9 @@
 #define THREEBYTE3A_STR   "x86DisassemblerThreeByte3AOpcodes"
 #define THREEBYTEA6_STR   "x86DisassemblerThreeByteA6Opcodes"
 #define THREEBYTEA7_STR   "x86DisassemblerThreeByteA7Opcodes"
+#define XOP8_MAP_STR      "x86DisassemblerXOP8Opcodes"
+#define XOP9_MAP_STR      "x86DisassemblerXOP9Opcodes"
+#define XOPA_MAP_STR      "x86DisassemblerXOPAOpcodes"
 
 /*
  * Attributes of an instruction that must be known before the opcode can be
@@ -116,10 +122,10 @@ enum attributeBits {
   ENUM_ENTRY(IC_VEX_L_XS,           4,  "requires VEX and the L and XS prefix")\
   ENUM_ENTRY(IC_VEX_L_XD,           4,  "requires VEX and the L and XD prefix")\
   ENUM_ENTRY(IC_VEX_L_OPSIZE,       4,  "requires VEX, L, and OpSize")         \
-  ENUM_ENTRY(IC_VEX_L_W,            3,  "requires VEX, L and W")               \
-  ENUM_ENTRY(IC_VEX_L_W_XS,         4,  "requires VEX, L, W and XS prefix")    \
-  ENUM_ENTRY(IC_VEX_L_W_XD,         4,  "requires VEX, L, W and XD prefix")    \
-  ENUM_ENTRY(IC_VEX_L_W_OPSIZE,     4,  "requires VEX, L, W and OpSize")       \
+  ENUM_ENTRY(IC_VEX_L_W,            4,  "requires VEX, L and W")               \
+  ENUM_ENTRY(IC_VEX_L_W_XS,         5,  "requires VEX, L, W and XS prefix")    \
+  ENUM_ENTRY(IC_VEX_L_W_XD,         5,  "requires VEX, L, W and XD prefix")    \
+  ENUM_ENTRY(IC_VEX_L_W_OPSIZE,     5,  "requires VEX, L, W and OpSize")       \
   ENUM_ENTRY(IC_EVEX,               1,  "requires an EVEX prefix")             \
   ENUM_ENTRY(IC_EVEX_XS,            2,  "requires EVEX and the XS prefix")     \
   ENUM_ENTRY(IC_EVEX_XD,            2,  "requires EVEX and the XD prefix")     \
@@ -234,7 +240,10 @@ typedef enum {
   THREEBYTE_38  = 2,
   THREEBYTE_3A  = 3,
   THREEBYTE_A6  = 4,
-  THREEBYTE_A7  = 5
+  THREEBYTE_A7  = 5,
+  XOP8_MAP      = 6,
+  XOP9_MAP      = 7,
+  XOPA_MAP      = 8
 } OpcodeType;
 
 /*

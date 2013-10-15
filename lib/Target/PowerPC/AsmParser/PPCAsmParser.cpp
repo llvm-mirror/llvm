@@ -13,6 +13,7 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
@@ -174,6 +175,7 @@ struct PPCOperand;
 class PPCAsmParser : public MCTargetAsmParser {
   MCSubtargetInfo &STI;
   MCAsmParser &Parser;
+  const MCInstrInfo &MII;
   bool IsPPC64;
 
   MCAsmParser &getParser() const { return Parser; }
@@ -218,8 +220,9 @@ class PPCAsmParser : public MCTargetAsmParser {
 
 
 public:
-  PPCAsmParser(MCSubtargetInfo &_STI, MCAsmParser &_Parser)
-    : MCTargetAsmParser(), STI(_STI), Parser(_Parser) {
+  PPCAsmParser(MCSubtargetInfo &_STI, MCAsmParser &_Parser,
+               const MCInstrInfo &_MII)
+      : MCTargetAsmParser(), STI(_STI), Parser(_Parser), MII(_MII) {
     // Check for 64-bit vs. 32-bit pointer mode.
     Triple TheTriple(STI.getTargetTriple());
     IsPPC64 = (TheTriple.getArch() == Triple::ppc64 ||
@@ -235,6 +238,10 @@ public:
   virtual bool ParseDirective(AsmToken DirectiveID);
 
   unsigned validateTargetOperandClass(MCParsedAsmOperand *Op, unsigned Kind);
+
+  virtual const MCExpr *applyModifierToExpr(const MCExpr *E,
+                                            MCSymbolRefExpr::VariantKind,
+                                            MCContext &Ctx);
 };
 
 /// PPCOperand - Instances of this class represent a parsed PowerPC machine
@@ -1353,6 +1360,8 @@ unsigned PPCAsmParser::validateTargetOperandClass(MCParsedAsmOperand *AsmOp,
   switch (Kind) {
     case MCK_0: ImmVal = 0; break;
     case MCK_1: ImmVal = 1; break;
+    case MCK_2: ImmVal = 2; break;
+    case MCK_3: ImmVal = 3; break;
     default: return Match_InvalidOperand;
   }
 
@@ -1363,3 +1372,26 @@ unsigned PPCAsmParser::validateTargetOperandClass(MCParsedAsmOperand *AsmOp,
   return Match_InvalidOperand;
 }
 
+const MCExpr *
+PPCAsmParser::applyModifierToExpr(const MCExpr *E,
+                                  MCSymbolRefExpr::VariantKind Variant,
+                                  MCContext &Ctx) {
+  switch (Variant) {
+  case MCSymbolRefExpr::VK_PPC_LO:
+    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_LO, E, false, Ctx);
+  case MCSymbolRefExpr::VK_PPC_HI:
+    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HI, E, false, Ctx);
+  case MCSymbolRefExpr::VK_PPC_HA:
+    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HA, E, false, Ctx);
+  case MCSymbolRefExpr::VK_PPC_HIGHER:
+    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHER, E, false, Ctx);
+  case MCSymbolRefExpr::VK_PPC_HIGHERA:
+    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHERA, E, false, Ctx);
+  case MCSymbolRefExpr::VK_PPC_HIGHEST:
+    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHEST, E, false, Ctx);
+  case MCSymbolRefExpr::VK_PPC_HIGHESTA:
+    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHESTA, E, false, Ctx);
+  default:
+    return 0;
+  }
+}

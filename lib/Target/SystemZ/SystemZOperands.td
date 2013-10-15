@@ -46,7 +46,8 @@ class PCRelOperand<ValueType vt, AsmOperandClass asmop> : Operand<vt> {
 // address with address size VT.  SELF is the name of the operand and
 // ASMOP is the associated asm operand.
 class PCRelAddress<ValueType vt, string self, AsmOperandClass asmop>
-  : ComplexPattern<vt, 1, "selectPCRelAddress", [z_pcrel_wrapper]>,
+  : ComplexPattern<vt, 1, "selectPCRelAddress",
+                   [z_pcrel_wrapper, z_pcrel_offset]>,
     PCRelOperand<vt, asmop> {
   let MIOperandInfo = (ops !cast<Operand>(self));
 }
@@ -219,11 +220,6 @@ def uimm8    : Immediate<i8, [{}], UIMM8, "U8Imm">;
 // i32 immediates
 //===----------------------------------------------------------------------===//
 
-// Immediates for 8-bit lengths.
-def imm32len8 : Immediate<i32, [{
-  return isUInt<8>(N->getZExtValue() - 1);
-}], NOOP_SDNodeXForm, "U32Imm">;
-
 // Immediates for the lower and upper 16 bits of an i32, with the other
 // bits of the i32 being zero.
 def imm32ll16 : Immediate<i32, [{
@@ -338,6 +334,10 @@ def imm64sx8 : Immediate<i64, [{
   return isInt<8>(N->getSExtValue());
 }], SIMM8, "S8Imm">;
 
+def imm64zx8 : Immediate<i64, [{
+  return isUInt<8>(N->getSExtValue());
+}], UIMM8, "U8Imm">;
+
 def imm64sx16 : Immediate<i64, [{
   return isInt<16>(N->getSExtValue());
 }], SIMM16, "S16Imm">;
@@ -358,7 +358,7 @@ def imm64zx32n : Immediate<i64, [{
   return isUInt<32>(-N->getSExtValue());
 }], NEGIMM32, "U32Imm">;
 
-def imm64 : ImmLeaf<i64, [{}]>;
+def imm64 : ImmLeaf<i64, [{}]>, Operand<i64>;
 
 //===----------------------------------------------------------------------===//
 // Floating-point immediates
@@ -393,19 +393,6 @@ def brtarget32 : PCRelOperand<OtherVT, PCRel32> {
 // and multiplied by 2.
 def pcrel32 : PCRelAddress<i64, "pcrel32", PCRel32> {
   let EncoderMethod = "getPC32DBLEncoding";
-  let DecoderMethod = "decodePC32DBLOperand";
-}
-
-// A PC-relative offset of a global value when the value is used as a
-// call target.  The offset is sign-extended and multiplied by 2.
-def pcrel16call : PCRelAddress<i64, "pcrel16call", PCRel16> {
-  let PrintMethod = "printCallOperand";
-  let EncoderMethod = "getPLT16DBLEncoding";
-  let DecoderMethod = "decodePC16DBLOperand";
-}
-def pcrel32call : PCRelAddress<i64, "pcrel32call", PCRel32> {
-  let PrintMethod = "printCallOperand";
-  let EncoderMethod = "getPLT32DBLEncoding";
   let DecoderMethod = "decodePC32DBLOperand";
 }
 

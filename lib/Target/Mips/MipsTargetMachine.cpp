@@ -135,7 +135,13 @@ namespace {
 class MipsPassConfig : public TargetPassConfig {
 public:
   MipsPassConfig(MipsTargetMachine *TM, PassManagerBase &PM)
-    : TargetPassConfig(TM, PM) {}
+    : TargetPassConfig(TM, PM) {
+    // The current implementation of long branch pass requires a scratch
+    // register ($at) to be available before branch instructions. Tail merging
+    // can break this requirement, so disable it when long branch pass is
+    // enabled.
+    EnableTailMerge = !getMipsSubtarget().enableLongBranchPass();
+  }
 
   MipsTargetMachine &getMipsTargetMachine() const {
     return getTM<MipsTargetMachine>();
@@ -197,8 +203,7 @@ bool MipsPassConfig::addPreEmitPass() {
   const MipsSubtarget &Subtarget = TM.getSubtarget<MipsSubtarget>();
   addPass(createMipsDelaySlotFillerPass(TM));
 
-  if (Subtarget.hasStandardEncoding() ||
-      Subtarget.allowMixed16_32())
+  if (Subtarget.enableLongBranchPass())
     addPass(createMipsLongBranchPass(TM));
   if (Subtarget.inMips16Mode() ||
       Subtarget.allowMixed16_32())

@@ -323,8 +323,6 @@ static DecodeStatus DecodeVCVTD(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
 static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
-static DecodeStatus DecodeImm0_4(MCInst &Inst, unsigned Insn, uint64_t Address,
-                                 const void *Decoder);
 
 
 static DecodeStatus DecodeThumbAddSpecialReg(MCInst &Inst, uint16_t Insn,
@@ -500,6 +498,14 @@ DecodeStatus ARMDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
 
   MI.clear();
   result = decodeInstruction(DecoderTablev8NEON32, MI, insn, Address,
+                             this, STI);
+  if (result != MCDisassembler::Fail) {
+    Size = 4;
+    return result;
+  }
+
+  MI.clear();
+  result = decodeInstruction(DecoderTablev8Crypto32, MI, insn, Address,
                              this, STI);
   if (result != MCDisassembler::Fail) {
     Size = 4;
@@ -823,6 +829,18 @@ DecodeStatus ThumbDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
       Check(result, AddThumbPredicate(MI));
       return result;
     }
+  }
+
+  MI.clear();
+  uint32_t NEONCryptoInsn = insn32;
+  NEONCryptoInsn &= 0xF0FFFFFF; // Clear bits 27-24
+  NEONCryptoInsn |= (NEONCryptoInsn & 0x10000000) >> 4; // Move bit 28 to bit 24
+  NEONCryptoInsn |= 0x12000000; // Set bits 28 and 25
+  result = decodeInstruction(DecoderTablev8Crypto32, MI, NEONCryptoInsn,
+                             Address, this, STI);
+  if (result != MCDisassembler::Fail) {
+    Size = 4;
+    return result;
   }
 
   MI.clear();
@@ -4899,15 +4917,6 @@ static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
   Inst.addOperand(MCOperand::CreateImm(64 - imm));
 
   return S;
-}
-
-static DecodeStatus DecodeImm0_4(MCInst &Inst, unsigned Insn, uint64_t Address,
-                                 const void *Decoder)
-{
-  unsigned Imm = fieldFromInstruction(Insn, 0, 3);
-  if (Imm > 4) return MCDisassembler::Fail;
-  Inst.addOperand(MCOperand::CreateImm(Imm));
-  return MCDisassembler::Success;
 }
 
 static DecodeStatus DecodeLDR(MCInst &Inst, unsigned Val,

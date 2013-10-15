@@ -2355,16 +2355,35 @@ class N2VQInt<bits<2> op24_23, bits<2> op21_20, bits<2> op19_18,
 class N2VDIntnp<bits<2> op17_16, bits<3> op10_8, bit op7,
               InstrItinClass itin, string OpcodeStr, string Dt,
               ValueType ResTy, ValueType OpTy, SDPatternOperator IntOp>
-  : N2Vnp<op17_16, op10_8, op7, 0,  (outs DPR:$Vd), (ins DPR:$Vm),
+  : N2Vnp<0b10, op17_16, op10_8, op7, 0,  (outs DPR:$Vd), (ins DPR:$Vm),
           itin, OpcodeStr, Dt, ResTy, OpTy,
           [(set DPR:$Vd, (ResTy (IntOp (OpTy DPR:$Vm))))]>;
 
 class N2VQIntnp<bits<2> op17_16, bits<3> op10_8, bit op7,
               InstrItinClass itin, string OpcodeStr, string Dt,
               ValueType ResTy, ValueType OpTy, SDPatternOperator IntOp>
-  : N2Vnp<op17_16, op10_8, op7, 1,  (outs QPR:$Vd), (ins QPR:$Vm),
+  : N2Vnp<0b10, op17_16, op10_8, op7, 1,  (outs QPR:$Vd), (ins QPR:$Vm),
           itin, OpcodeStr, Dt, ResTy, OpTy,
           [(set QPR:$Vd, (ResTy (IntOp (OpTy QPR:$Vm))))]>;
+
+// Similar to NV2VQIntnp with some more encoding bits exposed (crypto).
+class N2VQIntXnp<bits<2> op19_18, bits<2> op17_16, bits<3> op10_8, bit op6,
+              bit op7, InstrItinClass itin, string OpcodeStr, string Dt,
+              ValueType ResTy, ValueType OpTy, SDPatternOperator IntOp>
+  : N2Vnp<op19_18, op17_16, op10_8, op7, op6,  (outs QPR:$Vd), (ins QPR:$Vm),
+          itin, OpcodeStr, Dt, ResTy, OpTy,
+          [(set QPR:$Vd, (ResTy (IntOp (OpTy QPR:$Vm))))]>;
+
+// Same as N2VQIntXnp but with Vd as a src register.
+class N2VQIntX2np<bits<2> op19_18, bits<2> op17_16, bits<3> op10_8, bit op6,
+              bit op7, InstrItinClass itin, string OpcodeStr, string Dt,
+              ValueType ResTy, ValueType OpTy, SDPatternOperator IntOp>
+  : N2Vnp<op19_18, op17_16, op10_8, op7, op6,
+          (outs QPR:$Vd), (ins QPR:$src, QPR:$Vm),
+          itin, OpcodeStr, Dt, ResTy, OpTy,
+          [(set QPR:$Vd, (ResTy (IntOp (OpTy QPR:$src), (OpTy QPR:$Vm))))]> {
+  let Constraints = "$src = $Vd";
+}
 
 // Narrow 2-register operations.
 class N2VN<bits<2> op24_23, bits<2> op21_20, bits<2> op19_18,
@@ -2534,7 +2553,7 @@ class N3VDIntnp<bits<5> op27_23, bits<2> op21_20, bits<4> op11_8, bit op6,
                 string Dt, ValueType ResTy, ValueType OpTy,
                 SDPatternOperator IntOp, bit Commutable>
   : N3Vnp<op27_23, op21_20, op11_8, op6, op4,
-          (outs DPR:$Vd), (ins DPR:$Vn, DPR:$Vm), f, itin, OpcodeStr, Dt,
+          (outs DPR:$Vd), (ins DPR:$Vn, DPR:$Vm), N3RegFrm, itin, OpcodeStr, Dt,
           ResTy, OpTy, IntOp, Commutable,
           [(set DPR:$Vd, (ResTy (IntOp (OpTy DPR:$Vn), (OpTy DPR:$Vm))))]>;
 
@@ -2591,6 +2610,19 @@ class N3VQIntnp<bits<5> op27_23, bits<2> op21_20, bits<4> op11_8, bit op6,
           (outs QPR:$Vd), (ins QPR:$Vn, QPR:$Vm), f, itin, OpcodeStr, Dt,
           ResTy, OpTy, IntOp, Commutable,
           [(set QPR:$Vd, (ResTy (IntOp (OpTy QPR:$Vn), (OpTy QPR:$Vm))))]>;
+
+// Same as N3VQIntnp but with Vd as a src register.
+class N3VQInt3np<bits<5> op27_23, bits<2> op21_20, bits<4> op11_8, bit op6,
+                bit op4, Format f, InstrItinClass itin, string OpcodeStr,
+                string Dt, ValueType ResTy, ValueType OpTy,
+                SDPatternOperator IntOp, bit Commutable>
+  : N3Vnp<op27_23, op21_20, op11_8, op6, op4,
+          (outs QPR:$Vd), (ins QPR:$src, QPR:$Vn, QPR:$Vm), f, itin, OpcodeStr,
+          Dt, ResTy, OpTy, IntOp, Commutable,
+          [(set QPR:$Vd, (ResTy (IntOp (OpTy QPR:$src), (OpTy QPR:$Vn),
+                                       (OpTy QPR:$Vm))))]> {
+  let Constraints = "$src = $Vd";
+}
 
 class N3VQIntSL<bits<2> op21_20, bits<4> op11_8, InstrItinClass itin,
                 string OpcodeStr, string Dt,
@@ -2842,6 +2874,7 @@ class N3VL<bit op24, bit op23, bits<2> op21_20, bits<4> op11_8, bit op4,
         [(set QPR:$Vd, (TyQ (OpNode (TyD DPR:$Vn), (TyD DPR:$Vm))))]> {
   let isCommutable = Commutable;
 }
+
 class N3VLSL<bit op24, bits<2> op21_20, bits<4> op11_8,
              InstrItinClass itin, string OpcodeStr, string Dt,
              ValueType TyQ, ValueType TyD, SDNode OpNode>
@@ -2897,6 +2930,17 @@ class N3VLInt<bit op24, bit op23, bits<2> op21_20, bits<4> op11_8, bit op4,
         [(set QPR:$Vd, (TyQ (IntOp (TyD DPR:$Vn), (TyD DPR:$Vm))))]> {
   let isCommutable = Commutable;
 }
+
+// Same as above, but not predicated.
+class N3VLIntnp<bits<5> op27_23, bits<2> op21_20, bits<4> op11_8, bit op6,
+                bit op4, InstrItinClass itin, string OpcodeStr,
+                string Dt, ValueType ResTy, ValueType OpTy,
+                SDPatternOperator IntOp, bit Commutable>
+  : N3Vnp<op27_23, op21_20, op11_8, op6, op4,
+          (outs QPR:$Vd), (ins DPR:$Vn, DPR:$Vm), N3RegFrm, itin, OpcodeStr, Dt,
+          ResTy, OpTy, IntOp, Commutable,
+          [(set QPR:$Vd, (ResTy (IntOp (OpTy DPR:$Vn), (OpTy DPR:$Vm))))]>;
+
 class N3VLIntSL<bit op24, bits<2> op21_20, bits<4> op11_8, InstrItinClass itin,
                 string OpcodeStr, string Dt,
                 ValueType ResTy, ValueType OpTy, SDPatternOperator IntOp>
@@ -3973,11 +4017,17 @@ defm VQADDu   : N3VInt_QHSD<1, 0, 0b0000, 1, N3RegFrm,
                             IIC_VBINi4D, IIC_VBINi4D, IIC_VBINi4Q, IIC_VBINi4Q,
                             "vqadd", "u", int_arm_neon_vqaddu, 1>;
 //   VADDHN   : Vector Add and Narrow Returning High Half (D = Q + Q)
-defm VADDHN   : N3VNInt_HSD<0,1,0b0100,0, "vaddhn", "i",
-                            int_arm_neon_vaddhn, 1>;
+defm VADDHN   : N3VNInt_HSD<0,1,0b0100,0, "vaddhn", "i", null_frag, 1>;
 //   VRADDHN  : Vector Rounding Add and Narrow Returning High Half (D = Q + Q)
 defm VRADDHN  : N3VNInt_HSD<1,1,0b0100,0, "vraddhn", "i",
                             int_arm_neon_vraddhn, 1>;
+
+def : Pat<(v8i8  (trunc (NEONvshru (add (v8i16 QPR:$Vn), QPR:$Vm), 8))),
+          (VADDHNv8i8 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v4i16 (trunc (NEONvshru (add (v4i32 QPR:$Vn), QPR:$Vm), 16))),
+          (VADDHNv4i16 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v2i32 (trunc (NEONvshru (add (v2i64 QPR:$Vn), QPR:$Vm), 32))),
+          (VADDHNv2i32 QPR:$Vn, QPR:$Vm)>;
 
 // Vector Multiply Operations.
 
@@ -4015,6 +4065,17 @@ def : Pat<(v4f32 (fmul (v4f32 QPR:$src1),
                            (v2f32 (EXTRACT_SUBREG QPR:$src2,
                                    (DSubReg_i32_reg imm:$lane))),
                            (SubReg_i32_lane imm:$lane)))>;
+
+
+def : Pat<(v2f32 (fmul DPR:$Rn, (NEONvdup (f32 SPR:$Rm)))),
+          (VMULslfd DPR:$Rn,
+            (INSERT_SUBREG (v2f32 (IMPLICIT_DEF)), SPR:$Rm, ssub_0),
+            (i32 0))>;
+def : Pat<(v4f32 (fmul QPR:$Rn, (NEONvdup (f32 SPR:$Rm)))),
+          (VMULslfq QPR:$Rn,
+            (INSERT_SUBREG (v2f32 (IMPLICIT_DEF)), SPR:$Rm, ssub_0),
+            (i32 0))>;
+
 
 //   VQDMULH  : Vector Saturating Doubling Multiply Returning High Half
 defm VQDMULH  : N3VInt_HS<0, 0, 0b1011, 0, N3RegFrm, IIC_VMULi16D, IIC_VMULi32D,
@@ -4061,12 +4122,18 @@ def : Pat<(v4i32 (int_arm_neon_vqrdmulh (v4i32 QPR:$src1),
                                   (SubReg_i32_lane imm:$lane)))>;
 
 //   VMULL    : Vector Multiply Long (integer and polynomial) (Q = D * D)
-defm VMULLs   : N3VL_QHS<0,1,0b1100,0, IIC_VMULi16D, IIC_VMULi32D,
-                         "vmull", "s", NEONvmulls, 1>;
-defm VMULLu   : N3VL_QHS<1,1,0b1100,0, IIC_VMULi16D, IIC_VMULi32D,
-                         "vmull", "u", NEONvmullu, 1>;
-def  VMULLp   : N3VLInt<0, 1, 0b00, 0b1110, 0, IIC_VMULi16D, "vmull", "p8",
-                        v8i16, v8i8, int_arm_neon_vmullp, 1>;
+let PostEncoderMethod = "NEONThumb2DataIPostEncoder",
+    DecoderNamespace = "NEONData" in {
+  defm VMULLs   : N3VL_QHS<0,1,0b1100,0, IIC_VMULi16D, IIC_VMULi32D,
+                           "vmull", "s", NEONvmulls, 1>;
+  defm VMULLu   : N3VL_QHS<1,1,0b1100,0, IIC_VMULi16D, IIC_VMULi32D,
+                           "vmull", "u", NEONvmullu, 1>;
+  def  VMULLp8   :  N3VLInt<0, 1, 0b00, 0b1110, 0, IIC_VMULi16D, "vmull", "p8",
+                            v8i16, v8i8, int_arm_neon_vmullp, 1>;
+  def  VMULLp64  : N3VLIntnp<0b00101, 0b10, 0b1110, 0, 0, NoItinerary,
+                          "vmull", "p64", v2i64, v1i64, int_arm_neon_vmullp, 1>,
+                    Requires<[HasV8, HasCrypto]>;
+}
 defm VMULLsls : N3VLSL_HS<0, 0b1010, IIC_VMULi16D, "vmull", "s", NEONvmulls>;
 defm VMULLslu : N3VLSL_HS<1, 0b1010, IIC_VMULi16D, "vmull", "u", NEONvmullu>;
 
@@ -4133,8 +4200,27 @@ defm VMLALslu : N3VLMulOpSL_HS<1, 0b0010, "vmlal", "u", NEONvmullu, add>;
 
 //   VQDMLAL  : Vector Saturating Doubling Multiply Accumulate Long (Q += D * D)
 defm VQDMLAL  : N3VLInt3_HS<0, 1, 0b1001, 0, IIC_VMACi16D, IIC_VMACi32D,
-                            "vqdmlal", "s", int_arm_neon_vqdmlal>;
-defm VQDMLALsl: N3VLInt3SL_HS<0, 0b0011, "vqdmlal", "s", int_arm_neon_vqdmlal>;
+                            "vqdmlal", "s", null_frag>;
+defm VQDMLALsl: N3VLInt3SL_HS<0, 0b0011, "vqdmlal", "s", null_frag>;
+
+def : Pat<(v4i32 (int_arm_neon_vqadds (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                                  (v4i16 DPR:$Vm))))),
+          (VQDMLALv4i32 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v2i64 (int_arm_neon_vqadds (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                                  (v2i32 DPR:$Vm))))),
+          (VQDMLALv2i64 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v4i32 (int_arm_neon_vqadds (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                (v4i16 (NEONvduplane (v4i16 DPR_8:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLALslv4i16 QPR:$src1, DPR:$Vn, DPR_8:$Vm, imm:$lane)>;
+def : Pat<(v2i64 (int_arm_neon_vqadds (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                (v2i32 (NEONvduplane (v2i32 DPR_VFP2:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLALslv2i32 QPR:$src1, DPR:$Vn, DPR_VFP2:$Vm, imm:$lane)>;
 
 //   VMLS     : Vector Multiply Subtract (integer and floating-point)
 defm VMLS     : N3VMulOp_QHS<1, 0, 0b1001, 0, IIC_VMACi16D, IIC_VMACi32D,
@@ -4190,8 +4276,27 @@ defm VMLSLslu : N3VLMulOpSL_HS<1, 0b0110, "vmlsl", "u", NEONvmullu, sub>;
 
 //   VQDMLSL  : Vector Saturating Doubling Multiply Subtract Long (Q -= D * D)
 defm VQDMLSL  : N3VLInt3_HS<0, 1, 0b1011, 0, IIC_VMACi16D, IIC_VMACi32D,
-                            "vqdmlsl", "s", int_arm_neon_vqdmlsl>;
-defm VQDMLSLsl: N3VLInt3SL_HS<0, 0b111, "vqdmlsl", "s", int_arm_neon_vqdmlsl>;
+                            "vqdmlsl", "s", null_frag>;
+defm VQDMLSLsl: N3VLInt3SL_HS<0, 0b111, "vqdmlsl", "s", null_frag>;
+
+def : Pat<(v4i32 (int_arm_neon_vqsubs (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                                  (v4i16 DPR:$Vm))))),
+          (VQDMLSLv4i32 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v2i64 (int_arm_neon_vqsubs (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                                  (v2i32 DPR:$Vm))))),
+          (VQDMLSLv2i64 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v4i32 (int_arm_neon_vqsubs (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                (v4i16 (NEONvduplane (v4i16 DPR_8:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLSLslv4i16 QPR:$src1, DPR:$Vn, DPR_8:$Vm, imm:$lane)>;
+def : Pat<(v2i64 (int_arm_neon_vqsubs (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                (v2i32 (NEONvduplane (v2i32 DPR_VFP2:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLSLslv2i32 QPR:$src1, DPR:$Vn, DPR_VFP2:$Vm, imm:$lane)>;
 
 // Fused Vector Multiply-Accumulate and Fused Multiply-Subtract Operations.
 def  VFMAfd   : N3VDMulOp<0, 0, 0b00, 0b1100, 1, IIC_VFMACD, "vfma", "f32",
@@ -4256,11 +4361,17 @@ defm VQSUBu   : N3VInt_QHSD<1, 0, 0b0010, 1, N3RegFrm,
                             IIC_VSUBi4D, IIC_VSUBi4D, IIC_VSUBi4Q, IIC_VSUBi4Q,
                             "vqsub", "u", int_arm_neon_vqsubu, 0>;
 //   VSUBHN   : Vector Subtract and Narrow Returning High Half (D = Q - Q)
-defm VSUBHN   : N3VNInt_HSD<0,1,0b0110,0, "vsubhn", "i",
-                            int_arm_neon_vsubhn, 0>;
+defm VSUBHN   : N3VNInt_HSD<0,1,0b0110,0, "vsubhn", "i", null_frag, 0>;
 //   VRSUBHN  : Vector Rounding Subtract and Narrow Returning High Half (D=Q-Q)
 defm VRSUBHN  : N3VNInt_HSD<1,1,0b0110,0, "vrsubhn", "i",
                             int_arm_neon_vrsubhn, 0>;
+
+def : Pat<(v8i8  (trunc (NEONvshru (sub (v8i16 QPR:$Vn), QPR:$Vm), 8))),
+          (VSUBHNv8i8 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v4i16 (trunc (NEONvshru (sub (v4i32 QPR:$Vn), QPR:$Vm), 16))),
+          (VSUBHNv4i16 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v2i32 (trunc (NEONvshru (sub (v2i64 QPR:$Vn), QPR:$Vm), 32))),
+          (VSUBHNv2i32 QPR:$Vn, QPR:$Vm)>;
 
 // Vector Comparisons.
 
@@ -5744,9 +5855,9 @@ multiclass VRINT_FPI<string op, bits<3> op9_7, SDPatternOperator Int> {
     }
   }
 
-  def : InstAlias<!strconcat("vrint", op, ".f32.f32\t$Dd, $Dm"),
+  def : NEONInstAlias<!strconcat("vrint", op, ".f32.f32\t$Dd, $Dm"),
                   (!cast<Instruction>(NAME#"D") DPR:$Dd, DPR:$Dm)>;
-  def : InstAlias<!strconcat("vrint", op, ".f32.f32\t$Qd, $Qm"),
+  def : NEONInstAlias<!strconcat("vrint", op, ".f32.f32\t$Qd, $Qm"),
                   (!cast<Instruction>(NAME#"Q") QPR:$Qd, QPR:$Qm)>;
 }
 
@@ -5756,6 +5867,49 @@ defm VRINTAN : VRINT_FPI<"a", 0b010, int_arm_neon_vrinta>;
 defm VRINTZN : VRINT_FPI<"z", 0b011, int_arm_neon_vrintz>;
 defm VRINTMN : VRINT_FPI<"m", 0b101, int_arm_neon_vrintm>;
 defm VRINTPN : VRINT_FPI<"p", 0b111, int_arm_neon_vrintp>;
+
+// Cryptography instructions
+let PostEncoderMethod = "NEONThumb2DataIPostEncoder",
+    DecoderNamespace = "v8Crypto" in {
+  class AES<string op, bit op7, bit op6, SDPatternOperator Int>
+    : N2VQIntXnp<0b00, 0b00, 0b011, op6, op7, NoItinerary,
+                 !strconcat("aes", op), "8", v16i8, v16i8, Int>,
+      Requires<[HasV8, HasCrypto]>;
+  class AES2Op<string op, bit op7, bit op6, SDPatternOperator Int>
+    : N2VQIntX2np<0b00, 0b00, 0b011, op6, op7, NoItinerary,
+                 !strconcat("aes", op), "8", v16i8, v16i8, Int>,
+      Requires<[HasV8, HasCrypto]>;
+  class N2SHA<string op, bits<2> op17_16, bits<3> op10_8, bit op7, bit op6,
+              SDPatternOperator Int>
+    : N2VQIntXnp<0b10, op17_16, op10_8, op6, op7, NoItinerary,
+                 !strconcat("sha", op), "32", v4i32, v4i32, Int>,
+      Requires<[HasV8, HasCrypto]>;
+  class N2SHA2Op<string op, bits<2> op17_16, bits<3> op10_8, bit op7, bit op6,
+              SDPatternOperator Int>
+    : N2VQIntX2np<0b10, op17_16, op10_8, op6, op7, NoItinerary,
+                 !strconcat("sha", op), "32", v4i32, v4i32, Int>,
+      Requires<[HasV8, HasCrypto]>;
+  class N3SHA3Op<string op, bits<5> op27_23, bits<2> op21_20, SDPatternOperator Int>
+    : N3VQInt3np<op27_23, op21_20, 0b1100, 1, 0, N3RegFrm, NoItinerary,
+                !strconcat("sha", op), "32", v4i32, v4i32, Int, 0>,
+      Requires<[HasV8, HasCrypto]>;
+}
+
+def AESD : AES2Op<"d", 0, 1, int_arm_neon_aesd>;
+def AESE : AES2Op<"e", 0, 0, int_arm_neon_aese>;
+def AESIMC : AES<"imc", 1, 1, int_arm_neon_aesimc>;
+def AESMC : AES<"mc", 1, 0, int_arm_neon_aesmc>;
+
+def SHA1H : N2SHA<"1h", 0b01, 0b010, 1, 1, int_arm_neon_sha1h>;
+def SHA1SU1 : N2SHA2Op<"1su1", 0b10, 0b011, 1, 0, int_arm_neon_sha1su1>;
+def SHA256SU0 : N2SHA2Op<"256su0", 0b10, 0b011, 1, 1, int_arm_neon_sha256su0>;
+def SHA1C : N3SHA3Op<"1c", 0b00100, 0b00, int_arm_neon_sha1c>;
+def SHA1M : N3SHA3Op<"1m", 0b00100, 0b10, int_arm_neon_sha1m>;
+def SHA1P : N3SHA3Op<"1p", 0b00100, 0b01, int_arm_neon_sha1p>;
+def SHA1SU0 : N3SHA3Op<"1su0", 0b00100, 0b11, int_arm_neon_sha1su0>;
+def SHA256H : N3SHA3Op<"256h", 0b00110, 0b00, int_arm_neon_sha256h>;
+def SHA256H2 : N3SHA3Op<"256h2", 0b00110, 0b01, int_arm_neon_sha256h2>;
+def SHA256SU1 : N3SHA3Op<"256su1", 0b00110, 0b10, int_arm_neon_sha256su1>;
 
 //===----------------------------------------------------------------------===//
 // NEON instructions for single-precision FP math

@@ -101,8 +101,8 @@ int X86RegisterInfo::getCompactUnwindRegNum(unsigned RegNum, bool isEH) const {
 
 bool
 X86RegisterInfo::trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
-  // Only enable when post-RA scheduling is enabled and this is needed.
-  return TM.getSubtargetImpl()->postRAScheduler();
+  // ExeDepsFixer and PostRAScheduler require liveness.
+  return true;
 }
 
 int
@@ -510,14 +510,6 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 unsigned X86RegisterInfo::getFrameRegister(const MachineFunction &MF) const {
   const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
   return TFI->hasFP(MF) ? FramePtr : StackPtr;
-}
-
-unsigned X86RegisterInfo::getEHExceptionRegister() const {
-  llvm_unreachable("What is the exception register");
-}
-
-unsigned X86RegisterInfo::getEHHandlerRegister() const {
-  llvm_unreachable("What is the exception handler register");
 }
 
 namespace llvm {

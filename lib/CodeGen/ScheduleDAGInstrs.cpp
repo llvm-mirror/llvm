@@ -185,9 +185,6 @@ void ScheduleDAGInstrs::enterRegion(MachineBasicBlock *bb,
   RegionBegin = begin;
   RegionEnd = end;
   NumRegionInstrs = regioninstrs;
-  MISUnitMap.clear();
-
-  ScheduleDAG::clearDAG();
 }
 
 /// Close the current scheduling region. Don't clear any state in case the
@@ -408,11 +405,18 @@ void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
   unsigned Reg = MI->getOperand(OperIdx).getReg();
 
   // Record this local VReg use.
-  VRegUses.insert(VReg2SUnit(Reg, SU));
+  VReg2UseMap::iterator UI = VRegUses.find(Reg);
+  for (; UI != VRegUses.end(); ++UI) {
+    if (UI->SU == SU)
+      break;
+  }
+  if (UI == VRegUses.end())
+    VRegUses.insert(VReg2SUnit(Reg, SU));
 
   // Lookup this operand's reaching definition.
   assert(LIS && "vreg dependencies requires LiveIntervals");
-  LiveRangeQuery LRQ(LIS->getInterval(Reg), LIS->getInstructionIndex(MI));
+  LiveQueryResult LRQ
+    = LIS->getInterval(Reg).Query(LIS->getInstructionIndex(MI));
   VNInfo *VNI = LRQ.valueIn();
 
   // VNI will be valid because MachineOperand::readsReg() is checked by caller.
@@ -640,8 +644,7 @@ void addChainDependency (AliasAnalysis *AA, const MachineFrameInfo *MFI,
                          bool isNormalMemory = false) {
   // If this is a false dependency,
   // do not add the edge, but rememeber the rejected node.
-  if (!EnableAASchedMI ||
-      MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
+  if (!AA || MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
     SDep Dep(SUa, isNormalMemory ? SDep::MayAliasMem : SDep::Barrier);
     Dep.setLatency(TrueMemOrderLatency);
     SUb->addPred(Dep);
@@ -691,9 +694,21 @@ void ScheduleDAGInstrs::initSUnits() {
 /// DAG builder is an efficient place to do it because it already visits
 /// operands.
 void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
-                                        RegPressureTracker *RPTracker) {
+                                        RegPressureTracker *RPTracker,
+                                        PressureDiffs *PDiffs) {
+  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+  bool UseAA = EnableAASchedMI.getNumOccurrences() > 0 ? EnableAASchedMI
+                                                       : ST.useAA();
+  AliasAnalysis *AAForDep = UseAA ? AA : 0;
+
+  MISUnitMap.clear();
+  ScheduleDAG::clearDAG();
+
   // Create an SUnit for each real instruction.
   initSUnits();
+
+  if (PDiffs)
+    PDiffs->init(SUnits.size());
 
   // We build scheduling units by walking a block's instruction list from bottom
   // to top.
@@ -742,16 +757,17 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       DbgMI = MI;
       continue;
     }
+    SUnit *SU = MISUnitMap[MI];
+    assert(SU && "No SUnit mapped to this MI");
+
     if (RPTracker) {
-      RPTracker->recede();
+      PressureDiff *PDiff = PDiffs ? &(*PDiffs)[SU->NodeNum] : 0;
+      RPTracker->recede(/*LiveUses=*/0, PDiff);
       assert(RPTracker->getPos() == prior(MII) && "RPTracker can't find MI");
     }
 
     assert((CanHandleTerminators || (!MI->isTerminator() && !MI->isLabel())) &&
            "Cannot schedule terminators or labels!");
-
-    SUnit *SU = MISUnitMap[MI];
-    assert(SU && "No SUnit mapped to this MI");
 
     // Add register-based dependencies (data, anti, and output).
     bool HasVRegDef = false;
@@ -830,20 +846,20 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         unsigned ChainLatency = 0;
         if (AliasChain->getInstr()->mayLoad())
           ChainLatency = TrueMemOrderLatency;
-        addChainDependency(AA, MFI, SU, AliasChain, RejectMemNodes,
+        addChainDependency(AAForDep, MFI, SU, AliasChain, RejectMemNodes,
                            ChainLatency);
       }
       AliasChain = SU;
       for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
-        addChainDependency(AA, MFI, SU, PendingLoads[k], RejectMemNodes,
+        addChainDependency(AAForDep, MFI, SU, PendingLoads[k], RejectMemNodes,
                            TrueMemOrderLatency);
       for (MapVector<const Value *, SUnit *>::iterator I = AliasMemDefs.begin(),
            E = AliasMemDefs.end(); I != E; ++I)
-        addChainDependency(AA, MFI, SU, I->second, RejectMemNodes);
+        addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes);
       for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
            AliasMemUses.begin(), E = AliasMemUses.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i)
-          addChainDependency(AA, MFI, SU, I->second[i], RejectMemNodes,
+          addChainDependency(AAForDep, MFI, SU, I->second[i], RejectMemNodes,
                              TrueMemOrderLatency);
       }
       adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
@@ -876,7 +892,8 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         MapVector<const Value *, SUnit *>::iterator IE =
           ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
         if (I != IE) {
-          addChainDependency(AA, MFI, SU, I->second, RejectMemNodes, 0, true);
+          addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes,
+                             0, true);
           I->second = SU;
         } else {
           if (ThisMayAlias)
@@ -891,7 +908,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
           ((ThisMayAlias) ? AliasMemUses.end() : NonAliasMemUses.end());
         if (J != JE) {
           for (unsigned i = 0, e = J->second.size(); i != e; ++i)
-            addChainDependency(AA, MFI, SU, J->second[i], RejectMemNodes,
+            addChainDependency(AAForDep, MFI, SU, J->second[i], RejectMemNodes,
                                TrueMemOrderLatency, true);
           J->second.clear();
         }
@@ -900,11 +917,11 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         // Add dependencies from all the PendingLoads, i.e. loads
         // with no underlying object.
         for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
-          addChainDependency(AA, MFI, SU, PendingLoads[k], RejectMemNodes,
+          addChainDependency(AAForDep, MFI, SU, PendingLoads[k], RejectMemNodes,
                              TrueMemOrderLatency);
         // Add dependence on alias chain, if needed.
         if (AliasChain)
-          addChainDependency(AA, MFI, SU, AliasChain, RejectMemNodes);
+          addChainDependency(AAForDep, MFI, SU, AliasChain, RejectMemNodes);
         // But we also should check dependent instructions for the
         // SU in question.
         adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
@@ -934,7 +951,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
           // potentially aliasing stores.
           for (MapVector<const Value *, SUnit *>::iterator I =
                  AliasMemDefs.begin(), E = AliasMemDefs.end(); I != E; ++I)
-            addChainDependency(AA, MFI, SU, I->second, RejectMemNodes);
+            addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes);
 
           PendingLoads.push_back(SU);
           MayAlias = true;
@@ -956,7 +973,8 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
           MapVector<const Value *, SUnit *>::iterator IE =
             ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
           if (I != IE)
-            addChainDependency(AA, MFI, SU, I->second, RejectMemNodes, 0, true);
+            addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes,
+                               0, true);
           if (ThisMayAlias)
             AliasMemUses[V].push_back(SU);
           else
@@ -966,7 +984,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
           adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes, /*Latency=*/0);
         // Add dependencies on alias and barrier chains, if needed.
         if (MayAlias && AliasChain)
-          addChainDependency(AA, MFI, SU, AliasChain, RejectMemNodes);
+          addChainDependency(AAForDep, MFI, SU, AliasChain, RejectMemNodes);
         if (BarrierChain)
           BarrierChain->addPred(SDep(SU, SDep::Barrier));
       }
@@ -979,65 +997,6 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   Uses.clear();
   VRegDefs.clear();
   PendingLoads.clear();
-}
-
-/// Compute the max cyclic critical path through the DAG. For loops that span
-/// basic blocks, MachineTraceMetrics should be used for this instead.
-unsigned ScheduleDAGInstrs::computeCyclicCriticalPath() {
-  // This only applies to single block loop.
-  if (!BB->isSuccessor(BB))
-    return 0;
-
-  unsigned MaxCyclicLatency = 0;
-  // Visit each live out vreg def to find def/use pairs that cross iterations.
-  for (SUnit::const_pred_iterator
-         PI = ExitSU.Preds.begin(), PE = ExitSU.Preds.end(); PI != PE; ++PI) {
-    MachineInstr *MI = PI->getSUnit()->getInstr();
-    for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-      const MachineOperand &MO = MI->getOperand(i);
-      if (!MO.isReg() || !MO.isDef())
-        break;
-      unsigned Reg = MO.getReg();
-      if (!Reg || TRI->isPhysicalRegister(Reg))
-        continue;
-
-      const LiveInterval &LI = LIS->getInterval(Reg);
-      unsigned LiveOutHeight = PI->getSUnit()->getHeight();
-      unsigned LiveOutDepth = PI->getSUnit()->getDepth() + PI->getLatency();
-      // Visit all local users of the vreg def.
-      for (VReg2UseMap::iterator
-             UI = VRegUses.find(Reg); UI != VRegUses.end(); ++UI) {
-        if (UI->SU == &ExitSU)
-          continue;
-
-        // Only consider uses of the phi.
-        LiveRangeQuery LRQ(LI, LIS->getInstructionIndex(UI->SU->getInstr()));
-        if (!LRQ.valueIn()->isPHIDef())
-          continue;
-
-        // Cheat a bit and assume that a path spanning two iterations is a
-        // cycle, which could overestimate in strange cases. This allows cyclic
-        // latency to be estimated as the minimum height or depth slack.
-        unsigned CyclicLatency = 0;
-        if (LiveOutDepth > UI->SU->getDepth())
-          CyclicLatency = LiveOutDepth - UI->SU->getDepth();
-        unsigned LiveInHeight = UI->SU->getHeight() + PI->getLatency();
-        if (LiveInHeight > LiveOutHeight) {
-          if (LiveInHeight - LiveOutHeight < CyclicLatency)
-            CyclicLatency = LiveInHeight - LiveOutHeight;
-        }
-        else
-          CyclicLatency = 0;
-        DEBUG(dbgs() << "Cyclic Path: SU(" << PI->getSUnit()->NodeNum
-              << ") -> SU(" << UI->SU->NodeNum << ") = "
-              << CyclicLatency << "\n");
-        if (CyclicLatency > MaxCyclicLatency)
-          MaxCyclicLatency = CyclicLatency;
-      }
-    }
-  }
-  DEBUG(dbgs() << "Cyclic Critical Path: " << MaxCyclicLatency << "\n");
-  return MaxCyclicLatency;
 }
 
 void ScheduleDAGInstrs::dumpNode(const SUnit *SU) const {

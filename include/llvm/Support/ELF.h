@@ -650,7 +650,7 @@ enum {
 };
 
 // ARM Specific e_flags
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   EF_ARM_SOFT_FLOAT =     0x00000200U,
   EF_ARM_VFP_FLOAT =      0x00000400U,
   EF_ARM_EABI_UNKNOWN =   0x00000000U,
@@ -800,7 +800,7 @@ enum {
 };
 
 // Mips Specific e_flags
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   EF_MIPS_NOREORDER = 0x00000001, // Don't reorder instructions
   EF_MIPS_PIC       = 0x00000002, // Position independent code
   EF_MIPS_CPIC      = 0x00000004, // Call object with Position independent code
@@ -1116,7 +1116,7 @@ enum {
 };
 
 // Section types.
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   SHT_NULL          = 0,  // No associated section (inactive entry).
   SHT_PROGBITS      = 1,  // Program-defined contents.
   SHT_SYMTAB        = 2,  // Symbol table.
@@ -1164,7 +1164,7 @@ enum {
 };
 
 // Section flags.
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   // Section data should be writable during execution.
   SHF_WRITE = 0x1,
 
@@ -1195,6 +1195,9 @@ enum {
 
   // This section holds Thread-Local Storage.
   SHF_TLS = 0x400U,
+
+  // This section is excluded from the final executable or shared library.
+  SHF_EXCLUDE = 0x80000000U,
 
   // Start of target-specific flags.
 
@@ -1231,7 +1234,7 @@ enum {
 };
 
 // Section Group Flags
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   GRP_COMDAT = 0x1,
   GRP_MASKOS = 0x0ff00000,
   GRP_MASKPROC = 0xf0000000
@@ -1444,11 +1447,16 @@ enum {
   PT_ARM_ARCHEXT = 0x70000000, // Platform architecture compatibility info
   // These all contain stack unwind tables.
   PT_ARM_EXIDX   = 0x70000001,
-  PT_ARM_UNWIND  = 0x70000001
+  PT_ARM_UNWIND  = 0x70000001,
+
+  // MIPS program header types.
+  PT_MIPS_REGINFO  = 0x70000000,  // Register usage information.
+  PT_MIPS_RTPROC   = 0x70000001,  // Runtime procedure table.
+  PT_MIPS_OPTIONS  = 0x70000002   // Options segment.
 };
 
 // Segment flag bits.
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   PF_X        = 1,         // Execute
   PF_W        = 2,         // Write
   PF_R        = 4,         // Read
