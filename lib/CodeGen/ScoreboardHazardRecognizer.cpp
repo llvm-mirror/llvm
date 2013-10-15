@@ -165,7 +165,7 @@ ScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
         DEBUG(dbgs() << "*** Hazard in cycle +" << StageCycle << ", ");
         DEBUG(dbgs() << "SU(" << SU->NodeNum << "): ");
         DEBUG(DAG->dumpNode(SU));
-        return NoopHazard;
+        return Hazard;
       }
     }
 

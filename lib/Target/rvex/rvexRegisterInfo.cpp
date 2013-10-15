@@ -45,6 +45,12 @@ rvexRegisterInfo::rvexRegisterInfo(const rvexSubtarget &ST,
                                    const TargetInstrInfo &tii)
   : rvexGenRegisterInfo(rvex::LR), Subtarget(ST), TII(tii) {}
 
+const TargetRegisterClass*
+rvexRegisterInfo::getPointerRegClass(const MachineFunction &MF,
+                                      unsigned Kind) const {
+  return &rvex::CPURegsRegClass;
+}
+
 //===----------------------------------------------------------------------===//
 // Callee Saved Registers methods
 //===----------------------------------------------------------------------===//

@@ -384,7 +384,8 @@ int rvexBuildDFA (std::vector<DFAState>& isnStages) {
     }
     
     // Print out the table.
-    D.writeTableAndAPI("revx");
+    D.writeTableAndAPI("rvex");
+    return 0;
 }
 
 

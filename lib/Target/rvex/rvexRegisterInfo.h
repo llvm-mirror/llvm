@@ -31,6 +31,9 @@ struct rvexRegisterInfo : public rvexGenRegisterInfo {
 
   rvexRegisterInfo(const rvexSubtarget &Subtarget, const TargetInstrInfo &tii);
 
+  const TargetRegisterClass *getPointerRegClass(const MachineFunction &MF,
+                                                unsigned Kind) const;
+
   /// getRegisterNumbering - Given the enum value for some register, e.g.
   /// rvex::RA, return the number that it corresponds to (e.g. 31).
   static unsigned getRegisterNumbering(unsigned RegEnum);
