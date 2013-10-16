@@ -21,59 +21,70 @@ include "rvexInstrFormats.td"
 // rvex profiles and nodes
 //===----------------------------------------------------------------------===//
 
-def SDT_rvexRet          : SDTypeProfile<0, 1, [SDTCisInt<0>]>;
+def SDT_rvexRet           : SDTypeProfile<0, 1, 
+                                          [SDTCisInt<0>]>;
 
-def SDT_rvexDivRem       : SDTypeProfile<0, 2,
-                                         [SDTCisInt<0>,
+def SDT_rvexDivRem        : SDTypeProfile<0, 2,
+                                          [SDTCisInt<0>,
                                           SDTCisSameAs<0, 1>]>;                                      
 
-def SDT_rvexJmpLink      : SDTypeProfile<0, 1, [SDTCisVT<0, iPTR>]>;
+def SDT_rvexJmpLink       : SDTypeProfile<0, 1,
+                                          [SDTCisVT<0, iPTR>]>;
 
-def SDT_rvexCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>]>;
-def SDT_rvexCallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
+def SDT_slct              : SDTypeProfile<1, 3, []>;
+
+// Type profile for add carry generate instruction
+// (outs result, carry), (ins ra, rb, carry_in)
+def SDT_rvexAddc          : SDTypeProfile<2, 3, 
+                                          [//SDTCisVT<0, i32>, 
+                                          //SDTCisVT<1, i1>,
+                                          SDTCisSameAs<0, 2>,
+                                          SDTCisSameAs<0, 3>,
+                                          SDTCisInt<0>, SDTCisVT<0, i32>,
+                                          SDTCisSameAs<1,4>,
+                                          SDTCisInt<1>, SDTCisVT<1, i1>]>;
+                                          //SDTCisOpSmallerThanOp<1,2>,
+                                          //SDTCisOpSmallerThanOp<1,3>,
+                                          //SDTCisOpSmallerThanOp<4,0>]>;                                          
+
+def SDT_rvexCallSeqStart  : SDCallSeqStart<[SDTCisVT<0, i32>]>;
+def SDT_rvexCallSeqEnd    : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
 
 // Call
-def rvexJmpLink : SDNode<"rvexISD::JmpLink",SDT_rvexJmpLink,
-                         [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
-                          SDNPVariadic]>;
+def rvexJmpLink           : SDNode<"rvexISD::JmpLink",
+                                          SDT_rvexJmpLink,
+                                          [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                                          SDNPVariadic]>;
 
 // Hi and Lo nodes are used to handle global addresses. Used on
 // rvexISelLowering to lower stuff like GlobalAddress, ExternalSymbol
 // static model. (nothing to do with rvex Registers Hi and Lo)
-def rvexGPRel : SDNode<"rvexISD::GPRel", SDTIntUnaryOp>;
+def rvexGPRel             : SDNode<"rvexISD::GPRel", SDTIntUnaryOp>;
 
 // Return
-def rvexRet : SDNode<"rvexISD::Ret", SDT_rvexRet, [SDNPHasChain,
-                     SDNPOptInGlue, SDNPVariadic]>;
+def rvexRet               : SDNode<"rvexISD::Ret", SDT_rvexRet, 
+                                          [SDNPHasChain,
+                                          SDNPOptInGlue, SDNPVariadic]>;
 
 // These are target-independent nodes, but have target-specific formats.
-def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_rvexCallSeqStart,
-                           [SDNPHasChain, SDNPOutGlue]>;
-def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_rvexCallSeqEnd,
-                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+def callseq_start         : SDNode<"ISD::CALLSEQ_START", SDT_rvexCallSeqStart,
+                                          [SDNPHasChain, SDNPOutGlue]>;
+def callseq_end           : SDNode<"ISD::CALLSEQ_END", SDT_rvexCallSeqEnd,
+                                          [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 
-// DivRem(u) nodes
-def rvexDivRem    : SDNode<"rvexISD::DivRem", SDT_rvexDivRem,
-                           [SDNPOutGlue]>;
-def rvexDivRemU   : SDNode<"rvexISD::DivRemU", SDT_rvexDivRem,
-                           [SDNPOutGlue]>;
+def rvexSlct              : SDNode<"rvexISD::Slct", SDT_slct>;
 
-// Type profile for add carry generate instruction
-// (outs result, carry), (ins ra, rb, carry_in)
-def SDT_rvexAddc         : SDTypeProfile<2, 3, [//SDTCisVT<0, i32>, 
-                                              //SDTCisVT<1, i1>,
-                                              SDTCisSameAs<0, 2>,
-                                              SDTCisSameAs<0, 3>,
-                                              SDTCisInt<0>, SDTCisVT<0, i32>,
-                                              SDTCisSameAs<1,4>,
-                                              SDTCisInt<1>, SDTCisVT<1, i1>]>;
-                                              //SDTCisOpSmallerThanOp<1,2>,
-                                              //SDTCisOpSmallerThanOp<1,3>,
-                                              //SDTCisOpSmallerThanOp<4,0>]>;
-def rvexAddc             : SDNode<"rvexISD::Addc", SDT_rvexAddc>;
-def rvexAdde             : SDNode<"rvexISD::Adde", SDT_rvexAddc>;
+def rvexAddc              : SDNode<"rvexISD::Addc", SDT_rvexAddc>;
+def rvexAdde              : SDNode<"rvexISD::Adde", SDT_rvexAddc>;
 
-def rvexDivs             : SDNode<"rvexISD::Divs", SDT_rvexAddc>;                              
+def rvexDivs              : SDNode<"rvexISD::Divs", SDT_rvexAddc>;
+
+def rvexMpyllu            : SDNode<"rvexISD::Mpyllu", SDTIntBinOp, []>;
+def rvexMpylhu            : SDNode<"rvexISD::Mpylhu", SDTIntBinOp, []>;
+def rvexMpyhhu            : SDNode<"rvexISD::Mpyhhu", SDTIntBinOp, []>;
+def rvexMpyll             : SDNode<"rvexISD::Mpyll", SDTIntBinOp, []>;
+def rvexMpylh             : SDNode<"rvexISD::Mpylh", SDTIntBinOp, []>;
+def rvexMpyhh             : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;                              
 
 
 //===----------------------------------------------------------------------===//
@@ -90,7 +101,6 @@ def brtarget    : Operand<OtherVT> {
 def calltarget  : Operand<iPTR> {
   let EncoderMethod = "getJumpTargetOpValue";
 }
-
 
 // Signed Operand
 def simm16      : Operand<i32> {
@@ -217,9 +227,27 @@ class ArithLogicC<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
+// Arithmetic instructions with no pattern
+class ArithLogicS<bits<8> op, string instr_asm,
+                  InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins RC:$rb, RC:$rc),
+     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
+     [], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
 
-
-
+// Arithmetic and logical instructions with 3 register operands.
+class ArithLogicSi<bits<8> op, string instr_asm,
+                  InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins RC:$rb, i32imm:$rc),
+     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
+     [], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
 
 // Move immediate imm16 to register ra.
 class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
@@ -246,15 +274,6 @@ class shift_rotate_imm<bits<8> op, bits<4> isRotate, string instr_asm,
 class shift_rotate_imm32<bits<8> func, bits<4> isRotate, string instr_asm,
                          SDNode OpNode>:
   shift_rotate_imm<func, isRotate, instr_asm, OpNode, shamt, CPURegs>;
-
-// Load Upper Imediate
-class LoadUpper<bits<8> op, string instr_asm, RegisterClass RC, Operand Imm>:
-  FL<op, (outs RC:$ra), (ins Imm:$imm16),
-     !strconcat(instr_asm, "\t\t$ra = $imm16"), [], IIAlu, TypeIIAlu> {
-  let rb = 0;
-  let neverHasSideEffects = 1;
-  let isReMaterializable = 1;
-}
 
 class FMem<bits<8> op, dag outs, dag ins, string asmstr, list<dag> pattern,
           InstrItinClass itin, CType type>: FL<op, outs, ins, asmstr, pattern, itin, type> {
@@ -292,6 +311,30 @@ multiclass LoadM32<bits<8> op, string instr_asm, PatFrag OpNode,
 multiclass StoreM32<bits<8> op, string instr_asm, PatFrag OpNode,
                     bit Pseudo = 0> {
   def #NAME# : StoreM<op, instr_asm, OpNode, CPURegs, mem, Pseudo>;
+}
+
+// Arithmetic and logical instructions with 3 register operands and 2 returns.
+// Used for ADDCG and DIVS
+class SelectRR<bits<8> op, string instr_asm, SDNode OpNode,
+                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins BRRegs:$ci, RC:$rb, RC:$rc),
+     !strconcat(instr_asm, "\t$ra = $ci, $rb, $rc"),
+     [(set RC:$ra, (OpNode BRRegs:$ci, RC:$rb, RC:$rc))], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
+
+// Arithmetic and logical instructions with 3 register operands and 2 returns.
+// Used for ADDCG and DIVS
+class SelectRI<bits<8> op, string instr_asm, SDNode OpNode,
+                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins BRRegs:$ci, RC:$rb, i32imm:$rc),
+     !strconcat(instr_asm, "\t$ra = $ci, $rb, $rc"),
+     [(set RC:$ra, (OpNode BRRegs:$ci, RC:$rb, imm:$rc))], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
 }
 
 // Conditional Branch
@@ -375,123 +418,95 @@ def ADJCALLSTACKUP   : rvexPseudo<(outs), (ins uimm16:$amt1, uimm16:$amt2),
 
 /// Load and Store Instructions
 ///  aligned
-defm LD     : LoadM32<0x00,  "ldw ",  load_a>;
-defm ST     : StoreM32<0x01, "stw ",  store_a>;
-defm LB     : LoadM32<0x03, "ldb ",  sextloadi8>;
-defm LBu    : LoadM32<0x04, "ldbu", zextloadi8>;
-defm SB     : StoreM32<0x05, "stb ", truncstorei8>;
-defm LH     : LoadM32<0x06, "ldh ",  sextloadi16_a>;
-defm LHu    : LoadM32<0x07, "ldhu", zextloadi16_a>;
-defm SH     : StoreM32<0x08, "sth ", truncstorei16_a>;
+defm LD         : LoadM32<0x00,  "ldw ",  load_a>;
+defm ST         : StoreM32<0x01, "stw ",  store_a>;
+defm LB         : LoadM32<0x03, "ldb ",  sextloadi8>;
+defm LBu        : LoadM32<0x04, "ldbu", zextloadi8>;
+defm SB         : StoreM32<0x05, "stb ", truncstorei8>;
+defm LH         : LoadM32<0x06, "ldh ",  sextloadi16_a>;
+defm LHu        : LoadM32<0x07, "ldhu", zextloadi16_a>;
+defm SH         : StoreM32<0x08, "sth ", truncstorei16_a>;
 
 /// Arithmetic Instructions (ALU Immediate)
 //def MOV     
-def LDI     : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
-def MOV     : MoveImm<0x08, "mov ", add, simm16, immSExt32, CPURegs>;
-def ADDiu   : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
-def XORiu   : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
+def LDI         : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
+def MOV         : MoveImm<0x08, "mov ", add, simm16, immSExt32, CPURegs>;
+def ADDiu       : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
+def XORiu       : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 //Imm types
-def ANDi   : ArithLogicI<0x09, "and ", and, simm16, immSExt16, CPURegs>;
+def ANDi        : ArithLogicI<0x09, "and ", and, simm16, immSExt16, CPURegs>;
+def ORi         : ArithLogicI<0x09, "or  ", or, simm16, immSExt16, CPURegs>;
+def XORi        : ArithLogicI<0x09, "xor ", xor, simm16, immSExt16, CPURegs>;
 
 let isReturn=1 in
-def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
+def RETURN      : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 
 /// Arithmetic Instructions (3-Operand, R-Type)
-def ADD     : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
-def SUB     : ArithLogicR<0x14, "sub ", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
-def AND     : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
-def OR      : ArithLogicR<0x19, "or  ", or, IIAlu, CPURegs, 1, TypeIIAlu>;
-def XOR     : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
+def ADD         : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
+def SUB         : ArithLogicR<0x14, "sub ", sub, IIAlu, CPURegs, 1, TypeIIAlu>;
+def AND         : ArithLogicR<0x18, "and ", and, IIAlu, CPURegs, 1, TypeIIAlu>;
+def OR          : ArithLogicR<0x19, "or  ", or, IIAlu, CPURegs, 1, TypeIIAlu>;
+def XOR         : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 def rvexORC     : SDNode<"rvexISD::Orc", SDTIntBinOp, []>;
 def rvexMAX     : SDNode<"rvexISD::Max", SDTIntBinOp, []>;
 def rvexMAXU    : SDNode<"rvexISD::Maxu", SDTIntBinOp, []>;
 def rvexMIN     : SDNode<"rvexISD::Min", SDTIntBinOp, []>;
 def rvexMINU    : SDNode<"rvexISD::Minu", SDTIntBinOp, []>;
-def ORC     : ArithLogicR<0x1A, "orc ", rvexORC, IIAlu, CPURegs, 1, TypeIIAlu>;
-def MAX     : ArithLogicR<0x1A, "max ", rvexMAX, IIAlu, CPURegs, 1, TypeIIAlu>;
-def MAXU    : ArithLogicR<0x1A, "maxu", rvexMAXU, IIAlu, CPURegs, 1, TypeIIAlu>;
-def MIN     : ArithLogicR<0x1A, "min ", rvexMIN, IIAlu, CPURegs, 1, TypeIIAlu>;
-def MINU    : ArithLogicR<0x1A, "minu", rvexMINU, IIAlu, CPURegs, 1, TypeIIAlu>;
+def ORC         : ArithLogicR<0x1A, "orc ", rvexORC, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MAX         : ArithLogicR<0x1A, "max ", rvexMAX, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MAXU        : ArithLogicR<0x1A, "maxu", rvexMAXU, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MIN         : ArithLogicR<0x1A, "min ", rvexMIN, IIAlu, CPURegs, 1, TypeIIAlu>;
+def MINU        : ArithLogicR<0x1A, "minu", rvexMINU, IIAlu, CPURegs, 1, TypeIIAlu>;
 
-// Arithmetic and logical instructions with 3 register operands and 2 returns.
-// Used for ADDCG and DIVS
-class SelectRR<bits<8> op, string instr_asm, SDNode OpNode,
-                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
-  FA<op, (outs RC:$ra), (ins BRRegs:$ci, RC:$rb, RC:$rc),
-     !strconcat(instr_asm, "\t$ra = $ci, $rb, $rc"),
-     [(set RC:$ra, (OpNode BRRegs:$ci, RC:$rb, RC:$rc))], itin, type> {
-  let shamt = 0;
-  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
-  let isReMaterializable = 1;
-}
+def SLCTrr      : SelectRR<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def SLCTri      : SelectRI<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
 
-// Arithmetic and logical instructions with 3 register operands and 2 returns.
-// Used for ADDCG and DIVS
-class SelectRI<bits<8> op, string instr_asm, SDNode OpNode,
-                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
-  FA<op, (outs RC:$ra), (ins BRRegs:$ci, RC:$rb, i32imm:$rc),
-     !strconcat(instr_asm, "\t$ra = $ci, $rb, $rc"),
-     [(set RC:$ra, (OpNode BRRegs:$ci, RC:$rb, imm:$rc))], itin, type> {
-  let shamt = 0;
-  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
-  let isReMaterializable = 1;
-}
+def SLCT        : SelectRR<0x1A, "slct", rvexSlct, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
-def SLCTrr    : SelectRR<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
-def SLCTri    : SelectRI<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def rvexDIVS    : ArithLogicC<0x13, "divs ", rvexDivs, IIIdiv, CPURegs, BRRegs, 1, TypeIIIdiv>;
 
-def SDT_slct         : SDTypeProfile<1, 3, []>;
-def rvexSlct         : SDNode<"rvexISD::Slct", SDT_slct>;
+def rvexADDC    : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
+def rvexADDE    : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
+def rvexMPYLLU  : ArithLogicR<0x1A, "mpyllu ", rvexMpyllu, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLHU  : ArithLogicR<0x1A, "mpylhu ", rvexMpylhu, IIImul, CPURegs, 0, TypeIIImul>;
+def rvexMPYHHU  : ArithLogicR<0x1A, "mpyhhu ", rvexMpyhhu, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLL   : ArithLogicR<0x1A, "mpyll ", rvexMpyll, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYLH   : ArithLogicR<0x1A, "mpylh ", rvexMpylh, IIImul, CPURegs, 0, TypeIIImul>;
+def rvexMPYHH   : ArithLogicR<0x1A, "mpyhh ", rvexMpyhh, IIImul, CPURegs, 1, TypeIIImul>;
 
+def SH1ADD      : ArithLogicS<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH2ADD      : ArithLogicS<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH3ADD      : ArithLogicS<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH4ADD      : ArithLogicS<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
 
-def SLCT  : SelectRR<0x1A, "slct", rvexSlct, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
+def SH1ADDi     : ArithLogicSi<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH2ADDi     : ArithLogicSi<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH3ADDi     : ArithLogicSi<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH4ADDi     : ArithLogicSi<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
 
-
-def rvexDIVS     : ArithLogicC<0x13, "divs ", rvexDivs, IIIdiv, CPURegs, BRRegs, 1, TypeIIIdiv>;
-
-def rvexADDC     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
-def rvexADDE     : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
-
-
-def rvexMpyllu    : SDNode<"rvexISD::Mpyllu", SDTIntBinOp, []>;
-def rvexMpylhu    : SDNode<"rvexISD::Mpylhu", SDTIntBinOp, []>;
-def rvexMpyhhu    : SDNode<"rvexISD::Mpyhhu", SDTIntBinOp, []>;
-def rvexMpyll     : SDNode<"rvexISD::Mpyll", SDTIntBinOp, []>;
-def rvexMpylh     : SDNode<"rvexISD::Mpylh", SDTIntBinOp, []>;
-def rvexMpyhh     : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;
-
-def rvexMPYLLU    : ArithLogicR<0x1A, "mpyllu ", rvexMpyllu, IIImul, CPURegs, 1, TypeIIImul>;
-def rvexMPYLHU    : ArithLogicR<0x1A, "mpylhu ", rvexMpylhu, IIImul, CPURegs, 0, TypeIIImul>;
-def rvexMPYHHU    : ArithLogicR<0x1A, "mpyhhu ", rvexMpyhhu, IIImul, CPURegs, 1, TypeIIImul>;
-def rvexMPYLL     : ArithLogicR<0x1A, "mpyll ", rvexMpyll, IIImul, CPURegs, 1, TypeIIImul>;
-def rvexMPYLH     : ArithLogicR<0x1A, "mpylh ", rvexMpylh, IIImul, CPURegs, 0, TypeIIImul>;
-def rvexMPYHH     : ArithLogicR<0x1A, "mpyhh ", rvexMpyhh, IIImul, CPURegs, 1, TypeIIImul>;
-
-
-def MULT    : Mult32<0x50, "mpylu", IIImul>;
-def MULTu   : Mult32<0x51, "mpyhs", IIImul>;
+def MULT        : Mult32<0x50, "mpylu", IIImul>;
+def MULTu       : Mult32<0x51, "mpyhs", IIImul>;
 
 /// Shift Instructions
 // work, sra for ashr llvm IR instruction
-def SRA     : shift_rotate_imm32<0x1B, 0x00, "shr ", sra>;
-def ROL     : shift_rotate_imm32<0x1C, 0x01, "rol ", rotl>;
-def ROR     : shift_rotate_imm32<0x1D, 0x01, "ror ", rotr>;
-def SHL     : shift_rotate_imm32<0x1E, 0x00, "shl ", shl>;
-// work, srl for lshr llvm IR instruction
-def SHR     : shift_rotate_imm32<0x1F, 0x00, "shru", srl>;
+def SRA         : shift_rotate_imm32<0x1B, 0x00, "shr ", sra>;
+def ROL         : shift_rotate_imm32<0x1C, 0x01, "rol ", rotl>;
+def ROR         : shift_rotate_imm32<0x1D, 0x01, "ror ", rotr>;
+def SHL         : shift_rotate_imm32<0x1E, 0x00, "shl ", shl>;
+def SHR         : shift_rotate_imm32<0x1F, 0x00, "shru", srl>;
 
-def BR      : CBranch<0x25, "br  ", BRRegs>;
-def BRF     : CBranch<0x25, "brf ", BRRegs>;
+def BR          : CBranch<0x25, "br  ", BRRegs>;
+def BRF         : CBranch<0x25, "brf ", BRRegs>;
 
-def JMP     : UncondBranch<0x26, "goto">;
+def JMP         : UncondBranch<0x26, "goto">;
 
 /// Jump and Branch Instructions
-def SWI     : JumpLink<0x2A, "swi">;
+def SWI         : JumpLink<0x2A, "swi">;
 let isCall=1, isBarrier=1 in
-def CALL    : JumpLink<0x2B, "call">;
+def CALL        : JumpLink<0x2B, "call">;
 
 
 
@@ -528,8 +543,6 @@ def : Pat<(i32 imm:$in),
 def : Pat<(rvexJmpLink (i32 tglobaladdr:$dst)),
           (CALL (i32 LR), tglobaladdr:$dst)>;
          
-
-
 // gp_rel relocs
 def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
           (ADDiu CPURegs:$gp, tglobaladdr:$in)>;
@@ -537,33 +550,7 @@ def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
 def : Pat<(not CPURegs:$in),
           (XOR CPURegs:$in, (ADDiu R0, 1))>;
 
-// Arithmetic and logical instructions with 3 register operands.
-class ArithLogicS<bits<8> op, string instr_asm,
-                  InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
-  FA<op, (outs RC:$ra), (ins RC:$rb, RC:$rc),
-     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
-     [], itin, type> {
-  let shamt = 0;
-  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
-  let isReMaterializable = 1;
-}
-
-// Arithmetic and logical instructions with 3 register operands.
-class ArithLogicSi<bits<8> op, string instr_asm,
-                  InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
-  FA<op, (outs RC:$ra), (ins RC:$rb, i32imm:$rc),
-     !strconcat(instr_asm, "\t$ra = $rb, $rc"),
-     [], itin, type> {
-  let shamt = 0;
-  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
-  let isReMaterializable = 1;
-}
-
-def SH1ADD     : ArithLogicS<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH2ADD     : ArithLogicS<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH3ADD     : ArithLogicS<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH4ADD     : ArithLogicS<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-
+// Shift add patterns
 def : Pat<(add (shl CPURegs:$lhs, 1), CPURegs:$rhs),
           (SH1ADD CPURegs:$lhs, CPURegs:$rhs)>; 
 def : Pat<(add (shl CPURegs:$lhs, 2), CPURegs:$rhs),
@@ -573,11 +560,7 @@ def : Pat<(add (shl CPURegs:$lhs, 3), CPURegs:$rhs),
 def : Pat<(add (shl CPURegs:$lhs, 4), CPURegs:$rhs),
           (SH4ADD CPURegs:$lhs, CPURegs:$rhs)>; 
 
-def SH1ADDi     : ArithLogicSi<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH2ADDi     : ArithLogicSi<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH3ADDi     : ArithLogicSi<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH4ADDi     : ArithLogicSi<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-
+// Shift add immediate patterns
 def : Pat<(add (shl CPURegs:$lhs, 1), imm:$rhs),
           (SH1ADDi CPURegs:$lhs, imm:$rhs)>; 
 def : Pat<(add (shl CPURegs:$lhs, 2), imm:$rhs),
@@ -587,26 +570,13 @@ def : Pat<(add (shl CPURegs:$lhs, 3), imm:$rhs),
 def : Pat<(add (shl CPURegs:$lhs, 4), imm:$rhs),
           (SH4ADDi CPURegs:$lhs, imm:$rhs)>;                                                  
 
-
+// FIXME mult pattern
 def : Pat<(mul CPURegs:$rb, CPURegs:$rc),
               (ADD (MULT CPURegs:$rb, CPURegs:$rc), (MULTu CPURegs:$rb, CPURegs:$rc))>;          
 
 def : Pat<(i32 (extloadi1  ADDRrr:$src)), (LBu ADDRrr:$src)>;
 def : Pat<(i32 (extloadi8  ADDRrr:$src)), (LBu ADDRrr:$src)>;
 def : Pat<(i32 (extloadi16_a ADDRrr:$src)), (LHu ADDRrr:$src)>;
-
-//DEBUG
-
-//class CmpInstr<bits<8> op, string instr_asm, 
-//               InstrItinClass itin, RegisterClass RC, RegisterClass RD, 
-//               bit isComm = 0, CType type>:
-//  FA<op, (outs RD:$rc), (ins RC:$ra, RC:$rb),
-//     !strconcat(instr_asm, "\t$rc = $ra, $rb"), [], itin, type> {
-//  let rc = 0;
-//  let shamt = 0;
-//  let isCommutable = isComm;
-//}
-
 
 // Comparisons
 class SetCCR<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
@@ -621,53 +591,51 @@ class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       [(set DestRegs:$res, (cond_op CPURegs:$lhs, imm:$rhs))], IIAlu, TypeIIAlu>;
 
 let isCompare = 1 in {
-def CMPEQr  : SetCCR<"cmpeq ", seteq, CPURegs>;
-def CMPGEr  : SetCCR<"cmpge ", setge, CPURegs>;
-def CMPGEUr : SetCCR<"cmpgeu ", setuge, CPURegs>;
-def CMPGTr  : SetCCR<"cmpgt ", setgt, CPURegs>;
-def CMPGTUr : SetCCR<"cmpgtu ", setugt, CPURegs>;
-def CMPLEr  : SetCCR<"cmple ", setle, CPURegs>;
-def CMPLEUr : SetCCR<"cmpleu ", setule, CPURegs>;
-def CMPLTr  : SetCCR<"cmplt ", setlt, CPURegs>;
-def CMPLTUr : SetCCR<"cmpltu ", setult, CPURegs>;
-def CMPNEr  : SetCCR<"cmpne ", setne, CPURegs>;
+  def CMPEQr    : SetCCR<"cmpeq ", seteq, CPURegs>;
+  def CMPGEr    : SetCCR<"cmpge ", setge, CPURegs>;
+  def CMPGEUr   : SetCCR<"cmpgeu ", setuge, CPURegs>;
+  def CMPGTr    : SetCCR<"cmpgt ", setgt, CPURegs>;
+  def CMPGTUr   : SetCCR<"cmpgtu ", setugt, CPURegs>;
+  def CMPLEr    : SetCCR<"cmple ", setle, CPURegs>;
+  def CMPLEUr   : SetCCR<"cmpleu ", setule, CPURegs>;
+  def CMPLTr    : SetCCR<"cmplt ", setlt, CPURegs>;
+  def CMPLTUr   : SetCCR<"cmpltu ", setult, CPURegs>;
+  def CMPNEr    : SetCCR<"cmpne ", setne, CPURegs>;
 
-def CMPEQri  : SetCCI<"cmpeq ", seteq, CPURegs>;
-def CMPGEri  : SetCCI<"cmpge ", setge, CPURegs>;
-def CMPGEUri : SetCCI<"cmpgeu ", setuge, CPURegs>;
-def CMPGTri  : SetCCI<"cmpgt ", setgt, CPURegs>;
-def CMPGTUri : SetCCI<"cmpgtu ", setugt, CPURegs>;
-def CMPLEri  : SetCCI<"cmple ", setle, CPURegs>;
-def CMPLEUri : SetCCI<"cmpleu ", setule, CPURegs>;
-def CMPLTri  : SetCCI<"cmplt ", setlt, CPURegs>;
-def CMPLTUri : SetCCI<"cmpltu ", setult, CPURegs>;
-def CMPNEri  : SetCCI<"cmpne ", setne, CPURegs>;
+  def CMPEQri   : SetCCI<"cmpeq ", seteq, CPURegs>;
+  def CMPGEri   : SetCCI<"cmpge ", setge, CPURegs>;
+  def CMPGEUri  : SetCCI<"cmpgeu ", setuge, CPURegs>;
+  def CMPGTri   : SetCCI<"cmpgt ", setgt, CPURegs>;
+  def CMPGTUri  : SetCCI<"cmpgtu ", setugt, CPURegs>;
+  def CMPLEri   : SetCCI<"cmple ", setle, CPURegs>;
+  def CMPLEUri  : SetCCI<"cmpleu ", setule, CPURegs>;
+  def CMPLTri   : SetCCI<"cmplt ", setlt, CPURegs>;
+  def CMPLTUri  : SetCCI<"cmpltu ", setult, CPURegs>;
+  def CMPNEri   : SetCCI<"cmpne ", setne, CPURegs>;
 
-def CMPEQ  : SetCCR<"cmpeq ", seteq, BRRegs>;
-def CMPGE  : SetCCR<"cmpge ", setge, BRRegs>;
-def CMPGEU : SetCCR<"cmpgeu ", setuge, BRRegs>;
-def CMPGT  : SetCCR<"cmpgt ", setgt, BRRegs>;
-def CMPGTU : SetCCR<"cmpgtu ", setugt, BRRegs>;
-def CMPLE  : SetCCR<"cmple ", setle, BRRegs>;
-def CMPLEU : SetCCR<"cmpleu ", setule, BRRegs>;
-def CMPLT  : SetCCR<"cmplt ", setlt, BRRegs>;
-def CMPLTU : SetCCR<"cmpltu ", setult, BRRegs>;
-def CMPNE  : SetCCR<"cmpne ", setne, BRRegs>;
+  def CMPEQ     : SetCCR<"cmpeq ", seteq, BRRegs>;
+  def CMPGE     : SetCCR<"cmpge ", setge, BRRegs>;
+  def CMPGEU    : SetCCR<"cmpgeu ", setuge, BRRegs>;
+  def CMPGT     : SetCCR<"cmpgt ", setgt, BRRegs>;
+  def CMPGTU    : SetCCR<"cmpgtu ", setugt, BRRegs>;
+  def CMPLE     : SetCCR<"cmple ", setle, BRRegs>;
+  def CMPLEU    : SetCCR<"cmpleu ", setule, BRRegs>;
+  def CMPLT     : SetCCR<"cmplt ", setlt, BRRegs>;
+  def CMPLTU    : SetCCR<"cmpltu ", setult, BRRegs>;
+  def CMPNE     : SetCCR<"cmpne ", setne, BRRegs>;
 
-def CMPEQi  : SetCCI<"cmpeq ", seteq, BRRegs>;
-def CMPGEi  : SetCCI<"cmpge ", setge, BRRegs>;
-def CMPGEUi : SetCCI<"cmpgeu ", setuge, BRRegs>;
-def CMPGTi  : SetCCI<"cmpgt ", setgt, BRRegs>;
-def CMPGTUi : SetCCI<"cmpgtu ", setugt, BRRegs>;
-def CMPLEi  : SetCCI<"cmple ", setle, BRRegs>;
-def CMPLEUi : SetCCI<"cmpleu ", setule, BRRegs>;
-def CMPLTi  : SetCCI<"cmplt ", setlt, BRRegs>;
-def CMPLTUi : SetCCI<"cmpltu ", setult, BRRegs>;
-def CMPNEi  : SetCCI<"cmpne ", setne, BRRegs>;
+  def CMPEQi    : SetCCI<"cmpeq ", seteq, BRRegs>;
+  def CMPGEi    : SetCCI<"cmpge ", setge, BRRegs>;
+  def CMPGEUi   : SetCCI<"cmpgeu ", setuge, BRRegs>;
+  def CMPGTi    : SetCCI<"cmpgt ", setgt, BRRegs>;
+  def CMPGTUi   : SetCCI<"cmpgtu ", setugt, BRRegs>;
+  def CMPLEi    : SetCCI<"cmple ", setle, BRRegs>;
+  def CMPLEUi   : SetCCI<"cmpleu ", setule, BRRegs>;
+  def CMPLTi    : SetCCI<"cmplt ", setlt, BRRegs>;
+  def CMPLTUi   : SetCCI<"cmpltu ", setult, BRRegs>;
+  def CMPNEi    : SetCCI<"cmpne ", setne, BRRegs>;
 
 }
-
-
 
 multiclass CmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
   // Peepholes

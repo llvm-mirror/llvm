@@ -398,9 +398,10 @@ def ADDiu   : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
 def XORiu   : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 //Imm types
-def ANDi   : ArithLogicI<0x09, "and ", and, simm16, immSExt16, CPURegs>;
-def ORi   : ArithLogicI<0x09, "or ", or, simm16, immSExt16, CPURegs>;
-
+def ANDi    : ArithLogicI<0x09, "and ", and, simm16, immSExt16, CPURegs>;
+def ORi     : ArithLogicI<0x09, "or  ", or, simm16, immSExt16, CPURegs>;
+def XORi    : ArithLogicI<0x09, "xor ", xor, simm16, immSExt16, CPURegs>;
+  
 let isReturn=1 in
 def test_ret   : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
 
