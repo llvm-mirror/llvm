@@ -427,8 +427,24 @@ class SelectRR<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
+// Arithmetic and logical instructions with 3 register operands and 2 returns.
+// Used for ADDCG and DIVS
+class SelectRI<bits<8> op, string instr_asm, SDNode OpNode,
+                  InstrItinClass itin, RegisterClass RC, RegisterClass BRRegs, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins BRRegs:$ci, RC:$rb, i32imm:$rc),
+     !strconcat(instr_asm, "\t$ra = $ci, $rb, $rc"),
+     [(set RC:$ra, (OpNode BRRegs:$ci, RC:$rb, imm:$rc))], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
+
+def SLCTrr    : SelectRR<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def SLCTri    : SelectRI<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+
 def SDT_slct         : SDTypeProfile<1, 3, []>;
 def rvexSlct         : SDNode<"rvexISD::Slct", SDT_slct>;
+
 
 
 def SLCT  : SelectRR<0x1A, "slct", rvexSlct, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;

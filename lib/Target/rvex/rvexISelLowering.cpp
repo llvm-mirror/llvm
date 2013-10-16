@@ -109,10 +109,10 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::MULHS, MVT::i32, Custom);
   //setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);  
   //setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
-  setOperationAction(ISD::SDIVREM,          MVT::i32, Expand);
-  setOperationAction(ISD::UDIVREM,          MVT::i32, Expand);
+  setOperationAction(ISD::SDIVREM, MVT::i32, Expand);
+  setOperationAction(ISD::UDIVREM, MVT::i32, Expand);
 
-
+  setOperationAction(ISD::SELECT_CC,          MVT::i32, Promote);
 
   // Custom lowering of ADDE and ADDC
   setOperationAction(ISD::ADDE, MVT::i32, Custom);
