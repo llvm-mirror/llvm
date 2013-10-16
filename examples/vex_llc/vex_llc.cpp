@@ -195,8 +195,10 @@ int main(int argc, char **argv) {
   initializeLowerIntrinsicsPass(*Registry);
   initializeUnreachableBlockElimPass(*Registry);
 
-  // Register the target printer for --version.
-  cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
+    // Register the target printer for --version.
+    cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
+    
+    //cl::ParseCommandLineOptions(argc, argv, "llvm system compiler\n");
 
   
 

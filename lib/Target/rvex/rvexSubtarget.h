@@ -41,9 +41,9 @@ public:
   bool isVLIWEnabled() const { return IsVLIWEnabled; }
 
   /// enablePostRAScheduler - True at 'More' optimization.
-  bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
-                             TargetSubtargetInfo::AntiDepBreakMode& Mode,
-                             RegClassVector& CriticalPathRCs) const;
+  // bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
+  //                            TargetSubtargetInfo::AntiDepBreakMode& Mode,
+  //                            RegClassVector& CriticalPathRCs) const;
   
   // NOTE: O64 will not be supported.
   enum rvexABIEnum {

@@ -302,7 +302,7 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
       // anti-dependent can share a packet
       else if(DepType != SDep::Anti) {
         DEBUG(errs() << "anti dependencies\n");
-        FoundSequentialDependence = true;
+        FoundSequentialDependence = false;
       }
     }
 
@@ -345,6 +345,8 @@ isrvexSoloInstruction(const MachineInstr *MI) const {
   const uint64_t F = MI->getDesc().TSFlags;
   //return ((F >> SoloPos) & SoloMask);
   if (MI->getOpcode() == rvex::NOP)
+    return true;
+  if (MI->getOpcode() == rvex::CALL)
     return true;
   return false;
 }

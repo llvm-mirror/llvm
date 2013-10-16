@@ -51,13 +51,13 @@ rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
     rvexABI = O32;
 }
 
- bool rvexSubtarget::
- enablePostRAScheduler(CodeGenOpt::Level OptLevel,
-                       TargetSubtargetInfo::AntiDepBreakMode& Mode,
-                       RegClassVector& CriticalPathRCs) const {
-   Mode = TargetSubtargetInfo::ANTIDEP_NONE;
-   CriticalPathRCs.clear();
-   CriticalPathRCs.push_back(&rvex::CPURegsRegClass);
-   return OptLevel >= CodeGenOpt::Default;
- }
+ // bool rvexSubtarget::
+ // enablePostRAScheduler(CodeGenOpt::Level OptLevel,
+ //                       TargetSubtargetInfo::AntiDepBreakMode& Mode,
+ //                       RegClassVector& CriticalPathRCs) const {
+ //   Mode = TargetSubtargetInfo::ANTIDEP_NONE;
+ //   CriticalPathRCs.clear();
+ //   CriticalPathRCs.push_back(&rvex::CPURegsRegClass);
+ //   return OptLevel >= CodeGenOpt::Default;
+ // }
 

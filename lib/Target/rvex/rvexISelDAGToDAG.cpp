@@ -154,6 +154,10 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
         Addr.getOpcode() == ISD::TargetGlobalAddress))
       return false;
   }
+
+
+  if (Addr.getOpcode() == ISD::ADD)
+  {
     if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1))) {
       if (isInt<13>(CN->getSExtValue())) {
         if (FrameIndexSDNode *FIN =
@@ -168,6 +172,7 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
         return true;
       }
     }
+  }
   Base   = Addr;
   Offset = CurDAG->getTargetConstant(0, ValTy);
   return true;

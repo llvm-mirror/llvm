@@ -110,11 +110,6 @@ let Namespace = "rvex" in {
   def B6 : rvexBRReg< 72, "b0.6">, DwarfRegNum<[72]>;
   def B7 : rvexBRReg< 73, "b0.7">, DwarfRegNum<[73]>;
 
-
-
-  // Hi/Lo registers
-  def HI   : Register<"HI">, DwarfRegNum<[18]>;
-  def LO   : Register<"LO">, DwarfRegNum<[19]>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -129,8 +124,6 @@ def CPURegs : RegisterClass<"rvex", [i32], 32,
 
   )>;
 
-// Hi/Lo Registers
-def HILO : RegisterClass<"rvex", [i32], 32, (add HI, LO)>;
 
 def BRRegs   : RegisterClass<"rvex", [i32], 32, (add (sequence "B%u", 0, 7))>;
 //def BRRegs   : RegisterClass<"rvex", [i32], 32, (add B0)>;

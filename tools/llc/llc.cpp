@@ -76,14 +76,21 @@ OptLevel("O",
 static cl::opt<std::string>
 TargetTriple("mtriple", cl::desc("Override target triple for module"));
 
-static cl::opt<bool> NoVerify("disable-verify", cl::Hidden,
-                              cl::desc("Do not verify input module"));
+cl::opt<bool>
+DisableOutputNops("disable-output-nops",
+                        cl::desc("Disable nops in output"),
+                        cl::init(true));
 
-static cl::opt<bool> DisableSimplifyLibCalls("disable-simplify-libcalls",
-                                             cl::desc("Disable simplify-libcalls"));
+static cl::opt<bool> NoVerify("disable-verify", cl::Hidden,
+                       cl::desc("Do not verify input module"));
+
+cl::opt<bool>
+DisableSimplifyLibCalls("disable-simplify-libcalls",
+                        cl::desc("Disable simplify-libcalls"),
+                        cl::init(false));
 
 static cl::opt<bool> ShowMCEncoding("show-mc-encoding", cl::Hidden,
-                                    cl::desc("Show encoding in .s output"));
+                        cl::desc("Show encoding in .s output"));
 
 static cl::opt<bool> EnableDwarfDirectory(
     "enable-dwarf-directory", cl::Hidden,
@@ -93,7 +100,24 @@ static cl::opt<bool> AsmVerbose("asm-verbose",
                                 cl::desc("Add comments to directives."),
                                 cl::init(true));
 
-static int compileModule(char **, LLVMContext &);
+static int compileModule(char**, LLVMContext&);
+
+// GetFileNameRoot - Helper function to get the basename of a filename.
+static inline std::string
+GetFileNameRoot(const std::string &InputFilename) {
+  std::string IFN = InputFilename;
+  std::string outputFilename;
+  int Len = IFN.length();
+  if ((Len > 2) &&
+      IFN[Len-3] == '.' &&
+      ((IFN[Len-2] == 'b' && IFN[Len-1] == 'c') ||
+       (IFN[Len-2] == 'l' && IFN[Len-1] == 'l'))) {
+    outputFilename = std::string(IFN.begin(), IFN.end()-3); // s/.bc/.s/
+  } else {
+    outputFilename = IFN;
+  }
+  return outputFilename;
+}
 
 static std::unique_ptr<tool_output_file>
 GetOutputStream(const char *TargetName, Triple::OSType OS,

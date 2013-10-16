@@ -40,8 +40,6 @@ def rvexJmpLink : SDNode<"rvexISD::JmpLink",SDT_rvexJmpLink,
 // Hi and Lo nodes are used to handle global addresses. Used on
 // rvexISelLowering to lower stuff like GlobalAddress, ExternalSymbol
 // static model. (nothing to do with rvex Registers Hi and Lo)
-def rvexHi    : SDNode<"rvexISD::Hi", SDTIntUnaryOp>;
-def rvexLo    : SDNode<"rvexISD::Lo", SDTIntUnaryOp>;
 def rvexGPRel : SDNode<"rvexISD::GPRel", SDTIntUnaryOp>;
 
 // Return
@@ -147,7 +145,7 @@ def immZExt16  : PatLeaf<(imm), [{
 
 // rvex Address Mode! SDNode frameindex could possibily be a match
 // since load and store instructions from stack used it.
-def addr : ComplexPattern<iPTR, 2, "SelectAddr", [frameindex], [SDNPWantParent]>;
+def ADDRrr : ComplexPattern<iPTR, 2, "SelectAddr", [frameindex], [SDNPWantParent]>;
 
 //===----------------------------------------------------------------------===//
 // Pattern fragment for load/store
@@ -272,7 +270,7 @@ class LoadM<bits<8> op, string instr_asm, PatFrag OpNode, RegisterClass RC,
             Operand MemOpnd, bit Pseudo>:
   FMem<op, (outs RC:$ra), (ins MemOpnd:$addr),
      !strconcat(instr_asm, "\t$ra = $addr"),
-     [(set RC:$ra, (OpNode addr:$addr))], IILoad, TypeIILoad> {
+     [(set RC:$ra, (OpNode ADDRrr:$addr))], IILoad, TypeIILoad> {
   let isPseudo = Pseudo;
 }
 
@@ -280,7 +278,7 @@ class StoreM<bits<8> op, string instr_asm, PatFrag OpNode, RegisterClass RC,
              Operand MemOpnd, bit Pseudo>:
   FMem<op, (outs), (ins RC:$ra, MemOpnd:$addr),
      !strconcat(instr_asm, "\t$addr = $ra"),
-     [(OpNode RC:$ra, addr:$addr)], IIStore, TypeIIStore> {
+     [(OpNode RC:$ra, ADDRrr:$addr)], IIStore, TypeIIStore> {
   let isPseudo = Pseudo;
 }
 
@@ -338,44 +336,20 @@ let isCall=1, hasDelaySlot=0 in {
 
 // Mul, Div
 class Mult<bits<8> op, string instr_asm, InstrItinClass itin,
-           RegisterClass RC, list<Register> DefRegs>:
+           RegisterClass RC>:
   FL<op, (outs RC:$res), (ins RC:$ra, RC:$rb),
      !strconcat(instr_asm, "\t$res = $ra, $rb"), [], itin, TypeIIImul> {
   let imm16 = 0;
   let isCommutable = 1;
-  let Defs = DefRegs;
   let neverHasSideEffects = 1;
 }
 
 class Mult32<bits<8> op, string instr_asm, InstrItinClass itin>:
-  Mult<op, instr_asm, itin, CPURegs, [HI, LO]>;
-
-
-
-// Move from Hi/Lo
-class MoveFromLOHI<bits<8> op, string instr_asm, RegisterClass RC,
-                   list<Register> UseRegs>:
-  FL<op, (outs RC:$ra), (ins),
-     !strconcat(instr_asm, "\t$ra"), [], IIHiLo, TypeIIHiLo> {
-  let rb = 0;
-  let imm16 = 0;
-  let Uses = UseRegs;
-  let neverHasSideEffects = 1;
-}
-
-class MoveToLOHI<bits<8> op, string instr_asm, RegisterClass RC,
-                 list<Register> DefRegs>:
-  FL<op, (outs), (ins RC:$ra),
-     !strconcat(instr_asm, "\t$ra"), [], IIHiLo, TypeIIHiLo> {
-  let rb = 0;
-  let imm16 = 0;
-  let Defs = DefRegs;
-  let neverHasSideEffects = 1;
-}
+  Mult<op, instr_asm, itin, CPURegs>;
 
 class EffectiveAddress<string instr_asm, RegisterClass RC, Operand Mem> :
   FMem<0x09, (outs RC:$ra), (ins Mem:$addr),
-     instr_asm, [(set RC:$ra, addr:$addr)], IIAlu, TypeIIAlu>;
+     instr_asm, [(set RC:$ra, ADDRrr:$addr)], IIAlu, TypeIIAlu>;
 
 //===----------------------------------------------------------------------===//
 // Pseudo instructions
@@ -484,11 +458,6 @@ def rvexMPYHH     : ArithLogicR<0x1A, "mpyhh ", rvexMpyhh, IIImul, CPURegs, 1, T
 def MULT    : Mult32<0x50, "mpylu", IIImul>;
 def MULTu   : Mult32<0x51, "mpyhs", IIImul>;
 
-def MFHI : MoveFromLOHI<0x40, "mfhi", CPURegs, [HI]>;
-def MFLO : MoveFromLOHI<0x41, "mflo", CPURegs, [LO]>;
-def MTHI : MoveToLOHI<0x42, "mthi", CPURegs, [HI]>;
-def MTLO : MoveToLOHI<0x43, "mtlo", CPURegs, [LO]>;
-
 /// Shift Instructions
 // work, sra for ashr llvm IR instruction
 def SRA     : shift_rotate_imm32<0x1B, 0x00, "shr ", sra>;
@@ -505,6 +474,7 @@ def JMP     : UncondBranch<0x26, "goto">;
 
 /// Jump and Branch Instructions
 def SWI     : JumpLink<0x2A, "swi">;
+let isCall=1, isBarrier=1 in
 def CALL    : JumpLink<0x2B, "call">;
 
 
@@ -543,14 +513,6 @@ def : Pat<(rvexJmpLink (i32 tglobaladdr:$dst)),
           (CALL (i32 LR), tglobaladdr:$dst)>;
          
 
-// hi/lo relocs
-def : Pat<(rvexHi tglobaladdr:$in), (MOV R0, tglobaladdr:$in)>;
-// Expect rvex add LUi support, like Mips
-//def : Pat<(rvexHi tglobaladdr:$in), (LUi tglobaladdr:$in)>;
-def : Pat<(rvexLo tglobaladdr:$in), (ADDiu R0, tglobaladdr:$in)>;
-
-def : Pat<(add CPURegs:$hi, (rvexLo tglobaladdr:$lo)),
-          (ADDiu CPURegs:$hi, tglobaladdr:$lo)>;
 
 // gp_rel relocs
 def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
@@ -613,9 +575,9 @@ def : Pat<(add (shl CPURegs:$lhs, 4), imm:$rhs),
 def : Pat<(mul CPURegs:$rb, CPURegs:$rc),
               (ADD (MULT CPURegs:$rb, CPURegs:$rc), (MULTu CPURegs:$rb, CPURegs:$rc))>;          
 
-def : Pat<(i32 (extloadi1  addr:$src)), (LBu addr:$src)>;
-def : Pat<(i32 (extloadi8  addr:$src)), (LBu addr:$src)>;
-def : Pat<(i32 (extloadi16_a addr:$src)), (LHu addr:$src)>;
+def : Pat<(i32 (extloadi1  ADDRrr:$src)), (LBu ADDRrr:$src)>;
+def : Pat<(i32 (extloadi8  ADDRrr:$src)), (LBu ADDRrr:$src)>;
+def : Pat<(i32 (extloadi16_a ADDRrr:$src)), (LHu ADDRrr:$src)>;
 
 //DEBUG
 

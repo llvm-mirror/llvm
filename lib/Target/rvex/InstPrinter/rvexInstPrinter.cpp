@@ -129,17 +129,6 @@ printMemOperand(const MCInst *MI, int opNum, raw_ostream &O) {
 }
 
 void rvexInstPrinter::
-printMemOperand_glob(const MCInst *MI, int opNum, raw_ostream &O) {
-  // Load/Store memory operands -- imm($reg)
-  // If PIC target the target is loaded as the
-  // pattern ld $t9,%call24($gp)
-  printOperand(MI, opNum+1, O);
-  O << "[";
-  //printOperand(MI, opNum, O);
-  O << "$r0.0]";
-}
-
-void rvexInstPrinter::
 printMemOperandEA(const MCInst *MI, int opNum, raw_ostream &O) {
   // when using stack locations for not load/store instructions
   // print the same way as all normal 3 operand instructions.

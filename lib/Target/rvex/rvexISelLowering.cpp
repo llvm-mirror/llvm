@@ -47,8 +47,6 @@ static SDValue GetGlobalReg(SelectionDAG &DAG, EVT Ty) {
 const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   case rvexISD::JmpLink:           return "rvexISD::JmpLink";
-  case rvexISD::Hi:                return "rvexISD::Hi";
-  case rvexISD::Lo:                return "rvexISD::Lo";
   case rvexISD::GPRel:             return "rvexISD::GPRel";
   case rvexISD::Ret:               return "rvexISD::Ret";
   case rvexISD::Addc:              return "rvexISD::Addc";
@@ -111,7 +109,8 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::MULHS, MVT::i32, Custom);
   //setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);  
   //setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
-
+  setOperationAction(ISD::SDIVREM,          MVT::i32, Expand);
+  setOperationAction(ISD::UDIVREM,          MVT::i32, Expand);
 
 
 
@@ -133,42 +132,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   computeRegisterProperties();
 }
 
-static SDValue PerformDivRemCombine(SDNode *N, SelectionDAG& DAG,
-                                    TargetLowering::DAGCombinerInfo &DCI,
-                                    const rvexSubtarget* Subtarget) {
-  if (DCI.isBeforeLegalizeOps())
-    return SDValue();
 
-  EVT Ty = N->getValueType(0);
-  unsigned LO = rvex::LO;
-  unsigned HI = rvex::HI;
-  unsigned opc = N->getOpcode() == ISD::SDIVREM ? rvexISD::DivRem :
-                                                  rvexISD::DivRemU;
-  DebugLoc dl = N->getDebugLoc();
-
-  SDValue DivRem = DAG.getNode(opc, dl, MVT::Glue,
-                               N->getOperand(0), N->getOperand(1));
-  SDValue InChain = DAG.getEntryNode();
-  SDValue InGlue = DivRem;
-
-  // insert MFLO
-  if (N->hasAnyUseOfValue(0)) {
-    SDValue CopyFromLo = DAG.getCopyFromReg(InChain, dl, LO, Ty,
-                                            InGlue);
-    DAG.ReplaceAllUsesOfValueWith(SDValue(N, 0), CopyFromLo);
-    InChain = CopyFromLo.getValue(1);
-    InGlue = CopyFromLo.getValue(2);
-  }
-
-  // insert MFHI
-  if (N->hasAnyUseOfValue(1)) {
-    SDValue CopyFromHi = DAG.getCopyFromReg(InChain, dl,
-                                            HI, Ty, InGlue);
-    DAG.ReplaceAllUsesOfValueWith(SDValue(N, 1), CopyFromHi);
-  }
-
-  return SDValue();
-}
 
 SDValue rvexTargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
   const {
@@ -177,9 +141,7 @@ SDValue rvexTargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
 
   switch (opc) {
   default: break;
-  case ISD::SDIVREM:
-  case ISD::UDIVREM:
-    return PerformDivRemCombine(N, DAG, DCI, Subtarget);
+
   }
 
   return SDValue();
@@ -526,45 +488,21 @@ SDValue rvexTargetLowering::LowerGlobalAddress(SDValue Op,
   DebugLoc dl = Op.getDebugLoc();
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
 
-  if (getTargetMachine().getRelocationModel() != Reloc::PIC_) {
-    SDVTList VTs = DAG.getVTList(MVT::i32);
+  SDVTList VTs = DAG.getVTList(MVT::i32);
 
-    rvexTargetObjectFile &TLOF = (rvexTargetObjectFile&)getObjFileLowering();
+  rvexTargetObjectFile &TLOF = (rvexTargetObjectFile&)getObjFileLowering();
 
-    // %gp_rel relocation
-    if (TLOF.IsGlobalInSmallSection(GV, getTargetMachine())) {
-      SDValue GA = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
-                                              rvexII::MO_GPREL);
-      SDValue GPRelNode = DAG.getNode(rvexISD::GPRel, dl, VTs, &GA, 1);
-      SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i32);
-      return DAG.getNode(ISD::ADD, dl, MVT::i32, GOT, GPRelNode);
-    }
-    // %hi/%lo relocation
-    SDValue GAHi = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
-                                              rvexII::MO_NO_FLAG);      //Added MO_NO_FLAG so %Hi(c) is not used
-    SDValue GALo = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
-                                              rvexII::MO_ABS_LO);
-    //SDValue HiPart = DAG.getNode(rvexISD::Hi, dl, VTs, &GAHi, 1);
-    //SDValue Lo = DAG.getNode(rvexISD::Hi, dl, MVT::i32, GALo);
-    return DAG.getNode(rvexISD::Hi, dl, VTs, &GAHi, 1);                 //Use rvexISD::Hi pattern
-  }
 
-  EVT ValTy = Op.getValueType();
-  bool HasGotOfst = (GV->hasInternalLinkage() ||
-                     (GV->hasLocalLinkage() && !isa<Function>(GV)));
-  unsigned GotFlag = (HasGotOfst ? rvexII::MO_GOT : rvexII::MO_GOT16);
-  SDValue GA = DAG.getTargetGlobalAddress(GV, dl, ValTy, 0, GotFlag);
-  GA = DAG.getNode(rvexISD::Wrapper, dl, ValTy, GetGlobalReg(DAG, ValTy), GA);
-  SDValue ResNode = DAG.getLoad(ValTy, dl, DAG.getEntryNode(), GA,
-                                MachinePointerInfo(), false, false, false, 0);
-  // On functions and global targets not internal linked only
-  // a load from got/GP is necessary for PIC to work.
-  if (!HasGotOfst)
-    return ResNode;
-  SDValue GALo = DAG.getTargetGlobalAddress(GV, dl, ValTy, 0,
-                                                        rvexII::MO_ABS_LO);
-  SDValue Lo = DAG.getNode(rvexISD::Lo, dl, ValTy, GALo);
-  return DAG.getNode(ISD::ADD, dl, ValTy, ResNode, Lo);
+  SDValue GA = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
+                                          rvexII::MO_NO_FLAG);
+  SDValue GPRelNode = DAG.getNode(rvexISD::GPRel, dl, VTs, &GA, 1);
+  SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i32);
+  return DAG.getNode(ISD::ADD, dl, MVT::i32, GOT, GPRelNode);
+
+
+  
+
+
 }
 
 #include "rvexGenCallingConv.inc"

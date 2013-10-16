@@ -25,6 +25,7 @@ namespace llvm {
   FunctionPass *creatervexISelDag(rvexTargetMachine &TM);
 
   FunctionPass *creatervexVLIWPacketizer();
+  FunctionPass *creatervexPostRAScheduler();
 
 } // end namespace llvm;
 

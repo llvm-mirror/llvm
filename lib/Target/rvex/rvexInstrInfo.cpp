@@ -75,21 +75,14 @@ copyPhysReg(MachineBasicBlock &MBB,
   if (rvex::CPURegsRegClass.contains(DestReg)) { // Copy to CPU Reg.
     if (rvex::CPURegsRegClass.contains(SrcReg))
       Opc = rvex::ADD, ZeroReg = rvex::R0;
-    else if (SrcReg == rvex::HI)
-      Opc = rvex::MFHI, SrcReg = 0;
-    else if (SrcReg == rvex::LO)
-      Opc = rvex::MFLO, SrcReg = 0;
+
     else if (SrcReg == rvex::B0)
       Opc = rvex::ADD, ZeroReg = rvex::R0;
   }
   else if (rvex::CPURegsRegClass.contains(SrcReg)) { // Copy from CPU Reg.
-    if (DestReg == rvex::HI)
-      Opc = rvex::MTHI, DestReg = 0;
-    else if (DestReg == rvex::LO)
-      Opc = rvex::MTLO, DestReg = 0;
     // Only possibility in (DestReg==SW, SrcReg==rvexRegs) is 
     //  cmp $SW, $ZERO, $rc
-    else if (rvex::BRRegsRegClass.contains(DestReg))
+    if (rvex::BRRegsRegClass.contains(DestReg))
       Opc = rvex::CMPNE, ZeroReg = rvex::R0;
   }
 
