@@ -181,7 +181,7 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
   // Remove return node.
   MBB.erase(MBBI);
   // Add return with sp add
-  BuildMI(MBB, MBBI_end, dl, TII.get(rvex::test_ret), rvex::R1).addReg(rvex::R1).addImm(NumBytes).addReg(rvex::LR);
+  BuildMI(MBB, MBBI_end, dl, TII.get(rvex::RETURN), rvex::R1).addReg(rvex::R1).addImm(NumBytes).addReg(rvex::LR);
 
     
   //}

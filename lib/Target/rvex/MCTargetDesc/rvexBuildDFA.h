@@ -13,6 +13,6 @@
 #include "rvexReadConfig.h"
 
 
-int rvexBuildDFA (std::vector<DFAState>& isnStages);
+int rvexBuildDFA (std::vector<Stage_desc>& isnStages);
 
 #endif /* defined(__hello__BUILDDFA__) */

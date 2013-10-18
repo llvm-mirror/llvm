@@ -210,7 +210,7 @@ class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
      !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
-     [(set RC:$ra, (OpNode RC:$rb, immSExt32:$imm16))], IIAlu, TypeIIAlu> {
+     [(set RC:$ra, (OpNode RC:$rb, immSExt32:$imm16))], IIAluImm, TypeIIAluImm> {
   let isCommutable = 0;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
@@ -254,7 +254,7 @@ class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm),
      !strconcat(instr_asm, "\t$ra = $imm"),
-     [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm))], IIAlu, TypeIIAlu> {
+     [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm))], IIAluImm, TypeIIAluImm> {
   let rb = 0;
   let isReMaterializable = 1;
 }
@@ -265,7 +265,7 @@ class shift_rotate_imm<bits<8> op, bits<4> isRotate, string instr_asm,
                        RegisterClass RC>:
   FA<op, (outs RC:$ra), (ins RC:$rb, RC:$shamt),
      !strconcat(instr_asm, "\t$ra = $rb, $shamt"),
-     [(set RC:$ra, (OpNode RC:$rb, RC:$shamt))], IIAlu, TypeIIAlu> {
+     [(set RC:$ra, (OpNode RC:$rb, RC:$shamt))], IIAluImm, TypeIIAluImm> {
   let rc = isRotate;
   let shamt = shamt;
 }
@@ -461,11 +461,11 @@ def MIN         : ArithLogicR<0x1A, "min ", rvexMIN, IIAlu, CPURegs, 1, TypeIIAl
 def MINU        : ArithLogicR<0x1A, "minu", rvexMINU, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 def SLCTrr      : SelectRR<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
-def SLCTri      : SelectRI<1, "slct", select, IIAlu, CPURegs, BRRegs, 0, TypeIIAlu>;
+def SLCTri      : SelectRI<1, "slct", select, IIAluImm, CPURegs, BRRegs, 0, TypeIIAluImm>;
 
 def SLCT        : SelectRR<0x1A, "slct", rvexSlct, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
-def rvexDIVS    : ArithLogicC<0x13, "divs ", rvexDivs, IIIdiv, CPURegs, BRRegs, 1, TypeIIIdiv>;
+def rvexDIVS    : ArithLogicC<0x13, "divs ", rvexDivs, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 
 def rvexADDC    : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
 def rvexADDE    : ArithLogicC<0x13, "addcg", rvexAddc, IIAlu, CPURegs, BRRegs, 1, TypeIIAlu>;
@@ -482,10 +482,10 @@ def SH2ADD      : ArithLogicS<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
 def SH3ADD      : ArithLogicS<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
 def SH4ADD      : ArithLogicS<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
 
-def SH1ADDi     : ArithLogicSi<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH2ADDi     : ArithLogicSi<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH3ADDi     : ArithLogicSi<0x13, "sh3add ", IIAlu, CPURegs, 0, TypeIIAlu>;
-def SH4ADDi     : ArithLogicSi<0x13, "sh4add ", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SH1ADDi     : ArithLogicSi<0x13, "sh1add ", IIAluImm, CPURegs, 0, TypeIIAluImm>;
+def SH2ADDi     : ArithLogicSi<0x13, "sh2add ", IIAluImm, CPURegs, 0, TypeIIAluImm>;
+def SH3ADDi     : ArithLogicSi<0x13, "sh3add ", IIAluImm, CPURegs, 0, TypeIIAluImm>;
+def SH4ADDi     : ArithLogicSi<0x13, "sh4add ", IIAluImm, CPURegs, 0, TypeIIAluImm>;
 
 def MULT        : Mult32<0x50, "mpylu", IIImul>;
 def MULTu       : Mult32<0x51, "mpyhs", IIImul>;
@@ -588,7 +588,7 @@ let isReMaterializable = 1, neverHasSideEffects = 1 in
 class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       FL<0, (outs DestRegs:$res), (ins CPURegs:$lhs, i32imm:$rhs),
       !strconcat(instr_asm, "  $res, $lhs, $rhs"),
-      [(set DestRegs:$res, (cond_op CPURegs:$lhs, imm:$rhs))], IIAlu, TypeIIAlu>;
+      [(set DestRegs:$res, (cond_op CPURegs:$lhs, imm:$rhs))], IIAluImm, TypeIIAluImm>;
 
 let isCompare = 1 in {
   def CMPEQr    : SetCCR<"cmpeq ", seteq, CPURegs>;

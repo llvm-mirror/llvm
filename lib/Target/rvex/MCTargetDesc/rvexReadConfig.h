@@ -17,9 +17,16 @@ struct DFAState
     int num2;
 };
 
+struct Stage_desc
+{
+    int delay;
+    int FU;
+    int resources;
+};
+
 using namespace std;
 
-extern vector<DFAState> Stages;
+extern vector<Stage_desc> Stages;
 extern vector<DFAState> Itin;
 
 void read_config (string ConfigFile);

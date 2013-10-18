@@ -43,7 +43,7 @@ def TypeIIStore            : CType<2>;
 def TypeIIBranch           : CType<3>;
 def TypeIIHiLo             : CType<4>;
 def TypeIIImul             : CType<5>;
-def TypeIIIdiv             : CType<6>;
+def TypeIIAluImm           : CType<6>;
 def TypeIIPseudo           : CType<7>;
 
 // Generic rvex Format

@@ -42,7 +42,7 @@ namespace rvexII {
       TypeIIBranch = 3,
       TypeIIHiLo   = 4,
       TypeIIImul   = 5,
-      TypeIIIdiv   = 6,
+      TypeIIAluImm = 6,
       TypeIIPseudo = 7,
 
     };

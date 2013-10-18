@@ -217,8 +217,8 @@ extern "C" void LLVMInitializervexTargetMC() {
   for (i = 0; i < (int)Stages.size(); i++)
   {
     //llvm::InstrStage TempStage = {Stages[i].num1, Stages[i].num2, -1, (llvm::InstrStage::ReservationKinds)1 };
-    rvexStages[i+1].Cycles_ = Stages[i].num1;
-    rvexStages[i+1].Units_ = Stages[i].num2;
+    rvexStages[i+1].Cycles_ = Stages[i].delay;
+    rvexStages[i+1].Units_ = Stages[i].FU;
     //rvexStages[i+1] = TempStage;
   }
   rvexStages[i+1].Cycles_ = 0;
@@ -253,4 +253,3 @@ extern "C" void LLVMInitializervexTargetMC() {
   TargetRegistry::RegisterMCSubtargetInfo(ThervexTarget,
                                           creatervexMCSubtargetInfo);
 }
-

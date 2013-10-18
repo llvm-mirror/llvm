@@ -26,6 +26,11 @@
 #include <iostream>
 #include <vector>
 
+#define WIDTH 3
+#define WIDTH2 2
+
+unsigned stages_width, stages_num;
+
 using namespace llvm;
 
 
@@ -91,6 +96,8 @@ namespace {
         // given the input InsnClass
         //
         bool hasTransition(unsigned InsnClass);
+        
+        //bool hasResources(unsigned consumed, unsigned resources);
     };
 } // End anonymous namespace.
 
@@ -157,6 +164,43 @@ bool State::hasTransition(unsigned InsnClass) {
     return Transitions.count(InsnClass) > 0;
 }
 
+
+
+bool hasResources(unsigned consume, unsigned resources)
+{
+    unsigned i;
+
+    
+    for (i = 0; i < stages_num; i++)
+    {
+        if ((~resources & consume) == consume)
+            return true;
+    }
+    return false;
+}
+
+unsigned setResources(unsigned consume, unsigned resources)
+{
+    unsigned i, count = 0;
+    count = resources;
+    for (i = 0; i < 32; i ++)
+    {
+
+        if ((resources&0x01) == 0)
+        {
+            count |= 1<<i;
+            if (!--consume) break;
+        }
+        resources <<=1;
+    }
+    
+    return count;
+}
+
+unsigned consumption[] = {   0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0 };
+//int consumption[] = {0, 0, 0, 2, 0,0,0,1};
+
 //
 // AddInsnClass - Return all combinations of resource reservation
 // which are possible from this state (PossibleStates).
@@ -175,15 +219,22 @@ void State::AddInsnClass(unsigned InsnClass,
         // Iterate over all possible resources used in InsnClass.
         // For ex: for InsnClass = 0x11, all resources = {0x01, 0x10}.
         //
-        
+
         DenseSet<unsigned> VisitedResourceStates;
-        for (unsigned int j = 0; j < sizeof(InsnClass) * 8; ++j) {
-            if ((0x1 << j) & InsnClass) {
+        for (unsigned int j = 0; j <= stages_num; ++j) {
+            if (consumption[InsnClass] << j <= stages_width) {
                 //
                 // For each possible resource used in InsnClass, generate the
                 // resource state if that resource was used.
                 //
-                unsigned ResultingResourceState = thisState | (0x1 << j);
+                unsigned ResultingResourceState;
+
+                
+                if(hasResources(consumption[InsnClass], thisState))
+                    ResultingResourceState = thisState | (consumption[InsnClass] << j);
+                else
+                    ResultingResourceState = thisState;
+                
                 //
                 // Check if the resulting resource state can be accommodated in this
                 // packet.
@@ -196,8 +247,19 @@ void State::AddInsnClass(unsigned InsnClass,
                 //
                 if ((ResultingResourceState != thisState) &&
                     (VisitedResourceStates.count(ResultingResourceState) == 0)) {
-                    VisitedResourceStates.insert(ResultingResourceState);
-                    PossibleStates.insert(ResultingResourceState);
+                    
+                    //ResultingResourceState = setResources(consumption[InsnClass], thisState);
+
+//                    if (InsnClass == 1)
+//                    {
+                        PossibleStates.insert(ResultingResourceState);
+                        VisitedResourceStates.insert(ResultingResourceState);
+//                    }
+//                    else
+//                    {
+//                        VisitedResourceStates.insert(ResultingResourceState);
+//                        PossibleStates.insert(ResultingResourceState);
+//                    }
                 }
             }
         }
@@ -206,19 +268,24 @@ void State::AddInsnClass(unsigned InsnClass,
 }
 
 
+
 //
 // canAddInsnClass - Quickly verifies if an instruction of type InsnClass is a
 // valid transition from this state i.e., can an instruction of type InsnClass
 // be added to the packet represented by this state.
 //
 bool State::canAddInsnClass(unsigned InsnClass) const {
+    unsigned temp, temp2;
     for (std::set<unsigned>::const_iterator SI = stateInfo.begin();
          SI != stateInfo.end(); ++SI) {
-        if (~*SI & InsnClass)
-            return true;
+        temp = *SI;
+        temp2 = ~temp & InsnClass;
+        if (hasResources(consumption[InsnClass], temp))
+                return true;
     }
     return false;
 }
+
 
 
 void DFA::initialize() {
@@ -338,12 +405,29 @@ int main (void) {
 
 
     std::vector<int> isnStages;
+    
 
-    isnStages.push_back(3);
+
+    consumption[7] = 1;
+    consumption[1] = 7;
     isnStages.push_back(7);
     isnStages.push_back(1);
-    isnStages.push_back(2);
-    isnStages.push_back(4);
+    isnStages.push_back(7);
+//    isnStages.push_back(1);
+//    isnStages.push_back(2);
+//    isnStages.push_back(4);
+    
+    stages_width = isnStages[0];
+    
+    
+    for (stages_num = 0; stages_num < 16; stages_num++)
+    {
+        if (!(stages_width&0x01)) break;
+        stages_width >>= 1;
+    }
+    
+    stages_width = isnStages[0];
+
 
     //
     // Worklist algorithm to create a DFA for processor resource tracking.
@@ -364,13 +448,11 @@ int main (void) {
     //
     while (!WorkList.empty()) {
         State *current = WorkList.pop_back_val();
-
         for (std::vector<int>::iterator i = isnStages.begin(); i < isnStages.end(); i++)
         {
             unsigned InsnClass = *i;
 
             std::set<unsigned> NewStateResources;
-
             if (!current->hasTransition(InsnClass) &&
                 current->canAddInsnClass(InsnClass))
             {
