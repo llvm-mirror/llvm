@@ -53,7 +53,9 @@ namespace llvm {
       Mpyhhu,
       Mpyll,
       Mpylh,
-      Mpyhh,      
+      Mpyhh,
+      Mpyl,
+      Mpyh,      
 
 
       // Handle gp_rel (small data/bss sections) relocation.

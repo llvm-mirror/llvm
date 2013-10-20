@@ -84,7 +84,9 @@ def rvexMpylhu            : SDNode<"rvexISD::Mpylhu", SDTIntBinOp, []>;
 def rvexMpyhhu            : SDNode<"rvexISD::Mpyhhu", SDTIntBinOp, []>;
 def rvexMpyll             : SDNode<"rvexISD::Mpyll", SDTIntBinOp, []>;
 def rvexMpylh             : SDNode<"rvexISD::Mpylh", SDTIntBinOp, []>;
-def rvexMpyhh             : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;                              
+def rvexMpyhh             : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;
+def rvexMpyl              : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;
+def rvexMpyh              : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;                              
 
 
 //===----------------------------------------------------------------------===//
@@ -476,6 +478,8 @@ def rvexMPYHHU  : ArithLogicR<0x1A, "mpyhhu ", rvexMpyhhu, IIImul, CPURegs, 1, T
 def rvexMPYLL   : ArithLogicR<0x1A, "mpyll ", rvexMpyll, IIImul, CPURegs, 1, TypeIIImul>;
 def rvexMPYLH   : ArithLogicR<0x1A, "mpylh ", rvexMpylh, IIImul, CPURegs, 0, TypeIIImul>;
 def rvexMPYHH   : ArithLogicR<0x1A, "mpyhh ", rvexMpyhh, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYL    : ArithLogicR<0x1A, "mpyl ", rvexMpyl, IIImul, CPURegs, 1, TypeIIImul>;
+def rvexMPYH    : ArithLogicR<0x1A, "mpyh ", rvexMpyh, IIImul, CPURegs, 1, TypeIIImul>;
 
 def SH1ADD      : ArithLogicS<0x13, "sh1add ", IIAlu, CPURegs, 0, TypeIIAlu>;
 def SH2ADD      : ArithLogicS<0x13, "sh2add ", IIAlu, CPURegs, 0, TypeIIAlu>;
@@ -591,28 +595,6 @@ class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       [(set DestRegs:$res, (cond_op CPURegs:$lhs, imm:$rhs))], IIAluImm, TypeIIAluImm>;
 
 let isCompare = 1 in {
-  def CMPEQr    : SetCCR<"cmpeq ", seteq, CPURegs>;
-  def CMPGEr    : SetCCR<"cmpge ", setge, CPURegs>;
-  def CMPGEUr   : SetCCR<"cmpgeu ", setuge, CPURegs>;
-  def CMPGTr    : SetCCR<"cmpgt ", setgt, CPURegs>;
-  def CMPGTUr   : SetCCR<"cmpgtu ", setugt, CPURegs>;
-  def CMPLEr    : SetCCR<"cmple ", setle, CPURegs>;
-  def CMPLEUr   : SetCCR<"cmpleu ", setule, CPURegs>;
-  def CMPLTr    : SetCCR<"cmplt ", setlt, CPURegs>;
-  def CMPLTUr   : SetCCR<"cmpltu ", setult, CPURegs>;
-  def CMPNEr    : SetCCR<"cmpne ", setne, CPURegs>;
-
-  def CMPEQri   : SetCCI<"cmpeq ", seteq, CPURegs>;
-  def CMPGEri   : SetCCI<"cmpge ", setge, CPURegs>;
-  def CMPGEUri  : SetCCI<"cmpgeu ", setuge, CPURegs>;
-  def CMPGTri   : SetCCI<"cmpgt ", setgt, CPURegs>;
-  def CMPGTUri  : SetCCI<"cmpgtu ", setugt, CPURegs>;
-  def CMPLEri   : SetCCI<"cmple ", setle, CPURegs>;
-  def CMPLEUri  : SetCCI<"cmpleu ", setule, CPURegs>;
-  def CMPLTri   : SetCCI<"cmplt ", setlt, CPURegs>;
-  def CMPLTUri  : SetCCI<"cmpltu ", setult, CPURegs>;
-  def CMPNEri   : SetCCI<"cmpne ", setne, CPURegs>;
-
   def CMPEQ     : SetCCR<"cmpeq ", seteq, BRRegs>;
   def CMPGE     : SetCCR<"cmpge ", setge, BRRegs>;
   def CMPGEU    : SetCCR<"cmpgeu ", setuge, BRRegs>;
@@ -634,6 +616,28 @@ let isCompare = 1 in {
   def CMPLTi    : SetCCI<"cmplt ", setlt, BRRegs>;
   def CMPLTUi   : SetCCI<"cmpltu ", setult, BRRegs>;
   def CMPNEi    : SetCCI<"cmpne ", setne, BRRegs>;
+
+  def CMPEQr    : SetCCR<"cmpeq ", seteq, CPURegs>;
+  def CMPGEr    : SetCCR<"cmpge ", setge, CPURegs>;
+  def CMPGEUr   : SetCCR<"cmpgeu ", setuge, CPURegs>;
+  def CMPGTr    : SetCCR<"cmpgt ", setgt, CPURegs>;
+  def CMPGTUr   : SetCCR<"cmpgtu ", setugt, CPURegs>;
+  def CMPLEr    : SetCCR<"cmple ", setle, CPURegs>;
+  def CMPLEUr   : SetCCR<"cmpleu ", setule, CPURegs>;
+  def CMPLTr    : SetCCR<"cmplt ", setlt, CPURegs>;
+  def CMPLTUr   : SetCCR<"cmpltu ", setult, CPURegs>;
+  def CMPNEr    : SetCCR<"cmpne ", setne, CPURegs>;
+
+  def CMPEQri   : SetCCI<"cmpeq ", seteq, CPURegs>;
+  def CMPGEri   : SetCCI<"cmpge ", setge, CPURegs>;
+  def CMPGEUri  : SetCCI<"cmpgeu ", setuge, CPURegs>;
+  def CMPGTri   : SetCCI<"cmpgt ", setgt, CPURegs>;
+  def CMPGTUri  : SetCCI<"cmpgtu ", setugt, CPURegs>;
+  def CMPLEri   : SetCCI<"cmple ", setle, CPURegs>;
+  def CMPLEUri  : SetCCI<"cmpleu ", setule, CPURegs>;
+  def CMPLTri   : SetCCI<"cmplt ", setlt, CPURegs>;
+  def CMPLTUri  : SetCCI<"cmpltu ", setult, CPURegs>;
+  def CMPNEri   : SetCCI<"cmpne ", setne, CPURegs>;
 
 }
 

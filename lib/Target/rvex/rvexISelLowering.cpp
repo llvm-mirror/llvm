@@ -65,7 +65,9 @@ const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case rvexISD::Mpyhhu:            return "RvexISD::Mpyhhu";
   case rvexISD::Mpyll:             return "RvexISD::Mpyll";
   case rvexISD::Mpylh:             return "RvexISD::Mpylh";
-  case rvexISD::Mpyhh:             return "RvexISD::Mpyhh";  
+  case rvexISD::Mpyhh:             return "RvexISD::Mpyhh";
+  case rvexISD::Mpyl:              return "RvexISD::Mpyl";
+  case rvexISD::Mpyh:              return "RvexISD::Mpyh";  
 
   case rvexISD::DivRem:            return "rvexISD::DivRem";
   case rvexISD::DivRemU:           return "rvexISD::DivRemU";
@@ -381,35 +383,49 @@ LowerMULHS(SDValue Op, SelectionDAG &DAG) const
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
 
+  SDValue LHSinv, RHSinv;
+
   SDValue ShiftImm = DAG.getTargetConstant(16, MVT::i32);
   SDValue MaskImm = DAG.getConstant(0xffff, MVT::i32);
+  SDValue Neg1 = DAG.getConstant(0xffffffff, MVT::i32);
 
-  SDValue t, w3, k, w2, w1;
   SDValue Zero = DAG.getRegister(rvex::R0, MVT::i32);
-  SDValue ZeroImm = DAG.getTargetConstant(0, MVT::i32);
-  SDValue ADDCarry = DAG.getSetCC(dl, MVT::i32, Zero, ZeroImm, ISD::SETNE);
+
+  SDValue tres, t, tneg, w3, k, w2, w1, PosL, PosR;
+
+  LHSinv = DAG.getNode(rvexISD::Mpyl, dl, MVT::i32, LHS, Neg1);
+  RHSinv = DAG.getNode(rvexISD::Mpyl, dl, MVT::i32, RHS, Neg1);
+
+  PosL = DAG.getSetCC(dl, MVT::i32, Zero, LHS, ISD::SETLT);
+  PosR = DAG.getSetCC(dl, MVT::i32, Zero, RHS, ISD::SETLT);  
+
+  LHS = DAG.getNode(rvexISD::Slct, dl, MVT::i32, PosL, LHS, LHSinv);
+  RHS = DAG.getNode(rvexISD::Slct, dl, MVT::i32, PosR, RHS, RHSinv);    
 
   t = DAG.getNode(rvexISD::Mpyllu, dl, MVT::i32, LHS, RHS);
   w3 = DAG.getNode(ISD::AND, dl, MVT::i32, t, MaskImm);
   k = DAG.getNode(ISD::SRL, dl, MVT::i32, t, ShiftImm);
 
-  t = DAG.getNode(rvexISD::Mpylh, dl, MVT::i32, LHS, RHS);
+  t = DAG.getNode(rvexISD::Mpylhu, dl, MVT::i32, LHS, RHS);
   t = DAG.getNode(ISD::ADD, dl, MVT::i32, t, k);
   w2 = DAG.getNode(ISD::AND, dl, MVT::i32, t, MaskImm);
-  w1 = DAG.getNode(ISD::SRA, dl, MVT::i32, t, ShiftImm);
+  w1 = DAG.getNode(ISD::SRL, dl, MVT::i32, t, ShiftImm);
 
-  t = DAG.getNode(rvexISD::Mpylh, dl, MVT::i32, RHS, LHS); 
+  t = DAG.getNode(rvexISD::Mpylhu, dl, MVT::i32, RHS, LHS); 
   t = DAG.getNode(ISD::ADD, dl, MVT::i32, t, w2); 
-  k = DAG.getNode(ISD::SRA, dl, MVT::i32, t, ShiftImm);
+  k = DAG.getNode(ISD::SRL, dl, MVT::i32, t, ShiftImm);
 
-  t = DAG.getNode(rvexISD::Mpyhh, dl, MVT::i32, LHS, RHS);
+  t = DAG.getNode(rvexISD::Mpyhhu, dl, MVT::i32, LHS, RHS);
+  t = DAG.getNode(ISD::ADD, dl, MVT::i32, t, w1);
+  t = DAG.getNode(ISD::ADD, dl, MVT::i32, t, k);
 
-  t = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), t, w1, ADDCarry);
-  t = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), SDValue(t.getNode(), 0), k, SDValue(t.getNode(), 1));
-  //t = DAG.getNode(ISD::ADD, dl, MVT::i32, t, k); 
+  tneg = DAG.getNode(rvexISD::Orc, dl, MVT::i32, t, Zero);
 
-   //DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), DIVRes, DIVRes, ADDCarry );
-  return t;
+  tres = DAG.getNode(rvexISD::Slct, dl, MVT::i32, PosL, t, tneg);
+  tneg = DAG.getNode(rvexISD::Orc, dl, MVT::i32, tres, Zero);
+  tres = DAG.getNode(rvexISD::Slct, dl, MVT::i32, PosR, tres, tneg);
+
+  return tres;
 }  
 
 SDValue rvexTargetLowering::
