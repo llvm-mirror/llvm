@@ -11,7 +11,7 @@ using namespace std;
 vector<Stage_desc> Stages;
 vector<DFAState> Itin;
 
-void read_config (string ConfigFile)
+int read_config (string ConfigFile)
 {
     string str, str2, str3;
     int getal, getal2, getal3;
@@ -94,9 +94,17 @@ void read_config (string ConfigFile)
             }
             
         }
+
+        return 0;
     }
     
-
+    Stage_desc state;
+    state.delay = 1;
+    state.FU = 3;
+    state.resources = 1;
     
-  
+    Stages.push_back (state);
+    Stages.push_back (state);
+    
+    return 1;
 }

@@ -522,7 +522,7 @@ let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
 
 //def : Pat<(rvexRet CPURegs:$target), (RET CPURegs:$target, 0x8)>;
 
-def JALR    : JumpLinkReg<0x2E, "icall", CPURegs>;
+def JALR    : JumpLinkReg<0x2E, "call", CPURegs>;
 
 /// No operation
 let addr=0 in

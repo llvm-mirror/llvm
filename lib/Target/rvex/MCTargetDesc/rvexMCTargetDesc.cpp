@@ -107,7 +107,7 @@
     { 1, 1, 2, 0, 0 }, // 1 IIAlu
     { 1, 1, 2, 0, 0 }, // 2 IIPseudo
     { 1, 1, 2, 0, 0 }, // 3 IIBranch
-    { 1, 2, 3, 0, 0 }, // 4 IILoad
+    { 1, 1, 2, 0, 0 }, // 4 IILoad
     { 1, 1, 2, 0, 0 }, // 5 IIHiLo
     { 1, 1, 2, 0, 0 }, // 6 IIImul
     { 1, 1, 2, 0, 0 }, // 7 IIStore
@@ -209,29 +209,30 @@ extern "C" void LLVMInitializervexTargetMC() {
   int i;
   
   // Read configuration file
-  read_config(Config);
-
-
-  //Init InstrStages from config file
-  
-  for (i = 0; i < (int)Stages.size(); i++)
+  if (!read_config(Config))
   {
-    //llvm::InstrStage TempStage = {Stages[i].num1, Stages[i].num2, -1, (llvm::InstrStage::ReservationKinds)1 };
-    rvexStages[i+1].Cycles_ = Stages[i].delay;
-    rvexStages[i+1].Units_ = Stages[i].FU;
-    //rvexStages[i+1] = TempStage;
-  }
-  rvexStages[i+1].Cycles_ = 0;
-  rvexStages[i+1].Units_ = 0; 
-  rvexStages[i+1].NextCycles_ = 0;
-  rvexStages[i+1].Kind_ = llvm::InstrStage::Required;
-  
 
-  // Init InstrItin from config file
-  for (i = 0; i < (int)Itin.size(); i++)
-  {
-    llvm::InstrItinerary TempItin = {0, Itin[i].num1, Itin[i].num2, 0, 0};
-    rvexGenericItineraries[i + 1] = TempItin;
+    //Init InstrStages from config file
+    
+    for (i = 0; i < (int)Stages.size(); i++)
+    {
+      //llvm::InstrStage TempStage = {Stages[i].num1, Stages[i].num2, -1, (llvm::InstrStage::ReservationKinds)1 };
+      rvexStages[i+1].Cycles_ = Stages[i].delay;
+      rvexStages[i+1].Units_ = Stages[i].FU;
+      //rvexStages[i+1] = TempStage;
+    }
+    rvexStages[i+1].Cycles_ = 0;
+    rvexStages[i+1].Units_ = 0; 
+    rvexStages[i+1].NextCycles_ = 0;
+    rvexStages[i+1].Kind_ = llvm::InstrStage::Required;
+    
+
+    // Init InstrItin from config file
+    for (i = 0; i < (int)Itin.size(); i++)
+    {
+      llvm::InstrItinerary TempItin = {0, Itin[i].num1, Itin[i].num2, 0, 0};
+      rvexGenericItineraries[i + 1] = TempItin;
+    }
   }
 
   // Build VLIW DFA from config stages

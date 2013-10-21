@@ -177,7 +177,7 @@ eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
 // pure virtual method
 unsigned rvexRegisterInfo::
 getFrameRegister(const MachineFunction &MF) const {
-  const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
+  //const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
   return (rvex::R1);
 }
 

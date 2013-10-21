@@ -49,8 +49,8 @@
 #include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
 
+
 STATISTIC(NumNoops, "Number of noops inserted");
-STATISTIC(NumStalls, "Number of pipeline stalls");
 STATISTIC(NumFixedAnti, "Number of fixed anti-dependencies");
 
 // Post-RA scheduling is enabled with
@@ -234,7 +234,7 @@ bool rvexPostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
   MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
   MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
   AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
-  TargetPassConfig *PassConfig = &getAnalysis<TargetPassConfig>();
+  //TargetPassConfig *PassConfig = &getAnalysis<TargetPassConfig>();
 
   RegClassInfo.runOnMachineFunction(Fn);
 

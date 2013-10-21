@@ -265,7 +265,6 @@ SDValue rvexTargetLowering::
 LowerSDIV(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerSDIV!\n");
-  unsigned Opc = Op.getOpcode();
   SDNode* N = Op.getNode();
   DebugLoc dl = N->getDebugLoc();
 

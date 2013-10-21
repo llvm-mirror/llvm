@@ -342,7 +342,7 @@ bool rvexVLIWPacketizerList::isDirectJump(const MachineInstr *MI) const {
 // isrvexSoloInstruction - Return true if TSFlags:4 is 1.
 bool rvexVLIWPacketizerList::
 isrvexSoloInstruction(const MachineInstr *MI) const {
-  const uint64_t F = MI->getDesc().TSFlags;
+//  const uint64_t F = MI->getDesc().TSFlags;
   //return ((F >> SoloPos) & SoloMask);
   if (MI->getOpcode() == rvex::NOP)
     return true;
@@ -354,7 +354,7 @@ isrvexSoloInstruction(const MachineInstr *MI) const {
 // isrvexLongInstruction - Return true if TSFlags:5 is 1.
 bool rvexVLIWPacketizerList::
 isrvexLongInstruction(const MachineInstr *MI) const {
-  const uint64_t F = MI->getDesc().TSFlags;
+//  const uint64_t F = MI->getDesc().TSFlags;
   //return ((F >> LongPos) & LongMask);
   return false;
 }
@@ -377,7 +377,7 @@ isrvexCtrInstruction(const MachineInstr *MI) const {
 // TypeMeL.
 bool rvexVLIWPacketizerList::
 isrvexMemInstruction(const MachineInstr *MI) const {
-  rvexType type = rvexTypeOf(MI);
+//  rvexType type = rvexTypeOf(MI);
   //return (type == TypeMeS || type == TypeMeL);
   return false;
 }

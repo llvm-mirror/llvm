@@ -318,7 +318,7 @@ let isCall=1, hasDelaySlot=0 in {
   class JumpLinkReg<bits<8> op, string instr_asm,
                     RegisterClass RC>:
     FA<op, (outs), (ins RC:$rb, variable_ops),
-       !strconcat(instr_asm, "\t$rb = $rb"), [(rvexJmpLink RC:$rb)], IIBranch, TypeIIBranch> {
+       !strconcat(instr_asm, "\t$rb = $rb"), [], IIBranch, TypeIIBranch> {
     let rc = 0;
     let ra = 14;
     let shamt = 0;

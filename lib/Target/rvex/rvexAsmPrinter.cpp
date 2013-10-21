@@ -191,11 +191,7 @@ void rvexAsmPrinter::printHex32(unsigned Value, raw_ostream &O) {
 //	.set	nomacro
 /// Frame Directive
 void rvexAsmPrinter::emitFrameDirective() {
-  const TargetRegisterInfo &RI = *TM.getRegisterInfo();
-
-  unsigned stackReg  = RI.getFrameRegister(*MF);
-  unsigned returnReg = RI.getRARegister();
-  unsigned stackSize = MF->getFrameInfo()->getStackSize();
+//  const TargetRegisterInfo &RI = *TM.getRegisterInfo();
 
 /*  if (OutStreamer.hasRawTextSupport())
     OutStreamer.EmitRawText("\t.frame\t$" +
@@ -241,9 +237,6 @@ void rvexAsmPrinter::EmitFunctionBodyStart() {
   MCInstLowering.Initialize(Mang, &MF->getContext());
 
   //emitFrameDirective();
-  bool EmitCPLoad = (MF->getTarget().getRelocationModel() == Reloc::PIC_) &&
-    rvexFI->globalBaseRegSet() &&
-    rvexFI->globalBaseRegFixed();
 
 
 }

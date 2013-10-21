@@ -74,7 +74,7 @@ copyPhysReg(MachineBasicBlock &MBB,
 
   if (rvex::CPURegsRegClass.contains(DestReg)) { // Copy to CPU Reg.
     if (rvex::CPURegsRegClass.contains(SrcReg))
-      Opc = rvex::ADD, ZeroReg = rvex::R0;
+      Opc = rvex::MOV, ZeroReg = rvex::R0;
 
     else if (SrcReg == rvex::B0)
       Opc = rvex::ADD, ZeroReg = rvex::R0;

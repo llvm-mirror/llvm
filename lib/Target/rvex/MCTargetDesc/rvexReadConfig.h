@@ -29,6 +29,6 @@ using namespace std;
 extern vector<Stage_desc> Stages;
 extern vector<DFAState> Itin;
 
-void read_config (string ConfigFile);
+int read_config (string ConfigFile);
 
 #endif /* defined(__hello__hallo__) */

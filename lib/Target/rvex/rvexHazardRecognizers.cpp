@@ -36,7 +36,7 @@ using namespace llvm;
 rvexHazardRecognizer::rvexHazardRecognizer(const InstrItineraryData *II,
                            const ScheduleDAG *SchedDAG,
                            const char *ParentDebugType) :
-  ScheduleHazardRecognizer(), ItinData(II), DAG(SchedDAG), IssueWidth(0),
+  ScheduleHazardRecognizer(), DAG(SchedDAG), ItinData(II), IssueWidth(0),
   IssueCount(0) {
 
 

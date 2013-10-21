@@ -186,7 +186,7 @@ rvexDAGToDAGISel::SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl, EVT Ty,
   SDNode *Lo = 0, *Hi = 0;
   SDNode *Mul = CurDAG->getMachineNode(Opc, dl, MVT::Glue, N->getOperand(0),
                                        N->getOperand(1));
-  SDValue InFlag = SDValue(Mul, 0);
+
 /*
   if (HasLo) {
     Lo = CurDAG->getMachineNode(rvex::MFLO, dl,
@@ -219,7 +219,7 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
   // Instruction Selection not handled by the auto-generated
   // tablegen selection should be handled here.
   ///
-  EVT NodeTy = Node->getValueType(0);
+
   unsigned MultOpc;
 
   switch(Opcode) {
