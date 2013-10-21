@@ -138,7 +138,6 @@ rvexTargetLowering(rvexTargetMachine &TM)
 
 SDValue rvexTargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
   const {
-  SelectionDAG &DAG = DCI.DAG;
   unsigned opc = N->getOpcode();
 
   switch (opc) {
@@ -187,7 +186,6 @@ SDValue rvexTargetLowering::
 LowerUDIV(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerUDIV!\n");
-  unsigned Opc = Op.getOpcode();
   SDNode* N = Op.getNode();
   DebugLoc dl = N->getDebugLoc();
 
@@ -375,7 +373,6 @@ SDValue rvexTargetLowering::
 LowerMULHS(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerMULHS!\n");
-  unsigned Opc = Op.getOpcode();
   SDNode* N = Op.getNode();
   DebugLoc dl = N->getDebugLoc();
 
@@ -431,7 +428,6 @@ SDValue rvexTargetLowering::
 LowerMULHU(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerMULHU!\n");
-  unsigned Opc = Op.getOpcode();
   SDNode* N = Op.getNode();
   DebugLoc dl = N->getDebugLoc();
 
@@ -505,7 +501,7 @@ SDValue rvexTargetLowering::LowerGlobalAddress(SDValue Op,
 
   SDVTList VTs = DAG.getVTList(MVT::i32);
 
-  rvexTargetObjectFile &TLOF = (rvexTargetObjectFile&)getObjFileLowering();
+  //rvexTargetObjectFile &TLOF = (rvexTargetObjectFile&)getObjFileLowering();
 
 
   SDValue GA = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
@@ -594,7 +590,7 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     SDValue Arg = OutVals[i];
     CCValAssign &VA = ArgLocs[i];
-    MVT ValVT = VA.getValVT(), LocVT = VA.getLocVT();
+    MVT ValVT = VA.getValVT();
     ISD::ArgFlagsTy Flags = Outs[i].Flags;
 
     // ByVal Arg.
@@ -791,7 +787,6 @@ rvexTargetLowering::LowerFormalArguments(SDValue Chain,
     CCValAssign &VA = ArgLocs[i];
     EVT ValVT = VA.getValVT();
     ISD::ArgFlagsTy Flags = Ins[i].Flags;
-    bool IsRegLoc = VA.isRegLoc();
 
     if (Flags.isByVal()) {
       assert(Flags.getByValSize() &&
