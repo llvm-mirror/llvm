@@ -217,7 +217,7 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
   // Instruction Selection not handled by the auto-generated
   // tablegen selection should be handled here.
   ///
-  unsigned MultOpc;
+  //unsigned MultOpc;
 
 
   switch(Opcode) {
@@ -381,7 +381,7 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
 
   case ISD::MULHS:
   case ISD::MULHU: {
-    MultOpc = (Opcode == ISD::MULHU ? rvex::MULTu : rvex::MULT);
+    //MultOpc = (Opcode == ISD::MULHU ? rvex::MULTu : rvex::MULT);
     return CurDAG->getMachineNode(rvex::MULTu, dl, MVT::i32, Node->getOperand(0),
                                        Node->getOperand(1));
     //return SelectMULT(Node, MultOpc, dl, NodeTy, false, true).second;
