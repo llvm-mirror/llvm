@@ -234,10 +234,8 @@ void State::AddInsnClass(unsigned InsnClass,
         // Iterate over all possible resources used in InsnClass.
         // For ex: for InsnClass = 0x11, all resources = {0x01, 0x10}.
         //
-        int temp;
         DenseSet<unsigned> VisitedResourceStates;
         for (unsigned int j = 0; j <= stages_num; ++j) {
-            temp = consumption[InsnClass] << j;
             if (consumption[InsnClass] << j <= stages_width) {
                 //
                 // For each possible resource used in InsnClass, generate the
@@ -293,11 +291,10 @@ void State::AddInsnClass(unsigned InsnClass,
 // be added to the packet represented by this state.
 //
 bool State::canAddInsnClass(unsigned InsnClass) const {
-    unsigned temp, temp2;
+    unsigned temp;
     for (std::set<unsigned>::const_iterator SI = stateInfo.begin();
          SI != stateInfo.end(); ++SI) {
         temp = *SI;
-        temp2 = ~temp & InsnClass;
         if (hasResources(consumption[InsnClass], temp))
                 return true;
     }
