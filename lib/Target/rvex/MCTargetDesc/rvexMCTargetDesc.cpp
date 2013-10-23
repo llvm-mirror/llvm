@@ -105,13 +105,11 @@
   static llvm::InstrItinerary rvexGenericItineraries[] = {
     { 0, 0, 0, 0, 0 }, // 0 NoInstrModel
     { 1, 1, 2, 0, 0 }, // 1 IIAlu
-    { 1, 1, 2, 0, 0 }, // 2 IIPseudo
-    { 1, 1, 2, 0, 0 }, // 3 IIBranch
-    { 1, 1, 2, 0, 0 }, // 4 IILoad
-    { 1, 1, 2, 0, 0 }, // 5 IIHiLo
+    { 1, 2, 3, 0, 0 }, // 2 IIAluImm
+    { 1, 1, 2, 0, 0 }, // 3 IIPseudo
+    { 1, 1, 2, 0, 0 }, // 4 IIBranch
+    { 1, 2, 3, 0, 0 }, // 5 IILoadStore
     { 1, 1, 2, 0, 0 }, // 6 IIImul
-    { 1, 1, 2, 0, 0 }, // 7 IIStore
-    { 1, 1, 2, 0, 0 }, // 8 IIIdiv
     { 0, ~0U, ~0U, ~0U, ~0U } // end marker
   };
 

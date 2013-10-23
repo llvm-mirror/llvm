@@ -38,13 +38,12 @@ class CType<bits<4> val> {
   bits<4> Value = val;
 }
 def TypeIIAlu              : CType<0>;
-def TypeIILoad             : CType<1>;
-def TypeIIStore            : CType<2>;
-def TypeIIBranch           : CType<3>;
-def TypeIIHiLo             : CType<4>;
-def TypeIIImul             : CType<5>;
-def TypeIIAluImm           : CType<6>;
-def TypeIIPseudo           : CType<7>;
+def TypeIILoadStore        : CType<1>;
+def TypeIIBranch           : CType<2>;
+def TypeIIHiLo             : CType<3>;
+def TypeIIImul             : CType<4>;
+def TypeIIAluImm           : CType<5>;
+def TypeIIPseudo           : CType<6>;
 
 // Generic rvex Format
 class rvexInst<dag outs, dag ins, string asmstr, list<dag> pattern,

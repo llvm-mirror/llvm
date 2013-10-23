@@ -19,8 +19,7 @@ def P3 : FuncUnit;
 // Instruction Itinerary classes used for rvex
 //===----------------------------------------------------------------------===//
 def IIAlu              : InstrItinClass;
-def IILoad             : InstrItinClass;
-def IIStore            : InstrItinClass;
+def IILoadStore        : InstrItinClass;
 def IIBranch           : InstrItinClass;
 def IIHiLo             : InstrItinClass;
 def IIImul             : InstrItinClass;
@@ -35,8 +34,7 @@ def IIPseudo           : InstrItinClass;
 
 def rvexGenericItineraries : ProcessorItineraries<[P0, P1, P2, P3], [], [
   InstrItinData<IIAlu              , [InstrStage<1,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IILoad             , [InstrStage<2,  [P0, P1, P2, P3]>]>,
-  InstrItinData<IIStore            , [InstrStage<1,  [P0, P1, P2, P3]>]>,
+  InstrItinData<IILoadStore        , [InstrStage<2,  [P0]>]>,
   InstrItinData<IIBranch           , [InstrStage<1,  [P0, P1, P2, P3]>]>,
   InstrItinData<IIHiLo             , [InstrStage<1,  [P0, P1, P2, P3]>]>,
   InstrItinData<IIImul             , [InstrStage<1,  [P0, P1, P2, P3]>]>,

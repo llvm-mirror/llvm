@@ -291,7 +291,7 @@ class LoadM<bits<8> op, string instr_asm, PatFrag OpNode, RegisterClass RC,
             Operand MemOpnd, bit Pseudo>:
   FMem<op, (outs RC:$ra), (ins MemOpnd:$addr),
      !strconcat(instr_asm, "\t$ra = $addr"),
-     [(set RC:$ra, (OpNode ADDRrr:$addr))], IILoad, TypeIILoad> {
+     [(set RC:$ra, (OpNode ADDRrr:$addr))], IILoadStore, TypeIILoadStore> {
   let isPseudo = Pseudo;
 }
 
@@ -299,7 +299,7 @@ class StoreM<bits<8> op, string instr_asm, PatFrag OpNode, RegisterClass RC,
              Operand MemOpnd, bit Pseudo>:
   FMem<op, (outs), (ins RC:$ra, MemOpnd:$addr),
      !strconcat(instr_asm, "\t$addr = $ra"),
-     [(OpNode RC:$ra, ADDRrr:$addr)], IIStore, TypeIIStore> {
+     [(OpNode RC:$ra, ADDRrr:$addr)], IILoadStore, TypeIILoadStore> {
   let isPseudo = Pseudo;
 }
 
