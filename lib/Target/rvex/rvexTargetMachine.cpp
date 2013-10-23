@@ -98,7 +98,7 @@ bool rvexPassConfig::addInstSelector() {
 
 bool rvexPassConfig::addPreEmitPass() {
   if(static_cast<rvexTargetMachine*>(TM)->getSubtargetImpl()->isVLIWEnabled()) {
-    //addPass(creatervexPostRAScheduler());
+    addPass(creatervexPostRAScheduler());
     addPass(creatervexVLIWPacketizer());
   }
 

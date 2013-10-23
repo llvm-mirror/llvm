@@ -143,6 +143,7 @@ def HI16 : SDNodeXForm<imm, [{
 // e.g. addi, andi
 def immSExt32  : PatLeaf<(imm), [{ return isInt<32>(N->getSExtValue()); }]>;
 def immSExt16  : PatLeaf<(imm), [{ return isInt<16>(N->getSExtValue()); }]>;
+def immSExt8  : PatLeaf<(imm), [{ return isInt<8>(N->getSExtValue()); }]>;
 
 // Node immediate fits as 16-bit zero extended on target immediate.
 // The LO16 param means that only the lower 16 bits of the node
@@ -217,6 +218,16 @@ class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
+// Arithmetic and logical instructions with 2 register operands.
+class ArithLogicIS<bits<8> op, string instr_asm, SDNode OpNode,
+                  Operand Od, PatLeaf imm_type, RegisterClass RC> :
+  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
+     !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
+     [(set RC:$ra, (OpNode RC:$rb, immSExt8:$imm16))], IIAlu, TypeIIAlu> {
+  let isCommutable = 0;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
+
 // Arithmetic and logical instructions with 3 register operands and 2 returns.
 // Used for ADDCG and DIVS
 class ArithLogicC<bits<8> op, string instr_asm, SDNode OpNode,
@@ -256,7 +267,17 @@ class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm),
      !strconcat(instr_asm, "\t$ra = $imm"),
-     [(set RC:$ra, (OpNode RC:$rb, imm_type:$imm))], IIAluImm, TypeIIAluImm> {
+     [], IIAluImm, TypeIIAluImm> {
+  let rb = 0;
+  let isReMaterializable = 1;
+}
+
+// Move immediate imm16 to register ra.
+class MoveImmSmall<bits<8> op, string instr_asm, SDNode OpNode,
+                  Operand Od, PatLeaf imm_type, RegisterClass RC> :
+  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm),
+     !strconcat(instr_asm, "\t$ra = $imm"),
+     [], IIAlu, TypeIIAlu> {
   let rb = 0;
   let isReMaterializable = 1;
 }
@@ -431,9 +452,13 @@ defm SH         : StoreM32<0x08, "sth ", truncstorei16_a>;
 
 /// Arithmetic Instructions (ALU Immediate)
 //def MOV     
+def MOVS         : MoveImmSmall<0x08, "mov ", add, simm16, immSExt8, CPURegs>;
+def LDIS         : ArithLogicIS<0x09, "add ", add, simm16, immSExt8, CPURegs>;
+
 def LDI         : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
 def MOV         : MoveImm<0x08, "mov ", add, simm16, immSExt32, CPURegs>;
 def ADDiu       : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
+
 def XORiu       : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 //Imm types
@@ -541,6 +566,9 @@ def LEA_ADDiu : EffectiveAddress<"add \t$ra = $addr", CPURegs, mem_ea> {
 //===----------------------------------------------------------------------===//
 
 // Small immediates
+//def : Pat<(i32 immSExt8:$in),
+//          (MOVS R0, immSExt8:$in)>;
+
 def : Pat<(i32 imm:$in),
           (MOV R0, imm:$in)>;
 

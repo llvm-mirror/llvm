@@ -418,13 +418,13 @@ int rvexBuildDFA (std::vector<Stage_desc>& isnStages) {
     
     stages_width = isnStages[0].FU;
 
-//    consumption[7] = isnStages[2].resources;
-//    consumption[3] = isnStages[1].resources;
-//    consumption[1] = isnStages[0].resources;
+   consumption[7] = isnStages[2].resources;
+   consumption[3] = isnStages[1].resources;
+   consumption[1] = isnStages[0].resources;
 
-    consumption[7] = 1;
-    consumption[3] = 7;
-    consumption[1] = 7;
+    // consumption[7] = 1;
+    // consumption[3] = 7;
+    // consumption[1] = 7;
     
     for (std::vector<Stage_desc>::iterator i = isnStages.begin(); i < isnStages.end(); i++)
         consumption[i->FU] = i->resources;
