@@ -55,10 +55,7 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   SmallString<128> Str;
   raw_svector_ostream OS(Str);
 
-  DEBUG(errs() << "MI:" << MI << "\n");
-
   if(MI->isBundle()) {
-    DEBUG(errs() << "MI bundle:" << MI << "\n");
     std::vector<const MachineInstr*> BundleMIs;
 
     unsigned int IgnoreCount = 0;

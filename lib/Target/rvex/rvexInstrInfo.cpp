@@ -181,7 +181,7 @@ bool rvexInstrInfo::isSchedulingBoundary(const MachineInstr *MI,
     return false;
  
   // Terminators and labels can't be scheduled around.
-  if (MI->getDesc().isTerminator() || MI->isLabel() || MI->isInlineAsm()) {
+  if (MI->getDesc().isTerminator() || MI->isLabel() || MI->isInlineAsm() || MI->isReturn()) {
     return true;
   }
 

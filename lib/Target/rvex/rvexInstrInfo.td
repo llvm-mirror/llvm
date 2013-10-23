@@ -552,7 +552,7 @@ def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
           (ADDiu CPURegs:$gp, tglobaladdr:$in)>;
 
 def : Pat<(not CPURegs:$in),
-          (XOR CPURegs:$in, (ADDiu R0, 1))>;
+          (XORi CPURegs:$in, -1)>;
 
 // Shift add patterns
 def : Pat<(add (shl CPURegs:$lhs, 1), CPURegs:$rhs),
