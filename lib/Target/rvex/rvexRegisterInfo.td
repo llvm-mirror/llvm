@@ -125,6 +125,6 @@ def CPURegs : RegisterClass<"rvex", [i32], 32,
   )>;
 
 
-def BRRegs   : RegisterClass<"rvex", [i32], 32, (add (sequence "B%u", 0, 7))>;
+def BRRegs   : RegisterClass<"rvex", [i1], 32, (add (sequence "B%u", 0, 7))>;
 //def BRRegs   : RegisterClass<"rvex", [i32], 32, (add B0)>;
 

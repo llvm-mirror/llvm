@@ -67,7 +67,15 @@ const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case rvexISD::Mpylh:             return "RvexISD::Mpylh";
   case rvexISD::Mpyhh:             return "RvexISD::Mpyhh";
   case rvexISD::Mpyl:              return "RvexISD::Mpyl";
-  case rvexISD::Mpyh:              return "RvexISD::Mpyh";  
+  case rvexISD::Mpyh:              return "RvexISD::Mpyh";
+
+  case rvexISD::SXTB:              return "RvexISD::SXTB";
+  case rvexISD::SXTH:              return "RvexISD::SXTH";  
+  case rvexISD::ZXTB:              return "RvexISD::ZXTB";
+  case rvexISD::ZXTH:              return "RvexISD::ZXTH";
+
+      case rvexISD::BR:                 return "RvexISD::BR";
+      case rvexISD::BRF:                 return "RvexISD::BRF";
 
   case rvexISD::DivRem:            return "rvexISD::DivRem";
   case rvexISD::DivRemU:           return "rvexISD::DivRemU";
@@ -99,8 +107,8 @@ rvexTargetLowering(rvexTargetMachine &TM)
   // Without this, every float setcc comes with a AND/OR with the result,
   // we don't want this, since the fpcmp result goes to a flag register,
   // which is used implicitly by brcond and select operations.
-  AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
-  setOperationAction(ISD::BRCOND, MVT::Other, Custom);
+  //AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
+  //setOperationAction(ISD::BRCOND, MVT::Other, Custom);
   
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
   setOperationAction(ISD::SREM, MVT::i32, Expand);
@@ -114,15 +122,26 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::SDIVREM, MVT::i32, Expand);
   setOperationAction(ISD::UDIVREM, MVT::i32, Expand);
 
-  setOperationAction(ISD::SELECT_CC,          MVT::i32, Promote);
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Promote);
+
+  setOperationAction(ISD::ZERO_EXTEND, MVT::i32, Expand);
+  setOperationAction(ISD::SIGN_EXTEND, MVT::i32, Expand);
 
   // Custom lowering of ADDE and ADDC
   setOperationAction(ISD::ADDE, MVT::i32, Custom);
   setOperationAction(ISD::ADDC, MVT::i32, Custom);
 
+  setLoadExtAction(ISD::EXTLOAD,  MVT::i1,  Promote);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i1,  Promote);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i1,  Promote);
+
+  setOperationAction(ISD::BR_CC, MVT::Other,   Expand);
+  setOperationAction(ISD::BR_CC, MVT::i1,   Expand);
+  setOperationAction(ISD::BR_CC, MVT::i32,   Expand);
+
+  
 
 
-  setOperationAction(ISD::BR_CC,             MVT::i32, Expand);
 
 
 //- Set .align 2
@@ -134,7 +153,9 @@ rvexTargetLowering(rvexTargetMachine &TM)
   computeRegisterProperties();
 }
 
-
+EVT rvexTargetLowering::getSetCCResultType(EVT VT) const {
+  return MVT::i1;
+}
 
 SDValue rvexTargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
   const {

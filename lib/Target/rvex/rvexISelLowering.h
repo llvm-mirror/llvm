@@ -55,8 +55,16 @@ namespace llvm {
       Mpylh,
       Mpyhh,
       Mpyl,
-      Mpyh,      
+      Mpyh,
 
+      // Extend in reg ops
+      SXTB,
+      SXTH,
+      ZXTB,
+      ZXTH,
+
+      BR,
+      BRF,
 
       // Handle gp_rel (small data/bss sections) relocation.
       GPRel,
@@ -97,6 +105,8 @@ namespace llvm {
   private:
     // Subtarget Info
     const rvexSubtarget *Subtarget;
+
+    EVT getSetCCResultType(EVT VT) const;
 
     // Lower Operand helpers
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,

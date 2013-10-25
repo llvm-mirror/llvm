@@ -678,8 +678,9 @@ void SchedulePostRATDList::ListScheduleTopDown() {
         // Otherwise, we have a pipeline stall, but no other problem,
         // just advance the current cycle and try again.
         DEBUG(dbgs() << "*** Stall in cycle, insert noop " << CurCycle << '\n');
-        HazardRec->EmitNoop();
-        Sequence.push_back(0);   // NULL here means noop
+//        HazardRec->EmitNoop();
+//        Sequence.push_back(0);   // NULL here means noop
+        HazardRec->AdvanceCycle();
         ++NumNoops;
       } else {
         // Otherwise, we have no instructions to issue and we have instructions

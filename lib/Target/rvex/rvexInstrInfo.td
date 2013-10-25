@@ -86,7 +86,12 @@ def rvexMpyll             : SDNode<"rvexISD::Mpyll", SDTIntBinOp, []>;
 def rvexMpylh             : SDNode<"rvexISD::Mpylh", SDTIntBinOp, []>;
 def rvexMpyhh             : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;
 def rvexMpyl              : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;
-def rvexMpyh              : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;                              
+def rvexMpyh              : SDNode<"rvexISD::Mpyhh", SDTIntBinOp, []>;
+
+def rvexSXTB              : SDNode<"rvexISD::SXTB", SDTExtInreg, []>;
+def rvexSXTH              : SDNode<"rvexISD::SXTH", SDTExtInreg, []>;
+def rvexZXTB              : SDNode<"rvexISD::ZXTB", SDTExtInreg, []>;                              
+def rvexZXTH              : SDNode<"rvexISD::ZXTH", SDTExtInreg, []>;
 
 
 //===----------------------------------------------------------------------===//
@@ -262,6 +267,17 @@ class ArithLogicSi<bits<8> op, string instr_asm,
   let isReMaterializable = 1;
 }
 
+// Arithmetic instructions with no pattern
+class ArithLogicS1<bits<8> op, string instr_asm,
+                  InstrItinClass itin, RegisterClass RC, bit isComm = 0, CType type>:
+  FA<op, (outs RC:$ra), (ins RC:$rb),
+     !strconcat(instr_asm, "\t$ra = $rb"),
+     [], itin, type> {
+  let shamt = 0;
+  let isCommutable = isComm;  // e.g. add rb rc =  add rc rb
+  let isReMaterializable = 1;
+}
+
 // Move immediate imm16 to register ra.
 class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
@@ -360,16 +376,7 @@ class SelectRI<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
-// Conditional Branch
-class CBranch<bits<8> op, string instr_asm, RegisterClass RC>:
-  FJ<op, (outs), (ins RC:$ra, brtarget:$addr),
-             !strconcat(instr_asm, "\t$ra, $addr"),
-             [(brcond RC:$ra, bb:$addr)], IIBranch, TypeIIBranch> {
-  let isBranch = 1;
-  let isTerminator = 1;
-  let hasDelaySlot = 0;
-  let neverHasSideEffects = 1;
-}
+
 
 // Unconditional branch, such as JMP
 class UncondBranch<bits<8> op, string instr_asm>:
@@ -516,6 +523,31 @@ def SH2ADDi     : ArithLogicSi<0x13, "sh2add ", IIAluImm, CPURegs, 0, TypeIIAluI
 def SH3ADDi     : ArithLogicSi<0x13, "sh3add ", IIAluImm, CPURegs, 0, TypeIIAluImm>;
 def SH4ADDi     : ArithLogicSi<0x13, "sh4add ", IIAluImm, CPURegs, 0, TypeIIAluImm>;
 
+def SXTB        : ArithLogicS1<0x13, "sxtb", IIAlu, CPURegs, 0, TypeIIAlu>;
+def SXTH        : ArithLogicS1<0x13, "sxth", IIAlu, CPURegs, 0, TypeIIAlu>;
+def ZXTB        : ArithLogicS1<0x13, "zxtb", IIAlu, CPURegs, 0, TypeIIAlu>;
+def ZXTH        : ArithLogicS1<0x13, "zxth", IIAlu, CPURegs, 0, TypeIIAlu>;
+
+// Extending Patterns
+def : Pat<(sra (shl CPURegs:$src, (i32 16)), (i32 16)),
+          (SXTH CPURegs:$src)>;
+def : Pat<(sra (shl CPURegs:$src, (i32 24)), (i32 24)),
+          (SXTB CPURegs:$src)>;
+def : Pat<(srl (shl CPURegs:$src, (i32 16)), (i32 16)),
+          (ZXTH CPURegs:$src)>;
+def : Pat<(srl (shl CPURegs:$src, (i32 24)), (i32 24)),
+          (ZXTB CPURegs:$src)>;
+def : Pat<(and CPURegs:$src, (i32 0x000000FF)),
+          (ZXTB CPURegs:$src)>;
+def : Pat<(and CPURegs:$src, (i32 0x0000FFFF)),
+          (ZXTH CPURegs:$src)>;
+
+// Extend in reg patterns
+def : Pat<(sext_inreg CPURegs:$src, i8),
+          (SXTB CPURegs:$src)>;
+def : Pat<(sext_inreg CPURegs:$src, i16),
+          (SXTH CPURegs:$src)>;
+
 def MULT        : Mult32<0x50, "mpylu", IIImul>;
 def MULTu       : Mult32<0x51, "mpyhs", IIImul>;
 
@@ -527,8 +559,24 @@ def ROR         : shift_rotate_imm32<0x1D, 0x01, "ror ", rotr>;
 def SHL         : shift_rotate_imm32<0x1E, 0x00, "shl ", shl>;
 def SHR         : shift_rotate_imm32<0x1F, 0x00, "shru", srl>;
 
+    
+
+// Conditional Branch
+class CBranch<bits<8> op, string instr_asm, RegisterClass RC>:
+  FJ<op, (outs), (ins RC:$ra, brtarget:$addr),
+             !strconcat(instr_asm, "\t$ra, $addr"),
+             [(brcond RC:$ra, bb:$addr)], IIBranch, TypeIIBranch> {
+  let isBranch = 1;
+  let isTerminator = 1;
+  let hasDelaySlot = 0;
+  let neverHasSideEffects = 1;
+}      
+
+
 def BR          : CBranch<0x25, "br  ", BRRegs>;
 def BRF         : CBranch<0x25, "brf ", BRRegs>;
+
+
 
 def JMP         : UncondBranch<0x26, "goto">;
 
@@ -583,24 +631,24 @@ def : Pat<(not CPURegs:$in),
           (XORi CPURegs:$in, -1)>;
 
 // Shift add patterns
-def : Pat<(add (shl CPURegs:$lhs, 1), CPURegs:$rhs),
+def : Pat<(add (shl CPURegs:$lhs, (i32 1)), CPURegs:$rhs),
           (SH1ADD CPURegs:$lhs, CPURegs:$rhs)>; 
-def : Pat<(add (shl CPURegs:$lhs, 2), CPURegs:$rhs),
+def : Pat<(add (shl CPURegs:$lhs, (i32 2)), CPURegs:$rhs),
           (SH2ADD CPURegs:$lhs, CPURegs:$rhs)>; 
-def : Pat<(add (shl CPURegs:$lhs, 3), CPURegs:$rhs),
+def : Pat<(add (shl CPURegs:$lhs, (i32 3)), CPURegs:$rhs),
           (SH3ADD CPURegs:$lhs, CPURegs:$rhs)>; 
-def : Pat<(add (shl CPURegs:$lhs, 4), CPURegs:$rhs),
+def : Pat<(add (shl CPURegs:$lhs, (i32 4)), CPURegs:$rhs),
           (SH4ADD CPURegs:$lhs, CPURegs:$rhs)>; 
 
 // Shift add immediate patterns
-def : Pat<(add (shl CPURegs:$lhs, 1), imm:$rhs),
+def : Pat<(add (shl CPURegs:$lhs, (i32 1)), imm:$rhs),
           (SH1ADDi CPURegs:$lhs, imm:$rhs)>; 
-def : Pat<(add (shl CPURegs:$lhs, 2), imm:$rhs),
+def : Pat<(add (shl CPURegs:$lhs, (i32 2)), imm:$rhs),
           (SH2ADDi CPURegs:$lhs, imm:$rhs)>; 
-def : Pat<(add (shl CPURegs:$lhs, 3), imm:$rhs),
+def : Pat<(add (shl CPURegs:$lhs, (i32 3)), imm:$rhs),
           (SH3ADDi CPURegs:$lhs, imm:$rhs)>; 
-def : Pat<(add (shl CPURegs:$lhs, 4), imm:$rhs),
-          (SH4ADDi CPURegs:$lhs, imm:$rhs)>;                                                  
+def : Pat<(add (shl CPURegs:$lhs, (i32 1)), imm:$rhs),
+          (SH4ADDi CPURegs:$lhs, imm:$rhs)>;                                                    
 
 // FIXME mult pattern
 def : Pat<(mul CPURegs:$rb, CPURegs:$rc),
@@ -609,6 +657,8 @@ def : Pat<(mul CPURegs:$rb, CPURegs:$rc),
 def : Pat<(i32 (extloadi1  ADDRrr:$src)), (LBu ADDRrr:$src)>;
 def : Pat<(i32 (extloadi8  ADDRrr:$src)), (LBu ADDRrr:$src)>;
 def : Pat<(i32 (extloadi16_a ADDRrr:$src)), (LHu ADDRrr:$src)>;
+
+
 
 // Comparisons
 class SetCCR<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
@@ -621,6 +671,7 @@ class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       FL<0, (outs DestRegs:$res), (ins CPURegs:$lhs, i32imm:$rhs),
       !strconcat(instr_asm, "  $res, $lhs, $rhs"),
       [(set DestRegs:$res, (cond_op CPURegs:$lhs, imm:$rhs))], IIAluImm, TypeIIAluImm>;
+
 
 let isCompare = 1 in {
   def CMPEQ     : SetCCR<"cmpeq ", seteq, BRRegs>;
@@ -669,6 +720,79 @@ let isCompare = 1 in {
 
 }
 
+// Branch Patterns
+multiclass BranchPats<Instruction BrOp, Instruction CmpOpR, Instruction CmpOpI, 
+                      PatFrag cond> {
+  def : Pat<(brcond (i1 (cond CPURegs:$lhs, CPURegs:$rhs)), bb:$dst),
+            (BrOp (CmpOpR CPURegs:$lhs, CPURegs:$rhs), bb:$dst)>;
+  def : Pat<(brcond (i1 (cond CPURegs:$lhs, imm:$rhs)), bb:$dst),
+            (BrOp (CmpOpI CPURegs:$lhs, imm:$rhs), bb:$dst)>;
+  def : Pat<(brcond (i1 (cond CPURegs:$lhs, 0)), bb:$dst),
+            (BrOp (CmpOpR CPURegs:$lhs, R0), bb:$dst)>;
+}
+
+defm : BranchPats<BR, CMPEQ,   CMPEQi,   seteq>;
+defm : BranchPats<BR, CMPNE,   CMPNEi,   setne>;
+defm : BranchPats<BR, CMPLT,   CMPLTi,   setlt>;
+defm : BranchPats<BR, CMPLTU,  CMPLTUi,  setult>;
+defm : BranchPats<BR, CMPLE,   CMPLEi,   setle>;
+defm : BranchPats<BR, CMPLEU,  CMPLEUi,  setule>;
+defm : BranchPats<BR, CMPGT,   CMPGTi,   setgt>;
+defm : BranchPats<BR, CMPGTU,  CMPGTUi,  setugt>;
+defm : BranchPats<BR, CMPGE,   CMPGEi,   setge>;
+defm : BranchPats<BR, CMPGEU,  CMPGEUi,  setuge>;
+
+defm : BranchPats<BRF, CMPEQ,   CMPEQi,   setne>;
+defm : BranchPats<BRF, CMPNE,   CMPNEi,   seteq>;
+defm : BranchPats<BRF, CMPLT,   CMPLTi,   setge>;
+defm : BranchPats<BRF, CMPLTU,  CMPLTUi,  setuge>;
+defm : BranchPats<BRF, CMPLE,   CMPLEi,   setgt>;
+defm : BranchPats<BRF, CMPLEU,  CMPLEUi,  setugt>;
+defm : BranchPats<BRF, CMPGT,   CMPGTi,   setle>;
+defm : BranchPats<BRF, CMPGTU,  CMPGTUi,  setule>;
+defm : BranchPats<BRF, CMPGE,   CMPGEi,   setlt>;
+defm : BranchPats<BRF, CMPGEU,  CMPGEUi,  setult>;
+
+def : Pat<(brcond (i1 (setne BRRegs:$src, (i1 0))), bb:$offset),
+          (BRF BRRegs:$src, bb:$offset)>;
+def : Pat<(brcond (i1 (setne BRRegs:$src, (i1 -1))), bb:$offset),
+          (BRF BRRegs:$src, bb:$offset)>;
+def : Pat<(brcond (i1 (seteq BRRegs:$src, (i1 0))), bb:$offset),
+          (BR BRRegs:$src, bb:$offset)>;
+def : Pat<(brcond (i1 (seteq BRRegs:$src, (i1 -1))), bb:$offset),
+          (BR BRRegs:$src, bb:$offset)>;
+
+def : Pat<(brcond (i1 (seteq BRRegs:$cond, (i1 1))), bb:$offset),
+          (BR BRRegs:$cond, bb:$offset)>;
+def : Pat<(brcond (i1 (setne BRRegs:$cond, (i1 0))), bb:$offset),
+          (BRF BRRegs:$cond, bb:$offset)>;
+
+def : Pat<(trunc CPURegs:$src),
+          (CMPEQ CPURegs:$src, (i32 1))>;
+
+multiclass ExtendCmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
+  def : Pat<(anyext (setcc CPURegs:$lhs, CPURegs:$rhs, CC)),
+            (CmpOpR CPURegs:$lhs, CPURegs:$rhs)>; 
+  def : Pat<(zext (setcc CPURegs:$lhs, CPURegs:$rhs, CC)),
+            (CmpOpR CPURegs:$lhs, CPURegs:$rhs)>; 
+  def : Pat<(sext (setcc CPURegs:$lhs, CPURegs:$rhs, CC)),
+            (CmpOpR CPURegs:$lhs, CPURegs:$rhs)>; 
+  def : Pat<(anyext (setcc CPURegs:$lhs, imm:$rhs, CC)),
+            (CmpOpI CPURegs:$lhs, imm:$rhs)>;
+  def : Pat<(zext (setcc CPURegs:$lhs, imm:$rhs, CC)),
+            (CmpOpI CPURegs:$lhs, imm:$rhs)>;
+  def : Pat<(sext (setcc CPURegs:$lhs, imm:$rhs, CC)),
+            (CmpOpI CPURegs:$lhs, imm:$rhs)>;
+  // Peepholes
+  def : Pat<(anyext (setcc CPURegs:$lhs, 0, CC)),
+            (CmpOpR CPURegs:$lhs, 0)>;
+  def : Pat<(zext (setcc CPURegs:$lhs, 0, CC)),
+            (CmpOpR CPURegs:$lhs, 0)>;
+  def : Pat<(sext (setcc CPURegs:$lhs, 0, CC)),
+            (CmpOpR CPURegs:$lhs, 0)>;
+
+}
+
 multiclass CmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
   // Peepholes
   def : Pat<(setcc CPURegs:$lhs, 0, CC),
@@ -680,6 +804,17 @@ multiclass CmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
             (CmpOpI CPURegs:$lhs, imm:$rhs)>;
 
 }
+
+defm : ExtendCmpPats<CMPEQr,  CMPEQri,  SETEQ>;
+defm : ExtendCmpPats<CMPNEr,  CMPNEri,  SETNE>;
+defm : ExtendCmpPats<CMPLTr,  CMPLTri,  SETLT>;
+defm : ExtendCmpPats<CMPLTUr, CMPLTUri, SETULT>;
+defm : ExtendCmpPats<CMPLEr,  CMPLEri,  SETLE>;
+defm : ExtendCmpPats<CMPLEUr, CMPLEUri, SETULE>;
+defm : ExtendCmpPats<CMPGTr,  CMPGTri,  SETGT>;
+defm : ExtendCmpPats<CMPGTUr, CMPGTUri, SETUGT>;
+defm : ExtendCmpPats<CMPGEr,  CMPGEri,  SETGE>;
+defm : ExtendCmpPats<CMPGEUr, CMPGEUri, SETUGE>;
 
 defm : CmpPats<CMPEQ,   CMPEQi,   SETEQ>;
 defm : CmpPats<CMPNE,   CMPNEi,   SETNE>;
