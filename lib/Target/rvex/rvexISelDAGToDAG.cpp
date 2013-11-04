@@ -85,9 +85,7 @@ private:
 
   SDNode *getGlobalBaseReg();
 
-  std::pair<SDNode*, SDNode*> SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl,
-                                         EVT Ty, bool HasLo, bool HasHi);
-
+  SDNode *SelectConstant(SDNode *N);
 
   SDNode *Select(SDNode *N);
   // Complex Pattern.
@@ -178,24 +176,31 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
   return true;
 }
 
-/// Select multiply instructions.
-std::pair<SDNode*, SDNode*>
-rvexDAGToDAGISel::SelectMULT(SDNode *N, unsigned Opc, DebugLoc dl, EVT Ty,
-                             bool HasLo, bool HasHi) {
-  DEBUG(errs() << "SelectMULT!\n");
-  SDNode *Lo = 0, *Hi = 0;
+SDNode *rvexDAGToDAGISel::SelectConstant(SDNode *N) {
+  DEBUG(errs() << "SelectConstant!\n");
+  DebugLoc dl = N->getDebugLoc();
+  if(N->getValueType(0) == MVT::i1) {
+    SDNode *Result;
 
-/*
-  if (HasLo) {
-    Lo = CurDAG->getMachineNode(rvex::MFLO, dl,
-                                Ty, MVT::Glue, InFlag);
-    InFlag = SDValue(Lo, 1);
+    int32_t Val = cast<ConstantSDNode>(N)->getSExtValue();
+
+    if (Val = -1) {
+      SDValue Zero = CurDAG->getRegister(rvex::R0, MVT::i32);
+      SDValue ZeroImm = CurDAG->getTargetConstant(0, MVT::i32);
+
+      SDValue Res =  CurDAG->getSetCC(dl, MVT::i1, Zero, ZeroImm, ISD::SETEQ);
+
+      Result = CurDAG->getMachineNode(rvex::CMPEQ, dl, MVT::i1, Zero, ZeroImm);
+
+      ReplaceUses(N, Result);
+      return Result;
+    }
+
+
   }
-  if (HasHi)
-    Hi = CurDAG->getMachineNode(rvex::MFHI, dl,
-                                Ty, InFlag);
-*/
-  return std::make_pair(Lo, Hi);
+
+
+  return SelectCode(N);
 }
 
 /// Select instructions not customized! Used for
@@ -222,7 +227,6 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
 
   switch(Opcode) {
   default: break;
-
 
   
   // Select correct pattern for rvexADDC instruction
@@ -384,7 +388,6 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
     //MultOpc = (Opcode == ISD::MULHU ? rvex::MULTu : rvex::MULT);
     return CurDAG->getMachineNode(rvex::MULTu, dl, MVT::i32, Node->getOperand(0),
                                        Node->getOperand(1));
-    //return SelectMULT(Node, MultOpc, dl, NodeTy, false, true).second;
   }
 
   // Get target GOT address.
@@ -398,11 +401,14 @@ SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
     return getGlobalBaseReg();
 
   case ISD::Constant: {
+
     const ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Node);
     unsigned Size = CN->getValueSizeInBits(0);
 
     if (Size == 32)
       break;
+    else
+      return SelectConstant(Node);
   }
   }
 

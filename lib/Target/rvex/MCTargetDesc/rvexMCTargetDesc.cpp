@@ -68,12 +68,13 @@
 
   llvm::InstrStage rvexStages[] = {
     { 0, 0, 0, llvm::InstrStage::Required }, // No itinerary
-    { 1, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
-    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
-    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
-    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
-    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
-    { 2, rvexGenericItinerariesFU::P0 | rvexGenericItinerariesFU::P1, -1, (llvm::InstrStage::ReservationKinds)0 }, // 2
+    { 1, 15, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
+    { 1, 15, -1, (llvm::InstrStage::ReservationKinds)0 }, // 15
+    { 1, 15, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
+    { 1, 15, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
+    { 1, 15, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
+    { 1, 15, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
+    { 1, 15, -1, (llvm::InstrStage::ReservationKinds)0 }, // 1
     { 0, 0, 0, llvm::InstrStage::Required } // End stages
   };  
   
@@ -231,6 +232,8 @@ extern "C" void LLVMInitializervexTargetMC() {
       llvm::InstrItinerary TempItin = {0, Itin[i].num1, Itin[i].num2, 0, 0};
       rvexGenericItineraries[i + 1] = TempItin;
     }
+    llvm::InstrItinerary TempItin = {0, 0, 0, 0, 0};
+    rvexGenericItineraries[i + 1] = TempItin;
   }
 
   // Build VLIW DFA from config stages

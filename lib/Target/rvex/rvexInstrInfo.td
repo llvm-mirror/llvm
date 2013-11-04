@@ -134,16 +134,6 @@ def mem_ea : Operand<i32> {
   let EncoderMethod = "getMemEncoding";
 }
 
-// Transformation Function - get the lower 16 bits.
-def LO16 : SDNodeXForm<imm, [{
-  return getImm(N, N->getZExtValue() & 0xFFFF);
-}]>;
-
-// Transformation Function - get the higher 16 bits.
-def HI16 : SDNodeXForm<imm, [{
-  return getImm(N, (N->getZExtValue() >> 16) & 0xFFFF);
-}]>;
-
 // Node immediate fits as 16-bit sign extended on target immediate.
 // e.g. addi, andi
 def immSExt32  : PatLeaf<(imm), [{ return isInt<32>(N->getSExtValue()); }]>;
@@ -458,12 +448,13 @@ defm LHu        : LoadM32<0x07, "ldhu", zextloadi16_a>;
 defm SH         : StoreM32<0x08, "sth ", truncstorei16_a>;
 
 /// Arithmetic Instructions (ALU Immediate)
-//def MOV     
-def MOVS         : MoveImmSmall<0x08, "mov ", add, simm16, immSExt8, CPURegs>;
-def LDIS         : ArithLogicIS<0x09, "add ", add, simm16, immSExt8, CPURegs>;
 
-def LDI         : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
-def MOV         : MoveImm<0x08, "mov ", add, simm16, immSExt32, CPURegs>;
+
+def MOVS        : ArithLogicIS<0x09, "add ", add, simm16, immSExt8, CPURegs>;
+def MOV         : ArithLogicI<0x09, "add ", add, simm16, immSExt32, CPURegs>;
+
+
+
 def ADDiu       : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
 
 def XORiu       : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
@@ -528,6 +519,7 @@ def SXTH        : ArithLogicS1<0x13, "sxth", IIAlu, CPURegs, 0, TypeIIAlu>;
 def ZXTB        : ArithLogicS1<0x13, "zxtb", IIAlu, CPURegs, 0, TypeIIAlu>;
 def ZXTH        : ArithLogicS1<0x13, "zxth", IIAlu, CPURegs, 0, TypeIIAlu>;
 
+
 // Extending Patterns
 def : Pat<(sra (shl CPURegs:$src, (i32 16)), (i32 16)),
           (SXTH CPURegs:$src)>;
@@ -581,7 +573,6 @@ def BRF         : CBranch<0x25, "brf ", BRRegs>;
 def JMP         : UncondBranch<0x26, "goto">;
 
 /// Jump and Branch Instructions
-def SWI         : JumpLink<0x2A, "swi">;
 let isCall=1, isBarrier=1 in
 def CALL        : JumpLink<0x2B, "call">;
 
@@ -614,14 +605,18 @@ def LEA_ADDiu : EffectiveAddress<"add \t$ra = $addr", CPURegs, mem_ea> {
 //===----------------------------------------------------------------------===//
 
 // Small immediates
-//def : Pat<(i32 immSExt8:$in),
-//          (MOVS R0, immSExt8:$in)>;
+def : Pat<(i32 immSExt8:$in),
+          (MOVS R0, immSExt8:$in)>;
 
 def : Pat<(i32 imm:$in),
           (MOV R0, imm:$in)>;
-
+          
+//FIXME is dit nodig?
 def : Pat<(rvexJmpLink (i32 tglobaladdr:$dst)),
           (CALL (i32 LR), tglobaladdr:$dst)>;
+
+def : Pat<(rvexJmpLink (i32 texternalsym:$dst)),
+          (CALL (i32 LR), texternalsym:$dst)>;          
          
 // gp_rel relocs
 def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),
@@ -768,7 +763,7 @@ def : Pat<(brcond (i1 (setne BRRegs:$cond, (i1 0))), bb:$offset),
           (BRF BRRegs:$cond, bb:$offset)>;
 
 def : Pat<(trunc CPURegs:$src),
-          (CMPEQ CPURegs:$src, (i32 1))>;
+          (CMPEQ (ANDi CPURegs:$src, (i32 1)), (i32 1))>;
 
 multiclass ExtendCmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
   def : Pat<(anyext (setcc CPURegs:$lhs, CPURegs:$rhs, CC)),
@@ -828,3 +823,6 @@ defm : CmpPats<CMPGE,   CMPGEi,   SETGE>;
 defm : CmpPats<CMPGEU,  CMPGEUi,  SETUGE>;
 
 
+
+
+                 

@@ -47,11 +47,14 @@ rvexHazardRecognizer::rvexHazardRecognizer(const InstrItineraryData *II,
   unsigned ScoreboardDepth = 1;
   if (ItinData && !ItinData->isEmpty()) {
     for (unsigned idx = 0; ; ++idx) {
-      if (ItinData->isEndMarker(idx))
-        break;
+      // if (ItinData->isEndMarker(idx))              //FIXME werkt soms niet
+      //   break;
 
       const InstrStage *IS = ItinData->beginStage(idx);
       const InstrStage *E = ItinData->endStage(idx);
+
+      if ((IS->getCycles() == 0) && (IS->getNextCycles() == 0))   // FIXME om isEndMarker() op te vangen
+        break;
       unsigned CurCycle = 0;
       unsigned ItinDepth = 0;
       for (; IS != E; ++IS) {
@@ -148,7 +151,7 @@ rvexHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
         DEBUG(dbgs() << "*** Hazard in cycle +" << StageCycle << ", ");
         DEBUG(dbgs() << "SU(" << SU->NodeNum << "): ");
         DEBUG(DAG->dumpNode(SU));
-        return NoopHazard;
+        return Hazard;
       }
     }
 

@@ -27,7 +27,10 @@ using namespace llvm;
 #include "rvexInstrInfo.h"
 
 #include "llvm/Support/CommandLine.h"
+#ifdef VEX_LLC_FLAG
+
 extern cl::opt<bool> DisableOutputNops;
+#endif
 
 void rvexInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
 //- getRegisterName(RegNo) defined in rvexGenAsmWriter.inc which came from 
@@ -40,7 +43,11 @@ void rvexInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
 //- printInstruction(MI, O) defined in rvexGenAsmWriter.inc which came from 
 //   rvex.td indicate.
   // Check if nop instruction should be printed or an empty packet be printed
+  #ifdef VEX_LLC_FLAG
   if ((MI->getOpcode() != rvex::NOP) || (DisableOutputNops==false))
+  #else
+  if ((MI->getOpcode() != rvex::NOP))   
+  #endif
   {
     O << "\tc0 ";
     printInstruction(MI, O);

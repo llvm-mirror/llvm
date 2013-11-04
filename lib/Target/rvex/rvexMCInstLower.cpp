@@ -68,6 +68,10 @@ MCOperand rvexMCInstLower::LowerSymbolOperand(const MachineOperand &MO,
     Symbol = Mang->getSymbol(MO.getGlobal());
     break;
 
+  case MachineOperand::MO_ExternalSymbol:
+    Symbol = AsmPrinter.GetExternalSymbolSymbol(MO.getSymbolName());
+    break;    
+
   default:
     llvm_unreachable("<unknown operand type>");
   }
@@ -100,6 +104,7 @@ MCOperand rvexMCInstLower::LowerOperand(const MachineOperand& MO,
   case MachineOperand::MO_MachineBasicBlock:
   case MachineOperand::MO_GlobalAddress:
   case MachineOperand::MO_BlockAddress:
+  case MachineOperand::MO_ExternalSymbol:
     return LowerSymbolOperand(MO, MOTy, offset);
   case MachineOperand::MO_RegisterMask:
     break;
@@ -121,4 +126,3 @@ void rvexMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
       OutMI.addOperand(MCOp);
   }
 }
-

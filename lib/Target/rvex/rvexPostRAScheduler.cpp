@@ -622,6 +622,7 @@ void SchedulePostRATDList::ListScheduleTopDown() {
     // so, add them to the available queue.
     unsigned MinDepth = ~0u;
     for (unsigned i = 0, e = PendingQueue.size(); i != e; ++i) {
+      unsigned temp = PendingQueue[i]->getDepth();
       if (PendingQueue[i]->getDepth() <= CurCycle) {
         AvailableQueue.push(PendingQueue[i]);
         PendingQueue[i]->isAvailable = true;
@@ -678,10 +679,10 @@ void SchedulePostRATDList::ListScheduleTopDown() {
         // Otherwise, we have a pipeline stall, but no other problem,
         // just advance the current cycle and try again.
         DEBUG(dbgs() << "*** Stall in cycle, insert noop " << CurCycle << '\n');
-//        HazardRec->EmitNoop();
-//        Sequence.push_back(0);   // NULL here means noop
-        HazardRec->AdvanceCycle();
-        ++NumNoops;
+       HazardRec->EmitNoop();
+       Sequence.push_back(0);   // NULL here means noop
+        // HazardRec->AdvanceCycle();
+        // ++NumNoops;
       } else {
         // Otherwise, we have no instructions to issue and we have instructions
         // that will fault if we don't do this right.  This is the case for

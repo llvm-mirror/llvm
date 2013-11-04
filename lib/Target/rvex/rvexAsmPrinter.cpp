@@ -92,6 +92,7 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   } else {
     //OutStreamer.EmitRawText(StringRef("\tc0"));
     MCInst TmpInst0;
+    MI->dump();
     MCInstLowering.Lower(MI, TmpInst0);
     OutStreamer.EmitInstruction(TmpInst0);
     OutStreamer.EmitRawText(StringRef(";;\n\n"));
@@ -133,10 +134,10 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 //===----------------------------------------------------------------------===//
 // Mask directives
 //===----------------------------------------------------------------------===//
-//	.frame	$sp,8,$lr
-//->	.mask 	0x00000000,0
-//	.set	noreorder
-//	.set	nomacro
+//  .frame  $sp,8,$lr
+//->  .mask   0x00000000,0
+//  .set  noreorder
+//  .set  nomacro
 
 // Create a bitmask with all callee saved registers for CPU or Floating Point
 // registers. For CPU registers consider RA, GP and FP for saving if necessary.
@@ -182,10 +183,10 @@ void rvexAsmPrinter::printHex32(unsigned Value, raw_ostream &O) {
 //===----------------------------------------------------------------------===//
 // Frame and Set directives
 //===----------------------------------------------------------------------===//
-//->	.frame	$sp,8,$lr
-//	.mask 	0x00000000,0
-//	.set	noreorder
-//	.set	nomacro
+//->  .frame  $sp,8,$lr
+//  .mask   0x00000000,0
+//  .set  noreorder
+//  .set  nomacro
 /// Frame Directive
 void rvexAsmPrinter::emitFrameDirective() {
 //  const TargetRegisterInfo &RI = *TM.getRegisterInfo();
@@ -205,9 +206,9 @@ const char *rvexAsmPrinter::getCurrentABIString() const {
   }
 }
 
-//		.type	main,@function
-//->		.ent	main                    # @main
-//	main:
+//    .type main,@function
+//->    .ent  main                    # @main
+//  main:
 void rvexAsmPrinter::EmitFunctionEntryLabel() {
   if (OutStreamer.hasRawTextSupport())
   {
@@ -224,10 +225,10 @@ void rvexAsmPrinter::EmitFunctionEntryLabel() {
 }
 
 
-//	.frame	$sp,8,$pc
-//	.mask 	0x00000000,0
-//->	.set	noreorder
-//->	.set	nomacro
+//  .frame  $sp,8,$pc
+//  .mask   0x00000000,0
+//->  .set  noreorder
+//->  .set  nomacro
 /// EmitFunctionBodyStart - Targets can override this to emit stuff before
 /// the first basic block in the function.
 void rvexAsmPrinter::EmitFunctionBodyStart() {
@@ -238,9 +239,9 @@ void rvexAsmPrinter::EmitFunctionBodyStart() {
 
 }
 
-//->	.set	macro
-//->	.set	reorder
-//->	.end	main
+//->  .set  macro
+//->  .set  reorder
+//->  .end  main
 /// EmitFunctionBodyEnd - Targets can override this to emit stuff after
 /// the last basic block in the function.
 void rvexAsmPrinter::EmitFunctionBodyEnd() {
@@ -255,8 +256,8 @@ void rvexAsmPrinter::EmitFunctionBodyEnd() {
   }*/
 }
 
-//	.section .mdebug.abi32
-//	.previous
+//  .section .mdebug.abi32
+//  .previous
 void rvexAsmPrinter::EmitStartOfAsmFile(Module &M) {
 
 
