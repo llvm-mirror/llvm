@@ -217,8 +217,8 @@ class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
 class ArithLogicIS<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
-     !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
-     [(set RC:$ra, (OpNode RC:$rb, immSExt8:$imm16))], IIAlu, TypeIIAlu> {
+     !strconcat(instr_asm, "\t$ra = $imm16"),
+     [/*(set RC:$ra, (OpNode RC:$rb, immSExt8:$imm16))*/], IIAlu, TypeIIAlu> {
   let isCommutable = 0;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
@@ -450,8 +450,8 @@ defm SH         : StoreM32<0x08, "sth ", truncstorei16_a>;
 /// Arithmetic Instructions (ALU Immediate)
 
 
-def MOVS        : ArithLogicIS<0x09, "add ", add, simm16, immSExt8, CPURegs>;
-def MOV         : ArithLogicI<0x09, "add ", add, simm16, immSExt32, CPURegs>;
+def MOV         : ArithLogicIS<0x09, "mov ", add, simm16, immSExt8, CPURegs>;
+
 
 
 
@@ -546,8 +546,6 @@ def MULTu       : Mult32<0x51, "mpyhs", IIImul>;
 /// Shift Instructions
 // work, sra for ashr llvm IR instruction
 def SRA         : shift_rotate_imm32<0x1B, 0x00, "shr ", sra>;
-def ROL         : shift_rotate_imm32<0x1C, 0x01, "rol ", rotl>;
-def ROR         : shift_rotate_imm32<0x1D, 0x01, "ror ", rotr>;
 def SHL         : shift_rotate_imm32<0x1E, 0x00, "shl ", shl>;
 def SHR         : shift_rotate_imm32<0x1F, 0x00, "shru", srl>;
 
@@ -606,7 +604,7 @@ def LEA_ADDiu : EffectiveAddress<"add \t$ra = $addr", CPURegs, mem_ea> {
 
 // Small immediates
 def : Pat<(i32 immSExt8:$in),
-          (MOVS R0, immSExt8:$in)>;
+          (MOV R0, immSExt8:$in)>;
 
 def : Pat<(i32 imm:$in),
           (MOV R0, imm:$in)>;

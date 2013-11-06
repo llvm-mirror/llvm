@@ -149,6 +149,11 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::SRA,                MVT::i1, Promote);
   setOperationAction(ISD::SRL,                MVT::i1, Promote);
 
+  setOperationAction(ISD::ROTL,             MVT::i32, Expand);
+  setOperationAction(ISD::ROTR,             MVT::i32, Expand);
+  setOperationAction(ISD::ROTL,             MVT::i64, Expand);
+  setOperationAction(ISD::ROTR,             MVT::i64, Expand);  
+
   // Softfloat Floating Point Library Calls
   // Integer to Float conversions
   setLibcallName(RTLIB::SINTTOFP_I32_F32, "int32_to_float32");
