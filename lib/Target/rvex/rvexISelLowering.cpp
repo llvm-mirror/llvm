@@ -139,6 +139,8 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::BR_CC, MVT::Other,   Expand);
   setOperationAction(ISD::BR_CC, MVT::i1,   Expand);
   setOperationAction(ISD::BR_CC, MVT::i32,   Expand);
+  setOperationAction(ISD::BR_JT,            MVT::Other, Expand);
+  setOperationAction(ISD::BRIND,            MVT::Other, Expand);
 
   setOperationAction(ISD::AND,                MVT::i1, Promote);
   setOperationAction(ISD::OR,                 MVT::i1, Promote);
