@@ -27,7 +27,8 @@ def CC_rvexEABI : CallingConv<[
   CCIfType<[i8, i16], CCPromoteToType<i32>>,
   // Integer values get stored in stack slots that are 4 bytes in
   // size and 4-byte aligned.
-  CCIfType<[i32], CCAssignToStack<4, 4>>
+  CCIfType<[i32], CCAssignToReg<[R3, R4, R5, R6, R7, R8, R9, R10]>>,
+  CCIfType<[i32], CCAssignToStack<4, 32>>
 ]>;
 
 //===----------------------------------------------------------------------===//
