@@ -179,11 +179,24 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
   // Replace return with return that can change the stackpointer
 
   // Remove return node.
-  MBB.erase(MBBI);
+  // MBB.erase(MBBI);
   // Add return with sp add
-  BuildMI(MBB, MBBI_end, dl, TII.get(rvex::RETURN), rvex::R1).addReg(rvex::R1).addImm(NumBytes).addReg(rvex::LR);
+  DEBUG(errs() << "Epilogue dump!\n");
+  MBB.dump();
+  //MBB.erase(MBBI);
 
-    
+  assert(MBBI->getOpcode() == rvex::RET && "Last instruction isn't ret");
+    MachineOperand StackImm = MBBI->getOperand(1);
+    MachineOperand LinkReg = MBBI->getOperand(2);
+    StackImm.setImm(NumBytes);
+    MBBI->RemoveOperand(2);
+    MBBI->RemoveOperand(1);
+    MBBI->addOperand(StackImm);
+    MBBI->addOperand(LinkReg);  
+
+  //BuildMI(MBB, MBBI_end, dl, TII.get(rvex::RETURN), rvex::R1).addReg(rvex::R1).addImm(NumBytes).addReg(rvex::LR);
+
+  MBB.dump();    
   //}
 
 /*

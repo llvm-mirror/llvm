@@ -21,15 +21,15 @@ include "rvexInstrFormats.td"
 // rvex profiles and nodes
 //===----------------------------------------------------------------------===//
 
-def SDT_rvexRet           : SDTypeProfile<0, 1, 
-                                          [SDTCisInt<0>]>;
+def SDT_rvexRet  : SDTypeProfile<0, 3, [SDTCisSameAs<0, 1>,
+                                       SDTCisSameAs<1, 2>,
+                                       SDTCisInt<1>]>;
 
 def SDT_rvexDivRem        : SDTypeProfile<0, 2,
                                           [SDTCisInt<0>,
                                           SDTCisSameAs<0, 1>]>;                                      
 
-def SDT_rvexJmpLink       : SDTypeProfile<0, 1,
-                                          [SDTCisVT<0, iPTR>]>;
+def SDT_MipsJmpLink      : SDTypeProfile<0, 1, [SDTCisVT<0, iPTR>]>;
 
 def SDT_slct              : SDTypeProfile<1, 3, []>;
 
@@ -51,18 +51,22 @@ def SDT_rvexCallSeqStart  : SDCallSeqStart<[SDTCisVT<0, i32>]>;
 def SDT_rvexCallSeqEnd    : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
 
 // Call
-def rvexJmpLink           : SDNode<"rvexISD::JmpLink",
-                                          SDT_rvexJmpLink,
-                                          [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
-                                          SDNPVariadic]>;
+// Call
+def MipsJmpLink : SDNode<"rvexISD::JmpLink",SDT_MipsJmpLink,
+                         [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                          SDNPVariadic]>;
 
 // Hi and Lo nodes are used to handle global addresses. Used on
 // rvexISelLowering to lower stuff like GlobalAddress, ExternalSymbol
 // static model. (nothing to do with rvex Registers Hi and Lo)
 def rvexGPRel             : SDNode<"rvexISD::GPRel", SDTIntUnaryOp>;
 
+def SDT_LE1Ret  : SDTypeProfile<0, 3, [SDTCisSameAs<0, 1>,
+                                       SDTCisSameAs<1, 2>,
+                                       SDTCisInt<1>]>;
+
 // Return
-def rvexRet               : SDNode<"rvexISD::Ret", SDT_rvexRet, 
+def rvexRet               : SDNode<"rvexISD::Ret", SDT_LE1Ret, 
                                           [SDNPHasChain,
                                           SDNPOptInGlue, SDNPVariadic]>;
 
@@ -382,7 +386,7 @@ class UncondBranch<bits<8> op, string instr_asm>:
 // Jump and Link (Call)
 let isCall=1, hasDelaySlot=0 in {
   class JumpLink<bits<8> op, string instr_asm>:
-    FJ<op, (outs), (ins CPURegs:$link, calltarget:$target, variable_ops),
+    FJ<op, (outs), (ins CPURegs:$link, calltarget:$target),
        !strconcat(instr_asm, "\t$link = $target"), [],
        IIBranch, TypeIIBranch> {
        }
@@ -390,7 +394,7 @@ let isCall=1, hasDelaySlot=0 in {
   class JumpLinkReg<bits<8> op, string instr_asm,
                     RegisterClass RC>:
     FA<op, (outs), (ins RC:$rb, variable_ops),
-       !strconcat(instr_asm, "\t$rb = $rb"), [(rvexJmpLink RC:$rb)], IIBranch, TypeIIBranch> {
+       !strconcat(instr_asm, "\t$rb = $rb"), [], IIBranch, TypeIIBranch> {
     let rc = 0;
     let ra = 14;
     let shamt = 0;
@@ -578,8 +582,8 @@ def CALL        : JumpLink<0x2B, "call">;
 
 let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
     isBarrier=1, hasCtrlDep=1, addr=0 in
-  def RET   : FJ <0x2C, (outs), (ins CPURegs:$target),
-                "return\t$target", [(rvexRet CPURegs:$target)], IIBranch, TypeIIBranch>;
+  def RET   : FJ <0x2C, (outs), (ins CPURegs:$src, i32imm:$frame, CPURegs:$lnk),
+                "return\t$src = $src, $frame, $lnk", [(rvexRet CPURegs:$src, imm:$frame, CPURegs:$lnk)], IIBranch, TypeIIBranch>;
                 //"return l0.0", [(rvexRet CPURegs:$target)], IIBranch, TypeIIBranch>;
 
 //def : Pat<(rvexRet CPURegs:$target), (RET CPURegs:$target, 0x8)>;
@@ -610,11 +614,12 @@ def : Pat<(i32 imm:$in),
           (MOV R0, imm:$in)>;
           
 //FIXME is dit nodig?
-def : Pat<(rvexJmpLink (i32 tglobaladdr:$dst)),
-          (CALL (i32 LR), tglobaladdr:$dst)>;
+def : Pat<(MipsJmpLink (i32 tglobaladdr:$dst)),
+          (CALL LR, tglobaladdr:$dst)>;
+def : Pat<(MipsJmpLink (i32 texternalsym:$dst)),
+          (CALL LR, texternalsym:$dst)>;          
 
-def : Pat<(rvexJmpLink (i32 texternalsym:$dst)),
-          (CALL (i32 LR), texternalsym:$dst)>;          
+        
          
 // gp_rel relocs
 def : Pat<(add CPURegs:$gp, (rvexGPRel tglobaladdr:$in)),

@@ -71,23 +71,19 @@ rvexRegisterInfo::getCallPreservedMask(CallingConv::ID) const
   return CSR_O32_RegMask; 
 }
 
-// pure virtual method
 BitVector rvexRegisterInfo::
 getReservedRegs(const MachineFunction &MF) const {
-  static const uint16_t ReservedCPURegs[] = {
-    rvex::R0, rvex::R1, rvex::LR, rvex::PC
+  static const unsigned ReservedCPURegs[] = {
+    //rvex::ZERO, rvex::AT, rvex::K0, rvex::K1, 
+    //rvex::GP, rvex::SP, rvex::FP, rvex::RA, 0
+    rvex::R0, rvex::R1, rvex::LR, 0
   };
+
   BitVector Reserved(getNumRegs());
   typedef TargetRegisterClass::iterator RegIter;
 
-  for (unsigned I = 0; I < array_lengthof(ReservedCPURegs); ++I)
-    Reserved.set(ReservedCPURegs[I]);
-
-  // If GP is dedicated as a global base register, reserve it.
-  if (MF.getInfo<rvexFunctionInfo>()->globalBaseRegFixed()) {
-    //GlobalBaseReg HACK
-    Reserved.set(rvex::R0);
-  }
+  for (const unsigned *Reg = ReservedCPURegs; *Reg; ++Reg)
+    Reserved.set(*Reg);
 
   return Reserved;
 }

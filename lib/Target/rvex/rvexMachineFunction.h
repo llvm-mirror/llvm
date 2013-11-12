@@ -48,6 +48,12 @@ class rvexFunctionInfo : public MachineFunctionInfo {
   mutable int DynAllocFI; // Frame index of dynamically allocated stack area.
   unsigned MaxCallFrameSize;
 
+  /// True if function has a byval argument.
+  bool HasByvalArg;
+
+  /// Size of incoming argument area.
+  unsigned IncomingArgSize;  
+
 public:
   rvexFunctionInfo(MachineFunction& MF)
   : MF(MF), SRetReturnReg(0), GlobalBaseReg(0),
@@ -100,7 +106,12 @@ public:
   unsigned getMaxCallFrameSize() const { return MaxCallFrameSize; }
   void setMaxCallFrameSize(unsigned S) { MaxCallFrameSize = S; }
 
+  void setFormalArgInfo(unsigned Size, bool HasByval) {
+    IncomingArgSize = Size;
+    HasByvalArg = HasByval;
+  }
 
+  unsigned getIncomingArgSize() const { return IncomingArgSize; }  
 
 };
 
