@@ -822,6 +822,7 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
   // stuck together.
   SDValue InFlag;
   Ops.push_back(Callee);
+
   for (unsigned i = 0, e = RegsToPass.size(); i != e; ++i) {
     Chain = CLI.DAG.getCopyToReg(Chain, CLI.DL, RegsToPass[i].first,
                                  RegsToPass[i].second, InFlag);
@@ -909,8 +910,9 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     SDValue Arg = OutVals[i];
     CCValAssign &VA = ArgLocs[i];
-    MVT ValVT = VA.getValVT(), LocVT = VA.getLocVT();
-    ISD::ArgFlagsTy Flags = Outs[i].Flags;
+      
+      MVT ValVT = VA.getValVT(), LocVT = VA.getLocVT();
+      ISD::ArgFlagsTy Flags = Outs[i].Flags;
 
     // ByVal Arg.
     if (Flags.isByVal()) {
@@ -1016,6 +1018,15 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   SmallVector<SDValue, 8> Ops(1, Chain);
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+  SDValue InFlag;
+
+  // Handle func pointers where LR needs to be loaded with destination before JALR
+  if (!GlobalOrExternal)
+  {  
+    Chain = DAG.getCopyToReg(Chain, DL, rvex::LR, Callee, SDValue(0, 0));
+    InFlag = Chain.getValue(1);
+    Callee = DAG.getRegister(rvex::LR, getPointerTy());
+  }
 
   getOpndList(Ops, RegsToPass, IsPICCall, GlobalOrExternal, InternalLinkage,
               CLI, Callee, Chain);
@@ -1024,7 +1035,7 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 //    return DAG.getNode(rvexISD::TailCall, DL, MVT::Other, &Ops[0], Ops.size());
 
   Chain  = DAG.getNode(rvexISD::JmpLink, DL, NodeTys, &Ops[0], Ops.size());
-  SDValue InFlag = Chain.getValue(1);
+  InFlag = Chain.getValue(1);
 
   // Create the CALLSEQ_END node.
   Chain = DAG.getCALLSEQ_END(Chain, NextStackOffsetVal,

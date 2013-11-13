@@ -393,8 +393,8 @@ let isCall=1, hasDelaySlot=0 in {
 
   class JumpLinkReg<bits<8> op, string instr_asm,
                     RegisterClass RC>:
-    FA<op, (outs), (ins RC:$rb, variable_ops),
-       !strconcat(instr_asm, "\t$rb = $rb"), [], IIBranch, TypeIIBranch> {
+    FA<op, (outs), (ins RC:$rb, RC:$rc, variable_ops),
+       !strconcat(instr_asm, "\t$rb = $rc"), [], IIBranch, TypeIIBranch> {
     let rc = 0;
     let ra = 14;
     let shamt = 0;
@@ -577,7 +577,7 @@ def JMP         : UncondBranch<0x26, "goto">;
 /// Jump and Branch Instructions
 let isCall=1, isBarrier=1 in
 def CALL        : JumpLink<0x2B, "call">;
-
+def JALR        : JumpLinkReg<0x2E, "call", CPURegs>;
 
 
 let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
@@ -588,7 +588,7 @@ let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
 
 //def : Pat<(rvexRet CPURegs:$target), (RET CPURegs:$target, 0x8)>;
 
-def JALR    : JumpLinkReg<0x2E, "call", CPURegs>;
+
 
 /// No operation
 let addr=0 in
@@ -618,7 +618,8 @@ def : Pat<(MipsJmpLink (i32 tglobaladdr:$dst)),
           (CALL LR, tglobaladdr:$dst)>;
 def : Pat<(MipsJmpLink (i32 texternalsym:$dst)),
           (CALL LR, texternalsym:$dst)>;          
-
+def : Pat<(MipsJmpLink CPURegs:$rb),
+          (JALR LR, CPURegs:$rb)>;
         
          
 // gp_rel relocs

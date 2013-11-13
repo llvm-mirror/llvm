@@ -188,7 +188,7 @@ SDNode *rvexDAGToDAGISel::SelectConstant(SDNode *N) {
       SDValue Zero = CurDAG->getRegister(rvex::R0, MVT::i32);
       SDValue ZeroImm = CurDAG->getTargetConstant(0, MVT::i32);
 
-      SDValue Res =  CurDAG->getSetCC(dl, MVT::i1, Zero, ZeroImm, ISD::SETEQ);
+//      SDValue Res =  CurDAG->getSetCC(dl, MVT::i1, Zero, ZeroImm, ISD::SETEQ);
 
       Result = CurDAG->getMachineNode(rvex::CMPEQ, dl, MVT::i1, Zero, ZeroImm);
 

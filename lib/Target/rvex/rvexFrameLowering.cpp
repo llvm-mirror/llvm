@@ -168,13 +168,12 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
                                  MachineBasicBlock &MBB) const {
 
   MachineBasicBlock::iterator MBBI = prior(MBB.end());
-  DebugLoc dl = MBBI->getDebugLoc();
-  MachineBasicBlock::iterator MBBI_end = MBB.end();
+
 
   MachineFrameInfo *MFI = MF.getFrameInfo();
   int NumBytes = (int) MFI->getStackSize();
 
-  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+
 
   // Replace return with return that can change the stackpointer
 

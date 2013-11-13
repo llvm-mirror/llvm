@@ -185,8 +185,8 @@ int NumberOfSetBits(int i)
 
 bool hasResources(unsigned consume, unsigned resources)
 {
-    int consume_bits = NumberOfSetBits(consume);
-    int resource_bits = NumberOfSetBits(resources);
+    unsigned consume_bits = NumberOfSetBits(consume);
+    unsigned resource_bits = NumberOfSetBits(resources);
 
     
     if ((consume_bits + resource_bits) <= stages_num)
