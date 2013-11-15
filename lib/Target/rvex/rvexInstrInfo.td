@@ -114,34 +114,33 @@ def calltarget  : Operand<iPTR> {
 }
 
 // Signed Operand
-def simm16      : Operand<i32> {
-  let DecoderMethod= "DecodeSimm16";
+def simm8      : Operand<i32> {
+  let DecoderMethod= "DecodeSimm8";
 }
 
 def shamt       : Operand<i32>;
 
 // Unsigned Operand
-def uimm16      : Operand<i32> {
+def uimm8      : Operand<i32> {
   let PrintMethod = "printUnsignedImm";
 }
 
 // Address operand
 def mem : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops CPURegs, simm16);
+  let MIOperandInfo = (ops CPURegs, simm8);
   let EncoderMethod = "getMemEncoding";
 }
 
 def mem_ea : Operand<i32> {
   let PrintMethod = "printMemOperandEA";
-  let MIOperandInfo = (ops CPURegs, simm16);
+  let MIOperandInfo = (ops CPURegs, simm8);
   let EncoderMethod = "getMemEncoding";
 }
 
 // Node immediate fits as 16-bit sign extended on target immediate.
 // e.g. addi, andi
 def immSExt32  : PatLeaf<(imm), [{ return isInt<32>(N->getSExtValue()); }]>;
-def immSExt16  : PatLeaf<(imm), [{ return isInt<16>(N->getSExtValue()); }]>;
 def immSExt8  : PatLeaf<(imm), [{ return isInt<8>(N->getSExtValue()); }]>;
 
 // Node immediate fits as 16-bit zero extended on target immediate.
@@ -190,8 +189,8 @@ def store_a         : AlignedStore<store>;
 // Arithmetic and logical instructions with 2 register operands.
 class ReturnLogic<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
-  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16, RC:$rc),
-     !strconcat(instr_asm, "\t$ra = $rb, $imm16, $rc"),
+  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm8, RC:$rc),
+     !strconcat(instr_asm, "\t$ra = $rb, $imm8, $rc"),
      [], IIAlu, TypeIIAlu> {
   let isReMaterializable = 1;
 }
@@ -210,9 +209,9 @@ class ArithLogicR<bits<8> op, string instr_asm, SDNode OpNode,
 // Arithmetic and logical instructions with 2 register operands.
 class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
-  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
-     !strconcat(instr_asm, "\t$ra = $rb, $imm16"),
-     [(set RC:$ra, (OpNode RC:$rb, immSExt32:$imm16))], IIAluImm, TypeIIAluImm> {
+  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm8),
+     !strconcat(instr_asm, "\t$ra = $rb, $imm8"),
+     [(set RC:$ra, (OpNode RC:$rb, immSExt8:$imm8))], IIAluImm, TypeIIAluImm> {
   let isCommutable = 0;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
@@ -220,9 +219,9 @@ class ArithLogicI<bits<8> op, string instr_asm, SDNode OpNode,
 // Arithmetic and logical instructions with 2 register operands.
 class ArithLogicIS<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
-  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm16),
-     !strconcat(instr_asm, "\t$ra = $imm16"),
-     [/*(set RC:$ra, (OpNode RC:$rb, immSExt8:$imm16))*/], IIAlu, TypeIIAlu> {
+  FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm8),
+     !strconcat(instr_asm, "\t$ra = $imm8"),
+     [/*(set RC:$ra, (OpNode RC:$rb, immSExt8:$imm8))*/], IIAlu, TypeIIAlu> {
   let isCommutable = 0;  // e.g. add rb rc =  add rc rb
   let isReMaterializable = 1;
 }
@@ -272,7 +271,7 @@ class ArithLogicS1<bits<8> op, string instr_asm,
   let isReMaterializable = 1;
 }
 
-// Move immediate imm16 to register ra.
+// Move immediate imm8 to register ra.
 class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm),
@@ -282,7 +281,7 @@ class MoveImm<bits<8> op, string instr_asm, SDNode OpNode,
   let isReMaterializable = 1;
 }
 
-// Move immediate imm16 to register ra.
+// Move immediate imm8 to register ra.
 class MoveImmSmall<bits<8> op, string instr_asm, SDNode OpNode,
                   Operand Od, PatLeaf imm_type, RegisterClass RC> :
   FL<op, (outs RC:$ra), (ins RC:$rb, Od:$imm),
@@ -406,7 +405,7 @@ class Mult<bits<8> op, string instr_asm, InstrItinClass itin,
            RegisterClass RC>:
   FL<op, (outs RC:$res), (ins RC:$ra, RC:$rb),
      !strconcat(instr_asm, "\t$res = $ra, $rb"), [], itin, TypeIIImul> {
-  let imm16 = 0;
+  let imm8 = 0;
   let isCommutable = 1;
   let neverHasSideEffects = 1;
 }
@@ -416,7 +415,7 @@ class Mult32<bits<8> op, string instr_asm, InstrItinClass itin>:
 
 class EffectiveAddress<string instr_asm, RegisterClass RC, Operand Mem> :
   FMem<0x09, (outs RC:$ra), (ins Mem:$addr),
-     instr_asm, [(set RC:$ra, ADDRrr:$addr)], IIAlu, TypeIIAlu>;
+     instr_asm, [(set RC:$ra, ADDRrr:$addr)], IIAluImm, TypeIIAluImm>;
 
 //===----------------------------------------------------------------------===//
 // Pseudo instructions
@@ -424,10 +423,10 @@ class EffectiveAddress<string instr_asm, RegisterClass RC, Operand Mem> :
 
 // As stack alignment is always done with addiu, we need a 16-bit immediate
 let Defs = [R1], Uses = [R1] in {
-def ADJCALLSTACKDOWN : rvexPseudo<(outs), (ins uimm16:$amt),
+def ADJCALLSTACKDOWN : rvexPseudo<(outs), (ins uimm8:$amt),
                                   "!ADJCALLSTACKDOWN $amt",
                                   [(callseq_start timm:$amt)]>;
-def ADJCALLSTACKUP   : rvexPseudo<(outs), (ins uimm16:$amt1, uimm16:$amt2),
+def ADJCALLSTACKUP   : rvexPseudo<(outs), (ins uimm8:$amt1, uimm8:$amt2),
                                   "!ADJCALLSTACKUP $amt1",
                                   [(callseq_end timm:$amt1, timm:$amt2)]>;
 }     
@@ -454,22 +453,23 @@ defm SH         : StoreM32<0x08, "sth ", truncstorei16_a>;
 /// Arithmetic Instructions (ALU Immediate)
 
 
-def MOV         : ArithLogicIS<0x09, "mov ", add, simm16, immSExt8, CPURegs>;
+def MOV         : MoveImm<0x09, "mov ", add, simm8, immSExt32, CPURegs>;
+def MOVS        : MoveImmSmall<0x09, "mov ", add, simm8, immSExt8, CPURegs>;
 
 
 
 
-def ADDiu       : ArithLogicI<0x09, "add ", add, simm16, immSExt16, CPURegs>;
+def ADDiu       : ArithLogicI<0x09, "add ", add, simm8, immSExt8, CPURegs>;
 
 def XORiu       : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 //Imm types
-def ANDi        : ArithLogicI<0x09, "and ", and, simm16, immSExt16, CPURegs>;
-def ORi         : ArithLogicI<0x09, "or  ", or, simm16, immSExt16, CPURegs>;
-def XORi        : ArithLogicI<0x09, "xor ", xor, simm16, immSExt16, CPURegs>;
+def ANDi        : ArithLogicI<0x09, "and ", and, simm8, immSExt8, CPURegs>;
+def ORi         : ArithLogicI<0x09, "or  ", or, simm8, immSExt8, CPURegs>;
+def XORi        : ArithLogicI<0x09, "xor ", xor, simm8, immSExt8, CPURegs>;
 
 let isReturn=1 in
-def RETURN      : ReturnLogic<0x09, "return", add, simm16, immSExt16, CPURegs>;
+def RETURN      : ReturnLogic<0x09, "return", add, simm8, immSExt8, CPURegs>;
 
 /// Arithmetic Instructions (3-Operand, R-Type)
 def ADD         : ArithLogicR<0x13, "add ", add, IIAlu, CPURegs, 1, TypeIIAlu>;
@@ -608,7 +608,7 @@ def LEA_ADDiu : EffectiveAddress<"add \t$ra = $addr", CPURegs, mem_ea> {
 
 // Small immediates
 def : Pat<(i32 immSExt8:$in),
-          (MOV R0, immSExt8:$in)>;
+          (MOVS R0, immSExt8:$in)>;
 
 def : Pat<(i32 imm:$in),
           (MOV R0, imm:$in)>;
@@ -660,6 +660,7 @@ def : Pat<(i32 (extloadi16_a ADDRrr:$src)), (LHu ADDRrr:$src)>;
 
 
 // Comparisons
+let isReMaterializable = 1, neverHasSideEffects = 1 in
 class SetCCR<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       FA<0, (outs DestRegs:$res), (ins CPURegs:$lhs, CPURegs:$rhs),
       !strconcat(instr_asm, "  $res, $lhs, $rhs"),
@@ -803,6 +804,14 @@ multiclass CmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
             (CmpOpI CPURegs:$lhs, imm:$rhs)>;
 
 }
+
+def : Pat<(zext BRRegs:$src),
+          (rvexADDC BRRegs:$src, R0, R0, BRRegs:$src)>;
+
+def : Pat<(i1 0),
+          (CMPEQ R0, 0)>;
+def : Pat<(i1 -1),
+          (CMPNE R0, 0)>;
 
 defm : ExtendCmpPats<CMPEQr,  CMPEQri,  SETEQ>;
 defm : ExtendCmpPats<CMPNEr,  CMPNEri,  SETNE>;

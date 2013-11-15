@@ -129,8 +129,6 @@ const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
       case rvexISD::BR:                 return "RvexISD::BR";
       case rvexISD::BRF:                 return "RvexISD::BRF";
 
-      case rvexISD::MTB:                 return "RvexISD::MTB";
-      case rvexISD::MFB:                 return "RvexISD::MFB";
 
   case rvexISD::DivRem:            return "rvexISD::DivRem";
   case rvexISD::DivRemU:           return "rvexISD::DivRemU";
@@ -160,7 +158,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   // Without this, every float setcc comes with a AND/OR with the result,
   // we don't want this, since the fpcmp result goes to a flag register,
   // which is used implicitly by brcond and select operations.
-  AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
+  //AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
   //setOperationAction(ISD::BRCOND, MVT::Other, Custom);
   
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
@@ -177,7 +175,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
 
   setOperationAction(ISD::SELECT_CC, MVT::i32, Promote);
 
-  setOperationAction(ISD::ZERO_EXTEND, MVT::i32, Custom);
+  // setOperationAction(ISD::ZERO_EXTEND, MVT::i32, Custom);
   setOperationAction(ISD::SIGN_EXTEND, MVT::i32, Expand);
 
   // Custom lowering of ADDE and ADDC
@@ -185,23 +183,23 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::ADDC, MVT::i32, Custom);
 
   setLoadExtAction(ISD::EXTLOAD,  MVT::i1,  Promote);
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i1,  Promote);
+  //setLoadExtAction(ISD::ZEXTLOAD, MVT::i1,  Promote);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i1,  Promote);
 
-  setOperationAction(ISD::BR_CC, MVT::Other,   Expand);
-  setOperationAction(ISD::BR_CC, MVT::i1,   Expand);
-  setOperationAction(ISD::BR_CC, MVT::i32,   Expand);
+  setOperationAction(ISD::BR_CC,            MVT::Other, Expand);
+  setOperationAction(ISD::BR_CC,            MVT::i1, Expand);
+  setOperationAction(ISD::BR_CC,            MVT::i32, Expand);
   setOperationAction(ISD::BR_JT,            MVT::Other, Expand);
   setOperationAction(ISD::BRIND,            MVT::Other, Expand);
 
-  setOperationAction(ISD::AND,                MVT::i1, Promote);
-  setOperationAction(ISD::OR,                 MVT::i1, Promote);
-  setOperationAction(ISD::ADD,                MVT::i1, Promote);
-  setOperationAction(ISD::SUB,                MVT::i1, Promote);
-  setOperationAction(ISD::XOR,                MVT::i1, Promote);
-  setOperationAction(ISD::SHL,                MVT::i1, Promote);
-  setOperationAction(ISD::SRA,                MVT::i1, Promote);
-  setOperationAction(ISD::SRL,                MVT::i1, Promote);
+  setOperationAction(ISD::AND,              MVT::i1, Promote);
+  setOperationAction(ISD::OR,               MVT::i1, Promote);
+  setOperationAction(ISD::ADD,              MVT::i1, Promote);
+  setOperationAction(ISD::SUB,              MVT::i1, Promote);
+  setOperationAction(ISD::XOR,              MVT::i1, Promote);
+  setOperationAction(ISD::SHL,              MVT::i1, Promote);
+  setOperationAction(ISD::SRA,              MVT::i1, Promote);
+  setOperationAction(ISD::SRL,              MVT::i1, Promote);
 
   setOperationAction(ISD::ROTL,             MVT::i32, Expand);
   setOperationAction(ISD::ROTR,             MVT::i32, Expand);
@@ -660,7 +658,7 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
     case ISD::MULHS:              return LowerMULHS(Op, DAG);
     case ISD::MULHU:              return LowerMULHU(Op, DAG);
 
-    case ISD::ZERO_EXTEND:         return LowerZeroExtend(Op,DAG);
+    case ISD::ZERO_EXTEND:        return LowerZeroExtend(Op,DAG);
 
     case ISD::Constant:           return LowerConstant(Op, DAG);
   }

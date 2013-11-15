@@ -184,17 +184,17 @@ SDNode *rvexDAGToDAGISel::SelectConstant(SDNode *N) {
 
     int32_t Val = cast<ConstantSDNode>(N)->getSExtValue();
 
-    if (Val = -1) {
-      SDValue Zero = CurDAG->getRegister(rvex::R0, MVT::i32);
-      SDValue ZeroImm = CurDAG->getTargetConstant(0, MVT::i32);
+
+    SDValue Zero = CurDAG->getRegister(rvex::R0, MVT::i32);
+    SDValue ZeroImm = CurDAG->getTargetConstant(0, MVT::i32);
 
 //      SDValue Res =  CurDAG->getSetCC(dl, MVT::i1, Zero, ZeroImm, ISD::SETEQ);
 
-      Result = CurDAG->getMachineNode(rvex::CMPEQ, dl, MVT::i1, Zero, ZeroImm);
+    Result = CurDAG->getMachineNode(rvex::CMPEQ, dl, MVT::i1, Zero, ZeroImm);
 
-      ReplaceUses(N, Result);
-      return Result;
-    }
+    ReplaceUses(N, Result);
+    return Result;
+    
 
 
   }

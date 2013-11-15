@@ -70,13 +70,14 @@ copyPhysReg(MachineBasicBlock &MBB,
             MachineBasicBlock::iterator I, DebugLoc DL,
             unsigned DestReg, unsigned SrcReg,
             bool KillSrc) const {
+  DEBUG(errs() << "copyPhysReg!\n");  
   unsigned Opc = 0, ZeroReg = 0;
 
   if (rvex::CPURegsRegClass.contains(DestReg)) { // Copy to CPU Reg.
     if (rvex::CPURegsRegClass.contains(SrcReg))
       Opc = rvex::MOV, ZeroReg = rvex::R0;
 
-    else if (SrcReg == rvex::B0)
+    else if ((SrcReg == rvex::B0) || (SrcReg == rvex::B1))
       Opc = rvex::ADD, ZeroReg = rvex::R0;
   }
   else if (rvex::CPURegsRegClass.contains(SrcReg)) { // Copy from CPU Reg.
@@ -85,10 +86,30 @@ copyPhysReg(MachineBasicBlock &MBB,
     if (rvex::BRRegsRegClass.contains(DestReg))
       Opc = rvex::CMPNE, ZeroReg = rvex::R0;
   }
+  else if (rvex::BRRegsRegClass.contains(SrcReg, DestReg)) {
+          unsigned TempReg = rvex::R63;
+          Opc = rvex::rvexADDC, ZeroReg = rvex::R0;
+
+          MachineInstrBuilder MIB2 = BuildMI(MBB, I, DL, get(Opc));
+          MIB2.addReg(TempReg, RegState::Define);
+          MIB2.addReg(SrcReg, RegState::Define);
+          MIB2.addReg(ZeroReg);
+          MIB2.addReg(ZeroReg);
+          MIB2.addReg(SrcReg, getKillRegState(KillSrc));
+
+          Opc = rvex::CMPEQ, ZeroReg = rvex::R0;
+          MachineInstrBuilder MIB3 = BuildMI(MBB, I, DL, get(Opc));
+          MIB3.addReg(DestReg, RegState::Define);
+          MIB3.addReg(TempReg);
+          MIB3.addReg(ZeroReg);          
+          
+          return;
+
+  }
 
   assert(Opc && "Cannot copy registers");
 
-  MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(Opc));
+  MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(Opc)); 
 
   if (DestReg)
     MIB.addReg(DestReg, RegState::Define);

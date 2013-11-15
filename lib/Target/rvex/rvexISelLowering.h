@@ -71,8 +71,6 @@ namespace llvm {
       BR,
       BRF,
 
-      MTB,
-      MFB,
 
       // Handle gp_rel (small data/bss sections) relocation.
       GPRel,

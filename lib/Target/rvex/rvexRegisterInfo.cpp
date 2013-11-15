@@ -25,6 +25,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -162,9 +163,29 @@ eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
 
   // If MI is not a debug value, make sure Offset fits in the 16-bit immediate
   // field.
-  if (!MI.isDebugValue() && !isInt<16>(Offset)) {
-	assert("(!MI.isDebugValue() && !isInt<16>(Offset))");
+  if (!MI.isDebugValue() && !isInt<8>(Offset)) {
+    DEBUG(errs() << "Load frame through register\n");
+    //FIXME very ugly hack which uses R63 to calculate frameindex.
+    assert("(!MI.isDebugValue() && !isInt<8>(Offset))");
+
+    MachineBasicBlock &MBB = *MI.getParent();
+    DebugLoc DL = II->getDebugLoc();
+
+    MachineRegisterInfo &RegInfo = MBB.getParent()->getRegInfo();
+
+    // unsigned Reg = RegInfo.createVirtualRegister(&rvex::CPURegsRegClass);
+    unsigned Reg = MI.getOperand(i-1).getReg();
+
+    BuildMI(MBB, II, DL, TII.get(rvex::MOV), Reg).addReg(Reg, RegState::Kill)
+      .addImm(Offset);
+
+    FrameReg = Reg;
+    Offset = 0; 
+
+    
   }
+
+
 
   MI.getOperand(i).ChangeToRegister(FrameReg, false);
   MI.getOperand(i+1).ChangeToImmediate(Offset);

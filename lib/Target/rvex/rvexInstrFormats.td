@@ -126,13 +126,13 @@ class FL<bits<8> op, dag outs, dag ins, string asmstr, list<dag> pattern,
 {
   bits<4>  ra;
   bits<4>  rb;
-  bits<16> imm16;
+  bits<8> imm8;
 
   let Opcode = op;
 
   let Inst{23-20} = ra;
   let Inst{19-16} = rb;
-  let Inst{15-0}  = imm16;
+  let Inst{7-0}  = imm8;
 }
 
 //===----------------------------------------------------------------------===//

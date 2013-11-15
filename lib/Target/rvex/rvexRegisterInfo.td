@@ -118,7 +118,7 @@ let Namespace = "rvex" in {
 
 def CPURegs : RegisterClass<"rvex", [i32], 32, 
   (add
-    (sequence "R%u", 0, 63),
+    (sequence "R%u", 0, 62),
 
     LR, PC
 
