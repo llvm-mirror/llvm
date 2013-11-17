@@ -84,7 +84,15 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       MCInst TmpInst0;
       MCInstLowering.Lower(BMI, TmpInst0);
       OutStreamer.EmitInstruction(TmpInst0);
-      DEBUG(errs() << "inst:" << TmpInst0 << "\n");
+      TmpInst0.dump();
+
+      // int i;
+
+      // for (i = 0; i < TmpInst0.getNumOperands(); i++)
+      // {
+      //   if (TmpInst0.getOperand(i).isImm())
+      //     // DEBUG(errs() << "Imm operand found!\n");
+      // }
     }
 
     OutStreamer.EmitRawText(StringRef(";;\n\n"));

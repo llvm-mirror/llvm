@@ -67,6 +67,8 @@ public:
   // are available in the current state.
   bool canReserveResources(const llvm::MCInstrDesc *MID);
 
+  bool canReserve2Resources(const llvm::MCInstrDesc *MID);
+
   // reserveResources - Reserve the resources occupied by a MCInstrDesc and
   // change the current state to reflect that change.
   void reserveResources(const llvm::MCInstrDesc *MID);
@@ -74,6 +76,8 @@ public:
   // canReserveResources - Check if the resources occupied by a machine
   // instruction are available in the current state.
   bool canReserveResources(llvm::MachineInstr *MI);
+
+  bool canReserve2Resources(llvm::MachineInstr *MI);
 
   // reserveResources - Reserve the resources occupied by a machine
   // instruction and change the current state to reflect that change.
@@ -119,12 +123,13 @@ public:
   DFAPacketizer *getResourceTracker() {return ResourceTracker;}
 
   // addToPacket - Add MI to the current packet.
-  virtual MachineBasicBlock::iterator addToPacket(MachineInstr *MI) {
-    MachineBasicBlock::iterator MII = MI;
-    CurrentPacketMIs.push_back(MI);
-    ResourceTracker->reserveResources(MI);
-    return MII;
-  }
+  virtual MachineBasicBlock::iterator addToPacket(MachineInstr *MI);
+  //  {
+  //   MachineBasicBlock::iterator MII = MI;
+  //   CurrentPacketMIs.push_back(MI);
+  //   ResourceTracker->reserveResources(MI);
+  //   return MII;
+  // }
 
   // endPacket - End the current packet.
   void endPacket(MachineBasicBlock *MBB, MachineInstr *MI);

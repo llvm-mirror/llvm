@@ -144,7 +144,7 @@
     NoItineraries);
 
   static const llvm::MCSchedModel rvexModel(
-    4, // IssueWidth
+    8, // IssueWidth
     MCSchedModel::DefaultMinLatency,
     2,
     MCSchedModel::DefaultHighLatency,

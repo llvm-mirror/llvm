@@ -80,6 +80,8 @@ namespace {
     // packet and this instruction.
     bool Dependence;
 
+    int SlotsUsed;
+
     // Only check for dependence if there are resources available to schedule
     // this instruction.
     bool FoundSequentialDependence;
@@ -98,6 +100,8 @@ namespace {
     // ignorePseudoInstruction - Ignore bundling of pseudo instructions.
     virtual bool ignorePseudoInstruction(MachineInstr *MI,
                                          MachineBasicBlock *MBB);
+
+    virtual MachineBasicBlock::iterator addToPacket(MachineInstr *MI);  
 
     // isSoloInstruction - return true if instruction MI can not be packetized
     // with any other instruction, which means that MI itself is a packet.
@@ -190,6 +194,7 @@ bool rvexVLIWPacketizer::runOnMachineFunction(MachineFunction &Fn) {
 // initPacketizerState - Initialize packetizer flags
 void rvexVLIWPacketizerList::initPacketizerState() {
   Dependence = false;
+  SlotsUsed = 0;
   FoundSequentialDependence = false;
 }
 
@@ -219,6 +224,30 @@ bool rvexVLIWPacketizerList::isSoloInstruction(MachineInstr *MI) {
   }	
 }
 
+static bool isImmInstructon(MachineInstr *MI) {
+
+  unsigned i;
+  for (i = 0; i < MI->getNumOperands(); i++){
+    if (MI->getOperand(i).isImm()) {
+      int temp = MI->getOperand(i).getImm();
+      // DEBUG(errs() << "Imm operand found: "<<temp<<"\n");
+      if(!isInt<9>(temp)) {
+        DEBUG(errs() << "Imm operand found: "<<temp<<"\n");
+        // MI->dump();
+        return true;
+      }
+    }
+    if (MI->getOperand(i).isGlobal()) {
+      DEBUG(errs() << "Global found!\n");
+      // MI->dump();
+      return true;
+    }
+  }
+
+  return false;
+
+}
+
 
 
 // isLegalToPacketizeTogether:
@@ -236,12 +265,26 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
   const MCInstrDesc &MCIDI = I->getDesc();
   const MCInstrDesc &MCIDJ = J->getDesc();
 
-  DEBUG(errs() << "i en j:" << I->getOpcode() << " " << J->getOpcode() <<"\n");
+  // DEBUG(errs() << "i en j:\n");
+  // I->dump();
+  // J->dump();
   //In the case of rvex, two control flow instructions cannot have resource
   //in the same time.
 
+  // if (isImmInstructon(I)) {
+  //   SlotsUsed += 2;
+  //   // return false;
+  // }
+  // else
+  //   SlotsUsed += 1;
+  // if (isImmInstructon(J)) {
+  //   SlotsUsed += 2;
+  //   // return false;
+  // }
+  // else
+  //   SlotsUsed += 1;  
+
   if(SUJ->isSucc(SUI)) {
-    DEBUG(errs() << "succ: i en j:" << I->getOpcode() << " " << J->getOpcode() <<"\n");
     //FIXME: is Succs not a set? -- use the loop only to find the index...
     for(unsigned i = 0;
         (i < SUJ->Succs.size()) && !FoundSequentialDependence;
@@ -312,9 +355,33 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
       return false;
     }
   }
+
+  // if (SlotsUsed > 14) {
+  //   DEBUG(errs() << "Final Slots: "<<SlotsUsed<<"\n");
+  //   Dependence = true;
+  //   // SlotsUsed = 0;
+  //   return false;
+  // }
+
+  // DEBUG(errs() << "Slots: "<<SlotsUsed<<"\n");
   DEBUG(errs() << "true\n");
   return true;
 }
+
+  // addToPacket - Add MI to the current packet.
+  MachineBasicBlock::iterator rvexVLIWPacketizerList::addToPacket(MachineInstr *MI) {
+    DEBUG(errs() << "rvex add!\n");
+    MI->dump();
+    MachineBasicBlock::iterator MII = MI;
+    CurrentPacketMIs.push_back(MI);
+    ResourceTracker->reserveResources(MI);
+    if (isImmInstructon(MI))
+    {
+      ResourceTracker->reserveResources(MI);
+    }
+    return MII;
+  }
+
 
 // isLegalToPruneDependencies
 bool rvexVLIWPacketizerList::isLegalToPruneDependencies(SUnit *SUI,

@@ -29,6 +29,10 @@
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Target/TargetInstrInfo.h"
+
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
 DFAPacketizer::DFAPacketizer(const InstrItineraryData *I, const int (*SIT)[2],
@@ -72,6 +76,23 @@ bool DFAPacketizer::canReserveResources(const llvm::MCInstrDesc *MID) {
   return (CachedTable.count(StateTrans) != 0);
 }
 
+// canReserveResources - Check if the resources occupied by a MCInstrDesc
+// are available in the current state.
+bool DFAPacketizer::canReserve2Resources(const llvm::MCInstrDesc *MID) {
+  bool temp;
+  unsigned InsnClass = MID->getSchedClass();
+  const llvm::InstrStage *IS = InstrItins->beginStage(InsnClass);
+  unsigned FuncUnits = IS->getUnits();
+  UnsignPair StateTrans = UnsignPair(CurrentState, FuncUnits);
+  ReadTable(CurrentState);
+  temp = (CachedTable.count(StateTrans) != 0);
+  if (!temp)
+    return temp;
+  int tempstate = CachedTable[StateTrans];
+  StateTrans = UnsignPair(tempstate, FuncUnits);
+  ReadTable(tempstate);  
+  return (CachedTable.count(StateTrans) != 0);
+}
 
 // reserveResources - Reserve the resources occupied by a MCInstrDesc and
 // change the current state to reflect that change.
@@ -85,12 +106,41 @@ void DFAPacketizer::reserveResources(const llvm::MCInstrDesc *MID) {
   CurrentState = CachedTable[StateTrans];
 }
 
+static bool isImmInstructon(MachineInstr *MI) {
+
+  unsigned i;
+  for (i = 0; i < MI->getNumOperands(); i++){
+    if (MI->getOperand(i).isImm()) {
+      int temp = MI->getOperand(i).getImm();
+      // DEBUG(errs() << "Imm operand found: "<<temp<<"\n");
+      if(!isInt<9>(temp)) {
+        // DEBUG(errs() << "Imm operand found: "<<temp<<"\n");
+        // MI->dump();
+        return true;
+      }
+    }
+    if (MI->getOperand(i).isGlobal()) {
+      // DEBUG(errs() << "Global found!\n");
+      // MI->dump();
+      return true;
+    }
+  }
+
+  return false;
+
+}
 
 // canReserveResources - Check if the resources occupied by a machine
 // instruction are available in the current state.
 bool DFAPacketizer::canReserveResources(llvm::MachineInstr *MI) {
   const llvm::MCInstrDesc &MID = MI->getDesc();
-  return canReserveResources(&MID);
+  bool temp;
+
+  if (isImmInstructon(MI))
+    temp = canReserve2Resources(&MID);
+  else
+    temp = canReserveResources(&MID);
+  return temp;
 }
 
 // reserveResources - Reserve the resources occupied by a machine
@@ -151,6 +201,20 @@ void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB,
   }
   CurrentPacketMIs.clear();
   ResourceTracker->clearResources();
+}
+
+// addToPacket - Add MI to the current packet.
+MachineBasicBlock::iterator VLIWPacketizerList::addToPacket(MachineInstr *MI) {
+  DEBUG(errs() << "rvex add!\n");
+  MI->dump();
+  MachineBasicBlock::iterator MII = MI;
+  CurrentPacketMIs.push_back(MI);
+  ResourceTracker->reserveResources(MI);
+  if (isImmInstructon(MI))
+  {
+    ResourceTracker->reserveResources(MI);
+  }
+  return MII;
 }
 
 // PacketizeMIs - Bundle machine instructions into packets.

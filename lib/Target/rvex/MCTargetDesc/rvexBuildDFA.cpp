@@ -25,8 +25,6 @@
 #include <string>
 #include <vector>
 
-#include <iostream>
-
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
@@ -171,51 +169,6 @@ bool State::hasTransition(unsigned InsnClass) {
     return Transitions.count(InsnClass) > 0;
 }
 
-#define WIDTH 3
-#define WIDTH2 2
-
-unsigned stages_width, stages_num;
-
-int NumberOfSetBits(int i)
-{
-    i = i - ((i >> 1) & 0x55555555);
-    i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
-    return (((i + (i >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
-}
-
-bool hasResources(unsigned consume, unsigned resources)
-{
-    unsigned consume_bits = NumberOfSetBits(consume);
-    unsigned resource_bits = NumberOfSetBits(resources);
-
-    
-    if ((consume_bits + resource_bits) <= stages_num)
-        if ((consume & resources) == 0)
-            return true;
-    return false;
-}
-
-unsigned setResources(unsigned consume, unsigned resources)
-{
-    unsigned i, count = 0;
-    count = resources;
-    for (i = 0; i < 32; i ++)
-    {
-
-        if ((resources&0x01) == 0)
-        {
-            count |= 1<<i;
-            if (!--consume) break;
-        }
-        resources <<=1;
-    }
-    
-    return count;
-}
-
-unsigned consumption[] = {   0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0 };
-
 //
 // AddInsnClass - Return all combinations of resource reservation
 // which are possible from this state (PossibleStates).
@@ -234,24 +187,15 @@ void State::AddInsnClass(unsigned InsnClass,
         // Iterate over all possible resources used in InsnClass.
         // For ex: for InsnClass = 0x11, all resources = {0x01, 0x10}.
         //
+        
         DenseSet<unsigned> VisitedResourceStates;
-        for (unsigned int j = 0; j <= stages_num; ++j) {
-            if (consumption[InsnClass] << j <= stages_width) {
+        for (unsigned int j = 0; j < sizeof(InsnClass) * 8; ++j) {
+            if ((0x1 << j) & InsnClass) {
                 //
                 // For each possible resource used in InsnClass, generate the
                 // resource state if that resource was used.
                 //
-                unsigned ResultingResourceState;
-
-                
-                if(hasResources((consumption[InsnClass] << j), thisState))
-                    ResultingResourceState = thisState | (consumption[InsnClass] << j);
-                else
-                    ResultingResourceState = thisState;
-                
-                
-
-                
+                unsigned ResultingResourceState = thisState | (0x1 << j);
                 //
                 // Check if the resulting resource state can be accommodated in this
                 // packet.
@@ -264,19 +208,8 @@ void State::AddInsnClass(unsigned InsnClass,
                 //
                 if ((ResultingResourceState != thisState) &&
                     (VisitedResourceStates.count(ResultingResourceState) == 0)) {
-                    
-                    //ResultingResourceState = setResources(consumption[InsnClass], thisState);
-
-//                    if (InsnClass == 1)
-//                    {
-                        PossibleStates.insert(ResultingResourceState);
-                        VisitedResourceStates.insert(ResultingResourceState);
-//                    }
-//                    else
-//                    {
-//                        VisitedResourceStates.insert(ResultingResourceState);
-//                        PossibleStates.insert(ResultingResourceState);
-//                    }
+                    VisitedResourceStates.insert(ResultingResourceState);
+                    PossibleStates.insert(ResultingResourceState);
                 }
             }
         }
@@ -291,12 +224,10 @@ void State::AddInsnClass(unsigned InsnClass,
 // be added to the packet represented by this state.
 //
 bool State::canAddInsnClass(unsigned InsnClass) const {
-    unsigned temp;
     for (std::set<unsigned>::const_iterator SI = stateInfo.begin();
          SI != stateInfo.end(); ++SI) {
-        temp = *SI;
-        if (hasResources(consumption[InsnClass], temp))
-                return true;
+        if (~*SI & InsnClass)
+            return true;
     }
     return false;
 }
@@ -346,10 +277,9 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
         for (State::TransitionMap::iterator
              II = (*SI)->Transitions.begin(), IE = (*SI)->Transitions.end();
              II != IE; ++II) {
-            
-            std::cout << "{" << II->first << ", "
-            << II->second->stateNum
-            << "},    ";            rvexDFAStateInputTable[counter][0] = II->first;
+
+
+            rvexDFAStateInputTable[counter][0] = II->first;
             rvexDFAStateInputTable[counter][1] = II->second->stateNum;
             counter++;
         }
@@ -358,14 +288,11 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
         // If there are no valid transitions from this stage, we need a sentinel
         // transition.
         if (ValidTransitions == StateEntry[i]) {
-            std::cout << SentinelEntry << ",";
             rvexDFAStateInputTable[counter][0] = -1;
             rvexDFAStateInputTable[counter][1] = -1;
             counter++;
             ++ValidTransitions;
         }
-        
-        std::cout << "\n";
         
     }
     
@@ -379,10 +306,7 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
     // two numbers.
 
     for (unsigned i = 0; i < states.size(); ++i)
-    {
-        std::cout << StateEntry[i] << ", ";
         rvexDFAStateEntryTable[i] = StateEntry[i];
-    }
     
     // Print out the index to the sentinel entry in StateInputTable
     rvexDFAStateEntryTable[states.size()] = ValidTransitions;
@@ -406,28 +330,6 @@ int rvexBuildDFA (std::vector<Stage_desc>& isnStages) {
     std::map<std::set<unsigned>, State*> Visited;
     
     WorkList.push_back(Initial);
-    
-    stages_width = isnStages[0].FU;
-    
-    
-    for (stages_num = 0; stages_num < 16; stages_num++)
-    {
-        if (!(stages_width&0x01)) break;
-        stages_width >>= 1;
-    }
-    
-    stages_width = isnStages[0].FU;
-
-   consumption[7] = isnStages[2].resources;
-   consumption[3] = isnStages[1].resources;
-   consumption[1] = isnStages[0].resources;
-
-    // consumption[7] = 1;
-    // consumption[3] = 7;
-    // consumption[1] = 7;
-    
-    for (std::vector<Stage_desc>::iterator i = isnStages.begin(); i < isnStages.end(); i++)
-        consumption[i->FU] = i->resources;
 
     //
     // Worklist algorithm to create a DFA for processor resource tracking.
@@ -485,5 +387,4 @@ int rvexBuildDFA (std::vector<Stage_desc>& isnStages) {
     D.writeTableAndAPI("rvex");
     return 0;
 }
-
 
