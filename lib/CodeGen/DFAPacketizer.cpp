@@ -203,19 +203,7 @@ void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB,
   ResourceTracker->clearResources();
 }
 
-// addToPacket - Add MI to the current packet.
-MachineBasicBlock::iterator VLIWPacketizerList::addToPacket(MachineInstr *MI) {
-  DEBUG(errs() << "rvex add!\n");
-  MI->dump();
-  MachineBasicBlock::iterator MII = MI;
-  CurrentPacketMIs.push_back(MI);
-  ResourceTracker->reserveResources(MI);
-  if (isImmInstructon(MI))
-  {
-    ResourceTracker->reserveResources(MI);
-  }
-  return MII;
-}
+
 
 // PacketizeMIs - Bundle machine instructions into packets.
 void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,

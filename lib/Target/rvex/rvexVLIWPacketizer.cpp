@@ -42,6 +42,8 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineFunction.h"
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -202,7 +204,7 @@ void rvexVLIWPacketizerList::initPacketizerState() {
 bool rvexVLIWPacketizerList::ignorePseudoInstruction(MachineInstr *MI,
                                                        MachineBasicBlock *MBB) {
   assert(!isSoloInstruction(MI) && "Solo instruction should not be here!");
-  if(MI->isDebugValue()) {
+  if((MI->getOpcode() == TargetOpcode::IMPLICIT_DEF) || (MI->isDebugValue())) {
     return true;
   } else {
     //all other instructions should have functional unit mapped to them.
@@ -227,6 +229,8 @@ bool rvexVLIWPacketizerList::isSoloInstruction(MachineInstr *MI) {
 static bool isImmInstructon(MachineInstr *MI) {
 
   unsigned i;
+    
+
   for (i = 0; i < MI->getNumOperands(); i++){
     if (MI->getOperand(i).isImm()) {
       int temp = MI->getOperand(i).getImm();
@@ -244,6 +248,23 @@ static bool isImmInstructon(MachineInstr *MI) {
     }
   }
 
+  // unsigned Opc = MI->getOpcode();
+  // switch(Opc) {
+  //     case rvex::ST:
+  //     case rvex::SH:
+  //     case rvex::SB:
+
+  //     case rvex::LD:
+  //     case rvex::LH:
+  //     case rvex::LHu:
+  //     case rvex::LB:
+  //     case rvex::LBu:
+          
+  //         return true;
+  // }  
+
+
+
   return false;
 
 }
@@ -258,6 +279,13 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
                                                           SUnit *SUJ) {
   MachineInstr *I = SUI->getInstr();
   MachineInstr *J = SUJ->getInstr();
+
+  if (isrvexMemInstruction(I) && isrvexMemInstruction(J)) {
+    Dependence = true;
+    DEBUG(errs() << "false\n");
+    return false;
+  }
+
   assert(I && J && "Unable to packetize null instruction!");
   assert(!isSoloInstruction(I) && !ignorePseudoInstruction(I, I->getParent()) &&
          "Something gone wrong with packetizer mechanism!");
@@ -265,24 +293,6 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
   const MCInstrDesc &MCIDI = I->getDesc();
   const MCInstrDesc &MCIDJ = J->getDesc();
 
-  // DEBUG(errs() << "i en j:\n");
-  // I->dump();
-  // J->dump();
-  //In the case of rvex, two control flow instructions cannot have resource
-  //in the same time.
-
-  // if (isImmInstructon(I)) {
-  //   SlotsUsed += 2;
-  //   // return false;
-  // }
-  // else
-  //   SlotsUsed += 1;
-  // if (isImmInstructon(J)) {
-  //   SlotsUsed += 2;
-  //   // return false;
-  // }
-  // else
-  //   SlotsUsed += 1;  
 
   if(SUJ->isSucc(SUI)) {
     //FIXME: is Succs not a set? -- use the loop only to find the index...
@@ -370,11 +380,13 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
 
   // addToPacket - Add MI to the current packet.
   MachineBasicBlock::iterator rvexVLIWPacketizerList::addToPacket(MachineInstr *MI) {
-    DEBUG(errs() << "rvex add!\n");
+    DEBUG(errs() << "rvex add:\t");
     MI->dump();
     MachineBasicBlock::iterator MII = MI;
     CurrentPacketMIs.push_back(MI);
     ResourceTracker->reserveResources(MI);
+
+
     if (isImmInstructon(MI))
     {
       ResourceTracker->reserveResources(MI);
@@ -444,8 +456,22 @@ isrvexCtrInstruction(const MachineInstr *MI) const {
 // TypeMeL.
 bool rvexVLIWPacketizerList::
 isrvexMemInstruction(const MachineInstr *MI) const {
-//  rvexType type = rvexTypeOf(MI);
-  //return (type == TypeMeS || type == TypeMeL);
+  MI->dump();
+  unsigned Opc = MI->getOpcode();
+  switch(Opc) {
+      case rvex::ST:
+      case rvex::SH:
+      case rvex::SB:
+
+      case rvex::LD:
+      case rvex::LH:
+      case rvex::LHu:
+      case rvex::LB:
+      case rvex::LBu:
+          
+          return true;
+  }    
+
   return false;
 }
 

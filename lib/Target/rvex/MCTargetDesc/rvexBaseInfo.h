@@ -37,13 +37,12 @@ namespace rvexII {
 
     enum rvexType {
       TypeIIAlu    = 0,
-      TypeIILoad   = 1,
-      TypeIIStore  = 2,
-      TypeIIBranch = 3,
-      TypeIIHiLo   = 4,
-      TypeIIImul   = 5,
-      TypeIIAluImm = 6,
-      TypeIIPseudo = 7
+      TypeIILoadStore = 1,
+      TypeIIBranch = 2,
+      TypeIIHiLo   = 3,
+      TypeIIImul   = 4,
+      TypeIIAluImm = 5,
+      TypeIIPseudo = 6
 
     };
 

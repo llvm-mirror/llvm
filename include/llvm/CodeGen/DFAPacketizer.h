@@ -123,13 +123,12 @@ public:
   DFAPacketizer *getResourceTracker() {return ResourceTracker;}
 
   // addToPacket - Add MI to the current packet.
-  virtual MachineBasicBlock::iterator addToPacket(MachineInstr *MI);
-  //  {
-  //   MachineBasicBlock::iterator MII = MI;
-  //   CurrentPacketMIs.push_back(MI);
-  //   ResourceTracker->reserveResources(MI);
-  //   return MII;
-  // }
+  virtual MachineBasicBlock::iterator addToPacket(MachineInstr *MI) {
+    MachineBasicBlock::iterator MII = MI;
+    CurrentPacketMIs.push_back(MI);
+    ResourceTracker->reserveResources(MI);
+    return MII;
+  }
 
   // endPacket - End the current packet.
   void endPacket(MachineBasicBlock *MBB, MachineInstr *MI);

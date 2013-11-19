@@ -108,6 +108,8 @@ namespace llvm {
 
     virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
+
+
   private:
     // Subtarget Info
     const rvexSubtarget *Subtarget;
@@ -292,7 +294,10 @@ namespace llvm {
       CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
                      bool isVarArg,
                      const SmallVectorImpl<ISD::OutputArg> &Outs,
-                     LLVMContext &Context) const;                                
+                     LLVMContext &Context) const; 
+
+    bool isEligibleForTailCallOptimization(const rvexCC &rvexCCInfo,
+                                      unsigned NextStackOffset) const;                                                    
   };
 }
 

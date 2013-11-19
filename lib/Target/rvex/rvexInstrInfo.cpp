@@ -149,7 +149,7 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
   unsigned Opc = 0;
 
-  if (rvex::CPURegsRegClass.hasSubClassEq(RC))
+  // if (rvex::CPURegsRegClass.hasSubClassEq(RC))
     Opc = rvex::ST;
   assert(Opc && "Register class not handled!");
   BuildMI(MBB, I, DL, get(Opc)).addReg(SrcReg, getKillRegState(isKill))
@@ -168,11 +168,62 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   MachineMemOperand *MMO = GetMemOperand(MBB, FI, MachineMemOperand::MOLoad);
   unsigned Opc = 0;
 
-  if (rvex::CPURegsRegClass.hasSubClassEq(RC))
+  // if (rvex::CPURegsRegClass.hasSubClassEq(RC))
     Opc = rvex::LD;
   assert(Opc && "Register class not handled!");
   BuildMI(MBB, I, DL, get(Opc), DestReg).addFrameIndex(FI).addImm(0)
     .addMemOperand(MMO);
+}
+
+void rvexInstrInfo::BuildCondBr(MachineBasicBlock &MBB,
+                                MachineBasicBlock *TBB, DebugLoc DL,
+                                const SmallVectorImpl<MachineOperand>& Cond)
+  const {
+  unsigned Opc = Cond[0].getImm();
+  const MCInstrDesc &MCID = get(Opc);
+  MachineInstrBuilder MIB = BuildMI(&MBB, DL, MCID);
+
+  for (unsigned i = 1; i < Cond.size(); ++i) {
+    if (Cond[i].isReg())
+      MIB.addReg(Cond[i].getReg());
+    else if (Cond[i].isImm())
+      MIB.addImm(Cond[i].getImm());
+    else
+       assert(true && "Cannot copy operand");
+  }
+  MIB.addMBB(TBB);
+}
+
+unsigned rvexInstrInfo::
+InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+             MachineBasicBlock *FBB,
+             const SmallVectorImpl<MachineOperand> &Cond,
+             DebugLoc DL) const {
+  // Shouldn't be a fall through.
+  assert(TBB && "InsertBranch must not be told to insert a fallthrough");
+
+  // # of condition operands:
+  //  Unconditional branches: 0
+  //  Floating point branches: 1 (opc)
+  //  Int BranchZero: 2 (opc, reg)
+  //  Int Branch: 3 (opc, reg0, reg1)
+  assert((Cond.size() <= 3) &&
+         "# of rvex branch conditions must be <= 3!");
+
+  // Two-way Conditional branch.
+  if (FBB) {
+    BuildCondBr(MBB, TBB, DL, Cond);
+    BuildMI(&MBB, DL, get(rvex::JMP)).addMBB(FBB);
+    return 2;
+  }
+
+  // One way branch.
+  // Unconditional branch.
+  if (Cond.empty())
+    BuildMI(&MBB, DL, get(rvex::JMP)).addMBB(TBB);
+  else // Conditional branch.
+    BuildCondBr(MBB, TBB, DL, Cond);
+  return 1;
 }
 
 DFAPacketizer *rvexInstrInfo::
@@ -217,4 +268,6 @@ rvexInstrInfo::emitFrameIndexDebugValue(MachineFunction &MF, int FrameIx,
     .addFrameIndex(FrameIx).addImm(0).addImm(Offset).addMetadata(MDPtr);
   return &*MIB;
 }
+
+
 

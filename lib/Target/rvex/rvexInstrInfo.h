@@ -32,6 +32,7 @@ namespace llvm {
 
 class rvexInstrInfo : public rvexGenInstrInfo {
   rvexTargetMachine &TM;
+
   const rvexRegisterInfo RI;
 public:
   explicit rvexInstrInfo(rvexTargetMachine &TM);
@@ -77,6 +78,14 @@ public:
 
   virtual void insertNoop(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MI) const;
+
+  virtual unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                                MachineBasicBlock *FBB,
+                                const SmallVectorImpl<MachineOperand> &Cond,
+                                DebugLoc DL) const;  
+
+  void BuildCondBr(MachineBasicBlock &MBB, MachineBasicBlock *TBB, DebugLoc DL,
+                   const SmallVectorImpl<MachineOperand>& Cond) const;  
 };
 }
 

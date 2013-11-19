@@ -176,7 +176,9 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::SELECT_CC, MVT::i32, Promote);
 
   // setOperationAction(ISD::ZERO_EXTEND, MVT::i32, Custom);
-  setOperationAction(ISD::SIGN_EXTEND, MVT::i32, Expand);
+  setOperationAction(ISD::SIGN_EXTEND, MVT::i32, Custom);
+  setOperationAction(ISD::ANY_EXTEND, MVT::i32, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1,    Expand);
 
   // Custom lowering of ADDE and ADDC
   setOperationAction(ISD::ADDE, MVT::i32, Custom);
@@ -658,6 +660,8 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
     case ISD::MULHS:              return LowerMULHS(Op, DAG);
     case ISD::MULHU:              return LowerMULHU(Op, DAG);
 
+    case ISD::SIGN_EXTEND:
+    case ISD::ANY_EXTEND:
     case ISD::ZERO_EXTEND:        return LowerZeroExtend(Op,DAG);
 
     case ISD::Constant:           return LowerConstant(Op, DAG);
@@ -878,13 +882,10 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   unsigned NextStackOffset = CCInfo.getNextStackOffset();
 
   // Check if it's really possible to do a tail call.
-//  if (IsTailCall)
-//    IsTailCall =
-//      isEligibleForTailCallOptimization(rvexCCInfo, NextStackOffset,
-//                                        *MF.getInfo<rvexFunctionInfo>());
-//
-//  if (IsTailCall)
-//    ++NumTailCalls;
+ if (IsTailCall)
+   IsTailCall =
+     isEligibleForTailCallOptimization(rvexCCInfo, NextStackOffset);
+
 
   // Chain is the output chain of the last Load/Store or CopyToReg node.
   // ByValChain is the output chain of the last Memcpy node created for copying
@@ -1029,8 +1030,8 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   getOpndList(Ops, RegsToPass, IsPICCall, GlobalOrExternal, InternalLinkage,
               CLI, Callee, Chain);
 
-//  if (IsTailCall)
-//    return DAG.getNode(rvexISD::TailCall, DL, MVT::Other, &Ops[0], Ops.size());
+  if (IsTailCall)
+    return DAG.getNode(rvexISD::JmpLink, DL, MVT::Other, &Ops[0], Ops.size());
 
   Chain  = DAG.getNode(rvexISD::JmpLink, DL, NodeTys, &Ops[0], Ops.size());
   InFlag = Chain.getValue(1);
@@ -1697,6 +1698,20 @@ rvexTargetLowering::writeVarArgRegs(std::vector<SDValue> &OutChains,
   }
 }
 
+bool rvexTargetLowering::
+isEligibleForTailCallOptimization(const rvexCC &rvexCCInfo,
+                                  unsigned NextStackOffset) const {
+
+
+  // Return false if either the callee or caller has a byval argument.
+  if (rvexCCInfo.hasByValArg())
+    return false;
+
+  // Return true if the callee's argument area is no larger than the
+  // caller's.
+  //return NextStackOffset <= FI.getIncomingArgSize();
+  return true;
+}
 
 bool
 rvexTargetLowering::isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const {
