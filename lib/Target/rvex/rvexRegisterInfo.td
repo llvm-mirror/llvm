@@ -126,7 +126,11 @@ def CPURegs : RegisterClass<"rvex", [i32], 32,
   )>;
 
 def BRRegs   : RegisterClass<"rvex", [i1], 32, (add (sequence "B%u", 0, 7))> {
+//def BRRegs   : RegisterClass<"rvex", [i1], 32, (add B0)> {
+    //FIXME BRRegs should work without be allowed to be copied and to be allocated on stack
+//  let CopyCost = -1;
+//  let isAllocatable = 0;
   let Size = 8;
 }
-//def BRRegs   : RegisterClass<"rvex", [i32], 32, (add B0)>;
+
 

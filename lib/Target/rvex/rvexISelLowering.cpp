@@ -210,29 +210,26 @@ rvexTargetLowering(rvexTargetMachine &TM)
 
   // Softfloat Floating Point Library Calls
   // Integer to Float conversions
-  setLibcallName(RTLIB::SINTTOFP_I32_F32, "int32_to_float32");
-  //setLibcallName(RTLIB::SINTTOFP_I32_F32, "_r_ilfloat");
+  setLibcallName(RTLIB::SINTTOFP_I32_F32, "_r_ilfloat");
   setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
 
-  //setLibcallName(RTLIB::UINTTOFP_I32_F32, "_r_ufloat");
-  //setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  setLibcallName(RTLIB::UINTTOFP_I32_F32, "_r_ufloat");
+  setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
 
-  setLibcallName(RTLIB::SINTTOFP_I32_F64, "int32_to_float64");
-  //setLibcallName(RTLIB::SINTTOFP_I32_F64, "_d_ilfloat");
+  setLibcallName(RTLIB::SINTTOFP_I32_F64, "_d_ilfloat");
   setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
 
-  //setLibcallName(RTLIB::UINTTOFP_I32_F64, "_d_ufloat");
-  //setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  setLibcallName(RTLIB::UINTTOFP_I32_F64, "_d_ufloat");
+  setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
 
   //Software IEC/IEEE single-precision conversion routines.
-  //setLibcallName(RTLIB::FPTOSINT_F32_I32, "float32_to_int32");
+
   setLibcallName(RTLIB::FPTOSINT_F32_I32, "_r_fix");
   setOperationAction(ISD::FP_TO_SINT, MVT::f32, Expand);
 
   //FIXME
   //float32_to_int32_round_to_zero
 
-  //setLibcallName(RTLIB::FPEXT_F32_F64, "float32_to_float64");
   setLibcallName(RTLIB::FPEXT_F32_F64, "_d_r");
   setOperationAction(ISD::FP_EXTEND, MVT::f32, Expand);
 
@@ -241,21 +238,30 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setLibcallName(RTLIB::RINT_F32, "float32_round_to_int");
   setOperationAction(ISD::FRINT , MVT::f32, Expand);
 
-  //setLibcallName(RTLIB::ADD_F32, "float32_add");
+
   setLibcallName(RTLIB::ADD_F32, "_r_add");
   setOperationAction(ISD::FADD, MVT::f32, Expand);
 
-  //setLibcallName(RTLIB::SUB_F32, "float32_sub");
   setLibcallName(RTLIB::SUB_F32, "_r_sub");
   setOperationAction(ISD::FSUB, MVT::f32, Expand);
 
-  //setLibcallName(RTLIB::MUL_F32, "float32_mul");
   setLibcallName(RTLIB::MUL_F32, "_r_mul");
   setOperationAction(ISD::FMUL, MVT::f32, Expand);
 
-  //setLibcallName(RTLIB::DIV_F32, "float32_div");
   setLibcallName(RTLIB::DIV_F32, "_r_div");
   setOperationAction(ISD::FDIV, MVT::f32, Expand);
+
+  setLibcallName(RTLIB::ADD_F64, "_d_add");
+  setOperationAction(ISD::FADD, MVT::f64, Expand);
+
+  setLibcallName(RTLIB::SUB_F64, "_d_sub");
+  setOperationAction(ISD::FSUB, MVT::f64, Expand);
+
+  setLibcallName(RTLIB::MUL_F64, "_d_mul");
+  setOperationAction(ISD::FMUL, MVT::f64, Expand);
+
+  setLibcallName(RTLIB::DIV_F64, "_d_div");
+  setOperationAction(ISD::FDIV, MVT::f64, Expand);  
 
   setLibcallName(RTLIB::REM_F32, "float32_rem");
   setOperationAction(ISD::SREM, MVT::f32, Expand);
@@ -265,18 +271,42 @@ rvexTargetLowering(rvexTargetMachine &TM)
   //FIXME softfloat sqrt function?
   setLibcallName(RTLIB::SQRT_F32, "float32_sqrt");
 
-  //setLibcallName(RTLIB::OEQ_F32, "float32_eq");
   setLibcallName(RTLIB::OEQ_F32, "_r_eq");
   setOperationAction(ISD::SETOEQ, MVT::f32, Expand);
 
-  //setLibcallName(RTLIB::OLE_F32, "float32_le");
   setLibcallName(RTLIB::OLE_F32, "_r_le");
   setOperationAction(ISD::SETOLE, MVT::f32, Expand);
 
-  //setLibcallName(RTLIB::OLT_F32, "float32_lt");
   setLibcallName(RTLIB::OLT_F32, "_r_lt");
   setOperationAction(ISD::SETOLT, MVT::f32, Expand);
 
+  setLibcallName(RTLIB::OEQ_F64, "_d_eq");
+  setOperationAction(ISD::SETOEQ, MVT::f64, Expand);
+
+  setLibcallName(RTLIB::OLE_F64, "_d_le");
+  setOperationAction(ISD::SETOLE, MVT::f64, Expand);
+
+  setLibcallName(RTLIB::OLT_F64, "_d_lt");
+  setOperationAction(ISD::SETOLT, MVT::f64, Expand);  
+
+  //FIXME: Not sure if following rules are coorect:
+  setLibcallName(RTLIB::FPROUND_F64_F32, "_r_d");
+  setOperationAction(ISD::FP_ROUND, MVT::f64, Expand); 
+
+  setLibcallName(RTLIB::UO_F32, "_r_eq");
+  setOperationAction(ISD::SETUEQ, MVT::f32, Expand);  
+
+  setLibcallName(RTLIB::UO_F64, "_d_eq");
+  setOperationAction(ISD::SETUEQ, MVT::f64, Expand);
+
+  setLibcallName(RTLIB::FPTOSINT_F64_I32, "float64_to_int32");
+  setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);  
+
+
+
+
+
+//UO_F32
   
 
 

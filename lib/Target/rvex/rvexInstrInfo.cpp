@@ -97,7 +97,7 @@ copyPhysReg(MachineBasicBlock &MBB,
           MIB2.addReg(ZeroReg);
           MIB2.addReg(SrcReg, getKillRegState(KillSrc));
 
-          Opc = rvex::CMPEQ, ZeroReg = rvex::R0;
+          Opc = rvex::CMPNE, ZeroReg = rvex::R0;
           MachineInstrBuilder MIB3 = BuildMI(MBB, I, DL, get(Opc));
           MIB3.addReg(DestReg, RegState::Define);
           MIB3.addReg(TempReg);
@@ -149,7 +149,7 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
   unsigned Opc = 0;
 
-  // if (rvex::CPURegsRegClass.hasSubClassEq(RC))
+  if (rvex::CPURegsRegClass.hasSubClassEq(RC))
     Opc = rvex::ST;
   assert(Opc && "Register class not handled!");
   BuildMI(MBB, I, DL, get(Opc)).addReg(SrcReg, getKillRegState(isKill))
@@ -168,7 +168,7 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   MachineMemOperand *MMO = GetMemOperand(MBB, FI, MachineMemOperand::MOLoad);
   unsigned Opc = 0;
 
-  // if (rvex::CPURegsRegClass.hasSubClassEq(RC))
+  if (rvex::CPURegsRegClass.hasSubClassEq(RC))
     Opc = rvex::LD;
   assert(Opc && "Register class not handled!");
   BuildMI(MBB, I, DL, get(Opc), DestReg).addFrameIndex(FI).addImm(0)

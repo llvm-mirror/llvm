@@ -163,7 +163,7 @@ eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
 
   // If MI is not a debug value, make sure Offset fits in the 16-bit immediate
   // field.
-  // if (!MI.isDebugValue() && !isInt<8>(Offset)) {
+  // if (!MI.isDebugValue() && !isInt<9>(Offset)) {
   //   DEBUG(errs() << "Load frame through register\n");
   //   //FIXME very ugly hack which uses R63 to calculate frameindex.
   //   assert("(!MI.isDebugValue() && !isInt<8>(Offset))");

@@ -679,13 +679,13 @@ class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
 let isCompare = 1 in {
   def CMPEQ     : SetCCR<"cmpeq ", seteq, BRRegs>;
   def CMPGE     : SetCCR<"cmpge ", setge, BRRegs>;
-  def CMPGEU    : SetCCR<"cmpgeu ", setuge, BRRegs>;
+  def CMPGEU    : SetCCR<"cmpgeu", setuge, BRRegs>;
   def CMPGT     : SetCCR<"cmpgt ", setgt, BRRegs>;
-  def CMPGTU    : SetCCR<"cmpgtu ", setugt, BRRegs>;
+  def CMPGTU    : SetCCR<"cmpgtu", setugt, BRRegs>;
   def CMPLE     : SetCCR<"cmple ", setle, BRRegs>;
-  def CMPLEU    : SetCCR<"cmpleu ", setule, BRRegs>;
+  def CMPLEU    : SetCCR<"cmpleu", setule, BRRegs>;
   def CMPLT     : SetCCR<"cmplt ", setlt, BRRegs>;
-  def CMPLTU    : SetCCR<"cmpltu ", setult, BRRegs>;
+  def CMPLTU    : SetCCR<"cmpltu", setult, BRRegs>;
   def CMPNE     : SetCCR<"cmpne ", setne, BRRegs>;
 
   def CMPEQi    : SetCCI<"cmpeq ", seteq, BRRegs>;
@@ -811,7 +811,7 @@ multiclass CmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
 def : Pat<(zext BRRegs:$src),
           (rvexADDC BRRegs:$src, R0, R0, BRRegs:$src)>;
 
-def : Pat<(i1 0),
+def : Pat<(i1 1),
           (CMPEQ R0, 0)>;
 def : Pat<(i1 -1),
           (CMPNE R0, 0)>;
