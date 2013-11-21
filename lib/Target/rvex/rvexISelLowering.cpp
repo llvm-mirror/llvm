@@ -211,98 +211,108 @@ rvexTargetLowering(rvexTargetMachine &TM)
   // Softfloat Floating Point Library Calls
   // Integer to Float conversions
   setLibcallName(RTLIB::SINTTOFP_I32_F32, "_r_ilfloat");
-  setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
+  // setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
 
   setLibcallName(RTLIB::UINTTOFP_I32_F32, "_r_ufloat");
-  setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  // setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
 
   setLibcallName(RTLIB::SINTTOFP_I32_F64, "_d_ilfloat");
-  setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
+  // setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
 
   setLibcallName(RTLIB::UINTTOFP_I32_F64, "_d_ufloat");
-  setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  // setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
 
   //Software IEC/IEEE single-precision conversion routines.
 
   setLibcallName(RTLIB::FPTOSINT_F32_I32, "_r_fix");
-  setOperationAction(ISD::FP_TO_SINT, MVT::f32, Expand);
+  // setOperationAction(ISD::FP_TO_SINT, MVT::f32, Expand);
 
   //FIXME
   //float32_to_int32_round_to_zero
 
   setLibcallName(RTLIB::FPEXT_F32_F64, "_d_r");
-  setOperationAction(ISD::FP_EXTEND, MVT::f32, Expand);
+  // setOperationAction(ISD::FP_EXTEND, MVT::f32, Expand);
 
   //Software IEC/IEEE single-precision operations.
   // FIXME are these roundings correct? There is NEARBYINT_F too..
   setLibcallName(RTLIB::RINT_F32, "float32_round_to_int");
-  setOperationAction(ISD::FRINT , MVT::f32, Expand);
+  // setOperationAction(ISD::FRINT , MVT::f32, Expand);
 
 
   setLibcallName(RTLIB::ADD_F32, "_r_add");
-  setOperationAction(ISD::FADD, MVT::f32, Expand);
+  // setOperationAction(ISD::FADD, MVT::f32, Expand);
 
   setLibcallName(RTLIB::SUB_F32, "_r_sub");
-  setOperationAction(ISD::FSUB, MVT::f32, Expand);
+  // setOperationAction(ISD::FSUB, MVT::f32, Expand);
 
   setLibcallName(RTLIB::MUL_F32, "_r_mul");
-  setOperationAction(ISD::FMUL, MVT::f32, Expand);
+  // setOperationAction(ISD::FMUL, MVT::f32, Expand);
 
   setLibcallName(RTLIB::DIV_F32, "_r_div");
-  setOperationAction(ISD::FDIV, MVT::f32, Expand);
+  // setOperationAction(ISD::FDIV, MVT::f32, Expand);
 
   setLibcallName(RTLIB::ADD_F64, "_d_add");
-  setOperationAction(ISD::FADD, MVT::f64, Expand);
+  // setOperationAction(ISD::FADD, MVT::f64, Expand);
 
   setLibcallName(RTLIB::SUB_F64, "_d_sub");
-  setOperationAction(ISD::FSUB, MVT::f64, Expand);
+  // setOperationAction(ISD::FSUB, MVT::f64, Expand);
 
   setLibcallName(RTLIB::MUL_F64, "_d_mul");
-  setOperationAction(ISD::FMUL, MVT::f64, Expand);
+  // setOperationAction(ISD::FMUL, MVT::f64, Expand);
 
   setLibcallName(RTLIB::DIV_F64, "_d_div");
-  setOperationAction(ISD::FDIV, MVT::f64, Expand);  
+  // setOperationAction(ISD::FDIV, MVT::f64, Expand);  
 
   setLibcallName(RTLIB::REM_F32, "float32_rem");
-  setOperationAction(ISD::SREM, MVT::f32, Expand);
+  // setOperationAction(ISD::SREM, MVT::f32, Expand);
   //setLibcallName(RTLIB::UREM_F32, "float32_rem");
-  setOperationAction(ISD::UREM, MVT::f32, Expand);
+  // setOperationAction(ISD::UREM, MVT::f32, Expand);
 
   //FIXME softfloat sqrt function?
   setLibcallName(RTLIB::SQRT_F32, "float32_sqrt");
 
   setLibcallName(RTLIB::OEQ_F32, "_r_eq");
-  setOperationAction(ISD::SETOEQ, MVT::f32, Expand);
+  // setOperationAction(ISD::SETOEQ, MVT::f32, Expand);
 
   setLibcallName(RTLIB::OLE_F32, "_r_le");
-  setOperationAction(ISD::SETOLE, MVT::f32, Expand);
+  // setOperationAction(ISD::SETOLE, MVT::f32, Expand);
+
+  setLibcallName(RTLIB::OGE_F32, "_r_ge");
+  // setOperationAction(ISD::SETOGE, MVT::f32, Expand);  
 
   setLibcallName(RTLIB::OLT_F32, "_r_lt");
-  setOperationAction(ISD::SETOLT, MVT::f32, Expand);
+  // setOperationAction(ISD::SETOLT, MVT::f32, Expand);
+
+  setLibcallName(RTLIB::OGT_F32, "_r_gt");
+  // setOperationAction(ISD::SETOGT, MVT::f32, Expand);  
 
   setLibcallName(RTLIB::OEQ_F64, "_d_eq");
-  setOperationAction(ISD::SETOEQ, MVT::f64, Expand);
+  // setOperationAction(ISD::SETOEQ, MVT::f64, Expand);
 
   setLibcallName(RTLIB::OLE_F64, "_d_le");
-  setOperationAction(ISD::SETOLE, MVT::f64, Expand);
+  // setOperationAction(ISD::SETOLE, MVT::f64, Expand);
+
+  setLibcallName(RTLIB::OGE_F64, "_d_ge");
+  // setOperationAction(ISD::SETOGE, MVT::f64, Expand);
 
   setLibcallName(RTLIB::OLT_F64, "_d_lt");
-  setOperationAction(ISD::SETOLT, MVT::f64, Expand);  
+  // setOperationAction(ISD::SETOLT, MVT::f64, Expand);  
+
+  setLibcallName(RTLIB::OGT_F64, "_d_gt");
+  // setOperationAction(ISD::SETOGT, MVT::f64, Expand);    
 
   //FIXME: Not sure if following rules are coorect:
   setLibcallName(RTLIB::FPROUND_F64_F32, "_r_d");
-  setOperationAction(ISD::FP_ROUND, MVT::f64, Expand); 
+  // setOperationAction(ISD::FP_ROUND, MVT::f64, Expand); 
 
-  setLibcallName(RTLIB::UO_F32, "_r_eq");
-  setOperationAction(ISD::SETUEQ, MVT::f32, Expand);  
-
-  setLibcallName(RTLIB::UO_F64, "_d_eq");
-  setOperationAction(ISD::SETUEQ, MVT::f64, Expand);
+  // setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);
 
   setLibcallName(RTLIB::FPTOSINT_F64_I32, "float64_to_int32");
-  setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);  
+  // setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);  
 
+  setLibcallName(RTLIB::UNE_F32, "_r_ne");
 
+  setLibcallName(RTLIB::UNE_F64, "_d_ne");
 
 
 
@@ -310,7 +320,11 @@ rvexTargetLowering(rvexTargetMachine &TM)
   
 
 
-
+setOperationAction(ISD::CTTZ,  MVT::i32, Expand);
+setOperationAction(ISD::CTPOP,  MVT::i32, Expand);
+setOperationAction(ISD::CTLZ,  MVT::i32, Expand);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF  , MVT::i32  , Expand);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF  , MVT::i32  , Expand);
 
 //- Set .align 2
 // It will emit .align 2 later
