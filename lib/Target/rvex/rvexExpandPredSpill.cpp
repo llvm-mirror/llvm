@@ -18,7 +18,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 
-#include <iostream>
 
 using namespace llvm;
 
@@ -64,11 +63,11 @@ bool rvexExpandPredSpillCode::runOnMachineFunction(MachineFunction &MF) {
           //     "Not a Frame Pointer");
         unsigned numOps = MI->getNumOperands();
         for(unsigned i=0;i<numOps;++i) {
-          std::cout << "operand["<< i <<"] = ";
-          if(MI->getOperand(i).isFI()) std::cout << "FI\n";
-          else if(MI->getOperand(i).isImm()) std::cout << "Imm\n";
-          else if(MI->getOperand(i).isReg()) std::cout << "Reg\n";
-          else std::cout << "?\n";
+          // std::cout << "operand["<< i <<"] = ";
+          // if(MI->getOperand(i).isFI()) std::cout << "FI\n";
+          // else if(MI->getOperand(i).isImm()) std::cout << "Imm\n";
+          // else if(MI->getOperand(i).isReg()) std::cout << "Reg\n";
+          // else std::cout << "?\n";
         }
         assert(MI->getOperand(0).isReg() && "Not Register. Store");
         int SrcReg = MI->getOperand(0).getReg();
@@ -101,11 +100,11 @@ bool rvexExpandPredSpillCode::runOnMachineFunction(MachineFunction &MF) {
       else if(Opc == rvex::LDW_PRED) {
        unsigned numOps = MI->getNumOperands();
         for(unsigned i=0;i<numOps;++i) {
-          std::cout << "operand["<< i <<"] = ";
-          if(MI->getOperand(i).isFI()) std::cout << "FI\n";
-          else if(MI->getOperand(i).isImm()) std::cout << "Imm\n";
-          else if(MI->getOperand(i).isReg()) std::cout << "Reg\n";
-          else std::cout << "?\n";
+          // std::cout << "operand["<< i <<"] = ";
+          // if(MI->getOperand(i).isFI()) std::cout << "FI\n";
+          // else if(MI->getOperand(i).isImm()) std::cout << "Imm\n";
+          // else if(MI->getOperand(i).isReg()) std::cout << "Reg\n";
+          // else std::cout << "?\n";
         }
 
         assert(MI->getOperand(0).isReg() && "Not a register"); 
