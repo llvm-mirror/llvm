@@ -77,8 +77,18 @@ copyPhysReg(MachineBasicBlock &MBB,
     if (rvex::CPURegsRegClass.contains(SrcReg))
       Opc = rvex::MOV, ZeroReg = rvex::R0;
 
-    else if ((SrcReg == rvex::B0) || (SrcReg == rvex::B1))
-      Opc = rvex::ADD, ZeroReg = rvex::R0;
+    else if (rvex::BRRegsRegClass.contains(SrcReg)) {
+      Opc = rvex::rvexADDC, ZeroReg = rvex::R0;
+
+      MachineInstrBuilder MIB2 = BuildMI(MBB, I, DL, get(Opc));
+      MIB2.addReg(DestReg, RegState::Define);
+      MIB2.addReg(SrcReg, RegState::Define);
+      MIB2.addReg(ZeroReg);
+      MIB2.addReg(ZeroReg);
+      MIB2.addReg(SrcReg, getKillRegState(KillSrc));
+
+      return;
+    }
   }
   else if (rvex::CPURegsRegClass.contains(SrcReg)) { // Copy from CPU Reg.
     // Only possibility in (DestReg==SW, SrcReg==rvexRegs) is 
@@ -151,6 +161,8 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
   if (rvex::CPURegsRegClass.hasSubClassEq(RC))
     Opc = rvex::ST;
+  if (rvex::BRRegsRegClass.hasSubClassEq(RC))
+    Opc = rvex::STW_PRED;
   assert(Opc && "Register class not handled!");
   BuildMI(MBB, I, DL, get(Opc)).addReg(SrcReg, getKillRegState(isKill))
     .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
@@ -170,6 +182,8 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
   if (rvex::CPURegsRegClass.hasSubClassEq(RC))
     Opc = rvex::LD;
+  if (rvex::BRRegsRegClass.hasSubClassEq(RC))
+    Opc = rvex::LDW_PRED;  
   assert(Opc && "Register class not handled!");
   BuildMI(MBB, I, DL, get(Opc), DestReg).addFrameIndex(FI).addImm(0)
     .addMemOperand(MMO);

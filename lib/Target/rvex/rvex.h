@@ -19,13 +19,14 @@
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
-  class rvexTargetMachine;
-  class FunctionPass;
+	class rvexTargetMachine;
+	class FunctionPass;
 
-  FunctionPass *creatervexISelDag(rvexTargetMachine &TM);
+	FunctionPass *creatervexISelDag(rvexTargetMachine &TM);
 
-  FunctionPass *creatervexVLIWPacketizer();
-  FunctionPass *creatervexPostRAScheduler();
+	FunctionPass *creatervexVLIWPacketizer();
+	FunctionPass *creatervexPostRAScheduler();
+	FunctionPass *creatervexExpandPredSpillCode(rvexTargetMachine &TM);	
 
 } // end namespace llvm;
 

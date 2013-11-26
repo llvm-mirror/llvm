@@ -119,18 +119,18 @@ let Namespace = "rvex" in {
 
 def CPURegs : RegisterClass<"rvex", [i32], 32, 
   (add
-    (sequence "R%u", 0, 62),
+    (sequence "R%u", 0, 63),
 
     LR, PC
 
   )>;
 
-def BRRegs   : RegisterClass<"rvex", [i1], 32, (add (sequence "B%u", 0, 7))> {
-//def BRRegs   : RegisterClass<"rvex", [i1], 32, (add B0)> {
+def BRRegs   : RegisterClass<"rvex", [i32], 32, (add (sequence "B%u", 0, 7))> {
+//def BRRegs   : RegisterClass<"rvex", [i32], 32, (add B0)> {
     //FIXME BRRegs should work without be allowed to be copied and to be allocated on stack
 //  let CopyCost = -1;
 //  let isAllocatable = 0;
-  let Size = 8;
+//  let Size = 32;
 }
 
 

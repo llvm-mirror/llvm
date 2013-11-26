@@ -65,7 +65,7 @@ rvexelTargetMachine(const Target &T, StringRef TT,
                     StringRef CPU, StringRef FS, const TargetOptions &Options,
                     Reloc::Model RM, CodeModel::Model CM,
                     CodeGenOpt::Level OL)
-  : rvexTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
+  : rvexTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 namespace {
 /// rvex Code Generator Pass Configuration Options.
 class rvexPassConfig : public TargetPassConfig {
@@ -99,6 +99,7 @@ bool rvexPassConfig::addInstSelector() {
 bool rvexPassConfig::addPreEmitPass() {
   if(static_cast<rvexTargetMachine*>(TM)->getSubtargetImpl()->isVLIWEnabled()) {
     // addPass(creatervexPostRAScheduler());
+    addPass(creatervexExpandPredSpillCode(getrvexTargetMachine()));    
     addPass(creatervexVLIWPacketizer());
   }
 

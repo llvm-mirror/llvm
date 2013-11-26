@@ -143,12 +143,14 @@ namespace llvm {
                 SmallVectorImpl<SDValue> &InVals) const;
 
     SDValue LowerAddCG(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSUBE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerUDIV(SDValue Op, SelectionDAG &DAG) const;  
     SDValue LowerMULHS(SDValue Op, SelectionDAG &DAG) const;  
     SDValue LowerMULHU(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerConstant(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerZeroExtend(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSelect(SDValue Op, SelectionDAG &DAG) const;
 
 	//- must be exist without function all
     virtual SDValue

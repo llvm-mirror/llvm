@@ -483,7 +483,7 @@ def rvexMAX     : SDNode<"rvexISD::Max", SDTIntBinOp, []>;
 def rvexMAXU    : SDNode<"rvexISD::Maxu", SDTIntBinOp, []>;
 def rvexMIN     : SDNode<"rvexISD::Min", SDTIntBinOp, []>;
 def rvexMINU    : SDNode<"rvexISD::Minu", SDTIntBinOp, []>;
-def ORC         : ArithLogicR<0x1A, "orc ", rvexORC, IIAlu, CPURegs, 1, TypeIIAlu>;
+def ORC         : ArithLogicR<0x1A, "orc ", rvexORC, IIAlu, CPURegs, 0, TypeIIAlu>;
 def MAX         : ArithLogicR<0x1A, "max ", rvexMAX, IIAlu, CPURegs, 1, TypeIIAlu>;
 def MAXU        : ArithLogicR<0x1A, "maxu", rvexMAXU, IIAlu, CPURegs, 1, TypeIIAlu>;
 def MIN         : ArithLogicR<0x1A, "min ", rvexMIN, IIAlu, CPURegs, 1, TypeIIAlu>;
@@ -523,6 +523,16 @@ def SXTH        : ArithLogicS1<0x13, "sxth", IIAlu, CPURegs, 0, TypeIIAlu>;
 def ZXTB        : ArithLogicS1<0x13, "zxtb", IIAlu, CPURegs, 0, TypeIIAlu>;
 def ZXTH        : ArithLogicS1<0x13, "zxth", IIAlu, CPURegs, 0, TypeIIAlu>;
 
+
+// Operations to load/store predicate register
+
+
+let Defs = [R63] in {
+  def LDW_PRED  : rvexPseudo<(outs BRRegs:$dst), (ins mem:$addr),
+                            "!LOADPRED $dst", []>;
+  def STW_PRED  : rvexPseudo<(outs), (ins BRRegs:$src, mem:$addr),
+                            "!STOREPRED $src", []>;
+}
 
 // Extending Patterns
 def : Pat<(sra (shl CPURegs:$src, (i32 16)), (i32 16)),
@@ -677,6 +687,10 @@ class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
 
 
 let isCompare = 1 in {
+
+
+
+
   def CMPEQ     : SetCCR<"cmpeq ", seteq, BRRegs>;
   def CMPGE     : SetCCR<"cmpge ", setge, BRRegs>;
   def CMPGEU    : SetCCR<"cmpgeu", setuge, BRRegs>;
@@ -690,47 +704,47 @@ let isCompare = 1 in {
 
   def CMPEQi    : SetCCI<"cmpeq ", seteq, BRRegs>;
   def CMPGEi    : SetCCI<"cmpge ", setge, BRRegs>;
-  def CMPGEUi   : SetCCI<"cmpgeu ", setuge, BRRegs>;
+  def CMPGEUi   : SetCCI<"cmpgeu", setuge, BRRegs>;
   def CMPGTi    : SetCCI<"cmpgt ", setgt, BRRegs>;
-  def CMPGTUi   : SetCCI<"cmpgtu ", setugt, BRRegs>;
+  def CMPGTUi   : SetCCI<"cmpgtu", setugt, BRRegs>;
   def CMPLEi    : SetCCI<"cmple ", setle, BRRegs>;
-  def CMPLEUi   : SetCCI<"cmpleu ", setule, BRRegs>;
+  def CMPLEUi   : SetCCI<"cmpleu", setule, BRRegs>;
   def CMPLTi    : SetCCI<"cmplt ", setlt, BRRegs>;
-  def CMPLTUi   : SetCCI<"cmpltu ", setult, BRRegs>;
-  def CMPNEi    : SetCCI<"cmpne ", setne, BRRegs>;
+  def CMPLTUi   : SetCCI<"cmpltu", setult, BRRegs>;
+  def CMPNEi    : SetCCI<"cmpne ", setne, BRRegs>;  
 
   def CMPEQr    : SetCCR<"cmpeq ", seteq, CPURegs>;
   def CMPGEr    : SetCCR<"cmpge ", setge, CPURegs>;
-  def CMPGEUr   : SetCCR<"cmpgeu ", setuge, CPURegs>;
+  def CMPGEUr   : SetCCR<"cmpgeu", setuge, CPURegs>;
   def CMPGTr    : SetCCR<"cmpgt ", setgt, CPURegs>;
-  def CMPGTUr   : SetCCR<"cmpgtu ", setugt, CPURegs>;
+  def CMPGTUr   : SetCCR<"cmpgtu", setugt, CPURegs>;
   def CMPLEr    : SetCCR<"cmple ", setle, CPURegs>;
-  def CMPLEUr   : SetCCR<"cmpleu ", setule, CPURegs>;
+  def CMPLEUr   : SetCCR<"cmpleu", setule, CPURegs>;
   def CMPLTr    : SetCCR<"cmplt ", setlt, CPURegs>;
-  def CMPLTUr   : SetCCR<"cmpltu ", setult, CPURegs>;
+  def CMPLTUr   : SetCCR<"cmpltu", setult, CPURegs>;
   def CMPNEr    : SetCCR<"cmpne ", setne, CPURegs>;
 
   def CMPEQri   : SetCCI<"cmpeq ", seteq, CPURegs>;
   def CMPGEri   : SetCCI<"cmpge ", setge, CPURegs>;
-  def CMPGEUri  : SetCCI<"cmpgeu ", setuge, CPURegs>;
+  def CMPGEUri  : SetCCI<"cmpgeu", setuge, CPURegs>;
   def CMPGTri   : SetCCI<"cmpgt ", setgt, CPURegs>;
-  def CMPGTUri  : SetCCI<"cmpgtu ", setugt, CPURegs>;
+  def CMPGTUri  : SetCCI<"cmpgtu", setugt, CPURegs>;
   def CMPLEri   : SetCCI<"cmple ", setle, CPURegs>;
-  def CMPLEUri  : SetCCI<"cmpleu ", setule, CPURegs>;
+  def CMPLEUri  : SetCCI<"cmpleu", setule, CPURegs>;
   def CMPLTri   : SetCCI<"cmplt ", setlt, CPURegs>;
-  def CMPLTUri  : SetCCI<"cmpltu ", setult, CPURegs>;
-  def CMPNEri   : SetCCI<"cmpne ", setne, CPURegs>;
+  def CMPLTUri  : SetCCI<"cmpltu", setult, CPURegs>;
+  def CMPNEri   : SetCCI<"cmpne ", setne, CPURegs>;  
 
 }
 
 // Branch Patterns
 multiclass BranchPats<Instruction BrOp, Instruction CmpOpR, Instruction CmpOpI, 
                       PatFrag cond> {
-  def : Pat<(brcond (i1 (cond CPURegs:$lhs, CPURegs:$rhs)), bb:$dst),
+  def : Pat<(brcond (i32 (cond CPURegs:$lhs, CPURegs:$rhs)), bb:$dst),
             (BrOp (CmpOpR CPURegs:$lhs, CPURegs:$rhs), bb:$dst)>;
-  def : Pat<(brcond (i1 (cond CPURegs:$lhs, imm:$rhs)), bb:$dst),
+  def : Pat<(brcond (i32 (cond CPURegs:$lhs, imm:$rhs)), bb:$dst),
             (BrOp (CmpOpI CPURegs:$lhs, imm:$rhs), bb:$dst)>;
-  def : Pat<(brcond (i1 (cond CPURegs:$lhs, 0)), bb:$dst),
+  def : Pat<(brcond (i32 (cond CPURegs:$lhs, 0)), bb:$dst),
             (BrOp (CmpOpR CPURegs:$lhs, R0), bb:$dst)>;
 }
 
@@ -756,22 +770,30 @@ defm : BranchPats<BRF, CMPGTU,  CMPGTUi,  setule>;
 defm : BranchPats<BRF, CMPGE,   CMPGEi,   setlt>;
 defm : BranchPats<BRF, CMPGEU,  CMPGEUi,  setult>;
 
-def : Pat<(brcond (i1 (setne BRRegs:$src, (i1 0))), bb:$offset),
-          (BRF BRRegs:$src, bb:$offset)>;
-def : Pat<(brcond (i1 (setne BRRegs:$src, (i1 -1))), bb:$offset),
-          (BRF BRRegs:$src, bb:$offset)>;
-def : Pat<(brcond (i1 (seteq BRRegs:$src, (i1 0))), bb:$offset),
-          (BR BRRegs:$src, bb:$offset)>;
-def : Pat<(brcond (i1 (seteq BRRegs:$src, (i1 -1))), bb:$offset),
-          (BR BRRegs:$src, bb:$offset)>;
+defm : BranchPats<BR, CMPEQr,   CMPEQri,   seteq>;
+defm : BranchPats<BR, CMPNEr,   CMPNEri,   setne>;
+defm : BranchPats<BR, CMPLTr,   CMPLTri,   setlt>;
+defm : BranchPats<BR, CMPLTUr,  CMPLTUri,  setult>;
+defm : BranchPats<BR, CMPLEr,   CMPLEri,   setle>;
+defm : BranchPats<BR, CMPLEUr,  CMPLEUri,  setule>;
+defm : BranchPats<BR, CMPGTr,   CMPGTri,   setgt>;
+defm : BranchPats<BR, CMPGTUr,  CMPGTUri,  setugt>;
+defm : BranchPats<BR, CMPGEr,   CMPGEri,   setge>;
+defm : BranchPats<BR, CMPGEUr,  CMPGEUri,  setuge>;
 
-def : Pat<(brcond (i1 (seteq BRRegs:$cond, (i1 1))), bb:$offset),
-          (BR BRRegs:$cond, bb:$offset)>;
-def : Pat<(brcond (i1 (setne BRRegs:$cond, (i1 0))), bb:$offset),
-          (BRF BRRegs:$cond, bb:$offset)>;
+defm : BranchPats<BRF, CMPEQr,   CMPEQri,   setne>;
+defm : BranchPats<BRF, CMPNEr,   CMPNEri,   seteq>;
+defm : BranchPats<BRF, CMPLTr,   CMPLTri,   setge>;
+defm : BranchPats<BRF, CMPLTUr,  CMPLTUri,  setuge>;
+defm : BranchPats<BRF, CMPLEr,   CMPLEri,   setgt>;
+defm : BranchPats<BRF, CMPLEUr,  CMPLEUri,  setugt>;
+defm : BranchPats<BRF, CMPGTr,   CMPGTri,   setle>;
+defm : BranchPats<BRF, CMPGTUr,  CMPGTUri,  setule>;
+defm : BranchPats<BRF, CMPGEr,   CMPGEri,   setlt>;
+defm : BranchPats<BRF, CMPGEUr,  CMPGEUri,  setult>;
 
-def : Pat<(trunc CPURegs:$src),
-          (CMPEQ (ANDi CPURegs:$src, (i32 1)), (i32 1))>;
+
+
 
 multiclass ExtendCmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
   def : Pat<(anyext (setcc CPURegs:$lhs, CPURegs:$rhs, CC)),
@@ -808,24 +830,6 @@ multiclass CmpPats<Instruction CmpOpR, Instruction CmpOpI, CondCode CC> {
 
 }
 
-def : Pat<(zext BRRegs:$src),
-          (rvexADDC BRRegs:$src, R0, R0, BRRegs:$src)>;
-
-def : Pat<(i1 1),
-          (CMPEQ R0, 0)>;
-def : Pat<(i1 -1),
-          (CMPNE R0, 0)>;
-
-defm : ExtendCmpPats<CMPEQr,  CMPEQri,  SETEQ>;
-defm : ExtendCmpPats<CMPNEr,  CMPNEri,  SETNE>;
-defm : ExtendCmpPats<CMPLTr,  CMPLTri,  SETLT>;
-defm : ExtendCmpPats<CMPLTUr, CMPLTUri, SETULT>;
-defm : ExtendCmpPats<CMPLEr,  CMPLEri,  SETLE>;
-defm : ExtendCmpPats<CMPLEUr, CMPLEUri, SETULE>;
-defm : ExtendCmpPats<CMPGTr,  CMPGTri,  SETGT>;
-defm : ExtendCmpPats<CMPGTUr, CMPGTUri, SETUGT>;
-defm : ExtendCmpPats<CMPGEr,  CMPGEri,  SETGE>;
-defm : ExtendCmpPats<CMPGEUr, CMPGEUri, SETUGE>;
 
 defm : CmpPats<CMPEQ,   CMPEQi,   SETEQ>;
 defm : CmpPats<CMPNE,   CMPNEi,   SETNE>;

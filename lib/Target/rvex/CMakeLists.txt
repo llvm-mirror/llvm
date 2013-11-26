@@ -40,6 +40,7 @@ add_llvm_target(rvexCodeGen
   rvexVLIWPacketizer.cpp
   rvexHazardRecognizers.cpp
   rvexPostRAScheduler.cpp
+  rvexExpandPredSpill.cpp
   )
 
 # Should match with "subdirectories =  MCTargetDesc TargetInfo" in LLVMBuild.txt

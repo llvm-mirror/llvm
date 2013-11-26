@@ -145,7 +145,10 @@ rvexTargetLowering(rvexTargetMachine &TM)
 
   // Set up the register classes
   addRegisterClass(MVT::i32, &rvex::CPURegsRegClass);
-  addRegisterClass(MVT::i1, &rvex::BRRegsRegClass);
+  // addRegisterClass(MVT::i32, &rvex::BRRegsRegClass);
+
+  setBooleanContents(ZeroOrOneBooleanContent);
+  setBooleanVectorContents(ZeroOrNegativeOneBooleanContent);  
 
   // rvex Custom Operations
   setOperationAction(ISD::GlobalAddress,      MVT::i32,   Custom);
@@ -158,7 +161,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   // Without this, every float setcc comes with a AND/OR with the result,
   // we don't want this, since the fpcmp result goes to a flag register,
   // which is used implicitly by brcond and select operations.
-  //AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
+  AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
   //setOperationAction(ISD::BRCOND, MVT::Other, Custom);
   
   setOperationAction(ISD::SDIV, MVT::i32, Custom);
@@ -168,11 +171,14 @@ rvexTargetLowering(rvexTargetMachine &TM)
 
   setOperationAction(ISD::MULHU, MVT::i32, Custom);
   setOperationAction(ISD::MULHS, MVT::i32, Custom);
-  //setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);  
-  //setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);  
+  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::SDIVREM, MVT::i32, Expand);
   setOperationAction(ISD::UDIVREM, MVT::i32, Expand);
 
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Promote);
+
+  setOperationAction(ISD::SELECT_CC, MVT::i1, Promote);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Promote);
 
   // setOperationAction(ISD::ZERO_EXTEND, MVT::i32, Custom);
@@ -183,6 +189,8 @@ rvexTargetLowering(rvexTargetMachine &TM)
   // Custom lowering of ADDE and ADDC
   setOperationAction(ISD::ADDE, MVT::i32, Custom);
   setOperationAction(ISD::ADDC, MVT::i32, Custom);
+  setOperationAction(ISD::SUBE, MVT::i32, Custom);
+  setOperationAction(ISD::SUBC, MVT::i32, Custom);  
 
   setLoadExtAction(ISD::EXTLOAD,  MVT::i1,  Promote);
   //setLoadExtAction(ISD::ZEXTLOAD, MVT::i1,  Promote);
@@ -193,6 +201,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::BR_CC,            MVT::i32, Expand);
   setOperationAction(ISD::BR_JT,            MVT::Other, Expand);
   setOperationAction(ISD::BRIND,            MVT::Other, Expand);
+
 
   setOperationAction(ISD::AND,              MVT::i1, Promote);
   setOperationAction(ISD::OR,               MVT::i1, Promote);
@@ -208,111 +217,111 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::ROTL,             MVT::i64, Expand);
   setOperationAction(ISD::ROTR,             MVT::i64, Expand);  
 
-  // Softfloat Floating Point Library Calls
-  // Integer to Float conversions
-  setLibcallName(RTLIB::SINTTOFP_I32_F32, "_r_ilfloat");
-  // setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
+  // // Softfloat Floating Point Library Calls
+  // // Integer to Float conversions
+  // setLibcallName(RTLIB::SINTTOFP_I32_F32, "_r_ilfloat");
+  // // setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
 
-  setLibcallName(RTLIB::UINTTOFP_I32_F32, "_r_ufloat");
-  // setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  // setLibcallName(RTLIB::UINTTOFP_I32_F32, "_r_ufloat");
+  // // setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
 
-  setLibcallName(RTLIB::SINTTOFP_I32_F64, "_d_ilfloat");
-  // setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
+  // setLibcallName(RTLIB::SINTTOFP_I32_F64, "_d_ilfloat");
+  // // setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
 
-  setLibcallName(RTLIB::UINTTOFP_I32_F64, "_d_ufloat");
-  // setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  // setLibcallName(RTLIB::UINTTOFP_I32_F64, "_d_ufloat");
+  // // setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
 
-  //Software IEC/IEEE single-precision conversion routines.
+  // //Software IEC/IEEE single-precision conversion routines.
 
-  setLibcallName(RTLIB::FPTOSINT_F32_I32, "_r_fix");
-  // setOperationAction(ISD::FP_TO_SINT, MVT::f32, Expand);
+  // setLibcallName(RTLIB::FPTOSINT_F32_I32, "_r_fix");
+  // // setOperationAction(ISD::FP_TO_SINT, MVT::f32, Expand);
 
-  //FIXME
-  //float32_to_int32_round_to_zero
+  // //FIXME
+  // //float32_to_int32_round_to_zero
 
-  setLibcallName(RTLIB::FPEXT_F32_F64, "_d_r");
-  // setOperationAction(ISD::FP_EXTEND, MVT::f32, Expand);
+  // setLibcallName(RTLIB::FPEXT_F32_F64, "_d_r");
+  // // setOperationAction(ISD::FP_EXTEND, MVT::f32, Expand);
 
-  //Software IEC/IEEE single-precision operations.
-  // FIXME are these roundings correct? There is NEARBYINT_F too..
-  setLibcallName(RTLIB::RINT_F32, "float32_round_to_int");
-  // setOperationAction(ISD::FRINT , MVT::f32, Expand);
+  // //Software IEC/IEEE single-precision operations.
+  // // FIXME are these roundings correct? There is NEARBYINT_F too..
+  // setLibcallName(RTLIB::RINT_F32, "float32_round_to_int");
+  // // setOperationAction(ISD::FRINT , MVT::f32, Expand);
 
 
-  setLibcallName(RTLIB::ADD_F32, "_r_add");
-  // setOperationAction(ISD::FADD, MVT::f32, Expand);
+  // setLibcallName(RTLIB::ADD_F32, "_r_add");
+  // // setOperationAction(ISD::FADD, MVT::f32, Expand);
 
-  setLibcallName(RTLIB::SUB_F32, "_r_sub");
-  // setOperationAction(ISD::FSUB, MVT::f32, Expand);
+  // setLibcallName(RTLIB::SUB_F32, "_r_sub");
+  // // setOperationAction(ISD::FSUB, MVT::f32, Expand);
 
-  setLibcallName(RTLIB::MUL_F32, "_r_mul");
-  // setOperationAction(ISD::FMUL, MVT::f32, Expand);
+  // setLibcallName(RTLIB::MUL_F32, "_r_mul");
+  // // setOperationAction(ISD::FMUL, MVT::f32, Expand);
 
-  setLibcallName(RTLIB::DIV_F32, "_r_div");
-  // setOperationAction(ISD::FDIV, MVT::f32, Expand);
+  // setLibcallName(RTLIB::DIV_F32, "_r_div");
+  // // setOperationAction(ISD::FDIV, MVT::f32, Expand);
 
-  setLibcallName(RTLIB::ADD_F64, "_d_add");
-  // setOperationAction(ISD::FADD, MVT::f64, Expand);
+  // setLibcallName(RTLIB::ADD_F64, "_d_add");
+  // // setOperationAction(ISD::FADD, MVT::f64, Expand);
 
-  setLibcallName(RTLIB::SUB_F64, "_d_sub");
-  // setOperationAction(ISD::FSUB, MVT::f64, Expand);
+  // setLibcallName(RTLIB::SUB_F64, "_d_sub");
+  // // setOperationAction(ISD::FSUB, MVT::f64, Expand);
 
-  setLibcallName(RTLIB::MUL_F64, "_d_mul");
-  // setOperationAction(ISD::FMUL, MVT::f64, Expand);
+  // setLibcallName(RTLIB::MUL_F64, "_d_mul");
+  // // setOperationAction(ISD::FMUL, MVT::f64, Expand);
 
-  setLibcallName(RTLIB::DIV_F64, "_d_div");
-  // setOperationAction(ISD::FDIV, MVT::f64, Expand);  
+  // setLibcallName(RTLIB::DIV_F64, "_d_div");
+  // // setOperationAction(ISD::FDIV, MVT::f64, Expand);  
 
-  setLibcallName(RTLIB::REM_F32, "float32_rem");
-  // setOperationAction(ISD::SREM, MVT::f32, Expand);
-  //setLibcallName(RTLIB::UREM_F32, "float32_rem");
-  // setOperationAction(ISD::UREM, MVT::f32, Expand);
+  // setLibcallName(RTLIB::REM_F32, "float32_rem");
+  // // setOperationAction(ISD::SREM, MVT::f32, Expand);
+  // //setLibcallName(RTLIB::UREM_F32, "float32_rem");
+  // // setOperationAction(ISD::UREM, MVT::f32, Expand);
 
-  //FIXME softfloat sqrt function?
-  setLibcallName(RTLIB::SQRT_F32, "float32_sqrt");
+  // //FIXME softfloat sqrt function?
+  // setLibcallName(RTLIB::SQRT_F32, "float32_sqrt");
 
-  setLibcallName(RTLIB::OEQ_F32, "_r_eq");
-  // setOperationAction(ISD::SETOEQ, MVT::f32, Expand);
+  // setLibcallName(RTLIB::OEQ_F32, "_r_eq");
+  // // setOperationAction(ISD::SETOEQ, MVT::f32, Expand);
 
-  setLibcallName(RTLIB::OLE_F32, "_r_le");
-  // setOperationAction(ISD::SETOLE, MVT::f32, Expand);
+  // setLibcallName(RTLIB::OLE_F32, "_r_le");
+  // // setOperationAction(ISD::SETOLE, MVT::f32, Expand);
 
-  setLibcallName(RTLIB::OGE_F32, "_r_ge");
-  // setOperationAction(ISD::SETOGE, MVT::f32, Expand);  
+  // setLibcallName(RTLIB::OGE_F32, "_r_ge");
+  // // setOperationAction(ISD::SETOGE, MVT::f32, Expand);  
 
-  setLibcallName(RTLIB::OLT_F32, "_r_lt");
-  // setOperationAction(ISD::SETOLT, MVT::f32, Expand);
+  // setLibcallName(RTLIB::OLT_F32, "_r_lt");
+  // // setOperationAction(ISD::SETOLT, MVT::f32, Expand);
 
-  setLibcallName(RTLIB::OGT_F32, "_r_gt");
-  // setOperationAction(ISD::SETOGT, MVT::f32, Expand);  
+  // setLibcallName(RTLIB::OGT_F32, "_r_gt");
+  // // setOperationAction(ISD::SETOGT, MVT::f32, Expand);  
 
-  setLibcallName(RTLIB::OEQ_F64, "_d_eq");
-  // setOperationAction(ISD::SETOEQ, MVT::f64, Expand);
+  // setLibcallName(RTLIB::OEQ_F64, "_d_eq");
+  // // setOperationAction(ISD::SETOEQ, MVT::f64, Expand);
 
-  setLibcallName(RTLIB::OLE_F64, "_d_le");
-  // setOperationAction(ISD::SETOLE, MVT::f64, Expand);
+  // setLibcallName(RTLIB::OLE_F64, "_d_le");
+  // // setOperationAction(ISD::SETOLE, MVT::f64, Expand);
 
-  setLibcallName(RTLIB::OGE_F64, "_d_ge");
-  // setOperationAction(ISD::SETOGE, MVT::f64, Expand);
+  // setLibcallName(RTLIB::OGE_F64, "_d_ge");
+  // // setOperationAction(ISD::SETOGE, MVT::f64, Expand);
 
-  setLibcallName(RTLIB::OLT_F64, "_d_lt");
-  // setOperationAction(ISD::SETOLT, MVT::f64, Expand);  
+  // setLibcallName(RTLIB::OLT_F64, "_d_lt");
+  // // setOperationAction(ISD::SETOLT, MVT::f64, Expand);  
 
-  setLibcallName(RTLIB::OGT_F64, "_d_gt");
-  // setOperationAction(ISD::SETOGT, MVT::f64, Expand);    
+  // setLibcallName(RTLIB::OGT_F64, "_d_gt");
+  // // setOperationAction(ISD::SETOGT, MVT::f64, Expand);    
 
-  //FIXME: Not sure if following rules are coorect:
-  setLibcallName(RTLIB::FPROUND_F64_F32, "_r_d");
-  // setOperationAction(ISD::FP_ROUND, MVT::f64, Expand); 
+  // //FIXME: Not sure if following rules are coorect:
+  // setLibcallName(RTLIB::FPROUND_F64_F32, "_r_d");
+  // // setOperationAction(ISD::FP_ROUND, MVT::f64, Expand); 
 
-  // setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);
+  // // setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);
 
-  setLibcallName(RTLIB::FPTOSINT_F64_I32, "float64_to_int32");
-  // setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);  
+  // setLibcallName(RTLIB::FPTOSINT_F64_I32, "float64_to_int32");
+  // // setOperationAction(ISD::FP_TO_SINT, MVT::f64, Expand);  
 
-  setLibcallName(RTLIB::UNE_F32, "_r_ne");
+  // setLibcallName(RTLIB::UNE_F32, "_r_ne");
 
-  setLibcallName(RTLIB::UNE_F64, "_d_ne");
+  // setLibcallName(RTLIB::UNE_F64, "_d_ne");
 
 
 
@@ -320,11 +329,15 @@ rvexTargetLowering(rvexTargetMachine &TM)
   
 
 
-setOperationAction(ISD::CTTZ,  MVT::i32, Expand);
-setOperationAction(ISD::CTPOP,  MVT::i32, Expand);
-setOperationAction(ISD::CTLZ,  MVT::i32, Expand);
+  setOperationAction(ISD::CTTZ,  MVT::i32, Expand);
+  setOperationAction(ISD::CTPOP,  MVT::i32, Expand);
+  setOperationAction(ISD::CTLZ,  MVT::i32, Expand);
   setOperationAction(ISD::CTTZ_ZERO_UNDEF  , MVT::i32  , Expand);
   setOperationAction(ISD::CTLZ_ZERO_UNDEF  , MVT::i32  , Expand);
+
+
+  setOperationAction(ISD::SHL_PARTS, MVT::i32, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i32, Expand);
 
 //- Set .align 2
 // It will emit .align 2 later
@@ -336,7 +349,7 @@ setOperationAction(ISD::CTLZ,  MVT::i32, Expand);
 }
 
 EVT rvexTargetLowering::getSetCCResultType(EVT VT) const {
-  return MVT::i1;
+  return MVT::i32;
 }
 
 SDValue rvexTargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
@@ -369,6 +382,46 @@ LowerAddCG(SDValue Op, SelectionDAG &DAG) const
   {
     // For ADDC the branch register should be zero (Carry in is zero)
     Carry = DAG.getNode(ISD::SETNE, dl, MVT::i32);
+    ADDCG = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), LHS, RHS, Carry );
+  }
+  else
+  {
+    // For ADDE the branch register is MVT::Glue in Operand(2) and linked to an ADDC instruction
+    Carry = Op.getOperand(2);
+    ADDCG = DAG.getNode(rvexISD::Adde, dl, DAG.getVTList(MVT::i32, MVT::i32), LHS, RHS, Carry );
+  }
+
+  
+
+  return ADDCG;
+}
+
+
+SDValue rvexTargetLowering::
+LowerSUBE(SDValue Op, SelectionDAG &DAG) const
+{
+  unsigned Opc = Op.getOpcode();
+  SDNode* N = Op.getNode();
+  DebugLoc dl = N->getDebugLoc();
+
+  DEBUG(errs() << "LowerSUBC!\n");
+  SDValue ADDCG;
+
+  // LHS and RHS contain General purpose registers
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+
+  SDValue Carry;
+  SDValue Zero = DAG.getRegister(rvex::R0, MVT::i32);
+  SDValue ZeroImm = DAG.getTargetConstant(0, MVT::i32);
+
+  RHS = DAG.getNode(rvexISD::Orc, dl, MVT::i32, RHS, Zero);
+  // RHS = DAG.getNode(ISD::SUB, dl, MVT::i32, Zero, RHS);
+
+  if (Opc == ISD::SUBC)
+  {
+    // For ADDC the branch register should be zero (Carry in is zero)
+    Carry = DAG.getSetCC(dl, MVT::i32, Zero, ZeroImm, ISD::SETEQ);
     ADDCG = DAG.getNode(rvexISD::Addc, dl, DAG.getVTList(MVT::i32, MVT::i32), LHS, RHS, Carry );
   }
   else
@@ -698,6 +751,9 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
     case ISD::GlobalAddress:      return LowerGlobalAddress(Op, DAG);
     case ISD::ADDC:               return LowerAddCG(Op, DAG);
     case ISD::ADDE:               return LowerAddCG(Op, DAG);
+    case ISD::SUBE:               return LowerSUBE(Op, DAG);
+    case ISD::SUBC:               return LowerSUBE(Op, DAG);
+
     case ISD::UDIV:               return LowerUDIV(Op, DAG);
     case ISD::SDIV:               return LowerSDIV(Op, DAG);
 
