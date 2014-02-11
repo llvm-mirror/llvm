@@ -185,7 +185,7 @@ ARMBaseRegisterInfo::getCrossCopyRegClass(const TargetRegisterClass *RC) const {
 }
 
 unsigned
-ARMBaseRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
+ ARMBaseRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
                                          MachineFunction &MF) const {
   const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
 

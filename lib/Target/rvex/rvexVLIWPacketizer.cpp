@@ -47,8 +47,13 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "rvexFlags.h"
+
+
 using namespace llvm;
 using namespace rvexII;
+
+
 
 namespace {
   class rvexVLIWPacketizer : public MachineFunctionPass {
@@ -246,22 +251,6 @@ static bool isImmInstructon(MachineInstr *MI) {
     }
   }
 
-  // unsigned Opc = MI->getOpcode();
-  // switch(Opc) {
-  //     case rvex::ST:
-  //     case rvex::SH:
-  //     case rvex::SB:
-
-  //     case rvex::LD:
-  //     case rvex::LH:
-  //     case rvex::LHu:
-  //     case rvex::LB:
-  //     case rvex::LBu:
-          
-  //         return true;
-  // }  
-
-
 
   return false;
 
@@ -290,17 +279,23 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
 
   const MCInstrDesc &MCIDI = I->getDesc();
   const MCInstrDesc &MCIDJ = J->getDesc();
-
+          // MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
+          // unsigned TempReg = MRI.createVirtualRegister(&rvex::CPURegsRegClass);
 
   if(SUJ->isSucc(SUI)) {
     //FIXME: is Succs not a set? -- use the loop only to find the index...
-    for(unsigned i = 0;
+    for(unsigned i = 0; 
         (i < SUJ->Succs.size()) && !FoundSequentialDependence;
         ++i) {
 
       if(SUJ->Succs[i].getSUnit() != SUI) {
         continue;
       }
+
+      DEBUG(errs() << "SUI: ");
+      I->dump();
+      DEBUG(errs() << "SUJ: ");
+      J->dump();
 
       SDep Dep = SUJ->Succs[i];
       SDep::Kind DepType = Dep.getKind();
@@ -351,9 +346,9 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
 
       // Skip over anti-dependences. Two instructions that are
       // anti-dependent can share a packet
-      else if(DepType != SDep::Anti) {
+      else if(DepType == SDep::Anti && Is_Generic_flag) {
         DEBUG(errs() << "anti dependencies\n");
-        FoundSequentialDependence = false;
+        FoundSequentialDependence = true;
       }
     }
 

@@ -14,6 +14,7 @@
 #include "LiveRangeCalc.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/Support/Debug.h"
 
 using namespace llvm;
 
@@ -130,6 +131,7 @@ void LiveRangeCalc::calculate(LiveInterval &LI) {
   }
 }
 
+extern bool Is_Generic_flag;
 
 void LiveRangeCalc::createDeadDefs(LiveRange &LR, unsigned Reg) {
   assert(MRI && Indexes && "call reset() first");
@@ -189,6 +191,23 @@ void LiveRangeCalc::extendToUses(LiveRange &LR, unsigned Reg, unsigned Mask) {
       UseIdx = Indexes->getInstructionIndex(MI).getRegSlot(isEarlyClobber);
     }
 
+    if (Is_Generic_flag)
+    {
+      DEBUG(dbgs() << "Kill index old: " << Idx << "\n");
+      // Kill.setIndex(temp + 100);
+      // SlotIndex IndexEnd = Indexes->getMBBStartIdx(MI->getParent());
+      // DEBUG(dbgs() << "start index: " << IndexEnd << "\n");
+
+      SlotIndex Start2, End2;
+      tie(Start2, End2) = Indexes->getMBBRange(MI->getParent());
+      DEBUG(dbgs() << "start: " << Start2 << "\n");
+      DEBUG(dbgs() << "end: " << End2 << "\n");
+      // Idx = Idx.getNextIndex();
+      // Idx = Idx.getNextIndex();
+      UseIdx = End2;
+      DEBUG(dbgs() << "Kill index new: " << Idx << "\n");
+    }
+
     // MI is reading Reg. We may have visited MI before if it happens to be
     // reading Reg multiple times. That is OK, extend() is idempotent.
     extend(LR, UseIdx, Reg);
@@ -240,6 +259,9 @@ void LiveRangeCalc::extend(LiveRange &LR, SlotIndex Kill, unsigned PhysReg) {
   // know the dominating VNInfo.
   if (findReachingDefs(LR, *KillMBB, Kill, PhysReg))
     return;
+
+
+
 
   // When there were multiple different values, we may need new PHIs.
   calculateValues();

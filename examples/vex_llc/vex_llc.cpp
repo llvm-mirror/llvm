@@ -70,8 +70,7 @@ OptLevel("O",
 static cl::opt<std::string>
 TargetTriple("mtriple", cl::desc("Override target triple for module"));
 
-static cl::opt<std::string>
-Config("config", cl::desc("Path to config file"));
+
 
 cl::opt<bool>
 DisableOutputNops("disable-output-nops",

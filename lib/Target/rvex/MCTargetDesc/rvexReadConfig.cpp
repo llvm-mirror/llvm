@@ -10,6 +10,8 @@ using namespace std;
 
 vector<Stage_desc> Stages;
 vector<DFAState> Itin;
+int is_generic;
+int is_width;
 
 int read_config (string ConfigFile)
 {
@@ -26,6 +28,61 @@ int read_config (string ConfigFile)
     //Reads one string from the file
     b_file>> str;
     //Should output 'this'
+
+    if (str == "Generic")
+    {
+        b_file>> str;
+        if (str == "=")
+        {
+            run = true;
+            while(run)
+            {
+                b_file>> str;
+
+                
+                if (str.at( str.length() -1) == ';')
+                    run = false;
+                
+                str.erase(str.length()-1,1);
+
+                
+                
+                getal = atoi(str.c_str());
+
+                
+                is_generic = getal;
+            }
+            
+        }
+    } 
+    b_file>> str;
+    if (str == "Width")
+    {
+        b_file>> str;
+        if (str == "=")
+        {
+            run = true;
+            while(run)
+            {
+                b_file>> str;
+
+                
+                if (str.at( str.length() -1) == ';')
+                    run = false;
+                
+                str.erase(str.length()-1,1);
+
+                
+                
+                getal = atoi(str.c_str());
+
+                
+                is_width = getal;
+            }
+            
+        }
+    } 
+    b_file>> str;
     if (str == "Stages")
     {
         b_file>> str;

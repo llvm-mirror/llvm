@@ -65,6 +65,14 @@ ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetPostRAHazardRecognizer(
   return new rvexHazardRecognizer(II, DAG, "PostRA");
 }
 
+// Default implementation of CreateTargetMIHazardRecognizer.
+ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetMIHazardRecognizer(
+  const InstrItineraryData *II,
+  const ScheduleDAG *DAG) const {
+
+  return new rvexHazardRecognizer(II, DAG, "misched");
+}
+
 void rvexInstrInfo::
 copyPhysReg(MachineBasicBlock &MBB,
             MachineBasicBlock::iterator I, DebugLoc DL,

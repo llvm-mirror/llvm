@@ -129,9 +129,13 @@ namespace llvm {
 #endif // EXPENSIVE_CHECKS
       return lie.getPointer();
     }
-
+public:
     unsigned getIndex() const {
       return listEntry()->getIndex() | getSlot();
+    }
+
+    void setIndex(unsigned newIndex) {
+      listEntry()->setIndex(newIndex);
     }
 
     /// Returns the slot for this SlotIndex.
@@ -139,7 +143,7 @@ namespace llvm {
       return static_cast<Slot>(lie.getInt());
     }
 
-  public:
+  
     enum {
       /// The default distance between instructions as returned by distance().
       /// This may vary as instructions are inserted and removed.

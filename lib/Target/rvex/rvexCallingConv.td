@@ -46,5 +46,5 @@ def RetCC_rvex : CallingConv<[
 ]>;
 
 def CSR_O32 : CalleeSavedRegs<(add LR, 
-									(sequence "R%u", 57, 63))>;
+									(sequence "R%u", 57, 62))>;
 

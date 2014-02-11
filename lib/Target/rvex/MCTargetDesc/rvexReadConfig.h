@@ -28,6 +28,8 @@ using namespace std;
 
 extern vector<Stage_desc> Stages;
 extern vector<DFAState> Itin;
+extern int is_generic;
+extern int is_width;
 
 int read_config (string ConfigFile);
 

@@ -27,6 +27,7 @@ namespace llvm {
 	FunctionPass *creatervexVLIWPacketizer();
 	FunctionPass *creatervexPostRAScheduler();
 	FunctionPass *creatervexExpandPredSpillCode(rvexTargetMachine &TM);	
+	FunctionPass *CreateHelloPass(rvexTargetMachine &TM);	
 
 } // end namespace llvm;
 

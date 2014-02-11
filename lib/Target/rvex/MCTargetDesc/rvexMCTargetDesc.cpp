@@ -32,6 +32,8 @@
 
 #include "llvm/Support/CommandLine.h"
 
+#include "rvexFlags.h"
+
 #include "rvexReadConfig.h"
 #include "rvexBuildDFA.h"
 #include <iostream>
@@ -143,7 +145,7 @@
     0, 0, 0, 0, // No instruction-level machine model.
     NoItineraries);
 
-  static const llvm::MCSchedModel rvexModel(
+  static llvm::MCSchedModel rvexModel(
     8, // IssueWidth
     MCSchedModel::DefaultMinLatency,
     2,
@@ -200,18 +202,29 @@ static MCCodeGenInfo *creatervexMCCodeGenInfo(StringRef TT, Reloc::Model RM,
   return X;
 }
 
-extern cl::opt<std::string>
+cl::opt<std::string>
 Config("config", cl::desc("Path to config file"));
+
+// cl::opt<bool> Is_Generic_flag ("f", cl::desc("Generate generic binary"));
+
+bool Is_Generic_flag;
+static cl::opt<bool, true> Generic ("f", cl::desc("Generate generic binary"), cl::location(Is_Generic_flag));
 
 extern "C" void LLVMInitializervexTargetMC() {
   // Register the MC asm info.
   int i;
-  
+
   // Read configuration file
   if (!read_config(Config))
   {
-
     //Init InstrStages from config file
+    rvexModel.IssueWidth = is_width;
+    
+    if (is_generic == 1)
+      Is_Generic_flag = true;
+    else
+      Is_Generic_flag = false;
+
     
     for (i = 0; i < (int)Stages.size(); i++)
     {

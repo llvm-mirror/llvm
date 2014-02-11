@@ -106,7 +106,36 @@ void RegAllocBase::allocatePhysRegs() {
           << ':' << *VirtReg << " w=" << VirtReg->weight << '\n');
     typedef SmallVector<unsigned, 4> VirtRegVec;
     VirtRegVec SplitVRegs;
+
+
+    // MachineBasicBlock *currentMBB = VirtReg->ranges.back().end.getMBBFromIndex(Kill.getPrevSlot());
+    // DEBUG(dbgs() << "currentMBB: " << currentMBB->getNumber() << '\n');
+    // DEBUG(dbgs() << "Start: " << *VirtReg << '\n');    
+    // DEBUG(dbgs() << "End: " << *VirtReg << '\n');    
+
+    // int temp;
+
+    // DEBUG(dbgs() << "range: " << *VirtReg << '\n');    
+    // DEBUG(dbgs() << "old end: " << VirtReg->endIndex() << '\n');
+    // temp = VirtReg->ranges.back().end.getIndex();
+    // VirtReg->ranges.back().end.setIndex(temp + 100);
+    // DEBUG(dbgs() << "new end: " << VirtReg->endIndex() << '\n');
+    // VirtReg->ranges.back().end.dump();
+
+    
+    // VirtReg->ranges.front().end = VirtReg->ranges.front().end.getNextIndex();
+
+    // DEBUG(dbgs() << "new end: " << VirtReg->ranges.front().end << '\n');
+
+    // DEBUG(dbgs() << "start: " << VirtReg->ranges.front().start << '\n');
+    // VirtReg->ranges.front().end = VirtReg->ranges.front().start.getPrevIndex();
+    // DEBUG(dbgs() << "new start: " << VirtReg->ranges.front().start << '\n');
+
+
+
+
     unsigned AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
+
 
     if (AvailablePhysReg == ~0u) {
       // selectOrSplit failed to find a register!
