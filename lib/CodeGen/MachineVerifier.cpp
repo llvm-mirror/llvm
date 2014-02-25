@@ -734,13 +734,13 @@ void MachineVerifier::visitMachineBundleBefore(const MachineInstr *MI) {
   // Ensure non-terminators don't follow terminators.
   // Ignore predicated terminators formed by if conversion.
   // FIXME: If conversion shouldn't need to violate this rule.
-  // if (MI->isTerminator() && !TII->isPredicated(MI)) {
-  //   if (!FirstTerminator)
-  //     FirstTerminator = MI;
-  // } else if (FirstTerminator) {
-  //   report("Non-terminator instruction after the first terminator", MI);
-  //   *OS << "First terminator was:\t" << *FirstTerminator;
-  // }
+  if (MI->isTerminator() && !TII->isPredicated(MI)) {
+    if (!FirstTerminator)
+      FirstTerminator = MI;
+  } else if (FirstTerminator) {
+    report("Non-terminator instruction after the first terminator", MI);
+    *OS << "First terminator was:\t" << *FirstTerminator;
+  }
 }
 
 // The operands on an INLINEASM instruction must follow a template.
