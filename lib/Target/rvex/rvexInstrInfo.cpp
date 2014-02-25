@@ -56,13 +56,13 @@ const rvexRegisterInfo &rvexInstrInfo::getRegisterInfo() const {
   return RI;
 }
 
-ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetHazardRecognizer(const TargetMachine *TM,
-                             const ScheduleDAG *DAG) const {
+// ScheduleHazardRecognizer *rvexInstrInfo::CreateTargetHazardRecognizer(const TargetMachine *TM,
+//                              const ScheduleDAG *DAG) const {
 
-  const InstrItineraryData *II = TM->getInstrItineraryData();
-  return new ScoreboardHazardRecognizer(II, DAG, "pre-RA-sched");
+//   const InstrItineraryData *II = TM->getInstrItineraryData();
+//   return new ScoreboardHazardRecognizer(II, DAG, "pre-RA-sched");
 
-}
+// }
 
 /// CreateTargetPostRAHazardRecognizer - Return the postRA hazard recognizer
 /// to use for this target when scheduling the DAG.

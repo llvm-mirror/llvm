@@ -43,9 +43,9 @@ public:
   ///
   virtual const rvexRegisterInfo &getRegisterInfo() const;
 
-  ScheduleHazardRecognizer *
-  CreateTargetHazardRecognizer(const TargetMachine *TM,
-                               const ScheduleDAG *DAG) const;
+  // ScheduleHazardRecognizer *
+  // CreateTargetHazardRecognizer(const TargetMachine *TM,
+  //                              const ScheduleDAG *DAG) const;
   
   ScheduleHazardRecognizer *
   CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,

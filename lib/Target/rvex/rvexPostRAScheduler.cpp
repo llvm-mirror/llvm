@@ -444,6 +444,11 @@ void SchedulePostRATDList::FixupKills(MachineBasicBlock *MBB) {
   for (MachineBasicBlock::iterator I = MBB->end(), E = MBB->begin();
        I != E; --Count) {
     MachineInstr *MI = --I;
+    if (MI->getDesc().isConditionalBranch()) {
+      DEBUG(dbgs() << "found branch\n");
+      TII->insertNoop(*MBB, I);
+    }
+      
     if (MI->isDebugValue())
       continue;
 

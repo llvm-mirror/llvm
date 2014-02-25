@@ -240,12 +240,12 @@ void ScheduleDAGVLIW::listScheduleTopDown() {
 
     // If we found a node to schedule, do it now.
     if (FoundSUnit) {
-      if (FoundSUnit->getNode()->getOpcode() == 65512)
-      {
-        DEBUG(dbgs() << "*** Emitting branch noop\n");
-        HazardRec->EmitNoop();
-        Sequence.push_back(0);   // NULL here means noop       
-      }
+      // if (FoundSUnit->getNode()->getOpcode() == 65512)  //FIXME: belachelijke hack. fix het zodat 65512 altijd overeenkomt met de BR instructie
+      // {
+      //   DEBUG(dbgs() << "*** Emitting branch noop\n");
+      //   HazardRec->EmitNoop();
+      //   Sequence.push_back(0);   // NULL here means noop       
+      // }
       scheduleNodeTopDown(FoundSUnit, CurCycle);
       // HazardRec->EmitInstruction(FoundSUnit);
 
@@ -259,8 +259,9 @@ void ScheduleDAGVLIW::listScheduleTopDown() {
       // Otherwise, we have a pipeline stall, but no other problem, just advance
       // the current cycle and try again.
       DEBUG(dbgs() << "*** Advancing cycle, no work to do\n");
-      HazardRec->AdvanceCycle();
-      ++NumStalls;
+      HazardRec->EmitNoop();
+      Sequence.push_back(0);   // NULL here means noop
+      ++NumNoops;
       ++CurCycle;
     } else {
       // Otherwise, we have no instructions to issue and we have instructions
