@@ -42,6 +42,10 @@ public:
   /// always be able to get register info as well (through this method).
   ///
   virtual const rvexRegisterInfo &getRegisterInfo() const;
+
+  ScheduleHazardRecognizer *
+  CreateTargetHazardRecognizer(const TargetMachine *TM,
+                               const ScheduleDAG *DAG) const;
   
   ScheduleHazardRecognizer *
   CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,

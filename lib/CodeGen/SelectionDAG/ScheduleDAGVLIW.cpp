@@ -88,6 +88,7 @@ private:
   void releaseSuccessors(SUnit *SU);
   void scheduleNodeTopDown(SUnit *SU, unsigned CurCycle);
   void listScheduleTopDown();
+  void EmitNode(SUnit *SU);
 };
 }  // end anonymous namespace
 
@@ -239,8 +240,16 @@ void ScheduleDAGVLIW::listScheduleTopDown() {
 
     // If we found a node to schedule, do it now.
     if (FoundSUnit) {
+      if (FoundSUnit->getNode()->getOpcode() == 65512)
+      {
+        DEBUG(dbgs() << "*** Emitting branch noop\n");
+        HazardRec->EmitNoop();
+        Sequence.push_back(0);   // NULL here means noop       
+      }
       scheduleNodeTopDown(FoundSUnit, CurCycle);
-      HazardRec->EmitInstruction(FoundSUnit);
+      // HazardRec->EmitInstruction(FoundSUnit);
+
+      EmitNode(FoundSUnit);
 
       // If this is a pseudo-op node, we don't want to increment the current
       // cycle.
@@ -268,6 +277,46 @@ void ScheduleDAGVLIW::listScheduleTopDown() {
 #ifndef NDEBUG
   VerifyScheduledSequence(/*isBottomUp=*/false);
 #endif
+}
+
+/// Record this SUnit in the HazardRecognizer.
+/// Does not update CurCycle.
+void ScheduleDAGVLIW::EmitNode(SUnit *SU) {
+  if (!HazardRec->isEnabled())
+    return;
+
+  // Check for phys reg copy.
+  if (!SU->getNode())
+    return;
+
+  switch (SU->getNode()->getOpcode()) {
+  default:
+    assert(SU->getNode()->isMachineOpcode() &&
+           "This target-independent node should not be scheduled.");
+    break;
+  case ISD::MERGE_VALUES:
+  case ISD::TokenFactor:
+  case ISD::LIFETIME_START:
+  case ISD::LIFETIME_END:
+  case ISD::CopyToReg:
+  case ISD::CopyFromReg:
+  case ISD::EH_LABEL:
+
+    // Noops don't affect the scoreboard state. Copies are likely to be
+    // removed.
+    return;
+  case ISD::INLINEASM:
+    // For inline asm, clear the pipeline state.
+    HazardRec->Reset();
+    return;
+  }
+  if (SU->isCall) {
+    // Calls are scheduled with their preceding instructions. For bottom-up
+    // scheduling, clear the pipeline state before emitting.
+    HazardRec->Reset();
+  }
+
+  HazardRec->EmitInstruction(SU);
 }
 
 //===----------------------------------------------------------------------===//

@@ -186,17 +186,13 @@ void rvexPassConfig::addOptimizedRegAlloc(FunctionPass *RegAllocPass) {
  printAndVerify("After StackSlotColoring and postra Machine LICM");
 }
 
-// void rvexPassConfig::addFastRegAlloc(FunctionPass *RegAllocPass) {
-//   assert(!RegAllocPass && "NVPTX uses no regalloc!");
-// }
-
 
 bool rvexPassConfig::addPreEmitPass() {
   if(static_cast<rvexTargetMachine*>(TM)->getSubtargetImpl()->isVLIWEnabled()) {
     // addPass(creatervexPostRAScheduler());
     addPass(creatervexExpandPredSpillCode(getrvexTargetMachine()));    
     addPass(creatervexVLIWPacketizer());
-    addPass(CreateHelloPass(getrvexTargetMachine()));
+    // addPass(CreateHelloPass(getrvexTargetMachine()));
   }
 
   return false;

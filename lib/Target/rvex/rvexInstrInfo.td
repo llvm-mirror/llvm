@@ -602,9 +602,8 @@ let isReturn=1, isTerminator=1, hasDelaySlot=1, isCodeGenOnly=1,
 
 /// No operation
 let addr=0 in
-  def NOP   : FJ<0, (outs), (ins), "nop", [], IIAlu, TypeIIBranch>;
+  def NOP   : FJ<0, (outs), (ins), "nop", [], IIAlu, TypeIIAlu>;
 
-  def NOP2   : FJ<0, (outs), (ins), "asd", [], IIAlu, TypeIIAlu>;
 
   
 // FrameIndexes are legalized when they are operands from load/store

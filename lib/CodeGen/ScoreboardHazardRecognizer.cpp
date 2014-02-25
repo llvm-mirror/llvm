@@ -186,6 +186,12 @@ void ScoreboardHazardRecognizer::EmitInstruction(SUnit *SU) {
   assert(MCID && "The scheduler must filter non-machineinstrs");
   if (DAG->TII->isZeroCost(MCID->Opcode))
     return;
+  
+  if (MCID->isConditionalBranch()) {
+    DEBUG(dbgs() << "found cond branch\n");
+
+  }
+    
 
   ++IssueCount;
 

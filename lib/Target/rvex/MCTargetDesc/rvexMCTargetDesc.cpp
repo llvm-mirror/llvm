@@ -245,7 +245,7 @@ extern "C" void LLVMInitializervexTargetMC() {
       llvm::InstrItinerary TempItin = {0, Itin[i].num1, Itin[i].num2, 0, 0};
       rvexGenericItineraries[i + 1] = TempItin;
     }
-    llvm::InstrItinerary TempItin = {0, 0, 0, 0, 0};
+    llvm::InstrItinerary TempItin = { 0, ~0U, ~0U, ~0U, ~0U }; // end marker
     rvexGenericItineraries[i + 1] = TempItin;
   }
 
