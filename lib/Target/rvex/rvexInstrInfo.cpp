@@ -205,6 +205,130 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     .addMemOperand(MMO);
 }
 
+//===----------------------------------------------------------------------===//
+// Branch Analysis
+//===----------------------------------------------------------------------===//
+
+static unsigned GetAnalyzableBrOpc(unsigned Opc) {
+  return (Opc == rvex::BR || Opc == rvex::BRF || Opc == rvex::JMP) ? Opc : 0;
+}
+
+/// GetOppositeBranchOpc - Return the inverse of the specified
+/// opcode, e.g. turning BEQ to BNE.
+static unsigned GetOppositeBranchOpc(unsigned Opc)
+{
+  switch (Opc) {
+  default: llvm_unreachable("Illegal opcode!");
+  case rvex::BR    : return rvex::BRF;
+  case rvex::BRF    : return rvex::BR;
+  }
+}
+
+static void AnalyzeCondBr(const MachineInstr* Inst, unsigned Opc,
+                          MachineBasicBlock *&BB,
+                          SmallVectorImpl<MachineOperand>& Cond) {
+  assert(GetAnalyzableBrOpc(Opc) && "Not an analyzable branch");
+  int NumOp = Inst->getNumExplicitOperands();
+
+  // for both int and fp branches, the last explicit operand is the
+  // MBB.
+  BB = Inst->getOperand(NumOp-1).getMBB();
+  Cond.push_back(MachineOperand::CreateImm(Opc));
+
+  for (int i=0; i<NumOp-1; i++)
+    Cond.push_back(Inst->getOperand(i));
+}
+
+bool rvexInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
+                                  MachineBasicBlock *&TBB,
+                                  MachineBasicBlock *&FBB,
+                                  SmallVectorImpl<MachineOperand> &Cond,
+                                  bool AllowModify) const
+{
+  MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
+
+  // Skip all the debug instructions.
+  while (I != REnd && I->isDebugValue())
+    ++I;
+
+  if (I == REnd || !isUnpredicatedTerminator(&*I)) {
+    // If this block ends with no branches (it just falls through to its succ)
+    // just return false, leaving TBB/FBB null.
+    TBB = FBB = NULL;
+    return false;
+  }
+
+  MachineInstr *LastInst = &*I;
+  unsigned LastOpc = LastInst->getOpcode();
+
+  // Not an analyzable branch (must be an indirect jump).
+  if (!GetAnalyzableBrOpc(LastOpc)) {
+    return true;
+  }
+
+  // Get the second to last instruction in the block.
+  unsigned SecondLastOpc = 0;
+  MachineInstr *SecondLastInst = NULL;
+
+  if (++I != REnd) {
+    SecondLastInst = &*I;
+    SecondLastOpc = GetAnalyzableBrOpc(SecondLastInst->getOpcode());
+
+    // Not an analyzable branch (must be an indirect jump).
+    if (isUnpredicatedTerminator(SecondLastInst) && !SecondLastOpc) {
+      return true;
+    }
+  }
+
+  // If there is only one terminator instruction, process it.
+  if (!SecondLastOpc) {
+    // Unconditional branch
+    if (LastOpc == rvex::JMP) {
+      TBB = LastInst->getOperand(0).getMBB();
+      // If the basic block is next, remove the GOTO inst
+      if(MBB.isLayoutSuccessor(TBB)) {
+        LastInst->eraseFromParent();
+      }
+
+      return false;
+    }
+
+    // Conditional branch
+    AnalyzeCondBr(LastInst, LastOpc, TBB, Cond);
+    return false;
+  }
+
+  // If we reached here, there are two branches.
+  // If there are three terminators, we don't know what sort of block this is.
+  if (++I != REnd && isUnpredicatedTerminator(&*I)) {
+    return true;
+  }
+
+  // If second to last instruction is an unconditional branch,
+  // analyze it and remove the last instruction.
+  if (SecondLastOpc == rvex::JMP) {
+    // Return if the last instruction cannot be removed.
+    if (!AllowModify) {
+      return true;
+    }
+
+    TBB = SecondLastInst->getOperand(0).getMBB();
+    LastInst->eraseFromParent();
+    return false;
+  }
+
+  // Conditional branch followed by an unconditional branch.
+  // The last one must be unconditional.
+  if (LastOpc != rvex::JMP) {
+    return true;
+  }
+
+  AnalyzeCondBr(SecondLastInst, SecondLastOpc, TBB, Cond);
+  FBB = LastInst->getOperand(0).getMBB();
+
+  return false;
+}
+
 void rvexInstrInfo::BuildCondBr(MachineBasicBlock &MBB,
                                 MachineBasicBlock *TBB, DebugLoc DL,
                                 const SmallVectorImpl<MachineOperand>& Cond)
@@ -213,14 +337,9 @@ void rvexInstrInfo::BuildCondBr(MachineBasicBlock &MBB,
   const MCInstrDesc &MCID = get(Opc);
   MachineInstrBuilder MIB = BuildMI(&MBB, DL, MCID);
 
-  for (unsigned i = 1; i < Cond.size(); ++i) {
-    if (Cond[i].isReg())
-      MIB.addReg(Cond[i].getReg());
-    else if (Cond[i].isImm())
-      MIB.addImm(Cond[i].getImm());
-    else
-       assert(true && "Cannot copy operand");
-  }
+  for (unsigned i = 1; i < Cond.size(); ++i)
+    MIB.addReg(Cond[i].getReg());
+
   MIB.addMBB(TBB);
 }
 
@@ -254,6 +373,41 @@ InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
   else // Conditional branch.
     BuildCondBr(MBB, TBB, DL, Cond);
   return 1;
+}
+
+unsigned rvexInstrInfo::
+RemoveBranch(MachineBasicBlock &MBB) const
+{
+  MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
+  MachineBasicBlock::reverse_iterator FirstBr;
+  unsigned removed;
+
+  // Skip all the debug instructions.
+  while (I != REnd && I->isDebugValue())
+    ++I;
+
+  FirstBr = I;
+
+  // Up to 2 branches are removed.
+  // Note that indirect branches are not removed.
+  for(removed = 0; I != REnd && removed < 2; ++I, ++removed)
+    if (!GetAnalyzableBrOpc(I->getOpcode()))
+      break;
+
+  MBB.erase(I.base(), FirstBr.base());
+
+  return removed;
+}
+
+/// ReverseBranchCondition - Return the inverse opcode of the
+/// specified Branch instruction.
+bool rvexInstrInfo::
+ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const
+{
+  assert( (Cond.size() && Cond.size() <= 3) &&
+          "Invalid rvex branch condition!");
+  Cond[0].setImm(GetOppositeBranchOpc(Cond[0].getImm()));
+  return false;
 }
 
 DFAPacketizer *rvexInstrInfo::

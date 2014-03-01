@@ -80,6 +80,24 @@ public:
   virtual DFAPacketizer *CreateTargetScheduleState(const TargetMachine *TM,
                                                   const ScheduleDAG *DAG) const;
 
+  virtual bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                             MachineBasicBlock *&FBB,
+                             SmallVectorImpl<MachineOperand> &Cond,
+                             bool AllowModify) const;
+  virtual unsigned RemoveBranch(MachineBasicBlock &MBB) const;
+
+private:
+  void BuildCondBr(MachineBasicBlock &MBB, MachineBasicBlock *TBB, DebugLoc DL,
+                   const SmallVectorImpl<MachineOperand>& Cond) const;
+
+public:
+  virtual unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                                MachineBasicBlock *FBB,
+                                const SmallVectorImpl<MachineOperand> &Cond,
+                                DebugLoc DL) const;
+
+  virtual bool ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const;
+
   virtual bool isSchedulingBoundary(const MachineInstr *MI,
                                     const MachineBasicBlock *MBB,
                                     const MachineFunction &MF) const;
@@ -87,13 +105,7 @@ public:
   virtual void insertNoop(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MI) const;
 
-  virtual unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-                                MachineBasicBlock *FBB,
-                                const SmallVectorImpl<MachineOperand> &Cond,
-                                DebugLoc DL) const;  
 
-  void BuildCondBr(MachineBasicBlock &MBB, MachineBasicBlock *TBB, DebugLoc DL,
-                   const SmallVectorImpl<MachineOperand>& Cond) const;  
 };
 }
 

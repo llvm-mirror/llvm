@@ -180,8 +180,8 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
   // Remove return node.
   // MBB.erase(MBBI);
   // Add return with sp add
-  DEBUG(errs() << "Epilogue dump!\n");
-  MBB.dump();
+  // DEBUG(errs() << "Epilogue dump!\n");
+  // MBB.dump();
   //MBB.erase(MBBI);
 
   assert(MBBI->getOpcode() == rvex::RET && "Last instruction isn't ret");
