@@ -150,6 +150,8 @@ namespace {
     ///
     void FixupKills(MachineBasicBlock *MBB);
 
+    void FixupLoads(MachineBasicBlock *MBB);
+
   private:
     void ReleaseSucc(SUnit *SU, SDep *SuccEdge);
     void ReleaseSuccessors(SUnit *SU);
@@ -307,6 +309,8 @@ bool rvexPostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
 
     // Update register kills
     Scheduler.FixupKills(MBB);
+
+    // Scheduler.FixupLoads(MBB);
   }
 
   return true;
@@ -429,6 +433,25 @@ bool SchedulePostRATDList::ToggleKillFlag(MachineInstr *MI,
   return false;
 }
 
+
+void SchedulePostRATDList::FixupLoads(MachineBasicBlock *MBB) {
+  DEBUG(dbgs() << "Fixup loads for BB#" << MBB->getNumber() << '\n');
+
+  for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end();
+       I != E; ++I) {
+    
+    MachineInstr *MI = I;
+    DEBUG(MI->dump());
+    if (MI->getDesc().mayLoad()) {
+      DEBUG(dbgs() << "Found Load\n");
+      // DEBUG(MI->dump());
+
+      TII->insertNoop(*MBB, llvm::next(I));
+    }
+  }
+}
+
+
 /// FixupKills - Fix the register kill flags, they may have been made
 /// incorrect by instruction reordering.
 ///
@@ -448,6 +471,17 @@ void SchedulePostRATDList::FixupKills(MachineBasicBlock *MBB) {
       DEBUG(dbgs() << "found branch\n");
       TII->insertNoop(*MBB, I);
     }
+
+    if (MI->getDesc().isReturn()) {
+      DEBUG(dbgs() << "found return\n");
+      TII->insertNoop(*MBB, I);
+      TII->insertNoop(*MBB, I);
+    }
+
+    // if (MI->getDesc().mayLoad()) {
+    //   DEBUG(dbgs() << "Found Load\n");
+    //   TII->insertNoop(*MBB, I);
+    // }
       
     if (MI->isDebugValue())
       continue;
@@ -502,6 +536,14 @@ void SchedulePostRATDList::FixupKills(MachineBasicBlock *MBB) {
 
       if (MO.isKill() != kill) {
         DEBUG(dbgs() << "Fixing " << MO << " in ");
+
+        //FIXME do some magic to insert noop when ld / st instructions are used
+
+        if (MI->getDesc().mayLoad()) {
+          DEBUG(dbgs() << "Found Load\n");
+          TII->insertNoop(*MBB, llvm::next(I));
+        }
+
         // Warning: ToggleKillFlag may invalidate MO.
         ToggleKillFlag(MI, MO);
         DEBUG(MI->dump());

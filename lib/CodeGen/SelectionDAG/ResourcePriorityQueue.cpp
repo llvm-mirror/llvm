@@ -298,7 +298,7 @@ void ResourcePriorityQueue::reserveResources(SUnit *SU) {
     switch (SU->getNode()->getMachineOpcode()) {
     default:
       ResourcesModel->reserveResources(&TII->get(
-        SU->getNode()->getMachineOpcode()));
+        SU->getNode()->getMachineOpcode()), false);
       break;
     case TargetOpcode::EXTRACT_SUBREG:
     case TargetOpcode::INSERT_SUBREG:

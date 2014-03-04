@@ -376,13 +376,20 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
     DEBUG(errs() << "rvex add:\t");
     MI->dump();
     MachineBasicBlock::iterator MII = MI;
+    const TargetInstrInfo *TII = MF.getTarget().getInstrInfo();
+
     CurrentPacketMIs.push_back(MI);
-    ResourceTracker->reserveResources(MI);
+    ResourceTracker->reserveResources(MI, false);
 
 
     if (isImmInstructon(MI))
     {
-      ResourceTracker->reserveResources(MI);
+      // MachineInstr *MInst = MI;
+
+      // MachineInstrBuilder MIB2 = BuildMI(MBB, I, DL, get(rvex::NOP));
+
+      // MInst->setDesc(TII->get(rvex::NOP));
+      ResourceTracker->reserveResources(MI, true);
     }
     return MII;
   }

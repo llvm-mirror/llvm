@@ -96,8 +96,13 @@ bool DFAPacketizer::canReserve2Resources(const llvm::MCInstrDesc *MID) {
 
 // reserveResources - Reserve the resources occupied by a MCInstrDesc and
 // change the current state to reflect that change.
-void DFAPacketizer::reserveResources(const llvm::MCInstrDesc *MID) {
-  unsigned InsnClass = MID->getSchedClass();
+void DFAPacketizer::reserveResources(const llvm::MCInstrDesc *MID, bool isNop) {
+  unsigned InsnClass;
+  if (isNop)
+    InsnClass = 1;
+  else
+    InsnClass = MID->getSchedClass();
+
   const llvm::InstrStage *IS = InstrItins->beginStage(InsnClass);
   unsigned FuncUnits = IS->getUnits();
   UnsignPair StateTrans = UnsignPair(CurrentState, FuncUnits);
@@ -112,16 +117,16 @@ static bool isImmInstructon(MachineInstr *MI) {
   for (i = 0; i < MI->getNumOperands(); i++){
     if (MI->getOperand(i).isImm()) {
       int temp = MI->getOperand(i).getImm();
-      // DEBUG(errs() << "Imm operand found: "<<temp<<"\n");
+//      DEBUG(errs() << "Imm operand found 1: "<<temp<<"\n");
       if(!isInt<9>(temp)) {
-        // DEBUG(errs() << "Imm operand found: "<<temp<<"\n");
-        // MI->dump();
+//        DEBUG(errs() << "Imm operand found 2: "<<temp<<"\n");
+//        MI->dump();
         return true;
       }
     }
     if (MI->getOperand(i).isGlobal()) {
-      // DEBUG(errs() << "Global found!\n");
-      // MI->dump();
+//      DEBUG(errs() << "Global found!\n");
+//      MI->dump();
       return true;
     }
   }
@@ -147,7 +152,14 @@ bool DFAPacketizer::canReserveResources(llvm::MachineInstr *MI) {
 // instruction and change the current state to reflect that change.
 void DFAPacketizer::reserveResources(llvm::MachineInstr *MI) {
   const llvm::MCInstrDesc &MID = MI->getDesc();
-  reserveResources(&MID);
+  reserveResources(&MID, false);
+}
+
+// reserveResources - Reserve the resources occupied by a machine
+// instruction and change the current state to reflect that change.
+void DFAPacketizer::reserveResources(llvm::MachineInstr *MI, bool isNop) {
+  const llvm::MCInstrDesc &MID = MI->getDesc();
+  reserveResources(&MID, isNop);
 }
 
 namespace llvm {

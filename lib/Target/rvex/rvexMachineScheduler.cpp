@@ -100,7 +100,7 @@ bool VLIWResourceModel::reserveResources(SUnit *SU) {
 
   switch (SU->getInstr()->getOpcode()) {
   default:
-    ResourcesModel->reserveResources(SU->getInstr());
+    ResourcesModel->reserveResources(SU->getInstr(), false);
     break;
   case TargetOpcode::EXTRACT_SUBREG:
   case TargetOpcode::INSERT_SUBREG:

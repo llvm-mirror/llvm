@@ -71,7 +71,7 @@ public:
 
   // reserveResources - Reserve the resources occupied by a MCInstrDesc and
   // change the current state to reflect that change.
-  void reserveResources(const llvm::MCInstrDesc *MID);
+  void reserveResources(const llvm::MCInstrDesc *MID, bool isNop);
 
   // canReserveResources - Check if the resources occupied by a machine
   // instruction are available in the current state.
@@ -82,6 +82,7 @@ public:
   // reserveResources - Reserve the resources occupied by a machine
   // instruction and change the current state to reflect that change.
   void reserveResources(llvm::MachineInstr *MI);
+  void reserveResources(llvm::MachineInstr *MI, bool isNop);
 
   const InstrItineraryData *getInstrItins() const { return InstrItins; }
 };

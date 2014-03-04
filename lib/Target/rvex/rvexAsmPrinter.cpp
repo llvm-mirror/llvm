@@ -84,7 +84,7 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       MCInst TmpInst0;
       MCInstLowering.Lower(BMI, TmpInst0);
       OutStreamer.EmitInstruction(TmpInst0);
-      TmpInst0.dump();
+      // TmpInst0.dump();
 
       // int i;
 
@@ -100,7 +100,7 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   } else {
     //OutStreamer.EmitRawText(StringRef("\tc0"));
     MCInst TmpInst0;
-    MI->dump();
+    // MI->dump();
     MCInstLowering.Lower(MI, TmpInst0);
     OutStreamer.EmitInstruction(TmpInst0);
     OutStreamer.EmitRawText(StringRef(";;\n\n"));
