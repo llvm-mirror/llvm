@@ -466,12 +466,27 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler) {
       // This invalidates 'RegionEnd' and 'I'.
       Scheduler.schedule();
 
+      if (RegionEnd->isConditionalBranch()) {
+        if (llvm::prior(RegionEnd)->isCompare()) {
+          DEBUG(dbgs() << "Found branch & compare\n\tInsert NOP\n");
+          TII->insertNoop(*MBB, RegionEnd);
+        }
+      }
+      // if (RegionEnd->isReturn()) {
+      //   DEBUG(dbgs() << "found return\n");
+      //   llvm::prior(RegionEnd)->dump();
+      //   if (llvm::prior(RegionEnd)->mayLoad()) {
+      //     DEBUG(dbgs() << "Found return & load\n\tInsert NOP\n");
+      //     TII->insertNoop(*MBB, RegionEnd);
+      //   }
+      // }
+
       // Close the current region.
-      Scheduler.exitRegion();
+      Scheduler->exitRegion();      
 
       // Scheduling has invalidated the current iterator 'I'. Ask the
       // scheduler for the top of it's scheduled region.
-      RegionEnd = Scheduler.begin();
+      RegionEnd = Scheduler->begin();    
     }
     assert(RemainingInstrs == 0 && "Instruction count mismatch!");
     Scheduler.finishBlock();
@@ -1219,6 +1234,35 @@ void ScheduleDAGMILive::scheduleMI(SUnit *SU, bool IsTopNode) {
       updatePressureDiffs(LiveUses);
     }
   }
+}
+
+/// Move an instruction and update register pressure.
+void ScheduleDAGMI::scheduleMI(SUnit *SU, bool IsTopNode, bool isNoop) {
+  // Move the instruction to its new location in the instruction stream.
+
+  if (SU->InsertNop) {
+    DEBUG(dbgs() << "Time for nops!\n");
+    DEBUG(dbgs() << "Delay: " << SU->NopDelay << "\n");
+    const TargetInstrInfo *TII = MF.getTarget().getInstrInfo();
+
+    unsigned delay = SU->NopDelay - 1;
+    for (unsigned i = 0; i < delay; i++)
+      --CurrentTop;
+
+    TII->insertNoop(*BB, CurrentTop);
+
+    for (unsigned i = 0; i < delay; i++)
+      ++CurrentTop;
+  }
+    
+
+  // if (isNoop) {
+  //   const TargetInstrInfo *TII = MF.getTarget().getInstrInfo();
+  //   TII->insertNoop(*BB, CurrentTop);
+  //   return;    
+  // }
+
+  scheduleMI(SU, IsTopNode);
 }
 
 //===----------------------------------------------------------------------===//

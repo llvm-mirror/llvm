@@ -14,11 +14,14 @@
 
 #define DEBUG_TYPE "misched"
 
+
 #include "rvexMachineScheduler.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/IR/Function.h"
 
 using namespace llvm;
+
+bool isNoop = false;
 
 /// Platform specific modifications to DAG.
 void VLIWMachineScheduler::postprocessDAG() {
@@ -179,13 +182,21 @@ void VLIWMachineScheduler::schedule() {
   initQueues(TopRoots, BotRoots);
 
   bool IsTopNode = false;
+
   while (SUnit *SU = SchedImpl->pickNode(IsTopNode)) {
     if (!checkSchedLimit())
       break;
 
-    scheduleMI(SU, IsTopNode);
 
-    updateQueues(SU, IsTopNode);
+    if (!isNoop) {
+      scheduleMI(SU, IsTopNode, isNoop);
+      if (!isNoop)
+        updateQueues(SU, IsTopNode);
+    }
+
+    isNoop = false;
+
+
   }
   assert(CurrentTop == CurrentBottom && "Nonempty unscheduled zone.");
 
@@ -312,13 +323,14 @@ void ConvergingVLIWScheduler::SchedBoundary::bumpCycle() {
   }
   CheckPending = true;
 
-  DEBUG(dbgs() << "*** " << Available.getName() << " cycle "
+  DEBUG(dbgs() << "*** Bump Cycle " << Available.getName() << " cycle "
         << CurrCycle << '\n');
 }
 
 /// Move the boundary of scheduled code by one SUnit.
 void ConvergingVLIWScheduler::SchedBoundary::bumpNode(SUnit *SU) {
   bool startNewCycle = false;
+  bool hazard_test;
 
   // Update the reservation table.
   if (HazardRec->isEnabled()) {
@@ -327,6 +339,7 @@ void ConvergingVLIWScheduler::SchedBoundary::bumpNode(SUnit *SU) {
       // scheduling, clear the pipeline state before emitting.
       HazardRec->Reset();
     }
+    // hazard_test = HazardRec->getHazardType(SU) != ScheduleHazardRecognizer::NoHazard;
     HazardRec->EmitInstruction(SU);
   }
 
@@ -337,8 +350,14 @@ void ConvergingVLIWScheduler::SchedBoundary::bumpNode(SUnit *SU) {
   // TODO: Check if this SU must end a dispatch group.
   IssueCount += SchedModel->getNumMicroOps(SU->getInstr());
   if (startNewCycle) {
+
     DEBUG(dbgs() << "*** Max instrs at cycle " << CurrCycle << '\n');
     bumpCycle();
+    SU->TopReadyCycle = CurrCycle;
+    SU->ScheduledCycle = ResourceModel->getTotalPackets();
+    ResourceModel->PacketNooped = false;
+
+    DEBUG(dbgs() << "Updated real cycle: " << SU->ScheduledCycle <<"\n");
   }
   else
     DEBUG(dbgs() << "*** IssueCount " << IssueCount
@@ -357,12 +376,12 @@ void ConvergingVLIWScheduler::SchedBoundary::releasePending() {
   for (unsigned i = 0, e = Pending.size(); i != e; ++i) {
     SUnit *SU = *(Pending.begin()+i);
     unsigned ReadyCycle = isTop() ? SU->TopReadyCycle : SU->BotReadyCycle;
-
+    
     if (ReadyCycle < MinReadyCycle)
       MinReadyCycle = ReadyCycle;
 
-    if (ReadyCycle > CurrCycle)
-      continue;
+    // if (ReadyCycle > CurrCycle)
+    //   continue;
 
     if (checkHazard(SU))
       continue;
@@ -392,11 +411,15 @@ SUnit *ConvergingVLIWScheduler::SchedBoundary::pickOnlyChoice() {
     releasePending();
 
   for (unsigned i = 0; Available.empty(); ++i) {
-    assert(i <= (HazardRec->getMaxLookAhead() + MaxMinLatency) &&
-           "permanent hazard"); (void)i;
-    ResourceModel->reserveResources(0);
-    bumpCycle();
+//    ResourceModel->reserveResources(0);
+//    bumpCycle();
+    // if (CheckPending)
+    //   releasePending();
+      // CheckPending = true;
+
     releasePending();
+    return NULL;
+    
   }
   if (Available.size() == 1)
     return *Available.begin();
@@ -578,6 +601,7 @@ pickNodeFromQueue(ReadyQueue &Q, const RegPressureTracker &RPTracker,
 SUnit *ConvergingVLIWScheduler::pickNodeBidrectional(bool &IsTopNode) {
   // Schedule as far as possible in the direction of no choice. This is most
   // efficient, but also provides the best heuristics for CriticalPSets.
+  bool BotHazard, TopHazard;
   if (SUnit *SU = Bot.pickOnlyChoice()) {
     IsTopNode = false;
     return SU;
@@ -590,7 +614,20 @@ SUnit *ConvergingVLIWScheduler::pickNodeBidrectional(bool &IsTopNode) {
   // Prefer bottom scheduling when heuristics are silent.
   CandResult BotResult = pickNodeFromQueue(Bot.Available,
                                            DAG->getBotRPTracker(), BotCand);
-  assert(BotResult != NoCand && "failed to find the first candidate");
+
+  // if (BotResult == NoCand) {
+  //   Bot.bumpCycle();
+  //   Top.bumpCycle();
+  //   return NULL;
+  // }
+  
+  if (BotCand.SU != NULL)
+    BotHazard = Bot.HazardRec->getHazardType(BotCand.SU) != ScheduleHazardRecognizer::NoHazard;
+  else
+    BotHazard = true;
+
+
+  // assert(BotResult != NoCand && "failed to find the first candidate");
 
   // If either Q has a single candidate that provides the least increase in
   // Excess pressure, we can immediately schedule from that Q.
@@ -607,29 +644,65 @@ SUnit *ConvergingVLIWScheduler::pickNodeBidrectional(bool &IsTopNode) {
   SchedCandidate TopCand;
   CandResult TopResult = pickNodeFromQueue(Top.Available,
                                            DAG->getTopRPTracker(), TopCand);
-  assert(TopResult != NoCand && "failed to find the first candidate");
+
+  if (TopCand.SU != NULL)
+    TopHazard = Top.HazardRec->getHazardType(TopCand.SU) != ScheduleHazardRecognizer::NoHazard;
+  else
+    TopHazard = true;
+
+  if (BotHazard && TopHazard) {
+    DEBUG(dbgs() << "Found sched hazard\n");
+    // Bot.bumpCycle();
+    // Top.bumpCycle();
+    return NULL;
+  }  
+
+  // if (TopResult == NoCand) {
+  //   return TopCand.SU;  
+  // }
+
+  // if (BotResult == NoCand) {
+  //   return BotCand.SU;  
+  // }
+    
+  // assert(TopResult != NoCand && "failed to find the first candidate");
 
   if (TopResult == SingleExcess || TopResult == SingleCritical) {
     IsTopNode = true;
-    return TopCand.SU;
+    if (TopHazard)
+      return NULL;
+    else
+      return TopCand.SU;
   }
   // If either Q has a single candidate that minimizes pressure above the
   // original region's pressure pick it.
   if (BotResult == SingleMax) {
     IsTopNode = false;
-    return BotCand.SU;
+    if (BotHazard)
+      return NULL;
+    else
+      return BotCand.SU;    
   }
   if (TopResult == SingleMax) {
     IsTopNode = true;
-    return TopCand.SU;
+    if (TopHazard)
+      return NULL;
+    else
+      return TopCand.SU;
   }
   if (TopCand.SCost > BotCand.SCost) {
     IsTopNode = true;
-    return TopCand.SU;
+    if (TopHazard)
+      return NULL;
+    else
+      return TopCand.SU;
   }
   // Otherwise prefer the bottom candidate in node order.
   IsTopNode = false;
-  return BotCand.SU;
+  if (BotHazard)
+    return NULL;
+  else
+    return BotCand.SU;  
 }
 
 /// Pick the best node to balance the schedule. Implements MachineSchedStrategy.
@@ -640,40 +713,104 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
     return NULL;
   }
   SUnit *SU;
-  if (llvm::ForceTopDown) {
-    SU = Top.pickOnlyChoice();
-    if (!SU) {
-      SchedCandidate TopCand;
-      CandResult TopResult =
-        pickNodeFromQueue(Top.Available, DAG->getTopRPTracker(), TopCand);
-      assert(TopResult != NoCand && "failed to find the first candidate");
-      (void)TopResult;
+  bool schedHazard;
+
+  SU = Top.pickOnlyChoice();
+  if (!SU) {
+    SchedCandidate TopCand;
+    CandResult TopResult =
+      pickNodeFromQueue(Top.Available, DAG->getTopRPTracker(), TopCand);
+    // assert(TopResult != NoCand && "failed to find the first candidate");
+    // (void)TopResult;
+    if (TopResult != NoCand)
       SU = TopCand.SU;
+    else
+      SU = NULL;
+  }
+  IsTopNode = true;
+
+  if (SU != NULL) {
+    bool isAvailable = Top.ResourceModel->isResourceAvailable(SU);
+
+    SU->InsertNop = false;
+    if (SU->Preds.size() != 0) {
+      DEBUG(dbgs() << "Preds of:\n");
+      SU->dump(DAG);
+      for (SUnit::const_pred_iterator I = SU->Preds.begin(), E = SU->Preds.end();
+        I != E; ++I) {
+        I->getSUnit()->dump(DAG);
+        unsigned Latency = I->getLatency();
+        unsigned CurrentCycle = Top.ResourceModel->getTotalPackets();
+        if(!isAvailable)
+          CurrentCycle++;
+        DEBUG(dbgs() << "Current cycle: " << CurrentCycle <<"\n");
+        
+
+        DEBUG(dbgs() << "\tLatency: " << Latency << "\n");
+        DEBUG(dbgs() << "\tScheduled in: " << I->getSUnit()->ScheduledCycle << "\n");
+        // if (CurrentCycle == Top.CurrCycle)
+        //   break;
+
+        unsigned PacketSize =  Top.ResourceModel->getCurrentPacketWidth();
+        if (isAvailable) {
+          PacketSize++;          
+        }
+        else {
+          PacketSize = 1;
+          Top.ResourceModel->PacketNooped = false;
+        }
+          
+    
+
+        if ((Latency + I->getSUnit()->ScheduledCycle) > CurrentCycle ) {
+          DEBUG(dbgs() << "HAZARD!!!\n");
+          DEBUG(dbgs() << "cycle: " << Top.CurrCycle << "\n");
+          DEBUG(dbgs() << "Width: " << PacketSize << "\n");   
+
+          if(!SU->InsertNop)
+            SU->NopDelay = PacketSize;
+
+          I->getSUnit()->ScheduledCycle--;
+
+          if (!Top.ResourceModel->PacketNooped) {
+            SU->InsertNop = true;
+            Top.ResourceModel->PacketNooped = true;
+          }
+                      
+          // SU = NULL;
+        }
+      }
     }
-    IsTopNode = true;
-  } else if (llvm::ForceBottomUp) {
-    SU = Bot.pickOnlyChoice();
-    if (!SU) {
-      SchedCandidate BotCand;
-      CandResult BotResult =
-        pickNodeFromQueue(Bot.Available, DAG->getBotRPTracker(), BotCand);
-      assert(BotResult != NoCand && "failed to find the first candidate");
-      (void)BotResult;
-      SU = BotCand.SU;
-    }
-    IsTopNode = false;
-  } else {
-    SU = pickNodeBidrectional(IsTopNode);
+  } 
+
+  if (SU == NULL) {
+    DEBUG(dbgs() << "Insert NOOP\n");
+
+    Top.HazardRec->EmitNoop();  
+    // Top.bumpCycle();    
+    SUnit *NOP;
+    isNoop = true;
+      
+    return NOP;
   }
   if (SU->isTopReady())
     Top.removeReady(SU);
   if (SU->isBottomReady())
     Bot.removeReady(SU);
 
+
+
+
+
   DEBUG(dbgs() << "*** " << (IsTopNode ? "Top" : "Bottom")
         << " Scheduling Instruction in cycle "
         << (IsTopNode ? Top.CurrCycle : Bot.CurrCycle) << '\n';
         SU->dump(DAG));
+
+  SU->ScheduledCycle = Top.ResourceModel->getTotalPackets();
+
+  DEBUG(dbgs() << "Real cycle: " << SU->ScheduledCycle <<"\n");
+
   return SU;
 }
 
@@ -684,6 +821,7 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
 void ConvergingVLIWScheduler::schedNode(SUnit *SU, bool IsTopNode) {
   if (IsTopNode) {
     SU->TopReadyCycle = Top.CurrCycle;
+//    Top.RealCycle++;
     Top.bumpNode(SU);
   } else {
     SU->BotReadyCycle = Bot.CurrCycle;

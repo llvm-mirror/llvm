@@ -173,7 +173,8 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
   MachineFrameInfo *MFI = MF.getFrameInfo();
   int NumBytes = (int) MFI->getStackSize();
 
-
+    const rvexInstrInfo &TII =
+    *static_cast<const rvexInstrInfo*>(MF.getTarget().getInstrInfo());
 
   // Replace return with return that can change the stackpointer
 
@@ -194,8 +195,44 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
     MBBI->addOperand(LinkReg);  
 
   //BuildMI(MBB, MBBI_end, dl, TII.get(rvex::RETURN), rvex::R1).addReg(rvex::R1).addImm(NumBytes).addReg(rvex::LR);
+  
 
-  MBB.dump();    
+    MachineBasicBlock::iterator I = MBB.end();
+    unsigned nop_count = 0;
+    bool found_lr = false;
+    while(I != MBB.begin()) {
+      --I;
+      I->dump();
+      if (I->isReturn()) {
+        DEBUG(dbgs() << "Found return\n");
+        nop_count = 0;
+      }
+    else {
+      if (I->getNumOperands() == 0)
+        break;
+      MachineOperand temp = I->getOperand(0);
+      if (temp.getReg() == rvex::LR) {
+        DEBUG(dbgs() << "Found LR use\n");
+        found_lr = true;
+        break;
+      }
+    }
+
+    if(nop_count++ > 2)
+      return;
+
+    }
+
+    if (found_lr) {
+      DEBUG(dbgs() << "insert " << nop_count << " nops\n");
+      MachineBasicBlock::iterator I = MBB.end();
+      DebugLoc DL;
+
+      for (int i = 0; i <= nop_count; i++)
+        BuildMI(MBB, llvm::prior(I), DL, TII.get(rvex::NOP));
+
+    }
+    
   //}
 
 /*

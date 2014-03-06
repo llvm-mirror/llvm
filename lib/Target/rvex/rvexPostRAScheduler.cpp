@@ -468,11 +468,13 @@ void SchedulePostRATDList::FixupKills(MachineBasicBlock *MBB) {
        I != E; --Count) {
     MachineInstr *MI = --I;
     if (MI->getDesc().isConditionalBranch()) {
+      //FIXME ugly hack
       DEBUG(dbgs() << "found branch\n");
       TII->insertNoop(*MBB, I);
     }
 
     if (MI->getDesc().isReturn()) {
+      //FIXME ugly hack
       DEBUG(dbgs() << "found return\n");
       TII->insertNoop(*MBB, I);
       TII->insertNoop(*MBB, I);

@@ -461,7 +461,7 @@ def MOVS        : MoveImmSmall<0x09, "mov ", add, simm8, immSExt8, CPURegs>;
 
 def ADDiu       : ArithLogicI<0x09, "add ", add, simm8, immSExt8, CPURegs>;
 
-def XORiu       : ArithLogicR<0x1A, "xor", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
+def XORiu       : ArithLogicR<0x1A, "xor ", xor, IIAlu, CPURegs, 1, TypeIIAlu>;
 
 //Imm types
 def ANDi        : ArithLogicI<0x09, "and ", and, simm8, immSExt8, CPURegs>;

@@ -317,6 +317,10 @@ namespace llvm {
     unsigned TopReadyCycle; // Cycle relative to start when node is ready.
     unsigned BotReadyCycle; // Cycle relative to end when node is ready.
 
+    bool InsertNop;           // InsertNop
+    unsigned NopDelay;        // NopDelay
+    unsigned ScheduledCycle;  // ScheduledCycle
+
     const TargetRegisterClass *CopyDstRC; // Is a special copy node if not null.
     const TargetRegisterClass *CopySrcRC;
 

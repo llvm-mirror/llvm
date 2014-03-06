@@ -47,6 +47,7 @@ class VLIWResourceModel {
 
   const TargetSchedModel *SchedModel;
   const TargetRegisterInfo *TRI;
+  const TargetInstrInfo *TII;
 
   /// Local packet/bundle model. Purely
   /// internal to the MI schedulre at the time.
@@ -89,6 +90,9 @@ VLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
   bool isResourceAvailable(SUnit *SU);
   bool reserveResources(SUnit *SU);
   unsigned getTotalPackets() const { return TotalPackets; }
+  unsigned getCurrentPacketWidth() { return Packet.size(); }
+
+  bool PacketNooped;
 };
 
 /// Extend the standard ScheduleDAGMI to provide more context and override the
