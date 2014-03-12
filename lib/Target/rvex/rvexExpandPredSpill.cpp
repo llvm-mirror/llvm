@@ -45,11 +45,15 @@ bool rvexExpandPredSpillCode::runOnMachineFunction(MachineFunction &MF) {
   const rvexInstrInfo *TII = TM.getInstrInfo();
   unsigned TmpReg = rvex::R63;
 
+  bool found_ldw = false;
+  unsigned ldw_defines = 0;
+
   // Loop over all the basic blocks
   for(MachineFunction::iterator MBBb = MF.begin(), MBBe = MF.end();
       MBBb != MBBe; ++ MBBb) {
     MachineBasicBlock* MBB = MBBb;
 
+    found_ldw = false;
     // Traverse the basic block
     for(MachineBasicBlock::iterator MII = MBB->begin(); MII!= MBB->end();
         ++MII) {
@@ -57,6 +61,24 @@ bool rvexExpandPredSpillCode::runOnMachineFunction(MachineFunction &MF) {
       DebugLoc DL = MI->getDebugLoc();
 
       int Opc = MI->getOpcode();
+
+      // FIXME Hack to introduce nops when spillcode was used after machine scheduling
+      // In first pass Load instruction sets bool value
+      // If second instruction is store and bool value is true introduce a NOOP
+      if (Opc == rvex::ST && found_ldw) {
+
+        if (MI->getOperand(0).getReg() == ldw_defines) {
+          BuildMI(*MBB, MI, DL, TII->get(rvex::NOP));
+        }
+        found_ldw = false;
+      }
+
+      if (Opc == rvex::LD) {
+        found_ldw = true;
+        ldw_defines = MI->getOperand(0).getReg();
+      }
+
+
       if(Opc == rvex::STW_PRED) {
         //unsigned FP = MI->getOperand(0).getReg();
         //assert(FI == TM.getRegisterInfo()->getFrameRegister(MF) && 

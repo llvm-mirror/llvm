@@ -24,6 +24,7 @@ def IIBranch           : InstrItinClass;
 def IIHiLo             : InstrItinClass;
 def IIImul             : InstrItinClass;
 def IIAluImm           : InstrItinClass;
+def IILR               : InstrItinClass;
 
 def IIPseudo           : InstrItinClass;
 

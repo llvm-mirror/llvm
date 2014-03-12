@@ -211,11 +211,14 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
       if (I->getNumOperands() == 0)
         break;
       MachineOperand temp = I->getOperand(0);
-      if (temp.getReg() == rvex::LR) {
-        DEBUG(dbgs() << "Found LR use\n");
-        found_lr = true;
-        break;
+      if (temp.isReg()) {
+        if (temp.getReg() == rvex::LR) {
+          DEBUG(dbgs() << "Found LR use\n");
+          found_lr = true;
+          break;
+        }        
       }
+
     }
 
     if(nop_count++ > 2)

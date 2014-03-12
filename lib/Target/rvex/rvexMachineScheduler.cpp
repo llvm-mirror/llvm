@@ -16,6 +16,7 @@
 
 
 #include "rvexMachineScheduler.h"
+#include "rvexInstrInfo.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/IR/Function.h"
 
@@ -759,7 +760,27 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
           PacketSize = 1;
           Top.ResourceModel->PacketNooped = false;
         }
-          
+        
+        if (SU->getInstr()->getOpcode() == rvex::JALR) {
+          DEBUG(dbgs() << "Found sched func call\n");
+
+          MachineInstr *tempInstr = I->getSUnit()->getInstr();
+
+          if (tempInstr->getNumOperands() != 0) {
+            MachineOperand tempOperand = tempInstr->getOperand(0);
+
+            if (tempOperand.isReg())
+              if (tempOperand.getReg() == rvex::LR) {
+                DEBUG(dbgs() << "Found LR use\n");
+                // Latency++;
+                SU->InsertNop = true;
+                Top.ResourceModel->PacketNooped = true;
+                SU->NopDelay = 1;
+              }
+                
+
+          }
+        }  
     
 
         if ((Latency + I->getSUnit()->ScheduledCycle) > CurrentCycle ) {
@@ -767,14 +788,17 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
           DEBUG(dbgs() << "cycle: " << Top.CurrCycle << "\n");
           DEBUG(dbgs() << "Width: " << PacketSize << "\n");   
 
-          if(!SU->InsertNop)
+          if(!SU->InsertNop) {
             SU->NopDelay = PacketSize;
 
-          I->getSUnit()->ScheduledCycle--;
+            
+          }
 
           if (!Top.ResourceModel->PacketNooped) {
             SU->InsertNop = true;
             Top.ResourceModel->PacketNooped = true;
+
+            I->getSUnit()->ScheduledCycle--;
           }
                       
           // SU = NULL;

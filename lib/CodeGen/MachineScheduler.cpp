@@ -421,6 +421,13 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler) {
       // Avoid decrementing RegionEnd for blocks with no terminator.
       if (RegionEnd != MBB->end() ||
           isSchedBoundary(std::prev(RegionEnd), MBB, MF, TII, IsPostRA)) {
+
+        if (RegionEnd != MBB->end())
+          DEBUG(dbgs() << "RegionEnd\n");
+        if (isSchedBoundary(std::prev(RegionEnd), MBB, MF, TII, IsPostRA))
+          DEBUG(dbgs() << "Sched Boundary\n");
+        // RegionEnd->dump();
+        DEBUG(dbgs() << "Remaining: " << RemainingInstrs << "\n");
         --RegionEnd;
         // Count the boundary instruction.
         --RemainingInstrs;
@@ -472,14 +479,6 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler) {
           TII->insertNoop(*MBB, RegionEnd);
         }
       }
-      // if (RegionEnd->isReturn()) {
-      //   DEBUG(dbgs() << "found return\n");
-      //   llvm::prior(RegionEnd)->dump();
-      //   if (llvm::prior(RegionEnd)->mayLoad()) {
-      //     DEBUG(dbgs() << "Found return & load\n\tInsert NOP\n");
-      //     TII->insertNoop(*MBB, RegionEnd);
-      //   }
-      // }
 
       // Close the current region.
       Scheduler->exitRegion();      

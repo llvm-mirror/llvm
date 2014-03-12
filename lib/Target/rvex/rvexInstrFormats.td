@@ -43,7 +43,8 @@ def TypeIIBranch           : CType<2>;
 def TypeIIHiLo             : CType<3>;
 def TypeIIImul             : CType<4>;
 def TypeIIAluImm           : CType<5>;
-def TypeIIPseudo           : CType<6>;
+def TypeIILR               : CType<6>;
+def TypeIIPseudo           : CType<7>;
 
 // Generic rvex Format
 class rvexInst<dag outs, dag ins, string asmstr, list<dag> pattern,

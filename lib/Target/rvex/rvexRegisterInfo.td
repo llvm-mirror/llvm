@@ -121,9 +121,10 @@ def CPURegs : RegisterClass<"rvex", [i32], 32,
   (add
     (sequence "R%u", 0, 63),
 
-    LR, PC
+    LR
 
   )>;
+
 
 def BRRegs   : RegisterClass<"rvex", [i32], 32, (add (sequence "B%u", 0, 7))> {
 //def BRRegs   : RegisterClass<"rvex", [i32], 32, (add B0)> {
