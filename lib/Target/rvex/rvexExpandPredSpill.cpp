@@ -40,12 +40,39 @@ namespace {
 
   char rvexExpandPredSpillCode::ID = 0;
 
+bool isLoad(unsigned Opc) {
+  switch(Opc) {
+    case rvex::LD:
+    case rvex::LB:
+    case rvex::LBu:
+    case rvex::LH:
+    case rvex::LHu:
+      return true;   
+
+    default:
+      return false;
+  }
+}
+
+bool isStore(unsigned Opc) {
+  switch(Opc) {
+    case rvex::ST:
+    case rvex::SB:
+    case rvex::SH:
+      return true;   
+
+    default:
+      return false;
+  }
+}
+
 bool rvexExpandPredSpillCode::runOnMachineFunction(MachineFunction &MF) {
 
   const rvexInstrInfo *TII = TM.getInstrInfo();
   unsigned TmpReg = rvex::R63;
 
   bool found_ldw = false;
+  bool found_branch = false;
   unsigned ldw_defines = 0;
 
   // Loop over all the basic blocks
@@ -54,6 +81,7 @@ bool rvexExpandPredSpillCode::runOnMachineFunction(MachineFunction &MF) {
     MachineBasicBlock* MBB = MBBb;
 
     found_ldw = false;
+    found_branch = false;
     // Traverse the basic block
     for(MachineBasicBlock::iterator MII = MBB->begin(); MII!= MBB->end();
         ++MII) {
@@ -62,18 +90,45 @@ bool rvexExpandPredSpillCode::runOnMachineFunction(MachineFunction &MF) {
 
       int Opc = MI->getOpcode();
 
+      // FIXME another hack to introduce extra nops when required
+      if (MI->isConditionalBranch() && found_branch) {
+        DEBUG(dbgs() << "Found branch & compare\n\tInsert NOP\n");
+        BuildMI(*MBB, MI, DL, TII->get(rvex::NOP));
+        found_branch = false;
+      }      
+      if (MI->isCompare()) {
+        found_branch = true;
+      }
+
+
       // FIXME Hack to introduce nops when spillcode was used after machine scheduling
       // In first pass Load instruction sets bool value
       // If second instruction is store and bool value is true introduce a NOOP
-      if (Opc == rvex::ST && found_ldw) {
+      if (isStore(Opc) && found_ldw) {
 
         if (MI->getOperand(0).getReg() == ldw_defines) {
           BuildMI(*MBB, MI, DL, TII->get(rvex::NOP));
         }
+        if (MI->getOperand(1).getReg() == ldw_defines) {
+          BuildMI(*MBB, MI, DL, TII->get(rvex::NOP));
+        }        
+
         found_ldw = false;
       }
 
-      if (Opc == rvex::LD) {
+      if (isLoad(Opc) && found_ldw) {
+
+        if (MI->getOperand(0).getReg() == ldw_defines) {
+          BuildMI(*MBB, MI, DL, TII->get(rvex::NOP));
+        }
+        if (MI->getOperand(1).getReg() == ldw_defines) {
+          BuildMI(*MBB, MI, DL, TII->get(rvex::NOP));
+        }        
+
+        found_ldw = false;
+      }      
+
+      if (isLoad(Opc)) {
         found_ldw = true;
         ldw_defines = MI->getOperand(0).getReg();
       }

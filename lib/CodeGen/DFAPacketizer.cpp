@@ -88,6 +88,10 @@ bool DFAPacketizer::canReserve2Resources(const llvm::MCInstrDesc *MID) {
   temp = (CachedTable.count(StateTrans) != 0);
   if (!temp)
     return temp;
+
+  // Second operand is always of type nop
+  const llvm::InstrStage *IS2 = InstrItins->beginStage(1);
+  FuncUnits = IS2->getUnits();  
   int tempstate = CachedTable[StateTrans];
   StateTrans = UnsignPair(tempstate, FuncUnits);
   ReadTable(tempstate);  
@@ -207,6 +211,7 @@ VLIWPacketizerList::~VLIWPacketizerList() {
 // DFA state.
 void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB,
                                          MachineInstr *MI) {
+  DEBUG(dbgs() << "end packet\n");
   if (CurrentPacketMIs.size() > 1) {
     MachineInstr *MIFirst = CurrentPacketMIs.front();
     finalizeBundle(*MBB, MIFirst, MI);
@@ -242,6 +247,8 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
 
     // End the current packet if needed.
     if (this->isSoloInstruction(MI)) {
+      DEBUG(dbgs() << "hier4\n");
+      MI->dump();
       endPacket(MBB, MI);
       continue;
     }
@@ -268,12 +275,16 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
           // Allow packetization if dependency can be pruned.
           if (!this->isLegalToPruneDependencies(SUI, SUJ)) {
             // End the packet if dependency cannot be pruned.
+            DEBUG(dbgs() << "hier3\n");
+            MI->dump();
             endPacket(MBB, MI);
             break;
           } // !isLegalToPruneDependencies.
         } // !isLegalToPacketizeTogether.
       } // For all instructions in CurrentPacketMIs.
     } else {
+      DEBUG(dbgs() << "hier2\n");
+      MI->dump();
       // End the packet if resource is not available.
       endPacket(MBB, MI);
     }
@@ -282,6 +293,7 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
     BeginItr = this->addToPacket(MI);
   } // For all instructions in BB.
 
+  DEBUG(dbgs() << "hier1\n");
   // End any packet left behind.
   endPacket(MBB, EndItr);
   VLIWScheduler->exitRegion();

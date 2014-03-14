@@ -473,12 +473,12 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler) {
       // This invalidates 'RegionEnd' and 'I'.
       Scheduler.schedule();
 
-      if (RegionEnd->isConditionalBranch()) {
-        if (llvm::prior(RegionEnd)->isCompare()) {
-          DEBUG(dbgs() << "Found branch & compare\n\tInsert NOP\n");
-          TII->insertNoop(*MBB, RegionEnd);
-        }
-      }
+      // if (RegionEnd->isConditionalBranch()) {
+      //   if (llvm::prior(RegionEnd)->isCompare()) {
+      //     DEBUG(dbgs() << "Found branch & compare\n\tInsert NOP\n");
+      //     TII->insertNoop(*MBB, RegionEnd);
+      //   }
+      // }
 
       // Close the current region.
       Scheduler->exitRegion();      

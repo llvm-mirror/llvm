@@ -61,6 +61,8 @@ bool VLIWResourceModel::isResourceAvailable(SUnit *SU) {
   case TargetOpcode::IMPLICIT_DEF:
   case TargetOpcode::COPY:
   case TargetOpcode::INLINEASM:
+  case rvex::ADJCALLSTACKUP:
+  case rvex::ADJCALLSTACKDOWN:
     break;
   }
 
@@ -117,6 +119,9 @@ bool VLIWResourceModel::reserveResources(SUnit *SU) {
   case TargetOpcode::COPY:
   case TargetOpcode::INLINEASM:
     break;
+  case rvex::ADJCALLSTACKUP:
+  case rvex::ADJCALLSTACKDOWN:  
+    return startNewCycle;
   }
   Packet.push_back(SU);
 
