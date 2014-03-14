@@ -97,9 +97,9 @@ VLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
 
 /// Extend the standard ScheduleDAGMI to provide more context and override the
 /// top-level schedule() driver.
-class VLIWMachineScheduler : public ScheduleDAGMI {
+class rvexVLIWMachineScheduler : public ScheduleDAGMI {
 public:
-  VLIWMachineScheduler(MachineSchedContext *C, MachineSchedStrategy *S):
+  rvexVLIWMachineScheduler(MachineSchedContext *C, MachineSchedStrategy *S):
     ScheduleDAGMI(C, S) {}
 
   /// Schedule - This is called back from ScheduleDAGInstrs::Run() when it's
@@ -136,7 +136,7 @@ class ConvergingVLIWScheduler : public MachineSchedStrategy {
   /// current cycle in whichever direction at has moved, and maintains the state
   /// of "hazards" and other interlocks at the current cycle.
   struct SchedBoundary {
-    VLIWMachineScheduler *DAG;
+    rvexVLIWMachineScheduler *DAG;
     const TargetSchedModel *SchedModel;
 
     ReadyQueue Available;
@@ -169,7 +169,7 @@ class ConvergingVLIWScheduler : public MachineSchedStrategy {
       delete HazardRec;
     }
 
-    void init(VLIWMachineScheduler *dag, const TargetSchedModel *smodel) {
+    void init(rvexVLIWMachineScheduler *dag, const TargetSchedModel *smodel) {
       DAG = dag;
       SchedModel = smodel;
     }
@@ -193,7 +193,7 @@ class ConvergingVLIWScheduler : public MachineSchedStrategy {
     SUnit *pickOnlyChoice();
   };
 
-  VLIWMachineScheduler *DAG;
+  rvexVLIWMachineScheduler *DAG;
   const TargetSchedModel *SchedModel;
   const TargetRegisterInfo *TRI;
 

@@ -25,7 +25,7 @@ using namespace llvm;
 bool isNoop = false;
 
 /// Platform specific modifications to DAG.
-void VLIWMachineScheduler::postprocessDAG() {
+void rvexVLIWMachineScheduler::postprocessDAG() {
   SUnit* LastSequentialCall = NULL;
   // Currently we only catch the situation when compare gets scheduled
   // before preceding call.
@@ -149,7 +149,7 @@ bool VLIWResourceModel::reserveResources(SUnit *SU) {
 /// schedule - Called back from MachineScheduler::runOnMachineFunction
 /// after setting up the current scheduling region. [RegionBegin, RegionEnd)
 /// only includes instructions that have DAG nodes, not scheduling boundaries.
-void VLIWMachineScheduler::schedule() {
+void rvexVLIWMachineScheduler::schedule() {
   DEBUG(dbgs()
         << "********** MI Converging Scheduling VLIW BB#" << BB->getNumber()
         << " " << BB->getName()
@@ -210,7 +210,7 @@ void VLIWMachineScheduler::schedule() {
 }
 
 void ConvergingVLIWScheduler::initialize(ScheduleDAGMI *dag) {
-  DAG = static_cast<VLIWMachineScheduler*>(dag);
+  DAG = static_cast<rvexVLIWMachineScheduler*>(dag);
   SchedModel = DAG->getSchedModel();
   TRI = DAG->TRI;
 
@@ -842,7 +842,7 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
 }
 
 /// Update the scheduler's state after scheduling a node. This is the same node
-/// that was just returned by pickNode(). However, VLIWMachineScheduler needs
+/// that was just returned by pickNode(). However, rvexVLIWMachineScheduler needs
 /// to update it's state based on the current cycle before MachineSchedStrategy
 /// does.
 void ConvergingVLIWScheduler::schedNode(SUnit *SU, bool IsTopNode) {
