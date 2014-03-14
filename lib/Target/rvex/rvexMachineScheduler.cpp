@@ -336,7 +336,6 @@ void ConvergingVLIWScheduler::SchedBoundary::bumpCycle() {
 /// Move the boundary of scheduled code by one SUnit.
 void ConvergingVLIWScheduler::SchedBoundary::bumpNode(SUnit *SU) {
   bool startNewCycle = false;
-  bool hazard_test;
 
   // Update the reservation table.
   if (HazardRec->isEnabled()) {
@@ -719,7 +718,6 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
     return NULL;
   }
   SUnit *SU;
-  bool schedHazard;
 
   SU = Top.pickOnlyChoice();
   if (!SU) {
