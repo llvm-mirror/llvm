@@ -62,7 +62,7 @@ rvexebTargetMachine(const Target &T, StringRef TT,
 void rvexelTargetMachine::anchor() { }
 
 static ScheduleDAGInstrs *createVLIWMachineSched(MachineSchedContext *C) {
-  return new rvexVLIWMachineScheduler(C, new ConvergingVLIWScheduler());
+  return new rvexVLIWMachineScheduler(C, new ConvergingrvexVLIWScheduler());
 }
 
 static MachineSchedRegistry

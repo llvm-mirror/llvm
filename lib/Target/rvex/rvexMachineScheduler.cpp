@@ -209,7 +209,7 @@ void rvexVLIWMachineScheduler::schedule() {
   placeDebugValues();
 }
 
-void ConvergingVLIWScheduler::initialize(ScheduleDAGMI *dag) {
+void ConvergingrvexVLIWScheduler::initialize(ScheduleDAGMI *dag) {
   DAG = static_cast<rvexVLIWMachineScheduler*>(dag);
   SchedModel = DAG->getSchedModel();
   TRI = DAG->TRI;
@@ -233,7 +233,7 @@ void ConvergingVLIWScheduler::initialize(ScheduleDAGMI *dag) {
          "-misched-topdown incompatible with -misched-bottomup");
 }
 
-void ConvergingVLIWScheduler::releaseTopNode(SUnit *SU) {
+void ConvergingrvexVLIWScheduler::releaseTopNode(SUnit *SU) {
   if (SU->isScheduled)
     return;
 
@@ -250,7 +250,7 @@ void ConvergingVLIWScheduler::releaseTopNode(SUnit *SU) {
   Top.releaseNode(SU, SU->TopReadyCycle);
 }
 
-void ConvergingVLIWScheduler::releaseBottomNode(SUnit *SU) {
+void ConvergingrvexVLIWScheduler::releaseBottomNode(SUnit *SU) {
   if (SU->isScheduled)
     return;
 
@@ -282,7 +282,7 @@ void ConvergingVLIWScheduler::releaseBottomNode(SUnit *SU) {
 /// can dispatch per cycle.
 ///
 /// TODO: Also check whether the SU must start a new group.
-bool ConvergingVLIWScheduler::SchedBoundary::checkHazard(SUnit *SU) {
+bool ConvergingrvexVLIWScheduler::SchedBoundary::checkHazard(SUnit *SU) {
   if (HazardRec->isEnabled())
     return HazardRec->getHazardType(SU) != ScheduleHazardRecognizer::NoHazard;
 
@@ -293,7 +293,7 @@ bool ConvergingVLIWScheduler::SchedBoundary::checkHazard(SUnit *SU) {
   return false;
 }
 
-void ConvergingVLIWScheduler::SchedBoundary::releaseNode(SUnit *SU,
+void ConvergingrvexVLIWScheduler::SchedBoundary::releaseNode(SUnit *SU,
                                                      unsigned ReadyCycle) {
   if (ReadyCycle < MinReadyCycle)
     MinReadyCycle = ReadyCycle;
@@ -308,7 +308,7 @@ void ConvergingVLIWScheduler::SchedBoundary::releaseNode(SUnit *SU,
 }
 
 /// Move the boundary of scheduled code by one cycle.
-void ConvergingVLIWScheduler::SchedBoundary::bumpCycle() {
+void ConvergingrvexVLIWScheduler::SchedBoundary::bumpCycle() {
   unsigned Width = SchedModel->getIssueWidth();
   IssueCount = (IssueCount <= Width) ? 0 : IssueCount - Width;
 
@@ -334,7 +334,7 @@ void ConvergingVLIWScheduler::SchedBoundary::bumpCycle() {
 }
 
 /// Move the boundary of scheduled code by one SUnit.
-void ConvergingVLIWScheduler::SchedBoundary::bumpNode(SUnit *SU) {
+void ConvergingrvexVLIWScheduler::SchedBoundary::bumpNode(SUnit *SU) {
   bool startNewCycle = false;
 
   // Update the reservation table.
@@ -371,7 +371,7 @@ void ConvergingVLIWScheduler::SchedBoundary::bumpNode(SUnit *SU) {
 
 /// Release pending ready nodes in to the available queue. This makes them
 /// visible to heuristics.
-void ConvergingVLIWScheduler::SchedBoundary::releasePending() {
+void ConvergingrvexVLIWScheduler::SchedBoundary::releasePending() {
   // If the available queue is empty, it is safe to reset MinReadyCycle.
   if (Available.empty())
     MinReadyCycle = UINT_MAX;
@@ -399,7 +399,7 @@ void ConvergingVLIWScheduler::SchedBoundary::releasePending() {
 }
 
 /// Remove SU from the ready set for this boundary.
-void ConvergingVLIWScheduler::SchedBoundary::removeReady(SUnit *SU) {
+void ConvergingrvexVLIWScheduler::SchedBoundary::removeReady(SUnit *SU) {
   if (Available.isInQueue(SU))
     Available.remove(Available.find(SU));
   else {
@@ -411,7 +411,7 @@ void ConvergingVLIWScheduler::SchedBoundary::removeReady(SUnit *SU) {
 /// If this queue only has one ready candidate, return it. As a side effect,
 /// advance the cycle until at least one node is ready. If multiple instructions
 /// are ready, return NULL.
-SUnit *ConvergingVLIWScheduler::SchedBoundary::pickOnlyChoice() {
+SUnit *ConvergingrvexVLIWScheduler::SchedBoundary::pickOnlyChoice() {
   if (CheckPending)
     releasePending();
 
@@ -432,7 +432,7 @@ SUnit *ConvergingVLIWScheduler::SchedBoundary::pickOnlyChoice() {
 }
 
 #ifndef NDEBUG
-void ConvergingVLIWScheduler::traceCandidate(const char *Label,
+void ConvergingrvexVLIWScheduler::traceCandidate(const char *Label,
                                              const ReadyQueue &Q,
                                              SUnit *SU, PressureElement P) {
   dbgs() << Label << " " << Q.getName() << " ";
@@ -492,7 +492,7 @@ static const unsigned FactorOne = 2;
 
 /// Single point to compute overall scheduling cost.
 /// TODO: More heuristics will be used soon.
-int ConvergingVLIWScheduler::SchedulingCost(ReadyQueue &Q, SUnit *SU,
+int ConvergingrvexVLIWScheduler::SchedulingCost(ReadyQueue &Q, SUnit *SU,
                                             SchedCandidate &Candidate,
                                             RegPressureDelta &Delta,
                                             bool verbose) {
@@ -557,7 +557,7 @@ int ConvergingVLIWScheduler::SchedulingCost(ReadyQueue &Q, SUnit *SU,
 /// TODO: getMaxPressureDelta results can be mostly cached for each SUnit during
 /// DAG building. To adjust for the current scheduling location we need to
 /// maintain the number of vreg uses remaining to be top-scheduled.
-ConvergingVLIWScheduler::CandResult ConvergingVLIWScheduler::
+ConvergingrvexVLIWScheduler::CandResult ConvergingrvexVLIWScheduler::
 pickNodeFromQueue(ReadyQueue &Q, const RegPressureTracker &RPTracker,
                   SchedCandidate &Candidate) {
   DEBUG(Q.dump());
@@ -603,7 +603,7 @@ pickNodeFromQueue(ReadyQueue &Q, const RegPressureTracker &RPTracker,
 }
 
 /// Pick the best candidate node from either the top or bottom queue.
-SUnit *ConvergingVLIWScheduler::pickNodeBidrectional(bool &IsTopNode) {
+SUnit *ConvergingrvexVLIWScheduler::pickNodeBidrectional(bool &IsTopNode) {
   // Schedule as far as possible in the direction of no choice. This is most
   // efficient, but also provides the best heuristics for CriticalPSets.
   bool BotHazard, TopHazard;
@@ -711,7 +711,7 @@ SUnit *ConvergingVLIWScheduler::pickNodeBidrectional(bool &IsTopNode) {
 }
 
 /// Pick the best node to balance the schedule. Implements MachineSchedStrategy.
-SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
+SUnit *ConvergingrvexVLIWScheduler::pickNode(bool &IsTopNode) {
   if (DAG->top() == DAG->bottom()) {
     assert(Top.Available.empty() && Top.Pending.empty() &&
            Bot.Available.empty() && Bot.Pending.empty() && "ReadyQ garbage");
@@ -845,7 +845,7 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
 /// that was just returned by pickNode(). However, rvexVLIWMachineScheduler needs
 /// to update it's state based on the current cycle before MachineSchedStrategy
 /// does.
-void ConvergingVLIWScheduler::schedNode(SUnit *SU, bool IsTopNode) {
+void ConvergingrvexVLIWScheduler::schedNode(SUnit *SU, bool IsTopNode) {
   if (IsTopNode) {
     SU->TopReadyCycle = Top.CurrCycle;
 //    Top.RealCycle++;

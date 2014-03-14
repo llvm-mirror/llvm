@@ -35,7 +35,7 @@ using namespace llvm;
 
 namespace llvm {
 //===----------------------------------------------------------------------===//
-// ConvergingVLIWScheduler - Implementation of the standard
+// ConvergingrvexVLIWScheduler - Implementation of the standard
 // MachineSchedStrategy.
 //===----------------------------------------------------------------------===//
 
@@ -109,11 +109,11 @@ public:
   void postprocessDAG();
 };
 
-/// ConvergingVLIWScheduler shrinks the unscheduled zone using heuristics
+/// ConvergingrvexVLIWScheduler shrinks the unscheduled zone using heuristics
 /// to balance the schedule.
-class ConvergingVLIWScheduler : public MachineSchedStrategy {
+class ConvergingrvexVLIWScheduler : public MachineSchedStrategy {
 
-  /// Store the state used by ConvergingVLIWScheduler heuristics, required
+  /// Store the state used by ConvergingrvexVLIWScheduler heuristics, required
   ///  for the lifetime of one invocation of pickNode().
   struct SchedCandidate {
     // The best SUnit candidate.
@@ -159,7 +159,7 @@ class ConvergingVLIWScheduler : public MachineSchedStrategy {
     /// PendingFlag set.
     SchedBoundary(unsigned ID, const Twine &Name):
       DAG(0), SchedModel(0), Available(ID, Name+".A"),
-      Pending(ID << ConvergingVLIWScheduler::LogMaxQID, Name+".P"),
+      Pending(ID << ConvergingrvexVLIWScheduler::LogMaxQID, Name+".P"),
       CheckPending(false), HazardRec(0), ResourceModel(0),
       CurrCycle(0), IssueCount(0),
       MinReadyCycle(UINT_MAX), MaxMinLatency(0) {}
@@ -175,7 +175,7 @@ class ConvergingVLIWScheduler : public MachineSchedStrategy {
     }
 
     bool isTop() const {
-      return Available.getID() == ConvergingVLIWScheduler::TopQID;
+      return Available.getID() == ConvergingrvexVLIWScheduler::TopQID;
     }
 
     bool checkHazard(SUnit *SU);
@@ -209,7 +209,7 @@ public:
     LogMaxQID = 2
   };
 
-  ConvergingVLIWScheduler():
+  ConvergingrvexVLIWScheduler():
     DAG(0), SchedModel(0), TRI(0), Top(TopQID, "TopQ"), Bot(BotQID, "BotQ") {}
 
   virtual void initialize(ScheduleDAGMI *dag);
