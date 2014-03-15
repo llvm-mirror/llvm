@@ -39,7 +39,7 @@ namespace llvm {
 // MachineSchedStrategy.
 //===----------------------------------------------------------------------===//
 
-class VLIWResourceModel {
+class rvexVLIWResourceModel {
   /// ResourcesModel - Represents VLIW state.
   /// Not limited to VLIW targets per say, but assumes
   /// definition of DFA by a target.
@@ -57,7 +57,7 @@ class VLIWResourceModel {
   unsigned TotalPackets;
 
 public:
-VLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
+rvexVLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
     SchedModel(SM), TotalPackets(0) {
     ResourcesModel = TM.getInstrInfo()->CreateTargetScheduleState(&TM,NULL);
     TRI = TM.getRegisterInfo(); 
@@ -70,7 +70,7 @@ VLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
     ResourcesModel->clearResources();
   }
 
-  ~VLIWResourceModel() {
+  ~rvexVLIWResourceModel() {
     delete ResourcesModel;
   }
 
@@ -144,7 +144,7 @@ class ConvergingrvexVLIWScheduler : public MachineSchedStrategy {
     bool CheckPending;
 
     ScheduleHazardRecognizer *HazardRec;
-    VLIWResourceModel *ResourceModel;
+    rvexVLIWResourceModel *ResourceModel;
 
     unsigned CurrCycle;
     unsigned IssueCount;

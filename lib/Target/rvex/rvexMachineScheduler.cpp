@@ -44,7 +44,7 @@ void rvexVLIWMachineScheduler::postprocessDAG() {
 /// It is _not_ precise (statefull), it is more like
 /// another heuristic. Many corner cases are figured
 /// empirically.
-bool VLIWResourceModel::isResourceAvailable(SUnit *SU) {
+bool rvexVLIWResourceModel::isResourceAvailable(SUnit *SU) {
   if (!SU || !SU->getInstr())
     return false;
 
@@ -86,7 +86,7 @@ bool VLIWResourceModel::isResourceAvailable(SUnit *SU) {
 }
 
 /// Keep track of available resources.
-bool VLIWResourceModel::reserveResources(SUnit *SU) {
+bool rvexVLIWResourceModel::reserveResources(SUnit *SU) {
   bool startNewCycle = false;
   // Artificially reset state.
   if (!SU) {
@@ -226,8 +226,8 @@ void ConvergingrvexVLIWScheduler::initialize(ScheduleDAGMI *dag) {
   Top.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
   Bot.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
 
-  Top.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
-  Bot.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
+  Top.ResourceModel = new rvexVLIWResourceModel(TM, DAG->getSchedModel());
+  Bot.ResourceModel = new rvexVLIWResourceModel(TM, DAG->getSchedModel());
 
   assert((!llvm::ForceTopDown || !llvm::ForceBottomUp) &&
          "-misched-topdown incompatible with -misched-bottomup");
