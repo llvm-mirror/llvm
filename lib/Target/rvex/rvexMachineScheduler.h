@@ -47,7 +47,6 @@ class rvexVLIWResourceModel {
 
   const TargetSchedModel *SchedModel;
   const TargetRegisterInfo *TRI;
-  const TargetInstrInfo *TII;
 
   /// Local packet/bundle model. Purely
   /// internal to the MI schedulre at the time.

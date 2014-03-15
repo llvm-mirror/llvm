@@ -231,7 +231,7 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
       MachineBasicBlock::iterator I = MBB.end();
       DebugLoc DL;
 
-      for (int i = 0; i <= nop_count; i++)
+      for (unsigned i = 0; i <= nop_count; i++)
         BuildMI(MBB, llvm::prior(I), DL, TII.get(rvex::NOP));
 
     }

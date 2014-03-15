@@ -1010,7 +1010,7 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     SDValue Arg = OutVals[i];
     CCValAssign &VA = ArgLocs[i];
       
-      MVT ValVT = VA.getValVT(), LocVT = VA.getLocVT();
+      MVT LocVT = VA.getLocVT();
       ISD::ArgFlagsTy Flags = Outs[i].Flags;
 
     // ByVal Arg.

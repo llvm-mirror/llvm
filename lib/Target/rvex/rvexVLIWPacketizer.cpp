@@ -376,7 +376,6 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
     DEBUG(errs() << "rvex add:\t");
     // MI->dump();
     MachineBasicBlock::iterator MII = MI;
-    const TargetInstrInfo *TII = MF.getTarget().getInstrInfo();
 
     CurrentPacketMIs.push_back(MI);
     ResourceTracker->reserveResources(MI, false);

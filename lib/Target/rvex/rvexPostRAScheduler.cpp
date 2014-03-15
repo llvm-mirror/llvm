@@ -671,7 +671,6 @@ void SchedulePostRATDList::ListScheduleTopDown() {
     // so, add them to the available queue.
     unsigned MinDepth = ~0u;
     for (unsigned i = 0, e = PendingQueue.size(); i != e; ++i) {
-      unsigned temp = PendingQueue[i]->getDepth();
       if (PendingQueue[i]->getDepth() <= CurCycle) {
         AvailableQueue.push(PendingQueue[i]);
         PendingQueue[i]->isAvailable = true;
