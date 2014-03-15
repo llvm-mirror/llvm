@@ -215,7 +215,7 @@ extern "C" void LLVMInitializervexTargetMC() {
   int i;
 
   // Read configuration file
-  if (!read_config(Config))
+  if (!read_config("/Users/mauricedaverveldt/Projects/llvm/Source/config/rvex_W4_2"))
   {
     //Init InstrStages from config file
     rvexModel.IssueWidth = is_width;

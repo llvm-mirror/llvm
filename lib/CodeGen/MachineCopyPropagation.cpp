@@ -146,7 +146,7 @@ bool MachineCopyPropagation::CopyPropagateBlock(MachineBasicBlock &MBB) {
   bool Changed = false;
   for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E; ) {
     MachineInstr *MI = &*I;
-    MI->dump();
+    // MI->dump();
     ++I;
 
     if (MI->isCopy()) {

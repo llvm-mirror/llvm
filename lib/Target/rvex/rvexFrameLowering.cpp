@@ -202,7 +202,7 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
     bool found_lr = false;
     while(I != MBB.begin()) {
       --I;
-      I->dump();
+      // I->dump();
       if (I->isReturn()) {
         DEBUG(dbgs() << "Found return\n");
         nop_count = 0;

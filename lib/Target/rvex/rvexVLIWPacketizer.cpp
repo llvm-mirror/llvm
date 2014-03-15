@@ -293,9 +293,9 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
       }
 
       DEBUG(errs() << "SUI: ");
-      I->dump();
+      // I->dump();
       DEBUG(errs() << "SUJ: ");
-      J->dump();
+      // J->dump();
 
       SDep Dep = SUJ->Succs[i];
       SDep::Kind DepType = Dep.getKind();
@@ -374,7 +374,7 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
   // addToPacket - Add MI to the current packet.
   MachineBasicBlock::iterator rvexVLIWPacketizerList::addToPacket(MachineInstr *MI) {
     DEBUG(errs() << "rvex add:\t");
-    MI->dump();
+    // MI->dump();
     MachineBasicBlock::iterator MII = MI;
     const TargetInstrInfo *TII = MF.getTarget().getInstrInfo();
 
@@ -456,7 +456,7 @@ isrvexCtrInstruction(const MachineInstr *MI) const {
 // TypeMeL.
 bool rvexVLIWPacketizerList::
 isrvexMemInstruction(const MachineInstr *MI) const {
-  MI->dump();
+  // MI->dump();
   unsigned Opc = MI->getOpcode();
   switch(Opc) {
       case rvex::ST:
