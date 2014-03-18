@@ -327,7 +327,9 @@ rvexTargetLowering(rvexTargetMachine &TM)
 
 //UO_F32
   
-
+  setOperationAction(ISD::VASTART,            MVT::Other, Custom);
+  setOperationAction(ISD::VACOPY,            MVT::Other, Expand);
+  setOperationAction(ISD::VAEND,             MVT::Other, Expand);  
 
   setOperationAction(ISD::CTTZ,  MVT::i32, Expand);
   setOperationAction(ISD::CTPOP,  MVT::i32, Expand);
@@ -363,6 +365,22 @@ SDValue rvexTargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
 
   return SDValue();
 }
+
+SDValue rvexTargetLowering::lowerVASTART(SDValue Op, SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  rvexFunctionInfo *FuncInfo = MF.getInfo<rvexFunctionInfo>();
+
+  DebugLoc DL = Op.getDebugLoc();
+  SDValue FI = DAG.getFrameIndex(FuncInfo->getVarArgsFrameIndex(),
+                                 getPointerTy());
+
+  // vastart just stores the address of the VarArgsFrameIndex slot into the
+  // memory location argument.
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  return DAG.getStore(Op.getOperand(0), DL, FI, Op.getOperand(1),
+                      MachinePointerInfo(SV), false, false, 0);
+}
+
 
 SDValue rvexTargetLowering::
 LowerAddCG(SDValue Op, SelectionDAG &DAG) const
@@ -759,6 +777,8 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
 
     case ISD::MULHS:              return LowerMULHS(Op, DAG);
     case ISD::MULHU:              return LowerMULHU(Op, DAG);
+
+    case ISD::VASTART:            return lowerVASTART(Op, DAG);
 
     case ISD::SIGN_EXTEND:
     case ISD::ANY_EXTEND:

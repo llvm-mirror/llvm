@@ -151,6 +151,8 @@ namespace llvm {
     SDValue LowerConstant(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerZeroExtend(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSelect(SDValue Op, SelectionDAG &DAG) const;
+    
+    SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
 
 	//- must be exist without function all
     virtual SDValue
