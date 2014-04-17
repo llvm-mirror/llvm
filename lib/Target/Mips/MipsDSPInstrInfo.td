@@ -299,7 +299,7 @@ class PRECR_SRA_PH_W_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
                                InstrItinClass itin, RegisterOperand ROT,
                                RegisterOperand ROS = ROT> {
   dag OutOperandList = (outs ROT:$rt);
-  dag InOperandList = (ins ROS:$rs, shamt:$sa, ROS:$src);
+  dag InOperandList = (ins ROS:$rs, uimm5:$sa, ROS:$src);
   string AsmString = !strconcat(instr_asm, "\t$rt, $rs, $sa");
   list<dag> Pattern = [(set ROT:$rt, (OpNode ROS:$src, ROS:$rs, immZExt5:$sa))];
   InstrItinClass Itinerary = itin;
@@ -348,10 +348,9 @@ class SHLL_QB_R2_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
 class LX_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
                    InstrItinClass itin> {
   dag OutOperandList = (outs GPR32Opnd:$rd);
-  dag InOperandList = (ins GPR32Opnd:$base, GPR32Opnd:$index);
+  dag InOperandList = (ins PtrRC:$base, PtrRC:$index);
   string AsmString = !strconcat(instr_asm, "\t$rd, ${index}(${base})");
-  list<dag> Pattern = [(set GPR32Opnd:$rd,
-                       (OpNode GPR32Opnd:$base, GPR32Opnd:$index))];
+  list<dag> Pattern = [(set GPR32Opnd:$rd, (OpNode iPTR:$base, iPTR:$index))];
   InstrItinClass Itinerary = itin;
   bit mayLoad = 1;
 }
@@ -369,7 +368,7 @@ class ADDUH_QB_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
 class APPEND_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
                        SDPatternOperator ImmOp, InstrItinClass itin> {
   dag OutOperandList = (outs GPR32Opnd:$rt);
-  dag InOperandList = (ins GPR32Opnd:$rs, shamt:$sa, GPR32Opnd:$src);
+  dag InOperandList = (ins GPR32Opnd:$rs, uimm5:$sa, GPR32Opnd:$src);
   string AsmString = !strconcat(instr_asm, "\t$rt, $rs, $sa");
   list<dag> Pattern =  [(set GPR32Opnd:$rt,
                         (OpNode GPR32Opnd:$src, GPR32Opnd:$rs, ImmOp:$sa))];
@@ -454,7 +453,6 @@ class MULT_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
   string AsmString = !strconcat(instr_asm, "\t$ac, $rs, $rt");
   list<dag> Pattern = [(set ACC64DSPOpnd:$ac, (OpNode GPR32Opnd:$rs, GPR32Opnd:$rt))];
   InstrItinClass Itinerary = itin;
-  int AddedComplexity = 20;
   bit isCommutable = 1;
 }
 
@@ -466,14 +464,15 @@ class MADD_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
   list<dag> Pattern = [(set ACC64DSPOpnd:$ac,
                         (OpNode GPR32Opnd:$rs, GPR32Opnd:$rt, ACC64DSPOpnd:$acin))];
   InstrItinClass Itinerary = itin;
-  int AddedComplexity = 20;
   string Constraints = "$acin = $ac";
 }
 
-class MFHI_DESC_BASE<string instr_asm, RegisterOperand RO, InstrItinClass itin> {
+class MFHI_DESC_BASE<string instr_asm, RegisterOperand RO, SDNode OpNode,
+                     InstrItinClass itin> {
   dag OutOperandList = (outs GPR32Opnd:$rd);
   dag InOperandList = (ins RO:$ac);
   string AsmString = !strconcat(instr_asm, "\t$rd, $ac");
+  list<dag> Pattern = [(set GPR32Opnd:$rd, (OpNode RO:$ac))];
   InstrItinClass Itinerary = itin;
 }
 
@@ -737,8 +736,8 @@ class MAQ_SA_W_PHR_DESC : DPA_W_PH_DESC_BASE<"maq_sa.w.phr", MipsMAQ_SA_W_PHR>,
                           Defs<[DSPOutFlag16_19]>;
 
 // Move from/to hi/lo.
-class MFHI_DESC : MFHI_DESC_BASE<"mfhi", HI32DSPOpnd, NoItinerary>;
-class MFLO_DESC : MFHI_DESC_BASE<"mflo", LO32DSPOpnd, NoItinerary>;
+class MFHI_DESC : MFHI_DESC_BASE<"mfhi", ACC64DSPOpnd, MipsMFHI, NoItinerary>;
+class MFLO_DESC : MFHI_DESC_BASE<"mflo", ACC64DSPOpnd, MipsMFLO, NoItinerary>;
 class MTHI_DESC : MTHI_DESC_BASE<"mthi", HI32DSPOpnd, NoItinerary>;
 class MTLO_DESC : MTHI_DESC_BASE<"mtlo", LO32DSPOpnd, NoItinerary>;
 
@@ -1242,12 +1241,12 @@ def PREPEND : PREPEND_ENC, PREPEND_DESC;
 // Pseudos.
 let isPseudo = 1, isCodeGenOnly = 1 in {
   // Pseudo instructions for loading and storing accumulator registers.
-  defm LOAD_ACC64DSP  : LoadM<"", ACC64DSPOpnd>;
-  defm STORE_ACC64DSP : StoreM<"", ACC64DSPOpnd>;
+  def LOAD_ACC64DSP  : Load<"", ACC64DSPOpnd>;
+  def STORE_ACC64DSP : Store<"", ACC64DSPOpnd>;
 
   // Pseudos for loading and storing ccond field of DSP control register.
-  defm LOAD_CCOND_DSP  : LoadM<"load_ccond_dsp", DSPCC>;
-  defm STORE_CCOND_DSP : StoreM<"store_ccond_dsp", DSPCC>;
+  def LOAD_CCOND_DSP  : Load<"load_ccond_dsp", DSPCC>;
+  def STORE_CCOND_DSP : Store<"store_ccond_dsp", DSPCC>;
 }
 
 // Pseudo CMP and PICK instructions.
@@ -1269,6 +1268,8 @@ def PseudoCMPU_LE_QB : PseudoCMP<CMPU_LE_QB>;
 
 def PseudoPICK_PH : PseudoPICK<PICK_PH>;
 def PseudoPICK_QB : PseudoPICK<PICK_QB>;
+
+def PseudoMTLOHI_DSP : PseudoMTLOHI<ACC64DSP, GPR32>;
 
 // Patterns.
 class DSPPat<dag pattern, dag result, Predicate pred = HasDSP> :
@@ -1403,11 +1404,6 @@ def : EXTR_W_TY1_R1_Pat<MipsEXTR_RS_W, EXTR_RS_W>;
 def : EXTR_W_TY1_R2_Pat<MipsEXTR_RS_W, EXTRV_RS_W>;
 def : EXTR_W_TY1_R1_Pat<MipsEXTR_S_H, EXTR_S_H>;
 def : EXTR_W_TY1_R2_Pat<MipsEXTR_S_H, EXTRV_S_H>;
-
-// mflo/hi patterns.
-let AddedComplexity = 20 in
-def : DSPPat<(i32 (ExtractLOHI ACC64DSP:$ac, imm:$lohi_idx)),
-             (EXTRACT_SUBREG ACC64DSP:$ac, imm:$lohi_idx)>;
 
 // Indexed load patterns.
 class IndexedLoadPat<SDPatternOperator LoadNode, Instruction Instr> :

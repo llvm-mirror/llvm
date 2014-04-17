@@ -40,9 +40,9 @@ namespace {
     static char ID;
     MLxExpansion() : MachineFunctionPass(ID) {}
 
-    virtual bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "ARM MLA / MLS expansion pass";
     }
 
@@ -120,7 +120,7 @@ unsigned MLxExpansion::getDefReg(MachineInstr *MI) const {
     return Reg;
 
   MachineBasicBlock *MBB = MI->getParent();
-  MachineInstr *UseMI = &*MRI->use_nodbg_begin(Reg);
+  MachineInstr *UseMI = &*MRI->use_instr_nodbg_begin(Reg);
   if (UseMI->getParent() != MBB)
     return Reg;
 
@@ -129,7 +129,7 @@ unsigned MLxExpansion::getDefReg(MachineInstr *MI) const {
     if (TargetRegisterInfo::isPhysicalRegister(Reg) ||
         !MRI->hasOneNonDBGUse(Reg))
       return Reg;
-    UseMI = &*MRI->use_nodbg_begin(Reg);
+    UseMI = &*MRI->use_instr_nodbg_begin(Reg);
     if (UseMI->getParent() != MBB)
       return Reg;
   }
@@ -312,9 +312,9 @@ MLxExpansion::ExpandFPMLxInstruction(MachineBasicBlock &MBB, MachineInstr *MI,
       dbgs() << "Expanding: " << *MI;
       dbgs() << "  to:\n";
       MachineBasicBlock::iterator MII = MI;
-      MII = llvm::prior(MII);
+      MII = std::prev(MII);
       MachineInstr &MI2 = *MII;
-      MII = llvm::prior(MII);
+      MII = std::prev(MII);
       MachineInstr &MI1 = *MII;
       dbgs() << "    " << MI1;
       dbgs() << "    " << MI2;
@@ -335,7 +335,7 @@ bool MLxExpansion::ExpandFPMLxInstructions(MachineBasicBlock &MBB) {
   while (MII != E) {
     MachineInstr *MI = &*MII;
 
-    if (MI->isLabel() || MI->isImplicitDef() || MI->isCopy()) {
+    if (MI->isPosition() || MI->isImplicitDef() || MI->isCopy()) {
       ++MII;
       continue;
     }
@@ -385,11 +385,8 @@ bool MLxExpansion::runOnMachineFunction(MachineFunction &Fn) {
   isSwift = STI->isSwift();
 
   bool Modified = false;
-  for (MachineFunction::iterator MFI = Fn.begin(), E = Fn.end(); MFI != E;
-       ++MFI) {
-    MachineBasicBlock &MBB = *MFI;
+  for (MachineBasicBlock &MBB : Fn)
     Modified |= ExpandFPMLxInstructions(MBB);
-  }
 
   return Modified;
 }

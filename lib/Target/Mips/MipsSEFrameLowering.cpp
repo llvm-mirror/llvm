@@ -32,6 +32,21 @@ using namespace llvm;
 namespace {
 typedef MachineBasicBlock::iterator Iter;
 
+static std::pair<unsigned, unsigned> getMFHiLoOpc(unsigned Src) {
+  if (Mips::ACC64RegClass.contains(Src))
+    return std::make_pair((unsigned)Mips::PseudoMFHI,
+                          (unsigned)Mips::PseudoMFLO);
+
+  if (Mips::ACC64DSPRegClass.contains(Src))
+    return std::make_pair((unsigned)Mips::MFHI_DSP, (unsigned)Mips::MFLO_DSP);
+
+  if (Mips::ACC128RegClass.contains(Src))
+    return std::make_pair((unsigned)Mips::PseudoMFHI64,
+                          (unsigned)Mips::PseudoMFLO64);
+
+  return std::make_pair(0, 0);
+}
+
 /// Helper class to expand pseudos.
 class ExpandPseudo {
 public:
@@ -43,10 +58,11 @@ private:
   void expandLoadCCond(MachineBasicBlock &MBB, Iter I);
   void expandStoreCCond(MachineBasicBlock &MBB, Iter I);
   void expandLoadACC(MachineBasicBlock &MBB, Iter I, unsigned RegSize);
-  void expandStoreACC(MachineBasicBlock &MBB, Iter I, unsigned RegSize);
+  void expandStoreACC(MachineBasicBlock &MBB, Iter I, unsigned MFHiOpc,
+                      unsigned MFLoOpc, unsigned RegSize);
   bool expandCopy(MachineBasicBlock &MBB, Iter I);
-  bool expandCopyACC(MachineBasicBlock &MBB, Iter I, unsigned Dst,
-                     unsigned Src, unsigned RegSize);
+  bool expandCopyACC(MachineBasicBlock &MBB, Iter I, unsigned MFHiOpc,
+                     unsigned MFLoOpc);
 
   MachineFunction &MF;
   MachineRegisterInfo &MRI;
@@ -70,32 +86,26 @@ bool ExpandPseudo::expand() {
 bool ExpandPseudo::expandInstr(MachineBasicBlock &MBB, Iter I) {
   switch(I->getOpcode()) {
   case Mips::LOAD_CCOND_DSP:
-  case Mips::LOAD_CCOND_DSP_P8:
     expandLoadCCond(MBB, I);
     break;
   case Mips::STORE_CCOND_DSP:
-  case Mips::STORE_CCOND_DSP_P8:
     expandStoreCCond(MBB, I);
     break;
   case Mips::LOAD_ACC64:
-  case Mips::LOAD_ACC64_P8:
   case Mips::LOAD_ACC64DSP:
-  case Mips::LOAD_ACC64DSP_P8:
     expandLoadACC(MBB, I, 4);
     break;
   case Mips::LOAD_ACC128:
-  case Mips::LOAD_ACC128_P8:
     expandLoadACC(MBB, I, 8);
     break;
   case Mips::STORE_ACC64:
-  case Mips::STORE_ACC64_P8:
+    expandStoreACC(MBB, I, Mips::PseudoMFHI, Mips::PseudoMFLO, 4);
+    break;
   case Mips::STORE_ACC64DSP:
-  case Mips::STORE_ACC64DSP_P8:
-    expandStoreACC(MBB, I, 4);
+    expandStoreACC(MBB, I, Mips::MFHI_DSP, Mips::MFLO_DSP, 4);
     break;
   case Mips::STORE_ACC128:
-  case Mips::STORE_ACC128_P8:
-    expandStoreACC(MBB, I, 8);
+    expandStoreACC(MBB, I, Mips::PseudoMFHI64, Mips::PseudoMFLO64, 8);
     break;
   case TargetOpcode::COPY:
     if (!expandCopy(MBB, I))
@@ -179,10 +189,11 @@ void ExpandPseudo::expandLoadACC(MachineBasicBlock &MBB, Iter I,
 }
 
 void ExpandPseudo::expandStoreACC(MachineBasicBlock &MBB, Iter I,
+                                  unsigned MFHiOpc, unsigned MFLoOpc,
                                   unsigned RegSize) {
-  //  copy $vr0, lo
+  //  mflo $vr0, src
   //  store $vr0, FI
-  //  copy $vr1, hi
+  //  mfhi $vr1, src
   //  store $vr1, FI + 4
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
@@ -197,33 +208,29 @@ void ExpandPseudo::expandStoreACC(MachineBasicBlock &MBB, Iter I,
   unsigned VR1 = MRI.createVirtualRegister(RC);
   unsigned Src = I->getOperand(0).getReg(), FI = I->getOperand(1).getIndex();
   unsigned SrcKill = getKillRegState(I->getOperand(0).isKill());
-  unsigned Lo = RegInfo.getSubReg(Src, Mips::sub_lo);
-  unsigned Hi = RegInfo.getSubReg(Src, Mips::sub_hi);
   DebugLoc DL = I->getDebugLoc();
 
-  BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), VR0).addReg(Lo, SrcKill);
+  BuildMI(MBB, I, DL, TII.get(MFLoOpc), VR0).addReg(Src);
   TII.storeRegToStack(MBB, I, VR0, true, FI, RC, &RegInfo, 0);
-  BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), VR1).addReg(Hi, SrcKill);
+  BuildMI(MBB, I, DL, TII.get(MFHiOpc), VR1).addReg(Src, SrcKill);
   TII.storeRegToStack(MBB, I, VR1, true, FI, RC, &RegInfo, RegSize);
 }
 
 bool ExpandPseudo::expandCopy(MachineBasicBlock &MBB, Iter I) {
-  unsigned Dst = I->getOperand(0).getReg(), Src = I->getOperand(1).getReg();
+  unsigned Src = I->getOperand(1).getReg();
+  std::pair<unsigned, unsigned> Opcodes = getMFHiLoOpc(Src);
 
-  if (Mips::ACC64DSPRegClass.contains(Dst, Src))
-    return expandCopyACC(MBB, I, Dst, Src, 4);
+  if (!Opcodes.first)
+    return false;
 
-  if (Mips::ACC128RegClass.contains(Dst, Src))
-    return expandCopyACC(MBB, I, Dst, Src, 8);
-
-  return false;
+  return expandCopyACC(MBB, I, Opcodes.first, Opcodes.second);
 }
 
-bool ExpandPseudo::expandCopyACC(MachineBasicBlock &MBB, Iter I, unsigned Dst,
-                                 unsigned Src, unsigned RegSize) {
-  //  copy $vr0, src_lo
+bool ExpandPseudo::expandCopyACC(MachineBasicBlock &MBB, Iter I,
+                                 unsigned MFHiOpc, unsigned MFLoOpc) {
+  //  mflo $vr0, src
   //  copy dst_lo, $vr0
-  //  copy $vr1, src_hi
+  //  mfhi $vr1, src
   //  copy dst_hi, $vr1
 
   const MipsSEInstrInfo &TII =
@@ -231,20 +238,20 @@ bool ExpandPseudo::expandCopyACC(MachineBasicBlock &MBB, Iter I, unsigned Dst,
   const MipsRegisterInfo &RegInfo =
     *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
-  const TargetRegisterClass *RC = RegInfo.intRegClass(RegSize);
+  unsigned Dst = I->getOperand(0).getReg(), Src = I->getOperand(1).getReg();
+  unsigned VRegSize = RegInfo.getMinimalPhysRegClass(Dst)->getSize() / 2;
+  const TargetRegisterClass *RC = RegInfo.intRegClass(VRegSize);
   unsigned VR0 = MRI.createVirtualRegister(RC);
   unsigned VR1 = MRI.createVirtualRegister(RC);
   unsigned SrcKill = getKillRegState(I->getOperand(1).isKill());
   unsigned DstLo = RegInfo.getSubReg(Dst, Mips::sub_lo);
   unsigned DstHi = RegInfo.getSubReg(Dst, Mips::sub_hi);
-  unsigned SrcLo = RegInfo.getSubReg(Src, Mips::sub_lo);
-  unsigned SrcHi = RegInfo.getSubReg(Src, Mips::sub_hi);
   DebugLoc DL = I->getDebugLoc();
 
-  BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), VR0).addReg(SrcLo, SrcKill);
+  BuildMI(MBB, I, DL, TII.get(MFLoOpc), VR0).addReg(Src);
   BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), DstLo)
     .addReg(VR0, RegState::Kill);
-  BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), VR1).addReg(SrcHi, SrcKill);
+  BuildMI(MBB, I, DL, TII.get(MFHiOpc), VR1).addReg(Src, SrcKill);
   BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), DstHi)
     .addReg(VR1, RegState::Kill);
   return true;
@@ -292,11 +299,10 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
   TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
 
   // emit ".cfi_def_cfa_offset StackSize"
-  MCSymbol *AdjustSPLabel = MMI.getContext().CreateTempSymbol();
-  BuildMI(MBB, MBBI, dl,
-          TII.get(TargetOpcode::PROLOG_LABEL)).addSym(AdjustSPLabel);
-  MMI.addFrameInst(
-      MCCFIInstruction::createDefCfaOffset(AdjustSPLabel, -StackSize));
+  unsigned CFIIndex = MMI.addFrameInst(
+      MCCFIInstruction::createDefCfaOffset(nullptr, -StackSize));
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
 
@@ -308,10 +314,6 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
 
     // Iterate over list of callee-saved registers and emit .cfi_offset
     // directives.
-    MCSymbol *CSLabel = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl,
-            TII.get(TargetOpcode::PROLOG_LABEL)).addSym(CSLabel);
-
     for (std::vector<CalleeSavedInfo>::const_iterator I = CSI.begin(),
            E = CSI.end(); I != E; ++I) {
       int64_t Offset = MFI->getObjectOffset(I->getFrameIdx());
@@ -321,21 +323,28 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
       // one for each of the paired single precision registers.
       if (Mips::AFGR64RegClass.contains(Reg)) {
         unsigned Reg0 =
-            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_fpeven), true);
+            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_lo), true);
         unsigned Reg1 =
-            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_fpodd), true);
+            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_hi), true);
 
         if (!STI.isLittle())
           std::swap(Reg0, Reg1);
 
-        MMI.addFrameInst(
-            MCCFIInstruction::createOffset(CSLabel, Reg0, Offset));
-        MMI.addFrameInst(
-            MCCFIInstruction::createOffset(CSLabel, Reg1, Offset + 4));
+        unsigned CFIIndex = MMI.addFrameInst(
+            MCCFIInstruction::createOffset(nullptr, Reg0, Offset));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
+
+        CFIIndex = MMI.addFrameInst(
+            MCCFIInstruction::createOffset(nullptr, Reg1, Offset + 4));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
       } else {
         // Reg is either in GPR32 or FGR32.
-        MMI.addFrameInst(MCCFIInstruction::createOffset(
-            CSLabel, MRI->getDwarfRegNum(Reg, 1), Offset));
+        unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createOffset(
+            nullptr, MRI->getDwarfRegNum(Reg, 1), Offset));
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
       }
     }
   }
@@ -353,13 +362,13 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
     }
 
     // Emit .cfi_offset directives for eh data registers.
-    MCSymbol *CSLabel2 = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl,
-            TII.get(TargetOpcode::PROLOG_LABEL)).addSym(CSLabel2);
     for (int I = 0; I < 4; ++I) {
       int64_t Offset = MFI->getObjectOffset(MipsFI->getEhDataRegFI(I));
       unsigned Reg = MRI->getDwarfRegNum(ehDataReg(I), true);
-      MMI.addFrameInst(MCCFIInstruction::createOffset(CSLabel2, Reg, Offset));
+      unsigned CFIIndex = MMI.addFrameInst(
+          MCCFIInstruction::createOffset(nullptr, Reg, Offset));
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+          .addCFIIndex(CFIIndex);
     }
   }
 
@@ -369,11 +378,10 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
     BuildMI(MBB, MBBI, dl, TII.get(ADDu), FP).addReg(SP).addReg(ZERO);
 
     // emit ".cfi_def_cfa_register $fp"
-    MCSymbol *SetFPLabel = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl,
-            TII.get(TargetOpcode::PROLOG_LABEL)).addSym(SetFPLabel);
-    MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
-        SetFPLabel, MRI->getDwarfRegNum(FP, true)));
+    unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
+        nullptr, MRI->getDwarfRegNum(FP, true)));
+    BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIndex);
   }
 }
 

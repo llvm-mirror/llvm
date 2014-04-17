@@ -15,9 +15,9 @@
 #ifndef LLVM_IR_LLVMCONTEXT_H
 #define LLVM_IR_LLVMCONTEXT_H
 
+#include "llvm-c/Core.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm-c/Core.h"
 
 namespace llvm {
 
@@ -27,7 +27,10 @@ class Twine;
 class Instruction;
 class Module;
 class SMDiagnostic;
+class DiagnosticInfo;
 template <typename T> class SmallVectorImpl;
+class Function;
+class DebugLoc;
 
 /// This is an important class for using LLVM in a threaded context.  It
 /// (opaquely) owns and manages the core "global" data of LLVM's core
@@ -64,6 +67,11 @@ public:
   typedef void (*InlineAsmDiagHandlerTy)(const SMDiagnostic&, void *Context,
                                          unsigned LocCookie);
 
+  /// Defines the type of a diagnostic handler.
+  /// \see LLVMContext::setDiagnosticHandler.
+  /// \see LLVMContext::diagnose.
+  typedef void (*DiagnosticHandlerTy)(const DiagnosticInfo &DI, void *Context);
+
   /// setInlineAsmDiagnosticHandler - This method sets a handler that is invoked
   /// when problems with inline asm are detected by the backend.  The first
   /// argument is a function pointer and the second is a context pointer that
@@ -72,7 +80,7 @@ public:
   /// LLVMContext doesn't take ownership or interpret either of these
   /// pointers.
   void setInlineAsmDiagnosticHandler(InlineAsmDiagHandlerTy DiagHandler,
-                                     void *DiagContext = 0);
+                                     void *DiagContext = nullptr);
 
   /// getInlineAsmDiagnosticHandler - Return the diagnostic handler set by
   /// setInlineAsmDiagnosticHandler.
@@ -82,6 +90,33 @@ public:
   /// setInlineAsmDiagnosticHandler.
   void *getInlineAsmDiagnosticContext() const;
 
+  /// setDiagnosticHandler - This method sets a handler that is invoked
+  /// when the backend needs to report anything to the user.  The first
+  /// argument is a function pointer and the second is a context pointer that
+  /// gets passed into the DiagHandler.
+  ///
+  /// LLVMContext doesn't take ownership or interpret either of these
+  /// pointers.
+  void setDiagnosticHandler(DiagnosticHandlerTy DiagHandler,
+                            void *DiagContext = nullptr);
+
+  /// getDiagnosticHandler - Return the diagnostic handler set by
+  /// setDiagnosticHandler.
+  DiagnosticHandlerTy getDiagnosticHandler() const;
+
+  /// getDiagnosticContext - Return the diagnostic context set by
+  /// setDiagnosticContext.
+  void *getDiagnosticContext() const;
+
+  /// diagnose - Report a message to the currently installed diagnostic handler.
+  /// This function returns, in particular in the case of error reporting
+  /// (DI.Severity == RS_Error), so the caller should leave the compilation
+  /// process in a self-consistent state, even though the generated code
+  /// need not be correct.
+  /// The diagnostic message will be implicitly prefixed with a severity
+  /// keyword according to \p DI.getSeverity(), i.e., "error: "
+  /// for RS_Error, "warning: " for RS_Warning, and "note: " for RS_Note.
+  void diagnose(const DiagnosticInfo &DI);
 
   /// emitError - Emit an error message to the currently installed error handler
   /// with optional location information.  This function returns, so code should
@@ -91,6 +126,15 @@ public:
   void emitError(unsigned LocCookie, const Twine &ErrorStr);
   void emitError(const Instruction *I, const Twine &ErrorStr);
   void emitError(const Twine &ErrorStr);
+
+  /// emitOptimizationRemark - Emit an optimization remark message. \p PassName
+  /// is the name of the pass emitting the message. If -Rpass= is given
+  /// and \p PassName matches the regular expression in -Rpass, then the
+  /// remark will be emitted. \p Fn is the function triggering the remark,
+  /// \p DLoc is the debug location where the diagnostic is generated.
+  /// \p Msg is the message string to use.
+  void emitOptimizationRemark(const char *PassName, const Function &Fn,
+                              const DebugLoc &DLoc, const Twine &Msg);
 
 private:
   LLVMContext(LLVMContext&) LLVM_DELETED_FUNCTION;

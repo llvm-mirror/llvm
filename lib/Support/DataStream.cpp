@@ -58,7 +58,7 @@ public:
   virtual ~DataFileStreamer() {
     close(Fd);
   }
-  virtual size_t GetBytes(unsigned char *buf, size_t len) LLVM_OVERRIDE {
+  size_t GetBytes(unsigned char *buf, size_t len) override {
     NumStreamFetches++;
     return read(Fd, buf, len);
   }
@@ -83,7 +83,7 @@ DataStreamer *getDataFileStreamer(const std::string &Filename,
   if (error_code e = s->OpenFile(Filename)) {
     *StrError = std::string("Could not open ") + Filename + ": " +
         e.message() + "\n";
-    return NULL;
+    return nullptr;
   }
   return s;
 }

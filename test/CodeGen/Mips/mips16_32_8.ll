@@ -14,10 +14,9 @@ entry:
   ret void
 }
 
-; 32: 	.set	mips16                  # @foo
+; 32: 	.set	mips16
 ; 32: 	.ent	foo
-; 32:	save	{{.+}}
-; 32:	restore	{{.+}} 
+; 32:	jrc $ra
 ; 32:	.end	foo
 
 define void @nofoo() #1 {
@@ -33,7 +32,7 @@ entry:
   ret void
 }
 
-; 32: 	.set	nomips16                  # @nofoo
+; 32: 	.set	nomips16
 ; 32: 	.ent	nofoo
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -57,7 +56,7 @@ entry:
   ret i32 0
 }
 
-; 32: 	.set	nomips16                  # @main
+; 32: 	.set	nomips16
 ; 32: 	.ent	main
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -68,7 +67,7 @@ entry:
 ; 32:	.set	reorder
 ; 32:	.end	main
 
-attributes #0 = { nounwind "less-precise-fpmad"="false" "mips16" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
-attributes #1 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "nomips16" "unsafe-fp-math"="false" "use-soft-float"="false" }
-attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
-attributes #3 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #0 = { nounwind "less-precise-fpmad"="false" "mips16" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #1 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "nomips16" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #3 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }

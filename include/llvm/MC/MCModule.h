@@ -23,6 +23,7 @@
 namespace llvm {
 
 class MCAtom;
+class MCBasicBlock;
 class MCDataAtom;
 class MCFunction;
 class MCObjectDisassembler;
@@ -42,7 +43,9 @@ class MCModule {
   typedef std::vector<MCAtom*> AtomListTy;
   AtomListTy Atoms;
 
+  // For access to map/remap.
   friend class MCAtom;
+
   /// \brief Remap \p Atom to the given range, and update its Begin/End fields.
   /// \param Atom An atom belonging to this module.
   /// An atom should always use this method to update its bounds, because this
@@ -53,20 +56,38 @@ class MCModule {
   void map(MCAtom *NewAtom);
   /// @}
 
+  /// \name Basic block tracking
+  /// @{
+  typedef std::vector<MCBasicBlock*> BBsByAtomTy;
+  BBsByAtomTy BBsByAtom;
+
+  // For access to basic block > atom tracking.
+  friend class MCBasicBlock;
+  friend class MCTextAtom;
+
+  /// \brief Keep track of \p BBBackedByAtom as being backed by \p Atom.
+  /// This is used to update succs/preds when \p Atom is split.
+  void trackBBForAtom(const MCTextAtom *Atom, MCBasicBlock *BBBackedByAtom);
+  void splitBasicBlocksForAtom(const MCTextAtom *TA, const MCTextAtom *NewTA);
+  /// @}
+
   /// \name Function tracking
   /// @{
   typedef std::vector<MCFunction*> FunctionListTy;
   FunctionListTy Functions;
   /// @}
 
+  /// The address of the entrypoint function.
+  uint64_t Entrypoint;
+
   MCModule           (const MCModule &) LLVM_DELETED_FUNCTION;
   MCModule& operator=(const MCModule &) LLVM_DELETED_FUNCTION;
 
   // MCObjectDisassembler creates MCModules.
   friend class MCObjectDisassembler;
-  MCModule() : Atoms() { }
 
 public:
+  MCModule() : Entrypoint(0) { }
   ~MCModule();
 
   /// \name Create a new MCAtom covering the specified offset range.
@@ -79,6 +100,8 @@ public:
   /// @{
   const MCAtom *findAtomContaining(uint64_t Addr) const;
         MCAtom *findAtomContaining(uint64_t Addr);
+  const MCAtom *findFirstAtomAfter(uint64_t Addr) const;
+        MCAtom *findFirstAtomAfter(uint64_t Addr);
 
   typedef AtomListTy::const_iterator const_atom_iterator;
   typedef AtomListTy::      iterator       atom_iterator;
@@ -88,8 +111,8 @@ public:
         atom_iterator atom_end()         { return Atoms.end(); }
   /// @}
 
-  /// \name Create a new MCFunction.
-  MCFunction *createFunction(const StringRef &Name);
+  /// \brief Create a new MCFunction.
+  MCFunction *createFunction(StringRef Name);
 
   /// \name Access to the owned function list.
   /// @{
@@ -100,6 +123,9 @@ public:
   const_func_iterator func_end()   const { return Functions.end(); }
         func_iterator func_end()         { return Functions.end(); }
   /// @}
+
+  /// \brief Get the address of the entrypoint function, or 0 if there is none.
+  uint64_t getEntrypoint() const { return Entrypoint; }
 };
 
 }

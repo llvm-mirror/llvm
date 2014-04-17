@@ -468,6 +468,59 @@ for.end:                                          ; preds = %for.body, %entry
 
 declare double @llvm.fabs(double) nounwind readnone
 
+;CHECK-LABEL: @copysign_f32(
+;CHECK: llvm.copysign.v4f32
+;CHECK: ret void
+define void @copysign_f32(i32 %n, float* noalias %y, float* noalias %x, float* noalias %z) nounwind uwtable {
+entry:
+  %cmp6 = icmp sgt i32 %n, 0
+  br i1 %cmp6, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds float* %y, i64 %indvars.iv
+  %0 = load float* %arrayidx, align 4
+  %arrayidx1 = getelementptr inbounds float* %z, i64 %indvars.iv
+  %1 = load float* %arrayidx1, align 4
+  %call = tail call float @llvm.copysign.f32(float %0, float %1) nounwind readnone
+  %arrayidx2 = getelementptr inbounds float* %x, i64 %indvars.iv
+  store float %call, float* %arrayidx2, align 4
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}
+
+declare float @llvm.copysign.f32(float, float) nounwind readnone
+
+define void @copysign_f64(i32 %n, double* noalias %y, double* noalias %x, double* noalias %z) nounwind uwtable {
+entry:
+  %cmp6 = icmp sgt i32 %n, 0
+  br i1 %cmp6, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds double* %y, i64 %indvars.iv
+  %0 = load double* %arrayidx, align 8
+  %arrayidx1 = getelementptr inbounds double* %z, i64 %indvars.iv
+  %1 = load double* %arrayidx, align 8
+  %call = tail call double @llvm.copysign(double %0, double %1) nounwind readnone
+  %arrayidx2 = getelementptr inbounds double* %x, i64 %indvars.iv
+  store double %call, double* %arrayidx2, align 8
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}
+
+declare double @llvm.copysign(double, double) nounwind readnone
+
 ;CHECK-LABEL: @floor_f32(
 ;CHECK: llvm.floor.v4f32
 ;CHECK: ret void
@@ -979,3 +1032,61 @@ for.end:                                          ; preds = %for.body
 declare float @fabsf(float) nounwind readnone
 
 declare double @llvm.pow.f64(double, double) nounwind readnone
+
+
+
+; Make sure we don't replace calls to functions with standard library function
+; signatures but defined with internal linkage.
+
+define internal float @roundf(float %x) nounwind readnone {
+  ret float 0.00000000
+}
+; CHECK-LABEL: internal_round
+; CHECK-NOT:  load <4 x float>
+
+define void @internal_round(float* nocapture %x) nounwind {
+entry:
+  br label %for.body
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
+  %arrayidx = getelementptr inbounds float* %x, i64 %indvars.iv
+  %0 = load float* %arrayidx, align 4
+  %call = tail call float @roundf(float %0) nounwind readnone
+  store float %call, float* %arrayidx, align 4
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, 1024
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body
+  ret void
+}
+
+; Make sure we don't replace calls to functions with standard library names but
+; different signatures.
+
+declare void @round(double %f)
+
+; CHECK-LABEL: wrong_signature
+; CHECK-NOT:  load <4 x double>
+
+define void @wrong_signature(double* nocapture %x) nounwind {
+entry:
+  br label %for.body
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
+  %arrayidx = getelementptr inbounds double* %x, i64 %indvars.iv
+  %0 = load double* %arrayidx, align 4
+  store double %0, double* %arrayidx, align 4
+  tail call void @round(double %0) nounwind readnone
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, 1024
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body
+  ret void
+}
+

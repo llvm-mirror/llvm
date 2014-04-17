@@ -10,8 +10,8 @@
 #include "DWARFDebugFrame.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Dwarf.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <string>
@@ -125,6 +125,7 @@ void FrameEntry::parseInstructions(uint32_t *Offset, uint32_t EndOffset) {
         case DW_CFA_nop:
         case DW_CFA_remember_state:
         case DW_CFA_restore_state:
+        case DW_CFA_GNU_window_save:
           // No operands
           addInstruction(Opcode);
           break;
@@ -185,10 +186,8 @@ void FrameEntry::parseInstructions(uint32_t *Offset, uint32_t EndOffset) {
 void FrameEntry::dumpInstructions(raw_ostream &OS) const {
   // TODO: at the moment only instruction names are dumped. Expand this to
   // dump operands as well.
-  for (std::vector<Instruction>::const_iterator I = Instructions.begin(),
-                                                E = Instructions.end();
-       I != E; ++I) {
-    uint8_t Opcode = I->Opcode;
+  for (const auto &Instr : Instructions) {
+    uint8_t Opcode = Instr.Opcode;
     if (Opcode & DWARF_CFI_PRIMARY_OPCODE_MASK)
       Opcode &= DWARF_CFI_PRIMARY_OPCODE_MASK;
     OS << "  " << CallFrameString(Opcode) << ":\n";
@@ -213,7 +212,7 @@ public:
   ~CIE() {
   }
 
-  void dumpHeader(raw_ostream &OS) const {
+  void dumpHeader(raw_ostream &OS) const override {
     OS << format("%08x %08x %08x CIE",
                  (uint32_t)Offset, (uint32_t)Length, DW_CIE_ID)
        << "\n";
@@ -257,7 +256,7 @@ public:
   ~FDE() {
   }
 
-  void dumpHeader(raw_ostream &OS) const {
+  void dumpHeader(raw_ostream &OS) const override {
     OS << format("%08x %08x %08x FDE ",
                  (uint32_t)Offset, (uint32_t)Length, (int32_t)LinkedCIEOffset);
     OS << format("cie=%08x pc=%08x...%08x\n",
@@ -288,9 +287,8 @@ DWARFDebugFrame::DWARFDebugFrame() {
 
 
 DWARFDebugFrame::~DWARFDebugFrame() {
-  for (EntryVector::iterator I = Entries.begin(), E = Entries.end();
-       I != E; ++I) {
-    delete *I;
+  for (const auto &Entry : Entries) {
+    delete Entry;
   }
 }
 
@@ -380,9 +378,7 @@ void DWARFDebugFrame::parse(DataExtractor Data) {
 
 void DWARFDebugFrame::dump(raw_ostream &OS) const {
   OS << "\n";
-  for (EntryVector::const_iterator I = Entries.begin(), E = Entries.end();
-       I != E; ++I) {
-    FrameEntry *Entry = *I;
+  for (const auto &Entry : Entries) {
     Entry->dumpHeader(OS);
     Entry->dumpInstructions(OS);
     OS << "\n";

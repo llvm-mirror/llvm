@@ -419,6 +419,10 @@ namespace ISD {
     /// getNode().
     BITCAST,
 
+    /// ADDRSPACECAST - This operator converts between pointers of different
+    /// address spaces.
+    ADDRSPACECAST,
+
     /// CONVERT_RNDSAT - This operator is used to support various conversions
     /// between various types (float, signed, unsigned and vectors of those
     /// types) with rounding and saturation. NOTE: Avoid using this operator as
@@ -599,16 +603,22 @@ namespace ISD {
     /// This corresponds to "load atomic" instruction.
     ATOMIC_LOAD,
 
-    /// OUTCHAIN = ATOMIC_LOAD(INCHAIN, ptr, val)
+    /// OUTCHAIN = ATOMIC_STORE(INCHAIN, ptr, val)
     /// This corresponds to "store atomic" instruction.
     ATOMIC_STORE,
 
     /// Val, OUTCHAIN = ATOMIC_CMP_SWAP(INCHAIN, ptr, cmp, swap)
+    /// For double-word atomic operations:
+    /// ValLo, ValHi, OUTCHAIN = ATOMIC_CMP_SWAP(INCHAIN, ptr, cmpLo, cmpHi,
+    ///                                          swapLo, swapHi)
     /// This corresponds to the cmpxchg instruction.
     ATOMIC_CMP_SWAP,
 
     /// Val, OUTCHAIN = ATOMIC_SWAP(INCHAIN, ptr, amt)
     /// Val, OUTCHAIN = ATOMIC_LOAD_[OpName](INCHAIN, ptr, amt)
+    /// For double-word atomic operations:
+    /// ValLo, ValHi, OUTCHAIN = ATOMIC_SWAP(INCHAIN, ptr, amtLo, amtHi)
+    /// ValLo, ValHi, OUTCHAIN = ATOMIC_LOAD_[OpName](INCHAIN, ptr, amtLo, amtHi)
     /// These correspond to the atomicrmw instruction.
     ATOMIC_SWAP,
     ATOMIC_LOAD_ADD,
@@ -691,6 +701,8 @@ namespace ISD {
     ZEXTLOAD,
     LAST_LOADEXT_TYPE
   };
+
+  NodeType getExtForLoadExtType(LoadExtType);
 
   //===--------------------------------------------------------------------===//
   /// ISD::CondCode enum - These are ordered carefully to make the bitfields

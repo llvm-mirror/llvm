@@ -42,13 +42,14 @@ attributes #0 = { nounwind ssp uwtable "fp-contract-model"="standard" "no-frame-
 attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!26}
 
 !0 = metadata !{i32 786449, metadata !25, i32 4, metadata !"clang", i1 true, metadata !"", i32 0, metadata !1, metadata !1, metadata !2, metadata !11, null, metadata !""}
 !1 = metadata !{i32 0}
 !2 = metadata !{metadata !3}
 !3 = metadata !{i32 786478, metadata !25, metadata !4, metadata !"test", metadata !"test", metadata !"test", i32 5, metadata !5, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 ()* @test, null, null, metadata !8, i32 5}
 !4 = metadata !{i32 786473, metadata !25}
-!5 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !6, i32 0, i32 0}
+!5 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !6, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !6 = metadata !{metadata !7}
 !7 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5}
 !8 = metadata !{metadata !9}
@@ -56,7 +57,7 @@ attributes #1 = { nounwind readnone }
 !10 = metadata !{i32 786443, metadata !25, metadata !3, i32 6, i32 0, i32 0}
 !11 = metadata !{metadata !12, metadata !16, metadata !17}
 !12 = metadata !{i32 786484, i32 0, null, metadata !"A", metadata !"A", metadata !"", metadata !4, i32 1, metadata !13, i32 0, i32 1, [1024 x i32]* @A, null}
-!13 = metadata !{i32 786433, null, metadata !"", null, i32 0, i64 32768, i64 32, i32 0, i32 0, metadata !7, metadata !14, i32 0, i32 0}
+!13 = metadata !{i32 786433, null, null, null, i32 0, i64 32768, i64 32, i32 0, i32 0, metadata !7, metadata !14, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 32768, align 32, offset 0] [from int]
 !14 = metadata !{metadata !15}
 !15 = metadata !{i32 786465, i64 0, i64 1024}
 !16 = metadata !{i32 786484, i32 0, null, metadata !"B", metadata !"B", metadata !"", metadata !4, i32 2, metadata !13, i32 0, i32 1, [1024 x i32]* @B, null}
@@ -66,3 +67,4 @@ attributes #1 = { nounwind readnone }
 !20 = metadata !{i32 786443, metadata !25, metadata !10, i32 6, i32 0, i32 1}
 !24 = metadata !{i32 9, i32 0, metadata !3, null}
 !25 = metadata !{metadata !"test", metadata !"/path/to/somewhere"}
+!26 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

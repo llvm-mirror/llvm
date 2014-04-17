@@ -43,6 +43,11 @@ inline LLVMTargetLibraryInfoRef wrap(const TargetLibraryInfo *P) {
   return reinterpret_cast<LLVMTargetLibraryInfoRef>(X);
 }
 
+inline LLVMTargetMachineRef wrap(const TargetMachine *P) {
+  return
+  reinterpret_cast<LLVMTargetMachineRef>(const_cast<TargetMachine*>(P));
+}
+
 /*===-- Operations on generic values --------------------------------------===*/
 
 LLVMGenericValueRef LLVMCreateGenericValueOfInt(LLVMTypeRef Ty,
@@ -323,6 +328,11 @@ LLVMTargetDataRef LLVMGetExecutionEngineTargetData(LLVMExecutionEngineRef EE) {
   return wrap(unwrap(EE)->getDataLayout());
 }
 
+LLVMTargetMachineRef
+LLVMGetExecutionEngineTargetMachine(LLVMExecutionEngineRef EE) {
+  return wrap(unwrap(EE)->getTargetMachine());
+}
+
 void LLVMAddGlobalMapping(LLVMExecutionEngineRef EE, LLVMValueRef Global,
                           void* Addr) {
   unwrap(EE)->addGlobalMapping(unwrap<GlobalValue>(Global), Addr);
@@ -339,14 +349,10 @@ void *LLVMGetPointerToGlobal(LLVMExecutionEngineRef EE, LLVMValueRef Global) {
 namespace {
 
 struct SimpleBindingMMFunctions {
-  uint8_t *(*AllocateCodeSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID);
-  uint8_t *(*AllocateDataSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID, LLVMBool IsReadOnly);
-  LLVMBool (*FinalizeMemory)(void *Opaque, char **ErrMsg);
-  void (*Destroy)(void *Opaque);
+  LLVMMemoryManagerAllocateCodeSectionCallback AllocateCodeSection;
+  LLVMMemoryManagerAllocateDataSectionCallback AllocateDataSection;
+  LLVMMemoryManagerFinalizeMemoryCallback FinalizeMemory;
+  LLVMMemoryManagerDestroyCallback Destroy;
 };
 
 class SimpleBindingMemoryManager : public RTDyldMemoryManager {
@@ -354,16 +360,17 @@ public:
   SimpleBindingMemoryManager(const SimpleBindingMMFunctions& Functions,
                              void *Opaque);
   virtual ~SimpleBindingMemoryManager();
-  
-  virtual uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
-                                       unsigned SectionID);
 
-  virtual uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
-                                       unsigned SectionID,
-                                       bool isReadOnly);
+  uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID,
+                               StringRef SectionName) override;
 
-  virtual bool finalizeMemory(std::string *ErrMsg);
-  
+  uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID, StringRef SectionName,
+                               bool isReadOnly) override;
+
+  bool finalizeMemory(std::string *ErrMsg) override;
+
 private:
   SimpleBindingMMFunctions Functions;
   void *Opaque;
@@ -388,13 +395,17 @@ SimpleBindingMemoryManager::~SimpleBindingMemoryManager() {
 }
 
 uint8_t *SimpleBindingMemoryManager::allocateCodeSection(
-  uintptr_t Size, unsigned Alignment, unsigned SectionID) {
-  return Functions.AllocateCodeSection(Opaque, Size, Alignment, SectionID);
+  uintptr_t Size, unsigned Alignment, unsigned SectionID,
+  StringRef SectionName) {
+  return Functions.AllocateCodeSection(Opaque, Size, Alignment, SectionID,
+                                       SectionName.str().c_str());
 }
 
 uint8_t *SimpleBindingMemoryManager::allocateDataSection(
-  uintptr_t Size, unsigned Alignment, unsigned SectionID, bool isReadOnly) {
+  uintptr_t Size, unsigned Alignment, unsigned SectionID,
+  StringRef SectionName, bool isReadOnly) {
   return Functions.AllocateDataSection(Opaque, Size, Alignment, SectionID,
+                                       SectionName.str().c_str(),
                                        isReadOnly);
 }
 
@@ -415,14 +426,10 @@ bool SimpleBindingMemoryManager::finalizeMemory(std::string *ErrMsg) {
 
 LLVMMCJITMemoryManagerRef LLVMCreateSimpleMCJITMemoryManager(
   void *Opaque,
-  uint8_t *(*AllocateCodeSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID),
-  uint8_t *(*AllocateDataSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID, LLVMBool IsReadOnly),
-  LLVMBool (*FinalizeMemory)(void *Opaque, char **ErrMsg),
-  void (*Destroy)(void *Opaque)) {
+  LLVMMemoryManagerAllocateCodeSectionCallback AllocateCodeSection,
+  LLVMMemoryManagerAllocateDataSectionCallback AllocateDataSection,
+  LLVMMemoryManagerFinalizeMemoryCallback FinalizeMemory,
+  LLVMMemoryManagerDestroyCallback Destroy) {
   
   if (!AllocateCodeSection || !AllocateDataSection || !FinalizeMemory ||
       !Destroy)

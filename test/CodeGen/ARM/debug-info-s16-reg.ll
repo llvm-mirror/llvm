@@ -1,9 +1,11 @@
 ; RUN: llc < %s - | FileCheck %s
 ; Radar 9309221
 ; Test dwarf reg no for s16
-;CHECK: DW_OP_regx for S register
+;CHECK: super-register
+;CHECK-NEXT: DW_OP_regx
 ;CHECK-NEXT: ascii
-;CHECK-NEXT: DW_OP_bit_piece 32 0
+;CHECK-NEXT: DW_OP_piece
+;CHECK-NEXT: 4
 
 target datalayout = "e-p:32:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-i64:32:32-f32:32:32-f64:32:32-v64:32:64-v128:32:128-a0:0:32-n32"
 target triple = "thumbv7-apple-macosx10.6.7"
@@ -62,15 +64,16 @@ declare i32 @puts(i8* nocapture) nounwind optsize
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!53}
 
-!0 = metadata !{i32 786478, metadata !51, metadata !1, metadata !"inlineprinter", metadata !"inlineprinter", metadata !"", i32 5, metadata !3, i1 false, i1 true, i32 0, i32 0, i32 0, i32 256, i1 true, i32 (i8*, float, i8)* @inlineprinter, null, null, metadata !48, i32 5} ; [ DW_TAG_subprogram ]
+!0 = metadata !{i32 786478, metadata !51, metadata !1, metadata !"inlineprinter", metadata !"inlineprinter", metadata !"", i32 5, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i8*, float, i8)* @inlineprinter, null, null, metadata !48, i32 5} ; [ DW_TAG_subprogram ] [line 5] [def] [inlineprinter]
 !1 = metadata !{i32 786473, metadata !51} ; [ DW_TAG_file_type ]
 !2 = metadata !{i32 786449, metadata !51, i32 12, metadata !"clang version 3.0 (trunk 129915)", i1 true, metadata !"", i32 0, metadata !52, metadata !52, metadata !47, null,  null, null} ; [ DW_TAG_compile_unit ]
-!3 = metadata !{i32 786453, metadata !51, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, i32 0, metadata !4, i32 0, i32 0} ; [ DW_TAG_subroutine_type ]
+!3 = metadata !{i32 786453, metadata !51, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !4 = metadata !{metadata !5}
 !5 = metadata !{i32 786468, null, metadata !2, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!6 = metadata !{i32 786478, metadata !51, metadata !1, metadata !"printer", metadata !"printer", metadata !"", i32 12, metadata !3, i1 false, i1 true, i32 0, i32 0, i32 0, i32 256, i1 true, i32 (i8*, float, i8)* @printer, null, null, metadata !49, i32 12} ; [ DW_TAG_subprogram ]
-!7 = metadata !{i32 786478, metadata !51, metadata !1, metadata !"main", metadata !"main", metadata !"", i32 18, metadata !3, i1 false, i1 true, i32 0, i32 0, i32 0, i32 256, i1 true, i32 (i32, i8**)* @main, null, null, metadata !50, i32 18} ; [ DW_TAG_subprogram ]
+!6 = metadata !{i32 786478, metadata !51, metadata !1, metadata !"printer", metadata !"printer", metadata !"", i32 12, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i8*, float, i8)* @printer, null, null, metadata !49, i32 12} ; [ DW_TAG_subprogram ] [line 12] [def] [printer]
+!7 = metadata !{i32 786478, metadata !51, metadata !1, metadata !"main", metadata !"main", metadata !"", i32 18, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i32, i8**)* @main, null, null, metadata !50, i32 18} ; [ DW_TAG_subprogram ] [line 18] [def] [main]
 !8 = metadata !{i32 786689, metadata !0, metadata !"ptr", metadata !1, i32 16777220, metadata !9, i32 0, null} ; [ DW_TAG_arg_variable ]
 !9 = metadata !{i32 786447, null, metadata !2, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 0, null} ; [ DW_TAG_pointer_type ]
 !10 = metadata !{i32 786689, metadata !0, metadata !"val", metadata !1, i32 33554436, metadata !11, i32 0, null} ; [ DW_TAG_arg_variable ]
@@ -116,3 +119,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !50 = metadata !{metadata !17, metadata !18, metadata !22}
 !51 = metadata !{metadata !"a.c", metadata !"/private/tmp"}
 !52 = metadata !{i32 0}
+!53 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

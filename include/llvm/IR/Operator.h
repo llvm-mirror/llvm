@@ -18,9 +18,9 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
 
 namespace llvm {
 
@@ -209,6 +209,10 @@ public:
     setNoInfs();
     setNoSignedZeros();
     setAllowReciprocal();
+  }
+
+  void operator&=(const FastMathFlags &OtherFlags) {
+    Flags &= OtherFlags.Flags;
   }
 };
 
@@ -439,8 +443,8 @@ public:
   /// offset of this GEP if the GEP is in fact constant. If the GEP is not
   /// all-constant, it returns false and the value of the offset APInt is
   /// undefined (it is *not* preserved!). The APInt passed into this routine
-  /// must be at least as wide as the IntPtr type for the address space of
-  /// the base GEP pointer.
+  /// must be at exactly as wide as the IntPtr type for the address space of the
+  /// base GEP pointer.
   bool accumulateConstantOffset(const DataLayout &DL, APInt &Offset) const {
     assert(Offset.getBitWidth() ==
            DL.getPointerSizeInBits(getPointerAddressSpace()) &&
@@ -472,6 +476,36 @@ public:
   }
 
 };
+
+class PtrToIntOperator
+    : public ConcreteOperator<Operator, Instruction::PtrToInt> {
+  friend class PtrToInt;
+  friend class ConstantExpr;
+
+public:
+  Value *getPointerOperand() {
+    return getOperand(0);
+  }
+  const Value *getPointerOperand() const {
+    return getOperand(0);
+  }
+  static unsigned getPointerOperandIndex() {
+    return 0U;                      // get index for modifying correct operand
+  }
+
+  /// getPointerOperandType - Method to return the pointer operand as a
+  /// PointerType.
+  Type *getPointerOperandType() const {
+    return getPointerOperand()->getType();
+  }
+
+  /// getPointerAddressSpace - Method to return the address space of the
+  /// pointer operand.
+  unsigned getPointerAddressSpace() const {
+    return cast<PointerType>(getPointerOperandType())->getAddressSpace();
+  }
+};
+
 
 } // End llvm namespace
 

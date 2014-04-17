@@ -48,18 +48,20 @@ class SIMCCodeEmitter : public  AMDGPUMCCodeEmitter {
 
 public:
   SIMCCodeEmitter(const MCInstrInfo &mcii, const MCRegisterInfo &mri,
-                  const MCSubtargetInfo &sti, MCContext &ctx)
+                  MCContext &ctx)
     : MCII(mcii), MRI(mri) { }
 
   ~SIMCCodeEmitter() { }
 
-  /// \breif Encode the instruction and write it to the OS.
+  /// \brief Encode the instruction and write it to the OS.
   virtual void EncodeInstruction(const MCInst &MI, raw_ostream &OS,
-                         SmallVectorImpl<MCFixup> &Fixups) const;
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const;
 
   /// \returns the encoding for an MCOperand.
   virtual uint64_t getMachineOpValue(const MCInst &MI, const MCOperand &MO,
-                                     SmallVectorImpl<MCFixup> &Fixups) const;
+                                     SmallVectorImpl<MCFixup> &Fixups,
+                                     const MCSubtargetInfo &STI) const;
 };
 
 } // End anonymous namespace
@@ -68,7 +70,7 @@ MCCodeEmitter *llvm::createSIMCCodeEmitter(const MCInstrInfo &MCII,
                                            const MCRegisterInfo &MRI,
                                            const MCSubtargetInfo &STI,
                                            MCContext &Ctx) {
-  return new SIMCCodeEmitter(MCII, MRI, STI, Ctx);
+  return new SIMCCodeEmitter(MCII, MRI, Ctx);
 }
 
 bool SIMCCodeEmitter::isSrcOperand(const MCInstrDesc &Desc,
@@ -125,9 +127,10 @@ uint32_t SIMCCodeEmitter::getLitEncoding(const MCOperand &MO) const {
 }
 
 void SIMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
-                                       SmallVectorImpl<MCFixup> &Fixups) const {
+                                       SmallVectorImpl<MCFixup> &Fixups,
+                                       const MCSubtargetInfo &STI) const {
 
-  uint64_t Encoding = getBinaryCodeForInstr(MI, Fixups);
+  uint64_t Encoding = getBinaryCodeForInstr(MI, Fixups, STI);
   const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
   unsigned bytes = Desc.getSize();
 
@@ -168,7 +171,8 @@ void SIMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
 
 uint64_t SIMCCodeEmitter::getMachineOpValue(const MCInst &MI,
                                             const MCOperand &MO,
-                                       SmallVectorImpl<MCFixup> &Fixups) const {
+                                       SmallVectorImpl<MCFixup> &Fixups,
+                                       const MCSubtargetInfo &STI) const {
   if (MO.isReg())
     return MRI.getEncodingValue(MO.getReg());
 

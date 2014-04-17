@@ -10,21 +10,20 @@
 #ifndef SystemZTARGETASMINFO_H
 #define SystemZTARGETASMINFO_H
 
-#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCAsmInfoELF.h"
 #include "llvm/Support/Compiler.h"
 
 namespace llvm {
 class StringRef;
 
-class SystemZMCAsmInfo : public MCAsmInfo {
+class SystemZMCAsmInfo : public MCAsmInfoELF {
 public:
   explicit SystemZMCAsmInfo(StringRef TT);
 
   // Override MCAsmInfo;
-  virtual const MCSection *getNonexecutableStackSection(MCContext &Ctx) const
-    LLVM_OVERRIDE;
+  const MCSection *getNonexecutableStackSection(MCContext &Ctx) const override;
 };
 
-} // namespace llvm
+} // end namespace llvm
 
 #endif

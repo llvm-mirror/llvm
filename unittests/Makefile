@@ -9,10 +9,11 @@
 
 LEVEL = ..
 
-PARALLEL_DIRS = ADT Analysis Bitcode DebugInfo ExecutionEngine IR Object \
-		Option Support Transforms
+PARALLEL_DIRS = ADT Analysis Bitcode CodeGen DebugInfo ExecutionEngine IR \
+		LineEditor Linker MC Object Option Support Transforms
 
-include $(LEVEL)/Makefile.common
+include $(LEVEL)/Makefile.config
+include $(LLVM_SRC_ROOT)/unittests/Makefile.unittest
 
 clean::
 	$(Verb) $(RM) -f *Tests

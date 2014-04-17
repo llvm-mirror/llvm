@@ -85,10 +85,10 @@ static size_t getNumLengthAsString(uint64_t num) {
   return result.size();
 }
 
-/// @brief Print the size of each section in @p o.
+/// @brief Print the size of each section in @p Obj.
 ///
 /// The format used is determined by @c OutputFormat and @c Radix.
-static void PrintObjectSectionSizes(ObjectFile *o) {
+static void PrintObjectSectionSizes(ObjectFile *Obj) {
   uint64_t total = 0;
   std::string fmtbuf;
   raw_string_ostream fmt(fmtbuf);
@@ -111,21 +111,18 @@ static void PrintObjectSectionSizes(ObjectFile *o) {
     std::size_t max_name_len = strlen("section");
     std::size_t max_size_len = strlen("size");
     std::size_t max_addr_len = strlen("addr");
-    error_code ec;
-    for (section_iterator i = o->begin_sections(),
-                          e = o->end_sections(); i != e;
-                          i.increment(ec)) {
-      if (error(ec))
-        return;
+    for (const SectionRef &Section : Obj->sections()) {
       uint64_t size = 0;
-      if (error(i->getSize(size)))
+      if (error(Section.getSize(size)))
         return;
       total += size;
 
       StringRef name;
       uint64_t addr = 0;
-      if (error(i->getName(name))) return;
-      if (error(i->getAddress(addr))) return;
+      if (error(Section.getName(name)))
+        return;
+      if (error(Section.getAddress(addr)))
+        return;
       max_name_len = std::max(max_name_len, name.size());
       max_size_len = std::max(max_size_len, getNumLengthAsString(size));
       max_addr_len = std::max(max_addr_len, getNumLengthAsString(addr));
@@ -154,24 +151,19 @@ static void PrintObjectSectionSizes(ObjectFile *o) {
         << "%#" << max_addr_len << radix_fmt << "\n";
 
     // Print each section.
-    for (section_iterator i = o->begin_sections(),
-                          e = o->end_sections(); i != e;
-                          i.increment(ec)) {
-      if (error(ec))
-        return;
-
+    for (const SectionRef &Section : Obj->sections()) {
       StringRef name;
       uint64_t size = 0;
       uint64_t addr = 0;
-      if (error(i->getName(name))) return;
-      if (error(i->getSize(size))) return;
-      if (error(i->getAddress(addr))) return;
+      if (error(Section.getName(name)))
+        return;
+      if (error(Section.getSize(size)))
+        return;
+      if (error(Section.getAddress(addr)))
+        return;
       std::string namestr = name;
 
-      outs() << format(fmt.str().c_str(),
-                       namestr.c_str(),
-                       size,
-                       addr);
+      outs() << format(fmt.str().c_str(), namestr.c_str(), size, addr);
     }
 
     // Print total.
@@ -189,21 +181,19 @@ static void PrintObjectSectionSizes(ObjectFile *o) {
     uint64_t total_bss = 0;
 
     // Make one pass over the section table to calculate sizes.
-    error_code ec;
-    for (section_iterator i = o->begin_sections(),
-                          e = o->end_sections(); i != e;
-                          i.increment(ec)) {
-      if (error(ec))
-        return;
-
+    for (const SectionRef &Section : Obj->sections()) {
       uint64_t size = 0;
       bool isText = false;
       bool isData = false;
       bool isBSS = false;
-      if (error(i->getSize(size))) return;
-      if (error(i->isText(isText))) return;
-      if (error(i->isData(isData))) return;
-      if (error(i->isBSS(isBSS))) return;
+      if (error(Section.getSize(size)))
+        return;
+      if (error(Section.isText(isText)))
+        return;
+      if (error(Section.isData(isData)))
+        return;
+      if (error(Section.isBSS(isBSS)))
+        return;
       if (isText)
         total_text += size;
       else if (isData)
@@ -244,17 +234,18 @@ static void PrintFileSectionSizes(StringRef file) {
   }
 
   // Attempt to open the binary.
-  OwningPtr<Binary> binary;
-  if (error_code ec = createBinary(file, binary)) {
-    errs() << ToolName << ": " << file << ": " << ec.message() << ".\n";
+  ErrorOr<Binary *> BinaryOrErr = createBinary(file);
+  if (error_code EC = BinaryOrErr.getError()) {
+    errs() << ToolName << ": " << file << ": " << EC.message() << ".\n";
     return;
   }
+  std::unique_ptr<Binary> binary(BinaryOrErr.get());
 
   if (Archive *a = dyn_cast<Archive>(binary.get())) {
     // This is an archive. Iterate over each member and display its sizes.
-    for (object::Archive::child_iterator i = a->begin_children(),
-                                         e = a->end_children(); i != e; ++i) {
-      OwningPtr<Binary> child;
+    for (object::Archive::child_iterator i = a->child_begin(),
+                                         e = a->child_end(); i != e; ++i) {
+      std::unique_ptr<Binary> child;
       if (error_code ec = i->getAsBinary(child)) {
         errs() << ToolName << ": " << file << ": " << ec.message() << ".\n";
         continue;

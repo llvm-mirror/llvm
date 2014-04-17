@@ -16,6 +16,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
+#include <iterator>
 
 namespace llvm {
 template<typename T> class SmallVectorImpl;
@@ -25,6 +26,11 @@ template<typename T> class SmallVectorImpl;
 static inline char hexdigit(unsigned X, bool LowerCase = false) {
   const char HexChar = LowerCase ? 'a' : 'A';
   return X < 10 ? '0' + X : HexChar + X - 10;
+}
+
+/// Construct a string ref from a boolean.
+static inline StringRef toStringRef(bool B) {
+  return StringRef(B ? "true" : "false");
 }
 
 /// Interpret the given character \p C as a hexadecimal digit and return its
@@ -157,6 +163,48 @@ static inline StringRef getOrdinalSuffix(unsigned Val) {
       default: return "th";
     }
   }
+}
+
+template <typename IteratorT>
+inline std::string join_impl(IteratorT Begin, IteratorT End,
+                             StringRef Separator, std::input_iterator_tag) {
+  std::string S;
+  if (Begin == End)
+    return S;
+
+  S += (*Begin);
+  while (++Begin != End) {
+    S += Separator;
+    S += (*Begin);
+  }
+  return S;
+}
+
+template <typename IteratorT>
+inline std::string join_impl(IteratorT Begin, IteratorT End,
+                             StringRef Separator, std::forward_iterator_tag) {
+  std::string S;
+  if (Begin == End)
+    return S;
+
+  size_t Len = (std::distance(Begin, End) - 1) * Separator.size();
+  for (IteratorT I = Begin; I != End; ++I)
+    Len += (*Begin).size();
+  S.reserve(Len);
+  S += (*Begin);
+  while (++Begin != End) {
+    S += Separator;
+    S += (*Begin);
+  }
+  return S;
+}
+
+/// Joins the strings in the range [Begin, End), adding Separator between
+/// the elements.
+template <typename IteratorT>
+inline std::string join(IteratorT Begin, IteratorT End, StringRef Separator) {
+  typedef typename std::iterator_traits<IteratorT>::iterator_category tag;
+  return join_impl(Begin, End, Separator, tag());
 }
 
 } // End llvm namespace

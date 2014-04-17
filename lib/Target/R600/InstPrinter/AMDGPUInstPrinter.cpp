@@ -23,6 +23,63 @@ void AMDGPUInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
   printAnnotation(OS, Annot);
 }
 
+void AMDGPUInstPrinter::printRegOperand(unsigned reg, raw_ostream &O) {
+  switch (reg) {
+  case AMDGPU::VCC:
+    O << "vcc";
+    return;
+  case AMDGPU::SCC:
+    O << "scc";
+    return;
+  case AMDGPU::EXEC:
+    O << "exec";
+    return;
+  case AMDGPU::M0:
+    O << "m0";
+    return;
+  default:
+    break;
+  }
+
+  // It's seems there's no way to use SIRegisterInfo here, and dealing with the
+  // giant enum of all the different shifted sets of registers is pretty
+  // unmanagable, so parse the name and reformat it to be prettier.
+  StringRef Name(getRegisterName(reg));
+
+  std::pair<StringRef, StringRef> Split = Name.split('_');
+  StringRef SubRegName = Split.first;
+  StringRef Rest = Split.second;
+
+  if (SubRegName.size() <= 4) { // Must at least be as long as "SGPR"/"VGPR".
+    O << Name;
+    return;
+  }
+
+  unsigned RegIndex;
+  StringRef RegIndexStr = SubRegName.drop_front(4);
+
+  if (RegIndexStr.getAsInteger(10, RegIndex)) {
+    O << Name;
+    return;
+  }
+
+  if (SubRegName.front() == 'V')
+    O << 'v';
+  else if (SubRegName.front() == 'S')
+    O << 's';
+  else {
+    O << Name;
+    return;
+  }
+
+  if (Rest.empty()) // Only 1 32-bit register
+    O << RegIndex;
+  else {
+    unsigned NumReg = Rest.count('_') + 2;
+    O << '[' << RegIndex << ':' << (RegIndex + NumReg - 1) << ']';
+  }
+}
+
 void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                      raw_ostream &O) {
 
@@ -30,8 +87,12 @@ void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   if (Op.isReg()) {
     switch (Op.getReg()) {
     // This is the default predicate state, so we don't need to print it.
-    case AMDGPU::PRED_SEL_OFF: break;
-    default: O << getRegisterName(Op.getReg()); break;
+    case AMDGPU::PRED_SEL_OFF:
+      break;
+
+    default:
+      printRegOperand(Op.getReg(), O);
+      break;
     }
   } else if (Op.isImm()) {
     O << Op.getImm();
@@ -253,6 +314,54 @@ void AMDGPUInstPrinter::printKCache(const MCInst *MI, unsigned OpNo,
     int LineSize = (KCacheMode == 1)?16:32;
     O << KCacheAddr * 16 << "-" << KCacheAddr * 16 + LineSize;
   }
+}
+
+void AMDGPUInstPrinter::printSendMsg(const MCInst *MI, unsigned OpNo,
+                                     raw_ostream &O) {
+  unsigned SImm16 = MI->getOperand(OpNo).getImm();
+  unsigned Msg = SImm16 & 0xF;
+  if (Msg == 2 || Msg == 3) {
+    unsigned Op = (SImm16 >> 4) & 0xF;
+    if (Msg == 3)
+      O << "Gs_done(";
+    else
+      O << "Gs(";
+    if (Op == 0) {
+      O << "nop";
+    } else {
+      unsigned Stream = (SImm16 >> 8) & 0x3;
+      if (Op == 1)
+	O << "cut";
+      else if (Op == 2)
+	O << "emit";
+      else if (Op == 3)
+	O << "emit-cut";
+      O << " stream " << Stream;
+    }
+    O << "), [m0] ";
+  } else if (Msg == 1)
+    O << "interrupt ";
+  else if (Msg == 15)
+    O << "system ";
+  else
+    O << "unknown(" << Msg << ") ";
+}
+
+void AMDGPUInstPrinter::printWaitFlag(const MCInst *MI, unsigned OpNo,
+                                      raw_ostream &O) {
+  // Note: Mask values are taken from SIInsertWaits.cpp and not from ISA docs
+  // SIInsertWaits.cpp bits usage does not match ISA docs description but it
+  // works so it might be a misprint in docs.
+  unsigned SImm16 = MI->getOperand(OpNo).getImm();
+  unsigned Vmcnt = SImm16 & 0xF;
+  unsigned Expcnt = (SImm16 >> 4) & 0xF;
+  unsigned Lgkmcnt = (SImm16 >> 8) & 0xF;
+  if (Vmcnt != 0xF)
+    O << "vmcnt(" << Vmcnt << ") ";
+  if (Expcnt != 0x7)
+    O << "expcnt(" << Expcnt << ") ";
+  if (Lgkmcnt != 0x7)
+    O << "lgkmcnt(" << Lgkmcnt << ")";
 }
 
 #include "AMDGPUGenAsmWriter.inc"

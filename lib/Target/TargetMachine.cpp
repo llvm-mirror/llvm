@@ -17,9 +17,14 @@
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeGenInfo.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/SectionKind.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Target/TargetLowering.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 using namespace llvm;
 
 //---------------------------------------------------------------------------
@@ -52,9 +57,9 @@ TargetMachine::TargetMachine(const Target &T,
     MCRelaxAll(false),
     MCNoExecStack(false),
     MCSaveTempLabels(false),
-    MCUseLoc(true),
     MCUseCFI(true),
     MCUseDwarfDirectory(false),
+    RequireStructuredCFG(false),
     Options(Options) {
 }
 
@@ -67,7 +72,7 @@ TargetMachine::~TargetMachine() {
 void TargetMachine::resetTargetOptions(const MachineFunction *MF) const {
   const Function *F = MF->getFunction();
   TargetOptions &TO = MF->getTarget().Options;
-  
+
 #define RESET_OPTION(X, Y)                                              \
   do {                                                                  \
     if (F->hasFnAttribute(Y))                                           \
@@ -124,7 +129,7 @@ TLSModel::Model TargetMachine::getTLSModel(const GlobalValue *GV) const {
   // If GV is an alias then use the aliasee for determining
   // thread-localness.
   if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-    GV = GA->resolveAliasedGlobal(false);
+    GV = GA->getAliasedGlobal();
   const GlobalVariable *Var = cast<GlobalVariable>(GV);
 
   bool isLocal = Var->hasLocalLinkage();
@@ -164,6 +169,11 @@ CodeGenOpt::Level TargetMachine::getOptLevel() const {
   return CodeGenInfo->getOptLevel();
 }
 
+void TargetMachine::setOptLevel(CodeGenOpt::Level Level) const {
+  if (CodeGenInfo)
+    CodeGenInfo->setOptLevel(Level);
+}
+
 bool TargetMachine::getAsmVerbosityDefault() {
   return AsmVerbosityDefault;
 }
@@ -186,4 +196,29 @@ void TargetMachine::setFunctionSections(bool V) {
 
 void TargetMachine::setDataSections(bool V) {
   DataSections = V;
+}
+
+void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,
+                                      const GlobalValue *GV, Mangler &Mang,
+                                      bool MayAlwaysUsePrivate) const {
+  if (MayAlwaysUsePrivate || !GV->hasPrivateLinkage()) {
+    // Simple case: If GV is not private, it is not important to find out if
+    // private labels are legal in this case or not.
+    Mang.getNameWithPrefix(Name, GV, false);
+    return;
+  }
+  SectionKind GVKind = TargetLoweringObjectFile::getKindForGlobal(GV, *this);
+  const TargetLoweringObjectFile &TLOF =
+      getTargetLowering()->getObjFileLowering();
+  const MCSection *TheSection = TLOF.SectionForGlobal(GV, GVKind, Mang, *this);
+  bool CannotUsePrivateLabel = TLOF.isSectionAtomizableBySymbols(*TheSection);
+  Mang.getNameWithPrefix(Name, GV, CannotUsePrivateLabel);
+}
+
+MCSymbol *TargetMachine::getSymbol(const GlobalValue *GV, Mangler &Mang) const {
+  SmallString<60> NameStr;
+  getNameWithPrefix(NameStr, GV, Mang);
+  const TargetLoweringObjectFile &TLOF =
+      getTargetLowering()->getObjFileLowering();
+  return TLOF.getContext().GetOrCreateSymbol(NameStr.str());
 }

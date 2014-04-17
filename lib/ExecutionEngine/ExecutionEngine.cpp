@@ -14,22 +14,23 @@
 
 #define DEBUG_TYPE "jit"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
-#include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
+#include "llvm/ExecutionEngine/JITMemoryManager.h"
+#include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MutexGuard.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include <cmath>
@@ -38,6 +39,11 @@ using namespace llvm;
 
 STATISTIC(NumInitBytes, "Number of bytes of global vars initialized");
 STATISTIC(NumGlobals  , "Number of global vars initialized");
+
+// Pin the vtable to this file.
+void ObjectCache::anchor() {}
+void ObjectBuffer::anchor() {}
+void ObjectBufferStream::anchor() {}
 
 ExecutionEngine *(*ExecutionEngine::JITCtor)(
   Module *M,
@@ -56,9 +62,7 @@ ExecutionEngine *(*ExecutionEngine::InterpCtor)(Module *M,
 
 ExecutionEngine::ExecutionEngine(Module *M)
   : EEState(*this),
-    LazyFunctionCreator(0),
-    ExceptionTableRegister(0),
-    ExceptionTableDeregister(0) {
+    LazyFunctionCreator(0) {
   CompilingLazily         = false;
   GVCompilationDisabled   = false;
   SymbolSearchingDisabled = false;
@@ -70,16 +74,6 @@ ExecutionEngine::~ExecutionEngine() {
   clearAllGlobalMappings();
   for (unsigned i = 0, e = Modules.size(); i != e; ++i)
     delete Modules[i];
-}
-
-void ExecutionEngine::DeregisterAllTables() {
-  if (ExceptionTableDeregister) {
-    DenseMap<const Function*, void*>::iterator it = AllExceptionTables.begin();
-    DenseMap<const Function*, void*>::iterator ite = AllExceptionTables.end();
-    for (; it != ite; ++it)
-      ExceptionTableDeregister(it->second);
-    AllExceptionTables.clear();
-  }
 }
 
 namespace {
@@ -103,7 +97,7 @@ public:
     return static_cast<char*>(RawMemory) + sizeof(GVMemoryBlock);
   }
 
-  virtual void deleted() {
+  void deleted() override {
     // We allocated with operator new and with some extra memory hanging off the
     // end, so don't just delete this.  I'm not sure if this is actually
     // required.
@@ -449,7 +443,7 @@ ExecutionEngine *ExecutionEngine::createJIT(Module *M,
 }
 
 ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
-  OwningPtr<TargetMachine> TheTM(TM); // Take ownership.
+  std::unique_ptr<TargetMachine> TheTM(TM); // Take ownership.
 
   // Make sure we can resolve symbols in the program as well. The zero arg
   // to the function tells DynamicLibrary to load the program, not a library.
@@ -492,12 +486,12 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
     if (UseMCJIT && ExecutionEngine::MCJITCtor) {
       ExecutionEngine *EE =
         ExecutionEngine::MCJITCtor(M, ErrorStr, MCJMM ? MCJMM : JMM,
-                                   AllocateGVsWithCode, TheTM.take());
+                                   AllocateGVsWithCode, TheTM.release());
       if (EE) return EE;
     } else if (ExecutionEngine::JITCtor) {
       ExecutionEngine *EE =
         ExecutionEngine::JITCtor(M, ErrorStr, JMM,
-                                 AllocateGVsWithCode, TheTM.take());
+                                 AllocateGVsWithCode, TheTM.release());
       if (EE) return EE;
     }
   }
@@ -556,6 +550,24 @@ GenericValue ExecutionEngine::getConstantValue(const Constant *C) {
       // with the correct bit width.
       Result.IntVal = APInt(C->getType()->getPrimitiveSizeInBits(), 0);
       break;
+    case Type::StructTyID: {
+      // if the whole struct is 'undef' just reserve memory for the value.
+      if(StructType *STy = dyn_cast<StructType>(C->getType())) {
+        unsigned int elemNum = STy->getNumElements();
+        Result.AggregateVal.resize(elemNum);
+        for (unsigned int i = 0; i < elemNum; ++i) {
+          Type *ElemTy = STy->getElementType(i);
+          if (ElemTy->isIntegerTy())
+            Result.AggregateVal[i].IntVal = 
+              APInt(ElemTy->getPrimitiveSizeInBits(), 0);
+          else if (ElemTy->isAggregateType()) {
+              const Constant *ElemUndef = UndefValue::get(ElemTy);
+              Result.AggregateVal[i] = getConstantValue(ElemUndef);
+            }
+          }
+        }
+      }
+      break;
     case Type::VectorTyID:
       // if the whole vector is 'undef' just reserve memory for the value.
       const VectorType* VTy = dyn_cast<VectorType>(C->getType());
@@ -564,7 +576,7 @@ GenericValue ExecutionEngine::getConstantValue(const Constant *C) {
       Result.AggregateVal.resize(elemNum);
       if (ElemTy->isIntegerTy())
         for (unsigned int i = 0; i < elemNum; ++i)
-          Result.AggregateVal[i].IntVal = 
+          Result.AggregateVal[i].IntVal =
             APInt(ElemTy->getPrimitiveSizeInBits(), 0);
       break;
     }
@@ -578,8 +590,8 @@ GenericValue ExecutionEngine::getConstantValue(const Constant *C) {
     case Instruction::GetElementPtr: {
       // Compute the index
       GenericValue Result = getConstantValue(Op0);
-      APInt Offset(TD->getPointerSizeInBits(), 0);
-      cast<GEPOperator>(CE)->accumulateConstantOffset(*TD, Offset);
+      APInt Offset(DL->getPointerSizeInBits(), 0);
+      cast<GEPOperator>(CE)->accumulateConstantOffset(*DL, Offset);
 
       char* tmp = (char*) Result.PointerVal;
       Result = PTOGV(tmp + Offset.getSExtValue());
@@ -666,16 +678,16 @@ GenericValue ExecutionEngine::getConstantValue(const Constant *C) {
     }
     case Instruction::PtrToInt: {
       GenericValue GV = getConstantValue(Op0);
-      uint32_t PtrWidth = TD->getTypeSizeInBits(Op0->getType());
+      uint32_t PtrWidth = DL->getTypeSizeInBits(Op0->getType());
       assert(PtrWidth <= 64 && "Bad pointer width");
       GV.IntVal = APInt(PtrWidth, uintptr_t(GV.PointerVal));
-      uint32_t IntWidth = TD->getTypeSizeInBits(CE->getType());
+      uint32_t IntWidth = DL->getTypeSizeInBits(CE->getType());
       GV.IntVal = GV.IntVal.zextOrTrunc(IntWidth);
       return GV;
     }
     case Instruction::IntToPtr: {
       GenericValue GV = getConstantValue(Op0);
-      uint32_t PtrWidth = TD->getTypeSizeInBits(CE->getType());
+      uint32_t PtrWidth = DL->getTypeSizeInBits(CE->getType());
       GV.IntVal = GV.IntVal.zextOrTrunc(PtrWidth);
       assert(GV.IntVal.getBitWidth() <= 64 && "Bad pointer width");
       GV.PointerVal = PointerTy(uintptr_t(GV.IntVal.getZExtValue()));
@@ -1199,9 +1211,7 @@ void ExecutionEngine::emitGlobals() {
         }
 
         // If the existing global is strong, never replace it.
-        if (GVEntry->hasExternalLinkage() ||
-            GVEntry->hasDLLImportLinkage() ||
-            GVEntry->hasDLLExportLinkage())
+        if (GVEntry->hasExternalLinkage())
           continue;
 
         // Otherwise, we know it's linkonce/weak, replace it if this is a strong
@@ -1283,6 +1293,10 @@ void ExecutionEngine::EmitGlobalVariable(const GlobalVariable *GV) {
   if (GA == 0) {
     // If it's not already specified, allocate memory for the global.
     GA = getMemoryForGV(GV);
+
+    // If we failed to allocate memory for this global, return.
+    if (GA == 0) return;
+
     addGlobalMapping(GV, GA);
   }
 

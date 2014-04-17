@@ -35,13 +35,14 @@ entry:
 }
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!21}
 
 !0 = metadata !{i32 786449, metadata !20, i32 4, metadata !"clang version 3.2 (trunk 165305)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !1,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ] [/home/samsonov/tmp/clang-di/test.cc] [DW_LANG_C_plus_plus]
 !1 = metadata !{i32 0}
 !3 = metadata !{metadata !5, metadata !8, metadata !9}
 !5 = metadata !{i32 786478, metadata !20, metadata !6, metadata !"run", metadata !"run", metadata !"", i32 8, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @_Z3runv, null, null, metadata !1, i32 8} ; [ DW_TAG_subprogram ] [line 8] [def] [run]
 !6 = metadata !{i32 786473, metadata !20} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !1, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!7 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !1, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !8 = metadata !{i32 786478, metadata !20, metadata !6, metadata !"dead_vararg", metadata !"dead_vararg", metadata !"", i32 5, metadata !7, i1 true, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (...)* @_ZN12_GLOBAL__N_111dead_varargEz, null, null, metadata !1, i32 5} ; [ DW_TAG_subprogram ] [line 5] [local] [def] [dead_vararg]
 
 ; CHECK: metadata !"dead_vararg"{{.*}}void ()* @_ZN12_GLOBAL__N_111dead_varargEz
@@ -61,3 +62,4 @@ entry:
 !18 = metadata !{i32 786443, metadata !20, metadata !8, i32 5, i32 23, i32 1} ; [ DW_TAG_lexical_block ] [/home/samsonov/tmp/clang-di/test.cc]
 !19 = metadata !{i32 5, i32 30, metadata !18, null}
 !20 = metadata !{metadata !"test.cc", metadata !"/home/samsonov/tmp/clang-di"}
+!21 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

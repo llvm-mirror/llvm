@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This pass replaces occurences of __nvvm_reflect("string") with an
+// This pass replaces occurrences of __nvvm_reflect("string") with an
 // integer based on -nvvm-reflect-list string=<int> option given to this pass.
 // If an undefined string value is seen in a call to __nvvm_reflect("string"),
 // a default value of 0 will be used.
@@ -18,13 +18,13 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/Constants.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_os_ostream.h"
@@ -79,16 +79,16 @@ ModulePass *llvm::createNVVMReflectPass(const StringMap<int>& Mapping) {
 }
 
 static cl::opt<bool>
-NVVMReflectEnabled("nvvm-reflect-enable", cl::init(true),
+NVVMReflectEnabled("nvvm-reflect-enable", cl::init(true), cl::Hidden,
                    cl::desc("NVVM reflection, enabled by default"));
 
 char NVVMReflect::ID = 0;
 INITIALIZE_PASS(NVVMReflect, "nvvm-reflect",
-                "Replace occurences of __nvvm_reflect() calls with 0/1", false,
+                "Replace occurrences of __nvvm_reflect() calls with 0/1", false,
                 false)
 
 static cl::list<std::string>
-ReflectList("nvvm-reflect-list", cl::value_desc("name=<int>"),
+ReflectList("nvvm-reflect-list", cl::value_desc("name=<int>"), cl::Hidden,
             cl::desc("A list of string=num assignments"),
             cl::ValueRequired);
 
@@ -143,11 +143,9 @@ bool NVVMReflect::runOnModule(Module &M) {
   // ConstantArray can be found successfully, see if it can be
   // found in VarMap. If so, replace the uses of CallInst with the
   // value found in VarMap. If not, replace the use  with value 0.
-  for (Value::use_iterator I = ReflectFunction->use_begin(),
-                           E = ReflectFunction->use_end();
-       I != E; ++I) {
-    assert(isa<CallInst>(*I) && "Only a call instruction can use _reflect");
-    CallInst *Reflect = cast<CallInst>(*I);
+  for (User *U : ReflectFunction->users()) {
+    assert(isa<CallInst>(U) && "Only a call instruction can use _reflect");
+    CallInst *Reflect = cast<CallInst>(U);
 
     assert((Reflect->getNumOperands() == 2) &&
            "Only one operand expect for _reflect function");

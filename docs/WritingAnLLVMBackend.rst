@@ -51,7 +51,7 @@ These essential documents must be read before reading this document:
   Formation, SSA-based Optimization, Register Allocation, Prolog/Epilog Code
   Insertion, Late Machine Code Optimizations, and Code Emission.
 
-* :doc:`TableGenFundamentals` --- a document that describes the TableGen
+* :doc:`TableGen/index` --- a document that describes the TableGen
   (``tblgen``) application that manages domain-specific information to support
   LLVM code generation.  TableGen processes input from a target description
   file (``.td`` suffix) and generates C++ code that can be used for code
@@ -237,6 +237,12 @@ For some targets, you also need to support the following methods:
 
 * ``getTargetLowering()``
 * ``getJITInfo()``
+
+Some architectures, such as GPUs, do not support jumping to an arbitrary
+program location and implement branching using masked execution and loop using
+special instructions around the loop body. In order to avoid CFG modifications
+that introduce irreducible control flow not handled by such hardware, a target
+must call `setRequiresStructuredCFG(true)` when being initialized.
 
 In addition, the ``XXXTargetMachine`` constructor should specify a
 ``TargetDescription`` string that determines the data layout for the target
@@ -911,6 +917,9 @@ format instructions will bind the operands to the ``rd``, ``rs1``, and ``rs2``
 fields.  This results in the ``XNORrr`` instruction binding ``$dst``, ``$b``,
 and ``$c`` operands to the ``rd``, ``rs1``, and ``rs2`` fields respectively.
 
+Instruction Operand Name Mapping
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 TableGen will also generate a function called getNamedOperandIdx() which
 can be used to look up an operand's index in a MachineInstr based on its
 TableGen name.  Setting the UseNamedOperandTable bit in an instruction's
@@ -951,6 +960,59 @@ XXXInstrInfo.h:
   namespace XXX {
     int16_t getNamedOperandIdx(uint16_t Opcode, uint16_t NamedIndex);
   } // End namespace XXX
+
+Instruction Operand Types
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+TableGen will also generate an enumeration consisting of all named Operand
+types defined in the backend, in the llvm::XXX::OpTypes namespace.
+Some common immediate Operand types (for instance i8, i32, i64, f32, f64)
+are defined for all targets in ``include/llvm/Target/Target.td``, and are
+available in each Target's OpTypes enum.  Also, only named Operand types appear
+in the enumeration: anonymous types are ignored.
+For example, the X86 backend defines ``brtarget`` and ``brtarget8``, both
+instances of the TableGen ``Operand`` class, which represent branch target
+operands:
+
+.. code-block:: llvm
+
+  def brtarget : Operand<OtherVT>;
+  def brtarget8 : Operand<OtherVT>;
+
+This results in:
+
+.. code-block:: c++
+
+  namespace X86 {
+  namespace OpTypes {
+  enum OperandType {
+    ...
+    brtarget,
+    brtarget8,
+    ...
+    i32imm,
+    i64imm,
+    ...
+    OPERAND_TYPE_LIST_END
+  } // End namespace OpTypes
+  } // End namespace X86
+
+In typical TableGen fashion, to use the enum, you will need to define a
+preprocessor macro:
+
+.. code-block:: c++
+
+  #define GET_INSTRINFO_OPERAND_TYPES_ENUM // For OpTypes enum
+  #include "XXXGenInstrInfo.inc"
+
+
+Instruction Scheduling
+----------------------
+
+Instruction itineraries can be queried using MCDesc::getSchedClass(). The
+value can be named by an enumemation in llvm::XXX::Sched namespace generated
+by TableGen in XXXGenInstrInfo.inc. The name of the schedule classes are
+the same as provided in XXXSchedule.td plus a default NoItinerary class.
 
 Instruction Relation Mapping
 ----------------------------

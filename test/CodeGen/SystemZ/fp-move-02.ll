@@ -1,6 +1,7 @@
-; Test moves between FPRs and GPRs.
+; Test moves between FPRs and GPRs.  The 32-bit cases test the z10
+; implementation, which has no high-word support.
 ;
-; RUN: llc < %s -mtriple=s390x-linux-gnu | FileCheck %s
+; RUN: llc < %s -mtriple=s390x-linux-gnu -mcpu=z10 | FileCheck %s
 
 declare i64 @foo()
 declare double @bar()
@@ -63,11 +64,11 @@ define double @f5(i64 %a) {
 
 ; Test 128-bit moves from GPRs to FPRs.  i128 isn't a legitimate type,
 ; so this goes through memory.
-; FIXME: it would be better to use one MVC here.
 define void @f6(fp128 *%a, i128 *%b) {
 ; CHECK-LABEL: f6:
 ; CHECK: lg
-; CHECK: mvc
+; CHECK: lg
+; CHECK: stg
 ; CHECK: stg
 ; CHECK: br %r14
   %val = load i128 *%b

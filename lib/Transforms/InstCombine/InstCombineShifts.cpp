@@ -15,7 +15,7 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Support/PatternMatch.h"
+#include "llvm/IR/PatternMatch.h"
 using namespace llvm;
 using namespace PatternMatch;
 
@@ -677,7 +677,7 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, ConstantInt *Op1,
 Instruction *InstCombiner::visitShl(BinaryOperator &I) {
   if (Value *V = SimplifyShlInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
-                                 TD))
+                                 DL))
     return ReplaceInstUsesWith(I, V);
 
   if (Instruction *V = commonShiftTransforms(I))
@@ -714,7 +714,7 @@ Instruction *InstCombiner::visitShl(BinaryOperator &I) {
 
 Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
   if (Value *V = SimplifyLShrInst(I.getOperand(0), I.getOperand(1),
-                                  I.isExact(), TD))
+                                  I.isExact(), DL))
     return ReplaceInstUsesWith(I, V);
 
   if (Instruction *R = commonShiftTransforms(I))
@@ -754,7 +754,7 @@ Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
 
 Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
   if (Value *V = SimplifyAShrInst(I.getOperand(0), I.getOperand(1),
-                                  I.isExact(), TD))
+                                  I.isExact(), DL))
     return ReplaceInstUsesWith(I, V);
 
   if (Instruction *R = commonShiftTransforms(I))
@@ -807,4 +807,3 @@ Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
 
   return 0;
 }
-

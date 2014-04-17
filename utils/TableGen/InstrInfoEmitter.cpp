@@ -57,11 +57,12 @@ private:
                   std::map<std::vector<Record*>, unsigned> &EL,
                   const OperandInfoMapTy &OpInfo,
                   raw_ostream &OS);
+  void emitOperandTypesEnum(raw_ostream &OS, const CodeGenTarget &Target);
   void initOperandMapData(
-             const std::vector<const CodeGenInstruction *> NumberedInstructions,
-             const std::string &Namespace,
-             std::map<std::string, unsigned> &Operands,
-             OpNameMapTy &OperandMap);
+            const std::vector<const CodeGenInstruction *> &NumberedInstructions,
+            const std::string &Namespace,
+            std::map<std::string, unsigned> &Operands,
+            OpNameMapTy &OperandMap);
   void emitOperandNameMappings(raw_ostream &OS, const CodeGenTarget &Target,
             const std::vector<const CodeGenInstruction*> &NumberedInstructions);
 
@@ -132,8 +133,8 @@ InstrInfoEmitter::GetOperandInfo(const CodeGenInstruction &Inst) {
         Res += "|(1<<MCOI::LookupPtrRegClass)";
 
       // Predicate operands.  Check to see if the original unexpanded operand
-      // was of type PredicateOperand.
-      if (Inst.Operands[i].Rec->isSubClassOf("PredicateOperand"))
+      // was of type PredicateOp.
+      if (Inst.Operands[i].Rec->isSubClassOf("PredicateOp"))
         Res += "|(1<<MCOI::Predicate)";
 
       // Optional def operands.  Check to see if the original unexpanded operand
@@ -199,7 +200,7 @@ void InstrInfoEmitter::EmitOperandInfo(raw_ostream &OS,
 ///        each instructions.  This is used to generate the OperandMap table as
 ///        well as the getNamedOperandIdx() function.
 void InstrInfoEmitter::initOperandMapData(
-        const std::vector<const CodeGenInstruction *> NumberedInstructions,
+        const std::vector<const CodeGenInstruction *> &NumberedInstructions,
         const std::string &Namespace,
         std::map<std::string, unsigned> &Operands,
         OpNameMapTy &OperandMap) {
@@ -311,6 +312,34 @@ void InstrInfoEmitter::emitOperandNameMappings(raw_ostream &OS,
 
 }
 
+/// Generate an enum for all the operand types for this target, under the
+/// llvm::TargetNamespace::OpTypes namespace.
+/// Operand types are all definitions derived of the Operand Target.td class.
+void InstrInfoEmitter::emitOperandTypesEnum(raw_ostream &OS,
+                                            const CodeGenTarget &Target) {
+
+  const std::string &Namespace = Target.getInstNamespace();
+  std::vector<Record *> Operands = Records.getAllDerivedDefinitions("Operand");
+
+  OS << "\n#ifdef GET_INSTRINFO_OPERAND_TYPES_ENUM\n";
+  OS << "#undef GET_INSTRINFO_OPERAND_TYPES_ENUM\n";
+  OS << "namespace llvm {";
+  OS << "namespace " << Namespace << " {\n";
+  OS << "namespace OpTypes { \n";
+  OS << "enum OperandType {\n";
+
+  for (unsigned oi = 0, oe = Operands.size(); oi != oe; ++oi) {
+    if (!Operands[oi]->isAnonymous())
+      OS << "  " << Operands[oi]->getName() << " = " << oi << ",\n";
+  }
+
+  OS << "  OPERAND_TYPE_LIST_END" << "\n};\n";
+  OS << "} // End namespace OpTypes\n";
+  OS << "} // End namespace " << Namespace << "\n";
+  OS << "} // End namespace llvm\n";
+  OS << "#endif // GET_INSTRINFO_OPERAND_TYPES_ENUM\n";
+}
+
 //===----------------------------------------------------------------------===//
 // Main Output.
 //===----------------------------------------------------------------------===//
@@ -408,13 +437,14 @@ void InstrInfoEmitter::run(raw_ostream &OS) {
   OS << "namespace llvm {\n";
   OS << "struct " << ClassName << " : public TargetInstrInfo {\n"
      << "  explicit " << ClassName << "(int SO = -1, int DO = -1);\n"
+     << "  virtual ~" << ClassName << "();\n"
      << "};\n";
   OS << "} // End llvm namespace \n";
 
   OS << "#endif // GET_INSTRINFO_HEADER\n\n";
 
-  OS << "\n#ifdef GET_INSTRINFO_CTOR\n";
-  OS << "#undef GET_INSTRINFO_CTOR\n";
+  OS << "\n#ifdef GET_INSTRINFO_CTOR_DTOR\n";
+  OS << "#undef GET_INSTRINFO_CTOR_DTOR\n";
 
   OS << "namespace llvm {\n";
   OS << "extern const MCInstrDesc " << TargetName << "Insts[];\n";
@@ -424,12 +454,15 @@ void InstrInfoEmitter::run(raw_ostream &OS) {
      << "  : TargetInstrInfo(SO, DO) {\n"
      << "  InitMCInstrInfo(" << TargetName << "Insts, "
      << TargetName << "InstrNameIndices, " << TargetName << "InstrNameData, "
-     << NumberedInstructions.size() << ");\n}\n";
+     << NumberedInstructions.size() << ");\n}\n"
+     << ClassName << "::~" << ClassName << "() {}\n";
   OS << "} // End llvm namespace \n";
 
-  OS << "#endif // GET_INSTRINFO_CTOR\n\n";
+  OS << "#endif // GET_INSTRINFO_CTOR_DTOR\n\n";
 
   emitOperandNameMappings(OS, Target, NumberedInstructions);
+
+  emitOperandTypesEnum(OS, Target);
 }
 
 void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
@@ -514,6 +547,19 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
   else
     OS << "OperandInfo" << OpInfo.find(OperandInfo)->second;
 
+  CodeGenTarget &Target = CDP.getTargetInfo();
+  if (Inst.HasComplexDeprecationPredicate)
+    // Emit a function pointer to the complex predicate method.
+    OS << ",0"
+       << ",&get" << Inst.DeprecatedReason << "DeprecationInfo";
+  else if (!Inst.DeprecatedReason.empty())
+    // Emit the Subtarget feature.
+    OS << "," << Target.getInstNamespace() << "::" << Inst.DeprecatedReason
+       << ",0";
+  else
+    // Instruction isn't deprecated.
+    OS << ",0,0";
+
   OS << " },  // Inst #" << Num << " = " << Inst.TheDef->getName() << "\n";
 }
 
@@ -545,7 +591,15 @@ void InstrInfoEmitter::emitEnums(raw_ostream &OS) {
        << "\t= " << i << ",\n";
   }
   OS << "    INSTRUCTION_LIST_END = " << NumberedInstructions.size() << "\n";
-  OS << "  };\n}\n";
+  OS << "  };\n";
+  OS << "namespace Sched {\n";
+  OS << "  enum {\n";
+  for (unsigned i = 0, e = SchedModels.numInstrSchedClasses(); i != e; ++i) {
+    OS << "    " << SchedModels.getSchedClass(i).Name
+       << "\t= " << i << ",\n";
+  }
+  OS << "    SCHED_LIST_END = " << SchedModels.numInstrSchedClasses() << "\n";
+  OS << "  };\n}\n}\n";
   OS << "} // End llvm namespace \n";
 
   OS << "#endif // GET_INSTRINFO_ENUM\n\n";

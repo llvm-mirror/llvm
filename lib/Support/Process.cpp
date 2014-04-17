@@ -34,14 +34,6 @@ self_process *process::get_self() {
   return SP;
 }
 
-#if defined(_MSC_VER)
-// Visual Studio complains that the self_process destructor never exits. This
-// doesn't make much sense, as that's the whole point of calling abort... Just
-// silence this warning.
-#pragma warning(push)
-#pragma warning(disable:4722)
-#endif
-
 // The destructor for the self_process subclass must never actually be
 // executed. There should be at most one instance of this class, and that
 // instance should live until the process terminates to avoid the potential for
@@ -75,10 +67,23 @@ TimeValue self_process::get_wall_time() const {
 }
 
 
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+#define COLOR(FGBG, CODE, BOLD) "\033[0;" BOLD FGBG CODE "m"
 
+#define ALLCOLORS(FGBG,BOLD) {\
+    COLOR(FGBG, "0", BOLD),\
+    COLOR(FGBG, "1", BOLD),\
+    COLOR(FGBG, "2", BOLD),\
+    COLOR(FGBG, "3", BOLD),\
+    COLOR(FGBG, "4", BOLD),\
+    COLOR(FGBG, "5", BOLD),\
+    COLOR(FGBG, "6", BOLD),\
+    COLOR(FGBG, "7", BOLD)\
+  }
+
+static const char colorcodes[2][2][8][10] = {
+ { ALLCOLORS("3",""), ALLCOLORS("3","1;") },
+ { ALLCOLORS("4",""), ALLCOLORS("4","1;") }
+};
 
 // Include the platform-specific parts of this class.
 #ifdef LLVM_ON_UNIX

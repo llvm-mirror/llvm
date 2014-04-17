@@ -203,8 +203,19 @@ define void @f34()
 ; CHECK: define void @f34()
 {
         call void @nobuiltin() nobuiltin
-; CHECK: call void @nobuiltin() #23
+; CHECK: call void @nobuiltin() #24
         ret void;
+}
+
+define void @f35() optnone noinline
+; CHECK: define void @f35() #23
+{
+        ret void;
+}
+
+define void @f36(i8* inalloca) {
+; CHECK: define void @f36(i8* inalloca) {
+        ret void
 }
 
 ; CHECK: attributes #0 = { noreturn }
@@ -230,4 +241,6 @@ define void @f34()
 ; CHECK: attributes #20 = { "cpu"="cortex-a8" }
 ; CHECK: attributes #21 = { sspstrong }
 ; CHECK: attributes #22 = { minsize }
-; CHECK: attributes #23 = { nobuiltin }
+; CHECK: attributes #23 = { noinline optnone }
+; CHECK: attributes #24 = { nobuiltin }
+

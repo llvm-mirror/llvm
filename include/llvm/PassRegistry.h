@@ -17,9 +17,9 @@
 #ifndef LLVM_PASSREGISTRY_H
 #define LLVM_PASSREGISTRY_H
 
+#include "llvm-c/Core.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CBindingWrapping.h"
-#include "llvm-c/Core.h"
 
 namespace llvm {
 
@@ -37,7 +37,7 @@ class PassRegistry {
   void *getImpl() const;
    
 public:
-  PassRegistry() : pImpl(0) { }
+  PassRegistry() : pImpl(nullptr) { }
   ~PassRegistry();
   
   /// getPassRegistry - Access the global registry object, which is 

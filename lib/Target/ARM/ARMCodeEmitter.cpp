@@ -57,7 +57,7 @@ namespace {
     bool IsPIC;
     bool IsThumb;
 
-    void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<MachineModuleInfo>();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
@@ -76,9 +76,9 @@ namespace {
     /// machine instructions.
     uint64_t getBinaryCodeForInstr(const MachineInstr &MI) const;
 
-    bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "ARM Machine Code Emitter";
     }
 
@@ -207,8 +207,6 @@ namespace {
       const { return 0; }
     unsigned getThumbAddrModeRegRegOpValue(const MachineInstr &MI, unsigned Op)
       const { return 0; }
-    unsigned getT2AddrModeImm12OpValue(const MachineInstr &MI, unsigned Op)
-      const { return 0; }
     unsigned getT2AddrModeImm8OpValue(const MachineInstr &MI, unsigned Op)
       const { return 0; }
     unsigned getT2Imm8s4OpValue(const MachineInstr &MI, unsigned Op)
@@ -218,8 +216,6 @@ namespace {
     unsigned getT2AddrModeImm0_1020s4OpValue(const MachineInstr &MI,unsigned Op)
       const { return 0; }
     unsigned getT2AddrModeImm8OffsetOpValue(const MachineInstr &MI, unsigned Op)
-      const { return 0; }
-    unsigned getT2AddrModeImm12OffsetOpValue(const MachineInstr &MI,unsigned Op)
       const { return 0; }
     unsigned getT2AddrModeSORegOpValue(const MachineInstr &MI, unsigned Op)
       const { return 0; }
@@ -238,10 +234,6 @@ namespace {
       const { return 0; }
     unsigned getBitfieldInvertedMaskOpValue(const MachineInstr &MI,
                                             unsigned Op) const { return 0; }
-    unsigned getSsatBitPosValue(const MachineInstr &MI,
-                                unsigned Op) const { return 0; }
-    uint32_t getLdStmModeOpValue(const MachineInstr &MI, unsigned OpIdx)
-      const {return 0; }
     uint32_t getLdStSORegOpValue(const MachineInstr &MI, unsigned OpIdx)
       const { return 0; }
 
@@ -270,8 +262,6 @@ namespace {
       return 0;
     }
 
-    uint32_t getAddrMode2OpValue(const MachineInstr &MI, unsigned OpIdx)
-      const { return 0;}
     uint32_t getAddrMode2OffsetOpValue(const MachineInstr &MI, unsigned OpIdx)
       const { return 0;}
     uint32_t getPostIdxRegOpValue(const MachineInstr &MI, unsigned OpIdx)
@@ -281,8 +271,6 @@ namespace {
     uint32_t getAddrMode3OpValue(const MachineInstr &MI, unsigned Op)
       const { return 0; }
     uint32_t getAddrModeThumbSPOpValue(const MachineInstr &MI, unsigned Op)
-      const { return 0; }
-    uint32_t getAddrModeSOpValue(const MachineInstr &MI, unsigned Op)
       const { return 0; }
     uint32_t getAddrModeISOpValue(const MachineInstr &MI, unsigned Op)
       const { return 0; }
@@ -866,7 +854,8 @@ void ARMCodeEmitter::emitPseudoInstruction(const MachineInstr &MI) {
     }
     break;
   }
-  case TargetOpcode::PROLOG_LABEL:
+  case TargetOpcode::CFI_INSTRUCTION:
+    break;
   case TargetOpcode::EH_LABEL:
     MCE.emitLabel(MI.getOperand(0).getMCSymbol());
     break;

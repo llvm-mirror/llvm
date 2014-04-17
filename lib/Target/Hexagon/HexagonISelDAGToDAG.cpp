@@ -16,8 +16,8 @@
 #include "HexagonISelLowering.h"
 #include "HexagonTargetMachine.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/IR/Intrinsics.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
@@ -1344,8 +1344,10 @@ SDNode *HexagonDAGToDAGISel::SelectAdd(SDNode *N) {
 
 
 SDNode *HexagonDAGToDAGISel::Select(SDNode *N) {
-  if (N->isMachineOpcode())
+  if (N->isMachineOpcode()) {
+    N->setNodeId(-1);
     return NULL;   // Already selected.
+  }
 
 
   switch (N->getOpcode()) {
@@ -1637,7 +1639,7 @@ bool HexagonDAGToDAGISel::hasNumUsesBelowThresGA(SDNode *N) const {
 }
 
 //===--------------------------------------------------------------------===//
-// Return true if the non GP-relative global address can be folded.
+// Return true if the non-GP-relative global address can be folded.
 //===--------------------------------------------------------------------===//
 inline bool HexagonDAGToDAGISel::foldGlobalAddress(SDValue &N, SDValue &R) {
   return foldGlobalAddressImpl(N, R, false);

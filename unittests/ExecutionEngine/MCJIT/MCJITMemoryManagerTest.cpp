@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ExecutionEngine/JIT.h"
 #include "gtest/gtest.h"
 
@@ -17,12 +16,12 @@ using namespace llvm;
 namespace {
 
 TEST(MCJITMemoryManagerTest, BasicAllocations) {
-  OwningPtr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
+  std::unique_ptr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
 
-  uint8_t *code1 = MemMgr->allocateCodeSection(256, 0, 1);
-  uint8_t *data1 = MemMgr->allocateDataSection(256, 0, 2, true);
-  uint8_t *code2 = MemMgr->allocateCodeSection(256, 0, 3);
-  uint8_t *data2 = MemMgr->allocateDataSection(256, 0, 4, false);
+  uint8_t *code1 = MemMgr->allocateCodeSection(256, 0, 1, "");
+  uint8_t *data1 = MemMgr->allocateDataSection(256, 0, 2, "", true);
+  uint8_t *code2 = MemMgr->allocateCodeSection(256, 0, 3, "");
+  uint8_t *data2 = MemMgr->allocateDataSection(256, 0, 4, "", false);
 
   EXPECT_NE((uint8_t*)0, code1);
   EXPECT_NE((uint8_t*)0, code2);
@@ -50,12 +49,12 @@ TEST(MCJITMemoryManagerTest, BasicAllocations) {
 }
 
 TEST(MCJITMemoryManagerTest, LargeAllocations) {
-  OwningPtr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
+  std::unique_ptr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
 
-  uint8_t *code1 = MemMgr->allocateCodeSection(0x100000, 0, 1);
-  uint8_t *data1 = MemMgr->allocateDataSection(0x100000, 0, 2, true);
-  uint8_t *code2 = MemMgr->allocateCodeSection(0x100000, 0, 3);
-  uint8_t *data2 = MemMgr->allocateDataSection(0x100000, 0, 4, false);
+  uint8_t *code1 = MemMgr->allocateCodeSection(0x100000, 0, 1, "");
+  uint8_t *data1 = MemMgr->allocateDataSection(0x100000, 0, 2, "", true);
+  uint8_t *code2 = MemMgr->allocateCodeSection(0x100000, 0, 3, "");
+  uint8_t *data2 = MemMgr->allocateDataSection(0x100000, 0, 4, "", false);
 
   EXPECT_NE((uint8_t*)0, code1);
   EXPECT_NE((uint8_t*)0, code2);
@@ -83,7 +82,7 @@ TEST(MCJITMemoryManagerTest, LargeAllocations) {
 }
 
 TEST(MCJITMemoryManagerTest, ManyAllocations) {
-  OwningPtr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
+  std::unique_ptr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
 
   uint8_t* code[10000];
   uint8_t* data[10000];
@@ -91,8 +90,8 @@ TEST(MCJITMemoryManagerTest, ManyAllocations) {
   for (unsigned i = 0; i < 10000; ++i) {
     const bool isReadOnly = i % 2 == 0;
 
-    code[i] = MemMgr->allocateCodeSection(32, 0, 1);
-    data[i] = MemMgr->allocateDataSection(32, 0, 2, isReadOnly);
+    code[i] = MemMgr->allocateCodeSection(32, 0, 1, "");
+    data[i] = MemMgr->allocateDataSection(32, 0, 2, "", isReadOnly);
 
     for (unsigned j = 0; j < 32; j++) {
       code[i][j] = 1 + (i % 254);
@@ -118,7 +117,7 @@ TEST(MCJITMemoryManagerTest, ManyAllocations) {
 }
 
 TEST(MCJITMemoryManagerTest, ManyVariedAllocations) {
-  OwningPtr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
+  std::unique_ptr<SectionMemoryManager> MemMgr(new SectionMemoryManager());
 
   uint8_t* code[10000];
   uint8_t* data[10000];
@@ -130,8 +129,8 @@ TEST(MCJITMemoryManagerTest, ManyVariedAllocations) {
     bool isReadOnly = i % 3 == 0;
     unsigned Align = 8 << (i % 4);
 
-    code[i] = MemMgr->allocateCodeSection(CodeSize, Align, i);
-    data[i] = MemMgr->allocateDataSection(DataSize, Align, i + 10000,
+    code[i] = MemMgr->allocateCodeSection(CodeSize, Align, i, "");
+    data[i] = MemMgr->allocateDataSection(DataSize, Align, i + 10000, "",
                                           isReadOnly);
 
     for (unsigned j = 0; j < CodeSize; j++) {

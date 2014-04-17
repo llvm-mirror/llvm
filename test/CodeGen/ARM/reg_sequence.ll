@@ -34,9 +34,11 @@ entry:
   %12 = sext <4 x i16> %11 to <4 x i32>           ; <<4 x i32>> [#uses=1]
   %13 = mul <4 x i32> %1, %9                      ; <<4 x i32>> [#uses=1]
   %14 = mul <4 x i32> %3, %12                     ; <<4 x i32>> [#uses=1]
-  %15 = tail call <4 x i16> @llvm.arm.neon.vshiftn.v4i16(<4 x i32> %13, <4 x i32> <i32 -12, i32 -12, i32 -12, i32 -12>) ; <<4 x i16>> [#uses=1]
-  %16 = tail call <4 x i16> @llvm.arm.neon.vshiftn.v4i16(<4 x i32> %14, <4 x i32> <i32 -12, i32 -12, i32 -12, i32 -12>) ; <<4 x i16>> [#uses=1]
-  %17 = shufflevector <4 x i16> %15, <4 x i16> %16, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7> ; <<8 x i16>> [#uses=1]
+  %15 = lshr <4 x i32> %13, <i32 12, i32 12, i32 12, i32 12>
+  %trunc_15 = trunc <4 x i32> %15 to <4 x i16>
+  %16 = lshr <4 x i32> %14, <i32 12, i32 12, i32 12, i32 12>
+  %trunc_16 = trunc <4 x i32> %16 to <4 x i16>
+  %17 = shufflevector <4 x i16> %trunc_15, <4 x i16> %trunc_16, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7> ; <<8 x i16>> [#uses=1]
   %18 = bitcast i16* %o_ptr to i8*                ; <i8*> [#uses=1]
   tail call void @llvm.arm.neon.vst1.v8i16(i8* %18, <8 x i16> %17, i32 1)
   ret void
@@ -239,10 +241,9 @@ bb14:                                             ; preds = %bb6
 ; PR7157
 define arm_aapcs_vfpcc float @t9(%0* nocapture, %3* nocapture) nounwind {
 ; CHECK-LABEL:        t9:
-; CHECK:        vldr
-; CHECK-NOT:    vmov d{{.*}}, d16
-; CHECK:        vmov.i32 d17
+; CHECK: vmov.i32 d16, #0x0
 ; CHECK-NEXT:   vst1.64 {d16, d17}, [r0:128]
+; CHECK-NEXT:   vorr d17, d16, d16
 ; CHECK-NEXT:   vst1.64 {d16, d17}, [r0:128]
   %3 = bitcast double 0.000000e+00 to <2 x float> ; <<2 x float>> [#uses=2]
   %4 = shufflevector <2 x float> %3, <2 x float> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3> ; <<4 x float>> [#uses=1]

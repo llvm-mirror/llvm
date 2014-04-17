@@ -30,7 +30,6 @@ namespace llvm {
   class MachineInstr;
   class TargetLowering;
   class TargetLibraryInfo;
-  class TargetTransformInfo;
   class FunctionLoweringInfo;
   class ScheduleHazardRecognizer;
   class GCFunctionInfo;
@@ -43,7 +42,6 @@ class SelectionDAGISel : public MachineFunctionPass {
 public:
   TargetMachine &TM;
   const TargetLibraryInfo *LibInfo;
-  const TargetTransformInfo *TTI;
   FunctionLoweringInfo *FuncInfo;
   MachineFunction *MF;
   MachineRegisterInfo *RegInfo;
@@ -62,9 +60,9 @@ public:
     return TM.getTargetLowering();
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  virtual bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
   virtual void EmitFunctionEntryCode() {}
 
@@ -113,6 +111,8 @@ public:
     OPC_MoveChild,
     OPC_MoveParent,
     OPC_CheckSame,
+    OPC_CheckChild0Same, OPC_CheckChild1Same,
+    OPC_CheckChild2Same, OPC_CheckChild3Same,
     OPC_CheckPatternPredicate,
     OPC_CheckPredicate,
     OPC_CheckOpcode,
@@ -123,6 +123,8 @@ public:
     OPC_CheckChild3Type, OPC_CheckChild4Type, OPC_CheckChild5Type,
     OPC_CheckChild6Type, OPC_CheckChild7Type,
     OPC_CheckInteger,
+    OPC_CheckChild0Integer, OPC_CheckChild1Integer, OPC_CheckChild2Integer,
+    OPC_CheckChild3Integer, OPC_CheckChild4Integer,
     OPC_CheckCondCode,
     OPC_CheckValueType,
     OPC_CheckComplexPat,

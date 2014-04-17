@@ -71,14 +71,11 @@ HexagonTargetMachine::HexagonTargetMachine(const Target &T, StringRef TT,
                                            CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    DL("e-p:32:32:32-"
-                "i64:64:64-i32:32:32-i16:16:16-i1:32:32-"
-                "f64:64:64-f32:32:32-a0:0-n32") ,
+    DL("e-m:e-p:32:32-i1:32-i64:64-a:0-n32") ,
     Subtarget(TT, CPU, FS), InstrInfo(Subtarget), TLInfo(*this),
     TSInfo(*this),
     FrameLowering(Subtarget),
     InstrItins(&Subtarget.getInstrItineraryData()) {
-    setMCUseCFI(false);
     initAsmInfo();
 }
 
@@ -102,15 +99,23 @@ class HexagonPassConfig : public TargetPassConfig {
 public:
   HexagonPassConfig(HexagonTargetMachine *TM, PassManagerBase &PM)
     : TargetPassConfig(TM, PM) {
-    // Enable MI scheduler.
-    if (!DisableHexagonMISched) {
+    // FIXME: Rather than calling enablePass(&MachineSchedulerID) below, define
+    // HexagonSubtarget::enableMachineScheduler() { return true; }.
+    // That will bypass the SelectionDAG VLIW scheduler, which is probably just
+    // hurting compile time and will be removed eventually anyway.
+    if (DisableHexagonMISched)
+      disablePass(&MachineSchedulerID);
+    else
       enablePass(&MachineSchedulerID);
-      MachineSchedRegistry::setDefault(createVLIWMachineSched);
-    }
   }
 
   HexagonTargetMachine &getHexagonTargetMachine() const {
     return getTM<HexagonTargetMachine>();
+  }
+
+  virtual ScheduleDAGInstrs *
+  createMachineScheduler(MachineSchedContext *C) const {
+    return createVLIWMachineSched(C);
   }
 
   virtual bool addInstSelector();

@@ -13,6 +13,7 @@
 
 #include "Unix.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/MutexGuard.h"
 #include "llvm/Support/TimeValue.h"
@@ -88,13 +89,10 @@ TimeValue self_process::get_system_time() const {
   return getRUsageTimes().second;
 }
 
+// On Cygwin, getpagesize() returns 64k(AllocationGranularity) and
+// offset in mmap(3) should be aligned to the AllocationGranularity.
 static unsigned getPageSize() {
-#if defined(__CYGWIN__)
-  // On Cygwin, getpagesize() returns 64k but the page size for the purposes of
-  // memory protection and mmap() is 4k.
-  // See http://www.cygwin.com/ml/cygwin/2009-01/threads.html#00492
-  const int page_size = 0x1000;
-#elif defined(HAVE_GETPAGESIZE)
+#if defined(HAVE_GETPAGESIZE)
   const int page_size = ::getpagesize();
 #elif defined(HAVE_SYSCONF)
   long page_size = ::sysconf(_SC_PAGE_SIZE);
@@ -137,15 +135,7 @@ size_t Process::GetMallocUsage() {
 void Process::GetTimeUsage(TimeValue &elapsed, TimeValue &user_time,
                            TimeValue &sys_time) {
   elapsed = TimeValue::now();
-  llvm::tie(user_time, sys_time) = getRUsageTimes();
-}
-
-int Process::GetCurrentUserId() {
-  return getuid();
-}
-
-int Process::GetCurrentGroupId() {
-  return getgid();
+  std::tie(user_time, sys_time) = getRUsageTimes();
 }
 
 #if defined(HAVE_MACH_MACH_H) && !defined(__GNU__)
@@ -190,6 +180,22 @@ void Process::PreventCoreFiles() {
   signal(SIGSEGV, _exit);
   signal(SIGBUS,  _exit);
 #endif
+}
+
+Optional<std::string> Process::GetEnv(StringRef Name) {
+  std::string NameStr = Name.str();
+  const char *Val = ::getenv(NameStr.c_str());
+  if (!Val)
+    return None;
+  return std::string(Val);
+}
+
+error_code Process::GetArgumentVector(SmallVectorImpl<const char *> &ArgsOut,
+                                      ArrayRef<const char *> ArgsIn,
+                                      SpecificBumpPtrAllocator<char> &) {
+  ArgsOut.append(ArgsIn.begin(), ArgsIn.end());
+
+  return error_code::success();
 }
 
 bool Process::StandardInIsUserInput() {
@@ -248,10 +254,12 @@ unsigned Process::StandardErrColumns() {
 }
 
 #ifdef HAVE_TERMINFO
-// We manually declare these two extern functions because finding the correct
+// We manually declare these extern functions because finding the correct
 // headers from various terminfo, curses, or other sources is harder than
 // writing their specs down.
 extern "C" int setupterm(char *term, int filedes, int *errret);
+extern "C" struct term *set_curterm(struct term *termp);
+extern "C" int del_curterm(struct term *termp);
 extern "C" int tigetnum(char *capname);
 #endif
 
@@ -280,7 +288,15 @@ static bool terminalHasColors(int fd) {
   //
   // The 'tigetnum' routine returns -2 or -1 on errors, and might return 0 if
   // the terminfo says that no colors are supported.
-  if (tigetnum(const_cast<char *>("colors")) > 0)
+  bool HasColors = tigetnum(const_cast<char *>("colors")) > 0;
+
+  // Now extract the structure allocated by setupterm and free its memory
+  // through a really silly dance.
+  struct term *termp = set_curterm((struct term *)0);
+  (void)del_curterm(termp); // Drop any errors here.
+
+  // Return true if we found a color capabilities for the current terminal.
+  if (HasColors)
     return true;
 #endif
 
@@ -302,28 +318,14 @@ bool Process::StandardErrHasColors() {
   return FileDescriptorHasColors(STDERR_FILENO);
 }
 
+void Process::UseANSIEscapeCodes(bool /*enable*/) {
+  // No effect.
+}
+
 bool Process::ColorNeedsFlush() {
   // No, we use ANSI escape sequences.
   return false;
 }
-
-#define COLOR(FGBG, CODE, BOLD) "\033[0;" BOLD FGBG CODE "m"
-
-#define ALLCOLORS(FGBG,BOLD) {\
-    COLOR(FGBG, "0", BOLD),\
-    COLOR(FGBG, "1", BOLD),\
-    COLOR(FGBG, "2", BOLD),\
-    COLOR(FGBG, "3", BOLD),\
-    COLOR(FGBG, "4", BOLD),\
-    COLOR(FGBG, "5", BOLD),\
-    COLOR(FGBG, "6", BOLD),\
-    COLOR(FGBG, "7", BOLD)\
-  }
-
-static const char colorcodes[2][2][8][10] = {
- { ALLCOLORS("3",""), ALLCOLORS("3","1;") },
- { ALLCOLORS("4",""), ALLCOLORS("4","1;") }
-};
 
 const char *Process::OutputColor(char code, bool bold, bool bg) {
   return colorcodes[bg?1:0][bold?1:0][code&7];
@@ -341,7 +343,7 @@ const char *Process::ResetColor() {
   return "\033[0m";
 }
 
-#if !defined(HAVE_ARC4RANDOM)
+#if !defined(HAVE_DECL_ARC4RANDOM) || !HAVE_DECL_ARC4RANDOM
 static unsigned GetRandomNumberSeed() {
   // Attempt to get the initial seed from /dev/urandom, if possible.
   if (FILE *RandomSource = ::fopen("/dev/urandom", "r")) {
@@ -362,7 +364,7 @@ static unsigned GetRandomNumberSeed() {
 #endif
 
 unsigned llvm::sys::Process::GetRandomNumber() {
-#if defined(HAVE_ARC4RANDOM)
+#if defined(HAVE_DECL_ARC4RANDOM) && HAVE_DECL_ARC4RANDOM
   return arc4random();
 #else
   static int x = (::srand(GetRandomNumberSeed()), 0);

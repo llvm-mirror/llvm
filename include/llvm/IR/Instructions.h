@@ -17,14 +17,13 @@
 #define LLVM_IR_INSTRUCTIONS_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/IntegersSubset.h"
-#include "llvm/Support/IntegersSubsetMapping.h"
 #include <iterator>
 
 namespace llvm {
@@ -59,18 +58,19 @@ enum SynchronizationScope {
 ///
 class AllocaInst : public UnaryInstruction {
 protected:
-  virtual AllocaInst *clone_impl() const;
+  AllocaInst *clone_impl() const override;
 public:
-  explicit AllocaInst(Type *Ty, Value *ArraySize = 0,
-                      const Twine &Name = "", Instruction *InsertBefore = 0);
+  explicit AllocaInst(Type *Ty, Value *ArraySize = nullptr,
+                      const Twine &Name = "",
+                      Instruction *InsertBefore = nullptr);
   AllocaInst(Type *Ty, Value *ArraySize,
              const Twine &Name, BasicBlock *InsertAtEnd);
 
-  AllocaInst(Type *Ty, const Twine &Name, Instruction *InsertBefore = 0);
+  AllocaInst(Type *Ty, const Twine &Name, Instruction *InsertBefore = nullptr);
   AllocaInst(Type *Ty, const Twine &Name, BasicBlock *InsertAtEnd);
 
   AllocaInst(Type *Ty, Value *ArraySize, unsigned Align,
-             const Twine &Name = "", Instruction *InsertBefore = 0);
+             const Twine &Name = "", Instruction *InsertBefore = nullptr);
   AllocaInst(Type *Ty, Value *ArraySize, unsigned Align,
              const Twine &Name, BasicBlock *InsertAtEnd);
 
@@ -103,7 +103,7 @@ public:
   /// by the instruction.
   ///
   unsigned getAlignment() const {
-    return (1u << getSubclassDataFromInstruction()) >> 1;
+    return (1u << (getSubclassDataFromInstruction() & 31)) >> 1;
   }
   void setAlignment(unsigned Align);
 
@@ -111,6 +111,20 @@ public:
   /// function and is a constant size.  If so, the code generator will fold it
   /// into the prolog/epilog code, so it is basically free.
   bool isStaticAlloca() const;
+
+  /// \brief Return true if this alloca is used as an inalloca argument to a
+  /// call.  Such allocas are never considered static even if they are in the
+  /// entry block.
+  bool isUsedWithInAlloca() const {
+    return getSubclassDataFromInstruction() & 32;
+  }
+
+  /// \brief Specify whether this alloca is used to represent a the arguments to
+  /// a call.
+  void setUsedWithInAlloca(bool V) {
+    setInstructionSubclassData((getSubclassDataFromInstruction() & ~32) |
+                               (V ? 32 : 0));
+  }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Instruction *I) {
@@ -138,22 +152,22 @@ private:
 class LoadInst : public UnaryInstruction {
   void AssertOK();
 protected:
-  virtual LoadInst *clone_impl() const;
+  LoadInst *clone_impl() const override;
 public:
   LoadInst(Value *Ptr, const Twine &NameStr, Instruction *InsertBefore);
   LoadInst(Value *Ptr, const Twine &NameStr, BasicBlock *InsertAtEnd);
   LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile = false,
-           Instruction *InsertBefore = 0);
+           Instruction *InsertBefore = nullptr);
   LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
            BasicBlock *InsertAtEnd);
   LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
-           unsigned Align, Instruction *InsertBefore = 0);
+           unsigned Align, Instruction *InsertBefore = nullptr);
   LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
            unsigned Align, BasicBlock *InsertAtEnd);
   LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
            unsigned Align, AtomicOrdering Order,
            SynchronizationScope SynchScope = CrossThread,
-           Instruction *InsertBefore = 0);
+           Instruction *InsertBefore = nullptr);
   LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
            unsigned Align, AtomicOrdering Order,
            SynchronizationScope SynchScope,
@@ -161,8 +175,9 @@ public:
 
   LoadInst(Value *Ptr, const char *NameStr, Instruction *InsertBefore);
   LoadInst(Value *Ptr, const char *NameStr, BasicBlock *InsertAtEnd);
-  explicit LoadInst(Value *Ptr, const char *NameStr = 0,
-                    bool isVolatile = false,  Instruction *InsertBefore = 0);
+  explicit LoadInst(Value *Ptr, const char *NameStr = nullptr,
+                    bool isVolatile = false,
+                    Instruction *InsertBefore = nullptr);
   LoadInst(Value *Ptr, const char *NameStr, bool isVolatile,
            BasicBlock *InsertAtEnd);
 
@@ -258,7 +273,7 @@ class StoreInst : public Instruction {
   void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
   void AssertOK();
 protected:
-  virtual StoreInst *clone_impl() const;
+  StoreInst *clone_impl() const override;
 public:
   // allocate space for exactly two operands
   void *operator new(size_t s) {
@@ -267,16 +282,16 @@ public:
   StoreInst(Value *Val, Value *Ptr, Instruction *InsertBefore);
   StoreInst(Value *Val, Value *Ptr, BasicBlock *InsertAtEnd);
   StoreInst(Value *Val, Value *Ptr, bool isVolatile = false,
-            Instruction *InsertBefore = 0);
+            Instruction *InsertBefore = nullptr);
   StoreInst(Value *Val, Value *Ptr, bool isVolatile, BasicBlock *InsertAtEnd);
   StoreInst(Value *Val, Value *Ptr, bool isVolatile,
-            unsigned Align, Instruction *InsertBefore = 0);
+            unsigned Align, Instruction *InsertBefore = nullptr);
   StoreInst(Value *Val, Value *Ptr, bool isVolatile,
             unsigned Align, BasicBlock *InsertAtEnd);
   StoreInst(Value *Val, Value *Ptr, bool isVolatile,
             unsigned Align, AtomicOrdering Order,
             SynchronizationScope SynchScope = CrossThread,
-            Instruction *InsertBefore = 0);
+            Instruction *InsertBefore = nullptr);
   StoreInst(Value *Val, Value *Ptr, bool isVolatile,
             unsigned Align, AtomicOrdering Order,
             SynchronizationScope SynchScope,
@@ -385,7 +400,7 @@ class FenceInst : public Instruction {
   void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
   void Init(AtomicOrdering Ordering, SynchronizationScope SynchScope);
 protected:
-  virtual FenceInst *clone_impl() const;
+  FenceInst *clone_impl() const override;
 public:
   // allocate space for exactly zero operands
   void *operator new(size_t s) {
@@ -396,7 +411,7 @@ public:
   // SequentiallyConsistent.
   FenceInst(LLVMContext &C, AtomicOrdering Ordering,
             SynchronizationScope SynchScope = CrossThread,
-            Instruction *InsertBefore = 0);
+            Instruction *InsertBefore = nullptr);
   FenceInst(LLVMContext &C, AtomicOrdering Ordering,
             SynchronizationScope SynchScope,
             BasicBlock *InsertAtEnd);
@@ -451,19 +466,24 @@ private:
 class AtomicCmpXchgInst : public Instruction {
   void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
   void Init(Value *Ptr, Value *Cmp, Value *NewVal,
-            AtomicOrdering Ordering, SynchronizationScope SynchScope);
+            AtomicOrdering SuccessOrdering, AtomicOrdering FailureOrdering,
+            SynchronizationScope SynchScope);
 protected:
-  virtual AtomicCmpXchgInst *clone_impl() const;
+  AtomicCmpXchgInst *clone_impl() const override;
 public:
   // allocate space for exactly three operands
   void *operator new(size_t s) {
     return User::operator new(s, 3);
   }
   AtomicCmpXchgInst(Value *Ptr, Value *Cmp, Value *NewVal,
-                    AtomicOrdering Ordering, SynchronizationScope SynchScope,
-                    Instruction *InsertBefore = 0);
+                    AtomicOrdering SuccessOrdering,
+                    AtomicOrdering FailureOrdering,
+                    SynchronizationScope SynchScope,
+                    Instruction *InsertBefore = nullptr);
   AtomicCmpXchgInst(Value *Ptr, Value *Cmp, Value *NewVal,
-                    AtomicOrdering Ordering, SynchronizationScope SynchScope,
+                    AtomicOrdering SuccessOrdering,
+                    AtomicOrdering FailureOrdering,
+                    SynchronizationScope SynchScope,
                     BasicBlock *InsertAtEnd);
 
   /// isVolatile - Return true if this is a cmpxchg from a volatile memory
@@ -484,11 +504,18 @@ public:
   DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
 
   /// Set the ordering constraint on this cmpxchg.
-  void setOrdering(AtomicOrdering Ordering) {
+  void setSuccessOrdering(AtomicOrdering Ordering) {
     assert(Ordering != NotAtomic &&
            "CmpXchg instructions can only be atomic.");
-    setInstructionSubclassData((getSubclassDataFromInstruction() & 3) |
+    setInstructionSubclassData((getSubclassDataFromInstruction() & ~0x1c) |
                                (Ordering << 2));
+  }
+
+  void setFailureOrdering(AtomicOrdering Ordering) {
+    assert(Ordering != NotAtomic &&
+           "CmpXchg instructions can only be atomic.");
+    setInstructionSubclassData((getSubclassDataFromInstruction() & ~0xe0) |
+                               (Ordering << 5));
   }
 
   /// Specify whether this cmpxchg is atomic and orders other operations with
@@ -500,8 +527,13 @@ public:
   }
 
   /// Returns the ordering constraint on this cmpxchg.
-  AtomicOrdering getOrdering() const {
-    return AtomicOrdering(getSubclassDataFromInstruction() >> 2);
+  AtomicOrdering getSuccessOrdering() const {
+    return AtomicOrdering((getSubclassDataFromInstruction() >> 2) & 7);
+  }
+
+  /// Returns the ordering constraint on this cmpxchg.
+  AtomicOrdering getFailureOrdering() const {
+    return AtomicOrdering((getSubclassDataFromInstruction() >> 5) & 7);
   }
 
   /// Returns whether this cmpxchg is atomic between threads or only within a
@@ -523,6 +555,28 @@ public:
   /// \brief Returns the address space of the pointer operand.
   unsigned getPointerAddressSpace() const {
     return getPointerOperand()->getType()->getPointerAddressSpace();
+  }
+
+  /// \brief Returns the strongest permitted ordering on failure, given the
+  /// desired ordering on success.
+  ///
+  /// If the comparison in a cmpxchg operation fails, there is no atomic store
+  /// so release semantics cannot be provided. So this function drops explicit
+  /// Release requests from the AtomicOrdering. A SequentiallyConsistent
+  /// operation would remain SequentiallyConsistent.
+  static AtomicOrdering
+  getStrongestFailureOrdering(AtomicOrdering SuccessOrdering) {
+    switch (SuccessOrdering) {
+    default: llvm_unreachable("invalid cmpxchg success ordering");
+    case Release:
+    case Monotonic:
+      return Monotonic;
+    case AcquireRelease:
+    case Acquire:
+      return Acquire;
+    case SequentiallyConsistent:
+      return SequentiallyConsistent;
+    }
   }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
@@ -558,7 +612,7 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(AtomicCmpXchgInst, Value)
 class AtomicRMWInst : public Instruction {
   void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
 protected:
-  virtual AtomicRMWInst *clone_impl() const;
+  AtomicRMWInst *clone_impl() const override;
 public:
   /// This enumeration lists the possible modifications atomicrmw can make.  In
   /// the descriptions, 'p' is the pointer to the instruction's memory location,
@@ -599,7 +653,7 @@ public:
   }
   AtomicRMWInst(BinOp Operation, Value *Ptr, Value *Val,
                 AtomicOrdering Ordering, SynchronizationScope SynchScope,
-                Instruction *InsertBefore = 0);
+                Instruction *InsertBefore = nullptr);
   AtomicRMWInst(BinOp Operation, Value *Ptr, Value *Val,
                 AtomicOrdering Ordering, SynchronizationScope SynchScope,
                 BasicBlock *InsertAtEnd);
@@ -723,11 +777,11 @@ class GetElementPtrInst : public Instruction {
                            unsigned Values, const Twine &NameStr,
                            BasicBlock *InsertAtEnd);
 protected:
-  virtual GetElementPtrInst *clone_impl() const;
+  GetElementPtrInst *clone_impl() const override;
 public:
   static GetElementPtrInst *Create(Value *Ptr, ArrayRef<Value *> IdxList,
                                    const Twine &NameStr = "",
-                                   Instruction *InsertBefore = 0) {
+                                   Instruction *InsertBefore = nullptr) {
     unsigned Values = 1 + unsigned(IdxList.size());
     return new(Values)
       GetElementPtrInst(Ptr, IdxList, Values, NameStr, InsertBefore);
@@ -745,7 +799,7 @@ public:
   static GetElementPtrInst *CreateInBounds(Value *Ptr,
                                            ArrayRef<Value *> IdxList,
                                            const Twine &NameStr = "",
-                                           Instruction *InsertBefore = 0) {
+                                           Instruction *InsertBefore = nullptr){
     GetElementPtrInst *GEP = Create(Ptr, IdxList, NameStr, InsertBefore);
     GEP->setIsInBounds(true);
     return GEP;
@@ -911,9 +965,21 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(GetElementPtrInst, Value)
 /// must be identical types.
 /// \brief Represent an integer comparison operator.
 class ICmpInst: public CmpInst {
+  void AssertOK() {
+    assert(getPredicate() >= CmpInst::FIRST_ICMP_PREDICATE &&
+           getPredicate() <= CmpInst::LAST_ICMP_PREDICATE &&
+           "Invalid ICmp predicate value");
+    assert(getOperand(0)->getType() == getOperand(1)->getType() &&
+          "Both operands to ICmp instruction are not of the same type!");
+    // Check that the operands are the right type
+    assert((getOperand(0)->getType()->isIntOrIntVectorTy() ||
+            getOperand(0)->getType()->isPtrOrPtrVectorTy()) &&
+           "Invalid operand types for ICmp instruction");
+  }
+
 protected:
   /// \brief Clone an identical ICmpInst
-  virtual ICmpInst *clone_impl() const;
+  ICmpInst *clone_impl() const override;
 public:
   /// \brief Constructor with insert-before-instruction semantics.
   ICmpInst(
@@ -925,15 +991,9 @@ public:
   ) : CmpInst(makeCmpResultType(LHS->getType()),
               Instruction::ICmp, pred, LHS, RHS, NameStr,
               InsertBefore) {
-    assert(pred >= CmpInst::FIRST_ICMP_PREDICATE &&
-           pred <= CmpInst::LAST_ICMP_PREDICATE &&
-           "Invalid ICmp predicate value");
-    assert(getOperand(0)->getType() == getOperand(1)->getType() &&
-          "Both operands to ICmp instruction are not of the same type!");
-    // Check that the operands are the right type
-    assert((getOperand(0)->getType()->isIntOrIntVectorTy() ||
-            getOperand(0)->getType()->getScalarType()->isPointerTy()) &&
-           "Invalid operand types for ICmp instruction");
+#ifndef NDEBUG
+  AssertOK();
+#endif
   }
 
   /// \brief Constructor with insert-at-end semantics.
@@ -946,15 +1006,9 @@ public:
   ) : CmpInst(makeCmpResultType(LHS->getType()),
               Instruction::ICmp, pred, LHS, RHS, NameStr,
               &InsertAtEnd) {
-    assert(pred >= CmpInst::FIRST_ICMP_PREDICATE &&
-          pred <= CmpInst::LAST_ICMP_PREDICATE &&
-          "Invalid ICmp predicate value");
-    assert(getOperand(0)->getType() == getOperand(1)->getType() &&
-          "Both operands to ICmp instruction are not of the same type!");
-    // Check that the operands are the right type
-    assert((getOperand(0)->getType()->isIntOrIntVectorTy() ||
-            getOperand(0)->getType()->getScalarType()->isPointerTy()) &&
-           "Invalid operand types for ICmp instruction");
+#ifndef NDEBUG
+  AssertOK();
+#endif
   }
 
   /// \brief Constructor with no-insertion semantics
@@ -965,15 +1019,9 @@ public:
     const Twine &NameStr = "" ///< Name of the instruction
   ) : CmpInst(makeCmpResultType(LHS->getType()),
               Instruction::ICmp, pred, LHS, RHS, NameStr) {
-    assert(pred >= CmpInst::FIRST_ICMP_PREDICATE &&
-           pred <= CmpInst::LAST_ICMP_PREDICATE &&
-           "Invalid ICmp predicate value");
-    assert(getOperand(0)->getType() == getOperand(1)->getType() &&
-          "Both operands to ICmp instruction are not of the same type!");
-    // Check that the operands are the right type
-    assert((getOperand(0)->getType()->isIntOrIntVectorTy() ||
-            getOperand(0)->getType()->getScalarType()->isPointerTy()) &&
-           "Invalid operand types for ICmp instruction");
+#ifndef NDEBUG
+  AssertOK();
+#endif
   }
 
   /// For example, EQ->EQ, SLE->SLE, UGT->SGT, etc.
@@ -1063,7 +1111,7 @@ public:
 class FCmpInst: public CmpInst {
 protected:
   /// \brief Clone an identical FCmpInst
-  virtual FCmpInst *clone_impl() const;
+  FCmpInst *clone_impl() const override;
 public:
   /// \brief Constructor with insert-before-instruction semantics.
   FCmpInst(
@@ -1182,20 +1230,16 @@ class CallInst : public Instruction {
   inline CallInst(Value *Func, ArrayRef<Value *> Args,
                   const Twine &NameStr, BasicBlock *InsertAtEnd);
 
-  CallInst(Value *F, Value *Actual, const Twine &NameStr,
-           Instruction *InsertBefore);
-  CallInst(Value *F, Value *Actual, const Twine &NameStr,
-           BasicBlock *InsertAtEnd);
   explicit CallInst(Value *F, const Twine &NameStr,
                     Instruction *InsertBefore);
   CallInst(Value *F, const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  virtual CallInst *clone_impl() const;
+  CallInst *clone_impl() const override;
 public:
   static CallInst *Create(Value *Func,
                           ArrayRef<Value *> Args,
                           const Twine &NameStr = "",
-                          Instruction *InsertBefore = 0) {
+                          Instruction *InsertBefore = nullptr) {
     return new(unsigned(Args.size() + 1))
       CallInst(Func, Args, NameStr, InsertBefore);
   }
@@ -1206,7 +1250,7 @@ public:
       CallInst(Func, Args, NameStr, InsertAtEnd);
   }
   static CallInst *Create(Value *F, const Twine &NameStr = "",
-                          Instruction *InsertBefore = 0) {
+                          Instruction *InsertBefore = nullptr) {
     return new(1) CallInst(F, NameStr, InsertBefore);
   }
   static CallInst *Create(Value *F, const Twine &NameStr,
@@ -1221,13 +1265,13 @@ public:
   /// 3. Bitcast the result of the malloc call to the specified type.
   static Instruction *CreateMalloc(Instruction *InsertBefore,
                                    Type *IntPtrTy, Type *AllocTy,
-                                   Value *AllocSize, Value *ArraySize = 0,
-                                   Function* MallocF = 0,
+                                   Value *AllocSize, Value *ArraySize = nullptr,
+                                   Function* MallocF = nullptr,
                                    const Twine &Name = "");
   static Instruction *CreateMalloc(BasicBlock *InsertAtEnd,
                                    Type *IntPtrTy, Type *AllocTy,
-                                   Value *AllocSize, Value *ArraySize = 0,
-                                   Function* MallocF = 0,
+                                   Value *AllocSize, Value *ArraySize = nullptr,
+                                   Function* MallocF = nullptr,
                                    const Twine &Name = "");
   /// CreateFree - Generate the IR for a call to the builtin free function.
   static Instruction* CreateFree(Value* Source, Instruction *InsertBefore);
@@ -1252,6 +1296,22 @@ public:
   ///
   Value *getArgOperand(unsigned i) const { return getOperand(i); }
   void setArgOperand(unsigned i, Value *v) { setOperand(i, v); }
+
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<op_iterator> arg_operands() {
+    // The last operand in the op list is the callee - it's not one of the args
+    // so we don't want to iterate over it.
+    return iterator_range<op_iterator>(op_begin(), op_end() - 1);
+  }
+
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<const_op_iterator> arg_operands() const {
+    return iterator_range<const_op_iterator>(op_begin(), op_end() - 1);
+  }
+
+  /// \brief Wrappers for getting the \c Use of a call argument.
+  const Use &getArgOperandUse(unsigned i) const { return getOperandUse(i); }
+  Use &getArgOperandUse(unsigned i) { return getOperandUse(i); }
 
   /// getCallingConv/setCallingConv - Get or set the calling convention of this
   /// function call.
@@ -1458,11 +1518,11 @@ class SelectInst : public Instruction {
     setName(NameStr);
   }
 protected:
-  virtual SelectInst *clone_impl() const;
+  SelectInst *clone_impl() const override;
 public:
   static SelectInst *Create(Value *C, Value *S1, Value *S2,
                             const Twine &NameStr = "",
-                            Instruction *InsertBefore = 0) {
+                            Instruction *InsertBefore = nullptr) {
     return new(3) SelectInst(C, S1, S2, NameStr, InsertBefore);
   }
   static SelectInst *Create(Value *C, Value *S1, Value *S2,
@@ -1513,11 +1573,11 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(SelectInst, Value)
 ///
 class VAArgInst : public UnaryInstruction {
 protected:
-  virtual VAArgInst *clone_impl() const;
+  VAArgInst *clone_impl() const override;
 
 public:
   VAArgInst(Value *List, Type *Ty, const Twine &NameStr = "",
-             Instruction *InsertBefore = 0)
+             Instruction *InsertBefore = nullptr)
     : UnaryInstruction(Ty, VAArg, List, InsertBefore) {
     setName(NameStr);
   }
@@ -1549,16 +1609,16 @@ public:
 ///
 class ExtractElementInst : public Instruction {
   ExtractElementInst(Value *Vec, Value *Idx, const Twine &NameStr = "",
-                     Instruction *InsertBefore = 0);
+                     Instruction *InsertBefore = nullptr);
   ExtractElementInst(Value *Vec, Value *Idx, const Twine &NameStr,
                      BasicBlock *InsertAtEnd);
 protected:
-  virtual ExtractElementInst *clone_impl() const;
+  ExtractElementInst *clone_impl() const override;
 
 public:
   static ExtractElementInst *Create(Value *Vec, Value *Idx,
                                    const Twine &NameStr = "",
-                                   Instruction *InsertBefore = 0) {
+                                   Instruction *InsertBefore = nullptr) {
     return new(2) ExtractElementInst(Vec, Idx, NameStr, InsertBefore);
   }
   static ExtractElementInst *Create(Value *Vec, Value *Idx,
@@ -1610,16 +1670,16 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(ExtractElementInst, Value)
 class InsertElementInst : public Instruction {
   InsertElementInst(Value *Vec, Value *NewElt, Value *Idx,
                     const Twine &NameStr = "",
-                    Instruction *InsertBefore = 0);
+                    Instruction *InsertBefore = nullptr);
   InsertElementInst(Value *Vec, Value *NewElt, Value *Idx,
                     const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  virtual InsertElementInst *clone_impl() const;
+  InsertElementInst *clone_impl() const override;
 
 public:
   static InsertElementInst *Create(Value *Vec, Value *NewElt, Value *Idx,
                                    const Twine &NameStr = "",
-                                   Instruction *InsertBefore = 0) {
+                                   Instruction *InsertBefore = nullptr) {
     return new(3) InsertElementInst(Vec, NewElt, Idx, NameStr, InsertBefore);
   }
   static InsertElementInst *Create(Value *Vec, Value *NewElt, Value *Idx,
@@ -1667,7 +1727,7 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(InsertElementInst, Value)
 ///
 class ShuffleVectorInst : public Instruction {
 protected:
-  virtual ShuffleVectorInst *clone_impl() const;
+  ShuffleVectorInst *clone_impl() const override;
 
 public:
   // allocate space for exactly three operands
@@ -1676,7 +1736,7 @@ public:
   }
   ShuffleVectorInst(Value *V1, Value *V2, Value *Mask,
                     const Twine &NameStr = "",
-                    Instruction *InsertBefor = 0);
+                    Instruction *InsertBefor = nullptr);
   ShuffleVectorInst(Value *V1, Value *V2, Value *Mask,
                     const Twine &NameStr, BasicBlock *InsertAtEnd);
 
@@ -1768,13 +1828,13 @@ class ExtractValueInst : public UnaryInstruction {
     return User::operator new(s, 1);
   }
 protected:
-  virtual ExtractValueInst *clone_impl() const;
+  ExtractValueInst *clone_impl() const override;
 
 public:
   static ExtractValueInst *Create(Value *Agg,
                                   ArrayRef<unsigned> Idxs,
                                   const Twine &NameStr = "",
-                                  Instruction *InsertBefore = 0) {
+                                  Instruction *InsertBefore = nullptr) {
     return new
       ExtractValueInst(Agg, Idxs, NameStr, InsertBefore);
   }
@@ -1875,11 +1935,11 @@ class InsertValueInst : public Instruction {
   /// and two index insertvalue instructions are so common.
   InsertValueInst(Value *Agg, Value *Val,
                   unsigned Idx, const Twine &NameStr = "",
-                  Instruction *InsertBefore = 0);
+                  Instruction *InsertBefore = nullptr);
   InsertValueInst(Value *Agg, Value *Val, unsigned Idx,
                   const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  virtual InsertValueInst *clone_impl() const;
+  InsertValueInst *clone_impl() const override;
 public:
   // allocate space for exactly two operands
   void *operator new(size_t s) {
@@ -1889,7 +1949,7 @@ public:
   static InsertValueInst *Create(Value *Agg, Value *Val,
                                  ArrayRef<unsigned> Idxs,
                                  const Twine &NameStr = "",
-                                 Instruction *InsertBefore = 0) {
+                                 Instruction *InsertBefore = nullptr) {
     return new InsertValueInst(Agg, Val, Idxs, NameStr, InsertBefore);
   }
   static InsertValueInst *Create(Value *Agg, Value *Val,
@@ -1994,8 +2054,9 @@ class PHINode : public Instruction {
     return User::operator new(s, 0);
   }
   explicit PHINode(Type *Ty, unsigned NumReservedValues,
-                   const Twine &NameStr = "", Instruction *InsertBefore = 0)
-    : Instruction(Ty, Instruction::PHI, 0, 0, InsertBefore),
+                   const Twine &NameStr = "",
+                   Instruction *InsertBefore = nullptr)
+    : Instruction(Ty, Instruction::PHI, nullptr, 0, InsertBefore),
       ReservedSpace(NumReservedValues) {
     setName(NameStr);
     OperandList = allocHungoffUses(ReservedSpace);
@@ -2003,7 +2064,7 @@ class PHINode : public Instruction {
 
   PHINode(Type *Ty, unsigned NumReservedValues, const Twine &NameStr,
           BasicBlock *InsertAtEnd)
-    : Instruction(Ty, Instruction::PHI, 0, 0, InsertAtEnd),
+    : Instruction(Ty, Instruction::PHI, nullptr, 0, InsertAtEnd),
       ReservedSpace(NumReservedValues) {
     setName(NameStr);
     OperandList = allocHungoffUses(ReservedSpace);
@@ -2014,13 +2075,13 @@ protected:
   // values and pointers to the incoming blocks, all in one allocation.
   Use *allocHungoffUses(unsigned) const;
 
-  virtual PHINode *clone_impl() const;
+  PHINode *clone_impl() const override;
 public:
   /// Constructors - NumReservedValues is a hint for the number of incoming
   /// edges that this phi node will have (use 0 if you really have no idea).
   static PHINode *Create(Type *Ty, unsigned NumReservedValues,
                          const Twine &NameStr = "",
-                         Instruction *InsertBefore = 0) {
+                         Instruction *InsertBefore = nullptr) {
     return new PHINode(Ty, NumReservedValues, NameStr, InsertBefore);
   }
   static PHINode *Create(Type *Ty, unsigned NumReservedValues,
@@ -2094,8 +2155,7 @@ public:
   /// getIncomingBlock - Return incoming basic block corresponding
   /// to value use iterator.
   ///
-  template <typename U>
-  BasicBlock *getIncomingBlock(value_use_iterator<U> I) const {
+  BasicBlock *getIncomingBlock(Value::const_user_iterator I) const {
     return getIncomingBlock(I.getUse());
   }
 
@@ -2206,14 +2266,14 @@ private:
                           unsigned NumReservedValues, const Twine &NameStr,
                           BasicBlock *InsertAtEnd);
 protected:
-  virtual LandingPadInst *clone_impl() const;
+  LandingPadInst *clone_impl() const override;
 public:
   /// Constructors - NumReservedClauses is a hint for the number of incoming
   /// clauses that this landingpad will have (use 0 if you really have no idea).
   static LandingPadInst *Create(Type *RetTy, Value *PersonalityFn,
                                 unsigned NumReservedClauses,
                                 const Twine &NameStr = "",
-                                Instruction *InsertBefore = 0);
+                                Instruction *InsertBefore = nullptr);
   static LandingPadInst *Create(Type *RetTy, Value *PersonalityFn,
                                 unsigned NumReservedClauses,
                                 const Twine &NameStr, BasicBlock *InsertAtEnd);
@@ -2299,15 +2359,15 @@ private:
   //
   // NOTE: If the Value* passed is of type void then the constructor behaves as
   // if it was passed NULL.
-  explicit ReturnInst(LLVMContext &C, Value *retVal = 0,
-                      Instruction *InsertBefore = 0);
+  explicit ReturnInst(LLVMContext &C, Value *retVal = nullptr,
+                      Instruction *InsertBefore = nullptr);
   ReturnInst(LLVMContext &C, Value *retVal, BasicBlock *InsertAtEnd);
   explicit ReturnInst(LLVMContext &C, BasicBlock *InsertAtEnd);
 protected:
-  virtual ReturnInst *clone_impl() const;
+  ReturnInst *clone_impl() const override;
 public:
-  static ReturnInst* Create(LLVMContext &C, Value *retVal = 0,
-                            Instruction *InsertBefore = 0) {
+  static ReturnInst* Create(LLVMContext &C, Value *retVal = nullptr,
+                            Instruction *InsertBefore = nullptr) {
     return new(!!retVal) ReturnInst(C, retVal, InsertBefore);
   }
   static ReturnInst* Create(LLVMContext &C, Value *retVal,
@@ -2324,7 +2384,7 @@ public:
 
   /// Convenience accessor. Returns null if there is no return value.
   Value *getReturnValue() const {
-    return getNumOperands() != 0 ? getOperand(0) : 0;
+    return getNumOperands() != 0 ? getOperand(0) : nullptr;
   }
 
   unsigned getNumSuccessors() const { return 0; }
@@ -2337,9 +2397,9 @@ public:
     return isa<Instruction>(V) && classof(cast<Instruction>(V));
   }
  private:
-  virtual BasicBlock *getSuccessorV(unsigned idx) const;
-  virtual unsigned getNumSuccessorsV() const;
-  virtual void setSuccessorV(unsigned idx, BasicBlock *B);
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
 };
 
 template <>
@@ -2369,20 +2429,21 @@ class BranchInst : public TerminatorInst {
   // BranchInst(BB* T, BB *F, Value *C, Inst *I) - 'br C, T, F', insert before I
   // BranchInst(BB* B, BB *I)                    - 'br B'        insert at end
   // BranchInst(BB* T, BB *F, Value *C, BB *I)   - 'br C, T, F', insert at end
-  explicit BranchInst(BasicBlock *IfTrue, Instruction *InsertBefore = 0);
+  explicit BranchInst(BasicBlock *IfTrue, Instruction *InsertBefore = nullptr);
   BranchInst(BasicBlock *IfTrue, BasicBlock *IfFalse, Value *Cond,
-             Instruction *InsertBefore = 0);
+             Instruction *InsertBefore = nullptr);
   BranchInst(BasicBlock *IfTrue, BasicBlock *InsertAtEnd);
   BranchInst(BasicBlock *IfTrue, BasicBlock *IfFalse, Value *Cond,
              BasicBlock *InsertAtEnd);
 protected:
-  virtual BranchInst *clone_impl() const;
+  BranchInst *clone_impl() const override;
 public:
-  static BranchInst *Create(BasicBlock *IfTrue, Instruction *InsertBefore = 0) {
+  static BranchInst *Create(BasicBlock *IfTrue,
+                            Instruction *InsertBefore = nullptr) {
     return new(1) BranchInst(IfTrue, InsertBefore);
   }
   static BranchInst *Create(BasicBlock *IfTrue, BasicBlock *IfFalse,
-                            Value *Cond, Instruction *InsertBefore = 0) {
+                            Value *Cond, Instruction *InsertBefore = nullptr) {
     return new(3) BranchInst(IfTrue, IfFalse, Cond, InsertBefore);
   }
   static BranchInst *Create(BasicBlock *IfTrue, BasicBlock *InsertAtEnd) {
@@ -2436,9 +2497,9 @@ public:
     return isa<Instruction>(V) && classof(cast<Instruction>(V));
   }
 private:
-  virtual BasicBlock *getSuccessorV(unsigned idx) const;
-  virtual unsigned getNumSuccessorsV() const;
-  virtual void setSuccessorV(unsigned idx, BasicBlock *B);
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
 };
 
 template <>
@@ -2457,31 +2518,10 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(BranchInst, Value)
 class SwitchInst : public TerminatorInst {
   void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
   unsigned ReservedSpace;
-  // Operands format:
   // Operand[0]    = Value to switch on
   // Operand[1]    = Default basic block destination
   // Operand[2n  ] = Value to match
   // Operand[2n+1] = BasicBlock to go to on match
-
-  // Store case values separately from operands list. We needn't User-Use
-  // concept here, since it is just a case value, it will always constant,
-  // and case value couldn't reused with another instructions/values.
-  // Additionally:
-  // It allows us to use custom type for case values that is not inherited
-  // from Value. Since case value is a complex type that implements
-  // the subset of integers, we needn't extract sub-constants within
-  // slow getAggregateElement method.
-  // For case values we will use std::list to by two reasons:
-  // 1. It allows to add/remove cases without whole collection reallocation.
-  // 2. In most of cases we needn't random access.
-  // Currently case values are also stored in Operands List, but it will moved
-  // out in future commits.
-  typedef std::list<IntegersSubset> Subsets;
-  typedef Subsets::iterator SubsetsIt;
-  typedef Subsets::const_iterator SubsetsConstIt;
-
-  Subsets TheSubsets;
-
   SwitchInst(const SwitchInst &SI);
   void init(Value *Value, BasicBlock *Default, unsigned NumReserved);
   void growOperands();
@@ -2503,30 +2543,127 @@ class SwitchInst : public TerminatorInst {
   SwitchInst(Value *Value, BasicBlock *Default, unsigned NumCases,
              BasicBlock *InsertAtEnd);
 protected:
-  virtual SwitchInst *clone_impl() const;
+  SwitchInst *clone_impl() const override;
 public:
-
-  // FIXME: Currently there are a lot of unclean template parameters,
-  // we need to make refactoring in future.
-  // All these parameters are used to implement both iterator and const_iterator
-  // without code duplication.
-  // SwitchInstTy may be "const SwitchInst" or "SwitchInst"
-  // ConstantIntTy may be "const ConstantInt" or "ConstantInt"
-  // SubsetsItTy may be SubsetsConstIt or SubsetsIt
-  // BasicBlockTy may be "const BasicBlock" or "BasicBlock"
-  template <class SwitchInstTy, class ConstantIntTy,
-            class SubsetsItTy, class BasicBlockTy>
-    class CaseIteratorT;
-
-  typedef CaseIteratorT<const SwitchInst, const ConstantInt,
-                        SubsetsConstIt, const BasicBlock> ConstCaseIt;
-  class CaseIt;
 
   // -2
   static const unsigned DefaultPseudoIndex = static_cast<unsigned>(~0L-1);
 
+  template <class SwitchInstTy, class ConstantIntTy, class BasicBlockTy>
+  class CaseIteratorT {
+  protected:
+
+    SwitchInstTy *SI;
+    unsigned Index;
+
+  public:
+
+    typedef CaseIteratorT<SwitchInstTy, ConstantIntTy, BasicBlockTy> Self;
+
+    /// Initializes case iterator for given SwitchInst and for given
+    /// case number.
+    CaseIteratorT(SwitchInstTy *SI, unsigned CaseNum) {
+      this->SI = SI;
+      Index = CaseNum;
+    }
+
+    /// Initializes case iterator for given SwitchInst and for given
+    /// TerminatorInst's successor index.
+    static Self fromSuccessorIndex(SwitchInstTy *SI, unsigned SuccessorIndex) {
+      assert(SuccessorIndex < SI->getNumSuccessors() &&
+             "Successor index # out of range!");
+      return SuccessorIndex != 0 ?
+             Self(SI, SuccessorIndex - 1) :
+             Self(SI, DefaultPseudoIndex);
+    }
+
+    /// Resolves case value for current case.
+    ConstantIntTy *getCaseValue() {
+      assert(Index < SI->getNumCases() && "Index out the number of cases.");
+      return reinterpret_cast<ConstantIntTy*>(SI->getOperand(2 + Index*2));
+    }
+
+    /// Resolves successor for current case.
+    BasicBlockTy *getCaseSuccessor() {
+      assert((Index < SI->getNumCases() ||
+              Index == DefaultPseudoIndex) &&
+             "Index out the number of cases.");
+      return SI->getSuccessor(getSuccessorIndex());
+    }
+
+    /// Returns number of current case.
+    unsigned getCaseIndex() const { return Index; }
+
+    /// Returns TerminatorInst's successor index for current case successor.
+    unsigned getSuccessorIndex() const {
+      assert((Index == DefaultPseudoIndex || Index < SI->getNumCases()) &&
+             "Index out the number of cases.");
+      return Index != DefaultPseudoIndex ? Index + 1 : 0;
+    }
+
+    Self operator++() {
+      // Check index correctness after increment.
+      // Note: Index == getNumCases() means end().
+      assert(Index+1 <= SI->getNumCases() && "Index out the number of cases.");
+      ++Index;
+      return *this;
+    }
+    Self operator++(int) {
+      Self tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+    Self operator--() {
+      // Check index correctness after decrement.
+      // Note: Index == getNumCases() means end().
+      // Also allow "-1" iterator here. That will became valid after ++.
+      assert((Index == 0 || Index-1 <= SI->getNumCases()) &&
+             "Index out the number of cases.");
+      --Index;
+      return *this;
+    }
+    Self operator--(int) {
+      Self tmp = *this;
+      --(*this);
+      return tmp;
+    }
+    bool operator==(const Self& RHS) const {
+      assert(RHS.SI == SI && "Incompatible operators.");
+      return RHS.Index == Index;
+    }
+    bool operator!=(const Self& RHS) const {
+      assert(RHS.SI == SI && "Incompatible operators.");
+      return RHS.Index != Index;
+    }
+  };
+
+  typedef CaseIteratorT<const SwitchInst, const ConstantInt, const BasicBlock>
+    ConstCaseIt;
+
+  class CaseIt : public CaseIteratorT<SwitchInst, ConstantInt, BasicBlock> {
+
+    typedef CaseIteratorT<SwitchInst, ConstantInt, BasicBlock> ParentTy;
+
+  public:
+
+    CaseIt(const ParentTy& Src) : ParentTy(Src) {}
+    CaseIt(SwitchInst *SI, unsigned CaseNum) : ParentTy(SI, CaseNum) {}
+
+    /// Sets the new value for current case.
+    void setValue(ConstantInt *V) {
+      assert(Index < SI->getNumCases() && "Index out the number of cases.");
+      SI->setOperand(2 + Index*2, reinterpret_cast<Value*>(V));
+    }
+
+    /// Sets the new successor for current case.
+    void setSuccessor(BasicBlock *S) {
+      SI->setSuccessor(getSuccessorIndex(), S);
+    }
+  };
+
   static SwitchInst *Create(Value *Value, BasicBlock *Default,
-                            unsigned NumCases, Instruction *InsertBefore = 0) {
+                            unsigned NumCases,
+                            Instruction *InsertBefore = nullptr) {
     return new SwitchInst(Value, Default, NumCases, InsertBefore);
   }
   static SwitchInst *Create(Value *Value, BasicBlock *Default,
@@ -2560,23 +2697,23 @@ public:
   /// Returns a read/write iterator that points to the first
   /// case in SwitchInst.
   CaseIt case_begin() {
-    return CaseIt(this, 0, TheSubsets.begin());
+    return CaseIt(this, 0);
   }
   /// Returns a read-only iterator that points to the first
   /// case in the SwitchInst.
   ConstCaseIt case_begin() const {
-    return ConstCaseIt(this, 0, TheSubsets.begin());
+    return ConstCaseIt(this, 0);
   }
 
   /// Returns a read/write iterator that points one past the last
   /// in the SwitchInst.
   CaseIt case_end() {
-    return CaseIt(this, getNumCases(), TheSubsets.end());
+    return CaseIt(this, getNumCases());
   }
   /// Returns a read-only iterator that points one past the last
   /// in the SwitchInst.
   ConstCaseIt case_end() const {
-    return ConstCaseIt(this, getNumCases(), TheSubsets.end());
+    return ConstCaseIt(this, getNumCases());
   }
   /// Returns an iterator that points to the default case.
   /// Note: this iterator allows to resolve successor only. Attempt
@@ -2584,10 +2721,10 @@ public:
   /// Also note, that increment and decrement also causes an assertion and
   /// makes iterator invalid.
   CaseIt case_default() {
-    return CaseIt(this, DefaultPseudoIndex, TheSubsets.end());
+    return CaseIt(this, DefaultPseudoIndex);
   }
   ConstCaseIt case_default() const {
-    return ConstCaseIt(this, DefaultPseudoIndex, TheSubsets.end());
+    return ConstCaseIt(this, DefaultPseudoIndex);
   }
 
   /// findCaseValue - Search all of the case values for the specified constant.
@@ -2596,13 +2733,13 @@ public:
   /// that it is handled by the default handler.
   CaseIt findCaseValue(const ConstantInt *C) {
     for (CaseIt i = case_begin(), e = case_end(); i != e; ++i)
-      if (i.getCaseValueEx().isSatisfies(IntItem::fromConstantInt(C)))
+      if (i.getCaseValue() == C)
         return i;
     return case_default();
   }
   ConstCaseIt findCaseValue(const ConstantInt *C) const {
     for (ConstCaseIt i = case_begin(), e = case_end(); i != e; ++i)
-      if (i.getCaseValueEx().isSatisfies(IntItem::fromConstantInt(C)))
+      if (i.getCaseValue() == C)
         return i;
     return case_default();
   }
@@ -2610,12 +2747,12 @@ public:
   /// findCaseDest - Finds the unique case value for a given successor. Returns
   /// null if the successor is not found, not unique, or is the default case.
   ConstantInt *findCaseDest(BasicBlock *BB) {
-    if (BB == getDefaultDest()) return NULL;
+    if (BB == getDefaultDest()) return nullptr;
 
-    ConstantInt *CI = NULL;
+    ConstantInt *CI = nullptr;
     for (CaseIt i = case_begin(), e = case_end(); i != e; ++i) {
       if (i.getCaseSuccessor() == BB) {
-        if (CI) return NULL;   // Multiple cases lead to BB.
+        if (CI) return nullptr;   // Multiple cases lead to BB.
         else CI = i.getCaseValue();
       }
     }
@@ -2628,19 +2765,13 @@ public:
   /// point to the added case.
   void addCase(ConstantInt *OnVal, BasicBlock *Dest);
 
-  /// addCase - Add an entry to the switch instruction.
-  /// Note:
-  /// This action invalidates case_end(). Old case_end() iterator will
-  /// point to the added case.
-  void addCase(IntegersSubset& OnVal, BasicBlock *Dest);
-
   /// removeCase - This method removes the specified case and its successor
   /// from the switch instruction. Note that this operation may reorder the
   /// remaining cases at index idx and above.
   /// Note:
   /// This action invalidates iterators for all cases following the one removed,
   /// including the case_end() iterator.
-  void removeCase(CaseIt& i);
+  void removeCase(CaseIt i);
 
   unsigned getNumSuccessors() const { return getNumOperands()/2; }
   BasicBlock *getSuccessor(unsigned idx) const {
@@ -2652,190 +2783,7 @@ public:
     setOperand(idx*2+1, (Value*)NewSucc);
   }
 
-  uint16_t hash() const {
-    uint32_t NumberOfCases = (uint32_t)getNumCases();
-    uint16_t Hash = (0xFFFF & NumberOfCases) ^ (NumberOfCases >> 16);
-    for (ConstCaseIt i = case_begin(), e = case_end();
-         i != e; ++i) {
-      uint32_t NumItems = (uint32_t)i.getCaseValueEx().getNumItems();
-      Hash = (Hash << 1) ^ (0xFFFF & NumItems) ^ (NumItems >> 16);
-    }
-    return Hash;
-  }
-
-  // Case iterators definition.
-
-  template <class SwitchInstTy, class ConstantIntTy,
-            class SubsetsItTy, class BasicBlockTy>
-  class CaseIteratorT {
-  protected:
-
-    SwitchInstTy *SI;
-    unsigned Index;
-    SubsetsItTy SubsetIt;
-
-    /// Initializes case iterator for given SwitchInst and for given
-    /// case number.
-    friend class SwitchInst;
-    CaseIteratorT(SwitchInstTy *SI, unsigned SuccessorIndex,
-                  SubsetsItTy CaseValueIt) {
-      this->SI = SI;
-      Index = SuccessorIndex;
-      this->SubsetIt = CaseValueIt;
-    }
-
-  public:
-    typedef typename SubsetsItTy::reference IntegersSubsetRef;
-    typedef CaseIteratorT<SwitchInstTy, ConstantIntTy,
-                          SubsetsItTy, BasicBlockTy> Self;
-
-    CaseIteratorT(SwitchInstTy *SI, unsigned CaseNum) {
-          this->SI = SI;
-          Index = CaseNum;
-          SubsetIt = SI->TheSubsets.begin();
-          std::advance(SubsetIt, CaseNum);
-        }
-
-
-    /// Initializes case iterator for given SwitchInst and for given
-    /// TerminatorInst's successor index.
-    static Self fromSuccessorIndex(SwitchInstTy *SI, unsigned SuccessorIndex) {
-      assert(SuccessorIndex < SI->getNumSuccessors() &&
-             "Successor index # out of range!");
-      return SuccessorIndex != 0 ?
-             Self(SI, SuccessorIndex - 1) :
-             Self(SI, DefaultPseudoIndex);
-    }
-
-    /// Resolves case value for current case.
-    ConstantIntTy *getCaseValue() {
-      assert(Index < SI->getNumCases() && "Index out the number of cases.");
-      IntegersSubsetRef CaseRanges = *SubsetIt;
-
-      // FIXME: Currently we work with ConstantInt based cases.
-      // So return CaseValue as ConstantInt.
-      return CaseRanges.getSingleNumber(0).toConstantInt();
-    }
-
-    /// Resolves case value for current case.
-    IntegersSubsetRef getCaseValueEx() {
-      assert(Index < SI->getNumCases() && "Index out the number of cases.");
-      return *SubsetIt;
-    }
-
-    /// Resolves successor for current case.
-    BasicBlockTy *getCaseSuccessor() {
-      assert((Index < SI->getNumCases() ||
-              Index == DefaultPseudoIndex) &&
-             "Index out the number of cases.");
-      return SI->getSuccessor(getSuccessorIndex());
-    }
-
-    /// Returns number of current case.
-    unsigned getCaseIndex() const { return Index; }
-
-    /// Returns TerminatorInst's successor index for current case successor.
-    unsigned getSuccessorIndex() const {
-      assert((Index == DefaultPseudoIndex || Index < SI->getNumCases()) &&
-             "Index out the number of cases.");
-      return Index != DefaultPseudoIndex ? Index + 1 : 0;
-    }
-
-    Self operator++() {
-      // Check index correctness after increment.
-      // Note: Index == getNumCases() means end().
-      assert(Index+1 <= SI->getNumCases() && "Index out the number of cases.");
-      ++Index;
-      if (Index == 0)
-        SubsetIt = SI->TheSubsets.begin();
-      else
-        ++SubsetIt;
-      return *this;
-    }
-    Self operator++(int) {
-      Self tmp = *this;
-      ++(*this);
-      return tmp;
-    }
-    Self operator--() {
-      // Check index correctness after decrement.
-      // Note: Index == getNumCases() means end().
-      // Also allow "-1" iterator here. That will became valid after ++.
-      unsigned NumCases = SI->getNumCases();
-      assert((Index == 0 || Index-1 <= NumCases) &&
-             "Index out the number of cases.");
-      --Index;
-      if (Index == NumCases) {
-        SubsetIt = SI->TheSubsets.end();
-        return *this;
-      }
-
-      if (Index != -1U)
-        --SubsetIt;
-
-      return *this;
-    }
-    Self operator--(int) {
-      Self tmp = *this;
-      --(*this);
-      return tmp;
-    }
-    bool operator==(const Self& RHS) const {
-      assert(RHS.SI == SI && "Incompatible operators.");
-      return RHS.Index == Index;
-    }
-    bool operator!=(const Self& RHS) const {
-      assert(RHS.SI == SI && "Incompatible operators.");
-      return RHS.Index != Index;
-    }
-  };
-
-  class CaseIt : public CaseIteratorT<SwitchInst, ConstantInt,
-                                      SubsetsIt, BasicBlock> {
-    typedef CaseIteratorT<SwitchInst, ConstantInt, SubsetsIt, BasicBlock>
-      ParentTy;
-
-  protected:
-    friend class SwitchInst;
-    CaseIt(SwitchInst *SI, unsigned CaseNum, SubsetsIt SubsetIt) :
-      ParentTy(SI, CaseNum, SubsetIt) {}
-
-    void updateCaseValueOperand(IntegersSubset& V) {
-      SI->setOperand(2 + Index*2, reinterpret_cast<Value*>((Constant*)V));
-    }
-
-  public:
-
-    CaseIt(SwitchInst *SI, unsigned CaseNum) : ParentTy(SI, CaseNum) {}
-
-    CaseIt(const ParentTy& Src) : ParentTy(Src) {}
-
-    /// Sets the new value for current case.
-    void setValue(ConstantInt *V) {
-      assert(Index < SI->getNumCases() && "Index out the number of cases.");
-      IntegersSubsetToBB Mapping;
-      // FIXME: Currently we work with ConstantInt based cases.
-      // So inititalize IntItem container directly from ConstantInt.
-      Mapping.add(IntItem::fromConstantInt(V));
-      *SubsetIt = Mapping.getCase();
-      updateCaseValueOperand(*SubsetIt);
-    }
-
-    /// Sets the new value for current case.
-    void setValueEx(IntegersSubset& V) {
-      assert(Index < SI->getNumCases() && "Index out the number of cases.");
-      *SubsetIt = V;
-      updateCaseValueOperand(*SubsetIt);
-    }
-
-    /// Sets the new successor for current case.
-    void setSuccessor(BasicBlock *S) {
-      SI->setSuccessor(getSuccessorIndex(), S);
-    }
-  };
-
   // Methods for support type inquiry through isa, cast, and dyn_cast:
-
   static inline bool classof(const Instruction *I) {
     return I->getOpcode() == Instruction::Switch;
   }
@@ -2843,9 +2791,9 @@ public:
     return isa<Instruction>(V) && classof(cast<Instruction>(V));
   }
 private:
-  virtual BasicBlock *getSuccessorV(unsigned idx) const;
-  virtual unsigned getNumSuccessorsV() const;
-  virtual void setSuccessorV(unsigned idx, BasicBlock *B);
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
 };
 
 template <>
@@ -2888,10 +2836,10 @@ class IndirectBrInst : public TerminatorInst {
   /// autoinserts at the end of the specified BasicBlock.
   IndirectBrInst(Value *Address, unsigned NumDests, BasicBlock *InsertAtEnd);
 protected:
-  virtual IndirectBrInst *clone_impl() const;
+  IndirectBrInst *clone_impl() const override;
 public:
   static IndirectBrInst *Create(Value *Address, unsigned NumDests,
-                                Instruction *InsertBefore = 0) {
+                                Instruction *InsertBefore = nullptr) {
     return new IndirectBrInst(Address, NumDests, InsertBefore);
   }
   static IndirectBrInst *Create(Value *Address, unsigned NumDests,
@@ -2941,9 +2889,9 @@ public:
     return isa<Instruction>(V) && classof(cast<Instruction>(V));
   }
 private:
-  virtual BasicBlock *getSuccessorV(unsigned idx) const;
-  virtual unsigned getNumSuccessorsV() const;
-  virtual void setSuccessorV(unsigned idx, BasicBlock *B);
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
 };
 
 template <>
@@ -2980,12 +2928,12 @@ class InvokeInst : public TerminatorInst {
                     ArrayRef<Value *> Args, unsigned Values,
                     const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  virtual InvokeInst *clone_impl() const;
+  InvokeInst *clone_impl() const override;
 public:
   static InvokeInst *Create(Value *Func,
                             BasicBlock *IfNormal, BasicBlock *IfException,
                             ArrayRef<Value *> Args, const Twine &NameStr = "",
-                            Instruction *InsertBefore = 0) {
+                            Instruction *InsertBefore = nullptr) {
     unsigned Values = unsigned(Args.size()) + 3;
     return new(Values) InvokeInst(Func, IfNormal, IfException, Args,
                                   Values, NameStr, InsertBefore);
@@ -3011,6 +2959,20 @@ public:
   Value *getArgOperand(unsigned i) const { return getOperand(i); }
   void setArgOperand(unsigned i, Value *v) { setOperand(i, v); }
 
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<op_iterator> arg_operands() {
+    return iterator_range<op_iterator>(op_begin(), op_end() - 3);
+  }
+
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<const_op_iterator> arg_operands() const {
+    return iterator_range<const_op_iterator>(op_begin(), op_end() - 3);
+  }
+
+  /// \brief Wrappers for getting the \c Use of a invoke argument.
+  const Use &getArgOperandUse(unsigned i) const { return getOperandUse(i); }
+  Use &getArgOperandUse(unsigned i) { return getOperandUse(i); }
+
   /// getCallingConv/setCallingConv - Get or set the calling convention of this
   /// function call.
   CallingConv::ID getCallingConv() const {
@@ -3034,7 +2996,7 @@ public:
   /// removeAttribute - removes the attribute from the list of attributes.
   void removeAttribute(unsigned i, Attribute attr);
 
-  /// \brief Determine whether this call has the NoAlias attribute.
+  /// \brief Determine whether this call has the given attribute.
   bool hasFnAttr(Attribute::AttrKind A) const {
     assert(A != Attribute::NoBuiltin &&
            "Use CallInst::isNoBuiltin() to check for Attribute::NoBuiltin");
@@ -3090,6 +3052,12 @@ public:
   bool doesNotThrow() const { return hasFnAttr(Attribute::NoUnwind); }
   void setDoesNotThrow() {
     addAttribute(AttributeSet::FunctionIndex, Attribute::NoUnwind);
+  }
+
+  /// \brief Determine if the invoke cannot be duplicated.
+  bool cannotDuplicate() const {return hasFnAttr(Attribute::NoDuplicate); }
+  void setCannotDuplicate() {
+    addAttribute(AttributeSet::FunctionIndex, Attribute::NoDuplicate);
   }
 
   /// \brief Determine if the call returns a structure through first
@@ -3160,9 +3128,9 @@ public:
   }
 
 private:
-  virtual BasicBlock *getSuccessorV(unsigned idx) const;
-  virtual unsigned getNumSuccessorsV() const;
-  virtual void setSuccessorV(unsigned idx, BasicBlock *B);
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
 
   bool hasFnAttrImpl(Attribute::AttrKind A) const;
 
@@ -3212,12 +3180,12 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(InvokeInst, Value)
 class ResumeInst : public TerminatorInst {
   ResumeInst(const ResumeInst &RI);
 
-  explicit ResumeInst(Value *Exn, Instruction *InsertBefore=0);
+  explicit ResumeInst(Value *Exn, Instruction *InsertBefore=nullptr);
   ResumeInst(Value *Exn, BasicBlock *InsertAtEnd);
 protected:
-  virtual ResumeInst *clone_impl() const;
+  ResumeInst *clone_impl() const override;
 public:
-  static ResumeInst *Create(Value *Exn, Instruction *InsertBefore = 0) {
+  static ResumeInst *Create(Value *Exn, Instruction *InsertBefore = nullptr) {
     return new(1) ResumeInst(Exn, InsertBefore);
   }
   static ResumeInst *Create(Value *Exn, BasicBlock *InsertAtEnd) {
@@ -3240,9 +3208,9 @@ public:
     return isa<Instruction>(V) && classof(cast<Instruction>(V));
   }
 private:
-  virtual BasicBlock *getSuccessorV(unsigned idx) const;
-  virtual unsigned getNumSuccessorsV() const;
-  virtual void setSuccessorV(unsigned idx, BasicBlock *B);
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
 };
 
 template <>
@@ -3264,14 +3232,14 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(ResumeInst, Value)
 class UnreachableInst : public TerminatorInst {
   void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
 protected:
-  virtual UnreachableInst *clone_impl() const;
+  UnreachableInst *clone_impl() const override;
 
 public:
   // allocate space for exactly zero operands
   void *operator new(size_t s) {
     return User::operator new(s, 0);
   }
-  explicit UnreachableInst(LLVMContext &C, Instruction *InsertBefore = 0);
+  explicit UnreachableInst(LLVMContext &C, Instruction *InsertBefore = nullptr);
   explicit UnreachableInst(LLVMContext &C, BasicBlock *InsertAtEnd);
 
   unsigned getNumSuccessors() const { return 0; }
@@ -3284,9 +3252,9 @@ public:
     return isa<Instruction>(V) && classof(cast<Instruction>(V));
   }
 private:
-  virtual BasicBlock *getSuccessorV(unsigned idx) const;
-  virtual unsigned getNumSuccessorsV() const;
-  virtual void setSuccessorV(unsigned idx, BasicBlock *B);
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
 };
 
 //===----------------------------------------------------------------------===//
@@ -3297,21 +3265,21 @@ private:
 class TruncInst : public CastInst {
 protected:
   /// \brief Clone an identical TruncInst
-  virtual TruncInst *clone_impl() const;
+  TruncInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   TruncInst(
-    Value *S,                     ///< The value to be truncated
-    Type *Ty,               ///< The (smaller) type to truncate to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be truncated
+    Type *Ty,                           ///< The (smaller) type to truncate to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   TruncInst(
     Value *S,                     ///< The value to be truncated
-    Type *Ty,               ///< The (smaller) type to truncate to
+    Type *Ty,                     ///< The (smaller) type to truncate to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3333,21 +3301,21 @@ public:
 class ZExtInst : public CastInst {
 protected:
   /// \brief Clone an identical ZExtInst
-  virtual ZExtInst *clone_impl() const;
+  ZExtInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   ZExtInst(
-    Value *S,                     ///< The value to be zero extended
-    Type *Ty,               ///< The type to zero extend to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be zero extended
+    Type *Ty,                           ///< The type to zero extend to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end semantics.
   ZExtInst(
     Value *S,                     ///< The value to be zero extended
-    Type *Ty,               ///< The type to zero extend to
+    Type *Ty,                     ///< The type to zero extend to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3369,21 +3337,21 @@ public:
 class SExtInst : public CastInst {
 protected:
   /// \brief Clone an identical SExtInst
-  virtual SExtInst *clone_impl() const;
+  SExtInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   SExtInst(
-    Value *S,                     ///< The value to be sign extended
-    Type *Ty,               ///< The type to sign extend to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be sign extended
+    Type *Ty,                           ///< The type to sign extend to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   SExtInst(
     Value *S,                     ///< The value to be sign extended
-    Type *Ty,               ///< The type to sign extend to
+    Type *Ty,                     ///< The type to sign extend to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3405,21 +3373,21 @@ public:
 class FPTruncInst : public CastInst {
 protected:
   /// \brief Clone an identical FPTruncInst
-  virtual FPTruncInst *clone_impl() const;
+  FPTruncInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   FPTruncInst(
-    Value *S,                     ///< The value to be truncated
-    Type *Ty,               ///< The type to truncate to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be truncated
+    Type *Ty,                           ///< The type to truncate to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-before-instruction semantics
   FPTruncInst(
     Value *S,                     ///< The value to be truncated
-    Type *Ty,               ///< The type to truncate to
+    Type *Ty,                     ///< The type to truncate to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3441,21 +3409,21 @@ public:
 class FPExtInst : public CastInst {
 protected:
   /// \brief Clone an identical FPExtInst
-  virtual FPExtInst *clone_impl() const;
+  FPExtInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   FPExtInst(
-    Value *S,                     ///< The value to be extended
-    Type *Ty,               ///< The type to extend to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be extended
+    Type *Ty,                           ///< The type to extend to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   FPExtInst(
     Value *S,                     ///< The value to be extended
-    Type *Ty,               ///< The type to extend to
+    Type *Ty,                     ///< The type to extend to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3477,21 +3445,21 @@ public:
 class UIToFPInst : public CastInst {
 protected:
   /// \brief Clone an identical UIToFPInst
-  virtual UIToFPInst *clone_impl() const;
+  UIToFPInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   UIToFPInst(
-    Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be converted
+    Type *Ty,                           ///< The type to convert to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   UIToFPInst(
     Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
+    Type *Ty,                     ///< The type to convert to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3513,21 +3481,21 @@ public:
 class SIToFPInst : public CastInst {
 protected:
   /// \brief Clone an identical SIToFPInst
-  virtual SIToFPInst *clone_impl() const;
+  SIToFPInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   SIToFPInst(
-    Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be converted
+    Type *Ty,                           ///< The type to convert to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   SIToFPInst(
     Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
+    Type *Ty,                     ///< The type to convert to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3549,21 +3517,21 @@ public:
 class FPToUIInst  : public CastInst {
 protected:
   /// \brief Clone an identical FPToUIInst
-  virtual FPToUIInst *clone_impl() const;
+  FPToUIInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   FPToUIInst(
-    Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be converted
+    Type *Ty,                           ///< The type to convert to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   FPToUIInst(
     Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
+    Type *Ty,                     ///< The type to convert to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< Where to insert the new instruction
   );
@@ -3585,21 +3553,21 @@ public:
 class FPToSIInst  : public CastInst {
 protected:
   /// \brief Clone an identical FPToSIInst
-  virtual FPToSIInst *clone_impl() const;
+  FPToSIInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   FPToSIInst(
-    Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be converted
+    Type *Ty,                           ///< The type to convert to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   FPToSIInst(
     Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
+    Type *Ty,                     ///< The type to convert to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3622,22 +3590,22 @@ class IntToPtrInst : public CastInst {
 public:
   /// \brief Constructor with insert-before-instruction semantics
   IntToPtrInst(
-    Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be converted
+    Type *Ty,                           ///< The type to convert to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   IntToPtrInst(
     Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
+    Type *Ty,                     ///< The type to convert to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
 
   /// \brief Clone an identical IntToPtrInst
-  virtual IntToPtrInst *clone_impl() const;
+  IntToPtrInst *clone_impl() const override;
 
   /// \brief Returns the address space of this instruction's pointer type.
   unsigned getAddressSpace() const {
@@ -3661,21 +3629,21 @@ public:
 class PtrToIntInst : public CastInst {
 protected:
   /// \brief Clone an identical PtrToIntInst
-  virtual PtrToIntInst *clone_impl() const;
+  PtrToIntInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   PtrToIntInst(
-    Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be converted
+    Type *Ty,                           ///< The type to convert to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   PtrToIntInst(
     Value *S,                     ///< The value to be converted
-    Type *Ty,               ///< The type to convert to
+    Type *Ty,                     ///< The type to convert to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3709,21 +3677,21 @@ public:
 class BitCastInst : public CastInst {
 protected:
   /// \brief Clone an identical BitCastInst
-  virtual BitCastInst *clone_impl() const;
+  BitCastInst *clone_impl() const override;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
   BitCastInst(
-    Value *S,                     ///< The value to be casted
-    Type *Ty,               ///< The type to casted to
-    const Twine &NameStr = "",    ///< A name for the new instruction
-    Instruction *InsertBefore = 0 ///< Where to insert the new instruction
+    Value *S,                           ///< The value to be casted
+    Type *Ty,                           ///< The type to casted to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
   );
 
   /// \brief Constructor with insert-at-end-of-block semantics
   BitCastInst(
     Value *S,                     ///< The value to be casted
-    Type *Ty,               ///< The type to casted to
+    Type *Ty,                     ///< The type to casted to
     const Twine &NameStr,         ///< A name for the new instruction
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
@@ -3731,6 +3699,43 @@ public:
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Instruction *I) {
     return I->getOpcode() == BitCast;
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+};
+
+//===----------------------------------------------------------------------===//
+//                          AddrSpaceCastInst Class
+//===----------------------------------------------------------------------===//
+
+/// \brief This class represents a conversion between pointers from
+/// one address space to another.
+class AddrSpaceCastInst : public CastInst {
+protected:
+  /// \brief Clone an identical AddrSpaceCastInst
+  AddrSpaceCastInst *clone_impl() const override;
+
+public:
+  /// \brief Constructor with insert-before-instruction semantics
+  AddrSpaceCastInst(
+    Value *S,                           ///< The value to be casted
+    Type *Ty,                           ///< The type to casted to
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
+  );
+
+  /// \brief Constructor with insert-at-end-of-block semantics
+  AddrSpaceCastInst(
+    Value *S,                     ///< The value to be casted
+    Type *Ty,                     ///< The type to casted to
+    const Twine &NameStr,         ///< A name for the new instruction
+    BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
+  );
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return I->getOpcode() == AddrSpaceCast;
   }
   static inline bool classof(const Value *V) {
     return isa<Instruction>(V) && classof(cast<Instruction>(V));

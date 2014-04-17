@@ -17,6 +17,7 @@
 #include "ARMBaseInstrInfo.h"
 #include "ARMBaseRegisterInfo.h"
 #include "ARMMachineFunctionInfo.h"
+#include "ARMSubtarget.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -36,7 +37,6 @@
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -69,9 +69,9 @@ namespace {
     RegScavenger *RS;
     bool isThumb2;
 
-    virtual bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "ARM load / store optimization pass";
     }
 
@@ -89,6 +89,10 @@ namespace {
     };
     typedef SmallVector<MemOpQueueEntry,8> MemOpQueue;
     typedef MemOpQueue::iterator MemOpQueueIter;
+
+    void findUsesOfImpDef(SmallVectorImpl<MachineOperand *> &UsesOfImpDefs,
+                          const MemOpQueue &MemOps, unsigned DefReg,
+                          unsigned RangeBegin, unsigned RangeEnd);
 
     bool MergeOps(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                   int Offset, unsigned Base, bool BaseKill, int Opcode,
@@ -360,6 +364,62 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
   return true;
 }
 
+/// \brief Find all instructions using a given imp-def within a range.
+///
+/// We are trying to combine a range of instructions, one of which (located at
+/// position RangeBegin) implicitly defines a register. The final LDM/STM will
+/// be placed at RangeEnd, and so any uses of this definition between RangeStart
+/// and RangeEnd must be modified to use an undefined value.
+///
+/// The live range continues until we find a second definition or one of the
+/// uses we find is a kill. Unfortunately MemOps is not sorted by Position, so
+/// we must consider all uses and decide which are relevant in a second pass.
+void ARMLoadStoreOpt::findUsesOfImpDef(
+    SmallVectorImpl<MachineOperand *> &UsesOfImpDefs, const MemOpQueue &MemOps,
+    unsigned DefReg, unsigned RangeBegin, unsigned RangeEnd) {
+  std::map<unsigned, MachineOperand *> Uses;
+  unsigned LastLivePos = RangeEnd;
+
+  // First we find all uses of this register with Position between RangeBegin
+  // and RangeEnd, any or all of these could be uses of a definition at
+  // RangeBegin. We also record the latest position a definition at RangeBegin
+  // would be considered live.
+  for (unsigned i = 0; i < MemOps.size(); ++i) {
+    MachineInstr &MI = *MemOps[i].MBBI;
+    unsigned MIPosition = MemOps[i].Position;
+    if (MIPosition <= RangeBegin || MIPosition > RangeEnd)
+      continue;
+
+    // If this instruction defines the register, then any later use will be of
+    // that definition rather than ours.
+    if (MI.definesRegister(DefReg))
+      LastLivePos = std::min(LastLivePos, MIPosition);
+
+    MachineOperand *UseOp = MI.findRegisterUseOperand(DefReg);
+    if (!UseOp)
+      continue;
+
+    // If this instruction kills the register then (assuming liveness is
+    // correct when we start) we don't need to think about anything after here.
+    if (UseOp->isKill())
+      LastLivePos = std::min(LastLivePos, MIPosition);
+
+    Uses[MIPosition] = UseOp;
+  }
+
+  // Now we traverse the list of all uses, and append the ones that actually use
+  // our definition to the requested list.
+  for (std::map<unsigned, MachineOperand *>::iterator I = Uses.begin(),
+                                                      E = Uses.end();
+       I != E; ++I) {
+    // List is sorted by position so once we've found one out of range there
+    // will be no more to consider.
+    if (I->first > LastLivePos)
+      break;
+    UsesOfImpDefs.push_back(I->second);
+  }
+}
+
 // MergeOpsUpdate - call MergeOps and update MemOps and merges accordingly on
 // success.
 void ARMLoadStoreOpt::MergeOpsUpdate(MachineBasicBlock &MBB,
@@ -392,6 +452,7 @@ void ARMLoadStoreOpt::MergeOpsUpdate(MachineBasicBlock &MBB,
 
   SmallVector<std::pair<unsigned, bool>, 8> Regs;
   SmallVector<unsigned, 8> ImpDefs;
+  SmallVector<MachineOperand *, 8> UsesOfImpDefs;
   for (unsigned i = memOpsBegin; i < memOpsEnd; ++i) {
     unsigned Reg = memOps[i].Reg;
     // If we are inserting the merged operation after an operation that
@@ -406,6 +467,12 @@ void ARMLoadStoreOpt::MergeOpsUpdate(MachineBasicBlock &MBB,
       unsigned DefReg = MO->getReg();
       if (std::find(ImpDefs.begin(), ImpDefs.end(), DefReg) == ImpDefs.end())
         ImpDefs.push_back(DefReg);
+
+      // There may be other uses of the definition between this instruction and
+      // the eventual LDM/STM position. These should be marked undef if the
+      // merge takes place.
+      findUsesOfImpDef(UsesOfImpDefs, memOps, DefReg, memOps[i].Position,
+                       insertPos);
     }
   }
 
@@ -417,7 +484,17 @@ void ARMLoadStoreOpt::MergeOpsUpdate(MachineBasicBlock &MBB,
     return;
 
   // Merge succeeded, update records.
-  Merges.push_back(prior(Loc));
+  Merges.push_back(std::prev(Loc));
+
+  // In gathering loads together, we may have moved the imp-def of a register
+  // past one of its uses. This is OK, since we know better than the rest of
+  // LLVM what's OK with ARM loads and stores; but we still have to adjust the
+  // affected uses.
+  for (SmallVectorImpl<MachineOperand *>::iterator I = UsesOfImpDefs.begin(),
+                                                   E = UsesOfImpDefs.end();
+       I != E; ++I)
+    (*I)->setIsUndef();
+
   for (unsigned i = memOpsBegin; i < memOpsEnd; ++i) {
     // Remove kill flags from any memops that come before insertPos.
     if (Regs[i-memOpsBegin].second) {
@@ -489,7 +566,10 @@ ARMLoadStoreOpt::MergeLDR_STR(MachineBasicBlock &MBB, unsigned SIndex,
     if (Reg != ARM::SP &&
         NewOffset == Offset + (int)Size &&
         ((isNotVFP && RegNum > PRegNum) ||
-         ((Count < Limit) && RegNum == PRegNum+1))) {
+         ((Count < Limit) && RegNum == PRegNum+1)) &&
+        // On Swift we don't want vldm/vstm to start with a odd register num
+        // because Q register unaligned vldm/vstm need more uops.
+        (!STI->isSwift() || isNotVFP || Count != 1 || !(PRegNum & 0x1))) {
       Offset += Size;
       PRegNum = RegNum;
       ++Count;
@@ -732,7 +812,7 @@ bool ARMLoadStoreOpt::MergeBaseUpdateLSMultiple(MachineBasicBlock &MBB,
   // Try merging with the previous instruction.
   MachineBasicBlock::iterator BeginMBBI = MBB.begin();
   if (MBBI != BeginMBBI) {
-    MachineBasicBlock::iterator PrevMBBI = prior(MBBI);
+    MachineBasicBlock::iterator PrevMBBI = std::prev(MBBI);
     while (PrevMBBI != BeginMBBI && PrevMBBI->isDebugValue())
       --PrevMBBI;
     if (Mode == ARM_AM::ia &&
@@ -751,7 +831,7 @@ bool ARMLoadStoreOpt::MergeBaseUpdateLSMultiple(MachineBasicBlock &MBB,
   // Try merging with the next instruction.
   MachineBasicBlock::iterator EndMBBI = MBB.end();
   if (!DoMerge && MBBI != EndMBBI) {
-    MachineBasicBlock::iterator NextMBBI = llvm::next(MBBI);
+    MachineBasicBlock::iterator NextMBBI = std::next(MBBI);
     while (NextMBBI != EndMBBI && NextMBBI->isDebugValue())
       ++NextMBBI;
     if ((Mode == ARM_AM::ia || Mode == ARM_AM::ib) &&
@@ -879,7 +959,7 @@ bool ARMLoadStoreOpt::MergeBaseUpdateLoadStore(MachineBasicBlock &MBB,
   // Try merging with the previous instruction.
   MachineBasicBlock::iterator BeginMBBI = MBB.begin();
   if (MBBI != BeginMBBI) {
-    MachineBasicBlock::iterator PrevMBBI = prior(MBBI);
+    MachineBasicBlock::iterator PrevMBBI = std::prev(MBBI);
     while (PrevMBBI != BeginMBBI && PrevMBBI->isDebugValue())
       --PrevMBBI;
     if (isMatchingDecrement(PrevMBBI, Base, Bytes, Limit, Pred, PredReg)) {
@@ -898,7 +978,7 @@ bool ARMLoadStoreOpt::MergeBaseUpdateLoadStore(MachineBasicBlock &MBB,
   // Try merging with the next instruction.
   MachineBasicBlock::iterator EndMBBI = MBB.end();
   if (!DoMerge && MBBI != EndMBBI) {
-    MachineBasicBlock::iterator NextMBBI = llvm::next(MBBI);
+    MachineBasicBlock::iterator NextMBBI = std::next(MBBI);
     while (NextMBBI != EndMBBI && NextMBBI->isDebugValue())
       ++NextMBBI;
     if (!isAM5 &&
@@ -1042,7 +1122,7 @@ void ARMLoadStoreOpt::AdvanceRS(MachineBasicBlock &MBB, MemOpQueue &MemOps) {
   }
 
   if (Loc != MBB.begin())
-    RS->forward(prior(Loc));
+    RS->forward(std::prev(Loc));
 }
 
 static int getMemoryOpOffset(const MachineInstr *MI) {
@@ -1152,7 +1232,7 @@ bool ARMLoadStoreOpt::FixInvalidRegPairOp(MachineBasicBlock &MBB,
                   getKillRegState(OddDeadKill)  | getUndefRegState(OddUndef));
         ++NumSTRD2STM;
       }
-      NewBBI = llvm::prior(MBBI);
+      NewBBI = std::prev(MBBI);
     } else {
       // Split into two instructions.
       unsigned NewOpc = (isLd)
@@ -1174,7 +1254,7 @@ bool ARMLoadStoreOpt::FixInvalidRegPairOp(MachineBasicBlock &MBB,
                       OddReg, OddDeadKill, false,
                       BaseReg, false, BaseUndef, false, OffUndef,
                       Pred, PredReg, TII, isT2);
-        NewBBI = llvm::prior(MBBI);
+        NewBBI = std::prev(MBBI);
         InsertLDR_STR(MBB, MBBI, OffImm, isLd, dl, NewOpc,
                       EvenReg, EvenDeadKill, false,
                       BaseReg, BaseKill, BaseUndef, OffKill, OffUndef,
@@ -1194,7 +1274,7 @@ bool ARMLoadStoreOpt::FixInvalidRegPairOp(MachineBasicBlock &MBB,
                       EvenReg, EvenDeadKill, EvenUndef,
                       BaseReg, false, BaseUndef, false, OffUndef,
                       Pred, PredReg, TII, isT2);
-        NewBBI = llvm::prior(MBBI);
+        NewBBI = std::prev(MBBI);
         InsertLDR_STR(MBB, MBBI, OffImm+4, isLd, dl, NewOpc2,
                       OddReg, OddDeadKill, OddUndef,
                       BaseReg, BaseKill, BaseUndef, OffKill, OffUndef,
@@ -1339,7 +1419,7 @@ bool ARMLoadStoreOpt::LoadStoreMultipleOpti(MachineBasicBlock &MBB) {
         // Find a scratch register.
         unsigned Scratch = RS->FindUnusedReg(&ARM::GPRRegClass);
         // Process the load / store instructions.
-        RS->forward(prior(MBBI));
+        RS->forward(std::prev(MBBI));
 
         // Merge ops.
         Merges.clear();
@@ -1361,13 +1441,13 @@ bool ARMLoadStoreOpt::LoadStoreMultipleOpti(MachineBasicBlock &MBB) {
               ++NumMerges;
 
         // RS may be pointing to an instruction that's deleted.
-        RS->skipTo(prior(MBBI));
+        RS->skipTo(std::prev(MBBI));
       } else if (NumMemOps == 1) {
         // Try folding preceding/trailing base inc/dec into the single
         // load/store.
         if (MergeBaseUpdateLoadStore(MBB, MemOps[0].MBBI, TII, Advance, MBBI)) {
           ++NumMerges;
-          RS->forward(prior(MBBI));
+          RS->forward(std::prev(MBBI));
         }
       }
 
@@ -1410,7 +1490,7 @@ bool ARMLoadStoreOpt::MergeReturnIntoLDM(MachineBasicBlock &MBB) {
       (MBBI->getOpcode() == ARM::BX_RET ||
        MBBI->getOpcode() == ARM::tBX_RET ||
        MBBI->getOpcode() == ARM::MOVPCLR)) {
-    MachineInstr *PrevMI = prior(MBBI);
+    MachineInstr *PrevMI = std::prev(MBBI);
     unsigned Opcode = PrevMI->getOpcode();
     if (Opcode == ARM::LDMIA_UPD || Opcode == ARM::LDMDA_UPD ||
         Opcode == ARM::LDMDB_UPD || Opcode == ARM::LDMIB_UPD ||
@@ -1470,9 +1550,9 @@ namespace {
     MachineRegisterInfo *MRI;
     MachineFunction *MF;
 
-    virtual bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "ARM pre- register allocation load / store optimization pass";
     }
 
@@ -1644,17 +1724,6 @@ ARMPreAllocLoadStoreOpt::CanFormLdStDWord(MachineInstr *Op0, MachineInstr *Op1,
   return true;
 }
 
-namespace {
-  struct OffsetCompare {
-    bool operator()(const MachineInstr *LHS, const MachineInstr *RHS) const {
-      int LOffset = getMemoryOpOffset(LHS);
-      int ROffset = getMemoryOpOffset(RHS);
-      assert(LHS == RHS || LOffset != ROffset);
-      return LOffset > ROffset;
-    }
-  };
-}
-
 bool ARMPreAllocLoadStoreOpt::RescheduleOps(MachineBasicBlock *MBB,
                                  SmallVectorImpl<MachineInstr *> &Ops,
                                  unsigned Base, bool isLd,
@@ -1662,7 +1731,13 @@ bool ARMPreAllocLoadStoreOpt::RescheduleOps(MachineBasicBlock *MBB,
   bool RetVal = false;
 
   // Sort by offset (in reverse order).
-  std::sort(Ops.begin(), Ops.end(), OffsetCompare());
+  std::sort(Ops.begin(), Ops.end(),
+            [](const MachineInstr *LHS, const MachineInstr *RHS) {
+    int LOffset = getMemoryOpOffset(LHS);
+    int ROffset = getMemoryOpOffset(RHS);
+    assert(LHS == RHS || LOffset != ROffset);
+    return LOffset > ROffset;
+  });
 
   // The loads / stores of the same base are in order. Scan them from first to
   // last and check for the following:

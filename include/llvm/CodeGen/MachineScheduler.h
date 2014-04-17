@@ -7,8 +7,48 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file provides a MachineSchedRegistry for registering alternative machine
-// schedulers. A Target may provide an alternative scheduler implementation by
+// This file provides an interface for customizing the standard MachineScheduler
+// pass. Note that the entire pass may be replaced as follows:
+//
+// <Target>TargetMachine::createPassConfig(PassManagerBase &PM) {
+//   PM.substitutePass(&MachineSchedulerID, &CustomSchedulerPassID);
+//   ...}
+//
+// The MachineScheduler pass is only responsible for choosing the regions to be
+// scheduled. Targets can override the DAG builder and scheduler without
+// replacing the pass as follows:
+//
+// ScheduleDAGInstrs *<Target>PassConfig::
+// createMachineScheduler(MachineSchedContext *C) {
+//   return new CustomMachineScheduler(C);
+// }
+//
+// The default scheduler, ScheduleDAGMILive, builds the DAG and drives list
+// scheduling while updating the instruction stream, register pressure, and live
+// intervals. Most targets don't need to override the DAG builder and list
+// schedulier, but subtargets that require custom scheduling heuristics may
+// plugin an alternate MachineSchedStrategy. The strategy is responsible for
+// selecting the highest priority node from the list:
+//
+// ScheduleDAGInstrs *<Target>PassConfig::
+// createMachineScheduler(MachineSchedContext *C) {
+//   return new ScheduleDAGMI(C, CustomStrategy(C));
+// }
+//
+// The DAG builder can also be customized in a sense by adding DAG mutations
+// that will run after DAG building and before list scheduling. DAG mutations
+// can adjust dependencies based on target-specific knowledge or add weak edges
+// to aid heuristics:
+//
+// ScheduleDAGInstrs *<Target>PassConfig::
+// createMachineScheduler(MachineSchedContext *C) {
+//   ScheduleDAGMI *DAG = new ScheduleDAGMI(C, CustomStrategy(C));
+//   DAG->addMutation(new CustomDependencies(DAG->TII, DAG->TRI));
+//   return DAG;
+// }
+//
+// A target that supports alternative schedulers can use the
+// MachineSchedRegistry to allow command line selection. This can be done by
 // implementing the following boilerplate:
 //
 // static ScheduleDAGInstrs *createCustomMachineSched(MachineSchedContext *C) {
@@ -18,9 +58,19 @@
 // SchedCustomRegistry("custom", "Run my target's custom scheduler",
 //                     createCustomMachineSched);
 //
-// Inside <Target>PassConfig:
-//   enablePass(&MachineSchedulerID);
-//   MachineSchedRegistry::setDefault(createCustomMachineSched);
+//
+// Finally, subtargets that don't need to implement custom heuristics but would
+// like to configure the GenericScheduler's policy for a given scheduler region,
+// including scheduling direction and register pressure tracking policy, can do
+// this:
+//
+// void <SubTarget>Subtarget::
+// overrideSchedPolicy(MachineSchedPolicy &Policy,
+//                     MachineInstr *begin,
+//                     MachineInstr *end,
+//                     unsigned NumRegionInstrs) const {
+//   Policy.<Flag> = true;
+// }
 //
 //===----------------------------------------------------------------------===//
 
@@ -43,6 +93,7 @@ class MachineLoopInfo;
 class RegisterClassInfo;
 class ScheduleDAGInstrs;
 class SchedDFSResult;
+class ScheduleHazardRecognizer;
 
 /// MachineSchedContext provides enough context from the MachineScheduler pass
 /// for the target to instantiate a scheduler.
@@ -85,15 +136,6 @@ public:
   static MachineSchedRegistry *getList() {
     return (MachineSchedRegistry *)Registry.getList();
   }
-  static ScheduleDAGCtor getDefault() {
-    return (ScheduleDAGCtor)Registry.getDefault();
-  }
-  static void setDefault(ScheduleDAGCtor C) {
-    Registry.setDefault((MachinePassCtor)C);
-  }
-  static void setDefault(StringRef Name) {
-    Registry.setDefault(Name);
-  }
   static void setListener(MachinePassRegistryListener *L) {
     Registry.setListener(L);
   }
@@ -101,11 +143,40 @@ public:
 
 class ScheduleDAGMI;
 
+/// Define a generic scheduling policy for targets that don't provide their own
+/// MachineSchedStrategy. This can be overriden for each scheduling region
+/// before building the DAG.
+struct MachineSchedPolicy {
+  // Allow the scheduler to disable register pressure tracking.
+  bool ShouldTrackPressure;
+
+  // Allow the scheduler to force top-down or bottom-up scheduling. If neither
+  // is true, the scheduler runs in both directions and converges.
+  bool OnlyTopDown;
+  bool OnlyBottomUp;
+
+  MachineSchedPolicy(): ShouldTrackPressure(false), OnlyTopDown(false),
+    OnlyBottomUp(false) {}
+};
+
 /// MachineSchedStrategy - Interface to the scheduling algorithm used by
 /// ScheduleDAGMI.
+///
+/// Initialization sequence:
+///   initPolicy -> shouldTrackPressure -> initialize(DAG) -> registerRoots
 class MachineSchedStrategy {
+  virtual void anchor();
 public:
   virtual ~MachineSchedStrategy() {}
+
+  /// Optionally override the per-region scheduling policy.
+  virtual void initPolicy(MachineBasicBlock::iterator Begin,
+                          MachineBasicBlock::iterator End,
+                          unsigned NumRegionInstrs) {}
+
+  /// Check if pressure tracking is needed before building the DAG and
+  /// initializing this strategy. Called after initPolicy.
+  virtual bool shouldTrackPressure() const { return true; }
 
   /// Initialize the strategy after building the DAG for a new region.
   virtual void initialize(ScheduleDAGMI *DAG) = 0;
@@ -133,6 +204,262 @@ public:
   /// bottom-up scheduling.
   virtual void releaseBottomNode(SUnit *SU) = 0;
 };
+
+/// Mutate the DAG as a postpass after normal DAG building.
+class ScheduleDAGMutation {
+  virtual void anchor();
+public:
+  virtual ~ScheduleDAGMutation() {}
+
+  virtual void apply(ScheduleDAGMI *DAG) = 0;
+};
+
+/// ScheduleDAGMI is an implementation of ScheduleDAGInstrs that simply
+/// schedules machine instructions according to the given MachineSchedStrategy
+/// without much extra book-keeping. This is the common functionality between
+/// PreRA and PostRA MachineScheduler.
+class ScheduleDAGMI : public ScheduleDAGInstrs {
+protected:
+  AliasAnalysis *AA;
+  MachineSchedStrategy *SchedImpl;
+
+  /// Topo - A topological ordering for SUnits which permits fast IsReachable
+  /// and similar queries.
+  ScheduleDAGTopologicalSort Topo;
+
+  /// Ordered list of DAG postprocessing steps.
+  std::vector<ScheduleDAGMutation*> Mutations;
+
+  /// The top of the unscheduled zone.
+  MachineBasicBlock::iterator CurrentTop;
+
+  /// The bottom of the unscheduled zone.
+  MachineBasicBlock::iterator CurrentBottom;
+
+  /// Record the next node in a scheduled cluster.
+  const SUnit *NextClusterPred;
+  const SUnit *NextClusterSucc;
+
+#ifndef NDEBUG
+  /// The number of instructions scheduled so far. Used to cut off the
+  /// scheduler at the point determined by misched-cutoff.
+  unsigned NumInstrsScheduled;
+#endif
+public:
+  ScheduleDAGMI(MachineSchedContext *C, MachineSchedStrategy *S, bool IsPostRA):
+    ScheduleDAGInstrs(*C->MF, *C->MLI, *C->MDT, IsPostRA,
+                      /*RemoveKillFlags=*/IsPostRA, C->LIS),
+    AA(C->AA), SchedImpl(S), Topo(SUnits, &ExitSU), CurrentTop(),
+    CurrentBottom(), NextClusterPred(nullptr), NextClusterSucc(nullptr) {
+#ifndef NDEBUG
+    NumInstrsScheduled = 0;
+#endif
+  }
+
+  virtual ~ScheduleDAGMI();
+
+  /// Return true if this DAG supports VReg liveness and RegPressure.
+  virtual bool hasVRegLiveness() const { return false; }
+
+  /// Add a postprocessing step to the DAG builder.
+  /// Mutations are applied in the order that they are added after normal DAG
+  /// building and before MachineSchedStrategy initialization.
+  ///
+  /// ScheduleDAGMI takes ownership of the Mutation object.
+  void addMutation(ScheduleDAGMutation *Mutation) {
+    Mutations.push_back(Mutation);
+  }
+
+  /// \brief True if an edge can be added from PredSU to SuccSU without creating
+  /// a cycle.
+  bool canAddEdge(SUnit *SuccSU, SUnit *PredSU);
+
+  /// \brief Add a DAG edge to the given SU with the given predecessor
+  /// dependence data.
+  ///
+  /// \returns true if the edge may be added without creating a cycle OR if an
+  /// equivalent edge already existed (false indicates failure).
+  bool addEdge(SUnit *SuccSU, const SDep &PredDep);
+
+  MachineBasicBlock::iterator top() const { return CurrentTop; }
+  MachineBasicBlock::iterator bottom() const { return CurrentBottom; }
+
+  /// Implement the ScheduleDAGInstrs interface for handling the next scheduling
+  /// region. This covers all instructions in a block, while schedule() may only
+  /// cover a subset.
+  void enterRegion(MachineBasicBlock *bb,
+                   MachineBasicBlock::iterator begin,
+                   MachineBasicBlock::iterator end,
+                   unsigned regioninstrs) override;
+
+  /// Implement ScheduleDAGInstrs interface for scheduling a sequence of
+  /// reorderable instructions.
+  void schedule() override;
+
+  /// Change the position of an instruction within the basic block and update
+  /// live ranges and region boundary iterators.
+  void moveInstruction(MachineInstr *MI, MachineBasicBlock::iterator InsertPos);
+
+  const SUnit *getNextClusterPred() const { return NextClusterPred; }
+
+  const SUnit *getNextClusterSucc() const { return NextClusterSucc; }
+
+  void viewGraph(const Twine &Name, const Twine &Title) override;
+  void viewGraph() override;
+
+protected:
+  // Top-Level entry points for the schedule() driver...
+
+  /// Apply each ScheduleDAGMutation step in order. This allows different
+  /// instances of ScheduleDAGMI to perform custom DAG postprocessing.
+  void postprocessDAG();
+
+  /// Release ExitSU predecessors and setup scheduler queues.
+  void initQueues(ArrayRef<SUnit*> TopRoots, ArrayRef<SUnit*> BotRoots);
+
+  /// Update scheduler DAG and queues after scheduling an instruction.
+  void updateQueues(SUnit *SU, bool IsTopNode);
+
+  /// Reinsert debug_values recorded in ScheduleDAGInstrs::DbgValues.
+  void placeDebugValues();
+
+  /// \brief dump the scheduled Sequence.
+  void dumpSchedule() const;
+
+  // Lesser helpers...
+  bool checkSchedLimit();
+
+  void findRootsAndBiasEdges(SmallVectorImpl<SUnit*> &TopRoots,
+                             SmallVectorImpl<SUnit*> &BotRoots);
+
+  void releaseSucc(SUnit *SU, SDep *SuccEdge);
+  void releaseSuccessors(SUnit *SU);
+  void releasePred(SUnit *SU, SDep *PredEdge);
+  void releasePredecessors(SUnit *SU);
+};
+
+/// ScheduleDAGMILive is an implementation of ScheduleDAGInstrs that schedules
+/// machine instructions while updating LiveIntervals and tracking regpressure.
+class ScheduleDAGMILive : public ScheduleDAGMI {
+protected:
+  RegisterClassInfo *RegClassInfo;
+
+  /// Information about DAG subtrees. If DFSResult is NULL, then SchedulerTrees
+  /// will be empty.
+  SchedDFSResult *DFSResult;
+  BitVector ScheduledTrees;
+
+  MachineBasicBlock::iterator LiveRegionEnd;
+
+  // Map each SU to its summary of pressure changes. This array is updated for
+  // liveness during bottom-up scheduling. Top-down scheduling may proceed but
+  // has no affect on the pressure diffs.
+  PressureDiffs SUPressureDiffs;
+
+  /// Register pressure in this region computed by initRegPressure.
+  bool ShouldTrackPressure;
+  IntervalPressure RegPressure;
+  RegPressureTracker RPTracker;
+
+  /// List of pressure sets that exceed the target's pressure limit before
+  /// scheduling, listed in increasing set ID order. Each pressure set is paired
+  /// with its max pressure in the currently scheduled regions.
+  std::vector<PressureChange> RegionCriticalPSets;
+
+  /// The top of the unscheduled zone.
+  IntervalPressure TopPressure;
+  RegPressureTracker TopRPTracker;
+
+  /// The bottom of the unscheduled zone.
+  IntervalPressure BotPressure;
+  RegPressureTracker BotRPTracker;
+
+public:
+  ScheduleDAGMILive(MachineSchedContext *C, MachineSchedStrategy *S):
+    ScheduleDAGMI(C, S, /*IsPostRA=*/false), RegClassInfo(C->RegClassInfo),
+    DFSResult(nullptr), ShouldTrackPressure(false), RPTracker(RegPressure),
+    TopRPTracker(TopPressure), BotRPTracker(BotPressure)
+  {}
+
+  virtual ~ScheduleDAGMILive();
+
+  /// Return true if this DAG supports VReg liveness and RegPressure.
+  bool hasVRegLiveness() const override { return true; }
+
+  /// \brief Return true if register pressure tracking is enabled.
+  bool isTrackingPressure() const { return ShouldTrackPressure; }
+
+  /// Get current register pressure for the top scheduled instructions.
+  const IntervalPressure &getTopPressure() const { return TopPressure; }
+  const RegPressureTracker &getTopRPTracker() const { return TopRPTracker; }
+
+  /// Get current register pressure for the bottom scheduled instructions.
+  const IntervalPressure &getBotPressure() const { return BotPressure; }
+  const RegPressureTracker &getBotRPTracker() const { return BotRPTracker; }
+
+  /// Get register pressure for the entire scheduling region before scheduling.
+  const IntervalPressure &getRegPressure() const { return RegPressure; }
+
+  const std::vector<PressureChange> &getRegionCriticalPSets() const {
+    return RegionCriticalPSets;
+  }
+
+  PressureDiff &getPressureDiff(const SUnit *SU) {
+    return SUPressureDiffs[SU->NodeNum];
+  }
+
+  /// Compute a DFSResult after DAG building is complete, and before any
+  /// queue comparisons.
+  void computeDFSResult();
+
+  /// Return a non-null DFS result if the scheduling strategy initialized it.
+  const SchedDFSResult *getDFSResult() const { return DFSResult; }
+
+  BitVector &getScheduledTrees() { return ScheduledTrees; }
+
+  /// Implement the ScheduleDAGInstrs interface for handling the next scheduling
+  /// region. This covers all instructions in a block, while schedule() may only
+  /// cover a subset.
+  void enterRegion(MachineBasicBlock *bb,
+                   MachineBasicBlock::iterator begin,
+                   MachineBasicBlock::iterator end,
+                   unsigned regioninstrs) override;
+
+  /// Implement ScheduleDAGInstrs interface for scheduling a sequence of
+  /// reorderable instructions.
+  void schedule() override;
+
+  /// Compute the cyclic critical path through the DAG.
+  unsigned computeCyclicCriticalPath();
+
+protected:
+  // Top-Level entry points for the schedule() driver...
+
+  /// Call ScheduleDAGInstrs::buildSchedGraph with register pressure tracking
+  /// enabled. This sets up three trackers. RPTracker will cover the entire DAG
+  /// region, TopTracker and BottomTracker will be initialized to the top and
+  /// bottom of the DAG region without covereing any unscheduled instruction.
+  void buildDAGWithRegPressure();
+
+  /// Move an instruction and update register pressure.
+  void scheduleMI(SUnit *SU, bool IsTopNode);
+
+  // Lesser helpers...
+
+  void initRegPressure();
+
+  void updatePressureDiffs(ArrayRef<unsigned> LiveUses);
+
+  void updateScheduledPressure(const SUnit *SU,
+                               const std::vector<unsigned> &NewMaxPressure);
+};
+
+//===----------------------------------------------------------------------===//
+///
+/// Helpers for implementing custom MachineSchedStrategy classes. These take
+/// care of the book-keeping associated with list scheduling heuristics.
+///
+//===----------------------------------------------------------------------===//
 
 /// ReadyQueue encapsulates vector of "ready" SUnits with basic convenience
 /// methods for pushing and removing nodes. ReadyQueue's are uniquely identified
@@ -191,193 +518,220 @@ public:
 #endif
 };
 
-/// Mutate the DAG as a postpass after normal DAG building.
-class ScheduleDAGMutation {
-public:
-  virtual ~ScheduleDAGMutation() {}
+/// Summarize the unscheduled region.
+struct SchedRemainder {
+  // Critical path through the DAG in expected latency.
+  unsigned CriticalPath;
+  unsigned CyclicCritPath;
 
-  virtual void apply(ScheduleDAGMI *DAG) = 0;
+  // Scaled count of micro-ops left to schedule.
+  unsigned RemIssueCount;
+
+  bool IsAcyclicLatencyLimited;
+
+  // Unscheduled resources
+  SmallVector<unsigned, 16> RemainingCounts;
+
+  void reset() {
+    CriticalPath = 0;
+    CyclicCritPath = 0;
+    RemIssueCount = 0;
+    IsAcyclicLatencyLimited = false;
+    RemainingCounts.clear();
+  }
+
+  SchedRemainder() { reset(); }
+
+  void init(ScheduleDAGMI *DAG, const TargetSchedModel *SchedModel);
 };
 
-/// ScheduleDAGMI is an implementation of ScheduleDAGInstrs that schedules
-/// machine instructions while updating LiveIntervals and tracking regpressure.
-class ScheduleDAGMI : public ScheduleDAGInstrs {
-protected:
-  AliasAnalysis *AA;
-  RegisterClassInfo *RegClassInfo;
-  MachineSchedStrategy *SchedImpl;
+/// Each Scheduling boundary is associated with ready queues. It tracks the
+/// current cycle in the direction of movement, and maintains the state
+/// of "hazards" and other interlocks at the current cycle.
+class SchedBoundary {
+public:
+  /// SUnit::NodeQueueId: 0 (none), 1 (top), 2 (bot), 3 (both)
+  enum {
+    TopQID = 1,
+    BotQID = 2,
+    LogMaxQID = 2
+  };
 
-  /// Information about DAG subtrees. If DFSResult is NULL, then SchedulerTrees
-  /// will be empty.
-  SchedDFSResult *DFSResult;
-  BitVector ScheduledTrees;
+  ScheduleDAGMI *DAG;
+  const TargetSchedModel *SchedModel;
+  SchedRemainder *Rem;
 
-  /// Topo - A topological ordering for SUnits which permits fast IsReachable
-  /// and similar queries.
-  ScheduleDAGTopologicalSort Topo;
+  ReadyQueue Available;
+  ReadyQueue Pending;
 
-  /// Ordered list of DAG postprocessing steps.
-  std::vector<ScheduleDAGMutation*> Mutations;
+  ScheduleHazardRecognizer *HazardRec;
 
-  MachineBasicBlock::iterator LiveRegionEnd;
+private:
+  /// True if the pending Q should be checked/updated before scheduling another
+  /// instruction.
+  bool CheckPending;
 
-  /// Register pressure in this region computed by buildSchedGraph.
-  IntervalPressure RegPressure;
-  RegPressureTracker RPTracker;
+  // For heuristics, keep a list of the nodes that immediately depend on the
+  // most recently scheduled node.
+  SmallPtrSet<const SUnit*, 8> NextSUs;
 
-  /// List of pressure sets that exceed the target's pressure limit before
-  /// scheduling, listed in increasing set ID order. Each pressure set is paired
-  /// with its max pressure in the currently scheduled regions.
-  std::vector<PressureElement> RegionCriticalPSets;
+  /// Number of cycles it takes to issue the instructions scheduled in this
+  /// zone. It is defined as: scheduled-micro-ops / issue-width + stalls.
+  /// See getStalls().
+  unsigned CurrCycle;
 
-  /// The top of the unscheduled zone.
-  MachineBasicBlock::iterator CurrentTop;
-  IntervalPressure TopPressure;
-  RegPressureTracker TopRPTracker;
+  /// Micro-ops issued in the current cycle
+  unsigned CurrMOps;
 
-  /// The bottom of the unscheduled zone.
-  MachineBasicBlock::iterator CurrentBottom;
-  IntervalPressure BotPressure;
-  RegPressureTracker BotRPTracker;
+  /// MinReadyCycle - Cycle of the soonest available instruction.
+  unsigned MinReadyCycle;
 
-  /// Record the next node in a scheduled cluster.
-  const SUnit *NextClusterPred;
-  const SUnit *NextClusterSucc;
+  // The expected latency of the critical path in this scheduled zone.
+  unsigned ExpectedLatency;
+
+  // The latency of dependence chains leading into this zone.
+  // For each node scheduled bottom-up: DLat = max DLat, N.Depth.
+  // For each cycle scheduled: DLat -= 1.
+  unsigned DependentLatency;
+
+  /// Count the scheduled (issued) micro-ops that can be retired by
+  /// time=CurrCycle assuming the first scheduled instr is retired at time=0.
+  unsigned RetiredMOps;
+
+  // Count scheduled resources that have been executed. Resources are
+  // considered executed if they become ready in the time that it takes to
+  // saturate any resource including the one in question. Counts are scaled
+  // for direct comparison with other resources. Counts can be compared with
+  // MOps * getMicroOpFactor and Latency * getLatencyFactor.
+  SmallVector<unsigned, 16> ExecutedResCounts;
+
+  /// Cache the max count for a single resource.
+  unsigned MaxExecutedResCount;
+
+  // Cache the critical resources ID in this scheduled zone.
+  unsigned ZoneCritResIdx;
+
+  // Is the scheduled region resource limited vs. latency limited.
+  bool IsResourceLimited;
+
+  // Record the highest cycle at which each resource has been reserved by a
+  // scheduled instruction.
+  SmallVector<unsigned, 16> ReservedCycles;
 
 #ifndef NDEBUG
-  /// The number of instructions scheduled so far. Used to cut off the
-  /// scheduler at the point determined by misched-cutoff.
-  unsigned NumInstrsScheduled;
+  // Remember the greatest operand latency as an upper bound on the number of
+  // times we should retry the pending queue because of a hazard.
+  unsigned MaxObservedLatency;
 #endif
 
 public:
-  ScheduleDAGMI(MachineSchedContext *C, MachineSchedStrategy *S):
-    ScheduleDAGInstrs(*C->MF, *C->MLI, *C->MDT, /*IsPostRA=*/false, C->LIS),
-    AA(C->AA), RegClassInfo(C->RegClassInfo), SchedImpl(S), DFSResult(0),
-    Topo(SUnits, &ExitSU), RPTracker(RegPressure), CurrentTop(),
-    TopRPTracker(TopPressure), CurrentBottom(), BotRPTracker(BotPressure),
-    NextClusterPred(NULL), NextClusterSucc(NULL) {
+  /// Pending queues extend the ready queues with the same ID and the
+  /// PendingFlag set.
+  SchedBoundary(unsigned ID, const Twine &Name):
+    DAG(nullptr), SchedModel(nullptr), Rem(nullptr), Available(ID, Name+".A"),
+    Pending(ID << LogMaxQID, Name+".P"),
+    HazardRec(nullptr) {
+    reset();
+  }
+
+  ~SchedBoundary();
+
+  void reset();
+
+  void init(ScheduleDAGMI *dag, const TargetSchedModel *smodel,
+            SchedRemainder *rem);
+
+  bool isTop() const {
+    return Available.getID() == TopQID;
+  }
+
+  /// Number of cycles to issue the instructions scheduled in this zone.
+  unsigned getCurrCycle() const { return CurrCycle; }
+
+  /// Micro-ops issued in the current cycle
+  unsigned getCurrMOps() const { return CurrMOps; }
+
+  /// Return true if the given SU is used by the most recently scheduled
+  /// instruction.
+  bool isNextSU(const SUnit *SU) const { return NextSUs.count(SU); }
+
+  // The latency of dependence chains leading into this zone.
+  unsigned getDependentLatency() const { return DependentLatency; }
+
+  /// Get the number of latency cycles "covered" by the scheduled
+  /// instructions. This is the larger of the critical path within the zone
+  /// and the number of cycles required to issue the instructions.
+  unsigned getScheduledLatency() const {
+    return std::max(ExpectedLatency, CurrCycle);
+  }
+
+  unsigned getUnscheduledLatency(SUnit *SU) const {
+    return isTop() ? SU->getHeight() : SU->getDepth();
+  }
+
+  unsigned getResourceCount(unsigned ResIdx) const {
+    return ExecutedResCounts[ResIdx];
+  }
+
+  /// Get the scaled count of scheduled micro-ops and resources, including
+  /// executed resources.
+  unsigned getCriticalCount() const {
+    if (!ZoneCritResIdx)
+      return RetiredMOps * SchedModel->getMicroOpFactor();
+    return getResourceCount(ZoneCritResIdx);
+  }
+
+  /// Get a scaled count for the minimum execution time of the scheduled
+  /// micro-ops that are ready to execute by getExecutedCount. Notice the
+  /// feedback loop.
+  unsigned getExecutedCount() const {
+    return std::max(CurrCycle * SchedModel->getLatencyFactor(),
+                    MaxExecutedResCount);
+  }
+
+  unsigned getZoneCritResIdx() const { return ZoneCritResIdx; }
+
+  // Is the scheduled region resource limited vs. latency limited.
+  bool isResourceLimited() const { return IsResourceLimited; }
+
+  /// Get the difference between the given SUnit's ready time and the current
+  /// cycle.
+  unsigned getLatencyStallCycles(SUnit *SU);
+
+  unsigned getNextResourceCycle(unsigned PIdx, unsigned Cycles);
+
+  bool checkHazard(SUnit *SU);
+
+  unsigned findMaxLatency(ArrayRef<SUnit*> ReadySUs);
+
+  unsigned getOtherResourceCount(unsigned &OtherCritIdx);
+
+  void releaseNode(SUnit *SU, unsigned ReadyCycle);
+
+  void releaseTopNode(SUnit *SU);
+
+  void releaseBottomNode(SUnit *SU);
+
+  void bumpCycle(unsigned NextCycle);
+
+  void incExecutedResources(unsigned PIdx, unsigned Count);
+
+  unsigned countResource(unsigned PIdx, unsigned Cycles, unsigned ReadyCycle);
+
+  void bumpNode(SUnit *SU);
+
+  void releasePending();
+
+  void removeReady(SUnit *SU);
+
+  /// Call this before applying any other heuristics to the Available queue.
+  /// Updates the Available/Pending Q's if necessary and returns the single
+  /// available instruction, or NULL if there are multiple candidates.
+  SUnit *pickOnlyChoice();
+
 #ifndef NDEBUG
-    NumInstrsScheduled = 0;
+  void dumpScheduledState();
 #endif
-  }
-
-  virtual ~ScheduleDAGMI();
-
-  /// Add a postprocessing step to the DAG builder.
-  /// Mutations are applied in the order that they are added after normal DAG
-  /// building and before MachineSchedStrategy initialization.
-  ///
-  /// ScheduleDAGMI takes ownership of the Mutation object.
-  void addMutation(ScheduleDAGMutation *Mutation) {
-    Mutations.push_back(Mutation);
-  }
-
-  /// \brief True if an edge can be added from PredSU to SuccSU without creating
-  /// a cycle.
-  bool canAddEdge(SUnit *SuccSU, SUnit *PredSU);
-
-  /// \brief Add a DAG edge to the given SU with the given predecessor
-  /// dependence data.
-  ///
-  /// \returns true if the edge may be added without creating a cycle OR if an
-  /// equivalent edge already existed (false indicates failure).
-  bool addEdge(SUnit *SuccSU, const SDep &PredDep);
-
-  MachineBasicBlock::iterator top() const { return CurrentTop; }
-  MachineBasicBlock::iterator bottom() const { return CurrentBottom; }
-
-  /// Implement the ScheduleDAGInstrs interface for handling the next scheduling
-  /// region. This covers all instructions in a block, while schedule() may only
-  /// cover a subset.
-  void enterRegion(MachineBasicBlock *bb,
-                   MachineBasicBlock::iterator begin,
-                   MachineBasicBlock::iterator end,
-                   unsigned endcount);
-
-
-  /// Implement ScheduleDAGInstrs interface for scheduling a sequence of
-  /// reorderable instructions.
-  virtual void schedule();
-
-  /// Change the position of an instruction within the basic block and update
-  /// live ranges and region boundary iterators.
-  void moveInstruction(MachineInstr *MI, MachineBasicBlock::iterator InsertPos);
-
-  /// Get current register pressure for the top scheduled instructions.
-  const IntervalPressure &getTopPressure() const { return TopPressure; }
-  const RegPressureTracker &getTopRPTracker() const { return TopRPTracker; }
-
-  /// Get current register pressure for the bottom scheduled instructions.
-  const IntervalPressure &getBotPressure() const { return BotPressure; }
-  const RegPressureTracker &getBotRPTracker() const { return BotRPTracker; }
-
-  /// Get register pressure for the entire scheduling region before scheduling.
-  const IntervalPressure &getRegPressure() const { return RegPressure; }
-
-  const std::vector<PressureElement> &getRegionCriticalPSets() const {
-    return RegionCriticalPSets;
-  }
-
-  const SUnit *getNextClusterPred() const { return NextClusterPred; }
-
-  const SUnit *getNextClusterSucc() const { return NextClusterSucc; }
-
-  /// Compute a DFSResult after DAG building is complete, and before any
-  /// queue comparisons.
-  void computeDFSResult();
-
-  /// Return a non-null DFS result if the scheduling strategy initialized it.
-  const SchedDFSResult *getDFSResult() const { return DFSResult; }
-
-  BitVector &getScheduledTrees() { return ScheduledTrees; }
-
-  void viewGraph(const Twine &Name, const Twine &Title) LLVM_OVERRIDE;
-  void viewGraph() LLVM_OVERRIDE;
-
-protected:
-  // Top-Level entry points for the schedule() driver...
-
-  /// Call ScheduleDAGInstrs::buildSchedGraph with register pressure tracking
-  /// enabled. This sets up three trackers. RPTracker will cover the entire DAG
-  /// region, TopTracker and BottomTracker will be initialized to the top and
-  /// bottom of the DAG region without covereing any unscheduled instruction.
-  void buildDAGWithRegPressure();
-
-  /// Apply each ScheduleDAGMutation step in order. This allows different
-  /// instances of ScheduleDAGMI to perform custom DAG postprocessing.
-  void postprocessDAG();
-
-  /// Release ExitSU predecessors and setup scheduler queues.
-  void initQueues(ArrayRef<SUnit*> TopRoots, ArrayRef<SUnit*> BotRoots);
-
-  /// Move an instruction and update register pressure.
-  void scheduleMI(SUnit *SU, bool IsTopNode);
-
-  /// Update scheduler DAG and queues after scheduling an instruction.
-  void updateQueues(SUnit *SU, bool IsTopNode);
-
-  /// Reinsert debug_values recorded in ScheduleDAGInstrs::DbgValues.
-  void placeDebugValues();
-
-  /// \brief dump the scheduled Sequence.
-  void dumpSchedule() const;
-
-  // Lesser helpers...
-
-  void initRegPressure();
-
-  void updateScheduledPressure(const std::vector<unsigned> &NewMaxPressure);
-
-  bool checkSchedLimit();
-
-  void findRootsAndBiasEdges(SmallVectorImpl<SUnit*> &TopRoots,
-                             SmallVectorImpl<SUnit*> &BotRoots);
-
-  void releaseSucc(SUnit *SU, SDep *SuccEdge);
-  void releaseSuccessors(SUnit *SU);
-  void releasePred(SUnit *SU, SDep *PredEdge);
-  void releasePredecessors(SUnit *SU);
 };
 
 } // namespace llvm

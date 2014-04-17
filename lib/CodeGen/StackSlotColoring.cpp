@@ -87,7 +87,7 @@ namespace {
         initializeStackSlotColoringPass(*PassRegistry::getPassRegistry());
       }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       AU.addRequired<SlotIndexes>();
       AU.addPreserved<SlotIndexes>();
@@ -98,7 +98,7 @@ namespace {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
-    virtual bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
   private:
     void InitializeSlots();
@@ -142,7 +142,6 @@ void StackSlotColoring::ScanForSpillSlotRefs(MachineFunction &MF) {
   for (MachineFunction::iterator MBBI = MF.begin(), E = MF.end();
        MBBI != E; ++MBBI) {
     MachineBasicBlock *MBB = &*MBBI;
-    BlockFrequency Freq = MBFI->getBlockFreq(MBB);
     for (MachineBasicBlock::iterator MII = MBB->begin(), EE = MBB->end();
          MII != EE; ++MII) {
       MachineInstr *MI = &*MII;
@@ -157,7 +156,7 @@ void StackSlotColoring::ScanForSpillSlotRefs(MachineFunction &MF) {
           continue;
         LiveInterval &li = LS->getInterval(FI);
         if (!MI->isDebugValue())
-          li.weight += LiveIntervals::getSpillWeight(false, true, Freq);
+          li.weight += LiveIntervals::getSpillWeight(false, true, MBFI, MI);
       }
       for (MachineInstr::mmo_iterator MMOI = MI->memoperands_begin(),
            EE = MI->memoperands_end(); MMOI != EE; ++MMOI) {
@@ -386,8 +385,8 @@ bool StackSlotColoring::RemoveDeadStores(MachineBasicBlock* MBB) {
       toErase.push_back(I);
       continue;
     }
-        
-    MachineBasicBlock::iterator NextMI = llvm::next(I);
+
+    MachineBasicBlock::iterator NextMI = std::next(I);
     if (NextMI == MBB->end()) continue;
 
     unsigned LoadReg = 0;
@@ -399,7 +398,7 @@ bool StackSlotColoring::RemoveDeadStores(MachineBasicBlock* MBB) {
     ++NumDead;
     changed = true;
 
-    if (NextMI->findRegisterUseOperandIdx(LoadReg, true, 0) != -1) {
+    if (NextMI->findRegisterUseOperandIdx(LoadReg, true, nullptr) != -1) {
       ++NumDead;
       toErase.push_back(I);
     }

@@ -30,7 +30,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
 #include <vector>
 
 namespace llvm {
@@ -225,9 +225,9 @@ public:
   MDNode *get() const {
     return cast_or_null<MDNode>(getValPtr());
   }
-  
-  virtual void deleted();
-  virtual void allUsesReplacedWith(Value *VNew);
+
+  void deleted() override;
+  void allUsesReplacedWith(Value *VNew) override;
 };
   
 class LLVMContextImpl {
@@ -238,9 +238,12 @@ public:
   
   LLVMContext::InlineAsmDiagHandlerTy InlineAsmDiagHandler;
   void *InlineAsmDiagContext;
-  
-  typedef DenseMap<DenseMapAPIntKeyInfo::KeyTy, ConstantInt*, 
-                         DenseMapAPIntKeyInfo> IntMapTy;
+
+  LLVMContext::DiagnosticHandlerTy DiagnosticHandler;
+  void *DiagnosticContext;
+
+  typedef DenseMap<DenseMapAPIntKeyInfo::KeyTy, ConstantInt *,
+                   DenseMapAPIntKeyInfo> IntMapTy;
   IntMapTy IntConstants;
   
   typedef DenseMap<DenseMapAPFloatKeyInfo::KeyTy, ConstantFP*, 
@@ -278,8 +281,8 @@ public:
   
   StringMap<ConstantDataSequential*> CDSConstants;
 
-  
-  DenseMap<std::pair<Function*, BasicBlock*> , BlockAddress*> BlockAddresses;
+  DenseMap<std::pair<const Function *, const BasicBlock *>, BlockAddress *>
+    BlockAddresses;
   ConstantUniqueMap<ExprMapKeyType, const ExprMapKeyType&, Type, ConstantExpr>
     ExprConstants;
 
@@ -349,11 +352,25 @@ public:
   /// for an index.  The ValueHandle ensures that ScopeINlinedAtIdx stays up
   /// to date.
   std::vector<std::pair<DebugRecVH, DebugRecVH> > ScopeInlinedAtRecords;
-  
+
+  /// DiscriminatorTable - This table maps file:line locations to an
+  /// integer representing the next DWARF path discriminator to assign to
+  /// instructions in different blocks at the same location.
+  DenseMap<std::pair<const char *, unsigned>, unsigned> DiscriminatorTable;
+
   /// IntrinsicIDCache - Cache of intrinsic name (string) to numeric ID mappings
   /// requested in this context
   typedef DenseMap<const Function*, unsigned> IntrinsicIDCacheTy;
   IntrinsicIDCacheTy IntrinsicIDCache;
+
+  /// \brief Mapping from a function to its prefix data, which is stored as the
+  /// operand of an unparented ReturnInst so that the prefix data has a Use.
+  typedef DenseMap<const Function *, ReturnInst *> PrefixDataMapTy;
+  PrefixDataMapTy PrefixDataMap;
+
+  /// \brief Return true if the given pass name should emit optimization
+  /// remarks.
+  bool optimizationRemarksEnabledFor(const char *PassName) const;
 
   int getOrAddScopeRecordIdxEntry(MDNode *N, int ExistingIdx);
   int getOrAddScopeInlinedAtIdxEntry(MDNode *Scope, MDNode *IA,int ExistingIdx);

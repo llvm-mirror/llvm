@@ -28,9 +28,9 @@ public:
       MachineBasicBlock * BB) const;
   virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
   virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
-  void ReplaceNodeResults(SDNode * N,
-      SmallVectorImpl<SDValue> &Results,
-      SelectionDAG &DAG) const;
+  virtual void ReplaceNodeResults(SDNode * N,
+                                  SmallVectorImpl<SDValue> &Results,
+                                  SelectionDAG &DAG) const override;
   virtual SDValue LowerFormalArguments(
                                       SDValue Chain,
                                       CallingConv::ID CallConv,
@@ -43,7 +43,7 @@ private:
   unsigned Gen;
   /// Each OpenCL kernel has nine implicit parameters that are stored in the
   /// first nine dwords of a Vertex Buffer.  These implicit parameters are
-  /// lowered to load instructions which retreive the values from the Vertex
+  /// lowered to load instructions which retrieve the values from the Vertex
   /// Buffer.
   SDValue LowerImplicitParameter(SelectionDAG &DAG, EVT VT,
                                  SDLoc DL, unsigned DwordOffset) const;
@@ -56,11 +56,9 @@ private:
   SDValue LowerROTL(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFPTOUINT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerTrig(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue stackPtrToRegIndex(SDValue Ptr, unsigned StackWidth,
@@ -68,6 +66,7 @@ private:
   void getStackAddress(unsigned StackWidth, unsigned ElemIdx,
                        unsigned &Channel, unsigned &PtrIncr) const;
   bool isZero(SDValue Op) const;
+  virtual SDNode *PostISelFolding(MachineSDNode *N, SelectionDAG &DAG) const;
 };
 
 } // End namespace llvm;

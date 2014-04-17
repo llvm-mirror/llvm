@@ -44,13 +44,15 @@ namespace R600_InstFlag {
     TEX_INST = (1 << 13),
     ALU_INST = (1 << 14),
     LDS_1A = (1 << 15),
-    LDS_1A1D = (1 << 16)
+    LDS_1A1D = (1 << 16),
+    IS_EXPORT = (1 << 17),
+    LDS_1A2D = (1 << 18)
   };
 }
 
 #define HAS_NATIVE_OPERANDS(Flags) ((Flags) & R600_InstFlag::NATIVE_OPERANDS)
 
-/// \brief Defines for extracting register infomation from register encoding
+/// \brief Defines for extracting register information from register encoding
 #define HW_REG_MASK 0x1ff
 #define HW_CHAN_SHIFT 9
 

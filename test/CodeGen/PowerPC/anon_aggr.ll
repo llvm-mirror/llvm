@@ -1,4 +1,4 @@
-; RUN: llc -O0 -mcpu=pwr7 -mtriple=powerpc64-unknown-linux-gnu -fast-isel=false < %s | FileCheck %s
+; RUN: llc -O0 -mcpu=ppc64 -mtriple=powerpc64-unknown-linux-gnu -fast-isel=false < %s | FileCheck %s
 ; RUN: llc -O0 -mcpu=g4 -mtriple=powerpc-apple-darwin8 < %s | FileCheck -check-prefix=DARWIN32 %s
 ; RUN: llc -O0 -mcpu=ppc970 -mtriple=powerpc64-apple-darwin8 < %s | FileCheck -check-prefix=DARWIN64 %s
 
@@ -119,9 +119,9 @@ unequal:
 ; CHECK: ld 3, -[[OFFSET1]](1)
 
 ; DARWIN32: _func3:
-; DARWIN32: addi r[[REG1:[0-9]+]], r[[REGSP:[0-9]+]], 40
+; DARWIN32: addi r[[REG1:[0-9]+]], r[[REGSP:[0-9]+]], 36
 ; DARWIN32: addi r[[REG2:[0-9]+]], r[[REGSP]], 24
-; DARWIN32: lwz r[[REG3:[0-9]+]], 48(r[[REGSP]])
+; DARWIN32: lwz r[[REG3:[0-9]+]], 44(r[[REGSP]])
 ; DARWIN32: lwz r[[REG4:[0-9]+]], 32(r[[REGSP]])
 ; DARWIN32: cmplw cr{{[0-9]+}}, r[[REG4]], r[[REG3]]
 ; DARWIN32: stw r[[REG3]], -[[OFFSET1:[0-9]+]]

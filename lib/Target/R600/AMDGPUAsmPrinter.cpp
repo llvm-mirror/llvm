@@ -45,32 +45,78 @@ extern "C" void LLVMInitializeR600AsmPrinter() {
   TargetRegistry::RegisterAsmPrinter(TheAMDGPUTarget, createAMDGPUAsmPrinterPass);
 }
 
-/// We need to override this function so we can avoid
-/// the call to EmitFunctionHeader(), which the MCPureStreamer can't handle.
+AMDGPUAsmPrinter::AMDGPUAsmPrinter(TargetMachine &TM, MCStreamer &Streamer)
+    : AsmPrinter(TM, Streamer) {
+  DisasmEnabled = TM.getSubtarget<AMDGPUSubtarget>().dumpCode();
+}
+
 bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
+  SetupMachineFunction(MF);
+
+  OutStreamer.emitRawComment(Twine('@') + MF.getName() + Twine(':'));
+
+  MCContext &Context = getObjFileLowering().getContext();
+  const MCSectionELF *ConfigSection = Context.getELFSection(".AMDGPU.config",
+                                              ELF::SHT_PROGBITS, 0,
+                                              SectionKind::getReadOnly());
+  OutStreamer.SwitchSection(ConfigSection);
+
   const AMDGPUSubtarget &STM = TM.getSubtarget<AMDGPUSubtarget>();
+  SIProgramInfo KernelInfo;
+  if (STM.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
+    findNumUsedRegistersSI(MF, KernelInfo.NumSGPR, KernelInfo.NumVGPR);
+    EmitProgramInfoSI(MF, KernelInfo);
+  } else {
+    EmitProgramInfoR600(MF);
+  }
+
+  DisasmLines.clear();
+  HexLines.clear();
+  DisasmLineMaxLen = 0;
+
+  OutStreamer.SwitchSection(getObjFileLowering().getTextSection());
+  EmitFunctionBody();
+
+  if (isVerbose()) {
+    const MCSectionELF *CommentSection
+      = Context.getELFSection(".AMDGPU.csdata",
+                              ELF::SHT_PROGBITS, 0,
+                              SectionKind::getReadOnly());
+    OutStreamer.SwitchSection(CommentSection);
+
+    if (STM.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
+      OutStreamer.emitRawComment(" Kernel info:", false);
+      OutStreamer.emitRawComment(" NumSgprs: " + Twine(KernelInfo.NumSGPR),
+                                 false);
+      OutStreamer.emitRawComment(" NumVgprs: " + Twine(KernelInfo.NumVGPR),
+                                 false);
+    } else {
+      R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
+      OutStreamer.emitRawComment(
+        Twine("SQ_PGM_RESOURCES:STACK_SIZE = " + Twine(MFI->StackSize)));
+    }
+  }
+
   if (STM.dumpCode()) {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
     MF.dump();
 #endif
-  }
-  SetupMachineFunction(MF);
-  if (OutStreamer.hasRawTextSupport()) {
-    OutStreamer.EmitRawText("@" + MF.getName() + ":");
+
+    if (DisasmEnabled) {
+      OutStreamer.SwitchSection(Context.getELFSection(".AMDGPU.disasm",
+                                                  ELF::SHT_NOTE, 0,
+                                                  SectionKind::getReadOnly()));
+
+      for (size_t i = 0; i < DisasmLines.size(); ++i) {
+        std::string Comment(DisasmLineMaxLen - DisasmLines[i].size(), ' ');
+        Comment += " ; " + HexLines[i] + "\n";
+
+        OutStreamer.EmitBytes(StringRef(DisasmLines[i]));
+        OutStreamer.EmitBytes(StringRef(Comment));
+      }
+    }
   }
 
-  const MCSectionELF *ConfigSection = getObjFileLowering().getContext()
-                                              .getELFSection(".AMDGPU.config",
-                                              ELF::SHT_PROGBITS, 0,
-                                              SectionKind::getReadOnly());
-  OutStreamer.SwitchSection(ConfigSection);
-  if (STM.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
-    EmitProgramInfoSI(MF);
-  } else {
-    EmitProgramInfoR600(MF);
-  }
-  OutStreamer.SwitchSection(getObjFileLowering().getTextSection());
-  EmitFunctionBody();
   return false;
 }
 
@@ -138,7 +184,9 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(MachineFunction &MF) {
   }
 }
 
-void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
+void AMDGPUAsmPrinter::findNumUsedRegistersSI(MachineFunction &MF,
+                                              unsigned &NumSGPR,
+                                              unsigned &NumVGPR) const {
   unsigned MaxSGPR = 0;
   unsigned MaxVGPR = 0;
   bool VCCUsed = false;
@@ -154,22 +202,23 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
 
       unsigned numOperands = MI.getNumOperands();
       for (unsigned op_idx = 0; op_idx < numOperands; op_idx++) {
-        MachineOperand & MO = MI.getOperand(op_idx);
-        unsigned maxUsed;
+        MachineOperand &MO = MI.getOperand(op_idx);
         unsigned width = 0;
         bool isSGPR = false;
-        unsigned reg;
-        unsigned hwReg;
+
         if (!MO.isReg()) {
           continue;
         }
-        reg = MO.getReg();
-        if (reg == AMDGPU::VCC) {
+        unsigned reg = MO.getReg();
+        if (reg == AMDGPU::VCC || reg == AMDGPU::VCC_LO ||
+	    reg == AMDGPU::VCC_HI) {
           VCCUsed = true;
           continue;
         }
+
         switch (reg) {
         default: break;
+        case AMDGPU::SCC:
         case AMDGPU::EXEC:
         case AMDGPU::M0:
           continue;
@@ -202,14 +251,17 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
         } else if (AMDGPU::VReg_256RegClass.contains(reg)) {
           isSGPR = false;
           width = 8;
+        } else if (AMDGPU::SReg_512RegClass.contains(reg)) {
+          isSGPR = true;
+          width = 16;
         } else if (AMDGPU::VReg_512RegClass.contains(reg)) {
           isSGPR = false;
           width = 16;
         } else {
-          assert(!"Unknown register class");
+          llvm_unreachable("Unknown register class");
         }
-        hwReg = RI->getEncodingValue(reg) & 0xff;
-        maxUsed = hwReg + width - 1;
+        unsigned hwReg = RI->getEncodingValue(reg) & 0xff;
+        unsigned maxUsed = hwReg + width - 1;
         if (isSGPR) {
           MaxSGPR = maxUsed > MaxSGPR ? maxUsed : MaxSGPR;
         } else {
@@ -218,10 +270,24 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
       }
     }
   }
-  if (VCCUsed) {
+
+  if (VCCUsed)
     MaxSGPR += 2;
-  }
-  SIMachineFunctionInfo * MFI = MF.getInfo<SIMachineFunctionInfo>();
+
+  NumSGPR = MaxSGPR;
+  NumVGPR = MaxVGPR;
+}
+
+void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &Out,
+                                        MachineFunction &MF) const {
+  findNumUsedRegistersSI(MF, Out.NumSGPR, Out.NumVGPR);
+}
+
+void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF,
+                                         const SIProgramInfo &KernelInfo) {
+  const AMDGPUSubtarget &STM = TM.getSubtarget<AMDGPUSubtarget>();
+
+  SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   unsigned RsrcReg;
   switch (MFI->ShaderType) {
   default: // Fall through
@@ -232,15 +298,27 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
   }
 
   OutStreamer.EmitIntValue(RsrcReg, 4);
-  OutStreamer.EmitIntValue(S_00B028_VGPRS(MaxVGPR / 4) | S_00B028_SGPRS(MaxSGPR / 8), 4);
+  OutStreamer.EmitIntValue(S_00B028_VGPRS(KernelInfo.NumVGPR / 4) |
+                           S_00B028_SGPRS(KernelInfo.NumSGPR / 8), 4);
+
+  unsigned LDSAlignShift;
+  if (STM.getGeneration() < AMDGPUSubtarget::SEA_ISLANDS) {
+    // LDS is allocated in 64 dword blocks
+    LDSAlignShift = 8;
+  } else {
+    // LDS is allocated in 128 dword blocks
+    LDSAlignShift = 9;
+  }
+  unsigned LDSBlocks =
+          RoundUpToAlignment(MFI->LDSSize, 1 << LDSAlignShift) >> LDSAlignShift;
 
   if (MFI->ShaderType == ShaderType::COMPUTE) {
     OutStreamer.EmitIntValue(R_00B84C_COMPUTE_PGM_RSRC2, 4);
-    OutStreamer.EmitIntValue(S_00B84C_LDS_SIZE(RoundUpToAlignment(MFI->LDSSize, 256) >> 8), 4);
+    OutStreamer.EmitIntValue(S_00B84C_LDS_SIZE(LDSBlocks), 4);
   }
   if (MFI->ShaderType == ShaderType::PIXEL) {
     OutStreamer.EmitIntValue(R_00B02C_SPI_SHADER_PGM_RSRC2_PS, 4);
-    OutStreamer.EmitIntValue(S_00B02C_EXTRA_LDS_SIZE(RoundUpToAlignment(MFI->LDSSize, 256) >> 8), 4);
+    OutStreamer.EmitIntValue(S_00B02C_EXTRA_LDS_SIZE(LDSBlocks), 4);
     OutStreamer.EmitIntValue(R_0286CC_SPI_PS_INPUT_ENA, 4);
     OutStreamer.EmitIntValue(MFI->PSInputAddr, 4);
   }

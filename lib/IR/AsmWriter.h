@@ -16,7 +16,6 @@
 #define LLVM_IR_ASSEMBLYWRITER_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/TypeFinder.h"
@@ -67,7 +66,7 @@ protected:
   const Module *TheModule;
 
 private:
-  OwningPtr<SlotTracker> ModuleSlotTracker;
+  std::unique_ptr<SlotTracker> ModuleSlotTracker;
   SlotTracker &Machine;
   TypePrinting TypePrinter;
   AssemblyAnnotationWriter *AnnotationWriter;
@@ -91,6 +90,9 @@ public:
   void writeOperand(const Value *Op, bool PrintType);
   void writeParamOperand(const Value *Operand, AttributeSet Attrs,unsigned Idx);
   void writeAtomic(AtomicOrdering Ordering, SynchronizationScope SynchScope);
+  void writeAtomicCmpXchg(AtomicOrdering SuccessOrdering,
+                          AtomicOrdering FailureOrdering,
+                          SynchronizationScope SynchScope);
 
   void writeAllMDNodes();
   void writeMDNode(unsigned Slot, const MDNode *Node);

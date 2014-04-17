@@ -34,7 +34,7 @@ ModulePass *createStripSymbolsPass(bool OnlyDebugInfo = false);
 
 //===----------------------------------------------------------------------===//
 //
-// These functions strips symbols from functions and modules.  
+// These functions strips symbols from functions and modules.
 // Only debugging information is not stripped.
 //
 ModulePass *createStripNonDebugSymbolsPass();
@@ -78,20 +78,24 @@ ModulePass *createGlobalDCEPass();
 /// the specified global values. Otherwise, it deletes as much of the module as
 /// possible, except for the global values specified.
 ///
-ModulePass *createGVExtractionPass(std::vector<GlobalValue*>& GVs, bool 
+ModulePass *createGVExtractionPass(std::vector<GlobalValue*>& GVs, bool
                                    deleteFn = false);
 
 //===----------------------------------------------------------------------===//
 /// createFunctionInliningPass - Return a new pass object that uses a heuristic
 /// to inline direct function calls to small functions.
 ///
+/// The Threshold can be passed directly, or asked to be computed from the
+/// given optimization and size optimization arguments.
+///
 /// The -inline-threshold command line option takes precedence over the
 /// threshold given here.
 Pass *createFunctionInliningPass();
 Pass *createFunctionInliningPass(int Threshold);
+Pass *createFunctionInliningPass(unsigned OptLevel, unsigned SizeOptLevel);
 
 //===----------------------------------------------------------------------===//
-/// createAlwaysInlinerPass - Return a new pass object that inlines only 
+/// createAlwaysInlinerPass - Return a new pass object that inlines only
 /// functions that are marked as "always_inline".
 Pass *createAlwaysInlinerPass();
 Pass *createAlwaysInlinerPass(bool InsertLifetime);
@@ -104,12 +108,16 @@ Pass *createPruneEHPass();
 
 //===----------------------------------------------------------------------===//
 /// createInternalizePass - This pass loops over all of the functions in the
-/// input module, internalizing all globals (functions and variables) not in the
-/// given exportList.
+/// input module, internalizing all globals (functions and variables) it can.
+////
+/// The symbols in \p ExportList are never internalized.
+///
+/// The symbol in DSOList are internalized if it is safe to drop them from
+/// the symbol table.
 ///
 /// Note that commandline options that are used with the above function are not
 /// used now!
-ModulePass *createInternalizePass(ArrayRef<const char *> exportList);
+ModulePass *createInternalizePass(ArrayRef<const char *> ExportList);
 /// createInternalizePass - Same as above, but with an empty exportList.
 ModulePass *createInternalizePass();
 
@@ -183,7 +191,7 @@ ModulePass *createMergeFunctionsPass();
 /// createPartialInliningPass - This pass inlines parts of functions.
 ///
 ModulePass *createPartialInliningPass();
-  
+
 //===----------------------------------------------------------------------===//
 // createMetaRenamerPass - Rename everything with metasyntatic names.
 //

@@ -75,7 +75,7 @@ namespace {
       bool Dirty;               // Register needs spill.
 
       explicit LiveReg(unsigned v)
-        : LastUse(0), VirtReg(v), PhysReg(0), LastOpNum(0), Dirty(false) {}
+        : LastUse(nullptr), VirtReg(v), PhysReg(0), LastOpNum(0), Dirty(false){}
 
       unsigned getSparseSetIndex() const {
         return TargetRegisterInfo::virtReg2Index(VirtReg);
@@ -144,23 +144,23 @@ namespace {
     // not be erased.
     bool isBulkSpilling;
 
-    enum {
+    enum : unsigned {
       spillClean = 1,
       spillDirty = 100,
       spillImpossible = ~0u
     };
   public:
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "Fast Register Allocator";
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
   private:
-    bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
     void AllocateBasicBlock();
     void handleThroughOperands(MachineInstr *MI,
                                SmallVectorImpl<unsigned> &VirtDead);
@@ -224,7 +224,7 @@ bool RAFast::isLastUseOfLocalReg(MachineOperand &MO) {
 
   // Check that the use/def chain has exactly one operand - MO.
   MachineRegisterInfo::reg_nodbg_iterator I = MRI->reg_nodbg_begin(MO.getReg());
-  if (&I.getOperand() != &MO)
+  if (&*I != &MO)
     return false;
   return ++I == MRI->reg_nodbg_end();
 }
@@ -298,7 +298,7 @@ void RAFast::spillVirtReg(MachineBasicBlock::iterator MI,
     for (unsigned li = 0, le = LRIDbgValues.size(); li != le; ++li) {
       MachineInstr *DBG = LRIDbgValues[li];
       const MDNode *MDPtr = DBG->getOperand(2).getMetadata();
-      bool IsIndirect = DBG->getOperand(1).isImm(); // Register-indirect value?
+      bool IsIndirect = DBG->isIndirectDebugValue();
       uint64_t Offset = IsIndirect ? DBG->getOperand(1).getImm() : 0;
       DebugLoc DL;
       if (MI == MBB->end()) {
@@ -319,7 +319,7 @@ void RAFast::spillVirtReg(MachineBasicBlock::iterator MI,
     // now.
     LRIDbgValues.clear();
     if (SpillKill)
-      LR.LastUse = 0; // Don't kill register again
+      LR.LastUse = nullptr; // Don't kill register again
   }
   killVirtReg(LRI);
 }
@@ -569,7 +569,10 @@ RAFast::LiveRegMap::iterator RAFast::allocVirtReg(MachineInstr *MI,
   }
 
   // Nothing we can do. Report an error and keep going with a bad allocation.
-  MI->emitError("ran out of registers during register allocation");
+  if (MI->isInlineAsm())
+    MI->emitError("inline assembly requires more registers than available");
+  else
+    MI->emitError("ran out of registers during register allocation");
   definePhysReg(MI, *AO.begin(), regFree);
   return assignVirtToPhysReg(VirtReg, *AO.begin());
 }
@@ -582,12 +585,12 @@ RAFast::defineVirtReg(MachineInstr *MI, unsigned OpNum,
          "Not a virtual register");
   LiveRegMap::iterator LRI;
   bool New;
-  tie(LRI, New) = LiveVirtRegs.insert(LiveReg(VirtReg));
+  std::tie(LRI, New) = LiveVirtRegs.insert(LiveReg(VirtReg));
   if (New) {
     // If there is no hint, peek at the only use of this register.
     if ((!Hint || !TargetRegisterInfo::isPhysicalRegister(Hint)) &&
         MRI->hasOneNonDBGUse(VirtReg)) {
-      const MachineInstr &UseMI = *MRI->use_nodbg_begin(VirtReg);
+      const MachineInstr &UseMI = *MRI->use_instr_nodbg_begin(VirtReg);
       // It's a copy, use the destination register as a hint.
       if (UseMI.isCopyLike())
         Hint = UseMI.getOperand(0).getReg();
@@ -615,7 +618,7 @@ RAFast::reloadVirtReg(MachineInstr *MI, unsigned OpNum,
          "Not a virtual register");
   LiveRegMap::iterator LRI;
   bool New;
-  tie(LRI, New) = LiveVirtRegs.insert(LiveReg(VirtReg));
+  std::tie(LRI, New) = LiveVirtRegs.insert(LiveReg(VirtReg));
   MachineOperand &MO = MI->getOperand(OpNum);
   if (New) {
     LRI = allocVirtReg(MI, LRI, Hint);
@@ -856,7 +859,7 @@ void RAFast::AllocateBasicBlock() {
             }
             else {
               // Modify DBG_VALUE now that the value is in a spill slot.
-              bool IsIndirect = MI->getOperand(1).isImm();
+              bool IsIndirect = MI->isIndirectDebugValue();
               uint64_t Offset = IsIndirect ? MI->getOperand(1).getImm() : 0;
               const MDNode *MDPtr =
                 MI->getOperand(MI->getNumOperands()-1).getMetadata();

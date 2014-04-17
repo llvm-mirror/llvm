@@ -18,14 +18,15 @@ using namespace dwarf;
 
 void DWARFDebugLine::Prologue::dump(raw_ostream &OS) const {
   OS << "Line table prologue:\n"
-     << format("   total_length: 0x%8.8x\n", TotalLength)
-     << format("        version: %u\n", Version)
-     << format("prologue_length: 0x%8.8x\n", PrologueLength)
-     << format("min_inst_length: %u\n", MinInstLength)
-     << format("default_is_stmt: %u\n", DefaultIsStmt)
-     << format("      line_base: %i\n", LineBase)
-     << format("     line_range: %u\n", LineRange)
-     << format("    opcode_base: %u\n", OpcodeBase);
+     << format("    total_length: 0x%8.8x\n", TotalLength)
+     << format("         version: %u\n", Version)
+     << format(" prologue_length: 0x%8.8x\n", PrologueLength)
+     << format(" min_inst_length: %u\n", MinInstLength)
+     << format(Version >= 4 ? "max_ops_per_inst: %u\n" : "", MaxOpsPerInst)
+     << format(" default_is_stmt: %u\n", DefaultIsStmt)
+     << format("       line_base: %i\n", LineBase)
+     << format("      line_range: %u\n", LineRange)
+     << format("     opcode_base: %u\n", OpcodeBase);
 
   for (uint32_t i = 0; i < StandardOpcodeLengths.size(); ++i)
     OS << format("standard_opcode_lengths[%s] = %u\n", LNStandardString(i+1),
@@ -62,6 +63,7 @@ void DWARFDebugLine::Row::reset(bool default_is_stmt) {
   Column = 0;
   File = 1;
   Isa = 0;
+  Discriminator = 0;
   IsStmt = default_is_stmt;
   BasicBlock = false;
   EndSequence = false;
@@ -71,7 +73,7 @@ void DWARFDebugLine::Row::reset(bool default_is_stmt) {
 
 void DWARFDebugLine::Row::dump(raw_ostream &OS) const {
   OS << format("0x%16.16" PRIx64 " %6u %6u", Address, Line, Column)
-     << format(" %6u %3u ", File, Isa)
+     << format(" %6u %3u %13u ", File, Isa, Discriminator)
      << (IsStmt ? " is_stmt" : "")
      << (BasicBlock ? " basic_block" : "")
      << (PrologueEnd ? " prologue_end" : "")
@@ -85,11 +87,12 @@ void DWARFDebugLine::LineTable::dump(raw_ostream &OS) const {
   OS << '\n';
 
   if (!Rows.empty()) {
-    OS << "Address            Line   Column File   ISA Flags\n"
-       << "------------------ ------ ------ ------ --- -------------\n";
-    for (std::vector<Row>::const_iterator pos = Rows.begin(),
-         end = Rows.end(); pos != end; ++pos)
-      pos->dump(OS);
+    OS << "Address            Line   Column File   ISA Discriminator Flags\n"
+       << "------------------ ------ ------ ------ --- ------------- "
+          "-------------\n";
+    for (const Row &R : Rows) {
+      R.dump(OS);
+    }
   }
 }
 
@@ -170,12 +173,14 @@ DWARFDebugLine::parsePrologue(DataExtractor debug_line_data,
   prologue->clear();
   prologue->TotalLength = debug_line_data.getU32(offset_ptr);
   prologue->Version = debug_line_data.getU16(offset_ptr);
-  if (prologue->Version != 2)
+  if (prologue->Version < 2)
     return false;
 
   prologue->PrologueLength = debug_line_data.getU32(offset_ptr);
   const uint32_t end_prologue_offset = prologue->PrologueLength + *offset_ptr;
   prologue->MinInstLength = debug_line_data.getU8(offset_ptr);
+  if (prologue->Version >= 4)
+    prologue->MaxOpsPerInst = debug_line_data.getU8(offset_ptr);
   prologue->DefaultIsStmt = debug_line_data.getU8(offset_ptr);
   prologue->LineBase = debug_line_data.getU8(offset_ptr);
   prologue->LineRange = debug_line_data.getU8(offset_ptr);
@@ -211,17 +216,16 @@ DWARFDebugLine::parsePrologue(DataExtractor debug_line_data,
 
   if (*offset_ptr != end_prologue_offset) {
     fprintf(stderr, "warning: parsing line table prologue at 0x%8.8x should"
-                    " have ended at 0x%8.8x but it ended ad 0x%8.8x\n",
+                    " have ended at 0x%8.8x but it ended at 0x%8.8x\n",
             prologue_offset, end_prologue_offset, *offset_ptr);
     return false;
   }
   return true;
 }
 
-bool
-DWARFDebugLine::parseStatementTable(DataExtractor debug_line_data, 
-                                    const RelocAddrMap *RMap,
-                                    uint32_t *offset_ptr, State &state) {
+bool DWARFDebugLine::parseStatementTable(DataExtractor debug_line_data,
+                                         const RelocAddrMap *RMap,
+                                         uint32_t *offset_ptr, State &state) {
   const uint32_t debug_line_offset = *offset_ptr;
 
   Prologue *prologue = &state.Prologue;
@@ -309,6 +313,10 @@ DWARFDebugLine::parseStatementTable(DataExtractor debug_line_data,
           fileEntry.Length = debug_line_data.getULEB128(offset_ptr);
           prologue->FileNames.push_back(fileEntry);
         }
+        break;
+
+      case DW_LNE_set_discriminator:
+        state.Discriminator = debug_line_data.getULEB128(offset_ptr);
         break;
 
       default:

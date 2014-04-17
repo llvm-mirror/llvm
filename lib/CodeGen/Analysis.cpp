@@ -46,7 +46,7 @@ unsigned llvm::ComputeLinearIndex(Type *Ty,
         EI != EE; ++EI) {
       if (Indices && *Indices == unsigned(EI - EB))
         return ComputeLinearIndex(*EI, Indices+1, IndicesEnd, CurIndex);
-      CurIndex = ComputeLinearIndex(*EI, 0, 0, CurIndex);
+      CurIndex = ComputeLinearIndex(*EI, nullptr, nullptr, CurIndex);
     }
     return CurIndex;
   }
@@ -56,7 +56,7 @@ unsigned llvm::ComputeLinearIndex(Type *Ty,
     for (unsigned i = 0, e = ATy->getNumElements(); i != e; ++i) {
       if (Indices && *Indices == i)
         return ComputeLinearIndex(EltTy, Indices+1, IndicesEnd, CurIndex);
-      CurIndex = ComputeLinearIndex(EltTy, 0, 0, CurIndex);
+      CurIndex = ComputeLinearIndex(EltTy, nullptr, nullptr, CurIndex);
     }
     return CurIndex;
   }
@@ -228,7 +228,7 @@ static const Value *getNoopInput(const Value *V,
     // through.
     const Instruction *I = dyn_cast<Instruction>(V);
     if (!I || I->getNumOperands() == 0) return V;
-    const Value *NoopInput = 0;
+    const Value *NoopInput = nullptr;
 
     Value *Op = I->getOperand(0);
     if (isa<BitCastInst>(I)) {
@@ -498,8 +498,7 @@ bool llvm::isInTailCallPosition(ImmutableCallSite CS,
   // chain interposes between I and the return.
   if (I->mayHaveSideEffects() || I->mayReadFromMemory() ||
       !isSafeToSpeculativelyExecute(I))
-    for (BasicBlock::const_iterator BBI = prior(prior(ExitBB->end())); ;
-         --BBI) {
+    for (BasicBlock::const_iterator BBI = std::prev(ExitBB->end(), 2);; --BBI) {
       if (&*BBI == I)
         break;
       // Debug info intrinsics do not get in the way of tail call optimization.
@@ -510,6 +509,13 @@ bool llvm::isInTailCallPosition(ImmutableCallSite CS,
         return false;
     }
 
+  return returnTypeIsEligibleForTailCall(ExitBB->getParent(), I, Ret, TLI);
+}
+
+bool llvm::returnTypeIsEligibleForTailCall(const Function *F,
+                                           const Instruction *I,
+                                           const ReturnInst *Ret,
+                                           const TargetLoweringBase &TLI) {
   // If the block ends with a void return or unreachable, it doesn't matter
   // what the call's return type is.
   if (!Ret || Ret->getNumOperands() == 0) return true;
@@ -519,7 +525,7 @@ bool llvm::isInTailCallPosition(ImmutableCallSite CS,
   if (isa<UndefValue>(Ret->getOperand(0))) return true;
 
   // Make sure the attributes attached to each return are compatible.
-  AttrBuilder CallerAttrs(ExitBB->getParent()->getAttributes(),
+  AttrBuilder CallerAttrs(F->getAttributes(),
                           AttributeSet::ReturnIndex);
   AttrBuilder CalleeAttrs(cast<CallInst>(I)->getAttributes(),
                           AttributeSet::ReturnIndex);

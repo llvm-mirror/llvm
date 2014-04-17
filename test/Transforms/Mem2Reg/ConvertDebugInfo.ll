@@ -33,12 +33,13 @@ return:                                           ; preds = %entry
 declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!3}
+!llvm.module.flags = !{!14}
 
 !0 = metadata !{i32 786689, metadata !1, metadata !"i", metadata !2, i32 2, metadata !7, i32 0, null} ; [ DW_TAG_arg_variable ]
 !1 = metadata !{i32 786478, metadata !12, metadata !2, metadata !"testfunc", metadata !"testfunc", metadata !"testfunc", i32 2, metadata !4, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, double (i32, double)* @testfunc, null, null, null, i32 2} ; [ DW_TAG_subprogram ]
 !2 = metadata !{i32 786473, metadata !12} ; [ DW_TAG_file_type ]
 !3 = metadata !{i32 786449, metadata !12, i32 1, metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", i1 true, metadata !"", i32 0, metadata !13, metadata !13, null, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!4 = metadata !{i32 786453, metadata !12, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !5, i32 0, null} ; [ DW_TAG_subroutine_type ]
+!4 = metadata !{i32 786453, metadata !12, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !5, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !5 = metadata !{metadata !6, metadata !7, metadata !6}
 !6 = metadata !{i32 786468, metadata !12, metadata !2, metadata !"double", i32 0, i64 64, i64 64, i64 0, i32 0, i32 4} ; [ DW_TAG_base_type ]
 !7 = metadata !{i32 786468, metadata !12, metadata !2, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
@@ -48,3 +49,4 @@ declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
 !11 = metadata !{i32 786443, metadata !12, metadata !1, i32 2, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
 !12 = metadata !{metadata !"testfunc.c", metadata !"/tmp"}
 !13 = metadata !{i32 0}
+!14 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

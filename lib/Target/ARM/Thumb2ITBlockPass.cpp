@@ -28,13 +28,14 @@ namespace {
     static char ID;
     Thumb2ITBlockPass() : MachineFunctionPass(ID) {}
 
+    bool restrictIT;
     const Thumb2InstrInfo *TII;
     const TargetRegisterInfo *TRI;
     ARMFunctionInfo *AFI;
 
-    virtual bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "Thumb IT blocks insertion pass";
     }
 
@@ -192,37 +193,42 @@ bool Thumb2ITBlockPass::InsertITInstructions(MachineBasicBlock &MBB) {
     // Form IT block.
     ARMCC::CondCodes OCC = ARMCC::getOppositeCondition(CC);
     unsigned Mask = 0, Pos = 3;
-    // Branches, including tricky ones like LDM_RET, need to end an IT
-    // block so check the instruction we just put in the block.
-    for (; MBBI != E && Pos &&
-           (!MI->isBranch() && !MI->isReturn()) ; ++MBBI) {
-      if (MBBI->isDebugValue())
-        continue;
 
-      MachineInstr *NMI = &*MBBI;
-      MI = NMI;
-
-      unsigned NPredReg = 0;
-      ARMCC::CondCodes NCC = getITInstrPredicate(NMI, NPredReg);
-      if (NCC == CC || NCC == OCC) {
-        Mask |= (NCC & 1) << Pos;
-        // Add implicit use of ITSTATE.
-        NMI->addOperand(MachineOperand::CreateReg(ARM::ITSTATE, false/*ifDef*/,
-                                               true/*isImp*/, false/*isKill*/));
-        LastITMI = NMI;
-      } else {
-        if (NCC == ARMCC::AL &&
-            MoveCopyOutOfITBlock(NMI, CC, OCC, Defs, Uses)) {
-          --MBBI;
-          MBB.remove(NMI);
-          MBB.insert(InsertPos, NMI);
-          ++NumMovedInsts;
+    // v8 IT blocks are limited to one conditional op unless -arm-no-restrict-it
+    // is set: skip the loop
+    if (!restrictIT) {
+      // Branches, including tricky ones like LDM_RET, need to end an IT
+      // block so check the instruction we just put in the block.
+      for (; MBBI != E && Pos &&
+             (!MI->isBranch() && !MI->isReturn()) ; ++MBBI) {
+        if (MBBI->isDebugValue())
           continue;
+
+        MachineInstr *NMI = &*MBBI;
+        MI = NMI;
+
+        unsigned NPredReg = 0;
+        ARMCC::CondCodes NCC = getITInstrPredicate(NMI, NPredReg);
+        if (NCC == CC || NCC == OCC) {
+          Mask |= (NCC & 1) << Pos;
+          // Add implicit use of ITSTATE.
+          NMI->addOperand(MachineOperand::CreateReg(ARM::ITSTATE, false/*ifDef*/,
+                                                 true/*isImp*/, false/*isKill*/));
+          LastITMI = NMI;
+        } else {
+          if (NCC == ARMCC::AL &&
+              MoveCopyOutOfITBlock(NMI, CC, OCC, Defs, Uses)) {
+            --MBBI;
+            MBB.remove(NMI);
+            MBB.insert(InsertPos, NMI);
+            ++NumMovedInsts;
+            continue;
+          }
+          break;
         }
-        break;
+        TrackDefUses(NMI, Defs, Uses, TRI);
+        --Pos;
       }
-      TrackDefUses(NMI, Defs, Uses, TRI);
-      --Pos;
     }
 
     // Finalize IT mask.
@@ -236,7 +242,7 @@ bool Thumb2ITBlockPass::InsertITInstructions(MachineBasicBlock &MBB) {
 
     // Finalize the bundle.
     MachineBasicBlock::instr_iterator LI = LastITMI;
-    finalizeBundle(MBB, InsertPos.getInstrIterator(), llvm::next(LI));
+    finalizeBundle(MBB, InsertPos.getInstrIterator(), std::next(LI));
 
     Modified = true;
     ++NumITs;
@@ -250,6 +256,7 @@ bool Thumb2ITBlockPass::runOnMachineFunction(MachineFunction &Fn) {
   AFI = Fn.getInfo<ARMFunctionInfo>();
   TII = static_cast<const Thumb2InstrInfo*>(TM.getInstrInfo());
   TRI = TM.getRegisterInfo();
+  restrictIT = TM.getSubtarget<ARMSubtarget>().restrictIT();
 
   if (!AFI->isThumbFunction())
     return false;

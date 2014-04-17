@@ -26,10 +26,11 @@ namespace llvm {
 class InstrItineraryData;
 class JITCodeEmitter;
 class GlobalValue;
+class Mangler;
 class MCAsmInfo;
 class MCCodeGenInfo;
 class MCContext;
-class PassManagerBase;
+class MCSymbol;
 class Target;
 class DataLayout;
 class TargetLibraryInfo;
@@ -46,6 +47,12 @@ class ScalarTargetTransformInfo;
 class VectorTargetTransformInfo;
 class formatted_raw_ostream;
 class raw_ostream;
+
+// The old pass manager infrastructure is hidden in a legacy namespace now.
+namespace legacy {
+class PassManagerBase;
+}
+using legacy::PassManagerBase;
 
 //===----------------------------------------------------------------------===//
 ///
@@ -70,7 +77,8 @@ protected: // Can only create subclasses.
   std::string TargetFS;
 
   /// CodeGenInfo - Low level target information such as relocation model.
-  const MCCodeGenInfo *CodeGenInfo;
+  /// Non-const to allow resetting optimization level per-function.
+  MCCodeGenInfo *CodeGenInfo;
 
   /// AsmInfo - Contains target specific asm information.
   ///
@@ -79,9 +87,9 @@ protected: // Can only create subclasses.
   unsigned MCRelaxAll : 1;
   unsigned MCNoExecStack : 1;
   unsigned MCSaveTempLabels : 1;
-  unsigned MCUseLoc : 1;
   unsigned MCUseCFI : 1;
   unsigned MCUseDwarfDirectory : 1;
+  unsigned RequireStructuredCFG : 1;
 
 public:
   virtual ~TargetMachine();
@@ -94,7 +102,9 @@ public:
 
   /// getSubtargetImpl - virtual method implemented by subclasses that returns
   /// a reference to that target's TargetSubtargetInfo-derived member variable.
-  virtual const TargetSubtargetInfo *getSubtargetImpl() const { return 0; }
+  virtual const TargetSubtargetInfo *getSubtargetImpl() const {
+    return nullptr;
+  }
 
   mutable TargetOptions Options;
 
@@ -102,7 +112,7 @@ public:
   void resetTargetOptions(const MachineFunction *MF) const;
 
   // Interfaces to the major aspects of target machine information:
-  // 
+  //
   // -- Instruction opcode and operand information
   // -- Pipelines and scheduling information
   // -- Stack frame information
@@ -110,11 +120,15 @@ public:
   //
   // N.B. These objects may change during compilation. It's not safe to cache
   // them between functions.
-  virtual const TargetInstrInfo         *getInstrInfo() const { return 0; }
-  virtual const TargetFrameLowering *getFrameLowering() const { return 0; }
-  virtual const TargetLowering    *getTargetLowering() const { return 0; }
-  virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const{ return 0; }
-  virtual const DataLayout             *getDataLayout() const { return 0; }
+  virtual const TargetInstrInfo  *getInstrInfo() const { return nullptr; }
+  virtual const TargetFrameLowering *getFrameLowering() const {
+    return nullptr;
+  }
+  virtual const TargetLowering *getTargetLowering() const { return nullptr; }
+  virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const {
+    return nullptr;
+  }
+  virtual const DataLayout *getDataLayout() const { return nullptr; }
 
   /// getMCAsmInfo - Return target specific asm information.
   ///
@@ -131,24 +145,27 @@ public:
   /// not, return null.  This is kept separate from RegInfo until RegInfo has
   /// details of graph coloring register allocation removed from it.
   ///
-  virtual const TargetRegisterInfo *getRegisterInfo() const { return 0; }
+  virtual const TargetRegisterInfo *getRegisterInfo() const { return nullptr; }
 
   /// getIntrinsicInfo - If intrinsic information is available, return it.  If
   /// not, return null.
   ///
-  virtual const TargetIntrinsicInfo *getIntrinsicInfo() const { return 0; }
+  virtual const TargetIntrinsicInfo *getIntrinsicInfo() const { return nullptr;}
 
   /// getJITInfo - If this target supports a JIT, return information for it,
   /// otherwise return null.
   ///
-  virtual TargetJITInfo *getJITInfo() { return 0; }
+  virtual TargetJITInfo *getJITInfo() { return nullptr; }
 
   /// getInstrItineraryData - Returns instruction itinerary data for the target
   /// or specific subtarget.
   ///
   virtual const InstrItineraryData *getInstrItineraryData() const {
-    return 0;
+    return nullptr;
   }
+
+  bool requiresStructuredCFG() const { return RequireStructuredCFG; }
+  void setRequiresStructuredCFG(bool Value) { RequireStructuredCFG = Value; }
 
   /// hasMCRelaxAll - Check whether all machine code instructions should be
   /// relaxed.
@@ -171,12 +188,6 @@ public:
 
   /// setMCNoExecStack - Set whether an executabel stack is not needed.
   void setMCNoExecStack(bool Value) { MCNoExecStack = Value; }
-
-  /// hasMCUseLoc - Check whether we should use dwarf's .loc directive.
-  bool hasMCUseLoc() const { return MCUseLoc; }
-
-  /// setMCUseLoc - Set whether all we should use dwarf's .loc directive.
-  void setMCUseLoc(bool Value) { MCUseLoc = Value; }
 
   /// hasMCUseCFI - Check whether we should use dwarf's .cfi_* directives.
   bool hasMCUseCFI() const { return MCUseCFI; }
@@ -207,6 +218,9 @@ public:
   /// getOptLevel - Returns the optimization level: None, Less,
   /// Default, or Aggressive.
   CodeGenOpt::Level getOptLevel() const;
+
+  /// \brief Overrides the optimization level.
+  void setOptLevel(CodeGenOpt::Level Level) const;
 
   void setFastISel(bool Enable) { Options.EnableFastISel = Enable; }
 
@@ -255,8 +269,8 @@ public:
                                    formatted_raw_ostream &,
                                    CodeGenFileType,
                                    bool /*DisableVerify*/ = true,
-                                   AnalysisID /*StartAfter*/ = 0,
-                                   AnalysisID /*StopAfter*/ = 0) {
+                                   AnalysisID /*StartAfter*/ = nullptr,
+                                   AnalysisID /*StopAfter*/ = nullptr) {
     return true;
   }
 
@@ -283,6 +297,10 @@ public:
                                  bool /*DisableVerify*/ = true) {
     return true;
   }
+
+  void getNameWithPrefix(SmallVectorImpl<char> &Name, const GlobalValue *GV,
+                         Mangler &Mang, bool MayAlwaysUsePrivate = false) const;
+  MCSymbol *getSymbol(const GlobalValue *GV, Mangler &Mang) const;
 };
 
 /// LLVMTargetMachine - This class describes a target machine that is
@@ -300,7 +318,7 @@ public:
   /// \brief Register analysis passes for this target with a pass manager.
   ///
   /// This registers target independent analysis passes.
-  virtual void addAnalysisPasses(PassManagerBase &PM);
+  void addAnalysisPasses(PassManagerBase &PM) override;
 
   /// createPassConfig - Create a pass configuration object to be used by
   /// addPassToEmitX methods for generating a pipeline of CodeGen passes.
@@ -309,12 +327,10 @@ public:
   /// addPassesToEmitFile - Add passes to the specified pass manager to get the
   /// specified file emitted.  Typically this will involve several steps of code
   /// generation.
-  virtual bool addPassesToEmitFile(PassManagerBase &PM,
-                                   formatted_raw_ostream &Out,
-                                   CodeGenFileType FileType,
-                                   bool DisableVerify = true,
-                                   AnalysisID StartAfter = 0,
-                                   AnalysisID StopAfter = 0);
+  bool addPassesToEmitFile(PassManagerBase &PM, formatted_raw_ostream &Out,
+                           CodeGenFileType FileType, bool DisableVerify = true,
+                           AnalysisID StartAfter = nullptr,
+                           AnalysisID StopAfter = nullptr) override;
 
   /// addPassesToEmitMachineCode - Add passes to the specified pass manager to
   /// get machine code emitted.  This uses a JITCodeEmitter object to handle
@@ -322,19 +338,16 @@ public:
   /// of functions.  This method returns true if machine code emission is
   /// not supported.
   ///
-  virtual bool addPassesToEmitMachineCode(PassManagerBase &PM,
-                                          JITCodeEmitter &MCE,
-                                          bool DisableVerify = true);
+  bool addPassesToEmitMachineCode(PassManagerBase &PM, JITCodeEmitter &MCE,
+                                  bool DisableVerify = true) override;
 
   /// addPassesToEmitMC - Add passes to the specified pass manager to get
   /// machine code emitted with the MCJIT. This method returns true if machine
   /// code is not supported. It fills the MCContext Ctx pointer which can be
   /// used to build custom MCStreamer.
   ///
-  virtual bool addPassesToEmitMC(PassManagerBase &PM,
-                                 MCContext *&Ctx,
-                                 raw_ostream &OS,
-                                 bool DisableVerify = true);
+  bool addPassesToEmitMC(PassManagerBase &PM, MCContext *&Ctx,
+                         raw_ostream &OS, bool DisableVerify = true) override;
 
   /// addCodeEmitter - This pass should be overridden by the target to add a
   /// code emitter, if supported.  If this is not supported, 'true' should be

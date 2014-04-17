@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -96,7 +97,7 @@ namespace {
     static char ID;
     ARMCGBR() : MachineFunctionPass(ID) {}
 
-    virtual bool runOnMachineFunction(MachineFunction &MF) {
+    bool runOnMachineFunction(MachineFunction &MF) override {
       ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
       if (AFI->getGlobalBaseReg() == 0)
         return false;
@@ -119,25 +120,37 @@ namespace {
       MachineBasicBlock &FirstMBB = MF.front();
       MachineBasicBlock::iterator MBBI = FirstMBB.begin();
       DebugLoc DL = FirstMBB.findDebugLoc(MBBI);
-      unsigned GlobalBaseReg = AFI->getGlobalBaseReg();
+      unsigned TempReg =
+          MF.getRegInfo().createVirtualRegister(&ARM::rGPRRegClass);
       unsigned Opc = TM->getSubtarget<ARMSubtarget>().isThumb2() ?
                      ARM::t2LDRpci : ARM::LDRcp;
       const TargetInstrInfo &TII = *TM->getInstrInfo();
       MachineInstrBuilder MIB = BuildMI(FirstMBB, MBBI, DL,
-                                        TII.get(Opc), GlobalBaseReg)
+                                        TII.get(Opc), TempReg)
                                 .addConstantPoolIndex(Idx);
       if (Opc == ARM::LDRcp)
         MIB.addImm(0);
       AddDefaultPred(MIB);
 
+      // Fix the GOT address by adding pc.
+      unsigned GlobalBaseReg = AFI->getGlobalBaseReg();
+      Opc = TM->getSubtarget<ARMSubtarget>().isThumb2() ? ARM::tPICADD
+                                                        : ARM::PICADD;
+      MIB = BuildMI(FirstMBB, MBBI, DL, TII.get(Opc), GlobalBaseReg)
+                .addReg(TempReg)
+                .addImm(ARMPCLabelIndex);
+      if (Opc == ARM::PICADD)
+        AddDefaultPred(MIB);
+
+
       return true;
     }
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "ARM PIC Global Base Reg Initialization";
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       MachineFunctionPass::getAnalysisUsage(AU);
     }

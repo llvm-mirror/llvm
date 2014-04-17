@@ -59,14 +59,25 @@ X86MCAsmInfoDarwin::X86MCAsmInfoDarwin(const Triple &T) {
   // for .S files on other systems.  Perhaps this is because the file system
   // wasn't always case preserving or something.
   CommentString = "##";
-  PCSymbol = ".";
 
   SupportsDebugInformation = true;
-  DwarfUsesInlineInfoSection = true;
   UseDataRegionDirectives = MarkedJTDataRegions;
 
   // Exceptions handling
   ExceptionsType = ExceptionHandling::DwarfCFI;
+
+  // old assembler lacks some directives
+  // FIXME: this should really be a check on the assembler characteristics
+  // rather than OS version
+  if (T.isMacOSX() && T.isMacOSXVersionLT(10, 6))
+    HasWeakDefCanBeHiddenDirective = false;
+
+  // FIXME: this should not depend on the target OS version, but on the ld64
+  // version in use.  From at least >= ld64-97.17 (Xcode 3.2.6) the abs-ified
+  // FDE relocs may be used.
+  DwarfFDESymbolsUseAbsDiff = T.isMacOSX() && !T.isMacOSXVersionLT(10, 6);
+
+  UseIntegratedAssembler = true;
 }
 
 X86_64MCAsmInfoDarwin::X86_64MCAsmInfoDarwin(const Triple &Triple)
@@ -91,10 +102,6 @@ X86ELFMCAsmInfo::X86ELFMCAsmInfo(const Triple &T) {
 
   TextAlignFillValue = 0x90;
 
-  PrivateGlobalPrefix = ".L";
-  WeakRefDirective = "\t.weak\t";
-  PCSymbol = ".";
-
   // Set up DWARF directives
   HasLEB128 = true;  // Target asm supports leb128 directives (little-endian)
 
@@ -109,6 +116,10 @@ X86ELFMCAsmInfo::X86ELFMCAsmInfo(const Triple &T) {
   if ((T.getOS() == Triple::OpenBSD || T.getOS() == Triple::Bitrig) &&
        T.getArch() == Triple::x86)
     Data64bitsDirective = 0;
+
+  // Always enable the integrated assembler by default.
+  // Clang also enabled it when the OS is Solaris but that is redundant here.
+  UseIntegratedAssembler = true;
 }
 
 const MCExpr *
@@ -131,22 +142,24 @@ getNonexecutableStackSection(MCContext &Ctx) const {
 void X86MCAsmInfoMicrosoft::anchor() { }
 
 X86MCAsmInfoMicrosoft::X86MCAsmInfoMicrosoft(const Triple &Triple) {
-  if (Triple.getArch() == Triple::x86_64) {
-    GlobalPrefix = "";
+  if (Triple.getArch() == Triple::x86_64)
     PrivateGlobalPrefix = ".L";
-  }
 
   AssemblerDialect = AsmWriterFlavor;
 
   TextAlignFillValue = 0x90;
+
+  AllowAtInName = true;
+
+  UseIntegratedAssembler = true;
 }
 
 void X86MCAsmInfoGNUCOFF::anchor() { }
 
 X86MCAsmInfoGNUCOFF::X86MCAsmInfoGNUCOFF(const Triple &Triple) {
   if (Triple.getArch() == Triple::x86_64) {
-    GlobalPrefix = "";
     PrivateGlobalPrefix = ".L";
+    PointerSize = 8;
   }
 
   AssemblerDialect = AsmWriterFlavor;
@@ -155,4 +168,6 @@ X86MCAsmInfoGNUCOFF::X86MCAsmInfoGNUCOFF(const Triple &Triple) {
 
   // Exceptions handling
   ExceptionsType = ExceptionHandling::DwarfCFI;
+
+  UseIntegratedAssembler = true;
 }

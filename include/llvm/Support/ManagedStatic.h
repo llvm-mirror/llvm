@@ -47,7 +47,7 @@ protected:
   void RegisterManagedStatic(void *(*creator)(), void (*deleter)(void*)) const;
 public:
   /// isConstructed - Return true if this object has not been created yet.
-  bool isConstructed() const { return Ptr != 0; }
+  bool isConstructed() const { return Ptr != nullptr; }
 
   void destroy() const;
 };
@@ -98,7 +98,6 @@ public:
 
 /// llvm_shutdown - Deallocate and destroy all ManagedStatic variables.
 void llvm_shutdown();
-
 
 /// llvm_shutdown_obj - This is a simple helper class that calls
 /// llvm_shutdown() when it is destroyed.

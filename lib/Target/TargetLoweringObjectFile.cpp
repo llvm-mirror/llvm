@@ -18,6 +18,8 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Mangler.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
@@ -25,7 +27,7 @@
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/Mangler.h"
+#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 using namespace llvm;
@@ -40,6 +42,7 @@ using namespace llvm;
 void TargetLoweringObjectFile::Initialize(MCContext &ctx,
                                           const TargetMachine &TM) {
   Ctx = &ctx;
+  DL = TM.getDataLayout();
   InitMCObjectFileInfo(TM.getTargetTriple(),
                        TM.getRelocationModel(), TM.getCodeModel(), *Ctx);
 }
@@ -97,10 +100,22 @@ static bool IsNullTerminatedString(const Constant *C) {
   return false;
 }
 
-MCSymbol *TargetLoweringObjectFile::
-getCFIPersonalitySymbol(const GlobalValue *GV, Mangler *Mang,
-                        MachineModuleInfo *MMI) const {
-  return Mang->getSymbol(GV);
+MCSymbol *TargetLoweringObjectFile::getSymbolWithGlobalValueBase(
+    const GlobalValue *GV, StringRef Suffix, Mangler &Mang,
+    const TargetMachine &TM) const {
+  assert(!Suffix.empty());
+
+  SmallString<60> NameStr;
+  NameStr += DL->getPrivateGlobalPrefix();
+  TM.getNameWithPrefix(NameStr, GV, Mang);
+  NameStr.append(Suffix.begin(), Suffix.end());
+  return Ctx->GetOrCreateSymbol(NameStr.str());
+}
+
+MCSymbol *TargetLoweringObjectFile::getCFIPersonalitySymbol(
+    const GlobalValue *GV, Mangler &Mang, const TargetMachine &TM,
+    MachineModuleInfo *MMI) const {
+  return TM.getSymbol(GV, Mang);
 }
 
 void TargetLoweringObjectFile::emitPersonalityValue(MCStreamer &Streamer,
@@ -242,7 +257,7 @@ SectionKind TargetLoweringObjectFile::getKindForGlobal(const GlobalValue *GV,
 /// the specified global variable or function definition.  This should not
 /// be passed external (or available externally) globals.
 const MCSection *TargetLoweringObjectFile::
-SectionForGlobal(const GlobalValue *GV, SectionKind Kind, Mangler *Mang,
+SectionForGlobal(const GlobalValue *GV, SectionKind Kind, Mangler &Mang,
                  const TargetMachine &TM) const {
   // Select section name.
   if (GV->hasSection())
@@ -253,12 +268,16 @@ SectionForGlobal(const GlobalValue *GV, SectionKind Kind, Mangler *Mang,
   return SelectSectionForGlobal(GV, Kind, Mang, TM);
 }
 
+bool TargetLoweringObjectFile::isSectionAtomizableBySymbols(
+    const MCSection &Section) const {
+  return false;
+}
 
 // Lame default implementation. Calculate the section name for global.
 const MCSection *
 TargetLoweringObjectFile::SelectSectionForGlobal(const GlobalValue *GV,
                                                  SectionKind Kind,
-                                                 Mangler *Mang,
+                                                 Mangler &Mang,
                                                  const TargetMachine &TM) const{
   assert(!Kind.isThreadLocal() && "Doesn't support TLS");
 
@@ -288,12 +307,12 @@ TargetLoweringObjectFile::getSectionForConstant(SectionKind Kind) const {
 /// getTTypeGlobalReference - Return an MCExpr to use for a
 /// reference to the specified global variable from exception
 /// handling information.
-const MCExpr *TargetLoweringObjectFile::
-getTTypeGlobalReference(const GlobalValue *GV, Mangler *Mang,
-                        MachineModuleInfo *MMI, unsigned Encoding,
-                        MCStreamer &Streamer) const {
+const MCExpr *TargetLoweringObjectFile::getTTypeGlobalReference(
+    const GlobalValue *GV, unsigned Encoding, Mangler &Mang,
+    const TargetMachine &TM, MachineModuleInfo *MMI,
+    MCStreamer &Streamer) const {
   const MCSymbolRefExpr *Ref =
-    MCSymbolRefExpr::Create(Mang->getSymbol(GV), getContext());
+      MCSymbolRefExpr::Create(TM.getSymbol(GV, Mang), getContext());
 
   return getTTypeReference(Ref, Encoding, Streamer);
 }

@@ -1,6 +1,7 @@
-; Test 32-bit atomic minimum and maximum.
+; Test 32-bit atomic minimum and maximum.  Here we match the z10 versions,
+; which can't use LOCR.
 ;
-; RUN: llc < %s -mtriple=s390x-linux-gnu | FileCheck %s
+; RUN: llc < %s -mtriple=s390x-linux-gnu -mcpu=z10 | FileCheck %s
 
 ; Check signed minium.
 define i32 @f1(i32 %dummy, i32 *%src, i32 %b) {
@@ -37,9 +38,8 @@ define i32 @f3(i32 %dummy, i32 *%src, i32 %b) {
 ; CHECK-LABEL: f3:
 ; CHECK: l %r2, 0(%r3)
 ; CHECK: [[LOOP:\.[^:]*]]:
-; CHECK: clr %r2, %r4
 ; CHECK: lr [[NEW:%r[0-9]+]], %r2
-; CHECK: jle [[KEEP:\..*]]
+; CHECK: clrjle %r2, %r4, [[KEEP:\..*]]
 ; CHECK: lr [[NEW]], %r4
 ; CHECK: cs %r2, [[NEW]], 0(%r3)
 ; CHECK: jl [[LOOP]]
@@ -53,9 +53,8 @@ define i32 @f4(i32 %dummy, i32 *%src, i32 %b) {
 ; CHECK-LABEL: f4:
 ; CHECK: l %r2, 0(%r3)
 ; CHECK: [[LOOP:\.[^:]*]]:
-; CHECK: clr %r2, %r4
 ; CHECK: lr [[NEW:%r[0-9]+]], %r2
-; CHECK: jhe [[KEEP:\..*]]
+; CHECK: clrjhe %r2, %r4, [[KEEP:\..*]]
 ; CHECK: lr [[NEW]], %r4
 ; CHECK: cs %r2, [[NEW]], 0(%r3)
 ; CHECK: jl [[LOOP]]

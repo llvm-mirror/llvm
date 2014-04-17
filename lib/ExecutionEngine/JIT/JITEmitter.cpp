@@ -15,11 +15,9 @@
 #define DEBUG_TYPE "jit"
 #include "JIT.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/ValueMap.h"
 #include "llvm/CodeGen/JITCodeEmitter.h"
 #include "llvm/CodeGen/MachineCodeInfo.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -27,21 +25,22 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRelocation.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/ValueHandle.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Disassembler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MutexGuard.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetJITInfo.h"
@@ -376,8 +375,8 @@ namespace {
 
     JITResolver &getJITResolver() { return Resolver; }
 
-    virtual void startFunction(MachineFunction &F);
-    virtual bool finishFunction(MachineFunction &F);
+    void startFunction(MachineFunction &F) override;
+    bool finishFunction(MachineFunction &F) override;
 
     void emitConstantPool(MachineConstantPool *MCP);
     void initJumpTableInfo(MachineJumpTableInfo *MJTI);
@@ -387,24 +386,23 @@ namespace {
                      unsigned StubSize, unsigned Alignment = 1);
     void startGVStub(void *Buffer, unsigned StubSize);
     void finishGVStub();
-    virtual void *allocIndirectGV(const GlobalValue *GV,
-                                  const uint8_t *Buffer, size_t Size,
-                                  unsigned Alignment);
+    void *allocIndirectGV(const GlobalValue *GV, const uint8_t *Buffer,
+                          size_t Size, unsigned Alignment) override;
 
     /// allocateSpace - Reserves space in the current block if any, or
     /// allocate a new one of the given size.
-    virtual void *allocateSpace(uintptr_t Size, unsigned Alignment);
+    void *allocateSpace(uintptr_t Size, unsigned Alignment) override;
 
     /// allocateGlobal - Allocate memory for a global.  Unlike allocateSpace,
     /// this method does not allocate memory in the current output buffer,
     /// because a global may live longer than the current function.
-    virtual void *allocateGlobal(uintptr_t Size, unsigned Alignment);
+    void *allocateGlobal(uintptr_t Size, unsigned Alignment) override;
 
-    virtual void addRelocation(const MachineRelocation &MR) {
+    void addRelocation(const MachineRelocation &MR) override {
       Relocations.push_back(MR);
     }
 
-    virtual void StartMachineBasicBlock(MachineBasicBlock *MBB) {
+    void StartMachineBasicBlock(MachineBasicBlock *MBB) override {
       if (MBBLocations.size() <= (unsigned)MBB->getNumber())
         MBBLocations.resize((MBB->getNumber()+1)*2);
       MBBLocations[MBB->getNumber()] = getCurrentPCValue();
@@ -415,10 +413,11 @@ namespace {
                    << (void*) getCurrentPCValue() << "]\n");
     }
 
-    virtual uintptr_t getConstantPoolEntryAddress(unsigned Entry) const;
-    virtual uintptr_t getJumpTableEntryAddress(unsigned Entry) const;
+    uintptr_t getConstantPoolEntryAddress(unsigned Entry) const override;
+    uintptr_t getJumpTableEntryAddress(unsigned Entry) const override;
 
-    virtual uintptr_t getMachineBasicBlockAddress(MachineBasicBlock *MBB) const{
+    uintptr_t
+    getMachineBasicBlockAddress(MachineBasicBlock *MBB) const override {
       assert(MBBLocations.size() > (unsigned)MBB->getNumber() &&
              MBBLocations[MBB->getNumber()] && "MBB not emitted!");
       return MBBLocations[MBB->getNumber()];
@@ -433,22 +432,22 @@ namespace {
     /// function body.
     void deallocateMemForFunction(const Function *F);
 
-    virtual void processDebugLoc(DebugLoc DL, bool BeforePrintingInsn);
+    void processDebugLoc(DebugLoc DL, bool BeforePrintingInsn) override;
 
-    virtual void emitLabel(MCSymbol *Label) {
+    void emitLabel(MCSymbol *Label) override {
       LabelLocations[Label] = getCurrentPCValue();
     }
 
-    virtual DenseMap<MCSymbol*, uintptr_t> *getLabelLocations() {
+    DenseMap<MCSymbol*, uintptr_t> *getLabelLocations() override {
       return &LabelLocations;
     }
 
-    virtual uintptr_t getLabelAddress(MCSymbol *Label) const {
+    uintptr_t getLabelAddress(MCSymbol *Label) const override {
       assert(LabelLocations.count(Label) && "Label not emitted!");
       return LabelLocations.find(Label)->second;
     }
 
-    virtual void setModuleInfo(MachineModuleInfo* Info) {
+    void setModuleInfo(MachineModuleInfo* Info) override {
       MMI = Info;
     }
 
@@ -689,7 +688,7 @@ void *JITEmitter::getPointerToGlobal(GlobalValue *V, void *Reference,
     return TheJIT->getOrEmitGlobalVariable(GV);
 
   if (GlobalAlias *GA = dyn_cast<GlobalAlias>(V))
-    return TheJIT->getPointerToGlobal(GA->resolveAliasedGlobal(false));
+    return TheJIT->getPointerToGlobal(GA->getAliasedGlobal());
 
   // If we have already compiled the function, return a pointer to its body.
   Function *F = cast<Function>(V);

@@ -1,4 +1,5 @@
 ; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu | FileCheck %s
+; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu -mattr=-fp-armv8 | FileCheck --check-prefix=CHECK-NOFP %s
 
 @var32 = global i32 0
 @var64 = global i64 0
@@ -9,16 +10,16 @@ define void @test_csel(i32 %lhs32, i32 %rhs32, i64 %lhs64) {
   %tst1 = icmp ugt i32 %lhs32, %rhs32
   %val1 = select i1 %tst1, i32 42, i32 52
   store i32 %val1, i32* @var32
-; CHECK: movz [[W52:w[0-9]+]], #52
-; CHECK: movz [[W42:w[0-9]+]], #42
+; CHECK-DAG: movz [[W52:w[0-9]+]], #52
+; CHECK-DAG: movz [[W42:w[0-9]+]], #42
 ; CHECK: csel {{w[0-9]+}}, [[W42]], [[W52]], hi
 
   %rhs64 = sext i32 %rhs32 to i64
   %tst2 = icmp sle i64 %lhs64, %rhs64
   %val2 = select i1 %tst2, i64 %lhs64, i64 %rhs64
   store i64 %val2, i64* @var64
-; CHECK: cmp [[LHS:x[0-9]+]], [[RHS:w[0-9]+]], sxtw
-; CHECK: sxtw [[EXT_RHS:x[0-9]+]], [[RHS]]
+; CHECK-DAG: cmp [[LHS:x[0-9]+]], [[RHS:w[0-9]+]], sxtw
+; CHECK-DAG: sxtw [[EXT_RHS:x[0-9]+]], [[RHS]]
 ; CHECK: csel {{x[0-9]+}}, [[LHS]], [[EXT_RHS]], le
 
   ret void
@@ -30,6 +31,7 @@ define void @test_floatcsel(float %lhs32, float %rhs32, double %lhs64, double %r
 
   %tst1 = fcmp one float %lhs32, %rhs32
 ; CHECK: fcmp {{s[0-9]+}}, {{s[0-9]+}}
+; CHECK-NOFP-NOT: fcmp
   %val1 = select i1 %tst1, i32 42, i32 52
   store i32 %val1, i32* @var32
 ; CHECK: movz [[W52:w[0-9]+]], #52
@@ -40,6 +42,7 @@ define void @test_floatcsel(float %lhs32, float %rhs32, double %lhs64, double %r
 
   %tst2 = fcmp ueq double %lhs64, %rhs64
 ; CHECK: fcmp {{d[0-9]+}}, {{d[0-9]+}}
+; CHECK-NOFP-NOT: fcmp
   %val2 = select i1 %tst2, i64 9, i64 15
   store i64 %val2, i64* @var64
 ; CHECK: movz [[CONST15:x[0-9]+]], #15

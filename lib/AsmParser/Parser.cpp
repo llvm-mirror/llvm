@@ -7,13 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This library implements the functionality defined in llvm/Assembly/Parser.h
+// This library implements the functionality defined in llvm/AsmParser/Parser.h
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Assembly/Parser.h"
+#include "llvm/AsmParser/Parser.h"
 #include "LLParser.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
@@ -34,22 +33,22 @@ Module *llvm::ParseAssembly(MemoryBuffer *F,
     return LLParser(F, SM, Err, M).Run() ? 0 : M;
 
   // Otherwise create a new module.
-  OwningPtr<Module> M2(new Module(F->getBufferIdentifier(), Context));
+  std::unique_ptr<Module> M2(new Module(F->getBufferIdentifier(), Context));
   if (LLParser(F, SM, Err, M2.get()).Run())
     return 0;
-  return M2.take();
+  return M2.release();
 }
 
 Module *llvm::ParseAssemblyFile(const std::string &Filename, SMDiagnostic &Err,
                                 LLVMContext &Context) {
-  OwningPtr<MemoryBuffer> File;
+  std::unique_ptr<MemoryBuffer> File;
   if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, File)) {
     Err = SMDiagnostic(Filename, SourceMgr::DK_Error,
                        "Could not open input file: " + ec.message());
     return 0;
   }
 
-  return ParseAssembly(File.take(), 0, Err, Context);
+  return ParseAssembly(File.release(), 0, Err, Context);
 }
 
 Module *llvm::ParseAssemblyString(const char *AsmString, Module *M,

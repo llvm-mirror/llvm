@@ -116,16 +116,6 @@ else
 ENABLE_ASSERTIONS=1
 endif
 
-# Derive whether or not LTO is enabled by checking the extra options.
-LTO_IS_ENABLED := 0
-ifneq ($(findstring -flto,$(CompileCommonOpts)),)
-LTO_IS_ENABLED := 1
-else
-ifneq ($(findstring -O4,$(CompileCommonOpts)),)
-LTO_IS_ENABLED := 1
-endif
-endif
-
 lit.site.cfg: FORCE
 	@echo "Making LLVM 'lit.site.cfg' file..."
 	@$(ECHOPATH) s=@LLVM_HOST_TRIPLE@=$(HOST_TRIPLE)=g > lit.tmp
@@ -135,11 +125,11 @@ lit.site.cfg: FORCE
 	@$(ECHOPATH) s=@LLVM_TOOLS_DIR@=$(ToolDir)=g >> lit.tmp
 	@$(ECHOPATH) s=@SHLIBDIR@=$(SharedLibDir)=g >> lit.tmp
 	@$(ECHOPATH) s=@SHLIBEXT@=$(SHLIBEXT)=g >> lit.tmp
+	@$(ECHOPATH) s=@EXEEXT@=$(EXEEXT)=g >> lit.tmp
 	@$(ECHOPATH) s=@PYTHON_EXECUTABLE@=$(PYTHON)=g >> lit.tmp
-	@$(ECHOPATH) s=@OCAMLOPT@=$(OCAMLOPT) -cc $(subst *,'\\\"',*$(subst =,"\\=",$(CXX_FOR_OCAMLOPT))*) -I $(LibDir)/ocaml=g >> lit.tmp
+	@$(ECHOPATH) s=@OCAMLOPT@=$(OCAMLOPT) -cc $(subst *,'\\\"',*$(subst =,"\\=",$(CXX_FOR_OCAMLOPT))*) -cclib -L$(LibDir) -I $(LibDir)/ocaml=g >> lit.tmp
 	@$(ECHOPATH) s=@ENABLE_SHARED@=$(ENABLE_SHARED)=g >> lit.tmp
 	@$(ECHOPATH) s=@ENABLE_ASSERTIONS@=$(ENABLE_ASSERTIONS)=g >> lit.tmp
-	@$(ECHOPATH) s=@LTO_IS_ENABLED@=$(LTO_IS_ENABLED)=g >> lit.tmp
 	@$(ECHOPATH) s=@TARGETS_TO_BUILD@=$(TARGETS_TO_BUILD)=g >> lit.tmp
 	@$(ECHOPATH) s=@LLVM_BINDINGS@=$(BINDINGS_TO_BUILD)=g >> lit.tmp
 	@$(ECHOPATH) s=@HOST_OS@=$(HOST_OS)=g >> lit.tmp
@@ -156,7 +146,6 @@ Unit/lit.site.cfg: $(PROJ_OBJ_DIR)/Unit/.dir FORCE
 	@$(ECHOPATH) s=@LLVM_BUILD_MODE@=$(BuildMode)=g >> unit.tmp
 	@$(ECHOPATH) s=@ENABLE_SHARED@=$(ENABLE_SHARED)=g >> unit.tmp
 	@$(ECHOPATH) s=@SHLIBDIR@=$(SharedLibDir)=g >> unit.tmp
-	@$(ECHOPATH) s=@SHLIBPATH_VAR@=$(SHLIBPATH_VAR)=g >> unit.tmp
 	@$(ECHOPATH) s=@HOST_OS@=$(HOST_OS)=g >> unit.tmp
 	@$(ECHOPATH) s=@HOST_ARCH@=$(HOST_ARCH)=g >> lit.tmp
 	@sed -f unit.tmp $(PROJ_SRC_DIR)/Unit/lit.site.cfg.in > $@

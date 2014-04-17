@@ -8,12 +8,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
 
 /// DemoteRegToStack - This function takes a virtual register computed by an
@@ -41,7 +41,7 @@ AllocaInst *llvm::DemoteRegToStack(Instruction &I, bool VolatileLoads,
 
   // Change all of the users of the instruction to read from the stack slot.
   while (!I.use_empty()) {
-    Instruction *U = cast<Instruction>(I.use_back());
+    Instruction *U = cast<Instruction>(I.user_back());
     if (PHINode *PN = dyn_cast<PHINode>(U)) {
       // If this is a PHI node, we can't insert a load of the value before the
       // use.  Instead insert the load in the predecessor block corresponding

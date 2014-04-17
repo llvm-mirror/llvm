@@ -111,7 +111,9 @@ namespace {
     LowerAtomic() : BasicBlockPass(ID) {
       initializeLowerAtomicPass(*PassRegistry::getPassRegistry());
     }
-    bool runOnBasicBlock(BasicBlock &BB) {
+    bool runOnBasicBlock(BasicBlock &BB) override {
+      if (skipOptnoneFunction(BB))
+        return false;
       bool Changed = false;
       for (BasicBlock::iterator DI = BB.begin(), DE = BB.end(); DI != DE; ) {
         Instruction *Inst = DI++;

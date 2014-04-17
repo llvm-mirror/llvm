@@ -10,6 +10,8 @@
 #ifndef LLVM_READOBJ_OBJDUMPER_H
 #define LLVM_READOBJ_OBJDUMPER_H
 
+#include <memory>
+
 namespace llvm {
 
 namespace object {
@@ -17,9 +19,6 @@ namespace object {
 }
 
 class error_code;
-
-template<typename T>
-class OwningPtr;
 
 class StreamWriter;
 
@@ -40,21 +39,22 @@ public:
   virtual void printNeededLibraries() { }
   virtual void printProgramHeaders() { }
 
+  // Only implemented for ARM ELF at this time.
+  virtual void printAttributes() { }
+
 protected:
   StreamWriter& W;
 };
 
-error_code createCOFFDumper(const object::ObjectFile *Obj,
-                            StreamWriter& Writer,
-                            OwningPtr<ObjDumper> &Result);
+error_code createCOFFDumper(const object::ObjectFile *Obj, StreamWriter &Writer,
+                            std::unique_ptr<ObjDumper> &Result);
 
-error_code createELFDumper(const object::ObjectFile *Obj,
-                           StreamWriter& Writer,
-                           OwningPtr<ObjDumper> &Result);
+error_code createELFDumper(const object::ObjectFile *Obj, StreamWriter &Writer,
+                           std::unique_ptr<ObjDumper> &Result);
 
 error_code createMachODumper(const object::ObjectFile *Obj,
-                             StreamWriter& Writer,
-                             OwningPtr<ObjDumper> &Result);
+                             StreamWriter &Writer,
+                             std::unique_ptr<ObjDumper> &Result);
 
 } // namespace llvm
 

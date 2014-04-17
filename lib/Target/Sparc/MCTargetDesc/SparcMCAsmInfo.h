@@ -14,16 +14,23 @@
 #ifndef SPARCTARGETASMINFO_H
 #define SPARCTARGETASMINFO_H
 
-#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCAsmInfoELF.h"
 
 namespace llvm {
-  class StringRef;
+class StringRef;
 
-  class SparcELFMCAsmInfo : public MCAsmInfo {
-    virtual void anchor();
-  public:
-    explicit SparcELFMCAsmInfo(StringRef TT);
-  };
+class SparcELFMCAsmInfo : public MCAsmInfoELF {
+  virtual void anchor();
+public:
+  explicit SparcELFMCAsmInfo(StringRef TT);
+  virtual const MCExpr* getExprForPersonalitySymbol(const MCSymbol *Sym,
+                                                    unsigned Encoding,
+                                                    MCStreamer &Streamer) const;
+  virtual const MCExpr* getExprForFDESymbol(const MCSymbol *Sym,
+                                            unsigned Encoding,
+                                            MCStreamer &Streamer) const;
+
+};
 
 } // namespace llvm
 

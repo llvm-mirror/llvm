@@ -45,6 +45,21 @@ extern "C" {
 #define xFromREX(rex)        (((rex) & 0x2) >> 1)
 #define bFromREX(rex)        ((rex) & 0x1)
 
+#define rFromEVEX2of4(evex)     (((~(evex)) & 0x80) >> 7)
+#define xFromEVEX2of4(evex)     (((~(evex)) & 0x40) >> 6)
+#define bFromEVEX2of4(evex)     (((~(evex)) & 0x20) >> 5)
+#define r2FromEVEX2of4(evex)    (((~(evex)) & 0x10) >> 4)
+#define mmFromEVEX2of4(evex)    ((evex) & 0x3)
+#define wFromEVEX3of4(evex)     (((evex) & 0x80) >> 7)
+#define vvvvFromEVEX3of4(evex)  (((~(evex)) & 0x78) >> 3)
+#define ppFromEVEX3of4(evex)    ((evex) & 0x3)
+#define zFromEVEX4of4(evex)     (((evex) & 0x80) >> 7)
+#define l2FromEVEX4of4(evex)    (((evex) & 0x40) >> 6)
+#define lFromEVEX4of4(evex)     (((evex) & 0x20) >> 5)
+#define bFromEVEX4of4(evex)     (((evex) & 0x10) >> 4)
+#define v2FromEVEX4of4(evex)    (((~evex) & 0x8) >> 3)
+#define aaaFromEVEX4of4(evex)   ((evex) & 0x7)
+
 #define rFromVEX2of3(vex)       (((~(vex)) & 0x80) >> 7)
 #define xFromVEX2of3(vex)       (((~(vex)) & 0x40) >> 6)
 #define bFromVEX2of3(vex)       (((~(vex)) & 0x20) >> 5)
@@ -58,6 +73,15 @@ extern "C" {
 #define vvvvFromVEX2of2(vex)    (((~(vex)) & 0x78) >> 3)
 #define lFromVEX2of2(vex)       (((vex) & 0x4) >> 2)
 #define ppFromVEX2of2(vex)      ((vex) & 0x3)
+
+#define rFromXOP2of3(xop)       (((~(xop)) & 0x80) >> 7)
+#define xFromXOP2of3(xop)       (((~(xop)) & 0x40) >> 6)
+#define bFromXOP2of3(xop)       (((~(xop)) & 0x20) >> 5)
+#define mmmmmFromXOP2of3(xop)   ((xop) & 0x1f)
+#define wFromXOP3of3(xop)       (((xop) & 0x80) >> 7)
+#define vvvvFromXOP3of3(vex)    (((~(vex)) & 0x78) >> 3)
+#define lFromXOP3of3(xop)       (((xop) & 0x4) >> 2)
+#define ppFromXOP3of3(xop)      ((xop) & 0x3)
 
 /*
  * These enums represent Intel registers for use by the decoder.
@@ -305,6 +329,16 @@ extern "C" {
   ENTRY(ZMM30)    \
   ENTRY(ZMM31)
 
+#define REGS_MASKS \
+  ENTRY(K0)        \
+  ENTRY(K1)        \
+  ENTRY(K2)        \
+  ENTRY(K3)        \
+  ENTRY(K4)        \
+  ENTRY(K5)        \
+  ENTRY(K6)        \
+  ENTRY(K7)
+
 #define REGS_SEGMENT \
   ENTRY(ES)          \
   ENTRY(CS)          \
@@ -352,6 +386,7 @@ extern "C" {
   REGS_XMM            \
   REGS_YMM            \
   REGS_ZMM            \
+  REGS_MASKS          \
   REGS_SEGMENT        \
   REGS_DEBUG          \
   REGS_CONTROL        \
@@ -447,8 +482,14 @@ typedef enum {
   VEX_LOB_0F3A = 0x3
 } VEXLeadingOpcodeByte;
 
+typedef enum {
+  XOP_MAP_SELECT_8 = 0x8,
+  XOP_MAP_SELECT_9 = 0x9,
+  XOP_MAP_SELECT_A = 0xA
+} XOPMapSelect;
+
 /*
- * VEXPrefixCode - Possible values for the VEX.pp field
+ * VEXPrefixCode - Possible values for the VEX.pp/EVEX.pp field
  */
 
 typedef enum {
@@ -457,6 +498,14 @@ typedef enum {
   VEX_PREFIX_F3 = 0x2,
   VEX_PREFIX_F2 = 0x3
 } VEXPrefixCode;
+
+typedef enum {
+  TYPE_NO_VEX_XOP   = 0x0,
+  TYPE_VEX_2B       = 0x1,
+  TYPE_VEX_3B       = 0x2,
+  TYPE_EVEX         = 0x3,
+  TYPE_XOP          = 0x4
+} VectorExtensionType;
 
 typedef uint8_t BOOL;
 
@@ -514,10 +563,10 @@ struct InternalInstruction {
   uint8_t prefixPresent[0x100];
   /* contains the location (for use with the reader) of the prefix byte */
   uint64_t prefixLocations[0x100];
-  /* The value of the VEX prefix, if present */
-  uint8_t vexPrefix[3];
-  /* The length of the VEX prefix (0 if not present) */
-  uint8_t vexSize;
+  /* The value of the vector extension prefix(EVEX/VEX/XOP), if present */
+  uint8_t vectorExtensionPrefix[4];
+  /* The type of the vector extension prefix */
+  VectorExtensionType vectorExtensionType;
   /* The value of the REX prefix, if present */
   uint8_t rexPrefix;
   /* The location where a mandatory prefix would have to be (i.e., right before
@@ -541,10 +590,6 @@ struct InternalInstruction {
 
   /* opcode state */
 
-  /* The value of the two-byte escape prefix (usually 0x0f) */
-  uint8_t twoByteEscape;
-  /* The value of the three-byte escape prefix (usually 0x38 or 0x3a) */
-  uint8_t threeByteEscape;
   /* The last byte of the opcode, not counting any ModR/M extension */
   uint8_t opcode;
   /* The ModR/M byte of the instruction, if it is an opcode extension */
@@ -567,6 +612,9 @@ struct InternalInstruction {
      instructions */
   Reg                           vvvv;
 
+  /* The writemask for AVX-512 instructions which is contained in EVEX.aaa */
+  Reg                           writemask;
+
   /* The ModR/M byte, which contains most register operands and some portion of
      all memory operands */
   BOOL                          consumedModRM;
@@ -586,8 +634,6 @@ struct InternalInstruction {
   uint64_t                      immediates[2];
 
   /* A register or immediate operand encoded into the opcode */
-  BOOL                          consumedOpcodeModifier;
-  uint8_t                       opcodeModifier;
   Reg                           opcodeRegister;
 
   /* Portions of the ModR/M byte */

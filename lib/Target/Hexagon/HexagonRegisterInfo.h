@@ -48,7 +48,7 @@ struct HexagonRegisterInfo : public HexagonGenRegisterInfo {
   HexagonRegisterInfo(HexagonSubtarget &st);
 
   /// Code Generation virtual methods...
-  const uint16_t *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
+  const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
 
   const TargetRegisterClass* const* getCalleeSavedRegClasses(
                                      const MachineFunction *MF = 0) const;
@@ -78,10 +78,6 @@ struct HexagonRegisterInfo : public HexagonGenRegisterInfo {
   unsigned getFrameRegister(const MachineFunction &MF) const;
   unsigned getFrameRegister() const;
   unsigned getStackRegister() const;
-
-  // Exception handling queries.
-  unsigned getEHExceptionRegister() const;
-  unsigned getEHHandlerRegister() const;
 };
 
 } // end namespace llvm

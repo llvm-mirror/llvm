@@ -15,17 +15,17 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CFG.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
@@ -167,15 +167,17 @@ bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, Pass *P) {
 
   // Finally, erase the old block and update dominator info.
   if (P) {
-    if (DominatorTree *DT = P->getAnalysisIfAvailable<DominatorTree>()) {
-      if (DomTreeNode *DTN = DT->getNode(BB)) {
-        DomTreeNode *PredDTN = DT->getNode(PredBB);
+    if (DominatorTreeWrapperPass *DTWP =
+            P->getAnalysisIfAvailable<DominatorTreeWrapperPass>()) {
+      DominatorTree &DT = DTWP->getDomTree();
+      if (DomTreeNode *DTN = DT.getNode(BB)) {
+        DomTreeNode *PredDTN = DT.getNode(PredBB);
         SmallVector<DomTreeNode*, 8> Children(DTN->begin(), DTN->end());
         for (SmallVectorImpl<DomTreeNode *>::iterator DI = Children.begin(),
              DE = Children.end(); DI != DE; ++DI)
-          DT->changeImmediateDominator(*DI, PredDTN);
+          DT.changeImmediateDominator(*DI, PredDTN);
 
-        DT->eraseNode(BB);
+        DT.eraseNode(BB);
       }
 
       if (LoopInfo *LI = P->getAnalysisIfAvailable<LoopInfo>())
@@ -248,7 +250,6 @@ BasicBlock *llvm::SplitEdge(BasicBlock *BB, BasicBlock *Succ, Pass *P) {
 
   // If the edge isn't critical, then BB has a single successor or Succ has a
   // single pred.  Split the block.
-  BasicBlock::iterator SplitPoint;
   if (BasicBlock *SP = Succ->getSinglePredecessor()) {
     // If the successor only has a single pred, split the top of the successor
     // block.
@@ -281,18 +282,20 @@ BasicBlock *llvm::SplitBlock(BasicBlock *Old, Instruction *SplitPt, Pass *P) {
     if (Loop *L = LI->getLoopFor(Old))
       L->addBasicBlockToLoop(New, LI->getBase());
 
-  if (DominatorTree *DT = P->getAnalysisIfAvailable<DominatorTree>()) {
+  if (DominatorTreeWrapperPass *DTWP =
+          P->getAnalysisIfAvailable<DominatorTreeWrapperPass>()) {
+    DominatorTree &DT = DTWP->getDomTree();
     // Old dominates New. New node dominates all other nodes dominated by Old.
-    if (DomTreeNode *OldNode = DT->getNode(Old)) {
+    if (DomTreeNode *OldNode = DT.getNode(Old)) {
       std::vector<DomTreeNode *> Children;
       for (DomTreeNode::iterator I = OldNode->begin(), E = OldNode->end();
            I != E; ++I)
         Children.push_back(*I);
 
-      DomTreeNode *NewNode = DT->addNewBlock(New,Old);
+      DomTreeNode *NewNode = DT.addNewBlock(New, Old);
       for (std::vector<DomTreeNode *>::iterator I = Children.begin(),
              E = Children.end(); I != E; ++I)
-        DT->changeImmediateDominator(*I, NewNode);
+        DT.changeImmediateDominator(*I, NewNode);
     }
   }
 
@@ -337,9 +340,9 @@ static void UpdateAnalysisInformation(BasicBlock *OldBB, BasicBlock *NewBB,
   }
 
   // Update dominator tree if available.
-  DominatorTree *DT = P->getAnalysisIfAvailable<DominatorTree>();
-  if (DT)
-    DT->splitBlock(NewBB);
+  if (DominatorTreeWrapperPass *DTWP =
+          P->getAnalysisIfAvailable<DominatorTreeWrapperPass>())
+    DTWP->getDomTree().splitBlock(NewBB);
 
   if (!L) return;
 
@@ -401,8 +404,12 @@ static void UpdatePHINodes(BasicBlock *OrigBB, BasicBlock *NewBB,
       // If all incoming values for the new PHI would be the same, just don't
       // make a new PHI.  Instead, just remove the incoming values from the old
       // PHI.
-      for (unsigned i = 0, e = Preds.size(); i != e; ++i)
-        PN->removeIncomingValue(Preds[i], false);
+      for (unsigned i = 0, e = Preds.size(); i != e; ++i) {
+        // Explicitly check the BB index here to handle duplicates in Preds.
+        int Idx = PN->getBasicBlockIndex(Preds[i]);
+        if (Idx >= 0)
+          PN->removeIncomingValue(Idx, false);
+      }
     } else {
       // If the values coming into the block are not the same, we need a PHI.
       // Create the new PHI node, insert it into NewBB at the end of the block
@@ -627,28 +634,29 @@ ReturnInst *llvm::FoldReturnIntoUncondBranch(ReturnInst *RI, BasicBlock *BB,
 }
 
 /// SplitBlockAndInsertIfThen - Split the containing block at the
-/// specified instruction - everything before and including Cmp stays
-/// in the old basic block, and everything after Cmp is moved to a
+/// specified instruction - everything before and including SplitBefore stays
+/// in the old basic block, and everything after SplitBefore is moved to a
 /// new block. The two blocks are connected by a conditional branch
 /// (with value of Cmp being the condition).
 /// Before:
 ///   Head
-///   Cmp
+///   SplitBefore
 ///   Tail
 /// After:
 ///   Head
-///   Cmp
-///   if (Cmp)
+///   if (Cond)
 ///     ThenBlock
+///   SplitBefore
 ///   Tail
 ///
 /// If Unreachable is true, then ThenBlock ends with
 /// UnreachableInst, otherwise it branches to Tail.
 /// Returns the NewBasicBlock's terminator.
 
-TerminatorInst *llvm::SplitBlockAndInsertIfThen(Instruction *Cmp,
-    bool Unreachable, MDNode *BranchWeights) {
-  Instruction *SplitBefore = Cmp->getNextNode();
+TerminatorInst *llvm::SplitBlockAndInsertIfThen(Value *Cond,
+                                                Instruction *SplitBefore,
+                                                bool Unreachable,
+                                                MDNode *BranchWeights) {
   BasicBlock *Head = SplitBefore->getParent();
   BasicBlock *Tail = Head->splitBasicBlock(SplitBefore);
   TerminatorInst *HeadOldTerm = Head->getTerminator();
@@ -659,12 +667,50 @@ TerminatorInst *llvm::SplitBlockAndInsertIfThen(Instruction *Cmp,
     CheckTerm = new UnreachableInst(C, ThenBlock);
   else
     CheckTerm = BranchInst::Create(Tail, ThenBlock);
+  CheckTerm->setDebugLoc(SplitBefore->getDebugLoc());
   BranchInst *HeadNewTerm =
-    BranchInst::Create(/*ifTrue*/ThenBlock, /*ifFalse*/Tail, Cmp);
+    BranchInst::Create(/*ifTrue*/ThenBlock, /*ifFalse*/Tail, Cond);
+  HeadNewTerm->setDebugLoc(SplitBefore->getDebugLoc());
   HeadNewTerm->setMetadata(LLVMContext::MD_prof, BranchWeights);
   ReplaceInstWithInst(HeadOldTerm, HeadNewTerm);
   return CheckTerm;
 }
+
+/// SplitBlockAndInsertIfThenElse is similar to SplitBlockAndInsertIfThen,
+/// but also creates the ElseBlock.
+/// Before:
+///   Head
+///   SplitBefore
+///   Tail
+/// After:
+///   Head
+///   if (Cond)
+///     ThenBlock
+///   else
+///     ElseBlock
+///   SplitBefore
+///   Tail
+void llvm::SplitBlockAndInsertIfThenElse(Value *Cond, Instruction *SplitBefore,
+                                         TerminatorInst **ThenTerm,
+                                         TerminatorInst **ElseTerm,
+                                         MDNode *BranchWeights) {
+  BasicBlock *Head = SplitBefore->getParent();
+  BasicBlock *Tail = Head->splitBasicBlock(SplitBefore);
+  TerminatorInst *HeadOldTerm = Head->getTerminator();
+  LLVMContext &C = Head->getContext();
+  BasicBlock *ThenBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);
+  BasicBlock *ElseBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);
+  *ThenTerm = BranchInst::Create(Tail, ThenBlock);
+  (*ThenTerm)->setDebugLoc(SplitBefore->getDebugLoc());
+  *ElseTerm = BranchInst::Create(Tail, ElseBlock);
+  (*ElseTerm)->setDebugLoc(SplitBefore->getDebugLoc());
+  BranchInst *HeadNewTerm =
+    BranchInst::Create(/*ifTrue*/ThenBlock, /*ifFalse*/ElseBlock, Cond);
+  HeadNewTerm->setDebugLoc(SplitBefore->getDebugLoc());
+  HeadNewTerm->setMetadata(LLVMContext::MD_prof, BranchWeights);
+  ReplaceInstWithInst(HeadOldTerm, HeadNewTerm);
+}
+
 
 /// GetIfCondition - Given a basic block (BB) with two predecessors,
 /// check to see if the merge at this block is due

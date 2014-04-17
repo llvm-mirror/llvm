@@ -10,13 +10,10 @@
 #ifndef X86ASMPRINTER_H
 #define X86ASMPRINTER_H
 
-#include "X86.h"
-#include "X86MachineFunctionInfo.h"
-#include "X86TargetMachine.h"
+#include "X86Subtarget.h"
 #include "llvm/CodeGen/AsmPrinter.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/Support/Compiler.h"
+#include "llvm/CodeGen/StackMaps.h"
+#include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
 
@@ -24,49 +21,34 @@ class MCStreamer;
 
 class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   const X86Subtarget *Subtarget;
+  StackMaps SM;
+
  public:
   explicit X86AsmPrinter(TargetMachine &TM, MCStreamer &Streamer)
-    : AsmPrinter(TM, Streamer) {
+    : AsmPrinter(TM, Streamer), SM(*this) {
     Subtarget = &TM.getSubtarget<X86Subtarget>();
   }
 
-  virtual const char *getPassName() const LLVM_OVERRIDE {
+  const char *getPassName() const override {
     return "X86 Assembly / Object Emitter";
   }
 
   const X86Subtarget &getSubtarget() const { return *Subtarget; }
 
-  virtual void EmitStartOfAsmFile(Module &M) LLVM_OVERRIDE;
+  void EmitStartOfAsmFile(Module &M) override;
 
-  virtual void EmitEndOfAsmFile(Module &M) LLVM_OVERRIDE;
+  void EmitEndOfAsmFile(Module &M) override;
 
-  virtual void EmitInstruction(const MachineInstr *MI) LLVM_OVERRIDE;
+  void EmitInstruction(const MachineInstr *MI) override;
 
-  void printSymbolOperand(const MachineOperand &MO, raw_ostream &O);
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       unsigned AsmVariant, const char *ExtraCode,
+                       raw_ostream &OS) override;
+  bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                             unsigned AsmVariant, const char *ExtraCode,
+                             raw_ostream &OS) override;
 
-  // These methods are used by the tablegen'erated instruction printer.
-  void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &O,
-                    const char *Modifier = 0, unsigned AsmVariant = 0);
-  void printPCRelImm(const MachineInstr *MI, unsigned OpNo, raw_ostream &O);
-
-  bool printAsmMRegister(const MachineOperand &MO, char Mode, raw_ostream &O);
-  virtual bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                               unsigned AsmVariant, const char *ExtraCode,
-                               raw_ostream &OS) LLVM_OVERRIDE;
-  virtual bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
-                                     unsigned AsmVariant, const char *ExtraCode,
-                                     raw_ostream &OS) LLVM_OVERRIDE;
-
-  void printMemReference(const MachineInstr *MI, unsigned Op, raw_ostream &O,
-                         const char *Modifier=NULL);
-  void printLeaMemReference(const MachineInstr *MI, unsigned Op, raw_ostream &O,
-                            const char *Modifier=NULL);
-
-  void printIntelMemReference(const MachineInstr *MI, unsigned Op,
-                              raw_ostream &O, const char *Modifier=NULL,
-                              unsigned AsmVariant = 1);
-
-  virtual bool runOnMachineFunction(MachineFunction &F) LLVM_OVERRIDE;
+  bool runOnMachineFunction(MachineFunction &F) override;
 };
 
 } // end namespace llvm

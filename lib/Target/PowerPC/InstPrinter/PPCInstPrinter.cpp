@@ -18,8 +18,16 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetOpcodes.h"
 using namespace llvm;
+
+// FIXME: Once the integrated assembler supports full register names, tie this
+// to the verbose-asm setting.
+static cl::opt<bool>
+FullRegNames("ppc-asm-full-reg-names", cl::Hidden, cl::init(false),
+             cl::desc("Use full register names when printing assembly"));
 
 #include "PPCGenAsmWriter.inc"
 
@@ -78,6 +86,17 @@ void PPCInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     }
   }
   
+  // For fast-isel, a COPY_TO_REGCLASS may survive this long.  This is
+  // used when converting a 32-bit float to a 64-bit float as part of
+  // conversion to an integer (see PPCFastISel.cpp:SelectFPToI()),
+  // as otherwise we have problems with incorrect register classes
+  // in machine instruction verification.  For now, just avoid trying
+  // to print it as such an instruction has no effect (a 32-bit float
+  // in a register is already in 64-bit form, just with lower
+  // precision).  FIXME: Is there a better solution?
+  if (MI->getOpcode() == TargetOpcode::COPY_TO_REGCLASS)
+    return;
+  
   printInstruction(MI, O);
   printAnnotation(O, Annot);
 }
@@ -130,6 +149,9 @@ void PPCInstPrinter::printPredicateOperand(const MCInst *MI, unsigned OpNo,
     case PPC::PRED_NU:
       O << "nu";
       return;
+    case PPC::PRED_BIT_SET:
+    case PPC::PRED_BIT_UNSET:
+      llvm_unreachable("Invalid use of bit predicate code");
     }
     llvm_unreachable("Invalid predicate code");
   }
@@ -165,6 +187,9 @@ void PPCInstPrinter::printPredicateOperand(const MCInst *MI, unsigned OpNo,
     case PPC::PRED_NU_PLUS:
       O << "+";
       return;
+    case PPC::PRED_BIT_SET:
+    case PPC::PRED_BIT_UNSET:
+      llvm_unreachable("Invalid use of bit predicate code");
     }
     llvm_unreachable("Invalid predicate code");
   }
@@ -172,6 +197,13 @@ void PPCInstPrinter::printPredicateOperand(const MCInst *MI, unsigned OpNo,
   assert(StringRef(Modifier) == "reg" &&
          "Need to specify 'cc', 'pm' or 'reg' as predicate op modifier!");
   printOperand(MI, OpNo+1, O);
+}
+
+void PPCInstPrinter::printU2ImmOperand(const MCInst *MI, unsigned OpNo,
+                                       raw_ostream &O) {
+  unsigned int Value = MI->getOperand(OpNo).getImm();
+  assert(Value <= 3 && "Invalid u2imm argument!");
+  O << (unsigned int)Value;
 }
 
 void PPCInstPrinter::printS5ImmOperand(const MCInst *MI, unsigned OpNo,
@@ -285,10 +317,16 @@ void PPCInstPrinter::printTLSCall(const MCInst *MI, unsigned OpNo,
 /// stripRegisterPrefix - This method strips the character prefix from a
 /// register name so that only the number is left.  Used by for linux asm.
 static const char *stripRegisterPrefix(const char *RegName) {
+  if (FullRegNames)
+    return RegName;
+
   switch (RegName[0]) {
   case 'r':
   case 'f':
-  case 'v': return RegName + 1;
+  case 'v':
+    if (RegName[1] == 's')
+      return RegName + 2;
+    return RegName + 1;
   case 'c': if (RegName[1] == 'r') return RegName + 2;
   }
   

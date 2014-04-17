@@ -11,6 +11,7 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
@@ -47,19 +48,12 @@ void MCExpr::print(raw_ostream &OS) const {
     else
       OS << Sym;
 
-    if (SRE.getKind() == MCSymbolRefExpr::VK_ARM_NONE ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_PLT ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_TLSGD ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_GOT ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_GOTOFF ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_TPOFF ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_GOTTPOFF ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_TARGET1 ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_TARGET2 ||
-        SRE.getKind() == MCSymbolRefExpr::VK_ARM_PREL31)
-      OS << MCSymbolRefExpr::getVariantKindName(SRE.getKind());
-    else if (SRE.getKind() != MCSymbolRefExpr::VK_None)
-      OS << '@' << MCSymbolRefExpr::getVariantKindName(SRE.getKind());
+    if (SRE.getKind() != MCSymbolRefExpr::VK_None) {
+      if (SRE.getMCAsmInfo().useParensForSymbolVariant())
+        OS << '(' << MCSymbolRefExpr::getVariantKindName(SRE.getKind()) << ')';
+      else
+        OS << '@' << MCSymbolRefExpr::getVariantKindName(SRE.getKind());
+    }
 
     return;
   }
@@ -158,7 +152,7 @@ const MCConstantExpr *MCConstantExpr::Create(int64_t Value, MCContext &Ctx) {
 const MCSymbolRefExpr *MCSymbolRefExpr::Create(const MCSymbol *Sym,
                                                VariantKind Kind,
                                                MCContext &Ctx) {
-  return new (Ctx) MCSymbolRefExpr(Sym, Kind);
+  return new (Ctx) MCSymbolRefExpr(Sym, Kind, Ctx.getAsmInfo());
 }
 
 const MCSymbolRefExpr *MCSymbolRefExpr::Create(StringRef Name, VariantKind Kind,
@@ -185,17 +179,22 @@ StringRef MCSymbolRefExpr::getVariantKindName(VariantKind Kind) {
   case VK_TPOFF: return "TPOFF";
   case VK_DTPOFF: return "DTPOFF";
   case VK_TLVP: return "TLVP";
+  case VK_TLVPPAGE: return "TLVPPAGE";
+  case VK_TLVPPAGEOFF: return "TLVPPAGEOFF";
+  case VK_PAGE: return "PAGE";
+  case VK_PAGEOFF: return "PAGEOFF";
+  case VK_GOTPAGE: return "GOTPAGE";
+  case VK_GOTPAGEOFF: return "GOTPAGEOFF";
   case VK_SECREL: return "SECREL32";
-  case VK_ARM_NONE: return "(NONE)";
-  case VK_ARM_PLT: return "(PLT)";
-  case VK_ARM_GOT: return "(GOT)";
-  case VK_ARM_GOTOFF: return "(GOTOFF)";
-  case VK_ARM_TPOFF: return "(tpoff)";
-  case VK_ARM_GOTTPOFF: return "(gottpoff)";
-  case VK_ARM_TLSGD: return "(tlsgd)";
-  case VK_ARM_TARGET1: return "(target1)";
-  case VK_ARM_TARGET2: return "(target2)";
-  case VK_ARM_PREL31: return "(prel31)";
+  case VK_WEAKREF: return "WEAKREF";
+  case VK_ARM_NONE: return "none";
+  case VK_ARM_TARGET1: return "target1";
+  case VK_ARM_TARGET2: return "target2";
+  case VK_ARM_PREL31: return "prel31";
+  case VK_ARM_TLSLDO: return "tlsldo";
+  case VK_ARM_TLSCALL: return "tlscall";
+  case VK_ARM_TLSDESC: return "tlsdesc";
+  case VK_ARM_TLSDESCSEQ: return "tlsdescseq";
   case VK_PPC_LO: return "l";
   case VK_PPC_HI: return "h";
   case VK_PPC_HA: return "ha";
@@ -307,6 +306,18 @@ MCSymbolRefExpr::getVariantKindForName(StringRef Name) {
     .Case("dtpoff", VK_DTPOFF)
     .Case("TLVP", VK_TLVP)
     .Case("tlvp", VK_TLVP)
+    .Case("TLVPPAGE", VK_TLVPPAGE)
+    .Case("tlvppage", VK_TLVPPAGE)
+    .Case("TLVPPAGEOFF", VK_TLVPPAGEOFF)
+    .Case("tlvppageoff", VK_TLVPPAGEOFF)
+    .Case("PAGE", VK_PAGE)
+    .Case("page", VK_PAGE)
+    .Case("PAGEOFF", VK_PAGEOFF)
+    .Case("pageoff", VK_PAGEOFF)
+    .Case("GOTPAGE", VK_GOTPAGE)
+    .Case("gotpage", VK_GOTPAGE)
+    .Case("GOTPAGEOFF", VK_GOTPAGEOFF)
+    .Case("gotpageoff", VK_GOTPAGEOFF)
     .Case("IMGREL", VK_COFF_IMGREL32)
     .Case("imgrel", VK_COFF_IMGREL32)
     .Case("SECREL32", VK_SECREL)
@@ -409,6 +420,20 @@ MCSymbolRefExpr::getVariantKindForName(StringRef Name) {
     .Case("got@tlsld@h", VK_PPC_GOT_TLSLD_HI)
     .Case("GOT@TLSLD@HA", VK_PPC_GOT_TLSLD_HA)
     .Case("got@tlsld@ha", VK_PPC_GOT_TLSLD_HA)
+    .Case("NONE", VK_ARM_NONE)
+    .Case("none", VK_ARM_NONE)
+    .Case("TARGET1", VK_ARM_TARGET1)
+    .Case("target1", VK_ARM_TARGET1)
+    .Case("TARGET2", VK_ARM_TARGET2)
+    .Case("target2", VK_ARM_TARGET2)
+    .Case("PREL31", VK_ARM_PREL31)
+    .Case("prel31", VK_ARM_PREL31)
+    .Case("TLSLDO", VK_ARM_TLSLDO)
+    .Case("tlsldo", VK_ARM_TLSLDO)
+    .Case("TLSCALL", VK_ARM_TLSCALL)
+    .Case("tlscall", VK_ARM_TLSCALL)
+    .Case("TLSDESC", VK_ARM_TLSDESC)
+    .Case("tlsdesc", VK_ARM_TLSDESC)
     .Default(VK_Invalid);
 }
 
@@ -419,12 +444,12 @@ void MCTargetExpr::anchor() {}
 /* *** */
 
 bool MCExpr::EvaluateAsAbsolute(int64_t &Res) const {
-  return EvaluateAsAbsolute(Res, 0, 0, 0);
+  return EvaluateAsAbsolute(Res, nullptr, nullptr, nullptr);
 }
 
 bool MCExpr::EvaluateAsAbsolute(int64_t &Res,
                                 const MCAsmLayout &Layout) const {
-  return EvaluateAsAbsolute(Res, &Layout.getAssembler(), &Layout, 0);
+  return EvaluateAsAbsolute(Res, &Layout.getAssembler(), &Layout, nullptr);
 }
 
 bool MCExpr::EvaluateAsAbsolute(int64_t &Res,
@@ -434,7 +459,7 @@ bool MCExpr::EvaluateAsAbsolute(int64_t &Res,
 }
 
 bool MCExpr::EvaluateAsAbsolute(int64_t &Res, const MCAssembler &Asm) const {
-  return EvaluateAsAbsolute(Res, &Asm, 0, 0);
+  return EvaluateAsAbsolute(Res, &Asm, nullptr, nullptr);
 }
 
 bool MCExpr::EvaluateAsAbsolute(int64_t &Res, const MCAssembler *Asm,
@@ -493,7 +518,7 @@ static void AttemptToFoldSymbolOffsetDifference(const MCAssembler *Asm,
 
     // Clear the symbol expr pointers to indicate we have folded these
     // operands.
-    A = B = 0;
+    A = B = nullptr;
     return;
   }
 
@@ -519,7 +544,7 @@ static void AttemptToFoldSymbolOffsetDifference(const MCAssembler *Asm,
 
   // Clear the symbol expr pointers to indicate we have folded these
   // operands.
-  A = B = 0;
+  A = B = nullptr;
 }
 
 /// \brief Evaluate the result of an add between (conceptually) two MCValues.
@@ -601,9 +626,9 @@ static bool EvaluateSymbolicAdd(const MCAssembler *Asm,
 }
 
 bool MCExpr::EvaluateAsRelocatable(MCValue &Res,
-                                   const MCAsmLayout &Layout) const {
-  return EvaluateAsRelocatableImpl(Res, &Layout.getAssembler(), &Layout,
-                                   0, false);
+                                   const MCAsmLayout *Layout) const {
+  MCAssembler *Assembler = Layout ? &Layout->getAssembler() : nullptr;
+  return EvaluateAsRelocatableImpl(Res, Assembler, Layout, nullptr, false);
 }
 
 bool MCExpr::EvaluateAsRelocatableImpl(MCValue &Res,
@@ -624,20 +649,34 @@ bool MCExpr::EvaluateAsRelocatableImpl(MCValue &Res,
   case SymbolRef: {
     const MCSymbolRefExpr *SRE = cast<MCSymbolRefExpr>(this);
     const MCSymbol &Sym = SRE->getSymbol();
+    const MCAsmInfo &MCAsmInfo = SRE->getMCAsmInfo();
 
     // Evaluate recursively if this is a variable.
-    if (Sym.isVariable() && SRE->getKind() == MCSymbolRefExpr::VK_None) {
-      bool Ret = Sym.getVariableValue()->EvaluateAsRelocatableImpl(Res, Asm,
-                                                                   Layout,
-                                                                   Addrs,
-                                                                   true);
-      // If we failed to simplify this to a constant, let the target
-      // handle it.
-      if (Ret && !Res.getSymA() && !Res.getSymB())
-        return true;
+    if (Sym.isVariable()) {
+      if (Sym.getVariableValue()->EvaluateAsRelocatableImpl(Res, Asm, Layout,
+                                                            Addrs, true)) {
+        const MCSymbolRefExpr *A = Res.getSymA();
+        const MCSymbolRefExpr *B = Res.getSymB();
+
+        if (MCAsmInfo.hasSubsectionsViaSymbols()) {
+          // FIXME: This is small hack. Given
+          // a = b + 4
+          // .long a
+          // the OS X assembler will completely drop the 4. We should probably
+          // include it in the relocation or produce an error if that is not
+          // possible.
+          if (!A && !B)
+            return true;
+        } else {
+          bool IsSymbol = A && A->getSymbol().isDefined();
+          bool IsWeakRef = SRE->getKind() == MCSymbolRefExpr::VK_WEAKREF;
+          if (!IsSymbol && !IsWeakRef)
+            return true;
+        }
+      }
     }
 
-    Res = MCValue::get(SRE, 0, 0);
+    Res = MCValue::get(SRE, nullptr, 0);
     return true;
   }
 
@@ -756,7 +795,7 @@ const MCSection *MCExpr::FindAssociatedSection() const {
     if (Sym.isDefined())
       return &Sym.getSection();
 
-    return 0;
+    return nullptr;
   }
 
   case Unary:

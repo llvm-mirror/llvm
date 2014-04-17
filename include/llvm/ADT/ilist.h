@@ -83,7 +83,7 @@ struct ilist_sentinel_traits {
   /// provideInitialHead - when constructing an ilist, provide a starting
   /// value for its Head
   /// @return null node to indicate that it needs to be allocated later
-  static NodeTy *provideInitialHead() { return 0; }
+  static NodeTy *provideInitialHead() { return nullptr; }
 
   /// ensureHead - make sure that Head is either already
   /// initialized or assigned a fresh sentinel
@@ -92,7 +92,7 @@ struct ilist_sentinel_traits {
     if (!Head) {
       Head = ilist_traits<NodeTy>::createSentinel();
       ilist_traits<NodeTy>::noteHead(Head, Head);
-      ilist_traits<NodeTy>::setNext(Head, 0);
+      ilist_traits<NodeTy>::setNext(Head, nullptr);
       return Head;
     }
     return ilist_traits<NodeTy>::getPrev(Head);
@@ -175,7 +175,7 @@ public:
 
   ilist_iterator(pointer NP) : NodePtr(NP) {}
   ilist_iterator(reference NR) : NodePtr(&NR) {}
-  ilist_iterator() : NodePtr(0) {}
+  ilist_iterator() : NodePtr(nullptr) {}
 
   // This is templated so that we can allow constructing a const iterator from
   // a nonconst iterator...
@@ -382,7 +382,9 @@ public:
 
   // Miscellaneous inspection routines.
   size_type max_size() const { return size_type(-1); }
-  bool empty() const { return Head == 0 || Head == getTail(); }
+  bool LLVM_ATTRIBUTE_UNUSED_RESULT empty() const {
+    return !Head || Head == getTail();
+  }
 
   // Front and back accessor functions...
   reference front() {
@@ -449,8 +451,8 @@ public:
     // an ilist (and potentially deleted) with iterators still pointing at it.
     // When those iterators are incremented or decremented, they will assert on
     // the null next/prev pointer instead of "usually working".
-    this->setNext(Node, 0);
-    this->setPrev(Node, 0);
+    this->setNext(Node, nullptr);
+    this->setPrev(Node, nullptr);
     return Node;
   }
 
@@ -492,9 +494,9 @@ private:
       // Note: we have to be careful about the case when we move the first node
       // in the list.  This node is the list sentinel node and we can't move it.
       NodeTy *ThisSentinel = getTail();
-      setTail(0);
+      setTail(nullptr);
       NodeTy *L2Sentinel = L2.getTail();
-      L2.setTail(0);
+      L2.setTail(nullptr);
 
       // Remove [first, last) from its old position.
       NodeTy *First = &*first, *Prev = this->getPrev(First);
@@ -534,8 +536,8 @@ public:
   // Functionality derived from other functions defined above...
   //
 
-  size_type size() const {
-    if (Head == 0) return 0; // Don't require construction of sentinel if empty.
+  size_type LLVM_ATTRIBUTE_UNUSED_RESULT size() const {
+    if (!Head) return 0; // Don't require construction of sentinel if empty.
     return std::distance(begin(), end());
   }
 

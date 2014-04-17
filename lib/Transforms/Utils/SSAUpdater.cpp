@@ -16,12 +16,10 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Support/AlignOf.h"
-#include "llvm/Support/Allocator.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -63,7 +61,7 @@ void SSAUpdater::AddAvailableValue(BasicBlock *BB, Value *V) {
 }
 
 static bool IsEquivalentPHI(PHINode *PHI,
-                            DenseMap<BasicBlock*, Value*> &ValueMapping) {
+                          SmallDenseMap<BasicBlock*, Value*, 8> &ValueMapping) {
   unsigned PHINumValues = PHI->getNumIncomingValues();
   if (PHINumValues != ValueMapping.size())
     return false;
@@ -136,8 +134,8 @@ Value *SSAUpdater::GetValueInMiddleOfBlock(BasicBlock *BB) {
   // Otherwise, we do need a PHI: check to see if we already have one available
   // in this block that produces the right value.
   if (isa<PHINode>(BB->begin())) {
-    DenseMap<BasicBlock*, Value*> ValueMapping(PredValues.begin(),
-                                               PredValues.end());
+    SmallDenseMap<BasicBlock*, Value*, 8> ValueMapping(PredValues.begin(),
+                                                       PredValues.end());
     PHINode *SomePHI;
     for (BasicBlock::iterator It = BB->begin();
          (SomePHI = dyn_cast<PHINode>(It)); ++It) {

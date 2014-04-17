@@ -1,6 +1,10 @@
-; RUN: llc < %s -march=arm                  | FileCheck %s --check-prefix=ARM
-; RUN: llc < %s -march=arm -mattr=+thumb2   | FileCheck %s --check-prefix=ARMT2
-; RUN: llc < %s -march=thumb -mattr=+thumb2 | FileCheck %s --check-prefix=THUMB2
+; RUN: llc -mtriple=arm-eabi %s -o - | FileCheck %s --check-prefix=ARM
+
+; RUN: llc -mtriple=arm-eabi -mcpu=arm1156t2-s -mattr=+thumb2 %s -o - \
+; RUN:  | FileCheck %s --check-prefix=ARMT2
+
+; RUN: llc -mtriple=thumb-eabi -mcpu=arm1156t2-s -mattr=+thumb2 %s -o - \
+; RUN:  | FileCheck %s --check-prefix=THUMB2
 
 define i32 @t1(i32 %c) nounwind readnone {
 entry:
@@ -11,7 +15,7 @@ entry:
 
 ; ARMT2-LABEL: t1:
 ; ARMT2: movw [[R:r[0-1]]], #357
-; ARMT2: movgt [[R]], #123
+; ARMT2: movwgt [[R]], #123
 
 ; THUMB2-LABEL: t1:
 ; THUMB2: movw [[R:r[0-1]]], #357
@@ -25,9 +29,9 @@ entry:
 define i32 @t2(i32 %c) nounwind readnone {
 entry:
 ; ARM-LABEL: t2:
-; ARM: mov [[R:r[0-1]]], #123
-; ARM: movgt [[R]], #101
-; ARM: orrgt [[R]], [[R]], #256
+; ARM: mov [[R:r[0-9]+]], #101
+; ARM: orr [[R]], [[R]], #256
+; ARM: movle [[R]], #123
 
 ; ARMT2-LABEL: t2:
 ; ARMT2: mov [[R:r[0-1]]], #123
@@ -50,7 +54,7 @@ entry:
 
 ; ARMT2-LABEL: t3:
 ; ARMT2: mov [[R:r[0-1]]], #0
-; ARMT2: moveq [[R]], #1
+; ARMT2: movweq [[R]], #1
 
 ; THUMB2-LABEL: t3:
 ; THUMB2: mov{{(s|\.w)}} [[R:r[0-1]]], #0

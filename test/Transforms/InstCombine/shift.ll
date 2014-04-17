@@ -36,14 +36,14 @@ define i32 @test4(i8 %A) {
 define i32 @test5(i32 %A) {
 ; CHECK-LABEL: @test5(
 ; CHECK: ret i32 undef
-        %B = lshr i32 %A, 32  ;; shift all bits out 
+        %B = lshr i32 %A, 32  ;; shift all bits out
         ret i32 %B
 }
 
 define i32 @test5a(i32 %A) {
 ; CHECK-LABEL: @test5a(
 ; CHECK: ret i32 undef
-        %B = shl i32 %A, 32     ;; shift all bits out 
+        %B = shl i32 %A, 32     ;; shift all bits out
         ret i32 %B
 }
 
@@ -82,7 +82,7 @@ define i32 @test6a(i32 %A) {
 define i32 @test7(i8 %A) {
 ; CHECK-LABEL: @test7(
 ; CHECK-NEXT: ret i32 -1
-        %shift.upgrd.3 = zext i8 %A to i32 
+        %shift.upgrd.3 = zext i8 %A to i32
         %B = ashr i32 -1, %shift.upgrd.3  ;; Always equal to -1
         ret i32 %B
 }
@@ -232,7 +232,7 @@ define i1 @test16(i32 %X) {
 ; CHECK-NEXT: and i32 %X, 16
 ; CHECK-NEXT: icmp ne i32
 ; CHECK-NEXT: ret i1
-        %tmp.3 = ashr i32 %X, 4 
+        %tmp.3 = ashr i32 %X, 4
         %tmp.6 = and i32 %tmp.3, 1
         %tmp.7 = icmp ne i32 %tmp.6, 0
         ret i1 %tmp.7
@@ -365,12 +365,12 @@ define i1 @test27(i32 %x) nounwind {
   %z = trunc i32 %y to i1
   ret i1 %z
 }
- 
+
 define i8 @test28(i8 %x) {
 entry:
 ; CHECK-LABEL: @test28(
 ; CHECK:     icmp slt i8 %x, 0
-; CHECK-NEXT:     br i1 
+; CHECK-NEXT:     br i1
 	%tmp1 = lshr i8 %x, 7
 	%cond1 = icmp ne i8 %tmp1, 0
 	br i1 %cond1, label %bb1, label %bb2
@@ -476,7 +476,7 @@ entry:
   %ins = or i128 %tmp23, %tmp27
   %tmp45 = lshr i128 %ins, 64
   ret i128 %tmp45
-  
+
 ; CHECK-LABEL: @test36(
 ; CHECK:  %tmp231 = or i128 %B, %A
 ; CHECK:  %ins = and i128 %tmp231, 18446744073709551615
@@ -492,7 +492,7 @@ entry:
   %tmp45 = lshr i128 %ins, 64
   %tmp46 = trunc i128 %tmp45 to i64
   ret i64 %tmp46
-  
+
 ; CHECK-LABEL: @test37(
 ; CHECK:  %tmp23 = shl nuw nsw i128 %tmp22, 32
 ; CHECK:  %ins = or i128 %tmp23, %A
@@ -743,4 +743,40 @@ define i32 @test62(i32 %x) {
   ret i32 %or
 ; CHECK-LABEL: @test62(
 ; CHECK: ashr exact i32 %x, 3
+}
+
+; PR17026
+; CHECK-LABEL: @test63(
+; CHECK-NOT: sh
+; CHECK: ret
+define void @test63(i128 %arg) {
+bb:
+  br i1 undef, label %bb1, label %bb12
+
+bb1:                                              ; preds = %bb11, %bb
+  br label %bb2
+
+bb2:                                              ; preds = %bb7, %bb1
+  br i1 undef, label %bb3, label %bb7
+
+bb3:                                              ; preds = %bb2
+  %tmp = lshr i128 %arg, 36893488147419103232
+  %tmp4 = shl i128 %tmp, 0
+  %tmp5 = or i128 %tmp4, undef
+  %tmp6 = trunc i128 %tmp5 to i16
+  br label %bb8
+
+bb7:                                              ; preds = %bb2
+  br i1 undef, label %bb8, label %bb2
+
+bb8:                                              ; preds = %bb7, %bb3
+  %tmp9 = phi i16 [ %tmp6, %bb3 ], [ undef, %bb7 ]
+  %tmp10 = icmp eq i16 %tmp9, 0
+  br i1 %tmp10, label %bb11, label %bb12
+
+bb11:                                             ; preds = %bb8
+  br i1 undef, label %bb1, label %bb12
+
+bb12:                                             ; preds = %bb11, %bb8, %bb
+  ret void
 }

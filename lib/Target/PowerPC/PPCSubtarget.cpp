@@ -15,9 +15,10 @@
 #include "PPC.h"
 #include "PPCRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetMachine.h"
@@ -30,12 +31,24 @@
 using namespace llvm;
 
 PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, bool is64Bit)
+                           const std::string &FS, bool is64Bit,
+                           CodeGenOpt::Level OptLevel)
   : PPCGenSubtargetInfo(TT, CPU, FS)
   , IsPPC64(is64Bit)
   , TargetTriple(TT) {
   initializeEnvironment();
-  resetSubtargetFeatures(CPU, FS);
+
+  std::string FullFS = FS;
+
+  // At -O2 and above, track CR bits as individual registers.
+  if (OptLevel >= CodeGenOpt::Default) {
+    if (!FullFS.empty())
+      FullFS = "+crbits," + FullFS;
+    else
+      FullFS = "+crbits";
+  }
+
+  resetSubtargetFeatures(CPU, FullFS);
 }
 
 /// SetJITMode - This is called to inform the subtarget info that we are
@@ -72,8 +85,11 @@ void PPCSubtarget::initializeEnvironment() {
   HasMFOCRF = false;
   Has64BitSupport = false;
   Use64BitRegs = false;
+  UseCRBits = false;
   HasAltivec = false;
   HasQPX = false;
+  HasVSX = false;
+  HasFCPSGN = false;
   HasFSQRT = false;
   HasFRE = false;
   HasFRES = false;
@@ -88,6 +104,8 @@ void PPCSubtarget::initializeEnvironment() {
   HasPOPCNTD = false;
   HasLDBRX = false;
   IsBookE = false;
+  DeprecatedMFTB = false;
+  DeprecatedDST = false;
   HasLazyResolverStubs = false;
   IsJITCodeModel = false;
 }
@@ -163,14 +181,7 @@ bool PPCSubtarget::enablePostRAScheduler(
            CodeGenOpt::Level OptLevel,
            TargetSubtargetInfo::AntiDepBreakMode& Mode,
            RegClassVector& CriticalPathRCs) const {
-  // FIXME: It would be best to use TargetSubtargetInfo::ANTIDEP_ALL here,
-  // but we can't because we can't reassign the cr registers. There is a
-  // dependence between the cr register and the RLWINM instruction used
-  // to extract its value which the anti-dependency breaker can't currently
-  // see. Maybe we should make a late-expanded pseudo to encode this dependency.
-  // (the relevant code is in PPCDAGToDAGISel::SelectSETCC)
-
-  Mode = TargetSubtargetInfo::ANTIDEP_CRITICAL;
+  Mode = TargetSubtargetInfo::ANTIDEP_ALL;
 
   CriticalPathRCs.clear();
 
@@ -179,9 +190,45 @@ bool PPCSubtarget::enablePostRAScheduler(
   else
     CriticalPathRCs.push_back(&PPC::GPRCRegClass);
     
-  CriticalPathRCs.push_back(&PPC::F8RCRegClass);
-  CriticalPathRCs.push_back(&PPC::VRRCRegClass);
-
   return OptLevel >= CodeGenOpt::Default;
+}
+
+// Embedded cores need aggressive scheduling (and some others also benefit).
+static bool needsAggressiveScheduling(unsigned Directive) {
+  switch (Directive) {
+  default: return false;
+  case PPC::DIR_440:
+  case PPC::DIR_A2:
+  case PPC::DIR_E500mc:
+  case PPC::DIR_E5500:
+  case PPC::DIR_PWR7:
+    return true;
+  }
+}
+
+bool PPCSubtarget::enableMachineScheduler() const {
+  // Enable MI scheduling for the embedded cores.
+  // FIXME: Enable this for all cores (some additional modeling
+  // may be necessary).
+  return needsAggressiveScheduling(DarwinDirective);
+}
+
+void PPCSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
+                                       MachineInstr *begin,
+                                       MachineInstr *end,
+                                       unsigned NumRegionInstrs) const {
+  if (needsAggressiveScheduling(DarwinDirective)) {
+    Policy.OnlyTopDown = false;
+    Policy.OnlyBottomUp = false;
+  }
+
+  // Spilling is generally expensive on all PPC cores, so always enable
+  // register-pressure tracking.
+  Policy.ShouldTrackPressure = true;
+}
+
+bool PPCSubtarget::useAA() const {
+  // Use AA during code generation for the embedded cores.
+  return needsAggressiveScheduling(DarwinDirective);
 }
 

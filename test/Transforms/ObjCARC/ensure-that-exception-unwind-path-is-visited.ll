@@ -24,11 +24,11 @@ target triple = "x86_64-apple-macosx10.9.0"
 @"\01L_OBJC_METH_VAR_NAME_" = internal global [4 x i8] c"new\00", section "__TEXT,__objc_methname,cstring_literals", align 1
 @"\01L_OBJC_SELECTOR_REFERENCES_" = internal global i8* getelementptr inbounds ([4 x i8]* @"\01L_OBJC_METH_VAR_NAME_", i64 0, i64 0), section "__DATA, __objc_selrefs, literal_pointers, no_dead_strip"
 @__CFConstantStringClassReference = external global [0 x i32]
-@.str = linker_private unnamed_addr constant [11 x i8] c"Failed: %@\00", align 1
+@.str = private unnamed_addr constant [11 x i8] c"Failed: %@\00", align 1
 @_unnamed_cfstring_ = private constant %struct.NSConstantString { i32* getelementptr inbounds ([0 x i32]* @__CFConstantStringClassReference, i32 0, i32 0), i32 1992, i8* getelementptr inbounds ([11 x i8]* @.str, i32 0, i32 0), i64 10 }, section "__DATA,__cfstring"
 @"OBJC_CLASS_$_NSException" = external global %struct._class_t
 @"\01L_OBJC_CLASSLIST_REFERENCES_$_1" = internal global %struct._class_t* @"OBJC_CLASS_$_NSException", section "__DATA, __objc_classrefs, regular, no_dead_strip", align 8
-@.str2 = linker_private unnamed_addr constant [4 x i8] c"Foo\00", align 1
+@.str2 = private unnamed_addr constant [4 x i8] c"Foo\00", align 1
 @_unnamed_cfstring_3 = private constant %struct.NSConstantString { i32* getelementptr inbounds ([0 x i32]* @__CFConstantStringClassReference, i32 0, i32 0), i32 1992, i8* getelementptr inbounds ([4 x i8]* @.str2, i32 0, i32 0), i64 3 }, section "__DATA,__cfstring"
 @"\01L_OBJC_METH_VAR_NAME_4" = internal global [14 x i8] c"raise:format:\00", section "__TEXT,__objc_methname,cstring_literals", align 1
 @"\01L_OBJC_SELECTOR_REFERENCES_5" = internal global i8* getelementptr inbounds ([14 x i8]* @"\01L_OBJC_METH_VAR_NAME_4", i64 0, i64 0), section "__DATA, __objc_selrefs, literal_pointers, no_dead_strip"
@@ -111,14 +111,14 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 ; CHECK: attributes [[NUW]] = { nounwind }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!33, !34, !35, !36}
+!llvm.module.flags = !{!33, !34, !35, !36, !61}
 
 !0 = metadata !{i32 786449, metadata !60, i32 16, metadata !"clang version 3.3 ", i1 true, metadata !"", i32 2, metadata !1, metadata !1, metadata !3, metadata !1, null, metadata !""} ; [ DW_TAG_compile_unit ] [/Volumes/Files/gottesmmcab/Radar/12906997/test.m] [DW_LANG_ObjC]
 !1 = metadata !{i32 0}
 !3 = metadata !{metadata !5, metadata !27}
 !5 = metadata !{i32 786478, metadata !60, metadata !6, metadata !"main", metadata !"main", metadata !"", i32 9, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 true, i32 ()* @main, null, null, metadata !10, i32 10} ; [ DW_TAG_subprogram ] [line 9] [def] [scope 10] [main]
 !6 = metadata !{i32 786473, metadata !60} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!7 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !8 = metadata !{metadata !9}
 !9 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
 !10 = metadata !{metadata !11}
@@ -127,11 +127,11 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !13 = metadata !{i32 786443, metadata !60, metadata !5, i32 10, i32 0, i32 0} ; [ DW_TAG_lexical_block ] [/Volumes/Files/gottesmmcab/Radar/12906997/test.m]
 !14 = metadata !{i32 786454, metadata !60, null, metadata !"id", i32 11, i64 0, i64 0, i64 0, i32 0, metadata !15} ; [ DW_TAG_typedef ] [id] [line 11, size 0, align 0, offset 0] [from ]
 !15 = metadata !{i32 786447, metadata !60, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !16} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from objc_object]
-!16 = metadata !{i32 786451, metadata !60, null, metadata !"objc_object", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !17, i32 0, i32 0, i32 0} ; [ DW_TAG_structure_type ] [objc_object] [line 0, size 0, align 0, offset 0] [from ]
+!16 = metadata !{i32 786451, metadata !60, null, metadata !"objc_object", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !17, i32 0, null, i32 0, null} ; [ DW_TAG_structure_type ] [objc_object] [line 0, size 0, align 0, offset 0] [def] [from ]
 !17 = metadata !{metadata !18}
 !18 = metadata !{i32 786445, metadata !60, metadata !16, metadata !"isa", i32 0, i64 64, i64 0, i64 0, i32 0, metadata !19} ; [ DW_TAG_member ] [isa] [line 0, size 64, align 0, offset 0] [from ]
 !19 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 0, i64 0, i32 0, metadata !20} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 0, offset 0] [from objc_class]
-!20 = metadata !{i32 786451, metadata !60, null, metadata !"objc_class", i32 0, i64 0, i64 0, i32 0, i32 4, null, null, i32 0} ; [ DW_TAG_structure_type ] [objc_class] [line 0, size 0, align 0, offset 0] [fwd] [from ]
+!20 = metadata !{i32 786451, metadata !60, null, metadata !"objc_class", i32 0, i64 0, i64 0, i32 0, i32 4, null, null, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [objc_class] [line 0, size 0, align 0, offset 0] [decl] [from ]
 !21 = metadata !{i32 786688, metadata !22, metadata !"ok", metadata !6, i32 13, metadata !23, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [ok] [line 13]
 !22 = metadata !{i32 786443, metadata !60, metadata !13, i32 12, i32 0, i32 1} ; [ DW_TAG_lexical_block ] [/Volumes/Files/gottesmmcab/Radar/12906997/test.m]
 !23 = metadata !{i32 786454, metadata !60, null, metadata !"BOOL", i32 62, i64 0, i64 0, i64 0, i32 0, metadata !24} ; [ DW_TAG_typedef ] [BOOL] [line 62, size 0, align 0, offset 0] [from signed char]
@@ -139,7 +139,7 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !25 = metadata !{i32 786688, metadata !26, metadata !"obj2", metadata !6, i32 15, metadata !14, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [obj2] [line 15]
 !26 = metadata !{i32 786443, metadata !60, metadata !22, i32 14, i32 0, i32 2} ; [ DW_TAG_lexical_block ] [/Volumes/Files/gottesmmcab/Radar/12906997/test.m]
 !27 = metadata !{i32 786478, metadata !60, metadata !6, metadata !"ThrowFunc", metadata !"ThrowFunc", metadata !"", i32 4, metadata !28, i1 true, i1 true, i32 0, i32 0, null, i32 256, i1 true, void (i8*)* @ThrowFunc, null, null, metadata !30, i32 5} ; [ DW_TAG_subprogram ] [line 4] [local] [def] [scope 5] [ThrowFunc]
-!28 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !29, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!28 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !29, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !29 = metadata !{null, metadata !14}
 !30 = metadata !{metadata !31}
 !31 = metadata !{metadata !32}
@@ -171,3 +171,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !57 = metadata !{i32 786443, metadata !60, metadata !27, i32 5, i32 0, i32 7} ; [ DW_TAG_lexical_block ] [/Volumes/Files/gottesmmcab/Radar/12906997/test.m]
 !58 = metadata !{i32 7, i32 0, metadata !57, null}
 !60 = metadata !{metadata !"test.m", metadata !"/Volumes/Files/gottesmmcab/Radar/12906997"}
+!61 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

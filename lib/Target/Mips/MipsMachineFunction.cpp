@@ -15,12 +15,60 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
 static cl::opt<bool>
 FixGlobalBaseReg("mips-fix-global-base-reg", cl::Hidden, cl::init(true),
                  cl::desc("Always use $gp as the global base register."));
+
+// class MipsCallEntry.
+MipsCallEntry::MipsCallEntry(const StringRef &N) {
+#ifndef NDEBUG
+  Name = N;
+  Val = 0;
+#endif
+}
+
+MipsCallEntry::MipsCallEntry(const GlobalValue *V) {
+#ifndef NDEBUG
+  Val = V;
+#endif
+}
+
+bool MipsCallEntry::isConstant(const MachineFrameInfo *) const {
+  return false;
+}
+
+bool MipsCallEntry::isAliased(const MachineFrameInfo *) const {
+  return false;
+}
+
+bool MipsCallEntry::mayAlias(const MachineFrameInfo *) const {
+  return false;
+}
+
+void MipsCallEntry::printCustom(raw_ostream &O) const {
+  O << "MipsCallEntry: ";
+#ifndef NDEBUG
+  if (Val)
+    O << Val->getName();
+  else
+    O << Name;
+#endif
+}
+
+MipsFunctionInfo::~MipsFunctionInfo() {
+  for (StringMap<const MipsCallEntry *>::iterator
+       I = ExternalCallEntries.begin(), E = ExternalCallEntries.end(); I != E;
+       ++I)
+    delete I->getValue();
+
+  for (ValueMap<const GlobalValue *, const MipsCallEntry *>::iterator
+       I = GlobalCallEntries.begin(), E = GlobalCallEntries.end(); I != E; ++I)
+    delete I->second;
+}
 
 bool MipsFunctionInfo::globalBaseRegSet() const {
   return GlobalBaseReg;
@@ -70,6 +118,24 @@ void MipsFunctionInfo::createEhDataRegsFI() {
 bool MipsFunctionInfo::isEhDataRegFI(int FI) const {
   return CallsEhReturn && (FI == EhDataRegFI[0] || FI == EhDataRegFI[1]
                         || FI == EhDataRegFI[2] || FI == EhDataRegFI[3]);
+}
+
+MachinePointerInfo MipsFunctionInfo::callPtrInfo(const StringRef &Name) {
+  const MipsCallEntry *&E = ExternalCallEntries[Name];
+
+  if (!E)
+    E = new MipsCallEntry(Name);
+
+  return MachinePointerInfo(E);
+}
+
+MachinePointerInfo MipsFunctionInfo::callPtrInfo(const GlobalValue *Val) {
+  const MipsCallEntry *&E = GlobalCallEntries[Val];
+
+  if (!E)
+    E = new MipsCallEntry(Val);
+
+  return MachinePointerInfo(E);
 }
 
 void MipsFunctionInfo::anchor() { }

@@ -15,14 +15,19 @@
 
 #include "AMDGPUMCInstLower.h"
 #include "AMDGPUAsmPrinter.h"
+#include "InstPrinter/AMDGPUInstPrinter.h"
 #include "R600InstrInfo.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCObjectStreamer.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Format.h"
+#include <algorithm>
 
 using namespace llvm;
 
@@ -33,9 +38,7 @@ AMDGPUMCInstLower::AMDGPUMCInstLower(MCContext &ctx):
 void AMDGPUMCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
   OutMI.setOpcode(MI->getOpcode());
 
-  for (unsigned i = 0, e = MI->getNumExplicitOperands(); i != e; ++i) {
-    const MachineOperand &MO = MI->getOperand(i);
-
+  for (const MachineOperand &MO : MI->explicit_operands()) {
     MCOperand MCOp;
     switch (MO.getType()) {
     default:
@@ -64,20 +67,58 @@ void AMDGPUMCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
 void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   AMDGPUMCInstLower MCInstLowering(OutContext);
 
+#ifdef _DEBUG
+  StringRef Err;
+  if (!TM.getInstrInfo()->verifyInstruction(MI, Err)) {
+    errs() << "Warning: Illegal instruction detected: " << Err << "\n";
+    MI->dump();
+  }
+#endif
   if (MI->isBundle()) {
     const MachineBasicBlock *MBB = MI->getParent();
     MachineBasicBlock::const_instr_iterator I = MI;
     ++I;
     while (I != MBB->end() && I->isInsideBundle()) {
-      MCInst MCBundleInst;
-      const MachineInstr *BundledInst = I;
-      MCInstLowering.lower(BundledInst, MCBundleInst);
-      OutStreamer.EmitInstruction(MCBundleInst);
+      EmitInstruction(I);
       ++I;
     }
   } else {
     MCInst TmpInst;
     MCInstLowering.lower(MI, TmpInst);
-    OutStreamer.EmitInstruction(TmpInst);
+    EmitToStreamer(OutStreamer, TmpInst);
+
+    if (DisasmEnabled) {
+      // Disassemble instruction/operands to text.
+      DisasmLines.resize(DisasmLines.size() + 1);
+      std::string &DisasmLine = DisasmLines.back();
+      raw_string_ostream DisasmStream(DisasmLine);
+
+      AMDGPUInstPrinter InstPrinter(*TM.getMCAsmInfo(), *TM.getInstrInfo(),
+                                    *TM.getRegisterInfo());
+      InstPrinter.printInst(&TmpInst, DisasmStream, StringRef());
+
+      // Disassemble instruction/operands to hex representation.
+      SmallVector<MCFixup, 4> Fixups;
+      SmallVector<char, 16> CodeBytes;
+      raw_svector_ostream CodeStream(CodeBytes);
+
+      MCObjectStreamer &ObjStreamer = (MCObjectStreamer &)OutStreamer;
+      MCCodeEmitter &InstEmitter = ObjStreamer.getAssembler().getEmitter();
+      InstEmitter.EncodeInstruction(TmpInst, CodeStream, Fixups,
+                                    TM.getSubtarget<MCSubtargetInfo>());
+      CodeStream.flush();
+
+      HexLines.resize(HexLines.size() + 1);
+      std::string &HexLine = HexLines.back();
+      raw_string_ostream HexStream(HexLine);
+
+      for (size_t i = 0; i < CodeBytes.size(); i += 4) {
+        unsigned int CodeDWord = *(unsigned int *)&CodeBytes[i];
+        HexStream << format("%s%08X", (i > 0 ? " " : ""), CodeDWord);
+      }
+
+      DisasmStream.flush();
+      DisasmLineMaxLen = std::max(DisasmLineMaxLen, DisasmLine.size());
+    }
   }
 }

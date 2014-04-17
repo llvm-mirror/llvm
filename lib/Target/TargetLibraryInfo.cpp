@@ -38,6 +38,8 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "_ZnwjRKSt9nothrow_t",
     "_Znwm",
     "_ZnwmRKSt9nothrow_t",
+    "__cospi",
+    "__cospif",
     "__cxa_atexit",
     "__cxa_guard_abort",
     "__cxa_guard_acquire",
@@ -45,6 +47,10 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "__isoc99_scanf",
     "__isoc99_sscanf",
     "__memcpy_chk",
+    "__sincospi_stret",
+    "__sincospif_stret",
+    "__sinpi",
+    "__sinpif",
     "__sqrt_finite",
     "__sqrtf_finite",
     "__sqrtl_finite",
@@ -134,6 +140,12 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "floor",
     "floorf",
     "floorl",
+    "fmax",
+    "fmaxf",
+    "fmaxl",
+    "fmin",
+    "fminf",
+    "fminl",
     "fmod",
     "fmodf",
     "fmodl",
@@ -178,6 +190,9 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "isdigit",
     "labs",
     "lchown",
+    "ldexp",
+    "ldexpf",
+    "ldexpl",
     "llabs",
     "log",
     "log10",
@@ -331,6 +346,24 @@ const char* TargetLibraryInfo::StandardNames[LibFunc::NumLibFuncs] =
     "write"
   };
 
+static bool hasSinCosPiStret(const Triple &T) {
+  // Only Darwin variants have _stret versions of combined trig functions.
+  if (!T.isMacOSX() && T.getOS() != Triple::IOS)
+    return false;
+
+  // The ABI is rather complicated on x86, so don't do anything special there.
+  if (T.getArch() == Triple::x86)
+    return false;
+
+  if (T.isMacOSX() && T.isMacOSXVersionLT(10, 9))
+    return false;
+
+  if (T.getOS() == Triple::IOS && T.isOSVersionLT(7, 0))
+    return false;
+
+  return true;
+}
+
 /// initialize - Initialize the set of available library functions based on the
 /// specified target triple.  This should be carefully written so that a missing
 /// target triple gets a sane set of defaults.
@@ -345,16 +378,34 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
       llvm_unreachable("TargetLibraryInfo function names must be sorted");
   }
 #endif // !NDEBUG
-  
-  // memset_pattern16 is only available on iOS 3.0 and Mac OS/X 10.5 and later.
+
+  // There are no library implementations of mempcy and memset for r600 and
+  // these can be difficult to lower in the backend.
+  if (T.getArch() == Triple::r600) {
+    TLI.setUnavailable(LibFunc::memcpy);
+    TLI.setUnavailable(LibFunc::memset);
+    TLI.setUnavailable(LibFunc::memset_pattern16);
+    return;
+  }
+
+  // memset_pattern16 is only available on iOS 3.0 and Mac OS X 10.5 and later.
   if (T.isMacOSX()) {
     if (T.isMacOSXVersionLT(10, 5))
       TLI.setUnavailable(LibFunc::memset_pattern16);
-  } else if (T.getOS() == Triple::IOS) {
+  } else if (T.isiOS()) {
     if (T.isOSVersionLT(3, 0))
       TLI.setUnavailable(LibFunc::memset_pattern16);
   } else {
     TLI.setUnavailable(LibFunc::memset_pattern16);
+  }
+
+  if (!hasSinCosPiStret(T)) {
+    TLI.setUnavailable(LibFunc::sinpi);
+    TLI.setUnavailable(LibFunc::sinpif);
+    TLI.setUnavailable(LibFunc::cospi);
+    TLI.setUnavailable(LibFunc::cospif);
+    TLI.setUnavailable(LibFunc::sincospi_stret);
+    TLI.setUnavailable(LibFunc::sincospif_stret);
   }
 
   if (T.isMacOSX() && T.getArch() == Triple::x86 &&
@@ -375,7 +426,7 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::fiprintf);
   }
 
-  if (T.getOS() == Triple::Win32) {
+  if (T.isKnownWindowsMSVCEnvironment()) {
     // Win32 does not support long double
     TLI.setUnavailable(LibFunc::acosl);
     TLI.setUnavailable(LibFunc::asinl);
@@ -389,8 +440,12 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::fabsf); // Win32 and Win64 both lack fabsf
     TLI.setUnavailable(LibFunc::fabsl);
     TLI.setUnavailable(LibFunc::floorl);
+    TLI.setUnavailable(LibFunc::fmaxl);
+    TLI.setUnavailable(LibFunc::fminl);
     TLI.setUnavailable(LibFunc::fmodl);
     TLI.setUnavailable(LibFunc::frexpl);
+    TLI.setUnavailable(LibFunc::ldexpf);
+    TLI.setUnavailable(LibFunc::ldexpl);
     TLI.setUnavailable(LibFunc::logl);
     TLI.setUnavailable(LibFunc::modfl);
     TLI.setUnavailable(LibFunc::powl);
@@ -413,9 +468,6 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::cbrt);
     TLI.setUnavailable(LibFunc::cbrtf);
     TLI.setUnavailable(LibFunc::cbrtl);
-    TLI.setUnavailable(LibFunc::exp10);
-    TLI.setUnavailable(LibFunc::exp10f);
-    TLI.setUnavailable(LibFunc::exp10l);
     TLI.setUnavailable(LibFunc::exp2);
     TLI.setUnavailable(LibFunc::exp2f);
     TLI.setUnavailable(LibFunc::exp2l);
@@ -459,6 +511,8 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
       TLI.setUnavailable(LibFunc::coshf);
       TLI.setUnavailable(LibFunc::expf);
       TLI.setUnavailable(LibFunc::floorf);
+      TLI.setUnavailable(LibFunc::fminf);
+      TLI.setUnavailable(LibFunc::fmaxf);
       TLI.setUnavailable(LibFunc::fmodf);
       TLI.setUnavailable(LibFunc::logf);
       TLI.setUnavailable(LibFunc::powf);
@@ -534,6 +588,43 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::llabs);
   }
 
+  switch (T.getOS()) {
+  case Triple::MacOSX:
+    // exp10 and exp10f are not available on OS X until 10.9 and iOS until 7.0
+    // and their names are __exp10 and __exp10f. exp10l is not available on
+    // OS X or iOS.
+    TLI.setUnavailable(LibFunc::exp10l);
+    if (T.isMacOSXVersionLT(10, 9)) {
+      TLI.setUnavailable(LibFunc::exp10);
+      TLI.setUnavailable(LibFunc::exp10f);
+    } else {
+      TLI.setAvailableWithName(LibFunc::exp10, "__exp10");
+      TLI.setAvailableWithName(LibFunc::exp10f, "__exp10f");
+    }
+    break;
+  case Triple::IOS:
+    TLI.setUnavailable(LibFunc::exp10l);
+    if (T.isOSVersionLT(7, 0)) {
+      TLI.setUnavailable(LibFunc::exp10);
+      TLI.setUnavailable(LibFunc::exp10f);
+    } else {
+      TLI.setAvailableWithName(LibFunc::exp10, "__exp10");
+      TLI.setAvailableWithName(LibFunc::exp10f, "__exp10f");
+    }
+    break;
+  case Triple::Linux:
+    // exp10, exp10f, exp10l is available on Linux (GLIBC) but are extremely
+    // buggy prior to glibc version 2.18. Until this version is widely deployed
+    // or we have a reasonable detection strategy, we cannot use exp10 reliably
+    // on Linux.
+    //
+    // Fall through to disable all of them.
+  default:
+    TLI.setUnavailable(LibFunc::exp10);
+    TLI.setUnavailable(LibFunc::exp10f);
+    TLI.setUnavailable(LibFunc::exp10l);
+  }
+
   // ffsl is available on at least Darwin, Mac OS X, iOS, FreeBSD, and
   // Linux (GLIBC):
   // http://developer.apple.com/library/mac/#documentation/Darwin/Reference/ManPages/man3/ffsl.3.html
@@ -562,7 +653,7 @@ static void initialize(TargetLibraryInfo &TLI, const Triple &T,
   }
 
   // The following functions are available on at least Linux:
-  if (T.getOS() != Triple::Linux) {
+  if (!T.isOSLinux()) {
     TLI.setUnavailable(LibFunc::dunder_strdup);
     TLI.setUnavailable(LibFunc::dunder_strtok_r);
     TLI.setUnavailable(LibFunc::dunder_isoc99_scanf);

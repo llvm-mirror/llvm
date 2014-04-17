@@ -18,18 +18,17 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/Target/Mangler.h"
 
 using namespace llvm;
 
 MipsMCInstLower::MipsMCInstLower(MipsAsmPrinter &asmprinter)
   : AsmPrinter(asmprinter) {}
 
-void MipsMCInstLower::Initialize(Mangler *M, MCContext *C) {
-  Mang = M;
+void MipsMCInstLower::Initialize(MCContext *C) {
   Ctx = C;
 }
 
@@ -74,7 +73,7 @@ MCOperand MipsMCInstLower::LowerSymbolOperand(const MachineOperand &MO,
     break;
 
   case MachineOperand::MO_GlobalAddress:
-    Symbol = Mang->getSymbol(MO.getGlobal());
+    Symbol = AsmPrinter.getSymbol(MO.getGlobal());
     Offset += MO.getOffset();
     break;
 

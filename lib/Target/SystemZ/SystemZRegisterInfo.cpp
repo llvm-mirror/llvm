@@ -20,9 +20,9 @@ using namespace llvm;
 SystemZRegisterInfo::SystemZRegisterInfo(SystemZTargetMachine &tm)
   : SystemZGenRegisterInfo(SystemZ::R14D), TM(tm) {}
 
-const uint16_t*
+const MCPhysReg*
 SystemZRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  static const uint16_t CalleeSavedRegs[] = {
+  static const MCPhysReg CalleeSavedRegs[] = {
     SystemZ::R6D,  SystemZ::R7D,  SystemZ::R8D,  SystemZ::R9D,
     SystemZ::R10D, SystemZ::R11D, SystemZ::R12D, SystemZ::R13D,
     SystemZ::R14D, SystemZ::R15D,
@@ -42,13 +42,15 @@ SystemZRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   if (TFI->hasFP(MF)) {
     // R11D is the frame pointer.  Reserve all aliases.
     Reserved.set(SystemZ::R11D);
-    Reserved.set(SystemZ::R11W);
+    Reserved.set(SystemZ::R11L);
+    Reserved.set(SystemZ::R11H);
     Reserved.set(SystemZ::R10Q);
   }
 
   // R15D is the stack pointer.  Reserve all aliases.
   Reserved.set(SystemZ::R15D);
-  Reserved.set(SystemZ::R15W);
+  Reserved.set(SystemZ::R15L);
+  Reserved.set(SystemZ::R15H);
   Reserved.set(SystemZ::R14Q);
   return Reserved;
 }
@@ -61,8 +63,7 @@ SystemZRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
 
   MachineBasicBlock &MBB = *MI->getParent();
   MachineFunction &MF = *MBB.getParent();
-  const SystemZInstrInfo &TII =
-    *static_cast<const SystemZInstrInfo*>(TM.getInstrInfo());
+  auto *TII = static_cast<const SystemZInstrInfo*>(TM.getInstrInfo());
   const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
   DebugLoc DL = MI->getDebugLoc();
 
@@ -82,7 +83,7 @@ SystemZRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   // See if the offset is in range, or if an equivalent instruction that
   // accepts the offset exists.
   unsigned Opcode = MI->getOpcode();
-  unsigned OpcodeForOffset = TII.getOpcodeForOffset(Opcode, Offset);
+  unsigned OpcodeForOffset = TII->getOpcodeForOffset(Opcode, Offset);
   if (OpcodeForOffset)
     MI->getOperand(FIOperandNum).ChangeToRegister(BasePtr, false);
   else {
@@ -92,7 +93,7 @@ SystemZRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     int64_t Mask = 0xffff;
     do {
       Offset = OldOffset & Mask;
-      OpcodeForOffset = TII.getOpcodeForOffset(Opcode, Offset);
+      OpcodeForOffset = TII->getOpcodeForOffset(Opcode, Offset);
       Mask >>= 1;
       assert(Mask && "One offset must be OK");
     } while (!OpcodeForOffset);
@@ -105,21 +106,21 @@ SystemZRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         && MI->getOperand(FIOperandNum + 2).getReg() == 0) {
       // Load the offset into the scratch register and use it as an index.
       // The scratch register then dies here.
-      TII.loadImmediate(MBB, MI, ScratchReg, HighOffset);
+      TII->loadImmediate(MBB, MI, ScratchReg, HighOffset);
       MI->getOperand(FIOperandNum).ChangeToRegister(BasePtr, false);
       MI->getOperand(FIOperandNum + 2).ChangeToRegister(ScratchReg,
                                                         false, false, true);
     } else {
       // Load the anchor address into a scratch register.
-      unsigned LAOpcode = TII.getOpcodeForOffset(SystemZ::LA, HighOffset);
+      unsigned LAOpcode = TII->getOpcodeForOffset(SystemZ::LA, HighOffset);
       if (LAOpcode)
-        BuildMI(MBB, MI, DL, TII.get(LAOpcode),ScratchReg)
+        BuildMI(MBB, MI, DL, TII->get(LAOpcode),ScratchReg)
           .addReg(BasePtr).addImm(HighOffset).addReg(0);
       else {
         // Load the high offset into the scratch register and use it as
         // an index.
-        TII.loadImmediate(MBB, MI, ScratchReg, HighOffset);
-        BuildMI(MBB, MI, DL, TII.get(SystemZ::AGR),ScratchReg)
+        TII->loadImmediate(MBB, MI, ScratchReg, HighOffset);
+        BuildMI(MBB, MI, DL, TII->get(SystemZ::AGR),ScratchReg)
           .addReg(ScratchReg, RegState::Kill).addReg(BasePtr);
       }
 
@@ -128,7 +129,7 @@ SystemZRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                                                     false, false, true);
     }
   }
-  MI->setDesc(TII.get(OpcodeForOffset));
+  MI->setDesc(TII->get(OpcodeForOffset));
   MI->getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
 }
 

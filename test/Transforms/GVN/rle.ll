@@ -1,5 +1,5 @@
-; RUN: opt < %s -default-data-layout="e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:32:64-n8:16:32" -basicaa -gvn -S -die | FileCheck %s
-; RUN: opt < %s -default-data-layout="E-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:64:64-n32"      -basicaa -gvn -S -die | FileCheck %s
+; RUN: opt < %s -default-data-layout="e-p:32:32:32-p1:16:16:16-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:32:64-n8:16:32" -basicaa -gvn -S -die | FileCheck %s
+; RUN: opt < %s -default-data-layout="E-p:32:32:32-p1:16:16:16-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:64:64-n32"      -basicaa -gvn -S -die | FileCheck %s
 
 ;; Trivial RLE test.
 define i32 @test0(i32 %V, i32* %P) {
@@ -195,6 +195,7 @@ Cont:
 }
 
 @GCst = constant {i32, float, i32 } { i32 42, float 14., i32 97 }
+@GCst_as1 = addrspace(1) constant {i32, float, i32 } { i32 42, float 14., i32 97 }
 
 ; memset -> float forwarding.
 define float @memcpy_to_float_local(float* %A) nounwind ssp {
@@ -209,7 +210,18 @@ entry:
 ; CHECK: ret float 1.400000e+01
 }
 
-
+; memcpy from address space 1
+define float @memcpy_to_float_local_as1(float* %A) nounwind ssp {
+entry:
+  %conv = bitcast float* %A to i8*                ; <i8*> [#uses=1]
+  tail call void @llvm.memcpy.p0i8.p1i8.i64(i8* %conv, i8 addrspace(1)* bitcast ({i32, float, i32 } addrspace(1)* @GCst_as1 to i8 addrspace(1)*), i64 12, i32 1, i1 false)
+  %arrayidx = getelementptr inbounds float* %A, i64 1 ; <float*> [#uses=1]
+  %tmp2 = load float* %arrayidx                   ; <float> [#uses=1]
+  ret float %tmp2
+; CHECK-LABEL: @memcpy_to_float_local_as1(
+; CHECK-NOT: load
+; CHECK: ret float 1.400000e+01
+}
 
 ;; non-local i32/float -> i8 load forwarding.
 define i8 @coerce_mustalias_nonlocal0(i32* %P, i1 %cond) {
@@ -357,13 +369,14 @@ Cont:
 ; CHECK: ret i8 %A
 }
 
-define i32 @chained_load(i32** %p) {
+define i32 @chained_load(i32** %p, i32 %x, i32 %y) {
 block1:
   %A = alloca i32*
 
   %z = load i32** %p
   store i32* %z, i32** %A
-  br i1 true, label %block2, label %block3
+  %cmp = icmp eq i32 %x, %y
+  br i1 %cmp, label %block2, label %block3
 
 block2:
  %a = load i32** %p
@@ -427,10 +440,11 @@ TY:
   ret i32 0
 }
 
-define i32 @phi_trans3(i32* %p) {
+define i32 @phi_trans3(i32* %p, i32 %x, i32 %y, i32 %z) {
 ; CHECK-LABEL: @phi_trans3(
 block1:
-  br i1 true, label %block2, label %block3
+  %cmpxy = icmp eq i32 %x, %y
+  br i1 %cmpxy, label %block2, label %block3
 
 block2:
  store i32 87, i32* %p
@@ -443,7 +457,7 @@ block3:
 
 block4:
   %A = phi i32 [-1, %block2], [42, %block3]
-  br i1 true, label %block5, label %exit
+  br i1 %cmpxy, label %block5, label %exit
   
 ; CHECK: block4:
 ; CHECK-NEXT: %D = phi i32 [ 87, %block2 ], [ 97, %block3 ]  
@@ -451,11 +465,11 @@ block4:
 
 block5:
   %B = add i32 %A, 1
-  br i1 true, label %block6, label %exit
+  br i1 %cmpxy, label %block6, label %exit
   
 block6:
   %C = getelementptr i32* %p, i32 %B
-  br i1 true, label %block7, label %exit
+  br i1 %cmpxy, label %block7, label %exit
   
 block7:
   %D = load i32* %C
@@ -645,6 +659,8 @@ entry:
 declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i32, i1) nounwind
 
 declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i32, i1) nounwind
+declare void @llvm.memcpy.p0i8.p1i8.i64(i8* nocapture, i8 addrspace(1)* nocapture, i64, i32, i1) nounwind
+
 
 ;;===----------------------------------------------------------------------===;;
 ;; Load -> Store dependency which isn't interfered with by a call that happens

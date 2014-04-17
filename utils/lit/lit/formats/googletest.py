@@ -5,10 +5,11 @@ import sys
 import lit.Test
 import lit.TestRunner
 import lit.util
+from .base import TestFormat
 
 kIsWindows = sys.platform in ['win32', 'cygwin']
 
-class GoogleTest(object):
+class GoogleTest(TestFormat):
     def __init__(self, test_sub_dir, test_suffix):
         self.test_sub_dir = os.path.normcase(str(test_sub_dir)).split(';')
         self.test_suffix = str(test_suffix)
@@ -65,7 +66,7 @@ class GoogleTest(object):
         # Discover the tests in this executable.
         for testname in self.getGTestTests(execpath, litConfig, localConfig):
             testPath = path_in_suite + (basename, testname)
-            yield lit.Test.Test(testSuite, testPath, localConfig)
+            yield lit.Test.Test(testSuite, testPath, localConfig, file_path=execpath)
 
     def getTestsInDirectory(self, testSuite, path_in_suite,
                             litConfig, localConfig):

@@ -5,8 +5,7 @@
 ; Check CLGR.
 define double @f1(double %a, double %b, i64 %i1, i64 %i2) {
 ; CHECK-LABEL: f1:
-; CHECK: clgr %r2, %r3
-; CHECK-NEXT: jl
+; CHECK: clgrjl %r2, %r3
 ; CHECK: ldr %f0, %f2
 ; CHECK: br %r14
   %cond = icmp ult i64 %i1, %i2
@@ -112,6 +111,19 @@ define double @f8(double %a, double %b, i64 %i1, i64 %base, i64 %index) {
   %add2 = add i64 %add1, 524280
   %ptr = inttoptr i64 %add2 to i64 *
   %i2 = load i64 *%ptr
+  %cond = icmp ult i64 %i1, %i2
+  %res = select i1 %cond, double %a, double %b
+  ret double %res
+}
+
+; Check the comparison can be reversed if that allows CLG to be used.
+define double @f9(double %a, double %b, i64 %i2, i64 *%ptr) {
+; CHECK-LABEL: f9:
+; CHECK: clg %r2, 0(%r3)
+; CHECK-NEXT: jh {{\.L.*}}
+; CHECK: ldr %f0, %f2
+; CHECK: br %r14
+  %i1 = load i64 *%ptr
   %cond = icmp ult i64 %i1, %i2
   %res = select i1 %cond, double %a, double %b
   ret double %res

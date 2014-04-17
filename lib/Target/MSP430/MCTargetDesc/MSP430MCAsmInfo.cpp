@@ -20,12 +20,8 @@ void MSP430MCAsmInfo::anchor() { }
 MSP430MCAsmInfo::MSP430MCAsmInfo(StringRef TT) {
   PointerSize = CalleeSaveStackSlotSize = 2;
 
-  PrivateGlobalPrefix = ".L";
-  WeakRefDirective ="\t.weak\t";
-  PCSymbol=".";
   CommentString = ";";
 
   AlignmentIsInBytes = false;
-  AllowNameToStartWithDigit = true;
   UsesELFSectionDirectiveForBSS = true;
 }

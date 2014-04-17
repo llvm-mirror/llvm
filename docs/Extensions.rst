@@ -37,7 +37,7 @@ X86/COFF-Dependent
 Relocations
 ^^^^^^^^^^^
 
-The following additional relocation type is supported:
+The following additional relocation types are supported:
 
 **@IMGREL** (AT&T syntax only) generates an image-relative relocation that
 corresponds to the COFF relocation types ``IMAGE_REL_I386_DIR32NB`` (32-bit) or
@@ -54,6 +54,22 @@ corresponds to the COFF relocation types ``IMAGE_REL_I386_DIR32NB`` (32-bit) or
     .long (fun@imgrel + 0x3F)
     .long $unwind$fun@imgrel
 
+**.secrel32** generates a relocation that corresponds to the COFF relocation
+types ``IMAGE_REL_I386_SECREL`` (32-bit) or ``IMAGE_REL_AMD64_SECREL`` (64-bit).
+
+**.secidx** relocation generates an index of the section that contains
+the target.  It corresponds to the COFF relocation types
+``IMAGE_REL_I386_SECTION`` (32-bit) or ``IMAGE_REL_AMD64_SECTION`` (64-bit).
+
+.. code-block:: gas
+
+  .section .debug$S,"rn"
+    .long 4
+    .long 242
+    .long 40
+    .secrel32 _function_name
+    .secidx   _function_name
+    ...
 
 ``.linkonce`` Directive
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -105,3 +121,41 @@ Supported COMDAT types:
   .section .xdata$foo
   .linkonce associative .text$foo
     ...
+
+``.section`` Directive
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+MC supports passing the information in ``.linkonce`` at the end of
+``.section``. For example,  these two codes are equivalent
+
+.. code-block:: gas
+
+  .section secName, "dr", discard, "Symbol1"
+  .globl Symbol1
+  Symbol1:
+  .long 1
+
+.. code-block:: gas
+
+  .section secName, "dr"
+  .linkonce discard
+  .globl Symbol1
+  Symbol1:
+  .long 1
+
+Note that in the combined form the COMDAT symbol is explicit. This
+extension exists to support multiple sections with the same name in
+different COMDATs:
+
+
+.. code-block:: gas
+
+  .section secName, "dr", discard, "Symbol1"
+  .globl Symbol1
+  Symbol1:
+  .long 1
+
+  .section secName, "dr", discard, "Symbol2"
+  .globl Symbol2
+  Symbol2:
+  .long 1

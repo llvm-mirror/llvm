@@ -38,10 +38,8 @@ public:
   static void printOperand(const MCOperand &MO, raw_ostream &O);
 
   // Override MCInstPrinter.
-  virtual void printRegName(raw_ostream &O, unsigned RegNo) const
-    LLVM_OVERRIDE;
-  virtual void printInst(const MCInst *MI, raw_ostream &O, StringRef Annot)
-    LLVM_OVERRIDE;
+  void printRegName(raw_ostream &O, unsigned RegNo) const override;
+  void printInst(const MCInst *MI, raw_ostream &O, StringRef Annot) override;
 
 private:
   // Print various types of operand.
@@ -58,7 +56,6 @@ private:
   void printS32ImmOperand(const MCInst *MI, int OpNum, raw_ostream &O);
   void printU32ImmOperand(const MCInst *MI, int OpNum, raw_ostream &O);
   void printPCRelOperand(const MCInst *MI, int OpNum, raw_ostream &O);
-  void printCallOperand(const MCInst *MI, int OpNum, raw_ostream &O);
   void printAccessRegOperand(const MCInst *MI, int OpNum, raw_ostream &O);
 
   // Print the mnemonic for a condition-code mask ("ne", "lh", etc.)

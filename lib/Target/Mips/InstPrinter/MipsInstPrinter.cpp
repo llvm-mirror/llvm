@@ -13,6 +13,7 @@
 
 #define DEBUG_TYPE "asm-printer"
 #include "MipsInstPrinter.h"
+#include "MCTargetDesc/MipsMCExpr.h"
 #include "MipsInstrInfo.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/MC/MCExpr.h"
@@ -83,6 +84,27 @@ void MipsInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   case Mips::RDHWR64:
     O << "\t.set\tpush\n";
     O << "\t.set\tmips32r2\n";
+    break;
+  case Mips::Save16:
+    O << "\tsave\t";
+    printSaveRestore(MI, O);
+    O << " # 16 bit inst\n";
+    return;
+  case Mips::SaveX16:
+    O << "\tsave\t";
+    printSaveRestore(MI, O);
+    O << "\n";
+    return;
+  case Mips::Restore16:
+    O << "\trestore\t";
+    printSaveRestore(MI, O);
+    O << " # 16 bit inst\n";
+    return;
+  case Mips::RestoreX16:
+    O << "\trestore\t";
+    printSaveRestore(MI, O);
+    O << "\n";
+    return;
   }
 
   // Try to print any aliases first.
@@ -108,8 +130,10 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
     const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(BE->getRHS());
     assert(SRE && CE && "Binary expression must be sym+const.");
     Offset = CE->getValue();
-  }
-  else if (!(SRE = dyn_cast<MCSymbolRefExpr>(Expr)))
+  } else if (const MipsMCExpr *ME = dyn_cast<MipsMCExpr>(Expr)) {
+    ME->print(OS);
+    return;
+  } else if (!(SRE = dyn_cast<MCSymbolRefExpr>(Expr)))
     assert(false && "Unexpected MCExpr type.");
 
   MCSymbolRefExpr::VariantKind Kind = SRE->getKind();
@@ -184,6 +208,15 @@ void MipsInstPrinter::printUnsignedImm(const MCInst *MI, int opNum,
     printOperand(MI, opNum, O);
 }
 
+void MipsInstPrinter::printUnsignedImm8(const MCInst *MI, int opNum,
+                                        raw_ostream &O) {
+  const MCOperand &MO = MI->getOperand(opNum);
+  if (MO.isImm())
+    O << (unsigned short int)(unsigned char)MO.getImm();
+  else
+    printOperand(MI, opNum, O);
+}
+
 void MipsInstPrinter::
 printMemOperand(const MCInst *MI, int opNum, raw_ostream &O) {
   // Load/Store memory operands -- imm($reg)
@@ -211,6 +244,11 @@ printFCCOperand(const MCInst *MI, int opNum, raw_ostream &O) {
   O << MipsFCCToString((Mips::CondCode)MO.getImm());
 }
 
+void MipsInstPrinter::
+printSHFMask(const MCInst *MI, int opNum, raw_ostream &O) {
+  llvm_unreachable("TODO");
+}
+
 bool MipsInstPrinter::printAlias(const char *Str, const MCInst &MI,
                                  unsigned OpNo, raw_ostream &OS) {
   OS << "\t" << Str << "\t";
@@ -230,8 +268,11 @@ bool MipsInstPrinter::printAlias(const char *Str, const MCInst &MI,
 bool MipsInstPrinter::printAlias(const MCInst &MI, raw_ostream &OS) {
   switch (MI.getOpcode()) {
   case Mips::BEQ:
+    // beq $zero, $zero, $L2 => b $L2
     // beq $r0, $zero, $L2 => beqz $r0, $L2
-    return isReg<Mips::ZERO>(MI, 1) && printAlias("beqz", MI, 0, 2, OS);
+    return (isReg<Mips::ZERO>(MI, 0) && isReg<Mips::ZERO>(MI, 1) &&
+            printAlias("b", MI, 2, OS)) ||
+           (isReg<Mips::ZERO>(MI, 1) && printAlias("beqz", MI, 0, 2, OS));
   case Mips::BEQ64:
     // beq $r0, $zero, $L2 => beqz $r0, $L2
     return isReg<Mips::ZERO_64>(MI, 1) && printAlias("beqz", MI, 0, 2, OS);
@@ -257,6 +298,7 @@ bool MipsInstPrinter::printAlias(const MCInst &MI, raw_ostream &OS) {
     // jalr $ra, $r1 => jalr $r1
     return isReg<Mips::RA_64>(MI, 0) && printAlias("jalr", MI, 1, OS);
   case Mips::NOR:
+  case Mips::NOR_MM:
     // nor $r0, $r1, $zero => not $r0, $r1
     return isReg<Mips::ZERO>(MI, 2) && printAlias("not", MI, 0, 1, OS);
   case Mips::NOR64:
@@ -268,3 +310,14 @@ bool MipsInstPrinter::printAlias(const MCInst &MI, raw_ostream &OS) {
   default: return false;
   }
 }
+
+void MipsInstPrinter::printSaveRestore(const MCInst *MI, raw_ostream &O) {
+  for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+    if (i != 0) O << ", ";
+    if (MI->getOperand(i).isReg())
+      printRegName(O, MI->getOperand(i).getReg());
+    else
+      printUnsignedImm(MI, i, O);
+  }
+}
+

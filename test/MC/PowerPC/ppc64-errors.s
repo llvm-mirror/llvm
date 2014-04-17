@@ -1,6 +1,8 @@
 
 # RUN: not llvm-mc -triple powerpc64-unknown-unknown < %s 2> %t
 # RUN: FileCheck < %t %s
+# RUN: not llvm-mc -triple powerpc64le-unknown-unknown < %s 2> %t
+# RUN: FileCheck < %t %s
 
 # Register operands
 
@@ -96,3 +98,6 @@
 # CHECK-NEXT: ld 1, 32768(2)
               ld 1, 32768(2)
 
+# CHECK: error: invalid modifier 'got' (no symbols present)
+         addi 4, 3, 123@got
+# CHECK-NEXT: addi 4, 3, 123@got

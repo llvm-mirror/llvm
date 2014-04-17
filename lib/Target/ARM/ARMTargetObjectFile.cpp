@@ -10,13 +10,13 @@
 #include "ARMTargetObjectFile.h"
 #include "ARMSubtarget.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ELF.h"
-#include "llvm/Target/Mangler.h"
-#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetLowering.h"
 using namespace llvm;
 using namespace dwarf;
 
@@ -41,13 +41,18 @@ void ARMElfTargetObjectFile::Initialize(MCContext &Ctx,
                                SectionKind::getMetadata());
 }
 
-const MCExpr *ARMElfTargetObjectFile::
-getTTypeGlobalReference(const GlobalValue *GV, Mangler *Mang,
-                        MachineModuleInfo *MMI, unsigned Encoding,
-                        MCStreamer &Streamer) const {
+const MCExpr *ARMElfTargetObjectFile::getTTypeGlobalReference(
+    const GlobalValue *GV, unsigned Encoding, Mangler &Mang,
+    const TargetMachine &TM, MachineModuleInfo *MMI,
+    MCStreamer &Streamer) const {
   assert(Encoding == DW_EH_PE_absptr && "Can handle absptr encoding only");
 
-  return MCSymbolRefExpr::Create(Mang->getSymbol(GV),
-                                 MCSymbolRefExpr::VK_ARM_TARGET2,
+  return MCSymbolRefExpr::Create(TM.getSymbol(GV, Mang),
+                                 MCSymbolRefExpr::VK_ARM_TARGET2, getContext());
+}
+
+const MCExpr *ARMElfTargetObjectFile::
+getDebugThreadLocalSymbol(const MCSymbol *Sym) const {
+  return MCSymbolRefExpr::Create(Sym, MCSymbolRefExpr::VK_ARM_TLSLDO,
                                  getContext());
 }

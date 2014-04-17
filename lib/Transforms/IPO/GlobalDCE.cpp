@@ -38,7 +38,7 @@ namespace {
     // run - Do the GlobalDCE pass on the specified module, optionally updating
     // the specified callgraph to reflect the changes.
     //
-    bool runOnModule(Module &M);
+    bool runOnModule(Module &M) override;
 
   private:
     SmallPtrSet<GlobalValue*, 32> AliveGlobals;
@@ -178,6 +178,9 @@ void GlobalDCE::GlobalIsNeeded(GlobalValue *G) {
     // operands.  Any operands of these types must be processed to ensure that
     // any globals used will be marked as needed.
     Function *F = cast<Function>(G);
+
+    if (F->hasPrefixData())
+      MarkUsedGlobalsAsNeeded(F->getPrefixData());
 
     for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB)
       for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I)

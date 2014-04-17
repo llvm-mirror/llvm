@@ -45,6 +45,7 @@ namespace llvm {
   class TargetInstrInfo;
   class TargetRegisterClass;
   class VirtRegMap;
+  class MachineBlockFrequencyInfo;
 
   class LiveIntervals : public MachineFunctionPass {
     MachineFunction* MF;
@@ -90,9 +91,9 @@ namespace llvm {
     /// block.
     SmallVector<std::pair<unsigned, unsigned>, 8> RegMaskBlocks;
 
-    /// RegUnitIntervals - Keep a live interval for each register unit as a way
-    /// of tracking fixed physreg interference.
-    SmallVector<LiveInterval*, 0> RegUnitIntervals;
+    /// Keeps a live range set for each register unit to track fixed physreg
+    /// interference.
+    SmallVector<LiveRange*, 0> RegUnitRanges;
 
   public:
     static char ID; // Pass identification, replacement for typeid
@@ -100,12 +101,15 @@ namespace llvm {
     virtual ~LiveIntervals();
 
     // Calculate the spill weight to assign to a single instruction.
-    static float getSpillWeight(bool isDef, bool isUse, BlockFrequency freq);
+    static float getSpillWeight(bool isDef, bool isUse,
+                                const MachineBlockFrequencyInfo *MBFI,
+                                const MachineInstr *Instr);
 
     LiveInterval &getInterval(unsigned Reg) {
-      LiveInterval *LI = VirtRegIntervals[Reg];
-      assert(LI && "Interval does not exist for virtual register");
-      return *LI;
+      if (hasInterval(Reg))
+        return *VirtRegIntervals[Reg];
+      else
+        return createAndComputeVirtRegInterval(Reg);
     }
 
     const LiveInterval &getInterval(unsigned Reg) const {
@@ -117,24 +121,29 @@ namespace llvm {
     }
 
     // Interval creation.
-    LiveInterval &getOrCreateInterval(unsigned Reg) {
-      if (!hasInterval(Reg)) {
-        VirtRegIntervals.grow(Reg);
-        VirtRegIntervals[Reg] = createInterval(Reg);
-      }
-      return getInterval(Reg);
+    LiveInterval &createEmptyInterval(unsigned Reg) {
+      assert(!hasInterval(Reg) && "Interval already exists!");
+      VirtRegIntervals.grow(Reg);
+      VirtRegIntervals[Reg] = createInterval(Reg);
+      return *VirtRegIntervals[Reg];
+    }
+
+    LiveInterval &createAndComputeVirtRegInterval(unsigned Reg) {
+      LiveInterval &LI = createEmptyInterval(Reg);
+      computeVirtRegInterval(LI);
+      return LI;
     }
 
     // Interval removal.
     void removeInterval(unsigned Reg) {
       delete VirtRegIntervals[Reg];
-      VirtRegIntervals[Reg] = 0;
+      VirtRegIntervals[Reg] = nullptr;
     }
 
-    /// addLiveRangeToEndOfBlock - Given a register and an instruction,
-    /// adds a live range from that instruction to the end of its MBB.
-    LiveRange addLiveRangeToEndOfBlock(unsigned reg,
-                                       MachineInstr* startInst);
+    /// Given a register and an instruction, adds a live segment from that
+    /// instruction to the end of its MBB.
+    LiveInterval::Segment addSegmentToEndOfBlock(unsigned reg,
+                                                 MachineInstr* startInst);
 
     /// shrinkToUses - After removing some uses of a register, shrink its live
     /// range to just the remaining uses. This method does not compute reaching
@@ -144,7 +153,7 @@ namespace llvm {
     /// Return true if the interval may have been separated into multiple
     /// connected components.
     bool shrinkToUses(LiveInterval *li,
-                      SmallVectorImpl<MachineInstr*> *dead = 0);
+                      SmallVectorImpl<MachineInstr*> *dead = nullptr);
 
     /// extendToIndices - Extend the live range of LI to reach all points in
     /// Indices. The points in the Indices array must be jointly dominated by
@@ -154,7 +163,7 @@ namespace llvm {
     /// extended to be live out of the basic block.
     ///
     /// See also LiveRangeCalc::extend().
-    void extendToIndices(LiveInterval *LI, ArrayRef<SlotIndex> Indices);
+    void extendToIndices(LiveRange &LR, ArrayRef<SlotIndex> Indices);
 
     /// pruneValue - If an LI value is live at Kill, prune its live range by
     /// removing any liveness reachable from Kill. Add live range end points to
@@ -200,14 +209,14 @@ namespace llvm {
       return Indexes->getMBBEndIdx(mbb);
     }
 
-    bool isLiveInToMBB(const LiveInterval &li,
+    bool isLiveInToMBB(const LiveRange &LR,
                        const MachineBasicBlock *mbb) const {
-      return li.liveAt(getMBBStartIdx(mbb));
+      return LR.liveAt(getMBBStartIdx(mbb));
     }
 
-    bool isLiveOutOfMBB(const LiveInterval &li,
+    bool isLiveOutOfMBB(const LiveRange &LR,
                         const MachineBasicBlock *mbb) const {
-      return li.liveAt(getMBBEndIdx(mbb).getPrevSlot());
+      return LR.liveAt(getMBBEndIdx(mbb).getPrevSlot());
     }
 
     MachineBasicBlock* getMBBFromIndex(SlotIndex index) const {
@@ -225,6 +234,12 @@ namespace llvm {
       return Indexes->insertMachineInstrInMaps(MI);
     }
 
+    void InsertMachineInstrRangeInMaps(MachineBasicBlock::iterator B,
+                                       MachineBasicBlock::iterator E) {
+      for (MachineBasicBlock::iterator I = B; I != E; ++I)
+        Indexes->insertMachineInstrInMaps(I);
+    }
+
     void RemoveMachineInstrFromMaps(MachineInstr *MI) {
       Indexes->removeMachineInstrFromMaps(MI);
     }
@@ -240,14 +255,14 @@ namespace llvm {
 
     VNInfo::Allocator& getVNInfoAllocator() { return VNInfoAllocator; }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual void releaseMemory();
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    void releaseMemory() override;
 
     /// runOnMachineFunction - pass entry point
-    virtual bool runOnMachineFunction(MachineFunction&);
+    bool runOnMachineFunction(MachineFunction&) override;
 
     /// print - Implement the dump method.
-    virtual void print(raw_ostream &O, const Module* = 0) const;
+    void print(raw_ostream &O, const Module* = nullptr) const override;
 
     /// intervalIsInOneMBB - If LI is confined to a single basic block, return
     /// a pointer to that block.  If LI is live in to or out of any block,
@@ -352,24 +367,24 @@ namespace llvm {
 
     /// getRegUnit - Return the live range for Unit.
     /// It will be computed if it doesn't exist.
-    LiveInterval &getRegUnit(unsigned Unit) {
-      LiveInterval *LI = RegUnitIntervals[Unit];
-      if (!LI) {
+    LiveRange &getRegUnit(unsigned Unit) {
+      LiveRange *LR = RegUnitRanges[Unit];
+      if (!LR) {
         // Compute missing ranges on demand.
-        RegUnitIntervals[Unit] = LI = new LiveInterval(Unit, HUGE_VALF);
-        computeRegUnitInterval(LI);
+        RegUnitRanges[Unit] = LR = new LiveRange();
+        computeRegUnitRange(*LR, Unit);
       }
-      return *LI;
+      return *LR;
     }
 
     /// getCachedRegUnit - Return the live range for Unit if it has already
     /// been computed, or NULL if it hasn't been computed yet.
-    LiveInterval *getCachedRegUnit(unsigned Unit) {
-      return RegUnitIntervals[Unit];
+    LiveRange *getCachedRegUnit(unsigned Unit) {
+      return RegUnitRanges[Unit];
     }
 
-    const LiveInterval *getCachedRegUnit(unsigned Unit) const {
-      return RegUnitIntervals[Unit];
+    const LiveRange *getCachedRegUnit(unsigned Unit) const {
+      return RegUnitRanges[Unit];
     }
 
   private:
@@ -385,8 +400,8 @@ namespace llvm {
     void dumpInstrs() const;
 
     void computeLiveInRegUnits();
-    void computeRegUnitInterval(LiveInterval*);
-    void computeVirtRegInterval(LiveInterval*);
+    void computeRegUnitRange(LiveRange&, unsigned Unit);
+    void computeVirtRegInterval(LiveInterval&);
 
     class HMEditor;
   };

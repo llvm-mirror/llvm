@@ -31,7 +31,10 @@ struct SparcRegisterInfo : public SparcGenRegisterInfo {
   SparcRegisterInfo(SparcSubtarget &st);
 
   /// Code Generation virtual methods...
-  const uint16_t *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
+  const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
+  const uint32_t* getCallPreservedMask(CallingConv::ID CC) const;
+
+  const uint32_t* getRTCallPreservedMask(CallingConv::ID CC) const;
 
   BitVector getReservedRegs(const MachineFunction &MF) const;
 
@@ -47,10 +50,6 @@ struct SparcRegisterInfo : public SparcGenRegisterInfo {
 
   // Debug information queries.
   unsigned getFrameRegister(const MachineFunction &MF) const;
-
-  // Exception handling queries.
-  unsigned getEHExceptionRegister() const;
-  unsigned getEHHandlerRegister() const;
 };
 
 } // end namespace llvm

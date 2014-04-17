@@ -6,12 +6,12 @@ target datalayout = "e-p:32:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-i64:32:64-
 target triple = "thumbv7-apple-ios5.0.0"
 
 ; CHECK-GENERIC:      strb
-; CHECK-GENERIT-NEXT: strb
-; CHECK-GENERIT-NEXT: strb
-; CHECK-GENERIT-NEXT: strb
-; CHECK-GENERIT-NEXT: strb
-; CHECK-UNALIGNED:      strb
-; CHECK-UNALIGNED-NEXT: str 
+; CHECK-GENERIC-NEXT: strb
+; CHECK-GENERIC-NEXT: strb
+; CHECK-GENERIC-NEXT: strb
+; CHECK-GENERIC-NEXT: strb
+; CHECK-UNALIGNED:    strb
+; CHECK-UNALIGNED:    str
 define void @foo(i8* nocapture %c) nounwind optsize {
 entry:
   call void @llvm.memset.p0i8.i64(i8* %c, i8 -1, i64 5, i32 1, i1 false)

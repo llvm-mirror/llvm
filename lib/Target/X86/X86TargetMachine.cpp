@@ -13,7 +13,6 @@
 
 #include "X86TargetMachine.h"
 #include "X86.h"
-#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
@@ -24,53 +23,49 @@ using namespace llvm;
 
 extern "C" void LLVMInitializeX86Target() {
   // Register the target.
-  RegisterTargetMachine<X86_32TargetMachine> X(TheX86_32Target);
-  RegisterTargetMachine<X86_64TargetMachine> Y(TheX86_64Target);
+  RegisterTargetMachine<X86TargetMachine> X(TheX86_32Target);
+  RegisterTargetMachine<X86TargetMachine> Y(TheX86_64Target);
 }
 
-void X86_32TargetMachine::anchor() { }
+void X86TargetMachine::anchor() { }
 
-X86_32TargetMachine::X86_32TargetMachine(const Target &T, StringRef TT,
-                                         StringRef CPU, StringRef FS,
-                                         const TargetOptions &Options,
-                                         Reloc::Model RM, CodeModel::Model CM,
-                                         CodeGenOpt::Level OL)
-  : X86TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false),
-    DL(getSubtargetImpl()->isTargetDarwin() ?
-               "e-p:32:32-f64:32:64-i64:32:64-f80:128:128-f128:128:128-"
-               "n8:16:32-S128" :
-               (getSubtargetImpl()->isTargetCygMing() ||
-                getSubtargetImpl()->isTargetWindows()) ?
-               "e-p:32:32-f64:64:64-i64:64:64-f80:32:32-f128:128:128-"
-               "n8:16:32-S32" :
-               "e-p:32:32-f64:32:64-i64:32:64-f80:32:32-f128:128:128-"
-               "n8:16:32-S128"),
-    InstrInfo(*this),
-    TLInfo(*this),
-    TSInfo(*this),
-    JITInfo(*this) {
-  initAsmInfo();
-}
+static std::string computeDataLayout(const X86Subtarget &ST) {
+  // X86 is little endian
+  std::string Ret = "e";
 
-void X86_64TargetMachine::anchor() { }
+  Ret += DataLayout::getManglingComponent(ST.getTargetTriple());
+  // X86 and x32 have 32 bit pointers.
+  if (ST.isTarget64BitILP32() || !ST.is64Bit())
+    Ret += "-p:32:32";
 
-X86_64TargetMachine::X86_64TargetMachine(const Target &T, StringRef TT,
-                                         StringRef CPU, StringRef FS,
-                                         const TargetOptions &Options,
-                                         Reloc::Model RM, CodeModel::Model CM,
-                                         CodeGenOpt::Level OL)
-  : X86TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true),
-    // The x32 ABI dictates the ILP32 programming model for x64.
-    DL(getSubtargetImpl()->isTarget64BitILP32() ?
-        "e-p:32:32-s:64-f64:64:64-i64:64:64-f80:128:128-f128:128:128-"
-        "n8:16:32:64-S128" :
-        "e-p:64:64-s:64-f64:64:64-i64:64:64-f80:128:128-f128:128:128-"
-        "n8:16:32:64-S128"),
-    InstrInfo(*this),
-    TLInfo(*this),
-    TSInfo(*this),
-    JITInfo(*this) {
-  initAsmInfo();
+  // Some ABIs align 64 bit integers and doubles to 64 bits, others to 32.
+  if (ST.is64Bit() || ST.isTargetCygMing() || ST.isTargetKnownWindowsMSVC() ||
+      ST.isTargetNaCl())
+    Ret += "-i64:64";
+  else
+    Ret += "-f64:32:64";
+
+  // Some ABIs align long double to 128 bits, others to 32.
+  if (ST.isTargetNaCl())
+    ; // No f80
+  else if (ST.is64Bit() || ST.isTargetDarwin())
+    Ret += "-f80:128";
+  else
+    Ret += "-f80:32";
+
+  // The registers can hold 8, 16, 32 or, in x86-64, 64 bits.
+  if (ST.is64Bit())
+    Ret += "-n8:16:32:64";
+  else
+    Ret += "-n8:16:32";
+
+  // The stack is aligned to 32 bits on some ABIs and 128 bits on others.
+  if (!ST.is64Bit() && (ST.isTargetCygMing() || ST.isTargetKnownWindowsMSVC()))
+    Ret += "-S32";
+  else
+    Ret += "-S128";
+
+  return Ret;
 }
 
 /// X86TargetMachine ctor - Create an X86 target.
@@ -79,12 +74,16 @@ X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT,
                                    StringRef CPU, StringRef FS,
                                    const TargetOptions &Options,
                                    Reloc::Model RM, CodeModel::Model CM,
-                                   CodeGenOpt::Level OL,
-                                   bool is64Bit)
+                                   CodeGenOpt::Level OL)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, Options.StackAlignmentOverride, is64Bit),
+    Subtarget(TT, CPU, FS, Options.StackAlignmentOverride),
     FrameLowering(*this, Subtarget),
-    InstrItins(Subtarget.getInstrItineraryData()){
+    InstrItins(Subtarget.getInstrItineraryData()),
+    DL(computeDataLayout(*getSubtargetImpl())),
+    InstrInfo(*this),
+    TLInfo(*this),
+    TSInfo(*this),
+    JITInfo(*this) {
   // Determine the PICStyle based on the target selected.
   if (getRelocationModel() == Reloc::Static) {
     // Unless we're in PIC or DynamicNoPIC mode, set the PIC style to None.
@@ -92,7 +91,7 @@ X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT,
   } else if (Subtarget.is64Bit()) {
     // PIC in 64 bit mode is always rip-rel.
     Subtarget.setPICStyle(PICStyles::RIPRel);
-  } else if (Subtarget.isTargetCygMing()) {
+  } else if (Subtarget.isTargetCOFF()) {
     Subtarget.setPICStyle(PICStyles::None);
   } else if (Subtarget.isTargetDarwin()) {
     if (getRelocationModel() == Reloc::PIC_)
@@ -108,20 +107,22 @@ X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT,
   // default to hard float ABI
   if (Options.FloatABIType == FloatABI::Default)
     this->Options.FloatABIType = FloatABI::Hard;
+
+  initAsmInfo();
 }
 
 //===----------------------------------------------------------------------===//
 // Command line options for x86
 //===----------------------------------------------------------------------===//
 static cl::opt<bool>
-UseVZeroUpper("x86-use-vzeroupper",
+UseVZeroUpper("x86-use-vzeroupper", cl::Hidden,
   cl::desc("Minimize AVX to SSE transition penalty"),
   cl::init(true));
 
 // Temporary option to control early if-conversion for x86 while adding machine
 // models.
 static cl::opt<bool>
-X86EarlyIfConv("x86-early-ifcvt",
+X86EarlyIfConv("x86-early-ifcvt", cl::Hidden,
 	       cl::desc("Enable early if-conversion on X86"));
 
 //===----------------------------------------------------------------------===//
@@ -156,11 +157,11 @@ public:
     return *getX86TargetMachine().getSubtargetImpl();
   }
 
-  virtual bool addInstSelector();
-  virtual bool addILPOpts();
-  virtual bool addPreRegAlloc();
-  virtual bool addPostRegAlloc();
-  virtual bool addPreEmitPass();
+  bool addInstSelector() override;
+  bool addILPOpts() override;
+  bool addPreRegAlloc() override;
+  bool addPostRegAlloc() override;
+  bool addPreEmitPass() override;
 };
 } // namespace
 

@@ -683,6 +683,20 @@ APFloat::operator=(const APFloat &rhs)
   return *this;
 }
 
+APFloat &
+APFloat::operator=(APFloat &&rhs) {
+  freeSignificand();
+
+  semantics = rhs.semantics;
+  significand = rhs.significand;
+  exponent = rhs.exponent;
+  category = rhs.category;
+  sign = rhs.sign;
+
+  rhs.semantics = &Bogus;
+  return *this;
+}
+
 bool
 APFloat::isDenormal() const {
   return isFiniteNonZero() && (exponent == semantics->minExponent) &&
@@ -804,6 +818,10 @@ APFloat::APFloat(const fltSemantics &ourSemantics, StringRef text) {
 APFloat::APFloat(const APFloat &rhs) {
   initialize(rhs.semantics);
   assign(rhs);
+}
+
+APFloat::APFloat(APFloat &&rhs) : semantics(&Bogus) {
+  *this = std::move(rhs);
 }
 
 APFloat::~APFloat()
@@ -1661,7 +1679,7 @@ APFloat::multiply(const APFloat &rhs, roundingMode rounding_mode)
   fs = multiplySpecials(rhs);
 
   if (isFiniteNonZero()) {
-    lostFraction lost_fraction = multiplySignificand(rhs, 0);
+    lostFraction lost_fraction = multiplySignificand(rhs, nullptr);
     fs = normalize(rounding_mode, lost_fraction);
     if (lost_fraction != lfExactlyZero)
       fs = (opStatus) (fs | opInexact);
@@ -2421,7 +2439,7 @@ APFloat::roundSignificandWithExponent(const integerPart *decSigParts,
 
     if (exp >= 0) {
       /* multiplySignificand leaves the precision-th bit set to 1.  */
-      calcLostFraction = decSig.multiplySignificand(pow5, NULL);
+      calcLostFraction = decSig.multiplySignificand(pow5, nullptr);
       powHUerr = powStatus != opOK;
     } else {
       calcLostFraction = decSig.divideSignificand(pow5);
@@ -3546,11 +3564,14 @@ void APFloat::toString(SmallVectorImpl<char> &Str,
   // Set FormatPrecision if zero.  We want to do this before we
   // truncate trailing zeros, as those are part of the precision.
   if (!FormatPrecision) {
-    // It's an interesting question whether to use the nominal
-    // precision or the active precision here for denormals.
+    // We use enough digits so the number can be round-tripped back to an
+    // APFloat. The formula comes from "How to Print Floating-Point Numbers
+    // Accurately" by Steele and White.
+    // FIXME: Using a formula based purely on the precision is conservative;
+    // we can print fewer digits depending on the actual value being printed.
 
-    // FormatPrecision = ceil(significandBits / lg_2(10))
-    FormatPrecision = (semantics->precision * 59 + 195) / 196;
+    // FormatPrecision = 2 + floor(significandBits / lg_2(10))
+    FormatPrecision = 2 + semantics->precision * 59 / 196;
   }
 
   // Ignore trailing binary zeros.
@@ -3773,8 +3794,8 @@ APFloat::opStatus APFloat::next(bool nextDown) {
     //                     change the payload.
     if (isSignaling()) {
       result = opInvalidOp;
-      // For consistency, propogate the sign of the sNaN to the qNaN.
-      makeNaN(false, isNegative(), 0);
+      // For consistency, propagate the sign of the sNaN to the qNaN.
+      makeNaN(false, isNegative(), nullptr);
     }
     break;
   case fcZero:
@@ -3813,7 +3834,7 @@ APFloat::opStatus APFloat::next(bool nextDown) {
       // Decrement the significand.
       //
       // We always do this since:
-      //   1. If we are dealing with a non binade decrement, by definition we
+      //   1. If we are dealing with a non-binade decrement, by definition we
       //   just decrement the significand.
       //   2. If we are dealing with a normal -> normal binade decrement, since
       //   we have an explicit integral bit the fact that all bits but the

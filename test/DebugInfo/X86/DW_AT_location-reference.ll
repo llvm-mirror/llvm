@@ -1,5 +1,10 @@
-; RUN: llc -O1 -mtriple=x86_64-apple-darwin < %s | FileCheck -check-prefix=DARWIN %s
-; RUN: llc -O1 -mtriple=x86_64-pc-linux-gnu < %s | FileCheck -check-prefix=LINUX %s
+; RUN: llc -O1 -filetype=obj -mtriple=x86_64-apple-darwin < %s > %t
+; RUN: llvm-dwarfdump %t  | FileCheck %s
+; RUN: llvm-objdump -r %t | FileCheck -check-prefix=DARWIN %s
+; RUN: llc -O1 -filetype=obj -mtriple=x86_64-pc-linux-gnu < %s > %t
+; RUN: llvm-dwarfdump %t  | FileCheck %s
+; RUN: llvm-objdump -r %t | FileCheck -check-prefix=LINUX %s
+
 ; PR9493
 ; Adapted from the original test case in r127757.
 ; We use 'llc -O1' to induce variable 'x' to live in different locations.
@@ -24,22 +29,31 @@
 ; }
 
 ; // The 'x' variable and its symbol reference location
-; DARWIN:      DW_TAG_variable
-; DARWIN-NEXT: ## DW_AT_name
-; DARWIN-NEXT: .long Lset{{[0-9]+}}
-; DARWIN-NEXT: ## DW_AT_decl_file
-; DARWIN-NEXT: ## DW_AT_decl_line
-; DARWIN-NEXT: ## DW_AT_type
-; DARWIN-NEXT: Lset{{[0-9]+}} = Ldebug_loc{{[0-9]+}}-Lsection_debug_loc ## DW_AT_location
-; DARWIN-NEXT: .long Lset{{[0-9]+}}
+; CHECK: .debug_info contents:
+; CHECK:      DW_TAG_variable
+; CHECK-NEXT:   DW_AT_name {{.*}} "x"
+; CHECK-NEXT:   DW_AT_decl_file
+; CHECK-NEXT:   DW_AT_decl_line
+; CHECK-NEXT:   DW_AT_type
+; CHECK-NEXT:   DW_AT_location [DW_FORM_sec_offset] (0x00000000)
 
-; LINUX:      DW_TAG_variable
-; LINUX-NEXT: # DW_AT_name
-; LINUX-NEXT: # DW_AT_decl_file
-; LINUX-NEXT: # DW_AT_decl_line
-; LINUX-NEXT: # DW_AT_type
-; LINUX-NEXT: .long .Ldebug_loc{{[0-9]+}} # DW_AT_location
+; Check that the location contains only 4 ranges - this verifies that the 4th
+; and 5th ranges were successfully merged into a single range.
+; CHECK: .debug_loc contents:
+; CHECK: 0x00000000:
+; CHECK: Beginning address offset:
+; CHECK: Beginning address offset:
+; CHECK: Beginning address offset:
+; CHECK: Beginning address offset:
+; CHECK-NOT: Beginning address offset:
 
+; Check that we have no relocations in Darwin's output.
+; DARWIN-NOT: X86_64_RELOC{{.*}} __debug_loc
+
+; Check we have a relocation for the debug_loc entry in Linux output.
+; LINUX: RELOCATION RECORDS FOR [.rela.debug_info]
+; LINUX-NOT: RELOCATION RECORDS
+; LINUX: R_X86_64{{.*}} .debug_loc+0
 
 ; ModuleID = 'simple.c'
 target datalayout = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-n32"
@@ -86,11 +100,12 @@ declare i32 @g(i32, i32)
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!24}
 
-!0 = metadata !{i32 786478, metadata !23, metadata !1, metadata !"f", metadata !"f", metadata !"", i32 4, metadata !3, i1 false, i1 true, i32 0, i32 0, i32 0, i32 256, i1 true, void ()* @f, null, null, metadata !22, i32 4} ; [ DW_TAG_subprogram ]
+!0 = metadata !{i32 786478, metadata !23, metadata !1, metadata !"f", metadata !"f", metadata !"", i32 4, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, void ()* @f, null, null, metadata !22, i32 4} ; [ DW_TAG_subprogram ] [line 4] [def] [f]
 !1 = metadata !{i32 786473, metadata !23} ; [ DW_TAG_file_type ]
 !2 = metadata !{i32 786449, metadata !23, i32 12, metadata !"clang version 3.0 (trunk)", i1 true, metadata !"", i32 0, metadata !4, metadata !4, metadata !21, null,  null, null} ; [ DW_TAG_compile_unit ]
-!3 = metadata !{i32 786453, metadata !23, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, i32 0, metadata !4, i32 0, i32 0} ; [ DW_TAG_subroutine_type ]
+!3 = metadata !{i32 786453, metadata !23, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !4 = metadata !{null}
 !5 = metadata !{i32 786688, metadata !6, metadata !"x", metadata !1, i32 5, metadata !7, i32 0, null} ; [ DW_TAG_auto_variable ]
 !6 = metadata !{i32 786443, metadata !23, metadata !0, i32 4, i32 14, i32 0} ; [ DW_TAG_lexical_block ]
@@ -108,3 +123,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !21 = metadata !{metadata !0}
 !22 = metadata !{metadata !5}
 !23 = metadata !{metadata !"simple.c", metadata !"/home/rengol01/temp/tests/dwarf/relocation"}
+!24 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

@@ -1,40 +1,40 @@
-;RUN: llc < %s -march=r600 -mcpu=verde | FileCheck %s
+;RUN: llc < %s -march=r600 -mcpu=verde -verify-machineinstrs | FileCheck %s
 
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+_VGPR[0-9]+_VGPR[0-9]+}}, 15, 0, 0, -1
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+}}, 3, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+}}, 2, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+}}, 1, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+}}, 4, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+}}, 8, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+}}, 5, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+}}, 9, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+}}, 6, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+}}, 10, 0, 0, -1
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+}}, 12, 0, 0, -1
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+_VGPR[0-9]+}}, 7, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+_VGPR[0-9]+}}, 11, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+_VGPR[0-9]+}}, 13, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+_VGPR[0-9]+_VGPR[0-9]+}}, 14, 0, 0, 0
-;CHECK: IMAGE_GET_RESINFO {{VGPR[0-9]+}}, 8, 0, 0, -1
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 15, 0, 0, -1
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 3, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v[0-9]+}}, 2, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v[0-9]+}}, 1, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v[0-9]+}}, 4, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v[0-9]+}}, 8, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 5, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 9, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 6, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 10, 0, 0, -1
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 12, 0, 0, -1
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 7, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 11, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 13, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v\[[0-9]+:[0-9]+\]}}, 14, 0, 0, 0
+;CHECK: IMAGE_GET_RESINFO {{v[0-9]+}}, 8, 0, 0, -1
 
 define void @test(i32 %a1, i32 %a2, i32 %a3, i32 %a4, i32 %a5, i32 %a6, i32 %a7, i32 %a8,
 		  i32 %a9, i32 %a10, i32 %a11, i32 %a12, i32 %a13, i32 %a14, i32 %a15, i32 %a16) {
-   %res1 = call <4 x i32> @llvm.SI.resinfo(i32 %a1, <8 x i32> undef, i32 1)
-   %res2 = call <4 x i32> @llvm.SI.resinfo(i32 %a2, <8 x i32> undef, i32 2)
-   %res3 = call <4 x i32> @llvm.SI.resinfo(i32 %a3, <8 x i32> undef, i32 3)
-   %res4 = call <4 x i32> @llvm.SI.resinfo(i32 %a4, <8 x i32> undef, i32 4)
-   %res5 = call <4 x i32> @llvm.SI.resinfo(i32 %a5, <8 x i32> undef, i32 5)
-   %res6 = call <4 x i32> @llvm.SI.resinfo(i32 %a6, <8 x i32> undef, i32 6)
-   %res7 = call <4 x i32> @llvm.SI.resinfo(i32 %a7, <8 x i32> undef, i32 7)
-   %res8 = call <4 x i32> @llvm.SI.resinfo(i32 %a8, <8 x i32> undef, i32 8)
-   %res9 = call <4 x i32> @llvm.SI.resinfo(i32 %a9, <8 x i32> undef, i32 9)
-   %res10 = call <4 x i32> @llvm.SI.resinfo(i32 %a10, <8 x i32> undef, i32 10)
-   %res11 = call <4 x i32> @llvm.SI.resinfo(i32 %a11, <8 x i32> undef, i32 11)
-   %res12 = call <4 x i32> @llvm.SI.resinfo(i32 %a12, <8 x i32> undef, i32 12)
-   %res13 = call <4 x i32> @llvm.SI.resinfo(i32 %a13, <8 x i32> undef, i32 13)
-   %res14 = call <4 x i32> @llvm.SI.resinfo(i32 %a14, <8 x i32> undef, i32 14)
-   %res15 = call <4 x i32> @llvm.SI.resinfo(i32 %a15, <8 x i32> undef, i32 15)
-   %res16 = call <4 x i32> @llvm.SI.resinfo(i32 %a16, <8 x i32> undef, i32 16)
+   %res1 = call <4 x i32> @llvm.SI.resinfo(i32 %a1, <32 x i8> undef, i32 1)
+   %res2 = call <4 x i32> @llvm.SI.resinfo(i32 %a2, <32 x i8> undef, i32 2)
+   %res3 = call <4 x i32> @llvm.SI.resinfo(i32 %a3, <32 x i8> undef, i32 3)
+   %res4 = call <4 x i32> @llvm.SI.resinfo(i32 %a4, <32 x i8> undef, i32 4)
+   %res5 = call <4 x i32> @llvm.SI.resinfo(i32 %a5, <32 x i8> undef, i32 5)
+   %res6 = call <4 x i32> @llvm.SI.resinfo(i32 %a6, <32 x i8> undef, i32 6)
+   %res7 = call <4 x i32> @llvm.SI.resinfo(i32 %a7, <32 x i8> undef, i32 7)
+   %res8 = call <4 x i32> @llvm.SI.resinfo(i32 %a8, <32 x i8> undef, i32 8)
+   %res9 = call <4 x i32> @llvm.SI.resinfo(i32 %a9, <32 x i8> undef, i32 9)
+   %res10 = call <4 x i32> @llvm.SI.resinfo(i32 %a10, <32 x i8> undef, i32 10)
+   %res11 = call <4 x i32> @llvm.SI.resinfo(i32 %a11, <32 x i8> undef, i32 11)
+   %res12 = call <4 x i32> @llvm.SI.resinfo(i32 %a12, <32 x i8> undef, i32 12)
+   %res13 = call <4 x i32> @llvm.SI.resinfo(i32 %a13, <32 x i8> undef, i32 13)
+   %res14 = call <4 x i32> @llvm.SI.resinfo(i32 %a14, <32 x i8> undef, i32 14)
+   %res15 = call <4 x i32> @llvm.SI.resinfo(i32 %a15, <32 x i8> undef, i32 15)
+   %res16 = call <4 x i32> @llvm.SI.resinfo(i32 %a16, <32 x i8> undef, i32 16)
    %e1 = extractelement <4 x i32> %res1, i32 0
    %e2 = extractelement <4 x i32> %res2, i32 1
    %e3 = extractelement <4 x i32> %res3, i32 2
@@ -105,6 +105,6 @@ define void @test(i32 %a1, i32 %a2, i32 %a3, i32 %a4, i32 %a5, i32 %a6, i32 %a7,
    ret void
 }
 
-declare <4 x i32> @llvm.SI.resinfo(i32, <8 x i32>, i32) readnone
+declare <4 x i32> @llvm.SI.resinfo(i32, <32 x i8>, i32) readnone
 
 declare void @llvm.SI.export(i32, i32, i32, i32, i32, float, float, float, float)

@@ -28,6 +28,7 @@
 #include "ObjCARC.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Value.h"
@@ -37,7 +38,6 @@
 #include "llvm/PassSupport.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/InstIterator.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
@@ -50,9 +50,9 @@ using namespace llvm::objcarc;
 namespace {
   /// \brief Early ARC transformations.
   class ObjCARCExpand : public FunctionPass {
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual bool doInitialization(Module &M);
-    virtual bool runOnFunction(Function &F);
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    bool doInitialization(Module &M) override;
+    bool runOnFunction(Function &F) override;
 
     /// A flag indicating whether this optimization pass should run.
     bool Run;

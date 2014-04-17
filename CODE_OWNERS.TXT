@@ -29,6 +29,10 @@ N: Evan Cheng
 E: evan.cheng@apple.com
 D: ARM target, parts of code generator not covered by someone else
 
+N: Renato Golin
+E: renato.golin@linaro.org
+D: ARM Linux support
+
 N: Eric Christopher
 E: echristo@gmail.com
 D: Debug Information, autotools/configure/make build, inline assembly
@@ -45,7 +49,7 @@ D: Hexagon Backend
 
 N: Hal Finkel
 E: hfinkel@anl.gov
-D: BBVectorize and the PowerPC target
+D: BBVectorize, the loop reroller and the PowerPC target
 
 N: Venkatraman Govindaraju
 E: venkatra@cs.wisc.edu
@@ -58,7 +62,8 @@ N: James Grosbach
 E: grosbach@apple.com
 D: MC layer
 
-N: Howard Hinnant
+N: Marshall Clow
+E: mclow.lists@gmail.com
 D: libc++
 
 N: Justin Holewinski
@@ -91,7 +96,7 @@ W: http://nondot.org/~sabre/
 D: Everything not covered by someone else
 
 N: Tim Northover
-E: Tim.Northover@arm.com
+E: t.p.northover@gmail.com
 D: AArch64 backend
 
 N: Jakob Olesen
@@ -102,12 +107,16 @@ E: richard@xmos.com
 D: XCore Backend
 
 N: Chad Rosier
-E: mcrosier@apple.com
+E: mcrosier@codeaurora.org
 D: Fast-Isel
 
 N: Nadav Rotem
 E: nrotem@apple.com
 D: X86 Backend, Loop Vectorizer
+
+N: Daniel Sanders
+E: daniel.sanders@imgtec.com
+D: MIPS Backend (lib/Target/Mips/*)
 
 N: Richard Sandiford
 E: rsandifo@linux.vnet.ibm.com
@@ -139,5 +148,9 @@ E: atrick@apple.com
 D: IndVar Simplify, Loop Strength Reduction, Instruction Scheduling
 
 N: Bill Wendling
-E: wendling@apple.com
+E: isanbard@gmail.com
 D: libLTO, IR Linker
+
+N: Peter Zotov
+E: whitequark@whitequark.org
+D: OCaml bindings

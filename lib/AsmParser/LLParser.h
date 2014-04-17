@@ -22,7 +22,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
 #include <map>
 
 namespace llvm {
@@ -106,6 +106,8 @@ namespace llvm {
       unsigned MDKind, MDSlot;
     };
     DenseMap<Instruction*, std::vector<MDRef> > ForwardRefInstMetadata;
+
+    SmallVector<Instruction*, 64> InstsWithTBAATag;
 
     // Type resolution handling data structures.  The location is set when we
     // have processed a use of the type but not a definition yet.
@@ -202,12 +204,15 @@ namespace llvm {
       bool HasLinkage; return ParseOptionalLinkage(Linkage, HasLinkage);
     }
     bool ParseOptionalVisibility(unsigned &Visibility);
+    bool ParseOptionalDLLStorageClass(unsigned &DLLStorageClass);
     bool ParseOptionalCallingConv(CallingConv::ID &CC);
     bool ParseOptionalAlignment(unsigned &Alignment);
     bool ParseScopeAndOrdering(bool isAtomic, SynchronizationScope &Scope,
                                AtomicOrdering &Ordering);
+    bool ParseOrdering(AtomicOrdering &Ordering);
     bool ParseOptionalStackAlignment(unsigned &Alignment);
     bool ParseOptionalCommaAlign(unsigned &Alignment, bool &AteExtraComma);
+    bool ParseOptionalCommaInAlloca(bool &IsInAlloca);
     bool ParseIndexList(SmallVectorImpl<unsigned> &Indices,bool &AteExtraComma);
     bool ParseIndexList(SmallVectorImpl<unsigned> &Indices) {
       bool AteExtraComma;
@@ -232,8 +237,10 @@ namespace llvm {
     bool ParseUnnamedGlobal();
     bool ParseNamedGlobal();
     bool ParseGlobal(const std::string &Name, LocTy Loc, unsigned Linkage,
-                     bool HasLinkage, unsigned Visibility);
-    bool ParseAlias(const std::string &Name, LocTy Loc, unsigned Visibility);
+                     bool HasLinkage, unsigned Visibility,
+                     unsigned DLLStorageClass);
+    bool ParseAlias(const std::string &Name, LocTy Loc, unsigned Visibility,
+                    unsigned DLLStorageClass);
     bool ParseStandaloneMetadata();
     bool ParseNamedMetadata();
     bool ParseMDString(MDString *&Result);

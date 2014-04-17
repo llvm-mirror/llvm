@@ -11,9 +11,16 @@ include(CheckFunctionExists)
 include(CheckCXXSourceCompiles)
 include(TestBigEndian)
 
+include(HandleLLVMStdlib)
+
 if( UNIX AND NOT BEOS )
   # Used by check_symbol_exists:
   set(CMAKE_REQUIRED_LIBRARIES m)
+endif()
+# x86_64 FreeBSD 9.2 requires libcxxrt to be specified explicitly.
+if( CMAKE_SYSTEM MATCHES "FreeBSD-9.2-RELEASE" AND
+    CMAKE_SIZEOF_VOID_P EQUAL 8 )
+  list(APPEND CMAKE_REQUIRED_LIBRARIES "cxxrt")
 endif()
 
 # Helper macros and functions
@@ -49,7 +56,6 @@ check_include_file(ndir.h HAVE_NDIR_H)
 if( NOT PURE_WINDOWS )
   check_include_file(pthread.h HAVE_PTHREAD_H)
 endif()
-check_include_file(sanitizer/msan_interface.h HAVE_SANITIZER_MSAN_INTERFACE_H)
 check_include_file(signal.h HAVE_SIGNAL_H)
 check_include_file(stdint.h HAVE_STDINT_H)
 check_include_file(sys/dir.h HAVE_SYS_DIR_H)
@@ -97,9 +103,10 @@ if( NOT PURE_WINDOWS )
   else()
     set(HAVE_LIBZ 0)
   endif()
+  check_library_exists(edit el_init "" HAVE_LIBEDIT)
   if(LLVM_ENABLE_TERMINFO)
     set(HAVE_TERMINFO 0)
-    foreach(library tinfo curses ncurses ncursesw)
+    foreach(library tinfo terminfo curses ncurses ncursesw)
       string(TOUPPER ${library} library_suffix)
       check_library_exists(${library} setupterm "" HAVE_TERMINFO_${library_suffix})
       if(HAVE_TERMINFO_${library_suffix})
@@ -114,7 +121,7 @@ if( NOT PURE_WINDOWS )
 endif()
 
 # function checks
-check_symbol_exists(arc4random "stdlib.h" HAVE_ARC4RANDOM)
+check_symbol_exists(arc4random "stdlib.h" HAVE_DECL_ARC4RANDOM)
 check_symbol_exists(backtrace "execinfo.h" HAVE_BACKTRACE)
 check_symbol_exists(getpagesize unistd.h HAVE_GETPAGESIZE)
 check_symbol_exists(getrusage sys/resource.h HAVE_GETRUSAGE)
@@ -160,6 +167,7 @@ check_symbol_exists(gettimeofday sys/time.h HAVE_GETTIMEOFDAY)
 check_symbol_exists(getrlimit "sys/types.h;sys/time.h;sys/resource.h" HAVE_GETRLIMIT)
 check_symbol_exists(posix_spawn spawn.h HAVE_POSIX_SPAWN)
 check_symbol_exists(pread unistd.h HAVE_PREAD)
+check_symbol_exists(realpath stdlib.h HAVE_REALPATH)
 check_symbol_exists(sbrk unistd.h HAVE_SBRK)
 check_symbol_exists(srand48 stdlib.h HAVE_RAND48_SRAND48)
 if( HAVE_RAND48_SRAND48 )
@@ -299,9 +307,21 @@ endif()
 find_package(LibXml2)
 if (LIBXML2_FOUND)
   set(CLANG_HAVE_LIBXML 1)
+  # When cross-compiling, liblzma is not detected as a dependency for libxml2,
+  # which makes linking c-index-test fail. But for native builds, all libraries
+  # are installed and checked by CMake before Makefiles are generated and everything
+  # works according to the plan. However, if a -llzma is added to native builds,
+  # an additional requirement on the static liblzma.a is required, but will not
+  # be checked by CMake, breaking native compilation.
+  # Since this is only pertinent to cross-compilations, and there's no way CMake
+  # can check for every foreign library on every OS, we add the dep and warn the dev.
+  if ( CMAKE_CROSSCOMPILING )
+    if (NOT PC_LIBXML_VERSION VERSION_LESS "2.8.0")
+      message(STATUS "Adding LZMA as a dep to XML2 for cross-compilation, make sure liblzma.a is available.")
+      set(LIBXML2_LIBRARIES ${LIBXML2_LIBRARIES} "-llzma")
+    endif ()
+  endif ()
 endif ()
-
-include(CheckCXXCompilerFlag)
 
 check_cxx_compiler_flag("-Wno-variadic-macros" SUPPORTS_NO_VARIADIC_MACROS_FLAG)
 
@@ -351,6 +371,8 @@ elseif (LLVM_NATIVE_ARCH MATCHES "powerpc")
   set(LLVM_NATIVE_ARCH PowerPC)
 elseif (LLVM_NATIVE_ARCH MATCHES "aarch64")
   set(LLVM_NATIVE_ARCH AArch64)
+elseif (LLVM_NATIVE_ARCH MATCHES "arm64")
+  set(LLVM_NATIVE_ARCH ARM64)
 elseif (LLVM_NATIVE_ARCH MATCHES "arm")
   set(LLVM_NATIVE_ARCH ARM)
 elseif (LLVM_NATIVE_ARCH MATCHES "mips")
@@ -400,6 +422,7 @@ endif ()
 if( MINGW )
   set(HAVE_LIBIMAGEHLP 1)
   set(HAVE_LIBPSAPI 1)
+  set(HAVE_LIBSHELL32 1)
   # TODO: Check existence of libraries.
   #   include(CheckLibraryExists)
   #   CHECK_LIBRARY_EXISTS(imagehlp ??? . HAVE_LIBIMAGEHLP)
@@ -460,3 +483,25 @@ if (LLVM_ENABLE_ZLIB )
 endif()
 
 set(LLVM_PREFIX ${CMAKE_INSTALL_PREFIX})
+
+if (LLVM_ENABLE_DOXYGEN)
+  message(STATUS "Doxygen enabled.")
+  find_package(Doxygen)
+
+  if (DOXYGEN_FOUND)
+    # If we find doxygen and we want to enable doxygen by default create a
+    # global aggregate doxygen target for generating llvm and any/all
+    # subprojects doxygen documentation.
+    if (LLVM_BUILD_DOCS)
+      add_custom_target(doxygen ALL)
+    endif()
+
+    option(LLVM_DOXYGEN_EXTERNAL_SEARCH "Enable doxygen external search." OFF)
+    if (LLVM_DOXYGEN_EXTERNAL_SEARCH)
+      set(LLVM_DOXYGEN_SEARCHENGINE_URL "" CACHE STRING "URL to use for external searhc.")
+      set(LLVM_DOXYGEN_SEARCH_MAPPINGS "" CACHE STRING "Doxygen Search Mappings")
+    endif()
+  endif()
+else()
+  message(STATUS "Doxygen disabled.")
+endif()

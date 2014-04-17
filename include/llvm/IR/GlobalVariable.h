@@ -66,14 +66,14 @@ public:
   /// GlobalVariable ctor - If a parent module is specified, the global is
   /// automatically inserted into the end of the specified modules global list.
   GlobalVariable(Type *Ty, bool isConstant, LinkageTypes Linkage,
-                 Constant *Initializer = 0, const Twine &Name = "",
+                 Constant *Initializer = nullptr, const Twine &Name = "",
                  ThreadLocalMode = NotThreadLocal, unsigned AddressSpace = 0,
                  bool isExternallyInitialized = false);
   /// GlobalVariable ctor - This creates a global and inserts it before the
   /// specified other global.
   GlobalVariable(Module &M, Type *Ty, bool isConstant,
                  LinkageTypes Linkage, Constant *Initializer,
-                 const Twine &Name = "", GlobalVariable *InsertBefore = 0,
+                 const Twine &Name = "", GlobalVariable *InsertBefore = nullptr,
                  ThreadLocalMode = NotThreadLocal, unsigned AddressSpace = 0,
                  bool isExternallyInitialized = false);
 
@@ -84,9 +84,7 @@ public:
   /// Provide fast operand accessors
   DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
 
-  /// hasInitializer - Unless a global variable isExternal(), it has an
-  /// initializer.  The initializer for the global variable/constant is held by
-  /// Initializer if an initializer is specified.
+  /// Definitions have initializers, declarations don't.
   ///
   inline bool hasInitializer() const { return !isDeclaration(); }
 
@@ -176,21 +174,21 @@ public:
 
   /// copyAttributesFrom - copy all additional attributes (those not needed to
   /// create a GlobalVariable) from the GlobalVariable Src to this one.
-  void copyAttributesFrom(const GlobalValue *Src);
+  void copyAttributesFrom(const GlobalValue *Src) override;
 
   /// removeFromParent - This method unlinks 'this' from the containing module,
   /// but does not delete it.
   ///
-  virtual void removeFromParent();
+  void removeFromParent() override;
 
   /// eraseFromParent - This method unlinks 'this' from the containing module
   /// and deletes it.
   ///
-  virtual void eraseFromParent();
+  void eraseFromParent() override;
 
   /// Override Constant's implementation of this method so we can
   /// replace constant initializers.
-  virtual void replaceUsesOfWithOnConstant(Value *From, Value *To, Use *U);
+  void replaceUsesOfWithOnConstant(Value *From, Value *To, Use *U) override;
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Value *V) {

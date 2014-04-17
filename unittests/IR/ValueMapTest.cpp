@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/ValueMap.h"
-#include "llvm/ADT/OwningPtr.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
@@ -24,8 +23,8 @@ template<typename T>
 class ValueMapTest : public testing::Test {
 protected:
   Constant *ConstantV;
-  OwningPtr<BitCastInst> BitcastV;
-  OwningPtr<BinaryOperator> AddV;
+  std::unique_ptr<BitCastInst> BitcastV;
+  std::unique_ptr<BinaryOperator> AddV;
 
   ValueMapTest() :
     ConstantV(ConstantInt::get(Type::getInt32Ty(getGlobalContext()), 0)),
@@ -117,7 +116,8 @@ TYPED_TEST(ValueMapTest, OperationsWork) {
 
 template<typename ExpectedType, typename VarType>
 void CompileAssertHasType(VarType) {
-  typedef char assert[is_same<ExpectedType, VarType>::value ? 1 : -1];
+  static_assert(std::is_same<ExpectedType, VarType>::value,
+                "Not the same type");
 }
 
 TYPED_TEST(ValueMapTest, Iteration) {

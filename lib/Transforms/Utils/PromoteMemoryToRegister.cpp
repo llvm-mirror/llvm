@@ -34,18 +34,18 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasSetTracker.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/DIBuilder.h"
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <queue>
@@ -61,9 +61,7 @@ bool llvm::isAllocaPromotable(const AllocaInst *AI) {
   // assignments to subsections of the memory unit.
 
   // Only allow direct and non-volatile loads and stores...
-  for (Value::const_use_iterator UI = AI->use_begin(), UE = AI->use_end();
-       UI != UE; ++UI) { // Loop over all of the uses of the alloca
-    const User *U = *UI;
+  for (const User *U : AI->users()) {
     if (const LoadInst *LI = dyn_cast<LoadInst>(U)) {
       // Note that atomic loads can be transformed; atomic semantics do
       // not have any meaning for a local alloca.
@@ -131,8 +129,7 @@ struct AllocaInfo {
     // As we scan the uses of the alloca instruction, keep track of stores,
     // and decide whether all of the loads and stores to the alloca are within
     // the same basic block.
-    for (Value::use_iterator UI = AI->use_begin(), E = AI->use_end();
-         UI != E;) {
+    for (auto UI = AI->user_begin(), E = AI->user_end(); UI != E;) {
       Instruction *User = cast<Instruction>(*UI++);
 
       if (StoreInst *SI = dyn_cast<StoreInst>(User)) {
@@ -317,8 +314,7 @@ static void removeLifetimeIntrinsicUsers(AllocaInst *AI) {
   // Knowing that this alloca is promotable, we know that it's safe to kill all
   // instructions except for load and store.
 
-  for (Value::use_iterator UI = AI->use_begin(), UE = AI->use_end();
-       UI != UE;) {
+  for (auto UI = AI->user_begin(), UE = AI->user_end(); UI != UE;) {
     Instruction *I = cast<Instruction>(*UI);
     ++UI;
     if (isa<LoadInst>(I) || isa<StoreInst>(I))
@@ -328,10 +324,9 @@ static void removeLifetimeIntrinsicUsers(AllocaInst *AI) {
       // The only users of this bitcast/GEP instruction are lifetime intrinsics.
       // Follow the use/def chain to erase them now instead of leaving it for
       // dead code elimination later.
-      for (Value::use_iterator UI = I->use_begin(), UE = I->use_end();
-           UI != UE;) {
-        Instruction *Inst = cast<Instruction>(*UI);
-        ++UI;
+      for (auto UUI = I->user_begin(), UUE = I->user_end(); UUI != UUE;) {
+        Instruction *Inst = cast<Instruction>(*UUI);
+        ++UUI;
         Inst->eraseFromParent();
       }
     }
@@ -359,7 +354,7 @@ static bool rewriteSingleStoreAlloca(AllocaInst *AI, AllocaInfo &Info,
   // Clear out UsingBlocks.  We will reconstruct it here if needed.
   Info.UsingBlocks.clear();
 
-  for (Value::use_iterator UI = AI->use_begin(), E = AI->use_end(); UI != E;) {
+  for (auto UI = AI->user_begin(), E = AI->user_end(); UI != E;) {
     Instruction *UserInst = cast<Instruction>(*UI++);
     if (!isa<LoadInst>(UserInst)) {
       assert(UserInst == OnlyStore && "Should only have load/stores");
@@ -431,16 +426,6 @@ static bool rewriteSingleStoreAlloca(AllocaInst *AI, AllocaInfo &Info,
   return true;
 }
 
-namespace {
-/// This is a helper predicate used to search by the first element of a pair.
-struct StoreIndexSearchPredicate {
-  bool operator()(const std::pair<unsigned, StoreInst *> &LHS,
-                  const std::pair<unsigned, StoreInst *> &RHS) {
-    return LHS.first < RHS.first;
-  }
-};
-}
-
 /// Many allocas are only used within a single basic block.  If this is the
 /// case, avoid traversing the CFG and inserting a lot of potentially useless
 /// PHI nodes by just performing a single linear pass over the basic block
@@ -466,19 +451,17 @@ static void promoteSingleBlockAlloca(AllocaInst *AI, const AllocaInfo &Info,
   typedef SmallVector<std::pair<unsigned, StoreInst *>, 64> StoresByIndexTy;
   StoresByIndexTy StoresByIndex;
 
-  for (Value::use_iterator UI = AI->use_begin(), E = AI->use_end(); UI != E;
-       ++UI)
-    if (StoreInst *SI = dyn_cast<StoreInst>(*UI))
+  for (User *U : AI->users())
+    if (StoreInst *SI = dyn_cast<StoreInst>(U))
       StoresByIndex.push_back(std::make_pair(LBI.getInstructionIndex(SI), SI));
 
   // Sort the stores by their index, making it efficient to do a lookup with a
   // binary search.
-  std::sort(StoresByIndex.begin(), StoresByIndex.end(),
-            StoreIndexSearchPredicate());
+  std::sort(StoresByIndex.begin(), StoresByIndex.end(), less_first());
 
   // Walk all of the loads from this alloca, replacing them with the nearest
   // store above them, if any.
-  for (Value::use_iterator UI = AI->use_begin(), E = AI->use_end(); UI != E;) {
+  for (auto UI = AI->user_begin(), E = AI->user_end(); UI != E;) {
     LoadInst *LI = dyn_cast<LoadInst>(*UI++);
     if (!LI)
       continue;
@@ -489,14 +472,14 @@ static void promoteSingleBlockAlloca(AllocaInst *AI, const AllocaInfo &Info,
     StoresByIndexTy::iterator I =
         std::lower_bound(StoresByIndex.begin(), StoresByIndex.end(),
                          std::make_pair(LoadIdx, static_cast<StoreInst *>(0)),
-                         StoreIndexSearchPredicate());
+                         less_first());
 
     if (I == StoresByIndex.begin())
       // If there is no store before this load, the load takes the undef value.
       LI->replaceAllUsesWith(UndefValue::get(LI->getType()));
     else
       // Otherwise, there was a store before this load, the load takes its value.
-      LI->replaceAllUsesWith(llvm::prior(I)->second->getOperand(0));
+      LI->replaceAllUsesWith(std::prev(I)->second->getOperand(0));
 
     if (AST && LI->getType()->isPointerTy())
       AST->deleteValue(LI);
@@ -506,7 +489,7 @@ static void promoteSingleBlockAlloca(AllocaInst *AI, const AllocaInfo &Info,
 
   // Remove the (now dead) stores and alloca.
   while (!AI->use_empty()) {
-    StoreInst *SI = cast<StoreInst>(AI->use_back());
+    StoreInst *SI = cast<StoreInst>(AI->user_back());
     // Record debuginfo for the store before removing it.
     if (DbgDeclareInst *DDI = Info.DbgDeclare) {
       DIBuilder DIB(*AI->getParent()->getParent()->getParent());
@@ -690,8 +673,8 @@ void PromoteMem2Reg::run() {
 
     // Iterating over NewPhiNodes is deterministic, so it is safe to try to
     // simplify and RAUW them as we go.  If it was not, we could add uses to
-    // the values we replace with in a non deterministic order, thus creating
-    // non deterministic def->use chains.
+    // the values we replace with in a non-deterministic order, thus creating
+    // non-deterministic def->use chains.
     for (DenseMap<std::pair<unsigned, unsigned>, PHINode *>::iterator
              I = NewPhiNodes.begin(),
              E = NewPhiNodes.end();
@@ -849,16 +832,6 @@ void PromoteMem2Reg::ComputeLiveInBlocks(
   }
 }
 
-namespace {
-typedef std::pair<DomTreeNode *, unsigned> DomTreeNodePair;
-
-struct DomTreeNodeCompare {
-  bool operator()(const DomTreeNodePair &LHS, const DomTreeNodePair &RHS) {
-    return LHS.second < RHS.second;
-  }
-};
-} // end anonymous namespace
-
 /// At this point, we're committed to promoting the alloca using IDF's, and the
 /// standard SSA construction algorithm.  Determine which blocks need phi nodes
 /// and see if we can optimize out some work by avoiding insertion of dead phi
@@ -876,9 +849,9 @@ void PromoteMem2Reg::DetermineInsertionPoint(AllocaInst *AI, unsigned AllocaNum,
 
   // Use a priority queue keyed on dominator tree level so that inserted nodes
   // are handled from the bottom of the dominator tree upwards.
-  typedef std::priority_queue<DomTreeNodePair,
-                              SmallVector<DomTreeNodePair, 32>,
-                              DomTreeNodeCompare> IDFPriorityQueue;
+  typedef std::pair<DomTreeNode *, unsigned> DomTreeNodePair;
+  typedef std::priority_queue<DomTreeNodePair, SmallVector<DomTreeNodePair, 32>,
+                              less_second> IDFPriorityQueue;
   IDFPriorityQueue PQ;
 
   for (SmallPtrSet<BasicBlock *, 32>::const_iterator I = DefBlocks.begin(),

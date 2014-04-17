@@ -10,6 +10,7 @@
 #include "SystemZTargetMachine.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Transforms/Scalar.h"
 
 using namespace llvm;
 
@@ -29,8 +30,7 @@ SystemZTargetMachine::SystemZTargetMachine(const Target &T, StringRef TT,
     // Make sure that global data has at least 16 bits of alignment by default,
     // so that we can refer to it using LARL.  We don't have any special
     // requirements for stack variables though.
-    DL("E-p:64:64:64-i1:8:16-i8:8:16-i16:16-i32:32-i64:64"
-       "-f32:32-f64:64-f128:64-a0:8:16-n32:64"),
+    DL("E-m:e-i1:8:16-i8:8:16-i64:64-f128:64-a:8:16-n32:64"),
     InstrInfo(*this), TLInfo(*this), TSInfo(*this),
     FrameLowering(*this, Subtarget) {
   initAsmInfo();
@@ -47,11 +47,17 @@ public:
     return getTM<SystemZTargetMachine>();
   }
 
-  virtual bool addInstSelector() LLVM_OVERRIDE;
-  virtual bool addPreSched2() LLVM_OVERRIDE;
-  virtual bool addPreEmitPass() LLVM_OVERRIDE;
+  void addIRPasses() override;
+  bool addInstSelector() override;
+  bool addPreSched2() override;
+  bool addPreEmitPass() override;
 };
 } // end anonymous namespace
+
+void SystemZPassConfig::addIRPasses() {
+  TargetPassConfig::addIRPasses();
+  addPass(createPartiallyInlineLibCallsPass());
+}
 
 bool SystemZPassConfig::addInstSelector() {
   addPass(createSystemZISelDag(getSystemZTargetMachine(), getOptLevel()));
@@ -90,6 +96,8 @@ bool SystemZPassConfig::addPreEmitPass() {
   // preventing that would be a win or not.
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createSystemZElimComparePass(getSystemZTargetMachine()));
+  if (getOptLevel() != CodeGenOpt::None)
+    addPass(createSystemZShortenInstPass(getSystemZTargetMachine()));
   addPass(createSystemZLongBranchPass(getSystemZTargetMachine()));
   return true;
 }

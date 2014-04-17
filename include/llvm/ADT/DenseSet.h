@@ -27,7 +27,9 @@ class DenseSet {
   typedef DenseMap<ValueT, char, ValueInfoT> MapTy;
   MapTy TheMap;
 public:
-  DenseSet(const DenseSet &Other) : TheMap(Other.TheMap) {}
+  typedef ValueT key_type;
+  typedef ValueT value_type;
+
   explicit DenseSet(unsigned NumInitBuckets = 0) : TheMap(NumInitBuckets) {}
 
   bool empty() const { return TheMap.empty(); }
@@ -52,11 +54,6 @@ public:
 
   void swap(DenseSet& RHS) {
     TheMap.swap(RHS.TheMap);
-  }
-
-  DenseSet &operator=(const DenseSet &RHS) {
-    TheMap = RHS.TheMap;
-    return *this;
   }
 
   // Iterators.

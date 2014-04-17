@@ -111,6 +111,23 @@ define i32 @bextr32_load(i32* %x, i32 %y) nounwind readnone {
 
 declare i32 @llvm.x86.bmi.bextr.32(i32, i32) nounwind readnone
 
+define i32 @bextr32b(i32 %x) nounwind uwtable readnone ssp {
+  %1 = lshr i32 %x, 4
+  %2 = and i32 %1, 4095
+  ret i32 %2
+; CHECK-LABEL: bextr32b:
+; CHECK: bextrl
+}
+
+define i32 @bextr32b_load(i32* %x) nounwind uwtable readnone ssp {
+  %1 = load i32* %x
+  %2 = lshr i32 %1, 4
+  %3 = and i32 %2, 4095
+  ret i32 %3
+; CHECK-LABEL: bextr32b_load:
+; CHECK: bextrl {{.*}}, ({{.*}}), {{.*}}
+}
+
 define i64 @bextr64(i64 %x, i64 %y) nounwind readnone {
   %tmp = tail call i64 @llvm.x86.bmi.bextr.64(i64 %x, i64 %y)
   ret i64 %tmp
@@ -119,6 +136,14 @@ define i64 @bextr64(i64 %x, i64 %y) nounwind readnone {
 }
 
 declare i64 @llvm.x86.bmi.bextr.64(i64, i64) nounwind readnone
+
+define i64 @bextr64b(i64 %x) nounwind uwtable readnone ssp {
+  %1 = lshr i64 %x, 4
+  %2 = and i64 %1, 4095
+  ret i64 %2
+; CHECK-LABEL: bextr64b:
+; CHECK: bextrq
+}
 
 define i32 @bzhi32(i32 %x, i32 %y) nounwind readnone {
   %tmp = tail call i32 @llvm.x86.bmi.bzhi.32(i32 %x, i32 %y)
@@ -145,6 +170,51 @@ define i64 @bzhi64(i64 %x, i64 %y) nounwind readnone {
 }
 
 declare i64 @llvm.x86.bmi.bzhi.64(i64, i64) nounwind readnone
+
+define i32 @bzhi32b(i32 %x, i8 zeroext %index) #0 {
+entry:
+  %conv = zext i8 %index to i32
+  %shl = shl i32 1, %conv
+  %sub = add nsw i32 %shl, -1
+  %and = and i32 %sub, %x
+  ret i32 %and
+; CHECK-LABEL: bzhi32b:
+; CHECK: bzhil
+}
+
+define i32 @bzhi32b_load(i32* %w, i8 zeroext %index) #0 {
+entry:
+  %x = load i32* %w
+  %conv = zext i8 %index to i32
+  %shl = shl i32 1, %conv
+  %sub = add nsw i32 %shl, -1
+  %and = and i32 %sub, %x
+  ret i32 %and
+; CHECK-LABEL: bzhi32b_load:
+; CHECK: bzhil {{.*}}, ({{.*}}), {{.*}}
+}
+
+define i32 @bzhi32c(i32 %x, i8 zeroext %index) #0 {
+entry:
+  %conv = zext i8 %index to i32
+  %shl = shl i32 1, %conv
+  %sub = add nsw i32 %shl, -1
+  %and = and i32 %x, %sub
+  ret i32 %and
+; CHECK-LABEL: bzhi32c:
+; CHECK: bzhil
+}
+
+define i64 @bzhi64b(i64 %x, i8 zeroext %index) #0 {
+entry:
+  %conv = zext i8 %index to i64
+  %shl = shl i64 1, %conv
+  %sub = add nsw i64 %shl, -1
+  %and = and i64 %x, %sub
+  ret i64 %and
+; CHECK-LABEL: bzhi64b:
+; CHECK: bzhiq
+}
 
 define i32 @blsi32(i32 %x) nounwind readnone {
   %tmp = sub i32 0, %x

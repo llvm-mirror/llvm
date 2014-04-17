@@ -20,11 +20,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-readobj.h"
-
 #include "Error.h"
 #include "ObjDumper.h"
 #include "StreamWriter.h"
-
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Casting.h"
@@ -38,7 +36,6 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/system_error.h"
-
 #include <string>
 
 
@@ -128,6 +125,16 @@ namespace opts {
   // -expand-relocs
   cl::opt<bool> ExpandRelocs("expand-relocs",
     cl::desc("Expand each shown relocation to multiple lines"));
+
+  // -codeview-linetables
+  cl::opt<bool> CodeViewLineTables("codeview-linetables",
+    cl::desc("Display CodeView line table information"));
+
+  // -arm-attributes, -a
+  cl::opt<bool> ARMAttributes("arm-attributes",
+                              cl::desc("Display the ARM attributes section"));
+  cl::alias ARMAttributesShort("-a", cl::desc("Alias for --arm-attributes"),
+                               cl::aliasopt(ARMAttributes));
 } // namespace opts
 
 static int ReturnValue = EXIT_SUCCESS;
@@ -172,9 +179,8 @@ static void reportError(StringRef Input, StringRef Message) {
 }
 
 /// @brief Creates an format-specific object file dumper.
-static error_code createDumper(const ObjectFile *Obj,
-                               StreamWriter &Writer,
-                               OwningPtr<ObjDumper> &Result) {
+static error_code createDumper(const ObjectFile *Obj, StreamWriter &Writer,
+                               std::unique_ptr<ObjDumper> &Result) {
   if (!Obj)
     return readobj_error::unsupported_file_format;
 
@@ -192,7 +198,7 @@ static error_code createDumper(const ObjectFile *Obj,
 /// @brief Dumps the specified object file.
 static void dumpObject(const ObjectFile *Obj) {
   StreamWriter Writer(outs());
-  OwningPtr<ObjDumper> Dumper;
+  std::unique_ptr<ObjDumper> Dumper;
   if (error_code EC = createDumper(Obj, Writer, Dumper)) {
     reportError(Obj->getFileName(), EC);
     return;
@@ -226,15 +232,18 @@ static void dumpObject(const ObjectFile *Obj) {
     Dumper->printNeededLibraries();
   if (opts::ProgramHeaders)
     Dumper->printProgramHeaders();
+  if (Obj->getArch() == llvm::Triple::arm && Obj->isELF())
+    if (opts::ARMAttributes)
+      Dumper->printAttributes();
 }
 
 
 /// @brief Dumps each object file in \a Arc;
 static void dumpArchive(const Archive *Arc) {
-  for (Archive::child_iterator ArcI = Arc->begin_children(),
-                               ArcE = Arc->end_children();
+  for (Archive::child_iterator ArcI = Arc->child_begin(),
+                               ArcE = Arc->child_end();
                                ArcI != ArcE; ++ArcI) {
-    OwningPtr<Binary> child;
+    std::unique_ptr<Binary> child;
     if (error_code EC = ArcI->getAsBinary(child)) {
       // Ignore non-object files.
       if (EC != object_error::invalid_file_type)
@@ -259,11 +268,12 @@ static void dumpInput(StringRef File) {
   }
 
   // Attempt to open the binary.
-  OwningPtr<Binary> Binary;
-  if (error_code EC = createBinary(File, Binary)) {
+  ErrorOr<Binary *> BinaryOrErr = createBinary(File);
+  if (error_code EC = BinaryOrErr.getError()) {
     reportError(File, EC);
     return;
   }
+  std::unique_ptr<Binary> Binary(BinaryOrErr.get());
 
   if (Archive *Arc = dyn_cast<Archive>(Binary.get()))
     dumpArchive(Arc);

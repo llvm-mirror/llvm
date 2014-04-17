@@ -55,7 +55,7 @@ static std::vector<std::pair<void(*)(void*), void*> > CallBacksToRun;
 static const int IntSigs[] = {
   SIGHUP, SIGINT, SIGPIPE, SIGTERM, SIGUSR1, SIGUSR2
 };
-static const int *const IntSigsEnd = array_endof(IntSigs);
+static const int *const IntSigsEnd = std::end(IntSigs);
 
 // KillSigs - Signals that represent that we have a bug, and our prompt
 // termination has been ordered.
@@ -74,7 +74,7 @@ static const int KillSigs[] = {
   , SIGEMT
 #endif
 };
-static const int *const KillSigsEnd = array_endof(KillSigs);
+static const int *const KillSigsEnd = std::end(KillSigs);
 
 static unsigned NumRegisteredSignals = 0;
 static struct {
@@ -333,7 +333,7 @@ static void PrintStackTraceSignalHandler(void *) {
 void llvm::sys::PrintStackTraceOnErrorSignal() {
   AddSignalHandler(PrintStackTraceSignalHandler, 0);
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && defined(ENABLE_CRASH_OVERRIDES)
   // Environment variable to disable any kind of crash dialog.
   if (getenv("LLVM_DISABLE_CRASH_REPORT")) {
     mach_port_t self = mach_task_self();
@@ -359,7 +359,7 @@ void llvm::sys::PrintStackTraceOnErrorSignal() {
 // the same linkage unit by just defining our own versions of the assert handler
 // and abort.
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && defined(ENABLE_CRASH_OVERRIDES)
 
 #include <signal.h>
 #include <pthread.h>

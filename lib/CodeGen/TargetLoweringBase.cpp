@@ -18,11 +18,15 @@
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
+#include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -78,16 +82,16 @@ static void InitLibcallNames(const char **Names, const TargetMachine &TM) {
   Names[RTLIB::UREM_I128] = "__umodti3";
 
   // These are generally not available.
-  Names[RTLIB::SDIVREM_I8] = 0;
-  Names[RTLIB::SDIVREM_I16] = 0;
-  Names[RTLIB::SDIVREM_I32] = 0;
-  Names[RTLIB::SDIVREM_I64] = 0;
-  Names[RTLIB::SDIVREM_I128] = 0;
-  Names[RTLIB::UDIVREM_I8] = 0;
-  Names[RTLIB::UDIVREM_I16] = 0;
-  Names[RTLIB::UDIVREM_I32] = 0;
-  Names[RTLIB::UDIVREM_I64] = 0;
-  Names[RTLIB::UDIVREM_I128] = 0;
+  Names[RTLIB::SDIVREM_I8] = nullptr;
+  Names[RTLIB::SDIVREM_I16] = nullptr;
+  Names[RTLIB::SDIVREM_I32] = nullptr;
+  Names[RTLIB::SDIVREM_I64] = nullptr;
+  Names[RTLIB::SDIVREM_I128] = nullptr;
+  Names[RTLIB::UDIVREM_I8] = nullptr;
+  Names[RTLIB::UDIVREM_I16] = nullptr;
+  Names[RTLIB::UDIVREM_I32] = nullptr;
+  Names[RTLIB::UDIVREM_I64] = nullptr;
+  Names[RTLIB::UDIVREM_I128] = nullptr;
 
   Names[RTLIB::NEG_I32] = "__negsi2";
   Names[RTLIB::NEG_I64] = "__negdi2";
@@ -201,6 +205,11 @@ static void InitLibcallNames(const char **Names, const TargetMachine &TM) {
   Names[RTLIB::FLOOR_F80] = "floorl";
   Names[RTLIB::FLOOR_F128] = "floorl";
   Names[RTLIB::FLOOR_PPCF128] = "floorl";
+  Names[RTLIB::ROUND_F32] = "roundf";
+  Names[RTLIB::ROUND_F64] = "round";
+  Names[RTLIB::ROUND_F80] = "roundl";
+  Names[RTLIB::ROUND_F128] = "roundl";
+  Names[RTLIB::ROUND_PPCF128] = "roundl";
   Names[RTLIB::COPYSIGN_F32] = "copysignf";
   Names[RTLIB::COPYSIGN_F64] = "copysign";
   Names[RTLIB::COPYSIGN_F80] = "copysignl";
@@ -318,34 +327,62 @@ static void InitLibcallNames(const char **Names, const TargetMachine &TM) {
   Names[RTLIB::SYNC_VAL_COMPARE_AND_SWAP_2] = "__sync_val_compare_and_swap_2";
   Names[RTLIB::SYNC_VAL_COMPARE_AND_SWAP_4] = "__sync_val_compare_and_swap_4";
   Names[RTLIB::SYNC_VAL_COMPARE_AND_SWAP_8] = "__sync_val_compare_and_swap_8";
+  Names[RTLIB::SYNC_VAL_COMPARE_AND_SWAP_16] = "__sync_val_compare_and_swap_16";
   Names[RTLIB::SYNC_LOCK_TEST_AND_SET_1] = "__sync_lock_test_and_set_1";
   Names[RTLIB::SYNC_LOCK_TEST_AND_SET_2] = "__sync_lock_test_and_set_2";
   Names[RTLIB::SYNC_LOCK_TEST_AND_SET_4] = "__sync_lock_test_and_set_4";
   Names[RTLIB::SYNC_LOCK_TEST_AND_SET_8] = "__sync_lock_test_and_set_8";
+  Names[RTLIB::SYNC_LOCK_TEST_AND_SET_16] = "__sync_lock_test_and_set_16";
   Names[RTLIB::SYNC_FETCH_AND_ADD_1] = "__sync_fetch_and_add_1";
   Names[RTLIB::SYNC_FETCH_AND_ADD_2] = "__sync_fetch_and_add_2";
   Names[RTLIB::SYNC_FETCH_AND_ADD_4] = "__sync_fetch_and_add_4";
   Names[RTLIB::SYNC_FETCH_AND_ADD_8] = "__sync_fetch_and_add_8";
+  Names[RTLIB::SYNC_FETCH_AND_ADD_16] = "__sync_fetch_and_add_16";
   Names[RTLIB::SYNC_FETCH_AND_SUB_1] = "__sync_fetch_and_sub_1";
   Names[RTLIB::SYNC_FETCH_AND_SUB_2] = "__sync_fetch_and_sub_2";
   Names[RTLIB::SYNC_FETCH_AND_SUB_4] = "__sync_fetch_and_sub_4";
   Names[RTLIB::SYNC_FETCH_AND_SUB_8] = "__sync_fetch_and_sub_8";
+  Names[RTLIB::SYNC_FETCH_AND_SUB_16] = "__sync_fetch_and_sub_16";
   Names[RTLIB::SYNC_FETCH_AND_AND_1] = "__sync_fetch_and_and_1";
   Names[RTLIB::SYNC_FETCH_AND_AND_2] = "__sync_fetch_and_and_2";
   Names[RTLIB::SYNC_FETCH_AND_AND_4] = "__sync_fetch_and_and_4";
   Names[RTLIB::SYNC_FETCH_AND_AND_8] = "__sync_fetch_and_and_8";
+  Names[RTLIB::SYNC_FETCH_AND_AND_16] = "__sync_fetch_and_and_16";
   Names[RTLIB::SYNC_FETCH_AND_OR_1] = "__sync_fetch_and_or_1";
   Names[RTLIB::SYNC_FETCH_AND_OR_2] = "__sync_fetch_and_or_2";
   Names[RTLIB::SYNC_FETCH_AND_OR_4] = "__sync_fetch_and_or_4";
   Names[RTLIB::SYNC_FETCH_AND_OR_8] = "__sync_fetch_and_or_8";
+  Names[RTLIB::SYNC_FETCH_AND_OR_16] = "__sync_fetch_and_or_16";
   Names[RTLIB::SYNC_FETCH_AND_XOR_1] = "__sync_fetch_and_xor_1";
   Names[RTLIB::SYNC_FETCH_AND_XOR_2] = "__sync_fetch_and_xor_2";
   Names[RTLIB::SYNC_FETCH_AND_XOR_4] = "__sync_fetch_and_xor_4";
   Names[RTLIB::SYNC_FETCH_AND_XOR_8] = "__sync_fetch_and_xor_8";
+  Names[RTLIB::SYNC_FETCH_AND_XOR_16] = "__sync_fetch_and_xor_16";
   Names[RTLIB::SYNC_FETCH_AND_NAND_1] = "__sync_fetch_and_nand_1";
   Names[RTLIB::SYNC_FETCH_AND_NAND_2] = "__sync_fetch_and_nand_2";
   Names[RTLIB::SYNC_FETCH_AND_NAND_4] = "__sync_fetch_and_nand_4";
   Names[RTLIB::SYNC_FETCH_AND_NAND_8] = "__sync_fetch_and_nand_8";
+  Names[RTLIB::SYNC_FETCH_AND_NAND_16] = "__sync_fetch_and_nand_16";
+  Names[RTLIB::SYNC_FETCH_AND_MAX_1] = "__sync_fetch_and_max_1";
+  Names[RTLIB::SYNC_FETCH_AND_MAX_2] = "__sync_fetch_and_max_2";
+  Names[RTLIB::SYNC_FETCH_AND_MAX_4] = "__sync_fetch_and_max_4";
+  Names[RTLIB::SYNC_FETCH_AND_MAX_8] = "__sync_fetch_and_max_8";
+  Names[RTLIB::SYNC_FETCH_AND_MAX_16] = "__sync_fetch_and_max_16";
+  Names[RTLIB::SYNC_FETCH_AND_UMAX_1] = "__sync_fetch_and_umax_1";
+  Names[RTLIB::SYNC_FETCH_AND_UMAX_2] = "__sync_fetch_and_umax_2";
+  Names[RTLIB::SYNC_FETCH_AND_UMAX_4] = "__sync_fetch_and_umax_4";
+  Names[RTLIB::SYNC_FETCH_AND_UMAX_8] = "__sync_fetch_and_umax_8";
+  Names[RTLIB::SYNC_FETCH_AND_UMAX_16] = "__sync_fetch_and_umax_16";
+  Names[RTLIB::SYNC_FETCH_AND_MIN_1] = "__sync_fetch_and_min_1";
+  Names[RTLIB::SYNC_FETCH_AND_MIN_2] = "__sync_fetch_and_min_2";
+  Names[RTLIB::SYNC_FETCH_AND_MIN_4] = "__sync_fetch_and_min_4";
+  Names[RTLIB::SYNC_FETCH_AND_MIN_8] = "__sync_fetch_and_min_8";
+  Names[RTLIB::SYNC_FETCH_AND_MIN_16] = "__sync_fetch_and_min_16";
+  Names[RTLIB::SYNC_FETCH_AND_UMIN_1] = "__sync_fetch_and_umin_1";
+  Names[RTLIB::SYNC_FETCH_AND_UMIN_2] = "__sync_fetch_and_umin_2";
+  Names[RTLIB::SYNC_FETCH_AND_UMIN_4] = "__sync_fetch_and_umin_4";
+  Names[RTLIB::SYNC_FETCH_AND_UMIN_8] = "__sync_fetch_and_umin_8";
+  Names[RTLIB::SYNC_FETCH_AND_UMIN_16] = "__sync_fetch_and_umin_16";
   
   if (Triple(TM.getTargetTriple()).getEnvironment() == Triple::GNU) {
     Names[RTLIB::SINCOS_F32] = "sincosf";
@@ -355,18 +392,18 @@ static void InitLibcallNames(const char **Names, const TargetMachine &TM) {
     Names[RTLIB::SINCOS_PPCF128] = "sincosl";
   } else {
     // These are generally not available.
-    Names[RTLIB::SINCOS_F32] = 0;
-    Names[RTLIB::SINCOS_F64] = 0;
-    Names[RTLIB::SINCOS_F80] = 0;
-    Names[RTLIB::SINCOS_F128] = 0;
-    Names[RTLIB::SINCOS_PPCF128] = 0;
+    Names[RTLIB::SINCOS_F32] = nullptr;
+    Names[RTLIB::SINCOS_F64] = nullptr;
+    Names[RTLIB::SINCOS_F80] = nullptr;
+    Names[RTLIB::SINCOS_F128] = nullptr;
+    Names[RTLIB::SINCOS_PPCF128] = nullptr;
   }
 
   if (Triple(TM.getTargetTriple()).getOS() != Triple::OpenBSD) {
     Names[RTLIB::STACKPROTECTOR_CHECK_FAIL] = "__stack_chk_fail";
   } else {
     // These are generally not available.
-    Names[RTLIB::STACKPROTECTOR_CHECK_FAIL] = 0;
+    Names[RTLIB::STACKPROTECTOR_CHECK_FAIL] = nullptr;
   }
 }
 
@@ -631,22 +668,23 @@ static void InitCmpLibcallCCs(ISD::CondCode *CCs) {
 /// NOTE: The constructor takes ownership of TLOF.
 TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm,
                                        const TargetLoweringObjectFile *tlof)
-  : TM(tm), TD(TM.getDataLayout()), TLOF(*tlof) {
+  : TM(tm), DL(TM.getDataLayout()), TLOF(*tlof) {
   initActions();
 
   // Perform these initializations only once.
-  IsLittleEndian = TD->isLittleEndian();
-  PointerTy = MVT::getIntegerVT(8*TD->getPointerSize(0));
+  IsLittleEndian = DL->isLittleEndian();
   MaxStoresPerMemset = MaxStoresPerMemcpy = MaxStoresPerMemmove = 8;
   MaxStoresPerMemsetOptSize = MaxStoresPerMemcpyOptSize
     = MaxStoresPerMemmoveOptSize = 4;
   UseUnderscoreSetJmp = false;
   UseUnderscoreLongJmp = false;
   SelectIsExpensive = false;
+  HasMultipleConditionRegisters = false;
   IntDivIsCheap = false;
   Pow2DivIsCheap = false;
   JumpIsExpensive = false;
   PredictableSelectIsExpensive = false;
+  MaskAndBranchFoldingIsLegal = false;
   StackPointerRegisterToSaveRestore = 0;
   ExceptionPointerRegister = 0;
   ExceptionSelectorRegister = 0;
@@ -697,6 +735,11 @@ void TargetLoweringBase::initActions() {
 
     // These library functions default to expand.
     setOperationAction(ISD::FROUND, (MVT::SimpleValueType)VT, Expand);
+
+    // These operations default to expand for vector types.
+    if (VT >= MVT::FIRST_VECTOR_VALUETYPE &&
+        VT <= MVT::LAST_VECTOR_VALUETYPE)
+      setOperationAction(ISD::FCOPYSIGN, (MVT::SimpleValueType)VT, Expand);
   }
 
   // Most targets ignore the @llvm.prefetch intrinsic.
@@ -722,6 +765,7 @@ void TargetLoweringBase::initActions() {
   setOperationAction(ISD::FCEIL,  MVT::f16, Expand);
   setOperationAction(ISD::FRINT,  MVT::f16, Expand);
   setOperationAction(ISD::FTRUNC, MVT::f16, Expand);
+  setOperationAction(ISD::FROUND, MVT::f16, Expand);
   setOperationAction(ISD::FLOG ,  MVT::f32, Expand);
   setOperationAction(ISD::FLOG2,  MVT::f32, Expand);
   setOperationAction(ISD::FLOG10, MVT::f32, Expand);
@@ -732,6 +776,7 @@ void TargetLoweringBase::initActions() {
   setOperationAction(ISD::FCEIL,  MVT::f32, Expand);
   setOperationAction(ISD::FRINT,  MVT::f32, Expand);
   setOperationAction(ISD::FTRUNC, MVT::f32, Expand);
+  setOperationAction(ISD::FROUND, MVT::f32, Expand);
   setOperationAction(ISD::FLOG ,  MVT::f64, Expand);
   setOperationAction(ISD::FLOG2,  MVT::f64, Expand);
   setOperationAction(ISD::FLOG10, MVT::f64, Expand);
@@ -742,6 +787,7 @@ void TargetLoweringBase::initActions() {
   setOperationAction(ISD::FCEIL,  MVT::f64, Expand);
   setOperationAction(ISD::FRINT,  MVT::f64, Expand);
   setOperationAction(ISD::FTRUNC, MVT::f64, Expand);
+  setOperationAction(ISD::FROUND, MVT::f64, Expand);
   setOperationAction(ISD::FLOG ,  MVT::f128, Expand);
   setOperationAction(ISD::FLOG2,  MVT::f128, Expand);
   setOperationAction(ISD::FLOG10, MVT::f128, Expand);
@@ -752,6 +798,7 @@ void TargetLoweringBase::initActions() {
   setOperationAction(ISD::FCEIL,  MVT::f128, Expand);
   setOperationAction(ISD::FRINT,  MVT::f128, Expand);
   setOperationAction(ISD::FTRUNC, MVT::f128, Expand);
+  setOperationAction(ISD::FROUND, MVT::f128, Expand);
 
   // Default ISD::TRAP to expand (which turns it into abort).
   setOperationAction(ISD::TRAP, MVT::Other, Expand);
@@ -762,8 +809,21 @@ void TargetLoweringBase::initActions() {
   setOperationAction(ISD::DEBUGTRAP, MVT::Other, Expand);
 }
 
+MVT TargetLoweringBase::getPointerTy(uint32_t AS) const {
+  return MVT::getIntegerVT(getPointerSizeInBits(AS));
+}
+
+unsigned TargetLoweringBase::getPointerSizeInBits(uint32_t AS) const {
+  return DL->getPointerSizeInBits(AS);
+}
+
+unsigned TargetLoweringBase::getPointerTypeSizeInBits(Type *Ty) const {
+  assert(Ty->isPointerTy());
+  return getPointerSizeInBits(Ty->getPointerAddressSpace());
+}
+
 MVT TargetLoweringBase::getScalarShiftAmountTy(EVT LHSTy) const {
-  return MVT::getIntegerVT(8*TD->getPointerSize(0));
+  return MVT::getIntegerVT(8*DL->getPointerSize(0));
 }
 
 EVT TargetLoweringBase::getShiftAmountTy(EVT LHSTy) const {
@@ -849,6 +909,59 @@ bool TargetLoweringBase::isLegalRC(const TargetRegisterClass *RC) const {
   return false;
 }
 
+/// Replace/modify any TargetFrameIndex operands with a targte-dependent
+/// sequence of memory operands that is recognized by PrologEpilogInserter.
+MachineBasicBlock*
+TargetLoweringBase::emitPatchPoint(MachineInstr *MI,
+                                   MachineBasicBlock *MBB) const {
+  const TargetMachine &TM = getTargetMachine();
+  MachineFunction &MF = *MI->getParent()->getParent();
+
+  // MI changes inside this loop as we grow operands.
+  for(unsigned OperIdx = 0; OperIdx != MI->getNumOperands(); ++OperIdx) {
+    MachineOperand &MO = MI->getOperand(OperIdx);
+    if (!MO.isFI())
+      continue;
+
+    // foldMemoryOperand builds a new MI after replacing a single FI operand
+    // with the canonical set of five x86 addressing-mode operands.
+    int FI = MO.getIndex();
+    MachineInstrBuilder MIB = BuildMI(MF, MI->getDebugLoc(), MI->getDesc());
+
+    // Copy operands before the frame-index.
+    for (unsigned i = 0; i < OperIdx; ++i)
+      MIB.addOperand(MI->getOperand(i));
+    // Add frame index operands: direct-mem-ref tag, #FI, offset.
+    MIB.addImm(StackMaps::DirectMemRefOp);
+    MIB.addOperand(MI->getOperand(OperIdx));
+    MIB.addImm(0);
+    // Copy the operands after the frame index.
+    for (unsigned i = OperIdx + 1; i != MI->getNumOperands(); ++i)
+      MIB.addOperand(MI->getOperand(i));
+
+    // Inherit previous memory operands.
+    MIB->setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+    assert(MIB->mayLoad() && "Folded a stackmap use to a non-load!");
+
+    // Add a new memory operand for this FI.
+    const MachineFrameInfo &MFI = *MF.getFrameInfo();
+    assert(MFI.getObjectOffset(FI) != -1);
+    MachineMemOperand *MMO =
+      MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(FI),
+                              MachineMemOperand::MOLoad,
+                              TM.getDataLayout()->getPointerSize(),
+                              MFI.getObjectAlignment(FI));
+    MIB->addMemOperand(MF, MMO);
+
+    // Replace the instruction and update the operand index.
+    MBB->insert(MachineBasicBlock::iterator(MI), MIB);
+    OperIdx += (MIB->getNumOperands() - MI->getNumOperands()) - 1;
+    MI->eraseFromParent();
+    MI = MIB;
+  }
+  return MBB;
+}
+
 /// findRepresentativeClass - Return the largest legal super-reg register class
 /// of the register class for the specified type and its associated "cost".
 std::pair<const TargetRegisterClass*, uint8_t>
@@ -893,7 +1006,7 @@ void TargetLoweringBase::computeRegisterProperties() {
 
   // Find the largest integer register class.
   unsigned LargestIntReg = MVT::LAST_INTEGER_VALUETYPE;
-  for (; RegClassForVT[LargestIntReg] == 0; --LargestIntReg)
+  for (; RegClassForVT[LargestIntReg] == nullptr; --LargestIntReg)
     assert(LargestIntReg != MVT::i1 && "No integer registers defined!");
 
   // Every integer value type larger than this largest register takes twice as
@@ -974,7 +1087,7 @@ void TargetLoweringBase::computeRegisterProperties() {
     // that wider vector type.
     MVT EltVT = VT.getVectorElementType();
     unsigned NElts = VT.getVectorNumElements();
-    if (NElts != 1 && !shouldSplitVectorElementType(EltVT)) {
+    if (NElts != 1 && !shouldSplitVectorType(VT)) {
       bool IsLegalWiderType = false;
       // First try to promote the elements of integer vectors. If no legal
       // promotion was found, fallback to the widen-vector method.
@@ -1042,7 +1155,7 @@ void TargetLoweringBase::computeRegisterProperties() {
   for (unsigned i = 0; i != MVT::LAST_VALUETYPE; ++i) {
     const TargetRegisterClass* RRC;
     uint8_t Cost;
-    tie(RRC, Cost) =  findRepresentativeClass((MVT::SimpleValueType)i);
+    std::tie(RRC, Cost) = findRepresentativeClass((MVT::SimpleValueType)i);
     RepRegClassForVT[i] = RRC;
     RepRegClassCostForVT[i] = Cost;
   }
@@ -1177,7 +1290,7 @@ void llvm::GetReturnInfo(Type* ReturnType, AttributeSet attr,
       Flags.setZExt();
 
     for (unsigned i = 0; i < NumParts; ++i)
-      Outs.push_back(ISD::OutputArg(Flags, PartVT, /*isFixed=*/true, 0, 0));
+      Outs.push_back(ISD::OutputArg(Flags, PartVT, VT, /*isFixed=*/true, 0, 0));
   }
 }
 
@@ -1185,7 +1298,7 @@ void llvm::GetReturnInfo(Type* ReturnType, AttributeSet attr,
 /// function arguments in the caller parameter area.  This is the actual
 /// alignment, not its logarithm.
 unsigned TargetLoweringBase::getByValTypeAlignment(Type *Ty) const {
-  return TD->getCallFrameTypeAlignment(Ty);
+  return DL->getABITypeAlignment(Ty);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1243,6 +1356,7 @@ int TargetLoweringBase::InstructionOpcodeToISD(unsigned Opcode) const {
   case PtrToInt:       return ISD::BITCAST;
   case IntToPtr:       return ISD::BITCAST;
   case BitCast:        return ISD::BITCAST;
+  case AddrSpaceCast:  return ISD::ADDRSPACECAST;
   case ICmp:           return ISD::SETCC;
   case FCmp:           return ISD::SETCC;
   case PHI:            return 0;
@@ -1318,6 +1432,8 @@ bool TargetLoweringBase::isLegalAddressingMode(const AddrMode &AM,
       return false;
     // Allow 2*r as r+r.
     break;
+  default: // Don't allow n * r
+    return false;
   }
 
   return true;

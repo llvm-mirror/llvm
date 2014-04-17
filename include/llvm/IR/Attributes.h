@@ -18,6 +18,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/PointerLikeTypeTraits.h"
 #include <bitset>
 #include <cassert>
@@ -70,6 +71,7 @@ public:
     Builtin,               ///< Callee is recognized as a builtin, despite
                            ///< nobuiltin attribute on its declaration.
     ByVal,                 ///< Pass structure by value
+    InAlloca,              ///< Pass structure in an alloca
     Cold,                  ///< Marks function as being in a cold path.
     InlineHint,            ///< Source said inlining was desirable
     InReg,                 ///< Force argument to be passed in register
@@ -88,6 +90,7 @@ public:
     NoReturn,              ///< Mark the function as not returning
     NoUnwind,              ///< Function doesn't unwind stack
     OptimizeForSize,       ///< opt_size
+    OptimizeNone,          ///< Function must not be optimized.
     ReadNone,              ///< Function does not access memory
     ReadOnly,              ///< Function only reads from memory
     Returned,              ///< Return value is always equal to this argument
@@ -113,7 +116,7 @@ private:
   AttributeImpl *pImpl;
   Attribute(AttributeImpl *A) : pImpl(A) {}
 public:
-  Attribute() : pImpl(0) {}
+  Attribute() : pImpl(nullptr) {}
 
   //===--------------------------------------------------------------------===//
   // Attribute Construction
@@ -199,7 +202,7 @@ public:
 /// index `1'.
 class AttributeSet {
 public:
-  enum AttrIndex {
+  enum AttrIndex : unsigned {
     ReturnIndex = 0U,
     FunctionIndex = ~0U
   };
@@ -229,7 +232,7 @@ private:
 
   explicit AttributeSet(AttributeSetImpl *LI) : pImpl(LI) {}
 public:
-  AttributeSet() : pImpl(0) {}
+  AttributeSet() : pImpl(nullptr) {}
 
   //===--------------------------------------------------------------------===//
   // AttributeSet Construction and Mutation
@@ -400,10 +403,6 @@ public:
     addAttribute(A);
   }
   AttrBuilder(AttributeSet AS, unsigned Idx);
-  AttrBuilder(const AttrBuilder &B)
-    : Attrs(B.Attrs),
-      TargetDepAttrs(B.TargetDepAttrs.begin(), B.TargetDepAttrs.end()),
-      Alignment(B.Alignment), StackAlignment(B.StackAlignment) {}
 
   void clear();
 

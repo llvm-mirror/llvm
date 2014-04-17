@@ -21,6 +21,10 @@
 
 namespace llvm {
 
+namespace object {
+  class ObjectFile;
+}
+
 class RuntimeDyldImpl;
 class ObjectImage;
 
@@ -32,6 +36,7 @@ class RuntimeDyld {
   // interface.
   RuntimeDyldImpl *Dyld;
   RTDyldMemoryManager *MM;
+  bool ProcessAllSections;
 protected:
   // Change the address associated with a section when resolving relocations.
   // Any relocations already associated with the symbol will be re-resolved.
@@ -45,6 +50,12 @@ public:
   /// instance returned from this function if successful. In the case of load
   /// failure, the input buffer will be deleted.
   ObjectImage *loadObject(ObjectBuffer *InputBuffer);
+
+  /// Prepare the referenced object file for execution.
+  /// Ownership of the input object is transferred to the ObjectImage
+  /// instance returned from this function if successful. In the case of load
+  /// failure, the input object will be deleted.
+  ObjectImage *loadObject(object::ObjectFile *InputObject);
 
   /// Get the address of our local copy of the symbol. This may or may not
   /// be the address used for relocation (clients can copy the data around
@@ -64,9 +75,30 @@ public:
   /// This is the address which will be used for relocation resolution.
   void mapSectionAddress(const void *LocalAddress, uint64_t TargetAddress);
 
+  /// Register any EH frame sections that have been loaded but not previously
+  /// registered with the memory manager.  Note, RuntimeDyld is responsible
+  /// for identifying the EH frame and calling the memory manager with the
+  /// EH frame section data.  However, the memory manager itself will handle
+  /// the actual target-specific EH frame registration.
+  void registerEHFrames();
+
+  void deregisterEHFrames();
+
+  bool hasError();
   StringRef getErrorString();
 
-  StringRef getEHFrameSection();
+  /// By default, only sections that are "required for execution" are passed to
+  /// the RTDyldMemoryManager, and other sections are discarded. Passing 'true'
+  /// to this method will cause RuntimeDyld to pass all sections to its
+  /// memory manager regardless of whether they are "required to execute" in the
+  /// usual sense. This is useful for inspecting metadata sections that may not
+  /// contain relocations, E.g. Debug info, stackmaps.
+  ///
+  /// Must be called before the first object file is loaded.
+  void setProcessAllSections(bool ProcessAllSections) {
+    assert(!Dyld && "setProcessAllSections must be called before loadObject.");
+    this->ProcessAllSections = ProcessAllSections;
+  }
 };
 
 } // end namespace llvm

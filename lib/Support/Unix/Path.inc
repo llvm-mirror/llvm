@@ -17,7 +17,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "Unix.h"
-#include "llvm/Support/Process.h"
 #include <limits.h>
 #include <stdio.h>
 #if HAVE_SYS_STAT_H
@@ -86,95 +85,22 @@ namespace {
 
     operator int() const {return FileDescriptor;}
   };
-
-  error_code TempDir(SmallVectorImpl<char> &result) {
-    // FIXME: Don't use TMPDIR if program is SUID or SGID enabled.
-    const char *dir = 0;
-    (dir = std::getenv("TMPDIR" )) ||
-    (dir = std::getenv("TMP"    )) ||
-    (dir = std::getenv("TEMP"   )) ||
-    (dir = std::getenv("TEMPDIR")) ||
-#ifdef P_tmpdir
-    (dir = P_tmpdir) ||
-#endif
-    (dir = "/tmp");
-
-    result.clear();
-    StringRef d(dir);
-    result.append(d.begin(), d.end());
-    return error_code::success();
-  }
 }
 
-static error_code createUniqueEntity(const Twine &Model, int &ResultFD,
-                                     SmallVectorImpl<char> &ResultPath,
-                                     bool MakeAbsolute, unsigned Mode,
-                                     FSEntity Type) {
-  SmallString<128> ModelStorage;
-  Model.toVector(ModelStorage);
+static error_code TempDir(SmallVectorImpl<char> &result) {
+  // FIXME: Don't use TMPDIR if program is SUID or SGID enabled.
+  const char *dir = 0;
+  (dir = std::getenv("TMPDIR")) || (dir = std::getenv("TMP")) ||
+      (dir = std::getenv("TEMP")) || (dir = std::getenv("TEMPDIR")) ||
+#ifdef P_tmpdir
+      (dir = P_tmpdir) ||
+#endif
+      (dir = "/tmp");
 
-  if (MakeAbsolute) {
-    // Make model absolute by prepending a temp directory if it's not already.
-    bool absolute = sys::path::is_absolute(Twine(ModelStorage));
-    if (!absolute) {
-      SmallString<128> TDir;
-      if (error_code ec = TempDir(TDir)) return ec;
-      sys::path::append(TDir, Twine(ModelStorage));
-      ModelStorage.swap(TDir);
-    }
-  }
-
-  // From here on, DO NOT modify model. It may be needed if the randomly chosen
-  // path already exists.
-  ResultPath = ModelStorage;
-  // Null terminate.
-  ResultPath.push_back(0);
-  ResultPath.pop_back();
-
-retry_random_path:
-  // Replace '%' with random chars.
-  for (unsigned i = 0, e = ModelStorage.size(); i != e; ++i) {
-    if (ModelStorage[i] == '%')
-      ResultPath[i] = "0123456789abcdef"[sys::Process::GetRandomNumber() & 15];
-  }
-
-  // Try to open + create the file.
-  switch (Type) {
-  case FS_File: {
-    int RandomFD = ::open(ResultPath.begin(), O_RDWR | O_CREAT | O_EXCL, Mode);
-    if (RandomFD == -1) {
-      int SavedErrno = errno;
-      // If the file existed, try again, otherwise, error.
-      if (SavedErrno == errc::file_exists)
-        goto retry_random_path;
-      return error_code(SavedErrno, system_category());
-    }
-
-    ResultFD = RandomFD;
-    return error_code::success();
-  }
-
-  case FS_Name: {
-    bool Exists;
-    error_code EC = sys::fs::exists(ResultPath.begin(), Exists);
-    if (EC)
-      return EC;
-    if (Exists)
-      goto retry_random_path;
-    return error_code::success();
-  }
-
-  case FS_Dir: {
-    bool Existed;
-    error_code EC = sys::fs::create_directory(ResultPath.begin(), Existed);
-    if (EC)
-      return EC;
-    if (Existed)
-      goto retry_random_path;
-    return error_code::success();
-  }
-  }
-  llvm_unreachable("Invalid Type");
+  result.clear();
+  StringRef d(dir);
+  result.append(d.begin(), d.end());
+  return error_code::success();
 }
 
 namespace llvm {
@@ -182,17 +108,17 @@ namespace sys  {
 namespace fs {
 #if defined(__FreeBSD__) || defined (__NetBSD__) || defined(__Bitrig__) || \
     defined(__OpenBSD__) || defined(__minix) || defined(__FreeBSD_kernel__) || \
-    defined(__linux__) || defined(__CYGWIN__)
+    defined(__linux__) || defined(__CYGWIN__) || defined(__DragonFly__)
 static int
-test_dir(char buf[PATH_MAX], char ret[PATH_MAX],
-    const char *dir, const char *bin)
-{
+test_dir(char ret[PATH_MAX], const char *dir, const char *bin)
+{  
   struct stat sb;
+  char fullpath[PATH_MAX];
 
-  snprintf(buf, PATH_MAX, "%s/%s", dir, bin);
-  if (realpath(buf, ret) == NULL)
+  snprintf(fullpath, PATH_MAX, "%s/%s", dir, bin);
+  if (realpath(fullpath, ret) == NULL)
     return (1);
-  if (stat(buf, &sb) != 0)
+  if (stat(fullpath, &sb) != 0)
     return (1);
 
   return (0);
@@ -201,20 +127,21 @@ test_dir(char buf[PATH_MAX], char ret[PATH_MAX],
 static char *
 getprogpath(char ret[PATH_MAX], const char *bin)
 {
-  char *pv, *s, *t, buf[PATH_MAX];
+  char *pv, *s, *t;
 
   /* First approach: absolute path. */
   if (bin[0] == '/') {
-    if (test_dir(buf, ret, "/", bin) == 0)
+    if (test_dir(ret, "/", bin) == 0)
       return (ret);
     return (NULL);
   }
 
   /* Second approach: relative path. */
   if (strchr(bin, '/') != NULL) {
-    if (getcwd(buf, PATH_MAX) == NULL)
+    char cwd[PATH_MAX];
+    if (getcwd(cwd, PATH_MAX) == NULL)
       return (NULL);
-    if (test_dir(buf, ret, buf, bin) == 0)
+    if (test_dir(ret, cwd, bin) == 0)
       return (ret);
     return (NULL);
   }
@@ -226,7 +153,7 @@ getprogpath(char ret[PATH_MAX], const char *bin)
   if (pv == NULL)
     return (NULL);
   while ((t = strsep(&s, ":")) != NULL) {
-    if (test_dir(buf, ret, t, bin) == 0) {
+    if (test_dir(ret, t, bin) == 0) {
       free(pv);
       return (ret);
     }
@@ -251,7 +178,8 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
       return link_path;
   }
 #elif defined(__FreeBSD__) || defined (__NetBSD__) || defined(__Bitrig__) || \
-      defined(__OpenBSD__) || defined(__minix) || defined(__FreeBSD_kernel__)
+      defined(__OpenBSD__) || defined(__minix) || defined(__DragonFly__) || \
+      defined(__FreeBSD_kernel__)
   char exe_path[PATH_MAX];
 
   if (getprogpath(exe_path, argv0) != NULL)
@@ -332,34 +260,34 @@ error_code current_path(SmallVectorImpl<char> &result) {
   return error_code::success();
 }
 
-error_code create_directory(const Twine &path, bool &existed) {
+error_code create_directory(const Twine &path, bool IgnoreExisting) {
   SmallString<128> path_storage;
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
   if (::mkdir(p.begin(), S_IRWXU | S_IRWXG) == -1) {
-    if (errno != errc::file_exists)
+    if (errno != errc::file_exists || !IgnoreExisting)
       return error_code(errno, system_category());
-    existed = true;
-  } else
-    existed = false;
+  }
 
   return error_code::success();
 }
 
-error_code create_hard_link(const Twine &to, const Twine &from) {
-  // Get arguments.
-  SmallString<128> from_storage;
-  SmallString<128> to_storage;
-  StringRef f = from.toNullTerminatedStringRef(from_storage);
-  StringRef t = to.toNullTerminatedStringRef(to_storage);
-
-  if (::link(t.begin(), f.begin()) == -1)
-    return error_code(errno, system_category());
-
+error_code normalize_separators(SmallVectorImpl<char> &Path) {
+  for (auto PI = Path.begin(), PE = Path.end(); PI < PE; ++PI) {
+    if (*PI == '\\') {
+      auto PN = PI + 1;
+      if (PN < PE && *PN == '\\')
+        ++PI; // increment once, the for loop will move over the escaped slash
+      else
+        *PI = '/';
+    }
+  }
   return error_code::success();
 }
 
-error_code create_symlink(const Twine &to, const Twine &from) {
+// Note that we are using symbolic link because hard links are not supported by
+// all filesystems (SMB doesn't).
+error_code create_link(const Twine &to, const Twine &from) {
   // Get arguments.
   SmallString<128> from_storage;
   SmallString<128> to_storage;
@@ -372,15 +300,14 @@ error_code create_symlink(const Twine &to, const Twine &from) {
   return error_code::success();
 }
 
-error_code remove(const Twine &path, bool &existed) {
+error_code remove(const Twine &path, bool IgnoreNonExisting) {
   SmallString<128> path_storage;
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
   struct stat buf;
-  if (stat(p.begin(), &buf) != 0) {
-    if (errno != errc::no_such_file_or_directory)
+  if (lstat(p.begin(), &buf) != 0) {
+    if (errno != errc::no_such_file_or_directory || !IgnoreNonExisting)
       return error_code(errno, system_category());
-    existed = false;
     return error_code::success();
   }
 
@@ -389,15 +316,13 @@ error_code remove(const Twine &path, bool &existed) {
   // check ensures that what we're trying to erase is a regular file. It
   // effectively prevents LLVM from erasing things like /dev/null, any block
   // special file, or other things that aren't "regular" files.
-  if (!S_ISREG(buf.st_mode) && !S_ISDIR(buf.st_mode))
+  if (!S_ISREG(buf.st_mode) && !S_ISDIR(buf.st_mode) && !S_ISLNK(buf.st_mode))
     return make_error_code(errc::operation_not_permitted);
 
   if (::remove(p.begin()) == -1) {
-    if (errno != errc::no_such_file_or_directory)
+    if (errno != errc::no_such_file_or_directory || !IgnoreNonExisting)
       return error_code(errno, system_category());
-    existed = false;
-  } else
-    existed = true;
+  }
 
   return error_code::success();
 }
@@ -525,21 +450,24 @@ error_code status(int FD, file_status &Result) {
 error_code setLastModificationAndAccessTime(int FD, TimeValue Time) {
 #if defined(HAVE_FUTIMENS)
   timespec Times[2];
-  Times[0].tv_sec = Time.toPosixTime();
+  Times[0].tv_sec = Time.toEpochTime();
   Times[0].tv_nsec = 0;
   Times[1] = Times[0];
   if (::futimens(FD, Times))
+    return error_code(errno, system_category());
+  return error_code::success();
 #elif defined(HAVE_FUTIMES)
   timeval Times[2];
-  Times[0].tv_sec = Time.toPosixTime();
+  Times[0].tv_sec = Time.toEpochTime();
   Times[0].tv_usec = 0;
   Times[1] = Times[0];
   if (::futimes(FD, Times))
-#else
-#error Missing futimes() and futimens()
-#endif
     return error_code(errno, system_category());
   return error_code::success();
+#else
+#warning Missing futimes() and futimens()
+  return make_error_code(errc::not_supported);
+#endif
 }
 
 error_code mapped_file_region::init(int FD, bool CloseFD, uint64_t Offset) {
@@ -625,12 +553,10 @@ mapped_file_region::~mapped_file_region() {
     ::munmap(Mapping, Size);
 }
 
-#if LLVM_HAS_RVALUE_REFERENCES
 mapped_file_region::mapped_file_region(mapped_file_region &&other)
   : Mode(other.Mode), Size(other.Size), Mapping(other.Mapping) {
   other.Mapping = 0;
 }
-#endif
 
 mapped_file_region::mapmode mapped_file_region::flags() const {
   assert(Mapping && "Mapping failed but used anyway!");
@@ -644,7 +570,7 @@ uint64_t mapped_file_region::size() const {
 
 char *mapped_file_region::data() const {
   assert(Mapping && "Mapping failed but used anyway!");
-  assert(Mode != readonly && "Cannot get non const data for readonly mapping!");
+  assert(Mode != readonly && "Cannot get non-const data for readonly mapping!");
   return reinterpret_cast<char*>(Mapping);
 }
 
@@ -772,7 +698,12 @@ error_code openFileForWrite(const Twine &Name, int &ResultFD,
   assert((!(Flags & sys::fs::F_Excl) || !(Flags & sys::fs::F_Append)) &&
          "Cannot specify both 'excl' and 'append' file creation flags!");
 
-  int OpenFlags = O_WRONLY | O_CREAT;
+  int OpenFlags = O_CREAT;
+
+  if (Flags & F_RW)
+    OpenFlags |= O_RDWR;
+  else
+    OpenFlags |= O_WRONLY;
 
   if (Flags & F_Append)
     OpenFlags |= O_APPEND;
@@ -792,5 +723,20 @@ error_code openFileForWrite(const Twine &Name, int &ResultFD,
 }
 
 } // end namespace fs
+
+namespace path {
+
+bool home_directory(SmallVectorImpl<char> &result) {
+  if (char *RequestedDir = getenv("HOME")) {
+    result.clear();
+    result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
+    return true;
+  }
+
+  return false;
+}
+
+} // end namespace path
+
 } // end namespace sys
 } // end namespace llvm

@@ -65,7 +65,9 @@ bool LiveRegMatrix::runOnMachineFunction(MachineFunction &MF) {
 void LiveRegMatrix::releaseMemory() {
   for (unsigned i = 0, e = Matrix.size(); i != e; ++i) {
     Matrix[i].clear();
-    Queries[i].clear();
+    // No need to clear Queries here, since LiveIntervalUnion::Query doesn't
+    // have anything important to clear and LiveRegMatrix's runOnFunction()
+    // does a std::unique_ptr::reset anyways.
   }
 }
 
@@ -119,9 +121,11 @@ bool LiveRegMatrix::checkRegUnitInterference(LiveInterval &VirtReg,
   if (VirtReg.empty())
     return false;
   CoalescerPair CP(VirtReg.reg, PhysReg, *TRI);
-  for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units)
-    if (VirtReg.overlaps(LIS->getRegUnit(*Units), CP, *LIS->getSlotIndexes()))
+  for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
+    const LiveRange &UnitRange = LIS->getRegUnit(*Units);
+    if (VirtReg.overlaps(UnitRange, CP, *LIS->getSlotIndexes()))
       return true;
+  }
   return false;
 }
 

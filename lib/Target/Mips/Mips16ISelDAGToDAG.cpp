@@ -13,8 +13,8 @@
 
 #define DEBUG_TYPE "mips-isel"
 #include "Mips16ISelDAGToDAG.h"
-#include "Mips.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
+#include "Mips.h"
 #include "MipsAnalyzeImmediate.h"
 #include "MipsMachineFunction.h"
 #include "MipsRegisterInfo.h"
@@ -24,11 +24,11 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -80,10 +80,11 @@ void Mips16DAGToDAGISel::initGlobalBaseReg(MachineFunction &MF) {
   V1 = RegInfo.createVirtualRegister(RC);
   V2 = RegInfo.createVirtualRegister(RC);
 
-  BuildMI(MBB, I, DL, TII.get(Mips::LiRxImmX16), V0)
-    .addExternalSymbol("_gp_disp", MipsII::MO_ABS_HI);
-  BuildMI(MBB, I, DL, TII.get(Mips::AddiuRxPcImmX16), V1)
-    .addExternalSymbol("_gp_disp", MipsII::MO_ABS_LO);
+  BuildMI(MBB, I, DL, TII.get(Mips::GotPrologue16), V0).
+    addReg(V1, RegState::Define).
+    addExternalSymbol("_gp_disp", MipsII::MO_ABS_HI).
+    addExternalSymbol("_gp_disp", MipsII::MO_ABS_LO);
+
   BuildMI(MBB, I, DL, TII.get(Mips::SllX16), V2).addReg(V0).addImm(16);
   BuildMI(MBB, I, DL, TII.get(Mips::AdduRxRyRz16), GlobalBaseReg)
     .addReg(V1).addReg(V2);

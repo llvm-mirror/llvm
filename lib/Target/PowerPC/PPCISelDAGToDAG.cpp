@@ -27,12 +27,17 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetOptions.h"
 using namespace llvm;
+
+// FIXME: Remove this once the bug has been fixed!
+cl::opt<bool> ANDIGlueBug("expose-ppc-andi-glue-bug",
+cl::desc("expose the ANDI glue bug on PPC"), cl::Hidden);
 
 namespace llvm {
   void initializePPCDAGToDAGISelPass(PassRegistry&);
@@ -181,6 +186,12 @@ namespace {
 
 private:
     SDNode *SelectSETCC(SDNode *N);
+
+    void PeepholePPC64();
+    void PeepholdCROps();
+
+    bool AllUsersSelectZero(SDNode *N);
+    void SwapAllSelectUsers(SDNode *N);
   };
 }
 
@@ -261,11 +272,11 @@ SDNode *PPCDAGToDAGISel::getGlobalBaseReg() {
     DebugLoc dl;
 
     if (PPCLowering.getPointerTy() == MVT::i32) {
-      GlobalBaseReg = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
+      GlobalBaseReg = RegInfo->createVirtualRegister(&PPC::GPRC_NOR0RegClass);
       BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MovePCtoLR));
       BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MFLR), GlobalBaseReg);
     } else {
-      GlobalBaseReg = RegInfo->createVirtualRegister(&PPC::G8RCRegClass);
+      GlobalBaseReg = RegInfo->createVirtualRegister(&PPC::G8RC_NOX0RegClass);
       BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MovePCtoLR8));
       BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MFLR8), GlobalBaseReg);
     }
@@ -447,8 +458,15 @@ SDNode *PPCDAGToDAGISel::SelectBitfieldInsert(SDNode *N) {
         SH  = (Op1Opc == ISD::SHL) ? Value : 32 - Value;
       }
       if (Op1Opc == ISD::AND) {
+       // The AND mask might not be a constant, and we need to make sure that
+       // if we're going to fold the masking with the insert, all bits not
+       // know to be zero in the mask are known to be one.
+        APInt MKZ, MKO;
+        CurDAG->ComputeMaskedBits(Op1.getOperand(1), MKZ, MKO);
+        bool CanFoldMask = InsertMask == MKO.getZExtValue();
+
         unsigned SHOpc = Op1.getOperand(0).getOpcode();
-        if ((SHOpc == ISD::SHL || SHOpc == ISD::SRL) &&
+        if ((SHOpc == ISD::SHL || SHOpc == ISD::SRL) && CanFoldMask &&
             isInt32Immediate(Op1.getOperand(0).getOperand(1), Value)) {
 	  // Note that Value must be in range here (less than 32) because
 	  // otherwise there would not be any bits set in InsertMask.
@@ -561,7 +579,7 @@ SDValue PPCDAGToDAGISel::SelectCC(SDValue LHS, SDValue RHS,
     Opc = PPC::FCMPUS;
   } else {
     assert(LHS.getValueType() == MVT::f64 && "Unknown vt!");
-    Opc = PPC::FCMPUD;
+    Opc = PPCSubTarget.hasVSX() ? PPC::XSCMPUDP : PPC::FCMPUD;
   }
   return SDValue(CurDAG->getMachineNode(Opc, dl, MVT::i32, LHS, RHS), 0);
 }
@@ -629,7 +647,8 @@ static unsigned getCRIdxForSetCC(ISD::CondCode CC, bool &Invert) {
 // getVCmpInst: return the vector compare instruction for the specified
 // vector type and condition code. Since this is for altivec specific code,
 // only support the altivec types (v16i8, v8i16, v4i32, and v4f32).
-static unsigned int getVCmpInst(MVT::SimpleValueType VecVT, ISD::CondCode CC) {
+static unsigned int getVCmpInst(MVT::SimpleValueType VecVT, ISD::CondCode CC,
+                                bool HasVSX) {
   switch (CC) {
     case ISD::SETEQ:
     case ISD::SETUEQ:
@@ -643,7 +662,9 @@ static unsigned int getVCmpInst(MVT::SimpleValueType VecVT, ISD::CondCode CC) {
         return PPC::VCMPEQUW;
       // v4f32 != v4f32 could be translate to unordered not equal
       else if (VecVT == MVT::v4f32)
-        return PPC::VCMPEQFP;
+        return HasVSX ? PPC::XVCMPEQSP : PPC::VCMPEQFP;
+      else if (VecVT == MVT::v2f64)
+        return PPC::XVCMPEQDP;
       break;
     case ISD::SETLT:
     case ISD::SETGT:
@@ -656,7 +677,9 @@ static unsigned int getVCmpInst(MVT::SimpleValueType VecVT, ISD::CondCode CC) {
       else if (VecVT == MVT::v4i32)
         return PPC::VCMPGTSW;
       else if (VecVT == MVT::v4f32)
-        return PPC::VCMPGTFP;
+        return HasVSX ? PPC::XVCMPGTSP : PPC::VCMPGTFP;
+      else if (VecVT == MVT::v2f64)
+        return PPC::XVCMPGTDP;
       break;
     case ISD::SETULT:
     case ISD::SETUGT:
@@ -671,17 +694,23 @@ static unsigned int getVCmpInst(MVT::SimpleValueType VecVT, ISD::CondCode CC) {
       break;
     case ISD::SETOEQ:
       if (VecVT == MVT::v4f32)
-        return PPC::VCMPEQFP;
+        return HasVSX ? PPC::XVCMPEQSP : PPC::VCMPEQFP;
+      else if (VecVT == MVT::v2f64)
+        return PPC::XVCMPEQDP;
       break;
     case ISD::SETOLT:
     case ISD::SETOGT:
     case ISD::SETOLE:
       if (VecVT == MVT::v4f32)
-        return PPC::VCMPGTFP;
+        return HasVSX ? PPC::XVCMPGTSP : PPC::VCMPGTFP;
+      else if (VecVT == MVT::v2f64)
+        return PPC::XVCMPGTDP;
       break;
     case ISD::SETOGE:
       if (VecVT == MVT::v4f32)
-        return PPC::VCMPGEFP;
+        return HasVSX ? PPC::XVCMPGESP : PPC::VCMPGEFP;
+      else if (VecVT == MVT::v2f64)
+        return PPC::XVCMPGEDP;
       break;
     default:
       break;
@@ -692,7 +721,7 @@ static unsigned int getVCmpInst(MVT::SimpleValueType VecVT, ISD::CondCode CC) {
 // getVCmpEQInst: return the equal compare instruction for the specified vector
 // type. Since this is for altivec specific code, only support the altivec
 // types (v16i8, v8i16, v4i32, and v4f32).
-static unsigned int getVCmpEQInst(MVT::SimpleValueType VecVT) {
+static unsigned int getVCmpEQInst(MVT::SimpleValueType VecVT, bool HasVSX) {
   switch (VecVT) {
     case MVT::v16i8:
       return PPC::VCMPEQUB;
@@ -701,12 +730,13 @@ static unsigned int getVCmpEQInst(MVT::SimpleValueType VecVT) {
     case MVT::v4i32:
       return PPC::VCMPEQUW;
     case MVT::v4f32:
-      return PPC::VCMPEQFP;
+      return HasVSX ? PPC::XVCMPEQSP : PPC::VCMPEQFP;
+    case MVT::v2f64:
+      return PPC::XVCMPEQDP;
     default:
       llvm_unreachable("Invalid integer vector compare condition");
   }
 }
-
 
 SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
   SDLoc dl(N);
@@ -715,7 +745,8 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
   EVT PtrVT = CurDAG->getTargetLoweringInfo().getPointerTy();
   bool isPPC64 = (PtrVT == MVT::i64);
 
-  if (isInt32Immediate(N->getOperand(1), Imm)) {
+  if (!PPCSubTarget.useCRBits() &&
+      isInt32Immediate(N->getOperand(1), Imm)) {
     // We can codegen setcc op, imm very efficiently compared to a brcond.
     // Check for those cases here.
     // setcc op, 0
@@ -796,7 +827,7 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
   if (LHS.getValueType().isVector()) {
     EVT VecVT = LHS.getValueType();
     MVT::SimpleValueType VT = VecVT.getSimpleVT().SimpleTy;
-    unsigned int VCmpInst = getVCmpInst(VT, CC);
+    unsigned int VCmpInst = getVCmpInst(VT, CC, PPCSubTarget.hasVSX());
 
     switch (CC) {
       case ISD::SETEQ:
@@ -807,7 +838,9 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
       case ISD::SETONE:
       case ISD::SETUNE: {
         SDValue VCmp(CurDAG->getMachineNode(VCmpInst, dl, VecVT, LHS, RHS), 0);
-        return CurDAG->SelectNodeTo(N, PPC::VNOR, VecVT, VCmp, VCmp);
+        return CurDAG->SelectNodeTo(N, PPCSubTarget.hasVSX() ? PPC::XXLNOR :
+                                                               PPC::VNOR,
+                                    VecVT, VCmp, VCmp);
       } 
       case ISD::SETLT:
       case ISD::SETOLT:
@@ -827,23 +860,30 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
           return CurDAG->SelectNodeTo(N, VCmpInst, VecVT, LHS, RHS);
         } else {
           SDValue VCmpGT(CurDAG->getMachineNode(VCmpInst, dl, VecVT, LHS, RHS), 0);
-          unsigned int VCmpEQInst = getVCmpEQInst(VT);
+          unsigned int VCmpEQInst = getVCmpEQInst(VT, PPCSubTarget.hasVSX());
           SDValue VCmpEQ(CurDAG->getMachineNode(VCmpEQInst, dl, VecVT, LHS, RHS), 0);
-          return CurDAG->SelectNodeTo(N, PPC::VOR, VecVT, VCmpGT, VCmpEQ);
+          return CurDAG->SelectNodeTo(N, PPCSubTarget.hasVSX() ? PPC::XXLOR :
+                                                                 PPC::VOR,
+                                      VecVT, VCmpGT, VCmpEQ);
         }
       }
       case ISD::SETLE:
       case ISD::SETOLE:
       case ISD::SETULE: {
         SDValue VCmpLE(CurDAG->getMachineNode(VCmpInst, dl, VecVT, RHS, LHS), 0);
-        unsigned int VCmpEQInst = getVCmpEQInst(VT);
+        unsigned int VCmpEQInst = getVCmpEQInst(VT, PPCSubTarget.hasVSX());
         SDValue VCmpEQ(CurDAG->getMachineNode(VCmpEQInst, dl, VecVT, LHS, RHS), 0);
-        return CurDAG->SelectNodeTo(N, PPC::VOR, VecVT, VCmpLE, VCmpEQ);
+        return CurDAG->SelectNodeTo(N, PPCSubTarget.hasVSX() ? PPC::XXLOR :
+                                                               PPC::VOR,
+                                    VecVT, VCmpLE, VCmpEQ);
       }
       default:
         llvm_unreachable("Invalid vector compare type: should be expanded by legalize");
     }
   }
+
+  if (PPCSubTarget.useCRBits())
+    return 0;
 
   bool Inv;
   unsigned Idx = getCRIdxForSetCC(CC, Inv);
@@ -876,8 +916,10 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
 // target-specific node if it hasn't already been changed.
 SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
   SDLoc dl(N);
-  if (N->isMachineOpcode())
+  if (N->isMachineOpcode()) {
+    N->setNodeId(-1);
     return NULL;   // Already selected.
+  }
 
   switch (N->getOpcode()) {
   default: break;
@@ -957,8 +999,12 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     break;
   }
 
-  case ISD::SETCC:
-    return SelectSETCC(N);
+  case ISD::SETCC: {
+    SDNode *SN = SelectSETCC(N);
+    if (SN)
+      return SN;
+    break;
+  }
   case PPCISD::GlobalBaseReg:
     return getGlobalBaseReg();
 
@@ -1120,7 +1166,21 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
         isMask_64(Imm64)) {
       SDValue Val = N->getOperand(0);
       MB = 64 - CountTrailingOnes_64(Imm64);
-      SDValue Ops[] = { Val, getI32Imm(0), getI32Imm(MB) };
+      SH = 0;
+
+      // If the operand is a logical right shift, we can fold it into this
+      // instruction: rldicl(rldicl(x, 64-n, n), 0, mb) -> rldicl(x, 64-n, mb)
+      // for n <= mb. The right shift is really a left rotate followed by a
+      // mask, and this mask is a more-restrictive sub-mask of the mask implied
+      // by the shift.
+      if (Val.getOpcode() == ISD::SRL &&
+          isInt32Immediate(Val.getOperand(1).getNode(), Imm) && Imm <= MB) {
+        assert(Imm < 64 && "Illegal shift amount");
+        Val = Val.getOperand(0);
+        SH = 64 - Imm;
+      }
+
+      SDValue Ops[] = { Val, getI32Imm(SH), getI32Imm(MB) };
       return CurDAG->SelectNodeTo(N, PPC::RLDICL, MVT::i64, Ops, 3);
     }
     // AND X, 0 -> 0, not "rlwinm 32".
@@ -1177,10 +1237,38 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     // Other cases are autogenerated.
     break;
   }
+  // FIXME: Remove this once the ANDI glue bug is fixed:
+  case PPCISD::ANDIo_1_EQ_BIT:
+  case PPCISD::ANDIo_1_GT_BIT: {
+    if (!ANDIGlueBug)
+      break;
+
+    EVT InVT = N->getOperand(0).getValueType();
+    assert((InVT == MVT::i64 || InVT == MVT::i32) &&
+           "Invalid input type for ANDIo_1_EQ_BIT");
+
+    unsigned Opcode = (InVT == MVT::i64) ? PPC::ANDIo8 : PPC::ANDIo;
+    SDValue AndI(CurDAG->getMachineNode(Opcode, dl, InVT, MVT::Glue,
+                                        N->getOperand(0),
+                                        CurDAG->getTargetConstant(1, InVT)), 0);
+    SDValue CR0Reg = CurDAG->getRegister(PPC::CR0, MVT::i32);
+    SDValue SRIdxVal =
+      CurDAG->getTargetConstant(N->getOpcode() == PPCISD::ANDIo_1_EQ_BIT ?
+                                PPC::sub_eq : PPC::sub_gt, MVT::i32);
+
+    return CurDAG->SelectNodeTo(N, TargetOpcode::EXTRACT_SUBREG, MVT::i1,
+                                CR0Reg, SRIdxVal,
+                                SDValue(AndI.getNode(), 1) /* glue */);
+  }
   case ISD::SELECT_CC: {
     ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(4))->get();
     EVT PtrVT = CurDAG->getTargetLoweringInfo().getPointerTy();
     bool isPPC64 = (PtrVT == MVT::i64);
+
+    // If this is a select of i1 operands, we'll pattern match it.
+    if (PPCSubTarget.useCRBits() &&
+        N->getOperand(0).getValueType() == MVT::i1)
+      break;
 
     // Handle the setcc cases here.  select_cc lhs, 0, 1, 0, cc
     if (!isPPC64)
@@ -1200,6 +1288,36 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
             }
 
     SDValue CCReg = SelectCC(N->getOperand(0), N->getOperand(1), CC, dl);
+
+    if (N->getValueType(0) == MVT::i1) {
+      // An i1 select is: (c & t) | (!c & f).
+      bool Inv;
+      unsigned Idx = getCRIdxForSetCC(CC, Inv);
+
+      unsigned SRI;
+      switch (Idx) {
+      default: llvm_unreachable("Invalid CC index");
+      case 0: SRI = PPC::sub_lt; break;
+      case 1: SRI = PPC::sub_gt; break;
+      case 2: SRI = PPC::sub_eq; break;
+      case 3: SRI = PPC::sub_un; break;
+      }
+
+      SDValue CCBit = CurDAG->getTargetExtractSubreg(SRI, dl, MVT::i1, CCReg);
+
+      SDValue NotCCBit(CurDAG->getMachineNode(PPC::CRNOR, dl, MVT::i1,
+                                              CCBit, CCBit), 0);
+      SDValue C =    Inv ? NotCCBit : CCBit,
+              NotC = Inv ? CCBit    : NotCCBit;
+
+      SDValue CAndT(CurDAG->getMachineNode(PPC::CRAND, dl, MVT::i1,
+                                           C, N->getOperand(2)), 0);
+      SDValue NotCAndF(CurDAG->getMachineNode(PPC::CRAND, dl, MVT::i1,
+                                              NotC, N->getOperand(3)), 0);
+
+      return CurDAG->SelectNodeTo(N, PPC::CROR, MVT::i1, CAndT, NotCAndF);
+    }
+
     unsigned BROpc = getPredicateForSetCC(CC);
 
     unsigned SelectCCOp;
@@ -1218,6 +1336,50 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
                         getI32Imm(BROpc) };
     return CurDAG->SelectNodeTo(N, SelectCCOp, N->getValueType(0), Ops, 4);
   }
+  case ISD::VSELECT:
+    if (PPCSubTarget.hasVSX()) {
+      SDValue Ops[] = { N->getOperand(2), N->getOperand(1), N->getOperand(0) };
+      return CurDAG->SelectNodeTo(N, PPC::XXSEL, N->getValueType(0), Ops, 3);
+    }
+
+    break;
+  case ISD::VECTOR_SHUFFLE:
+    if (PPCSubTarget.hasVSX() && (N->getValueType(0) == MVT::v2f64 ||
+                                  N->getValueType(0) == MVT::v2i64)) {
+      ShuffleVectorSDNode *SVN = cast<ShuffleVectorSDNode>(N);
+      
+      SDValue Op1 = N->getOperand(SVN->getMaskElt(0) < 2 ? 0 : 1),
+              Op2 = N->getOperand(SVN->getMaskElt(1) < 2 ? 0 : 1);
+      unsigned DM[2];
+
+      for (int i = 0; i < 2; ++i)
+        if (SVN->getMaskElt(i) <= 0 || SVN->getMaskElt(i) == 2)
+          DM[i] = 0;
+        else
+          DM[i] = 1;
+
+      SDValue DMV = CurDAG->getTargetConstant(DM[1] | (DM[0] << 1), MVT::i32);
+
+      if (Op1 == Op2 && DM[0] == 0 && DM[1] == 0 &&
+          Op1.getOpcode() == ISD::SCALAR_TO_VECTOR &&
+          isa<LoadSDNode>(Op1.getOperand(0))) {
+        LoadSDNode *LD = cast<LoadSDNode>(Op1.getOperand(0));
+        SDValue Base, Offset;
+
+        if (LD->isUnindexed() &&
+            SelectAddrIdxOnly(LD->getBasePtr(), Base, Offset)) {
+          SDValue Chain = LD->getChain();
+          SDValue Ops[] = { Base, Offset, Chain };
+          return CurDAG->SelectNodeTo(N, PPC::LXVDSX,
+                                      N->getValueType(0), Ops, 3);
+        }
+      }
+
+      SDValue Ops[] = { Op1, Op2, DMV };
+      return CurDAG->SelectNodeTo(N, PPC::XXPERMDI, N->getValueType(0), Ops, 3);
+    }
+
+    break;
   case PPCISD::BDNZ:
   case PPCISD::BDZ: {
     bool IsPPC64 = PPCSubTarget.isPPC64();
@@ -1242,8 +1404,30 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
   }
   case ISD::BR_CC: {
     ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(1))->get();
+    unsigned PCC = getPredicateForSetCC(CC);
+
+    if (N->getOperand(2).getValueType() == MVT::i1) {
+      unsigned Opc;
+      bool Swap;
+      switch (PCC) {
+      default: llvm_unreachable("Unexpected Boolean-operand predicate");
+      case PPC::PRED_LT: Opc = PPC::CRANDC; Swap = true;  break;
+      case PPC::PRED_LE: Opc = PPC::CRORC;  Swap = true;  break;
+      case PPC::PRED_EQ: Opc = PPC::CREQV;  Swap = false; break;
+      case PPC::PRED_GE: Opc = PPC::CRORC;  Swap = false; break;
+      case PPC::PRED_GT: Opc = PPC::CRANDC; Swap = false; break;
+      case PPC::PRED_NE: Opc = PPC::CRXOR;  Swap = false; break;
+      }
+
+      SDValue BitComp(CurDAG->getMachineNode(Opc, dl, MVT::i1,
+                                             N->getOperand(Swap ? 3 : 2),
+                                             N->getOperand(Swap ? 2 : 3)), 0);
+      return CurDAG->SelectNodeTo(N, PPC::BC, MVT::Other,
+                                  BitComp, N->getOperand(4), N->getOperand(0));
+    }
+
     SDValue CondCode = SelectCC(N->getOperand(2), N->getOperand(3), CC, dl);
-    SDValue Ops[] = { getI32Imm(getPredicateForSetCC(CC)), CondCode,
+    SDValue Ops[] = { getI32Imm(PCC), CondCode,
                         N->getOperand(4), N->getOperand(0) };
     return CurDAG->SelectNodeTo(N, PPC::BCC, MVT::Other, Ops, 4);
   }
@@ -1286,8 +1470,8 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(GA)) {
       const GlobalValue *GValue = G->getGlobal();
       const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
-      const GlobalValue *RealGValue = GAlias ?
-        GAlias->resolveAliasedGlobal(false) : GValue;
+      const GlobalValue *RealGValue =
+          GAlias ? GAlias->getAliasedGlobal() : GValue;
       const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
       assert((GVar || isa<Function>(RealGValue)) &&
              "Unexpected global value subclass!");
@@ -1380,7 +1564,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
   return SelectCode(N);
 }
 
-/// PostProcessISelDAG - Perform some late peephole optimizations
+/// PostprocessISelDAG - Perform some late peephole optimizations
 /// on the DAG representation.
 void PPCDAGToDAGISel::PostprocessISelDAG() {
 
@@ -1388,6 +1572,478 @@ void PPCDAGToDAGISel::PostprocessISelDAG() {
   if (TM.getOptLevel() == CodeGenOpt::None)
     return;
 
+  PeepholePPC64();
+  PeepholdCROps();
+}
+
+// Check if all users of this node will become isel where the second operand
+// is the constant zero. If this is so, and if we can negate the condition,
+// then we can flip the true and false operands. This will allow the zero to
+// be folded with the isel so that we don't need to materialize a register
+// containing zero.
+bool PPCDAGToDAGISel::AllUsersSelectZero(SDNode *N) {
+  // If we're not using isel, then this does not matter.
+  if (!PPCSubTarget.hasISEL())
+    return false;
+
+  for (SDNode::use_iterator UI = N->use_begin(), UE = N->use_end();
+       UI != UE; ++UI) {
+    SDNode *User = *UI;
+    if (!User->isMachineOpcode())
+      return false;
+    if (User->getMachineOpcode() != PPC::SELECT_I4 &&
+        User->getMachineOpcode() != PPC::SELECT_I8)
+      return false;
+
+    SDNode *Op2 = User->getOperand(2).getNode();
+    if (!Op2->isMachineOpcode())
+      return false;
+
+    if (Op2->getMachineOpcode() != PPC::LI &&
+        Op2->getMachineOpcode() != PPC::LI8)
+      return false;
+
+    ConstantSDNode *C = dyn_cast<ConstantSDNode>(Op2->getOperand(0));
+    if (!C)
+      return false;
+
+    if (!C->isNullValue())
+      return false;
+  }
+
+  return true;
+}
+
+void PPCDAGToDAGISel::SwapAllSelectUsers(SDNode *N) {
+  SmallVector<SDNode *, 4> ToReplace;
+  for (SDNode::use_iterator UI = N->use_begin(), UE = N->use_end();
+       UI != UE; ++UI) {
+    SDNode *User = *UI;
+    assert((User->getMachineOpcode() == PPC::SELECT_I4 ||
+            User->getMachineOpcode() == PPC::SELECT_I8) &&
+           "Must have all select users");
+    ToReplace.push_back(User);
+  }
+
+  for (SmallVector<SDNode *, 4>::iterator UI = ToReplace.begin(),
+       UE = ToReplace.end(); UI != UE; ++UI) {
+    SDNode *User = *UI;
+    SDNode *ResNode =
+      CurDAG->getMachineNode(User->getMachineOpcode(), SDLoc(User),
+                             User->getValueType(0), User->getOperand(0),
+                             User->getOperand(2),
+                             User->getOperand(1));
+
+      DEBUG(dbgs() << "CR Peephole replacing:\nOld:    ");
+      DEBUG(User->dump(CurDAG));
+      DEBUG(dbgs() << "\nNew: ");
+      DEBUG(ResNode->dump(CurDAG));
+      DEBUG(dbgs() << "\n");
+
+      ReplaceUses(User, ResNode);
+  }
+}
+
+void PPCDAGToDAGISel::PeepholdCROps() {
+  bool IsModified;
+  do {
+    IsModified = false;
+    for (SelectionDAG::allnodes_iterator I = CurDAG->allnodes_begin(),
+         E = CurDAG->allnodes_end(); I != E; ++I) {
+      MachineSDNode *MachineNode = dyn_cast<MachineSDNode>(I);
+      if (!MachineNode || MachineNode->use_empty())
+        continue;
+      SDNode *ResNode = MachineNode;
+
+      bool Op1Set   = false, Op1Unset = false,
+           Op1Not   = false,
+           Op2Set   = false, Op2Unset = false,
+           Op2Not   = false;
+
+      unsigned Opcode = MachineNode->getMachineOpcode();
+      switch (Opcode) {
+      default: break;
+      case PPC::CRAND:
+      case PPC::CRNAND:
+      case PPC::CROR:
+      case PPC::CRXOR:
+      case PPC::CRNOR:
+      case PPC::CREQV:
+      case PPC::CRANDC:
+      case PPC::CRORC: {
+        SDValue Op = MachineNode->getOperand(1);
+        if (Op.isMachineOpcode()) {
+          if (Op.getMachineOpcode() == PPC::CRSET)
+            Op2Set = true;
+          else if (Op.getMachineOpcode() == PPC::CRUNSET)
+            Op2Unset = true;
+          else if (Op.getMachineOpcode() == PPC::CRNOR &&
+                   Op.getOperand(0) == Op.getOperand(1))
+            Op2Not = true;
+        }
+        }  // fallthrough
+      case PPC::BC:
+      case PPC::BCn:
+      case PPC::SELECT_I4:
+      case PPC::SELECT_I8:
+      case PPC::SELECT_F4:
+      case PPC::SELECT_F8:
+      case PPC::SELECT_VRRC: {
+        SDValue Op = MachineNode->getOperand(0);
+        if (Op.isMachineOpcode()) {
+          if (Op.getMachineOpcode() == PPC::CRSET)
+            Op1Set = true;
+          else if (Op.getMachineOpcode() == PPC::CRUNSET)
+            Op1Unset = true;
+          else if (Op.getMachineOpcode() == PPC::CRNOR &&
+                   Op.getOperand(0) == Op.getOperand(1))
+            Op1Not = true;
+        }
+        }
+        break;
+      }
+
+      bool SelectSwap = false;
+      switch (Opcode) {
+      default: break;
+      case PPC::CRAND:
+        if (MachineNode->getOperand(0) == MachineNode->getOperand(1))
+          // x & x = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Set)
+          // 1 & y = y
+          ResNode = MachineNode->getOperand(1).getNode();
+        else if (Op2Set)
+          // x & 1 = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Unset || Op2Unset)
+          // x & 0 = 0 & y = 0
+          ResNode = CurDAG->getMachineNode(PPC::CRUNSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Not)
+          // ~x & y = andc(y, x)
+          ResNode = CurDAG->getMachineNode(PPC::CRANDC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(0).
+                                             getOperand(0));
+        else if (Op2Not)
+          // x & ~y = andc(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRANDC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1).
+                                             getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CRNAND, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1)),
+          SelectSwap = true;
+        break;
+      case PPC::CRNAND:
+        if (MachineNode->getOperand(0) == MachineNode->getOperand(1))
+          // nand(x, x) -> nor(x, x)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(0));
+        else if (Op1Set)
+          // nand(1, y) -> nor(y, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(1));
+        else if (Op2Set)
+          // nand(x, 1) -> nor(x, x)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(0));
+        else if (Op1Unset || Op2Unset)
+          // nand(x, 0) = nand(0, y) = 1
+          ResNode = CurDAG->getMachineNode(PPC::CRSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Not)
+          // nand(~x, y) = ~(~x & y) = x | ~y = orc(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRORC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(1));
+        else if (Op2Not)
+          // nand(x, ~y) = ~x | y = orc(y, x)
+          ResNode = CurDAG->getMachineNode(PPC::CRORC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CRAND, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1)),
+          SelectSwap = true;
+        break;
+      case PPC::CROR:
+        if (MachineNode->getOperand(0) == MachineNode->getOperand(1))
+          // x | x = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Set || Op2Set)
+          // x | 1 = 1 | y = 1
+          ResNode = CurDAG->getMachineNode(PPC::CRSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Unset)
+          // 0 | y = y
+          ResNode = MachineNode->getOperand(1).getNode();
+        else if (Op2Unset)
+          // x | 0 = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Not)
+          // ~x | y = orc(y, x)
+          ResNode = CurDAG->getMachineNode(PPC::CRORC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(0).
+                                             getOperand(0));
+        else if (Op2Not)
+          // x | ~y = orc(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRORC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1).
+                                             getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1)),
+          SelectSwap = true;
+        break;
+      case PPC::CRXOR:
+        if (MachineNode->getOperand(0) == MachineNode->getOperand(1))
+          // xor(x, x) = 0
+          ResNode = CurDAG->getMachineNode(PPC::CRUNSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Set)
+          // xor(1, y) -> nor(y, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(1));
+        else if (Op2Set)
+          // xor(x, 1) -> nor(x, x)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(0));
+        else if (Op1Unset)
+          // xor(0, y) = y
+          ResNode = MachineNode->getOperand(1).getNode();
+        else if (Op2Unset)
+          // xor(x, 0) = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Not)
+          // xor(~x, y) = eqv(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CREQV, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(1));
+        else if (Op2Not)
+          // xor(x, ~y) = eqv(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CREQV, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1).
+                                             getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CREQV, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1)),
+          SelectSwap = true;
+        break;
+      case PPC::CRNOR:
+        if (Op1Set || Op2Set)
+          // nor(1, y) -> 0
+          ResNode = CurDAG->getMachineNode(PPC::CRUNSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Unset)
+          // nor(0, y) = ~y -> nor(y, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(1));
+        else if (Op2Unset)
+          // nor(x, 0) = ~x
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(0));
+        else if (Op1Not)
+          // nor(~x, y) = andc(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRANDC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(1));
+        else if (Op2Not)
+          // nor(x, ~y) = andc(y, x)
+          ResNode = CurDAG->getMachineNode(PPC::CRANDC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CROR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1)),
+          SelectSwap = true;
+        break;
+      case PPC::CREQV:
+        if (MachineNode->getOperand(0) == MachineNode->getOperand(1))
+          // eqv(x, x) = 1
+          ResNode = CurDAG->getMachineNode(PPC::CRSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Set)
+          // eqv(1, y) = y
+          ResNode = MachineNode->getOperand(1).getNode();
+        else if (Op2Set)
+          // eqv(x, 1) = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Unset)
+          // eqv(0, y) = ~y -> nor(y, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(1));
+        else if (Op2Unset)
+          // eqv(x, 0) = ~x
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(0));
+        else if (Op1Not)
+          // eqv(~x, y) = xor(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRXOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(1));
+        else if (Op2Not)
+          // eqv(x, ~y) = xor(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRXOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1).
+                                             getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CRXOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1)),
+          SelectSwap = true;
+        break;
+      case PPC::CRANDC:
+        if (MachineNode->getOperand(0) == MachineNode->getOperand(1))
+          // andc(x, x) = 0
+          ResNode = CurDAG->getMachineNode(PPC::CRUNSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Set)
+          // andc(1, y) = ~y
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(1));
+        else if (Op1Unset || Op2Set)
+          // andc(0, y) = andc(x, 1) = 0
+          ResNode = CurDAG->getMachineNode(PPC::CRUNSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op2Unset)
+          // andc(x, 0) = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Not)
+          // andc(~x, y) = ~(x | y) = nor(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(1));
+        else if (Op2Not)
+          // andc(x, ~y) = x & y
+          ResNode = CurDAG->getMachineNode(PPC::CRAND, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1).
+                                             getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CRORC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(0)),
+          SelectSwap = true;
+        break;
+      case PPC::CRORC:
+        if (MachineNode->getOperand(0) == MachineNode->getOperand(1))
+          // orc(x, x) = 1
+          ResNode = CurDAG->getMachineNode(PPC::CRSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op1Set || Op2Unset)
+          // orc(1, y) = orc(x, 0) = 1
+          ResNode = CurDAG->getMachineNode(PPC::CRSET, SDLoc(MachineNode),
+                                           MVT::i1);
+        else if (Op2Set)
+          // orc(x, 1) = x
+          ResNode = MachineNode->getOperand(0).getNode();
+        else if (Op1Unset)
+          // orc(0, y) = ~y
+          ResNode = CurDAG->getMachineNode(PPC::CRNOR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(1));
+        else if (Op1Not)
+          // orc(~x, y) = ~(x & y) = nand(x, y)
+          ResNode = CurDAG->getMachineNode(PPC::CRNAND, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0).
+                                                      getOperand(0),
+                                           MachineNode->getOperand(1));
+        else if (Op2Not)
+          // orc(x, ~y) = x | y
+          ResNode = CurDAG->getMachineNode(PPC::CROR, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(0),
+                                           MachineNode->getOperand(1).
+                                             getOperand(0));
+        else if (AllUsersSelectZero(MachineNode))
+          ResNode = CurDAG->getMachineNode(PPC::CRANDC, SDLoc(MachineNode),
+                                           MVT::i1, MachineNode->getOperand(1),
+                                           MachineNode->getOperand(0)),
+          SelectSwap = true;
+        break;
+      case PPC::SELECT_I4:
+      case PPC::SELECT_I8:
+      case PPC::SELECT_F4:
+      case PPC::SELECT_F8:
+      case PPC::SELECT_VRRC:
+        if (Op1Set)
+          ResNode = MachineNode->getOperand(1).getNode();
+        else if (Op1Unset)
+          ResNode = MachineNode->getOperand(2).getNode();
+        else if (Op1Not)
+          ResNode = CurDAG->getMachineNode(MachineNode->getMachineOpcode(),
+                                           SDLoc(MachineNode),
+                                           MachineNode->getValueType(0),
+                                           MachineNode->getOperand(0).
+                                             getOperand(0),
+                                           MachineNode->getOperand(2),
+                                           MachineNode->getOperand(1));
+        break;
+      case PPC::BC:
+      case PPC::BCn:
+        if (Op1Not)
+          ResNode = CurDAG->getMachineNode(Opcode == PPC::BC ? PPC::BCn :
+                                                               PPC::BC,
+                                           SDLoc(MachineNode),
+                                           MVT::Other,
+                                           MachineNode->getOperand(0).
+                                             getOperand(0),
+                                           MachineNode->getOperand(1),
+                                           MachineNode->getOperand(2));
+        // FIXME: Handle Op1Set, Op1Unset here too.
+        break;
+      }
+
+      // If we're inverting this node because it is used only by selects that
+      // we'd like to swap, then swap the selects before the node replacement.
+      if (SelectSwap)
+        SwapAllSelectUsers(MachineNode);
+
+      if (ResNode != MachineNode) {
+        DEBUG(dbgs() << "CR Peephole replacing:\nOld:    ");
+        DEBUG(MachineNode->dump(CurDAG));
+        DEBUG(dbgs() << "\nNew: ");
+        DEBUG(ResNode->dump(CurDAG));
+        DEBUG(dbgs() << "\n");
+
+        ReplaceUses(MachineNode, ResNode);
+        IsModified = true;
+      }
+    }
+    if (IsModified)
+      CurDAG->RemoveDeadNodes();
+  } while (IsModified);
+}
+
+void PPCDAGToDAGISel::PeepholePPC64() {
   // These optimizations are currently supported only for 64-bit SVR4.
   if (PPCSubTarget.isDarwin() || !PPCSubTarget.isPPC64())
     return;

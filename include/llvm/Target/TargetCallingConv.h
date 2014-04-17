@@ -14,6 +14,7 @@
 #ifndef LLVM_TARGET_TARGETCALLINGCONV_H
 #define LLVM_TARGET_TARGETCALLINGCONV_H
 
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/MathExtras.h"
 #include <string>
@@ -42,6 +43,8 @@ namespace ISD {
     static const uint64_t ByValAlignOffs = 7;
     static const uint64_t Split          = 1ULL<<11;
     static const uint64_t SplitOffs      = 11;
+    static const uint64_t InAlloca       = 1ULL<<12; ///< Passed with inalloca
+    static const uint64_t InAllocaOffs   = 12;
     static const uint64_t OrigAlign      = 0x1FULL<<27;
     static const uint64_t OrigAlignOffs  = 27;
     static const uint64_t ByValSize      = 0xffffffffULL<<32; ///< Struct size
@@ -67,6 +70,9 @@ namespace ISD {
 
     bool isByVal()     const { return Flags & ByVal; }
     void setByVal()    { Flags |= One << ByValOffs; }
+
+    bool isInAlloca()  const { return Flags & InAlloca; }
+    void setInAlloca() { Flags |= One << InAllocaOffs; }
 
     bool isNest()      const { return Flags & Nest; }
     void setNest()     { Flags |= One << NestOffs; }
@@ -113,6 +119,7 @@ namespace ISD {
   struct InputArg {
     ArgFlagsTy Flags;
     MVT VT;
+    EVT ArgVT;
     bool Used;
 
     /// Index original Function's argument.
@@ -124,10 +131,11 @@ namespace ISD {
     unsigned PartOffset;
 
     InputArg() : VT(MVT::Other), Used(false) {}
-    InputArg(ArgFlagsTy flags, EVT vt, bool used,
+    InputArg(ArgFlagsTy flags, EVT vt, EVT argvt, bool used,
              unsigned origIdx, unsigned partOffs)
       : Flags(flags), Used(used), OrigArgIndex(origIdx), PartOffset(partOffs) {
       VT = vt.getSimpleVT();
+      ArgVT = argvt;
     }
   };
 
@@ -138,6 +146,7 @@ namespace ISD {
   struct OutputArg {
     ArgFlagsTy Flags;
     MVT VT;
+    EVT ArgVT;
 
     /// IsFixed - Is this a "fixed" value, ie not passed through a vararg "...".
     bool IsFixed;
@@ -151,11 +160,12 @@ namespace ISD {
     unsigned PartOffset;
 
     OutputArg() : IsFixed(false) {}
-    OutputArg(ArgFlagsTy flags, EVT vt, bool isfixed,
+    OutputArg(ArgFlagsTy flags, EVT vt, EVT argvt, bool isfixed,
               unsigned origIdx, unsigned partOffs)
       : Flags(flags), IsFixed(isfixed), OrigArgIndex(origIdx),
         PartOffset(partOffs) {
       VT = vt.getSimpleVT();
+      ArgVT = argvt;
     }
   };
 }

@@ -1,4 +1,7 @@
-(* RUN: %ocamlopt -warn-error A llvm.cmxa llvm_analysis.cmxa llvm_bitwriter.cmxa %s -o %t
+(* RUN: rm -rf %t.builddir
+ * RUN: mkdir -p %t.builddir
+ * RUN: cp %s %t.builddir
+ * RUN: %ocamlopt -warn-error A llvm.cmxa llvm_analysis.cmxa llvm_bitwriter.cmxa %t.builddir/vmcore.ml -o %t
  * RUN: %t %t.bc
  * RUN: llvm-dis < %t.bc > %t.ll
  * RUN: FileCheck %s < %t.ll
@@ -64,6 +67,14 @@ let filename = Sys.argv.(1)
 let m = create_module context filename
 
 
+(*===-- Conversion --------------------------------------------------------===*)
+
+let test_conversion () =
+  insist ("i32" = (string_of_lltype i32_type));
+  let c = const_int i32_type 42 in
+  insist ("i32 42" = (string_of_llvalue c))
+
+
 (*===-- Target ------------------------------------------------------------===*)
 
 let test_target () =
@@ -74,11 +85,11 @@ let test_target () =
   end;
   
   begin group "layout";
-    let layout = "bogus" in
+    let layout = "e" in
     set_data_layout layout m;
     insist (layout = data_layout m)
   end
-  (* CHECK: target datalayout = "bogus"
+  (* CHECK: target datalayout = "e"
    * CHECK: target triple = "i686-apple-darwin8"
    *)
 
@@ -283,6 +294,7 @@ let test_constants () =
    * CHECK: const_ptrtoint{{.*}}ptrtoint
    * CHECK: const_inttoptr{{.*}}inttoptr
    * CHECK: const_bitcast{{.*}}bitcast
+   * CHECK: const_intcast{{.*}}zext
    *)
   let i128_type = integer_type context 128 in
   ignore (define_global "const_trunc" (const_trunc (const_add foldbomb five)
@@ -302,6 +314,8 @@ let test_constants () =
   ignore (define_global "const_inttoptr" (const_inttoptr (const_add foldbomb five)
                                                   void_ptr) m);
   ignore (define_global "const_bitcast" (const_bitcast ffoldbomb i64_type) m);
+  ignore (define_global "const_intcast"
+          (const_intcast foldbomb i128_type ~is_signed:false) m);
   
   group "misc constants";
   (* CHECK: const_size_of{{.*}}getelementptr{{.*}}null
@@ -399,10 +413,11 @@ let test_global_values () =
 
 let test_global_variables () =
   let (++) x f = f x; x in
-  let fourty_two32 = const_int i32_type 42 in
+  let forty_two32 = const_int i32_type 42 in
 
   group "declarations"; begin
-    (* CHECK: GVar01{{.*}}external
+    (* CHECK: @GVar01 = external global i32
+     * CHECK: @QGVar01 = external addrspace(3) global i32
      *)
     insist (None == lookup_global "GVar01" m);
     let g = declare_global i32_type "GVar01" m in
@@ -424,19 +439,21 @@ let test_global_variables () =
   end;
   
   group "definitions"; begin
-    (* CHECK: GVar02{{.*}}42
-     * CHECK: GVar03{{.*}}42
+    (* CHECK: @GVar02 = global i32 42
+     * CHECK: @GVar03 = global i32 42
+     * CHECK: @QGVar02 = addrspace(3) global i32 42
+     * CHECK: @QGVar03 = addrspace(3) global i32 42
      *)
-    let g = define_global "GVar02" fourty_two32 m in
+    let g = define_global "GVar02" forty_two32 m in
     let g2 = declare_global i32_type "GVar03" m ++
-           set_initializer fourty_two32 in
+           set_initializer forty_two32 in
     insist (not (is_declaration g));
     insist (not (is_declaration g2));
     insist ((global_initializer g) == (global_initializer g2));
 
-    let g = define_qualified_global "QGVar02" fourty_two32 3 m in
+    let g = define_qualified_global "QGVar02" forty_two32 3 m in
     let g2 = declare_qualified_global i32_type "QGVar03" 3 m ++
-           set_initializer fourty_two32 in
+           set_initializer forty_two32 in
     insist (not (is_declaration g));
     insist (not (is_declaration g2));
     insist ((global_initializer g) == (global_initializer g2));
@@ -445,20 +462,34 @@ let test_global_variables () =
   (* CHECK: GVar04{{.*}}thread_local
    *)
   group "threadlocal";
-  let g = define_global "GVar04" fourty_two32 m ++
+  let g = define_global "GVar04" forty_two32 m ++
           set_thread_local true in
   insist (is_thread_local g);
 
-  (* CHECK-NOWHERE-NOT: GVar05
+  (* CHECK: GVar05{{.*}}thread_local(initialexec)
+   *)
+  group "threadlocal_mode";
+  let g = define_global "GVar05" forty_two32 m ++
+          set_thread_local_mode ThreadLocalMode.InitialExec in
+  insist ((thread_local_mode g) = ThreadLocalMode.InitialExec);
+
+  (* CHECK: GVar06{{.*}}externally_initialized
+   *)
+  group "externally_initialized";
+  let g = define_global "GVar06" forty_two32 m ++
+          set_externally_initialized true in
+  insist (is_externally_initialized g);
+
+  (* CHECK-NOWHERE-NOT: GVar07
    *)
   group "delete";
-  let g = define_global "GVar05" fourty_two32 m in
+  let g = define_global "GVar07" forty_two32 m in
   delete_global g;
 
   (* CHECK: ConstGlobalVar{{.*}}constant
    *)
   group "constant";
-  let g = define_global "ConstGlobalVar" fourty_two32 m in
+  let g = define_global "ConstGlobalVar" forty_two32 m in
   insist (not (is_global_constant g));
   set_global_constant true g;
   insist (is_global_constant g);
@@ -550,7 +581,8 @@ let test_users () =
 let test_aliases () =
   (* CHECK: @alias = alias i32* @aliasee
    *)
-  let v = declare_global i32_type "aliasee" m in
+  let forty_two32 = const_int i32_type 42 in
+  let v = define_global "aliasee" forty_two32 m in
   ignore (add_alias m (pointer_type i32_type) v "alias")
 
 
@@ -1000,8 +1032,8 @@ let test_builder () =
   end;
 
   group "metadata"; begin
-    (* CHECK: %metadata = add i32 %P1, %P2, !test !0
-     * !0 is metadata emitted at EOF.
+    (* CHECK: %metadata = add i32 %P1, %P2, !test !1
+     * !1 is metadata emitted at EOF.
      *)
     let i = build_add p1 p2 "metadata" atentry in
     insist ((has_metadata i) = false);
@@ -1024,9 +1056,19 @@ let test_builder () =
     set_metadata i kind md
   end;
 
+  group "named metadata"; begin
+    (* !llvm.module.flags is emitted at EOF. *)
+    let n1 = const_int i32_type 1 in
+    let n2 = mdstring context "Debug Info Version" in
+    let md = mdnode context [| n1; n2; n1 |] in
+    add_named_metadata_operand m "llvm.module.flags" md;
+
+    insist ((get_named_metadata m "llvm.module.flags") = [| md |])
+  end;
+
   group "dbg"; begin
-    (* CHECK: %dbg = add i32 %P1, %P2, !dbg !1
-     * !1 is metadata emitted at EOF.
+    (* CHECK: %dbg = add i32 %P1, %P2, !dbg !2
+     * !2 is metadata emitted at EOF.
      *)
     insist ((current_debug_location atentry) = None);
 
@@ -1234,22 +1276,38 @@ let test_builder () =
 
     (* CHECK: %build_alloca = alloca i32
      * CHECK: %build_array_alloca = alloca i32, i32 %P2
-     * CHECK: %build_load = load i32* %build_array_alloca
-     * CHECK: store i32 %P2, i32* %build_alloca
+     * CHECK: %build_load = load volatile i32* %build_array_alloca, align 4
+     * CHECK: store volatile i32 %P2, i32* %build_alloca, align 4
      * CHECK: %build_gep = getelementptr i32* %build_array_alloca, i32 %P2
      * CHECK: %build_in_bounds_gep = getelementptr inbounds i32* %build_array_alloca, i32 %P2
      * CHECK: %build_struct_gep = getelementptr inbounds{{.*}}%build_alloca2, i32 0, i32 1
+     * CHECK: %build_atomicrmw = atomicrmw xchg i8* %p, i8 42 seq_cst
      *)
     let alloca = build_alloca i32_type "build_alloca" b in
     let array_alloca = build_array_alloca i32_type p2 "build_array_alloca" b in
-    ignore(build_load array_alloca "build_load" b);
-    ignore(build_store p2 alloca b);
+
+    let load = build_load array_alloca "build_load" b in
+    ignore(set_alignment 4 load);
+    ignore(set_volatile true load);
+    insist(true = is_volatile load);
+    insist(4 = alignment load);
+
+    let store = build_store p2 alloca b in
+    ignore(set_volatile true store);
+    ignore(set_alignment 4 store);
+    insist(true = is_volatile store);
+    insist(4 = alignment store);
     ignore(build_gep array_alloca [| p2 |] "build_gep" b);
     ignore(build_in_bounds_gep array_alloca [| p2 |] "build_in_bounds_gep" b);
 
     let sty = struct_type context [| i32_type; i8_type |] in
     let alloca2 = build_alloca sty "build_alloca2" b in
     ignore(build_struct_gep alloca2 1 "build_struct_gep" b);
+
+    let p = build_alloca i8_type "p" b in
+    ignore(build_atomicrmw AtomicRMWBinOp.Xchg p (const_int i8_type 42)
+              AtomicOrdering.SequentiallyConsistent false "build_atomicrmw"
+              b);
 
     ignore(build_unreachable b)
   end;
@@ -1289,8 +1347,10 @@ let test_builder () =
 
 (* End-of-file checks for things like metdata and attributes.
  * CHECK: attributes #0 = {{.*}}uwtable{{.*}}
- * CHECK: !0 = metadata !{i32 1, metadata !"metadata test"}
- * CHECK: !1 = metadata !{i32 2, i32 3, metadata !2, metadata !2}
+ * CHECK: !llvm.module.flags = !{!0}
+ * CHECK: !0 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+ * CHECK: !1 = metadata !{i32 1, metadata !"metadata test"}
+ * CHECK: !2 = metadata !{i32 2, i32 3, metadata !3, metadata !3}
  *)
 
 (*===-- Pass Managers -----------------------------------------------------===*)
@@ -1317,6 +1377,14 @@ let test_pass_manager () =
   end
 
 
+(*===-- Memory Buffer -----------------------------------------------------===*)
+
+let test_memory_buffer () =
+  group "memory buffer";
+  let buf = MemoryBuffer.of_string "foobar" in
+  insist ((MemoryBuffer.as_string buf) = "foobar")
+
+
 (*===-- Writer ------------------------------------------------------------===*)
 
 let test_writer () =
@@ -1334,6 +1402,7 @@ let test_writer () =
 (*===-- Driver ------------------------------------------------------------===*)
 
 let _ =
+  suite "conversion"       test_conversion;
   suite "target"           test_target;
   suite "constants"        test_constants;
   suite "global values"    test_global_values;
@@ -1347,5 +1416,6 @@ let _ =
   suite "instructions"     test_instructions;
   suite "builder"          test_builder;
   suite "pass manager"     test_pass_manager;
+  suite "memory buffer"    test_memory_buffer;
   suite "writer"           test_writer; (* Keep this last; it disposes m. *)
   exit !exit_status

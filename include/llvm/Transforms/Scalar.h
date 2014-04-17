@@ -15,6 +15,8 @@
 #ifndef LLVM_TRANSFORMS_SCALAR_H
 #define LLVM_TRANSFORMS_SCALAR_H
 
+#include "llvm/ADT/StringRef.h"
+
 namespace llvm {
 
 class FunctionPass;
@@ -120,7 +122,7 @@ Pass *createLICMPass();
 //
 Pass *createLoopStrengthReducePass();
 
-Pass *createGlobalMergePass(const TargetMachine *TM = 0);
+Pass *createGlobalMergePass(const TargetMachine *TM = nullptr);
 
 //===----------------------------------------------------------------------===//
 //
@@ -138,7 +140,16 @@ Pass *createLoopInstSimplifyPass();
 //
 // LoopUnroll - This pass is a simple loop unrolling pass.
 //
-Pass *createLoopUnrollPass(int Threshold = -1, int Count = -1, int AllowPartial = -1);
+Pass *createLoopUnrollPass(int Threshold = -1, int Count = -1,
+                           int AllowPartial = -1, int Runtime = -1);
+// Create an unrolling pass for full unrolling only.
+Pass *createSimpleLoopUnrollPass();
+
+//===----------------------------------------------------------------------===//
+//
+// LoopReroll - This pass is a simple loop rerolling pass.
+//
+Pass *createLoopRerollPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -253,24 +264,11 @@ extern char &LowerSwitchID;
 
 //===----------------------------------------------------------------------===//
 //
-// LowerInvoke - This pass converts invoke and unwind instructions to use sjlj
-// exception handling mechanisms.  Note that after this pass runs the CFG is not
-// entirely accurate (exceptional control flow edges are not correct anymore) so
-// only very simple things should be done after the lowerinvoke pass has run
-// (like generation of native code).  This should *NOT* be used as a general
-// purpose "my LLVM-to-LLVM pass doesn't support the invoke instruction yet"
-// lowering pass.
+// LowerInvoke - This pass removes invoke instructions, converting them to call
+// instructions.
 //
-FunctionPass *createLowerInvokePass(const TargetMachine *TM = 0,
-                                    bool useExpensiveEHSupport = false);
+FunctionPass *createLowerInvokePass();
 extern char &LowerInvokePassID;
-
-//===----------------------------------------------------------------------===//
-//
-// BlockPlacement - This pass reorders basic blocks in order to increase the
-// number of fall-through conditional branches.
-//
-FunctionPass *createBlockPlacementPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -310,9 +308,9 @@ Pass *createLoopDeletionPass();
   
 //===----------------------------------------------------------------------===//
 //
-// CodeGenPrepare - This pass prepares a function for instruction selection.
+// ConstantHoisting - This pass prepares a function for expensive constants.
 //
-FunctionPass *createCodeGenPreparePass(const TargetMachine *TM = 0);
+FunctionPass *createConstantHoistingPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -353,6 +351,31 @@ extern char &InstructionSimplifierID;
 // "block_weights" metadata.
 FunctionPass *createLowerExpectIntrinsicPass();
 
+
+//===----------------------------------------------------------------------===//
+//
+// PartiallyInlineLibCalls - Tries to inline the fast path of library
+// calls such as sqrt.
+//
+FunctionPass *createPartiallyInlineLibCallsPass();
+
+//===----------------------------------------------------------------------===//
+//
+// SampleProfilePass - Loads sample profile data from disk and generates
+// IR metadata to reflect the profile.
+FunctionPass *createSampleProfileLoaderPass();
+FunctionPass *createSampleProfileLoaderPass(StringRef Name);
+
+//===----------------------------------------------------------------------===//
+//
+// ScalarizerPass - Converts vector operations into scalar operations
+//
+FunctionPass *createScalarizerPass();
+
+//===----------------------------------------------------------------------===//
+//
+// AddDiscriminators - Add DWARF path discriminators to the IR.
+FunctionPass *createAddDiscriminatorsPass();
 
 } // End llvm namespace
 

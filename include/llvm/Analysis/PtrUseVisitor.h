@@ -26,8 +26,8 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/InstVisitor.h"
 #include "llvm/Support/Compiler.h"
 
 namespace llvm {
@@ -219,7 +219,7 @@ public:
       U = ToVisit.UseAndIsOffsetKnown.getPointer();
       IsOffsetKnown = ToVisit.UseAndIsOffsetKnown.getInt();
       if (IsOffsetKnown)
-        Offset = llvm_move(ToVisit.Offset);
+        Offset = std::move(ToVisit.Offset);
 
       Instruction *I = cast<Instruction>(U->getUser());
       static_cast<DerivedT*>(this)->visit(I);

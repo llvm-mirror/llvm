@@ -52,3 +52,27 @@ define void @test_simplify4(i32 %chr) {
   store i8* %dst, i8** @chp
   ret void
 }
+
+define void @test_simplify5() {
+; CHECK: store i8* getelementptr inbounds ([14 x i8]* @hello, i32 0, i32 13)
+; CHECK-NOT: call i8* @strchr
+; CHECK: ret void
+
+  %src = getelementptr [14 x i8]* @hello, i32 0, i32 0
+  %dst = call i8* @strchr(i8* %src, i32 65280)
+  store i8* %dst, i8** @chp
+  ret void
+}
+
+; Check transformation strchr(p, 0) -> p + strlen(p)
+define void @test_simplify6(i8* %str) {
+; CHECK: %strlen = call i32 @strlen(i8* %str)
+; CHECK-NOT: call i8* @strchr
+; CHECK: %strchr = getelementptr i8* %str, i32 %strlen
+; CHECK: store i8* %strchr, i8** @chp, align 4
+; CHECK: ret void
+
+  %dst = call i8* @strchr(i8* %str, i32 0)
+  store i8* %dst, i8** @chp
+  ret void
+}

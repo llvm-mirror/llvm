@@ -39,16 +39,19 @@ class SmallSet {
 public:
   SmallSet() {}
 
-  bool empty() const { return Vector.empty() && Set.empty(); }
+  bool LLVM_ATTRIBUTE_UNUSED_RESULT empty() const {
+    return Vector.empty() && Set.empty();
+  }
+
   unsigned size() const {
     return isSmall() ? Vector.size() : Set.size();
   }
 
-  /// count - Return true if the element is in the set.
-  bool count(const T &V) const {
+  /// count - Return 1 if the element is in the set, 0 otherwise.
+  unsigned count(const T &V) const {
     if (isSmall()) {
       // Since the collection is small, just do a linear search.
-      return vfind(V) != Vector.end();
+      return vfind(V) == Vector.end() ? 0 : 1;
     } else {
       return Set.count(V);
     }

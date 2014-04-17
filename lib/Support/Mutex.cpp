@@ -42,7 +42,7 @@ using namespace sys;
 
 // Construct a Mutex using pthread calls
 MutexImpl::MutexImpl( bool recursive)
-  : data_(0)
+  : data_(nullptr)
 {
   // Declare the pthread_mutex data structures
   pthread_mutex_t* mutex =
@@ -58,13 +58,6 @@ MutexImpl::MutexImpl( bool recursive)
   int kind = ( recursive  ? PTHREAD_MUTEX_RECURSIVE : PTHREAD_MUTEX_NORMAL );
   errorcode = pthread_mutexattr_settype(&attr, kind);
   assert(errorcode == 0);
-
-#if !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__) && \
-    !defined(__DragonFly__) && !defined(__Bitrig__)
-  // Make it a process local mutex
-  errorcode = pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_PRIVATE);
-  assert(errorcode == 0);
-#endif
 
   // Initialize the mutex
   errorcode = pthread_mutex_init(mutex, &attr);

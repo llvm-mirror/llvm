@@ -55,6 +55,8 @@ namespace llvm {
                            MachineBasicBlock::iterator MI, DebugLoc DL,
                            unsigned DestReg, unsigned SrcReg,
                            bool KillSrc) const;
+  bool isLegalToSplitMBBAt(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator MBBI) const;
 
   bool isTrig(const MachineInstr &MI) const;
   bool isPlaceHolderOpcode(unsigned opcode) const;
@@ -65,9 +67,18 @@ namespace llvm {
   bool isALUInstr(unsigned Opcode) const;
   bool hasInstrModifiers(unsigned Opcode) const;
   bool isLDSInstr(unsigned Opcode) const;
+  bool isLDSNoRetInstr(unsigned Opcode) const;
+  bool isLDSRetInstr(unsigned Opcode) const;
+
+  /// \returns true if this \p Opcode represents an ALU instruction or an
+  /// instruction that will be lowered in ExpandSpecialInstrs Pass.
+  bool canBeConsideredALU(const MachineInstr *MI) const;
 
   bool isTransOnly(unsigned Opcode) const;
   bool isTransOnly(const MachineInstr *MI) const;
+  bool isVectorOnly(unsigned Opcode) const;
+  bool isVectorOnly(const MachineInstr *MI) const;
+  bool isExport(unsigned Opcode) const;
 
   bool usesVertexCache(unsigned Opcode) const;
   bool usesVertexCache(const MachineInstr *MI) const;
@@ -75,6 +86,9 @@ namespace llvm {
   bool usesTextureCache(const MachineInstr *MI) const;
 
   bool mustBeLastInClause(unsigned Opcode) const;
+  bool usesAddressRegister(MachineInstr *MI) const;
+  bool definesAddressRegister(MachineInstr *MI) const;
+  bool readsLDSSrcReg(const MachineInstr *MI) const;
 
   /// \returns The operand index for the given source number.  Legal values
   /// for SrcNum are 0, 1, and 2.
@@ -124,12 +138,9 @@ namespace llvm {
   /// Same but using const index set instead of MI set.
   bool fitsConstReadLimitations(const std::vector<unsigned>&) const;
 
-  /// \breif Vector instructions are instructions that must fill all
+  /// \brief Vector instructions are instructions that must fill all
   /// instruction slots within an instruction group.
   bool isVector(const MachineInstr &MI) const;
-
-  virtual MachineInstr * getMovImmInstr(MachineFunction *MF, unsigned DstReg,
-                                        int64_t Imm) const;
 
   virtual unsigned getIEQOpcode() const;
   virtual bool isMov(unsigned Opcode) const;
@@ -177,6 +188,8 @@ namespace llvm {
   bool PredicateInstruction(MachineInstr *MI,
                         const SmallVectorImpl<MachineOperand> &Pred) const;
 
+  unsigned int getPredicationCost(const MachineInstr *) const;
+
   unsigned int getInstrLatency(const InstrItineraryData *ItinData,
                                const MachineInstr *MI,
                                unsigned *PredCost = 0) const;
@@ -184,22 +197,14 @@ namespace llvm {
   virtual int getInstrLatency(const InstrItineraryData *ItinData,
                               SDNode *Node) const { return 1;}
 
-  /// \returns a list of all the registers that may be accesed using indirect
-  /// addressing.
-  std::vector<unsigned> getIndirectReservedRegs(const MachineFunction &MF) const;
-
-  virtual int getIndirectIndexBegin(const MachineFunction &MF) const;
-
-  virtual int getIndirectIndexEnd(const MachineFunction &MF) const;
-
+  /// \brief Reserve the registers that may be accesed using indirect addressing.
+  void reserveIndirectRegisters(BitVector &Reserved,
+                                const MachineFunction &MF) const;
 
   virtual unsigned calculateIndirectAddress(unsigned RegIndex,
                                             unsigned Channel) const;
 
-  virtual const TargetRegisterClass *getIndirectAddrStoreRegClass(
-                                                      unsigned SourceReg) const;
-
-  virtual const TargetRegisterClass *getIndirectAddrLoadRegClass() const;
+  virtual const TargetRegisterClass *getIndirectAddrRegClass() const;
 
   virtual MachineInstrBuilder buildIndirectWrite(MachineBasicBlock *MBB,
                                   MachineBasicBlock::iterator I,
@@ -210,8 +215,6 @@ namespace llvm {
                                   MachineBasicBlock::iterator I,
                                   unsigned ValueReg, unsigned Address,
                                   unsigned OffsetReg) const;
-
-  virtual const TargetRegisterClass *getSuperIndirectRegClass() const;
 
   unsigned getMaxAlusPerClause() const;
 
@@ -238,6 +241,10 @@ namespace llvm {
                                   MachineBasicBlock::iterator I,
                                   unsigned DstReg,
                                   uint64_t Imm) const;
+
+  MachineInstr *buildMovInstr(MachineBasicBlock *MBB,
+                              MachineBasicBlock::iterator I,
+                              unsigned DstReg, unsigned SrcReg) const;
 
   /// \brief Get the index of Op in the MachineInstr.
   ///
@@ -271,6 +278,12 @@ namespace llvm {
   /// \brief Clear the specified flag on the instruction.
   void clearFlag(MachineInstr *MI, unsigned Operand, unsigned Flag) const;
 };
+
+namespace AMDGPU {
+
+int getLDSNoRetOp(uint16_t Opcode);
+
+} //End namespace AMDGPU
 
 } // End llvm namespace
 

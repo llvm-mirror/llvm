@@ -1,43 +1,42 @@
-//=== MipsELFStreamer.h - MipsELFStreamer ------------------------------===//
+//===-------- MipsELFStreamer.h - ELF Object Output -----------------------===//
 //
-//                    The LLVM Compiler Infrastructure
+//                     The LLVM Compiler Infrastructure
 //
 // This file is distributed under the University of Illinois Open Source
-// License. See LICENCE.TXT for details.
+// License. See LICENSE.TXT for details.
 //
-//===-------------------------------------------------------------------===//
-#ifndef MIPSELFSTREAMER_H_
-#define MIPSELFSTREAMER_H_
+//===----------------------------------------------------------------------===//
+//
+// This is a custom MCELFStreamer which allows us to insert some hooks before
+// emitting data into an actual object file.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef MIPSELFSTREAMER_H
+#define MIPSELFSTREAMER_H
 
 #include "llvm/MC/MCELFStreamer.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
-class MipsAsmPrinter;
-class MipsSubtarget;
-class MCSymbol;
+class MCAsmBackend;
+class MCCodeEmitter;
+class MCContext;
+class MCSubtargetInfo;
 
 class MipsELFStreamer : public MCELFStreamer {
+
 public:
-  MipsELFStreamer(MCContext &Context, MCAsmBackend &TAB,
-                  raw_ostream &OS, MCCodeEmitter *Emitter,
-                  bool RelaxAll, bool NoExecStack)
-    : MCELFStreamer(SK_MipsELFStreamer, Context, TAB, OS, Emitter) {
-  }
+  MipsELFStreamer(MCContext &Context, MCAsmBackend &MAB, raw_ostream &OS,
+                  MCCodeEmitter *Emitter, const MCSubtargetInfo &STI)
+      : MCELFStreamer(Context, MAB, OS, Emitter) {}
 
-  ~MipsELFStreamer() {}
-  void emitELFHeaderFlagsCG(const MipsSubtarget &Subtarget);
-  void emitMipsSTOCG(const MipsSubtarget &Subtarget,
-                     MCSymbol *Sym,
-                     unsigned Val);
-
-  static bool classof(const MCStreamer *S) {
-    return S->getKind() == SK_MipsELFStreamer;
-  }
+  virtual ~MipsELFStreamer() {}
 };
 
-  MCELFStreamer* createMipsELFStreamer(MCContext &Context, MCAsmBackend &TAB,
-                                       raw_ostream &OS, MCCodeEmitter *Emitter,
-                                       bool RelaxAll, bool NoExecStack);
-}
-
-#endif /* MIPSELFSTREAMER_H_ */
+MCELFStreamer *createMipsELFStreamer(MCContext &Context, MCAsmBackend &MAB,
+                                     raw_ostream &OS, MCCodeEmitter *Emitter,
+                                     const MCSubtargetInfo &STI, bool RelaxAll,
+                                     bool NoExecStack);
+} // namespace llvm.
+#endif

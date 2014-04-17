@@ -14,8 +14,8 @@
 #ifndef LLVM_TARGET_AARCH64INSTRINFO_H
 #define LLVM_TARGET_AARCH64INSTRINFO_H
 
-#include "llvm/Target/TargetInstrInfo.h"
 #include "AArch64RegisterInfo.h"
+#include "llvm/Target/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
 #include "AArch64GenInstrInfo.inc"
@@ -42,6 +42,9 @@ public:
                    MachineBasicBlock::iterator I, DebugLoc DL,
                    unsigned DestReg, unsigned SrcReg,
                    bool KillSrc) const;
+  void CopyPhysRegTuple(MachineBasicBlock &MBB,
+                        MachineBasicBlock::iterator I, DebugLoc DL,
+                        unsigned DestReg, unsigned SrcReg) const;
 
   void storeRegToStackSlot(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MI,

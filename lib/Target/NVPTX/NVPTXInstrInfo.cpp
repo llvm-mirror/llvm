@@ -14,16 +14,18 @@
 #include "NVPTX.h"
 #include "NVPTXInstrInfo.h"
 #include "NVPTXTargetMachine.h"
-#define GET_INSTRINFO_CTOR
+#define GET_INSTRINFO_CTOR_DTOR
 #include "NVPTXGenInstrInfo.inc"
 #include "llvm/IR/Function.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include <cstdio>
 
 using namespace llvm;
+
+// Pin the vtable to this file.
+void NVPTXInstrInfo::anchor() {}
 
 // FIXME: Add the subtarget support on this constructor.
 NVPTXInstrInfo::NVPTXInstrInfo(NVPTXTargetMachine &tm)

@@ -16,7 +16,7 @@
 #include "InstCombine.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Support/PatternMatch.h"
+#include "llvm/IR/PatternMatch.h"
 
 using namespace llvm;
 using namespace llvm::PatternMatch;
@@ -105,9 +105,9 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
   assert(Depth <= 6 && "Limit Search Depth");
   uint32_t BitWidth = DemandedMask.getBitWidth();
   Type *VTy = V->getType();
-  assert((TD || !VTy->isPointerTy()) &&
+  assert((DL || !VTy->isPointerTy()) &&
          "SimplifyDemandedBits needs to know bit widths!");
-  assert((!TD || TD->getTypeSizeInBits(VTy->getScalarType()) == BitWidth) &&
+  assert((!DL || DL->getTypeSizeInBits(VTy->getScalarType()) == BitWidth) &&
          (!VTy->isIntOrIntVectorTy() ||
           VTy->getScalarSizeInBits() == BitWidth) &&
          KnownZero.getBitWidth() == BitWidth &&
@@ -808,7 +808,6 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
         // TODO: Could compute known zero/one bits based on the input.
         break;
       }
-      case Intrinsic::x86_sse42_crc32_64_8:
       case Intrinsic::x86_sse42_crc32_64_64:
         KnownZero = APInt::getHighBitsSet(64, 32);
         return 0;
@@ -845,21 +844,26 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
 Value *InstCombiner::SimplifyShrShlDemandedBits(Instruction *Shr,
   Instruction *Shl, APInt DemandedMask, APInt &KnownZero, APInt &KnownOne) {
 
-  unsigned ShlAmt = cast<ConstantInt>(Shl->getOperand(1))->getZExtValue();
-  unsigned ShrAmt = cast<ConstantInt>(Shr->getOperand(1))->getZExtValue();
+  const APInt &ShlOp1 = cast<ConstantInt>(Shl->getOperand(1))->getValue();
+  const APInt &ShrOp1 = cast<ConstantInt>(Shr->getOperand(1))->getValue();
+  if (!ShlOp1 || !ShrOp1)
+      return 0; // Noop.
+
+  Value *VarX = Shr->getOperand(0);
+  Type *Ty = VarX->getType();
+  unsigned BitWidth = Ty->getIntegerBitWidth();
+  if (ShlOp1.uge(BitWidth) || ShrOp1.uge(BitWidth))
+    return 0; // Undef.
+
+  unsigned ShlAmt = ShlOp1.getZExtValue();
+  unsigned ShrAmt = ShrOp1.getZExtValue();
 
   KnownOne.clearAllBits();
   KnownZero = APInt::getBitsSet(KnownZero.getBitWidth(), 0, ShlAmt-1);
   KnownZero &= DemandedMask;
 
-  if (ShlAmt == 0 || ShrAmt == 0)
-    return 0;
-
-  Value *VarX = Shr->getOperand(0);
-  Type *Ty = VarX->getType();
-
-  APInt BitMask1(APInt::getAllOnesValue(Ty->getIntegerBitWidth()));
-  APInt BitMask2(APInt::getAllOnesValue(Ty->getIntegerBitWidth()));
+  APInt BitMask1(APInt::getAllOnesValue(BitWidth));
+  APInt BitMask2(APInt::getAllOnesValue(BitWidth));
 
   bool isLshr = (Shr->getOpcode() == Instruction::LShr);
   BitMask1 = isLshr ? (BitMask1.lshr(ShrAmt) << ShlAmt) :

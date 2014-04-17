@@ -69,6 +69,10 @@ class ReadNone<int argNo> : IntrinsicProperty {
 
 def IntrNoReturn : IntrinsicProperty;
 
+// IntrNoduplicate - Calls to this intrinsic cannot be duplicated.
+// Parallels the noduplicate attribute on LLVM IR functions.
+def IntrNoDuplicate : IntrinsicProperty;
+
 //===----------------------------------------------------------------------===//
 // Types used by intrinsics.
 //===----------------------------------------------------------------------===//
@@ -102,12 +106,16 @@ class LLVMMatchType<int num>
   int Number = num;
 }
 
-// Match the type of another intrinsic parameter that is expected to be
-// an integral vector type, but change the element size to be twice as wide
-// or half as wide as the other type.  This is only useful when the intrinsic
-// is overloaded, so the matched type should be declared as iAny.
-class LLVMExtendedElementVectorType<int num> : LLVMMatchType<num>;
-class LLVMTruncatedElementVectorType<int num> : LLVMMatchType<num>;
+// Match the type of another intrinsic parameter that is expected to be based on
+// an integral type (i.e. either iN or <N x iM>), but change the scalar size to
+// be twice as wide or half as wide as the other type.  This is only useful when
+// the intrinsic is overloaded, so the matched type should be declared as iAny.
+class LLVMExtendedType<int num> : LLVMMatchType<num>;
+class LLVMTruncatedType<int num> : LLVMMatchType<num>;
+
+// Match the type of another intrinsic parameter that is expected to be a
+// vector type, but change the element count to be half as many
+class LLVMHalfElementsVectorType<int num> : LLVMMatchType<num>;
 
 def llvm_void_ty       : LLVMType<isVoid>;
 def llvm_anyint_ty     : LLVMType<iAny>;
@@ -140,6 +148,7 @@ def llvm_v8i1_ty       : LLVMType<v8i1>;     //  8 x i1
 def llvm_v16i1_ty      : LLVMType<v16i1>;    // 16 x i1
 def llvm_v32i1_ty      : LLVMType<v32i1>;    // 32 x i1
 def llvm_v64i1_ty      : LLVMType<v64i1>;    // 64 x i1
+def llvm_v1i8_ty       : LLVMType<v1i8>;     //  1 x i8
 def llvm_v2i8_ty       : LLVMType<v2i8>;     //  2 x i8
 def llvm_v4i8_ty       : LLVMType<v4i8>;     //  4 x i8
 def llvm_v8i8_ty       : LLVMType<v8i8>;     //  8 x i8
@@ -165,10 +174,15 @@ def llvm_v4i64_ty      : LLVMType<v4i64>;    //  4 x i64
 def llvm_v8i64_ty      : LLVMType<v8i64>;    //  8 x i64
 def llvm_v16i64_ty     : LLVMType<v16i64>;   // 16 x i64
 
+def llvm_v2f16_ty      : LLVMType<v2f16>;    //  2 x half (__fp16)
+def llvm_v4f16_ty      : LLVMType<v4f16>;    //  4 x half (__fp16)
+def llvm_v8f16_ty      : LLVMType<v8f16>;    //  8 x half (__fp16)
+def llvm_v1f32_ty      : LLVMType<v1f32>;    //  1 x float
 def llvm_v2f32_ty      : LLVMType<v2f32>;    //  2 x float
 def llvm_v4f32_ty      : LLVMType<v4f32>;    //  4 x float
 def llvm_v8f32_ty      : LLVMType<v8f32>;    //  8 x float
 def llvm_v16f32_ty     : LLVMType<v16f32>;   // 16 x float
+def llvm_v1f64_ty      : LLVMType<v1f64>;    //  1 x double
 def llvm_v2f64_ty      : LLVMType<v2f64>;    //  2 x double
 def llvm_v4f64_ty      : LLVMType<v4f64>;    //  4 x double
 def llvm_v8f64_ty      : LLVMType<v8f64>;    //  8 x double
@@ -279,10 +293,17 @@ def int_memset  : Intrinsic<[],
                              llvm_i32_ty, llvm_i1_ty],
                             [IntrReadWriteArgMem, NoCapture<0>]>;
 
-// These functions do not actually read memory, but they are sensitive to the
-// rounding mode.  This needs to be modelled separately; in the meantime
-// declaring them as reading memory is conservatively correct.
-let Properties = [IntrReadMem] in {
+let Properties = [IntrNoMem] in {
+  def int_fma  : Intrinsic<[llvm_anyfloat_ty],
+                           [LLVMMatchType<0>, LLVMMatchType<0>,
+                            LLVMMatchType<0>]>;
+  def int_fmuladd : Intrinsic<[llvm_anyfloat_ty],
+                              [LLVMMatchType<0>, LLVMMatchType<0>,
+                               LLVMMatchType<0>]>;
+
+  // These functions do not read memory, but are sensitive to the
+  // rounding mode. LLVM purposely does not model changes to the FP
+  // environment so they can be treated as readnone.
   def int_sqrt : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_powi : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>, llvm_i32_ty]>;
   def int_sin  : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
@@ -295,22 +316,14 @@ let Properties = [IntrReadMem] in {
   def int_exp  : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_exp2 : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_fabs : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
+  def int_copysign : Intrinsic<[llvm_anyfloat_ty],
+                               [LLVMMatchType<0>, LLVMMatchType<0>]>;
   def int_floor : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_ceil  : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_trunc : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_rint  : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_nearbyint : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
   def int_round : Intrinsic<[llvm_anyfloat_ty], [LLVMMatchType<0>]>;
-}
-
-let Properties = [IntrNoMem] in {
-  def int_fma  : Intrinsic<[llvm_anyfloat_ty],
-                         [LLVMMatchType<0>, LLVMMatchType<0>,
-                          LLVMMatchType<0>]>;
-
-  def int_fmuladd : Intrinsic<[llvm_anyfloat_ty],
-                              [LLVMMatchType<0>, LLVMMatchType<0>,
-                               LLVMMatchType<0>]>;
 }
 
 // NOTE: these are internal interfaces.
@@ -320,7 +333,7 @@ def int_sigsetjmp  : Intrinsic<[llvm_i32_ty] , [llvm_ptr_ty, llvm_i32_ty]>;
 def int_siglongjmp : Intrinsic<[], [llvm_ptr_ty, llvm_i32_ty], [IntrNoReturn]>;
 
 // Internal interface for object size checking
-def int_objectsize : Intrinsic<[llvm_anyint_ty], [llvm_ptr_ty, llvm_i1_ty],
+def int_objectsize : Intrinsic<[llvm_anyint_ty], [llvm_anyptr_ty, llvm_i1_ty],
                                [IntrNoMem]>,
                                GCCBuiltin<"__builtin_object_size">;
 
@@ -447,6 +460,20 @@ def int_invariant_end   : Intrinsic<[],
                                      llvm_ptr_ty],
                                     [IntrReadWriteArgMem, NoCapture<2>]>;
 
+//===------------------------ Stackmap Intrinsics -------------------------===//
+//
+def int_experimental_stackmap : Intrinsic<[],
+                                  [llvm_i64_ty, llvm_i32_ty, llvm_vararg_ty],
+                                  [Throws]>;
+def int_experimental_patchpoint_void : Intrinsic<[],
+                                                 [llvm_i64_ty, llvm_i32_ty,
+                                                  llvm_ptr_ty, llvm_i32_ty,
+                                                  llvm_vararg_ty]>;
+def int_experimental_patchpoint_i64 : Intrinsic<[llvm_i64_ty],
+                                                [llvm_i64_ty, llvm_i32_ty,
+                                                 llvm_ptr_ty, llvm_i32_ty,
+                                                 llvm_vararg_ty]>;
+
 //===-------------------------- Other Intrinsics --------------------------===//
 //
 def int_flt_rounds : Intrinsic<[llvm_i32_ty]>,
@@ -490,6 +517,11 @@ def int_convertus  : Intrinsic<[llvm_anyint_ty],
 def int_convertuu  : Intrinsic<[llvm_anyint_ty],
                                [llvm_anyint_ty, llvm_i32_ty, llvm_i32_ty]>;
 
+// Clear cache intrinsic, default to ignore (ie. emit nothing)
+// maps to void __clear_cache() on supporting platforms
+def int_clear_cache : Intrinsic<[], [llvm_ptr_ty, llvm_ptr_ty],
+                                [], "llvm.clear_cache">;
+
 //===----------------------------------------------------------------------===//
 // Target-specific intrinsics
 //===----------------------------------------------------------------------===//
@@ -497,6 +529,7 @@ def int_convertuu  : Intrinsic<[llvm_anyint_ty],
 include "llvm/IR/IntrinsicsPowerPC.td"
 include "llvm/IR/IntrinsicsX86.td"
 include "llvm/IR/IntrinsicsARM.td"
+include "llvm/IR/IntrinsicsARM64.td"
 include "llvm/IR/IntrinsicsAArch64.td"
 include "llvm/IR/IntrinsicsXCore.td"
 include "llvm/IR/IntrinsicsHexagon.td"

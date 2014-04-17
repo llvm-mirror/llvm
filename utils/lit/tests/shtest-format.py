@@ -7,6 +7,7 @@
 
 # CHECK: -- Testing:
 
+# CHECK: PASS: shtest-format :: argv0.txt
 # CHECK: FAIL: shtest-format :: external_shell/fail.txt
 # CHECK-NEXT: *** TEST 'shtest-format :: external_shell/fail.txt' FAILED ***
 # CHECK: Command Output (stdout):
@@ -53,6 +54,11 @@
 # CHECK: XFAIL: shtest-format :: xfail-target.txt
 # CHECK: XFAIL: shtest-format :: xfail.txt
 # CHECK: XPASS: shtest-format :: xpass.txt
+# CHECK-NEXT: *** TEST 'shtest-format :: xpass.txt' FAILED ***
+# CHECK-NEXT: Script
+# CHECK-NEXT: --
+# CHECK-NEXT: true
+# CHECK-NEXT: --
 # CHECK: Testing Time
 
 # CHECK: Unexpected Passing Tests (1)
@@ -63,7 +69,7 @@
 # CHECK: shtest-format :: external_shell/fail_with_bad_encoding.txt
 # CHECK: shtest-format :: fail.txt
 
-# CHECK: Expected Passes    : 3
+# CHECK: Expected Passes    : 4
 # CHECK: Expected Failures  : 3
 # CHECK: Unsupported Tests  : 2
 # CHECK: Unresolved Tests   : 1

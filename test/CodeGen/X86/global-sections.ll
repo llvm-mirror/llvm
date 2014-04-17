@@ -1,7 +1,16 @@
 ; RUN: llc < %s -mtriple=i386-unknown-linux-gnu | FileCheck %s -check-prefix=LINUX
 ; RUN: llc < %s -mtriple=i386-apple-darwin9.7 | FileCheck %s -check-prefix=DARWIN
+; RUN: llc < %s -mtriple=i386-apple-darwin10 -relocation-model=static | FileCheck %s -check-prefix=DARWIN-STATIC
+; RUN: llc < %s -mtriple=x86_64-apple-darwin10 | FileCheck %s -check-prefix=DARWIN64
 ; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -fdata-sections | FileCheck %s -check-prefix=LINUX-SECTIONS
+; RUN: llc < %s -mtriple=i686-pc-win32 -fdata-sections -ffunction-sections | FileCheck %s -check-prefix=WIN32-SECTIONS
 
+define void @F1() {
+  ret void
+}
+
+; WIN32-SECTIONS: .section        .text,"xr",one_only,_F1
+; WIN32-SECTIONS: .globl _F1
 
 ; int G1;
 @G1 = common global i32 0
@@ -39,6 +48,9 @@
 ; LINUX-SECTIONS: .section        .rodata.G3,"a",@progbits
 ; LINUX-SECTIONS: .globl  G3
 
+; WIN32-SECTIONS: .section        .rdata,"r",one_only,_G3
+; WIN32-SECTIONS: .globl  _G3
+
 
 ; _Complex long long const G4 = 34;
 @G4 = unnamed_addr constant {i64,i64} { i64 34, i64 0 }
@@ -46,6 +58,14 @@
 ; DARWIN: .section        __TEXT,__literal16,16byte_literals
 ; DARWIN: _G4:
 ; DARWIN:     .long 34
+
+; DARWIN-STATIC: .section        __TEXT,__literal16,16byte_literals
+; DARWIN-STATIC: _G4:
+; DARWIN-STATIC:     .long 34
+
+; DARWIN64: .section        __TEXT,__literal16,16byte_literals
+; DARWIN64: _G4:
+; DARWIN64:     .quad 34
 
 
 ; int G5 = 47;
@@ -65,10 +85,10 @@
 ; PR4584
 @"foo bar" = linkonce global i32 42
 
-; LINUX: .type	foo_20_bar,@object
-; LINUX: .section .data.foo_20_bar,"aGw",@progbits,foo_20_bar,comdat
-; LINUX: .weak	foo_20_bar
-; LINUX: foo_20_bar:
+; LINUX: .type	"foo bar",@object
+; LINUX: .section ".data.foo bar","aGw",@progbits,"foo bar",comdat
+; LINUX: .weak	"foo bar"
+; LINUX: "foo bar":
 
 ; DARWIN: .section		__DATA,__datacoal_nt,coalesced
 ; DARWIN: .globl	"_foo bar"
@@ -106,6 +126,9 @@
 
 ; LINUX-SECTIONS: .section        .rodata.G7,"aMS",@progbits,1
 ; LINUX-SECTIONS:	.globl G7
+
+; WIN32-SECTIONS: .section        .rdata,"r",one_only,_G7
+; WIN32-SECTIONS:	.globl _G7
 
 
 @G8 = unnamed_addr constant [4 x i16] [ i16 1, i16 2, i16 3, i16 0 ]
@@ -158,3 +181,16 @@
 ; DARWIN: .zerofill __DATA,__common,_G12,1,3
 ; DARWIN: .globl _G13
 ; DARWIN: .zerofill __DATA,__common,_G13,1,3
+
+@G14 = private unnamed_addr constant [4 x i8] c"foo\00", align 1
+
+; LINUX-SECTIONS:        .type   .LG14,@object           # @G14
+; LINUX-SECTIONS:        .section        .rodata..LG14,"aMS",@progbits,1
+; LINUX-SECTIONS: .LG14:
+; LINUX-SECTIONS:        .asciz  "foo"
+; LINUX-SECTIONS:        .size   .LG14, 4
+
+; WIN32-SECTIONS:        .section        .rdata,"r"
+; WIN32-SECTIONS: L_G14:
+; WIN32-SECTIONS:        .asciz  "foo"
+

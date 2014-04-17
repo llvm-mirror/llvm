@@ -30,11 +30,13 @@ OPTIONS
 
 .. option:: --check-prefix prefix
 
- FileCheck searches the contents of ``match-filename`` for patterns to match.
- By default, these patterns are prefixed with "``CHECK:``".  If you'd like to
- use a different prefix (e.g. because the same input file is checking multiple
- different tool or options), the :option:`--check-prefix` argument allows you
- to specify a specific prefix to match.
+ FileCheck searches the contents of ``match-filename`` for patterns to
+ match.  By default, these patterns are prefixed with "``CHECK:``".
+ If you'd like to use a different prefix (e.g. because the same input
+ file is checking multiple different tool or options), the
+ :option:`--check-prefix` argument allows you to specify one or more
+ prefixes to match. Multiple prefixes are useful for tests which might
+ change for different run options, but most lines remain the same.
 
 .. option:: --input-file filename
 
@@ -216,6 +218,19 @@ in the natural order:
     Bar b;
     // CHECK-DAG: @_ZTV3Bar =
 
+``CHECK-NOT:`` directives could be mixed with ``CHECK-DAG:`` directives to
+exclude strings between the surrounding ``CHECK-DAG:`` directives. As a result,
+the surrounding ``CHECK-DAG:`` directives cannot be reordered, i.e. all
+occurrences matching ``CHECK-DAG:`` before ``CHECK-NOT:`` must not fall behind
+occurrences matching ``CHECK-DAG:`` after ``CHECK-NOT:``. For example,
+
+.. code-block:: llvm
+
+   ; CHECK-DAG: BEFORE
+   ; CHECK-NOT: NOT
+   ; CHECK-DAG: AFTER
+
+This case will reject input strings where ``BEFORE`` occurs after ``AFTER``.
 
 With captured variables, ``CHECK-DAG:`` is able to match valid topological
 orderings of a DAG with edges from the definition of a variable to its use.
@@ -230,19 +245,34 @@ sequences from the instruction scheduler. For example,
 
 In this case, any order of that two ``add`` instructions will be allowed.
 
-``CHECK-NOT:`` directives could be mixed with ``CHECK-DAG:`` directives to
-exclude strings between the surrounding ``CHECK-DAG:`` directives. As a result,
-the surrounding ``CHECK-DAG:`` directives cannot be reordered, i.e. all
-occurrences matching ``CHECK-DAG:`` before ``CHECK-NOT:`` must not fall behind
-occurrences matching ``CHECK-DAG:`` after ``CHECK-NOT:``. For example,
+If you are defining `and` using variables in the same ``CHECK-DAG:`` block,
+be aware that the definition rule can match `after` its use.
+
+So, for instance, the code below will pass:
 
 .. code-block:: llvm
 
-   ; CHECK-DAG: BEFORE
-   ; CHECK-NOT: NOT
-   ; CHECK-DAG: AFTER
+  ; CHECK-DAG: vmov.32 [[REG2:d[0-9]+]][0]
+  ; CHECK-DAG: vmov.32 [[REG2]][1]
+  vmov.32 d0[1]
+  vmov.32 d0[0]
 
-This case will reject input strings where ``BEFORE`` occurs after ``AFTER``.
+While this other code, will not:
+
+.. code-block:: llvm
+
+  ; CHECK-DAG: vmov.32 [[REG2:d[0-9]+]][0]
+  ; CHECK-DAG: vmov.32 [[REG2]][1]
+  vmov.32 d1[1]
+  vmov.32 d0[0]
+
+While this can be very useful, it's also dangerous, because in the case of
+register sequence, you must have a strong order (read before write, copy before
+use, etc). If the definition your test is looking for doesn't match (because
+of a bug in the compiler), it may match further away from the use, and mask
+real bugs away.
+
+In those cases, to enforce the order, use a non-DAG directive between DAG-blocks.
 
 The "CHECK-LABEL:" directive
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

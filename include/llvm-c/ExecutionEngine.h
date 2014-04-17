@@ -163,6 +163,8 @@ void *LLVMRecompileAndRelinkFunction(LLVMExecutionEngineRef EE,
                                      LLVMValueRef Fn);
 
 LLVMTargetDataRef LLVMGetExecutionEngineTargetData(LLVMExecutionEngineRef EE);
+LLVMTargetMachineRef
+LLVMGetExecutionEngineTargetMachine(LLVMExecutionEngineRef EE);
 
 void LLVMAddGlobalMapping(LLVMExecutionEngineRef EE, LLVMValueRef Global,
                           void* Addr);
@@ -170,6 +172,16 @@ void LLVMAddGlobalMapping(LLVMExecutionEngineRef EE, LLVMValueRef Global,
 void *LLVMGetPointerToGlobal(LLVMExecutionEngineRef EE, LLVMValueRef Global);
 
 /*===-- Operations on memory managers -------------------------------------===*/
+
+typedef uint8_t *(*LLVMMemoryManagerAllocateCodeSectionCallback)(
+  void *Opaque, uintptr_t Size, unsigned Alignment, unsigned SectionID,
+  const char *SectionName);
+typedef uint8_t *(*LLVMMemoryManagerAllocateDataSectionCallback)(
+  void *Opaque, uintptr_t Size, unsigned Alignment, unsigned SectionID,
+  const char *SectionName, LLVMBool IsReadOnly);
+typedef LLVMBool (*LLVMMemoryManagerFinalizeMemoryCallback)(
+  void *Opaque, char **ErrMsg);
+typedef void (*LLVMMemoryManagerDestroyCallback)(void *Opaque);
 
 /**
  * Create a simple custom MCJIT memory manager. This memory manager can
@@ -184,14 +196,10 @@ void *LLVMGetPointerToGlobal(LLVMExecutionEngineRef EE, LLVMValueRef Global);
  */
 LLVMMCJITMemoryManagerRef LLVMCreateSimpleMCJITMemoryManager(
   void *Opaque,
-  uint8_t *(*AllocateCodeSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID),
-  uint8_t *(*AllocateDataSection)(void *Opaque,
-                                  uintptr_t Size, unsigned Alignment,
-                                  unsigned SectionID, LLVMBool IsReadOnly),
-  LLVMBool (*FinalizeMemory)(void *Opaque, char **ErrMsg),
-  void (*Destroy)(void *Opaque));
+  LLVMMemoryManagerAllocateCodeSectionCallback AllocateCodeSection,
+  LLVMMemoryManagerAllocateDataSectionCallback AllocateDataSection,
+  LLVMMemoryManagerFinalizeMemoryCallback FinalizeMemory,
+  LLVMMemoryManagerDestroyCallback Destroy);
 
 void LLVMDisposeMCJITMemoryManager(LLVMMCJITMemoryManagerRef MM);
 
@@ -200,7 +208,7 @@ void LLVMDisposeMCJITMemoryManager(LLVMMCJITMemoryManagerRef MM);
  */
 
 #ifdef __cplusplus
-}  
+}
 #endif /* defined(__cplusplus) */
 
 #endif

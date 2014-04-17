@@ -2,21 +2,32 @@
 # Extra parameters for `tblgen' may come after `ofn' parameter.
 # Adds the name of the generated file to TABLEGEN_OUTPUT.
 
-macro(tablegen project ofn)
+function(tablegen project ofn)
+  # Validate calling context.
+  foreach(v
+      ${project}_TABLEGEN_EXE
+      LLVM_MAIN_SRC_DIR
+      LLVM_MAIN_INCLUDE_DIR
+      )
+    if(NOT ${v})
+      message(FATAL_ERROR "${v} not set")
+    endif()
+  endforeach()
+
   file(GLOB local_tds "*.td")
-  file(GLOB_RECURSE global_tds "${LLVM_MAIN_SRC_DIR}/include/llvm/*.td")
+  file(GLOB_RECURSE global_tds "${LLVM_MAIN_INCLUDE_DIR}/llvm/*.td")
 
   if (IS_ABSOLUTE ${LLVM_TARGET_DEFINITIONS})
     set(LLVM_TARGET_DEFINITIONS_ABSOLUTE ${LLVM_TARGET_DEFINITIONS})
   else()
-    set(LLVM_TARGET_DEFINITIONS_ABSOLUTE 
+    set(LLVM_TARGET_DEFINITIONS_ABSOLUTE
       ${CMAKE_CURRENT_SOURCE_DIR}/${LLVM_TARGET_DEFINITIONS})
   endif()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
     # Generate tablegen output in a temporary file.
     COMMAND ${${project}_TABLEGEN_EXE} ${ARGN} -I ${CMAKE_CURRENT_SOURCE_DIR}
     -I ${LLVM_MAIN_SRC_DIR}/lib/Target -I ${LLVM_MAIN_INCLUDE_DIR}
-    ${LLVM_TARGET_DEFINITIONS_ABSOLUTE} 
+    ${LLVM_TARGET_DEFINITIONS_ABSOLUTE}
     -o ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
     # The file in LLVM_TARGET_DEFINITIONS may be not in the current
     # directory and local_tds may not contain it, so we must
@@ -33,28 +44,30 @@ macro(tablegen project ofn)
         ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/${ofn}
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
-    COMMENT ""
+    COMMENT "Updating ${ofn}..."
     )
 
   # `make clean' must remove all those generated files:
   set_property(DIRECTORY APPEND
     PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${ofn}.tmp ${ofn})
 
-  set(TABLEGEN_OUTPUT ${TABLEGEN_OUTPUT} ${CMAKE_CURRENT_BINARY_DIR}/${ofn})
-  set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${ofn} 
-    PROPERTIES GENERATED 1)
-endmacro(tablegen)
+  set(TABLEGEN_OUTPUT ${TABLEGEN_OUTPUT} ${CMAKE_CURRENT_BINARY_DIR}/${ofn} PARENT_SCOPE)
+  set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${ofn} PROPERTIES
+    GENERATED 1)
+endfunction()
 
+# Creates a target for publicly exporting tablegen dependencies.
 function(add_public_tablegen_target target)
-  # Creates a target for publicly exporting tablegen dependencies.
-  if( TABLEGEN_OUTPUT )
-    add_custom_target(${target}
-      DEPENDS ${TABLEGEN_OUTPUT})
-    if (LLVM_COMMON_DEPENDS)
-      add_dependencies(${target} ${LLVM_COMMON_DEPENDS})
-    endif ()
-    set_target_properties(${target} PROPERTIES FOLDER "Tablegenning")
-  endif( TABLEGEN_OUTPUT )
+  if(NOT TABLEGEN_OUTPUT)
+    message(FATAL_ERROR "Requires tablegen() definitions as TABLEGEN_OUTPUT.")
+  endif()
+  add_custom_target(${target}
+    DEPENDS ${TABLEGEN_OUTPUT})
+  if(LLVM_COMMON_DEPENDS)
+    add_dependencies(${target} ${LLVM_COMMON_DEPENDS})
+  endif()
+  set_target_properties(${target} PROPERTIES FOLDER "Tablegenning")
+  set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} ${target} PARENT_SCOPE)
 endfunction()
 
 if(CMAKE_CROSSCOMPILING)
@@ -78,8 +91,6 @@ if(CMAKE_CROSSCOMPILING)
 endif()
 
 macro(add_tablegen target project)
-  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LLVM_TOOLS_BINARY_DIR})
-
   set(${target}_OLD_LLVM_LINK_COMPONENTS ${LLVM_LINK_COMPONENTS})
   set(LLVM_LINK_COMPONENTS ${LLVM_LINK_COMPONENTS} TableGen)
   add_llvm_utility(${target} ${ARGN})
@@ -96,7 +107,7 @@ macro(add_tablegen target project)
           FORCE)
     endif()
   endif()
-      
+
   # Effective tblgen executable to be used:
   set(${project}_TABLEGEN_EXE ${${project}_TABLEGEN} PARENT_SCOPE)
 
@@ -118,14 +129,14 @@ macro(add_tablegen target project)
   endif()
 
   if( MINGW )
-    target_link_libraries(${target} imagehlp psapi)
     if(CMAKE_SIZEOF_VOID_P MATCHES "8")
       set_target_properties(${target} PROPERTIES LINK_FLAGS -Wl,--stack,16777216)
     endif(CMAKE_SIZEOF_VOID_P MATCHES "8")
   endif( MINGW )
-  if( LLVM_ENABLE_THREADS AND HAVE_LIBPTHREAD AND NOT BEOS )
-    target_link_libraries(${target} pthread)
+  if (${project} STREQUAL LLVM AND NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
+    install(TARGETS ${target}
+            EXPORT LLVMExports
+            RUNTIME DESTINATION bin)
   endif()
-
-  install(TARGETS ${target} RUNTIME DESTINATION bin)
+  set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${target})
 endmacro()

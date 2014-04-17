@@ -219,7 +219,7 @@ bool SSAIfConv::canSpeculateInstrs(MachineBasicBlock *MBB) {
 
     // We never speculate stores, so an AA pointer isn't necessary.
     bool DontMoveAcrossStore = true;
-    if (!I->isSafeToMove(TII, 0, DontMoveAcrossStore)) {
+    if (!I->isSafeToMove(TII, nullptr, DontMoveAcrossStore)) {
       DEBUG(dbgs() << "Can't speculate: " << *I);
       return false;
     }
@@ -338,7 +338,7 @@ bool SSAIfConv::findInsertionPoint() {
 ///
 bool SSAIfConv::canConvertIf(MachineBasicBlock *MBB) {
   Head = MBB;
-  TBB = FBB = Tail = 0;
+  TBB = FBB = Tail = nullptr;
 
   if (Head->succ_size() != 2)
     return false;
@@ -461,9 +461,9 @@ void SSAIfConv::replacePHIInstrs() {
     DEBUG(dbgs() << "If-converting " << *PI.PHI);
     unsigned DstReg = PI.PHI->getOperand(0).getReg();
     TII->insertSelect(*Head, FirstTerm, HeadDL, DstReg, Cond, PI.TReg, PI.FReg);
-    DEBUG(dbgs() << "          --> " << *llvm::prior(FirstTerm));
+    DEBUG(dbgs() << "          --> " << *std::prev(FirstTerm));
     PI.PHI->eraseFromParent();
-    PI.PHI = 0;
+    PI.PHI = nullptr;
   }
 }
 
@@ -482,7 +482,7 @@ void SSAIfConv::rewritePHIOperands() {
     unsigned PHIDst = PI.PHI->getOperand(0).getReg();
     unsigned DstReg = MRI->createVirtualRegister(MRI->getRegClass(PHIDst));
     TII->insertSelect(*Head, FirstTerm, HeadDL, DstReg, Cond, PI.TReg, PI.FReg);
-    DEBUG(dbgs() << "          --> " << *llvm::prior(FirstTerm));
+    DEBUG(dbgs() << "          --> " << *std::prev(FirstTerm));
 
     // Rewrite PHI operands TPred -> (DstReg, Head), remove FPred.
     for (unsigned i = PI.PHI->getNumOperands(); i != 1; i -= 2) {
@@ -564,7 +564,7 @@ void SSAIfConv::convertIf(SmallVectorImpl<MachineBasicBlock*> &RemovedBlocks) {
     // We need a branch to Tail, let code placement work it out later.
     DEBUG(dbgs() << "Converting to unconditional branch.\n");
     SmallVector<MachineOperand, 0> EmptyCond;
-    TII->InsertBranch(*Head, Tail, 0, EmptyCond, HeadDL);
+    TII->InsertBranch(*Head, Tail, nullptr, EmptyCond, HeadDL);
     Head->addSuccessor(Tail);
   }
   DEBUG(dbgs() << *Head);
@@ -590,9 +590,9 @@ class EarlyIfConverter : public MachineFunctionPass {
 public:
   static char ID;
   EarlyIfConverter() : MachineFunctionPass(ID) {}
-  void getAnalysisUsage(AnalysisUsage &AU) const;
-  bool runOnMachineFunction(MachineFunction &MF);
-  const char *getPassName() const { return "Early If-Conversion"; }
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  bool runOnMachineFunction(MachineFunction &MF) override;
+  const char *getPassName() const override { return "Early If-Conversion"; }
 
 private:
   bool tryConvertIf(MachineBasicBlock*);
@@ -783,7 +783,7 @@ bool EarlyIfConverter::runOnMachineFunction(MachineFunction &MF) {
   DomTree = &getAnalysis<MachineDominatorTree>();
   Loops = getAnalysisIfAvailable<MachineLoopInfo>();
   Traces = &getAnalysis<MachineTraceMetrics>();
-  MinInstr = 0;
+  MinInstr = nullptr;
 
   bool Changed = false;
   IfConv.runOnMachineFunction(MF);

@@ -14,7 +14,7 @@
 #ifndef CODEGEN_INTRINSIC_H
 #define CODEGEN_INTRINSIC_H
 
-#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include <string>
 #include <vector>
 
@@ -72,6 +72,9 @@ namespace llvm {
 
     /// canThrow - True if the intrinsic can throw.
     bool canThrow;
+
+    /// isNoDuplicate - True if the intrinsic is marked as noduplicate.
+    bool isNoDuplicate;
 
     /// isNoReturn - True if the intrinsic is no-return.
     bool isNoReturn;

@@ -15,8 +15,8 @@
 #ifndef POWERPC32_REGISTERINFO_H
 #define POWERPC32_REGISTERINFO_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "PPC.h"
+#include "llvm/ADT/DenseMap.h"
 
 #define GET_REGINFO_HEADER
 #include "PPCGenRegisterInfo.inc"
@@ -40,8 +40,11 @@ public:
   unsigned getRegPressureLimit(const TargetRegisterClass *RC,
                                MachineFunction &MF) const;
 
+  const TargetRegisterClass*
+  getLargestLegalSuperClass(const TargetRegisterClass *RC) const;
+
   /// Code Generation virtual methods...
-  const uint16_t *getCalleeSavedRegs(const MachineFunction* MF = 0) const;
+  const MCPhysReg *getCalleeSavedRegs(const MachineFunction* MF = 0) const;
   const uint32_t *getCallPreservedMask(CallingConv::ID CC) const;
   const uint32_t *getNoPreservedMask() const;
 
@@ -69,6 +72,10 @@ public:
                        unsigned FrameIndex) const;
   void lowerCRRestore(MachineBasicBlock::iterator II,
                       unsigned FrameIndex) const;
+  void lowerCRBitSpilling(MachineBasicBlock::iterator II,
+                          unsigned FrameIndex) const;
+  void lowerCRBitRestore(MachineBasicBlock::iterator II,
+                         unsigned FrameIndex) const;
   void lowerVRSAVESpilling(MachineBasicBlock::iterator II,
                            unsigned FrameIndex) const;
   void lowerVRSAVERestore(MachineBasicBlock::iterator II,
@@ -85,8 +92,8 @@ public:
   void materializeFrameBaseRegister(MachineBasicBlock *MBB,
                                     unsigned BaseReg, int FrameIdx,
                                     int64_t Offset) const;
-  void resolveFrameIndex(MachineBasicBlock::iterator I,
-                         unsigned BaseReg, int64_t Offset) const;
+  void resolveFrameIndex(MachineInstr &MI, unsigned BaseReg,
+                         int64_t Offset) const;
   bool isFrameOffsetLegal(const MachineInstr *MI, int64_t Offset) const;
 
   // Debug information queries.
@@ -97,10 +104,6 @@ public:
   bool hasBasePointer(const MachineFunction &MF) const;
   bool canRealignStack(const MachineFunction &MF) const;
   bool needsStackRealignment(const MachineFunction &MF) const;
-
-  // Exception handling queries.
-  unsigned getEHExceptionRegister() const;
-  unsigned getEHHandlerRegister() const;
 };
 
 } // end namespace llvm

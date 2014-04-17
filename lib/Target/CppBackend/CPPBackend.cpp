@@ -33,6 +33,7 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -130,6 +131,7 @@ namespace {
   private:
     void printLinkageType(GlobalValue::LinkageTypes LT);
     void printVisibilityType(GlobalValue::VisibilityTypes VisTypes);
+    void printDLLStorageClassType(GlobalValue::DLLStorageClassTypes DSCType);
     void printThreadLocalMode(GlobalVariable::ThreadLocalMode TLM);
     void printCallingConv(CallingConv::ID cc);
     void printEscapedString(const std::string& str);
@@ -281,18 +283,12 @@ void CppWriter::printLinkageType(GlobalValue::LinkageTypes LT) {
     Out << "GlobalValue::InternalLinkage"; break;
   case GlobalValue::PrivateLinkage:
     Out << "GlobalValue::PrivateLinkage"; break;
-  case GlobalValue::LinkerPrivateLinkage:
-    Out << "GlobalValue::LinkerPrivateLinkage"; break;
-  case GlobalValue::LinkerPrivateWeakLinkage:
-    Out << "GlobalValue::LinkerPrivateWeakLinkage"; break;
   case GlobalValue::AvailableExternallyLinkage:
     Out << "GlobalValue::AvailableExternallyLinkage "; break;
   case GlobalValue::LinkOnceAnyLinkage:
     Out << "GlobalValue::LinkOnceAnyLinkage "; break;
   case GlobalValue::LinkOnceODRLinkage:
     Out << "GlobalValue::LinkOnceODRLinkage "; break;
-  case GlobalValue::LinkOnceODRAutoHideLinkage:
-    Out << "GlobalValue::LinkOnceODRAutoHideLinkage"; break;
   case GlobalValue::WeakAnyLinkage:
     Out << "GlobalValue::WeakAnyLinkage"; break;
   case GlobalValue::WeakODRLinkage:
@@ -301,10 +297,6 @@ void CppWriter::printLinkageType(GlobalValue::LinkageTypes LT) {
     Out << "GlobalValue::AppendingLinkage"; break;
   case GlobalValue::ExternalLinkage:
     Out << "GlobalValue::ExternalLinkage"; break;
-  case GlobalValue::DLLImportLinkage:
-    Out << "GlobalValue::DLLImportLinkage"; break;
-  case GlobalValue::DLLExportLinkage:
-    Out << "GlobalValue::DLLExportLinkage"; break;
   case GlobalValue::ExternalWeakLinkage:
     Out << "GlobalValue::ExternalWeakLinkage"; break;
   case GlobalValue::CommonLinkage:
@@ -322,6 +314,21 @@ void CppWriter::printVisibilityType(GlobalValue::VisibilityTypes VisType) {
     break;
   case GlobalValue::ProtectedVisibility:
     Out << "GlobalValue::ProtectedVisibility";
+    break;
+  }
+}
+
+void CppWriter::printDLLStorageClassType(
+                                    GlobalValue::DLLStorageClassTypes DSCType) {
+  switch (DSCType) {
+  case GlobalValue::DefaultStorageClass:
+    Out << "GlobalValue::DefaultStorageClass";
+    break;
+  case GlobalValue::DLLImportStorageClass:
+    Out << "GlobalValue::DLLImportStorageClass";
+    break;
+  case GlobalValue::DLLExportStorageClass:
+    Out << "GlobalValue::DLLExportStorageClass";
     break;
   }
 }
@@ -362,25 +369,25 @@ void CppWriter::printEscapedString(const std::string &Str) {
 }
 
 std::string CppWriter::getCppName(Type* Ty) {
-  // First, handle the primitive types .. easy
-  if (Ty->isPrimitiveType() || Ty->isIntegerTy()) {
-    switch (Ty->getTypeID()) {
-    case Type::VoidTyID:   return "Type::getVoidTy(mod->getContext())";
-    case Type::IntegerTyID: {
-      unsigned BitWidth = cast<IntegerType>(Ty)->getBitWidth();
-      return "IntegerType::get(mod->getContext(), " + utostr(BitWidth) + ")";
-    }
-    case Type::X86_FP80TyID: return "Type::getX86_FP80Ty(mod->getContext())";
-    case Type::FloatTyID:    return "Type::getFloatTy(mod->getContext())";
-    case Type::DoubleTyID:   return "Type::getDoubleTy(mod->getContext())";
-    case Type::LabelTyID:    return "Type::getLabelTy(mod->getContext())";
-    case Type::X86_MMXTyID:  return "Type::getX86_MMXTy(mod->getContext())";
-    default:
-      error("Invalid primitive type");
-      break;
-    }
-    // shouldn't be returned, but make it sensible
+  switch (Ty->getTypeID()) {
+  default:
+    break;
+  case Type::VoidTyID:
     return "Type::getVoidTy(mod->getContext())";
+  case Type::IntegerTyID: {
+    unsigned BitWidth = cast<IntegerType>(Ty)->getBitWidth();
+    return "IntegerType::get(mod->getContext(), " + utostr(BitWidth) + ")";
+  }
+  case Type::X86_FP80TyID:
+    return "Type::getX86_FP80Ty(mod->getContext())";
+  case Type::FloatTyID:
+    return "Type::getFloatTy(mod->getContext())";
+  case Type::DoubleTyID:
+    return "Type::getDoubleTy(mod->getContext())";
+  case Type::LabelTyID:
+    return "Type::getLabelTy(mod->getContext())";
+  case Type::X86_MMXTyID:
+    return "Type::getX86_MMXTy(mod->getContext())";
   }
 
   // Now, see if we've seen the type before and return that
@@ -492,11 +499,13 @@ void CppWriter::printAttributes(const AttributeSet &PAL,
       HANDLE_ATTR(NoUnwind);
       HANDLE_ATTR(NoAlias);
       HANDLE_ATTR(ByVal);
+      HANDLE_ATTR(InAlloca);
       HANDLE_ATTR(Nest);
       HANDLE_ATTR(ReadNone);
       HANDLE_ATTR(ReadOnly);
       HANDLE_ATTR(NoInline);
       HANDLE_ATTR(AlwaysInline);
+      HANDLE_ATTR(OptimizeNone);
       HANDLE_ATTR(OptimizeForSize);
       HANDLE_ATTR(StackProtect);
       HANDLE_ATTR(StackProtectReq);
@@ -537,7 +546,8 @@ void CppWriter::printAttributes(const AttributeSet &PAL,
 
 void CppWriter::printType(Type* Ty) {
   // We don't print definitions for primitive types
-  if (Ty->isPrimitiveType() || Ty->isIntegerTy())
+  if (Ty->isFloatingPointTy() || Ty->isX86_MMXTy() || Ty->isIntegerTy() ||
+      Ty->isLabelTy() || Ty->isMetadataTy() || Ty->isVoidTy())
     return;
 
   // If we already defined this type, we don't need to define it again.
@@ -1026,6 +1036,13 @@ void CppWriter::printVariableHead(const GlobalVariable *GV) {
     Out << ");";
     nl(Out);
   }
+  if (GV->getDLLStorageClass() != GlobalValue::DefaultStorageClass) {
+    printCppName(GV);
+    Out << "->setDLLStorageClass(";
+    printDLLStorageClassType(GV->getDLLStorageClass());
+    Out << ");";
+    nl(Out);
+  }
   if (GV->isThreadLocal()) {
     printCppName(GV);
     Out << "->setThreadLocalMode(";
@@ -1139,7 +1156,7 @@ void CppWriter::printInstruction(const Instruction *I,
     nl(Out);
     for (SwitchInst::ConstCaseIt i = SI->case_begin(), e = SI->case_end();
          i != e; ++i) {
-      const IntegersSubset CaseVal = i.getCaseValueEx();
+      const ConstantInt* CaseVal = i.getCaseValue();
       const BasicBlock *BB = i.getCaseSuccessor();
       Out << iName << "->addCase("
           << getOpName(CaseVal) << ", "
@@ -1160,8 +1177,7 @@ void CppWriter::printInstruction(const Instruction *I,
     break;
   }
   case Instruction::Resume: {
-    Out << "ResumeInst::Create(mod->getContext(), " << opNames[0]
-        << ", " << bbname << ");";
+    Out << "ResumeInst::Create(" << opNames[0] << ", " << bbname << ");";
     break;
   }
   case Instruction::Invoke: {
@@ -1175,7 +1191,7 @@ void CppWriter::printInstruction(const Instruction *I,
     }
     // FIXME: This shouldn't use magic numbers -3, -2, and -1.
     Out << "InvokeInst *" << iName << " = InvokeInst::Create("
-        << getOpName(inv->getCalledFunction()) << ", "
+        << getOpName(inv->getCalledValue()) << ", "
         << getOpName(inv->getNormalDest()) << ", "
         << getOpName(inv->getUnwindDest()) << ", "
         << iName << "_params, \"";
@@ -1547,12 +1563,16 @@ void CppWriter::printInstruction(const Instruction *I,
   }
   case Instruction::AtomicCmpXchg: {
     const AtomicCmpXchgInst *cxi = cast<AtomicCmpXchgInst>(I);
-    StringRef Ordering = ConvertAtomicOrdering(cxi->getOrdering());
+    StringRef SuccessOrdering =
+        ConvertAtomicOrdering(cxi->getSuccessOrdering());
+    StringRef FailureOrdering =
+        ConvertAtomicOrdering(cxi->getFailureOrdering());
     StringRef CrossThread = ConvertAtomicSynchScope(cxi->getSynchScope());
     Out << "AtomicCmpXchgInst* " << iName
         << " = new AtomicCmpXchgInst("
         << opNames[0] << ", " << opNames[1] << ", " << opNames[2] << ", "
-        << Ordering << ", " << CrossThread << ", " << bbname
+        << SuccessOrdering << ", " << FailureOrdering << ", "
+        << CrossThread << ", " << bbname
         << ");";
     nl(Out) << iName << "->setName(\"";
     printEscapedString(cxi->getName());
@@ -1587,6 +1607,20 @@ void CppWriter::printInstruction(const Instruction *I,
     nl(Out) << iName << "->setName(\"";
     printEscapedString(rmwi->getName());
     Out << "\");";
+    break;
+  }
+  case Instruction::LandingPad: {
+    const LandingPadInst *lpi = cast<LandingPadInst>(I);
+    Out << "LandingPadInst* " << iName << " = LandingPadInst::Create(";
+    printCppName(lpi->getType());
+    Out << ", " << opNames[0] << ", " << lpi->getNumClauses() << ", \"";
+    printEscapedString(lpi->getName());
+    Out << "\", " << bbname << ");";
+    nl(Out) << iName << "->setCleanup("
+            << (lpi->isCleanup() ? "true" : "false")
+            << ");";
+    for (unsigned i = 0, e = lpi->getNumClauses(); i != e; ++i)
+      nl(Out) << iName << "->addClause(" << opNames[i+1] << ");";
     break;
   }
   }
@@ -1728,6 +1762,13 @@ void CppWriter::printFunctionHead(const Function* F) {
     printCppName(F);
     Out << "->setVisibility(";
     printVisibilityType(F->getVisibility());
+    Out << ");";
+    nl(Out);
+  }
+  if (F->getDLLStorageClass() != GlobalValue::DefaultStorageClass) {
+    printCppName(F);
+    Out << "->setDLLStorageClass(";
+    printDLLStorageClassType(F->getDLLStorageClass());
     Out << ");";
     nl(Out);
   }
@@ -1903,13 +1944,13 @@ void CppWriter::printProgram(const std::string& fname,
 
   Out << "#include <llvm/ADT/SmallVector.h>\n";
   Out << "#include <llvm/Analysis/Verifier.h>\n";
-  Out << "#include <llvm/Assembly/PrintModulePass.h>\n";
   Out << "#include <llvm/IR/BasicBlock.h>\n";
   Out << "#include <llvm/IR/CallingConv.h>\n";
   Out << "#include <llvm/IR/Constants.h>\n";
   Out << "#include <llvm/IR/DerivedTypes.h>\n";
   Out << "#include <llvm/IR/Function.h>\n";
   Out << "#include <llvm/IR/GlobalVariable.h>\n";
+  Out << "#include <llvm/IR/IRPrintingPasses.h>\n";
   Out << "#include <llvm/IR/InlineAsm.h>\n";
   Out << "#include <llvm/IR/Instructions.h>\n";
   Out << "#include <llvm/IR/LLVMContext.h>\n";

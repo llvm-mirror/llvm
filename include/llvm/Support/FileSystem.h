@@ -28,7 +28,6 @@
 #define LLVM_SUPPORT_FILESYSTEM_H
 
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/DataTypes.h"
@@ -39,6 +38,7 @@
 #include <iterator>
 #include <stack>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #ifdef HAVE_SYS_STAT_H
@@ -49,10 +49,9 @@ namespace llvm {
 namespace sys {
 namespace fs {
 
-/// file_type - An "enum class" enumeration for the file system's view of the
-///             type.
+/// An "enum class" enumeration for the file system's view of the type.
 struct file_type {
-  enum _ {
+  enum Impl {
     status_error,
     file_not_found,
     regular_file,
@@ -65,12 +64,11 @@ struct file_type {
     type_unknown
   };
 
-  file_type(_ v) : v_(v) {}
-  explicit file_type(int v) : v_(_(v)) {}
-  operator int() const {return v_;}
+  file_type(Impl V) : V(V) {}
+  operator Impl() const { return V; }
 
 private:
-  int v_;
+  Impl V;
 };
 
 /// space_info - Self explanatory.
@@ -137,8 +135,7 @@ public:
   }
   bool operator!=(const UniqueID &Other) const { return !(*this == Other); }
   bool operator<(const UniqueID &Other) const {
-    return Device < Other.Device ||
-           (Device == Other.Device && File < Other.File);
+    return std::tie(Device, File) < std::tie(Other.Device, Other.File);
   }
   uint64_t getDevice() const { return Device; }
   uint64_t getFile() const { return File; }
@@ -238,7 +235,9 @@ struct file_magic {
     macho_dsym_companion,     ///< Mach-O dSYM companion file
     macho_universal_binary,   ///< Mach-O universal binary
     coff_object,              ///< COFF object file
-    pecoff_executable         ///< PECOFF executable file
+    coff_import_library,      ///< COFF import library
+    pecoff_executable,        ///< PECOFF executable file
+    windows_resource          ///< Windows compiled resource file (.rc)
   };
 
   bool is_object() const {
@@ -270,51 +269,42 @@ private:
 ///          platform specific error_code.
 error_code make_absolute(SmallVectorImpl<char> &path);
 
+/// @brief Normalize path separators in \a Path
+///
+/// If the path contains any '\' separators, they are transformed into '/'.
+/// This is particularly useful when cross-compiling Windows on Linux, but is
+/// safe to invoke on Windows, which accepts both characters as a path
+/// separator.
+error_code normalize_separators(SmallVectorImpl<char> &Path);
+
 /// @brief Create all the non-existent directories in path.
 ///
 /// @param path Directories to create.
-/// @param existed Set to true if \a path already existed, false otherwise.
-/// @returns errc::success if is_directory(path) and existed have been set,
-///          otherwise a platform specific error_code.
-error_code create_directories(const Twine &path, bool &existed);
-
-/// @brief Convenience function for clients that don't need to know if the
-///        directory existed or not.
-inline error_code create_directories(const Twine &Path) {
-  bool Existed;
-  return create_directories(Path, Existed);
-}
+/// @returns errc::success if is_directory(path), otherwise a platform
+///          specific error_code. If IgnoreExisting is false, also returns
+///          error if the directory already existed.
+error_code create_directories(const Twine &path, bool IgnoreExisting = true);
 
 /// @brief Create the directory in path.
 ///
 /// @param path Directory to create.
-/// @param existed Set to true if \a path already existed, false otherwise.
-/// @returns errc::success if is_directory(path) and existed have been set,
-///          otherwise a platform specific error_code.
-error_code create_directory(const Twine &path, bool &existed);
+/// @returns errc::success if is_directory(path), otherwise a platform
+///          specific error_code. If IgnoreExisting is false, also returns
+///          error if the directory already existed.
+error_code create_directory(const Twine &path, bool IgnoreExisting = true);
 
-/// @brief Convenience function for clients that don't need to know if the
-///        directory existed or not.
-inline error_code create_directory(const Twine &Path) {
-  bool Existed;
-  return create_directory(Path, Existed);
-}
-
-/// @brief Create a hard link from \a from to \a to.
+/// @brief Create a link from \a from to \a to.
+///
+/// The link may be a soft or a hard link, depending on the platform. The caller
+/// may not assume which one. Currently on windows it creates a hard link since
+/// soft links require extra privileges. On unix, it creates a soft link since
+/// hard links don't work on SMB file systems.
 ///
 /// @param to The path to hard link to.
 /// @param from The path to hard link from. This is created.
-/// @returns errc::success if exists(to) && exists(from) && equivalent(to, from)
-///          , otherwise a platform specific error_code.
-error_code create_hard_link(const Twine &to, const Twine &from);
-
-/// @brief Create a symbolic link from \a from to \a to.
-///
-/// @param to The path to symbolically link to.
-/// @param from The path to symbolically link from. This is created.
-/// @returns errc::success if exists(to) && exists(from) && is_symlink(from),
-///          otherwise a platform specific error_code.
-error_code create_symlink(const Twine &to, const Twine &from);
+/// @returns errc::success if the link was created, otherwise a platform
+/// specific error_code.
+error_code create_link(const Twine &to, const Twine &from);
 
 /// @brief Get the current path.
 ///
@@ -326,34 +316,10 @@ error_code current_path(SmallVectorImpl<char> &result);
 /// @brief Remove path. Equivalent to POSIX remove().
 ///
 /// @param path Input path.
-/// @param existed Set to true if \a path existed, false if it did not.
-///                undefined otherwise.
-/// @returns errc::success if path has been removed and existed has been
-///          successfully set, otherwise a platform specific error_code.
-error_code remove(const Twine &path, bool &existed);
-
-/// @brief Convenience function for clients that don't need to know if the file
-///        existed or not.
-inline error_code remove(const Twine &Path) {
-  bool Existed;
-  return remove(Path, Existed);
-}
-
-/// @brief Recursively remove all files below \a path, then \a path. Files are
-///        removed as if by POSIX remove().
-///
-/// @param path Input path.
-/// @param num_removed Number of files removed.
-/// @returns errc::success if path has been removed and num_removed has been
-///          successfully set, otherwise a platform specific error_code.
-error_code remove_all(const Twine &path, uint32_t &num_removed);
-
-/// @brief Convenience function for clients that don't need to know how many
-///        files were removed.
-inline error_code remove_all(const Twine &Path) {
-  uint32_t Removed;
-  return remove_all(Path, Removed);
-}
+/// @returns errc::success if path has been removed or didn't exist, otherwise a
+///          platform specific error code. If IgnoreNonExisting is false, also
+///          returns error if the file didn't exist.
+error_code remove(const Twine &path, bool IgnoreNonExisting = true);
 
 /// @brief Rename \a from to \a to. Files are renamed as if by POSIX rename().
 ///
@@ -488,8 +454,7 @@ inline bool is_regular_file(const Twine &Path) {
 ///        directory, regular file, or symlink?
 ///
 /// @param status A file_status previously returned from status.
-/// @returns exists(s) && !is_regular_file(s) && !is_directory(s) &&
-///          !is_symlink(s)
+/// @returns exists(s) && !is_regular_file(s) && !is_directory(s)
 bool is_other(file_status status);
 
 /// @brief Is path something that exists but is not a directory,
@@ -501,21 +466,6 @@ bool is_other(file_status status);
 /// @returns errc::success if result has been successfully set, otherwise a
 ///          platform specific error_code.
 error_code is_other(const Twine &path, bool &result);
-
-/// @brief Does status represent a symlink?
-///
-/// @param status A file_status previously returned from stat.
-/// @returns status.type() == symlink_file.
-bool is_symlink(file_status status);
-
-/// @brief Is path a symlink?
-///
-/// @param path Input path.
-/// @param result Set to true if \a path is a symlink, false if it is not.
-///               Undefined otherwise.
-/// @returns errc::success if result has been successfully set, otherwise a
-///          platform specific error_code.
-error_code is_symlink(const Twine &path, bool &result);
 
 /// @brief Get file status as if by POSIX stat().
 ///
@@ -543,6 +493,11 @@ inline error_code file_size(const Twine &Path, uint64_t &Result) {
   return error_code::success();
 }
 
+/// @brief Set the file modification and access time.
+///
+/// @returns errc::success if the file times were successfully set, otherwise a
+///          platform specific error_code or errc::not_supported on platforms
+///          where the functionality isn't available.
 error_code setLastModificationAndAccessTime(int FD, TimeValue Time);
 
 /// @brief Is status available?
@@ -619,9 +574,12 @@ enum OpenFlags {
   /// with F_Excl.
   F_Append = 2,
 
-  /// F_Binary - The file should be opened in binary mode on platforms that
-  /// make this distinction.
-  F_Binary = 4
+  /// The file should be opened in text mode on platforms that make this
+  /// distinction.
+  F_Text = 4,
+
+  /// Open the file for read and write.
+  F_RW = 8
 };
 
 inline OpenFlags operator|(OpenFlags A, OpenFlags B) {
@@ -637,17 +595,6 @@ error_code openFileForWrite(const Twine &Name, int &ResultFD, OpenFlags Flags,
                             unsigned Mode = 0666);
 
 error_code openFileForRead(const Twine &Name, int &ResultFD);
-
-/// @brief Canonicalize path.
-///
-/// Sets result to the file system's idea of what path is. The result is always
-/// absolute and has the same capitalization as the file system.
-///
-/// @param path Input path.
-/// @param result Set to the canonicalized version of \a path.
-/// @returns errc::success if result has been successfully set, otherwise a
-///          platform specific error_code.
-error_code canonicalize(const Twine &path, SmallVectorImpl<char> &result);
 
 /// @brief Are \a path's first bytes \a magic?
 ///
@@ -713,10 +660,8 @@ private:
 public:
   typedef char char_type;
 
-#if LLVM_HAS_RVALUE_REFERENCES
   mapped_file_region(mapped_file_region&&);
   mapped_file_region &operator =(mapped_file_region&&);
-#endif
 
   /// Construct a mapped_file_region at \a path starting at \a offset of length
   /// \a length and with access \a mode.
@@ -731,7 +676,7 @@ public:
   ///               should begin. Must be a multiple of
   ///               mapped_file_region::alignment().
   /// \param ec This is set to errc::success if the map was constructed
-  ///           sucessfully. Otherwise it is set to a platform dependent error.
+  ///           successfully. Otherwise it is set to a platform dependent error.
   mapped_file_region(const Twine &path,
                      mapmode mode,
                      uint64_t length,
@@ -869,7 +814,7 @@ public:
   }
 
   /// Construct end iterator.
-  directory_iterator() : State(0) {}
+  directory_iterator() : State(nullptr) {}
 
   // No operator++ because we need error_code.
   directory_iterator &increment(error_code &ec) {
@@ -883,9 +828,9 @@ public:
   bool operator==(const directory_iterator &RHS) const {
     if (State == RHS.State)
       return true;
-    if (RHS.State == 0)
+    if (!RHS.State)
       return State->CurrentEntry == directory_entry();
-    if (State == 0)
+    if (!State)
       return RHS.State->CurrentEntry == directory_entry();
     return State->CurrentEntry == RHS.State->CurrentEntry;
   }
@@ -970,7 +915,7 @@ public:
   // modifiers
   /// Goes up one level if Level > 0.
   void pop() {
-    assert(State && "Cannot pop and end itertor!");
+    assert(State && "Cannot pop an end iterator!");
     assert(State->Level > 0 && "Cannot pop an iterator with level < 1");
 
     const directory_iterator end_itr;

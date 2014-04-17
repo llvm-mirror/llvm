@@ -33,7 +33,8 @@ public:
     R700,
     EVERGREEN,
     NORTHERN_ISLANDS,
-    SOUTHERN_ISLANDS
+    SOUTHERN_ISLANDS,
+    SEA_ISLANDS
   };
 
 private:
@@ -48,6 +49,10 @@ private:
   enum Generation Gen;
   bool FP64;
   bool CaymanISA;
+  bool EnableIRStructurizer;
+  bool EnableIfCvt;
+  unsigned WavefrontSize;
+  bool CFALUBug;
 
   InstrItineraryData InstrItins;
 
@@ -64,9 +69,35 @@ public:
   bool hasHWFP64() const;
   bool hasCaymanISA() const;
 
+  bool hasBFE() const {
+    return (getGeneration() >= EVERGREEN);
+  }
+
+  bool hasBFM() const {
+    return hasBFE();
+  }
+
+  bool hasMulU24() const {
+    return (getGeneration() >= EVERGREEN);
+  }
+
+  bool hasMulI24() const {
+    return (getGeneration() >= SOUTHERN_ISLANDS ||
+            hasCaymanISA());
+  }
+
+  bool IsIRStructurizerEnabled() const;
+  bool isIfCvtEnabled() const;
+  unsigned getWavefrontSize() const;
+  unsigned getStackEntrySize() const;
+  bool hasCFAluBug() const;
+
+  virtual bool enableMachineScheduler() const {
+    return getGeneration() <= NORTHERN_ISLANDS;
+  }
+
   // Helper functions to simplify if statements
   bool isTargetELF() const;
-  std::string getDataLayout() const;
   std::string getDeviceName() const;
   virtual size_t getDefaultSize(uint32_t dim) const;
   bool dumpCode() const { return DumpCode; }

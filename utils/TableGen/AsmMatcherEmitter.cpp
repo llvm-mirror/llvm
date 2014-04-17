@@ -97,8 +97,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenTarget.h"
-#include "StringToOffsetTable.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -110,8 +108,10 @@
 #include "llvm/TableGen/Error.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/StringMatcher.h"
+#include "llvm/TableGen/StringToOffsetTable.h"
 #include "llvm/TableGen/TableGenBackend.h"
 #include <cassert>
+#include <cctype>
 #include <map>
 #include <set>
 #include <sstream>
@@ -124,6 +124,13 @@ MatchPrefix("match-prefix", cl::init(""),
 namespace {
 class AsmMatcherInfo;
 struct SubtargetFeatureInfo;
+
+// Register sets are used as keys in some second-order sets TableGen creates
+// when generating its data structures. This means that the order of two
+// RegisterSets can be seen in the outputted AsmMatcher tables occasionally, and
+// can even affect compiler output (at least seen in diagnostics produced when
+// all matches fail). So we use a type that sorts them consistently.
+typedef std::set<Record*, LessRecordByID> RegisterSet;
 
 class AsmMatcherEmitter {
   RecordKeeper &Records;
@@ -185,7 +192,7 @@ struct ClassInfo {
   std::string ParserMethod;
 
   /// For register classes, the records for all the registers in this class.
-  std::set<Record*> Registers;
+  RegisterSet Registers;
 
   /// For custom match classes, he diagnostic kind for when the predicate fails.
   std::string DiagnosticType;
@@ -213,11 +220,11 @@ public:
       if (!isRegisterClass() || !RHS.isRegisterClass())
         return false;
 
-      std::set<Record*> Tmp;
-      std::insert_iterator< std::set<Record*> > II(Tmp, Tmp.begin());
+      RegisterSet Tmp;
+      std::insert_iterator<RegisterSet> II(Tmp, Tmp.begin());
       std::set_intersection(Registers.begin(), Registers.end(),
                             RHS.Registers.begin(), RHS.Registers.end(),
-                            II);
+                            II, LessRecordByID());
 
       return !Tmp.empty();
     }
@@ -279,15 +286,6 @@ public:
     }
   }
 };
-
-namespace {
-/// Sort ClassInfo pointers independently of pointer value.
-struct LessClassInfoPtr {
-  bool operator()(const ClassInfo *LHS, const ClassInfo *RHS) const {
-    return *LHS < *RHS;
-  }
-};
-}
 
 /// MatchableInfo - Helper class for storing the necessary information for an
 /// instruction or alias which is capable of being matched.
@@ -429,6 +427,9 @@ struct MatchableInfo {
   /// convertToMCInst to convert parsed operands into an MCInst for this
   /// function.
   std::string ConversionFnKind;
+
+  /// If this instruction is deprecated in some form.
+  bool HasDeprecation;
 
   MatchableInfo(const CodeGenInstruction &CGI)
     : AsmVariantID(0), TheDef(CGI.TheDef), DefRec(&CGI),
@@ -613,7 +614,7 @@ public:
   RegisterClassesTy RegisterClasses;
 
   /// Map of Predicate records to their subtarget information.
-  std::map<Record*, SubtargetFeatureInfo*> SubtargetFeatures;
+  std::map<Record*, SubtargetFeatureInfo*, LessRecordByID> SubtargetFeatures;
 
   /// Map of AsmOperandClass records to their class information.
   std::map<Record*, ClassInfo*> AsmOperandClasses;
@@ -663,7 +664,7 @@ public:
   /// given operand.
   SubtargetFeatureInfo *getSubtargetFeature(Record *Def) const {
     assert(Def->isSubClassOf("Predicate") && "Invalid predicate type!");
-    std::map<Record*, SubtargetFeatureInfo*>::const_iterator I =
+    std::map<Record*, SubtargetFeatureInfo*, LessRecordByID>::const_iterator I =
       SubtargetFeatures.find(Def);
     return I == SubtargetFeatures.end() ? 0 : I->second;
   }
@@ -718,12 +719,12 @@ void MatchableInfo::formTwoOperandAlias(StringRef Constraint) {
   int DstAsmOperand = findAsmOperandNamed(Ops.second);
   if (SrcAsmOperand == -1)
     PrintFatalError(TheDef->getLoc(),
-                  "unknown source two-operand alias operand '" +
-                  Ops.first.str() + "'.");
+                    "unknown source two-operand alias operand '" + Ops.first +
+                    "'.");
   if (DstAsmOperand == -1)
     PrintFatalError(TheDef->getLoc(),
-                  "unknown destination two-operand alias operand '" +
-                  Ops.second.str() + "'.");
+                    "unknown destination two-operand alias operand '" +
+                    Ops.second + "'.");
 
   // Find the ResOperand that refers to the operand we're aliasing away
   // and update it to refer to the combined operand instead.
@@ -779,6 +780,13 @@ void MatchableInfo::initialize(const AsmMatcherInfo &Info,
     if (Record *Reg = AsmOperands[i].SingletonReg)
       SingletonRegisters.insert(Reg);
   }
+
+  const RecordVal *DepMask = TheDef->getValue("DeprecatedFeatureMask");
+  if (!DepMask)
+    DepMask = TheDef->getValue("ComplexDeprecationPredicate");
+
+  HasDeprecation =
+      DepMask ? !DepMask->getValue()->getAsUnquotedString().empty() : false;
 }
 
 /// tokenizeAsmString - Tokenize a simplified assembly string.
@@ -864,7 +872,7 @@ void MatchableInfo::tokenizeAsmString(const AsmMatcherInfo &Info) {
   // FIXME : Check and raise an error if it is a register.
   if (Mnemonic[0] == '$')
     PrintFatalError(TheDef->getLoc(),
-                  "Invalid instruction mnemonic '" + Mnemonic.str() + "'!");
+                    "Invalid instruction mnemonic '" + Mnemonic + "'!");
 
   // Remove the first operand, it is tracked in the mnemonic field.
   AsmOperands.erase(AsmOperands.begin());
@@ -901,22 +909,22 @@ bool MatchableInfo::validate(StringRef CommentDelimiter, bool Hack) const {
     StringRef Tok = AsmOperands[i].Token;
     if (Tok[0] == '$' && Tok.find(':') != StringRef::npos)
       PrintFatalError(TheDef->getLoc(),
-                    "matchable with operand modifier '" + Tok.str() +
-                    "' not supported by asm matcher.  Mark isCodeGenOnly!");
+                      "matchable with operand modifier '" + Tok +
+                      "' not supported by asm matcher.  Mark isCodeGenOnly!");
 
     // Verify that any operand is only mentioned once.
     // We reject aliases and ignore instructions for now.
     if (Tok[0] == '$' && !OperandNames.insert(Tok).second) {
       if (!Hack)
         PrintFatalError(TheDef->getLoc(),
-                      "ERROR: matchable with tied operand '" + Tok.str() +
-                      "' can never be matched!");
+                        "ERROR: matchable with tied operand '" + Tok +
+                        "' can never be matched!");
       // FIXME: Should reject these.  The ARM backend hits this with $lane in a
       // bunch of instructions.  It is unclear what the right answer is.
       DEBUG({
         errs() << "warning: '" << TheDef->getName() << "': "
                << "ignoring instruction with tied operand '"
-               << Tok.str() << "'\n";
+               << Tok << "'\n";
       });
       return false;
     }
@@ -1047,6 +1055,18 @@ AsmMatcherInfo::getOperandClass(Record *Rec, int SubOpIdx) {
   PrintFatalError(Rec->getLoc(), "operand has no match class!");
 }
 
+struct LessRegisterSet {
+  bool operator() (const RegisterSet &LHS, const RegisterSet & RHS) const {
+    // std::set<T> defines its own compariso "operator<", but it
+    // performs a lexicographical comparison by T's innate comparison
+    // for some reason. We don't want non-deterministic pointer
+    // comparisons so use this instead.
+    return std::lexicographical_compare(LHS.begin(), LHS.end(),
+                                        RHS.begin(), RHS.end(),
+                                        LessRecordByID());
+  }
+};
+
 void AsmMatcherInfo::
 buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   const std::vector<CodeGenRegister*> &Registers =
@@ -1054,33 +1074,35 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   ArrayRef<CodeGenRegisterClass*> RegClassList =
     Target.getRegBank().getRegClasses();
 
+  typedef std::set<RegisterSet, LessRegisterSet> RegisterSetSet;
+
   // The register sets used for matching.
-  std::set< std::set<Record*> > RegisterSets;
+  RegisterSetSet RegisterSets;
 
   // Gather the defined sets.
   for (ArrayRef<CodeGenRegisterClass*>::const_iterator it =
-       RegClassList.begin(), ie = RegClassList.end(); it != ie; ++it)
-    RegisterSets.insert(std::set<Record*>(
+         RegClassList.begin(), ie = RegClassList.end(); it != ie; ++it)
+    RegisterSets.insert(RegisterSet(
         (*it)->getOrder().begin(), (*it)->getOrder().end()));
 
   // Add any required singleton sets.
   for (SmallPtrSet<Record*, 16>::iterator it = SingletonRegisters.begin(),
        ie = SingletonRegisters.end(); it != ie; ++it) {
     Record *Rec = *it;
-    RegisterSets.insert(std::set<Record*>(&Rec, &Rec + 1));
+    RegisterSets.insert(RegisterSet(&Rec, &Rec + 1));
   }
 
   // Introduce derived sets where necessary (when a register does not determine
   // a unique register set class), and build the mapping of registers to the set
   // they should classify to.
-  std::map<Record*, std::set<Record*> > RegisterMap;
+  std::map<Record*, RegisterSet> RegisterMap;
   for (std::vector<CodeGenRegister*>::const_iterator it = Registers.begin(),
          ie = Registers.end(); it != ie; ++it) {
     const CodeGenRegister &CGR = **it;
     // Compute the intersection of all sets containing this register.
-    std::set<Record*> ContainingSet;
+    RegisterSet ContainingSet;
 
-    for (std::set< std::set<Record*> >::iterator it = RegisterSets.begin(),
+    for (RegisterSetSet::iterator it = RegisterSets.begin(),
            ie = RegisterSets.end(); it != ie; ++it) {
       if (!it->count(CGR.TheDef))
         continue;
@@ -1090,11 +1112,12 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
         continue;
       }
 
-      std::set<Record*> Tmp;
+      RegisterSet Tmp;
       std::swap(Tmp, ContainingSet);
-      std::insert_iterator< std::set<Record*> > II(ContainingSet,
-                                                   ContainingSet.begin());
-      std::set_intersection(Tmp.begin(), Tmp.end(), it->begin(), it->end(), II);
+      std::insert_iterator<RegisterSet> II(ContainingSet,
+                                           ContainingSet.begin());
+      std::set_intersection(Tmp.begin(), Tmp.end(), it->begin(), it->end(), II,
+                            LessRecordByID());
     }
 
     if (!ContainingSet.empty()) {
@@ -1104,9 +1127,9 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   }
 
   // Construct the register classes.
-  std::map<std::set<Record*>, ClassInfo*> RegisterSetClasses;
+  std::map<RegisterSet, ClassInfo*, LessRegisterSet> RegisterSetClasses;
   unsigned Index = 0;
-  for (std::set< std::set<Record*> >::iterator it = RegisterSets.begin(),
+  for (RegisterSetSet::iterator it = RegisterSets.begin(),
          ie = RegisterSets.end(); it != ie; ++it, ++Index) {
     ClassInfo *CI = new ClassInfo();
     CI->Kind = ClassInfo::RegisterClass0 + Index;
@@ -1124,13 +1147,14 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
 
   // Find the superclasses; we could compute only the subgroup lattice edges,
   // but there isn't really a point.
-  for (std::set< std::set<Record*> >::iterator it = RegisterSets.begin(),
+  for (RegisterSetSet::iterator it = RegisterSets.begin(),
          ie = RegisterSets.end(); it != ie; ++it) {
     ClassInfo *CI = RegisterSetClasses[*it];
-    for (std::set< std::set<Record*> >::iterator it2 = RegisterSets.begin(),
+    for (RegisterSetSet::iterator it2 = RegisterSets.begin(),
            ie2 = RegisterSets.end(); it2 != ie2; ++it2)
       if (*it != *it2 &&
-          std::includes(it2->begin(), it2->end(), it->begin(), it->end()))
+          std::includes(it2->begin(), it2->end(), it->begin(), it->end(),
+                        LessRecordByID()))
         CI->SuperClasses.push_back(RegisterSetClasses[*it2]);
   }
 
@@ -1142,8 +1166,8 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
     Record *Def = RC.getDef();
     if (!Def)
       continue;
-    ClassInfo *CI = RegisterSetClasses[std::set<Record*>(RC.getOrder().begin(),
-                                                         RC.getOrder().end())];
+    ClassInfo *CI = RegisterSetClasses[RegisterSet(RC.getOrder().begin(),
+                                                   RC.getOrder().end())];
     if (CI->ValueName.empty()) {
       CI->ClassName = RC.getName();
       CI->Name = "MCK_" + RC.getName();
@@ -1155,7 +1179,7 @@ buildRegisterClasses(SmallPtrSet<Record*, 16> &SingletonRegisters) {
   }
 
   // Populate the map for individual registers.
-  for (std::map<Record*, std::set<Record*> >::iterator it = RegisterMap.begin(),
+  for (std::map<Record*, RegisterSet>::iterator it = RegisterMap.begin(),
          ie = RegisterMap.end(); it != ie; ++it)
     RegisterClasses[it->first] = RegisterSetClasses[it->second];
 
@@ -1254,7 +1278,7 @@ void AsmMatcherInfo::buildOperandMatchInfo() {
 
   /// Map containing a mask with all operands indices that can be found for
   /// that class inside a instruction.
-  typedef std::map<ClassInfo*, unsigned, LessClassInfoPtr> OpClassMaskTy;
+  typedef std::map<ClassInfo *, unsigned, less_ptr<ClassInfo>> OpClassMaskTy;
   OpClassMaskTy OpClassMask;
 
   for (std::vector<MatchableInfo*>::const_iterator it =
@@ -1325,7 +1349,7 @@ void AsmMatcherInfo::buildInfo() {
       if (CGI.TheDef->getValueAsBit("isCodeGenOnly"))
         continue;
 
-      OwningPtr<MatchableInfo> II(new MatchableInfo(CGI));
+      std::unique_ptr<MatchableInfo> II(new MatchableInfo(CGI));
 
       II->initialize(*this, SingletonRegisters, AsmVariantNo, RegisterPrefix);
 
@@ -1341,7 +1365,7 @@ void AsmMatcherInfo::buildInfo() {
           StringRef(II->TheDef->getName()).endswith("_Int"))
         continue;
 
-      Matchables.push_back(II.take());
+      Matchables.push_back(II.release());
     }
 
     // Parse all of the InstAlias definitions and stick them in the list of
@@ -1358,14 +1382,14 @@ void AsmMatcherInfo::buildInfo() {
             .startswith( MatchPrefix))
         continue;
 
-      OwningPtr<MatchableInfo> II(new MatchableInfo(Alias));
+      std::unique_ptr<MatchableInfo> II(new MatchableInfo(Alias));
 
       II->initialize(*this, SingletonRegisters, AsmVariantNo, RegisterPrefix);
 
       // Validate the alias definitions.
       II->validate(CommentDelimiter, false);
 
-      Matchables.push_back(II.take());
+      Matchables.push_back(II.release());
     }
   }
 
@@ -1430,13 +1454,13 @@ void AsmMatcherInfo::buildInfo() {
         II->TheDef->getValueAsString("TwoOperandAliasConstraint");
       if (Constraint != "") {
         // Start by making a copy of the original matchable.
-        OwningPtr<MatchableInfo> AliasII(new MatchableInfo(*II));
+        std::unique_ptr<MatchableInfo> AliasII(new MatchableInfo(*II));
 
         // Adjust it to be a two-operand alias.
         AliasII->formTwoOperandAlias(Constraint);
 
         // Add the alias to the matchables list.
-        NewMatchables.push_back(AliasII.take());
+        NewMatchables.push_back(AliasII.release());
       }
     } else
       II->buildAliasResultOperands();
@@ -1476,8 +1500,8 @@ buildInstructionOperandReference(MatchableInfo *II,
   // Map this token to an operand.
   unsigned Idx;
   if (!Operands.hasOperandNamed(OperandName, Idx))
-    PrintFatalError(II->TheDef->getLoc(), "error: unable to find operand: '" +
-                  OperandName.str() + "'");
+    PrintFatalError(II->TheDef->getLoc(),
+                    "error: unable to find operand: '" + OperandName + "'");
 
   // If the instruction operand has multiple suboperands, but the parser
   // match class for the asm operand is still the default "ImmAsmOperand",
@@ -1549,8 +1573,8 @@ void AsmMatcherInfo::buildAliasOperandReference(MatchableInfo *II,
       return;
     }
 
-  PrintFatalError(II->TheDef->getLoc(), "error: unable to find operand: '" +
-                OperandName.str() + "'");
+  PrintFatalError(II->TheDef->getLoc(),
+                  "error: unable to find operand: '" + OperandName + "'");
 }
 
 void MatchableInfo::buildInstructionResultOperands() {
@@ -2179,7 +2203,7 @@ static void emitSubtargetFeatureFlagEnumeration(AsmMatcherInfo &Info,
   OS << "// Flags for subtarget features that participate in "
      << "instruction matching.\n";
   OS << "enum SubtargetFeatureFlag {\n";
-  for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
+  for (std::map<Record*, SubtargetFeatureInfo*, LessRecordByID>::const_iterator
          it = Info.SubtargetFeatures.begin(),
          ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
     SubtargetFeatureInfo &SFI = *it->second;
@@ -2217,9 +2241,9 @@ static void emitGetSubtargetFeatureName(AsmMatcherInfo &Info, raw_ostream &OS) {
      << "static const char *getSubtargetFeatureName(unsigned Val) {\n";
   if (!Info.SubtargetFeatures.empty()) {
     OS << "  switch(Val) {\n";
-    for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
-           it = Info.SubtargetFeatures.begin(),
-           ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
+    typedef std::map<Record*, SubtargetFeatureInfo*, LessRecordByID> RecFeatMap;
+    for (RecFeatMap::const_iterator it = Info.SubtargetFeatures.begin(),
+             ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
       SubtargetFeatureInfo &SFI = *it->second;
       // FIXME: Totally just a placeholder name to get the algorithm working.
       OS << "  case " << SFI.getEnumName() << ": return \""
@@ -2244,7 +2268,7 @@ static void emitComputeAvailableFeatures(AsmMatcherInfo &Info,
   OS << "unsigned " << Info.Target.getName() << ClassName << "::\n"
      << "ComputeAvailableFeatures(uint64_t FB) const {\n";
   OS << "  unsigned Features = 0;\n";
-  for (std::map<Record*, SubtargetFeatureInfo*>::const_iterator
+  for (std::map<Record*, SubtargetFeatureInfo*, LessRecordByID>::const_iterator
          it = Info.SubtargetFeatures.begin(),
          ie = Info.SubtargetFeatures.end(); it != ie; ++it) {
     SubtargetFeatureInfo &SFI = *it->second;
@@ -2657,8 +2681,8 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "                       const SmallVectorImpl<MCParsedAsmOperand*> "
      << "&Operands);\n";
   OS << "  void convertToMapAndConstraints(unsigned Kind,\n                ";
-  OS << "           const SmallVectorImpl<MCParsedAsmOperand*> &Operands);\n";
-  OS << "  bool mnemonicIsValid(StringRef Mnemonic, unsigned VariantID);\n";
+  OS << "           const SmallVectorImpl<MCParsedAsmOperand*> &Operands) override;\n";
+  OS << "  bool mnemonicIsValid(StringRef Mnemonic, unsigned VariantID) override;\n";
   OS << "  unsigned MatchInstructionImpl(\n";
   OS.indent(27);
   OS << "const SmallVectorImpl<MCParsedAsmOperand*> &Operands,\n"
@@ -2743,11 +2767,13 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   size_t MaxNumOperands = 0;
   unsigned MaxMnemonicIndex = 0;
+  bool HasDeprecation = false;
   for (std::vector<MatchableInfo*>::const_iterator it =
          Info.Matchables.begin(), ie = Info.Matchables.end();
        it != ie; ++it) {
     MatchableInfo &II = **it;
     MaxNumOperands = std::max(MaxNumOperands, II.AsmOperands.size());
+    HasDeprecation |= II.HasDeprecation;
 
     // Store a pascal-style length byte in the mnemonic.
     std::string LenMnemonic = char(II.Mnemonic.size()) + II.Mnemonic.str();
@@ -2804,9 +2830,6 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   unsigned VariantCount = Target.getAsmParserVariantCount();
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
-    std::string CommentDelimiter =
-      AsmVariant->getValueAsString("CommentDelimiter");
-    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
 
     OS << "static const MatchEntry MatchTable" << VC << "[] = {\n";
@@ -2857,12 +2880,9 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "  default: // unreachable\n";
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
-    std::string CommentDelimiter =
-      AsmVariant->getValueAsString("CommentDelimiter");
-    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
-    OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
-       << "; End = array_endof(MatchTable" << VC << "); break;\n";
+    OS << "  case " << AsmVariantNo << ": Start = std::begin(MatchTable" << VC
+       << "); End = std::end(MatchTable" << VC << "); break;\n";
   }
   OS << "  }\n";
   OS << "  // Search the table.\n";
@@ -2915,12 +2935,9 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "  default: // unreachable\n";
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
-    std::string CommentDelimiter =
-      AsmVariant->getValueAsString("CommentDelimiter");
-    std::string RegisterPrefix = AsmVariant->getValueAsString("RegisterPrefix");
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
-    OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
-       << "; End = array_endof(MatchTable" << VC << "); break;\n";
+    OS << "  case " << AsmVariantNo << ": Start = std::begin(MatchTable" << VC
+       << "); End = std::end(MatchTable" << VC << "); break;\n";
   }
   OS << "  }\n";
   OS << "  // Search the table.\n";
@@ -3017,6 +3034,14 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
     AsmParser->getValueAsString("AsmParserInstCleanup");
   if (!InsnCleanupFn.empty())
     OS << "    " << InsnCleanupFn << "(Inst);\n";
+
+  if (HasDeprecation) {
+    OS << "    std::string Info;\n";
+    OS << "    if (MII.get(Inst.getOpcode()).getDeprecatedInfo(Inst, STI, Info)) {\n";
+    OS << "      SMLoc Loc = ((" << Target.getName() << "Operand*)Operands[0])->getStartLoc();\n";
+    OS << "      Parser.Warning(Loc, Info, None);\n";
+    OS << "    }\n";
+  }
 
   OS << "    return Match_Success;\n";
   OS << "  }\n\n";

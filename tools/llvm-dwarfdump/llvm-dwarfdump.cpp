@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/DebugInfo/DIContext.h"
@@ -62,11 +61,18 @@ DumpType("debug-dump", cl::init(DIDT_All),
         clEnumValN(DIDT_Aranges, "aranges", ".debug_aranges"),
         clEnumValN(DIDT_Info, "info", ".debug_info"),
         clEnumValN(DIDT_InfoDwo, "info.dwo", ".debug_info.dwo"),
+        clEnumValN(DIDT_Types, "types", ".debug_types"),
+        clEnumValN(DIDT_TypesDwo, "types.dwo", ".debug_types.dwo"),
         clEnumValN(DIDT_Line, "line", ".debug_line"),
+        clEnumValN(DIDT_LineDwo, "line.dwo", ".debug_line.dwo"),
         clEnumValN(DIDT_Loc, "loc", ".debug_loc"),
+        clEnumValN(DIDT_LocDwo, "loc.dwo", ".debug_loc.dwo"),
         clEnumValN(DIDT_Frames, "frames", ".debug_frame"),
         clEnumValN(DIDT_Ranges, "ranges", ".debug_ranges"),
         clEnumValN(DIDT_Pubnames, "pubnames", ".debug_pubnames"),
+        clEnumValN(DIDT_Pubtypes, "pubtypes", ".debug_pubtypes"),
+        clEnumValN(DIDT_GnuPubnames, "gnu_pubnames", ".debug_gnu_pubnames"),
+        clEnumValN(DIDT_GnuPubtypes, "gnu_pubtypes", ".debug_gnu_pubtypes"),
         clEnumValN(DIDT_Str, "str", ".debug_str"),
         clEnumValN(DIDT_StrDwo, "str.dwo", ".debug_str.dwo"),
         clEnumValN(DIDT_StrOffsetsDwo, "str_offsets.dwo", ".debug_str_offsets.dwo"),
@@ -81,20 +87,21 @@ static void PrintDILineInfo(DILineInfo dli) {
 }
 
 static void DumpInput(const StringRef &Filename) {
-  OwningPtr<MemoryBuffer> Buff;
+  std::unique_ptr<MemoryBuffer> Buff;
 
   if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, Buff)) {
     errs() << Filename << ": " << ec.message() << "\n";
     return;
   }
 
-  OwningPtr<ObjectFile> Obj(ObjectFile::createObjectFile(Buff.take()));
-  if (!Obj) {
-    errs() << Filename << ": Unknown object file format\n";
+  ErrorOr<ObjectFile*> ObjOrErr(ObjectFile::createObjectFile(Buff.release()));
+  if (error_code EC = ObjOrErr.getError()) {
+    errs() << Filename << ": " << EC.message() << '\n';
     return;
   }
+  std::unique_ptr<ObjectFile> Obj(ObjOrErr.get());
 
-  OwningPtr<DIContext> DICtx(DIContext::getDWARFContext(Obj.get()));
+  std::unique_ptr<DIContext> DICtx(DIContext::getDWARFContext(Obj.get()));
 
   if (Address == -1ULL) {
     outs() << Filename

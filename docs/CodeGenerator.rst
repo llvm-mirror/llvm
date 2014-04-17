@@ -70,7 +70,7 @@ different pieces of this will be useful to you.  In any case, you should be
 familiar with the `target description`_ and `machine code representation`_
 classes.  If you want to add a backend for a new target, you will need to
 `implement the target description`_ classes for your new target and understand
-the `LLVM code representation <LangRef.html>`_.  If you are interested in
+the :doc:`LLVM code representation <LangRef>`.  If you are interested in
 implementing a new `code generation algorithm`_, it should only depend on the
 target-description and machine code representation classes, ensuring that it is
 portable.
@@ -172,7 +172,7 @@ architecture.  These target descriptions often have a large amount of common
 information (e.g., an ``add`` instruction is almost identical to a ``sub``
 instruction).  In order to allow the maximum amount of commonality to be
 factored out, the LLVM code generator uses the
-:doc:`TableGen <TableGenFundamentals>` tool to describe big chunks of the
+:doc:`TableGen/index` tool to describe big chunks of the
 target machine, which allows the use of domain-specific and target-specific
 abstractions to reduce the amount of repetition.
 
@@ -277,7 +277,7 @@ an associated register class.  When the register allocator runs, it replaces
 virtual registers with a physical register in the set.
 
 The target-specific implementations of these classes is auto-generated from a
-`TableGen <TableGenFundamentals.html>`_ description of the register file.
+:doc:`TableGen/index` description of the register file.
 
 .. _TargetInstrInfo:
 
@@ -434,12 +434,12 @@ For example, consider this simple LLVM example:
 .. code-block:: llvm
 
   define i32 @test(i32 %X, i32 %Y) {
-    %Z = udiv i32 %X, %Y
+    %Z = sdiv i32 %X, %Y
     ret i32 %Z
   }
 
-The X86 instruction selector produces this machine code for the ``div`` and
-``ret`` (use "``llc X.bc -march=x86 -print-machineinstrs``" to get this):
+The X86 instruction selector might produce this machine code for the ``div`` and
+``ret``:
 
 .. code-block:: llvm
 
@@ -454,8 +454,8 @@ The X86 instruction selector produces this machine code for the ``div`` and
   %EAX = mov %reg1026           ;; 32-bit return value goes in EAX
   ret
 
-By the end of code generation, the register allocator has coalesced the
-registers and deleted the resultant identity moves producing the following
+By the end of code generation, the register allocator would coalesce the
+registers and delete the resultant identity moves producing the following
 code:
 
 .. code-block:: llvm
@@ -635,6 +635,18 @@ one for writing out a .s file (MCAsmStreamer), and one for writing out a .o
 file (MCObjectStreamer).  MCAsmStreamer is a straight-forward implementation
 that prints out a directive for each method (e.g. ``EmitValue -> .byte``), but
 MCObjectStreamer implements a full assembler.
+
+For target specific directives, the MCStreamer has a MCTargetStreamer instance.
+Each target that needs it defines a class that inherits from it and is a lot
+like MCStreamer itself: It has one method per directive and two classes that
+inherit from it, a target object streamer and a target asm streamer. The target
+asm streamer just prints it (``emitFnStart -> .fnstrart``), and the object
+streamer implement the assembler logic for it.
+
+To make llvm use these classes, the target initialization must call
+TargetRegistry::RegisterAsmStreamer and TargetRegistry::RegisterMCObjectStreamer
+passing callbacks that allocate the corresponding target streamer and pass it
+to createAsmStreamer or to the appropriate object streamer constructor.
 
 The ``MCContext`` class
 -----------------------
@@ -1614,7 +1626,7 @@ Implementing a Native Assembler
 ===============================
 
 Though you're probably reading this because you want to write or maintain a
-compiler backend, LLVM also fully supports building a native assemblers too.
+compiler backend, LLVM also fully supports building a native assembler.
 We've tried hard to automate the generation of the assembler from the .td files
 (in particular the instruction syntax and encodings), which means that a large
 part of the manual and repetitive data entry can be factored and shared with the
@@ -2132,6 +2144,10 @@ The following target-specific calling conventions are known to backend:
 * **x86_ThisCall** --- Similar to X86_StdCall. Passes first argument in ECX,
   others via stack. Callee is responsible for stack cleaning. This convention is
   used by MSVC by default for methods in its ABI (CC ID = 70).
+
+* **X86_CDeclMethod** --- Identical to the standard x86_32 C calling convention,
+  except that an sret paramter, if present, is placed on the stack after the
+  second parameter, which must an integer or pointer.  (CC ID = 80).
 
 .. _X86 addressing mode:
 

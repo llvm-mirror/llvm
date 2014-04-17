@@ -1,5 +1,18 @@
+add_subdirectory(ChildTarget)
 
-set(LLVM_LINK_COMPONENTS mcjit jit interpreter nativecodegen bitreader asmparser irreader selectiondag native instrumentation)
+set(LLVM_LINK_COMPONENTS
+  CodeGen
+  Core
+  ExecutionEngine
+  IRReader
+  Instrumentation
+  Interpreter
+  JIT
+  MCJIT
+  SelectionDAG
+  Support
+  native
+  )
 
 if( LLVM_USE_OPROFILE )
   set(LLVM_LINK_COMPONENTS
@@ -19,6 +32,8 @@ endif( LLVM_USE_INTEL_JITEVENTS )
 
 add_llvm_tool(lli
   lli.cpp
-  RecordingMemoryManager.cpp
+  RemoteMemoryManager.cpp
   RemoteTarget.cpp
+  RemoteTargetExternal.cpp
   )
+set_target_properties(lli PROPERTIES ENABLE_EXPORTS 1)

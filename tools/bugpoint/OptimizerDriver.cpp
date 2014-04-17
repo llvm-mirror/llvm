@@ -16,10 +16,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "BugDriver.h"
-#include "llvm/Analysis/Verifier.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -71,7 +71,7 @@ bool BugDriver::writeProgramToFile(const std::string &Filename, int FD,
 bool BugDriver::writeProgramToFile(const std::string &Filename,
                                    const Module *M) const {
   std::string ErrInfo;
-  tool_output_file Out(Filename.c_str(), ErrInfo, sys::fs::F_Binary);
+  tool_output_file Out(Filename.c_str(), ErrInfo, sys::fs::F_None);
   if (ErrInfo.empty())
     return writeProgramToFileAux(Out, M);
   return true;

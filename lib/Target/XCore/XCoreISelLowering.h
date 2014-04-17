@@ -42,6 +42,9 @@ namespace llvm {
       // cp relative address
       CPRelativeWrapper,
 
+      // Load word from stack
+      LDWSP,
+
       // Store word to stack
       STWSP,
 
@@ -70,7 +73,17 @@ namespace llvm {
       BR_JT,
 
       // Jumptable branch using long branches for each entry.
-      BR_JT32
+      BR_JT32,
+
+      // Offset from frame pointer to the first (possible) on-stack argument
+      FRAME_TO_ARGS_OFFSET,
+
+      // Exception handler return. The stack is restored to the first
+      // followed by a jump to the second argument.
+      EH_RETURN,
+
+      // Memory barrier.
+      MEMBARRIER
     };
   }
 
@@ -82,6 +95,10 @@ namespace llvm {
   public:
 
     explicit XCoreTargetLowering(XCoreTargetMachine &TM);
+
+    using TargetLowering::isZExtFree;
+    virtual bool isZExtFree(SDValue Val, EVT VT2) const;
+
 
     virtual unsigned getJumpTableEncoding() const;
     virtual MVT getScalarShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
@@ -125,11 +142,6 @@ namespace llvm {
                            const SmallVectorImpl<ISD::InputArg> &Ins,
                            SDLoc dl, SelectionDAG &DAG,
                            SmallVectorImpl<SDValue> &InVals) const;
-    SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
-                            CallingConv::ID CallConv, bool isVarArg,
-                            const SmallVectorImpl<ISD::InputArg> &Ins,
-                            SDLoc dl, SelectionDAG &DAG,
-                            SmallVectorImpl<SDValue> &InVals) const;
     SDValue getReturnAddressFrameIndex(SelectionDAG &DAG) const;
     SDValue getGlobalAddressWrapper(SDValue GA, const GlobalValue *GV,
                                     SelectionDAG &DAG) const;
@@ -140,6 +152,7 @@ namespace llvm {
     // Lower Operand specifics
     SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -151,9 +164,14 @@ namespace llvm {
     SDValue LowerUMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFRAME_TO_ARGS_OFFSET(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINIT_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerADJUST_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerATOMIC_LOAD(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerATOMIC_STORE(SDValue Op, SelectionDAG &DAG) const;
 
     // Inline asm support
     std::pair<unsigned, const TargetRegisterClass*>

@@ -83,16 +83,15 @@ static bool LLVM_ATTRIBUTE_UNUSED
 ExecGraphViewer(StringRef ExecPath, std::vector<const char*> &args,
                 StringRef Filename, bool wait, std::string &ErrMsg) {
   if (wait) {
-    if (sys::ExecuteAndWait(ExecPath, &args[0],0,0,0,0,&ErrMsg)) {
+    if (sys::ExecuteAndWait(ExecPath, &args[0],nullptr,nullptr,0,0,&ErrMsg)) {
       errs() << "Error: " << ErrMsg << "\n";
       return false;
     }
-    bool Existed;
-    sys::fs::remove(Filename, Existed);
+    sys::fs::remove(Filename);
     errs() << " done. \n";
   }
   else {
-    sys::ExecuteNoWait(ExecPath, &args[0],0,0,0,&ErrMsg);
+    sys::ExecuteNoWait(ExecPath, &args[0],nullptr,nullptr,0,&ErrMsg);
     errs() << "Remember to erase graph file: " << Filename.str() << "\n";
   }
   return true;
@@ -109,7 +108,7 @@ void llvm::DisplayGraph(StringRef FilenameRef, bool wait,
   std::vector<const char*> args;
   args.push_back(Graphviz.c_str());
   args.push_back(Filename.c_str());
-  args.push_back(0);
+  args.push_back(nullptr);
 
   errs() << "Running 'Graphviz' program... ";
   if (!ExecGraphViewer(Graphviz, args, Filename, wait, ErrMsg))
@@ -219,5 +218,8 @@ void llvm::DisplayGraph(StringRef FilenameRef, bool wait,
   errs() << "Running 'dotty' program... ";
   if (!ExecGraphViewer(dotty, args, Filename, wait, ErrMsg))
     return;
+#else
+  (void)Filename;
+  (void)ErrMsg;
 #endif
 }

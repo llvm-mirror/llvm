@@ -5,17 +5,17 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 ; Make sure we are preserving debug info in the vectorized code.
 
 ; CHECK: for.body.lr.ph
-; CHECK:   cmp.zero = icmp eq i64 {{.*}}, 0, !dbg !21
+; CHECK:   cmp.zero = icmp eq i64 {{.*}}, 0, !dbg ![[LOC:[0-9]+]]
 ; CHECK: vector.body
-; CHECK:   index {{.*}}, !dbg !21
-; CHECK:   getelementptr inbounds i32* %a, {{.*}}, !dbg !22
-; CHECK:   load <2 x i32>* {{.*}}, !dbg !22
-; CHECK:   add <2 x i32> {{.*}}, !dbg !22
-; CHECK:   add i64 %index, 2, !dbg !21
-; CHECK:   icmp eq i64 %index.next, %end.idx.rnd.down, !dbg !21
+; CHECK:   index {{.*}}, !dbg ![[LOC]]
+; CHECK:   getelementptr inbounds i32* %a, {{.*}}, !dbg ![[LOC2:[0-9]+]]
+; CHECK:   load <2 x i32>* {{.*}}, !dbg ![[LOC2]]
+; CHECK:   add <2 x i32> {{.*}}, !dbg ![[LOC2]]
+; CHECK:   add i64 %index, 2, !dbg ![[LOC]]
+; CHECK:   icmp eq i64 %index.next, %end.idx.rnd.down, !dbg ![[LOC]]
 ; CHECK: middle.block
-; CHECK:   add <2 x i32> %rdx.vec.exit.phi, %rdx.shuf, !dbg !22
-; CHECK:   extractelement <2 x i32> %bin.rdx, i32 0, !dbg !22
+; CHECK:   add <2 x i32> %rdx.vec.exit.phi, %rdx.shuf, !dbg ![[LOC2]]
+; CHECK:   extractelement <2 x i32> %bin.rdx, i32 0, !dbg ![[LOC2]]
 
 define i32 @f(i32* nocapture %a, i32 %size) #0 {
 entry:
@@ -33,7 +33,7 @@ for.body:                                         ; preds = %for.body.lr.ph, %fo
   %indvars.iv = phi i64 [ 0, %for.body.lr.ph ], [ %indvars.iv.next, %for.body ]
   %sum.05 = phi i32 [ 0, %for.body.lr.ph ], [ %add, %for.body ]
   %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv, !dbg !22
-  %0 = load i32* %arrayidx, align 4, !dbg !22, !tbaa !23
+  %0 = load i32* %arrayidx, align 4, !dbg !22
   %add = add i32 %0, %sum.05, !dbg !22
   tail call void @llvm.dbg.value(metadata !{i32 %add.lcssa}, i64 0, metadata !15), !dbg !22
   %indvars.iv.next = add i64 %indvars.iv, 1, !dbg !21
@@ -61,7 +61,7 @@ attributes #0 = { nounwind readonly ssp uwtable "less-precise-fpmad"="false" "no
 attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!18}
+!llvm.module.flags = !{!18, !27}
 
 !0 = metadata !{i32 786449, metadata !1, i32 12, metadata !"clang version 3.4 (trunk 185038) (llvm/trunk 185097)", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/Volumes/Data/backedup/dev/os/llvm/debug/-] [DW_LANG_C99]
 !1 = metadata !{metadata !"-", metadata !"/Volumes/Data/backedup/dev/os/llvm/debug"}
@@ -70,7 +70,7 @@ attributes #1 = { nounwind readnone }
 !4 = metadata !{i32 786478, metadata !5, metadata !6, metadata !"f", metadata !"f", metadata !"", i32 3, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i32*, i32)* @f, null, null, metadata !12, i32 3} ; [ DW_TAG_subprogram ] [line 3] [def] [f]
 !5 = metadata !{metadata !"<stdin>", metadata !"/Volumes/Data/backedup/dev/os/llvm/debug"}
 !6 = metadata !{i32 786473, metadata !5}          ; [ DW_TAG_file_type ] [/Volumes/Data/backedup/dev/os/llvm/debug/<stdin>]
-!7 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!7 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !8 = metadata !{metadata !9, metadata !10, metadata !11}
 !9 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
 !10 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from int]
@@ -86,7 +86,5 @@ attributes #1 = { nounwind readnone }
 !20 = metadata !{i32 4, i32 0, metadata !4, null}
 !21 = metadata !{i32 5, i32 0, metadata !17, null}
 !22 = metadata !{i32 6, i32 0, metadata !17, null}
-!23 = metadata !{metadata !"int", metadata !24}
-!24 = metadata !{metadata !"omnipotent char", metadata !25}
-!25 = metadata !{metadata !"Simple C/C++ TBAA"}
 !26 = metadata !{i32 7, i32 0, metadata !4, null}
+!27 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

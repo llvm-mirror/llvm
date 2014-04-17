@@ -14,6 +14,7 @@
 #define DEBUG_TYPE "mips16-hard-float"
 #include "Mips16HardFloat.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Value.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -167,6 +168,11 @@ static bool needsFPReturnHelper(Function &F) {
   return whichFPReturnVariant(RetType) != NoFPRet;
 }
 
+static bool needsFPReturnHelper(const FunctionType &FT) {
+  Type* RetType = FT.getReturnType();
+  return whichFPReturnVariant(RetType) != NoFPRet;
+}
+
 static bool needsFPHelperFromSig(Function &F) {
   return needsFPStubFromParams(F) || needsFPReturnHelper(F);
 }
@@ -239,8 +245,8 @@ static void swapFPIntParams
 // Make sure that we know we already need a stub for this function.
 // Having called needsFPHelperFromSig
 //
-static void assureFPCallStub(Function &F, Module *M,  
-                             const MipsSubtarget &Subtarget){
+static void assureFPCallStub(Function &F, Module *M,
+                             const MipsSubtarget &Subtarget) {
   // for now we only need them for static relocation
   if (Subtarget.getRelocationModel() == Reloc::PIC_)
     return;
@@ -322,15 +328,34 @@ static void assureFPCallStub(Function &F, Module *M,
 }
 
 //
-// Functions that are inline intrinsics don't need helpers.
+// Functions that are llvm intrinsics and don't need helpers.
 //
 static const char *IntrinsicInline[] =
-  {"fabs"};
+  {"fabs",
+   "fabsf",
+   "llvm.ceil.f32", "llvm.ceil.f64",
+   "llvm.copysign.f32", "llvm.copysign.f64",
+   "llvm.cos.f32", "llvm.cos.f64",
+   "llvm.exp.f32", "llvm.exp.f64",
+   "llvm.exp2.f32", "llvm.exp2.f64",
+   "llvm.fabs.f32", "llvm.fabs.f64",
+   "llvm.floor.f32", "llvm.floor.f64",
+   "llvm.fma.f32", "llvm.fma.f64",
+   "llvm.log.f32", "llvm.log.f64",
+   "llvm.log10.f32", "llvm.log10.f64",
+   "llvm.nearbyint.f32", "llvm.nearbyint.f64",
+   "llvm.pow.f32", "llvm.pow.f64",
+   "llvm.powi.f32", "llvm.powi.f64",
+   "llvm.rint.f32", "llvm.rint.f64",
+   "llvm.round.f32", "llvm.round.f64",
+   "llvm.sin.f32", "llvm.sin.f64",
+   "llvm.sqrt.f32", "llvm.sqrt.f64",
+   "llvm.trunc.f32", "llvm.trunc.f64",
+  };
 
 static bool isIntrinsicInline(Function *F) {
-  return std::binary_search(
-    IntrinsicInline, array_endof(IntrinsicInline),
-    F->getName());
+  return std::binary_search(std::begin(IntrinsicInline),
+                            std::end(IntrinsicInline), F->getName());
 }
 //
 // Returns of float, double and complex need to be handled with a helper
@@ -380,13 +405,31 @@ static bool fixupFPReturnAndCall
         Value *F = (M->getOrInsertFunction(Name, A, MyVoid, T, NULL));
         CallInst::Create(F, Params, "", &Inst );
       } else if (const CallInst *CI = dyn_cast<CallInst>(I)) {
+          const Value* V = CI->getCalledValue();
+          const Type* T = 0;
+          if (V) T = V->getType();
+          const PointerType *PFT=0;
+          if (T) PFT = dyn_cast<PointerType>(T);
+          const FunctionType *FT=0;
+          if (PFT) FT = dyn_cast<FunctionType>(PFT->getElementType());
+          Function *F_ =  CI->getCalledFunction();
+          if (FT && needsFPReturnHelper(*FT) &&
+              !(F_ && isIntrinsicInline(F_))) {
+            Modified=true;
+            F.addFnAttr("saveS2");
+          }
+          if (F_ && !isIntrinsicInline(F_)) {
           // pic mode calls are handled by already defined
           // helper functions
-          if (Subtarget.getRelocationModel() != Reloc::PIC_ ) {
-            Function *F_ =  CI->getCalledFunction();
-            if (F_ && !isIntrinsicInline(F_) && needsFPHelperFromSig(*F_)) {
-              assureFPCallStub(*F_, M, Subtarget);
+            if (needsFPReturnHelper(*F_)) {
               Modified=true;
+              F.addFnAttr("saveS2");
+            }
+            if (Subtarget.getRelocationModel() != Reloc::PIC_ ) {
+              if (needsFPHelperFromSig(*F_)) {
+                assureFPCallStub(*F_, M, Subtarget);
+                Modified=true;
+              }
             }
           }
       }
@@ -402,7 +445,7 @@ static void createFPFnStub(Function *F, Module *M, FPParamVariant PV,
   std::string Name = F->getName();
   std::string SectionName = ".mips16.fn." + Name;
   std::string StubName = "__fn_stub_" + Name;
-  std::string LocalName = "__fn_local_" + Name;
+  std::string LocalName = "$$__fn_local_" + Name;
   Function *FStub = Function::Create
     (F->getFunctionType(),
      Function::InternalLinkage, StubName, M);
@@ -417,17 +460,34 @@ static void createFPFnStub(Function *F, Module *M, FPParamVariant PV,
   IAH.Out(" .set  macro");
   if (PicMode) {
     IAH.Out(".set noreorder");
-    IAH.Out(".cpload  $$2");
+    IAH.Out(".cpload  $$25");
     IAH.Out(".set reorder");
     IAH.Out(".reloc 0,R_MIPS_NONE," + Name);
     IAH.Out("la $$25," + LocalName);
   }
-  else
-    IAH.Out("la $$25, " + Name);
+  else {
+    IAH.Out(".set reorder");
+    IAH.Out("la $$25," + Name);
+  }
   swapFPIntParams(PV, M, IAH, LE, false);
   IAH.Out("jr $$25");
   IAH.Out(LocalName + " = " + Name);
   new UnreachableInst(FStub->getContext(), BB);
+}
+
+//
+// remove the use-soft-float attribute
+//
+static void removeUseSoftFloat(Function &F) {
+  AttributeSet A;
+  DEBUG(errs() << "removing -use-soft-float\n");
+  A = A.addAttribute(F.getContext(), AttributeSet::FunctionIndex,
+                     "use-soft-float", "false");
+  F.removeAttributes(AttributeSet::FunctionIndex, A);
+  if (F.hasFnAttribute("use-soft-float")) {
+    DEBUG(errs() << "still has -use-soft-float\n");
+  }
+  F.addAttributes(AttributeSet::FunctionIndex, A);
 }
 
 namespace llvm {
@@ -439,8 +499,9 @@ namespace llvm {
 // declared via attributes as nomips16, we must:
 //    1) fixup all returns of float, double, single and double complex
 //       by calling a helper function before the actual return.
-//    2) generate helper functions (stubs) that can be called by mips32 functions
-//       that will move parameters passed normally passed in floating point
+//    2) generate helper functions (stubs) that can be called by mips32
+//       functions that will move parameters passed normally passed in
+//       floating point
 //       registers the soft float equivalents.
 //    3) in the case of static relocation, generate helper functions so that
 //       mips16 functions can call extern functions of unknown type (mips16 or
@@ -453,6 +514,11 @@ bool Mips16HardFloat::runOnModule(Module &M) {
   DEBUG(errs() << "Run on Module Mips16HardFloat\n");
   bool Modified = false;
   for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
+    if (F->hasFnAttribute("nomips16") &&
+        F->hasFnAttribute("use-soft-float")) {
+      removeUseSoftFloat(*F);
+      continue;
+    }
     if (F->isDeclaration() || F->hasFnAttribute("mips16_fp_stub") ||
         F->hasFnAttribute("nomips16")) continue;
     Modified |= fixupFPReturnAndCall(*F, &M, Subtarget);

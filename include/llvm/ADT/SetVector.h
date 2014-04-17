@@ -170,7 +170,7 @@ public:
     vector_.pop_back();
   }
   
-  T pop_back_val() {
+  T LLVM_ATTRIBUTE_UNUSED_RESULT pop_back_val() {
     T Ret = back();
     pop_back();
     return Ret;
@@ -195,11 +195,10 @@ private:
     set_type &set_;
 
   public:
-    typedef typename UnaryPredicate::argument_type argument_type;
-
     TestAndEraseFromSet(UnaryPredicate P, set_type &set_) : P(P), set_(set_) {}
 
-    bool operator()(argument_type Arg) {
+    template <typename ArgumentT>
+    bool operator()(const ArgumentT &Arg) {
       if (P(Arg)) {
         set_.erase(Arg);
         return true;

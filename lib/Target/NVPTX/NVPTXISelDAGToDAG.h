@@ -59,6 +59,8 @@ private:
 #include "NVPTXGenDAGISel.inc"
 
   SDNode *Select(SDNode *N);
+  SDNode *SelectIntrinsicNoChain(SDNode *N);
+  SDNode *SelectTexSurfHandle(SDNode *N);
   SDNode *SelectLoad(SDNode *N);
   SDNode *SelectLoadVector(SDNode *N);
   SDNode *SelectLDGLDUVector(SDNode *N);
@@ -67,6 +69,9 @@ private:
   SDNode *SelectLoadParam(SDNode *N);
   SDNode *SelectStoreRetval(SDNode *N);
   SDNode *SelectStoreParam(SDNode *N);
+  SDNode *SelectAddrSpaceCast(SDNode *N);
+  SDNode *SelectTextureIntrinsic(SDNode *N);
+  SDNode *SelectSurfaceIntrinsic(SDNode *N);
         
   inline SDValue getI32Imm(unsigned Imm) {
     return CurDAG->getTargetConstant(Imm, MVT::i32);
@@ -90,8 +95,6 @@ private:
                       SDValue &Offset);
 
   bool ChkMemSDNodeAddressSpace(SDNode *N, unsigned int spN) const;
-
-  bool UndefOrImm(SDValue Op, SDValue N, SDValue &Retval);
 
 };
 }

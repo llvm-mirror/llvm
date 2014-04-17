@@ -10,6 +10,7 @@
 #ifndef LLVM_MC_TARGETPARSER_H
 #define LLVM_MC_TARGETPARSER_H
 
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCParser/MCAsmParserExtension.h"
 
 namespace llvm {
@@ -174,6 +175,14 @@ public:
 
   virtual void convertToMapAndConstraints(unsigned Kind,
                       const SmallVectorImpl<MCParsedAsmOperand*> &Operands) = 0;
+
+  virtual const MCExpr *applyModifierToExpr(const MCExpr *E,
+                                            MCSymbolRefExpr::VariantKind,
+                                            MCContext &Ctx) {
+    return 0;
+  }
+
+  virtual void onLabelParsed(MCSymbol *Symbol) { };
 };
 
 } // End llvm namespace

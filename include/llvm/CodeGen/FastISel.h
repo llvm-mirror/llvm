@@ -17,22 +17,22 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/ValueTypes.h"
 
 namespace llvm {
 
 class AllocaInst;
 class Constant;
 class ConstantFP;
+class DataLayout;
 class FunctionLoweringInfo;
 class Instruction;
 class LoadInst;
+class MVT;
 class MachineConstantPool;
+class MachineFrameInfo;
 class MachineFunction;
 class MachineInstr;
-class MachineFrameInfo;
 class MachineRegisterInfo;
-class DataLayout;
 class TargetInstrInfo;
 class TargetLibraryInfo;
 class TargetLowering;
@@ -51,9 +51,9 @@ protected:
   MachineRegisterInfo &MRI;
   MachineFrameInfo &MFI;
   MachineConstantPool &MCP;
-  DebugLoc DL;
+  DebugLoc DbgLoc;
   const TargetMachine &TM;
-  const DataLayout &TD;
+  const DataLayout &DL;
   const TargetInstrInfo &TII;
   const TargetLowering &TLI;
   const TargetRegisterInfo &TRI;
@@ -87,7 +87,7 @@ public:
   void startNewBlock();
 
   /// Return current debug location information.
-  DebugLoc getCurDebugLoc() const { return DL; }
+  DebugLoc getCurDebugLoc() const { return DbgLoc; }
   
   /// Do "fast" instruction selection for function arguments and append machine
   /// instructions to the current block. Return true if it is successful.
@@ -357,6 +357,15 @@ protected:
   virtual unsigned TargetMaterializeFloatZero(const ConstantFP* CF) {
     return 0;
   }
+
+  /// \brief Check if \c Add is an add that can be safely folded into \c GEP.
+  ///
+  /// \c Add can be folded into \c GEP if:
+  /// - \c Add is an add,
+  /// - \c Add's size matches \c GEP's,
+  /// - \c Add is in the same basic block as \c GEP, and
+  /// - \c Add has a constant operand.
+  bool canFoldAddIntoGEP(const User *GEP, const Value *Add);
 
 private:
   bool SelectBinaryOp(const User *I, unsigned ISDOpcode);

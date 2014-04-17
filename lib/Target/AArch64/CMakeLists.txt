@@ -26,9 +26,8 @@ add_llvm_target(AArch64CodeGen
   AArch64Subtarget.cpp
   AArch64TargetMachine.cpp
   AArch64TargetObjectFile.cpp
+  AArch64TargetTransformInfo.cpp
   )
-
-add_dependencies(LLVMAArch64CodeGen AArch64CommonTableGen)
 
 add_subdirectory(AsmParser)
 add_subdirectory(Disassembler)

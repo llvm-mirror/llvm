@@ -1,14 +1,20 @@
-; RUN: llc < %s | FileCheck %s
-; RUN: llc < %s -regalloc=basic | FileCheck %s
+; RUN: llc < %s -filetype=obj | llvm-dwarfdump -debug-dump=info - | FileCheck %s
+; RUN: llc < %s -filetype=obj -regalloc=basic | llvm-dwarfdump -debug-dump=info -  | FileCheck %s
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64"
 target triple = "x86_64-apple-darwin10.0.0"
 
 ; Check debug info for variable z_s
-;CHECK: .long Lset14
-;CHECK-NEXT:  ## DW_AT_decl_file
-;CHECK-NEXT:  ## DW_AT_decl_line
-;CHECK-NEXT:  ## DW_AT_type
-;CHECK-NEXT:  ## DW_AT_location
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_TAG_variable
+; CHECK: DW_TAG_variable
+; CHECK-NEXT:   DW_AT_name {{.*}} "z_s"
+; CHECK-NEXT:   DW_AT_decl_file
+; CHECK-NEXT:   DW_AT_decl_line
+; CHECK-NEXT:   DW_AT_type{{.*}}{[[TYPE:.*]]}
+; CHECK-NEXT:   DW_AT_location
+; CHECK: [[TYPE]]:
+; CHECK-NEXT: DW_AT_name {{.*}} "int"
 
 
 @.str1 = private unnamed_addr constant [14 x i8] c"m=%u, z_s=%d\0A\00"
@@ -70,15 +76,16 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 declare i32 @puts(i8* nocapture) nounwind
 
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!33}
 
-!0 = metadata !{i32 786478, metadata !31, metadata !1, metadata !"gcd", metadata !"gcd", metadata !"", i32 5, metadata !3, i1 false, i1 true, i32 0, i32 0, i32 0, i32 256, i1 true, i64 (i64, i64)* @gcd, null, null, metadata !29, i32 0} ; [ DW_TAG_subprogram ]
+!0 = metadata !{i32 786478, metadata !31, metadata !1, metadata !"gcd", metadata !"gcd", metadata !"", i32 5, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i64 (i64, i64)* @gcd, null, null, metadata !29, i32 0} ; [ DW_TAG_subprogram ] [line 5] [def] [scope 0] [gcd]
 !1 = metadata !{i32 786473, metadata !31} ; [ DW_TAG_file_type ]
 !2 = metadata !{i32 786449, metadata !31, i32 12, metadata !"clang version 2.9 (trunk 124117)", i1 true, metadata !"", i32 0, metadata !32, metadata !32, metadata !28, null,  null, null} ; [ DW_TAG_compile_unit ]
-!3 = metadata !{i32 786453, metadata !31, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, i32 0, metadata !4, i32 0, i32 0} ; [ DW_TAG_subroutine_type ]
+!3 = metadata !{i32 786453, metadata !31, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !4 = metadata !{metadata !5}
 !5 = metadata !{i32 786468, null, metadata !2, metadata !"long int", i32 0, i64 64, i64 64, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!6 = metadata !{i32 786478, metadata !31, metadata !1, metadata !"main", metadata !"main", metadata !"", i32 25, metadata !7, i1 false, i1 true, i32 0, i32 0, i32 0, i32 0, i1 true, i32 ()* @main, null, null, metadata !30, i32 0} ; [ DW_TAG_subprogram ]
-!7 = metadata !{i32 786453, metadata !31, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, i32 0, metadata !8, i32 0, i32 0} ; [ DW_TAG_subroutine_type ]
+!6 = metadata !{i32 786478, metadata !31, metadata !1, metadata !"main", metadata !"main", metadata !"", i32 25, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 true, i32 ()* @main, null, null, metadata !30, i32 0} ; [ DW_TAG_subprogram ] [line 25] [def] [scope 0] [main]
+!7 = metadata !{i32 786453, metadata !31, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !8 = metadata !{metadata !9}
 !9 = metadata !{i32 786468, null, metadata !2, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
 !10 = metadata !{i32 786689, metadata !0, metadata !"a", metadata !1, i32 5, metadata !5, i32 0, null} ; [ DW_TAG_arg_variable ]
@@ -104,3 +111,4 @@ declare i32 @puts(i8* nocapture) nounwind
 !30 = metadata !{metadata !14, metadata !17}
 !31 = metadata !{metadata !"rem_small.c", metadata !"/private/tmp"}
 !32 = metadata !{i32 0}
+!33 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

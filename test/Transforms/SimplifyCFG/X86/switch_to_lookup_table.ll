@@ -711,7 +711,7 @@ return:
   ret i32 %retval.0
 }
 
-define i32 @cprop(i32 %x) {
+define i32 @cprop(i32 %x, i32 %y) {
 entry:
   switch i32 %x, label %sw.default [
     i32 1, label %return
@@ -727,7 +727,8 @@ sw.bb1: br label %return
 
 sw.bb2:
   %and = and i32 %x, 1
-  %tobool = icmp ne i32 %and, 0
+  %and.ptr = inttoptr i32 %and to i8*
+  %tobool = icmp ne i8* %and.ptr, null
   %cond = select i1 %tobool, i32 -123, i32 456
   %sub = sub nsw i32 %x, %cond
   br label %return
@@ -735,13 +736,15 @@ sw.bb2:
 sw.bb3:
   %trunc = trunc i32 %x to i8
   %sext = sext i8 %trunc to i32
+  %select.i = icmp sgt i32 %sext, 0
+  %select = select i1 %select.i, i32 %sext, i32 %y
   br label %return
 
 sw.default:
   br label %return
 
 return:
-  %retval.0 = phi i32 [ 123, %sw.default ], [ %sext, %sw.bb3 ], [ %sub, %sw.bb2 ], [ 42, %sw.bb1 ], [ 5, %entry ]
+  %retval.0 = phi i32 [ 123, %sw.default ], [ %select, %sw.bb3 ], [ %sub, %sw.bb2 ], [ 42, %sw.bb1 ], [ 5, %entry ]
   ret i32 %retval.0
 
 ; CHECK-LABEL: @cprop(
@@ -802,4 +805,116 @@ return:
 ; CHECK-LABEL: @illegaltype(
 ; CHECK-NOT: @switch.table
 ; CHECK: switch i32 %c
+}
+
+; If we can build a lookup table without any holes, we don't need a default result.
+declare void @exit(i32)
+define i32 @nodefaultnoholes(i32 %c) {
+entry:
+  switch i32 %c, label %sw.default [
+    i32 0, label %return
+    i32 1, label %sw.bb1
+    i32 2, label %sw.bb2
+    i32 3, label %sw.bb3
+  ]
+
+sw.bb1: br label %return
+sw.bb2: br label %return
+sw.bb3: br label %return
+sw.default: call void @exit(i32 1)
+            unreachable
+return:
+  %x = phi i32 [ -1, %sw.bb3 ], [ 0, %sw.bb2 ], [ 123, %sw.bb1 ], [ 55, %entry ]
+  ret i32 %x
+
+; CHECK-LABEL: @nodefaultnoholes(
+; CHECK: @switch.table
+; CHECK-NOT: switch i32
+}
+
+; This lookup table will have holes, so we need to test for the holes.
+define i32 @nodefaultwithholes(i32 %c) {
+entry:
+  switch i32 %c, label %sw.default [
+    i32 0, label %return
+    i32 1, label %sw.bb1
+    i32 2, label %sw.bb2
+    i32 3, label %sw.bb3
+    i32 5, label %sw.bb3
+  ]
+
+sw.bb1: br label %return
+sw.bb2: br label %return
+sw.bb3: br label %return
+sw.default: call void @exit(i32 1)
+            unreachable
+return:
+  %x = phi i32 [ -1, %sw.bb3 ], [ 0, %sw.bb2 ], [ 123, %sw.bb1 ], [ 55, %entry ]
+  ret i32 %x
+
+; CHECK-LABEL: @nodefaultwithholes(
+; CHECK: entry:
+; CHECK: br i1 %{{.*}}, label %switch.hole_check, label %sw.default
+; CHECK: switch.hole_check:
+; CHECK-NEXT: %switch.maskindex = trunc i32 %switch.tableidx to i6
+; CHECK-NEXT: %switch.shifted = lshr i6 -17, %switch.maskindex
+; The mask is binary 101111.
+; CHECK-NEXT: %switch.lobit = trunc i6 %switch.shifted to i1
+; CHECK-NEXT: br i1 %switch.lobit, label %switch.lookup, label %sw.default
+; CHECK-NOT: switch i32
+}
+
+; We don't build lookup tables with holes for switches with less than four cases.
+define i32 @threecasesholes(i32 %c) {
+entry:
+  switch i32 %c, label %sw.default [
+    i32 0, label %return
+    i32 1, label %sw.bb1
+    i32 3, label %sw.bb2
+  ]
+sw.bb1: br label %return
+sw.bb2: br label %return
+sw.default: br label %return
+return:
+  %x = phi i32 [ %c, %sw.default ], [ 5, %sw.bb2 ], [ 7, %sw.bb1 ], [ 9, %entry ]
+  ret i32 %x
+; CHECK-LABEL: @threecasesholes(
+; CHECK: switch i32
+; CHECK-NOT: @switch.table
+}
+
+; We build lookup tables for switches with three or more cases.
+define i32 @threecases(i32 %c) {
+entry:
+  switch i32 %c, label %sw.default [
+    i32 0, label %return
+    i32 1, label %sw.bb1
+    i32 2, label %sw.bb2
+  ]
+sw.bb1: br label %return
+sw.bb2: br label %return
+sw.default: br label %return
+return:
+  %x = phi i32 [ 3, %sw.default ], [ 5, %sw.bb2 ], [ 7, %sw.bb1 ], [ 9, %entry ]
+  ret i32 %x
+; CHECK-LABEL: @threecases(
+; CHECK-NOT: switch i32
+; CHECK: @switch.table
+}
+
+; We don't build tables for switches with two cases.
+define i32 @twocases(i32 %c) {
+entry:
+  switch i32 %c, label %sw.default [
+    i32 0, label %return
+    i32 1, label %sw.bb1
+  ]
+sw.bb1: br label %return
+sw.default: br label %return
+return:
+  %x = phi i32 [ 3, %sw.default ], [ 7, %sw.bb1 ], [ 9, %entry ]
+  ret i32 %x
+; CHECK-LABEL: @twocases(
+; CHECK: switch i32
+; CHECK-NOT: @switch.table
 }

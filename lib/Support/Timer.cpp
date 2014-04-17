@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Timer.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -66,8 +65,8 @@ raw_ostream *llvm::CreateInfoOutputFile() {
   // compensate for this, the test-suite Makefiles have code to delete the
   // info output file before running commands which write to it.
   std::string Error;
-  raw_ostream *Result =
-      new raw_fd_ostream(OutputFilename.c_str(), Error, sys::fs::F_Append);
+  raw_ostream *Result = new raw_fd_ostream(
+      OutputFilename.c_str(), Error, sys::fs::F_Append | sys::fs::F_Text);
   if (Error.empty())
     return Result;
   
@@ -78,7 +77,7 @@ raw_ostream *llvm::CreateInfoOutputFile() {
 }
 
 
-static TimerGroup *DefaultTimerGroup = 0;
+static TimerGroup *DefaultTimerGroup = nullptr;
 static TimerGroup *getDefaultTimerGroup() {
   TimerGroup *tmp = DefaultTimerGroup;
   sys::MemoryFence();
@@ -236,11 +235,11 @@ static Timer &getNamedRegionTimer(StringRef Name) {
 
 NamedRegionTimer::NamedRegionTimer(StringRef Name,
                                    bool Enabled)
-  : TimeRegion(!Enabled ? 0 : &getNamedRegionTimer(Name)) {}
+  : TimeRegion(!Enabled ? nullptr : &getNamedRegionTimer(Name)) {}
 
 NamedRegionTimer::NamedRegionTimer(StringRef Name, StringRef GroupName,
                                    bool Enabled)
-  : TimeRegion(!Enabled ? 0 : &NamedGroupedTimers->get(Name, GroupName)) {}
+  : TimeRegion(!Enabled ? nullptr : &NamedGroupedTimers->get(Name, GroupName)){}
 
 //===----------------------------------------------------------------------===//
 //   TimerGroup Implementation
@@ -248,10 +247,10 @@ NamedRegionTimer::NamedRegionTimer(StringRef Name, StringRef GroupName,
 
 /// TimerGroupList - This is the global list of TimerGroups, maintained by the
 /// TimerGroup ctor/dtor and is protected by the TimerLock lock.
-static TimerGroup *TimerGroupList = 0;
+static TimerGroup *TimerGroupList = nullptr;
 
 TimerGroup::TimerGroup(StringRef name)
-  : Name(name.begin(), name.end()), FirstTimer(0) {
+  : Name(name.begin(), name.end()), FirstTimer(nullptr) {
     
   // Add the group to TimerGroupList.
   sys::SmartScopedLock<true> L(*TimerLock);
@@ -265,7 +264,7 @@ TimerGroup::TimerGroup(StringRef name)
 TimerGroup::~TimerGroup() {
   // If the timer group is destroyed before the timers it owns, accumulate and
   // print the timing data.
-  while (FirstTimer != 0)
+  while (FirstTimer)
     removeTimer(*FirstTimer);
   
   // Remove the group from the TimerGroupList.
@@ -283,7 +282,7 @@ void TimerGroup::removeTimer(Timer &T) {
   if (T.Started)
     TimersToPrint.push_back(std::make_pair(T.Time, T.Name));
 
-  T.TG = 0;
+  T.TG = nullptr;
   
   // Unlink the timer from our list.
   *T.Prev = T.Next;
@@ -292,7 +291,7 @@ void TimerGroup::removeTimer(Timer &T) {
   
   // Print the report when all timers in this group are destroyed if some of
   // them were started.
-  if (FirstTimer != 0 || TimersToPrint.empty())
+  if (FirstTimer || TimersToPrint.empty())
     return;
   
   raw_ostream *OutStream = CreateInfoOutputFile();

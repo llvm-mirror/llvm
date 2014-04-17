@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "Thumb1RegisterInfo.h"
-#include "ARM.h"
 #include "ARMBaseInstrInfo.h"
 #include "ARMMachineFunctionInfo.h"
 #include "ARMSubtarget.h"
@@ -30,7 +29,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetMachine.h"
 
@@ -421,12 +419,12 @@ rewriteFrameIndex(MachineBasicBlock::iterator II, unsigned FrameRegIdx,
         MI.getOperand(FrameRegIdx+1).ChangeToImmediate(Mask);
       }
       Offset = (Offset - Mask * Scale);
-      MachineBasicBlock::iterator NII = llvm::next(II);
+      MachineBasicBlock::iterator NII = std::next(II);
       emitThumbRegPlusImmediate(MBB, NII, dl, DestReg, DestReg, Offset, TII,
                                 *this);
     } else {
       // Translate r0 = add sp, -imm to
-      // r0 = -imm (this is then translated into a series of instructons)
+      // r0 = -imm (this is then translated into a series of instructions)
       // r0 = add r0, sp
       emitThumbConstant(MBB, II, DestReg, Offset, TII, *this, dl);
 
@@ -484,10 +482,8 @@ rewriteFrameIndex(MachineBasicBlock::iterator II, unsigned FrameRegIdx,
   return Offset == 0;
 }
 
-void
-Thumb1RegisterInfo::resolveFrameIndex(MachineBasicBlock::iterator I,
-                                      unsigned BaseReg, int64_t Offset) const {
-  MachineInstr &MI = *I;
+void Thumb1RegisterInfo::resolveFrameIndex(MachineInstr &MI, unsigned BaseReg,
+                                           int64_t Offset) const {
   const ARMBaseInstrInfo &TII =
     *static_cast<const ARMBaseInstrInfo*>(
       MI.getParent()->getParent()->getTarget().getInstrInfo());
@@ -573,11 +569,7 @@ Thumb1RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   int Offset = MF.getFrameInfo()->getObjectOffset(FrameIndex) +
                MF.getFrameInfo()->getStackSize() + SPAdj;
 
-  if (AFI->isGPRCalleeSavedArea1Frame(FrameIndex))
-    Offset -= AFI->getGPRCalleeSavedArea1Offset();
-  else if (AFI->isGPRCalleeSavedArea2Frame(FrameIndex))
-    Offset -= AFI->getGPRCalleeSavedArea2Offset();
-  else if (MF.getFrameInfo()->hasVarSizedObjects()) {
+  if (MF.getFrameInfo()->hasVarSizedObjects()) {
     assert(SPAdj == 0 && MF.getTarget().getFrameLowering()->hasFP(MF) &&
            "Unexpected");
     // There are alloca()'s in this function, must reference off the frame

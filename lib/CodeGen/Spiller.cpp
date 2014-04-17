@@ -77,7 +77,7 @@ protected:
 
     DEBUG(dbgs() << "Spilling everywhere " << *li << "\n");
 
-    assert(li->weight != HUGE_VALF &&
+    assert(li->weight != llvm::huge_valf &&
            "Attempting to spill already spilled value.");
 
     assert(!TargetRegisterInfo::isStackSlot(li->reg) &&
@@ -89,8 +89,9 @@ protected:
     unsigned ss = vrm->assignVirt2StackSlot(li->reg);
 
     // Iterate over reg uses/defs.
-    for (MachineRegisterInfo::reg_iterator
-         regItr = mri->reg_begin(li->reg); regItr != mri->reg_end();) {
+    for (MachineRegisterInfo::reg_instr_iterator
+         regItr = mri->reg_instr_begin(li->reg);
+         regItr != mri->reg_instr_end();) {
 
       // Grab the use/def instr.
       MachineInstr *mi = &*regItr;
@@ -98,9 +99,7 @@ protected:
       DEBUG(dbgs() << "  Processing " << *mi);
 
       // Step regItr to the next use/def instr.
-      do {
-        ++regItr;
-      } while (regItr != mri->reg_end() && (&*regItr == mi));
+      ++regItr;
 
       // Collect uses & defs for this instr.
       SmallVector<unsigned, 2> indices;
@@ -115,15 +114,14 @@ protected:
         indices.push_back(i);
       }
 
-      // Create a new vreg & interval for this instr.
-      LiveInterval *newLI = &LRE.create();
-      newLI->weight = HUGE_VALF;
+      // Create a new virtual register for the load and/or store.
+      unsigned NewVReg = LRE.create();
 
       // Update the reg operands & kill flags.
       for (unsigned i = 0; i < indices.size(); ++i) {
         unsigned mopIdx = indices[i];
         MachineOperand &mop = mi->getOperand(mopIdx);
-        mop.setReg(newLI->reg);
+        mop.setReg(NewVReg);
         if (mop.isUse() && !mi->isRegTiedToDefOperand(mopIdx)) {
           mop.setIsKill(true);
         }
@@ -133,28 +131,20 @@ protected:
       // Insert reload if necessary.
       MachineBasicBlock::iterator miItr(mi);
       if (hasUse) {
-        tii->loadRegFromStackSlot(*mi->getParent(), miItr, newLI->reg, ss, trc,
+        MachineInstrSpan MIS(miItr);
+
+        tii->loadRegFromStackSlot(*mi->getParent(), miItr, NewVReg, ss, trc,
                                   tri);
-        MachineInstr *loadInstr(prior(miItr));
-        SlotIndex loadIndex =
-          lis->InsertMachineInstrInMaps(loadInstr).getRegSlot();
-        SlotIndex endIndex = loadIndex.getNextIndex();
-        VNInfo *loadVNI =
-          newLI->getNextValue(loadIndex, lis->getVNInfoAllocator());
-        newLI->addRange(LiveRange(loadIndex, endIndex, loadVNI));
+        lis->InsertMachineInstrRangeInMaps(MIS.begin(), miItr);
       }
 
       // Insert store if necessary.
       if (hasDef) {
-        tii->storeRegToStackSlot(*mi->getParent(), llvm::next(miItr),newLI->reg,
+        MachineInstrSpan MIS(miItr);
+
+        tii->storeRegToStackSlot(*mi->getParent(), std::next(miItr), NewVReg,
                                  true, ss, trc, tri);
-        MachineInstr *storeInstr(llvm::next(miItr));
-        SlotIndex storeIndex =
-          lis->InsertMachineInstrInMaps(storeInstr).getRegSlot();
-        SlotIndex beginIndex = storeIndex.getPrevIndex();
-        VNInfo *storeVNI =
-          newLI->getNextValue(beginIndex, lis->getVNInfoAllocator());
-        newLI->addRange(LiveRange(beginIndex, storeIndex, storeVNI));
+        lis->InsertMachineInstrRangeInMaps(std::next(miItr), MIS.end());
       }
     }
   }
@@ -173,7 +163,7 @@ public:
                  VirtRegMap &vrm)
     : SpillerBase(pass, mf, vrm) {}
 
-  void spill(LiveRangeEdit &LRE) {
+  void spill(LiveRangeEdit &LRE) override {
     // Ignore spillIs - we don't use it.
     trivialSpillEverywhere(LRE);
   }

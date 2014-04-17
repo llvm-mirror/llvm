@@ -10,7 +10,7 @@
 #ifndef LLVM_ADT_STRINGREF_H
 #define LLVM_ADT_STRINGREF_H
 
-#include "llvm/Support/type_traits.h"
+#include "llvm/Support/Allocator.h"
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -70,7 +70,7 @@ namespace llvm {
     /// @{
 
     /// Construct an empty string ref.
-    /*implicit*/ StringRef() : Data(0), Length(0) {}
+    /*implicit*/ StringRef() : Data(nullptr), Length(0) {}
 
     /// Construct a string ref from a cstring.
     /*implicit*/ StringRef(const char *Str)
@@ -124,6 +124,13 @@ namespace llvm {
       return Data[Length-1];
     }
 
+    // copy - Allocate copy in BumpPtrAllocator and return StringRef to it.
+    StringRef copy(BumpPtrAllocator &Allocator) {
+      char *S = Allocator.Allocate<char>(Length);
+      std::copy(begin(), end(), S);
+      return StringRef(S, Length);
+    }
+
     /// equals - Check for string equality, this is more efficient than
     /// compare() when the relative ordering of inequal strings isn't needed.
     bool equals(StringRef RHS) const {
@@ -175,11 +182,11 @@ namespace llvm {
     /// transform one of the given strings into the other. If zero,
     /// the strings are identical.
     unsigned edit_distance(StringRef Other, bool AllowReplacements = true,
-                           unsigned MaxEditDistance = 0);
+                           unsigned MaxEditDistance = 0) const;
 
     /// str - Get the contents as an std::string.
     std::string str() const {
-      if (Data == 0) return std::string();
+      if (!Data) return std::string();
       return std::string(Data, Length);
     }
 
@@ -210,11 +217,17 @@ namespace llvm {
              compareMemory(Data, Prefix.Data, Prefix.Length) == 0;
     }
 
+    /// Check if this string starts with the given \p Prefix, ignoring case.
+    bool startswith_lower(StringRef Prefix) const;
+
     /// Check if this string ends with the given \p Suffix.
     bool endswith(StringRef Suffix) const {
       return Length >= Suffix.Length &&
         compareMemory(end() - Suffix.Length, Suffix.Data, Suffix.Length) == 0;
     }
+
+    /// Check if this string ends with the given \p Suffix, ignoring case.
+    bool endswith_lower(StringRef Suffix) const;
 
     /// @}
     /// @name String Searching
@@ -327,7 +340,7 @@ namespace llvm {
     /// this returns true to signify the error.  The string is considered
     /// erroneous if empty or if it overflows T.
     template <typename T>
-    typename enable_if_c<std::numeric_limits<T>::is_signed, bool>::type
+    typename std::enable_if<std::numeric_limits<T>::is_signed, bool>::type
     getAsInteger(unsigned Radix, T &Result) const {
       long long LLVal;
       if (getAsSignedInteger(*this, Radix, LLVal) ||
@@ -338,7 +351,7 @@ namespace llvm {
     }
 
     template <typename T>
-    typename enable_if_c<!std::numeric_limits<T>::is_signed, bool>::type
+    typename std::enable_if<!std::numeric_limits<T>::is_signed, bool>::type
     getAsInteger(unsigned Radix, T &Result) const {
       unsigned long long ULLVal;
       if (getAsUnsignedInteger(*this, Radix, ULLVal) ||
@@ -547,11 +560,6 @@ namespace llvm {
   // StringRefs can be treated like a POD type.
   template <typename T> struct isPodLike;
   template <> struct isPodLike<StringRef> { static const bool value = true; };
-
-  /// Construct a string ref from a boolean.
-  inline StringRef toStringRef(bool B) {
-    return StringRef(B ? "true" : "false");
-  }
 }
 
 #endif

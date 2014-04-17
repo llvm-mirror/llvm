@@ -39,13 +39,24 @@
 
 using namespace llvm;
 
-const unsigned Hexagon_MAX_RET_SIZE = 64;
-
 static cl::opt<bool>
 EmitJumpTables("hexagon-emit-jump-tables", cl::init(true), cl::Hidden,
                cl::desc("Control jump table emission on Hexagon target"));
 
-int NumNamedVarArgParams = -1;
+namespace {
+class HexagonCCState : public CCState {
+  int NumNamedVarArgParams;
+
+public:
+  HexagonCCState(CallingConv::ID CC, bool isVarArg, MachineFunction &MF,
+                 const TargetMachine &TM, SmallVectorImpl<CCValAssign> &locs,
+                 LLVMContext &C, int NumNamedVarArgParams)
+      : CCState(CC, isVarArg, MF, TM, locs, C),
+        NumNamedVarArgParams(NumNamedVarArgParams) {}
+
+  int getNumNamedVarArgParams() const { return NumNamedVarArgParams; }
+};
+}
 
 // Implement calling convention for Hexagon.
 static bool
@@ -82,12 +93,13 @@ static bool
 CC_Hexagon_VarArg (unsigned ValNo, MVT ValVT,
             MVT LocVT, CCValAssign::LocInfo LocInfo,
             ISD::ArgFlagsTy ArgFlags, CCState &State) {
+  HexagonCCState &HState = static_cast<HexagonCCState &>(State);
 
   // NumNamedVarArgParams can not be zero for a VarArg function.
-  assert ( (NumNamedVarArgParams > 0) &&
-           "NumNamedVarArgParams is not bigger than zero.");
+  assert((HState.getNumNamedVarArgParams() > 0) &&
+         "NumNamedVarArgParams is not bigger than zero.");
 
-  if ( (int)ValNo < NumNamedVarArgParams ) {
+  if ((int)ValNo < HState.getNumNamedVarArgParams()) {
     // Deal with named arguments.
     return CC_Hexagon(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State);
   }
@@ -170,7 +182,7 @@ static bool CC_Hexagon32(unsigned ValNo, MVT ValVT,
                          MVT LocVT, CCValAssign::LocInfo LocInfo,
                          ISD::ArgFlagsTy ArgFlags, CCState &State) {
 
-  static const uint16_t RegList[] = {
+  static const MCPhysReg RegList[] = {
     Hexagon::R0, Hexagon::R1, Hexagon::R2, Hexagon::R3, Hexagon::R4,
     Hexagon::R5
   };
@@ -193,10 +205,10 @@ static bool CC_Hexagon64(unsigned ValNo, MVT ValVT,
     return false;
   }
 
-  static const uint16_t RegList1[] = {
+  static const MCPhysReg RegList1[] = {
     Hexagon::D1, Hexagon::D2
   };
-  static const uint16_t RegList2[] = {
+  static const MCPhysReg RegList2[] = {
     Hexagon::R1, Hexagon::R3
   };
   if (unsigned Reg = State.AllocateReg(RegList1, RegList2, 2)) {
@@ -394,13 +406,8 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   bool IsStructRet    = (Outs.empty()) ? false : Outs[0].Flags.isSRet();
 
-  // Analyze operands of the call, assigning locations to each operand.
-  SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
-                 getTargetMachine(), ArgLocs, *DAG.getContext());
-
   // Check for varargs.
-  NumNamedVarArgParams = -1;
+  int NumNamedVarArgParams = -1;
   if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(Callee))
   {
     const Function* CalleeFn = NULL;
@@ -416,6 +423,12 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       }
     }
   }
+
+  // Analyze operands of the call, assigning locations to each operand.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  HexagonCCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
+                        getTargetMachine(), ArgLocs, *DAG.getContext(),
+                        NumNamedVarArgParams);
 
   if (NumNamedVarArgParams > 0)
     CCInfo.AnalyzeCallOperands(Outs, CC_Hexagon_VarArg);
@@ -967,6 +980,9 @@ HexagonTargetLowering::LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MFI->setReturnAddressIsTaken(true);
+
+  if (verifyReturnAddressArgumentIsConstant(Op, DAG))
+    return SDValue();
 
   EVT VT = Op.getValueType();
   SDLoc dl(Op);

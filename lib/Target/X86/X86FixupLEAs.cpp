@@ -39,7 +39,7 @@ namespace {
     /// where appropriate.
     bool processBasicBlock(MachineFunction &MF, MachineFunction::iterator MFI);
 
-    virtual const char *getPassName() const { return "X86 Atom LEA Fixup";}
+    const char *getPassName() const override { return "X86 Atom LEA Fixup";}
 
     /// \brief Given a machine register, look for the instruction
     /// which writes it in the current basic block. If found,
@@ -80,7 +80,7 @@ namespace {
     /// \brief Loop over all of the basic blocks,
     /// replacing instructions by equivalent LEA instructions
     /// if needed and when possible.
-    virtual bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
   private:
     MachineFunction *MF;
@@ -123,6 +123,15 @@ FixupLEAPass::postRAConvertToLEA(MachineFunction::iterator &MFI,
     if (!MI->getOperand(2).isImm()) {
       // convertToThreeAddress will call getImm()
       // which requires isImm() to be true
+      return 0;
+    }
+    break;
+  case X86::ADD16rr:
+  case X86::ADD16rr_DB:
+    if (MI->getOperand(1).getReg() != MI->getOperand(2).getReg()) {
+      // if src1 != src2, then convertToThreeAddress will
+      // need to create a Virtual register, which we cannot do
+      // after register allocation.
       return 0;
     }
   }

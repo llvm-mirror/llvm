@@ -64,7 +64,7 @@ class RABasic : public MachineFunctionPass, public RegAllocBase
   MachineFunction *MF;
 
   // state
-  OwningPtr<Spiller> SpillerInstance;
+  std::unique_ptr<Spiller> SpillerInstance;
   std::priority_queue<LiveInterval*, std::vector<LiveInterval*>,
                       CompSpillWeight> Queue;
 
@@ -76,42 +76,40 @@ public:
   RABasic();
 
   /// Return the pass name.
-  virtual const char* getPassName() const {
+  const char* getPassName() const override {
     return "Basic Register Allocator";
   }
 
   /// RABasic analysis usage.
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  virtual void releaseMemory();
+  void releaseMemory() override;
 
-  virtual Spiller &spiller() { return *SpillerInstance; }
+  Spiller &spiller() override { return *SpillerInstance; }
 
-  virtual float getPriority(LiveInterval *LI) { return LI->weight; }
-
-  virtual void enqueue(LiveInterval *LI) {
+  void enqueue(LiveInterval *LI) override {
     Queue.push(LI);
   }
 
-  virtual LiveInterval *dequeue() {
+  LiveInterval *dequeue() override {
     if (Queue.empty())
-      return 0;
+      return nullptr;
     LiveInterval *LI = Queue.top();
     Queue.pop();
     return LI;
   }
 
-  virtual unsigned selectOrSplit(LiveInterval &VirtReg,
-                                 SmallVectorImpl<LiveInterval*> &SplitVRegs);
+  unsigned selectOrSplit(LiveInterval &VirtReg,
+                         SmallVectorImpl<unsigned> &SplitVRegs) override;
 
   /// Perform register allocation.
-  virtual bool runOnMachineFunction(MachineFunction &mf);
+  bool runOnMachineFunction(MachineFunction &mf) override;
 
   // Helper for spilling all live virtual registers currently unified under preg
   // that interfere with the most recently queried lvr.  Return true if spilling
   // was successful, and append any new spilled/split intervals to splitLVRs.
   bool spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
-                          SmallVectorImpl<LiveInterval*> &SplitVRegs);
+                          SmallVectorImpl<unsigned> &SplitVRegs);
 
   static char ID;
 };
@@ -126,7 +124,6 @@ RABasic::RABasic(): MachineFunctionPass(ID) {
   initializeSlotIndexesPass(*PassRegistry::getPassRegistry());
   initializeRegisterCoalescerPass(*PassRegistry::getPassRegistry());
   initializeMachineSchedulerPass(*PassRegistry::getPassRegistry());
-  initializeCalculateSpillWeightsPass(*PassRegistry::getPassRegistry());
   initializeLiveStacksPass(*PassRegistry::getPassRegistry());
   initializeMachineDominatorTreePass(*PassRegistry::getPassRegistry());
   initializeMachineLoopInfoPass(*PassRegistry::getPassRegistry());
@@ -143,7 +140,6 @@ void RABasic::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<SlotIndexes>();
   AU.addRequired<LiveDebugVariables>();
   AU.addPreserved<LiveDebugVariables>();
-  AU.addRequired<CalculateSpillWeights>();
   AU.addRequired<LiveStacks>();
   AU.addPreserved<LiveStacks>();
   AU.addRequired<MachineBlockFrequencyInfo>();
@@ -160,7 +156,7 @@ void RABasic::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 void RABasic::releaseMemory() {
-  SpillerInstance.reset(0);
+  SpillerInstance.reset(nullptr);
 }
 
 
@@ -168,7 +164,7 @@ void RABasic::releaseMemory() {
 // that interfere with VirtReg. The newly spilled or split live intervals are
 // returned by appending them to SplitVRegs.
 bool RABasic::spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
-                                 SmallVectorImpl<LiveInterval*> &SplitVRegs) {
+                                 SmallVectorImpl<unsigned> &SplitVRegs) {
   // Record each interference and determine if all are spillable before mutating
   // either the union or live intervals.
   SmallVector<LiveInterval*, 8> Intfs;
@@ -222,7 +218,7 @@ bool RABasic::spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
 // minimal, there is no value in caching them outside the scope of
 // selectOrSplit().
 unsigned RABasic::selectOrSplit(LiveInterval &VirtReg,
-                                SmallVectorImpl<LiveInterval*> &SplitVRegs) {
+                                SmallVectorImpl<unsigned> &SplitVRegs) {
   // Populate a list of physical register spill candidates.
   SmallVector<unsigned, 8> PhysRegSpillCands;
 
@@ -279,6 +275,11 @@ bool RABasic::runOnMachineFunction(MachineFunction &mf) {
   RegAllocBase::init(getAnalysis<VirtRegMap>(),
                      getAnalysis<LiveIntervals>(),
                      getAnalysis<LiveRegMatrix>());
+
+  calculateSpillWeightsAndHints(*LIS, *MF,
+                                getAnalysis<MachineLoopInfo>(),
+                                getAnalysis<MachineBlockFrequencyInfo>());
+
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM));
 
   allocatePhysRegs();

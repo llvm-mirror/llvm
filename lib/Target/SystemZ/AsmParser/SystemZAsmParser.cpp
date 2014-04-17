@@ -22,7 +22,7 @@ using namespace llvm;
 
 // Return true if Expr is in the range [MinValue, MaxValue].
 static bool inRange(const MCExpr *Expr, int64_t MinValue, int64_t MaxValue) {
-  if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Expr)) {
+  if (auto *CE = dyn_cast<MCConstantExpr>(Expr)) {
     int64_t Value = CE->getValue();
     return Value >= MinValue && Value <= MaxValue;
   }
@@ -32,6 +32,7 @@ static bool inRange(const MCExpr *Expr, int64_t MinValue, int64_t MaxValue) {
 namespace {
 enum RegisterKind {
   GR32Reg,
+  GRH32Reg,
   GR64Reg,
   GR128Reg,
   ADDR32Reg,
@@ -111,7 +112,7 @@ private:
     // Add as immediates when possible.  Null MCExpr = 0.
     if (Expr == 0)
       Inst.addOperand(MCOperand::CreateImm(0));
-    else if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Expr))
+    else if (auto *CE = dyn_cast<MCConstantExpr>(Expr))
       Inst.addOperand(MCOperand::CreateImm(CE->getValue()));
     else
       Inst.addOperand(MCOperand::CreateExpr(Expr));
@@ -161,7 +162,7 @@ public:
   }
 
   // Token operands
-  virtual bool isToken() const LLVM_OVERRIDE {
+  bool isToken() const override {
     return Kind == KindToken;
   }
   StringRef getToken() const {
@@ -170,13 +171,13 @@ public:
   }
 
   // Register operands.
-  virtual bool isReg() const LLVM_OVERRIDE {
+  bool isReg() const override {
     return Kind == KindReg;
   }
   bool isReg(RegisterKind RegKind) const {
     return Kind == KindReg && Reg.Kind == RegKind;
   }
-  virtual unsigned getReg() const LLVM_OVERRIDE {
+  unsigned getReg() const override {
     assert(Kind == KindReg && "Not a register");
     return Reg.Num;
   }
@@ -188,7 +189,7 @@ public:
   }
 
   // Immediate operands.
-  virtual bool isImm() const LLVM_OVERRIDE {
+  bool isImm() const override {
     return Kind == KindImm;
   }
   bool isImm(int64_t MinValue, int64_t MaxValue) const {
@@ -200,7 +201,7 @@ public:
   }
 
   // Memory operands.
-  virtual bool isMem() const LLVM_OVERRIDE {
+  bool isMem() const override {
     return Kind == KindMem;
   }
   bool isMem(RegisterKind RegKind, MemoryKind MemKind) const {
@@ -220,9 +221,9 @@ public:
   }
 
   // Override MCParsedAsmOperand.
-  virtual SMLoc getStartLoc() const LLVM_OVERRIDE { return StartLoc; }
-  virtual SMLoc getEndLoc() const LLVM_OVERRIDE { return EndLoc; }
-  virtual void print(raw_ostream &OS) const LLVM_OVERRIDE;
+  SMLoc getStartLoc() const override { return StartLoc; }
+  SMLoc getEndLoc() const override { return EndLoc; }
+  void print(raw_ostream &OS) const override;
 
   // Used by the TableGen code to add particular types of operand
   // to an instruction.
@@ -262,6 +263,8 @@ public:
 
   // Used by the TableGen code to check for particular operand types.
   bool isGR32() const { return isReg(GR32Reg); }
+  bool isGRH32() const { return isReg(GRH32Reg); }
+  bool isGRX32() const { return false; }
   bool isGR64() const { return isReg(GR64Reg); }
   bool isGR128() const { return isReg(GR128Reg); }
   bool isADDR32() const { return isReg(ADDR32Reg); }
@@ -327,8 +330,9 @@ private:
                     StringRef Mnemonic);
 
 public:
-  SystemZAsmParser(MCSubtargetInfo &sti, MCAsmParser &parser)
-    : MCTargetAsmParser(), STI(sti), Parser(parser) {
+  SystemZAsmParser(MCSubtargetInfo &sti, MCAsmParser &parser,
+                   const MCInstrInfo &MII)
+      : MCTargetAsmParser(), STI(sti), Parser(parser) {
     MCAsmParserExtension::Initialize(Parser);
 
     // Initialize the set of available features.
@@ -336,23 +340,29 @@ public:
   }
 
   // Override MCTargetAsmParser.
-  virtual bool ParseDirective(AsmToken DirectiveID) LLVM_OVERRIDE;
-  virtual bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc,
-                             SMLoc &EndLoc) LLVM_OVERRIDE;
-  virtual bool ParseInstruction(ParseInstructionInfo &Info,
-                                StringRef Name, SMLoc NameLoc,
-                                SmallVectorImpl<MCParsedAsmOperand*> &Operands)
-    LLVM_OVERRIDE;
-  virtual bool
-    MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
-                            SmallVectorImpl<MCParsedAsmOperand*> &Operands,
-                            MCStreamer &Out, unsigned &ErrorInfo,
-                            bool MatchingInlineAsm) LLVM_OVERRIDE;
+  bool ParseDirective(AsmToken DirectiveID) override;
+  bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc) override;
+  bool ParseInstruction(ParseInstructionInfo &Info,
+                        StringRef Name, SMLoc NameLoc,
+                        SmallVectorImpl<MCParsedAsmOperand*> &Operands)
+    override;
+  bool MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
+                               SmallVectorImpl<MCParsedAsmOperand*> &Operands,
+                               MCStreamer &Out, unsigned &ErrorInfo,
+                               bool MatchingInlineAsm) override;
 
   // Used by the TableGen code to parse particular operand types.
   OperandMatchResultTy
   parseGR32(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
     return parseRegister(Operands, RegGR, SystemZMC::GR32Regs, GR32Reg);
+  }
+  OperandMatchResultTy
+  parseGRH32(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
+    return parseRegister(Operands, RegGR, SystemZMC::GRH32Regs, GRH32Reg);
+  }
+  OperandMatchResultTy
+  parseGRX32(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
+    llvm_unreachable("GRX32 should only be used for pseudo instructions");
   }
   OperandMatchResultTy
   parseGR64(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
@@ -416,7 +426,7 @@ public:
     return parsePCRel(Operands, -(1LL << 32), (1LL << 32) - 1);
   }
 };
-}
+} // end anonymous namespace
 
 #define GET_REGISTER_MATCHER
 #define GET_SUBTARGET_FEATURE_NAME
@@ -703,7 +713,7 @@ MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   default: break;
   case Match_Success:
     Inst.setLoc(IDLoc);
-    Out.EmitInstruction(Inst);
+    Out.EmitInstruction(Inst, STI);
     return false;
 
   case Match_MissingFeature: {
@@ -769,7 +779,7 @@ parsePCRel(SmallVectorImpl<MCParsedAsmOperand*> &Operands,
 
   // For consistency with the GNU assembler, treat immediates as offsets
   // from ".".
-  if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Expr)) {
+  if (auto *CE = dyn_cast<MCConstantExpr>(Expr)) {
     int64_t Value = CE->getValue();
     if ((Value & 1) || Value < MinVal || Value > MaxVal) {
       Error(StartLoc, "offset out of range");

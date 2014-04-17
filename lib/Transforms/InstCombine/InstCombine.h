@@ -11,13 +11,13 @@
 #define INSTCOMBINE_INSTCOMBINE_H
 
 #include "InstCombineWorklist.h"
+#include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/InstVisitor.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/TargetFolder.h"
 #include "llvm/Transforms/Utils/SimplifyLibCalls.h"
 
 namespace llvm {
@@ -51,6 +51,15 @@ static inline unsigned getComplexity(Value *V) {
   return isa<Constant>(V) ? (isa<UndefValue>(V) ? 0 : 1) : 2;
 }
 
+/// AddOne - Add one to a Constant
+static inline Constant *AddOne(Constant *C) {
+  return ConstantExpr::getAdd(C, ConstantInt::get(C->getType(), 1));
+}
+/// SubOne - Subtract one from a Constant
+static inline Constant *SubOne(Constant *C) {
+  return ConstantExpr::getSub(C, ConstantInt::get(C->getType(), 1));
+}
+
 
 /// InstCombineIRInserter - This is an IRBuilder insertion helper that works
 /// just like the normal insertion helper, but also adds any new instructions
@@ -72,7 +81,7 @@ public:
 class LLVM_LIBRARY_VISIBILITY InstCombiner
                              : public FunctionPass,
                                public InstVisitor<InstCombiner, Instruction*> {
-  DataLayout *TD;
+  const DataLayout *DL;
   TargetLibraryInfo *TLI;
   bool MadeIRChange;
   LibCallSimplifier *Simplifier;
@@ -87,19 +96,19 @@ public:
   BuilderTy *Builder;
 
   static char ID; // Pass identification, replacement for typeid
-  InstCombiner() : FunctionPass(ID), TD(0), Builder(0) {
+  InstCombiner() : FunctionPass(ID), DL(0), Builder(0) {
     MinimizeSize = false;
     initializeInstCombinerPass(*PassRegistry::getPassRegistry());
   }
 
 public:
-  virtual bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
   bool DoOneIteration(Function &F, unsigned ItNum);
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  DataLayout *getDataLayout() const { return TD; }
+  const DataLayout *getDataLayout() const { return DL; }
 
   TargetLibraryInfo *getTargetLibraryInfo() const { return TLI; }
 
@@ -116,7 +125,7 @@ public:
   Instruction *visitSub(BinaryOperator &I);
   Instruction *visitFSub(BinaryOperator &I);
   Instruction *visitMul(BinaryOperator &I);
-  Value *foldFMulConst(Instruction *FMulOrDiv, ConstantFP *C,
+  Value *foldFMulConst(Instruction *FMulOrDiv, Constant *C,
                        Instruction *InsertBefore);
   Instruction *visitFMul(BinaryOperator &I);
   Instruction *visitURem(BinaryOperator &I);
@@ -158,8 +167,8 @@ public:
                               ConstantInt *DivRHS);
   Instruction *FoldICmpShrCst(ICmpInst &ICI, BinaryOperator *DivI,
                               ConstantInt *DivRHS);
-  Instruction *FoldICmpAddOpCst(ICmpInst &ICI, Value *X, ConstantInt *CI,
-                                ICmpInst::Predicate Pred, Value *TheAdd);
+  Instruction *FoldICmpAddOpCst(Instruction &ICI, Value *X, ConstantInt *CI,
+                                ICmpInst::Predicate Pred);
   Instruction *FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
                            ICmpInst::Predicate Cond, Instruction &I);
   Instruction *FoldShiftByConstant(Value *Op0, ConstantInt *Op1,
@@ -178,6 +187,7 @@ public:
   Instruction *visitPtrToInt(PtrToIntInst &CI);
   Instruction *visitIntToPtr(IntToPtrInst &CI);
   Instruction *visitBitCast(BitCastInst &CI);
+  Instruction *visitAddrSpaceCast(AddrSpaceCastInst &CI);
   Instruction *FoldSelectOpOp(SelectInst &SI, Instruction *TI,
                               Instruction *FI);
   Instruction *FoldSelectIntoOp(SelectInst &SI, Value*, Value*);
@@ -212,8 +222,8 @@ private:
   bool ShouldChangeType(Type *From, Type *To) const;
   Value *dyn_castNegVal(Value *V) const;
   Value *dyn_castFNegVal(Value *V, bool NoSignedZero=false) const;
-  Type *FindElementAtOffset(Type *Ty, int64_t Offset,
-                                  SmallVectorImpl<Value*> &NewIndices);
+  Type *FindElementAtOffset(Type *PtrTy, int64_t Offset,
+                            SmallVectorImpl<Value*> &NewIndices);
   Instruction *FoldOpIntoSelect(Instruction &Op, SelectInst *SI);
 
   /// ShouldOptimizeCast - Return true if the cast from "V to Ty" actually
@@ -224,7 +234,7 @@ private:
                           Type *Ty);
 
   Instruction *visitCallSite(CallSite CS);
-  Instruction *tryOptimizeCall(CallInst *CI, const DataLayout *TD);
+  Instruction *tryOptimizeCall(CallInst *CI, const DataLayout *DL);
   bool transformConstExprCastCall(CallSite CS);
   Instruction *transformCallThroughTrampoline(CallSite CS,
                                               IntrinsicInst *Tramp);
@@ -271,7 +281,7 @@ public:
     if (&I == V)
       V = UndefValue::get(I.getType());
 
-    DEBUG(errs() << "IC: Replacing " << I << "\n"
+    DEBUG(dbgs() << "IC: Replacing " << I << "\n"
                     "    with " << *V << '\n');
 
     I.replaceAllUsesWith(V);
@@ -283,7 +293,7 @@ public:
   // instruction.  Instead, visit methods should return the value returned by
   // this function.
   Instruction *EraseInstFromFunction(Instruction &I) {
-    DEBUG(errs() << "IC: ERASE " << I << '\n');
+    DEBUG(dbgs() << "IC: ERASE " << I << '\n');
 
     assert(I.use_empty() && "Cannot erase instruction that is used!");
     // Make sure that we reprocess all operands now that we reduced their
@@ -301,15 +311,15 @@ public:
 
   void ComputeMaskedBits(Value *V, APInt &KnownZero,
                          APInt &KnownOne, unsigned Depth = 0) const {
-    return llvm::ComputeMaskedBits(V, KnownZero, KnownOne, TD, Depth);
+    return llvm::ComputeMaskedBits(V, KnownZero, KnownOne, DL, Depth);
   }
 
   bool MaskedValueIsZero(Value *V, const APInt &Mask,
                          unsigned Depth = 0) const {
-    return llvm::MaskedValueIsZero(V, Mask, TD, Depth);
+    return llvm::MaskedValueIsZero(V, Mask, DL, Depth);
   }
   unsigned ComputeNumSignBits(Value *Op, unsigned Depth = 0) const {
-    return llvm::ComputeNumSignBits(Op, TD, Depth);
+    return llvm::ComputeNumSignBits(Op, DL, Depth);
   }
 
 private:

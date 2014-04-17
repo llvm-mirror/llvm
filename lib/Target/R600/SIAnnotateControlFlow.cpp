@@ -12,10 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "si-annotate-control-flow"
+
 #include "AMDGPU.h"
 #include "llvm/ADT/DepthFirstIterator.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
@@ -98,8 +100,8 @@ public:
   }
 
   virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-    AU.addRequired<DominatorTree>();
-    AU.addPreserved<DominatorTree>();
+    AU.addRequired<DominatorTreeWrapperPass>();
+    AU.addPreserved<DominatorTreeWrapperPass>();
     FunctionPass::getAnalysisUsage(AU);
   }
 
@@ -205,7 +207,7 @@ void SIAnnotateControlFlow::insertElse(BranchInst *Term) {
 void SIAnnotateControlFlow::handleLoopCondition(Value *Cond) {
   if (PHINode *Phi = dyn_cast<PHINode>(Cond)) {
 
-    // Handle all non constant incoming values first
+    // Handle all non-constant incoming values first
     for (unsigned i = 0, e = Phi->getNumIncomingValues(); i != e; ++i) {
       Value *Incoming = Phi->getIncomingValue(i);
       if (isa<ConstantInt>(Incoming))
@@ -253,7 +255,7 @@ void SIAnnotateControlFlow::handleLoopCondition(Value *Cond) {
     PhiInserter.AddAvailableValue(Parent, Ret);
 
   } else {
-    assert(0 && "Unhandled loop condition!");
+    llvm_unreachable("Unhandled loop condition!");
   }
 }
 
@@ -289,7 +291,7 @@ void SIAnnotateControlFlow::closeControlFlow(BasicBlock *BB) {
 /// \brief Annotate the control flow with intrinsics so the backend can
 /// recognize if/then/else and loops.
 bool SIAnnotateControlFlow::runOnFunction(Function &F) {
-  DT = &getAnalysis<DominatorTree>();
+  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
   for (df_iterator<BasicBlock *> I = df_begin(&F.getEntryBlock()),
        E = df_end(&F.getEntryBlock()); I != E; ++I) {

@@ -19,8 +19,8 @@
 #include "ARMTargetMachine.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/CostTable.h"
+#include "llvm/Target/TargetLowering.h"
 using namespace llvm;
 
 // Declare the pass initialization routine locally as target-specific passes
@@ -32,7 +32,7 @@ void initializeARMTTIPass(PassRegistry &);
 
 namespace {
 
-class ARMTTI : public ImmutablePass, public TargetTransformInfo {
+class ARMTTI final : public ImmutablePass, public TargetTransformInfo {
   const ARMBaseTargetMachine *TM;
   const ARMSubtarget *ST;
   const ARMTargetLowering *TLI;
@@ -52,15 +52,11 @@ public:
     initializeARMTTIPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual void initializePass() {
+  void initializePass() override {
     pushTTIStack(this);
   }
 
-  virtual void finalizePass() {
-    popTTIStack();
-  }
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     TargetTransformInfo::getAnalysisUsage(AU);
   }
 
@@ -68,7 +64,7 @@ public:
   static char ID;
 
   /// Provide necessary pointer adjustments for the two base classes.
-  virtual void *getAdjustedAnalysisPointer(const void *ID) {
+  void *getAdjustedAnalysisPointer(const void *ID) override {
     if (ID == &TargetTransformInfo::ID)
       return (TargetTransformInfo*)this;
     return this;
@@ -76,8 +72,8 @@ public:
 
   /// \name Scalar TTI Implementations
   /// @{
-
-  virtual unsigned getIntImmCost(const APInt &Imm, Type *Ty) const;
+  using TargetTransformInfo::getIntImmCost;
+  unsigned getIntImmCost(const APInt &Imm, Type *Ty) const override;
 
   /// @}
 
@@ -85,7 +81,7 @@ public:
   /// \name Vector TTI Implementations
   /// @{
 
-  unsigned getNumberOfRegisters(bool Vector) const {
+  unsigned getNumberOfRegisters(bool Vector) const override {
     if (Vector) {
       if (ST->hasNEON())
         return 16;
@@ -94,10 +90,10 @@ public:
 
     if (ST->isThumb1Only())
       return 8;
-    return 16;
+    return 13;
   }
 
-  unsigned getRegisterBitWidth(bool Vector) const {
+  unsigned getRegisterBitWidth(bool Vector) const override {
     if (Vector) {
       if (ST->hasNEON())
         return 128;
@@ -107,7 +103,7 @@ public:
     return 32;
   }
 
-  unsigned getMaximumUnrollFactor() const {
+  unsigned getMaximumUnrollFactor() const override {
     // These are out of order CPUs:
     if (ST->isCortexA15() || ST->isSwift())
       return 2;
@@ -115,20 +111,27 @@ public:
   }
 
   unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
-                          int Index, Type *SubTp) const;
+                          int Index, Type *SubTp) const override;
 
   unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
-                                      Type *Src) const;
+                            Type *Src) const override;
 
-  unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy) const;
+  unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
+                              Type *CondTy) const override;
 
-  unsigned getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index) const;
+  unsigned getVectorInstrCost(unsigned Opcode, Type *Val,
+                              unsigned Index) const override;
 
-  unsigned getAddressComputationCost(Type *Val, bool IsComplex) const;
+  unsigned getAddressComputationCost(Type *Val,
+                                     bool IsComplex) const override;
 
-  unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
-                                  OperandValueKind Op1Info = OK_AnyValue,
-                                  OperandValueKind Op2Info = OK_AnyValue) const;
+  unsigned
+  getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                         OperandValueKind Op1Info = OK_AnyValue,
+                         OperandValueKind Op2Info = OK_AnyValue) const override;
+
+  unsigned getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
+                           unsigned AddressSpace) const override;
   /// @}
 };
 
@@ -159,25 +162,25 @@ unsigned ARMTTI::getIntImmCost(const APInt &Imm, Type *Ty) const {
         (ARM_AM::getSOImmVal(~ZImmVal) != -1))
       return 1;
     return ST->hasV6T2Ops() ? 2 : 3;
-  } else if (ST->isThumb2()) {
+  }
+  if (ST->isThumb2()) {
     if ((SImmVal >= 0 && SImmVal < 65536) ||
         (ARM_AM::getT2SOImmVal(ZImmVal) != -1) ||
         (ARM_AM::getT2SOImmVal(~ZImmVal) != -1))
       return 1;
     return ST->hasV6T2Ops() ? 2 : 3;
-  } else /*Thumb1*/ {
-    if (SImmVal >= 0 && SImmVal < 256)
-      return 1;
-    if ((~ZImmVal < 256) || ARM_AM::isThumbImmShiftedVal(ZImmVal))
-      return 2;
-    // Load from constantpool.
-    return 3;
   }
-  return 2;
+  // Thumb1.
+  if (SImmVal >= 0 && SImmVal < 256)
+    return 1;
+  if ((~ZImmVal < 256) || ARM_AM::isThumbImmShiftedVal(ZImmVal))
+    return 2;
+  // Load from constantpool.
+  return 3;
 }
 
 unsigned ARMTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
-                                    Type *Src) const {
+                                  Type *Src) const {
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
@@ -466,7 +469,8 @@ unsigned ARMTTI::getShuffleCost(ShuffleKind Kind, Type *Tp, int Index,
   return LT.first * NEONShuffleTbl[Idx].Cost;
 }
 
-unsigned ARMTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty, OperandValueKind Op1Info,
+unsigned ARMTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                        OperandValueKind Op1Info,
                                         OperandValueKind Op2Info) const {
 
   int ISDOpcode = TLI->InstructionOpcodeToISD(Opcode);
@@ -523,8 +527,32 @@ unsigned ARMTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty, OperandValueK
   if (Idx != -1)
     return LT.first * CostTbl[Idx].Cost;
 
+  unsigned Cost =
+      TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty, Op1Info, Op2Info);
 
-  return TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty, Op1Info,
-                                                     Op2Info);
+  // This is somewhat of a hack. The problem that we are facing is that SROA
+  // creates a sequence of shift, and, or instructions to construct values.
+  // These sequences are recognized by the ISel and have zero-cost. Not so for
+  // the vectorized code. Because we have support for v2i64 but not i64 those
+  // sequences look particularly beneficial to vectorize.
+  // To work around this we increase the cost of v2i64 operations to make them
+  // seem less beneficial.
+  if (LT.second == MVT::v2i64 &&
+      Op2Info == TargetTransformInfo::OK_UniformConstantValue)
+    Cost += 4;
+
+  return Cost;
 }
 
+unsigned ARMTTI::getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
+                                 unsigned AddressSpace) const {
+  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Src);
+
+  if (Src->isVectorTy() && Alignment != 16 &&
+      Src->getVectorElementType()->isDoubleTy()) {
+    // Unaligned loads/stores are extremely inefficient.
+    // We need 4 uops for vst.1/vld.1 vs 1uop for vldr/vstr.
+    return LT.first * 4;
+  }
+  return LT.first;
+}

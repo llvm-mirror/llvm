@@ -89,11 +89,15 @@ class CCAssignToStack<int size, int align> : CCAction {
   int Align = align;
 }
 
-/// CCAssignToStackWithShadow - Same as CCAssignToStack, but with a register
-/// to be shadowed.
-class CCAssignToStackWithShadow<int size, int align, Register reg> :
-        CCAssignToStack<size, align> {
-  Register ShadowReg = reg;
+/// CCAssignToStackWithShadow - Same as CCAssignToStack, but with a list of
+/// registers to be shadowed. Note that, unlike CCAssignToRegWithShadow, this
+/// shadows ALL of the registers in shadowList.
+class CCAssignToStackWithShadow<int size,
+                                int align,
+                                list<Register> shadowList> : CCAction {
+  int Size = size;
+  int Align = align;
+  list<Register> ShadowRegList = shadowList;
 }
 
 /// CCPassByVal - This action always matches: it assigns the value to a stack
@@ -143,4 +147,10 @@ class CallingConv<list<CCAction> actions> {
 /// returning from getCallPreservedMask().
 class CalleeSavedRegs<dag saves> {
   dag SaveList = saves;
+
+  // Registers that are also preserved across function calls, but should not be
+  // included in the generated FOO_SaveList array. These registers will be
+  // included in the FOO_RegMask bit mask. This can be used for registers that
+  // are saved automatically, like the SPARC register windows.
+  dag OtherPreserved;
 }

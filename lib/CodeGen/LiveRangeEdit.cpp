@@ -30,15 +30,21 @@ STATISTIC(NumFracRanges,     "Number of live ranges fractured by DCE");
 
 void LiveRangeEdit::Delegate::anchor() { }
 
-LiveInterval &LiveRangeEdit::createFrom(unsigned OldReg) {
+LiveInterval &LiveRangeEdit::createEmptyIntervalFrom(unsigned OldReg) {
   unsigned VReg = MRI.createVirtualRegister(MRI.getRegClass(OldReg));
   if (VRM) {
-    VRM->grow();
     VRM->setIsSplitFromReg(VReg, VRM->getOriginal(OldReg));
   }
-  LiveInterval &LI = LIS.getOrCreateInterval(VReg);
-  NewRegs.push_back(&LI);
+  LiveInterval &LI = LIS.createEmptyInterval(VReg);
   return LI;
+}
+
+unsigned LiveRangeEdit::createFrom(unsigned OldReg) {
+  unsigned VReg = MRI.createVirtualRegister(MRI.getRegClass(OldReg));
+  if (VRM) {
+    VRM->setIsSplitFromReg(VReg, VRM->getOriginal(OldReg));
+  }
+  return VReg;
 }
 
 bool LiveRangeEdit::checkRematerializable(VNInfo *VNI,
@@ -158,12 +164,10 @@ void LiveRangeEdit::eraseVirtReg(unsigned Reg) {
 
 bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
                                SmallVectorImpl<MachineInstr*> &Dead) {
-  MachineInstr *DefMI = 0, *UseMI = 0;
+  MachineInstr *DefMI = nullptr, *UseMI = nullptr;
 
   // Check that there is a single def and a single use.
-  for (MachineRegisterInfo::reg_nodbg_iterator I = MRI.reg_nodbg_begin(LI->reg),
-       E = MRI.reg_nodbg_end(); I != E; ++I) {
-    MachineOperand &MO = I.getOperand();
+  for (MachineOperand &MO : MRI.reg_nodbg_operands(LI->reg)) {
     MachineInstr *MI = MO.getParent();
     if (MO.isDef()) {
       if (DefMI && DefMI != MI)
@@ -193,7 +197,7 @@ bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
   // We also need to make sure it is safe to move the load.
   // Assume there are stores between DefMI and UseMI.
   bool SawStore = true;
-  if (!DefMI->isSafeToMove(&TII, 0, SawStore))
+  if (!DefMI->isSafeToMove(&TII, nullptr, SawStore))
     return false;
 
   DEBUG(dbgs() << "Try to fold single def: " << *DefMI
@@ -209,7 +213,7 @@ bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
   DEBUG(dbgs() << "                folded: " << *FoldMI);
   LIS.ReplaceMachineInstrInMaps(UseMI, FoldMI);
   UseMI->eraseFromParent();
-  DefMI->addRegisterDead(LI->reg, 0);
+  DefMI->addRegisterDead(LI->reg, nullptr);
   Dead.push_back(DefMI);
   ++NumDCEFoldedLoads;
   return true;
@@ -232,7 +236,7 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
 
   // Use the same criteria as DeadMachineInstructionElim.
   bool SawStore = false;
-  if (!MI->isSafeToMove(&TII, 0, SawStore)) {
+  if (!MI->isSafeToMove(&TII, nullptr, SawStore)) {
     DEBUG(dbgs() << "Can't delete: " << Idx << '\t' << *MI);
     return;
   }
@@ -256,9 +260,9 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
       else if (MOI->isDef()) {
         for (MCRegUnitIterator Units(Reg, MRI.getTargetRegisterInfo());
              Units.isValid(); ++Units) {
-          if (LiveInterval *LI = LIS.getCachedRegUnit(*Units)) {
-            if (VNInfo *VNI = LI->getVNInfoAt(Idx))
-              LI->removeValNo(VNI);
+          if (LiveRange *LR = LIS.getCachedRegUnit(*Units)) {
+            if (VNInfo *VNI = LR->getVNInfoAt(Idx))
+              LR->removeValNo(VNI);
           }
         }
       }
@@ -272,7 +276,7 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
     // Always shrink COPY uses that probably come from live range splitting.
     if (MI->readsVirtualRegister(Reg) &&
         (MI->isCopy() || MOI->isDef() || MRI.hasOneNonDBGUse(Reg) ||
-         LI.killedAt(Idx)))
+         LI.Query(Idx).isKill()))
       ToShrink.insert(&LI);
 
     // Remove defined value.
@@ -370,7 +374,7 @@ void LiveRangeEdit::eliminateDeadDefs(SmallVectorImpl<MachineInstr*> &Dead,
     DEBUG(dbgs() << NumComp << " components: " << *LI << '\n');
     SmallVector<LiveInterval*, 8> Dups(1, LI);
     for (unsigned i = 1; i != NumComp; ++i) {
-      Dups.push_back(&createFrom(LI->reg));
+      Dups.push_back(&createEmptyIntervalFrom(LI->reg));
       // If LI is an original interval that hasn't been split yet, make the new
       // intervals their own originals instead of referring to LI. The original
       // interval must contain all the split products, and LI doesn't.
@@ -387,16 +391,27 @@ void LiveRangeEdit::eliminateDeadDefs(SmallVectorImpl<MachineInstr*> &Dead,
   }
 }
 
+// Keep track of new virtual registers created via
+// MachineRegisterInfo::createVirtualRegister.
+void
+LiveRangeEdit::MRI_NoteNewVirtualRegister(unsigned VReg)
+{
+  if (VRM)
+    VRM->grow();
+
+  NewRegs.push_back(VReg);
+}
+
 void
 LiveRangeEdit::calculateRegClassAndHint(MachineFunction &MF,
                                         const MachineLoopInfo &Loops,
                                         const MachineBlockFrequencyInfo &MBFI) {
   VirtRegAuxInfo VRAI(MF, LIS, Loops, MBFI);
-  for (iterator I = begin(), E = end(); I != E; ++I) {
-    LiveInterval &LI = **I;
+  for (unsigned I = 0, Size = size(); I < Size; ++I) {
+    LiveInterval &LI = LIS.getInterval(get(I));
     if (MRI.recomputeRegClass(LI.reg, MF.getTarget()))
       DEBUG(dbgs() << "Inflated " << PrintReg(LI.reg) << " to "
                    << MRI.getRegClass(LI.reg)->getName() << '\n');
-    VRAI.CalculateWeightAndHint(LI);
+    VRAI.calculateSpillWeightAndHint(LI);
   }
 }

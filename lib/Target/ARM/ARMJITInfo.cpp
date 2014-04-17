@@ -13,10 +13,9 @@
 
 #define DEBUG_TYPE "jit"
 #include "ARMJITInfo.h"
-#include "ARM.h"
 #include "ARMConstantPoolValue.h"
 #include "ARMRelocations.h"
-#include "ARMSubtarget.h"
+#include "MCTargetDesc/ARMBaseInfo.h"
 #include "llvm/CodeGen/JITCodeEmitter.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
@@ -320,13 +319,13 @@ void ARMJITInfo::relocate(void *Function, MachineRelocation *MR,
       break;
     }
     case ARM::reloc_arm_movw: {
-      ResultPtr = ResultPtr & 0xFFFF; 
+      ResultPtr = ResultPtr & 0xFFFF;
       *((intptr_t*)RelocPos) |= ResultPtr & 0xFFF;
       *((intptr_t*)RelocPos) |= ((ResultPtr >> 12) & 0xF) << 16;
       break;
     }
     case ARM::reloc_arm_movt: {
-      ResultPtr = (ResultPtr >> 16) & 0xFFFF; 
+      ResultPtr = (ResultPtr >> 16) & 0xFFFF;
       *((intptr_t*)RelocPos) |= ResultPtr & 0xFFF;
       *((intptr_t*)RelocPos) |= ((ResultPtr >> 12) & 0xF) << 16;
       break;

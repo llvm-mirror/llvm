@@ -131,8 +131,8 @@ def executeShCmd(cmd, cfg, cwd, results):
 
         # Resolve the executable path ourselves.
         args = list(j.args)
-        args[0] = lit.util.which(args[0], cfg.environment['PATH'])
-        if not args[0]:
+        executable = lit.util.which(args[0], cfg.environment['PATH'])
+        if not executable:
             raise InternalShellError(j, '%r: command not found' % j.args[0])
 
         # Replace uses of /dev/null with temporary files.
@@ -145,6 +145,7 @@ def executeShCmd(cmd, cfg, cwd, results):
                     args[i] = f.name
 
         procs.append(subprocess.Popen(args, cwd=cwd,
+                                      executable = executable,
                                       stdin = stdin,
                                       stdout = stdout,
                                       stderr = stderr,
@@ -239,7 +240,7 @@ def executeScriptInternal(test, litConfig, tmpBase, commands, cwd):
             cmds.append(ShUtil.ShParser(ln, litConfig.isWindows,
                                         test.config.pipefail).parse())
         except:
-            return (Test.FAIL, "shell parser error on: %r" % ln)
+            return lit.Test.Result(Test.FAIL, "shell parser error on: %r" % ln)
 
     cmd = cmds[0]
     for c in cmds[1:]:
@@ -297,23 +298,6 @@ def executeScript(test, litConfig, tmpBase, commands, cwd):
 
     return lit.util.executeCommand(command, cwd=cwd,
                                    env=test.config.environment)
-
-def isExpectedFail(test, xfails):
-    # Check if any of the xfails match an available feature or the target.
-    for item in xfails:
-        # If this is the wildcard, it always fails.
-        if item == '*':
-            return True
-
-        # If this is an exact match for one of the features, it fails.
-        if item in test.config.available_features:
-            return True
-
-        # If this is a part of the target triple, it fails.
-        if item in test.suite.config.target_triple:
-            return True
-
-    return False
 
 def parseIntegratedTestScriptCommands(source_path):
     """
@@ -415,7 +399,6 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
 
     # Collect the test lines from the script.
     script = []
-    xfails = []
     requires = []
     for line_number, command_type, ln in \
             parseIntegratedTestScriptCommands(sourcepath):
@@ -438,7 +421,7 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
             else:
                 script.append(ln)
         elif command_type == 'XFAIL':
-            xfails.extend([s.strip() for s in ln.split(',')])
+            test.xfails.extend([s.strip() for s in ln.split(',')])
         elif command_type == 'REQUIRES':
             requires.extend([s.strip() for s in ln.split(',')])
         elif command_type == 'END':
@@ -466,51 +449,22 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
 
     # Verify the script contains a run line.
     if not script:
-        return (Test.UNRESOLVED, "Test has no run line!")
+        return lit.Test.Result(Test.UNRESOLVED, "Test has no run line!")
 
     # Check for unterminated run lines.
     if script[-1][-1] == '\\':
-        return (Test.UNRESOLVED, "Test has unterminated run lines (with '\\')")
+        return lit.Test.Result(Test.UNRESOLVED,
+                               "Test has unterminated run lines (with '\\')")
 
     # Check that we have the required features:
     missing_required_features = [f for f in requires
                                  if f not in test.config.available_features]
     if missing_required_features:
         msg = ', '.join(missing_required_features)
-        return (Test.UNSUPPORTED,
-                "Test requires the following features: %s" % msg)
+        return lit.Test.Result(Test.UNSUPPORTED,
+                               "Test requires the following features: %s" % msg)
 
-    isXFail = isExpectedFail(test, xfails)
-    return script,isXFail,tmpBase,execdir
-
-def formatTestOutput(status, out, err, exitCode, script):
-    output = """\
-Script:
---
-%s
---
-Exit Code: %d
-
-""" % ('\n'.join(script), exitCode)
-
-    # Append the stdout, if present.
-    if out:
-        output += """\
-Command Output (stdout):
---
-%s
---
-""" % (out,)
-
-    # Append the stderr, if present.
-    if err:
-        output += """\
-Command Output (stderr):
---
-%s
---
-""" % (err,)
-    return (status, output)
+    return script,tmpBase,execdir
 
 def executeShTest(test, litConfig, useExternalSh,
                   extra_substitutions=[]):
@@ -518,13 +472,12 @@ def executeShTest(test, litConfig, useExternalSh,
         return (Test.UNSUPPORTED, 'Test is unsupported')
 
     res = parseIntegratedTestScript(test, useExternalSh, extra_substitutions)
-    if len(res) == 2:
+    if isinstance(res, lit.Test.Result):
         return res
-
-    script, isXFail, tmpBase, execdir = res
-
     if litConfig.noExecute:
-        return (Test.PASS, '')
+        return lit.Test.Result(Test.PASS)
+
+    script, tmpBase, execdir = res
 
     # Create the output directory if it does not already exist.
     lit.util.mkdir_p(os.path.dirname(tmpBase))
@@ -533,24 +486,23 @@ def executeShTest(test, litConfig, useExternalSh,
         res = executeScript(test, litConfig, tmpBase, script, execdir)
     else:
         res = executeScriptInternal(test, litConfig, tmpBase, script, execdir)
-    if len(res) == 2:
+    if isinstance(res, lit.Test.Result):
         return res
 
     out,err,exitCode = res
-    if isXFail:
-        ok = exitCode != 0
-        if ok:
-            status = Test.XFAIL
-        else:
-            status = Test.XPASS
+    if exitCode == 0:
+        status = Test.PASS
     else:
-        ok = exitCode == 0
-        if ok:
-            status = Test.PASS
-        else:
-            status = Test.FAIL
+        status = Test.FAIL
 
-    if ok:
-        return (status,'')
+    # Form the output log.
+    output = """Script:\n--\n%s\n--\nExit Code: %d\n\n""" % (
+        '\n'.join(script), exitCode)
 
-    return formatTestOutput(status, out, err, exitCode, script)
+    # Append the outputs, if present.
+    if out:
+        output += """Command Output (stdout):\n--\n%s\n--\n""" % (out,)
+    if err:
+        output += """Command Output (stderr):\n--\n%s\n--\n""" % (err,)
+
+    return lit.Test.Result(status, output)

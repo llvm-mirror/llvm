@@ -15,14 +15,14 @@
 #define LLVM_TARGET_AARCH64_TARGETOBJECTFILE_H
 
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
+#include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
 
-  /// AArch64LinuxTargetObjectFile - This implementation is used for linux
-  /// AArch64.
-  class AArch64LinuxTargetObjectFile : public TargetLoweringObjectFileELF {
+  /// AArch64ElfTargetObjectFile - This implementation is used for ELF
+  /// AArch64 targets.
+  class AArch64ElfTargetObjectFile : public TargetLoweringObjectFileELF {
     virtual void Initialize(MCContext &Ctx, const TargetMachine &TM);
   };
 

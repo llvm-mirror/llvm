@@ -19,7 +19,8 @@ def CC_SI : CallingConv<[
 
   CCIfInReg<CCIfType<[f32, i32] , CCAssignToReg<[
     SGPR0, SGPR1, SGPR2, SGPR3, SGPR4, SGPR5, SGPR6, SGPR7,
-    SGPR8, SGPR9, SGPR10, SGPR11, SGPR12, SGPR13, SGPR14, SGPR15
+    SGPR8, SGPR9, SGPR10, SGPR11, SGPR12, SGPR13, SGPR14, SGPR15,
+    SGPR16
   ]>>>,
 
   CCIfInReg<CCIfType<[i64] , CCAssignToRegWithShadow<
@@ -32,21 +33,33 @@ def CC_SI : CallingConv<[
     VGPR8, VGPR9, VGPR10, VGPR11, VGPR12, VGPR13, VGPR14, VGPR15,
     VGPR16, VGPR17, VGPR18, VGPR19, VGPR20, VGPR21, VGPR22, VGPR23,
     VGPR24, VGPR25, VGPR26, VGPR27, VGPR28, VGPR29, VGPR30, VGPR31
-  ]>>>
+  ]>>>,
 
+  CCIfByVal<CCIfType<[i64] , CCAssignToRegWithShadow<
+    [ SGPR0, SGPR2, SGPR4, SGPR6, SGPR8, SGPR10, SGPR12, SGPR14 ],
+    [ SGPR1, SGPR3, SGPR5, SGPR7, SGPR9, SGPR11, SGPR13, SGPR15 ]
+  >>>
+
+]>;
+
+// Calling convention for R600
+def CC_R600 : CallingConv<[
+  CCIfInReg<CCIfType<[v4f32, v4i32] , CCAssignToReg<[
+    T0_XYZW, T1_XYZW, T2_XYZW, T3_XYZW, T4_XYZW, T5_XYZW, T6_XYZW, T7_XYZW,
+    T8_XYZW, T9_XYZW, T10_XYZW, T11_XYZW, T12_XYZW, T13_XYZW, T14_XYZW, T15_XYZW,
+    T16_XYZW, T17_XYZW, T18_XYZW, T19_XYZW, T20_XYZW, T21_XYZW, T22_XYZW,
+    T23_XYZW, T24_XYZW, T25_XYZW, T26_XYZW, T27_XYZW, T28_XYZW, T29_XYZW,
+    T30_XYZW, T31_XYZW, T32_XYZW
+  ]>>>
 ]>;
 
 // Calling convention for compute kernels
 def CC_AMDGPU_Kernel : CallingConv<[
-  CCIfType<[v4i32, v4f32],               CCAssignToStack <16, 16>>,
-  CCIfType<[i64, f64, v2f32, v2i32],     CCAssignToStack < 8, 8>>,
-  CCIfType<[i32, f32],                   CCAssignToStack < 4, 4>>,
-  CCIfType<[i16],                        CCAssignToStack < 2, 4>>,
-  CCIfType<[i8],                         CCAssignToStack < 1, 4>>
+  CCCustom<"allocateStack">
 ]>;
 
 def CC_AMDGPU : CallingConv<[
-  CCIf<"State.getTarget().getSubtarget<AMDGPUSubtarget>().getGeneration() == "
+  CCIf<"State.getTarget().getSubtarget<AMDGPUSubtarget>().getGeneration() >= "
        "AMDGPUSubtarget::SOUTHERN_ISLANDS && "
        "State.getMachineFunction().getInfo<SIMachineFunctionInfo>()->"#
        "ShaderType == ShaderType::COMPUTE", CCDelegateTo<CC_AMDGPU_Kernel>>,
@@ -55,5 +68,7 @@ def CC_AMDGPU : CallingConv<[
        "State.getMachineFunction().getInfo<R600MachineFunctionInfo>()->"
        "ShaderType == ShaderType::COMPUTE", CCDelegateTo<CC_AMDGPU_Kernel>>,
   CCIf<"State.getTarget().getSubtarget<AMDGPUSubtarget>()"#
-       ".getGeneration() == AMDGPUSubtarget::SOUTHERN_ISLANDS", CCDelegateTo<CC_SI>>
+       ".getGeneration() >= AMDGPUSubtarget::SOUTHERN_ISLANDS", CCDelegateTo<CC_SI>>,
+  CCIf<"State.getTarget().getSubtarget<AMDGPUSubtarget>()"#
+       ".getGeneration() < AMDGPUSubtarget::SOUTHERN_ISLANDS", CCDelegateTo<CC_R600>>
 ]>;

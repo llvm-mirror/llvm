@@ -717,3 +717,43 @@ define i1 @alloca_gep(i64 %a, i64 %b) {
   ret i1 %cmp
 ; CHECK-NEXT: ret i1 false
 }
+
+define i1 @non_inbounds_gep_compare(i64* %a) {
+; CHECK-LABEL: @non_inbounds_gep_compare(
+; Equality compares with non-inbounds GEPs can be folded.
+  %x = getelementptr i64* %a, i64 42
+  %y = getelementptr inbounds i64* %x, i64 -42
+  %z = getelementptr i64* %a, i64 -42
+  %w = getelementptr inbounds i64* %z, i64 42
+  %cmp = icmp eq i64* %y, %w
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @non_inbounds_gep_compare2(i64* %a) {
+; CHECK-LABEL: @non_inbounds_gep_compare2(
+; Equality compares with non-inbounds GEPs can be folded.
+  %x = getelementptr i64* %a, i64 4294967297
+  %y = getelementptr i64* %a, i64 1
+  %cmp = icmp eq i64* %y, %y
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 true
+}
+
+define <4 x i8> @vectorselectfold(<4 x i8> %a, <4 x i8> %b) {
+  %false = icmp ne <4 x i8> zeroinitializer, zeroinitializer
+  %sel = select <4 x i1> %false, <4 x i8> %a, <4 x i8> %b
+  ret <4 x i8> %sel
+
+; CHECK-LABEL: @vectorselectfold
+; CHECK-NEXT: ret <4 x i8> %b
+}
+
+define <4 x i8> @vectorselectfold2(<4 x i8> %a, <4 x i8> %b) {
+  %true = icmp eq <4 x i8> zeroinitializer, zeroinitializer
+  %sel = select <4 x i1> %true, <4 x i8> %a, <4 x i8> %b
+  ret <4 x i8> %sel
+
+; CHECK-LABEL: @vectorselectfold
+; CHECK-NEXT: ret <4 x i8> %a
+}

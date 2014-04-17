@@ -125,9 +125,9 @@ namespace {
         initializeMachineLICMPass(*PassRegistry::getPassRegistry());
       }
 
-    virtual bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<MachineLoopInfo>();
       AU.addRequired<MachineDominatorTree>();
       AU.addRequired<AliasAnalysis>();
@@ -136,7 +136,7 @@ namespace {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
-    virtual void releaseMemory() {
+    void releaseMemory() override {
       RegSeen.clear();
       RegPressure.clear();
       RegLimit.clear();
@@ -319,6 +319,9 @@ static bool LoopIsOuterMostWithPredecessor(MachineLoop *CurLoop) {
 }
 
 bool MachineLICM::runOnMachineFunction(MachineFunction &MF) {
+  if (skipOptnoneFunction(*MF.getFunction()))
+    return false;
+
   Changed = FirstInLoop = false;
   TM = &MF.getTarget();
   TII = TM->getInstrInfo();
@@ -355,7 +358,7 @@ bool MachineLICM::runOnMachineFunction(MachineFunction &MF) {
   SmallVector<MachineLoop *, 8> Worklist(MLI->begin(), MLI->end());
   while (!Worklist.empty()) {
     CurLoop = Worklist.pop_back_val();
-    CurPreheader = 0;
+    CurPreheader = nullptr;
     ExitBlocks.clear();
 
     // If this is done before regalloc, only visit outer-most preheader-sporting
@@ -468,12 +471,12 @@ void MachineLICM::ProcessMI(MachineInstr *MI,
     for (MCRegAliasIterator AS(Reg, TRI, true); AS.isValid(); ++AS) {
       if (PhysRegDefs.test(*AS))
         PhysRegClobbers.set(*AS);
-      if (PhysRegClobbers.test(*AS))
-        // MI defined register is seen defined by another instruction in
-        // the loop, it cannot be a LICM candidate.
-        RuledOut = true;
       PhysRegDefs.set(*AS);
     }
+    if (PhysRegClobbers.test(Reg))
+      // MI defined register is seen defined by another instruction in
+      // the loop, it cannot be a LICM candidate.
+      RuledOut = true;
   }
 
   // Only consider reloads for now and remats which do not have register
@@ -502,7 +505,7 @@ void MachineLICM::HoistRegionPostRA() {
 
   // Walk the entire region, count number of defs for each register, and
   // collect potential LICM candidates.
-  const std::vector<MachineBasicBlock*> Blocks = CurLoop->getBlocks();
+  const std::vector<MachineBasicBlock *> &Blocks = CurLoop->getBlocks();
   for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
     MachineBasicBlock *BB = Blocks[i];
 
@@ -584,7 +587,7 @@ void MachineLICM::HoistRegionPostRA() {
 /// AddToLiveIns - Add register 'Reg' to the livein sets of BBs in the current
 /// loop, and make sure it is not killed by any instructions in the loop.
 void MachineLICM::AddToLiveIns(unsigned Reg) {
-  const std::vector<MachineBasicBlock*> Blocks = CurLoop->getBlocks();
+  const std::vector<MachineBasicBlock *> &Blocks = CurLoop->getBlocks();
   for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
     MachineBasicBlock *BB = Blocks[i];
     if (!BB->isLiveIn(Reg))
@@ -697,7 +700,7 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
   WorkList.push_back(HeaderN);
   do {
     MachineDomTreeNode *Node = WorkList.pop_back_val();
-    assert(Node != 0 && "Null dominator tree node?");
+    assert(Node && "Null dominator tree node?");
     MachineBasicBlock *BB = Node->getBlock();
 
     // If the header of the loop containing this basic block is a landing pad,
@@ -801,7 +804,7 @@ void MachineLICM::InitRegPressure(MachineBasicBlock *BB) {
   // defs as well. This happens whenever the preheader is created by splitting
   // the critical edge from the loop predecessor to the loop header.
   if (BB->pred_size() == 1) {
-    MachineBasicBlock *TBB = 0, *FBB = 0;
+    MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
     SmallVector<MachineOperand, 4> Cond;
     if (!TII->AnalyzeBranch(*BB, TBB, FBB, Cond, false) && Cond.empty())
       InitRegPressure(*BB->pred_begin());
@@ -978,25 +981,23 @@ bool MachineLICM::HasLoopPHIUse(const MachineInstr *MI) const {
       unsigned Reg = MO->getReg();
       if (!TargetRegisterInfo::isVirtualRegister(Reg))
         continue;
-      for (MachineRegisterInfo::use_iterator UI = MRI->use_begin(Reg),
-           UE = MRI->use_end(); UI != UE; ++UI) {
-        MachineInstr *UseMI = &*UI;
+      for (MachineInstr &UseMI : MRI->use_instructions(Reg)) {
         // A PHI may cause a copy to be inserted.
-        if (UseMI->isPHI()) {
+        if (UseMI.isPHI()) {
           // A PHI inside the loop causes a copy because the live range of Reg is
           // extended across the PHI.
-          if (CurLoop->contains(UseMI))
+          if (CurLoop->contains(&UseMI))
             return true;
           // A PHI in an exit block can cause a copy to be inserted if the PHI
           // has multiple predecessors in the loop with different values.
           // For now, approximate by rejecting all exit blocks.
-          if (isExitBlock(UseMI->getParent()))
+          if (isExitBlock(UseMI.getParent()))
             return true;
           continue;
         }
         // Look past copies as well.
-        if (UseMI->isCopy() && CurLoop->contains(UseMI))
-          Work.push_back(UseMI);
+        if (UseMI.isCopy() && CurLoop->contains(&UseMI))
+          Work.push_back(&UseMI);
       }
     }
   } while (!Work.empty());
@@ -1011,22 +1012,20 @@ bool MachineLICM::HasHighOperandLatency(MachineInstr &MI,
   if (!InstrItins || InstrItins->isEmpty() || MRI->use_nodbg_empty(Reg))
     return false;
 
-  for (MachineRegisterInfo::use_nodbg_iterator I = MRI->use_nodbg_begin(Reg),
-         E = MRI->use_nodbg_end(); I != E; ++I) {
-    MachineInstr *UseMI = &*I;
-    if (UseMI->isCopyLike())
+  for (MachineInstr &UseMI : MRI->use_nodbg_instructions(Reg)) {
+    if (UseMI.isCopyLike())
       continue;
-    if (!CurLoop->contains(UseMI->getParent()))
+    if (!CurLoop->contains(UseMI.getParent()))
       continue;
-    for (unsigned i = 0, e = UseMI->getNumOperands(); i != e; ++i) {
-      const MachineOperand &MO = UseMI->getOperand(i);
+    for (unsigned i = 0, e = UseMI.getNumOperands(); i != e; ++i) {
+      const MachineOperand &MO = UseMI.getOperand(i);
       if (!MO.isReg() || !MO.isUse())
         continue;
       unsigned MOReg = MO.getReg();
       if (MOReg != Reg)
         continue;
 
-      if (TII->hasHighOperandLatency(InstrItins, MRI, &MI, DefIdx, UseMI, i))
+      if (TII->hasHighOperandLatency(InstrItins, MRI, &MI, DefIdx, &UseMI, i))
         return true;
     }
 
@@ -1242,13 +1241,13 @@ bool MachineLICM::IsProfitableToHoist(MachineInstr &MI) {
 MachineInstr *MachineLICM::ExtractHoistableLoad(MachineInstr *MI) {
   // Don't unfold simple loads.
   if (MI->canFoldAsLoad())
-    return 0;
+    return nullptr;
 
   // If not, we may be able to unfold a load and hoist that.
   // First test whether the instruction is loading from an amenable
   // memory location.
   if (!MI->isInvariantLoad(AA))
-    return 0;
+    return nullptr;
 
   // Next determine the register class for a temporary register.
   unsigned LoadRegIndex;
@@ -1257,9 +1256,9 @@ MachineInstr *MachineLICM::ExtractHoistableLoad(MachineInstr *MI) {
                                     /*UnfoldLoad=*/true,
                                     /*UnfoldStore=*/false,
                                     &LoadRegIndex);
-  if (NewOpc == 0) return 0;
+  if (NewOpc == 0) return nullptr;
   const MCInstrDesc &MID = TII->get(NewOpc);
-  if (MID.getNumDefs() != 1) return 0;
+  if (MID.getNumDefs() != 1) return nullptr;
   MachineFunction &MF = *MI->getParent()->getParent();
   const TargetRegisterClass *RC = TII->getRegClass(MID, LoadRegIndex, TRI, MF);
   // Ok, we're unfolding. Create a temporary register and do the unfold.
@@ -1285,7 +1284,7 @@ MachineInstr *MachineLICM::ExtractHoistableLoad(MachineInstr *MI) {
   if (!IsLoopInvariantInst(*NewMIs[0]) || !IsProfitableToHoist(*NewMIs[0])) {
     NewMIs[0]->eraseFromParent();
     NewMIs[1]->eraseFromParent();
-    return 0;
+    return nullptr;
   }
 
   // Update register pressure for the unfolded instruction.
@@ -1317,10 +1316,10 @@ MachineLICM::LookForDuplicate(const MachineInstr *MI,
                               std::vector<const MachineInstr*> &PrevMIs) {
   for (unsigned i = 0, e = PrevMIs.size(); i != e; ++i) {
     const MachineInstr *PrevMI = PrevMIs[i];
-    if (TII->produceSameValue(MI, PrevMI, (PreRegAlloc ? MRI : 0)))
+    if (TII->produceSameValue(MI, PrevMI, (PreRegAlloc ? MRI : nullptr)))
       return PrevMI;
   }
-  return 0;
+  return nullptr;
 }
 
 bool MachineLICM::EliminateCSE(MachineInstr *MI,
@@ -1391,7 +1390,7 @@ bool MachineLICM::MayCSE(MachineInstr *MI) {
   if (CI == CSEMap.end() || MI->isImplicitDef())
     return false;
 
-  return LookForDuplicate(MI, CI->second) != 0;
+  return LookForDuplicate(MI, CI->second) != nullptr;
 }
 
 /// Hoist - When an instruction is found to use only loop invariant operands
@@ -1467,7 +1466,7 @@ MachineBasicBlock *MachineLICM::getCurPreheader() {
 
   // If we've tried to get a preheader and failed, don't try again.
   if (CurPreheader == reinterpret_cast<MachineBasicBlock *>(-1))
-    return 0;
+    return nullptr;
 
   if (!CurPreheader) {
     CurPreheader = CurLoop->getLoopPreheader();
@@ -1475,13 +1474,13 @@ MachineBasicBlock *MachineLICM::getCurPreheader() {
       MachineBasicBlock *Pred = CurLoop->getLoopPredecessor();
       if (!Pred) {
         CurPreheader = reinterpret_cast<MachineBasicBlock *>(-1);
-        return 0;
+        return nullptr;
       }
 
       CurPreheader = Pred->SplitCriticalEdge(CurLoop->getHeader(), this);
       if (!CurPreheader) {
         CurPreheader = reinterpret_cast<MachineBasicBlock *>(-1);
-        return 0;
+        return nullptr;
       }
     }
   }

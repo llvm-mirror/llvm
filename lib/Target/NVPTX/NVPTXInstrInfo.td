@@ -689,11 +689,23 @@ def FDIV32approxrr_ftz : NVPTXInst<(outs Float32Regs:$dst),
                       [(set Float32Regs:$dst,
                         (fdiv Float32Regs:$a, Float32Regs:$b))]>,
                       Requires<[do_DIVF32_APPROX, doF32FTZ]>;
+def FDIV32approxri_ftz : NVPTXInst<(outs Float32Regs:$dst),
+                      (ins Float32Regs:$a, f32imm:$b),
+                      "div.approx.ftz.f32 \t$dst, $a, $b;",
+                      [(set Float32Regs:$dst,
+                        (fdiv Float32Regs:$a, fpimm:$b))]>,
+                      Requires<[do_DIVF32_APPROX, doF32FTZ]>;
 def FDIV32approxrr     : NVPTXInst<(outs Float32Regs:$dst),
                       (ins Float32Regs:$a, Float32Regs:$b),
                       "div.approx.f32 \t$dst, $a, $b;",
                       [(set Float32Regs:$dst,
                         (fdiv Float32Regs:$a, Float32Regs:$b))]>,
+                      Requires<[do_DIVF32_APPROX]>;
+def FDIV32approxri : NVPTXInst<(outs Float32Regs:$dst),
+                      (ins Float32Regs:$a, f32imm:$b),
+                      "div.approx.f32 \t$dst, $a, $b;",
+                      [(set Float32Regs:$dst,
+                        (fdiv Float32Regs:$a, fpimm:$b))]>,
                       Requires<[do_DIVF32_APPROX]>;
 //
 // F32 Semi-accurate reciprocal
@@ -2606,6 +2618,20 @@ def Callseq_End : NVPTXInst<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 def trapinst : NVPTXInst<(outs), (ins),
                          "trap;",
                          [(trap)]>;
+
+// Call prototype wrapper
+def SDTCallPrototype : SDTypeProfile<0, 1, [SDTCisInt<0>]>;
+def CallPrototype
+  : SDNode<"NVPTXISD::CallPrototype", SDTCallPrototype,
+           [SDNPHasChain, SDNPOutGlue, SDNPInGlue, SDNPSideEffect]>;
+def ProtoIdent : Operand<i32> {
+  let PrintMethod = "printProtoIdent";
+}
+def CALL_PROTOTYPE
+  : NVPTXInst<(outs), (ins ProtoIdent:$ident),
+              "$ident", [(CallPrototype (i32 texternalsym:$ident))]>;
+
+
 
 include "NVPTXIntrinsics.td"
 

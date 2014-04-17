@@ -60,17 +60,17 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CFG.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -89,9 +89,9 @@ namespace {
       initializeTailCallElimPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-    virtual bool runOnFunction(Function &F);
+    bool runOnFunction(Function &F) override;
 
   private:
     CallInst *FindTRECandidate(Instruction *I,
@@ -149,16 +149,16 @@ namespace {
 struct AllocaCaptureTracker : public CaptureTracker {
   AllocaCaptureTracker() : Captured(false) {}
 
-  void tooManyUses() LLVM_OVERRIDE { Captured = true; }
+  void tooManyUses() override { Captured = true; }
 
-  bool shouldExplore(Use *U) LLVM_OVERRIDE {
+  bool shouldExplore(const Use *U) override {
     Value *V = U->getUser();
     if (isa<CallInst>(V) || isa<InvokeInst>(V))
       UsesAlloca.insert(V);
     return true;
   }
 
-  bool captured(Use *U) LLVM_OVERRIDE {
+  bool captured(const Use *U) override {
     if (isa<ReturnInst>(U->getUser()))
       return false;
     Captured = true;
@@ -171,6 +171,9 @@ struct AllocaCaptureTracker : public CaptureTracker {
 } // end anonymous namespace
 
 bool TailCallElim::runOnFunction(Function &F) {
+  if (skipOptnoneFunction(F))
+    return false;
+
   // If this function is a varargs function, we won't be able to PHI the args
   // right, so don't even try to convert it...
   if (F.getFunctionType()->isVarArg()) return false;
@@ -377,13 +380,13 @@ Value *TailCallElim::CanTransformAccumulatorRecursion(Instruction *I,
     return 0;
 
   // The only user of this instruction we allow is a single return instruction.
-  if (!I->hasOneUse() || !isa<ReturnInst>(I->use_back()))
+  if (!I->hasOneUse() || !isa<ReturnInst>(I->user_back()))
     return 0;
 
   // Ok, now we have to check all of the other return instructions in this
   // function.  If they return non-constants or differing values, then we cannot
   // transform the function safely.
-  return getCommonReturnValue(cast<ReturnInst>(I->use_back()), CI);
+  return getCommonReturnValue(cast<ReturnInst>(I->user_back()), CI);
 }
 
 static Instruction *FirstNonDbg(BasicBlock::iterator I) {
@@ -426,7 +429,7 @@ TailCallElim::FindTRECandidate(Instruction *TI,
   // lower the call to fabs into inline code.
   if (BB == &F->getEntryBlock() &&
       FirstNonDbg(BB->front()) == CI &&
-      FirstNonDbg(llvm::next(BB->begin())) == TI &&
+      FirstNonDbg(std::next(BB->begin())) == TI &&
       CI->getCalledFunction() &&
       !TTI->isLoweredToCall(CI->getCalledFunction())) {
     // A single-block function with just a call and a return. Check that

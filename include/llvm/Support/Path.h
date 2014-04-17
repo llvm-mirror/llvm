@@ -173,6 +173,13 @@ void append(SmallVectorImpl<char> &path,
 /// @param result Holds the result of the transformation.
 void native(const Twine &path, SmallVectorImpl<char> &result);
 
+/// Convert path to the native form in place. This is used to give paths to
+/// users and operating system calls in the platform's normal way. For example,
+/// on Windows all '/' are converted to '\'.
+///
+/// @param path A path that is transformed to native format.
+void native(SmallVectorImpl<char> &path);
+
 /// @}
 /// @name Lexical Observers
 /// @{
@@ -298,6 +305,12 @@ bool is_separator(char value);
 ///
 /// @param result Holds the resulting path name.
 void system_temp_directory(bool erasedOnReboot, SmallVectorImpl<char> &result);
+
+/// @brief Get the user's home directory.
+///
+/// @param result Holds the resulting path name.
+/// @result True if a home directory is set, false otherwise.
+bool home_directory(SmallVectorImpl<char> &result);
 
 /// @brief Has root name?
 ///

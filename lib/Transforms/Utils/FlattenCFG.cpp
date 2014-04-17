@@ -240,7 +240,7 @@ bool FlattenCFGOpt::FlattenParallelAndOr(BasicBlock *BB, IRBuilder<> &Builder,
       BranchInst *BI = dyn_cast<BranchInst>(CurrBlock->getTerminator());
       CmpInst *CI = dyn_cast<CmpInst>(BI->getCondition());
       CmpInst::Predicate Predicate = CI->getPredicate();
-      // Cannonicalize icmp_ne -> icmp_eq, fcmp_one -> fcmp_oeq
+      // Canonicalize icmp_ne -> icmp_eq, fcmp_one -> fcmp_oeq
       if ((Predicate == CmpInst::ICMP_NE) || (Predicate == CmpInst::FCMP_ONE)) {
         CI->setPredicate(ICmpInst::getInversePredicate(Predicate));
         BI->swapSuccessors();
@@ -266,8 +266,7 @@ bool FlattenCFGOpt::FlattenParallelAndOr(BasicBlock *BB, IRBuilder<> &Builder,
   BasicBlock *CB;
   BranchInst *PBI = dyn_cast<BranchInst>(FirstCondBlock->getTerminator());
   bool Iteration = true;
-  BasicBlock *SaveInsertBB = Builder.GetInsertBlock();
-  BasicBlock::iterator SaveInsertPt = Builder.GetInsertPoint();
+  IRBuilder<>::InsertPointGuard Guard(Builder);
   Value *PC = PBI->getCondition();
 
   do {
@@ -298,7 +297,6 @@ bool FlattenCFGOpt::FlattenParallelAndOr(BasicBlock *BB, IRBuilder<> &Builder,
     new UnreachableInst(CB->getContext(), CB);
   } while (Iteration);
 
-  Builder.SetInsertPoint(SaveInsertBB, SaveInsertPt);
   DEBUG(dbgs() << "Use parallel and/or in:\n" << *FirstCondBlock);
   return true;
 }
@@ -372,7 +370,7 @@ bool FlattenCFGOpt::CompareIfRegionBlock(BasicBlock *Head1, BasicBlock *Head2,
 
 /// Check whether \param BB is the merge block of a if-region.  If yes, check
 /// whether there exists an adjacent if-region upstream, the two if-regions
-/// contain identical instuctions and can be legally merged.  \returns true if
+/// contain identical instructions and can be legally merged.  \returns true if
 /// the two if-regions are merged.
 ///
 /// From:

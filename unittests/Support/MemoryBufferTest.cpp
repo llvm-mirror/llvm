@@ -12,9 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/FileSystem.h"
+#include "llvm/ADT/OwningPtr.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -65,6 +65,28 @@ TEST_F(MemoryBufferTest, get) {
   EXPECT_EQ("this is some data", data);
 }
 
+TEST_F(MemoryBufferTest, NullTerminator4K) {
+  // Test that a file with size that is a multiple of the page size can be null
+  // terminated correctly by MemoryBuffer.
+  int TestFD;
+  SmallString<64> TestPath;
+  sys::fs::createTemporaryFile("MemoryBufferTest_NullTerminator4K", "temp",
+                               TestFD, TestPath);
+  raw_fd_ostream OF(TestFD, true, /*unbuffered=*/true);
+  for (unsigned i = 0; i < 4096 / 16; ++i) {
+    OF << "0123456789abcdef";
+  }
+  OF.close();
+
+  OwningBuffer MB;
+  error_code EC = MemoryBuffer::getFile(TestPath.c_str(), MB);
+  ASSERT_FALSE(EC);
+
+  const char *BufData = MB->getBufferStart();
+  EXPECT_EQ('f', BufData[4095]);
+  EXPECT_EQ('\0', BufData[4096]);
+}
+
 TEST_F(MemoryBufferTest, copy) {
   // copy with no name
   OwningBuffer MBC1(MemoryBuffer::getMemBufferCopy(data));
@@ -112,7 +134,7 @@ void MemoryBufferTest::testGetOpenFileSlice(bool Reopen) {
   SmallString<64> TestPath;
   // Create a temporary file and write data into it.
   sys::fs::createTemporaryFile("prefix", "temp", TestFD, TestPath);
-  // OF is responsible for closing the file; If the file is not 
+  // OF is responsible for closing the file; If the file is not
   // reopened, it will be unbuffered so that the results are
   // immediately visible through the fd.
   raw_fd_ostream OF(TestFD, true, !Reopen);
@@ -128,7 +150,7 @@ void MemoryBufferTest::testGetOpenFileSlice(bool Reopen) {
   OwningBuffer Buf;
   error_code EC = MemoryBuffer::getOpenFileSlice(TestFD, TestPath.c_str(), Buf,
                                                  40000, // Size
-                                                 8000   // Offset
+                                                 80000  // Offset
                                                  );
   EXPECT_FALSE(EC);
 

@@ -1,4 +1,5 @@
 ; RUN: llc -mtriple=aarch64-none-linux-gnu -relocation-model=pic -o - %s | FileCheck %s
+; RUN: llc -mtriple=aarch64_be-none-linux-gnu -relocation-model=pic -o - %s | FileCheck %s
 
 ; Make sure exception-handling PIC code can be linked correctly. An alternative
 ; to the sequence described below would have .gcc_except_table itself writable
@@ -10,8 +11,8 @@
   ; ... referring indirectly to stubs for its typeinfo ...
 ; CHECK: // @TType Encoding = indirect pcrel sdata8
   ; ... one of which is "int"'s typeinfo
-; CHECK: .Ltmp9:
-; CHECK-NEXT: .xword  .L_ZTIi.DW.stub-.Ltmp9
+; CHECK: .Ltmp7:
+; CHECK-NEXT: .xword  .L_ZTIi.DW.stub-.Ltmp7
 
   ; .. and which is properly defined (in a writable section for the dynamic loader) later.
 ; CHECK: .section .data.rel,"aw"

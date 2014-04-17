@@ -13,12 +13,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Object/MachO.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Object/MachOFormat.h"
 #include "llvm/Support/DataExtractor.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cctype>
 #include <cstring>
 #include <limits>
@@ -29,16 +30,16 @@ using namespace object;
 namespace llvm {
 namespace object {
 
-struct SymbolTableEntryBase {
-  uint32_t StringIndex;
-  uint8_t Type;
-  uint8_t SectionIndex;
-  uint16_t Flags;
+struct nlist_base {
+  uint32_t n_strx;
+  uint8_t n_type;
+  uint8_t n_sect;
+  uint16_t n_desc;
 };
 
-struct SectionBase {
-  char Name[16];
-  char SegmentName[16];
+struct section_base {
+  char sectname[16];
+  char segname[16];
 };
 
 template<typename T>
@@ -50,167 +51,182 @@ template<typename T>
 static void SwapStruct(T &Value);
 
 template<>
-void SwapStruct(macho::RelocationEntry &H) {
-  SwapValue(H.Word0);
-  SwapValue(H.Word1);
+void SwapStruct(MachO::any_relocation_info &H) {
+  SwapValue(H.r_word0);
+  SwapValue(H.r_word1);
 }
 
 template<>
-void SwapStruct(macho::LoadCommand &L) {
-  SwapValue(L.Type);
-  SwapValue(L.Size);
+void SwapStruct(MachO::load_command &L) {
+  SwapValue(L.cmd);
+  SwapValue(L.cmdsize);
 }
 
 template<>
-void SwapStruct(SymbolTableEntryBase &S) {
-  SwapValue(S.StringIndex);
-  SwapValue(S.Flags);
+void SwapStruct(nlist_base &S) {
+  SwapValue(S.n_strx);
+  SwapValue(S.n_desc);
 }
 
 template<>
-void SwapStruct(macho::Section &S) {
-  SwapValue(S.Address);
-  SwapValue(S.Size);
-  SwapValue(S.Offset);
-  SwapValue(S.Align);
-  SwapValue(S.RelocationTableOffset);
-  SwapValue(S.NumRelocationTableEntries);
-  SwapValue(S.Flags);
-  SwapValue(S.Reserved1);
-  SwapValue(S.Reserved2);
+void SwapStruct(MachO::section &S) {
+  SwapValue(S.addr);
+  SwapValue(S.size);
+  SwapValue(S.offset);
+  SwapValue(S.align);
+  SwapValue(S.reloff);
+  SwapValue(S.nreloc);
+  SwapValue(S.flags);
+  SwapValue(S.reserved1);
+  SwapValue(S.reserved2);
 }
 
 template<>
-void SwapStruct(macho::Section64 &S) {
-  SwapValue(S.Address);
-  SwapValue(S.Size);
-  SwapValue(S.Offset);
-  SwapValue(S.Align);
-  SwapValue(S.RelocationTableOffset);
-  SwapValue(S.NumRelocationTableEntries);
-  SwapValue(S.Flags);
-  SwapValue(S.Reserved1);
-  SwapValue(S.Reserved2);
-  SwapValue(S.Reserved3);
+void SwapStruct(MachO::section_64 &S) {
+  SwapValue(S.addr);
+  SwapValue(S.size);
+  SwapValue(S.offset);
+  SwapValue(S.align);
+  SwapValue(S.reloff);
+  SwapValue(S.nreloc);
+  SwapValue(S.flags);
+  SwapValue(S.reserved1);
+  SwapValue(S.reserved2);
+  SwapValue(S.reserved3);
 }
 
 template<>
-void SwapStruct(macho::SymbolTableEntry &S) {
-  SwapValue(S.StringIndex);
-  SwapValue(S.Flags);
-  SwapValue(S.Value);
+void SwapStruct(MachO::nlist &S) {
+  SwapValue(S.n_strx);
+  SwapValue(S.n_desc);
+  SwapValue(S.n_value);
 }
 
 template<>
-void SwapStruct(macho::Symbol64TableEntry &S) {
-  SwapValue(S.StringIndex);
-  SwapValue(S.Flags);
-  SwapValue(S.Value);
+void SwapStruct(MachO::nlist_64 &S) {
+  SwapValue(S.n_strx);
+  SwapValue(S.n_desc);
+  SwapValue(S.n_value);
 }
 
 template<>
-void SwapStruct(macho::Header &H) {
-  SwapValue(H.Magic);
-  SwapValue(H.CPUType);
-  SwapValue(H.CPUSubtype);
-  SwapValue(H.FileType);
-  SwapValue(H.NumLoadCommands);
-  SwapValue(H.SizeOfLoadCommands);
-  SwapValue(H.Flags);
+void SwapStruct(MachO::mach_header &H) {
+  SwapValue(H.magic);
+  SwapValue(H.cputype);
+  SwapValue(H.cpusubtype);
+  SwapValue(H.filetype);
+  SwapValue(H.ncmds);
+  SwapValue(H.sizeofcmds);
+  SwapValue(H.flags);
 }
 
 template<>
-void SwapStruct(macho::Header64Ext &E) {
-  SwapValue(E.Reserved);
+void SwapStruct(MachO::mach_header_64 &H) {
+  SwapValue(H.magic);
+  SwapValue(H.cputype);
+  SwapValue(H.cpusubtype);
+  SwapValue(H.filetype);
+  SwapValue(H.ncmds);
+  SwapValue(H.sizeofcmds);
+  SwapValue(H.flags);
+  SwapValue(H.reserved);
 }
 
 template<>
-void SwapStruct(macho::SymtabLoadCommand &C) {
-  SwapValue(C.Type);
-  SwapValue(C.Size);
-  SwapValue(C.SymbolTableOffset);
-  SwapValue(C.NumSymbolTableEntries);
-  SwapValue(C.StringTableOffset);
-  SwapValue(C.StringTableSize);
+void SwapStruct(MachO::symtab_command &C) {
+  SwapValue(C.cmd);
+  SwapValue(C.cmdsize);
+  SwapValue(C.symoff);
+  SwapValue(C.nsyms);
+  SwapValue(C.stroff);
+  SwapValue(C.strsize);
 }
 
 template<>
-void SwapStruct(macho::DysymtabLoadCommand &C) {
-  SwapValue(C.Type);
-  SwapValue(C.Size);
-  SwapValue(C.LocalSymbolsIndex);
-  SwapValue(C.NumLocalSymbols);
-  SwapValue(C.ExternalSymbolsIndex);
-  SwapValue(C.NumExternalSymbols);
-  SwapValue(C.UndefinedSymbolsIndex);
-  SwapValue(C.NumUndefinedSymbols);
-  SwapValue(C.TOCOffset);
-  SwapValue(C.NumTOCEntries);
-  SwapValue(C.ModuleTableOffset);
-  SwapValue(C.NumModuleTableEntries);
-  SwapValue(C.ReferenceSymbolTableOffset);
-  SwapValue(C.NumReferencedSymbolTableEntries);
-  SwapValue(C.IndirectSymbolTableOffset);
-  SwapValue(C.NumIndirectSymbolTableEntries);
-  SwapValue(C.ExternalRelocationTableOffset);
-  SwapValue(C.NumExternalRelocationTableEntries);
-  SwapValue(C.LocalRelocationTableOffset);
-  SwapValue(C.NumLocalRelocationTableEntries);
+void SwapStruct(MachO::dysymtab_command &C) {
+  SwapValue(C.cmd);
+  SwapValue(C.cmdsize);
+  SwapValue(C.ilocalsym);
+  SwapValue(C.nlocalsym);
+  SwapValue(C.iextdefsym);
+  SwapValue(C.nextdefsym);
+  SwapValue(C.iundefsym);
+  SwapValue(C.nundefsym);
+  SwapValue(C.tocoff);
+  SwapValue(C.ntoc);
+  SwapValue(C.modtaboff);
+  SwapValue(C.nmodtab);
+  SwapValue(C.extrefsymoff);
+  SwapValue(C.nextrefsyms);
+  SwapValue(C.indirectsymoff);
+  SwapValue(C.nindirectsyms);
+  SwapValue(C.extreloff);
+  SwapValue(C.nextrel);
+  SwapValue(C.locreloff);
+  SwapValue(C.nlocrel);
 }
 
 template<>
-void SwapStruct(macho::LinkeditDataLoadCommand &C) {
-  SwapValue(C.Type);
-  SwapValue(C.Size);
-  SwapValue(C.DataOffset);
-  SwapValue(C.DataSize);
+void SwapStruct(MachO::linkedit_data_command &C) {
+  SwapValue(C.cmd);
+  SwapValue(C.cmdsize);
+  SwapValue(C.dataoff);
+  SwapValue(C.datasize);
 }
 
 template<>
-void SwapStruct(macho::SegmentLoadCommand &C) {
-  SwapValue(C.Type);
-  SwapValue(C.Size);
-  SwapValue(C.VMAddress);
-  SwapValue(C.VMSize);
-  SwapValue(C.FileOffset);
-  SwapValue(C.FileSize);
-  SwapValue(C.MaxVMProtection);
-  SwapValue(C.InitialVMProtection);
-  SwapValue(C.NumSections);
-  SwapValue(C.Flags);
+void SwapStruct(MachO::segment_command &C) {
+  SwapValue(C.cmd);
+  SwapValue(C.cmdsize);
+  SwapValue(C.vmaddr);
+  SwapValue(C.vmsize);
+  SwapValue(C.fileoff);
+  SwapValue(C.filesize);
+  SwapValue(C.maxprot);
+  SwapValue(C.initprot);
+  SwapValue(C.nsects);
+  SwapValue(C.flags);
 }
 
 template<>
-void SwapStruct(macho::Segment64LoadCommand &C) {
-  SwapValue(C.Type);
-  SwapValue(C.Size);
-  SwapValue(C.VMAddress);
-  SwapValue(C.VMSize);
-  SwapValue(C.FileOffset);
-  SwapValue(C.FileSize);
-  SwapValue(C.MaxVMProtection);
-  SwapValue(C.InitialVMProtection);
-  SwapValue(C.NumSections);
-  SwapValue(C.Flags);
+void SwapStruct(MachO::segment_command_64 &C) {
+  SwapValue(C.cmd);
+  SwapValue(C.cmdsize);
+  SwapValue(C.vmaddr);
+  SwapValue(C.vmsize);
+  SwapValue(C.fileoff);
+  SwapValue(C.filesize);
+  SwapValue(C.maxprot);
+  SwapValue(C.initprot);
+  SwapValue(C.nsects);
+  SwapValue(C.flags);
 }
 
 template<>
-void SwapStruct(macho::IndirectSymbolTableEntry &C) {
-  SwapValue(C.Index);
+void SwapStruct(uint32_t &C) {
+  SwapValue(C);
 }
 
 template<>
-void SwapStruct(macho::LinkerOptionsLoadCommand &C) {
-  SwapValue(C.Type);
-  SwapValue(C.Size);
-  SwapValue(C.Count);
+void SwapStruct(MachO::linker_options_command &C) {
+  SwapValue(C.cmd);
+  SwapValue(C.cmdsize);
+  SwapValue(C.count);
 }
 
 template<>
-void SwapStruct(macho::DataInCodeTableEntry &C) {
-  SwapValue(C.Offset);
-  SwapValue(C.Length);
-  SwapValue(C.Kind);
+void SwapStruct(MachO::version_min_command&C) {
+  SwapValue(C.cmd);
+  SwapValue(C.cmdsize);
+  SwapValue(C.version);
+  SwapValue(C.reserved);
+}
+
+template<>
+void SwapStruct(MachO::data_in_code_entry &C) {
+  SwapValue(C.offset);
+  SwapValue(C.length);
+  SwapValue(C.kind);
 }
 
 template<typename T>
@@ -226,11 +242,11 @@ static uint32_t
 getSegmentLoadCommandNumSections(const MachOObjectFile *O,
                                  const MachOObjectFile::LoadCommandInfo &L) {
   if (O->is64Bit()) {
-    macho::Segment64LoadCommand S = O->getSegment64LoadCommand(L);
-    return S.NumSections;
+    MachO::segment_command_64 S = O->getSegment64LoadCommand(L);
+    return S.nsects;
   }
-  macho::SegmentLoadCommand S = O->getSegmentLoadCommand(L);
-  return S.NumSections;
+  MachO::segment_command S = O->getSegmentLoadCommand(L);
+  return S.nsects;
 }
 
 static const char *
@@ -239,10 +255,10 @@ getSectionPtr(const MachOObjectFile *O, MachOObjectFile::LoadCommandInfo L,
   uintptr_t CommandAddr = reinterpret_cast<uintptr_t>(L.Ptr);
 
   bool Is64 = O->is64Bit();
-  unsigned SegmentLoadSize = Is64 ? sizeof(macho::Segment64LoadCommand) :
-                                    sizeof(macho::SegmentLoadCommand);
-  unsigned SectionSize = Is64 ? sizeof(macho::Section64) :
-                                sizeof(macho::Section);
+  unsigned SegmentLoadSize = Is64 ? sizeof(MachO::segment_command_64) :
+                                    sizeof(MachO::segment_command);
+  unsigned SectionSize = Is64 ? sizeof(MachO::section_64) :
+                                sizeof(MachO::section);
 
   uintptr_t SectionAddr = CommandAddr + SegmentLoadSize + Sec * SectionSize;
   return reinterpret_cast<const char*>(SectionAddr);
@@ -252,10 +268,10 @@ static const char *getPtr(const MachOObjectFile *O, size_t Offset) {
   return O->getData().substr(Offset, 1).data();
 }
 
-static SymbolTableEntryBase
+static nlist_base
 getSymbolTableEntryBase(const MachOObjectFile *O, DataRefImpl DRI) {
   const char *P = reinterpret_cast<const char *>(DRI.p);
-  return getStruct<SymbolTableEntryBase>(O, P);
+  return getStruct<nlist_base>(O, P);
 }
 
 static StringRef parseSegmentOrSectionName(const char *P) {
@@ -268,26 +284,17 @@ static StringRef parseSegmentOrSectionName(const char *P) {
 
 // Helper to advance a section or symbol iterator multiple increments at a time.
 template<class T>
-static error_code advance(T &it, size_t Val) {
-  error_code ec;
-  while (Val--) {
-    it.increment(ec);
-  }
-  return ec;
-}
-
-template<class T>
-static void advanceTo(T &it, size_t Val) {
-  if (error_code ec = advance(it, Val))
-    report_fatal_error(ec.message());
+static void advance(T &it, size_t Val) {
+  while (Val--)
+    ++it;
 }
 
 static unsigned getCPUType(const MachOObjectFile *O) {
-  return O->getHeader().CPUType;
+  return O->getHeader().cputype;
 }
 
 static void printRelocationTargetName(const MachOObjectFile *O,
-                                      const macho::RelocationEntry &RE,
+                                      const MachO::any_relocation_info &RE,
                                       raw_string_ostream &fmt) {
   bool IsScattered = O->isRelocationScattered(RE);
 
@@ -298,18 +305,16 @@ static void printRelocationTargetName(const MachOObjectFile *O,
   if (IsScattered) {
     uint32_t Val = O->getPlainRelocationSymbolNum(RE);
 
-    error_code ec;
-    for (symbol_iterator SI = O->begin_symbols(), SE = O->end_symbols();
-         SI != SE; SI.increment(ec)) {
-      if (ec) report_fatal_error(ec.message());
-
+    for (const SymbolRef &Symbol : O->symbols()) {
+      error_code ec;
       uint64_t Addr;
       StringRef Name;
 
-      if ((ec = SI->getAddress(Addr)))
+      if ((ec = Symbol.getAddress(Addr)))
         report_fatal_error(ec.message());
-      if (Addr != Val) continue;
-      if ((ec = SI->getName(Name)))
+      if (Addr != Val)
+        continue;
+      if ((ec = Symbol.getName(Name)))
         report_fatal_error(ec.message());
       fmt << Name;
       return;
@@ -317,17 +322,16 @@ static void printRelocationTargetName(const MachOObjectFile *O,
 
     // If we couldn't find a symbol that this relocation refers to, try
     // to find a section beginning instead.
-    for (section_iterator SI = O->begin_sections(), SE = O->end_sections();
-         SI != SE; SI.increment(ec)) {
-      if (ec) report_fatal_error(ec.message());
-
+    for (const SectionRef &Section : O->sections()) {
+      error_code ec;
       uint64_t Addr;
       StringRef Name;
 
-      if ((ec = SI->getAddress(Addr)))
+      if ((ec = Section.getAddress(Addr)))
         report_fatal_error(ec.message());
-      if (Addr != Val) continue;
-      if ((ec = SI->getName(Name)))
+      if (Addr != Val)
+        continue;
+      if ((ec = Section.getName(Name)))
         report_fatal_error(ec.message());
       fmt << Name;
       return;
@@ -342,95 +346,97 @@ static void printRelocationTargetName(const MachOObjectFile *O,
   uint64_t Val = O->getPlainRelocationSymbolNum(RE);
 
   if (isExtern) {
-    symbol_iterator SI = O->begin_symbols();
-    advanceTo(SI, Val);
+    symbol_iterator SI = O->symbol_begin();
+    advance(SI, Val);
     SI->getName(S);
   } else {
-    section_iterator SI = O->begin_sections();
+    section_iterator SI = O->section_begin();
     // Adjust for the fact that sections are 1-indexed.
-    advanceTo(SI, Val - 1);
+    advance(SI, Val - 1);
     SI->getName(S);
   }
 
   fmt << S;
 }
 
-static uint32_t getPlainRelocationAddress(const macho::RelocationEntry &RE) {
-  return RE.Word0;
+static uint32_t
+getPlainRelocationAddress(const MachO::any_relocation_info &RE) {
+  return RE.r_word0;
 }
 
 static unsigned
-getScatteredRelocationAddress(const macho::RelocationEntry &RE) {
-  return RE.Word0 & 0xffffff;
+getScatteredRelocationAddress(const MachO::any_relocation_info &RE) {
+  return RE.r_word0 & 0xffffff;
 }
 
 static bool getPlainRelocationPCRel(const MachOObjectFile *O,
-                                    const macho::RelocationEntry &RE) {
+                                    const MachO::any_relocation_info &RE) {
   if (O->isLittleEndian())
-    return (RE.Word1 >> 24) & 1;
-  return (RE.Word1 >> 7) & 1;
+    return (RE.r_word1 >> 24) & 1;
+  return (RE.r_word1 >> 7) & 1;
 }
 
 static bool
 getScatteredRelocationPCRel(const MachOObjectFile *O,
-                            const macho::RelocationEntry &RE) {
-  return (RE.Word0 >> 30) & 1;
+                            const MachO::any_relocation_info &RE) {
+  return (RE.r_word0 >> 30) & 1;
 }
 
 static unsigned getPlainRelocationLength(const MachOObjectFile *O,
-                                         const macho::RelocationEntry &RE) {
+                                         const MachO::any_relocation_info &RE) {
   if (O->isLittleEndian())
-    return (RE.Word1 >> 25) & 3;
-  return (RE.Word1 >> 5) & 3;
+    return (RE.r_word1 >> 25) & 3;
+  return (RE.r_word1 >> 5) & 3;
 }
 
 static unsigned
-getScatteredRelocationLength(const macho::RelocationEntry &RE) {
-  return (RE.Word0 >> 28) & 3;
+getScatteredRelocationLength(const MachO::any_relocation_info &RE) {
+  return (RE.r_word0 >> 28) & 3;
 }
 
 static unsigned getPlainRelocationType(const MachOObjectFile *O,
-                                       const macho::RelocationEntry &RE) {
+                                       const MachO::any_relocation_info &RE) {
   if (O->isLittleEndian())
-    return RE.Word1 >> 28;
-  return RE.Word1 & 0xf;
+    return RE.r_word1 >> 28;
+  return RE.r_word1 & 0xf;
 }
 
-static unsigned getScatteredRelocationType(const macho::RelocationEntry &RE) {
-  return (RE.Word0 >> 24) & 0xf;
+static unsigned
+getScatteredRelocationType(const MachO::any_relocation_info &RE) {
+  return (RE.r_word0 >> 24) & 0xf;
 }
 
 static uint32_t getSectionFlags(const MachOObjectFile *O,
                                 DataRefImpl Sec) {
   if (O->is64Bit()) {
-    macho::Section64 Sect = O->getSection64(Sec);
-    return Sect.Flags;
+    MachO::section_64 Sect = O->getSection64(Sec);
+    return Sect.flags;
   }
-  macho::Section Sect = O->getSection(Sec);
-  return Sect.Flags;
+  MachO::section Sect = O->getSection(Sec);
+  return Sect.flags;
 }
 
-MachOObjectFile::MachOObjectFile(MemoryBuffer *Object,
-                                 bool IsLittleEndian, bool Is64bits,
-                                 error_code &ec)
-    : ObjectFile(getMachOType(IsLittleEndian, Is64bits), Object),
+MachOObjectFile::MachOObjectFile(MemoryBuffer *Object, bool IsLittleEndian,
+                                 bool Is64bits, error_code &EC,
+                                 bool BufferOwned)
+    : ObjectFile(getMachOType(IsLittleEndian, Is64bits), Object, BufferOwned),
       SymtabLoadCmd(NULL), DysymtabLoadCmd(NULL), DataInCodeLoadCmd(NULL) {
-  uint32_t LoadCommandCount = this->getHeader().NumLoadCommands;
-  macho::LoadCommandType SegmentLoadType = is64Bit() ?
-    macho::LCT_Segment64 : macho::LCT_Segment;
+  uint32_t LoadCommandCount = this->getHeader().ncmds;
+  MachO::LoadCommandType SegmentLoadType = is64Bit() ?
+    MachO::LC_SEGMENT_64 : MachO::LC_SEGMENT;
 
   MachOObjectFile::LoadCommandInfo Load = getFirstLoadCommandInfo();
   for (unsigned I = 0; ; ++I) {
-    if (Load.C.Type == macho::LCT_Symtab) {
+    if (Load.C.cmd == MachO::LC_SYMTAB) {
       assert(!SymtabLoadCmd && "Multiple symbol tables");
       SymtabLoadCmd = Load.Ptr;
-    } else if (Load.C.Type == macho::LCT_Dysymtab) {
+    } else if (Load.C.cmd == MachO::LC_DYSYMTAB) {
       assert(!DysymtabLoadCmd && "Multiple dynamic symbol tables");
       DysymtabLoadCmd = Load.Ptr;
-    } else if (Load.C.Type == macho::LCT_DataInCode) {
+    } else if (Load.C.cmd == MachO::LC_DATA_IN_CODE) {
       assert(!DataInCodeLoadCmd && "Multiple data in code tables");
       DataInCodeLoadCmd = Load.Ptr;
-    } else if (Load.C.Type == SegmentLoadType) {
+    } else if (Load.C.cmd == SegmentLoadType) {
       uint32_t NumSections = getSegmentLoadCommandNumSections(this, Load);
       for (unsigned J = 0; J < NumSections; ++J) {
         const char *Sec = getSectionPtr(this, Load, J);
@@ -445,21 +451,18 @@ MachOObjectFile::MachOObjectFile(MemoryBuffer *Object,
   }
 }
 
-error_code MachOObjectFile::getSymbolNext(DataRefImpl Symb,
-                                          SymbolRef &Res) const {
+void MachOObjectFile::moveSymbolNext(DataRefImpl &Symb) const {
   unsigned SymbolTableEntrySize = is64Bit() ?
-    sizeof(macho::Symbol64TableEntry) :
-    sizeof(macho::SymbolTableEntry);
+    sizeof(MachO::nlist_64) :
+    sizeof(MachO::nlist);
   Symb.p += SymbolTableEntrySize;
-  Res = SymbolRef(Symb, this);
-  return object_error::success;
 }
 
 error_code MachOObjectFile::getSymbolName(DataRefImpl Symb,
                                           StringRef &Res) const {
   StringRef StringTable = getStringTableData();
-  SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, Symb);
-  const char *Start = &StringTable.data()[Entry.StringIndex];
+  nlist_base Entry = getSymbolTableEntryBase(this, Symb);
+  const char *Start = &StringTable.data()[Entry.n_strx];
   Res = StringRef(Start);
   return object_error::success;
 }
@@ -467,45 +470,21 @@ error_code MachOObjectFile::getSymbolName(DataRefImpl Symb,
 error_code MachOObjectFile::getSymbolAddress(DataRefImpl Symb,
                                              uint64_t &Res) const {
   if (is64Bit()) {
-    macho::Symbol64TableEntry Entry = getSymbol64TableEntry(Symb);
-    Res = Entry.Value;
+    MachO::nlist_64 Entry = getSymbol64TableEntry(Symb);
+    Res = Entry.n_value;
   } else {
-    macho::SymbolTableEntry Entry = getSymbolTableEntry(Symb);
-    Res = Entry.Value;
+    MachO::nlist Entry = getSymbolTableEntry(Symb);
+    Res = Entry.n_value;
   }
-  return object_error::success;
-}
-
-error_code
-MachOObjectFile::getSymbolFileOffset(DataRefImpl Symb,
-                                     uint64_t &Res) const {
-  SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, Symb);
-  getSymbolAddress(Symb, Res);
-  if (Entry.SectionIndex) {
-    uint64_t Delta;
-    DataRefImpl SecRel;
-    SecRel.d.a = Entry.SectionIndex-1;
-    if (is64Bit()) {
-      macho::Section64 Sec = getSection64(SecRel);
-      Delta = Sec.Offset - Sec.Address;
-    } else {
-      macho::Section Sec = getSection(SecRel);
-      Delta = Sec.Offset - Sec.Address;
-    }
-
-    Res += Delta;
-  }
-
   return object_error::success;
 }
 
 error_code MachOObjectFile::getSymbolAlignment(DataRefImpl DRI,
                                                uint32_t &Result) const {
-  uint32_t flags;
-  this->getSymbolFlags(DRI, flags);
+  uint32_t flags = getSymbolFlags(DRI);
   if (flags & SymbolRef::SF_Common) {
-    SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, DRI);
-    Result = 1 << MachO::GET_COMM_ALIGN(Entry.Flags);
+    nlist_base Entry = getSymbolTableEntryBase(this, DRI);
+    Result = 1 << MachO::GET_COMM_ALIGN(Entry.n_desc);
   } else {
     Result = 0;
   }
@@ -518,16 +497,15 @@ error_code MachOObjectFile::getSymbolSize(DataRefImpl DRI,
   uint64_t EndOffset = 0;
   uint8_t SectionIndex;
 
-  SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, DRI);
+  nlist_base Entry = getSymbolTableEntryBase(this, DRI);
   uint64_t Value;
   getSymbolAddress(DRI, Value);
 
   BeginOffset = Value;
 
-  SectionIndex = Entry.SectionIndex;
+  SectionIndex = Entry.n_sect;
   if (!SectionIndex) {
-    uint32_t flags = SymbolRef::SF_None;
-    this->getSymbolFlags(DRI, flags);
+    uint32_t flags = getSymbolFlags(DRI);
     if (flags & SymbolRef::SF_Common)
       Result = Value;
     else
@@ -536,13 +514,11 @@ error_code MachOObjectFile::getSymbolSize(DataRefImpl DRI,
   }
   // Unfortunately symbols are unsorted so we need to touch all
   // symbols from load command
-  error_code ec;
-  for (symbol_iterator I = begin_symbols(), E = end_symbols(); I != E;
-       I.increment(ec)) {
-    DataRefImpl DRI = I->getRawDataRefImpl();
+  for (const SymbolRef &Symbol : symbols()) {
+    DataRefImpl DRI = Symbol.getRawDataRefImpl();
     Entry = getSymbolTableEntryBase(this, DRI);
     getSymbolAddress(DRI, Value);
-    if (Entry.SectionIndex == SectionIndex && Value > BeginOffset)
+    if (Entry.n_sect == SectionIndex && Value > BeginOffset)
       if (!EndOffset || Value < EndOffset)
         EndOffset = Value;
   }
@@ -560,73 +536,45 @@ error_code MachOObjectFile::getSymbolSize(DataRefImpl DRI,
 
 error_code MachOObjectFile::getSymbolType(DataRefImpl Symb,
                                           SymbolRef::Type &Res) const {
-  SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, Symb);
-  uint8_t n_type = Entry.Type;
+  nlist_base Entry = getSymbolTableEntryBase(this, Symb);
+  uint8_t n_type = Entry.n_type;
 
   Res = SymbolRef::ST_Other;
 
   // If this is a STAB debugging symbol, we can do nothing more.
-  if (n_type & MachO::NlistMaskStab) {
+  if (n_type & MachO::N_STAB) {
     Res = SymbolRef::ST_Debug;
     return object_error::success;
   }
 
-  switch (n_type & MachO::NlistMaskType) {
-    case MachO::NListTypeUndefined :
+  switch (n_type & MachO::N_TYPE) {
+    case MachO::N_UNDF :
       Res = SymbolRef::ST_Unknown;
       break;
-    case MachO::NListTypeSection :
+    case MachO::N_SECT :
       Res = SymbolRef::ST_Function;
       break;
   }
   return object_error::success;
 }
 
-error_code MachOObjectFile::getSymbolNMTypeChar(DataRefImpl Symb,
-                                                char &Res) const {
-  SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, Symb);
-  uint8_t Type = Entry.Type;
-  uint16_t Flags = Entry.Flags;
+uint32_t MachOObjectFile::getSymbolFlags(DataRefImpl DRI) const {
+  nlist_base Entry = getSymbolTableEntryBase(this, DRI);
 
-  char Char;
-  switch (Type & macho::STF_TypeMask) {
-    case macho::STT_Undefined:
-      Char = 'u';
-      break;
-    case macho::STT_Absolute:
-    case macho::STT_Section:
-      Char = 's';
-      break;
-    default:
-      Char = '?';
-      break;
-  }
+  uint8_t MachOType = Entry.n_type;
+  uint16_t MachOFlags = Entry.n_desc;
 
-  if (Flags & (macho::STF_External | macho::STF_PrivateExtern))
-    Char = toupper(static_cast<unsigned char>(Char));
-  Res = Char;
-  return object_error::success;
-}
+  uint32_t Result = SymbolRef::SF_None;
 
-error_code MachOObjectFile::getSymbolFlags(DataRefImpl DRI,
-                                           uint32_t &Result) const {
-  SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, DRI);
-
-  uint8_t MachOType = Entry.Type;
-  uint16_t MachOFlags = Entry.Flags;
-
-  // TODO: Correctly set SF_ThreadLocal
-  Result = SymbolRef::SF_None;
-
-  if ((MachOType & MachO::NlistMaskType) == MachO::NListTypeUndefined)
+  if ((MachOType & MachO::N_TYPE) == MachO::N_UNDF)
     Result |= SymbolRef::SF_Undefined;
 
-  if (MachOFlags & macho::STF_StabsEntryMask)
+  if (MachOType & MachO::N_STAB)
     Result |= SymbolRef::SF_FormatSpecific;
 
-  if (MachOType & MachO::NlistMaskExternal) {
+  if (MachOType & MachO::N_EXT) {
     Result |= SymbolRef::SF_Global;
-    if ((MachOType & MachO::NlistMaskType) == MachO::NListTypeUndefined) {
+    if ((MachOType & MachO::N_TYPE) == MachO::N_UNDF) {
       uint64_t Value;
       getSymbolAddress(DRI, Value);
       if (Value)
@@ -634,23 +582,23 @@ error_code MachOObjectFile::getSymbolFlags(DataRefImpl DRI,
     }
   }
 
-  if (MachOFlags & (MachO::NListDescWeakRef | MachO::NListDescWeakDef))
+  if (MachOFlags & (MachO::N_WEAK_REF | MachO::N_WEAK_DEF))
     Result |= SymbolRef::SF_Weak;
 
-  if ((MachOType & MachO::NlistMaskType) == MachO::NListTypeAbsolute)
+  if ((MachOType & MachO::N_TYPE) == MachO::N_ABS)
     Result |= SymbolRef::SF_Absolute;
 
-  return object_error::success;
+  return Result;
 }
 
 error_code
 MachOObjectFile::getSymbolSection(DataRefImpl Symb,
                                   section_iterator &Res) const {
-  SymbolTableEntryBase Entry = getSymbolTableEntryBase(this, Symb);
-  uint8_t index = Entry.SectionIndex;
+  nlist_base Entry = getSymbolTableEntryBase(this, Symb);
+  uint8_t index = Entry.n_sect;
 
   if (index == 0) {
-    Res = end_sections();
+    Res = section_end();
   } else {
     DataRefImpl DRI;
     DRI.d.a = index - 1;
@@ -660,16 +608,8 @@ MachOObjectFile::getSymbolSection(DataRefImpl Symb,
   return object_error::success;
 }
 
-error_code MachOObjectFile::getSymbolValue(DataRefImpl Symb,
-                                           uint64_t &Val) const {
-  report_fatal_error("getSymbolValue unimplemented in MachOObjectFile");
-}
-
-error_code MachOObjectFile::getSectionNext(DataRefImpl Sec,
-                                           SectionRef &Res) const {
+void MachOObjectFile::moveSectionNext(DataRefImpl &Sec) const {
   Sec.d.a++;
-  Res = SectionRef(Sec, this);
-  return object_error::success;
 }
 
 error_code
@@ -682,11 +622,11 @@ MachOObjectFile::getSectionName(DataRefImpl Sec, StringRef &Result) const {
 error_code
 MachOObjectFile::getSectionAddress(DataRefImpl Sec, uint64_t &Res) const {
   if (is64Bit()) {
-    macho::Section64 Sect = getSection64(Sec);
-    Res = Sect.Address;
+    MachO::section_64 Sect = getSection64(Sec);
+    Res = Sect.addr;
   } else {
-    macho::Section Sect = getSection(Sec);
-    Res = Sect.Address;
+    MachO::section Sect = getSection(Sec);
+    Res = Sect.addr;
   }
   return object_error::success;
 }
@@ -694,11 +634,11 @@ MachOObjectFile::getSectionAddress(DataRefImpl Sec, uint64_t &Res) const {
 error_code
 MachOObjectFile::getSectionSize(DataRefImpl Sec, uint64_t &Res) const {
   if (is64Bit()) {
-    macho::Section64 Sect = getSection64(Sec);
-    Res = Sect.Size;
+    MachO::section_64 Sect = getSection64(Sec);
+    Res = Sect.size;
   } else {
-    macho::Section Sect = getSection(Sec);
-    Res = Sect.Size;
+    MachO::section Sect = getSection(Sec);
+    Res = Sect.size;
   }
 
   return object_error::success;
@@ -710,13 +650,13 @@ MachOObjectFile::getSectionContents(DataRefImpl Sec, StringRef &Res) const {
   uint64_t Size;
 
   if (is64Bit()) {
-    macho::Section64 Sect = getSection64(Sec);
-    Offset = Sect.Offset;
-    Size = Sect.Size;
+    MachO::section_64 Sect = getSection64(Sec);
+    Offset = Sect.offset;
+    Size = Sect.size;
   } else {
-    macho::Section Sect =getSection(Sec);
-    Offset = Sect.Offset;
-    Size = Sect.Size;
+    MachO::section Sect = getSection(Sec);
+    Offset = Sect.offset;
+    Size = Sect.size;
   }
 
   Res = this->getData().substr(Offset, Size);
@@ -727,11 +667,11 @@ error_code
 MachOObjectFile::getSectionAlignment(DataRefImpl Sec, uint64_t &Res) const {
   uint32_t Align;
   if (is64Bit()) {
-    macho::Section64 Sect = getSection64(Sec);
-    Align = Sect.Align;
+    MachO::section_64 Sect = getSection64(Sec);
+    Align = Sect.align;
   } else {
-    macho::Section Sect = getSection(Sec);
-    Align = Sect.Align;
+    MachO::section Sect = getSection(Sec);
+    Align = Sect.align;
   }
 
   Res = uint64_t(1) << Align;
@@ -741,7 +681,7 @@ MachOObjectFile::getSectionAlignment(DataRefImpl Sec, uint64_t &Res) const {
 error_code
 MachOObjectFile::isSectionText(DataRefImpl Sec, bool &Res) const {
   uint32_t Flags = getSectionFlags(this, Sec);
-  Res = Flags & macho::SF_PureInstructions;
+  Res = Flags & MachO::S_ATTR_PURE_INSTRUCTIONS;
   return object_error::success;
 }
 
@@ -775,9 +715,9 @@ error_code MachOObjectFile::isSectionVirtual(DataRefImpl Sec,
 error_code
 MachOObjectFile::isSectionZeroInit(DataRefImpl Sec, bool &Res) const {
   uint32_t Flags = getSectionFlags(this, Sec);
-  unsigned SectionType = Flags & MachO::SectionFlagMaskSectionType;
-  Res = SectionType == MachO::SectionTypeZeroFill ||
-    SectionType == MachO::SectionTypeZeroFillLarge;
+  unsigned SectionType = Flags & MachO::SECTION_TYPE;
+  Res = SectionType == MachO::S_ZEROFILL ||
+    SectionType == MachO::S_GB_ZEROFILL;
   return object_error::success;
 }
 
@@ -814,77 +754,69 @@ MachOObjectFile::sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
   return object_error::success;
 }
 
-relocation_iterator MachOObjectFile::getSectionRelBegin(DataRefImpl Sec) const {
-  uint32_t Offset;
-  if (is64Bit()) {
-    macho::Section64 Sect = getSection64(Sec);
-    Offset = Sect.RelocationTableOffset;
-  } else {
-    macho::Section Sect = getSection(Sec);
-    Offset = Sect.RelocationTableOffset;
-  }
-
+relocation_iterator MachOObjectFile::section_rel_begin(DataRefImpl Sec) const {
   DataRefImpl Ret;
-  Ret.p = reinterpret_cast<uintptr_t>(getPtr(this, Offset));
+  Ret.d.a = Sec.d.a;
+  Ret.d.b = 0;
   return relocation_iterator(RelocationRef(Ret, this));
 }
 
 relocation_iterator
-MachOObjectFile::getSectionRelEnd(DataRefImpl Sec) const {
-  uint32_t Offset;
+MachOObjectFile::section_rel_end(DataRefImpl Sec) const {
   uint32_t Num;
   if (is64Bit()) {
-    macho::Section64 Sect = getSection64(Sec);
-    Offset = Sect.RelocationTableOffset;
-    Num = Sect.NumRelocationTableEntries;
+    MachO::section_64 Sect = getSection64(Sec);
+    Num = Sect.nreloc;
   } else {
-    macho::Section Sect = getSection(Sec);
-    Offset = Sect.RelocationTableOffset;
-    Num = Sect.NumRelocationTableEntries;
+    MachO::section Sect = getSection(Sec);
+    Num = Sect.nreloc;
   }
 
-  const macho::RelocationEntry *P =
-    reinterpret_cast<const macho::RelocationEntry*>(getPtr(this, Offset));
-
   DataRefImpl Ret;
-  Ret.p = reinterpret_cast<uintptr_t>(P + Num);
+  Ret.d.a = Sec.d.a;
+  Ret.d.b = Num;
   return relocation_iterator(RelocationRef(Ret, this));
 }
 
-error_code MachOObjectFile::getRelocationNext(DataRefImpl Rel,
-                                              RelocationRef &Res) const {
-  const macho::RelocationEntry *P =
-    reinterpret_cast<const macho::RelocationEntry *>(Rel.p);
-  Rel.p = reinterpret_cast<uintptr_t>(P + 1);
-  Res = RelocationRef(Rel, this);
-  return object_error::success;
+void MachOObjectFile::moveRelocationNext(DataRefImpl &Rel) const {
+  ++Rel.d.b;
 }
 
 error_code
 MachOObjectFile::getRelocationAddress(DataRefImpl Rel, uint64_t &Res) const {
-  report_fatal_error("getRelocationAddress not implemented in MachOObjectFile");
+  uint64_t Offset;
+  getRelocationOffset(Rel, Offset);
+
+  DataRefImpl Sec;
+  Sec.d.a = Rel.d.a;
+  uint64_t SecAddress;
+  getSectionAddress(Sec, SecAddress);
+  Res = SecAddress + Offset;
+  return object_error::success;
 }
 
 error_code MachOObjectFile::getRelocationOffset(DataRefImpl Rel,
                                                 uint64_t &Res) const {
-  macho::RelocationEntry RE = getRelocation(Rel);
+  assert(getHeader().filetype == MachO::MH_OBJECT &&
+         "Only implemented for MH_OBJECT");
+  MachO::any_relocation_info RE = getRelocation(Rel);
   Res = getAnyRelocationAddress(RE);
   return object_error::success;
 }
 
 symbol_iterator
 MachOObjectFile::getRelocationSymbol(DataRefImpl Rel) const {
-  macho::RelocationEntry RE = getRelocation(Rel);
+  MachO::any_relocation_info RE = getRelocation(Rel);
   uint32_t SymbolIdx = getPlainRelocationSymbolNum(RE);
   bool isExtern = getPlainRelocationExternal(RE);
   if (!isExtern)
-    return end_symbols();
+    return symbol_end();
 
-  macho::SymtabLoadCommand S = getSymtabLoadCommand();
+  MachO::symtab_command S = getSymtabLoadCommand();
   unsigned SymbolTableEntrySize = is64Bit() ?
-    sizeof(macho::Symbol64TableEntry) :
-    sizeof(macho::SymbolTableEntry);
-  uint64_t Offset = S.SymbolTableOffset + SymbolIdx * SymbolTableEntrySize;
+    sizeof(MachO::nlist_64) :
+    sizeof(MachO::nlist);
+  uint64_t Offset = S.symoff + SymbolIdx * SymbolTableEntrySize;
   DataRefImpl Sym;
   Sym.p = reinterpret_cast<uintptr_t>(getPtr(this, Offset));
   return symbol_iterator(SymbolRef(Sym, this));
@@ -892,7 +824,7 @@ MachOObjectFile::getRelocationSymbol(DataRefImpl Rel) const {
 
 error_code MachOObjectFile::getRelocationType(DataRefImpl Rel,
                                               uint64_t &Res) const {
-  macho::RelocationEntry RE = getRelocation(Rel);
+  MachO::any_relocation_info RE = getRelocation(Rel);
   Res = getAnyRelocationType(RE);
   return object_error::success;
 }
@@ -916,7 +848,7 @@ MachOObjectFile::getRelocationTypeName(DataRefImpl Rel,
         "GENERIC_RELOC_LOCAL_SECTDIFF",
         "GENERIC_RELOC_TLV" };
 
-      if (RType > 6)
+      if (RType > 5)
         res = "Unknown";
       else
         res = Table[RType];
@@ -960,6 +892,23 @@ MachOObjectFile::getRelocationTypeName(DataRefImpl Rel,
         res = Table[RType];
       break;
     }
+    case Triple::arm64:
+    case Triple::aarch64: {
+      static const char *const Table[] = {
+        "ARM64_RELOC_UNSIGNED",           "ARM64_RELOC_SUBTRACTOR",
+        "ARM64_RELOC_BRANCH26",           "ARM64_RELOC_PAGE21",
+        "ARM64_RELOC_PAGEOFF12",          "ARM64_RELOC_GOT_LOAD_PAGE21",
+        "ARM64_RELOC_GOT_LOAD_PAGEOFF12", "ARM64_RELOC_POINTER_TO_GOT",
+        "ARM64_RELOC_TLVP_LOAD_PAGE21",   "ARM64_RELOC_TLVP_LOAD_PAGEOFF12",
+        "ARM64_RELOC_ADDEND"
+      };
+
+      if (RType >= array_lengthof(Table))
+        res = "Unknown";
+      else
+        res = Table[RType];
+      break;
+    }
     case Triple::ppc: {
       static const char *const Table[] =  {
         "PPC_RELOC_VANILLA",
@@ -979,7 +928,10 @@ MachOObjectFile::getRelocationTypeName(DataRefImpl Rel,
         "PPC_RELOC_LO14_SECTDIFF",
         "PPC_RELOC_LOCAL_SECTDIFF" };
 
-      res = Table[RType];
+      if (RType > 15)
+        res = "Unknown";
+      else
+        res = Table[RType];
       break;
     }
     case Triple::UnknownArch:
@@ -993,7 +945,7 @@ MachOObjectFile::getRelocationTypeName(DataRefImpl Rel,
 error_code
 MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
                                           SmallVectorImpl<char> &Result) const {
-  macho::RelocationEntry RE = getRelocation(Rel);
+  MachO::any_relocation_info RE = getRelocation(Rel);
 
   unsigned Arch = this->getArch();
 
@@ -1010,47 +962,47 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
     bool isPCRel = getAnyRelocationPCRel(RE);
 
     switch (Type) {
-      case macho::RIT_X86_64_GOTLoad:   // X86_64_RELOC_GOT_LOAD
-      case macho::RIT_X86_64_GOT: {     // X86_64_RELOC_GOT
+      case MachO::X86_64_RELOC_GOT_LOAD:
+      case MachO::X86_64_RELOC_GOT: {
         printRelocationTargetName(this, RE, fmt);
         fmt << "@GOT";
         if (isPCRel) fmt << "PCREL";
         break;
       }
-      case macho::RIT_X86_64_Subtractor: { // X86_64_RELOC_SUBTRACTOR
+      case MachO::X86_64_RELOC_SUBTRACTOR: {
         DataRefImpl RelNext = Rel;
-        RelNext.d.a++;
-        macho::RelocationEntry RENext = getRelocation(RelNext);
+        moveRelocationNext(RelNext);
+        MachO::any_relocation_info RENext = getRelocation(RelNext);
 
-        // X86_64_SUBTRACTOR must be followed by a relocation of type
+        // X86_64_RELOC_SUBTRACTOR must be followed by a relocation of type
         // X86_64_RELOC_UNSIGNED.
         // NOTE: Scattered relocations don't exist on x86_64.
         unsigned RType = getAnyRelocationType(RENext);
-        if (RType != 0)
+        if (RType != MachO::X86_64_RELOC_UNSIGNED)
           report_fatal_error("Expected X86_64_RELOC_UNSIGNED after "
                              "X86_64_RELOC_SUBTRACTOR.");
 
-        // The X86_64_RELOC_UNSIGNED contains the minuend symbol,
-        // X86_64_SUBTRACTOR contains to the subtrahend.
+        // The X86_64_RELOC_UNSIGNED contains the minuend symbol;
+        // X86_64_RELOC_SUBTRACTOR contains the subtrahend.
         printRelocationTargetName(this, RENext, fmt);
         fmt << "-";
         printRelocationTargetName(this, RE, fmt);
         break;
       }
-      case macho::RIT_X86_64_TLV:
+      case MachO::X86_64_RELOC_TLV:
         printRelocationTargetName(this, RE, fmt);
         fmt << "@TLV";
         if (isPCRel) fmt << "P";
         break;
-      case macho::RIT_X86_64_Signed1: // X86_64_RELOC_SIGNED1
+      case MachO::X86_64_RELOC_SIGNED_1:
         printRelocationTargetName(this, RE, fmt);
         fmt << "-1";
         break;
-      case macho::RIT_X86_64_Signed2: // X86_64_RELOC_SIGNED2
+      case MachO::X86_64_RELOC_SIGNED_2:
         printRelocationTargetName(this, RE, fmt);
         fmt << "-2";
         break;
-      case macho::RIT_X86_64_Signed4: // X86_64_RELOC_SIGNED4
+      case MachO::X86_64_RELOC_SIGNED_4:
         printRelocationTargetName(this, RE, fmt);
         fmt << "-4";
         break;
@@ -1063,18 +1015,18 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
              Arch == Triple::ppc) {
     // Generic relocation types...
     switch (Type) {
-      case macho::RIT_Pair: // GENERIC_RELOC_PAIR - prints no info
+      case MachO::GENERIC_RELOC_PAIR: // prints no info
         return object_error::success;
-      case macho::RIT_Difference: { // GENERIC_RELOC_SECTDIFF
+      case MachO::GENERIC_RELOC_SECTDIFF: {
         DataRefImpl RelNext = Rel;
-        RelNext.d.a++;
-        macho::RelocationEntry RENext = getRelocation(RelNext);
+        moveRelocationNext(RelNext);
+        MachO::any_relocation_info RENext = getRelocation(RelNext);
 
         // X86 sect diff's must be followed by a relocation of type
         // GENERIC_RELOC_PAIR.
         unsigned RType = getAnyRelocationType(RENext);
 
-        if (RType != 1)
+        if (RType != MachO::GENERIC_RELOC_PAIR)
           report_fatal_error("Expected GENERIC_RELOC_PAIR after "
                              "GENERIC_RELOC_SECTDIFF.");
 
@@ -1086,18 +1038,16 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
     }
 
     if (Arch == Triple::x86 || Arch == Triple::ppc) {
-      // All X86 relocations that need special printing were already
-      // handled in the generic code.
       switch (Type) {
-        case macho::RIT_Generic_LocalDifference:{// GENERIC_RELOC_LOCAL_SECTDIFF
+        case MachO::GENERIC_RELOC_LOCAL_SECTDIFF: {
           DataRefImpl RelNext = Rel;
-          RelNext.d.a++;
-          macho::RelocationEntry RENext = getRelocation(RelNext);
+          moveRelocationNext(RelNext);
+          MachO::any_relocation_info RENext = getRelocation(RelNext);
 
           // X86 sect diff's must be followed by a relocation of type
           // GENERIC_RELOC_PAIR.
           unsigned RType = getAnyRelocationType(RENext);
-          if (RType != 1)
+          if (RType != MachO::GENERIC_RELOC_PAIR)
             report_fatal_error("Expected GENERIC_RELOC_PAIR after "
                                "GENERIC_RELOC_LOCAL_SECTDIFF.");
 
@@ -1106,7 +1056,7 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
           printRelocationTargetName(this, RENext, fmt);
           break;
         }
-        case macho::RIT_Generic_TLV: {
+        case MachO::GENERIC_RELOC_TLV: {
           printRelocationTargetName(this, RE, fmt);
           fmt << "@TLV";
           if (IsPCRel) fmt << "P";
@@ -1117,8 +1067,8 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
       }
     } else { // ARM-specific relocations
       switch (Type) {
-        case macho::RIT_ARM_Half:             // ARM_RELOC_HALF
-        case macho::RIT_ARM_HalfDifference: { // ARM_RELOC_HALF_SECTDIFF
+        case MachO::ARM_RELOC_HALF:
+        case MachO::ARM_RELOC_HALF_SECTDIFF: {
           // Half relocations steal a bit from the length field to encode
           // whether this is an upper16 or a lower16 relocation.
           bool isUpper = getAnyRelocationLength(RE) >> 1;
@@ -1130,15 +1080,15 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
           printRelocationTargetName(this, RE, fmt);
 
           DataRefImpl RelNext = Rel;
-          RelNext.d.a++;
-          macho::RelocationEntry RENext = getRelocation(RelNext);
+          moveRelocationNext(RelNext);
+          MachO::any_relocation_info RENext = getRelocation(RelNext);
 
           // ARM half relocs must be followed by a relocation of type
           // ARM_RELOC_PAIR.
           unsigned RType = getAnyRelocationType(RENext);
-          if (RType != 1)
+          if (RType != MachO::ARM_RELOC_PAIR)
             report_fatal_error("Expected ARM_RELOC_PAIR after "
-                               "GENERIC_RELOC_HALF");
+                               "ARM_RELOC_HALF");
 
           // NOTE: The half of the target virtual address is stashed in the
           // address field of the secondary relocation, but we can't reverse
@@ -1147,7 +1097,7 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
 
           // ARM_RELOC_HALF_SECTDIFF encodes the second section in the
           // symbol/section pointer of the follow-on relocation.
-          if (Type == macho::RIT_ARM_HalfDifference) {
+          if (Type == MachO::ARM_RELOC_HALF_SECTDIFF) {
             fmt << "-";
             printRelocationTargetName(this, RENext, fmt);
           }
@@ -1179,16 +1129,16 @@ MachOObjectFile::getRelocationHidden(DataRefImpl Rel, bool &Result) const {
   // On arches that use the generic relocations, GENERIC_RELOC_PAIR
   // is always hidden.
   if (Arch == Triple::x86 || Arch == Triple::arm || Arch == Triple::ppc) {
-    if (Type == macho::RIT_Pair) Result = true;
+    if (Type == MachO::GENERIC_RELOC_PAIR) Result = true;
   } else if (Arch == Triple::x86_64) {
     // On x86_64, X86_64_RELOC_UNSIGNED is hidden only when it follows
     // an X86_64_RELOC_SUBTRACTOR.
-    if (Type == macho::RIT_X86_64_Unsigned && Rel.d.a > 0) {
+    if (Type == MachO::X86_64_RELOC_UNSIGNED && Rel.d.a > 0) {
       DataRefImpl RelPrev = Rel;
       RelPrev.d.a--;
       uint64_t PrevType;
       getRelocationType(RelPrev, PrevType);
-      if (PrevType == macho::RIT_X86_64_Subtractor)
+      if (PrevType == MachO::X86_64_RELOC_SUBTRACTOR)
         Result = true;
     }
   }
@@ -1206,58 +1156,48 @@ error_code MachOObjectFile::getLibraryPath(DataRefImpl LibData,
   report_fatal_error("Needed libraries unimplemented in MachOObjectFile");
 }
 
-symbol_iterator MachOObjectFile::begin_symbols() const {
+basic_symbol_iterator MachOObjectFile::symbol_begin_impl() const {
   DataRefImpl DRI;
   if (!SymtabLoadCmd)
-    return symbol_iterator(SymbolRef(DRI, this));
+    return basic_symbol_iterator(SymbolRef(DRI, this));
 
-  macho::SymtabLoadCommand Symtab = getSymtabLoadCommand();
-  DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Symtab.SymbolTableOffset));
-  return symbol_iterator(SymbolRef(DRI, this));
+  MachO::symtab_command Symtab = getSymtabLoadCommand();
+  DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Symtab.symoff));
+  return basic_symbol_iterator(SymbolRef(DRI, this));
 }
 
-symbol_iterator MachOObjectFile::end_symbols() const {
+basic_symbol_iterator MachOObjectFile::symbol_end_impl() const {
   DataRefImpl DRI;
   if (!SymtabLoadCmd)
-    return symbol_iterator(SymbolRef(DRI, this));
+    return basic_symbol_iterator(SymbolRef(DRI, this));
 
-  macho::SymtabLoadCommand Symtab = getSymtabLoadCommand();
+  MachO::symtab_command Symtab = getSymtabLoadCommand();
   unsigned SymbolTableEntrySize = is64Bit() ?
-    sizeof(macho::Symbol64TableEntry) :
-    sizeof(macho::SymbolTableEntry);
-  unsigned Offset = Symtab.SymbolTableOffset +
-    Symtab.NumSymbolTableEntries * SymbolTableEntrySize;
+    sizeof(MachO::nlist_64) :
+    sizeof(MachO::nlist);
+  unsigned Offset = Symtab.symoff +
+    Symtab.nsyms * SymbolTableEntrySize;
   DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Offset));
-  return symbol_iterator(SymbolRef(DRI, this));
+  return basic_symbol_iterator(SymbolRef(DRI, this));
 }
 
-symbol_iterator MachOObjectFile::begin_dynamic_symbols() const {
-  // TODO: implement
-  report_fatal_error("Dynamic symbols unimplemented in MachOObjectFile");
-}
-
-symbol_iterator MachOObjectFile::end_dynamic_symbols() const {
-  // TODO: implement
-  report_fatal_error("Dynamic symbols unimplemented in MachOObjectFile");
-}
-
-section_iterator MachOObjectFile::begin_sections() const {
+section_iterator MachOObjectFile::section_begin() const {
   DataRefImpl DRI;
   return section_iterator(SectionRef(DRI, this));
 }
 
-section_iterator MachOObjectFile::end_sections() const {
+section_iterator MachOObjectFile::section_end() const {
   DataRefImpl DRI;
   DRI.d.a = Sections.size();
   return section_iterator(SectionRef(DRI, this));
 }
 
-library_iterator MachOObjectFile::begin_libraries_needed() const {
+library_iterator MachOObjectFile::needed_library_begin() const {
   // TODO: implement
   report_fatal_error("Needed libraries unimplemented in MachOObjectFile");
 }
 
-library_iterator MachOObjectFile::end_libraries_needed() const {
+library_iterator MachOObjectFile::needed_library_end() const {
   // TODO: implement
   report_fatal_error("Needed libraries unimplemented in MachOObjectFile");
 }
@@ -1270,28 +1210,30 @@ StringRef MachOObjectFile::getFileFormatName() const {
   unsigned CPUType = getCPUType(this);
   if (!is64Bit()) {
     switch (CPUType) {
-    case llvm::MachO::CPUTypeI386:
+    case llvm::MachO::CPU_TYPE_I386:
       return "Mach-O 32-bit i386";
-    case llvm::MachO::CPUTypeARM:
+    case llvm::MachO::CPU_TYPE_ARM:
       return "Mach-O arm";
-    case llvm::MachO::CPUTypePowerPC:
+    case llvm::MachO::CPU_TYPE_POWERPC:
       return "Mach-O 32-bit ppc";
     default:
-      assert((CPUType & llvm::MachO::CPUArchABI64) == 0 &&
+      assert((CPUType & llvm::MachO::CPU_ARCH_ABI64) == 0 &&
              "64-bit object file when we're not 64-bit?");
       return "Mach-O 32-bit unknown";
     }
   }
 
   // Make sure the cpu type has the correct mask.
-  assert((CPUType & llvm::MachO::CPUArchABI64)
-         == llvm::MachO::CPUArchABI64 &&
+  assert((CPUType & llvm::MachO::CPU_ARCH_ABI64)
+         == llvm::MachO::CPU_ARCH_ABI64 &&
          "32-bit object file when we're 64-bit?");
 
   switch (CPUType) {
-  case llvm::MachO::CPUTypeX86_64:
+  case llvm::MachO::CPU_TYPE_X86_64:
     return "Mach-O 64-bit x86-64";
-  case llvm::MachO::CPUTypePowerPC64:
+  case llvm::MachO::CPU_TYPE_ARM64:
+    return "Mach-O arm64";
+  case llvm::MachO::CPU_TYPE_POWERPC64:
     return "Mach-O 64-bit ppc64";
   default:
     return "Mach-O 64-bit unknown";
@@ -1300,15 +1242,17 @@ StringRef MachOObjectFile::getFileFormatName() const {
 
 Triple::ArchType MachOObjectFile::getArch(uint32_t CPUType) {
   switch (CPUType) {
-  case llvm::MachO::CPUTypeI386:
+  case llvm::MachO::CPU_TYPE_I386:
     return Triple::x86;
-  case llvm::MachO::CPUTypeX86_64:
+  case llvm::MachO::CPU_TYPE_X86_64:
     return Triple::x86_64;
-  case llvm::MachO::CPUTypeARM:
+  case llvm::MachO::CPU_TYPE_ARM:
     return Triple::arm;
-  case llvm::MachO::CPUTypePowerPC:
+  case llvm::MachO::CPU_TYPE_ARM64:
+    return Triple::arm64;
+  case llvm::MachO::CPU_TYPE_POWERPC:
     return Triple::ppc;
-  case llvm::MachO::CPUTypePowerPC64:
+  case llvm::MachO::CPU_TYPE_POWERPC64:
     return Triple::ppc64;
   default:
     return Triple::UnknownArch;
@@ -1324,16 +1268,16 @@ StringRef MachOObjectFile::getLoadName() const {
   report_fatal_error("get_load_name() unimplemented in MachOObjectFile");
 }
 
-relocation_iterator MachOObjectFile::getSectionRelBegin(unsigned Index) const {
+relocation_iterator MachOObjectFile::section_rel_begin(unsigned Index) const {
   DataRefImpl DRI;
   DRI.d.a = Index;
-  return getSectionRelBegin(DRI);
+  return section_rel_begin(DRI);
 }
 
-relocation_iterator MachOObjectFile::getSectionRelEnd(unsigned Index) const {
+relocation_iterator MachOObjectFile::section_rel_end(unsigned Index) const {
   DataRefImpl DRI;
   DRI.d.a = Index;
-  return getSectionRelEnd(DRI);
+  return section_rel_end(DRI);
 }
 
 dice_iterator MachOObjectFile::begin_dices() const {
@@ -1341,8 +1285,8 @@ dice_iterator MachOObjectFile::begin_dices() const {
   if (!DataInCodeLoadCmd)
     return dice_iterator(DiceRef(DRI, this));
 
-  macho::LinkeditDataLoadCommand DicLC = getDataInCodeLoadCommand();
-  DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, DicLC.DataOffset));
+  MachO::linkedit_data_command DicLC = getDataInCodeLoadCommand();
+  DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, DicLC.dataoff));
   return dice_iterator(DiceRef(DRI, this));
 }
 
@@ -1351,8 +1295,8 @@ dice_iterator MachOObjectFile::end_dices() const {
   if (!DataInCodeLoadCmd)
     return dice_iterator(DiceRef(DRI, this));
 
-  macho::LinkeditDataLoadCommand DicLC = getDataInCodeLoadCommand();
-  unsigned Offset = DicLC.DataOffset + DicLC.DataSize;
+  MachO::linkedit_data_command DicLC = getDataInCodeLoadCommand();
+  unsigned Offset = DicLC.dataoff + DicLC.datasize;
   DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Offset));
   return dice_iterator(DiceRef(DRI, this));
 }
@@ -1365,82 +1309,84 @@ MachOObjectFile::getSectionFinalSegmentName(DataRefImpl Sec) const {
 
 ArrayRef<char>
 MachOObjectFile::getSectionRawName(DataRefImpl Sec) const {
-  const SectionBase *Base =
-    reinterpret_cast<const SectionBase*>(Sections[Sec.d.a]);
-  return ArrayRef<char>(Base->Name);
+  const section_base *Base =
+    reinterpret_cast<const section_base *>(Sections[Sec.d.a]);
+  return ArrayRef<char>(Base->sectname);
 }
 
 ArrayRef<char>
 MachOObjectFile::getSectionRawFinalSegmentName(DataRefImpl Sec) const {
-  const SectionBase *Base =
-    reinterpret_cast<const SectionBase*>(Sections[Sec.d.a]);
-  return ArrayRef<char>(Base->SegmentName);
+  const section_base *Base =
+    reinterpret_cast<const section_base *>(Sections[Sec.d.a]);
+  return ArrayRef<char>(Base->segname);
 }
 
 bool
-MachOObjectFile::isRelocationScattered(const macho::RelocationEntry &RE)
+MachOObjectFile::isRelocationScattered(const MachO::any_relocation_info &RE)
   const {
-  if (getCPUType(this) == llvm::MachO::CPUTypeX86_64)
+  if (getCPUType(this) == MachO::CPU_TYPE_X86_64)
     return false;
-  return getPlainRelocationAddress(RE) & macho::RF_Scattered;
+  return getPlainRelocationAddress(RE) & MachO::R_SCATTERED;
 }
 
 unsigned MachOObjectFile::getPlainRelocationSymbolNum(
-    const macho::RelocationEntry &RE) const {
+    const MachO::any_relocation_info &RE) const {
   if (isLittleEndian())
-    return RE.Word1 & 0xffffff;
-  return RE.Word1 >> 8;
+    return RE.r_word1 & 0xffffff;
+  return RE.r_word1 >> 8;
 }
 
 bool MachOObjectFile::getPlainRelocationExternal(
-    const macho::RelocationEntry &RE) const {
+    const MachO::any_relocation_info &RE) const {
   if (isLittleEndian())
-    return (RE.Word1 >> 27) & 1;
-  return (RE.Word1 >> 4) & 1;
+    return (RE.r_word1 >> 27) & 1;
+  return (RE.r_word1 >> 4) & 1;
 }
 
 bool MachOObjectFile::getScatteredRelocationScattered(
-    const macho::RelocationEntry &RE) const {
-  return RE.Word0 >> 31;
+    const MachO::any_relocation_info &RE) const {
+  return RE.r_word0 >> 31;
 }
 
 uint32_t MachOObjectFile::getScatteredRelocationValue(
-    const macho::RelocationEntry &RE) const {
-  return RE.Word1;
+    const MachO::any_relocation_info &RE) const {
+  return RE.r_word1;
 }
 
 unsigned MachOObjectFile::getAnyRelocationAddress(
-    const macho::RelocationEntry &RE) const {
+    const MachO::any_relocation_info &RE) const {
   if (isRelocationScattered(RE))
     return getScatteredRelocationAddress(RE);
   return getPlainRelocationAddress(RE);
 }
 
-unsigned
-MachOObjectFile::getAnyRelocationPCRel(const macho::RelocationEntry &RE) const {
+unsigned MachOObjectFile::getAnyRelocationPCRel(
+    const MachO::any_relocation_info &RE) const {
   if (isRelocationScattered(RE))
     return getScatteredRelocationPCRel(this, RE);
   return getPlainRelocationPCRel(this, RE);
 }
 
 unsigned MachOObjectFile::getAnyRelocationLength(
-    const macho::RelocationEntry &RE) const {
+    const MachO::any_relocation_info &RE) const {
   if (isRelocationScattered(RE))
     return getScatteredRelocationLength(RE);
   return getPlainRelocationLength(this, RE);
 }
 
 unsigned
-MachOObjectFile::getAnyRelocationType(const macho::RelocationEntry &RE) const {
+MachOObjectFile::getAnyRelocationType(
+                                   const MachO::any_relocation_info &RE) const {
   if (isRelocationScattered(RE))
     return getScatteredRelocationType(RE);
   return getPlainRelocationType(this, RE);
 }
 
 SectionRef
-MachOObjectFile::getRelocationSection(const macho::RelocationEntry &RE) const {
+MachOObjectFile::getRelocationSection(
+                                   const MachO::any_relocation_info &RE) const {
   if (isRelocationScattered(RE) || getPlainRelocationExternal(RE))
-    return *end_sections();
+    return *section_end();
   unsigned SecNum = getPlainRelocationSymbolNum(RE) - 1;
   DataRefImpl DRI;
   DRI.d.a = SecNum;
@@ -1451,133 +1397,150 @@ MachOObjectFile::LoadCommandInfo
 MachOObjectFile::getFirstLoadCommandInfo() const {
   MachOObjectFile::LoadCommandInfo Load;
 
-  unsigned HeaderSize = is64Bit() ? macho::Header64Size : macho::Header32Size;
+  unsigned HeaderSize = is64Bit() ? sizeof(MachO::mach_header_64) :
+                                    sizeof(MachO::mach_header);
   Load.Ptr = getPtr(this, HeaderSize);
-  Load.C = getStruct<macho::LoadCommand>(this, Load.Ptr);
+  Load.C = getStruct<MachO::load_command>(this, Load.Ptr);
   return Load;
 }
 
 MachOObjectFile::LoadCommandInfo
 MachOObjectFile::getNextLoadCommandInfo(const LoadCommandInfo &L) const {
   MachOObjectFile::LoadCommandInfo Next;
-  Next.Ptr = L.Ptr + L.C.Size;
-  Next.C = getStruct<macho::LoadCommand>(this, Next.Ptr);
+  Next.Ptr = L.Ptr + L.C.cmdsize;
+  Next.C = getStruct<MachO::load_command>(this, Next.Ptr);
   return Next;
 }
 
-macho::Section MachOObjectFile::getSection(DataRefImpl DRI) const {
-  return getStruct<macho::Section>(this, Sections[DRI.d.a]);
+MachO::section MachOObjectFile::getSection(DataRefImpl DRI) const {
+  return getStruct<MachO::section>(this, Sections[DRI.d.a]);
 }
 
-macho::Section64 MachOObjectFile::getSection64(DataRefImpl DRI) const {
-  return getStruct<macho::Section64>(this, Sections[DRI.d.a]);
+MachO::section_64 MachOObjectFile::getSection64(DataRefImpl DRI) const {
+  return getStruct<MachO::section_64>(this, Sections[DRI.d.a]);
 }
 
-macho::Section MachOObjectFile::getSection(const LoadCommandInfo &L,
+MachO::section MachOObjectFile::getSection(const LoadCommandInfo &L,
                                            unsigned Index) const {
   const char *Sec = getSectionPtr(this, L, Index);
-  return getStruct<macho::Section>(this, Sec);
+  return getStruct<MachO::section>(this, Sec);
 }
 
-macho::Section64 MachOObjectFile::getSection64(const LoadCommandInfo &L,
-                                               unsigned Index) const {
+MachO::section_64 MachOObjectFile::getSection64(const LoadCommandInfo &L,
+                                                unsigned Index) const {
   const char *Sec = getSectionPtr(this, L, Index);
-  return getStruct<macho::Section64>(this, Sec);
+  return getStruct<MachO::section_64>(this, Sec);
 }
 
-macho::SymbolTableEntry
+MachO::nlist
 MachOObjectFile::getSymbolTableEntry(DataRefImpl DRI) const {
   const char *P = reinterpret_cast<const char *>(DRI.p);
-  return getStruct<macho::SymbolTableEntry>(this, P);
+  return getStruct<MachO::nlist>(this, P);
 }
 
-macho::Symbol64TableEntry
+MachO::nlist_64
 MachOObjectFile::getSymbol64TableEntry(DataRefImpl DRI) const {
   const char *P = reinterpret_cast<const char *>(DRI.p);
-  return getStruct<macho::Symbol64TableEntry>(this, P);
+  return getStruct<MachO::nlist_64>(this, P);
 }
 
-macho::LinkeditDataLoadCommand MachOObjectFile::getLinkeditDataLoadCommand(
-    const MachOObjectFile::LoadCommandInfo &L) const {
-  return getStruct<macho::LinkeditDataLoadCommand>(this, L.Ptr);
+MachO::linkedit_data_command
+MachOObjectFile::getLinkeditDataLoadCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::linkedit_data_command>(this, L.Ptr);
 }
 
-macho::SegmentLoadCommand
+MachO::segment_command
 MachOObjectFile::getSegmentLoadCommand(const LoadCommandInfo &L) const {
-  return getStruct<macho::SegmentLoadCommand>(this, L.Ptr);
+  return getStruct<MachO::segment_command>(this, L.Ptr);
 }
 
-macho::Segment64LoadCommand
+MachO::segment_command_64
 MachOObjectFile::getSegment64LoadCommand(const LoadCommandInfo &L) const {
-  return getStruct<macho::Segment64LoadCommand>(this, L.Ptr);
+  return getStruct<MachO::segment_command_64>(this, L.Ptr);
 }
 
-macho::LinkerOptionsLoadCommand
+MachO::linker_options_command
 MachOObjectFile::getLinkerOptionsLoadCommand(const LoadCommandInfo &L) const {
-  return getStruct<macho::LinkerOptionsLoadCommand>(this, L.Ptr);
+  return getStruct<MachO::linker_options_command>(this, L.Ptr);
 }
 
-macho::RelocationEntry
+MachO::version_min_command
+MachOObjectFile::getVersionMinLoadCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::version_min_command>(this, L.Ptr);
+}
+
+MachO::any_relocation_info
 MachOObjectFile::getRelocation(DataRefImpl Rel) const {
-  const char *P = reinterpret_cast<const char *>(Rel.p);
-  return getStruct<macho::RelocationEntry>(this, P);
+  DataRefImpl Sec;
+  Sec.d.a = Rel.d.a;
+  uint32_t Offset;
+  if (is64Bit()) {
+    MachO::section_64 Sect = getSection64(Sec);
+    Offset = Sect.reloff;
+  } else {
+    MachO::section Sect = getSection(Sec);
+    Offset = Sect.reloff;
+  }
+
+  auto P = reinterpret_cast<const MachO::any_relocation_info *>(
+      getPtr(this, Offset)) + Rel.d.b;
+  return getStruct<MachO::any_relocation_info>(
+      this, reinterpret_cast<const char *>(P));
 }
 
-macho::DataInCodeTableEntry
+MachO::data_in_code_entry
 MachOObjectFile::getDice(DataRefImpl Rel) const {
   const char *P = reinterpret_cast<const char *>(Rel.p);
-  return getStruct<macho::DataInCodeTableEntry>(this, P);
+  return getStruct<MachO::data_in_code_entry>(this, P);
 }
 
-macho::Header MachOObjectFile::getHeader() const {
-  return getStruct<macho::Header>(this, getPtr(this, 0));
+MachO::mach_header MachOObjectFile::getHeader() const {
+  return getStruct<MachO::mach_header>(this, getPtr(this, 0));
 }
 
-macho::Header64Ext MachOObjectFile::getHeader64Ext() const {
-  return
-    getStruct<macho::Header64Ext>(this, getPtr(this, sizeof(macho::Header)));
+MachO::mach_header_64 MachOObjectFile::getHeader64() const {
+  return getStruct<MachO::mach_header_64>(this, getPtr(this, 0));
 }
 
-macho::IndirectSymbolTableEntry MachOObjectFile::getIndirectSymbolTableEntry(
-                                          const macho::DysymtabLoadCommand &DLC,
-                                          unsigned Index) const {
-  uint64_t Offset = DLC.IndirectSymbolTableOffset +
-    Index * sizeof(macho::IndirectSymbolTableEntry);
-  return getStruct<macho::IndirectSymbolTableEntry>(this, getPtr(this, Offset));
+uint32_t MachOObjectFile::getIndirectSymbolTableEntry(
+                                             const MachO::dysymtab_command &DLC,
+                                             unsigned Index) const {
+  uint64_t Offset = DLC.indirectsymoff + Index * sizeof(uint32_t);
+  return getStruct<uint32_t>(this, getPtr(this, Offset));
 }
 
-macho::DataInCodeTableEntry
+MachO::data_in_code_entry
 MachOObjectFile::getDataInCodeTableEntry(uint32_t DataOffset,
                                          unsigned Index) const {
-  uint64_t Offset = DataOffset + Index * sizeof(macho::DataInCodeTableEntry);
-  return getStruct<macho::DataInCodeTableEntry>(this, getPtr(this, Offset));
+  uint64_t Offset = DataOffset + Index * sizeof(MachO::data_in_code_entry);
+  return getStruct<MachO::data_in_code_entry>(this, getPtr(this, Offset));
 }
 
-macho::SymtabLoadCommand MachOObjectFile::getSymtabLoadCommand() const {
-  return getStruct<macho::SymtabLoadCommand>(this, SymtabLoadCmd);
+MachO::symtab_command MachOObjectFile::getSymtabLoadCommand() const {
+  return getStruct<MachO::symtab_command>(this, SymtabLoadCmd);
 }
 
-macho::DysymtabLoadCommand MachOObjectFile::getDysymtabLoadCommand() const {
-  return getStruct<macho::DysymtabLoadCommand>(this, DysymtabLoadCmd);
+MachO::dysymtab_command MachOObjectFile::getDysymtabLoadCommand() const {
+  return getStruct<MachO::dysymtab_command>(this, DysymtabLoadCmd);
 }
 
-macho::LinkeditDataLoadCommand
+MachO::linkedit_data_command
 MachOObjectFile::getDataInCodeLoadCommand() const {
   if (DataInCodeLoadCmd)
-    return getStruct<macho::LinkeditDataLoadCommand>(this, DataInCodeLoadCmd);
+    return getStruct<MachO::linkedit_data_command>(this, DataInCodeLoadCmd);
 
   // If there is no DataInCodeLoadCmd return a load command with zero'ed fields.
-  macho::LinkeditDataLoadCommand Cmd;
-  Cmd.Type = macho::LCT_DataInCode;
-  Cmd.Size = macho::LinkeditLoadCommandSize;
-  Cmd.DataOffset = 0;
-  Cmd.DataSize = 0;
+  MachO::linkedit_data_command Cmd;
+  Cmd.cmd = MachO::LC_DATA_IN_CODE;
+  Cmd.cmdsize = sizeof(MachO::linkedit_data_command);
+  Cmd.dataoff = 0;
+  Cmd.datasize = 0;
   return Cmd;
 }
 
 StringRef MachOObjectFile::getStringTableData() const {
-  macho::SymtabLoadCommand S = getSymtabLoadCommand();
-  return getData().substr(S.StringTableOffset, S.StringTableSize);
+  MachO::symtab_command S = getSymtabLoadCommand();
+  return getData().substr(S.stroff, S.strsize);
 }
 
 bool MachOObjectFile::is64Bit() const {
@@ -1597,26 +1560,27 @@ void MachOObjectFile::ReadULEB128s(uint64_t Index,
   }
 }
 
-ObjectFile *ObjectFile::createMachOObjectFile(MemoryBuffer *Buffer) {
+ErrorOr<ObjectFile *> ObjectFile::createMachOObjectFile(MemoryBuffer *Buffer,
+                                                        bool BufferOwned) {
   StringRef Magic = Buffer->getBuffer().slice(0, 4);
-  error_code ec;
-  OwningPtr<ObjectFile> Ret;
+  error_code EC;
+  std::unique_ptr<MachOObjectFile> Ret;
   if (Magic == "\xFE\xED\xFA\xCE")
-    Ret.reset(new MachOObjectFile(Buffer, false, false, ec));
+    Ret.reset(new MachOObjectFile(Buffer, false, false, EC, BufferOwned));
   else if (Magic == "\xCE\xFA\xED\xFE")
-    Ret.reset(new MachOObjectFile(Buffer, true, false, ec));
+    Ret.reset(new MachOObjectFile(Buffer, true, false, EC, BufferOwned));
   else if (Magic == "\xFE\xED\xFA\xCF")
-    Ret.reset(new MachOObjectFile(Buffer, false, true, ec));
+    Ret.reset(new MachOObjectFile(Buffer, false, true, EC, BufferOwned));
   else if (Magic == "\xCF\xFA\xED\xFE")
-    Ret.reset(new MachOObjectFile(Buffer, true, true, ec));
+    Ret.reset(new MachOObjectFile(Buffer, true, true, EC, BufferOwned));
   else {
     delete Buffer;
-    return NULL;
+    return object_error::parse_failed;
   }
 
-  if (ec)
-    return NULL;
-  return Ret.take();
+  if (EC)
+    return EC;
+  return Ret.release();
 }
 
 } // end namespace object

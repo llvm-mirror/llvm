@@ -14,11 +14,9 @@
 #ifndef MIPSSUBTARGET_H
 #define MIPSSUBTARGET_H
 
-#include "MCTargetDesc/MipsReginfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
-
 #include <string>
 
 #define GET_SUBTARGETINFO_HEADER
@@ -39,10 +37,7 @@ public:
   };
 
 protected:
-
-  enum MipsArchEnum {
-    Mips32, Mips32r2, Mips64, Mips64r2
-  };
+  enum MipsArchEnum { Mips32, Mips32r2, Mips4, Mips64, Mips64r2 };
 
   // Mips architecture version
   MipsArchEnum MipsArchVersion;
@@ -66,6 +61,9 @@ protected:
 
   // HasVFPU - Processor has a vector floating point unit.
   bool HasVFPU;
+
+  // CPU supports cnMIPS (Cavium Networks Octeon CPU).
+  bool HasCnMips;
 
   // isLinux - Target system is Linux. Is false we consider ELFOS for now.
   bool IsLinux;
@@ -118,9 +116,6 @@ protected:
 
   InstrItineraryData InstrItins;
 
-  // The instance to the register info section object
-  MipsReginfo MRI;
-
   // Relocation Model
   Reloc::Model RM;
 
@@ -130,6 +125,7 @@ protected:
 
   MipsTargetMachine *TM;
 
+  Triple TargetTriple;
 public:
   virtual bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
                                      AntiDepBreakMode& Mode,
@@ -158,8 +154,11 @@ public:
   bool hasMips64() const { return MipsArchVersion >= Mips64; }
   bool hasMips64r2() const { return MipsArchVersion == Mips64r2; }
 
+  bool hasCnMips() const { return HasCnMips; }
+
   bool isLittle() const { return IsLittle; }
   bool isFP64bit() const { return IsFP64bit; }
+  bool isNotFP64bit() const { return !IsFP64bit; }
   bool isGP64bit() const { return IsGP64bit; }
   bool isGP32bit() const { return !IsGP64bit; }
   bool isSingleFloat() const { return IsSingleFloat; }
@@ -191,12 +190,19 @@ public:
 
   bool hasStandardEncoding() const { return !inMips16Mode(); }
 
+  bool mipsSEUsesSoftFloat() const;
+
+  bool enableLongBranchPass() const {
+    return hasStandardEncoding() || allowMixed16_32();
+  }
+
   /// Features related to the presence of specific instructions.
   bool hasSEInReg()   const { return HasSEInReg; }
   bool hasCondMov()   const { return HasCondMov; }
   bool hasSwap()      const { return HasSwap; }
   bool hasBitCount()  const { return HasBitCount; }
   bool hasFPIdx()     const { return HasFPIdx; }
+  bool hasExtractInsert() const { return !inMips16Mode() && hasMips32r2(); }
 
   const InstrItineraryData &getInstrItineraryData() const { return InstrItins; }
   bool allowMixed16_32() const { return inMips16ModeDefault() |
@@ -204,8 +210,15 @@ public:
 
   bool os16() const { return Os16;};
 
-  // Grab MipsRegInfo object
-  const MipsReginfo &getMReginfo() const { return MRI; }
+  bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
+  bool isNotTargetNaCl() const { return !TargetTriple.isOSNaCl(); }
+
+// for now constant islands are on for the whole compilation unit but we only
+// really use them if in addition we are in mips16 mode
+//
+static bool useConstantIslands();
+
+  unsigned stackAlignment() const { return hasMips64() ? 16 : 8; }
 
   // Grab relocation model
   Reloc::Model getRelocationModel() const {return RM;}

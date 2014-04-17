@@ -17,10 +17,12 @@
 #ifndef LLVM_ADT_STLEXTRAS_H
 #define LLVM_ADT_STLEXTRAS_H
 
+#include "llvm/Support/Compiler.h"
 #include <cstddef> // for std::size_t
 #include <cstdlib> // for qsort
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <utility> // for std::pair
 
 namespace llvm {
@@ -95,8 +97,6 @@ public:
 
   inline explicit mapped_iterator(const RootIt &I, UnaryFunc F)
     : current(I), Fn(F) {}
-  inline mapped_iterator(const mapped_iterator &It)
-    : current(It.current), Fn(It.Fn) {}
 
   inline value_type operator*() const {   // All this work to do this
     return Fn(*current);         // little change
@@ -141,97 +141,33 @@ inline mapped_iterator<ItTy, FuncTy> map_iterator(const ItTy &I, FuncTy F) {
   return mapped_iterator<ItTy, FuncTy>(I, F);
 }
 
-
-// next/prior - These functions unlike std::advance do not modify the
-// passed iterator but return a copy.
-//
-// next(myIt) returns copy of myIt incremented once
-// next(myIt, n) returns copy of myIt incremented n times
-// prior(myIt) returns copy of myIt decremented once
-// prior(myIt, n) returns copy of myIt decremented n times
-
-template <typename ItTy, typename Dist>
-inline ItTy next(ItTy it, Dist n)
-{
-  std::advance(it, n);
-  return it;
-}
-
-template <typename ItTy>
-inline ItTy next(ItTy it)
-{
-  return ++it;
-}
-
-template <typename ItTy, typename Dist>
-inline ItTy prior(ItTy it, Dist n)
-{
-  std::advance(it, -n);
-  return it;
-}
-
-template <typename ItTy>
-inline ItTy prior(ItTy it)
-{
-  return --it;
-}
-
 //===----------------------------------------------------------------------===//
 //     Extra additions to <utility>
 //===----------------------------------------------------------------------===//
 
-// tie - this function ties two objects and returns a temporary object
-// that is assignable from a std::pair. This can be used to make code
-// more readable when using values returned from functions bundled in
-// a std::pair. Since an example is worth 1000 words:
-//
-// typedef std::map<int, int> Int2IntMap;
-//
-// Int2IntMap myMap;
-// Int2IntMap::iterator where;
-// bool inserted;
-// tie(where, inserted) = myMap.insert(std::make_pair(123,456));
-//
-// if (inserted)
-//   // do stuff
-// else
-//   // do other stuff
-template <typename T1, typename T2>
-struct tier {
-  typedef T1 &first_type;
-  typedef T2 &second_type;
-
-  first_type first;
-  second_type second;
-
-  tier(first_type f, second_type s) : first(f), second(s) { }
-  tier& operator=(const std::pair<T1, T2>& p) {
-    first = p.first;
-    second = p.second;
-    return *this;
+/// \brief Function object to check whether the first component of a std::pair
+/// compares less than the first component of another std::pair.
+struct less_first {
+  template <typename T> bool operator()(const T &lhs, const T &rhs) const {
+    return lhs.first < rhs.first;
   }
 };
 
-template <typename T1, typename T2>
-inline tier<T1, T2> tie(T1& f, T2& s) {
-  return tier<T1, T2>(f, s);
-}
+/// \brief Function object to check whether the second component of a std::pair
+/// compares less than the second component of another std::pair.
+struct less_second {
+  template <typename T> bool operator()(const T &lhs, const T &rhs) const {
+    return lhs.second < rhs.second;
+  }
+};
 
 //===----------------------------------------------------------------------===//
 //     Extra additions for arrays
 //===----------------------------------------------------------------------===//
 
-/// Find where an array ends (for ending iterators)
-/// This returns a pointer to the byte immediately
-/// after the end of an array.
-template<class T, std::size_t N>
-inline T *array_endof(T (&x)[N]) {
-  return x+N;
-}
-
 /// Find the length of an array.
-template<class T, std::size_t N>
-inline size_t array_lengthof(T (&)[N]) {
+template <class T, std::size_t N>
+LLVM_CONSTEXPR inline size_t array_lengthof(T (&)[N]) {
   return N;
 }
 
@@ -277,12 +213,16 @@ inline void array_pod_sort(IteratorTy Start, IteratorTy End) {
         get_array_pod_sort_comparator(*Start));
 }
 
-template<class IteratorTy>
-inline void array_pod_sort(IteratorTy Start, IteratorTy End,
-                                  int (*Compare)(const void*, const void*)) {
+template <class IteratorTy>
+inline void array_pod_sort(
+    IteratorTy Start, IteratorTy End,
+    int (*Compare)(
+        const typename std::iterator_traits<IteratorTy>::value_type *,
+        const typename std::iterator_traits<IteratorTy>::value_type *)) {
   // Don't dereference start iterator of empty sequence.
   if (Start == End) return;
-  qsort(&*Start, End-Start, sizeof(*Start), Compare);
+  qsort(&*Start, End - Start, sizeof(*Start),
+        reinterpret_cast<int (*)(const void *, const void *)>(Compare));
 }
 
 //===----------------------------------------------------------------------===//
@@ -306,6 +246,163 @@ void DeleteContainerSeconds(Container &C) {
     delete I->second;
   C.clear();
 }
+
+//===----------------------------------------------------------------------===//
+//     Extra additions to <memory>
+//===----------------------------------------------------------------------===//
+
+#if LLVM_HAS_VARIADIC_TEMPLATES
+
+// Implement make_unique according to N3656.
+
+/// \brief Constructs a `new T()` with the given args and returns a
+///        `unique_ptr<T>` which owns the object.
+///
+/// Example:
+///
+///     auto p = make_unique<int>();
+///     auto p = make_unique<std::tuple<int, int>>(0, 1);
+template <class T, class... Args>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Args &&... args) {
+  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+
+/// \brief Constructs a `new T[n]` with the given args and returns a
+///        `unique_ptr<T[]>` which owns the object.
+///
+/// \param n size of the new array.
+///
+/// Example:
+///
+///     auto p = make_unique<int[]>(2); // value-initializes the array with 0's.
+template <class T>
+typename std::enable_if<std::is_array<T>::value && std::extent<T>::value == 0,
+                        std::unique_ptr<T>>::type
+make_unique(size_t n) {
+  return std::unique_ptr<T>(new typename std::remove_extent<T>::type[n]());
+}
+
+/// This function isn't used and is only here to provide better compile errors.
+template <class T, class... Args>
+typename std::enable_if<std::extent<T>::value != 0>::type
+make_unique(Args &&...) LLVM_DELETED_FUNCTION;
+
+#else
+
+template <class T>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique() {
+  return std::unique_ptr<T>(new T());
+}
+
+template <class T, class Arg1>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1) {
+  return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1)));
+}
+
+template <class T, class Arg1, class Arg2>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3) {
+  return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1),
+                                  std::forward<Arg2>(arg2),
+                                  std::forward<Arg3>(arg3)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3, class Arg4>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
+            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
+            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
+            std::forward<Arg5>(arg5)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
+          class Arg6>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
+            Arg6 &&arg6) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
+            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
+            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
+          class Arg6, class Arg7>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
+            Arg6 &&arg6, Arg7 &&arg7) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
+            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
+            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
+            std::forward<Arg7>(arg7)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
+          class Arg6, class Arg7, class Arg8>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
+            Arg6 &&arg6, Arg7 &&arg7, Arg8 &&arg8) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
+            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
+            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
+            std::forward<Arg7>(arg7), std::forward<Arg8>(arg8)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
+          class Arg6, class Arg7, class Arg8, class Arg9>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
+            Arg6 &&arg6, Arg7 &&arg7, Arg8 &&arg8, Arg9 &&arg9) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
+            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
+            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
+            std::forward<Arg7>(arg7), std::forward<Arg8>(arg8),
+            std::forward<Arg9>(arg9)));
+}
+
+template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
+          class Arg6, class Arg7, class Arg8, class Arg9, class Arg10>
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
+make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
+            Arg6 &&arg6, Arg7 &&arg7, Arg8 &&arg8, Arg9 &&arg9, Arg10 &&arg10) {
+  return std::unique_ptr<T>(
+      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
+            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
+            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
+            std::forward<Arg7>(arg7), std::forward<Arg8>(arg8),
+            std::forward<Arg9>(arg9), std::forward<Arg10>(arg10)));
+}
+
+template <class T>
+typename std::enable_if<std::is_array<T>::value &&std::extent<T>::value == 0,
+                        std::unique_ptr<T>>::type
+make_unique(size_t n) {
+  return std::unique_ptr<T>(new typename std::remove_extent<T>::type[n]());
+}
+
+#endif
 
 } // End llvm namespace
 

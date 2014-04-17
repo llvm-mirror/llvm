@@ -121,7 +121,7 @@ void RegisterInfoEmitter::runEnums(raw_ostream &OS,
       OS << "}\n";
   }
 
-  const std::vector<Record*> RegAltNameIndices = Target.getRegAltNameIndices();
+  const std::vector<Record*> &RegAltNameIndices = Target.getRegAltNameIndices();
   // If the only definition is the default NoRegAltName, we don't need to
   // emit anything.
   if (RegAltNameIndices.size() > 1) {
@@ -722,7 +722,7 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   // Keep track of sub-register names as well. These are not differentially
   // encoded.
   typedef SmallVector<const CodeGenSubRegIndex*, 4> SubRegIdxVec;
-  SequenceToOffsetTable<SubRegIdxVec> SubRegIdxSeqs;
+  SequenceToOffsetTable<SubRegIdxVec, CodeGenSubRegIndex::Less> SubRegIdxSeqs;
   SmallVector<SubRegIdxVec, 4> SubRegIdxLists(Regs.size());
 
   SequenceToOffsetTable<std::string> RegStrings;
@@ -831,7 +831,7 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
 
   // Emit the table of register unit roots. Each regunit has one or two root
   // registers.
-  OS << "extern const uint16_t " << TargetName << "RegUnitRoots[][2] = {\n";
+  OS << "extern const MCPhysReg " << TargetName << "RegUnitRoots[][2] = {\n";
   for (unsigned i = 0, e = RegBank.getNumNativeRegUnits(); i != e; ++i) {
     ArrayRef<const CodeGenRegister*> Roots = RegBank.getRegUnit(i).getRoots();
     assert(!Roots.empty() && "All regunits must have a root register.");
@@ -858,7 +858,7 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
 
     // Emit the register list now.
     OS << "  // " << Name << " Register Class...\n"
-       << "  const uint16_t " << Name
+       << "  const MCPhysReg " << Name
        << "[] = {\n    ";
     for (unsigned i = 0, e = Order.size(); i != e; ++i) {
       Record *Reg = Order[i];
@@ -917,7 +917,7 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
     uint64_t Value = 0;
     for (unsigned b = 0, be = BI->getNumBits(); b != be; ++b) {
       if (BitInit *B = dyn_cast<BitInit>(BI->getBit(b)))
-      Value |= (uint64_t)B->getValue() << b;
+        Value |= (uint64_t)B->getValue() << b;
     }
     OS << "  " << Value << ",\n";
   }
@@ -965,23 +965,24 @@ RegisterInfoEmitter::runTargetHeader(raw_ostream &OS, CodeGenTarget &Target,
   OS << "struct " << ClassName << " : public TargetRegisterInfo {\n"
      << "  explicit " << ClassName
      << "(unsigned RA, unsigned D = 0, unsigned E = 0, unsigned PC = 0);\n"
-     << "  virtual bool needsStackRealignment(const MachineFunction &) const\n"
+     << "  bool needsStackRealignment(const MachineFunction &) const override\n"
      << "     { return false; }\n";
   if (!RegBank.getSubRegIndices().empty()) {
-    OS << "  virtual unsigned composeSubRegIndicesImpl"
-       << "(unsigned, unsigned) const;\n"
-      << "  virtual const TargetRegisterClass *"
-      "getSubClassWithSubReg(const TargetRegisterClass*, unsigned) const;\n";
+    OS << "  unsigned composeSubRegIndicesImpl"
+       << "(unsigned, unsigned) const override;\n"
+       << "  const TargetRegisterClass *getSubClassWithSubReg"
+       << "(const TargetRegisterClass*, unsigned) const override;\n";
   }
-  OS << "  virtual const RegClassWeight &getRegClassWeight("
-     << "const TargetRegisterClass *RC) const;\n"
-     << "  virtual unsigned getRegUnitWeight(unsigned RegUnit) const;\n"
-     << "  virtual unsigned getNumRegPressureSets() const;\n"
-     << "  virtual const char *getRegPressureSetName(unsigned Idx) const;\n"
-     << "  virtual unsigned getRegPressureSetLimit(unsigned Idx) const;\n"
-     << "  virtual const int *getRegClassPressureSets("
-     << "const TargetRegisterClass *RC) const;\n"
-     << "  virtual const int *getRegUnitPressureSets(unsigned RegUnit) const;\n"
+  OS << "  const RegClassWeight &getRegClassWeight("
+     << "const TargetRegisterClass *RC) const override;\n"
+     << "  unsigned getRegUnitWeight(unsigned RegUnit) const override;\n"
+     << "  unsigned getNumRegPressureSets() const override;\n"
+     << "  const char *getRegPressureSetName(unsigned Idx) const override;\n"
+     << "  unsigned getRegPressureSetLimit(unsigned Idx) const override;\n"
+     << "  const int *getRegClassPressureSets("
+     << "const TargetRegisterClass *RC) const override;\n"
+     << "  const int *getRegUnitPressureSets("
+     << "unsigned RegUnit) const override;\n"
      << "};\n\n";
 
   ArrayRef<CodeGenRegisterClass*> RegisterClasses = RegBank.getRegClasses();
@@ -1090,7 +1091,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
     // Compress the sub-reg index lists.
     typedef std::vector<const CodeGenSubRegIndex*> IdxList;
     SmallVector<IdxList, 8> SuperRegIdxLists(RegisterClasses.size());
-    SequenceToOffsetTable<IdxList> SuperRegIdxSeqs;
+    SequenceToOffsetTable<IdxList, CodeGenSubRegIndex::Less> SuperRegIdxSeqs;
     BitVector MaskBV(RegisterClasses.size());
 
     for (unsigned rc = 0, e = RegisterClasses.size(); rc != e; ++rc) {
@@ -1266,7 +1267,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
   OS << "extern const MCRegisterDesc " << TargetName << "RegDesc[];\n";
   OS << "extern const MCPhysReg " << TargetName << "RegDiffLists[];\n";
   OS << "extern const char " << TargetName << "RegStrings[];\n";
-  OS << "extern const uint16_t " << TargetName << "RegUnitRoots[][2];\n";
+  OS << "extern const MCPhysReg " << TargetName << "RegUnitRoots[][2];\n";
   OS << "extern const uint16_t " << TargetName << "SubRegIdxLists[];\n";
   OS << "extern const MCRegisterInfo::SubRegCoveredBits "
      << TargetName << "SubRegIdxRanges[];\n";
@@ -1314,9 +1315,21 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
     OS << "0 };\n";
 
     // Emit the *_RegMask bit mask of call-preserved registers.
+    BitVector Covered = RegBank.computeCoveredRegisters(*Regs);
+
+    // Check for an optional OtherPreserved set.
+    // Add those registers to RegMask, but not to SaveList.
+    if (DagInit *OPDag =
+        dyn_cast<DagInit>(CSRSet->getValueInit("OtherPreserved"))) {
+      SetTheory::RecSet OPSet;
+      RegBank.getSets().evaluate(OPDag, OPSet, CSRSet->getLoc());
+      Covered |= RegBank.computeCoveredRegisters(
+        ArrayRef<Record*>(OPSet.begin(), OPSet.end()));
+    }
+
     OS << "static const uint32_t " << CSRSet->getName()
        << "_RegMask[] = { ";
-    printBitVectorAsHex(OS, RegBank.computeCoveredRegisters(*Regs), 32);
+    printBitVectorAsHex(OS, Covered, 32);
     OS << "};\n";
   }
   OS << "\n\n";

@@ -21,14 +21,14 @@ add_llvm_target(SystemZCodeGen
   SystemZISelLowering.cpp
   SystemZInstrInfo.cpp
   SystemZLongBranch.cpp
+  SystemZMachineFunctionInfo.cpp
   SystemZMCInstLower.cpp
   SystemZRegisterInfo.cpp
   SystemZSelectionDAGInfo.cpp
+  SystemZShortenInst.cpp
   SystemZSubtarget.cpp
   SystemZTargetMachine.cpp
   )
-
-add_dependencies(LLVMSystemZCodeGen SystemZCommonTableGen intrinsics_gen)
 
 add_subdirectory(AsmParser)
 add_subdirectory(Disassembler)

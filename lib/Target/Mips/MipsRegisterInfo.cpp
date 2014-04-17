@@ -24,9 +24,9 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -47,6 +47,11 @@ MipsRegisterInfo::MipsRegisterInfo(const MipsSubtarget &ST)
 
 unsigned MipsRegisterInfo::getPICCallReg() { return Mips::T9; }
 
+const TargetRegisterClass *
+MipsRegisterInfo::getPointerRegClass(const MachineFunction &MF,
+                                     unsigned Kind) const {
+  return Subtarget.isABI_N64() ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
+}
 
 unsigned
 MipsRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
@@ -74,30 +79,38 @@ MipsRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
 //===----------------------------------------------------------------------===//
 
 /// Mips Callee Saved Registers
-const uint16_t* MipsRegisterInfo::
-getCalleeSavedRegs(const MachineFunction *MF) const {
+const MCPhysReg *
+MipsRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   if (Subtarget.isSingleFloat())
     return CSR_SingleFloatOnly_SaveList;
-  else if (!Subtarget.hasMips64())
-    return CSR_O32_SaveList;
-  else if (Subtarget.isABI_N32())
+
+  if (Subtarget.isABI_N64())
+    return CSR_N64_SaveList;
+
+  if (Subtarget.isABI_N32())
     return CSR_N32_SaveList;
 
-  assert(Subtarget.isABI_N64());
-  return CSR_N64_SaveList;
+  if (Subtarget.isFP64bit())
+    return CSR_O32_FP64_SaveList;
+
+  return CSR_O32_SaveList;
 }
 
 const uint32_t*
 MipsRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
   if (Subtarget.isSingleFloat())
     return CSR_SingleFloatOnly_RegMask;
-  else if (!Subtarget.hasMips64())
-    return CSR_O32_RegMask;
-  else if (Subtarget.isABI_N32())
+
+  if (Subtarget.isABI_N64())
+    return CSR_N64_RegMask;
+
+  if (Subtarget.isABI_N32())
     return CSR_N32_RegMask;
 
-  assert(Subtarget.isABI_N64());
-  return CSR_N64_RegMask;
+  if (Subtarget.isFP64bit())
+    return CSR_O32_FP64_RegMask;
+
+  return CSR_O32_RegMask;
 }
 
 const uint32_t *MipsRegisterInfo::getMips16RetHelperMask() {
@@ -106,11 +119,11 @@ const uint32_t *MipsRegisterInfo::getMips16RetHelperMask() {
 
 BitVector MipsRegisterInfo::
 getReservedRegs(const MachineFunction &MF) const {
-  static const uint16_t ReservedGPR32[] = {
+  static const MCPhysReg ReservedGPR32[] = {
     Mips::ZERO, Mips::K0, Mips::K1, Mips::SP
   };
 
-  static const uint16_t ReservedGPR64[] = {
+  static const MCPhysReg ReservedGPR64[] = {
     Mips::ZERO_64, Mips::K0_64, Mips::K1_64, Mips::SP_64
   };
 
@@ -120,10 +133,17 @@ getReservedRegs(const MachineFunction &MF) const {
   for (unsigned I = 0; I < array_lengthof(ReservedGPR32); ++I)
     Reserved.set(ReservedGPR32[I]);
 
+  // Reserve registers for the NaCl sandbox.
+  if (Subtarget.isTargetNaCl()) {
+    Reserved.set(Mips::T6);   // Reserved for control flow mask.
+    Reserved.set(Mips::T7);   // Reserved for memory access mask.
+    Reserved.set(Mips::T8);   // Reserved for thread pointer.
+  }
+
   for (unsigned I = 0; I < array_lengthof(ReservedGPR64); ++I)
     Reserved.set(ReservedGPR64[I]);
 
-  if (Subtarget.hasMips64()) {
+  if (Subtarget.isFP64bit()) {
     // Reserve all registers in AFGR64.
     for (RegIter Reg = Mips::AFGR64RegClass.begin(),
          EReg = Mips::AFGR64RegClass.end(); Reg != EReg; ++Reg)
@@ -154,12 +174,25 @@ getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(Mips::DSPEFI);
   Reserved.set(Mips::DSPOutFlag);
 
+  // Reserve MSA control registers.
+  Reserved.set(Mips::MSAIR);
+  Reserved.set(Mips::MSACSR);
+  Reserved.set(Mips::MSAAccess);
+  Reserved.set(Mips::MSASave);
+  Reserved.set(Mips::MSAModify);
+  Reserved.set(Mips::MSARequest);
+  Reserved.set(Mips::MSAMap);
+  Reserved.set(Mips::MSAUnmap);
+
   // Reserve RA if in mips16 mode.
   if (Subtarget.inMips16Mode()) {
+    const MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
     Reserved.set(Mips::RA);
     Reserved.set(Mips::RA_64);
     Reserved.set(Mips::T0);
     Reserved.set(Mips::T1);
+    if (MF.getFunction()->hasFnAttribute("saveS2") || MipsFI->hasSaveS2())
+      Reserved.set(Mips::S2);
   }
 
   // Reserve GP if small section is used.
@@ -217,12 +250,3 @@ getFrameRegister(const MachineFunction &MF) const {
 
 }
 
-unsigned MipsRegisterInfo::
-getEHExceptionRegister() const {
-  llvm_unreachable("What is the exception register");
-}
-
-unsigned MipsRegisterInfo::
-getEHHandlerRegister() const {
-  llvm_unreachable("What is the exception handler register");
-}

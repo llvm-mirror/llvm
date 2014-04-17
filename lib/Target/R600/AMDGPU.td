@@ -21,7 +21,17 @@ def FeatureDumpCode : SubtargetFeature <"DumpCode",
         "true",
         "Dump MachineInstrs in the CodeEmitter">;
 
+def FeatureIRStructurizer : SubtargetFeature <"disable-irstructurizer",
+        "EnableIRStructurizer",
+        "false",
+        "Disable IR Structurizer">;
+
 // Target features
+
+def FeatureIfCvt : SubtargetFeature <"disable-ifcvt",
+        "EnableIfCvt",
+        "false",
+        "Disable the if conversion pass">;
 
 def FeatureFP64     : SubtargetFeature<"fp64",
         "FP64",
@@ -53,6 +63,11 @@ def FeatureCaymanISA : SubtargetFeature<"caymanISA",
         "true",
         "Use Cayman ISA">;
 
+def FeatureCFALUBug : SubtargetFeature<"cfalubug",
+        "CFALUBug",
+        "true",
+        "GPU has CF_ALU bug">;
+
 class SubtargetFeatureFetchLimit <string Value> :
                           SubtargetFeature <"fetch"#Value,
         "TexVTXClauseSize",
@@ -61,6 +76,16 @@ class SubtargetFeatureFetchLimit <string Value> :
 
 def FeatureFetchLimit8 : SubtargetFeatureFetchLimit <"8">;
 def FeatureFetchLimit16 : SubtargetFeatureFetchLimit <"16">;
+
+class SubtargetFeatureWavefrontSize <int Value> : SubtargetFeature<
+        "wavefrontsize"#Value,
+        "WavefrontSize",
+        !cast<string>(Value),
+        "The number of threads per wavefront">;
+
+def FeatureWavefrontSize16 : SubtargetFeatureWavefrontSize<16>;
+def FeatureWavefrontSize32 : SubtargetFeatureWavefrontSize<32>;
+def FeatureWavefrontSize64 : SubtargetFeatureWavefrontSize<64>;
 
 class SubtargetFeatureGeneration <string Value,
                                   list<SubtargetFeature> Implies> :
@@ -77,30 +102,22 @@ def FeatureEvergreen : SubtargetFeatureGeneration<"EVERGREEN",
         [FeatureFetchLimit16]>;
 
 def FeatureNorthernIslands : SubtargetFeatureGeneration<"NORTHERN_ISLANDS",
-        [FeatureFetchLimit16]>;
+        [FeatureFetchLimit16, FeatureWavefrontSize64]>;
 
 def FeatureSouthernIslands : SubtargetFeatureGeneration<"SOUTHERN_ISLANDS",
         [Feature64BitPtr, FeatureFP64]>;
 
+def FeatureSeaIslands : SubtargetFeatureGeneration<"SEA_ISLANDS",
+        [Feature64BitPtr, FeatureFP64]>;
 //===----------------------------------------------------------------------===//
 
 def AMDGPUInstrInfo : InstrInfo {
   let guessInstructionProperties = 1;
 }
 
-//===----------------------------------------------------------------------===//
-// Declare the target which we are implementing
-//===----------------------------------------------------------------------===//
-def AMDGPUAsmWriter : AsmWriter {
-    string AsmWriterClassName = "InstPrinter";
-    int Variant = 0;
-    bit isMCAsmWriter = 1;
-}
-
 def AMDGPU : Target {
   // Pull in Instruction Info:
   let InstructionSet = AMDGPUInstrInfo;
-  let AssemblyWriters = [AMDGPUAsmWriter];
 }
 
 // Include AMDGPU TD files

@@ -16,7 +16,11 @@ declare void @custom1(i32 %a, i32 %b)
 
 declare i32 @custom2(i32 %a, i32 %b)
 
-; CHECK: @f
+declare void @customcb(i32 (i32)* %cb)
+
+declare i32 @cb(i32)
+
+; CHECK: @"dfs$f"
 define void @f() {
   ; CHECK: %[[LABELRETURN:.*]] = alloca i16
 
@@ -26,8 +30,17 @@ define void @f() {
   ; CHECK: call i32 @__dfsw_custom2(i32 1, i32 2, i16 0, i16 0, i16* %[[LABELRETURN]])
   call i32 @custom2(i32 1, i32 2)
 
+  ; CHECK: call void @__dfsw_customcb({{.*}} @"dfst0$customcb", i8* bitcast ({{.*}} @"dfs$cb" to i8*), i16 0)
+  call void @customcb(i32 (i32)* @cb)
+
   ret void
 }
+
+; CHECK: define i32 (i32, i32)* @discardg(i32)
+; CHECK: %[[CALL:.*]] = call { i32 (i32, i32)*, i16 } @"dfs$g"(i32 %0, i16 0)
+; CHECK: %[[XVAL:.*]] = extractvalue { i32 (i32, i32)*, i16 } %[[CALL]], 0
+; CHECK: ret {{.*}} %[[XVAL]]
+@discardg = alias i32 (i32, i32)* (i32)* @g
 
 ; CHECK: define linkonce_odr { i32, i16 } @"dfsw$custom2"(i32, i32, i16, i16)
 ; CHECK: %[[LABELRETURN2:.*]] = alloca i16
@@ -37,11 +50,26 @@ define void @f() {
 ; CHECK: insertvalue {{.*}}[[RVSHADOW]], 1
 ; CHECK: ret { i32, i16 }
 
-; CHECK: @g
-define i32 (i32, i32)* @g() {
+; CHECK: @"dfs$g"
+define i32 (i32, i32)* @g(i32) {
   ; CHECK: ret {{.*}} @"dfsw$custom2"
   ret i32 (i32, i32)* @custom2
 }
 
+; CHECK: define { i32, i16 } @"dfs$adiscard"(i32, i32, i16, i16)
+; CHECK: %[[CALL:.*]] = call i32 @discard(i32 %0, i32 %1)
+; CHECK: %[[IVAL0:.*]] = insertvalue { i32, i16 } undef, i32 %[[CALL]], 0
+; CHECK: %[[IVAL1:.*]] = insertvalue { i32, i16 } %[[IVAL0]], i16 0, 1
+; CHECK: ret { i32, i16 } %[[IVAL1]]
+@adiscard = alias i32 (i32, i32)* @discard
+
 ; CHECK: declare void @__dfsw_custom1(i32, i32, i16, i16)
 ; CHECK: declare i32 @__dfsw_custom2(i32, i32, i16, i16, i16*)
+
+; CHECK-LABEL: define linkonce_odr i32 @"dfst0$customcb"(i32 (i32)*, i32, i16, i16*)
+; CHECK: %[[BC:.*]] = bitcast i32 (i32)* %0 to { i32, i16 } (i32, i16)*
+; CHECK: %[[CALL:.*]] = call { i32, i16 } %[[BC]](i32 %1, i16 %2)
+; CHECK: %[[XVAL0:.*]] = extractvalue { i32, i16 } %[[CALL]], 0
+; CHECK: %[[XVAL1:.*]] = extractvalue { i32, i16 } %[[CALL]], 1
+; CHECK: store i16 %[[XVAL1]], i16* %3
+; CHECK: ret i32 %[[XVAL0]]
