@@ -1,6 +1,8 @@
-# RUN: llvm-mc %s -triple=mipsel-unknown-linux -show-encoding -mcpu=mips32r2 -mattr=+msa -arch=mips | FileCheck %s
+# RUN: llvm-mc %s -arch=mips -mcpu=mips32r2 -mattr=+msa -show-encoding | FileCheck %s
 #
-# RUN: llvm-mc %s -triple=mipsel-unknown-linux -mcpu=mips32r2 -mattr=+msa -arch=mips -filetype=obj -o - | llvm-objdump -d -triple=mipsel-unknown-linux -mattr=+msa -arch=mips - | FileCheck %s -check-prefix=CHECKOBJDUMP
+# RUN: llvm-mc %s -arch=mips -mcpu=mips32r2 -mattr=+msa -filetype=obj -o - | \
+# RUN: llvm-objdump -d -arch=mips -mattr=+msa - | \
+# RUN: FileCheck %s -check-prefix=CHECKOBJDUMP
 #
 # CHECK:        copy_s.b        $13, $w8[2]             # encoding: [0x78,0x82,0x43,0x59]
 # CHECK:        copy_s.h        $1, $w25[0]             # encoding: [0x78,0xa0,0xc8,0x59]
@@ -16,6 +18,7 @@
 # CHECK:        splati.h        $w24, $w28[1]           # encoding: [0x78,0x61,0xe6,0x19]
 # CHECK:        splati.w        $w13, $w18[0]           # encoding: [0x78,0x70,0x93,0x59]
 # CHECK:        splati.d        $w28, $w1[0]            # encoding: [0x78,0x78,0x0f,0x19]
+# CHECK:        move.v          $w23, $w24              # encoding: [0x78,0xbe,0xc5,0xd9]
 
 # CHECKOBJDUMP:        copy_s.b        $13, $w8[2]
 # CHECKOBJDUMP:        copy_s.h        $1, $w25[0]
@@ -31,6 +34,7 @@
 # CHECKOBJDUMP:        splati.h        $w24, $w28[1]
 # CHECKOBJDUMP:        splati.w        $w13, $w18[0]
 # CHECKOBJDUMP:        splati.d        $w28, $w1[0]
+# CHECKOBJDUMP:        move.v          $w23, $w24
 
                 copy_s.b        $13, $w8[2]
                 copy_s.h        $1, $w25[0]
@@ -46,3 +50,4 @@
                 splati.h        $w24, $w28[1]
                 splati.w        $w13, $w18[0]
                 splati.d        $w28, $w1[0]
+                move.v          $w23, $w24

@@ -12,11 +12,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Allocator.h"
+#include <malloc.h>
 
-#include "Windows.h"
+// The Windows.h header must be after LLVM and standard headers.
+#include "WindowsSupport.h"
+
 #include <direct.h>
 #include <io.h>
-#include <malloc.h>
 #include <psapi.h>
 #include <shellapi.h>
 
@@ -152,7 +154,7 @@ void Process::PreventCoreFiles() {
 Optional<std::string> Process::GetEnv(StringRef Name) {
   // Convert the argument to UTF-16 to pass it to _wgetenv().
   SmallVector<wchar_t, 128> NameUTF16;
-  if (error_code ec = windows::UTF8ToUTF16(Name, NameUTF16))
+  if (windows::UTF8ToUTF16(Name, NameUTF16))
     return None;
 
   // Environment variable can be encoded in non-UTF8 encoding, and there's no
@@ -173,7 +175,7 @@ Optional<std::string> Process::GetEnv(StringRef Name) {
 
   // Convert the result from UTF-16 to UTF-8.
   SmallVector<char, MAX_PATH> Res;
-  if (error_code ec = windows::UTF16ToUTF8(Buf.data(), Size, Res))
+  if (windows::UTF16ToUTF8(Buf.data(), Size, Res))
     return None;
   return std::string(Res.data());
 }
@@ -357,4 +359,18 @@ const char *Process::ResetColor() {
   if (UseANSI) return "\033[0m";
   SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), defaultColors());
   return 0;
+}
+
+unsigned Process::GetRandomNumber() {
+  HCRYPTPROV HCPC;
+  if (!::CryptAcquireContextW(&HCPC, NULL, NULL, PROV_RSA_FULL,
+                              CRYPT_VERIFYCONTEXT))
+    assert(false && "Could not acquire a cryptographic context");
+
+  ScopedCryptContext CryptoProvider(HCPC);
+  unsigned Ret;
+  if (!::CryptGenRandom(CryptoProvider, sizeof(Ret),
+                        reinterpret_cast<BYTE *>(&Ret)))
+    assert(false && "Could not generate a random number");
+  return Ret;
 }

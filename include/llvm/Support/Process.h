@@ -29,9 +29,9 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Allocator.h"
-#include "llvm/Support/system_error.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/TimeValue.h"
+#include "llvm/Support/system_error.h"
 
 namespace llvm {
 class StringRef;
@@ -110,10 +110,10 @@ class self_process : public process {
   virtual ~self_process();
 
 public:
-  virtual id_type get_id();
-  virtual TimeValue get_user_time() const;
-  virtual TimeValue get_system_time() const;
-  virtual TimeValue get_wall_time() const;
+  id_type get_id() override;
+  TimeValue get_user_time() const override;
+  TimeValue get_system_time() const override;
+  TimeValue get_wall_time() const override;
 
   /// \name Process configuration (sysconf on POSIX)
   /// @{

@@ -1,10 +1,17 @@
 ; RUN: llc -O0 -mtriple=x86_64-apple-darwin %s -o %t -filetype=obj
 ; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s -check-prefix=DW-CHECK
+; RUN: llc -O0 -mtriple=x86_64-apple-darwin %s -o %t -filetype=obj -dwarf-version=3
+; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s -check-prefix=DWARF3
 
 ; DW-CHECK: DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000067] = "vla")
 ; FIXME: The location here needs to be fixed, but llvm-dwarfdump doesn't handle
 ; DW_AT_location lists yet.
-; DW-CHECK: DW_AT_location [DW_FORM_data4]                      (0x00000000)
+; DW-CHECK: DW_AT_location [DW_FORM_sec_offset]                      (0x00000000)
+
+; DWARF3: DW_AT_name [DW_FORM_strp]  ( .debug_str[0x00000067] = "vla")
+; FIXME: The location here needs to be fixed, but llvm-dwarfdump doesn't handle
+; DW_AT_location lists yet.
+; DWARF3: DW_AT_location [DW_FORM_data4]                      (0x00000000)
 
 ; Unfortunately llvm-dwarfdump can't unparse a list of DW_AT_locations
 ; right now, so we check the asm output:
@@ -65,9 +72,10 @@ declare i8* @llvm.stacksave() nounwind
 declare void @llvm.stackrestore(i8*) nounwind
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!29}
 
 !0 = metadata !{i32 786449, metadata !28, i32 12, metadata !"clang version 3.2 (trunk 156005) (llvm/trunk 156000)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !1,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
+!1 = metadata !{}
 !3 = metadata !{metadata !5}
 !5 = metadata !{i32 786478, metadata !28, metadata !6, metadata !"testVLAwithSize", metadata !"testVLAwithSize", metadata !"", i32 1, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (i32)* @testVLAwithSize, null, null, metadata !1, i32 2} ; [ DW_TAG_subprogram ]
 !6 = metadata !{i32 786473, metadata !28} ; [ DW_TAG_file_type ]
@@ -93,3 +101,4 @@ declare void @llvm.stackrestore(i8*) nounwind
 !26 = metadata !{i32 5, i32 22, metadata !22, null}
 !27 = metadata !{i32 8, i32 1, metadata !13, null}
 !28 = metadata !{metadata !"bar.c", metadata !"/Users/echristo/tmp"}
+!29 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

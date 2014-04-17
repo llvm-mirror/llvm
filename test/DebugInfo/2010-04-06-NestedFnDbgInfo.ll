@@ -1,4 +1,4 @@
-; RUN: llvm-as < %s | llc -asm-verbose -O0 | grep AT_specification | count 2
+; RUN: llvm-as < %s | %llc_dwarf -asm-verbose -O0 | grep AT_specification | count 2
 ; Radar 7833483
 ; Do not emit AT_specification for nested function foo.
 
@@ -51,6 +51,7 @@ entry:
 }
 
 !llvm.dbg.cu = !{!4}
+!llvm.module.flags = !{!40}
 !37 = metadata !{metadata !2, metadata !10, metadata !23}
 
 !0 = metadata !{i32 786688, metadata !1, metadata !"b", metadata !3, i32 16, metadata !8, i32 0, null} ; [ DW_TAG_auto_variable ]
@@ -92,3 +93,4 @@ entry:
 !36 = metadata !{i32 786443, metadata !38, metadata !23, i32 7, i32 17, i32 0} ; [ DW_TAG_lexical_block ]
 !38 = metadata !{metadata !"one.cc", metadata !"/tmp" }
 !39 = metadata !{i32 0}
+!40 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

@@ -18,35 +18,34 @@
 //===----------------------------------------------------------------------===//
 #define DEBUG_TYPE "packets"
 #include "llvm/CodeGen/DFAPacketizer.h"
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineLoopInfo.h"
-#include "llvm/CodeGen/ScheduleDAG.h"
-#include "llvm/CodeGen/ScheduleDAGInstrs.h"
-#include "llvm/CodeGen/LatencyPriorityQueue.h"
-#include "llvm/CodeGen/SchedulerRegistry.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineFunctionAnalysis.h"
-#include "llvm/CodeGen/ScheduleHazardRecognizer.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/MC/MCInstrItineraries.h"
-#include "llvm/Support/Compiler.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Debug.h"
 #include "Hexagon.h"
-#include "HexagonTargetMachine.h"
+#include "HexagonMachineFunctionInfo.h"
 #include "HexagonRegisterInfo.h"
 #include "HexagonSubtarget.h"
-#include "HexagonMachineFunctionInfo.h"
-
+#include "HexagonTargetMachine.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/CodeGen/LatencyPriorityQueue.h"
+#include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunctionAnalysis.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/CodeGen/ScheduleDAGInstrs.h"
+#include "llvm/CodeGen/ScheduleHazardRecognizer.h"
+#include "llvm/CodeGen/SchedulerRegistry.h"
+#include "llvm/MC/MCInstrItineraries.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetRegisterInfo.h"
 #include <map>
 #include <vector>
 
@@ -238,20 +237,20 @@ bool HexagonPacketizer::runOnMachineFunction(MachineFunction &Fn) {
       // instruction stream until we find the nearest boundary.
       MachineBasicBlock::iterator I = RegionEnd;
       for(;I != MBB->begin(); --I, --RemainingCount) {
-        if (TII->isSchedulingBoundary(llvm::prior(I), MBB, Fn))
+        if (TII->isSchedulingBoundary(std::prev(I), MBB, Fn))
           break;
       }
       I = MBB->begin();
 
       // Skip empty scheduling regions.
       if (I == RegionEnd) {
-        RegionEnd = llvm::prior(RegionEnd);
+        RegionEnd = std::prev(RegionEnd);
         --RemainingCount;
         continue;
       }
       // Skip regions with one instruction.
-      if (I == llvm::prior(RegionEnd)) {
-        RegionEnd = llvm::prior(RegionEnd);
+      if (I == std::prev(RegionEnd)) {
+        RegionEnd = std::prev(RegionEnd);
         continue;
       }
 
@@ -391,7 +390,7 @@ static bool IsLoopN(MachineInstr *MI) {
 /// callee-saved register.
 static bool DoesModifyCalleeSavedReg(MachineInstr *MI,
                                      const TargetRegisterInfo *TRI) {
-  for (const uint16_t *CSR = TRI->getCalleeSavedRegs(); *CSR; ++CSR) {
+  for (const MCPhysReg *CSR = TRI->getCalleeSavedRegs(); *CSR; ++CSR) {
     unsigned CalleeSavedReg = *CSR;
     if (MI->modifiesRegister(CalleeSavedReg, TRI))
       return true;
@@ -681,7 +680,7 @@ bool HexagonPacketizerList::CanPromoteToNewValueStore( MachineInstr *MI,
     }
   }
 
-  // Make sure that for non POST_INC stores:
+  // Make sure that for non-POST_INC stores:
   // 1. The only use of reg is DepReg and no other registers.
   //    This handles V4 base+index registers.
   //    The following store can not be dot new.

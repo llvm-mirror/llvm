@@ -14,8 +14,8 @@
 
 #define DEBUG_TYPE "aarch64mcexpr"
 #include "AArch64MCExpr.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCAssembler.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELF.h"
 #include "llvm/Object/ELF.h"
 
@@ -79,7 +79,7 @@ void AArch64MCExpr::PrintImpl(raw_ostream &OS) const {
 bool
 AArch64MCExpr::EvaluateAsRelocatableImpl(MCValue &Res,
                                          const MCAsmLayout *Layout) const {
-  return getSubExpr()->EvaluateAsRelocatable(Res, *Layout);
+  return getSubExpr()->EvaluateAsRelocatable(Res, Layout);
 }
 
 static void fixELFSymbolsInTLSFixupsImpl(const MCExpr *Expr, MCAssembler &Asm) {

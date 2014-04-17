@@ -45,13 +45,13 @@ using namespace llvm;
 
 ARMBaseRegisterInfo::ARMBaseRegisterInfo(const ARMSubtarget &sti)
   : ARMGenRegisterInfo(ARM::LR, 0, 0, ARM::PC), STI(sti),
-    FramePtr((STI.isTargetDarwin() || STI.isThumb()) ? ARM::R7 : ARM::R11),
+    FramePtr((STI.isTargetMachO() || STI.isThumb()) ? ARM::R7 : ARM::R11),
     BasePtr(ARM::R6) {
 }
 
-const uint16_t*
+const MCPhysReg*
 ARMBaseRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  const uint16_t *RegList = (STI.isTargetIOS() && !STI.isAAPCS_ABI())
+  const MCPhysReg *RegList = (STI.isTargetIOS() && !STI.isAAPCS_ABI())
                                 ? CSR_iOS_SaveList
                                 : CSR_AAPCS_SaveList;
 
@@ -408,6 +408,11 @@ emitLoadConstPool(MachineBasicBlock &MBB,
     .setMIFlags(MIFlags);
 }
 
+bool ARMBaseRegisterInfo::mayOverrideLocalAssignment() const {
+  // The native linux build hits a downstream codegen bug when this is enabled.
+  return STI.isTargetDarwin();
+}
+
 bool ARMBaseRegisterInfo::
 requiresRegisterScavenging(const MachineFunction &MF) const {
   return true;
@@ -590,10 +595,8 @@ materializeFrameBaseRegister(MachineBasicBlock *MBB,
     AddDefaultCC(MIB);
 }
 
-void
-ARMBaseRegisterInfo::resolveFrameIndex(MachineBasicBlock::iterator I,
-                                       unsigned BaseReg, int64_t Offset) const {
-  MachineInstr &MI = *I;
+void ARMBaseRegisterInfo::resolveFrameIndex(MachineInstr &MI, unsigned BaseReg,
+                                            int64_t Offset) const {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
   const ARMBaseInstrInfo &TII =

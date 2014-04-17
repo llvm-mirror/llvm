@@ -15,16 +15,12 @@
 
 #define INSTRUCTION_SPECIFIER_FIELDS       \
   struct OperandSpecifier operands[X86_MAX_OPERANDS]; \
-  bool                    filtered;        \
   InstructionContext      insnContext;     \
   std::string             name;            \
                                            \
   InstructionSpecifier() {                 \
-    filtered = false;                      \
     insnContext = IC;                      \
     name = "";                             \
-    modifierType = MODIFIER_NONE;          \
-    modifierBase = 0;                      \
     memset(operands, 0, sizeof(operands)); \
   }
 

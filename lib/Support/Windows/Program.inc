@@ -11,8 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Windows.h"
-#include "llvm/ADT/OwningPtr.h"
+#include "WindowsSupport.h"
 #include "llvm/Support/FileSystem.h"
 #include <cstdio>
 #include <fcntl.h>
@@ -27,7 +26,7 @@
 namespace llvm {
 using namespace sys;
 
-ProcessInfo::ProcessInfo() : Pid(0), ProcessHandle(0), ReturnCode(0) {}
+ProcessInfo::ProcessInfo() : ProcessHandle(0), Pid(0), ReturnCode(0) {}
 
 // This function just uses the PATH environment variable to find the program.
 std::string sys::FindProgramByName(const std::string &progName) {
@@ -187,7 +186,7 @@ static bool Execute(ProcessInfo &PI, StringRef Program, const char **args,
   }
 
   // Now build the command line.
-  OwningArrayPtr<char> command(new char[len+1]);
+  std::unique_ptr<char[]> command(new char[len+1]);
   char *p = command.get();
 
   for (unsigned i = 0; args[i]; i++) {
@@ -432,13 +431,6 @@ error_code sys::ChangeStdinToBinary(){
 
 error_code sys::ChangeStdoutToBinary(){
   int result = _setmode( _fileno(stdout), _O_BINARY );
-  if (result == -1)
-    return error_code(errno, generic_category());
-  return make_error_code(errc::success);
-}
-
-error_code sys::ChangeStderrToBinary(){
-  int result = _setmode( _fileno(stderr), _O_BINARY );
   if (result == -1)
     return error_code(errno, generic_category());
   return make_error_code(errc::success);

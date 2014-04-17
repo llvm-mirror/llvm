@@ -14,6 +14,7 @@ add_llvm_library(LLVMAnalysis
   CostModel.cpp
   CodeMetrics.cpp
   ConstantFolding.cpp
+  Delinearization.cpp
   DependenceAnalysis.cpp
   DomPrinter.cpp
   DominanceFrontier.cpp
@@ -22,6 +23,7 @@ add_llvm_library(LLVMAnalysis
   InstructionSimplify.cpp
   Interval.cpp
   IntervalPartition.cpp
+  LazyCallGraph.cpp
   LazyValueInfo.cpp
   LibCallAliasAnalysis.cpp
   LibCallSemantics.cpp

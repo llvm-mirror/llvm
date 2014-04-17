@@ -1,4 +1,4 @@
-; RUN: llc -mcpu=pwr7 < %s | FileCheck %s
+; RUN: llc -mcpu=pwr7 -mattr=-crbits < %s | FileCheck %s
 target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-f128:128:128-v128:128:128-n32:64"
 target triple = "powerpc64-bgq-linux"
 
@@ -28,12 +28,11 @@ codeRepl17:                                       ; preds = %codeRepl4
   store i16 %rvml38.sroa.0.0.insert.insert, i16* undef, align 2
   unreachable
 
+; FIXME: the SLWI could be folded into the RLWIMI to give a rotate of 8.
 ; CHECK: @test
-; CHECK-DAG: slwi [[R1:[0-9]+]],
-; CHECK-DAG: rlwinm [[R2:[0-9]+]],
-; CHECK-DAG: srawi [[R3:[0-9]+]], [[R1]]
-; CHECK-DAG: rlwinm [[R4:[0-9]+]], [[R3]], 0, 23, 23
-; CHECK: rlwimi [[R4]], [[R2]], 0,
+; CHECK-DAG: slwi [[R1:[0-9]+]], {{[0-9]+}}, 31
+; CHECK-DAG: rlwinm [[R2:[0-9]+]], {{[0-9]+}}, 0, 31, 31
+; CHECK: rlwimi [[R2]], [[R1]], 9, 23, 23
 
 codeRepl29:                                       ; preds = %codeRepl1
   unreachable

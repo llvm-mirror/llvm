@@ -26,7 +26,7 @@ namespace llvm {
 
 class R600SchedStrategy : public MachineSchedStrategy {
 
-  const ScheduleDAGMI *DAG;
+  const ScheduleDAGMILive *DAG;
   const R600InstrInfo *TII;
   const R600RegisterInfo *TRI;
   MachineRegisterInfo *MRI;
@@ -53,8 +53,6 @@ class R600SchedStrategy : public MachineSchedStrategy {
 
   std::vector<SUnit *> Available[IDLast], Pending[IDLast];
   std::vector<SUnit *> AvailableAlus[AluLast];
-  std::vector<SUnit *> UnscheduledARDefs;
-  std::vector<SUnit *> UnscheduledARUses;
   std::vector<SUnit *> PhysicalRegCopy;
 
   InstKind CurInstKind;

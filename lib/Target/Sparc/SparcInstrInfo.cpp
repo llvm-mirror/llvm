@@ -24,10 +24,14 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
-#define GET_INSTRINFO_CTOR
+#define GET_INSTRINFO_CTOR_DTOR
 #include "SparcGenInstrInfo.inc"
 
 using namespace llvm;
+
+
+// Pin the vtable to this file.
+void SparcInstrInfo::anchor() {}
 
 SparcInstrInfo::SparcInstrInfo(SparcSubtarget &ST)
   : SparcGenInstrInfo(SP::ADJCALLSTACKDOWN, SP::ADJCALLSTACKUP),
@@ -85,6 +89,8 @@ static bool IsIntegerCC(unsigned CC)
 static SPCC::CondCodes GetOppositeBranchCondition(SPCC::CondCodes CC)
 {
   switch(CC) {
+  case SPCC::ICC_A:    return SPCC::ICC_N;
+  case SPCC::ICC_N:    return SPCC::ICC_A;
   case SPCC::ICC_NE:   return SPCC::ICC_E;
   case SPCC::ICC_E:    return SPCC::ICC_NE;
   case SPCC::ICC_G:    return SPCC::ICC_LE;
@@ -100,6 +106,8 @@ static SPCC::CondCodes GetOppositeBranchCondition(SPCC::CondCodes CC)
   case SPCC::ICC_VC:   return SPCC::ICC_VS;
   case SPCC::ICC_VS:   return SPCC::ICC_VC;
 
+  case SPCC::FCC_A:    return SPCC::FCC_N;
+  case SPCC::FCC_N:    return SPCC::FCC_A;
   case SPCC::FCC_U:    return SPCC::FCC_O;
   case SPCC::FCC_O:    return SPCC::FCC_U;
   case SPCC::FCC_G:    return SPCC::FCC_ULE;
@@ -150,8 +158,8 @@ bool SparcInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
         continue;
       }
 
-      while (llvm::next(I) != MBB.end())
-        llvm::next(I)->eraseFromParent();
+      while (std::next(I) != MBB.end())
+        std::next(I)->eraseFromParent();
 
       Cond.clear();
       FBB = 0;
@@ -427,8 +435,9 @@ unsigned SparcInstrInfo::getGlobalBaseReg(MachineFunction *MF) const
   MachineBasicBlock::iterator MBBI = FirstMBB.begin();
   MachineRegisterInfo &RegInfo = MF->getRegInfo();
 
-  GlobalBaseReg = RegInfo.createVirtualRegister(&SP::IntRegsRegClass);
-
+  const TargetRegisterClass *PtrRC =
+    Subtarget.is64Bit() ? &SP::I64RegsRegClass : &SP::IntRegsRegClass;
+  GlobalBaseReg = RegInfo.createVirtualRegister(PtrRC);
 
   DebugLoc dl;
 

@@ -4,15 +4,17 @@
 
 @llvm.used = appending global [1 x i8*] [i8* bitcast (i32* @foo1 to i8*)], section "llvm.metadata"
 
-@bar = external global i32
+@bar = global i32 0
 @foo1 = alias i32* @bar
 @foo2 = alias i32* @bar
 @foo3 = alias i32* @foo2
 
 %FunTy = type i32()
 
-declare i32 @foo_f()
-@bar_f = alias weak %FunTy* @foo_f
+define i32 @foo_f() {
+  ret i32 0
+}
+@bar_f = alias weak_odr %FunTy* @foo_f
 @bar_ff = alias i32()* @bar_f
 
 @bar_i = alias internal i32* @bar

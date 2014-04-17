@@ -30,8 +30,7 @@ SystemZTargetMachine::SystemZTargetMachine(const Target &T, StringRef TT,
     // Make sure that global data has at least 16 bits of alignment by default,
     // so that we can refer to it using LARL.  We don't have any special
     // requirements for stack variables though.
-    DL("E-p:64:64:64-i1:8:16-i8:8:16-i16:16-i32:32-i64:64"
-       "-f32:32-f64:64-f128:64-a0:8:16-n32:64"),
+    DL("E-m:e-i1:8:16-i8:8:16-i64:64-f128:64-a:8:16-n32:64"),
     InstrInfo(*this), TLInfo(*this), TSInfo(*this),
     FrameLowering(*this, Subtarget) {
   initAsmInfo();
@@ -48,10 +47,10 @@ public:
     return getTM<SystemZTargetMachine>();
   }
 
-  virtual void addIRPasses() LLVM_OVERRIDE;
-  virtual bool addInstSelector() LLVM_OVERRIDE;
-  virtual bool addPreSched2() LLVM_OVERRIDE;
-  virtual bool addPreEmitPass() LLVM_OVERRIDE;
+  void addIRPasses() override;
+  bool addInstSelector() override;
+  bool addPreSched2() override;
+  bool addPreEmitPass() override;
 };
 } // end anonymous namespace
 

@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -16,6 +15,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/NoFolder.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -25,12 +25,12 @@ namespace {
 class IRBuilderTest : public testing::Test {
 protected:
   virtual void SetUp() {
-    M.reset(new Module("MyModule", getGlobalContext()));
-    FunctionType *FTy = FunctionType::get(Type::getVoidTy(getGlobalContext()),
+    M.reset(new Module("MyModule", Ctx));
+    FunctionType *FTy = FunctionType::get(Type::getVoidTy(Ctx),
                                           /*isVarArg=*/false);
     F = Function::Create(FTy, Function::ExternalLinkage, "", M.get());
-    BB = BasicBlock::Create(getGlobalContext(), "", F);
-    GV = new GlobalVariable(*M, Type::getFloatTy(getGlobalContext()), true,
+    BB = BasicBlock::Create(Ctx, "", F);
+    GV = new GlobalVariable(*M, Type::getFloatTy(Ctx), true,
                             GlobalValue::ExternalLinkage, 0);
   }
 
@@ -39,7 +39,8 @@ protected:
     M.reset();
   }
 
-  OwningPtr<Module> M;
+  LLVMContext Ctx;
+  std::unique_ptr<Module> M;
   Function *F;
   BasicBlock *BB;
   GlobalVariable *GV;
@@ -78,8 +79,8 @@ TEST_F(IRBuilderTest, Lifetime) {
 
 TEST_F(IRBuilderTest, CreateCondBr) {
   IRBuilder<> Builder(BB);
-  BasicBlock *TBB = BasicBlock::Create(getGlobalContext(), "", F);
-  BasicBlock *FBB = BasicBlock::Create(getGlobalContext(), "", F);
+  BasicBlock *TBB = BasicBlock::Create(Ctx, "", F);
+  BasicBlock *FBB = BasicBlock::Create(Ctx, "", F);
 
   BranchInst *BI = Builder.CreateCondBr(Builder.getTrue(), TBB, FBB);
   TerminatorInst *TI = BB->getTerminator();
@@ -89,7 +90,7 @@ TEST_F(IRBuilderTest, CreateCondBr) {
   EXPECT_EQ(FBB, TI->getSuccessor(1));
 
   BI->eraseFromParent();
-  MDNode *Weights = MDBuilder(getGlobalContext()).createBranchWeights(42, 13);
+  MDNode *Weights = MDBuilder(Ctx).createBranchWeights(42, 13);
   BI = Builder.CreateCondBr(Builder.getTrue(), TBB, FBB, Weights);
   TI = BB->getTerminator();
   EXPECT_EQ(BI, TI);
@@ -106,15 +107,23 @@ TEST_F(IRBuilderTest, LandingPadName) {
   EXPECT_EQ(LP->getName(), "LP");
 }
 
+TEST_F(IRBuilderTest, DataLayout) {
+  std::unique_ptr<Module> M(new Module("test", Ctx));
+  M->setDataLayout("e-n32");
+  EXPECT_TRUE(M->getDataLayout()->isLegalInteger(32));
+  M->setDataLayout("e");
+  EXPECT_FALSE(M->getDataLayout()->isLegalInteger(32));
+}
+
 TEST_F(IRBuilderTest, GetIntTy) {
   IRBuilder<> Builder(BB);
   IntegerType *Ty1 = Builder.getInt1Ty();
-  EXPECT_EQ(Ty1, IntegerType::get(getGlobalContext(), 1));
+  EXPECT_EQ(Ty1, IntegerType::get(Ctx, 1));
 
   DataLayout* DL = new DataLayout(M.get());
   IntegerType *IntPtrTy = Builder.getIntPtrTy(DL);
   unsigned IntPtrBitSize =  DL->getPointerSizeInBits(0);
-  EXPECT_EQ(IntPtrTy, IntegerType::get(getGlobalContext(), IntPtrBitSize));
+  EXPECT_EQ(IntPtrTy, IntegerType::get(Ctx, IntPtrBitSize));
   delete DL;
 }
 
@@ -141,6 +150,13 @@ TEST_F(IRBuilderTest, FastMathFlags) {
   Builder.SetFastMathFlags(FMF);
 
   F = Builder.CreateFAdd(F, F);
+  EXPECT_TRUE(Builder.getFastMathFlags().any());
+  ASSERT_TRUE(isa<Instruction>(F));
+  FAdd = cast<Instruction>(F);
+  EXPECT_TRUE(FAdd->hasNoNaNs());
+
+  // Now, try it with CreateBinOp
+  F = Builder.CreateBinOp(Instruction::FAdd, F, F);
   EXPECT_TRUE(Builder.getFastMathFlags().any());
   ASSERT_TRUE(isa<Instruction>(F));
   FAdd = cast<Instruction>(F);
@@ -180,6 +196,56 @@ TEST_F(IRBuilderTest, FastMathFlags) {
   FDiv->copyFastMathFlags(FAdd);
   EXPECT_TRUE(FDiv->hasNoNaNs());
 
+}
+
+TEST_F(IRBuilderTest, WrapFlags) {
+  IRBuilder<true, NoFolder> Builder(BB);
+
+  // Test instructions.
+  GlobalVariable *G = new GlobalVariable(*M, Builder.getInt32Ty(), true,
+                                         GlobalValue::ExternalLinkage, 0);
+  Value *V = Builder.CreateLoad(G);
+  EXPECT_TRUE(
+      cast<BinaryOperator>(Builder.CreateNSWAdd(V, V))->hasNoSignedWrap());
+  EXPECT_TRUE(
+      cast<BinaryOperator>(Builder.CreateNSWMul(V, V))->hasNoSignedWrap());
+  EXPECT_TRUE(
+      cast<BinaryOperator>(Builder.CreateNSWSub(V, V))->hasNoSignedWrap());
+  EXPECT_TRUE(cast<BinaryOperator>(
+                  Builder.CreateShl(V, V, "", /* NUW */ false, /* NSW */ true))
+                  ->hasNoSignedWrap());
+
+  EXPECT_TRUE(
+      cast<BinaryOperator>(Builder.CreateNUWAdd(V, V))->hasNoUnsignedWrap());
+  EXPECT_TRUE(
+      cast<BinaryOperator>(Builder.CreateNUWMul(V, V))->hasNoUnsignedWrap());
+  EXPECT_TRUE(
+      cast<BinaryOperator>(Builder.CreateNUWSub(V, V))->hasNoUnsignedWrap());
+  EXPECT_TRUE(cast<BinaryOperator>(
+                  Builder.CreateShl(V, V, "", /* NUW */ true, /* NSW */ false))
+                  ->hasNoUnsignedWrap());
+
+  // Test operators created with constants.
+  Constant *C = Builder.getInt32(42);
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(Builder.CreateNSWAdd(C, C))
+                  ->hasNoSignedWrap());
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(Builder.CreateNSWSub(C, C))
+                  ->hasNoSignedWrap());
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(Builder.CreateNSWMul(C, C))
+                  ->hasNoSignedWrap());
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(
+                  Builder.CreateShl(C, C, "", /* NUW */ false, /* NSW */ true))
+                  ->hasNoSignedWrap());
+
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(Builder.CreateNUWAdd(C, C))
+                  ->hasNoUnsignedWrap());
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(Builder.CreateNUWSub(C, C))
+                  ->hasNoUnsignedWrap());
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(Builder.CreateNUWMul(C, C))
+                  ->hasNoUnsignedWrap());
+  EXPECT_TRUE(cast<OverflowingBinaryOperator>(
+                  Builder.CreateShl(C, C, "", /* NUW */ true, /* NSW */ false))
+                  ->hasNoUnsignedWrap());
 }
 
 TEST_F(IRBuilderTest, RAIIHelpersTest) {

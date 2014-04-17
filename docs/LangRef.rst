@@ -4,7 +4,7 @@ LLVM Language Reference Manual
 
 .. contents::
    :local:
-   :depth: 3
+   :depth: 4
 
 Abstract
 ========
@@ -128,7 +128,9 @@ lexical features of LLVM:
 #. Unnamed temporaries are created when the result of a computation is
    not assigned to a named value.
 #. Unnamed temporaries are numbered sequentially (using a per-function
-   incrementing counter, starting with 0).
+   incrementing counter, starting with 0). Note that basic blocks are
+   included in this numbering. For example, if the entry basic block is not
+   given a label name, then it will get number 0.
 
 It also shows a convention that we follow in this document. When
 demonstrating instructions, we will follow an instruction with a comment
@@ -195,16 +197,6 @@ linkage:
     private to be renamed as necessary to avoid collisions. Because the
     symbol is private to the module, all references can be updated. This
     doesn't show up in any symbol table in the object file.
-``linker_private``
-    Similar to ``private``, but the symbol is passed through the
-    assembler and evaluated by the linker. Unlike normal strong symbols,
-    they are removed by the linker from the final linked image
-    (executable or dynamic library).
-``linker_private_weak``
-    Similar to "``linker_private``", but the symbol is weak. Note that
-    ``linker_private_weak`` symbols are subject to coalescing by the
-    linker. The symbols are removed by the linker from the final linked
-    image (executable or dynamic library).
 ``internal``
     Similar to private, but the value shows as a local symbol
     (``STB_LOCAL`` in the case of ELF) in the object file. This
@@ -267,46 +259,13 @@ linkage:
     ``linkonce_odr`` and ``weak_odr`` linkage types to indicate that the
     global will only be merged with equivalent globals. These linkage
     types are otherwise the same as their non-``odr`` versions.
-``linkonce_odr_auto_hide``
-    Similar to "``linkonce_odr``", but nothing in the translation unit
-    takes the address of this definition. For instance, functions that
-    had an inline definition, but the compiler decided not to inline it.
-    ``linkonce_odr_auto_hide`` may have only ``default`` visibility. The
-    symbols are removed by the linker from the final linked image
-    (executable or dynamic library).
 ``external``
     If none of the above identifiers are used, the global is externally
     visible, meaning that it participates in linkage and can be used to
     resolve external symbol references.
 
-The next two types of linkage are targeted for Microsoft Windows
-platform only. They are designed to support importing (exporting)
-symbols from (to) DLLs (Dynamic Link Libraries).
-
-``dllimport``
-    "``dllimport``" linkage causes the compiler to reference a function
-    or variable via a global pointer to a pointer that is set up by the
-    DLL exporting the symbol. On Microsoft Windows targets, the pointer
-    name is formed by combining ``__imp_`` and the function or variable
-    name.
-``dllexport``
-    "``dllexport``" linkage causes the compiler to provide a global
-    pointer to a pointer in a DLL, so that it can be referenced with the
-    ``dllimport`` attribute. On Microsoft Windows targets, the pointer
-    name is formed by combining ``__imp_`` and the function or variable
-    name.
-
-For example, since the "``.LC0``" variable is defined to be internal, if
-another module defined a "``.LC0``" variable and was linked with this
-one, one of the two would be renamed, preventing a collision. Since
-"``main``" and "``puts``" are external (i.e., lacking any linkage
-declarations), they are accessible outside of the current module.
-
 It is illegal for a function *declaration* to have any linkage type
-other than ``external``, ``dllimport`` or ``extern_weak``.
-
-Aliases can have only ``external``, ``internal``, ``weak`` or
-``weak_odr`` linkages.
+other than ``external`` or ``extern_weak``.
 
 .. _callingconv:
 
@@ -343,7 +302,8 @@ added in the future:
     so that the call does not break any live ranges in the caller side.
     This calling convention does not support varargs and requires the
     prototype of all callees to exactly match the prototype of the
-    function definition.
+    function definition. Furthermore the inliner doesn't consider such function
+    calls for inlining.
 "``cc 10``" - GHC convention
     This calling convention has been implemented specifically for use by
     the `Glasgow Haskell Compiler (GHC) <http://www.haskell.org/ghc>`_.
@@ -378,6 +338,72 @@ added in the future:
     accessed runtime components pinned to specific hardware registers.
     At the moment only X86 supports this convention (both 32 and 64
     bit).
+"``webkit_jscc``" - WebKit's JavaScript calling convention
+    This calling convention has been implemented for `WebKit FTL JIT
+    <https://trac.webkit.org/wiki/FTLJIT>`_. It passes arguments on the
+    stack right to left (as cdecl does), and returns a value in the
+    platform's customary return register.
+"``anyregcc``" - Dynamic calling convention for code patching
+    This is a special convention that supports patching an arbitrary code
+    sequence in place of a call site. This convention forces the call
+    arguments into registers but allows them to be dynamcially
+    allocated. This can currently only be used with calls to
+    llvm.experimental.patchpoint because only this intrinsic records
+    the location of its arguments in a side table. See :doc:`StackMaps`.
+"``preserve_mostcc``" - The `PreserveMost` calling convention
+    This calling convention attempts to make the code in the caller as little
+    intrusive as possible. This calling convention behaves identical to the `C`
+    calling convention on how arguments and return values are passed, but it
+    uses a different set of caller/callee-saved registers. This alleviates the
+    burden of saving and recovering a large register set before and after the
+    call in the caller. If the arguments are passed in callee-saved registers,
+    then they will be preserved by the callee across the call. This doesn't
+    apply for values returned in callee-saved registers.
+
+    - On X86-64 the callee preserves all general purpose registers, except for
+      R11. R11 can be used as a scratch register. Floating-point registers
+      (XMMs/YMMs) are not preserved and need to be saved by the caller.
+
+    The idea behind this convention is to support calls to runtime functions
+    that have a hot path and a cold path. The hot path is usually a small piece
+    of code that doesn't many registers. The cold path might need to call out to
+    another function and therefore only needs to preserve the caller-saved
+    registers, which haven't already been saved by the caller. The
+    `PreserveMost` calling convention is very similar to the `cold` calling
+    convention in terms of caller/callee-saved registers, but they are used for
+    different types of function calls. `coldcc` is for function calls that are
+    rarely executed, whereas `preserve_mostcc` function calls are intended to be
+    on the hot path and definitely executed a lot. Furthermore `preserve_mostcc`
+    doesn't prevent the inliner from inlining the function call.
+
+    This calling convention will be used by a future version of the ObjectiveC
+    runtime and should therefore still be considered experimental at this time.
+    Although this convention was created to optimize certain runtime calls to
+    the ObjectiveC runtime, it is not limited to this runtime and might be used
+    by other runtimes in the future too. The current implementation only
+    supports X86-64, but the intention is to support more architectures in the
+    future.
+"``preserve_allcc``" - The `PreserveAll` calling convention
+    This calling convention attempts to make the code in the caller even less
+    intrusive than the `PreserveMost` calling convention. This calling
+    convention also behaves identical to the `C` calling convention on how
+    arguments and return values are passed, but it uses a different set of
+    caller/callee-saved registers. This removes the burden of saving and
+    recovering a large register set before and after the call in the caller. If
+    the arguments are passed in callee-saved registers, then they will be
+    preserved by the callee across the call. This doesn't apply for values
+    returned in callee-saved registers.
+
+    - On X86-64 the callee preserves all general purpose registers, except for
+      R11. R11 can be used as a scratch register. Furthermore it also preserves
+      all floating-point registers (XMMs/YMMs).
+
+    The idea behind this convention is to support calls to runtime functions
+    that don't need to call out to any other functions.
+
+    This calling convention, like the `PreserveMost` calling convention, will be
+    used by a future version of the ObjectiveC runtime and should be considered
+    experimental at this time.
 "``cc <n>``" - Numbered convention
     Any calling convention may be specified by number, allowing
     target-specific calling conventions to be used. Target specific
@@ -416,31 +442,41 @@ styles:
 
 .. _namedtypes:
 
-Named Types
------------
+DLL Storage Classes
+-------------------
 
-LLVM IR allows you to specify name aliases for certain types. This can
-make it easier to read the IR and make the IR more condensed
-(particularly when recursive types are involved). An example of a name
-specification is:
+All Global Variables, Functions and Aliases can have one of the following
+DLL storage class:
+
+``dllimport``
+    "``dllimport``" causes the compiler to reference a function or variable via
+    a global pointer to a pointer that is set up by the DLL exporting the
+    symbol. On Microsoft Windows targets, the pointer name is formed by
+    combining ``__imp_`` and the function or variable name.
+``dllexport``
+    "``dllexport``" causes the compiler to provide a global pointer to a pointer
+    in a DLL, so that it can be referenced with the ``dllimport`` attribute. On
+    Microsoft Windows targets, the pointer name is formed by combining
+    ``__imp_`` and the function or variable name. Since this storage class
+    exists for defining a dll interface, the compiler, assembler and linker know
+    it is externally referenced and must refrain from deleting the symbol.
+
+Structure Types
+---------------
+
+LLVM IR allows you to specify both "identified" and "literal" :ref:`structure
+types <t_struct>`.  Literal types are uniqued structurally, but identified types
+are never uniqued.  An :ref:`opaque structural type <t_opaque>` can also be used
+to forward declare a type which is not yet available.
+
+An example of a identified structure specification is:
 
 .. code-block:: llvm
 
     %mytype = type { %mytype*, i32 }
 
-You may give a name to any :ref:`type <typesystem>` except
-":ref:`void <t_void>`". Type name aliases may be used anywhere a type is
-expected with the syntax "%mytype".
-
-Note that type names are aliases for the structural type that they
-indicate, and that you can therefore specify multiple names for the same
-type. This often leads to confusing behavior when dumping out a .ll
-file. Since LLVM IR uses structural typing, the name is not part of the
-type. When printing out LLVM IR, the printer will pick *one name* to
-render all types of a particular shape. This means that if you have code
-where two different source types end up having the same LLVM type, that
-the dumper will sometimes print the "wrong" or unexpected type. This is
-an important design point and isn't going to change.
+Prior to the LLVM 3.0 release, identified types were structurally uniqued.  Only
+literal types are uniqued in recent versions of LLVM.
 
 .. _globalvars:
 
@@ -448,9 +484,13 @@ Global Variables
 ----------------
 
 Global variables define regions of memory allocated at compilation time
-instead of run-time. Global variables may optionally be initialized, may
-have an explicit section to be placed in, and may have an optional
-explicit alignment specified.
+instead of run-time.
+
+Global variables definitions must be initialized, may have an explicit section
+to be placed in, and may have an optional explicit alignment specified.
+
+Global variables in other translation units can also be declared, in which
+case they don't have an initializer.
 
 A variable may be defined as ``thread_local``, which means that it will
 not be shared by threads (each thread will have a separated copy of the
@@ -511,8 +551,8 @@ variables defined within the module are not modified from their
 initial values before the start of the global initializer.  This is
 true even for variables potentially accessible from outside the
 module, including those with external linkage or appearing in
-``@llvm.used``. This assumption may be suppressed by marking the
-variable with ``externally_initialized``.
+``@llvm.used`` or dllexported variables. This assumption may be suppressed
+by marking the variable with ``externally_initialized``.
 
 An explicit alignment may be specified for a global, which must be a
 power of 2. If not present, or if the alignment is set to zero, the
@@ -525,12 +565,27 @@ assume that the globals are densely packed in their section and try to
 iterate over them as an array, alignment padding would break this
 iteration.
 
+Globals can also have a :ref:`DLL storage class <dllstorageclass>`.
+
+Syntax::
+
+    [@<GlobalVarName> =] [Linkage] [Visibility] [DLLStorageClass] [ThreadLocal]
+                         [AddrSpace] [unnamed_addr] [ExternallyInitialized]
+                         <global | constant> <Type>
+                         [, section "name"] [, align <Alignment>]
+
 For example, the following defines a global in a numbered address space
 with an initializer, section, and alignment:
 
 .. code-block:: llvm
 
     @G = addrspace(5) constant float 1.0, section "foo", align 4
+
+The following example just declares a global variable
+
+.. code-block:: llvm
+
+   @G = external global i32
 
 The following example defines a thread-local global with the
 ``initialexec`` TLS model:
@@ -546,7 +601,8 @@ Functions
 
 LLVM function definitions consist of the "``define``" keyword, an
 optional :ref:`linkage type <linkage>`, an optional :ref:`visibility
-style <visibility>`, an optional :ref:`calling convention <callingconv>`,
+style <visibility>`, an optional :ref:`DLL storage class <dllstorageclass>`,
+an optional :ref:`calling convention <callingconv>`,
 an optional ``unnamed_addr`` attribute, a return type, an optional
 :ref:`parameter attribute <paramattrs>` for the return type, a function
 name, a (possibly empty) argument list (each with optional :ref:`parameter
@@ -557,22 +613,22 @@ curly brace, a list of basic blocks, and a closing curly brace.
 
 LLVM function declarations consist of the "``declare``" keyword, an
 optional :ref:`linkage type <linkage>`, an optional :ref:`visibility
-style <visibility>`, an optional :ref:`calling convention <callingconv>`,
+style <visibility>`, an optional :ref:`DLL storage class <dllstorageclass>`,
+an optional :ref:`calling convention <callingconv>`,
 an optional ``unnamed_addr`` attribute, a return type, an optional
 :ref:`parameter attribute <paramattrs>` for the return type, a function
 name, a possibly empty list of arguments, an optional alignment, an optional
 :ref:`garbage collector name <gc>` and an optional :ref:`prefix <prefixdata>`.
 
-A function definition contains a list of basic blocks, forming the CFG
-(Control Flow Graph) for the function. Each basic block may optionally
-start with a label (giving the basic block a symbol table entry),
-contains a list of instructions, and ends with a
-:ref:`terminator <terminators>` instruction (such as a branch or function
-return). If explicit label is not provided, a block is assigned an
-implicit numbered label, using a next value from the same counter as used
-for unnamed temporaries (:ref:`see above<identifiers>`). For example, if a
-function entry block does not have explicit label, it will be assigned
-label "%0", then first unnamed temporary in that block will be "%1", etc.
+A function definition contains a list of basic blocks, forming the CFG (Control
+Flow Graph) for the function. Each basic block may optionally start with a label
+(giving the basic block a symbol table entry), contains a list of instructions,
+and ends with a :ref:`terminator <terminators>` instruction (such as a branch or
+function return). If an explicit label is not provided, a block is assigned an
+implicit numbered label, using the next value from the same counter as used for
+unnamed temporaries (:ref:`see above<identifiers>`). For example, if a function
+entry block does not have an explicit label, it will be assigned label "%0",
+then the first unnamed temporary in that block will be "%1", etc.
 
 The first basic block in a function is special in two ways: it is
 immediately executed on entrance to the function, and it is not allowed
@@ -594,10 +650,10 @@ be significant and two identical functions can be merged.
 
 Syntax::
 
-    define [linkage] [visibility]
+    define [linkage] [visibility] [DLLStorageClass]
            [cconv] [ret attrs]
            <ResultType> @<FunctionName> ([argument list])
-           [fn Attrs] [section "name"] [align N]
+           [unnamed_addr] [fn Attrs] [section "name"] [align N]
            [gc] [prefix Constant] { ... }
 
 .. _langref_aliases:
@@ -607,18 +663,27 @@ Aliases
 
 Aliases act as "second name" for the aliasee value (which can be either
 function, global variable, another alias or bitcast of global value).
-Aliases may have an optional :ref:`linkage type <linkage>`, and an optional
-:ref:`visibility style <visibility>`.
+Aliases may have an optional :ref:`linkage type <linkage>`, an optional
+:ref:`visibility style <visibility>`, and an optional :ref:`DLL storage class
+<dllstorageclass>`.
 
 Syntax::
 
-    @<Name> = alias [Linkage] [Visibility] <AliaseeTy> @<Aliasee>
+    @<Name> = [Visibility] [DLLStorageClass] alias [Linkage] <AliaseeTy> @<Aliasee>
 
-The linkage must be one of ``private``, ``linker_private``,
-``linker_private_weak``, ``internal``, ``linkonce``, ``weak``,
-``linkonce_odr``, ``weak_odr``, ``linkonce_odr_auto_hide``, ``external``. Note
-that some system linkers might not correctly handle dropping a weak symbol that
-is aliased by a non weak alias.
+The linkage must be one of ``private``, ``internal``, ``linkonce``, ``weak``,
+``linkonce_odr``, ``weak_odr``, ``external``. Note that some system linkers
+might not correctly handle dropping a weak symbol that is aliased by a non-weak
+alias.
+
+Alias that are not ``unnamed_addr`` are guaranteed to have the same address as
+the aliasee.
+
+The aliasee must be a definition.
+
+Aliases are not allowed to point to aliases with linkages that can be
+overridden. Since they are only a second name, the possibility of the
+intermediate alias being overridden cannot be represented in an object file.
 
 .. _namedmetadatastructure:
 
@@ -700,6 +765,35 @@ Currently, only the following parameter attributes are defined:
     site. If the alignment is not specified, then the code generator
     makes a target-specific assumption.
 
+.. _attr_inalloca:
+
+``inalloca``
+
+    The ``inalloca`` argument attribute allows the caller to take the
+    address of outgoing stack arguments.  An ``inalloca`` argument must
+    be a pointer to stack memory produced by an ``alloca`` instruction.
+    The alloca, or argument allocation, must also be tagged with the
+    inalloca keyword.  Only the past argument may have the ``inalloca``
+    attribute, and that argument is guaranteed to be passed in memory.
+
+    An argument allocation may be used by a call at most once because
+    the call may deallocate it.  The ``inalloca`` attribute cannot be
+    used in conjunction with other attributes that affect argument
+    storage, like ``inreg``, ``nest``, ``sret``, or ``byval``.  The
+    ``inalloca`` attribute also disables LLVM's implicit lowering of
+    large aggregate return values, which means that frontend authors
+    must lower them with ``sret`` pointers.
+
+    When the call site is reached, the argument allocation must have
+    been the most recent stack allocation that is still live, or the
+    results are undefined.  It is possible to allocate additional stack
+    space after an argument allocation and before its call site, but it
+    must be cleared off with :ref:`llvm.stackrestore
+    <int_stackrestore>`.
+
+    See :doc:`InAlloca` for more information on how to use this
+    attribute.
+
 ``sret``
     This indicates that the pointer parameter specifies the address of a
     structure that is the return value of the function in the source
@@ -708,6 +802,9 @@ Currently, only the following parameter attributes are defined:
     not to trap and to be properly aligned. This may only be applied to
     the first parameter. This is not a valid attribute for return
     values.
+
+.. _noalias:
+
 ``noalias``
     This indicates that pointer values :ref:`based <pointeraliasing>` on
     the argument or return value do not alias pointer values which are
@@ -717,8 +814,8 @@ Currently, only the following parameter attributes are defined:
     "irrelevant" to the ``noalias`` keyword for the arguments and return
     value used in that call. The caller shares the responsibility with
     the callee for ensuring that these requirements are met. For further
-    details, please see the discussion of the NoAlias response in `alias
-    analysis <AliasAnalysis.html#MustMayNo>`_.
+    details, please see the discussion of the NoAlias response in :ref:`alias
+    analysis <Must, May, or No>`.
 
     Note that this definition of ``noalias`` is intentionally similar
     to the definition of ``restrict`` in C99 for function arguments,
@@ -891,7 +988,7 @@ example:
 ``minsize``
     This attribute suggests that optimization passes and code generator
     passes make choices that keep the code size of this function as small
-    as possible and perform optimizations that may sacrifice runtime 
+    as possible and perform optimizations that may sacrifice runtime
     performance in order to minimize the size of the generated code.
 ``naked``
     This attribute disables prologue / epilogue emission for the
@@ -936,15 +1033,16 @@ example:
     unwind, its runtime behavior is undefined.
 ``optnone``
     This function attribute indicates that the function is not optimized
-    by any optimization or code generator passes with the 
+    by any optimization or code generator passes with the
     exception of interprocedural optimization passes.
     This attribute cannot be used together with the ``alwaysinline``
     attribute; this attribute is also incompatible
     with the ``minsize`` attribute and the ``optsize`` attribute.
-    
-    The inliner should never inline this function in any situation.
+
+    This attribute requires the ``noinline`` attribute to be specified on
+    the function as well, so the function is never inlined into any caller.
     Only functions with the ``alwaysinline`` attribute are valid
-    candidates for inlining inside the body of this function.
+    candidates for inlining into the body of this function.
 ``optsize``
     This attribute suggests that optimization passes and code generator
     passes make choices that keep the code size of this function low,
@@ -959,7 +1057,7 @@ example:
     (including ``byval`` arguments) and never changes any state visible
     to callers. This means that it cannot unwind exceptions by calling
     the ``C++`` exception throwing methods.
-    
+
     On an argument, this attribute indicates that the function does not
     dereference that pointer argument, even though it may read or write the
     memory that the pointer points to if accessed through other pointers.
@@ -973,7 +1071,7 @@ example:
     called with the same set of arguments and global state. It cannot
     unwind an exception by calling the ``C++`` exception throwing
     methods.
-    
+
     On an argument, this attribute indicates that the function does not write
     through this pointer argument, even though it may write to the memory that
     the pointer points to.
@@ -1004,6 +1102,9 @@ example:
     - Calls to alloca() with variable sizes or constant sizes greater than
       ``ssp-buffer-size``.
 
+    Variables that are identified as requiring a protector will be arranged
+    on the stack such that they are adjacent to the stack protector guard.
+
     If a function that has an ``ssp`` attribute is inlined into a
     function that doesn't have an ``ssp`` attribute, then the resulting
     function will have an ``ssp`` attribute.
@@ -1011,6 +1112,17 @@ example:
     This attribute indicates that the function should *always* emit a
     stack smashing protector. This overrides the ``ssp`` function
     attribute.
+
+    Variables that are identified as requiring a protector will be arranged
+    on the stack such that they are adjacent to the stack protector guard.
+    The specific layout rules are:
+
+    #. Large arrays and structures containing large arrays
+       (``>= ssp-buffer-size``) are closest to the stack protector.
+    #. Small arrays and structures containing small arrays
+       (``< ssp-buffer-size``) are 2nd closest to the protector.
+    #. Variables that have had their address taken are 3rd closest to the
+       protector.
 
     If a function that has an ``sspreq`` attribute is inlined into a
     function that doesn't have an ``sspreq`` attribute or which has an
@@ -1026,6 +1138,17 @@ example:
     - Aggregates containing an array of any size and type.
     - Calls to alloca().
     - Local variables that have had their address taken.
+
+    Variables that are identified as requiring a protector will be arranged
+    on the stack such that they are adjacent to the stack protector guard.
+    The specific layout rules are:
+
+    #. Large arrays and structures containing large arrays
+       (``>= ssp-buffer-size``) are closest to the stack protector.
+    #. Small arrays and structures containing small arrays
+       (``< ssp-buffer-size``) are 2nd closest to the protector.
+    #. Variables that have had their address taken are 3rd closest to the
+       protector.
 
     This overrides the ``ssp`` function attribute.
 
@@ -1098,10 +1221,9 @@ as follows:
 ``p[n]:<size>:<abi>:<pref>``
     This specifies the *size* of a pointer and its ``<abi>`` and
     ``<pref>``\erred alignments for address space ``n``. All sizes are in
-    bits. Specifying the ``<pref>`` alignment is optional. If omitted, the
-    preceding ``:`` should be omitted too. The address space, ``n`` is
-    optional, and if not specified, denotes the default address space 0.
-    The value of ``n`` must be in the range [1,2^23).
+    bits. The address space, ``n`` is optional, and if not specified,
+    denotes the default address space 0.  The value of ``n`` must be
+    in the range [1,2^23).
 ``i<size>:<abi>:<pref>``
     This specifies the alignment for an integer type of a given bit
     ``<size>``. The value of ``<size>`` must be in the range [1,2^23).
@@ -1114,18 +1236,28 @@ as follows:
     will work. 32 (float) and 64 (double) are supported on all targets; 80
     or 128 (different flavors of long double) are also supported on some
     targets.
-``a<size>:<abi>:<pref>``
-    This specifies the alignment for an aggregate type of a given bit
-    ``<size>``.
-``s<size>:<abi>:<pref>``
-    This specifies the alignment for a stack object of a given bit
-    ``<size>``.
+``a:<abi>:<pref>``
+    This specifies the alignment for an object of aggregate type.
+``m:<mangling>``
+    If present, specifies that llvm names are mangled in the output. The
+    options are
+
+    * ``e``: ELF mangling: Private symbols get a ``.L`` prefix.
+    * ``m``: Mips mangling: Private symbols get a ``$`` prefix.
+    * ``o``: Mach-O mangling: Private symbols get ``L`` prefix. Other
+      symbols get a ``_`` prefix.
+    * ``w``: Windows COFF prefix:  Similar to Mach-O, but stdcall and fastcall
+      functions also get a suffix based on the frame size.
 ``n<size1>:<size2>:<size3>...``
     This specifies a set of native integer widths for the target CPU in
     bits. For example, it might contain ``n32`` for 32-bit PowerPC,
     ``n32:64`` for PowerPC 64, or ``n8:16:32:64`` for X86-64. Elements of
     this set are considered to support most general arithmetic operations
     efficiently.
+
+On every specification that takes a ``<abi>:<pref>``, specifying the
+``<pref>`` alignment is optional. If omitted, the preceding ``:``
+should be omitted too and ``<pref>`` will be equal to ``<abi>``.
 
 When constructing the data layout for a given target, LLVM starts with a
 default set of specifications which are then (possibly) overridden by
@@ -1149,7 +1281,7 @@ specifications are given in this list:
 -  ``f128:128:128`` - quad is 128-bit aligned
 -  ``v64:64:64`` - 64-bit vector is 64-bit aligned
 -  ``v128:128:128`` - 128-bit vector is 128-bit aligned
--  ``a0:0:64`` - aggregates are 64-bit aligned
+-  ``a:0:64`` - aggregates are 64-bit aligned
 
 When LLVM is determining the alignment for a given type, it uses the
 following rules:
@@ -1180,6 +1312,30 @@ that does not embed this target-specific detail into the IR, then you
 don't have to specify the string. This will disable some optimizations
 that require precise layout information, but this also prevents those
 optimizations from introducing target specificity into the IR.
+
+.. _langref_triple:
+
+Target Triple
+-------------
+
+A module may specify a target triple string that describes the target
+host. The syntax for the target triple is simply:
+
+.. code-block:: llvm
+
+    target triple = "x86_64-apple-macosx10.7.0"
+
+The *target triple* string consists of a series of identifiers delimited
+by the minus sign character ('-'). The canonical forms are:
+
+::
+
+    ARCHITECTURE-VENDOR-OPERATING_SYSTEM
+    ARCHITECTURE-VENDOR-OPERATING_SYSTEM-ENVIRONMENT
+
+This information is passed along to the backend so that it generates
+code for the proper architecture. It's possible to override this on the
+command line with the ``-mtriple`` command line option.
 
 .. _pointeraliasing:
 
@@ -1339,7 +1495,7 @@ Atomic Memory Ordering Constraints
 Atomic instructions (:ref:`cmpxchg <i_cmpxchg>`,
 :ref:`atomicrmw <i_atomicrmw>`, :ref:`fence <i_fence>`,
 :ref:`atomic load <i_load>`, and :ref:`atomic store <i_store>`) take
-an ordering parameter that determines which other atomic instructions on
+ordering parameters that determine which other atomic instructions on
 the same address they *synchronize with*. These semantics are borrowed
 from Java and C++0x, but are somewhat more colloquial. If these
 descriptions aren't precise enough, check those specs (see spec
@@ -1454,80 +1610,90 @@ transformation. A strong type system makes it easier to read the
 generated code and enables novel analyses and transformations that are
 not feasible to perform on normal three address code representations.
 
-.. _typeclassifications:
+.. _t_void:
 
-Type Classifications
---------------------
+Void Type
+---------
 
-The types fall into a few useful classifications:
-
-
-.. list-table::
-   :header-rows: 1
-
-   * - Classification
-     - Types
-
-   * - :ref:`integer <t_integer>`
-     - ``i1``, ``i2``, ``i3``, ... ``i8``, ... ``i16``, ... ``i32``, ...
-       ``i64``, ...
-
-   * - :ref:`floating point <t_floating>`
-     - ``half``, ``float``, ``double``, ``x86_fp80``, ``fp128``,
-       ``ppc_fp128``
+:Overview:
 
 
-   * - first class
+The void type does not represent any value and has no size.
 
-       .. _t_firstclass:
+:Syntax:
 
-     - :ref:`integer <t_integer>`, :ref:`floating point <t_floating>`,
-       :ref:`pointer <t_pointer>`, :ref:`vector <t_vector>`,
-       :ref:`structure <t_struct>`, :ref:`array <t_array>`,
-       :ref:`label <t_label>`, :ref:`metadata <t_metadata>`.
 
-   * - :ref:`primitive <t_primitive>`
-     - :ref:`label <t_label>`,
-       :ref:`void <t_void>`,
-       :ref:`integer <t_integer>`,
-       :ref:`floating point <t_floating>`,
-       :ref:`x86mmx <t_x86mmx>`,
-       :ref:`metadata <t_metadata>`.
+::
 
-   * - :ref:`derived <t_derived>`
-     - :ref:`array <t_array>`,
-       :ref:`function <t_function>`,
-       :ref:`pointer <t_pointer>`,
-       :ref:`structure <t_struct>`,
-       :ref:`vector <t_vector>`,
-       :ref:`opaque <t_opaque>`.
+      void
+
+
+.. _t_function:
+
+Function Type
+-------------
+
+:Overview:
+
+
+The function type can be thought of as a function signature. It consists of a
+return type and a list of formal parameter types. The return type of a function
+type is a void type or first class type --- except for :ref:`label <t_label>`
+and :ref:`metadata <t_metadata>` types.
+
+:Syntax:
+
+::
+
+      <returntype> (<parameter list>)
+
+...where '``<parameter list>``' is a comma-separated list of type
+specifiers. Optionally, the parameter list may include a type ``...``, which
+indicates that the function takes a variable number of arguments.  Variable
+argument functions can access their arguments with the :ref:`variable argument
+handling intrinsic <int_varargs>` functions.  '``<returntype>``' is any type
+except :ref:`label <t_label>` and :ref:`metadata <t_metadata>`.
+
+:Examples:
+
++---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ``i32 (i32)``                   | function taking an ``i32``, returning an ``i32``                                                                                                                    |
++---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ``float (i16, i32 *) *``        | :ref:`Pointer <t_pointer>` to a function that takes an ``i16`` and a :ref:`pointer <t_pointer>` to ``i32``, returning ``float``.                                    |
++---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ``i32 (i8*, ...)``              | A vararg function that takes at least one :ref:`pointer <t_pointer>` to ``i8`` (char in C), which returns an integer. This is the signature for ``printf`` in LLVM. |
++---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ``{i32, i32} (i32)``            | A function taking an ``i32``, returning a :ref:`structure <t_struct>` containing two ``i32`` values                                                                 |
++---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+.. _t_firstclass:
+
+First Class Types
+-----------------
 
 The :ref:`first class <t_firstclass>` types are perhaps the most important.
 Values of these types are the only ones which can be produced by
 instructions.
 
-.. _t_primitive:
+.. _t_single_value:
 
-Primitive Types
----------------
+Single Value Types
+^^^^^^^^^^^^^^^^^^
 
-The primitive types are the fundamental building blocks of the LLVM
-system.
+These are the types that are valid in registers from CodeGen's perspective.
 
 .. _t_integer:
 
 Integer Type
-^^^^^^^^^^^^
+""""""""""""
 
-Overview:
-"""""""""
+:Overview:
 
 The integer type is a very simple type that simply specifies an
 arbitrary bit width for the integer type desired. Any bit width from 1
 bit to 2\ :sup:`23`\ -1 (about 8 million) can be specified.
 
-Syntax:
-"""""""
+:Syntax:
 
 ::
 
@@ -1537,7 +1703,7 @@ The number of bits the integer will occupy is specified by the ``N``
 value.
 
 Examples:
-"""""""""
+*********
 
 +----------------+------------------------------------------------+
 | ``i1``         | a single-bit integer.                          |
@@ -1550,7 +1716,7 @@ Examples:
 .. _t_floating:
 
 Floating Point Types
-^^^^^^^^^^^^^^^^^^^^
+""""""""""""""""""""
 
 .. list-table::
    :header-rows: 1
@@ -1576,57 +1742,104 @@ Floating Point Types
    * - ``ppc_fp128``
      - 128-bit floating point value (two 64-bits)
 
-.. _t_x86mmx:
+X86_mmx Type
+""""""""""""
 
-X86mmx Type
-^^^^^^^^^^^
+:Overview:
 
-Overview:
-"""""""""
-
-The x86mmx type represents a value held in an MMX register on an x86
+The x86_mmx type represents a value held in an MMX register on an x86
 machine. The operations allowed on it are quite limited: parameters and
 return values, load and store, and bitcast. User-specified MMX
 instructions are represented as intrinsic or asm calls with arguments
 and/or results of this type. There are no arrays, vectors or constants
 of this type.
 
-Syntax:
-"""""""
+:Syntax:
 
 ::
 
-      x86mmx
+      x86_mmx
 
-.. _t_void:
 
-Void Type
-^^^^^^^^^
+.. _t_pointer:
 
-Overview:
-"""""""""
+Pointer Type
+""""""""""""
 
-The void type does not represent any value and has no size.
+:Overview:
 
-Syntax:
-"""""""
+The pointer type is used to specify memory locations. Pointers are
+commonly used to reference objects in memory.
+
+Pointer types may have an optional address space attribute defining the
+numbered address space where the pointed-to object resides. The default
+address space is number zero. The semantics of non-zero address spaces
+are target-specific.
+
+Note that LLVM does not permit pointers to void (``void*``) nor does it
+permit pointers to labels (``label*``). Use ``i8*`` instead.
+
+:Syntax:
 
 ::
 
-      void
+      <type> *
+
+:Examples:
+
++-------------------------+--------------------------------------------------------------------------------------------------------------+
+| ``[4 x i32]*``          | A :ref:`pointer <t_pointer>` to :ref:`array <t_array>` of four ``i32`` values.                               |
++-------------------------+--------------------------------------------------------------------------------------------------------------+
+| ``i32 (i32*) *``        | A :ref:`pointer <t_pointer>` to a :ref:`function <t_function>` that takes an ``i32*``, returning an ``i32``. |
++-------------------------+--------------------------------------------------------------------------------------------------------------+
+| ``i32 addrspace(5)*``   | A :ref:`pointer <t_pointer>` to an ``i32`` value that resides in address space #5.                           |
++-------------------------+--------------------------------------------------------------------------------------------------------------+
+
+.. _t_vector:
+
+Vector Type
+"""""""""""
+
+:Overview:
+
+A vector type is a simple derived type that represents a vector of
+elements. Vector types are used when multiple primitive data are
+operated in parallel using a single instruction (SIMD). A vector type
+requires a size (number of elements) and an underlying primitive data
+type. Vector types are considered :ref:`first class <t_firstclass>`.
+
+:Syntax:
+
+::
+
+      < <# elements> x <elementtype> >
+
+The number of elements is a constant integer value larger than 0;
+elementtype may be any integer or floating point type, or a pointer to
+these types. Vectors of size zero are not allowed.
+
+:Examples:
+
++-------------------+--------------------------------------------------+
+| ``<4 x i32>``     | Vector of 4 32-bit integer values.               |
++-------------------+--------------------------------------------------+
+| ``<8 x float>``   | Vector of 8 32-bit floating-point values.        |
++-------------------+--------------------------------------------------+
+| ``<2 x i64>``     | Vector of 2 64-bit integer values.               |
++-------------------+--------------------------------------------------+
+| ``<4 x i64*>``    | Vector of 4 pointers to 64-bit integer values.   |
++-------------------+--------------------------------------------------+
 
 .. _t_label:
 
 Label Type
 ^^^^^^^^^^
 
-Overview:
-"""""""""
+:Overview:
 
 The label type represents code labels.
 
-Syntax:
-"""""""
+:Syntax:
 
 ::
 
@@ -1637,30 +1850,16 @@ Syntax:
 Metadata Type
 ^^^^^^^^^^^^^
 
-Overview:
-"""""""""
+:Overview:
 
 The metadata type represents embedded metadata. No derived types may be
 created from metadata except for :ref:`function <t_function>` arguments.
 
-Syntax:
-"""""""
+:Syntax:
 
 ::
 
       metadata
-
-.. _t_derived:
-
-Derived Types
--------------
-
-The real power in LLVM comes from the derived types in the system. This
-is what allows a programmer to represent arrays, functions, pointers,
-and other useful types. Each of these types contain one or more element
-types which may be a primitive type, or another derived type. For
-example, it is possible to have a two dimensional array, using an array
-as the element type of another array.
 
 .. _t_aggregate:
 
@@ -1675,17 +1874,15 @@ aggregate types.
 .. _t_array:
 
 Array Type
-^^^^^^^^^^
+""""""""""
 
-Overview:
-"""""""""
+:Overview:
 
 The array type is a very simple derived type that arranges elements
 sequentially in memory. The array type requires a size (number of
 elements) and an underlying data type.
 
-Syntax:
-"""""""
+:Syntax:
 
 ::
 
@@ -1694,8 +1891,7 @@ Syntax:
 The number of elements is a constant integer value; ``elementtype`` may
 be any type with a size.
 
-Examples:
-"""""""""
+:Examples:
 
 +------------------+--------------------------------------+
 | ``[40 x i32]``   | Array of 40 32-bit integer values.   |
@@ -1723,52 +1919,12 @@ LLVM with a zero length array type. An implementation of 'pascal style
 arrays' in LLVM could use the type "``{ i32, [0 x float]}``", for
 example.
 
-.. _t_function:
-
-Function Type
-^^^^^^^^^^^^^
-
-Overview:
-"""""""""
-
-The function type can be thought of as a function signature. It consists
-of a return type and a list of formal parameter types. The return type
-of a function type is a first class type or a void type.
-
-Syntax:
-"""""""
-
-::
-
-      <returntype> (<parameter list>)
-
-...where '``<parameter list>``' is a comma-separated list of type
-specifiers. Optionally, the parameter list may include a type ``...``,
-which indicates that the function takes a variable number of arguments.
-Variable argument functions can access their arguments with the
-:ref:`variable argument handling intrinsic <int_varargs>` functions.
-'``<returntype>``' is any type except :ref:`label <t_label>`.
-
-Examples:
-"""""""""
-
-+---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``i32 (i32)``                   | function taking an ``i32``, returning an ``i32``                                                                                                                    |
-+---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``float (i16, i32 *) *``        | :ref:`Pointer <t_pointer>` to a function that takes an ``i16`` and a :ref:`pointer <t_pointer>` to ``i32``, returning ``float``.                                    |
-+---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``i32 (i8*, ...)``              | A vararg function that takes at least one :ref:`pointer <t_pointer>` to ``i8`` (char in C), which returns an integer. This is the signature for ``printf`` in LLVM. |
-+---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``{i32, i32} (i32)``            | A function taking an ``i32``, returning a :ref:`structure <t_struct>` containing two ``i32`` values                                                                 |
-+---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-
 .. _t_struct:
 
 Structure Type
-^^^^^^^^^^^^^^
+""""""""""""""
 
-Overview:
-"""""""""
+:Overview:
 
 The structure type is used to represent a collection of data members
 together in memory. The elements of a structure may be any type that has
@@ -1792,16 +1948,14 @@ Literal types are uniqued by their contents and can never be recursive
 or opaque since there is no way to write one. Identified types can be
 recursive, can be opaqued, and are never uniqued.
 
-Syntax:
-"""""""
+:Syntax:
 
 ::
 
       %T1 = type { <type list> }     ; Identified normal struct type
       %T2 = type <{ <type list> }>   ; Identified packed struct type
 
-Examples:
-"""""""""
+:Examples:
 
 +------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | ``{ i32, i32, i32 }``        | A triple of three ``i32`` values                                                                                                                                                      |
@@ -1814,104 +1968,28 @@ Examples:
 .. _t_opaque:
 
 Opaque Structure Types
-^^^^^^^^^^^^^^^^^^^^^^
+""""""""""""""""""""""
 
-Overview:
-"""""""""
+:Overview:
 
 Opaque structure types are used to represent named structure types that
 do not have a body specified. This corresponds (for example) to the C
 notion of a forward declared structure.
 
-Syntax:
-"""""""
+:Syntax:
 
 ::
 
       %X = type opaque
       %52 = type opaque
 
-Examples:
-"""""""""
+:Examples:
 
 +--------------+-------------------+
 | ``opaque``   | An opaque type.   |
 +--------------+-------------------+
 
-.. _t_pointer:
-
-Pointer Type
-^^^^^^^^^^^^
-
-Overview:
-"""""""""
-
-The pointer type is used to specify memory locations. Pointers are
-commonly used to reference objects in memory.
-
-Pointer types may have an optional address space attribute defining the
-numbered address space where the pointed-to object resides. The default
-address space is number zero. The semantics of non-zero address spaces
-are target-specific.
-
-Note that LLVM does not permit pointers to void (``void*``) nor does it
-permit pointers to labels (``label*``). Use ``i8*`` instead.
-
-Syntax:
-"""""""
-
-::
-
-      <type> *
-
-Examples:
-"""""""""
-
-+-------------------------+--------------------------------------------------------------------------------------------------------------+
-| ``[4 x i32]*``          | A :ref:`pointer <t_pointer>` to :ref:`array <t_array>` of four ``i32`` values.                               |
-+-------------------------+--------------------------------------------------------------------------------------------------------------+
-| ``i32 (i32*) *``        | A :ref:`pointer <t_pointer>` to a :ref:`function <t_function>` that takes an ``i32*``, returning an ``i32``. |
-+-------------------------+--------------------------------------------------------------------------------------------------------------+
-| ``i32 addrspace(5)*``   | A :ref:`pointer <t_pointer>` to an ``i32`` value that resides in address space #5.                           |
-+-------------------------+--------------------------------------------------------------------------------------------------------------+
-
-.. _t_vector:
-
-Vector Type
-^^^^^^^^^^^
-
-Overview:
-"""""""""
-
-A vector type is a simple derived type that represents a vector of
-elements. Vector types are used when multiple primitive data are
-operated in parallel using a single instruction (SIMD). A vector type
-requires a size (number of elements) and an underlying primitive data
-type. Vector types are considered :ref:`first class <t_firstclass>`.
-
-Syntax:
-"""""""
-
-::
-
-      < <# elements> x <elementtype> >
-
-The number of elements is a constant integer value larger than 0;
-elementtype may be any integer or floating point type, or a pointer to
-these types. Vectors of size zero are not allowed.
-
-Examples:
-"""""""""
-
-+-------------------+--------------------------------------------------+
-| ``<4 x i32>``     | Vector of 4 32-bit integer values.               |
-+-------------------+--------------------------------------------------+
-| ``<8 x float>``   | Vector of 8 32-bit floating-point values.        |
-+-------------------+--------------------------------------------------+
-| ``<2 x i64>``     | Vector of 2 64-bit integer values.               |
-+-------------------+--------------------------------------------------+
-| ``<4 x i64*>``    | Vector of 4 pointers to 64-bit integer values.   |
-+-------------------+--------------------------------------------------+
+.. _constants:
 
 Constants
 =========
@@ -1967,7 +2045,7 @@ The IEEE 16-bit format (half precision) is represented by ``0xH``
 followed by 4 hexadecimal digits. All hexadecimal formats are big-endian
 (sign bit at the left).
 
-There are no constants of type x86mmx.
+There are no constants of type x86_mmx.
 
 .. _complexconstants:
 
@@ -2358,6 +2436,10 @@ The following is the syntax for constant expressions:
     Convert a constant, CST, to another TYPE. The constraints of the
     operands are the same as those for the :ref:`bitcast
     instruction <i_bitcast>`.
+``addrspacecast (CST to TYPE)``
+    Convert a constant pointer or constant vector of pointer, CST, to another
+    TYPE in a different address space. The constraints of the operands are the
+    same as those for the :ref:`addrspacecast instruction <i_addrspacecast>`.
 ``getelementptr (CSTPTR, IDX0, IDX1, ...)``, ``getelementptr inbounds (CSTPTR, IDX0, IDX1, ...)``
     Perform the :ref:`getelementptr operation <i_getelementptr>` on
     constants. As with the :ref:`getelementptr <i_getelementptr>`
@@ -2711,9 +2793,9 @@ metadata types that refer to the same loop identifier metadata.
 
    for.body:
      ...
-     %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+     %val0 = load i32* %arrayidx, !llvm.mem.parallel_loop_access !0
      ...
-     store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+     store i32 %val0, i32* %arrayidx1, !llvm.mem.parallel_loop_access !0
      ...
      br i1 %exitcond, label %for.end, label %for.body, !llvm.loop !0
 
@@ -2728,21 +2810,22 @@ the loop identifier metadata node directly:
 .. code-block:: llvm
 
    outer.for.body:
-   ...
+     ...
+     %val1 = load i32* %arrayidx3, !llvm.mem.parallel_loop_access !2
+     ...
+     br label %inner.for.body
 
    inner.for.body:
      ...
-     %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
+     %val0 = load i32* %arrayidx1, !llvm.mem.parallel_loop_access !0
      ...
-     store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+     store i32 %val0, i32* %arrayidx2, !llvm.mem.parallel_loop_access !0
      ...
      br i1 %exitcond, label %inner.for.end, label %inner.for.body, !llvm.loop !1
 
    inner.for.end:
      ...
-     %0 = load i32* %arrayidx, align 4, !llvm.mem.parallel_loop_access !0
-     ...
-     store i32 %0, i32* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !0
+     store i32 %val1, i32* %arrayidx4, !llvm.mem.parallel_loop_access !2
      ...
      br i1 %exitcond, label %outer.for.end, label %outer.for.body, !llvm.loop !2
 
@@ -4631,7 +4714,7 @@ Syntax:
 
 ::
 
-      <result> = alloca <type>[, <ty> <NumElements>][, align <alignment>]     ; yields {type*}:result
+      <result> = alloca [inalloca] <type> [, <ty> <NumElements>] [, align <alignment>]     ; yields {type*}:result
 
 Overview:
 """""""""
@@ -4908,7 +4991,7 @@ Syntax:
 
 ::
 
-      cmpxchg [volatile] <ty>* <pointer>, <ty> <cmp>, <ty> <new> [singlethread] <ordering>  ; yields {ty}
+      cmpxchg [volatile] <ty>* <pointer>, <ty> <cmp>, <ty> <new> [singlethread] <success ordering> <failure ordering> ; yields {ty}
 
 Overview:
 """""""""
@@ -4931,8 +5014,11 @@ type, and the type of '<pointer>' must be a pointer to that type. If the
 to modify the number or order of execution of this ``cmpxchg`` with
 other :ref:`volatile operations <volatile>`.
 
-The :ref:`ordering <ordering>` argument specifies how this ``cmpxchg``
-synchronizes with other atomic operations.
+The success and failure :ref:`ordering <ordering>` arguments specify how this
+``cmpxchg`` synchronizes with other atomic operations. The both ordering
+parameters must be at least ``monotonic``, the ordering constraint on failure
+must be no stronger than that on success, and the failure ordering cannot be
+either ``release`` or ``acq_rel``.
 
 The optional "``singlethread``" argument declares that the ``cmpxchg``
 is only atomic with respect to code (usually signal handlers) running in
@@ -4950,10 +5036,9 @@ operand is read and compared to '``<cmp>``'; if the read value is the
 equal, '``<new>``' is written. The original value at the location is
 returned.
 
-A successful ``cmpxchg`` is a read-modify-write instruction for the purpose
-of identifying release sequences. A failed ``cmpxchg`` is equivalent to an
-atomic load with an ordering parameter determined by dropping any
-``release`` part of the ``cmpxchg``'s ordering.
+A successful ``cmpxchg`` is a read-modify-write instruction for the purpose of
+identifying release sequences. A failed ``cmpxchg`` is equivalent to an atomic
+load with an ordering parameter determined the second ordering parameter.
 
 Example:
 """"""""
@@ -4967,7 +5052,7 @@ Example:
     loop:
       %cmp = phi i32 [ %orig, %entry ], [%old, %loop]
       %squared = mul i32 %cmp, %cmp
-      %old = cmpxchg i32* %ptr, i32 %cmp, i32 %squared          ; yields {i32}
+      %old = cmpxchg i32* %ptr, i32 %cmp, i32 %squared acq_rel monotonic ; yields {i32}
       %success = icmp eq i32 %cmp, %old
       br i1 %success, label %done, label %loop
 
@@ -5702,9 +5787,9 @@ is always a *no-op cast* because no bits change with this
 conversion. The conversion is done as if the ``value`` had been stored
 to memory and read back as type ``ty2``. Pointer (or vector of
 pointers) types may only be converted to other pointer (or vector of
-pointers) types with this instruction if the pointer sizes are
-equal. To convert pointers to other types, use the :ref:`inttoptr
-<i_inttoptr>` or :ref:`ptrtoint <i_ptrtoint>` instructions first.
+pointers) types with the same address space through this instruction.
+To convert pointers to other types, use the :ref:`inttoptr <i_inttoptr>`
+or :ref:`ptrtoint <i_ptrtoint>` instructions first.
 
 Example:
 """"""""
@@ -5715,6 +5800,51 @@ Example:
       %Y = bitcast i32* %x to sint*          ; yields sint*:%x
       %Z = bitcast <2 x int> %V to i64;        ; yields i64: %V
       %Z = bitcast <2 x i32*> %V to <2 x i64*> ; yields <2 x i64*>
+
+.. _i_addrspacecast:
+
+'``addrspacecast .. to``' Instruction
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      <result> = addrspacecast <pty> <ptrval> to <pty2>       ; yields pty2
+
+Overview:
+"""""""""
+
+The '``addrspacecast``' instruction converts ``ptrval`` from ``pty`` in
+address space ``n`` to type ``pty2`` in address space ``m``.
+
+Arguments:
+""""""""""
+
+The '``addrspacecast``' instruction takes a pointer or vector of pointer value
+to cast and a pointer type to cast it to, which must have a different
+address space.
+
+Semantics:
+""""""""""
+
+The '``addrspacecast``' instruction converts the pointer value
+``ptrval`` to type ``pty2``. It can be a *no-op cast* or a complex
+value modification, depending on the target and the address space
+pair. Pointer conversions within the same address space must be
+performed with the ``bitcast`` instruction. Note that if the address space
+conversion is legal then both result and operand refer to the same memory
+location.
+
+Example:
+""""""""
+
+.. code-block:: llvm
+
+      %X = addrspacecast i32* %x to i32 addrspace(1)*    ; yields i32 addrspace(1)*:%x
+      %Y = addrspacecast i32 addrspace(1)* %y to i64 addrspace(2)*    ; yields i64 addrspace(2)*:%y
+      %Z = addrspacecast <4 x i32*> %z to <4 x float addrspace(3)*>   ; yields <4 x float addrspace(3)*>:%z
 
 .. _otherops:
 
@@ -5993,7 +6123,7 @@ Overview:
 """""""""
 
 The '``select``' instruction is used to choose one value based on a
-condition, without branching.
+condition, without IR-level branching.
 
 Arguments:
 """"""""""
@@ -6816,6 +6946,39 @@ is lowered to a constant 0.
 Note that runtime support may be conditional on the privilege-level code is
 running at and the host platform.
 
+'``llvm.clear_cache``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare void @llvm.clear_cache(i8*, i8*)
+
+Overview:
+"""""""""
+
+The '``llvm.clear_cache``' intrinsic ensures visibility of modifications
+in the specified range to the execution unit of the processor. On
+targets with non-unified instruction and data cache, the implementation
+flushes the instruction cache.
+
+Semantics:
+""""""""""
+
+On platforms with coherent instruction and data caches (e.g. x86), this
+intrinsic is a nop. On platforms with non-coherent instruction and data
+cache (e.g. ARM, MIPS), the intrinsic is lowered either to appropriate
+instructions or a system call, if cache flushing requires special
+privileges.
+
+The default behavior is to emit a call to ``__clear_cache`` from the run
+time library.
+
+This instrinsic does *not* empty the instruction pipeline. Modifications
+of the current function are outside the scope of the intrinsic.
+
 Standard C Library Intrinsics
 -----------------------------
 
@@ -6877,7 +7040,7 @@ The '``llvm.memcpy.*``' intrinsics copy a block of memory from the
 source location to the destination location, which are not allowed to
 overlap. It copies "len" bytes of memory over. If the argument is known
 to be aligned to some boundary, this can be specified as the fourth
-argument, otherwise it should be set to 0 or 1.
+argument, otherwise it should be set to 0 or 1 (both meaning no alignment).
 
 '``llvm.memmove``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -6932,7 +7095,7 @@ The '``llvm.memmove.*``' intrinsics copy a block of memory from the
 source location to the destination location, which may overlap. It
 copies "len" bytes of memory over. If the argument is known to be
 aligned to some boundary, this can be specified as the fourth argument,
-otherwise it should be set to 0 or 1.
+otherwise it should be set to 0 or 1 (both meaning no alignment).
 
 '``llvm.memset.*``' Intrinsics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -6983,7 +7146,7 @@ Semantics:
 The '``llvm.memset.*``' intrinsics fill "len" bytes of memory starting
 at the destination location. If the argument is known to be aligned to
 some boundary, this can be specified as the fourth argument, otherwise
-it should be set to 0 or 1.
+it should be set to 0 or 1 (both meaning no alignment).
 
 '``llvm.sqrt.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -7381,7 +7544,7 @@ Semantics:
 """"""""""
 
 This function returns the same values as the libm ``fma`` functions
-would.
+would, and does not set errno.
 
 '``llvm.fabs.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -8189,7 +8352,8 @@ is equivalent to the expression a \* b + c, except that rounding will
 not be performed between the multiplication and addition steps if the
 code generator fuses the operations. Fusion is not guaranteed, even if
 the target platform supports it. If a fused multiply-add is required the
-corresponding llvm.fma.\* intrinsic function should be used instead.
+corresponding llvm.fma.\* intrinsic function should be used
+instead. This never sets errno, just as '``llvm.fma.*``'.
 
 Examples:
 """""""""
@@ -8426,6 +8590,8 @@ Memory Use Markers
 This class of intrinsics exists to information about the lifetime of
 memory objects and ranges where variables are immutable.
 
+.. _int_lifestart:
+
 '``llvm.lifetime.start``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -8456,6 +8622,8 @@ This intrinsic indicates that before this point in the code, the value
 of the memory pointed to by ``ptr`` is dead. This means that it is known
 to never be used and has an undefined value. A load from the pointer
 that precedes this intrinsic can be replaced with ``'undef'``.
+
+.. _int_lifeend:
 
 '``llvm.lifetime.end``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -8787,7 +8955,7 @@ level without an intrinsic, one would need to create additional basic blocks to
 handle the success/failure cases. This makes it difficult to stop the stack
 protector check from disrupting sibling tail calls in Codegen. With this
 intrinsic, we are able to generate the stack protector basic blocks late in
-codegen after the tail call decision has occured.
+codegen after the tail call decision has occurred.
 
 '``llvm.objectsize``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -8833,8 +9001,12 @@ on the ``min`` argument).
 Syntax:
 """""""
 
+This is an overloaded intrinsic. You can use ``llvm.expect`` on any
+integer bit width.
+
 ::
 
+      declare i1 @llvm.expect.i1(i1 <val>, i1 <expected_val>)
       declare i32 @llvm.expect.i32(i32 <val>, i32 <expected_val>)
       declare i64 @llvm.expect.i64(i64 <val>, i64 <expected_val>)
 
@@ -8882,3 +9054,10 @@ Semantics:
 
 This intrinsic does nothing, and it's removed by optimizers and ignored
 by codegen.
+
+Stack Map Intrinsics
+--------------------
+
+LLVM provides experimental intrinsics to support runtime patching
+mechanisms commonly desired in dynamic language JITs. These intrinsics
+are described in :doc:`StackMaps`.

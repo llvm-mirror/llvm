@@ -159,7 +159,7 @@ void DAGTypeLegalizer::PerformExpensiveChecks() {
         if (Mapped & 128)
           dbgs() << " WidenedVectors";
         dbgs() << "\n";
-        llvm_unreachable(0);
+        llvm_unreachable(nullptr);
       }
     }
   }
@@ -433,7 +433,7 @@ NodeDone:
 
     if (Failed) {
       I->dump(&DAG); dbgs() << "\n";
-      llvm_unreachable(0);
+      llvm_unreachable(nullptr);
     }
   }
 #endif
@@ -634,7 +634,7 @@ namespace {
       : SelectionDAG::DAGUpdateListener(dtl.getDAG()),
         DTL(dtl), NodesToAnalyze(nta) {}
 
-    virtual void NodeDeleted(SDNode *N, SDNode *E) {
+    void NodeDeleted(SDNode *N, SDNode *E) override {
       assert(N->getNodeId() != DAGTypeLegalizer::ReadyToProcess &&
              N->getNodeId() != DAGTypeLegalizer::Processed &&
              "Invalid node ID for RAUW deletion!");
@@ -655,7 +655,7 @@ namespace {
         NodesToAnalyze.insert(E);
     }
 
-    virtual void NodeUpdated(SDNode *N) {
+    void NodeUpdated(SDNode *N) override {
       // Node updates can mean pretty much anything.  It is possible that an
       // operand was set to something already processed (f.e.) in which case
       // this node could become ready.  Recompute its flags.
@@ -736,7 +736,7 @@ void DAGTypeLegalizer::SetPromotedInteger(SDValue Op, SDValue Result) {
   AnalyzeNewValue(Result);
 
   SDValue &OpEntry = PromotedIntegers[Op];
-  assert(OpEntry.getNode() == 0 && "Node is already promoted!");
+  assert(!OpEntry.getNode() && "Node is already promoted!");
   OpEntry = Result;
 }
 
@@ -747,7 +747,7 @@ void DAGTypeLegalizer::SetSoftenedFloat(SDValue Op, SDValue Result) {
   AnalyzeNewValue(Result);
 
   SDValue &OpEntry = SoftenedFloats[Op];
-  assert(OpEntry.getNode() == 0 && "Node is already converted to integer!");
+  assert(!OpEntry.getNode() && "Node is already converted to integer!");
   OpEntry = Result;
 }
 
@@ -761,7 +761,7 @@ void DAGTypeLegalizer::SetScalarizedVector(SDValue Op, SDValue Result) {
   AnalyzeNewValue(Result);
 
   SDValue &OpEntry = ScalarizedVectors[Op];
-  assert(OpEntry.getNode() == 0 && "Node is already scalarized!");
+  assert(!OpEntry.getNode() && "Node is already scalarized!");
   OpEntry = Result;
 }
 
@@ -787,7 +787,7 @@ void DAGTypeLegalizer::SetExpandedInteger(SDValue Op, SDValue Lo,
 
   // Remember that this is the result of the node.
   std::pair<SDValue, SDValue> &Entry = ExpandedIntegers[Op];
-  assert(Entry.first.getNode() == 0 && "Node already expanded");
+  assert(!Entry.first.getNode() && "Node already expanded");
   Entry.first = Lo;
   Entry.second = Hi;
 }
@@ -814,7 +814,7 @@ void DAGTypeLegalizer::SetExpandedFloat(SDValue Op, SDValue Lo,
 
   // Remember that this is the result of the node.
   std::pair<SDValue, SDValue> &Entry = ExpandedFloats[Op];
-  assert(Entry.first.getNode() == 0 && "Node already expanded");
+  assert(!Entry.first.getNode() && "Node already expanded");
   Entry.first = Lo;
   Entry.second = Hi;
 }
@@ -843,7 +843,7 @@ void DAGTypeLegalizer::SetSplitVector(SDValue Op, SDValue Lo,
 
   // Remember that this is the result of the node.
   std::pair<SDValue, SDValue> &Entry = SplitVectors[Op];
-  assert(Entry.first.getNode() == 0 && "Node already split");
+  assert(!Entry.first.getNode() && "Node already split");
   Entry.first = Lo;
   Entry.second = Hi;
 }
@@ -855,7 +855,7 @@ void DAGTypeLegalizer::SetWidenedVector(SDValue Op, SDValue Result) {
   AnalyzeNewValue(Result);
 
   SDValue &OpEntry = WidenedVectors[Op];
-  assert(OpEntry.getNode() == 0 && "Node already widened!");
+  assert(!OpEntry.getNode() && "Node already widened!");
   OpEntry = Result;
 }
 
@@ -958,20 +958,6 @@ SDValue DAGTypeLegalizer::DisintegrateMERGE_VALUES(SDNode *N, unsigned ResNo) {
   return SDValue(N->getOperand(ResNo));
 }
 
-/// GetSplitDestVTs - Compute the VTs needed for the low/hi parts of a type
-/// which is split into two not necessarily identical pieces.
-void DAGTypeLegalizer::GetSplitDestVTs(EVT InVT, EVT &LoVT, EVT &HiVT) {
-  // Currently all types are split in half.
-  if (!InVT.isVector()) {
-    LoVT = HiVT = TLI.getTypeToTransformTo(*DAG.getContext(), InVT);
-  } else {
-    unsigned NumElements = InVT.getVectorNumElements();
-    assert(!(NumElements & 1) && "Splitting vector, but not in half!");
-    LoVT = HiVT = EVT::getVectorVT(*DAG.getContext(),
-                                   InVT.getVectorElementType(), NumElements/2);
-  }
-}
-
 /// GetPairElements - Use ISD::EXTRACT_ELEMENT nodes to extract the low and
 /// high parts of the given value.
 void DAGTypeLegalizer::GetPairElements(SDValue Pair,
@@ -988,10 +974,7 @@ SDValue DAGTypeLegalizer::GetVectorElementPointer(SDValue VecPtr, EVT EltVT,
                                                   SDValue Index) {
   SDLoc dl(Index);
   // Make sure the index type is big enough to compute in.
-  if (Index.getValueType().bitsGT(TLI.getPointerTy()))
-    Index = DAG.getNode(ISD::TRUNCATE, dl, TLI.getPointerTy(), Index);
-  else
-    Index = DAG.getNode(ISD::ZERO_EXTEND, dl, TLI.getPointerTy(), Index);
+  Index = DAG.getZExtOrTrunc(Index, dl, TLI.getPointerTy());
 
   // Calculate the element offset and add it to the pointer.
   unsigned EltSize = EltVT.getSizeInBits() / 8; // FIXME: should be ABI size.
@@ -1024,7 +1007,7 @@ SDValue DAGTypeLegalizer::LibCallify(RTLIB::Libcall LC, SDNode *N,
   unsigned NumOps = N->getNumOperands();
   SDLoc dl(N);
   if (NumOps == 0) {
-    return TLI.makeLibCall(DAG, LC, N->getValueType(0), 0, 0, isSigned,
+    return TLI.makeLibCall(DAG, LC, N->getValueType(0), nullptr, 0, isSigned,
                            dl).first;
   } else if (NumOps == 1) {
     SDValue Op = N->getOperand(0);

@@ -17,7 +17,16 @@ class SIReg <string n, bits<16> encoding = 0> : Register<n> {
 }
 
 // Special Registers
-def VCC : SIReg<"VCC", 106>;
+def VCC_LO : SIReg<"vcc_lo", 106>;
+def VCC_HI : SIReg<"vcc_hi", 107>;
+
+// VCC for 64-bit instructions
+def VCC : RegisterWithSubRegs<"VCC", [VCC_LO, VCC_HI]> {
+  let Namespace = "AMDGPU";
+  let SubRegIndices = [sub0, sub1];
+  let HWEncoding = 106;
+}
+
 def EXEC : SIReg<"EXEC", 126>;
 def SCC : SIReg<"SCC", 253>;
 def M0 : SIReg <"M0", 124>;
@@ -150,7 +159,7 @@ def M0Reg : RegisterClass<"AMDGPU", [i32], 32, (add M0)>;
 
 // Register class for all scalar registers (SGPRs + Special Registers)
 def SReg_32 : RegisterClass<"AMDGPU", [f32, i32], 32,
-  (add SGPR_32, M0Reg)
+  (add SGPR_32, M0Reg, VCC_LO)
 >;
 
 def SGPR_64 : RegisterClass<"AMDGPU", [v2i32, i64], 64, (add SGPR_64Regs)>;
@@ -159,11 +168,11 @@ def SReg_64 : RegisterClass<"AMDGPU", [v2i32, i64, i1], 64,
   (add SGPR_64Regs, VCCReg, EXECReg)
 >;
 
-def SReg_128 : RegisterClass<"AMDGPU", [i128], 128, (add SGPR_128)>;
+def SReg_128 : RegisterClass<"AMDGPU", [i128, v4i32], 128, (add SGPR_128)>;
 
 def SReg_256 : RegisterClass<"AMDGPU", [v32i8, v8i32, v8f32], 256, (add SGPR_256)>;
 
-def SReg_512 : RegisterClass<"AMDGPU", [v64i8], 512, (add SGPR_512)>;
+def SReg_512 : RegisterClass<"AMDGPU", [v64i8, v16i32], 512, (add SGPR_512)>;
 
 // Register class for all vector registers (VGPRs + Interploation Registers)
 def VReg_32 : RegisterClass<"AMDGPU", [i32, f32, v1i32], 32, (add VGPR_32)>;
@@ -174,7 +183,7 @@ def VReg_96 : RegisterClass<"AMDGPU", [untyped], 96, (add VGPR_96)> {
   let Size = 96;
 }
 
-def VReg_128 : RegisterClass<"AMDGPU", [v4i32, v4f32], 128, (add VGPR_128)>;
+def VReg_128 : RegisterClass<"AMDGPU", [v4i32, v4f32, i128], 128, (add VGPR_128)>;
 
 def VReg_256 : RegisterClass<"AMDGPU", [v32i8, v8i32, v8f32], 256, (add VGPR_256)>;
 

@@ -531,6 +531,10 @@ class InstSS<bits<8> op, dag outs, dag ins, string asmstr, list<dag> pattern>
 //   Ternary:
 //     One register output operand and three register input operands.
 //
+//   LoadAndOp:
+//     One output operand and two input operands.  The first input operand
+//     is a register and the second is an address.
+//
 //   CmpSwap:
 //     One output operand and three input operands.  The first two
 //     operands are registers and the third is an address.  The instruction
@@ -1267,6 +1271,15 @@ class TernaryRXF<string mnemonic, bits<16> opcode, SDPatternOperator operator,
   let AccessBytes = bytes;
 }
 
+class LoadAndOpRSY<string mnemonic, bits<16> opcode, SDPatternOperator operator,
+                  RegisterOperand cls, AddressingMode mode = bdaddr20only>
+  : InstRSY<opcode, (outs cls:$R1), (ins cls:$R3, mode:$BD2),
+            mnemonic#"\t$R1, $R3, $BD2",
+            [(set cls:$R1, (operator mode:$BD2, cls:$R3))]> {
+  let mayLoad = 1;
+  let mayStore = 1;
+}
+
 class CmpSwapRS<string mnemonic, bits<8> opcode, SDPatternOperator operator,
                 RegisterOperand cls, AddressingMode mode = bdaddr12only>
   : InstRS<opcode, (outs cls:$R1), (ins cls:$R1src, cls:$R3, mode:$BD2),
@@ -1586,6 +1599,13 @@ class BinaryAliasRIL<SDPatternOperator operator, RegisterOperand cls,
   : Alias<6, (outs cls:$R1), (ins cls:$R1src, imm:$I2),
           [(set cls:$R1, (operator cls:$R1src, imm:$I2))]> {
   let Constraints = "$R1 = $R1src";
+}
+
+// An alias of a CompareRI, but with different register sizes.
+class CompareAliasRI<SDPatternOperator operator, RegisterOperand cls,
+                     Immediate imm>
+  : Alias<4, (outs), (ins cls:$R1, imm:$I2), [(operator cls:$R1, imm:$I2)]> {
+  let isCompare = 1;
 }
 
 // An alias of a RotateSelectRIEf, but with different register sizes.

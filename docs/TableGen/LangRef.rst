@@ -2,8 +2,6 @@
 TableGen Language Reference
 ===========================
 
-.. sectionauthor:: Sean Silva <silvas@purdue.edu>
-
 .. contents::
    :local:
 
@@ -18,7 +16,7 @@ This document is meant to be a normative spec about the TableGen language
 in and of itself (i.e. how to understand a given construct in terms of how
 it affects the final set of records represented by the TableGen file). If
 you are unsure if this document is really what you are looking for, please
-read :doc:`/TableGenFundamentals` first.
+read the :doc:`introduction to TableGen <index>` first.
 
 Notation
 ========
@@ -73,6 +71,9 @@ TableGen also has two string-like literals:
 .. productionlist::
    TokString: '"' <non-'"' characters and C-like escapes> '"'
    TokCodeFragment: "[{" <shortest text not containing "}]"> "}]"
+
+:token:`TokCodeFragment` is essentially a multiline string literal
+delimited by ``[{`` and ``}]``.
 
 .. note::
    The current implementation accepts the following C-like escapes::

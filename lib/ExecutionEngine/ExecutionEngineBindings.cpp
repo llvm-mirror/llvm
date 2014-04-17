@@ -43,6 +43,11 @@ inline LLVMTargetLibraryInfoRef wrap(const TargetLibraryInfo *P) {
   return reinterpret_cast<LLVMTargetLibraryInfoRef>(X);
 }
 
+inline LLVMTargetMachineRef wrap(const TargetMachine *P) {
+  return
+  reinterpret_cast<LLVMTargetMachineRef>(const_cast<TargetMachine*>(P));
+}
+
 /*===-- Operations on generic values --------------------------------------===*/
 
 LLVMGenericValueRef LLVMCreateGenericValueOfInt(LLVMTypeRef Ty,
@@ -323,6 +328,11 @@ LLVMTargetDataRef LLVMGetExecutionEngineTargetData(LLVMExecutionEngineRef EE) {
   return wrap(unwrap(EE)->getDataLayout());
 }
 
+LLVMTargetMachineRef
+LLVMGetExecutionEngineTargetMachine(LLVMExecutionEngineRef EE) {
+  return wrap(unwrap(EE)->getTargetMachine());
+}
+
 void LLVMAddGlobalMapping(LLVMExecutionEngineRef EE, LLVMValueRef Global,
                           void* Addr) {
   unwrap(EE)->addGlobalMapping(unwrap<GlobalValue>(Global), Addr);
@@ -350,17 +360,17 @@ public:
   SimpleBindingMemoryManager(const SimpleBindingMMFunctions& Functions,
                              void *Opaque);
   virtual ~SimpleBindingMemoryManager();
-  
-  virtual uint8_t *allocateCodeSection(
-    uintptr_t Size, unsigned Alignment, unsigned SectionID,
-    StringRef SectionName);
 
-  virtual uint8_t *allocateDataSection(
-    uintptr_t Size, unsigned Alignment, unsigned SectionID,
-    StringRef SectionName, bool isReadOnly);
+  uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID,
+                               StringRef SectionName) override;
 
-  virtual bool finalizeMemory(std::string *ErrMsg);
-  
+  uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID, StringRef SectionName,
+                               bool isReadOnly) override;
+
+  bool finalizeMemory(std::string *ErrMsg) override;
+
 private:
   SimpleBindingMMFunctions Functions;
   void *Opaque;

@@ -28,14 +28,14 @@ namespace {
       initializeCFGOnlyViewerPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &F) {
+    bool runOnFunction(Function &F) override {
       F.viewCFG();
       return false;
     }
 
-    void print(raw_ostream &OS, const Module* = 0) const {}
+    void print(raw_ostream &OS, const Module* = 0) const override {}
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
     }
   };
@@ -51,14 +51,14 @@ namespace {
       initializeCFGOnlyViewerPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &F) {
+    bool runOnFunction(Function &F) override {
       F.viewCFGOnly();
       return false;
     }
 
-    void print(raw_ostream &OS, const Module* = 0) const {}
+    void print(raw_ostream &OS, const Module* = 0) const override {}
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
     }
   };
@@ -75,12 +75,12 @@ namespace {
       initializeCFGPrinterPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &F) {
+    bool runOnFunction(Function &F) override {
       std::string Filename = "cfg." + F.getName().str() + ".dot";
       errs() << "Writing '" << Filename << "'...";
       
       std::string ErrorInfo;
-      raw_fd_ostream File(Filename.c_str(), ErrorInfo);
+      raw_fd_ostream File(Filename.c_str(), ErrorInfo, sys::fs::F_Text);
 
       if (ErrorInfo.empty())
         WriteGraph(File, (const Function*)&F);
@@ -90,9 +90,9 @@ namespace {
       return false;
     }
 
-    void print(raw_ostream &OS, const Module* = 0) const {}
+    void print(raw_ostream &OS, const Module* = 0) const override {}
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
     }
   };
@@ -108,13 +108,13 @@ namespace {
     CFGOnlyPrinter() : FunctionPass(ID) {
       initializeCFGOnlyPrinterPass(*PassRegistry::getPassRegistry());
     }
-    
-    virtual bool runOnFunction(Function &F) {
+
+    bool runOnFunction(Function &F) override {
       std::string Filename = "cfg." + F.getName().str() + ".dot";
       errs() << "Writing '" << Filename << "'...";
 
       std::string ErrorInfo;
-      raw_fd_ostream File(Filename.c_str(), ErrorInfo);
+      raw_fd_ostream File(Filename.c_str(), ErrorInfo, sys::fs::F_Text);
       
       if (ErrorInfo.empty())
         WriteGraph(File, (const Function*)&F, true);
@@ -123,9 +123,9 @@ namespace {
       errs() << "\n";
       return false;
     }
-    void print(raw_ostream &OS, const Module* = 0) const {}
+    void print(raw_ostream &OS, const Module* = 0) const override {}
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
     }
   };

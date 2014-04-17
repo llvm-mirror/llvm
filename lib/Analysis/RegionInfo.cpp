@@ -15,10 +15,9 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/RegionIterator.h"
-#include "llvm/Assembly/Writer.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
 #include <set>
 
@@ -215,7 +214,7 @@ std::string Region::getNameStr() const {
   if (getEntry()->getName().empty()) {
     raw_string_ostream OS(entryName);
 
-    WriteAsOperand(OS, getEntry(), false);
+    getEntry()->printAsOperand(OS, false);
   } else
     entryName = getEntry()->getName();
 
@@ -223,7 +222,7 @@ std::string Region::getNameStr() const {
     if (getExit()->getName().empty()) {
       raw_string_ostream OS(exitName);
 
-      WriteAsOperand(OS, getExit(), false);
+      getExit()->printAsOperand(OS, false);
     } else
       exitName = getExit()->getName();
   } else
@@ -439,8 +438,8 @@ void Region::print(raw_ostream &OS, bool print_tree, unsigned level,
     OS.indent(level*2 + 2);
 
     if (Style == PrintBB) {
-      for (const_block_iterator I = block_begin(), E = block_end(); I != E; ++I)
-        OS << (*I)->getName() << ", "; // TODO: remove the last ","
+      for (const auto &BB : blocks())
+        OS << BB->getName() << ", "; // TODO: remove the last ","
     } else if (Style == PrintRN) {
       for (const_element_iterator I = element_begin(), E = element_end(); I!=E; ++I)
         OS << **I << ", "; // TODO: remove the last ",
@@ -707,7 +706,7 @@ void RegionInfo::Calculate(Function &F) {
 bool RegionInfo::runOnFunction(Function &F) {
   releaseMemory();
 
-  DT = &getAnalysis<DominatorTree>();
+  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   PDT = &getAnalysis<PostDominatorTree>();
   DF = &getAnalysis<DominanceFrontier>();
 
@@ -721,7 +720,7 @@ bool RegionInfo::runOnFunction(Function &F) {
 
 void RegionInfo::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
-  AU.addRequiredTransitive<DominatorTree>();
+  AU.addRequiredTransitive<DominatorTreeWrapperPass>();
   AU.addRequired<PostDominatorTree>();
   AU.addRequired<DominanceFrontier>();
 }
@@ -847,7 +846,7 @@ void RegionInfo::splitBlock(BasicBlock* NewBB, BasicBlock *OldBB)
 char RegionInfo::ID = 0;
 INITIALIZE_PASS_BEGIN(RegionInfo, "regions",
                 "Detect single entry single exit regions", true, true)
-INITIALIZE_PASS_DEPENDENCY(DominatorTree)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(PostDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(DominanceFrontier)
 INITIALIZE_PASS_END(RegionInfo, "regions",

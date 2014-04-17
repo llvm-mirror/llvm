@@ -12,11 +12,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "PPCMCAsmInfo.h"
+#include "llvm/ADT/Triple.h"
+
 using namespace llvm;
 
 void PPCMCAsmInfoDarwin::anchor() { }
 
-PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit) {
+PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit, const Triple& T) {
   if (is64Bit) {
     PointerSize = CalleeSaveStackSlotSize = 8;
   }
@@ -30,24 +32,29 @@ PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit) {
 
   AssemblerDialect = 1;           // New-Style mnemonics.
   SupportsDebugInformation= true; // Debug information.
+
+  // The installed assembler for OSX < 10.6 lacks some directives.
+  // FIXME: this should really be a check on the assembler characteristics
+  // rather than OS version
+  if (T.isMacOSX() && T.isMacOSXVersionLT(10, 6))
+    HasWeakDefCanBeHiddenDirective = false;
+
+  UseIntegratedAssembler = true;
 }
 
 void PPCLinuxMCAsmInfo::anchor() { }
 
-PPCLinuxMCAsmInfo::PPCLinuxMCAsmInfo(bool is64Bit) {
+PPCLinuxMCAsmInfo::PPCLinuxMCAsmInfo(bool is64Bit, const Triple& T) {
   if (is64Bit) {
     PointerSize = CalleeSaveStackSlotSize = 8;
   }
-  IsLittleEndian = false;
+  IsLittleEndian = T.getArch() == Triple::ppc64le;
 
   // ".comm align is in bytes but .align is pow-2."
   AlignmentIsInBytes = false;
 
   CommentString = "#";
-  GlobalPrefix = "";
-  PrivateGlobalPrefix = ".L";
-  WeakRefDirective = "\t.weak\t";
-  
+
   // Uses '.section' before '.bss' directive
   UsesELFSectionDirectiveForBSS = true;  
 
@@ -66,5 +73,10 @@ PPCLinuxMCAsmInfo::PPCLinuxMCAsmInfo(bool is64Bit) {
   ZeroDirective = "\t.space\t";
   Data64bitsDirective = is64Bit ? "\t.quad\t" : 0;
   AssemblerDialect = 1;           // New-Style mnemonics.
+
+  if (T.getOS() == llvm::Triple::FreeBSD ||
+      (T.getOS() == llvm::Triple::NetBSD && !is64Bit) ||
+      (T.getOS() == llvm::Triple::OpenBSD && !is64Bit))
+    UseIntegratedAssembler = true;
 }
 

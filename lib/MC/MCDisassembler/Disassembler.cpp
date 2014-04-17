@@ -24,9 +24,6 @@
 #include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/TargetRegistry.h"
 
-namespace llvm {
-class Target;
-} // namespace llvm
 using namespace llvm;
 
 // LLVMCreateDisasm() creates a disassembler for the TripleName.  Symbolic
@@ -77,17 +74,15 @@ LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU,
   if (!DisAsm)
     return 0;
 
-  OwningPtr<MCRelocationInfo> RelInfo(
-    TheTarget->createMCRelocationInfo(Triple, *Ctx));
+  std::unique_ptr<MCRelocationInfo> RelInfo(
+      TheTarget->createMCRelocationInfo(Triple, *Ctx));
   if (!RelInfo)
     return 0;
 
-  OwningPtr<MCSymbolizer> Symbolizer(
-    TheTarget->createMCSymbolizer(Triple, GetOpInfo, SymbolLookUp, DisInfo,
-                                  Ctx, RelInfo.take()));
-  DisAsm->setSymbolizer(Symbolizer);
-  DisAsm->setupForSymbolicDisassembly(GetOpInfo, SymbolLookUp, DisInfo,
-                                      Ctx, RelInfo);
+  std::unique_ptr<MCSymbolizer> Symbolizer(TheTarget->createMCSymbolizer(
+      Triple, GetOpInfo, SymbolLookUp, DisInfo, Ctx, RelInfo.release()));
+  DisAsm->setSymbolizer(std::move(Symbolizer));
+
   // Set up the instruction printer.
   int AsmPrinterVariant = MAI->getAssemblerDialect();
   MCInstPrinter *IP = TheTarget->createMCInstPrinter(AsmPrinterVariant,
@@ -132,11 +127,11 @@ class DisasmMemoryObject : public MemoryObject {
 public:
   DisasmMemoryObject(uint8_t *bytes, uint64_t size, uint64_t basePC) :
                      Bytes(bytes), Size(size), BasePC(basePC) {}
- 
-  uint64_t getBase() const { return BasePC; }
-  uint64_t getExtent() const { return Size; }
 
-  int readByte(uint64_t Addr, uint8_t *Byte) const {
+  uint64_t getBase() const override { return BasePC; }
+  uint64_t getExtent() const override { return Size; }
+
+  int readByte(uint64_t Addr, uint8_t *Byte) const override {
     if (Addr - BasePC >= Size)
       return -1;
     *Byte = Bytes[Addr - BasePC];
@@ -298,6 +293,7 @@ size_t LLVMDisasmInstruction(LLVMDisasmContextRef DCR, uint8_t *Bytes,
       emitLatency(DC, Inst);
 
     emitComments(DC, FormattedOS);
+    OS.flush();
 
     assert(OutStringSize != 0 && "Output buffer cannot be zero size");
     size_t OutputSize = std::min(OutStringSize-1, InsnStr.size());

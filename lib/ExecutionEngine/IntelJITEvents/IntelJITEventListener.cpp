@@ -16,11 +16,10 @@
 #include "llvm/ExecutionEngine/JITEventListener.h"
 
 #define DEBUG_TYPE "amplifier-jit-event-listener"
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/ExecutionEngine/ObjectImage.h"
@@ -28,7 +27,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Errno.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
 #include "EventListenerCommon.h"
 #include "IntelJITEventsWrapper.h"
 
@@ -40,7 +39,7 @@ namespace {
 class IntelJITEventListener : public JITEventListener {
   typedef DenseMap<void*, unsigned int> MethodIDMap;
 
-  OwningPtr<IntelJITEventsWrapper> Wrapper;
+  std::unique_ptr<IntelJITEventsWrapper> Wrapper;
   MethodIDMap MethodIDs;
   FilenameCache Filenames;
 
@@ -194,11 +193,10 @@ void IntelJITEventListener::NotifyObjectEmitted(const ObjectImage &Obj) {
   MethodAddressVector Functions;
 
   // Use symbol info to iterate functions in the object.
-  error_code ec;
   for (object::symbol_iterator I = Obj.begin_symbols(),
                                E = Obj.end_symbols();
-                        I != E && !ec;
-                        I.increment(ec)) {
+                        I != E;
+                        ++I) {
     std::vector<LineNumberInfo> LineInfo;
     std::string SourceFileName;
 
@@ -235,7 +233,7 @@ void IntelJITEventListener::NotifyObjectEmitted(const ObjectImage &Obj) {
           FunctionMessage.line_number_table = 0;
         } else {
           SourceFileName = Lines.front().second.getFileName();
-          FunctionMessage.source_file_name = (char *)SourceFileName.c_str();
+          FunctionMessage.source_file_name = const_cast<char *>(SourceFileName.c_str());
           FunctionMessage.line_number_size = LineInfo.size();
           FunctionMessage.line_number_table = &*LineInfo.begin();
         }

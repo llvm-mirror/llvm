@@ -10,8 +10,8 @@
 #ifndef LLVM_MC_TARGETPARSER_H
 #define LLVM_MC_TARGETPARSER_H
 
-#include "llvm/MC/MCParser/MCAsmParserExtension.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCParser/MCAsmParserExtension.h"
 
 namespace llvm {
 class MCStreamer;
@@ -181,6 +181,8 @@ public:
                                             MCContext &Ctx) {
     return 0;
   }
+
+  virtual void onLabelParsed(MCSymbol *Symbol) { };
 };
 
 } // End llvm namespace

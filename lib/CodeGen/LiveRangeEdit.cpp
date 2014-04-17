@@ -164,12 +164,10 @@ void LiveRangeEdit::eraseVirtReg(unsigned Reg) {
 
 bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
                                SmallVectorImpl<MachineInstr*> &Dead) {
-  MachineInstr *DefMI = 0, *UseMI = 0;
+  MachineInstr *DefMI = nullptr, *UseMI = nullptr;
 
   // Check that there is a single def and a single use.
-  for (MachineRegisterInfo::reg_nodbg_iterator I = MRI.reg_nodbg_begin(LI->reg),
-       E = MRI.reg_nodbg_end(); I != E; ++I) {
-    MachineOperand &MO = I.getOperand();
+  for (MachineOperand &MO : MRI.reg_nodbg_operands(LI->reg)) {
     MachineInstr *MI = MO.getParent();
     if (MO.isDef()) {
       if (DefMI && DefMI != MI)
@@ -199,7 +197,7 @@ bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
   // We also need to make sure it is safe to move the load.
   // Assume there are stores between DefMI and UseMI.
   bool SawStore = true;
-  if (!DefMI->isSafeToMove(&TII, 0, SawStore))
+  if (!DefMI->isSafeToMove(&TII, nullptr, SawStore))
     return false;
 
   DEBUG(dbgs() << "Try to fold single def: " << *DefMI
@@ -215,7 +213,7 @@ bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
   DEBUG(dbgs() << "                folded: " << *FoldMI);
   LIS.ReplaceMachineInstrInMaps(UseMI, FoldMI);
   UseMI->eraseFromParent();
-  DefMI->addRegisterDead(LI->reg, 0);
+  DefMI->addRegisterDead(LI->reg, nullptr);
   Dead.push_back(DefMI);
   ++NumDCEFoldedLoads;
   return true;
@@ -238,7 +236,7 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
 
   // Use the same criteria as DeadMachineInstructionElim.
   bool SawStore = false;
-  if (!MI->isSafeToMove(&TII, 0, SawStore)) {
+  if (!MI->isSafeToMove(&TII, nullptr, SawStore)) {
     DEBUG(dbgs() << "Can't delete: " << Idx << '\t' << *MI);
     return;
   }
@@ -414,6 +412,6 @@ LiveRangeEdit::calculateRegClassAndHint(MachineFunction &MF,
     if (MRI.recomputeRegClass(LI.reg, MF.getTarget()))
       DEBUG(dbgs() << "Inflated " << PrintReg(LI.reg) << " to "
                    << MRI.getRegClass(LI.reg)->getName() << '\n');
-    VRAI.CalculateWeightAndHint(LI);
+    VRAI.calculateSpillWeightAndHint(LI);
   }
 }

@@ -36,13 +36,13 @@ return:                                           ; preds = %for.cond.preheader,
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!12}
 
-!0 = metadata !{i32 786449, metadata !11, i32 12, metadata !"clang version 3.3 (trunk 168918) (llvm/trunk 168920)", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !3, null, metadata !""} ; [ DW_TAG_compile_unit ] [MultiSource/Benchmarks/Olden/bh/newbh.c] [DW_LANG_C99]
-!1 = metadata !{metadata !2}
-!2 = metadata !{i32 0}
-!3 = metadata !{null}
+!0 = metadata !{i32 786449, metadata !11, i32 12, metadata !"clang version 3.3 (trunk 168918) (llvm/trunk 168920)", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !2, null, metadata !""} ; [ DW_TAG_compile_unit ] [MultiSource/Benchmarks/Olden/bh/newbh.c] [DW_LANG_C99]
+!2 = metadata !{}
 !4 = metadata !{i32 786689, null, metadata !"hg", metadata !5, i32 67109589, metadata !6, i32 0, i32 0} ; [ DW_TAG_arg_variable ] [hg] [line 725]
 !5 = metadata !{i32 786473, metadata !11} ; [ DW_TAG_file_type ]
 !6 = metadata !{i32 786454, metadata !11, null, metadata !"hgstruct", i32 492, i64 0, i64 0, i64 0, i32 0, metadata !7} ; [ DW_TAG_typedef ] [hgstruct] [line 492, size 0, align 0, offset 0] [from ]
 !7 = metadata !{i32 786451, metadata !11, null, metadata !"", i32 487, i64 512, i64 64, i32 0, i32 0, null, null, i32 0, null, i32 0, null} ; [ DW_TAG_structure_type ] [line 487, size 512, align 64, offset 0] [def] [from ]
 !11 = metadata !{metadata !"MultiSource/Benchmarks/Olden/bh/newbh.c", metadata !"MultiSource/Benchmarks/Olden/bh"}
+!12 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

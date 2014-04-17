@@ -183,23 +183,6 @@ TEST_F(StringMapTest, IterationTest) {
   }
 }
 
-} // end anonymous namespace
-
-namespace llvm {
-
-template <>
-class StringMapEntryInitializer<uint32_t> {
-public:
-  template <typename InitTy>
-  static void Initialize(StringMapEntry<uint32_t> &T, InitTy InitVal) {
-    T.second = InitVal;
-  }
-};
-
-} // end llvm namespace
-
-namespace {
-
 // Test StringMapEntry::Create() method.
 TEST_F(StringMapTest, StringMapEntryTest) {
   StringMap<uint32_t>::value_type* entry =
@@ -218,6 +201,21 @@ TEST_F(StringMapTest, InsertTest) {
           testKeyFirst, testKeyFirst + testKeyLength, 
           testMap.getAllocator(), 1u));
   assertSingleItemMap();
+}
+
+// Create a non-default constructable value
+struct StringMapTestStruct {
+  StringMapTestStruct(int i) : i(i) {}
+  StringMapTestStruct() LLVM_DELETED_FUNCTION;
+  int i;
+};
+
+TEST_F(StringMapTest, NonDefaultConstructable) {
+  StringMap<StringMapTestStruct> t;
+  t.GetOrCreateValue("Test", StringMapTestStruct(123));
+  StringMap<StringMapTestStruct>::iterator iter = t.find("Test");
+  ASSERT_NE(iter, t.end());
+  ASSERT_EQ(iter->second.i, 123);
 }
 
 } // end anonymous namespace

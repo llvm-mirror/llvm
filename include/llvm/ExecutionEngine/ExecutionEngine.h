@@ -18,11 +18,11 @@
 #include "llvm-c/ExecutionEngine.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/ValueMap.h"
+#include "llvm/IR/ValueHandle.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/MC/MCCodeGenInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Mutex.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include <map>
@@ -47,6 +47,11 @@ class ObjectCache;
 class RTDyldMemoryManager;
 class Triple;
 class Type;
+
+namespace object {
+  class Archive;
+  class ObjectFile;
+}
 
 /// \brief Helper class for helping synchronize access to the global address map
 /// table.
@@ -106,7 +111,7 @@ class ExecutionEngine {
   ExecutionEngineState EEState;
 
   /// The target data for the platform for which execution is being performed.
-  const DataLayout *TD;
+  const DataLayout *DL;
 
   /// Whether lazy JIT compilation is enabled.
   bool CompilingLazily;
@@ -125,7 +130,7 @@ protected:
   /// optimize for the case where there is only one module.
   SmallVector<Module*, 1> Modules;
 
-  void setDataLayout(const DataLayout *td) { TD = td; }
+  void setDataLayout(const DataLayout *Val) { DL = Val; }
 
   /// getMemoryforGV - Allocate memory for a global variable.
   virtual char *getMemoryForGV(const GlobalVariable *GV);
@@ -153,7 +158,7 @@ protected:
   void *(*LazyFunctionCreator)(const std::string &);
 
 public:
-  /// lock - This lock protects the ExecutionEngine, JIT, JITResolver and
+  /// lock - This lock protects the ExecutionEngine, MCJIT, JIT, JITResolver and
   /// JITEmitter classes.  It must be held while changing the internal state of
   /// any of those classes.
   sys::Mutex lock;
@@ -204,9 +209,36 @@ public:
     Modules.push_back(M);
   }
 
+  /// addObjectFile - Add an ObjectFile to the execution engine.
+  ///
+  /// This method is only supported by MCJIT.  MCJIT will immediately load the
+  /// object into memory and adds its symbols to the list used to resolve
+  /// external symbols while preparing other objects for execution.
+  ///
+  /// Objects added using this function will not be made executable until
+  /// needed by another object.
+  ///
+  /// MCJIT will take ownership of the ObjectFile.
+  virtual void addObjectFile(object::ObjectFile *O) {
+    llvm_unreachable(
+      "ExecutionEngine subclass doesn't implement addObjectFile.");
+  }
+
+  /// addArchive - Add an Archive to the execution engine.
+  ///
+  /// This method is only supported by MCJIT.  MCJIT will use the archive to
+  /// resolve external symbols in objects it is loading.  If a symbol is found
+  /// in the Archive the contained object file will be extracted (in memory)
+  /// and loaded for possible execution.
+  ///
+  /// MCJIT will take ownership of the Archive.
+  virtual void addArchive(object::Archive *A) {
+    llvm_unreachable("ExecutionEngine subclass doesn't implement addArchive.");
+  }
+
   //===--------------------------------------------------------------------===//
 
-  const DataLayout *getDataLayout() const { return TD; }
+  const DataLayout *getDataLayout() const { return DL; }
 
   /// removeModule - Remove a Module from the list of modules.  Returns true if
   /// M is found.
@@ -215,7 +247,7 @@ public:
   /// FindFunctionNamed - Search all of the active modules to find the one that
   /// defines FnName.  This is very slow operation and shouldn't be used for
   /// general code.
-  Function *FindFunctionNamed(const char *FnName);
+  virtual Function *FindFunctionNamed(const char *FnName);
 
   /// runFunction - Execute the specified function with the specified arguments,
   /// and return the result.
@@ -231,6 +263,9 @@ public:
   /// it prints a message to stderr and aborts.
   ///
   /// This function is deprecated for the MCJIT execution engine.
+  ///
+  /// FIXME: the JIT and MCJIT interfaces should be disentangled or united
+  /// again, if possible.
   ///
   virtual void *getPointerToNamedFunction(const std::string &Name,
                                           bool AbortOnFailure = true) = 0;
@@ -275,7 +310,7 @@ public:
   /// the static constructors or destructors for a program.
   ///
   /// \param isDtors - Run the destructors instead of constructors.
-  void runStaticConstructorsDestructors(bool isDtors);
+  virtual void runStaticConstructorsDestructors(bool isDtors);
 
   /// runStaticConstructorsDestructors - This method is used to execute all of
   /// the static constructors or destructors for a particular module.
@@ -427,6 +462,24 @@ public:
     llvm_unreachable("No support for an object cache");
   }
 
+  /// setProcessAllSections (MCJIT Only): By default, only sections that are
+  /// "required for execution" are passed to the RTDyldMemoryManager, and other
+  /// sections are discarded. Passing 'true' to this method will cause
+  /// RuntimeDyld to pass all sections to its RTDyldMemoryManager regardless
+  /// of whether they are "required to execute" in the usual sense.
+  ///
+  /// Rationale: Some MCJIT clients want to be able to inspect metadata
+  /// sections (e.g. Dwarf, Stack-maps) to enable functionality or analyze
+  /// performance. Passing these sections to the memory manager allows the
+  /// client to make policy about the relevant sections, rather than having
+  /// MCJIT do it.
+  virtual void setProcessAllSections(bool ProcessAllSections) {
+    llvm_unreachable("No support for ProcessAllSections option");
+  }
+
+  /// Return the target machine (if available).
+  virtual TargetMachine *getTargetMachine() { return NULL; }
+
   /// DisableLazyCompilation - When lazy compilation is off (the default), the
   /// JIT will eagerly compile every function reachable from the argument to
   /// getPointerToFunction.  If lazy compilation is turned on, the JIT will only
@@ -547,7 +600,7 @@ public:
     WhichEngine = w;
     return *this;
   }
-  
+
   /// setMCJITMemoryManager - Sets the MCJIT memory manager to use. This allows
   /// clients to customize their memory allocation policies for the MCJIT. This
   /// is only appropriate for the MCJIT; setting this and configuring the builder

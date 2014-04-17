@@ -21,6 +21,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -28,7 +29,6 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
@@ -182,13 +182,13 @@ Constant *Constant::getAllOnesValue(Type *Ty) {
 /// 'this' is a constant expr.
 Constant *Constant::getAggregateElement(unsigned Elt) const {
   if (const ConstantStruct *CS = dyn_cast<ConstantStruct>(this))
-    return Elt < CS->getNumOperands() ? CS->getOperand(Elt) : 0;
+    return Elt < CS->getNumOperands() ? CS->getOperand(Elt) : nullptr;
 
   if (const ConstantArray *CA = dyn_cast<ConstantArray>(this))
-    return Elt < CA->getNumOperands() ? CA->getOperand(Elt) : 0;
+    return Elt < CA->getNumOperands() ? CA->getOperand(Elt) : nullptr;
 
   if (const ConstantVector *CV = dyn_cast<ConstantVector>(this))
-    return Elt < CV->getNumOperands() ? CV->getOperand(Elt) : 0;
+    return Elt < CV->getNumOperands() ? CV->getOperand(Elt) : nullptr;
 
   if (const ConstantAggregateZero *CAZ =dyn_cast<ConstantAggregateZero>(this))
     return CAZ->getElementValue(Elt);
@@ -197,15 +197,16 @@ Constant *Constant::getAggregateElement(unsigned Elt) const {
     return UV->getElementValue(Elt);
 
   if (const ConstantDataSequential *CDS =dyn_cast<ConstantDataSequential>(this))
-    return Elt < CDS->getNumElements() ? CDS->getElementAsConstant(Elt) : 0;
-  return 0;
+    return Elt < CDS->getNumElements() ? CDS->getElementAsConstant(Elt)
+                                       : nullptr;
+  return nullptr;
 }
 
 Constant *Constant::getAggregateElement(Constant *Elt) const {
   assert(isa<IntegerType>(Elt->getType()) && "Index must be an integer");
   if (ConstantInt *CI = dyn_cast<ConstantInt>(Elt))
     return getAggregateElement(CI->getZExtValue());
-  return 0;
+  return nullptr;
 }
 
 
@@ -218,7 +219,7 @@ void Constant::destroyConstantImpl() {
   // Constants) that they are, in fact, invalid now and should be deleted.
   //
   while (!use_empty()) {
-    Value *V = use_back();
+    Value *V = user_back();
 #ifndef NDEBUG      // Only in -g mode...
     if (!isa<Constant>(V)) {
       dbgs() << "While deleting: " << *this
@@ -230,7 +231,7 @@ void Constant::destroyConstantImpl() {
     cast<Constant>(V)->destroyConstant();
 
     // The constant should remove itself from our use list...
-    assert((use_empty() || use_back() != V) && "Constant not removed!");
+    assert((use_empty() || user_back() != V) && "Constant not removed!");
   }
 
   // Value has no outstanding references it is safe to delete it now...
@@ -307,9 +308,9 @@ bool Constant::isThreadDependent() const {
 /// isConstantUsed - Return true if the constant has users other than constant
 /// exprs and other dangling things.
 bool Constant::isConstantUsed() const {
-  for (const_use_iterator UI = use_begin(), E = use_end(); UI != E; ++UI) {
-    const Constant *UC = dyn_cast<Constant>(*UI);
-    if (UC == 0 || isa<GlobalValue>(UC))
+  for (const User *U : users()) {
+    const Constant *UC = dyn_cast<Constant>(U);
+    if (!UC || isa<GlobalValue>(UC))
       return true;
 
     if (UC->isConstantUsed())
@@ -377,7 +378,7 @@ static bool removeDeadUsersOfConstant(const Constant *C) {
   if (isa<GlobalValue>(C)) return false; // Cannot remove this
 
   while (!C->use_empty()) {
-    const Constant *User = dyn_cast<Constant>(C->use_back());
+    const Constant *User = dyn_cast<Constant>(C->user_back());
     if (!User) return false; // Non-constant usage;
     if (!removeDeadUsersOfConstant(User))
       return false; // Constant wasn't dead
@@ -393,11 +394,11 @@ static bool removeDeadUsersOfConstant(const Constant *C) {
 /// that want to check to see if a global is unused, but don't want to deal
 /// with potentially dead constants hanging off of the globals.
 void Constant::removeDeadConstantUsers() const {
-  Value::const_use_iterator I = use_begin(), E = use_end();
-  Value::const_use_iterator LastNonDeadUser = E;
+  Value::const_user_iterator I = user_begin(), E = user_end();
+  Value::const_user_iterator LastNonDeadUser = E;
   while (I != E) {
     const Constant *User = dyn_cast<Constant>(*I);
-    if (User == 0) {
+    if (!User) {
       LastNonDeadUser = I;
       ++I;
       continue;
@@ -413,7 +414,7 @@ void Constant::removeDeadConstantUsers() const {
 
     // If the constant was dead, then the iterator is invalidated.
     if (LastNonDeadUser == E) {
-      I = use_begin();
+      I = user_begin();
       if (I == E) break;
     } else {
       I = LastNonDeadUser;
@@ -431,7 +432,7 @@ void Constant::removeDeadConstantUsers() const {
 void ConstantInt::anchor() { }
 
 ConstantInt::ConstantInt(IntegerType *Ty, const APInt& V)
-  : Constant(Ty, ConstantIntVal, 0, 0), Val(V) {
+  : Constant(Ty, ConstantIntVal, nullptr, 0), Val(V) {
   assert(V.getBitWidth() == Ty->getBitWidth() && "Invalid constant for type");
 }
 
@@ -584,23 +585,21 @@ Constant *ConstantFP::get(Type *Ty, StringRef Str) {
   return C; 
 }
 
+Constant *ConstantFP::getNegativeZero(Type *Ty) {
+  const fltSemantics &Semantics = *TypeToFloatSemantics(Ty->getScalarType());
+  APFloat NegZero = APFloat::getZero(Semantics, /*Negative=*/true);
+  Constant *C = get(Ty->getContext(), NegZero);
 
-ConstantFP *ConstantFP::getNegativeZero(Type *Ty) {
-  LLVMContext &Context = Ty->getContext();
-  APFloat apf = cast<ConstantFP>(Constant::getNullValue(Ty))->getValueAPF();
-  apf.changeSign();
-  return get(Context, apf);
+  if (VectorType *VTy = dyn_cast<VectorType>(Ty))
+    return ConstantVector::getSplat(VTy->getNumElements(), C);
+
+  return C;
 }
 
 
 Constant *ConstantFP::getZeroValueForNegation(Type *Ty) {
-  Type *ScalarTy = Ty->getScalarType();
-  if (ScalarTy->isFloatingPointTy()) {
-    Constant *C = getNegativeZero(ScalarTy);
-    if (VectorType *VTy = dyn_cast<VectorType>(Ty))
-      return ConstantVector::getSplat(VTy->getNumElements(), C);
-    return C;
-  }
+  if (Ty->isFPOrFPVectorTy())
+    return getNegativeZero(Ty);
 
   return Constant::getNullValue(Ty);
 }
@@ -635,14 +634,18 @@ ConstantFP* ConstantFP::get(LLVMContext &Context, const APFloat& V) {
   return Slot;
 }
 
-ConstantFP *ConstantFP::getInfinity(Type *Ty, bool Negative) {
-  const fltSemantics &Semantics = *TypeToFloatSemantics(Ty);
-  return ConstantFP::get(Ty->getContext(),
-                         APFloat::getInf(Semantics, Negative));
+Constant *ConstantFP::getInfinity(Type *Ty, bool Negative) {
+  const fltSemantics &Semantics = *TypeToFloatSemantics(Ty->getScalarType());
+  Constant *C = get(Ty->getContext(), APFloat::getInf(Semantics, Negative));
+
+  if (VectorType *VTy = dyn_cast<VectorType>(Ty))
+    return ConstantVector::getSplat(VTy->getNumElements(), C);
+
+  return C;
 }
 
 ConstantFP::ConstantFP(Type *Ty, const APFloat& V)
-  : Constant(Ty, ConstantFPVal, 0, 0), Val(V) {
+  : Constant(Ty, ConstantFPVal, nullptr, 0), Val(V) {
   assert(&V.getSemantics() == TypeToFloatSemantics(Ty) &&
          "FP type Mismatch");
 }
@@ -1045,7 +1048,7 @@ bool ConstantExpr::isGEPWithNoNotionalOverIndexing() const {
   if (getOpcode() != Instruction::GetElementPtr) return false;
 
   gep_type_iterator GEPI = gep_type_begin(this), E = gep_type_end(this);
-  User::const_op_iterator OI = llvm::next(this->op_begin());
+  User::const_op_iterator OI = std::next(this->op_begin());
 
   // Skip the first index, as it has no static limit.
   ++GEPI;
@@ -1126,6 +1129,7 @@ getWithOperands(ArrayRef<Constant*> Ops, Type *Ty) const {
   case Instruction::PtrToInt:
   case Instruction::IntToPtr:
   case Instruction::BitCast:
+  case Instruction::AddrSpaceCast:
     return ConstantExpr::getCast(getOpcode(), Ops[0], Ty);
   case Instruction::Select:
     return ConstantExpr::getSelect(Ops[0], Ops[1], Ops[2]);
@@ -1232,7 +1236,7 @@ ConstantAggregateZero *ConstantAggregateZero::get(Type *Ty) {
          "Cannot create an aggregate zero of non-aggregate type!");
   
   ConstantAggregateZero *&Entry = Ty->getContext().pImpl->CAZConstants[Ty];
-  if (Entry == 0)
+  if (!Entry)
     Entry = new ConstantAggregateZero(Ty);
 
   return Entry;
@@ -1280,7 +1284,7 @@ Constant *Constant::getSplatValue() const {
     return CV->getSplatValue();
   if (const ConstantVector *CV = dyn_cast<ConstantVector>(this))
     return CV->getSplatValue();
-  return 0;
+  return nullptr;
 }
 
 /// getSplatValue - If this is a splat constant, where all of the
@@ -1291,7 +1295,7 @@ Constant *ConstantVector::getSplatValue() const {
   // Then make sure all remaining elements point to the same value.
   for (unsigned I = 1, E = getNumOperands(); I < E; ++I)
     if (getOperand(I) != Elt)
-      return 0;
+      return nullptr;
   return Elt;
 }
 
@@ -1312,7 +1316,7 @@ const APInt &Constant::getUniqueInteger() const {
 
 ConstantPointerNull *ConstantPointerNull::get(PointerType *Ty) {
   ConstantPointerNull *&Entry = Ty->getContext().pImpl->CPNConstants[Ty];
-  if (Entry == 0)
+  if (!Entry)
     Entry = new ConstantPointerNull(Ty);
 
   return Entry;
@@ -1332,7 +1336,7 @@ void ConstantPointerNull::destroyConstant() {
 
 UndefValue *UndefValue::get(Type *Ty) {
   UndefValue *&Entry = Ty->getContext().pImpl->UVConstants[Ty];
-  if (Entry == 0)
+  if (!Entry)
     Entry = new UndefValue(Ty);
 
   return Entry;
@@ -1357,7 +1361,7 @@ BlockAddress *BlockAddress::get(BasicBlock *BB) {
 BlockAddress *BlockAddress::get(Function *F, BasicBlock *BB) {
   BlockAddress *&BA =
     F->getContext().pImpl->BlockAddresses[std::make_pair(F, BB)];
-  if (BA == 0)
+  if (!BA)
     BA = new BlockAddress(F, BB);
 
   assert(BA->getFunction() == F && "Basic block moved between functions");
@@ -1372,6 +1376,17 @@ BlockAddress::BlockAddress(Function *F, BasicBlock *BB)
   BB->AdjustBlockAddressRefCount(1);
 }
 
+BlockAddress *BlockAddress::lookup(const BasicBlock *BB) {
+  if (!BB->hasAddressTaken())
+    return nullptr;
+
+  const Function *F = BB->getParent();
+  assert(F != 0 && "Block must have a parent");
+  BlockAddress *BA =
+      F->getContext().pImpl->BlockAddresses.lookup(std::make_pair(F, BB));
+  assert(BA && "Refcount and block address map disagree!");
+  return BA;
+}
 
 // destroyConstant - Remove the constant from the constant table.
 //
@@ -1397,7 +1412,7 @@ void BlockAddress::replaceUsesOfWithOnConstant(Value *From, Value *To, Use *U) {
   // and return early.
   BlockAddress *&NewBA =
     getContext().pImpl->BlockAddresses[std::make_pair(NewF, NewBB)];
-  if (NewBA == 0) {
+  if (!NewBA) {
     getBasicBlock()->AdjustBlockAddressRefCount(-1);
 
     // Remove the old entry, this can't cause the map to rehash (just a
@@ -1461,6 +1476,7 @@ Constant *ConstantExpr::getCast(unsigned oc, Constant *C, Type *Ty) {
   case Instruction::PtrToInt: return getPtrToInt(C, Ty);
   case Instruction::IntToPtr: return getIntToPtr(C, Ty);
   case Instruction::BitCast:  return getBitCast(C, Ty);
+  case Instruction::AddrSpaceCast:  return getAddrSpaceCast(C, Ty);
   }
 }
 
@@ -1489,10 +1505,26 @@ Constant *ConstantExpr::getPointerCast(Constant *S, Type *Ty) {
 
   if (Ty->isIntOrIntVectorTy())
     return getPtrToInt(S, Ty);
+
+  unsigned SrcAS = S->getType()->getPointerAddressSpace();
+  if (Ty->isPtrOrPtrVectorTy() && SrcAS != Ty->getPointerAddressSpace())
+    return getAddrSpaceCast(S, Ty);
+
   return getBitCast(S, Ty);
 }
 
-Constant *ConstantExpr::getIntegerCast(Constant *C, Type *Ty, 
+Constant *ConstantExpr::getPointerBitCastOrAddrSpaceCast(Constant *S,
+                                                         Type *Ty) {
+  assert(S->getType()->isPtrOrPtrVectorTy() && "Invalid cast");
+  assert(Ty->isPtrOrPtrVectorTy() && "Invalid cast");
+
+  if (S->getType()->getPointerAddressSpace() != Ty->getPointerAddressSpace())
+    return getAddrSpaceCast(S, Ty);
+
+  return getBitCast(S, Ty);
+}
+
+Constant *ConstantExpr::getIntegerCast(Constant *C, Type *Ty,
                                        bool isSigned) {
   assert(C->getType()->isIntOrIntVectorTy() &&
          Ty->isIntOrIntVectorTy() && "Invalid cast");
@@ -1660,6 +1692,13 @@ Constant *ConstantExpr::getBitCast(Constant *C, Type *DstTy) {
   if (C->getType() == DstTy) return C;
 
   return getFoldedCast(Instruction::BitCast, C, DstTy);
+}
+
+Constant *ConstantExpr::getAddrSpaceCast(Constant *C, Type *DstTy) {
+  assert(CastInst::castIsValid(Instruction::AddrSpaceCast, C, DstTy) &&
+         "Invalid constantexpr addrspacecast!");
+
+  return getFoldedCast(Instruction::AddrSpaceCast, C, DstTy);
 }
 
 Constant *ConstantExpr::get(unsigned Opcode, Constant *C1, Constant *C2,
@@ -2107,7 +2146,7 @@ Constant *ConstantExpr::getBinOpIdentity(unsigned Opcode, Type *Ty) {
   switch (Opcode) {
   default:
     // Doesn't have an identity.
-    return 0;
+    return nullptr;
 
   case Instruction::Add:
   case Instruction::Or:
@@ -2130,7 +2169,7 @@ Constant *ConstantExpr::getBinOpAbsorber(unsigned Opcode, Type *Ty) {
   switch (Opcode) {
   default:
     // Doesn't have an absorber.
-    return 0;
+    return nullptr;
 
   case Instruction::Or:
     return Constant::getAllOnesValue(Ty);
@@ -2247,7 +2286,7 @@ Constant *ConstantDataSequential::getImpl(StringRef Elements, Type *Ty) {
   // of i8, or a 1-element array of i32.  They'll both end up in the same
   /// StringMap bucket, linked up by their Next pointers.  Walk the list.
   ConstantDataSequential **Entry = &Slot.getValue();
-  for (ConstantDataSequential *Node = *Entry; Node != 0;
+  for (ConstantDataSequential *Node = *Entry; Node;
        Entry = &Node->Next, Node = *Entry)
     if (Node->getType() == Ty)
       return Node;
@@ -2274,7 +2313,7 @@ void ConstantDataSequential::destroyConstant() {
   ConstantDataSequential **Entry = &Slot->getValue();
 
   // Remove the entry from the hash table.
-  if ((*Entry)->Next == 0) {
+  if (!(*Entry)->Next) {
     // If there is only one value in the bucket (common case) it must be this
     // entry, and removing the entry should remove the bucket completely.
     assert((*Entry) == this && "Hash mismatch in ConstantDataSequential");
@@ -2295,7 +2334,7 @@ void ConstantDataSequential::destroyConstant() {
 
   // If we were part of a list, make sure that we don't delete the list that is
   // still owned by the uniquing map.
-  Next = 0;
+  Next = nullptr;
 
   // Finally, actually delete it.
   destroyConstantImpl();
@@ -2523,7 +2562,7 @@ Constant *ConstantDataVector::getSplatValue() const {
   unsigned EltSize = getElementByteSize();
   for (unsigned i = 1, e = getNumElements(); i != e; ++i)
     if (memcmp(Base, Base+i*EltSize, EltSize))
-      return 0;
+      return nullptr;
 
   // If they're all the same, return the 0th one as a representative.
   return getElementAsConstant(0);
@@ -2571,7 +2610,7 @@ void ConstantArray::replaceUsesOfWithOnConstant(Value *From, Value *To,
     AllSame &= Val == ToC;
   }
 
-  Constant *Replacement = 0;
+  Constant *Replacement = nullptr;
   if (AllSame && ToC->isNullValue()) {
     Replacement = ConstantAggregateZero::get(getType());
   } else if (AllSame && isa<UndefValue>(ToC)) {
@@ -2657,7 +2696,7 @@ void ConstantStruct::replaceUsesOfWithOnConstant(Value *From, Value *To,
 
   LLVMContextImpl *pImpl = getContext().pImpl;
 
-  Constant *Replacement = 0;
+  Constant *Replacement = nullptr;
   if (isAllZeros) {
     Replacement = ConstantAggregateZero::get(getType());
   } else if (isAllUndef) {
@@ -2756,6 +2795,7 @@ Instruction *ConstantExpr::getAsInstruction() {
   case Instruction::PtrToInt:
   case Instruction::IntToPtr:
   case Instruction::BitCast:
+  case Instruction::AddrSpaceCast:
     return CastInst::Create((Instruction::CastOps)getOpcode(),
                             Ops[0], getType());
   case Instruction::Select:

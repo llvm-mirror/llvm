@@ -8,9 +8,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/Allocator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
 using namespace llvm;
@@ -61,6 +63,9 @@ TEST(StringRefTest, StringOps) {
   EXPECT_EQ( 0, StringRef("AaB").compare_lower("aab"));
   EXPECT_EQ( 1, StringRef("AaB").compare_lower("AAA"));
   EXPECT_EQ(-1, StringRef("AaB").compare_lower("aaBb"));
+  EXPECT_EQ(-1, StringRef("AaB").compare_lower("bb"));
+  EXPECT_EQ( 1, StringRef("aaBb").compare_lower("AaB"));
+  EXPECT_EQ( 1, StringRef("bb").compare_lower("AaB"));
   EXPECT_EQ( 1, StringRef("AaB").compare_lower("aA"));
   EXPECT_EQ( 1, StringRef("\xFF").compare_lower("\1"));
 
@@ -248,17 +253,39 @@ TEST(StringRefTest, Trim) {
 
 TEST(StringRefTest, StartsWith) {
   StringRef Str("hello");
+  EXPECT_TRUE(Str.startswith(""));
   EXPECT_TRUE(Str.startswith("he"));
   EXPECT_FALSE(Str.startswith("helloworld"));
   EXPECT_FALSE(Str.startswith("hi"));
 }
 
+TEST(StringRefTest, StartsWithLower) {
+  StringRef Str("heLLo");
+  EXPECT_TRUE(Str.startswith_lower(""));
+  EXPECT_TRUE(Str.startswith_lower("he"));
+  EXPECT_TRUE(Str.startswith_lower("hell"));
+  EXPECT_TRUE(Str.startswith_lower("HELlo"));
+  EXPECT_FALSE(Str.startswith_lower("helloworld"));
+  EXPECT_FALSE(Str.startswith_lower("hi"));
+}
+
 TEST(StringRefTest, EndsWith) {
   StringRef Str("hello");
+  EXPECT_TRUE(Str.endswith(""));
   EXPECT_TRUE(Str.endswith("lo"));
   EXPECT_FALSE(Str.endswith("helloworld"));
   EXPECT_FALSE(Str.endswith("worldhello"));
   EXPECT_FALSE(Str.endswith("so"));
+}
+
+TEST(StringRefTest, EndsWithLower) {
+  StringRef Str("heLLo");
+  EXPECT_TRUE(Str.endswith_lower(""));
+  EXPECT_TRUE(Str.endswith_lower("lo"));
+  EXPECT_TRUE(Str.endswith_lower("LO"));
+  EXPECT_TRUE(Str.endswith_lower("ELlo"));
+  EXPECT_FALSE(Str.endswith_lower("helloworld"));
+  EXPECT_FALSE(Str.endswith_lower("hi"));
 }
 
 TEST(StringRefTest, Find) {
@@ -505,5 +532,19 @@ TEST(StringRefTest, joinStrings) {
   bool v2_join3 = join(v2.begin(), v2.end(), "::") == join_result3;
   EXPECT_TRUE(v2_join3);
 }
+
+
+TEST(StringRefTest, AllocatorCopy) {
+  BumpPtrAllocator Alloc;
+  StringRef Str1 = "hello";
+  StringRef Str2 = "bye";
+  StringRef Str1c = Str1.copy(Alloc);
+  StringRef Str2c = Str2.copy(Alloc);
+  EXPECT_TRUE(Str1.equals(Str1c));
+  EXPECT_NE(Str1.data(), Str1c.data());
+  EXPECT_TRUE(Str2.equals(Str2c));
+  EXPECT_NE(Str2.data(), Str2c.data());
+}
+
 
 } // end anonymous namespace

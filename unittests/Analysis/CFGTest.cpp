@@ -8,18 +8,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/CFG.h"
-#include "llvm/ADT/OwningPtr.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Assembly/Parser.h"
-#include "llvm/IR/LLVMContext.h"
+#include "llvm/AsmParser/Parser.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/InstIterator.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Pass.h"
 #include "llvm/PassManager.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -78,14 +77,15 @@ protected:
                                     "", &ID, 0, true, true);
         PassRegistry::getPassRegistry()->registerPass(*PI, false);
         initializeLoopInfoPass(*PassRegistry::getPassRegistry());
-        initializeDominatorTreePass(*PassRegistry::getPassRegistry());
+        initializeDominatorTreeWrapperPassPass(
+            *PassRegistry::getPassRegistry());
         return 0;
       }
 
       void getAnalysisUsage(AnalysisUsage &AU) const {
         AU.setPreservesAll();
         AU.addRequired<LoopInfo>();
-        AU.addRequired<DominatorTree>();
+        AU.addRequired<DominatorTreeWrapperPass>();
       }
 
       bool runOnFunction(Function &F) {
@@ -93,7 +93,8 @@ protected:
           return false;
 
         LoopInfo *LI = &getAnalysis<LoopInfo>();
-        DominatorTree *DT = &getAnalysis<DominatorTree>();
+        DominatorTree *DT =
+            &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
         EXPECT_EQ(isPotentiallyReachable(A, B, 0, 0), ExpectedResult);
         EXPECT_EQ(isPotentiallyReachable(A, B, DT, 0), ExpectedResult);
         EXPECT_EQ(isPotentiallyReachable(A, B, 0, LI), ExpectedResult);
@@ -113,8 +114,8 @@ protected:
     PM.add(P);
     PM.run(*M);
   }
-private:
-  OwningPtr<Module> M;
+
+  std::unique_ptr<Module> M;
   Instruction *A, *B;
 };
 
@@ -350,27 +351,40 @@ TEST_F(IsPotentiallyReachableTest, OneLoopAfterTheOtherInsideAThirdLoop) {
   ExpectPath(true);
 }
 
+static const char *BranchInsideLoopIR =
+    "declare i1 @switch()\n"
+    "\n"
+    "define void @test() {\n"
+    "entry:\n"
+    "  br label %loop\n"
+    "loop:\n"
+    "  %x = call i1 @switch()\n"
+    "  br i1 %x, label %nextloopblock, label %exit\n"
+    "nextloopblock:\n"
+    "  %y = call i1 @switch()\n"
+    "  br i1 %y, label %left, label %right\n"
+    "left:\n"
+    "  %A = bitcast i8 undef to i8\n"
+    "  br label %loop\n"
+    "right:\n"
+    "  %B = bitcast i8 undef to i8\n"
+    "  br label %loop\n"
+    "exit:\n"
+    "  ret void\n"
+    "}";
+
 TEST_F(IsPotentiallyReachableTest, BranchInsideLoop) {
-  ParseAssembly(
-      "declare i1 @switch()\n"
-      "\n"
-      "define void @test() {\n"
-      "entry:\n"
-      "  br label %loop\n"
-      "loop:\n"
-      "  %x = call i1 @switch()\n"
-      "  br i1 %x, label %nextloopblock, label %exit\n"
-      "nextloopblock:\n"
-      "  %y = call i1 @switch()\n"
-      "  br i1 %y, label %left, label %right\n"
-      "left:\n"
-      "  %A = bitcast i8 undef to i8\n"
-      "  br label %loop\n"
-      "right:\n"
-      "  %B = bitcast i8 undef to i8\n"
-      "  br label %loop\n"
-      "exit:\n"
-      "  ret void\n"
-      "}");
+  ParseAssembly(BranchInsideLoopIR);
+  ExpectPath(true);
+}
+
+TEST_F(IsPotentiallyReachableTest, ModifyTest) {
+  ParseAssembly(BranchInsideLoopIR);
+
+  succ_iterator S = succ_begin(++M->getFunction("test")->begin());
+  BasicBlock *OldBB = S[0];
+  S[0] = S[1];
+  ExpectPath(false);
+  S[0] = OldBB;
   ExpectPath(true);
 }

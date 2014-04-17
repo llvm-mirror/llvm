@@ -6,7 +6,7 @@
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64"
 target triple = "x86_64-apple-darwin8"
 
-;CHECK: DW_AT_location{{.*}}(<0x01> 55 )
+;CHECK: DW_AT_location{{.*}}(<0x1> 55 )
 
 %0 = type { i64, i1 }
 
@@ -38,6 +38,7 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 declare %0 @llvm.uadd.with.overflow.i64(i64, i64) nounwind readnone
 
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!32}
 
 !0 = metadata !{i32 786478, metadata !29, metadata !1, metadata !"__udivmodti4", metadata !"__udivmodti4", metadata !"", i32 879, metadata !3, i1 true, i1 true, i32 0, i32 0, null, i32 256, i1 true, null, null, null, null, i32 879} ; [ DW_TAG_subprogram ]
 !1 = metadata !{i32 786473, metadata !29} ; [ DW_TAG_file_type ]
@@ -71,3 +72,4 @@ declare %0 @llvm.uadd.with.overflow.i64(i64, i64) nounwind readnone
 !29 = metadata !{metadata !"foobar.c", metadata !"/tmp"}
 !30 = metadata !{metadata !"foobar.h", metadata !"/tmp"}
 !31 = metadata !{i32 0}
+!32 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

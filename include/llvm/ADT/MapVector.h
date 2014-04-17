@@ -1,4 +1,4 @@
-//===- llvm/ADT/MapVector.h - Map with deterministic value order *- C++ -*-===//
+//===- llvm/ADT/MapVector.h - Map w/ deterministic value order --*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,9 +17,7 @@
 #ifndef LLVM_ADT_MAPVECTOR_H
 #define LLVM_ADT_MAPVECTOR_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/STLExtras.h"
 #include <vector>
 
 namespace llvm {
@@ -97,7 +95,7 @@ public:
     if (Result.second) {
       Vector.push_back(std::make_pair(KV.first, KV.second));
       I = Vector.size() - 1;
-      return std::make_pair(llvm::prior(end()), true);
+      return std::make_pair(std::prev(end()), true);
     }
     return std::make_pair(begin() + I, false);
   }

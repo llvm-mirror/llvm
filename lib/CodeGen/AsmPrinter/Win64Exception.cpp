@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -30,7 +31,6 @@
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Target/Mangler.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
@@ -44,14 +44,14 @@ Win64Exception::Win64Exception(AsmPrinter *A)
 
 Win64Exception::~Win64Exception() {}
 
-/// EndModule - Emit all exception information that should come after the
+/// endModule - Emit all exception information that should come after the
 /// content.
-void Win64Exception::EndModule() {
+void Win64Exception::endModule() {
 }
 
-/// BeginFunction - Gather pre-function exception information. Assumes it's
+/// beginFunction - Gather pre-function exception information. Assumes it's
 /// being emitted immediately after the function entry point.
-void Win64Exception::BeginFunction(const MachineFunction *MF) {
+void Win64Exception::beginFunction(const MachineFunction *MF) {
   shouldEmitMoves = shouldEmitPersonality = shouldEmitLSDA = false;
 
   // If any landing pads survive, we need an EH table.
@@ -86,9 +86,9 @@ void Win64Exception::BeginFunction(const MachineFunction *MF) {
                                                 Asm->getFunctionNumber()));
 }
 
-/// EndFunction - Gather and emit post-function exception information.
+/// endFunction - Gather and emit post-function exception information.
 ///
-void Win64Exception::EndFunction() {
+void Win64Exception::endFunction(const MachineFunction *) {
   if (!shouldEmitPersonality && !shouldEmitMoves)
     return;
 
@@ -101,7 +101,8 @@ void Win64Exception::EndFunction() {
   if (shouldEmitPersonality) {
     const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
     const Function *Per = MMI->getPersonalities()[MMI->getPersonalityIndex()];
-    const MCSymbol *Sym = TLOF.getCFIPersonalitySymbol(Per, Asm->Mang, MMI);
+    const MCSymbol *Sym =
+        TLOF.getCFIPersonalitySymbol(Per, *Asm->Mang, Asm->TM, MMI);
 
     Asm->OutStreamer.PushSection();
     Asm->OutStreamer.EmitWin64EHHandlerData();

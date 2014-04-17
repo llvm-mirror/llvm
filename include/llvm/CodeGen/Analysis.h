@@ -17,19 +17,18 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
-#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/Support/CallSite.h"
 
 namespace llvm {
-
 class GlobalVariable;
-class TargetLowering;
 class TargetLoweringBase;
 class SDNode;
 class SDValue;
 class SelectionDAG;
+class TargetLowering;
+struct EVT;
 
 /// ComputeLinearIndex - Given an LLVM IR aggregate type and a sequence
 /// of insertvalue or extractvalue indices that identify a member, return
@@ -55,7 +54,7 @@ inline unsigned ComputeLinearIndex(Type *Ty,
 ///
 void ComputeValueVTs(const TargetLowering &TLI, Type *Ty,
                      SmallVectorImpl<EVT> &ValueVTs,
-                     SmallVectorImpl<uint64_t> *Offsets = 0,
+                     SmallVectorImpl<uint64_t> *Offsets = nullptr,
                      uint64_t StartingOffset = 0);
 
 /// ExtractTypeInfo - Returns the type info, possibly bitcast, encoded in V.

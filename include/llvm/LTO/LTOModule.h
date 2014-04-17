@@ -15,11 +15,11 @@
 #define LTO_MODULE_H
 
 #include "llvm-c/lto.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/Target/Mangler.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include <string>
 #include <vector>
@@ -47,8 +47,12 @@ private:
     const llvm::GlobalValue *symbol;
   };
 
-  llvm::OwningPtr<llvm::Module>           _module;
-  llvm::OwningPtr<llvm::TargetMachine>    _target;
+  std::unique_ptr<llvm::Module>           _module;
+  std::unique_ptr<llvm::TargetMachine>    _target;
+  llvm::MCObjectFileInfo ObjFileInfo;
+  StringSet                               _linkeropt_strings;
+  std::vector<const char *>               _deplibs;
+  std::vector<const char *>               _linkeropts;
   std::vector<NameAndAttributes>          _symbols;
 
   // _defines and _undefines only needed to disambiguate tentative definitions
@@ -95,7 +99,8 @@ public:
                                   std::string& errMsg);
   static LTOModule *makeLTOModule(const void *mem, size_t length,
                                   llvm::TargetOptions options,
-                                  std::string &errMsg);
+                                  std::string &errMsg,
+                                  llvm::StringRef path = "");
 
   /// getTargetTriple - Return the Module's target triple.
   const char *getTargetTriple() {
@@ -127,6 +132,30 @@ public:
     return NULL;
   }
 
+  /// getDependentLibraryCount - Get the number of dependent libraries
+  uint32_t getDependentLibraryCount() {
+    return _deplibs.size();
+  }
+
+  /// getDependentLibrary - Get the dependent library at the specified index.
+  const char *getDependentLibrary(uint32_t index) {
+    if (index < _deplibs.size())
+      return _deplibs[index];
+    return NULL;
+  }
+
+  /// getLinkerOptCount - Get the number of linker options
+  uint32_t getLinkerOptCount() {
+    return _linkeropts.size();
+  }
+
+  /// getLinkerOpt - Get the linker option at the specified index.
+  const char *getLinkerOpt(uint32_t index) {
+    if (index < _linkeropts.size())
+      return _linkeropts[index];
+    return NULL;
+  }
+
   /// getLLVVMModule - Return the Module.
   llvm::Module *getLLVVMModule() { return _module.get(); }
 
@@ -136,6 +165,10 @@ public:
   }
 
 private:
+  /// parseMetadata - Parse metadata from the module
+  // FIXME: it only parses "Linker Options" metadata at the moment
+  void parseMetadata();
+
   /// parseSymbols - Parse the symbols from the module and model-level ASM and
   /// add them to either the defined or undefined lists.
   bool parseSymbols(std::string &errMsg);
@@ -189,8 +222,9 @@ private:
                                   llvm::TargetOptions options,
                                   std::string &errMsg);
 
-  /// makeBuffer - Create a MemoryBuffer from a memory range.
-  static llvm::MemoryBuffer *makeBuffer(const void *mem, size_t length);
+  /// Create a MemoryBuffer from a memory range with an optional name.
+  static llvm::MemoryBuffer *makeBuffer(const void *mem, size_t length,
+                                        llvm::StringRef name = "");
 };
 
 #endif // LTO_MODULE_H

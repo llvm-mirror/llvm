@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Object/ObjectFile.h"
 #include "llvm-c/Object.h"
+#include "llvm/Object/ObjectFile.h"
 
 using namespace llvm;
 using namespace object;
@@ -59,7 +59,9 @@ wrap(const relocation_iterator *SI) {
 
 // ObjectFile creation
 LLVMObjectFileRef LLVMCreateObjectFile(LLVMMemoryBufferRef MemBuf) {
-  return wrap(ObjectFile::createObjectFile(unwrap(MemBuf)));
+  ErrorOr<ObjectFile*> ObjOrErr(ObjectFile::createObjectFile(unwrap(MemBuf)));
+  ObjectFile *Obj = ObjOrErr ? ObjOrErr.get() : 0;
+  return wrap(Obj);
 }
 
 void LLVMDisposeObjectFile(LLVMObjectFileRef ObjectFile) {
@@ -68,7 +70,7 @@ void LLVMDisposeObjectFile(LLVMObjectFileRef ObjectFile) {
 
 // ObjectFile Section iterators
 LLVMSectionIteratorRef LLVMGetSections(LLVMObjectFileRef ObjectFile) {
-  section_iterator SI = unwrap(ObjectFile)->begin_sections();
+  section_iterator SI = unwrap(ObjectFile)->section_begin();
   return wrap(new section_iterator(SI));
 }
 
@@ -78,13 +80,11 @@ void LLVMDisposeSectionIterator(LLVMSectionIteratorRef SI) {
 
 LLVMBool LLVMIsSectionIteratorAtEnd(LLVMObjectFileRef ObjectFile,
                                 LLVMSectionIteratorRef SI) {
-  return (*unwrap(SI) == unwrap(ObjectFile)->end_sections()) ? 1 : 0;
+  return (*unwrap(SI) == unwrap(ObjectFile)->section_end()) ? 1 : 0;
 }
 
 void LLVMMoveToNextSection(LLVMSectionIteratorRef SI) {
-  error_code ec;
-  unwrap(SI)->increment(ec);
-  if (ec) report_fatal_error("LLVMMoveToNextSection failed: " + ec.message());
+  ++(*unwrap(SI));
 }
 
 void LLVMMoveToContainingSection(LLVMSectionIteratorRef Sect,
@@ -95,7 +95,7 @@ void LLVMMoveToContainingSection(LLVMSectionIteratorRef Sect,
 
 // ObjectFile Symbol iterators
 LLVMSymbolIteratorRef LLVMGetSymbols(LLVMObjectFileRef ObjectFile) {
-  symbol_iterator SI = unwrap(ObjectFile)->begin_symbols();
+  symbol_iterator SI = unwrap(ObjectFile)->symbol_begin();
   return wrap(new symbol_iterator(SI));
 }
 
@@ -105,13 +105,11 @@ void LLVMDisposeSymbolIterator(LLVMSymbolIteratorRef SI) {
 
 LLVMBool LLVMIsSymbolIteratorAtEnd(LLVMObjectFileRef ObjectFile,
                                 LLVMSymbolIteratorRef SI) {
-  return (*unwrap(SI) == unwrap(ObjectFile)->end_symbols()) ? 1 : 0;
+  return (*unwrap(SI) == unwrap(ObjectFile)->symbol_end()) ? 1 : 0;
 }
 
 void LLVMMoveToNextSymbol(LLVMSymbolIteratorRef SI) {
-  error_code ec;
-  unwrap(SI)->increment(ec);
-  if (ec) report_fatal_error("LLVMMoveToNextSymbol failed: " + ec.message());
+  ++(*unwrap(SI));
 }
 
 // SectionRef accessors
@@ -153,7 +151,7 @@ LLVMBool LLVMGetSectionContainsSymbol(LLVMSectionIteratorRef SI,
 
 // Section Relocation iterators
 LLVMRelocationIteratorRef LLVMGetRelocations(LLVMSectionIteratorRef Section) {
-  relocation_iterator SI = (*unwrap(Section))->begin_relocations();
+  relocation_iterator SI = (*unwrap(Section))->relocation_begin();
   return wrap(new relocation_iterator(SI));
 }
 
@@ -163,14 +161,11 @@ void LLVMDisposeRelocationIterator(LLVMRelocationIteratorRef SI) {
 
 LLVMBool LLVMIsRelocationIteratorAtEnd(LLVMSectionIteratorRef Section,
                                        LLVMRelocationIteratorRef SI) {
-  return (*unwrap(SI) == (*unwrap(Section))->end_relocations()) ? 1 : 0;
+  return (*unwrap(SI) == (*unwrap(Section))->relocation_end()) ? 1 : 0;
 }
 
 void LLVMMoveToNextRelocation(LLVMRelocationIteratorRef SI) {
-  error_code ec;
-  unwrap(SI)->increment(ec);
-  if (ec) report_fatal_error("LLVMMoveToNextRelocation failed: " +
-                             ec.message());
+  ++(*unwrap(SI));
 }
 
 

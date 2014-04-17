@@ -16,13 +16,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/GCStrategy.h"
-#include "llvm/Analysis/DominatorInternals.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
@@ -53,11 +52,11 @@ namespace {
     static char ID;
 
     LowerIntrinsics();
-    const char *getPassName() const;
-    void getAnalysisUsage(AnalysisUsage &AU) const;
+    const char *getPassName() const override;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-    bool doInitialization(Module &M);
-    bool runOnFunction(Function &F);
+    bool doInitialization(Module &M) override;
+    bool runOnFunction(Function &F) override;
   };
 
 
@@ -83,9 +82,9 @@ namespace {
     static char ID;
 
     GCMachineCodeAnalysis();
-    void getAnalysisUsage(AnalysisUsage &AU) const;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-    bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
   };
 
 }
@@ -119,7 +118,7 @@ bool GCStrategy::performCustomLowering(Function &F) {
 
 bool GCStrategy::findCustomSafePoints(GCFunctionInfo& FI, MachineFunction &F) {
   dbgs() << "gc " << getName() << " must override findCustomSafePoints.\n";
-  llvm_unreachable(0);
+  llvm_unreachable(nullptr);
 }
 
 
@@ -154,7 +153,7 @@ const char *LowerIntrinsics::getPassName() const {
 void LowerIntrinsics::getAnalysisUsage(AnalysisUsage &AU) const {
   FunctionPass::getAnalysisUsage(AU);
   AU.addRequired<GCModuleInfo>();
-  AU.addPreserved<DominatorTree>();
+  AU.addPreserved<DominatorTreeWrapperPass>();
 }
 
 /// doInitialization - If this module uses the GC intrinsics, find them now.
@@ -271,8 +270,9 @@ bool LowerIntrinsics::runOnFunction(Function &F) {
 
   // Custom lowering may modify the CFG, so dominators must be recomputed.
   if (UseCustomLoweringPass) {
-    if (DominatorTree *DT = getAnalysisIfAvailable<DominatorTree>())
-      DT->DT->recalculate(F);
+    if (DominatorTreeWrapperPass *DTWP =
+            getAnalysisIfAvailable<DominatorTreeWrapperPass>())
+      DTWP->getDomTree().recalculate(F);
   }
 
   return MadeChange;

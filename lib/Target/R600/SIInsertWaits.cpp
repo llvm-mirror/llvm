@@ -186,7 +186,7 @@ bool SIInsertWaits::isOpRelevant(MachineOperand &Op) {
 
 RegInterval SIInsertWaits::getRegInterval(MachineOperand &Op) {
 
-  if (!Op.isReg())
+  if (!Op.isReg() || !TRI->isInAllocatableClass(Op.getReg()))
     return std::make_pair(0, 0);
 
   unsigned Reg = Op.getReg();
@@ -313,6 +313,12 @@ static void increaseCounters(Counters &Dst, const Counters &Src) {
 Counters SIInsertWaits::handleOperands(MachineInstr &MI) {
 
   Counters Result = ZeroCounts;
+
+  // S_SENDMSG implicitly waits for all outstanding LGKM transfers to finish,
+  // but we also want to wait for any other outstanding transfers before
+  // signalling other hardware blocks
+  if (MI.getOpcode() == AMDGPU::S_SENDMSG)
+    return LastIssued;
 
   // For each register affected by this
   // instruction increase the result sequence

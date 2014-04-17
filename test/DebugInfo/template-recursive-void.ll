@@ -1,6 +1,6 @@
 ; REQUIRES: object-emission
 
-; RUN: llc -O0 -filetype=obj < %s > %t
+; RUN: %llc_dwarf -O0 -filetype=obj < %s > %t
 ; RUN: llvm-dwarfdump %t | FileCheck %s
 
 ; This was pulled from clang's debug-info-template-recursive.cpp test.
@@ -13,7 +13,7 @@
 ; class bar : public foo<void> { };
 ; bar filters;
 
-; CHECK: DW_TAG_template_type_parameter [10]
+; CHECK: DW_TAG_template_type_parameter [{{.*}}]
 ; CHECK-NEXT: DW_AT_name{{.*}}"T"
 ; CHECK-NOT: DW_AT_type
 ; CHECK: NULL
@@ -23,11 +23,11 @@
 @filters = global %class.bar zeroinitializer, align 1
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!36}
+!llvm.module.flags = !{!36, !37}
 
 !0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 (trunk 187958) (llvm/trunk 187964)", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !3, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/tmp/debug-info-template-recursive.cpp] [DW_LANG_C_plus_plus]
 !1 = metadata !{metadata !"debug-info-template-recursive.cpp", metadata !"/usr/local/google/home/echristo/tmp"}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786484, i32 0, null, metadata !"filters", metadata !"filters", metadata !"", metadata !5, i32 10, metadata !6, i32 0, i32 1, %class.bar* @filters, null} ; [ DW_TAG_variable ] [filters] [line 10] [def]
 !5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/usr/local/google/home/echristo/tmp/debug-info-template-recursive.cpp]
@@ -62,3 +62,4 @@
 !34 = metadata !{i32 786447, i32 0, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !6} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from bar]
 !35 = metadata !{i32 786468}
 !36 = metadata !{i32 2, metadata !"Dwarf Version", i32 3}
+!37 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

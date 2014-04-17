@@ -14,6 +14,7 @@
 #include "LLVMSymbolize.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Config/config.h"
+#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compression.h"
@@ -21,7 +22,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
-
 #include <sstream>
 #include <stdlib.h>
 
@@ -53,41 +53,49 @@ static void patchFunctionNameInDILineInfo(const std::string &NewFunctionName,
 
 ModuleInfo::ModuleInfo(ObjectFile *Obj, DIContext *DICtx)
     : Module(Obj), DebugInfoContext(DICtx) {
-  error_code ec;
-  for (symbol_iterator si = Module->begin_symbols(), se = Module->end_symbols();
-       si != se; si.increment(ec)) {
-    if (error(ec))
-      return;
-    SymbolRef::Type SymbolType;
-    if (error(si->getType(SymbolType)))
-      continue;
-    if (SymbolType != SymbolRef::ST_Function &&
-        SymbolType != SymbolRef::ST_Data)
-      continue;
-    uint64_t SymbolAddress;
-    if (error(si->getAddress(SymbolAddress)) ||
-        SymbolAddress == UnknownAddressOrSize)
-      continue;
-    uint64_t SymbolSize;
-    // Getting symbol size is linear for Mach-O files, so assume that symbol
-    // occupies the memory range up to the following symbol.
-    if (isa<MachOObjectFile>(Obj))
-      SymbolSize = 0;
-    else if (error(si->getSize(SymbolSize)) ||
-             SymbolSize == UnknownAddressOrSize)
-      continue;
-    StringRef SymbolName;
-    if (error(si->getName(SymbolName)))
-      continue;
-    // Mach-O symbol table names have leading underscore, skip it.
-    if (Module->isMachO() && SymbolName.size() > 0 && SymbolName[0] == '_')
-      SymbolName = SymbolName.drop_front();
-    // FIXME: If a function has alias, there are two entries in symbol table
-    // with same address size. Make sure we choose the correct one.
-    SymbolMapTy &M = SymbolType == SymbolRef::ST_Function ? Functions : Objects;
-    SymbolDesc SD = { SymbolAddress, SymbolSize };
-    M.insert(std::make_pair(SD, SymbolName));
+  for (const SymbolRef &Symbol : Module->symbols()) {
+    addSymbol(Symbol);
   }
+  bool NoSymbolTable = (Module->symbol_begin() == Module->symbol_end());
+  if (NoSymbolTable && Module->isELF()) {
+    // Fallback to dynamic symbol table, if regular symbol table is stripped.
+    std::pair<symbol_iterator, symbol_iterator> IDyn =
+        getELFDynamicSymbolIterators(Module);
+    for (symbol_iterator si = IDyn.first, se = IDyn.second; si != se; ++si) {
+      addSymbol(*si);
+    }
+  }
+}
+
+void ModuleInfo::addSymbol(const SymbolRef &Symbol) {
+  SymbolRef::Type SymbolType;
+  if (error(Symbol.getType(SymbolType)))
+    return;
+  if (SymbolType != SymbolRef::ST_Function && SymbolType != SymbolRef::ST_Data)
+    return;
+  uint64_t SymbolAddress;
+  if (error(Symbol.getAddress(SymbolAddress)) ||
+      SymbolAddress == UnknownAddressOrSize)
+    return;
+  uint64_t SymbolSize;
+  // Getting symbol size is linear for Mach-O files, so assume that symbol
+  // occupies the memory range up to the following symbol.
+  if (isa<MachOObjectFile>(Module))
+    SymbolSize = 0;
+  else if (error(Symbol.getSize(SymbolSize)) ||
+           SymbolSize == UnknownAddressOrSize)
+    return;
+  StringRef SymbolName;
+  if (error(Symbol.getName(SymbolName)))
+    return;
+  // Mach-O symbol table names have leading underscore, skip it.
+  if (Module->isMachO() && SymbolName.size() > 0 && SymbolName[0] == '_')
+    SymbolName = SymbolName.drop_front();
+  // FIXME: If a function has alias, there are two entries in symbol table
+  // with same address size. Make sure we choose the correct one.
+  SymbolMapTy &M = SymbolType == SymbolRef::ST_Function ? Functions : Objects;
+  SymbolDesc SD = { SymbolAddress, SymbolSize };
+  M.insert(std::make_pair(SD, SymbolName));
 }
 
 bool ModuleInfo::getNameFromSymbolTable(SymbolRef::Type Type, uint64_t Address,
@@ -221,7 +229,7 @@ static std::string getDarwinDWARFResourceForPath(const std::string &Path) {
 }
 
 static bool checkFileCRC(StringRef Path, uint32_t CRCHash) {
-  OwningPtr<MemoryBuffer> MB;
+  std::unique_ptr<MemoryBuffer> MB;
   if (MemoryBuffer::getFileOrSTDIN(Path, MB))
     return false;
   return !zlib::isAvailable() || CRCHash == zlib::crc32(MB->getBuffer());
@@ -269,15 +277,13 @@ static bool getGNUDebuglinkContents(const Binary *Bin, std::string &DebugName,
   const ObjectFile *Obj = dyn_cast<ObjectFile>(Bin);
   if (!Obj)
     return false;
-  error_code EC;
-  for (section_iterator I = Obj->begin_sections(), E = Obj->end_sections();
-       I != E; I.increment(EC)) {
+  for (const SectionRef &Section : Obj->sections()) {
     StringRef Name;
-    I->getName(Name);
+    Section.getName(Name);
     Name = Name.substr(Name.find_first_not_of("._"));
     if (Name == "gnu_debuglink") {
       StringRef Data;
-      I->getContents(Data);
+      Section.getContents(Data);
       DataExtractor DE(Data, Obj->isLittleEndian(), 0);
       uint32_t Offset = 0;
       if (const char *DebugNameStr = DE.getCStr(&Offset)) {
@@ -302,22 +308,21 @@ LLVMSymbolizer::getOrCreateBinary(const std::string &Path) {
     return I->second;
   Binary *Bin = 0;
   Binary *DbgBin = 0;
-  OwningPtr<Binary> ParsedBinary;
-  OwningPtr<Binary> ParsedDbgBinary;
-  if (!error(createBinary(Path, ParsedBinary))) {
+  ErrorOr<Binary *> BinaryOrErr = createBinary(Path);
+  if (!error(BinaryOrErr.getError())) {
+    std::unique_ptr<Binary> ParsedBinary(BinaryOrErr.get());
     // Check if it's a universal binary.
-    Bin = ParsedBinary.take();
+    Bin = ParsedBinary.release();
     ParsedBinariesAndObjects.push_back(Bin);
     if (Bin->isMachO() || Bin->isMachOUniversalBinary()) {
       // On Darwin we may find DWARF in separate object file in
       // resource directory.
       const std::string &ResourcePath =
           getDarwinDWARFResourceForPath(Path);
-      bool ResourceFileExists = false;
-      if (!sys::fs::exists(ResourcePath, ResourceFileExists) &&
-          ResourceFileExists &&
-          !error(createBinary(ResourcePath, ParsedDbgBinary))) {
-        DbgBin = ParsedDbgBinary.take();
+      BinaryOrErr = createBinary(ResourcePath);
+      error_code EC = BinaryOrErr.getError();
+      if (EC != errc::no_such_file_or_directory && !error(EC)) {
+        DbgBin = BinaryOrErr.get();
         ParsedBinariesAndObjects.push_back(DbgBin);
       }
     }
@@ -327,10 +332,12 @@ LLVMSymbolizer::getOrCreateBinary(const std::string &Path) {
       uint32_t CRCHash;
       std::string DebugBinaryPath;
       if (getGNUDebuglinkContents(Bin, DebuglinkName, CRCHash) &&
-          findDebugBinary(Path, DebuglinkName, CRCHash, DebugBinaryPath) &&
-          !error(createBinary(DebugBinaryPath, ParsedDbgBinary))) {
-        DbgBin = ParsedDbgBinary.take();
-        ParsedBinariesAndObjects.push_back(DbgBin);
+          findDebugBinary(Path, DebuglinkName, CRCHash, DebugBinaryPath)) {
+        BinaryOrErr = createBinary(DebugBinaryPath);
+        if (!error(BinaryOrErr.getError())) {
+          DbgBin = BinaryOrErr.get();
+          ParsedBinariesAndObjects.push_back(DbgBin);
+        }
       }
     }
   }
@@ -351,9 +358,9 @@ LLVMSymbolizer::getObjectFileFromBinary(Binary *Bin, const std::string &ArchName
         std::make_pair(UB, ArchName));
     if (I != ObjectFileForArch.end())
       return I->second;
-    OwningPtr<ObjectFile> ParsedObj;
+    std::unique_ptr<ObjectFile> ParsedObj;
     if (!UB->getObjectForArch(Triple(ArchName).getArch(), ParsedObj)) {
-      Res = ParsedObj.take();
+      Res = ParsedObj.release();
       ParsedBinariesAndObjects.push_back(Res);
     }
     ObjectFileForArch[std::make_pair(UB, ArchName)] = Res;
@@ -424,6 +431,10 @@ extern "C" char *__cxa_demangle(const char *mangled_name, char *output_buffer,
 
 std::string LLVMSymbolizer::DemangleName(const std::string &Name) {
 #if !defined(_MSC_VER)
+  // We can spoil names of symbols with C linkage, so use an heuristic
+  // approach to check if the name should be demangled.
+  if (Name.substr(0, 2) != "_Z")
+    return Name;
   int status = 0;
   char *DemangledName = __cxa_demangle(Name.c_str(), 0, 0, &status);
   if (status != 0)

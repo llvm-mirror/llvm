@@ -179,14 +179,14 @@ let Namespace = "Mips" in {
             DwarfRegNum<[!add(I, 32)]>;
 
   // Hi/Lo registers
-  def HI0 : Register<"ac0">, DwarfRegNum<[64]>;
-  def HI1 : Register<"ac1">, DwarfRegNum<[176]>;
-  def HI2 : Register<"ac2">, DwarfRegNum<[178]>;
-  def HI3 : Register<"ac3">, DwarfRegNum<[180]>;
-  def LO0 : Register<"ac0">, DwarfRegNum<[65]>;
-  def LO1 : Register<"ac1">, DwarfRegNum<[177]>;
-  def LO2 : Register<"ac2">, DwarfRegNum<[179]>;
-  def LO3 : Register<"ac3">, DwarfRegNum<[181]>;
+  def HI0 : MipsReg<0, "ac0">, DwarfRegNum<[64]>;
+  def HI1 : MipsReg<1, "ac1">, DwarfRegNum<[176]>;
+  def HI2 : MipsReg<2, "ac2">, DwarfRegNum<[178]>;
+  def HI3 : MipsReg<3, "ac3">, DwarfRegNum<[180]>;
+  def LO0 : MipsReg<0, "ac0">, DwarfRegNum<[65]>;
+  def LO1 : MipsReg<1, "ac1">, DwarfRegNum<[177]>;
+  def LO2 : MipsReg<2, "ac2">, DwarfRegNum<[179]>;
+  def LO3 : MipsReg<3, "ac3">, DwarfRegNum<[181]>;
 
   let SubRegIndices = [sub_32] in {
   def HI0_64  : RegisterWithSubRegs<"hi", [HI0]>;
@@ -209,7 +209,8 @@ let Namespace = "Mips" in {
   def PC : Register<"pc">;
 
   // Hardware register $29
-  def HWR29 : MipsReg<29, "29">;
+  foreach I = 0-31 in
+  def HWR#I : MipsReg<#I, ""#I>;
 
   // Accum registers
   foreach I = 0-3 in
@@ -237,14 +238,23 @@ let Namespace = "Mips" in {
                                             DSPOutFlag23]>;
 
   // MSA-ASE control registers.
-  def MSAIR : Register<"0">;
-  def MSACSR : Register<"1">;
-  def MSAAccess : Register<"2">;
-  def MSASave : Register<"3">;
-  def MSAModify : Register<"4">;
-  def MSARequest : Register<"5">;
-  def MSAMap : Register<"6">;
-  def MSAUnmap : Register<"7">;
+  def MSAIR      : MipsReg<0, "0">;
+  def MSACSR     : MipsReg<1, "1">;
+  def MSAAccess  : MipsReg<2, "2">;
+  def MSASave    : MipsReg<3, "3">;
+  def MSAModify  : MipsReg<4, "4">;
+  def MSARequest : MipsReg<5, "5">;
+  def MSAMap     : MipsReg<6, "6">;
+  def MSAUnmap   : MipsReg<7, "7">;
+
+  // Octeon multiplier and product registers
+  def MPL0 : MipsReg<0, "mpl0">;
+  def MPL1 : MipsReg<1, "mpl1">;
+  def MPL2 : MipsReg<2, "mpl2">;
+  def P0 : MipsReg<0, "p0">;
+  def P1 : MipsReg<1, "p1">;
+  def P2 : MipsReg<2, "p2">;
+
 }
 
 //===----------------------------------------------------------------------===//
@@ -355,7 +365,8 @@ def LO64 : RegisterClass<"Mips", [i64], 64, (add LO0_64)>;
 def HI64 : RegisterClass<"Mips", [i64], 64, (add HI0_64)>;
 
 // Hardware registers
-def HWRegs : RegisterClass<"Mips", [i32], 32, (add HWR29)>, Unallocatable;
+def HWRegs : RegisterClass<"Mips", [i32], 32, (sequence "HWR%u", 0, 31)>,
+             Unallocatable;
 
 // Accumulator Registers
 def ACC64 : RegisterClass<"Mips", [untyped], 64, (add AC0)> {
@@ -376,84 +387,77 @@ def DSPCC : RegisterClass<"Mips", [v4i8, v2i16], 32, (add DSPCCond)>;
 def COP2 : RegisterClass<"Mips", [i32], 32, (sequence "COP2%u", 0, 31)>,
            Unallocatable;
 
+// Octeon multiplier and product registers
+def OCTEON_MPL : RegisterClass<"Mips", [i64], 64, (add MPL0, MPL1, MPL2)>,
+                 Unallocatable;
+def OCTEON_P : RegisterClass<"Mips", [i64], 64, (add P0, P1, P2)>,
+               Unallocatable;
+
 // Register Operands.
 
 class MipsAsmRegOperand : AsmOperandClass {
-  let RenderMethod = "addRegAsmOperands";
-}
-def GPR32AsmOperand : MipsAsmRegOperand {
-  let Name = "GPR32Asm";
-  let ParserMethod = "parseGPR32";
+  let ParserMethod = "ParseAnyRegister";
 }
 
 def GPR64AsmOperand : MipsAsmRegOperand {
-  let Name = "GPR64Asm";
-  let ParserMethod = "parseGPR64";
+  let Name = "GPR64AsmReg";
+  let PredicateMethod = "isGPRAsmReg";
+}
+
+def GPR32AsmOperand : MipsAsmRegOperand {
+  let Name = "GPR32AsmReg";
+  let PredicateMethod = "isGPRAsmReg";
 }
 
 def ACC64DSPAsmOperand : MipsAsmRegOperand {
-  let Name = "ACC64DSPAsm";
-  let ParserMethod = "parseACC64DSP";
-}
-
-def LO32DSPAsmOperand : MipsAsmRegOperand {
-  let Name = "LO32DSPAsm";
-  let ParserMethod = "parseLO32DSP";
+  let Name = "ACC64DSPAsmReg";
+  let PredicateMethod = "isACCAsmReg";
 }
 
 def HI32DSPAsmOperand : MipsAsmRegOperand {
-  let Name = "HI32DSPAsm";
-  let ParserMethod = "parseHI32DSP";
+  let Name = "HI32DSPAsmReg";
+  let PredicateMethod = "isACCAsmReg";
+}
+
+def LO32DSPAsmOperand : MipsAsmRegOperand {
+  let Name = "LO32DSPAsmReg";
+  let PredicateMethod = "isACCAsmReg";
 }
 
 def CCRAsmOperand : MipsAsmRegOperand {
-  let Name = "CCRAsm";
-  let ParserMethod = "parseCCRRegs";
+  let Name = "CCRAsmReg";
 }
 
 def AFGR64AsmOperand : MipsAsmRegOperand {
-  let Name = "AFGR64Asm";
-  let ParserMethod = "parseAFGR64Regs";
+  let Name = "AFGR64AsmReg";
+  let PredicateMethod = "isFGRAsmReg";
 }
 
 def FGR64AsmOperand : MipsAsmRegOperand {
-  let Name = "FGR64Asm";
-  let ParserMethod = "parseFGR64Regs";
+  let Name = "FGR64AsmReg";
+  let PredicateMethod = "isFGRAsmReg";
 }
 
 def FGR32AsmOperand : MipsAsmRegOperand {
-  let Name = "FGR32Asm";
-  let ParserMethod = "parseFGR32Regs";
+  let Name = "FGR32AsmReg";
+  let PredicateMethod = "isFGRAsmReg";
 }
 
 def FGRH32AsmOperand : MipsAsmRegOperand {
-  let Name = "FGRH32Asm";
-  let ParserMethod = "parseFGRH32Regs";
+  let Name = "FGRH32AsmReg";
+  let PredicateMethod = "isFGRAsmReg";
 }
 
 def FCCRegsAsmOperand : MipsAsmRegOperand {
-  let Name = "FCCRegsAsm";
-  let ParserMethod = "parseFCCRegs";
+  let Name = "FCCAsmReg";
 }
 
-def MSA128BAsmOperand : MipsAsmRegOperand {
-  let Name = "MSA128BAsm";
-  let ParserMethod = "parseMSA128BRegs";
+def MSA128AsmOperand : MipsAsmRegOperand {
+  let Name = "MSA128AsmReg";
 }
 
-def MSA128HAsmOperand : MipsAsmRegOperand {
-  let Name = "MSA128HAsm";
-  let ParserMethod = "parseMSA128HRegs";
-}
-
-def MSA128WAsmOperand : MipsAsmRegOperand {
-  let Name = "MSA128WAsm";
-  let ParserMethod = "parseMSA128WRegs";
-}
-
-def MSA128DAsmOperand : MipsAsmRegOperand {
-  let Name = "MSA128DAsm";
-  let ParserMethod = "parseMSA128DRegs";
+def MSACtrlAsmOperand : MipsAsmRegOperand {
+  let Name = "MSACtrlAsmReg";
 }
 
 def GPR32Opnd : RegisterOperand<GPR32> {
@@ -473,13 +477,11 @@ def CCROpnd : RegisterOperand<CCR> {
 }
 
 def HWRegsAsmOperand : MipsAsmRegOperand {
-  let Name = "HWRegsAsm";
-  let ParserMethod = "parseHWRegs";
+  let Name = "HWRegsAsmReg";
 }
 
 def COP2AsmOperand : MipsAsmRegOperand {
-  let Name = "COP2Asm";
-  let ParserMethod = "parseCOP2";
+  let Name = "COP2AsmReg";
 }
 
 def HWRegsOpnd : RegisterOperand<HWRegs> {
@@ -523,18 +525,22 @@ def COP2Opnd : RegisterOperand<COP2> {
 }
 
 def MSA128BOpnd : RegisterOperand<MSA128B> {
-  let ParserMatchClass = MSA128BAsmOperand;
+  let ParserMatchClass = MSA128AsmOperand;
 }
 
 def MSA128HOpnd : RegisterOperand<MSA128H> {
-  let ParserMatchClass = MSA128HAsmOperand;
+  let ParserMatchClass = MSA128AsmOperand;
 }
 
 def MSA128WOpnd : RegisterOperand<MSA128W> {
-  let ParserMatchClass = MSA128WAsmOperand;
+  let ParserMatchClass = MSA128AsmOperand;
 }
 
 def MSA128DOpnd : RegisterOperand<MSA128D> {
-  let ParserMatchClass = MSA128DAsmOperand;
+  let ParserMatchClass = MSA128AsmOperand;
+}
+
+def MSA128CROpnd : RegisterOperand<MSACtrl> {
+  let ParserMatchClass = MSACtrlAsmOperand;
 }
 

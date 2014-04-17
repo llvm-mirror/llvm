@@ -1016,7 +1016,7 @@ class NVJrr_template<string mnemonic, bits<3> majOp, bit NvOpNum,
       bits<5> src1;
       bits<5> src2;
       bits<3> Ns;    // New-Value Operand
-      bits<5> RegOp; // Non New-Value Operand
+      bits<5> RegOp; // Non-New-Value Operand
       bits<11> offset;
 
       let isBrTaken = !if(isTaken, "true", "false");
@@ -3198,7 +3198,7 @@ def : Pat<(i64 (cttz (i64 DoubleRegs:$src1))),
 
 
 // i8 -> i64 loads
-// We need a complexity of 120 here to overide preceeding handling of
+// We need a complexity of 120 here to override preceding handling of
 // zextloadi8.
 let Predicates = [HasV4T], AddedComplexity = 120 in {
 def:  Pat <(i64 (extloadi8 (NumUsesBelowThresCONST32 tglobaladdr:$addr))),
@@ -3220,7 +3220,7 @@ def:  Pat <(i64 (sextloadi8 FoldGlobalAddr:$addr)),
       (i64 (SXTW (LDrib_abs_V4 FoldGlobalAddr:$addr)))>;
 }
 // i16 -> i64 loads
-// We need a complexity of 120 here to overide preceeding handling of
+// We need a complexity of 120 here to override preceding handling of
 // zextloadi16.
 let AddedComplexity = 120 in {
 def:  Pat <(i64 (extloadi16 (NumUsesBelowThresCONST32 tglobaladdr:$addr))),
@@ -3248,7 +3248,7 @@ def:  Pat <(i64 (sextloadi16 FoldGlobalAddr:$addr)),
       Requires<[HasV4T]>;
 }
 // i32->i64 loads
-// We need a complexity of 120 here to overide preceeding handling of
+// We need a complexity of 120 here to override preceding handling of
 // zextloadi32.
 let AddedComplexity = 120 in {
 def:  Pat <(i64 (extloadi32 (NumUsesBelowThresCONST32 tglobaladdr:$addr))),
@@ -3390,4 +3390,3 @@ def : Pat<(i32 (load FoldGlobalAddrGP:$addr)),
 def : Pat<(atomic_load_32 FoldGlobalAddrGP:$addr),
           (i32 (LDriw_abs_V4 FoldGlobalAddrGP:$addr))>,
            Requires<[HasV4T]>;
-

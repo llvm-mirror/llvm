@@ -26,19 +26,6 @@ namespace llvm {
   template<typename ValueTy>
   class StringMapEntry;
 
-/// StringMapEntryInitializer - This datatype can be partially specialized for
-/// various datatypes in a stringmap to allow them to be initialized when an
-/// entry is default constructed for the map.
-template<typename ValueTy>
-class StringMapEntryInitializer {
-public:
-  template <typename InitTy>
-  static void Initialize(StringMapEntry<ValueTy> &T, InitTy InitVal) {
-    T.second = InitVal;
-  }
-};
-
-
 /// StringMapEntryBase - Shared base class of StringMapEntry instances.
 class StringMapEntryBase {
   unsigned StrLen;
@@ -63,7 +50,7 @@ protected:
 protected:
   explicit StringMapImpl(unsigned itemSize) : ItemSize(itemSize) {
     // Initialize the map with zero buckets to allocation.
-    TheTable = 0;
+    TheTable = nullptr;
     NumBuckets = 0;
     NumItems = 0;
     NumTombstones = 0;
@@ -149,10 +136,8 @@ public:
                                 InitType InitVal) {
     unsigned KeyLength = static_cast<unsigned>(KeyEnd-KeyStart);
 
-    // Okay, the item doesn't already exist, and 'Bucket' is the bucket to fill
-    // in.  Allocate a new item with space for the string at the end and a null
+    // Allocate a new item with space for the string at the end and a null
     // terminator.
-
     unsigned AllocSize = static_cast<unsigned>(sizeof(StringMapEntry))+
       KeyLength+1;
     unsigned Alignment = alignOf<StringMapEntry>();
@@ -161,15 +146,12 @@ public:
       static_cast<StringMapEntry*>(Allocator.Allocate(AllocSize,Alignment));
 
     // Default construct the value.
-    new (NewItem) StringMapEntry(KeyLength);
+    new (NewItem) StringMapEntry(KeyLength, InitVal);
 
     // Copy the string information.
     char *StrBuffer = const_cast<char*>(NewItem->getKeyData());
     memcpy(StrBuffer, KeyStart, KeyLength);
     StrBuffer[KeyLength] = 0;  // Null terminate for convenience of clients.
-
-    // Initialize the value if the client wants to.
-    StringMapEntryInitializer<ValueTy>::Initialize(*NewItem, InitVal);
     return NewItem;
   }
 
@@ -313,6 +295,7 @@ public:
     return GetOrCreateValue(Key).getValue();
   }
 
+  /// count - Return 1 if the element is in the map, 0 otherwise.
   size_type count(StringRef Key) const {
     return find(Key) == end() ? 0 : 1;
   }
@@ -347,7 +330,7 @@ public:
       if (Bucket && Bucket != getTombstoneVal()) {
         static_cast<MapEntryTy*>(Bucket)->Destroy(Allocator);
       }
-      Bucket = 0;
+      Bucket = nullptr;
     }
 
     NumItems = 0;
@@ -404,7 +387,17 @@ public:
   }
 
   ~StringMap() {
-    clear();
+    // Delete all the elements in the map, but don't reset the elements
+    // to default values.  This is a copy of clear(), but avoids unnecessary
+    // work not required in the destructor.
+    if (!empty()) {
+      for (unsigned I = 0, E = NumBuckets; I != E; ++I) {
+        StringMapEntryBase *Bucket = TheTable[I];
+        if (Bucket && Bucket != getTombstoneVal()) {
+          static_cast<MapEntryTy*>(Bucket)->Destroy(Allocator);
+        }
+      }
+    }
     free(TheTable);
   }
 };
@@ -417,7 +410,7 @@ protected:
 public:
   typedef StringMapEntry<ValueTy> value_type;
 
-  StringMapConstIterator() : Ptr(0) { }
+  StringMapConstIterator() : Ptr(nullptr) { }
 
   explicit StringMapConstIterator(StringMapEntryBase **Bucket,
                                   bool NoAdvance = false)
@@ -450,7 +443,7 @@ public:
 
 private:
   void AdvancePastEmptyBuckets() {
-    while (*Ptr == 0 || *Ptr == StringMapImpl::getTombstoneVal())
+    while (*Ptr == nullptr || *Ptr == StringMapImpl::getTombstoneVal())
       ++Ptr;
   }
 };

@@ -15,7 +15,7 @@
 #define DEBUG_TYPE "mem2reg"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/Dominators.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
@@ -34,10 +34,10 @@ namespace {
     // runOnFunction - To run this pass, first we calculate the alloca
     // instructions that are safe for promotion, then we promote each one.
     //
-    virtual bool runOnFunction(Function &F);
+    bool runOnFunction(Function &F) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.addRequired<DominatorTree>();
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
+      AU.addRequired<DominatorTreeWrapperPass>();
       AU.setPreservesCFG();
       // This is a cluster of orthogonal Transforms
       AU.addPreserved<UnifyFunctionExitNodes>();
@@ -50,7 +50,7 @@ namespace {
 char PromotePass::ID = 0;
 INITIALIZE_PASS_BEGIN(PromotePass, "mem2reg", "Promote Memory to Register",
                 false, false)
-INITIALIZE_PASS_DEPENDENCY(DominatorTree)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_END(PromotePass, "mem2reg", "Promote Memory to Register",
                 false, false)
 
@@ -61,7 +61,7 @@ bool PromotePass::runOnFunction(Function &F) {
 
   bool Changed  = false;
 
-  DominatorTree &DT = getAnalysis<DominatorTree>();
+  DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
   while (1) {
     Allocas.clear();

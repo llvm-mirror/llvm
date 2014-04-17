@@ -145,11 +145,11 @@ attributes #1 = { nounwind readnone }
 attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "ssp-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!22}
+!llvm.module.flags = !{!22, !27}
 
 !0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 ", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/tmp/crash.cpp] [DW_LANG_C_plus_plus]
 !1 = metadata !{metadata !"crash.cpp", metadata !"/tmp"}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786478, metadata !1, metadata !5, metadata !"func", metadata !"func", metadata !"_Z4funci", i32 6, metadata !6, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.A*, i32)* @_Z4funci, null, null, metadata !2, i32 6} ; [ DW_TAG_subprogram ] [line 6] [def] [func]
 !5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/tmp/crash.cpp]
@@ -174,3 +174,4 @@ attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "n
 !24 = metadata !{i32 786688, metadata !4, metadata !"a", metadata !5, i32 7, metadata !8, i32 8192, i32 0} ; [ DW_TAG_auto_variable ] [a] [line 7]
 !25 = metadata !{i32 7, i32 0, metadata !4, null}
 !26 = metadata !{i32 8, i32 0, metadata !4, null} ; [ DW_TAG_imported_declaration ]
+!27 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

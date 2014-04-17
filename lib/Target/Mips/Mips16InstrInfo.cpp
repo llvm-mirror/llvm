@@ -1,3 +1,4 @@
+
 //===-- Mips16InstrInfo.cpp - Mips16 Instruction Information --------------===//
 //
 //                     The LLVM Compiler Infrastructure
@@ -10,7 +11,6 @@
 // This file contains the Mips16 implementation of the TargetInstrInfo class.
 //
 //===----------------------------------------------------------------------===//
-
 #include "Mips16InstrInfo.h"
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MipsMachineFunction.h"
@@ -20,23 +20,18 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
+#include <cctype>
 
 using namespace llvm;
 
-static cl::opt<bool> NeverUseSaveRestore(
-  "mips16-never-use-save-restore",
-  cl::init(false),
-  cl::desc("For testing ability to adjust stack pointer "
-           "without save/restore instruction"),
-  cl::Hidden);
-
 
 Mips16InstrInfo::Mips16InstrInfo(MipsTargetMachine &tm)
-  : MipsInstrInfo(tm, Mips::BimmX16),
+  : MipsInstrInfo(tm, Mips::Bimm16),
     RI(*tm.getSubtargetImpl()) {}
 
 const MipsRegisterInfo &Mips16InstrInfo::getRegisterInfo() const {
@@ -151,13 +146,17 @@ unsigned Mips16InstrInfo::getOppositeBranchOpc(unsigned Opc) const {
   default:  llvm_unreachable("Illegal opcode!");
   case Mips::BeqzRxImmX16: return Mips::BnezRxImmX16;
   case Mips::BnezRxImmX16: return Mips::BeqzRxImmX16;
+  case Mips::BeqzRxImm16: return Mips::BnezRxImm16;
+  case Mips::BnezRxImm16: return Mips::BeqzRxImm16;
   case Mips::BteqzT8CmpX16: return Mips::BtnezT8CmpX16;
   case Mips::BteqzT8SltX16: return Mips::BtnezT8SltX16;
   case Mips::BteqzT8SltiX16: return Mips::BtnezT8SltiX16;
+  case Mips::Btnez16: return Mips::Bteqz16;
   case Mips::BtnezX16: return Mips::BteqzX16;
   case Mips::BtnezT8CmpiX16: return Mips::BteqzT8CmpiX16;
   case Mips::BtnezT8SltuX16: return Mips::BteqzT8SltuX16;
   case Mips::BtnezT8SltiuX16: return Mips::BteqzT8SltiuX16;
+  case Mips::Bteqz16: return Mips::Btnez16;
   case Mips::BteqzX16: return Mips::BtnezX16;
   case Mips::BteqzT8CmpiX16: return Mips::BtnezT8CmpiX16;
   case Mips::BteqzT8SltuX16: return Mips::BtnezT8SltuX16;
@@ -170,45 +169,56 @@ unsigned Mips16InstrInfo::getOppositeBranchOpc(unsigned Opc) const {
   return 0;
 }
 
+static void addSaveRestoreRegs(MachineInstrBuilder &MIB,
+                          const std::vector<CalleeSavedInfo> &CSI, unsigned Flags=0) {
+  for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
+    // Add the callee-saved register as live-in. Do not add if the register is
+    // RA and return address is taken, because it has already been added in
+    // method MipsTargetLowering::LowerRETURNADDR.
+    // It's killed at the spill, unless the register is RA and return address
+    // is taken.
+    unsigned Reg = CSI[e-i-1].getReg();
+    switch (Reg) {
+    case Mips::RA:
+    case Mips::S0:
+    case Mips::S1:
+      MIB.addReg(Reg, Flags);
+      break;
+    case Mips::S2:
+      break;
+    default:
+      llvm_unreachable("unexpected mips16 callee saved register");
+
+    }
+  }
+}
 // Adjust SP by FrameSize bytes. Save RA, S0, S1
 void Mips16InstrInfo::makeFrame(unsigned SP, int64_t FrameSize,
                     MachineBasicBlock &MBB,
                     MachineBasicBlock::iterator I) const {
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
-  if (!NeverUseSaveRestore) {
-    if (isUInt<11>(FrameSize))
-      BuildMI(MBB, I, DL, get(Mips::SaveRaF16)).addImm(FrameSize);
-    else {
-      int Base = 2040; // should create template function like isUInt that
-                       // returns largest possible n bit unsigned integer
-      int64_t Remainder = FrameSize - Base;
-      BuildMI(MBB, I, DL, get(Mips::SaveRaF16)). addImm(Base);
-      if (isInt<16>(-Remainder))
-        BuildAddiuSpImm(MBB, I, -Remainder);
-      else
-        adjustStackPtrBig(SP, -Remainder, MBB, I, Mips::V0, Mips::V1);
-    }
-
-  }
+  MachineFunction &MF = *MBB.getParent();
+  MachineFrameInfo *MFI    = MF.getFrameInfo();
+  const BitVector Reserved = RI.getReservedRegs(MF);
+  bool SaveS2 = Reserved[Mips::S2];
+  MachineInstrBuilder MIB;
+  unsigned Opc = ((FrameSize <= 128) && !SaveS2)? Mips::Save16:Mips::SaveX16;
+  MIB = BuildMI(MBB, I, DL, get(Opc));
+  const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
+  addSaveRestoreRegs(MIB, CSI);
+  if (SaveS2)
+    MIB.addReg(Mips::S2);
+  if (isUInt<11>(FrameSize))
+    MIB.addImm(FrameSize);
   else {
-    //
-    // sw ra, -4[sp]
-    // sw s1, -8[sp]
-    // sw s0, -12[sp]
-
-    MachineInstrBuilder MIB1 = BuildMI(MBB, I, DL, get(Mips::SwRxSpImmX16),
-                                       Mips::RA);
-    MIB1.addReg(Mips::SP);
-    MIB1.addImm(-4);
-    MachineInstrBuilder MIB2 = BuildMI(MBB, I, DL, get(Mips::SwRxSpImmX16),
-                                       Mips::S1);
-    MIB2.addReg(Mips::SP);
-    MIB2.addImm(-8);
-    MachineInstrBuilder MIB3 = BuildMI(MBB, I, DL, get(Mips::SwRxSpImmX16),
-                                       Mips::S0);
-    MIB3.addReg(Mips::SP);
-    MIB3.addImm(-12);
-    adjustStackPtrBig(SP, -FrameSize, MBB, I, Mips::V0, Mips::V1);
+    int Base = 2040; // should create template function like isUInt that
+                     // returns largest possible n bit unsigned integer
+    int64_t Remainder = FrameSize - Base;
+    MIB.addImm(Base);
+    if (isInt<16>(-Remainder))
+      BuildAddiuSpImm(MBB, I, -Remainder);
+    else
+      adjustStackPtrBig(SP, -Remainder, MBB, I, Mips::V0, Mips::V1);
   }
 }
 
@@ -217,42 +227,31 @@ void Mips16InstrInfo::restoreFrame(unsigned SP, int64_t FrameSize,
                                    MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator I) const {
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
-  if (!NeverUseSaveRestore) {
-    if (isUInt<11>(FrameSize))
-      BuildMI(MBB, I, DL, get(Mips::RestoreRaF16)).addImm(FrameSize);
-    else {
-      int Base = 2040; // should create template function like isUInt that
-                       // returns largest possible n bit unsigned integer
-      int64_t Remainder = FrameSize - Base;
-      if (isInt<16>(Remainder))
-        BuildAddiuSpImm(MBB, I, Remainder);
-      else
-        adjustStackPtrBig(SP, Remainder, MBB, I, Mips::A0, Mips::A1);
-      BuildMI(MBB, I, DL, get(Mips::RestoreRaF16)). addImm(Base);
-    }
-  }
-  else {
-    adjustStackPtrBig(SP, FrameSize, MBB, I, Mips::A0, Mips::A1);
-    // lw ra, -4[sp]
-    // lw s1, -8[sp]
-    // lw s0, -12[sp]
-    MachineInstrBuilder MIB1 = BuildMI(MBB, I, DL, get(Mips::LwRxSpImmX16),
-                                       Mips::A0);
-    MIB1.addReg(Mips::SP);
-    MIB1.addImm(-4);
-    MachineInstrBuilder MIB0 = BuildMI(MBB, I, DL, get(Mips::Move32R16),
-                                       Mips::RA);
-     MIB0.addReg(Mips::A0);
-    MachineInstrBuilder MIB2 = BuildMI(MBB, I, DL, get(Mips::LwRxSpImmX16),
-                                       Mips::S1);
-    MIB2.addReg(Mips::SP);
-    MIB2.addImm(-8);
-    MachineInstrBuilder MIB3 = BuildMI(MBB, I, DL, get(Mips::LwRxSpImmX16),
-                                       Mips::S0);
-    MIB3.addReg(Mips::SP);
-    MIB3.addImm(-12);
-  }
+  MachineFunction *MF = MBB.getParent();
+  MachineFrameInfo *MFI    = MF->getFrameInfo();
+  const BitVector Reserved = RI.getReservedRegs(*MF);
+  bool SaveS2 = Reserved[Mips::S2];
+  MachineInstrBuilder MIB;
+  unsigned Opc = ((FrameSize <= 128) && !SaveS2)?
+    Mips::Restore16:Mips::RestoreX16;
 
+  if (!isUInt<11>(FrameSize)) {
+    unsigned Base = 2040;
+    int64_t Remainder = FrameSize - Base;
+    FrameSize = Base; // should create template function like isUInt that
+                     // returns largest possible n bit unsigned integer
+
+    if (isInt<16>(Remainder))
+      BuildAddiuSpImm(MBB, I, Remainder);
+    else
+      adjustStackPtrBig(SP, Remainder, MBB, I, Mips::A0, Mips::A1);
+  }
+  MIB = BuildMI(MBB, I, DL, get(Opc));
+  const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
+  addSaveRestoreRegs(MIB, CSI, RegState::Define);
+  if (SaveS2)
+    MIB.addReg(Mips::S2, RegState::Define);
+  MIB.addImm(FrameSize);
 }
 
 // Adjust SP by Amount bytes where bytes can be up to 32bit number.
@@ -276,7 +275,7 @@ void Mips16InstrInfo::adjustStackPtrBig(unsigned SP, int64_t Amount,
   //
   //
   MachineInstrBuilder MIB1 = BuildMI(MBB, I, DL, get(Mips::LwConstant32), Reg1);
-  MIB1.addImm(Amount);
+  MIB1.addImm(Amount).addImm(-1);
   MachineInstrBuilder MIB2 = BuildMI(MBB, I, DL, get(Mips::MoveR3216), Reg2);
   MIB2.addReg(Mips::SP, RegState::Kill);
   MachineInstrBuilder MIB3 = BuildMI(MBB, I, DL, get(Mips::AdduRxRyRz16), Reg1);
@@ -388,7 +387,7 @@ Mips16InstrInfo::loadImmediate(unsigned FrameReg,
   }
   else
     Available.reset(Reg);
-  BuildMI(MBB, II, DL, get(Mips::LwConstant32), Reg).addImm(Imm);
+  BuildMI(MBB, II, DL, get(Mips::LwConstant32), Reg).addImm(Imm).addImm(-1);
   NewImm = 0;
   if (FrameReg == Mips::SP) {
     SpReg = Available.find_first();
@@ -412,7 +411,7 @@ Mips16InstrInfo::loadImmediate(unsigned FrameReg,
     BuildMI(MBB, II, DL, get(Mips::  AdduRxRyRz16), Reg).addReg(FrameReg)
       .addReg(Reg, RegState::Kill);
   if (FirstRegSaved || SecondRegSaved) {
-    II = llvm::next(II);
+    II = std::next(II);
     if (FirstRegSaved)
       copyPhysReg(MBB, II, DL, FirstRegSaved, FirstRegSavedTo, true);
     if (SecondRegSaved)
@@ -421,24 +420,11 @@ Mips16InstrInfo::loadImmediate(unsigned FrameReg,
   return Reg;
 }
 
-/// This function generates the sequence of instructions needed to get the
-/// result of adding register REG and immediate IMM.
-unsigned
-Mips16InstrInfo::basicLoadImmediate(
-  unsigned FrameReg,
-  int64_t Imm, MachineBasicBlock &MBB,
-  MachineBasicBlock::iterator II, DebugLoc DL,
-  unsigned &NewImm) const {
-  const TargetRegisterClass *RC = &Mips::CPU16RegsRegClass;
-  MachineRegisterInfo &RegInfo = MBB.getParent()->getRegInfo();
-  unsigned Reg = RegInfo.createVirtualRegister(RC);
-  BuildMI(MBB, II, DL, get(Mips::LwConstant32), Reg).addImm(Imm);
-  NewImm = 0;
-  return Reg;
-}
-
 unsigned Mips16InstrInfo::getAnalyzableBrOpc(unsigned Opc) const {
   return (Opc == Mips::BeqzRxImmX16   || Opc == Mips::BimmX16  ||
+          Opc == Mips::Bimm16  ||
+          Opc == Mips::Bteqz16        || Opc == Mips::Btnez16 ||
+          Opc == Mips::BeqzRxImm16    || Opc == Mips::BnezRxImm16   ||
           Opc == Mips::BnezRxImmX16   || Opc == Mips::BteqzX16 ||
           Opc == Mips::BteqzT8CmpX16  || Opc == Mips::BteqzT8CmpiX16 ||
           Opc == Mips::BteqzT8SltX16  || Opc == Mips::BteqzT8SltuX16  ||
@@ -493,4 +479,48 @@ bool Mips16InstrInfo::validImmediate(unsigned Opcode, unsigned Reg,
     return isInt<15>(Amount);
   }
   llvm_unreachable("unexpected Opcode in validImmediate");
+}
+
+/// Measure the specified inline asm to determine an approximation of its
+/// length.
+/// Comments (which run till the next SeparatorString or newline) do not
+/// count as an instruction.
+/// Any other non-whitespace text is considered an instruction, with
+/// multiple instructions separated by SeparatorString or newlines.
+/// Variable-length instructions are not handled here; this function
+/// may be overloaded in the target code to do that.
+/// We implement the special case of the .space directive taking only an
+/// integer argument, which is the size in bytes. This is used for creating
+/// inline code spacing for testing purposes using inline assembly.
+///
+unsigned Mips16InstrInfo::getInlineAsmLength(const char *Str,
+                                             const MCAsmInfo &MAI) const {
+
+
+  // Count the number of instructions in the asm.
+  bool atInsnStart = true;
+  unsigned Length = 0;
+  for (; *Str; ++Str) {
+    if (*Str == '\n' || strncmp(Str, MAI.getSeparatorString(),
+                                strlen(MAI.getSeparatorString())) == 0)
+      atInsnStart = true;
+    if (atInsnStart && !std::isspace(static_cast<unsigned char>(*Str))) {
+      if (strncmp(Str, ".space", 6)==0) {
+        char *EStr; int Sz;
+        Sz = strtol(Str+6, &EStr, 10);
+        while (isspace(*EStr)) ++EStr;
+        if (*EStr=='\0') {
+          DEBUG(dbgs() << "parsed .space " << Sz << '\n');
+          return Sz;
+        }
+      }
+      Length += MAI.getMaxInstLength();
+      atInsnStart = false;
+    }
+    if (atInsnStart && strncmp(Str, MAI.getCommentString(),
+                               strlen(MAI.getCommentString())) == 0)
+      atInsnStart = false;
+  }
+
+  return Length;
 }

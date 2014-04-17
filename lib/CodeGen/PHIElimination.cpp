@@ -57,8 +57,8 @@ namespace {
       initializePHIEliminationPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnMachineFunction(MachineFunction &Fn);
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+    bool runOnMachineFunction(MachineFunction &Fn) override;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
 
   private:
     /// EliminatePHINodes - Eliminate phi nodes by inserting copy instructions
@@ -186,7 +186,7 @@ bool PHIElimination::EliminatePHINodes(MachineFunction &MF,
   // Get an iterator to the first instruction after the last PHI node (this may
   // also be the end of the basic block).
   MachineBasicBlock::iterator LastPHIIt =
-    prior(MBB.SkipPHIsAndLabels(MBB.begin()));
+    std::prev(MBB.SkipPHIsAndLabels(MBB.begin()));
 
   while (MBB.front().isPHI())
     LowerPHINode(MBB, LastPHIIt);
@@ -198,9 +198,8 @@ bool PHIElimination::EliminatePHINodes(MachineFunction &MF,
 /// This includes registers with no defs.
 static bool isImplicitlyDefined(unsigned VirtReg,
                                 const MachineRegisterInfo *MRI) {
-  for (MachineRegisterInfo::def_iterator DI = MRI->def_begin(VirtReg),
-       DE = MRI->def_end(); DI != DE; ++DI)
-    if (!DI->isImplicitDef())
+  for (MachineInstr &DI : MRI->def_instructions(VirtReg))
+    if (!DI.isImplicitDef())
       return false;
   return true;
 }
@@ -222,7 +221,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
                                   MachineBasicBlock::iterator LastPHIIt) {
   ++NumLowered;
 
-  MachineBasicBlock::iterator AfterPHIsIt = llvm::next(LastPHIIt);
+  MachineBasicBlock::iterator AfterPHIsIt = std::next(LastPHIIt);
 
   // Unlink the PHI node from the basic block, but don't delete the PHI yet.
   MachineInstr *MPhi = MBB.remove(MBB.begin());
@@ -267,7 +266,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
 
   // Update live variable information if there is any.
   if (LV) {
-    MachineInstr *PHICopy = prior(AfterPHIsIt);
+    MachineInstr *PHICopy = std::prev(AfterPHIsIt);
 
     if (IncomingReg) {
       LiveVariables::VarInfo &VI = LV->getVarInfo(IncomingReg);
@@ -306,7 +305,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
 
   // Update LiveIntervals for the new copy or implicit def.
   if (LIS) {
-    MachineInstr *NewInstr = prior(AfterPHIsIt);
+    MachineInstr *NewInstr = std::prev(AfterPHIsIt);
     SlotIndex DestCopyIndex = LIS->InsertMachineInstrInMaps(NewInstr);
 
     SlotIndex MBBStartIndex = LIS->getMBBStartIdx(&MBB);
@@ -378,7 +377,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
       findPHICopyInsertPoint(&opBlock, &MBB, SrcReg);
 
     // Insert the copy.
-    MachineInstr *NewSrcInstr = 0;
+    MachineInstr *NewSrcInstr = nullptr;
     if (!reusedIncoming && IncomingReg) {
       if (SrcUndef) {
         // The source register is undefined, so there is no need for a real
@@ -444,7 +443,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
           }
         } else {
           // We just inserted this copy.
-          KillInst = prior(InsertPos);
+          KillInst = std::prev(InsertPos);
         }
       }
       assert(KillInst->readsRegister(SrcReg) && "Cannot find kill instruction");
@@ -504,7 +503,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
               }
             } else {
               // We just inserted this copy.
-              KillInst = prior(InsertPos);
+              KillInst = std::prev(InsertPos);
             }
           }
           assert(KillInst->readsRegister(SrcReg) &&
@@ -547,7 +546,7 @@ bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
   if (MBB.empty() || !MBB.front().isPHI() || MBB.isLandingPad())
     return false;   // Quick exit for basic blocks without PHIs.
 
-  const MachineLoop *CurLoop = MLI ? MLI->getLoopFor(&MBB) : 0;
+  const MachineLoop *CurLoop = MLI ? MLI->getLoopFor(&MBB) : nullptr;
   bool IsLoopHeader = CurLoop && &MBB == CurLoop->getHeader();
 
   bool Changed = false;
@@ -564,7 +563,7 @@ bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
       // out-of-line blocks into the loop which is very bad for code placement.
       if (PreMBB == &MBB && !SplitAllCriticalEdges)
         continue;
-      const MachineLoop *PreLoop = MLI ? MLI->getLoopFor(PreMBB) : 0;
+      const MachineLoop *PreLoop = MLI ? MLI->getLoopFor(PreMBB) : nullptr;
       if (IsLoopHeader && PreLoop == CurLoop && !SplitAllCriticalEdges)
         continue;
 
@@ -607,7 +606,7 @@ bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
       if (!ShouldSplit)
         continue;
       if (!PreMBB->SplitCriticalEdge(&MBB, this)) {
-        DEBUG(dbgs() << "Failed to split ciritcal edge.\n");
+        DEBUG(dbgs() << "Failed to split critical edge.\n");
         continue;
       }
       Changed = true;

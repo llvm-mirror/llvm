@@ -14,7 +14,7 @@
 #include "LLLexer.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/Assembly/Parser.h"
+#include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/LLVMContext.h"
@@ -32,6 +32,10 @@ using namespace llvm;
 bool LLLexer::Error(LocTy ErrorLoc, const Twine &Msg) const {
   ErrorInfo = SM.GetMessage(ErrorLoc, SourceMgr::DK_Error, Msg);
   return true;
+}
+
+void LLLexer::Warning(LocTy WarningLoc, const Twine &Msg) const {
+  SM.PrintMessage(WarningLoc, SourceMgr::DK_Warning, Msg);
 }
 
 //===----------------------------------------------------------------------===//
@@ -275,6 +279,10 @@ lltok::Kind LLLexer::LexAt() {
       if (CurChar == '"') {
         StrVal.assign(TokStart+2, CurPtr-1);
         UnEscapeLexed(StrVal);
+        if (StringRef(StrVal).find_first_of(0) != StringRef::npos) {
+          Error("Null bytes are not allowed in names");
+          return lltok::Error;
+        }
         return lltok::GlobalVar;
       }
     }
@@ -476,14 +484,12 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(global);  KEYWORD(constant);
 
   KEYWORD(private);
-  KEYWORD(linker_private);
-  KEYWORD(linker_private_weak);
-  KEYWORD(linker_private_weak_def_auto); // FIXME: For backwards compatibility.
   KEYWORD(internal);
+  KEYWORD(linker_private);        // NOTE: deprecated, for parser compatibility
+  KEYWORD(linker_private_weak);   // NOTE: deprecated, for parser compatibility
   KEYWORD(available_externally);
   KEYWORD(linkonce);
   KEYWORD(linkonce_odr);
-  KEYWORD(linkonce_odr_auto_hide);
   KEYWORD(weak);
   KEYWORD(weak_odr);
   KEYWORD(appending);
@@ -548,6 +554,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(x86_stdcallcc);
   KEYWORD(x86_fastcallcc);
   KEYWORD(x86_thiscallcc);
+  KEYWORD(x86_cdeclmethodcc);
   KEYWORD(arm_apcscc);
   KEYWORD(arm_aapcscc);
   KEYWORD(arm_aapcs_vfpcc);
@@ -559,6 +566,10 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(intel_ocl_bicc);
   KEYWORD(x86_64_sysvcc);
   KEYWORD(x86_64_win64cc);
+  KEYWORD(webkit_jscc);
+  KEYWORD(anyregcc);
+  KEYWORD(preserve_mostcc);
+  KEYWORD(preserve_allcc);
 
   KEYWORD(cc);
   KEYWORD(c);
@@ -568,6 +579,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(alwaysinline);
   KEYWORD(builtin);
   KEYWORD(byval);
+  KEYWORD(inalloca);
   KEYWORD(cold);
   KEYWORD(inlinehint);
   KEYWORD(inreg);
@@ -665,6 +677,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   INSTKEYWORD(inttoptr,    IntToPtr);
   INSTKEYWORD(ptrtoint,    PtrToInt);
   INSTKEYWORD(bitcast,     BitCast);
+  INSTKEYWORD(addrspacecast, AddrSpaceCast);
   INSTKEYWORD(select,      Select);
   INSTKEYWORD(va_arg,      VAArg);
   INSTKEYWORD(ret,         Ret);

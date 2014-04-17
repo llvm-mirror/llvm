@@ -135,7 +135,7 @@ size_t Process::GetMallocUsage() {
 void Process::GetTimeUsage(TimeValue &elapsed, TimeValue &user_time,
                            TimeValue &sys_time) {
   elapsed = TimeValue::now();
-  llvm::tie(user_time, sys_time) = getRUsageTimes();
+  std::tie(user_time, sys_time) = getRUsageTimes();
 }
 
 #if defined(HAVE_MACH_MACH_H) && !defined(__GNU__)
@@ -343,7 +343,7 @@ const char *Process::ResetColor() {
   return "\033[0m";
 }
 
-#if !defined(HAVE_ARC4RANDOM)
+#if !defined(HAVE_DECL_ARC4RANDOM) || !HAVE_DECL_ARC4RANDOM
 static unsigned GetRandomNumberSeed() {
   // Attempt to get the initial seed from /dev/urandom, if possible.
   if (FILE *RandomSource = ::fopen("/dev/urandom", "r")) {
@@ -364,7 +364,7 @@ static unsigned GetRandomNumberSeed() {
 #endif
 
 unsigned llvm::sys::Process::GetRandomNumber() {
-#if defined(HAVE_ARC4RANDOM)
+#if defined(HAVE_DECL_ARC4RANDOM) && HAVE_DECL_ARC4RANDOM
   return arc4random();
 #else
   static int x = (::srand(GetRandomNumberSeed()), 0);

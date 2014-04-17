@@ -1,7 +1,27 @@
-; RUN: llvm-link %s %p/type-unique-simple-b.ll -S -o - | FileCheck %s
+; REQUIRES: object-emission
 
-; CHECK: DW_TAG_structure_type
+; RUN: llvm-link %s %p/type-unique-simple-b.ll -S -o %t
+; RUN: cat %t | FileCheck %s -check-prefix=LINK
+; RUN: %llc_dwarf -filetype=obj -O0 < %t > %t2
+; RUN: llvm-dwarfdump -debug-dump=info %t2 | FileCheck %s
+
+; Make sure the backend generates a single DIE and uses ref_addr.
+; CHECK: 0x[[BASE:.*]]: DW_TAG_structure_type
+; CHECK-NEXT: DW_AT_name {{.*}} = "Base"
 ; CHECK-NOT: DW_TAG_structure_type
+; CHECK: 0x[[INT:.*]]: DW_TAG_base_type
+; CHECK-NEXT: DW_AT_name {{.*}} = "int"
+; CHECK-NOT: DW_TAG_base_type
+
+; CHECK: DW_TAG_compile_unit
+; CHECK: DW_TAG_formal_parameter
+; CHECK: DW_AT_type [DW_FORM_ref_addr] {{.*}}[[INT]])
+; CHECK: DW_TAG_variable
+; CHECK: DW_AT_type [DW_FORM_ref_addr] {{.*}}[[BASE]])
+
+; Make sure llvm-link only generates a single copy of the struct.
+; LINK: DW_TAG_structure_type
+; LINK-NOT: DW_TAG_structure_type
 ; Content of header files:
 ; struct Base {
 ;   int a;
@@ -46,11 +66,11 @@ attributes #0 = { nounwind ssp uwtable "less-precise-fpmad"="false" "no-frame-po
 attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!14}
+!llvm.module.flags = !{!14, !20}
 
 !0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 (http://llvm.org/git/clang.git c23b1db6268c8e7ce64026d57d1510c1aac200a0) (http://llvm.org/git/llvm.git 09b98fe3978eddefc2145adc1056cf21580ce945)", i1 false, metadata !"", i32 0, metadata !2, metadata !3, metadata !9, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/Users/mren/c_testing/type_unique_air/simple/foo.cpp] [DW_LANG_C_plus_plus]
 !1 = metadata !{metadata !"foo.cpp", metadata !"/Users/mren/c_testing/type_unique_air/simple"}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786451, metadata !5, null, metadata !"Base", i32 1, i64 32, i64 32, i32 0, i32 0, null, metadata !6, i32 0, null, null, metadata !"_ZTS4Base"} ; [ DW_TAG_structure_type ] [Base] [line 1, size 32, align 32, offset 0] [def] [from ]
 !5 = metadata !{metadata !"./a.hpp", metadata !"/Users/mren/c_testing/type_unique_air/simple"}
@@ -68,3 +88,4 @@ attributes #1 = { nounwind readnone }
 !17 = metadata !{i32 786688, metadata !10, metadata !"t", metadata !11, i32 4, metadata !4, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [t] [line 4]
 !18 = metadata !{i32 4, i32 0, metadata !10, null}
 !19 = metadata !{i32 5, i32 0, metadata !10, null}
+!20 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

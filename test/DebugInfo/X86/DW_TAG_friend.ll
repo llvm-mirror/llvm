@@ -3,10 +3,10 @@
 
 ; Check that the friend tag is there and is followed by a DW_AT_friend that has a reference back.
 
-; CHECK: [[BACK:0x[0-9a-f]*]]:   DW_TAG_class_type [4]
+; CHECK: [[BACK:0x[0-9a-f]*]]:   DW_TAG_class_type
 ; CHECK-NEXT: DW_AT_name [DW_FORM_strp]       ( .debug_str[{{.*}}] = "A")
-; CHECK: DW_TAG_friend [9]
-; CHECK-NEXT: DW_AT_friend [DW_FORM_ref4]   (cu + 0x0032 => {[[BACK]]})
+; CHECK: DW_TAG_friend
+; CHECK-NEXT: DW_AT_friend [DW_FORM_ref4]   (cu + 0x{{[0-9a-f]*}} => {[[BACK]]})
 
 
 %class.A = type { i32 }
@@ -16,9 +16,10 @@
 @b = global %class.B zeroinitializer, align 4
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!29}
 
-!0 = metadata !{i32 786449, metadata !28, i32 4, metadata !"clang version 3.1 (trunk 153413) (llvm/trunk 153428)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !1, metadata !3,  metadata !3, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
+!0 = metadata !{i32 786449, metadata !28, i32 4, metadata !"clang version 3.1 (trunk 153413) (llvm/trunk 153428)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !1, metadata !3,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ]
+!1 = metadata !{}
 !3 = metadata !{metadata !5, metadata !17}
 !5 = metadata !{i32 786484, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !6, i32 10, metadata !7, i32 0, i32 1, %class.A* @a, null} ; [ DW_TAG_variable ]
 !6 = metadata !{i32 786473, metadata !28} ; [ DW_TAG_file_type ]
@@ -44,3 +45,4 @@
 !26 = metadata !{i32 786468}                      ; [ DW_TAG_base_type ]
 !27 = metadata !{i32 786474, metadata !18, null, metadata !6, i32 0, i64 0, i64 0, i64 0, i32 0, metadata !7} ; [ DW_TAG_friend ]
 !28 = metadata !{metadata !"foo.cpp", metadata !"/Users/echristo/tmp"}
+!29 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

@@ -185,9 +185,10 @@ static MCStreamer *createSystemZMCObjectStreamer(const Target &T, StringRef TT,
                                                  MCAsmBackend &MAB,
                                                  raw_ostream &OS,
                                                  MCCodeEmitter *Emitter,
+                                                 const MCSubtargetInfo &STI,
                                                  bool RelaxAll,
                                                  bool NoExecStack) {
-  return createELFStreamer(Ctx, 0, MAB, OS, Emitter, RelaxAll, NoExecStack);
+  return createELFStreamer(Ctx, MAB, OS, Emitter, RelaxAll, NoExecStack);
 }
 
 extern "C" void LLVMInitializeSystemZTargetMC() {

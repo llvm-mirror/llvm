@@ -241,17 +241,17 @@ namespace {
     static char ID; // Pass ID, replacement for typeid
     const char *const Banner;
 
-    MachineVerifierPass(const char *b = 0)
+    MachineVerifierPass(const char *b = nullptr)
       : MachineFunctionPass(ID), Banner(b) {
         initializeMachineVerifierPassPass(*PassRegistry::getPassRegistry());
       }
 
-    void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
-    bool runOnMachineFunction(MachineFunction &MF) {
+    bool runOnMachineFunction(MachineFunction &MF) override {
       MF.verify(this, Banner);
       return false;
     }
@@ -273,10 +273,11 @@ void MachineFunction::verify(Pass *p, const char *Banner) const {
 }
 
 bool MachineVerifier::runOnMachineFunction(MachineFunction &MF) {
-  raw_ostream *OutFile = 0;
+  raw_ostream *OutFile = nullptr;
   if (OutFileName) {
     std::string ErrorInfo;
-    OutFile = new raw_fd_ostream(OutFileName, ErrorInfo, sys::fs::F_Append);
+    OutFile = new raw_fd_ostream(OutFileName, ErrorInfo,
+                                 sys::fs::F_Append | sys::fs::F_Text);
     if (!ErrorInfo.empty()) {
       errs() << "Error opening '" << OutFileName << "': " << ErrorInfo << '\n';
       exit(1);
@@ -295,10 +296,10 @@ bool MachineVerifier::runOnMachineFunction(MachineFunction &MF) {
   TRI = TM->getRegisterInfo();
   MRI = &MF.getRegInfo();
 
-  LiveVars = NULL;
-  LiveInts = NULL;
-  LiveStks = NULL;
-  Indexes = NULL;
+  LiveVars = nullptr;
+  LiveInts = nullptr;
+  LiveStks = nullptr;
+  Indexes = nullptr;
   if (PASS) {
     LiveInts = PASS->getAnalysisIfAvailable<LiveIntervals>();
     // We don't want to verify LiveVariables if LiveIntervals is available.
@@ -313,7 +314,7 @@ bool MachineVerifier::runOnMachineFunction(MachineFunction &MF) {
        MFI!=MFE; ++MFI) {
     visitMachineBasicBlockBefore(MFI);
     // Keep track of the current bundle header.
-    const MachineInstr *CurBundle = 0;
+    const MachineInstr *CurBundle = nullptr;
     // Do we expect the next instruction to be part of the same bundle?
     bool InBundle = false;
 
@@ -500,7 +501,7 @@ static bool matchPair(MachineBasicBlock::const_succ_iterator i,
 
 void
 MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
-  FirstTerminator = 0;
+  FirstTerminator = nullptr;
 
   if (MRI->isSSA()) {
     // If this block has allocatable physical registers live-in, check that
@@ -552,7 +553,7 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
     report("MBB has more than one landing pad successor", MBB);
 
   // Call AnalyzeBranch. If it succeeds, there several more conditions to check.
-  MachineBasicBlock *TBB = 0, *FBB = 0;
+  MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
   SmallVector<MachineOperand, 4> Cond;
   if (!TII->AnalyzeBranch(*const_cast<MachineBasicBlock *>(MBB),
                           TBB, FBB, Cond)) {
@@ -775,7 +776,7 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
   if (MI->getNumOperands() < MCID.getNumOperands()) {
     report("Too few operands", MI);
     *OS << MCID.getNumOperands() << " operands expected, but "
-        << MI->getNumExplicitOperands() << " given.\n";
+        << MI->getNumOperands() << " given.\n";
   }
 
   // Check the tied operands.
@@ -1075,7 +1076,7 @@ void MachineVerifier::checkLiveness(const MachineOperand *MO, unsigned MONum) {
 
     // Verify SSA form.
     if (MRI->isSSA() && TargetRegisterInfo::isVirtualRegister(Reg) &&
-        llvm::next(MRI->def_begin(Reg)) != MRI->def_end())
+        std::next(MRI->def_begin(Reg)) != MRI->def_end())
       report("Multiple virtual register defs in SSA form", MO, MONum);
 
     // Check LiveInts for a live segment, but only for virtual registers.
@@ -1095,6 +1096,14 @@ void MachineVerifier::checkLiveness(const MachineOperand *MO, unsigned MONum) {
         } else {
           report("No live segment at def", MO, MONum);
           *OS << DefIdx << " is not live in " << LI << '\n';
+        }
+        // Check that, if the dead def flag is present, LiveInts agree.
+        if (MO->isDead()) {
+          LiveQueryResult LRQ = LI.Query(DefIdx);
+          if (!LRQ.isDeadDef()) {
+            report("Live range continues after dead def flag", MO, MONum);
+            *OS << "Live range: " << LI << '\n';
+          }
         }
       } else {
         report("Virtual register has no Live interval", MO, MONum);
@@ -1517,22 +1526,13 @@ void MachineVerifier::verifyLiveRangeSegment(const LiveRange &LR,
     // A live segment can end with either a redefinition, a kill flag on a
     // use, or a dead flag on a def.
     bool hasRead = false;
-    bool hasDeadDef = false;
     for (ConstMIBundleOperands MOI(MI); MOI.isValid(); ++MOI) {
       if (!MOI->isReg() || MOI->getReg() != Reg)
         continue;
       if (MOI->readsReg())
         hasRead = true;
-      if (MOI->isDef() && MOI->isDead())
-        hasDeadDef = true;
     }
-
-    if (S.end.isDead()) {
-      if (!hasDeadDef) {
-        report("Instruction doesn't have a dead def operand", MI);
-        *OS << S << " in " << LR << '\n';
-      }
-    } else {
+    if (!S.end.isDead()) {
       if (!hasRead) {
         report("Instruction ending live segment doesn't read the register", MI);
         *OS << S << " in " << LR << '\n';

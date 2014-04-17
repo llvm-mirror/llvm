@@ -1,14 +1,16 @@
-; RUN: llc < %s | FileCheck %s
-; RUN: llc < %s -regalloc=basic | FileCheck %s
+; RUN: llc -filetype=obj %s -o - | llvm-dwarfdump -debug-dump=info - | FileCheck %s
+; RUN: llc -filetype=obj %s -regalloc=basic -o - | llvm-dwarfdump -debug-dump=info - | FileCheck %s
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64"
 target triple = "x86_64-apple-darwin10.0.0"
-;Radar 8950491
+; Test that the type for the formal parameter "var" makes it into the debug info.
+; rdar://8950491
 
-;CHECK: .long Lset5
-;CHECK-NEXT:        ## DW_AT_decl_file
-;CHECK-NEXT:        ## DW_AT_decl_line
-;CHECK-NEXT:        ## DW_AT_type
-;CHECK-NEXT:        ## DW_AT_location
+;CHECK: DW_TAG_formal_parameter
+;CHECK-NEXT: DW_AT_name {{.*}} "var"
+;CHECK-NEXT: DW_AT_decl_file
+;CHECK-NEXT: DW_AT_decl_line
+;CHECK-NEXT: DW_AT_type
+;CHECK-NEXT: DW_AT_location
 
 @dfm = external global i32, align 4
 
@@ -46,6 +48,7 @@ declare hidden fastcc i32 @bar3(i32) nounwind optsize ssp
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!29}
 
 !0 = metadata !{i32 786478, metadata !26, metadata !1, metadata !"foo", metadata !"foo", metadata !"", i32 19510, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i32, i64, i8*, i32)* @foo, null, null, null, i32 19510} ; [ DW_TAG_subprogram ] [line 19510] [def] [foo]
 !1 = metadata !{i32 786473, metadata !26} ; [ DW_TAG_file_type ]
@@ -73,3 +76,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !26 = metadata !{metadata !"/tmp/f.c", metadata !"/tmp"}
 !27 = metadata !{metadata !"f.i", metadata !"/tmp"}
 !28 = metadata !{i32 0}
+!29 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

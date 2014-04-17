@@ -6,26 +6,29 @@
 
 @a = global %class.A zeroinitializer, align 4
 
-; CHECK:      0x0000002d:   DW_TAG_base_type [3]  
-; CHECK-NEXT: DW_AT_name
-; CHECK-NEXT: DW_AT_byte_size [DW_FORM_data1]  (0x04)
-; CHECK-NEXT: DW_AT_encoding [DW_FORM_data1]   (0x05)
+; CHECK: DW_TAG_class_type
+; CHECK:      DW_TAG_member
+; CHECK-NEXT: DW_AT_name [DW_FORM_strp]  ( .debug_str[0x{{[0-9a-f]*}}] = "x")
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x{{[0-9a-f]*}} => {[[ARRAY:0x[0-9a-f]*]]})
 
-; CHECK:      0x00000034:   DW_TAG_array_type [4] *
-; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]    (cu + 0x0026 => {0x00000026})
+; CHECK:      [[ARRAY]]: DW_TAG_array_type [{{.*}}] *
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]    (cu + 0x{{[0-9a-f]*}} => {[[BASETYPE:0x[0-9a-f]*]]})
 
-; CHECK:      0x00000039:     DW_TAG_subrange_type [5]
-; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x002d => {0x0000002d})
+; CHECK:      DW_TAG_subrange_type
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x{{[0-9a-f]*}} => {[[BASE2:0x[0-9a-f]*]]})
 ; CHECK-NOT:  DW_AT_upper_bound
 
-; CHECK:      DW_TAG_member [8]
-; CHECK-NEXT: DW_AT_name [DW_FORM_strp]  ( .debug_str[0x0000003f] = "x")
-; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]  (cu + 0x0034 => {0x00000034})
+; CHECK: [[BASETYPE]]: DW_TAG_base_type
+; CHECK: [[BASE2]]: DW_TAG_base_type
+; CHECK-NEXT: DW_AT_name
+; CHECK-NEXT: DW_AT_byte_size [DW_FORM_data1]  (0x08)
+; CHECK-NEXT: DW_AT_encoding [DW_FORM_data1]   (0x07)
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!21}
 
-!0 = metadata !{i32 786449, metadata !20, i32 4, metadata !"clang version 3.3 (trunk 169136)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !1, metadata !3,  metadata !3, metadata !""} ; [ DW_TAG_compile_unit ] [/Volumes/Sandbox/llvm/t.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{i32 0}
+!0 = metadata !{i32 786449, metadata !20, i32 4, metadata !"clang version 3.3 (trunk 169136)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !1, metadata !3,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ] [/Volumes/Sandbox/llvm/t.cpp] [DW_LANG_C_plus_plus]
+!1 = metadata !{}
 !3 = metadata !{metadata !5}
 !5 = metadata !{i32 786484, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !6, i32 1, metadata !7, i32 0, i32 1, %class.A* @a, null} ; [ DW_TAG_variable ] [a] [line 1] [def]
 !6 = metadata !{i32 786473, metadata !20} ; [ DW_TAG_file_type ]
@@ -43,3 +46,4 @@
 !18 = metadata !{metadata !19}
 !19 = metadata !{i32 786468}                      ; [ DW_TAG_base_type ] [line 0, size 0, align 0, offset 0]
 !20 = metadata !{metadata !"t.cpp", metadata !"/Volumes/Sandbox/llvm"}
+!21 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

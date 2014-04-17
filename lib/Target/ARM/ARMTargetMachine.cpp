@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMTargetMachine.h"
 #include "ARM.h"
+#include "ARMTargetMachine.h"
 #include "ARMFrameLowering.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -24,19 +24,16 @@
 using namespace llvm;
 
 static cl::opt<bool>
-EnableGlobalMerge("global-merge", cl::Hidden,
-                  cl::desc("Enable global merge pass"),
-                  cl::init(true));
-
-static cl::opt<bool>
 DisableA15SDOptimization("disable-a15-sd-optimization", cl::Hidden,
                    cl::desc("Inhibit optimization of S->D register accesses on A15"),
                    cl::init(false));
 
 extern "C" void LLVMInitializeARMTarget() {
   // Register the target.
-  RegisterTargetMachine<ARMTargetMachine> X(TheARMTarget);
-  RegisterTargetMachine<ThumbTargetMachine> Y(TheThumbTarget);
+  RegisterTargetMachine<ARMLETargetMachine> X(TheARMLETarget);
+  RegisterTargetMachine<ARMBETargetMachine> Y(TheARMBETarget);
+  RegisterTargetMachine<ThumbLETargetMachine> A(TheThumbLETarget);
+  RegisterTargetMachine<ThumbBETargetMachine> B(TheThumbBETarget);
 }
 
 
@@ -46,14 +43,17 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
                                            StringRef CPU, StringRef FS,
                                            const TargetOptions &Options,
                                            Reloc::Model RM, CodeModel::Model CM,
-                                           CodeGenOpt::Level OL)
+                                           CodeGenOpt::Level OL,
+                                           bool isLittle)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, Options),
+    Subtarget(TT, CPU, FS, isLittle, Options),
     JITInfo(),
     InstrItins(Subtarget.getInstrItineraryData()) {
-  // Default to soft float ABI
+
+  // Default to triple-appropriate float ABI
   if (Options.FloatABIType == FloatABI::Default)
-    this->Options.FloatABIType = FloatABI::Soft;
+    this->Options.FloatABIType =
+        Subtarget.isTargetHardFloat() ? FloatABI::Hard : FloatABI::Soft;
 }
 
 void ARMBaseTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
@@ -67,21 +67,71 @@ void ARMBaseTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
 
 void ARMTargetMachine::anchor() { }
 
+static std::string computeDataLayout(ARMSubtarget &ST) {
+  std::string Ret = "";
+
+  if (ST.isLittle())
+    // Little endian.
+    Ret += "e";
+  else
+    // Big endian.
+    Ret += "E";
+
+  Ret += DataLayout::getManglingComponent(ST.getTargetTriple());
+
+  // Pointers are 32 bits and aligned to 32 bits.
+  Ret += "-p:32:32";
+
+  // On thumb, i16,i18 and i1 have natural aligment requirements, but we try to
+  // align to 32.
+  if (ST.isThumb())
+    Ret += "-i1:8:32-i8:8:32-i16:16:32";
+
+  // ABIs other than APCS have 64 bit integers with natural alignment.
+  if (!ST.isAPCS_ABI())
+    Ret += "-i64:64";
+
+  // We have 64 bits floats. The APCS ABI requires them to be aligned to 32
+  // bits, others to 64 bits. We always try to align to 64 bits.
+  if (ST.isAPCS_ABI())
+    Ret += "-f64:32:64";
+
+  // We have 128 and 64 bit vectors. The APCS ABI aligns them to 32 bits, others
+  // to 64. We always ty to give them natural alignment.
+  if (ST.isAPCS_ABI())
+    Ret += "-v64:32:64-v128:32:128";
+  else
+    Ret += "-v128:64:128";
+
+  // On thumb and APCS, only try to align aggregates to 32 bits (the default is
+  // 64 bits).
+  if (ST.isThumb() || ST.isAPCS_ABI())
+    Ret += "-a:0:32";
+
+  // Integer registers are 32 bits.
+  Ret += "-n32";
+
+  // The stack is 128 bit aligned on NaCl, 64 bit aligned on AAPCS and 32 bit
+  // aligned everywhere else.
+  if (ST.isTargetNaCl())
+    Ret += "-S128";
+  else if (ST.isAAPCS_ABI())
+    Ret += "-S64";
+  else
+    Ret += "-S32";
+
+  return Ret;
+}
+
 ARMTargetMachine::ARMTargetMachine(const Target &T, StringRef TT,
                                    StringRef CPU, StringRef FS,
                                    const TargetOptions &Options,
                                    Reloc::Model RM, CodeModel::Model CM,
-                                   CodeGenOpt::Level OL)
-  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+                                   CodeGenOpt::Level OL,
+                                   bool isLittle)
+  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, isLittle),
     InstrInfo(Subtarget),
-    DL(Subtarget.isAPCS_ABI() ?
-               std::string("e-p:32:32-f64:32:64-i64:32:64-"
-                           "v128:32:128-v64:32:64-n32-S32") :
-               Subtarget.isAAPCS_ABI() ?
-               std::string("e-p:32:32-f64:64:64-i64:64:64-"
-                           "v128:64:128-v64:64:64-n32-S64") :
-               std::string("e-p:32:32-f64:64:64-i64:64:64-"
-                           "v128:64:128-v64:64:64-n32-S32")),
+    DL(computeDataLayout(Subtarget)),
     TLInfo(*this),
     TSInfo(*this),
     FrameLowering(Subtarget) {
@@ -91,28 +141,37 @@ ARMTargetMachine::ARMTargetMachine(const Target &T, StringRef TT,
                        "support ARM mode execution!");
 }
 
+void ARMLETargetMachine::anchor() { }
+
+ARMLETargetMachine::
+ARMLETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ARMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
+
+void ARMBETargetMachine::anchor() { }
+
+ARMBETargetMachine::
+ARMBETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ARMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
+
 void ThumbTargetMachine::anchor() { }
 
 ThumbTargetMachine::ThumbTargetMachine(const Target &T, StringRef TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
-                                       CodeGenOpt::Level OL)
-  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+                                       CodeGenOpt::Level OL,
+                                       bool isLittle)
+  : ARMBaseTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, isLittle),
     InstrInfo(Subtarget.hasThumb2()
               ? ((ARMBaseInstrInfo*)new Thumb2InstrInfo(Subtarget))
               : ((ARMBaseInstrInfo*)new Thumb1InstrInfo(Subtarget))),
-    DL(Subtarget.isAPCS_ABI() ?
-               std::string("e-p:32:32-f64:32:64-i64:32:64-"
-                           "i16:16:32-i8:8:32-i1:8:32-"
-                           "v128:32:128-v64:32:64-a:0:32-n32-S32") :
-               Subtarget.isAAPCS_ABI() ?
-               std::string("e-p:32:32-f64:64:64-i64:64:64-"
-                           "i16:16:32-i8:8:32-i1:8:32-"
-                           "v128:64:128-v64:64:64-a:0:32-n32-S64") :
-               std::string("e-p:32:32-f64:64:64-i64:64:64-"
-                           "i16:16:32-i8:8:32-i1:8:32-"
-                           "v128:64:128-v64:64:64-a:0:32-n32-S32")),
+    DL(computeDataLayout(Subtarget)),
     TLInfo(*this),
     TSInfo(*this),
     FrameLowering(Subtarget.hasThumb2()
@@ -120,6 +179,24 @@ ThumbTargetMachine::ThumbTargetMachine(const Target &T, StringRef TT,
               : (ARMFrameLowering*)new Thumb1FrameLowering(Subtarget)) {
   initAsmInfo();
 }
+
+void ThumbLETargetMachine::anchor() { }
+
+ThumbLETargetMachine::
+ThumbLETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ThumbTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
+
+void ThumbBETargetMachine::anchor() { }
+
+ThumbBETargetMachine::
+ThumbBETargetMachine(const Target &T, StringRef TT,
+                       StringRef CPU, StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL)
+  : ThumbTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
 namespace {
 /// ARM Code Generator Pass Configuration Options.
@@ -136,11 +213,11 @@ public:
     return *getARMTargetMachine().getSubtargetImpl();
   }
 
-  virtual bool addPreISel();
-  virtual bool addInstSelector();
-  virtual bool addPreRegAlloc();
-  virtual bool addPreSched2();
-  virtual bool addPreEmitPass();
+  bool addPreISel() override;
+  bool addInstSelector() override;
+  bool addPreRegAlloc() override;
+  bool addPreSched2() override;
+  bool addPreEmitPass() override;
 };
 } // namespace
 
@@ -149,7 +226,11 @@ TargetPassConfig *ARMBaseTargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 bool ARMPassConfig::addPreISel() {
-  if (TM->getOptLevel() != CodeGenOpt::None && EnableGlobalMerge)
+  const ARMSubtarget *Subtarget = &getARMSubtarget();
+  if (Subtarget->hasAnyDataBarrier() && !Subtarget->isThumb1Only())
+    addPass(createARMAtomicExpandPass(TM));
+
+  if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createGlobalMergePass(TM));
 
   return false;
@@ -198,7 +279,7 @@ bool ARMPassConfig::addPreSched2() {
   if (getOptLevel() != CodeGenOpt::None) {
     if (!getARMSubtarget().isThumb1Only()) {
       // in v8, IfConversion depends on Thumb instruction widths
-      if (getARMSubtarget().hasV8Ops() &&
+      if (getARMSubtarget().restrictIT() &&
           !getARMSubtarget().prefers32BitThumb())
         addPass(createThumb2SizeReductionPass());
       addPass(&IfConverterID);
@@ -219,6 +300,7 @@ bool ARMPassConfig::addPreEmitPass() {
     addPass(&UnpackMachineBundlesID);
   }
 
+  addPass(createARMOptimizeBarriersPass());
   addPass(createARMConstantIslandPass());
 
   return true;

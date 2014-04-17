@@ -7,7 +7,3 @@ add_llvm_library(LLVMAArch64Desc
   AArch64MCExpr.cpp
   AArch64MCTargetDesc.cpp
   )
-add_dependencies(LLVMAArch64Desc AArch64CommonTableGen)
-
-# Hack: we need to include 'main' target directory to grab private headers
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_BINARY_DIR}/..)

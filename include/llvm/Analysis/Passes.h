@@ -95,27 +95,6 @@ namespace llvm {
 
   //===--------------------------------------------------------------------===//
   //
-  // createDSAAPass - This pass implements simple context sensitive alias
-  // analysis.
-  //
-  ModulePass *createDSAAPass();
-
-  //===--------------------------------------------------------------------===//
-  //
-  // createDSOptPass - This pass uses DSA to do a series of simple
-  // optimizations.
-  //
-  ModulePass *createDSOptPass();
-
-  //===--------------------------------------------------------------------===//
-  //
-  // createSteensgaardPass - This pass uses the data structure graphs to do a
-  // simple context insensitive alias analysis.
-  //
-  ModulePass *createSteensgaardPass();
-
-  //===--------------------------------------------------------------------===//
-  //
   /// createLazyValueInfoPass - This creates an instance of the LazyValueInfo
   /// pass.
   FunctionPass *createLazyValueInfoPass();
@@ -133,6 +112,13 @@ namespace llvm {
   // CostModelAnalysis pass.
   //
   FunctionPass *createCostModelAnalysisPass();
+
+  //===--------------------------------------------------------------------===//
+  //
+  // createDelinearizationPass - This pass implements attempts to restore
+  // multidimensional array indices from linearized expressions.
+  //
+  FunctionPass *createDelinearizationPass();
 
   //===--------------------------------------------------------------------===//
   //

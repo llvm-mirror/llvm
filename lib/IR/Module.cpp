@@ -17,12 +17,12 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/GVMaterializer.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/Support/LeakDetector.h"
+#include "llvm/IR/LeakDetector.h"
 #include <algorithm>
 #include <cstdarg>
 #include <cstdlib>
@@ -42,8 +42,8 @@ template class llvm::SymbolTableListTraits<GlobalAlias, Module>;
 // Primitive Module methods.
 //
 
-Module::Module(StringRef MID, LLVMContext& C)
-  : Context(C), Materializer(NULL), ModuleID(MID) {
+Module::Module(StringRef MID, LLVMContext &C)
+    : Context(C), Materializer(), ModuleID(MID), DL("") {
   ValSymTab = new ValueSymbolTable();
   NamedMDSymTab = new StringMap<NamedMDNode *>();
   Context.addModule(this);
@@ -58,51 +58,6 @@ Module::~Module() {
   NamedMDList.clear();
   delete ValSymTab;
   delete static_cast<StringMap<NamedMDNode *> *>(NamedMDSymTab);
-}
-
-/// Target endian information.
-Module::Endianness Module::getEndianness() const {
-  StringRef temp = DataLayout;
-  Module::Endianness ret = AnyEndianness;
-
-  while (!temp.empty()) {
-    std::pair<StringRef, StringRef> P = getToken(temp, "-");
-
-    StringRef token = P.first;
-    temp = P.second;
-
-    if (token[0] == 'e') {
-      ret = LittleEndian;
-    } else if (token[0] == 'E') {
-      ret = BigEndian;
-    }
-  }
-
-  return ret;
-}
-
-/// Target Pointer Size information.
-Module::PointerSize Module::getPointerSize() const {
-  StringRef temp = DataLayout;
-  Module::PointerSize ret = AnyPointerSize;
-
-  while (!temp.empty()) {
-    std::pair<StringRef, StringRef> TmpP = getToken(temp, "-");
-    temp = TmpP.second;
-    TmpP = getToken(TmpP.first, ":");
-    StringRef token = TmpP.second, signalToken = TmpP.first;
-
-    if (signalToken[0] == 'p') {
-      int size = 0;
-      getToken(token, ":").first.getAsInteger(10, size);
-      if (size == 32)
-        ret = Pointer32;
-      else if (size == 64)
-        ret = Pointer64;
-    }
-  }
-
-  return ret;
 }
 
 /// getNamedValue - Return the first global value in the module with
@@ -140,23 +95,13 @@ Constant *Module::getOrInsertFunction(StringRef Name,
                                       AttributeSet AttributeList) {
   // See if we have a definition for the specified function already.
   GlobalValue *F = getNamedValue(Name);
-  if (F == 0) {
+  if (!F) {
     // Nope, add it
     Function *New = Function::Create(Ty, GlobalVariable::ExternalLinkage, Name);
     if (!New->isIntrinsic())       // Intrinsics get attrs set on construction
       New->setAttributes(AttributeList);
     FunctionList.push_back(New);
     return New;                    // Return the new prototype.
-  }
-
-  // Okay, the function exists.  Does it have externally visible linkage?
-  if (F->hasLocalLinkage()) {
-    // Clear the function's name.
-    F->setName("");
-    // Retry, now there won't be a conflict.
-    Constant *NewF = getOrInsertFunction(Name, Ty);
-    F->setName(Name);
-    return NewF;
   }
 
   // If the function exists but has the wrong type, return a bitcast to the
@@ -238,7 +183,7 @@ GlobalVariable *Module::getGlobalVariable(StringRef Name, bool AllowLocal) {
       dyn_cast_or_null<GlobalVariable>(getNamedValue(Name)))
     if (AllowLocal || !Result->hasLocalLinkage())
       return Result;
-  return 0;
+  return nullptr;
 }
 
 /// getOrInsertGlobal - Look up the specified global in the module symbol table.
@@ -250,11 +195,11 @@ GlobalVariable *Module::getGlobalVariable(StringRef Name, bool AllowLocal) {
 Constant *Module::getOrInsertGlobal(StringRef Name, Type *Ty) {
   // See if we have a definition for the specified global already.
   GlobalVariable *GV = dyn_cast_or_null<GlobalVariable>(getNamedValue(Name));
-  if (GV == 0) {
+  if (!GV) {
     // Nope, add it
     GlobalVariable *New =
       new GlobalVariable(*this, Ty, false, GlobalVariable::ExternalLinkage,
-                         0, Name);
+                         nullptr, Name);
      return New;                    // Return the new declaration.
   }
 
@@ -316,13 +261,17 @@ getModuleFlagsMetadata(SmallVectorImpl<ModuleFlagEntry> &Flags) const {
   const NamedMDNode *ModFlags = getModuleFlagsMetadata();
   if (!ModFlags) return;
 
-  for (unsigned i = 0, e = ModFlags->getNumOperands(); i != e; ++i) {
-    MDNode *Flag = ModFlags->getOperand(i);
-    ConstantInt *Behavior = cast<ConstantInt>(Flag->getOperand(0));
-    MDString *Key = cast<MDString>(Flag->getOperand(1));
-    Value *Val = Flag->getOperand(2);
-    Flags.push_back(ModuleFlagEntry(ModFlagBehavior(Behavior->getZExtValue()),
-                                    Key, Val));
+  for (const MDNode *Flag : ModFlags->operands()) {
+    if (Flag->getNumOperands() >= 3 && isa<ConstantInt>(Flag->getOperand(0)) &&
+        isa<MDString>(Flag->getOperand(1))) {
+      // Check the operands of the MDNode before accessing the operands.
+      // The verifier will actually catch these failures.
+      ConstantInt *Behavior = cast<ConstantInt>(Flag->getOperand(0));
+      MDString *Key = cast<MDString>(Flag->getOperand(1));
+      Value *Val = Flag->getOperand(2);
+      Flags.push_back(ModuleFlagEntry(ModFlagBehavior(Behavior->getZExtValue()),
+                                      Key, Val));
+    }
   }
 }
 
@@ -331,12 +280,11 @@ getModuleFlagsMetadata(SmallVectorImpl<ModuleFlagEntry> &Flags) const {
 Value *Module::getModuleFlag(StringRef Key) const {
   SmallVector<Module::ModuleFlagEntry, 8> ModuleFlags;
   getModuleFlagsMetadata(ModuleFlags);
-  for (unsigned I = 0, E = ModuleFlags.size(); I < E; ++I) {
-    const ModuleFlagEntry &MFE = ModuleFlags[I];
+  for (const ModuleFlagEntry &MFE : ModuleFlags) {
     if (Key == MFE.Key->getString())
       return MFE.Val;
   }
-  return 0;
+  return nullptr;
 }
 
 /// getModuleFlagsMetadata - Returns the NamedMDNode in the module that
@@ -378,6 +326,34 @@ void Module::addModuleFlag(MDNode *Node) {
   getOrInsertModuleFlagsMetadata()->addOperand(Node);
 }
 
+void Module::setDataLayout(StringRef Desc) {
+  DL.reset(Desc);
+
+  if (Desc.empty()) {
+    DataLayoutStr = "";
+  } else {
+    DataLayoutStr = DL.getStringRepresentation();
+    // DataLayoutStr is now equivalent to Desc, but since the representation
+    // is not unique, they may not be identical.
+  }
+}
+
+void Module::setDataLayout(const DataLayout *Other) {
+  if (!Other) {
+    DataLayoutStr = "";
+    DL.reset("");
+  } else {
+    DL = *Other;
+    DataLayoutStr = DL.getStringRepresentation();
+  }
+}
+
+const DataLayout *Module::getDataLayout() const {
+  if (DataLayoutStr.empty())
+    return nullptr;
+  return &DL;
+}
+
 //===----------------------------------------------------------------------===//
 // Methods to control the materialization of GlobalValues in the Module.
 //
@@ -401,9 +377,15 @@ bool Module::isDematerializable(const GlobalValue *GV) const {
 }
 
 bool Module::Materialize(GlobalValue *GV, std::string *ErrInfo) {
-  if (Materializer)
-    return Materializer->Materialize(GV, ErrInfo);
-  return false;
+  if (!Materializer)
+    return false;
+
+  error_code EC = Materializer->Materialize(GV);
+  if (!EC)
+    return false;
+  if (ErrInfo)
+    *ErrInfo = EC.message();
+  return true;
 }
 
 void Module::Dematerialize(GlobalValue *GV) {
@@ -411,17 +393,18 @@ void Module::Dematerialize(GlobalValue *GV) {
     return Materializer->Dematerialize(GV);
 }
 
-bool Module::MaterializeAll(std::string *ErrInfo) {
+error_code Module::materializeAll() {
   if (!Materializer)
-    return false;
-  return Materializer->MaterializeModule(this, ErrInfo);
+    return error_code::success();
+  return Materializer->MaterializeModule(this);
 }
 
-bool Module::MaterializeAllPermanently(std::string *ErrInfo) {
-  if (MaterializeAll(ErrInfo))
-    return true;
+error_code Module::materializeAllPermanently() {
+  if (error_code EC = materializeAll())
+    return EC;
+
   Materializer.reset();
-  return false;
+  return error_code::success();
 }
 
 //===----------------------------------------------------------------------===//

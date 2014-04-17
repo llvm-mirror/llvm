@@ -19,6 +19,7 @@
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
 #include <string>
 using namespace llvm;
 
@@ -85,9 +86,6 @@ FileType("filetype", cl::init(TargetMachine::CGFT_AssemblyFile),
                         "Emit nothing, for performance testing"),
              clEnumValEnd));
 
-cl::opt<bool> DisableDotLoc("disable-dot-loc", cl::Hidden,
-                            cl::desc("Do not use .loc entries"));
-
 cl::opt<bool> DisableCFI("disable-cfi", cl::Hidden,
                          cl::desc("Do not use .cfi_* directives"));
 
@@ -150,7 +148,7 @@ FloatABIForCalls("float-abi",
 
 cl::opt<llvm::FPOpFusion::FPOpFusionMode>
 FuseFPOps("fp-contract",
-          cl::desc("Enable aggresive formation of fused FP ops"),
+          cl::desc("Enable aggressive formation of fused FP ops"),
           cl::init(FPOpFusion::Standard),
           cl::values(
               clEnumValN(FPOpFusion::Fast, "fast",
@@ -192,11 +190,6 @@ EnablePIE("enable-pie",
           cl::init(false));
 
 cl::opt<bool>
-SegmentedStacks("segmented-stacks",
-                cl::desc("Use segmented stacks if possible."),
-                cl::init(false));
-
-cl::opt<bool>
 UseInitArray("use-init-array",
              cl::desc("Use .init_array instead of .ctors."),
              cl::init(false));
@@ -209,5 +202,30 @@ cl::opt<std::string> StartAfter("start-after",
                           cl::desc("Resume compilation after a specific pass"),
                           cl::value_desc("pass-name"),
                           cl::init(""));
+
+// Common utility function tightly tied to the options listed here. Initializes
+// a TargetOptions object with CodeGen flags and returns it.
+static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
+  TargetOptions Options;
+  Options.LessPreciseFPMADOption = EnableFPMAD;
+  Options.NoFramePointerElim = DisableFPElim;
+  Options.AllowFPOpFusion = FuseFPOps;
+  Options.UnsafeFPMath = EnableUnsafeFPMath;
+  Options.NoInfsFPMath = EnableNoInfsFPMath;
+  Options.NoNaNsFPMath = EnableNoNaNsFPMath;
+  Options.HonorSignDependentRoundingFPMathOption =
+      EnableHonorSignDependentRoundingFPMath;
+  Options.UseSoftFloat = GenerateSoftFloatCalls;
+  if (FloatABIForCalls != FloatABI::Default)
+    Options.FloatABIType = FloatABIForCalls;
+  Options.NoZerosInBSS = DontPlaceZerosInBSS;
+  Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
+  Options.DisableTailCalls = DisableTailCalls;
+  Options.StackAlignmentOverride = OverrideStackAlignment;
+  Options.TrapFuncName = TrapFuncName;
+  Options.PositionIndependentExecutable = EnablePIE;
+  Options.UseInitArray = UseInitArray;
+  return Options;
+}
 
 #endif

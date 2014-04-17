@@ -165,3 +165,30 @@ define i64 @f13(i64 %a, i32 %b) {
   %or = or i64 %shift, %low
   ret i64 %or
 }
+
+; We previously wrongly removed the upper AND as dead.
+define i64 @f14(i64 %a, i64 %b) {
+; CHECK-LABEL: f14:
+; CHECK: risbg {{%r[0-5]}}, %r2, 6, 134, 0
+; CHECK: br %r14
+  %and1 = and i64 %a, 144115188075855872
+  %and2 = and i64 %b, 15
+  %or = or i64 %and1, %and2
+  %res = icmp eq i64 %or, 0
+  %ext = sext i1 %res to i64
+  ret i64 %ext
+}
+
+; Check another representation of f8.
+define i64 @f15(i64 %a, i8 *%src) {
+; CHECK-LABEL: f15:
+; CHECK-NOT: {{%r[23]}}
+; CHECK: lb %r2, 0(%r3)
+; CHECK: br %r14
+  %byte = load i8 *%src
+  %b = sext i8 %byte to i64
+  %low = and i64 %b, 4294967295
+  %high = and i64 %a, -4294967296
+  %res = or i64 %high, %low
+  ret i64 %res
+}

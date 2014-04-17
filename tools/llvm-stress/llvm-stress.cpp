@@ -11,18 +11,18 @@
 // different components in LLVM.
 //
 //===----------------------------------------------------------------------===//
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/ADT/OwningPtr.h"
+
 #include "llvm/Analysis/CallGraphSCCPass.h"
-#include "llvm/Analysis/Verifier.h"
-#include "llvm/Assembly/PrintModulePass.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassNameParser.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/PassNameParser.h"
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -52,6 +52,7 @@ static cl::opt<bool> GenPPCFP128("generate-ppc-fp128",
 static cl::opt<bool> GenX86MMX("generate-x86-mmx",
   cl::desc("Generate X86 MMX floating-point values"), cl::init(false));
 
+namespace {
 /// A utility class to provide a pseudo-random number generator which is
 /// the same across all platforms. This is somewhat close to the libc
 /// implementation. Note: This is not a cryptographically secure pseudorandom
@@ -287,8 +288,8 @@ protected:
 
 struct LoadModifier: public Modifier {
   LoadModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R) {}
-  virtual void Act() {
-    // Try to use predefined pointers. If non exist, use undef pointer value;
+  void Act() override {
+    // Try to use predefined pointers. If non-exist, use undef pointer value;
     Value *Ptr = getRandomPointerValue();
     Value *V = new LoadInst(Ptr, "L", BB->getTerminator());
     PT->push_back(V);
@@ -297,8 +298,8 @@ struct LoadModifier: public Modifier {
 
 struct StoreModifier: public Modifier {
   StoreModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R) {}
-  virtual void Act() {
-    // Try to use predefined pointers. If non exist, use undef pointer value;
+  void Act() override {
+    // Try to use predefined pointers. If non-exist, use undef pointer value;
     Value *Ptr = getRandomPointerValue();
     Type  *Tp = Ptr->getType();
     Value *Val = getRandomValue(Tp->getContainedType(0));
@@ -316,7 +317,7 @@ struct StoreModifier: public Modifier {
 struct BinModifier: public Modifier {
   BinModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R) {}
 
-  virtual void Act() {
+  void Act() override {
     Value *Val0 = getRandomVal();
     Value *Val1 = getRandomValue(Val0->getType());
 
@@ -359,7 +360,7 @@ struct BinModifier: public Modifier {
 /// Generate constant values.
 struct ConstModifier: public Modifier {
   ConstModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R) {}
-  virtual void Act() {
+  void Act() override {
     Type *Ty = pickType();
 
     if (Ty->isVectorTy()) {
@@ -406,7 +407,7 @@ struct ConstModifier: public Modifier {
 struct AllocaModifier: public Modifier {
   AllocaModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R){}
 
-  virtual void Act() {
+  void Act() override {
     Type *Tp = pickType();
     PT->push_back(new AllocaInst(Tp, "A", BB->getFirstNonPHI()));
   }
@@ -416,7 +417,7 @@ struct ExtractElementModifier: public Modifier {
   ExtractElementModifier(BasicBlock *BB, PieceTable *PT, Random *R):
     Modifier(BB, PT, R) {}
 
-  virtual void Act() {
+  void Act() override {
     Value *Val0 = getRandomVectorValue();
     Value *V = ExtractElementInst::Create(Val0,
              ConstantInt::get(Type::getInt32Ty(BB->getContext()),
@@ -428,7 +429,7 @@ struct ExtractElementModifier: public Modifier {
 
 struct ShuffModifier: public Modifier {
   ShuffModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R) {}
-  virtual void Act() {
+  void Act() override {
 
     Value *Val0 = getRandomVectorValue();
     Value *Val1 = getRandomValue(Val0->getType());
@@ -457,7 +458,7 @@ struct InsertElementModifier: public Modifier {
   InsertElementModifier(BasicBlock *BB, PieceTable *PT, Random *R):
     Modifier(BB, PT, R) {}
 
-  virtual void Act() {
+  void Act() override {
     Value *Val0 = getRandomVectorValue();
     Value *Val1 = getRandomValue(Val0->getType()->getScalarType());
 
@@ -472,7 +473,7 @@ struct InsertElementModifier: public Modifier {
 
 struct CastModifier: public Modifier {
   CastModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R) {}
-  virtual void Act() {
+  void Act() override {
 
     Value *V = getRandomVal();
     Type *VTy = V->getType();
@@ -559,7 +560,7 @@ struct SelectModifier: public Modifier {
   SelectModifier(BasicBlock *BB, PieceTable *PT, Random *R):
     Modifier(BB, PT, R) {}
 
-  virtual void Act() {
+  void Act() override {
     // Try a bunch of different select configuration until a valid one is found.
       Value *Val0 = getRandomVal();
       Value *Val1 = getRandomValue(Val0->getType());
@@ -582,7 +583,7 @@ struct SelectModifier: public Modifier {
 
 struct CmpModifier: public Modifier {
   CmpModifier(BasicBlock *BB, PieceTable *PT, Random *R):Modifier(BB, PT, R) {}
-  virtual void Act() {
+  void Act() override {
 
     Value *Val0 = getRandomVal();
     Value *Val1 = getRandomValue(Val0->getType());
@@ -607,7 +608,9 @@ struct CmpModifier: public Modifier {
   }
 };
 
-void FillFunction(Function *F, Random &R) {
+} // end anonymous namespace
+
+static void FillFunction(Function *F, Random &R) {
   // Create a legal entry block.
   BasicBlock *BB = BasicBlock::Create(F->getContext(), "BB", F);
   ReturnInst::Create(F->getContext(), BB);
@@ -622,15 +625,15 @@ void FillFunction(Function *F, Random &R) {
 
   // List of modifiers which add new random instructions.
   std::vector<Modifier*> Modifiers;
-  OwningPtr<Modifier> LM(new LoadModifier(BB, &PT, &R));
-  OwningPtr<Modifier> SM(new StoreModifier(BB, &PT, &R));
-  OwningPtr<Modifier> EE(new ExtractElementModifier(BB, &PT, &R));
-  OwningPtr<Modifier> SHM(new ShuffModifier(BB, &PT, &R));
-  OwningPtr<Modifier> IE(new InsertElementModifier(BB, &PT, &R));
-  OwningPtr<Modifier> BM(new BinModifier(BB, &PT, &R));
-  OwningPtr<Modifier> CM(new CastModifier(BB, &PT, &R));
-  OwningPtr<Modifier> SLM(new SelectModifier(BB, &PT, &R));
-  OwningPtr<Modifier> PM(new CmpModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> LM(new LoadModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> SM(new StoreModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> EE(new ExtractElementModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> SHM(new ShuffModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> IE(new InsertElementModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> BM(new BinModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> CM(new CastModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> SLM(new SelectModifier(BB, &PT, &R));
+  std::unique_ptr<Modifier> PM(new CmpModifier(BB, &PT, &R));
   Modifiers.push_back(LM.get());
   Modifiers.push_back(SM.get());
   Modifiers.push_back(EE.get());
@@ -654,7 +657,7 @@ void FillFunction(Function *F, Random &R) {
   SM->ActN(5); // Throw in a few stores.
 }
 
-void IntroduceControlFlow(Function *F, Random &R) {
+static void IntroduceControlFlow(Function *F, Random &R) {
   std::vector<Instruction*> BoolInst;
   for (BasicBlock::iterator it = F->begin()->begin(),
        e = F->begin()->end(); it != e; ++it) {
@@ -684,7 +687,7 @@ int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "llvm codegen stress-tester\n");
   llvm_shutdown_obj Y;
 
-  OwningPtr<Module> M(new Module("/tmp/autogen.bc", getGlobalContext()));
+  std::unique_ptr<Module> M(new Module("/tmp/autogen.bc", getGlobalContext()));
   Function *F = GenEmptyFunction(M.get());
 
   // Pick an initial seed value
@@ -695,14 +698,14 @@ int main(int argc, char **argv) {
   IntroduceControlFlow(F, R);
 
   // Figure out what stream we are supposed to write to...
-  OwningPtr<tool_output_file> Out;
+  std::unique_ptr<tool_output_file> Out;
   // Default to standard output.
   if (OutputFilename.empty())
     OutputFilename = "-";
 
   std::string ErrorInfo;
   Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
-                                 sys::fs::F_Binary));
+                                 sys::fs::F_None));
   if (!ErrorInfo.empty()) {
     errs() << ErrorInfo << '\n';
     return 1;
@@ -710,7 +713,7 @@ int main(int argc, char **argv) {
 
   PassManager Passes;
   Passes.add(createVerifierPass());
-  Passes.add(createPrintModulePass(&Out->os()));
+  Passes.add(createPrintModulePass(Out->os()));
   Passes.run(*M.get());
   Out->keep();
 

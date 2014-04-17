@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Object/MachOUniversal.h"
-
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Casting.h"
@@ -73,7 +72,7 @@ MachOUniversalBinary::ObjectForArch::ObjectForArch(
 }
 
 error_code MachOUniversalBinary::ObjectForArch::getAsObjectFile(
-    OwningPtr<ObjectFile> &Result) const {
+    std::unique_ptr<ObjectFile> &Result) const {
   if (Parent) {
     StringRef ParentData = Parent->getData();
     StringRef ObjectData = ParentData.substr(Header.offset, Header.size);
@@ -82,15 +81,26 @@ error_code MachOUniversalBinary::ObjectForArch::getAsObjectFile(
         Triple::getArchTypeName(MachOObjectFile::getArch(Header.cputype));
     MemoryBuffer *ObjBuffer = MemoryBuffer::getMemBuffer(
         ObjectData, ObjectName, false);
-    if (ObjectFile *Obj = ObjectFile::createMachOObjectFile(ObjBuffer)) {
-      Result.reset(Obj);
-      return object_error::success;
-    }
+    ErrorOr<ObjectFile *> Obj = ObjectFile::createMachOObjectFile(ObjBuffer);
+    if (error_code EC = Obj.getError())
+      return EC;
+    Result.reset(Obj.get());
+    return object_error::success;
   }
   return object_error::parse_failed;
 }
 
 void MachOUniversalBinary::anchor() { }
+
+ErrorOr<MachOUniversalBinary *>
+MachOUniversalBinary::create(MemoryBuffer *Source) {
+  error_code EC;
+  std::unique_ptr<MachOUniversalBinary> Ret(
+      new MachOUniversalBinary(Source, EC));
+  if (EC)
+    return EC;
+  return Ret.release();
+}
 
 MachOUniversalBinary::MachOUniversalBinary(MemoryBuffer *Source,
                                            error_code &ec)
@@ -125,9 +135,8 @@ static bool getCTMForArch(Triple::ArchType Arch, MachO::CPUType &CTM) {
   }
 }
 
-error_code
-MachOUniversalBinary::getObjectForArch(Triple::ArchType Arch,
-                                       OwningPtr<ObjectFile> &Result) const {
+error_code MachOUniversalBinary::getObjectForArch(
+    Triple::ArchType Arch, std::unique_ptr<ObjectFile> &Result) const {
   MachO::CPUType CTM;
   if (!getCTMForArch(Arch, CTM))
     return object_error::arch_not_found;

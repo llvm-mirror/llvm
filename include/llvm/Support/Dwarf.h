@@ -24,7 +24,7 @@ namespace llvm {
 //===----------------------------------------------------------------------===//
 // Debug info constants.
 
-enum LLVM_ENUM_INT_TYPE(uint32_t) {
+enum : uint32_t {
   LLVMDebugVersion = (12 << 16),    // Current version of debug information.
   LLVMDebugVersion11 = (11 << 16),  // Constant for version 11.
   LLVMDebugVersion10 = (10 << 16),  // Constant for version 10.
@@ -41,13 +41,13 @@ namespace dwarf {
 
 //===----------------------------------------------------------------------===//
 // Dwarf constants as gleaned from the DWARF Debugging Information Format V.4
-// reference manual http://dwarf.freestandards.org.
+// reference manual http://www.dwarfstd.org/.
 //
 
 // Do not mix the following two enumerations sets.  DW_TAG_invalid changes the
 // enumeration base type.
 
-enum LLVMConstants LLVM_ENUM_INT_TYPE(uint32_t) {
+enum LLVMConstants : uint32_t {
   // llvm mock tags
   DW_TAG_invalid = ~0U, // Tag for invalid results.
 
@@ -68,8 +68,7 @@ enum LLVMConstants LLVM_ENUM_INT_TYPE(uint32_t) {
 const uint32_t DW_CIE_ID = UINT32_MAX;
 const uint64_t DW64_CIE_ID = UINT64_MAX;
 
-enum Constants {
-  // Tags
+enum Tag : uint16_t {
   DW_TAG_array_type = 0x01,
   DW_TAG_class_type = 0x02,
   DW_TAG_entry_point = 0x03,
@@ -130,6 +129,12 @@ enum Constants {
   DW_TAG_type_unit = 0x41,
   DW_TAG_rvalue_reference_type = 0x42,
   DW_TAG_template_alias = 0x43,
+
+  // New in DWARF 5:
+  DW_TAG_coarray_type = 0x44,
+  DW_TAG_generic_subrange = 0x45,
+  DW_TAG_dynamic_type = 0x46,
+
   DW_TAG_MIPS_loop = 0x4081,
   DW_TAG_format_label = 0x4101,
   DW_TAG_function_template = 0x4102,
@@ -139,12 +144,38 @@ enum Constants {
   DW_TAG_GNU_formal_parameter_pack = 0x4108,
   DW_TAG_lo_user = 0x4080,
   DW_TAG_APPLE_property = 0x4200,
-  DW_TAG_hi_user = 0xffff,
+  DW_TAG_hi_user = 0xffff
+};
 
-  // Children flag
-  DW_CHILDREN_no = 0x00,
-  DW_CHILDREN_yes = 0x01,
+inline bool isType(Tag T) {
+  switch (T) {
+  case DW_TAG_array_type:
+  case DW_TAG_class_type:
+  case DW_TAG_interface_type:
+  case DW_TAG_enumeration_type:
+  case DW_TAG_pointer_type:
+  case DW_TAG_reference_type:
+  case DW_TAG_rvalue_reference_type:
+  case DW_TAG_string_type:
+  case DW_TAG_structure_type:
+  case DW_TAG_subroutine_type:
+  case DW_TAG_union_type:
+  case DW_TAG_ptr_to_member_type:
+  case DW_TAG_set_type:
+  case DW_TAG_subrange_type:
+  case DW_TAG_base_type:
+  case DW_TAG_const_type:
+  case DW_TAG_file_type:
+  case DW_TAG_packed_type:
+  case DW_TAG_volatile_type:
+  case DW_TAG_typedef:
+    return true;
+  default:
+    return false;
+  }
+}
 
+enum Attribute : uint16_t {
   // Attributes
   DW_AT_sibling = 0x01,
   DW_AT_location = 0x02,
@@ -239,6 +270,18 @@ enum Constants {
   DW_AT_enum_class = 0x6d,
   DW_AT_linkage_name = 0x6e,
 
+  // New in DWARF 5:
+  DW_AT_string_length_bit_size = 0x6f,
+  DW_AT_string_length_byte_size = 0x70,
+  DW_AT_rank = 0x71,
+  DW_AT_str_offsets_base = 0x72,
+  DW_AT_addr_base = 0x73,
+  DW_AT_ranges_base = 0x74,
+  DW_AT_dwo_id = 0x75,
+  DW_AT_dwo_name = 0x76,
+  DW_AT_reference = 0x77,
+  DW_AT_rvalue_reference = 0x78,
+
   DW_AT_lo_user = 0x2000,
   DW_AT_hi_user = 0x3fff,
 
@@ -295,8 +338,10 @@ enum Constants {
   DW_AT_APPLE_property_setter = 0x3fea,
   DW_AT_APPLE_property_attribute = 0x3feb,
   DW_AT_APPLE_objc_complete_type = 0x3fec,
-  DW_AT_APPLE_property = 0x3fed,
+  DW_AT_APPLE_property = 0x3fed
+};
 
+enum Form : uint16_t {
   // Attribute form encodings
   DW_FORM_addr = 0x01,
   DW_FORM_block2 = 0x03,
@@ -326,8 +371,10 @@ enum Constants {
 
   // Extensions for Fission proposal
   DW_FORM_GNU_addr_index = 0x1f01,
-  DW_FORM_GNU_str_index = 0x1f02,
+  DW_FORM_GNU_str_index = 0x1f02
+};
 
+enum LocationAtom {
   // Operation encodings
   DW_OP_addr = 0x03,
   DW_OP_deref = 0x06,
@@ -491,8 +538,10 @@ enum Constants {
 
   // Extensions for Fission proposal.
   DW_OP_GNU_addr_index = 0xfb,
-  DW_OP_GNU_const_index = 0xfc,
+  DW_OP_GNU_const_index = 0xfc
+};
 
+enum TypeKind {
   // Encoding attribute values
   DW_ATE_address = 0x01,
   DW_ATE_boolean = 0x02,
@@ -511,37 +560,49 @@ enum Constants {
   DW_ATE_decimal_float = 0x0f,
   DW_ATE_UTF = 0x10,
   DW_ATE_lo_user = 0x80,
-  DW_ATE_hi_user = 0xff,
+  DW_ATE_hi_user = 0xff
+};
 
+enum DecimalSignEncoding {
   // Decimal sign attribute values
   DW_DS_unsigned = 0x01,
   DW_DS_leading_overpunch = 0x02,
   DW_DS_trailing_overpunch = 0x03,
   DW_DS_leading_separate = 0x04,
-  DW_DS_trailing_separate = 0x05,
+  DW_DS_trailing_separate = 0x05
+};
 
+enum EndianityEncoding {
   // Endianity attribute values
   DW_END_default = 0x00,
   DW_END_big = 0x01,
   DW_END_little = 0x02,
   DW_END_lo_user = 0x40,
-  DW_END_hi_user = 0xff,
+  DW_END_hi_user = 0xff
+};
 
+enum AccessAttribute {
   // Accessibility codes
   DW_ACCESS_public = 0x01,
   DW_ACCESS_protected = 0x02,
-  DW_ACCESS_private = 0x03,
+  DW_ACCESS_private = 0x03
+};
 
+enum VisibilityAttribute {
   // Visibility codes
   DW_VIS_local = 0x01,
   DW_VIS_exported = 0x02,
-  DW_VIS_qualified = 0x03,
+  DW_VIS_qualified = 0x03
+};
 
+enum VirtualityAttribute {
   // Virtuality codes
   DW_VIRTUALITY_none = 0x00,
   DW_VIRTUALITY_virtual = 0x01,
-  DW_VIRTUALITY_pure_virtual = 0x02,
+  DW_VIRTUALITY_pure_virtual = 0x02
+};
 
+enum SourceLanguage {
   // Language names
   DW_LANG_C89 = 0x0001,
   DW_LANG_C = 0x0002,
@@ -562,38 +623,59 @@ enum Constants {
   DW_LANG_ObjC_plus_plus = 0x0011,
   DW_LANG_UPC = 0x0012,
   DW_LANG_D = 0x0013,
+  // New in DWARF 5:
   DW_LANG_Python = 0x0014,
+  DW_LANG_OpenCL = 0x0015,
+  DW_LANG_Go = 0x0016,
+  DW_LANG_Modula3 = 0x0017,
+  DW_LANG_Haskell = 0x0018,
+  DW_LANG_C_plus_plus_03 = 0x0019,
+  DW_LANG_C_plus_plus_11 = 0x001a,
+  DW_LANG_OCaml = 0x001b,
+
   DW_LANG_lo_user = 0x8000,
   DW_LANG_Mips_Assembler = 0x8001,
-  DW_LANG_hi_user = 0xffff,
+  DW_LANG_hi_user = 0xffff
+};
 
+enum CaseSensitivity {
   // Identifier case codes
   DW_ID_case_sensitive = 0x00,
   DW_ID_up_case = 0x01,
   DW_ID_down_case = 0x02,
-  DW_ID_case_insensitive = 0x03,
+  DW_ID_case_insensitive = 0x03
+};
 
+enum CallingConvention {
   // Calling convention codes
   DW_CC_normal = 0x01,
   DW_CC_program = 0x02,
   DW_CC_nocall = 0x03,
   DW_CC_lo_user = 0x40,
-  DW_CC_hi_user = 0xff,
+  DW_CC_hi_user = 0xff
+};
 
+enum InlineAttribute {
   // Inline codes
   DW_INL_not_inlined = 0x00,
   DW_INL_inlined = 0x01,
   DW_INL_declared_not_inlined = 0x02,
-  DW_INL_declared_inlined = 0x03,
+  DW_INL_declared_inlined = 0x03
+};
 
+enum ArrayDimensionOrdering {
   // Array ordering
   DW_ORD_row_major = 0x00,
-  DW_ORD_col_major = 0x01,
+  DW_ORD_col_major = 0x01
+};
 
+enum DiscriminantList {
   // Discriminant descriptor values
   DW_DSC_label = 0x00,
-  DW_DSC_range = 0x01,
+  DW_DSC_range = 0x01
+};
 
+enum LineNumberOps {
   // Line Number Standard Opcode Encodings
   DW_LNS_extended_op = 0x00,
   DW_LNS_copy = 0x01,
@@ -607,23 +689,29 @@ enum Constants {
   DW_LNS_fixed_advance_pc = 0x09,
   DW_LNS_set_prologue_end = 0x0a,
   DW_LNS_set_epilogue_begin = 0x0b,
-  DW_LNS_set_isa = 0x0c,
+  DW_LNS_set_isa = 0x0c
+};
 
+enum LineNumberExtendedOps {
   // Line Number Extended Opcode Encodings
   DW_LNE_end_sequence = 0x01,
   DW_LNE_set_address = 0x02,
   DW_LNE_define_file = 0x03,
   DW_LNE_set_discriminator = 0x04,
   DW_LNE_lo_user = 0x80,
-  DW_LNE_hi_user = 0xff,
+  DW_LNE_hi_user = 0xff
+};
 
+enum MacinfoRecordType {
   // Macinfo Type Encodings
   DW_MACINFO_define = 0x01,
   DW_MACINFO_undef = 0x02,
   DW_MACINFO_start_file = 0x03,
   DW_MACINFO_end_file = 0x04,
-  DW_MACINFO_vendor_ext = 0xff,
+  DW_MACINFO_vendor_ext = 0xff
+};
 
+enum CallFrameInfo {
   // Call frame instruction encodings
   DW_CFA_extended = 0x00,
   DW_CFA_nop = 0x00,
@@ -656,7 +744,13 @@ enum Constants {
   DW_CFA_GNU_window_save = 0x2d,
   DW_CFA_GNU_args_size = 0x2e,
   DW_CFA_lo_user = 0x1c,
-  DW_CFA_hi_user = 0x3f,
+  DW_CFA_hi_user = 0x3f
+};
+
+enum Constants {
+  // Children flag
+  DW_CHILDREN_no = 0x00,
+  DW_CHILDREN_yes = 0x01,
 
   DW_EH_PE_absptr = 0x00,
   DW_EH_PE_omit = 0xff,
@@ -674,8 +768,19 @@ enum Constants {
   DW_EH_PE_datarel = 0x30,
   DW_EH_PE_funcrel = 0x40,
   DW_EH_PE_aligned = 0x50,
-  DW_EH_PE_indirect = 0x80,
+  DW_EH_PE_indirect = 0x80
+};
 
+// Constants for debug_loc.dwo in the DWARF5 Split Debug Info Proposal
+enum LocationListEntry : unsigned char {
+  DW_LLE_end_of_list_entry,
+  DW_LLE_base_address_selection_entry,
+  DW_LLE_start_end_entry,
+  DW_LLE_start_length_entry,
+  DW_LLE_offset_pair_entry
+};
+
+enum ApplePropertyAttributes {
   // Apple Objective-C Property Attributes
   DW_APPLE_PROPERTY_readonly = 0x01,
   DW_APPLE_PROPERTY_readwrite = 0x02,

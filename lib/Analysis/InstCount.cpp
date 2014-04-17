@@ -15,7 +15,7 @@
 #include "llvm/Analysis/Passes.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/Function.h"
-#include "llvm/InstVisitor.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -55,12 +55,12 @@ namespace {
       initializeInstCountPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &F);
+    bool runOnFunction(Function &F) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
     }
-    virtual void print(raw_ostream &O, const Module *M) const {}
+    void print(raw_ostream &O, const Module *M) const override {}
 
   };
 }

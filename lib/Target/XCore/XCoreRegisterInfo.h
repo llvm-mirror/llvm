@@ -24,25 +24,12 @@ namespace llvm {
 class TargetInstrInfo;
 
 struct XCoreRegisterInfo : public XCoreGenRegisterInfo {
-private:
-  void loadConstant(MachineBasicBlock &MBB,
-                  MachineBasicBlock::iterator I,
-                  unsigned DstReg, int64_t Value, DebugLoc dl) const;
-
-  void storeToStack(MachineBasicBlock &MBB,
-                  MachineBasicBlock::iterator I,
-                  unsigned SrcReg, int Offset, DebugLoc dl) const;
-
-  void loadFromStack(MachineBasicBlock &MBB,
-                  MachineBasicBlock::iterator I,
-                  unsigned DstReg, int Offset, DebugLoc dl) const;
-
 public:
   XCoreRegisterInfo();
 
   /// Code Generation virtual methods...
 
-  const uint16_t *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
+  const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
 
   BitVector getReservedRegs(const MachineFunction &MF) const;
   

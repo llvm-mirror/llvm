@@ -16,7 +16,7 @@
 
 #include "llvm/ADT/StringRef.h"
 
-#if defined(__GNUC__) && defined(__linux__)
+#if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
 inline void *getDFSanArgTLSPtrForJIT() {
   extern __thread __attribute__((tls_model("initial-exec")))
     void *__dfsan_arg_tls;
@@ -66,14 +66,12 @@ ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
 // Insert AddressSanitizer (address sanity checking) instrumentation
 FunctionPass *createAddressSanitizerFunctionPass(
     bool CheckInitOrder = true, bool CheckUseAfterReturn = false,
-    bool CheckLifetime = false, StringRef BlacklistFile = StringRef(),
-    bool ZeroBaseShadow = false);
+    bool CheckLifetime = false, StringRef BlacklistFile = StringRef());
 ModulePass *createAddressSanitizerModulePass(
-    bool CheckInitOrder = true, StringRef BlacklistFile = StringRef(),
-    bool ZeroBaseShadow = false);
+    bool CheckInitOrder = true, StringRef BlacklistFile = StringRef());
 
 // Insert MemorySanitizer instrumentation (detection of uninitialized reads)
-FunctionPass *createMemorySanitizerPass(bool TrackOrigins = false,
+FunctionPass *createMemorySanitizerPass(int TrackOrigins = 0,
                                         StringRef BlacklistFile = StringRef());
 
 // Insert ThreadSanitizer (race detection) instrumentation
@@ -84,7 +82,7 @@ ModulePass *createDataFlowSanitizerPass(StringRef ABIListFile = StringRef(),
                                         void *(*getArgTLS)() = 0,
                                         void *(*getRetValTLS)() = 0);
 
-#if defined(__GNUC__) && defined(__linux__)
+#if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
 inline ModulePass *createDataFlowSanitizerPassForJIT(StringRef ABIListFile =
                                                          StringRef()) {
   return createDataFlowSanitizerPass(ABIListFile, getDFSanArgTLSPtrForJIT,

@@ -34,7 +34,7 @@ ModulePass *createStripSymbolsPass(bool OnlyDebugInfo = false);
 
 //===----------------------------------------------------------------------===//
 //
-// These functions strips symbols from functions and modules.  
+// These functions strips symbols from functions and modules.
 // Only debugging information is not stripped.
 //
 ModulePass *createStripNonDebugSymbolsPass();
@@ -78,20 +78,24 @@ ModulePass *createGlobalDCEPass();
 /// the specified global values. Otherwise, it deletes as much of the module as
 /// possible, except for the global values specified.
 ///
-ModulePass *createGVExtractionPass(std::vector<GlobalValue*>& GVs, bool 
+ModulePass *createGVExtractionPass(std::vector<GlobalValue*>& GVs, bool
                                    deleteFn = false);
 
 //===----------------------------------------------------------------------===//
 /// createFunctionInliningPass - Return a new pass object that uses a heuristic
 /// to inline direct function calls to small functions.
 ///
+/// The Threshold can be passed directly, or asked to be computed from the
+/// given optimization and size optimization arguments.
+///
 /// The -inline-threshold command line option takes precedence over the
 /// threshold given here.
 Pass *createFunctionInliningPass();
 Pass *createFunctionInliningPass(int Threshold);
+Pass *createFunctionInliningPass(unsigned OptLevel, unsigned SizeOptLevel);
 
 //===----------------------------------------------------------------------===//
-/// createAlwaysInlinerPass - Return a new pass object that inlines only 
+/// createAlwaysInlinerPass - Return a new pass object that inlines only
 /// functions that are marked as "always_inline".
 Pass *createAlwaysInlinerPass();
 Pass *createAlwaysInlinerPass(bool InsertLifetime);
@@ -111,25 +115,9 @@ Pass *createPruneEHPass();
 /// The symbol in DSOList are internalized if it is safe to drop them from
 /// the symbol table.
 ///
-/// For example of the difference, consider a dynamic library being built from
-/// two translation units. The first one compiled to a native object
-/// (ELF/MachO/COFF) and second one compiled to IL. Translation unit A has a
-/// copy of linkonce_odr unnamed_addr function F. The translation unit B has a
-/// copy of the linkonce_odr unnamed_addr functions F and G.
-///
-/// Assume the linker decides to keep the copy of F in B. This means that LLVM
-/// must produce F in the object file it passes to the linker, otherwise we
-/// will have an undefined reference. For G the situation is different. The
-/// linker puts the function in the DSOList, since it is only wanted for the
-/// symbol table. With this information internalize can now reason that since
-/// the function is a linkonce_odr and its address is not important, it can be
-/// omitted. Any other shared library needing this function will have a copy of
-/// it.
-///
 /// Note that commandline options that are used with the above function are not
 /// used now!
-ModulePass *createInternalizePass(ArrayRef<const char *> ExportList,
-                                  ArrayRef<const char *> DSOList);
+ModulePass *createInternalizePass(ArrayRef<const char *> ExportList);
 /// createInternalizePass - Same as above, but with an empty exportList.
 ModulePass *createInternalizePass();
 
@@ -203,7 +191,7 @@ ModulePass *createMergeFunctionsPass();
 /// createPartialInliningPass - This pass inlines parts of functions.
 ///
 ModulePass *createPartialInliningPass();
-  
+
 //===----------------------------------------------------------------------===//
 // createMetaRenamerPass - Rename everything with metasyntatic names.
 //

@@ -160,7 +160,7 @@ public:
     template<class OtherTy, class OtherIterTy>
     bundle_iterator(const bundle_iterator<OtherTy, OtherIterTy> &I)
       : MII(I.getInstrIterator()) {}
-    bundle_iterator() : MII(0) {}
+    bundle_iterator() : MII(nullptr) {}
 
     Ty &operator*() const { return *MII; }
     Ty *operator->() const { return &operator*(); }
@@ -256,7 +256,6 @@ public:
                                                          succ_reverse_iterator;
   typedef std::vector<MachineBasicBlock *>::const_reverse_iterator
                                                    const_succ_reverse_iterator;
-
   pred_iterator        pred_begin()       { return Predecessors.begin(); }
   const_pred_iterator  pred_begin() const { return Predecessors.begin(); }
   pred_iterator        pred_end()         { return Predecessors.end();   }
@@ -289,6 +288,19 @@ public:
     return (unsigned)Successors.size();
   }
   bool                 succ_empty() const { return Successors.empty();   }
+
+  inline iterator_range<pred_iterator> predecessors() {
+    return iterator_range<pred_iterator>(pred_begin(), pred_end());
+  }
+  inline iterator_range<const_pred_iterator> predecessors() const {
+    return iterator_range<const_pred_iterator>(pred_begin(), pred_end());
+  }
+  inline iterator_range<succ_iterator> successors() {
+    return iterator_range<succ_iterator>(succ_begin(), succ_end());
+  }
+  inline iterator_range<const_succ_iterator> successors() const {
+    return iterator_range<const_succ_iterator>(succ_begin(), succ_end());
+  }
 
   // LiveIn management methods.
 
@@ -362,6 +374,9 @@ public:
   /// Note that duplicate Machine CFG edges are not allowed.
   ///
   void addSuccessor(MachineBasicBlock *succ, uint32_t weight = 0);
+
+  /// Set successor weight of a given iterator.
+  void setSuccWeight(succ_iterator I, uint32_t weight);
 
   /// removeSuccessor - Remove successor from the successors list of this
   /// MachineBasicBlock. The Predecessors list of succ is automatically updated.
@@ -500,7 +515,7 @@ public:
   ///
   /// If I points to a bundle of instructions, they are all erased.
   iterator erase(iterator I) {
-    return erase(I, llvm::next(I));
+    return erase(I, std::next(I));
   }
 
   /// Remove an instruction from the instruction list and delete it.
@@ -539,7 +554,7 @@ public:
   void splice(iterator Where, MachineBasicBlock *Other, iterator From) {
     // The range splice() doesn't allow noop moves, but this one does.
     if (Where != From)
-      splice(Where, Other, From, llvm::next(From));
+      splice(Where, Other, From, std::next(From));
   }
 
   /// Take a block of instructions from MBB 'Other' in the range [From, To),
@@ -606,7 +621,10 @@ public:
 
   // Debugging methods.
   void dump() const;
-  void print(raw_ostream &OS, SlotIndexes* = 0) const;
+  void print(raw_ostream &OS, SlotIndexes* = nullptr) const;
+
+  // Printing method used by LoopInfo.
+  void printAsOperand(raw_ostream &OS, bool PrintType = true);
 
   /// getNumber - MachineBasicBlocks are uniquely numbered at the function
   /// level, unless they're not in a MachineFunction yet, in which case this
@@ -654,8 +672,6 @@ private:
 };
 
 raw_ostream& operator<<(raw_ostream &OS, const MachineBasicBlock &MBB);
-
-void WriteAsOperand(raw_ostream &, const MachineBasicBlock*, bool t);
 
 // This is useful when building IndexedMaps keyed on basic block pointers.
 struct MBB2NumberFunctor :
@@ -746,11 +762,11 @@ public:
   MachineInstrSpan(MachineBasicBlock::iterator I)
     : MBB(*I->getParent()),
       I(I),
-      B(I == MBB.begin() ? MBB.end() : llvm::prior(I)),
-      E(llvm::next(I)) {}
+      B(I == MBB.begin() ? MBB.end() : std::prev(I)),
+      E(std::next(I)) {}
 
   MachineBasicBlock::iterator begin() {
-    return B == MBB.end() ? MBB.begin() : llvm::next(B);
+    return B == MBB.end() ? MBB.begin() : std::next(B);
   }
   MachineBasicBlock::iterator end() { return E; }
   bool empty() { return begin() == end(); }

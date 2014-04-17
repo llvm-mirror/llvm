@@ -1,9 +1,11 @@
 ; RUN: llc < %s - | FileCheck %s
 ; Radar 9309221
 ; Test dwarf reg no for s16
-;CHECK: DW_OP_regx for S register
+;CHECK: super-register
+;CHECK-NEXT: DW_OP_regx
 ;CHECK-NEXT: ascii
-;CHECK-NEXT: DW_OP_bit_piece 32 0
+;CHECK-NEXT: DW_OP_piece
+;CHECK-NEXT: 4
 
 target datalayout = "e-p:32:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-i64:32:32-f32:32:32-f64:32:32-v64:32:64-v128:32:128-a0:0:32-n32"
 target triple = "thumbv7-apple-macosx10.6.7"
@@ -62,6 +64,7 @@ declare i32 @puts(i8* nocapture) nounwind optsize
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!53}
 
 !0 = metadata !{i32 786478, metadata !51, metadata !1, metadata !"inlineprinter", metadata !"inlineprinter", metadata !"", i32 5, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i8*, float, i8)* @inlineprinter, null, null, metadata !48, i32 5} ; [ DW_TAG_subprogram ] [line 5] [def] [inlineprinter]
 !1 = metadata !{i32 786473, metadata !51} ; [ DW_TAG_file_type ]
@@ -116,3 +119,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !50 = metadata !{metadata !17, metadata !18, metadata !22}
 !51 = metadata !{metadata !"a.c", metadata !"/private/tmp"}
 !52 = metadata !{i32 0}
+!53 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

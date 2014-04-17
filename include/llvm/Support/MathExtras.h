@@ -16,12 +16,13 @@
 
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/SwapByteOrder.h"
-#include "llvm/Support/type_traits.h"
-
+#include <cassert>
 #include <cstring>
+#include <type_traits>
 
 #ifdef _MSC_VER
-# include <intrin.h>
+#include <intrin.h>
+#include <limits>
 #endif
 
 namespace llvm {
@@ -43,8 +44,8 @@ enum ZeroBehavior {
 /// \param ZB the behavior on an input of 0. Only ZB_Width and ZB_Undefined are
 ///   valid arguments.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     !std::numeric_limits<T>::is_signed, std::size_t>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                        !std::numeric_limits<T>::is_signed, std::size_t>::type
 countTrailingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
   (void)ZB;
 
@@ -70,8 +71,8 @@ countTrailingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
 
 // Disable signed.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     std::numeric_limits<T>::is_signed, std::size_t>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                        std::numeric_limits<T>::is_signed, std::size_t>::type
 countTrailingZeros(T Val, ZeroBehavior ZB = ZB_Width) LLVM_DELETED_FUNCTION;
 
 #if __GNUC__ >= 4 || _MSC_VER
@@ -114,8 +115,8 @@ inline std::size_t countTrailingZeros<uint64_t>(uint64_t Val, ZeroBehavior ZB) {
 /// \param ZB the behavior on an input of 0. Only ZB_Width and ZB_Undefined are
 ///   valid arguments.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     !std::numeric_limits<T>::is_signed, std::size_t>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                        !std::numeric_limits<T>::is_signed, std::size_t>::type
 countLeadingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
   (void)ZB;
 
@@ -136,8 +137,8 @@ countLeadingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
 
 // Disable signed.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     std::numeric_limits<T>::is_signed, std::size_t>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                        std::numeric_limits<T>::is_signed, std::size_t>::type
 countLeadingZeros(T Val, ZeroBehavior ZB = ZB_Width) LLVM_DELETED_FUNCTION;
 
 #if __GNUC__ >= 4 || _MSC_VER
@@ -180,8 +181,8 @@ inline std::size_t countLeadingZeros<uint64_t>(uint64_t Val, ZeroBehavior ZB) {
 /// \param ZB the behavior on an input of 0. Only ZB_Max and ZB_Undefined are
 ///   valid arguments.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     !std::numeric_limits<T>::is_signed, T>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                       !std::numeric_limits<T>::is_signed, T>::type
 findFirstSet(T Val, ZeroBehavior ZB = ZB_Max) {
   if (ZB == ZB_Max && Val == 0)
     return std::numeric_limits<T>::max();
@@ -191,8 +192,8 @@ findFirstSet(T Val, ZeroBehavior ZB = ZB_Max) {
 
 // Disable signed.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     std::numeric_limits<T>::is_signed, T>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                        std::numeric_limits<T>::is_signed, T>::type
 findFirstSet(T Val, ZeroBehavior ZB = ZB_Max) LLVM_DELETED_FUNCTION;
 
 /// \brief Get the index of the last set bit starting from the least
@@ -203,8 +204,8 @@ findFirstSet(T Val, ZeroBehavior ZB = ZB_Max) LLVM_DELETED_FUNCTION;
 /// \param ZB the behavior on an input of 0. Only ZB_Max and ZB_Undefined are
 ///   valid arguments.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     !std::numeric_limits<T>::is_signed, T>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                        !std::numeric_limits<T>::is_signed, T>::type
 findLastSet(T Val, ZeroBehavior ZB = ZB_Max) {
   if (ZB == ZB_Max && Val == 0)
     return std::numeric_limits<T>::max();
@@ -217,8 +218,8 @@ findLastSet(T Val, ZeroBehavior ZB = ZB_Max) {
 
 // Disable signed.
 template <typename T>
-typename enable_if_c<std::numeric_limits<T>::is_integer &&
-                     std::numeric_limits<T>::is_signed, T>::type
+typename std::enable_if<std::numeric_limits<T>::is_integer &&
+                        std::numeric_limits<T>::is_signed, T>::type
 findLastSet(T Val, ZeroBehavior ZB = ZB_Max) LLVM_DELETED_FUNCTION;
 
 /// \brief Macro compressed bit reversal table for 256 bits.
@@ -540,6 +541,18 @@ inline uint64_t MinAlign(uint64_t A, uint64_t B) {
   return (A | B) & (1 + ~(A | B));
 }
 
+/// \brief Aligns \c Ptr to \c Alignment bytes, rounding up.
+///
+/// Alignment should be a power of two.  This method rounds up, so
+/// AlignPtr(7, 4) == 8 and AlignPtr(8, 4) == 8.
+inline char *alignPtr(char *Ptr, size_t Alignment) {
+  assert(Alignment && isPowerOf2_64((uint64_t)Alignment) &&
+         "Alignment is not a power of two!");
+
+  return (char *)(((uintptr_t)Ptr + Alignment - 1) &
+                  ~(uintptr_t)(Alignment - 1));
+}
+
 /// NextPowerOf2 - Returns the next power of two (in 64-bits)
 /// that is strictly greater than A.  Returns zero on overflow.
 inline uint64_t NextPowerOf2(uint64_t A) {
@@ -550,6 +563,13 @@ inline uint64_t NextPowerOf2(uint64_t A) {
   A |= (A >> 16);
   A |= (A >> 32);
   return A + 1;
+}
+
+/// Returns the power of two which is less than or equal to the given value.
+/// Essentially, it is a floor operation across the domain of powers of two.
+inline uint64_t PowerOf2Floor(uint64_t A) {
+  if (!A) return 0;
+  return 1ull << (63 - countLeadingZeros(A, ZB_Undefined));
 }
 
 /// Returns the next integer (mod 2**64) that is greater than or equal to
@@ -603,6 +623,13 @@ inline int64_t SignExtend64(uint64_t X, unsigned B) {
   return int64_t(X << (64 - B)) >> (64 - B);
 }
 
+#if defined(_MSC_VER)
+  // Visual Studio defines the HUGE_VAL class of macros using purposeful
+  // constant arithmetic overflow, which it then warns on when encountered.
+  const float huge_valf = std::numeric_limits<float>::infinity();
+#else
+  const float huge_valf = HUGE_VALF;
+#endif
 } // End llvm namespace
 
 #endif

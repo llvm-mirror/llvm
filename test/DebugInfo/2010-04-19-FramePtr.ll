@@ -1,6 +1,6 @@
-; RUN: llc -asm-verbose -O1 -o %t < %s 
+; RUN: %llc_dwarf -asm-verbose -O1 -o %t < %s
 ; RUN: grep DW_AT_APPLE_omit_frame_ptr %t
-; RUN: llc -disable-fp-elim -asm-verbose -O1 -o %t < %s 
+; RUN: %llc_dwarf -disable-fp-elim -asm-verbose -O1 -o %t < %s
 ; RUN: grep -v DW_AT_APPLE_omit_frame_ptr %t
 
 
@@ -20,6 +20,7 @@ return:                                           ; preds = %entry
 }
 
 !llvm.dbg.cu = !{!3}
+!llvm.module.flags = !{!12}
 !9 = metadata !{metadata !1}
 
 !0 = metadata !{i32 2, i32 0, metadata !1, null}
@@ -33,3 +34,4 @@ return:                                           ; preds = %entry
 !8 = metadata !{i32 786443, metadata !10, metadata !1, i32 2, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
 !10 = metadata !{metadata !"a.c", metadata !"/tmp"}
 !11 = metadata !{i32 0}
+!12 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

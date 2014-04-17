@@ -12,18 +12,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/LeakDetector.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CallSite.h"
-#include "llvm/Support/LeakDetector.h"
 using namespace llvm;
 
 Instruction::Instruction(Type *ty, unsigned it, Use *Ops, unsigned NumOps,
                          Instruction *InsertBefore)
-  : User(ty, Value::InstructionVal + it, Ops, NumOps), Parent(0) {
+  : User(ty, Value::InstructionVal + it, Ops, NumOps), Parent(nullptr) {
   // Make sure that we get added to a basicblock
   LeakDetector::addGarbageObject(this);
 
@@ -35,9 +35,13 @@ Instruction::Instruction(Type *ty, unsigned it, Use *Ops, unsigned NumOps,
   }
 }
 
+const DataLayout *Instruction::getDataLayout() const {
+  return getParent()->getDataLayout();
+}
+
 Instruction::Instruction(Type *ty, unsigned it, Use *Ops, unsigned NumOps,
                          BasicBlock *InsertAtEnd)
-  : User(ty, Value::InstructionVal + it, Ops, NumOps), Parent(0) {
+  : User(ty, Value::InstructionVal + it, Ops, NumOps), Parent(nullptr) {
   // Make sure that we get added to a basicblock
   LeakDetector::addGarbageObject(this);
 
@@ -223,18 +227,19 @@ const char *Instruction::getOpcodeName(unsigned OpCode) {
   case GetElementPtr: return "getelementptr";
 
   // Convert instructions...
-  case Trunc:     return "trunc";
-  case ZExt:      return "zext";
-  case SExt:      return "sext";
-  case FPTrunc:   return "fptrunc";
-  case FPExt:     return "fpext";
-  case FPToUI:    return "fptoui";
-  case FPToSI:    return "fptosi";
-  case UIToFP:    return "uitofp";
-  case SIToFP:    return "sitofp";
-  case IntToPtr:  return "inttoptr";
-  case PtrToInt:  return "ptrtoint";
-  case BitCast:   return "bitcast";
+  case Trunc:         return "trunc";
+  case ZExt:          return "zext";
+  case SExt:          return "sext";
+  case FPTrunc:       return "fptrunc";
+  case FPExt:         return "fpext";
+  case FPToUI:        return "fptoui";
+  case FPToSI:        return "fptosi";
+  case UIToFP:        return "uitofp";
+  case SIToFP:        return "sitofp";
+  case IntToPtr:      return "inttoptr";
+  case PtrToInt:      return "ptrtoint";
+  case BitCast:       return "bitcast";
+  case AddrSpaceCast: return "addrspacecast";
 
   // Other instructions...
   case ICmp:           return "icmp";
@@ -276,9 +281,8 @@ bool Instruction::isIdenticalToWhenDefined(const Instruction *I) const {
 
   // We have two instructions of identical opcode and #operands.  Check to see
   // if all operands are the same.
-  for (unsigned i = 0, e = getNumOperands(); i != e; ++i)
-    if (getOperand(i) != I->getOperand(i))
-      return false;
+  if (!std::equal(op_begin(), op_end(), I->op_begin()))
+    return false;
 
   // Check special state that is a part of some instructions.
   if (const LoadInst *LI = dyn_cast<LoadInst>(this))
@@ -309,7 +313,10 @@ bool Instruction::isIdenticalToWhenDefined(const Instruction *I) const {
            FI->getSynchScope() == cast<FenceInst>(FI)->getSynchScope();
   if (const AtomicCmpXchgInst *CXI = dyn_cast<AtomicCmpXchgInst>(this))
     return CXI->isVolatile() == cast<AtomicCmpXchgInst>(I)->isVolatile() &&
-           CXI->getOrdering() == cast<AtomicCmpXchgInst>(I)->getOrdering() &&
+           CXI->getSuccessOrdering() ==
+               cast<AtomicCmpXchgInst>(I)->getSuccessOrdering() &&
+           CXI->getFailureOrdering() ==
+               cast<AtomicCmpXchgInst>(I)->getFailureOrdering() &&
            CXI->getSynchScope() == cast<AtomicCmpXchgInst>(I)->getSynchScope();
   if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(this))
     return RMWI->getOperation() == cast<AtomicRMWInst>(I)->getOperation() &&
@@ -318,11 +325,8 @@ bool Instruction::isIdenticalToWhenDefined(const Instruction *I) const {
            RMWI->getSynchScope() == cast<AtomicRMWInst>(I)->getSynchScope();
   if (const PHINode *thisPHI = dyn_cast<PHINode>(this)) {
     const PHINode *otherPHI = cast<PHINode>(I);
-    for (unsigned i = 0, e = thisPHI->getNumOperands(); i != e; ++i) {
-      if (thisPHI->getIncomingBlock(i) != otherPHI->getIncomingBlock(i))
-        return false;
-    }
-    return true;
+    return std::equal(thisPHI->block_begin(), thisPHI->block_end(),
+                      otherPHI->block_begin());
   }
   return true;
 }
@@ -383,7 +387,10 @@ bool Instruction::isSameOperationAs(const Instruction *I,
            FI->getSynchScope() == cast<FenceInst>(I)->getSynchScope();
   if (const AtomicCmpXchgInst *CXI = dyn_cast<AtomicCmpXchgInst>(this))
     return CXI->isVolatile() == cast<AtomicCmpXchgInst>(I)->isVolatile() &&
-           CXI->getOrdering() == cast<AtomicCmpXchgInst>(I)->getOrdering() &&
+           CXI->getSuccessOrdering() ==
+               cast<AtomicCmpXchgInst>(I)->getSuccessOrdering() &&
+           CXI->getFailureOrdering() ==
+               cast<AtomicCmpXchgInst>(I)->getFailureOrdering() &&
            CXI->getSynchScope() == cast<AtomicCmpXchgInst>(I)->getSynchScope();
   if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(this))
     return RMWI->getOperation() == cast<AtomicRMWInst>(I)->getOperation() &&
@@ -398,18 +405,18 @@ bool Instruction::isSameOperationAs(const Instruction *I,
 /// specified block.  Note that PHI nodes are considered to evaluate their
 /// operands in the corresponding predecessor block.
 bool Instruction::isUsedOutsideOfBlock(const BasicBlock *BB) const {
-  for (const_use_iterator UI = use_begin(), E = use_end(); UI != E; ++UI) {
+  for (const Use &U : uses()) {
     // PHI nodes uses values in the corresponding predecessor block.  For other
     // instructions, just check to see whether the parent of the use matches up.
-    const User *U = *UI;
-    const PHINode *PN = dyn_cast<PHINode>(U);
-    if (PN == 0) {
-      if (cast<Instruction>(U)->getParent() != BB)
+    const Instruction *I = cast<Instruction>(U.getUser());
+    const PHINode *PN = dyn_cast<PHINode>(I);
+    if (!PN) {
+      if (I->getParent() != BB)
         return true;
       continue;
     }
 
-    if (PN->getIncomingBlock(UI) != BB)
+    if (PN->getIncomingBlock(U) != BB)
       return true;
   }
   return false;
@@ -547,8 +554,8 @@ Instruction *Instruction::clone() const {
   // new one.
   SmallVector<std::pair<unsigned, MDNode*>, 4> TheMDs;
   getAllMetadataOtherThanDebugLoc(TheMDs);
-  for (unsigned i = 0, e = TheMDs.size(); i != e; ++i)
-    New->setMetadata(TheMDs[i].first, TheMDs[i].second);
+  for (const auto &MD : TheMDs)
+    New->setMetadata(MD.first, MD.second);
 
   New->setDebugLoc(getDebugLoc());
   return New;

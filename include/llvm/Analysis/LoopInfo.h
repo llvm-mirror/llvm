@@ -33,8 +33,10 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/GraphTraits.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Analysis/Dominators.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/Pass.h"
 #include <algorithm>
 
@@ -53,6 +55,7 @@ class Loop;
 class MDNode;
 class PHINode;
 class raw_ostream;
+template<class N> class DominatorTreeBase;
 template<class N, class M> class LoopInfoBase;
 template<class N, class M> class LoopBase;
 
@@ -69,12 +72,14 @@ class LoopBase {
   // Blocks - The list of blocks in this loop.  First entry is the header node.
   std::vector<BlockT*> Blocks;
 
+  SmallPtrSet<const BlockT*, 8> DenseBlockSet;
+
   LoopBase(const LoopBase<BlockT, LoopT> &) LLVM_DELETED_FUNCTION;
   const LoopBase<BlockT, LoopT>&
     operator=(const LoopBase<BlockT, LoopT> &) LLVM_DELETED_FUNCTION;
 public:
   /// Loop ctor - This creates an empty loop.
-  LoopBase() : ParentLoop(0) {}
+  LoopBase() : ParentLoop(nullptr) {}
   ~LoopBase() {
     for (size_t i = 0, e = SubLoops.size(); i != e; ++i)
       delete SubLoops[i];
@@ -101,14 +106,14 @@ public:
   ///
   bool contains(const LoopT *L) const {
     if (L == this) return true;
-    if (L == 0)    return false;
+    if (!L)        return false;
     return contains(L->getParentLoop());
   }
 
   /// contains - Return true if the specified basic block is in this loop.
   ///
   bool contains(const BlockT *BB) const {
-    return std::find(block_begin(), block_end(), BB) != block_end();
+    return DenseBlockSet.count(BB);
   }
 
   /// contains - Return true if the specified instruction is in this loop.
@@ -134,7 +139,6 @@ public:
   /// getBlocks - Get a list of the basic blocks which make up this loop.
   ///
   const std::vector<BlockT*> &getBlocks() const { return Blocks; }
-  std::vector<BlockT*> &getBlocksVector() { return Blocks; }
   typedef typename std::vector<BlockT*>::const_iterator block_iterator;
   block_iterator block_begin() const { return Blocks.begin(); }
   block_iterator block_end() const { return Blocks.end(); }
@@ -227,6 +231,18 @@ public:
   /// A latch block is a block that contains a branch back to the header.
   BlockT *getLoopLatch() const;
 
+  /// getLoopLatches - Return all loop latch blocks of this loop. A latch block
+  /// is a block that contains a branch back to the header.
+  void getLoopLatches(SmallVectorImpl<BlockT *> &LoopLatches) const {
+    BlockT *H = getHeader();
+    typedef GraphTraits<Inverse<BlockT*> > InvBlockTraits;
+    for (typename InvBlockTraits::ChildIteratorType I =
+         InvBlockTraits::child_begin(H),
+         E = InvBlockTraits::child_end(H); I != E; ++I)
+      if (contains(*I))
+        LoopLatches.push_back(*I);
+  }
+
   //===--------------------------------------------------------------------===//
   // APIs for updating loop information after changing the CFG
   //
@@ -249,7 +265,7 @@ public:
   /// updates the loop depth of the new child.
   ///
   void addChildLoop(LoopT *NewChild) {
-    assert(NewChild->ParentLoop == 0 && "NewChild already has a parent!");
+    assert(!NewChild->ParentLoop && "NewChild already has a parent!");
     NewChild->ParentLoop = static_cast<LoopT *>(this);
     SubLoops.push_back(NewChild);
   }
@@ -262,7 +278,7 @@ public:
     LoopT *Child = *I;
     assert(Child->ParentLoop == this && "Child is not a child of this loop!");
     SubLoops.erase(SubLoops.begin()+(I-begin()));
-    Child->ParentLoop = 0;
+    Child->ParentLoop = nullptr;
     return Child;
   }
 
@@ -271,6 +287,17 @@ public:
   /// transformations should use addBasicBlockToLoop.
   void addBlockEntry(BlockT *BB) {
     Blocks.push_back(BB);
+    DenseBlockSet.insert(BB);
+  }
+
+  /// reverseBlocks - interface to reverse Blocks[from, end of loop] in this loop
+  void reverseBlock(unsigned from) {
+    std::reverse(Blocks.begin() + from, Blocks.end());
+  }
+
+  /// reserveBlocks- interface to do reserve() for Blocks
+  void reserveBlocks(unsigned size) {
+    Blocks.reserve(size);
   }
 
   /// moveToHeader - This method is used to move BB (which must be part of this
@@ -293,6 +320,7 @@ public:
   /// the mapping in the LoopInfo class.
   void removeBlockFromLoop(BlockT *BB) {
     RemoveFromVector(Blocks, BB);
+    DenseBlockSet.erase(BB);
   }
 
   /// verifyLoop - Verify loop structure
@@ -305,8 +333,9 @@ public:
 
 protected:
   friend class LoopInfoBase<BlockT, LoopT>;
-  explicit LoopBase(BlockT *BB) : ParentLoop(0) {
+  explicit LoopBase(BlockT *BB) : ParentLoop(nullptr) {
     Blocks.push_back(BB);
+    DenseBlockSet.insert(BB);
   }
 };
 
@@ -343,7 +372,7 @@ public:
   /// If null, the terminator of the loop preheader is used.
   ///
   bool makeLoopInvariant(Value *V, bool &Changed,
-                         Instruction *InsertPt = 0) const;
+                         Instruction *InsertPt = nullptr) const;
 
   /// makeLoopInvariant - If the given instruction is inside of the
   /// loop and it can be hoisted, do so to make it trivially loop-invariant.
@@ -355,7 +384,7 @@ public:
   /// If null, the terminator of the loop preheader is used.
   ///
   bool makeLoopInvariant(Instruction *I, bool &Changed,
-                         Instruction *InsertPt = 0) const;
+                         Instruction *InsertPt = nullptr) const;
 
   /// getCanonicalInductionVariable - Check to see if the loop has a canonical
   /// induction variable: an integer recurrence that starts at 0 and increments
@@ -502,7 +531,7 @@ public:
   LoopT *removeLoop(iterator I) {
     assert(I != end() && "Cannot remove end iterator!");
     LoopT *L = *I;
-    assert(L->getParentLoop() == 0 && "Not a top-level loop!");
+    assert(!L->getParentLoop() && "Not a top-level loop!");
     TopLevelLoops.erase(TopLevelLoops.begin() + (I-begin()));
     return L;
   }
@@ -526,14 +555,14 @@ public:
                  std::find(TopLevelLoops.begin(), TopLevelLoops.end(), OldLoop);
     assert(I != TopLevelLoops.end() && "Old loop not at top level!");
     *I = NewLoop;
-    assert(NewLoop->ParentLoop == 0 && OldLoop->ParentLoop == 0 &&
+    assert(!NewLoop->ParentLoop && !OldLoop->ParentLoop &&
            "Loops already embedded into a subloop!");
   }
 
   /// addTopLevelLoop - This adds the specified loop to the collection of
   /// top-level loops.
   void addTopLevelLoop(LoopT *New) {
-    assert(New->getParentLoop() == 0 && "Loop already in subloop!");
+    assert(!New->getParentLoop() && "Loop already in subloop!");
     TopLevelLoops.push_back(New);
   }
 
@@ -554,7 +583,7 @@ public:
 
   static bool isNotAlreadyContainedIn(const LoopT *SubLoop,
                                       const LoopT *ParentLoop) {
-    if (SubLoop == 0) return true;
+    if (!SubLoop) return true;
     if (SubLoop == ParentLoop) return false;
     return isNotAlreadyContainedIn(SubLoop->getParentLoop(), ParentLoop);
   }
@@ -625,15 +654,15 @@ public:
 
   /// runOnFunction - Calculate the natural loop information.
   ///
-  virtual bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
-  virtual void verifyAnalysis() const;
+  void verifyAnalysis() const override;
 
-  virtual void releaseMemory() { LI.releaseMemory(); }
+  void releaseMemory() override { LI.releaseMemory(); }
 
-  virtual void print(raw_ostream &O, const Module* M = 0) const;
+  void print(raw_ostream &O, const Module* M = nullptr) const override;
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
   /// removeLoop - This removes the specified top-level loop from this loop info
   /// object.  The loop is not deleted, as it will presumably be inserted into

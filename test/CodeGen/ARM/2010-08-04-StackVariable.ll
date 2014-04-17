@@ -75,6 +75,7 @@ return:                                           ; preds = %entry
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!3}
+!llvm.module.flags = !{!49}
 
 !0 = metadata !{i32 786478, metadata !48, metadata !1, metadata !"SVal", metadata !"SVal", metadata !"", i32 11, metadata !14, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
 !1 = metadata !{i32 786451, metadata !48, null, metadata !"SVal", i32 1, i64 128, i64 64, i64 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [SVal] [line 1, size 128, align 64, offset 0] [def] [from ]
@@ -123,5 +124,6 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !44 = metadata !{i32 786688, metadata !39, metadata !"k", metadata !2, i32 26, metadata !13, i32 0, i32 0} ; [ DW_TAG_auto_variable ]
 !45 = metadata !{i32 27, i32 0, metadata !39, null}
 !46 = metadata !{metadata !0, metadata !9, metadata !16, metadata !17, metadata !20}
-!47 = metadata !{i32 0}
+!47 = metadata !{}
 !48 = metadata !{metadata !"small.cc", metadata !"/Users/manav/R8248330"}
+!49 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

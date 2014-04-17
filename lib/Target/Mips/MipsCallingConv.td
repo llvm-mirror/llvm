@@ -192,8 +192,15 @@ def CC_Mips_FastCC : CallingConv<[
 
   // Integer arguments are passed in integer registers. All scratch registers,
   // except for AT, V0 and T9, are available to be used as argument registers.
-  CCIfType<[i32], CCAssignToReg<[A0, A1, A2, A3, T0, T1, T2, T3, T4, T5, T6,
-                                 T7, T8, V1]>>,
+  CCIfType<[i32], CCIfSubtarget<"isNotTargetNaCl()",
+      CCAssignToReg<[A0, A1, A2, A3, T0, T1, T2, T3, T4, T5, T6, T7, T8, V1]>>>,
+
+  // In NaCl, T6, T7 and T8 are reserved and not available as argument
+  // registers for fastcc.  T6 contains the mask for sandboxing control flow
+  // (indirect jumps and calls).  T7 contains the mask for sandboxing memory
+  // accesses (loads and stores).  T8 contains the thread pointer.
+  CCIfType<[i32], CCIfSubtarget<"isTargetNaCl()",
+      CCAssignToReg<[A0, A1, A2, A3, T0, T1, T2, T3, T4, T5, V1]>>>,
 
   // f32 arguments are passed in single-precision floating pointer registers.
   CCIfType<[f32], CCAssignToReg<[F0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10,
@@ -246,4 +253,6 @@ def CSR_N64 : CalleeSavedRegs<(add (sequence "D%u_64", 31, 24), RA_64, FP_64,
                                    GP_64, (sequence "S%u_64", 7, 0))>;
 
 def CSR_Mips16RetHelper :
-  CalleeSavedRegs<(add V0, V1, (sequence "A%u", 3, 0), S0, S1)>;
+  CalleeSavedRegs<(add V0, V1, FP,
+                   (sequence "A%u", 3, 0), (sequence "S%u", 7, 0),
+                   (sequence "D%u", 15, 10))>;

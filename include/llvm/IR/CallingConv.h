@@ -51,6 +51,21 @@ namespace CallingConv {
     // (HiPE).
     HiPE = 11,
 
+    // WebKit JS - Calling convention for stack based JavaScript calls
+    WebKit_JS = 12,
+
+    // AnyReg - Calling convention for dynamic register based calls (e.g.
+    // stackmap and patchpoint intrinsics).
+    AnyReg = 13,
+
+    // PreserveMost - Calling convention for runtime calls that preserves most
+    // registers.
+    PreserveMost = 14,
+
+    // PreserveAll - Calling convention for runtime calls that preserves
+    // (almost) all registers.
+    PreserveAll = 15,
+
     // Target - This is the start of the target-specific calling conventions,
     // e.g. fastcall and thiscall on X86.
     FirstTargetCC = 64,
@@ -122,7 +137,13 @@ namespace CallingConv {
     /// convention differs from the more common \c X86_64_SysV convention
     /// in a number of ways, most notably in that XMM registers used to pass
     /// arguments are shadowed by GPRs, and vice versa.
-    X86_64_Win64 = 79
+    X86_64_Win64 = 79,
+
+    /// \brief The calling convention used for __cdecl methods on win32.
+    /// Differs from the C calling convention only in that the order of the
+    /// first parameter and the sret parameter are swapped.
+    X86_CDeclMethod = 80
+
   };
 } // End CallingConv namespace
 

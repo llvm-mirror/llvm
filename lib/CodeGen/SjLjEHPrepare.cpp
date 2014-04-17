@@ -60,11 +60,11 @@ class SjLjEHPrepare : public FunctionPass {
 public:
   static char ID; // Pass identification, replacement for typeid
   explicit SjLjEHPrepare(const TargetMachine *TM) : FunctionPass(ID), TM(TM) {}
-  bool doInitialization(Module &M);
-  bool runOnFunction(Function &F);
+  bool doInitialization(Module &M) override;
+  bool runOnFunction(Function &F) override;
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {}
-  const char *getPassName() const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {}
+  const char *getPassName() const override {
     return "SJLJ Exception Handling preparation";
   }
 
@@ -100,10 +100,10 @@ bool SjLjEHPrepare::doInitialization(Module &M) {
                                       NULL);
   RegisterFn = M.getOrInsertFunction(
       "_Unwind_SjLj_Register", Type::getVoidTy(M.getContext()),
-      PointerType::getUnqual(FunctionContextTy), (Type *)0);
+      PointerType::getUnqual(FunctionContextTy), (Type *)nullptr);
   UnregisterFn = M.getOrInsertFunction(
       "_Unwind_SjLj_Unregister", Type::getVoidTy(M.getContext()),
-      PointerType::getUnqual(FunctionContextTy), (Type *)0);
+      PointerType::getUnqual(FunctionContextTy), (Type *)nullptr);
   FrameAddrFn = Intrinsic::getDeclaration(&M, Intrinsic::frameaddress);
   StackAddrFn = Intrinsic::getDeclaration(&M, Intrinsic::stacksave);
   StackRestoreFn = Intrinsic::getDeclaration(&M, Intrinsic::stackrestore);
@@ -111,7 +111,7 @@ bool SjLjEHPrepare::doInitialization(Module &M) {
   LSDAAddrFn = Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_lsda);
   CallSiteFn = Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_callsite);
   FuncCtxFn = Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_functioncontext);
-  PersonalityFn = 0;
+  PersonalityFn = nullptr;
 
   return true;
 }
@@ -149,7 +149,7 @@ static void MarkBlocksLiveIn(BasicBlock *BB,
 /// instruction with those returned by the personality function.
 void SjLjEHPrepare::substituteLPadValues(LandingPadInst *LPI, Value *ExnVal,
                                          Value *SelVal) {
-  SmallVector<Value *, 8> UseWorkList(LPI->use_begin(), LPI->use_end());
+  SmallVector<Value *, 8> UseWorkList(LPI->user_begin(), LPI->user_end());
   while (!UseWorkList.empty()) {
     Value *Val = UseWorkList.pop_back_val();
     ExtractValueInst *EVI = dyn_cast<ExtractValueInst>(Val);
@@ -173,7 +173,7 @@ void SjLjEHPrepare::substituteLPadValues(LandingPadInst *LPI, Value *ExnVal,
   Type *LPadType = LPI->getType();
   Value *LPadVal = UndefValue::get(LPadType);
   IRBuilder<> Builder(
-      llvm::next(BasicBlock::iterator(cast<Instruction>(SelVal))));
+      std::next(BasicBlock::iterator(cast<Instruction>(SelVal))));
   LPadVal = Builder.CreateInsertValue(LPadVal, ExnVal, 0, "lpad.val");
   LPadVal = Builder.CreateInsertValue(LPadVal, SelVal, 1, "lpad.val");
 
@@ -192,7 +192,7 @@ Value *SjLjEHPrepare::setupFunctionContext(Function &F,
   const TargetLowering *TLI = TM->getTargetLowering();
   unsigned Align =
       TLI->getDataLayout()->getPrefTypeAlignment(FunctionContextTy);
-  FuncCtx = new AllocaInst(FunctionContextTy, 0, Align, "fn_context",
+  FuncCtx = new AllocaInst(FunctionContextTy, nullptr, Align, "fn_context",
                            EntryBB->begin());
 
   // Fill in the function context structure.
@@ -251,7 +251,7 @@ void SjLjEHPrepare::lowerIncomingArguments(Function &F) {
     // Aggregate types can't be cast, but are legal argument types, so we have
     // to handle them differently. We use an extract/insert pair as a
     // lightweight method to achieve the same goal.
-    if (isa<StructType>(Ty) || isa<ArrayType>(Ty) || isa<VectorType>(Ty)) {
+    if (isa<StructType>(Ty) || isa<ArrayType>(Ty)) {
       Instruction *EI = ExtractValueInst::Create(AI, 0, "", AfterAllocaInsPt);
       Instruction *NI = InsertValueInst::Create(AI, EI, 0);
       NI->insertAfter(EI);
@@ -294,8 +294,8 @@ void SjLjEHPrepare::lowerAcrossUnwindEdges(Function &F,
       if (Inst->use_empty())
         continue;
       if (Inst->hasOneUse() &&
-          cast<Instruction>(Inst->use_back())->getParent() == BB &&
-          !isa<PHINode>(Inst->use_back()))
+          cast<Instruction>(Inst->user_back())->getParent() == BB &&
+          !isa<PHINode>(Inst->user_back()))
         continue;
 
       // If this is an alloca in the entry block, it's not a real register
@@ -306,11 +306,10 @@ void SjLjEHPrepare::lowerAcrossUnwindEdges(Function &F,
 
       // Avoid iterator invalidation by copying users to a temporary vector.
       SmallVector<Instruction *, 16> Users;
-      for (Value::use_iterator UI = Inst->use_begin(), E = Inst->use_end();
-           UI != E; ++UI) {
-        Instruction *User = cast<Instruction>(*UI);
-        if (User->getParent() != BB || isa<PHINode>(User))
-          Users.push_back(User);
+      for (User *U : Inst->users()) {
+        Instruction *UI = cast<Instruction>(U);
+        if (UI->getParent() != BB || isa<PHINode>(UI))
+          Users.push_back(UI);
       }
 
       // Find all of the blocks that this value is live in.

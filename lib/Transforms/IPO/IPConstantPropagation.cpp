@@ -20,11 +20,11 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CallSite.h"
 using namespace llvm;
 
 STATISTIC(NumArgumentsProped, "Number of args turned into constants");
@@ -39,7 +39,7 @@ namespace {
       initializeIPCPPass(*PassRegistry::getPassRegistry());
     }
 
-    bool runOnModule(Module &M);
+    bool runOnModule(Module &M) override;
   private:
     bool PropagateConstantsIntoArguments(Function &F);
     bool PropagateConstantReturn(Function &F);
@@ -86,18 +86,18 @@ bool IPCP::PropagateConstantsIntoArguments(Function &F) {
   ArgumentConstants.resize(F.arg_size());
 
   unsigned NumNonconstant = 0;
-  for (Value::use_iterator UI = F.use_begin(), E = F.use_end(); UI != E; ++UI) {
-    User *U = *UI;
+  for (Use &U : F.uses()) {
+    User *UR = U.getUser();
     // Ignore blockaddress uses.
-    if (isa<BlockAddress>(U)) continue;
+    if (isa<BlockAddress>(UR)) continue;
     
     // Used by a non-instruction, or not the callee of a function, do not
     // transform.
-    if (!isa<CallInst>(U) && !isa<InvokeInst>(U))
+    if (!isa<CallInst>(UR) && !isa<InvokeInst>(UR))
       return false;
     
-    CallSite CS(cast<Instruction>(U));
-    if (!CS.isCallee(UI))
+    CallSite CS(cast<Instruction>(UR));
+    if (!CS.isCallee(&U))
       return false;
 
     // Check out all of the potentially constant arguments.  Note that we don't
@@ -135,7 +135,7 @@ bool IPCP::PropagateConstantsIntoArguments(Function &F) {
   for (unsigned i = 0, e = ArgumentConstants.size(); i != e; ++i, ++AI) {
     // Do we have a constant argument?
     if (ArgumentConstants[i].second || AI->use_empty() ||
-        (AI->hasByValAttr() && !F.onlyReadsMemory()))
+        AI->hasInAllocaAttr() || (AI->hasByValAttr() && !F.onlyReadsMemory()))
       continue;
   
     Value *V = ArgumentConstants[i].first;
@@ -210,7 +210,7 @@ bool IPCP::PropagateConstantReturn(Function &F) {
         // Different or no known return value? Don't propagate this return
         // value.
         RetVals[i] = 0;
-        // All values non constant? Stop looking.
+        // All values non-constant? Stop looking.
         if (++NumNonConstant == RetVals.size())
           return false;
       }
@@ -220,13 +220,13 @@ bool IPCP::PropagateConstantReturn(Function &F) {
   // over all users, replacing any uses of the return value with the returned
   // constant.
   bool MadeChange = false;
-  for (Value::use_iterator UI = F.use_begin(), E = F.use_end(); UI != E; ++UI) {
-    CallSite CS(*UI);
+  for (Use &U : F.uses()) {
+    CallSite CS(U.getUser());
     Instruction* Call = CS.getInstruction();
 
     // Not a call instruction or a call instruction that's not calling F
     // directly?
-    if (!Call || !CS.isCallee(UI))
+    if (!Call || !CS.isCallee(&U))
       continue;
     
     // Call result not used?
@@ -244,9 +244,8 @@ bool IPCP::PropagateConstantReturn(Function &F) {
       Call->replaceAllUsesWith(New);
       continue;
     }
-   
-    for (Value::use_iterator I = Call->use_begin(), E = Call->use_end();
-         I != E;) {
+
+    for (auto I = Call->user_begin(), E = Call->user_end(); I != E;) {
       Instruction *Ins = cast<Instruction>(*I);
 
       // Increment now, so we can remove the use

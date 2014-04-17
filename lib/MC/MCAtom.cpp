@@ -14,6 +14,9 @@
 
 using namespace llvm;
 
+// Pin the vtable to this file.
+void MCAtom::anchor() {}
+
 void MCAtom::remap(uint64_t NewBegin, uint64_t NewEnd) {
   Parent->remap(this, NewBegin, NewEnd);
 }
@@ -44,7 +47,7 @@ void MCAtom::remapForSplit(uint64_t SplitPt,
 
 void MCDataAtom::addData(const MCData &D) {
   Data.push_back(D);
-  if (Data.size() > Begin - End - 1)
+  if (Data.size() > End + 1 - Begin)
     remap(Begin, End + 1);
 }
 

@@ -15,10 +15,10 @@
 #include "MCTargetDesc/AArch64FixupKinds.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "llvm/MC/MCAsmBackend.h"
-#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -43,7 +43,7 @@ public:
   virtual void processFixupValue(const MCAssembler &Asm,
                                  const MCAsmLayout &Layout,
                                  const MCFixup &Fixup, const MCFragment *DF,
-                                 MCValue &Target, uint64_t &Value,
+                                 const MCValue &Target, uint64_t &Value,
                                  bool &IsResolved);
 };
 } // end anonymous namespace
@@ -52,8 +52,8 @@ void AArch64AsmBackend::processFixupValue(const MCAssembler &Asm,
                                           const MCAsmLayout &Layout,
                                           const MCFixup &Fixup,
                                           const MCFragment *DF,
-                                          MCValue &Target, uint64_t &Value,
-                                          bool &IsResolved) {
+                                          const MCValue &Target,
+                                          uint64_t &Value, bool &IsResolved) {
   // The ADRP instruction adds some multiple of 0x1000 to the current PC &
   // ~0xfff. This means that the required offset to reach a symbol can vary by
   // up to one step depending on where the ADRP is in memory. For example:
@@ -79,11 +79,12 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value);
 namespace {
 
 class ELFAArch64AsmBackend : public AArch64AsmBackend {
-public:
   uint8_t OSABI;
+  bool IsLittle; // Big or little endian
+public:
   ELFAArch64AsmBackend(const Target &T, const StringRef TT,
-                       uint8_t _OSABI)
-    : AArch64AsmBackend(T, TT), OSABI(_OSABI) { }
+                       uint8_t _OSABI, bool isLittle)
+    : AArch64AsmBackend(T, TT), OSABI(_OSABI), IsLittle(isLittle) { }
 
   bool fixupNeedsRelaxation(const MCFixup &Fixup,
                             uint64_t Value,
@@ -176,7 +177,7 @@ public:
   }
 
   void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                  uint64_t Value) const {
+                  uint64_t Value, bool IsPCRel) const {
     unsigned NumBytes = getFixupKindInfo(Fixup.getKind()).TargetSize / 8;
     Value = adjustFixupValue(Fixup.getKind(), Value);
     if (!Value) return;           // Doesn't change encoding.
@@ -200,7 +201,7 @@ public:
   }
 
   MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
-    return createAArch64ELFObjectWriter(OS, OSABI);
+    return createAArch64ELFObjectWriter(OS, OSABI, IsLittle);
   }
 };
 
@@ -578,8 +579,15 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
 }
 
 MCAsmBackend *
-llvm::createAArch64AsmBackend(const Target &T, const MCRegisterInfo &MRI,
+llvm::createAArch64leAsmBackend(const Target &T, const MCRegisterInfo &MRI,
                               StringRef TT, StringRef CPU) {
   Triple TheTriple(TT);
-  return new ELFAArch64AsmBackend(T, TT, TheTriple.getOS());
+  return new ELFAArch64AsmBackend(T, TT, TheTriple.getOS(), /*isLittle*/ true);
+}
+
+MCAsmBackend *
+llvm::createAArch64beAsmBackend(const Target &T, const MCRegisterInfo &MRI,
+                              StringRef TT, StringRef CPU) {
+  Triple TheTriple(TT);
+  return new ELFAArch64AsmBackend(T, TT, TheTriple.getOS(), /*isLittle*/ false);
 }

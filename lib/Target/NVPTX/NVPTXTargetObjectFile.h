@@ -44,30 +44,10 @@ public:
     DwarfMacroInfoSection = 0;
   }
 
-  ~NVPTXTargetObjectFile() {
-    delete TextSection;
-    delete DataSection;
-    delete BSSSection;
-    delete ReadOnlySection;
+  virtual ~NVPTXTargetObjectFile();
 
-    delete StaticCtorSection;
-    delete StaticDtorSection;
-    delete LSDASection;
-    delete EHFrameSection;
-    delete DwarfAbbrevSection;
-    delete DwarfInfoSection;
-    delete DwarfLineSection;
-    delete DwarfFrameSection;
-    delete DwarfPubTypesSection;
-    delete DwarfDebugInlineSection;
-    delete DwarfStrSection;
-    delete DwarfLocSection;
-    delete DwarfARangesSection;
-    delete DwarfRangesSection;
-    delete DwarfMacroInfoSection;
-  }
-
-  virtual void Initialize(MCContext &ctx, const TargetMachine &TM) {
+  void Initialize(MCContext &ctx, const TargetMachine &TM) override {
+    TargetLoweringObjectFile::Initialize(ctx, TM);
     TextSection = new NVPTXSection(MCSection::SV_ELF, SectionKind::getText());
     DataSection =
         new NVPTXSection(MCSection::SV_ELF, SectionKind::getDataRel());
@@ -107,13 +87,13 @@ public:
         new NVPTXSection(MCSection::SV_ELF, SectionKind::getMetadata());
   }
 
-  virtual const MCSection *getSectionForConstant(SectionKind Kind) const {
+  const MCSection *getSectionForConstant(SectionKind Kind) const override {
     return ReadOnlySection;
   }
 
-  virtual const MCSection *
-  getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
-                           Mangler *Mang, const TargetMachine &TM) const {
+  const MCSection *getExplicitSectionGlobal(const GlobalValue *GV,
+                                       SectionKind Kind, Mangler &Mang,
+                                       const TargetMachine &TM) const override {
     return DataSection;
   }
 

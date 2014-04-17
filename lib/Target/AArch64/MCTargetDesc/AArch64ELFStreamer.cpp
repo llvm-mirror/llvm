@@ -57,7 +57,7 @@ class AArch64ELFStreamer : public MCELFStreamer {
 public:
   AArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
                      MCCodeEmitter *Emitter)
-      : MCELFStreamer(Context, 0, TAB, OS, Emitter), MappingSymbolCounter(0),
+      : MCELFStreamer(Context, TAB, OS, Emitter), MappingSymbolCounter(0),
         LastEMS(EMS_None) {}
 
   ~AArch64ELFStreamer() {}
@@ -76,9 +76,9 @@ public:
   /// This function is the one used to emit instruction data into the ELF
   /// streamer. We override it to add the appropriate mapping symbol if
   /// necessary.
-  virtual void EmitInstruction(const MCInst& Inst) {
+  virtual void EmitInstruction(const MCInst& Inst, const MCSubtargetInfo &STI) {
     EmitA64MappingSymbol();
-    MCELFStreamer::EmitInstruction(Inst);
+    MCELFStreamer::EmitInstruction(Inst, STI);
   }
 
   /// This is one of the functions used to emit data into an ELF section, so the

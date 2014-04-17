@@ -24,8 +24,8 @@
 using namespace llvm;
 
 void R600SchedStrategy::initialize(ScheduleDAGMI *dag) {
-
-  DAG = dag;
+  assert(dag->hasVRegLiveness() && "R600SchedStrategy needs vreg liveness");
+  DAG = static_cast<ScheduleDAGMILive*>(dag);
   TII = static_cast<const R600InstrInfo*>(DAG->TII);
   TRI = static_cast<const R600RegisterInfo*>(DAG->TRI);
   VLIW5 = !DAG->MF.getTarget().getSubtarget<AMDGPUSubtarget>().hasCaymanISA();
@@ -72,7 +72,7 @@ SUnit* R600SchedStrategy::pickNode(bool &IsTopNode) {
     // OpenCL Programming Guide :
     // The approx. number of WF that allows TEX inst to hide ALU inst is :
     // 500 (cycles for TEX) / (AluFetchRatio * 8 (cycles for ALU))
-    float ALUFetchRationEstimate = 
+    float ALUFetchRationEstimate =
         (AluInstCount + AvailablesAluCount() + Pending[IDAlu].size()) /
         (FetchInstCount + Available[IDFetch].size());
     unsigned NeededWF = 62.5f / ALUFetchRationEstimate;
@@ -90,15 +90,6 @@ SUnit* R600SchedStrategy::pickNode(bool &IsTopNode) {
     unsigned NearRegisterRequirement = 2 * Available[IDFetch].size();
     if (NeededWF > getWFCountLimitedByGPR(NearRegisterRequirement))
       AllowSwitchFromAlu = true;
-  }
-
-
-  // We want to scheduled AR defs as soon as possible to make sure they aren't
-  // put in a different ALU clause from their uses.
-  if (!SU && !UnscheduledARDefs.empty()) {
-      SU = UnscheduledARDefs[0];
-      UnscheduledARDefs.erase(UnscheduledARDefs.begin());
-      NextInstKind = IDAlu;
   }
 
   if (!SU && ((AllowSwitchToAlu && CurInstKind != IDAlu) ||
@@ -129,15 +120,6 @@ SUnit* R600SchedStrategy::pickNode(bool &IsTopNode) {
     if (SU)
       NextInstKind = IDOther;
   }
-
-  // We want to schedule the AR uses as late as possible to make sure that
-  // the AR defs have been released.
-  if (!SU && !UnscheduledARUses.empty()) {
-      SU = UnscheduledARUses[0];
-      UnscheduledARUses.erase(UnscheduledARUses.begin());
-      NextInstKind = IDAlu;
-  }
-
 
   DEBUG(
       if (SU) {
@@ -216,20 +198,6 @@ void R600SchedStrategy::releaseBottomNode(SUnit *SU) {
   }
 
   int IK = getInstKind(SU);
-
-  // Check for AR register defines
-  for (MachineInstr::const_mop_iterator I = SU->getInstr()->operands_begin(),
-                                        E = SU->getInstr()->operands_end();
-                                        I != E; ++I) {
-    if (I->isReg() && I->getReg() == AMDGPU::AR_X) {
-      if (I->isDef()) {
-        UnscheduledARDefs.push_back(SU);
-      } else {
-        UnscheduledARUses.push_back(SU);
-      }
-      return;
-    }
-  }
 
   // There is no export clause, we can schedule one as soon as its ready
   if (IK == IDOther)
@@ -496,4 +464,3 @@ SUnit* R600SchedStrategy::pickOther(int QID) {
   }
   return SU;
 }
-

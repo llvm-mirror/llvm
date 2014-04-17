@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines the RegAllocBase class which provides comon functionality
+// This file defines the RegAllocBase class which provides common functionality
 // for LiveIntervalUnion-based register allocators.
 //
 //===----------------------------------------------------------------------===//
@@ -49,6 +49,9 @@ bool RegAllocBase::VerifyEnabled = false;
 //===----------------------------------------------------------------------===//
 //                         RegAllocBase Implementation
 //===----------------------------------------------------------------------===//
+
+// Pin the vtable to this file.
+void RegAllocBase::anchor() {}
 
 void RegAllocBase::init(VirtRegMap &vrm,
                         LiveIntervals &lis,
@@ -98,8 +101,8 @@ void RegAllocBase::allocatePhysRegs() {
     // register if possible and populate a list of new live intervals that
     // result from splitting.
     DEBUG(dbgs() << "\nselectOrSplit "
-                 << MRI->getRegClass(VirtReg->reg)->getName()
-                 << ':' << *VirtReg << '\n');
+          << MRI->getRegClass(VirtReg->reg)->getName()
+          << ':' << *VirtReg << " w=" << VirtReg->weight << '\n');
     typedef SmallVector<unsigned, 4> VirtRegVec;
     VirtRegVec SplitVRegs;
     unsigned AvailablePhysReg = selectOrSplit(*VirtReg, SplitVRegs);
@@ -107,11 +110,16 @@ void RegAllocBase::allocatePhysRegs() {
     if (AvailablePhysReg == ~0u) {
       // selectOrSplit failed to find a register!
       // Probably caused by an inline asm.
-      MachineInstr *MI;
-      for (MachineRegisterInfo::reg_iterator I = MRI->reg_begin(VirtReg->reg);
-           (MI = I.skipInstruction());)
-        if (MI->isInlineAsm())
+      MachineInstr *MI = nullptr;
+      for (MachineRegisterInfo::reg_instr_iterator
+           I = MRI->reg_instr_begin(VirtReg->reg), E = MRI->reg_instr_end();
+           I != E; ) {
+        MachineInstr *TmpMI = &*(I++);
+        if (TmpMI->isInlineAsm()) {
+          MI = TmpMI;
           break;
+        }
+      }
       if (MI)
         MI->emitError("inline assembly requires more registers than available");
       else

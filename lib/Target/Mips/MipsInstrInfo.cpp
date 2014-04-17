@@ -22,10 +22,13 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
-#define GET_INSTRINFO_CTOR
+#define GET_INSTRINFO_CTOR_DTOR
 #include "MipsGenInstrInfo.inc"
 
 using namespace llvm;
+
+// Pin the vtable to this file.
+void MipsInstrInfo::anchor() {}
 
 MipsInstrInfo::MipsInstrInfo(MipsTargetMachine &tm, unsigned UncondBr)
   : MipsGenInstrInfo(Mips::ADJCALLSTACKDOWN, Mips::ADJCALLSTACKUP),
@@ -271,6 +274,10 @@ unsigned MipsInstrInfo::GetInstSizeInBytes(const MachineInstr *MI) const {
     const char *AsmStr = MI->getOperand(0).getSymbolName();
     return getInlineAsmLength(AsmStr, *MF->getTarget().getMCAsmInfo());
   }
+  case Mips::CONSTPOOL_ENTRY:
+    // If this machine instr is a constant pool entry, its size is recorded as
+    // operand #2.
+    return MI->getOperand(2).getImm();
   }
 }
 

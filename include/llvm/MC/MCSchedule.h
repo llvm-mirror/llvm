@@ -32,11 +32,16 @@ struct MCProcResourceDesc {
 
   // Number of resources that may be buffered.
   //
-  // Buffered resources (BufferSize > 0 || BufferSize == -1) may be consumed at
-  // some indeterminate cycle after dispatch (e.g. for instructions that may
-  // issue out-of-order). Unbuffered resources (BufferSize == 0) always consume
-  // their resource some fixed number of cycles after dispatch (e.g. for
-  // instruction interlocking that may stall the pipeline).
+  // Buffered resources (BufferSize != 0) may be consumed at some indeterminate
+  // cycle after dispatch. This should be used for out-of-order cpus when
+  // instructions that use this resource can be buffered in a reservaton
+  // station.
+  //
+  // Unbuffered resources (BufferSize == 0) always consume their resource some
+  // fixed number of cycles after dispatch. If a resource is unbuffered, then
+  // the scheduler will avoid scheduling instructions with conflicting resources
+  // in the same cycle. This is for in-order cpus, or the in-order portion of
+  // an out-of-order cpus.
   int BufferSize;
 
   bool operator==(const MCProcResourceDesc &Other) const {
@@ -124,7 +129,7 @@ struct MCSchedClassDesc {
 /// microarchitecture to the scheduler in the form of properties. It also
 /// optionally refers to scheduler resource tables and itinerary
 /// tables. Scheduler resource tables model the latency and cost for each
-/// instruction type. Itinerary tables are an independant mechanism that
+/// instruction type. Itinerary tables are an independent mechanism that
 /// provides a detailed reservation table describing each cycle of instruction
 /// execution. Subtargets may define any or all of the above categories of data
 /// depending on the type of CPU and selected scheduler.
@@ -149,7 +154,7 @@ public:
   // but we balance those stalls against other heuristics.
   //
   // "> 1" means the processor is out-of-order. This is a machine independent
-  // estimate of highly machine specific characteristics such are the register
+  // estimate of highly machine specific characteristics such as the register
   // renaming pool and reorder buffer.
   unsigned MicroOpBufferSize;
   static const unsigned DefaultMicroOpBufferSize = 0;
@@ -196,10 +201,9 @@ public:
                   LoadLatency(DefaultLoadLatency),
                   HighLatency(DefaultHighLatency),
                   MispredictPenalty(DefaultMispredictPenalty),
-                  CompleteModel(true),
-                  ProcID(0), ProcResourceTable(0), SchedClassTable(0),
-                  NumProcResourceKinds(0), NumSchedClasses(0),
-                  InstrItineraries(0) {
+                  CompleteModel(true), ProcID(0), ProcResourceTable(nullptr),
+                  SchedClassTable(nullptr), NumProcResourceKinds(0),
+                  NumSchedClasses(0), InstrItineraries(nullptr) {
     (void)NumProcResourceKinds;
     (void)NumSchedClasses;
   }

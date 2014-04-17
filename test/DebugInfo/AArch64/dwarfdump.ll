@@ -1,4 +1,7 @@
-; RUN: llc -mtriple=aarch64-non-linux-gnu < %s -filetype=obj | llvm-dwarfdump - | FileCheck %s
+; RUN: llc -mtriple=aarch64-non-linux-gnu -dwarf-version=4 < %s -filetype=obj \
+; RUN:    | llvm-dwarfdump - | FileCheck -check-prefix=CHECK -check-prefix=CHECK-4 %s
+; RUN: llc -mtriple=aarch64-non-linux-gnu -dwarf-version=3 < %s -filetype=obj \
+; RUN:    | llvm-dwarfdump - | FileCheck -check-prefix=CHECK -check-prefix=CHECK-3 %s
 
 ; We're mostly checking that relocations are applied correctly
 ; here. Currently R_AARCH64_ABS32 is used for references to debug data
@@ -12,7 +15,8 @@
 ; A couple of ABS64s similarly:
 
 ; CHECK: DW_AT_low_pc [DW_FORM_addr] (0x0000000000000000)
-; CHECK: DW_AT_high_pc [DW_FORM_addr] (0x0000000000000008)
+; CHECK-4: DW_AT_high_pc [DW_FORM_data4] (0x00000008)
+; CHECK-3: DW_AT_high_pc [DW_FORM_addr] (0x0000000000000008)
 
 define i32 @main() nounwind {
   ret i32 0, !dbg !8
@@ -21,9 +25,10 @@ define i32 @main() nounwind {
 attributes #0 = { nounwind }
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!10}
 
 !0 = metadata !{i32 786449, metadata !9, i32 12, metadata !"clang version 3.3 ", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !2, metadata !1,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ] [/home/timnor01/llvm/build/tmp.c] [DW_LANG_C99]
-!1 = metadata !{i32 0}
+!1 = metadata !{}
 !2 = metadata !{metadata !3}
 !3 = metadata !{i32 786478, metadata !9, metadata !4, metadata !"main", metadata !"main", metadata !"", i32 1, metadata !5, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, i32 ()* @main, null, null, metadata !1, i32 1} ; [ DW_TAG_subprogram ] [line 1] [def] [main]
 !4 = metadata !{i32 786473, metadata !9} ; [ DW_TAG_file_type ]
@@ -32,3 +37,4 @@ attributes #0 = { nounwind }
 !7 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
 !8 = metadata !{i32 2, i32 0, metadata !3, null}
 !9 = metadata !{metadata !"tmp.c", metadata !"/home/tim/llvm/build"}
+!10 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

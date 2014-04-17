@@ -12,10 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/PHITransAddr.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -72,7 +72,7 @@ static bool VerifySubExpr(Value *Expr,
   // If it isn't in the InstInputs list it is a subexpr incorporated into the
   // address.  Sanity check that it is phi translatable.
   if (!CanPHITrans(I)) {
-    errs() << "Non phi translatable instruction found in PHITransAddr:\n";
+    errs() << "Instruction in PHITransAddr is not phi-translatable:\n";
     errs() << *I << '\n';
     llvm_unreachable("Either something is missing from InstInputs or "
                      "CanPHITrans is wrong.");
@@ -202,9 +202,8 @@ Value *PHITransAddr::PHITranslateSubExpr(Value *V, BasicBlock *CurBB,
 
     // Otherwise we have to see if a casted version of the incoming pointer
     // is available.  If so, we can use it, otherwise we have to fail.
-    for (Value::use_iterator UI = PHIIn->use_begin(), E = PHIIn->use_end();
-         UI != E; ++UI) {
-      if (CastInst *CastI = dyn_cast<CastInst>(*UI))
+    for (User *U : PHIIn->users()) {
+      if (CastInst *CastI = dyn_cast<CastInst>(U))
         if (CastI->getOpcode() == Cast->getOpcode() &&
             CastI->getType() == Cast->getType() &&
             (!DT || DT->dominates(CastI->getParent(), PredBB)))
@@ -229,7 +228,7 @@ Value *PHITransAddr::PHITranslateSubExpr(Value *V, BasicBlock *CurBB,
       return GEP;
 
     // Simplify the GEP to handle 'gep x, 0' -> x etc.
-    if (Value *V = SimplifyGEPInst(GEPOps, TD, TLI, DT)) {
+    if (Value *V = SimplifyGEPInst(GEPOps, DL, TLI, DT)) {
       for (unsigned i = 0, e = GEPOps.size(); i != e; ++i)
         RemoveInstInputs(GEPOps[i], InstInputs);
 
@@ -238,9 +237,8 @@ Value *PHITransAddr::PHITranslateSubExpr(Value *V, BasicBlock *CurBB,
 
     // Scan to see if we have this GEP available.
     Value *APHIOp = GEPOps[0];
-    for (Value::use_iterator UI = APHIOp->use_begin(), E = APHIOp->use_end();
-         UI != E; ++UI) {
-      if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(*UI))
+    for (User *U : APHIOp->users()) {
+      if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(U))
         if (GEPI->getType() == GEP->getType() &&
             GEPI->getNumOperands() == GEPOps.size() &&
             GEPI->getParent()->getParent() == CurBB->getParent() &&
@@ -285,7 +283,7 @@ Value *PHITransAddr::PHITranslateSubExpr(Value *V, BasicBlock *CurBB,
         }
 
     // See if the add simplifies away.
-    if (Value *Res = SimplifyAddInst(LHS, RHS, isNSW, isNUW, TD, TLI, DT)) {
+    if (Value *Res = SimplifyAddInst(LHS, RHS, isNSW, isNUW, DL, TLI, DT)) {
       // If we simplified the operands, the LHS is no longer an input, but Res
       // is.
       RemoveInstInputs(LHS, InstInputs);
@@ -297,9 +295,8 @@ Value *PHITransAddr::PHITranslateSubExpr(Value *V, BasicBlock *CurBB,
       return Inst;
 
     // Otherwise, see if we have this add available somewhere.
-    for (Value::use_iterator UI = LHS->use_begin(), E = LHS->use_end();
-         UI != E; ++UI) {
-      if (BinaryOperator *BO = dyn_cast<BinaryOperator>(*UI))
+    for (User *U : LHS->users()) {
+      if (BinaryOperator *BO = dyn_cast<BinaryOperator>(U))
         if (BO->getOpcode() == Instruction::Add &&
             BO->getOperand(0) == LHS && BO->getOperand(1) == RHS &&
             BO->getParent()->getParent() == CurBB->getParent() &&
@@ -372,7 +369,7 @@ InsertPHITranslatedSubExpr(Value *InVal, BasicBlock *CurBB,
                            SmallVectorImpl<Instruction*> &NewInsts) {
   // See if we have a version of this value already available and dominating
   // PredBB.  If so, there is no need to insert a new instance of it.
-  PHITransAddr Tmp(InVal, TD);
+  PHITransAddr Tmp(InVal, DL);
   if (!Tmp.PHITranslateValue(CurBB, PredBB, &DT))
     return Tmp.getAddr();
 

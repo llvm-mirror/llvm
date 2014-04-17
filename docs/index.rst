@@ -215,6 +215,7 @@ For API clients and LLVM developers.
 
    AliasAnalysis
    BitCodeFormat
+   BlockFrequencyTerminology
    BranchWeightMetadata
    Bugpoint
    CodeGenerator
@@ -222,6 +223,7 @@ For API clients and LLVM developers.
    LinkTimeOptimization
    SegmentedStacks
    TableGenFundamentals
+   TableGen/index
    DebuggingJITedCode
    GoldPlugin
    MarkedUpDisassembly
@@ -231,9 +233,10 @@ For API clients and LLVM developers.
    WritingAnLLVMBackend
    GarbageCollection
    WritingAnLLVMPass
-   TableGen/LangRef
    HowToUseAttributes
    NVPTXUsage
+   StackMaps
+   InAlloca
 
 :doc:`WritingAnLLVMPass`
    Information on how to write LLVM transformations and analyses.
@@ -246,7 +249,7 @@ For API clients and LLVM developers.
    working on retargetting LLVM to a new architecture, designing a new codegen
    pass, or enhancing existing components.
 
-:doc:`TableGenFundamentals`
+:doc:`TableGen <TableGen/index>`
    Describes the TableGen tool, which is used heavily by the LLVM code
    generator.
 
@@ -296,6 +299,10 @@ For API clients and LLVM developers.
 :doc:`BranchWeightMetadata`
    Provides information about Branch Prediction Information.
 
+:doc:`BlockFrequencyTerminology`
+   Provides information about terminology used in the ``BlockFrequencyInfo``
+   analysis pass.
+
 :doc:`SegmentedStacks`
    This document describes segmented stacks and how they are used in LLVM.
 
@@ -308,6 +315,9 @@ For API clients and LLVM developers.
 :doc:`NVPTXUsage`
    This document describes using the NVPTX back-end to compile GPU kernels.
 
+:doc:`StackMaps`
+  LLVM support for mapping instruction addresses to the location of
+  values and allowing code to be patched.
 
 Development Process Documentation
 =================================

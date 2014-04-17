@@ -63,7 +63,7 @@ public:
   void RecordRelocation(MachObjectWriter *Writer,
                         const MCAssembler &Asm, const MCAsmLayout &Layout,
                         const MCFragment *Fragment, const MCFixup &Fixup,
-                        MCValue Target, uint64_t &FixedValue) {
+                        MCValue Target, uint64_t &FixedValue) override {
     if (Writer->is64Bit())
       RecordX86_64Relocation(Writer, Asm, Layout, Fragment, Fixup, Target,
                              FixedValue);
@@ -230,7 +230,7 @@ void X86MachObjectWriter::RecordX86_64Relocation(MachObjectWriter *Writer,
     if (Symbol->isInSection()) {
       const MCSectionMachO &Section = static_cast<const MCSectionMachO&>(
         Fragment->getParent()->getSection());
-      if (Section.hasAttribute(MCSectionMachO::S_ATTR_DEBUG))
+      if (Section.hasAttribute(MachO::S_ATTR_DEBUG))
         Base = 0;
     }
 
@@ -362,6 +362,7 @@ bool X86MachObjectWriter::RecordScatteredRelocation(MachObjectWriter *Writer,
                                                     MCValue Target,
                                                     unsigned Log2Size,
                                                     uint64_t &FixedValue) {
+  uint64_t OriginalFixedValue = FixedValue;
   uint32_t FixupOffset = Layout.getFragmentOffset(Fragment)+Fixup.getOffset();
   unsigned IsPCRel = Writer->isFixupKindPCRel(Asm, Fixup.getKind());
   unsigned Type = MachO::GENERIC_RELOC_VANILLA;
@@ -431,8 +432,10 @@ bool X86MachObjectWriter::RecordScatteredRelocation(MachObjectWriter *Writer,
     // symbol, things can go badly.
     //
     // Required for 'as' compatibility.
-    if (FixupOffset > 0xffffff)
+    if (FixupOffset > 0xffffff) {
+      FixedValue = OriginalFixedValue;
       return false;
+    }
   }
 
   MachO::any_relocation_info MRE;

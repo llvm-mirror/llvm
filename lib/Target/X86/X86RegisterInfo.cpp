@@ -14,7 +14,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "X86RegisterInfo.h"
-#include "X86.h"
 #include "X86InstrBuilder.h"
 #include "X86MachineFunctionInfo.h"
 #include "X86Subtarget.h"
@@ -27,7 +26,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
@@ -232,16 +231,27 @@ X86RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   }
 }
 
-const uint16_t *
+const MCPhysReg *
 X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+  bool HasAVX = TM.getSubtarget<X86Subtarget>().hasAVX();
+  bool HasAVX512 = TM.getSubtarget<X86Subtarget>().hasAVX512();
+
+  assert(MF && "MachineFunction required");
   switch (MF->getFunction()->getCallingConv()) {
   case CallingConv::GHC:
   case CallingConv::HiPE:
     return CSR_NoRegs_SaveList;
-
+  case CallingConv::AnyReg:
+    if (HasAVX)
+      return CSR_64_AllRegs_AVX_SaveList;
+    return CSR_64_AllRegs_SaveList;
+  case CallingConv::PreserveMost:
+    return CSR_64_RT_MostRegs_SaveList;
+  case CallingConv::PreserveAll:
+    if (HasAVX)
+      return CSR_64_RT_AllRegs_AVX_SaveList;
+    return CSR_64_RT_AllRegs_SaveList;
   case CallingConv::Intel_OCL_BI: {
-    bool HasAVX = TM.getSubtarget<X86Subtarget>().hasAVX();
-    bool HasAVX512 = TM.getSubtarget<X86Subtarget>().hasAVX512();
     if (HasAVX512 && IsWin64)
       return CSR_Win64_Intel_OCL_BI_AVX512_SaveList;
     if (HasAVX512 && Is64Bit)
@@ -254,12 +264,10 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
       return CSR_64_Intel_OCL_BI_SaveList;
     break;
   }
-
   case CallingConv::Cold:
     if (Is64Bit)
-      return CSR_MostRegs_64_SaveList;
+      return CSR_64_MostRegs_SaveList;
     break;
-
   default:
     break;
   }
@@ -282,27 +290,49 @@ X86RegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
   bool HasAVX = TM.getSubtarget<X86Subtarget>().hasAVX();
   bool HasAVX512 = TM.getSubtarget<X86Subtarget>().hasAVX512();
 
-  if (CC == CallingConv::Intel_OCL_BI) {
-    if (IsWin64 && HasAVX512)
+  switch (CC) {
+  case CallingConv::GHC:
+  case CallingConv::HiPE:
+    return CSR_NoRegs_RegMask;
+  case CallingConv::AnyReg:
+    if (HasAVX)
+      return CSR_64_AllRegs_AVX_RegMask;
+    return CSR_64_AllRegs_RegMask;
+  case CallingConv::PreserveMost:
+    return CSR_64_RT_MostRegs_RegMask;
+  case CallingConv::PreserveAll:
+    if (HasAVX)
+      return CSR_64_RT_AllRegs_AVX_RegMask;
+    return CSR_64_RT_AllRegs_RegMask;
+  case CallingConv::Intel_OCL_BI: {
+    if (HasAVX512 && IsWin64)
       return CSR_Win64_Intel_OCL_BI_AVX512_RegMask;
-    if (Is64Bit && HasAVX512)
+    if (HasAVX512 && Is64Bit)
       return CSR_64_Intel_OCL_BI_AVX512_RegMask;
-    if (IsWin64 && HasAVX)
+    if (HasAVX && IsWin64)
       return CSR_Win64_Intel_OCL_BI_AVX_RegMask;
-    if (Is64Bit && HasAVX)
+    if (HasAVX && Is64Bit)
       return CSR_64_Intel_OCL_BI_AVX_RegMask;
     if (!HasAVX && !IsWin64 && Is64Bit)
       return CSR_64_Intel_OCL_BI_RegMask;
+    break;
   }
-  if (CC == CallingConv::GHC || CC == CallingConv::HiPE)
-    return CSR_NoRegs_RegMask;
-  if (!Is64Bit)
-    return CSR_32_RegMask;
-  if (CC == CallingConv::Cold)
-    return CSR_MostRegs_64_RegMask;
-  if (IsWin64)
-    return CSR_Win64_RegMask;
-  return CSR_64_RegMask;
+  case CallingConv::Cold:
+    if (Is64Bit)
+      return CSR_64_MostRegs_RegMask;
+    break;
+  default:
+    break;
+  }
+
+  // Unlike getCalleeSavedRegs(), we don't have MMI so we can't check
+  // callsEHReturn().
+  if (Is64Bit) {
+    if (IsWin64)
+      return CSR_Win64_RegMask;
+    return CSR_64_RegMask;
+  }
+  return CSR_32_RegMask;
 }
 
 const uint32_t*
@@ -396,18 +426,15 @@ bool X86RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
    if (!EnableBasePointer)
      return false;
 
-   // When we need stack realignment and there are dynamic allocas, we can't
-   // reference off of the stack pointer, so we reserve a base pointer.
-   //
-   // This is also true if the function contain MS-style inline assembly.  We
-   // do this because if any stack changes occur in the inline assembly, e.g.,
-   // "pusha", then any C local variable or C argument references in the
-   // inline assembly will be wrong because the SP is not properly tracked.
-   if ((needsStackRealignment(MF) && MFI->hasVarSizedObjects()) ||
-       MF.hasMSInlineAsm())
-     return true;
-
-   return false;
+   // When we need stack realignment, we can't address the stack from the frame
+   // pointer.  When we have dynamic allocas or stack-adjusting inline asm, we
+   // can't address variables from the stack pointer.  MS inline asm can
+   // reference locals while also adjusting the stack pointer.  When we can't
+   // use both the SP and the FP, we need a separate base pointer register.
+   bool CantUseFP = needsStackRealignment(MF);
+   bool CantUseSP =
+       MFI->hasVarSizedObjects() || MFI->hasInlineAsmWithSPAdjust();
+   return CantUseFP && CantUseSP;
 }
 
 bool X86RegisterInfo::canRealignStack(const MachineFunction &MF) const {
@@ -491,6 +518,15 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     FIOffset = MFI->getObjectOffset(FrameIndex) - TFI->getOffsetOfLocalArea();
   } else
     FIOffset = TFI->getFrameIndexOffset(MF, FrameIndex);
+
+  // The frame index format for stackmaps and patchpoints is different from the
+  // X86 format. It only has a FI and an offset.
+  if (Opc == TargetOpcode::STACKMAP || Opc == TargetOpcode::PATCHPOINT) {
+    assert(BasePtr == FramePtr && "Expected the FP as base register");
+    int64_t Offset = MI.getOperand(FIOperandNum + 1).getImm() + FIOffset;
+    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
+    return;
+  }
 
   if (MI.getOperand(FIOperandNum+3).isImm()) {
     // Offset is a 32-bit integer.

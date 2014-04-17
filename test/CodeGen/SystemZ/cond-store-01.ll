@@ -1,6 +1,7 @@
-; Test 8-bit conditional stores that are presented as selects.
+; Test 8-bit conditional stores that are presented as selects.  The volatile
+; tests require z10, which use a branch instead of a LOCR.
 ;
-; RUN: llc < %s -mtriple=s390x-linux-gnu | FileCheck %s
+; RUN: llc < %s -mtriple=s390x-linux-gnu -mcpu=z10 | FileCheck %s
 
 declare void @foo(i8 *)
 
@@ -346,11 +347,10 @@ define void @f19(i8 *%ptr, i8 %alt, i32 %limit) {
 define void @f20(i8 *%ptr, i8 %alt, i32 %limit) {
 ; FIXME: should use a normal load instead of CS.
 ; CHECK-LABEL: f20:
-; CHECK: cs {{%r[0-9]+}},
-; CHECK: jl
+; CHECK: lb {{%r[0-9]+}}, 0(%r2)
 ; CHECK: {{jl|jnl}} [[LABEL:[^ ]*]]
 ; CHECK: [[LABEL]]:
-; CHECK: stc {{%r[0-9]+}},
+; CHECK: stc {{%r[0-9]+}}, 0(%r2)
 ; CHECK: br %r14
   %cond = icmp ult i32 %limit, 420
   %orig = load atomic i8 *%ptr unordered, align 1
@@ -366,7 +366,7 @@ define void @f21(i8 *%ptr, i8 %alt, i32 %limit) {
 ; CHECK: jhe [[LABEL:[^ ]*]]
 ; CHECK: lb %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
-; CHECK: cs {{%r[0-9]+}},
+; CHECK: stc %r3, 0(%r2)
 ; CHECK: br %r14
   %cond = icmp ult i32 %limit, 420
   %orig = load i8 *%ptr

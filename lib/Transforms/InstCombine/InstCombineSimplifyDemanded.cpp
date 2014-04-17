@@ -16,7 +16,7 @@
 #include "InstCombine.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Support/PatternMatch.h"
+#include "llvm/IR/PatternMatch.h"
 
 using namespace llvm;
 using namespace llvm::PatternMatch;
@@ -105,9 +105,9 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
   assert(Depth <= 6 && "Limit Search Depth");
   uint32_t BitWidth = DemandedMask.getBitWidth();
   Type *VTy = V->getType();
-  assert((TD || !VTy->isPointerTy()) &&
+  assert((DL || !VTy->isPointerTy()) &&
          "SimplifyDemandedBits needs to know bit widths!");
-  assert((!TD || TD->getTypeSizeInBits(VTy->getScalarType()) == BitWidth) &&
+  assert((!DL || DL->getTypeSizeInBits(VTy->getScalarType()) == BitWidth) &&
          (!VTy->isIntOrIntVectorTy() ||
           VTy->getScalarSizeInBits() == BitWidth) &&
          KnownZero.getBitWidth() == BitWidth &&
@@ -808,7 +808,6 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
         // TODO: Could compute known zero/one bits based on the input.
         break;
       }
-      case Intrinsic::x86_sse42_crc32_64_8:
       case Intrinsic::x86_sse42_crc32_64_64:
         KnownZero = APInt::getHighBitsSet(64, 32);
         return 0;

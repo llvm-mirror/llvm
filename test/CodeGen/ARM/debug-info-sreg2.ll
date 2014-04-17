@@ -3,13 +3,19 @@
 target datalayout = "e-p:32:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-i64:32:32-f32:32:32-f64:32:32-v64:32:64-v128:32:128-a0:0:32-n32"
 target triple = "thumbv7-apple-macosx10.6.7"
 
-;CHECK: Ldebug_loc0:
-;CHECK-NEXT:        .long   Ltmp0
-;CHECK-NEXT:        .long   Ltmp1
+;CHECK-LABEL: Lfunc_begin0:
+;CHECK: Ltmp[[K:[0-9]+]]:
+;CHECK: Ltmp[[L:[0-9]+]]:
+;CHECK-LABEL: Ldebug_loc0:
+;CHECK-NEXT:        .long   Ltmp[[K]]
+;CHECK-NEXT:        .long   Ltmp[[L]]
 ;CHECK-NEXT: Lset[[N:[0-9]+]] = Ltmp{{[0-9]+}}-Ltmp[[M:[0-9]+]]        @ Loc expr size
 ;CHECK-NEXT:        .short  Lset[[N]]
 ;CHECK-NEXT: Ltmp[[M]]:
-;CHECK-NEXT:        .byte   144                     @ DW_OP_regx for S register
+;CHECK-NEXT:        .byte   144                     @ super-register
+;CHECK-NEXT:                                        @ DW_OP_regx
+;CHECK-NEXT:        .ascii
+;CHECK-NEXT:        .byte   {{[0-9]+}}              @ DW_OP_{{.*}}piece
 
 define void @_Z3foov() optsize ssp {
 entry:
@@ -40,6 +46,7 @@ declare float @_Z2f3f(float) optsize
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!20}
 
 !0 = metadata !{i32 786449, metadata !18, i32 4, metadata !"clang version 3.0 (trunk 130845)", i1 true, metadata !"", i32 0, metadata !19, metadata !19, metadata !16, null,  null, null} ; [ DW_TAG_compile_unit ]
 !1 = metadata !{i32 786478, metadata !18, metadata !2, metadata !"foo", metadata !"foo", metadata !"_Z3foov", i32 5, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, void ()* @_Z3foov, null, null, metadata !17, i32 5} ; [ DW_TAG_subprogram ] [line 5] [def] [foo]
@@ -61,3 +68,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !17 = metadata !{metadata !5, metadata !8}
 !18 = metadata !{metadata !"k.cc", metadata !"/private/tmp"}
 !19 = metadata !{i32 0}
+!20 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

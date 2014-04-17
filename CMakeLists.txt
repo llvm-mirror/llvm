@@ -1,7 +1,22 @@
 # See docs/CMake.html for instructions about how to build LLVM with CMake.
 
+cmake_minimum_required(VERSION 2.8.8)
+
+# FIXME: It may be removed when we use 2.8.12.
+if(CMAKE_VERSION VERSION_LESS 2.8.12)
+  # Invalidate a couple of keywords.
+  set(cmake_2_8_12_INTERFACE)
+  set(cmake_2_8_12_PRIVATE)
+else()
+  # Use ${cmake_2_8_12_KEYWORD} intead of KEYWORD in target_link_libraries().
+  set(cmake_2_8_12_INTERFACE INTERFACE)
+  set(cmake_2_8_12_PRIVATE PRIVATE)
+  if(POLICY CMP0022)
+    cmake_policy(SET CMP0022 NEW) # automatic when 2.8.12 is required
+  endif()
+endif()
+
 project(LLVM)
-cmake_minimum_required(VERSION 2.8)
 
 # Add path for custom modules
 set(CMAKE_MODULE_PATH
@@ -11,24 +26,18 @@ set(CMAKE_MODULE_PATH
   )
 
 set(LLVM_VERSION_MAJOR 3)
-set(LLVM_VERSION_MINOR 4)
+set(LLVM_VERSION_MINOR 5)
+set(LLVM_VERSION_PATCH 0)
 
-set(PACKAGE_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}svn")
+if (NOT PACKAGE_VERSION)
+  set(PACKAGE_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}svn")
+endif()
 
 option(LLVM_INSTALL_TOOLCHAIN_ONLY "Only include toolchain files in the 'install' target." OFF)
 
 option(LLVM_USE_FOLDERS "Enable solution folders in Visual Studio. Disable for Express versions." ON)
 if ( LLVM_USE_FOLDERS )
   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-endif()
-
-if(MSVC AND NOT (${CMAKE_VERSION} VERSION_LESS 2.8.11))
-  # set stack reserved size to ~10MB
-  # CMake previously automatically set this value for MSVC builds, but the
-  # behavior was changed in CMake 2.8.11 (Issue 12437) to use the MSVC default
-  # value (1 MB) which is not enough for us in tasks such as parsing recursive
-  # C++ templates in Clang.
-  set(CMAKE_CXX_STACK_SIZE "10000000")
 endif()
 
 include(VersionFromVCS)
@@ -44,18 +53,22 @@ set(PACKAGE_NAME LLVM)
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
 set(PACKAGE_BUGREPORT "http://llvm.org/bugs/")
 
+set(BUG_REPORT_URL "${PACKAGE_BUGREPORT}" CACHE STRING
+  "Default URL where bug reports are to be submitted.")
+
 # Configure CPack.
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "LLVM")
 set(CPACK_PACKAGE_VENDOR "LLVM")
 set(CPACK_PACKAGE_VERSION_MAJOR ${LLVM_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${LLVM_VERSION_MINOR})
-if( LLVM_APPEND_VC_REV )
-  add_version_info_from_vcs(CPACK_PACKAGE_VERSION_PATCH)
-else()
-  set(CPACK_PACKAGE_VERSION_PATCH "svn")
-endif()
+set(CPACK_PACKAGE_VERSION_PATCH ${LLVM_VERSION_PATCH})
+set(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION})
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.TXT")
 if(WIN32 AND NOT UNIX)
+  set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "LLVM")
   set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}\\\\cmake\\\\nsis_logo.bmp")
+  set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}\\\\cmake\\\\nsis_icon.ico")
+  set(CPACK_NSIS_MUI_UNIICON "${CMAKE_CURRENT_SOURCE_DIR}\\\\cmake\\\\nsis_icon.ico")
   set(CPACK_NSIS_MODIFY_PATH "ON")
   set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL "ON")
   set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
@@ -98,15 +111,24 @@ endif()
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
 
-set(LLVM_MAIN_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(LLVM_MAIN_INCLUDE_DIR ${LLVM_MAIN_SRC_DIR}/include)
-set(LLVM_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
-set(LLVM_TOOLS_BINARY_DIR ${LLVM_BINARY_DIR}/bin)
+# They are used as destination of target generators.
+set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
+set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib)
+
+# Each of them corresponds to llvm-config's.
+set(LLVM_TOOLS_BINARY_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR}) # --bindir
+set(LLVM_LIBRARY_DIR      ${LLVM_LIBRARY_OUTPUT_INTDIR}) # --libdir
+set(LLVM_MAIN_SRC_DIR     ${CMAKE_CURRENT_SOURCE_DIR}  ) # --src-root
+set(LLVM_MAIN_INCLUDE_DIR ${LLVM_MAIN_SRC_DIR}/include ) # --includedir
+set(LLVM_BINARY_DIR       ${CMAKE_CURRENT_BINARY_DIR}  ) # --prefix
+
 set(LLVM_EXAMPLES_BINARY_DIR ${LLVM_BINARY_DIR}/examples)
+set(LLVM_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
 set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
 
 set(LLVM_ALL_TARGETS
   AArch64
+  ARM64
   ARM
   CppBackend
   Hexagon
@@ -122,7 +144,7 @@ set(LLVM_ALL_TARGETS
   )
 
 # List of targets with JIT support:
-set(LLVM_TARGETS_WITH_JIT X86 PowerPC AArch64 ARM Mips SystemZ)
+set(LLVM_TARGETS_WITH_JIT X86 PowerPC AArch64 ARM64 ARM Mips SystemZ)
 
 set(LLVM_TARGETS_TO_BUILD "all"
     CACHE STRING "Semicolon-separated list of targets to build, or \"all\".")
@@ -132,11 +154,6 @@ set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD ""
 
 option(BUILD_SHARED_LIBS
   "Build all libraries as shared libraries instead of static" OFF)
-
-option(LLVM_ENABLE_CBE_PRINTF_A "Set to ON if CBE is enabled for printf %a output" ON)
-if(LLVM_ENABLE_CBE_PRINTF_A)
-  set(ENABLE_CBE_PRINTF_A 1)
-endif()
 
 option(LLVM_ENABLE_TIMESTAMPS "Enable embedding timestamp information in build" ON)
 if(LLVM_ENABLE_TIMESTAMPS)
@@ -175,8 +192,6 @@ set(LLVM_TARGETS_TO_BUILD
    ${LLVM_EXPERIMENTAL_TARGETS_TO_BUILD})
 list(REMOVE_DUPLICATES LLVM_TARGETS_TO_BUILD)
 
-set(llvm_builded_incs_dir ${LLVM_BINARY_DIR}/include/llvm)
-
 include(AddLLVMDefinitions)
 
 option(LLVM_ENABLE_PIC "Build Position-Independent Code" ON)
@@ -188,6 +203,8 @@ else( MSVC )
   option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
 endif()
 
+option(LLVM_ENABLE_CXX1Y "Compile with C++1y enabled." OFF)
+option(LLVM_ENABLE_LIBCXX "Use libc++ if available." OFF)
 option(LLVM_ENABLE_PEDANTIC "Compile with pedantic enabled." ON)
 option(LLVM_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 
@@ -196,6 +213,9 @@ if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
 else()
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
 endif()
+
+option(LLVM_FORCE_USE_OLD_HOST_TOOLCHAIN
+       "Set to ON to force using an old, unsupported host toolchain." OFF)
 
 option(LLVM_USE_INTEL_JITEVENTS
   "Use Intel JIT API to inform Intel(R) VTune(TM) Amplifier XE 2011 about JIT code"
@@ -253,6 +273,8 @@ option(LLVM_INCLUDE_TOOLS "Generate build targets for the LLVM tools." ON)
 option(LLVM_BUILD_TOOLS
   "Build the LLVM tools. If OFF, just generate build targets." ON)
 
+option(LLVM_INCLUDE_UTILS "Generate build targets for the LLVM utils." ON)
+
 option(LLVM_BUILD_RUNTIME
   "Build the LLVM runtime libraries." ON)
 option(LLVM_BUILD_EXAMPLES
@@ -266,6 +288,9 @@ option(LLVM_INCLUDE_TESTS "Generate build targets for the LLVM unit tests." ON)
 option (LLVM_BUILD_DOCS "Build the llvm documentation." OFF)
 option (LLVM_INCLUDE_DOCS "Generate build targets for llvm documentation." ON)
 option (LLVM_ENABLE_DOXYGEN "Use doxygen to generate llvm documentation." OFF)
+
+option (LLVM_BUILD_EXTERNAL_COMPILER_RT
+  "Build compiler-rt as an external project." OFF)
 
 # All options referred to from HandleLLVMOptions have to be specified
 # BEFORE this include, otherwise options will not be correctly set on
@@ -281,7 +306,7 @@ set(TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE}")
 include(HandleLLVMOptions)
 
 # Verify that we can find a Python 2 interpreter.  Python 3 is unsupported.
-set(Python_ADDITIONAL_VERSIONS 2.7 2.6 2.5 2.4)
+set(Python_ADDITIONAL_VERSIONS 2.7 2.6 2.5)
 include(FindPythonInterp)
 if( NOT PYTHONINTERP_FOUND )
   message(FATAL_ERROR
@@ -387,39 +412,53 @@ endforeach(t)
 # include various classes of targets.
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/AsmPrinters.def.in
-  ${LLVM_BINARY_DIR}/include/llvm/Config/AsmPrinters.def
+  ${LLVM_INCLUDE_DIR}/llvm/Config/AsmPrinters.def
   )
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/AsmParsers.def.in
-  ${LLVM_BINARY_DIR}/include/llvm/Config/AsmParsers.def
+  ${LLVM_INCLUDE_DIR}/llvm/Config/AsmParsers.def
   )
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/Disassemblers.def.in
-  ${LLVM_BINARY_DIR}/include/llvm/Config/Disassemblers.def
+  ${LLVM_INCLUDE_DIR}/llvm/Config/Disassemblers.def
   )
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/Targets.def.in
-  ${LLVM_BINARY_DIR}/include/llvm/Config/Targets.def
+  ${LLVM_INCLUDE_DIR}/llvm/Config/Targets.def
   )
 
 # Configure the three LLVM configuration header files.
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/config.h.cmake
-  ${LLVM_BINARY_DIR}/include/llvm/Config/config.h)
+  ${LLVM_INCLUDE_DIR}/llvm/Config/config.h)
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/llvm-config.h.cmake
-  ${LLVM_BINARY_DIR}/include/llvm/Config/llvm-config.h)
+  ${LLVM_INCLUDE_DIR}/llvm/Config/llvm-config.h)
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Support/DataTypes.h.cmake
-  ${LLVM_BINARY_DIR}/include/llvm/Support/DataTypes.h)
+  ${LLVM_INCLUDE_DIR}/llvm/Support/DataTypes.h)
 
-set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LLVM_TOOLS_BINARY_DIR} )
+# They are not referenced. See set_output_directory().
+set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/bin )
 set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib )
 set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib )
 
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+if (APPLE)
+  set(CMAKE_INSTALL_NAME_DIR "@rpath")
+  set(CMAKE_INSTALL_RPATH "@executable_path/../lib")
+else(UNIX)
+  if(NOT DEFINED CMAKE_INSTALL_RPATH)
+    set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib")
+    if (${CMAKE_SYSTEM_NAME} MATCHES FreeBSD)
+      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-z,origin")
+    endif()
+  endif(NOT DEFINED CMAKE_INSTALL_RPATH)
+endif()
+
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-include_directories( ${LLVM_BINARY_DIR}/include ${LLVM_MAIN_INCLUDE_DIR})
+include_directories( ${LLVM_INCLUDE_DIR} ${LLVM_MAIN_INCLUDE_DIR})
 
 if( ${CMAKE_SYSTEM_NAME} MATCHES FreeBSD )
   # On FreeBSD, /usr/local/* is not used by default. In order to build LLVM
@@ -455,14 +494,34 @@ add_subdirectory(include/llvm)
 
 add_subdirectory(lib)
 
-add_subdirectory(utils/FileCheck)
-add_subdirectory(utils/FileUpdate)
-add_subdirectory(utils/count)
-add_subdirectory(utils/not)
-add_subdirectory(utils/llvm-lit)
-add_subdirectory(utils/yaml-bench)
+if( LLVM_INCLUDE_UTILS )
+  add_subdirectory(utils/FileCheck)
+  add_subdirectory(utils/FileUpdate)
+  add_subdirectory(utils/count)
+  add_subdirectory(utils/not)
+  add_subdirectory(utils/llvm-lit)
+  add_subdirectory(utils/yaml-bench)
+else()
+  if ( LLVM_INCLUDE_TESTS )
+    message(FATAL_ERROR "Including tests when not building utils will not work.
+    Either set LLVM_INCLUDE_UTILS to On, or set LLVM_INCLDE_TESTS to Off.")
+  endif()
+endif()
+
+if(LLVM_INCLUDE_TESTS)
+  add_subdirectory(utils/unittest)
+endif()
 
 add_subdirectory(projects)
+
+option(WITH_POLLY "Build LLVM with Polly" ON)
+option(LINK_POLLY_INTO_TOOLS "Static link Polly into tools" OFF)
+
+if(WITH_POLLY)
+  if(NOT EXISTS ${LLVM_MAIN_SRC_DIR}/tools/polly/CMakeLists.txt)
+    set(WITH_POLLY OFF)
+  endif()
+endif(WITH_POLLY)
 
 if( LLVM_INCLUDE_TOOLS )
   add_subdirectory(tools)
@@ -474,7 +533,6 @@ endif()
 
 if( LLVM_INCLUDE_TESTS )
   add_subdirectory(test)
-  add_subdirectory(utils/unittest)
   add_subdirectory(unittests)
   if (MSVC)
     # This utility is used to prevent crashing tests from calling Dr. Watson on
@@ -504,7 +562,7 @@ endif()
 add_subdirectory(cmake/modules)
 
 if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
-  install(DIRECTORY include/
+  install(DIRECTORY include/llvm include/llvm-c
     DESTINATION include
     FILES_MATCHING
     PATTERN "*.def"
@@ -515,7 +573,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN ".svn" EXCLUDE
     )
 
-  install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/
+  install(DIRECTORY ${LLVM_INCLUDE_DIR}/llvm
     DESTINATION include
     FILES_MATCHING
     PATTERN "*.def"
@@ -526,13 +584,4 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN "CMakeFiles" EXCLUDE
     PATTERN ".svn" EXCLUDE
     )
-endif()
-
-# Workaround for MSVS10 to avoid the Dialog Hell
-# FIXME: This could be removed with future version of CMake.
-if(MSVC_VERSION EQUAL 1600)
-  set(LLVM_SLN_FILENAME "${CMAKE_CURRENT_BINARY_DIR}/LLVM.sln")
-  if( EXISTS "${LLVM_SLN_FILENAME}" )
-    file(APPEND "${LLVM_SLN_FILENAME}" "\n# This should be regenerated!\n")
-  endif()
 endif()

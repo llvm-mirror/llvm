@@ -12,12 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/Assembly/PrintModulePass.h"
-#include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/Bitcode/BitcodeWriterPass.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/IRPrintingPasses.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/PassManager.h"
@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 
   // Use lazy loading, since we only care about selected global values.
   SMDiagnostic Err;
-  OwningPtr<Module> M;
+  std::unique_ptr<Module> M;
   M.reset(getLazyIRFileModule(InputFilename, Err, Context));
 
   if (M.get() == 0) {
@@ -254,7 +254,7 @@ int main(int argc, char **argv) {
   // In addition to deleting all other functions, we also want to spiff it
   // up a little bit.  Do this now.
   PassManager Passes;
-  Passes.add(new DataLayout(M.get())); // Use correct DataLayout
+  Passes.add(new DataLayoutPass(M.get())); // Use correct DataLayout
 
   std::vector<GlobalValue*> Gvs(GVs.begin(), GVs.end());
 
@@ -265,14 +265,14 @@ int main(int argc, char **argv) {
   Passes.add(createStripDeadPrototypesPass());   // Remove dead func decls
 
   std::string ErrorInfo;
-  tool_output_file Out(OutputFilename.c_str(), ErrorInfo, sys::fs::F_Binary);
+  tool_output_file Out(OutputFilename.c_str(), ErrorInfo, sys::fs::F_None);
   if (!ErrorInfo.empty()) {
     errs() << ErrorInfo << '\n';
     return 1;
   }
 
   if (OutputAssembly)
-    Passes.add(createPrintModulePass(&Out.os()));
+    Passes.add(createPrintModulePass(Out.os()));
   else if (Force || !CheckBitcodeOutputToConsole(Out.os(), true))
     Passes.add(createBitcodeWriterPass(Out.os()));
 

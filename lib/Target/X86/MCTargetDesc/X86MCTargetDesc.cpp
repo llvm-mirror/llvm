@@ -47,9 +47,12 @@ std::string X86_MC::ParseX86Triple(StringRef TT) {
   Triple TheTriple(TT);
   std::string FS;
   if (TheTriple.getArch() == Triple::x86_64)
-    FS = "+64bit-mode";
+    FS = "+64bit-mode,-32bit-mode,-16bit-mode";
+  else if (TheTriple.getEnvironment() != Triple::CODE16)
+    FS = "-64bit-mode,+32bit-mode,-16bit-mode";
   else
-    FS = "-64bit-mode";
+    FS = "-64bit-mode,-32bit-mode,+16bit-mode";
+
   return FS;
 }
 
@@ -202,8 +205,7 @@ unsigned X86_MC::getDwarfRegFlavour(StringRef TT, bool isEH) {
 
   if (TheTriple.isOSDarwin())
     return isEH ? DWARFFlavour::X86_32_DarwinEH : DWARFFlavour::X86_32_Generic;
-  if (TheTriple.getOS() == Triple::MinGW32 ||
-      TheTriple.getOS() == Triple::Cygwin)
+  if (TheTriple.isOSCygMing())
     // Unsupported by now, just quick fallback
     return DWARFFlavour::X86_32_Generic;
   return DWARFFlavour::X86_32_Generic;
@@ -268,17 +270,17 @@ static MCAsmInfo *createX86MCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
   bool is64Bit = TheTriple.getArch() == Triple::x86_64;
 
   MCAsmInfo *MAI;
-  if (TheTriple.isOSDarwin() || TheTriple.getEnvironment() == Triple::MachO) {
+  if (TheTriple.isOSBinFormatMachO()) {
     if (is64Bit)
       MAI = new X86_64MCAsmInfoDarwin(TheTriple);
     else
       MAI = new X86MCAsmInfoDarwin(TheTriple);
-  } else if (TheTriple.getEnvironment() == Triple::ELF) {
+  } else if (TheTriple.isOSBinFormatELF()) {
     // Force the use of an ELF container.
     MAI = new X86ELFMCAsmInfo(TheTriple);
-  } else if (TheTriple.getOS() == Triple::Win32) {
+  } else if (TheTriple.isWindowsMSVCEnvironment()) {
     MAI = new X86MCAsmInfoMicrosoft(TheTriple);
-  } else if (TheTriple.getOS() == Triple::MinGW32 || TheTriple.getOS() == Triple::Cygwin) {
+  } else if (TheTriple.isOSCygMing()) {
     MAI = new X86MCAsmInfoGNUCOFF(TheTriple);
   } else {
     // The default is ELF.
@@ -358,17 +360,18 @@ static MCStreamer *createMCStreamer(const Target &T, StringRef TT,
                                     MCContext &Ctx, MCAsmBackend &MAB,
                                     raw_ostream &_OS,
                                     MCCodeEmitter *_Emitter,
+                                    const MCSubtargetInfo &STI,
                                     bool RelaxAll,
                                     bool NoExecStack) {
   Triple TheTriple(TT);
 
-  if (TheTriple.isOSDarwin() || TheTriple.getEnvironment() == Triple::MachO)
+  if (TheTriple.isOSBinFormatMachO())
     return createMachOStreamer(Ctx, MAB, _OS, _Emitter, RelaxAll);
 
-  if (TheTriple.isOSWindows() && TheTriple.getEnvironment() != Triple::ELF)
+  if (TheTriple.isOSWindows() && !TheTriple.isOSBinFormatELF())
     return createWinCOFFStreamer(Ctx, MAB, *_Emitter, _OS, RelaxAll);
 
-  return createELFStreamer(Ctx, 0, MAB, _OS, _Emitter, RelaxAll, NoExecStack);
+  return createELFStreamer(Ctx, MAB, _OS, _Emitter, RelaxAll, NoExecStack);
 }
 
 static MCInstPrinter *createX86MCInstPrinter(const Target &T,
@@ -387,7 +390,7 @@ static MCInstPrinter *createX86MCInstPrinter(const Target &T,
 static MCRelocationInfo *createX86MCRelocationInfo(StringRef TT,
                                                    MCContext &Ctx) {
   Triple TheTriple(TT);
-  if (TheTriple.isEnvironmentMachO() && TheTriple.getArch() == Triple::x86_64)
+  if (TheTriple.isOSBinFormatMachO() && TheTriple.getArch() == Triple::x86_64)
     return createX86_64MachORelocationInfo(Ctx);
   else if (TheTriple.isOSBinFormatELF())
     return createX86_64ELFRelocationInfo(Ctx);

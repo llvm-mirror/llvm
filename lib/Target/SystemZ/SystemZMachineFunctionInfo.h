@@ -15,6 +15,7 @@
 namespace llvm {
 
 class SystemZMachineFunctionInfo : public MachineFunctionInfo {
+  virtual void anchor();
   unsigned LowSavedGPR;
   unsigned HighSavedGPR;
   unsigned VarArgsFirstGPR;
@@ -62,6 +63,6 @@ public:
   void setManipulatesSP(bool MSP) { ManipulatesSP = MSP; }
 };
 
-} // end llvm namespace
+} // end namespace llvm
 
 #endif

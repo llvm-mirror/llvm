@@ -11,8 +11,8 @@
 #define LLVM_READOBJ_STREAMWRITER_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/raw_ostream.h"
@@ -170,6 +170,19 @@ public:
 
   void printNumber(StringRef Label, int8_t Value) {
     startLine() << Label << ": " << int(Value) << "\n";
+  }
+
+  template <typename T_>
+  void printList(StringRef Label, const SmallVectorImpl<T_> &List) {
+    startLine() << Label << ": [";
+    bool Comma = false;
+    for (unsigned LI = 0, LE = List.size(); LI != LE; ++LI) {
+      if (Comma)
+        OS << ", ";
+      OS << List[LI];
+      Comma = true;
+    }
+    OS << "]\n";
   }
 
   template<typename T>

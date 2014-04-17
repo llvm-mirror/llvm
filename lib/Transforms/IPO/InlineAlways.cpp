@@ -17,13 +17,13 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/InlineCost.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Transforms/IPO/InlinerPass.h"
 
 using namespace llvm;
@@ -47,13 +47,13 @@ public:
 
   static char ID; // Pass identification, replacement for typeid
 
-  virtual InlineCost getInlineCost(CallSite CS);
+  InlineCost getInlineCost(CallSite CS) override;
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-  virtual bool runOnSCC(CallGraphSCC &SCC);
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  bool runOnSCC(CallGraphSCC &SCC) override;
 
   using llvm::Pass::doFinalization;
-  virtual bool doFinalization(CallGraph &CG) {
+  bool doFinalization(CallGraph &CG) override {
     return removeDeadFunctions(CG, /*AlwaysInlineOnly=*/ true);
   }
 };
@@ -63,7 +63,7 @@ public:
 char AlwaysInliner::ID = 0;
 INITIALIZE_PASS_BEGIN(AlwaysInliner, "always-inline",
                 "Inliner for always_inline functions", false, false)
-INITIALIZE_AG_DEPENDENCY(CallGraph)
+INITIALIZE_PASS_DEPENDENCY(CallGraphWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(InlineCostAnalysis)
 INITIALIZE_PASS_END(AlwaysInliner, "always-inline",
                 "Inliner for always_inline functions", false, false)

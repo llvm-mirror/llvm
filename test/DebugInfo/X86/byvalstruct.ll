@@ -84,11 +84,11 @@ attributes #0 = { ssp uwtable }
 attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!24, !25, !26, !27}
+!llvm.module.flags = !{!24, !25, !26, !27, !38}
 
 !0 = metadata !{i32 786449, metadata !1, i32 17, metadata !"clang version 3.4 ", i1 false, metadata !"", i32 2, metadata !2, metadata !3, metadata !6, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/t.mm] [DW_LANG_ObjC_plus_plus]
 !1 = metadata !{metadata !"t.mm", metadata !""}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786451, metadata !1, metadata !5, metadata !"Bitmap", i32 8, i64 8, i64 8, i32 0, i32 512, null, metadata !2, i32 17, null, null, null} ; [ DW_TAG_structure_type ] [Bitmap] [line 8, size 8, align 8, offset 0] [def] [from ]
 !5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/t.mm]
@@ -124,3 +124,4 @@ attributes #1 = { nounwind readnone }
 !35 = metadata !{i32 786689, metadata !7, metadata !"length", metadata !5, i32 83886091, metadata !19, i32 0, i32 0} ; [ DW_TAG_arg_variable ] [length] [line 11]
 !36 = metadata !{i32 11, i32 0, metadata !7, null}
 !37 = metadata !{i32 13, i32 0, metadata !7, null}
+!38 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

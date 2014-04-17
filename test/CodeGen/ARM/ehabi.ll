@@ -19,22 +19,34 @@
 ; (4) armv7 without -disable-fp-elim
 
 ; RUN: llc -mtriple arm-unknown-linux-gnueabi \
-; RUN:     -arm-enable-ehabi -arm-enable-ehabi-descriptors \
 ; RUN:     -disable-fp-elim -filetype=asm -o - %s \
 ; RUN:   | FileCheck %s --check-prefix=CHECK-FP
 
 ; RUN: llc -mtriple arm-unknown-linux-gnueabi \
-; RUN:     -arm-enable-ehabi -arm-enable-ehabi-descriptors \
 ; RUN:     -filetype=asm -o - %s \
 ; RUN:   | FileCheck %s --check-prefix=CHECK-FP-ELIM
 
 ; RUN: llc -mtriple armv7-unknown-linux-gnueabi \
-; RUN:     -arm-enable-ehabi -arm-enable-ehabi-descriptors \
 ; RUN:     -disable-fp-elim -filetype=asm -o - %s \
 ; RUN:   | FileCheck %s --check-prefix=CHECK-V7-FP
 
 ; RUN: llc -mtriple armv7-unknown-linux-gnueabi \
-; RUN:     -arm-enable-ehabi -arm-enable-ehabi-descriptors \
+; RUN:     -filetype=asm -o - %s \
+; RUN:   | FileCheck %s --check-prefix=CHECK-V7-FP-ELIM
+
+; RUN: llc -mtriple arm-unknown-linux-androideabi \
+; RUN:     -disable-fp-elim -filetype=asm -o - %s \
+; RUN:   | FileCheck %s --check-prefix=CHECK-FP
+
+; RUN: llc -mtriple arm-unknown-linux-androideabi \
+; RUN:     -filetype=asm -o - %s \
+; RUN:   | FileCheck %s --check-prefix=CHECK-FP-ELIM
+
+; RUN: llc -mtriple armv7-unknown-linux-androideabi \
+; RUN:     -disable-fp-elim -filetype=asm -o - %s \
+; RUN:   | FileCheck %s --check-prefix=CHECK-V7-FP
+
+; RUN: llc -mtriple armv7-unknown-linux-androideabi \
 ; RUN:     -filetype=asm -o - %s \
 ; RUN:   | FileCheck %s --check-prefix=CHECK-V7-FP-ELIM
 
@@ -169,7 +181,7 @@ declare void @throw_exception_2()
 
 define void @test2() {
 entry:
-  tail call void @throw_exception_2()
+  call void @throw_exception_2()
   ret void
 }
 

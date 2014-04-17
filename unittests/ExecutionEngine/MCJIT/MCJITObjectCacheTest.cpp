@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/OwningPtr.h"
+#include "MCJITTestBase.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
@@ -15,7 +15,6 @@
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
-#include "MCJITTestBase.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -101,7 +100,7 @@ protected:
 
   void compileAndRun(int ExpectedRC = OriginalRC) {
     // This function shouldn't be called until after SetUp.
-    ASSERT_TRUE(TheJIT.isValid());
+    ASSERT_TRUE(bool(TheJIT));
     ASSERT_TRUE(0 != Main);
 
     // We may be using a null cache, so ensure compilation is valid.
@@ -122,7 +121,7 @@ protected:
 TEST_F(MCJITObjectCacheTest, SetNullObjectCache) {
   SKIP_UNSUPPORTED_PLATFORM;
 
-  createJIT(M.take());
+  createJIT(M.release());
 
   TheJIT->setObjectCache(NULL);
 
@@ -133,12 +132,12 @@ TEST_F(MCJITObjectCacheTest, SetNullObjectCache) {
 TEST_F(MCJITObjectCacheTest, VerifyBasicObjectCaching) {
   SKIP_UNSUPPORTED_PLATFORM;
 
-  OwningPtr<TestObjectCache>  Cache(new TestObjectCache);
+  std::unique_ptr<TestObjectCache> Cache(new TestObjectCache);
 
   // Save a copy of the module pointer before handing it off to MCJIT.
   const Module * SavedModulePointer = M.get();
 
-  createJIT(M.take());
+  createJIT(M.release());
 
   TheJIT->setObjectCache(Cache.get());
 
@@ -162,10 +161,10 @@ TEST_F(MCJITObjectCacheTest, VerifyBasicObjectCaching) {
 TEST_F(MCJITObjectCacheTest, VerifyLoadFromCache) {
   SKIP_UNSUPPORTED_PLATFORM;
 
-  OwningPtr<TestObjectCache>  Cache(new TestObjectCache);
+  std::unique_ptr<TestObjectCache> Cache(new TestObjectCache);
 
   // Compile this module with an MCJIT engine
-  createJIT(M.take());
+  createJIT(M.release());
   TheJIT->setObjectCache(Cache.get());
   TheJIT->finalizeObject();
 
@@ -182,7 +181,7 @@ TEST_F(MCJITObjectCacheTest, VerifyLoadFromCache) {
   const Module * SecondModulePointer = M.get();
 
   // Create a new MCJIT instance to load this module then execute it.
-  createJIT(M.take());
+  createJIT(M.release());
   TheJIT->setObjectCache(Cache.get());
   compileAndRun();
 
@@ -196,10 +195,10 @@ TEST_F(MCJITObjectCacheTest, VerifyLoadFromCache) {
 TEST_F(MCJITObjectCacheTest, VerifyNonLoadFromCache) {
   SKIP_UNSUPPORTED_PLATFORM;
 
-  OwningPtr<TestObjectCache>  Cache(new TestObjectCache);
+  std::unique_ptr<TestObjectCache> Cache(new TestObjectCache);
 
   // Compile this module with an MCJIT engine
-  createJIT(M.take());
+  createJIT(M.release());
   TheJIT->setObjectCache(Cache.get());
   TheJIT->finalizeObject();
 
@@ -217,7 +216,7 @@ TEST_F(MCJITObjectCacheTest, VerifyNonLoadFromCache) {
   const Module * SecondModulePointer = M.get();
 
   // Create a new MCJIT instance to load this module then execute it.
-  createJIT(M.take());
+  createJIT(M.release());
   TheJIT->setObjectCache(Cache.get());
 
   // Verify that our object cache does not contain the module yet.

@@ -49,7 +49,7 @@ ResourcePriorityQueue::ResourcePriorityQueue(SelectionDAGISel *IS) :
    TLI = IS->getTargetLowering();
 
    const TargetMachine &tm = (*IS->MF).getTarget();
-   ResourcesModel = tm.getInstrInfo()->CreateTargetScheduleState(&tm,NULL);
+   ResourcesModel = tm.getInstrInfo()->CreateTargetScheduleState(&tm,nullptr);
    // This hard requirement could be relaxed, but for now
    // do not let it procede.
    assert (ResourcesModel && "Unimplemented CreateTargetScheduleState.");
@@ -214,7 +214,7 @@ bool resource_sort::operator()(const SUnit *LHS, const SUnit *RHS) const {
 /// getSingleUnscheduledPred - If there is exactly one unscheduled predecessor
 /// of SU, return it, otherwise return null.
 SUnit *ResourcePriorityQueue::getSingleUnscheduledPred(SUnit *SU) {
-  SUnit *OnlyAvailablePred = 0;
+  SUnit *OnlyAvailablePred = nullptr;
   for (SUnit::const_pred_iterator I = SU->Preds.begin(), E = SU->Preds.end();
        I != E; ++I) {
     SUnit &Pred = *I->getSUnit();
@@ -222,7 +222,7 @@ SUnit *ResourcePriorityQueue::getSingleUnscheduledPred(SUnit *SU) {
       // We found an available, but not scheduled, predecessor.  If it's the
       // only one we have found, keep track of it... otherwise give up.
       if (OnlyAvailablePred && OnlyAvailablePred != &Pred)
-        return 0;
+        return nullptr;
       OnlyAvailablePred = &Pred;
     }
   }
@@ -581,7 +581,7 @@ void ResourcePriorityQueue::adjustPriorityOfUnscheduledPreds(SUnit *SU) {
   if (SU->isAvailable) return;  // All preds scheduled.
 
   SUnit *OnlyAvailablePred = getSingleUnscheduledPred(SU);
-  if (OnlyAvailablePred == 0 || !OnlyAvailablePred->isAvailable)
+  if (!OnlyAvailablePred || !OnlyAvailablePred->isAvailable)
     return;
 
   // Okay, we found a single predecessor that is available, but not scheduled.
@@ -598,12 +598,12 @@ void ResourcePriorityQueue::adjustPriorityOfUnscheduledPreds(SUnit *SU) {
 /// to be placed in scheduling sequence.
 SUnit *ResourcePriorityQueue::pop() {
   if (empty())
-    return 0;
+    return nullptr;
 
   std::vector<SUnit *>::iterator Best = Queue.begin();
   if (!DisableDFASched) {
     signed BestCost = SUSchedulingCost(*Best);
-    for (std::vector<SUnit *>::iterator I = llvm::next(Queue.begin()),
+    for (std::vector<SUnit *>::iterator I = std::next(Queue.begin()),
            E = Queue.end(); I != E; ++I) {
 
       if (SUSchedulingCost(*I) > BestCost) {
@@ -614,14 +614,14 @@ SUnit *ResourcePriorityQueue::pop() {
   }
   // Use default TD scheduling mechanism.
   else {
-    for (std::vector<SUnit *>::iterator I = llvm::next(Queue.begin()),
+    for (std::vector<SUnit *>::iterator I = std::next(Queue.begin()),
        E = Queue.end(); I != E; ++I)
       if (Picker(*Best, *I))
         Best = I;
   }
 
   SUnit *V = *Best;
-  if (Best != prior(Queue.end()))
+  if (Best != std::prev(Queue.end()))
     std::swap(*Best, Queue.back());
 
   Queue.pop_back();
@@ -633,7 +633,7 @@ SUnit *ResourcePriorityQueue::pop() {
 void ResourcePriorityQueue::remove(SUnit *SU) {
   assert(!Queue.empty() && "Queue is empty!");
   std::vector<SUnit *>::iterator I = std::find(Queue.begin(), Queue.end(), SU);
-  if (I != prior(Queue.end()))
+  if (I != std::prev(Queue.end()))
     std::swap(*I, Queue.back());
 
   Queue.pop_back();

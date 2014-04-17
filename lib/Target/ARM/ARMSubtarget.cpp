@@ -15,8 +15,8 @@
 #include "ARMBaseInstrInfo.h"
 #include "ARMBaseRegisterInfo.h"
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetOptions.h"
@@ -57,16 +57,35 @@ Align(cl::desc("Load/store alignment support"),
                      "Allow unaligned memory accesses"),
           clEnumValEnd));
 
+enum ITMode {
+  DefaultIT,
+  RestrictedIT,
+  NoRestrictedIT
+};
+
+static cl::opt<ITMode>
+IT(cl::desc("IT block support"), cl::Hidden, cl::init(DefaultIT),
+   cl::ZeroOrMore,
+   cl::values(clEnumValN(DefaultIT, "arm-default-it",
+                         "Generate IT block based on arch"),
+              clEnumValN(RestrictedIT, "arm-restrict-it",
+                         "Disallow deprecated IT based on ARMv8"),
+              clEnumValN(NoRestrictedIT, "arm-no-restrict-it",
+                         "Allow IT blocks based on ARMv7"),
+              clEnumValEnd));
+
 ARMSubtarget::ARMSubtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, const TargetOptions &Options)
+                           const std::string &FS, bool IsLittle,
+                           const TargetOptions &Options)
   : ARMGenSubtargetInfo(TT, CPU, FS)
   , ARMProcFamily(Others)
   , ARMProcClass(None)
   , stackAlignment(4)
   , CPUString(CPU)
+  , IsLittle(IsLittle)
   , TargetTriple(TT)
   , Options(Options)
-  , TargetABI(ARM_ABI_APCS) {
+  , TargetABI(ARM_ABI_UNKNOWN) {
   initializeEnvironment();
   resetSubtargetFeatures(CPU, FS);
 }
@@ -85,6 +104,7 @@ void ARMSubtarget::initializeEnvironment() {
   HasVFPv4 = false;
   HasFPARMv8 = false;
   HasNEON = false;
+  MinSize = false;
   UseNEONForSinglePrecisionFP = false;
   UseMulOps = UseFusedMulOps;
   SlowFPVMLx = false;
@@ -108,10 +128,13 @@ void ARMSubtarget::initializeEnvironment() {
   AvoidMOVsShifterOperand = false;
   HasRAS = false;
   HasMPExtension = false;
+  HasVirtualization = false;
   FPOnlySP = false;
   HasPerfMon = false;
   HasTrustZone = false;
   HasCrypto = false;
+  HasCRC = false;
+  HasZeroCycleZeroing = false;
   AllowsUnalignedMem = false;
   Thumb2DSP = false;
   UseNaClTrap = false;
@@ -132,6 +155,9 @@ void ARMSubtarget::resetSubtargetFeatures(const MachineFunction *MF) {
     initializeEnvironment();
     resetSubtargetFeatures(CPU, FS);
   }
+
+  MinSize =
+      FnAttrs.hasAttribute(AttributeSet::FunctionIndex, Attribute::MinSize);
 }
 
 void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
@@ -156,10 +182,9 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
   }
   ParseSubtargetFeatures(CPUString, ArchFS);
 
-  // Thumb2 implies at least V6T2. FIXME: Fix tests to explicitly specify a
-  // ARM version or CPU and then remove this.
-  if (!HasV6T2Ops && hasThumb2())
-    HasV4TOps = HasV5TOps = HasV5TEOps = HasV6Ops = HasV6MOps = HasV6T2Ops = true;
+  // FIXME: This used enable V6T2 support implicitly for Thumb2 mode.
+  // Assert this for now to make the change obvious.
+  assert(hasV6T2Ops() || !hasThumb2());
 
   // Keep a pointer to static instruction cost data for the specified CPU.
   SchedModel = getSchedModelForCPU(CPUString);
@@ -167,22 +192,45 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUString);
 
-  if ((TargetTriple.getTriple().find("eabi") != std::string::npos) ||
-      (isTargetIOS() && isMClass()))
-    // FIXME: We might want to separate AAPCS and EABI. Some systems, e.g.
-    // Darwin-EABI conforms to AACPS but not the rest of EABI.
+  if (TargetABI == ARM_ABI_UNKNOWN) {
+    switch (TargetTriple.getEnvironment()) {
+    case Triple::Android:
+    case Triple::EABI:
+    case Triple::EABIHF:
+    case Triple::GNUEABI:
+    case Triple::GNUEABIHF:
+      TargetABI = ARM_ABI_AAPCS;
+      break;
+    default:
+      if ((isTargetIOS() && isMClass()) ||
+          (TargetTriple.isOSBinFormatMachO() &&
+           TargetTriple.getOS() == Triple::UnknownOS))
+        TargetABI = ARM_ABI_AAPCS;
+      else
+        TargetABI = ARM_ABI_APCS;
+      break;
+    }
+  }
+
+  // FIXME: this is invalid for WindowsCE
+  if (isTargetWindows()) {
     TargetABI = ARM_ABI_AAPCS;
+    NoARM = true;
+  }
 
   if (isAAPCS_ABI())
     stackAlignment = 8;
+  if (isTargetNaCl())
+    stackAlignment = 16;
 
   UseMovt = hasV6T2Ops() && ArmUseMOVT;
 
-  if (!isTargetIOS()) {
-    IsR9Reserved = ReserveR9;
-  } else {
+  if (isTargetMachO()) {
     IsR9Reserved = ReserveR9 | !HasV6Ops;
-    SupportsTailCall = !getTargetTriple().isOSVersionLT(5, 0);
+    SupportsTailCall = !isTargetIOS() || !getTargetTriple().isOSVersionLT(5, 0);
+  } else {
+    IsR9Reserved = ReserveR9;
+    SupportsTailCall = !isThumb1Only();
   }
 
   if (!isThumb() || hasThumb2())
@@ -194,7 +242,7 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
       //
       // ARMv6 may or may not support unaligned accesses depending on the
       // SCTLR.U bit, which is architecture-specific. We assume ARMv6
-      // Darwin targets support unaligned accesses, and others don't.
+      // Darwin and NetBSD targets support unaligned accesses, and others don't.
       //
       // ARMv7 always has SCTLR.U set to 1, but it has a new SCTLR.A bit
       // which raises an alignment fault on unaligned accesses. Linux
@@ -203,9 +251,15 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
       // Linux targets support unaligned accesses. The same goes for NaCl.
       //
       // The above behavior is consistent with GCC.
-      AllowsUnalignedMem = (
-          (hasV7Ops() && (isTargetLinux() || isTargetNaCl())) ||
-          (hasV6Ops() && isTargetDarwin()));
+      AllowsUnalignedMem =
+          (hasV7Ops() && (isTargetLinux() || isTargetNaCl() ||
+                          isTargetNetBSD())) ||
+          (hasV6Ops() && (isTargetMachO() || isTargetNetBSD()));
+      // The one exception is cortex-m0, which despite being v6, does not
+      // support unaligned accesses. Rather than make the above boolean
+      // expression even more obtuse, just override the value here.
+      if (isThumb1Only() && isMClass())
+        AllowsUnalignedMem = false;
       break;
     case StrictAlign:
       AllowsUnalignedMem = false;
@@ -213,6 +267,18 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
     case NoStrictAlign:
       AllowsUnalignedMem = true;
       break;
+  }
+
+  switch (IT) {
+  case DefaultIT:
+    RestrictIT = hasV8Ops() ? true : false;
+    break;
+  case RestrictedIT:
+    RestrictIT = true;
+    break;
+  case NoRestrictedIT:
+    RestrictIT = false;
+    break;
   }
 
   // NEON f32 ops are non-IEEE 754 compliant. Darwin is ok with it by default.
@@ -235,7 +301,7 @@ ARMSubtarget::GVIsIndirectSymbol(const GlobalValue *GV,
   if (GV->isDeclaration() && !GV->isMaterializable())
     isDecl = true;
 
-  if (!isTargetDarwin()) {
+  if (!isTargetMachO()) {
     // Extra load is needed for all externally visible.
     if (GV->hasLocalLinkage() || GV->hasHiddenVisibility())
       return false;
@@ -277,6 +343,11 @@ ARMSubtarget::GVIsIndirectSymbol(const GlobalValue *GV,
 
 unsigned ARMSubtarget::getMispredictionPenalty() const {
   return SchedModel->MispredictPenalty;
+}
+
+bool ARMSubtarget::hasSinCos() const {
+  return getTargetTriple().getOS() == Triple::IOS &&
+    !getTargetTriple().isOSVersionLT(7, 0);
 }
 
 bool ARMSubtarget::enablePostRAScheduler(

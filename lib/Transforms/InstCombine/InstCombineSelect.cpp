@@ -14,7 +14,7 @@
 #include "InstCombine.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
-#include "llvm/Support/PatternMatch.h"
+#include "llvm/IR/PatternMatch.h"
 using namespace llvm;
 using namespace PatternMatch;
 
@@ -554,18 +554,18 @@ Instruction *InstCombiner::visitSelectInstWithICmp(SelectInst &SI,
   // arms of the select. See if substituting this value into the arm and
   // simplifying the result yields the same value as the other arm.
   if (Pred == ICmpInst::ICMP_EQ) {
-    if (SimplifyWithOpReplaced(FalseVal, CmpLHS, CmpRHS, TD, TLI) == TrueVal ||
-        SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, TD, TLI) == TrueVal)
+    if (SimplifyWithOpReplaced(FalseVal, CmpLHS, CmpRHS, DL, TLI) == TrueVal ||
+        SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, DL, TLI) == TrueVal)
       return ReplaceInstUsesWith(SI, FalseVal);
-    if (SimplifyWithOpReplaced(TrueVal, CmpLHS, CmpRHS, TD, TLI) == FalseVal ||
-        SimplifyWithOpReplaced(TrueVal, CmpRHS, CmpLHS, TD, TLI) == FalseVal)
+    if (SimplifyWithOpReplaced(TrueVal, CmpLHS, CmpRHS, DL, TLI) == FalseVal ||
+        SimplifyWithOpReplaced(TrueVal, CmpRHS, CmpLHS, DL, TLI) == FalseVal)
       return ReplaceInstUsesWith(SI, FalseVal);
   } else if (Pred == ICmpInst::ICMP_NE) {
-    if (SimplifyWithOpReplaced(TrueVal, CmpLHS, CmpRHS, TD, TLI) == FalseVal ||
-        SimplifyWithOpReplaced(TrueVal, CmpRHS, CmpLHS, TD, TLI) == FalseVal)
+    if (SimplifyWithOpReplaced(TrueVal, CmpLHS, CmpRHS, DL, TLI) == FalseVal ||
+        SimplifyWithOpReplaced(TrueVal, CmpRHS, CmpLHS, DL, TLI) == FalseVal)
       return ReplaceInstUsesWith(SI, TrueVal);
-    if (SimplifyWithOpReplaced(FalseVal, CmpLHS, CmpRHS, TD, TLI) == TrueVal ||
-        SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, TD, TLI) == TrueVal)
+    if (SimplifyWithOpReplaced(FalseVal, CmpLHS, CmpRHS, DL, TLI) == TrueVal ||
+        SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, DL, TLI) == TrueVal)
       return ReplaceInstUsesWith(SI, TrueVal);
   }
 
@@ -734,7 +734,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
   Value *TrueVal = SI.getTrueValue();
   Value *FalseVal = SI.getFalseValue();
 
-  if (Value *V = SimplifySelectInst(CondVal, TrueVal, FalseVal, TD))
+  if (Value *V = SimplifySelectInst(CondVal, TrueVal, FalseVal, DL))
     return ReplaceInstUsesWith(SI, V);
 
   if (SI.getType()->isIntegerTy(1)) {
@@ -901,6 +901,11 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
             Value *NegVal;  // Compute -Z
             if (SI.getType()->isFPOrFPVectorTy()) {
               NegVal = Builder->CreateFNeg(SubOp->getOperand(1));
+              if (Instruction *NegInst = dyn_cast<Instruction>(NegVal)) {
+                FastMathFlags Flags = AddOp->getFastMathFlags();
+                Flags &= SubOp->getFastMathFlags();
+                NegInst->setFastMathFlags(Flags);
+              }
             } else {
               NegVal = Builder->CreateNeg(SubOp->getOperand(1));
             }
@@ -913,9 +918,15 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
               Builder->CreateSelect(CondVal, NewTrueOp,
                                     NewFalseOp, SI.getName() + ".p");
 
-            if (SI.getType()->isFPOrFPVectorTy())
-              return BinaryOperator::CreateFAdd(SubOp->getOperand(0), NewSel);
-            else
+            if (SI.getType()->isFPOrFPVectorTy()) {
+              Instruction *RI =
+                BinaryOperator::CreateFAdd(SubOp->getOperand(0), NewSel);
+
+              FastMathFlags Flags = AddOp->getFastMathFlags();
+              Flags &= SubOp->getFastMathFlags();
+              RI->setFastMathFlags(Flags);
+              return RI;
+            } else
               return BinaryOperator::CreateAdd(SubOp->getOperand(0), NewSel);
           }
         }

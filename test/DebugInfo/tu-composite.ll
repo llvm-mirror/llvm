@@ -1,6 +1,6 @@
 ; REQUIRES: object-emission
 
-; RUN: llc -filetype=obj -O0 < %s > %t
+; RUN: %llc_dwarf -filetype=obj -O0 < %s > %t
 ; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
 ; CHECK: [[TYPE:.*]]: DW_TAG_structure_type
 ; Make sure we correctly handle containing type of a struct being a type identifier.
@@ -121,11 +121,11 @@ attributes #0 = { nounwind ssp uwtable "less-precise-fpmad"="false" "no-frame-po
 attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!35}
+!llvm.module.flags = !{!35, !59}
 
 !0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4", i1 false, metadata !"", i32 0, metadata !2, metadata !3, metadata !30, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [tmp.cpp] [DW_LANG_C_plus_plus]
 !1 = metadata !{metadata !"tmp.cpp", metadata !"."}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4, metadata !18, metadata !19, metadata !22, metadata !23, metadata !24}
 !4 = metadata !{i32 786451, metadata !1, null, metadata !"C", i32 1, i64 64, i64 64, i32 0, i32 0, null, metadata !5, i32 0, metadata !"_ZTS1C", null, metadata !"_ZTS1C"} ; [ DW_TAG_structure_type ] [C] [line 1, size 64, align 64, offset 0] [def] [from ]
 !5 = metadata !{metadata !6, metadata !13}
@@ -182,3 +182,4 @@ attributes #1 = { nounwind readnone }
 !56 = metadata !{i32 786688, metadata !32, metadata !"t", metadata !7, i32 26, metadata !24, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [t] [line 26]
 !57 = metadata !{i32 26, i32 0, metadata !32, null}
 !58 = metadata !{i32 27, i32 0, metadata !32, null}
+!59 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

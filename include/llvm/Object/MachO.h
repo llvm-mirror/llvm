@@ -31,14 +31,14 @@ class DiceRef {
   const ObjectFile *OwningObject;
 
 public:
-  DiceRef() : OwningObject(NULL) { }
+  DiceRef() : OwningObject(nullptr) { }
 
   DiceRef(DataRefImpl DiceP, const ObjectFile *Owner);
 
   bool operator==(const DiceRef &Other) const;
   bool operator<(const DiceRef &Other) const;
 
-  error_code getNext(DiceRef &Result) const;
+  void moveNext();
 
   error_code getOffset(uint32_t &Result) const;
   error_code getLength(uint16_t &Result) const;
@@ -57,77 +57,72 @@ public:
   };
 
   MachOObjectFile(MemoryBuffer *Object, bool IsLittleEndian, bool Is64Bits,
-                  error_code &ec);
+                  error_code &EC, bool BufferOwned = true);
 
-  virtual error_code getSymbolNext(DataRefImpl Symb, SymbolRef &Res) const;
-  virtual error_code getSymbolName(DataRefImpl Symb, StringRef &Res) const;
-  virtual error_code getSymbolAddress(DataRefImpl Symb, uint64_t &Res) const;
-  virtual error_code getSymbolFileOffset(DataRefImpl Symb, uint64_t &Res) const;
-  virtual error_code getSymbolAlignment(DataRefImpl Symb, uint32_t &Res) const;
-  virtual error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const;
-  virtual error_code getSymbolType(DataRefImpl Symb,
-                                   SymbolRef::Type &Res) const;
-  virtual error_code getSymbolNMTypeChar(DataRefImpl Symb, char &Res) const;
-  virtual error_code getSymbolFlags(DataRefImpl Symb, uint32_t &Res) const;
-  virtual error_code getSymbolSection(DataRefImpl Symb,
-                                      section_iterator &Res) const;
-  virtual error_code getSymbolValue(DataRefImpl Symb, uint64_t &Val) const;
+  void moveSymbolNext(DataRefImpl &Symb) const override;
+  error_code getSymbolName(DataRefImpl Symb, StringRef &Res) const override;
+  error_code getSymbolAddress(DataRefImpl Symb, uint64_t &Res) const override;
+  error_code getSymbolAlignment(DataRefImpl Symb, uint32_t &Res) const override;
+  error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const override;
+  error_code getSymbolType(DataRefImpl Symb,
+                           SymbolRef::Type &Res) const override;
+  uint32_t getSymbolFlags(DataRefImpl Symb) const override;
+  error_code getSymbolSection(DataRefImpl Symb,
+                              section_iterator &Res) const override;
 
-  virtual error_code getSectionNext(DataRefImpl Sec, SectionRef &Res) const;
-  virtual error_code getSectionName(DataRefImpl Sec, StringRef &Res) const;
-  virtual error_code getSectionAddress(DataRefImpl Sec, uint64_t &Res) const;
-  virtual error_code getSectionSize(DataRefImpl Sec, uint64_t &Res) const;
-  virtual error_code getSectionContents(DataRefImpl Sec, StringRef &Res) const;
-  virtual error_code getSectionAlignment(DataRefImpl Sec, uint64_t &Res) const;
-  virtual error_code isSectionText(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionData(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionBSS(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionRequiredForExecution(DataRefImpl Sec,
-                                                   bool &Res) const;
-  virtual error_code isSectionVirtual(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionZeroInit(DataRefImpl Sec, bool &Res) const;
-  virtual error_code isSectionReadOnlyData(DataRefImpl Sec, bool &Res) const;
-  virtual error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
-                                           bool &Result) const;
-  virtual relocation_iterator section_rel_begin(DataRefImpl Sec) const;
-  virtual relocation_iterator section_rel_end(DataRefImpl Sec) const;
+  void moveSectionNext(DataRefImpl &Sec) const override;
+  error_code getSectionName(DataRefImpl Sec, StringRef &Res) const override;
+  error_code getSectionAddress(DataRefImpl Sec, uint64_t &Res) const override;
+  error_code getSectionSize(DataRefImpl Sec, uint64_t &Res) const override;
+  error_code getSectionContents(DataRefImpl Sec, StringRef &Res) const override;
+  error_code getSectionAlignment(DataRefImpl Sec, uint64_t &Res) const override;
+  error_code isSectionText(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionData(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionBSS(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionRequiredForExecution(DataRefImpl Sec,
+                                           bool &Res) const override;
+  error_code isSectionVirtual(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionZeroInit(DataRefImpl Sec, bool &Res) const override;
+  error_code isSectionReadOnlyData(DataRefImpl Sec, bool &Res) const override;
+  error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
+                                   bool &Result) const override;
+  relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
+  relocation_iterator section_rel_end(DataRefImpl Sec) const override;
 
-  virtual error_code getRelocationNext(DataRefImpl Rel,
-                                       RelocationRef &Res) const;
-  virtual error_code getRelocationAddress(DataRefImpl Rel, uint64_t &Res) const;
-  virtual error_code getRelocationOffset(DataRefImpl Rel, uint64_t &Res) const;
-  virtual symbol_iterator getRelocationSymbol(DataRefImpl Rel) const;
-  virtual error_code getRelocationType(DataRefImpl Rel, uint64_t &Res) const;
-  virtual error_code getRelocationTypeName(DataRefImpl Rel,
-                                           SmallVectorImpl<char> &Result) const;
-  virtual error_code getRelocationValueString(DataRefImpl Rel,
-                                           SmallVectorImpl<char> &Result) const;
-  virtual error_code getRelocationHidden(DataRefImpl Rel, bool &Result) const;
+  void moveRelocationNext(DataRefImpl &Rel) const override;
+  error_code getRelocationAddress(DataRefImpl Rel,
+                                  uint64_t &Res) const override;
+  error_code getRelocationOffset(DataRefImpl Rel, uint64_t &Res) const override;
+  symbol_iterator getRelocationSymbol(DataRefImpl Rel) const override;
+  error_code getRelocationType(DataRefImpl Rel, uint64_t &Res) const override;
+  error_code getRelocationTypeName(DataRefImpl Rel,
+                                  SmallVectorImpl<char> &Result) const override;
+  error_code getRelocationValueString(DataRefImpl Rel,
+                                  SmallVectorImpl<char> &Result) const override;
+  error_code getRelocationHidden(DataRefImpl Rel, bool &Result) const override;
 
-  virtual error_code getLibraryNext(DataRefImpl LibData, LibraryRef &Res) const;
-  virtual error_code getLibraryPath(DataRefImpl LibData, StringRef &Res) const;
+  error_code getLibraryNext(DataRefImpl LibData,
+                            LibraryRef &Res) const override;
+  error_code getLibraryPath(DataRefImpl LibData, StringRef &Res) const override;
 
   // TODO: Would be useful to have an iterator based version
   // of the load command interface too.
 
-  virtual symbol_iterator begin_symbols() const;
-  virtual symbol_iterator end_symbols() const;
+  basic_symbol_iterator symbol_begin_impl() const override;
+  basic_symbol_iterator symbol_end_impl() const override;
 
-  virtual symbol_iterator begin_dynamic_symbols() const;
-  virtual symbol_iterator end_dynamic_symbols() const;
+  section_iterator section_begin() const override;
+  section_iterator section_end() const override;
 
-  virtual section_iterator begin_sections() const;
-  virtual section_iterator end_sections() const;
+  library_iterator needed_library_begin() const override;
+  library_iterator needed_library_end() const override;
 
-  virtual library_iterator begin_libraries_needed() const;
-  virtual library_iterator end_libraries_needed() const;
+  uint8_t getBytesInAddress() const override;
 
-  virtual uint8_t getBytesInAddress() const;
+  StringRef getFileFormatName() const override;
+  unsigned getArch() const override;
 
-  virtual StringRef getFileFormatName() const;
-  virtual unsigned getArch() const;
-
-  virtual StringRef getLoadName() const;
+  StringRef getLoadName() const override;
 
   relocation_iterator section_rel_begin(unsigned Index) const;
   relocation_iterator section_rel_end(unsigned Index) const;
@@ -180,6 +175,8 @@ public:
   getSegment64LoadCommand(const LoadCommandInfo &L) const;
   MachO::linker_options_command
   getLinkerOptionsLoadCommand(const LoadCommandInfo &L) const;
+  MachO::version_min_command
+  getVersionMinLoadCommand(const LoadCommandInfo &L) const;
 
   MachO::any_relocation_info getRelocation(DataRefImpl Rel) const;
   MachO::data_in_code_entry getDice(DataRefImpl Rel) const;
@@ -224,13 +221,10 @@ inline bool DiceRef::operator<(const DiceRef &Other) const {
   return DicePimpl < Other.DicePimpl;
 }
 
-inline error_code DiceRef::getNext(DiceRef &Result) const {
-  DataRefImpl Rel = DicePimpl;
+inline void DiceRef::moveNext() {
   const MachO::data_in_code_entry *P =
-    reinterpret_cast<const MachO::data_in_code_entry *>(Rel.p);
-  Rel.p = reinterpret_cast<uintptr_t>(P + 1);
-  Result = DiceRef(Rel, OwningObject);
-  return object_error::success;
+    reinterpret_cast<const MachO::data_in_code_entry *>(DicePimpl.p);
+  DicePimpl.p = reinterpret_cast<uintptr_t>(P + 1);
 }
 
 // Since a Mach-O data in code reference, a DiceRef, can only be created when

@@ -37,7 +37,6 @@
 #ifndef LLVM_CODEGEN_REGALLOCBASE
 #define LLVM_CODEGEN_REGALLOCBASE
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 
@@ -57,6 +56,7 @@ class Spiller;
 /// live range splitting. They must also override enqueue/dequeue to provide an
 /// assignment order.
 class RegAllocBase {
+  virtual void anchor();
 protected:
   const TargetRegisterInfo *TRI;
   MachineRegisterInfo *MRI;

@@ -22,16 +22,16 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
-#include "llvm/Analysis/Dominators.h"
-#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/Support/ConstantRange.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
-#include "llvm/Support/PatternMatch.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/PatternMatch.h"
+#include "llvm/IR/ValueHandle.h"
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
@@ -42,12 +42,12 @@ STATISTIC(NumFactor , "Number of factorizations");
 STATISTIC(NumReassoc, "Number of reassociations");
 
 struct Query {
-  const DataLayout *TD;
+  const DataLayout *DL;
   const TargetLibraryInfo *TLI;
   const DominatorTree *DT;
 
-  Query(const DataLayout *td, const TargetLibraryInfo *tli,
-        const DominatorTree *dt) : TD(td), TLI(tli), DT(dt) {}
+  Query(const DataLayout *DL, const TargetLibraryInfo *tli,
+        const DominatorTree *dt) : DL(DL), TLI(tli), DT(dt) {}
 };
 
 static Value *SimplifyAndInst(Value *, Value *, const Query &, unsigned);
@@ -595,7 +595,7 @@ static Value *SimplifyAddInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::Add, CLHS->getType(), Ops,
-                                      Q.TD, Q.TLI);
+                                      Q.DL, Q.TLI);
     }
 
     // Canonicalize the constant to the RHS.
@@ -651,9 +651,9 @@ static Value *SimplifyAddInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
 }
 
 Value *llvm::SimplifyAddInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
-                             const DataLayout *TD, const TargetLibraryInfo *TLI,
+                             const DataLayout *DL, const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyAddInst(Op0, Op1, isNSW, isNUW, Query (TD, TLI, DT),
+  return ::SimplifyAddInst(Op0, Op1, isNSW, isNUW, Query (DL, TLI, DT),
                            RecursionLimit);
 }
 
@@ -667,17 +667,17 @@ Value *llvm::SimplifyAddInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
 /// This is very similar to GetPointerBaseWithConstantOffset except it doesn't
 /// follow non-inbounds geps. This allows it to remain usable for icmp ult/etc.
 /// folding.
-static Constant *stripAndComputeConstantOffsets(const DataLayout *TD,
+static Constant *stripAndComputeConstantOffsets(const DataLayout *DL,
                                                 Value *&V,
                                                 bool AllowNonInbounds = false) {
   assert(V->getType()->getScalarType()->isPointerTy());
 
   // Without DataLayout, just be conservative for now. Theoretically, more could
   // be done in this case.
-  if (!TD)
+  if (!DL)
     return ConstantInt::get(IntegerType::get(V->getContext(), 64), 0);
 
-  Type *IntPtrTy = TD->getIntPtrType(V->getType())->getScalarType();
+  Type *IntPtrTy = DL->getIntPtrType(V->getType())->getScalarType();
   APInt Offset = APInt::getNullValue(IntPtrTy->getIntegerBitWidth());
 
   // Even though we don't look through PHI nodes, we could be called on an
@@ -687,7 +687,7 @@ static Constant *stripAndComputeConstantOffsets(const DataLayout *TD,
   do {
     if (GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
       if ((!AllowNonInbounds && !GEP->isInBounds()) ||
-          !GEP->accumulateConstantOffset(*TD, Offset))
+          !GEP->accumulateConstantOffset(*DL, Offset))
         break;
       V = GEP->getPointerOperand();
     } else if (Operator::getOpcode(V) == Instruction::BitCast) {
@@ -712,10 +712,10 @@ static Constant *stripAndComputeConstantOffsets(const DataLayout *TD,
 
 /// \brief Compute the constant difference between two pointer values.
 /// If the difference is not a constant, returns zero.
-static Constant *computePointerDifference(const DataLayout *TD,
+static Constant *computePointerDifference(const DataLayout *DL,
                                           Value *LHS, Value *RHS) {
-  Constant *LHSOffset = stripAndComputeConstantOffsets(TD, LHS);
-  Constant *RHSOffset = stripAndComputeConstantOffsets(TD, RHS);
+  Constant *LHSOffset = stripAndComputeConstantOffsets(DL, LHS);
+  Constant *RHSOffset = stripAndComputeConstantOffsets(DL, RHS);
 
   // If LHS and RHS are not related via constant offsets to the same base
   // value, there is nothing we can do here.
@@ -737,7 +737,7 @@ static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::Sub, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
 
   // X - undef -> undef
@@ -831,7 +831,7 @@ static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
   // Variations on GEP(base, I, ...) - GEP(base, i, ...) -> GEP(null, I-i, ...).
   if (match(Op0, m_PtrToInt(m_Value(X))) &&
       match(Op1, m_PtrToInt(m_Value(Y))))
-    if (Constant *Result = computePointerDifference(Q.TD, X, Y))
+    if (Constant *Result = computePointerDifference(Q.DL, X, Y))
       return ConstantExpr::getIntegerCast(Result, Op0->getType(), true);
 
   // Mul distributes over Sub.  Try some generic simplifications based on this.
@@ -857,9 +857,9 @@ static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
 }
 
 Value *llvm::SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
-                             const DataLayout *TD, const TargetLibraryInfo *TLI,
+                             const DataLayout *DL, const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifySubInst(Op0, Op1, isNSW, isNUW, Query (TD, TLI, DT),
+  return ::SimplifySubInst(Op0, Op1, isNSW, isNUW, Query (DL, TLI, DT),
                            RecursionLimit);
 }
 
@@ -871,7 +871,7 @@ static Value *SimplifyFAddInst(Value *Op0, Value *Op1, FastMathFlags FMF,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::FAdd, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
 
     // Canonicalize the constant to the RHS.
@@ -913,7 +913,7 @@ static Value *SimplifyFSubInst(Value *Op0, Value *Op1, FastMathFlags FMF,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::FSub, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
   }
 
@@ -951,7 +951,7 @@ static Value *SimplifyFMulInst(Value *Op0, Value *Op1,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::FMul, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
 
     // Canonicalize the constant to the RHS.
@@ -977,7 +977,7 @@ static Value *SimplifyMulInst(Value *Op0, Value *Op1, const Query &Q,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::Mul, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
 
     // Canonicalize the constant to the RHS.
@@ -1035,29 +1035,29 @@ static Value *SimplifyMulInst(Value *Op0, Value *Op1, const Query &Q,
 }
 
 Value *llvm::SimplifyFAddInst(Value *Op0, Value *Op1, FastMathFlags FMF,
-                             const DataLayout *TD, const TargetLibraryInfo *TLI,
+                             const DataLayout *DL, const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyFAddInst(Op0, Op1, FMF, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyFAddInst(Op0, Op1, FMF, Query (DL, TLI, DT), RecursionLimit);
 }
 
 Value *llvm::SimplifyFSubInst(Value *Op0, Value *Op1, FastMathFlags FMF,
-                             const DataLayout *TD, const TargetLibraryInfo *TLI,
+                             const DataLayout *DL, const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyFSubInst(Op0, Op1, FMF, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyFSubInst(Op0, Op1, FMF, Query (DL, TLI, DT), RecursionLimit);
 }
 
 Value *llvm::SimplifyFMulInst(Value *Op0, Value *Op1,
                               FastMathFlags FMF,
-                              const DataLayout *TD,
+                              const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyFMulInst(Op0, Op1, FMF, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyFMulInst(Op0, Op1, FMF, Query (DL, TLI, DT), RecursionLimit);
 }
 
-Value *llvm::SimplifyMulInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyMulInst(Value *Op0, Value *Op1, const DataLayout *DL,
                              const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyMulInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyMulInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyDiv - Given operands for an SDiv or UDiv, see if we can
@@ -1067,7 +1067,7 @@ static Value *SimplifyDiv(Instruction::BinaryOps Opcode, Value *Op0, Value *Op1,
   if (Constant *C0 = dyn_cast<Constant>(Op0)) {
     if (Constant *C1 = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { C0, C1 };
-      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.TD, Q.TLI);
+      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.DL, Q.TLI);
     }
   }
 
@@ -1142,10 +1142,10 @@ static Value *SimplifySDivInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifySDivInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifySDivInst(Value *Op0, Value *Op1, const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifySDivInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifySDivInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyUDivInst - Given operands for a UDiv, see if we can
@@ -1158,10 +1158,10 @@ static Value *SimplifyUDivInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifyUDivInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyUDivInst(Value *Op0, Value *Op1, const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyUDivInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyUDivInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 static Value *SimplifyFDivInst(Value *Op0, Value *Op1, const Query &Q,
@@ -1177,10 +1177,10 @@ static Value *SimplifyFDivInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifyFDivInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyFDivInst(Value *Op0, Value *Op1, const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyFDivInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyFDivInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyRem - Given operands for an SRem or URem, see if we can
@@ -1190,7 +1190,7 @@ static Value *SimplifyRem(Instruction::BinaryOps Opcode, Value *Op0, Value *Op1,
   if (Constant *C0 = dyn_cast<Constant>(Op0)) {
     if (Constant *C1 = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { C0, C1 };
-      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.TD, Q.TLI);
+      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.DL, Q.TLI);
     }
   }
 
@@ -1247,10 +1247,10 @@ static Value *SimplifySRemInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifySRemInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifySRemInst(Value *Op0, Value *Op1, const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifySRemInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifySRemInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyURemInst - Given operands for a URem, see if we can
@@ -1263,10 +1263,10 @@ static Value *SimplifyURemInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifyURemInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyURemInst(Value *Op0, Value *Op1, const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyURemInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyURemInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 static Value *SimplifyFRemInst(Value *Op0, Value *Op1, const Query &,
@@ -1282,10 +1282,37 @@ static Value *SimplifyFRemInst(Value *Op0, Value *Op1, const Query &,
   return 0;
 }
 
-Value *llvm::SimplifyFRemInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyFRemInst(Value *Op0, Value *Op1, const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyFRemInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyFRemInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
+}
+
+/// isUndefShift - Returns true if a shift by \c Amount always yields undef.
+static bool isUndefShift(Value *Amount) {
+  Constant *C = dyn_cast<Constant>(Amount);
+  if (!C)
+    return false;
+
+  // X shift by undef -> undef because it may shift by the bitwidth.
+  if (isa<UndefValue>(C))
+    return true;
+
+  // Shifting by the bitwidth or more is undefined.
+  if (ConstantInt *CI = dyn_cast<ConstantInt>(C))
+    if (CI->getValue().getLimitedValue() >=
+        CI->getType()->getScalarSizeInBits())
+      return true;
+
+  // If all lanes of a vector shift are undefined the whole shift is.
+  if (isa<ConstantVector>(C) || isa<ConstantDataVector>(C)) {
+    for (unsigned I = 0, E = C->getType()->getVectorNumElements(); I != E; ++I)
+      if (!isUndefShift(C->getAggregateElement(I)))
+        return false;
+    return true;
+  }
+
+  return false;
 }
 
 /// SimplifyShift - Given operands for an Shl, LShr or AShr, see if we can
@@ -1295,7 +1322,7 @@ static Value *SimplifyShift(unsigned Opcode, Value *Op0, Value *Op1,
   if (Constant *C0 = dyn_cast<Constant>(Op0)) {
     if (Constant *C1 = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { C0, C1 };
-      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.TD, Q.TLI);
+      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.DL, Q.TLI);
     }
   }
 
@@ -1307,15 +1334,9 @@ static Value *SimplifyShift(unsigned Opcode, Value *Op0, Value *Op1,
   if (match(Op1, m_Zero()))
     return Op0;
 
-  // X shift by undef -> undef because it may shift by the bitwidth.
-  if (match(Op1, m_Undef()))
-    return Op1;
-
-  // Shifting by the bitwidth or more is undefined.
-  if (ConstantInt *CI = dyn_cast<ConstantInt>(Op1))
-    if (CI->getValue().getLimitedValue() >=
-        Op0->getType()->getScalarSizeInBits())
-      return UndefValue::get(Op0->getType());
+  // Fold undefined shifts.
+  if (isUndefShift(Op1))
+    return UndefValue::get(Op0->getType());
 
   // If the operation is with the result of a select instruction, check whether
   // operating on either branch of the select always yields the same value.
@@ -1351,9 +1372,9 @@ static Value *SimplifyShlInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
 }
 
 Value *llvm::SimplifyShlInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
-                             const DataLayout *TD, const TargetLibraryInfo *TLI,
+                             const DataLayout *DL, const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyShlInst(Op0, Op1, isNSW, isNUW, Query (TD, TLI, DT),
+  return ::SimplifyShlInst(Op0, Op1, isNSW, isNUW, Query (DL, TLI, DT),
                            RecursionLimit);
 }
 
@@ -1382,10 +1403,10 @@ static Value *SimplifyLShrInst(Value *Op0, Value *Op1, bool isExact,
 }
 
 Value *llvm::SimplifyLShrInst(Value *Op0, Value *Op1, bool isExact,
-                              const DataLayout *TD,
+                              const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyLShrInst(Op0, Op1, isExact, Query (TD, TLI, DT),
+  return ::SimplifyLShrInst(Op0, Op1, isExact, Query (DL, TLI, DT),
                             RecursionLimit);
 }
 
@@ -1418,10 +1439,10 @@ static Value *SimplifyAShrInst(Value *Op0, Value *Op1, bool isExact,
 }
 
 Value *llvm::SimplifyAShrInst(Value *Op0, Value *Op1, bool isExact,
-                              const DataLayout *TD,
+                              const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyAShrInst(Op0, Op1, isExact, Query (TD, TLI, DT),
+  return ::SimplifyAShrInst(Op0, Op1, isExact, Query (DL, TLI, DT),
                             RecursionLimit);
 }
 
@@ -1433,7 +1454,7 @@ static Value *SimplifyAndInst(Value *Op0, Value *Op1, const Query &Q,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::And, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
 
     // Canonicalize the constant to the RHS.
@@ -1518,10 +1539,10 @@ static Value *SimplifyAndInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifyAndInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyAndInst(Value *Op0, Value *Op1, const DataLayout *DL,
                              const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyAndInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyAndInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyOrInst - Given operands for an Or, see if we can
@@ -1532,7 +1553,7 @@ static Value *SimplifyOrInst(Value *Op0, Value *Op1, const Query &Q,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::Or, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
 
     // Canonicalize the constant to the RHS.
@@ -1612,10 +1633,10 @@ static Value *SimplifyOrInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifyOrInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyOrInst(Value *Op0, Value *Op1, const DataLayout *DL,
                             const TargetLibraryInfo *TLI,
                             const DominatorTree *DT) {
-  return ::SimplifyOrInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyOrInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyXorInst - Given operands for a Xor, see if we can
@@ -1626,7 +1647,7 @@ static Value *SimplifyXorInst(Value *Op0, Value *Op1, const Query &Q,
     if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
       Constant *Ops[] = { CLHS, CRHS };
       return ConstantFoldInstOperands(Instruction::Xor, CLHS->getType(),
-                                      Ops, Q.TD, Q.TLI);
+                                      Ops, Q.DL, Q.TLI);
     }
 
     // Canonicalize the constant to the RHS.
@@ -1672,10 +1693,10 @@ static Value *SimplifyXorInst(Value *Op0, Value *Op1, const Query &Q,
   return 0;
 }
 
-Value *llvm::SimplifyXorInst(Value *Op0, Value *Op1, const DataLayout *TD,
+Value *llvm::SimplifyXorInst(Value *Op0, Value *Op1, const DataLayout *DL,
                              const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyXorInst(Op0, Op1, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyXorInst(Op0, Op1, Query (DL, TLI, DT), RecursionLimit);
 }
 
 static Type *GetCompareTy(Value *Op) {
@@ -1730,7 +1751,7 @@ static Value *ExtractEquivalentCondition(Value *V, CmpInst::Predicate Pred,
 // If the C and C++ standards are ever made sufficiently restrictive in this
 // area, it may be possible to update LLVM's semantics accordingly and reinstate
 // this optimization.
-static Constant *computePointerICmp(const DataLayout *TD,
+static Constant *computePointerICmp(const DataLayout *DL,
                                     const TargetLibraryInfo *TLI,
                                     CmpInst::Predicate Pred,
                                     Value *LHS, Value *RHS) {
@@ -1772,8 +1793,8 @@ static Constant *computePointerICmp(const DataLayout *TD,
   // numerous hazards. AliasAnalysis and its utilities rely on special rules
   // governing loads and stores which don't apply to icmps. Also, AliasAnalysis
   // doesn't need to guarantee pointer inequality when it says NoAlias.
-  Constant *LHSOffset = stripAndComputeConstantOffsets(TD, LHS);
-  Constant *RHSOffset = stripAndComputeConstantOffsets(TD, RHS);
+  Constant *LHSOffset = stripAndComputeConstantOffsets(DL, LHS);
+  Constant *RHSOffset = stripAndComputeConstantOffsets(DL, RHS);
 
   // If LHS and RHS are related via constant offsets to the same base
   // value, we can replace it with an icmp which just compares the offsets.
@@ -1817,8 +1838,8 @@ static Constant *computePointerICmp(const DataLayout *TD,
       ConstantInt *RHSOffsetCI = dyn_cast<ConstantInt>(RHSOffset);
       uint64_t LHSSize, RHSSize;
       if (LHSOffsetCI && RHSOffsetCI &&
-          getObjectSize(LHS, LHSSize, TD, TLI) &&
-          getObjectSize(RHS, RHSSize, TD, TLI)) {
+          getObjectSize(LHS, LHSSize, DL, TLI) &&
+          getObjectSize(RHS, RHSSize, DL, TLI)) {
         const APInt &LHSOffsetValue = LHSOffsetCI->getValue();
         const APInt &RHSOffsetValue = RHSOffsetCI->getValue();
         if (!LHSOffsetValue.isNegative() &&
@@ -1844,8 +1865,8 @@ static Constant *computePointerICmp(const DataLayout *TD,
     // equality comparisons concerning the result. We avoid walking the whole
     // chain again by starting where the last calls to
     // stripAndComputeConstantOffsets left off and accumulate the offsets.
-    Constant *LHSNoBound = stripAndComputeConstantOffsets(TD, LHS, true);
-    Constant *RHSNoBound = stripAndComputeConstantOffsets(TD, RHS, true);
+    Constant *LHSNoBound = stripAndComputeConstantOffsets(DL, LHS, true);
+    Constant *RHSNoBound = stripAndComputeConstantOffsets(DL, RHS, true);
     if (LHS == RHS)
       return ConstantExpr::getICmp(Pred,
                                    ConstantExpr::getAdd(LHSOffset, LHSNoBound),
@@ -1865,7 +1886,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 
   if (Constant *CLHS = dyn_cast<Constant>(LHS)) {
     if (Constant *CRHS = dyn_cast<Constant>(RHS))
-      return ConstantFoldCompareInstOperands(Pred, CLHS, CRHS, Q.TD, Q.TLI);
+      return ConstantFoldCompareInstOperands(Pred, CLHS, CRHS, Q.DL, Q.TLI);
 
     // If we have a constant, make sure it is on the RHS.
     std::swap(LHS, RHS);
@@ -1929,40 +1950,40 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       return getTrue(ITy);
     case ICmpInst::ICMP_EQ:
     case ICmpInst::ICMP_ULE:
-      if (isKnownNonZero(LHS, Q.TD))
+      if (isKnownNonZero(LHS, Q.DL))
         return getFalse(ITy);
       break;
     case ICmpInst::ICMP_NE:
     case ICmpInst::ICMP_UGT:
-      if (isKnownNonZero(LHS, Q.TD))
+      if (isKnownNonZero(LHS, Q.DL))
         return getTrue(ITy);
       break;
     case ICmpInst::ICMP_SLT:
-      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.TD);
+      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.DL);
       if (LHSKnownNegative)
         return getTrue(ITy);
       if (LHSKnownNonNegative)
         return getFalse(ITy);
       break;
     case ICmpInst::ICMP_SLE:
-      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.TD);
+      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.DL);
       if (LHSKnownNegative)
         return getTrue(ITy);
-      if (LHSKnownNonNegative && isKnownNonZero(LHS, Q.TD))
+      if (LHSKnownNonNegative && isKnownNonZero(LHS, Q.DL))
         return getFalse(ITy);
       break;
     case ICmpInst::ICMP_SGE:
-      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.TD);
+      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.DL);
       if (LHSKnownNegative)
         return getFalse(ITy);
       if (LHSKnownNonNegative)
         return getTrue(ITy);
       break;
     case ICmpInst::ICMP_SGT:
-      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.TD);
+      ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, Q.DL);
       if (LHSKnownNegative)
         return getFalse(ITy);
-      if (LHSKnownNonNegative && isKnownNonZero(LHS, Q.TD))
+      if (LHSKnownNonNegative && isKnownNonZero(LHS, Q.DL))
         return getTrue(ITy);
       break;
     }
@@ -2045,8 +2066,8 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 
     // Turn icmp (ptrtoint x), (ptrtoint/constant) into a compare of the input
     // if the integer type is the same size as the pointer type.
-    if (MaxRecurse && Q.TD && isa<PtrToIntInst>(LI) &&
-        Q.TD->getTypeSizeInBits(SrcTy) == DstTy->getPrimitiveSizeInBits()) {
+    if (MaxRecurse && Q.DL && isa<PtrToIntInst>(LI) &&
+        Q.DL->getTypeSizeInBits(SrcTy) == DstTy->getPrimitiveSizeInBits()) {
       if (Constant *RHSC = dyn_cast<Constant>(RHS)) {
         // Transfer the cast to the constant.
         if (Value *V = SimplifyICmpInst(Pred, SrcOp,
@@ -2266,7 +2287,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       break;
     case ICmpInst::ICMP_SGT:
     case ICmpInst::ICMP_SGE:
-      ComputeSignBit(RHS, KnownNonNegative, KnownNegative, Q.TD);
+      ComputeSignBit(RHS, KnownNonNegative, KnownNegative, Q.DL);
       if (!KnownNonNegative)
         break;
       // fall-through
@@ -2276,7 +2297,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       return getFalse(ITy);
     case ICmpInst::ICMP_SLT:
     case ICmpInst::ICMP_SLE:
-      ComputeSignBit(RHS, KnownNonNegative, KnownNegative, Q.TD);
+      ComputeSignBit(RHS, KnownNonNegative, KnownNegative, Q.DL);
       if (!KnownNonNegative)
         break;
       // fall-through
@@ -2295,7 +2316,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       break;
     case ICmpInst::ICMP_SGT:
     case ICmpInst::ICMP_SGE:
-      ComputeSignBit(LHS, KnownNonNegative, KnownNegative, Q.TD);
+      ComputeSignBit(LHS, KnownNonNegative, KnownNegative, Q.DL);
       if (!KnownNonNegative)
         break;
       // fall-through
@@ -2305,7 +2326,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       return getTrue(ITy);
     case ICmpInst::ICMP_SLT:
     case ICmpInst::ICMP_SLE:
-      ComputeSignBit(LHS, KnownNonNegative, KnownNegative, Q.TD);
+      ComputeSignBit(LHS, KnownNonNegative, KnownNegative, Q.DL);
       if (!KnownNonNegative)
         break;
       // fall-through
@@ -2548,7 +2569,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
   // Simplify comparisons of related pointers using a powerful, recursive
   // GEP-walk when we have target data available..
   if (LHS->getType()->isPointerTy())
-    if (Constant *C = computePointerICmp(Q.TD, Q.TLI, Pred, LHS, RHS))
+    if (Constant *C = computePointerICmp(Q.DL, Q.TLI, Pred, LHS, RHS))
       return C;
 
   if (GetElementPtrInst *GLHS = dyn_cast<GetElementPtrInst>(LHS)) {
@@ -2588,10 +2609,10 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 }
 
 Value *llvm::SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
-                              const DataLayout *TD,
+                              const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyICmpInst(Predicate, LHS, RHS, Query (TD, TLI, DT),
+  return ::SimplifyICmpInst(Predicate, LHS, RHS, Query (DL, TLI, DT),
                             RecursionLimit);
 }
 
@@ -2604,7 +2625,7 @@ static Value *SimplifyFCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 
   if (Constant *CLHS = dyn_cast<Constant>(LHS)) {
     if (Constant *CRHS = dyn_cast<Constant>(RHS))
-      return ConstantFoldCompareInstOperands(Pred, CLHS, CRHS, Q.TD, Q.TLI);
+      return ConstantFoldCompareInstOperands(Pred, CLHS, CRHS, Q.DL, Q.TLI);
 
     // If we have a constant, make sure it is on the RHS.
     std::swap(LHS, RHS);
@@ -2685,10 +2706,10 @@ static Value *SimplifyFCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 }
 
 Value *llvm::SimplifyFCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
-                              const DataLayout *TD,
+                              const DataLayout *DL,
                               const TargetLibraryInfo *TLI,
                               const DominatorTree *DT) {
-  return ::SimplifyFCmpInst(Predicate, LHS, RHS, Query (TD, TLI, DT),
+  return ::SimplifyFCmpInst(Predicate, LHS, RHS, Query (DL, TLI, DT),
                             RecursionLimit);
 }
 
@@ -2699,8 +2720,12 @@ static Value *SimplifySelectInst(Value *CondVal, Value *TrueVal,
                                  unsigned MaxRecurse) {
   // select true, X, Y  -> X
   // select false, X, Y -> Y
-  if (ConstantInt *CB = dyn_cast<ConstantInt>(CondVal))
-    return CB->getZExtValue() ? TrueVal : FalseVal;
+  if (Constant *CB = dyn_cast<Constant>(CondVal)) {
+    if (CB->isAllOnesValue())
+      return TrueVal;
+    if (CB->isNullValue())
+      return FalseVal;
+  }
 
   // select C, X, X -> X
   if (TrueVal == FalseVal)
@@ -2720,10 +2745,10 @@ static Value *SimplifySelectInst(Value *CondVal, Value *TrueVal,
 }
 
 Value *llvm::SimplifySelectInst(Value *Cond, Value *TrueVal, Value *FalseVal,
-                                const DataLayout *TD,
+                                const DataLayout *DL,
                                 const TargetLibraryInfo *TLI,
                                 const DominatorTree *DT) {
-  return ::SimplifySelectInst(Cond, TrueVal, FalseVal, Query (TD, TLI, DT),
+  return ::SimplifySelectInst(Cond, TrueVal, FalseVal, Query (DL, TLI, DT),
                               RecursionLimit);
 }
 
@@ -2731,10 +2756,7 @@ Value *llvm::SimplifySelectInst(Value *Cond, Value *TrueVal, Value *FalseVal,
 /// fold the result.  If not, this returns null.
 static Value *SimplifyGEPInst(ArrayRef<Value *> Ops, const Query &Q, unsigned) {
   // The type of the GEP pointer operand.
-  PointerType *PtrTy = dyn_cast<PointerType>(Ops[0]->getType());
-  // The GEP pointer operand is not a pointer, it's a vector of pointers.
-  if (!PtrTy)
-    return 0;
+  PointerType *PtrTy = cast<PointerType>(Ops[0]->getType()->getScalarType());
 
   // getelementptr P -> P.
   if (Ops.size() == 1)
@@ -2744,18 +2766,19 @@ static Value *SimplifyGEPInst(ArrayRef<Value *> Ops, const Query &Q, unsigned) {
     // Compute the (pointer) type returned by the GEP instruction.
     Type *LastType = GetElementPtrInst::getIndexedType(PtrTy, Ops.slice(1));
     Type *GEPTy = PointerType::get(LastType, PtrTy->getAddressSpace());
+    if (VectorType *VT = dyn_cast<VectorType>(Ops[0]->getType()))
+      GEPTy = VectorType::get(GEPTy, VT->getNumElements());
     return UndefValue::get(GEPTy);
   }
 
   if (Ops.size() == 2) {
     // getelementptr P, 0 -> P.
-    if (ConstantInt *C = dyn_cast<ConstantInt>(Ops[1]))
-      if (C->isZero())
-        return Ops[0];
+    if (match(Ops[1], m_Zero()))
+      return Ops[0];
     // getelementptr P, N -> P if P points to a type of zero size.
-    if (Q.TD) {
+    if (Q.DL) {
       Type *Ty = PtrTy->getElementType();
-      if (Ty->isSized() && Q.TD->getTypeAllocSize(Ty) == 0)
+      if (Ty->isSized() && Q.DL->getTypeAllocSize(Ty) == 0)
         return Ops[0];
     }
   }
@@ -2768,10 +2791,10 @@ static Value *SimplifyGEPInst(ArrayRef<Value *> Ops, const Query &Q, unsigned) {
   return ConstantExpr::getGetElementPtr(cast<Constant>(Ops[0]), Ops.slice(1));
 }
 
-Value *llvm::SimplifyGEPInst(ArrayRef<Value *> Ops, const DataLayout *TD,
+Value *llvm::SimplifyGEPInst(ArrayRef<Value *> Ops, const DataLayout *DL,
                              const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyGEPInst(Ops, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyGEPInst(Ops, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyInsertValueInst - Given operands for an InsertValueInst, see if we
@@ -2805,10 +2828,10 @@ static Value *SimplifyInsertValueInst(Value *Agg, Value *Val,
 
 Value *llvm::SimplifyInsertValueInst(Value *Agg, Value *Val,
                                      ArrayRef<unsigned> Idxs,
-                                     const DataLayout *TD,
+                                     const DataLayout *DL,
                                      const TargetLibraryInfo *TLI,
                                      const DominatorTree *DT) {
-  return ::SimplifyInsertValueInst(Agg, Val, Idxs, Query (TD, TLI, DT),
+  return ::SimplifyInsertValueInst(Agg, Val, Idxs, Query (DL, TLI, DT),
                                    RecursionLimit);
 }
 
@@ -2848,15 +2871,15 @@ static Value *SimplifyPHINode(PHINode *PN, const Query &Q) {
 
 static Value *SimplifyTruncInst(Value *Op, Type *Ty, const Query &Q, unsigned) {
   if (Constant *C = dyn_cast<Constant>(Op))
-    return ConstantFoldInstOperands(Instruction::Trunc, Ty, C, Q.TD, Q.TLI);
+    return ConstantFoldInstOperands(Instruction::Trunc, Ty, C, Q.DL, Q.TLI);
 
   return 0;
 }
 
-Value *llvm::SimplifyTruncInst(Value *Op, Type *Ty, const DataLayout *TD,
+Value *llvm::SimplifyTruncInst(Value *Op, Type *Ty, const DataLayout *DL,
                                const TargetLibraryInfo *TLI,
                                const DominatorTree *DT) {
-  return ::SimplifyTruncInst(Op, Ty, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyTruncInst(Op, Ty, Query (DL, TLI, DT), RecursionLimit);
 }
 
 //=== Helper functions for higher up the class hierarchy.
@@ -2901,7 +2924,7 @@ static Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
     if (Constant *CLHS = dyn_cast<Constant>(LHS))
       if (Constant *CRHS = dyn_cast<Constant>(RHS)) {
         Constant *COps[] = {CLHS, CRHS};
-        return ConstantFoldInstOperands(Opcode, LHS->getType(), COps, Q.TD,
+        return ConstantFoldInstOperands(Opcode, LHS->getType(), COps, Q.DL,
                                         Q.TLI);
       }
 
@@ -2927,9 +2950,9 @@ static Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
 }
 
 Value *llvm::SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
-                           const DataLayout *TD, const TargetLibraryInfo *TLI,
+                           const DataLayout *DL, const TargetLibraryInfo *TLI,
                            const DominatorTree *DT) {
-  return ::SimplifyBinOp(Opcode, LHS, RHS, Query (TD, TLI, DT), RecursionLimit);
+  return ::SimplifyBinOp(Opcode, LHS, RHS, Query (DL, TLI, DT), RecursionLimit);
 }
 
 /// SimplifyCmpInst - Given operands for a CmpInst, see if we can
@@ -2942,9 +2965,9 @@ static Value *SimplifyCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 }
 
 Value *llvm::SimplifyCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
-                             const DataLayout *TD, const TargetLibraryInfo *TLI,
+                             const DataLayout *DL, const TargetLibraryInfo *TLI,
                              const DominatorTree *DT) {
-  return ::SimplifyCmpInst(Predicate, LHS, RHS, Query (TD, TLI, DT),
+  return ::SimplifyCmpInst(Predicate, LHS, RHS, Query (DL, TLI, DT),
                            RecursionLimit);
 }
 
@@ -3017,136 +3040,136 @@ static Value *SimplifyCall(Value *V, IterTy ArgBegin, IterTy ArgEnd,
 }
 
 Value *llvm::SimplifyCall(Value *V, User::op_iterator ArgBegin,
-                          User::op_iterator ArgEnd, const DataLayout *TD,
+                          User::op_iterator ArgEnd, const DataLayout *DL,
                           const TargetLibraryInfo *TLI,
                           const DominatorTree *DT) {
-  return ::SimplifyCall(V, ArgBegin, ArgEnd, Query(TD, TLI, DT),
+  return ::SimplifyCall(V, ArgBegin, ArgEnd, Query(DL, TLI, DT),
                         RecursionLimit);
 }
 
 Value *llvm::SimplifyCall(Value *V, ArrayRef<Value *> Args,
-                          const DataLayout *TD, const TargetLibraryInfo *TLI,
+                          const DataLayout *DL, const TargetLibraryInfo *TLI,
                           const DominatorTree *DT) {
-  return ::SimplifyCall(V, Args.begin(), Args.end(), Query(TD, TLI, DT),
+  return ::SimplifyCall(V, Args.begin(), Args.end(), Query(DL, TLI, DT),
                         RecursionLimit);
 }
 
 /// SimplifyInstruction - See if we can compute a simplified version of this
 /// instruction.  If not, this returns null.
-Value *llvm::SimplifyInstruction(Instruction *I, const DataLayout *TD,
+Value *llvm::SimplifyInstruction(Instruction *I, const DataLayout *DL,
                                  const TargetLibraryInfo *TLI,
                                  const DominatorTree *DT) {
   Value *Result;
 
   switch (I->getOpcode()) {
   default:
-    Result = ConstantFoldInstruction(I, TD, TLI);
+    Result = ConstantFoldInstruction(I, DL, TLI);
     break;
   case Instruction::FAdd:
     Result = SimplifyFAddInst(I->getOperand(0), I->getOperand(1),
-                              I->getFastMathFlags(), TD, TLI, DT);
+                              I->getFastMathFlags(), DL, TLI, DT);
     break;
   case Instruction::Add:
     Result = SimplifyAddInst(I->getOperand(0), I->getOperand(1),
                              cast<BinaryOperator>(I)->hasNoSignedWrap(),
                              cast<BinaryOperator>(I)->hasNoUnsignedWrap(),
-                             TD, TLI, DT);
+                             DL, TLI, DT);
     break;
   case Instruction::FSub:
     Result = SimplifyFSubInst(I->getOperand(0), I->getOperand(1),
-                              I->getFastMathFlags(), TD, TLI, DT);
+                              I->getFastMathFlags(), DL, TLI, DT);
     break;
   case Instruction::Sub:
     Result = SimplifySubInst(I->getOperand(0), I->getOperand(1),
                              cast<BinaryOperator>(I)->hasNoSignedWrap(),
                              cast<BinaryOperator>(I)->hasNoUnsignedWrap(),
-                             TD, TLI, DT);
+                             DL, TLI, DT);
     break;
   case Instruction::FMul:
     Result = SimplifyFMulInst(I->getOperand(0), I->getOperand(1),
-                              I->getFastMathFlags(), TD, TLI, DT);
+                              I->getFastMathFlags(), DL, TLI, DT);
     break;
   case Instruction::Mul:
-    Result = SimplifyMulInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyMulInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::SDiv:
-    Result = SimplifySDivInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifySDivInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::UDiv:
-    Result = SimplifyUDivInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyUDivInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::FDiv:
-    Result = SimplifyFDivInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyFDivInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::SRem:
-    Result = SimplifySRemInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifySRemInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::URem:
-    Result = SimplifyURemInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyURemInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::FRem:
-    Result = SimplifyFRemInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyFRemInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::Shl:
     Result = SimplifyShlInst(I->getOperand(0), I->getOperand(1),
                              cast<BinaryOperator>(I)->hasNoSignedWrap(),
                              cast<BinaryOperator>(I)->hasNoUnsignedWrap(),
-                             TD, TLI, DT);
+                             DL, TLI, DT);
     break;
   case Instruction::LShr:
     Result = SimplifyLShrInst(I->getOperand(0), I->getOperand(1),
                               cast<BinaryOperator>(I)->isExact(),
-                              TD, TLI, DT);
+                              DL, TLI, DT);
     break;
   case Instruction::AShr:
     Result = SimplifyAShrInst(I->getOperand(0), I->getOperand(1),
                               cast<BinaryOperator>(I)->isExact(),
-                              TD, TLI, DT);
+                              DL, TLI, DT);
     break;
   case Instruction::And:
-    Result = SimplifyAndInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyAndInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::Or:
-    Result = SimplifyOrInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyOrInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::Xor:
-    Result = SimplifyXorInst(I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+    Result = SimplifyXorInst(I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::ICmp:
     Result = SimplifyICmpInst(cast<ICmpInst>(I)->getPredicate(),
-                              I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+                              I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::FCmp:
     Result = SimplifyFCmpInst(cast<FCmpInst>(I)->getPredicate(),
-                              I->getOperand(0), I->getOperand(1), TD, TLI, DT);
+                              I->getOperand(0), I->getOperand(1), DL, TLI, DT);
     break;
   case Instruction::Select:
     Result = SimplifySelectInst(I->getOperand(0), I->getOperand(1),
-                                I->getOperand(2), TD, TLI, DT);
+                                I->getOperand(2), DL, TLI, DT);
     break;
   case Instruction::GetElementPtr: {
     SmallVector<Value*, 8> Ops(I->op_begin(), I->op_end());
-    Result = SimplifyGEPInst(Ops, TD, TLI, DT);
+    Result = SimplifyGEPInst(Ops, DL, TLI, DT);
     break;
   }
   case Instruction::InsertValue: {
     InsertValueInst *IV = cast<InsertValueInst>(I);
     Result = SimplifyInsertValueInst(IV->getAggregateOperand(),
                                      IV->getInsertedValueOperand(),
-                                     IV->getIndices(), TD, TLI, DT);
+                                     IV->getIndices(), DL, TLI, DT);
     break;
   }
   case Instruction::PHI:
-    Result = SimplifyPHINode(cast<PHINode>(I), Query (TD, TLI, DT));
+    Result = SimplifyPHINode(cast<PHINode>(I), Query (DL, TLI, DT));
     break;
   case Instruction::Call: {
     CallSite CS(cast<CallInst>(I));
     Result = SimplifyCall(CS.getCalledValue(), CS.arg_begin(), CS.arg_end(),
-                          TD, TLI, DT);
+                          DL, TLI, DT);
     break;
   }
   case Instruction::Trunc:
-    Result = SimplifyTruncInst(I->getOperand(0), I->getType(), TD, TLI, DT);
+    Result = SimplifyTruncInst(I->getOperand(0), I->getType(), DL, TLI, DT);
     break;
   }
 
@@ -3168,7 +3191,7 @@ Value *llvm::SimplifyInstruction(Instruction *I, const DataLayout *TD,
 /// This routine returns 'true' only when *it* simplifies something. The passed
 /// in simplified value does not count toward this.
 static bool replaceAndRecursivelySimplifyImpl(Instruction *I, Value *SimpleV,
-                                              const DataLayout *TD,
+                                              const DataLayout *DL,
                                               const TargetLibraryInfo *TLI,
                                               const DominatorTree *DT) {
   bool Simplified = false;
@@ -3177,10 +3200,9 @@ static bool replaceAndRecursivelySimplifyImpl(Instruction *I, Value *SimpleV,
   // If we have an explicit value to collapse to, do that round of the
   // simplification loop by hand initially.
   if (SimpleV) {
-    for (Value::use_iterator UI = I->use_begin(), UE = I->use_end(); UI != UE;
-         ++UI)
-      if (*UI != I)
-        Worklist.insert(cast<Instruction>(*UI));
+    for (User *U : I->users())
+      if (U != I)
+        Worklist.insert(cast<Instruction>(U));
 
     // Replace the instruction with its simplified value.
     I->replaceAllUsesWith(SimpleV);
@@ -3198,7 +3220,7 @@ static bool replaceAndRecursivelySimplifyImpl(Instruction *I, Value *SimpleV,
     I = Worklist[Idx];
 
     // See if this instruction simplifies.
-    SimpleV = SimplifyInstruction(I, TD, TLI, DT);
+    SimpleV = SimplifyInstruction(I, DL, TLI, DT);
     if (!SimpleV)
       continue;
 
@@ -3207,9 +3229,8 @@ static bool replaceAndRecursivelySimplifyImpl(Instruction *I, Value *SimpleV,
     // Stash away all the uses of the old instruction so we can check them for
     // recursive simplifications after a RAUW. This is cheaper than checking all
     // uses of To on the recursive step in most cases.
-    for (Value::use_iterator UI = I->use_begin(), UE = I->use_end(); UI != UE;
-         ++UI)
-      Worklist.insert(cast<Instruction>(*UI));
+    for (User *U : I->users())
+      Worklist.insert(cast<Instruction>(U));
 
     // Replace the instruction with its simplified value.
     I->replaceAllUsesWith(SimpleV);
@@ -3223,17 +3244,17 @@ static bool replaceAndRecursivelySimplifyImpl(Instruction *I, Value *SimpleV,
 }
 
 bool llvm::recursivelySimplifyInstruction(Instruction *I,
-                                          const DataLayout *TD,
+                                          const DataLayout *DL,
                                           const TargetLibraryInfo *TLI,
                                           const DominatorTree *DT) {
-  return replaceAndRecursivelySimplifyImpl(I, 0, TD, TLI, DT);
+  return replaceAndRecursivelySimplifyImpl(I, 0, DL, TLI, DT);
 }
 
 bool llvm::replaceAndRecursivelySimplify(Instruction *I, Value *SimpleV,
-                                         const DataLayout *TD,
+                                         const DataLayout *DL,
                                          const TargetLibraryInfo *TLI,
                                          const DominatorTree *DT) {
   assert(I != SimpleV && "replaceAndRecursivelySimplify(X,X) is not valid!");
   assert(SimpleV && "Must provide a simplified value.");
-  return replaceAndRecursivelySimplifyImpl(I, SimpleV, TD, TLI, DT);
+  return replaceAndRecursivelySimplifyImpl(I, SimpleV, DL, TLI, DT);
 }

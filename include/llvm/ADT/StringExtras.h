@@ -14,9 +14,9 @@
 #ifndef LLVM_ADT_STRINGEXTRAS_H
 #define LLVM_ADT_STRINGEXTRAS_H
 
-#include <iterator>
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
+#include <iterator>
 
 namespace llvm {
 template<typename T> class SmallVectorImpl;
@@ -26,6 +26,11 @@ template<typename T> class SmallVectorImpl;
 static inline char hexdigit(unsigned X, bool LowerCase = false) {
   const char HexChar = LowerCase ? 'a' : 'A';
   return X < 10 ? '0' + X : HexChar + X - 10;
+}
+
+/// Construct a string ref from a boolean.
+static inline StringRef toStringRef(bool B) {
+  return StringRef(B ? "true" : "false");
 }
 
 /// Interpret the given character \p C as a hexadecimal digit and return its

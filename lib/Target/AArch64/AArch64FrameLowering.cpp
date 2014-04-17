@@ -13,8 +13,8 @@
 
 #include "AArch64.h"
 #include "AArch64FrameLowering.h"
-#include "AArch64MachineFunctionInfo.h"
 #include "AArch64InstrInfo.h"
+#include "AArch64MachineFunctionInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -92,14 +92,12 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF) const {
   if (NeedsFrameMoves && NumInitialBytes) {
     // We emit this update even if the CFA is set from a frame pointer later so
     // that the CFA is valid in the interim.
-    MCSymbol *SPLabel = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::PROLOG_LABEL))
-      .addSym(SPLabel);
-
     MachineLocation Dst(MachineLocation::VirtualFP);
     unsigned Reg = MRI->getDwarfRegNum(AArch64::XSP, true);
-    MMI.addFrameInst(
-        MCCFIInstruction::createDefCfa(SPLabel, Reg, -NumInitialBytes));
+    unsigned CFIIndex = MMI.addFrameInst(
+        MCCFIInstruction::createDefCfa(nullptr, Reg, -NumInitialBytes));
+    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIndex);
   }
 
   // Otherwise we need to set the frame pointer and/or add a second stack
@@ -129,12 +127,12 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF) const {
                                - MFI->getStackSize());
 
       if (NeedsFrameMoves) {
-        MCSymbol *FPLabel = MMI.getContext().CreateTempSymbol();
-        BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::PROLOG_LABEL))
-          .addSym(FPLabel);
         unsigned Reg = MRI->getDwarfRegNum(AArch64::X29, true);
         unsigned Offset = MFI->getObjectOffset(X29FrameIdx);
-        MMI.addFrameInst(MCCFIInstruction::createDefCfa(FPLabel, Reg, Offset));
+        unsigned CFIIndex = MMI.addFrameInst(
+            MCCFIInstruction::createDefCfa(nullptr, Reg, Offset));
+        BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIndex);
       }
 
       FPNeedsSetting = false;
@@ -155,36 +153,29 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF) const {
   if (!NeedsFrameMoves)
     return;
 
-  // Reuse the label if appropriate, so create it in this outer scope.
-  MCSymbol *CSLabel = 0;
-
   // The rest of the stack adjustment
   if (!hasFP(MF) && NumResidualBytes) {
-    CSLabel = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::PROLOG_LABEL))
-      .addSym(CSLabel);
-
     MachineLocation Dst(MachineLocation::VirtualFP);
     unsigned Reg = MRI->getDwarfRegNum(AArch64::XSP, true);
     unsigned Offset = NumResidualBytes + NumInitialBytes;
-    MMI.addFrameInst(MCCFIInstruction::createDefCfa(CSLabel, Reg, -Offset));
+    unsigned CFIIndex =
+        MMI.addFrameInst(MCCFIInstruction::createDefCfa(nullptr, Reg, -Offset));
+    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIndex);
   }
 
   // And any callee-saved registers (it's fine to leave them to the end here,
   // because the old values are still valid at this point.
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
   if (CSI.size()) {
-    if (!CSLabel) {
-      CSLabel = MMI.getContext().CreateTempSymbol();
-      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::PROLOG_LABEL))
-        .addSym(CSLabel);
-    }
-
     for (std::vector<CalleeSavedInfo>::const_iterator I = CSI.begin(),
            E = CSI.end(); I != E; ++I) {
       unsigned Offset = MFI->getObjectOffset(I->getFrameIdx());
       unsigned Reg = MRI->getDwarfRegNum(I->getReg(), true);
-      MMI.addFrameInst(MCCFIInstruction::createOffset(CSLabel, Reg, Offset));
+      unsigned CFIIndex = MMI.addFrameInst(
+          MCCFIInstruction::createOffset(nullptr, Reg, Offset));
+      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+          .addCFIIndex(CFIIndex);
     }
   }
 }
@@ -237,7 +228,7 @@ AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
 
 
     // Delete the pseudo instruction TC_RETURN.
-    MachineInstr *NewMI = prior(MBBI);
+    MachineInstr *NewMI = std::prev(MBBI);
     MBB.erase(MBBI);
     MBBI = NewMI;
 
@@ -378,8 +369,8 @@ AArch64FrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
 
   // We certainly need some slack space for the scavenger, preferably an extra
   // register.
-  const uint16_t *CSRegs = RegInfo->getCalleeSavedRegs();
-  uint16_t ExtraReg = AArch64::NoRegister;
+  const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegs();
+  MCPhysReg ExtraReg = AArch64::NoRegister;
 
   for (unsigned i = 0; CSRegs[i]; ++i) {
     if (AArch64::GPR64RegClass.contains(CSRegs[i]) &&

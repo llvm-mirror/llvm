@@ -14,9 +14,9 @@
 #include "InstCombine.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/Support/CallSite.h"
-#include "llvm/Support/PatternMatch.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
@@ -56,8 +56,8 @@ static Type *reduceToSingleValueType(Type *T) {
 }
 
 Instruction *InstCombiner::SimplifyMemTransfer(MemIntrinsic *MI) {
-  unsigned DstAlign = getKnownAlignment(MI->getArgOperand(0), TD);
-  unsigned SrcAlign = getKnownAlignment(MI->getArgOperand(1), TD);
+  unsigned DstAlign = getKnownAlignment(MI->getArgOperand(0), DL);
+  unsigned SrcAlign = getKnownAlignment(MI->getArgOperand(1), DL);
   unsigned MinAlign = std::min(DstAlign, SrcAlign);
   unsigned CopyAlign = MI->getAlignment();
 
@@ -77,7 +77,7 @@ Instruction *InstCombiner::SimplifyMemTransfer(MemIntrinsic *MI) {
   // A single load+store correctly handles overlapping memory in the memmove
   // case.
   uint64_t Size = MemOpLength->getLimitedValue();
-  assert(Size && "0-sized memory transfering should be removed already.");
+  assert(Size && "0-sized memory transferring should be removed already.");
 
   if (Size > 8 || (Size&(Size-1)))
     return 0;  // If not 1/2/4/8 bytes, exit.
@@ -103,7 +103,7 @@ Instruction *InstCombiner::SimplifyMemTransfer(MemIntrinsic *MI) {
   if (StrippedDest != MI->getArgOperand(0)) {
     Type *SrcETy = cast<PointerType>(StrippedDest->getType())
                                     ->getElementType();
-    if (TD && SrcETy->isSized() && TD->getTypeStoreSize(SrcETy) == Size) {
+    if (DL && SrcETy->isSized() && DL->getTypeStoreSize(SrcETy) == Size) {
       // The SrcETy might be something like {{{double}}} or [1 x double].  Rip
       // down through these levels if so.
       SrcETy = reduceToSingleValueType(SrcETy);
@@ -152,7 +152,7 @@ Instruction *InstCombiner::SimplifyMemTransfer(MemIntrinsic *MI) {
 }
 
 Instruction *InstCombiner::SimplifyMemSet(MemSetInst *MI) {
-  unsigned Alignment = getKnownAlignment(MI->getDest(), TD);
+  unsigned Alignment = getKnownAlignment(MI->getDest(), DL);
   if (MI->getAlignment() < Alignment) {
     MI->setAlignment(ConstantInt::get(MI->getAlignmentType(),
                                              Alignment, false));
@@ -274,7 +274,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   default: break;
   case Intrinsic::objectsize: {
     uint64_t Size;
-    if (getObjectSize(II->getArgOperand(0), Size, TD, TLI))
+    if (getObjectSize(II->getArgOperand(0), Size, DL, TLI))
       return ReplaceInstUsesWith(CI, ConstantInt::get(CI.getType(), Size));
     return 0;
   }
@@ -504,7 +504,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::ppc_altivec_lvx:
   case Intrinsic::ppc_altivec_lvxl:
     // Turn PPC lvx -> load if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, TD) >= 16) {
+    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL) >= 16) {
       Value *Ptr = Builder->CreateBitCast(II->getArgOperand(0),
                                          PointerType::getUnqual(II->getType()));
       return new LoadInst(Ptr);
@@ -513,7 +513,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::ppc_altivec_stvx:
   case Intrinsic::ppc_altivec_stvxl:
     // Turn stvx -> store if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 16, TD) >= 16) {
+    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 16, DL) >= 16) {
       Type *OpPtrTy =
         PointerType::getUnqual(II->getArgOperand(0)->getType());
       Value *Ptr = Builder->CreateBitCast(II->getArgOperand(1), OpPtrTy);
@@ -524,7 +524,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::x86_sse2_storeu_pd:
   case Intrinsic::x86_sse2_storeu_dq:
     // Turn X86 storeu -> store if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, TD) >= 16) {
+    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL) >= 16) {
       Type *OpPtrTy =
         PointerType::getUnqual(II->getArgOperand(1)->getType());
       Value *Ptr = Builder->CreateBitCast(II->getArgOperand(0), OpPtrTy);
@@ -641,7 +641,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::arm_neon_vst2lane:
   case Intrinsic::arm_neon_vst3lane:
   case Intrinsic::arm_neon_vst4lane: {
-    unsigned MemAlign = getKnownAlignment(II->getArgOperand(0), TD);
+    unsigned MemAlign = getKnownAlignment(II->getArgOperand(0), DL);
     unsigned AlignArg = II->getNumArgOperands() - 1;
     ConstantInt *IntrAlign = dyn_cast<ConstantInt>(II->getArgOperand(AlignArg));
     if (IntrAlign && IntrAlign->getZExtValue() < MemAlign) {
@@ -654,7 +654,9 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   }
 
   case Intrinsic::arm_neon_vmulls:
-  case Intrinsic::arm_neon_vmullu: {
+  case Intrinsic::arm_neon_vmullu:
+  case Intrinsic::arm64_neon_smull:
+  case Intrinsic::arm64_neon_umull: {
     Value *Arg0 = II->getArgOperand(0);
     Value *Arg1 = II->getArgOperand(1);
 
@@ -664,42 +666,28 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     }
 
     // Check for constant LHS & RHS - in this case we just simplify.
-    bool Zext = (II->getIntrinsicID() == Intrinsic::arm_neon_vmullu);
+    bool Zext = (II->getIntrinsicID() == Intrinsic::arm_neon_vmullu ||
+                 II->getIntrinsicID() == Intrinsic::arm64_neon_umull);
     VectorType *NewVT = cast<VectorType>(II->getType());
-    unsigned NewWidth = NewVT->getElementType()->getIntegerBitWidth();
-    if (ConstantDataVector *CV0 = dyn_cast<ConstantDataVector>(Arg0)) {
-      if (ConstantDataVector *CV1 = dyn_cast<ConstantDataVector>(Arg1)) {
-        VectorType* VT = cast<VectorType>(CV0->getType());
-        SmallVector<Constant*, 4> NewElems;
-        for (unsigned i = 0; i < VT->getNumElements(); ++i) {
-          APInt CV0E =
-            (cast<ConstantInt>(CV0->getAggregateElement(i)))->getValue();
-          CV0E = Zext ? CV0E.zext(NewWidth) : CV0E.sext(NewWidth);
-          APInt CV1E =
-            (cast<ConstantInt>(CV1->getAggregateElement(i)))->getValue();
-          CV1E = Zext ? CV1E.zext(NewWidth) : CV1E.sext(NewWidth);
-          NewElems.push_back(
-            ConstantInt::get(NewVT->getElementType(), CV0E * CV1E));
-        }
-        return ReplaceInstUsesWith(CI, ConstantVector::get(NewElems));
+    if (Constant *CV0 = dyn_cast<Constant>(Arg0)) {
+      if (Constant *CV1 = dyn_cast<Constant>(Arg1)) {
+        CV0 = ConstantExpr::getIntegerCast(CV0, NewVT, /*isSigned=*/!Zext);
+        CV1 = ConstantExpr::getIntegerCast(CV1, NewVT, /*isSigned=*/!Zext);
+
+        return ReplaceInstUsesWith(CI, ConstantExpr::getMul(CV0, CV1));
       }
 
-      // Couldn't simplify - cannonicalize constant to the RHS.
+      // Couldn't simplify - canonicalize constant to the RHS.
       std::swap(Arg0, Arg1);
     }
 
     // Handle mul by one:
-    if (ConstantDataVector *CV1 = dyn_cast<ConstantDataVector>(Arg1)) {
+    if (Constant *CV1 = dyn_cast<Constant>(Arg1))
       if (ConstantInt *Splat =
-            dyn_cast_or_null<ConstantInt>(CV1->getSplatValue())) {
-        if (Splat->isOne()) {
-          if (Zext)
-            return CastInst::CreateZExtOrBitCast(Arg0, II->getType());
-          // else
-          return CastInst::CreateSExtOrBitCast(Arg0, II->getType());
-        }
-      }
-    }
+              dyn_cast_or_null<ConstantInt>(CV1->getSplatValue()))
+        if (Splat->isOne())
+          return CastInst::CreateIntegerCast(Arg0, II->getType(),
+                                             /*isSigned=*/!Zext);
 
     break;
   }
@@ -762,15 +750,15 @@ Instruction *InstCombiner::visitInvokeInst(InvokeInst &II) {
 /// passed through the varargs area, we can eliminate the use of the cast.
 static bool isSafeToEliminateVarargsCast(const CallSite CS,
                                          const CastInst * const CI,
-                                         const DataLayout * const TD,
+                                         const DataLayout * const DL,
                                          const int ix) {
   if (!CI->isLosslessCast())
     return false;
 
-  // The size of ByVal arguments is derived from the type, so we
+  // The size of ByVal or InAlloca arguments is derived from the type, so we
   // can't change to a type with a different size.  If the size were
   // passed explicitly we could avoid this check.
-  if (!CS.isByValArgument(ix))
+  if (!CS.isByValOrInAllocaArgument(ix))
     return true;
 
   Type* SrcTy =
@@ -778,7 +766,7 @@ static bool isSafeToEliminateVarargsCast(const CallSite CS,
   Type* DstTy = cast<PointerType>(CI->getType())->getElementType();
   if (!SrcTy->isSized() || !DstTy->isSized())
     return false;
-  if (!TD || TD->getTypeAllocSize(SrcTy) != TD->getTypeAllocSize(DstTy))
+  if (!DL || DL->getTypeAllocSize(SrcTy) != DL->getTypeAllocSize(DstTy))
     return false;
   return true;
 }
@@ -787,7 +775,7 @@ static bool isSafeToEliminateVarargsCast(const CallSite CS,
 // Currently we're only working with the checking functions, memcpy_chk,
 // mempcpy_chk, memmove_chk, memset_chk, strcpy_chk, stpcpy_chk, strncpy_chk,
 // strcat_chk and strncat_chk.
-Instruction *InstCombiner::tryOptimizeCall(CallInst *CI, const DataLayout *TD) {
+Instruction *InstCombiner::tryOptimizeCall(CallInst *CI, const DataLayout *DL) {
   if (CI->getCalledFunction() == 0) return 0;
 
   if (Value *With = Simplifier->optimizeCall(CI)) {
@@ -803,15 +791,14 @@ static IntrinsicInst *FindInitTrampolineFromAlloca(Value *TrampMem) {
   // is good enough in practice and simpler than handling any number of casts.
   Value *Underlying = TrampMem->stripPointerCasts();
   if (Underlying != TrampMem &&
-      (!Underlying->hasOneUse() || *Underlying->use_begin() != TrampMem))
+      (!Underlying->hasOneUse() || Underlying->user_back() != TrampMem))
     return 0;
   if (!isa<AllocaInst>(Underlying))
     return 0;
 
   IntrinsicInst *InitTrampoline = 0;
-  for (Value::use_iterator I = TrampMem->use_begin(), E = TrampMem->use_end();
-       I != E; I++) {
-    IntrinsicInst *II = dyn_cast<IntrinsicInst>(*I);
+  for (User *U : TrampMem->users()) {
+    IntrinsicInst *II = dyn_cast<IntrinsicInst>(U);
     if (!II)
       return 0;
     if (II->getIntrinsicID() == Intrinsic::init_trampoline) {
@@ -949,7 +936,7 @@ Instruction *InstCombiner::visitCallSite(CallSite CS) {
     for (CallSite::arg_iterator I = CS.arg_begin() + FTy->getNumParams(),
            E = CS.arg_end(); I != E; ++I, ++ix) {
       CastInst *CI = dyn_cast<CastInst>(*I);
-      if (CI && isSafeToEliminateVarargsCast(CS, CI, TD, ix)) {
+      if (CI && isSafeToEliminateVarargsCast(CS, CI, DL, ix)) {
         *I = CI->getOperand(0);
         Changed = true;
       }
@@ -966,7 +953,7 @@ Instruction *InstCombiner::visitCallSite(CallSite CS) {
   // this.  None of these calls are seen as possibly dead so go ahead and
   // delete the instruction now.
   if (CallInst *CI = dyn_cast<CallInst>(CS.getInstruction())) {
-    Instruction *I = tryOptimizeCall(CI, TD);
+    Instruction *I = tryOptimizeCall(CI, DL);
     // If we changed something return the result, etc. Otherwise let
     // the fallthrough check.
     if (I) return EraseInstFromFunction(*I);
@@ -994,11 +981,12 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
   Type *OldRetTy = Caller->getType();
   Type *NewRetTy = FT->getReturnType();
 
-  if (NewRetTy->isStructTy())
-    return false; // TODO: Handle multiple return values.
-
   // Check to see if we are changing the return type...
   if (OldRetTy != NewRetTy) {
+
+    if (NewRetTy->isStructTy())
+      return false; // TODO: Handle multiple return values.
+
     if (!CastInst::isBitCastable(NewRetTy, OldRetTy)) {
       if (Callee->isDeclaration())
         return false;   // Cannot transform this return value.
@@ -1024,9 +1012,8 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
     // the critical edge).  Bail out in this case.
     if (!Caller->use_empty())
       if (InvokeInst *II = dyn_cast<InvokeInst>(Caller))
-        for (Value::use_iterator UI = II->use_begin(), E = II->use_end();
-             UI != E; ++UI)
-          if (PHINode *PN = dyn_cast<PHINode>(*UI))
+        for (User *U : II->users())
+          if (PHINode *PN = dyn_cast<PHINode>(U))
             if (PN->getParent() == II->getNormalDest() ||
                 PN->getParent() == II->getUnwindDest())
               return false;
@@ -1048,18 +1035,21 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
                         typeIncompatible(ParamTy, i + 1), i + 1))
       return false;   // Attribute not compatible with transformed value.
 
+    if (CS.isInAllocaArgument(i))
+      return false;   // Cannot transform to and from inalloca.
+
     // If the parameter is passed as a byval argument, then we have to have a
     // sized type and the sized type has to have the same size as the old type.
     if (ParamTy != ActTy &&
         CallerPAL.getParamAttributes(i + 1).hasAttribute(i + 1,
                                                          Attribute::ByVal)) {
       PointerType *ParamPTy = dyn_cast<PointerType>(ParamTy);
-      if (ParamPTy == 0 || !ParamPTy->getElementType()->isSized() || TD == 0)
+      if (ParamPTy == 0 || !ParamPTy->getElementType()->isSized() || DL == 0)
         return false;
 
       Type *CurElTy = ActTy->getPointerElementType();
-      if (TD->getTypeAllocSize(CurElTy) !=
-          TD->getTypeAllocSize(ParamPTy->getElementType()))
+      if (DL->getTypeAllocSize(CurElTy) !=
+          DL->getTypeAllocSize(ParamPTy->getElementType()))
         return false;
     }
   }
@@ -1223,6 +1213,8 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
 
   if (!Caller->use_empty())
     ReplaceInstUsesWith(*Caller, NV);
+  else if (Caller->hasValueHandle())
+    ValueHandleBase::ValueIsRAUWd(Caller, NV);
 
   EraseInstFromFunction(*Caller);
   return true;

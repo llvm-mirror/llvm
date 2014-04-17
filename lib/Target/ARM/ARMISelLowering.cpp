@@ -14,7 +14,6 @@
 
 #define DEBUG_TYPE "arm-isel"
 #include "ARMISelLowering.h"
-#include "ARM.h"
 #include "ARMCallingConv.h"
 #include "ARMConstantPoolValue.h"
 #include "ARMMachineFunctionInfo.h"
@@ -46,19 +45,13 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetOptions.h"
+#include <utility>
 using namespace llvm;
 
 STATISTIC(NumTailCalls, "Number of tail calls");
 STATISTIC(NumMovwMovt, "Number of GAs materialized with movw + movt");
 STATISTIC(NumLoopByVals, "Number of loops generated for byval arguments");
-
-// This option should go away when tail calls fully work.
-static cl::opt<bool>
-EnableARMTailCalls("arm-tail-calls", cl::Hidden,
-  cl::desc("Generate tail calls (TEMPORARY OPTION)."),
-  cl::init(false));
 
 cl::opt<bool>
 EnableARMLongCalls("arm-long-calls", cl::Hidden,
@@ -86,7 +79,7 @@ namespace {
 }
 
 // The APCS parameter registers.
-static const uint16_t GPRArgRegs[] = {
+static const MCPhysReg GPRArgRegs[] = {
   ARM::R0, ARM::R1, ARM::R2, ARM::R3
 };
 
@@ -155,12 +148,12 @@ void ARMTargetLowering::addDRTypeForNEON(MVT VT) {
 }
 
 void ARMTargetLowering::addQRTypeForNEON(MVT VT) {
-  addRegisterClass(VT, &ARM::QPRRegClass);
+  addRegisterClass(VT, &ARM::DPairRegClass);
   addTypeForNEON(VT, MVT::v2f64, MVT::v4i32);
 }
 
 static TargetLoweringObjectFile *createTLOF(TargetMachine &TM) {
-  if (TM.getSubtarget<ARMSubtarget>().isTargetDarwin())
+  if (TM.getSubtarget<ARMSubtarget>().isTargetMachO())
     return new TargetLoweringObjectFileMachO();
 
   return new ARMElfTargetObjectFile();
@@ -174,9 +167,10 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
 
   setBooleanVectorContents(ZeroOrNegativeOneBooleanContent);
 
-  if (Subtarget->isTargetDarwin()) {
+  if (Subtarget->isTargetMachO()) {
     // Uses VFP for Thumb libfuncs if available.
-    if (Subtarget->isThumb() && Subtarget->hasVFP2()) {
+    if (Subtarget->isThumb() && Subtarget->hasVFP2() &&
+        Subtarget->hasARMOps()) {
       // Single-precision floating-point arithmetic.
       setLibcallName(RTLIB::ADD_F32, "__addsf3vfp");
       setLibcallName(RTLIB::SUB_F32, "__subsf3vfp");
@@ -256,7 +250,8 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
   setLibcallName(RTLIB::SRL_I128, 0);
   setLibcallName(RTLIB::SRA_I128, 0);
 
-  if (Subtarget->isAAPCS_ABI() && !Subtarget->isTargetDarwin()) {
+  if (Subtarget->isAAPCS_ABI() && !Subtarget->isTargetMachO() &&
+      !Subtarget->isTargetWindows()) {
     // Double-precision floating-point arithmetic helper functions
     // RTABI chapter 4.1.2, Table 2
     setLibcallName(RTLIB::ADD_F64, "__aeabi_dadd");
@@ -565,16 +560,6 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
     setOperationAction(ISD::FP_ROUND,   MVT::v2f32, Expand);
     setOperationAction(ISD::FP_EXTEND,  MVT::v2f64, Expand);
 
-    // Custom expand long extensions to vectors.
-    setOperationAction(ISD::SIGN_EXTEND, MVT::v8i32,  Custom);
-    setOperationAction(ISD::ZERO_EXTEND, MVT::v8i32,  Custom);
-    setOperationAction(ISD::SIGN_EXTEND, MVT::v4i64,  Custom);
-    setOperationAction(ISD::ZERO_EXTEND, MVT::v4i64,  Custom);
-    setOperationAction(ISD::SIGN_EXTEND, MVT::v16i32, Custom);
-    setOperationAction(ISD::ZERO_EXTEND, MVT::v16i32, Custom);
-    setOperationAction(ISD::SIGN_EXTEND, MVT::v8i64,  Custom);
-    setOperationAction(ISD::ZERO_EXTEND, MVT::v8i64,  Custom);
-
     // NEON does not have single instruction CTPOP for vectors with element
     // types wider than 8-bits.  However, custom lowering can leverage the
     // v8i8/v16i8 vcnt instruction.
@@ -741,8 +726,8 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
   setOperationAction(ISD::STACKSAVE,          MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE,       MVT::Other, Expand);
 
-  if (!Subtarget->isTargetDarwin()) {
-    // Non-Darwin platforms may return values in these registers via the
+  if (!Subtarget->isTargetMachO()) {
+    // Non-MachO platforms may return values in these registers via the
     // personality function.
     setExceptionPointerRegister(ARM::R0);
     setExceptionSelectorRegister(ARM::R1);
@@ -751,35 +736,24 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Expand);
   // ARMv6 Thumb1 (except for CPUs that support dmb / dsb) and earlier use
   // the default expansion.
-  // FIXME: This should be checking for v6k, not just v6.
-  if (Subtarget->hasDataBarrier() ||
-      (Subtarget->hasV6Ops() && !Subtarget->isThumb())) {
-    // membarrier needs custom lowering; the rest are legal and handled
-    // normally.
-    setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
-    // Custom lowering for 64-bit ops
-    setOperationAction(ISD::ATOMIC_LOAD_ADD,  MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_SUB,  MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_AND,  MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_OR,   MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_XOR,  MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_SWAP,      MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_MIN,  MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_MAX,  MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_UMIN, MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_LOAD_UMAX, MVT::i64, Custom);
-    setOperationAction(ISD::ATOMIC_CMP_SWAP,  MVT::i64, Custom);
+  if (Subtarget->hasAnyDataBarrier() && !Subtarget->isThumb1Only()) {
+    // ATOMIC_FENCE needs custom lowering; the others should have been expanded
+    // to ldrex/strex loops already.
+    setOperationAction(ISD::ATOMIC_FENCE,     MVT::Other, Custom);
+
     // On v8, we have particularly efficient implementations of atomic fences
     // if they can be combined with nearby atomic loads and stores.
     if (!Subtarget->hasV8Ops()) {
       // Automatically insert fences (dmb ist) around ATOMIC_SWAP etc.
       setInsertFencesForAtomic(true);
     }
-    setOperationAction(ISD::ATOMIC_LOAD, MVT::i64, Custom);
-    //setOperationAction(ISD::ATOMIC_STORE, MVT::i64, Custom);
   } else {
+    // If there's anything we can use as a barrier, go through custom lowering
+    // for ATOMIC_FENCE.
+    setOperationAction(ISD::ATOMIC_FENCE,   MVT::Other,
+                       Subtarget->hasAnyDataBarrier() ? Custom : Expand);
+
     // Set them all for expansion, which will force libcalls.
-    setOperationAction(ISD::ATOMIC_FENCE,   MVT::Other, Expand);
     setOperationAction(ISD::ATOMIC_CMP_SWAP,  MVT::i32, Expand);
     setOperationAction(ISD::ATOMIC_SWAP,      MVT::i32, Expand);
     setOperationAction(ISD::ATOMIC_LOAD_ADD,  MVT::i32, Expand);
@@ -877,6 +851,18 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
     }
   }
 
+  // Combine sin / cos into one node or libcall if possible.
+  if (Subtarget->hasSinCos()) {
+    setLibcallName(RTLIB::SINCOS_F32, "sincosf");
+    setLibcallName(RTLIB::SINCOS_F64, "sincos");
+    if (Subtarget->getTargetTriple().getOS() == Triple::IOS) {
+      // For iOS, we don't want to the normal expansion of a libcall to
+      // sincos. We want to issue a libcall to __sincos_stret.
+      setOperationAction(ISD::FSINCOS, MVT::f64, Custom);
+      setOperationAction(ISD::FSINCOS, MVT::f32, Custom);
+    }
+  }
+
   // We have target-specific dag combine patterns for the following nodes:
   // ARMISD::VMOVRRD  - No need to call setTargetDAGCombine
   setTargetDAGCombine(ISD::ADD);
@@ -913,44 +899,6 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
   PredictableSelectIsExpensive = Subtarget->isLikeA9();
 
   setMinFunctionAlignment(Subtarget->isThumb() ? 1 : 2);
-}
-
-static void getExclusiveOperation(unsigned Size, AtomicOrdering Ord,
-                                  bool isThumb2, unsigned &LdrOpc,
-                                  unsigned &StrOpc) {
-  static const unsigned LoadBares[4][2] =  {{ARM::LDREXB, ARM::t2LDREXB},
-                                            {ARM::LDREXH, ARM::t2LDREXH},
-                                            {ARM::LDREX,  ARM::t2LDREX},
-                                            {ARM::LDREXD, ARM::t2LDREXD}};
-  static const unsigned LoadAcqs[4][2] =   {{ARM::LDAEXB, ARM::t2LDAEXB},
-                                            {ARM::LDAEXH, ARM::t2LDAEXH},
-                                            {ARM::LDAEX,  ARM::t2LDAEX},
-                                            {ARM::LDAEXD, ARM::t2LDAEXD}};
-  static const unsigned StoreBares[4][2] = {{ARM::STREXB, ARM::t2STREXB},
-                                            {ARM::STREXH, ARM::t2STREXH},
-                                            {ARM::STREX,  ARM::t2STREX},
-                                            {ARM::STREXD, ARM::t2STREXD}};
-  static const unsigned StoreRels[4][2] =  {{ARM::STLEXB, ARM::t2STLEXB},
-                                            {ARM::STLEXH, ARM::t2STLEXH},
-                                            {ARM::STLEX,  ARM::t2STLEX},
-                                            {ARM::STLEXD, ARM::t2STLEXD}};
-
-  const unsigned (*LoadOps)[2], (*StoreOps)[2];
-  if (Ord == Acquire || Ord == AcquireRelease || Ord == SequentiallyConsistent)
-    LoadOps = LoadAcqs;
-  else
-    LoadOps = LoadBares;
-
-  if (Ord == Release || Ord == AcquireRelease || Ord == SequentiallyConsistent)
-    StoreOps = StoreRels;
-  else
-    StoreOps = StoreBares;
-
-  assert(isPowerOf2_32(Size) && Size <= 8 &&
-         "unsupported size for atomic binary op!");
-
-  LdrOpc = LoadOps[Log2_32(Size)][isThumb2];
-  StrOpc = StoreOps[Log2_32(Size)][isThumb2];
 }
 
 // FIXME: It might make sense to define the representative register class as the
@@ -1004,7 +952,6 @@ const char *ARMTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   default: return 0;
   case ARMISD::Wrapper:       return "ARMISD::Wrapper";
-  case ARMISD::WrapperDYN:    return "ARMISD::WrapperDYN";
   case ARMISD::WrapperPIC:    return "ARMISD::WrapperPIC";
   case ARMISD::WrapperJT:     return "ARMISD::WrapperJT";
   case ARMISD::CALL:          return "ARMISD::CALL";
@@ -1074,10 +1021,6 @@ const char *ARMTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case ARMISD::VSHL:          return "ARMISD::VSHL";
   case ARMISD::VSHRs:         return "ARMISD::VSHRs";
   case ARMISD::VSHRu:         return "ARMISD::VSHRu";
-  case ARMISD::VSHLLs:        return "ARMISD::VSHLLs";
-  case ARMISD::VSHLLu:        return "ARMISD::VSHLLu";
-  case ARMISD::VSHLLi:        return "ARMISD::VSHLLi";
-  case ARMISD::VSHRN:         return "ARMISD::VSHRN";
   case ARMISD::VRSHRs:        return "ARMISD::VRSHRs";
   case ARMISD::VRSHRu:        return "ARMISD::VRSHRu";
   case ARMISD::VRSHRN:        return "ARMISD::VRSHRN";
@@ -1445,9 +1388,11 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool isStructRet    = (Outs.empty()) ? false : Outs[0].Flags.isSRet();
   bool isThisReturn   = false;
   bool isSibCall      = false;
+
   // Disable tail calls if they're not supported.
-  if (!EnableARMTailCalls && !Subtarget->supportsTailCall())
+  if (!Subtarget->supportsTailCall() || MF.getTarget().Options.DisableTailCalls)
     isTailCall = false;
+
   if (isTailCall) {
     // Check if it's really possible to do a tail call.
     isTailCall = IsEligibleForTailCallOptimization(Callee, CallConv,
@@ -1690,25 +1635,16 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     const GlobalValue *GV = G->getGlobal();
     isDirect = true;
     bool isExt = GV->isDeclaration() || GV->isWeakForLinker();
-    bool isStub = (isExt && Subtarget->isTargetDarwin()) &&
+    bool isStub = (isExt && Subtarget->isTargetMachO()) &&
                    getTargetMachine().getRelocationModel() != Reloc::Static;
     isARMFunc = !Subtarget->isThumb() || isStub;
     // ARM call to a local ARM function is predicable.
     isLocalARMFunc = !Subtarget->isThumb() && (!isExt || !ARMInterworking);
     // tBX takes a register source operand.
-    if (isARMFunc && Subtarget->isThumb1Only() && !Subtarget->hasV5TOps()) {
-      unsigned ARMPCLabelIndex = AFI->createPICLabelUId();
-      ARMConstantPoolValue *CPV =
-        ARMConstantPoolConstant::Create(GV, ARMPCLabelIndex, ARMCP::CPValue, 4);
-      SDValue CPAddr = DAG.getTargetConstantPool(CPV, getPointerTy(), 4);
-      CPAddr = DAG.getNode(ARMISD::Wrapper, dl, MVT::i32, CPAddr);
-      Callee = DAG.getLoad(getPointerTy(), dl,
-                           DAG.getEntryNode(), CPAddr,
-                           MachinePointerInfo::getConstantPool(),
-                           false, false, false, 0);
-      SDValue PICLabel = DAG.getConstant(ARMPCLabelIndex, MVT::i32);
-      Callee = DAG.getNode(ARMISD::PIC_ADD, dl,
-                           getPointerTy(), Callee, PICLabel);
+    if (isStub && Subtarget->isThumb1Only() && !Subtarget->hasV5TOps()) {
+      assert(Subtarget->isTargetMachO() && "WrapperPIC use on non-MachO?");
+      Callee = DAG.getNode(ARMISD::WrapperPIC, dl, getPointerTy(),
+                           DAG.getTargetGlobalAddress(GV, dl, getPointerTy()));
     } else {
       // On ELF targets for PIC code, direct calls should go through the PLT
       unsigned OpFlags = 0;
@@ -1719,7 +1655,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     }
   } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     isDirect = true;
-    bool isStub = Subtarget->isTargetDarwin() &&
+    bool isStub = Subtarget->isTargetMachO() &&
                   getTargetMachine().getRelocationModel() != Reloc::Static;
     isARMFunc = !Subtarget->isThumb() || isStub;
     // tBX takes a register source operand.
@@ -1750,8 +1686,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // FIXME: handle tail calls differently.
   unsigned CallOpc;
-  bool HasMinSizeAttr = MF.getFunction()->getAttributes().
-    hasAttribute(AttributeSet::FunctionIndex, Attribute::MinSize);
+  bool HasMinSizeAttr = Subtarget->isMinSize();
   if (Subtarget->isThumb()) {
     if ((!isDirect || isARMFunc) && !Subtarget->hasV5TOps())
       CallOpc = ARMISD::CALL_NOLINK;
@@ -1836,22 +1771,6 @@ ARMTargetLowering::HandleByVal(
           State->getCallOrPrologue() == Call) &&
          "unhandled ParmContext");
 
-  // For in-prologue parameters handling, we also introduce stack offset
-  // for byval registers: see CallingConvLower.cpp, CCState::HandleByVal.
-  // This behaviour outsides AAPCS rules (5.5 Parameters Passing) of how
-  // NSAA should be evaluted (NSAA means "next stacked argument address").
-  // So: NextStackOffset = NSAAOffset + SizeOfByValParamsStoredInRegs.
-  // Then: NSAAOffset = NextStackOffset - SizeOfByValParamsStoredInRegs.
-  unsigned NSAAOffset = State->getNextStackOffset();
-  if (State->getCallOrPrologue() != Call) {
-    for (unsigned i = 0, e = State->getInRegsParamsCount(); i != e; ++i) {
-      unsigned RB, RE;
-      State->getInRegsParamInfo(i, RB, RE);
-      assert(NSAAOffset >= (RE-RB)*4 &&
-             "Stack offset for byval regs doesn't introduced anymore?");
-      NSAAOffset -= (RE-RB)*4;
-    }
-  }
   if ((ARM::R0 <= reg) && (reg <= ARM::R3)) {
     if (Subtarget->isAAPCS_ABI() && Align > 4) {
       unsigned AlignInRegs = Align / 4;
@@ -1866,6 +1785,7 @@ ARMTargetLowering::HandleByVal(
       // all remained GPR regs. In that case we can't split parameter, we must
       // send it to stack. We also must set NCRN to R4, so waste all
       // remained registers.
+      const unsigned NSAAOffset = State->getNextStackOffset();
       if (Subtarget->isAAPCS_ABI() && NSAAOffset != 0 && size > excess) {
         while (State->AllocateReg(GPRArgRegs, 4))
           ;
@@ -1885,18 +1805,14 @@ ARMTargetLowering::HandleByVal(
       // allocate remained amount of registers we need.
       for (unsigned i = reg+1; i != ByValRegEnd; ++i)
         State->AllocateReg(GPRArgRegs, 4);
-      // At a call site, a byval parameter that is split between
-      // registers and memory needs its size truncated here.  In a
-      // function prologue, such byval parameters are reassembled in
-      // memory, and are not truncated.
-      if (State->getCallOrPrologue() == Call) {
-        // Make remained size equal to 0 in case, when
-        // the whole structure may be stored into registers.
-        if (size < excess)
-          size = 0;
-        else
-          size -= excess;
-      }
+      // A byval parameter that is split between registers and memory needs its
+      // size truncated here.
+      // In the case where the entire structure fits in registers, we set the
+      // size in memory to zero.
+      if (size < excess)
+        size = 0;
+      else
+        size -= excess;
     }
   }
 }
@@ -2305,10 +2221,10 @@ bool ARMTargetLowering::isUsedByReturnOnly(SDNode *N, SDValue &Chain) const {
 }
 
 bool ARMTargetLowering::mayBeEmittedAsTailCall(CallInst *CI) const {
-  if (!EnableARMTailCalls && !Subtarget->supportsTailCall())
+  if (!Subtarget->supportsTailCall())
     return false;
 
-  if (!CI->isTailCall())
+  if (!CI->isTailCall() || getTargetMachine().Options.DisableTailCalls)
     return false;
 
   return !Subtarget->isThumb1Only();
@@ -2533,56 +2449,20 @@ SDValue ARMTargetLowering::LowerGlobalAddressDarwin(SDValue Op,
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
   Reloc::Model RelocM = getTargetMachine().getRelocationModel();
 
-  // FIXME: Enable this for static codegen when tool issues are fixed.  Also
-  // update ARMFastISel::ARMMaterializeGV.
-  if (Subtarget->useMovt() && RelocM != Reloc::Static) {
+  if (Subtarget->useMovt())
     ++NumMovwMovt;
-    // FIXME: Once remat is capable of dealing with instructions with register
-    // operands, expand this into two nodes.
-    if (RelocM == Reloc::Static)
-      return DAG.getNode(ARMISD::Wrapper, dl, PtrVT,
-                                 DAG.getTargetGlobalAddress(GV, dl, PtrVT));
 
-    unsigned Wrapper = (RelocM == Reloc::PIC_)
-      ? ARMISD::WrapperPIC : ARMISD::WrapperDYN;
-    SDValue Result = DAG.getNode(Wrapper, dl, PtrVT,
-                                 DAG.getTargetGlobalAddress(GV, dl, PtrVT));
-    if (Subtarget->GVIsIndirectSymbol(GV, RelocM))
-      Result = DAG.getLoad(PtrVT, dl, DAG.getEntryNode(), Result,
-                           MachinePointerInfo::getGOT(),
-                           false, false, false, 0);
-    return Result;
-  }
+  // FIXME: Once remat is capable of dealing with instructions with register
+  // operands, expand this into multiple nodes
+  unsigned Wrapper =
+      RelocM == Reloc::PIC_ ? ARMISD::WrapperPIC : ARMISD::Wrapper;
 
-  unsigned ARMPCLabelIndex = 0;
-  SDValue CPAddr;
-  if (RelocM == Reloc::Static) {
-    CPAddr = DAG.getTargetConstantPool(GV, PtrVT, 4);
-  } else {
-    ARMFunctionInfo *AFI = DAG.getMachineFunction().getInfo<ARMFunctionInfo>();
-    ARMPCLabelIndex = AFI->createPICLabelUId();
-    unsigned PCAdj = (RelocM != Reloc::PIC_) ? 0 : (Subtarget->isThumb()?4:8);
-    ARMConstantPoolValue *CPV =
-      ARMConstantPoolConstant::Create(GV, ARMPCLabelIndex, ARMCP::CPValue,
-                                      PCAdj);
-    CPAddr = DAG.getTargetConstantPool(CPV, PtrVT, 4);
-  }
-  CPAddr = DAG.getNode(ARMISD::Wrapper, dl, MVT::i32, CPAddr);
-
-  SDValue Result = DAG.getLoad(PtrVT, dl, DAG.getEntryNode(), CPAddr,
-                               MachinePointerInfo::getConstantPool(),
-                               false, false, false, 0);
-  SDValue Chain = Result.getValue(1);
-
-  if (RelocM == Reloc::PIC_) {
-    SDValue PICLabel = DAG.getConstant(ARMPCLabelIndex, MVT::i32);
-    Result = DAG.getNode(ARMISD::PIC_ADD, dl, PtrVT, Result, PICLabel);
-  }
+  SDValue G = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0, ARMII::MO_NONLAZY);
+  SDValue Result = DAG.getNode(Wrapper, dl, PtrVT, G);
 
   if (Subtarget->GVIsIndirectSymbol(GV, RelocM))
-    Result = DAG.getLoad(PtrVT, dl, Chain, Result, MachinePointerInfo::getGOT(),
-                         false, false, false, 0);
-
+    Result = DAG.getLoad(PtrVT, dl, DAG.getEntryNode(), Result,
+                         MachinePointerInfo::getGOT(), false, false, false, 0);
   return Result;
 }
 
@@ -2679,7 +2559,7 @@ static SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG,
     // Thumb1 and pre-v6 ARM mode use a libcall instead and should never get
     // here.
     assert(Subtarget->hasV6Ops() && !Subtarget->isThumb() &&
-           "Unexpected ISD::MEMBARRIER encountered. Should be libcall!");
+           "Unexpected ISD::ATOMIC_FENCE encountered. Should be libcall!");
     return DAG.getNode(ARMISD::MEMBARRIER_MCR, dl, MVT::Other, Op.getOperand(0),
                        DAG.getConstant(0, MVT::i32));
   }
@@ -2802,11 +2682,11 @@ ARMTargetLowering::computeRegArea(CCState &CCInfo, MachineFunction &MF,
   ArgRegsSize = NumGPRs * 4;
 
   // If parameter is split between stack and GPRs...
-  if (NumGPRs && Align == 8 &&
+  if (NumGPRs && Align > 4 &&
       (ArgRegsSize < ArgSize ||
         InRegsParamRecordIdx >= CCInfo.getInRegsParamsCount())) {
-    // Add padding for part of param recovered from GPRs, so
-    // its last byte must be at address K*8 - 1.
+    // Add padding for part of param recovered from GPRs.  For example,
+    // if Align == 8, its last byte must be at address K*8 - 1.
     // We need to do it, since remained (stack) part of parameter has
     // stack alignment, and we need to "attach" "GPRs head" without gaps
     // to it:
@@ -2816,8 +2696,7 @@ ARMTargetLowering::computeRegArea(CCState &CCInfo, MachineFunction &MF,
     //
     ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
     unsigned Padding =
-        ((ArgRegsSize + AFI->getArgRegsSaveSize() + Align - 1) & ~(Align-1)) -
-        (ArgRegsSize + AFI->getArgRegsSaveSize());
+        OffsetToAlignment(ArgRegsSize + AFI->getArgRegsSaveSize(), Align);
     ArgRegsSaveSize = ArgRegsSize + Padding;
   } else
     // We don't need to extend regs save size for byval parameters if they
@@ -2841,10 +2720,12 @@ ARMTargetLowering::StoreByValRegs(CCState &CCInfo, SelectionDAG &DAG,
                                   unsigned OffsetFromOrigArg,
                                   unsigned ArgOffset,
                                   unsigned ArgSize,
-                                  bool ForceMutable) const {
+                                  bool ForceMutable,
+                                  unsigned ByValStoreOffset,
+                                  unsigned TotalArgRegsSaveSize) const {
 
   // Currently, two use-cases possible:
-  // Case #1. Non var-args function, and we meet first byval parameter.
+  // Case #1. Non-var-args function, and we meet first byval parameter.
   //          Setup first unallocated register as first byval register;
   //          eat all remained registers
   //          (these two actions are performed by HandleByVal method).
@@ -2878,7 +2759,6 @@ ARMTargetLowering::StoreByValRegs(CCState &CCInfo, SelectionDAG &DAG,
   // Note: once stack area for byval/varargs registers
   // was initialized, it can't be initialized again.
   if (ArgRegsSaveSize) {
-
     unsigned Padding = ArgRegsSaveSize - ArgRegsSize;
 
     if (Padding) {
@@ -2887,11 +2767,18 @@ ARMTargetLowering::StoreByValRegs(CCState &CCInfo, SelectionDAG &DAG,
       AFI->setStoredByValParamsPadding(Padding);
     }
 
-    int FrameIndex = MFI->CreateFixedObject(
-                      ArgRegsSaveSize,
-                      Padding + ArgOffset,
-                      false);
+    int FrameIndex = MFI->CreateFixedObject(ArgRegsSaveSize,
+                                            Padding +
+                                              ByValStoreOffset -
+                                              (int64_t)TotalArgRegsSaveSize,
+                                            false);
     SDValue FIN = DAG.getFrameIndex(FrameIndex, getPointerTy());
+    if (Padding) {
+       MFI->CreateFixedObject(Padding,
+                              ArgOffset + ByValStoreOffset -
+                                (int64_t)ArgRegsSaveSize,
+                              false);
+    }
 
     SmallVector<SDValue, 4> MemOps;
     for (unsigned i = 0; firstRegToSaveIndex < lastRegToSaveIndex;
@@ -2919,10 +2806,16 @@ ARMTargetLowering::StoreByValRegs(CCState &CCInfo, SelectionDAG &DAG,
       Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
                           &MemOps[0], MemOps.size());
     return FrameIndex;
-  } else
+  } else {
+    if (ArgSize == 0) {
+      // We cannot allocate a zero-byte object for the first variadic argument,
+      // so just make up a size.
+      ArgSize = 4;
+    }
     // This will point to the next argument passed via stack.
     return MFI->CreateFixedObject(
-        4, AFI->getStoredByValParamsPadding() + ArgOffset, !ForceMutable);
+      ArgSize, ArgOffset, !ForceMutable);
+  }
 }
 
 // Setup stack frame, the va_list pointer will start from.
@@ -2930,6 +2823,7 @@ void
 ARMTargetLowering::VarArgStyleRegisters(CCState &CCInfo, SelectionDAG &DAG,
                                         SDLoc dl, SDValue &Chain,
                                         unsigned ArgOffset,
+                                        unsigned TotalArgRegsSaveSize,
                                         bool ForceMutable) const {
   MachineFunction &MF = DAG.getMachineFunction();
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
@@ -2941,7 +2835,7 @@ ARMTargetLowering::VarArgStyleRegisters(CCState &CCInfo, SelectionDAG &DAG,
   // argument passed via stack.
   int FrameIndex =
     StoreByValRegs(CCInfo, DAG, dl, Chain, 0, CCInfo.getInRegsParamsCount(),
-                   0, ArgOffset, 0, ForceMutable);
+                   0, ArgOffset, 0, ForceMutable, 0, TotalArgRegsSaveSize);
 
   AFI->setVarArgsFrameIndex(FrameIndex);
 }
@@ -2977,6 +2871,51 @@ ARMTargetLowering::LowerFormalArguments(SDValue Chain,
   // Then we increase this value each time we meet byval parameter.
   // We also increase this value in case of varargs function.
   AFI->setArgRegsSaveSize(0);
+
+  unsigned ByValStoreOffset = 0;
+  unsigned TotalArgRegsSaveSize = 0;
+  unsigned ArgRegsSaveSizeMaxAlign = 4;
+
+  // Calculate the amount of stack space that we need to allocate to store
+  // byval and variadic arguments that are passed in registers.
+  // We need to know this before we allocate the first byval or variadic
+  // argument, as they will be allocated a stack slot below the CFA (Canonical
+  // Frame Address, the stack pointer at entry to the function).
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    CCValAssign &VA = ArgLocs[i];
+    if (VA.isMemLoc()) {
+      int index = VA.getValNo();
+      if (index != lastInsIndex) {
+        ISD::ArgFlagsTy Flags = Ins[index].Flags;
+        if (Flags.isByVal()) {
+          unsigned ExtraArgRegsSize;
+          unsigned ExtraArgRegsSaveSize;
+          computeRegArea(CCInfo, MF, CCInfo.getInRegsParamsProceed(),
+                         Flags.getByValSize(),
+                         ExtraArgRegsSize, ExtraArgRegsSaveSize);
+
+          TotalArgRegsSaveSize += ExtraArgRegsSaveSize;
+          if (Flags.getByValAlign() > ArgRegsSaveSizeMaxAlign)
+              ArgRegsSaveSizeMaxAlign = Flags.getByValAlign();
+          CCInfo.nextInRegsParam();
+        }
+        lastInsIndex = index;
+      }
+    }
+  }
+  CCInfo.rewindByValRegsInfo();
+  lastInsIndex = -1;
+  if (isVarArg) {
+    unsigned ExtraArgRegsSize;
+    unsigned ExtraArgRegsSaveSize;
+    computeRegArea(CCInfo, MF, CCInfo.getInRegsParamsCount(), 0,
+                   ExtraArgRegsSize, ExtraArgRegsSaveSize);
+    TotalArgRegsSaveSize += ExtraArgRegsSaveSize;
+  }
+  // If the arg regs save area contains N-byte aligned values, the
+  // bottom of it must be at least N-byte aligned.
+  TotalArgRegsSaveSize = RoundUpToAlignment(TotalArgRegsSaveSize, ArgRegsSaveSizeMaxAlign);
+  TotalArgRegsSaveSize = std::min(TotalArgRegsSaveSize, 16U);
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
@@ -3076,18 +3015,23 @@ ARMTargetLowering::LowerFormalArguments(SDValue Chain,
           // a tail call.
           if (Flags.isByVal()) {
             unsigned CurByValIndex = CCInfo.getInRegsParamsProceed();
+
+            ByValStoreOffset = RoundUpToAlignment(ByValStoreOffset, Flags.getByValAlign());
             int FrameIndex = StoreByValRegs(
                 CCInfo, DAG, dl, Chain, CurOrigArg,
                 CurByValIndex,
                 Ins[VA.getValNo()].PartOffset,
                 VA.getLocMemOffset(),
                 Flags.getByValSize(),
-                true /*force mutable frames*/);
+                true /*force mutable frames*/,
+                ByValStoreOffset,
+                TotalArgRegsSaveSize);
+            ByValStoreOffset += Flags.getByValSize();
+            ByValStoreOffset = std::min(ByValStoreOffset, 16U);
             InVals.push_back(DAG.getFrameIndex(FrameIndex, getPointerTy()));
             CCInfo.nextInRegsParam();
           } else {
-            unsigned FIOffset = VA.getLocMemOffset() +
-                                AFI->getStoredByValParamsPadding();
+            unsigned FIOffset = VA.getLocMemOffset();
             int FI = MFI->CreateFixedObject(VA.getLocVT().getSizeInBits()/8,
                                             FIOffset, true);
 
@@ -3105,7 +3049,10 @@ ARMTargetLowering::LowerFormalArguments(SDValue Chain,
   // varargs
   if (isVarArg)
     VarArgStyleRegisters(CCInfo, DAG, dl, Chain,
-                         CCInfo.getNextStackOffset());
+                         CCInfo.getNextStackOffset(),
+                         TotalArgRegsSaveSize);
+
+  AFI->setArgumentStackSize(CCInfo.getNextStackOffset());
 
   return Chain;
 }
@@ -3274,7 +3221,7 @@ SDValue ARMTargetLowering::LowerSELECT(SDValue Op, SelectionDAG &DAG) const {
 static ISD::CondCode getInverseCCForVSEL(ISD::CondCode CC) {
   if (CC == ISD::SETNE)
     return ISD::SETEQ;
-  return ISD::getSetCCSwappedOperands(CC);
+  return ISD::getSetCCInverse(CC, true);
 }
 
 static void checkVSELConstraints(ISD::CondCode CC, ARMCC::CondCodes &CondCode,
@@ -3794,6 +3741,9 @@ SDValue ARMTargetLowering::LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const{
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MFI->setReturnAddressIsTaken(true);
 
+  if (verifyReturnAddressArgumentIsConstant(Op, DAG))
+    return SDValue();
+
   EVT VT = Op.getValueType();
   SDLoc dl(Op);
   unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
@@ -3817,7 +3767,7 @@ SDValue ARMTargetLowering::LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const {
   EVT VT = Op.getValueType();
   SDLoc dl(Op);  // FIXME probably not meaningful
   unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
-  unsigned FrameReg = (Subtarget->isThumb() || Subtarget->isTargetDarwin())
+  unsigned FrameReg = (Subtarget->isThumb() || Subtarget->isTargetMachO())
     ? ARM::R7 : ARM::R11;
   SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), dl, FrameReg, VT);
   while (Depth--)
@@ -3825,47 +3775,6 @@ SDValue ARMTargetLowering::LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const {
                             MachinePointerInfo(),
                             false, false, false, 0);
   return FrameAddr;
-}
-
-/// Custom Expand long vector extensions, where size(DestVec) > 2*size(SrcVec),
-/// and size(DestVec) > 128-bits.
-/// This is achieved by doing the one extension from the SrcVec, splitting the
-/// result, extending these parts, and then concatenating these into the
-/// destination.
-static SDValue ExpandVectorExtension(SDNode *N, SelectionDAG &DAG) {
-  SDValue Op = N->getOperand(0);
-  EVT SrcVT = Op.getValueType();
-  EVT DestVT = N->getValueType(0);
-
-  assert(DestVT.getSizeInBits() > 128 &&
-         "Custom sext/zext expansion needs >128-bit vector.");
-  // If this is a normal length extension, use the default expansion.
-  if (SrcVT.getSizeInBits()*4 != DestVT.getSizeInBits() &&
-      SrcVT.getSizeInBits()*8 != DestVT.getSizeInBits())
-    return SDValue();
-
-  SDLoc dl(N);
-  unsigned SrcEltSize = SrcVT.getVectorElementType().getSizeInBits();
-  unsigned DestEltSize = DestVT.getVectorElementType().getSizeInBits();
-  unsigned NumElts = SrcVT.getVectorNumElements();
-  LLVMContext &Ctx = *DAG.getContext();
-  SDValue Mid, SplitLo, SplitHi, ExtLo, ExtHi;
-
-  EVT MidVT = EVT::getVectorVT(Ctx, EVT::getIntegerVT(Ctx, SrcEltSize*2),
-                               NumElts);
-  EVT SplitVT = EVT::getVectorVT(Ctx, EVT::getIntegerVT(Ctx, SrcEltSize*2),
-                                 NumElts/2);
-  EVT ExtVT = EVT::getVectorVT(Ctx, EVT::getIntegerVT(Ctx, DestEltSize),
-                               NumElts/2);
-
-  Mid = DAG.getNode(N->getOpcode(), dl, MidVT, Op);
-  SplitLo = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, SplitVT, Mid,
-                        DAG.getIntPtrConstant(0));
-  SplitHi = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, SplitVT, Mid,
-                        DAG.getIntPtrConstant(NumElts/2));
-  ExtLo = DAG.getNode(N->getOpcode(), dl, ExtVT, SplitLo);
-  ExtHi = DAG.getNode(N->getOpcode(), dl, ExtVT, SplitHi);
-  return DAG.getNode(ISD::CONCAT_VECTORS, dl, DestVT, ExtLo, ExtHi);
 }
 
 /// ExpandBITCAST - If the target supports VFP, this function is called to
@@ -4416,7 +4325,6 @@ static SDValue isNEONModifiedImm(uint64_t SplatBits, uint64_t SplatUndef,
       // Value = 0x0000nnff: Op=x, Cmode=1100.
       OpCmode = 0xc;
       Imm = SplatBits >> 8;
-      SplatBits |= 0xff;
       break;
     }
 
@@ -4425,7 +4333,6 @@ static SDValue isNEONModifiedImm(uint64_t SplatBits, uint64_t SplatUndef,
       // Value = 0x00nnffff: Op=x, Cmode=1101.
       OpCmode = 0xd;
       Imm = SplatBits >> 16;
-      SplatBits |= 0xffff;
       break;
     }
 
@@ -4456,7 +4363,6 @@ static SDValue isNEONModifiedImm(uint64_t SplatBits, uint64_t SplatUndef,
     }
     // Op=1, Cmode=1110.
     OpCmode = 0x1e;
-    SplatBits = Val;
     VT = is128Bits ? MVT::v2i64 : MVT::v1i64;
     break;
   }
@@ -5998,43 +5904,78 @@ static SDValue LowerADDC_ADDE_SUBC_SUBE(SDValue Op, SelectionDAG &DAG) {
                      Op.getOperand(1), Op.getOperand(2));
 }
 
+SDValue ARMTargetLowering::LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const {
+  assert(Subtarget->isTargetDarwin());
+
+  // For iOS, we want to call an alternative entry point: __sincos_stret,
+  // return values are passed via sret.
+  SDLoc dl(Op);
+  SDValue Arg = Op.getOperand(0);
+  EVT ArgVT = Arg.getValueType();
+  Type *ArgTy = ArgVT.getTypeForEVT(*DAG.getContext());
+
+  MachineFrameInfo *FrameInfo = DAG.getMachineFunction().getFrameInfo();
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+
+  // Pair of floats / doubles used to pass the result.
+  StructType *RetTy = StructType::get(ArgTy, ArgTy, NULL);
+
+  // Create stack object for sret.
+  const uint64_t ByteSize = TLI.getDataLayout()->getTypeAllocSize(RetTy);
+  const unsigned StackAlign = TLI.getDataLayout()->getPrefTypeAlignment(RetTy);
+  int FrameIdx = FrameInfo->CreateStackObject(ByteSize, StackAlign, false);
+  SDValue SRet = DAG.getFrameIndex(FrameIdx, TLI.getPointerTy());
+
+  ArgListTy Args;
+  ArgListEntry Entry;
+
+  Entry.Node = SRet;
+  Entry.Ty = RetTy->getPointerTo();
+  Entry.isSExt = false;
+  Entry.isZExt = false;
+  Entry.isSRet = true;
+  Args.push_back(Entry);
+
+  Entry.Node = Arg;
+  Entry.Ty = ArgTy;
+  Entry.isSExt = false;
+  Entry.isZExt = false;
+  Args.push_back(Entry);
+
+  const char *LibcallName  = (ArgVT == MVT::f64)
+  ? "__sincos_stret" : "__sincosf_stret";
+  SDValue Callee = DAG.getExternalSymbol(LibcallName, getPointerTy());
+
+  TargetLowering::
+  CallLoweringInfo CLI(DAG.getEntryNode(), Type::getVoidTy(*DAG.getContext()),
+                       false, false, false, false, 0,
+                       CallingConv::C, /*isTaillCall=*/false,
+                       /*doesNotRet=*/false, /*isReturnValueUsed*/false,
+                       Callee, Args, DAG, dl);
+  std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
+
+  SDValue LoadSin = DAG.getLoad(ArgVT, dl, CallResult.second, SRet,
+                                MachinePointerInfo(), false, false, false, 0);
+
+  // Address of cos field.
+  SDValue Add = DAG.getNode(ISD::ADD, dl, getPointerTy(), SRet,
+                            DAG.getIntPtrConstant(ArgVT.getStoreSize()));
+  SDValue LoadCos = DAG.getLoad(ArgVT, dl, LoadSin.getValue(1), Add,
+                                MachinePointerInfo(), false, false, false, 0);
+
+  SDVTList Tys = DAG.getVTList(ArgVT, ArgVT);
+  return DAG.getNode(ISD::MERGE_VALUES, dl, Tys,
+                     LoadSin.getValue(0), LoadCos.getValue(0));
+}
+
 static SDValue LowerAtomicLoadStore(SDValue Op, SelectionDAG &DAG) {
   // Monotonic load/store is legal for all targets
   if (cast<AtomicSDNode>(Op)->getOrdering() <= Monotonic)
     return Op;
 
-  // Aquire/Release load/store is not legal for targets without a
+  // Acquire/Release load/store is not legal for targets without a
   // dmb or equivalent available.
   return SDValue();
-}
-
-static void
-ReplaceATOMIC_OP_64(SDNode *Node, SmallVectorImpl<SDValue>& Results,
-                    SelectionDAG &DAG) {
-  SDLoc dl(Node);
-  assert (Node->getValueType(0) == MVT::i64 &&
-          "Only know how to expand i64 atomics");
-  AtomicSDNode *AN = cast<AtomicSDNode>(Node);
-
-  SmallVector<SDValue, 6> Ops;
-  Ops.push_back(Node->getOperand(0)); // Chain
-  Ops.push_back(Node->getOperand(1)); // Ptr
-  for(unsigned i=2; i<Node->getNumOperands(); i++) {
-    // Low part
-    Ops.push_back(DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32,
-                              Node->getOperand(i), DAG.getIntPtrConstant(0)));
-    // High part
-    Ops.push_back(DAG.getNode(ISD::EXTRACT_ELEMENT, dl, MVT::i32,
-                              Node->getOperand(i), DAG.getIntPtrConstant(1)));
-  }
-  SDVTList Tys = DAG.getVTList(MVT::i32, MVT::i32, MVT::Other);
-  SDValue Result =
-    DAG.getAtomic(Node->getOpcode(), dl, MVT::i64, Tys, Ops.data(), Ops.size(),
-                  cast<MemSDNode>(Node)->getMemOperand(), AN->getOrdering(),
-                  AN->getSynchScope());
-  SDValue OpsF[] = { Result.getValue(0), Result.getValue(1) };
-  Results.push_back(DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i64, OpsF, 2));
-  Results.push_back(Result.getValue(2));
 }
 
 static void ReplaceREADCYCLECOUNTER(SDNode *N,
@@ -6081,7 +6022,7 @@ SDValue ARMTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::ConstantPool:  return LowerConstantPool(Op, DAG);
   case ISD::BlockAddress:  return LowerBlockAddress(Op, DAG);
   case ISD::GlobalAddress:
-    return Subtarget->isTargetDarwin() ? LowerGlobalAddressDarwin(Op, DAG) :
+    return Subtarget->isTargetMachO() ? LowerGlobalAddressDarwin(Op, DAG) :
       LowerGlobalAddressELF(Op, DAG);
   case ISD::GlobalTLSAddress: return LowerGlobalTLSAddress(Op, DAG);
   case ISD::SELECT:        return LowerSELECT(Op, DAG);
@@ -6129,6 +6070,7 @@ SDValue ARMTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::SUBE:          return LowerADDC_ADDE_SUBC_SUBE(Op, DAG);
   case ISD::ATOMIC_LOAD:
   case ISD::ATOMIC_STORE:  return LowerAtomicLoadStore(Op, DAG);
+  case ISD::FSINCOS:       return LowerFSINCOS(Op, DAG);
   case ISD::SDIVREM:
   case ISD::UDIVREM:       return LowerDivRem(Op, DAG);
   }
@@ -6146,32 +6088,12 @@ void ARMTargetLowering::ReplaceNodeResults(SDNode *N,
   case ISD::BITCAST:
     Res = ExpandBITCAST(N, DAG);
     break;
-  case ISD::SIGN_EXTEND:
-  case ISD::ZERO_EXTEND:
-    Res = ExpandVectorExtension(N, DAG);
-    break;
   case ISD::SRL:
   case ISD::SRA:
     Res = Expand64BitShift(N, DAG, Subtarget);
     break;
   case ISD::READCYCLECOUNTER:
     ReplaceREADCYCLECOUNTER(N, Results, DAG, Subtarget);
-    return;
-  case ISD::ATOMIC_STORE:
-  case ISD::ATOMIC_LOAD:
-  case ISD::ATOMIC_LOAD_ADD:
-  case ISD::ATOMIC_LOAD_AND:
-  case ISD::ATOMIC_LOAD_NAND:
-  case ISD::ATOMIC_LOAD_OR:
-  case ISD::ATOMIC_LOAD_SUB:
-  case ISD::ATOMIC_LOAD_XOR:
-  case ISD::ATOMIC_SWAP:
-  case ISD::ATOMIC_CMP_SWAP:
-  case ISD::ATOMIC_LOAD_MIN:
-  case ISD::ATOMIC_LOAD_UMIN:
-  case ISD::ATOMIC_LOAD_MAX:
-  case ISD::ATOMIC_LOAD_UMAX:
-    ReplaceATOMIC_OP_64(N, Results, DAG);
     return;
   }
   if (Res.getNode())
@@ -6181,538 +6103,6 @@ void ARMTargetLowering::ReplaceNodeResults(SDNode *N,
 //===----------------------------------------------------------------------===//
 //                           ARM Scheduler Hooks
 //===----------------------------------------------------------------------===//
-
-MachineBasicBlock *
-ARMTargetLowering::EmitAtomicCmpSwap(MachineInstr *MI,
-                                     MachineBasicBlock *BB,
-                                     unsigned Size) const {
-  unsigned dest    = MI->getOperand(0).getReg();
-  unsigned ptr     = MI->getOperand(1).getReg();
-  unsigned oldval  = MI->getOperand(2).getReg();
-  unsigned newval  = MI->getOperand(3).getReg();
-  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
-  AtomicOrdering Ord = static_cast<AtomicOrdering>(MI->getOperand(4).getImm());
-  DebugLoc dl = MI->getDebugLoc();
-  bool isThumb2 = Subtarget->isThumb2();
-
-  MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
-  unsigned scratch = MRI.createVirtualRegister(isThumb2 ?
-    (const TargetRegisterClass*)&ARM::rGPRRegClass :
-    (const TargetRegisterClass*)&ARM::GPRRegClass);
-
-  if (isThumb2) {
-    MRI.constrainRegClass(dest, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(oldval, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(newval, &ARM::rGPRRegClass);
-  }
-
-  unsigned ldrOpc, strOpc;
-  getExclusiveOperation(Size, Ord, isThumb2, ldrOpc, strOpc);
-
-  MachineFunction *MF = BB->getParent();
-  const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction::iterator It = BB;
-  ++It; // insert the new blocks after the current block
-
-  MachineBasicBlock *loop1MBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MachineBasicBlock *loop2MBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MachineBasicBlock *exitMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MF->insert(It, loop1MBB);
-  MF->insert(It, loop2MBB);
-  MF->insert(It, exitMBB);
-
-  // Transfer the remainder of BB and its successor edges to exitMBB.
-  exitMBB->splice(exitMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
-  exitMBB->transferSuccessorsAndUpdatePHIs(BB);
-
-  //  thisMBB:
-  //   ...
-  //   fallthrough --> loop1MBB
-  BB->addSuccessor(loop1MBB);
-
-  // loop1MBB:
-  //   ldrex dest, [ptr]
-  //   cmp dest, oldval
-  //   bne exitMBB
-  BB = loop1MBB;
-  MachineInstrBuilder MIB = BuildMI(BB, dl, TII->get(ldrOpc), dest).addReg(ptr);
-  if (ldrOpc == ARM::t2LDREX)
-    MIB.addImm(0);
-  AddDefaultPred(MIB);
-  AddDefaultPred(BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2CMPrr : ARM::CMPrr))
-                 .addReg(dest).addReg(oldval));
-  BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-    .addMBB(exitMBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
-  BB->addSuccessor(loop2MBB);
-  BB->addSuccessor(exitMBB);
-
-  // loop2MBB:
-  //   strex scratch, newval, [ptr]
-  //   cmp scratch, #0
-  //   bne loop1MBB
-  BB = loop2MBB;
-  MIB = BuildMI(BB, dl, TII->get(strOpc), scratch).addReg(newval).addReg(ptr);
-  if (strOpc == ARM::t2STREX)
-    MIB.addImm(0);
-  AddDefaultPred(MIB);
-  AddDefaultPred(BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2CMPri : ARM::CMPri))
-                 .addReg(scratch).addImm(0));
-  BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-    .addMBB(loop1MBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
-  BB->addSuccessor(loop1MBB);
-  BB->addSuccessor(exitMBB);
-
-  //  exitMBB:
-  //   ...
-  BB = exitMBB;
-
-  MI->eraseFromParent();   // The instruction is gone now.
-
-  return BB;
-}
-
-MachineBasicBlock *
-ARMTargetLowering::EmitAtomicBinary(MachineInstr *MI, MachineBasicBlock *BB,
-                                    unsigned Size, unsigned BinOpcode) const {
-  // This also handles ATOMIC_SWAP, indicated by BinOpcode==0.
-  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
-
-  const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction *MF = BB->getParent();
-  MachineFunction::iterator It = BB;
-  ++It;
-
-  unsigned dest = MI->getOperand(0).getReg();
-  unsigned ptr = MI->getOperand(1).getReg();
-  unsigned incr = MI->getOperand(2).getReg();
-  AtomicOrdering Ord = static_cast<AtomicOrdering>(MI->getOperand(3).getImm());
-  DebugLoc dl = MI->getDebugLoc();
-  bool isThumb2 = Subtarget->isThumb2();
-
-  MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
-  if (isThumb2) {
-    MRI.constrainRegClass(dest, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(ptr, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(incr, &ARM::rGPRRegClass);
-  }
-
-  unsigned ldrOpc, strOpc;
-  getExclusiveOperation(Size, Ord, isThumb2, ldrOpc, strOpc);
-
-  MachineBasicBlock *loopMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MachineBasicBlock *exitMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MF->insert(It, loopMBB);
-  MF->insert(It, exitMBB);
-
-  // Transfer the remainder of BB and its successor edges to exitMBB.
-  exitMBB->splice(exitMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
-  exitMBB->transferSuccessorsAndUpdatePHIs(BB);
-
-  const TargetRegisterClass *TRC = isThumb2 ?
-    (const TargetRegisterClass*)&ARM::rGPRRegClass :
-    (const TargetRegisterClass*)&ARM::GPRRegClass;
-  unsigned scratch = MRI.createVirtualRegister(TRC);
-  unsigned scratch2 = (!BinOpcode) ? incr : MRI.createVirtualRegister(TRC);
-
-  //  thisMBB:
-  //   ...
-  //   fallthrough --> loopMBB
-  BB->addSuccessor(loopMBB);
-
-  //  loopMBB:
-  //   ldrex dest, ptr
-  //   <binop> scratch2, dest, incr
-  //   strex scratch, scratch2, ptr
-  //   cmp scratch, #0
-  //   bne- loopMBB
-  //   fallthrough --> exitMBB
-  BB = loopMBB;
-  MachineInstrBuilder MIB = BuildMI(BB, dl, TII->get(ldrOpc), dest).addReg(ptr);
-  if (ldrOpc == ARM::t2LDREX)
-    MIB.addImm(0);
-  AddDefaultPred(MIB);
-  if (BinOpcode) {
-    // operand order needs to go the other way for NAND
-    if (BinOpcode == ARM::BICrr || BinOpcode == ARM::t2BICrr)
-      AddDefaultPred(BuildMI(BB, dl, TII->get(BinOpcode), scratch2).
-                     addReg(incr).addReg(dest)).addReg(0);
-    else
-      AddDefaultPred(BuildMI(BB, dl, TII->get(BinOpcode), scratch2).
-                     addReg(dest).addReg(incr)).addReg(0);
-  }
-
-  MIB = BuildMI(BB, dl, TII->get(strOpc), scratch).addReg(scratch2).addReg(ptr);
-  if (strOpc == ARM::t2STREX)
-    MIB.addImm(0);
-  AddDefaultPred(MIB);
-  AddDefaultPred(BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2CMPri : ARM::CMPri))
-                 .addReg(scratch).addImm(0));
-  BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-    .addMBB(loopMBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
-
-  BB->addSuccessor(loopMBB);
-  BB->addSuccessor(exitMBB);
-
-  //  exitMBB:
-  //   ...
-  BB = exitMBB;
-
-  MI->eraseFromParent();   // The instruction is gone now.
-
-  return BB;
-}
-
-MachineBasicBlock *
-ARMTargetLowering::EmitAtomicBinaryMinMax(MachineInstr *MI,
-                                          MachineBasicBlock *BB,
-                                          unsigned Size,
-                                          bool signExtend,
-                                          ARMCC::CondCodes Cond) const {
-  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
-
-  const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction *MF = BB->getParent();
-  MachineFunction::iterator It = BB;
-  ++It;
-
-  unsigned dest = MI->getOperand(0).getReg();
-  unsigned ptr = MI->getOperand(1).getReg();
-  unsigned incr = MI->getOperand(2).getReg();
-  unsigned oldval = dest;
-  AtomicOrdering Ord = static_cast<AtomicOrdering>(MI->getOperand(3).getImm());
-  DebugLoc dl = MI->getDebugLoc();
-  bool isThumb2 = Subtarget->isThumb2();
-
-  MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
-  if (isThumb2) {
-    MRI.constrainRegClass(dest, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(ptr, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(incr, &ARM::rGPRRegClass);
-  }
-
-  unsigned ldrOpc, strOpc, extendOpc;
-  getExclusiveOperation(Size, Ord, isThumb2, ldrOpc, strOpc);
-  switch (Size) {
-  default: llvm_unreachable("unsupported size for AtomicBinaryMinMax!");
-  case 1:
-    extendOpc = isThumb2 ? ARM::t2SXTB : ARM::SXTB;
-    break;
-  case 2:
-    extendOpc = isThumb2 ? ARM::t2SXTH : ARM::SXTH;
-    break;
-  case 4:
-    extendOpc = 0;
-    break;
-  }
-
-  MachineBasicBlock *loopMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MachineBasicBlock *exitMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MF->insert(It, loopMBB);
-  MF->insert(It, exitMBB);
-
-  // Transfer the remainder of BB and its successor edges to exitMBB.
-  exitMBB->splice(exitMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
-  exitMBB->transferSuccessorsAndUpdatePHIs(BB);
-
-  const TargetRegisterClass *TRC = isThumb2 ?
-    (const TargetRegisterClass*)&ARM::rGPRRegClass :
-    (const TargetRegisterClass*)&ARM::GPRRegClass;
-  unsigned scratch = MRI.createVirtualRegister(TRC);
-  unsigned scratch2 = MRI.createVirtualRegister(TRC);
-
-  //  thisMBB:
-  //   ...
-  //   fallthrough --> loopMBB
-  BB->addSuccessor(loopMBB);
-
-  //  loopMBB:
-  //   ldrex dest, ptr
-  //   (sign extend dest, if required)
-  //   cmp dest, incr
-  //   cmov.cond scratch2, incr, dest
-  //   strex scratch, scratch2, ptr
-  //   cmp scratch, #0
-  //   bne- loopMBB
-  //   fallthrough --> exitMBB
-  BB = loopMBB;
-  MachineInstrBuilder MIB = BuildMI(BB, dl, TII->get(ldrOpc), dest).addReg(ptr);
-  if (ldrOpc == ARM::t2LDREX)
-    MIB.addImm(0);
-  AddDefaultPred(MIB);
-
-  // Sign extend the value, if necessary.
-  if (signExtend && extendOpc) {
-    oldval = MRI.createVirtualRegister(isThumb2 ? &ARM::rGPRRegClass
-                                                : &ARM::GPRnopcRegClass);
-    if (!isThumb2)
-      MRI.constrainRegClass(dest, &ARM::GPRnopcRegClass);
-    AddDefaultPred(BuildMI(BB, dl, TII->get(extendOpc), oldval)
-                     .addReg(dest)
-                     .addImm(0));
-  }
-
-  // Build compare and cmov instructions.
-  AddDefaultPred(BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2CMPrr : ARM::CMPrr))
-                 .addReg(oldval).addReg(incr));
-  BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2MOVCCr : ARM::MOVCCr), scratch2)
-         .addReg(incr).addReg(oldval).addImm(Cond).addReg(ARM::CPSR);
-
-  MIB = BuildMI(BB, dl, TII->get(strOpc), scratch).addReg(scratch2).addReg(ptr);
-  if (strOpc == ARM::t2STREX)
-    MIB.addImm(0);
-  AddDefaultPred(MIB);
-  AddDefaultPred(BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2CMPri : ARM::CMPri))
-                 .addReg(scratch).addImm(0));
-  BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-    .addMBB(loopMBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
-
-  BB->addSuccessor(loopMBB);
-  BB->addSuccessor(exitMBB);
-
-  //  exitMBB:
-  //   ...
-  BB = exitMBB;
-
-  MI->eraseFromParent();   // The instruction is gone now.
-
-  return BB;
-}
-
-MachineBasicBlock *
-ARMTargetLowering::EmitAtomicBinary64(MachineInstr *MI, MachineBasicBlock *BB,
-                                      unsigned Op1, unsigned Op2,
-                                      bool NeedsCarry, bool IsCmpxchg,
-                                      bool IsMinMax, ARMCC::CondCodes CC) const {
-  // This also handles ATOMIC_SWAP and ATOMIC_STORE, indicated by Op1==0.
-  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
-
-  const BasicBlock *LLVM_BB = BB->getBasicBlock();
-  MachineFunction *MF = BB->getParent();
-  MachineFunction::iterator It = BB;
-  ++It;
-
-  bool isStore = (MI->getOpcode() == ARM::ATOMIC_STORE_I64);
-  unsigned offset = (isStore ? -2 : 0);
-  unsigned destlo = MI->getOperand(0).getReg();
-  unsigned desthi = MI->getOperand(1).getReg();
-  unsigned ptr = MI->getOperand(offset+2).getReg();
-  unsigned vallo = MI->getOperand(offset+3).getReg();
-  unsigned valhi = MI->getOperand(offset+4).getReg();
-  unsigned OrdIdx = offset + (IsCmpxchg ? 7 : 5);
-  AtomicOrdering Ord = static_cast<AtomicOrdering>(MI->getOperand(OrdIdx).getImm());
-  DebugLoc dl = MI->getDebugLoc();
-  bool isThumb2 = Subtarget->isThumb2();
-
-  MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
-  if (isThumb2) {
-    MRI.constrainRegClass(destlo, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(desthi, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(ptr, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(vallo, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(valhi, &ARM::rGPRRegClass);
-  }
-
-  unsigned ldrOpc, strOpc;
-  getExclusiveOperation(8, Ord, isThumb2, ldrOpc, strOpc);
-
-  MachineBasicBlock *loopMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MachineBasicBlock *contBB = 0, *cont2BB = 0;
-  if (IsCmpxchg || IsMinMax)
-    contBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  if (IsCmpxchg)
-    cont2BB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MachineBasicBlock *exitMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-
-  MF->insert(It, loopMBB);
-  if (IsCmpxchg || IsMinMax) MF->insert(It, contBB);
-  if (IsCmpxchg) MF->insert(It, cont2BB);
-  MF->insert(It, exitMBB);
-
-  // Transfer the remainder of BB and its successor edges to exitMBB.
-  exitMBB->splice(exitMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
-  exitMBB->transferSuccessorsAndUpdatePHIs(BB);
-
-  const TargetRegisterClass *TRC = isThumb2 ?
-    (const TargetRegisterClass*)&ARM::tGPRRegClass :
-    (const TargetRegisterClass*)&ARM::GPRRegClass;
-  unsigned storesuccess = MRI.createVirtualRegister(TRC);
-
-  //  thisMBB:
-  //   ...
-  //   fallthrough --> loopMBB
-  BB->addSuccessor(loopMBB);
-
-  //  loopMBB:
-  //   ldrexd r2, r3, ptr
-  //   <binopa> r0, r2, incr
-  //   <binopb> r1, r3, incr
-  //   strexd storesuccess, r0, r1, ptr
-  //   cmp storesuccess, #0
-  //   bne- loopMBB
-  //   fallthrough --> exitMBB
-  BB = loopMBB;
-
-  if (!isStore) {
-    // Load
-    if (isThumb2) {
-      AddDefaultPred(BuildMI(BB, dl, TII->get(ldrOpc))
-                     .addReg(destlo, RegState::Define)
-                     .addReg(desthi, RegState::Define)
-                     .addReg(ptr));
-    } else {
-      unsigned GPRPair0 = MRI.createVirtualRegister(&ARM::GPRPairRegClass);
-      AddDefaultPred(BuildMI(BB, dl, TII->get(ldrOpc))
-                     .addReg(GPRPair0, RegState::Define).addReg(ptr));
-      // Copy r2/r3 into dest.  (This copy will normally be coalesced.)
-      BuildMI(BB, dl, TII->get(TargetOpcode::COPY), destlo)
-        .addReg(GPRPair0, 0, ARM::gsub_0);
-      BuildMI(BB, dl, TII->get(TargetOpcode::COPY), desthi)
-        .addReg(GPRPair0, 0, ARM::gsub_1);
-    }
-  }
-
-  unsigned StoreLo, StoreHi;
-  if (IsCmpxchg) {
-    // Add early exit
-    for (unsigned i = 0; i < 2; i++) {
-      AddDefaultPred(BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2CMPrr :
-                                                         ARM::CMPrr))
-                     .addReg(i == 0 ? destlo : desthi)
-                     .addReg(i == 0 ? vallo : valhi));
-      BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-        .addMBB(exitMBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
-      BB->addSuccessor(exitMBB);
-      BB->addSuccessor(i == 0 ? contBB : cont2BB);
-      BB = (i == 0 ? contBB : cont2BB);
-    }
-
-    // Copy to physregs for strexd
-    StoreLo = MI->getOperand(5).getReg();
-    StoreHi = MI->getOperand(6).getReg();
-  } else if (Op1) {
-    // Perform binary operation
-    unsigned tmpRegLo = MRI.createVirtualRegister(TRC);
-    AddDefaultPred(BuildMI(BB, dl, TII->get(Op1), tmpRegLo)
-                   .addReg(destlo).addReg(vallo))
-        .addReg(NeedsCarry ? ARM::CPSR : 0, getDefRegState(NeedsCarry));
-    unsigned tmpRegHi = MRI.createVirtualRegister(TRC);
-    AddDefaultPred(BuildMI(BB, dl, TII->get(Op2), tmpRegHi)
-                   .addReg(desthi).addReg(valhi))
-        .addReg(IsMinMax ? ARM::CPSR : 0, getDefRegState(IsMinMax));
-
-    StoreLo = tmpRegLo;
-    StoreHi = tmpRegHi;
-  } else {
-    // Copy to physregs for strexd
-    StoreLo = vallo;
-    StoreHi = valhi;
-  }
-  if (IsMinMax) {
-    // Compare and branch to exit block.
-    BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-      .addMBB(exitMBB).addImm(CC).addReg(ARM::CPSR);
-    BB->addSuccessor(exitMBB);
-    BB->addSuccessor(contBB);
-    BB = contBB;
-    StoreLo = vallo;
-    StoreHi = valhi;
-  }
-
-  // Store
-  if (isThumb2) {
-    MRI.constrainRegClass(StoreLo, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(StoreHi, &ARM::rGPRRegClass);
-    AddDefaultPred(BuildMI(BB, dl, TII->get(strOpc), storesuccess)
-                   .addReg(StoreLo).addReg(StoreHi).addReg(ptr));
-  } else {
-    // Marshal a pair...
-    unsigned StorePair = MRI.createVirtualRegister(&ARM::GPRPairRegClass);
-    unsigned UndefPair = MRI.createVirtualRegister(&ARM::GPRPairRegClass);
-    unsigned r1 = MRI.createVirtualRegister(&ARM::GPRPairRegClass);
-    BuildMI(BB, dl, TII->get(TargetOpcode::IMPLICIT_DEF), UndefPair);
-    BuildMI(BB, dl, TII->get(TargetOpcode::INSERT_SUBREG), r1)
-      .addReg(UndefPair)
-      .addReg(StoreLo)
-      .addImm(ARM::gsub_0);
-    BuildMI(BB, dl, TII->get(TargetOpcode::INSERT_SUBREG), StorePair)
-      .addReg(r1)
-      .addReg(StoreHi)
-      .addImm(ARM::gsub_1);
-
-    // ...and store it
-    AddDefaultPred(BuildMI(BB, dl, TII->get(strOpc), storesuccess)
-                   .addReg(StorePair).addReg(ptr));
-  }
-  // Cmp+jump
-  AddDefaultPred(BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2CMPri : ARM::CMPri))
-                 .addReg(storesuccess).addImm(0));
-  BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-    .addMBB(loopMBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
-
-  BB->addSuccessor(loopMBB);
-  BB->addSuccessor(exitMBB);
-
-  //  exitMBB:
-  //   ...
-  BB = exitMBB;
-
-  MI->eraseFromParent();   // The instruction is gone now.
-
-  return BB;
-}
-
-MachineBasicBlock *
-ARMTargetLowering::EmitAtomicLoad64(MachineInstr *MI, MachineBasicBlock *BB) const {
-
-  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
-
-  unsigned destlo = MI->getOperand(0).getReg();
-  unsigned desthi = MI->getOperand(1).getReg();
-  unsigned ptr = MI->getOperand(2).getReg();
-  AtomicOrdering Ord = static_cast<AtomicOrdering>(MI->getOperand(3).getImm());
-  DebugLoc dl = MI->getDebugLoc();
-  bool isThumb2 = Subtarget->isThumb2();
-
-  MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
-  if (isThumb2) {
-    MRI.constrainRegClass(destlo, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(desthi, &ARM::rGPRRegClass);
-    MRI.constrainRegClass(ptr, &ARM::rGPRRegClass);
-  }
-  unsigned ldrOpc, strOpc;
-  getExclusiveOperation(8, Ord, isThumb2, ldrOpc, strOpc);
-
-  MachineInstrBuilder MIB = BuildMI(*BB, MI, dl, TII->get(ldrOpc));
-
-  if (isThumb2) {
-    MIB.addReg(destlo, RegState::Define)
-       .addReg(desthi, RegState::Define)
-       .addReg(ptr);
-
-  } else {
-    unsigned GPRPair0 = MRI.createVirtualRegister(&ARM::GPRPairRegClass);
-    MIB.addReg(GPRPair0, RegState::Define).addReg(ptr);
-
-    // Copy GPRPair0 into dest.  (This copy will normally be coalesced.)
-    BuildMI(*BB, MI, dl, TII->get(TargetOpcode::COPY), destlo)
-      .addReg(GPRPair0, 0, ARM::gsub_0);
-    BuildMI(*BB, MI, dl, TII->get(TargetOpcode::COPY), desthi)
-      .addReg(GPRPair0, 0, ARM::gsub_1);
-  }
-  AddDefaultPred(MIB);
-
-  MI->eraseFromParent();   // The instruction is gone now.
-
-  return BB;
-}
 
 /// SetupEntryBlockForSjLj - Insert code into the entry block that creates and
 /// registers the function context.
@@ -7168,7 +6558,7 @@ EmitSjLjDispatchBlock(MachineInstr *MI, MachineBasicBlock *MBB) const {
   }
 
   // N.B. the order the invoke BBs are processed in doesn't matter here.
-  const uint16_t *SavedRegs = RI.getCalleeSavedRegs(MF);
+  const MCPhysReg *SavedRegs = RI.getCalleeSavedRegs(MF);
   SmallVector<MachineBasicBlock*, 64> MBBLPads;
   for (SmallPtrSet<MachineBasicBlock*, 64>::iterator
          I = InvokeBBs.begin(), E = InvokeBBs.end(); I != E; ++I) {
@@ -7245,8 +6635,109 @@ MachineBasicBlock *OtherSucc(MachineBasicBlock *MBB, MachineBasicBlock *Succ) {
   llvm_unreachable("Expecting a BB with two successors!");
 }
 
-MachineBasicBlock *ARMTargetLowering::
-EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
+/// Return the load opcode for a given load size. If load size >= 8,
+/// neon opcode will be returned.
+static unsigned getLdOpcode(unsigned LdSize, bool IsThumb1, bool IsThumb2) {
+  if (LdSize >= 8)
+    return LdSize == 16 ? ARM::VLD1q32wb_fixed
+                        : LdSize == 8 ? ARM::VLD1d32wb_fixed : 0;
+  if (IsThumb1)
+    return LdSize == 4 ? ARM::tLDRi
+                       : LdSize == 2 ? ARM::tLDRHi
+                                     : LdSize == 1 ? ARM::tLDRBi : 0;
+  if (IsThumb2)
+    return LdSize == 4 ? ARM::t2LDR_POST
+                       : LdSize == 2 ? ARM::t2LDRH_POST
+                                     : LdSize == 1 ? ARM::t2LDRB_POST : 0;
+  return LdSize == 4 ? ARM::LDR_POST_IMM
+                     : LdSize == 2 ? ARM::LDRH_POST
+                                   : LdSize == 1 ? ARM::LDRB_POST_IMM : 0;
+}
+
+/// Return the store opcode for a given store size. If store size >= 8,
+/// neon opcode will be returned.
+static unsigned getStOpcode(unsigned StSize, bool IsThumb1, bool IsThumb2) {
+  if (StSize >= 8)
+    return StSize == 16 ? ARM::VST1q32wb_fixed
+                        : StSize == 8 ? ARM::VST1d32wb_fixed : 0;
+  if (IsThumb1)
+    return StSize == 4 ? ARM::tSTRi
+                       : StSize == 2 ? ARM::tSTRHi
+                                     : StSize == 1 ? ARM::tSTRBi : 0;
+  if (IsThumb2)
+    return StSize == 4 ? ARM::t2STR_POST
+                       : StSize == 2 ? ARM::t2STRH_POST
+                                     : StSize == 1 ? ARM::t2STRB_POST : 0;
+  return StSize == 4 ? ARM::STR_POST_IMM
+                     : StSize == 2 ? ARM::STRH_POST
+                                   : StSize == 1 ? ARM::STRB_POST_IMM : 0;
+}
+
+/// Emit a post-increment load operation with given size. The instructions
+/// will be added to BB at Pos.
+static void emitPostLd(MachineBasicBlock *BB, MachineInstr *Pos,
+                       const TargetInstrInfo *TII, DebugLoc dl,
+                       unsigned LdSize, unsigned Data, unsigned AddrIn,
+                       unsigned AddrOut, bool IsThumb1, bool IsThumb2) {
+  unsigned LdOpc = getLdOpcode(LdSize, IsThumb1, IsThumb2);
+  assert(LdOpc != 0 && "Should have a load opcode");
+  if (LdSize >= 8) {
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(LdOpc), Data)
+                       .addReg(AddrOut, RegState::Define).addReg(AddrIn)
+                       .addImm(0));
+  } else if (IsThumb1) {
+    // load + update AddrIn
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(LdOpc), Data)
+                       .addReg(AddrIn).addImm(0));
+    MachineInstrBuilder MIB =
+        BuildMI(*BB, Pos, dl, TII->get(ARM::tADDi8), AddrOut);
+    MIB = AddDefaultT1CC(MIB);
+    MIB.addReg(AddrIn).addImm(LdSize);
+    AddDefaultPred(MIB);
+  } else if (IsThumb2) {
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(LdOpc), Data)
+                       .addReg(AddrOut, RegState::Define).addReg(AddrIn)
+                       .addImm(LdSize));
+  } else { // arm
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(LdOpc), Data)
+                       .addReg(AddrOut, RegState::Define).addReg(AddrIn)
+                       .addReg(0).addImm(LdSize));
+  }
+}
+
+/// Emit a post-increment store operation with given size. The instructions
+/// will be added to BB at Pos.
+static void emitPostSt(MachineBasicBlock *BB, MachineInstr *Pos,
+                       const TargetInstrInfo *TII, DebugLoc dl,
+                       unsigned StSize, unsigned Data, unsigned AddrIn,
+                       unsigned AddrOut, bool IsThumb1, bool IsThumb2) {
+  unsigned StOpc = getStOpcode(StSize, IsThumb1, IsThumb2);
+  assert(StOpc != 0 && "Should have a store opcode");
+  if (StSize >= 8) {
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(StOpc), AddrOut)
+                       .addReg(AddrIn).addImm(0).addReg(Data));
+  } else if (IsThumb1) {
+    // store + update AddrIn
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(StOpc)).addReg(Data)
+                       .addReg(AddrIn).addImm(0));
+    MachineInstrBuilder MIB =
+        BuildMI(*BB, Pos, dl, TII->get(ARM::tADDi8), AddrOut);
+    MIB = AddDefaultT1CC(MIB);
+    MIB.addReg(AddrIn).addImm(StSize);
+    AddDefaultPred(MIB);
+  } else if (IsThumb2) {
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(StOpc), AddrOut)
+                       .addReg(Data).addReg(AddrIn).addImm(StSize));
+  } else { // arm
+    AddDefaultPred(BuildMI(*BB, Pos, dl, TII->get(StOpc), AddrOut)
+                       .addReg(Data).addReg(AddrIn).addReg(0)
+                       .addImm(StSize));
+  }
+}
+
+MachineBasicBlock *
+ARMTargetLowering::EmitStructByval(MachineInstr *MI,
+                                   MachineBasicBlock *BB) const {
   // This pseudo instruction has 3 operands: dst, src, size
   // We expand it to a loop if size > Subtarget->getMaxInlineSizeThreshold().
   // Otherwise, we will generate unrolled scalar copies.
@@ -7261,23 +6752,18 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
   unsigned Align = MI->getOperand(3).getImm();
   DebugLoc dl = MI->getDebugLoc();
 
-  bool isThumb2 = Subtarget->isThumb2();
   MachineFunction *MF = BB->getParent();
   MachineRegisterInfo &MRI = MF->getRegInfo();
-  unsigned ldrOpc, strOpc, UnitSize = 0;
+  unsigned UnitSize = 0;
+  const TargetRegisterClass *TRC = 0;
+  const TargetRegisterClass *VecTRC = 0;
 
-  const TargetRegisterClass *TRC = isThumb2 ?
-    (const TargetRegisterClass*)&ARM::tGPRRegClass :
-    (const TargetRegisterClass*)&ARM::GPRRegClass;
-  const TargetRegisterClass *TRC_Vec = 0;
+  bool IsThumb1 = Subtarget->isThumb1Only();
+  bool IsThumb2 = Subtarget->isThumb2();
 
   if (Align & 1) {
-    ldrOpc = isThumb2 ? ARM::t2LDRB_POST : ARM::LDRB_POST_IMM;
-    strOpc = isThumb2 ? ARM::t2STRB_POST : ARM::STRB_POST_IMM;
     UnitSize = 1;
   } else if (Align & 2) {
-    ldrOpc = isThumb2 ? ARM::t2LDRH_POST : ARM::LDRH_POST;
-    strOpc = isThumb2 ? ARM::t2STRH_POST : ARM::STRH_POST;
     UnitSize = 2;
   } else {
     // Check whether we can use NEON instructions.
@@ -7285,26 +6771,26 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
           hasAttribute(AttributeSet::FunctionIndex,
                        Attribute::NoImplicitFloat) &&
         Subtarget->hasNEON()) {
-      if ((Align % 16 == 0) && SizeVal >= 16) {
-        ldrOpc = ARM::VLD1q32wb_fixed;
-        strOpc = ARM::VST1q32wb_fixed;
+      if ((Align % 16 == 0) && SizeVal >= 16)
         UnitSize = 16;
-        TRC_Vec = (const TargetRegisterClass*)&ARM::DPairRegClass;
-      }
-      else if ((Align % 8 == 0) && SizeVal >= 8) {
-        ldrOpc = ARM::VLD1d32wb_fixed;
-        strOpc = ARM::VST1d32wb_fixed;
+      else if ((Align % 8 == 0) && SizeVal >= 8)
         UnitSize = 8;
-        TRC_Vec = (const TargetRegisterClass*)&ARM::DPRRegClass;
-      }
     }
     // Can't use NEON instructions.
-    if (UnitSize == 0) {
-      ldrOpc = isThumb2 ? ARM::t2LDR_POST : ARM::LDR_POST_IMM;
-      strOpc = isThumb2 ? ARM::t2STR_POST : ARM::STR_POST_IMM;
+    if (UnitSize == 0)
       UnitSize = 4;
-    }
   }
+
+  // Select the correct opcode and register class for unit size load/store
+  bool IsNeon = UnitSize >= 8;
+  TRC = (IsThumb1 || IsThumb2) ? (const TargetRegisterClass *)&ARM::tGPRRegClass
+                               : (const TargetRegisterClass *)&ARM::GPRRegClass;
+  if (IsNeon)
+    VecTRC = UnitSize == 16
+                 ? (const TargetRegisterClass *)&ARM::DPairRegClass
+                 : UnitSize == 8
+                       ? (const TargetRegisterClass *)&ARM::DPRRegClass
+                       : 0;
 
   unsigned BytesLeft = SizeVal % UnitSize;
   unsigned LoopSize = SizeVal - BytesLeft;
@@ -7316,34 +6802,13 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
     unsigned srcIn = src;
     unsigned destIn = dest;
     for (unsigned i = 0; i < LoopSize; i+=UnitSize) {
-      unsigned scratch = MRI.createVirtualRegister(UnitSize >= 8 ? TRC_Vec:TRC);
       unsigned srcOut = MRI.createVirtualRegister(TRC);
       unsigned destOut = MRI.createVirtualRegister(TRC);
-      if (UnitSize >= 8) {
-        AddDefaultPred(BuildMI(*BB, MI, dl,
-          TII->get(ldrOpc), scratch)
-          .addReg(srcOut, RegState::Define).addReg(srcIn).addImm(0));
-
-        AddDefaultPred(BuildMI(*BB, MI, dl, TII->get(strOpc), destOut)
-          .addReg(destIn).addImm(0).addReg(scratch));
-      } else if (isThumb2) {
-        AddDefaultPred(BuildMI(*BB, MI, dl,
-          TII->get(ldrOpc), scratch)
-          .addReg(srcOut, RegState::Define).addReg(srcIn).addImm(UnitSize));
-
-        AddDefaultPred(BuildMI(*BB, MI, dl, TII->get(strOpc), destOut)
-          .addReg(scratch).addReg(destIn)
-          .addImm(UnitSize));
-      } else {
-        AddDefaultPred(BuildMI(*BB, MI, dl,
-          TII->get(ldrOpc), scratch)
-          .addReg(srcOut, RegState::Define).addReg(srcIn).addReg(0)
-          .addImm(UnitSize));
-
-        AddDefaultPred(BuildMI(*BB, MI, dl, TII->get(strOpc), destOut)
-          .addReg(scratch).addReg(destIn)
-          .addReg(0).addImm(UnitSize));
-      }
+      unsigned scratch = MRI.createVirtualRegister(IsNeon ? VecTRC : TRC);
+      emitPostLd(BB, MI, TII, dl, UnitSize, scratch, srcIn, srcOut,
+                 IsThumb1, IsThumb2);
+      emitPostSt(BB, MI, TII, dl, UnitSize, scratch, destIn, destOut,
+                 IsThumb1, IsThumb2);
       srcIn = srcOut;
       destIn = destOut;
     }
@@ -7351,30 +6816,14 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
     // Handle the leftover bytes with LDRB and STRB.
     // [scratch, srcOut] = LDRB_POST(srcIn, 1)
     // [destOut] = STRB_POST(scratch, destIn, 1)
-    ldrOpc = isThumb2 ? ARM::t2LDRB_POST : ARM::LDRB_POST_IMM;
-    strOpc = isThumb2 ? ARM::t2STRB_POST : ARM::STRB_POST_IMM;
     for (unsigned i = 0; i < BytesLeft; i++) {
-      unsigned scratch = MRI.createVirtualRegister(TRC);
       unsigned srcOut = MRI.createVirtualRegister(TRC);
       unsigned destOut = MRI.createVirtualRegister(TRC);
-      if (isThumb2) {
-        AddDefaultPred(BuildMI(*BB, MI, dl,
-          TII->get(ldrOpc),scratch)
-          .addReg(srcOut, RegState::Define).addReg(srcIn).addImm(1));
-
-        AddDefaultPred(BuildMI(*BB, MI, dl, TII->get(strOpc), destOut)
-          .addReg(scratch).addReg(destIn)
-          .addReg(0).addImm(1));
-      } else {
-        AddDefaultPred(BuildMI(*BB, MI, dl,
-          TII->get(ldrOpc),scratch)
-          .addReg(srcOut, RegState::Define).addReg(srcIn)
-          .addReg(0).addImm(1));
-
-        AddDefaultPred(BuildMI(*BB, MI, dl, TII->get(strOpc), destOut)
-          .addReg(scratch).addReg(destIn)
-          .addReg(0).addImm(1));
-      }
+      unsigned scratch = MRI.createVirtualRegister(TRC);
+      emitPostLd(BB, MI, TII, dl, 1, scratch, srcIn, srcOut,
+                 IsThumb1, IsThumb2);
+      emitPostSt(BB, MI, TII, dl, 1, scratch, destIn, destOut,
+                 IsThumb1, IsThumb2);
       srcIn = srcOut;
       destIn = destOut;
     }
@@ -7409,23 +6858,21 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
 
   // Transfer the remainder of BB and its successor edges to exitMBB.
   exitMBB->splice(exitMBB->begin(), BB,
-                  llvm::next(MachineBasicBlock::iterator(MI)),
-                  BB->end());
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
   exitMBB->transferSuccessorsAndUpdatePHIs(BB);
 
   // Load an immediate to varEnd.
   unsigned varEnd = MRI.createVirtualRegister(TRC);
-  if (isThumb2) {
-    unsigned VReg1 = varEnd;
+  if (IsThumb2) {
+    unsigned Vtmp = varEnd;
     if ((LoopSize & 0xFFFF0000) != 0)
-      VReg1 = MRI.createVirtualRegister(TRC);
-    AddDefaultPred(BuildMI(BB, dl, TII->get(ARM::t2MOVi16), VReg1)
-                   .addImm(LoopSize & 0xFFFF));
+      Vtmp = MRI.createVirtualRegister(TRC);
+    AddDefaultPred(BuildMI(BB, dl, TII->get(ARM::t2MOVi16), Vtmp)
+                       .addImm(LoopSize & 0xFFFF));
 
     if ((LoopSize & 0xFFFF0000) != 0)
       AddDefaultPred(BuildMI(BB, dl, TII->get(ARM::t2MOVTi16), varEnd)
-                     .addReg(VReg1)
-                     .addImm(LoopSize >> 16));
+                         .addReg(Vtmp).addImm(LoopSize >> 16));
   } else {
     MachineConstantPool *ConstantPool = MF->getConstantPool();
     Type *Int32Ty = Type::getInt32Ty(MF->getFunction()->getContext());
@@ -7437,10 +6884,12 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
       Align = getDataLayout()->getTypeAllocSize(C->getType());
     unsigned Idx = ConstantPool->getConstantPoolIndex(C, Align);
 
-    AddDefaultPred(BuildMI(BB, dl, TII->get(ARM::LDRcp))
-                   .addReg(varEnd, RegState::Define)
-                   .addConstantPoolIndex(Idx)
-                   .addImm(0));
+    if (IsThumb1)
+      AddDefaultPred(BuildMI(*BB, MI, dl, TII->get(ARM::tLDRpci)).addReg(
+          varEnd, RegState::Define).addConstantPoolIndex(Idx));
+    else
+      AddDefaultPred(BuildMI(*BB, MI, dl, TII->get(ARM::LDRcp)).addReg(
+          varEnd, RegState::Define).addConstantPoolIndex(Idx).addImm(0));
   }
   BB->addSuccessor(loopMBB);
 
@@ -7469,39 +6918,30 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
 
   //   [scratch, srcLoop] = LDR_POST(srcPhi, UnitSize)
   //   [destLoop] = STR_POST(scratch, destPhi, UnitSiz)
-  unsigned scratch = MRI.createVirtualRegister(UnitSize >= 8 ? TRC_Vec:TRC);
-  if (UnitSize >= 8) {
-    AddDefaultPred(BuildMI(BB, dl, TII->get(ldrOpc), scratch)
-      .addReg(srcLoop, RegState::Define).addReg(srcPhi).addImm(0));
-
-    AddDefaultPred(BuildMI(BB, dl, TII->get(strOpc), destLoop)
-      .addReg(destPhi).addImm(0).addReg(scratch));
-  } else if (isThumb2) {
-    AddDefaultPred(BuildMI(BB, dl, TII->get(ldrOpc), scratch)
-      .addReg(srcLoop, RegState::Define).addReg(srcPhi).addImm(UnitSize));
-
-    AddDefaultPred(BuildMI(BB, dl, TII->get(strOpc), destLoop)
-      .addReg(scratch).addReg(destPhi)
-      .addImm(UnitSize));
-  } else {
-    AddDefaultPred(BuildMI(BB, dl, TII->get(ldrOpc), scratch)
-      .addReg(srcLoop, RegState::Define).addReg(srcPhi).addReg(0)
-      .addImm(UnitSize));
-
-    AddDefaultPred(BuildMI(BB, dl, TII->get(strOpc), destLoop)
-      .addReg(scratch).addReg(destPhi)
-      .addReg(0).addImm(UnitSize));
-  }
+  unsigned scratch = MRI.createVirtualRegister(IsNeon ? VecTRC : TRC);
+  emitPostLd(BB, BB->end(), TII, dl, UnitSize, scratch, srcPhi, srcLoop,
+             IsThumb1, IsThumb2);
+  emitPostSt(BB, BB->end(), TII, dl, UnitSize, scratch, destPhi, destLoop,
+             IsThumb1, IsThumb2);
 
   // Decrement loop variable by UnitSize.
-  MachineInstrBuilder MIB = BuildMI(BB, dl,
-    TII->get(isThumb2 ? ARM::t2SUBri : ARM::SUBri), varLoop);
-  AddDefaultCC(AddDefaultPred(MIB.addReg(varPhi).addImm(UnitSize)));
-  MIB->getOperand(5).setReg(ARM::CPSR);
-  MIB->getOperand(5).setIsDef(true);
-
-  BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
-    .addMBB(loopMBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
+  if (IsThumb1) {
+    MachineInstrBuilder MIB =
+        BuildMI(*BB, BB->end(), dl, TII->get(ARM::tSUBi8), varLoop);
+    MIB = AddDefaultT1CC(MIB);
+    MIB.addReg(varPhi).addImm(UnitSize);
+    AddDefaultPred(MIB);
+  } else {
+    MachineInstrBuilder MIB =
+        BuildMI(*BB, BB->end(), dl,
+                TII->get(IsThumb2 ? ARM::t2SUBri : ARM::SUBri), varLoop);
+    AddDefaultCC(AddDefaultPred(MIB.addReg(varPhi).addImm(UnitSize)));
+    MIB->getOperand(5).setReg(ARM::CPSR);
+    MIB->getOperand(5).setIsDef(true);
+  }
+  BuildMI(*BB, BB->end(), dl,
+          TII->get(IsThumb1 ? ARM::tBcc : IsThumb2 ? ARM::t2Bcc : ARM::Bcc))
+      .addMBB(loopMBB).addImm(ARMCC::NE).addReg(ARM::CPSR);
 
   // loopMBB can loop back to loopMBB or fall through to exitMBB.
   BB->addSuccessor(loopMBB);
@@ -7510,34 +6950,19 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
   // Add epilogue to handle BytesLeft.
   BB = exitMBB;
   MachineInstr *StartOfExit = exitMBB->begin();
-  ldrOpc = isThumb2 ? ARM::t2LDRB_POST : ARM::LDRB_POST_IMM;
-  strOpc = isThumb2 ? ARM::t2STRB_POST : ARM::STRB_POST_IMM;
 
   //   [scratch, srcOut] = LDRB_POST(srcLoop, 1)
   //   [destOut] = STRB_POST(scratch, destLoop, 1)
   unsigned srcIn = srcLoop;
   unsigned destIn = destLoop;
   for (unsigned i = 0; i < BytesLeft; i++) {
-    unsigned scratch = MRI.createVirtualRegister(TRC);
     unsigned srcOut = MRI.createVirtualRegister(TRC);
     unsigned destOut = MRI.createVirtualRegister(TRC);
-    if (isThumb2) {
-      AddDefaultPred(BuildMI(*BB, StartOfExit, dl,
-        TII->get(ldrOpc),scratch)
-        .addReg(srcOut, RegState::Define).addReg(srcIn).addImm(1));
-
-      AddDefaultPred(BuildMI(*BB, StartOfExit, dl, TII->get(strOpc), destOut)
-        .addReg(scratch).addReg(destIn)
-        .addImm(1));
-    } else {
-      AddDefaultPred(BuildMI(*BB, StartOfExit, dl,
-        TII->get(ldrOpc),scratch)
-        .addReg(srcOut, RegState::Define).addReg(srcIn).addReg(0).addImm(1));
-
-      AddDefaultPred(BuildMI(*BB, StartOfExit, dl, TII->get(strOpc), destOut)
-        .addReg(scratch).addReg(destIn)
-        .addReg(0).addImm(1));
-    }
+    unsigned scratch = MRI.createVirtualRegister(TRC);
+    emitPostLd(BB, StartOfExit, TII, dl, 1, scratch, srcIn, srcOut,
+               IsThumb1, IsThumb2);
+    emitPostSt(BB, StartOfExit, TII, dl, 1, scratch, destIn, destOut,
+               IsThumb1, IsThumb2);
     srcIn = srcOut;
     destIn = destOut;
   }
@@ -7609,131 +7034,6 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
     MI->eraseFromParent();
     return BB;
   }
-  case ARM::ATOMIC_LOAD_ADD_I8:
-     return EmitAtomicBinary(MI, BB, 1, isThumb2 ? ARM::t2ADDrr : ARM::ADDrr);
-  case ARM::ATOMIC_LOAD_ADD_I16:
-     return EmitAtomicBinary(MI, BB, 2, isThumb2 ? ARM::t2ADDrr : ARM::ADDrr);
-  case ARM::ATOMIC_LOAD_ADD_I32:
-     return EmitAtomicBinary(MI, BB, 4, isThumb2 ? ARM::t2ADDrr : ARM::ADDrr);
-
-  case ARM::ATOMIC_LOAD_AND_I8:
-     return EmitAtomicBinary(MI, BB, 1, isThumb2 ? ARM::t2ANDrr : ARM::ANDrr);
-  case ARM::ATOMIC_LOAD_AND_I16:
-     return EmitAtomicBinary(MI, BB, 2, isThumb2 ? ARM::t2ANDrr : ARM::ANDrr);
-  case ARM::ATOMIC_LOAD_AND_I32:
-     return EmitAtomicBinary(MI, BB, 4, isThumb2 ? ARM::t2ANDrr : ARM::ANDrr);
-
-  case ARM::ATOMIC_LOAD_OR_I8:
-     return EmitAtomicBinary(MI, BB, 1, isThumb2 ? ARM::t2ORRrr : ARM::ORRrr);
-  case ARM::ATOMIC_LOAD_OR_I16:
-     return EmitAtomicBinary(MI, BB, 2, isThumb2 ? ARM::t2ORRrr : ARM::ORRrr);
-  case ARM::ATOMIC_LOAD_OR_I32:
-     return EmitAtomicBinary(MI, BB, 4, isThumb2 ? ARM::t2ORRrr : ARM::ORRrr);
-
-  case ARM::ATOMIC_LOAD_XOR_I8:
-     return EmitAtomicBinary(MI, BB, 1, isThumb2 ? ARM::t2EORrr : ARM::EORrr);
-  case ARM::ATOMIC_LOAD_XOR_I16:
-     return EmitAtomicBinary(MI, BB, 2, isThumb2 ? ARM::t2EORrr : ARM::EORrr);
-  case ARM::ATOMIC_LOAD_XOR_I32:
-     return EmitAtomicBinary(MI, BB, 4, isThumb2 ? ARM::t2EORrr : ARM::EORrr);
-
-  case ARM::ATOMIC_LOAD_NAND_I8:
-     return EmitAtomicBinary(MI, BB, 1, isThumb2 ? ARM::t2BICrr : ARM::BICrr);
-  case ARM::ATOMIC_LOAD_NAND_I16:
-     return EmitAtomicBinary(MI, BB, 2, isThumb2 ? ARM::t2BICrr : ARM::BICrr);
-  case ARM::ATOMIC_LOAD_NAND_I32:
-     return EmitAtomicBinary(MI, BB, 4, isThumb2 ? ARM::t2BICrr : ARM::BICrr);
-
-  case ARM::ATOMIC_LOAD_SUB_I8:
-     return EmitAtomicBinary(MI, BB, 1, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr);
-  case ARM::ATOMIC_LOAD_SUB_I16:
-     return EmitAtomicBinary(MI, BB, 2, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr);
-  case ARM::ATOMIC_LOAD_SUB_I32:
-     return EmitAtomicBinary(MI, BB, 4, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr);
-
-  case ARM::ATOMIC_LOAD_MIN_I8:
-     return EmitAtomicBinaryMinMax(MI, BB, 1, true, ARMCC::LT);
-  case ARM::ATOMIC_LOAD_MIN_I16:
-     return EmitAtomicBinaryMinMax(MI, BB, 2, true, ARMCC::LT);
-  case ARM::ATOMIC_LOAD_MIN_I32:
-     return EmitAtomicBinaryMinMax(MI, BB, 4, true, ARMCC::LT);
-
-  case ARM::ATOMIC_LOAD_MAX_I8:
-     return EmitAtomicBinaryMinMax(MI, BB, 1, true, ARMCC::GT);
-  case ARM::ATOMIC_LOAD_MAX_I16:
-     return EmitAtomicBinaryMinMax(MI, BB, 2, true, ARMCC::GT);
-  case ARM::ATOMIC_LOAD_MAX_I32:
-     return EmitAtomicBinaryMinMax(MI, BB, 4, true, ARMCC::GT);
-
-  case ARM::ATOMIC_LOAD_UMIN_I8:
-     return EmitAtomicBinaryMinMax(MI, BB, 1, false, ARMCC::LO);
-  case ARM::ATOMIC_LOAD_UMIN_I16:
-     return EmitAtomicBinaryMinMax(MI, BB, 2, false, ARMCC::LO);
-  case ARM::ATOMIC_LOAD_UMIN_I32:
-     return EmitAtomicBinaryMinMax(MI, BB, 4, false, ARMCC::LO);
-
-  case ARM::ATOMIC_LOAD_UMAX_I8:
-     return EmitAtomicBinaryMinMax(MI, BB, 1, false, ARMCC::HI);
-  case ARM::ATOMIC_LOAD_UMAX_I16:
-     return EmitAtomicBinaryMinMax(MI, BB, 2, false, ARMCC::HI);
-  case ARM::ATOMIC_LOAD_UMAX_I32:
-     return EmitAtomicBinaryMinMax(MI, BB, 4, false, ARMCC::HI);
-
-  case ARM::ATOMIC_SWAP_I8:  return EmitAtomicBinary(MI, BB, 1, 0);
-  case ARM::ATOMIC_SWAP_I16: return EmitAtomicBinary(MI, BB, 2, 0);
-  case ARM::ATOMIC_SWAP_I32: return EmitAtomicBinary(MI, BB, 4, 0);
-
-  case ARM::ATOMIC_CMP_SWAP_I8:  return EmitAtomicCmpSwap(MI, BB, 1);
-  case ARM::ATOMIC_CMP_SWAP_I16: return EmitAtomicCmpSwap(MI, BB, 2);
-  case ARM::ATOMIC_CMP_SWAP_I32: return EmitAtomicCmpSwap(MI, BB, 4);
-
-  case ARM::ATOMIC_LOAD_I64:
-    return EmitAtomicLoad64(MI, BB);
-
-  case ARM::ATOMIC_LOAD_ADD_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2ADDrr : ARM::ADDrr,
-                              isThumb2 ? ARM::t2ADCrr : ARM::ADCrr,
-                              /*NeedsCarry*/ true);
-  case ARM::ATOMIC_LOAD_SUB_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr,
-                              isThumb2 ? ARM::t2SBCrr : ARM::SBCrr,
-                              /*NeedsCarry*/ true);
-  case ARM::ATOMIC_LOAD_OR_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2ORRrr : ARM::ORRrr,
-                              isThumb2 ? ARM::t2ORRrr : ARM::ORRrr);
-  case ARM::ATOMIC_LOAD_XOR_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2EORrr : ARM::EORrr,
-                              isThumb2 ? ARM::t2EORrr : ARM::EORrr);
-  case ARM::ATOMIC_LOAD_AND_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2ANDrr : ARM::ANDrr,
-                              isThumb2 ? ARM::t2ANDrr : ARM::ANDrr);
-  case ARM::ATOMIC_STORE_I64:
-  case ARM::ATOMIC_SWAP_I64:
-    return EmitAtomicBinary64(MI, BB, 0, 0, false);
-  case ARM::ATOMIC_CMP_SWAP_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr,
-                              isThumb2 ? ARM::t2SBCrr : ARM::SBCrr,
-                              /*NeedsCarry*/ false, /*IsCmpxchg*/true);
-  case ARM::ATOMIC_LOAD_MIN_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr,
-                              isThumb2 ? ARM::t2SBCrr : ARM::SBCrr,
-                              /*NeedsCarry*/ true, /*IsCmpxchg*/false,
-                              /*IsMinMax*/ true, ARMCC::LT);
-  case ARM::ATOMIC_LOAD_MAX_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr,
-                              isThumb2 ? ARM::t2SBCrr : ARM::SBCrr,
-                              /*NeedsCarry*/ true, /*IsCmpxchg*/false,
-                              /*IsMinMax*/ true, ARMCC::GE);
-  case ARM::ATOMIC_LOAD_UMIN_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr,
-                              isThumb2 ? ARM::t2SBCrr : ARM::SBCrr,
-                              /*NeedsCarry*/ true, /*IsCmpxchg*/false,
-                              /*IsMinMax*/ true, ARMCC::LO);
-  case ARM::ATOMIC_LOAD_UMAX_I64:
-    return EmitAtomicBinary64(MI, BB, isThumb2 ? ARM::t2SUBrr : ARM::SUBrr,
-                              isThumb2 ? ARM::t2SBCrr : ARM::SBCrr,
-                              /*NeedsCarry*/ true, /*IsCmpxchg*/false,
-                              /*IsMinMax*/ true, ARMCC::HS);
 
   case ARM::tMOVCCr_pseudo: {
     // To "insert" a SELECT_CC instruction, we actually have to insert the
@@ -7759,8 +7059,7 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 
     // Transfer the remainder of BB and its successor edges to sinkMBB.
     sinkMBB->splice(sinkMBB->begin(), BB,
-                    llvm::next(MachineBasicBlock::iterator(MI)),
-                    BB->end());
+                    std::next(MachineBasicBlock::iterator(MI)), BB->end());
     sinkMBB->transferSuccessorsAndUpdatePHIs(BB);
 
     BB->addSuccessor(copy0MBB);
@@ -7793,7 +7092,7 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   case ARM::BCCi64:
   case ARM::BCCZi64: {
     // If there is an unconditional branch to the other successor, remove it.
-    BB->erase(llvm::next(MachineBasicBlock::iterator(MI)), BB->end());
+    BB->erase(std::next(MachineBasicBlock::iterator(MI)), BB->end());
 
     // Compare both parts that make up the double comparison separately for
     // equality.
@@ -7878,8 +7177,7 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 
     // Transfer the remainder of BB and its successor edges to sinkMBB.
     SinkBB->splice(SinkBB->begin(), BB,
-      llvm::next(MachineBasicBlock::iterator(MI)),
-      BB->end());
+                   std::next(MachineBasicBlock::iterator(MI)), BB->end());
     SinkBB->transferSuccessorsAndUpdatePHIs(BB);
 
     BB->addSuccessor(RSBBB);
@@ -8212,7 +7510,9 @@ static SDValue AddCombineToVPADDL(SDNode *N, SDValue N0, SDValue N1,
   // Get widened type and narrowed type.
   MVT widenType;
   unsigned numElem = VT.getVectorNumElements();
-  switch (VT.getVectorElementType().getSimpleVT().SimpleTy) {
+  
+  EVT inputLaneType = Vec.getValueType().getVectorElementType();
+  switch (inputLaneType.getSimpleVT().SimpleTy) {
     case MVT::i8: widenType = MVT::getVectorVT(MVT::i16, numElem); break;
     case MVT::i16: widenType = MVT::getVectorVT(MVT::i32, numElem); break;
     case MVT::i32: widenType = MVT::getVectorVT(MVT::i64, numElem); break;
@@ -8222,7 +7522,8 @@ static SDValue AddCombineToVPADDL(SDNode *N, SDValue N0, SDValue N1,
 
   SDValue tmp = DAG.getNode(ISD::INTRINSIC_WO_CHAIN, SDLoc(N),
                             widenType, &Ops[0], Ops.size());
-  return DAG.getNode(ISD::TRUNCATE, SDLoc(N), VT, tmp);
+  unsigned ExtOp = VT.bitsGT(tmp.getValueType()) ? ISD::ANY_EXTEND : ISD::TRUNCATE;
+  return DAG.getNode(ExtOp, SDLoc(N), VT, tmp);
 }
 
 static SDValue findMUL_LOHI(SDValue V) {
@@ -9169,7 +8470,7 @@ PerformARMBUILD_VECTORCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
       // Fold obvious case.
       V = V.getOperand(0);
     else {
-      V = DAG.getNode(ISD::BITCAST, SDLoc(V), MVT::i32, V); 
+      V = DAG.getNode(ISD::BITCAST, SDLoc(V), MVT::i32, V);
       // Make the DAGCombiner fold the bitcasts.
       DCI.AddToWorklist(V.getNode());
     }
@@ -9698,9 +8999,6 @@ static SDValue PerformIntrinsicCombine(SDNode *N, SelectionDAG &DAG) {
   // loads from a constant pool.
   case Intrinsic::arm_neon_vshifts:
   case Intrinsic::arm_neon_vshiftu:
-  case Intrinsic::arm_neon_vshiftls:
-  case Intrinsic::arm_neon_vshiftlu:
-  case Intrinsic::arm_neon_vshiftn:
   case Intrinsic::arm_neon_vrshifts:
   case Intrinsic::arm_neon_vrshiftu:
   case Intrinsic::arm_neon_vrshiftn:
@@ -9731,12 +9029,6 @@ static SDValue PerformIntrinsicCombine(SDNode *N, SelectionDAG &DAG) {
       }
       return SDValue();
 
-    case Intrinsic::arm_neon_vshiftls:
-    case Intrinsic::arm_neon_vshiftlu:
-      if (isVShiftLImm(N->getOperand(2), VT, true, Cnt))
-        break;
-      llvm_unreachable("invalid shift count for vshll intrinsic");
-
     case Intrinsic::arm_neon_vrshifts:
     case Intrinsic::arm_neon_vrshiftu:
       if (isVShiftRImm(N->getOperand(2), VT, false, true, Cnt))
@@ -9754,7 +9046,6 @@ static SDValue PerformIntrinsicCombine(SDNode *N, SelectionDAG &DAG) {
         break;
       llvm_unreachable("invalid shift count for vqshlu intrinsic");
 
-    case Intrinsic::arm_neon_vshiftn:
     case Intrinsic::arm_neon_vrshiftn:
     case Intrinsic::arm_neon_vqshiftns:
     case Intrinsic::arm_neon_vqshiftnu:
@@ -9777,16 +9068,6 @@ static SDValue PerformIntrinsicCombine(SDNode *N, SelectionDAG &DAG) {
     case Intrinsic::arm_neon_vshiftu:
       // Opcode already set above.
       break;
-    case Intrinsic::arm_neon_vshiftls:
-    case Intrinsic::arm_neon_vshiftlu:
-      if (Cnt == VT.getVectorElementType().getSizeInBits())
-        VShiftOpc = ARMISD::VSHLLi;
-      else
-        VShiftOpc = (IntNo == Intrinsic::arm_neon_vshiftls ?
-                     ARMISD::VSHLLs : ARMISD::VSHLLu);
-      break;
-    case Intrinsic::arm_neon_vshiftn:
-      VShiftOpc = ARMISD::VSHRN; break;
     case Intrinsic::arm_neon_vrshifts:
       VShiftOpc = ARMISD::VRSHRs; break;
     case Intrinsic::arm_neon_vrshiftu:
@@ -10150,7 +9431,8 @@ bool ARMTargetLowering::isDesirableToTransformToIntegerOp(unsigned Opc,
   return (VT == MVT::f32) && (Opc == ISD::LOAD || Opc == ISD::STORE);
 }
 
-bool ARMTargetLowering::allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const {
+bool ARMTargetLowering::allowsUnalignedMemoryAccesses(EVT VT, unsigned,
+                                                      bool *Fast) const {
   // The AllowsUnaliged flag models the SCTLR.A setting in ARM cpus
   bool AllowsUnaligned = Subtarget->allowsUnalignedMem();
 
@@ -10172,7 +9454,7 @@ bool ARMTargetLowering::allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const 
   case MVT::v2f64: {
     // For any little-endian targets with neon, we can support unaligned ld/st
     // of D and Q (e.g. {D0,D1}) registers by using vld1.i8/vst1.i8.
-    // A big-endian target may also explictly support unaligned accesses
+    // A big-endian target may also explicitly support unaligned accesses
     if (Subtarget->hasNEON() && (AllowsUnaligned || isLittleEndian())) {
       if (Fast)
         *Fast = true;
@@ -10204,11 +9486,11 @@ EVT ARMTargetLowering::getOptimalMemOpType(uint64_t Size,
     bool Fast;
     if (Size >= 16 &&
         (memOpAlign(SrcAlign, DstAlign, 16) ||
-         (allowsUnalignedMemoryAccesses(MVT::v2f64, &Fast) && Fast))) {
+         (allowsUnalignedMemoryAccesses(MVT::v2f64, 0, &Fast) && Fast))) {
       return MVT::v2f64;
     } else if (Size >= 8 &&
                (memOpAlign(SrcAlign, DstAlign, 8) ||
-                (allowsUnalignedMemoryAccesses(MVT::f64, &Fast) && Fast))) {
+                (allowsUnalignedMemoryAccesses(MVT::f64, 0, &Fast) && Fast))) {
       return MVT::f64;
     }
   }
@@ -10682,6 +9964,20 @@ void ARMTargetLowering::computeMaskedBitsForTargetNode(const SDValue Op,
     KnownOne  &= KnownOneRHS;
     return;
   }
+  case ISD::INTRINSIC_W_CHAIN: {
+    ConstantSDNode *CN = cast<ConstantSDNode>(Op->getOperand(1));
+    Intrinsic::ID IntID = static_cast<Intrinsic::ID>(CN->getZExtValue());
+    switch (IntID) {
+    default: return;
+    case Intrinsic::arm_ldaex:
+    case Intrinsic::arm_ldrex: {
+      EVT VT = cast<MemIntrinsicSDNode>(Op)->getMemoryVT();
+      unsigned MemBits = VT.getScalarType().getSizeInBits();
+      KnownZero |= APInt::getHighBitsSet(BitWidth, BitWidth - MemBits);
+      return;
+    }
+    }
+  }
   }
 }
 
@@ -10799,6 +10095,8 @@ ARMTargetLowering::getRegForInlineAsmConstraint(const std::string &Constraint,
     case 'r':
       return RCPair(0U, &ARM::GPRRegClass);
     case 'w':
+      if (VT == MVT::Other)
+        break;
       if (VT == MVT::f32)
         return RCPair(0U, &ARM::SPRRegClass);
       if (VT.getSizeInBits() == 64)
@@ -10807,6 +10105,8 @@ ARMTargetLowering::getRegForInlineAsmConstraint(const std::string &Constraint,
         return RCPair(0U, &ARM::QPRRegClass);
       break;
     case 'x':
+      if (VT == MVT::Other)
+        break;
       if (VT == MVT::f32)
         return RCPair(0U, &ARM::SPR_8RegClass);
       if (VT.getSizeInBits() == 64)
@@ -11126,6 +10426,7 @@ bool ARMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.writeMem = true;
     return true;
   }
+  case Intrinsic::arm_ldaex:
   case Intrinsic::arm_ldrex: {
     PointerType *PtrTy = cast<PointerType>(I.getArgOperand(0)->getType());
     Info.opc = ISD::INTRINSIC_W_CHAIN;
@@ -11138,6 +10439,7 @@ bool ARMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.writeMem = false;
     return true;
   }
+  case Intrinsic::arm_stlex:
   case Intrinsic::arm_strex: {
     PointerType *PtrTy = cast<PointerType>(I.getArgOperand(1)->getType());
     Info.opc = ISD::INTRINSIC_W_CHAIN;
@@ -11150,6 +10452,7 @@ bool ARMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.writeMem = true;
     return true;
   }
+  case Intrinsic::arm_stlexd:
   case Intrinsic::arm_strexd: {
     Info.opc = ISD::INTRINSIC_W_CHAIN;
     Info.memVT = MVT::i64;
@@ -11161,6 +10464,7 @@ bool ARMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.writeMem = true;
     return true;
   }
+  case Intrinsic::arm_ldaexd:
   case Intrinsic::arm_ldrexd: {
     Info.opc = ISD::INTRINSIC_W_CHAIN;
     Info.memVT = MVT::i64;
@@ -11177,4 +10481,16 @@ bool ARMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
   }
 
   return false;
+}
+
+/// \brief Returns true if it is beneficial to convert a load of a constant
+/// to just the constant itself.
+bool ARMTargetLowering::shouldConvertConstantLoadToIntImm(const APInt &Imm,
+                                                          Type *Ty) const {
+  assert(Ty->isIntegerTy());
+
+  unsigned Bits = Ty->getPrimitiveSizeInBits();
+  if (Bits == 0 || Bits > 32)
+    return false;
+  return true;
 }

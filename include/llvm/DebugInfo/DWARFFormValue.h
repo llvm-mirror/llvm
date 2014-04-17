@@ -10,6 +10,8 @@
 #ifndef LLVM_DEBUGINFO_DWARFFORMVALUE_H
 #define LLVM_DEBUGINFO_DWARFFORMVALUE_H
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/Support/DataExtractor.h"
 
 namespace llvm {
@@ -19,8 +21,22 @@ class raw_ostream;
 
 class DWARFFormValue {
 public:
+  enum FormClass {
+    FC_Unknown,
+    FC_Address,
+    FC_Block,
+    FC_Constant,
+    FC_String,
+    FC_Flag,
+    FC_Reference,
+    FC_Indirect,
+    FC_SectionOffset,
+    FC_Exprloc
+  };
+
+private:
   struct ValueType {
-    ValueType() : data(NULL), IsDWOIndex(false) {
+    ValueType() : data(NULL) {
       uval = 0;
     }
 
@@ -30,45 +46,38 @@ public:
       const char* cstr;
     };
     const uint8_t* data;
-    bool IsDWOIndex;
   };
 
-  enum {
-    eValueTypeInvalid = 0,
-    eValueTypeUnsigned,
-    eValueTypeSigned,
-    eValueTypeCStr,
-    eValueTypeBlock
-  };
-
-private:
   uint16_t Form;   // Form for this value.
   ValueType Value; // Contains all data for the form.
 
 public:
-  DWARFFormValue(uint16_t form = 0) : Form(form) {}
+  DWARFFormValue(uint16_t Form = 0) : Form(Form) {}
   uint16_t getForm() const { return Form; }
-  const ValueType& value() const { return Value; }
+  bool isFormClass(FormClass FC) const;
+
   void dump(raw_ostream &OS, const DWARFUnit *U) const;
   bool extractValue(DataExtractor data, uint32_t *offset_ptr,
                     const DWARFUnit *u);
   bool isInlinedCStr() const {
     return Value.data != NULL && Value.data == (const uint8_t*)Value.cstr;
   }
-  const uint8_t *BlockData() const;
-  uint64_t getReference(const DWARFUnit *U) const;
 
-  uint64_t getUnsigned() const { return Value.uval; }
-  int64_t getSigned() const { return Value.sval; }
-  const char *getAsCString(const DWARFUnit *U) const;
-  uint64_t getAsAddress(const DWARFUnit *U) const;
+  /// getAsFoo functions below return the extracted value as Foo if only
+  /// DWARFFormValue has form class is suitable for representing Foo.
+  Optional<uint64_t> getAsReference(const DWARFUnit *U) const;
+  Optional<uint64_t> getAsUnsignedConstant() const;
+  Optional<const char *> getAsCString(const DWARFUnit *U) const;
+  Optional<uint64_t> getAsAddress(const DWARFUnit *U) const;
+  Optional<uint64_t> getAsSectionOffset() const;
+
   bool skipValue(DataExtractor debug_info_data, uint32_t *offset_ptr,
                  const DWARFUnit *u) const;
   static bool skipValue(uint16_t form, DataExtractor debug_info_data,
                         uint32_t *offset_ptr, const DWARFUnit *u);
-  static bool isBlockForm(uint16_t form);
-  static bool isDataForm(uint16_t form);
-  static const uint8_t *getFixedFormSizes(uint8_t AddrSize, uint16_t Version);
+
+  static ArrayRef<uint8_t> getFixedFormSizes(uint8_t AddrSize,
+                                             uint16_t Version);
 };
 
 }

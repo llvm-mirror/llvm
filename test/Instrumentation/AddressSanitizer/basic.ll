@@ -1,6 +1,6 @@
 ; Test basic address sanitizer instrumentation.
 ;
-; RUN: opt < %s -asan -S | FileCheck %s
+; RUN: opt < %s -asan -asan-module -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64"
 target triple = "x86_64-unknown-linux-gnu"
@@ -88,25 +88,6 @@ entry:
 ; CHECK: = alloca
 ; CHECK-NOT: = alloca
 ; CHECK: ret void
-
-; Check that asan does not touch allocas with alignment > 32.
-define void @alloca_alignment_test() sanitize_address {
-entry:
-  %x = alloca [10 x i8], align 64
-  %y = alloca [10 x i8], align 128
-  %z = alloca [10 x i8], align 256
-  call void @alloca_test_use([10 x i8]* %x)
-  call void @alloca_test_use([10 x i8]* %y)
-  call void @alloca_test_use([10 x i8]* %z)
-  ret void
-}
-
-; CHECK: define void @alloca_alignment_test()
-; CHECK: = alloca{{.*}} align 64
-; CHECK: = alloca{{.*}} align 128
-; CHECK: = alloca{{.*}} align 256
-; CHECK: ret void
-
 
 define void @LongDoubleTest(x86_fp80* nocapture %a) nounwind uwtable sanitize_address {
 entry:

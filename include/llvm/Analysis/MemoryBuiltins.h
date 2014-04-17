@@ -17,12 +17,12 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Analysis/TargetFolder.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/InstVisitor.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/TargetFolder.h"
-#include "llvm/Support/ValueHandle.h"
 
 namespace llvm {
 class CallInst;
@@ -190,6 +190,8 @@ public:
     return knownSize(SizeOffset) && knownOffset(SizeOffset);
   }
 
+  // These are "private", except they can't actually be made private. Only
+  // compute() should be used by external users.
   SizeOffsetType visitAllocaInst(AllocaInst &I);
   SizeOffsetType visitArgument(Argument &A);
   SizeOffsetType visitCallSite(CallSite CS);
@@ -228,6 +230,7 @@ class ObjectSizeOffsetEvaluator
   Value *Zero;
   CacheMapTy CacheMap;
   PtrSetTy SeenVals;
+  bool RoundToAlign;
 
   SizeOffsetEvalType unknown() {
     return std::make_pair((Value*)0, (Value*)0);
@@ -236,7 +239,7 @@ class ObjectSizeOffsetEvaluator
 
 public:
   ObjectSizeOffsetEvaluator(const DataLayout *DL, const TargetLibraryInfo *TLI,
-                            LLVMContext &Context);
+                            LLVMContext &Context, bool RoundToAlign = false);
   SizeOffsetEvalType compute(Value *V);
 
   bool knownSize(SizeOffsetEvalType SizeOffset) {
@@ -255,6 +258,7 @@ public:
     return knownSize(SizeOffset) && knownOffset(SizeOffset);
   }
 
+  // The individual instruction visitors should be treated as private.
   SizeOffsetEvalType visitAllocaInst(AllocaInst &I);
   SizeOffsetEvalType visitCallSite(CallSite CS);
   SizeOffsetEvalType visitExtractElementInst(ExtractElementInst &I);

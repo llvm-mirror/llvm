@@ -1,3 +1,5 @@
+RUN: llvm-readobj -h %p/Inputs/trivial.obj.coff-arm \
+RUN:   | FileCheck %s -check-prefix COFF-ARM
 RUN: llvm-readobj -h %p/Inputs/trivial.obj.coff-i386 \
 RUN:   | FileCheck %s -check-prefix COFF32
 RUN: llvm-readobj -h %p/Inputs/trivial.obj.coff-x86-64 \
@@ -8,6 +10,25 @@ RUN: llvm-readobj -h %p/Inputs/trivial.obj.elf-i386 \
 RUN:   | FileCheck %s -check-prefix ELF32
 RUN: llvm-readobj -h %p/Inputs/trivial.obj.elf-x86-64 \
 RUN:   | FileCheck %s -check-prefix ELF64
+RUN: llvm-readobj -h %p/Inputs/magic.coff-unknown \
+RUN:   | FileCheck %s -check-prefix COFF-UNKNOWN
+RUN: llvm-readobj -h %p/Inputs/magic.coff-importlib \
+RUN:   | FileCheck %s -check-prefix COFF-IMPORTLIB
+
+COFF-ARM:      File: {{(.*[/\\])?}}trivial.obj.coff-arm
+COFF-ARM-NEXT: Format: COFF-ARM
+COFF-ARM-NEXT: Arch: thumb
+COFF-ARM-NEXT: AddressSize: 32bit
+COFF-ARM-NEXT: ImageFileHeader {
+COFF-ARM-NEXT:   Machine: IMAGE_FILE_MACHINE_ARMNT (0x1C4)
+COFF-ARM-NEXT:   SectionCount: 2
+COFF-ARM-NEXT:   TimeDateStamp: 2014-03-13 02:48:34 (0x53211C82)
+COFF-ARM-NEXT:   PointerToSymbolTable: 0xFF
+COFF-ARM-NEXT:   SymbolCount: 6
+COFF-ARM-NEXT:   OptionalHeaderSize: 0
+COFF-ARM-NEXT:   Characteristics [ (0x0)
+COFF-ARM-NEXT:   ]
+COFF-ARM-NEXT: }
 
 COFF32:      File: {{(.*[/\\])?}}trivial.obj.coff-i386
 COFF32-NEXT: Format: COFF-i386
@@ -18,7 +39,7 @@ COFF32-NEXT:   Machine: IMAGE_FILE_MACHINE_I386 (0x14C)
 COFF32-NEXT:   SectionCount: 2
 COFF32-NEXT:   TimeDateStamp: 2013-03-20 17:56:46 (0x5149F85E)
 COFF32-NEXT:   PointerToSymbolTable: 0xA5
-COFF32-NEXT:   SymbolCount: 7
+COFF32-NEXT:   SymbolCount: 9
 COFF32-NEXT:   OptionalHeaderSize: 0
 COFF32-NEXT:   Characteristics [ (0x0)
 COFF32-NEXT:   ]
@@ -183,3 +204,32 @@ PE32-NEXT:     ReservedRVA: 0x0
 PE32-NEXT:     ReservedSize: 0x0
 PE32-NEXT:   }
 PE32-NEXT: }
+
+COFF-UNKNOWN:      Format: COFF-<unknown arch>
+COFF-UNKNOWN-NEXT: Arch: unknown
+COFF-UNKNOWN-NEXT: AddressSize: 32bit
+COFF-UNKNOWN-NEXT: ImageFileHeader {
+COFF-UNKNOWN-NEXT:   Machine: IMAGE_FILE_MACHINE_UNKNOWN (0x0)
+COFF-UNKNOWN-NEXT:   SectionCount: 3
+COFF-UNKNOWN-NEXT:   TimeDateStamp: 2013-11-14 21:19:28 (0x52853E60)
+COFF-UNKNOWN-NEXT:   PointerToSymbolTable: 0xF8
+COFF-UNKNOWN-NEXT:   SymbolCount: 11
+COFF-UNKNOWN-NEXT:   OptionalHeaderSize: 0
+COFF-UNKNOWN-NEXT:   Characteristics [ (0x0)
+COFF-UNKNOWN-NEXT:   ]
+COFF-UNKNOWN-NEXT: }
+
+COFF-IMPORTLIB:      Format: COFF-<unknown arch>
+COFF-IMPORTLIB-NEXT: Arch: unknown
+COFF-IMPORTLIB-NEXT: AddressSize: 32bit
+COFF-IMPORTLIB-NEXT: ImageFileHeader {
+COFF-IMPORTLIB-NEXT:   Machine: IMAGE_FILE_MACHINE_UNKNOWN (0x0)
+COFF-IMPORTLIB-NEXT:   SectionCount: 65535
+COFF-IMPORTLIB-NEXT:   TimeDateStamp: 1970-09-09 19:52:32 (0x14C0000)
+COFF-IMPORTLIB-NEXT:   PointerToSymbolTable: 0x528542EB
+COFF-IMPORTLIB-NEXT:   SymbolCount: 20
+COFF-IMPORTLIB-NEXT:   OptionalHeaderSize: 0
+COFF-IMPORTLIB-NEXT:   Characteristics [ (0x8)
+COFF-IMPORTLIB-NEXT:     IMAGE_FILE_LOCAL_SYMS_STRIPPED (0x8)
+COFF-IMPORTLIB-NEXT:   ]
+COFF-IMPORTLIB-NEXT: }

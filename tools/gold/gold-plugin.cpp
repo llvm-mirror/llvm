@@ -13,9 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
-#include "plugin-api.h"
 #include "llvm-c/lto.h"
-#include "llvm/ADT/OwningPtr.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -28,6 +27,7 @@
 #include <cstring>
 #include <fstream>
 #include <list>
+#include <plugin-api.h>
 #include <vector>
 
 // Support Windows/MinGW crazyness.
@@ -35,6 +35,12 @@
 # include <io.h>
 # define lseek _lseek
 # define read _read
+#endif
+
+#ifndef LDPO_PIE
+// FIXME: remove this declaration when we stop maintaining Ubuntu Quantal and
+// Precise and Debian Wheezy (binutils 2.23 is required)
+# define LDPO_PIE 3
 #endif
 
 using namespace llvm;
@@ -67,6 +73,7 @@ namespace {
   std::list<claimed_file> Modules;
   std::vector<std::string> Cleanup;
   lto_code_gen_t code_gen = NULL;
+  StringSet<> CannotBeHidden;
 }
 
 namespace options {
@@ -151,8 +158,7 @@ ld_plugin_status onload(ld_plugin_tv *tv) {
         switch (tv->tv_u.tv_val) {
           case LDPO_REL:  // .o
           case LDPO_DYN:  // .so
-          // FIXME: Replace 3 with LDPO_PIE once that is in a released binutils.
-          case 3: // position independent executable
+          case LDPO_PIE:  // position independent executable
             output_type = LTO_CODEGEN_PIC_MODEL_DYNAMIC;
             break;
           case LDPO_EXEC:  // .exe
@@ -239,7 +245,7 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
                                         int *claimed) {
   lto_module_t M;
   const void *view;
-  OwningPtr<MemoryBuffer> buffer;
+  std::unique_ptr<MemoryBuffer> buffer;
   if (get_view) {
     if (get_view(file->handle, &view) != LDPS_OK) {
       (*message)(LDPL_ERROR, "Failed to get a view of %s", file->name);
@@ -297,6 +303,9 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
     sym.version = NULL;
 
     int scope = attrs & LTO_SYMBOL_SCOPE_MASK;
+    bool CanBeHidden = scope == LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN;
+    if (!CanBeHidden)
+      CannotBeHidden.insert(sym.name);
     switch (scope) {
       case LTO_SYMBOL_SCOPE_HIDDEN:
         sym.visibility = LDPV_HIDDEN;
@@ -306,6 +315,7 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
         break;
       case 0: // extern
       case LTO_SYMBOL_SCOPE_DEFAULT:
+      case LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN:
         sym.visibility = LDPV_DEFAULT;
         break;
       default:
@@ -351,12 +361,25 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
     }
   }
 
-  if (code_gen)
-    lto_codegen_add_module(code_gen, M);
+  if (code_gen) {
+    if (lto_codegen_add_module(code_gen, M)) {
+      (*message)(LDPL_ERROR, "Error linking module: %s",
+                 lto_get_error_message());
+      return LDPS_ERR;
+    }
+  }
 
   lto_module_dispose(M);
 
   return LDPS_OK;
+}
+
+static bool mustPreserve(const claimed_file &F, int i) {
+  if (F.syms[i].resolution == LDPR_PREVAILING_DEF)
+    return true;
+  if (F.syms[i].resolution == LDPR_PREVAILING_DEF_IRONLY_EXP)
+    return CannotBeHidden.count(F.syms[i].name);
+  return false;
 }
 
 /// all_symbols_read_hook - gold informs us that all symbols have been read.
@@ -381,16 +404,11 @@ static ld_plugin_status all_symbols_read_hook(void) {
       continue;
     (*get_symbols)(I->handle, I->syms.size(), &I->syms[0]);
     for (unsigned i = 0, e = I->syms.size(); i != e; i++) {
-      if (I->syms[i].resolution == LDPR_PREVAILING_DEF) {
+      if (mustPreserve(*I, i)) {
         lto_codegen_add_must_preserve_symbol(code_gen, I->syms[i].name);
 
         if (options::generate_api_file)
           api_file << I->syms[i].name << "\n";
-      } else if (I->syms[i].resolution == LDPR_PREVAILING_DEF_IRONLY_EXP) {
-        lto_codegen_add_dso_symbol(code_gen, I->syms[i].name);
-
-        if (options::generate_api_file)
-          api_file << I->syms[i].name << " dso only\n";
       }
     }
   }
@@ -427,9 +445,14 @@ static ld_plugin_status all_symbols_read_hook(void) {
       exit(0);
     }
   }
-  const char *objPath;
-  if (lto_codegen_compile_to_file(code_gen, &objPath)) {
-    (*message)(LDPL_ERROR, "Could not produce a combined object file\n");
+
+  std::string ObjPath;
+  {
+    const char *Temp;
+    if (lto_codegen_compile_to_file(code_gen, &Temp)) {
+      (*message)(LDPL_ERROR, "Could not produce a combined object file\n");
+    }
+    ObjPath = Temp;
   }
 
   lto_codegen_dispose(code_gen);
@@ -441,9 +464,9 @@ static ld_plugin_status all_symbols_read_hook(void) {
     }
   }
 
-  if ((*add_input_file)(objPath) != LDPS_OK) {
+  if ((*add_input_file)(ObjPath.c_str()) != LDPS_OK) {
     (*message)(LDPL_ERROR, "Unable to add .o file to the link.");
-    (*message)(LDPL_ERROR, "File left behind in: %s", objPath);
+    (*message)(LDPL_ERROR, "File left behind in: %s", ObjPath.c_str());
     return LDPS_ERR;
   }
 
@@ -454,7 +477,7 @@ static ld_plugin_status all_symbols_read_hook(void) {
   }
 
   if (options::obj_path.empty())
-    Cleanup.push_back(objPath);
+    Cleanup.push_back(ObjPath);
 
   return LDPS_OK;
 }

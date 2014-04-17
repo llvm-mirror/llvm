@@ -584,3 +584,18 @@ fsub ST(1)
 fsubr ST(1)
 fdiv ST(1)
 fdivr ST(1)
+
+
+// CHECK: fxsaveq (%rax)
+// CHECK: fxrstorq (%rax)
+fxsave64 opaque ptr [rax]
+fxrstor64 opaque ptr [rax]
+
+.bss
+.globl _g0
+.text
+
+// CHECK: movq _g0, %rbx
+// CHECK: movq _g0+8, %rcx
+mov rbx, qword ptr [_g0]
+mov rcx, qword ptr [_g0 + 8]

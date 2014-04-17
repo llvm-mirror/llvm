@@ -18,12 +18,16 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/Object/Archive.h"
+#include "llvm/PassManager.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/MutexGuard.h"
+#include "llvm/Target/TargetLowering.h"
 
 using namespace llvm;
 
@@ -57,49 +61,92 @@ MCJIT::MCJIT(Module *m, TargetMachine *tm, RTDyldMemoryManager *MM,
   : ExecutionEngine(m), TM(tm), Ctx(0), MemMgr(this, MM), Dyld(&MemMgr),
     ObjCache(0) {
 
-  ModuleStates[m] = ModuleAdded;
+  OwnedModules.addModule(m);
   setDataLayout(TM->getDataLayout());
 }
 
 MCJIT::~MCJIT() {
-  LoadedObjectMap::iterator it, end = LoadedObjects.end();
-  for (it = LoadedObjects.begin(); it != end; ++it) {
-    ObjectImage *Obj = it->second;
+  MutexGuard locked(lock);
+  // FIXME: We are managing our modules, so we do not want the base class
+  // ExecutionEngine to manage them as well. To avoid double destruction
+  // of the first (and only) module added in ExecutionEngine constructor
+  // we remove it from EE and will destruct it ourselves.
+  //
+  // It may make sense to move our module manager (based on SmallStPtr) back
+  // into EE if the JIT and Interpreter can live with it.
+  // If so, additional functions: addModule, removeModule, FindFunctionNamed,
+  // runStaticConstructorsDestructors could be moved back to EE as well.
+  //
+  Modules.clear();
+  Dyld.deregisterEHFrames();
+
+  LoadedObjectList::iterator it, end;
+  for (it = LoadedObjects.begin(), end = LoadedObjects.end(); it != end; ++it) {
+    ObjectImage *Obj = *it;
     if (Obj) {
       NotifyFreeingObject(*Obj);
       delete Obj;
     }
   }
   LoadedObjects.clear();
+
+
+  SmallVector<object::Archive *, 2>::iterator ArIt, ArEnd;
+  for (ArIt = Archives.begin(), ArEnd = Archives.end(); ArIt != ArEnd; ++ArIt) {
+    object::Archive *A = *ArIt;
+    delete A;
+  }
+  Archives.clear();
+
   delete TM;
 }
 
 void MCJIT::addModule(Module *M) {
-  Modules.push_back(M);
-  ModuleStates[M] = MCJITModuleState();
+  MutexGuard locked(lock);
+  OwnedModules.addModule(M);
 }
 
+bool MCJIT::removeModule(Module *M) {
+  MutexGuard locked(lock);
+  return OwnedModules.removeModule(M);
+}
+
+
+
+void MCJIT::addObjectFile(object::ObjectFile *Obj) {
+  ObjectImage *LoadedObject = Dyld.loadObject(Obj);
+  if (!LoadedObject || Dyld.hasError())
+    report_fatal_error(Dyld.getErrorString());
+
+  LoadedObjects.push_back(LoadedObject);
+
+  NotifyObjectEmitted(*LoadedObject);
+}
+
+void MCJIT::addArchive(object::Archive *A) {
+  Archives.push_back(A);
+}
+
+
 void MCJIT::setObjectCache(ObjectCache* NewCache) {
+  MutexGuard locked(lock);
   ObjCache = NewCache;
 }
 
 ObjectBufferStream* MCJIT::emitObject(Module *M) {
-  // This must be a module which has already been added to this MCJIT instance.
-  assert(std::find(Modules.begin(), Modules.end(), M) != Modules.end());
-  assert(ModuleStates.find(M) != ModuleStates.end());
-
-  // Get a thread lock to make sure we aren't trying to compile multiple times
   MutexGuard locked(lock);
 
-  // Re-compilation is not supported
-  assert(!ModuleStates[M].hasBeenEmitted());
+  // This must be a module which has already been added but not loaded to this
+  // MCJIT instance, since these conditions are tested by our caller,
+  // generateCodeForModule.
 
   PassManager PM;
 
-  PM.add(new DataLayout(*TM->getDataLayout()));
+  M->setDataLayout(TM->getDataLayout());
+  PM.add(new DataLayoutPass(M));
 
   // The RuntimeDyld will take ownership of this shortly
-  OwningPtr<ObjectBufferStream> CompiledObject(new ObjectBufferStream());
+  std::unique_ptr<ObjectBufferStream> CompiledObject(new ObjectBufferStream());
 
   // Turn the machine code intermediate representation into bytes in memory
   // that may be executed.
@@ -117,31 +164,31 @@ ObjectBufferStream* MCJIT::emitObject(Module *M) {
   if (ObjCache) {
     // MemoryBuffer is a thin wrapper around the actual memory, so it's OK
     // to create a temporary object here and delete it after the call.
-    OwningPtr<MemoryBuffer> MB(CompiledObject->getMemBuffer());
+    std::unique_ptr<MemoryBuffer> MB(CompiledObject->getMemBuffer());
     ObjCache->notifyObjectCompiled(M, MB.get());
   }
 
-  return CompiledObject.take();
+  return CompiledObject.release();
 }
 
 void MCJIT::generateCodeForModule(Module *M) {
-  // This must be a module which has already been added to this MCJIT instance.
-  assert(std::find(Modules.begin(), Modules.end(), M) != Modules.end());
-  assert(ModuleStates.find(M) != ModuleStates.end());
-
   // Get a thread lock to make sure we aren't trying to load multiple times
   MutexGuard locked(lock);
 
+  // This must be a module which has already been added to this MCJIT instance.
+  assert(OwnedModules.ownsModule(M) &&
+         "MCJIT::generateCodeForModule: Unknown module.");
+
   // Re-compilation is not supported
-  if (ModuleStates[M].hasBeenLoaded())
+  if (OwnedModules.hasModuleBeenLoaded(M))
     return;
 
-  OwningPtr<ObjectBuffer> ObjectToLoad;
+  std::unique_ptr<ObjectBuffer> ObjectToLoad;
   // Try to load the pre-compiled object from cache if possible
   if (0 != ObjCache) {
-    OwningPtr<MemoryBuffer> PreCompiledObject(ObjCache->getObject(M));
+    std::unique_ptr<MemoryBuffer> PreCompiledObject(ObjCache->getObject(M));
     if (0 != PreCompiledObject.get())
-      ObjectToLoad.reset(new ObjectBuffer(PreCompiledObject.take()));
+      ObjectToLoad.reset(new ObjectBuffer(PreCompiledObject.release()));
   }
 
   // If the cache did not contain a suitable object, compile the object
@@ -151,9 +198,9 @@ void MCJIT::generateCodeForModule(Module *M) {
   }
 
   // Load the object into the dynamic linker.
-  // MCJIT now owns the ObjectImage pointer (via its LoadedObjects map).
-  ObjectImage *LoadedObject = Dyld.loadObject(ObjectToLoad.take());
-  LoadedObjects[M] = LoadedObject;
+  // MCJIT now owns the ObjectImage pointer (via its LoadedObjects list).
+  ObjectImage *LoadedObject = Dyld.loadObject(ObjectToLoad.release());
+  LoadedObjects.push_back(LoadedObject);
   if (!LoadedObject)
     report_fatal_error(Dyld.getErrorString());
 
@@ -162,26 +209,18 @@ void MCJIT::generateCodeForModule(Module *M) {
 
   NotifyObjectEmitted(*LoadedObject);
 
-  ModuleStates[M] = ModuleLoaded;
+  OwnedModules.markModuleAsLoaded(M);
 }
 
 void MCJIT::finalizeLoadedModules() {
+  MutexGuard locked(lock);
+
   // Resolve any outstanding relocations.
   Dyld.resolveRelocations();
 
+  OwnedModules.markAllLoadedModulesAsFinalized();
+
   // Register EH frame data for any module we own which has been loaded
-  SmallVector<Module *, 1>::iterator end = Modules.end();
-  SmallVector<Module *, 1>::iterator it;
-  for (it = Modules.begin(); it != end; ++it) {
-    Module *M = *it;
-    assert(ModuleStates.find(M) != ModuleStates.end());
-
-    if (ModuleStates[M].hasBeenLoaded() &&
-        !ModuleStates[M].hasBeenFinalized()) {
-      ModuleStates[M] = ModuleFinalized;
-    }
-  }
-
   Dyld.registerEHFrames();
 
   // Set page permissions.
@@ -190,66 +229,29 @@ void MCJIT::finalizeLoadedModules() {
 
 // FIXME: Rename this.
 void MCJIT::finalizeObject() {
-  // FIXME: This is a temporary hack to get around problems with calling
-  // finalize multiple times.
-  bool finalizeNeeded = false;
-  SmallVector<Module *, 1>::iterator end = Modules.end();
-  SmallVector<Module *, 1>::iterator it;
-  for (it = Modules.begin(); it != end; ++it) {
-    Module *M = *it;
-    assert(ModuleStates.find(M) != ModuleStates.end());
-    if (!ModuleStates[M].hasBeenFinalized())
-      finalizeNeeded = true;
+  MutexGuard locked(lock);
 
-    // I don't really like this, but the C API depends on this behavior.
-    // I suppose it's OK for a deprecated function.
-    if (!ModuleStates[M].hasBeenLoaded())
-      generateCodeForModule(M);
-  }
-  if (!finalizeNeeded)
-    return;
-
-  // Resolve any outstanding relocations.
-  Dyld.resolveRelocations();
-
-  // Register EH frame data for any module we own which has been loaded
-  for (it = Modules.begin(); it != end; ++it) {
-    Module *M = *it;
-    assert(ModuleStates.find(M) != ModuleStates.end());
-
-    if (ModuleStates[M].hasBeenLoaded() &&
-        !ModuleStates[M].hasBeenFinalized()) {
-      ModuleStates[M] = ModuleFinalized;
-    }
+  for (ModulePtrSet::iterator I = OwnedModules.begin_added(),
+                              E = OwnedModules.end_added();
+       I != E; ++I) {
+    Module *M = *I;
+    generateCodeForModule(M);
   }
 
-  Dyld.registerEHFrames();
-
-  // Set page permissions.
-  MemMgr.finalizeMemory();
+  finalizeLoadedModules();
 }
 
 void MCJIT::finalizeModule(Module *M) {
-  // This must be a module which has already been added to this MCJIT instance.
-  assert(std::find(Modules.begin(), Modules.end(), M) != Modules.end());
-  assert(ModuleStates.find(M) != ModuleStates.end());
+  MutexGuard locked(lock);
 
-  if (ModuleStates[M].hasBeenFinalized())
-    return;
+  // This must be a module which has already been added to this MCJIT instance.
+  assert(OwnedModules.ownsModule(M) && "MCJIT::finalizeModule: Unknown module.");
 
   // If the module hasn't been compiled, just do that.
-  if (!ModuleStates[M].hasBeenLoaded())
+  if (!OwnedModules.hasModuleBeenLoaded(M))
     generateCodeForModule(M);
 
-  // Resolve any outstanding relocations.
-  Dyld.resolveRelocations();
-
-  Dyld.registerEHFrames();
-
-  // Set page permissions.
-  MemMgr.finalizeMemory();
-
-  ModuleStates[M] = ModuleFinalized;
+  finalizeLoadedModules();
 }
 
 void *MCJIT::getPointerToBasicBlock(BasicBlock *BB) {
@@ -257,26 +259,27 @@ void *MCJIT::getPointerToBasicBlock(BasicBlock *BB) {
 }
 
 uint64_t MCJIT::getExistingSymbolAddress(const std::string &Name) {
-  // Check with the RuntimeDyld to see if we already have this symbol.
-  if (Name[0] == '\1')
-    return Dyld.getSymbolLoadAddress(Name.substr(1));
-  return Dyld.getSymbolLoadAddress((TM->getMCAsmInfo()->getGlobalPrefix()
-                                       + Name));
+  Mangler Mang(TM->getDataLayout());
+  SmallString<128> FullName;
+  Mang.getNameWithPrefix(FullName, Name);
+  return Dyld.getSymbolLoadAddress(FullName);
 }
 
 Module *MCJIT::findModuleForSymbol(const std::string &Name,
                                    bool CheckFunctionsOnly) {
+  MutexGuard locked(lock);
+
   // If it hasn't already been generated, see if it's in one of our modules.
-  SmallVector<Module *, 1>::iterator end = Modules.end();
-  SmallVector<Module *, 1>::iterator it;
-  for (it = Modules.begin(); it != end; ++it) {
-    Module *M = *it;
+  for (ModulePtrSet::iterator I = OwnedModules.begin_added(),
+                              E = OwnedModules.end_added();
+       I != E; ++I) {
+    Module *M = *I;
     Function *F = M->getFunction(Name);
-    if (F && !F->empty())
+    if (F && !F->isDeclaration())
       return M;
     if (!CheckFunctionsOnly) {
       GlobalVariable *G = M->getGlobalVariable(Name);
-      if (G)
+      if (G && !G->isDeclaration())
         return M;
       // FIXME: Do we need to worry about global aliases?
     }
@@ -288,24 +291,39 @@ Module *MCJIT::findModuleForSymbol(const std::string &Name,
 uint64_t MCJIT::getSymbolAddress(const std::string &Name,
                                  bool CheckFunctionsOnly)
 {
+  MutexGuard locked(lock);
+
   // First, check to see if we already have this symbol.
   uint64_t Addr = getExistingSymbolAddress(Name);
   if (Addr)
     return Addr;
+
+  SmallVector<object::Archive*, 2>::iterator I, E;
+  for (I = Archives.begin(), E = Archives.end(); I != E; ++I) {
+    object::Archive *A = *I;
+    // Look for our symbols in each Archive
+    object::Archive::child_iterator ChildIt = A->findSym(Name);
+    if (ChildIt != A->child_end()) {
+      std::unique_ptr<object::Binary> ChildBin;
+      // FIXME: Support nested archives?
+      if (!ChildIt->getAsBinary(ChildBin) && ChildBin->isObject()) {
+        object::ObjectFile *OF = reinterpret_cast<object::ObjectFile *>(
+                                                            ChildBin.release());
+        // This causes the object file to be loaded.
+        addObjectFile(OF);
+        // The address should be here now.
+        Addr = getExistingSymbolAddress(Name);
+        if (Addr)
+          return Addr;
+      }
+    }
+  }
 
   // If it hasn't already been generated, see if it's in one of our modules.
   Module *M = findModuleForSymbol(Name, CheckFunctionsOnly);
   if (!M)
     return 0;
 
-  // If this is in one of our modules, generate code for that module.
-  assert(ModuleStates.find(M) != ModuleStates.end());
-  // If the module code has already been generated, we won't find the symbol.
-  if (ModuleStates[M].hasBeenLoaded())
-    return 0;
-
-  // FIXME: We probably need to make sure we aren't in the process of
-  //        loading or finalizing this module.
   generateCodeForModule(M);
 
   // Check the RuntimeDyld table again, it should be there now.
@@ -313,6 +331,7 @@ uint64_t MCJIT::getSymbolAddress(const std::string &Name,
 }
 
 uint64_t MCJIT::getGlobalValueAddress(const std::string &Name) {
+  MutexGuard locked(lock);
   uint64_t Result = getSymbolAddress(Name, false);
   if (Result != 0)
     finalizeLoadedModules();
@@ -320,6 +339,7 @@ uint64_t MCJIT::getGlobalValueAddress(const std::string &Name) {
 }
 
 uint64_t MCJIT::getFunctionAddress(const std::string &Name) {
+  MutexGuard locked(lock);
   uint64_t Result = getSymbolAddress(Name, true);
   if (Result != 0)
     finalizeLoadedModules();
@@ -328,6 +348,7 @@ uint64_t MCJIT::getFunctionAddress(const std::string &Name) {
 
 // Deprecated.  Use getFunctionAddress instead.
 void *MCJIT::getPointerToFunction(Function *F) {
+  MutexGuard locked(lock);
 
   if (F->isDeclaration() || F->hasAvailableExternallyLinkage()) {
     bool AbortOnFailure = !F->hasExternalWeakLinkage();
@@ -336,27 +357,24 @@ void *MCJIT::getPointerToFunction(Function *F) {
     return Addr;
   }
 
-  // If this function doesn't belong to one of our modules, we're done.
   Module *M = F->getParent();
-  if (std::find(Modules.begin(), Modules.end(), M) == Modules.end())
-    return NULL;
-
-  assert(ModuleStates.find(M) != ModuleStates.end());
+  bool HasBeenAddedButNotLoaded = OwnedModules.hasModuleBeenAddedButNotLoaded(M);
 
   // Make sure the relevant module has been compiled and loaded.
-  if (!ModuleStates[M].hasBeenLoaded())
+  if (HasBeenAddedButNotLoaded)
     generateCodeForModule(M);
+  else if (!OwnedModules.hasModuleBeenLoaded(M))
+    // If this function doesn't belong to one of our modules, we're done.
+    return NULL;
 
   // FIXME: Should the Dyld be retaining module information? Probably not.
-  // FIXME: Should we be using the mangler for this? Probably.
   //
   // This is the accessor for the target address, so make sure to check the
   // load address of the symbol, not the local address.
-  StringRef BaseName = F->getName();
-  if (BaseName[0] == '\1')
-    return (void*)Dyld.getSymbolLoadAddress(BaseName.substr(1));
-  return (void*)Dyld.getSymbolLoadAddress((TM->getMCAsmInfo()->getGlobalPrefix()
-                                       + BaseName).str());
+  Mangler Mang(TM->getDataLayout());
+  SmallString<128> Name;
+  TM->getNameWithPrefix(Name, F, Mang);
+  return (void*)Dyld.getSymbolLoadAddress(Name);
 }
 
 void *MCJIT::recompileAndRelinkFunction(Function *F) {
@@ -365,6 +383,45 @@ void *MCJIT::recompileAndRelinkFunction(Function *F) {
 
 void MCJIT::freeMachineCodeForFunction(Function *F) {
   report_fatal_error("not yet implemented");
+}
+
+void MCJIT::runStaticConstructorsDestructorsInModulePtrSet(
+    bool isDtors, ModulePtrSet::iterator I, ModulePtrSet::iterator E) {
+  for (; I != E; ++I) {
+    ExecutionEngine::runStaticConstructorsDestructors(*I, isDtors);
+  }
+}
+
+void MCJIT::runStaticConstructorsDestructors(bool isDtors) {
+  // Execute global ctors/dtors for each module in the program.
+  runStaticConstructorsDestructorsInModulePtrSet(
+      isDtors, OwnedModules.begin_added(), OwnedModules.end_added());
+  runStaticConstructorsDestructorsInModulePtrSet(
+      isDtors, OwnedModules.begin_loaded(), OwnedModules.end_loaded());
+  runStaticConstructorsDestructorsInModulePtrSet(
+      isDtors, OwnedModules.begin_finalized(), OwnedModules.end_finalized());
+}
+
+Function *MCJIT::FindFunctionNamedInModulePtrSet(const char *FnName,
+                                                 ModulePtrSet::iterator I,
+                                                 ModulePtrSet::iterator E) {
+  for (; I != E; ++I) {
+    if (Function *F = (*I)->getFunction(FnName))
+      return F;
+  }
+  return 0;
+}
+
+Function *MCJIT::FindFunctionNamed(const char *FnName) {
+  Function *F = FindFunctionNamedInModulePtrSet(
+      FnName, OwnedModules.begin_added(), OwnedModules.end_added());
+  if (!F)
+    F = FindFunctionNamedInModulePtrSet(FnName, OwnedModules.begin_loaded(),
+                                        OwnedModules.end_loaded());
+  if (!F)
+    F = FindFunctionNamedInModulePtrSet(FnName, OwnedModules.begin_finalized(),
+                                        OwnedModules.end_finalized());
+  return F;
 }
 
 GenericValue MCJIT::runFunction(Function *F,

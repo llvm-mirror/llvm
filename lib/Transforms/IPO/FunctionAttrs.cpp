@@ -29,9 +29,9 @@
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/Support/InstIterator.h"
 #include "llvm/Target/TargetLibraryInfo.h"
 using namespace llvm;
 
@@ -51,7 +51,7 @@ namespace {
     }
 
     // runOnSCC - Analyze the SCC, performing the transformation if possible.
-    bool runOnSCC(CallGraphSCC &SCC);
+    bool runOnSCC(CallGraphSCC &SCC) override;
 
     // AddReadAttrs - Deduce readonly/readnone attributes for the SCC.
     bool AddReadAttrs(const CallGraphSCC &SCC);
@@ -120,7 +120,7 @@ namespace {
     // call declarations.
     bool annotateLibraryCalls(const CallGraphSCC &SCC);
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       AU.addRequired<AliasAnalysis>();
       AU.addRequired<TargetLibraryInfo>();
@@ -137,7 +137,7 @@ char FunctionAttrs::ID = 0;
 INITIALIZE_PASS_BEGIN(FunctionAttrs, "functionattrs",
                 "Deduce function attributes", false, false)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
-INITIALIZE_AG_DEPENDENCY(CallGraph)
+INITIALIZE_PASS_DEPENDENCY(CallGraphWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
 INITIALIZE_PASS_END(FunctionAttrs, "functionattrs",
                 "Deduce function attributes", false, false)
@@ -342,9 +342,9 @@ namespace {
     ArgumentUsesTracker(const SmallPtrSet<Function*, 8> &SCCNodes)
       : Captured(false), SCCNodes(SCCNodes) {}
 
-    void tooManyUses() { Captured = true; }
+    void tooManyUses() override { Captured = true; }
 
-    bool captured(Use *U) {
+    bool captured(const Use *U) override {
       CallSite CS(U->getUser());
       if (!CS.getInstruction()) { Captured = true; return true; }
 
@@ -414,17 +414,19 @@ determinePointerReadAttrs(Argument *A,
   SmallSet<Use*, 32> Visited;
   int Count = 0;
 
+  // inalloca arguments are always clobbered by the call.
+  if (A->hasInAllocaAttr())
+    return Attribute::None;
+
   bool IsRead = false;
   // We don't need to track IsWritten. If A is written to, return immediately.
 
-  for (Value::use_iterator UI = A->use_begin(), UE = A->use_end();
-       UI != UE; ++UI) {
+  for (Use &U : A->uses()) {
     if (Count++ >= 20)
       return Attribute::None;
 
-    Use *U = &UI.getUse();
-    Visited.insert(U);
-    Worklist.push_back(U);
+    Visited.insert(&U);
+    Worklist.push_back(&U);
   }
 
   while (!Worklist.empty()) {
@@ -437,13 +439,11 @@ determinePointerReadAttrs(Argument *A,
     case Instruction::GetElementPtr:
     case Instruction::PHI:
     case Instruction::Select:
+    case Instruction::AddrSpaceCast:
       // The original value is not read/written via this if the new value isn't.
-      for (Instruction::use_iterator UI = I->use_begin(), UE = I->use_end();
-           UI != UE; ++UI) {
-        Use *U = &UI.getUse();
-        if (Visited.insert(U))
-          Worklist.push_back(U);
-      }
+      for (Use &UU : I->uses())
+        if (Visited.insert(&UU))
+          Worklist.push_back(&UU);
       break;
 
     case Instruction::Call:
@@ -599,8 +599,7 @@ bool FunctionAttrs::AddArgumentAttrs(const CallGraphSCC &SCC) {
   // made.  If the definition doesn't have a 'nocapture' attribute by now, it
   // captures.
 
-  for (scc_iterator<ArgumentGraph*> I = scc_begin(&AG), E = scc_end(&AG);
-       I != E; ++I) {
+  for (scc_iterator<ArgumentGraph*> I = scc_begin(&AG); !I.isAtEnd(); ++I) {
     std::vector<ArgumentGraphNode*> &ArgumentSCC = *I;
     if (ArgumentSCC.size() == 1) {
       if (!ArgumentSCC[0]->Definition) continue;  // synthetic root node
@@ -723,6 +722,7 @@ bool FunctionAttrs::IsFunctionMallocLike(Function *F,
         // Extend the analysis by looking upwards.
         case Instruction::BitCast:
         case Instruction::GetElementPtr:
+        case Instruction::AddrSpaceCast:
           FlowsToReturn.insert(RVI->getOperand(0));
           continue;
         case Instruction::Select: {
@@ -1649,6 +1649,7 @@ bool FunctionAttrs::inferPrototypeAttributes(Function &F) {
     setDoesNotThrow(F);
     setDoesNotCapture(F, 1);
     setDoesNotCapture(F, 2);
+    break;
   default:
     // Didn't mark any attributes.
     return false;

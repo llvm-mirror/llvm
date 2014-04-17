@@ -85,30 +85,6 @@ bool DWARFUnit::extract(DataExtractor debug_info, uint32_t *offset_ptr) {
   return false;
 }
 
-uint32_t
-DWARFUnit::extract(uint32_t offset, DataExtractor debug_info_data,
-                          const DWARFAbbreviationDeclarationSet *abbrevs) {
-  clear();
-
-  Offset = offset;
-
-  if (debug_info_data.isValidOffset(offset)) {
-    Length = debug_info_data.getU32(&offset);
-    Version = debug_info_data.getU16(&offset);
-    bool abbrevsOK = debug_info_data.getU32(&offset) == abbrevs->getOffset();
-    Abbrevs = abbrevs;
-    AddrSize = debug_info_data.getU8(&offset);
-
-    bool versionOK = DWARFContext::isSupportedVersion(Version);
-    bool addrSizeOK = AddrSize == 4 || AddrSize == 8;
-
-    if (versionOK && addrSizeOK && abbrevsOK &&
-        debug_info_data.isValidOffset(offset))
-      return offset;
-  }
-  return 0;
-}
-
 bool DWARFUnit::extractRangeList(uint32_t RangeListOffset,
                                         DWARFDebugRangeList &RangeList) const {
   // Require that compile unit is extracted.
@@ -144,7 +120,7 @@ uint64_t DWARFUnit::getDWOId() {
   if (DieArray.empty())
     return FailValue;
   return DieArray[0]
-      .getAttributeValueAsUnsigned(this, DW_AT_GNU_dwo_id, FailValue);
+      .getAttributeValueAsUnsignedConstant(this, DW_AT_GNU_dwo_id, FailValue);
 }
 
 void DWARFUnit::setDIERelations() {
@@ -194,12 +170,9 @@ void DWARFUnit::extractDIEsToVector(
   uint32_t NextCUOffset = getNextUnitOffset();
   DWARFDebugInfoEntryMinimal DIE;
   uint32_t Depth = 0;
-  const uint8_t *FixedFormSizes =
-    DWARFFormValue::getFixedFormSizes(getAddressByteSize(), getVersion());
   bool IsCUDie = true;
 
-  while (Offset < NextCUOffset &&
-         DIE.extractFast(this, FixedFormSizes, &Offset)) {
+  while (Offset < NextCUOffset && DIE.extractFast(this, &Offset)) {
     if (IsCUDie) {
       if (AppendCUDie)
         Dies.push_back(DIE);
@@ -251,14 +224,14 @@ size_t DWARFUnit::extractDIEsIfNeeded(bool CUDieOnly) {
   // If CU DIE was just parsed, copy several attribute values from it.
   if (!HasCUDie) {
     uint64_t BaseAddr =
-      DieArray[0].getAttributeValueAsUnsigned(this, DW_AT_low_pc, -1U);
-    if (BaseAddr == -1U)
-      BaseAddr = DieArray[0].getAttributeValueAsUnsigned(this, DW_AT_entry_pc, 0);
+        DieArray[0].getAttributeValueAsAddress(this, DW_AT_low_pc, -1ULL);
+    if (BaseAddr == -1ULL)
+      BaseAddr = DieArray[0].getAttributeValueAsAddress(this, DW_AT_entry_pc, 0);
     setBaseAddress(BaseAddr);
-    AddrOffsetSectionBase =
-        DieArray[0].getAttributeValueAsReference(this, DW_AT_GNU_addr_base, 0);
-    RangeSectionBase =
-        DieArray[0].getAttributeValueAsReference(this, DW_AT_GNU_ranges_base, 0);
+    AddrOffsetSectionBase = DieArray[0].getAttributeValueAsSectionOffset(
+        this, DW_AT_GNU_addr_base, 0);
+    RangeSectionBase = DieArray[0].getAttributeValueAsSectionOffset(
+        this, DW_AT_GNU_ranges_base, 0);
   }
 
   setDIERelations();
@@ -290,12 +263,12 @@ bool DWARFUnit::parseDWO() {
     sys::path::append(AbsolutePath, CompilationDir);
   }
   sys::path::append(AbsolutePath, DWOFileName);
-  object::ObjectFile *DWOFile =
+  ErrorOr<object::ObjectFile *> DWOFile =
       object::ObjectFile::createObjectFile(AbsolutePath);
   if (!DWOFile)
     return false;
   // Reset DWOHolder.
-  DWO.reset(new DWOHolder(DWOFile));
+  DWO.reset(new DWOHolder(DWOFile.get()));
   DWARFUnit *DWOCU = DWO->getUnit();
   // Verify that compile unit in .dwo file is valid.
   if (DWOCU == 0 || DWOCU->getDWOId() != getDWOId()) {
@@ -358,11 +331,12 @@ DWARFUnit::buildAddressRangeTable(DWARFDebugAranges *debug_aranges,
 const DWARFDebugInfoEntryMinimal *
 DWARFUnit::getSubprogramForAddress(uint64_t Address) {
   extractDIEsIfNeeded(false);
-  for (size_t i = 0, n = DieArray.size(); i != n; i++)
-    if (DieArray[i].isSubprogramDIE() &&
-        DieArray[i].addressRangeContainsAddress(this, Address)) {
-      return &DieArray[i];
+  for (const DWARFDebugInfoEntryMinimal &DIE : DieArray) {
+    if (DIE.isSubprogramDIE() &&
+        DIE.addressRangeContainsAddress(this, Address)) {
+      return &DIE;
     }
+  }
   return 0;
 }
 

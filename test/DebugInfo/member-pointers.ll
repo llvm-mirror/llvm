@@ -1,15 +1,15 @@
 ; REQUIRES: object-emission
 ; XFAIL: hexagon
 
-; RUN: llc -filetype=obj -O0 < %s > %t
+; RUN: %llc_dwarf -filetype=obj -O0 < %s > %t
 ; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
 ; CHECK: DW_TAG_ptr_to_member_type
-; CHECK: [[TYPE:.*]]:   DW_TAG_subroutine_type
+; CHECK: DW_TAG_ptr_to_member_type
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]       (cu + {{.*}} => {[[TYPE:0x[0-9a-f]+]]})
+; CHECK: [[TYPE]]:   DW_TAG_subroutine_type
 ; CHECK: DW_TAG_formal_parameter
 ; CHECK-NEXT: DW_AT_type
 ; CHECK-NEXT: DW_AT_artificial [DW_FORM_flag
-; CHECK: DW_TAG_ptr_to_member_type
-; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]       (cu + {{.*}} => {[[TYPE]]})
 ; IR generated from clang -g with the following source:
 ; struct S {
 ; };
@@ -21,9 +21,10 @@
 @y = global { i64, i64 } zeroinitializer, align 8
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!16}
 
-!0 = metadata !{i32 786449, metadata !15, i32 4, metadata !"clang version 3.3 ", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !1, metadata !3,  metadata !3, metadata !""} ; [ DW_TAG_compile_unit ] [/home/blaikie/Development/scratch/simple.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{i32 0}
+!0 = metadata !{i32 786449, metadata !15, i32 4, metadata !"clang version 3.3 ", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !1, metadata !3,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ] [/home/blaikie/Development/scratch/simple.cpp] [DW_LANG_C_plus_plus]
+!1 = metadata !{}
 !3 = metadata !{metadata !5, metadata !10}
 !5 = metadata !{i32 786484, i32 0, null, metadata !"x", metadata !"x", metadata !"", metadata !6, i32 4, metadata !7, i32 0, i32 1, i64* @x, null} ; [ DW_TAG_variable ] [x] [line 4] [def]
 !6 = metadata !{i32 786473, metadata !15} ; [ DW_TAG_file_type ]
@@ -36,3 +37,4 @@
 !13 = metadata !{null, metadata !14, metadata !8}
 !14 = metadata !{i32 786447, i32 0, null, i32 0, i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from S]
 !15 = metadata !{metadata !"simple.cpp", metadata !"/home/blaikie/Development/scratch"}
+!16 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

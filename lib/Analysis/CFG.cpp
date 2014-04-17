@@ -13,10 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/CFG.h"
-
 #include "llvm/ADT/SmallSet.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/Dominators.h"
 
 using namespace llvm;
 
@@ -102,15 +101,9 @@ bool llvm::isCriticalEdge(const TerminatorInst *TI, unsigned SuccNum,
 
   // If AllowIdenticalEdges is true, then we allow this edge to be considered
   // non-critical iff all preds come from TI's block.
-  while (I != E) {
-    const BasicBlock *P = *I;
-    if (P != FirstPred)
+  for (; I != E; ++I)
+    if (*I != FirstPred)
       return true;
-    // Note: leave this as is until no one ever compiles with either gcc 4.0.1
-    // or Xcode 2. This seems to work around the pred_iterator assert in PR 2207
-    E = pred_end(P);
-    ++I;
-  }
   return false;
 }
 
@@ -169,8 +162,7 @@ static bool isPotentiallyReachableInner(SmallVectorImpl<BasicBlock *> &Worklist,
       // ignoring any other blocks inside the loop body.
       Outer->getExitBlocks(Worklist);
     } else {
-      for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; ++I)
-        Worklist.push_back(*I);
+      Worklist.append(succ_begin(BB), succ_end(BB));
     }
   } while (!Worklist.empty());
 
@@ -223,8 +215,7 @@ bool llvm::isPotentiallyReachable(const Instruction *A, const Instruction *B,
       return false;
 
     // Otherwise, continue doing the normal per-BB CFG walk.
-    for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; ++I)
-      Worklist.push_back(*I);
+    Worklist.append(succ_begin(BB), succ_end(BB));
 
     if (Worklist.empty()) {
       // We've proven that there's no path!

@@ -23,19 +23,19 @@ using namespace llvm;
 namespace {
 class AArch64ELFObjectWriter : public MCELFObjectTargetWriter {
 public:
-  AArch64ELFObjectWriter(uint8_t OSABI);
+  AArch64ELFObjectWriter(uint8_t OSABI, bool IsLittleEndian);
 
   virtual ~AArch64ELFObjectWriter();
 
 protected:
-  virtual unsigned GetRelocType(const MCValue &Target, const MCFixup &Fixup,
-                                bool IsPCRel, bool IsRelocWithSymbol,
-                                int64_t Addend) const;
+  unsigned GetRelocType(const MCValue &Target, const MCFixup &Fixup,
+                        bool IsPCRel) const override;
+
 private:
 };
 }
 
-AArch64ELFObjectWriter::AArch64ELFObjectWriter(uint8_t OSABI)
+AArch64ELFObjectWriter::AArch64ELFObjectWriter(uint8_t OSABI, bool IsLittleEndian)
   : MCELFObjectTargetWriter(/*Is64Bit*/ true, OSABI, ELF::EM_AARCH64,
                             /*HasRelocationAddend*/ true)
 {}
@@ -45,9 +45,7 @@ AArch64ELFObjectWriter::~AArch64ELFObjectWriter()
 
 unsigned AArch64ELFObjectWriter::GetRelocType(const MCValue &Target,
                                               const MCFixup &Fixup,
-                                              bool IsPCRel,
-                                              bool IsRelocWithSymbol,
-                                              int64_t Addend) const {
+                                              bool IsPCRel) const {
   unsigned Type;
   if (IsPCRel) {
     switch ((unsigned)Fixup.getKind()) {
@@ -286,7 +284,8 @@ unsigned AArch64ELFObjectWriter::GetRelocType(const MCValue &Target,
 }
 
 MCObjectWriter *llvm::createAArch64ELFObjectWriter(raw_ostream &OS,
-                                                   uint8_t OSABI) {
-  MCELFObjectTargetWriter *MOTW = new AArch64ELFObjectWriter(OSABI);
-  return createELFObjectWriter(MOTW, OS,  /*IsLittleEndian=*/true);
+                                                   uint8_t OSABI,
+                                                   bool IsLittleEndian) {
+  MCELFObjectTargetWriter *MOTW = new AArch64ELFObjectWriter(OSABI, IsLittleEndian);
+  return createELFObjectWriter(MOTW, OS,  IsLittleEndian);
 }

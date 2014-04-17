@@ -77,7 +77,7 @@ protected:
 
     DEBUG(dbgs() << "Spilling everywhere " << *li << "\n");
 
-    assert(li->weight != HUGE_VALF &&
+    assert(li->weight != llvm::huge_valf &&
            "Attempting to spill already spilled value.");
 
     assert(!TargetRegisterInfo::isStackSlot(li->reg) &&
@@ -89,8 +89,9 @@ protected:
     unsigned ss = vrm->assignVirt2StackSlot(li->reg);
 
     // Iterate over reg uses/defs.
-    for (MachineRegisterInfo::reg_iterator
-         regItr = mri->reg_begin(li->reg); regItr != mri->reg_end();) {
+    for (MachineRegisterInfo::reg_instr_iterator
+         regItr = mri->reg_instr_begin(li->reg);
+         regItr != mri->reg_instr_end();) {
 
       // Grab the use/def instr.
       MachineInstr *mi = &*regItr;
@@ -98,9 +99,7 @@ protected:
       DEBUG(dbgs() << "  Processing " << *mi);
 
       // Step regItr to the next use/def instr.
-      do {
-        ++regItr;
-      } while (regItr != mri->reg_end() && (&*regItr == mi));
+      ++regItr;
 
       // Collect uses & defs for this instr.
       SmallVector<unsigned, 2> indices;
@@ -143,9 +142,9 @@ protected:
       if (hasDef) {
         MachineInstrSpan MIS(miItr);
 
-        tii->storeRegToStackSlot(*mi->getParent(), llvm::next(miItr), NewVReg,
+        tii->storeRegToStackSlot(*mi->getParent(), std::next(miItr), NewVReg,
                                  true, ss, trc, tri);
-        lis->InsertMachineInstrRangeInMaps(llvm::next(miItr), MIS.end());
+        lis->InsertMachineInstrRangeInMaps(std::next(miItr), MIS.end());
       }
     }
   }
@@ -164,7 +163,7 @@ public:
                  VirtRegMap &vrm)
     : SpillerBase(pass, mf, vrm) {}
 
-  void spill(LiveRangeEdit &LRE) {
+  void spill(LiveRangeEdit &LRE) override {
     // Ignore spillIs - we don't use it.
     trivialSpillEverywhere(LRE);
   }

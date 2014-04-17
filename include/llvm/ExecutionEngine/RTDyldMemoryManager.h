@@ -14,10 +14,10 @@
 #ifndef LLVM_EXECUTIONENGINE_RT_DYLD_MEMORY_MANAGER_H
 #define LLVM_EXECUTIONENGINE_RT_DYLD_MEMORY_MANAGER_H
 
+#include "llvm-c/ExecutionEngine.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Memory.h"
-#include "llvm-c/ExecutionEngine.h"
 
 namespace llvm {
 
@@ -52,6 +52,20 @@ public:
     uintptr_t Size, unsigned Alignment, unsigned SectionID,
     StringRef SectionName, bool IsReadOnly) = 0;
 
+  /// Inform the memory manager about the total amount of memory required to
+  /// allocate all sections to be loaded:
+  /// \p CodeSize - the total size of all code sections
+  /// \p DataSizeRO - the total size of all read-only data sections
+  /// \p DataSizeRW - the total size of all read-write data sections
+  /// 
+  /// Note that by default the callback is disabled. To enable it
+  /// redefine the method needsToReserveAllocationSpace to return true.
+  virtual void reserveAllocationSpace(
+    uintptr_t CodeSize, uintptr_t DataSizeRO, uintptr_t DataSizeRW) { }
+  
+  /// Override to return true to enable the reserveAllocationSpace callback.
+  virtual bool needsToReserveAllocationSpace() { return false; }
+
   /// Register the EH frames with the runtime so that c++ exceptions work.
   ///
   /// \p Addr parameter provides the local address of the EH frame section
@@ -59,6 +73,8 @@ public:
   /// address space.  If the section has not been remapped (which will usually
   /// be the case for local execution) these two values will be the same.
   virtual void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr, size_t Size);
+
+  virtual void deregisterEHFrames(uint8_t *Addr, uint64_t LoadAddr, size_t Size);
 
   /// This method returns the address of the specified function or variable.
   /// It is used to resolve symbols during module linking.

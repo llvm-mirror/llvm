@@ -12,9 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/FileSystem.h"
+#include "llvm/ADT/OwningPtr.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -78,8 +78,8 @@ TEST_F(MemoryBufferTest, NullTerminator4K) {
   }
   OF.close();
 
-  OwningPtr<MemoryBuffer> MB;
-  error_code EC = MemoryBuffer::getFile(TestPath, MB);
+  OwningBuffer MB;
+  error_code EC = MemoryBuffer::getFile(TestPath.c_str(), MB);
   ASSERT_FALSE(EC);
 
   const char *BufData = MB->getBufferStart();

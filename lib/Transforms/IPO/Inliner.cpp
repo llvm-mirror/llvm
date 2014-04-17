@@ -19,11 +19,12 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/InlineCost.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -49,6 +50,13 @@ InlineLimit("inline-threshold", cl::Hidden, cl::init(225), cl::ZeroOrMore,
 static cl::opt<int>
 HintThreshold("inlinehint-threshold", cl::Hidden, cl::init(325),
               cl::desc("Threshold for inlining functions with inline hint"));
+
+// We instroduce this threshold to help performance of instrumentation based
+// PGO before we actually hook up inliner with analysis passes such as BPI and
+// BFI.
+static cl::opt<int>
+ColdThreshold("inlinecold-threshold", cl::Hidden, cl::init(225),
+              cl::desc("Threshold for inlining functions with cold attribute"));
 
 // Threshold to use when optsize is specified (and there is no -inline-limit).
 const int OptSizeThreshold = 75;
@@ -117,7 +125,7 @@ static void AdjustCallerSSPLevel(Function *Caller, Function *Callee) {
 static bool InlineCallIfPossible(CallSite CS, InlineFunctionInfo &IFI,
                                  InlinedArrayAllocasTy &InlinedArrayAllocas,
                                  int InlineHistory, bool InsertLifetime,
-                                 const DataLayout *TD) {
+                                 const DataLayout *DL) {
   Function *Callee = CS.getCalledFunction();
   Function *Caller = CS.getCaller();
 
@@ -196,7 +204,7 @@ static bool InlineCallIfPossible(CallSite CS, InlineFunctionInfo &IFI,
       // If we don't have data layout information, and only one alloca is using
       // the target default, then we can't safely merge them because we can't
       // pick the greater alignment.
-      if (!TD && (!Align1 || !Align2) && Align1 != Align2)
+      if (!DL && (!Align1 || !Align2) && Align1 != Align2)
         continue;
       
       // The available alloca has to be in the right function, not in some other
@@ -218,8 +226,8 @@ static bool InlineCallIfPossible(CallSite CS, InlineFunctionInfo &IFI,
 
       if (Align1 != Align2) {
         if (!Align1 || !Align2) {
-          assert(TD && "DataLayout required to compare default alignments");
-          unsigned TypeAlign = TD->getABITypeAlignment(AI->getAllocatedType());
+          assert(DL && "DataLayout required to compare default alignments");
+          unsigned TypeAlign = DL->getABITypeAlignment(AI->getAllocatedType());
 
           Align1 = Align1 ? Align1 : TypeAlign;
           Align2 = Align2 ? Align2 : TypeAlign;
@@ -277,6 +285,13 @@ unsigned Inliner::getInlineThreshold(CallSite CS) const {
                                                Attribute::MinSize))
     thres = HintThreshold;
 
+  // Listen to the cold attribute when it would decrease the threshold.
+  bool ColdCallee = Callee && !Callee->isDeclaration() &&
+    Callee->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                         Attribute::Cold);
+  if (ColdCallee && ColdThreshold < thres)
+    thres = ColdThreshold;
+
   return thres;
 }
 
@@ -330,9 +345,8 @@ bool Inliner::shouldInline(CallSite CS) {
     bool callerWillBeRemoved = Caller->hasLocalLinkage();
     // This bool tracks what happens if we DO inline C into B.
     bool inliningPreventsSomeOuterInline = false;
-    for (Value::use_iterator I = Caller->use_begin(), E =Caller->use_end(); 
-         I != E; ++I) {
-      CallSite CS2(*I);
+    for (User *U : Caller->users()) {
+      CallSite CS2(U);
 
       // If this isn't a call to Caller (it could be some other sort
       // of reference) skip it.  Such references will prevent the caller
@@ -363,7 +377,7 @@ bool Inliner::shouldInline(CallSite CS) {
     // one is set very low by getInlineCost, in anticipation that Caller will
     // be removed entirely.  We did not account for this above unless there
     // is only one caller of Caller.
-    if (callerWillBeRemoved && Caller->use_begin() != Caller->use_end())
+    if (callerWillBeRemoved && !Caller->use_empty())
       TotalSecondaryCost += InlineConstants::LastCallToStaticBonus;
 
     if (inliningPreventsSomeOuterInline && TotalSecondaryCost < IC.getCost()) {
@@ -395,8 +409,9 @@ static bool InlineHistoryIncludes(Function *F, int InlineHistoryID,
 }
 
 bool Inliner::runOnSCC(CallGraphSCC &SCC) {
-  CallGraph &CG = getAnalysis<CallGraph>();
-  const DataLayout *TD = getAnalysisIfAvailable<DataLayout>();
+  CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
+  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
+  const DataLayout *DL = DLP ? &DLP->getDataLayout() : 0;
   const TargetLibraryInfo *TLI = getAnalysisIfAvailable<TargetLibraryInfo>();
 
   SmallPtrSet<Function*, 8> SCCFunctions;
@@ -456,7 +471,7 @@ bool Inliner::runOnSCC(CallGraphSCC &SCC) {
 
   
   InlinedArrayAllocasTy InlinedArrayAllocas;
-  InlineFunctionInfo InlineInfo(&CG, TD);
+  InlineFunctionInfo InlineInfo(&CG, DL);
   
   // Now that we have all of the call sites, loop over them and inline them if
   // it looks profitable to do so.
@@ -505,10 +520,15 @@ bool Inliner::runOnSCC(CallGraphSCC &SCC) {
 
         // Attempt to inline the function.
         if (!InlineCallIfPossible(CS, InlineInfo, InlinedArrayAllocas,
-                                  InlineHistoryID, InsertLifetime, TD))
+                                  InlineHistoryID, InsertLifetime, DL))
           continue;
         ++NumInlined;
-        
+
+        // Report the inline decision.
+        Caller->getContext().emitOptimizationRemark(
+            DEBUG_TYPE, *Caller, CS.getInstruction()->getDebugLoc(),
+            Twine(Callee->getName() + " inlined into " + Caller->getName()));
+
         // If inlining this function gave us any new call sites, throw them
         // onto our worklist to process.  They are useful inline candidates.
         if (!InlineInfo.InlinedCalls.empty()) {

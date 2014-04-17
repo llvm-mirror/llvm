@@ -42,25 +42,26 @@ public:
                        StringRef CPU, StringRef FS,
                        const TargetOptions &Options,
                        Reloc::Model RM, CodeModel::Model CM,
-                       CodeGenOpt::Level OL);
+                       CodeGenOpt::Level OL,
+                       bool isLittle);
 
-  virtual       ARMJITInfo       *getJITInfo()         { return &JITInfo; }
-  virtual const ARMSubtarget  *getSubtargetImpl() const { return &Subtarget; }
-  virtual const ARMTargetLowering *getTargetLowering() const {
+  ARMJITInfo *getJITInfo() override { return &JITInfo; }
+  const ARMSubtarget *getSubtargetImpl() const override { return &Subtarget; }
+  const ARMTargetLowering *getTargetLowering() const override {
     // Implemented by derived classes
     llvm_unreachable("getTargetLowering not implemented");
   }
-  virtual const InstrItineraryData *getInstrItineraryData() const {
+  const InstrItineraryData *getInstrItineraryData() const override {
     return &InstrItins;
   }
 
   /// \brief Register ARM analysis passes with a pass manager.
-  virtual void addAnalysisPasses(PassManagerBase &PM);
+  void addAnalysisPasses(PassManagerBase &PM) override;
 
   // Pass Pipeline Configuration
-  virtual TargetPassConfig *createPassConfig(PassManagerBase &PM);
+  TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
-  virtual bool addCodeEmitter(PassManagerBase &PM, JITCodeEmitter &MCE);
+  bool addCodeEmitter(PassManagerBase &PM, JITCodeEmitter &MCE) override;
 };
 
 /// ARMTargetMachine - ARM target machine.
@@ -77,24 +78,47 @@ class ARMTargetMachine : public ARMBaseTargetMachine {
                    StringRef CPU, StringRef FS,
                    const TargetOptions &Options,
                    Reloc::Model RM, CodeModel::Model CM,
-                   CodeGenOpt::Level OL);
+                   CodeGenOpt::Level OL,
+                   bool isLittle);
 
-  virtual const ARMRegisterInfo  *getRegisterInfo() const {
+  const ARMRegisterInfo *getRegisterInfo() const override {
     return &InstrInfo.getRegisterInfo();
   }
 
-  virtual const ARMTargetLowering *getTargetLowering() const {
+  const ARMTargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }
 
-  virtual const ARMSelectionDAGInfo* getSelectionDAGInfo() const {
+  const ARMSelectionDAGInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
-  virtual const ARMFrameLowering *getFrameLowering() const {
+  const ARMFrameLowering *getFrameLowering() const override {
     return &FrameLowering;
   }
-  virtual const ARMInstrInfo     *getInstrInfo() const { return &InstrInfo; }
-  virtual const DataLayout       *getDataLayout() const { return &DL; }
+  const ARMInstrInfo *getInstrInfo() const override { return &InstrInfo; }
+  const DataLayout *getDataLayout() const override { return &DL; }
+};
+
+/// ARMLETargetMachine - ARM little endian target machine.
+///
+class ARMLETargetMachine : public ARMTargetMachine {
+  virtual void anchor();
+public:
+  ARMLETargetMachine(const Target &T, StringRef TT,
+                     StringRef CPU, StringRef FS, const TargetOptions &Options,
+                     Reloc::Model RM, CodeModel::Model CM,
+                     CodeGenOpt::Level OL);
+};
+
+/// ARMBETargetMachine - ARM big endian target machine.
+///
+class ARMBETargetMachine : public ARMTargetMachine {
+  virtual void anchor();
+public:
+  ARMBETargetMachine(const Target &T, StringRef TT,
+                     StringRef CPU, StringRef FS, const TargetOptions &Options,
+                     Reloc::Model RM, CodeModel::Model CM,
+                     CodeGenOpt::Level OL);
 };
 
 /// ThumbTargetMachine - Thumb target machine.
@@ -115,30 +139,53 @@ public:
                      StringRef CPU, StringRef FS,
                      const TargetOptions &Options,
                      Reloc::Model RM, CodeModel::Model CM,
-                     CodeGenOpt::Level OL);
+                     CodeGenOpt::Level OL,
+                     bool isLittle);
 
   /// returns either Thumb1RegisterInfo or Thumb2RegisterInfo
-  virtual const ARMBaseRegisterInfo *getRegisterInfo() const {
+  const ARMBaseRegisterInfo *getRegisterInfo() const override {
     return &InstrInfo->getRegisterInfo();
   }
 
-  virtual const ARMTargetLowering *getTargetLowering() const {
+  const ARMTargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }
 
-  virtual const ARMSelectionDAGInfo *getSelectionDAGInfo() const {
+  const ARMSelectionDAGInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
 
   /// returns either Thumb1InstrInfo or Thumb2InstrInfo
-  virtual const ARMBaseInstrInfo *getInstrInfo() const {
+  const ARMBaseInstrInfo *getInstrInfo() const override {
     return InstrInfo.get();
   }
   /// returns either Thumb1FrameLowering or ARMFrameLowering
-  virtual const ARMFrameLowering *getFrameLowering() const {
+  const ARMFrameLowering *getFrameLowering() const override {
     return FrameLowering.get();
   }
-  virtual const DataLayout       *getDataLayout() const { return &DL; }
+  const DataLayout *getDataLayout() const override { return &DL; }
+};
+
+/// ThumbLETargetMachine - Thumb little endian target machine.
+///
+class ThumbLETargetMachine : public ThumbTargetMachine {
+  virtual void anchor();
+public:
+  ThumbLETargetMachine(const Target &T, StringRef TT,
+                     StringRef CPU, StringRef FS, const TargetOptions &Options,
+                     Reloc::Model RM, CodeModel::Model CM,
+                     CodeGenOpt::Level OL);
+};
+
+/// ThumbBETargetMachine - Thumb big endian target machine.
+///
+class ThumbBETargetMachine : public ThumbTargetMachine {
+  virtual void anchor();
+public:
+  ThumbBETargetMachine(const Target &T, StringRef TT, StringRef CPU,
+                       StringRef FS, const TargetOptions &Options,
+                       Reloc::Model RM, CodeModel::Model CM,
+                       CodeGenOpt::Level OL);
 };
 
 } // end namespace llvm

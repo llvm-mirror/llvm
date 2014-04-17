@@ -11,9 +11,16 @@ include(CheckFunctionExists)
 include(CheckCXXSourceCompiles)
 include(TestBigEndian)
 
+include(HandleLLVMStdlib)
+
 if( UNIX AND NOT BEOS )
   # Used by check_symbol_exists:
   set(CMAKE_REQUIRED_LIBRARIES m)
+endif()
+# x86_64 FreeBSD 9.2 requires libcxxrt to be specified explicitly.
+if( CMAKE_SYSTEM MATCHES "FreeBSD-9.2-RELEASE" AND
+    CMAKE_SIZEOF_VOID_P EQUAL 8 )
+  list(APPEND CMAKE_REQUIRED_LIBRARIES "cxxrt")
 endif()
 
 # Helper macros and functions
@@ -49,7 +56,6 @@ check_include_file(ndir.h HAVE_NDIR_H)
 if( NOT PURE_WINDOWS )
   check_include_file(pthread.h HAVE_PTHREAD_H)
 endif()
-check_include_file(sanitizer/msan_interface.h HAVE_SANITIZER_MSAN_INTERFACE_H)
 check_include_file(signal.h HAVE_SIGNAL_H)
 check_include_file(stdint.h HAVE_STDINT_H)
 check_include_file(sys/dir.h HAVE_SYS_DIR_H)
@@ -97,6 +103,7 @@ if( NOT PURE_WINDOWS )
   else()
     set(HAVE_LIBZ 0)
   endif()
+  check_library_exists(edit el_init "" HAVE_LIBEDIT)
   if(LLVM_ENABLE_TERMINFO)
     set(HAVE_TERMINFO 0)
     foreach(library tinfo terminfo curses ncurses ncursesw)
@@ -114,7 +121,7 @@ if( NOT PURE_WINDOWS )
 endif()
 
 # function checks
-check_symbol_exists(arc4random "stdlib.h" HAVE_ARC4RANDOM)
+check_symbol_exists(arc4random "stdlib.h" HAVE_DECL_ARC4RANDOM)
 check_symbol_exists(backtrace "execinfo.h" HAVE_BACKTRACE)
 check_symbol_exists(getpagesize unistd.h HAVE_GETPAGESIZE)
 check_symbol_exists(getrusage sys/resource.h HAVE_GETRUSAGE)
@@ -316,8 +323,6 @@ if (LIBXML2_FOUND)
   endif ()
 endif ()
 
-include(CheckCXXCompilerFlag)
-
 check_cxx_compiler_flag("-Wno-variadic-macros" SUPPORTS_NO_VARIADIC_MACROS_FLAG)
 
 set(USE_NO_MAYBE_UNINITIALIZED 0)
@@ -366,6 +371,8 @@ elseif (LLVM_NATIVE_ARCH MATCHES "powerpc")
   set(LLVM_NATIVE_ARCH PowerPC)
 elseif (LLVM_NATIVE_ARCH MATCHES "aarch64")
   set(LLVM_NATIVE_ARCH AArch64)
+elseif (LLVM_NATIVE_ARCH MATCHES "arm64")
+  set(LLVM_NATIVE_ARCH ARM64)
 elseif (LLVM_NATIVE_ARCH MATCHES "arm")
   set(LLVM_NATIVE_ARCH ARM)
 elseif (LLVM_NATIVE_ARCH MATCHES "mips")

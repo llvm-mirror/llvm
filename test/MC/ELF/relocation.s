@@ -14,12 +14,19 @@ bar:
         leaq	foo@TPOFF(%rax), %rax    # R_X86_64_TPOFF32
         leaq	foo@TLSLD(%rip), %rdi    # R_X86_64_TLSLD
         leaq	foo@dtpoff(%rax), %rcx   # R_X86_64_DTPOFF32
+        movabs  foo@GOT, %rax		 # R_X86_64_GOT64
+        movabs  foo@GOTOFF, %rax	 # R_X86_64_GOTOFF64
         pushq    $bar
         movq	foo(%rip), %rdx
         leaq    foo-bar(%r14),%r14
         addq	$bar,%rax         # R_X86_64_32S
 	.quad	foo@DTPOFF
         movabsq	$baz@TPOFF, %rax
+	.word   foo-bar
+	.byte   foo-bar
+
+	zed = foo +2
+	call zed@PLT
 
 // CHECK:        Section {
 // CHECK:          Name: .rela.text
@@ -35,12 +42,17 @@ bar:
 // CHECK-NEXT:       0x3B R_X86_64_TPOFF32  foo 0x0
 // CHECK-NEXT:       0x42 R_X86_64_TLSLD    foo 0xFFFFFFFFFFFFFFFC
 // CHECK-NEXT:       0x49 R_X86_64_DTPOFF32 foo 0x0
-// CHECK-NEXT:       0x4E R_X86_64_32S      .text 0x0
-// CHECK-NEXT:       0x55 R_X86_64_PC32     foo 0xFFFFFFFFFFFFFFFC
-// CHECK-NEXT:       0x5C R_X86_64_PC32     foo 0x5C
-// CHECK-NEXT:       0x63 R_X86_64_32S      .text 0x0
-// CHECK-NEXT:       0x67 R_X86_64_DTPOFF64 foo 0x0
-// CHECK-NEXT:       0x71 R_X86_64_TPOFF64  baz 0x0
+// CHECK-NEXT:       0x4F R_X86_64_GOT64 foo 0x0
+// CHECK-NEXT:       0x59 R_X86_64_GOTOFF64 foo 0x0
+// CHECK-NEXT:       0x62 R_X86_64_32S .text 0x0
+// CHECK-NEXT:       0x69 R_X86_64_PC32 foo 0xFFFFFFFFFFFFFFFC
+// CHECK-NEXT:       0x70 R_X86_64_PC32 foo 0x70
+// CHECK-NEXT:       0x77 R_X86_64_32S .text 0x0
+// CHECK-NEXT:       0x7B R_X86_64_DTPOFF64 foo 0x0
+// CHECK-NEXT:       0x85 R_X86_64_TPOFF64 baz 0x0
+// CHECK-NEXT:       0x8D R_X86_64_PC16 foo 0x8D
+// CHECK-NEXT:       0x8F R_X86_64_PC8 foo 0x8F
+// CHECK-NEXT:       0x91 R_X86_64_PLT32 foo 0xFFFFFFFFFFFFFFFE
 // CHECK-NEXT:     ]
 // CHECK-NEXT:   }
 

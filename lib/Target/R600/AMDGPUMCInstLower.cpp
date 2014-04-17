@@ -38,9 +38,7 @@ AMDGPUMCInstLower::AMDGPUMCInstLower(MCContext &ctx):
 void AMDGPUMCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
   OutMI.setOpcode(MI->getOpcode());
 
-  for (unsigned i = 0, e = MI->getNumExplicitOperands(); i != e; ++i) {
-    const MachineOperand &MO = MI->getOperand(i);
-
+  for (const MachineOperand &MO : MI->explicit_operands()) {
     MCOperand MCOp;
     switch (MO.getType()) {
     default:
@@ -69,6 +67,13 @@ void AMDGPUMCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
 void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   AMDGPUMCInstLower MCInstLowering(OutContext);
 
+#ifdef _DEBUG
+  StringRef Err;
+  if (!TM.getInstrInfo()->verifyInstruction(MI, Err)) {
+    errs() << "Warning: Illegal instruction detected: " << Err << "\n";
+    MI->dump();
+  }
+#endif
   if (MI->isBundle()) {
     const MachineBasicBlock *MBB = MI->getParent();
     MachineBasicBlock::const_instr_iterator I = MI;
@@ -80,7 +85,7 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   } else {
     MCInst TmpInst;
     MCInstLowering.lower(MI, TmpInst);
-    OutStreamer.EmitInstruction(TmpInst);
+    EmitToStreamer(OutStreamer, TmpInst);
 
     if (DisasmEnabled) {
       // Disassemble instruction/operands to text.
@@ -99,7 +104,8 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
       MCObjectStreamer &ObjStreamer = (MCObjectStreamer &)OutStreamer;
       MCCodeEmitter &InstEmitter = ObjStreamer.getAssembler().getEmitter();
-      InstEmitter.EncodeInstruction(TmpInst, CodeStream, Fixups);
+      InstEmitter.EncodeInstruction(TmpInst, CodeStream, Fixups,
+                                    TM.getSubtarget<MCSubtargetInfo>());
       CodeStream.flush();
 
       HexLines.resize(HexLines.size() + 1);

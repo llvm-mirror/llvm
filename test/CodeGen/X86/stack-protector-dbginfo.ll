@@ -23,14 +23,14 @@ declare void @llvm.dbg.value(metadata, i64, metadata)
 attributes #0 = { sspreq }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!21}
+!llvm.module.flags = !{!21, !72}
 
 !0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 ", i1 true, metadata !"", i32 0, metadata !2, metadata !5, metadata !8, metadata !20, metadata !5, metadata !""} ; [ DW_TAG_compile_unit ] [/Users/matt/ryan_bug/<unknown>] [DW_LANG_C_plus_plus]
 !1 = metadata !{metadata !"<unknown>", metadata !"/Users/matt/ryan_bug"}
 !2 = metadata !{metadata !3}
 !3 = metadata !{i32 786436, metadata !1, metadata !4, metadata !"", i32 20, i64 32, i64 32, i32 0, i32 0, null, metadata !6, i32 0, null, null, null} ; [ DW_TAG_enumeration_type ] [line 20, size 32, align 32, offset 0] [def] [from ]
 !4 = metadata !{i32 786451, metadata !1, null, metadata !"C", i32 19, i64 8, i64 8, i32 0, i32 0, null, metadata !5, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [C] [line 19, size 8, align 8, offset 0] [def] [from ]
-!5 = metadata !{i32 0}
+!5 = metadata !{}
 !6 = metadata !{metadata !7}
 !7 = metadata !{i32 786472, metadata !"max_frame_size", i64 0} ; [ DW_TAG_enumerator ] [max_frame_size :: 0]
 !8 = metadata !{metadata !9}
@@ -94,3 +94,4 @@ attributes #0 = { sspreq }
 !69 = metadata !{i32 786689, metadata !65, metadata !"p1", metadata !10, i32 33554433, metadata !50, i32 0, i32 0} ; [ DW_TAG_arg_variable ] [p1] [line 1]
 !70 = metadata !{i32 786689, metadata !65, metadata !"", metadata !10, i32 50331650, metadata !50, i32 0, i32 0} ; [ DW_TAG_arg_variable ] [line 2]
 !71 = metadata !{i32 1, i32 0, metadata !65, metadata !40}
+!72 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

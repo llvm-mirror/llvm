@@ -178,16 +178,16 @@ namespace {
       if (Args) { ToolArgs = *Args; }
     }
 
-    virtual int ExecuteProgram(const std::string &Bitcode,
-                               const std::vector<std::string> &Args,
-                               const std::string &InputFile,
-                               const std::string &OutputFile,
-                               std::string *Error,
-                               const std::vector<std::string> &GCCArgs,
-                               const std::vector<std::string> &SharedLibs =
-                               std::vector<std::string>(),
-                               unsigned Timeout = 0,
-                               unsigned MemoryLimit = 0);
+    int ExecuteProgram(const std::string &Bitcode,
+                       const std::vector<std::string> &Args,
+                       const std::string &InputFile,
+                       const std::string &OutputFile,
+                       std::string *Error,
+                       const std::vector<std::string> &GCCArgs,
+                       const std::vector<std::string> &SharedLibs =
+                       std::vector<std::string>(),
+                       unsigned Timeout = 0,
+                       unsigned MemoryLimit = 0) override;
   };
 }
 
@@ -294,22 +294,22 @@ namespace {
       const std::string &CompilerCmd, std::vector<std::string> CompArgs) :
       CompilerCommand(CompilerCmd), CompilerArgs(CompArgs) {}
 
-    virtual void compileProgram(const std::string &Bitcode,
-                                std::string *Error,
-                                unsigned Timeout = 0,
-                                unsigned MemoryLimit = 0);
+    void compileProgram(const std::string &Bitcode,
+                        std::string *Error,
+                        unsigned Timeout = 0,
+                        unsigned MemoryLimit = 0) override;
 
-    virtual int ExecuteProgram(const std::string &Bitcode,
-                               const std::vector<std::string> &Args,
-                               const std::string &InputFile,
-                               const std::string &OutputFile,
-                               std::string *Error,
-                               const std::vector<std::string> &GCCArgs =
-                               std::vector<std::string>(),
-                               const std::vector<std::string> &SharedLibs =
-                               std::vector<std::string>(),
-                               unsigned Timeout = 0,
-                               unsigned MemoryLimit = 0) {
+    int ExecuteProgram(const std::string &Bitcode,
+                       const std::vector<std::string> &Args,
+                       const std::string &InputFile,
+                       const std::string &OutputFile,
+                       std::string *Error,
+                       const std::vector<std::string> &GCCArgs =
+                       std::vector<std::string>(),
+                       const std::vector<std::string> &SharedLibs =
+                       std::vector<std::string>(),
+                       unsigned Timeout = 0,
+                       unsigned MemoryLimit = 0) override {
       *Error = "Execution not supported with -compile-custom";
       return -1;
     }
@@ -355,16 +355,16 @@ namespace {
       const std::string &ExecutionCmd, std::vector<std::string> ExecArgs) :
       ExecutionCommand(ExecutionCmd), ExecutorArgs(ExecArgs) {}
 
-    virtual int ExecuteProgram(const std::string &Bitcode,
-                               const std::vector<std::string> &Args,
-                               const std::string &InputFile,
-                               const std::string &OutputFile,
-                               std::string *Error,
-                               const std::vector<std::string> &GCCArgs,
-                               const std::vector<std::string> &SharedLibs =
-                                 std::vector<std::string>(),
-                               unsigned Timeout = 0,
-                               unsigned MemoryLimit = 0);
+    int ExecuteProgram(const std::string &Bitcode,
+                       const std::vector<std::string> &Args,
+                       const std::string &InputFile,
+                       const std::string &OutputFile,
+                       std::string *Error,
+                       const std::vector<std::string> &GCCArgs,
+                       const std::vector<std::string> &SharedLibs =
+                         std::vector<std::string>(),
+                       unsigned Timeout = 0,
+                       unsigned MemoryLimit = 0) override;
   };
 }
 
@@ -406,7 +406,7 @@ int CustomExecutor::ExecuteProgram(const std::string &Bitcode,
 // code borrowed from:
 // http://oopweb.com/CPP/Documents/CPPHOWTO/Volume/C++Programming-HOWTO-7.html
 static void lexCommand(std::string &Message, const std::string &CommandLine,
-                       std::string &CmdPath, std::vector<std::string> Args) {
+                       std::string &CmdPath, std::vector<std::string> &Args) {
 
   std::string Command = "";
   std::string delimiters = " ";
@@ -584,17 +584,17 @@ namespace {
       if (Args) { ToolArgs = *Args; }
     }
 
-    virtual int ExecuteProgram(const std::string &Bitcode,
-                               const std::vector<std::string> &Args,
-                               const std::string &InputFile,
-                               const std::string &OutputFile,
-                               std::string *Error,
-                               const std::vector<std::string> &GCCArgs =
-                                 std::vector<std::string>(),
-                               const std::vector<std::string> &SharedLibs =
-                                 std::vector<std::string>(),
-                               unsigned Timeout = 0,
-                               unsigned MemoryLimit = 0);
+    int ExecuteProgram(const std::string &Bitcode,
+                       const std::vector<std::string> &Args,
+                       const std::string &InputFile,
+                       const std::string &OutputFile,
+                       std::string *Error,
+                       const std::vector<std::string> &GCCArgs =
+                         std::vector<std::string>(),
+                       const std::vector<std::string> &SharedLibs =
+                         std::vector<std::string>(),
+                       unsigned Timeout = 0,
+                       unsigned MemoryLimit = 0) override;
   };
 }
 
@@ -662,7 +662,7 @@ static bool IsARMArchitecture(std::vector<const char*> Args) {
          I = Args.begin(), E = Args.end(); I != E; ++I) {
     if (StringRef(*I).equals_lower("-arch")) {
       ++I;
-      if (I != E && StringRef(*I).substr(0, strlen("arm")).equals_lower("arm"))
+      if (I != E && StringRef(*I).startswith_lower("arm"))
         return true;
     }
   }

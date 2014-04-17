@@ -18,14 +18,14 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
-#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <vector>
 
 namespace llvm {
 
+class AddrSpaceCastInst;
 class AliasAnalysis;
 class AllocaInst;
 class BasicBlock;
@@ -56,6 +56,7 @@ class MachineBasicBlock;
 class MachineInstr;
 class MachineRegisterInfo;
 class MDNode;
+class MVT;
 class PHINode;
 class PtrToIntInst;
 class ReturnInst;
@@ -84,7 +85,7 @@ class SelectionDAGBuilder {
   const Instruction *CurInst;
 
   DenseMap<const Value*, SDValue> NodeMap;
-  
+
   /// UnusedArgNodeMap - Maps argument value for unused arguments. This is used
   /// to preserve debug information for incoming arguments.
   DenseMap<const Value*, SDValue> UnusedArgNodeMap;
@@ -235,7 +236,7 @@ private:
   struct JumpTable {
     JumpTable(unsigned R, unsigned J, MachineBasicBlock *M,
               MachineBasicBlock *D): Reg(R), JTI(J), MBB(M), Default(D) {}
-  
+
     /// Reg - the virtual register containing the index of the jump table entry
     //. to jump to.
     unsigned Reg;
@@ -487,8 +488,12 @@ private:
 private:
   const TargetMachine &TM;
 public:
+  /// Lowest valid SDNodeOrder. The special case 0 is reserved for scheduling
+  /// nodes without a corresponding SDNode.
+  static const unsigned LowestSDNodeOrder = 1;
+
   SelectionDAG &DAG;
-  const DataLayout *TD;
+  const DataLayout *DL;
   AliasAnalysis *AA;
   const TargetLibraryInfo *LibInfo;
 
@@ -514,9 +519,9 @@ public:
   FunctionLoweringInfo &FuncInfo;
 
   /// OptLevel - What optimization level we're generating code for.
-  /// 
+  ///
   CodeGenOpt::Level OptLevel;
-  
+
   /// GFI - Garbage collection metadata for the function.
   GCFunctionInfo *GFI;
 
@@ -533,7 +538,7 @@ public:
 
   SelectionDAGBuilder(SelectionDAG &dag, FunctionLoweringInfo &funcinfo,
                       CodeGenOpt::Level ol)
-    : CurInst(NULL), SDNodeOrder(0), TM(dag.getTarget()),
+    : CurInst(NULL), SDNodeOrder(LowestSDNodeOrder), TM(dag.getTarget()),
       DAG(dag), FuncInfo(funcinfo), OptLevel(ol),
       HasTailCall(false) {
   }
@@ -598,7 +603,7 @@ public:
     assert(N.getNode() == 0 && "Already set a value for this node!");
     N = NewN;
   }
-  
+
   void setUnusedArgValue(const Value *V, SDValue NewN) {
     SDValue &N = UnusedArgNodeMap[V];
     assert(N.getNode() == 0 && "Already set a value for this node!");
@@ -607,11 +612,13 @@ public:
 
   void FindMergedConditions(const Value *Cond, MachineBasicBlock *TBB,
                             MachineBasicBlock *FBB, MachineBasicBlock *CurBB,
-                            MachineBasicBlock *SwitchBB, unsigned Opc);
+                            MachineBasicBlock *SwitchBB, unsigned Opc,
+                            uint32_t TW, uint32_t FW);
   void EmitBranchForMergedCondition(const Value *Cond, MachineBasicBlock *TBB,
                                     MachineBasicBlock *FBB,
                                     MachineBasicBlock *CurBB,
-                                    MachineBasicBlock *SwitchBB);
+                                    MachineBasicBlock *SwitchBB,
+                                    uint32_t TW, uint32_t FW);
   bool ShouldEmitAsBranches(const std::vector<CaseBlock> &Cases);
   bool isExportableFromCurrentBlock(const Value *V, const BasicBlock *FromBB);
   void CopyToExportRegsIfNeeded(const Value *V);
@@ -619,8 +626,14 @@ public:
   void LowerCallTo(ImmutableCallSite CS, SDValue Callee, bool IsTailCall,
                    MachineBasicBlock *LandingPad = NULL);
 
+  std::pair<SDValue, SDValue> LowerCallOperands(const CallInst &CI,
+                                                unsigned ArgIdx,
+                                                unsigned NumArgs,
+                                                SDValue Callee,
+                                                bool useVoidTy = false);
+
   /// UpdateSplitBlock - When an MBB was split during scheduling, update the
-  /// references that ned to refer to the last resulting block.
+  /// references that need to refer to the last resulting block.
   void UpdateSplitBlock(MachineBasicBlock *First, MachineBasicBlock *Last);
 
 private:
@@ -673,7 +686,7 @@ public:
   void visitJumpTable(JumpTable &JT);
   void visitJumpTableHeader(JumpTable &JT, JumpTableHeader &JTH,
                             MachineBasicBlock *SwitchBB);
-  
+
 private:
   // These all get lowered before this pass.
   void visitInvoke(const InvokeInst &I);
@@ -714,6 +727,7 @@ private:
   void visitPtrToInt(const User &I);
   void visitIntToPtr(const User &I);
   void visitBitCast(const User &I);
+  void visitAddrSpaceCast(const User &I);
 
   void visitExtractElement(const User &I);
   void visitInsertElement(const User &I);
@@ -752,6 +766,8 @@ private:
   void visitVAArg(const VAArgInst &I);
   void visitVAEnd(const CallInst &I);
   void visitVACopy(const CallInst &I);
+  void visitStackmap(const CallInst &I);
+  void visitPatchpoint(const CallInst &I);
 
   void visitUserOp1(const Instruction &I) {
     llvm_unreachable("UserOp1 should not exist at instruction selection time!");
@@ -766,7 +782,7 @@ private:
   void HandlePHINodesInSuccessorBlocks(const BasicBlock *LLVMBB);
 
   /// EmitFuncArgumentDbgValue - If V is an function argument then create
-  /// corresponding DBG_VALUE machine instruction for it now. At the end of 
+  /// corresponding DBG_VALUE machine instruction for it now. At the end of
   /// instruction selection, they will be inserted to the entry BB.
   bool EmitFuncArgumentDbgValue(const Value *V, MDNode *Variable,
                                 int64_t Offset, const SDValue &N);

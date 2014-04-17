@@ -35,36 +35,15 @@ class AMDGPUShaderInst <dag outs, dag ins, string asm, list<dag> pattern>
 }
 
 def InstFlag : OperandWithDefaultOps <i32, (ops (i32 0))>;
+def ADDRIndirect : ComplexPattern<iPTR, 2, "SelectADDRIndirect", [], []>;
 
-def COND_EQ : PatLeaf <
-  (cond),
-  [{switch(N->get()){{default: return false;
-                     case ISD::SETOEQ: case ISD::SETUEQ:
-                     case ISD::SETEQ: return true;}}}]
->;
+//===----------------------------------------------------------------------===//
+// PatLeafs for floating-point comparisons
+//===----------------------------------------------------------------------===//
 
 def COND_OEQ : PatLeaf <
   (cond),
   [{return N->get() == ISD::SETOEQ || N->get() == ISD::SETEQ;}]
->;
-
-def COND_NE : PatLeaf <
-  (cond),
-  [{switch(N->get()){{default: return false;
-                     case ISD::SETONE: case ISD::SETUNE:
-                     case ISD::SETNE: return true;}}}]
->;
-
-def COND_UNE : PatLeaf <
-  (cond),
-  [{return N->get() == ISD::SETUNE || N->get() == ISD::SETNE;}]
->;
-
-def COND_GT : PatLeaf <
-  (cond),
-  [{switch(N->get()){{default: return false;
-                     case ISD::SETOGT: case ISD::SETUGT:
-                     case ISD::SETGT: return true;}}}]
 >;
 
 def COND_OGT : PatLeaf <
@@ -72,30 +51,59 @@ def COND_OGT : PatLeaf <
   [{return N->get() == ISD::SETOGT || N->get() == ISD::SETGT;}]
 >;
 
-def COND_GE : PatLeaf <
-  (cond),
-  [{switch(N->get()){{default: return false;
-                     case ISD::SETOGE: case ISD::SETUGE:
-                     case ISD::SETGE: return true;}}}]
->;
-
 def COND_OGE : PatLeaf <
   (cond),
   [{return N->get() == ISD::SETOGE || N->get() == ISD::SETGE;}]
 >;
 
-def COND_LT : PatLeaf <
+def COND_OLT : PatLeaf <
   (cond),
-  [{switch(N->get()){{default: return false;
-                     case ISD::SETOLT: case ISD::SETULT:
-                     case ISD::SETLT: return true;}}}]
+  [{return N->get() == ISD::SETOLT || N->get() == ISD::SETLT;}]
 >;
 
-def COND_LE : PatLeaf <
+def COND_OLE : PatLeaf <
   (cond),
-  [{switch(N->get()){{default: return false;
-                     case ISD::SETOLE: case ISD::SETULE:
-                     case ISD::SETLE: return true;}}}]
+  [{return N->get() == ISD::SETOLE || N->get() == ISD::SETLE;}]
+>;
+
+def COND_UNE : PatLeaf <
+  (cond),
+  [{return N->get() == ISD::SETUNE || N->get() == ISD::SETNE;}]
+>;
+
+def COND_O : PatLeaf <(cond), [{return N->get() == ISD::SETO;}]>;
+def COND_UO : PatLeaf <(cond), [{return N->get() == ISD::SETUO;}]>;
+
+//===----------------------------------------------------------------------===//
+// PatLeafs for unsigned comparisons
+//===----------------------------------------------------------------------===//
+
+def COND_UGT : PatLeaf <(cond), [{return N->get() == ISD::SETUGT;}]>;
+def COND_UGE : PatLeaf <(cond), [{return N->get() == ISD::SETUGE;}]>;
+def COND_ULT : PatLeaf <(cond), [{return N->get() == ISD::SETULT;}]>;
+def COND_ULE : PatLeaf <(cond), [{return N->get() == ISD::SETULE;}]>;
+
+//===----------------------------------------------------------------------===//
+// PatLeafs for signed comparisons
+//===----------------------------------------------------------------------===//
+
+def COND_SGT : PatLeaf <(cond), [{return N->get() == ISD::SETGT;}]>;
+def COND_SGE : PatLeaf <(cond), [{return N->get() == ISD::SETGE;}]>;
+def COND_SLT : PatLeaf <(cond), [{return N->get() == ISD::SETLT;}]>;
+def COND_SLE : PatLeaf <(cond), [{return N->get() == ISD::SETLE;}]>;
+
+//===----------------------------------------------------------------------===//
+// PatLeafs for integer equality
+//===----------------------------------------------------------------------===//
+
+def COND_EQ : PatLeaf <
+  (cond),
+  [{return N->get() == ISD::SETEQ || N->get() == ISD::SETUEQ;}]
+>;
+
+def COND_NE : PatLeaf <
+  (cond),
+  [{return N->get() == ISD::SETNE || N->get() == ISD::SETUNE;}]
 >;
 
 def COND_NULL : PatLeaf <
@@ -231,7 +239,7 @@ class Constants {
 int TWO_PI = 0x40c90fdb;
 int PI = 0x40490fdb;
 int TWO_PI_INV = 0x3e22f983;
-int FP_UINT_MAX_PLUS_1 = 0x4f800000;	// 1 << 32 in floating point encoding
+int FP_UINT_MAX_PLUS_1 = 0x4f800000;    // 1 << 32 in floating point encoding
 }
 def CONST : Constants;
 
@@ -244,9 +252,6 @@ def FP_ONE : PatLeaf <
   (fpimm),
   [{return N->isExactlyValue(1.0);}]
 >;
-
-def U24 : ComplexPattern<i32, 1, "SelectU24", [], []>;
-def I24 : ComplexPattern<i32, 1, "SelectI24", [], []>;
 
 let isCodeGenOnly = 1, isPseudo = 1 in {
 
@@ -277,6 +282,8 @@ class FNEG <RegisterClass rc> : AMDGPUShaderInst <
 
 multiclass RegisterLoadStore <RegisterClass dstClass, Operand addrClass,
                     ComplexPattern addrPat> {
+let UseNamedOperandTable = 1 in {
+
   def RegisterLoad : AMDGPUShaderInst <
     (outs dstClass:$dst),
     (ins addrClass:$addr, i32imm:$chan),
@@ -295,6 +302,7 @@ multiclass RegisterLoadStore <RegisterClass dstClass, Operand addrClass,
     let isRegisterStore = 1;
   }
 }
+}
 
 } // End isCodeGenOnly = 1, isPseudo = 1
 
@@ -311,7 +319,7 @@ class POW_Common <AMDGPUInst log_ieee, AMDGPUInst exp_ieee, AMDGPUInst mul>
 /* --------------------- */
 
 /* Extract element pattern */
-class Extract_Element <ValueType sub_type, ValueType vec_type, int sub_idx, 
+class Extract_Element <ValueType sub_type, ValueType vec_type, int sub_idx,
                        SubRegIndex sub_reg>
   : Pat<
   (sub_type (vector_extract vec_type:$src, sub_idx)),
@@ -324,12 +332,6 @@ class Insert_Element <ValueType elem_type, ValueType vec_type,
   : Pat <
   (vector_insert vec_type:$vec, elem_type:$elem, sub_idx),
   (INSERT_SUBREG $vec, $elem, sub_reg)
->;
-
-class Vector4_Build <ValueType vecType, ValueType elemType> : Pat <
-  (vecType (build_vector elemType:$x, elemType:$y, elemType:$z, elemType:$w)),
-  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-    (vecType (IMPLICIT_DEF)), $x, sub0), $y, sub1), $z, sub2), $w, sub3)
 >;
 
 // XXX: Convert to new syntax and use COPY_TO_REG, once the DFAPacketizer
@@ -377,6 +379,11 @@ class SHA256MaPattern <Instruction BFI_INT, Instruction XOR> : Pat <
 
 // Bitfield extract patterns
 
+/*
+
+XXX: The BFE pattern is not working correctly because the XForm is not being
+applied.
+
 def legalshift32 : ImmLeaf <i32, [{return Imm >=0 && Imm < 32;}]>;
 def bfemask : PatLeaf <(imm), [{return isMask_32(N->getZExtValue());}],
                             SDNodeXForm<imm, [{ return CurDAG->getTargetConstant(CountTrailingOnes_32(N->getZExtValue()), MVT::i32);}]>>;
@@ -385,6 +392,8 @@ class BFEPattern <Instruction BFE> : Pat <
   (and (srl i32:$x, legalshift32:$y), bfemask:$z),
   (BFE $x, $y, $z)
 >;
+
+*/
 
 // rotr pattern
 class ROTRPattern <Instruction BIT_ALIGN> : Pat <
@@ -403,6 +412,9 @@ class UMUL24Pattern <Instruction UMUL24> : Pat <
 */
 
 include "R600Instructions.td"
+include "R700Instructions.td"
+include "EvergreenInstructions.td"
+include "CaymanInstructions.td"
 
 include "SIInstrInfo.td"
 

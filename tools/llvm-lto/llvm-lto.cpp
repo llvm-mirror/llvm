@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringSet.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/LTO/LTOCodeGenerator.h"
 #include "llvm/LTO/LTOModule.h"
@@ -19,8 +20,8 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -55,6 +56,12 @@ DSOSymbols("dso-symbol",
   cl::desc("Symbol to put in the symtab in the resulting dso"),
   cl::ZeroOrMore);
 
+namespace {
+struct ModuleInfo {
+  std::vector<bool> CanBeHidden;
+};
+}
+
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
   sys::PrintStackTraceOnErrorSignal();
@@ -70,26 +77,7 @@ int main(int argc, char **argv) {
   InitializeAllAsmParsers();
 
   // set up the TargetOptions for the machine
-  TargetOptions Options;
-  Options.LessPreciseFPMADOption = EnableFPMAD;
-  Options.NoFramePointerElim = DisableFPElim;
-  Options.AllowFPOpFusion = FuseFPOps;
-  Options.UnsafeFPMath = EnableUnsafeFPMath;
-  Options.NoInfsFPMath = EnableNoInfsFPMath;
-  Options.NoNaNsFPMath = EnableNoNaNsFPMath;
-  Options.HonorSignDependentRoundingFPMathOption =
-    EnableHonorSignDependentRoundingFPMath;
-  Options.UseSoftFloat = GenerateSoftFloatCalls;
-  if (FloatABIForCalls != FloatABI::Default)
-    Options.FloatABIType = FloatABIForCalls;
-  Options.NoZerosInBSS = DontPlaceZerosInBSS;
-  Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
-  Options.DisableTailCalls = DisableTailCalls;
-  Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.TrapFuncName = TrapFuncName;
-  Options.PositionIndependentExecutable = EnablePIE;
-  Options.EnableSegmentedStacks = SegmentedStacks;
-  Options.UseInitArray = UseInitArray;
+  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
 
   unsigned BaseArg = 0;
 
@@ -99,10 +87,16 @@ int main(int argc, char **argv) {
   CodeGen.setDebugInfo(LTO_DEBUG_MODEL_DWARF);
   CodeGen.setTargetOptions(Options);
 
+  llvm::StringSet<llvm::MallocAllocator> DSOSymbolsSet;
+  for (unsigned i = 0; i < DSOSymbols.size(); ++i)
+    DSOSymbolsSet.insert(DSOSymbols[i]);
+
+  std::vector<std::string> KeptDSOSyms;
+
   for (unsigned i = BaseArg; i < InputFilenames.size(); ++i) {
     std::string error;
-    OwningPtr<LTOModule> Module(LTOModule::makeLTOModule(InputFilenames[i].c_str(),
-                                                         Options, error));
+    std::unique_ptr<LTOModule> Module(
+        LTOModule::makeLTOModule(InputFilenames[i].c_str(), Options, error));
     if (!error.empty()) {
       errs() << argv[0] << ": error loading file '" << InputFilenames[i]
              << "': " << error << "\n";
@@ -115,6 +109,17 @@ int main(int argc, char **argv) {
              << "': " << error << "\n";
       return 1;
     }
+
+    unsigned NumSyms = Module->getSymbolCount();
+    for (unsigned I = 0; I < NumSyms; ++I) {
+      StringRef Name = Module->getSymbolName(I);
+      if (!DSOSymbolsSet.count(Name))
+        continue;
+      lto_symbol_attributes Attrs = Module->getSymbolAttributes(I);
+      unsigned Scope = Attrs & LTO_SYMBOL_SCOPE_MASK;
+      if (Scope != LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN)
+        KeptDSOSyms.push_back(Name);
+    }
   }
 
   // Add all the exported symbols to the table of symbols to preserve.
@@ -122,8 +127,8 @@ int main(int argc, char **argv) {
     CodeGen.addMustPreserveSymbol(ExportedSymbols[i].c_str());
 
   // Add all the dso symbols to the table of symbols to expose.
-  for (unsigned i = 0; i < DSOSymbols.size(); ++i)
-    CodeGen.addDSOSymbol(DSOSymbols[i].c_str());
+  for (unsigned i = 0; i < KeptDSOSyms.size(); ++i)
+    CodeGen.addMustPreserveSymbol(KeptDSOSyms[i].c_str());
 
   if (!OutputFilename.empty()) {
     size_t len = 0;
@@ -137,7 +142,7 @@ int main(int argc, char **argv) {
     }
 
     raw_fd_ostream FileStream(OutputFilename.c_str(), ErrorInfo,
-                              sys::fs::F_Binary);
+                              sys::fs::F_None);
     if (!ErrorInfo.empty()) {
       errs() << argv[0] << ": error opening the file '" << OutputFilename
              << "': " << ErrorInfo << "\n";

@@ -26,11 +26,50 @@ static cl::
 opt<bool> DisableCTRLoops("disable-ppc-ctrloops", cl::Hidden,
                         cl::desc("Disable CTR loops for PPC"));
 
+static cl::opt<bool>
+VSXFMAMutateEarly("schedule-ppc-vsx-fma-mutation-early",
+  cl::Hidden, cl::desc("Schedule VSX FMA instruction mutation early"));
+
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
   RegisterTargetMachine<PPC32TargetMachine> A(ThePPC32Target);
   RegisterTargetMachine<PPC64TargetMachine> B(ThePPC64Target);
   RegisterTargetMachine<PPC64TargetMachine> C(ThePPC64LETarget);
+}
+
+/// Return the datalayout string of a subtarget.
+static std::string getDataLayoutString(const PPCSubtarget &ST) {
+  const Triple &T = ST.getTargetTriple();
+
+  std::string Ret;
+
+  // Most PPC* platforms are big endian, PPC64LE is little endian.
+  if (ST.isLittleEndian())
+    Ret = "e";
+  else
+    Ret = "E";
+
+  Ret += DataLayout::getManglingComponent(T);
+
+  // PPC32 has 32 bit pointers. The PS3 (OS Lv2) is a PPC64 machine with 32 bit
+  // pointers.
+  if (!ST.isPPC64() || T.getOS() == Triple::Lv2)
+    Ret += "-p:32:32";
+
+  // Note, the alignment values for f64 and i64 on ppc64 in Darwin
+  // documentation are wrong; these are correct (i.e. "what gcc does").
+  if (ST.isPPC64() || ST.isSVR4ABI())
+    Ret += "-i64:64";
+  else
+    Ret += "-f64:32:64";
+
+  // PPC64 has 32 and 64 bit registers, PPC32 has only 32 bit ones.
+  if (ST.isPPC64())
+    Ret += "-n32:64";
+  else
+    Ret += "-n32";
+
+  return Ret;
 }
 
 PPCTargetMachine::PPCTargetMachine(const Target &T, StringRef TT,
@@ -40,15 +79,11 @@ PPCTargetMachine::PPCTargetMachine(const Target &T, StringRef TT,
                                    CodeGenOpt::Level OL,
                                    bool is64Bit)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, is64Bit),
-    DL(Subtarget.getDataLayoutString()), InstrInfo(*this),
+    Subtarget(TT, CPU, FS, is64Bit, OL),
+    DL(getDataLayoutString(Subtarget)), InstrInfo(*this),
     FrameLowering(Subtarget), JITInfo(*this, is64Bit),
     TLInfo(*this), TSInfo(*this),
     InstrItins(Subtarget.getInstrItineraryData()) {
-
-  // The binutils for the BG/P are too old for CFI.
-  if (Subtarget.isBGP())
-    setMCUseCFI(false);
   initAsmInfo();
 }
 
@@ -95,6 +130,7 @@ public:
   virtual bool addPreISel();
   virtual bool addILPOpts();
   virtual bool addInstSelector();
+  virtual bool addPreRegAlloc();
   virtual bool addPreSched2();
   virtual bool addPreEmitPass();
 };
@@ -129,10 +165,26 @@ bool PPCPassConfig::addInstSelector() {
     addPass(createPPCCTRLoopsVerify());
 #endif
 
+  if (getPPCSubtarget().hasVSX())
+    addPass(createPPCVSXCopyPass());
+
+  return false;
+}
+
+bool PPCPassConfig::addPreRegAlloc() {
+  if (getPPCSubtarget().hasVSX()) {
+    initializePPCVSXFMAMutatePass(*PassRegistry::getPassRegistry());
+    insertPass(VSXFMAMutateEarly ? &RegisterCoalescerID : &MachineSchedulerID,
+               &PPCVSXFMAMutateID);
+  }
+
   return false;
 }
 
 bool PPCPassConfig::addPreSched2() {
+  if (getPPCSubtarget().hasVSX())
+    addPass(createPPCVSXCopyCleanupPass());
+
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&IfConverterID);
 

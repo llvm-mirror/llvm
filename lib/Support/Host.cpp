@@ -95,6 +95,76 @@ static bool GetX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
 #endif
 }
 
+/// GetX86CpuIDAndInfoEx - Execute the specified cpuid with subleaf and return the
+/// 4 values in the specified arguments.  If we can't run cpuid on the host,
+/// return true.
+static bool GetX86CpuIDAndInfoEx(unsigned value, unsigned subleaf,
+                                 unsigned *rEAX, unsigned *rEBX, unsigned *rECX,
+                                 unsigned *rEDX) {
+#if defined(__x86_64__) || defined(_M_AMD64) || defined (_M_X64)
+  #if defined(__GNUC__)
+    // gcc doesn't know cpuid would clobber ebx/rbx. Preseve it manually.
+    asm ("movq\t%%rbx, %%rsi\n\t"
+         "cpuid\n\t"
+         "xchgq\t%%rbx, %%rsi\n\t"
+         : "=a" (*rEAX),
+           "=S" (*rEBX),
+           "=c" (*rECX),
+           "=d" (*rEDX)
+         :  "a" (value),
+            "c" (subleaf));
+    return false;
+  #elif defined(_MSC_VER)
+    // __cpuidex was added in MSVC++ 9.0 SP1
+    #if (_MSC_VER > 1500) || (_MSC_VER == 1500 && _MSC_FULL_VER >= 150030729)
+      int registers[4];
+      __cpuidex(registers, value, subleaf);
+      *rEAX = registers[0];
+      *rEBX = registers[1];
+      *rECX = registers[2];
+      *rEDX = registers[3];
+      return false;
+    #else
+      return true;
+    #endif
+  #else
+    return true;
+  #endif
+#elif defined(i386) || defined(__i386__) || defined(__x86__) || defined(_M_IX86)
+  #if defined(__GNUC__)
+    asm ("movl\t%%ebx, %%esi\n\t"
+         "cpuid\n\t"
+         "xchgl\t%%ebx, %%esi\n\t"
+         : "=a" (*rEAX),
+           "=S" (*rEBX),
+           "=c" (*rECX),
+           "=d" (*rEDX)
+         :  "a" (value),
+            "c" (subleaf));
+    return false;
+  #elif defined(_MSC_VER)
+    __asm {
+      mov   eax,value
+      mov   ecx,subleaf
+      cpuid
+      mov   esi,rEAX
+      mov   dword ptr [esi],eax
+      mov   esi,rEBX
+      mov   dword ptr [esi],ebx
+      mov   esi,rECX
+      mov   dword ptr [esi],ecx
+      mov   esi,rEDX
+      mov   dword ptr [esi],edx
+    }
+    return false;
+  #else
+    return true;
+  #endif
+#else
+  return true;
+#endif
+}
+
 static bool OSHasAVXSupport() {
 #if defined(__GNUC__)
   // Check xgetbv; this uses a .byte sequence instead of the instruction
@@ -123,7 +193,7 @@ static void DetectX86FamilyModel(unsigned EAX, unsigned &Family,
   }
 }
 
-std::string sys::getHostCPUName() {
+StringRef sys::getHostCPUName() {
   unsigned EAX = 0, EBX = 0, ECX = 0, EDX = 0;
   if (GetX86CpuIDAndInfo(0x1, &EAX, &EBX, &ECX, &EDX))
     return "generic";
@@ -131,6 +201,14 @@ std::string sys::getHostCPUName() {
   unsigned Model  = 0;
   DetectX86FamilyModel(EAX, Family, Model);
 
+  union {
+    unsigned u[3];
+    char     c[12];
+  } text;
+
+  GetX86CpuIDAndInfo(0, &EAX, text.u+0, text.u+2, text.u+1);
+
+  unsigned MaxLeaf = EAX;
   bool HasSSE3 = (ECX & 0x1);
   bool HasSSE41 = (ECX & 0x80000);
   // If CPUID indicates support for XSAVE, XRESTORE and AVX, and XGETBV 
@@ -138,15 +216,12 @@ std::string sys::getHostCPUName() {
   // switch, then we have full AVX support.
   const unsigned AVXBits = (1 << 27) | (1 << 28);
   bool HasAVX = ((ECX & AVXBits) == AVXBits) && OSHasAVXSupport();
+  bool HasAVX2 = HasAVX && MaxLeaf >= 0x7 &&
+                 !GetX86CpuIDAndInfoEx(0x7, 0x0, &EAX, &EBX, &ECX, &EDX) &&
+                 (EBX & 0x20);
   GetX86CpuIDAndInfo(0x80000001, &EAX, &EBX, &ECX, &EDX);
   bool Em64T = (EDX >> 29) & 0x1;
 
-  union {
-    unsigned u[3];
-    char     c[12];
-  } text;
-
-  GetX86CpuIDAndInfo(0, &EAX, text.u+0, text.u+2, text.u+1);
   if (memcmp(text.c, "GenuineIntel", 12) == 0) {
     switch (Family) {
     case 3:
@@ -254,9 +329,19 @@ std::string sys::getHostCPUName() {
 
       // Ivy Bridge:
       case 58:
+      case 62: // Ivy Bridge EP
         // Not all Ivy Bridge processors support AVX (such as the Pentium
         // versions instead of the i7 versions).
         return HasAVX ? "core-avx-i" : "corei7";
+
+      // Haswell:
+      case 60:
+      case 63:
+      case 69:
+      case 70:
+        // Not all Haswell processors support AVX too (such as the Pentium
+        // versions instead of the i7 versions).
+        return HasAVX2 ? "core-avx2" : "corei7";
 
       case 28: // Most 45 nm Intel Atom processors
       case 38: // 45 nm Atom Lincroft
@@ -348,9 +433,11 @@ std::string sys::getHostCPUName() {
       case 21:
         if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
           return "btver1";
-        if (Model > 15 && Model <= 31)
-          return "bdver2";
-        return "bdver1";
+        if (Model >= 0x30)
+          return "bdver3"; // 30h-3Fh: Steamroller
+        if (Model >= 0x10)
+          return "bdver2"; // 10h-1Fh: Piledriver
+        return "bdver1";   // 00h-0Fh: Bulldozer
       case 22:
         if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
           return "btver1";
@@ -362,7 +449,7 @@ std::string sys::getHostCPUName() {
   return "generic";
 }
 #elif defined(__APPLE__) && (defined(__ppc__) || defined(__powerpc__))
-std::string sys::getHostCPUName() {
+StringRef sys::getHostCPUName() {
   host_basic_info_data_t hostInfo;
   mach_msg_type_number_t infoCount;
 
@@ -391,7 +478,7 @@ std::string sys::getHostCPUName() {
   return "generic";
 }
 #elif defined(__linux__) && (defined(__ppc__) || defined(__powerpc__))
-std::string sys::getHostCPUName() {
+StringRef sys::getHostCPUName() {
   // Access to the Processor Version Register (PVR) on PowerPC is privileged,
   // and so we must use an operating-system interface to determine the current
   // processor type. On Linux, this is exposed through the /proc/cpuinfo file.
@@ -481,7 +568,7 @@ std::string sys::getHostCPUName() {
     .Default(generic);
 }
 #elif defined(__linux__) && defined(__arm__)
-std::string sys::getHostCPUName() {
+StringRef sys::getHostCPUName() {
   // The cpuid register on arm is not accessible from user space. On Linux,
   // it is exposed through the /proc/cpuinfo file.
   // Note: We cannot mmap /proc/cpuinfo here and then process the resulting
@@ -533,10 +620,63 @@ std::string sys::getHostCPUName() {
           .Case("0xc24", "cortex-m4")
           .Default("generic");
 
+  if (Implementer == "0x51") // Qualcomm Technologies, Inc.
+    // Look for the CPU part line.
+    for (unsigned I = 0, E = Lines.size(); I != E; ++I)
+      if (Lines[I].startswith("CPU part"))
+        // The CPU part is a 3 digit hexadecimal number with a 0x prefix. The
+        // values correspond to the "Part number" in the CP15/c0 register. The
+        // contents are specified in the various processor manuals.
+        return StringSwitch<const char *>(Lines[I].substr(8).ltrim("\t :"))
+          .Case("0x06f", "krait") // APQ8064
+          .Default("generic");
+
+  return "generic";
+}
+#elif defined(__linux__) && defined(__s390x__)
+StringRef sys::getHostCPUName() {
+  // STIDP is a privileged operation, so use /proc/cpuinfo instead.
+  // Note: We cannot mmap /proc/cpuinfo here and then process the resulting
+  // memory buffer because the 'file' has 0 size (it can be read from only
+  // as a stream).
+
+  std::string Err;
+  DataStreamer *DS = getDataFileStreamer("/proc/cpuinfo", &Err);
+  if (!DS) {
+    DEBUG(dbgs() << "Unable to open /proc/cpuinfo: " << Err << "\n");
+    return "generic";
+  }
+
+  // The "processor 0:" line comes after a fair amount of other information,
+  // including a cache breakdown, but this should be plenty.
+  char buffer[2048];
+  size_t CPUInfoSize = DS->GetBytes((unsigned char*) buffer, sizeof(buffer));
+  delete DS;
+
+  StringRef Str(buffer, CPUInfoSize);
+  SmallVector<StringRef, 32> Lines;
+  Str.split(Lines, "\n");
+  for (unsigned I = 0, E = Lines.size(); I != E; ++I) {
+    if (Lines[I].startswith("processor ")) {
+      size_t Pos = Lines[I].find("machine = ");
+      if (Pos != StringRef::npos) {
+        Pos += sizeof("machine = ") - 1;
+        unsigned int Id;
+        if (!Lines[I].drop_front(Pos).getAsInteger(10, Id)) {
+          if (Id >= 2827)
+            return "zEC12";
+          if (Id >= 2817)
+            return "z196";
+        }
+      }
+      break;
+    }
+  }
+  
   return "generic";
 }
 #else
-std::string sys::getHostCPUName() {
+StringRef sys::getHostCPUName() {
   return "generic";
 }
 #endif

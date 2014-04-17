@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm-c/Core.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Config/config.h"     // Get autoconf configuration settings
 #include "llvm/Support/ManagedStatic.h"
@@ -26,10 +27,6 @@
 #endif
 
 using namespace llvm;
-
-namespace llvm {
-  bool DisablePrettyStackTrace = false;
-}
 
 static ManagedStatic<sys::ThreadLocal<const PrettyStackTraceEntry> > PrettyStackTraceHead;
 
@@ -49,7 +46,7 @@ static unsigned PrintStack(const PrettyStackTraceEntry *Entry, raw_ostream &OS){
 /// PrintCurStackTrace - Print the current stack trace to the specified stream.
 static void PrintCurStackTrace(raw_ostream &OS) {
   // Don't print an empty trace.
-  if (PrettyStackTraceHead->get() == 0) return;
+  if (!PrettyStackTraceHead->get()) return;
   
   // If there are pretty stack frames registered, walk and emit them.
   OS << "Stack dump:\n";
@@ -102,17 +99,7 @@ static void CrashHandler(void *) {
 #endif
 }
 
-static bool RegisterCrashPrinter() {
-  if (!DisablePrettyStackTrace)
-    sys::AddSignalHandler(CrashHandler, 0);
-  return false;
-}
-
 PrettyStackTraceEntry::PrettyStackTraceEntry() {
-  // The first time this is called, we register the crash printer.
-  static bool HandlerRegistered = RegisterCrashPrinter();
-  (void)HandlerRegistered;
-    
   // Link ourselves.
   NextEntry = PrettyStackTraceHead->get();
   PrettyStackTraceHead->set(this);
@@ -146,4 +133,19 @@ void PrettyStackTraceProgram::print(raw_ostream &OS) const {
   for (unsigned i = 0, e = ArgC; i != e; ++i)
     OS << ArgV[i] << ' ';
   OS << '\n';
+}
+
+static bool RegisterCrashPrinter() {
+  sys::AddSignalHandler(CrashHandler, nullptr);
+  return false;
+}
+
+void llvm::EnablePrettyStackTrace() {
+  // The first time this is called, we register the crash printer.
+  static bool HandlerRegistered = RegisterCrashPrinter();
+  (void)HandlerRegistered;
+}
+
+void LLVMEnablePrettyStackTrace() {
+  EnablePrettyStackTrace();
 }

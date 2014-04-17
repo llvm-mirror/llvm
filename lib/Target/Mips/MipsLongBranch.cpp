@@ -134,7 +134,7 @@ void MipsLongBranch::splitMBB(MachineBasicBlock *MBB) {
       (!LastBr->isConditionalBranch() && !LastBr->isUnconditionalBranch()))
     return;
 
-  ReverseIter FirstBr = getNonDebugInstr(llvm::next(LastBr), End);
+  ReverseIter FirstBr = getNonDebugInstr(std::next(LastBr), End);
 
   // MBB has only one branch instruction if FirstBr is not a branch
   // instruction.
@@ -154,7 +154,7 @@ void MipsLongBranch::splitMBB(MachineBasicBlock *MBB) {
   NewMBB->removeSuccessor(Tgt);
   MBB->addSuccessor(NewMBB);
   MBB->addSuccessor(Tgt);
-  MF->insert(llvm::next(MachineFunction::iterator(MBB)), NewMBB);
+  MF->insert(std::next(MachineFunction::iterator(MBB)), NewMBB);
 
   NewMBB->splice(NewMBB->end(), MBB, (++LastBr).base(), MBB->end());
 }
@@ -437,8 +437,10 @@ bool MipsLongBranch::runOnMachineFunction(MachineFunction &F) {
       if (!I->Br || I->HasLongBranch)
         continue;
 
+      int ShVal = TM.getSubtarget<MipsSubtarget>().inMicroMipsMode() ? 2 : 4;
+
       // Check if offset fits into 16-bit immediate field of branches.
-      if (!ForceLongBranch && isInt<16>(computeOffset(I->Br) / 4))
+      if (!ForceLongBranch && isInt<16>(computeOffset(I->Br) / ShVal))
         continue;
 
       I->HasLongBranch = true;

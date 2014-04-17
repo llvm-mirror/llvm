@@ -162,12 +162,14 @@ template <> struct ScalarTraits<MCModuleYAML::Operand> {
   static void output(const MCModuleYAML::Operand &, void *,
                      llvm::raw_ostream &);
   static StringRef input(StringRef, void *, MCModuleYAML::Operand &);
+  static bool mustQuote(StringRef) { return false; }
 };
 
 template <> struct ScalarTraits<MCModuleYAML::OpcodeEnum> {
   static void output(const MCModuleYAML::OpcodeEnum &, void *,
                      llvm::raw_ostream &);
   static StringRef input(StringRef, void *, MCModuleYAML::OpcodeEnum &);
+  static bool mustQuote(StringRef) { return false; }
 };
 
 void ScalarEnumerationTraits<MCAtom::AtomKind>::enumeration(
@@ -442,7 +444,7 @@ StringRef mcmodule2yaml(raw_ostream &OS, const MCModule &MCM,
   return "";
 }
 
-StringRef yaml2mcmodule(OwningPtr<MCModule> &MCM, StringRef YamlContent,
+StringRef yaml2mcmodule(std::unique_ptr<MCModule> &MCM, StringRef YamlContent,
                         const MCInstrInfo &MII, const MCRegisterInfo &MRI) {
   MCM.reset(new MCModule);
   YAML2MCModule Parser(*MCM);

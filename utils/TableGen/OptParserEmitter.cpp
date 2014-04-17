@@ -13,8 +13,8 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/TableGenBackend.h"
-#include <cstring>
 #include <cctype>
+#include <cstring>
 #include <map>
 
 using namespace llvm;
@@ -79,7 +79,7 @@ static int CompareOptionRecords(Record *const *Av, Record *const *Bv) {
   if (APrec == BPrec &&
       A->getValueAsListOfStrings("Prefixes") ==
       B->getValueAsListOfStrings("Prefixes")) {
-    PrintError(A->getLoc(), Twine("Option is equivilent to"));
+    PrintError(A->getLoc(), Twine("Option is equivalent to"));
     PrintError(B->getLoc(), Twine("Other defined here"));
     PrintFatalError("Equivalent Options found.");
   }

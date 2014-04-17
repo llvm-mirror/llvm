@@ -84,19 +84,25 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                   unsigned DestReg, unsigned SrcReg,
                                   bool KillSrc) const {
   unsigned Opc = 0, ZeroReg = 0;
+  bool isMicroMips = TM.getSubtarget<MipsSubtarget>().inMicroMipsMode();
 
   if (Mips::GPR32RegClass.contains(DestReg)) { // Copy to CPU Reg.
-    if (Mips::GPR32RegClass.contains(SrcReg))
-      Opc = Mips::ADDu, ZeroReg = Mips::ZERO;
-    else if (Mips::CCRRegClass.contains(SrcReg))
+    if (Mips::GPR32RegClass.contains(SrcReg)) {
+      if (isMicroMips)
+        Opc = Mips::MOVE16_MM;
+      else
+        Opc = Mips::ADDu, ZeroReg = Mips::ZERO;
+    } else if (Mips::CCRRegClass.contains(SrcReg))
       Opc = Mips::CFC1;
     else if (Mips::FGR32RegClass.contains(SrcReg))
       Opc = Mips::MFC1;
-    else if (Mips::HI32RegClass.contains(SrcReg))
-      Opc = Mips::MFHI, SrcReg = 0;
-    else if (Mips::LO32RegClass.contains(SrcReg))
-      Opc = Mips::MFLO, SrcReg = 0;
-    else if (Mips::HI32DSPRegClass.contains(SrcReg))
+    else if (Mips::HI32RegClass.contains(SrcReg)) {
+      Opc = isMicroMips ? Mips::MFHI16_MM : Mips::MFHI;
+      SrcReg = 0;
+    } else if (Mips::LO32RegClass.contains(SrcReg)) {
+      Opc = isMicroMips ? Mips::MFLO16_MM : Mips::MFLO;
+      SrcReg = 0;
+    } else if (Mips::HI32DSPRegClass.contains(SrcReg))
       Opc = Mips::MFHI_DSP;
     else if (Mips::LO32DSPRegClass.contains(SrcReg))
       Opc = Mips::MFLO_DSP;
@@ -259,6 +265,8 @@ loadRegFromStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
 bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   MachineBasicBlock &MBB = *MI->getParent();
+  bool isMicroMips = TM.getSubtarget<MipsSubtarget>().inMicroMipsMode();
+  unsigned Opc;
 
   switch(MI->getDesc().getOpcode()) {
   default:
@@ -267,16 +275,27 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
     expandRetRA(MBB, MI, Mips::RET);
     break;
   case Mips::PseudoMFHI:
-    expandPseudoMFHiLo(MBB, MI, Mips::MFHI);
+    Opc = isMicroMips ? Mips::MFHI16_MM : Mips::MFHI;
+    expandPseudoMFHiLo(MBB, MI, Opc);
     break;
   case Mips::PseudoMFLO:
-    expandPseudoMFHiLo(MBB, MI, Mips::MFLO);
+    Opc = isMicroMips ? Mips::MFLO16_MM : Mips::MFLO;
+    expandPseudoMFHiLo(MBB, MI, Opc);
     break;
   case Mips::PseudoMFHI64:
     expandPseudoMFHiLo(MBB, MI, Mips::MFHI64);
     break;
   case Mips::PseudoMFLO64:
     expandPseudoMFHiLo(MBB, MI, Mips::MFLO64);
+    break;
+  case Mips::PseudoMTLOHI:
+    expandPseudoMTLoHi(MBB, MI, Mips::MTLO, Mips::MTHI, false);
+    break;
+  case Mips::PseudoMTLOHI64:
+    expandPseudoMTLoHi(MBB, MI, Mips::MTLO64, Mips::MTHI64, false);
+    break;
+  case Mips::PseudoMTLOHI_DSP:
+    expandPseudoMTLoHi(MBB, MI, Mips::MTLO_DSP, Mips::MTHI_DSP, true);
     break;
   case Mips::PseudoCVT_S_W:
     expandCvtFPInt(MBB, MI, Mips::CVT_S_W, Mips::MTC1, false);
@@ -432,6 +451,35 @@ void MipsSEInstrInfo::expandPseudoMFHiLo(MachineBasicBlock &MBB,
   BuildMI(MBB, I, I->getDebugLoc(), get(NewOpc), I->getOperand(0).getReg());
 }
 
+void MipsSEInstrInfo::expandPseudoMTLoHi(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         unsigned LoOpc,
+                                         unsigned HiOpc,
+                                         bool HasExplicitDef) const {
+  // Expand
+  //  lo_hi pseudomtlohi $gpr0, $gpr1
+  // to these two instructions:
+  //  mtlo $gpr0
+  //  mthi $gpr1
+
+  DebugLoc DL = I->getDebugLoc();
+  const MachineOperand &SrcLo = I->getOperand(1), &SrcHi = I->getOperand(2);
+  MachineInstrBuilder LoInst = BuildMI(MBB, I, DL, get(LoOpc));
+  MachineInstrBuilder HiInst = BuildMI(MBB, I, DL, get(HiOpc));
+  LoInst.addReg(SrcLo.getReg(), getKillRegState(SrcLo.isKill()));
+  HiInst.addReg(SrcHi.getReg(), getKillRegState(SrcHi.isKill()));
+
+  // Add lo/hi registers if the mtlo/hi instructions created have explicit
+  // def registers.
+  if (HasExplicitDef) {
+    unsigned DstReg = I->getOperand(0).getReg();
+    unsigned DstLo = getRegisterInfo().getSubReg(DstReg, Mips::sub_lo);
+    unsigned DstHi = getRegisterInfo().getSubReg(DstReg, Mips::sub_hi);
+    LoInst.addReg(DstLo, RegState::Define);
+    HiInst.addReg(DstHi, RegState::Define);
+  }
+}
+
 void MipsSEInstrInfo::expandCvtFPInt(MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator I,
                                      unsigned CvtOpc, unsigned MovOpc,
@@ -443,7 +491,8 @@ void MipsSEInstrInfo::expandCvtFPInt(MachineBasicBlock &MBB,
   DebugLoc DL = I->getDebugLoc();
   bool DstIsLarger, SrcIsLarger;
 
-  tie(DstIsLarger, SrcIsLarger) = compareOpndSize(CvtOpc, *MBB.getParent());
+  std::tie(DstIsLarger, SrcIsLarger) =
+      compareOpndSize(CvtOpc, *MBB.getParent());
 
   if (DstIsLarger)
     TmpReg = getRegisterInfo().getSubReg(DstReg, Mips::sub_lo);
@@ -467,9 +516,21 @@ void MipsSEInstrInfo::expandExtractElementF64(MachineBasicBlock &MBB,
   unsigned SubIdx = N ? Mips::sub_hi : Mips::sub_lo;
   unsigned SubReg = getRegisterInfo().getSubReg(SrcReg, SubIdx);
 
-  if (SubIdx == Mips::sub_hi && FP64)
-    BuildMI(MBB, I, dl, get(Mips::MFHC1), DstReg).addReg(SubReg);
-  else
+  if (SubIdx == Mips::sub_hi && FP64) {
+    // FIXME: The .addReg(SrcReg, RegState::Implicit) is a white lie used to
+    //        temporarily work around a widespread bug in the -mfp64 support.
+    //        The problem is that none of the 32-bit fpu ops mention the fact
+    //        that they clobber the upper 32-bits of the 64-bit FPR. Fixing that
+    //        requires a major overhaul of the FPU implementation which can't
+    //        be done right now due to time constraints.
+    //        MFHC1 is one of two instructions that are affected since they are
+    //        the only instructions that don't read the lower 32-bits.
+    //        We therefore pretend that it reads the bottom 32-bits to
+    //        artificially create a dependency and prevent the scheduler
+    //        changing the behaviour of the code.
+    BuildMI(MBB, I, dl, get(Mips::MFHC1), DstReg).addReg(SubReg).addReg(
+        SrcReg, RegState::Implicit);
+  } else
     BuildMI(MBB, I, dl, get(Mips::MFC1), DstReg).addReg(SubReg);
 }
 
@@ -482,15 +543,32 @@ void MipsSEInstrInfo::expandBuildPairF64(MachineBasicBlock &MBB,
   DebugLoc dl = I->getDebugLoc();
   const TargetRegisterInfo &TRI = getRegisterInfo();
 
-  // mtc1 Lo, $fp
-  // mtc1 Hi, $fp + 1
+  // For FP32 mode:
+  //   mtc1 Lo, $fp
+  //   mtc1 Hi, $fp + 1
+  // For FP64 mode:
+  //   mtc1 Lo, $fp
+  //   mthc1 Hi, $fp
+
   BuildMI(MBB, I, dl, Mtc1Tdd, TRI.getSubReg(DstReg, Mips::sub_lo))
     .addReg(LoReg);
 
-  if (FP64)
+  if (FP64) {
+    // FIXME: The .addReg(DstReg, RegState::Implicit) is a white lie used to
+    //        temporarily work around a widespread bug in the -mfp64 support.
+    //        The problem is that none of the 32-bit fpu ops mention the fact
+    //        that they clobber the upper 32-bits of the 64-bit FPR. Fixing that
+    //        requires a major overhaul of the FPU implementation which can't
+    //        be done right now due to time constraints.
+    //        MTHC1 is one of two instructions that are affected since they are
+    //        the only instructions that don't read the lower 32-bits.
+    //        We therefore pretend that it reads the bottom 32-bits to
+    //        artificially create a dependency and prevent the scheduler
+    //        changing the behaviour of the code.
     BuildMI(MBB, I, dl, get(Mips::MTHC1), TRI.getSubReg(DstReg, Mips::sub_hi))
-      .addReg(HiReg);
-  else
+        .addReg(HiReg)
+        .addReg(DstReg, RegState::Implicit);
+  } else
     BuildMI(MBB, I, dl, Mtc1Tdd, TRI.getSubReg(DstReg, Mips::sub_hi))
       .addReg(HiReg);
 }

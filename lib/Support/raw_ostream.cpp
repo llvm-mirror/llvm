@@ -227,11 +227,17 @@ raw_ostream &raw_ostream::operator<<(double N) {
   // On MSVCRT and compatible, output of %e is incompatible to Posix
   // by default. Number of exponent digits should be at least 2. "%+03d"
   // FIXME: Implement our formatter to here or Support/Format.h!
+#if __cplusplus >= 201103L && defined(__MINGW32__)
+  // FIXME: It should be generic to C++11.
+  if (N == 0.0 && std::signbit(N))
+    return *this << "-0.000000e+00";
+#else
   int fpcl = _fpclass(N);
 
   // negative zero
   if (fpcl == _FPCLASS_NZ)
     return *this << "-0.000000e+00";
+#endif
 
   char buf[16];
   unsigned len;
@@ -437,7 +443,7 @@ raw_fd_ostream::raw_fd_ostream(const char *Filename, std::string &ErrorInfo,
     FD = STDOUT_FILENO;
     // If user requested binary then put stdout into binary mode if
     // possible.
-    if (Flags & sys::fs::F_Binary)
+    if (!(Flags & sys::fs::F_Text))
       sys::ChangeStdoutToBinary();
     // Close stdout when we're done, to detect any output errors.
     ShouldClose = true;
@@ -463,9 +469,10 @@ raw_fd_ostream::raw_fd_ostream(int fd, bool shouldClose, bool unbuffered)
   : raw_ostream(unbuffered), FD(fd),
     ShouldClose(shouldClose), Error(false), UseAtomicWrites(false) {
 #ifdef O_BINARY
-  // Setting STDOUT and STDERR to binary mode is necessary in Win32
+  // Setting STDOUT to binary mode is necessary in Win32
   // to avoid undesirable linefeed conversion.
-  if (fd == STDOUT_FILENO || fd == STDERR_FILENO)
+  // Don't touch STDERR, or w*printf() (in assert()) would barf wide chars.
+  if (fd == STDOUT_FILENO)
     setmode(fd, O_BINARY);
 #endif
 

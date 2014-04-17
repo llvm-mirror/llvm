@@ -77,9 +77,9 @@ namespace Intrinsic {
   /// getIntrinsicInfoTableEntries.
   struct IITDescriptor {
     enum IITDescriptorKind {
-      Void, MMX, Metadata, Half, Float, Double,
+      Void, VarArg, MMX, Metadata, Half, Float, Double,
       Integer, Vector, Pointer, Struct,
-      Argument, ExtendVecArgument, TruncVecArgument
+      Argument, ExtendArgument, TruncArgument, HalfVecArgument
     } Kind;
     
     union {
@@ -98,13 +98,13 @@ namespace Intrinsic {
       AK_AnyPointer
     };
     unsigned getArgumentNumber() const {
-      assert(Kind == Argument || Kind == ExtendVecArgument || 
-             Kind == TruncVecArgument);
+      assert(Kind == Argument || Kind == ExtendArgument ||
+             Kind == TruncArgument || Kind == HalfVecArgument);
       return Argument_Info >> 2;
     }
     ArgKind getArgumentKind() const {
-      assert(Kind == Argument || Kind == ExtendVecArgument || 
-             Kind == TruncVecArgument);
+      assert(Kind == Argument || Kind == ExtendArgument ||
+             Kind == TruncArgument || Kind == HalfVecArgument);
       return (ArgKind)(Argument_Info&3);
     }
     

@@ -27,11 +27,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/OwningPtr.h"
-#include "llvm/Analysis/Verifier.h"
 #include "llvm/Bitcode/BitstreamReader.h"
 #include "llvm/Bitcode/LLVMBitCodes.h"
 #include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -479,7 +478,7 @@ static void PrintSize(uint64_t Bits) {
 /// AnalyzeBitcode - Analyze the bitcode file specified by InputFilename.
 static int AnalyzeBitcode() {
   // Read the input file.
-  OwningPtr<MemoryBuffer> MemBuf;
+  std::unique_ptr<MemoryBuffer> MemBuf;
 
   if (error_code ec =
         MemoryBuffer::getFileOrSTDIN(InputFilename, MemBuf))

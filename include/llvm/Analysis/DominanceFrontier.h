@@ -18,7 +18,7 @@
 #ifndef LLVM_ANALYSIS_DOMINANCEFRONTIER_H
 #define LLVM_ANALYSIS_DOMINANCEFRONTIER_H
 
-#include "llvm/Analysis/Dominators.h"
+#include "llvm/IR/Dominators.h"
 #include <map>
 #include <set>
 
@@ -51,7 +51,7 @@ public:
   ///
   bool isPostDominator() const { return IsPostDominators; }
 
-  virtual void releaseMemory() { Frontiers.clear(); }
+  void releaseMemory() override { Frontiers.clear(); }
 
   // Accessor interface:
   typedef DomSetMapType::iterator iterator;
@@ -142,7 +142,7 @@ public:
 
   /// print - Convert to human readable form
   ///
-  virtual void print(raw_ostream &OS, const Module* = 0) const;
+  void print(raw_ostream &OS, const Module* = 0) const override;
 
   /// dump - Dump the dominance frontier to dbgs().
   void dump() const;
@@ -167,18 +167,18 @@ public:
     return Roots[0];
   }
 
-  virtual bool runOnFunction(Function &) {
+  bool runOnFunction(Function &) override {
     Frontiers.clear();
-    DominatorTree &DT = getAnalysis<DominatorTree>();
+    DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
     Roots = DT.getRoots();
     assert(Roots.size() == 1 && "Only one entry block for forward domfronts!");
     calculate(DT, DT[Roots[0]]);
     return false;
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
-    AU.addRequired<DominatorTree>();
+    AU.addRequired<DominatorTreeWrapperPass>();
   }
 
   const DomSetType &calculate(const DominatorTree &DT,

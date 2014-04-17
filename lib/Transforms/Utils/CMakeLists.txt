@@ -1,4 +1,6 @@
 add_llvm_library(LLVMTransformUtils
+  AddDiscriminators.cpp
+  ASanStackFrameLayout.cpp
   BasicBlockUtils.cpp
   BreakCriticalEdges.cpp
   BuildLibCalls.cpp
@@ -8,6 +10,7 @@ add_llvm_library(LLVMTransformUtils
   CmpInstAnalysis.cpp
   CodeExtractor.cpp
   DemoteRegToStack.cpp
+  GlobalStatus.cpp
   InlineFunction.cpp
   InstructionNamer.cpp
   IntegerDivision.cpp

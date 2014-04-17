@@ -234,6 +234,7 @@ The following types have built-in support in YAML I/O:
 * float
 * double
 * StringRef
+* std::string
 * int64_t
 * int32_t
 * int16_t
@@ -425,8 +426,10 @@ looks like:
       static StringRef input(StringRef scalar, T &value) {
         // do custom parsing here.  Return the empty string on success,
         // or an error message on failure.
-        return StringRef(); 
+        return StringRef();
       }
+      // Determine if this scalar needs quotes.
+      static bool mustQuote(StringRef) { return true; }
     };
     
 
@@ -630,6 +633,58 @@ This works for both reading and writing. For example:
         else
           io.mapRequired("flags",  *(My86Flags*)info.flags);
      }
+    };
+
+
+Tags
+----
+
+The YAML syntax supports tags as a way to specify the type of a node before
+it is parsed. This allows dynamic types of nodes.  But the YAML I/O model uses
+static typing, so there are limits to how you can use tags with the YAML I/O
+model. Recently, we added support to YAML I/O for checking/setting the optional 
+tag on a map. Using this functionality it is even possbile to support different 
+mappings, as long as they are convertable.  
+
+To check a tag, inside your mapping() method you can use io.mapTag() to specify
+what the tag should be.  This will also add that tag when writing yaml.
+
+Validation
+----------
+
+Sometimes in a yaml map, each key/value pair is valid, but the combination is
+not.  This is similar to something having no syntax errors, but still having
+semantic errors.  To support semantic level checking, YAML I/O allows
+an optional ``validate()`` method in a MappingTraits template specialization.  
+
+When parsing yaml, the ``validate()`` method is call *after* all key/values in 
+the map have been processed. Any error message returned by the ``validate()`` 
+method during input will be printed just a like a syntax error would be printed.
+When writing yaml, the ``validate()`` method is called *before* the yaml 
+key/values  are written.  Any error during output will trigger an ``assert()`` 
+because it is a programming error to have invalid struct values.
+
+
+.. code-block:: c++
+
+    using llvm::yaml::MappingTraits;
+    using llvm::yaml::IO;
+    
+    struct Stuff {
+      ...
+    };
+
+    template <>
+    struct MappingTraits<Stuff> {
+      static void mapping(IO &io, Stuff &stuff) {
+      ...
+      }
+      static StringRef validate(IO &io, Stuff &stuff) {
+        // Look at all fields in 'stuff' and if there
+        // are any bad values return a string describing
+        // the error.  Otherwise return an empty string.
+        return StringRef();
+      }
     };
 
 

@@ -78,6 +78,7 @@ class PPCInstrInfo : public PPCGenInstrInfo {
                             const TargetRegisterClass *RC,
                             SmallVectorImpl<MachineInstr*> &NewMIs,
                             bool &NonRI, bool &SpillsVRS) const;
+  virtual void anchor();
 public:
   explicit PPCInstrInfo(PPCTargetMachine &TM);
 
@@ -94,6 +95,18 @@ public:
   CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
                                      const ScheduleDAG *DAG) const;
 
+  virtual
+  int getOperandLatency(const InstrItineraryData *ItinData,
+                        const MachineInstr *DefMI, unsigned DefIdx,
+                        const MachineInstr *UseMI, unsigned UseIdx) const;
+  virtual
+  int getOperandLatency(const InstrItineraryData *ItinData,
+                        SDNode *DefNode, unsigned DefIdx,
+                        SDNode *UseNode, unsigned UseIdx) const {
+    return PPCGenInstrInfo::getOperandLatency(ItinData, DefNode, DefIdx,
+                                              UseNode, UseIdx);
+  }
+
   bool isCoalescableExtInstr(const MachineInstr &MI,
                              unsigned &SrcReg, unsigned &DstReg,
                              unsigned &SubIdx) const;
@@ -105,6 +118,9 @@ public:
   // commuteInstruction - We can commute rlwimi instructions, but only if the
   // rotate amt is zero.  We also have to munge the immediates a bit.
   virtual MachineInstr *commuteInstruction(MachineInstr *MI, bool NewMI) const;
+
+  virtual bool findCommutedOpIndices(MachineInstr *MI, unsigned &SrcOpIdx1,
+                                     unsigned &SrcOpIdx2) const;
 
   virtual void insertNoop(MachineBasicBlock &MBB,
                           MachineBasicBlock::iterator MI) const;

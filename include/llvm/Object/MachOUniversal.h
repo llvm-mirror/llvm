@@ -14,10 +14,10 @@
 #ifndef LLVM_OBJECT_MACHOUNIVERSAL_H
 #define LLVM_OBJECT_MACHOUNIVERSAL_H
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Object/Binary.h"
+#include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/MachO.h"
 
 namespace llvm {
@@ -52,7 +52,7 @@ public:
     ObjectForArch getNext() const { return ObjectForArch(Parent, Index + 1); }
     uint32_t getCPUType() const { return Header.cputype; }
 
-    error_code getAsObjectFile(OwningPtr<ObjectFile> &Result) const;
+    error_code getAsObjectFile(std::unique_ptr<ObjectFile> &Result) const;
   };
 
   class object_iterator {
@@ -77,6 +77,7 @@ public:
   };
 
   MachOUniversalBinary(MemoryBuffer *Source, error_code &ec);
+  static ErrorOr<MachOUniversalBinary*> create(MemoryBuffer *Source);
 
   object_iterator begin_objects() const {
     return ObjectForArch(this, 0);
@@ -93,7 +94,7 @@ public:
   }
 
   error_code getObjectForArch(Triple::ArchType Arch,
-                              OwningPtr<ObjectFile> &Result) const;
+                              std::unique_ptr<ObjectFile> &Result) const;
 };
 
 }

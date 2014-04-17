@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/ExecutionEngine/ObjectBuffer.h"
@@ -22,6 +21,8 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/system_error.h"
 using namespace llvm;
@@ -60,17 +61,18 @@ public:
   SmallVector<sys::MemoryBlock, 16> DataMemory;
 
   uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
-                               unsigned SectionID, StringRef SectionName);
+                               unsigned SectionID,
+                               StringRef SectionName) override;
   uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
                                unsigned SectionID, StringRef SectionName,
-                               bool IsReadOnly);
+                               bool IsReadOnly) override;
 
-  virtual void *getPointerToNamedFunction(const std::string &Name,
-                                          bool AbortOnFailure = true) {
+  void *getPointerToNamedFunction(const std::string &Name,
+                                  bool AbortOnFailure = true) override {
     return 0;
   }
 
-  bool finalizeMemory(std::string *ErrMsg) { return false; }
+  bool finalizeMemory(std::string *ErrMsg) override { return false; }
 
   // Invalidate instruction cache for sections with execute permissions.
   // Some platforms with separate data cache and instruction cache require
@@ -131,14 +133,14 @@ static int printLineInfoForInput() {
     RuntimeDyld Dyld(&MemMgr);
 
     // Load the input memory buffer.
-    OwningPtr<MemoryBuffer> InputBuffer;
-    OwningPtr<ObjectImage>  LoadedObject;
+    std::unique_ptr<MemoryBuffer> InputBuffer;
+    std::unique_ptr<ObjectImage> LoadedObject;
     if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputFileList[i],
                                                      InputBuffer))
       return Error("unable to read input: '" + ec.message() + "'");
 
     // Load the object file
-    LoadedObject.reset(Dyld.loadObject(new ObjectBuffer(InputBuffer.take())));
+    LoadedObject.reset(Dyld.loadObject(new ObjectBuffer(InputBuffer.release())));
     if (!LoadedObject) {
       return Error(Dyld.getErrorString());
     }
@@ -146,14 +148,13 @@ static int printLineInfoForInput() {
     // Resolve all the relocations we can.
     Dyld.resolveRelocations();
 
-    OwningPtr<DIContext> Context(DIContext::getDWARFContext(LoadedObject->getObjectFile()));
+    std::unique_ptr<DIContext> Context(
+        DIContext::getDWARFContext(LoadedObject->getObjectFile()));
 
     // Use symbol info to iterate functions in the object.
-    error_code ec;
     for (object::symbol_iterator I = LoadedObject->begin_symbols(),
                                  E = LoadedObject->end_symbols();
-                          I != E && !ec;
-                          I.increment(ec)) {
+         I != E; ++I) {
       object::SymbolRef::Type SymType;
       if (I->getType(SymType)) continue;
       if (SymType == object::SymbolRef::ST_Function) {
@@ -191,14 +192,14 @@ static int executeInput() {
     InputFileList.push_back("-");
   for(unsigned i = 0, e = InputFileList.size(); i != e; ++i) {
     // Load the input memory buffer.
-    OwningPtr<MemoryBuffer> InputBuffer;
-    OwningPtr<ObjectImage>  LoadedObject;
+    std::unique_ptr<MemoryBuffer> InputBuffer;
+    std::unique_ptr<ObjectImage> LoadedObject;
     if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputFileList[i],
                                                      InputBuffer))
       return Error("unable to read input: '" + ec.message() + "'");
 
     // Load the object file
-    LoadedObject.reset(Dyld.loadObject(new ObjectBuffer(InputBuffer.take())));
+    LoadedObject.reset(Dyld.loadObject(new ObjectBuffer(InputBuffer.release())));
     if (!LoadedObject) {
       return Error(Dyld.getErrorString());
     }
@@ -239,6 +240,9 @@ static int executeInput() {
 }
 
 int main(int argc, char **argv) {
+  sys::PrintStackTraceOnErrorSignal();
+  PrettyStackTraceProgram X(argc, argv);
+
   ProgramName = argv[0];
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
 

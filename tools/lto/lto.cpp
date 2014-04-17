@@ -13,11 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-c/lto.h"
+#include "llvm-c/Core.h"
+#include "llvm-c/Target.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/LTO/LTOCodeGenerator.h"
 #include "llvm/LTO/LTOModule.h"
-#include "llvm-c/Core.h"
-#include "llvm-c/Target.h"
 
 // extra command-line flags needed for LTOCodeGenerator
 static cl::opt<bool>
@@ -54,28 +54,6 @@ static void lto_initialize() {
     LLVMInitializeAllDisassemblers();
     initialized = true;
   }
-}
-
-static void lto_set_target_options(llvm::TargetOptions &Options) {
-  Options.LessPreciseFPMADOption = EnableFPMAD;
-  Options.NoFramePointerElim = DisableFPElim;
-  Options.AllowFPOpFusion = FuseFPOps;
-  Options.UnsafeFPMath = EnableUnsafeFPMath;
-  Options.NoInfsFPMath = EnableNoInfsFPMath;
-  Options.NoNaNsFPMath = EnableNoNaNsFPMath;
-  Options.HonorSignDependentRoundingFPMathOption =
-    EnableHonorSignDependentRoundingFPMath;
-  Options.UseSoftFloat = GenerateSoftFloatCalls;
-  if (FloatABIForCalls != llvm::FloatABI::Default)
-    Options.FloatABIType = FloatABIForCalls;
-  Options.NoZerosInBSS = DontPlaceZerosInBSS;
-  Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
-  Options.DisableTailCalls = DisableTailCalls;
-  Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.TrapFuncName = TrapFuncName;
-  Options.PositionIndependentExecutable = EnablePIE;
-  Options.EnableSegmentedStacks = SegmentedStacks;
-  Options.UseInitArray = UseInitArray;
 }
 
 /// lto_get_version - Returns a printable string.
@@ -120,8 +98,7 @@ lto_module_is_object_file_in_memory_for_target(const void* mem,
 /// (check lto_get_error_message() for details).
 lto_module_t lto_module_create(const char* path) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(path, Options, sLastErrorString);
 }
 
@@ -129,8 +106,7 @@ lto_module_t lto_module_create(const char* path) {
 /// error (check lto_get_error_message() for details).
 lto_module_t lto_module_create_from_fd(int fd, const char *path, size_t size) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(fd, path, size, Options, sLastErrorString);
 }
 
@@ -141,8 +117,7 @@ lto_module_t lto_module_create_from_fd_at_offset(int fd, const char *path,
                                                  size_t map_size,
                                                  off_t offset) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(fd, path, map_size, offset, Options,
                                   sLastErrorString);
 }
@@ -151,9 +126,18 @@ lto_module_t lto_module_create_from_fd_at_offset(int fd, const char *path,
 /// NULL on error (check lto_get_error_message() for details).
 lto_module_t lto_module_create_from_memory(const void* mem, size_t length) {
   lto_initialize();
-  llvm::TargetOptions Options;
-  lto_set_target_options(Options);
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return LTOModule::makeLTOModule(mem, length, Options, sLastErrorString);
+}
+
+/// Loads an object file from memory with an extra path argument.
+/// Returns NULL on error (check lto_get_error_message() for details).
+lto_module_t lto_module_create_from_memory_with_path(const void* mem,
+                                                     size_t length,
+                                                     const char *path) {
+  lto_initialize();
+  llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+  return LTOModule::makeLTOModule(mem, length, Options, sLastErrorString, path);
 }
 
 /// lto_module_dispose - Frees all memory for a module. Upon return the
@@ -193,13 +177,41 @@ lto_symbol_attributes lto_module_get_symbol_attribute(lto_module_t mod,
   return mod->getSymbolAttributes(index);
 }
 
+/// lto_module_get_num_deplibs - Returns the number of dependent libraries in
+/// the object module.
+unsigned int lto_module_get_num_deplibs(lto_module_t mod) {
+  return mod->getDependentLibraryCount();
+}
+
+/// lto_module_get_deplib - Returns the ith dependent library in the module.
+const char* lto_module_get_deplib(lto_module_t mod, unsigned int index) {
+  return mod->getDependentLibrary(index);
+}
+
+/// lto_module_get_num_linkeropts - Returns the number of linker options in the
+/// object module.
+unsigned int lto_module_get_num_linkeropts(lto_module_t mod) {
+  return mod->getLinkerOptCount();
+}
+
+/// lto_module_get_linkeropt - Returns the ith linker option in the module.
+const char* lto_module_get_linkeropt(lto_module_t mod, unsigned int index) {
+  return mod->getLinkerOpt(index);
+}
+
+/// Set a diagnostic handler.
+void lto_codegen_set_diagnostic_handler(lto_code_gen_t cg,
+                                        lto_diagnostic_handler_t diag_handler,
+                                        void *ctxt) {
+  cg->setDiagnosticHandler(diag_handler, ctxt);
+}
+
 /// lto_codegen_create - Instantiates a code generator. Returns NULL if there
 /// is an error.
 lto_code_gen_t lto_codegen_create(void) {
   lto_initialize();
 
-  TargetOptions Options;
-  lto_set_target_options(Options);
+  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
 
   LTOCodeGenerator *CodeGen = new LTOCodeGenerator();
   if (CodeGen)
@@ -258,10 +270,6 @@ void lto_codegen_set_assembler_args(lto_code_gen_t cg, const char **args,
 void lto_codegen_add_must_preserve_symbol(lto_code_gen_t cg,
                                           const char *symbol) {
   cg->addMustPreserveSymbol(symbol);
-}
-
-void lto_codegen_add_dso_symbol(lto_code_gen_t cg, const char *symbol) {
-  cg->addDSOSymbol(symbol);
 }
 
 /// lto_codegen_write_merged_modules - Writes a new file at the specified path

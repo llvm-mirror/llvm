@@ -20,7 +20,7 @@ entry:
 ; CHECK: ldaw r5, sp[1]
 ; CHECK: ldc r2, 40
 ; CHECK: mov r0, r5
-; CHECK: bl memcpy
+; CHECK: bl __memcpy_4
 ; CHECK: mov r0, r5
 ; CHECK: bl f1
 ; CHECK: mov r0, r4
@@ -54,5 +54,20 @@ declare void @f2(i32, %struct.st2*) nounwind
 define void @f2Test(%struct.st2* byval %s2, i32 %i, ...) nounwind {
 entry:
   call void @f2(i32 %i, %struct.st2* %s2)
+  ret void
+}
+
+; CHECK-LABEL: f3Test
+; CHECK: entsp 2
+; CHECK: ldc r1, 0
+; CHECK: ld8u r2, r0[r1]
+; CHECK: ldaw r0, sp[1]
+; CHECK: st8 r2, r0[r1]
+; CHECK: bl f
+; CHECK: retsp 2
+declare void @f3(i8*) nounwind
+define void @f3Test(i8* byval %v) nounwind {
+entry:
+  call void @f3(i8* %v) nounwind
   ret void
 }

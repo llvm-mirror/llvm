@@ -32,7 +32,6 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
 
@@ -73,11 +72,11 @@ public:
       Subtarget(&TM.getSubtarget<ARMSubtarget>()) {
   }
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "ARM Instruction Selection";
   }
 
-  virtual void PreprocessISelDAG();
+  void PreprocessISelDAG() override;
 
   /// getI32Imm - Return a target constant of type i32 with the specified
   /// value.
@@ -85,7 +84,7 @@ public:
     return CurDAG->getTargetConstant(Imm, MVT::i32);
   }
 
-  SDNode *Select(SDNode *N);
+  SDNode *Select(SDNode *N) override;
 
 
   bool hasNoVMLxHazardUse(SDNode *N) const;
@@ -253,13 +252,10 @@ private:
 
   SDNode *SelectConcatVector(SDNode *N);
 
-  SDNode *SelectAtomic(SDNode *N, unsigned Op8, unsigned Op16, unsigned Op32, unsigned Op64);
-
   /// SelectInlineAsmMemoryOperand - Implement addressing mode selection for
   /// inline asm expressions.
-  virtual bool SelectInlineAsmMemoryOperand(const SDValue &Op,
-                                            char ConstraintCode,
-                                            std::vector<SDValue> &OutOps);
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op, char ConstraintCode,
+                                    std::vector<SDValue> &OutOps) override;
 
   // Form pairs of consecutive R, S, D, or Q registers.
   SDNode *createGPRPairNode(EVT VT, SDValue V0, SDValue V1);
@@ -401,7 +397,7 @@ void ARMDAGToDAGISel::PreprocessISelDAG() {
     N1 = CurDAG->getNode(ISD::SHL, SDLoc(N1), MVT::i32,
                          N1, CurDAG->getConstant(TZ, MVT::i32));
     CurDAG->UpdateNodeOperands(N, N0, N1);
-  }  
+  }
 }
 
 /// hasNoVMLxHazardUse - Return true if it's desirable to select a FP MLA / MLS
@@ -414,8 +410,8 @@ bool ARMDAGToDAGISel::hasNoVMLxHazardUse(SDNode *N) const {
   if (!CheckVMLxHazard)
     return true;
 
-  if (!Subtarget->isCortexA8() && !Subtarget->isCortexA9() &&
-      !Subtarget->isSwift())
+  if (!Subtarget->isCortexA7() && !Subtarget->isCortexA8() &&
+      !Subtarget->isCortexA9() && !Subtarget->isSwift())
     return true;
 
   if (!N->hasOneUse())
@@ -534,8 +530,7 @@ bool ARMDAGToDAGISel::SelectAddrModeImm12(SDValue N,
     }
 
     if (N.getOpcode() == ARMISD::Wrapper &&
-        !(Subtarget->useMovt() &&
-                     N.getOperand(0).getOpcode() == ISD::TargetGlobalAddress)) {
+        N.getOperand(0).getOpcode() != ISD::TargetGlobalAddress) {
       Base = N.getOperand(0);
     } else
       Base = N;
@@ -702,8 +697,7 @@ AddrMode2Type ARMDAGToDAGISel::SelectAddrMode2Worker(SDValue N,
       Base = CurDAG->getTargetFrameIndex(FI,
                                          getTargetLowering()->getPointerTy());
     } else if (N.getOpcode() == ARMISD::Wrapper &&
-               !(Subtarget->useMovt() &&
-                 N.getOperand(0).getOpcode() == ISD::TargetGlobalAddress)) {
+               N.getOperand(0).getOpcode() != ISD::TargetGlobalAddress) {
       Base = N.getOperand(0);
     }
     Offset = CurDAG->getRegister(0, MVT::i32);
@@ -963,8 +957,7 @@ bool ARMDAGToDAGISel::SelectAddrMode5(SDValue N,
       Base = CurDAG->getTargetFrameIndex(FI,
                                          getTargetLowering()->getPointerTy());
     } else if (N.getOpcode() == ARMISD::Wrapper &&
-               !(Subtarget->useMovt() &&
-                 N.getOperand(0).getOpcode() == ISD::TargetGlobalAddress)) {
+               N.getOperand(0).getOpcode() != ISD::TargetGlobalAddress) {
       Base = N.getOperand(0);
     }
     Offset = CurDAG->getTargetConstant(ARM_AM::getAM5Opc(ARM_AM::add, 0),
@@ -1141,8 +1134,7 @@ ARMDAGToDAGISel::SelectThumbAddrModeImm5S(SDValue N, unsigned Scale,
 
   if (!CurDAG->isBaseWithConstantOffset(N)) {
     if (N.getOpcode() == ARMISD::Wrapper &&
-        !(Subtarget->useMovt() &&
-          N.getOperand(0).getOpcode() == ISD::TargetGlobalAddress)) {
+        N.getOperand(0).getOpcode() != ISD::TargetGlobalAddress) {
       Base = N.getOperand(0);
     } else {
       Base = N;
@@ -1278,8 +1270,7 @@ bool ARMDAGToDAGISel::SelectT2AddrModeImm12(SDValue N,
     }
 
     if (N.getOpcode() == ARMISD::Wrapper &&
-               !(Subtarget->useMovt() &&
-                 N.getOperand(0).getOpcode() == ISD::TargetGlobalAddress)) {
+        N.getOperand(0).getOpcode() != ISD::TargetGlobalAddress) {
       Base = N.getOperand(0);
       if (Base.getOpcode() == ISD::TargetConstantPool)
         return false;  // We want to select t2LDRpci instead.
@@ -1412,7 +1403,7 @@ bool ARMDAGToDAGISel::SelectT2AddrModeSoReg(SDValue N,
 
 bool ARMDAGToDAGISel::SelectT2AddrModeExclusive(SDValue N, SDValue &Base,
                                                 SDValue &OffImm) {
-  // This *must* succeed since it's used for the irreplacable ldrex and strex
+  // This *must* succeed since it's used for the irreplaceable ldrex and strex
   // instructions.
   Base = N;
   OffImm = CurDAG->getTargetConstant(0, MVT::i32);
@@ -1673,9 +1664,61 @@ SDValue ARMDAGToDAGISel::GetVLDSTAlign(SDValue Align, unsigned NumVecs,
   return CurDAG->getTargetConstant(Alignment, MVT::i32);
 }
 
+static bool isVLDfixed(unsigned Opc)
+{
+  switch (Opc) {
+  default: return false;
+  case ARM::VLD1d8wb_fixed : return true;
+  case ARM::VLD1d16wb_fixed : return true;
+  case ARM::VLD1d64Qwb_fixed : return true;
+  case ARM::VLD1d32wb_fixed : return true;
+  case ARM::VLD1d64wb_fixed : return true;
+  case ARM::VLD1d64TPseudoWB_fixed : return true;
+  case ARM::VLD1d64QPseudoWB_fixed : return true;
+  case ARM::VLD1q8wb_fixed : return true;
+  case ARM::VLD1q16wb_fixed : return true;
+  case ARM::VLD1q32wb_fixed : return true;
+  case ARM::VLD1q64wb_fixed : return true;
+  case ARM::VLD2d8wb_fixed : return true;
+  case ARM::VLD2d16wb_fixed : return true;
+  case ARM::VLD2d32wb_fixed : return true;
+  case ARM::VLD2q8PseudoWB_fixed : return true;
+  case ARM::VLD2q16PseudoWB_fixed : return true;
+  case ARM::VLD2q32PseudoWB_fixed : return true;
+  case ARM::VLD2DUPd8wb_fixed : return true;
+  case ARM::VLD2DUPd16wb_fixed : return true;
+  case ARM::VLD2DUPd32wb_fixed : return true;
+  }
+}
+
+static bool isVSTfixed(unsigned Opc)
+{
+  switch (Opc) {
+  default: return false;
+  case ARM::VST1d8wb_fixed : return true;
+  case ARM::VST1d16wb_fixed : return true;
+  case ARM::VST1d32wb_fixed : return true;
+  case ARM::VST1d64wb_fixed : return true;
+  case ARM::VST1q8wb_fixed : return true;
+  case ARM::VST1q16wb_fixed : return true;
+  case ARM::VST1q32wb_fixed : return true;
+  case ARM::VST1q64wb_fixed : return true;
+  case ARM::VST1d64TPseudoWB_fixed : return true;
+  case ARM::VST1d64QPseudoWB_fixed : return true;
+  case ARM::VST2d8wb_fixed : return true;
+  case ARM::VST2d16wb_fixed : return true;
+  case ARM::VST2d32wb_fixed : return true;
+  case ARM::VST2q8PseudoWB_fixed : return true;
+  case ARM::VST2q16PseudoWB_fixed : return true;
+  case ARM::VST2q32PseudoWB_fixed : return true;
+  }
+}
+
 // Get the register stride update opcode of a VLD/VST instruction that
 // is otherwise equivalent to the given fixed stride updating instruction.
 static unsigned getVLDSTRegisterUpdateOpcode(unsigned Opc) {
+  assert((isVLDfixed(Opc) || isVSTfixed(Opc))
+    && "Incorrect fixed stride updating instruction.");
   switch (Opc) {
   default: break;
   case ARM::VLD1d8wb_fixed: return ARM::VLD1d8wb_register;
@@ -1686,6 +1729,10 @@ static unsigned getVLDSTRegisterUpdateOpcode(unsigned Opc) {
   case ARM::VLD1q16wb_fixed: return ARM::VLD1q16wb_register;
   case ARM::VLD1q32wb_fixed: return ARM::VLD1q32wb_register;
   case ARM::VLD1q64wb_fixed: return ARM::VLD1q64wb_register;
+  case ARM::VLD1d64Twb_fixed: return ARM::VLD1d64Twb_register;
+  case ARM::VLD1d64Qwb_fixed: return ARM::VLD1d64Qwb_register;
+  case ARM::VLD1d64TPseudoWB_fixed: return ARM::VLD1d64TPseudoWB_register;
+  case ARM::VLD1d64QPseudoWB_fixed: return ARM::VLD1d64QPseudoWB_register;
 
   case ARM::VST1d8wb_fixed: return ARM::VST1d8wb_register;
   case ARM::VST1d16wb_fixed: return ARM::VST1d16wb_register;
@@ -1785,11 +1832,11 @@ SDNode *ARMDAGToDAGISel::SelectVLD(SDNode *N, bool isUpdating, unsigned NumVecs,
       SDValue Inc = N->getOperand(AddrOpIdx + 1);
       // FIXME: VLD1/VLD2 fixed increment doesn't need Reg0. Remove the reg0
       // case entirely when the rest are updated to that form, too.
-      if ((NumVecs == 1 || NumVecs == 2) && !isa<ConstantSDNode>(Inc.getNode()))
+      if ((NumVecs <= 2) && !isa<ConstantSDNode>(Inc.getNode()))
         Opc = getVLDSTRegisterUpdateOpcode(Opc);
-      // We use a VLD1 for v1i64 even if the pseudo says vld2/3/4, so
+      // FIXME: We use a VLD1 for v1i64 even if the pseudo says vld2/3/4, so
       // check for that explicitly too. Horribly hacky, but temporary.
-      if ((NumVecs != 1 && NumVecs != 2 && Opc != ARM::VLD1q64wb_fixed) ||
+      if ((NumVecs > 2 && !isVLDfixed(Opc)) ||
           !isa<ConstantSDNode>(Inc.getNode()))
         Ops.push_back(isa<ConstantSDNode>(Inc.getNode()) ? Reg0 : Inc);
     }
@@ -1937,11 +1984,12 @@ SDNode *ARMDAGToDAGISel::SelectVST(SDNode *N, bool isUpdating, unsigned NumVecs,
       // case entirely when the rest are updated to that form, too.
       if (NumVecs <= 2 && !isa<ConstantSDNode>(Inc.getNode()))
         Opc = getVLDSTRegisterUpdateOpcode(Opc);
-      // We use a VST1 for v1i64 even if the pseudo says vld2/3/4, so
+      // FIXME: We use a VST1 for v1i64 even if the pseudo says vld2/3/4, so
       // check for that explicitly too. Horribly hacky, but temporary.
-      if ((NumVecs > 2 && Opc != ARM::VST1q64wb_fixed) ||
-          !isa<ConstantSDNode>(Inc.getNode()))
-        Ops.push_back(isa<ConstantSDNode>(Inc.getNode()) ? Reg0 : Inc);
+      if  (!isa<ConstantSDNode>(Inc.getNode()))
+        Ops.push_back(Inc);
+      else if (NumVecs > 2 && !isVSTfixed(Opc))
+        Ops.push_back(Reg0);
     }
     Ops.push_back(SrcReg);
     Ops.push_back(Pred);
@@ -2361,38 +2409,6 @@ SDNode *ARMDAGToDAGISel::SelectConcatVector(SDNode *N) {
   return createDRegPairNode(VT, N->getOperand(0), N->getOperand(1));
 }
 
-SDNode *ARMDAGToDAGISel::SelectAtomic(SDNode *Node, unsigned Op8,
-                                      unsigned Op16,unsigned Op32,
-                                      unsigned Op64) {
-  // Mostly direct translation to the given operations, except that we preserve
-  // the AtomicOrdering for use later on.
-  AtomicSDNode *AN = cast<AtomicSDNode>(Node);
-  EVT VT = AN->getMemoryVT();
-
-  unsigned Op;
-  SDVTList VTs = CurDAG->getVTList(AN->getValueType(0), MVT::Other);
-  if (VT == MVT::i8)
-    Op = Op8;
-  else if (VT == MVT::i16)
-    Op = Op16;
-  else if (VT == MVT::i32)
-    Op = Op32;
-  else if (VT == MVT::i64) {
-    Op = Op64;
-    VTs = CurDAG->getVTList(MVT::i32, MVT::i32, MVT::Other);
-  } else
-    llvm_unreachable("Unexpected atomic operation");
-
-  SmallVector<SDValue, 6> Ops;
-  for (unsigned i = 1; i < AN->getNumOperands(); ++i)
-      Ops.push_back(AN->getOperand(i));
-
-  Ops.push_back(CurDAG->getTargetConstant(AN->getOrdering(), MVT::i32));
-  Ops.push_back(AN->getOperand(0)); // Chain moves to the end
-
-  return CurDAG->SelectNodeTo(Node, Op, VTs, &Ops[0], Ops.size());
-}
-
 SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
   SDLoc dl(N);
 
@@ -2420,19 +2436,21 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
   case ISD::Constant: {
     unsigned Val = cast<ConstantSDNode>(N)->getZExtValue();
     bool UseCP = true;
-    if (Subtarget->hasThumb2())
+    if (Subtarget->useMovt())
       // Thumb2-aware targets have the MOVT instruction, so all immediates can
       // be done with MOV + MOVT, at worst.
-      UseCP = 0;
+      UseCP = false;
     else {
       if (Subtarget->isThumb()) {
-        UseCP = (Val > 255 &&                          // MOV
-                 ~Val > 255 &&                         // MOV + MVN
-                 !ARM_AM::isThumbImmShiftedVal(Val));  // MOV + LSL
+        UseCP = (Val > 255 &&                                  // MOV
+                 ~Val > 255 &&                                 // MOV + MVN
+                 !ARM_AM::isThumbImmShiftedVal(Val) &&         // MOV + LSL
+                 !(Subtarget->hasV6T2Ops() && Val <= 0xffff)); // MOVW
       } else
-        UseCP = (ARM_AM::getSOImmVal(Val) == -1 &&     // MOV
-                 ARM_AM::getSOImmVal(~Val) == -1 &&    // MVN
-                 !ARM_AM::isSOImmTwoPartVal(Val));     // two instrs.
+        UseCP = (ARM_AM::getSOImmVal(Val) == -1 &&             // MOV
+                 ARM_AM::getSOImmVal(~Val) == -1 &&            // MVN
+                 !ARM_AM::isSOImmTwoPartVal(Val) &&            // two instrs.
+                 !(Subtarget->hasV6T2Ops() && Val <= 0xffff)); // MOVW
     }
 
     if (UseCP) {
@@ -2442,7 +2460,7 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
                                       getTargetLowering()->getPointerTy());
 
       SDNode *ResNode;
-      if (Subtarget->isThumb1Only()) {
+      if (Subtarget->isThumb()) {
         SDValue Pred = getAL(CurDAG);
         SDValue PredReg = CurDAG->getRegister(0, MVT::i32);
         SDValue Ops[] = { CPIdx, Pred, PredReg, CurDAG->getEntryNode() };
@@ -2834,7 +2852,7 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
     static const uint16_t DOpcodes[] = { ARM::VLD3d8Pseudo_UPD,
                                          ARM::VLD3d16Pseudo_UPD,
                                          ARM::VLD3d32Pseudo_UPD,
-                                         ARM::VLD1q64wb_fixed};
+                                         ARM::VLD1d64TPseudoWB_fixed};
     static const uint16_t QOpcodes0[] = { ARM::VLD3q8Pseudo_UPD,
                                           ARM::VLD3q16Pseudo_UPD,
                                           ARM::VLD3q32Pseudo_UPD };
@@ -2848,7 +2866,7 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
     static const uint16_t DOpcodes[] = { ARM::VLD4d8Pseudo_UPD,
                                          ARM::VLD4d16Pseudo_UPD,
                                          ARM::VLD4d32Pseudo_UPD,
-                                         ARM::VLD1q64wb_fixed};
+                                         ARM::VLD1d64QPseudoWB_fixed};
     static const uint16_t QOpcodes0[] = { ARM::VLD4q8Pseudo_UPD,
                                           ARM::VLD4q16Pseudo_UPD,
                                           ARM::VLD4q32Pseudo_UPD };
@@ -2970,13 +2988,16 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
     default:
       break;
 
+    case Intrinsic::arm_ldaexd:
     case Intrinsic::arm_ldrexd: {
-      SDValue MemAddr = N->getOperand(2);
       SDLoc dl(N);
       SDValue Chain = N->getOperand(0);
-
+      SDValue MemAddr = N->getOperand(2);
       bool isThumb = Subtarget->isThumb() && Subtarget->hasThumb2();
-      unsigned NewOpc = isThumb ? ARM::t2LDREXD :ARM::LDREXD;
+
+      bool IsAcquire = IntNo == Intrinsic::arm_ldaexd;
+      unsigned NewOpc = isThumb ? (IsAcquire ? ARM::t2LDAEXD : ARM::t2LDREXD)
+                                : (IsAcquire ? ARM::LDAEXD : ARM::LDREXD);
 
       // arm_ldrexd returns a i64 value in {i32, i32}
       std::vector<EVT> ResTys;
@@ -3028,7 +3049,7 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
       ReplaceUses(SDValue(N, 2), OutChain);
       return NULL;
     }
-
+    case Intrinsic::arm_stlexd:
     case Intrinsic::arm_strexd: {
       SDLoc dl(N);
       SDValue Chain = N->getOperand(0);
@@ -3054,7 +3075,9 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
       Ops.push_back(CurDAG->getRegister(0, MVT::i32));
       Ops.push_back(Chain);
 
-      unsigned NewOpc = isThumb ? ARM::t2STREXD : ARM::STREXD;
+      bool IsRelease = IntNo == Intrinsic::arm_stlexd;
+      unsigned NewOpc = isThumb ? (IsRelease ? ARM::t2STLEXD : ARM::t2STREXD)
+                                : (IsRelease ? ARM::STLEXD : ARM::STREXD);
 
       SDNode *St = CurDAG->getMachineNode(NewOpc, dl, ResTys, Ops);
       // Transfer memoperands.
@@ -3263,91 +3286,6 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
 
   case ISD::CONCAT_VECTORS:
     return SelectConcatVector(N);
-
-  case ISD::ATOMIC_LOAD:
-    if (cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i64)
-      return SelectAtomic(N, 0, 0, 0, ARM::ATOMIC_LOAD_I64);
-    else
-      break;
-
-  case ISD::ATOMIC_STORE:
-    if (cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i64)
-      return SelectAtomic(N, 0, 0, 0, ARM::ATOMIC_STORE_I64);
-    else
-      break;
-
-  case ISD::ATOMIC_LOAD_ADD:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_ADD_I8,
-                        ARM::ATOMIC_LOAD_ADD_I16,
-                        ARM::ATOMIC_LOAD_ADD_I32,
-                        ARM::ATOMIC_LOAD_ADD_I64);
-  case ISD::ATOMIC_LOAD_SUB:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_SUB_I8,
-                        ARM::ATOMIC_LOAD_SUB_I16,
-                        ARM::ATOMIC_LOAD_SUB_I32,
-                        ARM::ATOMIC_LOAD_SUB_I64);
-  case ISD::ATOMIC_LOAD_AND:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_AND_I8,
-                        ARM::ATOMIC_LOAD_AND_I16,
-                        ARM::ATOMIC_LOAD_AND_I32,
-                        ARM::ATOMIC_LOAD_AND_I64);
-  case ISD::ATOMIC_LOAD_OR:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_OR_I8,
-                        ARM::ATOMIC_LOAD_OR_I16,
-                        ARM::ATOMIC_LOAD_OR_I32,
-                        ARM::ATOMIC_LOAD_OR_I64);
-  case ISD::ATOMIC_LOAD_XOR:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_XOR_I8,
-                        ARM::ATOMIC_LOAD_XOR_I16,
-                        ARM::ATOMIC_LOAD_XOR_I32,
-                        ARM::ATOMIC_LOAD_XOR_I64);
-  case ISD::ATOMIC_LOAD_NAND:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_NAND_I8,
-                        ARM::ATOMIC_LOAD_NAND_I16,
-                        ARM::ATOMIC_LOAD_NAND_I32,
-                        ARM::ATOMIC_LOAD_NAND_I64);
-  case ISD::ATOMIC_LOAD_MIN:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_MIN_I8,
-                        ARM::ATOMIC_LOAD_MIN_I16,
-                        ARM::ATOMIC_LOAD_MIN_I32,
-                        ARM::ATOMIC_LOAD_MIN_I64);
-  case ISD::ATOMIC_LOAD_MAX:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_MAX_I8,
-                        ARM::ATOMIC_LOAD_MAX_I16,
-                        ARM::ATOMIC_LOAD_MAX_I32,
-                        ARM::ATOMIC_LOAD_MAX_I64);
-  case ISD::ATOMIC_LOAD_UMIN:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_UMIN_I8,
-                        ARM::ATOMIC_LOAD_UMIN_I16,
-                        ARM::ATOMIC_LOAD_UMIN_I32,
-                        ARM::ATOMIC_LOAD_UMIN_I64);
-  case ISD::ATOMIC_LOAD_UMAX:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_LOAD_UMAX_I8,
-                        ARM::ATOMIC_LOAD_UMAX_I16,
-                        ARM::ATOMIC_LOAD_UMAX_I32,
-                        ARM::ATOMIC_LOAD_UMAX_I64);
-  case ISD::ATOMIC_SWAP:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_SWAP_I8,
-                        ARM::ATOMIC_SWAP_I16,
-                        ARM::ATOMIC_SWAP_I32,
-                        ARM::ATOMIC_SWAP_I64);
-  case ISD::ATOMIC_CMP_SWAP:
-    return SelectAtomic(N,
-                        ARM::ATOMIC_CMP_SWAP_I8,
-                        ARM::ATOMIC_CMP_SWAP_I16,
-                        ARM::ATOMIC_CMP_SWAP_I32,
-                        ARM::ATOMIC_CMP_SWAP_I64);
   }
 
   return SelectCode(N);

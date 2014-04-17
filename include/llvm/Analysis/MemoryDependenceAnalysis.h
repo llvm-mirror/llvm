@@ -15,13 +15,12 @@
 #define LLVM_ANALYSIS_MEMORYDEPENDENCEANALYSIS_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/ValueHandle.h"
 
 namespace llvm {
   class Function;
@@ -323,24 +322,25 @@ namespace llvm {
 
     /// Current AA implementation, just a cache.
     AliasAnalysis *AA;
-    DataLayout *TD;
+    const DataLayout *DL;
     DominatorTree *DT;
-    OwningPtr<PredIteratorCache> PredCache;
+    std::unique_ptr<PredIteratorCache> PredCache;
+
   public:
     MemoryDependenceAnalysis();
     ~MemoryDependenceAnalysis();
     static char ID;
 
     /// Pass Implementation stuff.  This doesn't do any analysis eagerly.
-    bool runOnFunction(Function &);
+    bool runOnFunction(Function &) override;
 
     /// Clean up memory in between runs
-    void releaseMemory();
+    void releaseMemory() override;
 
     /// getAnalysisUsage - Does not modify anything.  It uses Value Numbering
     /// and Alias Analysis.
     ///
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
 
     /// getDependency - Return the instruction on which a memory operation
     /// depends.  See the class comment for more details.  It is illegal to call
@@ -415,7 +415,7 @@ namespace llvm {
                                                     int64_t MemLocOffs,
                                                     unsigned MemLocSize,
                                                     const LoadInst *LI,
-                                                    const DataLayout &TD);
+                                                    const DataLayout &DL);
 
   private:
     MemDepResult getCallSiteDependencyFrom(CallSite C, bool isReadOnlyCall,

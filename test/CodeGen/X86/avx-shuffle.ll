@@ -81,7 +81,7 @@ entry:
 define i32 @test9(<4 x i32> %a) nounwind {
 ; CHECK: test9
 ; CHECK: vpextrd
-  %b = shufflevector <4 x i32> %a, <4 x i32> undef, <8 x i32> <i32 1, i32 1, i32 2, i32 2, i32 3, i32 3, i32 undef, i32 4> 
+  %b = shufflevector <4 x i32> %a, <4 x i32> undef, <8 x i32> <i32 1, i32 1, i32 2, i32 2, i32 3, i32 3, i32 undef, i32 4>
   %r = extractelement <8 x i32> %b, i32 2
 ; CHECK: ret
   ret i32 %r
@@ -251,6 +251,8 @@ define <8 x float> @test19(<8 x float> %A, <8 x float>%B) nounwind {
 ; CHECK: swap8doubles
 ; CHECK: vmovups {{[0-9]*}}(%rdi), %xmm{{[0-9]+}}
 ; CHECK: vmovups {{[0-9]*}}(%rdi), %xmm{{[0-9]+}}
+; CHECK: vinsertf128 $1, {{[0-9]*}}(%rdi), %ymm{{[0-9]+}}
+; CHECK: vinsertf128 $1, {{[0-9]*}}(%rdi), %ymm{{[0-9]+}}
 ; CHECK: vmovaps {{[0-9]*}}(%rsi), %ymm{{[0-9]+}}
 ; CHECK: vmovaps {{[0-9]*}}(%rsi), %ymm{{[0-9]+}}
 ; CHECK: vmovaps %xmm{{[0-9]+}}, {{[0-9]*}}(%rdi)
@@ -295,3 +297,12 @@ entry:
 }
 declare <2 x double> @llvm.x86.avx.vextractf128.pd.256(<4 x double>, i8) nounwind readnone
 declare <4 x double> @llvm.x86.avx.vinsertf128.pd.256(<4 x double>, <2 x double>, i8) nounwind readnone
+
+; this test case just should not fail
+define void @test20() {
+  %a0 = insertelement <3 x double> <double 0.000000e+00, double 0.000000e+00, double undef>, double 0.000000e+00, i32 2
+  store <3 x double> %a0, <3 x double>* undef, align 1
+  %a1 = insertelement <3 x double> <double 0.000000e+00, double 0.000000e+00, double undef>, double undef, i32 2
+  store <3 x double> %a1, <3 x double>* undef, align 1
+  ret void
+}

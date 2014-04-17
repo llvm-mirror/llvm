@@ -18,25 +18,23 @@
 
 #define DEBUG_TYPE "debug-ir"
 
-#include "llvm/ADT/ValueMap.h"
-#include "llvm/Assembly/AssemblyAnnotationWriter.h"
-#include "llvm/DebugInfo.h"
-#include "llvm/DIBuilder.h"
-#include "llvm/InstVisitor.h"
+#include "llvm/IR/ValueMap.h"
+#include "DebugIR.h"
+#include "llvm/IR/AssemblyAnnotationWriter.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/ToolOutputFile.h"
-#include "llvm/Support/FormattedStream.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Path.h"
-
-#include "DebugIR.h"
-
 #include <string>
 
 #define STR_HELPER(x) #x
@@ -69,11 +67,12 @@ public:
 
   // This function is called after an Instruction, GlobalValue, or GlobalAlias
   // is printed.
-  void printInfoComment(const Value &V, formatted_raw_ostream &Out) {
+  void printInfoComment(const Value &V, formatted_raw_ostream &Out) override {
     addEntry(&V, Out);
   }
 
-  void emitFunctionAnnot(const Function *F, formatted_raw_ostream &Out) {
+  void emitFunctionAnnot(const Function *F,
+                         formatted_raw_ostream &Out) override {
     addEntry(F, Out);
   }
 
@@ -184,8 +183,8 @@ public:
     if (Finder.compile_unit_count() > 1)
       report_fatal_error("DebugIR pass supports only a signle compile unit per "
                          "Module.");
-    createCompileUnit(
-        Finder.compile_unit_count() == 1 ? *Finder.compile_unit_begin() : 0);
+    createCompileUnit(Finder.compile_unit_count() == 1 ?
+                      (MDNode*)*Finder.compile_units().begin() : 0);
   }
 
   void visitFunction(Function &F) {
@@ -326,14 +325,11 @@ private:
                  << " subprogram nodes"
                  << "\n");
 
-    for (DebugInfoFinder::iterator i = Finder.subprogram_begin(),
-                                   e = Finder.subprogram_end();
-         i != e; ++i) {
-      DISubprogram S(*i);
+    for (DISubprogram S : Finder.subprograms()) {
       if (S.getFunction() == F) {
-        DEBUG(dbgs() << "Found DISubprogram " << *i << " for function "
+        DEBUG(dbgs() << "Found DISubprogram " << S << " for function "
                      << S.getFunction() << "\n");
-        return *i;
+        return S;
       }
     }
     DEBUG(dbgs() << "unable to find DISubprogram node for function "
@@ -504,7 +500,7 @@ bool DebugIR::updateExtension(StringRef NewExtension) {
   return true;
 }
 
-void DebugIR::generateFilename(OwningPtr<int> &fd) {
+void DebugIR::generateFilename(std::unique_ptr<int> &fd) {
   SmallVector<char, 16> PathVec;
   fd.reset(new int);
   sys::fs::createTemporaryFile("debug-ir", "ll", *fd, PathVec);
@@ -525,12 +521,12 @@ std::string DebugIR::getPath() {
 }
 
 void DebugIR::writeDebugBitcode(const Module *M, int *fd) {
-  OwningPtr<raw_fd_ostream> Out;
+  std::unique_ptr<raw_fd_ostream> Out;
   std::string error;
 
   if (!fd) {
     std::string Path = getPath();
-    Out.reset(new raw_fd_ostream(Path.c_str(), error));
+    Out.reset(new raw_fd_ostream(Path.c_str(), error, sys::fs::F_Text));
     DEBUG(dbgs() << "WRITING debug bitcode from Module " << M << " to file "
                  << Path << "\n");
   } else {
@@ -543,12 +539,12 @@ void DebugIR::writeDebugBitcode(const Module *M, int *fd) {
   Out->close();
 }
 
-void DebugIR::createDebugInfo(Module &M, OwningPtr<Module> &DisplayM) {
+void DebugIR::createDebugInfo(Module &M, std::unique_ptr<Module> &DisplayM) {
   if (M.getFunctionList().size() == 0)
     // no functions -- no debug info needed
     return;
 
-  OwningPtr<ValueToValueMapTy> VMap;
+  std::unique_ptr<ValueToValueMapTy> VMap;
 
   if (WriteSourceToDisk && (HideDebugIntrinsics || HideDebugMetadata)) {
     VMap.reset(new ValueToValueMapTy);
@@ -567,7 +563,7 @@ void DebugIR::createDebugInfo(Module &M, OwningPtr<Module> &DisplayM) {
 bool DebugIR::isMissingPath() { return Filename.empty() || Directory.empty(); }
 
 bool DebugIR::runOnModule(Module &M) {
-  OwningPtr<int> fd;
+  std::unique_ptr<int> fd;
 
   if (isMissingPath() && !getSourceInfo(M)) {
     if (!WriteSourceToDisk)
@@ -586,7 +582,7 @@ bool DebugIR::runOnModule(Module &M) {
   // file name from the DICompileUnit descriptor.
   DebugMetadataRemover::process(M, !ParsedPath);
 
-  OwningPtr<Module> DisplayM;
+  std::unique_ptr<Module> DisplayM;
   createDebugInfo(M, DisplayM);
   if (WriteSourceToDisk) {
     Module *OutputM = DisplayM.get() ? DisplayM.get() : &M;

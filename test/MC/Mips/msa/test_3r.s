@@ -1,6 +1,8 @@
-# RUN: llvm-mc %s -triple=mipsel-unknown-linux -show-encoding -mcpu=mips32r2 -mattr=+msa -arch=mips | FileCheck %s
+# RUN: llvm-mc %s -arch=mips -mcpu=mips32r2 -mattr=+msa -show-encoding | FileCheck %s
 #
-# RUN: llvm-mc %s -triple=mipsel-unknown-linux -mcpu=mips32r2 -mattr=+msa -arch=mips -filetype=obj -o - | llvm-objdump -d -triple=mipsel-unknown-linux -mattr=+msa -arch=mips - | FileCheck %s -check-prefix=CHECKOBJDUMP
+# RUN: llvm-mc %s -arch=mips -mcpu=mips32r2 -mattr=+msa -filetype=obj -o - | \
+# RUN: llvm-objdump -d -arch=mips -mattr=+msa - | \
+# RUN: FileCheck %s -check-prefix=CHECKOBJDUMP
 #
 # CHECK:        add_a.b         $w26, $w9, $w4                  # encoding: [0x78,0x04,0x4e,0x90]
 # CHECK:        add_a.h         $w23, $w27, $w31                # encoding: [0x78,0x3f,0xdd,0xd0]
@@ -192,14 +194,18 @@
 # CHECK:        pckod.h         $w26, $w5, $w8                  # encoding: [0x79,0xa8,0x2e,0x94]
 # CHECK:        pckod.w         $w9, $w4, $w2                   # encoding: [0x79,0xc2,0x22,0x54]
 # CHECK:        pckod.d         $w30, $w22, $w20                # encoding: [0x79,0xf4,0xb7,0x94]
-# CHECK:        sld.b           $w5, $w23, $w12                 # encoding: [0x78,0x0c,0xb9,0x54]
-# CHECK:        sld.h           $w1, $w23, $w3                  # encoding: [0x78,0x23,0xb8,0x54]
-# CHECK:        sld.w           $w20, $w8, $w9                  # encoding: [0x78,0x49,0x45,0x14]
-# CHECK:        sld.d           $w7, $w23, $w30                 # encoding: [0x78,0x7e,0xb9,0xd4]
+# CHECK:        sld.b           $w5, $w23[$12]                  # encoding: [0x78,0x0c,0xb9,0x54]
+# CHECK:        sld.h           $w1, $w23[$3]                   # encoding: [0x78,0x23,0xb8,0x54]
+# CHECK:        sld.w           $w20, $w8[$9]                   # encoding: [0x78,0x49,0x45,0x14]
+# CHECK:        sld.d           $w7, $w23[$fp]                  # encoding: [0x78,0x7e,0xb9,0xd4]
 # CHECK:        sll.b           $w3, $w0, $w17                  # encoding: [0x78,0x11,0x00,0xcd]
 # CHECK:        sll.h           $w17, $w27, $w3                 # encoding: [0x78,0x23,0xdc,0x4d]
 # CHECK:        sll.w           $w16, $w7, $w6                  # encoding: [0x78,0x46,0x3c,0x0d]
 # CHECK:        sll.d           $w9, $w0, $w26                  # encoding: [0x78,0x7a,0x02,0x4d]
+# CHECK:        splat.b         $w28, $w1[$1]                   # encoding: [0x78,0x81,0x0f,0x14]
+# CHECK:        splat.h         $w2, $w11[$11]                  # encoding: [0x78,0xab,0x58,0x94]
+# CHECK:        splat.w         $w22, $w0[$11]                  # encoding: [0x78,0xcb,0x05,0x94]
+# CHECK:        splat.d         $w0, $w0[$2]                    # encoding: [0x78,0xe2,0x00,0x14]
 # CHECK:        sra.b           $w28, $w4, $w17                 # encoding: [0x78,0x91,0x27,0x0d]
 # CHECK:        sra.h           $w13, $w9, $w3                  # encoding: [0x78,0xa3,0x4b,0x4d]
 # CHECK:        sra.w           $w27, $w21, $w19                # encoding: [0x78,0xd3,0xae,0xcd]
@@ -431,14 +437,18 @@
 # CHECKOBJDUMP:        pckod.h         $w26, $w5, $w8
 # CHECKOBJDUMP:        pckod.w         $w9, $w4, $w2
 # CHECKOBJDUMP:        pckod.d         $w30, $w22, $w20
-# CHECKOBJDUMP:        sld.b           $w5, $w23, $w12
-# CHECKOBJDUMP:        sld.h           $w1, $w23, $w3
-# CHECKOBJDUMP:        sld.w           $w20, $w8, $w9
-# CHECKOBJDUMP:        sld.d           $w7, $w23, $w30
+# CHECKOBJDUMP:        sld.b           $w5, $w23[$12]
+# CHECKOBJDUMP:        sld.h           $w1, $w23[$3]
+# CHECKOBJDUMP:        sld.w           $w20, $w8[$9]
+# CHECKOBJDUMP:        sld.d           $w7, $w23[$fp]
 # CHECKOBJDUMP:        sll.b           $w3, $w0, $w17
 # CHECKOBJDUMP:        sll.h           $w17, $w27, $w3
 # CHECKOBJDUMP:        sll.w           $w16, $w7, $w6
 # CHECKOBJDUMP:        sll.d           $w9, $w0, $w26
+# CHECKOBJDUMP:        splat.b         $w28, $w1[$1]
+# CHECKOBJDUMP:        splat.h         $w2, $w11[$11]
+# CHECKOBJDUMP:        splat.w         $w22, $w0[$11]
+# CHECKOBJDUMP:        splat.d         $w0, $w0[$2]
 # CHECKOBJDUMP:        sra.b           $w28, $w4, $w17
 # CHECKOBJDUMP:        sra.h           $w13, $w9, $w3
 # CHECKOBJDUMP:        sra.w           $w27, $w21, $w19
@@ -670,14 +680,18 @@
                 pckod.h         $w26, $w5, $w8
                 pckod.w         $w9, $w4, $w2
                 pckod.d         $w30, $w22, $w20
-                sld.b           $w5, $w23, $w12
-                sld.h           $w1, $w23, $w3
-                sld.w           $w20, $w8, $w9
-                sld.d           $w7, $w23, $w30
+                sld.b           $w5, $w23[$12]
+                sld.h           $w1, $w23[$3]
+                sld.w           $w20, $w8[$9]
+                sld.d           $w7, $w23[$30]
                 sll.b           $w3, $w0, $w17
                 sll.h           $w17, $w27, $w3
                 sll.w           $w16, $w7, $w6
                 sll.d           $w9, $w0, $w26
+                splat.b         $w28, $w1[$1]
+                splat.h         $w2, $w11[$11]
+                splat.w         $w22, $w0[$11]
+                splat.d         $w0, $w0[$2]
                 sra.b           $w28, $w4, $w17
                 sra.h           $w13, $w9, $w3
                 sra.w           $w27, $w21, $w19

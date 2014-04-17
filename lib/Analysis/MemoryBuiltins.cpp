@@ -261,8 +261,8 @@ PointerType *llvm::getMallocType(const CallInst *CI,
   unsigned NumOfBitCastUses = 0;
 
   // Determine if CallInst has a bitcast use.
-  for (Value::const_use_iterator UI = CI->use_begin(), E = CI->use_end();
-       UI != E; )
+  for (Value::const_user_iterator UI = CI->user_begin(), E = CI->user_end();
+       UI != E;)
     if (const BitCastInst *BCI = dyn_cast<BitCastInst>(*UI++)) {
       MallocType = cast<PointerType>(BCI->getDestTy());
       NumOfBitCastUses++;
@@ -399,12 +399,14 @@ ObjectSizeOffsetVisitor::ObjectSizeOffsetVisitor(const DataLayout *DL,
                                                  LLVMContext &Context,
                                                  bool RoundToAlign)
 : DL(DL), TLI(TLI), RoundToAlign(RoundToAlign) {
-  IntegerType *IntTy = DL->getIntPtrType(Context);
-  IntTyBits = IntTy->getBitWidth();
-  Zero = APInt::getNullValue(IntTyBits);
+  // Pointer size must be rechecked for each object visited since it could have
+  // a different address space.
 }
 
 SizeOffsetType ObjectSizeOffsetVisitor::compute(Value *V) {
+  IntTyBits = DL->getPointerTypeSizeInBits(V->getType());
+  Zero = APInt::getNullValue(IntTyBits);
+
   V = V->stripPointerCasts();
   if (Instruction *I = dyn_cast<Instruction>(V)) {
     // If we have already seen this instruction, bail out. Cycles can happen in
@@ -456,7 +458,7 @@ SizeOffsetType ObjectSizeOffsetVisitor::visitAllocaInst(AllocaInst &I) {
 
 SizeOffsetType ObjectSizeOffsetVisitor::visitArgument(Argument &A) {
   // no interprocedural analysis is done at the moment
-  if (!A.hasByValAttr()) {
+  if (!A.hasByValOrInAllocaAttr()) {
     ++ObjectVisitorArgument;
     return unknown();
   }
@@ -588,13 +590,19 @@ SizeOffsetType ObjectSizeOffsetVisitor::visitInstruction(Instruction &I) {
 
 ObjectSizeOffsetEvaluator::ObjectSizeOffsetEvaluator(const DataLayout *DL,
                                                      const TargetLibraryInfo *TLI,
-                                                     LLVMContext &Context)
-: DL(DL), TLI(TLI), Context(Context), Builder(Context, TargetFolder(DL)) {
-  IntTy = DL->getIntPtrType(Context);
-  Zero = ConstantInt::get(IntTy, 0);
+                                                     LLVMContext &Context,
+                                                     bool RoundToAlign)
+: DL(DL), TLI(TLI), Context(Context), Builder(Context, TargetFolder(DL)),
+  RoundToAlign(RoundToAlign) {
+  // IntTy and Zero must be set for each compute() since the address space may
+  // be different for later objects.
 }
 
 SizeOffsetEvalType ObjectSizeOffsetEvaluator::compute(Value *V) {
+  // XXX - Are vectors of pointers possible here?
+  IntTy = cast<IntegerType>(DL->getIntPtrType(V->getType()));
+  Zero = ConstantInt::get(IntTy, 0);
+
   SizeOffsetEvalType Result = compute_(V);
 
   if (!bothKnown(Result)) {
@@ -614,7 +622,7 @@ SizeOffsetEvalType ObjectSizeOffsetEvaluator::compute(Value *V) {
 }
 
 SizeOffsetEvalType ObjectSizeOffsetEvaluator::compute_(Value *V) {
-  ObjectSizeOffsetVisitor Visitor(DL, TLI, Context);
+  ObjectSizeOffsetVisitor Visitor(DL, TLI, Context, RoundToAlign);
   SizeOffsetType Const = Visitor.compute(V);
   if (Visitor.bothKnown(Const))
     return std::make_pair(ConstantInt::get(Context, Const.first),

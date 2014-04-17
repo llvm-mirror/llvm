@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "Disassembler.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -27,6 +26,7 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compression.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
@@ -51,6 +51,9 @@ static cl::opt<bool>
 ShowEncoding("show-encoding", cl::desc("Show instruction encodings"));
 
 static cl::opt<bool>
+CompressDebugSections("compress-debug-sections", cl::desc("Compress DWARF debug sections"));
+
+static cl::opt<bool>
 ShowInst("show-inst", cl::desc("Show internal instruction representation"));
 
 static cl::opt<bool>
@@ -63,9 +66,6 @@ OutputAsmVariant("output-asm-variant",
 
 static cl::opt<bool>
 RelaxAll("mc-relax-all", cl::desc("Relax all fixups"));
-
-static cl::opt<bool>
-DisableCFI("disable-cfi", cl::desc("Do not use .cfi_* directives"));
 
 static cl::opt<bool>
 NoExecStack("mc-no-exec-stack", cl::desc("File doesn't need an exec stack"));
@@ -211,7 +211,7 @@ static tool_output_file *GetOutputStream() {
 
   std::string Err;
   tool_output_file *Out =
-      new tool_output_file(OutputFilename.c_str(), Err, sys::fs::F_Binary);
+      new tool_output_file(OutputFilename.c_str(), Err, sys::fs::F_None);
   if (!Err.empty()) {
     errs() << Err << '\n';
     delete Out;
@@ -317,12 +317,12 @@ static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI, tool_output_file *Out) 
   return Error;
 }
 
-static int AssembleInput(const char *ProgName, const Target *TheTarget, 
+static int AssembleInput(const char *ProgName, const Target *TheTarget,
                          SourceMgr &SrcMgr, MCContext &Ctx, MCStreamer &Str,
                          MCAsmInfo &MAI, MCSubtargetInfo &STI, MCInstrInfo &MCII) {
-  OwningPtr<MCAsmParser> Parser(createMCAsmParser(SrcMgr, Ctx,
-                                                  Str, MAI));
-  OwningPtr<MCTargetAsmParser> TAP(TheTarget->createMCAsmParser(STI, *Parser, MCII));
+  std::unique_ptr<MCAsmParser> Parser(createMCAsmParser(SrcMgr, Ctx, Str, MAI));
+  std::unique_ptr<MCTargetAsmParser> TAP(
+      TheTarget->createMCAsmParser(STI, *Parser, MCII));
   if (!TAP) {
     errs() << ProgName
            << ": error: this target does not support assembly parsing.\n";
@@ -363,12 +363,12 @@ int main(int argc, char **argv) {
   if (!TheTarget)
     return 1;
 
-  OwningPtr<MemoryBuffer> BufferPtr;
+  std::unique_ptr<MemoryBuffer> BufferPtr;
   if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputFilename, BufferPtr)) {
     errs() << ProgName << ": " << ec.message() << '\n';
     return 1;
   }
-  MemoryBuffer *Buffer = BufferPtr.take();
+  MemoryBuffer *Buffer = BufferPtr.release();
 
   SourceMgr SrcMgr;
 
@@ -379,15 +379,23 @@ int main(int argc, char **argv) {
   // it later.
   SrcMgr.setIncludeDirs(IncludeDirs);
 
-  llvm::OwningPtr<MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TripleName));
+  std::unique_ptr<MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TripleName));
   assert(MRI && "Unable to create target register info!");
 
-  llvm::OwningPtr<MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, TripleName));
+  std::unique_ptr<MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, TripleName));
   assert(MAI && "Unable to create target asm info!");
+
+  if (CompressDebugSections) {
+    if (!zlib::isAvailable()) {
+      errs() << ProgName << ": build tools with zlib to enable -compress-debug-sections";
+      return 1;
+    }
+    MAI->setCompressDebugSections(true);
+  }
 
   // FIXME: This is not pretty. MCContext has a ptr to MCObjectFileInfo and
   // MCObjectFileInfo needs a MCContext reference in order to initialize itself.
-  OwningPtr<MCObjectFileInfo> MOFI(new MCObjectFileInfo());
+  std::unique_ptr<MCObjectFileInfo> MOFI(new MCObjectFileInfo());
   MCContext Ctx(MAI.get(), MRI.get(), MOFI.get(), &SrcMgr);
   MOFI->InitMCObjectFileInfo(TripleName, RelocModel, CMModel, Ctx);
 
@@ -413,16 +421,16 @@ int main(int argc, char **argv) {
     FeaturesStr = Features.getString();
   }
 
-  OwningPtr<tool_output_file> Out(GetOutputStream());
+  std::unique_ptr<tool_output_file> Out(GetOutputStream());
   if (!Out)
     return 1;
 
   formatted_raw_ostream FOS(Out->os());
-  OwningPtr<MCStreamer> Str;
+  std::unique_ptr<MCStreamer> Str;
 
-  OwningPtr<MCInstrInfo> MCII(TheTarget->createMCInstrInfo());
-  OwningPtr<MCSubtargetInfo>
-    STI(TheTarget->createMCSubtargetInfo(TripleName, MCPU, FeaturesStr));
+  std::unique_ptr<MCInstrInfo> MCII(TheTarget->createMCInstrInfo());
+  std::unique_ptr<MCSubtargetInfo> STI(
+      TheTarget->createMCSubtargetInfo(TripleName, MCPU, FeaturesStr));
 
   MCInstPrinter *IP = NULL;
   if (FileType == OFT_AssemblyFile) {
@@ -434,12 +442,10 @@ int main(int argc, char **argv) {
       CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, *STI, Ctx);
       MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, MCPU);
     }
-    bool UseCFI = !DisableCFI;
-    Str.reset(TheTarget->createAsmStreamer(Ctx, FOS, /*asmverbose*/true,
-                                           /*useLoc*/ true,
-                                           UseCFI,
-                                           /*useDwarfDirectory*/ true,
-                                           IP, CE, MAB, ShowInst));
+    Str.reset(TheTarget->createAsmStreamer(Ctx, FOS, /*asmverbose*/ true,
+                                           /*UseCFI*/ true,
+                                           /*useDwarfDirectory*/
+                                           true, IP, CE, MAB, ShowInst));
 
   } else if (FileType == OFT_Null) {
     Str.reset(createNullStreamer(Ctx));
@@ -448,7 +454,7 @@ int main(int argc, char **argv) {
     MCCodeEmitter *CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, *STI, Ctx);
     MCAsmBackend *MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, MCPU);
     Str.reset(TheTarget->createMCObjectStreamer(TripleName, Ctx, *MAB,
-                                                FOS, CE, RelaxAll,
+                                                FOS, CE, *STI, RelaxAll,
                                                 NoExecStack));
   }
 

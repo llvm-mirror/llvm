@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Linker.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm-c/Linker.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SetVector.h"
@@ -19,11 +19,13 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/TypeFinder.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <cctype>
 using namespace llvm;
+
 
 //===----------------------------------------------------------------------===//
 // TypeMap implementation.
@@ -85,7 +87,7 @@ public:
 private:
   Type *getImpl(Type *T);
   /// remapType - Implement the ValueMapTypeRemapper interface.
-  Type *remapType(Type *SrcTy) {
+  Type *remapType(Type *SrcTy) override {
     return get(SrcTy);
   }
   
@@ -370,7 +372,7 @@ namespace {
       LazilyLinkFunctions(LazilyLinkFunctions) {
     }
 
-    virtual Value *materializeValueFor(Value *V);
+    Value *materializeValueFor(Value *V) override;
   };
 
   /// ModuleLinker - This is an implementation class for the LinkModules
@@ -402,15 +404,18 @@ namespace {
     
     // Vector of functions to lazily link in.
     std::vector<Function*> LazilyLinkFunctions;
+
+    bool SuppressWarnings;
     
   public:
     std::string ErrorMsg;
-    
-    ModuleLinker(Module *dstM, TypeSet &Set, Module *srcM, unsigned mode)
-      : DstM(dstM), SrcM(srcM), TypeMap(Set),
-        ValMaterializer(TypeMap, DstM, LazilyLinkFunctions),
-        Mode(mode) { }
-    
+
+    ModuleLinker(Module *dstM, TypeSet &Set, Module *srcM, unsigned mode,
+                 bool SuppressWarnings=false)
+        : DstM(dstM), SrcM(srcM), TypeMap(Set),
+          ValMaterializer(TypeMap, DstM, LazilyLinkFunctions), Mode(mode),
+          SuppressWarnings(SuppressWarnings) {}
+
     bool run();
     
   private:
@@ -543,8 +548,8 @@ bool ModuleLinker::getLinkageResult(GlobalValue *Dest, const GlobalValue *Src,
   if (SrcIsDeclaration) {
     // If Src is external or if both Src & Dest are external..  Just link the
     // external globals, we aren't adding anything.
-    if (Src->hasDLLImportLinkage()) {
-      // If one of GVs has DLLImport linkage, result should be dllimport'ed.
+    if (Src->hasDLLImportStorageClass()) {
+      // If one of GVs is marked as DLLImport, result should be dllimport'ed.
       if (DestIsDeclaration) {
         LinkFromSrc = true;
         LT = Src->getLinkage();
@@ -557,7 +562,7 @@ bool ModuleLinker::getLinkageResult(GlobalValue *Dest, const GlobalValue *Src,
       LinkFromSrc = false;
       LT = Dest->getLinkage();
     }
-  } else if (DestIsDeclaration && !Dest->hasDLLImportLinkage()) {
+  } else if (DestIsDeclaration && !Dest->hasDLLImportStorageClass()) {
     // If Dest is external but Src is not:
     LinkFromSrc = true;
     LT = Src->getLinkage();
@@ -584,10 +589,8 @@ bool ModuleLinker::getLinkageResult(GlobalValue *Dest, const GlobalValue *Src,
       LT = GlobalValue::ExternalLinkage;
     }
   } else {
-    assert((Dest->hasExternalLinkage()  || Dest->hasDLLImportLinkage() ||
-            Dest->hasDLLExportLinkage() || Dest->hasExternalWeakLinkage()) &&
-           (Src->hasExternalLinkage()   || Src->hasDLLImportLinkage() ||
-            Src->hasDLLExportLinkage()  || Src->hasExternalWeakLinkage()) &&
+    assert((Dest->hasExternalLinkage()  || Dest->hasExternalWeakLinkage()) &&
+           (Src->hasExternalLinkage()   || Src->hasExternalWeakLinkage()) &&
            "Unexpected linkage type!");
     return emitError("Linking globals named '" + Src->getName() +
                  "': symbol multiply defined!");
@@ -1136,8 +1139,10 @@ bool ModuleLinker::linkModuleFlagsMetadata() {
     case Module::Warning: {
       // Emit a warning if the values differ.
       if (SrcOp->getOperand(2) != DstOp->getOperand(2)) {
-        errs() << "WARNING: linking module flags '" << ID->getString()
-               << "': IDs have conflicting values";
+        if (!SuppressWarnings) {
+          errs() << "WARNING: linking module flags '" << ID->getString()
+                 << "': IDs have conflicting values";
+        }
       }
       continue;
     }
@@ -1195,23 +1200,32 @@ bool ModuleLinker::run() {
 
   // Inherit the target data from the source module if the destination module
   // doesn't have one already.
-  if (DstM->getDataLayout().empty() && !SrcM->getDataLayout().empty())
+  if (!DstM->getDataLayout() && SrcM->getDataLayout())
     DstM->setDataLayout(SrcM->getDataLayout());
 
   // Copy the target triple from the source to dest if the dest's is empty.
   if (DstM->getTargetTriple().empty() && !SrcM->getTargetTriple().empty())
     DstM->setTargetTriple(SrcM->getTargetTriple());
 
-  if (!SrcM->getDataLayout().empty() && !DstM->getDataLayout().empty() &&
-      SrcM->getDataLayout() != DstM->getDataLayout())
-    errs() << "WARNING: Linking two modules of different data layouts!\n";
+  if (SrcM->getDataLayout() && DstM->getDataLayout() &&
+      *SrcM->getDataLayout() != *DstM->getDataLayout()) {
+    if (!SuppressWarnings) {
+      errs() << "WARNING: Linking two modules of different data layouts: '"
+             << SrcM->getModuleIdentifier() << "' is '"
+             << SrcM->getDataLayoutStr() << "' whereas '"
+             << DstM->getModuleIdentifier() << "' is '"
+             << DstM->getDataLayoutStr() << "'\n";
+    }
+  }
   if (!SrcM->getTargetTriple().empty() &&
       DstM->getTargetTriple() != SrcM->getTargetTriple()) {
-    errs() << "WARNING: Linking two modules of different target triples: ";
-    if (!SrcM->getModuleIdentifier().empty())
-      errs() << SrcM->getModuleIdentifier() << ": ";
-    errs() << "'" << SrcM->getTargetTriple() << "' and '" 
-           << DstM->getTargetTriple() << "'\n";
+    if (!SuppressWarnings) {
+      errs() << "WARNING: Linking two modules of different target triples: "
+             << SrcM->getModuleIdentifier() << "' is '"
+             << SrcM->getTargetTriple() << "' whereas '"
+             << DstM->getModuleIdentifier() << "' is '"
+             << DstM->getTargetTriple() << "'\n";
+    }
   }
 
   // Append the module inline asm string.
@@ -1251,10 +1265,6 @@ bool ModuleLinker::run() {
   for (unsigned i = 0, e = AppendingVars.size(); i != e; ++i)
     linkAppendingVarInit(AppendingVars[i]);
   
-  // Update the initializers in the DstM module now that all globals that may
-  // be referenced are in DstM.
-  linkGlobalInits();
-
   // Link in the function bodies that are defined in the source module into
   // DstM.
   for (Module::iterator SF = SrcM->begin(), E = SrcM->end(); SF != E; ++SF) {
@@ -1291,6 +1301,10 @@ bool ModuleLinker::run() {
   // Merge the module flags into the DstM module.
   if (linkModuleFlagsMetadata())
     return true;
+
+  // Update the initializers in the DstM module now that all globals that may
+  // be referenced are in DstM.
+  linkGlobalInits();
 
   // Process vector of lazily linked in functions.
   bool LinkedInAnyFunctions;
@@ -1343,7 +1357,8 @@ bool ModuleLinker::run() {
   return false;
 }
 
-Linker::Linker(Module *M) : Composite(M) {
+Linker::Linker(Module *M, bool SuppressWarnings)
+    : Composite(M), SuppressWarnings(SuppressWarnings) {
   TypeFinder StructTypes;
   StructTypes.run(*M, true);
   IdentifiedStructTypes.insert(StructTypes.begin(), StructTypes.end());
@@ -1352,8 +1367,14 @@ Linker::Linker(Module *M) : Composite(M) {
 Linker::~Linker() {
 }
 
+void Linker::deleteModule() {
+  delete Composite;
+  Composite = NULL;
+}
+
 bool Linker::linkInModule(Module *Src, unsigned Mode, std::string *ErrorMsg) {
-  ModuleLinker TheLinker(Composite, IdentifiedStructTypes, Src, Mode);
+  ModuleLinker TheLinker(Composite, IdentifiedStructTypes, Src, Mode,
+                         SuppressWarnings);
   if (TheLinker.run()) {
     if (ErrorMsg)
       *ErrorMsg = TheLinker.ErrorMsg;

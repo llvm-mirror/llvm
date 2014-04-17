@@ -1,18 +1,22 @@
-; RUN: llc -mtriple=x86_64-apple-darwin %s -filetype=obj -o %t
-; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
-; RUN: llc -mtriple=x86_64-apple-darwin -regalloc=basic %s -filetype=obj -o %t
-; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
+; RUN: llc -mtriple=x86_64-apple-darwin < %s -filetype=obj \
+; RUN:     | llvm-dwarfdump -debug-dump=info - | FileCheck --check-prefix=CHECK --check-prefix=DARWIN %s
+; RUN: llc -mtriple=x86_64-linux-gnu < %s -filetype=obj \
+; RUN:     | llvm-dwarfdump -debug-dump=info - | FileCheck --check-prefix=CHECK --check-prefix=LINUX %s
+; RUN: llc -mtriple=x86_64-apple-darwin < %s -filetype=obj -regalloc=basic \
+; RUN:     | llvm-dwarfdump -debug-dump=info - | FileCheck --check-prefix=CHECK --check-prefix=DARWIN %s
 
 ;CHECK: DW_TAG_inlined_subroutine
 ;CHECK-NEXT: DW_AT_abstract_origin
-;CHECK-NEXT: DW_AT_low_pc
-;CHECK-NEXT: DW_AT_high_pc
+;CHECK-NEXT: DW_AT_low_pc [DW_FORM_addr]
+;CHECK-NEXT: DW_AT_high_pc [DW_FORM_data4]
 ;CHECK-NEXT: DW_AT_call_file
 ;CHECK-NEXT: DW_AT_call_line
 
 ;CHECK: DW_TAG_formal_parameter
-;CHECK: DW_TAG_formal_parameter
-;CHECK-NEXT: DW_AT_name [DW_FORM_strp] ( .debug_str[0x00000055] = "sp")
+;FIXME: Linux shouldn't drop this parameter either...
+;LINUX-NOT: DW_TAG_formal_parameter
+;DARWIN: DW_TAG_formal_parameter
+;DARWIN-NEXT: DW_AT_name [DW_FORM_strp] ( .debug_str[0x00000055] = "sp")
 
 %struct.S1 = type { float*, i32 }
 
@@ -47,10 +51,11 @@ entry:
 declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!43}
 
 !0 = metadata !{i32 786478, metadata !1, metadata !1, metadata !"foo", metadata !"foo", metadata !"", i32 8, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (%struct.S1*, i32)* @foo, null, null, metadata !41, i32 8} ; [ DW_TAG_subprogram ] [line 8] [def] [foo]
 !1 = metadata !{i32 786473, metadata !42} ; [ DW_TAG_file_type ]
-!2 = metadata !{i32 786449, metadata !42, i32 12, metadata !"clang version 2.9 (trunk 125693)", i1 true, metadata !"", i32 0, metadata !8, metadata !8, metadata !39, metadata !40,  metadata !40, null} ; [ DW_TAG_compile_unit ]
+!2 = metadata !{i32 786449, metadata !42, i32 12, metadata !"clang version 2.9 (trunk 125693)", i1 true, metadata !"", i32 0, metadata !8, metadata !8, metadata !39, metadata !40,  metadata !44, null} ; [ DW_TAG_compile_unit ]
 !3 = metadata !{i32 786453, metadata !42, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !4 = metadata !{metadata !5}
 !5 = metadata !{i32 786468, null, metadata !2, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
@@ -87,3 +92,5 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !40 = metadata !{metadata !19}
 !41 = metadata !{metadata !9, metadata !18}
 !42 = metadata !{metadata !"nm2.c", metadata !"/private/tmp"}
+!43 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!44 = metadata !{}

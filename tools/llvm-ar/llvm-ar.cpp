@@ -322,7 +322,7 @@ static void doExtract(StringRef Name, object::Archive::child_iterator I) {
 
   int FD;
   failIfError(
-      sys::fs::openFileForWrite(Storage.c_str(), FD, sys::fs::F_Binary, Mode),
+      sys::fs::openFileForWrite(Storage.c_str(), FD, sys::fs::F_None, Mode),
       Storage.c_str());
 
   {
@@ -365,8 +365,8 @@ static bool shouldCreateArchive(ArchiveOperation Op) {
 
 static void performReadOperation(ArchiveOperation Operation,
                                  object::Archive *OldArchive) {
-  for (object::Archive::child_iterator I = OldArchive->begin_children(),
-                                       E = OldArchive->end_children();
+  for (object::Archive::child_iterator I = OldArchive->child_begin(),
+                                       E = OldArchive->child_end();
        I != E; ++I) {
     StringRef Name;
     failIfError(I->getName(Name));
@@ -395,17 +395,25 @@ namespace {
 class NewArchiveIterator {
   bool IsNewMember;
   StringRef Name;
+
   object::Archive::child_iterator OldI;
+
   std::string NewFilename;
+  mutable int NewFD;
+  mutable sys::fs::file_status NewStatus;
 
 public:
   NewArchiveIterator(object::Archive::child_iterator I, StringRef Name);
   NewArchiveIterator(std::string *I, StringRef Name);
   NewArchiveIterator();
   bool isNewMember() const;
-  object::Archive::child_iterator getOld() const;
-  const char *getNew() const;
   StringRef getName() const;
+
+  object::Archive::child_iterator getOld() const;
+
+  const char *getNew() const;
+  int getFD() const;
+  const sys::fs::file_status &getStatus() const;
 };
 }
 
@@ -416,7 +424,7 @@ NewArchiveIterator::NewArchiveIterator(object::Archive::child_iterator I,
     : IsNewMember(false), Name(Name), OldI(I) {}
 
 NewArchiveIterator::NewArchiveIterator(std::string *NewFilename, StringRef Name)
-    : IsNewMember(true), Name(Name), NewFilename(*NewFilename) {}
+    : IsNewMember(true), Name(Name), NewFilename(*NewFilename), NewFD(-1) {}
 
 StringRef NewArchiveIterator::getName() const { return Name; }
 
@@ -432,6 +440,31 @@ const char *NewArchiveIterator::getNew() const {
   return NewFilename.c_str();
 }
 
+int NewArchiveIterator::getFD() const {
+  assert(IsNewMember);
+  if (NewFD != -1)
+    return NewFD;
+  failIfError(sys::fs::openFileForRead(NewFilename, NewFD), NewFilename);
+  assert(NewFD != -1);
+
+  failIfError(sys::fs::status(NewFD, NewStatus), NewFilename);
+
+  // Opening a directory doesn't make sense. Let it fail.
+  // Linux cannot open directories with open(2), although
+  // cygwin and *bsd can.
+  if (NewStatus.type() == sys::fs::file_type::directory_file)
+    failIfError(error_code(errc::is_a_directory, posix_category()),
+                NewFilename);
+
+  return NewFD;
+}
+
+const sys::fs::file_status &NewArchiveIterator::getStatus() const {
+  assert(IsNewMember);
+  assert(NewFD != -1 && "Must call getFD first");
+  return NewStatus;
+}
+
 template <typename T>
 void addMember(std::vector<NewArchiveIterator> &Members, T I, StringRef Name,
                int Pos = -1) {
@@ -440,16 +473,6 @@ void addMember(std::vector<NewArchiveIterator> &Members, T I, StringRef Name,
     Members.push_back(NI);
   else
     Members[Pos] = NI;
-}
-
-namespace {
-class HasName {
-  StringRef Name;
-
-public:
-  HasName(StringRef Name) : Name(Name) {}
-  bool operator()(StringRef Path) { return Name == sys::path::filename(Path); }
-};
 }
 
 enum InsertAction {
@@ -467,8 +490,9 @@ computeInsertAction(ArchiveOperation Operation,
   if (Operation == QuickAppend || Members.empty())
     return IA_AddOldMember;
 
-  std::vector<std::string>::iterator MI =
-      std::find_if(Members.begin(), Members.end(), HasName(Name));
+  std::vector<std::string>::iterator MI = std::find_if(
+      Members.begin(), Members.end(),
+      [Name](StringRef Path) { return Name == sys::path::filename(Path); });
 
   if (MI == Members.end())
     return IA_AddOldMember;
@@ -516,8 +540,8 @@ computeNewArchiveMembers(ArchiveOperation Operation,
   int InsertPos = -1;
   StringRef PosName = sys::path::filename(RelPos);
   if (OldArchive) {
-    for (object::Archive::child_iterator I = OldArchive->begin_children(),
-                                         E = OldArchive->end_children();
+    for (object::Archive::child_iterator I = OldArchive->child_begin(),
+                                         E = OldArchive->child_end();
          I != E; ++I) {
       int Pos = Ret.size();
       StringRef Name;
@@ -578,14 +602,21 @@ computeNewArchiveMembers(ArchiveOperation Operation,
 }
 
 template <typename T>
-static void printWithSpacePadding(raw_ostream &OS, T Data, unsigned Size) {
+static void printWithSpacePadding(raw_fd_ostream &OS, T Data, unsigned Size,
+				  bool MayTruncate = false) {
   uint64_t OldPos = OS.tell();
   OS << Data;
   unsigned SizeSoFar = OS.tell() - OldPos;
-  assert(Size >= SizeSoFar && "Data doesn't fit in Size");
-  unsigned Remaining = Size - SizeSoFar;
-  for (unsigned I = 0; I < Remaining; ++I)
-    OS << ' ';
+  if (Size > SizeSoFar) {
+    unsigned Remaining = Size - SizeSoFar;
+    for (unsigned I = 0; I < Remaining; ++I)
+      OS << ' ';
+  } else if (Size < SizeSoFar) {
+    assert(MayTruncate && "Data doesn't fit in Size");
+    // Some of the data this is used for (like UID) can be larger than the
+    // space available in the archive format. Truncate in that case.
+    OS.seek(OldPos + Size);
+  }
 }
 
 static void print32BE(raw_fd_ostream &Out, unsigned Val) {
@@ -600,8 +631,8 @@ static void printRestOfMemberHeader(raw_fd_ostream &Out,
                                     unsigned GID, unsigned Perms,
                                     unsigned Size) {
   printWithSpacePadding(Out, ModTime.toEpochTime(), 12);
-  printWithSpacePadding(Out, UID, 6);
-  printWithSpacePadding(Out, GID, 6);
+  printWithSpacePadding(Out, UID, 6, true);
+  printWithSpacePadding(Out, GID, 6, true);
   printWithSpacePadding(Out, format("%o", Perms), 8);
   printWithSpacePadding(Out, Size, 10);
   Out << "`\n";
@@ -652,32 +683,26 @@ static void writeStringTable(raw_fd_ostream &Out,
 
 static void writeSymbolTable(
     raw_fd_ostream &Out, ArrayRef<NewArchiveIterator> Members,
+    ArrayRef<MemoryBuffer *> Buffers,
     std::vector<std::pair<unsigned, unsigned> > &MemberOffsetRefs) {
   unsigned StartOffset = 0;
   unsigned MemberNum = 0;
-  std::vector<StringRef> SymNames;
-  std::vector<object::ObjectFile *> DeleteIt;
+  std::string NameBuf;
+  raw_string_ostream NameOS(NameBuf);
+  unsigned NumSyms = 0;
+  std::vector<object::SymbolicFile *> DeleteIt;
+  LLVMContext &Context = getGlobalContext();
   for (ArrayRef<NewArchiveIterator>::iterator I = Members.begin(),
                                               E = Members.end();
        I != E; ++I, ++MemberNum) {
-    object::ObjectFile *Obj;
-    if (I->isNewMember()) {
-      const char *Filename = I->getNew();
-      Obj = object::ObjectFile::createObjectFile(Filename);
-    } else {
-      object::Archive::child_iterator OldMember = I->getOld();
-      OwningPtr<object::Binary> Binary;
-      error_code EC = OldMember->getAsBinary(Binary);
-      if (EC) { // FIXME: check only for "not an object file" errors.
-        Obj = NULL;
-      } else {
-        Obj = dyn_cast<object::ObjectFile>(Binary.get());
-        if (Obj)
-          Binary.take();
-      }
-    }
-    if (!Obj)
-      continue;
+    MemoryBuffer *MemberBuffer = Buffers[MemberNum];
+    ErrorOr<object::SymbolicFile *> ObjOrErr =
+        object::SymbolicFile::createSymbolicFile(
+            MemberBuffer, false, sys::fs::file_magic::unknown, &Context);
+    if (!ObjOrErr)
+      continue;  // FIXME: check only for "not an object file" errors.
+    object::SymbolicFile *Obj = ObjOrErr.get();
+
     DeleteIt.push_back(Obj);
     if (!StartOffset) {
       printMemberHeader(Out, "", sys::TimeValue::now(), 0, 0, 0, 0);
@@ -685,36 +710,29 @@ static void writeSymbolTable(
       print32BE(Out, 0);
     }
 
-    error_code Err;
-    for (object::symbol_iterator I = Obj->begin_symbols(),
-                                 E = Obj->end_symbols();
-         I != E; I.increment(Err), failIfError(Err)) {
-      uint32_t Symflags;
-      failIfError(I->getFlags(Symflags));
+    for (object::basic_symbol_iterator I = Obj->symbol_begin(),
+                                       E = Obj->symbol_end();
+         I != E; ++I) {
+      uint32_t Symflags = I->getFlags();
       if (Symflags & object::SymbolRef::SF_FormatSpecific)
         continue;
       if (!(Symflags & object::SymbolRef::SF_Global))
         continue;
       if (Symflags & object::SymbolRef::SF_Undefined)
         continue;
-      StringRef Name;
-      failIfError(I->getName(Name));
-      SymNames.push_back(Name);
+      failIfError(I->printName(NameOS));
+      NameOS << '\0';
+      ++NumSyms;
       MemberOffsetRefs.push_back(std::make_pair(Out.tell(), MemberNum));
       print32BE(Out, 0);
     }
   }
-  for (std::vector<StringRef>::iterator I = SymNames.begin(),
-                                        E = SymNames.end();
-       I != E; ++I) {
-    Out << *I;
-    Out << '\0';
-  }
+  Out << NameOS.str();
 
-  for (std::vector<object::ObjectFile *>::iterator I = DeleteIt.begin(),
-                                                   E = DeleteIt.end();
+  for (std::vector<object::SymbolicFile *>::iterator I = DeleteIt.begin(),
+                                                     E = DeleteIt.end();
        I != E; ++I) {
-    object::ObjectFile *O = *I;
+    object::SymbolicFile *O = *I;
     delete O;
   }
 
@@ -728,7 +746,7 @@ static void writeSymbolTable(
   Out.seek(StartOffset - 12);
   printWithSpacePadding(Out, Pos - StartOffset, 10);
   Out.seek(StartOffset);
-  print32BE(Out, SymNames.size());
+  print32BE(Out, NumSyms);
   Out.seek(Pos);
 }
 
@@ -748,8 +766,30 @@ static void performWriteOperation(ArchiveOperation Operation,
 
   std::vector<std::pair<unsigned, unsigned> > MemberOffsetRefs;
 
+  std::vector<MemoryBuffer *> MemberBuffers;
+  MemberBuffers.resize(NewMembers.size());
+
+  for (unsigned I = 0, N = NewMembers.size(); I < N; ++I) {
+    std::unique_ptr<MemoryBuffer> MemberBuffer;
+    NewArchiveIterator &Member = NewMembers[I];
+
+    if (Member.isNewMember()) {
+      const char *Filename = Member.getNew();
+      int FD = Member.getFD();
+      const sys::fs::file_status &Status = Member.getStatus();
+      failIfError(MemoryBuffer::getOpenFile(FD, Filename, MemberBuffer,
+                                            Status.getSize(), false),
+                  Filename);
+
+    } else {
+      object::Archive::child_iterator OldMember = Member.getOld();
+      failIfError(OldMember->getMemoryBuffer(MemberBuffer));
+    }
+    MemberBuffers[I] = MemberBuffer.release();
+  }
+
   if (Symtab) {
-    writeSymbolTable(Out, NewMembers, MemberOffsetRefs);
+    writeSymbolTable(Out, NewMembers, MemberBuffers, MemberOffsetRefs);
   }
 
   std::vector<unsigned> StringMapIndexes;
@@ -773,19 +813,10 @@ static void performWriteOperation(ArchiveOperation Operation,
     }
     Out.seek(Pos);
 
+    const MemoryBuffer *File = MemberBuffers[MemberNum];
     if (I->isNewMember()) {
       const char *FileName = I->getNew();
-
-      int FD;
-      failIfError(sys::fs::openFileForRead(FileName, FD), FileName);
-
-      sys::fs::file_status Status;
-      failIfError(sys::fs::status(FD, Status), FileName);
-
-      OwningPtr<MemoryBuffer> File;
-      failIfError(MemoryBuffer::getOpenFile(FD, FileName, File,
-                                            Status.getSize(), false),
-                  FileName);
+      const sys::fs::file_status &Status = I->getStatus();
 
       StringRef Name = sys::path::filename(FileName);
       if (Name.size() < 16)
@@ -797,7 +828,6 @@ static void performWriteOperation(ArchiveOperation Operation,
                           Status.getLastModificationTime(), Status.getUser(),
                           Status.getGroup(), Status.permissions(),
                           Status.getSize());
-      Out << File->getBuffer();
     } else {
       object::Archive::child_iterator OldMember = I->getOld();
       StringRef Name = I->getName();
@@ -811,12 +841,18 @@ static void performWriteOperation(ArchiveOperation Operation,
                           OldMember->getLastModified(), OldMember->getUID(),
                           OldMember->getGID(), OldMember->getAccessMode(),
                           OldMember->getSize());
-      Out << OldMember->getBuffer();
     }
+
+    Out << File->getBuffer();
 
     if (Out.tell() % 2)
       Out << '\n';
   }
+
+  for (unsigned I = 0, N = MemberBuffers.size(); I < N; ++I) {
+    delete MemberBuffers[I];
+  }
+
   Output.keep();
   Out.close();
   sys::fs::rename(TemporaryOutput, ArchiveName);
@@ -877,9 +913,9 @@ int main(int argc, char **argv) {
   );
 
   StringRef Stem = sys::path::stem(ToolName);
-  if (Stem.endswith("ar"))
+  if (Stem.find("ar") != StringRef::npos)
     return ar_main(argv);
-  if (Stem.endswith("ranlib"))
+  if (Stem.find("ranlib") != StringRef::npos)
     return ranlib_main();
   fail("Not ranlib or ar!");
 }
@@ -902,7 +938,7 @@ int ar_main(char **argv) {
 
 static int performOperation(ArchiveOperation Operation) {
   // Create or open the archive object.
-  OwningPtr<MemoryBuffer> Buf;
+  std::unique_ptr<MemoryBuffer> Buf;
   error_code EC = MemoryBuffer::getFile(ArchiveName, Buf, -1, false);
   if (EC && EC != llvm::errc::no_such_file_or_directory) {
     errs() << ToolName << ": error opening '" << ArchiveName
@@ -911,7 +947,7 @@ static int performOperation(ArchiveOperation Operation) {
   }
 
   if (!EC) {
-    object::Archive Archive(Buf.take(), EC);
+    object::Archive Archive(Buf.release(), EC);
 
     if (EC) {
       errs() << ToolName << ": error loading '" << ArchiveName

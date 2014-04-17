@@ -17,7 +17,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Analysis/ConstantFolding.h"
-#include "llvm/Assembly/Writer.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -26,8 +25,8 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -57,9 +56,9 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   if (TM.getRegisterInfo())
     RegInfo = new (Allocator) MachineRegisterInfo(TM);
   else
-    RegInfo = 0;
+    RegInfo = nullptr;
 
-  MFInfo = 0;
+  MFInfo = nullptr;
   FrameInfo =
     new (Allocator) MachineFrameInfo(TM,!F->hasFnAttribute("no-realign-stack"));
 
@@ -78,7 +77,7 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                          TM.getTargetLowering()->getPrefFunctionAlignment());
 
   FunctionNumber = FunctionNum;
-  JumpTableInfo = 0;
+  JumpTableInfo = nullptr;
 }
 
 MachineFunction::~MachineFunction() {
@@ -124,6 +123,11 @@ getOrCreateJumpTableInfo(unsigned EntryKind) {
   return JumpTableInfo;
 }
 
+/// Should we be emitting segmented stack stuff for the function
+bool MachineFunction::shouldSplitStack() {
+  return getFunction()->hasFnAttribute("split-stack");
+}
+
 /// RenumberBlocks - This discards all of the MachineBasicBlock numbers and
 /// recomputes them.  This guarantees that the MBB numbers are sequential,
 /// dense, and match the ordering of the blocks within the function.  If a
@@ -132,7 +136,7 @@ getOrCreateJumpTableInfo(unsigned EntryKind) {
 void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
   if (empty()) { MBBNumbering.clear(); return; }
   MachineFunction::iterator MBBI, E = end();
-  if (MBB == 0)
+  if (MBB == nullptr)
     MBBI = begin();
   else
     MBBI = MBB;
@@ -140,7 +144,7 @@ void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
   // Figure out the block number this should have.
   unsigned BlockNo = 0;
   if (MBBI != begin())
-    BlockNo = prior(MBBI)->getNumber()+1;
+    BlockNo = std::prev(MBBI)->getNumber() + 1;
 
   for (; MBBI != E; ++MBBI, ++BlockNo) {
     if (MBBI->getNumber() != (int)BlockNo) {
@@ -148,7 +152,7 @@ void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
       if (MBBI->getNumber() != -1) {
         assert(MBBNumbering[MBBI->getNumber()] == &*MBBI &&
                "MBB number mismatch!");
-        MBBNumbering[MBBI->getNumber()] = 0;
+        MBBNumbering[MBBI->getNumber()] = nullptr;
       }
 
       // If BlockNo is already taken, set that block's number to -1.
@@ -236,7 +240,7 @@ MachineFunction::getMachineMemOperand(const MachineMemOperand *MMO,
              MachineMemOperand(MachinePointerInfo(MMO->getValue(),
                                                   MMO->getOffset()+Offset),
                                MMO->getFlags(), Size,
-                               MMO->getBaseAlignment(), 0);
+                               MMO->getBaseAlignment(), nullptr);
 }
 
 MachineInstr::mmo_iterator
@@ -347,7 +351,7 @@ void MachineFunction::print(raw_ostream &OS, SlotIndexes *Indexes) const {
       OS << PrintReg(I->first, TRI);
       if (I->second)
         OS << " in " << PrintReg(I->second, TRI);
-      if (llvm::next(I) != E)
+      if (std::next(I) != E)
         OS << ", ";
     }
     OS << '\n';
@@ -425,7 +429,16 @@ unsigned MachineFunction::addLiveIn(unsigned PReg,
   MachineRegisterInfo &MRI = getRegInfo();
   unsigned VReg = MRI.getLiveInVirtReg(PReg);
   if (VReg) {
-    assert(MRI.getRegClass(VReg) == RC && "Register class mismatch!");
+    const TargetRegisterClass *VRegRC = MRI.getRegClass(VReg);
+    (void)VRegRC;
+    // A physical register can be added several times.
+    // Between two calls, the register class of the related virtual register
+    // may have been constrained to match some operation constraints.
+    // In that case, check that the current register class includes the
+    // physical register and is a sub class of the specified RC.
+    assert((VRegRC == RC || (VRegRC->contains(PReg) &&
+                             RC->hasSubClassEq(VRegRC))) &&
+            "Register class mismatch!");
     return VReg;
   }
   VReg = MRI.createVirtualRegister(RC);
@@ -438,12 +451,12 @@ unsigned MachineFunction::addLiveIn(unsigned PReg,
 /// normal 'L' label is returned.
 MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx, 
                                         bool isLinkerPrivate) const {
+  const DataLayout *DL = getTarget().getDataLayout();
   assert(JumpTableInfo && "No jump tables");
   assert(JTI < JumpTableInfo->getJumpTables().size() && "Invalid JTI!");
-  const MCAsmInfo &MAI = *getTarget().getMCAsmInfo();
 
-  const char *Prefix = isLinkerPrivate ? MAI.getLinkerPrivateGlobalPrefix() :
-                                         MAI.getPrivateGlobalPrefix();
+  const char *Prefix = isLinkerPrivate ? DL->getLinkerPrivateGlobalPrefix() :
+                                         DL->getPrivateGlobalPrefix();
   SmallString<60> Name;
   raw_svector_ostream(Name)
     << Prefix << "JTI" << getFunctionNumber() << '_' << JTI;
@@ -453,8 +466,8 @@ MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx,
 /// getPICBaseSymbol - Return a function-local symbol to represent the PIC
 /// base.
 MCSymbol *MachineFunction::getPICBaseSymbol() const {
-  const MCAsmInfo &MAI = *Target.getMCAsmInfo();
-  return Ctx.GetOrCreateSymbol(Twine(MAI.getPrivateGlobalPrefix())+
+  const DataLayout *DL = getTarget().getDataLayout();
+  return Ctx.GetOrCreateSymbol(Twine(DL->getPrivateGlobalPrefix())+
                                Twine(getFunctionNumber())+"$pb");
 }
 
@@ -490,14 +503,13 @@ static inline unsigned clampStackAlignment(bool ShouldClamp, unsigned Align,
 /// a nonnegative identifier to represent it.
 ///
 int MachineFrameInfo::CreateStackObject(uint64_t Size, unsigned Alignment,
-                      bool isSS, bool MayNeedSP, const AllocaInst *Alloca) {
+                      bool isSS, const AllocaInst *Alloca) {
   assert(Size != 0 && "Cannot allocate zero size stack objects!");
   Alignment =
     clampStackAlignment(!getFrameLowering()->isStackRealignable() ||
                           !RealignOption,
                         Alignment, getFrameLowering()->getStackAlignment());
-  Objects.push_back(StackObject(Size, Alignment, 0, false, isSS, MayNeedSP,
-                                Alloca));
+  Objects.push_back(StackObject(Size, Alignment, 0, false, isSS, Alloca));
   int Index = (int)Objects.size() - NumFixedObjects - 1;
   assert(Index >= 0 && "Bad frame index!");
   ensureMaxAlignment(Alignment);
@@ -514,7 +526,7 @@ int MachineFrameInfo::CreateSpillStackObject(uint64_t Size,
     clampStackAlignment(!getFrameLowering()->isStackRealignable() ||
                           !RealignOption,
                         Alignment, getFrameLowering()->getStackAlignment()); 
-  CreateStackObject(Size, Alignment, true, false);
+  CreateStackObject(Size, Alignment, true);
   int Index = (int)Objects.size() - NumFixedObjects - 1;
   ensureMaxAlignment(Alignment);
   return Index;
@@ -525,13 +537,14 @@ int MachineFrameInfo::CreateSpillStackObject(uint64_t Size,
 /// variable sized object is created, whether or not the index returned is
 /// actually used.
 ///
-int MachineFrameInfo::CreateVariableSizedObject(unsigned Alignment) {
+int MachineFrameInfo::CreateVariableSizedObject(unsigned Alignment,
+                                                const AllocaInst *Alloca) {
   HasVarSizedObjects = true;
   Alignment =
     clampStackAlignment(!getFrameLowering()->isStackRealignable() ||
                           !RealignOption,
                         Alignment, getFrameLowering()->getStackAlignment()); 
-  Objects.push_back(StackObject(0, Alignment, 0, false, false, true, 0));
+  Objects.push_back(StackObject(0, Alignment, 0, false, false, Alloca));
   ensureMaxAlignment(Alignment);
   return (int)Objects.size()-NumFixedObjects-1;
 }
@@ -556,8 +569,7 @@ int MachineFrameInfo::CreateFixedObject(uint64_t Size, int64_t SPOffset,
                         Align, getFrameLowering()->getStackAlignment()); 
   Objects.insert(Objects.begin(), StackObject(Size, Align, SPOffset, Immutable,
                                               /*isSS*/   false,
-                                              /*NeedSP*/ false,
-                                              /*Alloca*/ 0));
+                                              /*Alloca*/ nullptr));
   return -++NumFixedObjects;
 }
 
@@ -576,7 +588,7 @@ MachineFrameInfo::getPristineRegs(const MachineBasicBlock *MBB) const {
   if (!isCalleeSavedInfoValid())
     return BV;
 
-  for (const uint16_t *CSR = TRI->getCalleeSavedRegs(MF); CSR && *CSR; ++CSR)
+  for (const MCPhysReg *CSR = TRI->getCalleeSavedRegs(MF); CSR && *CSR; ++CSR)
     BV.set(*CSR);
 
   // The entry MBB always has all CSRs pristine.
@@ -910,7 +922,7 @@ void MachineConstantPool::print(raw_ostream &OS) const {
     if (Constants[i].isMachineConstantPoolEntry())
       Constants[i].Val.MachineCPVal->print(OS);
     else
-      WriteAsOperand(OS, Constants[i].Val.ConstVal, /*PrintType=*/false);
+      Constants[i].Val.ConstVal->printAsOperand(OS, /*PrintType=*/false);
     OS << ", align=" << Constants[i].getAlignment();
     OS << "\n";
   }

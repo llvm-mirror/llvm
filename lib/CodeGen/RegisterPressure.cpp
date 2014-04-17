@@ -154,8 +154,8 @@ const LiveRange *RegPressureTracker::getLiveRange(unsigned Reg) const {
 }
 
 void RegPressureTracker::reset() {
-  MBB = 0;
-  LIS = 0;
+  MBB = nullptr;
+  LIS = nullptr;
 
   CurrSetPressure.clear();
   LiveThruPressure.clear();
@@ -498,10 +498,26 @@ bool RegPressureTracker::recede(SmallVectorImpl<unsigned> *LiveUses,
   // TODO: consider earlyclobbers?
   for (unsigned i = 0, e = RegOpers.Defs.size(); i < e; ++i) {
     unsigned Reg = RegOpers.Defs[i];
-    if (LiveRegs.erase(Reg))
-      decreaseRegPressure(Reg);
-    else
-      discoverLiveOut(Reg);
+    bool DeadDef = false;
+    if (RequireIntervals) {
+      const LiveRange *LR = getLiveRange(Reg);
+      if (LR) {
+        LiveQueryResult LRQ = LR->Query(SlotIdx);
+        DeadDef = LRQ.isDeadDef();
+      }
+    }
+    if (DeadDef) {
+      // LiveIntervals knows this is a dead even though it's MachineOperand is
+      // not flagged as such. Since this register will not be recorded as
+      // live-out, increase its PDiff value to avoid underflowing pressure.
+      if (PDiff)
+        PDiff->addPressureChange(Reg, false, MRI);
+    } else {
+      if (LiveRegs.erase(Reg))
+        decreaseRegPressure(Reg);
+      else
+        discoverLiveOut(Reg);
+    }
   }
 
   // Generate liveness for uses.
@@ -702,8 +718,19 @@ void RegPressureTracker::bumpUpwardPressure(const MachineInstr *MI) {
   // Kill liveness at live defs.
   for (unsigned i = 0, e = RegOpers.Defs.size(); i < e; ++i) {
     unsigned Reg = RegOpers.Defs[i];
-    if (!containsReg(RegOpers.Uses, Reg))
-      decreaseRegPressure(Reg);
+    bool DeadDef = false;
+    if (RequireIntervals) {
+      const LiveRange *LR = getLiveRange(Reg);
+      if (LR) {
+        SlotIndex SlotIdx = LIS->getInstructionIndex(MI);
+        LiveQueryResult LRQ = LR->Query(SlotIdx);
+        DeadDef = LRQ.isDeadDef();
+      }
+    }
+    if (!DeadDef) {
+      if (!containsReg(RegOpers.Uses, Reg))
+        decreaseRegPressure(Reg);
+    }
   }
   // Generate liveness for uses.
   for (unsigned i = 0, e = RegOpers.Uses.size(); i < e; ++i) {
@@ -855,9 +882,9 @@ static bool findUseBetween(unsigned Reg,
                            SlotIndex PriorUseIdx, SlotIndex NextUseIdx,
                            const MachineRegisterInfo *MRI,
                            const LiveIntervals *LIS) {
-  for (MachineRegisterInfo::use_nodbg_iterator
-         UI = MRI->use_nodbg_begin(Reg), UE = MRI->use_nodbg_end();
-         UI != UE; UI.skipInstruction()) {
+  for (MachineRegisterInfo::use_instr_nodbg_iterator
+       UI = MRI->use_instr_nodbg_begin(Reg),
+       UE = MRI->use_instr_nodbg_end(); UI != UE; ++UI) {
       const MachineInstr* MI = &*UI;
       if (MI->isDebugValue())
         continue;

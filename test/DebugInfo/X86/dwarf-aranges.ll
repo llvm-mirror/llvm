@@ -1,4 +1,4 @@
-; RUN: llc < %s | FileCheck %s
+; RUN: llc -generate-arange-section < %s | FileCheck %s
 
 
 ; -- header --
@@ -7,10 +7,7 @@
 ; CHECK-NEXT: .byte 8 # Address Size (in bytes)
 ; CHECK-NEXT: .byte 0 # Segment Size (in bytes)
 ; -- alignment --
-; CHECK-NEXT: .byte
-; CHECK-NEXT: .byte
-; CHECK-NEXT: .byte
-; CHECK-NEXT: .byte
+; CHECK-NEXT: .zero 4,255
 
 ; <common symbols> - it should have made one span for each symbol.
 ; CHECK-NEXT: .quad some_bss
@@ -18,18 +15,18 @@
 
 ; <data section> - it should have made one span covering all vars in this CU.
 ; CHECK-NEXT: .quad some_data
-; CHECK-NEXT: .Lset0 = .Ldebug_end1-some_data
-; CHECK-NEXT: .quad .Lset0
+; CHECK-NEXT: [[R1:\.[A-Za-z0-9]*]] = .Ldebug_end1-some_data
+; CHECK-NEXT: .quad [[R1]]
 
 ; <text section> - it should have made one span covering all functions in this CU.
 ; CHECK-NEXT: .quad .Lfunc_begin0
-; CHECK-NEXT: .Lset1 = .Ldebug_end2-.Lfunc_begin0
-; CHECK-NEXT: .quad .Lset1
+; CHECK-NEXT: [[R2:\.[A-Za-z0-9]*]] = .Ldebug_end2-.Lfunc_begin0
+; CHECK-NEXT: .quad [[R2]]
 
 ; <other sections> - it should have made one span covering all vars in this CU.
 ; CHECK-NEXT: .quad some_other
-; CHECK-NEXT: .Lset2 = .Ldebug_end3-some_other
-; CHECK-NEXT: .quad .Lset2
+; CHECK-NEXT: [[R3:\.[A-Za-z0-9]*]] = .Ldebug_end3-some_other
+; CHECK-NEXT: .quad [[R3]]
 
 ; -- finish --
 ; CHECK-NEXT: # ARange terminator
@@ -66,11 +63,11 @@ entry:
 }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!13}
+!llvm.module.flags = !{!13, !16}
 
 !0 = metadata !{i32 786449, metadata !1, i32 12, metadata !"clang version 3.4 ", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !8, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/home/kayamon/test.c] [DW_LANG_C99]
 !1 = metadata !{metadata !"test.c", metadata !"/home/kayamon"}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786478, metadata !1, metadata !5, metadata !"some_code", metadata !"some_code", metadata !"", i32 5, metadata !6, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, void ()* @some_code, null, null, metadata !2, i32 6} ; [ DW_TAG_subprogram ] [line 5] [def] [scope 6] [some_code]
 !5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/home/kayamon/test.c]
@@ -84,3 +81,4 @@ entry:
 !13 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
 !14 = metadata !{i32 7, i32 0, metadata !4, null}
 !15 = metadata !{i32 8, i32 0, metadata !4, null} ; [ DW_TAG_imported_declaration ]
+!16 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

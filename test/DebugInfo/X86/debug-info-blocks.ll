@@ -5,13 +5,15 @@
 ; rdar://problem/9279956
 ; test that the DW_AT_location of self is at ( fbreg +{{[0-9]+}}, deref, +{{[0-9]+}} )
 
+; CHECK: DW_TAG_subprogram
 ; CHECK: DW_AT_name{{.*}}_block_invoke
+
 ; CHECK-NOT: DW_TAG_subprogram
 ; CHECK: DW_TAG_formal_parameter
-; CHECK-NOT: DW_TAG
-; CHECK: .block_descriptor
+; CHECK-NEXT: DW_AT_name{{.*}}.block_descriptor
 ; CHECK-NOT: DW_TAG
 ; CHECK: DW_AT_location
+
 ; CHECK-NOT: DW_TAG_subprogram
 ; CHECK: DW_TAG_variable
 ; CHECK-NEXT: DW_AT_name{{.*}}"self"
@@ -24,7 +26,7 @@
 ; 0x23 = DW_OP_uconst
 ; 0x91 = DW_OP_fbreg
 ; CHECK: DW_AT_location{{.*}}91 {{[0-9]+}} 06 23 {{[0-9]+}} )
-; CHECK: DW_TAG_structure_type
+
 ; CHECK: [[A:.*]]:   DW_TAG_structure_type
 ; CHECK-NEXT: DW_AT_APPLE_objc_complete_type
 ; CHECK-NEXT: DW_AT_name{{.*}}"A"
@@ -258,11 +260,11 @@ attributes #2 = { nonlazybind }
 attributes #3 = { nounwind }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!56, !57, !58, !59}
+!llvm.module.flags = !{!56, !57, !58, !59, !110}
 
 !0 = metadata !{i32 786449, metadata !1, i32 16, metadata !"clang version 3.3 ", i1 false, metadata !"", i32 2, metadata !2, metadata !3, metadata !12, metadata !2,  metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [llvm/tools/clang/test/CodeGenObjC/<unknown>] [DW_LANG_ObjC]
 !1 = metadata !{metadata !"llvm/tools/clang/test/CodeGenObjC/<unknown>", metadata !"llvm/_build.ninja.Debug"}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786451, metadata !5, metadata !6, metadata !"A", i32 33, i64 32, i64 32, i32 0, i32 512, null, metadata !7, i32 16, null, null, null} ; [ DW_TAG_structure_type ] [A] [line 33, size 32, align 32, offset 0] [def] [from ]
 !5 = metadata !{metadata !"llvm/tools/clang/test/CodeGenObjC/debug-info-blocks.m", metadata !"llvm/_build.ninja.Debug"}
@@ -370,3 +372,4 @@ attributes #3 = { nounwind }
 !107 = metadata !{i32 786688, metadata !36, metadata !"a", metadata !6, i32 61, metadata !61, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [a] [line 61]
 !108 = metadata !{i32 61, i32 0, metadata !36, null}
 !109 = metadata !{i32 62, i32 0, metadata !36, null}
+!110 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

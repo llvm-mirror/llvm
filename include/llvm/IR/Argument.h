@@ -44,7 +44,7 @@ public:
   ///
   /// If \p F is specified, the argument is inserted at the end of the argument
   /// list for \p F.
-  explicit Argument(Type *Ty, const Twine &Name = "", Function *F = 0);
+  explicit Argument(Type *Ty, const Twine &Name = "", Function *F = nullptr);
 
   inline const Function *getParent() const { return Parent; }
   inline       Function *getParent()       { return Parent; }
@@ -59,7 +59,12 @@ public:
   /// containing function.
   bool hasByValAttr() const;
 
-  /// \brief If this is a byval argument, return its alignment.
+  /// \brief Return true if this argument has the byval attribute or inalloca
+  /// attribute on it in its containing function.  These attributes both
+  /// represent arguments being passed by value.
+  bool hasByValOrInAllocaAttr() const;
+
+  /// \brief If this is a byval or inalloca argument, return its alignment.
   unsigned getParamAlignment() const;
 
   /// \brief Return true if this argument has the nest attribute on it in its
@@ -86,6 +91,9 @@ public:
   /// on it in its containing function.
   bool onlyReadsMemory() const;
 
+  /// \brief Return true if this argument has the inalloca attribute on it in
+  /// its containing function.
+  bool hasInAllocaAttr() const;
 
   /// \brief Add a Attribute to an argument.
   void addAttr(AttributeSet AS);

@@ -19,16 +19,35 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/Pass.h"
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
-class DominatorTree;
 class Function;
 class Module;
 class PHINode;
 
 class StackProtector : public FunctionPass {
+public:
+  /// SSPLayoutKind.  Stack Smashing Protection (SSP) rules require that
+  /// vulnerable stack allocations are located close the stack protector.
+  enum SSPLayoutKind {
+    SSPLK_None,       ///< Did not trigger a stack protector.  No effect on data
+                      ///< layout.
+    SSPLK_LargeArray, ///< Array or nested array >= SSP-buffer-size.  Closest
+                      ///< to the stack protector.
+    SSPLK_SmallArray, ///< Array or nested array < SSP-buffer-size. 2nd closest
+                      ///< to the stack protector.
+    SSPLK_AddrOf      ///< The address of this allocation is exposed and
+                      ///< triggered protection.  3rd closest to the protector.
+  };
+
+  /// A mapping of AllocaInsts to their required SSP layout.
+  typedef ValueMap<const AllocaInst *, SSPLayoutKind> SSPLayoutMap;
+
+private:
   const TargetMachine *TM;
 
   /// TLI - Keep a pointer of a TargetLowering to consult for determining
@@ -41,6 +60,11 @@ class StackProtector : public FunctionPass {
 
   DominatorTree *DT;
 
+  /// Layout - Mapping of allocations to the required SSPLayoutKind.
+  /// StackProtector analysis will update this map when determining if an
+  /// AllocaInst triggers a stack protector.
+  SSPLayoutMap Layout;
+
   /// \brief The minimum size of buffers that will receive stack smashing
   /// protection when -fstack-protection is used.
   unsigned SSPBufferSize;
@@ -49,7 +73,7 @@ class StackProtector : public FunctionPass {
   /// if a variable's reference has been taken.  This set
   /// is maintained to ensure we don't visit the same PHI node multiple
   /// times.
-  SmallPtrSet<const PHINode*, 16> VisitedPHIs;
+  SmallPtrSet<const PHINode *, 16> VisitedPHIs;
 
   /// InsertStackProtectors - Insert code into the prologue and epilogue of
   /// the function.
@@ -66,7 +90,10 @@ class StackProtector : public FunctionPass {
   /// ContainsProtectableArray - Check whether the type either is an array or
   /// contains an array of sufficient size so that we need stack protectors
   /// for it.
-  bool ContainsProtectableArray(Type *Ty, bool Strong = false,
+  /// \param [out] IsLarge is set to true if a protectable array is found and
+  /// it is "large" ( >= ssp-buffer-size).  In the case of a structure with
+  /// multiple arrays, this gets set if any of them is large.
+  bool ContainsProtectableArray(Type *Ty, bool &IsLarge, bool Strong = false,
                                 bool InStruct = false) const;
 
   /// \brief Check whether a stack allocation has its address taken.
@@ -75,22 +102,27 @@ class StackProtector : public FunctionPass {
   /// RequiresStackProtector - Check whether or not this function needs a
   /// stack protector based upon the stack protector level.
   bool RequiresStackProtector();
+
 public:
-  static char ID;             // Pass identification, replacement for typeid.
-  StackProtector() : FunctionPass(ID), TM(0), TLI(0), SSPBufferSize(0) {
+  static char ID; // Pass identification, replacement for typeid.
+  StackProtector()
+      : FunctionPass(ID), TM(nullptr), TLI(nullptr), SSPBufferSize(0) {
     initializeStackProtectorPass(*PassRegistry::getPassRegistry());
   }
   StackProtector(const TargetMachine *TM)
-    : FunctionPass(ID), TM(TM), TLI(0), Trip(TM->getTargetTriple()),
-      SSPBufferSize(8) {
+      : FunctionPass(ID), TM(TM), TLI(nullptr), Trip(TM->getTargetTriple()),
+        SSPBufferSize(8) {
     initializeStackProtectorPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-    AU.addPreserved<DominatorTree>();
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addPreserved<DominatorTreeWrapperPass>();
   }
 
-  virtual bool runOnFunction(Function &Fn);
+  SSPLayoutKind getSSPLayout(const AllocaInst *AI) const;
+  void adjustForColoring(const AllocaInst *From, const AllocaInst *To);
+
+  bool runOnFunction(Function &Fn) override;
 };
 } // end namespace llvm
 

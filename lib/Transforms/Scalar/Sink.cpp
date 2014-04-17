@@ -16,12 +16,11 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Assembly/Writer.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
@@ -41,15 +40,15 @@ namespace {
       initializeSinkingPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &F);
+    bool runOnFunction(Function &F) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       FunctionPass::getAnalysisUsage(AU);
       AU.addRequired<AliasAnalysis>();
-      AU.addRequired<DominatorTree>();
+      AU.addRequired<DominatorTreeWrapperPass>();
       AU.addRequired<LoopInfo>();
-      AU.addPreserved<DominatorTree>();
+      AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addPreserved<LoopInfo>();
     }
   private:
@@ -63,7 +62,7 @@ namespace {
 char Sinking::ID = 0;
 INITIALIZE_PASS_BEGIN(Sinking, "sink", "Code sinking", false, false)
 INITIALIZE_PASS_DEPENDENCY(LoopInfo)
-INITIALIZE_PASS_DEPENDENCY(DominatorTree)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_END(Sinking, "sink", "Code sinking", false, false)
 
@@ -77,15 +76,14 @@ bool Sinking::AllUsesDominatedByBlock(Instruction *Inst,
   // This may leave a referencing dbg_value in the original block, before
   // the definition of the vreg.  Dwarf generator handles this although the
   // user might not get the right info at runtime.
-  for (Value::use_iterator I = Inst->use_begin(),
-       E = Inst->use_end(); I != E; ++I) {
+  for (Use &U : Inst->uses()) {
     // Determine the block of the use.
-    Instruction *UseInst = cast<Instruction>(*I);
+    Instruction *UseInst = cast<Instruction>(U.getUser());
     BasicBlock *UseBlock = UseInst->getParent();
     if (PHINode *PN = dyn_cast<PHINode>(UseInst)) {
       // PHI nodes use the operand in the predecessor block, not the block with
       // the PHI.
-      unsigned Num = PHINode::getIncomingValueNumForOperand(I.getOperandNo());
+      unsigned Num = PHINode::getIncomingValueNumForOperand(U.getOperandNo());
       UseBlock = PN->getIncomingBlock(Num);
     }
     // Check that it dominates.
@@ -96,7 +94,7 @@ bool Sinking::AllUsesDominatedByBlock(Instruction *Inst,
 }
 
 bool Sinking::runOnFunction(Function &F) {
-  DT = &getAnalysis<DominatorTree>();
+  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   LI = &getAnalysis<LoopInfo>();
   AA = &getAnalysis<AliasAnalysis>();
 
@@ -218,6 +216,13 @@ bool Sinking::IsAcceptableTarget(Instruction *Inst,
 /// instruction out of its current block into a successor.
 bool Sinking::SinkInstruction(Instruction *Inst,
                               SmallPtrSet<Instruction *, 8> &Stores) {
+
+  // Don't sink static alloca instructions.  CodeGen assumes allocas outside the
+  // entry block are dynamically sized stack objects.
+  if (AllocaInst *AI = dyn_cast<AllocaInst>(Inst))
+    if (AI->isStaticAlloca())
+      return false;
+
   // Check if it's safe to move the instruction.
   if (!isSafeToMove(Inst, AA, Stores))
     return false;
@@ -259,9 +264,9 @@ bool Sinking::SinkInstruction(Instruction *Inst,
     return false;
 
   DEBUG(dbgs() << "Sink" << *Inst << " (";
-        WriteAsOperand(dbgs(), Inst->getParent(), false);
+        Inst->getParent()->printAsOperand(dbgs(), false);
         dbgs() << " -> ";
-        WriteAsOperand(dbgs(), SuccToSinkTo, false);
+        SuccToSinkTo->printAsOperand(dbgs(), false);
         dbgs() << ")\n");
 
   // Move the instruction.

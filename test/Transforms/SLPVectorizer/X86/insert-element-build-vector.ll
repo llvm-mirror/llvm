@@ -1,4 +1,5 @@
 ; RUN: opt -S -slp-vectorizer -slp-threshold=-10000 < %s | FileCheck %s
+; RUN: opt -S -slp-vectorizer -slp-threshold=0 < %s | FileCheck %s -check-prefix=ZEROTHRESH
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-n8:16:32:64-S128"
 
 target triple = "x86_64-apple-macosx10.8.0"
@@ -192,6 +193,54 @@ define <4 x float> @simple_select_partial_vector(<4 x float> %a, <4 x float> %b,
   %10 = extractelement <2 x float> %8, i32 1
   %rb = insertelement <4 x float> %ra, float %10, i32 1
   ret <4 x float> %rb
+}
+
+; Make sure that vectorization happens even if insertelements operations
+; must be rescheduled. The case here is from compiling Julia.
+define <4 x float> @reschedule_extract(<4 x float> %a, <4 x float> %b) {
+; CHECK-LABEL: @reschedule_extract(
+; CHECK: %1 = fadd <4 x float> %a, %b
+  %a0 = extractelement <4 x float> %a, i32 0
+  %b0 = extractelement <4 x float> %b, i32 0
+  %c0 = fadd float %a0, %b0
+  %v0 = insertelement <4 x float> undef, float %c0, i32 0
+  %a1 = extractelement <4 x float> %a, i32 1
+  %b1 = extractelement <4 x float> %b, i32 1
+  %c1 = fadd float %a1, %b1
+  %v1 = insertelement <4 x float> %v0, float %c1, i32 1
+  %a2 = extractelement <4 x float> %a, i32 2
+  %b2 = extractelement <4 x float> %b, i32 2
+  %c2 = fadd float %a2, %b2
+  %v2 = insertelement <4 x float> %v1, float %c2, i32 2
+  %a3 = extractelement <4 x float> %a, i32 3
+  %b3 = extractelement <4 x float> %b, i32 3
+  %c3 = fadd float %a3, %b3
+  %v3 = insertelement <4 x float> %v2, float %c3, i32 3
+  ret <4 x float> %v3
+}
+
+; Check that cost model for vectorization takes credit for
+; instructions that are erased.
+define <4 x float> @take_credit(<4 x float> %a, <4 x float> %b) {
+; ZEROTHRESH-LABEL: @take_credit(
+; ZEROTHRESH-CHECK: %1 = fadd <4 x float> %a, %b
+  %a0 = extractelement <4 x float> %a, i32 0
+  %b0 = extractelement <4 x float> %b, i32 0
+  %c0 = fadd float %a0, %b0
+  %a1 = extractelement <4 x float> %a, i32 1
+  %b1 = extractelement <4 x float> %b, i32 1
+  %c1 = fadd float %a1, %b1
+  %a2 = extractelement <4 x float> %a, i32 2
+  %b2 = extractelement <4 x float> %b, i32 2
+  %c2 = fadd float %a2, %b2
+  %a3 = extractelement <4 x float> %a, i32 3
+  %b3 = extractelement <4 x float> %b, i32 3
+  %c3 = fadd float %a3, %b3
+  %v0 = insertelement <4 x float> undef, float %c0, i32 0
+  %v1 = insertelement <4 x float> %v0, float %c1, i32 1
+  %v2 = insertelement <4 x float> %v1, float %c2, i32 2
+  %v3 = insertelement <4 x float> %v2, float %c3, i32 3
+  ret <4 x float> %v3
 }
 
 attributes #0 = { nounwind ssp uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }

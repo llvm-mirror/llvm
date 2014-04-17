@@ -24,11 +24,11 @@
 // Both of these are conservative weaknesses;
 // that is, not a source of correctness problems.
 //
-// The implementation depends on the GEP instruction to
-// differentiate subscripts. Since Clang linearizes subscripts
-// for most arrays, we give up some precision (though the existing MIV tests
-// will help). We trust that the GEP instruction will eventually be extended.
-// In the meantime, we should explore Maslov's ideas about delinearization.
+// The implementation depends on the GEP instruction to differentiate
+// subscripts. Since Clang linearizes some array subscripts, the dependence
+// analysis is using SCEV->delinearize to recover the representation of multiple
+// subscripts, and thus avoid the more expensive and less precise MIV tests. The
+// delinearization is controlled by the flag -da-delinearize.
 //
 // We should pay some careful attention to the possibility of integer overflow
 // in the implementation of the various tests. This could happen with Add,
@@ -60,10 +60,11 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/InstIterator.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -103,6 +104,10 @@ STATISTIC(GCDindependence, "GCD independence");
 STATISTIC(BanerjeeApplications, "Banerjee applications");
 STATISTIC(BanerjeeIndependence, "Banerjee independence");
 STATISTIC(BanerjeeSuccesses, "Banerjee successes");
+
+static cl::opt<bool>
+Delinearize("da-delinearize", cl::init(false), cl::Hidden, cl::ZeroOrMore,
+            cl::desc("Try to delinearize array references."));
 
 //===----------------------------------------------------------------------===//
 // basics
@@ -1270,8 +1275,8 @@ bool DependenceAnalysis::weakCrossingSIVtest(const SCEV *Coeff,
 //
 // Program 2.1, page 29.
 // Computes the GCD of AM and BM.
-// Also finds a solution to the equation ax - by = gdc(a, b).
-// Returns true iff the gcd divides Delta.
+// Also finds a solution to the equation ax - by = gcd(a, b).
+// Returns true if dependence disproved; i.e., gcd does not divide Delta.
 static
 bool findGCD(unsigned Bits, APInt AM, APInt BM, APInt Delta,
              APInt &G, APInt &X, APInt &Y) {
@@ -3171,6 +3176,83 @@ void DependenceAnalysis::updateDirection(Dependence::DVEntry &Level,
     llvm_unreachable("constraint has unexpected kind");
 }
 
+/// Check if we can delinearize the subscripts. If the SCEVs representing the
+/// source and destination array references are recurrences on a nested loop,
+/// this function flattens the nested recurrences into separate recurrences
+/// for each loop level.
+bool
+DependenceAnalysis::tryDelinearize(const SCEV *SrcSCEV, const SCEV *DstSCEV,
+                                   SmallVectorImpl<Subscript> &Pair) const {
+  const SCEVAddRecExpr *SrcAR = dyn_cast<SCEVAddRecExpr>(SrcSCEV);
+  const SCEVAddRecExpr *DstAR = dyn_cast<SCEVAddRecExpr>(DstSCEV);
+  if (!SrcAR || !DstAR || !SrcAR->isAffine() || !DstAR->isAffine())
+    return false;
+
+  SmallVector<const SCEV *, 4> SrcSubscripts, DstSubscripts, SrcSizes, DstSizes;
+  const SCEV *RemainderS = SrcAR->delinearize(*SE, SrcSubscripts, SrcSizes);
+  const SCEV *RemainderD = DstAR->delinearize(*SE, DstSubscripts, DstSizes);
+
+  int size = SrcSubscripts.size();
+  // Fail when there is only a subscript: that's a linearized access function.
+  if (size < 2)
+    return false;
+
+  int dstSize = DstSubscripts.size();
+  // Fail when the number of subscripts in Src and Dst differ.
+  if (size != dstSize)
+    return false;
+
+  // Fail when the size of any of the subscripts in Src and Dst differs: the
+  // dependence analysis assumes that elements in the same array have same size.
+  // SCEV delinearization does not have a context based on which it would decide
+  // globally the size of subscripts that would best fit all the array accesses.
+  for (int i = 0; i < size; ++i)
+    if (SrcSizes[i] != DstSizes[i])
+      return false;
+
+  // When the difference in remainders is different than a constant it might be
+  // that the base address of the arrays is not the same.
+  const SCEV *DiffRemainders = SE->getMinusSCEV(RemainderS, RemainderD);
+  if (!isa<SCEVConstant>(DiffRemainders))
+    return false;
+
+  // Normalize the last dimension: integrate the size of the "scalar dimension"
+  // and the remainder of the delinearization.
+  DstSubscripts[size-1] = SE->getMulExpr(DstSubscripts[size-1],
+                                         DstSizes[size-1]);
+  SrcSubscripts[size-1] = SE->getMulExpr(SrcSubscripts[size-1],
+                                         SrcSizes[size-1]);
+  SrcSubscripts[size-1] = SE->getAddExpr(SrcSubscripts[size-1], RemainderS);
+  DstSubscripts[size-1] = SE->getAddExpr(DstSubscripts[size-1], RemainderD);
+
+#ifndef NDEBUG
+  DEBUG(errs() << "\nSrcSubscripts: ");
+  for (int i = 0; i < size; i++)
+    DEBUG(errs() << *SrcSubscripts[i]);
+  DEBUG(errs() << "\nDstSubscripts: ");
+  for (int i = 0; i < size; i++)
+    DEBUG(errs() << *DstSubscripts[i]);
+#endif
+
+  // The delinearization transforms a single-subscript MIV dependence test into
+  // a multi-subscript SIV dependence test that is easier to compute. So we
+  // resize Pair to contain as many pairs of subscripts as the delinearization
+  // has found, and then initialize the pairs following the delinearization.
+  Pair.resize(size);
+  for (int i = 0; i < size; ++i) {
+    Pair[i].Src = SrcSubscripts[i];
+    Pair[i].Dst = DstSubscripts[i];
+
+    // FIXME: we should record the bounds SrcSizes[i] and DstSizes[i] that the
+    // delinearization has found, and add these constraints to the dependence
+    // check to avoid memory accesses overflow from one dimension into another.
+    // This is related to the problem of determining the existence of data
+    // dependences in array accesses using a different number of subscripts: in
+    // C one can access an array A[100][100]; as A[0][9999], *A[9999], etc.
+  }
+
+  return true;
+}
 
 //===----------------------------------------------------------------------===//
 
@@ -3278,6 +3360,12 @@ Dependence *DependenceAnalysis::depends(Instruction *Src,
     DEBUG(dbgs() << "    DstSCEV = " << *DstSCEV << "\n");
     Pair[0].Src = SrcSCEV;
     Pair[0].Dst = DstSCEV;
+  }
+
+  if (Delinearize && Pairs == 1 && CommonLevels > 1 &&
+      tryDelinearize(Pair[0].Src, Pair[0].Dst, Pair)) {
+    DEBUG(dbgs() << "    delinerized GEP\n");
+    Pairs = Pair.size();
   }
 
   for (unsigned P = 0; P < Pairs; ++P) {
@@ -3696,6 +3784,12 @@ const  SCEV *DependenceAnalysis::getSplitIteration(const Dependence *Dep,
     const SCEV *DstSCEV = SE->getSCEV(DstPtr);
     Pair[0].Src = SrcSCEV;
     Pair[0].Dst = DstSCEV;
+  }
+
+  if (Delinearize && Pairs == 1 && CommonLevels > 1 &&
+      tryDelinearize(Pair[0].Src, Pair[0].Dst, Pair)) {
+    DEBUG(dbgs() << "    delinerized GEP\n");
+    Pairs = Pair.size();
   }
 
   for (unsigned P = 0; P < Pairs; ++P) {

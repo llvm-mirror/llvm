@@ -14,7 +14,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/SourceMgr.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Locale.h"
@@ -55,7 +54,7 @@ SourceMgr::~SourceMgr() {
 size_t SourceMgr::AddIncludeFile(const std::string &Filename,
                                  SMLoc IncludeLoc,
                                  std::string &IncludedFile) {
-  OwningPtr<MemoryBuffer> NewBuf;
+  std::unique_ptr<MemoryBuffer> NewBuf;
   IncludedFile = Filename;
   MemoryBuffer::getFile(IncludedFile.c_str(), NewBuf);
 
@@ -67,7 +66,7 @@ size_t SourceMgr::AddIncludeFile(const std::string &Filename,
 
   if (!NewBuf) return ~0U;
 
-  return AddNewSourceBuffer(NewBuf.take(), IncludeLoc);
+  return AddNewSourceBuffer(NewBuf.release(), IncludeLoc);
 }
 
 
@@ -115,7 +114,7 @@ SourceMgr::getLineAndColumn(SMLoc Loc, int BufferID) const {
     if (*Ptr == '\n') ++LineNo;
 
   // Allocate the line number cache if it doesn't exist.
-  if (LineNoCache == 0)
+  if (!LineNoCache)
     LineNoCache = new LineNoCacheTy();
 
   // Update the line # cache.
@@ -229,7 +228,7 @@ void SourceMgr::PrintMessage(raw_ostream &OS, SMLoc Loc,
     PrintIncludeStack(getBufferInfo(CurBuf).IncludeLoc, OS);
   }
 
-  Diagnostic.print(0, OS, ShowColors);
+  Diagnostic.print(nullptr, OS, ShowColors);
 }
 
 void SourceMgr::PrintMessage(SMLoc Loc, SourceMgr::DiagKind Kind,

@@ -96,6 +96,10 @@ namespace EEVT {
     /// a floating point value type.
     bool hasFloatingPointTypes() const;
 
+    /// hasScalarTypes - Return true if this TypeSet contains a scalar value
+    /// type.
+    bool hasScalarTypes() const;
+
     /// hasVectorTypes - Return true if this TypeSet contains a vector value
     /// type.
     bool hasVectorTypes() const;
@@ -778,7 +782,11 @@ public:
   ptm_iterator ptm_begin() const { return PatternsToMatch.begin(); }
   ptm_iterator ptm_end() const { return PatternsToMatch.end(); }
 
-
+  /// Parse the Pattern for an instruction, and insert the result in DAGInsts.
+  typedef std::map<Record*, DAGInstruction, LessRecordByID> DAGInstMap;
+  const DAGInstruction &parseInstructionPattern(
+      CodeGenInstruction &CGI, ListInit *Pattern,
+      DAGInstMap &DAGInsts);
 
   const DAGInstruction &getInstruction(Record *R) const {
     assert(Instructions.count(R) && "Unknown instruction!");
@@ -801,7 +809,7 @@ private:
   void ParseNodeInfo();
   void ParseNodeTransforms();
   void ParseComplexPatterns();
-  void ParsePatternFragments();
+  void ParsePatternFragments(bool OutFrags = false);
   void ParseDefaultOperands();
   void ParseInstructions();
   void ParsePatterns();

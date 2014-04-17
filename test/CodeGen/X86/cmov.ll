@@ -4,8 +4,8 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 define i32 @test1(i32 %x, i32 %n, i32 %w, i32* %vp) nounwind readnone {
 entry:
 ; CHECK-LABEL: test1:
-; CHECK: movl	$12, %eax
-; CHECK-NEXT: btl
+; CHECK: btl
+; CHECK-NEXT: movl	$12, %eax
 ; CHECK-NEXT: cmovael	(%rcx), %eax
 ; CHECK-NEXT: ret
 
@@ -19,8 +19,8 @@ entry:
 define i32 @test2(i32 %x, i32 %n, i32 %w, i32* %vp) nounwind readnone {
 entry:
 ; CHECK-LABEL: test2:
-; CHECK: movl	$12, %eax
-; CHECK-NEXT: btl
+; CHECK: btl
+; CHECK-NEXT: movl	$12, %eax
 ; CHECK-NEXT: cmovbl	(%rcx), %eax
 ; CHECK-NEXT: ret
 
@@ -41,8 +41,8 @@ declare void @bar(i64) nounwind
 
 define void @test3(i64 %a, i64 %b, i1 %p) nounwind {
 ; CHECK-LABEL: test3:
-; CHECK:      cmovnel %edi, %esi
-; CHECK-NEXT: movl    %esi, %edi
+; CHECK:      cmov{{n?}}el %[[R1:e..]], %[[R2:e..]]
+; CHECK-NEXT: movl    %[[R2]], %{{e..}}
 
   %c = trunc i64 %a to i32
   %d = trunc i64 %b to i32
@@ -92,7 +92,7 @@ bb.i.i.i:                                         ; preds = %entry
 ; CHECK: testb
 ; CHECK-NOT: xor
 ; CHECK: setne
-; CHECK-NEXT: testb
+; CHECK: testb
 
 func_4.exit.i:                                    ; preds = %bb.i.i.i, %entry
   %.not.i = xor i1 %2, true                       ; <i1> [#uses=1]

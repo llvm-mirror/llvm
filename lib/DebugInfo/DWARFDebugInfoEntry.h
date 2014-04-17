@@ -45,17 +45,10 @@ public:
   void dumpAttribute(raw_ostream &OS, const DWARFUnit *u, uint32_t *offset_ptr,
                      uint16_t attr, uint16_t form, unsigned indent = 0) const;
 
-  /// Extracts a debug info entry, which is a child of a given compile unit,
+  /// Extracts a debug info entry, which is a child of a given unit,
   /// starting at a given offset. If DIE can't be extracted, returns false and
   /// doesn't change OffsetPtr.
-  bool extractFast(const DWARFUnit *U, const uint8_t *FixedFormSizes,
-                   uint32_t *OffsetPtr);
-
-  /// Extract a debug info entry for a given compile unit from the
-  /// .debug_info and .debug_abbrev data starting at the given offset.
-  /// If compile unit can't be parsed, returns false and doesn't change
-  /// OffsetPtr.
-  bool extract(const DWARFUnit *U, uint32_t *OffsetPtr);
+  bool extractFast(const DWARFUnit *U, uint32_t *OffsetPtr);
 
   uint32_t getTag() const { return AbbrevDecl ? AbbrevDecl->getTag() : 0; }
   bool isNULL() const { return AbbrevDecl == 0; }
@@ -67,9 +60,6 @@ public:
   bool isSubroutineDIE() const;
 
   uint32_t getOffset() const { return Offset; }
-  uint32_t getNumAttributes() const {
-    return !isNULL() ? AbbrevDecl->getNumAttributes() : 0;
-  }
   bool hasChildren() const { return !isNULL() && AbbrevDecl->hasChildren(); }
 
   // We know we are kept in a vector of contiguous entries, so we know
@@ -120,24 +110,25 @@ public:
     return AbbrevDecl;
   }
 
-  uint32_t getAttributeValue(const DWARFUnit *u, const uint16_t attr,
-                             DWARFFormValue &formValue,
-                             uint32_t *end_attr_offset_ptr = 0) const;
+  bool getAttributeValue(const DWARFUnit *U, const uint16_t Attr,
+                         DWARFFormValue &FormValue) const;
 
-  const char *getAttributeValueAsString(const DWARFUnit *u, const uint16_t attr,
-                                        const char *fail_value) const;
+  const char *getAttributeValueAsString(const DWARFUnit *U, const uint16_t Attr,
+                                        const char *FailValue) const;
 
   uint64_t getAttributeValueAsAddress(const DWARFUnit *U, const uint16_t Attr,
                                       uint64_t FailValue) const;
 
-  uint64_t getAttributeValueAsUnsigned(const DWARFUnit *u, const uint16_t attr,
-                                       uint64_t fail_value) const;
+  uint64_t getAttributeValueAsUnsignedConstant(const DWARFUnit *U,
+                                               const uint16_t Attr,
+                                               uint64_t FailValue) const;
 
-  uint64_t getAttributeValueAsReference(const DWARFUnit *u, const uint16_t attr,
-                                        uint64_t fail_value) const;
+  uint64_t getAttributeValueAsReference(const DWARFUnit *U, const uint16_t Attr,
+                                        uint64_t FailValue) const;
 
-  int64_t getAttributeValueAsSigned(const DWARFUnit *u, const uint16_t attr,
-                                    int64_t fail_value) const;
+  uint64_t getAttributeValueAsSectionOffset(const DWARFUnit *U,
+                                            const uint16_t Attr,
+                                            uint64_t FailValue) const;
 
   /// Retrieves DW_AT_low_pc and DW_AT_high_pc from CU.
   /// Returns true if both attributes are present.

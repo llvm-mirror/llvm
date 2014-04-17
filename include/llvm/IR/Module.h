@@ -15,13 +15,15 @@
 #ifndef LLVM_IR_MODULE_H
 #define LLVM_IR_MODULE_H
 
-#include "llvm/ADT/OwningPtr.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm/Support/system_error.h"
 
 namespace llvm {
 
@@ -142,12 +144,6 @@ public:
   /// The named metadata constant interators.
   typedef NamedMDListType::const_iterator const_named_metadata_iterator;
 
-  /// An enumeration for describing the endianess of the target machine.
-  enum Endianness  { AnyEndianness, LittleEndian, BigEndian };
-
-  /// An enumeration for describing the size of a pointer on the target machine.
-  enum PointerSize { AnyPointerSize, Pointer32, Pointer64 };
-
   /// This enumeration defines the supported behaviors of module flags.
   enum ModFlagBehavior {
     /// Emits an error if two values disagree, otherwise the resulting value is
@@ -156,7 +152,7 @@ public:
 
     /// Emits a warning if two values disagree. The result value will be the
     /// operand for the flag from the first module being linked.
-    Warning  = 2,
+    Warning = 2,
 
     /// Adds a requirement that another module flag be present and have a
     /// specified value after linking is performed. The value must be a metadata
@@ -201,11 +197,19 @@ private:
   NamedMDListType NamedMDList;    ///< The named metadata in the module
   std::string GlobalScopeAsm;     ///< Inline Asm at global scope.
   ValueSymbolTable *ValSymTab;    ///< Symbol table for values
-  OwningPtr<GVMaterializer> Materializer;  ///< Used to materialize GlobalValues
+  std::unique_ptr<GVMaterializer>
+  Materializer;                   ///< Used to materialize GlobalValues
   std::string ModuleID;           ///< Human readable identifier for the module
   std::string TargetTriple;       ///< Platform target triple Module compiled on
-  std::string DataLayout;         ///< Target data description
   void *NamedMDSymTab;            ///< NamedMDNode names.
+
+  // We need to keep the string because the C API expects us to own the string
+  // representation.
+  // Since we have it, we also use an empty string to represent a module without
+  // a DataLayout. If it has a DataLayout, these variables are in sync and the
+  // string is just a cache of getDataLayout()->getStringRepresentation().
+  std::string DataLayoutStr;
+  DataLayout DL;
 
   friend class Constant;
 
@@ -227,22 +231,16 @@ public:
   /// @returns the module identifier as a string
   const std::string &getModuleIdentifier() const { return ModuleID; }
 
-  /// Get the data layout string for the module's target platform.  This encodes
-  /// the type sizes and alignments expected by this module.
-  /// @returns the data layout as a string
-  const std::string &getDataLayout() const { return DataLayout; }
+  /// Get the data layout string for the module's target platform. This is
+  /// equivalent to getDataLayout()->getStringRepresentation().
+  const std::string &getDataLayoutStr() const { return DataLayoutStr; }
+
+  /// Get the data layout for the module's target platform.
+  const DataLayout *getDataLayout() const;
 
   /// Get the target triple which is a string describing the target host.
   /// @returns a string containing the target triple.
   const std::string &getTargetTriple() const { return TargetTriple; }
-
-  /// Get the target endian information.
-  /// @returns Endianess - an enumeration for the endianess of the target
-  Endianness getEndianness() const;
-
-  /// Get the target pointer size.
-  /// @returns PointerSize - an enumeration for the size of the target's pointer
-  PointerSize getPointerSize() const;
 
   /// Get the global data context.
   /// @returns LLVMContext - a container for LLVM's global information
@@ -260,7 +258,8 @@ public:
   void setModuleIdentifier(StringRef ID) { ModuleID = ID; }
 
   /// Set the data layout
-  void setDataLayout(StringRef DL) { DataLayout = DL; }
+  void setDataLayout(StringRef Desc);
+  void setDataLayout(const DataLayout *Other);
 
   /// Set the target triple.
   void setTargetTriple(StringRef T) { TargetTriple = T; }
@@ -391,7 +390,7 @@ public:
 /// @name Named Metadata Accessors
 /// @{
 
-  /// getNamedMetadata - Return the NamedMDNode in the module with the
+  /// getNamedMetadata - Return the first NamedMDNode in the module with the
   /// specified name. This method returns null if a NamedMDNode with the
   /// specified name is not found.
   NamedMDNode *getNamedMetadata(const Twine &Name) const;
@@ -458,24 +457,19 @@ public:
   /// Materialize - Make sure the GlobalValue is fully read.  If the module is
   /// corrupt, this returns true and fills in the optional string with
   /// information about the problem.  If successful, this returns false.
-  bool Materialize(GlobalValue *GV, std::string *ErrInfo = 0);
+  bool Materialize(GlobalValue *GV, std::string *ErrInfo = nullptr);
   /// Dematerialize - If the GlobalValue is read in, and if the GVMaterializer
   /// supports it, release the memory for the function, and set it up to be
   /// materialized lazily.  If !isDematerializable(), this method is a noop.
   void Dematerialize(GlobalValue *GV);
 
-  /// MaterializeAll - Make sure all GlobalValues in this Module are fully read.
-  /// If the module is corrupt, this returns true and fills in the optional
-  /// string with information about the problem.  If successful, this returns
-  /// false.
-  bool MaterializeAll(std::string *ErrInfo = 0);
+  /// Make sure all GlobalValues in this Module are fully read.
+  error_code materializeAll();
 
-  /// MaterializeAllPermanently - Make sure all GlobalValues in this Module are
-  /// fully read and clear the Materializer.  If the module is corrupt, this
-  /// returns true, fills in the optional string with information about the
-  /// problem, and DOES NOT clear the old Materializer.  If successful, this
-  /// returns false.
-  bool MaterializeAllPermanently(std::string *ErrInfo = 0);
+  /// Make sure all GlobalValues in this Module are fully read and clear the
+  /// Materializer. If the module is corrupt, this DOES NOT clear the old
+  /// Materializer.
+  error_code materializeAllPermanently();
 
 /// @}
 /// @name Direct access to the globals list, functions list, and symbol table
@@ -524,6 +518,13 @@ public:
   const_global_iterator global_end  () const { return GlobalList.end(); }
   bool                  global_empty() const { return GlobalList.empty(); }
 
+  iterator_range<global_iterator> globals() {
+    return iterator_range<global_iterator>(global_begin(), global_end());
+  }
+  iterator_range<const_global_iterator> globals() const {
+    return iterator_range<const_global_iterator>(global_begin(), global_end());
+  }
+
 /// @}
 /// @name Function Iteration
 /// @{
@@ -546,6 +547,12 @@ public:
   size_t               alias_size () const      { return AliasList.size();  }
   bool                 alias_empty() const      { return AliasList.empty(); }
 
+  iterator_range<alias_iterator> aliases() {
+    return iterator_range<alias_iterator>(alias_begin(), alias_end());
+  }
+  iterator_range<const_alias_iterator> aliases() const {
+    return iterator_range<const_alias_iterator>(alias_begin(), alias_end());
+  }
 
 /// @}
 /// @name Named Metadata Iteration
@@ -564,6 +571,14 @@ public:
   size_t named_metadata_size() const { return NamedMDList.size();  }
   bool named_metadata_empty() const { return NamedMDList.empty(); }
 
+  iterator_range<named_metadata_iterator> named_metadata() {
+    return iterator_range<named_metadata_iterator>(named_metadata_begin(),
+                                                   named_metadata_end());
+  }
+  iterator_range<const_named_metadata_iterator> named_metadata() const {
+    return iterator_range<const_named_metadata_iterator>(named_metadata_begin(),
+                                                         named_metadata_end());
+  }
 
 /// @}
 /// @name Utility functions for printing and dumping Module objects
@@ -588,7 +603,7 @@ public:
 
 /// An raw_ostream inserter for modules.
 inline raw_ostream &operator<<(raw_ostream &O, const Module &M) {
-  M.print(O, 0);
+  M.print(O, nullptr);
   return O;
 }
 

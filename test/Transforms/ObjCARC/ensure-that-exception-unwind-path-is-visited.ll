@@ -24,11 +24,11 @@ target triple = "x86_64-apple-macosx10.9.0"
 @"\01L_OBJC_METH_VAR_NAME_" = internal global [4 x i8] c"new\00", section "__TEXT,__objc_methname,cstring_literals", align 1
 @"\01L_OBJC_SELECTOR_REFERENCES_" = internal global i8* getelementptr inbounds ([4 x i8]* @"\01L_OBJC_METH_VAR_NAME_", i64 0, i64 0), section "__DATA, __objc_selrefs, literal_pointers, no_dead_strip"
 @__CFConstantStringClassReference = external global [0 x i32]
-@.str = linker_private unnamed_addr constant [11 x i8] c"Failed: %@\00", align 1
+@.str = private unnamed_addr constant [11 x i8] c"Failed: %@\00", align 1
 @_unnamed_cfstring_ = private constant %struct.NSConstantString { i32* getelementptr inbounds ([0 x i32]* @__CFConstantStringClassReference, i32 0, i32 0), i32 1992, i8* getelementptr inbounds ([11 x i8]* @.str, i32 0, i32 0), i64 10 }, section "__DATA,__cfstring"
 @"OBJC_CLASS_$_NSException" = external global %struct._class_t
 @"\01L_OBJC_CLASSLIST_REFERENCES_$_1" = internal global %struct._class_t* @"OBJC_CLASS_$_NSException", section "__DATA, __objc_classrefs, regular, no_dead_strip", align 8
-@.str2 = linker_private unnamed_addr constant [4 x i8] c"Foo\00", align 1
+@.str2 = private unnamed_addr constant [4 x i8] c"Foo\00", align 1
 @_unnamed_cfstring_3 = private constant %struct.NSConstantString { i32* getelementptr inbounds ([0 x i32]* @__CFConstantStringClassReference, i32 0, i32 0), i32 1992, i8* getelementptr inbounds ([4 x i8]* @.str2, i32 0, i32 0), i64 3 }, section "__DATA,__cfstring"
 @"\01L_OBJC_METH_VAR_NAME_4" = internal global [14 x i8] c"raise:format:\00", section "__TEXT,__objc_methname,cstring_literals", align 1
 @"\01L_OBJC_SELECTOR_REFERENCES_5" = internal global i8* getelementptr inbounds ([14 x i8]* @"\01L_OBJC_METH_VAR_NAME_4", i64 0, i64 0), section "__DATA, __objc_selrefs, literal_pointers, no_dead_strip"
@@ -111,7 +111,7 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 ; CHECK: attributes [[NUW]] = { nounwind }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!33, !34, !35, !36}
+!llvm.module.flags = !{!33, !34, !35, !36, !61}
 
 !0 = metadata !{i32 786449, metadata !60, i32 16, metadata !"clang version 3.3 ", i1 true, metadata !"", i32 2, metadata !1, metadata !1, metadata !3, metadata !1, null, metadata !""} ; [ DW_TAG_compile_unit ] [/Volumes/Files/gottesmmcab/Radar/12906997/test.m] [DW_LANG_ObjC]
 !1 = metadata !{i32 0}
@@ -171,3 +171,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 !57 = metadata !{i32 786443, metadata !60, metadata !27, i32 5, i32 0, i32 7} ; [ DW_TAG_lexical_block ] [/Volumes/Files/gottesmmcab/Radar/12906997/test.m]
 !58 = metadata !{i32 7, i32 0, metadata !57, null}
 !60 = metadata !{metadata !"test.m", metadata !"/Volumes/Files/gottesmmcab/Radar/12906997"}
+!61 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

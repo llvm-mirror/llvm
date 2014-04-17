@@ -53,9 +53,9 @@ namespace {
     unsigned getInstructionCost(const Instruction *I) const;
 
   private:
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual bool runOnFunction(Function &F);
-    virtual void print(raw_ostream &OS, const Module*) const;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    bool runOnFunction(Function &F) override;
+    void print(raw_ostream &OS, const Module*) const override;
 
     /// The function that we analyze.
     Function *F;
@@ -98,15 +98,12 @@ static TargetTransformInfo::OperandValueKind getOperandInfo(Value *V) {
   TargetTransformInfo::OperandValueKind OpInfo =
     TargetTransformInfo::OK_AnyValue;
 
-  // Check for a splat of a constant.
-  ConstantDataVector *CDV = 0;
-  if ((CDV = dyn_cast<ConstantDataVector>(V)))
-    if (CDV->getSplatValue() != NULL)
+  // Check for a splat of a constant or for a non uniform vector of constants.
+  if (isa<ConstantVector>(V) || isa<ConstantDataVector>(V)) {
+    OpInfo = TargetTransformInfo::OK_NonUniformConstantValue;
+    if (cast<Constant>(V)->getSplatValue() != NULL)
       OpInfo = TargetTransformInfo::OK_UniformConstantValue;
-  ConstantVector *CV = 0;
-  if ((CV = dyn_cast<ConstantVector>(V)))
-    if (CV->getSplatValue() != NULL)
-      OpInfo = TargetTransformInfo::OK_UniformConstantValue;
+  }
 
   return OpInfo;
 }
@@ -337,7 +334,7 @@ static bool matchVectorSplittingReduction(const ExtractElementInst *ReduxRoot,
 
     Value *NextRdxOp;
     ShuffleVectorInst *Shuffle;
-    tie(NextRdxOp, Shuffle) = getShuffleAndOtherOprd(BinOp);
+    std::tie(NextRdxOp, Shuffle) = getShuffleAndOtherOprd(BinOp);
 
     // Check the current reduction operation and the shuffle use the same value.
     if (Shuffle == 0)
@@ -439,7 +436,8 @@ unsigned CostModelAnalysis::getInstructionCost(const Instruction *I) const {
   case Instruction::UIToFP:
   case Instruction::Trunc:
   case Instruction::FPTrunc:
-  case Instruction::BitCast: {
+  case Instruction::BitCast:
+  case Instruction::AddrSpaceCast: {
     Type *SrcTy = I->getOperand(0)->getType();
     return TTI->getCastInstrCost(I->getOpcode(), I->getType(), SrcTy);
   }

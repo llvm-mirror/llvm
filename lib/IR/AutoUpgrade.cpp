@@ -11,16 +11,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/AutoUpgrade.h"
+#include "llvm/IR/AutoUpgrade.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/CFG.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cstring>
 using namespace llvm;
@@ -111,8 +113,9 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
         Name == "x86.avx.movnt.dq.256" ||
         Name == "x86.avx.movnt.pd.256" ||
         Name == "x86.avx.movnt.ps.256" ||
+        Name == "x86.sse42.crc32.64.8" ||
         (Name.startswith("x86.xop.vpcom") && F->arg_size() == 2)) {
-      NewFn = 0;
+      NewFn = nullptr;
       return true;
     }
     // SSE4.1 ptest functions may have an old signature.
@@ -155,7 +158,7 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
 }
 
 bool llvm::UpgradeIntrinsicFunction(Function *F, Function *&NewFn) {
-  NewFn = 0;
+  NewFn = nullptr;
   bool Upgraded = UpgradeIntrinsicFunction1(F, NewFn);
 
   // Upgrade intrinsic attributes.  This does not change the function.
@@ -271,6 +274,12 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       Function *VPCOM = Intrinsic::getDeclaration(F->getParent(), intID);
       Rep = Builder.CreateCall3(VPCOM, CI->getArgOperand(0),
                                 CI->getArgOperand(1), Builder.getInt8(Imm));
+    } else if (Name == "llvm.x86.sse42.crc32.64.8") {
+      Function *CRC32 = Intrinsic::getDeclaration(F->getParent(),
+                                               Intrinsic::x86_sse42_crc32_32_8);
+      Value *Trunc0 = Builder.CreateTrunc(CI->getArgOperand(0), Type::getInt32Ty(C));
+      Rep = Builder.CreateCall2(CRC32, Trunc0, CI->getArgOperand(1));
+      Rep = Builder.CreateZExt(Rep, CI->getType(), "");
     } else {
       bool PD128 = false, PD256 = false, PS128 = false, PS256 = false;
       if (Name == "llvm.x86.avx.vpermil.pd.256")
@@ -402,7 +411,7 @@ void llvm::UpgradeCallsToIntrinsic(Function* F) {
   if (UpgradeIntrinsicFunction(F, NewFn)) {
     if (NewFn != F) {
       // Replace all uses to the old function with the new one if necessary.
-      for (Value::use_iterator UI = F->use_begin(), UE = F->use_end();
+      for (Value::user_iterator UI = F->user_begin(), UE = F->user_end();
            UI != UE; ) {
         if (CallInst *CI = dyn_cast<CallInst>(*UI++))
           UpgradeIntrinsicCall(CI, NewFn);
@@ -439,4 +448,61 @@ void llvm::UpgradeInstWithTBAATag(Instruction *I) {
       Constant::getNullValue(Type::getInt64Ty(I->getContext()))};
     I->setMetadata(LLVMContext::MD_tbaa, MDNode::get(I->getContext(), Elts));
   }
+}
+
+Instruction *llvm::UpgradeBitCastInst(unsigned Opc, Value *V, Type *DestTy,
+                                      Instruction *&Temp) {
+  if (Opc != Instruction::BitCast)
+    return nullptr;
+
+  Temp = nullptr;
+  Type *SrcTy = V->getType();
+  if (SrcTy->isPtrOrPtrVectorTy() && DestTy->isPtrOrPtrVectorTy() &&
+      SrcTy->getPointerAddressSpace() != DestTy->getPointerAddressSpace()) {
+    LLVMContext &Context = V->getContext();
+
+    // We have no information about target data layout, so we assume that
+    // the maximum pointer size is 64bit.
+    Type *MidTy = Type::getInt64Ty(Context);
+    Temp = CastInst::Create(Instruction::PtrToInt, V, MidTy);
+
+    return CastInst::Create(Instruction::IntToPtr, Temp, DestTy);
+  }
+
+  return nullptr;
+}
+
+Value *llvm::UpgradeBitCastExpr(unsigned Opc, Constant *C, Type *DestTy) {
+  if (Opc != Instruction::BitCast)
+    return nullptr;
+
+  Type *SrcTy = C->getType();
+  if (SrcTy->isPtrOrPtrVectorTy() && DestTy->isPtrOrPtrVectorTy() &&
+      SrcTy->getPointerAddressSpace() != DestTy->getPointerAddressSpace()) {
+    LLVMContext &Context = C->getContext();
+
+    // We have no information about target data layout, so we assume that
+    // the maximum pointer size is 64bit.
+    Type *MidTy = Type::getInt64Ty(Context);
+
+    return ConstantExpr::getIntToPtr(ConstantExpr::getPtrToInt(C, MidTy),
+                                     DestTy);
+  }
+
+  return nullptr;
+}
+
+/// Check the debug info version number, if it is out-dated, drop the debug
+/// info. Return true if module is modified.
+bool llvm::UpgradeDebugInfo(Module &M) {
+  unsigned Version = getDebugMetadataVersionFromModule(M);
+  if (Version == DEBUG_METADATA_VERSION)
+    return false;
+
+  bool RetCode = StripDebugInfo(M);
+  if (RetCode) {
+    DiagnosticInfoDebugMetadataVersion DiagVersion(M, Version);
+    M.getContext().diagnose(DiagVersion);
+  }
+  return RetCode;
 }

@@ -36,7 +36,10 @@ AMDGPUSubtarget::AMDGPUSubtarget(StringRef TT, StringRef CPU, StringRef FS) :
   Gen = AMDGPUSubtarget::R600;
   FP64 = false;
   CaymanISA = false;
-  EnableIRStructurizer = false;
+  EnableIRStructurizer = true;
+  EnableIfCvt = true;
+  WavefrontSize = 0;
+  CFALUBug = false;
   ParseSubtargetFeatures(GPU, FS);
   DevName = GPU;
 }
@@ -70,43 +73,46 @@ AMDGPUSubtarget::IsIRStructurizerEnabled() const {
   return EnableIRStructurizer;
 }
 bool
+AMDGPUSubtarget::isIfCvtEnabled() const {
+  return EnableIfCvt;
+}
+unsigned
+AMDGPUSubtarget::getWavefrontSize() const {
+  return WavefrontSize;
+}
+unsigned
+AMDGPUSubtarget::getStackEntrySize() const {
+  assert(getGeneration() <= NORTHERN_ISLANDS);
+  switch(getWavefrontSize()) {
+  case 16:
+    return 8;
+  case 32:
+    if (hasCaymanISA())
+      return 4;
+    else
+      return 8;
+  case 64:
+    return 4;
+  default:
+    llvm_unreachable("Illegal wavefront size.");
+  }
+}
+bool
+AMDGPUSubtarget::hasCFAluBug() const {
+  assert(getGeneration() <= NORTHERN_ISLANDS);
+  return CFALUBug;
+}
+bool
 AMDGPUSubtarget::isTargetELF() const {
   return false;
 }
 size_t
 AMDGPUSubtarget::getDefaultSize(uint32_t dim) const {
-  if (dim > 3) {
+  if (dim > 2) {
     return 1;
   } else {
     return DefaultSize[dim];
   }
-}
-
-std::string
-AMDGPUSubtarget::getDataLayout() const {
-  std::string DataLayout = std::string(
-   "e"
-   "-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32"
-   "-v16:16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128"
-   "-v192:256:256-v256:256:256-v512:512:512-v1024:1024:1024-v2048:2048:2048"
-   "-n32:64"
-  );
-
-  if (hasHWFP64()) {
-    DataLayout.append("-f64:64:64");
-  }
-
-  if (is64bit()) {
-    DataLayout.append("-p:64:64:64");
-  } else {
-    DataLayout.append("-p:32:32:32");
-  }
-
-  if (Gen >= AMDGPUSubtarget::SOUTHERN_ISLANDS) {
-    DataLayout.append("-p3:32:32:32");
-  }
-
-  return DataLayout;
 }
 
 std::string

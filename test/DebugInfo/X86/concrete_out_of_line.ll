@@ -7,15 +7,22 @@
 ; first check that we have a TAG_subprogram at a given offset and it has
 ; AT_inline.
 
-; CHECK: 0x0000011e:   DW_TAG_subprogram [17]
-; CHECK-NEXT:     DW_AT_specification
+; CHECK: DW_TAG_class_type
+; CHECK: DW_TAG_class_type
+; CHECK:   DW_TAG_subprogram
+; CHECK: [[DTOR_DECL:0x........]]:  DW_TAG_subprogram
+
+; CHECK: [[DTOR_OOL:0x........]]: DW_TAG_subprogram
+; CHECK-NEXT:     DW_AT_specification {{.*}} {[[DTOR_DECL]]})
 ; CHECK-NEXT:     DW_AT_inline
 
 
 ; and then that a TAG_subprogram refers to it with AT_abstract_origin.
 
-; CHECK: 0x0000015f:   DW_TAG_subprogram [19]
-; CHECK-NEXT: DW_AT_abstract_origin [DW_FORM_ref4]    (cu + 0x011e => {0x0000011e})
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_TAG_subprogram
+; CHECK-NEXT: DW_AT_abstract_origin {{.*}} {[[DTOR_OOL]]})
 
 define i32 @_ZN17nsAutoRefCnt7ReleaseEv() {
 entry:
@@ -33,9 +40,10 @@ entry:
 declare void @_Z8moz_freePv(i8*)
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!60}
 
-!0 = metadata !{i32 786449, metadata !59, i32 4, metadata !"clang version 3.1 ()", i1 true, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !47,  metadata !47, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
+!0 = metadata !{i32 786449, metadata !59, i32 4, metadata !"clang version 3.1 ()", i1 true, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !47,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ]
+!1 = metadata !{}
 !3 = metadata !{metadata !5, metadata !23, metadata !27, metadata !31}
 !5 = metadata !{i32 720942, metadata !6, null, metadata !"Release", metadata !"Release", metadata !"_ZN17nsAutoRefCnt7ReleaseEv", i32 14, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32* null, null, metadata !12, metadata !20, i32 14} ; [ DW_TAG_subprogram ] [line 14] [def] [Release]
 !6 = metadata !{i32 720937, metadata !59} ; [ DW_TAG_file_type ]
@@ -86,3 +94,4 @@ declare void @_Z8moz_freePv(i8*)
 !57 = metadata !{i32 19, i32 3, metadata !55, metadata !58}
 !58 = metadata !{i32 18, i32 41, metadata !23, null}
 !59 = metadata !{metadata !"nsAutoRefCnt.ii", metadata !"/Users/espindola/mozilla-central/obj-x86_64-apple-darwin11.2.0/netwerk/base/src"}
+!60 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

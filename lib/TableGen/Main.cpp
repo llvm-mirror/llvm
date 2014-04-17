@@ -16,7 +16,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "TGParser.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -57,7 +56,7 @@ static int createDependencyFile(const TGParser &Parser, const char *argv0) {
     return 1;
   }
   std::string Error;
-  tool_output_file DepOut(DependFilename.c_str(), Error);
+  tool_output_file DepOut(DependFilename.c_str(), Error, sys::fs::F_Text);
   if (!Error.empty()) {
     errs() << argv0 << ": error opening " << DependFilename
       << ":" << Error << "\n";
@@ -81,14 +80,14 @@ int TableGenMain(char *argv0, TableGenMainFn *MainFn) {
   RecordKeeper Records;
 
   // Parse the input file.
-  OwningPtr<MemoryBuffer> File;
+  std::unique_ptr<MemoryBuffer> File;
   if (error_code ec =
         MemoryBuffer::getFileOrSTDIN(InputFilename, File)) {
     errs() << "Could not open input file '" << InputFilename << "': "
            << ec.message() <<"\n";
     return 1;
   }
-  MemoryBuffer *F = File.take();
+  MemoryBuffer *F = File.release();
 
   // Tell SrcMgr about this buffer, which is what TGParser will pick up.
   SrcMgr.AddNewSourceBuffer(F, SMLoc());
@@ -103,7 +102,7 @@ int TableGenMain(char *argv0, TableGenMainFn *MainFn) {
     return 1;
 
   std::string Error;
-  tool_output_file Out(OutputFilename.c_str(), Error);
+  tool_output_file Out(OutputFilename.c_str(), Error, sys::fs::F_Text);
   if (!Error.empty()) {
     errs() << argv0 << ": error opening " << OutputFilename
       << ":" << Error << "\n";

@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -31,7 +32,6 @@
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Target/Mangler.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
@@ -46,9 +46,9 @@ DwarfCFIException::DwarfCFIException(AsmPrinter *A)
 
 DwarfCFIException::~DwarfCFIException() {}
 
-/// EndModule - Emit all exception information that should come after the
+/// endModule - Emit all exception information that should come after the
 /// content.
-void DwarfCFIException::EndModule() {
+void DwarfCFIException::endModule() {
   if (moveTypeModule == AsmPrinter::CFI_M_Debug)
     Asm->OutStreamer.EmitCFISections(false, true);
 
@@ -68,7 +68,7 @@ void DwarfCFIException::EndModule() {
   for (size_t i = 0, e = Personalities.size(); i != e; ++i) {
     if (!Personalities[i])
       continue;
-    MCSymbol *Sym = Asm->Mang->getSymbol(Personalities[i]);
+    MCSymbol *Sym = Asm->getSymbol(Personalities[i]);
     TLOF.emitPersonalityValue(Asm->OutStreamer, Asm->TM, Sym);
     AtLeastOne = true;
   }
@@ -82,9 +82,9 @@ void DwarfCFIException::EndModule() {
   }
 }
 
-/// BeginFunction - Gather pre-function exception information. Assumes it's
+/// beginFunction - Gather pre-function exception information. Assumes it's
 /// being emitted immediately after the function entry point.
-void DwarfCFIException::BeginFunction(const MachineFunction *MF) {
+void DwarfCFIException::beginFunction(const MachineFunction *MF) {
   shouldEmitMoves = shouldEmitPersonality = shouldEmitLSDA = false;
 
   // If any landing pads survive, we need an EH table.
@@ -113,13 +113,14 @@ void DwarfCFIException::BeginFunction(const MachineFunction *MF) {
   if (!shouldEmitPersonality && !shouldEmitMoves)
     return;
 
-  Asm->OutStreamer.EmitCFIStartProc();
+  Asm->OutStreamer.EmitCFIStartProc(/*IsSimple=*/false);
 
   // Indicate personality routine, if any.
   if (!shouldEmitPersonality)
     return;
 
-  const MCSymbol *Sym = TLOF.getCFIPersonalitySymbol(Per, Asm->Mang, MMI);
+  const MCSymbol *Sym =
+      TLOF.getCFIPersonalitySymbol(Per, *Asm->Mang, Asm->TM, MMI);
   Asm->OutStreamer.EmitCFIPersonality(Sym, PerEncoding);
 
   Asm->OutStreamer.EmitDebugLabel
@@ -135,9 +136,9 @@ void DwarfCFIException::BeginFunction(const MachineFunction *MF) {
                                LSDAEncoding);
 }
 
-/// EndFunction - Gather and emit post-function exception information.
+/// endFunction - Gather and emit post-function exception information.
 ///
-void DwarfCFIException::EndFunction() {
+void DwarfCFIException::endFunction(const MachineFunction *) {
   if (!shouldEmitPersonality && !shouldEmitMoves)
     return;
 

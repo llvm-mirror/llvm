@@ -48,7 +48,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/Verifier.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/DataLayout.h"
@@ -915,7 +915,7 @@ void generateStringPrint(llvm::LLVMContext &context,
     new llvm::GlobalVariable(module,
                              stringConstant->getType(),
                              true,
-                             llvm::GlobalValue::LinkerPrivateLinkage,
+                             llvm::GlobalValue::PrivateLinkage,
                              stringConstant,
                              "");
   }
@@ -959,7 +959,7 @@ void generateIntegerPrint(llvm::LLVMContext &context,
     new llvm::GlobalVariable(module,
                              stringConstant->getType(),
                              true,
-                             llvm::GlobalValue::LinkerPrivateLinkage,
+                             llvm::GlobalValue::PrivateLinkage,
                              stringConstant,
                              "");
   }
@@ -1562,7 +1562,7 @@ llvm::Function *createUnwindExceptionTest(llvm::Module &module,
   return(outerCatchFunct);
 }
 
-
+namespace {
 /// Represents our foreign exceptions
 class OurCppRunException : public std::runtime_error {
 public:
@@ -1577,9 +1577,9 @@ public:
                                  std::runtime_error::operator=(toCopy)));
   }
 
-  ~OurCppRunException (void) throw () {}
+  virtual ~OurCppRunException (void) throw () {}
 };
-
+} // end anonymous namespace
 
 /// Throws foreign C++ exception.
 /// @param ignoreIt unused parameter that allows function to match implied
@@ -1976,7 +1976,8 @@ int main(int argc, char *argv[]) {
     // Set up the optimizer pipeline.
     // Start with registering info about how the
     // target lays out data structures.
-    fpm.add(new llvm::DataLayout(*executionEngine->getDataLayout()));
+    module->setDataLayout(executionEngine->getDataLayout());
+    fpm.add(new llvm::DataLayoutPass(module));
 
     // Optimizations turned on
 #ifdef ADD_OPT_PASSES

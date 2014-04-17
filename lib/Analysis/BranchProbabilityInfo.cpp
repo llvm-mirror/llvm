@@ -11,15 +11,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "branch-prob"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
@@ -398,10 +399,24 @@ bool BranchProbabilityInfo::calcZeroHeuristics(BasicBlock *BB) {
     // InstCombine canonicalizes X <= 0 into X < 1.
     // X <= 0   ->  Unlikely
     isProb = false;
-  } else if (CV->isAllOnesValue() && CI->getPredicate() == CmpInst::ICMP_SGT) {
-    // InstCombine canonicalizes X >= 0 into X > -1.
-    // X >= 0   ->  Likely
-    isProb = true;
+  } else if (CV->isAllOnesValue()) {
+    switch (CI->getPredicate()) {
+    case CmpInst::ICMP_EQ:
+      // X == -1  ->  Unlikely
+      isProb = false;
+      break;
+    case CmpInst::ICMP_NE:
+      // X != -1  ->  Likely
+      isProb = true;
+      break;
+    case CmpInst::ICMP_SGT:
+      // InstCombine canonicalizes X >= 0 into X > -1.
+      // X >= 0   ->  Likely
+      isProb = true;
+      break;
+    default:
+      return false;
+    }
   } else {
     return false;
   }
@@ -469,6 +484,8 @@ void BranchProbabilityInfo::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool BranchProbabilityInfo::runOnFunction(Function &F) {
+  DEBUG(dbgs() << "---- Branch Probability Info : " << F.getName()
+               << " ----\n\n");
   LastF = &F; // Store the last function we ran on for printing.
   LI = &getAnalysis<LoopInfo>();
   assert(PostDominatedByUnreachable.empty());
@@ -575,6 +592,11 @@ getEdgeWeight(const BasicBlock *Src, unsigned IndexInSuccessors) const {
     return I->second;
 
   return DEFAULT_WEIGHT;
+}
+
+uint32_t BranchProbabilityInfo::getEdgeWeight(const BasicBlock *Src,
+                                              succ_const_iterator Dst) const {
+  return getEdgeWeight(Src, Dst.getSuccessorIndex());
 }
 
 /// Get the raw edge weight calculated for the block pair. This returns the sum

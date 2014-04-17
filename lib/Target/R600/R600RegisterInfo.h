@@ -39,12 +39,16 @@ struct R600RegisterInfo : public AMDGPURegisterInfo {
   /// \brief get the HW encoding for a register's channel.
   unsigned getHWRegChan(unsigned reg) const;
 
+  virtual unsigned getHWRegIndex(unsigned Reg) const;
+
   /// \brief get the register class of the specified type to use in the
   /// CFGStructurizer
   virtual const TargetRegisterClass * getCFGStructurizerRegClass(MVT VT) const;
 
   virtual const RegClassWeight &getRegClassWeight(const TargetRegisterClass *RC) const;
 
+  // \returns true if \p Reg can be defined in one ALU caluse and used in another.
+  virtual bool isPhysRegLiveAcrossClauses(unsigned Reg) const;
 };
 
 } // End namespace llvm

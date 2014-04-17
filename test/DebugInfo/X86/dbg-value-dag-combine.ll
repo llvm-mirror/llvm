@@ -16,7 +16,7 @@ entry:
   call void @llvm.dbg.value(metadata !12, i64 0, metadata !13), !dbg !14
   %tmp2 = load i32 addrspace(1)* %ip, align 4, !dbg !15
   %tmp3 = add i32 0, %tmp2, !dbg !15
-; CHECK:  ##DEBUG_VALUE: idx <- EAX{{$}}
+; CHECK:  ##DEBUG_VALUE: idx <- E{{..$}}
   call void @llvm.dbg.value(metadata !{i32 %tmp3}, i64 0, metadata !13), !dbg
 !15
   %arrayidx = getelementptr i32 addrspace(1)* %ip, i32 %1, !dbg !16
@@ -24,6 +24,7 @@ entry:
   ret void, !dbg !17
 }
 !llvm.dbg.cu = !{!2}
+!llvm.module.flags = !{!20}
 
 !0 = metadata !{i32 786478, metadata !19, metadata !1, metadata !"__OpenCL_test_kernel", metadata !"__OpenCL_test_kernel", metadata !"__OpenCL_test_kernel", i32 2, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ] [line 2] [def] [scope 0] [__OpenCL_test_kernel]
 !1 = metadata !{i32 786473, metadata !19} ; [ DW_TAG_file_type ]
@@ -45,3 +46,4 @@ entry:
 !17 = metadata !{i32 7, i32 1, metadata !0, null}
 !18 = metadata !{metadata !0}
 !19 = metadata !{metadata !"OCL6368.tmp.cl", metadata !"E:\5CUsers\5Cmvillmow.AMD\5CAppData\5CLocal\5CTemp"}
+!20 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

@@ -20,8 +20,8 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/ADT/ValueMap.h"
-#include "llvm/Support/ValueHandle.h"
+#include "llvm/IR/ValueHandle.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
 namespace llvm {
@@ -109,7 +109,7 @@ BasicBlock *CloneBasicBlock(const BasicBlock *BB,
 /// information about the cloned code if non-null.
 ///
 /// If ModuleLevelChanges is false, VMap contains no non-identity GlobalValue
-/// mappings.
+/// mappings, and debug info metadata will not be cloned.
 ///
 Function *CloneFunction(const Function *F,
                         ValueToValueMapTy &VMap,
@@ -151,7 +151,7 @@ void CloneAndPruneFunctionInto(Function *NewFunc, const Function *OldFunc,
                                SmallVectorImpl<ReturnInst*> &Returns,
                                const char *NameSuffix = "", 
                                ClonedCodeInfo *CodeInfo = 0,
-                               const DataLayout *TD = 0,
+                               const DataLayout *DL = 0,
                                Instruction *TheCall = 0);
 
   
@@ -159,13 +159,13 @@ void CloneAndPruneFunctionInto(Function *NewFunc, const Function *OldFunc,
 /// InlineFunction call, and records the auxiliary results produced by it. 
 class InlineFunctionInfo {
 public:
-  explicit InlineFunctionInfo(CallGraph *cg = 0, const DataLayout *td = 0)
-    : CG(cg), TD(td) {}
+  explicit InlineFunctionInfo(CallGraph *cg = 0, const DataLayout *DL = 0)
+    : CG(cg), DL(DL) {}
   
   /// CG - If non-null, InlineFunction will update the callgraph to reflect the
   /// changes it makes.
   CallGraph *CG;
-  const DataLayout *TD;
+  const DataLayout *DL;
 
   /// StaticAllocas - InlineFunction fills this in with all static allocas that
   /// get copied into the caller.

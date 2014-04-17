@@ -97,7 +97,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenTarget.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -287,15 +286,6 @@ public:
     }
   }
 };
-
-namespace {
-/// Sort ClassInfo pointers independently of pointer value.
-struct LessClassInfoPtr {
-  bool operator()(const ClassInfo *LHS, const ClassInfo *RHS) const {
-    return *LHS < *RHS;
-  }
-};
-}
 
 /// MatchableInfo - Helper class for storing the necessary information for an
 /// instruction or alias which is capable of being matched.
@@ -729,12 +719,12 @@ void MatchableInfo::formTwoOperandAlias(StringRef Constraint) {
   int DstAsmOperand = findAsmOperandNamed(Ops.second);
   if (SrcAsmOperand == -1)
     PrintFatalError(TheDef->getLoc(),
-                  "unknown source two-operand alias operand '" +
-                  Ops.first.str() + "'.");
+                    "unknown source two-operand alias operand '" + Ops.first +
+                    "'.");
   if (DstAsmOperand == -1)
     PrintFatalError(TheDef->getLoc(),
-                  "unknown destination two-operand alias operand '" +
-                  Ops.second.str() + "'.");
+                    "unknown destination two-operand alias operand '" +
+                    Ops.second + "'.");
 
   // Find the ResOperand that refers to the operand we're aliasing away
   // and update it to refer to the combined operand instead.
@@ -882,7 +872,7 @@ void MatchableInfo::tokenizeAsmString(const AsmMatcherInfo &Info) {
   // FIXME : Check and raise an error if it is a register.
   if (Mnemonic[0] == '$')
     PrintFatalError(TheDef->getLoc(),
-                  "Invalid instruction mnemonic '" + Mnemonic.str() + "'!");
+                    "Invalid instruction mnemonic '" + Mnemonic + "'!");
 
   // Remove the first operand, it is tracked in the mnemonic field.
   AsmOperands.erase(AsmOperands.begin());
@@ -919,22 +909,22 @@ bool MatchableInfo::validate(StringRef CommentDelimiter, bool Hack) const {
     StringRef Tok = AsmOperands[i].Token;
     if (Tok[0] == '$' && Tok.find(':') != StringRef::npos)
       PrintFatalError(TheDef->getLoc(),
-                    "matchable with operand modifier '" + Tok.str() +
-                    "' not supported by asm matcher.  Mark isCodeGenOnly!");
+                      "matchable with operand modifier '" + Tok +
+                      "' not supported by asm matcher.  Mark isCodeGenOnly!");
 
     // Verify that any operand is only mentioned once.
     // We reject aliases and ignore instructions for now.
     if (Tok[0] == '$' && !OperandNames.insert(Tok).second) {
       if (!Hack)
         PrintFatalError(TheDef->getLoc(),
-                      "ERROR: matchable with tied operand '" + Tok.str() +
-                      "' can never be matched!");
+                        "ERROR: matchable with tied operand '" + Tok +
+                        "' can never be matched!");
       // FIXME: Should reject these.  The ARM backend hits this with $lane in a
       // bunch of instructions.  It is unclear what the right answer is.
       DEBUG({
         errs() << "warning: '" << TheDef->getName() << "': "
                << "ignoring instruction with tied operand '"
-               << Tok.str() << "'\n";
+               << Tok << "'\n";
       });
       return false;
     }
@@ -1288,7 +1278,7 @@ void AsmMatcherInfo::buildOperandMatchInfo() {
 
   /// Map containing a mask with all operands indices that can be found for
   /// that class inside a instruction.
-  typedef std::map<ClassInfo*, unsigned, LessClassInfoPtr> OpClassMaskTy;
+  typedef std::map<ClassInfo *, unsigned, less_ptr<ClassInfo>> OpClassMaskTy;
   OpClassMaskTy OpClassMask;
 
   for (std::vector<MatchableInfo*>::const_iterator it =
@@ -1359,7 +1349,7 @@ void AsmMatcherInfo::buildInfo() {
       if (CGI.TheDef->getValueAsBit("isCodeGenOnly"))
         continue;
 
-      OwningPtr<MatchableInfo> II(new MatchableInfo(CGI));
+      std::unique_ptr<MatchableInfo> II(new MatchableInfo(CGI));
 
       II->initialize(*this, SingletonRegisters, AsmVariantNo, RegisterPrefix);
 
@@ -1375,7 +1365,7 @@ void AsmMatcherInfo::buildInfo() {
           StringRef(II->TheDef->getName()).endswith("_Int"))
         continue;
 
-      Matchables.push_back(II.take());
+      Matchables.push_back(II.release());
     }
 
     // Parse all of the InstAlias definitions and stick them in the list of
@@ -1392,14 +1382,14 @@ void AsmMatcherInfo::buildInfo() {
             .startswith( MatchPrefix))
         continue;
 
-      OwningPtr<MatchableInfo> II(new MatchableInfo(Alias));
+      std::unique_ptr<MatchableInfo> II(new MatchableInfo(Alias));
 
       II->initialize(*this, SingletonRegisters, AsmVariantNo, RegisterPrefix);
 
       // Validate the alias definitions.
       II->validate(CommentDelimiter, false);
 
-      Matchables.push_back(II.take());
+      Matchables.push_back(II.release());
     }
   }
 
@@ -1464,13 +1454,13 @@ void AsmMatcherInfo::buildInfo() {
         II->TheDef->getValueAsString("TwoOperandAliasConstraint");
       if (Constraint != "") {
         // Start by making a copy of the original matchable.
-        OwningPtr<MatchableInfo> AliasII(new MatchableInfo(*II));
+        std::unique_ptr<MatchableInfo> AliasII(new MatchableInfo(*II));
 
         // Adjust it to be a two-operand alias.
         AliasII->formTwoOperandAlias(Constraint);
 
         // Add the alias to the matchables list.
-        NewMatchables.push_back(AliasII.take());
+        NewMatchables.push_back(AliasII.release());
       }
     } else
       II->buildAliasResultOperands();
@@ -1510,8 +1500,8 @@ buildInstructionOperandReference(MatchableInfo *II,
   // Map this token to an operand.
   unsigned Idx;
   if (!Operands.hasOperandNamed(OperandName, Idx))
-    PrintFatalError(II->TheDef->getLoc(), "error: unable to find operand: '" +
-                  OperandName.str() + "'");
+    PrintFatalError(II->TheDef->getLoc(),
+                    "error: unable to find operand: '" + OperandName + "'");
 
   // If the instruction operand has multiple suboperands, but the parser
   // match class for the asm operand is still the default "ImmAsmOperand",
@@ -1583,8 +1573,8 @@ void AsmMatcherInfo::buildAliasOperandReference(MatchableInfo *II,
       return;
     }
 
-  PrintFatalError(II->TheDef->getLoc(), "error: unable to find operand: '" +
-                OperandName.str() + "'");
+  PrintFatalError(II->TheDef->getLoc(),
+                  "error: unable to find operand: '" + OperandName + "'");
 }
 
 void MatchableInfo::buildInstructionResultOperands() {
@@ -2691,8 +2681,8 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "                       const SmallVectorImpl<MCParsedAsmOperand*> "
      << "&Operands);\n";
   OS << "  void convertToMapAndConstraints(unsigned Kind,\n                ";
-  OS << "           const SmallVectorImpl<MCParsedAsmOperand*> &Operands);\n";
-  OS << "  bool mnemonicIsValid(StringRef Mnemonic, unsigned VariantID);\n";
+  OS << "           const SmallVectorImpl<MCParsedAsmOperand*> &Operands) override;\n";
+  OS << "  bool mnemonicIsValid(StringRef Mnemonic, unsigned VariantID) override;\n";
   OS << "  unsigned MatchInstructionImpl(\n";
   OS.indent(27);
   OS << "const SmallVectorImpl<MCParsedAsmOperand*> &Operands,\n"
@@ -2891,8 +2881,8 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
-    OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
-       << "; End = array_endof(MatchTable" << VC << "); break;\n";
+    OS << "  case " << AsmVariantNo << ": Start = std::begin(MatchTable" << VC
+       << "); End = std::end(MatchTable" << VC << "); break;\n";
   }
   OS << "  }\n";
   OS << "  // Search the table.\n";
@@ -2946,8 +2936,8 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   for (unsigned VC = 0; VC != VariantCount; ++VC) {
     Record *AsmVariant = Target.getAsmParserVariant(VC);
     int AsmVariantNo = AsmVariant->getValueAsInt("Variant");
-    OS << "  case " << AsmVariantNo << ": Start = MatchTable" << VC
-       << "; End = array_endof(MatchTable" << VC << "); break;\n";
+    OS << "  case " << AsmVariantNo << ": Start = std::begin(MatchTable" << VC
+       << "); End = std::end(MatchTable" << VC << "); break;\n";
   }
   OS << "  }\n";
   OS << "  // Search the table.\n";

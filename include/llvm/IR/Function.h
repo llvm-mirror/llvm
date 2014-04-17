@@ -18,6 +18,7 @@
 #ifndef LLVM_IR_FUNCTION_H
 #define LLVM_IR_FUNCTION_H
 
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -122,11 +123,11 @@ private:
   /// the module.
   ///
   Function(FunctionType *Ty, LinkageTypes Linkage,
-           const Twine &N = "", Module *M = 0);
+           const Twine &N = "", Module *M = nullptr);
 
 public:
   static Function *Create(FunctionType *Ty, LinkageTypes Linkage,
-                          const Twine &N = "", Module *M = 0) {
+                          const Twine &N = "", Module *M = nullptr) {
     return new(0) Function(Ty, Linkage, N, M);
   }
 
@@ -335,7 +336,7 @@ public:
 
   /// copyAttributesFrom - copy all additional attributes (those not needed to
   /// create a Function) from the Function Src to this one.
-  void copyAttributesFrom(const GlobalValue *Src);
+  void copyAttributesFrom(const GlobalValue *Src) override;
 
   /// deleteBody - This method deletes the body of the function, and converts
   /// the linkage to external.
@@ -348,12 +349,12 @@ public:
   /// removeFromParent - This method unlinks 'this' from the containing module,
   /// but does not delete it.
   ///
-  virtual void removeFromParent();
+  void removeFromParent() override;
 
   /// eraseFromParent - This method unlinks 'this' from the containing module
   /// and deletes it.
   ///
-  virtual void eraseFromParent();
+  void eraseFromParent() override;
 
 
   /// Get the underlying elements of the Function... the basic block list is
@@ -404,9 +405,9 @@ public:
   const BasicBlock        &back() const { return BasicBlocks.back();  }
         BasicBlock        &back()       { return BasicBlocks.back();  }
 
-  //===--------------------------------------------------------------------===//
-  // Argument iterator forwarding functions
-  //
+/// @name Function Argument Iteration
+/// @{
+
   arg_iterator arg_begin() {
     CheckLazyArguments();
     return ArgumentList.begin();
@@ -423,6 +424,16 @@ public:
     CheckLazyArguments();
     return ArgumentList.end();
   }
+
+  iterator_range<arg_iterator> args() {
+    return iterator_range<arg_iterator>(arg_begin(), arg_end());
+  }
+
+  iterator_range<const_arg_iterator> args() const {
+    return iterator_range<const_arg_iterator>(arg_begin(), arg_end());
+  }
+
+/// @}
 
   size_t arg_size() const;
   bool arg_empty() const;
@@ -472,7 +483,7 @@ public:
   /// other than direct calls or invokes to it, or blockaddress expressions.
   /// Optionally passes back an offending user for diagnostic purposes.
   ///
-  bool hasAddressTaken(const User** = 0) const;
+  bool hasAddressTaken(const User** = nullptr) const;
 
   /// isDefTriviallyDead - Return true if it is trivially safe to remove
   /// this function definition from the module (because it isn't externally
@@ -494,12 +505,12 @@ private:
 
 inline ValueSymbolTable *
 ilist_traits<BasicBlock>::getSymTab(Function *F) {
-  return F ? &F->getValueSymbolTable() : 0;
+  return F ? &F->getValueSymbolTable() : nullptr;
 }
 
 inline ValueSymbolTable *
 ilist_traits<Argument>::getSymTab(Function *F) {
-  return F ? &F->getValueSymbolTable() : 0;
+  return F ? &F->getValueSymbolTable() : nullptr;
 }
 
 } // End llvm namespace

@@ -39,11 +39,11 @@ attributes #2 = { nounwind readnone }
 attributes #3 = { nounwind }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!17}
+!llvm.module.flags = !{!17, !21}
 
 !0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 (trunk 190804) (llvm/trunk 190797)", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [//<unknown>] [DW_LANG_C_plus_plus]
 !1 = metadata !{metadata !"/<unknown>", metadata !""}
-!2 = metadata !{i32 0}
+!2 = metadata !{}
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786478, metadata !5, metadata !6, metadata !"h", metadata !"h", metadata !"_Z1hiiiif", i32 3, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, void (i32, i32, i32, i32, float)* @_Z1hiiiif, null, null, metadata !11, i32 3} ; [ DW_TAG_subprogram ] [line 3] [def] [h]
 !5 = metadata !{metadata !"/arm.cpp", metadata !""}
@@ -62,3 +62,4 @@ attributes #3 = { nounwind }
 !18 = metadata !{i32 3, i32 0, metadata !4, null}
 !19 = metadata !{i32 4, i32 0, metadata !4, null}
 !20 = metadata !{i32 5, i32 0, metadata !4, null}
+!21 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}

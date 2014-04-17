@@ -13,23 +13,23 @@
 
 #define DEBUG_TYPE "mips-isel"
 #include "MipsISelDAGToDAG.h"
-#include "Mips16ISelDAGToDAG.h"
-#include "MipsSEISelDAGToDAG.h"
-#include "Mips.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
+#include "Mips.h"
+#include "Mips16ISelDAGToDAG.h"
 #include "MipsMachineFunction.h"
 #include "MipsRegisterInfo.h"
+#include "MipsSEISelDAGToDAG.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -93,6 +93,12 @@ bool MipsDAGToDAGISel::selectIntAddrMM(SDValue Addr, SDValue &Base,
   return false;
 }
 
+bool MipsDAGToDAGISel::selectIntAddrMSA(SDValue Addr, SDValue &Base,
+                                        SDValue &Offset) const {
+  llvm_unreachable("Unimplemented function.");
+  return false;
+}
+
 bool MipsDAGToDAGISel::selectAddr16(SDNode *Parent, SDValue N, SDValue &Base,
                                     SDValue &Offset, SDValue &Alias) {
   llvm_unreachable("Unimplemented function.");
@@ -145,6 +151,21 @@ bool MipsDAGToDAGISel::selectVSplatSimm5(SDValue N, SDValue &Imm) const {
 }
 
 bool MipsDAGToDAGISel::selectVSplatUimmPow2(SDValue N, SDValue &Imm) const {
+  llvm_unreachable("Unimplemented function.");
+  return false;
+}
+
+bool MipsDAGToDAGISel::selectVSplatUimmInvPow2(SDValue N, SDValue &Imm) const {
+  llvm_unreachable("Unimplemented function.");
+  return false;
+}
+
+bool MipsDAGToDAGISel::selectVSplatMaskL(SDValue N, SDValue &Imm) const {
+  llvm_unreachable("Unimplemented function.");
+  return false;
+}
+
+bool MipsDAGToDAGISel::selectVSplatMaskR(SDValue N, SDValue &Imm) const {
   llvm_unreachable("Unimplemented function.");
   return false;
 }

@@ -16,8 +16,10 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
@@ -25,10 +27,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/Support/ConstantRange.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/PatternMatch.h"
 #include <cstring>
 using namespace llvm;
 using namespace llvm::PatternMatch;
@@ -311,8 +311,9 @@ void llvm::ComputeMaskedBits(Value *V, APInt &KnownZero, APInt &KnownOne,
   if (Argument *A = dyn_cast<Argument>(V)) {
     unsigned Align = 0;
 
-    if (A->hasByValAttr()) {
-      // Get alignment information off byval arguments if specified in the IR.
+    if (A->hasByValOrInAllocaAttr()) {
+      // Get alignment information off byval/inalloca arguments if specified in
+      // the IR.
       Align = A->getParamAlignment();
     } else if (TD && A->hasStructRetAttr()) {
       // An sret parameter has at least the ABI alignment of the return type.
@@ -760,7 +761,6 @@ void llvm::ComputeMaskedBits(Value *V, APInt &KnownZero, APInt &KnownOne,
         KnownZero = APInt::getHighBitsSet(BitWidth, BitWidth - LowBits);
         break;
       }
-      case Intrinsic::x86_sse42_crc32_64_8:
       case Intrinsic::x86_sse42_crc32_64_64:
         KnownZero = APInt::getHighBitsSet(64, 32);
         break;
@@ -1960,9 +1960,8 @@ llvm::GetUnderlyingObjects(Value *V,
 /// are lifetime markers.
 ///
 bool llvm::onlyUsedByLifetimeMarkers(const Value *V) {
-  for (Value::const_use_iterator UI = V->use_begin(), UE = V->use_end();
-       UI != UE; ++UI) {
-    const IntrinsicInst *II = dyn_cast<IntrinsicInst>(*UI);
+  for (const User *U : V->users()) {
+    const IntrinsicInst *II = dyn_cast<IntrinsicInst>(U);
     if (!II) return false;
 
     if (II->getIntrinsicID() != Intrinsic::lifetime_start &&
@@ -2007,7 +2006,9 @@ bool llvm::isSafeToSpeculativelyExecute(const Value *V,
   }
   case Instruction::Load: {
     const LoadInst *LI = cast<LoadInst>(Inst);
-    if (!LI->isUnordered())
+    if (!LI->isUnordered() ||
+        // Speculative load may create a race that did not exist in the source.
+        LI->getParent()->getParent()->hasFnAttribute(Attribute::SanitizeThread))
       return false;
     return LI->getPointerOperand()->isDereferenceablePointer();
   }
@@ -2033,6 +2034,12 @@ bool llvm::isSafeToSpeculativelyExecute(const Value *V,
        case Intrinsic::uadd_with_overflow:
        case Intrinsic::umul_with_overflow:
        case Intrinsic::usub_with_overflow:
+         return true;
+       // Sqrt should be OK, since the llvm sqrt intrinsic isn't defined to set
+       // errno like libm sqrt would.
+       case Intrinsic::sqrt:
+       case Intrinsic::fma:
+       case Intrinsic::fmuladd:
          return true;
        // TODO: some fp intrinsics are marked as having the same error handling
        // as libm. They're safe to speculate when they won't error.
@@ -2069,9 +2076,9 @@ bool llvm::isKnownNonNull(const Value *V, const TargetLibraryInfo *TLI) {
   // Alloca never returns null, malloc might.
   if (isa<AllocaInst>(V)) return true;
 
-  // A byval argument is never null.
+  // A byval or inalloca argument is never null.
   if (const Argument *A = dyn_cast<Argument>(V))
-    return A->hasByValAttr();
+    return A->hasByValOrInAllocaAttr();
 
   // Global values are not null unless extern weak.
   if (const GlobalValue *GV = dyn_cast<GlobalValue>(V))

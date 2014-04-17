@@ -17,7 +17,7 @@
 #include "ToolRunner.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
-#include "llvm/Linker.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileUtilities.h"
@@ -122,7 +122,7 @@ bool BugDriver::addSources(const std::vector<std::string> &Filenames) {
   outs() << "Read input file      : '" << Filenames[0] << "'\n";
 
   for (unsigned i = 1, e = Filenames.size(); i != e; ++i) {
-    OwningPtr<Module> M(ParseInputFile(Filenames[i], Context));
+    std::unique_ptr<Module> M(ParseInputFile(Filenames[i], Context));
     if (M.get() == 0) return true;
 
     outs() << "Linking in input file: '" << Filenames[i] << "'\n";

@@ -27,12 +27,10 @@ public:
   virtual ~SystemZDisassembler() {}
 
   // Override MCDisassembler.
-  virtual DecodeStatus getInstruction(MCInst &instr,
-                                      uint64_t &size,
-                                      const MemoryObject &region,
-                                      uint64_t address,
-                                      raw_ostream &vStream,
-                                      raw_ostream &cStream) const LLVM_OVERRIDE;
+  DecodeStatus getInstruction(MCInst &instr, uint64_t &size,
+                              const MemoryObject &region, uint64_t address,
+                              raw_ostream &vStream,
+                              raw_ostream &cStream) const override;
 };
 } // end anonymous namespace
 
@@ -48,14 +46,11 @@ extern "C" void LLVMInitializeSystemZDisassembler() {
 }
 
 static DecodeStatus decodeRegisterClass(MCInst &Inst, uint64_t RegNo,
-                                        const unsigned *Regs,
-                                        bool isAddress = false) {
+                                        const unsigned *Regs) {
   assert(RegNo < 16 && "Invalid register");
-  if (!isAddress || RegNo) {
-    RegNo = Regs[RegNo];
-    if (RegNo == 0)
-      return MCDisassembler::Fail;
-  }
+  RegNo = Regs[RegNo];
+  if (RegNo == 0)
+    return MCDisassembler::Fail;
   Inst.addOperand(MCOperand::CreateReg(RegNo));
   return MCDisassembler::Success;
 }
@@ -87,7 +82,7 @@ static DecodeStatus DecodeGR128BitRegisterClass(MCInst &Inst, uint64_t RegNo,
 static DecodeStatus DecodeADDR64BitRegisterClass(MCInst &Inst, uint64_t RegNo,
                                                  uint64_t Address,
                                                  const void *Decoder) {
-  return decodeRegisterClass(Inst, RegNo, SystemZMC::GR64Regs, true);
+  return decodeRegisterClass(Inst, RegNo, SystemZMC::GR64Regs);
 }
 
 static DecodeStatus DecodeFP32BitRegisterClass(MCInst &Inst, uint64_t RegNo,

@@ -14,8 +14,8 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCRelocationInfo.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Object/MachO.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Object/MachO.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 
@@ -34,31 +34,28 @@ class MCMachObjectSymbolizer : public MCObjectSymbolizer {
   uint64_t StubsIndSymIndex;
 
 public:
-  MCMachObjectSymbolizer(MCContext &Ctx, OwningPtr<MCRelocationInfo> &RelInfo,
+  MCMachObjectSymbolizer(MCContext &Ctx,
+                         std::unique_ptr<MCRelocationInfo> RelInfo,
                          const MachOObjectFile *MOOF);
 
-  StringRef findExternalFunctionAt(uint64_t Addr) LLVM_OVERRIDE;
+  StringRef findExternalFunctionAt(uint64_t Addr) override;
 
-  void tryAddingPcLoadReferenceComment(raw_ostream &cStream,
-                                       int64_t Value,
-                                       uint64_t Address) LLVM_OVERRIDE;
+  void tryAddingPcLoadReferenceComment(raw_ostream &cStream, int64_t Value,
+                                       uint64_t Address) override;
 };
 } // End unnamed namespace
 
+MCMachObjectSymbolizer::MCMachObjectSymbolizer(
+    MCContext &Ctx, std::unique_ptr<MCRelocationInfo> RelInfo,
+    const MachOObjectFile *MOOF)
+  : MCObjectSymbolizer(Ctx, std::move(RelInfo), MOOF), MOOF(MOOF),
+    StubsStart(0), StubsCount(0), StubSize(0), StubsIndSymIndex(0) {
 
-MCMachObjectSymbolizer::
-MCMachObjectSymbolizer(MCContext &Ctx, OwningPtr<MCRelocationInfo> &RelInfo,
-                       const MachOObjectFile *MOOF)
-    : MCObjectSymbolizer(Ctx, RelInfo, MOOF), MOOF(MOOF),
-      StubsStart(0), StubsCount(0), StubSize(0), StubsIndSymIndex(0) {
-
-  error_code ec;
-  for (section_iterator SI = MOOF->begin_sections(), SE = MOOF->end_sections();
-       SI != SE; SI.increment(ec)) {
-    if (ec) break;
-    StringRef Name; SI->getName(Name);
+  for (const SectionRef &Section : MOOF->sections()) {
+    StringRef Name;
+    Section.getName(Name);
     if (Name == "__stubs") {
-      SectionRef StubsSec = *SI;
+      SectionRef StubsSec = Section;
       if (MOOF->is64Bit()) {
         MachO::section_64 S = MOOF->getSection64(StubsSec.getRawDataRefImpl());
         StubsIndSymIndex = S.reserved1;
@@ -90,13 +87,11 @@ StringRef MCMachObjectSymbolizer::findExternalFunctionAt(uint64_t Addr) {
     MOOF->getIndirectSymbolTableEntry(MOOF->getDysymtabLoadCommand(), StubIdx);
 
   StringRef SymName;
-  symbol_iterator SI = MOOF->begin_symbols();
-  error_code ec;
-  for (uint32_t i = 0; i != SymtabIdx; ++i) {
-    SI.increment(ec);
-  }
+  symbol_iterator SI = MOOF->symbol_begin();
+  for (uint32_t i = 0; i != SymtabIdx; ++i)
+    ++SI;
   SI->getName(SymName);
-  assert(SI != MOOF->end_symbols() && "Stub wasn't found in the symbol table!");
+  assert(SI != MOOF->symbol_end() && "Stub wasn't found in the symbol table!");
   assert(SymName.front() == '_' && "Mach-O symbol doesn't start with '_'!");
   return SymName.substr(1);
 }
@@ -125,11 +120,11 @@ tryAddingPcLoadReferenceComment(raw_ostream &cStream, int64_t Value,
 
 //===- MCObjectSymbolizer -------------------------------------------------===//
 
-MCObjectSymbolizer::MCObjectSymbolizer(MCContext &Ctx,
-                                       OwningPtr<MCRelocationInfo> &RelInfo,
-                                       const ObjectFile *Obj)
-    : MCSymbolizer(Ctx, RelInfo), Obj(Obj), SortedSections(), AddrToReloc() {
-}
+MCObjectSymbolizer::MCObjectSymbolizer(
+  MCContext &Ctx, std::unique_ptr<MCRelocationInfo> RelInfo,
+  const ObjectFile *Obj)
+  : MCSymbolizer(Ctx, std::move(RelInfo)), Obj(Obj), SortedSections(),
+    AddrToReloc() {}
 
 bool MCObjectSymbolizer::
 tryAddingSymbolicOperand(MCInst &MI, raw_ostream &cStream,
@@ -159,16 +154,17 @@ tryAddingSymbolicOperand(MCInst &MI, raw_ostream &cStream,
     return false;
   uint64_t UValue = Value;
   // FIXME: map instead of looping each time?
-  error_code ec;
-  for (symbol_iterator SI = Obj->begin_symbols(), SE = Obj->end_symbols();
-       SI != SE; SI.increment(ec)) {
-    if (ec) break;
-    uint64_t SymAddr; SI->getAddress(SymAddr);
-    uint64_t SymSize; SI->getSize(SymSize);
-    StringRef SymName; SI->getName(SymName);
-    SymbolRef::Type SymType; SI->getType(SymType);
-    if (SymAddr == UnknownAddressOrSize || SymSize == UnknownAddressOrSize
-        || SymName.empty() || SymType != SymbolRef::ST_Function)
+  for (const SymbolRef &Symbol : Obj->symbols()) {
+    uint64_t SymAddr;
+    Symbol.getAddress(SymAddr);
+    uint64_t SymSize;
+    Symbol.getSize(SymSize);
+    StringRef SymName;
+    Symbol.getName(SymName);
+    SymbolRef::Type SymType;
+    Symbol.getType(SymType);
+    if (SymAddr == UnknownAddressOrSize || SymSize == UnknownAddressOrSize ||
+        SymName.empty() || SymType != SymbolRef::ST_Function)
       continue;
 
     if ( SymAddr == UValue ||
@@ -195,13 +191,12 @@ StringRef MCObjectSymbolizer::findExternalFunctionAt(uint64_t Addr) {
   return StringRef();
 }
 
-MCObjectSymbolizer *
-MCObjectSymbolizer::createObjectSymbolizer(MCContext &Ctx,
-                                           OwningPtr<MCRelocationInfo> &RelInfo,
-                                           const ObjectFile *Obj) {
+MCObjectSymbolizer *MCObjectSymbolizer::createObjectSymbolizer(
+    MCContext &Ctx, std::unique_ptr<MCRelocationInfo> RelInfo,
+    const ObjectFile *Obj) {
   if (const MachOObjectFile *MOOF = dyn_cast<MachOObjectFile>(Obj))
-    return new MCMachObjectSymbolizer(Ctx, RelInfo, MOOF);
-  return new MCObjectSymbolizer(Ctx, RelInfo, Obj);
+    return new MCMachObjectSymbolizer(Ctx, std::move(RelInfo), MOOF);
+  return new MCObjectSymbolizer(Ctx, std::move(RelInfo), Obj);
 }
 
 // SortedSections implementation.
@@ -220,11 +215,11 @@ const SectionRef *MCObjectSymbolizer::findSectionContaining(uint64_t Addr) {
     It = std::lower_bound(SortedSections.begin(), EndIt,
                           Addr, SectionStartsBefore);
   if (It == EndIt)
-    return 0;
+    return nullptr;
   uint64_t SAddr; It->getAddress(SAddr);
   uint64_t SSize; It->getSize(SSize);
   if (Addr >= SAddr + SSize)
-    return 0;
+    return nullptr;
   return &*It;
 }
 
@@ -234,77 +229,40 @@ const RelocationRef *MCObjectSymbolizer::findRelocationAt(uint64_t Addr) {
 
   AddrToRelocMap::const_iterator RI = AddrToReloc.find(Addr);
   if (RI == AddrToReloc.end())
-    return 0;
+    return nullptr;
   return &RI->second;
 }
 
 void MCObjectSymbolizer::buildSectionList() {
-  error_code ec;
-  for (section_iterator SI = Obj->begin_sections(), SE = Obj->end_sections();
-                        SI != SE; SI.increment(ec)) {
-    if (ec) break;
-
-    bool RequiredForExec; SI->isRequiredForExecution(RequiredForExec);
+  for (const SectionRef &Section : Obj->sections()) {
+    bool RequiredForExec;
+    Section.isRequiredForExecution(RequiredForExec);
     if (RequiredForExec == false)
       continue;
-    uint64_t SAddr; SI->getAddress(SAddr);
-    uint64_t SSize; SI->getSize(SSize);
-    SortedSectionList::iterator It = std::lower_bound(SortedSections.begin(),
-                                                      SortedSections.end(),
-                                                      SAddr,
-                                                      SectionStartsBefore);
+    uint64_t SAddr;
+    Section.getAddress(SAddr);
+    uint64_t SSize;
+    Section.getSize(SSize);
+    SortedSectionList::iterator It =
+        std::lower_bound(SortedSections.begin(), SortedSections.end(), SAddr,
+                         SectionStartsBefore);
     if (It != SortedSections.end()) {
       uint64_t FoundSAddr; It->getAddress(FoundSAddr);
       if (FoundSAddr < SAddr + SSize)
         llvm_unreachable("Inserting overlapping sections");
     }
-    SortedSections.insert(It, *SI);
+    SortedSections.insert(It, Section);
   }
 }
 
 void MCObjectSymbolizer::buildRelocationByAddrMap() {
-  error_code ec;
-  for (section_iterator SI = Obj->begin_sections(), SE = Obj->end_sections();
-                        SI != SE; SI.increment(ec)) {
-    if (ec) break;
-
-    section_iterator RelSecI = SI->getRelocatedSection();
-    if (RelSecI == Obj->end_sections())
-      continue;
-
-    uint64_t StartAddr; RelSecI->getAddress(StartAddr);
-    uint64_t Size; RelSecI->getSize(Size);
-    bool RequiredForExec; RelSecI->isRequiredForExecution(RequiredForExec);
-    if (RequiredForExec == false || Size == 0)
-      continue;
-    for (relocation_iterator RI = SI->begin_relocations(),
-                             RE = SI->end_relocations();
-                             RI != RE;
-                             RI.increment(ec)) {
-      if (ec) break;
-      // FIXME: libObject is inconsistent regarding error handling. The
-      // overwhelming majority of methods always return object_error::success,
-      // and assert for simple errors.. Here, ELFObjectFile::getRelocationOffset
-      // asserts when the file type isn't ET_REL.
-      // This workaround handles x86-64 elf, the only one that has a relocinfo.
-      uint64_t Offset;
-      if (Obj->isELF()) {
-        const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj);
-        if (ELFObj == 0)
-          break;
-        if (ELFObj->getELFFile()->getHeader()->e_type == ELF::ET_REL) {
-          RI->getOffset(Offset);
-          Offset += StartAddr;
-        } else {
-          RI->getAddress(Offset);
-        }
-      } else {
-        RI->getOffset(Offset);
-        Offset += StartAddr;
-      }
+  for (const SectionRef &Section : Obj->sections()) {
+    for (const RelocationRef &Reloc : Section.relocations()) {
+      uint64_t Address;
+      Reloc.getAddress(Address);
       // At a specific address, only keep the first relocation.
-      if (AddrToReloc.find(Offset) == AddrToReloc.end())
-        AddrToReloc[Offset] = *RI;
+      if (AddrToReloc.find(Address) == AddrToReloc.end())
+        AddrToReloc[Address] = Reloc;
     }
   }
 }

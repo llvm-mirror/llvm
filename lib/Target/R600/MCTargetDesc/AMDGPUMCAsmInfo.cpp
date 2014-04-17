@@ -13,7 +13,6 @@
 using namespace llvm;
 AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(StringRef &TT) : MCAsmInfo() {
   HasSingleParameterDotFile = false;
-  WeakDefDirective = 0;
   //===------------------------------------------------------------------===//
   HasSubsectionsViaSymbols = true;
   HasMachoZeroFillDirective = false;
@@ -22,18 +21,11 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(StringRef &TT) : MCAsmInfo() {
   LinkerRequiresNonEmptyDwarfLines = true;
   MaxInstLength = 16;
   SeparatorString = "\n";
-  CommentColumn = 40;
   CommentString = ";";
   LabelSuffix = ":";
-  GlobalPrefix = "@";
-  PrivateGlobalPrefix = ";.";
-  LinkerPrivateGlobalPrefix = "!";
   InlineAsmStart = ";#ASMSTART";
   InlineAsmEnd = ";#ASMEND";
   AssemblerDialect = 0;
-  AllowQuotesInName = false;
-  AllowNameToStartWithDigit = false;
-  AllowPeriodsInName = false;
 
   //===--- Data Emission Directives -------------------------------------===//
   ZeroDirective = ".zero";
@@ -46,24 +38,19 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(StringRef &TT) : MCAsmInfo() {
   GPRel32Directive = 0;
   SunStyleELFSectionSwitchSyntax = true;
   UsesELFSectionDirectiveForBSS = true;
-  HasMicrosoftFastStdCallMangling = false;
 
   //===--- Alignment Information ----------------------------------------===//
-  AlignDirective = ".align\t";
   AlignmentIsInBytes = true;
   TextAlignFillValue = 0;
 
   //===--- Global Variable Emission Directives --------------------------===//
   GlobalDirective = ".global";
-  ExternDirective = ".extern";
   HasSetDirective = false;
   HasAggressiveSymbolFolding = true;
   COMMDirectiveAlignmentIsInBytes = false;
   HasDotTypeDotSizeDirective = false;
   HasNoDeadStrip = true;
-  HasSymbolResolver = false;
   WeakRefDirective = ".weakref\t";
-  LinkOnceDirective = 0;
   //===--- Dwarf Emission Directives -----------------------------------===//
   HasLEB128 = true;
   SupportsDebugInformation = true;

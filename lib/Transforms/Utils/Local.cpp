@@ -17,15 +17,17 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/DIBuilder.h"
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
@@ -35,11 +37,9 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/Support/CFG.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/ValueHandle.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -127,8 +127,10 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       // dest.  If so, eliminate it as an explicit compare.
       if (i.getCaseSuccessor() == DefaultDest) {
         MDNode* MD = SI->getMetadata(LLVMContext::MD_prof);
-        // MD should have 2 + NumCases operands.
-        if (MD && MD->getNumOperands() == 2 + SI->getNumCases()) {
+        unsigned NCases = SI->getNumCases();
+        // Fold the case metadata into the default if there will be any branches
+        // left, unless the metadata doesn't match the switch.
+        if (NCases > 1 && MD && MD->getNumOperands() == 2 + NCases) {
           // Collect branch weights into a vector.
           SmallVector<uint32_t, 8> Weights;
           for (unsigned MD_i = 1, MD_e = MD->getNumOperands(); MD_i < MD_e;
@@ -352,8 +354,8 @@ llvm::RecursivelyDeleteTriviallyDeadInstructions(Value *V,
 /// true when there are no uses or multiple uses that all refer to the same
 /// value.
 static bool areAllUsesEqual(Instruction *I) {
-  Value::use_iterator UI = I->use_begin();
-  Value::use_iterator UE = I->use_end();
+  Value::user_iterator UI = I->user_begin();
+  Value::user_iterator UE = I->user_end();
   if (UI == UE)
     return true;
 
@@ -374,7 +376,7 @@ bool llvm::RecursivelyDeleteDeadPHINode(PHINode *PN,
                                         const TargetLibraryInfo *TLI) {
   SmallPtrSet<Instruction*, 4> Visited;
   for (Instruction *I = PN; areAllUsesEqual(I) && !I->mayHaveSideEffects();
-       I = cast<Instruction>(*I->use_begin())) {
+       I = cast<Instruction>(*I->user_begin())) {
     if (I->use_empty())
       return RecursivelyDeleteTriviallyDeadInstructions(I, TLI);
 
@@ -506,11 +508,12 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB, Pass *P) {
   DestBB->getInstList().splice(DestBB->begin(), PredBB->getInstList());
 
   if (P) {
-    DominatorTree *DT = P->getAnalysisIfAvailable<DominatorTree>();
-    if (DT) {
-      BasicBlock *PredBBIDom = DT->getNode(PredBB)->getIDom()->getBlock();
-      DT->changeImmediateDominator(DestBB, PredBBIDom);
-      DT->eraseNode(PredBB);
+    if (DominatorTreeWrapperPass *DTWP =
+            P->getAnalysisIfAvailable<DominatorTreeWrapperPass>()) {
+      DominatorTree &DT = DTWP->getDomTree();
+      BasicBlock *PredBBIDom = DT.getNode(PredBB)->getIDom()->getBlock();
+      DT.changeImmediateDominator(DestBB, PredBBIDom);
+      DT.eraseNode(PredBB);
     }
   }
   // Nuke BB.
@@ -749,10 +752,9 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB) {
   if (!Succ->getSinglePredecessor()) {
     BasicBlock::iterator BBI = BB->begin();
     while (isa<PHINode>(*BBI)) {
-      for (Value::use_iterator UI = BBI->use_begin(), E = BBI->use_end();
-           UI != E; ++UI) {
-        if (PHINode* PN = dyn_cast<PHINode>(*UI)) {
-          if (PN->getIncomingBlock(UI) != BB)
+      for (Use &U : BBI->uses()) {
+        if (PHINode* PN = dyn_cast<PHINode>(U.getUser())) {
+          if (PN->getIncomingBlock(U) != BB)
             return false;
         } else {
           return false;
@@ -1034,26 +1036,28 @@ bool llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
 bool llvm::LowerDbgDeclare(Function &F) {
   DIBuilder DIB(*F.getParent());
   SmallVector<DbgDeclareInst *, 4> Dbgs;
-  for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI)
-    for (BasicBlock::iterator BI = FI->begin(), BE = FI->end(); BI != BE; ++BI) {
-      if (DbgDeclareInst *DDI = dyn_cast<DbgDeclareInst>(BI))
+  for (auto &FI : F)
+    for (BasicBlock::iterator BI : FI)
+      if (auto DDI = dyn_cast<DbgDeclareInst>(BI))
         Dbgs.push_back(DDI);
-    }
+
   if (Dbgs.empty())
     return false;
 
-  for (SmallVectorImpl<DbgDeclareInst *>::iterator I = Dbgs.begin(),
-         E = Dbgs.end(); I != E; ++I) {
-    DbgDeclareInst *DDI = *I;
-    if (AllocaInst *AI = dyn_cast_or_null<AllocaInst>(DDI->getAddress())) {
+  for (auto &I : Dbgs) {
+    DbgDeclareInst *DDI = I;
+    AllocaInst *AI = dyn_cast_or_null<AllocaInst>(DDI->getAddress());
+    // If this is an alloca for a scalar variable, insert a dbg.value
+    // at each load and store to the alloca and erase the dbg.declare.
+    if (AI && !AI->isArrayAllocation()) {
+
       // We only remove the dbg.declare intrinsic if all uses are
       // converted to dbg.value intrinsics.
       bool RemoveDDI = true;
-      for (Value::use_iterator UI = AI->use_begin(), E = AI->use_end();
-           UI != E; ++UI)
-        if (StoreInst *SI = dyn_cast<StoreInst>(*UI))
+      for (User *U : AI->users())
+        if (StoreInst *SI = dyn_cast<StoreInst>(U))
           ConvertDebugDeclareToDebugValue(DDI, SI, DIB);
-        else if (LoadInst *LI = dyn_cast<LoadInst>(*UI))
+        else if (LoadInst *LI = dyn_cast<LoadInst>(U))
           ConvertDebugDeclareToDebugValue(DDI, LI, DIB);
         else
           RemoveDDI = false;
@@ -1068,9 +1072,8 @@ bool llvm::LowerDbgDeclare(Function &F) {
 /// alloca 'V', if any.
 DbgDeclareInst *llvm::FindAllocaDbgDeclare(Value *V) {
   if (MDNode *DebugNode = MDNode::getIfExists(V->getContext(), V))
-    for (Value::use_iterator UI = DebugNode->use_begin(),
-         E = DebugNode->use_end(); UI != E; ++UI)
-      if (DbgDeclareInst *DDI = dyn_cast<DbgDeclareInst>(*UI))
+    for (User *U : DebugNode->users())
+      if (DbgDeclareInst *DDI = dyn_cast<DbgDeclareInst>(U))
         return DDI;
 
   return 0;

@@ -1,12 +1,12 @@
-; RUN: llc < %s -mcpu=generic -mtriple=i686-linux -segmented-stacks -verify-machineinstrs | FileCheck %s -check-prefix=X32
-; RUN: llc < %s -mcpu=generic -mtriple=x86_64-linux  -segmented-stacks -verify-machineinstrs | FileCheck %s -check-prefix=X64
-; RUN: llc < %s -mcpu=generic -mtriple=i686-linux -segmented-stacks -filetype=obj
-; RUN: llc < %s -mcpu=generic -mtriple=x86_64-linux -segmented-stacks -filetype=obj
+; RUN: llc < %s -mcpu=generic -mtriple=i686-linux -verify-machineinstrs | FileCheck %s -check-prefix=X32
+; RUN: llc < %s -mcpu=generic -mtriple=x86_64-linux -verify-machineinstrs | FileCheck %s -check-prefix=X64
+; RUN: llc < %s -mcpu=generic -mtriple=i686-linux -filetype=obj
+; RUN: llc < %s -mcpu=generic -mtriple=x86_64-linux -filetype=obj
 
 ; Just to prevent the alloca from being optimized away
 declare void @dummy_use(i32*, i32)
 
-define i32 @test_basic(i32 %l) {
+define i32 @test_basic(i32 %l) #0 {
         %mem = alloca i32, i32 %l
         call void @dummy_use (i32* %mem, i32 %l)
         %terminate = icmp eq i32 %l, 0
@@ -31,7 +31,7 @@ false:
 ; X32-NEXT: ret
 
 ; X32:      movl %esp, %eax
-; X32-NEXT: subl %ecx, %eax
+; X32:      subl %ecx, %eax
 ; X32-NEXT: cmpl %eax, %gs:48
 
 ; X32:      movl %eax, %esp
@@ -52,7 +52,7 @@ false:
 ; X64-NEXT: ret
 
 ; X64:      movq %rsp, %[[RDI:rdi|rax]]
-; X64-NEXT: subq %{{.*}}, %[[RDI]]
+; X64:      subq %{{.*}}, %[[RDI]]
 ; X64-NEXT: cmpq %[[RDI]], %fs:112
 
 ; X64:      movq %[[RDI]], %rsp
@@ -62,3 +62,5 @@ false:
 ; X64:      movq %rax, %rdi
 
 }
+
+attributes #0 = { "split-stack" }

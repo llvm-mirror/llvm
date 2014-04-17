@@ -13,37 +13,45 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/LTO/LTOModule.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
+#include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/system_error.h"
+#include "llvm/Target/TargetLowering.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Transforms/Utils/GlobalStatus.h"
 using namespace llvm;
 
 LTOModule::LTOModule(llvm::Module *m, llvm::TargetMachine *t)
   : _module(m), _target(t),
-    _context(_target->getMCAsmInfo(), _target->getRegisterInfo(), NULL),
-    _mangler(_context, t) {}
+    _context(_target->getMCAsmInfo(), _target->getRegisterInfo(), &ObjFileInfo),
+    _mangler(t->getDataLayout()) {
+  ObjFileInfo.InitMCObjectFileInfo(t->getTargetTriple(),
+                                   t->getRelocationModel(), t->getCodeModel(),
+                                   _context);
+}
 
 /// isBitcodeFile - Returns 'true' if the file (or memory contents) is LLVM
 /// bitcode.
@@ -71,10 +79,10 @@ bool LTOModule::isBitcodeFileForTarget(const void *mem, size_t length,
 
 bool LTOModule::isBitcodeFileForTarget(const char *path,
                                        const char *triplePrefix) {
-  OwningPtr<MemoryBuffer> buffer;
+  std::unique_ptr<MemoryBuffer> buffer;
   if (MemoryBuffer::getFile(path, buffer))
     return false;
-  return isTargetMatch(buffer.take(), triplePrefix);
+  return isTargetMatch(buffer.release(), triplePrefix);
 }
 
 /// isTargetMatch - Returns 'true' if the memory buffer is for the specified
@@ -89,12 +97,12 @@ bool LTOModule::isTargetMatch(MemoryBuffer *buffer, const char *triplePrefix) {
 /// the buffer.
 LTOModule *LTOModule::makeLTOModule(const char *path, TargetOptions options,
                                     std::string &errMsg) {
-  OwningPtr<MemoryBuffer> buffer;
+  std::unique_ptr<MemoryBuffer> buffer;
   if (error_code ec = MemoryBuffer::getFile(path, buffer)) {
     errMsg = ec.message();
     return NULL;
   }
-  return makeLTOModule(buffer.take(), options, errMsg);
+  return makeLTOModule(buffer.release(), options, errMsg);
 }
 
 LTOModule *LTOModule::makeLTOModule(int fd, const char *path,
@@ -108,34 +116,36 @@ LTOModule *LTOModule::makeLTOModule(int fd, const char *path,
                                     off_t offset,
                                     TargetOptions options,
                                     std::string &errMsg) {
-  OwningPtr<MemoryBuffer> buffer;
+  std::unique_ptr<MemoryBuffer> buffer;
   if (error_code ec =
           MemoryBuffer::getOpenFileSlice(fd, path, buffer, map_size, offset)) {
     errMsg = ec.message();
     return NULL;
   }
-  return makeLTOModule(buffer.take(), options, errMsg);
+  return makeLTOModule(buffer.release(), options, errMsg);
 }
 
 LTOModule *LTOModule::makeLTOModule(const void *mem, size_t length,
                                     TargetOptions options,
-                                    std::string &errMsg) {
-  OwningPtr<MemoryBuffer> buffer(makeBuffer(mem, length));
+                                    std::string &errMsg, StringRef path) {
+  std::unique_ptr<MemoryBuffer> buffer(makeBuffer(mem, length, path));
   if (!buffer)
     return NULL;
-  return makeLTOModule(buffer.take(), options, errMsg);
+  return makeLTOModule(buffer.release(), options, errMsg);
 }
 
 LTOModule *LTOModule::makeLTOModule(MemoryBuffer *buffer,
                                     TargetOptions options,
                                     std::string &errMsg) {
   // parse bitcode buffer
-  OwningPtr<Module> m(getLazyBitcodeModule(buffer, getGlobalContext(),
-                                           &errMsg));
-  if (!m) {
+  ErrorOr<Module *> ModuleOrErr =
+      getLazyBitcodeModule(buffer, getGlobalContext());
+  if (error_code EC = ModuleOrErr.getError()) {
+    errMsg = EC.message();
     delete buffer;
     return NULL;
   }
+  std::unique_ptr<Module> m(ModuleOrErr.get());
 
   std::string TripleStr = m->getTargetTriple();
   if (TripleStr.empty())
@@ -158,23 +168,40 @@ LTOModule *LTOModule::makeLTOModule(MemoryBuffer *buffer,
       CPU = "core2";
     else if (Triple.getArch() == llvm::Triple::x86)
       CPU = "yonah";
+    else if (Triple.getArch() == llvm::Triple::arm64)
+      CPU = "cyclone";
   }
 
   TargetMachine *target = march->createTargetMachine(TripleStr, CPU, FeatureStr,
                                                      options);
-  LTOModule *Ret = new LTOModule(m.take(), target);
+  m->materializeAllPermanently();
+
+  LTOModule *Ret = new LTOModule(m.release(), target);
+
+  // We need a MCContext set up in order to get mangled names of private
+  // symbols. It is a bit odd that we need to report uses and definitions
+  // of private symbols, but it does look like ld64 expects to be informed
+  // of at least the ones with an 'l' prefix.
+  MCContext &Context = Ret->_context;
+  const TargetLoweringObjectFile &TLOF =
+      target->getTargetLowering()->getObjFileLowering();
+  const_cast<TargetLoweringObjectFile &>(TLOF).Initialize(Context, *target);
+
   if (Ret->parseSymbols(errMsg)) {
     delete Ret;
     return NULL;
   }
 
+  Ret->parseMetadata();
+
   return Ret;
 }
 
-/// makeBuffer - Create a MemoryBuffer from a memory range.
-MemoryBuffer *LTOModule::makeBuffer(const void *mem, size_t length) {
+/// Create a MemoryBuffer from a memory range with an optional name.
+MemoryBuffer *LTOModule::makeBuffer(const void *mem, size_t length,
+                                    StringRef name) {
   const char *startPtr = (const char*)mem;
-  return MemoryBuffer::getMemBuffer(StringRef(startPtr, length), "", false);
+  return MemoryBuffer::getMemBuffer(StringRef(startPtr, length), name, false);
 }
 
 /// objcClassNameFromExpression - Get string that the data pointer points to.
@@ -333,6 +360,30 @@ void LTOModule::addDefinedFunctionSymbol(const Function *f) {
   addDefinedSymbol(f, true);
 }
 
+static bool canBeHidden(const GlobalValue *GV) {
+  // FIXME: this is duplicated with another static function in AsmPrinter.cpp
+  GlobalValue::LinkageTypes L = GV->getLinkage();
+
+  if (L != GlobalValue::LinkOnceODRLinkage)
+    return false;
+
+  if (GV->hasUnnamedAddr())
+    return true;
+
+  // If it is a non constant variable, it needs to be uniqued across shared
+  // objects.
+  if (const GlobalVariable *Var = dyn_cast<GlobalVariable>(GV)) {
+    if (!Var->isConstant())
+      return false;
+  }
+
+  GlobalStatus GS;
+  if (GlobalStatus::analyzeGlobal(GV, GS))
+    return false;
+
+  return !GS.IsCompared;
+}
+
 /// addDefinedSymbol - Add a defined symbol to the list.
 void LTOModule::addDefinedSymbol(const GlobalValue *def, bool isFunction) {
   // ignore all llvm.* symbols
@@ -341,7 +392,7 @@ void LTOModule::addDefinedSymbol(const GlobalValue *def, bool isFunction) {
 
   // string is owned by _defines
   SmallString<64> Buffer;
-  _mangler.getNameWithPrefix(Buffer, def, false);
+  _target->getNameWithPrefix(Buffer, def, _mangler);
 
   // set alignment part log2() can have rounding errors
   uint32_t align = def->getAlignment();
@@ -359,8 +410,7 @@ void LTOModule::addDefinedSymbol(const GlobalValue *def, bool isFunction) {
   }
 
   // set definition part
-  if (def->hasWeakLinkage() || def->hasLinkOnceLinkage() ||
-      def->hasLinkerPrivateWeakLinkage())
+  if (def->hasWeakLinkage() || def->hasLinkOnceLinkage())
     attr |= LTO_SYMBOL_DEFINITION_WEAK;
   else if (def->hasCommonLinkage())
     attr |= LTO_SYMBOL_DEFINITION_TENTATIVE;
@@ -372,12 +422,11 @@ void LTOModule::addDefinedSymbol(const GlobalValue *def, bool isFunction) {
     attr |= LTO_SYMBOL_SCOPE_HIDDEN;
   else if (def->hasProtectedVisibility())
     attr |= LTO_SYMBOL_SCOPE_PROTECTED;
-  else if (def->hasExternalLinkage() || def->hasWeakLinkage() ||
-           def->hasLinkOnceLinkage() || def->hasCommonLinkage() ||
-           def->hasLinkerPrivateWeakLinkage())
-    attr |= LTO_SYMBOL_SCOPE_DEFAULT;
-  else if (def->hasLinkOnceODRAutoHideLinkage())
+  else if (canBeHidden(def))
     attr |= LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN;
+  else if (def->hasExternalLinkage() || def->hasWeakLinkage() ||
+           def->hasLinkOnceLinkage() || def->hasCommonLinkage())
+    attr |= LTO_SYMBOL_SCOPE_DEFAULT;
   else
     attr |= LTO_SYMBOL_SCOPE_INTERNAL;
 
@@ -477,7 +526,7 @@ LTOModule::addPotentialUndefinedSymbol(const GlobalValue *decl, bool isFunc) {
     return;
 
   SmallString<64> name;
-  _mangler.getNameWithPrefix(name, decl, false);
+  _target->getNameWithPrefix(name, decl, _mangler);
 
   StringMap<NameAndAttributes>::value_type &entry =
     _undefines.GetOrCreateValue(name);
@@ -502,6 +551,7 @@ LTOModule::addPotentialUndefinedSymbol(const GlobalValue *decl, bool isFunc) {
 }
 
 namespace {
+
   class RecordStreamer : public MCStreamer {
   public:
     enum State { NeverSeen, Global, Defined, DefinedGlobal, Used };
@@ -591,79 +641,79 @@ namespace {
       return Symbols.end();
     }
 
-    RecordStreamer(MCContext &Context) : MCStreamer(Context, 0) {}
+    RecordStreamer(MCContext &Context) : MCStreamer(Context) {}
 
-    virtual void EmitInstruction(const MCInst &Inst) {
+    void EmitInstruction(const MCInst &Inst,
+                         const MCSubtargetInfo &STI) override {
       // Scan for values.
       for (unsigned i = Inst.getNumOperands(); i--; )
         if (Inst.getOperand(i).isExpr())
           AddValueSymbols(Inst.getOperand(i).getExpr());
     }
-    virtual void EmitLabel(MCSymbol *Symbol) {
+    void EmitLabel(MCSymbol *Symbol) override {
       Symbol->setSection(*getCurrentSection().first);
       markDefined(*Symbol);
     }
-    virtual void EmitDebugLabel(MCSymbol *Symbol) {
+    void EmitDebugLabel(MCSymbol *Symbol) override {
       EmitLabel(Symbol);
     }
-    virtual void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
+    void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override {
       // FIXME: should we handle aliases?
       markDefined(*Symbol);
+      AddValueSymbols(Value);
     }
-    virtual bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) {
+    bool EmitSymbolAttribute(MCSymbol *Symbol,
+                             MCSymbolAttr Attribute) override {
       if (Attribute == MCSA_Global)
         markGlobal(*Symbol);
       return true;
     }
-    virtual void EmitZerofill(const MCSection *Section, MCSymbol *Symbol,
-                              uint64_t Size , unsigned ByteAlignment) {
+    void EmitZerofill(const MCSection *Section, MCSymbol *Symbol,
+                      uint64_t Size , unsigned ByteAlignment) override {
       markDefined(*Symbol);
     }
-    virtual void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                  unsigned ByteAlignment) {
+    void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                          unsigned ByteAlignment) override {
       markDefined(*Symbol);
     }
 
-    virtual void EmitBundleAlignMode(unsigned AlignPow2) {}
-    virtual void EmitBundleLock(bool AlignToEnd) {}
-    virtual void EmitBundleUnlock() {}
+    void EmitBundleAlignMode(unsigned AlignPow2) override {}
+    void EmitBundleLock(bool AlignToEnd) override {}
+    void EmitBundleUnlock() override {}
 
     // Noop calls.
-    virtual void ChangeSection(const MCSection *Section,
-                               const MCExpr *Subsection) {}
-    virtual void InitToTextSection() {}
-    virtual void InitSections() {}
-    virtual void EmitAssemblerFlag(MCAssemblerFlag Flag) {}
-    virtual void EmitThumbFunc(MCSymbol *Func) {}
-    virtual void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) {}
-    virtual void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) {}
-    virtual void BeginCOFFSymbolDef(const MCSymbol *Symbol) {}
-    virtual void EmitCOFFSymbolStorageClass(int StorageClass) {}
-    virtual void EmitCOFFSymbolType(int Type) {}
-    virtual void EndCOFFSymbolDef() {}
-    virtual void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) {}
-    virtual void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                       unsigned ByteAlignment) {}
-    virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
-                                uint64_t Size, unsigned ByteAlignment) {}
-    virtual void EmitBytes(StringRef Data) {}
-    virtual void EmitValueImpl(const MCExpr *Value, unsigned Size) {}
-    virtual void EmitULEB128Value(const MCExpr *Value) {}
-    virtual void EmitSLEB128Value(const MCExpr *Value) {}
-    virtual void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
-                                      unsigned ValueSize,
-                                      unsigned MaxBytesToEmit) {}
-    virtual void EmitCodeAlignment(unsigned ByteAlignment,
-                                   unsigned MaxBytesToEmit) {}
-    virtual bool EmitValueToOffset(const MCExpr *Offset,
-                                   unsigned char Value ) { return false; }
-    virtual void EmitFileDirective(StringRef Filename) {}
-    virtual void EmitDwarfAdvanceLineAddr(int64_t LineDelta,
-                                          const MCSymbol *LastLabel,
-                                          const MCSymbol *Label,
-                                          unsigned PointerSize) {}
-    virtual void FinishImpl() {}
-    virtual void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) {
+    void ChangeSection(const MCSection *Section,
+                       const MCExpr *Subsection) override {}
+    void EmitAssemblerFlag(MCAssemblerFlag Flag) override {}
+    void EmitThumbFunc(MCSymbol *Func) override {}
+    void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) override {}
+    void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) override {}
+    void BeginCOFFSymbolDef(const MCSymbol *Symbol) override {}
+    void EmitCOFFSymbolStorageClass(int StorageClass) override {}
+    void EmitCOFFSymbolType(int Type) override {}
+    void EndCOFFSymbolDef() override {}
+    void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) override {}
+    void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                               unsigned ByteAlignment) override {}
+    void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
+                        uint64_t Size, unsigned ByteAlignment) override {}
+    void EmitBytes(StringRef Data) override {}
+    void EmitValueImpl(const MCExpr *Value, unsigned Size) override {}
+    void EmitULEB128Value(const MCExpr *Value) override {}
+    void EmitSLEB128Value(const MCExpr *Value) override {}
+    void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
+                              unsigned ValueSize,
+                              unsigned MaxBytesToEmit) override {}
+    void EmitCodeAlignment(unsigned ByteAlignment,
+                           unsigned MaxBytesToEmit) override {}
+    bool EmitValueToOffset(const MCExpr *Offset,
+                           unsigned char Value) override { return false; }
+    void EmitFileDirective(StringRef Filename) override {}
+    void EmitDwarfAdvanceLineAddr(int64_t LineDelta, const MCSymbol *LastLabel,
+                                  const MCSymbol *Label,
+                                  unsigned PointerSize) override {}
+    void FinishImpl() override {}
+    void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) override {
       RecordProcEnd(Frame);
     }
   };
@@ -676,20 +726,19 @@ bool LTOModule::addAsmGlobalSymbols(std::string &errMsg) {
   if (inlineAsm.empty())
     return false;
 
-  OwningPtr<RecordStreamer> Streamer(new RecordStreamer(_context));
+  std::unique_ptr<RecordStreamer> Streamer(new RecordStreamer(_context));
   MemoryBuffer *Buffer = MemoryBuffer::getMemBuffer(inlineAsm);
   SourceMgr SrcMgr;
   SrcMgr.AddNewSourceBuffer(Buffer, SMLoc());
-  OwningPtr<MCAsmParser> Parser(createMCAsmParser(SrcMgr,
-                                                  _context, *Streamer,
-                                                  *_target->getMCAsmInfo()));
+  std::unique_ptr<MCAsmParser> Parser(
+      createMCAsmParser(SrcMgr, _context, *Streamer, *_target->getMCAsmInfo()));
   const Target &T = _target->getTarget();
-  OwningPtr<MCInstrInfo> MCII(T.createMCInstrInfo());
-  OwningPtr<MCSubtargetInfo>
-    STI(T.createMCSubtargetInfo(_target->getTargetTriple(),
-                                _target->getTargetCPU(),
-                                _target->getTargetFeatureString()));
-  OwningPtr<MCTargetAsmParser> TAP(T.createMCAsmParser(*STI, *Parser.get(), *MCII));
+  std::unique_ptr<MCInstrInfo> MCII(T.createMCInstrInfo());
+  std::unique_ptr<MCSubtargetInfo> STI(T.createMCSubtargetInfo(
+      _target->getTargetTriple(), _target->getTargetCPU(),
+      _target->getTargetFeatureString()));
+  std::unique_ptr<MCTargetAsmParser> TAP(
+      T.createMCAsmParser(*STI, *Parser.get(), *MCII));
   if (!TAP) {
     errMsg = "target " + std::string(T.getName()) +
       " does not define AsmParser.";
@@ -772,4 +821,28 @@ bool LTOModule::parseSymbols(std::string &errMsg) {
   }
 
   return false;
+}
+
+/// parseMetadata - Parse metadata from the module
+void LTOModule::parseMetadata() {
+  // Linker Options
+  if (Value *Val = _module->getModuleFlag("Linker Options")) {
+    MDNode *LinkerOptions = cast<MDNode>(Val);
+    for (unsigned i = 0, e = LinkerOptions->getNumOperands(); i != e; ++i) {
+      MDNode *MDOptions = cast<MDNode>(LinkerOptions->getOperand(i));
+      for (unsigned ii = 0, ie = MDOptions->getNumOperands(); ii != ie; ++ii) {
+        MDString *MDOption = cast<MDString>(MDOptions->getOperand(ii));
+        StringRef Op = _linkeropt_strings.
+            GetOrCreateValue(MDOption->getString()).getKey();
+        StringRef DepLibName = _target->getTargetLowering()->
+            getObjFileLowering().getDepLibFromLinkerOpt(Op);
+        if (!DepLibName.empty())
+          _deplibs.push_back(DepLibName.data());
+        else if (!Op.empty())
+          _linkeropts.push_back(Op.data());
+      }
+    }
+  }
+
+  // Add other interesting metadata here.
 }

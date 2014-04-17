@@ -112,14 +112,6 @@ multiclass CondStores64<Instruction insn, Instruction insninv,
                      uimm8zx4:$valid, uimm8zx4:$cc)>;
 }
 
-// INSN performs a comparison between a 32-bit register and a constant.
-// Record that it is equivalent to comparing subreg SUBREG of a GR64 with IMM.
-class CompareGR64RI<Instruction insn, SDPatternOperator compare,
-                    Immediate imm, SubRegIndex subreg>
-  : Pat<(compare GR64:$R1, imm:$I2),
-        (insn (EXTRACT_SUBREG GR64:$R1, subreg),
-              (imm.OperandTransform imm:$I2))>;
-
 // Try to use MVC instruction INSN for a load of type LOAD followed by a store
 // of the same size.  VT is the type of the intermediate (legalized) value and
 // LENGTH is the number of bytes loaded by LOAD.
@@ -156,5 +148,8 @@ multiclass BlockLoadStore<SDPatternOperator load, ValueType vt,
 // Record that INSN is a LOAD AND TEST that can be used to compare
 // registers in CLS against zero.  The instruction has separate R1 and R2
 // operands, but they must be the same when the instruction is used like this.
-class CompareZeroFP<Instruction insn, RegisterOperand cls>
-  : Pat<(z_fcmp cls:$reg, (fpimm0)), (insn cls:$reg, cls:$reg)>;
+multiclass CompareZeroFP<Instruction insn, RegisterOperand cls> {
+  def : Pat<(z_fcmp cls:$reg, (fpimm0)), (insn cls:$reg, cls:$reg)>;
+  // The sign of the zero makes no difference.
+  def : Pat<(z_fcmp cls:$reg, (fpimmneg0)), (insn cls:$reg, cls:$reg)>;
+}

@@ -2,13 +2,13 @@ add_llvm_library(LLVMSupport
   APFloat.cpp
   APInt.cpp
   APSInt.cpp
+  ARMBuildAttrs.cpp
   Allocator.cpp
   BlockFrequency.cpp
   BranchProbability.cpp
   circular_raw_ostream.cpp
   CommandLine.cpp
   Compression.cpp
-  ConstantRange.cpp
   ConvertUTF.c
   ConvertUTFWrapper.cpp
   CrashRecoveryContext.cpp
@@ -30,6 +30,8 @@ add_llvm_library(LLVMSupport
   IntrusiveRefCntPtr.cpp
   IsInf.cpp
   IsNAN.cpp
+  LEB128.cpp
+  LineIterator.cpp
   Locale.cpp
   LockFileManager.cpp
   ManagedStatic.cpp
@@ -87,6 +89,8 @@ add_llvm_library(LLVMSupport
   TimeValue.cpp
   Valgrind.cpp
   Watchdog.cpp
+
+  ADDITIONAL_HEADERS
   Unix/Host.inc
   Unix/Memory.inc
   Unix/Mutex.inc
@@ -113,3 +117,37 @@ add_llvm_library(LLVMSupport
   Windows/TimeValue.inc
   Windows/Watchdog.inc
   )
+set(system_libs)
+if( NOT MSVC )
+  if( MINGW )
+    set(system_libs ${system_libs} imagehlp psapi shell32)
+  elseif( CMAKE_HOST_UNIX )
+    if( HAVE_LIBRT )
+      set(system_libs ${system_libs} rt)
+    endif()
+    if( HAVE_LIBDL )
+      set(system_libs ${system_libs} ${CMAKE_DL_LIBS})
+    endif()
+    if(LLVM_ENABLE_TERMINFO)
+      if(HAVE_TERMINFO)
+        set(system_libs ${system_libs} ${TERMINFO_LIBS})
+      endif()
+    endif()
+    if( LLVM_ENABLE_THREADS AND HAVE_LIBPTHREAD )
+      set(system_libs ${system_libs} pthread)
+    endif()
+    if ( LLVM_ENABLE_ZLIB AND HAVE_LIBZ )
+      set(system_libs ${system_libs} z)
+    endif()
+  endif( MINGW )
+endif( NOT MSVC )
+
+
+if(POLICY CMP0022 AND BUILD_SHARED_LIBS)
+  # FIXME: Should this be really PUBLIC?
+  target_link_libraries(LLVMSupport PUBLIC ${system_libs})
+else()
+  target_link_libraries(LLVMSupport ${cmake_2_8_12_INTERFACE} ${system_libs})
+endif()
+
+set_property(TARGET LLVMSupport PROPERTY LLVM_SYSTEM_LIBS "${system_libs}")

@@ -122,7 +122,7 @@ uint64_t MCAsmLayout::getSymbolOffset(const MCSymbolData *SD) const {
   // If this is a variable, then recursively evaluate now.
   if (S.isVariable()) {
     MCValue Target;
-    if (!S.getVariableValue()->EvaluateAsRelocatable(Target, *this))
+    if (!S.getVariableValue()->EvaluateAsRelocatable(Target, this))
       report_fatal_error("unable to evaluate offset for variable '" +
                          S.getName() + "'");
 
@@ -212,7 +212,7 @@ MCFragment::~MCFragment() {
 }
 
 MCFragment::MCFragment(FragmentType _Kind, MCSectionData *_Parent)
-  : Kind(_Kind), Parent(_Parent), Atom(0), Offset(~UINT64_C(0))
+  : Kind(_Kind), Parent(_Parent), Atom(nullptr), Offset(~UINT64_C(0))
 {
   if (Parent)
     Parent->getFragmentList().push_back(this);
@@ -230,7 +230,7 @@ MCEncodedFragmentWithFixups::~MCEncodedFragmentWithFixups() {
 
 /* *** */
 
-MCSectionData::MCSectionData() : Section(0) {}
+MCSectionData::MCSectionData() : Section(nullptr) {}
 
 MCSectionData::MCSectionData(const MCSection &_Section, MCAssembler *A)
   : Section(&_Section),
@@ -250,7 +250,7 @@ MCSectionData::getSubsectionInsertionPoint(unsigned Subsection) {
 
   SmallVectorImpl<std::pair<unsigned, MCFragment *> >::iterator MI =
     std::lower_bound(SubsectionFragmentMap.begin(), SubsectionFragmentMap.end(),
-                     std::make_pair(Subsection, (MCFragment *)0));
+                     std::make_pair(Subsection, (MCFragment *)nullptr));
   bool ExactMatch = false;
   if (MI != SubsectionFragmentMap.end()) {
     ExactMatch = MI->first == Subsection;
@@ -275,13 +275,13 @@ MCSectionData::getSubsectionInsertionPoint(unsigned Subsection) {
 
 /* *** */
 
-MCSymbolData::MCSymbolData() : Symbol(0) {}
+MCSymbolData::MCSymbolData() : Symbol(nullptr) {}
 
 MCSymbolData::MCSymbolData(const MCSymbol &_Symbol, MCFragment *_Fragment,
                            uint64_t _Offset, MCAssembler *A)
   : Symbol(&_Symbol), Fragment(_Fragment), Offset(_Offset),
     IsExternal(false), IsPrivateExtern(false),
-    CommonSize(0), SymbolSize(0), CommonAlign(0),
+    CommonSize(0), SymbolSize(nullptr), CommonAlign(0),
     Flags(0), Index(0)
 {
   if (A)
@@ -296,6 +296,7 @@ MCAssembler::MCAssembler(MCContext &Context_, MCAsmBackend &Backend_,
   : Context(Context_), Backend(Backend_), Emitter(Emitter_), Writer(Writer_),
     OS(OS_), BundleAlignSize(0), RelaxAll(false), NoExecStack(false),
     SubsectionsViaSymbols(false), ELFHeaderEFlags(0) {
+  VersionMinInfo.Major = 0; // Major version == 0 for "none specified"
 }
 
 MCAssembler::~MCAssembler() {
@@ -318,6 +319,7 @@ void MCAssembler::reset() {
   getBackend().reset();
   getEmitter().reset();
   getWriter().reset();
+  getLOHContainer().reset();
 }
 
 bool MCAssembler::isSymbolLinkerVisible(const MCSymbol &Symbol) const {
@@ -340,13 +342,13 @@ const MCSymbolData *MCAssembler::getAtom(const MCSymbolData *SD) const {
 
   // Absolute and undefined symbols have no defining atom.
   if (!SD->getFragment())
-    return 0;
+    return nullptr;
 
   // Non-linker visible symbols in sections which can't be atomized have no
   // defining atom.
   if (!getBackend().isSectionAtomizable(
         SD->getFragment()->getParent()->getSection()))
-    return 0;
+    return nullptr;
 
   // Otherwise, return the atom for the containing fragment.
   return SD->getFragment()->getAtom();
@@ -357,7 +359,7 @@ bool MCAssembler::evaluateFixup(const MCAsmLayout &Layout,
                                 MCValue &Target, uint64_t &Value) const {
   ++stats::evaluateFixup;
 
-  if (!Fixup.getValue()->EvaluateAsRelocatable(Target, Layout))
+  if (!Fixup.getValue()->EvaluateAsRelocatable(Target, &Layout))
     getContext().FatalError(Fixup.getLoc(), "expected relocatable expression");
 
   bool IsPCRel = Backend.getFixupKindInfo(
@@ -734,21 +736,23 @@ void MCAssembler::writeSectionData(const MCSectionData *SD,
          Layout.getSectionAddressSize(SD));
 }
 
-
-uint64_t MCAssembler::handleFixup(const MCAsmLayout &Layout,
-                                  MCFragment &F,
-                                  const MCFixup &Fixup) {
-   // Evaluate the fixup.
-   MCValue Target;
-   uint64_t FixedValue;
-   if (!evaluateFixup(Layout, Fixup, &F, Target, FixedValue)) {
-     // The fixup was unresolved, we need a relocation. Inform the object
-     // writer of the relocation, and give it an opportunity to adjust the
-     // fixup value if need be.
-     getWriter().RecordRelocation(*this, Layout, &F, Fixup, Target, FixedValue);
-   }
-   return FixedValue;
- }
+std::pair<uint64_t, bool> MCAssembler::handleFixup(const MCAsmLayout &Layout,
+                                                   MCFragment &F,
+                                                   const MCFixup &Fixup) {
+  // Evaluate the fixup.
+  MCValue Target;
+  uint64_t FixedValue;
+  bool IsPCRel = Backend.getFixupKindInfo(Fixup.getKind()).Flags &
+                 MCFixupKindInfo::FKF_IsPCRel;
+  if (!evaluateFixup(Layout, Fixup, &F, Target, FixedValue)) {
+    // The fixup was unresolved, we need a relocation. Inform the object
+    // writer of the relocation, and give it an opportunity to adjust the
+    // fixup value if need be.
+    getWriter().RecordRelocation(*this, Layout, &F, Fixup, Target, IsPCRel,
+                                 FixedValue);
+  }
+  return std::make_pair(FixedValue, IsPCRel);
+}
 
 void MCAssembler::Finish() {
   DEBUG_WITH_TYPE("mc-dump", {
@@ -811,9 +815,11 @@ void MCAssembler::Finish() {
         for (MCEncodedFragmentWithFixups::fixup_iterator it3 = F->fixup_begin(),
              ie3 = F->fixup_end(); it3 != ie3; ++it3) {
           MCFixup &Fixup = *it3;
-          uint64_t FixedValue = handleFixup(Layout, *F, Fixup);
+          uint64_t FixedValue;
+          bool IsPCRel;
+          std::tie(FixedValue, IsPCRel) = handleFixup(Layout, *F, Fixup);
           getBackend().applyFixup(Fixup, F->getContents().data(),
-                                  F->getContents().size(), FixedValue);
+                                  F->getContents().size(), FixedValue, IsPCRel);
         }
       }
     }
@@ -875,7 +881,7 @@ bool MCAssembler::relaxInstruction(MCAsmLayout &Layout,
   SmallVector<MCFixup, 4> Fixups;
   SmallString<256> Code;
   raw_svector_ostream VecOS(Code);
-  getEmitter().EncodeInstruction(Relaxed, VecOS, Fixups);
+  getEmitter().EncodeInstruction(Relaxed, VecOS, Fixups, F.getSubtargetInfo());
   VecOS.flush();
 
   // Update the fragment.
@@ -942,7 +948,7 @@ bool MCAssembler::layoutSectionOnce(MCAsmLayout &Layout, MCSectionData &SD) {
   // remain NULL if none were relaxed.
   // When a fragment is relaxed, all the fragments following it should get
   // invalidated because their offset is going to change.
-  MCFragment *FirstRelaxedFragment = NULL;
+  MCFragment *FirstRelaxedFragment = nullptr;
 
   // Attempt to relax all the fragments in the section.
   for (MCSectionData::iterator I = SD.begin(), IE = SD.end(); I != IE; ++I) {

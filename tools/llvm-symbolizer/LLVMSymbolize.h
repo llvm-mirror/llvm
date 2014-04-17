@@ -13,7 +13,6 @@
 #ifndef LLVM_SYMBOLIZE_H
 #define LLVM_SYMBOLIZE_H
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/Object/MachOUniversal.h"
@@ -102,8 +101,9 @@ private:
   bool getNameFromSymbolTable(SymbolRef::Type Type, uint64_t Address,
                               std::string &Name, uint64_t &Addr,
                               uint64_t &Size) const;
+  void addSymbol(const SymbolRef &Symbol);
   ObjectFile *Module;
-  OwningPtr<DIContext> DebugInfoContext;
+  std::unique_ptr<DIContext> DebugInfoContext;
 
   struct SymbolDesc {
     uint64_t Addr;

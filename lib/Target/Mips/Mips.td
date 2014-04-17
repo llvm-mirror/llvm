@@ -54,7 +54,7 @@ def FeatureSwap        : SubtargetFeature<"swap", "HasSwap", "true",
                                 "Enable 'byte/half swap' instructions.">;
 def FeatureBitCount    : SubtargetFeature<"bitcount", "HasBitCount", "true",
                                 "Enable 'count leading bits' instructions.">;
-def FeatureFPIdx       : SubtargetFeature<"FPIdx", "HasFPIdx", "true",
+def FeatureFPIdx       : SubtargetFeature<"fpidx", "HasFPIdx", "true",
                                 "Enable 'FP indexed load/store' instructions.">;
 def FeatureMips32      : SubtargetFeature<"mips32", "MipsArchVersion", "Mips32",
                                 "Mips32 ISA Support",
@@ -63,10 +63,13 @@ def FeatureMips32r2    : SubtargetFeature<"mips32r2", "MipsArchVersion",
                                 "Mips32r2", "Mips32r2 ISA Support",
                                 [FeatureMips32, FeatureSEInReg, FeatureSwap,
                                  FeatureFPIdx]>;
+def FeatureMips4       : SubtargetFeature<"mips4", "MipsArchVersion",
+                                "Mips4", "MIPS IV ISA Support",
+                                [FeatureGP64Bit, FeatureFP64Bit, FeatureFPIdx,
+                                 FeatureCondMov]>;
 def FeatureMips64      : SubtargetFeature<"mips64", "MipsArchVersion",
                                 "Mips64", "Mips64 ISA Support",
-                                [FeatureGP64Bit, FeatureFP64Bit,
-                                 FeatureMips32, FeatureFPIdx]>;
+                                [FeatureMips4, FeatureMips32, FeatureFPIdx]>;
 def FeatureMips64r2    : SubtargetFeature<"mips64r2", "MipsArchVersion",
                                 "Mips64r2", "Mips64r2 ISA Support",
                                 [FeatureMips64, FeatureMips32r2]>;
@@ -83,6 +86,10 @@ def FeatureMSA : SubtargetFeature<"msa", "HasMSA", "true", "Mips MSA ASE">;
 def FeatureMicroMips  : SubtargetFeature<"micromips", "InMicroMipsMode", "true",
                                          "microMips mode">;
 
+def FeatureCnMips     : SubtargetFeature<"cnmips", "HasCnMips",
+                                "true", "Octeon cnMIPS Support",
+                                [FeatureMips64r2]>;
+
 //===----------------------------------------------------------------------===//
 // Mips processors supported.
 //===----------------------------------------------------------------------===//
@@ -90,16 +97,13 @@ def FeatureMicroMips  : SubtargetFeature<"micromips", "InMicroMipsMode", "true",
 class Proc<string Name, list<SubtargetFeature> Features>
  : Processor<Name, MipsGenericItineraries, Features>;
 
-def : Proc<"mips32", [FeatureMips32]>;
-def : Proc<"mips32r2", [FeatureMips32r2]>;
-def : Proc<"mips64", [FeatureMips64]>;
-def : Proc<"mips64r2", [FeatureMips64r2]>;
-def : Proc<"mips16", [FeatureMips16]>;
-
-def MipsAsmWriter : AsmWriter {
-  string AsmWriterClassName  = "InstPrinter";
-  bit isMCAsmWriter = 1;
-}
+def : Proc<"mips32", [FeatureMips32, FeatureO32]>;
+def : Proc<"mips32r2", [FeatureMips32r2, FeatureO32]>;
+def : Proc<"mips4", [FeatureMips4, FeatureN64]>;
+def : Proc<"mips64", [FeatureMips64, FeatureN64]>;
+def : Proc<"mips64r2", [FeatureMips64r2, FeatureN64]>;
+def : Proc<"mips16", [FeatureMips16, FeatureO32]>;
+def : Proc<"octeon", [FeatureMips64r2, FeatureN64, FeatureCnMips]>;
 
 def MipsAsmParser : AsmParser {
   let ShouldEmitMatchRegisterName = 0;
@@ -116,6 +120,5 @@ def MipsAsmParserVariant : AsmParserVariant {
 def Mips : Target {
   let InstructionSet = MipsInstrInfo;
   let AssemblyParsers = [MipsAsmParser];
-  let AssemblyWriters = [MipsAsmWriter];
   let AssemblyParserVariants = [MipsAsmParserVariant];
 }

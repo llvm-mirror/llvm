@@ -16,11 +16,12 @@
 #include "llvm/ExecutionEngine/JITEventListener.h"
 
 #define DEBUG_TYPE "oprofile-jit-event-listener"
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/ExecutionEngine/ObjectImage.h"
 #include "llvm/ExecutionEngine/OProfileWrapper.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Errno.h"
@@ -52,6 +53,10 @@ public:
                                 const JITEvent_EmittedFunctionDetails &Details);
 
   virtual void NotifyFreeingMachineCode(void *OldPtr);
+
+  virtual void NotifyObjectEmitted(const ObjectImage &Obj);
+
+  virtual void NotifyFreeingObject(const ObjectImage &Obj);
 };
 
 void OProfileJITEventListener::initialize() {
@@ -159,11 +164,72 @@ void OProfileJITEventListener::NotifyFreeingMachineCode(void *FnStart) {
   }
 }
 
+void OProfileJITEventListener::NotifyObjectEmitted(const ObjectImage &Obj) {
+  if (!Wrapper.isAgentAvailable()) {
+    return;
+  }
+
+  // Use symbol info to iterate functions in the object.
+  error_code ec;
+  for (object::symbol_iterator I = Obj.begin_symbols(),
+                               E = Obj.end_symbols();
+                        I != E && !ec;
+                        I.increment(ec)) {
+    object::SymbolRef::Type SymType;
+    if (I->getType(SymType)) continue;
+    if (SymType == object::SymbolRef::ST_Function) {
+      StringRef  Name;
+      uint64_t   Addr;
+      uint64_t   Size;
+      if (I->getName(Name)) continue;
+      if (I->getAddress(Addr)) continue;
+      if (I->getSize(Size)) continue;
+
+      if (Wrapper.op_write_native_code(Name.data(), Addr, (void*)Addr, Size)
+                        == -1) {
+        DEBUG(dbgs() << "Failed to tell OProfile about native function "
+          << Name << " at ["
+          << (void*)Addr << "-" << ((char*)Addr + Size) << "]\n");
+        continue;
+      }
+      // TODO: support line number info (similar to IntelJITEventListener.cpp)
+    }
+  }
+}
+
+void OProfileJITEventListener::NotifyFreeingObject(const ObjectImage &Obj) {
+  if (!Wrapper.isAgentAvailable()) {
+    return;
+  }
+
+  // Use symbol info to iterate functions in the object.
+  error_code ec;
+  for (object::symbol_iterator I = Obj.begin_symbols(),
+                               E = Obj.end_symbols();
+                        I != E && !ec;
+                        I.increment(ec)) {
+    object::SymbolRef::Type SymType;
+    if (I->getType(SymType)) continue;
+    if (SymType == object::SymbolRef::ST_Function) {
+      uint64_t   Addr;
+      if (I->getAddress(Addr)) continue;
+
+      if (Wrapper.op_unload_native_code(Addr) == -1) {
+        DEBUG(dbgs()
+          << "Failed to tell OProfile about unload of native function at "
+          << (void*)Addr << "\n");
+        continue;
+      }
+    }
+  }
+}
+
 }  // anonymous namespace.
 
 namespace llvm {
 JITEventListener *JITEventListener::createOProfileJITEventListener() {
-  static OwningPtr<OProfileWrapper> JITProfilingWrapper(new OProfileWrapper);
+  static std::unique_ptr<OProfileWrapper> JITProfilingWrapper(
+      new OProfileWrapper);
   return new OProfileJITEventListener(*JITProfilingWrapper);
 }
 

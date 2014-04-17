@@ -13,8 +13,8 @@
 
 #define DEBUG_TYPE "mips-isel"
 #include "MipsSEISelDAGToDAG.h"
-#include "Mips.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
+#include "Mips.h"
 #include "MipsAnalyzeImmediate.h"
 #include "MipsMachineFunction.h"
 #include "MipsRegisterInfo.h"
@@ -24,11 +24,11 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -104,7 +104,7 @@ bool MipsSEDAGToDAGISel::replaceUsesWithZeroReg(MachineRegisterInfo *MRI,
   // Replace uses with ZeroReg.
   for (MachineRegisterInfo::use_iterator U = MRI->use_begin(DstReg),
        E = MRI->use_end(); U != E;) {
-    MachineOperand &MO = U.getOperand();
+    MachineOperand &MO = *U;
     unsigned OpNo = U.getOperandNo();
     MachineInstr *MI = MO.getParent();
     ++U;
@@ -248,18 +248,49 @@ SDNode *MipsSEDAGToDAGISel::selectAddESubE(unsigned MOp, SDValue InFlag,
                               SDValue(AddCarry, 0));
 }
 
-/// ComplexPattern used on MipsInstrInfo
-/// Used on Mips Load/Store instructions
-bool MipsSEDAGToDAGISel::selectAddrRegImm(SDValue Addr, SDValue &Base,
-                                          SDValue &Offset) const {
-  EVT ValTy = Addr.getValueType();
-
-  // if Address is FI, get the TargetFrameIndex.
+/// Match frameindex
+bool MipsSEDAGToDAGISel::selectAddrFrameIndex(SDValue Addr, SDValue &Base,
+                                              SDValue &Offset) const {
   if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr)) {
+    EVT ValTy = Addr.getValueType();
+
     Base   = CurDAG->getTargetFrameIndex(FIN->getIndex(), ValTy);
     Offset = CurDAG->getTargetConstant(0, ValTy);
     return true;
   }
+  return false;
+}
+
+/// Match frameindex+offset and frameindex|offset
+bool MipsSEDAGToDAGISel::selectAddrFrameIndexOffset(SDValue Addr, SDValue &Base,
+                                                    SDValue &Offset,
+                                                    unsigned OffsetBits) const {
+  if (CurDAG->isBaseWithConstantOffset(Addr)) {
+    ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1));
+    if (isIntN(OffsetBits, CN->getSExtValue())) {
+      EVT ValTy = Addr.getValueType();
+
+      // If the first operand is a FI, get the TargetFI Node
+      if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>
+                                  (Addr.getOperand(0)))
+        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), ValTy);
+      else
+        Base = Addr.getOperand(0);
+
+      Offset = CurDAG->getTargetConstant(CN->getZExtValue(), ValTy);
+      return true;
+    }
+  }
+  return false;
+}
+
+/// ComplexPattern used on MipsInstrInfo
+/// Used on Mips Load/Store instructions
+bool MipsSEDAGToDAGISel::selectAddrRegImm(SDValue Addr, SDValue &Base,
+                                          SDValue &Offset) const {
+  // if Address is FI, get the TargetFrameIndex.
+  if (selectAddrFrameIndex(Addr, Base, Offset))
+    return true;
 
   // on PIC code Load GA
   if (Addr.getOpcode() == MipsISD::Wrapper) {
@@ -275,21 +306,8 @@ bool MipsSEDAGToDAGISel::selectAddrRegImm(SDValue Addr, SDValue &Base,
   }
 
   // Addresses of the form FI+const or FI|const
-  if (CurDAG->isBaseWithConstantOffset(Addr)) {
-    ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1));
-    if (isInt<16>(CN->getSExtValue())) {
-
-      // If the first operand is a FI, get the TargetFI Node
-      if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>
-                                  (Addr.getOperand(0)))
-        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), ValTy);
-      else
-        Base = Addr.getOperand(0);
-
-      Offset = CurDAG->getTargetConstant(CN->getZExtValue(), ValTy);
-      return true;
-    }
-  }
+  if (selectAddrFrameIndexOffset(Addr, Base, Offset, 16))
+    return true;
 
   // Operand is a result from an ADD.
   if (Addr.getOpcode() == ISD::ADD) {
@@ -343,27 +361,25 @@ bool MipsSEDAGToDAGISel::selectIntAddr(SDValue Addr, SDValue &Base,
     selectAddrDefault(Addr, Base, Offset);
 }
 
+bool MipsSEDAGToDAGISel::selectAddrRegImm10(SDValue Addr, SDValue &Base,
+                                            SDValue &Offset) const {
+  if (selectAddrFrameIndex(Addr, Base, Offset))
+    return true;
+
+  if (selectAddrFrameIndexOffset(Addr, Base, Offset, 10))
+    return true;
+
+  return false;
+}
+
 /// Used on microMIPS Load/Store unaligned instructions (12-bit offset)
 bool MipsSEDAGToDAGISel::selectAddrRegImm12(SDValue Addr, SDValue &Base,
                                             SDValue &Offset) const {
-  EVT ValTy = Addr.getValueType();
+  if (selectAddrFrameIndex(Addr, Base, Offset))
+    return true;
 
-  // Addresses of the form FI+const or FI|const
-  if (CurDAG->isBaseWithConstantOffset(Addr)) {
-    ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1));
-    if (isInt<12>(CN->getSExtValue())) {
-
-      // If the first operand is a FI then get the TargetFI Node
-      if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>
-                                  (Addr.getOperand(0)))
-        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), ValTy);
-      else
-        Base = Addr.getOperand(0);
-
-      Offset = CurDAG->getTargetConstant(CN->getZExtValue(), ValTy);
-      return true;
-    }
-  }
+  if (selectAddrFrameIndexOffset(Addr, Base, Offset, 12))
+    return true;
 
   return false;
 }
@@ -374,17 +390,22 @@ bool MipsSEDAGToDAGISel::selectIntAddrMM(SDValue Addr, SDValue &Base,
     selectAddrDefault(Addr, Base, Offset);
 }
 
+bool MipsSEDAGToDAGISel::selectIntAddrMSA(SDValue Addr, SDValue &Base,
+                                          SDValue &Offset) const {
+  if (selectAddrRegImm10(Addr, Base, Offset))
+    return true;
+
+  if (selectAddrDefault(Addr, Base, Offset))
+    return true;
+
+  return false;
+}
+
 // Select constant vector splats.
 //
 // Returns true and sets Imm if:
 // * MSA is enabled
 // * N is a ISD::BUILD_VECTOR representing a constant splat
-// * The splat value fits in a signed 32-bit value.
-//
-// That last requirement isn't strictly a requirement of the instruction set
-// but it simplifies the callers by allowing them to assume they don't have to
-// handle 64-bit values. The callers will also be placing stricter requirements
-// on the immediates so this doesn't prohibit selection of legal immediates.
 bool MipsSEDAGToDAGISel::selectVSplat(SDNode *N, APInt &Imm) const {
   if (!Subtarget.hasMSA())
     return false;
@@ -401,10 +422,6 @@ bool MipsSEDAGToDAGISel::selectVSplat(SDNode *N, APInt &Imm) const {
   if (!Node->isConstantSplat(SplatValue, SplatUndef, SplatBitSize,
                              HasAnyUndefs, 8,
                              !Subtarget.isLittle()))
-    return false;
-
-  // None of the immediate forms can handle more than 32 bits
-  if (!SplatValue.isIntN(32))
     return false;
 
   Imm = SplatValue;
@@ -525,6 +542,91 @@ bool MipsSEDAGToDAGISel::selectVSplatUimmPow2(SDValue N, SDValue &Imm) const {
   return false;
 }
 
+// Select constant vector splats whose value only has a consecutive sequence
+// of left-most bits set (e.g. 0b11...1100...00).
+//
+// In addition to the requirements of selectVSplat(), this function returns
+// true and sets Imm if:
+// * The splat value is the same width as the elements of the vector
+// * The splat value is a consecutive sequence of left-most bits.
+//
+// This function looks through ISD::BITCAST nodes.
+// TODO: This might not be appropriate for big-endian MSA since BITCAST is
+//       sometimes a shuffle in big-endian mode.
+bool MipsSEDAGToDAGISel::selectVSplatMaskL(SDValue N, SDValue &Imm) const {
+  APInt ImmValue;
+  EVT EltTy = N->getValueType(0).getVectorElementType();
+
+  if (N->getOpcode() == ISD::BITCAST)
+    N = N->getOperand(0);
+
+  if (selectVSplat(N.getNode(), ImmValue) &&
+      ImmValue.getBitWidth() == EltTy.getSizeInBits()) {
+    // Extract the run of set bits starting with bit zero from the bitwise
+    // inverse of ImmValue, and test that the inverse of this is the same
+    // as the original value.
+    if (ImmValue == ~(~ImmValue & ~(~ImmValue + 1))) {
+
+      Imm = CurDAG->getTargetConstant(ImmValue.countPopulation(), EltTy);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Select constant vector splats whose value only has a consecutive sequence
+// of right-most bits set (e.g. 0b00...0011...11).
+//
+// In addition to the requirements of selectVSplat(), this function returns
+// true and sets Imm if:
+// * The splat value is the same width as the elements of the vector
+// * The splat value is a consecutive sequence of right-most bits.
+//
+// This function looks through ISD::BITCAST nodes.
+// TODO: This might not be appropriate for big-endian MSA since BITCAST is
+//       sometimes a shuffle in big-endian mode.
+bool MipsSEDAGToDAGISel::selectVSplatMaskR(SDValue N, SDValue &Imm) const {
+  APInt ImmValue;
+  EVT EltTy = N->getValueType(0).getVectorElementType();
+
+  if (N->getOpcode() == ISD::BITCAST)
+    N = N->getOperand(0);
+
+  if (selectVSplat(N.getNode(), ImmValue) &&
+      ImmValue.getBitWidth() == EltTy.getSizeInBits()) {
+    // Extract the run of set bits starting with bit zero, and test that the
+    // result is the same as the original value
+    if (ImmValue == (ImmValue & ~(ImmValue + 1))) {
+      Imm = CurDAG->getTargetConstant(ImmValue.countPopulation(), EltTy);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool MipsSEDAGToDAGISel::selectVSplatUimmInvPow2(SDValue N,
+                                                 SDValue &Imm) const {
+  APInt ImmValue;
+  EVT EltTy = N->getValueType(0).getVectorElementType();
+
+  if (N->getOpcode() == ISD::BITCAST)
+    N = N->getOperand(0);
+
+  if (selectVSplat(N.getNode(), ImmValue) &&
+      ImmValue.getBitWidth() == EltTy.getSizeInBits()) {
+    int32_t Log2 = (~ImmValue).exactLogBase2();
+
+    if (Log2 != -1) {
+      Imm = CurDAG->getTargetConstant(Log2, EltTy);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
   unsigned Opcode = Node->getOpcode();
   SDLoc DL(Node);
@@ -555,10 +657,15 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
   case ISD::ConstantFP: {
     ConstantFPSDNode *CN = dyn_cast<ConstantFPSDNode>(Node);
     if (Node->getValueType(0) == MVT::f64 && CN->isExactlyValue(+0.0)) {
-      if (Subtarget.hasMips64()) {
+      if (Subtarget.isGP64bit()) {
         SDValue Zero = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), DL,
                                               Mips::ZERO_64, MVT::i64);
         Result = CurDAG->getMachineNode(Mips::DMTC1, DL, MVT::f64, Zero);
+      } else if (Subtarget.isFP64bit()) {
+        SDValue Zero = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), DL,
+                                              Mips::ZERO, MVT::i32);
+        Result = CurDAG->getMachineNode(Mips::BuildPairF64_64, DL, MVT::f64,
+                                        Zero, Zero);
       } else {
         SDValue Zero = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), DL,
                                               Mips::ZERO, MVT::i32);
@@ -682,19 +789,6 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
     SDValue ResNode = CurDAG->getCopyFromReg(Chain, DL, DestReg, PtrVT);
     ReplaceUses(SDValue(Node, 0), ResNode);
     return std::make_pair(true, ResNode.getNode());
-  }
-
-  case MipsISD::InsertLOHI: {
-    unsigned RCID = Subtarget.hasDSP() ? Mips::ACC64DSPRegClassID :
-                                         Mips::ACC64RegClassID;
-    SDValue RegClass = CurDAG->getTargetConstant(RCID, MVT::i32);
-    SDValue LoIdx = CurDAG->getTargetConstant(Mips::sub_lo, MVT::i32);
-    SDValue HiIdx = CurDAG->getTargetConstant(Mips::sub_hi, MVT::i32);
-    const SDValue Ops[] = { RegClass, Node->getOperand(0), LoIdx,
-                            Node->getOperand(1), HiIdx };
-    SDNode *Res = CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, DL,
-                                         MVT::Untyped, Ops);
-    return std::make_pair(true, Res);
   }
 
   case ISD::BUILD_VECTOR: {

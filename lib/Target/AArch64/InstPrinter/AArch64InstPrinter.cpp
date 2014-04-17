@@ -15,8 +15,8 @@
 #include "AArch64InstPrinter.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "Utils/AArch64BaseInfo.h"
-#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
@@ -462,8 +462,8 @@ void AArch64InstPrinter::printNeonUImm0Operand(const MCInst *MI, unsigned OpNum,
   o << "#0x0";
 }
 
-void AArch64InstPrinter::printNeonUImm8Operand(const MCInst *MI, unsigned OpNum,
-                                               raw_ostream &O) {
+void AArch64InstPrinter::printUImmHexOperand(const MCInst *MI, unsigned OpNum,
+                                             raw_ostream &O) {
   const MCOperand &MOUImm = MI->getOperand(OpNum);
 
   assert(MOUImm.isImm() &&
@@ -475,9 +475,9 @@ void AArch64InstPrinter::printNeonUImm8Operand(const MCInst *MI, unsigned OpNum,
   O.write_hex(Imm);
 }
 
-void AArch64InstPrinter::printNeonUImm8OperandBare(const MCInst *MI,
-                                               unsigned OpNum,
-                                               raw_ostream &O) {
+void AArch64InstPrinter::printUImmBareOperand(const MCInst *MI,
+                                              unsigned OpNum,
+                                              raw_ostream &O) {
   const MCOperand &MOUImm = MI->getOperand(OpNum);
 
   assert(MOUImm.isImm()
@@ -521,7 +521,7 @@ void AArch64InstPrinter::printVectorList(const MCInst *MI, unsigned OpNum,
   std::string LayoutStr = A64VectorLayoutToString(Layout);
   O << "{";
   if (Count > 1) { // Print sub registers separately
-    bool IsVec64 = (Layout < A64Layout::_16B) ? true : false;
+    bool IsVec64 = (Layout < A64Layout::VL_16B);
     unsigned SubRegIdx = IsVec64 ? AArch64::dsub_0 : AArch64::qsub_0;
     for (unsigned I = 0; I < Count; I++) {
       std::string Name = getRegisterName(MRI.getSubReg(Reg, SubRegIdx++));

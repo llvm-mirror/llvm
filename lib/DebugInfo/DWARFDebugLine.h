@@ -34,8 +34,9 @@ public:
 
   struct Prologue {
     Prologue()
-      : TotalLength(0), Version(0), PrologueLength(0), MinInstLength(0),
-        DefaultIsStmt(0), LineBase(0), LineRange(0), OpcodeBase(0) {}
+        : TotalLength(0), Version(0), PrologueLength(0), MinInstLength(0),
+          MaxOpsPerInst(0), DefaultIsStmt(0), LineBase(0), LineRange(0),
+          OpcodeBase(0) {}
 
     // The size in bytes of the statement information for this compilation unit
     // (not including the total_length field itself).
@@ -49,6 +50,9 @@ public:
     // program opcodes that alter the address register first multiply their
     // operands by this value.
     uint8_t MinInstLength;
+    // The maximum number of individual operations that may be encoded in an
+    // instruction.
+    uint8_t MaxOpsPerInst;
     // The initial value of theis_stmtregister.
     uint8_t DefaultIsStmt;
     // This parameter affects the meaning of the special opcodes. See below.
@@ -112,6 +116,9 @@ public:
     // An unsigned integer whose value encodes the applicable instruction set
     // architecture for the current instruction.
     uint8_t Isa;
+    // An unsigned integer representing the DWARF path discriminator value
+    // for this location.
+    uint32_t Discriminator;
     // A boolean indicating that the current instruction is the beginning of a
     // statement.
     uint8_t IsStmt:1,
@@ -224,7 +231,7 @@ public:
   struct DumpingState : public State {
     DumpingState(raw_ostream &OS) : OS(OS) {}
     virtual ~DumpingState();
-    virtual void finalize();
+    void finalize() override;
   private:
     raw_ostream &OS;
   };

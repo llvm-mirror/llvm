@@ -163,6 +163,8 @@ void *LLVMRecompileAndRelinkFunction(LLVMExecutionEngineRef EE,
                                      LLVMValueRef Fn);
 
 LLVMTargetDataRef LLVMGetExecutionEngineTargetData(LLVMExecutionEngineRef EE);
+LLVMTargetMachineRef
+LLVMGetExecutionEngineTargetMachine(LLVMExecutionEngineRef EE);
 
 void LLVMAddGlobalMapping(LLVMExecutionEngineRef EE, LLVMValueRef Global,
                           void* Addr);
@@ -197,7 +199,7 @@ LLVMMCJITMemoryManagerRef LLVMCreateSimpleMCJITMemoryManager(
   LLVMMemoryManagerAllocateCodeSectionCallback AllocateCodeSection,
   LLVMMemoryManagerAllocateDataSectionCallback AllocateDataSection,
   LLVMMemoryManagerFinalizeMemoryCallback FinalizeMemory,
-  LLVMMemoryManagerDestroyCallback Destory);
+  LLVMMemoryManagerDestroyCallback Destroy);
 
 void LLVMDisposeMCJITMemoryManager(LLVMMCJITMemoryManagerRef MM);
 
@@ -206,7 +208,7 @@ void LLVMDisposeMCJITMemoryManager(LLVMMCJITMemoryManagerRef MM);
  */
 
 #ifdef __cplusplus
-}  
+}
 #endif /* defined(__cplusplus) */
 
 #endif

@@ -24,7 +24,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormattedStream.h"
-#include <map>
 #include <vector>
 
 // The dwarf accelerator tables are an indirect hash table optimized
@@ -62,8 +61,7 @@
 namespace llvm {
 
 class AsmPrinter;
-class DIE;
-class DwarfUnits;
+class DwarfFile;
 
 class DwarfAccelTable {
 
@@ -165,10 +163,10 @@ private:
   // HashData[hash_data_count]
 public:
   struct HashDataContents {
-    DIE *Die;   // Offsets
+    const DIE *Die;   // Offsets
     char Flags; // Specific flags to output
 
-    HashDataContents(DIE *D, char Flags) : Die(D), Flags(Flags) {}
+    HashDataContents(const DIE *D, char Flags) : Die(D), Flags(Flags) {}
 #ifndef NDEBUG
     void print(raw_ostream &O) const {
       O << "  Offset: " << Die->getOffset() << "\n";
@@ -216,7 +214,7 @@ private:
   void EmitBuckets(AsmPrinter *);
   void EmitHashes(AsmPrinter *);
   void EmitOffsets(AsmPrinter *, MCSymbol *);
-  void EmitData(AsmPrinter *, DwarfUnits *D);
+  void EmitData(AsmPrinter *, DwarfFile *D);
 
   // Allocator for HashData and HashDataContents.
   BumpPtrAllocator Allocator;
@@ -241,9 +239,9 @@ private:
 public:
   DwarfAccelTable(ArrayRef<DwarfAccelTable::Atom>);
   ~DwarfAccelTable();
-  void AddName(StringRef, DIE *, char = 0);
+  void AddName(StringRef, const DIE *, char = 0);
   void FinalizeTable(AsmPrinter *, StringRef);
-  void Emit(AsmPrinter *, MCSymbol *, DwarfUnits *);
+  void Emit(AsmPrinter *, MCSymbol *, DwarfFile *);
 #ifndef NDEBUG
   void print(raw_ostream &O);
   void dump() { print(dbgs()); }

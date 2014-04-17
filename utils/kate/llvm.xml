@@ -39,9 +39,6 @@
     </list>
     <list name="linkage-types">
       <item> private </item>
-      <item> linker_private </item>
-      <item> linker_private_weak </item>
-      <item> linker_private_weak_def_auto </item>
       <item> internal </item>
       <item> available_externally </item>
       <item> linkonce </item>
@@ -158,6 +155,7 @@
       <item> ptrtoint </item>
       <item> inttoptr </item>
       <item> bitcast </item>
+      <item> addrspacecast </item>
       <item> icmp </item>
       <item> fcmp </item>
       <item> phi </item>

@@ -13,8 +13,8 @@
 
 #include "llvm/Analysis/AliasSetTracker.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Assembly/Writer.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
@@ -22,7 +22,6 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/InstIterator.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -566,7 +565,7 @@ void AliasSet::print(raw_ostream &OS) const {
     OS << "Pointers: ";
     for (iterator I = begin(), E = end(); I != E; ++I) {
       if (I != begin()) OS << ", ";
-      WriteAsOperand(OS << "(", I.getPointer());
+      I.getPointer()->printAsOperand(OS << "(");
       OS << ", " << I.getSize() << ")";
     }
   }
@@ -574,7 +573,7 @@ void AliasSet::print(raw_ostream &OS) const {
     OS << "\n    " << UnknownInsts.size() << " Unknown instructions: ";
     for (unsigned i = 0, e = UnknownInsts.size(); i != e; ++i) {
       if (i) OS << ", ";
-      WriteAsOperand(OS, UnknownInsts[i]);
+      UnknownInsts[i]->printAsOperand(OS);
     }
   }
   OS << "\n";
@@ -628,12 +627,12 @@ namespace {
       initializeAliasSetPrinterPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
       AU.addRequired<AliasAnalysis>();
     }
 
-    virtual bool runOnFunction(Function &F) {
+    bool runOnFunction(Function &F) override {
       Tracker = new AliasSetTracker(getAnalysis<AliasAnalysis>());
 
       for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)

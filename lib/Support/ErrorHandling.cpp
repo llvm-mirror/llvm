@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm-c/Core.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/config.h"
@@ -33,8 +34,8 @@
 
 using namespace llvm;
 
-static fatal_error_handler_t ErrorHandler = 0;
-static void *ErrorHandlerUserData = 0;
+static fatal_error_handler_t ErrorHandler = nullptr;
+static void *ErrorHandlerUserData = nullptr;
 
 void llvm::install_fatal_error_handler(fatal_error_handler_t handler,
                                        void *user_data) {
@@ -46,7 +47,7 @@ void llvm::install_fatal_error_handler(fatal_error_handler_t handler,
 }
 
 void llvm::remove_fatal_error_handler() {
-  ErrorHandler = 0;
+  ErrorHandler = nullptr;
 }
 
 void llvm::report_fatal_error(const char *Reason, bool GenCrashDiag) {
@@ -101,4 +102,20 @@ void llvm::llvm_unreachable_internal(const char *msg, const char *file,
   // so use the unreachable builtin to avoid a Clang self-host warning.
   LLVM_BUILTIN_UNREACHABLE;
 #endif
+}
+
+static void bindingsErrorHandler(void *user_data, const std::string& reason,
+                                 bool gen_crash_diag) {
+  LLVMFatalErrorHandler handler =
+      LLVM_EXTENSION reinterpret_cast<LLVMFatalErrorHandler>(user_data);
+  handler(reason.c_str());
+}
+
+void LLVMInstallFatalErrorHandler(LLVMFatalErrorHandler Handler) {
+  install_fatal_error_handler(bindingsErrorHandler,
+                              LLVM_EXTENSION reinterpret_cast<void *>(Handler));
+}
+
+void LLVMResetFatalErrorHandler() {
+  remove_fatal_error_handler();
 }

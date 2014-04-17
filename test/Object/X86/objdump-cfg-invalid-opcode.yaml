@@ -6,6 +6,7 @@
 # .LBL0_1:
 # 	movq	8(%rsi), %rax
 # 	<invalid opcode: 06>
+# 	nop
 
 !ELF
 FileHeader:
@@ -17,7 +18,7 @@ Sections:
   - Name: .text
     Type: SHT_PROGBITS
     Flags: [ SHF_ALLOC, SHF_EXECINSTR ]
-    Content: "488B460806"
+    Content: "488B46080690"
 
 ## 0000000000000000 <main>:
 
@@ -37,7 +38,16 @@ Sections:
 #CFG:     Type:            Data
 
 ##    4:   06                      (bad)
-#CFG:     Content:         06
+#CFG:     Content:         '06'
+
+#CFG:   - StartAddress:    0x0000000000000005
+#CFG:     Size:            1
+#CFG:     Type:            Text
+
+##    5:   90                      nop
+#CFG:       - Inst:            NOOP
+#CFG:         Size:            1
+#CFG:         Ops:             [  ]
 
 Symbols:
   Global:
@@ -45,4 +55,4 @@ Symbols:
       Type: STT_FUNC
       Section: .text
       Value: 0x0
-      Size: 5
+      Size: 6

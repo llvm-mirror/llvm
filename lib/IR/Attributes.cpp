@@ -16,6 +16,7 @@
 #include "llvm/IR/Attributes.h"
 #include "AttributeImpl.h"
 #include "LLVMContextImpl.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Atomic.h"
@@ -166,6 +167,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "builtin";
   if (hasAttribute(Attribute::ByVal))
     return "byval";
+  if (hasAttribute(Attribute::InAlloca))
+    return "inalloca";
   if (hasAttribute(Attribute::InlineHint))
     return "inlinehint";
   if (hasAttribute(Attribute::InReg))
@@ -286,7 +289,11 @@ bool Attribute::operator<(Attribute A) const {
 // AttributeImpl Definition
 //===----------------------------------------------------------------------===//
 
+// Pin the vtabels to this file.
 AttributeImpl::~AttributeImpl() {}
+void EnumAttributeImpl::anchor() {}
+void AlignAttributeImpl::anchor() {}
+void StringAttributeImpl::anchor() {}
 
 bool AttributeImpl::hasAttribute(Attribute::AttrKind A) const {
   if (isStringAttribute()) return false;
@@ -384,6 +391,7 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::Cold:            return 1ULL << 40;
   case Attribute::Builtin:         return 1ULL << 41;
   case Attribute::OptimizeNone:    return 1ULL << 42;
+  case Attribute::InAlloca:        return 1ULL << 43;
   }
   llvm_unreachable("Unsupported attribute type");
 }
@@ -395,7 +403,7 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
 AttributeSetNode *AttributeSetNode::get(LLVMContext &C,
                                         ArrayRef<Attribute> Attrs) {
   if (Attrs.empty())
-    return 0;
+    return nullptr;
 
   // Otherwise, build a key to look up the existing attributes.
   LLVMContextImpl *pImpl = C.pImpl;
@@ -829,7 +837,7 @@ bool AttributeSet::hasAttributes(unsigned Index) const {
 /// \brief Return true if the specified attribute is set for at least one
 /// parameter or for the return value.
 bool AttributeSet::hasAttrSomewhere(Attribute::AttrKind Attr) const {
-  if (pImpl == 0) return false;
+  if (!pImpl) return false;
 
   for (unsigned I = 0, E = pImpl->getNumAttributes(); I != E; ++I)
     for (AttributeSetImpl::iterator II = pImpl->begin(I),
@@ -870,14 +878,14 @@ std::string AttributeSet::getAsString(unsigned Index,
 
 /// \brief The attributes for the specified index are returned.
 AttributeSetNode *AttributeSet::getAttributes(unsigned Index) const {
-  if (!pImpl) return 0;
+  if (!pImpl) return nullptr;
 
   // Loop through to find the attribute node we want.
   for (unsigned I = 0, E = pImpl->getNumAttributes(); I != E; ++I)
     if (pImpl->getSlotIndex(I) == Index)
       return pImpl->getSlotNode(I);
 
-  return 0;
+  return nullptr;
 }
 
 AttributeSet::iterator AttributeSet::begin(unsigned Slot) const {
@@ -1170,7 +1178,8 @@ AttributeSet AttributeFuncs::typeIncompatible(Type *Ty, uint64_t Index) {
       .addAttribute(Attribute::NoCapture)
       .addAttribute(Attribute::ReadNone)
       .addAttribute(Attribute::ReadOnly)
-      .addAttribute(Attribute::StructRet);
+      .addAttribute(Attribute::StructRet)
+      .addAttribute(Attribute::InAlloca);
 
   return AttributeSet::get(Ty->getContext(), Index, Incompatible);
 }
