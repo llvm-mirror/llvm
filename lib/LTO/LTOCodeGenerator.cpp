@@ -64,17 +64,17 @@ const char* LTOCodeGenerator::getVersionString() {
 
 LTOCodeGenerator::LTOCodeGenerator()
     : Context(getGlobalContext()), Linker(new Module("ld-temp.o", Context)),
-      TargetMach(NULL), EmitDwarfDebugInfo(false), ScopeRestrictionsDone(false),
-      CodeModel(LTO_CODEGEN_PIC_MODEL_DYNAMIC), NativeObjectFile(NULL),
-      DiagHandler(NULL), DiagContext(NULL) {
+      TargetMach(nullptr), EmitDwarfDebugInfo(false),
+      ScopeRestrictionsDone(false), CodeModel(LTO_CODEGEN_PIC_MODEL_DEFAULT),
+      NativeObjectFile(nullptr), DiagHandler(nullptr), DiagContext(nullptr) {
   initializeLTOPasses();
 }
 
 LTOCodeGenerator::~LTOCodeGenerator() {
   delete TargetMach;
   delete NativeObjectFile;
-  TargetMach = NULL;
-  NativeObjectFile = NULL;
+  TargetMach = nullptr;
+  NativeObjectFile = nullptr;
 
   Linker.deleteModule();
 
@@ -161,6 +161,7 @@ void LTOCodeGenerator::setCodePICModel(lto_codegen_model model) {
   case LTO_CODEGEN_PIC_MODEL_STATIC:
   case LTO_CODEGEN_PIC_MODEL_DYNAMIC:
   case LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC:
+  case LTO_CODEGEN_PIC_MODEL_DEFAULT:
     CodeModel = model;
     return;
   }
@@ -244,7 +245,7 @@ const void* LTOCodeGenerator::compile(size_t* length,
   const char *name;
   if (!compile_to_file(&name, disableOpt, disableInline, disableGVNLoadPRE,
                        errMsg))
-    return NULL;
+    return nullptr;
 
   // remove old buffer if compile() called twice
   delete NativeObjectFile;
@@ -254,7 +255,7 @@ const void* LTOCodeGenerator::compile(size_t* length,
   if (error_code ec = MemoryBuffer::getFile(name, BuffPtr, -1, false)) {
     errMsg = ec.message();
     sys::fs::remove(NativeObjectPath);
-    return NULL;
+    return nullptr;
   }
   NativeObjectFile = BuffPtr.release();
 
@@ -262,14 +263,14 @@ const void* LTOCodeGenerator::compile(size_t* length,
   sys::fs::remove(NativeObjectPath);
 
   // return buffer, unless error
-  if (NativeObjectFile == NULL)
-    return NULL;
+  if (!NativeObjectFile)
+    return nullptr;
   *length = NativeObjectFile->getBufferSize();
   return NativeObjectFile->getBufferStart();
 }
 
 bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
-  if (TargetMach != NULL)
+  if (TargetMach)
     return true;
 
   std::string TripleStr = Linker.getModule()->getTargetTriple();
@@ -279,7 +280,7 @@ bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
 
   // create target machine from info for merged modules
   const Target *march = TargetRegistry::lookupTarget(TripleStr, errMsg);
-  if (march == NULL)
+  if (!march)
     return false;
 
   // The relocation model is actually a static member of TargetMachine and
@@ -294,6 +295,9 @@ bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
     break;
   case LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC:
     RelocModel = Reloc::DynamicNoPIC;
+    break;
+  case LTO_CODEGEN_PIC_MODEL_DEFAULT:
+    // RelocModel is already the default, so leave it that way.
     break;
   }
 
@@ -351,7 +355,7 @@ applyRestriction(GlobalValue &GV,
 
 static void findUsedValues(GlobalVariable *LLVMUsed,
                            SmallPtrSet<GlobalValue*, 8> &UsedValues) {
-  if (LLVMUsed == 0) return;
+  if (!LLVMUsed) return;
 
   ConstantArray *Inits = cast<ConstantArray>(LLVMUsed->getInitializer());
   for (unsigned i = 0, e = Inits->getNumOperands(); i != e; ++i)
@@ -395,6 +399,7 @@ void LTOCodeGenerator::applyScopeRestrictions() {
   // Start off with a verification pass.
   PassManager passes;
   passes.add(createVerifierPass());
+  passes.add(createDebugInfoVerifierPass());
 
   // mark which symbols can not be internalized
   Mangler Mangler(TargetMach->getDataLayout());
@@ -467,6 +472,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
 
   // Start off with a verification pass.
   passes.add(createVerifierPass());
+  passes.add(createDebugInfoVerifierPass());
 
   // Add an appropriate DataLayout instance for this module...
   mergedModule->setDataLayout(TargetMach->getDataLayout());
@@ -488,6 +494,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
 
   // Make sure everything is still good.
   passes.add(createVerifierPass());
+  passes.add(createDebugInfoVerifierPass());
 
   PassManager codeGenPasses;
 
@@ -575,7 +582,7 @@ LTOCodeGenerator::setDiagnosticHandler(lto_diagnostic_handler_t DiagHandler,
   this->DiagHandler = DiagHandler;
   this->DiagContext = Ctxt;
   if (!DiagHandler)
-    return Context.setDiagnosticHandler(NULL, NULL);
+    return Context.setDiagnosticHandler(nullptr, nullptr);
   // Register the LTOCodeGenerator stub in the LLVMContext to forward the
   // diagnostic to the external DiagHandler.
   Context.setDiagnosticHandler(LTOCodeGenerator::DiagnosticHandler, this);

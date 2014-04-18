@@ -141,71 +141,6 @@ def : Pat<(relaxed_store<atomic_store_64> am_unscaled64:$ptr, GPR64:$val),
           (STURXi GPR64:$val, am_unscaled64:$ptr)>;
 
 //===----------------------------------
-// Atomic read-modify-write operations
-//===----------------------------------
-
-// More complicated operations need lots of C++ support, so we just create
-// skeletons here for the C++ code to refer to.
-
-let usesCustomInserter = 1, hasCtrlDep = 1, mayLoad = 1, mayStore = 1 in {
-multiclass AtomicSizes {
-  def _I8 : Pseudo<(outs GPR32:$dst),
-                   (ins GPR64sp:$ptr, GPR32:$incr, i32imm:$ordering), []>;
-  def _I16 : Pseudo<(outs GPR32:$dst),
-                    (ins GPR64sp:$ptr, GPR32:$incr, i32imm:$ordering), []>;
-  def _I32 : Pseudo<(outs GPR32:$dst),
-                    (ins GPR64sp:$ptr, GPR32:$incr, i32imm:$ordering), []>;
-  def _I64 : Pseudo<(outs GPR64:$dst),
-                    (ins GPR64sp:$ptr, GPR64:$incr, i32imm:$ordering), []>;
-  def _I128 : Pseudo<(outs GPR64:$dstlo, GPR64:$dsthi),
-                     (ins GPR64sp:$ptr, GPR64:$incrlo, GPR64:$incrhi,
-                          i32imm:$ordering), []>;
-}
-}
-
-defm ATOMIC_LOAD_ADD  : AtomicSizes;
-defm ATOMIC_LOAD_SUB  : AtomicSizes;
-defm ATOMIC_LOAD_AND  : AtomicSizes;
-defm ATOMIC_LOAD_OR   : AtomicSizes;
-defm ATOMIC_LOAD_XOR  : AtomicSizes;
-defm ATOMIC_LOAD_NAND : AtomicSizes;
-defm ATOMIC_SWAP      : AtomicSizes;
-let Defs = [CPSR] in {
-  // These operations need a CMP to calculate the correct value
-  defm ATOMIC_LOAD_MIN  : AtomicSizes;
-  defm ATOMIC_LOAD_MAX  : AtomicSizes;
-  defm ATOMIC_LOAD_UMIN : AtomicSizes;
-  defm ATOMIC_LOAD_UMAX : AtomicSizes;
-}
-
-class AtomicCmpSwap<RegisterClass GPRData>
-  : Pseudo<(outs GPRData:$dst),
-           (ins GPR64sp:$ptr, GPRData:$old, GPRData:$new,
-                i32imm:$ordering), []> {
-  let usesCustomInserter = 1;
-  let hasCtrlDep = 1;
-  let mayLoad = 1;
-  let mayStore = 1;
-  let Defs = [CPSR];
-}
-
-def ATOMIC_CMP_SWAP_I8  : AtomicCmpSwap<GPR32>;
-def ATOMIC_CMP_SWAP_I16 : AtomicCmpSwap<GPR32>;
-def ATOMIC_CMP_SWAP_I32 : AtomicCmpSwap<GPR32>;
-def ATOMIC_CMP_SWAP_I64 : AtomicCmpSwap<GPR64>;
-
-def ATOMIC_CMP_SWAP_I128
-  : Pseudo<(outs GPR64:$dstlo, GPR64:$dsthi),
-           (ins GPR64sp:$ptr, GPR64:$oldlo, GPR64:$oldhi,
-                GPR64:$newlo, GPR64:$newhi, i32imm:$ordering), []> {
-  let usesCustomInserter = 1;
-  let hasCtrlDep = 1;
-  let mayLoad = 1;
-  let mayStore = 1;
-  let Defs = [CPSR];
-}
-
-//===----------------------------------
 // Low-level exclusive operations
 //===----------------------------------
 
@@ -242,6 +177,39 @@ def : Pat<(and (ldxr_2 am_noindex:$addr), 0xffff),
 def : Pat<(and (ldxr_4 am_noindex:$addr), 0xffffffff),
           (SUBREG_TO_REG (i64 0), (LDXRW am_noindex:$addr), sub_32)>;
 
+// Load-exclusives.
+
+def ldaxr_1 : PatFrag<(ops node:$ptr), (int_arm64_ldaxr node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i8;
+}]>;
+
+def ldaxr_2 : PatFrag<(ops node:$ptr), (int_arm64_ldaxr node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i16;
+}]>;
+
+def ldaxr_4 : PatFrag<(ops node:$ptr), (int_arm64_ldaxr node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i32;
+}]>;
+
+def ldaxr_8 : PatFrag<(ops node:$ptr), (int_arm64_ldaxr node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i64;
+}]>;
+
+def : Pat<(ldaxr_1 am_noindex:$addr),
+          (SUBREG_TO_REG (i64 0), (LDAXRB am_noindex:$addr), sub_32)>;
+def : Pat<(ldaxr_2 am_noindex:$addr),
+          (SUBREG_TO_REG (i64 0), (LDAXRH am_noindex:$addr), sub_32)>;
+def : Pat<(ldaxr_4 am_noindex:$addr),
+          (SUBREG_TO_REG (i64 0), (LDAXRW am_noindex:$addr), sub_32)>;
+def : Pat<(ldaxr_8 am_noindex:$addr), (LDAXRX am_noindex:$addr)>;
+
+def : Pat<(and (ldaxr_1 am_noindex:$addr), 0xff),
+          (SUBREG_TO_REG (i64 0), (LDAXRB am_noindex:$addr), sub_32)>;
+def : Pat<(and (ldaxr_2 am_noindex:$addr), 0xffff),
+          (SUBREG_TO_REG (i64 0), (LDAXRH am_noindex:$addr), sub_32)>;
+def : Pat<(and (ldaxr_4 am_noindex:$addr), 0xffffffff),
+          (SUBREG_TO_REG (i64 0), (LDAXRW am_noindex:$addr), sub_32)>;
+
 // Store-exclusives.
 
 def stxr_1 : PatFrag<(ops node:$val, node:$ptr),
@@ -263,6 +231,7 @@ def stxr_8 : PatFrag<(ops node:$val, node:$ptr),
                      (int_arm64_stxr node:$val, node:$ptr), [{
   return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i64;
 }]>;
+
 
 def : Pat<(stxr_1 GPR64:$val, am_noindex:$addr),
           (STXRB (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
@@ -286,6 +255,52 @@ def : Pat<(stxr_2 (and GPR64:$val, 0xffff), am_noindex:$addr),
           (STXRH (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
 def : Pat<(stxr_4 (and GPR64:$val, 0xffffffff), am_noindex:$addr),
           (STXRW (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
+
+// Store-release-exclusives.
+
+def stlxr_1 : PatFrag<(ops node:$val, node:$ptr),
+                     (int_arm64_stlxr node:$val, node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i8;
+}]>;
+
+def stlxr_2 : PatFrag<(ops node:$val, node:$ptr),
+                     (int_arm64_stlxr node:$val, node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i16;
+}]>;
+
+def stlxr_4 : PatFrag<(ops node:$val, node:$ptr),
+                     (int_arm64_stlxr node:$val, node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i32;
+}]>;
+
+def stlxr_8 : PatFrag<(ops node:$val, node:$ptr),
+                     (int_arm64_stlxr node:$val, node:$ptr), [{
+  return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i64;
+}]>;
+
+
+def : Pat<(stlxr_1 GPR64:$val, am_noindex:$addr),
+          (STLXRB (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
+def : Pat<(stlxr_2 GPR64:$val, am_noindex:$addr),
+          (STLXRH (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
+def : Pat<(stlxr_4 GPR64:$val, am_noindex:$addr),
+          (STLXRW (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
+def : Pat<(stlxr_8 GPR64:$val, am_noindex:$addr),
+          (STLXRX GPR64:$val, am_noindex:$addr)>;
+
+def : Pat<(stlxr_1 (zext (and GPR32:$val, 0xff)), am_noindex:$addr),
+          (STLXRB GPR32:$val, am_noindex:$addr)>;
+def : Pat<(stlxr_2 (zext (and GPR32:$val, 0xffff)), am_noindex:$addr),
+          (STLXRH GPR32:$val, am_noindex:$addr)>;
+def : Pat<(stlxr_4 (zext GPR32:$val), am_noindex:$addr),
+          (STLXRW GPR32:$val, am_noindex:$addr)>;
+
+def : Pat<(stlxr_1 (and GPR64:$val, 0xff), am_noindex:$addr),
+          (STLXRB (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
+def : Pat<(stlxr_2 (and GPR64:$val, 0xffff), am_noindex:$addr),
+          (STLXRH (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
+def : Pat<(stlxr_4 (and GPR64:$val, 0xffffffff), am_noindex:$addr),
+          (STLXRW (EXTRACT_SUBREG GPR64:$val, sub_32), am_noindex:$addr)>;
 
 
 // And clear exclusive.

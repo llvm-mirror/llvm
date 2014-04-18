@@ -108,6 +108,7 @@ unlikely to be supported by our host compilers.
 * Lambdas: N2927_
 
   * But *not* ``std::function``, until Clang implements `MSVC-compatible RTTI`_.
+  * And *not* lambdas with default arguments.
 
 * ``decltype``: N2343_
 * Nested closing right angle brackets: N1757_
@@ -116,6 +117,11 @@ unlikely to be supported by our host compilers.
 * Strongly-typed and forward declarable enums: N2347_, N2764_
 * Local and unnamed types as template arguments: N2657_
 * Range-based for-loop: N2930_
+
+  * But ``{}`` are required around inner ``do {} while()`` loops.  As a result,
+    ``{}`` are required around function-like macros inside range-based for
+    loops.
+
 * ``override`` and ``final``: N2928_, N3206_, N3272_
 * Atomic operations and the C++11 memory model: N2429_
 
@@ -1278,9 +1284,9 @@ method will never be implemented. This enables other checks like
 ``-Wunused-private-field`` to run correctly on classes that contain these
 methods.
 
-To maintain compatibility with C++03, ``LLVM_DELETED_FUNCTION`` should be used
-which will expand to ``= delete`` if the compiler supports it. These methods
-should still be declared private. Example of the uncopyable pattern:
+For compatibility with MSVC, ``LLVM_DELETED_FUNCTION`` should be used which
+will expand to ``= delete`` on compilers that support it. These methods should
+still be declared private. Example of the uncopyable pattern:
 
 .. code-block:: c++
 

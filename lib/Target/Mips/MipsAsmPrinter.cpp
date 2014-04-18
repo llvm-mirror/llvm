@@ -285,9 +285,8 @@ void MipsAsmPrinter::EmitFunctionEntryLabel() {
 
   if (Subtarget->inMicroMipsMode())
     TS.emitDirectiveSetMicroMips();
-  // leave out until FSF available gas has micromips changes
-  //  else
-  //    TS.emitDirectiveSetNoMicroMips();
+  else
+    TS.emitDirectiveSetNoMicroMips();
 
   if (Subtarget->inMips16Mode())
     TS.emitDirectiveSetMips16();
@@ -621,15 +620,28 @@ printFCCOperand(const MachineInstr *MI, int opNum, raw_ostream &O,
 void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
   // TODO: Need to add -mabicalls and -mno-abicalls flags.
   // Currently we assume that -mabicalls is the default.
-  getTargetStreamer().emitDirectiveAbiCalls();
-  Reloc::Model RM = Subtarget->getRelocationModel();
-  if (RM == Reloc::Static && !Subtarget->hasMips64())
-    getTargetStreamer().emitDirectiveOptionPic0();
+  bool IsABICalls = true;
+  if (IsABICalls) {
+    getTargetStreamer().emitDirectiveAbiCalls();
+    Reloc::Model RM = Subtarget->getRelocationModel();
+    // FIXME: This condition should be a lot more complicated that it is here.
+    //        Ideally it should test for properties of the ABI and not the ABI
+    //        itself.
+    //        For the moment, I'm only correcting enough to make MIPS-IV work.
+    if (RM == Reloc::Static && !Subtarget->isABI_N64())
+      getTargetStreamer().emitDirectiveOptionPic0();
+  }
 
   // Tell the assembler which ABI we are using
   std::string SectionName = std::string(".mdebug.") + getCurrentABIString();
   OutStreamer.SwitchSection(OutContext.getELFSection(
       SectionName, ELF::SHT_PROGBITS, 0, SectionKind::getDataRel()));
+
+  // NaN: At the moment we only support:
+  // 1. .nan legacy (default)
+  // 2. .nan 2008
+  Subtarget->isNaN2008() ? getTargetStreamer().emitDirectiveNaN2008()
+    : getTargetStreamer().emitDirectiveNaNLegacy();
 
   // TODO: handle O64 ABI
 

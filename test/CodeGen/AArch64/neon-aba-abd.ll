@@ -1,4 +1,5 @@
 ; RUN: llc -mtriple=aarch64-none-linux-gnu -mattr=+neon < %s | FileCheck %s
+; arm64 has copied test in its own directory (different intrinsic names).
 
 declare <8 x i8> @llvm.arm.neon.vabdu.v8i8(<8 x i8>, <8 x i8>)
 declare <8 x i8> @llvm.arm.neon.vabds.v8i8(<8 x i8>, <8 x i8>)

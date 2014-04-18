@@ -33,6 +33,7 @@
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Support/Allocator.h"
 #include <map>
+#include <memory>
 
 namespace llvm {
 
@@ -213,7 +214,7 @@ class Region : public RegionNode {
   // (The entry BasicBlock is part of RegionNode)
   BasicBlock *exit;
 
-  typedef std::vector<Region*> RegionSet;
+  typedef std::vector<std::unique_ptr<Region>> RegionSet;
 
   // The subregions of this region.
   RegionSet children;
@@ -246,7 +247,7 @@ public:
   /// @param Parent The surrounding region or NULL if this is a top level
   ///               region.
   Region(BasicBlock *Entry, BasicBlock *Exit, RegionInfo* RI,
-         DominatorTree *DT, Region *Parent = 0);
+         DominatorTree *DT, Region *Parent = nullptr);
 
   /// Delete the Region and all its subregions.
   ~Region();
@@ -311,7 +312,7 @@ public:
   /// @brief Check if a Region is the TopLevel region.
   ///
   /// The toplevel region represents the whole function.
-  bool isTopLevelRegion() const { return exit == NULL; }
+  bool isTopLevelRegion() const { return exit == nullptr; }
 
   /// @brief Return a new (non-canonical) region, that is obtained by joining
   ///        this region with its predecessors.
@@ -515,7 +516,7 @@ public:
     }
 
     // Construct the end iterator.
-    block_iterator_wrapper() : super(df_end<pointer>((BasicBlock *)0)) {}
+    block_iterator_wrapper() : super(df_end<pointer>((BasicBlock *)nullptr)) {}
 
     /*implicit*/ block_iterator_wrapper(super I) : super(I) {}
 

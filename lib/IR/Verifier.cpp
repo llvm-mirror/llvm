@@ -61,6 +61,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
@@ -79,11 +80,68 @@ using namespace llvm;
 static cl::opt<bool> VerifyDebugInfo("verify-debug-info", cl::init(false));
 
 namespace {
-class Verifier : public InstVisitor<Verifier> {
-  friend class InstVisitor<Verifier>;
-
+struct VerifierSupport {
   raw_ostream &OS;
   const Module *M;
+
+  /// \brief Track the brokenness of the module while recursively visiting.
+  bool Broken;
+
+  explicit VerifierSupport(raw_ostream &OS)
+      : OS(OS), M(nullptr), Broken(false) {}
+
+  void WriteValue(const Value *V) {
+    if (!V)
+      return;
+    if (isa<Instruction>(V)) {
+      OS << *V << '\n';
+    } else {
+      V->printAsOperand(OS, true, M);
+      OS << '\n';
+    }
+  }
+
+  void WriteType(Type *T) {
+    if (!T)
+      return;
+    OS << ' ' << *T;
+  }
+
+  // CheckFailed - A check failed, so print out the condition and the message
+  // that failed.  This provides a nice place to put a breakpoint if you want
+  // to see why something is not correct.
+  void CheckFailed(const Twine &Message, const Value *V1 = nullptr,
+                   const Value *V2 = nullptr, const Value *V3 = nullptr,
+                   const Value *V4 = nullptr) {
+    OS << Message.str() << "\n";
+    WriteValue(V1);
+    WriteValue(V2);
+    WriteValue(V3);
+    WriteValue(V4);
+    Broken = true;
+  }
+
+  void CheckFailed(const Twine &Message, const Value *V1, Type *T2,
+                   const Value *V3 = nullptr) {
+    OS << Message.str() << "\n";
+    WriteValue(V1);
+    WriteType(T2);
+    WriteValue(V3);
+    Broken = true;
+  }
+
+  void CheckFailed(const Twine &Message, Type *T1, Type *T2 = nullptr,
+                   Type *T3 = nullptr) {
+    OS << Message.str() << "\n";
+    WriteType(T1);
+    WriteType(T2);
+    WriteType(T3);
+    Broken = true;
+  }
+};
+class Verifier : public InstVisitor<Verifier>, VerifierSupport {
+  friend class InstVisitor<Verifier>;
+
   LLVMContext *Context;
   const DataLayout *DL;
   DominatorTree DT;
@@ -103,16 +161,10 @@ class Verifier : public InstVisitor<Verifier> {
   /// personality function.
   const Value *PersonalityFn;
 
-  /// \brief Finder keeps track of all debug info MDNodes in a Module.
-  DebugInfoFinder Finder;
-
-  /// \brief Track the brokenness of the module while recursively visiting.
-  bool Broken;
-
 public:
   explicit Verifier(raw_ostream &OS = dbgs())
-      : OS(OS), M(nullptr), Context(nullptr), DL(nullptr),
-        PersonalityFn(nullptr), Broken(false) {}
+      : VerifierSupport(OS), Context(nullptr), DL(nullptr),
+        PersonalityFn(nullptr) {}
 
   bool verify(const Function &F) {
     M = F.getParent();
@@ -142,16 +194,11 @@ public:
     // FIXME: It's really gross that we have to cast away constness here.
     DT.recalculate(const_cast<Function &>(F));
 
-    Finder.reset();
     Broken = false;
     // FIXME: We strip const here because the inst visitor strips const.
     visit(const_cast<Function &>(F));
     InstsInThisBlock.clear();
     PersonalityFn = nullptr;
-
-    if (VerifyDebugInfo)
-      // Verify Debug Info.
-      verifyDebugInfo();
 
     return !Broken;
   }
@@ -159,7 +206,6 @@ public:
   bool verify(const Module &M) {
     this->M = &M;
     Context = &M.getContext();
-    Finder.reset();
     Broken = false;
 
     // Scan through, checking all of the external function's linkage now...
@@ -186,13 +232,6 @@ public:
 
     visitModuleFlags(M);
     visitModuleIdents(M);
-
-    if (VerifyDebugInfo) {
-      Finder.reset();
-      Finder.processModule(M);
-      // Verify Debug Info.
-      verifyDebugInfo();
-    }
 
     return !Broken;
   }
@@ -278,57 +317,21 @@ private:
 
   void VerifyBitcastType(const Value *V, Type *DestTy, Type *SrcTy);
   void VerifyConstantExprBitcastType(const ConstantExpr *CE);
+};
+class DebugInfoVerifier : public VerifierSupport {
+public:
+  explicit DebugInfoVerifier(raw_ostream &OS = dbgs()) : VerifierSupport(OS) {}
 
+  bool verify(const Module &M) {
+    this->M = &M;
+    verifyDebugInfo();
+    return !Broken;
+  }
+
+private:
   void verifyDebugInfo();
-
-  void WriteValue(const Value *V) {
-    if (!V)
-      return;
-    if (isa<Instruction>(V)) {
-      OS << *V << '\n';
-    } else {
-      V->printAsOperand(OS, true, M);
-      OS << '\n';
-    }
-  }
-
-  void WriteType(Type *T) {
-    if (!T)
-      return;
-    OS << ' ' << *T;
-  }
-
-  // CheckFailed - A check failed, so print out the condition and the message
-  // that failed.  This provides a nice place to put a breakpoint if you want
-  // to see why something is not correct.
-  void CheckFailed(const Twine &Message, const Value *V1 = nullptr,
-                   const Value *V2 = nullptr, const Value *V3 = nullptr,
-                   const Value *V4 = nullptr) {
-    OS << Message.str() << "\n";
-    WriteValue(V1);
-    WriteValue(V2);
-    WriteValue(V3);
-    WriteValue(V4);
-    Broken = true;
-  }
-
-  void CheckFailed(const Twine &Message, const Value *V1, Type *T2,
-                   const Value *V3 = nullptr) {
-    OS << Message.str() << "\n";
-    WriteValue(V1);
-    WriteType(T2);
-    WriteValue(V3);
-    Broken = true;
-  }
-
-  void CheckFailed(const Twine &Message, Type *T1, Type *T2 = nullptr,
-                   Type *T3 = nullptr) {
-    OS << Message.str() << "\n";
-    WriteType(T1);
-    WriteType(T2);
-    WriteType(T3);
-    Broken = true;
-  }
+  void processInstructions(DebugInfoFinder &Finder);
+  void processCallInst(DebugInfoFinder &Finder, const CallInst &CI);
 };
 } // End anonymous namespace
 
@@ -2104,11 +2107,6 @@ void Verifier::visitInstruction(Instruction &I) {
   MDNode *MD = I.getMetadata(LLVMContext::MD_range);
   Assert1(!MD || isa<LoadInst>(I), "Ranges are only for loads!", &I);
 
-  if (VerifyDebugInfo) {
-    MD = I.getMetadata(LLVMContext::MD_dbg);
-    Finder.processLocation(*M, DILocation(MD));
-  }
-
   InstsInThisBlock.insert(&I);
 }
 
@@ -2308,17 +2306,7 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
     MDNode *MD = cast<MDNode>(CI.getArgOperand(0));
     Assert1(MD->getNumOperands() == 1,
                 "invalid llvm.dbg.declare intrinsic call 2", &CI);
-    if (VerifyDebugInfo)
-      Finder.processDeclare(*M, cast<DbgDeclareInst>(&CI));
   } break;
-  case Intrinsic::dbg_value: { //llvm.dbg.value
-    if (VerifyDebugInfo) {
-      Assert1(CI.getArgOperand(0) && isa<MDNode>(CI.getArgOperand(0)),
-              "invalid llvm.dbg.value intrinsic call 1", &CI);
-      Finder.processValue(*M, cast<DbgValueInst>(&CI));
-    }
-    break;
-  }
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
   case Intrinsic::memset:
@@ -2380,25 +2368,58 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
   }
 }
 
-void Verifier::verifyDebugInfo() {
+void DebugInfoVerifier::verifyDebugInfo() {
+  if (!VerifyDebugInfo)
+    return;
+
+  DebugInfoFinder Finder;
+  Finder.processModule(*M);
+  processInstructions(Finder);
+
   // Verify Debug Info.
-  if (VerifyDebugInfo) {
-    for (DICompileUnit CU : Finder.compile_units()) {
-      Assert1(CU.Verify(), "DICompileUnit does not Verify!", CU);
-    }
-    for (DISubprogram S : Finder.subprograms()) {
-      Assert1(S.Verify(), "DISubprogram does not Verify!", S);
-    }
-    for (DIGlobalVariable GV : Finder.global_variables()) {
-      Assert1(GV.Verify(), "DIGlobalVariable does not Verify!", GV);
-    }
-    for (DIType T : Finder.types()) {
-      Assert1(T.Verify(), "DIType does not Verify!", T);
-    }
-    for (DIScope S : Finder.scopes()) {
-      Assert1(S.Verify(), "DIScope does not Verify!", S);
-    }
+  //
+  // NOTE:  The loud braces are necessary for MSVC compatibility.
+  for (DICompileUnit CU : Finder.compile_units()) {
+    Assert1(CU.Verify(), "DICompileUnit does not Verify!", CU);
   }
+  for (DISubprogram S : Finder.subprograms()) {
+    Assert1(S.Verify(), "DISubprogram does not Verify!", S);
+  }
+  for (DIGlobalVariable GV : Finder.global_variables()) {
+    Assert1(GV.Verify(), "DIGlobalVariable does not Verify!", GV);
+  }
+  for (DIType T : Finder.types()) {
+    Assert1(T.Verify(), "DIType does not Verify!", T);
+  }
+  for (DIScope S : Finder.scopes()) {
+    Assert1(S.Verify(), "DIScope does not Verify!", S);
+  }
+}
+
+void DebugInfoVerifier::processInstructions(DebugInfoFinder &Finder) {
+  for (const Function &F : *M)
+    for (auto I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
+      if (MDNode *MD = I->getMetadata(LLVMContext::MD_dbg))
+        Finder.processLocation(*M, DILocation(MD));
+      if (const CallInst *CI = dyn_cast<CallInst>(&*I))
+        processCallInst(Finder, *CI);
+    }
+}
+
+void DebugInfoVerifier::processCallInst(DebugInfoFinder &Finder,
+                                        const CallInst &CI) {
+  if (Function *F = CI.getCalledFunction())
+    if (Intrinsic::ID ID = (Intrinsic::ID)F->getIntrinsicID())
+      switch (ID) {
+      case Intrinsic::dbg_declare:
+        Finder.processDeclare(*M, cast<DbgDeclareInst>(&CI));
+        break;
+      case Intrinsic::dbg_value:
+        Finder.processValue(*M, cast<DbgValueInst>(&CI));
+        break;
+      default:
+        break;
+      }
 }
 
 //===----------------------------------------------------------------------===//
@@ -2428,7 +2449,8 @@ bool llvm::verifyModule(const Module &M, raw_ostream *OS) {
 
   // Note that this function's return value is inverted from what you would
   // expect of a function called "verify".
-  return !V.verify(M) || Broken;
+  DebugInfoVerifier DIV(OS ? *OS : NullStr);
+  return !V.verify(M) || !DIV.verify(M) || Broken;
 }
 
 namespace {
@@ -2464,13 +2486,46 @@ struct VerifierLegacyPass : public FunctionPass {
     AU.setPreservesAll();
   }
 };
+struct DebugInfoVerifierLegacyPass : public ModulePass {
+  static char ID;
+
+  DebugInfoVerifier V;
+  bool FatalErrors;
+
+  DebugInfoVerifierLegacyPass() : ModulePass(ID), FatalErrors(true) {
+    initializeDebugInfoVerifierLegacyPassPass(*PassRegistry::getPassRegistry());
+  }
+  explicit DebugInfoVerifierLegacyPass(bool FatalErrors)
+      : ModulePass(ID), V(dbgs()), FatalErrors(FatalErrors) {
+    initializeDebugInfoVerifierLegacyPassPass(*PassRegistry::getPassRegistry());
+  }
+
+  bool runOnModule(Module &M) override {
+    if (!V.verify(M) && FatalErrors)
+      report_fatal_error("Broken debug info found, compilation aborted!");
+
+    return false;
+  }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesAll();
+  }
+};
 }
 
 char VerifierLegacyPass::ID = 0;
 INITIALIZE_PASS(VerifierLegacyPass, "verify", "Module Verifier", false, false)
 
+char DebugInfoVerifierLegacyPass::ID = 0;
+INITIALIZE_PASS(DebugInfoVerifierLegacyPass, "verify-di", "Debug Info Verifier",
+                false, false)
+
 FunctionPass *llvm::createVerifierPass(bool FatalErrors) {
   return new VerifierLegacyPass(FatalErrors);
+}
+
+ModulePass *llvm::createDebugInfoVerifierPass(bool FatalErrors) {
+  return new DebugInfoVerifierLegacyPass(FatalErrors);
 }
 
 PreservedAnalyses VerifierPass::run(Module *M) {

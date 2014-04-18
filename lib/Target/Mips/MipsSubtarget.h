@@ -56,6 +56,9 @@ protected:
   // IsFP64bit - The target processor has 64-bit floating point registers.
   bool IsFP64bit;
 
+  // IsNan2008 - IEEE 754-2008 NaN encoding.
+  bool IsNaN2008bit;
+
   // IsFP64bit - General-purpose registers are 64 bits wide
   bool IsGP64bit;
 
@@ -158,6 +161,7 @@ public:
 
   bool isLittle() const { return IsLittle; }
   bool isFP64bit() const { return IsFP64bit; }
+  bool isNaN2008() const { return IsNaN2008bit; }
   bool isNotFP64bit() const { return !IsFP64bit; }
   bool isGP64bit() const { return IsGP64bit; }
   bool isGP32bit() const { return !IsGP64bit; }
@@ -213,10 +217,9 @@ public:
   bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
   bool isNotTargetNaCl() const { return !TargetTriple.isOSNaCl(); }
 
-// for now constant islands are on for the whole compilation unit but we only
-// really use them if in addition we are in mips16 mode
-//
-static bool useConstantIslands();
+  // for now constant islands are on for the whole compilation unit but we only
+  // really use them if in addition we are in mips16 mode
+  static bool useConstantIslands();
 
   unsigned stackAlignment() const { return hasMips64() ? 16 : 8; }
 

@@ -1,4 +1,5 @@
 ; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon | FileCheck %s
+; arm64 has its own copy of this test in its directory.
 
 declare <8 x i16> @llvm.arm.neon.vmullp.v8i16(<8 x i8>, <8 x i8>)
 

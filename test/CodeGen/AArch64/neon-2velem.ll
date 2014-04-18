@@ -1,4 +1,5 @@
 ; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon -fp-contract=fast | FileCheck %s
+; arm64 has copied test in its directory due to differing intrinsics.
 
 declare <2 x double> @llvm.aarch64.neon.vmulx.v2f64(<2 x double>, <2 x double>)
 

@@ -252,7 +252,7 @@ namespace llvm {
     /// EmitBasicBlockStart - This method prints the label for the specified
     /// MachineBasicBlock, an alignment (if present) and a comment describing
     /// it if appropriate.
-    void EmitBasicBlockStart(const MachineBasicBlock *MBB) const;
+    void EmitBasicBlockStart(const MachineBasicBlock &MBB) const;
 
     /// \brief Print a general LLVM constant to the .s file.
     void EmitGlobalConstant(const Constant *CV);
@@ -516,7 +516,7 @@ namespace llvm {
     /// Emit llvm.ident metadata in an '.ident' directive.
     void EmitModuleIdents(Module &M);
     void EmitXXStructorList(const Constant *List, bool isCtor);
-    GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy *C);
+    GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy &C);
   };
 }
 

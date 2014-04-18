@@ -139,7 +139,6 @@ public:
   //
   // Modify the DFA.
   //
-  void initialize();
   void addState(State *);
 
   //
@@ -161,7 +160,7 @@ State::State(const State &S) :
   stateNum(currentStateNum++), isInitial(S.isInitial),
   stateInfo(S.stateInfo) {}
 
-DFA::DFA(): currentState(NULL) {}
+DFA::DFA(): currentState(nullptr) {}
 
 DFA::~DFA() {
   DeleteContainerPointers(states);
@@ -245,12 +244,6 @@ bool State::canAddInsnClass(unsigned InsnClass) const {
       return true;
   }
   return false;
-}
-
-
-void DFA::initialize() {
-  assert(currentState && "Missing current state");
-  currentState->isInitial = true;
 }
 
 
@@ -486,7 +479,7 @@ void DFAPacketizerEmitter::run(raw_ostream &OS) {
       //
       if (!current->hasTransition(InsnClass) &&
           current->canAddInsnClass(InsnClass)) {
-        State *NewState = NULL;
+        State *NewState = nullptr;
         current->AddInsnClass(InsnClass, NewStateResources);
         assert(NewStateResources.size() && "New states must be generated");
 

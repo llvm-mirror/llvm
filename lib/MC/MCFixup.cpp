@@ -12,7 +12,12 @@ using namespace llvm;
 
 static MCSymbolRefExpr::VariantKind getAccessVariant(const MCExpr *Expr) {
   switch (Expr->getKind()) {
-  case MCExpr::Unary:
+  case MCExpr::Unary: {
+    assert(getAccessVariant(cast<MCUnaryExpr>(Expr)->getSubExpr()) ==
+           MCSymbolRefExpr::VK_None);
+    return MCSymbolRefExpr::VK_None;
+  }
+
   case MCExpr::Target:
     llvm_unreachable("unsupported");
 

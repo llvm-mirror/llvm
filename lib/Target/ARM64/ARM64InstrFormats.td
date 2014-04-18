@@ -304,16 +304,27 @@ def movk_symbol_g0 : Operand<i32> {
   let ParserMatchClass = MovKSymbolG0AsmOperand;
 }
 
-def fixedpoint32 : Operand<i32> {
+class fixedpoint_i32<ValueType FloatVT>
+  : Operand<FloatVT>,
+    ComplexPattern<FloatVT, 1, "SelectCVTFixedPosOperand<32>", [fpimm, ld]> {
   let EncoderMethod = "getFixedPointScaleOpValue";
   let DecoderMethod = "DecodeFixedPointScaleImm32";
   let ParserMatchClass = Imm1_32Operand;
 }
-def fixedpoint64 : Operand<i64> {
+
+class fixedpoint_i64<ValueType FloatVT>
+  : Operand<FloatVT>,
+    ComplexPattern<FloatVT, 1, "SelectCVTFixedPosOperand<64>", [fpimm, ld]> {
   let EncoderMethod = "getFixedPointScaleOpValue";
   let DecoderMethod = "DecodeFixedPointScaleImm64";
   let ParserMatchClass = Imm1_64Operand;
 }
+
+def fixedpoint_f32_i32 : fixedpoint_i32<f32>;
+def fixedpoint_f64_i32 : fixedpoint_i32<f64>;
+
+def fixedpoint_f32_i64 : fixedpoint_i64<f32>;
+def fixedpoint_f64_i64 : fixedpoint_i64<f64>;
 
 def vecshiftR8 : Operand<i32>, ImmLeaf<i32, [{
   return (((uint32_t)Imm) > 0) && (((uint32_t)Imm) < 9);
@@ -1936,6 +1947,11 @@ class BaseCondSelectOp<bit op, bits<2> op2, RegisterClass regtype, string asm,
   let Inst{4-0}   = Rd;
 }
 
+def inv_cond_XFORM : SDNodeXForm<imm, [{
+  ARM64CC::CondCode CC = static_cast<ARM64CC::CondCode>(N->getZExtValue());
+  return CurDAG->getTargetConstant(ARM64CC::getInvertedCondCode(CC), MVT::i32);
+}]>;
+
 multiclass CondSelectOp<bit op, bits<2> op2, string asm, PatFrag frag> {
   def Wr : BaseCondSelectOp<op, op2, GPR32, asm, frag> {
     let Inst{31} = 0;
@@ -1943,6 +1959,14 @@ multiclass CondSelectOp<bit op, bits<2> op2, string asm, PatFrag frag> {
   def Xr : BaseCondSelectOp<op, op2, GPR64, asm, frag> {
     let Inst{31} = 1;
   }
+
+  def : Pat<(ARM64csel (frag GPR32:$Rm), GPR32:$Rn, (i32 imm:$cond), CPSR),
+            (!cast<Instruction>(NAME # Wr) GPR32:$Rn, GPR32:$Rm,
+                                           (inv_cond_XFORM imm:$cond))>;
+
+  def : Pat<(ARM64csel (frag GPR64:$Rm), GPR64:$Rn, (i32 imm:$cond), CPSR),
+            (!cast<Instruction>(NAME # Xr) GPR64:$Rn, GPR64:$Rm,
+                                           (inv_cond_XFORM imm:$cond))>;
 }
 
 //---
@@ -3073,9 +3097,9 @@ class BaseFPToIntegerUnscaled<bits<2> type, bits<2> rmode, bits<3> opcode,
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in
 class BaseFPToInteger<bits<2> type, bits<2> rmode, bits<3> opcode,
                       RegisterClass srcType, RegisterClass dstType,
-                      Operand immType, string asm>
+                      Operand immType, string asm, list<dag> pattern>
     : I<(outs dstType:$Rd), (ins srcType:$Rn, immType:$scale),
-         asm, "\t$Rd, $Rn, $scale", "", []>,
+         asm, "\t$Rd, $Rn, $scale", "", pattern>,
       Sched<[WriteFCvt]> {
   bits<5> Rd;
   bits<5> Rn;
@@ -3119,30 +3143,38 @@ multiclass FPToIntegerUnscaled<bits<2> rmode, bits<3> opcode, string asm,
 }
 
 multiclass FPToIntegerScaled<bits<2> rmode, bits<3> opcode, string asm,
-           SDPatternOperator OpN> {
+                             SDPatternOperator OpN> {
   // Scaled single-precision to 32-bit
   def SWSri : BaseFPToInteger<0b00, rmode, opcode, FPR32, GPR32,
-                              fixedpoint32, asm> {
+                              fixedpoint_f32_i32, asm,
+              [(set GPR32:$Rd, (OpN (fmul FPR32:$Rn,
+                                          fixedpoint_f32_i32:$scale)))]> {
     let Inst{31} = 0; // 32-bit GPR flag
     let scale{5} = 1;
   }
 
   // Scaled single-precision to 64-bit
   def SXSri : BaseFPToInteger<0b00, rmode, opcode, FPR32, GPR64,
-                              fixedpoint64, asm> {
+                              fixedpoint_f32_i64, asm,
+              [(set GPR64:$Rd, (OpN (fmul FPR32:$Rn,
+                                          fixedpoint_f32_i64:$scale)))]> {
     let Inst{31} = 1; // 64-bit GPR flag
   }
 
   // Scaled double-precision to 32-bit
   def SWDri : BaseFPToInteger<0b01, rmode, opcode, FPR64, GPR32,
-                              fixedpoint32, asm> {
+                              fixedpoint_f64_i32, asm,
+              [(set GPR32:$Rd, (OpN (fmul FPR64:$Rn,
+                                          fixedpoint_f64_i32:$scale)))]> {
     let Inst{31} = 0; // 32-bit GPR flag
     let scale{5} = 1;
   }
 
   // Scaled double-precision to 64-bit
   def SXDri : BaseFPToInteger<0b01, rmode, opcode, FPR64, GPR64,
-                              fixedpoint64, asm> {
+                              fixedpoint_f64_i64, asm,
+              [(set GPR64:$Rd, (OpN (fmul FPR64:$Rn,
+                                          fixedpoint_f64_i64:$scale)))]> {
     let Inst{31} = 1; // 64-bit GPR flag
   }
 }
@@ -3154,9 +3186,9 @@ multiclass FPToIntegerScaled<bits<2> rmode, bits<3> opcode, string asm,
 let mayStore = 0, mayLoad = 0, hasSideEffects = 0 in
 class BaseIntegerToFP<bit isUnsigned,
                       RegisterClass srcType, RegisterClass dstType,
-                      Operand immType, string asm>
+                      Operand immType, string asm, list<dag> pattern>
     : I<(outs dstType:$Rd), (ins srcType:$Rn, immType:$scale),
-         asm, "\t$Rd, $Rn, $scale", "", []>,
+         asm, "\t$Rd, $Rn, $scale", "", pattern>,
       Sched<[WriteFCvt]> {
   bits<5> Rd;
   bits<5> Rn;
@@ -3209,24 +3241,36 @@ multiclass IntegerToFP<bit isUnsigned, string asm, SDNode node> {
   }
 
   // Scaled
-  def SWSri: BaseIntegerToFP<isUnsigned, GPR32, FPR32, fixedpoint32, asm> {
+  def SWSri: BaseIntegerToFP<isUnsigned, GPR32, FPR32, fixedpoint_f32_i32, asm,
+                             [(set FPR32:$Rd,
+                                   (fdiv (node GPR32:$Rn),
+                                         fixedpoint_f32_i32:$scale))]> {
     let Inst{31} = 0; // 32-bit GPR flag
     let Inst{22} = 0; // 32-bit FPR flag
     let scale{5} = 1;
   }
 
-  def SWDri: BaseIntegerToFP<isUnsigned, GPR32, FPR64, fixedpoint32, asm> {
+  def SWDri: BaseIntegerToFP<isUnsigned, GPR32, FPR64, fixedpoint_f64_i32, asm,
+                             [(set FPR64:$Rd,
+                                   (fdiv (node GPR32:$Rn),
+                                         fixedpoint_f64_i32:$scale))]> {
     let Inst{31} = 0; // 32-bit GPR flag
     let Inst{22} = 1; // 64-bit FPR flag
     let scale{5} = 1;
   }
 
-  def SXSri: BaseIntegerToFP<isUnsigned, GPR64, FPR32, fixedpoint64, asm> {
+  def SXSri: BaseIntegerToFP<isUnsigned, GPR64, FPR32, fixedpoint_f32_i64, asm,
+                             [(set FPR32:$Rd,
+                                   (fdiv (node GPR64:$Rn),
+                                         fixedpoint_f32_i64:$scale))]> {
     let Inst{31} = 1; // 64-bit GPR flag
     let Inst{22} = 0; // 32-bit FPR flag
   }
 
-  def SXDri: BaseIntegerToFP<isUnsigned, GPR64, FPR64, fixedpoint64, asm> {
+  def SXDri: BaseIntegerToFP<isUnsigned, GPR64, FPR64, fixedpoint_f64_i64, asm,
+                             [(set FPR64:$Rd,
+                                   (fdiv (node GPR64:$Rn),
+                                         fixedpoint_f64_i64:$scale))]> {
     let Inst{31} = 1; // 64-bit GPR flag
     let Inst{22} = 1; // 64-bit FPR flag
   }
@@ -3352,28 +3396,28 @@ class BaseFPConversion<bits<2> type, bits<2> opcode, RegisterClass dstType,
 
 multiclass FPConversion<string asm> {
   // Double-precision to Half-precision
-  let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in
-  def HDr : BaseFPConversion<0b01, 0b11, FPR16, FPR64, asm, []>;
+  def HDr : BaseFPConversion<0b01, 0b11, FPR16, FPR64, asm,
+                             [(set FPR16:$Rd, (fround FPR64:$Rn))]>;
 
   // Double-precision to Single-precision
   def SDr : BaseFPConversion<0b01, 0b00, FPR32, FPR64, asm,
                              [(set FPR32:$Rd, (fround FPR64:$Rn))]>;
 
   // Half-precision to Double-precision
-  let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in
-  def DHr : BaseFPConversion<0b11, 0b01, FPR64, FPR16, asm, []>;
+  def DHr : BaseFPConversion<0b11, 0b01, FPR64, FPR16, asm,
+                             [(set FPR64:$Rd, (fextend FPR16:$Rn))]>;
 
   // Half-precision to Single-precision
-  let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in
-  def SHr : BaseFPConversion<0b11, 0b00, FPR32, FPR16, asm, []>;
+  def SHr : BaseFPConversion<0b11, 0b00, FPR32, FPR16, asm,
+                             [(set FPR32:$Rd, (fextend FPR16:$Rn))]>;
 
   // Single-precision to Double-precision
   def DSr : BaseFPConversion<0b00, 0b01, FPR64, FPR32, asm,
                              [(set FPR64:$Rd, (fextend FPR32:$Rn))]>;
 
   // Single-precision to Half-precision
-  let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in
-  def HSr : BaseFPConversion<0b00, 0b11, FPR16, FPR32, asm, []>;
+  def HSr : BaseFPConversion<0b00, 0b11, FPR16, FPR32, asm,
+                             [(set FPR16:$Rd, (fround FPR32:$Rn))]>;
 }
 
 //---

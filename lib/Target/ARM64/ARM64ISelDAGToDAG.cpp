@@ -14,6 +14,7 @@
 #define DEBUG_TYPE "arm64-isel"
 #include "ARM64TargetMachine.h"
 #include "MCTargetDesc/ARM64AddressingModes.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Function.h" // To access function attributes.
 #include "llvm/IR/GlobalValue.h"
@@ -156,9 +157,6 @@ public:
   SDNode *SelectSIMDAddSubNarrowing(unsigned IntNo, SDNode *Node);
   SDNode *SelectSIMDXtnNarrowing(unsigned IntNo, SDNode *Node);
 
-  SDNode *SelectAtomic(SDNode *Node, unsigned Op8, unsigned Op16, unsigned Op32,
-                       unsigned Op64);
-
   SDNode *SelectBitfieldExtractOp(SDNode *N);
   SDNode *SelectBitfieldInsertOp(SDNode *N);
 
@@ -179,6 +177,13 @@ private:
   bool isWorthFolding(SDValue V) const;
   bool SelectExtendedSHL(SDValue N, unsigned Size, SDValue &Offset,
                          SDValue &Imm);
+
+  template<unsigned RegWidth>
+  bool SelectCVTFixedPosOperand(SDValue N, SDValue &FixedPos) {
+    return SelectCVTFixedPosOperand(N, FixedPos, RegWidth);
+  }
+
+  bool SelectCVTFixedPosOperand(SDValue N, SDValue &FixedPos, unsigned Width);
 };
 } // end anonymous namespace
 
@@ -532,7 +537,7 @@ bool ARM64DAGToDAGISel::SelectArithExtendedRegister(SDValue N, SDValue &Reg,
     if (!CSD)
       return false;
     ShiftVal = CSD->getZExtValue();
-    if ((ShiftVal & 0x3) != ShiftVal)
+    if (ShiftVal > 4)
       return false;
 
     Ext = getExtendTypeForNode(N.getOperand(0));
@@ -1130,37 +1135,6 @@ SDNode *ARM64DAGToDAGISel::SelectStoreLane(SDNode *N, unsigned NumVecs,
   return St;
 }
 
-SDNode *ARM64DAGToDAGISel::SelectAtomic(SDNode *Node, unsigned Op8,
-                                        unsigned Op16, unsigned Op32,
-                                        unsigned Op64) {
-  // Mostly direct translation to the given operations, except that we preserve
-  // the AtomicOrdering for use later on.
-  AtomicSDNode *AN = cast<AtomicSDNode>(Node);
-  EVT VT = AN->getMemoryVT();
-
-  unsigned Op;
-  if (VT == MVT::i8)
-    Op = Op8;
-  else if (VT == MVT::i16)
-    Op = Op16;
-  else if (VT == MVT::i32)
-    Op = Op32;
-  else if (VT == MVT::i64)
-    Op = Op64;
-  else
-    llvm_unreachable("Unexpected atomic operation");
-
-  SmallVector<SDValue, 4> Ops;
-  for (unsigned i = 1; i < AN->getNumOperands(); ++i)
-    Ops.push_back(AN->getOperand(i));
-
-  Ops.push_back(CurDAG->getTargetConstant(AN->getOrdering(), MVT::i32));
-  Ops.push_back(AN->getOperand(0)); // Chain moves to the end
-
-  return CurDAG->SelectNodeTo(Node, Op, AN->getValueType(0), MVT::Other,
-                              &Ops[0], Ops.size());
-}
-
 static bool isBitfieldExtractOpFromAnd(SelectionDAG *CurDAG, SDNode *N,
                                        unsigned &Opc, SDValue &Opd0,
                                        unsigned &LSB, unsigned &MSB,
@@ -1751,6 +1725,50 @@ SDNode *ARM64DAGToDAGISel::SelectLIBM(SDNode *N) {
   return CurDAG->getMachineNode(Opc, dl, VT, Ops);
 }
 
+bool
+ARM64DAGToDAGISel::SelectCVTFixedPosOperand(SDValue N, SDValue &FixedPos,
+                                              unsigned RegWidth) {
+  APFloat FVal(0.0);
+  if (ConstantFPSDNode *CN = dyn_cast<ConstantFPSDNode>(N))
+    FVal = CN->getValueAPF();
+  else if (LoadSDNode *LN = dyn_cast<LoadSDNode>(N)) {
+    // Some otherwise illegal constants are allowed in this case.
+    if (LN->getOperand(1).getOpcode() != ARM64ISD::ADDlow ||
+        !isa<ConstantPoolSDNode>(LN->getOperand(1)->getOperand(1)))
+      return false;
+
+    ConstantPoolSDNode *CN =
+        dyn_cast<ConstantPoolSDNode>(LN->getOperand(1)->getOperand(1));
+    FVal = cast<ConstantFP>(CN->getConstVal())->getValueAPF();
+  } else
+    return false;
+
+  // An FCVT[SU] instruction performs: convertToInt(Val * 2^fbits) where fbits
+  // is between 1 and 32 for a destination w-register, or 1 and 64 for an
+  // x-register.
+  //
+  // By this stage, we've detected (fp_to_[su]int (fmul Val, THIS_NODE)) so we
+  // want THIS_NODE to be 2^fbits. This is much easier to deal with using
+  // integers.
+  bool IsExact;
+
+  // fbits is between 1 and 64 in the worst-case, which means the fmul
+  // could have 2^64 as an actual operand. Need 65 bits of precision.
+  APSInt IntVal(65, true);
+  FVal.convertToInteger(IntVal, APFloat::rmTowardZero, &IsExact);
+
+  // N.b. isPowerOf2 also checks for > 0.
+  if (!IsExact || !IntVal.isPowerOf2()) return false;
+  unsigned FBits = IntVal.logBase2();
+
+  // Checks above should have guaranteed that we haven't lost information in
+  // finding FBits, but it must still be in range.
+  if (FBits == 0 || FBits > RegWidth) return false;
+
+  FixedPos = CurDAG->getTargetConstant(FBits, MVT::i32);
+  return true;
+}
+
 SDNode *ARM64DAGToDAGISel::Select(SDNode *Node) {
   // Dump information about the Node being selected
   DEBUG(errs() << "Selecting: ");
@@ -1776,54 +1794,6 @@ SDNode *ARM64DAGToDAGISel::Select(SDNode *Node) {
     if (SDNode *I = SelectMLAV64LaneV128(Node))
       return I;
     break;
-
-  case ISD::ATOMIC_LOAD_ADD:
-    return SelectAtomic(Node, ARM64::ATOMIC_LOAD_ADD_I8,
-                        ARM64::ATOMIC_LOAD_ADD_I16, ARM64::ATOMIC_LOAD_ADD_I32,
-                        ARM64::ATOMIC_LOAD_ADD_I64);
-  case ISD::ATOMIC_LOAD_SUB:
-    return SelectAtomic(Node, ARM64::ATOMIC_LOAD_SUB_I8,
-                        ARM64::ATOMIC_LOAD_SUB_I16, ARM64::ATOMIC_LOAD_SUB_I32,
-                        ARM64::ATOMIC_LOAD_SUB_I64);
-  case ISD::ATOMIC_LOAD_AND:
-    return SelectAtomic(Node, ARM64::ATOMIC_LOAD_AND_I8,
-                        ARM64::ATOMIC_LOAD_AND_I16, ARM64::ATOMIC_LOAD_AND_I32,
-                        ARM64::ATOMIC_LOAD_AND_I64);
-  case ISD::ATOMIC_LOAD_OR:
-    return SelectAtomic(Node, ARM64::ATOMIC_LOAD_OR_I8,
-                        ARM64::ATOMIC_LOAD_OR_I16, ARM64::ATOMIC_LOAD_OR_I32,
-                        ARM64::ATOMIC_LOAD_OR_I64);
-  case ISD::ATOMIC_LOAD_XOR:
-    return SelectAtomic(Node, ARM64::ATOMIC_LOAD_XOR_I8,
-                        ARM64::ATOMIC_LOAD_XOR_I16, ARM64::ATOMIC_LOAD_XOR_I32,
-                        ARM64::ATOMIC_LOAD_XOR_I64);
-  case ISD::ATOMIC_LOAD_NAND:
-    return SelectAtomic(
-        Node, ARM64::ATOMIC_LOAD_NAND_I8, ARM64::ATOMIC_LOAD_NAND_I16,
-        ARM64::ATOMIC_LOAD_NAND_I32, ARM64::ATOMIC_LOAD_NAND_I64);
-  case ISD::ATOMIC_LOAD_MIN:
-    return SelectAtomic(Node, ARM64::ATOMIC_LOAD_MIN_I8,
-                        ARM64::ATOMIC_LOAD_MIN_I16, ARM64::ATOMIC_LOAD_MIN_I32,
-                        ARM64::ATOMIC_LOAD_MIN_I64);
-  case ISD::ATOMIC_LOAD_MAX:
-    return SelectAtomic(Node, ARM64::ATOMIC_LOAD_MAX_I8,
-                        ARM64::ATOMIC_LOAD_MAX_I16, ARM64::ATOMIC_LOAD_MAX_I32,
-                        ARM64::ATOMIC_LOAD_MAX_I64);
-  case ISD::ATOMIC_LOAD_UMIN:
-    return SelectAtomic(
-        Node, ARM64::ATOMIC_LOAD_UMIN_I8, ARM64::ATOMIC_LOAD_UMIN_I16,
-        ARM64::ATOMIC_LOAD_UMIN_I32, ARM64::ATOMIC_LOAD_UMIN_I64);
-  case ISD::ATOMIC_LOAD_UMAX:
-    return SelectAtomic(
-        Node, ARM64::ATOMIC_LOAD_UMAX_I8, ARM64::ATOMIC_LOAD_UMAX_I16,
-        ARM64::ATOMIC_LOAD_UMAX_I32, ARM64::ATOMIC_LOAD_UMAX_I64);
-  case ISD::ATOMIC_SWAP:
-    return SelectAtomic(Node, ARM64::ATOMIC_SWAP_I8, ARM64::ATOMIC_SWAP_I16,
-                        ARM64::ATOMIC_SWAP_I32, ARM64::ATOMIC_SWAP_I64);
-  case ISD::ATOMIC_CMP_SWAP:
-    return SelectAtomic(Node, ARM64::ATOMIC_CMP_SWAP_I8,
-                        ARM64::ATOMIC_CMP_SWAP_I16, ARM64::ATOMIC_CMP_SWAP_I32,
-                        ARM64::ATOMIC_CMP_SWAP_I64);
 
   case ISD::LOAD: {
     // Try to select as an indexed load. Fall through to normal processing
@@ -1917,12 +1887,15 @@ SDNode *ARM64DAGToDAGISel::Select(SDNode *Node) {
     switch (IntNo) {
     default:
       break;
+    case Intrinsic::arm64_ldaxp:
     case Intrinsic::arm64_ldxp: {
+      unsigned Op =
+          IntNo == Intrinsic::arm64_ldaxp ? ARM64::LDAXPX : ARM64::LDXPX;
       SDValue MemAddr = Node->getOperand(2);
       SDLoc DL(Node);
       SDValue Chain = Node->getOperand(0);
 
-      SDNode *Ld = CurDAG->getMachineNode(ARM64::LDXPX, DL, MVT::i64, MVT::i64,
+      SDNode *Ld = CurDAG->getMachineNode(Op, DL, MVT::i64, MVT::i64,
                                           MVT::Other, MemAddr, Chain);
 
       // Transfer memoperands.
@@ -1931,7 +1904,10 @@ SDNode *ARM64DAGToDAGISel::Select(SDNode *Node) {
       cast<MachineSDNode>(Ld)->setMemRefs(MemOp, MemOp + 1);
       return Ld;
     }
+    case Intrinsic::arm64_stlxp:
     case Intrinsic::arm64_stxp: {
+      unsigned Op =
+          IntNo == Intrinsic::arm64_stlxp ? ARM64::STLXPX : ARM64::STXPX;
       SDLoc DL(Node);
       SDValue Chain = Node->getOperand(0);
       SDValue ValLo = Node->getOperand(2);
@@ -1945,8 +1921,7 @@ SDNode *ARM64DAGToDAGISel::Select(SDNode *Node) {
       Ops.push_back(MemAddr);
       Ops.push_back(Chain);
 
-      SDNode *St =
-          CurDAG->getMachineNode(ARM64::STXPX, DL, MVT::i32, MVT::Other, Ops);
+      SDNode *St = CurDAG->getMachineNode(Op, DL, MVT::i32, MVT::Other, Ops);
       // Transfer memoperands.
       MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
       MemOp[0] = cast<MemIntrinsicSDNode>(Node)->getMemOperand();

@@ -392,7 +392,7 @@ public:
   SDVTList getVTList(EVT VT1, EVT VT2);
   SDVTList getVTList(EVT VT1, EVT VT2, EVT VT3);
   SDVTList getVTList(EVT VT1, EVT VT2, EVT VT3, EVT VT4);
-  SDVTList getVTList(const EVT *VTs, unsigned NumVTs);
+  SDVTList getVTList(ArrayRef<EVT> VTs);
 
   //===--------------------------------------------------------------------===//
   // Node creation methods.
@@ -578,7 +578,7 @@ public:
     Ops.push_back(Op2);
     Ops.push_back(InGlue);
     return getNode(ISD::CALLSEQ_END, DL, NodeTys, &Ops[0],
-                   (unsigned)Ops.size() - (InGlue.getNode() == 0 ? 1 : 0));
+                   (unsigned)Ops.size() - (InGlue.getNode()==nullptr ? 1 : 0));
   }
 
   /// getUNDEF - Return an UNDEF node.  UNDEF does not have a useful SDLoc.
@@ -705,7 +705,7 @@ public:
   /// getAtomic - Gets a node for an atomic op, produces result (if relevant)
   /// and chain and takes 2 operands.
   SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, SDValue Chain,
-                    SDValue Ptr, SDValue Val, const Value* PtrVal,
+                    SDValue Ptr, SDValue Val, const Value *PtrVal,
                     unsigned Alignment, AtomicOrdering Ordering,
                     SynchronizationScope SynchScope);
   SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, SDValue Chain,
@@ -715,11 +715,6 @@ public:
 
   /// getAtomic - Gets a node for an atomic op, produces result and chain and
   /// takes 1 operand.
-  SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, EVT VT,
-                    SDValue Chain, SDValue Ptr, const Value* PtrVal,
-                    unsigned Alignment,
-                    AtomicOrdering Ordering,
-                    SynchronizationScope SynchScope);
   SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, EVT VT,
                     SDValue Chain, SDValue Ptr, MachineMemOperand *MMO,
                     AtomicOrdering Ordering,
@@ -766,14 +761,15 @@ public:
   SDValue getLoad(EVT VT, SDLoc dl, SDValue Chain, SDValue Ptr,
                   MachinePointerInfo PtrInfo, bool isVolatile,
                   bool isNonTemporal, bool isInvariant, unsigned Alignment,
-                  const MDNode *TBAAInfo = 0, const MDNode *Ranges = 0);
+                  const MDNode *TBAAInfo = nullptr,
+                  const MDNode *Ranges = nullptr);
   SDValue getLoad(EVT VT, SDLoc dl, SDValue Chain, SDValue Ptr,
                   MachineMemOperand *MMO);
   SDValue getExtLoad(ISD::LoadExtType ExtType, SDLoc dl, EVT VT,
                      SDValue Chain, SDValue Ptr, MachinePointerInfo PtrInfo,
                      EVT MemVT, bool isVolatile,
                      bool isNonTemporal, unsigned Alignment,
-                     const MDNode *TBAAInfo = 0);
+                     const MDNode *TBAAInfo = nullptr);
   SDValue getExtLoad(ISD::LoadExtType ExtType, SDLoc dl, EVT VT,
                      SDValue Chain, SDValue Ptr, EVT MemVT,
                      MachineMemOperand *MMO);
@@ -784,8 +780,8 @@ public:
                   SDValue Chain, SDValue Ptr, SDValue Offset,
                   MachinePointerInfo PtrInfo, EVT MemVT,
                   bool isVolatile, bool isNonTemporal, bool isInvariant,
-                  unsigned Alignment, const MDNode *TBAAInfo = 0,
-                  const MDNode *Ranges = 0);
+                  unsigned Alignment, const MDNode *TBAAInfo = nullptr,
+                  const MDNode *Ranges = nullptr);
   SDValue getLoad(ISD::MemIndexedMode AM, ISD::LoadExtType ExtType,
                   EVT VT, SDLoc dl,
                   SDValue Chain, SDValue Ptr, SDValue Offset,
@@ -796,14 +792,14 @@ public:
   SDValue getStore(SDValue Chain, SDLoc dl, SDValue Val, SDValue Ptr,
                    MachinePointerInfo PtrInfo, bool isVolatile,
                    bool isNonTemporal, unsigned Alignment,
-                   const MDNode *TBAAInfo = 0);
+                   const MDNode *TBAAInfo = nullptr);
   SDValue getStore(SDValue Chain, SDLoc dl, SDValue Val, SDValue Ptr,
                    MachineMemOperand *MMO);
   SDValue getTruncStore(SDValue Chain, SDLoc dl, SDValue Val, SDValue Ptr,
                         MachinePointerInfo PtrInfo, EVT TVT,
                         bool isNonTemporal, bool isVolatile,
                         unsigned Alignment,
-                        const MDNode *TBAAInfo = 0);
+                        const MDNode *TBAAInfo = nullptr);
   SDValue getTruncStore(SDValue Chain, SDLoc dl, SDValue Val, SDValue Ptr,
                         EVT TVT, MachineMemOperand *MMO);
   SDValue getIndexedStore(SDValue OrigStoe, SDLoc dl, SDValue Base,
@@ -1166,6 +1162,8 @@ public:
   void ExtractVectorElements(SDValue Op, SmallVectorImpl<SDValue> &Args,
                              unsigned Start = 0, unsigned Count = 0);
 
+  unsigned getEVTAlignment(EVT MemoryVT) const;
+
 private:
   bool RemoveNodeFromCSEMaps(SDNode *N);
   void AddModifiedNodeToCSEMaps(SDNode *N);
@@ -1178,8 +1176,6 @@ private:
 
   void DeleteNodeNotInCSEMaps(SDNode *N);
   void DeallocateNode(SDNode *N);
-
-  unsigned getEVTAlignment(EVT MemoryVT) const;
 
   void allnodes_clear();
 

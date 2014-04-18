@@ -427,8 +427,13 @@ X86JITInfo::getLazyResolverFunction(JITCompilerFn F) {
   TsanIgnoreWritesEnd();
 
 #if defined (X86_32_JIT) && !defined (_MSC_VER)
+#if defined(__SSE__)
+  // SSE Callback should be called for SSE-enabled LLVM.
+  return X86CompilationCallback_SSE;
+#else
   if (Subtarget->hasSSE1())
     return X86CompilationCallback_SSE;
+#endif
 #endif
 
   return X86CompilationCallback;

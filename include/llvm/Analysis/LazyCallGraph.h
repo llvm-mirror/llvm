@@ -119,25 +119,18 @@ public:
     /// \brief Nonce type to select the constructor for the end iterator.
     struct IsAtEndT {};
 
-    LazyCallGraph &G;
+    LazyCallGraph *G;
     NodeVectorImplT::iterator NI;
 
     // Build the begin iterator for a node.
     explicit iterator(LazyCallGraph &G, NodeVectorImplT &Nodes)
-        : G(G), NI(Nodes.begin()) {}
+        : G(&G), NI(Nodes.begin()) {}
 
     // Build the end iterator for a node. This is selected purely by overload.
     iterator(LazyCallGraph &G, NodeVectorImplT &Nodes, IsAtEndT /*Nonce*/)
-        : G(G), NI(Nodes.end()) {}
+        : G(&G), NI(Nodes.end()) {}
 
   public:
-    iterator(const iterator &Arg) : G(Arg.G), NI(Arg.NI) {}
-    iterator(iterator &&Arg) : G(Arg.G), NI(std::move(Arg.NI)) {}
-    iterator &operator=(iterator Arg) {
-      std::swap(Arg, *this);
-      return *this;
-    }
-
     bool operator==(const iterator &Arg) { return NI == Arg.NI; }
     bool operator!=(const iterator &Arg) { return !operator==(Arg); }
 
@@ -146,7 +139,7 @@ public:
         return NI->get<Node *>();
 
       Function *F = NI->get<Function *>();
-      Node *ChildN = G.get(*F);
+      Node *ChildN = G->get(*F);
       *NI = ChildN;
       return ChildN;
     }
@@ -171,6 +164,41 @@ public:
       --*this;
       return next;
     }
+  };
+
+  /// \brief A node in the call graph.
+  ///
+  /// This represents a single node. It's primary roles are to cache the list of
+  /// callees, de-duplicate and provide fast testing of whether a function is
+  /// a callee, and facilitate iteration of child nodes in the graph.
+  class Node {
+    friend class LazyCallGraph;
+
+    LazyCallGraph *G;
+    Function &F;
+    mutable NodeVectorT Callees;
+    SmallPtrSet<Function *, 4> CalleeSet;
+
+    /// \brief Basic constructor implements the scanning of F into Callees and
+    /// CalleeSet.
+    Node(LazyCallGraph &G, Function &F);
+
+    /// \brief Constructor used when copying a node from one graph to another.
+    Node(LazyCallGraph &G, const Node &OtherN);
+
+  public:
+    typedef LazyCallGraph::iterator iterator;
+
+    Function &getFunction() const {
+      return F;
+    };
+
+    iterator begin() const { return iterator(*G, Callees); }
+    iterator end() const { return iterator(*G, Callees, iterator::IsAtEndT()); }
+
+    /// Equality is defined as address equality.
+    bool operator==(const Node &N) const { return this == &N; }
+    bool operator!=(const Node &N) const { return !operator==(N); }
   };
 
   /// \brief Construct a graph for the given module.
@@ -216,8 +244,6 @@ public:
   }
 
 private:
-  Module &M;
-
   /// \brief Allocator that holds all the call graph nodes.
   SpecificBumpPtrAllocator<Node> BPA;
 
@@ -239,47 +265,6 @@ private:
 
   /// \brief Helper to copy a node from another graph into this one.
   Node *copyInto(const Node &OtherN);
-
-  /// \brief Helper to move a node from another graph into this one.
-  Node *moveInto(Node &&OtherN);
-};
-
-/// \brief A node in the call graph.
-///
-/// This represents a single node. It's primary roles are to cache the list of
-/// callees, de-duplicate and provide fast testing of whether a function is
-/// a callee, and facilitate iteration of child nodes in the graph.
-class LazyCallGraph::Node {
-  friend class LazyCallGraph;
-
-  LazyCallGraph &G;
-  Function &F;
-  mutable NodeVectorT Callees;
-  SmallPtrSet<Function *, 4> CalleeSet;
-
-  /// \brief Basic constructor implements the scanning of F into Callees and
-  /// CalleeSet.
-  Node(LazyCallGraph &G, Function &F);
-
-  /// \brief Constructor used when copying a node from one graph to another.
-  Node(LazyCallGraph &G, const Node &OtherN);
-
-  /// \brief Constructor used when moving a node from one graph to another.
-  Node(LazyCallGraph &G, Node &&OtherN);
-
-public:
-  typedef LazyCallGraph::iterator iterator;
-
-  Function &getFunction() const {
-    return F;
-  };
-
-  iterator begin() const { return iterator(G, Callees); }
-  iterator end() const { return iterator(G, Callees, iterator::IsAtEndT()); }
-
-  /// Equality is defined as address equality.
-  bool operator==(const Node &N) const { return this == &N; }
-  bool operator!=(const Node &N) const { return !operator==(N); }
 };
 
 // Provide GraphTraits specializations for call graphs.

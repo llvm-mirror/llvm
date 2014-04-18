@@ -1,5 +1,5 @@
 ; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon -fp-contract=fast | FileCheck %s
-
+; arm64 has copied test in its directory due to differing intrinsics.
 declare <2 x float> @llvm.fma.v2f32(<2 x float>, <2 x float>, <2 x float>)
 
 declare <4 x float> @llvm.fma.v4f32(<4 x float>, <4 x float>, <4 x float>)

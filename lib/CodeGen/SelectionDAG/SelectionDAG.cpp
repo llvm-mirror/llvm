@@ -4389,37 +4389,6 @@ SDValue SelectionDAG::getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT,
 SDValue SelectionDAG::getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT,
                                 EVT VT, SDValue Chain,
                                 SDValue Ptr,
-                                const Value* PtrVal,
-                                unsigned Alignment,
-                                AtomicOrdering Ordering,
-                                SynchronizationScope SynchScope) {
-  if (Alignment == 0)  // Ensure that codegen never sees alignment 0
-    Alignment = getEVTAlignment(MemVT);
-
-  MachineFunction &MF = getMachineFunction();
-  // An atomic store does not load. An atomic load does not store.
-  // (An atomicrmw obviously both loads and stores.)
-  // For now, atomics are considered to be volatile always, and they are
-  // chained as such.
-  // FIXME: Volatile isn't really correct; we should keep track of atomic
-  // orderings in the memoperand.
-  unsigned Flags = MachineMemOperand::MOVolatile;
-  if (Opcode != ISD::ATOMIC_STORE)
-    Flags |= MachineMemOperand::MOLoad;
-  if (Opcode != ISD::ATOMIC_LOAD)
-    Flags |= MachineMemOperand::MOStore;
-
-  MachineMemOperand *MMO =
-    MF.getMachineMemOperand(MachinePointerInfo(PtrVal), Flags,
-                            MemVT.getStoreSize(), Alignment);
-
-  return getAtomic(Opcode, dl, MemVT, VT, Chain, Ptr, MMO,
-                   Ordering, SynchScope);
-}
-
-SDValue SelectionDAG::getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT,
-                                EVT VT, SDValue Chain,
-                                SDValue Ptr,
                                 MachineMemOperand *MMO,
                                 AtomicOrdering Ordering,
                                 SynchronizationScope SynchScope) {
@@ -4440,7 +4409,7 @@ SDValue SelectionDAG::getMergeValues(const SDValue *Ops, unsigned NumOps,
   VTs.reserve(NumOps);
   for (unsigned i = 0; i < NumOps; ++i)
     VTs.push_back(Ops[i].getValueType());
-  return getNode(ISD::MERGE_VALUES, dl, getVTList(&VTs[0], NumOps),
+  return getNode(ISD::MERGE_VALUES, dl, getVTList(VTs),
                  Ops, NumOps);
 }
 
@@ -4574,7 +4543,7 @@ SelectionDAG::getLoad(ISD::MemIndexedMode AM, ISD::LoadExtType ExtType,
 
   // If we don't have a PtrInfo, infer the trivial frame index case to simplify
   // clients.
-  if (PtrInfo.V == nullptr)
+  if (PtrInfo.V.isNull())
     PtrInfo = InferPointerInfo(Ptr, Offset);
 
   MachineFunction &MF = getMachineFunction();
@@ -4701,7 +4670,7 @@ SDValue SelectionDAG::getStore(SDValue Chain, SDLoc dl, SDValue Val,
   if (isNonTemporal)
     Flags |= MachineMemOperand::MONonTemporal;
 
-  if (PtrInfo.V == nullptr)
+  if (PtrInfo.V.isNull())
     PtrInfo = InferPointerInfo(Ptr);
 
   MachineFunction &MF = getMachineFunction();
@@ -4756,7 +4725,7 @@ SDValue SelectionDAG::getTruncStore(SDValue Chain, SDLoc dl, SDValue Val,
   if (isNonTemporal)
     Flags |= MachineMemOperand::MONonTemporal;
 
-  if (PtrInfo.V == nullptr)
+  if (PtrInfo.V.isNull())
     PtrInfo = InferPointerInfo(Ptr);
 
   MachineFunction &MF = getMachineFunction();
@@ -4920,7 +4889,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT,
 SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL,
                               ArrayRef<EVT> ResultTys,
                               const SDValue *Ops, unsigned NumOps) {
-  return getNode(Opcode, DL, getVTList(&ResultTys[0], ResultTys.size()),
+  return getNode(Opcode, DL, getVTList(ResultTys),
                  Ops, NumOps);
 }
 
@@ -5109,7 +5078,8 @@ SDVTList SelectionDAG::getVTList(EVT VT1, EVT VT2, EVT VT3, EVT VT4) {
   return Result->getSDVTList();
 }
 
-SDVTList SelectionDAG::getVTList(const EVT *VTs, unsigned NumVTs) {
+SDVTList SelectionDAG::getVTList(ArrayRef<EVT> VTs) {
+  unsigned NumVTs = VTs.size();
   FoldingSetNodeID ID;
   ID.AddInteger(NumVTs);
   for (unsigned index = 0; index < NumVTs; index++) {
@@ -5120,7 +5090,7 @@ SDVTList SelectionDAG::getVTList(const EVT *VTs, unsigned NumVTs) {
   SDVTListNode *Result = VTListMap.FindNodeOrInsertPos(ID, IP);
   if (!Result) {
     EVT *Array = Allocator.Allocate<EVT>(NumVTs);
-    std::copy(VTs, VTs + NumVTs, Array);
+    std::copy(VTs.begin(), VTs.end(), Array);
     Result = new (Allocator) SDVTListNode(ID.Intern(Allocator), Array, NumVTs);
     VTListMap.InsertNode(Result, IP);
   }
@@ -5591,7 +5561,7 @@ MachineSDNode *
 SelectionDAG::getMachineNode(unsigned Opcode, SDLoc dl,
                              ArrayRef<EVT> ResultTys,
                              ArrayRef<SDValue> Ops) {
-  SDVTList VTs = getVTList(&ResultTys[0], ResultTys.size());
+  SDVTList VTs = getVTList(ResultTys);
   return getMachineNode(Opcode, dl, VTs, Ops);
 }
 
