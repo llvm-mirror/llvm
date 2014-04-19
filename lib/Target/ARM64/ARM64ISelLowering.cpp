@@ -635,6 +635,7 @@ const char *ARM64TargetLowering::getTargetNodeName(unsigned Opcode) const {
   case ARM64ISD::MVNImsl:           return "ARM64ISD::MVNImsl";
   case ARM64ISD::BICi:              return "ARM64ISD::BICi";
   case ARM64ISD::ORRi:              return "ARM64ISD::ORRi";
+  case ARM64ISD::BSL:               return "ARM64ISD::BSL";
   case ARM64ISD::NEG:               return "ARM64ISD::NEG";
   case ARM64ISD::EXTR:              return "ARM64ISD::EXTR";
   case ARM64ISD::ZIP1:              return "ARM64ISD::ZIP1";
@@ -860,6 +861,39 @@ static void changeFPCCToARM64CC(ISD::CondCode CC, ARM64CC::CondCode &CondCode,
   case ISD::SETNE:
   case ISD::SETUNE:
     CondCode = ARM64CC::NE;
+    break;
+  }
+}
+
+/// changeVectorFPCCToARM64CC - Convert a DAG fp condition code to an ARM64 CC
+/// usable with the vector instructions. Fewer operations are available without
+/// a real NZCV register, so we have to use less efficient combinations to get
+/// the same effect.
+static void changeVectorFPCCToARM64CC(ISD::CondCode CC,
+                                      ARM64CC::CondCode &CondCode,
+                                      ARM64CC::CondCode &CondCode2,
+                                      bool &Invert) {
+  Invert = false;
+  switch (CC) {
+  default:
+    // Mostly the scalar mappings work fine.
+    changeFPCCToARM64CC(CC, CondCode, CondCode2);
+    break;
+  case ISD::SETUO:
+    Invert = true; // Fallthrough
+  case ISD::SETO:
+    CondCode = ARM64CC::MI;
+    CondCode2 = ARM64CC::GE;
+    break;
+  case ISD::SETUEQ:
+  case ISD::SETULT:
+  case ISD::SETULE:
+  case ISD::SETUGT:
+  case ISD::SETUGE:
+    // All of the compare-mask comparisons are ordered, but we can switch
+    // between the two by a double inversion. E.g. ULE == !OGT.
+    Invert = true;
+    changeFPCCToARM64CC(getSetCCInverse(CC, false), CondCode, CondCode2);
     break;
   }
 }
@@ -1279,10 +1313,16 @@ static SDValue LowerVectorFP_TO_INT(SDValue Op, SelectionDAG &DAG) {
   if (VT.getSizeInBits() == InVT.getSizeInBits())
     return Op;
 
-  if (InVT == MVT::v2f64) {
+  if (InVT == MVT::v2f64 || InVT == MVT::v4f32) {
     SDLoc dl(Op);
-    SDValue Cv = DAG.getNode(Op.getOpcode(), dl, MVT::v2i64, Op.getOperand(0));
+    SDValue Cv =
+        DAG.getNode(Op.getOpcode(), dl, InVT.changeVectorElementTypeToInteger(),
+                    Op.getOperand(0));
     return DAG.getNode(ISD::TRUNCATE, dl, VT, Cv);
+  } else if (InVT == MVT::v2f32) {
+    SDLoc dl(Op);
+    SDValue Ext = DAG.getNode(ISD::FP_EXTEND, dl, MVT::v2f64, Op.getOperand(0));
+    return DAG.getNode(Op.getOpcode(), dl, VT, Ext);
   }
 
   // Type changing conversions are illegal.
@@ -1574,13 +1614,26 @@ SDValue ARM64TargetLowering::LowerFormalArguments(
     assert(!Res && "Call operand has unhandled type");
     (void)Res;
   }
-
+  assert(ArgLocs.size() == Ins.size());
   SmallVector<SDValue, 16> ArgValues;
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
 
-    // Arguments stored in registers.
-    if (VA.isRegLoc()) {
+    if (Ins[i].Flags.isByVal()) {
+      // Byval is used for HFAs in the PCS, but the system should work in a
+      // non-compliant manner for larger structs.
+      EVT PtrTy = getPointerTy();
+      int Size = Ins[i].Flags.getByValSize();
+      unsigned NumRegs = (Size + 7) / 8;
+
+      unsigned FrameIdx =
+          MFI->CreateFixedObject(8 * NumRegs, VA.getLocMemOffset(), false);
+      SDValue FrameIdxN = DAG.getFrameIndex(FrameIdx, PtrTy);
+      InVals.push_back(FrameIdxN);
+
+      continue;
+    } if (VA.isRegLoc()) {
+      // Arguments stored in registers.
       EVT RegVT = VA.getLocVT();
 
       SDValue ArgValue;
@@ -1988,19 +2041,31 @@ SDValue ARM64TargetLowering::LowerCall(CallLoweringInfo &CLI,
       SDValue PtrOff = DAG.getIntPtrConstant(LocMemOffset);
       PtrOff = DAG.getNode(ISD::ADD, DL, getPointerTy(), StackPtr, PtrOff);
 
-      // Since we pass i1/i8/i16 as i1/i8/i16 on stack and Arg is already
-      // promoted to a legal register type i32, we should truncate Arg back to
-      // i1/i8/i16.
-      if (Arg.getValueType().isSimple() &&
-          Arg.getValueType().getSimpleVT() == MVT::i32 &&
-          (VA.getLocVT() == MVT::i1 || VA.getLocVT() == MVT::i8 ||
-           VA.getLocVT() == MVT::i16))
-        Arg = DAG.getNode(ISD::TRUNCATE, DL, VA.getLocVT(), Arg);
+      if (Outs[i].Flags.isByVal()) {
+        SDValue SizeNode =
+            DAG.getConstant(Outs[i].Flags.getByValSize(), MVT::i64);
+        SDValue Cpy = DAG.getMemcpy(
+            Chain, DL, PtrOff, Arg, SizeNode, Outs[i].Flags.getByValAlign(),
+            /*isVolatile = */ false,
+            /*alwaysInline = */ false,
+            MachinePointerInfo::getStack(LocMemOffset), MachinePointerInfo());
 
-      SDValue Store = DAG.getStore(Chain, DL, Arg, PtrOff,
-                                   MachinePointerInfo::getStack(LocMemOffset),
-                                   false, false, 0);
-      MemOpChains.push_back(Store);
+        MemOpChains.push_back(Cpy);
+      } else {
+        // Since we pass i1/i8/i16 as i1/i8/i16 on stack and Arg is already
+        // promoted to a legal register type i32, we should truncate Arg back to
+        // i1/i8/i16.
+        if (Arg.getValueType().isSimple() &&
+            Arg.getValueType().getSimpleVT() == MVT::i32 &&
+            (VA.getLocVT() == MVT::i1 || VA.getLocVT() == MVT::i8 ||
+             VA.getLocVT() == MVT::i16))
+          Arg = DAG.getNode(ISD::TRUNCATE, DL, VA.getLocVT(), Arg);
+
+        SDValue Store = DAG.getStore(Chain, DL, Arg, PtrOff,
+                                     MachinePointerInfo::getStack(LocMemOffset),
+                                     false, false, 0);
+        MemOpChains.push_back(Store);
+      }
     }
   }
 
@@ -3770,9 +3835,11 @@ SDValue ARM64TargetLowering::ReconstructShuffle(SDValue Op,
       VEXTOffsets[i] = 0;
       continue;
     } else if (SourceVecs[i].getValueType().getVectorNumElements() < NumElts) {
-      // It probably isn't worth padding out a smaller vector just to
-      // break it down again in a shuffle.
-      return SDValue();
+      // We can pad out the smaller vector for free, so if it's part of a
+      // shuffle...
+      ShuffleSrcs[i] = DAG.getNode(ISD::CONCAT_VECTORS, dl, VT, SourceVecs[i],
+                                   DAG.getUNDEF(SourceVecs[i].getValueType()));
+      continue;
     }
 
     // Don't attempt to extract subvectors from BUILD_VECTOR sources
@@ -3884,11 +3951,13 @@ static bool isEXTMask(ArrayRef<int> M, EVT VT, bool &ReverseEXT,
   unsigned NumElts = VT.getVectorNumElements();
   ReverseEXT = false;
 
-  // Assume that the first shuffle index is not UNDEF.  Fail if it is.
-  if (M[0] < 0)
-    return false;
-
-  Imm = M[0];
+  // Look for the first non-undef choice and count backwards from
+  // that. E.g. <-1, -1, 3, ...> means that an EXT must start at 3 - 2 = 1. This
+  // guarantees that at least one index is correct.
+  const int *FirstRealElt =
+      std::find_if(M.begin(), M.end(), [](int Elt) { return Elt >= 0; });
+  assert(FirstRealElt != M.end() && "Completely UNDEF shuffle? Why bother?");
+  Imm = *FirstRealElt - (FirstRealElt - M.begin());
 
   // If this is a VEXT shuffle, the immediate value is the index of the first
   // element.  The other shuffle indices must be the successive elements after
@@ -4032,6 +4101,94 @@ static bool isTRN_v_undef_Mask(ArrayRef<int> M, EVT VT, unsigned &WhichResult) {
       return false;
   }
   return true;
+}
+
+static bool isINSMask(ArrayRef<int> M, int NumInputElements,
+                      bool &DstIsLeft, int &Anomaly) {
+  if (M.size() != static_cast<size_t>(NumInputElements))
+    return false;
+
+  int NumLHSMatch = 0, NumRHSMatch = 0;
+  int LastLHSMismatch = -1, LastRHSMismatch = -1;
+
+  for (int i = 0; i < NumInputElements; ++i) {
+    if (M[i] == -1) {
+      ++NumLHSMatch;
+      ++NumRHSMatch;
+      continue;
+    }
+
+    if (M[i] == i)
+      ++NumLHSMatch;
+    else
+      LastLHSMismatch = i;
+
+    if (M[i] == i + NumInputElements)
+      ++NumRHSMatch;
+    else
+      LastRHSMismatch = i;
+  }
+
+  if (NumLHSMatch == NumInputElements - 1) {
+    DstIsLeft = true;
+    Anomaly = LastLHSMismatch;
+    return true;
+  } else if (NumRHSMatch == NumInputElements - 1) {
+    DstIsLeft = false;
+    Anomaly = LastRHSMismatch;
+    return true;
+  }
+
+  return false;
+}
+
+static bool isConcatMask(ArrayRef<int> Mask, EVT VT, bool SplitLHS) {
+  if (VT.getSizeInBits() != 128)
+    return false;
+
+  unsigned NumElts = VT.getVectorNumElements();
+
+  for (int I = 0, E = NumElts / 2; I != E; I++) {
+    if (Mask[I] != I)
+      return false;
+  }
+
+  int Offset = NumElts / 2;
+  for (int I = NumElts / 2, E = NumElts; I != E; I++) {
+    if (Mask[I] != I + SplitLHS * Offset)
+      return false;
+  }
+
+  return true;
+}
+
+static SDValue tryFormConcatFromShuffle(SDValue Op, SelectionDAG &DAG) {
+  SDLoc DL(Op);
+  EVT VT = Op.getValueType();
+  SDValue V0 = Op.getOperand(0);
+  SDValue V1 = Op.getOperand(1);
+  ArrayRef<int> Mask = cast<ShuffleVectorSDNode>(Op)->getMask();
+
+  if (VT.getVectorElementType() != V0.getValueType().getVectorElementType() ||
+      VT.getVectorElementType() != V1.getValueType().getVectorElementType())
+    return SDValue();
+
+  bool SplitV0 = V0.getValueType().getSizeInBits() == 128;
+
+  if (!isConcatMask(Mask, VT, SplitV0))
+    return SDValue();
+
+  EVT CastVT = EVT::getVectorVT(*DAG.getContext(), VT.getVectorElementType(),
+                                VT.getVectorNumElements() / 2);
+  if (SplitV0) {
+    V0 = DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, CastVT, V0,
+                     DAG.getConstant(0, MVT::i64));
+  }
+  if (V1.getValueType().getSizeInBits() == 128) {
+    V1 = DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, CastVT, V1,
+                     DAG.getConstant(0, MVT::i64));
+  }
+  return DAG.getNode(ISD::CONCAT_VECTORS, DL, VT, V0, V1);
 }
 
 /// GeneratePerfectShuffle - Given an entry in the perfect-shuffle table, emit
@@ -4301,6 +4458,35 @@ SDValue ARM64TargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   if (isTRN_v_undef_Mask(ShuffleMask, VT, WhichResult)) {
     unsigned Opc = (WhichResult == 0) ? ARM64ISD::TRN1 : ARM64ISD::TRN2;
     return DAG.getNode(Opc, dl, V1.getValueType(), V1, V1);
+  }
+
+  SDValue Concat = tryFormConcatFromShuffle(Op, DAG);
+  if (Concat.getNode())
+    return Concat;
+
+  bool DstIsLeft;
+  int Anomaly;
+  int NumInputElements = V1.getValueType().getVectorNumElements();
+  if (isINSMask(ShuffleMask, NumInputElements, DstIsLeft, Anomaly)) {
+    SDValue DstVec = DstIsLeft ? V1 : V2;
+    SDValue DstLaneV = DAG.getConstant(Anomaly, MVT::i64);
+
+    SDValue SrcVec = V1;
+    int SrcLane = ShuffleMask[Anomaly];
+    if (SrcLane >= NumInputElements) {
+      SrcVec = V2;
+      SrcLane -= VT.getVectorNumElements();
+    }
+    SDValue SrcLaneV = DAG.getConstant(SrcLane, MVT::i64);
+
+    EVT ScalarVT = VT.getVectorElementType();
+    if (ScalarVT.getSizeInBits() < 32)
+      ScalarVT = MVT::i32;
+
+    return DAG.getNode(
+        ISD::INSERT_VECTOR_ELT, dl, VT, DstVec,
+        DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, ScalarVT, SrcVec, SrcLaneV),
+        DstLaneV);
   }
 
   // If the shuffle is not directly supported and it has 4 elements, use
@@ -5141,18 +5327,21 @@ bool ARM64TargetLowering::isShuffleMaskLegal(const SmallVectorImpl<int> &M,
       return true;
   }
 
-  bool ReverseVEXT;
-  unsigned Imm, WhichResult;
+  bool DummyBool;
+  int DummyInt;
+  unsigned DummyUnsigned;
 
   return (ShuffleVectorSDNode::isSplatMask(&M[0], VT) || isREVMask(M, VT, 64) ||
           isREVMask(M, VT, 32) || isREVMask(M, VT, 16) ||
-          isEXTMask(M, VT, ReverseVEXT, Imm) ||
+          isEXTMask(M, VT, DummyBool, DummyUnsigned) ||
           // isTBLMask(M, VT) || // FIXME: Port TBL support from ARM.
-          isTRNMask(M, VT, WhichResult) || isUZPMask(M, VT, WhichResult) ||
-          isZIPMask(M, VT, WhichResult) ||
-          isTRN_v_undef_Mask(M, VT, WhichResult) ||
-          isUZP_v_undef_Mask(M, VT, WhichResult) ||
-          isZIP_v_undef_Mask(M, VT, WhichResult));
+          isTRNMask(M, VT, DummyUnsigned) || isUZPMask(M, VT, DummyUnsigned) ||
+          isZIPMask(M, VT, DummyUnsigned) ||
+          isTRN_v_undef_Mask(M, VT, DummyUnsigned) ||
+          isUZP_v_undef_Mask(M, VT, DummyUnsigned) ||
+          isZIP_v_undef_Mask(M, VT, DummyUnsigned) ||
+          isINSMask(M, VT.getVectorNumElements(), DummyBool, DummyInt) ||
+          isConcatMask(M, VT, VT.getSizeInBits() == 128));
 }
 
 /// getVShiftImm - Check if this is a valid build_vector for the immediate
@@ -5363,12 +5552,13 @@ SDValue ARM64TargetLowering::LowerVSETCC(SDValue Op, SelectionDAG &DAG) const {
   // Unfortunately, the mapping of LLVM FP CC's onto ARM64 CC's isn't totally
   // clean.  Some of them require two branches to implement.
   ARM64CC::CondCode CC1, CC2;
-  changeFPCCToARM64CC(CC, CC1, CC2);
+  bool ShouldInvert;
+  changeVectorFPCCToARM64CC(CC, CC1, CC2, ShouldInvert);
 
   bool NoNaNs = getTargetMachine().Options.NoNaNsFPMath;
-  SDValue Cmp1 =
+  SDValue Cmp =
       EmitVectorComparison(LHS, RHS, CC1, NoNaNs, Op.getValueType(), dl, DAG);
-  if (!Cmp1.getNode())
+  if (!Cmp.getNode())
     return SDValue();
 
   if (CC2 != ARM64CC::AL) {
@@ -5377,10 +5567,13 @@ SDValue ARM64TargetLowering::LowerVSETCC(SDValue Op, SelectionDAG &DAG) const {
     if (!Cmp2.getNode())
       return SDValue();
 
-    return DAG.getNode(ISD::OR, dl, Cmp1.getValueType(), Cmp1, Cmp2);
+    Cmp = DAG.getNode(ISD::OR, dl, Cmp.getValueType(), Cmp, Cmp2);
   }
 
-  return Cmp1;
+  if (ShouldInvert)
+    return Cmp = DAG.getNOT(dl, Cmp, Cmp.getValueType());
+
+  return Cmp;
 }
 
 /// getTgtMemIntrinsic - Represent NEON load and store intrinsics as
@@ -5899,6 +6092,53 @@ static SDValue tryCombineToEXTR(SDNode *N,
                      DAG.getConstant(ShiftRHS, MVT::i64));
 }
 
+static SDValue tryCombineToBSL(SDNode *N,
+                                TargetLowering::DAGCombinerInfo &DCI) {
+  EVT VT = N->getValueType(0);
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+
+  if (!VT.isVector())
+    return SDValue();
+
+  SDValue N0 = N->getOperand(0);
+  if (N0.getOpcode() != ISD::AND)
+    return SDValue();
+
+  SDValue N1 = N->getOperand(1);
+  if (N1.getOpcode() != ISD::AND)
+    return SDValue();
+
+  // We only have to look for constant vectors here since the general, variable
+  // case can be handled in TableGen.
+  unsigned Bits = VT.getVectorElementType().getSizeInBits();
+  uint64_t BitMask = Bits == 64 ? -1ULL : ((1ULL << Bits) - 1);
+  for (int i = 1; i >= 0; --i)
+    for (int j = 1; j >= 0; --j) {
+      BuildVectorSDNode *BVN0 = dyn_cast<BuildVectorSDNode>(N0->getOperand(i));
+      BuildVectorSDNode *BVN1 = dyn_cast<BuildVectorSDNode>(N1->getOperand(j));
+      if (!BVN0 || !BVN1)
+        continue;
+
+      bool FoundMatch = true;
+      for (unsigned k = 0; k < VT.getVectorNumElements(); ++k) {
+        ConstantSDNode *CN0 = dyn_cast<ConstantSDNode>(BVN0->getOperand(k));
+        ConstantSDNode *CN1 = dyn_cast<ConstantSDNode>(BVN1->getOperand(k));
+        if (!CN0 || !CN1 ||
+            CN0->getZExtValue() != (BitMask & ~CN1->getZExtValue())) {
+          FoundMatch = false;
+          break;
+        }
+      }
+
+      if (FoundMatch)
+        return DAG.getNode(ARM64ISD::BSL, DL, VT, SDValue(BVN0, 0),
+                           N0->getOperand(1 - i), N1->getOperand(1 - j));
+    }
+
+  return SDValue();
+}
+
 static SDValue performORCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
                                 const ARM64Subtarget *Subtarget) {
   // Attempt to form an EXTR from (or (shl VAL1, #N), (srl VAL2, #RegWidth-N))
@@ -5911,6 +6151,10 @@ static SDValue performORCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
     return SDValue();
 
   SDValue Res = tryCombineToEXTR(N, DCI);
+  if (Res.getNode())
+    return Res;
+
+  Res = tryCombineToBSL(N, DCI);
   if (Res.getNode())
     return Res;
 

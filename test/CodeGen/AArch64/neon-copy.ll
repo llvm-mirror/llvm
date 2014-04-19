@@ -1,5 +1,5 @@
 ; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon -fp-contract=fast | FileCheck %s
-
+; arm64 has copied equivalent test due to intrinsics.
 
 define <16 x i8> @ins16bw(<16 x i8> %tmp1, i8 %tmp2) {
 ;CHECK: ins {{v[0-9]+}}.b[15], {{w[0-9]+}}

@@ -530,9 +530,8 @@ void ELFObjectWriter::ExecutePostLayoutBinding(MCAssembler &Asm,
   // The presence of symbol versions causes undefined symbols and
   // versions declared with @@@ to be renamed.
 
-  for (MCAssembler::symbol_iterator it = Asm.symbol_begin(),
-         ie = Asm.symbol_end(); it != ie; ++it) {
-    const MCSymbol &Alias = it->getSymbol();
+  for (MCSymbolData &OriginalData : Asm.symbols()) {
+    const MCSymbol &Alias = OriginalData.getSymbol();
     const MCSymbol &Symbol = Alias.AliasedSymbol();
     MCSymbolData &SD = Asm.getSymbolData(Symbol);
 
@@ -547,8 +546,8 @@ void ELFObjectWriter::ExecutePostLayoutBinding(MCAssembler &Asm,
 
     // Aliases defined with .symvar copy the binding from the symbol they alias.
     // This is the first place we are able to copy this information.
-    it->setExternal(SD.isExternal());
-    MCELF::SetBinding(*it, MCELF::GetBinding(SD));
+    OriginalData.setExternal(SD.isExternal());
+    MCELF::SetBinding(OriginalData, MCELF::GetBinding(SD));
 
     StringRef Rest = AliasName.substr(Pos);
     if (!Symbol.isUndefined() && !Rest.startswith("@@@"))
@@ -617,6 +616,10 @@ static const MCSymbol *getBaseSymbol(const MCAsmLayout &Layout,
 void ELFObjectWriter::WriteSymbol(SymbolTableWriter &Writer, ELFSymbolData &MSD,
                                   const MCAsmLayout &Layout) {
   MCSymbolData &OrigData = *MSD.SymbolData;
+  assert((!OrigData.getFragment() ||
+          (&OrigData.getFragment()->getParent()->getSection() ==
+           &OrigData.getSymbol().getSection())) &&
+         "The symbol's section doesn't match the fragment's symbol");
   const MCSymbol *Base = getBaseSymbol(Layout, OrigData.getSymbol());
 
   // This has to be in sync with when computeSymbolTable uses SHN_ABS or
@@ -1046,36 +1049,35 @@ ELFObjectWriter::computeSymbolTable(MCAssembler &Asm, const MCAsmLayout &Layout,
   }
 
   // Add the data for the symbols.
-  for (MCAssembler::symbol_iterator it = Asm.symbol_begin(),
-         ie = Asm.symbol_end(); it != ie; ++it) {
-    const MCSymbol &Symbol = it->getSymbol();
+  for (MCSymbolData &SD : Asm.symbols()) {
+    const MCSymbol &Symbol = SD.getSymbol();
 
     bool Used = UsedInReloc.count(&Symbol);
     bool WeakrefUsed = WeakrefUsedInReloc.count(&Symbol);
     bool isSignature = RevGroupMap.count(&Symbol);
 
-    if (!isInSymtab(Asm, *it,
+    if (!isInSymtab(Asm, SD,
                     Used || WeakrefUsed || isSignature,
                     Renames.count(&Symbol)))
       continue;
 
     ELFSymbolData MSD;
-    MSD.SymbolData = it;
+    MSD.SymbolData = &SD;
     const MCSymbol *BaseSymbol = getBaseSymbol(Layout, Symbol);
 
     // Undefined symbols are global, but this is the first place we
     // are able to set it.
-    bool Local = isLocal(*it, isSignature, Used);
-    if (!Local && MCELF::GetBinding(*it) == ELF::STB_LOCAL) {
+    bool Local = isLocal(SD, isSignature, Used);
+    if (!Local && MCELF::GetBinding(SD) == ELF::STB_LOCAL) {
       assert(BaseSymbol);
-      MCSymbolData &SD = Asm.getSymbolData(*BaseSymbol);
-      MCELF::SetBinding(*it, ELF::STB_GLOBAL);
+      MCSymbolData &BaseData = Asm.getSymbolData(*BaseSymbol);
       MCELF::SetBinding(SD, ELF::STB_GLOBAL);
+      MCELF::SetBinding(BaseData, ELF::STB_GLOBAL);
     }
 
     if (!BaseSymbol) {
       MSD.SectionIndex = ELF::SHN_ABS;
-    } else if (it->isCommon()) {
+    } else if (SD.isCommon()) {
       assert(!Local);
       MSD.SectionIndex = ELF::SHN_COMMON;
     } else if (BaseSymbol->isUndefined()) {
@@ -1084,7 +1086,7 @@ ELFObjectWriter::computeSymbolTable(MCAssembler &Asm, const MCAsmLayout &Layout,
       else
         MSD.SectionIndex = ELF::SHN_UNDEF;
       if (!Used && WeakrefUsed)
-        MCELF::SetBinding(*it, ELF::STB_WEAK);
+        MCELF::SetBinding(SD, ELF::STB_WEAK);
     } else {
       const MCSectionELF &Section =
         static_cast<const MCSectionELF&>(BaseSymbol->getSection());
@@ -1207,10 +1209,12 @@ getUncompressedData(MCAsmLayout &Layout,
 // Include the debug info compression header:
 // "ZLIB" followed by 8 bytes representing the uncompressed size of the section,
 // useful for consumers to preallocate a buffer to decompress into.
-static void
+static bool
 prependCompressionHeader(uint64_t Size,
                          SmallVectorImpl<char> &CompressedContents) {
   static const StringRef Magic = "ZLIB";
+  if (Size <= Magic.size() + sizeof(Size) + CompressedContents.size())
+    return false;
   if (sys::IsLittleEndianHost)
     Size = sys::SwapByteOrder(Size);
   CompressedContents.insert(CompressedContents.begin(),
@@ -1219,6 +1223,7 @@ prependCompressionHeader(uint64_t Size,
   std::copy(reinterpret_cast<char *>(&Size),
             reinterpret_cast<char *>(&Size + 1),
             CompressedContents.begin() + Magic.size());
+  return true;
 }
 
 // Return a single fragment containing the compressed contents of the whole
@@ -1241,9 +1246,23 @@ getCompressedFragment(MCAsmLayout &Layout,
   if (Success != zlib::StatusOK)
     return nullptr;
 
-  prependCompressionHeader(UncompressedData.size(), CompressedContents);
+  if (!prependCompressionHeader(UncompressedData.size(), CompressedContents))
+    return nullptr;
 
   return CompressedFragment;
+}
+
+static void UpdateSymbols(const MCAsmLayout &Layout, const MCSectionData &SD,
+                          MCAssembler::symbol_range Symbols,
+                          MCFragment *NewFragment) {
+  for (MCSymbolData &Data : Symbols) {
+    MCFragment *F = Data.getFragment();
+    if (F && F->getParent() == &SD) {
+      Data.setOffset(Data.getOffset() +
+                     Layout.getFragmentOffset(Data.Fragment));
+      Data.setFragment(NewFragment);
+    }
+  }
 }
 
 static void CompressDebugSection(MCAssembler &Asm, MCAsmLayout &Layout,
@@ -1258,6 +1277,10 @@ static void CompressDebugSection(MCAssembler &Asm, MCAsmLayout &Layout,
   // Leave the section as-is if the fragments could not be compressed.
   if (!CompressedFragment)
     return;
+
+  // Update the fragment+offsets of any symbols referring to fragments in this
+  // section to refer to the new fragment.
+  UpdateSymbols(Layout, SD, Asm.symbols(), CompressedFragment.get());
 
   // Invalidate the layout for the whole section since it will have new and
   // different fragments now.
