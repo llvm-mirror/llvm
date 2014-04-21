@@ -86,6 +86,30 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::SELECT, MVT::v4i32, Expand);
   setOperationAction(ISD::SELECT, MVT::v4f32, Expand);
 
+  // Expand sign extension of vectors
+  if (!Subtarget->hasBFE())
+    setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i1, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i1, Expand);
+
+  if (!Subtarget->hasBFE())
+    setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i8, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i8, Expand);
+
+  if (!Subtarget->hasBFE())
+    setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i16, Expand);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i32, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i32, Expand);
+
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::Other, Expand);
+
+
   // Legalize loads and stores to the private address space.
   setOperationAction(ISD::LOAD, MVT::i32, Custom);
   setOperationAction(ISD::LOAD, MVT::v2i32, Custom);
@@ -1233,8 +1257,8 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const
       ((LoadNode->getExtensionType() == ISD::NON_EXTLOAD) ||
        (LoadNode->getExtensionType() == ISD::ZEXTLOAD))) {
     SDValue Result;
-    if (isa<ConstantExpr>(LoadNode->getSrcValue()) ||
-        isa<Constant>(LoadNode->getSrcValue()) ||
+    if (isa<ConstantExpr>(LoadNode->getMemOperand()->getValue()) ||
+        isa<Constant>(LoadNode->getMemOperand()->getValue()) ||
         isa<ConstantSDNode>(Ptr)) {
       SDValue Slots[4];
       for (unsigned i = 0; i < 4; i++) {
@@ -1367,8 +1391,7 @@ SDValue R600TargetLowering::LowerFormalArguments(
 
   SmallVector<ISD::InputArg, 8> LocalIns;
 
-  getOriginalFunctionArgs(DAG, DAG.getMachineFunction().getFunction(), Ins,
-                          LocalIns);
+  getOriginalFunctionArgs(DAG, MF.getFunction(), Ins, LocalIns);
 
   AnalyzeFormalArguments(CCInfo, LocalIns);
 
@@ -1403,28 +1426,29 @@ SDValue R600TargetLowering::LowerFormalArguments(
                                  DAG.getConstant(36 + VA.getLocMemOffset(), MVT::i32),
                                  MachinePointerInfo(UndefValue::get(PtrTy)),
                                  MemVT, false, false, 4);
-    // 4 is the preferred alignment for
-    // the CONSTANT memory space.
+
+    // 4 is the preferred alignment for the CONSTANT memory space.
     InVals.push_back(Arg);
   }
   return Chain;
 }
 
 EVT R600TargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
-   if (!VT.isVector()) return MVT::i32;
+   if (!VT.isVector())
+     return MVT::i32;
    return VT.changeVectorElementTypeToInteger();
 }
 
-static SDValue
-CompactSwizzlableVector(SelectionDAG &DAG, SDValue VectorEntry,
-                        DenseMap<unsigned, unsigned> &RemapSwizzle) {
+static SDValue CompactSwizzlableVector(
+  SelectionDAG &DAG, SDValue VectorEntry,
+  DenseMap<unsigned, unsigned> &RemapSwizzle) {
   assert(VectorEntry.getOpcode() == ISD::BUILD_VECTOR);
   assert(RemapSwizzle.empty());
   SDValue NewBldVec[4] = {
-      VectorEntry.getOperand(0),
-      VectorEntry.getOperand(1),
-      VectorEntry.getOperand(2),
-      VectorEntry.getOperand(3)
+    VectorEntry.getOperand(0),
+    VectorEntry.getOperand(1),
+    VectorEntry.getOperand(2),
+    VectorEntry.getOperand(3)
   };
 
   for (unsigned i = 0; i < 4; i++) {
@@ -1455,7 +1479,7 @@ CompactSwizzlableVector(SelectionDAG &DAG, SDValue VectorEntry,
   }
 
   return DAG.getNode(ISD::BUILD_VECTOR, SDLoc(VectorEntry),
-      VectorEntry.getValueType(), NewBldVec, 4);
+                     VectorEntry.getValueType(), NewBldVec, 4);
 }
 
 static SDValue ReorganizeVector(SelectionDAG &DAG, SDValue VectorEntry,

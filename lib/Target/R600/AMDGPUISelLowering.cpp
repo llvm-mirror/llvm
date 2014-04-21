@@ -212,22 +212,6 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::SELECT, VT, Expand);
   }
 
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i1, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i1, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i8, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i8, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Custom);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v4i16, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Custom);
-
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::Other, Custom);
-
   setTargetDAGCombine(ISD::MUL);
 }
 
@@ -776,9 +760,24 @@ SDValue AMDGPUTargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
     return DAG.getNode(ISD::getExtForLoadExtType(ExtType), DL, VT, ExtLoad32);
   }
 
+  if (ExtType == ISD::NON_EXTLOAD && VT.getSizeInBits() < 32) {
+    assert(VT == MVT::i1 && "Only i1 non-extloads expected");
+    // FIXME: Copied from PPC
+    // First, load into 32 bits, then truncate to 1 bit.
+
+    SDValue Chain = Load->getChain();
+    SDValue BasePtr = Load->getBasePtr();
+    MachineMemOperand *MMO = Load->getMemOperand();
+
+    SDValue NewLD = DAG.getExtLoad(ISD::EXTLOAD, DL, MVT::i32, Chain,
+                                   BasePtr, MVT::i8, MMO);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, NewLD);
+  }
+
   // Lower loads constant address space global variable loads
   if (Load->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS &&
-      isa<GlobalVariable>(GetUnderlyingObject(Load->getPointerInfo().V))) {
+      isa<GlobalVariable>(
+          GetUnderlyingObject(Load->getMemOperand()->getValue()))) {
 
     SDValue Ptr = DAG.getZExtOrTrunc(Load->getBasePtr(), DL,
         getPointerTy(AMDGPUAS::PRIVATE_ADDRESS));
@@ -1159,6 +1158,8 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
         break;
       }
 
+      // We need to use sext even for MUL_U24, because MUL_U24 is used
+      // for signed multiply of 8 and 16-bit types.
       SDValue Reg = DAG.getSExtOrTrunc(Mul, DL, VT);
 
       return Reg;

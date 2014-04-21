@@ -24,6 +24,7 @@ $(PROJ_OBJ_DIR)/LLVMConfig.cmake: LLVMConfig.cmake.in $(LLVMBuildCMakeFrag)
 	  -e 's/@LLVM_CONFIG_CODE@/set(LLVM_INSTALL_PREFIX "'"$(subst /,\/,$(PROJ_prefix))"'")/' \
 	  -e 's/@LLVM_VERSION_MAJOR@/'"$(LLVM_VERSION_MAJOR)"'/' \
 	  -e 's/@LLVM_VERSION_MINOR@/'"$(LLVM_VERSION_MINOR)"'/' \
+	  -e 's/@LLVM_VERSION_PATCH@/'"$(LLVM_VERSION_PATCH)"'/' \
 	  -e 's/@PACKAGE_VERSION@/'"$(LLVMVersion)"'/' \
 	  -e 's/@LLVM_COMMON_DEPENDS@//' \
 	  -e 's/@LLVM_AVAILABLE_LIBS@/'"$(subst -l,,$(LLVMConfigLibs))"'/' \
@@ -51,6 +52,9 @@ $(PROJ_OBJ_DIR)/LLVMConfigVersion.cmake: LLVMConfigVersion.cmake.in
 	$(Echo) 'Generating LLVM CMake package version file'
 	$(Verb) cat $< | sed \
 	  -e 's/@PACKAGE_VERSION@/'"$(LLVMVersion)"'/' \
+	  -e 's/@LLVM_VERSION_MAJOR@/'"$(LLVM_VERSION_MAJOR)"'/' \
+	  -e 's/@LLVM_VERSION_MINOR@/'"$(LLVM_VERSION_MINOR)"'/' \
+	  -e 's/@LLVM_VERSION_PATCH@/'"$(LLVM_VERSION_PATCH)"'/' \
 	  > $@
 
 $(PROJ_OBJ_DIR)/LLVMExports.cmake: $(LLVMBuildCMakeExportsFrag)

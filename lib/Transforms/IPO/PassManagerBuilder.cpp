@@ -58,6 +58,7 @@ PassManagerBuilder::PassManagerBuilder() {
     SizeLevel = 0;
     LibraryInfo = 0;
     Inliner = 0;
+    DisableTailCalls = false;
     DisableUnitAtATime = false;
     DisableUnrollLoops = false;
     BBVectorize = RunBBVectorization;
@@ -183,7 +184,8 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   MPM.add(createInstructionCombiningPass());  // Combine silly seq's
 
-  MPM.add(createTailCallEliminationPass());   // Eliminate tail calls
+  if (!DisableTailCalls)
+    MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
   MPM.add(createLoopRotatePass());            // Rotate Loop
@@ -334,7 +336,9 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
   // Nuke dead stores.
   PM.add(createDeadStoreEliminationPass());
 
-  // More loops are countable try to vectorize them.
+  // More loops are countable; try to optimize them.
+  PM.add(createIndVarSimplifyPass());
+  PM.add(createLoopDeletionPass());
   PM.add(createLoopVectorizePass(true, true));
 
   // Cleanup and simplify the code after the scalar optimizations.

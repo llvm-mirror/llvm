@@ -38,8 +38,10 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
@@ -100,6 +102,7 @@ class raw_ostream;
 class LazyCallGraph {
 public:
   class Node;
+  class SCC;
   typedef SmallVector<PointerUnion<Function *, Node *>, 4> NodeVectorT;
   typedef SmallVectorImpl<PointerUnion<Function *, Node *>> NodeVectorImplT;
 
@@ -119,25 +122,18 @@ public:
     /// \brief Nonce type to select the constructor for the end iterator.
     struct IsAtEndT {};
 
-    LazyCallGraph &G;
+    LazyCallGraph *G;
     NodeVectorImplT::iterator NI;
 
     // Build the begin iterator for a node.
     explicit iterator(LazyCallGraph &G, NodeVectorImplT &Nodes)
-        : G(G), NI(Nodes.begin()) {}
+        : G(&G), NI(Nodes.begin()) {}
 
     // Build the end iterator for a node. This is selected purely by overload.
     iterator(LazyCallGraph &G, NodeVectorImplT &Nodes, IsAtEndT /*Nonce*/)
-        : G(G), NI(Nodes.end()) {}
+        : G(&G), NI(Nodes.end()) {}
 
   public:
-    iterator(const iterator &Arg) : G(Arg.G), NI(Arg.NI) {}
-    iterator(iterator &&Arg) : G(Arg.G), NI(std::move(Arg.NI)) {}
-    iterator &operator=(iterator Arg) {
-      std::swap(Arg, *this);
-      return *this;
-    }
-
     bool operator==(const iterator &Arg) { return NI == Arg.NI; }
     bool operator!=(const iterator &Arg) { return !operator==(Arg); }
 
@@ -146,7 +142,7 @@ public:
         return NI->get<Node *>();
 
       Function *F = NI->get<Function *>();
-      Node *ChildN = G.get(*F);
+      Node *ChildN = G->get(*F);
       *NI = ChildN;
       return ChildN;
     }
@@ -173,6 +169,118 @@ public:
     }
   };
 
+  /// \brief A node in the call graph.
+  ///
+  /// This represents a single node. It's primary roles are to cache the list of
+  /// callees, de-duplicate and provide fast testing of whether a function is
+  /// a callee, and facilitate iteration of child nodes in the graph.
+  class Node {
+    friend class LazyCallGraph;
+    friend class LazyCallGraph::SCC;
+
+    LazyCallGraph *G;
+    Function &F;
+
+    // We provide for the DFS numbering and Tarjan walk lowlink numbers to be
+    // stored directly within the node.
+    int DFSNumber;
+    int LowLink;
+
+    mutable NodeVectorT Callees;
+    SmallPtrSet<Function *, 4> CalleeSet;
+
+    /// \brief Basic constructor implements the scanning of F into Callees and
+    /// CalleeSet.
+    Node(LazyCallGraph &G, Function &F);
+
+  public:
+    typedef LazyCallGraph::iterator iterator;
+
+    Function &getFunction() const {
+      return F;
+    };
+
+    iterator begin() const { return iterator(*G, Callees); }
+    iterator end() const { return iterator(*G, Callees, iterator::IsAtEndT()); }
+
+    /// Equality is defined as address equality.
+    bool operator==(const Node &N) const { return this == &N; }
+    bool operator!=(const Node &N) const { return !operator==(N); }
+  };
+
+  /// \brief An SCC of the call graph.
+  ///
+  /// This represents a Strongly Connected Component of the call graph as
+  /// a collection of call graph nodes. While the order of nodes in the SCC is
+  /// stable, it is not any particular order.
+  class SCC {
+    friend class LazyCallGraph;
+    friend class LazyCallGraph::Node;
+
+    SmallSetVector<SCC *, 1> ParentSCCs;
+    SmallVector<Node *, 1> Nodes;
+    SmallPtrSet<Function *, 1> NodeSet;
+
+    SCC() {}
+
+  public:
+    typedef SmallVectorImpl<Node *>::const_iterator iterator;
+
+    iterator begin() const { return Nodes.begin(); }
+    iterator end() const { return Nodes.end(); }
+  };
+
+  /// \brief A post-order depth-first SCC iterator over the call graph.
+  ///
+  /// This iterator triggers the Tarjan DFS-based formation of the SCC DAG for
+  /// the call graph, walking it lazily in depth-first post-order. That is, it
+  /// always visits SCCs for a callee prior to visiting the SCC for a caller
+  /// (when they are in different SCCs).
+  class postorder_scc_iterator
+      : public std::iterator<std::forward_iterator_tag, SCC *, ptrdiff_t, SCC *,
+                             SCC *> {
+    friend class LazyCallGraph;
+    friend class LazyCallGraph::Node;
+    typedef std::iterator<std::forward_iterator_tag, SCC *, ptrdiff_t,
+                          SCC *, SCC *> BaseT;
+
+    /// \brief Nonce type to select the constructor for the end iterator.
+    struct IsAtEndT {};
+
+    LazyCallGraph *G;
+    SCC *C;
+
+    // Build the begin iterator for a node.
+    postorder_scc_iterator(LazyCallGraph &G) : G(&G) {
+      C = G.getNextSCCInPostOrder();
+    }
+
+    // Build the end iterator for a node. This is selected purely by overload.
+    postorder_scc_iterator(LazyCallGraph &G, IsAtEndT /*Nonce*/)
+        : G(&G), C(nullptr) {}
+
+  public:
+    bool operator==(const postorder_scc_iterator &Arg) {
+      return G == Arg.G && C == Arg.C;
+    }
+    bool operator!=(const postorder_scc_iterator &Arg) {
+      return !operator==(Arg);
+    }
+
+    reference operator*() const { return C; }
+    pointer operator->() const { return operator*(); }
+
+    postorder_scc_iterator &operator++() {
+      C = G->getNextSCCInPostOrder();
+      return *this;
+    }
+    postorder_scc_iterator operator++(int) {
+      postorder_scc_iterator prev = *this;
+      ++*this;
+      return prev;
+    }
+  };
+
   /// \brief Construct a graph for the given module.
   ///
   /// This sets up the graph and computes all of the entry points of the graph.
@@ -180,26 +288,23 @@ public:
   /// requested during traversal.
   LazyCallGraph(Module &M);
 
-  /// \brief Copy constructor.
-  ///
-  /// This does a deep copy of the graph. It does no verification that the
-  /// graph remains valid for the module. It is also relatively expensive.
-  LazyCallGraph(const LazyCallGraph &G);
-
-  /// \brief Move constructor.
-  ///
-  /// This is a deep move. It leaves G in an undefined but destroyable state.
-  /// Any other operation on G is likely to fail.
   LazyCallGraph(LazyCallGraph &&G);
-
-  /// \brief Copy and move assignment.
-  LazyCallGraph &operator=(LazyCallGraph RHS) {
-    std::swap(*this, RHS);
-    return *this;
-  }
+  LazyCallGraph &operator=(LazyCallGraph &&RHS);
 
   iterator begin() { return iterator(*this, EntryNodes); }
   iterator end() { return iterator(*this, EntryNodes, iterator::IsAtEndT()); }
+
+  postorder_scc_iterator postorder_scc_begin() {
+    return postorder_scc_iterator(*this);
+  }
+  postorder_scc_iterator postorder_scc_end() {
+    return postorder_scc_iterator(*this, postorder_scc_iterator::IsAtEndT());
+  }
+
+  iterator_range<postorder_scc_iterator> postorder_sccs() {
+    return iterator_range<postorder_scc_iterator>(postorder_scc_begin(),
+                                                  postorder_scc_end());
+  }
 
   /// \brief Lookup a function in the graph which has already been scanned and
   /// added.
@@ -216,8 +321,6 @@ public:
   }
 
 private:
-  Module &M;
-
   /// \brief Allocator that holds all the call graph nodes.
   SpecificBumpPtrAllocator<Node> BPA;
 
@@ -233,53 +336,35 @@ private:
   /// \brief Set of the entry nodes to the graph.
   SmallPtrSet<Function *, 4> EntryNodeSet;
 
+  /// \brief Allocator that holds all the call graph SCCs.
+  SpecificBumpPtrAllocator<SCC> SCCBPA;
+
+  /// \brief Maps Function -> SCC for fast lookup.
+  DenseMap<const Function *, SCC *> SCCMap;
+
+  /// \brief The leaf SCCs of the graph.
+  ///
+  /// These are all of the SCCs which have no children.
+  SmallVector<SCC *, 4> LeafSCCs;
+
+  /// \brief Stack of nodes not-yet-processed into SCCs.
+  SmallVector<std::pair<Node *, iterator>, 4> DFSStack;
+
+  /// \brief Set of entry nodes not-yet-processed into SCCs.
+  SmallSetVector<Function *, 4> SCCEntryNodes;
+
+  /// \brief Counter for the next DFS number to assign.
+  int NextDFSNumber;
+
   /// \brief Helper to insert a new function, with an already looked-up entry in
   /// the NodeMap.
   Node *insertInto(Function &F, Node *&MappedN);
 
-  /// \brief Helper to copy a node from another graph into this one.
-  Node *copyInto(const Node &OtherN);
+  /// \brief Helper to update pointers back to the graph object during moves.
+  void updateGraphPtrs();
 
-  /// \brief Helper to move a node from another graph into this one.
-  Node *moveInto(Node &&OtherN);
-};
-
-/// \brief A node in the call graph.
-///
-/// This represents a single node. It's primary roles are to cache the list of
-/// callees, de-duplicate and provide fast testing of whether a function is
-/// a callee, and facilitate iteration of child nodes in the graph.
-class LazyCallGraph::Node {
-  friend class LazyCallGraph;
-
-  LazyCallGraph &G;
-  Function &F;
-  mutable NodeVectorT Callees;
-  SmallPtrSet<Function *, 4> CalleeSet;
-
-  /// \brief Basic constructor implements the scanning of F into Callees and
-  /// CalleeSet.
-  Node(LazyCallGraph &G, Function &F);
-
-  /// \brief Constructor used when copying a node from one graph to another.
-  Node(LazyCallGraph &G, const Node &OtherN);
-
-  /// \brief Constructor used when moving a node from one graph to another.
-  Node(LazyCallGraph &G, Node &&OtherN);
-
-public:
-  typedef LazyCallGraph::iterator iterator;
-
-  Function &getFunction() const {
-    return F;
-  };
-
-  iterator begin() const { return iterator(G, Callees); }
-  iterator end() const { return iterator(G, Callees, iterator::IsAtEndT()); }
-
-  /// Equality is defined as address equality.
-  bool operator==(const Node &N) const { return this == &N; }
-  bool operator!=(const Node &N) const { return !operator==(N); }
+  /// \brief Retrieve the next node in the post-order SCC walk of the call graph.
+  SCC *getNextSCCInPostOrder();
 };
 
 // Provide GraphTraits specializations for call graphs.

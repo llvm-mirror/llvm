@@ -98,7 +98,7 @@ void DWARFUnit::clear() {
   Offset = 0;
   Length = 0;
   Version = 0;
-  Abbrevs = 0;
+  Abbrevs = nullptr;
   AddrSize = 0;
   BaseAddr = 0;
   RangeSectionBase = 0;
@@ -110,8 +110,8 @@ void DWARFUnit::clear() {
 const char *DWARFUnit::getCompilationDir() {
   extractDIEsIfNeeded(true);
   if (DieArray.empty())
-    return 0;
-  return DieArray[0].getAttributeValueAsString(this, DW_AT_comp_dir, 0);
+    return nullptr;
+  return DieArray[0].getAttributeValueAsString(this, DW_AT_comp_dir, nullptr);
 }
 
 uint64_t DWARFUnit::getDWOId() {
@@ -241,25 +241,25 @@ size_t DWARFUnit::extractDIEsIfNeeded(bool CUDieOnly) {
 DWARFUnit::DWOHolder::DWOHolder(object::ObjectFile *DWOFile)
     : DWOFile(DWOFile),
       DWOContext(cast<DWARFContext>(DIContext::getDWARFContext(DWOFile))),
-      DWOU(0) {
+      DWOU(nullptr) {
   if (DWOContext->getNumDWOCompileUnits() > 0)
     DWOU = DWOContext->getDWOCompileUnitAtIndex(0);
 }
 
 bool DWARFUnit::parseDWO() {
-  if (DWO.get() != 0)
+  if (DWO.get())
     return false;
   extractDIEsIfNeeded(true);
   if (DieArray.empty())
     return false;
   const char *DWOFileName =
-      DieArray[0].getAttributeValueAsString(this, DW_AT_GNU_dwo_name, 0);
-  if (DWOFileName == 0)
+      DieArray[0].getAttributeValueAsString(this, DW_AT_GNU_dwo_name, nullptr);
+  if (!DWOFileName)
     return false;
   const char *CompilationDir =
-      DieArray[0].getAttributeValueAsString(this, DW_AT_comp_dir, 0);
+      DieArray[0].getAttributeValueAsString(this, DW_AT_comp_dir, nullptr);
   SmallString<16> AbsolutePath;
-  if (sys::path::is_relative(DWOFileName) && CompilationDir != 0) {
+  if (sys::path::is_relative(DWOFileName) && CompilationDir != nullptr) {
     sys::path::append(AbsolutePath, CompilationDir);
   }
   sys::path::append(AbsolutePath, DWOFileName);
@@ -271,7 +271,7 @@ bool DWARFUnit::parseDWO() {
   DWO.reset(new DWOHolder(DWOFile.get()));
   DWARFUnit *DWOCU = DWO->getUnit();
   // Verify that compile unit in .dwo file is valid.
-  if (DWOCU == 0 || DWOCU->getDWOId() != getDWOId()) {
+  if (!DWOCU || DWOCU->getDWOId() != getDWOId()) {
     DWO.reset();
     return false;
   }
@@ -298,33 +298,33 @@ void DWARFUnit::clearDIEs(bool KeepCUDie) {
   }
 }
 
-void
-DWARFUnit::buildAddressRangeTable(DWARFDebugAranges *debug_aranges,
-                                         bool clear_dies_if_already_not_parsed,
-                                         uint32_t CUOffsetInAranges) {
+void DWARFUnit::collectAddressRanges(DWARFAddressRangesVector &CURanges) {
+  // First, check if CU DIE describes address ranges for the unit.
+  const auto &CUDIERanges = getCompileUnitDIE()->getAddressRanges(this);
+  if (!CUDIERanges.empty()) {
+    CURanges.insert(CURanges.end(), CUDIERanges.begin(), CUDIERanges.end());
+    return;
+  }
+
   // This function is usually called if there in no .debug_aranges section
   // in order to produce a compile unit level set of address ranges that
   // is accurate. If the DIEs weren't parsed, then we don't want all dies for
   // all compile units to stay loaded when they weren't needed. So we can end
   // up parsing the DWARF and then throwing them all away to keep memory usage
   // down.
-  const bool clear_dies = extractDIEsIfNeeded(false) > 1 &&
-                          clear_dies_if_already_not_parsed;
-  DieArray[0].buildAddressRangeTable(this, debug_aranges, CUOffsetInAranges);
+  const bool ClearDIEs = extractDIEsIfNeeded(false) > 1;
+  DieArray[0].collectChildrenAddressRanges(this, CURanges);
+
+  // Collect address ranges from DIEs in .dwo if necessary.
   bool DWOCreated = parseDWO();
-  if (DWO.get()) {
-    // If there is a .dwo file for this compile unit, then skeleton CU DIE
-    // doesn't have children, and we should instead build address range table
-    // from DIEs in the .debug_info.dwo section of .dwo file.
-    DWO->getUnit()->buildAddressRangeTable(
-        debug_aranges, clear_dies_if_already_not_parsed, CUOffsetInAranges);
-  }
-  if (DWOCreated && clear_dies_if_already_not_parsed)
+  if (DWO.get())
+    DWO->getUnit()->collectAddressRanges(CURanges);
+  if (DWOCreated)
     DWO.reset();
 
   // Keep memory down by clearing DIEs if this generate function
   // caused them to be parsed.
-  if (clear_dies)
+  if (ClearDIEs)
     clearDIEs(true);
 }
 
@@ -337,14 +337,14 @@ DWARFUnit::getSubprogramForAddress(uint64_t Address) {
       return &DIE;
     }
   }
-  return 0;
+  return nullptr;
 }
 
 DWARFDebugInfoEntryInlinedChain
 DWARFUnit::getInlinedChainForAddress(uint64_t Address) {
   // First, find a subprogram that contains the given address (the root
   // of inlined chain).
-  const DWARFUnit *ChainCU = 0;
+  const DWARFUnit *ChainCU = nullptr;
   const DWARFDebugInfoEntryMinimal *SubprogramDIE =
       getSubprogramForAddress(Address);
   if (SubprogramDIE) {

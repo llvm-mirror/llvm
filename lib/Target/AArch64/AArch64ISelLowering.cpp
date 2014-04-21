@@ -540,6 +540,8 @@ AArch64TargetLowering::AArch64TargetLowering(AArch64TargetMachine &TM)
 
   setTargetDAGCombine(ISD::SIGN_EXTEND);
   setTargetDAGCombine(ISD::VSELECT);
+
+  MaskAndBranchFoldingIsLegal = true;
 }
 
 EVT AArch64TargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
@@ -1659,7 +1661,7 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
                                   Flags.getByValAlign(),
                                   /*isVolatile = */ false,
                                   /*alwaysInline = */ false,
-                                  DstInfo, MachinePointerInfo(0));
+                                  DstInfo, MachinePointerInfo());
       MemOpChains.push_back(Cpy);
     } else {
       // Normal stack argument, put it where it's needed.
@@ -4178,7 +4180,7 @@ static SDValue CombineBaseUpdate(SDNode *N,
       Tys[n] = VecTy;
     Tys[n++] = MVT::i64;
     Tys[n] = MVT::Other;
-    SDVTList SDTys = DAG.getVTList(Tys, NumResultVecs + 2);
+    SDVTList SDTys = DAG.getVTList(ArrayRef<EVT>(Tys, NumResultVecs + 2));
     SmallVector<SDValue, 8> Ops;
     Ops.push_back(N->getOperand(0)); // incoming chain
     Ops.push_back(N->getOperand(AddrOpIdx));
@@ -4254,7 +4256,7 @@ static SDValue CombineVLDDUP(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
   for (n = 0; n < NumVecs; ++n)
     Tys[n] = VT;
   Tys[n] = MVT::Other;
-  SDVTList SDTys = DAG.getVTList(Tys, NumVecs + 1);
+  SDVTList SDTys = DAG.getVTList(ArrayRef<EVT>(Tys, NumVecs + 1));
   SDValue Ops[] = { VLD->getOperand(0), VLD->getOperand(2) };
   MemIntrinsicSDNode *VLDMemInt = cast<MemIntrinsicSDNode>(VLD);
   SDValue VLDDup = DAG.getMemIntrinsicNode(NewOpc, SDLoc(VLD), SDTys, Ops, 2,
@@ -4412,6 +4414,50 @@ AArch64TargetLowering::isFMAFasterThanFMulAndFAdd(EVT VT) const {
 
   return false;
 }
+
+bool AArch64TargetLowering::allowsUnalignedMemoryAccesses(EVT VT,
+                                                          unsigned AddrSpace,
+                                                          bool *Fast) const {
+  const AArch64Subtarget *Subtarget = getSubtarget();
+  // The AllowsUnaliged flag models the SCTLR.A setting in ARM cpus
+  bool AllowsUnaligned = Subtarget->allowsUnalignedMem();
+
+  switch (VT.getSimpleVT().SimpleTy) {
+  default:
+    return false;
+  // Scalar types
+  case MVT::i8:  case MVT::i16:
+  case MVT::i32: case MVT::i64:
+  case MVT::f32: case MVT::f64: {
+    // Unaligned access can use (for example) LRDB, LRDH, LDRW
+    if (AllowsUnaligned) {
+      if (Fast)
+        *Fast = true;
+      return true;
+    }
+    return false;
+  }
+  // 64-bit vector types
+  case MVT::v8i8:  case MVT::v4i16:
+  case MVT::v2i32: case MVT::v1i64:
+  case MVT::v2f32: case MVT::v1f64:
+  // 128-bit vector types
+  case MVT::v16i8: case MVT::v8i16:
+  case MVT::v4i32: case MVT::v2i64:
+  case MVT::v4f32: case MVT::v2f64: {
+    // For any little-endian targets with neon, we can support unaligned
+    // load/store of V registers using ld1/st1.
+    // A big-endian target may also explicitly support unaligned accesses
+    if (Subtarget->hasNEON() && (AllowsUnaligned || isLittleEndian())) {
+      if (Fast)
+        *Fast = true;
+      return true;
+    }
+    return false;
+  }
+  }
+}
+
 // Check whether a shuffle_vector could be presented as concat_vector.
 bool AArch64TargetLowering::isConcatVector(SDValue Op, SelectionDAG &DAG,
                                            SDValue V0, SDValue V1,

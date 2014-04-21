@@ -123,6 +123,9 @@ class ExecutionEngine {
   /// using dlsym).
   bool SymbolSearchingDisabled;
 
+  /// Whether the JIT should verify IR modules during compilation.
+  bool VerifyModules;
+
   friend class EngineBuilder;  // To allow access to JITCtor and InterpCtor.
 
 protected:
@@ -181,7 +184,7 @@ public:
   /// freeMachineCodeForFunction works.
   static ExecutionEngine *create(Module *M,
                                  bool ForceInterpreter = false,
-                                 std::string *ErrorStr = 0,
+                                 std::string *ErrorStr = nullptr,
                                  CodeGenOpt::Level OptLevel =
                                  CodeGenOpt::Default,
                                  bool GVsWithCode = true);
@@ -193,8 +196,8 @@ public:
   /// Clients should make sure to initialize targets prior to calling this
   /// function.
   static ExecutionEngine *createJIT(Module *M,
-                                    std::string *ErrorStr = 0,
-                                    JITMemoryManager *JMM = 0,
+                                    std::string *ErrorStr = nullptr,
+                                    JITMemoryManager *JMM = nullptr,
                                     CodeGenOpt::Level OptLevel =
                                     CodeGenOpt::Default,
                                     bool GVsWithCode = true,
@@ -411,7 +414,7 @@ public:
   }
 
   // The JIT overrides a version that actually does this.
-  virtual void runJITOnFunction(Function *, MachineCodeInfo * = 0) { }
+  virtual void runJITOnFunction(Function *, MachineCodeInfo * = nullptr) { }
 
   /// getGlobalValueAtAddress - Return the LLVM global value object that starts
   /// at the specified address.
@@ -478,7 +481,7 @@ public:
   }
 
   /// Return the target machine (if available).
-  virtual TargetMachine *getTargetMachine() { return NULL; }
+  virtual TargetMachine *getTargetMachine() { return nullptr; }
 
   /// DisableLazyCompilation - When lazy compilation is off (the default), the
   /// JIT will eagerly compile every function reachable from the argument to
@@ -523,6 +526,17 @@ public:
   }
   bool isSymbolSearchingDisabled() const {
     return SymbolSearchingDisabled;
+  }
+
+  /// Enable/Disable IR module verification.
+  ///
+  /// Note: Module verification is enabled by default in Debug builds, and
+  /// disabled by default in Release. Use this method to override the default.
+  void setVerifyModules(bool Verify) {
+    VerifyModules = Verify;
+  }
+  bool getVerifyModules() const {
+    return VerifyModules;
   }
 
   /// InstallLazyFunctionCreator - If an unknown function is needed, the
@@ -572,19 +586,28 @@ private:
   std::string MCPU;
   SmallVector<std::string, 4> MAttrs;
   bool UseMCJIT;
+  bool VerifyModules;
 
   /// InitEngine - Does the common initialization of default options.
   void InitEngine() {
     WhichEngine = EngineKind::Either;
-    ErrorStr = NULL;
+    ErrorStr = nullptr;
     OptLevel = CodeGenOpt::Default;
-    MCJMM = NULL;
-    JMM = NULL;
+    MCJMM = nullptr;
+    JMM = nullptr;
     Options = TargetOptions();
     AllocateGVsWithCode = false;
     RelocModel = Reloc::Default;
     CMModel = CodeModel::JITDefault;
     UseMCJIT = false;
+
+  // IR module verification is enabled by default in debug builds, and disabled
+  // by default in release builds.
+#ifndef NDEBUG
+  VerifyModules = true;
+#else
+  VerifyModules = false;
+#endif
   }
 
 public:
@@ -610,7 +633,7 @@ public:
   /// the setJITMemoryManager() option.
   EngineBuilder &setMCJITMemoryManager(RTDyldMemoryManager *mcjmm) {
     MCJMM = mcjmm;
-    JMM = NULL;
+    JMM = nullptr;
     return *this;
   }
 
@@ -622,7 +645,7 @@ public:
   /// memory manager.  This option defaults to NULL. This option overrides
   /// setMCJITMemoryManager() as well.
   EngineBuilder &setJITMemoryManager(JITMemoryManager *jmm) {
-    MCJMM = NULL;
+    MCJMM = nullptr;
     JMM = jmm;
     return *this;
   }
@@ -691,6 +714,13 @@ public:
   /// (experimental).
   EngineBuilder &setUseMCJIT(bool Value) {
     UseMCJIT = Value;
+    return *this;
+  }
+
+  /// setVerifyModules - Set whether the JIT implementation should verify
+  /// IR modules during compilation.
+  EngineBuilder &setVerifyModules(bool Verify) {
+    VerifyModules = Verify;
     return *this;
   }
 

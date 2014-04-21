@@ -12,6 +12,8 @@
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/MathExtras.h"
 
 using namespace llvm;
 
@@ -21,6 +23,21 @@ void AMDGPUInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
   printInstruction(MI, OS);
 
   printAnnotation(OS, Annot);
+}
+
+void AMDGPUInstPrinter::printU8ImmOperand(const MCInst *MI, unsigned OpNo,
+                                           raw_ostream &O) {
+  O << formatHex(MI->getOperand(OpNo).getImm() & 0xff);
+}
+
+void AMDGPUInstPrinter::printU16ImmOperand(const MCInst *MI, unsigned OpNo,
+                                           raw_ostream &O) {
+  O << formatHex(MI->getOperand(OpNo).getImm() & 0xffff);
+}
+
+void AMDGPUInstPrinter::printU32ImmOperand(const MCInst *MI, unsigned OpNo,
+                                           raw_ostream &O) {
+  O << formatHex(MI->getOperand(OpNo).getImm() & 0xffffffff);
 }
 
 void AMDGPUInstPrinter::printRegOperand(unsigned reg, raw_ostream &O) {
@@ -41,43 +58,78 @@ void AMDGPUInstPrinter::printRegOperand(unsigned reg, raw_ostream &O) {
     break;
   }
 
-  // It's seems there's no way to use SIRegisterInfo here, and dealing with the
-  // giant enum of all the different shifted sets of registers is pretty
-  // unmanagable, so parse the name and reformat it to be prettier.
-  StringRef Name(getRegisterName(reg));
+  char Type;
+  unsigned NumRegs;
 
-  std::pair<StringRef, StringRef> Split = Name.split('_');
-  StringRef SubRegName = Split.first;
-  StringRef Rest = Split.second;
-
-  if (SubRegName.size() <= 4) { // Must at least be as long as "SGPR"/"VGPR".
-    O << Name;
+  if (MRI.getRegClass(AMDGPU::VGPR_32RegClassID).contains(reg)) {
+    Type = 'v';
+    NumRegs = 1;
+  } else  if (MRI.getRegClass(AMDGPU::SGPR_32RegClassID).contains(reg)) {
+    Type = 's';
+    NumRegs = 1;
+  } else if (MRI.getRegClass(AMDGPU::VReg_64RegClassID).contains(reg)) {
+    Type = 'v';
+    NumRegs = 2;
+  } else  if (MRI.getRegClass(AMDGPU::SReg_64RegClassID).contains(reg)) {
+    Type = 's';
+    NumRegs = 2;
+  } else if (MRI.getRegClass(AMDGPU::VReg_128RegClassID).contains(reg)) {
+    Type = 'v';
+    NumRegs = 4;
+  } else  if (MRI.getRegClass(AMDGPU::SReg_128RegClassID).contains(reg)) {
+    Type = 's';
+    NumRegs = 4;
+  } else if (MRI.getRegClass(AMDGPU::VReg_96RegClassID).contains(reg)) {
+    Type = 'v';
+    NumRegs = 3;
+  } else if (MRI.getRegClass(AMDGPU::VReg_256RegClassID).contains(reg)) {
+    Type = 'v';
+    NumRegs = 8;
+  } else if (MRI.getRegClass(AMDGPU::SReg_256RegClassID).contains(reg)) {
+    Type = 's';
+    NumRegs = 8;
+  } else if (MRI.getRegClass(AMDGPU::VReg_512RegClassID).contains(reg)) {
+    Type = 'v';
+    NumRegs = 16;
+  } else if (MRI.getRegClass(AMDGPU::SReg_512RegClassID).contains(reg)) {
+    Type = 's';
+    NumRegs = 16;
+  } else {
+    O << getRegisterName(reg);
     return;
   }
 
-  unsigned RegIndex;
-  StringRef RegIndexStr = SubRegName.drop_front(4);
-
-  if (RegIndexStr.getAsInteger(10, RegIndex)) {
-    O << Name;
+  // The low 8 bits encoding value is the register index, for both VGPRs and
+  // SGPRs.
+  unsigned RegIdx = MRI.getEncodingValue(reg) & ((1 << 8)  - 1);
+  if (NumRegs == 1) {
+    O << Type << RegIdx;
     return;
   }
 
-  if (SubRegName.front() == 'V')
-    O << 'v';
-  else if (SubRegName.front() == 'S')
-    O << 's';
-  else {
-    O << Name;
+  O << Type << '[' << RegIdx << ':' << (RegIdx + NumRegs - 1) << ']';
+}
+
+void AMDGPUInstPrinter::printImmediate(uint32_t Imm, raw_ostream &O) {
+  int32_t SImm = static_cast<int32_t>(Imm);
+  if (SImm >= -16 && SImm <= 64) {
+    O << SImm;
     return;
   }
 
-  if (Rest.empty()) // Only 1 32-bit register
-    O << RegIndex;
-  else {
-    unsigned NumReg = Rest.count('_') + 2;
-    O << '[' << RegIndex << ':' << (RegIndex + NumReg - 1) << ']';
+  if (Imm == FloatToBits(1.0f) ||
+      Imm == FloatToBits(-1.0f) ||
+      Imm == FloatToBits(0.5f) ||
+      Imm == FloatToBits(-0.5f) ||
+      Imm == FloatToBits(2.0f) ||
+      Imm == FloatToBits(-2.0f) ||
+      Imm == FloatToBits(4.0f) ||
+      Imm == FloatToBits(-4.0f)) {
+    O << BitsToFloat(Imm);
+    return;
   }
+
+  O << formatHex(static_cast<uint64_t>(Imm));
 }
 
 void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
@@ -95,7 +147,7 @@ void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
       break;
     }
   } else if (Op.isImm()) {
-    O << Op.getImm();
+    printImmediate(Op.getImm(), O);
   } else if (Op.isFPImm()) {
     O << Op.getFPImm();
   } else if (Op.isExpr()) {

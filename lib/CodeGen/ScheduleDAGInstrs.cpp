@@ -98,7 +98,7 @@ static const Value *getUnderlyingObjectFromInt(const Value *V) {
 /// and adds support for basic ptrtoint+arithmetic+inttoptr sequences.
 static void getUnderlyingObjects(const Value *V,
                                  SmallVectorImpl<Value *> &Objects) {
-  SmallPtrSet<const Value*, 16> Visited;
+  SmallPtrSet<const Value *, 16> Visited;
   SmallVector<const Value *, 4> Working(1, V);
   do {
     V = Working.pop_back_val();
@@ -124,7 +124,8 @@ static void getUnderlyingObjects(const Value *V,
   } while (!Working.empty());
 }
 
-typedef SmallVector<PointerIntPair<const Value *, 1, bool>, 4>
+typedef PointerUnion<const Value *, const PseudoSourceValue *> ValueType;
+typedef SmallVector<PointerIntPair<ValueType, 1, bool>, 4>
 UnderlyingObjectsVector;
 
 /// getUnderlyingObjectsForInstr - If this machine instr has memory reference
@@ -134,24 +135,26 @@ static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
                                          const MachineFrameInfo *MFI,
                                          UnderlyingObjectsVector &Objects) {
   if (!MI->hasOneMemOperand() ||
-      !(*MI->memoperands_begin())->getValue() ||
+      (!(*MI->memoperands_begin())->getValue() &&
+       !(*MI->memoperands_begin())->getPseudoValue()) ||
       (*MI->memoperands_begin())->isVolatile())
     return;
 
-  const Value *V = (*MI->memoperands_begin())->getValue();
-  if (!V)
-    return;
-
-  if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
+  if (const PseudoSourceValue *PSV =
+      (*MI->memoperands_begin())->getPseudoValue()) {
     // For now, ignore PseudoSourceValues which may alias LLVM IR values
     // because the code that uses this function has no way to cope with
     // such aliases.
     if (!PSV->isAliased(MFI)) {
       bool MayAlias = PSV->mayAlias(MFI);
-      Objects.push_back(UnderlyingObjectsVector::value_type(V, MayAlias));
+      Objects.push_back(UnderlyingObjectsVector::value_type(PSV, MayAlias));
     }
     return;
   }
+
+  const Value *V = (*MI->memoperands_begin())->getValue();
+  if (!V)
+    return;
 
   SmallVector<Value *, 4> Objs;
   getUnderlyingObjects(V, Objs);
@@ -159,8 +162,6 @@ static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
   for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), IE = Objs.end();
          I != IE; ++I) {
     V = *I;
-
-    assert(!isa<PseudoSourceValue>(V) && "Underlying value is a stack slot!");
 
     if (!isIdentifiedObject(V)) {
       Objects.clear();
@@ -477,6 +478,15 @@ static inline bool isUnsafeMemoryObject(MachineInstr *MI,
   if ((*MI->memoperands_begin())->isVolatile() ||
        MI->hasUnmodeledSideEffects())
     return true;
+
+  if ((*MI->memoperands_begin())->getPseudoValue()) {
+    // Similarly to getUnderlyingObjectForInstr:
+    // For now, ignore PseudoSourceValues which may alias LLVM IR values
+    // because the code that uses this function has no way to cope with
+    // such aliases.
+    return true;
+  }
+
   const Value *V = (*MI->memoperands_begin())->getValue();
   if (!V)
     return true;
@@ -485,19 +495,8 @@ static inline bool isUnsafeMemoryObject(MachineInstr *MI,
   getUnderlyingObjects(V, Objs);
   for (SmallVectorImpl<Value *>::iterator I = Objs.begin(),
          IE = Objs.end(); I != IE; ++I) {
-    V = *I;
-
-    if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
-      // Similarly to getUnderlyingObjectForInstr:
-      // For now, ignore PseudoSourceValues which may alias LLVM IR values
-      // because the code that uses this function has no way to cope with
-      // such aliases.
-      if (PSV->isAliased(MFI))
-        return true;
-    }
-
     // Does this pointer refer to a distinct and identifiable object?
-    if (!isIdentifiedObject(V))
+    if (!isIdentifiedObject(*I))
       return true;
   }
 
@@ -534,6 +533,9 @@ static bool MIsNeedChainEdge(AliasAnalysis *AA, const MachineFrameInfo *MFI,
 
   MachineMemOperand *MMOa = *MIa->memoperands_begin();
   MachineMemOperand *MMOb = *MIb->memoperands_begin();
+
+  if (!MMOa->getValue() || !MMOb->getValue())
+    return true;
 
   // The following interface to AA is fashioned after DAGCombiner::isAlias
   // and operates with MachineMemOperand offset with some important
@@ -697,10 +699,14 @@ void ScheduleDAGInstrs::initSUnits() {
     // Assign the Latency field of SU using target-provided information.
     SU->Latency = SchedModel.computeInstrLatency(SU->getInstr());
 
-    // If this SUnit uses an unbuffered resource, mark it as such.
-    // These resources are used for in-order execution pipelines within an
-    // out-of-order core and are identified by BufferSize=1. BufferSize=0 is
-    // used for dispatch/issue groups and is not considered here.
+    // If this SUnit uses a reserved or unbuffered resource, mark it as such.
+    //
+    // Reserved resources block an instruction from issueing and stall the
+    // entire pipeline. These are identified by BufferSize=0.
+    //
+    // Unbuffered resources prevent execution of subsequeny instructions that
+    // require the same resources. This is used for in-order execution pipelines
+    // within an out-of-order core. These are identified by BufferSize=1.
     if (SchedModel.hasInstrSchedModel()) {
       const MCSchedClassDesc *SC = getSchedClass(SU);
       for (TargetSchedModel::ProcResIter
@@ -751,8 +757,8 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   // so that they can be given more precise dependencies. We track
   // separately the known memory locations that may alias and those
   // that are known not to alias
-  MapVector<const Value *, std::vector<SUnit *> > AliasMemDefs, NonAliasMemDefs;
-  MapVector<const Value *, std::vector<SUnit *> > AliasMemUses, NonAliasMemUses;
+  MapVector<ValueType, std::vector<SUnit *> > AliasMemDefs, NonAliasMemDefs;
+  MapVector<ValueType, std::vector<SUnit *> > AliasMemUses, NonAliasMemUses;
   std::set<SUnit*> RejectMemNodes;
 
   // Remove any stale debug info; sometimes BuildSchedGraph is called again
@@ -848,13 +854,13 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
     if (isGlobalMemoryObject(AA, MI)) {
       // Be conservative with these and add dependencies on all memory
       // references, even those that are known to not alias.
-      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
              NonAliasMemDefs.begin(), E = NonAliasMemDefs.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i) {
           I->second[i]->addPred(SDep(SU, SDep::Barrier));
         }
       }
-      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
              NonAliasMemUses.begin(), E = NonAliasMemUses.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i) {
           SDep Dep(SU, SDep::Barrier);
@@ -888,12 +894,12 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
         addChainDependency(AAForDep, MFI, SU, PendingLoads[k], RejectMemNodes,
                            TrueMemOrderLatency);
-      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
            AliasMemDefs.begin(), E = AliasMemDefs.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i)
           addChainDependency(AAForDep, MFI, SU, I->second[i], RejectMemNodes);
       }
-      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
            AliasMemUses.begin(), E = AliasMemUses.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i)
           addChainDependency(AAForDep, MFI, SU, I->second[i], RejectMemNodes,
@@ -916,7 +922,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       bool MayAlias = false;
       for (UnderlyingObjectsVector::iterator K = Objs.begin(), KE = Objs.end();
            K != KE; ++K) {
-        const Value *V = K->getPointer();
+        ValueType V = K->getPointer();
         bool ThisMayAlias = K->getInt();
         if (ThisMayAlias)
           MayAlias = true;
@@ -924,9 +930,9 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         // A store to a specific PseudoSourceValue. Add precise dependencies.
         // Record the def in MemDefs, first adding a dep if there is
         // an existing def.
-        MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator I =
           ((ThisMayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
-        MapVector<const Value *, std::vector<SUnit *> >::iterator IE =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator IE =
           ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
         if (I != IE) {
           for (unsigned i = 0, e = I->second.size(); i != e; ++i)
@@ -949,9 +955,9 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
           }
         }
         // Handle the uses in MemUses, if there are any.
-        MapVector<const Value *, std::vector<SUnit *> >::iterator J =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator J =
           ((ThisMayAlias) ? AliasMemUses.find(V) : NonAliasMemUses.find(V));
-        MapVector<const Value *, std::vector<SUnit *> >::iterator JE =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator JE =
           ((ThisMayAlias) ? AliasMemUses.end() : NonAliasMemUses.end());
         if (J != JE) {
           for (unsigned i = 0, e = J->second.size(); i != e; ++i)
@@ -996,7 +1002,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         if (Objs.empty()) {
           // A load with no underlying object. Depend on all
           // potentially aliasing stores.
-          for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+          for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
                  AliasMemDefs.begin(), E = AliasMemDefs.end(); I != E; ++I)
             for (unsigned i = 0, e = I->second.size(); i != e; ++i)
               addChainDependency(AAForDep, MFI, SU, I->second[i],
@@ -1010,16 +1016,16 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
 
         for (UnderlyingObjectsVector::iterator
              J = Objs.begin(), JE = Objs.end(); J != JE; ++J) {
-          const Value *V = J->getPointer();
+          ValueType V = J->getPointer();
           bool ThisMayAlias = J->getInt();
 
           if (ThisMayAlias)
             MayAlias = true;
 
           // A load from a specific PseudoSourceValue. Add precise dependencies.
-          MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+          MapVector<ValueType, std::vector<SUnit *> >::iterator I =
             ((ThisMayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
-          MapVector<const Value *, std::vector<SUnit *> >::iterator IE =
+          MapVector<ValueType, std::vector<SUnit *> >::iterator IE =
             ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
           if (I != IE)
             for (unsigned i = 0, e = I->second.size(); i != e; ++i)

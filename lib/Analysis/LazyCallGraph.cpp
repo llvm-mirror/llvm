@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/LazyCallGraph.h"
-#include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
@@ -46,7 +46,8 @@ static void findCallees(
   }
 }
 
-LazyCallGraph::Node::Node(LazyCallGraph &G, Function &F) : G(G), F(F) {
+LazyCallGraph::Node::Node(LazyCallGraph &G, Function &F)
+    : G(&G), F(F), DFSNumber(0), LowLink(0) {
   SmallVector<Constant *, 16> Worklist;
   SmallPtrSet<Constant *, 16> Visited;
   // Find all the potential callees in this function. First walk the
@@ -64,29 +65,7 @@ LazyCallGraph::Node::Node(LazyCallGraph &G, Function &F) : G(G), F(F) {
   findCallees(Worklist, Visited, Callees, CalleeSet);
 }
 
-LazyCallGraph::Node::Node(LazyCallGraph &G, const Node &OtherN)
-    : G(G), F(OtherN.F), CalleeSet(OtherN.CalleeSet) {
-  // Loop over the other node's callees, adding the Function*s to our list
-  // directly, and recursing to add the Node*s.
-  Callees.reserve(OtherN.Callees.size());
-  for (const auto &OtherCallee : OtherN.Callees)
-    if (Function *Callee = OtherCallee.dyn_cast<Function *>())
-      Callees.push_back(Callee);
-    else
-      Callees.push_back(G.copyInto(*OtherCallee.get<Node *>()));
-}
-
-LazyCallGraph::Node::Node(LazyCallGraph &G, Node &&OtherN)
-    : G(G), F(OtherN.F), Callees(std::move(OtherN.Callees)),
-      CalleeSet(std::move(OtherN.CalleeSet)) {
-  // Loop over our Callees. They've been moved from another node, but we need
-  // to move the Node*s to live under our bump ptr allocator.
-  for (auto &Callee : Callees)
-    if (Node *ChildN = Callee.dyn_cast<Node *>())
-      Callee = G.moveInto(std::move(*ChildN));
-}
-
-LazyCallGraph::LazyCallGraph(Module &M) : M(M) {
+LazyCallGraph::LazyCallGraph(Module &M) : NextDFSNumber(0) {
   for (Function &F : M)
     if (!F.isDeclaration() && !F.hasLocalLinkage())
       if (EntryNodeSet.insert(&F))
@@ -101,50 +80,140 @@ LazyCallGraph::LazyCallGraph(Module &M) : M(M) {
         Worklist.push_back(GV.getInitializer());
 
   findCallees(Worklist, Visited, EntryNodes, EntryNodeSet);
-}
 
-LazyCallGraph::LazyCallGraph(const LazyCallGraph &G)
-    : M(G.M), EntryNodeSet(G.EntryNodeSet) {
-  EntryNodes.reserve(G.EntryNodes.size());
-  for (const auto &EntryNode : G.EntryNodes)
-    if (Function *Callee = EntryNode.dyn_cast<Function *>())
-      EntryNodes.push_back(Callee);
-    else
-      EntryNodes.push_back(copyInto(*EntryNode.get<Node *>()));
-}
-
-// FIXME: This would be crazy simpler if BumpPtrAllocator were movable without
-// invalidating any of the allocated memory. We should make that be the case at
-// some point and delete this.
-LazyCallGraph::LazyCallGraph(LazyCallGraph &&G)
-    : M(G.M), EntryNodes(std::move(G.EntryNodes)),
-      EntryNodeSet(std::move(G.EntryNodeSet)) {
-  // Loop over our EntryNodes. They've been moved from another graph, so we
-  // need to move the Node*s to live under our bump ptr allocator. We can just
-  // do this in-place.
   for (auto &Entry : EntryNodes)
-    if (Node *EntryN = Entry.dyn_cast<Node *>())
-      Entry = moveInto(std::move(*EntryN));
+    if (Function *F = Entry.dyn_cast<Function *>())
+      SCCEntryNodes.insert(F);
+    else
+      SCCEntryNodes.insert(&Entry.get<Node *>()->getFunction());
+}
+
+LazyCallGraph::LazyCallGraph(LazyCallGraph &&G)
+    : BPA(std::move(G.BPA)), NodeMap(std::move(G.NodeMap)),
+      EntryNodes(std::move(G.EntryNodes)),
+      EntryNodeSet(std::move(G.EntryNodeSet)), SCCBPA(std::move(G.SCCBPA)),
+      SCCMap(std::move(G.SCCMap)), LeafSCCs(std::move(G.LeafSCCs)),
+      DFSStack(std::move(G.DFSStack)),
+      SCCEntryNodes(std::move(G.SCCEntryNodes)),
+      NextDFSNumber(G.NextDFSNumber) {
+  updateGraphPtrs();
+}
+
+LazyCallGraph &LazyCallGraph::operator=(LazyCallGraph &&G) {
+  BPA = std::move(G.BPA);
+  NodeMap = std::move(G.NodeMap);
+  EntryNodes = std::move(G.EntryNodes);
+  EntryNodeSet = std::move(G.EntryNodeSet);
+  SCCBPA = std::move(G.SCCBPA);
+  SCCMap = std::move(G.SCCMap);
+  LeafSCCs = std::move(G.LeafSCCs);
+  DFSStack = std::move(G.DFSStack);
+  SCCEntryNodes = std::move(G.SCCEntryNodes);
+  NextDFSNumber = G.NextDFSNumber;
+  updateGraphPtrs();
+  return *this;
 }
 
 LazyCallGraph::Node *LazyCallGraph::insertInto(Function &F, Node *&MappedN) {
   return new (MappedN = BPA.Allocate()) Node(*this, F);
 }
 
-LazyCallGraph::Node *LazyCallGraph::copyInto(const Node &OtherN) {
-  Node *&N = NodeMap[&OtherN.F];
-  if (N)
-    return N;
+void LazyCallGraph::updateGraphPtrs() {
+  // Process all nodes updating the graph pointers.
+  SmallVector<Node *, 16> Worklist;
+  for (auto &Entry : EntryNodes)
+    if (Node *EntryN = Entry.dyn_cast<Node *>())
+      Worklist.push_back(EntryN);
 
-  return new (N = BPA.Allocate()) Node(*this, OtherN);
+  while (!Worklist.empty()) {
+    Node *N = Worklist.pop_back_val();
+    N->G = this;
+    for (auto &Callee : N->Callees)
+      if (Node *CalleeN = Callee.dyn_cast<Node *>())
+        Worklist.push_back(CalleeN);
+  }
 }
 
-LazyCallGraph::Node *LazyCallGraph::moveInto(Node &&OtherN) {
-  Node *&N = NodeMap[&OtherN.F];
-  if (N)
-    return N;
+LazyCallGraph::SCC *LazyCallGraph::getNextSCCInPostOrder() {
+  // When the stack is empty, there are no more SCCs to walk in this graph.
+  if (DFSStack.empty()) {
+    // If we've handled all candidate entry nodes to the SCC forest, we're done.
+    if (SCCEntryNodes.empty())
+      return nullptr;
 
-  return new (N = BPA.Allocate()) Node(*this, std::move(OtherN));
+    Node *N = get(*SCCEntryNodes.pop_back_val());
+    DFSStack.push_back(std::make_pair(N, N->begin()));
+  }
+
+  Node *N = DFSStack.back().first;
+  if (N->DFSNumber == 0) {
+    // This node hasn't been visited before, assign it a DFS number and remove
+    // it from the entry set.
+    N->LowLink = N->DFSNumber = NextDFSNumber++;
+    SCCEntryNodes.remove(&N->getFunction());
+  }
+
+  for (auto I = DFSStack.back().second, E = N->end(); I != E; ++I) {
+    Node *ChildN = *I;
+    if (ChildN->DFSNumber == 0) {
+      // Mark that we should start at this child when next this node is the
+      // top of the stack. We don't start at the next child to ensure this
+      // child's lowlink is reflected.
+      // FIXME: I don't actually think this is required, and we could start
+      // at the next child.
+      DFSStack.back().second = I;
+
+      // Recurse onto this node via a tail call.
+      DFSStack.push_back(std::make_pair(ChildN, ChildN->begin()));
+      return LazyCallGraph::getNextSCCInPostOrder();
+    }
+
+    // Track the lowest link of the childen, if any are still in the stack.
+    if (ChildN->LowLink < N->LowLink && !SCCMap.count(&ChildN->getFunction()))
+      N->LowLink = ChildN->LowLink;
+  }
+
+  // The tail of the stack is the new SCC. Allocate the SCC and pop the stack
+  // into it.
+  SCC *NewSCC = new (SCCBPA.Allocate()) SCC();
+
+  // Because we don't follow the strict Tarjan recursive formulation, walk
+  // from the top of the stack down, propagating the lowest link and stopping
+  // when the DFS number is the lowest link.
+  int LowestLink = N->LowLink;
+  do {
+    Node *SCCN = DFSStack.pop_back_val().first;
+    SCCMap.insert(std::make_pair(&SCCN->getFunction(), NewSCC));
+    NewSCC->Nodes.push_back(SCCN);
+    LowestLink = std::min(LowestLink, SCCN->LowLink);
+    bool Inserted =
+        NewSCC->NodeSet.insert(&SCCN->getFunction());
+    (void)Inserted;
+    assert(Inserted && "Cannot have duplicates in the DFSStack!");
+  } while (!DFSStack.empty() && LowestLink <= DFSStack.back().first->DFSNumber);
+  assert(LowestLink == NewSCC->Nodes.back()->DFSNumber &&
+         "Cannot stop with a DFS number greater than the lowest link!");
+
+  // A final pass over all edges in the SCC (this remains linear as we only
+  // do this once when we build the SCC) to connect it to the parent sets of
+  // its children.
+  bool IsLeafSCC = true;
+  for (Node *SCCN : NewSCC->Nodes)
+    for (Node *SCCChildN : *SCCN) {
+      if (NewSCC->NodeSet.count(&SCCChildN->getFunction()))
+        continue;
+      SCC *ChildSCC = SCCMap.lookup(&SCCChildN->getFunction());
+      assert(ChildSCC &&
+             "Must have all child SCCs processed when building a new SCC!");
+      ChildSCC->ParentSCCs.insert(NewSCC);
+      IsLeafSCC = false;
+    }
+
+  // For the SCCs where we fine no child SCCs, add them to the leaf list.
+  if (IsLeafSCC)
+    LeafSCCs.push_back(NewSCC);
+
+  return NewSCC;
 }
 
 char LazyCallGraphAnalysis::PassID;
@@ -165,6 +234,16 @@ static void printNodes(raw_ostream &OS, LazyCallGraph::Node &N,
   OS << "\n";
 }
 
+static void printSCC(raw_ostream &OS, LazyCallGraph::SCC &SCC) {
+  ptrdiff_t SCCSize = std::distance(SCC.begin(), SCC.end());
+  OS << "  SCC with " << SCCSize << " functions:\n";
+
+  for (LazyCallGraph::Node *N : SCC)
+    OS << "    " << N->getFunction().getName() << "\n";
+
+  OS << "\n";
+}
+
 PreservedAnalyses LazyCallGraphPrinterPass::run(Module *M,
                                                 ModuleAnalysisManager *AM) {
   LazyCallGraph &G = AM->getResult<LazyCallGraphAnalysis>(M);
@@ -177,5 +256,9 @@ PreservedAnalyses LazyCallGraphPrinterPass::run(Module *M,
     if (Printed.insert(N))
       printNodes(OS, *N, Printed);
 
+  for (LazyCallGraph::SCC *SCC : G.postorder_sccs())
+    printSCC(OS, *SCC);
+
   return PreservedAnalyses::all();
+
 }

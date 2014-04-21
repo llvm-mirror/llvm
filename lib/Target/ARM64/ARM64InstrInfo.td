@@ -173,6 +173,7 @@ def ARM64urshri : SDNode<"ARM64ISD::URSHR_I", SDT_ARM64vshift>;
 
 def ARM64not: SDNode<"ARM64ISD::NOT", SDT_ARM64unvec>;
 def ARM64bit: SDNode<"ARM64ISD::BIT", SDT_ARM64trivec>;
+def ARM64bsl: SDNode<"ARM64ISD::BSL", SDT_ARM64trivec>;
 
 def ARM64cmeq: SDNode<"ARM64ISD::CMEQ", SDT_ARM64binvec>;
 def ARM64cmge: SDNode<"ARM64ISD::CMGE", SDT_ARM64binvec>;
@@ -395,6 +396,22 @@ def MOVi64imm
       Sched<[WriteImm]>;
 } // isReMaterializable, isCodeGenOnly
 
+// If possible, we want to use MOVi32imm even for 64-bit moves. This gives the
+// eventual expansion code fewer bits to worry about getting right. Marshalling
+// the types is a little tricky though:
+def i64imm_32bit : ImmLeaf<i64, [{
+  return (Imm & 0xffffffffULL) == static_cast<uint64_t>(Imm);
+}]>;
+
+def trunc_imm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getZExtValue(), MVT::i32);
+}]>;
+
+def : Pat<(i64 i64imm_32bit:$src),
+          (SUBREG_TO_REG (i64 0), (MOVi32imm (trunc_imm imm:$src)), sub_32)>;
+
+// Deal with the various forms of (ELF) large addressing with MOVZ/MOVK
+// sequences.
 def : Pat<(ARM64WrapperLarge tglobaladdr:$g3, tglobaladdr:$g2,
                              tglobaladdr:$g1, tglobaladdr:$g0),
           (MOVKXi (MOVKXi (MOVKXi (MOVZXi tglobaladdr:$g3, 48),
@@ -415,6 +432,13 @@ def : Pat<(ARM64WrapperLarge tconstpool:$g3, tconstpool:$g2,
                                   tconstpool:$g2, 32),
                           tconstpool:$g1, 16),
                   tconstpool:$g0, 0)>;
+
+def : Pat<(ARM64WrapperLarge tjumptable:$g3, tjumptable:$g2,
+                             tjumptable:$g1, tjumptable:$g0),
+          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tjumptable:$g3, 48),
+                                  tjumptable:$g2, 32),
+                          tjumptable:$g1, 16),
+                  tjumptable:$g0, 0)>;
 
 
 //===----------------------------------------------------------------------===//
@@ -645,8 +669,7 @@ defm CLZ    : OneOperandData<0b100, "clz", ctlz>;
 defm RBIT   : OneOperandData<0b000, "rbit">;
 def  REV16Wr : OneWRegData<0b001, "rev16",
                                   UnOpFrag<(rotr (bswap node:$LHS), (i64 16))>>;
-def  REV16Xr : OneXRegData<0b001, "rev16",
-                                  UnOpFrag<(rotr (bswap node:$LHS), (i64 16))>>;
+def  REV16Xr : OneXRegData<0b001, "rev16", null_frag>;
 
 def : Pat<(cttz GPR32:$Rn),
           (CLZWr (RBITWr GPR32:$Rn))>;
@@ -666,6 +689,11 @@ def REVWr   : OneWRegData<0b010, "rev", bswap>;
 def REVXr   : OneXRegData<0b011, "rev", bswap>;
 def REV32Xr : OneXRegData<0b010, "rev32",
                                  UnOpFrag<(rotr (bswap node:$LHS), (i64 32))>>;
+
+// The bswap commutes with the rotr so we want a pattern for both possible
+// orders.
+def : Pat<(bswap (rotr GPR32:$Rn, (i64 16))), (REV16Wr GPR32:$Rn)>;
+def : Pat<(bswap (rotr GPR64:$Rn, (i64 32))), (REV32Xr GPR64:$Rn)>;
 
 //===----------------------------------------------------------------------===//
 // Bitfield immediate extraction instruction.
@@ -1018,7 +1046,7 @@ def LDRXro  : Load64RO<0b11,   0, 0b01, GPR64, "ldr",
 def LDRBro : Load8RO<0b00,   1, 0b01, FPR8,   "ldr",
                       [(set FPR8:$Rt, (load ro_indexed8:$addr))]>;
 def LDRHro : Load16RO<0b01,  1, 0b01, FPR16,  "ldr",
-                      [(set FPR16:$Rt, (load ro_indexed16:$addr))]>;
+                      [(set (f16 FPR16:$Rt), (load ro_indexed16:$addr))]>;
 def LDRSro : Load32RO<0b10,    1, 0b01, FPR32,  "ldr",
                       [(set (f32 FPR32:$Rt), (load ro_indexed32:$addr))]>;
 def LDRDro : Load64RO<0b11,    1, 0b01, FPR64,  "ldr",
@@ -1097,6 +1125,8 @@ def : Pat<(i64 (zextloadi8 ro_indexed8:$addr)),
     (SUBREG_TO_REG (i64 0), (LDRBBro ro_indexed8:$addr), sub_32)>;
 def : Pat<(i64 (zextloadi16 ro_indexed16:$addr)),
     (SUBREG_TO_REG (i64 0), (LDRHHro ro_indexed16:$addr), sub_32)>;
+def : Pat<(i64 (zextloadi32 ro_indexed32:$addr)),
+    (SUBREG_TO_REG (i64 0), (LDRWro ro_indexed32:$addr), sub_32)>;
 
 // zextloadi1 -> zextloadi8
 def : Pat<(i32 (zextloadi1 ro_indexed8:$addr)), (LDRBBro ro_indexed8:$addr)>;
@@ -1128,7 +1158,7 @@ def LDRWui : LoadUI<0b10, 0, 0b01, GPR32, am_indexed32, "ldr",
 def LDRBui : LoadUI<0b00, 1, 0b01, FPR8, am_indexed8, "ldr",
                     [(set FPR8:$Rt, (load am_indexed8:$addr))]>;
 def LDRHui : LoadUI<0b01, 1, 0b01, FPR16, am_indexed16, "ldr",
-                    [(set FPR16:$Rt, (load am_indexed16:$addr))]>;
+                    [(set (f16 FPR16:$Rt), (load am_indexed16:$addr))]>;
 def LDRSui : LoadUI<0b10, 1, 0b01, FPR32, am_indexed32, "ldr",
                     [(set (f32 FPR32:$Rt), (load am_indexed32:$addr))]>;
 def LDRDui : LoadUI<0b11, 1, 0b01, FPR64, am_indexed64, "ldr",
@@ -1257,7 +1287,7 @@ def LDURWi : LoadUnscaled<0b10, 0, 0b01, GPR32, am_unscaled32, "ldur",
 def LDURBi : LoadUnscaled<0b00, 1, 0b01, FPR8,  am_unscaled8, "ldur",
                           [(set FPR8:$Rt, (load am_unscaled8:$addr))]>;
 def LDURHi : LoadUnscaled<0b01, 1, 0b01, FPR16, am_unscaled16, "ldur",
-                          [(set FPR16:$Rt, (load am_unscaled16:$addr))]>;
+                          [(set (f16 FPR16:$Rt), (load am_unscaled16:$addr))]>;
 def LDURSi : LoadUnscaled<0b10, 1, 0b01, FPR32, am_unscaled32, "ldur",
                           [(set (f32 FPR32:$Rt), (load am_unscaled32:$addr))]>;
 def LDURDi : LoadUnscaled<0b11, 1, 0b01, FPR64, am_unscaled64, "ldur",
@@ -1571,7 +1601,7 @@ def : Pat<(truncstorei32 GPR64:$Rt, ro_indexed32:$addr),
 def STRBro : Store8RO<0b00,  1, 0b00, FPR8,  "str",
                             [(store FPR8:$Rt, ro_indexed8:$addr)]>;
 def STRHro : Store16RO<0b01, 1, 0b00, FPR16, "str",
-                            [(store FPR16:$Rt, ro_indexed16:$addr)]>;
+                            [(store (f16 FPR16:$Rt), ro_indexed16:$addr)]>;
 def STRSro : Store32RO<0b10,   1, 0b00, FPR32, "str",
                             [(store (f32 FPR32:$Rt), ro_indexed32:$addr)]>;
 def STRDro : Store64RO<0b11,   1, 0b00, FPR64, "str",
@@ -1619,7 +1649,7 @@ def STRWui : StoreUI<0b10, 0, 0b00, GPR32, am_indexed32, "str",
 def STRBui : StoreUI<0b00, 1, 0b00, FPR8, am_indexed8, "str",
                      [(store FPR8:$Rt, am_indexed8:$addr)]>;
 def STRHui : StoreUI<0b01, 1, 0b00, FPR16, am_indexed16, "str",
-                     [(store FPR16:$Rt, am_indexed16:$addr)]>;
+                     [(store (f16 FPR16:$Rt), am_indexed16:$addr)]>;
 def STRSui : StoreUI<0b10, 1, 0b00, FPR32, am_indexed32, "str",
                      [(store (f32 FPR32:$Rt), am_indexed32:$addr)]>;
 def STRDui : StoreUI<0b11, 1, 0b00, FPR64, am_indexed64, "str",
@@ -1682,7 +1712,7 @@ def STURWi : StoreUnscaled<0b10, 0, 0b00, GPR32, am_unscaled32, "stur",
 def STURBi : StoreUnscaled<0b00, 1, 0b00, FPR8,  am_unscaled8, "stur",
                            [(store FPR8:$Rt, am_unscaled8:$addr)]>;
 def STURHi : StoreUnscaled<0b01, 1, 0b00, FPR16, am_unscaled16, "stur",
-                           [(store FPR16:$Rt, am_unscaled16:$addr)]>;
+                           [(store (f16 FPR16:$Rt), am_unscaled16:$addr)]>;
 def STURSi : StoreUnscaled<0b10, 1, 0b00, FPR32, am_unscaled32, "stur",
                            [(store (f32 FPR32:$Rt), am_unscaled32:$addr)]>;
 def STURDi : StoreUnscaled<0b11, 1, 0b00, FPR64, am_unscaled64, "stur",
@@ -2029,6 +2059,20 @@ def : Pat<(f32 (fma (fneg FPR32:$Rn), FPR32:$Rm, FPR32:$Ra)),
 def : Pat<(f64 (fma (fneg FPR64:$Rn), FPR64:$Rm, FPR64:$Ra)),
           (FMSUBDrrr FPR64:$Rn, FPR64:$Rm, FPR64:$Ra)>;
 
+// We handled -(a + b*c) for FNMADD above, now it's time for "(-a) + (-b)*c" and
+// "(-a) + b*(-c)".
+def : Pat<(f32 (fma (fneg FPR32:$Rn), FPR32:$Rm, (fneg FPR32:$Ra))),
+          (FNMADDSrrr FPR32:$Rn, FPR32:$Rm, FPR32:$Ra)>;
+
+def : Pat<(f64 (fma (fneg FPR64:$Rn), FPR64:$Rm, (fneg FPR64:$Ra))),
+          (FNMADDDrrr FPR64:$Rn, FPR64:$Rm, FPR64:$Ra)>;
+
+def : Pat<(f32 (fma FPR32:$Rn, (fneg FPR32:$Rm), (fneg FPR32:$Ra))),
+          (FNMADDSrrr FPR32:$Rn, FPR32:$Rm, FPR32:$Ra)>;
+
+def : Pat<(f64 (fma FPR64:$Rn, (fneg FPR64:$Rm), (fneg FPR64:$Ra))),
+          (FNMADDDrrr FPR64:$Rn, FPR64:$Rm, FPR64:$Ra)>;
+
 //===----------------------------------------------------------------------===//
 // Floating point comparison instructions.
 //===----------------------------------------------------------------------===//
@@ -2328,6 +2372,24 @@ defm ORN : SIMDLogicalThreeVector<0, 0b11, "orn",
                                   BinOpFrag<(or node:$LHS, (vnot node:$RHS))> >;
 defm ORR : SIMDLogicalThreeVector<0, 0b10, "orr", or>;
 
+def : Pat<(ARM64bsl (v8i8 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+def : Pat<(ARM64bsl (v4i16 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+def : Pat<(ARM64bsl (v2i32 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+def : Pat<(ARM64bsl (v1i64 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+
+def : Pat<(ARM64bsl (v16i8 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+def : Pat<(ARM64bsl (v8i16 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+def : Pat<(ARM64bsl (v4i32 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+def : Pat<(ARM64bsl (v2i64 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+
 // FIXME: the .16b and .8b variantes should be emitted by the
 // AsmWriter. TableGen's AsmWriter-generator doesn't deal with variant syntaxes
 // in aliases yet though.
@@ -2601,6 +2663,8 @@ defm UCVTF  : SIMDTwoScalarCVTSD<   1, 0, 0b11101, "ucvtf", ARM64uitof>;
 defm UQXTN  : SIMDTwoScalarMixedBHS<1, 0b10100, "uqxtn", int_arm64_neon_scalar_uqxtn>;
 defm USQADD : SIMDTwoScalarBHSDTied< 1, 0b00011, "usqadd",
                                     int_arm64_neon_usqadd>;
+
+def : Pat<(ARM64neg (v1i64 V64:$Rn)), (NEGv1i64 V64:$Rn)>;
 
 def : Pat<(v1i64 (int_arm64_neon_fcvtas (v1f64 FPR64:$Rn))),
           (FCVTASv1i64 FPR64:$Rn)>;
@@ -2964,6 +3028,59 @@ def : Pat<(v4f32 (ARM64duplane32 (v4f32 V128:$Rn), VectorIndexS:$imm)),
 def : Pat<(v2f64 (ARM64duplane64 (v2f64 V128:$Rn), VectorIndexD:$imm)),
           (DUPv2i64lane V128:$Rn, VectorIndexD:$imm)>;
 
+// If there's an (ARM64dup (vector_extract ...) ...), we can use a duplane
+// instruction even if the types don't match: we just have to remap the lane
+// carefully. N.b. this trick only applies to truncations.
+def VecIndex_x2 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(2 * N->getZExtValue(), MVT::i64);
+}]>;
+def VecIndex_x4 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(4 * N->getZExtValue(), MVT::i64);
+}]>;
+def VecIndex_x8 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(8 * N->getZExtValue(), MVT::i64);
+}]>;
+
+multiclass DUPWithTruncPats<ValueType ResVT, ValueType Src64VT,
+                            ValueType Src128VT, ValueType ScalVT,
+                            Instruction DUP, SDNodeXForm IdxXFORM> {
+  def : Pat<(ResVT (ARM64dup (ScalVT (vector_extract (Src128VT V128:$Rn),
+                                                     imm:$idx)))),
+            (DUP V128:$Rn, (IdxXFORM imm:$idx))>;
+
+  def : Pat<(ResVT (ARM64dup (ScalVT (vector_extract (Src64VT V64:$Rn),
+                                                     imm:$idx)))),
+            (DUP (SUBREG_TO_REG (i64 0), V64:$Rn, dsub), (IdxXFORM imm:$idx))>;
+}
+
+defm : DUPWithTruncPats<v8i8,   v4i16, v8i16, i32, DUPv8i8lane,  VecIndex_x2>;
+defm : DUPWithTruncPats<v8i8,   v2i32, v4i32, i32, DUPv8i8lane,  VecIndex_x4>;
+defm : DUPWithTruncPats<v4i16,  v2i32, v4i32, i32, DUPv4i16lane, VecIndex_x2>;
+
+defm : DUPWithTruncPats<v16i8,  v4i16, v8i16, i32, DUPv16i8lane, VecIndex_x2>;
+defm : DUPWithTruncPats<v16i8,  v2i32, v4i32, i32, DUPv16i8lane, VecIndex_x4>;
+defm : DUPWithTruncPats<v8i16,  v2i32, v4i32, i32, DUPv8i16lane, VecIndex_x2>;
+
+multiclass DUPWithTrunci64Pats<ValueType ResVT, Instruction DUP,
+                               SDNodeXForm IdxXFORM> {
+  def : Pat<(ResVT (ARM64dup (i32 (trunc (vector_extract (v2i64 V128:$Rn),
+                                                         imm:$idx))))),
+            (DUP V128:$Rn, (IdxXFORM imm:$idx))>;
+
+  def : Pat<(ResVT (ARM64dup (i32 (trunc (vector_extract (v1i64 V64:$Rn),
+                                                         imm:$idx))))),
+            (DUP (SUBREG_TO_REG (i64 0), V64:$Rn, dsub), (IdxXFORM imm:$idx))>;
+}
+
+defm : DUPWithTrunci64Pats<v8i8,  DUPv8i8lane,   VecIndex_x8>;
+defm : DUPWithTrunci64Pats<v4i16, DUPv4i16lane,  VecIndex_x4>;
+defm : DUPWithTrunci64Pats<v2i32, DUPv2i32lane,  VecIndex_x2>;
+
+defm : DUPWithTrunci64Pats<v16i8, DUPv16i8lane, VecIndex_x8>;
+defm : DUPWithTrunci64Pats<v8i16, DUPv8i16lane, VecIndex_x4>;
+defm : DUPWithTrunci64Pats<v4i32, DUPv4i32lane, VecIndex_x2>;
+
+// SMOV and UMOV definitions, with some extra patterns for convenience
 defm SMOV : SMov;
 defm UMOV : UMov;
 
@@ -3074,6 +3191,43 @@ def : Pat<(v2i64 (int_arm64_neon_vcopy_lane
           (v2i64 (INSvi64lane
                    V128:$Vd, VectorIndexD:$idx, V128:$Vs, VectorIndexD:$idx2)
           )>;
+
+multiclass Neon_INS_elt_pattern<ValueType VT128, ValueType VT64,
+                                ValueType VTScal, Instruction INS> {
+  def : Pat<(VT128 (vector_insert V128:$src,
+                        (VTScal (vector_extract (VT128 V128:$Rn), imm:$Immn)),
+                        imm:$Immd)),
+            (INS V128:$src, imm:$Immd, V128:$Rn, imm:$Immn)>;
+
+  def : Pat<(VT128 (vector_insert V128:$src,
+                        (VTScal (vector_extract (VT64 V64:$Rn), imm:$Immn)),
+                        imm:$Immd)),
+            (INS V128:$src, imm:$Immd,
+                 (SUBREG_TO_REG (i64 0), V64:$Rn, dsub), imm:$Immn)>;
+
+  def : Pat<(VT64 (vector_insert V64:$src,
+                        (VTScal (vector_extract (VT128 V128:$Rn), imm:$Immn)),
+                        imm:$Immd)),
+            (EXTRACT_SUBREG (INS (SUBREG_TO_REG (i64 0), V64:$src, dsub),
+                                 imm:$Immd, V128:$Rn, imm:$Immn),
+                            dsub)>;
+
+  def : Pat<(VT64 (vector_insert V64:$src,
+                        (VTScal (vector_extract (VT64 V64:$Rn), imm:$Immn)),
+                        imm:$Immd)),
+            (EXTRACT_SUBREG
+                (INS (SUBREG_TO_REG (i64 0), V64:$src, dsub), imm:$Immd,
+                     (SUBREG_TO_REG (i64 0), V64:$Rn, dsub), imm:$Immn),
+                dsub)>;
+}
+
+defm : Neon_INS_elt_pattern<v4f32, v2f32, f32, INSvi32lane>;
+defm : Neon_INS_elt_pattern<v2f64, v1f64, f64, INSvi64lane>;
+defm : Neon_INS_elt_pattern<v16i8, v8i8,  i32, INSvi8lane>;
+defm : Neon_INS_elt_pattern<v8i16, v4i16, i32, INSvi16lane>;
+defm : Neon_INS_elt_pattern<v4i32, v2i32, i32, INSvi32lane>;
+defm : Neon_INS_elt_pattern<v2i64, v1i64, i64, INSvi32lane>;
+
 
 // Floating point vector extractions are codegen'd as either a sequence of
 // subregister extractions, possibly fed by an INS if the lane number is
@@ -3428,6 +3582,9 @@ def : Pat<(v2i64 immAllOnesV), (MOVIv2d_ns (i32 255))>;
 def : Pat<(v4i32 immAllOnesV), (MOVIv2d_ns (i32 255))>;
 def : Pat<(v8i16 immAllOnesV), (MOVIv2d_ns (i32 255))>;
 def : Pat<(v16i8 immAllOnesV), (MOVIv2d_ns (i32 255))>;
+
+def : Pat<(v2f64 (ARM64dup (f64 fpimm0))), (MOVIv2d_ns (i32 0))>;
+def : Pat<(v4f32 (ARM64dup (f32 fpimm0))), (MOVIv2d_ns (i32 0))>;
 
 // EDIT per word & halfword: 2s, 4h, 4s, & 8h
 defm MOVI      : SIMDModifiedImmVectorShift<0, 0b10, 0b00, "movi">;

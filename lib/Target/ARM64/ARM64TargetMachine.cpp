@@ -39,6 +39,14 @@ EnableCollectLOH("arm64-collect-loh", cl::Hidden,
                           " optimization hints (LOH)"),
                  cl::init(true));
 
+static cl::opt<bool>
+EnableDeadRegisterElimination("arm64-dead-def-elimination", cl::Hidden,
+                              cl::desc("Enable the pass that removes dead"
+                                       " definitons and replaces stores to"
+                                       " them with stores to the zero"
+                                       " register"),
+                              cl::init(true));
+
 extern "C" void LLVMInitializeARM64Target() {
   // Register the target.
   RegisterTargetMachine<ARM64TargetMachine> X(TheARM64Target);
@@ -103,6 +111,11 @@ bool ARM64PassConfig::addPreISel() {
     addPass(createGlobalMergePass(TM));
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createARM64AddressTypePromotionPass());
+
+  // Always expand atomic operations, we don't deal with atomicrmw or cmpxchg
+  // ourselves.
+  addPass(createAtomicExpandLoadLinkedPass(TM));
+
   return false;
 }
 
@@ -135,7 +148,8 @@ bool ARM64PassConfig::addPreRegAlloc() {
 
 bool ARM64PassConfig::addPostRegAlloc() {
   // Change dead register definitions to refer to the zero register.
-  addPass(createARM64DeadRegisterDefinitions());
+  if (EnableDeadRegisterElimination)
+    addPass(createARM64DeadRegisterDefinitions());
   return true;
 }
 
@@ -151,7 +165,8 @@ bool ARM64PassConfig::addPreEmitPass() {
   // Relax conditional branch instructions if they're otherwise out of
   // range of their destination.
   addPass(createARM64BranchRelaxation());
-  if (TM->getOptLevel() != CodeGenOpt::None && EnableCollectLOH)
+  if (TM->getOptLevel() != CodeGenOpt::None && EnableCollectLOH &&
+      TM->getSubtarget<ARM64Subtarget>().isTargetMachO())
     addPass(createARM64CollectLOHPass());
   return true;
 }

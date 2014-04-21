@@ -57,7 +57,7 @@ define void @test_extension(i1 %bool, i8 %char, i16 %short, i32 %int) {
 
   %ext_char = sext i8 %char to i64
   store volatile i64 %ext_char, i64* @var64
-; CHECK: sxtb [[EXT:x[0-9]+]], x1
+; CHECK: sxtb [[EXT:x[0-9]+]], w1
 ; CHECK: str [[EXT]], [{{x[0-9]+}}, :lo12:var64]
 
   %ext_short = zext i16 %short to i64
@@ -67,7 +67,7 @@ define void @test_extension(i1 %bool, i8 %char, i16 %short, i32 %int) {
 
   %ext_int = zext i32 %int to i64
   store volatile i64 %ext_int, i64* @var64
-; CHECK: uxtw [[EXT:x[0-9]+]], x3
+; CHECK: uxtw [[EXT:x[0-9]+]], w3
 ; CHECK: str [[EXT]], [{{x[0-9]+}}, :lo12:var64]
 
   ret void
@@ -80,7 +80,17 @@ declare void @variadic(i32 %a, ...)
 define void @test_variadic() {
   call void(i32, ...)* @variadic(i32 0, i64 1, double 2.0)
 ; CHECK: fmov d0, #2.0
-; CHECK: orr x1, xzr, #0x1
+; CHECK: orr w1, wzr, #0x1
 ; CHECK: bl variadic
   ret void
+}
+
+; We weren't marking x7 as used after deciding that the i128 didn't fit into
+; registers and putting the first half on the stack, so the *second* half went
+; into x7. Yuck!
+define i128 @test_i128_shadow([7 x i64] %x0_x6, i128 %sp) {
+; CHECK-LABEL: test_i128_shadow:
+; CHECK: ldp x0, x1, [sp]
+
+  ret i128 %sp
 }

@@ -43,6 +43,10 @@ static MCInstrInfo *createARM64MCInstrInfo() {
 static MCSubtargetInfo *createARM64MCSubtargetInfo(StringRef TT, StringRef CPU,
                                                    StringRef FS) {
   MCSubtargetInfo *X = new MCSubtargetInfo();
+
+  if (CPU.empty())
+    CPU = "generic";
+
   InitARM64MCSubtargetInfo(X, TT, CPU, FS);
   return X;
 }

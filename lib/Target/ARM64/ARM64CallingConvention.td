@@ -26,6 +26,10 @@ def CC_ARM64_AAPCS : CallingConv<[
   // An SRet is passed in X8, not X0 like a normal pointer parameter.
   CCIfSRet<CCIfType<[i64], CCAssignToRegWithShadow<[X8], [W8]>>>,
 
+  // Put ByVal arguments directly on the stack. Minimum size and alignment of a
+  // slot is 64-bit.
+  CCIfByVal<CCPassByVal<8, 8>>,
+
   // Handle i1, i8, i16, i32, i64, f32, f64 and v2f64 by passing in registers,
   // up to eight each of GPR and FPR.
   CCIfType<[i1, i8, i16], CCCustom<"CC_ARM64_Custom_i1i8i16_Reg">>,
@@ -36,7 +40,7 @@ def CC_ARM64_AAPCS : CallingConv<[
                                                     [X0, X1, X3, X5]>>>,
 
   // i128 is split to two i64s, and its stack alignment is 16 bytes.
-  CCIfType<[i64], CCIfSplit<CCAssignToStack<8, 16>>>,
+  CCIfType<[i64], CCIfSplit<CCAssignToStackWithShadow<8, 16, [X7]>>>,
 
   CCIfType<[i64], CCAssignToRegWithShadow<[X0, X1, X2, X3, X4, X5, X6, X7],
                                           [W0, W1, W2, W3, W4, W5, W6, W7]>>,
@@ -88,6 +92,10 @@ def CC_ARM64_DarwinPCS : CallingConv<[
 
   // An SRet is passed in X8, not X0 like a normal pointer parameter.
   CCIfSRet<CCIfType<[i64], CCAssignToRegWithShadow<[X8], [W8]>>>,
+
+  // Put ByVal arguments directly on the stack. Minimum size and alignment of a
+  // slot is 64-bit.
+  CCIfByVal<CCPassByVal<8, 8>>,
 
   // Handle i1, i8, i16, i32, i64, f32, f64 and v2f64 by passing in registers,
   // up to eight each of GPR and FPR.

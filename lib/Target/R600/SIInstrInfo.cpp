@@ -537,6 +537,10 @@ unsigned SIInstrInfo::getVALUOp(const MachineInstr &MI) {
   case AMDGPU::S_LSHL_B64: return AMDGPU::V_LSHL_B64;
   case AMDGPU::S_LSHR_B32: return AMDGPU::V_LSHR_B32_e32;
   case AMDGPU::S_LSHR_B64: return AMDGPU::V_LSHR_B64;
+  case AMDGPU::S_SEXT_I32_I8: return AMDGPU::V_BFE_I32;
+  case AMDGPU::S_SEXT_I32_I16: return AMDGPU::V_BFE_I32;
+  case AMDGPU::S_BFE_U32: return AMDGPU::V_BFE_U32;
+  case AMDGPU::S_BFE_I32: return AMDGPU::V_BFE_I32;
   case AMDGPU::S_NOT_B32: return AMDGPU::V_NOT_B32_e32;
   case AMDGPU::S_CMP_EQ_I32: return AMDGPU::V_CMP_EQ_I32_e32;
   case AMDGPU::S_CMP_LG_I32: return AMDGPU::V_CMP_NE_I32_e32;
@@ -567,6 +571,7 @@ bool SIInstrInfo::canReadVGPR(const MachineInstr &MI, unsigned OpNo) const {
   switch (MI.getOpcode()) {
   case AMDGPU::COPY:
   case AMDGPU::REG_SEQUENCE:
+  case AMDGPU::PHI:
     return RI.hasVGPRs(getOpRegClass(MI, 0));
   default:
     return RI.hasVGPRs(getOpRegClass(MI, OpNo));
@@ -745,10 +750,11 @@ void SIInstrInfo::legalizeOperands(MachineInstr *MI) const {
     }
   }
 
-  // Legalize REG_SEQUENCE
+  // Legalize REG_SEQUENCE and PHI
   // The register class of the operands much be the same type as the register
   // class of the output.
-  if (MI->getOpcode() == AMDGPU::REG_SEQUENCE) {
+  if (MI->getOpcode() == AMDGPU::REG_SEQUENCE ||
+      MI->getOpcode() == AMDGPU::PHI) {
     const TargetRegisterClass *RC = NULL, *SRC = NULL, *VRC = NULL;
     for (unsigned i = 1, e = MI->getNumOperands(); i != e; i+=2) {
       if (!MI->getOperand(i).isReg() ||
@@ -782,7 +788,17 @@ void SIInstrInfo::legalizeOperands(MachineInstr *MI) const {
           !TargetRegisterInfo::isVirtualRegister(MI->getOperand(i).getReg()))
         continue;
       unsigned DstReg = MRI.createVirtualRegister(RC);
-      BuildMI(*MI->getParent(), MI, MI->getDebugLoc(),
+      MachineBasicBlock *InsertBB;
+      MachineBasicBlock::iterator Insert;
+      if (MI->getOpcode() == AMDGPU::REG_SEQUENCE) {
+        InsertBB = MI->getParent();
+        Insert = MI;
+      } else {
+        // MI is a PHI instruction.
+        InsertBB = MI->getOperand(i + 1).getMBB();
+        Insert = InsertBB->getFirstTerminator();
+      }
+      BuildMI(*InsertBB, Insert, MI->getDebugLoc(),
               get(AMDGPU::COPY), DstReg)
               .addOperand(MI->getOperand(i));
       MI->getOperand(i).setReg(DstReg);
@@ -903,8 +919,10 @@ void SIInstrInfo::moveToVALU(MachineInstr &TopInst) const {
     MachineBasicBlock *MBB = Inst->getParent();
     MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
 
+    unsigned Opcode = Inst->getOpcode();
+
     // Handle some special cases
-    switch(Inst->getOpcode()) {
+    switch (Opcode) {
     case AMDGPU::S_MOV_B64: {
       DebugLoc DL = Inst->getDebugLoc();
 
@@ -976,27 +994,49 @@ void SIInstrInfo::moveToVALU(MachineInstr &TopInst) const {
         Inst->RemoveOperand(i);
     }
 
-    // Add the implict and explicit register definitions.
-    if (NewDesc.ImplicitUses) {
-      for (unsigned i = 0; NewDesc.ImplicitUses[i]; ++i) {
-        unsigned Reg = NewDesc.ImplicitUses[i];
-        Inst->addOperand(MachineOperand::CreateReg(Reg, false, true));
-      }
+    if (Opcode == AMDGPU::S_SEXT_I32_I8 || Opcode == AMDGPU::S_SEXT_I32_I16) {
+      // We are converting these to a BFE, so we need to add the missing
+      // operands for the size and offset.
+      unsigned Size = (Opcode == AMDGPU::S_SEXT_I32_I8) ? 8 : 16;
+      Inst->addOperand(MachineOperand::CreateImm(0));
+      Inst->addOperand(MachineOperand::CreateImm(Size));
+
+      // XXX - Other pointless operands. There are 4, but it seems you only need
+      // 3 to not hit an assertion later in MCInstLower.
+      Inst->addOperand(MachineOperand::CreateImm(0));
+      Inst->addOperand(MachineOperand::CreateImm(0));
+      Inst->addOperand(MachineOperand::CreateImm(0));
+      Inst->addOperand(MachineOperand::CreateImm(0));
     }
 
-    if (NewDesc.ImplicitDefs) {
-      for (unsigned i = 0; NewDesc.ImplicitDefs[i]; ++i) {
-        unsigned Reg = NewDesc.ImplicitDefs[i];
-        Inst->addOperand(MachineOperand::CreateReg(Reg, true, true));
-      }
-    }
+    addDescImplicitUseDef(NewDesc, Inst);
 
-    legalizeOperands(Inst);
+    if (Opcode == AMDGPU::S_BFE_I32 || Opcode == AMDGPU::S_BFE_U32) {
+      const MachineOperand &OffsetWidthOp = Inst->getOperand(2);
+      // If we need to move this to VGPRs, we need to unpack the second operand
+      // back into the 2 separate ones for bit offset and width.
+      assert(OffsetWidthOp.isImm() &&
+             "Scalar BFE is only implemented for constant width and offset");
+      uint32_t Imm = OffsetWidthOp.getImm();
+
+      uint32_t Offset = Imm & 0x3f; // Extract bits [5:0].
+      uint32_t BitWidth = (Imm & 0x7f0000) >> 16; // Extract bits [22:16].
+
+      Inst->RemoveOperand(2); // Remove old immediate.
+      Inst->addOperand(MachineOperand::CreateImm(Offset));
+      Inst->addOperand(MachineOperand::CreateImm(BitWidth));
+
+      Inst->addOperand(MachineOperand::CreateImm(0));
+      Inst->addOperand(MachineOperand::CreateImm(0));
+      Inst->addOperand(MachineOperand::CreateImm(0));
+      Inst->addOperand(MachineOperand::CreateImm(0));
+    }
 
     // Update the destination register class.
+
     const TargetRegisterClass *NewDstRC = getOpRegClass(*Inst, 0);
 
-    switch (Inst->getOpcode()) {
+    switch (Opcode) {
       // For target instructions, getOpRegClass just returns the virtual
       // register class associated with the operand, so we need to find an
       // equivalent VGPR register class in order to move the instruction to the
@@ -1018,6 +1058,9 @@ void SIInstrInfo::moveToVALU(MachineInstr &TopInst) const {
     unsigned DstReg = Inst->getOperand(0).getReg();
     unsigned NewDstReg = MRI.createVirtualRegister(NewDstRC);
     MRI.replaceRegWith(DstReg, NewDstReg);
+
+    // Legalize the operands
+    legalizeOperands(Inst);
 
     for (MachineRegisterInfo::use_iterator I = MRI.use_begin(NewDstReg),
            E = MRI.use_end(); I != E; ++I) {
@@ -1104,6 +1147,24 @@ void SIInstrInfo::splitScalar64BitOp(SmallVectorImpl<MachineInstr *> &Worklist,
   // valid.
   Worklist.push_back(LoHalf);
   Worklist.push_back(HiHalf);
+}
+
+void SIInstrInfo::addDescImplicitUseDef(const MCInstrDesc &NewDesc,
+                                        MachineInstr *Inst) const {
+  // Add the implict and explicit register definitions.
+  if (NewDesc.ImplicitUses) {
+    for (unsigned i = 0; NewDesc.ImplicitUses[i]; ++i) {
+      unsigned Reg = NewDesc.ImplicitUses[i];
+      Inst->addOperand(MachineOperand::CreateReg(Reg, false, true));
+    }
+  }
+
+  if (NewDesc.ImplicitDefs) {
+    for (unsigned i = 0; NewDesc.ImplicitDefs[i]; ++i) {
+      unsigned Reg = NewDesc.ImplicitDefs[i];
+      Inst->addOperand(MachineOperand::CreateReg(Reg, true, true));
+    }
+  }
 }
 
 MachineInstrBuilder SIInstrInfo::buildIndirectWrite(

@@ -17,6 +17,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
@@ -118,8 +119,8 @@ public:
 class WinCOFFObjectWriter : public MCObjectWriter {
 public:
 
-  typedef std::vector<COFFSymbol*>  symbols;
-  typedef std::vector<COFFSection*> sections;
+  typedef std::vector<std::unique_ptr<COFFSymbol>>  symbols;
+  typedef std::vector<std::unique_ptr<COFFSection>> sections;
 
   typedef DenseMap<MCSymbol  const *, COFFSymbol *>   symbol_map;
   typedef DenseMap<MCSection const *, COFFSection *> section_map;
@@ -137,7 +138,6 @@ public:
   symbol_map  SymbolMap;
 
   WinCOFFObjectWriter(MCWinCOFFObjectTargetWriter *MOTW, raw_ostream &OS);
-  virtual ~WinCOFFObjectWriter();
 
   COFFSymbol *createSymbol(StringRef Name);
   COFFSymbol *GetOrCreateCOFFSymbol(const MCSymbol * Symbol);
@@ -160,7 +160,7 @@ public:
   // Entity writing methods.
 
   void WriteFileHeader(const COFF::header &Header);
-  void WriteSymbol(const COFFSymbol *S);
+  void WriteSymbol(const COFFSymbol &S);
   void WriteAuxiliarySymbols(const COFFSymbol::AuxiliarySymbols &S);
   void WriteSectionHeader(const COFF::section &S);
   void WriteRelocation(const COFF::relocation &R);
@@ -308,13 +308,6 @@ WinCOFFObjectWriter::WinCOFFObjectWriter(MCWinCOFFObjectTargetWriter *MOTW,
   Header.Machine = TargetObjectWriter->getMachine();
 }
 
-WinCOFFObjectWriter::~WinCOFFObjectWriter() {
-  for (symbols::iterator I = Symbols.begin(), E = Symbols.end(); I != E; ++I)
-    delete *I;
-  for (sections::iterator I = Sections.begin(), E = Sections.end(); I != E; ++I)
-    delete *I;
-}
-
 COFFSymbol *WinCOFFObjectWriter::createSymbol(StringRef Name) {
   return createCOFFEntity<COFFSymbol>(Name, Symbols);
 }
@@ -338,11 +331,9 @@ COFFSection *WinCOFFObjectWriter::createSection(StringRef Name) {
 template <typename object_t, typename list_t>
 object_t *WinCOFFObjectWriter::createCOFFEntity(StringRef Name,
                                                 list_t &List) {
-  object_t *Object = new object_t(Name);
+  List.push_back(make_unique<object_t>(Name));
 
-  List.push_back(Object);
-
-  return Object;
+  return List.back().get();
 }
 
 /// This function takes a section data object from the assembler
@@ -563,14 +554,14 @@ void WinCOFFObjectWriter::WriteFileHeader(const COFF::header &Header) {
   WriteLE16(Header.Characteristics);
 }
 
-void WinCOFFObjectWriter::WriteSymbol(const COFFSymbol *S) {
-  WriteBytes(StringRef(S->Data.Name, COFF::NameSize));
-  WriteLE32(S->Data.Value);
-  WriteLE16(S->Data.SectionNumber);
-  WriteLE16(S->Data.Type);
-  Write8(S->Data.StorageClass);
-  Write8(S->Data.NumberOfAuxSymbols);
-  WriteAuxiliarySymbols(S->Aux);
+void WinCOFFObjectWriter::WriteSymbol(const COFFSymbol &S) {
+  WriteBytes(StringRef(S.Data.Name, COFF::NameSize));
+  WriteLE32(S.Data.Value);
+  WriteLE16(S.Data.SectionNumber);
+  WriteLE16(S.Data.Type);
+  Write8(S.Data.StorageClass);
+  Write8(S.Data.NumberOfAuxSymbols);
+  WriteAuxiliarySymbols(S.Aux);
 }
 
 void WinCOFFObjectWriter::WriteAuxiliarySymbols(
@@ -642,16 +633,41 @@ void WinCOFFObjectWriter::ExecutePostLayoutBinding(MCAssembler &Asm,
   // "Define" each section & symbol. This creates section & symbol
   // entries in the staging area.
 
+  static_assert(sizeof(((COFF::AuxiliaryFile *)0)->FileName) == COFF::SymbolSize,
+                "size mismatch for COFF::AuxiliaryFile::FileName");
+  for (auto FI = Asm.file_names_begin(), FE = Asm.file_names_end();
+       FI != FE; ++FI) {
+    // round up to calculate the number of auxiliary symbols required
+    unsigned Count = (FI->size() + COFF::SymbolSize - 1) / COFF::SymbolSize;
+
+    COFFSymbol *file = createSymbol(".file");
+    file->Data.StorageClass = COFF::IMAGE_SYM_CLASS_FILE;
+    file->Aux.resize(Count);
+
+    unsigned Offset = 0;
+    unsigned Length = FI->size();
+    for (auto & Aux : file->Aux) {
+      Aux.AuxType = ATFile;
+
+      if (Length > COFF::SymbolSize) {
+        memcpy(Aux.Aux.File.FileName, FI->c_str() + Offset, COFF::SymbolSize);
+        Length = Length - COFF::SymbolSize;
+      } else {
+        memcpy(Aux.Aux.File.FileName, FI->c_str() + Offset, Length);
+        memset(&Aux.Aux.File.FileName[Length], 0, COFF::SymbolSize - Length);
+        Length = 0;
+      }
+
+      Offset = Offset + COFF::SymbolSize;
+    }
+  }
+
   for (MCAssembler::const_iterator i = Asm.begin(), e = Asm.end(); i != e; i++)
     DefineSection(*i);
 
-  for (MCAssembler::const_symbol_iterator i = Asm.symbol_begin(),
-                                          e = Asm.symbol_end();
-       i != e; i++) {
-    if (ExportSymbol(*i, Asm)) {
-      DefineSymbol(*i, Asm, Layout);
-    }
-  }
+  for (MCSymbolData &SD : Asm.symbols())
+    if (ExportSymbol(SD, Asm))
+      DefineSymbol(SD, Asm, Layout);
 }
 
 void WinCOFFObjectWriter::RecordRelocation(const MCAssembler &Asm,
@@ -758,7 +774,7 @@ void WinCOFFObjectWriter::WriteObject(MCAssembler &Asm,
                           e = Sections.end(); i != e; i++) {
     if (Layout.getSectionAddressSize((*i)->MCData) > 0) {
       size_t Number = ++Header.NumberOfSections;
-      SectionIndices[*i] = Number;
+      SectionIndices[i->get()] = Number;
       MakeSectionReal(**i, Number);
     } else {
       (*i)->Number = -1;
@@ -768,38 +784,38 @@ void WinCOFFObjectWriter::WriteObject(MCAssembler &Asm,
   Header.NumberOfSymbols = 0;
 
   for (symbols::iterator i = Symbols.begin(), e = Symbols.end(); i != e; i++) {
-    COFFSymbol *coff_symbol = *i;
-    MCSymbolData const *SymbolData = coff_symbol->MCData;
+    COFFSymbol &coff_symbol = **i;
+    MCSymbolData const *SymbolData = coff_symbol.MCData;
 
     // Update section number & offset for symbols that have them.
     if (SymbolData && SymbolData->Fragment) {
-      assert(coff_symbol->Section != nullptr);
+      assert(coff_symbol.Section != nullptr);
 
-      coff_symbol->Data.SectionNumber = coff_symbol->Section->Number;
-      coff_symbol->Data.Value = Layout.getFragmentOffset(SymbolData->Fragment)
+      coff_symbol.Data.SectionNumber = coff_symbol.Section->Number;
+      coff_symbol.Data.Value = Layout.getFragmentOffset(SymbolData->Fragment)
                               + SymbolData->Offset;
     }
 
-    if (coff_symbol->should_keep()) {
-      MakeSymbolReal(*coff_symbol, Header.NumberOfSymbols++);
+    if (coff_symbol.should_keep()) {
+      MakeSymbolReal(coff_symbol, Header.NumberOfSymbols++);
 
       // Update auxiliary symbol info.
-      coff_symbol->Data.NumberOfAuxSymbols = coff_symbol->Aux.size();
-      Header.NumberOfSymbols += coff_symbol->Data.NumberOfAuxSymbols;
+      coff_symbol.Data.NumberOfAuxSymbols = coff_symbol.Aux.size();
+      Header.NumberOfSymbols += coff_symbol.Data.NumberOfAuxSymbols;
     } else
-      coff_symbol->Index = -1;
+      coff_symbol.Index = -1;
   }
 
   // Fixup weak external references.
   for (symbols::iterator i = Symbols.begin(), e = Symbols.end(); i != e; i++) {
-    COFFSymbol *coff_symbol = *i;
-    if (coff_symbol->Other) {
-      assert(coff_symbol->Index != -1);
-      assert(coff_symbol->Aux.size() == 1 &&
+    COFFSymbol &coff_symbol = **i;
+    if (coff_symbol.Other) {
+      assert(coff_symbol.Index != -1);
+      assert(coff_symbol.Aux.size() == 1 &&
              "Symbol must contain one aux symbol!");
-      assert(coff_symbol->Aux[0].AuxType == ATWeakExternal &&
+      assert(coff_symbol.Aux[0].AuxType == ATWeakExternal &&
              "Symbol's aux symbol must be a Weak External!");
-      coff_symbol->Aux[0].Aux.WeakExternal.TagIndex = coff_symbol->Other->Index;
+      coff_symbol.Aux[0].Aux.WeakExternal.TagIndex = coff_symbol.Other->Index;
     }
   }
 
@@ -954,7 +970,7 @@ void WinCOFFObjectWriter::WriteObject(MCAssembler &Asm,
 
   for (symbols::iterator i = Symbols.begin(), e = Symbols.end(); i != e; i++)
     if ((*i)->Index != -1)
-      WriteSymbol(*i);
+      WriteSymbol(**i);
 
   OS.write((char const *)&Strings.Data.front(), Strings.Data.size());
 }

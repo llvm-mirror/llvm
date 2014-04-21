@@ -167,6 +167,12 @@ static const Target *getTarget(const ObjectFile *Obj = NULL) {
       // the best we can do here is indicate that it is mach-o.
       if (Obj->isMachO())
         TheTriple.setObjectFormat(Triple::MachO);
+
+      if (Obj->isCOFF()) {
+        const auto COFFObj = dyn_cast<COFFObjectFile>(Obj);
+        if (COFFObj->getArch() == Triple::thumb)
+          TheTriple.setTriple("thumbv7-windows");
+      }
     }
   } else
     TheTriple.setTriple(Triple::normalize(TripleName));
@@ -309,24 +315,25 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     return;
   }
 
-  std::unique_ptr<MCDisassembler> DisAsm(TheTarget->createMCDisassembler(*STI));
+  std::unique_ptr<const MCObjectFileInfo> MOFI(new MCObjectFileInfo);
+  MCContext Ctx(AsmInfo.get(), MRI.get(), MOFI.get());
+
+  std::unique_ptr<MCDisassembler> DisAsm(
+    TheTarget->createMCDisassembler(*STI, Ctx));
+
   if (!DisAsm) {
     errs() << "error: no disassembler for target " << TripleName << "\n";
     return;
   }
 
-  std::unique_ptr<const MCObjectFileInfo> MOFI;
-  std::unique_ptr<MCContext> Ctx;
 
   if (Symbolize) {
-    MOFI.reset(new MCObjectFileInfo);
-    Ctx.reset(new MCContext(AsmInfo.get(), MRI.get(), MOFI.get()));
     std::unique_ptr<MCRelocationInfo> RelInfo(
-        TheTarget->createMCRelocationInfo(TripleName, *Ctx.get()));
+        TheTarget->createMCRelocationInfo(TripleName, Ctx));
     if (RelInfo) {
       std::unique_ptr<MCSymbolizer> Symzer(
-        MCObjectSymbolizer::createObjectSymbolizer(*Ctx.get(),
-                                                   std::move(RelInfo), Obj));
+        MCObjectSymbolizer::createObjectSymbolizer(Ctx, std::move(RelInfo),
+                                                   Obj));
       if (Symzer)
         DisAsm->setSymbolizer(std::move(Symzer));
     }
@@ -708,6 +715,9 @@ static void PrintCOFFSymbolTable(const COFFObjectFile *coff) {
         StringRef Name(AF->FileName,
                        Symbol->NumberOfAuxSymbols * COFF::SymbolSize);
         outs() << "AUX " << Name.rtrim(StringRef("\0", 1))  << '\n';
+
+        SI = SI + Symbol->NumberOfAuxSymbols;
+        break;
       } else {
         outs() << "AUX Unknown\n";
       }
