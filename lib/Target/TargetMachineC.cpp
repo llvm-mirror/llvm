@@ -18,6 +18,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -62,7 +63,7 @@ inline LLVMTargetRef wrap(const Target * P) {
 
 LLVMTargetRef LLVMGetFirstTarget() {
   if(TargetRegistry::begin() == TargetRegistry::end()) {
-    return NULL;
+    return nullptr;
   }
 
   const Target* target = &*TargetRegistry::begin();
@@ -80,7 +81,7 @@ LLVMTargetRef LLVMGetTargetFromName(const char *Name) {
       return wrap(&*IT);
   }
   
-  return NULL;
+  return nullptr;
 }
 
 LLVMBool LLVMGetTargetFromTriple(const char* TripleStr, LLVMTargetRef *T,

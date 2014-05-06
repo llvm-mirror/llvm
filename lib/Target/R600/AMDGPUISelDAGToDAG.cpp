@@ -16,9 +16,11 @@
 #include "AMDGPURegisterInfo.h"
 #include "R600InstrInfo.h"
 #include "SIISelLowering.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/IR/Function.h"
 
 using namespace llvm;
 
@@ -37,9 +39,9 @@ public:
   AMDGPUDAGToDAGISel(TargetMachine &TM);
   virtual ~AMDGPUDAGToDAGISel();
 
-  SDNode *Select(SDNode *N);
-  virtual const char *getPassName() const;
-  virtual void PostprocessISelDAG();
+  SDNode *Select(SDNode *N) override;
+  const char *getPassName() const override;
+  void PostprocessISelDAG() override;
 
 private:
   bool isInlineImmediate(SDNode *N) const;
@@ -69,6 +71,11 @@ private:
   bool isPrivateLoad(const LoadSDNode *N) const;
   bool isLocalLoad(const LoadSDNode *N) const;
   bool isRegionLoad(const LoadSDNode *N) const;
+
+  /// \returns True if the current basic block being selected is at control
+  ///          flow depth 0.  Meaning that the current block dominates the
+  //           exit block.
+  bool isCFDepth0() const;
 
   const TargetRegisterClass *getOperandRegClass(SDNode *N, unsigned OpNo) const;
   bool SelectGlobalValueConstantOffset(SDValue Addr, SDValue& IntPtr);
@@ -246,7 +253,7 @@ SDNode *AMDGPUDAGToDAGISel::Select(SDNode *N) {
       SDValue(AddHi,0),
       Sub1,
     };
-    return CurDAG->SelectNodeTo(N, AMDGPU::REG_SEQUENCE, MVT::i64, Args, 5);
+    return CurDAG->SelectNodeTo(N, AMDGPU::REG_SEQUENCE, MVT::i64, Args);
   }
   case ISD::BUILD_VECTOR: {
     unsigned RegClassID;
@@ -315,7 +322,7 @@ SDNode *AMDGPUDAGToDAGISel::Select(SDNode *N) {
     // 16 = Max Num Vector Elements
     // 2 = 2 REG_SEQUENCE operands per element (value, subreg index)
     // 1 = Vector Register Class
-    SDValue RegSeqArgs[16 * 2 + 1];
+    SmallVector<SDValue, 16 * 2 + 1> RegSeqArgs(N->getNumOperands() * 2 + 1);
 
     RegSeqArgs[0] = CurDAG->getTargetConstant(RegClassID, MVT::i32);
     bool IsRegSeq = true;
@@ -332,7 +339,7 @@ SDNode *AMDGPUDAGToDAGISel::Select(SDNode *N) {
     if (!IsRegSeq)
       break;
     return CurDAG->SelectNodeTo(N, AMDGPU::REG_SEQUENCE, N->getVTList(),
-        RegSeqArgs, 2 * N->getNumOperands() + 1);
+                                RegSeqArgs);
   }
   case ISD::BUILD_PAIR: {
     SDValue RC, SubReg0, SubReg1;
@@ -564,6 +571,14 @@ bool AMDGPUDAGToDAGISel::isPrivateLoad(const LoadSDNode *N) const {
   }
   return false;
 }
+
+bool AMDGPUDAGToDAGISel::isCFDepth0() const {
+  // FIXME: Figure out a way to use DominatorTree analysis here.
+  const BasicBlock *CurBlock = FuncInfo->MBB->getBasicBlock();
+  const Function *Fn = FuncInfo->Fn;
+  return &Fn->front() == CurBlock || &Fn->back() == CurBlock;
+}
+
 
 const char *AMDGPUDAGToDAGISel::getPassName() const {
   return "AMDGPU DAG->DAG Pattern Instruction Selection";

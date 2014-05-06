@@ -16,12 +16,14 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/LegacyPassManagers.h"
 #include "llvm/IR/LegacyPassNameParser.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
+#include "llvm/Support/TimeValue.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -1158,7 +1160,8 @@ void PMDataManager::dumpPassInfo(Pass *P, enum PassDebuggingString S1,
                                  StringRef Msg) {
   if (PassDebugging < Executions)
     return;
-  dbgs() << (void*)this << std::string(getDepth()*2+1, ' ');
+  dbgs() << "[" << sys::TimeValue::now().str() << "] " << (void *)this
+         << std::string(getDepth() * 2 + 1, ' ');
   switch (S1) {
   case EXECUTION_MSG:
     dbgs() << "Executing Pass '" << P->getPassName();
@@ -1311,6 +1314,8 @@ bool BBPassManager::runOnFunction(Function &F) {
         TimeRegion PassTimer(getPassTimer(BP));
 
         LocalChanged |= BP->runOnBasicBlock(*I);
+
+        F.getContext().notifyPassRun(BP, F.getParent(), &F, &*I);
       }
 
       Changed |= LocalChanged;
@@ -1549,6 +1554,8 @@ bool FPPassManager::runOnFunction(Function &F) {
     removeNotPreservedAnalysis(FP);
     recordAvailableAnalysis(FP);
     removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
+
+    F.getContext().notifyPassRun(FP, F.getParent(), &F);
   }
   return Changed;
 }
@@ -1628,6 +1635,8 @@ MPPassManager::runOnModule(Module &M) {
     removeNotPreservedAnalysis(MP);
     recordAvailableAnalysis(MP);
     removeDeadPasses(MP, M.getModuleIdentifier(), ON_MODULE_MSG);
+
+    M.getContext().notifyPassRun(MP, &M);
   }
 
   // Finalize module passes

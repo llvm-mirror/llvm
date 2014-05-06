@@ -1,5 +1,9 @@
-; RUN: llc -mtriple i386-pc-win32 < %s | FileCheck -check-prefix=CHECK -check-prefix=WIN32 %s
-; RUN: llc -mtriple i386-pc-mingw32 < %s | FileCheck -check-prefix=CHECK -check-prefix=MINGW %s
+; RUN: llc -mtriple i386-pc-win32 < %s \
+; RUN:    | FileCheck -check-prefix CHECK -check-prefix CHECK-CL %s
+; RUN: llc -mtriple i386-pc-mingw32 < %s \
+; RUN:    | FileCheck -check-prefix CHECK -check-prefix CHECK-GCC %s
+; RUN: llc -mtriple i686-pc-cygwin %s -o - \
+; RUN:    | FileCheck -check-prefix CHECK -check-prefix CHECK-GCC %s
 
 ; CHECK: .text
 
@@ -55,18 +59,18 @@ define weak_odr dllexport void @weak1() {
 ; CHECK: .globl _Var1
 @Var1 = dllexport global i32 1, align 4
 
-; CHECK: .rdata,"r"
+; CHECK: .rdata,"rd"
 ; CHECK: .globl _Var2
 @Var2 = dllexport unnamed_addr constant i32 1
 
 ; CHECK: .comm _Var3
 @Var3 = common dllexport global i32 0, align 4
 
-; CHECK: .section .data,"w",discard,_WeakVar1
+; CHECK: .section .data,"wd",discard,_WeakVar1
 ; CHECK: .globl _WeakVar1
 @WeakVar1 = weak_odr dllexport global i32 1, align 4
 
-; CHECK: .section .rdata,"r",discard,_WeakVar2
+; CHECK: .section .rdata,"rd",discard,_WeakVar2
 ; CHECK: .globl _WeakVar2
 @WeakVar2 = weak_odr dllexport unnamed_addr constant i32 1
 
@@ -89,37 +93,38 @@ define weak_odr dllexport void @weak1() {
 
 
 ; CHECK: .section .drectve
-; WIN32: /EXPORT:_Var1,DATA
-; WIN32: /EXPORT:_Var2,DATA
-; WIN32: /EXPORT:_Var3,DATA
-; WIN32: /EXPORT:_WeakVar1,DATA
-; WIN32: /EXPORT:_WeakVar2,DATA
-; WIN32: /EXPORT:_f1
-; WIN32: /EXPORT:_f2
-; WIN32: /EXPORT:_stdfun@0
-; WIN32: /EXPORT:@fastfun@0
-; WIN32: /EXPORT:_thisfun
-; WIN32: /EXPORT:_lnk1
-; WIN32: /EXPORT:_lnk2
-; WIN32: /EXPORT:_weak1
-; WIN32: /EXPORT:_alias
-; WIN32: /EXPORT:_alias2
-; WIN32: /EXPORT:_alias3
-; WIN32: /EXPORT:_weak_alias
-; MINGW: -export:_Var1,data
-; MINGW: -export:_Var2,data
-; MINGW: -export:_Var3,data
-; MINGW: -export:_WeakVar1,data
-; MINGW: -export:_WeakVar2,data
-; MINGW: -export:_f1
-; MINGW: -export:_f2
-; MINGW: -export:_stdfun@0
-; MINGW: -export:@fastfun@0
-; MINGW: -export:_thisfun
-; MINGW: -export:_lnk1
-; MINGW: -export:_lnk2
-; MINGW: -export:_weak1
-; MINGW: -export:_alias
-; MINGW: -export:_alias2
-; MINGW: -export:_alias3
-; MINGW: -export:_weak_alias
+; CHECK-CL: /EXPORT:_Var1,DATA
+; CHECK-CL: /EXPORT:_Var2,DATA
+; CHECK-CL: /EXPORT:_Var3,DATA
+; CHECK-CL: /EXPORT:_WeakVar1,DATA
+; CHECK-CL: /EXPORT:_WeakVar2,DATA
+; CHECK-CL: /EXPORT:_f1
+; CHECK-CL: /EXPORT:_f2
+; CHECK-CL: /EXPORT:_stdfun@0
+; CHECK-CL: /EXPORT:@fastfun@0
+; CHECK-CL: /EXPORT:_thisfun
+; CHECK-CL: /EXPORT:_lnk1
+; CHECK-CL: /EXPORT:_lnk2
+; CHECK-CL: /EXPORT:_weak1
+; CHECK-CL: /EXPORT:_alias
+; CHECK-CL: /EXPORT:_alias2
+; CHECK-CL: /EXPORT:_alias3
+; CHECK-CL: /EXPORT:_weak_alias
+; CHECK-GCC: -export:Var1,data
+; CHECK-GCC: -export:Var2,data
+; CHECK-GCC: -export:Var3,data
+; CHECK-GCC: -export:WeakVar1,data
+; CHECK-GCC: -export:WeakVar2,data
+; CHECK-GCC: -export:f1
+; CHECK-GCC: -export:f2
+; CHECK-GCC: -export:stdfun@0
+; CHECK-GCC: -export:@fastfun@0
+; CHECK-GCC: -export:thisfun
+; CHECK-GCC: -export:lnk1
+; CHECK-GCC: -export:lnk2
+; CHECK-GCC: -export:weak1
+; CHECK-GCC: -export:alias
+; CHECK-GCC: -export:alias2
+; CHECK-GCC: -export:alias3
+; CHECK-GCC: -export:weak_alias
+

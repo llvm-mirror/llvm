@@ -25,6 +25,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/DataStream.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -135,7 +136,7 @@ int main(int argc, char **argv) {
       DisplayFilename = InputFilename;
     M.reset(getStreamedBitcodeModule(DisplayFilename, streamer, Context,
                                      &ErrorMessage));
-    if(M.get() != 0) {
+    if(M.get()) {
       if (error_code EC = M->materializeAllPermanently()) {
         ErrorMessage = EC.message();
         M.reset();
@@ -143,7 +144,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (M.get() == 0) {
+  if (!M.get()) {
     errs() << argv[0] << ": ";
     if (ErrorMessage.size())
       errs() << ErrorMessage << "\n";

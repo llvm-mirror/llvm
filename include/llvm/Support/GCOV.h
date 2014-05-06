@@ -37,9 +37,9 @@ namespace GCOV {
 
 /// GCOVOptions - A struct for passing gcov options between functions.
 struct GCOVOptions {
-  GCOVOptions(bool A, bool B, bool C, bool F, bool P, bool U)
+  GCOVOptions(bool A, bool B, bool C, bool F, bool P, bool U, bool L)
       : AllBlocks(A), BranchInfo(B), BranchCount(C), FuncCoverage(F),
-        PreservePaths(P), UncondBranch(U) {}
+        PreservePaths(P), UncondBranch(U), LongFileNames(L) {}
 
   bool AllBlocks;
   bool BranchInfo;
@@ -47,6 +47,7 @@ struct GCOVOptions {
   bool FuncCoverage;
   bool PreservePaths;
   bool UncondBranch;
+  bool LongFileNames;
 };
 
 /// GCOVBuffer - A wrapper around MemoryBuffer to provide GCOV specific
@@ -232,7 +233,6 @@ class GCOVFile {
 public:
   GCOVFile() : GCNOInitialized(false), Checksum(0), Functions(), RunCount(0),
                ProgramCount(0) {}
-  ~GCOVFile();
   bool readGCNO(GCOVBuffer &Buffer);
   bool readGCDA(GCOVBuffer &Buffer);
   uint32_t getChecksum() const { return Checksum; }
@@ -242,27 +242,27 @@ private:
   bool GCNOInitialized;
   GCOV::GCOVVersion Version;
   uint32_t Checksum;
-  SmallVector<GCOVFunction *, 16> Functions;
+  SmallVector<std::unique_ptr<GCOVFunction>, 16> Functions;
   uint32_t RunCount;
   uint32_t ProgramCount;
 };
 
 /// GCOVEdge - Collects edge information.
 struct GCOVEdge {
-  GCOVEdge(GCOVBlock *S, GCOVBlock *D): Src(S), Dst(D), Count(0) {}
+  GCOVEdge(GCOVBlock &S, GCOVBlock &D) : Src(S), Dst(D), Count(0) {}
 
-  GCOVBlock *Src;
-  GCOVBlock *Dst;
+  GCOVBlock &Src;
+  GCOVBlock &Dst;
   uint64_t Count;
 };
 
 /// GCOVFunction - Collects function information.
 class GCOVFunction {
 public:
-  typedef SmallVectorImpl<GCOVBlock *>::const_iterator BlockIterator;
+  typedef SmallVectorImpl<std::unique_ptr<GCOVBlock>>::const_iterator
+  BlockIterator;
 
   GCOVFunction(GCOVFile &P) : Parent(P), Ident(0), LineNumber(0) {}
-  ~GCOVFunction();
   bool readGCNO(GCOVBuffer &Buffer, GCOV::GCOVVersion Version);
   bool readGCDA(GCOVBuffer &Buffer, GCOV::GCOVVersion Version);
   StringRef getName() const { return Name; }
@@ -283,8 +283,8 @@ private:
   uint32_t LineNumber;
   StringRef Name;
   StringRef Filename;
-  SmallVector<GCOVBlock *, 16> Blocks;
-  SmallVector<GCOVEdge *, 16> Edges;
+  SmallVector<std::unique_ptr<GCOVBlock>, 16> Blocks;
+  SmallVector<std::unique_ptr<GCOVEdge>, 16> Edges;
 };
 
 /// GCOVBlock - Collects block information.
@@ -298,7 +298,7 @@ class GCOVBlock {
 
   struct SortDstEdgesFunctor {
     bool operator()(const GCOVEdge *E1, const GCOVEdge *E2) {
-      return E1->Dst->Number < E2->Dst->Number;
+      return E1->Dst.Number < E2->Dst.Number;
     }
   };
 public:
@@ -314,13 +314,13 @@ public:
   uint64_t getCount() const { return Counter; }
 
   void addSrcEdge(GCOVEdge *Edge) {
-    assert(Edge->Dst == this); // up to caller to ensure edge is valid
+    assert(&Edge->Dst == this); // up to caller to ensure edge is valid
     SrcEdges.push_back(Edge);
   }
   void addDstEdge(GCOVEdge *Edge) {
-    assert(Edge->Src == this); // up to caller to ensure edge is valid
+    assert(&Edge->Src == this); // up to caller to ensure edge is valid
     // Check if adding this edge causes list to become unsorted.
-    if (DstEdges.size() && DstEdges.back()->Dst->Number > Edge->Dst->Number)
+    if (DstEdges.size() && DstEdges.back()->Dst.Number > Edge->Dst.Number)
       DstEdgesAreSorted = false;
     DstEdges.push_back(Edge);
   }
@@ -386,7 +386,8 @@ public:
   }
   void setRunCount(uint32_t Runs) { RunCount = Runs; }
   void setProgramCount(uint32_t Programs) { ProgramCount = Programs; }
-  void print(StringRef GCNOFile, StringRef GCDAFile);
+  void print(StringRef MainFilename, StringRef GCNOFile, StringRef GCDAFile);
+
 private:
   void printFunctionSummary(raw_fd_ostream &OS,
                             const FunctionVector &Funcs) const;

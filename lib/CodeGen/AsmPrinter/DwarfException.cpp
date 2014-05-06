@@ -103,7 +103,7 @@ ComputeActionsTable(const SmallVectorImpl<const LandingPadInfo*> &LandingPads,
 
   int FirstAction = 0;
   unsigned SizeActions = 0;
-  const LandingPadInfo *PrevLPI = 0;
+  const LandingPadInfo *PrevLPI = nullptr;
 
   for (SmallVectorImpl<const LandingPadInfo *>::const_iterator
          I = LandingPads.begin(), E = LandingPads.end(); I != E; ++I) {
@@ -181,7 +181,7 @@ bool DwarfException::CallToNoUnwindFunction(const MachineInstr *MI) {
     if (!MO.isGlobal()) continue;
 
     const Function *F = dyn_cast<Function>(MO.getGlobal());
-    if (F == 0) continue;
+    if (!F) continue;
 
     if (SawFunc) {
       // Be conservative. If we have more than one function operand for this
@@ -214,7 +214,7 @@ ComputeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
                      const SmallVectorImpl<const LandingPadInfo *> &LandingPads,
                      const SmallVectorImpl<unsigned> &FirstActions) {
   // The end label of the previous invoke or nounwind try-range.
-  MCSymbol *LastLabel = 0;
+  MCSymbol *LastLabel = nullptr;
 
   // Whether there is a potentially throwing instruction (currently this means
   // an ordinary call) between the end of the previous try-range and now.
@@ -224,18 +224,16 @@ ComputeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
   bool PreviousIsInvoke = false;
 
   // Visit all instructions in order of address.
-  for (MachineFunction::const_iterator I = Asm->MF->begin(), E = Asm->MF->end();
-       I != E; ++I) {
-    for (MachineBasicBlock::const_iterator MI = I->begin(), E = I->end();
-         MI != E; ++MI) {
-      if (!MI->isEHLabel()) {
-        if (MI->isCall())
-          SawPotentiallyThrowing |= !CallToNoUnwindFunction(MI);
+  for (const auto &MBB : *Asm->MF) {
+    for (const auto &MI : MBB) {
+      if (!MI.isEHLabel()) {
+        if (MI.isCall())
+          SawPotentiallyThrowing |= !CallToNoUnwindFunction(&MI);
         continue;
       }
 
       // End of the previous try-range?
-      MCSymbol *BeginLabel = MI->getOperand(0).getMCSymbol();
+      MCSymbol *BeginLabel = MI.getOperand(0).getMCSymbol();
       if (BeginLabel == LastLabel)
         SawPotentiallyThrowing = false;
 
@@ -255,7 +253,7 @@ ComputeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
       // create a call-site entry with no landing pad for the region between the
       // try-ranges.
       if (SawPotentiallyThrowing && Asm->MAI->isExceptionHandlingDwarf()) {
-        CallSiteEntry Site = { LastLabel, BeginLabel, 0, 0 };
+        CallSiteEntry Site = { LastLabel, BeginLabel, nullptr, 0 };
         CallSites.push_back(Site);
         PreviousIsInvoke = false;
       }
@@ -305,7 +303,7 @@ ComputeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
   // function may throw, create a call-site entry with no landing pad for the
   // region following the try-range.
   if (SawPotentiallyThrowing && Asm->MAI->isExceptionHandlingDwarf()) {
-    CallSiteEntry Site = { LastLabel, 0, 0, 0 };
+    CallSiteEntry Site = { LastLabel, nullptr, nullptr, 0 };
     CallSites.push_back(Site);
   }
 }
@@ -571,10 +569,10 @@ void DwarfException::EmitExceptionTable() {
         Asm->GetTempSymbol("eh_func_begin", Asm->getFunctionNumber());
 
       MCSymbol *BeginLabel = S.BeginLabel;
-      if (BeginLabel == 0)
+      if (!BeginLabel)
         BeginLabel = EHFuncBeginSym;
       MCSymbol *EndLabel = S.EndLabel;
-      if (EndLabel == 0)
+      if (!EndLabel)
         EndLabel = Asm->GetTempSymbol("eh_func_end", Asm->getFunctionNumber());
 
 

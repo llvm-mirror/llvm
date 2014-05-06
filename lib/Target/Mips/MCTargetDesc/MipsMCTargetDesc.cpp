@@ -30,6 +30,8 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_MC_DESC
 #include "MipsGenInstrInfo.inc"
 
@@ -38,8 +40,6 @@
 
 #define GET_REGINFO_MC_DESC
 #include "MipsGenRegisterInfo.inc"
-
-using namespace llvm;
 
 /// Select the Mips CPU for the given triple and cpu name.
 /// FIXME: Merge with the copy in MipsSubtarget.cpp
@@ -79,7 +79,7 @@ static MCAsmInfo *createMipsMCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
   MCAsmInfo *MAI = new MipsMCAsmInfo(TT);
 
   unsigned SP = MRI.getDwarfRegNum(Mips::SP, true);
-  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(0, SP, 0);
+  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, SP, 0);
   MAI->addInitialFrameState(Inst);
 
   return MAI;

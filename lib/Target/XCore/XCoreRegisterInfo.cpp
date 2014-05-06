@@ -33,10 +33,12 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 
+using namespace llvm;
+
+#define DEBUG_TYPE "xcore-reg-info"
+
 #define GET_REGINFO_TARGET_DESC
 #include "XCoreGenRegisterInfo.inc"
-
-using namespace llvm;
 
 XCoreRegisterInfo::XCoreRegisterInfo()
   : XCoreGenRegisterInfo(XCore::LR) {

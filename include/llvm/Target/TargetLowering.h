@@ -182,6 +182,9 @@ public:
     return HasMultipleConditionRegisters;
   }
 
+  /// Return true if the target has BitExtract instructions.
+  bool hasExtractBitsInsn() const { return HasExtractBitsInsn; }
+
   /// Return true if a vector of the given type should be split
   /// (TypeSplitVector) instead of promoted (TypePromoteInteger) during type
   /// legalization.
@@ -1006,6 +1009,14 @@ protected:
     HasMultipleConditionRegisters = hasManyRegs;
   }
 
+  /// Tells the code generator that the target has BitExtract instructions.
+  /// The code generator will aggressively sink "shift"s into the blocks of
+  /// their users if the users will generate "and" instructions which can be
+  /// combined with "shift" to BitExtract instructions.
+  void setHasExtractBitsInsn(bool hasExtractInsn = true) {
+    HasExtractBitsInsn = hasExtractInsn;
+  }
+
   /// Tells the code generator not to expand sequence of operations into a
   /// separate sequences that increases the amount of flow control.
   void setJumpIsExpensive(bool isExpensive = true) {
@@ -1424,6 +1435,12 @@ private:
   /// registers, the code generator will not aggressively sink comparisons into
   /// the blocks of their users.
   bool HasMultipleConditionRegisters;
+
+  /// Tells the code generator that the target has BitExtract instructions.
+  /// The code generator will aggressively sink "shift"s into the blocks of
+  /// their users if the users will generate "and" instructions which can be
+  /// combined with "shift" to BitExtract instructions.
+  bool HasExtractBitsInsn;
 
   /// Tells the code generator not to expand integer divides by constants into a
   /// sequence of muls, adds, and shifts.  This is a hack until a real cost
@@ -2000,6 +2017,15 @@ public:
   ///
   virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
+  /// Return true if it is profitable to move a following shift through this
+  //  node, adjusting any immediate operands as necessary to preserve semantics.
+  //  This transformation may not be desirable if it disrupts a particularly
+  //  auspicious target-specific tree (e.g. bitfield extraction in AArch64).
+  //  By default, it returns true.
+  virtual bool isDesirableToCommuteWithShift(const SDNode *N /*Op*/) const {
+    return true;
+  }
+
   /// Return true if the target has native support for the specified value type
   /// and it is 'desirable' to use the type for the given node type. e.g. On x86
   /// i16 is legal, but undesirable since i16 instruction encodings are longer
@@ -2400,10 +2426,12 @@ public:
   //
   SDValue BuildExactSDIV(SDValue Op1, SDValue Op2, SDLoc dl,
                          SelectionDAG &DAG) const;
-  SDValue BuildSDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-                      std::vector<SDNode*> *Created) const;
-  SDValue BuildUDIV(SDNode *N, SelectionDAG &DAG, bool IsAfterLegalization,
-                      std::vector<SDNode*> *Created) const;
+  SDValue BuildSDIV(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
+                    bool IsAfterLegalization,
+                    std::vector<SDNode *> *Created) const;
+  SDValue BuildUDIV(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
+                    bool IsAfterLegalization,
+                    std::vector<SDNode *> *Created) const;
 
   //===--------------------------------------------------------------------===//
   // Legalization utility functions
@@ -2420,8 +2448,8 @@ public:
   /// \returns true if the node has been expanded. false if it has not
   bool expandMUL(SDNode *N, SDValue &Lo, SDValue &Hi, EVT HiLoVT,
                  SelectionDAG &DAG, SDValue LL = SDValue(),
-		 SDValue LH = SDValue(), SDValue RL = SDValue(),
-		 SDValue RH = SDValue()) const;
+                 SDValue LH = SDValue(), SDValue RL = SDValue(),
+                 SDValue RH = SDValue()) const;
 
   //===--------------------------------------------------------------------===//
   // Instruction Emitting Hooks

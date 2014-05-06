@@ -22,6 +22,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_MC_DESC
 #include "SparcGenInstrInfo.inc"
 
@@ -31,14 +33,11 @@
 #define GET_REGINFO_MC_DESC
 #include "SparcGenRegisterInfo.inc"
 
-using namespace llvm;
-
-
 static MCAsmInfo *createSparcMCAsmInfo(const MCRegisterInfo &MRI,
                                        StringRef TT) {
   MCAsmInfo *MAI = new SparcELFMCAsmInfo(TT);
   unsigned Reg = MRI.getDwarfRegNum(SP::O6, true);
-  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(0, Reg, 0);
+  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, Reg, 0);
   MAI->addInitialFrameState(Inst);
   return MAI;
 }
@@ -47,7 +46,7 @@ static MCAsmInfo *createSparcV9MCAsmInfo(const MCRegisterInfo &MRI,
                                        StringRef TT) {
   MCAsmInfo *MAI = new SparcELFMCAsmInfo(TT);
   unsigned Reg = MRI.getDwarfRegNum(SP::O6, true);
-  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(0, Reg, 2047);
+  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, Reg, 2047);
   MAI->addInitialFrameState(Inst);
   return MAI;
 }

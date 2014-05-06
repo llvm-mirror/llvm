@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "subtarget"
 #include "X86Subtarget.h"
 #include "X86InstrInfo.h"
 #include "llvm/IR/Attributes.h"
@@ -24,15 +23,17 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 
-#define GET_SUBTARGETINFO_TARGET_DESC
-#define GET_SUBTARGETINFO_CTOR
-#include "X86GenSubtargetInfo.inc"
-
-using namespace llvm;
-
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
+
+using namespace llvm;
+
+#define DEBUG_TYPE "subtarget"
+
+#define GET_SUBTARGETINFO_TARGET_DESC
+#define GET_SUBTARGETINFO_CTOR
+#include "X86GenSubtargetInfo.inc"
 
 /// ClassifyBlockAddressReference - Classify a blockaddress reference for the
 /// current subtarget according to how we should reference it in a non-pcrel
@@ -153,7 +154,7 @@ const char *X86Subtarget::getBZeroEntry() const {
       !getTargetTriple().isMacOSXVersionLT(10, 6))
     return "__bzero";
 
-  return 0;
+  return nullptr;
 }
 
 bool X86Subtarget::hasSinCos() const {

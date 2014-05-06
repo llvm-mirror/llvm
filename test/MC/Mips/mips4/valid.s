@@ -46,21 +46,20 @@
 	dmultu	$a1,$a2
 	dsll  $zero,18             # CHECK: dsll $zero, $zero, 18       # encoding: [0x00,0x00,0x04,0xb8]
 	dsll  $zero,$s4,18         # CHECK: dsll $zero, $20, 18         # encoding: [0x00,0x14,0x04,0xb8]
+	dsll  $zero,$s4,$t4        # CHECK: dsllv $zero, $20, $12       # encoding: [0x01,0x94,0x00,0x14]
 	dsll32 $zero,18            # CHECK: dsll32 $zero, $zero, 18     # encoding: [0x00,0x00,0x04,0xbc]
 	dsll32 $zero,$zero,18      # CHECK: dsll32 $zero, $zero, 18     # encoding: [0x00,0x00,0x04,0xbc]
-	dsllv $zero,$t4            # CHECK: dsllv $zero, $zero, $12     # encoding: [0x01,0x80,0x00,0x14]
 	dsllv $zero,$s4,$t4        # CHECK: dsllv $zero, $20, $12       # encoding: [0x01,0x94,0x00,0x14]
 	dsra  $gp,10               # CHECK: dsra $gp, $gp, 10           # encoding: [0x00,0x1c,0xe2,0xbb]
 	dsra  $gp,$s2,10           # CHECK: dsra $gp, $18, 10           # encoding: [0x00,0x12,0xe2,0xbb]
 	dsra32  $gp,10             # CHECK: dsra32 $gp, $gp, 10         # encoding: [0x00,0x1c,0xe2,0xbf]
 	dsra32  $gp,$s2,10         # CHECK: dsra32 $gp, $18, 10         # encoding: [0x00,0x12,0xe2,0xbf]
-	dsrav $gp,$s3              # CHECK: dsrav $gp, $gp, $19         # encoding: [0x02,0x7c,0xe0,0x17]
 	dsrav $gp,$s2,$s3          # CHECK: dsrav $gp, $18, $19         # encoding: [0x02,0x72,0xe0,0x17]
 	dsrl  $s3,23               # CHECK: dsrl $19, $19, 23           # encoding: [0x00,0x13,0x9d,0xfa]
 	dsrl  $s3,$6,23            # CHECK: dsrl $19, $6, 23            # encoding: [0x00,0x06,0x9d,0xfa]
+	dsrl  $s3,$6,$s4           # CHECK: dsrlv $19, $6, $20          # encoding: [0x02,0x86,0x98,0x16]
 	dsrl32  $s3,23             # CHECK: dsrl32 $19, $19, 23         # encoding: [0x00,0x13,0x9d,0xfe]
 	dsrl32  $s3,$6,23          # CHECK: dsrl32 $19, $6, 23          # encoding: [0x00,0x06,0x9d,0xfe]
-	dsrlv $s3,$s4              # CHECK: dsrlv $19, $19, $20         # encoding: [0x02,0x93,0x98,0x16]
 	dsrlv $s3,$6,$s4           # CHECK: dsrlv $19, $6, $20          # encoding: [0x02,0x86,0x98,0x16]
 	dsub	$a3,$s6,$t0
 	dsubu	$a1,$a1,$k0
@@ -125,6 +124,8 @@
 	mult	$sp,$v0
 	multu	$gp,$k0
 	multu	$t1,$s2
+	negu	$2                   # CHECK: negu $2, $2            # encoding: [0x00,0x02,0x10,0x23]
+	negu	$2,$3                # CHECK: negu $2, $3            # encoding: [0x00,0x03,0x10,0x23]
 	neg.d	$f27,$f18
 	neg.s	$f1,$f15
 	nop
@@ -146,21 +147,21 @@
 	sh	$t6,-6704($t7)
 	sll   $a3,18               # CHECK: sll $7, $7, 18         # encoding: [0x00,0x07,0x3c,0x80]
 	sll   $a3,$zero,18         # CHECK: sll $7, $zero, 18      # encoding: [0x00,0x00,0x3c,0x80]
-	sllv  $a3,$9               # CHECK: sllv $7, $7, $9        # encoding: [0x01,0x27,0x38,0x04]
+	sll   $a3,$zero,$9         # CHECK: sllv $7, $zero, $9     # encoding: [0x01,0x20,0x38,0x04]
 	sllv  $a3,$zero,$9         # CHECK: sllv $7, $zero, $9     # encoding: [0x01,0x20,0x38,0x04]
-	slt	$s7,$t3,$k1
-	slti	$s1,$t2,9489
-	sltiu	$t9,$t9,-15531
-	sltu	$s4,$s5,$t3
+	slt   $s7,$11,$k1          # CHECK: slt $23, $11, $27      # encoding: [0x01,0x7b,0xb8,0x2a]
+	slti  $s1,$10,9489         # CHECK: slti $17, $10, 9489    # encoding: [0x29,0x51,0x25,0x11]
+	sltiu $t9,$t9,-15531       # CHECK: sltiu $25, $25, -15531 # encoding: [0x2f,0x39,0xc3,0x55]
+	sltu  $s4,$s5,$11          # CHECK: sltu  $20, $21, $11    # encoding: [0x02,0xab,0xa0,0x2b]
+	sltu  $t8,$t9,-15531       # CHECK: sltiu $24, $25, -15531 # encoding: [0x2f,0x38,0xc3,0x55]
 	sqrt.d	$f17,$f22
 	sqrt.s	$f0,$f1
 	sra   $s1,15               # CHECK: sra $17, $17, 15       # encoding: [0x00,0x11,0x8b,0xc3]
 	sra   $s1,$s7,15           # CHECK: sra $17, $23, 15       # encoding: [0x00,0x17,0x8b,0xc3]
-	srav  $s1,$sp              # CHECK: srav $17, $17, $sp     # encoding: [0x03,0xb1,0x88,0x07]
 	srav  $s1,$s7,$sp          # CHECK: srav $17, $23, $sp     # encoding: [0x03,0xb7,0x88,0x07]
 	srl   $2,7                 # CHECK: srl $2, $2, 7          # encoding: [0x00,0x02,0x11,0xc2]
 	srl   $2,$2,7              # CHECK: srl $2, $2, 7          # encoding: [0x00,0x02,0x11,0xc2]
-	srlv  $t9,$a0              # CHECK: srlv $25, $25, $4      # encoding: [0x00,0x99,0xc8,0x06]
+	srl   $t9,$s4,$a0          # CHECK: srlv $25, $20, $4      # encoding: [0x00,0x94,0xc8,0x06]
 	srlv  $t9,$s4,$a0          # CHECK: srlv $25, $20, $4      # encoding: [0x00,0x94,0xc8,0x06]
 	ssnop                      # CHECK: ssnop                  # encoding: [0x00,0x00,0x00,0x40]
 	sub	$s6,$s3,$t4

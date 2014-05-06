@@ -1505,6 +1505,15 @@ class MSA_INSERT_PSEUDO_BASE<SDPatternOperator OpNode, ValueType Ty,
   string Constraints = "$wd = $wd_in";
 }
 
+class MSA_INSERT_VIDX_PSEUDO_BASE<SDPatternOperator OpNode, ValueType Ty,
+                                  RegisterOperand ROWD, RegisterOperand ROFS> :
+      MSAPseudo<(outs ROWD:$wd), (ins ROWD:$wd_in, GPR32Opnd:$n, ROFS:$fs),
+                [(set ROWD:$wd, (OpNode (Ty ROWD:$wd_in), ROFS:$fs,
+                                        GPR32Opnd:$n))]> {
+  bit usesCustomInserter = 1;
+  string Constraints = "$wd = $wd_in";
+}
+
 class MSA_INSVE_DESC_BASE<string instr_asm, SDPatternOperator OpNode,
                           RegisterOperand ROWD, RegisterOperand ROWS = ROWD,
                           InstrItinClass itin = NoItinerary> {
@@ -2300,10 +2309,24 @@ class INSERT_W_DESC : MSA_INSERT_DESC_BASE<"insert.w", vinsert_v4i32,
 class INSERT_D_DESC : MSA_INSERT_DESC_BASE<"insert.d", vinsert_v2i64,
                                            MSA128DOpnd, GPR64Opnd>;
 
+class INSERT_B_VIDX_PSEUDO_DESC :
+    MSA_INSERT_VIDX_PSEUDO_BASE<vector_insert, v16i8, MSA128BOpnd, GPR32Opnd>;
+class INSERT_H_VIDX_PSEUDO_DESC :
+    MSA_INSERT_VIDX_PSEUDO_BASE<vector_insert, v8i16, MSA128HOpnd, GPR32Opnd>;
+class INSERT_W_VIDX_PSEUDO_DESC :
+    MSA_INSERT_VIDX_PSEUDO_BASE<vector_insert, v4i32, MSA128WOpnd, GPR32Opnd>;
+class INSERT_D_VIDX_PSEUDO_DESC :
+    MSA_INSERT_VIDX_PSEUDO_BASE<vector_insert, v2i64, MSA128DOpnd, GPR64Opnd>;
+
 class INSERT_FW_PSEUDO_DESC : MSA_INSERT_PSEUDO_BASE<vector_insert, v4f32,
                                                      MSA128WOpnd, FGR32Opnd>;
 class INSERT_FD_PSEUDO_DESC : MSA_INSERT_PSEUDO_BASE<vector_insert, v2f64,
                                                      MSA128DOpnd, FGR64Opnd>;
+
+class INSERT_FW_VIDX_PSEUDO_DESC :
+    MSA_INSERT_VIDX_PSEUDO_BASE<vector_insert, v4f32, MSA128WOpnd, FGR32Opnd>;
+class INSERT_FD_VIDX_PSEUDO_DESC :
+    MSA_INSERT_VIDX_PSEUDO_BASE<vector_insert, v2f64, MSA128DOpnd, FGR64Opnd>;
 
 class INSVE_B_DESC : MSA_INSVE_DESC_BASE<"insve.b", insve_v16i8,
                                          MSA128BOpnd>;
@@ -3214,6 +3237,13 @@ let DecoderMethod = "DecodeINSVE_DF" in {
 def INSERT_FW_PSEUDO : INSERT_FW_PSEUDO_DESC;
 def INSERT_FD_PSEUDO : INSERT_FD_PSEUDO_DESC;
 
+def INSERT_B_VIDX_PSEUDO : INSERT_B_VIDX_PSEUDO_DESC;
+def INSERT_H_VIDX_PSEUDO : INSERT_H_VIDX_PSEUDO_DESC;
+def INSERT_W_VIDX_PSEUDO : INSERT_W_VIDX_PSEUDO_DESC;
+def INSERT_D_VIDX_PSEUDO : INSERT_D_VIDX_PSEUDO_DESC;
+def INSERT_FW_VIDX_PSEUDO : INSERT_FW_VIDX_PSEUDO_DESC;
+def INSERT_FD_VIDX_PSEUDO : INSERT_FD_VIDX_PSEUDO_DESC;
+
 def LD_B: LD_B_ENC, LD_B_DESC;
 def LD_H: LD_H_ENC, LD_H_DESC;
 def LD_W: LD_W_ENC, LD_W_DESC;
@@ -3731,3 +3761,55 @@ def SZ_D_PSEUDO : MSA_CBRANCH_PSEUDO_DESC_BASE<MipsVAllZero, v2i64,
                                                MSA128D, NoItinerary>;
 def SZ_V_PSEUDO : MSA_CBRANCH_PSEUDO_DESC_BASE<MipsVAnyZero, v16i8,
                                                MSA128B, NoItinerary>;
+
+// Vector extraction with variable index
+def : MSAPat<(i32 (vextract_sext_i8 v16i8:$ws, i32:$idx)),
+             (SRA (COPY_TO_REGCLASS (i32 (EXTRACT_SUBREG (SPLAT_B v16i8:$ws,
+                                                                  i32:$idx),
+                                                         sub_lo)),
+                                    GPR32), (i32 24))>;
+def : MSAPat<(i32 (vextract_sext_i16 v8i16:$ws, i32:$idx)),
+             (SRA (COPY_TO_REGCLASS (i32 (EXTRACT_SUBREG (SPLAT_H v8i16:$ws,
+                                                                  i32:$idx),
+                                                         sub_lo)),
+                                    GPR32), (i32 16))>;
+def : MSAPat<(i32 (vextract_sext_i32 v4i32:$ws, i32:$idx)),
+             (COPY_TO_REGCLASS (i32 (EXTRACT_SUBREG (SPLAT_W v4i32:$ws,
+                                                             i32:$idx),
+                                                    sub_lo)),
+                               GPR32)>;
+def : MSAPat<(i64 (vextract_sext_i64 v2i64:$ws, i32:$idx)),
+             (COPY_TO_REGCLASS (i64 (EXTRACT_SUBREG (SPLAT_D v2i64:$ws,
+                                                             i32:$idx),
+                                                    sub_64)),
+                               GPR64), [HasMSA, IsGP64bit]>;
+
+def : MSAPat<(i32 (vextract_zext_i8 v16i8:$ws, i32:$idx)),
+             (SRL (COPY_TO_REGCLASS (i32 (EXTRACT_SUBREG (SPLAT_B v16i8:$ws,
+                                                                  i32:$idx),
+                                                         sub_lo)),
+                                    GPR32), (i32 24))>;
+def : MSAPat<(i32 (vextract_zext_i16 v8i16:$ws, i32:$idx)),
+             (SRL (COPY_TO_REGCLASS (i32 (EXTRACT_SUBREG (SPLAT_H v8i16:$ws,
+                                                                  i32:$idx),
+                                                         sub_lo)),
+                                    GPR32), (i32 16))>;
+def : MSAPat<(i32 (vextract_zext_i32 v4i32:$ws, i32:$idx)),
+             (COPY_TO_REGCLASS (i32 (EXTRACT_SUBREG (SPLAT_W v4i32:$ws,
+                                                             i32:$idx),
+                                                    sub_lo)),
+                               GPR32)>;
+def : MSAPat<(i64 (vextract_zext_i64 v2i64:$ws, i32:$idx)),
+             (COPY_TO_REGCLASS (i64 (EXTRACT_SUBREG (SPLAT_D v2i64:$ws,
+                                                             i32:$idx),
+                                                    sub_64)),
+                               GPR64), [HasMSA, IsGP64bit]>;
+
+def : MSAPat<(f32 (vector_extract v4f32:$ws, i32:$idx)),
+             (f32 (EXTRACT_SUBREG (SPLAT_W v4f32:$ws,
+                                           i32:$idx),
+                                  sub_lo))>;
+def : MSAPat<(f64 (vector_extract v2f64:$ws, i32:$idx)),
+             (f64 (EXTRACT_SUBREG (SPLAT_D v2f64:$ws,
+                                           i32:$idx),
+                                  sub_64))>;

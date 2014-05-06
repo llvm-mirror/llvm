@@ -38,11 +38,11 @@ private:
 
 public:
   R600ExpandSpecialInstrsPass(TargetMachine &tm) : MachineFunctionPass(ID),
-    TII(0) { }
+    TII(nullptr) { }
 
-  virtual bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
-  const char *getPassName() const {
+  const char *getPassName() const override {
     return "R600 Expand special instructions pass";
   }
 };

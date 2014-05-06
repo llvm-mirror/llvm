@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dyld"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "JITRegistrar.h"
 #include "ObjectImageCommon.h"
@@ -24,6 +23,8 @@
 
 using namespace llvm;
 using namespace llvm::object;
+
+#define DEBUG_TYPE "dyld"
 
 // Empty out-of-line virtual destructor as the key function.
 RuntimeDyldImpl::~RuntimeDyldImpl() {}
@@ -72,12 +73,40 @@ void RuntimeDyldImpl::mapSectionAddress(const void *LocalAddress,
   llvm_unreachable("Attempting to remap address of unknown section!");
 }
 
+static error_code getOffset(const SymbolRef &Sym, uint64_t &Result) {
+  uint64_t Address;
+  if (error_code EC = Sym.getAddress(Address))
+    return EC;
+
+  if (Address == UnknownAddressOrSize) {
+    Result = UnknownAddressOrSize;
+    return object_error::success;
+  }
+
+  const ObjectFile *Obj = Sym.getObject();
+  section_iterator SecI(Obj->section_begin());
+  if (error_code EC = Sym.getSection(SecI))
+    return EC;
+
+ if (SecI == Obj->section_end()) {
+   Result = UnknownAddressOrSize;
+   return object_error::success;
+ }
+
+  uint64_t SectionAddress;
+  if (error_code EC = SecI->getAddress(SectionAddress))
+    return EC;
+
+  Result = Address - SectionAddress;
+  return object_error::success;
+}
+
 ObjectImage *RuntimeDyldImpl::loadObject(ObjectImage *InputObject) {
   MutexGuard locked(lock);
 
   std::unique_ptr<ObjectImage> Obj(InputObject);
   if (!Obj)
-    return NULL;
+    return nullptr;
 
   // Save information about our target
   Arch = (Triple::ArchType)Obj->getArch();
@@ -125,26 +154,21 @@ ObjectImage *RuntimeDyldImpl::loadObject(ObjectImage *InputObject) {
       if (SymType == object::SymbolRef::ST_Function ||
           SymType == object::SymbolRef::ST_Data ||
           SymType == object::SymbolRef::ST_Unknown) {
-        uint64_t FileOffset;
+        uint64_t SectOffset;
         StringRef SectionData;
         bool IsCode;
         section_iterator SI = Obj->end_sections();
-        Check(I->getFileOffset(FileOffset));
+        Check(getOffset(*I, SectOffset));
         Check(I->getSection(SI));
         if (SI == Obj->end_sections())
           continue;
         Check(SI->getContents(SectionData));
         Check(SI->isText(IsCode));
-        const uint8_t *SymPtr =
-            (const uint8_t *)Obj->getData().data() + (uintptr_t)FileOffset;
-        uintptr_t SectOffset =
-            (uintptr_t)(SymPtr - (const uint8_t *)SectionData.begin());
         unsigned SectionID =
             findOrEmitSection(*Obj, *SI, IsCode, LocalSections);
         LocalSymbols[Name.data()] = SymbolLoc(SectionID, SectOffset);
-        DEBUG(dbgs() << "\tFileOffset: " << format("%p", (uintptr_t)FileOffset)
-                     << " flags: " << Flags << " SID: " << SectionID
-                     << " Offset: " << format("%p", SectOffset));
+        DEBUG(dbgs() << "\tOffset: " << format("%p", (uintptr_t)SectOffset)
+                     << " flags: " << Flags << " SID: " << SectionID);
         GlobalSymbolTable[Name] = SymbolLoc(SectionID, SectOffset);
       }
     }
@@ -402,7 +426,7 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
   uintptr_t Allocate;
   unsigned SectionID = Sections.size();
   uint8_t *Addr;
-  const char *pData = 0;
+  const char *pData = nullptr;
 
   // Some sections, such as debug info, don't need to be loaded for execution.
   // Leave those where they are.
@@ -443,7 +467,7 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
     // to handle later processing (and by 'handle' I mean don't do anything
     // with these sections).
     Allocate = 0;
-    Addr = 0;
+    Addr = nullptr;
     DEBUG(dbgs() << "emitSection SectionID: " << SectionID << " Name: " << Name
                  << " obj addr: " << format("%p", data.data()) << " new addr: 0"
                  << " DataSize: " << DataSize << " StubBufSize: " << StubBufSize
@@ -492,7 +516,8 @@ void RuntimeDyldImpl::addRelocationForSymbol(const RelocationEntry &RE,
 }
 
 uint8_t *RuntimeDyldImpl::createStubFunction(uint8_t *Addr) {
-  if (Arch == Triple::aarch64 || Arch == Triple::aarch64_be) {
+  if (Arch == Triple::aarch64 || Arch == Triple::aarch64_be ||
+      Arch == Triple::arm64 || Arch == Triple::arm64_be) {
     // This stub has to be able to access the full address space,
     // since symbol lookup won't necessarily find a handy, in-range,
     // PLT stub for functions which could be anywhere.
@@ -588,7 +613,7 @@ void RuntimeDyldImpl::resolveRelocationList(const RelocationList &Relocs,
   for (unsigned i = 0, e = Relocs.size(); i != e; ++i) {
     const RelocationEntry &RE = Relocs[i];
     // Ignore relocations for sections that were not loaded
-    if (Sections[RE.SectionID].Address == 0)
+    if (Sections[RE.SectionID].Address == nullptr)
       continue;
     resolveRelocation(RE, Value);
   }
@@ -653,7 +678,7 @@ RuntimeDyld::RuntimeDyld(RTDyldMemoryManager *mm) {
   // though the public class spawns a new 'impl' instance for each load,
   // they share a single memory manager.  This can become a problem when page
   // permissions are applied.
-  Dyld = 0;
+  Dyld = nullptr;
   MM = mm;
   ProcessAllSections = false;
 }
@@ -674,21 +699,23 @@ createRuntimeDyldMachO(RTDyldMemoryManager *MM, bool ProcessAllSections) {
   return Dyld;
 }
 
-ObjectImage *RuntimeDyld::loadObject(ObjectFile *InputObject) {
+ObjectImage *RuntimeDyld::loadObject(std::unique_ptr<ObjectFile> InputObject) {
   std::unique_ptr<ObjectImage> InputImage;
 
+  ObjectFile &Obj = *InputObject;
+
   if (InputObject->isELF()) {
-    InputImage.reset(RuntimeDyldELF::createObjectImageFromFile(InputObject));
+    InputImage.reset(RuntimeDyldELF::createObjectImageFromFile(std::move(InputObject)));
     if (!Dyld)
       Dyld = createRuntimeDyldELF(MM, ProcessAllSections).release();
   } else if (InputObject->isMachO()) {
-    InputImage.reset(RuntimeDyldMachO::createObjectImageFromFile(InputObject));
+    InputImage.reset(RuntimeDyldMachO::createObjectImageFromFile(std::move(InputObject)));
     if (!Dyld)
       Dyld = createRuntimeDyldMachO(MM, ProcessAllSections).release();
   } else
     report_fatal_error("Incompatible object format!");
 
-  if (!Dyld->isCompatibleFile(InputObject))
+  if (!Dyld->isCompatibleFile(&Obj))
     report_fatal_error("Incompatible object format!");
 
   Dyld->loadObject(InputImage.get());
@@ -742,7 +769,7 @@ ObjectImage *RuntimeDyld::loadObject(ObjectBuffer *InputBuffer) {
 
 void *RuntimeDyld::getSymbolAddress(StringRef Name) {
   if (!Dyld)
-    return NULL;
+    return nullptr;
   return Dyld->getSymbolAddress(Name);
 }
 

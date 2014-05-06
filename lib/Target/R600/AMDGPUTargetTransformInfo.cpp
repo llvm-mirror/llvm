@@ -15,7 +15,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "AMDGPUtti"
 #include "AMDGPU.h"
 #include "AMDGPUTargetMachine.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -25,6 +24,8 @@
 #include "llvm/Target/CostTable.h"
 #include "llvm/Target/TargetLowering.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "AMDGPUtti"
 
 // Declare the pass initialization routine locally as target-specific passes
 // don't have a target-wide initialization entry point, and so we rely on the
@@ -45,7 +46,7 @@ class AMDGPUTTI final : public ImmutablePass, public TargetTransformInfo {
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
 public:
-  AMDGPUTTI() : ImmutablePass(ID), TM(0), ST(0), TLI(0) {
+  AMDGPUTTI() : ImmutablePass(ID), TM(nullptr), ST(nullptr), TLI(nullptr) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
@@ -55,9 +56,9 @@ public:
     initializeAMDGPUTTIPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual void initializePass() override { pushTTIStack(this); }
+  void initializePass() override { pushTTIStack(this); }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     TargetTransformInfo::getAnalysisUsage(AU);
   }
 
@@ -65,15 +66,16 @@ public:
   static char ID;
 
   /// Provide necessary pointer adjustments for the two base classes.
-  virtual void *getAdjustedAnalysisPointer(const void *ID) override {
+  void *getAdjustedAnalysisPointer(const void *ID) override {
     if (ID == &TargetTransformInfo::ID)
       return (TargetTransformInfo *)this;
     return this;
   }
 
-  virtual bool hasBranchDivergence() const override;
+  bool hasBranchDivergence() const override;
 
-  virtual void getUnrollingPreferences(Loop *L, UnrollingPreferences &UP) const;
+  void getUnrollingPreferences(Loop *L,
+                               UnrollingPreferences &UP) const override;
 
   /// @}
 };

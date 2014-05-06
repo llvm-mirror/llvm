@@ -75,7 +75,7 @@ static bool IsPTXVectorType(MVT VT) {
 /// LowerCall, and LowerReturn.
 static void ComputePTXValueVTs(const TargetLowering &TLI, Type *Ty,
                                SmallVectorImpl<EVT> &ValueVTs,
-                               SmallVectorImpl<uint64_t> *Offsets = 0,
+                               SmallVectorImpl<uint64_t> *Offsets = nullptr,
                                uint64_t StartingOffset = 0) {
   SmallVector<EVT, 16> TempVTs;
   SmallVector<uint64_t, 16> TempOffsets;
@@ -245,7 +245,7 @@ NVPTXTargetLowering::NVPTXTargetLowering(NVPTXTargetMachine &TM)
 const char *NVPTXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   default:
-    return 0;
+    return nullptr;
   case NVPTXISD::CALL:
     return "NVPTXISD::CALL";
   case NVPTXISD::RET_FLAG:
@@ -685,7 +685,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                       DAG.getConstant(paramCount, MVT::i32),
                                       DAG.getConstant(sz, MVT::i32), InFlag };
         Chain = DAG.getNode(NVPTXISD::DeclareParam, dl, DeclareParamVTs,
-                            DeclareParamOps, 5);
+                            DeclareParamOps);
         InFlag = Chain.getValue(1);
         unsigned curOffset = 0;
         for (unsigned j = 0, je = vtparts.size(); j != je; ++j) {
@@ -709,7 +709,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                        DAG.getConstant(curOffset, MVT::i32),
                                        StVal, InFlag };
             Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreParam, dl,
-                                            CopyParamVTs, &CopyParamOps[0], 5,
+                                            CopyParamVTs, CopyParamOps,
                                             elemtype, MachinePointerInfo());
             InFlag = Chain.getValue(1);
             curOffset += sz / 8;
@@ -731,7 +731,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                       DAG.getConstant(paramCount, MVT::i32),
                                       DAG.getConstant(sz, MVT::i32), InFlag };
         Chain = DAG.getNode(NVPTXISD::DeclareParam, dl, DeclareParamVTs,
-                            DeclareParamOps, 5);
+                            DeclareParamOps);
         InFlag = Chain.getValue(1);
         unsigned NumElts = ObjectVT.getVectorNumElements();
         EVT EltVT = ObjectVT.getVectorElementType();
@@ -754,7 +754,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                      DAG.getConstant(0, MVT::i32), Elt,
                                      InFlag };
           Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreParam, dl,
-                                          CopyParamVTs, &CopyParamOps[0], 5,
+                                          CopyParamVTs, CopyParamOps,
                                           MemVT, MachinePointerInfo());
           InFlag = Chain.getValue(1);
         } else if (NumElts == 2) {
@@ -771,7 +771,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                      DAG.getConstant(0, MVT::i32), Elt0, Elt1,
                                      InFlag };
           Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreParamV2, dl,
-                                          CopyParamVTs, &CopyParamOps[0], 6,
+                                          CopyParamVTs, CopyParamOps,
                                           MemVT, MachinePointerInfo());
           InFlag = Chain.getValue(1);
         } else {
@@ -845,9 +845,8 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
             Ops.push_back(InFlag);
 
             SDVTList CopyParamVTs = DAG.getVTList(MVT::Other, MVT::Glue);
-            Chain = DAG.getMemIntrinsicNode(Opc, dl, CopyParamVTs, &Ops[0],
-                                            Ops.size(), MemVT,
-                                            MachinePointerInfo());
+            Chain = DAG.getMemIntrinsicNode(Opc, dl, CopyParamVTs, Ops,
+                                            MemVT, MachinePointerInfo());
             InFlag = Chain.getValue(1);
             curOffset += PerStoreOffset;
           }
@@ -872,7 +871,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                     DAG.getConstant(sz, MVT::i32),
                                     DAG.getConstant(0, MVT::i32), InFlag };
       Chain = DAG.getNode(NVPTXISD::DeclareScalarParam, dl, DeclareParamVTs,
-                          DeclareParamOps, 5);
+                          DeclareParamOps);
       InFlag = Chain.getValue(1);
       SDValue OutV = OutVals[OIdx];
       if (needExtend) {
@@ -891,7 +890,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         opcode = NVPTXISD::StoreParamU32;
       else if (Outs[OIdx].Flags.isSExt())
         opcode = NVPTXISD::StoreParamS32;
-      Chain = DAG.getMemIntrinsicNode(opcode, dl, CopyParamVTs, CopyParamOps, 5,
+      Chain = DAG.getMemIntrinsicNode(opcode, dl, CopyParamVTs, CopyParamOps,
                                       VT, MachinePointerInfo());
 
       InFlag = Chain.getValue(1);
@@ -916,7 +915,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       InFlag
     };
     Chain = DAG.getNode(NVPTXISD::DeclareParam, dl, DeclareParamVTs,
-                        DeclareParamOps, 5);
+                        DeclareParamOps);
     InFlag = Chain.getValue(1);
     unsigned curOffset = 0;
     for (unsigned j = 0, je = vtparts.size(); j != je; ++j) {
@@ -944,7 +943,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                    DAG.getConstant(curOffset, MVT::i32), theVal,
                                    InFlag };
         Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreParam, dl, CopyParamVTs,
-                                        CopyParamOps, 5, elemtype,
+                                        CopyParamOps, elemtype,
                                         MachinePointerInfo());
 
         InFlag = Chain.getValue(1);
@@ -975,7 +974,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                   DAG.getConstant(resultsz, MVT::i32),
                                   DAG.getConstant(0, MVT::i32), InFlag };
       Chain = DAG.getNode(NVPTXISD::DeclareRet, dl, DeclareRetVTs,
-                          DeclareRetOps, 5);
+                          DeclareRetOps);
       InFlag = Chain.getValue(1);
     } else {
       retAlignment = getArgumentAlignment(Callee, CS, retTy, 0);
@@ -985,7 +984,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                   DAG.getConstant(resultsz / 8, MVT::i32),
                                   DAG.getConstant(0, MVT::i32), InFlag };
       Chain = DAG.getNode(NVPTXISD::DeclareRetParam, dl, DeclareRetVTs,
-                          DeclareRetOps, 5);
+                          DeclareRetOps);
       InFlag = Chain.getValue(1);
     }
   }
@@ -1005,7 +1004,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     SDValue ProtoOps[] = {
       Chain, DAG.getTargetExternalSymbol(ProtoStr, MVT::i32), InFlag,
     };
-    Chain = DAG.getNode(NVPTXISD::CallPrototype, dl, ProtoVTs, &ProtoOps[0], 3);
+    Chain = DAG.getNode(NVPTXISD::CallPrototype, dl, ProtoVTs, ProtoOps);
     InFlag = Chain.getValue(1);
   }
   // Op to just print "call"
@@ -1014,20 +1013,20 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     Chain, DAG.getConstant((Ins.size() == 0) ? 0 : 1, MVT::i32), InFlag
   };
   Chain = DAG.getNode(Func ? (NVPTXISD::PrintCallUni) : (NVPTXISD::PrintCall),
-                      dl, PrintCallVTs, PrintCallOps, 3);
+                      dl, PrintCallVTs, PrintCallOps);
   InFlag = Chain.getValue(1);
 
   // Ops to print out the function name
   SDVTList CallVoidVTs = DAG.getVTList(MVT::Other, MVT::Glue);
   SDValue CallVoidOps[] = { Chain, Callee, InFlag };
-  Chain = DAG.getNode(NVPTXISD::CallVoid, dl, CallVoidVTs, CallVoidOps, 3);
+  Chain = DAG.getNode(NVPTXISD::CallVoid, dl, CallVoidVTs, CallVoidOps);
   InFlag = Chain.getValue(1);
 
   // Ops to print out the param list
   SDVTList CallArgBeginVTs = DAG.getVTList(MVT::Other, MVT::Glue);
   SDValue CallArgBeginOps[] = { Chain, InFlag };
   Chain = DAG.getNode(NVPTXISD::CallArgBegin, dl, CallArgBeginVTs,
-                      CallArgBeginOps, 2);
+                      CallArgBeginOps);
   InFlag = Chain.getValue(1);
 
   for (unsigned i = 0, e = paramCount; i != e; ++i) {
@@ -1039,21 +1038,20 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     SDVTList CallArgVTs = DAG.getVTList(MVT::Other, MVT::Glue);
     SDValue CallArgOps[] = { Chain, DAG.getConstant(1, MVT::i32),
                              DAG.getConstant(i, MVT::i32), InFlag };
-    Chain = DAG.getNode(opcode, dl, CallArgVTs, CallArgOps, 4);
+    Chain = DAG.getNode(opcode, dl, CallArgVTs, CallArgOps);
     InFlag = Chain.getValue(1);
   }
   SDVTList CallArgEndVTs = DAG.getVTList(MVT::Other, MVT::Glue);
   SDValue CallArgEndOps[] = { Chain, DAG.getConstant(Func ? 1 : 0, MVT::i32),
                               InFlag };
-  Chain =
-      DAG.getNode(NVPTXISD::CallArgEnd, dl, CallArgEndVTs, CallArgEndOps, 3);
+  Chain = DAG.getNode(NVPTXISD::CallArgEnd, dl, CallArgEndVTs, CallArgEndOps);
   InFlag = Chain.getValue(1);
 
   if (!Func) {
     SDVTList PrototypeVTs = DAG.getVTList(MVT::Other, MVT::Glue);
     SDValue PrototypeOps[] = { Chain, DAG.getConstant(uniqueCallSite, MVT::i32),
                                InFlag };
-    Chain = DAG.getNode(NVPTXISD::Prototype, dl, PrototypeVTs, PrototypeOps, 3);
+    Chain = DAG.getNode(NVPTXISD::Prototype, dl, PrototypeVTs, PrototypeOps);
     InFlag = Chain.getValue(1);
   }
 
@@ -1072,7 +1070,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
       if (NumElts == 1) {
         // Just a simple load
-        std::vector<EVT> LoadRetVTs;
+        SmallVector<EVT, 4> LoadRetVTs;
         if (needTruncate) {
           // If loading i1 result, generate
           //   load i16
@@ -1082,15 +1080,14 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
           LoadRetVTs.push_back(EltVT);
         LoadRetVTs.push_back(MVT::Other);
         LoadRetVTs.push_back(MVT::Glue);
-        std::vector<SDValue> LoadRetOps;
+        SmallVector<SDValue, 4> LoadRetOps;
         LoadRetOps.push_back(Chain);
         LoadRetOps.push_back(DAG.getConstant(1, MVT::i32));
         LoadRetOps.push_back(DAG.getConstant(0, MVT::i32));
         LoadRetOps.push_back(InFlag);
         SDValue retval = DAG.getMemIntrinsicNode(
             NVPTXISD::LoadParam, dl,
-            DAG.getVTList(LoadRetVTs), &LoadRetOps[0],
-            LoadRetOps.size(), EltVT, MachinePointerInfo());
+            DAG.getVTList(LoadRetVTs), LoadRetOps, EltVT, MachinePointerInfo());
         Chain = retval.getValue(1);
         InFlag = retval.getValue(2);
         SDValue Ret0 = retval;
@@ -1099,7 +1096,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         InVals.push_back(Ret0);
       } else if (NumElts == 2) {
         // LoadV2
-        std::vector<EVT> LoadRetVTs;
+        SmallVector<EVT, 4> LoadRetVTs;
         if (needTruncate) {
           // If loading i1 result, generate
           //   load i16
@@ -1112,15 +1109,14 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         }
         LoadRetVTs.push_back(MVT::Other);
         LoadRetVTs.push_back(MVT::Glue);
-        std::vector<SDValue> LoadRetOps;
+        SmallVector<SDValue, 4> LoadRetOps;
         LoadRetOps.push_back(Chain);
         LoadRetOps.push_back(DAG.getConstant(1, MVT::i32));
         LoadRetOps.push_back(DAG.getConstant(0, MVT::i32));
         LoadRetOps.push_back(InFlag);
         SDValue retval = DAG.getMemIntrinsicNode(
             NVPTXISD::LoadParamV2, dl,
-            DAG.getVTList(LoadRetVTs), &LoadRetOps[0],
-            LoadRetOps.size(), EltVT, MachinePointerInfo());
+            DAG.getVTList(LoadRetVTs), LoadRetOps, EltVT, MachinePointerInfo());
         Chain = retval.getValue(2);
         InFlag = retval.getValue(3);
         SDValue Ret0 = retval.getValue(0);
@@ -1165,7 +1161,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
           LoadRetOps.push_back(InFlag);
           SDValue retval = DAG.getMemIntrinsicNode(
               Opc, dl, DAG.getVTList(LoadRetVTs),
-              &LoadRetOps[0], LoadRetOps.size(), EltVT, MachinePointerInfo());
+              LoadRetOps, EltVT, MachinePointerInfo());
           if (VecSize == 2) {
             Chain = retval.getValue(2);
             InFlag = retval.getValue(3);
@@ -1220,8 +1216,8 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         LoadRetOps.push_back(InFlag);
         SDValue retval = DAG.getMemIntrinsicNode(
             NVPTXISD::LoadParam, dl,
-            DAG.getVTList(LoadRetVTs), &LoadRetOps[0],
-            LoadRetOps.size(), TheLoadType, MachinePointerInfo());
+            DAG.getVTList(LoadRetVTs), LoadRetOps,
+            TheLoadType, MachinePointerInfo());
         Chain = retval.getValue(1);
         InFlag = retval.getValue(2);
         SDValue Ret0 = retval.getValue(0);
@@ -1263,8 +1259,7 @@ NVPTXTargetLowering::LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const {
                                 DAG.getIntPtrConstant(j)));
     }
   }
-  return DAG.getNode(ISD::BUILD_VECTOR, dl, Node->getValueType(0), &Ops[0],
-                     Ops.size());
+  return DAG.getNode(ISD::BUILD_VECTOR, dl, Node->getValueType(0), Ops);
 }
 
 SDValue
@@ -1319,7 +1314,7 @@ SDValue NVPTXTargetLowering::LowerLOADi1(SDValue Op, SelectionDAG &DAG) const {
   // load, so we build a MergeValues node for it. See ExpandUnalignedLoad()
   // in LegalizeDAG.cpp which also uses MergeValues.
   SDValue Ops[] = { result, LD->getChain() };
-  return DAG.getMergeValues(Ops, 2, dl);
+  return DAG.getMergeValues(Ops, dl);
 }
 
 SDValue NVPTXTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
@@ -1407,7 +1402,7 @@ NVPTXTargetLowering::LowerSTOREVector(SDValue Op, SelectionDAG &DAG) const {
     MemSDNode *MemSD = cast<MemSDNode>(N);
 
     SDValue NewSt = DAG.getMemIntrinsicNode(
-        Opcode, DL, DAG.getVTList(MVT::Other), &Ops[0], Ops.size(),
+        Opcode, DL, DAG.getVTList(MVT::Other), Ops,
         MemSD->getMemoryVT(), MemSD->getMemOperand());
 
     //return DCI.CombineTo(N, NewSt, true);
@@ -1539,7 +1534,7 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
     if (isImageOrSamplerVal(
             theArgs[i],
             (theArgs[i]->getParent() ? theArgs[i]->getParent()->getParent()
-                                     : 0))) {
+                                     : nullptr))) {
       assert(isKernel && "Only kernels can have image/sampler params");
       InVals.push_back(DAG.getConstant(i + 1, MVT::i32));
       continue;
@@ -1793,8 +1788,7 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
   //}
 
   if (!OutChains.empty())
-    DAG.setRoot(DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &OutChains[0],
-                            OutChains.size()));
+    DAG.setRoot(DAG.getNode(ISD::TokenFactor, dl, MVT::Other, OutChains));
 
   return Chain;
 }
@@ -1836,7 +1830,7 @@ NVPTXTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
         StoreVal = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i16, StoreVal);
       SDValue Ops[] = { Chain, DAG.getConstant(0, MVT::i32), StoreVal };
       Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreRetval, dl,
-                                      DAG.getVTList(MVT::Other), &Ops[0], 3,
+                                      DAG.getVTList(MVT::Other), Ops,
                                       EltVT, MachinePointerInfo());
 
     } else if (NumElts == 2) {
@@ -1852,7 +1846,7 @@ NVPTXTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
       SDValue Ops[] = { Chain, DAG.getConstant(0, MVT::i32), StoreVal0,
                         StoreVal1 };
       Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreRetvalV2, dl,
-                                      DAG.getVTList(MVT::Other), &Ops[0], 4,
+                                      DAG.getVTList(MVT::Other), Ops,
                                       EltVT, MachinePointerInfo());
     } else {
       // V4 stores
@@ -1924,8 +1918,8 @@ NVPTXTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
 
         // Chain = DAG.getNode(Opc, dl, MVT::Other, &Ops[0], Ops.size());
         Chain =
-            DAG.getMemIntrinsicNode(Opc, dl, DAG.getVTList(MVT::Other), &Ops[0],
-                                    Ops.size(), EltVT, MachinePointerInfo());
+            DAG.getMemIntrinsicNode(Opc, dl, DAG.getVTList(MVT::Other), Ops,
+                                    EltVT, MachinePointerInfo());
         Offset += PerStoreOffset;
       }
     }
@@ -1962,8 +1956,8 @@ NVPTXTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
 
         SDValue Ops[] = { Chain, DAG.getConstant(SizeSoFar, MVT::i32), TmpVal };
         Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreRetval, dl,
-                                        DAG.getVTList(MVT::Other), &Ops[0],
-                                        3, TheStoreType,
+                                        DAG.getVTList(MVT::Other), Ops,
+                                        TheStoreType,
                                         MachinePointerInfo());
         if(TheValType.isVector())
           SizeSoFar += 
@@ -2265,7 +2259,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
   case Intrinsic::nvvm_tex_3d_grad_v4f32_f32: {
     Info.opc = getOpcForTextureInstr(Intrinsic);
     Info.memVT = MVT::f32;
-    Info.ptrVal = NULL;
+    Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.vol = 0;
     Info.readMem = true;
@@ -2295,7 +2289,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
   case Intrinsic::nvvm_tex_3d_grad_v4i32_f32: {
     Info.opc = getOpcForTextureInstr(Intrinsic);
     Info.memVT = MVT::i32;
-    Info.ptrVal = NULL;
+    Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.vol = 0;
     Info.readMem = true;
@@ -2320,7 +2314,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
   case Intrinsic::nvvm_suld_3d_v4i8_trap: {
     Info.opc = getOpcForSurfaceInstr(Intrinsic);
     Info.memVT = MVT::i8;
-    Info.ptrVal = NULL;
+    Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.vol = 0;
     Info.readMem = true;
@@ -2345,7 +2339,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
   case Intrinsic::nvvm_suld_3d_v4i16_trap: {
     Info.opc = getOpcForSurfaceInstr(Intrinsic);
     Info.memVT = MVT::i16;
-    Info.ptrVal = NULL;
+    Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.vol = 0;
     Info.readMem = true;
@@ -2370,7 +2364,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
   case Intrinsic::nvvm_suld_3d_v4i32_trap: {
     Info.opc = getOpcForSurfaceInstr(Intrinsic);
     Info.memVT = MVT::i32;
-    Info.ptrVal = NULL;
+    Info.ptrVal = nullptr;
     Info.offset = 0;
     Info.vol = 0;
     Info.readMem = true;
@@ -2546,8 +2540,8 @@ static void ReplaceLoadVector(SDNode *N, SelectionDAG &DAG,
   // pass along the extension information
   OtherOps.push_back(DAG.getIntPtrConstant(LD->getExtensionType()));
 
-  SDValue NewLD = DAG.getMemIntrinsicNode(Opcode, DL, LdResVTs, &OtherOps[0],
-                                          OtherOps.size(), LD->getMemoryVT(),
+  SDValue NewLD = DAG.getMemIntrinsicNode(Opcode, DL, LdResVTs, OtherOps,
+                                          LD->getMemoryVT(),
                                           LD->getMemOperand());
 
   SmallVector<SDValue, 4> ScalarRes;
@@ -2561,8 +2555,7 @@ static void ReplaceLoadVector(SDNode *N, SelectionDAG &DAG,
 
   SDValue LoadChain = NewLD.getValue(NumElts);
 
-  SDValue BuildVec =
-      DAG.getNode(ISD::BUILD_VECTOR, DL, ResVT, &ScalarRes[0], NumElts);
+  SDValue BuildVec = DAG.getNode(ISD::BUILD_VECTOR, DL, ResVT, ScalarRes);
 
   Results.push_back(BuildVec);
   Results.push_back(LoadChain);
@@ -2659,9 +2652,9 @@ static void ReplaceINTRINSIC_W_CHAIN(SDNode *N, SelectionDAG &DAG,
 
       MemIntrinsicSDNode *MemSD = cast<MemIntrinsicSDNode>(N);
 
-      SDValue NewLD = DAG.getMemIntrinsicNode(
-          Opcode, DL, LdResVTs, &OtherOps[0], OtherOps.size(),
-          MemSD->getMemoryVT(), MemSD->getMemOperand());
+      SDValue NewLD = DAG.getMemIntrinsicNode(Opcode, DL, LdResVTs, OtherOps,
+                                              MemSD->getMemoryVT(),
+                                              MemSD->getMemOperand());
 
       SmallVector<SDValue, 4> ScalarRes;
 
@@ -2676,7 +2669,7 @@ static void ReplaceINTRINSIC_W_CHAIN(SDNode *N, SelectionDAG &DAG,
       SDValue LoadChain = NewLD.getValue(NumElts);
 
       SDValue BuildVec =
-          DAG.getNode(ISD::BUILD_VECTOR, DL, ResVT, &ScalarRes[0], NumElts);
+          DAG.getNode(ISD::BUILD_VECTOR, DL, ResVT, ScalarRes);
 
       Results.push_back(BuildVec);
       Results.push_back(LoadChain);
@@ -2698,8 +2691,8 @@ static void ReplaceINTRINSIC_W_CHAIN(SDNode *N, SelectionDAG &DAG,
       // We make sure the memory type is i8, which will be used during isel
       // to select the proper instruction.
       SDValue NewLD =
-          DAG.getMemIntrinsicNode(ISD::INTRINSIC_W_CHAIN, DL, LdResVTs, &Ops[0],
-                                  Ops.size(), MVT::i8, MemSD->getMemOperand());
+          DAG.getMemIntrinsicNode(ISD::INTRINSIC_W_CHAIN, DL, LdResVTs, Ops,
+                                  MVT::i8, MemSD->getMemOperand());
 
       Results.push_back(DAG.getNode(ISD::TRUNCATE, DL, MVT::i8,
                                     NewLD.getValue(0)));

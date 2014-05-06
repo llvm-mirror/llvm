@@ -7,7 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "structurizecfg"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SCCIterator.h"
@@ -20,6 +19,8 @@
 
 using namespace llvm;
 using namespace llvm::PatternMatch;
+
+#define DEBUG_TYPE "structurizecfg"
 
 namespace {
 
@@ -64,14 +65,14 @@ public:
   /// \brief Start a new query
   NearestCommonDominator(DominatorTree *DomTree) {
     DT = DomTree;
-    Result = 0;
+    Result = nullptr;
   }
 
   /// \brief Add BB to the resulting dominator
   void addBlock(BasicBlock *BB, bool Remember = true) {
     DomTreeNode *Node = DT->getNode(BB);
 
-    if (Result == 0) {
+    if (!Result) {
       unsigned Numbering = 0;
       for (;Node;Node = Node->getIDom())
         IndexMap[Node] = ++Numbering;
@@ -279,7 +280,7 @@ bool StructurizeCFG::doInitialization(Region *R, RGPassManager &RGM) {
 void StructurizeCFG::orderNodes() {
   scc_iterator<Region *> I = scc_begin(ParentRegion);
   for (Order.clear(); !I.isAtEnd(); ++I) {
-    std::vector<RegionNode *> &Nodes = *I;
+    const std::vector<RegionNode *> &Nodes = *I;
     Order.append(Nodes.begin(), Nodes.end());
   }
 }
@@ -472,7 +473,7 @@ void StructurizeCFG::insertConditions(bool Loops) {
     NearestCommonDominator Dominator(DT);
     Dominator.addBlock(Parent, false);
 
-    Value *ParentValue = 0;
+    Value *ParentValue = nullptr;
     for (BBPredicates::iterator PI = Preds.begin(), PE = Preds.end();
          PI != PE; ++PI) {
 
@@ -591,7 +592,7 @@ void StructurizeCFG::changeExit(RegionNode *Node, BasicBlock *NewExit,
   if (Node->isSubRegion()) {
     Region *SubRegion = Node->getNodeAs<Region>();
     BasicBlock *OldExit = SubRegion->getExit();
-    BasicBlock *Dominator = 0;
+    BasicBlock *Dominator = nullptr;
 
     // Find all the edges from the sub region to the exit
     for (pred_iterator I = pred_begin(OldExit), E = pred_end(OldExit);
@@ -678,7 +679,8 @@ BasicBlock *StructurizeCFG::needPostfix(BasicBlock *Flow,
 
 /// \brief Set the previous node
 void StructurizeCFG::setPrevNode(BasicBlock *BB) {
-  PrevNode =  ParentRegion->contains(BB) ? ParentRegion->getBBNode(BB) : 0;
+  PrevNode = ParentRegion->contains(BB) ? ParentRegion->getBBNode(BB)
+                                        : nullptr;
 }
 
 /// \brief Does BB dominate all the predicates of Node ?
@@ -699,7 +701,7 @@ bool StructurizeCFG::isPredictableTrue(RegionNode *Node) {
   bool Dominated = false;
 
   // Regionentry is always true
-  if (PrevNode == 0)
+  if (!PrevNode)
     return true;
 
   for (BBPredicates::iterator I = Preds.begin(), E = Preds.end();
@@ -806,11 +808,11 @@ void StructurizeCFG::createFlow() {
   Conditions.clear();
   LoopConds.clear();
 
-  PrevNode = 0;
+  PrevNode = nullptr;
   Visited.clear();
 
   while (!Order.empty()) {
-    handleLoops(EntryDominatesExit, 0);
+    handleLoops(EntryDominatesExit, nullptr);
   }
 
   if (PrevNode)

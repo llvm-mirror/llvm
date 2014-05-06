@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mips-subtarget"
-
 #include "MipsMachineFunction.h"
 #include "Mips.h"
 #include "MipsRegisterInfo.h"
@@ -25,12 +23,13 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 
+using namespace llvm;
+
+#define DEBUG_TYPE "mips-subtarget"
+
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "MipsGenSubtargetInfo.inc"
-
-
-using namespace llvm;
 
 // FIXME: Maybe this should be on by default when Mips16 is specified
 //

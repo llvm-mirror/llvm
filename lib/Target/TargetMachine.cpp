@@ -21,6 +21,7 @@
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeGenInfo.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCTargetOptions.h"
 #include "llvm/MC/SectionKind.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetLowering.h"
@@ -53,7 +54,7 @@ TargetMachine::TargetMachine(const Target &T,
                              StringRef TT, StringRef CPU, StringRef FS,
                              const TargetOptions &Options)
   : TheTarget(T), TargetTriple(TT), TargetCPU(CPU), TargetFS(FS),
-    CodeGenInfo(0), AsmInfo(0),
+    CodeGenInfo(nullptr), AsmInfo(nullptr),
     MCRelaxAll(false),
     MCNoExecStack(false),
     MCSaveTempLabels(false),
@@ -89,6 +90,8 @@ void TargetMachine::resetTargetOptions(const MachineFunction *MF) const {
   RESET_OPTION(NoNaNsFPMath, "no-nans-fp-math");
   RESET_OPTION(UseSoftFloat, "use-soft-float");
   RESET_OPTION(DisableTailCalls, "disable-tail-calls");
+
+  TO.MCOptions.SanitizeAddress = F->hasFnAttribute(Attribute::SanitizeAddress);
 }
 
 /// getRelocationModel - Returns the code generation relocation model. The

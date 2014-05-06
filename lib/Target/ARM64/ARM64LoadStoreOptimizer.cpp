@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm64-ldst-opt"
 #include "ARM64InstrInfo.h"
 #include "MCTargetDesc/ARM64AddressingModes.h"
 #include "llvm/ADT/BitVector.h"
@@ -29,6 +28,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/ADT/Statistic.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "arm64-ldst-opt"
 
 /// ARM64AllocLoadStoreOpt - Post-register allocation pass to combine
 /// load / store instructions to form ldp / stp instructions.
@@ -100,9 +101,9 @@ struct ARM64LoadStoreOpt : public MachineFunctionPass {
 
   bool optimizeBlock(MachineBasicBlock &MBB);
 
-  virtual bool runOnMachineFunction(MachineFunction &Fn);
+  bool runOnMachineFunction(MachineFunction &Fn) override;
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "ARM64 load / store optimization pass";
   }
 

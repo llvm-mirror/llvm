@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "correlated-value-propagation"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/InstructionSimplify.h"
@@ -25,6 +24,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "correlated-value-propagation"
 
 STATISTIC(NumPhis,      "Number of phis propagated");
 STATISTIC(NumSelects,   "Number of selects propagated");
@@ -138,7 +139,7 @@ bool CorrelatedValuePropagation::processPHI(PHINode *P) {
 }
 
 bool CorrelatedValuePropagation::processMemAccess(Instruction *I) {
-  Value *Pointer = 0;
+  Value *Pointer = nullptr;
   if (LoadInst *L = dyn_cast<LoadInst>(I))
     Pointer = L->getPointerOperand();
   else

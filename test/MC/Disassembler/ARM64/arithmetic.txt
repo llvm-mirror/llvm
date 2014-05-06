@@ -40,8 +40,8 @@
 0x83 0x00 0x40 0x91
 0xff 0x83 0x00 0x91
 
-# CHECK: add w3, w4, #4194304
-# CHECK: add x3, x4, #4194304
+# CHECK: add w3, w4, #1024, lsl #12
+# CHECK: add x3, x4, #1024, lsl #12
 # CHECK: add x3, x4, #0, lsl #12
 # CHECK: add sp, sp, #32
 
@@ -52,9 +52,9 @@
 0xff 0x83 0x00 0xb1
 
 # CHECK: adds w3, w4, #1024
-# CHECK: adds w3, w4, #4194304
+# CHECK: adds w3, w4, #1024, lsl #12
 # CHECK: adds x3, x4, #1024
-# CHECK: adds x3, x4, #4194304
+# CHECK: adds x3, x4, #1024, lsl #12
 # CHECK: cmn  sp, #32
 
 0x83 0x00 0x10 0x51
@@ -64,9 +64,9 @@
 0xff 0x83 0x00 0xd1
 
 # CHECK: sub w3, w4, #1024
-# CHECK: sub w3, w4, #4194304
+# CHECK: sub w3, w4, #1024, lsl #12
 # CHECK: sub x3, x4, #1024
-# CHECK: sub x3, x4, #4194304
+# CHECK: sub x3, x4, #1024, lsl #12
 # CHECK: sub sp, sp, #32
 
 0x83 0x00 0x10 0x71
@@ -76,9 +76,9 @@
 0xff 0x83 0x00 0xf1
 
 # CHECK: subs w3, w4, #1024
-# CHECK: subs w3, w4, #4194304
+# CHECK: subs w3, w4, #1024, lsl #12
 # CHECK: subs x3, x4, #1024
-# CHECK: subs x3, x4, #4194304
+# CHECK: subs x3, x4, #1024, lsl #12
 # CHECK: cmp  sp, #32
 
 #==---------------------------------------------------------------------------==
@@ -368,21 +368,21 @@
 #==---------------------------------------------------------------------------==
 
   0x41 0x28 0xc3 0x1a
-# CHECK: asrv w1, w2, w3
+# CHECK: asr w1, w2, w3
   0x41 0x28 0xc3 0x9a
-# CHECK: asrv x1, x2, x3
+# CHECK: asr x1, x2, x3
   0x41 0x20 0xc3 0x1a
-# CHECK: lslv w1, w2, w3
+# CHECK: lsl w1, w2, w3
   0x41 0x20 0xc3 0x9a
-# CHECK: lslv x1, x2, x3
+# CHECK: lsl x1, x2, x3
   0x41 0x24 0xc3 0x1a
-# CHECK: lsrv w1, w2, w3
+# CHECK: lsr w1, w2, w3
   0x41 0x24 0xc3 0x9a
-# CHECK: lsrv x1, x2, x3
+# CHECK: lsr x1, x2, x3
   0x41 0x2c 0xc3 0x1a
-# CHECK: rorv w1, w2, w3
+# CHECK: ror w1, w2, w3
   0x41 0x2c 0xc3 0x9a
-# CHECK: rorv x1, x2, x3
+# CHECK: ror x1, x2, x3
 
 #==---------------------------------------------------------------------------==
 # One operand instructions
@@ -452,30 +452,30 @@
 0x20 0x00 0xa0 0x52
 0x20 0x00 0xa0 0xd2
 
-# CHECK: movz w0, #1
-# CHECK: movz x0, #1
-# CHECK: movz w0, #1, lsl #16
-# CHECK: movz x0, #1, lsl #16
+# CHECK: movz w0, #0x1
+# CHECK: movz x0, #0x1
+# CHECK: movz w0, #0x1, lsl #16
+# CHECK: movz x0, #0x1, lsl #16
 
 0x40 0x00 0x80 0x12
 0x40 0x00 0x80 0x92
 0x40 0x00 0xa0 0x12
 0x40 0x00 0xa0 0x92
 
-# CHECK: movn w0, #2
-# CHECK: movn x0, #2
-# CHECK: movn w0, #2, lsl #16
-# CHECK: movn x0, #2, lsl #16
+# CHECK: movn w0, #0x2
+# CHECK: movn x0, #0x2
+# CHECK: movn w0, #0x2, lsl #16
+# CHECK: movn x0, #0x2, lsl #16
 
 0x20 0x00 0x80 0x72
 0x20 0x00 0x80 0xf2
 0x20 0x00 0xa0 0x72
 0x20 0x00 0xa0 0xf2
 
-# CHECK: movk w0, #1
-# CHECK: movk x0, #1
-# CHECK: movk w0, #1, lsl #16
-# CHECK: movk x0, #1, lsl #16
+# CHECK: movk w0, #0x1
+# CHECK: movk x0, #0x1
+# CHECK: movk w0, #0x1, lsl #16
+# CHECK: movk x0, #0x1, lsl #16
 
 #==---------------------------------------------------------------------------==
 # Conditionally set flags instructions

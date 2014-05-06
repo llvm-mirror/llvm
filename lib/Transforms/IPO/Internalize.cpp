@@ -19,7 +19,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "internalize"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -34,6 +33,8 @@
 #include <fstream>
 #include <set>
 using namespace llvm;
+
+#define DEBUG_TYPE "internalize"
 
 STATISTIC(NumAliases  , "Number of aliases internalized");
 STATISTIC(NumFunctions, "Number of functions internalized");
@@ -131,8 +132,8 @@ static bool shouldInternalize(const GlobalValue &GV,
 
 bool InternalizePass::runOnModule(Module &M) {
   CallGraphWrapperPass *CGPass = getAnalysisIfAvailable<CallGraphWrapperPass>();
-  CallGraph *CG = CGPass ? &CGPass->getCallGraph() : 0;
-  CallGraphNode *ExternalNode = CG ? CG->getExternalCallingNode() : 0;
+  CallGraph *CG = CGPass ? &CGPass->getCallGraph() : nullptr;
+  CallGraphNode *ExternalNode = CG ? CG->getExternalCallingNode() : nullptr;
   bool Changed = false;
 
   SmallPtrSet<GlobalValue *, 8> Used;
@@ -158,6 +159,7 @@ bool InternalizePass::runOnModule(Module &M) {
     if (!shouldInternalize(*I, ExternalNames))
       continue;
 
+    I->setVisibility(GlobalValue::DefaultVisibility);
     I->setLinkage(GlobalValue::InternalLinkage);
 
     if (ExternalNode)
@@ -194,6 +196,7 @@ bool InternalizePass::runOnModule(Module &M) {
     if (!shouldInternalize(*I, ExternalNames))
       continue;
 
+    I->setVisibility(GlobalValue::DefaultVisibility);
     I->setLinkage(GlobalValue::InternalLinkage);
     Changed = true;
     ++NumGlobals;
@@ -206,6 +209,7 @@ bool InternalizePass::runOnModule(Module &M) {
     if (!shouldInternalize(*I, ExternalNames))
       continue;
 
+    I->setVisibility(GlobalValue::DefaultVisibility);
     I->setLinkage(GlobalValue::InternalLinkage);
     Changed = true;
     ++NumAliases;

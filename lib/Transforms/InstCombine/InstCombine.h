@@ -20,6 +20,8 @@
 #include "llvm/Pass.h"
 #include "llvm/Transforms/Utils/SimplifyLibCalls.h"
 
+#define DEBUG_TYPE "instcombine"
+
 namespace llvm {
   class CallSite;
   class DataLayout;
@@ -96,7 +98,7 @@ public:
   BuilderTy *Builder;
 
   static char ID; // Pass identification, replacement for typeid
-  InstCombiner() : FunctionPass(ID), DL(0), Builder(0) {
+  InstCombiner() : FunctionPass(ID), DL(nullptr), Builder(nullptr) {
     MinimizeSize = false;
     initializeInstCombinerPass(*PassRegistry::getPassRegistry());
   }
@@ -156,7 +158,7 @@ public:
                                     Constant *RHSC);
   Instruction *FoldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP,
                                             GlobalVariable *GV, CmpInst &ICI,
-                                            ConstantInt *AndCst = 0);
+                                            ConstantInt *AndCst = nullptr);
   Instruction *visitFCmpInst(FCmpInst &I);
   Instruction *visitICmpInst(ICmpInst &I);
   Instruction *visitICmpInstWithCastAndCast(ICmpInst &ICI);
@@ -216,7 +218,7 @@ public:
   Instruction *visitLandingPadInst(LandingPadInst &LI);
 
   // visitInstruction - Specify what to return for unhandled instructions...
-  Instruction *visitInstruction(Instruction &I) { return 0; }
+  Instruction *visitInstruction(Instruction &I) { return nullptr; }
 
 private:
   bool ShouldChangeType(Type *From, Type *To) const;
@@ -251,7 +253,7 @@ public:
   // in the program.  Add the new instruction to the worklist.
   //
   Instruction *InsertNewInstBefore(Instruction *New, Instruction &Old) {
-    assert(New && New->getParent() == 0 &&
+    assert(New && !New->getParent() &&
            "New instruction already inserted into a basic block!");
     BasicBlock *BB = Old.getParent();
     BB->getInstList().insert(&Old, New);  // Insert inst
@@ -306,7 +308,7 @@ public:
     Worklist.Remove(&I);
     I.eraseFromParent();
     MadeIRChange = true;
-    return 0;  // Don't do anything with FI
+    return nullptr;  // Don't do anything with FI
   }
 
   void ComputeMaskedBits(Value *V, APInt &KnownZero,
@@ -394,8 +396,8 @@ private:
   Value *Descale(Value *Val, APInt Scale, bool &NoSignedWrap);
 };
 
-
-
 } // end namespace llvm.
+
+#undef DEBUG_TYPE
 
 #endif

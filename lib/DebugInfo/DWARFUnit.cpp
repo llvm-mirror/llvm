@@ -17,12 +17,12 @@
 using namespace llvm;
 using namespace dwarf;
 
-DWARFUnit::DWARFUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef AS,
-                     StringRef RS, StringRef SS, StringRef SOS, StringRef AOS,
+DWARFUnit::DWARFUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef RS,
+                     StringRef SS, StringRef SOS, StringRef AOS,
                      const RelocAddrMap *M, bool LE)
-    : Abbrev(DA), InfoSection(IS), AbbrevSection(AS), RangeSection(RS),
-      StringSection(SS), StringOffsetSection(SOS), AddrOffsetSection(AOS),
-      RelocMap(M), isLittleEndian(LE) {
+    : Abbrev(DA), InfoSection(IS), RangeSection(RS), StringSection(SS),
+      StringOffsetSection(SOS), AddrOffsetSection(AOS), RelocMap(M),
+      isLittleEndian(LE) {
   clear();
 }
 
@@ -54,18 +54,20 @@ bool DWARFUnit::getStringOffsetSectionItem(uint32_t Index,
 bool DWARFUnit::extractImpl(DataExtractor debug_info, uint32_t *offset_ptr) {
   Length = debug_info.getU32(offset_ptr);
   Version = debug_info.getU16(offset_ptr);
-  uint64_t abbrOffset = debug_info.getU32(offset_ptr);
+  uint64_t AbbrOffset = debug_info.getU32(offset_ptr);
   AddrSize = debug_info.getU8(offset_ptr);
 
-  bool lengthOK = debug_info.isValidOffset(getNextUnitOffset() - 1);
-  bool versionOK = DWARFContext::isSupportedVersion(Version);
-  bool abbrOffsetOK = AbbrevSection.size() > abbrOffset;
-  bool addrSizeOK = AddrSize == 4 || AddrSize == 8;
+  bool LengthOK = debug_info.isValidOffset(getNextUnitOffset() - 1);
+  bool VersionOK = DWARFContext::isSupportedVersion(Version);
+  bool AddrSizeOK = AddrSize == 4 || AddrSize == 8;
 
-  if (!lengthOK || !versionOK || !addrSizeOK || !abbrOffsetOK)
+  if (!LengthOK || !VersionOK || !AddrSizeOK)
     return false;
 
-  Abbrevs = Abbrev->getAbbreviationDeclarationSet(abbrOffset);
+  Abbrevs = Abbrev->getAbbreviationDeclarationSet(AbbrOffset);
+  if (Abbrevs == nullptr)
+    return false;
+
   return true;
 }
 
@@ -124,38 +126,32 @@ uint64_t DWARFUnit::getDWOId() {
 }
 
 void DWARFUnit::setDIERelations() {
-  if (DieArray.empty())
+  if (DieArray.size() <= 1)
     return;
-  DWARFDebugInfoEntryMinimal *die_array_begin = &DieArray.front();
-  DWARFDebugInfoEntryMinimal *die_array_end = &DieArray.back();
-  DWARFDebugInfoEntryMinimal *curr_die;
-  // We purposely are skipping the last element in the array in the loop below
-  // so that we can always have a valid next item
-  for (curr_die = die_array_begin; curr_die < die_array_end; ++curr_die) {
-    // Since our loop doesn't include the last element, we can always
-    // safely access the next die in the array.
-    DWARFDebugInfoEntryMinimal *next_die = curr_die + 1;
 
-    const DWARFAbbreviationDeclaration *curr_die_abbrev =
-      curr_die->getAbbreviationDeclarationPtr();
-
-    if (curr_die_abbrev) {
-      // Normal DIE
-      if (curr_die_abbrev->hasChildren())
-        next_die->setParent(curr_die);
-      else
-        curr_die->setSibling(next_die);
+  std::vector<DWARFDebugInfoEntryMinimal *> ParentChain;
+  DWARFDebugInfoEntryMinimal *SiblingChain = nullptr;
+  for (auto &DIE : DieArray) {
+    if (SiblingChain) {
+      SiblingChain->setSibling(&DIE);
+    }
+    if (const DWARFAbbreviationDeclaration *AbbrDecl =
+            DIE.getAbbreviationDeclarationPtr()) {
+      // Normal DIE.
+      if (AbbrDecl->hasChildren()) {
+        ParentChain.push_back(&DIE);
+        SiblingChain = nullptr;
+      } else {
+        SiblingChain = &DIE;
+      }
     } else {
-      // NULL DIE that terminates a sibling chain
-      DWARFDebugInfoEntryMinimal *parent = curr_die->getParent();
-      if (parent)
-        parent->setSibling(next_die);
+      // NULL entry terminates the sibling chain.
+      SiblingChain = ParentChain.back();
+      ParentChain.pop_back();
     }
   }
-
-  // Since we skipped the last element, we need to fix it up!
-  if (die_array_begin < die_array_end)
-    curr_die->setParent(die_array_begin);
+  assert(SiblingChain == nullptr || SiblingChain == &DieArray[0]);
+  assert(ParentChain.empty());
 }
 
 void DWARFUnit::extractDIEsToVector(
@@ -166,13 +162,13 @@ void DWARFUnit::extractDIEsToVector(
 
   // Set the offset to that of the first DIE and calculate the start of the
   // next compilation unit header.
-  uint32_t Offset = getFirstDIEOffset();
+  uint32_t DIEOffset = Offset + getHeaderSize();
   uint32_t NextCUOffset = getNextUnitOffset();
   DWARFDebugInfoEntryMinimal DIE;
   uint32_t Depth = 0;
   bool IsCUDie = true;
 
-  while (Offset < NextCUOffset && DIE.extractFast(this, &Offset)) {
+  while (DIEOffset < NextCUOffset && DIE.extractFast(this, &DIEOffset)) {
     if (IsCUDie) {
       if (AppendCUDie)
         Dies.push_back(DIE);
@@ -187,9 +183,8 @@ void DWARFUnit::extractDIEsToVector(
       Dies.push_back(DIE);
     }
 
-    const DWARFAbbreviationDeclaration *AbbrDecl =
-      DIE.getAbbreviationDeclarationPtr();
-    if (AbbrDecl) {
+    if (const DWARFAbbreviationDeclaration *AbbrDecl =
+            DIE.getAbbreviationDeclarationPtr()) {
       // Normal DIE
       if (AbbrDecl->hasChildren())
         ++Depth;
@@ -205,9 +200,9 @@ void DWARFUnit::extractDIEsToVector(
   // Give a little bit of info if we encounter corrupt DWARF (our offset
   // should always terminate at or before the start of the next compilation
   // unit header).
-  if (Offset > NextCUOffset)
+  if (DIEOffset > NextCUOffset)
     fprintf(stderr, "warning: DWARF compile unit extends beyond its "
-                    "bounds cu 0x%8.8x at 0x%8.8x'\n", getOffset(), Offset);
+                    "bounds cu 0x%8.8x at 0x%8.8x'\n", getOffset(), DIEOffset);
 }
 
 size_t DWARFUnit::extractDIEsIfNeeded(bool CUDieOnly) {

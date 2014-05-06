@@ -34,7 +34,7 @@ struct AMDGPURegisterInfo : public AMDGPUGenRegisterInfo {
 
   AMDGPURegisterInfo(TargetMachine &tm);
 
-  virtual BitVector getReservedRegs(const MachineFunction &MF) const {
+  BitVector getReservedRegs(const MachineFunction &MF) const override {
     assert(!"Unimplemented");  return BitVector();
   }
 
@@ -43,11 +43,11 @@ struct AMDGPURegisterInfo : public AMDGPUGenRegisterInfo {
   /// \returns The ISA reg class that is equivalent to \p RC.
   virtual const TargetRegisterClass * getISARegClass(
                                          const TargetRegisterClass * RC) const {
-    assert(!"Unimplemented"); return NULL;
+    assert(!"Unimplemented"); return nullptr;
   }
 
   virtual const TargetRegisterClass* getCFGStructurizerRegClass(MVT VT) const {
-    assert(!"Unimplemented"); return NULL;
+    assert(!"Unimplemented"); return nullptr;
   }
 
   virtual unsigned getHWRegIndex(unsigned Reg) const {
@@ -58,11 +58,11 @@ struct AMDGPURegisterInfo : public AMDGPUGenRegisterInfo {
   /// (e.g. getSubRegFromChannel(0) -> AMDGPU::sub0)
   unsigned getSubRegFromChannel(unsigned Channel) const;
 
-  const MCPhysReg* getCalleeSavedRegs(const MachineFunction *MF) const;
+  const MCPhysReg* getCalleeSavedRegs(const MachineFunction *MF) const override;
   void eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
                            unsigned FIOperandNum,
-                           RegScavenger *RS) const;
-  unsigned getFrameRegister(const MachineFunction &MF) const;
+                           RegScavenger *RS) const override;
+  unsigned getFrameRegister(const MachineFunction &MF) const override;
 
   unsigned getIndirectSubReg(unsigned IndirectIndex) const;
 

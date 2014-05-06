@@ -13,8 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm-disassembler"
-
 #include "AArch64.h"
 #include "AArch64RegisterInfo.h"
 #include "AArch64Subtarget.h"
@@ -32,6 +30,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "arm-disassembler"
 
 typedef MCDisassembler::DecodeStatus DecodeStatus;
 
@@ -53,7 +53,7 @@ public:
                               const MemoryObject &region,
                               uint64_t address,
                               raw_ostream &vStream,
-                              raw_ostream &cStream) const;
+                              raw_ostream &cStream) const override;
 };
 
 }

@@ -15,6 +15,7 @@
 #include "llvm/ProfileData/InstrProfReader.h"
 #include "llvm/ProfileData/InstrProfWriter.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -111,6 +112,7 @@ int show_main(int argc, const char *argv[]) {
                  Func.Name.find(ShowFunction) != Func.Name.npos);
 
     ++TotalFunctions;
+    assert(Func.Counts.size() > 0 && "function missing entry counter");
     if (Func.Counts[0] > MaxFunctionCount)
       MaxFunctionCount = Func.Counts[0];
 
@@ -155,7 +157,7 @@ int main(int argc, const char *argv[]) {
 
   StringRef ProgName(sys::path::filename(argv[0]));
   if (argc > 1) {
-    int (*func)(int, const char *[]) = 0;
+    int (*func)(int, const char *[]) = nullptr;
 
     if (strcmp(argv[1], "merge") == 0)
       func = merge_main;

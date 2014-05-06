@@ -10,7 +10,6 @@
 // Subclass of MipsTargetLowering specialized for mips16.
 //
 //===----------------------------------------------------------------------===//
-#define DEBUG_TYPE "mips-lower"
 #include "Mips16ISelLowering.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "MipsRegisterInfo.h"
@@ -22,6 +21,8 @@
 #include <string>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mips-lower"
 
 static cl::opt<bool> DontExpandCondPseudos16(
   "mips16-dont-expand-cond-pseudo",
@@ -353,7 +354,7 @@ unsigned int Mips16TargetLowering::getMips16HelperFunctionStubNumber
 #define T P "0" , T1
 #define P P_
 static char const * vMips16Helper[MAX_STUB_NUMBER+1] =
-  {0, T1 };
+  {nullptr, T1 };
 #undef P
 #define P P_ "sf_"
 static char const * sfMips16Helper[MAX_STUB_NUMBER+1] =
@@ -430,7 +431,7 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
   SelectionDAG &DAG = CLI.DAG;
   MachineFunction &MF = DAG.getMachineFunction();
   MipsFunctionInfo *FuncInfo = MF.getInfo<MipsFunctionInfo>();
-  const char* Mips16HelperFunction = 0;
+  const char* Mips16HelperFunction = nullptr;
   bool NeedMips16Helper = false;
 
   if (Subtarget->inMips16HardFloat()) {

@@ -83,6 +83,9 @@ namespace llvm {
       /// readcyclecounter
       RDTSC_DAG,
 
+      /// X86 Read Time-Stamp Counter and Processor ID.
+      RDTSCP_DAG,
+
       /// X86 compare and logical compare instructions.
       CMP, COMI, UCOMI,
 
@@ -291,7 +294,6 @@ namespace llvm {
       ADD, SUB, ADC, SBB, SMUL,
       INC, DEC, OR, XOR, AND,
 
-      BZHI,   // BZHI - Zero high bits
       BEXTR,  // BEXTR - Bit field extract
 
       UMUL, // LOW, HI, FLAGS = umul LHS, RHS
@@ -345,6 +347,8 @@ namespace llvm {
 
       // PMULUDQ - Vector multiply packed unsigned doubleword integers
       PMULUDQ,
+      // PMULUDQ - Vector multiply packed signed doubleword integers
+      PMULDQ,
 
       // FMA nodes
       FMADD,
@@ -680,6 +684,12 @@ namespace llvm {
     /// the immediate into a register.
     bool isLegalAddImmediate(int64_t Imm) const override;
 
+    /// \brief Return the cost of the scaling factor used in the addressing
+    /// mode represented by AM for this target, for a load/store
+    /// of the specified type.
+    /// If the AM is supported, the return value must be >= 0.
+    /// If the AM is not supported, it returns a negative value.
+    int getScalingFactorCost(const AddrMode &AM, Type *Ty) const override;
 
     bool isVectorShiftByScalarCheap(Type *Ty) const override;
 
@@ -772,8 +782,8 @@ namespace llvm {
                                            Type *Ty) const override;
 
     /// Intel processors have a unified instruction and data cache
-    const char * getClearCacheBuiltinName() const {
-      return 0; // nothing to do, move along.
+    const char * getClearCacheBuiltinName() const override {
+      return nullptr; // nothing to do, move along.
     }
 
     /// createFastISel - This method returns a target specific FastISel object,

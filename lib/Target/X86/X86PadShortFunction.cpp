@@ -15,7 +15,6 @@
 
 #include <algorithm>
 
-#define DEBUG_TYPE "x86-pad-short-functions"
 #include "X86.h"
 #include "X86InstrInfo.h"
 #include "llvm/ADT/Statistic.h"
@@ -29,6 +28,8 @@
 #include "llvm/Target/TargetInstrInfo.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "x86-pad-short-functions"
 
 STATISTIC(NumBBsPadded, "Number of basic blocks padded");
 
@@ -49,7 +50,7 @@ namespace {
   struct PadShortFunc : public MachineFunctionPass {
     static char ID;
     PadShortFunc() : MachineFunctionPass(ID)
-                   , Threshold(4), TM(0), TII(0) {}
+                   , Threshold(4), TM(nullptr), TII(nullptr) {}
 
     bool runOnMachineFunction(MachineFunction &MF) override;
 

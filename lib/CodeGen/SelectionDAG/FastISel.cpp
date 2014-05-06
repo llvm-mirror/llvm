@@ -39,7 +39,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "isel"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/Statistic.h"
@@ -63,6 +62,8 @@
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "isel"
 
 STATISTIC(NumFastIselSuccessIndependent, "Number of insts selected by "
           "target-independent selector");
@@ -1041,8 +1042,10 @@ FastISel::SelectOperator(const User *I, unsigned Opcode) {
   }
 
   case Instruction::Unreachable:
-    // Nothing to emit.
-    return true;
+    if (TM.Options.TrapUnreachable)
+      return FastEmit_(MVT::Other, MVT::Other, ISD::TRAP) != 0;
+    else
+      return true;
 
   case Instruction::Alloca:
     // FunctionLowering has the static-sized case covered.

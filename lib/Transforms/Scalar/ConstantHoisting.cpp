@@ -33,7 +33,6 @@
 // %0 = load i64* inttoptr (i64 big_constant to i64*)
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "consthoist"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -44,8 +43,11 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
+#include <tuple>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "consthoist"
 
 STATISTIC(NumConstantsHoisted, "Number of constants hoisted");
 STATISTIC(NumConstantsRebased, "Number of constants rebased");
@@ -117,7 +119,8 @@ class ConstantHoisting : public FunctionPass {
   SmallVector<ConstantInfo, 8> ConstantVec;
 public:
   static char ID; // Pass identification, replacement for typeid
-  ConstantHoisting() : FunctionPass(ID), TTI(0), DT(0), Entry(0) {
+  ConstantHoisting() : FunctionPass(ID), TTI(nullptr), DT(nullptr),
+                       Entry(nullptr) {
     initializeConstantHoistingPass(*PassRegistry::getPassRegistry());
   }
 
@@ -206,7 +209,16 @@ bool ConstantHoisting::runOnFunction(Function &Fn) {
 /// \brief Find the constant materialization insertion point.
 Instruction *ConstantHoisting::findMatInsertPt(Instruction *Inst,
                                                unsigned Idx) const {
-  // The simple and common case.
+  // If the operand is a cast instruction, then we have to materialize the
+  // constant before the cast instruction.
+  if (Idx != ~0U) {
+    Value *Opnd = Inst->getOperand(Idx);
+    if (auto CastInst = dyn_cast<Instruction>(Opnd))
+      if (CastInst->isCast())
+        return CastInst;
+  }
+
+  // The simple and common case. This also includes constant expressions.
   if (!isa<PHINode>(Inst) && !isa<LandingPadInst>(Inst))
     return Inst;
 
@@ -228,7 +240,7 @@ findConstantInsertionPoint(const ConstantInfo &ConstInfo) const {
   SmallPtrSet<BasicBlock *, 8> BBs;
   for (auto const &RCI : ConstInfo.RebasedConstants)
     for (auto const &U : RCI.Uses)
-      BBs.insert(U.Inst->getParent());
+      BBs.insert(findMatInsertPt(U.Inst, U.OpndIdx)->getParent());
 
   if (BBs.count(Entry))
     return &Entry->front();
@@ -487,8 +499,8 @@ void ConstantHoisting::emitBaseConstants(Instruction *Base, Constant *Offset,
       ClonedCastInst->insertAfter(CastInst);
       // Use the same debug location as the original cast instruction.
       ClonedCastInst->setDebugLoc(CastInst->getDebugLoc());
-      DEBUG(dbgs() << "Clone instruction: " << *ClonedCastInst << '\n'
-                   << "To               : " << *CastInst << '\n');
+      DEBUG(dbgs() << "Clone instruction: " << *CastInst << '\n'
+                   << "To               : " << *ClonedCastInst << '\n');
     }
 
     DEBUG(dbgs() << "Update: " << *ConstUser.Inst << '\n');

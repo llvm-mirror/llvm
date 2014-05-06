@@ -30,7 +30,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "licm"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -59,6 +58,8 @@
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "licm"
 
 STATISTIC(NumSunk      , "Number of instructions sunk out of loop");
 STATISTIC(NumHoisted   , "Number of instructions hoisted out of loop");
@@ -223,7 +224,7 @@ bool LICM::runOnLoop(Loop *L, LPPassManager &LPM) {
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : 0;
+  DL = DLP ? &DLP->getDataLayout() : nullptr;
   TLI = &getAnalysis<TargetLibraryInfo>();
 
   assert(L->isLCSSAForm(*DT) && "Loop is not in LCSSA form.");
@@ -315,8 +316,8 @@ bool LICM::runOnLoop(Loop *L, LPPassManager &LPM) {
          "Parent loop not left in LCSSA form after LICM!");
 
   // Clear out loops state information for the next iteration
-  CurLoop = 0;
-  Preheader = 0;
+  CurLoop = nullptr;
+  Preheader = nullptr;
 
   // If this loop is nested inside of another one, save the alias information
   // for when we process the outer loop.
@@ -334,7 +335,7 @@ bool LICM::runOnLoop(Loop *L, LPPassManager &LPM) {
 /// iteration.
 ///
 void LICM::SinkRegion(DomTreeNode *N) {
-  assert(N != 0 && "Null dominator tree node?");
+  assert(N != nullptr && "Null dominator tree node?");
   BasicBlock *BB = N->getBlock();
 
   // If this subregion is not in the top level loop at all, exit.
@@ -381,7 +382,7 @@ void LICM::SinkRegion(DomTreeNode *N) {
 /// before uses, allowing us to hoist a loop body in one pass without iteration.
 ///
 void LICM::HoistRegion(DomTreeNode *N) {
-  assert(N != 0 && "Null dominator tree node?");
+  assert(N != nullptr && "Null dominator tree node?");
   BasicBlock *BB = N->getBlock();
 
   // If this subregion is not in the top level loop at all, exit.
@@ -774,7 +775,7 @@ void LICM::PromoteAliasSet(AliasSet &AS,
   // We start with an alignment of one and try to find instructions that allow
   // us to prove better alignment.
   unsigned Alignment = 1;
-  MDNode *TBAATag = 0;
+  MDNode *TBAATag = nullptr;
 
   // Check that all of the pointers in the alias set have the same type.  We
   // cannot (yet) promote a memory location that is loaded and stored in

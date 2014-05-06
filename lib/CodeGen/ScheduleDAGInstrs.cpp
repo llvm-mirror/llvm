@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "misched"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -40,6 +39,8 @@
 #include <queue>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "misched"
 
 static cl::opt<bool> EnableAASchedMI("enable-aa-sched-mi", cl::Hidden,
     cl::ZeroOrMore, cl::init(false),
@@ -986,11 +987,6 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       // we have lost all RejectMemNodes below barrier.
       if (BarrierChain)
         BarrierChain->addPred(SDep(SU, SDep::Barrier));
-
-      if (!ExitSU.isPred(SU))
-        // Push store's up a bit to avoid them getting in between cmp
-        // and branches.
-        ExitSU.addPred(SDep(SU, SDep::Artificial));
     } else if (MI->mayLoad()) {
       bool MayAlias = true;
       if (MI->isInvariantLoad(AA)) {

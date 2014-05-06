@@ -1827,7 +1827,8 @@ PseudoInst<(outs), (ins i32imm:$amt, pred:$p), NoItinerary,
 }
 
 def HINT : AI<(outs), (ins imm0_239:$imm), MiscFrm, NoItinerary,
-              "hint", "\t$imm", []>, Requires<[IsARM, HasV6]> {
+              "hint", "\t$imm", [(int_arm_hint imm0_239:$imm)]>,
+           Requires<[IsARM, HasV6]> {
   bits<8> imm;
   let Inst{27-8} = 0b00110010000011110000;
   let Inst{7-0} = imm;
@@ -1839,8 +1840,6 @@ def : InstAlias<"wfe$p", (HINT 2, pred:$p)>, Requires<[IsARM, HasV6T2]>;
 def : InstAlias<"wfi$p", (HINT 3, pred:$p)>, Requires<[IsARM, HasV6T2]>;
 def : InstAlias<"sev$p", (HINT 4, pred:$p)>, Requires<[IsARM, HasV6T2]>;
 def : InstAlias<"sevl$p", (HINT 5, pred:$p)>, Requires<[IsARM, HasV8]>;
-
-def : Pat<(int_arm_sevl), (HINT 5)>;
 
 def SEL : AI<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm), DPFrm, NoItinerary, "sel",
              "\t$Rd, $Rn, $Rm", []>, Requires<[IsARM, HasV6]> {

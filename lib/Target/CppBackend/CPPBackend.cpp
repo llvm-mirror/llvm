@@ -108,9 +108,9 @@ namespace {
     explicit CppWriter(formatted_raw_ostream &o) :
       ModulePass(ID), Out(o), uniqueNum(0), is_inline(false), indent_level(0){}
 
-    virtual const char *getPassName() const { return "C++ backend"; }
+    const char *getPassName() const override { return "C++ backend"; }
 
-    bool runOnModule(Module &M);
+    bool runOnModule(Module &M) override;
 
     void printProgram(const std::string& fname, const std::string& modName );
     void printModule(const std::string& fname, const std::string& modName );
@@ -396,7 +396,7 @@ std::string CppWriter::getCppName(Type* Ty) {
     return I->second;
 
   // Okay, let's build a new name for this type. Start with a prefix
-  const char* prefix = 0;
+  const char* prefix = nullptr;
   switch (Ty->getTypeID()) {
   case Type::FunctionTyID:    prefix = "FuncTy_"; break;
   case Type::StructTyID:      prefix = "StructTy_"; break;

@@ -13,7 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "ppcfastisel"
 #include "PPC.h"
 #include "MCTargetDesc/PPCPredicates.h"
 #include "PPCISelLowering.h"
@@ -57,6 +56,8 @@
 //
 //===----------------------------------------------------------------------===//
 using namespace llvm;
+
+#define DEBUG_TYPE "ppcfastisel"
 
 namespace {
 
@@ -102,24 +103,24 @@ class PPCFastISel final : public FastISel {
 
   // Backend specific FastISel code.
   private:
-    virtual bool TargetSelectInstruction(const Instruction *I);
-    virtual unsigned TargetMaterializeConstant(const Constant *C);
-    virtual unsigned TargetMaterializeAlloca(const AllocaInst *AI);
-    virtual bool tryToFoldLoadIntoMI(MachineInstr *MI, unsigned OpNo,
-                                     const LoadInst *LI);
-    virtual bool FastLowerArguments();
-    virtual unsigned FastEmit_i(MVT Ty, MVT RetTy, unsigned Opc, uint64_t Imm);
-    virtual unsigned FastEmitInst_ri(unsigned MachineInstOpcode,
-                                     const TargetRegisterClass *RC,
-                                     unsigned Op0, bool Op0IsKill,
-                                     uint64_t Imm);
-    virtual unsigned FastEmitInst_r(unsigned MachineInstOpcode,
-                                    const TargetRegisterClass *RC,
-                                    unsigned Op0, bool Op0IsKill);
-    virtual unsigned FastEmitInst_rr(unsigned MachineInstOpcode,
-                                     const TargetRegisterClass *RC,
-                                     unsigned Op0, bool Op0IsKill,
-                                     unsigned Op1, bool Op1IsKill);
+    bool TargetSelectInstruction(const Instruction *I) override;
+    unsigned TargetMaterializeConstant(const Constant *C) override;
+    unsigned TargetMaterializeAlloca(const AllocaInst *AI) override;
+    bool tryToFoldLoadIntoMI(MachineInstr *MI, unsigned OpNo,
+                             const LoadInst *LI) override;
+    bool FastLowerArguments() override;
+    unsigned FastEmit_i(MVT Ty, MVT RetTy, unsigned Opc, uint64_t Imm) override;
+    unsigned FastEmitInst_ri(unsigned MachineInstOpcode,
+                             const TargetRegisterClass *RC,
+                             unsigned Op0, bool Op0IsKill,
+                             uint64_t Imm);
+    unsigned FastEmitInst_r(unsigned MachineInstOpcode,
+                            const TargetRegisterClass *RC,
+                            unsigned Op0, bool Op0IsKill);
+    unsigned FastEmitInst_rr(unsigned MachineInstOpcode,
+                             const TargetRegisterClass *RC,
+                             unsigned Op0, bool Op0IsKill,
+                             unsigned Op1, bool Op1IsKill);
 
   // Instruction selection routines.
   private:
@@ -282,7 +283,7 @@ bool PPCFastISel::isLoadTypeLegal(Type *Ty, MVT &VT) {
 // Given a value Obj, create an Address object Addr that represents its
 // address.  Return false if we can't handle it.
 bool PPCFastISel::PPCComputeAddress(const Value *Obj, Address &Addr) {
-  const User *U = NULL;
+  const User *U = nullptr;
   unsigned Opcode = Instruction::UserOp1;
   if (const Instruction *I = dyn_cast<Instruction>(Obj)) {
     // Don't walk into other basic blocks unless the object is an alloca from
@@ -556,7 +557,7 @@ bool PPCFastISel::SelectLoad(const Instruction *I) {
   // to constrain RA from using R0/X0 when this is not legal.
   unsigned AssignedReg = FuncInfo.ValueMap[I];
   const TargetRegisterClass *RC =
-    AssignedReg ? MRI.getRegClass(AssignedReg) : 0;
+    AssignedReg ? MRI.getRegClass(AssignedReg) : nullptr;
 
   unsigned ResultReg = 0;
   if (!PPCEmitLoad(VT, ResultReg, Addr, RC))
@@ -1012,7 +1013,7 @@ unsigned PPCFastISel::PPCMoveToIntReg(const Instruction *I, MVT VT,
   // to determine the required register class.
   unsigned AssignedReg = FuncInfo.ValueMap[I];
   const TargetRegisterClass *RC =
-    AssignedReg ? MRI.getRegClass(AssignedReg) : 0;
+    AssignedReg ? MRI.getRegClass(AssignedReg) : nullptr;
 
   unsigned ResultReg = 0;
   if (!PPCEmitLoad(VT, ResultReg, Addr, RC, !IsSigned))
@@ -2149,7 +2150,7 @@ bool PPCFastISel::tryToFoldLoadIntoMI(MachineInstr *MI, unsigned OpNo,
 
   unsigned ResultReg = MI->getOperand(0).getReg();
 
-  if (!PPCEmitLoad(VT, ResultReg, Addr, 0, IsZExt))
+  if (!PPCEmitLoad(VT, ResultReg, Addr, nullptr, IsZExt))
     return false;
 
   MI->eraseFromParent();
@@ -2261,6 +2262,6 @@ namespace llvm {
     if (Subtarget->isPPC64() && Subtarget->isSVR4ABI())
       return new PPCFastISel(FuncInfo, LibInfo);
 
-    return 0;
+    return nullptr;
   }
 }

@@ -12,7 +12,6 @@
 // NOP is placed.
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "delay-slot-filler"
 #include "Sparc.h"
 #include "SparcSubtarget.h"
 #include "llvm/ADT/SmallSet.h"
@@ -26,6 +25,8 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "delay-slot-filler"
 
 STATISTIC(FilledSlots, "Number of delay slots filled");
 
@@ -49,12 +50,12 @@ namespace {
         Subtarget(&TM.getSubtarget<SparcSubtarget>()) {
     }
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "SPARC Delay Slot Filler";
     }
 
     bool runOnMachineBasicBlock(MachineBasicBlock &MBB);
-    bool runOnMachineFunction(MachineFunction &F) {
+    bool runOnMachineFunction(MachineFunction &F) override {
       bool Changed = false;
 
       // This pass invalidates liveness information when it reorders

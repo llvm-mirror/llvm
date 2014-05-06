@@ -22,10 +22,10 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_CTOR_DTOR
 #include "MSP430GenInstrInfo.inc"
-
-using namespace llvm;
 
 // Pin the vtable to this file.
 void MSP430InstrInfo::anchor() {}
@@ -208,11 +208,11 @@ bool MSP430InstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
       while (std::next(I) != MBB.end())
         std::next(I)->eraseFromParent();
       Cond.clear();
-      FBB = 0;
+      FBB = nullptr;
 
       // Delete the JMP if it's equivalent to a fall-through.
       if (MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
-        TBB = 0;
+        TBB = nullptr;
         I->eraseFromParent();
         I = MBB.end();
         continue;

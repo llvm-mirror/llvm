@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "aarch64-branch-fixup"
 #include "AArch64.h"
 #include "AArch64InstrInfo.h"
 #include "Utils/AArch64BaseInfo.h"
@@ -24,6 +23,8 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "aarch64-branch-fixup"
 
 STATISTIC(NumSplit,      "Number of uncond branches inserted");
 STATISTIC(NumCBrFixed,   "Number of cond branches fixed");
@@ -135,9 +136,9 @@ namespace {
     static char ID;
     AArch64BranchFixup() : MachineFunctionPass(ID) {}
 
-    virtual bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "AArch64 branch fixup pass";
     }
 
@@ -449,7 +450,7 @@ bool AArch64BranchFixup::isBBInRange(MachineInstr *MI,
 /// displacement field.
 bool AArch64BranchFixup::fixupImmediateBr(ImmBranch &Br) {
   MachineInstr *MI = Br.MI;
-  MachineBasicBlock *DestBB = 0;
+  MachineBasicBlock *DestBB = nullptr;
   for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
     if (MI->getOperand(i).isMBB()) {
       DestBB = MI->getOperand(i).getMBB();

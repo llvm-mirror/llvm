@@ -12,7 +12,6 @@
 //
 //===---------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "jit"
 #include "Sparc.h"
 #include "MCTargetDesc/SparcMCExpr.h"
 #include "SparcRelocations.h"
@@ -24,6 +23,8 @@
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "jit"
 
 STATISTIC(NumEmitted, "Number of machine instructions emitted");
 
@@ -39,7 +40,7 @@ class SparcCodeEmitter : public MachineFunctionPass {
   const std::vector<MachineConstantPoolEntry> *MCPEs;
   bool IsPIC;
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<MachineModuleInfo> ();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -48,13 +49,13 @@ class SparcCodeEmitter : public MachineFunctionPass {
 
 public:
   SparcCodeEmitter(TargetMachine &tm, JITCodeEmitter &mce)
-    : MachineFunctionPass(ID), JTI(0), II(0), TD(0),
-      TM(tm), MCE(mce), MCPEs(0),
+    : MachineFunctionPass(ID), JTI(nullptr), II(nullptr), TD(nullptr),
+      TM(tm), MCE(mce), MCPEs(nullptr),
       IsPIC(TM.getRelocationModel() == Reloc::PIC_) {}
 
-  bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "Sparc Machine Code Emitter";
   }
 

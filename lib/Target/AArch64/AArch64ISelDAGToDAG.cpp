@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "aarch64-isel"
 #include "AArch64.h"
 #include "AArch64InstrInfo.h"
 #include "AArch64Subtarget.h"
@@ -24,6 +23,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "aarch64-isel"
 
 //===--------------------------------------------------------------------===//
 /// AArch64 specific code to select AArch64 machine instructions for
@@ -45,7 +46,7 @@ public:
       Subtarget(&TM.getSubtarget<AArch64Subtarget>()) {
   }
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "AArch64 Instruction Selection";
   }
 
@@ -85,7 +86,7 @@ public:
 
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
                                     char ConstraintCode,
-                                    std::vector<SDValue> &OutOps);
+                                    std::vector<SDValue> &OutOps) override;
 
   bool SelectLogicalImm(SDValue N, SDValue &Imm);
 
@@ -107,7 +108,7 @@ public:
   SDNode *LowerToFPLitPool(SDNode *Node);
   SDNode *SelectToLitPool(SDNode *N);
 
-  SDNode* Select(SDNode*);
+  SDNode* Select(SDNode*) override;
 private:
   /// Get the opcode for table lookup instruction
   unsigned getTBLOpc(bool IsExt, bool Is64Bit, unsigned NumOfVec);
@@ -260,7 +261,7 @@ SDNode *AArch64DAGToDAGISel::TrySelectToMoveImm(SDNode *Node) {
   } else {
     // Can't handle it in one instruction. There's scope for permitting two (or
     // more) instructions, but that'll need more thought.
-    return NULL;
+    return nullptr;
   }
 
   ResNode = CurDAG->getMachineNode(MOVOpcode, dl, MOVType,
@@ -424,9 +425,7 @@ SDNode *AArch64DAGToDAGISel::SelectAtomic(SDNode *Node, unsigned Op8,
   Ops.push_back(CurDAG->getTargetConstant(AN->getOrdering(), MVT::i32));
   Ops.push_back(AN->getOperand(0)); // Chain moves to the end
 
-  return CurDAG->SelectNodeTo(Node, Op,
-                              AN->getValueType(0), MVT::Other,
-                              &Ops[0], Ops.size());
+  return CurDAG->SelectNodeTo(Node, Op, AN->getValueType(0), MVT::Other, Ops);
 }
 
 SDValue AArch64DAGToDAGISel::createDTuple(ArrayRef<SDValue> Regs) {
@@ -736,7 +735,7 @@ SDNode *AArch64DAGToDAGISel::SelectVLD(SDNode *N, bool isUpdating,
   if (isUpdating)
     ReplaceUses(SDValue(N, NumVecs + 1), SDValue(VLd, 2));
 
-  return NULL;
+  return nullptr;
 }
 
 SDNode *AArch64DAGToDAGISel::SelectVST(SDNode *N, bool isUpdating,
@@ -861,7 +860,7 @@ SDNode *AArch64DAGToDAGISel::SelectVLDDup(SDNode *N, bool isUpdating,
   ReplaceUses(SDValue(N, NumVecs), SDValue(VLdDup, 1));
   if (isUpdating)
     ReplaceUses(SDValue(N, NumVecs + 1), SDValue(VLdDup, 2));
-  return NULL;
+  return nullptr;
 }
 
 // We only have 128-bit vector type of load/store lane instructions.
@@ -955,7 +954,7 @@ SDNode *AArch64DAGToDAGISel::SelectVLDSTLane(SDNode *N, bool IsLoad,
   ReplaceUses(SDValue(N, NumVecs), SDValue(VLdLn, 1));
   if (isUpdating)
     ReplaceUses(SDValue(N, NumVecs + 1), SDValue(VLdLn, 2));
-  return NULL;
+  return nullptr;
 }
 
 unsigned AArch64DAGToDAGISel::getTBLOpc(bool IsExt, bool Is64Bit,
@@ -1030,7 +1029,7 @@ SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
   if (Node->isMachineOpcode()) {
     DEBUG(dbgs() << "== "; Node->dump(CurDAG); dbgs() << "\n");
     Node->setNodeId(-1);
-    return NULL;
+    return nullptr;
   }
 
   switch (Node->getOpcode()) {
@@ -1114,7 +1113,7 @@ SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
                                 TFI, CurDAG->getTargetConstant(0, PtrTy));
   }
   case ISD::Constant: {
-    SDNode *ResNode = 0;
+    SDNode *ResNode = nullptr;
     if (cast<ConstantSDNode>(Node)->getZExtValue() == 0) {
       // XZR and WZR are probably even better than an actual move: most of the
       // time they can be folded into another instruction with *no* cost.
@@ -1560,7 +1559,7 @@ SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
   SDNode *ResNode = SelectCode(Node);
 
   DEBUG(dbgs() << "=> ";
-        if (ResNode == NULL || ResNode == Node)
+        if (ResNode == nullptr || ResNode == Node)
           Node->dump(CurDAG);
         else
           ResNode->dump(CurDAG);

@@ -642,7 +642,7 @@ private:
   void visitBr(const BranchInst &I);
   void visitSwitch(const SwitchInst &I);
   void visitIndirectBr(const IndirectBrInst &I);
-  void visitUnreachable(const UnreachableInst &I) { /* noop */ }
+  void visitUnreachable(const UnreachableInst &I);
 
   // Helpers for visitSwitch
   bool handleSmallSwitchRange(CaseRec& CR,
@@ -785,7 +785,8 @@ private:
   /// corresponding DBG_VALUE machine instruction for it now. At the end of
   /// instruction selection, they will be inserted to the entry BB.
   bool EmitFuncArgumentDbgValue(const Value *V, MDNode *Variable,
-                                int64_t Offset, const SDValue &N);
+                                int64_t Offset, bool IsIndirect,
+                                const SDValue &N);
 };
 
 } // end namespace llvm

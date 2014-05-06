@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mccodeemitter"
 #include "MCTargetDesc/X86MCTargetDesc.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "MCTargetDesc/X86FixupKinds.h"
@@ -26,6 +25,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mccodeemitter"
 
 namespace {
 class X86MCCodeEmitter : public MCCodeEmitter {
@@ -285,7 +286,7 @@ enum GlobalOffsetTableExprKind {
 };
 static GlobalOffsetTableExprKind
 StartsWithGlobalOffsetTable(const MCExpr *Expr) {
-  const MCExpr *RHS = 0;
+  const MCExpr *RHS = nullptr;
   if (Expr->getKind() == MCExpr::Binary) {
     const MCBinaryExpr *BE = static_cast<const MCBinaryExpr *>(Expr);
     Expr = BE->getLHS();
@@ -316,7 +317,7 @@ void X86MCCodeEmitter::
 EmitImmediate(const MCOperand &DispOp, SMLoc Loc, unsigned Size,
               MCFixupKind FixupKind, unsigned &CurByte, raw_ostream &OS,
               SmallVectorImpl<MCFixup> &Fixups, int ImmOffset) const {
-  const MCExpr *Expr = NULL;
+  const MCExpr *Expr = nullptr;
   if (DispOp.isImm()) {
     // If this is a simple integer displacement that doesn't require a
     // relocation, emit it now.
@@ -339,7 +340,13 @@ EmitImmediate(const MCOperand &DispOp, SMLoc Loc, unsigned Size,
     if (Kind != GOT_None) {
       assert(ImmOffset == 0);
 
-      FixupKind = MCFixupKind(X86::reloc_global_offset_table);
+      if (Size == 8) {
+        FixupKind = MCFixupKind(X86::reloc_global_offset_table8);
+      } else {
+        assert(Size == 4);
+        FixupKind = MCFixupKind(X86::reloc_global_offset_table);
+      }
+
       if (Kind == GOT_Normal)
         ImmOffset = CurByte;
     } else if (Expr->getKind() == MCExpr::SymbolRef) {

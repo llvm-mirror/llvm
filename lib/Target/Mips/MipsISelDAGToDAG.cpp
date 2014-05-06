@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mips-isel"
 #include "MipsISelDAGToDAG.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "Mips.h"
@@ -35,6 +34,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "mips-isel"
 
 //===----------------------------------------------------------------------===//
 // Instruction Selector Implementation
@@ -182,7 +183,7 @@ SDNode* MipsDAGToDAGISel::Select(SDNode *Node) {
   if (Node->isMachineOpcode()) {
     DEBUG(errs() << "== "; Node->dump(CurDAG); errs() << "\n");
     Node->setNodeId(-1);
-    return NULL;
+    return nullptr;
   }
 
   // See if subclasses can handle this node.
@@ -212,7 +213,7 @@ SDNode* MipsDAGToDAGISel::Select(SDNode *Node) {
   SDNode *ResNode = SelectCode(Node);
 
   DEBUG(errs() << "=> ");
-  if (ResNode == NULL || ResNode == Node)
+  if (ResNode == nullptr || ResNode == Node)
     DEBUG(Node->dump(CurDAG));
   else
     DEBUG(ResNode->dump(CurDAG));

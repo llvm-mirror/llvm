@@ -77,7 +77,7 @@ const TargetRegisterClass *SIRegisterInfo::getPhysRegClass(unsigned Reg) const {
       return BaseClasses[i];
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 bool SIRegisterInfo::isSGPRClass(const TargetRegisterClass *RC) const {
@@ -113,7 +113,7 @@ const TargetRegisterClass *SIRegisterInfo::getEquivalentVGPRClass(
     } else if (getCommonSubClass(SRC, &AMDGPU::SReg_512RegClass)) {
       return &AMDGPU::VReg_512RegClass;
     }
-    return NULL;
+    return nullptr;
 }
 
 const TargetRegisterClass *SIRegisterInfo::getSubRegClass(
@@ -128,4 +128,11 @@ const TargetRegisterClass *SIRegisterInfo::getSubRegClass(
   } else {
     return &AMDGPU::VGPR_32RegClass;
   }
+}
+
+unsigned SIRegisterInfo::getPhysRegSubReg(unsigned Reg,
+                                          const TargetRegisterClass *SubRC,
+                                          unsigned Channel) const {
+  unsigned Index = getHWRegIndex(Reg);
+  return SubRC->getRegister(Index + Channel);
 }

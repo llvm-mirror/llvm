@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "inline"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/CallGraph.h"
@@ -28,6 +27,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "inline"
+
 namespace {
 
 /// \brief Inliner pass which only handles "always inline" functions.
@@ -36,12 +37,13 @@ class AlwaysInliner : public Inliner {
 
 public:
   // Use extremely low threshold.
-  AlwaysInliner() : Inliner(ID, -2000000000, /*InsertLifetime*/ true), ICA(0) {
+  AlwaysInliner() : Inliner(ID, -2000000000, /*InsertLifetime*/ true),
+                    ICA(nullptr) {
     initializeAlwaysInlinerPass(*PassRegistry::getPassRegistry());
   }
 
   AlwaysInliner(bool InsertLifetime)
-      : Inliner(ID, -2000000000, InsertLifetime), ICA(0) {
+      : Inliner(ID, -2000000000, InsertLifetime), ICA(nullptr) {
     initializeAlwaysInlinerPass(*PassRegistry::getPassRegistry());
   }
 

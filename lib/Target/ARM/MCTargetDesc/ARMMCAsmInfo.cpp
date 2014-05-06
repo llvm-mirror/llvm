@@ -25,7 +25,7 @@ ARMMCAsmInfoDarwin::ARMMCAsmInfoDarwin(StringRef TT) {
       (TheTriple.getArch() == Triple::thumbeb))
     IsLittleEndian = false;
 
-  Data64bitsDirective = 0;
+  Data64bitsDirective = nullptr;
   CommentString = "@";
   Code16Directive = ".code\t16";
   Code32Directive = ".code\t32";
@@ -50,7 +50,7 @@ ARMELFMCAsmInfo::ARMELFMCAsmInfo(StringRef TT) {
   // ".comm align is in bytes but .align is pow-2."
   AlignmentIsInBytes = false;
 
-  Data64bitsDirective = 0;
+  Data64bitsDirective = nullptr;
   CommentString = "@";
   Code16Directive = ".code\t16";
   Code32Directive = ".code\t32";
@@ -89,6 +89,7 @@ void ARMCOFFMCAsmInfoGNU::anchor() { }
 
 ARMCOFFMCAsmInfoGNU::ARMCOFFMCAsmInfoGNU() {
   AlignmentIsInBytes = false;
+  HasSingleParameterDotFile = true;
 
   CommentString = "@";
   Code16Directive = ".code\t16";

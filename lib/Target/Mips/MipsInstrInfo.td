@@ -496,9 +496,7 @@ class shift_rotate_reg<string opstr, RegisterOperand RO, InstrItinClass itin,
   InstSE<(outs RO:$rd), (ins RO:$rt, GPR32Opnd:$rs),
          !strconcat(opstr, "\t$rd, $rt, $rs"),
          [(set RO:$rd, (OpNode RO:$rt, GPR32Opnd:$rs))], itin, FrmR,
-         opstr> {
-  let TwoOperandAliasConstraint = "$rt = $rd";
-}
+         opstr>;
 
 // Load Upper Imediate
 class LoadUpper<string opstr, RegisterOperand RO, Operand Imm>:
@@ -928,6 +926,18 @@ let isPseudo = 1, isCodeGenOnly = 1 in {
   def STORE_ACC64 : Store<"", ACC64>;
 }
 
+// We need these two pseudo instructions to avoid offset calculation for long
+// branches.  See the comment in file MipsLongBranch.cpp for detailed
+// explanation.
+
+// Expands to: lui $dst, %hi($tgt - $baltgt)
+def LONG_BRANCH_LUi : PseudoSE<(outs GPR32Opnd:$dst),
+  (ins brtarget:$tgt, brtarget:$baltgt), []>;
+
+// Expands to: addiu $dst, $src, %lo($tgt - $baltgt)
+def LONG_BRANCH_ADDiu : PseudoSE<(outs GPR32Opnd:$dst),
+  (ins GPR32Opnd:$src, brtarget:$tgt, brtarget:$baltgt), []>;
+
 //===----------------------------------------------------------------------===//
 // Instruction definition
 //===----------------------------------------------------------------------===//
@@ -1203,10 +1213,14 @@ def : InstAlias<"not $rt, $rs",
                 (NOR GPR32Opnd:$rt, GPR32Opnd:$rs, ZERO), 0>;
 def : InstAlias<"neg $rt, $rs",
                 (SUB GPR32Opnd:$rt, ZERO, GPR32Opnd:$rs), 1>;
+def : InstAlias<"negu $rt",
+                (SUBu GPR32Opnd:$rt, ZERO, GPR32Opnd:$rt), 0>;
 def : InstAlias<"negu $rt, $rs",
                 (SUBu GPR32Opnd:$rt, ZERO, GPR32Opnd:$rs), 1>;
 def : InstAlias<"slt $rs, $rt, $imm",
                 (SLTi GPR32Opnd:$rs, GPR32Opnd:$rt, simm16:$imm), 0>;
+def : InstAlias<"sltu $rt, $rs, $imm",
+                (SLTiu GPR32Opnd:$rt, GPR32Opnd:$rs, simm16:$imm), 0>;
 def : InstAlias<"xor $rs, $rt, $imm",
                 (XORi GPR32Opnd:$rs, GPR32Opnd:$rt, uimm16:$imm), 0>;
 def : InstAlias<"or $rs, $rt, $imm",
@@ -1234,6 +1248,8 @@ def  : InstAlias<"tgeu $rs, $rt", (TGEU GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
 def  : InstAlias<"tlt $rs, $rt", (TLT GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
 def  : InstAlias<"tltu $rs, $rt", (TLTU GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
 def  : InstAlias<"tne $rs, $rt", (TNE GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
+def  : InstAlias<"sll $rd, $rt, $rs",
+                 (SLLV GPR32Opnd:$rd, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
 def : InstAlias<"sub, $rd, $rs, $imm",
                 (ADDi GPR32Opnd:$rd, GPR32Opnd:$rs, InvertedImOperand:$imm)>;
 def : InstAlias<"sub $rs, $imm",
@@ -1244,6 +1260,8 @@ def : InstAlias<"subu, $rd, $rs, $imm",
 def : InstAlias<"subu $rs, $imm",
                 (ADDiu GPR32Opnd:$rs, GPR32Opnd:$rs, InvertedImOperand:$imm),
                 0>;
+def  : InstAlias<"srl $rd, $rt, $rs",
+                 (SRLV GPR32Opnd:$rd, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
 //===----------------------------------------------------------------------===//
 // Assembler Pseudo Instructions
 //===----------------------------------------------------------------------===//
@@ -1358,14 +1376,11 @@ def : MipsPat<(not GPR32:$in),
               (NOR GPR32Opnd:$in, ZERO)>;
 
 // extended loads
-let Predicates = [HasStdEnc] in {
-  def : MipsPat<(i32 (extloadi1  addr:$src)), (LBu addr:$src)>;
-  def : MipsPat<(i32 (extloadi8  addr:$src)), (LBu addr:$src)>;
-  def : MipsPat<(i32 (extloadi16 addr:$src)), (LHu addr:$src)>;
-}
+def : MipsPat<(i32 (extloadi1  addr:$src)), (LBu addr:$src)>;
+def : MipsPat<(i32 (extloadi8  addr:$src)), (LBu addr:$src)>;
+def : MipsPat<(i32 (extloadi16 addr:$src)), (LHu addr:$src)>;
 
 // peepholes
-let Predicates = [HasStdEnc] in
 def : MipsPat<(store (i32 0), addr:$dst), (SW ZERO, addr:$dst)>;
 
 // brcond patterns
@@ -1459,11 +1474,9 @@ def : MipsPat<(bswap GPR32:$rt), (ROTR (WSBH GPR32:$rt), 16)>;
 
 // Load halfword/word patterns.
 let AddedComplexity = 40 in {
-  let Predicates = [HasStdEnc] in {
-    def : LoadRegImmPat<LBu, i32, zextloadi8>;
-    def : LoadRegImmPat<LH, i32, sextloadi16>;
-    def : LoadRegImmPat<LW, i32, load>;
-  }
+  def : LoadRegImmPat<LBu, i32, zextloadi8>;
+  def : LoadRegImmPat<LH, i32, sextloadi16>;
+  def : LoadRegImmPat<LW, i32, load>;
 }
 
 //===----------------------------------------------------------------------===//

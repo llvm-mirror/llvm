@@ -30,6 +30,7 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstPrinter.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectStreamer.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSection.h"
@@ -62,7 +63,7 @@ static const char *GetFPUName(unsigned ID) {
 #define ARM_FPU_NAME(NAME, ID) case ARM::ID: return NAME;
 #include "ARMFPUName.def"
   }
-  return NULL;
+  return nullptr;
 }
 
 static const char *GetArchName(unsigned ID) {
@@ -75,7 +76,7 @@ static const char *GetArchName(unsigned ID) {
 #define ARM_ARCH_ALIAS(NAME, ID) /* empty */
 #include "ARMArchName.def"
   }
-  return NULL;
+  return nullptr;
 }
 
 static const char *GetArchDefaultCPUName(unsigned ID) {
@@ -88,7 +89,7 @@ static const char *GetArchDefaultCPUName(unsigned ID) {
 #define ARM_ARCH_ALIAS(NAME, ID) /* empty */
 #include "ARMArchName.def"
   }
-  return NULL;
+  return nullptr;
 }
 
 static unsigned GetArchDefaultCPUArch(unsigned ID) {
@@ -139,6 +140,7 @@ class ARMTargetAsmStreamer : public ARMTargetStreamer {
   void finishAttributeSection() override;
 
   void AnnotateTLSDescriptorSequence(const MCSymbolRefExpr *SRE) override;
+  void emitThumbSet(MCSymbol *Symbol, const MCExpr *Value) override;
 
 public:
   ARMTargetAsmStreamer(MCStreamer &S, formatted_raw_ostream &OS,
@@ -260,6 +262,10 @@ ARMTargetAsmStreamer::AnnotateTLSDescriptorSequence(const MCSymbolRefExpr *S) {
   OS << "\t.tlsdescseq\t" << S->getSymbol().getName();
 }
 
+void ARMTargetAsmStreamer::emitThumbSet(MCSymbol *Symbol, const MCExpr *Value) {
+  OS << "\t.thumb_set\t" << *Symbol << ", " << *Value << '\n';
+}
+
 void ARMTargetAsmStreamer::emitInst(uint32_t Inst, char Suffix) {
   OS << "\t.inst";
   if (Suffix)
@@ -310,7 +316,7 @@ private:
     for (size_t i = 0; i < Contents.size(); ++i)
       if (Contents[i].Tag == Attribute)
         return &Contents[i];
-    return 0;
+    return nullptr;
   }
 
   void setAttributeItem(unsigned Attribute, unsigned Value,
@@ -406,8 +412,10 @@ private:
   void emitFPU(unsigned FPU) override;
   void emitInst(uint32_t Inst, char Suffix = '\0') override;
   void finishAttributeSection() override;
+  void emitLabel(MCSymbol *Symbol) override;
 
   void AnnotateTLSDescriptorSequence(const MCSymbolRefExpr *SRE) override;
+  void emitThumbSet(MCSymbol *Symbol, const MCExpr *Value) override;
 
   size_t calculateContentSize() const;
 
@@ -415,7 +423,7 @@ public:
   ARMTargetELFStreamer(MCStreamer &S)
     : ARMTargetStreamer(S), CurrentVendor("aeabi"), FPU(ARM::INVALID_FPU),
       Arch(ARM::INVALID_ARCH), EmittedArch(ARM::INVALID_ARCH),
-      AttributeSection(0) {}
+      AttributeSection(nullptr) {}
 };
 
 /// Extend the generic ELFStreamer class so that it can emit mapping symbols at
@@ -531,7 +539,8 @@ public:
   /// This is one of the functions used to emit data into an ELF section, so the
   /// ARM streamer overrides it to add the appropriate mapping symbol ($d) if
   /// necessary.
-  void EmitValueImpl(const MCExpr *Value, unsigned Size) override {
+  void EmitValueImpl(const MCExpr *Value, unsigned Size,
+                     const SMLoc &Loc) override {
     EmitDataMappingSymbol();
     MCELFStreamer::EmitValueImpl(Value, Size);
   }
@@ -600,12 +609,8 @@ private:
   }
 
   void EmitThumbFunc(MCSymbol *Func) override {
-    // FIXME: Anything needed here to flag the function as thumb?
-
     getAssembler().setIsThumbFunc(Func);
-
-    MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*Func);
-    SD.setFlags(SD.getFlags() | ELF_Other_ThumbFunc);
+    EmitSymbolAttribute(Func, MCSA_ELF_TypeFunction);
   }
 
   // Helper functions for ARM exception handling directives
@@ -980,10 +985,35 @@ void ARMTargetELFStreamer::finishAttributeSection() {
   Contents.clear();
   FPU = ARM::INVALID_FPU;
 }
+
+void ARMTargetELFStreamer::emitLabel(MCSymbol *Symbol) {
+  ARMELFStreamer &Streamer = getStreamer();
+  if (!Streamer.IsThumb)
+    return;
+
+  const MCSymbolData &SD = Streamer.getOrCreateSymbolData(Symbol);
+  if (MCELF::GetType(SD) & (ELF::STT_FUNC << ELF_STT_Shift))
+    Streamer.EmitThumbFunc(Symbol);
+}
+
 void
 ARMTargetELFStreamer::AnnotateTLSDescriptorSequence(const MCSymbolRefExpr *S) {
   getStreamer().EmitFixup(S, FK_Data_4);
 }
+
+void ARMTargetELFStreamer::emitThumbSet(MCSymbol *Symbol, const MCExpr *Value) {
+  if (const MCSymbolRefExpr *SRE = dyn_cast<MCSymbolRefExpr>(Value)) {
+    const MCSymbol &Sym = SRE->getSymbol();
+    if (!Sym.isDefined()) {
+      getStreamer().EmitAssignment(Symbol, Value);
+      return;
+    }
+  }
+
+  getStreamer().EmitThumbFunc(Symbol);
+  getStreamer().EmitAssignment(Symbol, Value);
+}
+
 void ARMTargetELFStreamer::emitInst(uint32_t Inst, char Suffix) {
   getStreamer().emitInst(Inst, Suffix);
 }
@@ -1012,7 +1042,7 @@ inline void ARMELFStreamer::SwitchToEHSection(const char *Prefix,
   }
 
   // Get .ARM.extab or .ARM.exidx section
-  const MCSectionELF *EHSection = NULL;
+  const MCSectionELF *EHSection = nullptr;
   if (const MCSymbol *Group = FnSection.getGroup()) {
     EHSection = getContext().getELFSection(
       EHSecName, Type, Flags | ELF::SHF_GROUP, Kind,
@@ -1049,9 +1079,9 @@ void ARMELFStreamer::EmitFixup(const MCExpr *Expr, MCFixupKind Kind) {
 }
 
 void ARMELFStreamer::Reset() {
-  ExTab = NULL;
-  FnStart = NULL;
-  Personality = NULL;
+  ExTab = nullptr;
+  FnStart = nullptr;
+  Personality = nullptr;
   PersonalityIndex = ARM::EHABI::NUM_PERSONALITY_INDEX;
   FPReg = ARM::SP;
   FPOffset = 0;
@@ -1065,7 +1095,7 @@ void ARMELFStreamer::Reset() {
 }
 
 void ARMELFStreamer::emitFnStart() {
-  assert(FnStart == 0);
+  assert(FnStart == nullptr);
   FnStart = getContext().CreateTempSymbol();
   EmitLabel(FnStart);
 }

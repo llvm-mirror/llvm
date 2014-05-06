@@ -13,8 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "systemz-elim-compare"
-
 #include "SystemZTargetMachine.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -27,6 +25,8 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "systemz-elim-compare"
 
 STATISTIC(BranchOnCounts, "Number of branch-on-count instructions");
 STATISTIC(EliminatedComparisons, "Number of eliminated comparisons");
@@ -64,14 +64,14 @@ class SystemZElimCompare : public MachineFunctionPass {
 public:
   static char ID;
   SystemZElimCompare(const SystemZTargetMachine &tm)
-    : MachineFunctionPass(ID), TII(0), TRI(0) {}
+    : MachineFunctionPass(ID), TII(nullptr), TRI(nullptr) {}
 
   const char *getPassName() const override {
     return "SystemZ Comparison Elimination";
   }
 
   bool processBlock(MachineBasicBlock &MBB);
-  bool runOnMachineFunction(MachineFunction &F);
+  bool runOnMachineFunction(MachineFunction &F) override;
 
 private:
   Reference getRegReferences(MachineInstr *MI, unsigned Reg);

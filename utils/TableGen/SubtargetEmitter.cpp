@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "subtarget-emitter"
-
 #include "CodeGenTarget.h"
 #include "CodeGenSchedule.h"
 #include "llvm/ADT/STLExtras.h"
@@ -28,6 +26,8 @@
 #include <string>
 #include <vector>
 using namespace llvm;
+
+#define DEBUG_TYPE "subtarget-emitter"
 
 namespace {
 class SubtargetEmitter {
@@ -578,7 +578,7 @@ EmitItineraries(raw_ostream &OS,
     OS << "\n";
     OS << "static const llvm::InstrItinerary ";
     if (ItinList.empty()) {
-      OS << '*' << Name << " = 0;\n";
+      OS << '*' << Name << " = nullptr;\n";
       continue;
     }
 

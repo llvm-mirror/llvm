@@ -24,7 +24,7 @@ using namespace llvm;
 namespace {
 class ARM64ELFObjectWriter : public MCELFObjectTargetWriter {
 public:
-  ARM64ELFObjectWriter(uint8_t OSABI);
+  ARM64ELFObjectWriter(uint8_t OSABI, bool IsLittleEndian);
 
   virtual ~ARM64ELFObjectWriter();
 
@@ -36,7 +36,7 @@ private:
 };
 }
 
-ARM64ELFObjectWriter::ARM64ELFObjectWriter(uint8_t OSABI)
+ARM64ELFObjectWriter::ARM64ELFObjectWriter(uint8_t OSABI, bool IsLittleEndian)
     : MCELFObjectTargetWriter(/*Is64Bit*/ true, OSABI, ELF::EM_AARCH64,
                               /*HasRelocationAddend*/ true) {}
 
@@ -67,7 +67,8 @@ unsigned ARM64ELFObjectWriter::GetRelocType(const MCValue &Target,
     case FK_Data_8:
       return ELF::R_AARCH64_PREL64;
     case ARM64::fixup_arm64_pcrel_adr_imm21:
-      llvm_unreachable("No ELF relocations supported for ADR at the moment");
+      assert(SymLoc == ARM64MCExpr::VK_NONE && "unexpected ADR relocation");
+      return ELF::R_AARCH64_ADR_PREL_LO21;
     case ARM64::fixup_arm64_pcrel_adrp_imm21:
       if (SymLoc == ARM64MCExpr::VK_ABS && !IsNC)
         return ELF::R_AARCH64_ADR_PREL_PG_HI21;
@@ -82,11 +83,13 @@ unsigned ARM64ELFObjectWriter::GetRelocType(const MCValue &Target,
       return ELF::R_AARCH64_JUMP26;
     case ARM64::fixup_arm64_pcrel_call26:
       return ELF::R_AARCH64_CALL26;
-    case ARM64::fixup_arm64_pcrel_imm19:
-      // A bit of an oddity here: shared by both "ldr x0, :gottprel:var" and
-      // "b.eq var".
+    case ARM64::fixup_arm64_ldr_pcrel_imm19:
       if (SymLoc == ARM64MCExpr::VK_GOTTPREL)
         return ELF::R_AARCH64_TLSIE_LD_GOTTPREL_PREL19;
+      return ELF::R_AARCH64_LD_PREL_LO19;
+    case ARM64::fixup_arm64_pcrel_branch14:
+      return ELF::R_AARCH64_TSTBR14;
+    case ARM64::fixup_arm64_pcrel_branch19:
       return ELF::R_AARCH64_CONDBR19;
     default:
       llvm_unreachable("Unsupported pc-relative fixup kind");
@@ -100,15 +103,19 @@ unsigned ARM64ELFObjectWriter::GetRelocType(const MCValue &Target,
     case FK_Data_8:
       return ELF::R_AARCH64_ABS64;
     case ARM64::fixup_arm64_add_imm12:
-      if (SymLoc == ARM64MCExpr::VK_DTPREL && IsNC)
+      if (RefKind == ARM64MCExpr::VK_DTPREL_HI12)
+        return ELF::R_AARCH64_TLSLD_ADD_DTPREL_HI12;
+      if (RefKind == ARM64MCExpr::VK_TPREL_HI12)
+        return ELF::R_AARCH64_TLSLE_ADD_TPREL_HI12;
+      if (RefKind == ARM64MCExpr::VK_DTPREL_LO12_NC)
         return ELF::R_AARCH64_TLSLD_ADD_DTPREL_LO12_NC;
-      if (SymLoc == ARM64MCExpr::VK_DTPREL && !IsNC)
+      if (RefKind == ARM64MCExpr::VK_DTPREL_LO12)
         return ELF::R_AARCH64_TLSLD_ADD_DTPREL_LO12;
-      if (SymLoc == ARM64MCExpr::VK_TPREL && IsNC)
+      if (RefKind == ARM64MCExpr::VK_TPREL_LO12_NC)
         return ELF::R_AARCH64_TLSLE_ADD_TPREL_LO12_NC;
-      if (SymLoc == ARM64MCExpr::VK_TPREL && !IsNC)
+      if (RefKind == ARM64MCExpr::VK_TPREL_LO12)
         return ELF::R_AARCH64_TLSLE_ADD_TPREL_LO12;
-      if (SymLoc == ARM64MCExpr::VK_TLSDESC && IsNC)
+      if (RefKind == ARM64MCExpr::VK_TLSDESC_LO12)
         return ELF::R_AARCH64_TLSDESC_ADD_LO12_NC;
       if (SymLoc == ARM64MCExpr::VK_ABS && IsNC)
         return ELF::R_AARCH64_ADD_ABS_LO12_NC;
@@ -188,14 +195,20 @@ unsigned ARM64ELFObjectWriter::GetRelocType(const MCValue &Target,
         return ELF::R_AARCH64_MOVW_UABS_G3;
       if (RefKind == ARM64MCExpr::VK_ABS_G2)
         return ELF::R_AARCH64_MOVW_UABS_G2;
+      if (RefKind == ARM64MCExpr::VK_ABS_G2_S)
+        return ELF::R_AARCH64_MOVW_SABS_G2;
       if (RefKind == ARM64MCExpr::VK_ABS_G2_NC)
         return ELF::R_AARCH64_MOVW_UABS_G2_NC;
       if (RefKind == ARM64MCExpr::VK_ABS_G1)
         return ELF::R_AARCH64_MOVW_UABS_G1;
+      if (RefKind == ARM64MCExpr::VK_ABS_G1_S)
+        return ELF::R_AARCH64_MOVW_SABS_G1;
       if (RefKind == ARM64MCExpr::VK_ABS_G1_NC)
         return ELF::R_AARCH64_MOVW_UABS_G1_NC;
       if (RefKind == ARM64MCExpr::VK_ABS_G0)
         return ELF::R_AARCH64_MOVW_UABS_G0;
+      if (RefKind == ARM64MCExpr::VK_ABS_G0_S)
+        return ELF::R_AARCH64_MOVW_SABS_G0;
       if (RefKind == ARM64MCExpr::VK_ABS_G0_NC)
         return ELF::R_AARCH64_MOVW_UABS_G0_NC;
       if (RefKind == ARM64MCExpr::VK_DTPREL_G2)
@@ -235,7 +248,8 @@ unsigned ARM64ELFObjectWriter::GetRelocType(const MCValue &Target,
 }
 
 MCObjectWriter *llvm::createARM64ELFObjectWriter(raw_ostream &OS,
-                                                 uint8_t OSABI) {
-  MCELFObjectTargetWriter *MOTW = new ARM64ELFObjectWriter(OSABI);
-  return createELFObjectWriter(MOTW, OS, /*IsLittleEndian=*/true);
+                                                 uint8_t OSABI,
+                                                 bool IsLittleEndian) {
+  MCELFObjectTargetWriter *MOTW = new ARM64ELFObjectWriter(OSABI, IsLittleEndian);
+  return createELFObjectWriter(MOTW, OS, IsLittleEndian);
 }

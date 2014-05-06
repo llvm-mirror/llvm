@@ -22,10 +22,10 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_CTOR_DTOR
 #include "MipsGenInstrInfo.inc"
-
-using namespace llvm;
 
 // Pin the vtable to this file.
 void MipsInstrInfo::anchor() {}
@@ -195,7 +195,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
   if (I == REnd || !isUnpredicatedTerminator(&*I)) {
     // This block ends with no branches (it just falls through to its succ).
     // Leave TBB/FBB null.
-    TBB = FBB = NULL;
+    TBB = FBB = nullptr;
     return BT_NoBranch;
   }
 
@@ -209,7 +209,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
 
   // Get the second to last instruction in the block.
   unsigned SecondLastOpc = 0;
-  MachineInstr *SecondLastInst = NULL;
+  MachineInstr *SecondLastInst = nullptr;
 
   if (++I != REnd) {
     SecondLastInst = &*I;

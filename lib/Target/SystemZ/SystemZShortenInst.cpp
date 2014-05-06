@@ -13,12 +13,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "systemz-shorten-inst"
-
 #include "SystemZTargetMachine.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "systemz-shorten-inst"
 
 namespace {
 class SystemZShortenInst : public MachineFunctionPass {
@@ -31,7 +31,7 @@ public:
   }
 
   bool processBlock(MachineBasicBlock &MBB);
-  bool runOnMachineFunction(MachineFunction &F);
+  bool runOnMachineFunction(MachineFunction &F) override;
 
 private:
   bool shortenIIF(MachineInstr &MI, unsigned *GPRMap, unsigned LiveOther,
@@ -53,7 +53,7 @@ FunctionPass *llvm::createSystemZShortenInstPass(SystemZTargetMachine &TM) {
 }
 
 SystemZShortenInst::SystemZShortenInst(const SystemZTargetMachine &tm)
-  : MachineFunctionPass(ID), TII(0), LowGPRs(), HighGPRs() {
+  : MachineFunctionPass(ID), TII(nullptr), LowGPRs(), HighGPRs() {
   // Set up LowGPRs and HighGPRs.
   for (unsigned I = 0; I < 16; ++I) {
     LowGPRs[SystemZMC::GR32Regs[I]] |= 1 << I;

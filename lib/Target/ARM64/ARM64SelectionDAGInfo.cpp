@@ -11,9 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm64-selectiondag-info"
 #include "ARM64TargetMachine.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "arm64-selectiondag-info"
 
 ARM64SelectionDAGInfo::ARM64SelectionDAGInfo(const TargetMachine &TM)
     : TargetSelectionDAGInfo(TM),
@@ -29,7 +30,7 @@ SDValue ARM64SelectionDAGInfo::EmitTargetCodeForMemset(
   ConstantSDNode *V = dyn_cast<ConstantSDNode>(Src);
   ConstantSDNode *SizeValue = dyn_cast<ConstantSDNode>(Size);
   const char *bzeroEntry =
-      (V && V->isNullValue()) ? Subtarget->getBZeroEntry() : 0;
+      (V && V->isNullValue()) ? Subtarget->getBZeroEntry() : nullptr;
   // For small size (< 256), it is not beneficial to use bzero
   // instead of memset.
   if (bzeroEntry && (!SizeValue || SizeValue->getZExtValue() > 256)) {

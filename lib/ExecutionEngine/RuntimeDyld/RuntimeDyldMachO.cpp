@@ -11,12 +11,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dyld"
 #include "RuntimeDyldMachO.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 using namespace llvm;
 using namespace llvm::object;
+
+#define DEBUG_TYPE "dyld"
 
 namespace llvm {
 
@@ -66,7 +67,7 @@ void RuntimeDyldMachO::registerEHFrames() {
       continue;
     SectionEntry *Text = &Sections[SectionInfo.TextSID];
     SectionEntry *EHFrame = &Sections[SectionInfo.EHFrameSID];
-    SectionEntry *ExceptTab = NULL;
+    SectionEntry *ExceptTab = nullptr;
     if (SectionInfo.ExceptTabSID != RTDYLD_INVALID_SECTION_ID)
       ExceptTab = &Sections[SectionInfo.ExceptTabSID];
 

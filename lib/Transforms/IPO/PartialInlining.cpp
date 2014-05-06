@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "partialinlining"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/CFG.h"
@@ -23,6 +22,8 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/CodeExtractor.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "partialinlining"
 
 STATISTIC(NumPartialInlined, "Number of functions partially inlined");
 
@@ -52,10 +53,10 @@ Function* PartialInliner::unswitchFunction(Function* F) {
   BasicBlock* entryBlock = F->begin();
   BranchInst *BR = dyn_cast<BranchInst>(entryBlock->getTerminator());
   if (!BR || BR->isUnconditional())
-    return 0;
+    return nullptr;
   
-  BasicBlock* returnBlock = 0;
-  BasicBlock* nonReturnBlock = 0;
+  BasicBlock* returnBlock = nullptr;
+  BasicBlock* nonReturnBlock = nullptr;
   unsigned returnCount = 0;
   for (succ_iterator SI = succ_begin(entryBlock), SE = succ_end(entryBlock);
        SI != SE; ++SI)
@@ -66,7 +67,7 @@ Function* PartialInliner::unswitchFunction(Function* F) {
       nonReturnBlock = *SI;
   
   if (returnCount != 1)
-    return 0;
+    return nullptr;
   
   // Clone the function, so that we can hack away on it.
   ValueToValueMapTy VMap;

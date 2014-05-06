@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mips16-hard-float"
 #include "Mips16HardFloat.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
@@ -19,6 +18,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <string>
+
+#define DEBUG_TYPE "mips16-hard-float"
 
 static void inlineAsmOut
   (LLVMContext &C, StringRef AsmString, BasicBlock *BB ) {
@@ -406,11 +407,11 @@ static bool fixupFPReturnAndCall
         CallInst::Create(F, Params, "", &Inst );
       } else if (const CallInst *CI = dyn_cast<CallInst>(I)) {
           const Value* V = CI->getCalledValue();
-          const Type* T = 0;
+          const Type* T = nullptr;
           if (V) T = V->getType();
-          const PointerType *PFT=0;
+          const PointerType *PFT=nullptr;
           if (T) PFT = dyn_cast<PointerType>(T);
-          const FunctionType *FT=0;
+          const FunctionType *FT=nullptr;
           if (PFT) FT = dyn_cast<FunctionType>(PFT->getElementType());
           Function *F_ =  CI->getCalledFunction();
           if (FT && needsFPReturnHelper(*FT) &&

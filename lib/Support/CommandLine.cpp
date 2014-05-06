@@ -38,6 +38,8 @@
 using namespace llvm;
 using namespace cl;
 
+#define DEBUG_TYPE "commandline"
+
 //===----------------------------------------------------------------------===//
 // Template instantiations and anchors.
 //
@@ -746,7 +748,7 @@ void cl::ParseCommandLineOptions(int argc, const char * const *argv,
   argc = static_cast<int>(newArgv.size());
 
   // Copy the program name into ProgName, making sure not to overflow it.
-  std::string ProgName = sys::path::filename(argv[0]);
+  StringRef ProgName = sys::path::filename(argv[0]);
   size_t Len = std::min(ProgName.size(), size_t(79));
   memcpy(ProgramName, ProgName.data(), Len);
   ProgramName[Len] = '\0';

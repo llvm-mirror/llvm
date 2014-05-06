@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "jit"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
@@ -25,6 +24,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -36,6 +36,8 @@
 #include <cmath>
 #include <cstring>
 using namespace llvm;
+
+#define DEBUG_TYPE "jit"
 
 STATISTIC(NumInitBytes, "Number of bytes of global vars initialized");
 STATISTIC(NumGlobals  , "Number of global vars initialized");
@@ -118,6 +120,10 @@ public:
 
 char *ExecutionEngine::getMemoryForGV(const GlobalVariable *GV) {
   return GVMemoryBlock::Create(GV, *getDataLayout());
+}
+
+void ExecutionEngine::addObjectFile(std::unique_ptr<object::ObjectFile> O) {
+  llvm_unreachable("ExecutionEngine subclass doesn't implement addObjectFile.");
 }
 
 bool ExecutionEngine::removeModule(Module *M) {

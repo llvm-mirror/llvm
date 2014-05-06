@@ -25,6 +25,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_REGINFO_MC_DESC
 #include "AArch64GenRegisterInfo.inc"
 
@@ -33,8 +35,6 @@
 
 #define GET_SUBTARGETINFO_MC_DESC
 #include "AArch64GenSubtargetInfo.inc"
-
-using namespace llvm;
 
 MCSubtargetInfo *AArch64_MC::createAArch64MCSubtargetInfo(StringRef TT,
                                                           StringRef CPU,
@@ -63,7 +63,7 @@ static MCAsmInfo *createAArch64MCAsmInfo(const MCRegisterInfo &MRI,
 
   MCAsmInfo *MAI = new AArch64ELFMCAsmInfo(TT);
   unsigned Reg = MRI.getDwarfRegNum(AArch64::XSP, true);
-  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(0, Reg, 0);
+  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, Reg, 0);
   MAI->addInitialFrameState(Inst);
 
   return MAI;
@@ -114,7 +114,7 @@ static MCInstPrinter *createAArch64MCInstPrinter(const Target &T,
                                                  const MCSubtargetInfo &STI) {
   if (SyntaxVariant == 0)
     return new AArch64InstPrinter(MAI, MII, MRI, STI);
-  return 0;
+  return nullptr;
 }
 
 namespace {
@@ -123,14 +123,14 @@ class AArch64MCInstrAnalysis : public MCInstrAnalysis {
 public:
   AArch64MCInstrAnalysis(const MCInstrInfo *Info) : MCInstrAnalysis(Info) {}
 
-  virtual bool isUnconditionalBranch(const MCInst &Inst) const {
+  bool isUnconditionalBranch(const MCInst &Inst) const override {
     if (Inst.getOpcode() == AArch64::Bcc
         && Inst.getOperand(0).getImm() == A64CC::AL)
       return true;
     return MCInstrAnalysis::isUnconditionalBranch(Inst);
   }
 
-  virtual bool isConditionalBranch(const MCInst &Inst) const {
+  bool isConditionalBranch(const MCInst &Inst) const override {
     if (Inst.getOpcode() == AArch64::Bcc
         && Inst.getOperand(0).getImm() == A64CC::AL)
       return false;
@@ -138,7 +138,7 @@ public:
   }
 
   bool evaluateBranch(const MCInst &Inst, uint64_t Addr,
-                      uint64_t Size, uint64_t &Target) const {
+                      uint64_t Size, uint64_t &Target) const override {
     unsigned LblOperand = Inst.getOpcode() == AArch64::Bcc ? 1 : 0;
     // FIXME: We only handle PCRel branches for now.
     if (Info->get(Inst.getOpcode()).OpInfo[LblOperand].OperandType

@@ -16,6 +16,7 @@
 #ifndef LLVM_CODEGEN_COMMANDFLAGS_H
 #define LLVM_CODEGEN_COMMANDFLAGS_H
 
+#include "llvm/MC/MCTargetOptionsCommandFlags.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetMachine.h"
@@ -85,9 +86,6 @@ FileType("filetype", cl::init(TargetMachine::CGFT_AssemblyFile),
              clEnumValN(TargetMachine::CGFT_Null, "null",
                         "Emit nothing, for performance testing"),
              clEnumValEnd));
-
-cl::opt<bool> DisableCFI("disable-cfi", cl::Hidden,
-                         cl::desc("Do not use .cfi_* directives"));
 
 cl::opt<bool> EnableDwarfDirectory("enable-dwarf-directory", cl::Hidden,
                   cl::desc("Use .file directives with an explicit directory."));
@@ -225,6 +223,9 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.UseInitArray = UseInitArray;
+
+  Options.MCOptions = InitMCTargetOptionsFromFlags();
+
   return Options;
 }
 

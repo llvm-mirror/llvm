@@ -23,8 +23,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "ctrloops"
-
 #include "llvm/Transforms/Scalar.h"
 #include "PPC.h"
 #include "PPCTargetMachine.h"
@@ -61,6 +59,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "ctrloops"
+
 #ifndef NDEBUG
 static cl::opt<int> CTRLoopLimit("ppc-max-ctrloop", cl::Hidden, cl::init(-1));
 #endif
@@ -84,16 +84,16 @@ namespace {
   public:
     static char ID;
 
-    PPCCTRLoops() : FunctionPass(ID), TM(0) {
+    PPCCTRLoops() : FunctionPass(ID), TM(nullptr) {
       initializePPCCTRLoopsPass(*PassRegistry::getPassRegistry());
     }
     PPCCTRLoops(PPCTargetMachine &TM) : FunctionPass(ID), TM(&TM) {
       initializePPCCTRLoopsPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &F);
+    bool runOnFunction(Function &F) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<LoopInfo>();
       AU.addPreserved<LoopInfo>();
       AU.addRequired<DominatorTreeWrapperPass>();
@@ -128,12 +128,12 @@ namespace {
       initializePPCCTRLoopsVerifyPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<MachineDominatorTree>();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
-    virtual bool runOnMachineFunction(MachineFunction &MF);
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
   private:
     MachineDominatorTree *MDT;
@@ -172,7 +172,7 @@ bool PPCCTRLoops::runOnFunction(Function &F) {
   SE = &getAnalysis<ScalarEvolution>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : 0;
+  DL = DLP ? &DLP->getDataLayout() : nullptr;
   LibInfo = getAnalysisIfAvailable<TargetLibraryInfo>();
 
   bool MadeChange = false;
@@ -424,9 +424,9 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
   SmallVector<BasicBlock*, 4> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
 
-  BasicBlock *CountedExitBlock = 0;
-  const SCEV *ExitCount = 0;
-  BranchInst *CountedExitBranch = 0;
+  BasicBlock *CountedExitBlock = nullptr;
+  const SCEV *ExitCount = nullptr;
+  BranchInst *CountedExitBranch = nullptr;
   for (SmallVectorImpl<BasicBlock *>::iterator I = ExitingBlocks.begin(),
        IE = ExitingBlocks.end(); I != IE; ++I) {
     const SCEV *EC = SE->getExitCount(L, *I);

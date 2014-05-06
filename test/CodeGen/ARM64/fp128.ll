@@ -186,13 +186,13 @@ define i32 @test_br_cc() {
 iftrue:
   ret i32 42
 ; CHECK-NEXT: BB#
-; CHECK-NEXT: movz w0, #42
+; CHECK-NEXT: movz w0, #0x2a
 ; CHECK-NEXT: b [[REALRET:.LBB[0-9]+_[0-9]+]]
 
 iffalse:
   ret i32 29
 ; CHECK: [[RET29]]:
-; CHECK-NEXT: movz w0, #29
+; CHECK-NEXT: movz w0, #0x1d
 ; CHECK-NEXT: [[REALRET]]:
 ; CHECK: ret
 }
@@ -202,8 +202,7 @@ define void @test_select(i1 %cond, fp128 %lhs, fp128 %rhs) {
 
   %val = select i1 %cond, fp128 %lhs, fp128 %rhs
   store fp128 %val, fp128* @lhs, align 16
-; CHECK: and [[BIT:w[0-9]+]], w0, #0x1
-; CHECK: cmp [[BIT]], #0
+; CHECK: tst w0, #0x1
 ; CHECK-NEXT: b.eq [[IFFALSE:.LBB[0-9]+_[0-9]+]]
 ; CHECK-NEXT: BB#
 ; CHECK-NEXT: orr v[[VAL:[0-9]+]].16b, v0.16b, v0.16b

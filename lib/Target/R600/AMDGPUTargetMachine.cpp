@@ -42,7 +42,7 @@ extern "C" void LLVMInitializeR600Target() {
 }
 
 static ScheduleDAGInstrs *createR600MachineScheduler(MachineSchedContext *C) {
-  return new ScheduleDAGMILive(C, new R600SchedStrategy());
+  return new ScheduleDAGMILive(C, make_unique<R600SchedStrategy>());
 }
 
 static MachineSchedRegistry
@@ -103,20 +103,20 @@ public:
     return getTM<AMDGPUTargetMachine>();
   }
 
-  virtual ScheduleDAGInstrs *
-  createMachineScheduler(MachineSchedContext *C) const {
+  ScheduleDAGInstrs *
+  createMachineScheduler(MachineSchedContext *C) const override {
     const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
     if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS)
       return createR600MachineScheduler(C);
-    return 0;
+    return nullptr;
   }
 
-  virtual bool addPreISel();
-  virtual bool addInstSelector();
-  virtual bool addPreRegAlloc();
-  virtual bool addPostRegAlloc();
-  virtual bool addPreSched2();
-  virtual bool addPreEmitPass();
+  bool addPreISel() override;
+  bool addInstSelector() override;
+  bool addPreRegAlloc() override;
+  bool addPostRegAlloc() override;
+  bool addPreSched2() override;
+  bool addPreEmitPass() override;
 };
 } // End of anonymous namespace
 
@@ -154,6 +154,7 @@ AMDGPUPassConfig::addPreISel() {
 
 bool AMDGPUPassConfig::addInstSelector() {
   addPass(createAMDGPUISelDag(getAMDGPUTargetMachine()));
+  addPass(createSILowerI1CopiesPass());
   return false;
 }
 

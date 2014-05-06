@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "systemz-lower"
-
 #include "SystemZISelLowering.h"
 #include "SystemZCallingConv.h"
 #include "SystemZConstantPoolValue.h"
@@ -25,6 +23,8 @@
 #include <cctype>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "systemz-lower"
 
 namespace {
 // Represents a sequence for extracting a 0/1 value from an IPM result:
@@ -424,7 +424,7 @@ getSingleConstraintMatchWeight(AsmOperandInfo &info,
   Value *CallOperandVal = info.CallOperandVal;
   // If we don't have a value, we can't do a match,
   // but allow it at the lowest weight.
-  if (CallOperandVal == NULL)
+  if (!CallOperandVal)
     return CW_Default;
   Type *type = CallOperandVal->getType();
   // Look at the constraint type.
@@ -492,7 +492,7 @@ parseRegisterNumber(const std::string &Constraint,
     if (Index < 16 && Map[Index])
       return std::make_pair(Map[Index], RC);
   }
-  return std::make_pair(0u, static_cast<TargetRegisterClass*>(0));
+  return std::make_pair(0U, nullptr);
 }
 
 std::pair<unsigned, const TargetRegisterClass *> SystemZTargetLowering::
@@ -772,8 +772,8 @@ LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
       }
       // Join the stores, which are independent of one another.
       Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
-                          &MemOps[NumFixedFPRs],
-                          SystemZ::NumArgFPRs - NumFixedFPRs);
+                          makeArrayRef(&MemOps[NumFixedFPRs],
+                                       SystemZ::NumArgFPRs-NumFixedFPRs));
     }
   }
 
@@ -875,8 +875,7 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Join the stores, which are independent of one another.
   if (!MemOpChains.empty())
-    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
-                        &MemOpChains[0], MemOpChains.size());
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOpChains);
 
   // Accept direct calls by converting symbolic call addresses to the
   // associated Target* opcodes.  Force %r1 to be used for indirect
@@ -919,8 +918,8 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
   // Emit the call.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
   if (IsTailCall)
-    return DAG.getNode(SystemZISD::SIBCALL, DL, NodeTys, &Ops[0], Ops.size());
-  Chain = DAG.getNode(SystemZISD::CALL, DL, NodeTys, &Ops[0], Ops.size());
+    return DAG.getNode(SystemZISD::SIBCALL, DL, NodeTys, Ops);
+  Chain = DAG.getNode(SystemZISD::CALL, DL, NodeTys, Ops);
   Glue = Chain.getValue(1);
 
   // Mark the end of the call, which is glued to the call itself.
@@ -996,8 +995,7 @@ SystemZTargetLowering::LowerReturn(SDValue Chain,
   if (Glue.getNode())
     RetOps.push_back(Glue);
 
-  return DAG.getNode(SystemZISD::RET_FLAG, DL, MVT::Other,
-                     RetOps.data(), RetOps.size());
+  return DAG.getNode(SystemZISD::RET_FLAG, DL, MVT::Other, RetOps);
 }
 
 SDValue SystemZTargetLowering::
@@ -1489,7 +1487,7 @@ static void adjustForTestUnderMask(SelectionDAG &DAG, Comparison &C) {
   // Check whether the nonconstant input is an AND with a constant mask.
   Comparison NewC(C);
   uint64_t MaskVal;
-  ConstantSDNode *Mask = 0;
+  ConstantSDNode *Mask = nullptr;
   if (C.Op0.getOpcode() == ISD::AND) {
     NewC.Op0 = C.Op0.getOperand(0);
     NewC.Op1 = C.Op0.getOperand(1);
@@ -1779,7 +1777,7 @@ SDValue SystemZTargetLowering::lowerSELECT_CC(SDValue Op,
   Ops.push_back(Glue);
 
   SDVTList VTs = DAG.getVTList(Op.getValueType(), MVT::Glue);
-  return DAG.getNode(SystemZISD::SELECT_CCMASK, DL, VTs, &Ops[0], Ops.size());
+  return DAG.getNode(SystemZISD::SELECT_CCMASK, DL, VTs, Ops);
 }
 
 SDValue SystemZTargetLowering::lowerGlobalAddress(GlobalAddressSDNode *Node,
@@ -1971,7 +1969,7 @@ SDValue SystemZTargetLowering::lowerVASTART(SDValue Op,
                              false, false, 0);
     Offset += 8;
   }
-  return DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOps, NumFields);
+  return DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOps);
 }
 
 SDValue SystemZTargetLowering::lowerVACOPY(SDValue Op,
@@ -2012,7 +2010,7 @@ lowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Result = DAG.getNode(ISD::ADD, DL, MVT::i64, NewSP, ArgAdjust);
 
   SDValue Ops[2] = { Result, Chain };
-  return DAG.getMergeValues(Ops, 2, DL);
+  return DAG.getMergeValues(Ops, DL);
 }
 
 SDValue SystemZTargetLowering::lowerSMUL_LOHI(SDValue Op,
@@ -2054,7 +2052,7 @@ SDValue SystemZTargetLowering::lowerSMUL_LOHI(SDValue Op,
     SDValue NegSum = DAG.getNode(ISD::ADD, DL, VT, NegLLTimesRH, NegLHTimesRL);
     Ops[1] = DAG.getNode(ISD::SUB, DL, VT, Ops[1], NegSum);
   }
-  return DAG.getMergeValues(Ops, 2, DL);
+  return DAG.getMergeValues(Ops, DL);
 }
 
 SDValue SystemZTargetLowering::lowerUMUL_LOHI(SDValue Op,
@@ -2073,7 +2071,7 @@ SDValue SystemZTargetLowering::lowerUMUL_LOHI(SDValue Op,
     // low half first, so the results are in reverse order.
     lowerGR128Binary(DAG, DL, VT, SystemZ::AEXT128_64, SystemZISD::UMUL_LOHI64,
                      Op.getOperand(0), Op.getOperand(1), Ops[1], Ops[0]);
-  return DAG.getMergeValues(Ops, 2, DL);
+  return DAG.getMergeValues(Ops, DL);
 }
 
 SDValue SystemZTargetLowering::lowerSDIVREM(SDValue Op,
@@ -2100,7 +2098,7 @@ SDValue SystemZTargetLowering::lowerSDIVREM(SDValue Op,
   SDValue Ops[2];
   lowerGR128Binary(DAG, DL, VT, SystemZ::AEXT128_64, Opcode,
                    Op0, Op1, Ops[1], Ops[0]);
-  return DAG.getMergeValues(Ops, 2, DL);
+  return DAG.getMergeValues(Ops, DL);
 }
 
 SDValue SystemZTargetLowering::lowerUDIVREM(SDValue Op,
@@ -2118,7 +2116,7 @@ SDValue SystemZTargetLowering::lowerUDIVREM(SDValue Op,
   else
     lowerGR128Binary(DAG, DL, VT, SystemZ::ZEXT128_64, SystemZISD::UDIVREM64,
                      Op.getOperand(0), Op.getOperand(1), Ops[1], Ops[0]);
-  return DAG.getMergeValues(Ops, 2, DL);
+  return DAG.getMergeValues(Ops, DL);
 }
 
 SDValue SystemZTargetLowering::lowerOR(SDValue Op, SelectionDAG &DAG) const {
@@ -2259,7 +2257,6 @@ SDValue SystemZTargetLowering::lowerATOMIC_LOAD_OP(SDValue Op,
   SDValue Ops[] = { ChainIn, AlignedAddr, Src2, BitShift, NegBitShift,
                     DAG.getConstant(BitSize, WideVT) };
   SDValue AtomicOp = DAG.getMemIntrinsicNode(Opcode, DL, VTList, Ops,
-                                             array_lengthof(Ops),
                                              NarrowVT, MMO);
 
   // Rotate the result of the final CS so that the field is in the lower
@@ -2269,7 +2266,7 @@ SDValue SystemZTargetLowering::lowerATOMIC_LOAD_OP(SDValue Op,
   SDValue Result = DAG.getNode(ISD::ROTL, DL, WideVT, AtomicOp, ResultShift);
 
   SDValue RetOps[2] = { Result, AtomicOp.getValue(1) };
-  return DAG.getMergeValues(RetOps, 2, DL);
+  return DAG.getMergeValues(RetOps, DL);
 }
 
 // Op is an ATOMIC_LOAD_SUB operation.  Lower 8- and 16-bit operations
@@ -2351,8 +2348,7 @@ SDValue SystemZTargetLowering::lowerATOMIC_CMP_SWAP(SDValue Op,
   SDValue Ops[] = { ChainIn, AlignedAddr, CmpVal, SwapVal, BitShift,
                     NegBitShift, DAG.getConstant(BitSize, WideVT) };
   SDValue AtomicOp = DAG.getMemIntrinsicNode(SystemZISD::ATOMIC_CMP_SWAPW, DL,
-                                             VTList, Ops, array_lengthof(Ops),
-                                             NarrowVT, MMO);
+                                             VTList, Ops, NarrowVT, MMO);
   return AtomicOp;
 }
 
@@ -2388,7 +2384,7 @@ SDValue SystemZTargetLowering::lowerPREFETCH(SDValue Op,
     Op.getOperand(1)
   };
   return DAG.getMemIntrinsicNode(SystemZISD::PREFETCH, SDLoc(Op),
-                                 Node->getVTList(), Ops, array_lengthof(Ops),
+                                 Node->getVTList(), Ops,
                                  Node->getMemoryVT(), Node->getMemOperand());
 }
 
@@ -2517,7 +2513,7 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
     OPCODE(ATOMIC_CMP_SWAPW);
     OPCODE(PREFETCH);
   }
-  return NULL;
+  return nullptr;
 #undef OPCODE
 }
 
@@ -3116,7 +3112,7 @@ SystemZTargetLowering::emitMemMemWrapper(MachineInstr *MI,
   // When generating more than one CLC, all but the last will need to
   // branch to the end when a difference is found.
   MachineBasicBlock *EndMBB = (Length > 256 && Opcode == SystemZ::CLC ?
-                               splitBlockAfter(MI, MBB) : 0);
+                               splitBlockAfter(MI, MBB) : nullptr);
 
   // Check for the loop form, in which operand 5 is the trip count.
   if (MI->getNumExplicitOperands() > 5) {

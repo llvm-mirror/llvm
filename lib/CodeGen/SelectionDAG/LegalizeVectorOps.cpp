@@ -152,8 +152,7 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   for (unsigned i = 0, e = Node->getNumOperands(); i != e; ++i)
     Ops.push_back(LegalizeOp(Node->getOperand(i)));
 
-  SDValue Result =
-    SDValue(DAG.UpdateNodeOperands(Op.getNode(), Ops.data(), Ops.size()), 0);
+  SDValue Result = SDValue(DAG.UpdateNodeOperands(Op.getNode(), Ops), 0);
 
   if (Op.getOpcode() == ISD::LOAD) {
     LoadSDNode *LD = cast<LoadSDNode>(Op.getNode());
@@ -343,7 +342,7 @@ SDValue VectorLegalizer::PromoteVectorOp(SDValue Op) {
       Operands[j] = Op.getOperand(j);
   }
 
-  Op = DAG.getNode(Op.getOpcode(), dl, NVT, &Operands[0], Operands.size());
+  Op = DAG.getNode(Op.getOpcode(), dl, NVT, Operands);
 
   return DAG.getNode(ISD::BITCAST, dl, VT, Op);
 }
@@ -377,8 +376,7 @@ SDValue VectorLegalizer::PromoteVectorOpINT_TO_FP(SDValue Op) {
       Operands[j] = Op.getOperand(j);
   }
 
-  return DAG.getNode(Op.getOpcode(), dl, Op.getValueType(), &Operands[0],
-                     Operands.size());
+  return DAG.getNode(Op.getOpcode(), dl, Op.getValueType(), Operands);
 }
 
 // For FP_TO_INT we promote the result type to a vector type with wider
@@ -546,10 +544,9 @@ SDValue VectorLegalizer::ExpandLoad(SDValue Op) {
     }
   }
 
-  SDValue NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
-            &LoadChains[0], LoadChains.size());
+  SDValue NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, LoadChains);
   SDValue Value = DAG.getNode(ISD::BUILD_VECTOR, dl,
-            Op.getNode()->getValueType(0), &Vals[0], Vals.size());
+                              Op.getNode()->getValueType(0), Vals);
 
   AddLegalizedOperand(Op.getValue(0), Value);
   AddLegalizedOperand(Op.getValue(1), NewChain);
@@ -603,8 +600,7 @@ SDValue VectorLegalizer::ExpandStore(SDValue Op) {
 
     Stores.push_back(Store);
   }
-  SDValue TF =  DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
-                            &Stores[0], Stores.size());
+  SDValue TF =  DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Stores);
   AddLegalizedOperand(Op, TF);
   return TF;
 }
@@ -648,7 +644,7 @@ SDValue VectorLegalizer::ExpandSELECT(SDValue Op) {
 
   // Broadcast the mask so that the entire vector is all-one or all zero.
   SmallVector<SDValue, 8> Ops(NumElem, Mask);
-  Mask = DAG.getNode(ISD::BUILD_VECTOR, DL, MaskTy, &Ops[0], Ops.size());
+  Mask = DAG.getNode(ISD::BUILD_VECTOR, DL, MaskTy, Ops);
 
   // Bitcast the operands to be the same type as the mask.
   // This is needed when we select between FP types because
@@ -803,7 +799,7 @@ SDValue VectorLegalizer::UnrollVSETCC(SDValue Op) {
                                            (EltVT.getSizeInBits()), EltVT),
                            DAG.getConstant(0, EltVT));
   }
-  return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, &Ops[0], NumElems);
+  return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Ops);
 }
 
 }

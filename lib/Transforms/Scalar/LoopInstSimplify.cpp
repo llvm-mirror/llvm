@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "loop-instsimplify"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
@@ -25,6 +24,8 @@
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "loop-instsimplify"
 
 STATISTIC(NumSimplified, "Number of redundant instructions simplified");
 
@@ -70,10 +71,10 @@ bool LoopInstSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
 
   DominatorTreeWrapperPass *DTWP =
       getAnalysisIfAvailable<DominatorTreeWrapperPass>();
-  DominatorTree *DT = DTWP ? &DTWP->getDomTree() : 0;
+  DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
   LoopInfo *LI = &getAnalysis<LoopInfo>();
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  const DataLayout *DL = DLP ? &DLP->getDataLayout() : 0;
+  const DataLayout *DL = DLP ? &DLP->getDataLayout() : nullptr;
   const TargetLibraryInfo *TLI = &getAnalysis<TargetLibraryInfo>();
 
   SmallVector<BasicBlock*, 8> ExitBlocks;
@@ -126,7 +127,15 @@ bool LoopInstSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
             ++NumSimplified;
           }
         }
-        LocalChanged |= RecursivelyDeleteTriviallyDeadInstructions(I, TLI);
+        bool res = RecursivelyDeleteTriviallyDeadInstructions(I, TLI);
+        if (res) {
+          // RecursivelyDeleteTriviallyDeadInstruction can remove
+          // more than one instruction, so simply incrementing the
+          // iterator does not work. When instructions get deleted
+          // re-iterate instead.
+          BI = BB->begin(); BE = BB->end();
+          LocalChanged |= res;
+        }
 
         if (IsSubloopHeader && !isa<PHINode>(I))
           break;

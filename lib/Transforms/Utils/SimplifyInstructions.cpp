@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "instsimplify"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -28,6 +27,8 @@
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "instsimplify"
 
 STATISTIC(NumSimplified, "Number of redundant instructions removed");
 
@@ -47,9 +48,9 @@ namespace {
     bool runOnFunction(Function &F) override {
       const DominatorTreeWrapperPass *DTWP =
           getAnalysisIfAvailable<DominatorTreeWrapperPass>();
-      const DominatorTree *DT = DTWP ? &DTWP->getDomTree() : 0;
+      const DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
       DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-      const DataLayout *DL = DLP ? &DLP->getDataLayout() : 0;
+      const DataLayout *DL = DLP ? &DLP->getDataLayout() : nullptr;
       const TargetLibraryInfo *TLI = &getAnalysis<TargetLibraryInfo>();
       SmallPtrSet<const Instruction*, 8> S1, S2, *ToSimplify = &S1, *Next = &S2;
       bool Changed = false;
@@ -75,7 +76,15 @@ namespace {
                 ++NumSimplified;
                 Changed = true;
               }
-            Changed |= RecursivelyDeleteTriviallyDeadInstructions(I, TLI);
+            bool res = RecursivelyDeleteTriviallyDeadInstructions(I, TLI);
+            if (res)  {
+              // RecursivelyDeleteTriviallyDeadInstruction can remove
+              // more than one instruction, so simply incrementing the
+              // iterator does not work. When instructions get deleted
+              // re-iterate instead.
+              BI = BB->begin(); BE = BB->end();
+              Changed |= res;
+            }
           }
 
         // Place the list of instructions to simplify on the next loop iteration

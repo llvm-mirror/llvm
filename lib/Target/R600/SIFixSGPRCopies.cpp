@@ -65,7 +65,6 @@
 /// ultimately led to the creation of an illegal COPY.
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "sgpr-copies"
 #include "AMDGPU.h"
 #include "SIInstrInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -76,6 +75,8 @@
 #include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "sgpr-copies"
 
 namespace {
 
@@ -97,9 +98,9 @@ private:
 public:
   SIFixSGPRCopies(TargetMachine &tm) : MachineFunctionPass(ID) { }
 
-  virtual bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
-  const char *getPassName() const {
+  const char *getPassName() const override {
     return "SI Fix SGPR copies";
   }
 
@@ -184,7 +185,8 @@ bool SIFixSGPRCopies::isVGPRToSGPRCopy(const MachineInstr &Copy,
   const TargetRegisterClass *SrcRC;
 
   if (!TargetRegisterInfo::isVirtualRegister(SrcReg) ||
-      DstRC == &AMDGPU::M0RegRegClass)
+      DstRC == &AMDGPU::M0RegRegClass ||
+      MRI.getRegClass(SrcReg) == &AMDGPU::VReg_1RegClass)
     return false;
 
   SrcRC = TRI->getSubRegClass(MRI.getRegClass(SrcReg), SrcSubReg);

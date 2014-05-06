@@ -12,8 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "misched"
-
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/ADT/PriorityQueue.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -34,6 +32,8 @@
 #include <queue>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "misched"
 
 namespace llvm {
 cl::opt<bool> ForceTopDown("misched-topdown", cl::Hidden,
@@ -487,9 +487,8 @@ void ReadyQueue::dump() {
 // virtual registers.
 // ===----------------------------------------------------------------------===/
 
+// Provide a vtable anchor.
 ScheduleDAGMI::~ScheduleDAGMI() {
-  DeleteContainerPointers(Mutations);
-  delete SchedImpl;
 }
 
 bool ScheduleDAGMI::canAddEdge(SUnit *SuccSU, SUnit *PredSU) {
@@ -3002,17 +3001,17 @@ void GenericScheduler::schedNode(SUnit *SU, bool IsTopNode) {
 /// Create the standard converging machine scheduler. This will be used as the
 /// default scheduler if the target does not set a default.
 static ScheduleDAGInstrs *createGenericSchedLive(MachineSchedContext *C) {
-  ScheduleDAGMILive *DAG = new ScheduleDAGMILive(C, new GenericScheduler(C));
+  ScheduleDAGMILive *DAG = new ScheduleDAGMILive(C, make_unique<GenericScheduler>(C));
   // Register DAG post-processors.
   //
   // FIXME: extend the mutation API to allow earlier mutations to instantiate
   // data and pass it to later mutations. Have a single mutation that gathers
   // the interesting nodes in one pass.
-  DAG->addMutation(new CopyConstrain(DAG->TII, DAG->TRI));
+  DAG->addMutation(make_unique<CopyConstrain>(DAG->TII, DAG->TRI));
   if (EnableLoadCluster && DAG->TII->enableClusterLoads())
-    DAG->addMutation(new LoadClusterMutation(DAG->TII, DAG->TRI));
+    DAG->addMutation(make_unique<LoadClusterMutation>(DAG->TII, DAG->TRI));
   if (EnableMacroFusion)
-    DAG->addMutation(new MacroFusion(DAG->TII));
+    DAG->addMutation(make_unique<MacroFusion>(DAG->TII));
   return DAG;
 }
 
@@ -3198,7 +3197,7 @@ void PostGenericScheduler::schedNode(SUnit *SU, bool IsTopNode) {
 
 /// Create a generic scheduler with no vreg liveness or DAG mutation passes.
 static ScheduleDAGInstrs *createGenericSchedPostRA(MachineSchedContext *C) {
-  return new ScheduleDAGMI(C, new PostGenericScheduler(C), /*IsPostRA=*/true);
+  return new ScheduleDAGMI(C, make_unique<PostGenericScheduler>(C), /*IsPostRA=*/true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -3303,10 +3302,10 @@ public:
 } // namespace
 
 static ScheduleDAGInstrs *createILPMaxScheduler(MachineSchedContext *C) {
-  return new ScheduleDAGMILive(C, new ILPScheduler(true));
+  return new ScheduleDAGMILive(C, make_unique<ILPScheduler>(true));
 }
 static ScheduleDAGInstrs *createILPMinScheduler(MachineSchedContext *C) {
-  return new ScheduleDAGMILive(C, new ILPScheduler(false));
+  return new ScheduleDAGMILive(C, make_unique<ILPScheduler>(false));
 }
 static MachineSchedRegistry ILPMaxRegistry(
   "ilpmax", "Schedule bottom-up for max ILP", createILPMaxScheduler);
@@ -3348,7 +3347,7 @@ public:
   InstructionShuffler(bool alternate, bool topdown)
     : IsAlternating(alternate), IsTopDown(topdown) {}
 
-  virtual void initialize(ScheduleDAGMI*) {
+  void initialize(ScheduleDAGMI*) override {
     TopQ.clear();
     BottomQ.clear();
   }
@@ -3356,7 +3355,7 @@ public:
   /// Implement MachineSchedStrategy interface.
   /// -----------------------------------------
 
-  virtual SUnit *pickNode(bool &IsTopNode) {
+  SUnit *pickNode(bool &IsTopNode) override {
     SUnit *SU;
     if (IsTopDown) {
       do {
@@ -3379,12 +3378,12 @@ public:
     return SU;
   }
 
-  virtual void schedNode(SUnit *SU, bool IsTopNode) {}
+  void schedNode(SUnit *SU, bool IsTopNode) override {}
 
-  virtual void releaseTopNode(SUnit *SU) {
+  void releaseTopNode(SUnit *SU) override {
     TopQ.push(SU);
   }
-  virtual void releaseBottomNode(SUnit *SU) {
+  void releaseBottomNode(SUnit *SU) override {
     BottomQ.push(SU);
   }
 };
@@ -3395,7 +3394,7 @@ static ScheduleDAGInstrs *createInstructionShuffler(MachineSchedContext *C) {
   bool TopDown = !ForceBottomUp;
   assert((TopDown || !ForceTopDown) &&
          "-misched-topdown incompatible with -misched-bottomup");
-  return new ScheduleDAGMILive(C, new InstructionShuffler(Alternate, TopDown));
+  return new ScheduleDAGMILive(C, make_unique<InstructionShuffler>(Alternate, TopDown));
 }
 static MachineSchedRegistry ShufflerRegistry(
   "shuffle", "Shuffle machine instructions alternating directions",

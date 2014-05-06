@@ -1,4 +1,4 @@
-; RUN: llvm-mc -triple arm64-apple-darwin -output-asm-variant=1 -show-encoding < %s | FileCheck %s
+; RUN: llvm-mc -triple arm64-apple-darwin -mattr=neon -output-asm-variant=1 -show-encoding < %s | FileCheck %s
 
 foo:
 ;-----------------------------------------------------------------------------
@@ -67,7 +67,7 @@ foo:
   cmn x4, x5, uxtx #1
 
 ; CHECK: cmn	w1, #3                  ; encoding: [0x3f,0x0c,0x00,0x31]
-; CHECK: cmn	x2, #4194304            ; encoding: [0x5f,0x00,0x50,0xb1]
+; CHECK: cmn	x2, #1024, lsl #12      ; encoding: [0x5f,0x00,0x50,0xb1]
 ; CHECK: cmn	w4, w5                  ; encoding: [0x9f,0x00,0x05,0x2b]
 ; CHECK: cmn	x6, x7                  ; encoding: [0xdf,0x00,0x07,0xab]
 ; CHECK: cmn	w8, w9, asr #3          ; encoding: [0x1f,0x0d,0x89,0x2b]
@@ -92,7 +92,7 @@ foo:
   cmp w9, w8, uxtw
   cmp wsp, w9, lsl #0
 
-; CHECK: cmp	w1, #4194304            ; encoding: [0x3f,0x00,0x50,0x71]
+; CHECK: cmp	w1, #1024, lsl #12      ; encoding: [0x3f,0x00,0x50,0x71]
 ; CHECK: cmp	x2, #1024               ; encoding: [0x5f,0x00,0x10,0xf1]
 ; CHECK: cmp	w4, w5                  ; encoding: [0x9f,0x00,0x05,0x6b]
 ; CHECK: cmp	x6, x7                  ; encoding: [0xdf,0x00,0x07,0xeb]
@@ -134,8 +134,8 @@ foo:
   mov x0, #281470681743360
   mov x0, #18446744073709486080
 
-; CHECK: movz	x0, #65535, lsl #32
-; CHECK: movn	x0, #65535
+; CHECK: movz	x0, #0xffff, lsl #32
+; CHECK: movn	x0, #0xffff
 
   mov w0, #0xffffffff
   mov w0, #0xffffff00
@@ -143,9 +143,9 @@ foo:
   mov wzr, #0xffffff00
 
 ; CHECK: movn   w0, #0
-; CHECK: movn   w0, #255
+; CHECK: movn   w0, #0xff
 ; CHECK: movn   wzr, #0
-; CHECK: movn   wzr, #255
+; CHECK: movn   wzr, #0xff
 
 ;-----------------------------------------------------------------------------
 ; MVN aliases
@@ -186,20 +186,20 @@ foo:
   ubfx  w0, w0, #2, #3
   ubfx  x0, x0, #2, #3
 
-; CHECK: bfm  w0, w0, #31, #3
-; CHECK: bfm  x0, x0, #63, #3
-; CHECK: bfm  w0, w0, #0, #1
-; CHECK: bfm  x0, x0, #0, #1
-; CHECK: bfm  w0, w0, #2, #4
-; CHECK: bfm  x0, x0, #2, #4
-; CHECK: sbfm w0, w0, #31, #3
-; CHECK: sbfm x0, x0, #63, #3
-; CHECK: sbfm w0, w0, #2, #4
-; CHECK: sbfm x0, x0, #2, #4
-; CHECK: ubfm w0, w0, #31, #3
-; CHECK: ubfm x0, x0, #63, #3
-; CHECK: ubfm w0, w0, #2, #4
-; CHECK: ubfm x0, x0, #2, #4
+; CHECK: bfi   w0, w0, #1, #4
+; CHECK: bfi   x0, x0, #1, #4
+; CHECK: bfxil w0, w0, #0, #2
+; CHECK: bfxil x0, x0, #0, #2
+; CHECK: bfxil w0, w0, #2, #3
+; CHECK: bfxil x0, x0, #2, #3
+; CHECK: sbfiz w0, w0, #1, #4
+; CHECK: sbfiz x0, x0, #1, #4
+; CHECK: sbfx  w0, w0, #2, #3
+; CHECK: sbfx  x0, x0, #2, #3
+; CHECK: ubfiz w0, w0, #1, #4
+; CHECK: ubfiz x0, x0, #1, #4
+; CHECK: ubfx  w0, w0, #2, #3
+; CHECK: ubfx  x0, x0, #2, #3
 
 ;-----------------------------------------------------------------------------
 ; Shift (immediate) aliases
@@ -249,9 +249,9 @@ foo:
 ; CHECK: sxtb x1, w2
 ; CHECK: sxth x1, w2
 ; CHECK: sxtw x1, w2
-; CHECK: uxtb x1, w2
-; CHECK: uxth x1, w2
-; CHECK: uxtw x1, w2
+; CHECK: uxtb w1, w2
+; CHECK: uxth w1, w2
+; CHECK: ubfx x1, x2, #0, #32
 
 ;-----------------------------------------------------------------------------
 ; Negate with carry
@@ -746,8 +746,8 @@ foo:
   movi v2.2D, #0x000000000000ff
 
 ; CHECK: movi.16b	v4, #0              ; encoding: [0x04,0xe4,0x00,0x4f]
-; CHECK: movi.16b	v4, #1              ; encoding: [0x24,0xe4,0x00,0x4f]
-; CHECK: movi.8b	v4, #2               ; encoding: [0x44,0xe4,0x00,0x0f]
-; CHECK: movi.8b	v4, #3               ; encoding: [0x64,0xe4,0x00,0x0f]
+; CHECK: movi.16b	v4, #0x1              ; encoding: [0x24,0xe4,0x00,0x4f]
+; CHECK: movi.8b	v4, #0x2               ; encoding: [0x44,0xe4,0x00,0x0f]
+; CHECK: movi.8b	v4, #0x3               ; encoding: [0x64,0xe4,0x00,0x0f]
 ; CHECK: movi.2d	v1, #0x000000000000ff ; encoding: [0x21,0xe4,0x00,0x6f]
 ; CHECK: movi.2d	v2, #0x000000000000ff ; encoding: [0x22,0xe4,0x00,0x6f]

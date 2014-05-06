@@ -396,7 +396,7 @@ void LTOModule::addDefinedSymbol(const GlobalValue *def, bool isFunction) {
 
   // set alignment part log2() can have rounding errors
   uint32_t align = def->getAlignment();
-  uint32_t attr = align ? countTrailingZeros(def->getAlignment()) : 0;
+  uint32_t attr = align ? countTrailingZeros(align) : 0;
 
   // set permissions part
   if (isFunction) {
@@ -502,7 +502,7 @@ void LTOModule::addAsmGlobalSymbolUndef(const char *name) {
   if (entry.getValue().name)
     return;
 
-  uint32_t attr = LTO_SYMBOL_DEFINITION_UNDEFINED;;
+  uint32_t attr = LTO_SYMBOL_DEFINITION_UNDEFINED;
   attr |= LTO_SYMBOL_SCOPE_DEFAULT;
   NameAndAttributes info;
   info.name = entry.getKey().data();
@@ -698,7 +698,8 @@ namespace {
     void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
                         uint64_t Size, unsigned ByteAlignment) override {}
     void EmitBytes(StringRef Data) override {}
-    void EmitValueImpl(const MCExpr *Value, unsigned Size) override {}
+    void EmitValueImpl(const MCExpr *Value, unsigned Size,
+                       const SMLoc &Loc) override {}
     void EmitULEB128Value(const MCExpr *Value) override {}
     void EmitSLEB128Value(const MCExpr *Value) override {}
     void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
@@ -738,7 +739,8 @@ bool LTOModule::addAsmGlobalSymbols(std::string &errMsg) {
       _target->getTargetTriple(), _target->getTargetCPU(),
       _target->getTargetFeatureString()));
   std::unique_ptr<MCTargetAsmParser> TAP(
-      T.createMCAsmParser(*STI, *Parser.get(), *MCII));
+      T.createMCAsmParser(*STI, *Parser.get(), *MCII,
+                          _target->Options.MCOptions));
   if (!TAP) {
     errMsg = "target " + std::string(T.getName()) +
       " does not define AsmParser.";

@@ -147,8 +147,9 @@ void MCStreamer::EmitAbsValue(const MCExpr *Value, unsigned Size) {
 }
 
 
-void MCStreamer::EmitValue(const MCExpr *Value, unsigned Size) {
-  EmitValueImpl(Value, Size);
+void MCStreamer::EmitValue(const MCExpr *Value, unsigned Size,
+                           const SMLoc &Loc) {
+  EmitValueImpl(Value, Size, Loc);
 }
 
 void MCStreamer::EmitSymbolValue(const MCSymbol *Sym, unsigned Size) {
@@ -641,11 +642,6 @@ void MCStreamer::Finish() {
     TS->finish();
 
   FinishImpl();
-}
-
-MCSymbolData &MCStreamer::getOrCreateSymbolData(const MCSymbol *Symbol) {
-  report_fatal_error("Not supported!");
-  return *(static_cast<MCSymbolData*>(nullptr));
 }
 
 void MCStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {

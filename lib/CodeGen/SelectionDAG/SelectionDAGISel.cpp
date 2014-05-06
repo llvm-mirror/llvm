@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "isel"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "ScheduleDAGSDNodes.h"
 #include "SelectionDAGBuilder.h"
@@ -57,6 +56,8 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "isel"
 
 STATISTIC(NumFastIselFailures, "Number of instructions fast isel failed on");
 STATISTIC(NumFastIselSuccess, "Number of instructions fast isel selected");
@@ -509,21 +510,17 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
 
   // Determine if there are any calls in this machine function.
   MachineFrameInfo *MFI = MF->getFrameInfo();
-  for (MachineFunction::const_iterator I = MF->begin(), E = MF->end(); I != E;
-       ++I) {
-
+  for (const auto &MBB : *MF) {
     if (MFI->hasCalls() && MF->hasInlineAsm())
       break;
 
-    const MachineBasicBlock *MBB = I;
-    for (MachineBasicBlock::const_iterator II = MBB->begin(), IE = MBB->end();
-         II != IE; ++II) {
-      const MCInstrDesc &MCID = TM.getInstrInfo()->get(II->getOpcode());
+    for (const auto &MI : MBB) {
+      const MCInstrDesc &MCID = TM.getInstrInfo()->get(MI.getOpcode());
       if ((MCID.isCall() && !MCID.isReturn()) ||
-          II->isStackAligningInlineAsm()) {
+          MI.isStackAligningInlineAsm()) {
         MFI->setHasCalls(true);
       }
-      if (II->isInlineAsm()) {
+      if (MI.isInlineAsm()) {
         MF->setHasInlineAsm(true);
       }
     }
@@ -1805,8 +1802,7 @@ SDNode *SelectionDAGISel::Select_INLINEASM(SDNode *N) {
   SelectInlineAsmMemoryOperands(Ops);
 
   EVT VTs[] = { MVT::Other, MVT::Glue };
-  SDValue New = CurDAG->getNode(ISD::INLINEASM, SDLoc(N),
-                                VTs, &Ops[0], Ops.size());
+  SDValue New = CurDAG->getNode(ISD::INLINEASM, SDLoc(N), VTs, Ops);
   New->setNodeId(-1);
   return New.getNode();
 }
@@ -2080,13 +2076,13 @@ HandleMergeInputChains(SmallVectorImpl<SDNode*> &ChainNodesMatched,
   if (InputChains.size() == 1)
     return InputChains[0];
   return CurDAG->getNode(ISD::TokenFactor, SDLoc(ChainNodesMatched[0]),
-                         MVT::Other, &InputChains[0], InputChains.size());
+                         MVT::Other, InputChains);
 }
 
 /// MorphNode - Handle morphing a node in place for the selector.
 SDNode *SelectionDAGISel::
 MorphNode(SDNode *Node, unsigned TargetOpc, SDVTList VTList,
-          const SDValue *Ops, unsigned NumOps, unsigned EmitNodeInfo) {
+          ArrayRef<SDValue> Ops, unsigned EmitNodeInfo) {
   // It is possible we're using MorphNodeTo to replace a node with no
   // normal results with one that has a normal result (or we could be
   // adding a chain) and the input could have glue and chains as well.
@@ -2106,7 +2102,7 @@ MorphNode(SDNode *Node, unsigned TargetOpc, SDVTList VTList,
 
   // Call the underlying SelectionDAG routine to do the transmogrification. Note
   // that this deletes operands of the old node that become dead.
-  SDNode *Res = CurDAG->MorphNodeTo(Node, ~TargetOpc, VTList, Ops, NumOps);
+  SDNode *Res = CurDAG->MorphNodeTo(Node, ~TargetOpc, VTList, Ops);
 
   // MorphNodeTo can operate in two ways: if an existing node with the
   // specified operands exists, it can just return it.  Otherwise, it
@@ -2975,8 +2971,7 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
         }
 
       } else if (NodeToMatch->getOpcode() != ISD::DELETED_NODE) {
-        Res = MorphNode(NodeToMatch, TargetOpc, VTList, Ops.data(), Ops.size(),
-                        EmitNodeInfo);
+        Res = MorphNode(NodeToMatch, TargetOpc, VTList, Ops, EmitNodeInfo);
       } else {
         // NodeToMatch was eliminated by CSE when the target changed the DAG.
         // We will visit the equivalent node later.

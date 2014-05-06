@@ -17,8 +17,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "xfer"
-
 #include "HexagonTargetMachine.h"
 #include "HexagonMachineFunctionInfo.h"
 #include "HexagonSubtarget.h"
@@ -44,6 +42,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "xfer"
+
 namespace {
 
 class HexagonSplitConst32AndConst64 : public MachineFunctionPass {
@@ -55,10 +55,10 @@ class HexagonSplitConst32AndConst64 : public MachineFunctionPass {
     HexagonSplitConst32AndConst64(const HexagonTargetMachine& TM)
       : MachineFunctionPass(ID), QTM(TM), QST(*TM.getSubtargetImpl()) {}
 
-    const char *getPassName() const {
+    const char *getPassName() const override {
       return "Hexagon Split Const32s and Const64s";
     }
-    bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
 };
 
 

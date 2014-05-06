@@ -27,7 +27,6 @@
 /// to reduce MOV count.
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "vec-merger"
 #include "llvm/Support/Debug.h"
 #include "AMDGPU.h"
 #include "R600InstrInfo.h"
@@ -41,6 +40,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "vec-merger"
 
 namespace {
 
@@ -107,9 +108,9 @@ private:
 public:
   static char ID;
   R600VectorRegMerger(TargetMachine &tm) : MachineFunctionPass(ID),
-  TII(0) { }
+  TII(nullptr) { }
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     AU.addRequired<MachineDominatorTree>();
     AU.addPreserved<MachineDominatorTree>();
@@ -118,11 +119,11 @@ public:
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
-  const char *getPassName() const {
+  const char *getPassName() const override {
     return "R600 Vector Registers Merge Pass";
   }
 
-  bool runOnMachineFunction(MachineFunction &Fn);
+  bool runOnMachineFunction(MachineFunction &Fn) override;
 };
 
 char R600VectorRegMerger::ID = 0;

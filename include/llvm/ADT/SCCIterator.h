@@ -25,6 +25,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/GraphTraits.h"
+#include "llvm/ADT/iterator.h"
 #include <vector>
 
 namespace llvm {
@@ -35,19 +36,17 @@ namespace llvm {
 /// This is implemented using Tarjan's DFS algorithm using an internal stack to
 /// build up a vector of nodes in a particular SCC. Note that it is a forward
 /// iterator and thus you cannot backtrack or re-visit nodes.
-template <class GraphT, class GT = GraphTraits<GraphT> >
+template <class GraphT, class GT = GraphTraits<GraphT>>
 class scc_iterator
-    : public std::iterator<std::forward_iterator_tag,
-                           std::vector<typename GT::NodeType>, ptrdiff_t> {
+    : public iterator_facade_base<
+          scc_iterator<GraphT, GT>, std::forward_iterator_tag,
+          const std::vector<typename GT::NodeType *>, ptrdiff_t> {
   typedef typename GT::NodeType NodeType;
   typedef typename GT::ChildIteratorType ChildItTy;
   typedef std::vector<NodeType *> SccTy;
-  typedef std::iterator<std::forward_iterator_tag,
-                        std::vector<typename GT::NodeType>, ptrdiff_t> super;
-  typedef typename super::reference reference;
-  typedef typename super::pointer pointer;
+  typedef typename scc_iterator::reference reference;
 
-  // Element of VisitStack during DFS.
+  /// Element of VisitStack during DFS.
   struct StackElement {
     NodeType *Node;       ///< The current node pointer.
     ChildItTy NextChild;  ///< The next child, modified inplace during DFS.
@@ -63,135 +62,63 @@ class scc_iterator
     }
   };
 
-  // The visit counters used to detect when a complete SCC is on the stack.
-  // visitNum is the global counter.
-  // nodeVisitNumbers are per-node visit numbers, also used as DFS flags.
+  /// The visit counters used to detect when a complete SCC is on the stack.
+  /// visitNum is the global counter.
+  ///
+  /// nodeVisitNumbers are per-node visit numbers, also used as DFS flags.
   unsigned visitNum;
   DenseMap<NodeType *, unsigned> nodeVisitNumbers;
 
-  // Stack holding nodes of the SCC.
+  /// Stack holding nodes of the SCC.
   std::vector<NodeType *> SCCNodeStack;
 
-  // The current SCC, retrieved using operator*().
+  /// The current SCC, retrieved using operator*().
   SccTy CurrentSCC;
 
-
-  // DFS stack, Used to maintain the ordering.  The top contains the current
-  // node, the next child to visit, and the minimum uplink value of all child
+  /// DFS stack, Used to maintain the ordering.  The top contains the current
+  /// node, the next child to visit, and the minimum uplink value of all child
   std::vector<StackElement> VisitStack;
 
-  // A single "visit" within the non-recursive DFS traversal.
-  void DFSVisitOne(NodeType *N) {
-    ++visitNum;
-    nodeVisitNumbers[N] = visitNum;
-    SCCNodeStack.push_back(N);
-    VisitStack.push_back(StackElement(N, GT::child_begin(N), visitNum));
-#if 0 // Enable if needed when debugging.
-    dbgs() << "TarjanSCC: Node " << N <<
-          " : visitNum = " << visitNum << "\n";
-#endif
-  }
+  /// A single "visit" within the non-recursive DFS traversal.
+  void DFSVisitOne(NodeType *N);
 
-  // The stack-based DFS traversal; defined below.
-  void DFSVisitChildren() {
-    assert(!VisitStack.empty());
-    while (VisitStack.back().NextChild !=
-           GT::child_end(VisitStack.back().Node)) {
-      // TOS has at least one more child so continue DFS
-      NodeType *childN = *VisitStack.back().NextChild++;
-      typename DenseMap<NodeType *, unsigned>::iterator Visited =
-        nodeVisitNumbers.find(childN);
-      if (Visited == nodeVisitNumbers.end()) {
-        // this node has never been seen.
-        DFSVisitOne(childN);
-        continue;
-      }
+  /// The stack-based DFS traversal; defined below.
+  void DFSVisitChildren();
 
-      unsigned childNum = Visited->second;
-      if (VisitStack.back().MinVisited > childNum)
-        VisitStack.back().MinVisited = childNum;
-    }
-  }
+  /// Compute the next SCC using the DFS traversal.
+  void GetNextSCC();
 
-  // Compute the next SCC using the DFS traversal.
-  void GetNextSCC() {
-    CurrentSCC.clear(); // Prepare to compute the next SCC
-    while (!VisitStack.empty()) {
-      DFSVisitChildren();
-
-      // Pop the leaf on top of the VisitStack.
-      NodeType *visitingN = VisitStack.back().Node;
-      unsigned minVisitNum = VisitStack.back().MinVisited;
-      assert(VisitStack.back().NextChild == GT::child_end(visitingN));
-      VisitStack.pop_back();
-
-      // Propagate MinVisitNum to parent so we can detect the SCC starting node.
-      if (!VisitStack.empty() && VisitStack.back().MinVisited > minVisitNum)
-        VisitStack.back().MinVisited = minVisitNum;
-
-#if 0 // Enable if needed when debugging.
-      dbgs() << "TarjanSCC: Popped node " << visitingN <<
-            " : minVisitNum = " << minVisitNum << "; Node visit num = " <<
-            nodeVisitNumbers[visitingN] << "\n";
-#endif
-
-      if (minVisitNum != nodeVisitNumbers[visitingN])
-        continue;
-
-      // A full SCC is on the SCCNodeStack!  It includes all nodes below
-      // visitingN on the stack.  Copy those nodes to CurrentSCC,
-      // reset their minVisit values, and return (this suspends
-      // the DFS traversal till the next ++).
-      do {
-        CurrentSCC.push_back(SCCNodeStack.back());
-        SCCNodeStack.pop_back();
-        nodeVisitNumbers[CurrentSCC.back()] = ~0U;
-      } while (CurrentSCC.back() != visitingN);
-      return;
-    }
-  }
-
-  inline scc_iterator(NodeType *entryN) : visitNum(0) {
+  scc_iterator(NodeType *entryN) : visitNum(0) {
     DFSVisitOne(entryN);
     GetNextSCC();
   }
 
-  // End is when the DFS stack is empty.
-  inline scc_iterator() {}
+  /// End is when the DFS stack is empty.
+  scc_iterator() {}
 
 public:
-  static inline scc_iterator begin(const GraphT &G) {
+  static scc_iterator begin(const GraphT &G) {
     return scc_iterator(GT::getEntryNode(G));
   }
-  static inline scc_iterator end(const GraphT &) { return scc_iterator(); }
+  static scc_iterator end(const GraphT &) { return scc_iterator(); }
 
   /// \brief Direct loop termination test which is more efficient than
   /// comparison with \c end().
-  inline bool isAtEnd() const {
+  bool isAtEnd() const {
     assert(!CurrentSCC.empty() || VisitStack.empty());
     return CurrentSCC.empty();
   }
 
-  inline bool operator==(const scc_iterator &x) const {
+  bool operator==(const scc_iterator &x) const {
     return VisitStack == x.VisitStack && CurrentSCC == x.CurrentSCC;
   }
-  inline bool operator!=(const scc_iterator &x) const { return !operator==(x); }
 
-  inline scc_iterator &operator++() {
+  scc_iterator &operator++() {
     GetNextSCC();
     return *this;
   }
-  inline scc_iterator operator++(int) {
-    scc_iterator tmp = *this;
-    ++*this;
-    return tmp;
-  }
 
-  inline const SccTy &operator*() const {
-    assert(!CurrentSCC.empty() && "Dereferencing END SCC iterator!");
-    return CurrentSCC;
-  }
-  inline SccTy &operator*() {
+  reference operator*() const {
     assert(!CurrentSCC.empty() && "Dereferencing END SCC iterator!");
     return CurrentSCC;
   }
@@ -200,7 +127,88 @@ public:
   ///
   /// If the SCC has more than one node, this is trivially true.  If not, it may
   /// still contain a loop if the node has an edge back to itself.
-  bool hasLoop() const {
+  bool hasLoop() const;
+
+  /// This informs the \c scc_iterator that the specified \c Old node
+  /// has been deleted, and \c New is to be used in its place.
+  void ReplaceNode(NodeType *Old, NodeType *New) {
+    assert(nodeVisitNumbers.count(Old) && "Old not in scc_iterator?");
+    nodeVisitNumbers[New] = nodeVisitNumbers[Old];
+    nodeVisitNumbers.erase(Old);
+  }
+};
+
+template <class GraphT, class GT>
+void scc_iterator<GraphT, GT>::DFSVisitOne(NodeType *N) {
+  ++visitNum;
+  nodeVisitNumbers[N] = visitNum;
+  SCCNodeStack.push_back(N);
+  VisitStack.push_back(StackElement(N, GT::child_begin(N), visitNum));
+#if 0 // Enable if needed when debugging.
+  dbgs() << "TarjanSCC: Node " << N <<
+        " : visitNum = " << visitNum << "\n";
+#endif
+}
+
+template <class GraphT, class GT>
+void scc_iterator<GraphT, GT>::DFSVisitChildren() {
+  assert(!VisitStack.empty());
+  while (VisitStack.back().NextChild != GT::child_end(VisitStack.back().Node)) {
+    // TOS has at least one more child so continue DFS
+    NodeType *childN = *VisitStack.back().NextChild++;
+    typename DenseMap<NodeType *, unsigned>::iterator Visited =
+        nodeVisitNumbers.find(childN);
+    if (Visited == nodeVisitNumbers.end()) {
+      // this node has never been seen.
+      DFSVisitOne(childN);
+      continue;
+    }
+
+    unsigned childNum = Visited->second;
+    if (VisitStack.back().MinVisited > childNum)
+      VisitStack.back().MinVisited = childNum;
+  }
+}
+
+template <class GraphT, class GT> void scc_iterator<GraphT, GT>::GetNextSCC() {
+  CurrentSCC.clear(); // Prepare to compute the next SCC
+  while (!VisitStack.empty()) {
+    DFSVisitChildren();
+
+    // Pop the leaf on top of the VisitStack.
+    NodeType *visitingN = VisitStack.back().Node;
+    unsigned minVisitNum = VisitStack.back().MinVisited;
+    assert(VisitStack.back().NextChild == GT::child_end(visitingN));
+    VisitStack.pop_back();
+
+    // Propagate MinVisitNum to parent so we can detect the SCC starting node.
+    if (!VisitStack.empty() && VisitStack.back().MinVisited > minVisitNum)
+      VisitStack.back().MinVisited = minVisitNum;
+
+#if 0 // Enable if needed when debugging.
+    dbgs() << "TarjanSCC: Popped node " << visitingN <<
+          " : minVisitNum = " << minVisitNum << "; Node visit num = " <<
+          nodeVisitNumbers[visitingN] << "\n";
+#endif
+
+    if (minVisitNum != nodeVisitNumbers[visitingN])
+      continue;
+
+    // A full SCC is on the SCCNodeStack!  It includes all nodes below
+    // visitingN on the stack.  Copy those nodes to CurrentSCC,
+    // reset their minVisit values, and return (this suspends
+    // the DFS traversal till the next ++).
+    do {
+      CurrentSCC.push_back(SCCNodeStack.back());
+      SCCNodeStack.pop_back();
+      nodeVisitNumbers[CurrentSCC.back()] = ~0U;
+    } while (CurrentSCC.back() != visitingN);
+    return;
+  }
+}
+
+template <class GraphT, class GT>
+bool scc_iterator<GraphT, GT>::hasLoop() const {
     assert(!CurrentSCC.empty() && "Dereferencing END SCC iterator!");
     if (CurrentSCC.size() > 1)
       return true;
@@ -211,15 +219,6 @@ public:
         return true;
     return false;
   }
-
-  /// This informs the \c scc_iterator that the specified \c Old node
-  /// has been deleted, and \c New is to be used in its place.
-  void ReplaceNode(NodeType *Old, NodeType *New) {
-    assert(nodeVisitNumbers.count(Old) && "Old not in scc_iterator?");
-    nodeVisitNumbers[New] = nodeVisitNumbers[Old];
-    nodeVisitNumbers.erase(Old);
-  }
-};
 
 /// \brief Construct the begin iterator for a deduced graph type T.
 template <class T> scc_iterator<T> scc_begin(const T &G) {

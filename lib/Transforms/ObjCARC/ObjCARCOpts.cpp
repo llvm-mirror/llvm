@@ -24,7 +24,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "objc-arc-opts"
 #include "ObjCARC.h"
 #include "ARCRuntimeEntryPoints.h"
 #include "DependencyAnalysis.h"
@@ -43,6 +42,8 @@
 
 using namespace llvm;
 using namespace llvm::objcarc;
+
+#define DEBUG_TYPE "objc-arc-opts"
 
 /// \defgroup MiscUtils Miscellaneous utilities that are not ARC specific.
 /// @{
@@ -156,7 +157,7 @@ static const Value *FindSingleUseIdentifiedObject(const Value *Arg) {
       return FindSingleUseIdentifiedObject(
                cast<CallInst>(Arg)->getArgOperand(0));
     if (!IsObjCIdentifiedObject(Arg))
-      return 0;
+      return nullptr;
     return Arg;
   }
 
@@ -165,12 +166,12 @@ static const Value *FindSingleUseIdentifiedObject(const Value *Arg) {
   if (IsObjCIdentifiedObject(Arg)) {
     for (const User *U : Arg->users())
       if (!U->use_empty() || StripPointerCastsAndObjCCalls(U) != Arg)
-         return 0;
+         return nullptr;
 
     return Arg;
   }
 
-  return 0;
+  return nullptr;
 }
 
 /// This is a wrapper around getUnderlyingObjCPtr along the lines of
@@ -373,7 +374,7 @@ namespace {
     bool CFGHazardAfflicted;
 
     RRInfo() :
-      KnownSafe(false), IsTailCallRelease(false), ReleaseMetadata(0),
+      KnownSafe(false), IsTailCallRelease(false), ReleaseMetadata(nullptr),
       CFGHazardAfflicted(false) {}
 
     void clear();
@@ -388,7 +389,7 @@ namespace {
 void RRInfo::clear() {
   KnownSafe = false;
   IsTailCallRelease = false;
-  ReleaseMetadata = 0;
+  ReleaseMetadata = nullptr;
   Calls.clear();
   ReverseInsertPts.clear();
   CFGHazardAfflicted = false;
@@ -397,7 +398,7 @@ void RRInfo::clear() {
 bool RRInfo::Merge(const RRInfo &Other) {
     // Conservatively merge the ReleaseMetadata information.
     if (ReleaseMetadata != Other.ReleaseMetadata)
-      ReleaseMetadata = 0;
+      ReleaseMetadata = nullptr;
 
     // Conservatively merge the boolean state.
     KnownSafe &= Other.KnownSafe;
@@ -456,7 +457,7 @@ namespace {
     }
 
     bool IsTrackingImpreciseReleases() const {
-      return RRI.ReleaseMetadata != 0;
+      return RRI.ReleaseMetadata != nullptr;
     }
 
     const MDNode *GetReleaseMetadata() const {
@@ -818,7 +819,7 @@ ARCAnnotationTargetIdentifier("objc-arc-annotation-target-identifier",
 /// arc annotation processor tool. If the function is an
 static MDString *AppendMDNodeToSourcePtr(unsigned NodeId,
                                          Value *Ptr) {
-  MDString *Hash = 0;
+  MDString *Hash = nullptr;
 
   // If pointer is a result of an instruction and it does not have a source
   // MDNode it, attach a new MDNode onto it. If pointer is a result of
@@ -880,7 +881,7 @@ static void AppendMDNodeToInstForPtr(unsigned NodeId,
                                      MDString *PtrSourceMDNodeID,
                                      Sequence OldSeq,
                                      Sequence NewSeq) {
-  MDNode *Node = 0;
+  MDNode *Node = nullptr;
   Value *tmp[3] = {PtrSourceMDNodeID,
                    SequenceToMDString(Inst->getContext(),
                                       OldSeq),
@@ -916,7 +917,7 @@ static void GenerateARCBBEntranceAnnotation(const char *Name, BasicBlock *BB,
 
   Value *PtrName;
   StringRef Tmp = Ptr->getName();
-  if (0 == (PtrName = M->getGlobalVariable(Tmp, true))) {
+  if (nullptr == (PtrName = M->getGlobalVariable(Tmp, true))) {
     Value *ActualPtrName = Builder.CreateGlobalStringPtr(Tmp,
                                                          Tmp + "_STR");
     PtrName = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
@@ -925,7 +926,7 @@ static void GenerateARCBBEntranceAnnotation(const char *Name, BasicBlock *BB,
 
   Value *S;
   std::string SeqStr = SequenceToString(Seq);
-  if (0 == (S = M->getGlobalVariable(SeqStr, true))) {
+  if (nullptr == (S = M->getGlobalVariable(SeqStr, true))) {
     Value *ActualPtrName = Builder.CreateGlobalStringPtr(SeqStr,
                                                          SeqStr + "_STR");
     S = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
@@ -959,7 +960,7 @@ static void GenerateARCBBTerminatorAnnotation(const char *Name, BasicBlock *BB,
 
   Value *PtrName;
   StringRef Tmp = Ptr->getName();
-  if (0 == (PtrName = M->getGlobalVariable(Tmp, true))) {
+  if (nullptr == (PtrName = M->getGlobalVariable(Tmp, true))) {
     Value *ActualPtrName = Builder.CreateGlobalStringPtr(Tmp,
                                                          Tmp + "_STR");
     PtrName = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
@@ -968,7 +969,7 @@ static void GenerateARCBBTerminatorAnnotation(const char *Name, BasicBlock *BB,
 
   Value *S;
   std::string SeqStr = SequenceToString(Seq);
-  if (0 == (S = M->getGlobalVariable(SeqStr, true))) {
+  if (nullptr == (S = M->getGlobalVariable(SeqStr, true))) {
     Value *ActualPtrName = Builder.CreateGlobalStringPtr(SeqStr,
                                                          SeqStr + "_STR");
     S = new GlobalVariable(*M, I8X, true, GlobalVariable::InternalLinkage,
@@ -1718,7 +1719,7 @@ ObjCARCOpt::VisitInstructionBottomUp(Instruction *Inst,
                                      BBState &MyStates) {
   bool NestingDetected = false;
   InstructionClass Class = GetInstructionClass(Inst);
-  const Value *Arg = 0;
+  const Value *Arg = nullptr;
 
   DEBUG(dbgs() << "Class: " << Class << "\n");
 
@@ -1974,7 +1975,7 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
                                     BBState &MyStates) {
   bool NestingDetected = false;
   InstructionClass Class = GetInstructionClass(Inst);
-  const Value *Arg = 0;
+  const Value *Arg = nullptr;
 
   switch (Class) {
   case IC_RetainBlock:
@@ -2026,7 +2027,7 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
     switch (OldSeq) {
     case S_Retain:
     case S_CanRelease:
-      if (OldSeq == S_Retain || ReleaseMetadata != 0)
+      if (OldSeq == S_Retain || ReleaseMetadata != nullptr)
         S.ClearReverseInsertPts();
       // FALL THROUGH
     case S_Use:
@@ -2432,7 +2433,7 @@ ObjCARCOpt::ConnectTDBUTraversals(DenseMap<const BasicBlock *, BBState>
           } else {
             if (ReleasesToMove.ReleaseMetadata !=
                 NewRetainReleaseRRI.ReleaseMetadata)
-              ReleasesToMove.ReleaseMetadata = 0;
+              ReleasesToMove.ReleaseMetadata = nullptr;
             if (ReleasesToMove.IsTailCallRelease !=
                 NewRetainReleaseRRI.IsTailCallRelease)
               ReleasesToMove.IsTailCallRelease = false;
@@ -2884,7 +2885,7 @@ FindPredecessorRetainWithSafePath(const Value *Arg, BasicBlock *BB,
   FindDependencies(CanChangeRetainCount, Arg,
                    BB, Autorelease, DepInsts, Visited, PA);
   if (DepInsts.size() != 1)
-    return 0;
+    return nullptr;
 
   CallInst *Retain =
     dyn_cast_or_null<CallInst>(*DepInsts.begin());
@@ -2893,7 +2894,7 @@ FindPredecessorRetainWithSafePath(const Value *Arg, BasicBlock *BB,
   if (!Retain ||
       !IsRetain(GetBasicInstructionClass(Retain)) ||
       GetObjCArg(Retain) != Arg) {
-    return 0;
+    return nullptr;
   }
 
   return Retain;
@@ -2911,17 +2912,17 @@ FindPredecessorAutoreleaseWithSafePath(const Value *Arg, BasicBlock *BB,
   FindDependencies(NeedsPositiveRetainCount, Arg,
                    BB, Ret, DepInsts, V, PA);
   if (DepInsts.size() != 1)
-    return 0;
+    return nullptr;
 
   CallInst *Autorelease =
     dyn_cast_or_null<CallInst>(*DepInsts.begin());
   if (!Autorelease)
-    return 0;
+    return nullptr;
   InstructionClass AutoreleaseClass = GetBasicInstructionClass(Autorelease);
   if (!IsAutorelease(AutoreleaseClass))
-    return 0;
+    return nullptr;
   if (GetObjCArg(Autorelease) != Arg)
-    return 0;
+    return nullptr;
 
   return Autorelease;
 }

@@ -67,7 +67,7 @@ private:
   static const unsigned SkipThreshold = 12;
 
   static char ID;
-  const TargetRegisterInfo *TRI;
+  const SIRegisterInfo *TRI;
   const SIInstrInfo *TII;
 
   bool shouldSkip(MachineBasicBlock *From, MachineBasicBlock *To);
@@ -92,11 +92,11 @@ private:
 
 public:
   SILowerControlFlowPass(TargetMachine &tm) :
-    MachineFunctionPass(ID), TRI(0), TII(0) { }
+    MachineFunctionPass(ID), TRI(nullptr), TII(nullptr) { }
 
-  virtual bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
-  const char *getPassName() const {
+  const char *getPassName() const override {
     return "SI Lower control flow instructions";
   }
 
@@ -427,7 +427,7 @@ void SILowerControlFlowPass::IndirectDst(MachineInstr &MI) {
 
 bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
   TII = static_cast<const SIInstrInfo*>(MF.getTarget().getInstrInfo());
-  TRI = MF.getTarget().getRegisterInfo();
+  TRI = static_cast<const SIRegisterInfo*>(MF.getTarget().getRegisterInfo());
   SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
   bool HaveKill = false;

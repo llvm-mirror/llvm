@@ -64,7 +64,8 @@ static void EmitDefCfaRegister(MachineBasicBlock &MBB,
                                MachineModuleInfo *MMI, unsigned DRegNum) {
   unsigned CFIIndex = MMI->addFrameInst(
       MCCFIInstruction::createDefCfaRegister(nullptr, DRegNum));
-  BuildMI(MBB, MBBI, dl, TII.get(XCore::CFI_INSTRUCTION)).addCFIIndex(CFIIndex);
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 }
 
 static void EmitDefCfaOffset(MachineBasicBlock &MBB,
@@ -73,7 +74,8 @@ static void EmitDefCfaOffset(MachineBasicBlock &MBB,
                              MachineModuleInfo *MMI, int Offset) {
   unsigned CFIIndex =
       MMI->addFrameInst(MCCFIInstruction::createDefCfaOffset(nullptr, -Offset));
-  BuildMI(MBB, MBBI, dl, TII.get(XCore::CFI_INSTRUCTION)).addCFIIndex(CFIIndex);
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 }
 
 static void EmitCfiOffset(MachineBasicBlock &MBB,
@@ -82,7 +84,8 @@ static void EmitCfiOffset(MachineBasicBlock &MBB,
                           unsigned DRegNum, int Offset) {
   unsigned CFIIndex = MMI->addFrameInst(
       MCCFIInstruction::createOffset(nullptr, DRegNum, Offset));
-  BuildMI(MBB, MBBI, dl, TII.get(XCore::CFI_INSTRUCTION)).addCFIIndex(CFIIndex);
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 }
 
 /// The SP register is moved in steps of 'MaxImmU16' towards the bottom of the
@@ -113,7 +116,8 @@ static void IfNeededExtSP(MachineBasicBlock &MBB,
 /// IfNeededLDAWSP emits the necessary LDAWSP instructions to move the SP only
 /// as far as to make 'OffsetFromTop' reachable using an LDAWSP_lru6.
 /// \param OffsetFromTop the spill offset from the top of the frame.
-/// \param [in,out] RemainingAdj the current SP offset from the top of the frame.
+/// \param [in,out] RemainingAdj the current SP offset from the top of the
+/// frame.
 static void IfNeededLDAWSP(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI, DebugLoc dl,
                            const TargetInstrInfo &TII, int OffsetFromTop,
@@ -346,7 +350,8 @@ void XCoreFrameLowering::emitEpilogue(MachineFunction &MF,
   RemainingAdj /= 4;
 
   if (RetOpcode == XCore::EH_RETURN) {
-    // 'Restore' the exception info the unwinder has placed into the stack slots.
+    // 'Restore' the exception info the unwinder has placed into the stack
+    // slots.
     SmallVector<StackSlotInfo,2> SpillList;
     GetEHSpillList(SpillList, MFI, XFI, MF.getTarget().getTargetLowering());
     RestoreSpillList(MBB, MBBI, dl, TII, RemainingAdj, SpillList);
@@ -495,7 +500,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
         errs() << "eliminateCallFramePseudoInstr size too big: "
                << Amount << "\n";
 #endif
-        llvm_unreachable(0);
+        llvm_unreachable(nullptr);
       }
 
       MachineInstr *New;
@@ -514,7 +519,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
       MBB.insert(I, New);
     }
   }
-  
+
   MBB.erase(I);
 }
 

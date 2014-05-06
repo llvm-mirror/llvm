@@ -14,7 +14,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "x86tti"
 #include "X86.h"
 #include "X86TargetMachine.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -26,6 +25,8 @@
 #include "llvm/Target/CostTable.h"
 #include "llvm/Target/TargetLowering.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "x86tti"
 
 // Declare the pass initialization routine locally as target-specific passes
 // don't havve a target-wide initialization entry point, and so we rely on the
@@ -56,7 +57,7 @@ class X86TTI final : public ImmutablePass, public TargetTransformInfo {
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
 public:
-  X86TTI() : ImmutablePass(ID), ST(0), TLI(0) {
+  X86TTI() : ImmutablePass(ID), ST(nullptr), TLI(nullptr) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
@@ -283,6 +284,21 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
+  static const CostTblEntry<MVT::SimpleValueType>
+  AVX2UniformConstCostTable[] = {
+    { ISD::SDIV, MVT::v16i16,  6 }, // vpmulhw sequence
+    { ISD::UDIV, MVT::v16i16,  6 }, // vpmulhuw sequence
+    { ISD::SDIV, MVT::v8i32,  15 }, // vpmuldq sequence
+    { ISD::UDIV, MVT::v8i32,  15 }, // vpmuludq sequence
+  };
+
+  if (Op2Info == TargetTransformInfo::OK_UniformConstantValue &&
+      ST->hasAVX2()) {
+    int Idx = CostTableLookup(AVX2UniformConstCostTable, ISD, LT.second);
+    if (Idx != -1)
+      return LT.first * AVX2UniformConstCostTable[Idx].Cost;
+  }
+
   static const CostTblEntry<MVT::SimpleValueType> AVX2CostTable[] = {
     // Shifts on v4i64/v8i32 on AVX2 is legal even though we declare to
     // customize them to detect the cases where shift amount is a scalar one.
@@ -350,10 +366,19 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
     { ISD::SRA,  MVT::v16i8,  4 }, // psrlw, pand, pxor, psubb.
     { ISD::SRA,  MVT::v8i16,  1 }, // psraw.
     { ISD::SRA,  MVT::v4i32,  1 }, // psrad.
+
+    { ISD::SDIV, MVT::v8i16,  6 }, // pmulhw sequence
+    { ISD::UDIV, MVT::v8i16,  6 }, // pmulhuw sequence
+    { ISD::SDIV, MVT::v4i32, 19 }, // pmuludq sequence
+    { ISD::UDIV, MVT::v4i32, 15 }, // pmuludq sequence
   };
 
   if (Op2Info == TargetTransformInfo::OK_UniformConstantValue &&
       ST->hasSSE2()) {
+    // pmuldq sequence.
+    if (ISD == ISD::SDIV && LT.second == MVT::v4i32 && ST->hasSSE41())
+      return LT.first * 15;
+
     int Idx = CostTableLookup(SSE2UniformConstCostTable, ISD, LT.second);
     if (Idx != -1)
       return LT.first * SSE2UniformConstCostTable[Idx].Cost;
@@ -931,14 +956,18 @@ unsigned X86TTI::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
   case Instruction::SDiv:
   case Instruction::URem:
   case Instruction::SRem:
-  case Instruction::Shl:
-  case Instruction::LShr:
-  case Instruction::AShr:
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor:
   case Instruction::ICmp:
     ImmIdx = 1;
+    break;
+  // Always return TCC_Free for the shift value of a shift instruction.
+  case Instruction::Shl:
+  case Instruction::LShr:
+  case Instruction::AShr:
+    if (Idx == 1)
+      return TCC_Free;
     break;
   case Instruction::Trunc:
   case Instruction::ZExt:

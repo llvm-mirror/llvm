@@ -143,3 +143,34 @@ cond_false:
   call void @noarg()
   ret i32* null
 }
+
+; Don't tail call if a byval arg is captured.
+define void @test9(i32* byval %a) {
+; CHECK-LABEL: define void @test9(
+; CHECK: {{^ *}}call void @use(
+  call void @use(i32* %a)
+  ret void
+}
+
+%struct.X = type { i8* }
+
+declare void @ctor(%struct.X*)
+define void @test10(%struct.X* noalias sret %agg.result, i1 zeroext %b) {
+; CHECK-LABEL @test10
+entry:
+  %x = alloca %struct.X, align 8
+  br i1 %b, label %if.then, label %if.end
+
+if.then:                                          ; preds = %entry
+  call void @ctor(%struct.X* %agg.result)
+; CHECK: tail call void @ctor
+  br label %return
+
+if.end:
+  call void @ctor(%struct.X* %x)
+; CHECK: call void @ctor
+  br label %return
+
+return:
+  ret void
+}

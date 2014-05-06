@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "delay-slot-filler"
-
 #include "MCTargetDesc/MipsMCNaCl.h"
 #include "Mips.h"
 #include "MipsInstrInfo.h"
@@ -32,6 +30,8 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "delay-slot-filler"
 
 STATISTIC(FilledSlots, "Number of delay slots filled");
 STATISTIC(UsefulSlots, "Number of delay slots filled with instructions that"
@@ -124,7 +124,7 @@ namespace {
   public:
     NoMemInstr() : InspectMemInstr(true) {}
   private:
-    virtual bool hasHazard_(const MachineInstr &MI) { return true; }
+    bool hasHazard_(const MachineInstr &MI) override { return true; }
   };
 
   /// This subclass accepts loads from stacks and constant loads.
@@ -132,7 +132,7 @@ namespace {
   public:
     LoadFromStackOrConst() : InspectMemInstr(false) {}
   private:
-    virtual bool hasHazard_(const MachineInstr &MI);
+    bool hasHazard_(const MachineInstr &MI) override;
   };
 
   /// This subclass uses memory dependence information to determine whether a
@@ -144,7 +144,7 @@ namespace {
   private:
     typedef PointerUnion<const Value *, const PseudoSourceValue *> ValueType;
 
-    virtual bool hasHazard_(const MachineInstr &MI);
+    bool hasHazard_(const MachineInstr &MI) override;
 
     /// Update Defs and Uses. Return true if there exist dependences that
     /// disqualify the delay slot candidate between V and values in Uses and
@@ -168,11 +168,11 @@ namespace {
     Filler(TargetMachine &tm)
       : MachineFunctionPass(ID), TM(tm) { }
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "Mips Delay Slot Filler";
     }
 
-    bool runOnMachineFunction(MachineFunction &F) {
+    bool runOnMachineFunction(MachineFunction &F) override {
       bool Changed = false;
       for (MachineFunction::iterator FI = F.begin(), FE = F.end();
            FI != FE; ++FI)
@@ -180,7 +180,7 @@ namespace {
       return Changed;
     }
 
-    void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<MachineBranchProbabilityInfo>();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
@@ -408,7 +408,7 @@ bool LoadFromStackOrConst::hasHazard_(const MachineInstr &MI) {
       (*MI.memoperands_begin())->getPseudoValue()) {
     if (isa<FixedStackPseudoSourceValue>(PSV))
       return false;
-    return !PSV->isConstant(0) && PSV != PseudoSourceValue::getStack();
+    return !PSV->isConstant(nullptr) && PSV != PseudoSourceValue::getStack();
   }
 
   return true;
@@ -610,7 +610,7 @@ bool Filler::searchSuccBBs(MachineBasicBlock &MBB, Iter Slot) const {
   RegDefsUses RegDU(TM);
   bool HasMultipleSuccs = false;
   BB2BrMap BrMap;
-  OwningPtr<InspectMemInstr> IM;
+  std::unique_ptr<InspectMemInstr> IM;
   Iter Filler;
 
   // Iterate over SuccBB's predecessor list.
@@ -644,7 +644,7 @@ bool Filler::searchSuccBBs(MachineBasicBlock &MBB, Iter Slot) const {
 
 MachineBasicBlock *Filler::selectSuccBB(MachineBasicBlock &B) const {
   if (B.succ_empty())
-    return NULL;
+    return nullptr;
 
   // Select the successor with the larget edge weight.
   auto &Prob = getAnalysis<MachineBranchProbabilityInfo>();
@@ -653,14 +653,14 @@ MachineBasicBlock *Filler::selectSuccBB(MachineBasicBlock &B) const {
                                                const MachineBasicBlock *Dst1) {
     return Prob.getEdgeWeight(&B, Dst0) < Prob.getEdgeWeight(&B, Dst1);
   });
-  return S->isLandingPad() ? NULL : S;
+  return S->isLandingPad() ? nullptr : S;
 }
 
 std::pair<MipsInstrInfo::BranchType, MachineInstr *>
 Filler::getBranch(MachineBasicBlock &MBB, const MachineBasicBlock &Dst) const {
   const MipsInstrInfo *TII =
     static_cast<const MipsInstrInfo*>(TM.getInstrInfo());
-  MachineBasicBlock *TrueBB = 0, *FalseBB = 0;
+  MachineBasicBlock *TrueBB = nullptr, *FalseBB = nullptr;
   SmallVector<MachineInstr*, 2> BranchInstrs;
   SmallVector<MachineOperand, 2> Cond;
 
@@ -668,11 +668,11 @@ Filler::getBranch(MachineBasicBlock &MBB, const MachineBasicBlock &Dst) const {
     TII->AnalyzeBranch(MBB, TrueBB, FalseBB, Cond, false, BranchInstrs);
 
   if ((R == MipsInstrInfo::BT_None) || (R == MipsInstrInfo::BT_NoBranch))
-    return std::make_pair(R, (MachineInstr*)NULL);
+    return std::make_pair(R, nullptr);
 
   if (R != MipsInstrInfo::BT_CondUncond) {
     if (!hasUnoccupiedSlot(BranchInstrs[0]))
-      return std::make_pair(MipsInstrInfo::BT_None, (MachineInstr*)NULL);
+      return std::make_pair(MipsInstrInfo::BT_None, nullptr);
 
     assert(((R != MipsInstrInfo::BT_Uncond) || (TrueBB == &Dst)));
 
@@ -689,7 +689,7 @@ Filler::getBranch(MachineBasicBlock &MBB, const MachineBasicBlock &Dst) const {
   if (hasUnoccupiedSlot(BranchInstrs[1]) && (FalseBB == &Dst))
     return std::make_pair(MipsInstrInfo::BT_Uncond, BranchInstrs[1]);
 
-  return std::make_pair(MipsInstrInfo::BT_None, (MachineInstr*)NULL);
+  return std::make_pair(MipsInstrInfo::BT_None, nullptr);
 }
 
 bool Filler::examinePred(MachineBasicBlock &Pred, const MachineBasicBlock &Succ,

@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "inline-cost"
 #include "llvm/Analysis/InlineCost.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
@@ -33,6 +32,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "inline-cost"
 
 STATISTIC(NumCallsAnalyzed, "Number of call sites analyzed");
 
@@ -807,9 +808,29 @@ bool CallAnalyzer::visitBranchInst(BranchInst &BI) {
 bool CallAnalyzer::visitSwitchInst(SwitchInst &SI) {
   // We model unconditional switches as free, see the comments on handling
   // branches.
-  return isa<ConstantInt>(SI.getCondition()) ||
-         dyn_cast_or_null<ConstantInt>(
-             SimplifiedValues.lookup(SI.getCondition()));
+  if (isa<ConstantInt>(SI.getCondition()))
+    return true;
+  if (Value *V = SimplifiedValues.lookup(SI.getCondition()))
+    if (isa<ConstantInt>(V))
+      return true;
+
+  // Otherwise, we need to accumulate a cost proportional to the number of
+  // distinct successor blocks. This fan-out in the CFG cannot be represented
+  // for free even if we can represent the core switch as a jumptable that
+  // takes a single instruction.
+  //
+  // NB: We convert large switches which are just used to initialize large phi
+  // nodes to lookup tables instead in simplify-cfg, so this shouldn't prevent
+  // inlining those. It will prevent inlining in cases where the optimization
+  // does not (yet) fire.
+  SmallPtrSet<BasicBlock *, 8> SuccessorBlocks;
+  SuccessorBlocks.insert(SI.getDefaultDest());
+  for (auto I = SI.case_begin(), E = SI.case_end(); I != E; ++I)
+    SuccessorBlocks.insert(I.getCaseSuccessor());
+  // Add cost corresponding to the number of distinct destinations. The first
+  // we model as free because of fallthrough.
+  Cost += (SuccessorBlocks.size() - 1) * InlineConstants::InstrCost;
+  return false;
 }
 
 bool CallAnalyzer::visitIndirectBrInst(IndirectBrInst &IBI) {
@@ -925,7 +946,7 @@ bool CallAnalyzer::analyzeBlock(BasicBlock *BB) {
 /// no constant offsets applied.
 ConstantInt *CallAnalyzer::stripAndComputeInBoundsConstantOffsets(Value *&V) {
   if (!DL || !V->getType()->isPointerTy())
-    return 0;
+    return nullptr;
 
   unsigned IntPtrWidth = DL->getPointerSizeInBits();
   APInt Offset = APInt::getNullValue(IntPtrWidth);
@@ -937,7 +958,7 @@ ConstantInt *CallAnalyzer::stripAndComputeInBoundsConstantOffsets(Value *&V) {
   do {
     if (GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
       if (!GEP->isInBounds() || !accumulateGEPOffset(*GEP, Offset))
-        return 0;
+        return nullptr;
       V = GEP->getPointerOperand();
     } else if (Operator::getOpcode(V) == Instruction::BitCast) {
       V = cast<Operator>(V)->getOperand(0);

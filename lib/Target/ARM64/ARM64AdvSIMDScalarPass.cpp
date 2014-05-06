@@ -33,7 +33,6 @@
 // solution.
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm64-simd-scalar"
 #include "ARM64.h"
 #include "ARM64InstrInfo.h"
 #include "ARM64RegisterInfo.h"
@@ -47,6 +46,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "arm64-simd-scalar"
 
 static cl::opt<bool>
 AdvSIMDScalar("arm64-simd-scalar",
@@ -86,13 +87,13 @@ public:
   static char ID; // Pass identification, replacement for typeid.
   explicit ARM64AdvSIMDScalar() : MachineFunctionPass(ID) {}
 
-  virtual bool runOnMachineFunction(MachineFunction &F);
+  bool runOnMachineFunction(MachineFunction &F) override;
 
-  const char *getPassName() const {
-    return "AdvSIMD scalar operation optimization";
+  const char *getPassName() const override {
+    return "AdvSIMD Scalar Operation Optimization";
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -116,7 +117,7 @@ static bool isFPR64(unsigned Reg, unsigned SubReg,
             SubReg == 0) ||
            (MRI->getRegClass(Reg)->hasSuperClassEq(&ARM64::FPR128RegClass) &&
             SubReg == ARM64::dsub);
-  // Physical register references just check the regist class directly.
+  // Physical register references just check the register class directly.
   return (ARM64::FPR64RegClass.contains(Reg) && SubReg == 0) ||
          (ARM64::FPR128RegClass.contains(Reg) && SubReg == ARM64::dsub);
 }
@@ -147,7 +148,7 @@ static unsigned getSrcFromCopy(const MachineInstr *MI,
                 MRI) &&
         isFPR64(MI->getOperand(1).getReg(), MI->getOperand(1).getSubReg(),
                 MRI)) {
-      SubReg = ARM64::dsub;
+      SubReg = MI->getOperand(1).getSubReg();
       return MI->getOperand(1).getReg();
     }
   }

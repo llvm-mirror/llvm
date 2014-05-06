@@ -8,7 +8,7 @@ foo:
   ldr x3, (foo + 4)
   ldr x3, [foo + 4]
 ; CHECK:  ldr x3, foo+4               ; encoding: [0bAAA00011,A,A,0x58]
-; CHECK:                              ;   fixup A - offset: 0, value: foo+4, kind: fixup_arm64_pcrel_imm19
+; CHECK:                              ;   fixup A - offset: 0, value: foo+4, kind: fixup_arm64_ldr_pcrel_imm19
 ; CHECK-ERRORS: error: register expected
 
 ; The last argument should be flagged as an error.  rdar://9576009
@@ -74,6 +74,18 @@ foo:
 ; CHECK-ERRORS:                   ^
 
 
+; Check that register offset addressing modes only accept 32-bit offset
+; registers when using uxtw/sxtw extends. Everything else requires a 64-bit
+; register.
+  str    d1, [x3, w3, sxtx #3]
+  ldr    s1, [x3, d3, sxtx #2]
+
+; CHECK-ERRORS: 32-bit general purpose offset register requires sxtw or uxtw extend
+; CHECK-ERRORS:   str    d1, [x3, w3, sxtx #3]
+; CHECK-ERRORS:                       ^
+; CHECK-ERRORS: error: 64-bit general purpose offset register expected
+; CHECK-ERRORS:   ldr    s1, [x3, d3, sxtx #2]
+; CHECK-ERRORS:                   ^
 
 ; Shift immediates range checking.
   sqrshrn b4, h9, #10

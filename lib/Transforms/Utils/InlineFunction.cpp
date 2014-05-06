@@ -51,8 +51,8 @@ namespace {
 
   public:
     InvokeInliningInfo(InvokeInst *II)
-      : OuterResumeDest(II->getUnwindDest()), InnerResumeDest(0),
-        CallerLPad(0), InnerEHValuesPHI(0) {
+      : OuterResumeDest(II->getUnwindDest()), InnerResumeDest(nullptr),
+        CallerLPad(nullptr), InnerEHValuesPHI(nullptr) {
       // If there are PHI nodes in the unwind destination block, we need to keep
       // track of which values came into them from the invoke before removing
       // the edge from this block.
@@ -289,13 +289,13 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
 
     ValueToValueMapTy::iterator VMI = VMap.find(OrigCall);
     // Only copy the edge if the call was inlined!
-    if (VMI == VMap.end() || VMI->second == 0)
+    if (VMI == VMap.end() || VMI->second == nullptr)
       continue;
     
     // If the call was inlined, but then constant folded, there is no edge to
     // add.  Check for this case.
     Instruction *NewCall = dyn_cast<Instruction>(VMI->second);
-    if (NewCall == 0) continue;
+    if (!NewCall) continue;
 
     // Remember that this call site got inlined for the client of
     // InlineFunction.
@@ -306,7 +306,7 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
     // happens, set the callee of the new call site to a more precise
     // destination.  This can also happen if the call graph node of the caller
     // was just unnecessarily imprecise.
-    if (I->second->getFunction() == 0)
+    if (!I->second->getFunction())
       if (Function *F = CallSite(NewCall).getCalledFunction()) {
         // Indirect call site resolved to direct call.
         CallerNode->addCalledFunction(CallSite(NewCall), CG[F]);
@@ -335,7 +335,7 @@ static void HandleByValArgumentInit(Value *Dst, Value *Src, Module *M,
   Value *SrcCast = builder.CreateBitCast(Src, VoidPtrTy, "tmp");
 
   Value *Size;
-  if (IFI.DL == 0)
+  if (IFI.DL == nullptr)
     Size = ConstantExpr::getSizeOf(AggTy);
   else
     Size = ConstantInt::get(Type::getInt64Ty(Context),
@@ -358,7 +358,8 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
                                   const Function *CalledFunc,
                                   InlineFunctionInfo &IFI,
                                   unsigned ByValAlignment) {
-  Type *AggTy = cast<PointerType>(Arg->getType())->getElementType();
+  PointerType *ArgTy = cast<PointerType>(Arg->getType());
+  Type *AggTy = ArgTy->getElementType();
 
   // If the called function is readonly, then it could not mutate the caller's
   // copy of the byval'd memory.  In this case, it is safe to elide the copy and
@@ -392,7 +393,7 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
   
   Function *Caller = TheCall->getParent()->getParent(); 
   
-  Value *NewAlloca = new AllocaInst(AggTy, 0, Align, Arg->getName(), 
+  Value *NewAlloca = new AllocaInst(AggTy, nullptr, Align, Arg->getName(), 
                                     &*Caller->begin()->begin());
   IFI.StaticAllocas.push_back(cast<AllocaInst>(NewAlloca));
   
@@ -420,8 +421,10 @@ static bool isUsedByLifetimeMarker(Value *V) {
 // hasLifetimeMarkers - Check whether the given alloca already has
 // lifetime.start or lifetime.end intrinsics.
 static bool hasLifetimeMarkers(AllocaInst *AI) {
-  Type *Int8PtrTy = Type::getInt8PtrTy(AI->getType()->getContext());
-  if (AI->getType() == Int8PtrTy)
+  Type *Ty = AI->getType();
+  Type *Int8PtrTy = Type::getInt8PtrTy(Ty->getContext(),
+                                       Ty->getPointerAddressSpace());
+  if (Ty == Int8PtrTy)
     return isUsedByLifetimeMarker(AI);
 
   // Do a scan to find all the casts to i8*.
@@ -494,7 +497,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   IFI.reset();
   
   const Function *CalledFunc = CS.getCalledFunction();
-  if (CalledFunc == 0 ||          // Can't inline external function or indirect
+  if (!CalledFunc ||              // Can't inline external function or indirect
       CalledFunc->isDeclaration() || // call, or call to a vararg function!
       CalledFunc->getFunctionType()->isVarArg()) return false;
 
@@ -522,7 +525,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   }
 
   // Get the personality function from the callee if it contains a landing pad.
-  Value *CalleePersonality = 0;
+  Value *CalleePersonality = nullptr;
   for (Function::const_iterator I = CalledFunc->begin(), E = CalledFunc->end();
        I != E; ++I)
     if (const InvokeInst *II = dyn_cast<InvokeInst>(I->getTerminator())) {
@@ -586,15 +589,8 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       if (CS.isByValArgument(ArgNo)) {
         ActualArg = HandleByValArgument(ActualArg, TheCall, CalledFunc, IFI,
                                         CalledFunc->getParamAlignment(ArgNo+1));
- 
-        // Calls that we inline may use the new alloca, so we need to clear
-        // their 'tail' flags if HandleByValArgument introduced a new alloca and
-        // the callee has calls.
-        if (ActualArg != *AI) {
-          MustClearTailCallFlags = true;
+        if (ActualArg != *AI)
           ByValInit.push_back(std::make_pair(ActualArg, (Value*) *AI));
-        }
-
       }
 
       VMap[I] = ActualArg;
@@ -633,7 +629,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     for (BasicBlock::iterator I = FirstNewBlock->begin(),
          E = FirstNewBlock->end(); I != E; ) {
       AllocaInst *AI = dyn_cast<AllocaInst>(I++);
-      if (AI == 0) continue;
+      if (!AI) continue;
       
       // If the alloca is now dead, remove it.  This often occurs due to code
       // specialization.
@@ -678,7 +674,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
         continue;
 
       // Try to determine the size of the allocation.
-      ConstantInt *AllocaSize = 0;
+      ConstantInt *AllocaSize = nullptr;
       if (ConstantInt *AIArraySize =
           dyn_cast<ConstantInt>(AI->getArraySize())) {
         if (IFI.DL) {
@@ -788,7 +784,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   // "starter" and "ender" blocks.  How we accomplish this depends on whether
   // this is an invoke instruction or a call instruction.
   BasicBlock *AfterCallBB;
-  BranchInst *CreatedBranchToNormalDest = NULL;
+  BranchInst *CreatedBranchToNormalDest = nullptr;
   if (InvokeInst *II = dyn_cast<InvokeInst>(TheCall)) {
 
     // Add an unconditional branch to make this look like the CallInst case...
@@ -827,7 +823,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   // any users of the original call/invoke instruction.
   Type *RTy = CalledFunc->getReturnType();
 
-  PHINode *PHI = 0;
+  PHINode *PHI = nullptr;
   if (Returns.size() > 1) {
     // The PHI node should go at the front of the new basic block to merge all
     // possible incoming values.

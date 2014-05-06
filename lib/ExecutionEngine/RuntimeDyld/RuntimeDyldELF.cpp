@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dyld"
 #include "RuntimeDyldELF.h"
 #include "JITRegistrar.h"
 #include "ObjectImageCommon.h"
@@ -28,6 +27,8 @@
 
 using namespace llvm;
 using namespace llvm::object;
+
+#define DEBUG_TYPE "dyld"
 
 namespace {
 
@@ -50,7 +51,12 @@ template <class ELFT> class DyldELFObject : public ELFObjectFile<ELFT> {
 
   typedef typename ELFDataTypeTypedefHelper<ELFT>::value_type addr_type;
 
+  std::unique_ptr<ObjectFile> UnderlyingFile;
+
 public:
+  DyldELFObject(std::unique_ptr<ObjectFile> UnderlyingFile,
+                MemoryBuffer *Wrapper, error_code &ec);
+
   DyldELFObject(MemoryBuffer *Wrapper, error_code &ec);
 
   void updateSectionAddress(const SectionRef &Sec, uint64_t Addr);
@@ -67,13 +73,11 @@ public:
 };
 
 template <class ELFT> class ELFObjectImage : public ObjectImageCommon {
-protected:
-  DyldELFObject<ELFT> *DyldObj;
   bool Registered;
 
 public:
-  ELFObjectImage(ObjectBuffer *Input, DyldELFObject<ELFT> *Obj)
-      : ObjectImageCommon(Input, Obj), DyldObj(Obj), Registered(false) {}
+  ELFObjectImage(ObjectBuffer *Input, std::unique_ptr<DyldELFObject<ELFT>> Obj)
+      : ObjectImageCommon(Input, std::move(Obj)), Registered(false) {}
 
   virtual ~ELFObjectImage() {
     if (Registered)
@@ -83,11 +87,13 @@ public:
   // Subclasses can override these methods to update the image with loaded
   // addresses for sections and common symbols
   void updateSectionAddress(const SectionRef &Sec, uint64_t Addr) override {
-    DyldObj->updateSectionAddress(Sec, Addr);
+    static_cast<DyldELFObject<ELFT>*>(getObjectFile())
+        ->updateSectionAddress(Sec, Addr);
   }
 
   void updateSymbolAddress(const SymbolRef &Sym, uint64_t Addr) override {
-    DyldObj->updateSymbolAddress(Sym, Addr);
+    static_cast<DyldELFObject<ELFT>*>(getObjectFile())
+        ->updateSymbolAddress(Sym, Addr);
   }
 
   void registerWithDebugger() override {
@@ -105,6 +111,14 @@ public:
 template <class ELFT>
 DyldELFObject<ELFT>::DyldELFObject(MemoryBuffer *Wrapper, error_code &ec)
     : ELFObjectFile<ELFT>(Wrapper, ec) {
+  this->isDyldELFObject = true;
+}
+
+template <class ELFT>
+DyldELFObject<ELFT>::DyldELFObject(std::unique_ptr<ObjectFile> UnderlyingFile,
+                                   MemoryBuffer *Wrapper, error_code &ec)
+    : ELFObjectFile<ELFT>(Wrapper, ec),
+      UnderlyingFile(std::move(UnderlyingFile)) {
   this->isDyldELFObject = true;
 }
 
@@ -164,30 +178,36 @@ void RuntimeDyldELF::deregisterEHFrames() {
 }
 
 ObjectImage *
-RuntimeDyldELF::createObjectImageFromFile(object::ObjectFile *ObjFile) {
+RuntimeDyldELF::createObjectImageFromFile(std::unique_ptr<object::ObjectFile> ObjFile) {
   if (!ObjFile)
-    return NULL;
+    return nullptr;
 
   error_code ec;
   MemoryBuffer *Buffer =
       MemoryBuffer::getMemBuffer(ObjFile->getData(), "", false);
 
   if (ObjFile->getBytesInAddress() == 4 && ObjFile->isLittleEndian()) {
-    DyldELFObject<ELFType<support::little, 2, false>> *Obj =
-        new DyldELFObject<ELFType<support::little, 2, false>>(Buffer, ec);
-    return new ELFObjectImage<ELFType<support::little, 2, false>>(NULL, Obj);
+    auto Obj =
+        llvm::make_unique<DyldELFObject<ELFType<support::little, 2, false>>>(
+            std::move(ObjFile), Buffer, ec);
+    return new ELFObjectImage<ELFType<support::little, 2, false>>(
+        nullptr, std::move(Obj));
   } else if (ObjFile->getBytesInAddress() == 4 && !ObjFile->isLittleEndian()) {
-    DyldELFObject<ELFType<support::big, 2, false>> *Obj =
-        new DyldELFObject<ELFType<support::big, 2, false>>(Buffer, ec);
-    return new ELFObjectImage<ELFType<support::big, 2, false>>(NULL, Obj);
+    auto Obj =
+        llvm::make_unique<DyldELFObject<ELFType<support::big, 2, false>>>(
+            std::move(ObjFile), Buffer, ec);
+    return new ELFObjectImage<ELFType<support::big, 2, false>>(nullptr, std::move(Obj));
   } else if (ObjFile->getBytesInAddress() == 8 && !ObjFile->isLittleEndian()) {
-    DyldELFObject<ELFType<support::big, 2, true>> *Obj =
-        new DyldELFObject<ELFType<support::big, 2, true>>(Buffer, ec);
-    return new ELFObjectImage<ELFType<support::big, 2, true>>(NULL, Obj);
+    auto Obj = llvm::make_unique<DyldELFObject<ELFType<support::big, 2, true>>>(
+        std::move(ObjFile), Buffer, ec);
+    return new ELFObjectImage<ELFType<support::big, 2, true>>(nullptr,
+                                                              std::move(Obj));
   } else if (ObjFile->getBytesInAddress() == 8 && ObjFile->isLittleEndian()) {
-    DyldELFObject<ELFType<support::little, 2, true>> *Obj =
-        new DyldELFObject<ELFType<support::little, 2, true>>(Buffer, ec);
-    return new ELFObjectImage<ELFType<support::little, 2, true>>(NULL, Obj);
+    auto Obj =
+        llvm::make_unique<DyldELFObject<ELFType<support::little, 2, true>>>(
+            std::move(ObjFile), Buffer, ec);
+    return new ELFObjectImage<ELFType<support::little, 2, true>>(
+        nullptr, std::move(Obj));
   } else
     llvm_unreachable("Unexpected ELF format");
 }
@@ -201,28 +221,29 @@ ObjectImage *RuntimeDyldELF::createObjectImage(ObjectBuffer *Buffer) {
   error_code ec;
 
   if (Ident.first == ELF::ELFCLASS32 && Ident.second == ELF::ELFDATA2LSB) {
-    DyldELFObject<ELFType<support::little, 4, false>> *Obj =
-        new DyldELFObject<ELFType<support::little, 4, false>>(
+    auto Obj =
+        llvm::make_unique<DyldELFObject<ELFType<support::little, 4, false>>>(
             Buffer->getMemBuffer(), ec);
-    return new ELFObjectImage<ELFType<support::little, 4, false>>(Buffer, Obj);
+    return new ELFObjectImage<ELFType<support::little, 4, false>>(
+        Buffer, std::move(Obj));
   } else if (Ident.first == ELF::ELFCLASS32 &&
              Ident.second == ELF::ELFDATA2MSB) {
-    DyldELFObject<ELFType<support::big, 4, false>> *Obj =
-        new DyldELFObject<ELFType<support::big, 4, false>>(
+    auto Obj =
+        llvm::make_unique<DyldELFObject<ELFType<support::big, 4, false>>>(
             Buffer->getMemBuffer(), ec);
-    return new ELFObjectImage<ELFType<support::big, 4, false>>(Buffer, Obj);
+    return new ELFObjectImage<ELFType<support::big, 4, false>>(Buffer,
+                                                               std::move(Obj));
   } else if (Ident.first == ELF::ELFCLASS64 &&
              Ident.second == ELF::ELFDATA2MSB) {
-    DyldELFObject<ELFType<support::big, 8, true>> *Obj =
-        new DyldELFObject<ELFType<support::big, 8, true>>(
-            Buffer->getMemBuffer(), ec);
-    return new ELFObjectImage<ELFType<support::big, 8, true>>(Buffer, Obj);
+    auto Obj = llvm::make_unique<DyldELFObject<ELFType<support::big, 8, true>>>(
+        Buffer->getMemBuffer(), ec);
+    return new ELFObjectImage<ELFType<support::big, 8, true>>(Buffer, std::move(Obj));
   } else if (Ident.first == ELF::ELFCLASS64 &&
              Ident.second == ELF::ELFDATA2LSB) {
-    DyldELFObject<ELFType<support::little, 8, true>> *Obj =
-        new DyldELFObject<ELFType<support::little, 8, true>>(
+    auto Obj =
+        llvm::make_unique<DyldELFObject<ELFType<support::little, 8, true>>>(
             Buffer->getMemBuffer(), ec);
-    return new ELFObjectImage<ELFType<support::little, 8, true>>(Buffer, Obj);
+    return new ELFObjectImage<ELFType<support::little, 8, true>>(Buffer, std::move(Obj));
   } else
     llvm_unreachable("Unexpected ELF format");
 }
@@ -845,6 +866,8 @@ void RuntimeDyldELF::resolveRelocation(const SectionEntry &Section,
     break;
   case Triple::aarch64:
   case Triple::aarch64_be:
+  case Triple::arm64:
+  case Triple::arm64_be:
     resolveAArch64Relocation(Section, Offset, Value, Type, Addend);
     break;
   case Triple::arm: // Fall through.
@@ -950,7 +973,8 @@ relocation_iterator RuntimeDyldELF::processRelocationRef(
 
   DEBUG(dbgs() << "\t\tSectionID: " << SectionID << " Offset: " << Offset
                << "\n");
-  if (Arch == Triple::aarch64 &&
+  if ((Arch == Triple::aarch64 || Arch == Triple::aarch64_be ||
+       Arch == Triple::arm64 || Arch == Triple::arm64_be) &&
       (RelType == ELF::R_AARCH64_CALL26 || RelType == ELF::R_AARCH64_JUMP26)) {
     // This is an AArch64 branch relocation, need to use a stub function.
     DEBUG(dbgs() << "\t\tThis is an AArch64 branch relocation.");
@@ -1151,7 +1175,7 @@ relocation_iterator RuntimeDyldELF::processRelocationRef(
       // Extra check to avoid relocation againt empty symbols (usually
       // the R_PPC64_TOC).
       if (SymType != SymbolRef::ST_Unknown && TargetName.empty())
-        Value.SymbolName = NULL;
+        Value.SymbolName = nullptr;
 
       if (Value.SymbolName)
         addRelocationForSymbol(RE, Value.SymbolName);
@@ -1283,7 +1307,8 @@ void RuntimeDyldELF::updateGOTEntries(StringRef Name, uint64_t Addr) {
   for (it = GOTs.begin(); it != end; ++it) {
     GOTRelocations &GOTEntries = it->second;
     for (int i = 0, e = GOTEntries.size(); i != e; ++i) {
-      if (GOTEntries[i].SymbolName != 0 && GOTEntries[i].SymbolName == Name) {
+      if (GOTEntries[i].SymbolName != nullptr &&
+          GOTEntries[i].SymbolName == Name) {
         GOTEntries[i].Offset = Addr;
       }
     }
@@ -1297,6 +1322,9 @@ size_t RuntimeDyldELF::getGOTEntrySize() {
   switch (Arch) {
   case Triple::x86_64:
   case Triple::aarch64:
+  case Triple::aarch64_be:
+  case Triple::arm64:
+  case Triple::arm64_be:
   case Triple::ppc64:
   case Triple::ppc64le:
   case Triple::systemz:
@@ -1331,7 +1359,7 @@ uint64_t RuntimeDyldELF::findGOTEntry(uint64_t LoadAddress, uint64_t Offset) {
     // Find the matching entry in our vector.
     uint64_t SymbolOffset = 0;
     for (int i = 0, e = GOTEntries.size(); i != e; ++i) {
-      if (GOTEntries[i].SymbolName == 0) {
+      if (!GOTEntries[i].SymbolName) {
         if (getSectionLoadAddress(GOTEntries[i].SectionID) == LoadAddress &&
             GOTEntries[i].Offset == Offset) {
           GOTIndex = i;

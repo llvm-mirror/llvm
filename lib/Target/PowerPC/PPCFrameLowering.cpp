@@ -222,7 +222,7 @@ unsigned PPCFrameLowering::determineFrameLayout(MachineFunction &MF,
   if (!DisableRedZone &&
       (Subtarget.isPPC64() ||                      // 32-bit SVR4, no stack-
        !Subtarget.isSVR4ABI() ||                   //   allocated locals.
-	FrameSize == 0) &&
+        FrameSize == 0) &&
       FrameSize <= 224 &&                          // Fits in red zone.
       !MFI->hasVarSizedObjects() &&                // No dynamic alloca.
       !MFI->adjustsStack() &&                      // No calls.
@@ -281,8 +281,8 @@ bool PPCFrameLowering::needsFP(const MachineFunction &MF) const {
 
   // Naked functions have no stack frame pushed, so we don't have a frame
   // pointer.
-  if (MF.getFunction()->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                                     Attribute::Naked))
+  if (MF.getFunction()->getAttributes().hasAttribute(
+          AttributeSet::FunctionIndex, Attribute::Naked))
     return false;
 
   return MF.getTarget().Options.DisableFramePointerElim(MF) ||
@@ -426,7 +426,8 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
       assert(FPIndex && "No Frame Pointer Save Slot!");
       FPOffset = FFI->getObjectOffset(FPIndex);
     } else {
-      FPOffset = PPCFrameLowering::getFramePointerSaveOffset(isPPC64, isDarwinABI);
+      FPOffset =
+          PPCFrameLowering::getFramePointerSaveOffset(isPPC64, isDarwinABI);
     }
   }
 
@@ -562,13 +563,14 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
     assert(NegFrameSize);
     unsigned CFIIndex = MMI.addFrameInst(
         MCCFIInstruction::createDefCfaOffset(nullptr, NegFrameSize));
-    BuildMI(MBB, MBBI, dl, TII.get(PPC::CFI_INSTRUCTION)).addCFIIndex(CFIIndex);
+    BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIndex);
 
     if (HasFP) {
       unsigned Reg = MRI->getDwarfRegNum(FPReg, true);
       CFIIndex = MMI.addFrameInst(
           MCCFIInstruction::createOffset(nullptr, Reg, FPOffset));
-      BuildMI(MBB, MBBI, dl, TII.get(PPC::CFI_INSTRUCTION))
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
 
@@ -576,7 +578,7 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
       unsigned Reg = MRI->getDwarfRegNum(BPReg, true);
       CFIIndex = MMI.addFrameInst(
           MCCFIInstruction::createOffset(nullptr, Reg, BPOffset));
-      BuildMI(MBB, MBBI, dl, TII.get(PPC::CFI_INSTRUCTION))
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
 
@@ -584,7 +586,7 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
       unsigned Reg = MRI->getDwarfRegNum(LRReg, true);
       CFIIndex = MMI.addFrameInst(
           MCCFIInstruction::createOffset(nullptr, Reg, LROffset));
-      BuildMI(MBB, MBBI, dl, TII.get(PPC::CFI_INSTRUCTION))
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
   }
@@ -601,7 +603,7 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
       unsigned CFIIndex = MMI.addFrameInst(
           MCCFIInstruction::createDefCfaRegister(nullptr, Reg));
 
-      BuildMI(MBB, MBBI, dl, TII.get(PPC::CFI_INSTRUCTION))
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
   }
@@ -629,7 +631,7 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
       if (isSVR4ABI && isPPC64 && (PPC::CR2 <= Reg && Reg <= PPC::CR4)) {
         unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createOffset(
             nullptr, MRI->getDwarfRegNum(PPC::CR2, true), 8));
-        BuildMI(MBB, MBBI, dl, TII.get(PPC::CFI_INSTRUCTION))
+        BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
             .addCFIIndex(CFIIndex);
         continue;
       }
@@ -637,7 +639,7 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF) const {
       int Offset = MFI->getObjectOffset(CSI[I].getFrameIdx());
       unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createOffset(
           nullptr, MRI->getDwarfRegNum(Reg, true), Offset));
-      BuildMI(MBB, MBBI, dl, TII.get(PPC::CFI_INSTRUCTION))
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
   }
@@ -712,7 +714,8 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
       assert(FPIndex && "No Frame Pointer Save Slot!");
       FPOffset = FFI->getObjectOffset(FPIndex);
     } else {
-      FPOffset = PPCFrameLowering::getFramePointerSaveOffset(isPPC64, isDarwinABI);
+      FPOffset =
+          PPCFrameLowering::getFramePointerSaveOffset(isPPC64, isDarwinABI);
     }
   }
 
@@ -930,9 +933,9 @@ PPCFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
     MFI->CreateFixedObject(-1 * TCSPDelta, TCSPDelta, true);
   }
 
-  // For 32-bit SVR4, allocate the nonvolatile CR spill slot iff the 
+  // For 32-bit SVR4, allocate the nonvolatile CR spill slot iff the
   // function uses CR 2, 3, or 4.
-  if (!isPPC64 && !isDarwinABI && 
+  if (!isPPC64 && !isDarwinABI &&
       (MRI.isPhysRegUsed(PPC::CR2) ||
        MRI.isPhysRegUsed(PPC::CR3) ||
        MRI.isPhysRegUsed(PPC::CR4))) {
@@ -1106,10 +1109,10 @@ void PPCFrameLowering::processFunctionBeforeFrameFinalized(MachineFunction &MF,
       unsigned Reg = CSI[i].getReg();
 
       if ((Subtarget.isSVR4ABI() && Reg == PPC::CR2)
-	  // Leave Darwin logic as-is.
-	  || (!Subtarget.isSVR4ABI() &&
-	      (PPC::CRBITRCRegClass.contains(Reg) ||
-	       PPC::CRRCRegClass.contains(Reg)))) {
+          // Leave Darwin logic as-is.
+          || (!Subtarget.isSVR4ABI() &&
+              (PPC::CRBITRCRegClass.contains(Reg) ||
+               PPC::CRRCRegClass.contains(Reg)))) {
         int FI = CSI[i].getFrameIdx();
 
         FFI->setObjectOffset(FI, LowerBound + FFI->getObjectOffset(FI));
@@ -1190,11 +1193,11 @@ PPCFrameLowering::addScavengingSpillSlot(MachineFunction &MF,
   }
 }
 
-bool 
+bool
 PPCFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
-				     MachineBasicBlock::iterator MI,
-				     const std::vector<CalleeSavedInfo> &CSI,
-				     const TargetRegisterInfo *TRI) const {
+                                     MachineBasicBlock::iterator MI,
+                                     const std::vector<CalleeSavedInfo> &CSI,
+                                     const TargetRegisterInfo *TRI) const {
 
   // Currently, this function only handles SVR4 32- and 64-bit ABIs.
   // Return false otherwise to maintain pre-existing behavior.
@@ -1207,7 +1210,7 @@ PPCFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
   DebugLoc DL;
   bool CRSpilled = false;
   MachineInstrBuilder CRMIB;
-  
+
   for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
     unsigned Reg = CSI[i].getReg();
     // Only Darwin actually uses the VRSAVE register, but it can still appear
@@ -1237,21 +1240,21 @@ PPCFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
         CRSpilled = true;
         FuncInfo->setSpillsCR();
 
-	// 32-bit:  FP-relative.  Note that we made sure CR2-CR4 all have
-	// the same frame index in PPCRegisterInfo::hasReservedSpillSlot.
-	CRMIB = BuildMI(*MF, DL, TII.get(PPC::MFCR), PPC::R12)
+        // 32-bit:  FP-relative.  Note that we made sure CR2-CR4 all have
+        // the same frame index in PPCRegisterInfo::hasReservedSpillSlot.
+        CRMIB = BuildMI(*MF, DL, TII.get(PPC::MFCR), PPC::R12)
                   .addReg(Reg, RegState::ImplicitKill);
 
-	MBB.insert(MI, CRMIB);
-	MBB.insert(MI, addFrameReference(BuildMI(*MF, DL, TII.get(PPC::STW))
-					 .addReg(PPC::R12,
-						 getKillRegState(true)),
-					 CSI[i].getFrameIdx()));
+        MBB.insert(MI, CRMIB);
+        MBB.insert(MI, addFrameReference(BuildMI(*MF, DL, TII.get(PPC::STW))
+                                         .addReg(PPC::R12,
+                                                 getKillRegState(true)),
+                                         CSI[i].getFrameIdx()));
       }
     } else {
       const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
       TII.storeRegToStackSlot(MBB, MI, Reg, true,
-			      CSI[i].getFrameIdx(), RC, TRI);
+                              CSI[i].getFrameIdx(), RC, TRI);
     }
   }
   return true;
@@ -1260,8 +1263,8 @@ PPCFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
 static void
 restoreCRs(bool isPPC64, bool is31,
            bool CR2Spilled, bool CR3Spilled, bool CR4Spilled,
-	   MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
-	   const std::vector<CalleeSavedInfo> &CSI, unsigned CSIIndex) {
+           MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+           const std::vector<CalleeSavedInfo> &CSI, unsigned CSIIndex) {
 
   MachineFunction *MF = MBB.getParent();
   const PPCInstrInfo &TII =
@@ -1275,12 +1278,12 @@ restoreCRs(bool isPPC64, bool is31,
   else {
     // 32-bit:  FP-relative
     MBB.insert(MI, addFrameReference(BuildMI(*MF, DL, TII.get(PPC::LWZ),
-					     PPC::R12),
-				     CSI[CSIIndex].getFrameIdx()));
+                                             PPC::R12),
+                                     CSI[CSIIndex].getFrameIdx()));
     RestoreOp = PPC::MTOCRF;
     MoveReg = PPC::R12;
   }
-  
+
   if (CR2Spilled)
     MBB.insert(MI, BuildMI(*MF, DL, TII.get(RestoreOp), PPC::CR2)
                .addReg(MoveReg, getKillRegState(!CR3Spilled && !CR4Spilled)));
@@ -1335,11 +1338,11 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
   MBB.erase(I);
 }
 
-bool 
+bool
 PPCFrameLowering::restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
-					MachineBasicBlock::iterator MI,
-				        const std::vector<CalleeSavedInfo> &CSI,
-					const TargetRegisterInfo *TRI) const {
+                                        MachineBasicBlock::iterator MI,
+                                        const std::vector<CalleeSavedInfo> &CSI,
+                                        const TargetRegisterInfo *TRI) const {
 
   // Currently, this function only handles SVR4 32- and 64-bit ABIs.
   // Return false otherwise to maintain pre-existing behavior.
@@ -1387,20 +1390,20 @@ PPCFrameLowering::restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
       // When we first encounter a non-CR register after seeing at
       // least one CR register, restore all spilled CRs together.
       if ((CR2Spilled || CR3Spilled || CR4Spilled)
-	  && !(PPC::CR2 <= Reg && Reg <= PPC::CR4)) {
+          && !(PPC::CR2 <= Reg && Reg <= PPC::CR4)) {
         bool is31 = needsFP(*MF);
         restoreCRs(Subtarget.isPPC64(), is31,
                    CR2Spilled, CR3Spilled, CR4Spilled,
-		   MBB, I, CSI, CSIIndex);
-	CR2Spilled = CR3Spilled = CR4Spilled = false;
+                   MBB, I, CSI, CSIIndex);
+        CR2Spilled = CR3Spilled = CR4Spilled = false;
       }
 
       // Default behavior for non-CR saves.
       const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
       TII.loadRegFromStackSlot(MBB, I, Reg, CSI[i].getFrameIdx(),
-			       RC, TRI);
+                               RC, TRI);
       assert(I != MBB.begin() &&
-	     "loadRegFromStackSlot didn't insert any code!");
+             "loadRegFromStackSlot didn't insert any code!");
       }
 
     // Insert in reverse order.
@@ -1409,16 +1412,15 @@ PPCFrameLowering::restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
     else {
       I = BeforeI;
       ++I;
-    }	    
+    }
   }
 
   // If we haven't yet spilled the CRs, do so now.
   if (CR2Spilled || CR3Spilled || CR4Spilled) {
-    bool is31 = needsFP(*MF); 
+    bool is31 = needsFP(*MF);
     restoreCRs(Subtarget.isPPC64(), is31, CR2Spilled, CR3Spilled, CR4Spilled,
-	       MBB, I, CSI, CSIIndex);
+               MBB, I, CSI, CSIIndex);
   }
 
   return true;
 }
-
