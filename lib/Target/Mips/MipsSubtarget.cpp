@@ -80,12 +80,12 @@ MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
     : MipsGenSubtargetInfo(TT, CPU, FS), MipsArchVersion(Mips32),
       MipsABI(UnknownABI), IsLittle(little), IsSingleFloat(false),
       IsFP64bit(false), IsNaN2008bit(false), IsGP64bit(false), HasVFPU(false),
-      HasCnMips(false), IsLinux(true), HasSEInReg(false), HasCondMov(false),
-      HasSwap(false), HasBitCount(false), HasFPIdx(false), InMips16Mode(false),
-      InMips16HardFloat(Mips16HardFloat), InMicroMipsMode(false), HasDSP(false),
-      HasDSPR2(false), AllowMixed16_32(Mixed16_32 | Mips_Os16), Os16(Mips_Os16),
-      HasMSA(false), RM(_RM), OverrideMode(NoOverride), TM(_TM),
-      TargetTriple(TT) {
+      HasCnMips(false), IsLinux(true), HasMips3_32(false), HasMips4_32(false),
+      HasSEInReg(false), HasSwap(false), HasBitCount(false), HasFPIdx(false),
+      InMips16Mode(false), InMips16HardFloat(Mips16HardFloat),
+      InMicroMipsMode(false), HasDSP(false), HasDSPR2(false),
+      AllowMixed16_32(Mixed16_32 | Mips_Os16), Os16(Mips_Os16), HasMSA(false),
+      RM(_RM), OverrideMode(NoOverride), TM(_TM), TargetTriple(TT) {
   std::string CPUName = CPU;
   CPUName = selectMipsCPU(TT, CPUName);
 
@@ -107,6 +107,19 @@ MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUName);
 
+  // Don't even attempt to generate code for MIPS-I, MIPS-II, MIPS-III, and
+  // MIPS-V. They have not been tested and currently exist for the integrated
+  // assembler only.
+  if (MipsArchVersion == Mips1)
+    report_fatal_error("Code generation for MIPS-I is not implemented", false);
+  if (MipsArchVersion == Mips2)
+    report_fatal_error("Code generation for MIPS-II is not implemented", false);
+  if (MipsArchVersion == Mips3)
+    report_fatal_error("Code generation for MIPS-III is not implemented",
+                       false);
+  if (MipsArchVersion == Mips5)
+    report_fatal_error("Code generation for MIPS-V is not implemented", false);
+
   // Assert exactly one ABI was chosen.
   assert(MipsABI != UnknownABI);
   assert((((getFeatureBits() & Mips::FeatureO32) != 0) +
@@ -123,6 +136,15 @@ MipsSubtarget::MipsSubtarget(const std::string &TT, const std::string &CPU,
     report_fatal_error("MSA requires a 64-bit FPU register file (FR=1 mode). "
                        "See -mattr=+fp64.",
                        false);
+
+  if (hasMips32r6()) {
+    StringRef ISA = hasMips64r6() ? "MIPS64r6" : "MIPS32r6";
+
+    assert(isFP64bit());
+    assert(isNaN2008());
+    if (hasDSP())
+      report_fatal_error(ISA + " is not compatible with the DSP ASE", false);
+  }
 
   // Is the target system Linux ?
   if (TT.find("linux") == std::string::npos)

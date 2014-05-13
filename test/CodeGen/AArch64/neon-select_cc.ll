@@ -1,5 +1,5 @@
 ; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon -fp-contract=fast | FileCheck %s
-
+; arm64 has separate copy of this test due to different codegen.
 define <8x i8> @test_select_cc_v8i8_i8(i8 %a, i8 %b, <8x i8> %c, <8x i8> %d ) {
 ; CHECK-LABEL: test_select_cc_v8i8_i8:
 ; CHECK: and	w0, w0, #0xff

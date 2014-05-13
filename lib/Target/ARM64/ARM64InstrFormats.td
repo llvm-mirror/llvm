@@ -97,16 +97,16 @@ def MovImm64ShifterOperand : AsmOperandClass {
 }
 
 // Shifter operand for arithmetic register shifted encodings.
-def ArithmeticShifterOperand : AsmOperandClass {
+class ArithmeticShifterOperand<int width> : AsmOperandClass {
   let SuperClasses = [ShifterOperand];
-  let Name = "ArithmeticShifter";
+  let Name = "ArithmeticShifter" # width;
+  let PredicateMethod = "isArithmeticShifter";
+  let RenderMethod = "addArithmeticShifterOperands";
+  let DiagnosticType = "AddSubRegShift" # width;
 }
 
-// Shifter operand for arithmetic shifted encodings for ADD/SUB instructions.
-def AddSubShifterOperand : AsmOperandClass {
-  let SuperClasses = [ArithmeticShifterOperand];
-  let Name = "AddSubShifter";
-}
+def ArithmeticShifterOperand32 : ArithmeticShifterOperand<32>;
+def ArithmeticShifterOperand64 : ArithmeticShifterOperand<64>;
 
 // Shifter operand for logical vector 128/64-bit shifted encodings.
 def LogicalVecShifterOperand : AsmOperandClass {
@@ -125,15 +125,20 @@ def MoveVecShifterOperand : AsmOperandClass {
 }
 
 // Extend operand for arithmetic encodings.
-def ExtendOperand : AsmOperandClass { let Name = "Extend"; }
+def ExtendOperand : AsmOperandClass {
+  let Name = "Extend";
+  let DiagnosticType = "AddSubRegExtendLarge";
+}
 def ExtendOperand64 : AsmOperandClass {
   let SuperClasses = [ExtendOperand];
   let Name = "Extend64";
+  let DiagnosticType = "AddSubRegExtendSmall";
 }
 // 'extend' that's a lsl of a 64-bit register.
 def ExtendOperandLSL64 : AsmOperandClass {
   let SuperClasses = [ExtendOperand];
   let Name = "ExtendLSL64";
+  let DiagnosticType = "AddSubRegExtendLarge";
 }
 
 // 8-bit floating-point immediate encodings.
@@ -225,22 +230,15 @@ def imm0_65535 : Operand<i32>, ImmLeaf<i32, [{
   let PrintMethod = "printHexImm";
 }
 
-def Imm1_8Operand : AsmOperandClass {
-  let Name = "Imm1_8";
-  let DiagnosticType = "InvalidImm1_8";
+class AsmImmRange<int Low, int High> : AsmOperandClass {
+  let Name = "Imm" # Low # "_" # High;
+  let DiagnosticType = "InvalidImm" # Low # "_" # High;
 }
-def Imm1_16Operand : AsmOperandClass {
-  let Name = "Imm1_16";
-  let DiagnosticType = "InvalidImm1_16";
-}
-def Imm1_32Operand : AsmOperandClass {
-  let Name = "Imm1_32";
-  let DiagnosticType = "InvalidImm1_32";
-}
-def Imm1_64Operand : AsmOperandClass {
-  let Name = "Imm1_64";
-  let DiagnosticType = "InvalidImm1_64";
-}
+
+def Imm1_8Operand : AsmImmRange<1, 8>;
+def Imm1_16Operand : AsmImmRange<1, 16>;
+def Imm1_32Operand : AsmImmRange<1, 32>;
+def Imm1_64Operand : AsmImmRange<1, 64>;
 
 def MovZSymbolG3AsmOperand : AsmOperandClass {
   let Name = "MovZSymbolG3";
@@ -386,10 +384,10 @@ def vecshiftR64Narrow : Operand<i32>, ImmLeaf<i32, [{
   let ParserMatchClass = Imm1_32Operand;
 }
 
-def Imm0_7Operand : AsmOperandClass { let Name = "Imm0_7"; }
-def Imm0_15Operand : AsmOperandClass { let Name = "Imm0_15"; }
-def Imm0_31Operand : AsmOperandClass { let Name = "Imm0_31"; }
-def Imm0_63Operand : AsmOperandClass { let Name = "Imm0_63"; }
+def Imm0_7Operand : AsmImmRange<0, 7>;
+def Imm0_15Operand : AsmImmRange<0, 15>;
+def Imm0_31Operand : AsmImmRange<0, 31>;
+def Imm0_63Operand : AsmImmRange<0, 63>;
 
 def vecshiftL8 : Operand<i32>, ImmLeaf<i32, [{
   return (((uint32_t)Imm) < 8);
@@ -499,20 +497,24 @@ def imm0_7 : Operand<i64>, ImmLeaf<i64, [{
 // An arithmetic shifter operand:
 //  {7-6} - shift type: 00 = lsl, 01 = lsr, 10 = asr
 //  {5-0} - imm6
-def arith_shift : Operand<i32> {
+class arith_shift<ValueType Ty, int width> : Operand<Ty> {
   let PrintMethod = "printShifter";
-  let ParserMatchClass = ArithmeticShifterOperand;
+  let ParserMatchClass = !cast<AsmOperandClass>(
+                         "ArithmeticShifterOperand" # width);
 }
 
-class arith_shifted_reg<ValueType Ty, RegisterClass regclass>
+def arith_shift32 : arith_shift<i32, 32>;
+def arith_shift64 : arith_shift<i64, 64>;
+
+class arith_shifted_reg<ValueType Ty, RegisterClass regclass, int width>
     : Operand<Ty>,
       ComplexPattern<Ty, 2, "SelectArithShiftedRegister", []> {
   let PrintMethod = "printShiftedRegister";
-  let MIOperandInfo = (ops regclass, arith_shift);
+  let MIOperandInfo = (ops regclass, !cast<Operand>("arith_shift" # width));
 }
 
-def arith_shifted_reg32 : arith_shifted_reg<i32, GPR32>;
-def arith_shifted_reg64 : arith_shifted_reg<i64, GPR64>;
+def arith_shifted_reg32 : arith_shifted_reg<i32, GPR32, 32>;
+def arith_shifted_reg64 : arith_shifted_reg<i64, GPR64, 64>;
 
 // An arithmetic shifter operand:
 //  {7-6} - shift type: 00 = lsl, 01 = lsr, 10 = asr, 11 = ror
@@ -558,18 +560,21 @@ def move_vec_shift : Operand<i32> {
   let ParserMatchClass = MoveVecShifterOperand;
 }
 
+def AddSubImmOperand : AsmOperandClass {
+  let Name = "AddSubImm";
+  let ParserMethod = "tryParseAddSubImm";
+  let DiagnosticType = "AddSubSecondSource";
+}
 // An ADD/SUB immediate shifter operand:
+//  second operand:
 //  {7-6} - shift type: 00 = lsl
 //  {5-0} - imm6: #0 or #12
-def addsub_shift : Operand<i32> {
-  let ParserMatchClass = AddSubShifterOperand;
-}
-
 class addsub_shifted_imm<ValueType Ty>
     : Operand<Ty>, ComplexPattern<Ty, 2, "SelectArithImmed", [imm]> {
   let PrintMethod = "printAddSubImm";
   let EncoderMethod = "getAddSubImmOpValue";
-  let MIOperandInfo = (ops i32imm, addsub_shift);
+  let ParserMatchClass = AddSubImmOperand;
+  let MIOperandInfo = (ops i32imm, i32imm);
 }
 
 def addsub_shifted_imm32 : addsub_shifted_imm<i32>;
@@ -579,7 +584,8 @@ class neg_addsub_shifted_imm<ValueType Ty>
     : Operand<Ty>, ComplexPattern<Ty, 2, "SelectNegArithImmed", [imm]> {
   let PrintMethod = "printAddSubImm";
   let EncoderMethod = "getAddSubImmOpValue";
-  let MIOperandInfo = (ops i32imm, addsub_shift);
+  let ParserMatchClass = AddSubImmOperand;
+  let MIOperandInfo = (ops i32imm, i32imm);
 }
 
 def neg_addsub_shifted_imm32 : neg_addsub_shifted_imm<i32>;
@@ -1524,7 +1530,7 @@ multiclass AddSub<bit isSub, string mnemonic,
                        GPR64sp, GPR64sp, GPR64, 24>; // UXTX #0
 }
 
-multiclass AddSubS<bit isSub, string mnemonic, SDNode OpNode> {
+multiclass AddSubS<bit isSub, string mnemonic, SDNode OpNode, string cmp> {
   let isCompare = 1, Defs = [NZCV] in {
   // Add/Subtract immediate
   def Wri  : BaseAddSubImm<isSub, 1, GPR32, GPR32sp, addsub_shifted_imm32,
@@ -1569,6 +1575,28 @@ multiclass AddSubS<bit isSub, string mnemonic, SDNode OpNode> {
     let Inst{31} = 1;
   }
   } // Defs = [NZCV]
+
+  // Compare aliases
+  def : InstAlias<cmp#" $src, $imm", (!cast<Instruction>(NAME#"Wri")
+                  WZR, GPR32sp:$src, addsub_shifted_imm32:$imm)>;
+  def : InstAlias<cmp#" $src, $imm", (!cast<Instruction>(NAME#"Xri")
+                  XZR, GPR64sp:$src, addsub_shifted_imm64:$imm)>;
+  def : InstAlias<cmp#" $src1, $src2, $sh", (!cast<Instruction>(NAME#"Wrx")
+                  WZR, GPR32sp:$src1, GPR32:$src2, arith_extend:$sh)>;
+  def : InstAlias<cmp#" $src1, $src2, $sh", (!cast<Instruction>(NAME#"Xrx")
+                  XZR, GPR64sp:$src1, GPR32:$src2, arith_extend:$sh)>;
+  def : InstAlias<cmp#" $src1, $src2, $sh", (!cast<Instruction>(NAME#"Xrx64")
+                  XZR, GPR64sp:$src1, GPR64:$src2, arith_extendlsl64:$sh)>;
+  def : InstAlias<cmp#" $src1, $src2, $sh", (!cast<Instruction>(NAME#"Wrs")
+                  WZR, GPR32:$src1, GPR32:$src2, arith_shift32:$sh)>;
+  def : InstAlias<cmp#" $src1, $src2, $sh", (!cast<Instruction>(NAME#"Xrs")
+                  XZR, GPR64:$src1, GPR64:$src2, arith_shift64:$sh)>;
+
+  // Compare shorthands
+  def : InstAlias<cmp#" $src1, $src2", (!cast<Instruction>(NAME#"Wrs")
+                  WZR, GPR32:$src1, GPR32:$src2, 0)>;
+  def : InstAlias<cmp#" $src1, $src2", (!cast<Instruction>(NAME#"Xrs")
+                  XZR, GPR64:$src1, GPR64:$src2, 0)>;
 
   // Register/register aliases with no shift when SP is not used.
   def : AddSubRegAlias<mnemonic, !cast<Instruction>(NAME#"Wrs"),
@@ -3742,10 +3770,15 @@ multiclass FPMoveImmediate<string asm> {
 // AdvSIMD
 //----------------------------------------------------------------------------
 
-def VectorIndexBOperand : AsmOperandClass { let Name = "VectorIndexB"; }
-def VectorIndexHOperand : AsmOperandClass { let Name = "VectorIndexH"; }
-def VectorIndexSOperand : AsmOperandClass { let Name = "VectorIndexS"; }
-def VectorIndexDOperand : AsmOperandClass { let Name = "VectorIndexD"; }
+class AsmVectorIndex<string Suffix> : AsmOperandClass {
+  let Name = "VectorIndex" # Suffix;
+  let DiagnosticType = "InvalidIndex" # Suffix;
+}
+def VectorIndexBOperand : AsmVectorIndex<"B">;
+def VectorIndexHOperand : AsmVectorIndex<"H">;
+def VectorIndexSOperand : AsmVectorIndex<"S">;
+def VectorIndexDOperand : AsmVectorIndex<"D">;
+
 def VectorIndexB : Operand<i64>, ImmLeaf<i64, [{
   return ((uint64_t)Imm) < 16;
 }]> {
@@ -4473,6 +4506,7 @@ multiclass SIMDCmpTwoVector<bit U, bits<5> opc, string asm,
 // FP Comparisons support only S and D element sizes.
 multiclass SIMDFPCmpTwoVector<bit U, bit S, bits<5> opc,
                               string asm, SDNode OpNode> {
+
   def v2i32rz : BaseSIMDCmpTwoVector<0, U, {S,0}, opc, V64,
                                      asm, ".2s", "0.0",
                                      v2i32, v2f32, OpNode>;

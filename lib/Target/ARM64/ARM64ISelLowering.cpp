@@ -45,9 +45,20 @@ EnableARM64TailCalls("arm64-tail-calls", cl::Hidden,
                      cl::desc("Generate ARM64 tail calls (TEMPORARY OPTION)."),
                      cl::init(true));
 
-static cl::opt<bool>
-StrictAlign("arm64-strict-align", cl::Hidden,
-            cl::desc("Disallow all unaligned memory accesses"));
+enum AlignMode {
+  StrictAlign,
+  NoStrictAlign
+};
+
+static cl::opt<AlignMode>
+Align(cl::desc("Load/store alignment support"),
+      cl::Hidden, cl::init(NoStrictAlign),
+      cl::values(
+          clEnumValN(StrictAlign,   "arm64-strict-align",
+                     "Disallow all unaligned memory accesses"),
+          clEnumValN(NoStrictAlign, "arm64-no-strict-align",
+                     "Allow unaligned memory accesses"),
+          clEnumValEnd));
 
 // Place holder until extr generation is tested fully.
 static cl::opt<bool>
@@ -355,7 +366,11 @@ ARM64TargetLowering::ARM64TargetLowering(ARM64TargetMachine &TM)
 
   setTargetDAGCombine(ISD::MUL);
 
+  setTargetDAGCombine(ISD::SELECT);
   setTargetDAGCombine(ISD::VSELECT);
+
+  setTargetDAGCombine(ISD::INTRINSIC_VOID);
+  setTargetDAGCombine(ISD::INTRINSIC_W_CHAIN);
 
   MaxStoresPerMemset = MaxStoresPerMemsetOptSize = 8;
   MaxStoresPerMemcpy = MaxStoresPerMemcpyOptSize = 4;
@@ -370,7 +385,7 @@ ARM64TargetLowering::ARM64TargetLowering(ARM64TargetMachine &TM)
 
   setMinFunctionAlignment(2);
 
-  RequireStrictAlign = StrictAlign;
+  RequireStrictAlign = (Align == StrictAlign);
 
   setHasExtractBitsInsn(true);
 
@@ -717,6 +732,27 @@ const char *ARM64TargetLowering::getTargetNodeName(unsigned Opcode) const {
   case ARM64ISD::URSHR_I:           return "ARM64ISD::URSHR_I";
   case ARM64ISD::SQSHLU_I:          return "ARM64ISD::SQSHLU_I";
   case ARM64ISD::WrapperLarge:      return "ARM64ISD::WrapperLarge";
+  case ARM64ISD::LD2post:           return "ARM64ISD::LD2post";
+  case ARM64ISD::LD3post:           return "ARM64ISD::LD3post";
+  case ARM64ISD::LD4post:           return "ARM64ISD::LD4post";
+  case ARM64ISD::ST2post:           return "ARM64ISD::ST2post";
+  case ARM64ISD::ST3post:           return "ARM64ISD::ST3post";
+  case ARM64ISD::ST4post:           return "ARM64ISD::ST4post";
+  case ARM64ISD::LD1x2post:         return "ARM64ISD::LD1x2post";
+  case ARM64ISD::LD1x3post:         return "ARM64ISD::LD1x3post";
+  case ARM64ISD::LD1x4post:         return "ARM64ISD::LD1x4post";
+  case ARM64ISD::ST1x2post:         return "ARM64ISD::ST1x2post";
+  case ARM64ISD::ST1x3post:         return "ARM64ISD::ST1x3post";
+  case ARM64ISD::ST1x4post:         return "ARM64ISD::ST1x4post";
+  case ARM64ISD::LD2DUPpost:        return "ARM64ISD::LD2DUPpost";
+  case ARM64ISD::LD3DUPpost:        return "ARM64ISD::LD3DUPpost";
+  case ARM64ISD::LD4DUPpost:        return "ARM64ISD::LD4DUPpost";
+  case ARM64ISD::LD2LANEpost:       return "ARM64ISD::LD2LANEpost";
+  case ARM64ISD::LD3LANEpost:       return "ARM64ISD::LD3LANEpost";
+  case ARM64ISD::LD4LANEpost:       return "ARM64ISD::LD4LANEpost";
+  case ARM64ISD::ST2LANEpost:       return "ARM64ISD::ST2LANEpost";
+  case ARM64ISD::ST3LANEpost:       return "ARM64ISD::ST3LANEpost";
+  case ARM64ISD::ST4LANEpost:       return "ARM64ISD::ST4LANEpost";
   }
 }
 
@@ -1667,8 +1703,10 @@ SDValue ARM64TargetLowering::LowerFormalArguments(
       int Size = Ins[i].Flags.getByValSize();
       unsigned NumRegs = (Size + 7) / 8;
 
+      // FIXME: This works on big-endian for composite byvals, which are the common
+      // case. It should also work for fundamental types too.
       unsigned FrameIdx =
-          MFI->CreateFixedObject(8 * NumRegs, VA.getLocMemOffset(), false);
+        MFI->CreateFixedObject(8 * NumRegs, VA.getLocMemOffset(), false);
       SDValue FrameIdxN = DAG.getFrameIndex(FrameIdx, PtrTy);
       InVals.push_back(FrameIdxN);
 
@@ -1726,13 +1764,33 @@ SDValue ARM64TargetLowering::LowerFormalArguments(
       assert(VA.isMemLoc() && "CCValAssign is neither reg nor mem");
       unsigned ArgOffset = VA.getLocMemOffset();
       unsigned ArgSize = VA.getLocVT().getSizeInBits() / 8;
-      int FI = MFI->CreateFixedObject(ArgSize, ArgOffset, true);
+
+      uint32_t BEAlign = 0;
+      if (ArgSize < 8 && !Subtarget->isLittleEndian())
+        BEAlign = 8 - ArgSize;
+
+      int FI = MFI->CreateFixedObject(ArgSize, ArgOffset + BEAlign, true);
 
       // Create load nodes to retrieve arguments from the stack.
       SDValue FIN = DAG.getFrameIndex(FI, getPointerTy());
-      InVals.push_back(DAG.getLoad(VA.getValVT(), DL, Chain, FIN,
-                                   MachinePointerInfo::getFixedStack(FI), false,
-                                   false, false, 0));
+      SDValue ArgValue;
+
+      // If the loc type and val type are not the same, create an anyext load.
+      if (VA.getLocVT().getSizeInBits() != VA.getValVT().getSizeInBits()) {
+        // We should only get here if this is a pure integer.
+        assert(!VA.getValVT().isVector() && VA.getValVT().isInteger() &&
+               "Only integer extension supported!");
+        ArgValue = DAG.getExtLoad(ISD::EXTLOAD, DL, VA.getValVT(), Chain, FIN,
+                                  MachinePointerInfo::getFixedStack(FI),
+                                  VA.getLocVT(),
+                                  false, false, false, 0);
+      } else {
+        ArgValue = DAG.getLoad(VA.getValVT(), DL, Chain, FIN,
+                               MachinePointerInfo::getFixedStack(FI), false,
+                               false, false, 0);
+      }
+
+      InVals.push_back(ArgValue);
     }
   }
 
@@ -1810,7 +1868,8 @@ void ARM64TargetLowering::saveVarArgRegisters(CCState &CCInfo,
 
       for (unsigned i = FirstVariadicFPR; i < NumFPRArgRegs; ++i) {
         unsigned VReg = MF.addLiveIn(FPRArgRegs[i], &ARM64::FPR128RegClass);
-        SDValue Val = DAG.getCopyFromReg(Chain, DL, VReg, MVT::v2i64);
+        SDValue Val = DAG.getCopyFromReg(Chain, DL, VReg, MVT::f128);
+
         SDValue Store =
             DAG.getStore(Val.getValue(1), DL, Val, FIN,
                          MachinePointerInfo::getStack(i * 16), false, false, 0);
@@ -2078,8 +2137,18 @@ SDValue ARM64TargetLowering::LowerCall(CallLoweringInfo &CLI,
       // There's no reason we can't support stack args w/ tailcall, but
       // we currently don't, so assert if we see one.
       assert(!IsTailCall && "stack argument with tail call!?");
+
+      // FIXME: This works on big-endian for composite byvals, which are the common
+      // case. It should also work for fundamental types too.
+      uint32_t BEAlign = 0;
+      if (!Subtarget->isLittleEndian() && !Flags.isByVal()) {
+        unsigned OpSize = (VA.getLocVT().getSizeInBits() + 7) / 8;
+        if (OpSize < 8)
+          BEAlign = 8 - OpSize;
+      }
+
       unsigned LocMemOffset = VA.getLocMemOffset();
-      SDValue PtrOff = DAG.getIntPtrConstant(LocMemOffset);
+      SDValue PtrOff = DAG.getIntPtrConstant(LocMemOffset + BEAlign);
       PtrOff = DAG.getNode(ISD::ADD, DL, getPointerTy(), StackPtr, PtrOff);
 
       if (Outs[i].Flags.isByVal()) {
@@ -3371,6 +3440,17 @@ SDValue ARM64TargetLowering::LowerFRAMEADDR(SDValue Op,
     FrameAddr = DAG.getLoad(VT, DL, DAG.getEntryNode(), FrameAddr,
                             MachinePointerInfo(), false, false, false, 0);
   return FrameAddr;
+}
+
+// FIXME? Maybe this could be a TableGen attribute on some registers and
+// this table could be generated automatically from RegInfo.
+unsigned ARM64TargetLowering::getRegisterByName(const char* RegName) const {
+  unsigned Reg = StringSwitch<unsigned>(RegName)
+                       .Case("sp", ARM64::SP)
+                       .Default(0);
+  if (Reg)
+    return Reg;
+  report_fatal_error("Invalid register name global variable");
 }
 
 SDValue ARM64TargetLowering::LowerRETURNADDR(SDValue Op,
@@ -5627,6 +5707,9 @@ bool ARM64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
   case Intrinsic::arm64_neon_ld2:
   case Intrinsic::arm64_neon_ld3:
   case Intrinsic::arm64_neon_ld4:
+  case Intrinsic::arm64_neon_ld1x2:
+  case Intrinsic::arm64_neon_ld1x3:
+  case Intrinsic::arm64_neon_ld1x4:
   case Intrinsic::arm64_neon_ld2lane:
   case Intrinsic::arm64_neon_ld3lane:
   case Intrinsic::arm64_neon_ld4lane:
@@ -5648,6 +5731,9 @@ bool ARM64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
   case Intrinsic::arm64_neon_st2:
   case Intrinsic::arm64_neon_st3:
   case Intrinsic::arm64_neon_st4:
+  case Intrinsic::arm64_neon_st1x2:
+  case Intrinsic::arm64_neon_st1x3:
+  case Intrinsic::arm64_neon_st1x4:
   case Intrinsic::arm64_neon_st2lane:
   case Intrinsic::arm64_neon_st3lane:
   case Intrinsic::arm64_neon_st4lane: {
@@ -6982,6 +7068,138 @@ static SDValue performSTORECombine(SDNode *N,
                       S->getAlignment());
 }
 
+/// Target-specific DAG combine function for NEON load/store intrinsics
+/// to merge base address updates.
+static SDValue performNEONPostLDSTCombine(SDNode *N,
+                                          TargetLowering::DAGCombinerInfo &DCI,
+                                          SelectionDAG &DAG) {
+  if (DCI.isBeforeLegalize() || DCI.isCalledByLegalizer())
+    return SDValue();
+
+  unsigned AddrOpIdx = N->getNumOperands() - 1;
+  SDValue Addr = N->getOperand(AddrOpIdx);
+
+  // Search for a use of the address operand that is an increment.
+  for (SDNode::use_iterator UI = Addr.getNode()->use_begin(),
+       UE = Addr.getNode()->use_end(); UI != UE; ++UI) {
+    SDNode *User = *UI;
+    if (User->getOpcode() != ISD::ADD ||
+        UI.getUse().getResNo() != Addr.getResNo())
+      continue;
+
+    // Check that the add is independent of the load/store.  Otherwise, folding
+    // it would create a cycle.
+    if (User->isPredecessorOf(N) || N->isPredecessorOf(User))
+      continue;
+
+    // Find the new opcode for the updating load/store.
+    bool IsStore = false;
+    bool IsLaneOp = false;
+    bool IsDupOp = false;
+    unsigned NewOpc = 0;
+    unsigned NumVecs = 0;
+    unsigned IntNo = cast<ConstantSDNode>(N->getOperand(1))->getZExtValue();
+    switch (IntNo) {
+    default: llvm_unreachable("unexpected intrinsic for Neon base update");
+    case Intrinsic::arm64_neon_ld2:       NewOpc = ARM64ISD::LD2post;
+      NumVecs = 2; break;
+    case Intrinsic::arm64_neon_ld3:       NewOpc = ARM64ISD::LD3post;
+      NumVecs = 3; break;
+    case Intrinsic::arm64_neon_ld4:       NewOpc = ARM64ISD::LD4post;
+      NumVecs = 4; break;
+    case Intrinsic::arm64_neon_st2:       NewOpc = ARM64ISD::ST2post;
+      NumVecs = 2; IsStore = true; break;
+    case Intrinsic::arm64_neon_st3:       NewOpc = ARM64ISD::ST3post;
+      NumVecs = 3; IsStore = true; break;
+    case Intrinsic::arm64_neon_st4:       NewOpc = ARM64ISD::ST4post;
+      NumVecs = 4; IsStore = true; break;
+    case Intrinsic::arm64_neon_ld1x2:     NewOpc = ARM64ISD::LD1x2post;
+      NumVecs = 2; break;
+    case Intrinsic::arm64_neon_ld1x3:     NewOpc = ARM64ISD::LD1x3post;
+      NumVecs = 3; break;
+    case Intrinsic::arm64_neon_ld1x4:     NewOpc = ARM64ISD::LD1x4post;
+      NumVecs = 4; break;
+    case Intrinsic::arm64_neon_st1x2:     NewOpc = ARM64ISD::ST1x2post;
+      NumVecs = 2; IsStore = true; break;
+    case Intrinsic::arm64_neon_st1x3:     NewOpc = ARM64ISD::ST1x3post;
+      NumVecs = 3; IsStore = true; break;
+    case Intrinsic::arm64_neon_st1x4:     NewOpc = ARM64ISD::ST1x4post;
+      NumVecs = 4; IsStore = true; break;
+    case Intrinsic::arm64_neon_ld2r:      NewOpc = ARM64ISD::LD2DUPpost;
+      NumVecs = 2; IsDupOp = true; break;
+    case Intrinsic::arm64_neon_ld3r:      NewOpc = ARM64ISD::LD3DUPpost;
+      NumVecs = 3; IsDupOp = true; break;
+    case Intrinsic::arm64_neon_ld4r:      NewOpc = ARM64ISD::LD4DUPpost;
+      NumVecs = 4; IsDupOp = true; break;
+    case Intrinsic::arm64_neon_ld2lane:   NewOpc = ARM64ISD::LD2LANEpost;
+      NumVecs = 2; IsLaneOp = true; break;
+    case Intrinsic::arm64_neon_ld3lane:   NewOpc = ARM64ISD::LD3LANEpost;
+      NumVecs = 3; IsLaneOp = true; break;
+    case Intrinsic::arm64_neon_ld4lane:   NewOpc = ARM64ISD::LD4LANEpost;
+      NumVecs = 4; IsLaneOp = true; break;
+    case Intrinsic::arm64_neon_st2lane:   NewOpc = ARM64ISD::ST2LANEpost;
+      NumVecs = 2; IsStore = true; IsLaneOp = true; break;
+    case Intrinsic::arm64_neon_st3lane:   NewOpc = ARM64ISD::ST3LANEpost;
+      NumVecs = 3; IsStore = true; IsLaneOp = true; break;
+    case Intrinsic::arm64_neon_st4lane:   NewOpc = ARM64ISD::ST4LANEpost;
+      NumVecs = 4; IsStore = true; IsLaneOp = true; break;
+    }
+
+    EVT VecTy;
+    if (IsStore)
+      VecTy = N->getOperand(2).getValueType();
+    else
+      VecTy = N->getValueType(0);
+
+    // If the increment is a constant, it must match the memory ref size.
+    SDValue Inc = User->getOperand(User->getOperand(0) == Addr ? 1 : 0);
+    if (ConstantSDNode *CInc = dyn_cast<ConstantSDNode>(Inc.getNode())) {
+      uint32_t IncVal = CInc->getZExtValue();
+      unsigned NumBytes = NumVecs * VecTy.getSizeInBits() / 8;
+      if (IsLaneOp || IsDupOp)
+        NumBytes /= VecTy.getVectorNumElements();
+      if (IncVal != NumBytes)
+        continue;
+      Inc = DAG.getRegister(ARM64::XZR, MVT::i64);
+    }
+    SmallVector<SDValue, 8> Ops;
+    Ops.push_back(N->getOperand(0)); // Incoming chain
+    // Load lane and store have vector list as input.
+    if (IsLaneOp || IsStore)
+      for (unsigned i = 2; i < AddrOpIdx; ++i)
+        Ops.push_back(N->getOperand(i));
+    Ops.push_back(N->getOperand(AddrOpIdx)); // Base register
+    Ops.push_back(Inc);
+
+    // Return Types.
+    EVT Tys[6];
+    unsigned NumResultVecs = (IsStore ? 0 : NumVecs);
+    unsigned n;
+    for (n = 0; n < NumResultVecs; ++n)
+      Tys[n] = VecTy;
+    Tys[n++] = MVT::i64;  // Type of write back register
+    Tys[n] = MVT::Other;  // Type of the chain
+    SDVTList SDTys = DAG.getVTList(ArrayRef<EVT>(Tys, NumResultVecs + 2));
+
+    MemIntrinsicSDNode *MemInt = cast<MemIntrinsicSDNode>(N);
+    SDValue UpdN = DAG.getMemIntrinsicNode(NewOpc, SDLoc(N), SDTys, Ops,
+                                           MemInt->getMemoryVT(),
+                                           MemInt->getMemOperand());
+
+    // Update the uses.
+    std::vector<SDValue> NewResults;
+    for (unsigned i = 0; i < NumResultVecs; ++i) {
+      NewResults.push_back(SDValue(UpdN.getNode(), i));
+    }
+    NewResults.push_back(SDValue(UpdN.getNode(), NumResultVecs + 1));
+    DCI.CombineTo(N, NewResults);
+    DCI.CombineTo(User, SDValue(UpdN.getNode(), NumResultVecs));
+
+    break;
+  }
+  return SDValue();
+}
+
 // Optimize compare with zero and branch.
 static SDValue performBRCONDCombine(SDNode *N,
                                     TargetLowering::DAGCombinerInfo &DCI,
@@ -7066,6 +7284,44 @@ static SDValue performVSelectCombine(SDNode *N, SelectionDAG &DAG) {
                      IfTrue, IfFalse);
 }
 
+/// A vector select: "(select vL, vR, (setcc LHS, RHS))" is best performed with
+/// the compare-mask instructions rather than going via NZCV, even if LHS and
+/// RHS are really scalar. This replaces any scalar setcc in the above pattern
+/// with a vector one followed by a DUP shuffle on the result.
+static SDValue performSelectCombine(SDNode *N, SelectionDAG &DAG) {
+  SDValue N0 = N->getOperand(0);
+  EVT ResVT = N->getValueType(0);
+
+  if (!N->getOperand(1).getValueType().isVector())
+    return SDValue();
+
+  if (N0.getOpcode() != ISD::SETCC || N0.getValueType() != MVT::i1)
+    return SDValue();
+
+  SDLoc DL(N0);
+
+  EVT SrcVT = N0.getOperand(0).getValueType();
+  SrcVT = EVT::getVectorVT(*DAG.getContext(), SrcVT,
+                           ResVT.getSizeInBits() / SrcVT.getSizeInBits());
+  EVT CCVT = SrcVT.changeVectorElementTypeToInteger();
+
+  // First perform a vector comparison, where lane 0 is the one we're interested
+  // in.
+  SDValue LHS =
+      DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, SrcVT, N0.getOperand(0));
+  SDValue RHS =
+      DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, SrcVT, N0.getOperand(1));
+  SDValue SetCC = DAG.getNode(ISD::SETCC, DL, CCVT, LHS, RHS, N0.getOperand(2));
+
+  // Now duplicate the comparison mask we want across all other lanes.
+  SmallVector<int, 8> DUPMask(CCVT.getVectorNumElements(), 0);
+  SDValue Mask = DAG.getVectorShuffle(CCVT, DL, SetCC, SetCC, DUPMask.data());
+  Mask = DAG.getNode(ISD::BITCAST, DL, ResVT.changeVectorElementTypeToInteger(),
+                     Mask);
+
+  return DAG.getSelect(DL, ResVT, Mask, N->getOperand(1), N->getOperand(2));
+}
+
 SDValue ARM64TargetLowering::PerformDAGCombine(SDNode *N,
                                                DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -7094,12 +7350,42 @@ SDValue ARM64TargetLowering::PerformDAGCombine(SDNode *N,
     return performBitcastCombine(N, DCI, DAG);
   case ISD::CONCAT_VECTORS:
     return performConcatVectorsCombine(N, DCI, DAG);
+  case ISD::SELECT:
+    return performSelectCombine(N, DAG);
   case ISD::VSELECT:
     return performVSelectCombine(N, DCI.DAG);
   case ISD::STORE:
     return performSTORECombine(N, DCI, DAG, Subtarget);
   case ARM64ISD::BRCOND:
     return performBRCONDCombine(N, DCI, DAG);
+  case ISD::INTRINSIC_VOID:
+  case ISD::INTRINSIC_W_CHAIN:
+    switch (cast<ConstantSDNode>(N->getOperand(1))->getZExtValue()) {
+    case Intrinsic::arm64_neon_ld2:
+    case Intrinsic::arm64_neon_ld3:
+    case Intrinsic::arm64_neon_ld4:
+    case Intrinsic::arm64_neon_ld1x2:
+    case Intrinsic::arm64_neon_ld1x3:
+    case Intrinsic::arm64_neon_ld1x4:
+    case Intrinsic::arm64_neon_ld2lane:
+    case Intrinsic::arm64_neon_ld3lane:
+    case Intrinsic::arm64_neon_ld4lane:
+    case Intrinsic::arm64_neon_ld2r:
+    case Intrinsic::arm64_neon_ld3r:
+    case Intrinsic::arm64_neon_ld4r:
+    case Intrinsic::arm64_neon_st2:
+    case Intrinsic::arm64_neon_st3:
+    case Intrinsic::arm64_neon_st4:
+    case Intrinsic::arm64_neon_st1x2:
+    case Intrinsic::arm64_neon_st1x3:
+    case Intrinsic::arm64_neon_st1x4:
+    case Intrinsic::arm64_neon_st2lane:
+    case Intrinsic::arm64_neon_st3lane:
+    case Intrinsic::arm64_neon_st4lane:
+      return performNEONPostLDSTCombine(N, DCI, DAG);
+    default:
+      break;
+    }
   }
   return SDValue();
 }

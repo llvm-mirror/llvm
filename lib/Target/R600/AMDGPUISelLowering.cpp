@@ -130,6 +130,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::STORE, MVT::f64, Promote);
   AddPromotedToType(ISD::STORE, MVT::f64, MVT::i64);
 
+  setOperationAction(ISD::STORE, MVT::v2f64, Promote);
+  AddPromotedToType(ISD::STORE, MVT::v2f64, MVT::v2i64);
+
   // Custom lowering of vector stores is required for local address space
   // stores.
   setOperationAction(ISD::STORE, MVT::v4i32, Custom);
@@ -170,6 +173,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::LOAD, MVT::f64, Promote);
   AddPromotedToType(ISD::LOAD, MVT::f64, MVT::i64);
 
+  setOperationAction(ISD::LOAD, MVT::v2f64, Promote);
+  AddPromotedToType(ISD::LOAD, MVT::v2f64, MVT::v2i64);
+
   setOperationAction(ISD::CONCAT_VECTORS, MVT::v4i32, Custom);
   setOperationAction(ISD::CONCAT_VECTORS, MVT::v4f32, Custom);
   setOperationAction(ISD::CONCAT_VECTORS, MVT::v8i32, Custom);
@@ -195,6 +201,8 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setLoadExtAction(ISD::ZEXTLOAD, MVT::v4i16, Expand);
 
   setOperationAction(ISD::BR_CC, MVT::i1, Expand);
+
+  setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
 
   setOperationAction(ISD::FNEG, MVT::v2f32, Expand);
   setOperationAction(ISD::FNEG, MVT::v4f32, Expand);
@@ -261,6 +269,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   }
 
   setTargetDAGCombine(ISD::MUL);
+  setTargetDAGCombine(ISD::SELECT_CC);
 }
 
 //===----------------------------------------------------------------------===//
@@ -742,16 +751,16 @@ SDValue AMDGPUTargetLowering::LowerIntrinsicLRP(SDValue Op,
 }
 
 /// \brief Generate Min/Max node
-SDValue AMDGPUTargetLowering::LowerMinMax(SDValue Op,
+SDValue AMDGPUTargetLowering::CombineMinMax(SDNode *N,
     SelectionDAG &DAG) const {
-  SDLoc DL(Op);
-  EVT VT = Op.getValueType();
+  SDLoc DL(N);
+  EVT VT = N->getValueType(0);
 
-  SDValue LHS = Op.getOperand(0);
-  SDValue RHS = Op.getOperand(1);
-  SDValue True = Op.getOperand(2);
-  SDValue False = Op.getOperand(3);
-  SDValue CC = Op.getOperand(4);
+  SDValue LHS = N->getOperand(0);
+  SDValue RHS = N->getOperand(1);
+  SDValue True = N->getOperand(2);
+  SDValue False = N->getOperand(3);
+  SDValue CC = N->getOperand(4);
 
   if (VT != MVT::f32 ||
       !((LHS == True && RHS == False) || (LHS == False && RHS == True))) {
@@ -798,7 +807,7 @@ SDValue AMDGPUTargetLowering::LowerMinMax(SDValue Op,
   case ISD::SETCC_INVALID:
     llvm_unreachable("Invalid setcc condcode!");
   }
-  return Op;
+  return SDValue();
 }
 
 SDValue AMDGPUTargetLowering::SplitVectorLoad(const SDValue &Op,
@@ -1276,6 +1285,9 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
       simplifyI24(N0, DCI);
       simplifyI24(N1, DCI);
       return SDValue();
+    }
+    case ISD::SELECT_CC: {
+      return CombineMinMax(N, DAG);
     }
   }
   return SDValue();

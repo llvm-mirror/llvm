@@ -156,10 +156,11 @@ LexicalScope *LexicalScopes::getOrCreateRegularScope(MDNode *Scope) {
   LexicalScope *Parent = nullptr;
   if (D.isLexicalBlock())
     Parent = getOrCreateLexicalScope(DebugLoc::getFromDILexicalBlock(Scope));
-  I = LexicalScopeMap.emplace(std::piecewise_construct,
-                              std::forward_as_tuple(Scope),
-                              std::forward_as_tuple(Parent, DIDescriptor(Scope),
-                                                    nullptr, false)).first;
+  // FIXME: Use forward_as_tuple instead of make_tuple, once MSVC2012
+  // compatibility is no longer required.
+  I = LexicalScopeMap.emplace(std::piecewise_construct, std::make_tuple(Scope),
+                              std::make_tuple(Parent, DIDescriptor(Scope),
+                                              nullptr, false)).first;
 
   if (!Parent && DIDescriptor(Scope).isSubprogram() &&
       DISubprogram(Scope).describes(MF->getFunction()))
@@ -176,11 +177,13 @@ LexicalScope *LexicalScopes::getOrCreateInlinedScope(MDNode *Scope,
     return &I->second;
 
   DebugLoc InlinedLoc = DebugLoc::getFromDILocation(InlinedAt);
-  I = LexicalScopeMap.emplace(std::piecewise_construct,
-                              std::forward_as_tuple(InlinedAt),
-                              std::forward_as_tuple(
-                                  getOrCreateLexicalScope(InlinedLoc),
-                                  DIDescriptor(Scope), InlinedAt, false)).first;
+  // FIXME: Use forward_as_tuple instead of make_tuple, once MSVC2012
+  // compatibility is no longer required.
+  I = LexicalScopeMap.emplace(
+                          std::piecewise_construct, std::make_tuple(InlinedAt),
+                          std::make_tuple(getOrCreateLexicalScope(InlinedLoc),
+                                          DIDescriptor(Scope), InlinedAt,
+                                          false)).first;
   InlinedLexicalScopeMap[InlinedLoc] = &I->second;
   return &I->second;
 }

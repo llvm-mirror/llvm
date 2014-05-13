@@ -1250,10 +1250,16 @@ bool ARM64FastISel::ProcessCallArgs(SmallVectorImpl<Value *> &Args,
       assert(VA.isMemLoc() && "Assuming store on stack.");
 
       // Need to store on the stack.
+      unsigned ArgSize = VA.getLocVT().getSizeInBits() / 8;
+
+      unsigned BEAlign = 0;
+      if (ArgSize < 8 && !Subtarget->isLittleEndian())
+        BEAlign = 8 - ArgSize;
+
       Address Addr;
       Addr.setKind(Address::RegBase);
       Addr.setReg(ARM64::SP);
-      Addr.setOffset(VA.getLocMemOffset());
+      Addr.setOffset(VA.getLocMemOffset() + BEAlign);
 
       if (!EmitStore(ArgVT, Arg, Addr))
         return false;
@@ -1593,6 +1599,11 @@ bool ARM64FastISel::SelectRet(const Instruction *I) {
     EVT RVEVT = TLI.getValueType(RV->getType());
     if (!RVEVT.isSimple())
       return false;
+
+    // Vectors (of > 1 lane) in big endian need tricky handling.
+    if (RVEVT.isVector() && RVEVT.getVectorNumElements() > 1)
+      return false;
+
     MVT RVVT = RVEVT.getSimpleVT();
     if (RVVT == MVT::f128)
       return false;
@@ -1844,14 +1855,15 @@ bool ARM64FastISel::SelectRem(const Instruction *I, unsigned ISDOpcode) {
   if (!Src1Reg)
     return false;
 
-  unsigned ResultReg = createResultReg(TLI.getRegClassFor(DestVT));
-  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(DivOpc), ResultReg)
+  unsigned QuotReg = createResultReg(TLI.getRegClassFor(DestVT));
+  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(DivOpc), QuotReg)
       .addReg(Src0Reg)
       .addReg(Src1Reg);
   // The remainder is computed as numerator - (quotient * denominator) using the
   // MSUB instruction.
+  unsigned ResultReg = createResultReg(TLI.getRegClassFor(DestVT));
   BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(MSubOpc), ResultReg)
-      .addReg(ResultReg)
+      .addReg(QuotReg)
       .addReg(Src1Reg)
       .addReg(Src0Reg);
   UpdateValueMap(I, ResultReg);

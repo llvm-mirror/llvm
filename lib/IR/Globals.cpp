@@ -53,21 +53,42 @@ void GlobalValue::destroyConstant() {
 /// copyAttributesFrom - copy all additional attributes (those not needed to
 /// create a GlobalValue) from the GlobalValue Src to this one.
 void GlobalValue::copyAttributesFrom(const GlobalValue *Src) {
-  setAlignment(Src->getAlignment());
-  setSection(Src->getSection());
+  if (!isa<GlobalAlias>(this)) {
+    setAlignment(Src->getAlignment());
+    setSection(Src->getSection());
+  }
+
   setVisibility(Src->getVisibility());
   setUnnamedAddr(Src->hasUnnamedAddr());
   setDLLStorageClass(Src->getDLLStorageClass());
 }
 
+unsigned GlobalValue::getAlignment() const {
+  if (auto *GA = dyn_cast<GlobalAlias>(this))
+    return GA->getAliasedGlobal()->getAlignment();
+
+  return (1u << Alignment) >> 1;
+}
+
 void GlobalValue::setAlignment(unsigned Align) {
-  assert((!isa<GlobalAlias>(this) || !Align) &&
+  assert((!isa<GlobalAlias>(this)) &&
          "GlobalAlias should not have an alignment!");
   assert((Align & (Align-1)) == 0 && "Alignment is not a power of 2!");
   assert(Align <= MaximumAlignment &&
          "Alignment is greater than MaximumAlignment!");
   Alignment = Log2_32(Align) + 1;
   assert(getAlignment() == Align && "Alignment representation error!");
+}
+
+const std::string &GlobalValue::getSection() const {
+  if (auto *GA = dyn_cast<GlobalAlias>(this))
+    return GA->getAliasedGlobal()->getSection();
+  return Section;
+}
+
+void GlobalValue::setSection(StringRef S) {
+  assert(!isa<GlobalAlias>(this) && "GlobalAlias should not have a section!");
+  Section = S;
 }
 
 bool GlobalValue::isDeclaration() const {
@@ -83,22 +104,20 @@ bool GlobalValue::isDeclaration() const {
   assert(isa<GlobalAlias>(this));
   return false;
 }
-  
+
 //===----------------------------------------------------------------------===//
 // GlobalVariable Implementation
 //===----------------------------------------------------------------------===//
 
 GlobalVariable::GlobalVariable(Type *Ty, bool constant, LinkageTypes Link,
-                               Constant *InitVal,
-                               const Twine &Name, ThreadLocalMode TLMode,
-                               unsigned AddressSpace,
+                               Constant *InitVal, const Twine &Name,
+                               ThreadLocalMode TLMode, unsigned AddressSpace,
                                bool isExternallyInitialized)
-  : GlobalValue(PointerType::get(Ty, AddressSpace),
-                Value::GlobalVariableVal,
-                OperandTraits<GlobalVariable>::op_begin(this),
-                InitVal != nullptr, Link, Name),
-    isConstantGlobal(constant), threadLocalMode(TLMode),
-    isExternallyInitializedConstant(isExternallyInitialized) {
+    : GlobalValue(PointerType::get(Ty, AddressSpace), Value::GlobalVariableVal,
+                  OperandTraits<GlobalVariable>::op_begin(this),
+                  InitVal != nullptr, Link, Name),
+      isConstantGlobal(constant), threadLocalMode(TLMode),
+      isExternallyInitializedConstant(isExternallyInitialized) {
   if (InitVal) {
     assert(InitVal->getType() == Ty &&
            "Initializer should be the same type as the GlobalVariable!");
@@ -110,24 +129,22 @@ GlobalVariable::GlobalVariable(Type *Ty, bool constant, LinkageTypes Link,
 
 GlobalVariable::GlobalVariable(Module &M, Type *Ty, bool constant,
                                LinkageTypes Link, Constant *InitVal,
-                               const Twine &Name,
-                               GlobalVariable *Before, ThreadLocalMode TLMode,
-                               unsigned AddressSpace,
+                               const Twine &Name, GlobalVariable *Before,
+                               ThreadLocalMode TLMode, unsigned AddressSpace,
                                bool isExternallyInitialized)
-  : GlobalValue(PointerType::get(Ty, AddressSpace),
-                Value::GlobalVariableVal,
-                OperandTraits<GlobalVariable>::op_begin(this),
-                InitVal != nullptr, Link, Name),
-    isConstantGlobal(constant), threadLocalMode(TLMode),
-    isExternallyInitializedConstant(isExternallyInitialized) {
+    : GlobalValue(PointerType::get(Ty, AddressSpace), Value::GlobalVariableVal,
+                  OperandTraits<GlobalVariable>::op_begin(this),
+                  InitVal != nullptr, Link, Name),
+      isConstantGlobal(constant), threadLocalMode(TLMode),
+      isExternallyInitializedConstant(isExternallyInitialized) {
   if (InitVal) {
     assert(InitVal->getType() == Ty &&
            "Initializer should be the same type as the GlobalVariable!");
     Op<0>() = InitVal;
   }
-  
+
   LeakDetector::addGarbageObject(this);
-  
+
   if (Before)
     Before->getParent()->getGlobalList().insert(Before, this);
   else
@@ -232,7 +249,7 @@ void GlobalAlias::eraseFromParent() {
 void GlobalAlias::setAliasee(Constant *Aliasee) {
   assert((!Aliasee || Aliasee->getType() == getType()) &&
          "Alias and aliasee types should match!");
-  
+
   setOperand(0, Aliasee);
 }
 
