@@ -156,6 +156,12 @@ static cl::opt<std::string>
 MainFileName("main-file-name",
              cl::desc("Specifies the name we should consider the input file"));
 
+static cl::opt<bool> SaveTempLabels("save-temp-labels",
+                                    cl::desc("Don't discard temporary labels"));
+
+static cl::opt<bool> NoExecStack("no-exec-stack",
+                                 cl::desc("File doesn't need an exec stack"));
+
 enum ActionType {
   AC_AsLex,
   AC_Assemble,

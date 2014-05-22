@@ -16,6 +16,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Host.h"
@@ -34,6 +35,13 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "X86GenSubtargetInfo.inc"
+
+// Temporary option to control early if-conversion for x86 while adding machine
+// models.
+static cl::opt<bool>
+X86EarlyIfConv("x86-early-ifcvt", cl::Hidden,
+               cl::desc("Enable early if-conversion on X86"));
+
 
 /// ClassifyBlockAddressReference - Classify a blockaddress reference for the
 /// current subtarget according to how we should reference it in a non-pcrel
@@ -309,4 +317,9 @@ X86Subtarget::enablePostRAScheduler(CodeGenOpt::Level OptLevel,
   Mode = TargetSubtargetInfo::ANTIDEP_CRITICAL;
   CriticalPathRCs.clear();
   return PostRAScheduler && OptLevel >= CodeGenOpt::Default;
+}
+
+bool
+X86Subtarget::enableEarlyIfConversion() const {
+  return hasCMov() && X86EarlyIfConv;
 }

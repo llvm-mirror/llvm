@@ -514,6 +514,16 @@ void AMDGPUTargetLowering::ReplaceNodeResults(SDNode *N,
   }
 }
 
+// FIXME: This implements accesses to initialized globals in the constant
+// address space by copying them to private and accessing that. It does not
+// properly handle illegal types or vectors. The private vector loads are not
+// scalarized, and the illegal scalars hit an assertion. This technique will not
+// work well with large initializers, and this should eventually be
+// removed. Initialized globals should be placed into a data section that the
+// runtime will load into a buffer before the kernel is executed. Uses of the
+// global need to be replaced with a pointer loaded from an implicit kernel
+// argument into this buffer holding the copy of the data, which will remove the
+// need for any of this.
 SDValue AMDGPUTargetLowering::LowerConstantInitializer(const Constant* Init,
                                                        const GlobalValue *GV,
                                                        const SDValue &InitPtr,
@@ -537,16 +547,43 @@ SDValue AMDGPUTargetLowering::LowerConstantInitializer(const Constant* Init,
                  TD->getPrefTypeAlignment(CFP->getType()));
   }
 
-  if (Init->getType()->isAggregateType()) {
+  Type *InitTy = Init->getType();
+  if (StructType *ST = dyn_cast<StructType>(InitTy)) {
+    const StructLayout *SL = TD->getStructLayout(ST);
+
     EVT PtrVT = InitPtr.getValueType();
-    unsigned NumElements = Init->getType()->getArrayNumElements();
+    SmallVector<SDValue, 8> Chains;
+
+    for (unsigned I = 0, N = ST->getNumElements(); I != N; ++I) {
+      SDValue Offset = DAG.getConstant(SL->getElementOffset(I), PtrVT);
+      SDValue Ptr = DAG.getNode(ISD::ADD, DL, PtrVT, InitPtr, Offset);
+
+      Constant *Elt = Init->getAggregateElement(I);
+      Chains.push_back(LowerConstantInitializer(Elt, GV, Ptr, Chain, DAG));
+    }
+
+    return DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Chains);
+  }
+
+  if (SequentialType *SeqTy = dyn_cast<SequentialType>(InitTy)) {
+    EVT PtrVT = InitPtr.getValueType();
+
+    unsigned NumElements;
+    if (ArrayType *AT = dyn_cast<ArrayType>(SeqTy))
+      NumElements = AT->getNumElements();
+    else if (VectorType *VT = dyn_cast<VectorType>(SeqTy))
+      NumElements = VT->getNumElements();
+    else
+      llvm_unreachable("Unexpected type");
+
+    unsigned EltSize = TD->getTypeAllocSize(SeqTy->getElementType());
     SmallVector<SDValue, 8> Chains;
     for (unsigned i = 0; i < NumElements; ++i) {
-      SDValue Offset = DAG.getConstant(i * TD->getTypeAllocSize(
-          Init->getType()->getArrayElementType()), PtrVT);
+      SDValue Offset = DAG.getConstant(i * EltSize, PtrVT);
       SDValue Ptr = DAG.getNode(ISD::ADD, DL, PtrVT, InitPtr, Offset);
-      Chains.push_back(LowerConstantInitializer(Init->getAggregateElement(i),
-                       GV, Ptr, Chain, DAG));
+
+      Constant *Elt = Init->getAggregateElement(i);
+      Chains.push_back(LowerConstantInitializer(Elt, GV, Ptr, Chain, DAG));
     }
 
     return DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Chains);
@@ -591,7 +628,7 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
     unsigned Size = TD->getTypeAllocSize(EltType);
     unsigned Alignment = TD->getPrefTypeAlignment(EltType);
 
-    const GlobalVariable *Var = dyn_cast<GlobalVariable>(GV);
+    const GlobalVariable *Var = cast<GlobalVariable>(GV);
     const Constant *Init = Var->getInitializer();
     int FI = FrameInfo->CreateStackObject(Size, Alignment, false);
     SDValue InitPtr = DAG.getFrameIndex(FI,
