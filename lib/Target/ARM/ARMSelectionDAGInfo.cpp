@@ -53,9 +53,10 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
   EVT VT = MVT::i32;
   unsigned VTSize = 4;
   unsigned i = 0;
-  const unsigned MAX_LOADS_IN_LDM = 6;
-  SDValue TFOps[MAX_LOADS_IN_LDM];
-  SDValue Loads[MAX_LOADS_IN_LDM];
+  // Emit a maximum of 4 loads in Thumb1 since we have fewer registers
+  const unsigned MAX_LOADS_IN_LDM = Subtarget->isThumb1Only() ? 4 : 6;
+  SDValue TFOps[6];
+  SDValue Loads[6];
   uint64_t SrcOff = 0, DstOff = 0;
 
   // Emit up to MAX_LOADS_IN_LDM loads, then a TokenFactor barrier, then the
@@ -185,22 +186,14 @@ EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc dl,
   Args.push_back(Entry);
 
   // Emit __eabi_memset call
-  TargetLowering::CallLoweringInfo CLI(Chain,
-                    Type::getVoidTy(*DAG.getContext()), // return type
-                    false, // return sign ext
-                    false, // return zero ext
-                    false, // is var arg
-                    false, // is in regs
-                    0,     // number of fixed arguments
-                    TLI.getLibcallCallingConv(RTLIB::MEMSET), // call conv
-                    false, // is tail call
-                    false, // does not return
-                    false, // is return val used
-                    DAG.getExternalSymbol(TLI.getLibcallName(RTLIB::MEMSET),
-                                          TLI.getPointerTy()), // callee
-                    Args, DAG, dl);
-  std::pair<SDValue,SDValue> CallResult =
-    TLI.LowerCallTo(CLI);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(Chain)
+    .setCallee(TLI.getLibcallCallingConv(RTLIB::MEMSET),
+               Type::getVoidTy(*DAG.getContext()),
+               DAG.getExternalSymbol(TLI.getLibcallName(RTLIB::MEMSET),
+                                     TLI.getPointerTy()), &Args, 0)
+    .setDiscardResult();
 
+  std::pair<SDValue,SDValue> CallResult = TLI.LowerCallTo(CLI);
   return CallResult.second;
 }

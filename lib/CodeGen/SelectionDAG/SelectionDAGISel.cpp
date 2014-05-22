@@ -621,7 +621,7 @@ void SelectionDAGISel::ComputeLiveOutVRegInfo() {
       continue;
 
     unsigned NumSignBits = CurDAG->ComputeNumSignBits(Src);
-    CurDAG->ComputeMaskedBits(Src, KnownZero, KnownOne);
+    CurDAG->computeKnownBits(Src, KnownZero, KnownOne);
     FuncInfo->AddLiveOutRegInfo(DestReg, NumSignBits, KnownZero, KnownOne);
   } while (!Worklist.empty());
 }
@@ -1604,7 +1604,7 @@ bool SelectionDAGISel::CheckOrMask(SDValue LHS, ConstantSDNode *RHS,
   APInt NeededMask = DesiredMask & ~ActualMask;
 
   APInt KnownZero, KnownOne;
-  CurDAG->ComputeMaskedBits(LHS, KnownZero, KnownOne);
+  CurDAG->computeKnownBits(LHS, KnownZero, KnownOne);
 
   // If all the missing bits in the or are already known to be set, match!
   if ((NeededMask & KnownOne) == NeededMask)
@@ -1813,7 +1813,7 @@ SDNode
   MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(0));
   const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
   unsigned Reg = getTargetLowering()->getRegisterByName(
-                 RegStr->getString().data());
+                 RegStr->getString().data(), Op->getValueType(0));
   SDValue New = CurDAG->getCopyFromReg(
                         CurDAG->getEntryNode(), dl, Reg, Op->getValueType(0));
   New->setNodeId(-1);
@@ -1826,7 +1826,7 @@ SDNode
   MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(1));
   const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
   unsigned Reg = getTargetLowering()->getRegisterByName(
-                 RegStr->getString().data());
+                 RegStr->getString().data(), Op->getOperand(2).getValueType());
   SDValue New = CurDAG->getCopyToReg(
                         CurDAG->getEntryNode(), dl, Reg, Op->getOperand(2));
   New->setNodeId(-1);

@@ -352,20 +352,21 @@ MipsTargetLowering::MipsTargetLowering(MipsTargetMachine &TM)
 
   setInsertFencesForAtomic(true);
 
-  if (!Subtarget->hasSEInReg()) {
+  if (!Subtarget->hasMips32r2()) {
     setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8,  Expand);
     setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
   }
 
-  if (!Subtarget->hasBitCount()) {
+  // MIPS16 lacks MIPS32's clz and clo instructions.
+  if (!Subtarget->hasMips32() || Subtarget->inMips16Mode())
     setOperationAction(ISD::CTLZ, MVT::i32, Expand);
+  if (!Subtarget->hasMips64())
     setOperationAction(ISD::CTLZ, MVT::i64, Expand);
-  }
 
-  if (!Subtarget->hasSwap()) {
+  if (!Subtarget->hasMips32r2())
     setOperationAction(ISD::BSWAP, MVT::i32, Expand);
+  if (!Subtarget->hasMips64r2())
     setOperationAction(ISD::BSWAP, MVT::i64, Expand);
-  }
 
   if (isGP64bit()) {
     setLoadExtAction(ISD::SEXTLOAD, MVT::i32, Custom);
@@ -1576,11 +1577,9 @@ lowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const
     Entry.Ty = PtrTy;
     Args.push_back(Entry);
 
-    TargetLowering::CallLoweringInfo CLI(DAG.getEntryNode(), PtrTy,
-                  false, false, false, false, 0, CallingConv::C,
-                  /*IsTailCall=*/false, /*doesNotRet=*/false,
-                  /*isReturnValueUsed=*/true,
-                  TlsGetAddr, Args, DAG, DL);
+    TargetLowering::CallLoweringInfo CLI(DAG);
+    CLI.setDebugLoc(DL).setChain(DAG.getEntryNode())
+      .setCallee(CallingConv::C, PtrTy, TlsGetAddr, &Args, 0);
     std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
 
     SDValue Ret = CallResult.first;
@@ -2328,7 +2327,7 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   MipsCCInfo.analyzeCallOperands(Outs, IsVarArg,
                                  Subtarget->mipsSEUsesSoftFloat(),
-                                 Callee.getNode(), CLI.Args);
+                                 Callee.getNode(), CLI.getArgs());
 
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NextStackOffset = CCInfo.getNextStackOffset();
@@ -2661,18 +2660,21 @@ MipsTargetLowering::LowerFormalArguments(SDValue Chain,
     }
   }
 
-  // The mips ABIs for returning structs by value requires that we copy
-  // the sret argument into $v0 for the return. Save the argument into
-  // a virtual register so that we can access it from the return points.
-  if (DAG.getMachineFunction().getFunction()->hasStructRetAttr()) {
-    unsigned Reg = MipsFI->getSRetReturnReg();
-    if (!Reg) {
-      Reg = MF.getRegInfo().createVirtualRegister(
-          getRegClassFor(isN64() ? MVT::i64 : MVT::i32));
-      MipsFI->setSRetReturnReg(Reg);
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+    // The mips ABIs for returning structs by value requires that we copy
+    // the sret argument into $v0 for the return. Save the argument into
+    // a virtual register so that we can access it from the return points.
+    if (Ins[i].Flags.isSRet()) {
+      unsigned Reg = MipsFI->getSRetReturnReg();
+      if (!Reg) {
+        Reg = MF.getRegInfo().createVirtualRegister(
+            getRegClassFor(isN64() ? MVT::i64 : MVT::i32));
+        MipsFI->setSRetReturnReg(Reg);
+      }
+      SDValue Copy = DAG.getCopyToReg(DAG.getEntryNode(), DL, Reg, InVals[i]);
+      Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Copy, Chain);
+      break;
     }
-    SDValue Copy = DAG.getCopyToReg(DAG.getEntryNode(), DL, Reg, InVals[0]);
-    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Copy, Chain);
   }
 
   if (IsVarArg)

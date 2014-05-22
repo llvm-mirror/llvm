@@ -193,10 +193,10 @@ struct ClassInfo {
   /// parsing on the operand.
   std::string ParserMethod;
 
-  /// For register classes, the records for all the registers in this class.
+  /// For register classes: the records for all the registers in this class.
   RegisterSet Registers;
 
-  /// For custom match classes, he diagnostic kind for when the predicate fails.
+  /// For custom match classes: the diagnostic kind for when the predicate fails.
   std::string DiagnosticType;
 public:
   /// isRegisterClass() - Check if this is a register class.
@@ -1375,7 +1375,8 @@ void AsmMatcherInfo::buildInfo() {
     std::vector<Record*> AllInstAliases =
       Records.getAllDerivedDefinitions("InstAlias");
     for (unsigned i = 0, e = AllInstAliases.size(); i != e; ++i) {
-      CodeGenInstAlias *Alias = new CodeGenInstAlias(AllInstAliases[i], Target);
+      CodeGenInstAlias *Alias =
+          new CodeGenInstAlias(AllInstAliases[i], AsmVariantNo, Target);
 
       // If the tblgen -match-prefix option is specified (for tblgen hackers),
       // filter the set of instruction aliases we consider, based on the target

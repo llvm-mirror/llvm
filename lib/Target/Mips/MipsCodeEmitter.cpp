@@ -110,6 +110,12 @@ private:
   unsigned getBranchTargetOpValueMM(const MachineInstr &MI,
                                     unsigned OpNo) const;
 
+  unsigned getBranchTarget21OpValue(const MachineInstr &MI,
+                                    unsigned OpNo) const;
+  unsigned getBranchTarget26OpValue(const MachineInstr &MI,
+                                    unsigned OpNo) const;
+  unsigned getJumpOffset16OpValue(const MachineInstr &MI, unsigned OpNo) const;
+
   unsigned getBranchTargetOpValue(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncodingMMImm12(const MachineInstr &MI, unsigned OpNo) const;
@@ -117,6 +123,7 @@ private:
   unsigned getSizeExtEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getSizeInsEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getLSAImmEncoding(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getSimm19Lsl2Encoding(const MachineInstr &MI, unsigned OpNo) const;
 
   /// Expand pseudo instructions with accumulator register operands.
   void expandACCInstr(MachineBasicBlock::instr_iterator MI,
@@ -202,6 +209,24 @@ unsigned MipsCodeEmitter::getBranchTargetOpValueMM(const MachineInstr &MI,
   return 0;
 }
 
+unsigned MipsCodeEmitter::getBranchTarget21OpValue(const MachineInstr &MI,
+                                                   unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getBranchTarget26OpValue(const MachineInstr &MI,
+                                                   unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getJumpOffset16OpValue(const MachineInstr &MI,
+                                                 unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
 unsigned MipsCodeEmitter::getBranchTargetOpValue(const MachineInstr &MI,
                                                  unsigned OpNo) const {
   MachineOperand MO = MI.getOperand(OpNo);
@@ -244,6 +269,12 @@ unsigned MipsCodeEmitter::getSizeInsEncoding(const MachineInstr &MI,
 
 unsigned MipsCodeEmitter::getLSAImmEncoding(const MachineInstr &MI,
                                             unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getSimm19Lsl2Encoding(const MachineInstr &MI,
+                                                unsigned OpNo) const {
   llvm_unreachable("Unimplemented function.");
   return 0;
 }

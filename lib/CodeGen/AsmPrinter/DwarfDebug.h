@@ -253,6 +253,7 @@ class DwarfDebug : public AsmPrinterHandler {
   MCSymbol *DwarfDebugLocSectionSym, *DwarfLineSectionSym, *DwarfAddrSectionSym;
   MCSymbol *FunctionBeginSym, *FunctionEndSym;
   MCSymbol *DwarfInfoDWOSectionSym, *DwarfAbbrevDWOSectionSym;
+  MCSymbol *DwarfTypesDWOSectionSym;
   MCSymbol *DwarfStrDWOSectionSym;
   MCSymbol *DwarfGnuPubNamesSectionSym, *DwarfGnuPubTypesSectionSym;
 
@@ -384,9 +385,6 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Compute the size and offset of all the DIEs.
   void computeSizeAndOffsets();
-
-  /// \brief Attach DW_AT_inline attribute with inlined subprogram DIEs.
-  void computeInlinedDIEs();
 
   /// \brief Collect info for variables that were optimized out.
   void collectDeadVariables();
@@ -542,6 +540,8 @@ class DwarfDebug : public AsmPrinterHandler {
   /// \brief Return Label immediately following the instruction.
   MCSymbol *getLabelAfterInsn(const MachineInstr *MI);
 
+  void attachRangesOrLowHighPC(DwarfCompileUnit &Unit, DIE &D,
+                               const SmallVectorImpl<InsnRange> &Ranges);
   void attachLowHighPC(DwarfCompileUnit &Unit, DIE &D, MCSymbol *Begin,
                        MCSymbol *End);
 

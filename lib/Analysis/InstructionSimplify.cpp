@@ -2001,7 +2001,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 
     // Many binary operators with constant RHS have easy to compute constant
     // range.  Use them to check whether the comparison is a tautology.
-    uint32_t Width = CI->getBitWidth();
+    unsigned Width = CI->getBitWidth();
     APInt Lower = APInt(Width, 0);
     APInt Upper = APInt(Width, 0);
     ConstantInt *CI2;
@@ -2020,6 +2020,10 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       APInt NegOne = APInt::getAllOnesValue(Width);
       if (!CI2->isZero())
         Upper = NegOne.udiv(CI2->getValue()) + 1;
+    } else if (match(LHS, m_SDiv(m_ConstantInt(CI2), m_Value()))) {
+      // 'sdiv CI2, x' produces [-|CI2|, |CI2|].
+      Upper = CI2->getValue().abs() + 1;
+      Lower = (-Upper) + 1;
     } else if (match(LHS, m_SDiv(m_Value(), m_ConstantInt(CI2)))) {
       // 'sdiv x, CI2' produces [INT_MIN / CI2, INT_MAX / CI2].
       APInt IntMin = APInt::getSignedMinValue(Width);
@@ -2034,6 +2038,13 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       APInt NegOne = APInt::getAllOnesValue(Width);
       if (CI2->getValue().ult(Width))
         Upper = NegOne.lshr(CI2->getValue()) + 1;
+    } else if (match(LHS, m_LShr(m_ConstantInt(CI2), m_Value()))) {
+      // 'lshr CI2, x' produces [CI2 >> (Width-1), CI2].
+      unsigned ShiftAmount = Width - 1;
+      if (!CI2->isZero() && cast<BinaryOperator>(LHS)->isExact())
+        ShiftAmount = CI2->getValue().countTrailingZeros();
+      Lower = CI2->getValue().lshr(ShiftAmount);
+      Upper = CI2->getValue() + 1;
     } else if (match(LHS, m_AShr(m_Value(), m_ConstantInt(CI2)))) {
       // 'ashr x, CI2' produces [INT_MIN >> CI2, INT_MAX >> CI2].
       APInt IntMin = APInt::getSignedMinValue(Width);
@@ -2041,6 +2052,19 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       if (CI2->getValue().ult(Width)) {
         Lower = IntMin.ashr(CI2->getValue());
         Upper = IntMax.ashr(CI2->getValue()) + 1;
+      }
+    } else if (match(LHS, m_AShr(m_ConstantInt(CI2), m_Value()))) {
+      unsigned ShiftAmount = Width - 1;
+      if (!CI2->isZero() && cast<BinaryOperator>(LHS)->isExact())
+        ShiftAmount = CI2->getValue().countTrailingZeros();
+      if (CI2->isNegative()) {
+        // 'ashr CI2, x' produces [CI2, CI2 >> (Width-1)]
+        Lower = CI2->getValue();
+        Upper = CI2->getValue().ashr(ShiftAmount) + 1;
+      } else {
+        // 'ashr CI2, x' produces [CI2 >> (Width-1), CI2]
+        Lower = CI2->getValue().ashr(ShiftAmount);
+        Upper = CI2->getValue() + 1;
       }
     } else if (match(LHS, m_Or(m_Value(), m_ConstantInt(CI2)))) {
       // 'or x, CI2' produces [CI2, UINT_MAX].
@@ -2277,6 +2301,28 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       }
       if (Value *V = SimplifyICmpInst(Pred, Y, Z, Q, MaxRecurse-1))
         return V;
+    }
+  }
+
+  // 0 - (zext X) pred C
+  if (!CmpInst::isUnsigned(Pred) && match(LHS, m_Neg(m_ZExt(m_Value())))) {
+    if (ConstantInt *RHSC = dyn_cast<ConstantInt>(RHS)) {
+      if (RHSC->getValue().isStrictlyPositive()) {
+        if (Pred == ICmpInst::ICMP_SLT)
+          return ConstantInt::getTrue(RHSC->getContext());
+        if (Pred == ICmpInst::ICMP_SGE)
+          return ConstantInt::getFalse(RHSC->getContext());
+        if (Pred == ICmpInst::ICMP_EQ)
+          return ConstantInt::getFalse(RHSC->getContext());
+        if (Pred == ICmpInst::ICMP_NE)
+          return ConstantInt::getTrue(RHSC->getContext());
+      }
+      if (RHSC->getValue().isNonNegative()) {
+        if (Pred == ICmpInst::ICMP_SLE)
+          return ConstantInt::getTrue(RHSC->getContext());
+        if (Pred == ICmpInst::ICMP_SGT)
+          return ConstantInt::getFalse(RHSC->getContext());
+      }
     }
   }
 

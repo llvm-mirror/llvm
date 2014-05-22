@@ -103,12 +103,11 @@ TargetLowering::makeLibCall(SelectionDAG &DAG,
   SDValue Callee = DAG.getExternalSymbol(getLibcallName(LC), getPointerTy());
 
   Type *RetTy = RetVT.getTypeForEVT(*DAG.getContext());
-  TargetLowering::
-  CallLoweringInfo CLI(DAG.getEntryNode(), RetTy, isSigned, !isSigned, false,
-                    false, 0, getLibcallCallingConv(LC),
-                    /*isTailCall=*/false,
-                    doesNotReturn, isReturnValueUsed, Callee, Args,
-                    DAG, dl);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
+    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setNoReturn(doesNotReturn).setDiscardResult(!isReturnValueUsed)
+    .setSExtResult(isSigned).setZExtResult(!isSigned);
   return LowerCallTo(CLI);
 }
 
@@ -386,7 +385,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
     if (Depth != 0) {
       // If not at the root, Just compute the KnownZero/KnownOne bits to
       // simplify things downstream.
-      TLO.DAG.ComputeMaskedBits(Op, KnownZero, KnownOne, Depth);
+      TLO.DAG.computeKnownBits(Op, KnownZero, KnownOne, Depth);
       return false;
     }
     // If this is the root being simplified, allow it to have multiple uses,
@@ -416,7 +415,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
     if (ConstantSDNode *RHSC = dyn_cast<ConstantSDNode>(Op.getOperand(1))) {
       APInt LHSZero, LHSOne;
       // Do not increment Depth here; that can cause an infinite loop.
-      TLO.DAG.ComputeMaskedBits(Op.getOperand(0), LHSZero, LHSOne, Depth);
+      TLO.DAG.computeKnownBits(Op.getOperand(0), LHSZero, LHSOne, Depth);
       // If the LHS already has zeros where RHSC does, this and is dead.
       if ((LHSZero & NewMask) == (~RHSC->getAPIntValue() & NewMask))
         return TLO.CombineTo(Op, Op.getOperand(0));
@@ -848,6 +847,31 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
     }
     break;
   }
+  case ISD::BUILD_PAIR: {
+    EVT HalfVT = Op.getOperand(0).getValueType();
+    unsigned HalfBitWidth = HalfVT.getScalarSizeInBits();
+
+    APInt MaskLo = NewMask.getLoBits(HalfBitWidth).trunc(HalfBitWidth);
+    APInt MaskHi = NewMask.getHiBits(HalfBitWidth).trunc(HalfBitWidth);
+
+    APInt KnownZeroLo, KnownOneLo;
+    APInt KnownZeroHi, KnownOneHi;
+
+    if (SimplifyDemandedBits(Op.getOperand(0), MaskLo, KnownZeroLo,
+                             KnownOneLo, TLO, Depth + 1))
+      return true;
+
+    if (SimplifyDemandedBits(Op.getOperand(1), MaskHi, KnownZeroHi,
+                             KnownOneHi, TLO, Depth + 1))
+      return true;
+
+    KnownZero = KnownZeroLo.zext(BitWidth) |
+                KnownZeroHi.zext(BitWidth).shl(HalfBitWidth);
+
+    KnownOne = KnownOneLo.zext(BitWidth) |
+               KnownOneHi.zext(BitWidth).shl(HalfBitWidth);
+    break;
+  }
   case ISD::ZERO_EXTEND: {
     unsigned OperandBitWidth =
       Op.getOperand(0).getValueType().getScalarType().getSizeInBits();
@@ -1040,8 +1064,8 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
   }
   // FALL THROUGH
   default:
-    // Just use ComputeMaskedBits to compute output bits.
-    TLO.DAG.ComputeMaskedBits(Op, KnownZero, KnownOne, Depth);
+    // Just use computeKnownBits to compute output bits.
+    TLO.DAG.computeKnownBits(Op, KnownZero, KnownOne, Depth);
     break;
   }
 
@@ -1053,14 +1077,14 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
   return false;
 }
 
-/// computeMaskedBitsForTargetNode - Determine which of the bits specified
+/// computeKnownBitsForTargetNode - Determine which of the bits specified
 /// in Mask are known to be either zero or one and return them in the
 /// KnownZero/KnownOne bitsets.
-void TargetLowering::computeMaskedBitsForTargetNode(const SDValue Op,
-                                                    APInt &KnownZero,
-                                                    APInt &KnownOne,
-                                                    const SelectionDAG &DAG,
-                                                    unsigned Depth) const {
+void TargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
+                                                   APInt &KnownZero,
+                                                   APInt &KnownOne,
+                                                   const SelectionDAG &DAG,
+                                                   unsigned Depth) const {
   assert((Op.getOpcode() >= ISD::BUILTIN_OP_END ||
           Op.getOpcode() == ISD::INTRINSIC_WO_CHAIN ||
           Op.getOpcode() == ISD::INTRINSIC_W_CHAIN ||
@@ -1086,7 +1110,7 @@ unsigned TargetLowering::ComputeNumSignBitsForTargetNode(SDValue Op,
 }
 
 /// ValueHasExactlyOneBitSet - Test if the given value is known to have exactly
-/// one bit set. This differs from ComputeMaskedBits in that it doesn't need to
+/// one bit set. This differs from computeKnownBits in that it doesn't need to
 /// determine which bit is set.
 ///
 static bool ValueHasExactlyOneBitSet(SDValue Val, const SelectionDAG &DAG) {
@@ -1109,11 +1133,11 @@ static bool ValueHasExactlyOneBitSet(SDValue Val, const SelectionDAG &DAG) {
   // More could be done here, though the above checks are enough
   // to handle some common cases.
 
-  // Fall back to ComputeMaskedBits to catch other known cases.
+  // Fall back to computeKnownBits to catch other known cases.
   EVT OpVT = Val.getValueType();
   unsigned BitWidth = OpVT.getScalarType().getSizeInBits();
   APInt KnownZero, KnownOne;
-  DAG.ComputeMaskedBits(Val, KnownZero, KnownOne);
+  DAG.computeKnownBits(Val, KnownZero, KnownOne);
   return (KnownZero.countPopulation() == BitWidth - 1) &&
          (KnownOne.countPopulation() == 1);
 }

@@ -36,11 +36,12 @@ def isCFDepth0 : Predicate<"isCFDepth0()">;
 
 def WAIT_FLAG : InstFlag<"printWaitFlag">;
 
+let SubtargetPredicate = isSI in {
+let OtherPredicates  = [isCFDepth0] in {
+
 //===----------------------------------------------------------------------===//
 // SMRD Instructions
 //===----------------------------------------------------------------------===//
-
-let Predicates = [isSI, isCFDepth0] in {
 
 let mayLoad = 1 in {
 
@@ -78,13 +79,9 @@ defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
 //def S_MEMTIME : SMRD_ <0x0000001e, "S_MEMTIME", []>;
 //def S_DCACHE_INV : SMRD_ <0x0000001f, "S_DCACHE_INV", []>;
 
-} // let Predicates = [isSI, isCFDepth0]
-
 //===----------------------------------------------------------------------===//
 // SOP1 Instructions
 //===----------------------------------------------------------------------===//
-
-let Predicates = [isSI, isCFDepth0] in {
 
 let neverHasSideEffects = 1 in {
 
@@ -158,13 +155,9 @@ def S_MOV_REGRD_B32 : SOP1_32 <0x00000033, "S_MOV_REGRD_B32", []>;
 def S_ABS_I32 : SOP1_32 <0x00000034, "S_ABS_I32", []>;
 def S_MOV_FED_B32 : SOP1_32 <0x00000035, "S_MOV_FED_B32", []>;
 
-} // let Predicates = [isSI, isCFDepth0]
-
 //===----------------------------------------------------------------------===//
 // SOP2 Instructions
 //===----------------------------------------------------------------------===//
-
-let Predicates = [isSI, isCFDepth0] in {
 
 let Defs = [SCC] in { // Carry out goes to SCC
 let isCommutable = 1 in {
@@ -279,13 +272,9 @@ def S_BFE_I64 : SOP2_64 <0x0000002a, "S_BFE_I64", []>;
 //def S_CBRANCH_G_FORK : SOP2_ <0x0000002b, "S_CBRANCH_G_FORK", []>;
 def S_ABSDIFF_I32 : SOP2_32 <0x0000002c, "S_ABSDIFF_I32", []>;
 
-} // let Predicates = [isSI, isCFDepth0]
-
 //===----------------------------------------------------------------------===//
 // SOPC Instructions
 //===----------------------------------------------------------------------===//
-
-let Predicates = [isSI, isCFDepth0] in {
 
 def S_CMP_EQ_I32 : SOPC_32 <0x00000000, "S_CMP_EQ_I32">;
 def S_CMP_LG_I32 : SOPC_32 <0x00000001, "S_CMP_LG_I32">;
@@ -305,13 +294,9 @@ def S_CMP_LE_U32 : SOPC_32 <0x0000000b, "S_CMP_LE_U32">;
 ////def S_BITCMP1_B64 : SOPC_BITCMP1 <0x0000000f, "S_BITCMP1_B64", []>;
 //def S_SETVSKIP : SOPC_ <0x00000010, "S_SETVSKIP", []>;
 
-} // let Predicates = [isSI, isCFDepth0]
-
 //===----------------------------------------------------------------------===//
 // SOPK Instructions
 //===----------------------------------------------------------------------===//
-
-let Predicates = [isSI, isCFDepth0] in {
 
 def S_MOVK_I32 : SOPK_32 <0x00000000, "S_MOVK_I32", []>;
 def S_CMOVK_I32 : SOPK_32 <0x00000002, "S_CMOVK_I32", []>;
@@ -361,13 +346,11 @@ def S_GETREG_REGRD_B32 : SOPK_32 <0x00000014, "S_GETREG_REGRD_B32", []>;
 //def S_SETREG_IMM32_B32 : SOPK_32 <0x00000015, "S_SETREG_IMM32_B32", []>;
 //def EXP : EXP_ <0x00000000, "EXP", []>;
 
-} // let Predicates = [isSI, isCFDepth0]
+} // End let OtherPredicates = [isCFDepth0]
 
 //===----------------------------------------------------------------------===//
 // SOPP Instructions
 //===----------------------------------------------------------------------===//
-
-let Predicates = [isSI] in {
 
 def S_NOP : SOPP <0x00000000, (ins i16imm:$SIMM16), "S_NOP $SIMM16", []>;
 
@@ -460,10 +443,6 @@ let Uses = [EXEC] in {
 //def S_DECPERFLEVEL : SOPP_ <0x00000015, "S_DECPERFLEVEL", []>;
 //def S_TTRACEDATA : SOPP_ <0x00000016, "S_TTRACEDATA", []>;
 } // End hasSideEffects
-
-} // let Predicates = [isSI, isCFDepth0]
-
-let Predicates = [isSI] in {
 
 //===----------------------------------------------------------------------===//
 // VOPC Instructions
@@ -1115,18 +1094,11 @@ def V_CNDMASK_B32_e64 : VOP3 <0x00000100, (outs VReg_32:$dst),
    InstFlag:$abs, InstFlag:$clamp, InstFlag:$omod, InstFlag:$neg),
   "V_CNDMASK_B32_e64 $dst, $src0, $src1, $src2, $abs, $clamp, $omod, $neg",
   [(set i32:$dst, (select i1:$src2, i32:$src1, i32:$src0))]
->;
-
-//f32 pattern for V_CNDMASK_B32_e64
-def : Pat <
-  (f32 (select i1:$src2, f32:$src1, f32:$src0)),
-  (V_CNDMASK_B32_e64 $src0, $src1, $src2)
->;
-
-def : Pat <
-  (i32 (trunc i64:$val)),
-  (EXTRACT_SUBREG $val, sub0)
->;
+> {
+  let src0_modifiers = 0;
+  let src1_modifiers = 0;
+  let src2_modifiers = 0;
+}
 
 def V_READLANE_B32 : VOP2 <
   0x00000001,
@@ -1274,43 +1246,41 @@ defm V_CVT_PKRTZ_F16_F32 : VOP2_32 <0x0000002f, "V_CVT_PKRTZ_F16_F32",
 
 let neverHasSideEffects = 1 in {
 
-def V_MAD_LEGACY_F32 : VOP3_32 <0x00000140, "V_MAD_LEGACY_F32", []>;
-def V_MAD_F32 : VOP3_32 <0x00000141, "V_MAD_F32", []>;
-def V_MAD_I32_I24 : VOP3_32 <0x00000142, "V_MAD_I32_I24",
+defm V_MAD_LEGACY_F32 : VOP3_32 <0x00000140, "V_MAD_LEGACY_F32", []>;
+defm V_MAD_F32 : VOP3_32 <0x00000141, "V_MAD_F32", []>;
+defm V_MAD_I32_I24 : VOP3_32 <0x00000142, "V_MAD_I32_I24",
   [(set i32:$dst, (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2))]
 >;
-def V_MAD_U32_U24 : VOP3_32 <0x00000143, "V_MAD_U32_U24",
+defm V_MAD_U32_U24 : VOP3_32 <0x00000143, "V_MAD_U32_U24",
   [(set i32:$dst, (add (AMDGPUmul_u24 i32:$src0, i32:$src1), i32:$src2))]
 >;
 
 } // End neverHasSideEffects
-def V_CUBEID_F32 : VOP3_32 <0x00000144, "V_CUBEID_F32", []>;
-def V_CUBESC_F32 : VOP3_32 <0x00000145, "V_CUBESC_F32", []>;
-def V_CUBETC_F32 : VOP3_32 <0x00000146, "V_CUBETC_F32", []>;
-def V_CUBEMA_F32 : VOP3_32 <0x00000147, "V_CUBEMA_F32", []>;
+defm V_CUBEID_F32 : VOP3_32 <0x00000144, "V_CUBEID_F32", []>;
+defm V_CUBESC_F32 : VOP3_32 <0x00000145, "V_CUBESC_F32", []>;
+defm V_CUBETC_F32 : VOP3_32 <0x00000146, "V_CUBETC_F32", []>;
+defm V_CUBEMA_F32 : VOP3_32 <0x00000147, "V_CUBEMA_F32", []>;
 
 let neverHasSideEffects = 1, mayLoad = 0, mayStore = 0 in {
-def V_BFE_U32 : VOP3_32 <0x00000148, "V_BFE_U32",
+defm V_BFE_U32 : VOP3_32 <0x00000148, "V_BFE_U32",
   [(set i32:$dst, (AMDGPUbfe_u32 i32:$src0, i32:$src1, i32:$src2))]>;
-def V_BFE_I32 : VOP3_32 <0x00000149, "V_BFE_I32",
+defm V_BFE_I32 : VOP3_32 <0x00000149, "V_BFE_I32",
   [(set i32:$dst, (AMDGPUbfe_i32 i32:$src0, i32:$src1, i32:$src2))]>;
 }
 
-def V_BFI_B32 : VOP3_32 <0x0000014a, "V_BFI_B32",
+defm V_BFI_B32 : VOP3_32 <0x0000014a, "V_BFI_B32",
   [(set i32:$dst, (AMDGPUbfi i32:$src0, i32:$src1, i32:$src2))]>;
-defm : BFIPatterns <V_BFI_B32>;
-def V_FMA_F32 : VOP3_32 <0x0000014b, "V_FMA_F32",
+defm V_FMA_F32 : VOP3_32 <0x0000014b, "V_FMA_F32",
   [(set f32:$dst, (fma f32:$src0, f32:$src1, f32:$src2))]
 >;
 def V_FMA_F64 : VOP3_64 <0x0000014c, "V_FMA_F64",
   [(set f64:$dst, (fma f64:$src0, f64:$src1, f64:$src2))]
 >;
 //def V_LERP_U8 : VOP3_U8 <0x0000014d, "V_LERP_U8", []>;
-def V_ALIGNBIT_B32 : VOP3_32 <0x0000014e, "V_ALIGNBIT_B32", []>;
-def : ROTRPattern <V_ALIGNBIT_B32>;
+defm V_ALIGNBIT_B32 : VOP3_32 <0x0000014e, "V_ALIGNBIT_B32", []>;
 
-def V_ALIGNBYTE_B32 : VOP3_32 <0x0000014f, "V_ALIGNBYTE_B32", []>;
-def V_MULLIT_F32 : VOP3_32 <0x00000150, "V_MULLIT_F32", []>;
+defm V_ALIGNBYTE_B32 : VOP3_32 <0x0000014f, "V_ALIGNBYTE_B32", []>;
+defm V_MULLIT_F32 : VOP3_32 <0x00000150, "V_MULLIT_F32", []>;
 ////def V_MIN3_F32 : VOP3_MIN3 <0x00000151, "V_MIN3_F32", []>;
 ////def V_MIN3_I32 : VOP3_MIN3 <0x00000152, "V_MIN3_I32", []>;
 ////def V_MIN3_U32 : VOP3_MIN3 <0x00000153, "V_MIN3_U32", []>;
@@ -1323,9 +1293,9 @@ def V_MULLIT_F32 : VOP3_32 <0x00000150, "V_MULLIT_F32", []>;
 //def V_SAD_U8 : VOP3_U8 <0x0000015a, "V_SAD_U8", []>;
 //def V_SAD_HI_U8 : VOP3_U8 <0x0000015b, "V_SAD_HI_U8", []>;
 //def V_SAD_U16 : VOP3_U16 <0x0000015c, "V_SAD_U16", []>;
-def V_SAD_U32 : VOP3_32 <0x0000015d, "V_SAD_U32", []>;
+defm V_SAD_U32 : VOP3_32 <0x0000015d, "V_SAD_U32", []>;
 ////def V_CVT_PK_U8_F32 : VOP3_U8 <0x0000015e, "V_CVT_PK_U8_F32", []>;
-def V_DIV_FIXUP_F32 : VOP3_32 <0x0000015f, "V_DIV_FIXUP_F32", []>;
+defm V_DIV_FIXUP_F32 : VOP3_32 <0x0000015f, "V_DIV_FIXUP_F32", []>;
 def V_DIV_FIXUP_F64 : VOP3_64 <0x00000160, "V_DIV_FIXUP_F64", []>;
 
 def V_LSHL_B64 : VOP3_64_Shift <0x00000161, "V_LSHL_B64",
@@ -1347,45 +1317,20 @@ def V_MAX_F64 : VOP3_64 <0x00000167, "V_MAX_F64", []>;
 
 } // isCommutable = 1
 
-def : Pat <
-  (fadd f64:$src0, f64:$src1),
-  (V_ADD_F64 $src0, $src1, (i64 0))
->;
-
-def : Pat <
-  (fmul f64:$src0, f64:$src1),
-  (V_MUL_F64 $src0, $src1, (i64 0))
->;
-
 def V_LDEXP_F64 : VOP3_64 <0x00000168, "V_LDEXP_F64", []>;
 
 let isCommutable = 1 in {
 
-def V_MUL_LO_U32 : VOP3_32 <0x00000169, "V_MUL_LO_U32", []>;
-def V_MUL_HI_U32 : VOP3_32 <0x0000016a, "V_MUL_HI_U32", []>;
-def V_MUL_LO_I32 : VOP3_32 <0x0000016b, "V_MUL_LO_I32", []>;
-def V_MUL_HI_I32 : VOP3_32 <0x0000016c, "V_MUL_HI_I32", []>;
+defm V_MUL_LO_U32 : VOP3_32 <0x00000169, "V_MUL_LO_U32", []>;
+defm V_MUL_HI_U32 : VOP3_32 <0x0000016a, "V_MUL_HI_U32", []>;
+defm V_MUL_LO_I32 : VOP3_32 <0x0000016b, "V_MUL_LO_I32", []>;
+defm V_MUL_HI_I32 : VOP3_32 <0x0000016c, "V_MUL_HI_I32", []>;
 
 } // isCommutable = 1
 
-def : Pat <
-  (mul i32:$src0, i32:$src1),
-  (V_MUL_LO_I32 $src0, $src1, (i32 0))
->;
-
-def : Pat <
-  (mulhu i32:$src0, i32:$src1),
-  (V_MUL_HI_U32 $src0, $src1, (i32 0))
->;
-
-def : Pat <
-  (mulhs i32:$src0, i32:$src1),
-  (V_MUL_HI_I32 $src0, $src1, (i32 0))
->;
-
-def V_DIV_SCALE_F32 : VOP3_32 <0x0000016d, "V_DIV_SCALE_F32", []>;
+defm V_DIV_SCALE_F32 : VOP3_32 <0x0000016d, "V_DIV_SCALE_F32", []>;
 def V_DIV_SCALE_F64 : VOP3_64 <0x0000016e, "V_DIV_SCALE_F64", []>;
-def V_DIV_FMAS_F32 : VOP3_32 <0x0000016f, "V_DIV_FMAS_F32", []>;
+defm V_DIV_FMAS_F32 : VOP3_32 <0x0000016f, "V_DIV_FMAS_F32", []>;
 def V_DIV_FMAS_F64 : VOP3_64 <0x00000170, "V_DIV_FMAS_F64", []>;
 //def V_MSAD_U8 : VOP3_U8 <0x00000171, "V_MSAD_U8", []>;
 //def V_QSAD_U8 : VOP3_U8 <0x00000172, "V_QSAD_U8", []>;
@@ -1404,11 +1349,14 @@ def V_MOV_I1 : InstSI <
   "", [(set i1:$dst, (imm:$src))]
 >;
 
-def LOAD_CONST : AMDGPUShaderInst <
-  (outs GPRF32:$dst),
-  (ins i32imm:$src),
-  "LOAD_CONST $dst, $src",
-  [(set GPRF32:$dst, (int_AMDGPU_load_const imm:$src))]
+def V_AND_I1 : InstSI <
+   (outs VReg_1:$dst), (ins VReg_1:$src0, VReg_1:$src1), "",
+   [(set i1:$dst, (and i1:$src0, i1:$src1))]
+>;
+
+def V_OR_I1 : InstSI <
+   (outs VReg_1:$dst), (ins VReg_1:$src0, VReg_1:$src1), "",
+   [(set i1:$dst, (or i1:$src0, i1:$src1))]
 >;
 
 // SI pseudo instructions. These are used by the CFG structurizer pass
@@ -1417,37 +1365,20 @@ def LOAD_CONST : AMDGPUShaderInst <
 let mayLoad = 1, mayStore = 1, hasSideEffects = 1,
     Uses = [EXEC], Defs = [EXEC] in {
 
-let usesCustomInserter = 1 in {
-
-def SI_IF_NON_TERM : InstSI <
-  (outs SReg_64:$dst),
-  (ins SReg_64:$vcc, brtarget:$target), "",
-  [(set i64:$dst, (int_SI_if i1:$vcc, bb:$target))]
->;
-
-def SI_ELSE_NON_TERM : InstSI <
-  (outs SReg_64:$dst),
-  (ins SReg_64:$src, brtarget:$target),
-  "",
-  [(set i64:$dst, (int_SI_else i64:$src, bb:$target))]
-> {
-  let Constraints = "$src = $dst";
-}
-
-} // usesCustomInserter = 1
-
 let isBranch = 1, isTerminator = 1 in {
 
 def SI_IF: InstSI <
   (outs SReg_64:$dst),
   (ins SReg_64:$vcc, brtarget:$target),
-  "", []
+  "",
+  [(set i64:$dst, (int_SI_if i1:$vcc, bb:$target))]
 >;
 
 def SI_ELSE : InstSI <
   (outs SReg_64:$dst),
   (ins SReg_64:$src, brtarget:$target),
-  "", []
+  "",
+  [(set i64:$dst, (int_SI_else i64:$src, bb:$target))]
 > {
   let Constraints = "$src = $dst";
 }
@@ -1505,7 +1436,7 @@ let Uses = [EXEC], Defs = [EXEC,VCC,M0] in {
 
 let UseNamedOperandTable = 1 in {
 
-def SI_RegisterLoad : AMDGPUShaderInst <
+def SI_RegisterLoad : InstSI <
   (outs VReg_32:$dst, SReg_64:$temp),
   (ins FRAMEri32:$addr, i32imm:$chan),
   "", []
@@ -1514,7 +1445,7 @@ def SI_RegisterLoad : AMDGPUShaderInst <
   let mayLoad = 1;
 }
 
-class SIRegStore<dag outs> : AMDGPUShaderInst <
+class SIRegStore<dag outs> : InstSI <
   outs,
   (ins VReg_32:$val, FRAMEri32:$addr, i32imm:$chan),
   "", []
@@ -1597,6 +1528,10 @@ defm SI_SPILL_S512 : SI_SPILL_SGPR <SReg_512>;
 
 } // end IsCodeGenOnly, isPseudo
 
+} // end SubtargetPredicate = SI
+
+let Predicates = [isSI] in {
+
 def : Pat<
   (int_AMDGPU_cndlt f32:$src0, f32:$src1, f32:$src2),
   (V_CNDMASK_B32_e64 $src2, $src1, (V_CMP_GT_F32_e64 0, $src0))
@@ -1675,16 +1610,6 @@ def : Pat <
 //===----------------------------------------------------------------------===//
 // SOP2 Patterns
 //===----------------------------------------------------------------------===//
-
-def : Pat <
-  (i1 (and i1:$src0, i1:$src1)),
-  (S_AND_B64 $src0, $src1)
->;
-
-def : Pat <
-  (i1 (or i1:$src0, i1:$src1)),
-  (S_OR_B64 $src0, $src1)
->;
 
 def : Pat <
   (i1 (xor i1:$src0, i1:$src1)),
@@ -1951,10 +1876,18 @@ def : BitConvert <v16f32, v16i32, VReg_512>;
 /********** Src & Dst modifiers **********/
 /********** =================== **********/
 
+def FCLAMP_SI : AMDGPUShaderInst <
+  (outs VReg_32:$dst),
+  (ins VSrc_32:$src0),
+  "FCLAMP_SI $dst, $src0",
+  []
+> {
+  let usesCustomInserter = 1;
+}
+
 def : Pat <
   (int_AMDIL_clamp f32:$src, (f32 FP_ZERO), (f32 FP_ONE)),
-  (V_ADD_F32_e64 $src, (i32 0 /* SRC1 */),
-   0 /* ABS */, 1 /* CLAMP */, 0 /* OMOD */, 0 /* NEG */)
+  (FCLAMP_SI f32:$src)
 >;
 
 /********** ================================ **********/
@@ -1973,14 +1906,32 @@ def : Pat <
   (V_OR_B32_e32 $src, (V_MOV_B32_e32 0x80000000)) /* Set sign bit */
 >;
 
+def FABS_SI : AMDGPUShaderInst <
+  (outs VReg_32:$dst),
+  (ins VSrc_32:$src0),
+  "FABS_SI $dst, $src0",
+  []
+> {
+  let usesCustomInserter = 1;
+}
+
 def : Pat <
   (fabs f32:$src),
-  (V_AND_B32_e32 $src, (V_MOV_B32_e32 0x7fffffff)) /* Clear sign bit */
+  (FABS_SI f32:$src)
 >;
+
+def FNEG_SI : AMDGPUShaderInst <
+  (outs VReg_32:$dst),
+  (ins VSrc_32:$src0),
+  "FNEG_SI $dst, $src0",
+  []
+> {
+  let usesCustomInserter = 1;
+}
 
 def : Pat <
   (fneg f32:$src),
-  (V_XOR_B32_e32 $src, (V_MOV_B32_e32 0x80000000)) /* Toggle sign bit */
+  (FNEG_SI f32:$src)
 >;
 
 /********** ================== **********/
@@ -2112,17 +2063,45 @@ def : Pat <
 def : Pat <
   (int_SI_tid),
   (V_MBCNT_HI_U32_B32_e32 0xffffffff,
-                          (V_MBCNT_LO_U32_B32_e64 0xffffffff, 0, 0, 0, 0, 0))
+                          (V_MBCNT_LO_U32_B32_e64 0xffffffff, 0, 0, 0))
 >;
 
-/********** ================== **********/
-/**********   VOP3 Patterns    **********/
-/********** ================== **********/
+//===----------------------------------------------------------------------===//
+// VOP3 Patterns
+//===----------------------------------------------------------------------===//
 
 def : Pat <
   (f32 (fadd (fmul f32:$src0, f32:$src1), f32:$src2)),
   (V_MAD_F32 $src0, $src1, $src2)
 >;
+
+def : Pat <
+  (fadd f64:$src0, f64:$src1),
+  (V_ADD_F64 $src0, $src1, (i64 0))
+>;
+
+def : Pat <
+  (fmul f64:$src0, f64:$src1),
+  (V_MUL_F64 $src0, $src1, (i64 0))
+>;
+
+def : Pat <
+  (mul i32:$src0, i32:$src1),
+  (V_MUL_LO_I32 $src0, $src1, (i32 0))
+>;
+
+def : Pat <
+  (mulhu i32:$src0, i32:$src1),
+  (V_MUL_HI_U32 $src0, $src1, (i32 0))
+>;
+
+def : Pat <
+  (mulhs i32:$src0, i32:$src1),
+  (V_MUL_HI_I32 $src0, $src1, (i32 0))
+>;
+
+defm : BFIPatterns <V_BFI_B32>;
+def : ROTRPattern <V_ALIGNBIT_B32>;
 
 /********** ======================= **********/
 /**********   Load/Store Patterns   **********/
@@ -2333,9 +2312,9 @@ defm V_RNDNE_F64 : VOP1_64 <0x00000019, "V_RNDNE_F64",
   [(set f64:$dst, (frint f64:$src0))]
 >;
 
-def V_QSAD_PK_U16_U8 : VOP3_32 <0x00000173, "V_QSAD_PK_U16_U8", []>;
-def V_MQSAD_U16_U8 : VOP3_32 <0x000000172, "V_MQSAD_U16_U8", []>;
-def V_MQSAD_U32_U8 : VOP3_32 <0x00000175, "V_MQSAD_U32_U8", []>;
+defm V_QSAD_PK_U16_U8 : VOP3_32 <0x00000173, "V_QSAD_PK_U16_U8", []>;
+defm V_MQSAD_U16_U8 : VOP3_32 <0x000000172, "V_MQSAD_U16_U8", []>;
+defm V_MQSAD_U32_U8 : VOP3_32 <0x00000175, "V_MQSAD_U32_U8", []>;
 def V_MAD_U64_U32 : VOP3_64 <0x00000176, "V_MAD_U64_U32", []>;
 
 // XXX - Does this set VCC?

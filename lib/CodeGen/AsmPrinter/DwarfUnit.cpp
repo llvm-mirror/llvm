@@ -745,35 +745,45 @@ void DwarfUnit::addBlockByrefAddress(const DbgVariable &DV, DIE &Die,
   addBlock(Die, Attribute, Loc);
 }
 
-/// isTypeSigned - Return true if the type is signed.
-static bool isTypeSigned(DwarfDebug *DD, DIType Ty, int *SizeInBits) {
-  if (Ty.isDerivedType())
-    return isTypeSigned(DD, DD->resolve(DIDerivedType(Ty).getTypeDerivedFrom()),
-                        SizeInBits);
-  if (Ty.isBasicType())
-    if (DIBasicType(Ty).getEncoding() == dwarf::DW_ATE_signed ||
-        DIBasicType(Ty).getEncoding() == dwarf::DW_ATE_signed_char) {
-      *SizeInBits = Ty.getSizeInBits();
-      return true;
-    }
-  return false;
-}
-
 /// Return true if type encoding is unsigned.
 static bool isUnsignedDIType(DwarfDebug *DD, DIType Ty) {
   DIDerivedType DTy(Ty);
-  if (DTy.isDerivedType())
-    return isUnsignedDIType(DD, DD->resolve(DTy.getTypeDerivedFrom()));
+  if (DTy.isDerivedType()) {
+    dwarf::Tag T = (dwarf::Tag)Ty.getTag();
+    // Encode pointer constants as unsigned bytes. This is used at least for
+    // null pointer constant emission.
+    // FIXME: reference and rvalue_reference /probably/ shouldn't be allowed
+    // here, but accept them for now due to a bug in SROA producing bogus
+    // dbg.values.
+    if (T == dwarf::DW_TAG_pointer_type ||
+        T == dwarf::DW_TAG_ptr_to_member_type ||
+        T == dwarf::DW_TAG_reference_type ||
+        T == dwarf::DW_TAG_rvalue_reference_type)
+      return true;
+    assert(T == dwarf::DW_TAG_typedef || T == dwarf::DW_TAG_const_type ||
+           T == dwarf::DW_TAG_volatile_type ||
+           T == dwarf::DW_TAG_restrict_type ||
+           T == dwarf::DW_TAG_enumeration_type);
+    if (DITypeRef Deriv = DTy.getTypeDerivedFrom())
+      return isUnsignedDIType(DD, DD->resolve(Deriv));
+    // FIXME: Enums without a fixed underlying type have unknown signedness
+    // here, leading to incorrectly emitted constants.
+    assert(DTy.getTag() == dwarf::DW_TAG_enumeration_type);
+    return false;
+  }
 
   DIBasicType BTy(Ty);
-  if (BTy.isBasicType()) {
-    unsigned Encoding = BTy.getEncoding();
-    if (Encoding == dwarf::DW_ATE_unsigned ||
-        Encoding == dwarf::DW_ATE_unsigned_char ||
-        Encoding == dwarf::DW_ATE_boolean)
-      return true;
-  }
-  return false;
+  assert(BTy.isBasicType());
+  unsigned Encoding = BTy.getEncoding();
+  assert((Encoding == dwarf::DW_ATE_unsigned ||
+          Encoding == dwarf::DW_ATE_unsigned_char ||
+          Encoding == dwarf::DW_ATE_signed ||
+          Encoding == dwarf::DW_ATE_signed_char ||
+          Encoding == dwarf::DW_ATE_UTF || Encoding == dwarf::DW_ATE_boolean) &&
+         "Unsupported encoding");
+  return (Encoding == dwarf::DW_ATE_unsigned ||
+          Encoding == dwarf::DW_ATE_unsigned_char ||
+          Encoding == dwarf::DW_ATE_UTF || Encoding == dwarf::DW_ATE_boolean);
 }
 
 /// If this type is derived from a base type then return base type size.
@@ -803,45 +813,6 @@ static uint64_t getBaseTypeSize(DwarfDebug *DD, DIDerivedType Ty) {
     return getBaseTypeSize(DD, DIDerivedType(BaseType));
 
   return BaseType.getSizeInBits();
-}
-
-/// addConstantValue - Add constant value entry in variable DIE.
-void DwarfUnit::addConstantValue(DIE &Die, const MachineOperand &MO,
-                                 DIType Ty) {
-  // FIXME: This is a bit conservative/simple - it emits negative values at
-  // their maximum bit width which is a bit unfortunate (& doesn't prefer
-  // udata/sdata over dataN as suggested by the DWARF spec)
-  assert(MO.isImm() && "Invalid machine operand!");
-  int SizeInBits = -1;
-  bool SignedConstant = isTypeSigned(DD, Ty, &SizeInBits);
-  dwarf::Form Form;
-
-  // If we're a signed constant definitely use sdata.
-  if (SignedConstant) {
-    addSInt(Die, dwarf::DW_AT_const_value, dwarf::DW_FORM_sdata, MO.getImm());
-    return;
-  }
-
-  // Else use data for now unless it's larger than we can deal with.
-  switch (SizeInBits) {
-  case 8:
-    Form = dwarf::DW_FORM_data1;
-    break;
-  case 16:
-    Form = dwarf::DW_FORM_data2;
-    break;
-  case 32:
-    Form = dwarf::DW_FORM_data4;
-    break;
-  case 64:
-    Form = dwarf::DW_FORM_data8;
-    break;
-  default:
-    Form = dwarf::DW_FORM_udata;
-    addUInt(Die, dwarf::DW_AT_const_value, Form, MO.getImm());
-    return;
-  }
-  addUInt(Die, dwarf::DW_AT_const_value, Form, MO.getImm());
 }
 
 /// addConstantFPValue - Add constant value entry in variable DIE.
@@ -874,43 +845,35 @@ void DwarfUnit::addConstantFPValue(DIE &Die, const ConstantFP *CFP) {
 }
 
 /// addConstantValue - Add constant value entry in variable DIE.
-void DwarfUnit::addConstantValue(DIE &Die, const ConstantInt *CI,
-                                 bool Unsigned) {
-  addConstantValue(Die, CI->getValue(), Unsigned);
+void DwarfUnit::addConstantValue(DIE &Die, const ConstantInt *CI, DIType Ty) {
+  addConstantValue(Die, CI->getValue(), Ty);
+}
+
+/// addConstantValue - Add constant value entry in variable DIE.
+void DwarfUnit::addConstantValue(DIE &Die, const MachineOperand &MO,
+                                 DIType Ty) {
+  assert(MO.isImm() && "Invalid machine operand!");
+
+  addConstantValue(Die, isUnsignedDIType(DD, Ty), MO.getImm());
+}
+
+void DwarfUnit::addConstantValue(DIE &Die, bool Unsigned, uint64_t Val) {
+  // FIXME: This is a bit conservative/simple - it emits negative values always
+  // sign extended to 64 bits rather than minimizing the number of bytes.
+  addUInt(Die, dwarf::DW_AT_const_value,
+          Unsigned ? dwarf::DW_FORM_udata : dwarf::DW_FORM_sdata, Val);
+}
+
+void DwarfUnit::addConstantValue(DIE &Die, const APInt &Val, DIType Ty) {
+  addConstantValue(Die, Val, isUnsignedDIType(DD, Ty));
 }
 
 // addConstantValue - Add constant value entry in variable DIE.
 void DwarfUnit::addConstantValue(DIE &Die, const APInt &Val, bool Unsigned) {
   unsigned CIBitWidth = Val.getBitWidth();
   if (CIBitWidth <= 64) {
-    // If we're a signed constant definitely use sdata.
-    if (!Unsigned) {
-      addSInt(Die, dwarf::DW_AT_const_value, dwarf::DW_FORM_sdata,
-              Val.getSExtValue());
-      return;
-    }
-
-    // Else use data for now unless it's larger than we can deal with.
-    dwarf::Form Form;
-    switch (CIBitWidth) {
-    case 8:
-      Form = dwarf::DW_FORM_data1;
-      break;
-    case 16:
-      Form = dwarf::DW_FORM_data2;
-      break;
-    case 32:
-      Form = dwarf::DW_FORM_data4;
-      break;
-    case 64:
-      Form = dwarf::DW_FORM_data8;
-      break;
-    default:
-      addUInt(Die, dwarf::DW_AT_const_value, dwarf::DW_FORM_udata,
-              Val.getZExtValue());
-      return;
-    }
-    addUInt(Die, dwarf::DW_AT_const_value, Form, Val.getZExtValue());
+    addConstantValue(Die, Unsigned,
+                     Unsigned ? Val.getZExtValue() : Val.getSExtValue());
     return;
   }
 
@@ -1364,8 +1327,7 @@ DwarfUnit::constructTemplateValueParameterDIE(DIE &Buffer,
     addString(ParamDIE, dwarf::DW_AT_name, VP.getName());
   if (Value *Val = VP.getValue()) {
     if (ConstantInt *CI = dyn_cast<ConstantInt>(Val))
-      addConstantValue(ParamDIE, CI,
-                       isUnsignedDIType(DD, resolve(VP.getType())));
+      addConstantValue(ParamDIE, CI, resolve(VP.getType()));
     else if (GlobalValue *GV = dyn_cast<GlobalValue>(Val)) {
       // For declaration non-type template parameters (such as global values and
       // functions)
@@ -1671,7 +1633,7 @@ void DwarfCompileUnit::createGlobalVariableDIE(DIGlobalVariable GV) {
     // emitting AT_const_value multiple times, we only add AT_const_value when
     // it is not a static member.
     if (!IsStaticMember)
-      addConstantValue(*VariableDIE, CI, isUnsignedDIType(DD, GTy));
+      addConstantValue(*VariableDIE, CI, GTy);
   } else if (const ConstantExpr *CE = getMergedGlobalExpr(GV->getOperand(11))) {
     addToAccelTable = true;
     // GV is a merged global.
@@ -1858,7 +1820,7 @@ DwarfUnit::constructVariableDIEImpl(const DbgVariable &DV,
       addConstantFPValue(*VariableDie, DVInsn->getOperand(0));
     else if (DVInsn->getOperand(0).isCImm())
       addConstantValue(*VariableDie, DVInsn->getOperand(0).getCImm(),
-                       isUnsignedDIType(DD, DV.getType()));
+                       DV.getType());
 
     return VariableDie;
   }
@@ -2002,7 +1964,7 @@ DIE *DwarfUnit::getOrCreateStaticMemberDIE(DIDerivedType DT) {
             dwarf::DW_ACCESS_public);
 
   if (const ConstantInt *CI = dyn_cast_or_null<ConstantInt>(DT.getConstant()))
-    addConstantValue(StaticMemberDIE, CI, isUnsignedDIType(DD, Ty));
+    addConstantValue(StaticMemberDIE, CI, Ty);
   if (const ConstantFP *CFP = dyn_cast_or_null<ConstantFP>(DT.getConstant()))
     addConstantFPValue(StaticMemberDIE, CFP);
 

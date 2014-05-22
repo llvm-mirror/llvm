@@ -70,11 +70,6 @@ CMModel("code-model",
                               "Large code model"),
                    clEnumValEnd));
 
-cl::opt<bool>
-RelaxAll("mc-relax-all",
-         cl::desc("When used with filetype=obj, "
-                  "relax all fixups in the emitted object file"));
-
 cl::opt<TargetMachine::CodeGenFileType>
 FileType("filetype", cl::init(TargetMachine::CGFT_AssemblyFile),
   cl::desc("Choose a file type (not all types are supported by all targets):"),
@@ -86,9 +81,6 @@ FileType("filetype", cl::init(TargetMachine::CGFT_AssemblyFile),
              clEnumValN(TargetMachine::CGFT_Null, "null",
                         "Emit nothing, for performance testing"),
              clEnumValEnd));
-
-cl::opt<bool> EnableDwarfDirectory("enable-dwarf-directory", cl::Hidden,
-                  cl::desc("Use .file directives with an explicit directory."));
 
 cl::opt<bool>
 DisableRedZone("disable-red-zone",
@@ -201,6 +193,15 @@ cl::opt<std::string> StartAfter("start-after",
                           cl::value_desc("pass-name"),
                           cl::init(""));
 
+cl::opt<bool> DataSections("data-sections",
+                           cl::desc("Emit data into separate sections"),
+                           cl::init(false));
+
+cl::opt<bool>
+FunctionSections("function-sections",
+                 cl::desc("Emit functions into separate sections"),
+                 cl::init(false));
+
 // Common utility function tightly tied to the options listed here. Initializes
 // a TargetOptions object with CodeGen flags and returns it.
 static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
@@ -223,6 +224,8 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.UseInitArray = UseInitArray;
+  Options.DataSections = DataSections;
+  Options.FunctionSections = FunctionSections;
 
   Options.MCOptions = InitMCTargetOptionsFromFlags();
 

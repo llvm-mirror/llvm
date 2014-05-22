@@ -83,14 +83,15 @@ struct Section {
 };
 struct RawContentSection : Section {
   object::yaml::BinaryRef Content;
+  llvm::yaml::Hex64 Size;
   RawContentSection() : Section(SectionKind::RawContent) {}
   static bool classof(const Section *S) {
     return S->Kind == SectionKind::RawContent;
   }
 };
 struct Relocation {
-  uint32_t Offset;
-  uint32_t Addend;
+  llvm::yaml::Hex64 Offset;
+  int64_t Addend;
   ELF_REL Type;
   StringRef Symbol;
 };
@@ -193,6 +194,7 @@ template <> struct MappingTraits<ELFYAML::Relocation> {
 template <>
 struct MappingTraits<std::unique_ptr<ELFYAML::Section>> {
   static void mapping(IO &IO, std::unique_ptr<ELFYAML::Section> &Section);
+  static StringRef validate(IO &io, std::unique_ptr<ELFYAML::Section> &Section);
 };
 
 template <>

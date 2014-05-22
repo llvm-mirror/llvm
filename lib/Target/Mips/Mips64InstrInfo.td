@@ -209,17 +209,19 @@ def PseudoMFLO64 : PseudoMFLOHI<GPR64, ACC128, MipsMFLO>;
 def PseudoMTLOHI64 : PseudoMTLOHI<ACC128, GPR64>;
 
 /// Sign Ext In Register Instructions.
-def SEB64 : SignExtInReg<"seb", i8, GPR64Opnd, II_SEB>, SEB_FM<0x10, 0x20>;
-def SEH64 : SignExtInReg<"seh", i16, GPR64Opnd, II_SEH>, SEB_FM<0x18, 0x20>;
+def SEB64 : SignExtInReg<"seb", i8, GPR64Opnd, II_SEB>, SEB_FM<0x10, 0x20>,
+            ISA_MIPS32R2;
+def SEH64 : SignExtInReg<"seh", i16, GPR64Opnd, II_SEH>, SEB_FM<0x18, 0x20>,
+            ISA_MIPS32R2;
 }
 
 /// Count Leading
-def DCLZ : CountLeading0<"dclz", GPR64Opnd>, CLO_FM<0x24>;
-def DCLO : CountLeading1<"dclo", GPR64Opnd>, CLO_FM<0x25>;
+def DCLZ : CountLeading0<"dclz", GPR64Opnd>, CLO_FM<0x24>, ISA_MIPS64;
+def DCLO : CountLeading1<"dclo", GPR64Opnd>, CLO_FM<0x25>, ISA_MIPS64;
 
 /// Double Word Swap Bytes/HalfWords
-def DSBH : SubwordSwap<"dsbh", GPR64Opnd>, SEB_FM<2, 0x24>;
-def DSHD : SubwordSwap<"dshd", GPR64Opnd>, SEB_FM<5, 0x24>;
+def DSBH : SubwordSwap<"dsbh", GPR64Opnd>, SEB_FM<2, 0x24>, ISA_MIPS64R2;
+def DSHD : SubwordSwap<"dshd", GPR64Opnd>, SEB_FM<5, 0x24>, ISA_MIPS64R2;
 
 def LEA_ADDiu64 : EffectiveAddress<"daddiu", GPR64Opnd>, LW_FM<0x19>;
 
@@ -427,7 +429,7 @@ def : MipsPat<(bswap GPR64:$rt), (DSHD (DSBH GPR64:$rt))>;
 //===----------------------------------------------------------------------===//
 def : MipsInstAlias<"move $dst, $src",
                     (DADDu GPR64Opnd:$dst,  GPR64Opnd:$src, ZERO_64), 1>,
-      Requires<[IsGP64]>;
+      GPR_64;
 def : MipsInstAlias<"daddu $rs, $rt, $imm",
                     (DADDiu GPR64Opnd:$rs, GPR64Opnd:$rt, simm16_64:$imm),
                     0>;

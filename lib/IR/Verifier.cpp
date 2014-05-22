@@ -396,14 +396,22 @@ void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
             "invalid linkage for intrinsic global variable", &GV);
     // Don't worry about emitting an error for it not being an array,
     // visitGlobalValue will complain on appending non-array.
-    if (ArrayType *ATy = dyn_cast<ArrayType>(GV.getType())) {
+    if (ArrayType *ATy = dyn_cast<ArrayType>(GV.getType()->getElementType())) {
       StructType *STy = dyn_cast<StructType>(ATy->getElementType());
       PointerType *FuncPtrTy =
           FunctionType::get(Type::getVoidTy(*Context), false)->getPointerTo();
-      Assert1(STy && STy->getNumElements() == 2 &&
+      // FIXME: Reject the 2-field form in LLVM 4.0.
+      Assert1(STy && (STy->getNumElements() == 2 ||
+                      STy->getNumElements() == 3) &&
               STy->getTypeAtIndex(0u)->isIntegerTy(32) &&
               STy->getTypeAtIndex(1) == FuncPtrTy,
               "wrong type for intrinsic global variable", &GV);
+      if (STy->getNumElements() == 3) {
+        Type *ETy = STy->getTypeAtIndex(2);
+        Assert1(ETy->isPointerTy() &&
+                    cast<PointerType>(ETy)->getElementType()->isIntegerTy(8),
+                "wrong type for intrinsic global variable", &GV);
+      }
     }
   }
 
@@ -473,8 +481,6 @@ void Verifier::visitGlobalAlias(const GlobalAlias &GA) {
           "Alias should have external or external weak linkage!", &GA);
   Assert1(GA.getAliasee(),
           "Aliasee cannot be NULL!", &GA);
-  Assert1(GA.getType() == GA.getAliasee()->getType(),
-          "Alias and aliasee types should match!", &GA);
   Assert1(!GA.hasUnnamedAddr(), "Alias cannot have unnamed_addr!", &GA);
 
   const Constant *Aliasee = GA.getAliasee();
@@ -505,10 +511,6 @@ void Verifier::visitGlobalAlias(const GlobalAlias &GA) {
     Assert1(!GAAliasee->mayBeOverridden(), "Alias cannot point to a weak alias",
             &GA);
   }
-
-  const GlobalValue *AG = GA.getAliasedGlobal();
-  Assert1(AG, "Aliasing chain should end with function or global variable",
-          &GA);
 
   visitGlobalValue(GA);
 }
@@ -820,6 +822,7 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT, AttributeSet Attrs,
 
   bool SawNest = false;
   bool SawReturned = false;
+  bool SawSRet = false;
 
   for (unsigned i = 0, e = Attrs.getNumSlots(); i != e; ++i) {
     unsigned Idx = Attrs.getSlotIndex(i);
@@ -850,8 +853,12 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT, AttributeSet Attrs,
       SawReturned = true;
     }
 
-    if (Attrs.hasAttribute(Idx, Attribute::StructRet))
-      Assert1(Idx == 1, "Attribute sret is not on first parameter!", V);
+    if (Attrs.hasAttribute(Idx, Attribute::StructRet)) {
+      Assert1(!SawSRet, "Cannot have multiple 'sret' parameters!", V);
+      Assert1(Idx == 1 || Idx == 2,
+              "Attribute 'sret' is not on first or second parameter!", V);
+      SawSRet = true;
+    }
 
     if (Attrs.hasAttribute(Idx, Attribute::InAlloca)) {
       Assert1(Idx == FT->getNumParams(),
@@ -1562,6 +1569,20 @@ static bool isTypeCongruent(Type *L, Type *R) {
   return PL->getAddressSpace() == PR->getAddressSpace();
 }
 
+static AttrBuilder getParameterABIAttributes(int I, AttributeSet Attrs) {
+  static const Attribute::AttrKind ABIAttrs[] = {
+      Attribute::StructRet, Attribute::ByVal, Attribute::InAlloca,
+      Attribute::InReg, Attribute::Returned};
+  AttrBuilder Copy;
+  for (auto AK : ABIAttrs) {
+    if (Attrs.hasAttribute(I + 1, AK))
+      Copy.addAttribute(AK);
+  }
+  if (Attrs.hasAttribute(I + 1, Attribute::Alignment))
+    Copy.addAlignmentAttr(Attrs.getParamAlignment(I + 1));
+  return Copy;
+}
+
 void Verifier::verifyMustTailCall(CallInst &CI) {
   Assert1(!CI.isInlineAsm(), "cannot use musttail call with inline asm", &CI);
 
@@ -1593,20 +1614,11 @@ void Verifier::verifyMustTailCall(CallInst &CI) {
 
   // - All ABI-impacting function attributes, such as sret, byval, inreg,
   //   returned, and inalloca, must match.
-  static const Attribute::AttrKind ABIAttrs[] = {
-      Attribute::Alignment, Attribute::StructRet, Attribute::ByVal,
-      Attribute::InAlloca,  Attribute::InReg,     Attribute::Returned};
   AttributeSet CallerAttrs = F->getAttributes();
   AttributeSet CalleeAttrs = CI.getAttributes();
   for (int I = 0, E = CallerTy->getNumParams(); I != E; ++I) {
-    AttrBuilder CallerABIAttrs;
-    AttrBuilder CalleeABIAttrs;
-    for (auto AK : ABIAttrs) {
-      if (CallerAttrs.hasAttribute(I + 1, AK))
-        CallerABIAttrs.addAttribute(AK);
-      if (CalleeAttrs.hasAttribute(I + 1, AK))
-        CalleeABIAttrs.addAttribute(AK);
-    }
+    AttrBuilder CallerABIAttrs = getParameterABIAttributes(I, CallerAttrs);
+    AttrBuilder CalleeABIAttrs = getParameterABIAttributes(I, CalleeAttrs);
     Assert2(CallerABIAttrs == CalleeABIAttrs,
             "cannot guarantee tail call due to mismatched ABI impacting "
             "function attributes", &CI, CI.getOperand(I));

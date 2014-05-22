@@ -21,7 +21,7 @@ namespace llvm {
   class Value;
   class DataLayout;
   class TargetLibraryInfo;
-  
+
   /// CastToCStr - Return V if it is an i8*, otherwise cast it to i8*.
   Value *CastToCStr(Value *V, IRBuilder<> &B);
 
@@ -124,6 +124,7 @@ namespace llvm {
     virtual void replaceCall(Value *With) = 0;
     virtual bool isFoldable(unsigned SizeCIOp, unsigned SizeArgOp,
                             bool isString) const = 0;
+
   public:
     virtual ~SimplifyFortifiedLibCalls();
     bool fold(CallInst *CI, const DataLayout *TD, const TargetLibraryInfo *TLI);

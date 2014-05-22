@@ -205,6 +205,16 @@ static DecodeStatus DecodeJumpTarget(MCInst &Inst,
                                      uint64_t Address,
                                      const void *Decoder);
 
+static DecodeStatus DecodeBranchTarget21(MCInst &Inst,
+                                         unsigned Offset,
+                                         uint64_t Address,
+                                         const void *Decoder);
+
+static DecodeStatus DecodeBranchTarget26(MCInst &Inst,
+                                         unsigned Offset,
+                                         uint64_t Address,
+                                         const void *Decoder);
+
 // DecodeBranchTargetMM - Decode microMIPS branch offset, which is
 // shifted left by 1 bit.
 static DecodeStatus DecodeBranchTargetMM(MCInst &Inst,
@@ -262,6 +272,9 @@ static DecodeStatus DecodeExtSize(MCInst &Inst,
                                   unsigned Insn,
                                   uint64_t Address,
                                   const void *Decoder);
+
+static DecodeStatus DecodeSimm19Lsl2(MCInst &Inst, unsigned Insn,
+                                     uint64_t Address, const void *Decoder);
 
 /// INSVE_[BHWD] have an implicit operand that the generated decoder doesn't
 /// handle.
@@ -853,6 +866,26 @@ static DecodeStatus DecodeJumpTarget(MCInst &Inst,
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeBranchTarget21(MCInst &Inst,
+                                         unsigned Offset,
+                                         uint64_t Address,
+                                         const void *Decoder) {
+  int32_t BranchOffset = SignExtend32<21>(Offset) << 2;
+
+  Inst.addOperand(MCOperand::CreateImm(BranchOffset));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeBranchTarget26(MCInst &Inst,
+                                         unsigned Offset,
+                                         uint64_t Address,
+                                         const void *Decoder) {
+  int32_t BranchOffset = SignExtend32<26>(Offset) << 2;
+
+  Inst.addOperand(MCOperand::CreateImm(BranchOffset));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus DecodeBranchTargetMM(MCInst &Inst,
                                          unsigned Offset,
                                          uint64_t Address,
@@ -906,5 +939,11 @@ static DecodeStatus DecodeExtSize(MCInst &Inst,
                                   const void *Decoder) {
   int Size = (int) Insn  + 1;
   Inst.addOperand(MCOperand::CreateImm(SignExtend32<16>(Size)));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeSimm19Lsl2(MCInst &Inst, unsigned Insn,
+                                     uint64_t Address, const void *Decoder) {
+  Inst.addOperand(MCOperand::CreateImm(SignExtend32<19>(Insn) << 2));
   return MCDisassembler::Success;
 }

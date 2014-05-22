@@ -2599,7 +2599,7 @@ bool CodeGenPrepare::OptimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
   Value *&SunkAddr = SunkAddrs[Addr];
   if (SunkAddr) {
     DEBUG(dbgs() << "CGP: Reusing nonlocal addrmode: " << AddrMode << " for "
-                 << *MemoryInst);
+                 << *MemoryInst << "\n");
     if (SunkAddr->getType() != Addr->getType())
       SunkAddr = Builder.CreateBitCast(SunkAddr, Addr->getType());
   } else if (AddrSinkUsingGEPs || (!AddrSinkUsingGEPs.getNumOccurrences() &&
@@ -2607,7 +2607,7 @@ bool CodeGenPrepare::OptimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
     // By default, we use the GEP-based method when AA is used later. This
     // prevents new inttoptr/ptrtoint pairs from degrading AA capabilities.
     DEBUG(dbgs() << "CGP: SINKING nonlocal addrmode: " << AddrMode << " for "
-                 << *MemoryInst);
+                 << *MemoryInst << "\n");
     Type *IntPtrTy = TLI->getDataLayout()->getIntPtrType(Addr->getType());
     Value *ResultPtr = nullptr, *ResultIndex = nullptr;
 
@@ -2725,7 +2725,7 @@ bool CodeGenPrepare::OptimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
     }
   } else {
     DEBUG(dbgs() << "CGP: SINKING nonlocal addrmode: " << AddrMode << " for "
-                 << *MemoryInst);
+                 << *MemoryInst << "\n");
     Type *IntPtrTy = TLI->getDataLayout()->getIntPtrType(Addr->getType());
     Value *Result = nullptr;
 
@@ -2759,7 +2759,7 @@ bool CodeGenPrepare::OptimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
         // the original IR value was tossed in favor of a constant back when
         // the AddrMode was created we need to bail out gracefully if widths
         // do not match instead of extending it.
-        Instruction *I = dyn_cast<Instruction>(Result);
+        Instruction *I = dyn_cast_or_null<Instruction>(Result);
         if (I && (Result != AddrMode.BaseReg))
           I->eraseFromParent();
         return false;

@@ -133,7 +133,7 @@ define i1 @test_setcc1() {
   %val = fcmp ole fp128 %lhs, %rhs
 ; CHECK: bl __letf2
 ; CHECK: cmp w0, #0
-; CHECK: csinc w0, wzr, wzr, gt
+; CHECK: cset w0, le
 
   ret i1 %val
 ; CHECK: ret
@@ -150,11 +150,11 @@ define i1 @test_setcc2() {
   %val = fcmp ugt fp128 %lhs, %rhs
 ; CHECK: bl      __gttf2
 ; CHECK: cmp     w0, #0
-; CHECK: csinc   [[GT:w[0-9]+]], wzr, wzr, le
+; CHECK: cset   [[GT:w[0-9]+]], gt
 
 ; CHECK: bl      __unordtf2
 ; CHECK: cmp     w0, #0
-; CHECK: csinc   [[UNORDERED:w[0-9]+]], wzr, wzr, eq
+; CHECK: cset   [[UNORDERED:w[0-9]+]], ne
 ; CHECK: orr     w0, [[UNORDERED]], [[GT]]
 
   ret i1 %val
@@ -173,11 +173,11 @@ define i32 @test_br_cc() {
   %cond = fcmp olt fp128 %lhs, %rhs
 ; CHECK: bl      __getf2
 ; CHECK: cmp     w0, #0
-; CHECK: csinc   [[OGE:w[0-9]+]], wzr, wzr, lt
+; CHECK: cset   [[OGE:w[0-9]+]], ge
 
 ; CHECK: bl      __unordtf2
 ; CHECK: cmp     w0, #0
-; CHECK: csinc   [[UNORDERED:w[0-9]+]], wzr, wzr, eq
+; CHECK: cset   [[UNORDERED:w[0-9]+]], ne
 
 ; CHECK: orr     [[UGE:w[0-9]+]], [[UNORDERED]], [[OGE]]
 ; CHECK: cbnz [[UGE]], [[RET29:.LBB[0-9]+_[0-9]+]]
@@ -205,7 +205,7 @@ define void @test_select(i1 %cond, fp128 %lhs, fp128 %rhs) {
 ; CHECK: tst w0, #0x1
 ; CHECK-NEXT: b.eq [[IFFALSE:.LBB[0-9]+_[0-9]+]]
 ; CHECK-NEXT: BB#
-; CHECK-NEXT: orr v[[VAL:[0-9]+]].16b, v0.16b, v0.16b
+; CHECK-NEXT: mov v[[VAL:[0-9]+]].16b, v0.16b
 ; CHECK-NEXT: [[IFFALSE]]:
 ; CHECK: str q[[VAL]], [{{x[0-9]+}}, :lo12:lhs]
   ret void
@@ -264,7 +264,7 @@ define fp128 @test_neg(fp128 %in) {
   ; Could in principle be optimized to fneg which we can't select, this makes
   ; sure that doesn't happen.
   %ret = fsub fp128 0xL00000000000000008000000000000000, %in
-; CHECK: orr v1.16b, v0.16b, v0.16b
+; CHECK: mov v1.16b, v0.16b
 ; CHECK: ldr q0, [{{x[0-9]+}}, :lo12:[[MINUS0]]]
 ; CHECK: bl __subtf3
 

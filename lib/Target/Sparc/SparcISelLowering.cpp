@@ -355,10 +355,13 @@ LowerFormalArguments_32(SDValue Chain,
 
   const unsigned StackOffset = 92;
 
-  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+  unsigned InIdx = 0;
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i, ++InIdx) {
     CCValAssign &VA = ArgLocs[i];
 
-    if (i == 0  && Ins[i].Flags.isSRet()) {
+    if (Ins[InIdx].Flags.isSRet()) {
+      if (InIdx != 0)
+        report_fatal_error("sparc only supports sret on the first parameter");
       // Get SRet from [%fp+64].
       int FrameIdx = MF.getFrameInfo()->CreateFixedObject(4, 64, true);
       SDValue FIPtr = DAG.getFrameIndex(FrameIdx, MVT::i32);
@@ -1705,7 +1708,7 @@ EVT SparcTargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
 /// isMaskedValueZeroForTargetNode - Return true if 'Op & Mask' is known to
 /// be zero. Op is expected to be a target specific node. Used by DAG
 /// combiner.
-void SparcTargetLowering::computeMaskedBitsForTargetNode
+void SparcTargetLowering::computeKnownBitsForTargetNode
                                 (const SDValue Op,
                                  APInt &KnownZero,
                                  APInt &KnownOne,
@@ -1719,10 +1722,8 @@ void SparcTargetLowering::computeMaskedBitsForTargetNode
   case SPISD::SELECT_ICC:
   case SPISD::SELECT_XCC:
   case SPISD::SELECT_FCC:
-    DAG.ComputeMaskedBits(Op.getOperand(1), KnownZero, KnownOne, Depth+1);
-    DAG.ComputeMaskedBits(Op.getOperand(0), KnownZero2, KnownOne2, Depth+1);
-    assert((KnownZero & KnownOne) == 0 && "Bits known to be one AND zero?");
-    assert((KnownZero2 & KnownOne2) == 0 && "Bits known to be one AND zero?");
+    DAG.computeKnownBits(Op.getOperand(1), KnownZero, KnownOne, Depth+1);
+    DAG.computeKnownBits(Op.getOperand(0), KnownZero2, KnownOne2, Depth+1);
 
     // Only known if known in both the LHS and RHS.
     KnownOne &= KnownOne2;
@@ -2027,13 +2028,10 @@ SparcTargetLowering::LowerF128Op(SDValue Op, SelectionDAG &DAG,
   for (unsigned i = 0, e = numArgs; i != e; ++i) {
     Chain = LowerF128_LibCallArg(Chain, Args, Op.getOperand(i), SDLoc(Op), DAG);
   }
-  TargetLowering::
-    CallLoweringInfo CLI(Chain,
-                         RetTyABI,
-                         false, false, false, false,
-                         0, CallingConv::C,
-                         false, false, true,
-                         Callee, Args, DAG, SDLoc(Op));
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(SDLoc(Op)).setChain(Chain)
+    .setCallee(CallingConv::C, RetTyABI, Callee, &Args, 0);
+
   std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
 
   // chain is in second result.
@@ -2086,13 +2084,9 @@ SparcTargetLowering::LowerF128Compare(SDValue LHS, SDValue RHS,
   Chain = LowerF128_LibCallArg(Chain, Args, LHS, DL, DAG);
   Chain = LowerF128_LibCallArg(Chain, Args, RHS, DL, DAG);
 
-  TargetLowering::
-    CallLoweringInfo CLI(Chain,
-                         RetTy,
-                         false, false, false, false,
-                         0, CallingConv::C,
-                         false, false, true,
-                         Callee, Args, DAG, DL);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(DL).setChain(Chain)
+    .setCallee(CallingConv::C, RetTy, Callee, &Args, 0);
 
   std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
 

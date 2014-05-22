@@ -63,18 +63,6 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
       return;
     }
 
-  // TBZ/TBNZ should print the register operand as a Wreg if the bit
-  // number is < 32.
-  if ((Opcode == ARM64::TBNZ || Opcode == ARM64::TBZ) &&
-      MI->getOperand(1).getImm() < 32) {
-    MCInst newMI = *MI;
-    unsigned Reg = MI->getOperand(0).getReg();
-    newMI.getOperand(0).setReg(getWRegFromXReg(Reg));
-    printInstruction(&newMI, O);
-    printAnnotation(O, Annot);
-    return;
-  }
-
   // SBFM/UBFM should print to a nicer aliased form if possible.
   if (Opcode == ARM64::SBFMXri || Opcode == ARM64::SBFMWri ||
       Opcode == ARM64::UBFMXri || Opcode == ARM64::UBFMWri) {
@@ -163,7 +151,7 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
       return;
     }
 
-    // Otherwise SBFX/UBFX is the prefered form
+    // Otherwise SBFX/UBFX is the preferred form
     O << '\t' << (IsSigned ? "sbfx" : "ubfx") << '\t'
       << getRegisterName(Op0.getReg()) << ", " << getRegisterName(Op1.getReg())
       << ", #" << Op2.getImm() << ", #" << Op3.getImm() - Op2.getImm() + 1;
@@ -190,7 +178,7 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
 
     int LSB = ImmR;
     int Width = ImmS - ImmR + 1;
-    // Otherwise BFXIL the prefered form
+    // Otherwise BFXIL the preferred form
     O << "\tbfxil\t"
       << getRegisterName(Op0.getReg()) << ", " << getRegisterName(Op2.getReg())
       << ", #" << LSB << ", #" << Width;
@@ -218,129 +206,6 @@ void ARM64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
       MI->getOperand(2).isExpr()) {
     O << "\tmovk\t" << getRegisterName(MI->getOperand(0).getReg()) << ", #"
       << *MI->getOperand(2).getExpr();
-    return;
-  }
-
-  // ANDS WZR, Wn, #imm ==> TST Wn, #imm
-  // ANDS XZR, Xn, #imm ==> TST Xn, #imm
-  if (Opcode == ARM64::ANDSWri && MI->getOperand(0).getReg() == ARM64::WZR) {
-    O << "\ttst\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printLogicalImm32(MI, 2, O);
-    return;
-  }
-  if (Opcode == ARM64::ANDSXri && MI->getOperand(0).getReg() == ARM64::XZR) {
-    O << "\ttst\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printLogicalImm64(MI, 2, O);
-    return;
-  }
-  // ANDS WZR, Wn, Wm{, lshift #imm} ==> TST Wn{, lshift #imm}
-  // ANDS XZR, Xn, Xm{, lshift #imm} ==> TST Xn{, lshift #imm}
-  if ((Opcode == ARM64::ANDSWrs && MI->getOperand(0).getReg() == ARM64::WZR) ||
-      (Opcode == ARM64::ANDSXrs && MI->getOperand(0).getReg() == ARM64::XZR)) {
-    O << "\ttst\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printShiftedRegister(MI, 2, O);
-    return;
-  }
-
-  // ORN Wn, WZR, Wm{, lshift #imm} ==> MVN Wn, Wm{, lshift #imm}
-  // ORN Xn, XZR, Xm{, lshift #imm} ==> MVN Xn, Xm{, lshift #imm}
-  if ((Opcode == ARM64::ORNWrs && MI->getOperand(1).getReg() == ARM64::WZR) ||
-      (Opcode == ARM64::ORNXrs && MI->getOperand(1).getReg() == ARM64::XZR)) {
-    O << "\tmvn\t" << getRegisterName(MI->getOperand(0).getReg()) << ", ";
-    printShiftedRegister(MI, 2, O);
-    return;
-  }
-  // SUBS WZR, Wn, #imm ==> CMP Wn, #imm
-  // SUBS XZR, Xn, #imm ==> CMP Xn, #imm
-  if ((Opcode == ARM64::SUBSWri && MI->getOperand(0).getReg() == ARM64::WZR) ||
-      (Opcode == ARM64::SUBSXri && MI->getOperand(0).getReg() == ARM64::XZR)) {
-    O << "\tcmp\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printAddSubImm(MI, 2, O);
-    return;
-  }
-  // SUBS WZR, Wn, Wm{, lshift #imm} ==> CMP Wn, Wm{, lshift #imm}
-  // SUBS XZR, Xn, Xm{, lshift #imm} ==> CMP Xn, Xm{, lshift #imm}
-  if ((Opcode == ARM64::SUBSWrs && MI->getOperand(0).getReg() == ARM64::WZR) ||
-      (Opcode == ARM64::SUBSXrs && MI->getOperand(0).getReg() == ARM64::XZR)) {
-    O << "\tcmp\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printShiftedRegister(MI, 2, O);
-    return;
-  }
-  // SUBS XZR, Xn, Wm, uxtb #imm ==> CMP Xn, uxtb #imm
-  // SUBS WZR, Wn, Xm, uxtb #imm ==> CMP Wn, uxtb #imm
-  if ((Opcode == ARM64::SUBSXrx && MI->getOperand(0).getReg() == ARM64::XZR) ||
-      (Opcode == ARM64::SUBSWrx && MI->getOperand(0).getReg() == ARM64::WZR)) {
-    O << "\tcmp\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printExtendedRegister(MI, 2, O);
-    return;
-  }
-  // SUBS XZR, Xn, Xm, uxtx #imm ==> CMP Xn, uxtb #imm
-  if (Opcode == ARM64::SUBSXrx64 && MI->getOperand(0).getReg() == ARM64::XZR) {
-    O << "\tcmp\t" << getRegisterName(MI->getOperand(1).getReg()) << ", "
-      << getRegisterName(MI->getOperand(2).getReg());
-    printExtend(MI, 3, O);
-    return;
-  }
-
-  // ADDS WZR, Wn, #imm ==> CMN Wn, #imm
-  // ADDS XZR, Xn, #imm ==> CMN Xn, #imm
-  if ((Opcode == ARM64::ADDSWri && MI->getOperand(0).getReg() == ARM64::WZR) ||
-      (Opcode == ARM64::ADDSXri && MI->getOperand(0).getReg() == ARM64::XZR)) {
-    O << "\tcmn\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printAddSubImm(MI, 2, O);
-    return;
-  }
-  // ADDS WZR, Wn, Wm{, lshift #imm} ==> CMN Wn, Wm{, lshift #imm}
-  // ADDS XZR, Xn, Xm{, lshift #imm} ==> CMN Xn, Xm{, lshift #imm}
-  if ((Opcode == ARM64::ADDSWrs && MI->getOperand(0).getReg() == ARM64::WZR) ||
-      (Opcode == ARM64::ADDSXrs && MI->getOperand(0).getReg() == ARM64::XZR)) {
-    O << "\tcmn\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printShiftedRegister(MI, 2, O);
-    return;
-  }
-  // ADDS XZR, Xn, Wm, uxtb #imm ==> CMN Xn, uxtb #imm
-  if (Opcode == ARM64::ADDSXrx && MI->getOperand(0).getReg() == ARM64::XZR) {
-    O << "\tcmn\t" << getRegisterName(MI->getOperand(1).getReg()) << ", ";
-    printExtendedRegister(MI, 2, O);
-    return;
-  }
-  // ADDS XZR, Xn, Xm, uxtx #imm ==> CMN Xn, uxtb #imm
-  if (Opcode == ARM64::ADDSXrx64 && MI->getOperand(0).getReg() == ARM64::XZR) {
-    O << "\tcmn\t" << getRegisterName(MI->getOperand(1).getReg()) << ", "
-      << getRegisterName(MI->getOperand(2).getReg());
-    printExtend(MI, 3, O);
-    return;
-  }
-  // ADD WSP, Wn, #0 ==> MOV WSP, Wn
-  if (Opcode == ARM64::ADDWri && (MI->getOperand(0).getReg() == ARM64::WSP ||
-                                  MI->getOperand(1).getReg() == ARM64::WSP) &&
-      MI->getOperand(2).getImm() == 0 &&
-      ARM64_AM::getShiftValue(MI->getOperand(3).getImm()) == 0) {
-    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
-      << ", " << getRegisterName(MI->getOperand(1).getReg());
-    return;
-  }
-  // ADD XSP, Wn, #0 ==> MOV XSP, Wn
-  if (Opcode == ARM64::ADDXri && (MI->getOperand(0).getReg() == ARM64::SP ||
-                                  MI->getOperand(1).getReg() == ARM64::SP) &&
-      MI->getOperand(2).getImm() == 0 &&
-      ARM64_AM::getShiftValue(MI->getOperand(3).getImm()) == 0) {
-    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
-      << ", " << getRegisterName(MI->getOperand(1).getReg());
-    return;
-  }
-  // ORR Wn, WZR, Wm ==> MOV Wn, Wm
-  if (Opcode == ARM64::ORRWrs && MI->getOperand(1).getReg() == ARM64::WZR &&
-      MI->getOperand(3).getImm() == 0) {
-    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
-      << ", " << getRegisterName(MI->getOperand(2).getReg());
-    return;
-  }
-  // ORR Xn, XZR, Xm ==> MOV Xn, Xm
-  if (Opcode == ARM64::ORRXrs && MI->getOperand(1).getReg() == ARM64::XZR &&
-      MI->getOperand(3).getImm() == 0) {
-    O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg())
-      << ", " << getRegisterName(MI->getOperand(2).getReg());
     return;
   }
 
@@ -1112,7 +977,7 @@ void ARM64InstPrinter::printShifter(const MCInst *MI, unsigned OpNum,
   if (ARM64_AM::getShiftType(Val) == ARM64_AM::LSL &&
       ARM64_AM::getShiftValue(Val) == 0)
     return;
-  O << ", " << ARM64_AM::getShiftName(ARM64_AM::getShiftType(Val)) << " #"
+  O << ", " << ARM64_AM::getShiftExtendName(ARM64_AM::getShiftType(Val)) << " #"
     << ARM64_AM::getShiftValue(Val);
 }
 
@@ -1131,7 +996,7 @@ void ARM64InstPrinter::printExtendedRegister(const MCInst *MI, unsigned OpNum,
 void ARM64InstPrinter::printExtend(const MCInst *MI, unsigned OpNum,
                                    raw_ostream &O) {
   unsigned Val = MI->getOperand(OpNum).getImm();
-  ARM64_AM::ExtendType ExtType = ARM64_AM::getArithExtendType(Val);
+  ARM64_AM::ShiftExtendType ExtType = ARM64_AM::getArithExtendType(Val);
   unsigned ShiftVal = ARM64_AM::getArithShiftValue(Val);
 
   // If the destination or first source register operand is [W]SP, print
@@ -1149,21 +1014,21 @@ void ARM64InstPrinter::printExtend(const MCInst *MI, unsigned OpNum,
       return;
     }
   }
-  O << ", " << ARM64_AM::getExtendName(ExtType);
+  O << ", " << ARM64_AM::getShiftExtendName(ExtType);
   if (ShiftVal != 0)
     O << " #" << ShiftVal;
-}
-
-void ARM64InstPrinter::printDotCondCode(const MCInst *MI, unsigned OpNum,
-                                        raw_ostream &O) {
-  ARM64CC::CondCode CC = (ARM64CC::CondCode)MI->getOperand(OpNum).getImm();
-  O << '.' << ARM64CC::getCondCodeName(CC);
 }
 
 void ARM64InstPrinter::printCondCode(const MCInst *MI, unsigned OpNum,
                                      raw_ostream &O) {
   ARM64CC::CondCode CC = (ARM64CC::CondCode)MI->getOperand(OpNum).getImm();
   O << ARM64CC::getCondCodeName(CC);
+}
+
+void ARM64InstPrinter::printInverseCondCode(const MCInst *MI, unsigned OpNum,
+                                            raw_ostream &O) {
+  ARM64CC::CondCode CC = (ARM64CC::CondCode)MI->getOperand(OpNum).getImm();
+  O << ARM64CC::getCondCodeName(ARM64CC::getInvertedCondCode(CC));
 }
 
 void ARM64InstPrinter::printAMNoIndex(const MCInst *MI, unsigned OpNum,
@@ -1224,7 +1089,7 @@ void ARM64InstPrinter::printMemoryPostIndexed(const MCInst *MI, unsigned OpNum,
 void ARM64InstPrinter::printMemoryRegOffset(const MCInst *MI, unsigned OpNum,
                                             raw_ostream &O, int Scale) {
   unsigned Val = MI->getOperand(OpNum + 2).getImm();
-  ARM64_AM::ExtendType ExtType = ARM64_AM::getMemExtendType(Val);
+  ARM64_AM::ShiftExtendType ExtType = ARM64_AM::getMemExtendType(Val);
 
   O << '[' << getRegisterName(MI->getOperand(OpNum).getReg()) << ", ";
   if (ExtType == ARM64_AM::UXTW || ExtType == ARM64_AM::SXTW)
@@ -1238,7 +1103,7 @@ void ARM64InstPrinter::printMemoryRegOffset(const MCInst *MI, unsigned OpNum,
     if (DoShift)
       O << ", lsl";
   } else
-    O << ", " << ARM64_AM::getExtendName(ExtType);
+    O << ", " << ARM64_AM::getShiftExtendName(ExtType);
 
   if (DoShift)
     O << " #" << Log2_32(Scale);

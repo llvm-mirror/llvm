@@ -1943,11 +1943,11 @@ public:
 
   /// Determine which of the bits specified in Mask are known to be either zero
   /// or one and return them in the KnownZero/KnownOne bitsets.
-  virtual void computeMaskedBitsForTargetNode(const SDValue Op,
-                                              APInt &KnownZero,
-                                              APInt &KnownOne,
-                                              const SelectionDAG &DAG,
-                                              unsigned Depth = 0) const;
+  virtual void computeKnownBitsForTargetNode(const SDValue Op,
+                                             APInt &KnownZero,
+                                             APInt &KnownOne,
+                                             const SelectionDAG &DAG,
+                                             unsigned Depth = 0) const;
 
   /// This method can be implemented by targets that want to expose additional
   /// information about sign bits to the DAG Combiner.
@@ -2111,7 +2111,7 @@ public:
     unsigned NumFixedArgs;
     CallingConv::ID CallConv;
     SDValue Callee;
-    ArgListTy &Args;
+    ArgListTy *Args;
     SelectionDAG &DAG;
     SDLoc DL;
     ImmutableCallSite *CS;
@@ -2119,33 +2119,96 @@ public:
     SmallVector<SDValue, 32> OutVals;
     SmallVector<ISD::InputArg, 32> Ins;
 
+    CallLoweringInfo(SelectionDAG &DAG)
+      : RetTy(nullptr), RetSExt(false), RetZExt(false), IsVarArg(false),
+        IsInReg(false), DoesNotReturn(false), IsReturnValueUsed(true),
+        IsTailCall(false), NumFixedArgs(-1), CallConv(CallingConv::C),
+        Args(nullptr), DAG(DAG), CS(nullptr) {}
 
-    /// Constructs a call lowering context based on the ImmutableCallSite \p cs.
-    CallLoweringInfo(SDValue chain, Type *retTy,
-                     FunctionType *FTy, bool isTailCall, SDValue callee,
-                     ArgListTy &args, SelectionDAG &dag, SDLoc dl,
-                     ImmutableCallSite &cs)
-    : Chain(chain), RetTy(retTy), RetSExt(cs.paramHasAttr(0, Attribute::SExt)),
-      RetZExt(cs.paramHasAttr(0, Attribute::ZExt)), IsVarArg(FTy->isVarArg()),
-      IsInReg(cs.paramHasAttr(0, Attribute::InReg)),
-      DoesNotReturn(cs.doesNotReturn()),
-      IsReturnValueUsed(!cs.getInstruction()->use_empty()),
-      IsTailCall(isTailCall), NumFixedArgs(FTy->getNumParams()),
-      CallConv(cs.getCallingConv()), Callee(callee), Args(args), DAG(dag),
-      DL(dl), CS(&cs) {}
+    CallLoweringInfo &setDebugLoc(SDLoc dl) {
+      DL = dl;
+      return *this;
+    }
 
-    /// Constructs a call lowering context based on the provided call
-    /// information.
-    CallLoweringInfo(SDValue chain, Type *retTy, bool retSExt, bool retZExt,
-                     bool isVarArg, bool isInReg, unsigned numFixedArgs,
-                     CallingConv::ID callConv, bool isTailCall,
-                     bool doesNotReturn, bool isReturnValueUsed, SDValue callee,
-                     ArgListTy &args, SelectionDAG &dag, SDLoc dl)
-    : Chain(chain), RetTy(retTy), RetSExt(retSExt), RetZExt(retZExt),
-      IsVarArg(isVarArg), IsInReg(isInReg), DoesNotReturn(doesNotReturn),
-      IsReturnValueUsed(isReturnValueUsed), IsTailCall(isTailCall),
-      NumFixedArgs(numFixedArgs), CallConv(callConv), Callee(callee),
-      Args(args), DAG(dag), DL(dl), CS(nullptr) {}
+    CallLoweringInfo &setChain(SDValue InChain) {
+      Chain = InChain;
+      return *this;
+    }
+
+    CallLoweringInfo &setCallee(CallingConv::ID CC, Type *ResultType,
+                                SDValue Target, ArgListTy *ArgsList,
+                                unsigned FixedArgs = -1) {
+      RetTy = ResultType;
+      Callee = Target;
+      CallConv = CC;
+      NumFixedArgs =
+        (FixedArgs == static_cast<unsigned>(-1) ? Args->size() : FixedArgs);
+      Args = ArgsList;
+      return *this;
+    }
+
+    CallLoweringInfo &setCallee(Type *ResultType, FunctionType *FTy,
+                                SDValue Target, ArgListTy *ArgsList,
+                                ImmutableCallSite &Call) {
+      RetTy = ResultType;
+
+      IsInReg = Call.paramHasAttr(0, Attribute::InReg);
+      DoesNotReturn = Call.doesNotReturn();
+      IsVarArg = FTy->isVarArg();
+      IsReturnValueUsed = !Call.getInstruction()->use_empty();
+      RetSExt = Call.paramHasAttr(0, Attribute::SExt);
+      RetZExt = Call.paramHasAttr(0, Attribute::ZExt);
+
+      Callee = Target;
+
+      CallConv = Call.getCallingConv();
+      NumFixedArgs = FTy->getNumParams();
+      Args = ArgsList;
+
+      CS = &Call;
+
+      return *this;
+    }
+
+    CallLoweringInfo &setInRegister(bool Value = true) {
+      IsInReg = Value;
+      return *this;
+    }
+
+    CallLoweringInfo &setNoReturn(bool Value = true) {
+      DoesNotReturn = Value;
+      return *this;
+    }
+
+    CallLoweringInfo &setVarArg(bool Value = true) {
+      IsVarArg = Value;
+      return *this;
+    }
+
+    CallLoweringInfo &setTailCall(bool Value = true) {
+      IsTailCall = Value;
+      return *this;
+    }
+
+    CallLoweringInfo &setDiscardResult(bool Value = true) {
+      IsReturnValueUsed = !Value;
+      return *this;
+    }
+
+    CallLoweringInfo &setSExtResult(bool Value = true) {
+      RetSExt = Value;
+      return *this;
+    }
+
+    CallLoweringInfo &setZExtResult(bool Value = true) {
+      RetZExt = Value;
+      return *this;
+    }
+
+    ArgListTy &getArgs() {
+      assert(Args && "Arguments must be set before accessing them");
+      return *Args;
+    }
   };
 
   /// This function lowers an abstract call to a function into an actual call.
@@ -2217,7 +2280,7 @@ public:
   /// Return the register ID of the name passed in. Used by named register
   /// global variables extension. There is no target-independent behaviour
   /// so the default action is to bail.
-  virtual unsigned getRegisterByName(const char* RegName) const {
+  virtual unsigned getRegisterByName(const char* RegName, EVT VT) const {
     report_fatal_error("Named registers not implemented for this target");
   }
 

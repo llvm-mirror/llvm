@@ -88,6 +88,27 @@ public:
                                     SmallVectorImpl<MCFixup> &Fixups,
                                     const MCSubtargetInfo &STI) const;
 
+  // getBranchTarget21OpValue - Return binary encoding of the branch
+  // offset operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getBranchTarget21OpValue(const MCInst &MI, unsigned OpNo,
+                                   SmallVectorImpl<MCFixup> &Fixups,
+                                   const MCSubtargetInfo &STI) const;
+
+  // getBranchTarget26OpValue - Return binary encoding of the branch
+  // offset operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getBranchTarget26OpValue(const MCInst &MI, unsigned OpNo,
+                                    SmallVectorImpl<MCFixup> &Fixups,
+                                    const MCSubtargetInfo &STI) const;
+
+  // getJumpOffset16OpValue - Return binary encoding of the jump
+  // offset operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getJumpOffset16OpValue(const MCInst &MI, unsigned OpNo,
+                                  SmallVectorImpl<MCFixup> &Fixups,
+                                  const MCSubtargetInfo &STI) const;
+
   // getMachineOpValue - Return binary encoding of operand. If the machin
   // operand requires relocation, record the relocation and return zero.
   unsigned getMachineOpValue(const MCInst &MI, const MCOperand &MO,
@@ -115,6 +136,10 @@ public:
   unsigned getLSAImmEncoding(const MCInst &MI, unsigned OpNo,
                              SmallVectorImpl<MCFixup> &Fixups,
                              const MCSubtargetInfo &STI) const;
+
+  unsigned getSimm19Lsl2Encoding(const MCInst &MI, unsigned OpNo,
+                                 SmallVectorImpl<MCFixup> &Fixups,
+                                 const MCSubtargetInfo &STI) const;
 
   unsigned getExprOpValue(const MCExpr *Expr, SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;

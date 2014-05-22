@@ -54,7 +54,7 @@ def SDT_ARM64Brcond  : SDTypeProfile<0, 3,
                                      [SDTCisVT<0, OtherVT>, SDTCisVT<1, i32>,
                                       SDTCisVT<2, i32>]>;
 def SDT_ARM64cbz : SDTypeProfile<0, 2, [SDTCisInt<0>, SDTCisVT<1, OtherVT>]>;
-def SDT_ARM64tbz : SDTypeProfile<0, 3, [SDTCisVT<0, i64>, SDTCisVT<1, i64>,
+def SDT_ARM64tbz : SDTypeProfile<0, 3, [SDTCisInt<0>, SDTCisInt<1>,
                                         SDTCisVT<2, OtherVT>]>;
 
 
@@ -88,7 +88,7 @@ def SDT_ARM64binvec : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
 def SDT_ARM64trivec : SDTypeProfile<1, 3, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                                            SDTCisSameAs<0,2>,
                                            SDTCisSameAs<0,3>]>;
-def SDT_ARM64TCRET : SDTypeProfile<0, 1, [SDTCisPtrTy<0>]>;
+def SDT_ARM64TCRET : SDTypeProfile<0, 2, [SDTCisPtrTy<0>]>;
 def SDT_ARM64PREFETCH : SDTypeProfile<0, 2, [SDTCisVT<0, i32>, SDTCisPtrTy<1>]>;
 
 def SDT_ARM64ITOF  : SDTypeProfile<1, 1, [SDTCisFP<0>, SDTCisSameAs<0,1>]>;
@@ -365,6 +365,7 @@ defm MOVN : MoveImmediate<0b00, "movn">;
 let PostEncoderMethod = "fixMOVZ" in
 defm MOVZ : MoveImmediate<0b10, "movz">;
 
+// First group of aliases covers an implicit "lsl #0".
 def : InstAlias<"movk $dst, $imm", (MOVKWi GPR32:$dst, imm0_65535:$imm, 0)>;
 def : InstAlias<"movk $dst, $imm", (MOVKXi GPR64:$dst, imm0_65535:$imm, 0)>;
 def : InstAlias<"movn $dst, $imm", (MOVNWi GPR32:$dst, imm0_65535:$imm, 0)>;
@@ -372,6 +373,7 @@ def : InstAlias<"movn $dst, $imm", (MOVNXi GPR64:$dst, imm0_65535:$imm, 0)>;
 def : InstAlias<"movz $dst, $imm", (MOVZWi GPR32:$dst, imm0_65535:$imm, 0)>;
 def : InstAlias<"movz $dst, $imm", (MOVZXi GPR64:$dst, imm0_65535:$imm, 0)>;
 
+// Next, we have various ELF relocations with the ":XYZ_g0:sym" syntax.
 def : InstAlias<"movz $Rd, $sym", (MOVZXi GPR64:$Rd, movz_symbol_g3:$sym, 48)>;
 def : InstAlias<"movz $Rd, $sym", (MOVZXi GPR64:$Rd, movz_symbol_g2:$sym, 32)>;
 def : InstAlias<"movz $Rd, $sym", (MOVZXi GPR64:$Rd, movz_symbol_g1:$sym, 16)>;
@@ -395,6 +397,40 @@ def : InstAlias<"movn $Rd, $sym", (MOVNWi GPR32:$Rd, movz_symbol_g0:$sym, 0)>;
 
 def : InstAlias<"movk $Rd, $sym", (MOVKWi GPR32:$Rd, movk_symbol_g1:$sym, 16)>;
 def : InstAlias<"movk $Rd, $sym", (MOVKWi GPR32:$Rd, movk_symbol_g0:$sym, 0)>;
+
+// Final group of aliases covers true "mov $Rd, $imm" cases.
+multiclass movw_mov_alias<string basename,Instruction INST, RegisterClass GPR,
+                          int width, int shift> {
+  def _asmoperand : AsmOperandClass {
+    let Name = basename # width # "_lsl" # shift # "MovAlias";
+    let PredicateMethod = "is" # basename # "MovAlias<" # width # ", "
+                               # shift # ">";
+    let RenderMethod = "add" # basename # "MovAliasOperands<" # shift # ">";
+  }
+
+  def _movimm : Operand<i32> {
+    let ParserMatchClass = !cast<AsmOperandClass>(NAME # "_asmoperand");
+  }
+
+  def : InstAlias<"mov $Rd, $imm",
+                  (INST GPR:$Rd, !cast<Operand>(NAME # "_movimm"):$imm, shift)>;
+}
+
+defm : movw_mov_alias<"MOVZ", MOVZWi, GPR32, 32, 0>;
+defm : movw_mov_alias<"MOVZ", MOVZWi, GPR32, 32, 16>;
+
+defm : movw_mov_alias<"MOVZ", MOVZXi, GPR64, 64, 0>;
+defm : movw_mov_alias<"MOVZ", MOVZXi, GPR64, 64, 16>;
+defm : movw_mov_alias<"MOVZ", MOVZXi, GPR64, 64, 32>;
+defm : movw_mov_alias<"MOVZ", MOVZXi, GPR64, 64, 48>;
+
+defm : movw_mov_alias<"MOVN", MOVNWi, GPR32, 32, 0>;
+defm : movw_mov_alias<"MOVN", MOVNWi, GPR32, 32, 16>;
+
+defm : movw_mov_alias<"MOVN", MOVNXi, GPR64, 64, 0>;
+defm : movw_mov_alias<"MOVN", MOVNXi, GPR64, 64, 16>;
+defm : movw_mov_alias<"MOVN", MOVNXi, GPR64, 64, 32>;
+defm : movw_mov_alias<"MOVN", MOVNXi, GPR64, 64, 48>;
 
 let isReMaterializable = 1, isCodeGenOnly = 1, isMoveImm = 1,
     isAsCheapAsAMove = 1 in {
@@ -474,6 +510,15 @@ def : InstAlias<"ngcs $dst, $src", (SBCSXr GPR64:$dst, XZR, GPR64:$src)>;
 defm ADD : AddSub<0, "add", add>;
 defm SUB : AddSub<1, "sub">;
 
+def : InstAlias<"mov $dst, $src",
+                (ADDWri GPR32sponly:$dst, GPR32sp:$src, 0, 0)>;
+def : InstAlias<"mov $dst, $src",
+                (ADDWri GPR32sp:$dst, GPR32sponly:$src, 0, 0)>;
+def : InstAlias<"mov $dst, $src",
+                (ADDXri GPR64sponly:$dst, GPR64sp:$src, 0, 0)>;
+def : InstAlias<"mov $dst, $src",
+                (ADDXri GPR64sp:$dst, GPR64sponly:$src, 0, 0)>;
+
 defm ADDS : AddSubS<0, "adds", ARM64add_flag, "cmn">;
 defm SUBS : AddSubS<1, "subs", ARM64sub_flag, "cmp">;
 
@@ -509,13 +554,6 @@ def : Pat<(sub GPR64:$Rn, neg_addsub_shifted_imm64:$imm),
           (ADDXri GPR64:$Rn, neg_addsub_shifted_imm64:$imm)>;
 }
 
-def : InstAlias<"neg $dst, $src", (SUBWrs GPR32:$dst, WZR, GPR32:$src, 0)>;
-def : InstAlias<"neg $dst, $src", (SUBXrs GPR64:$dst, XZR, GPR64:$src, 0)>;
-def : InstAlias<"neg $dst, $src, $shift",
-                (SUBWrs GPR32:$dst, WZR, GPR32:$src, arith_shift32:$shift)>;
-def : InstAlias<"neg $dst, $src, $shift",
-                (SUBXrs GPR64:$dst, XZR, GPR64:$src, arith_shift64:$shift)>;
-
 // Because of the immediate format for add/sub-imm instructions, the
 // expression (add x, -1) must be transformed to (SUB{W,X}ri x, 1).
 //  These patterns capture that transformation.
@@ -530,12 +568,20 @@ def : Pat<(ARM64sub_flag GPR64:$Rn, neg_addsub_shifted_imm64:$imm),
           (ADDSXri GPR64:$Rn, neg_addsub_shifted_imm64:$imm)>;
 }
 
-def : InstAlias<"negs $dst, $src", (SUBSWrs GPR32:$dst, WZR, GPR32:$src, 0)>;
-def : InstAlias<"negs $dst, $src", (SUBSXrs GPR64:$dst, XZR, GPR64:$src, 0)>;
-def : InstAlias<"negs $dst, $src, $shift",
-                (SUBSWrs GPR32:$dst, WZR, GPR32:$src, arith_shift32:$shift)>;
-def : InstAlias<"negs $dst, $src, $shift",
-                (SUBSXrs GPR64:$dst, XZR, GPR64:$src, arith_shift64:$shift)>;
+def : InstAlias<"neg $dst, $src", (SUBWrs GPR32:$dst, WZR, GPR32:$src, 0), 3>;
+def : InstAlias<"neg $dst, $src", (SUBXrs GPR64:$dst, XZR, GPR64:$src, 0), 3>;
+def : InstAlias<"neg $dst, $src$shift",
+                (SUBWrs GPR32:$dst, WZR, GPR32:$src, arith_shift32:$shift), 2>;
+def : InstAlias<"neg $dst, $src$shift",
+                (SUBXrs GPR64:$dst, XZR, GPR64:$src, arith_shift64:$shift), 2>;
+
+def : InstAlias<"negs $dst, $src", (SUBSWrs GPR32:$dst, WZR, GPR32:$src, 0), 3>;
+def : InstAlias<"negs $dst, $src", (SUBSXrs GPR64:$dst, XZR, GPR64:$src, 0), 3>;
+def : InstAlias<"negs $dst, $src$shift",
+                (SUBSWrs GPR32:$dst, WZR, GPR32:$src, arith_shift32:$shift), 2>;
+def : InstAlias<"negs $dst, $src$shift",
+                (SUBSXrs GPR64:$dst, XZR, GPR64:$src, arith_shift64:$shift), 2>;
+
 
 // Unsigned/Signed divide
 defm UDIV : Div<0, "udiv", udiv>;
@@ -628,10 +674,13 @@ defm AND  : LogicalImm<0b00, "and", and>;
 defm EOR  : LogicalImm<0b10, "eor", xor>;
 defm ORR  : LogicalImm<0b01, "orr", or>;
 
+// FIXME: these aliases *are* canonical sometimes (when movz can't be
+// used). Actually, it seems to be working right now, but putting logical_immXX
+// here is a bit dodgy on the AsmParser side too.
 def : InstAlias<"mov $dst, $imm", (ORRWri GPR32sp:$dst, WZR,
-                                          logical_imm32:$imm)>;
+                                          logical_imm32:$imm), 0>;
 def : InstAlias<"mov $dst, $imm", (ORRXri GPR64sp:$dst, XZR,
-                                          logical_imm64:$imm)>;
+                                          logical_imm64:$imm), 0>;
 
 
 // (register)
@@ -648,30 +697,32 @@ defm ORN  : LogicalReg<0b01, 1, "orn",
                        BinOpFrag<(or node:$LHS, (not node:$RHS))>>;
 defm ORR  : LogicalReg<0b01, 0, "orr", or>;
 
-def : InstAlias<"tst $src1, $src2",
-                (ANDSWri WZR, GPR32:$src1, logical_imm32:$src2)>;
-def : InstAlias<"tst $src1, $src2",
-                (ANDSXri XZR, GPR64:$src1, logical_imm64:$src2)>;
+def : InstAlias<"mov $dst, $src", (ORRWrs GPR32:$dst, WZR, GPR32:$src, 0), 2>;
+def : InstAlias<"mov $dst, $src", (ORRXrs GPR64:$dst, XZR, GPR64:$src, 0), 2>;
+
+def : InstAlias<"mvn $Wd, $Wm", (ORNWrs GPR32:$Wd, WZR, GPR32:$Wm, 0), 3>;
+def : InstAlias<"mvn $Xd, $Xm", (ORNXrs GPR64:$Xd, XZR, GPR64:$Xm, 0), 3>;
+
+def : InstAlias<"mvn $Wd, $Wm$sh",
+                (ORNWrs GPR32:$Wd, WZR, GPR32:$Wm, logical_shift32:$sh), 2>;
+def : InstAlias<"mvn $Xd, $Xm$sh",
+                (ORNXrs GPR64:$Xd, XZR, GPR64:$Xm, logical_shift64:$sh), 2>;
 
 def : InstAlias<"tst $src1, $src2",
-                (ANDSWrs WZR, GPR32:$src1, GPR32:$src2, 0)>;
+                (ANDSWri WZR, GPR32:$src1, logical_imm32:$src2), 2>;
 def : InstAlias<"tst $src1, $src2",
-                (ANDSXrs XZR, GPR64:$src1, GPR64:$src2, 0)>;
+                (ANDSXri XZR, GPR64:$src1, logical_imm64:$src2), 2>;
 
-def : InstAlias<"tst $src1, $src2, $sh",
-                (ANDSWrs WZR, GPR32:$src1, GPR32:$src2, logical_shift:$sh)>;
-def : InstAlias<"tst $src1, $src2, $sh",
-                (ANDSXrs XZR, GPR64:$src1, GPR64:$src2, logical_shift:$sh)>;
+def : InstAlias<"tst $src1, $src2",
+                        (ANDSWrs WZR, GPR32:$src1, GPR32:$src2, 0), 3>;
+def : InstAlias<"tst $src1, $src2",
+                        (ANDSXrs XZR, GPR64:$src1, GPR64:$src2, 0), 3>;
 
-def : InstAlias<"mvn $Wd, $Wm",
-                (ORNWrs GPR32:$Wd, WZR, GPR32:$Wm, 0)>;
-def : InstAlias<"mvn $Xd, $Xm",
-                (ORNXrs GPR64:$Xd, XZR, GPR64:$Xm, 0)>;
+def : InstAlias<"tst $src1, $src2$sh",
+               (ANDSWrs WZR, GPR32:$src1, GPR32:$src2, logical_shift32:$sh), 2>;
+def : InstAlias<"tst $src1, $src2$sh",
+               (ANDSXrs XZR, GPR64:$src1, GPR64:$src2, logical_shift64:$sh), 2>;
 
-def : InstAlias<"mvn $Wd, $Wm, $sh",
-                (ORNWrs GPR32:$Wd, WZR, GPR32:$Wm, logical_shift:$sh)>;
-def : InstAlias<"mvn $Xd, $Xm, $sh",
-                (ORNXrs GPR64:$Xd, XZR, GPR64:$Xm, logical_shift:$sh)>;
 
 def : Pat<(not GPR32:$Wm), (ORNWrr WZR, GPR32:$Wm)>;
 def : Pat<(not GPR64:$Xm), (ORNXrr XZR, GPR64:$Xm)>;
@@ -874,27 +925,30 @@ def : Pat<(ARM64csel (i64 0), (i64 -1), (i32 imm:$cc), NZCV),
 // The inverse of the condition code from the alias instruction is what is used
 // in the aliased instruction. The parser all ready inverts the condition code
 // for these aliases.
-// FIXME: Is this the correct way to handle these aliases?
-def : InstAlias<"cset $dst, $cc", (CSINCWr GPR32:$dst, WZR, WZR, ccode:$cc)>;
-def : InstAlias<"cset $dst, $cc", (CSINCXr GPR64:$dst, XZR, XZR, ccode:$cc)>;
+def : InstAlias<"cset $dst, $cc",
+                (CSINCWr GPR32:$dst, WZR, WZR, inv_ccode:$cc)>;
+def : InstAlias<"cset $dst, $cc",
+                (CSINCXr GPR64:$dst, XZR, XZR, inv_ccode:$cc)>;
 
-def : InstAlias<"csetm $dst, $cc", (CSINVWr GPR32:$dst, WZR, WZR, ccode:$cc)>;
-def : InstAlias<"csetm $dst, $cc", (CSINVXr GPR64:$dst, XZR, XZR, ccode:$cc)>;
+def : InstAlias<"csetm $dst, $cc",
+                (CSINVWr GPR32:$dst, WZR, WZR, inv_ccode:$cc)>;
+def : InstAlias<"csetm $dst, $cc",
+                (CSINVXr GPR64:$dst, XZR, XZR, inv_ccode:$cc)>;
 
 def : InstAlias<"cinc $dst, $src, $cc",
-                (CSINCWr GPR32:$dst, GPR32:$src, GPR32:$src, ccode:$cc)>;
+                (CSINCWr GPR32:$dst, GPR32:$src, GPR32:$src, inv_ccode:$cc)>;
 def : InstAlias<"cinc $dst, $src, $cc",
-                (CSINCXr GPR64:$dst, GPR64:$src, GPR64:$src, ccode:$cc)>;
+                (CSINCXr GPR64:$dst, GPR64:$src, GPR64:$src, inv_ccode:$cc)>;
 
 def : InstAlias<"cinv $dst, $src, $cc",
-                (CSINVWr GPR32:$dst, GPR32:$src, GPR32:$src, ccode:$cc)>;
+                (CSINVWr GPR32:$dst, GPR32:$src, GPR32:$src, inv_ccode:$cc)>;
 def : InstAlias<"cinv $dst, $src, $cc",
-                (CSINVXr GPR64:$dst, GPR64:$src, GPR64:$src, ccode:$cc)>;
+                (CSINVXr GPR64:$dst, GPR64:$src, GPR64:$src, inv_ccode:$cc)>;
 
 def : InstAlias<"cneg $dst, $src, $cc",
-                (CSNEGWr GPR32:$dst, GPR32:$src, GPR32:$src, ccode:$cc)>;
+                (CSNEGWr GPR32:$dst, GPR32:$src, GPR32:$src, inv_ccode:$cc)>;
 def : InstAlias<"cneg $dst, $src, $cc",
-                (CSNEGXr GPR64:$dst, GPR64:$src, GPR64:$src, ccode:$cc)>;
+                (CSNEGXr GPR64:$dst, GPR64:$src, GPR64:$src, inv_ccode:$cc)>;
 
 //===----------------------------------------------------------------------===//
 // PC-relative instructions.
@@ -973,8 +1027,8 @@ defm CBNZ : CmpBranch<1, "cbnz", ARM64cbnz>;
 //===----------------------------------------------------------------------===//
 // Test-bit-and-branch instructions.
 //===----------------------------------------------------------------------===//
-def TBZ  : TestBranch<0, "tbz", ARM64tbz>;
-def TBNZ : TestBranch<1, "tbnz", ARM64tbnz>;
+defm TBZ  : TestBranch<0, "tbz", ARM64tbz>;
+defm TBNZ : TestBranch<1, "tbnz", ARM64tbnz>;
 
 //===----------------------------------------------------------------------===//
 // Unconditional branch (immediate) instructions.
@@ -1428,13 +1482,13 @@ def am_unscaled_fb128 : Operand<i64> {
   let ParserMatchClass = MemoryUnscaledFB128Operand;
   let MIOperandInfo = (ops GPR64sp:$base, i64imm:$offset);
 }
-def : InstAlias<"ldr $Rt, $addr", (LDURXi GPR64:$Rt, am_unscaled_fb64:$addr)>;
-def : InstAlias<"ldr $Rt, $addr", (LDURWi GPR32:$Rt, am_unscaled_fb32:$addr)>;
-def : InstAlias<"ldr $Rt, $addr", (LDURBi FPR8:$Rt, am_unscaled_fb8:$addr)>;
-def : InstAlias<"ldr $Rt, $addr", (LDURHi FPR16:$Rt, am_unscaled_fb16:$addr)>;
-def : InstAlias<"ldr $Rt, $addr", (LDURSi FPR32:$Rt, am_unscaled_fb32:$addr)>;
-def : InstAlias<"ldr $Rt, $addr", (LDURDi FPR64:$Rt, am_unscaled_fb64:$addr)>;
-def : InstAlias<"ldr $Rt, $addr", (LDURQi FPR128:$Rt, am_unscaled_fb128:$addr)>;
+def : InstAlias<"ldr $Rt, $addr", (LDURXi GPR64:$Rt, am_unscaled_fb64:$addr), 0>;
+def : InstAlias<"ldr $Rt, $addr", (LDURWi GPR32:$Rt, am_unscaled_fb32:$addr), 0>;
+def : InstAlias<"ldr $Rt, $addr", (LDURBi FPR8:$Rt, am_unscaled_fb8:$addr), 0>;
+def : InstAlias<"ldr $Rt, $addr", (LDURHi FPR16:$Rt, am_unscaled_fb16:$addr), 0>;
+def : InstAlias<"ldr $Rt, $addr", (LDURSi FPR32:$Rt, am_unscaled_fb32:$addr), 0>;
+def : InstAlias<"ldr $Rt, $addr", (LDURDi FPR64:$Rt, am_unscaled_fb64:$addr), 0>;
+def : InstAlias<"ldr $Rt, $addr", (LDURQi FPR128:$Rt, am_unscaled_fb128:$addr), 0>;
 
 // zextload -> i64
 def : Pat<(i64 (zextloadi8 am_unscaled8:$addr)),
@@ -1464,13 +1518,20 @@ def LDURSWi
                    [(set GPR64:$Rt, (sextloadi32 am_unscaled32:$addr))]>;
 
 // zero and sign extending aliases from generic LDR* mnemonics to LDUR*.
-def : InstAlias<"ldrb $Rt, $addr", (LDURBBi GPR32:$Rt, am_unscaled_fb8:$addr)>;
-def : InstAlias<"ldrh $Rt, $addr", (LDURHHi GPR32:$Rt, am_unscaled_fb16:$addr)>;
-def : InstAlias<"ldrsb $Rt, $addr", (LDURSBWi GPR32:$Rt, am_unscaled_fb8:$addr)>;
-def : InstAlias<"ldrsb $Rt, $addr", (LDURSBXi GPR64:$Rt, am_unscaled_fb8:$addr)>;
-def : InstAlias<"ldrsh $Rt, $addr", (LDURSHWi GPR32:$Rt, am_unscaled_fb16:$addr)>;
-def : InstAlias<"ldrsh $Rt, $addr", (LDURSHXi GPR64:$Rt, am_unscaled_fb16:$addr)>;
-def : InstAlias<"ldrsw $Rt, $addr", (LDURSWi GPR64:$Rt, am_unscaled_fb32:$addr)>;
+def : InstAlias<"ldrb $Rt, $addr",
+                (LDURBBi GPR32:$Rt, am_unscaled_fb8:$addr), 0>;
+def : InstAlias<"ldrh $Rt, $addr",
+                (LDURHHi GPR32:$Rt, am_unscaled_fb16:$addr), 0>;
+def : InstAlias<"ldrsb $Rt, $addr",
+                (LDURSBWi GPR32:$Rt, am_unscaled_fb8:$addr), 0>;
+def : InstAlias<"ldrsb $Rt, $addr",
+                (LDURSBXi GPR64:$Rt, am_unscaled_fb8:$addr), 0>;
+def : InstAlias<"ldrsh $Rt, $addr",
+                (LDURSHWi GPR32:$Rt, am_unscaled_fb16:$addr), 0>;
+def : InstAlias<"ldrsh $Rt, $addr",
+                (LDURSHXi GPR64:$Rt, am_unscaled_fb16:$addr), 0>;
+def : InstAlias<"ldrsw $Rt, $addr",
+                (LDURSWi GPR64:$Rt, am_unscaled_fb32:$addr), 0>;
 
 // Pre-fetch.
 def PRFUMi : PrefetchUnscaled<0b11, 0, 0b10, "prfum",
@@ -1817,16 +1878,25 @@ def : Pat<(truncstorei8 GPR64:$Rt, am_unscaled8:$addr),
 
 //---
 // STR mnemonics fall back to STUR for negative or unaligned offsets.
-def : InstAlias<"str $Rt, $addr", (STURXi GPR64:$Rt, am_unscaled_fb64:$addr)>;
-def : InstAlias<"str $Rt, $addr", (STURWi GPR32:$Rt, am_unscaled_fb32:$addr)>;
-def : InstAlias<"str $Rt, $addr", (STURBi FPR8:$Rt, am_unscaled_fb8:$addr)>;
-def : InstAlias<"str $Rt, $addr", (STURHi FPR16:$Rt, am_unscaled_fb16:$addr)>;
-def : InstAlias<"str $Rt, $addr", (STURSi FPR32:$Rt, am_unscaled_fb32:$addr)>;
-def : InstAlias<"str $Rt, $addr", (STURDi FPR64:$Rt, am_unscaled_fb64:$addr)>;
-def : InstAlias<"str $Rt, $addr", (STURQi FPR128:$Rt, am_unscaled_fb128:$addr)>;
+def : InstAlias<"str $Rt, $addr",
+                (STURXi GPR64:$Rt, am_unscaled_fb64:$addr), 0>;
+def : InstAlias<"str $Rt, $addr",
+                (STURWi GPR32:$Rt, am_unscaled_fb32:$addr), 0>;
+def : InstAlias<"str $Rt, $addr",
+                (STURBi FPR8:$Rt, am_unscaled_fb8:$addr), 0>;
+def : InstAlias<"str $Rt, $addr",
+                (STURHi FPR16:$Rt, am_unscaled_fb16:$addr), 0>;
+def : InstAlias<"str $Rt, $addr",
+                (STURSi FPR32:$Rt, am_unscaled_fb32:$addr), 0>;
+def : InstAlias<"str $Rt, $addr",
+                (STURDi FPR64:$Rt, am_unscaled_fb64:$addr), 0>;
+def : InstAlias<"str $Rt, $addr",
+                (STURQi FPR128:$Rt, am_unscaled_fb128:$addr), 0>;
 
-def : InstAlias<"strb $Rt, $addr", (STURBBi GPR32:$Rt, am_unscaled_fb8:$addr)>;
-def : InstAlias<"strh $Rt, $addr", (STURHHi GPR32:$Rt, am_unscaled_fb16:$addr)>;
+def : InstAlias<"strb $Rt, $addr",
+                (STURBBi GPR32:$Rt, am_unscaled_fb8:$addr), 0>;
+def : InstAlias<"strh $Rt, $addr",
+                (STURHHi GPR32:$Rt, am_unscaled_fb16:$addr), 0>;
 
 //---
 // (unscaled immediate, unprivileged)
@@ -2259,10 +2329,10 @@ defm NEG    : SIMDTwoVectorBHSD<1, 0b01011, "neg",
                                UnOpFrag<(sub immAllZerosV, node:$LHS)> >;
 defm NOT    : SIMDTwoVectorB<1, 0b00, 0b00101, "not", vnot>;
 // Aliases for MVN -> NOT.
-def : InstAlias<"mvn.8b $Vd, $Vn", (NOTv8i8 V64:$Vd, V64:$Vn)>;
-def : InstAlias<"mvn.16b $Vd, $Vn", (NOTv16i8 V128:$Vd, V128:$Vn)>;
-def : InstAlias<"mvn $Vd.8b, $Vn.8b", (NOTv8i8 V64:$Vd, V64:$Vn)>;
-def : InstAlias<"mvn $Vd.16b, $Vn.16b", (NOTv16i8 V128:$Vd, V128:$Vn)>;
+def : InstAlias<"mvn{ $Vd.8b, $Vn.8b|.8b $Vd, $Vn}",
+                (NOTv8i8 V64:$Vd, V64:$Vn)>;
+def : InstAlias<"mvn{ $Vd.16b, $Vn.16b|.16b $Vd, $Vn}",
+                (NOTv16i8 V128:$Vd, V128:$Vn)>;
 
 def : Pat<(ARM64neg (v8i8  V64:$Rn)),  (NEGv8i8  V64:$Rn)>;
 def : Pat<(ARM64neg (v16i8 V128:$Rn)), (NEGv16i8 V128:$Rn)>;
@@ -2462,25 +2532,22 @@ def : Pat<(ARM64bsl (v4i32 V128:$Rd), V128:$Rn, V128:$Rm),
 def : Pat<(ARM64bsl (v2i64 V128:$Rd), V128:$Rn, V128:$Rm),
           (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
 
-// FIXME: the .16b and .8b variantes should be emitted by the
-// AsmWriter. TableGen's AsmWriter-generator doesn't deal with variant syntaxes
-// in aliases yet though.
 def : InstAlias<"mov{\t$dst.16b, $src.16b|.16b\t$dst, $src}",
+                (ORRv16i8 V128:$dst, V128:$src, V128:$src), 1>;
+def : InstAlias<"mov{\t$dst.8h, $src.8h|.8h\t$dst, $src}",
                 (ORRv16i8 V128:$dst, V128:$src, V128:$src), 0>;
-def : InstAlias<"{mov\t$dst.8h, $src.8h|mov.8h\t$dst, $src}",
+def : InstAlias<"mov{\t$dst.4s, $src.4s|.4s\t$dst, $src}",
                 (ORRv16i8 V128:$dst, V128:$src, V128:$src), 0>;
-def : InstAlias<"{mov\t$dst.4s, $src.4s|mov.4s\t$dst, $src}",
-                (ORRv16i8 V128:$dst, V128:$src, V128:$src), 0>;
-def : InstAlias<"{mov\t$dst.2d, $src.2d|mov.2d\t$dst, $src}",
+def : InstAlias<"mov{\t$dst.2d, $src.2d|.2d\t$dst, $src}",
                 (ORRv16i8 V128:$dst, V128:$src, V128:$src), 0>;
 
-def : InstAlias<"{mov\t$dst.8b, $src.8b|mov.8b\t$dst, $src}",
+def : InstAlias<"mov{\t$dst.8b, $src.8b|.8b\t$dst, $src}",
+                (ORRv8i8 V64:$dst, V64:$src, V64:$src), 1>;
+def : InstAlias<"mov{\t$dst.4h, $src.4h|.4h\t$dst, $src}",
                 (ORRv8i8 V64:$dst, V64:$src, V64:$src), 0>;
-def : InstAlias<"{mov\t$dst.4h, $src.4h|mov.4h\t$dst, $src}",
+def : InstAlias<"mov{\t$dst.2s, $src.2s|.2s\t$dst, $src}",
                 (ORRv8i8 V64:$dst, V64:$src, V64:$src), 0>;
-def : InstAlias<"{mov\t$dst.2s, $src.2s|mov.2s\t$dst, $src}",
-                (ORRv8i8 V64:$dst, V64:$src, V64:$src), 0>;
-def : InstAlias<"{mov\t$dst.1d, $src.1d|mov.1d\t$dst, $src}",
+def : InstAlias<"mov{\t$dst.1d, $src.1d|.1d\t$dst, $src}",
                 (ORRv8i8 V64:$dst, V64:$src, V64:$src), 0>;
 
 def : InstAlias<"{cmls\t$dst.8b, $src1.8b, $src2.8b" #
@@ -2652,29 +2719,29 @@ defm URSHL    : SIMDThreeScalarD<   1, 0b01010, "urshl", int_arm64_neon_urshl>;
 defm USHL     : SIMDThreeScalarD<   1, 0b01000, "ushl", int_arm64_neon_ushl>;
 
 def : InstAlias<"cmls $dst, $src1, $src2",
-                (CMHSv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (CMHSv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 def : InstAlias<"cmle $dst, $src1, $src2",
-                (CMGEv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (CMGEv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 def : InstAlias<"cmlo $dst, $src1, $src2",
-                (CMHIv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (CMHIv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 def : InstAlias<"cmlt $dst, $src1, $src2",
-                (CMGTv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (CMGTv1i64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 def : InstAlias<"fcmle $dst, $src1, $src2",
-                (FCMGE32 FPR32:$dst, FPR32:$src2, FPR32:$src1)>;
+                (FCMGE32 FPR32:$dst, FPR32:$src2, FPR32:$src1), 0>;
 def : InstAlias<"fcmle $dst, $src1, $src2",
-                (FCMGE64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (FCMGE64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 def : InstAlias<"fcmlt $dst, $src1, $src2",
-                (FCMGT32 FPR32:$dst, FPR32:$src2, FPR32:$src1)>;
+                (FCMGT32 FPR32:$dst, FPR32:$src2, FPR32:$src1), 0>;
 def : InstAlias<"fcmlt $dst, $src1, $src2",
-                (FCMGT64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (FCMGT64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 def : InstAlias<"facle $dst, $src1, $src2",
-                (FACGE32 FPR32:$dst, FPR32:$src2, FPR32:$src1)>;
+                (FACGE32 FPR32:$dst, FPR32:$src2, FPR32:$src1), 0>;
 def : InstAlias<"facle $dst, $src1, $src2",
-                (FACGE64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (FACGE64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 def : InstAlias<"faclt $dst, $src1, $src2",
-                (FACGT32 FPR32:$dst, FPR32:$src2, FPR32:$src1)>;
+                (FACGT32 FPR32:$dst, FPR32:$src2, FPR32:$src1), 0>;
 def : InstAlias<"faclt $dst, $src1, $src2",
-                (FACGT64 FPR64:$dst, FPR64:$src2, FPR64:$src1)>;
+                (FACGT64 FPR64:$dst, FPR64:$src2, FPR64:$src1), 0>;
 
 //===----------------------------------------------------------------------===//
 // Advanced SIMD three scalar instructions (mixed operands).
@@ -3590,6 +3657,25 @@ defm BIC : SIMDModifiedImmVectorShiftTied<1, 0b11, 0b01, "bic", ARM64bici>;
 // AdvSIMD ORR
 defm ORR : SIMDModifiedImmVectorShiftTied<0, 0b11, 0b01, "orr", ARM64orri>;
 
+def : InstAlias<"bic $Vd.4h, $imm", (BICv4i16 V64:$Vd,  imm0_255:$imm, 0)>;
+def : InstAlias<"bic $Vd.8h, $imm", (BICv8i16 V128:$Vd, imm0_255:$imm, 0)>;
+def : InstAlias<"bic $Vd.2s, $imm", (BICv2i32 V64:$Vd,  imm0_255:$imm, 0)>;
+def : InstAlias<"bic $Vd.4s, $imm", (BICv4i32 V128:$Vd, imm0_255:$imm, 0)>;
+
+def : InstAlias<"bic.4h $Vd, $imm", (BICv4i16 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"bic.8h $Vd, $imm", (BICv8i16 V128:$Vd, imm0_255:$imm, 0), 0>;
+def : InstAlias<"bic.2s $Vd, $imm", (BICv2i32 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"bic.4s $Vd, $imm", (BICv4i32 V128:$Vd, imm0_255:$imm, 0), 0>;
+
+def : InstAlias<"orr $Vd.4h, $imm", (ORRv4i16 V64:$Vd,  imm0_255:$imm, 0)>;
+def : InstAlias<"orr $Vd.8h, $imm", (ORRv8i16 V128:$Vd, imm0_255:$imm, 0)>;
+def : InstAlias<"orr $Vd.2s, $imm", (ORRv2i32 V64:$Vd,  imm0_255:$imm, 0)>;
+def : InstAlias<"orr $Vd.4s, $imm", (ORRv4i32 V128:$Vd, imm0_255:$imm, 0)>;
+
+def : InstAlias<"orr.4h $Vd, $imm", (ORRv4i16 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"orr.8h $Vd, $imm", (ORRv8i16 V128:$Vd, imm0_255:$imm, 0), 0>;
+def : InstAlias<"orr.2s $Vd, $imm", (ORRv2i32 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"orr.4s $Vd, $imm", (ORRv4i32 V128:$Vd, imm0_255:$imm, 0), 0>;
 
 // AdvSIMD FMOV
 def FMOVv2f64_ns : SIMDModifiedImmVectorNoShift<1, 1, 0b1111, V128, fpimm8,
@@ -3660,6 +3746,17 @@ def : Pat<(v4f32 (ARM64dup (f32 fpimm0))), (MOVIv2d_ns (i32 0))>;
 
 // EDIT per word & halfword: 2s, 4h, 4s, & 8h
 defm MOVI      : SIMDModifiedImmVectorShift<0, 0b10, 0b00, "movi">;
+
+def : InstAlias<"movi $Vd.4h, $imm", (MOVIv4i16 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"movi $Vd.8h, $imm", (MOVIv8i16 V128:$Vd, imm0_255:$imm, 0), 0>;
+def : InstAlias<"movi $Vd.2s, $imm", (MOVIv2i32 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"movi $Vd.4s, $imm", (MOVIv4i32 V128:$Vd, imm0_255:$imm, 0), 0>;
+
+def : InstAlias<"movi.4h $Vd, $imm", (MOVIv4i16 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"movi.8h $Vd, $imm", (MOVIv8i16 V128:$Vd, imm0_255:$imm, 0), 0>;
+def : InstAlias<"movi.2s $Vd, $imm", (MOVIv2i32 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"movi.4s $Vd, $imm", (MOVIv4i32 V128:$Vd, imm0_255:$imm, 0), 0>;
+
 def : Pat<(v2i32 (ARM64movi_shift imm0_255:$imm8, (i32 imm:$shift))),
           (MOVIv2i32 imm0_255:$imm8, imm:$shift)>;
 def : Pat<(v4i32 (ARM64movi_shift imm0_255:$imm8, (i32 imm:$shift))),
@@ -3689,6 +3786,17 @@ def MOVIv16b_ns  : SIMDModifiedImmVectorNoShift<1, 0, 0b1110, V128, imm0_255,
 
 // EDIT per word & halfword: 2s, 4h, 4s, & 8h
 defm MVNI      : SIMDModifiedImmVectorShift<1, 0b10, 0b00, "mvni">;
+
+def : InstAlias<"mvni $Vd.4h, $imm", (MVNIv4i16 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"mvni $Vd.8h, $imm", (MVNIv8i16 V128:$Vd, imm0_255:$imm, 0), 0>;
+def : InstAlias<"mvni $Vd.2s, $imm", (MVNIv2i32 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"mvni $Vd.4s, $imm", (MVNIv4i32 V128:$Vd, imm0_255:$imm, 0), 0>;
+
+def : InstAlias<"mvni.4h $Vd, $imm", (MVNIv4i16 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"mvni.8h $Vd, $imm", (MVNIv8i16 V128:$Vd, imm0_255:$imm, 0), 0>;
+def : InstAlias<"mvni.2s $Vd, $imm", (MVNIv2i32 V64:$Vd,  imm0_255:$imm, 0), 0>;
+def : InstAlias<"mvni.4s $Vd, $imm", (MVNIv4i32 V128:$Vd, imm0_255:$imm, 0), 0>;
+
 def : Pat<(v2i32 (ARM64mvni_shift imm0_255:$imm8, (i32 imm:$shift))),
           (MVNIv2i32 imm0_255:$imm8, imm:$shift)>;
 def : Pat<(v4i32 (ARM64mvni_shift imm0_255:$imm8, (i32 imm:$shift))),
@@ -5062,12 +5170,15 @@ def : Pat<(i64 (int_arm64_neon_urshl (i64 FPR64:$Rn), (i64 FPR64:$Rm))),
 // Tail call return handling. These are all compiler pseudo-instructions,
 // so no encoding information or anything like that.
 let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [SP] in {
-  def TCRETURNdi : Pseudo<(outs), (ins i64imm:$dst), []>;
-  def TCRETURNri : Pseudo<(outs), (ins tcGPR64:$dst), []>;
+  def TCRETURNdi : Pseudo<(outs), (ins i64imm:$dst, i32imm:$FPDiff),[]>;
+  def TCRETURNri : Pseudo<(outs), (ins tcGPR64:$dst, i32imm:$FPDiff), []>;
 }
 
-def : Pat<(ARM64tcret tcGPR64:$dst), (TCRETURNri tcGPR64:$dst)>;
-def : Pat<(ARM64tcret (i64 tglobaladdr:$dst)), (TCRETURNdi texternalsym:$dst)>;
-def : Pat<(ARM64tcret (i64 texternalsym:$dst)), (TCRETURNdi texternalsym:$dst)>;
+def : Pat<(ARM64tcret tcGPR64:$dst, (i32 timm:$FPDiff)),
+          (TCRETURNri tcGPR64:$dst, imm:$FPDiff)>;
+def : Pat<(ARM64tcret tglobaladdr:$dst, (i32 timm:$FPDiff)),
+          (TCRETURNdi texternalsym:$dst, imm:$FPDiff)>;
+def : Pat<(ARM64tcret texternalsym:$dst, (i32 timm:$FPDiff)),
+          (TCRETURNdi texternalsym:$dst, imm:$FPDiff)>;
 
 include "ARM64InstrAtomics.td"

@@ -1058,7 +1058,7 @@ Instruction *InstCombiner::visitICmpInstWithInstAndIntCst(ICmpInst &ICI,
       unsigned DstBits = LHSI->getType()->getPrimitiveSizeInBits(),
              SrcBits = LHSI->getOperand(0)->getType()->getPrimitiveSizeInBits();
       APInt KnownZero(SrcBits, 0), KnownOne(SrcBits, 0);
-      ComputeMaskedBits(LHSI->getOperand(0), KnownZero, KnownOne);
+      computeKnownBits(LHSI->getOperand(0), KnownZero, KnownOne);
 
       // If all the high bits are known, we can do this xform.
       if ((KnownZero|KnownOne).countLeadingOnes() >= SrcBits-DstBits) {
@@ -2970,6 +2970,16 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
         // Try not to increase register pressure.
         BO0->hasOneUse() && BO1->hasOneUse())
       return new ICmpInst(Pred, D, B);
+
+    // icmp (0-X) < cst --> x > -cst
+    if (NoOp0WrapProblem && ICmpInst::isSigned(Pred)) {
+      Value *X;
+      if (match(BO0, m_Neg(m_Value(X))))
+        if (ConstantInt *RHSC = dyn_cast<ConstantInt>(Op1))
+          if (!RHSC->isMinValue(/*isSigned=*/true))
+            return new ICmpInst(I.getSwappedPredicate(), X,
+                                ConstantExpr::getNeg(RHSC));
+    }
 
     BinaryOperator *SRem = nullptr;
     // icmp (srem X, Y), Y

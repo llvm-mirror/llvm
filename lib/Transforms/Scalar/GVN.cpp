@@ -19,6 +19,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -1539,7 +1540,7 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
 
   // Check to see how many predecessors have the loaded value fully
   // available.
-  DenseMap<BasicBlock*, Value*> PredLoads;
+  MapVector<BasicBlock *, Value *> PredLoads;
   DenseMap<BasicBlock*, char> FullyAvailableBlocks;
   for (unsigned i = 0, e = ValuesPerBlock.size(); i != e; ++i)
     FullyAvailableBlocks[ValuesPerBlock[i].BB] = true;
@@ -1553,7 +1554,6 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     if (IsValueFullyAvailableInBlock(Pred, FullyAvailableBlocks, 0)) {
       continue;
     }
-    PredLoads[Pred] = nullptr;
 
     if (Pred->getTerminator()->getNumSuccessors() != 1) {
       if (isa<IndirectBrInst>(Pred->getTerminator())) {
@@ -1570,11 +1570,14 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
       }
 
       CriticalEdgePred.push_back(Pred);
+    } else {
+      // Only add the predecessors that will not be split for now.
+      PredLoads[Pred] = nullptr;
     }
   }
 
   // Decide whether PRE is profitable for this load.
-  unsigned NumUnavailablePreds = PredLoads.size();
+  unsigned NumUnavailablePreds = PredLoads.size() + CriticalEdgePred.size();
   assert(NumUnavailablePreds != 0 &&
          "Fully available value should already be eliminated!");
 
@@ -1586,11 +1589,9 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
       return false;
 
   // Split critical edges, and update the unavailable predecessors accordingly.
-  for (SmallVectorImpl<BasicBlock *>::iterator I = CriticalEdgePred.begin(),
-         E = CriticalEdgePred.end(); I != E; I++) {
-    BasicBlock *OrigPred = *I;
+  for (BasicBlock *OrigPred : CriticalEdgePred) {
     BasicBlock *NewPred = splitCriticalEdges(OrigPred, LoadBB);
-    PredLoads.erase(OrigPred);
+    assert(!PredLoads.count(OrigPred) && "Split edges shouldn't be in map!");
     PredLoads[NewPred] = nullptr;
     DEBUG(dbgs() << "Split critical edge " << OrigPred->getName() << "->"
                  << LoadBB->getName() << '\n');
@@ -1599,9 +1600,8 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
   // Check if the load can safely be moved to all the unavailable predecessors.
   bool CanDoPRE = true;
   SmallVector<Instruction*, 8> NewInsts;
-  for (DenseMap<BasicBlock*, Value*>::iterator I = PredLoads.begin(),
-         E = PredLoads.end(); I != E; ++I) {
-    BasicBlock *UnavailablePred = I->first;
+  for (auto &PredLoad : PredLoads) {
+    BasicBlock *UnavailablePred = PredLoad.first;
 
     // Do PHI translation to get its value in the predecessor if necessary.  The
     // returned pointer (if non-null) is guaranteed to dominate UnavailablePred.
@@ -1623,7 +1623,7 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
       break;
     }
 
-    I->second = LoadPtr;
+    PredLoad.second = LoadPtr;
   }
 
   if (!CanDoPRE) {
@@ -1632,8 +1632,8 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
       if (MD) MD->removeInstruction(I);
       I->eraseFromParent();
     }
-    // HINT:Don't revert the edge-splitting as following transformation may 
-    // also need to split these critial edges.
+    // HINT: Don't revert the edge-splitting as following transformation may
+    // also need to split these critical edges.
     return !CriticalEdgePred.empty();
   }
 
@@ -1654,10 +1654,9 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     VN.lookup_or_add(NewInsts[i]);
   }
 
-  for (DenseMap<BasicBlock*, Value*>::iterator I = PredLoads.begin(),
-         E = PredLoads.end(); I != E; ++I) {
-    BasicBlock *UnavailablePred = I->first;
-    Value *LoadPtr = I->second;
+  for (const auto &PredLoad : PredLoads) {
+    BasicBlock *UnavailablePred = PredLoad.first;
+    Value *LoadPtr = PredLoad.second;
 
     Instruction *NewLoad = new LoadInst(LoadPtr, LI->getName()+".pre", false,
                                         LI->getAlignment(),

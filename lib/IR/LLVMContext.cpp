@@ -115,6 +115,17 @@ void *LLVMContext::getDiagnosticContext() const {
   return pImpl->DiagnosticContext;
 }
 
+void LLVMContext::setYieldCallback(YieldCallbackTy Callback, void *OpaqueHandle)
+{
+  pImpl->YieldCallback = Callback;
+  pImpl->YieldOpaqueHandle = OpaqueHandle;
+}
+
+void LLVMContext::yield() {
+  if (pImpl->YieldCallback)
+    pImpl->YieldCallback(this, pImpl->YieldOpaqueHandle);
+}
+
 void LLVMContext::emitError(const Twine &ErrorStr) {
   diagnose(DiagnosticInfoInlineAsm(ErrorStr));
 }
@@ -213,24 +224,4 @@ void LLVMContext::getMDKindNames(SmallVectorImpl<StringRef> &Names) const {
   for (StringMap<unsigned>::const_iterator I = pImpl->CustomMDKindNames.begin(),
        E = pImpl->CustomMDKindNames.end(); I != E; ++I)
     Names[I->second] = I->first();
-}
-
-//===----------------------------------------------------------------------===//
-// Pass Run Listeners
-//===----------------------------------------------------------------------===//
-/// Notify that we finished running a pass.
-void LLVMContext::notifyPassRun(Pass *P, Module *M, Function *F, BasicBlock *BB)
-{
-  pImpl->notifyPassRun(this, P, M, F, BB);
-}
-/// Register the given PassRunListener to receive notifyPassRun() callbacks
-/// whenever a pass ran. The context will take ownership of the listener and
-/// free it when the context is destroyed.
-void LLVMContext::addRunListener(PassRunListener *L) {
-  pImpl->addRunListener(L);
-}
-/// Unregister a PassRunListener so that it no longer receives notifyPassRun()
-/// callbacks. Remove and free the listener from the context.
-void LLVMContext::removeRunListener(PassRunListener *L) {
-  pImpl->removeRunListener(L);
 }

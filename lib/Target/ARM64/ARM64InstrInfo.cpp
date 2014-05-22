@@ -70,8 +70,10 @@ static void parseCondBranch(MachineInstr *LastInst, MachineBasicBlock *&Target,
     Cond.push_back(MachineOperand::CreateImm(LastInst->getOpcode()));
     Cond.push_back(LastInst->getOperand(0));
     break;
-  case ARM64::TBZ:
-  case ARM64::TBNZ:
+  case ARM64::TBZW:
+  case ARM64::TBZX:
+  case ARM64::TBNZW:
+  case ARM64::TBNZX:
     Target = LastInst->getOperand(2).getMBB();
     Cond.push_back(MachineOperand::CreateImm(-1));
     Cond.push_back(MachineOperand::CreateImm(LastInst->getOpcode()));
@@ -196,11 +198,17 @@ bool ARM64InstrInfo::ReverseBranchCondition(
     case ARM64::CBNZX:
       Cond[1].setImm(ARM64::CBZX);
       break;
-    case ARM64::TBZ:
-      Cond[1].setImm(ARM64::TBNZ);
+    case ARM64::TBZW:
+      Cond[1].setImm(ARM64::TBNZW);
       break;
-    case ARM64::TBNZ:
-      Cond[1].setImm(ARM64::TBZ);
+    case ARM64::TBNZW:
+      Cond[1].setImm(ARM64::TBZW);
+      break;
+    case ARM64::TBZX:
+      Cond[1].setImm(ARM64::TBNZX);
+      break;
+    case ARM64::TBNZX:
+      Cond[1].setImm(ARM64::TBZX);
       break;
     }
   }
@@ -453,17 +461,24 @@ void ARM64InstrInfo::insertSelect(MachineBasicBlock &MBB,
     switch (Cond[1].getImm()) {
     default:
       llvm_unreachable("Unknown branch opcode in Cond");
-    case ARM64::TBZ:
+    case ARM64::TBZW:
+    case ARM64::TBZX:
       CC = ARM64CC::EQ;
       break;
-    case ARM64::TBNZ:
+    case ARM64::TBNZW:
+    case ARM64::TBNZX:
       CC = ARM64CC::NE;
       break;
     }
     // cmp reg, #foo is actually ands xzr, reg, #1<<foo.
-    BuildMI(MBB, I, DL, get(ARM64::ANDSXri), ARM64::XZR)
-        .addReg(Cond[2].getReg())
-        .addImm(ARM64_AM::encodeLogicalImmediate(1ull << Cond[3].getImm(), 64));
+    if (Cond[1].getImm() == ARM64::TBZW || Cond[1].getImm() == ARM64::TBNZW)
+      BuildMI(MBB, I, DL, get(ARM64::ANDSWri), ARM64::WZR)
+          .addReg(Cond[2].getReg())
+          .addImm(ARM64_AM::encodeLogicalImmediate(1ull << Cond[3].getImm(), 32));
+    else
+      BuildMI(MBB, I, DL, get(ARM64::ANDSXri), ARM64::XZR)
+          .addReg(Cond[2].getReg())
+          .addImm(ARM64_AM::encodeLogicalImmediate(1ull << Cond[3].getImm(), 64));
     break;
   }
   }
@@ -825,6 +840,79 @@ bool ARM64InstrInfo::optimizeCompareInstr(
   return true;
 }
 
+/// Return true if this is this instruction has a non-zero immediate
+bool ARM64InstrInfo::hasShiftedReg(const MachineInstr *MI) const {
+  switch (MI->getOpcode()) {
+  default:
+    break;
+  case ARM64::ADDSWrs:
+  case ARM64::ADDSXrs:
+  case ARM64::ADDWrs:
+  case ARM64::ADDXrs:
+  case ARM64::ANDSWrs:
+  case ARM64::ANDSXrs:
+  case ARM64::ANDWrs:
+  case ARM64::ANDXrs:
+  case ARM64::BICSWrs:
+  case ARM64::BICSXrs:
+  case ARM64::BICWrs:
+  case ARM64::BICXrs:
+  case ARM64::CRC32Brr:
+  case ARM64::CRC32CBrr:
+  case ARM64::CRC32CHrr:
+  case ARM64::CRC32CWrr:
+  case ARM64::CRC32CXrr:
+  case ARM64::CRC32Hrr:
+  case ARM64::CRC32Wrr:
+  case ARM64::CRC32Xrr:
+  case ARM64::EONWrs:
+  case ARM64::EONXrs:
+  case ARM64::EORWrs:
+  case ARM64::EORXrs:
+  case ARM64::ORNWrs:
+  case ARM64::ORNXrs:
+  case ARM64::ORRWrs:
+  case ARM64::ORRXrs:
+  case ARM64::SUBSWrs:
+  case ARM64::SUBSXrs:
+  case ARM64::SUBWrs:
+  case ARM64::SUBXrs:
+    if (MI->getOperand(3).isImm()) {
+      unsigned val = MI->getOperand(3).getImm();
+      return (val != 0);
+    }
+    break;
+  }
+  return false;
+}
+
+/// Return true if this is this instruction has a non-zero immediate
+bool ARM64InstrInfo::hasExtendedReg(const MachineInstr *MI) const {
+  switch (MI->getOpcode()) {
+  default:
+    break;
+  case ARM64::ADDSWrx:
+  case ARM64::ADDSXrx:
+  case ARM64::ADDSXrx64:
+  case ARM64::ADDWrx:
+  case ARM64::ADDXrx:
+  case ARM64::ADDXrx64:
+  case ARM64::SUBSWrx:
+  case ARM64::SUBSXrx:
+  case ARM64::SUBSXrx64:
+  case ARM64::SUBWrx:
+  case ARM64::SUBXrx:
+  case ARM64::SUBXrx64:
+    if (MI->getOperand(3).isImm()) {
+      unsigned val = MI->getOperand(3).getImm();
+      return (val != 0);
+    }
+    break;
+  }
+
+  return false;
+}
+
 // Return true if this instruction simply sets its single destination register
 // to zero. This is equivalent to a register rename of the zero-register.
 bool ARM64InstrInfo::isGPRZero(const MachineInstr *MI) const {
@@ -975,7 +1063,7 @@ bool ARM64InstrInfo::isScaledAddr(const MachineInstr *MI) const {
   case ARM64::STRWro:
   case ARM64::STRXro:
     unsigned Val = MI->getOperand(3).getImm();
-    ARM64_AM::ExtendType ExtType = ARM64_AM::getMemExtendType(Val);
+    ARM64_AM::ShiftExtendType ExtType = ARM64_AM::getMemExtendType(Val);
     return (ExtType != ARM64_AM::UXTX) || ARM64_AM::getMemDoShift(Val);
   }
   return false;

@@ -120,6 +120,9 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   bool Changed = SimplifyAssociativeOrCommutative(I);
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
 
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (Value *V = SimplifyMulInst(Op0, Op1, DL))
     return ReplaceInstUsesWith(I, V);
 
@@ -428,6 +431,9 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
   bool Changed = SimplifyAssociativeOrCommutative(I);
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
 
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (isa<Constant>(Op0))
     std::swap(Op0, Op1);
 
@@ -721,7 +727,7 @@ Instruction *InstCombiner::commonIDivTransforms(BinaryOperator &I) {
       if (Instruction::BinaryOps(LHS->getOpcode()) == I.getOpcode())
         if (ConstantInt *LHSRHS = dyn_cast<ConstantInt>(LHS->getOperand(1))) {
           if (MultiplyOverflows(RHS, LHSRHS,
-                                I.getOpcode()==Instruction::SDiv))
+                                I.getOpcode() == Instruction::SDiv))
             return ReplaceInstUsesWith(I, Constant::getNullValue(I.getType()));
           return BinaryOperator::Create(I.getOpcode(), LHS->getOperand(0),
                                         ConstantExpr::getMul(RHS, LHSRHS));
@@ -734,6 +740,25 @@ Instruction *InstCombiner::commonIDivTransforms(BinaryOperator &I) {
       if (isa<PHINode>(Op0))
         if (Instruction *NV = FoldOpIntoPhi(I))
           return NV;
+    }
+  }
+
+  if (ConstantInt *One = dyn_cast<ConstantInt>(Op0)) {
+    if (One->isOne() && !I.getType()->isIntegerTy(1)) {
+      bool isSigned = I.getOpcode() == Instruction::SDiv;
+      if (isSigned) {
+        // If Op1 is 0 then it's undefined behaviour, if Op1 is 1 then the
+        // result is one, if Op1 is -1 then the result is minus one, otherwise
+        // it's zero.
+        Value *Inc = Builder->CreateAdd(Op1, One);
+        Value *Cmp = Builder->CreateICmpULT(
+                         Inc, ConstantInt::get(I.getType(), 3));
+        return SelectInst::Create(Cmp, Op1, ConstantInt::get(I.getType(), 0));
+      } else {
+        // If Op1 is 0 then it's undefined behaviour. If Op1 is 1 then the
+        // result is one, otherwise it's zero.
+        return new ZExtInst(Builder->CreateICmpEQ(Op1, One), I.getType());
+      }
     }
   }
 
@@ -878,6 +903,9 @@ static size_t visitUDivOperand(Value *Op0, Value *Op1, const BinaryOperator &I,
 Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
 
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (Value *V = SimplifyUDivInst(Op0, Op1, DL))
     return ReplaceInstUsesWith(I, V);
 
@@ -936,6 +964,9 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
 
 Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifySDivInst(Op0, Op1, DL))
     return ReplaceInstUsesWith(I, V);
@@ -1022,6 +1053,9 @@ static Instruction *CvtFDivConstToReciprocal(Value *Dividend,
 
 Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyFDivInst(Op0, Op1, DL))
     return ReplaceInstUsesWith(I, V);
@@ -1185,6 +1219,9 @@ Instruction *InstCombiner::commonIRemTransforms(BinaryOperator &I) {
 Instruction *InstCombiner::visitURem(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
 
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (Value *V = SimplifyURemInst(Op0, Op1, DL))
     return ReplaceInstUsesWith(I, V);
 
@@ -1216,6 +1253,9 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
 
 Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifySRemInst(Op0, Op1, DL))
     return ReplaceInstUsesWith(I, V);
@@ -1287,6 +1327,9 @@ Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
 
 Instruction *InstCombiner::visitFRem(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyFRemInst(Op0, Op1, DL))
     return ReplaceInstUsesWith(I, V);

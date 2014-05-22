@@ -313,10 +313,10 @@ namespace llvm {
                                     SDValue &Offset, ISD::MemIndexedMode &AM,
                                     SelectionDAG &DAG) const override;
 
-    void computeMaskedBitsForTargetNode(const SDValue Op, APInt &KnownZero,
-                                        APInt &KnownOne,
-                                        const SelectionDAG &DAG,
-                                        unsigned Depth) const override;
+    void computeKnownBitsForTargetNode(const SDValue Op, APInt &KnownZero,
+                                       APInt &KnownOne,
+                                       const SelectionDAG &DAG,
+                                       unsigned Depth) const override;
 
 
     bool ExpandInlineAsm(CallInst *CI) const override;
@@ -471,7 +471,7 @@ namespace llvm {
     SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerDivRem(SDValue Op, SelectionDAG &DAG) const;
 
-    unsigned getRegisterByName(const char* RegName) const;
+    unsigned getRegisterByName(const char* RegName, EVT VT) const override;
 
     /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
     /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be

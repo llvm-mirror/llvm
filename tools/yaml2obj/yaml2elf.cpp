@@ -314,9 +314,14 @@ void
 ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
                                     const ELFYAML::RawContentSection &Section,
                                     ContiguousBlobAccumulator &CBA) {
-  Section.Content.writeAsBinary(CBA.getOSAndAlignedOffset(SHeader.sh_offset));
+  assert(Section.Size >= Section.Content.binary_size() &&
+         "Section size and section content are inconsistent");
+  raw_ostream &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset);
+  Section.Content.writeAsBinary(OS);
+  for (auto i = Section.Content.binary_size(); i < Section.Size; ++i)
+    OS.write(0);
   SHeader.sh_entsize = 0;
-  SHeader.sh_size = Section.Content.binary_size();
+  SHeader.sh_size = Section.Size;
 }
 
 template <class ELFT>
@@ -477,13 +482,13 @@ int yaml2elf(llvm::raw_ostream &Out, llvm::MemoryBuffer *Buf) {
   typedef ELFType<support::big, 4, false> BE32;
   if (is64Bit(Doc)) {
     if (isLittleEndian(Doc))
-      return ELFState<LE64>::writeELF(outs(), Doc);
+      return ELFState<LE64>::writeELF(Out, Doc);
     else
-      return ELFState<BE64>::writeELF(outs(), Doc);
+      return ELFState<BE64>::writeELF(Out, Doc);
   } else {
     if (isLittleEndian(Doc))
-      return ELFState<LE32>::writeELF(outs(), Doc);
+      return ELFState<LE32>::writeELF(Out, Doc);
     else
-      return ELFState<BE32>::writeELF(outs(), Doc);
+      return ELFState<BE32>::writeELF(Out, Doc);
   }
 }

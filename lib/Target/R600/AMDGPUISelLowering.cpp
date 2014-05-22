@@ -222,10 +222,8 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   static const MVT::SimpleValueType IntTypes[] = {
     MVT::v2i32, MVT::v4i32
   };
-  const size_t NumIntTypes = array_lengthof(IntTypes);
 
-  for (unsigned int x  = 0; x < NumIntTypes; ++x) {
-    MVT::SimpleValueType VT = IntTypes[x];
+  for (MVT VT : IntTypes) {
     //Expand the following operations for the current type by default
     setOperationAction(ISD::ADD,  VT, Expand);
     setOperationAction(ISD::AND,  VT, Expand);
@@ -249,10 +247,8 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   static const MVT::SimpleValueType FloatTypes[] = {
     MVT::v2f32, MVT::v4f32
   };
-  const size_t NumFloatTypes = array_lengthof(FloatTypes);
 
-  for (unsigned int x = 0; x < NumFloatTypes; ++x) {
-    MVT::SimpleValueType VT = FloatTypes[x];
+  for (MVT VT : FloatTypes) {
     setOperationAction(ISD::FABS, VT, Expand);
     setOperationAction(ISD::FADD, VT, Expand);
     setOperationAction(ISD::FCOS, VT, Expand);
@@ -531,13 +527,17 @@ SDValue AMDGPUTargetLowering::LowerConstantInitializer(const Constant* Init,
     return DAG.getStore(Chain, DL,  DAG.getConstant(*CI, VT), InitPtr,
                  MachinePointerInfo(UndefValue::get(PtrTy)), false, false,
                  TD->getPrefTypeAlignment(CI->getType()));
-  } else if (const ConstantFP *CFP = dyn_cast<ConstantFP>(Init)) {
+  }
+
+  if (const ConstantFP *CFP = dyn_cast<ConstantFP>(Init)) {
     EVT VT = EVT::getEVT(CFP->getType());
     PointerType *PtrTy = PointerType::get(CFP->getType(), 0);
     return DAG.getStore(Chain, DL, DAG.getConstantFP(*CFP, VT), InitPtr,
                  MachinePointerInfo(UndefValue::get(PtrTy)), false, false,
                  TD->getPrefTypeAlignment(CFP->getType()));
-  } else if (Init->getType()->isAggregateType()) {
+  }
+
+  if (Init->getType()->isAggregateType()) {
     EVT PtrVT = InitPtr.getValueType();
     unsigned NumElements = Init->getType()->getArrayNumElements();
     SmallVector<SDValue, 8> Chains;
@@ -548,11 +548,12 @@ SDValue AMDGPUTargetLowering::LowerConstantInitializer(const Constant* Init,
       Chains.push_back(LowerConstantInitializer(Init->getAggregateElement(i),
                        GV, Ptr, Chain, DAG));
     }
+
     return DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Chains);
-  } else {
-    Init->dump();
-    llvm_unreachable("Unhandled constant initializer");
   }
+
+  Init->dump();
+  llvm_unreachable("Unhandled constant initializer");
 }
 
 SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
@@ -694,6 +695,14 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
       return DAG.getNode(AMDGPUISD::UMIN, DL, VT, Op.getOperand(1),
                                                   Op.getOperand(2));
 
+    case AMDGPUIntrinsic::AMDGPU_umul24:
+      return DAG.getNode(AMDGPUISD::MUL_U24, DL, VT,
+                         Op.getOperand(1), Op.getOperand(2));
+
+    case AMDGPUIntrinsic::AMDGPU_imul24:
+      return DAG.getNode(AMDGPUISD::MUL_I24, DL, VT,
+                         Op.getOperand(1), Op.getOperand(2));
+
     case AMDGPUIntrinsic::AMDGPU_bfe_i32:
       return DAG.getNode(AMDGPUISD::BFE_I32, DL, VT,
                          Op.getOperand(1),
@@ -724,8 +733,7 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
 
 ///IABS(a) = SMAX(sub(0, a), a)
 SDValue AMDGPUTargetLowering::LowerIntrinsicIABS(SDValue Op,
-    SelectionDAG &DAG) const {
-
+                                                 SelectionDAG &DAG) const {
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
   SDValue Neg = DAG.getNode(ISD::SUB, DL, VT, DAG.getConstant(0, VT),
@@ -737,7 +745,7 @@ SDValue AMDGPUTargetLowering::LowerIntrinsicIABS(SDValue Op,
 /// Linear Interpolation
 /// LRP(a, b, c) = muladd(a,  b, (1 - a) * c)
 SDValue AMDGPUTargetLowering::LowerIntrinsicLRP(SDValue Op,
-    SelectionDAG &DAG) const {
+                                                SelectionDAG &DAG) const {
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
   SDValue OneSubA = DAG.getNode(ISD::FSUB, DL, VT,
@@ -752,7 +760,7 @@ SDValue AMDGPUTargetLowering::LowerIntrinsicLRP(SDValue Op,
 
 /// \brief Generate Min/Max node
 SDValue AMDGPUTargetLowering::CombineMinMax(SDNode *N,
-    SelectionDAG &DAG) const {
+                                            SelectionDAG &DAG) const {
   SDLoc DL(N);
   EVT VT = N->getValueType(0);
 
@@ -788,10 +796,8 @@ SDValue AMDGPUTargetLowering::CombineMinMax(SDNode *N,
   case ISD::SETOLT:
   case ISD::SETLE:
   case ISD::SETLT: {
-    if (LHS == True)
-      return DAG.getNode(AMDGPUISD::FMIN, DL, VT, LHS, RHS);
-    else
-      return DAG.getNode(AMDGPUISD::FMAX, DL, VT, LHS, RHS);
+    unsigned Opc = (LHS == True) ? AMDGPUISD::FMIN : AMDGPUISD::FMAX;
+    return DAG.getNode(Opc, DL, VT, LHS, RHS);
   }
   case ISD::SETGT:
   case ISD::SETGE:
@@ -799,10 +805,8 @@ SDValue AMDGPUTargetLowering::CombineMinMax(SDNode *N,
   case ISD::SETOGE:
   case ISD::SETUGT:
   case ISD::SETOGT: {
-    if (LHS == True)
-      return DAG.getNode(AMDGPUISD::FMAX, DL, VT, LHS, RHS);
-    else
-      return DAG.getNode(AMDGPUISD::FMIN, DL, VT, LHS, RHS);
+    unsigned Opc = (LHS == True) ? AMDGPUISD::FMAX : AMDGPUISD::FMIN;
+    return DAG.getNode(Opc, DL, VT, LHS, RHS);
   }
   case ISD::SETCC_INVALID:
     llvm_unreachable("Invalid setcc condcode!");
@@ -1049,7 +1053,7 @@ SDValue AMDGPUTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
 }
 
 SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
-    SelectionDAG &DAG) const {
+                                           SelectionDAG &DAG) const {
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
 
@@ -1215,7 +1219,7 @@ SDValue AMDGPUTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
 static bool isU24(SDValue Op, SelectionDAG &DAG) {
   APInt KnownZero, KnownOne;
   EVT VT = Op.getValueType();
-  DAG.ComputeMaskedBits(Op, KnownZero, KnownOne);
+  DAG.computeKnownBits(Op, KnownZero, KnownOne);
 
   return (VT.getSizeInBits() - KnownZero.countLeadingOnes()) <= 24;
 }
@@ -1408,22 +1412,22 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   }
 }
 
-static void computeMaskedBitsForMinMax(const SDValue Op0,
-                                       const SDValue Op1,
-                                       APInt &KnownZero,
-                                       APInt &KnownOne,
-                                       const SelectionDAG &DAG,
-                                       unsigned Depth) {
+static void computeKnownBitsForMinMax(const SDValue Op0,
+                                      const SDValue Op1,
+                                      APInt &KnownZero,
+                                      APInt &KnownOne,
+                                      const SelectionDAG &DAG,
+                                      unsigned Depth) {
   APInt Op0Zero, Op0One;
   APInt Op1Zero, Op1One;
-  DAG.ComputeMaskedBits(Op0, Op0Zero, Op0One, Depth);
-  DAG.ComputeMaskedBits(Op1, Op1Zero, Op1One, Depth);
+  DAG.computeKnownBits(Op0, Op0Zero, Op0One, Depth);
+  DAG.computeKnownBits(Op1, Op1Zero, Op1One, Depth);
 
   KnownZero = Op0Zero & Op1Zero;
   KnownOne = Op0One & Op1One;
 }
 
-void AMDGPUTargetLowering::computeMaskedBitsForTargetNode(
+void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
   const SDValue Op,
   APInt &KnownZero,
   APInt &KnownOne,
@@ -1440,8 +1444,8 @@ void AMDGPUTargetLowering::computeMaskedBitsForTargetNode(
     case AMDGPUIntrinsic::AMDGPU_umax:
     case AMDGPUIntrinsic::AMDGPU_imin:
     case AMDGPUIntrinsic::AMDGPU_umin:
-      computeMaskedBitsForMinMax(Op.getOperand(1), Op.getOperand(2),
-                                 KnownZero, KnownOne, DAG, Depth);
+      computeKnownBitsForMinMax(Op.getOperand(1), Op.getOperand(2),
+                                KnownZero, KnownOne, DAG, Depth);
       break;
     default:
       break;
@@ -1453,8 +1457,8 @@ void AMDGPUTargetLowering::computeMaskedBitsForTargetNode(
   case AMDGPUISD::UMAX:
   case AMDGPUISD::SMIN:
   case AMDGPUISD::UMIN:
-    computeMaskedBitsForMinMax(Op.getOperand(0), Op.getOperand(1),
-                               KnownZero, KnownOne, DAG, Depth);
+    computeKnownBitsForMinMax(Op.getOperand(0), Op.getOperand(1),
+                              KnownZero, KnownOne, DAG, Depth);
     break;
   default:
     break;

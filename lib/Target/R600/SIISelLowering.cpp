@@ -30,20 +30,20 @@ using namespace llvm;
 SITargetLowering::SITargetLowering(TargetMachine &TM) :
     AMDGPUTargetLowering(TM) {
   addRegisterClass(MVT::i1, &AMDGPU::VReg_1RegClass);
-  addRegisterClass(MVT::i64, &AMDGPU::VSrc_64RegClass);
+  addRegisterClass(MVT::i64, &AMDGPU::SReg_64RegClass);
 
   addRegisterClass(MVT::v32i8, &AMDGPU::SReg_256RegClass);
   addRegisterClass(MVT::v64i8, &AMDGPU::SReg_512RegClass);
 
   addRegisterClass(MVT::i32, &AMDGPU::SReg_32RegClass);
-  addRegisterClass(MVT::f32, &AMDGPU::VSrc_32RegClass);
+  addRegisterClass(MVT::f32, &AMDGPU::VReg_32RegClass);
 
-  addRegisterClass(MVT::f64, &AMDGPU::VSrc_64RegClass);
-  addRegisterClass(MVT::v2i32, &AMDGPU::VSrc_64RegClass);
-  addRegisterClass(MVT::v2f32, &AMDGPU::VSrc_64RegClass);
+  addRegisterClass(MVT::f64, &AMDGPU::VReg_64RegClass);
+  addRegisterClass(MVT::v2i32, &AMDGPU::SReg_64RegClass);
+  addRegisterClass(MVT::v2f32, &AMDGPU::VReg_64RegClass);
 
-  addRegisterClass(MVT::v4i32, &AMDGPU::VSrc_128RegClass);
-  addRegisterClass(MVT::v4f32, &AMDGPU::VSrc_128RegClass);
+  addRegisterClass(MVT::v4i32, &AMDGPU::SReg_128RegClass);
+  addRegisterClass(MVT::v4f32, &AMDGPU::VReg_128RegClass);
 
   addRegisterClass(MVT::v8i32, &AMDGPU::VReg_256RegClass);
   addRegisterClass(MVT::v8f32, &AMDGPU::VReg_256RegClass);
@@ -99,6 +99,8 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::STORE, MVT::v2i32, Custom);
   setOperationAction(ISD::STORE, MVT::v4i32, Custom);
 
+  setOperationAction(ISD::SELECT, MVT::f32, Promote);
+  AddPromotedToType(ISD::SELECT, MVT::f32, MVT::i32);
   setOperationAction(ISD::SELECT, MVT::i64, Custom);
   setOperationAction(ISD::SELECT, MVT::f64, Promote);
   AddPromotedToType(ISD::SELECT, MVT::f64, MVT::i64);
@@ -179,8 +181,7 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
     MVT::v8i32, MVT::v8f32, MVT::v16i32, MVT::v16f32
   };
 
-  const size_t NumVecTypes = array_lengthof(VecTypes);
-  for (unsigned Type = 0; Type < NumVecTypes; ++Type) {
+  for (MVT VT : VecTypes) {
     for (unsigned Op = 0; Op < ISD::BUILTIN_OP_END; ++Op) {
       switch(Op) {
       case ISD::LOAD:
@@ -194,7 +195,7 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
       case ISD::EXTRACT_SUBVECTOR:
         break;
       default:
-        setOperationAction(Op, VecTypes[Type], Expand);
+        setOperationAction(Op, VT, Expand);
         break;
       }
     }
@@ -444,35 +445,6 @@ SDValue SITargetLowering::LowerFormalArguments(
   return Chain;
 }
 
-/// Usually ISel will insert a copy between terminator insturction that output
-/// a value and the S_BRANCH* at the end of the block.  This causes
-/// MachineBasicBlock::getFirstTerminator() to return the incorrect value,
-/// so we want to make sure there are no copies between terminators at the
-/// end of blocks.
-static void LowerTerminatorWithOutput(unsigned Opcode, MachineBasicBlock *BB,
-                                      MachineInstr *MI,
-                                      const TargetInstrInfo *TII,
-                                      MachineRegisterInfo &MRI) {
-  unsigned DstReg = MI->getOperand(0).getReg();
-  // Usually ISel will insert a copy between the SI_IF_NON_TERM instruction
-  // and the S_BRANCH* terminator.  We want to replace SI_IF_NO_TERM with
-  // SI_IF and we can't have any instructions between S_BRANCH* and SI_IF,
-  // since they are both terminators
-  assert(MRI.hasOneUse(DstReg));
-  MachineOperand &Use = *MRI.use_begin(DstReg);
-  MachineInstr *UseMI = Use.getParent();
-  assert(UseMI->getOpcode() == AMDGPU::COPY);
-
-  MRI.replaceRegWith(UseMI->getOperand(0).getReg(), DstReg);
-  UseMI->eraseFromParent();
-  BuildMI(*BB, BB->getFirstTerminator(), MI->getDebugLoc(),
-          TII->get(Opcode))
-          .addOperand(MI->getOperand(0))
-          .addOperand(MI->getOperand(1))
-          .addOperand(MI->getOperand(2));
-  MI->eraseFromParent();
-}
-
 MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     MachineInstr * MI, MachineBasicBlock * BB) const {
 
@@ -510,12 +482,6 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     MI->eraseFromParent();
     break;
   }
-  case AMDGPU::SI_IF_NON_TERM:
-    LowerTerminatorWithOutput(AMDGPU::SI_IF, BB, MI, TII, MRI);
-    break;
-  case AMDGPU::SI_ELSE_NON_TERM:
-    LowerTerminatorWithOutput(AMDGPU::SI_ELSE, BB, MI, TII, MRI);
-    break;
   case AMDGPU::V_SUB_F64:
     BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_ADD_F64),
             MI->getOperand(0).getReg())
@@ -538,6 +504,50 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i)
       MIB.addOperand(MI->getOperand(i));
 
+    MI->eraseFromParent();
+    break;
+  }
+  case AMDGPU::FABS_SI: {
+    MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
+    const SIInstrInfo *TII =
+      static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
+    unsigned Reg = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
+    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_MOV_B32_e32),
+            Reg)
+            .addImm(0x7fffffff);
+    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_AND_B32_e32),
+            MI->getOperand(0).getReg())
+            .addReg(MI->getOperand(1).getReg())
+            .addReg(Reg);
+    MI->eraseFromParent();
+    break;
+  }
+  case AMDGPU::FNEG_SI: {
+    MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
+    const SIInstrInfo *TII =
+      static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
+    unsigned Reg = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
+    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_MOV_B32_e32),
+            Reg)
+            .addImm(0x80000000);
+    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_XOR_B32_e32),
+            MI->getOperand(0).getReg())
+            .addReg(MI->getOperand(1).getReg())
+            .addReg(Reg);
+    MI->eraseFromParent();
+    break;
+  }
+  case AMDGPU::FCLAMP_SI: {
+    const SIInstrInfo *TII =
+      static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
+    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::V_ADD_F32_e64),
+            MI->getOperand(0).getReg())
+            .addImm(0) // SRC0 modifiers
+            .addOperand(MI->getOperand(1))
+            .addImm(0) // SRC1 modifiers
+            .addImm(0) // SRC1
+            .addImm(1) // CLAMP
+            .addImm(0); // OMOD
     MI->eraseFromParent();
   }
   }
@@ -1279,9 +1289,9 @@ SDNode *SITargetLowering::foldOperands(MachineSDNode *Node,
   // e64 version if available, -1 otherwise
   int OpcodeE64 = AMDGPU::getVOPe64(Opcode);
   const MCInstrDesc *DescE64 = OpcodeE64 == -1 ? nullptr : &TII->get(OpcodeE64);
+  int InputModifiers[3] = {0};
 
   assert(!DescE64 || DescE64->getNumDefs() == NumDefs);
-  assert(!DescE64 || DescE64->getNumOperands() == (NumOps + 4));
 
   int32_t Immediate = Desc->getSize() == 4 ? 0 : -1;
   bool HaveVSrc = false, HaveSSrc = false;
@@ -1356,7 +1366,10 @@ SDNode *SITargetLowering::foldOperands(MachineSDNode *Node,
       }
     }
 
-    if (DescE64 && !Immediate) {
+    if (Immediate)
+      continue;
+
+    if (DescE64) {
 
       // Test if it makes sense to switch to e64 encoding
       unsigned OtherRegClass = DescE64->OpInfo[Op].RegClass;
@@ -1375,11 +1388,43 @@ SDNode *SITargetLowering::foldOperands(MachineSDNode *Node,
         DescE64 = nullptr;
       }
     }
+
+    if (!DescE64 && !Promote2e64)
+      continue;
+    if (!Operand.isMachineOpcode())
+      continue;
+    if (Operand.getMachineOpcode() == AMDGPU::FNEG_SI) {
+      Ops.pop_back();
+      Ops.push_back(Operand.getOperand(0));
+      InputModifiers[i] = 1;
+      Promote2e64 = true;
+      if (!DescE64)
+        continue;
+      Desc = DescE64;
+      DescE64 = 0;
+    }
+    else if (Operand.getMachineOpcode() == AMDGPU::FABS_SI) {
+      Ops.pop_back();
+      Ops.push_back(Operand.getOperand(0));
+      InputModifiers[i] = 2;
+      Promote2e64 = true;
+      if (!DescE64)
+        continue;
+      Desc = DescE64;
+      DescE64 = 0;
+    }
   }
 
   if (Promote2e64) {
+    std::vector<SDValue> OldOps(Ops);
+    Ops.clear();
+    for (unsigned i = 0; i < OldOps.size(); ++i) {
+      // src_modifier
+      Ops.push_back(DAG.getTargetConstant(InputModifiers[i], MVT::i32));
+      Ops.push_back(OldOps[i]);
+    }
     // Add the modifier flags while promoting
-    for (unsigned i = 0; i < 4; ++i)
+    for (unsigned i = 0; i < 2; ++i)
       Ops.push_back(DAG.getTargetConstant(0, MVT::i32));
   }
 

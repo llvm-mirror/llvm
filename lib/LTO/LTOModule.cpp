@@ -710,9 +710,6 @@ namespace {
     bool EmitValueToOffset(const MCExpr *Offset,
                            unsigned char Value) override { return false; }
     void EmitFileDirective(StringRef Filename) override {}
-    void EmitDwarfAdvanceLineAddr(int64_t LineDelta, const MCSymbol *LastLabel,
-                                  const MCSymbol *Label,
-                                  unsigned PointerSize) override {}
     void FinishImpl() override {}
     void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) override {
       RecordProcEnd(Frame);
@@ -805,7 +802,7 @@ bool LTOModule::parseSymbols(std::string &errMsg) {
   // add aliases
   for (Module::alias_iterator a = _module->alias_begin(),
          e = _module->alias_end(); a != e; ++a) {
-    if (isDeclaration(*a->getAliasedGlobal()))
+    if (isDeclaration(*a->getAliasee()))
       // Is an alias to a declaration.
       addPotentialUndefinedSymbol(a, false);
     else

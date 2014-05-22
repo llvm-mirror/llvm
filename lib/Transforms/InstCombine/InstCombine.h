@@ -313,9 +313,9 @@ public:
     return nullptr; // Don't do anything with FI
   }
 
-  void ComputeMaskedBits(Value *V, APInt &KnownZero, APInt &KnownOne,
-                         unsigned Depth = 0) const {
-    return llvm::ComputeMaskedBits(V, KnownZero, KnownOne, DL, Depth);
+  void computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
+                        unsigned Depth = 0) const {
+    return llvm::computeKnownBits(V, KnownZero, KnownOne, DL, Depth);
   }
 
   bool MaskedValueIsZero(Value *V, const APInt &Mask,
@@ -357,6 +357,8 @@ private:
 
   Value *SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
                                     APInt &UndefElts, unsigned Depth = 0);
+
+  Value *SimplifyVectorOp(BinaryOperator &Inst);
 
   // FoldOpIntoPhi - Given a binary operator, cast instruction, or select
   // which has a PHI node as operand #0, see if we can fold the instruction

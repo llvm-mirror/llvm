@@ -322,34 +322,10 @@ DIE &DwarfDebug::updateSubprogramScopeDIE(DwarfCompileUnit &SPCU,
   // object pointer later on. But what we don't want to do is process the
   // concrete DIE twice.
   if (DIE *AbsSPDIE = AbstractSPDies.lookup(SP)) {
+    assert(SPDie == AbsSPDIE);
     // Pick up abstract subprogram DIE.
     SPDie = &SPCU.createAndAddDIE(dwarf::DW_TAG_subprogram, SPCU.getUnitDie());
     SPCU.addDIEEntry(*SPDie, dwarf::DW_AT_abstract_origin, *AbsSPDIE);
-  } else {
-    DISubprogram SPDecl = SP.getFunctionDeclaration();
-    if (!SPDecl.isSubprogram()) {
-      // There is not any need to generate specification DIE for a function
-      // defined at compile unit level. If a function is defined inside another
-      // function then gdb prefers the definition at top level and but does not
-      // expect specification DIE in parent function. So avoid creating
-      // specification DIE for a function defined inside a function.
-      DIScope SPContext = resolve(SP.getContext());
-      if (SP.isDefinition() && !SPContext.isCompileUnit() &&
-          !SPContext.isFile() && !isSubprogramContext(SPContext)) {
-        SPCU.addFlag(*SPDie, dwarf::DW_AT_declaration);
-
-        // Add arguments.
-        DICompositeType SPTy = SP.getType();
-        DIArray Args = SPTy.getTypeArray();
-        uint16_t SPTag = SPTy.getTag();
-        if (SPTag == dwarf::DW_TAG_subroutine_type)
-          SPCU.constructSubprogramArguments(*SPDie, Args);
-        DIE *SPDeclDie = SPDie;
-        SPDie =
-            &SPCU.createAndAddDIE(dwarf::DW_TAG_subprogram, SPCU.getUnitDie());
-        SPCU.addDIEEntry(*SPDie, dwarf::DW_AT_specification, *SPDeclDie);
-      }
-    }
   }
 
   attachLowHighPC(SPCU, *SPDie, FunctionBeginSym, FunctionEndSym);
@@ -420,6 +396,16 @@ void DwarfDebug::addScopeRangeList(DwarfCompileUnit &TheCU, DIE &ScopeDIE,
   TheCU.addRangeList(std::move(List));
 }
 
+void DwarfDebug::attachRangesOrLowHighPC(DwarfCompileUnit &TheCU, DIE &Die,
+                                    const SmallVectorImpl<InsnRange> &Ranges) {
+  assert(!Ranges.empty());
+  if (Ranges.size() == 1)
+    attachLowHighPC(TheCU, Die, getLabelBeforeInsn(Ranges.front().first),
+                    getLabelAfterInsn(Ranges.front().second));
+  else
+    addScopeRangeList(TheCU, Die, Ranges);
+}
+
 // Construct new DW_TAG_lexical_block for this scope and attach
 // DW_AT_low_pc/DW_AT_high_pc labels.
 std::unique_ptr<DIE>
@@ -432,24 +418,7 @@ DwarfDebug::constructLexicalScopeDIE(DwarfCompileUnit &TheCU,
   if (Scope->isAbstractScope())
     return ScopeDIE;
 
-  const SmallVectorImpl<InsnRange> &ScopeRanges = Scope->getRanges();
-
-  // If we have multiple ranges, emit them into the range section.
-  if (ScopeRanges.size() > 1) {
-    addScopeRangeList(TheCU, *ScopeDIE, ScopeRanges);
-    return ScopeDIE;
-  }
-
-  // Construct the address range for this DIE.
-  SmallVectorImpl<InsnRange>::const_iterator RI = ScopeRanges.begin();
-  MCSymbol *Start = getLabelBeforeInsn(RI->first);
-  MCSymbol *End = getLabelAfterInsn(RI->second);
-  assert(End && "End label should not be null!");
-
-  assert(Start->isDefined() && "Invalid starting label for an inlined scope!");
-  assert(End->isDefined() && "Invalid end label for an inlined scope!");
-
-  attachLowHighPC(TheCU, *ScopeDIE, Start, End);
+  attachRangesOrLowHighPC(TheCU, *ScopeDIE, Scope->getRanges());
 
   return ScopeDIE;
 }
@@ -459,15 +428,13 @@ DwarfDebug::constructLexicalScopeDIE(DwarfCompileUnit &TheCU,
 std::unique_ptr<DIE>
 DwarfDebug::constructInlinedScopeDIE(DwarfCompileUnit &TheCU,
                                      LexicalScope *Scope) {
-  const SmallVectorImpl<InsnRange> &ScopeRanges = Scope->getRanges();
-  assert(!ScopeRanges.empty() &&
-         "LexicalScope does not have instruction markers!");
-
-  if (!Scope->getScopeNode())
-    return nullptr;
+  assert(Scope->getScopeNode());
   DIScope DS(Scope->getScopeNode());
   DISubprogram InlinedSP = getDISubprogram(DS);
   DIE *OriginDIE = TheCU.getDIE(InlinedSP);
+  // FIXME: This should be an assert (or possibly a
+  // getOrCreateSubprogram(InlinedSP)) otherwise we're just failing to emit
+  // inlining information.
   if (!OriginDIE) {
     DEBUG(dbgs() << "Unable to find original DIE for an inlined subprogram.");
     return nullptr;
@@ -476,23 +443,7 @@ DwarfDebug::constructInlinedScopeDIE(DwarfCompileUnit &TheCU,
   auto ScopeDIE = make_unique<DIE>(dwarf::DW_TAG_inlined_subroutine);
   TheCU.addDIEEntry(*ScopeDIE, dwarf::DW_AT_abstract_origin, *OriginDIE);
 
-  // If we have multiple ranges, emit them into the range section.
-  if (ScopeRanges.size() > 1)
-    addScopeRangeList(TheCU, *ScopeDIE, ScopeRanges);
-  else {
-    SmallVectorImpl<InsnRange>::const_iterator RI = ScopeRanges.begin();
-    MCSymbol *StartLabel = getLabelBeforeInsn(RI->first);
-    MCSymbol *EndLabel = getLabelAfterInsn(RI->second);
-
-    if (!StartLabel || !EndLabel)
-      llvm_unreachable("Unexpected Start and End labels for an inlined scope!");
-
-    assert(StartLabel->isDefined() &&
-           "Invalid starting label for an inlined scope!");
-    assert(EndLabel->isDefined() && "Invalid end label for an inlined scope!");
-
-    attachLowHighPC(TheCU, *ScopeDIE, StartLabel, EndLabel);
-  }
+  attachRangesOrLowHighPC(TheCU, *ScopeDIE, Scope->getRanges());
 
   InlinedSubprogramDIEs.insert(OriginDIE);
 
@@ -576,10 +527,12 @@ void DwarfDebug::constructAbstractSubprogramScopeDIE(DwarfCompileUnit &TheCU,
 
   DISubprogram Sub(Scope->getScopeNode());
 
-  ProcessedSPNodes.insert(Sub);
+  if (!ProcessedSPNodes.insert(Sub))
+    return;
 
   if (DIE *ScopeDIE = TheCU.getDIE(Sub)) {
     AbstractSPDies.insert(std::make_pair(Sub, ScopeDIE));
+    TheCU.addUInt(*ScopeDIE, dwarf::DW_AT_inline, None, dwarf::DW_INL_inlined);
     createAndAddScopeChildren(TheCU, Scope, *ScopeDIE);
   }
 }
@@ -589,9 +542,9 @@ DIE &DwarfDebug::constructSubprogramScopeDIE(DwarfCompileUnit &TheCU,
   assert(Scope && Scope->getScopeNode());
   assert(!Scope->getInlinedAt());
   assert(!Scope->isAbstractScope());
-  assert(DIScope(Scope->getScopeNode()).isSubprogram());
-
   DISubprogram Sub(Scope->getScopeNode());
+
+  assert(Sub.isSubprogram());
 
   ProcessedSPNodes.insert(Sub);
 
@@ -621,7 +574,7 @@ std::unique_ptr<DIE> DwarfDebug::constructScopeDIE(DwarfCompileUnit &TheCU,
   // avoid creating un-used children then removing them later when we find out
   // the scope DIE is null.
   std::unique_ptr<DIE> ScopeDIE;
-  if (Scope->getInlinedAt()) {
+  if (Scope->getParent() && DS.isSubprogram()) {
     ScopeDIE = constructInlinedScopeDIE(TheCU, Scope);
     if (!ScopeDIE)
       return nullptr;
@@ -742,10 +695,8 @@ void DwarfDebug::constructSubprogramDIE(DwarfCompileUnit &TheCU,
   CURef = &TheCU;
 
   DISubprogram SP(N);
-  if (!SP.isDefinition())
-    // This is a method declaration which will be handled while constructing
-    // class type.
-    return;
+  assert(SP.isSubprogram());
+  assert(SP.isDefinition());
 
   DIE &SubprogramDie = *TheCU.getOrCreateSubprogramDIE(SP);
 
@@ -854,20 +805,6 @@ void DwarfDebug::beginModule() {
   SectionMap[Asm->getObjFileLowering().getTextSection()];
 }
 
-// Attach DW_AT_inline attribute with inlined subprogram DIEs.
-void DwarfDebug::computeInlinedDIEs() {
-  // Attach DW_AT_inline attribute with inlined subprogram DIEs.
-  for (DIE *ISP : InlinedSubprogramDIEs)
-    FirstCU->addUInt(*ISP, dwarf::DW_AT_inline, None, dwarf::DW_INL_inlined);
-
-  for (const auto &AI : AbstractSPDies) {
-    DIE &ISP = *AI.second;
-    if (InlinedSubprogramDIEs.count(&ISP))
-      continue;
-    FirstCU->addUInt(ISP, dwarf::DW_AT_inline, None, dwarf::DW_INL_inlined);
-  }
-}
-
 // Collect info for variables that were optimized out.
 void DwarfDebug::collectDeadVariables() {
   const Module *M = MMI->getModule();
@@ -875,31 +812,30 @@ void DwarfDebug::collectDeadVariables() {
   if (NamedMDNode *CU_Nodes = M->getNamedMetadata("llvm.dbg.cu")) {
     for (MDNode *N : CU_Nodes->operands()) {
       DICompileUnit TheCU(N);
+      // Construct subprogram DIE and add variables DIEs.
+      DwarfCompileUnit *SPCU =
+          static_cast<DwarfCompileUnit *>(CUMap.lookup(TheCU));
+      assert(SPCU && "Unable to find Compile Unit!");
       DIArray Subprograms = TheCU.getSubprograms();
       for (unsigned i = 0, e = Subprograms.getNumElements(); i != e; ++i) {
         DISubprogram SP(Subprograms.getElement(i));
         if (ProcessedSPNodes.count(SP) != 0)
           continue;
-        if (!SP.isSubprogram())
-          continue;
-        if (!SP.isDefinition())
-          continue;
+        assert(SP.isSubprogram() &&
+               "CU's subprogram list contains a non-subprogram");
+        assert(SP.isDefinition() &&
+               "CU's subprogram list contains a subprogram declaration");
         DIArray Variables = SP.getVariables();
         if (Variables.getNumElements() == 0)
           continue;
 
-        // Construct subprogram DIE and add variables DIEs.
-        DwarfCompileUnit *SPCU =
-            static_cast<DwarfCompileUnit *>(CUMap.lookup(TheCU));
-        assert(SPCU && "Unable to find Compile Unit!");
         // FIXME: See the comment in constructSubprogramDIE about duplicate
         // subprogram DIEs.
         constructSubprogramDIE(*SPCU, SP);
         DIE *SPDIE = SPCU->getDIE(SP);
         for (unsigned vi = 0, ve = Variables.getNumElements(); vi != ve; ++vi) {
           DIVariable DV(Variables.getElement(vi));
-          if (!DV.isVariable())
-            continue;
+          assert(DV.isVariable());
           DbgVariable NewVar(DV, nullptr, this);
           SPDIE->addChild(SPCU->constructVariableDIE(NewVar));
         }
@@ -911,9 +847,6 @@ void DwarfDebug::collectDeadVariables() {
 void DwarfDebug::finalizeModuleInfo() {
   // Collect info for variables that were optimized out.
   collectDeadVariables();
-
-  // Attach DW_AT_inline attribute with inlined subprogram DIEs.
-  computeInlinedDIEs();
 
   // Handle anything that needs to be done on a per-unit basis after
   // all other generation.
@@ -1157,8 +1090,6 @@ void DwarfDebug::collectVariableInfoFromMMITable(
     RegVar->setFrameIndex(VI.Slot);
     if (!addCurrentFnArgument(RegVar, Scope))
       addScopeVariable(Scope, RegVar);
-    if (AbsDbgVariable)
-      AbsDbgVariable->setFrameIndex(VI.Slot);
   }
 }
 
@@ -1212,10 +1143,12 @@ DwarfDebug::collectVariableInfo(SmallPtrSet<const MDNode *, 16> &Processed) {
     if (DV.getTag() == dwarf::DW_TAG_arg_variable &&
         DISubprogram(DV.getContext()).describes(CurFn->getFunction()))
       Scope = LScopes.getCurrentFunctionScope();
-    else if (MDNode *IA = DV.getInlinedAt())
-      Scope = LScopes.findInlinedScope(DebugLoc::getFromDILocation(IA));
-    else
-      Scope = LScopes.findLexicalScope(cast<MDNode>(DV->getOperand(1)));
+    else if (MDNode *IA = DV.getInlinedAt()) {
+      DebugLoc DL = DebugLoc::getFromDILocation(IA);
+      Scope = LScopes.findInlinedScope(DebugLoc::get(
+          DL.getLine(), DL.getCol(), DV.getContext(), IA));
+    } else
+      Scope = LScopes.findLexicalScope(DV.getContext());
     // If variable scope is not found then skip this variable.
     if (!Scope)
       continue;
@@ -1268,10 +1201,10 @@ DwarfDebug::collectVariableInfo(SmallPtrSet<const MDNode *, 16> &Processed) {
         const MachineInstr *End = HI[1];
         DEBUG(dbgs() << "DotDebugLoc Pair:\n"
                      << "\t" << *Begin << "\t" << *End << "\n");
-        if (End->isDebugValue())
+        if (End->isDebugValue() && End->getDebugVariable() == DV)
           SLabel = getLabelBeforeInsn(End);
         else {
-          // End is a normal instruction clobbering the range.
+          // End is clobbering the range.
           SLabel = getLabelAfterInsn(End);
           assert(SLabel && "Forgot label after clobber instruction");
           ++HI;
@@ -1289,7 +1222,8 @@ DwarfDebug::collectVariableInfo(SmallPtrSet<const MDNode *, 16> &Processed) {
   DIArray Variables = DISubprogram(FnScope->getScopeNode()).getVariables();
   for (unsigned i = 0, e = Variables.getNumElements(); i != e; ++i) {
     DIVariable DV(Variables.getElement(i));
-    if (!DV || !DV.isVariable() || !Processed.insert(DV))
+    assert(DV.isVariable());
+    if (!Processed.insert(DV))
       continue;
     if (LexicalScope *Scope = LScopes.findLexicalScope(DV.getContext()))
       addScopeVariable(Scope, new DbgVariable(DV, nullptr, this));
@@ -1481,7 +1415,7 @@ void DwarfDebug::beginFunction(const MachineFunction *MF) {
       LabelsBeforeInsn[History.front()] = FunctionBeginSym;
 
     for (const MachineInstr *MI : History) {
-      if (MI->isDebugValue())
+      if (MI->isDebugValue() && MI->getDebugVariable() == DV)
         requestLabelBeforeInsn(MI);
       else
         requestLabelAfterInsn(MI);
@@ -1573,25 +1507,25 @@ void DwarfDebug::endFunction(const MachineFunction *MF) {
   // Construct abstract scopes.
   for (LexicalScope *AScope : LScopes.getAbstractScopesList()) {
     DISubprogram SP(AScope->getScopeNode());
-    if (SP.isSubprogram()) {
-      // Collect info for variables that were optimized out.
-      DIArray Variables = SP.getVariables();
-      for (unsigned i = 0, e = Variables.getNumElements(); i != e; ++i) {
-        DIVariable DV(Variables.getElement(i));
-        if (!DV || !DV.isVariable() || !ProcessedVars.insert(DV))
-          continue;
-        // Check that DbgVariable for DV wasn't created earlier, when
-        // findAbstractVariable() was called for inlined instance of DV.
-        LLVMContext &Ctx = DV->getContext();
-        DIVariable CleanDV = cleanseInlinedVariable(DV, Ctx);
-        if (AbstractVariables.lookup(CleanDV))
-          continue;
-        if (LexicalScope *Scope = LScopes.findAbstractScope(DV.getContext()))
-          addScopeVariable(Scope, new DbgVariable(DV, nullptr, this));
-      }
+    if (!SP.isSubprogram())
+      continue;
+    // Collect info for variables that were optimized out.
+    DIArray Variables = SP.getVariables();
+    for (unsigned i = 0, e = Variables.getNumElements(); i != e; ++i) {
+      DIVariable DV(Variables.getElement(i));
+      assert(DV && DV.isVariable());
+      if (!ProcessedVars.insert(DV))
+        continue;
+      // Check that DbgVariable for DV wasn't created earlier, when
+      // findAbstractVariable() was called for inlined instance of DV.
+      LLVMContext &Ctx = DV->getContext();
+      DIVariable CleanDV = cleanseInlinedVariable(DV, Ctx);
+      if (AbstractVariables.lookup(CleanDV))
+        continue;
+      if (LexicalScope *Scope = LScopes.findAbstractScope(DV.getContext()))
+        addScopeVariable(Scope, new DbgVariable(DV, nullptr, this));
     }
-    if (ProcessedSPNodes.count(AScope->getScopeNode()) == 0)
-      constructAbstractSubprogramScopeDIE(TheCU, AScope);
+    constructAbstractSubprogramScopeDIE(TheCU, AScope);
   }
 
   DIE &CurFnDIE = constructSubprogramScopeDIE(TheCU, FnScope);
@@ -1625,32 +1559,12 @@ void DwarfDebug::recordSourceLine(unsigned Line, unsigned Col, const MDNode *S,
   StringRef Dir;
   unsigned Src = 1;
   unsigned Discriminator = 0;
-  if (S) {
-    DIDescriptor Scope(S);
-
-    if (Scope.isCompileUnit()) {
-      DICompileUnit CU(S);
-      Fn = CU.getFilename();
-      Dir = CU.getDirectory();
-    } else if (Scope.isFile()) {
-      DIFile F(S);
-      Fn = F.getFilename();
-      Dir = F.getDirectory();
-    } else if (Scope.isSubprogram()) {
-      DISubprogram SP(S);
-      Fn = SP.getFilename();
-      Dir = SP.getDirectory();
-    } else if (Scope.isLexicalBlockFile()) {
-      DILexicalBlockFile DBF(S);
-      Fn = DBF.getFilename();
-      Dir = DBF.getDirectory();
-    } else if (Scope.isLexicalBlock()) {
-      DILexicalBlock DB(S);
-      Fn = DB.getFilename();
-      Dir = DB.getDirectory();
-      Discriminator = DB.getDiscriminator();
-    } else
-      llvm_unreachable("Unexpected scope info");
+  if (DIScope Scope = DIScope(S)) {
+    assert(Scope.isScope());
+    Fn = Scope.getFilename();
+    Dir = Scope.getDirectory();
+    if (Scope.isLexicalBlock())
+      Discriminator = DILexicalBlock(S).getDiscriminator();
 
     unsigned CUID = Asm->OutStreamer.getContext().getDwarfCompileUnitID();
     Src = static_cast<DwarfCompileUnit &>(*InfoHolder.getUnits()[CUID])
@@ -1671,9 +1585,12 @@ void DwarfDebug::emitSectionLabels() {
   // Dwarf sections base addresses.
   DwarfInfoSectionSym =
       emitSectionSym(Asm, TLOF.getDwarfInfoSection(), "section_info");
-  if (useSplitDwarf())
+  if (useSplitDwarf()) {
     DwarfInfoDWOSectionSym =
         emitSectionSym(Asm, TLOF.getDwarfInfoDWOSection(), "section_info_dwo");
+    DwarfTypesDWOSectionSym =
+        emitSectionSym(Asm, TLOF.getDwarfTypesDWOSection(), "section_types_dwo");
+  }
   DwarfAbbrevSectionSym =
       emitSectionSym(Asm, TLOF.getDwarfAbbrevSection(), "section_abbrev");
   if (useSplitDwarf())
@@ -2437,9 +2354,9 @@ void DwarfDebug::addDwarfTypeUnitType(DwarfCompileUnit &CU,
   bool TopLevelType = TypeUnitsUnderConstruction.empty();
   AddrPool.resetUsedFlag();
 
-  auto OwnedUnit =
-      make_unique<DwarfTypeUnit>(InfoHolder.getUnits().size(), CU, Asm, this,
-                                 &InfoHolder, getDwoLineTable(CU));
+  auto OwnedUnit = make_unique<DwarfTypeUnit>(
+      InfoHolder.getUnits().size() + TypeUnitsUnderConstruction.size(), CU, Asm,
+      this, &InfoHolder, getDwoLineTable(CU));
   DwarfTypeUnit &NewTU = *OwnedUnit;
   DIE &UnitDie = NewTU.getUnitDie();
   TU = &NewTU;
@@ -2452,13 +2369,14 @@ void DwarfDebug::addDwarfTypeUnitType(DwarfCompileUnit &CU,
   uint64_t Signature = makeTypeSignature(Identifier);
   NewTU.setTypeSignature(Signature);
 
-  if (!useSplitDwarf())
+  if (useSplitDwarf())
+    NewTU.initSection(Asm->getObjFileLowering().getDwarfTypesDWOSection(),
+                      DwarfTypesDWOSectionSym);
+  else {
     CU.applyStmtList(UnitDie);
-
-  NewTU.initSection(
-      useSplitDwarf()
-          ? Asm->getObjFileLowering().getDwarfTypesDWOSection(Signature)
-          : Asm->getObjFileLowering().getDwarfTypesSection(Signature));
+    NewTU.initSection(
+        Asm->getObjFileLowering().getDwarfTypesSection(Signature));
+  }
 
   NewTU.setType(NewTU.createTypeDIE(CTy));
 
@@ -2497,6 +2415,11 @@ void DwarfDebug::addDwarfTypeUnitType(DwarfCompileUnit &CU,
 
 void DwarfDebug::attachLowHighPC(DwarfCompileUnit &Unit, DIE &D,
                                  MCSymbol *Begin, MCSymbol *End) {
+  assert(Begin && "Begin label should not be null!");
+  assert(End && "End label should not be null!");
+  assert(Begin->isDefined() && "Invalid starting label");
+  assert(End->isDefined() && "Invalid end label");
+
   Unit.addLabelAddress(D, dwarf::DW_AT_low_pc, Begin);
   if (DwarfVersion < 4)
     Unit.addLabelAddress(D, dwarf::DW_AT_high_pc, End);

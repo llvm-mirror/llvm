@@ -158,7 +158,8 @@ void ARMTargetLowering::addQRTypeForNEON(MVT VT) {
 static TargetLoweringObjectFile *createTLOF(TargetMachine &TM) {
   if (TM.getSubtarget<ARMSubtarget>().isTargetMachO())
     return new TargetLoweringObjectFileMachO();
-
+  if (TM.getSubtarget<ARMSubtarget>().isTargetWindows())
+    return new TargetLoweringObjectFileCOFF();
   return new ARMElfTargetObjectFile();
 }
 
@@ -255,167 +256,128 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
 
   if (Subtarget->isAAPCS_ABI() && !Subtarget->isTargetMachO() &&
       !Subtarget->isTargetWindows()) {
-    // Double-precision floating-point arithmetic helper functions
-    // RTABI chapter 4.1.2, Table 2
-    setLibcallName(RTLIB::ADD_F64, "__aeabi_dadd");
-    setLibcallName(RTLIB::DIV_F64, "__aeabi_ddiv");
-    setLibcallName(RTLIB::MUL_F64, "__aeabi_dmul");
-    setLibcallName(RTLIB::SUB_F64, "__aeabi_dsub");
-    setLibcallCallingConv(RTLIB::ADD_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::DIV_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::MUL_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SUB_F64, CallingConv::ARM_AAPCS);
+    static const struct {
+      const RTLIB::Libcall Op;
+      const char * const Name;
+      const CallingConv::ID CC;
+      const ISD::CondCode Cond;
+    } LibraryCalls[] = {
+      // Double-precision floating-point arithmetic helper functions
+      // RTABI chapter 4.1.2, Table 2
+      { RTLIB::ADD_F64, "__aeabi_dadd", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::DIV_F64, "__aeabi_ddiv", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::MUL_F64, "__aeabi_dmul", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SUB_F64, "__aeabi_dsub", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
 
-    // Double-precision floating-point comparison helper functions
-    // RTABI chapter 4.1.2, Table 3
-    setLibcallName(RTLIB::OEQ_F64, "__aeabi_dcmpeq");
-    setCmpLibcallCC(RTLIB::OEQ_F64, ISD::SETNE);
-    setLibcallName(RTLIB::UNE_F64, "__aeabi_dcmpeq");
-    setCmpLibcallCC(RTLIB::UNE_F64, ISD::SETEQ);
-    setLibcallName(RTLIB::OLT_F64, "__aeabi_dcmplt");
-    setCmpLibcallCC(RTLIB::OLT_F64, ISD::SETNE);
-    setLibcallName(RTLIB::OLE_F64, "__aeabi_dcmple");
-    setCmpLibcallCC(RTLIB::OLE_F64, ISD::SETNE);
-    setLibcallName(RTLIB::OGE_F64, "__aeabi_dcmpge");
-    setCmpLibcallCC(RTLIB::OGE_F64, ISD::SETNE);
-    setLibcallName(RTLIB::OGT_F64, "__aeabi_dcmpgt");
-    setCmpLibcallCC(RTLIB::OGT_F64, ISD::SETNE);
-    setLibcallName(RTLIB::UO_F64,  "__aeabi_dcmpun");
-    setCmpLibcallCC(RTLIB::UO_F64,  ISD::SETNE);
-    setLibcallName(RTLIB::O_F64,   "__aeabi_dcmpun");
-    setCmpLibcallCC(RTLIB::O_F64,   ISD::SETEQ);
-    setLibcallCallingConv(RTLIB::OEQ_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UNE_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OLT_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OLE_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OGE_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OGT_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UO_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::O_F64, CallingConv::ARM_AAPCS);
+      // Double-precision floating-point comparison helper functions
+      // RTABI chapter 4.1.2, Table 3
+      { RTLIB::OEQ_F64, "__aeabi_dcmpeq", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::UNE_F64, "__aeabi_dcmpeq", CallingConv::ARM_AAPCS, ISD::SETEQ },
+      { RTLIB::OLT_F64, "__aeabi_dcmplt", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::OLE_F64, "__aeabi_dcmple", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::OGE_F64, "__aeabi_dcmpge", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::OGT_F64, "__aeabi_dcmpgt", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::UO_F64,  "__aeabi_dcmpun", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::O_F64,   "__aeabi_dcmpun", CallingConv::ARM_AAPCS, ISD::SETEQ },
 
-    // Single-precision floating-point arithmetic helper functions
-    // RTABI chapter 4.1.2, Table 4
-    setLibcallName(RTLIB::ADD_F32, "__aeabi_fadd");
-    setLibcallName(RTLIB::DIV_F32, "__aeabi_fdiv");
-    setLibcallName(RTLIB::MUL_F32, "__aeabi_fmul");
-    setLibcallName(RTLIB::SUB_F32, "__aeabi_fsub");
-    setLibcallCallingConv(RTLIB::ADD_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::DIV_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::MUL_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SUB_F32, CallingConv::ARM_AAPCS);
+      // Single-precision floating-point arithmetic helper functions
+      // RTABI chapter 4.1.2, Table 4
+      { RTLIB::ADD_F32, "__aeabi_fadd", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::DIV_F32, "__aeabi_fdiv", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::MUL_F32, "__aeabi_fmul", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SUB_F32, "__aeabi_fsub", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
 
-    // Single-precision floating-point comparison helper functions
-    // RTABI chapter 4.1.2, Table 5
-    setLibcallName(RTLIB::OEQ_F32, "__aeabi_fcmpeq");
-    setCmpLibcallCC(RTLIB::OEQ_F32, ISD::SETNE);
-    setLibcallName(RTLIB::UNE_F32, "__aeabi_fcmpeq");
-    setCmpLibcallCC(RTLIB::UNE_F32, ISD::SETEQ);
-    setLibcallName(RTLIB::OLT_F32, "__aeabi_fcmplt");
-    setCmpLibcallCC(RTLIB::OLT_F32, ISD::SETNE);
-    setLibcallName(RTLIB::OLE_F32, "__aeabi_fcmple");
-    setCmpLibcallCC(RTLIB::OLE_F32, ISD::SETNE);
-    setLibcallName(RTLIB::OGE_F32, "__aeabi_fcmpge");
-    setCmpLibcallCC(RTLIB::OGE_F32, ISD::SETNE);
-    setLibcallName(RTLIB::OGT_F32, "__aeabi_fcmpgt");
-    setCmpLibcallCC(RTLIB::OGT_F32, ISD::SETNE);
-    setLibcallName(RTLIB::UO_F32,  "__aeabi_fcmpun");
-    setCmpLibcallCC(RTLIB::UO_F32,  ISD::SETNE);
-    setLibcallName(RTLIB::O_F32,   "__aeabi_fcmpun");
-    setCmpLibcallCC(RTLIB::O_F32,   ISD::SETEQ);
-    setLibcallCallingConv(RTLIB::OEQ_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UNE_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OLT_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OLE_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OGE_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::OGT_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UO_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::O_F32, CallingConv::ARM_AAPCS);
+      // Single-precision floating-point comparison helper functions
+      // RTABI chapter 4.1.2, Table 5
+      { RTLIB::OEQ_F32, "__aeabi_fcmpeq", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::UNE_F32, "__aeabi_fcmpeq", CallingConv::ARM_AAPCS, ISD::SETEQ },
+      { RTLIB::OLT_F32, "__aeabi_fcmplt", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::OLE_F32, "__aeabi_fcmple", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::OGE_F32, "__aeabi_fcmpge", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::OGT_F32, "__aeabi_fcmpgt", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::UO_F32,  "__aeabi_fcmpun", CallingConv::ARM_AAPCS, ISD::SETNE },
+      { RTLIB::O_F32,   "__aeabi_fcmpun", CallingConv::ARM_AAPCS, ISD::SETEQ },
 
-    // Floating-point to integer conversions.
-    // RTABI chapter 4.1.2, Table 6
-    setLibcallName(RTLIB::FPTOSINT_F64_I32, "__aeabi_d2iz");
-    setLibcallName(RTLIB::FPTOUINT_F64_I32, "__aeabi_d2uiz");
-    setLibcallName(RTLIB::FPTOSINT_F64_I64, "__aeabi_d2lz");
-    setLibcallName(RTLIB::FPTOUINT_F64_I64, "__aeabi_d2ulz");
-    setLibcallName(RTLIB::FPTOSINT_F32_I32, "__aeabi_f2iz");
-    setLibcallName(RTLIB::FPTOUINT_F32_I32, "__aeabi_f2uiz");
-    setLibcallName(RTLIB::FPTOSINT_F32_I64, "__aeabi_f2lz");
-    setLibcallName(RTLIB::FPTOUINT_F32_I64, "__aeabi_f2ulz");
-    setLibcallCallingConv(RTLIB::FPTOSINT_F64_I32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPTOUINT_F64_I32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPTOSINT_F64_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPTOUINT_F64_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPTOSINT_F32_I32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPTOUINT_F32_I32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPTOSINT_F32_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPTOUINT_F32_I64, CallingConv::ARM_AAPCS);
+      // Floating-point to integer conversions.
+      // RTABI chapter 4.1.2, Table 6
+      { RTLIB::FPTOSINT_F64_I32, "__aeabi_d2iz",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPTOUINT_F64_I32, "__aeabi_d2uiz", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPTOSINT_F64_I64, "__aeabi_d2lz",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPTOUINT_F64_I64, "__aeabi_d2ulz", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPTOSINT_F32_I32, "__aeabi_f2iz",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPTOUINT_F32_I32, "__aeabi_f2uiz", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPTOSINT_F32_I64, "__aeabi_f2lz",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPTOUINT_F32_I64, "__aeabi_f2ulz", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
 
-    // Conversions between floating types.
-    // RTABI chapter 4.1.2, Table 7
-    setLibcallName(RTLIB::FPROUND_F64_F32, "__aeabi_d2f");
-    setLibcallName(RTLIB::FPEXT_F32_F64,   "__aeabi_f2d");
-    setLibcallCallingConv(RTLIB::FPROUND_F64_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPEXT_F32_F64, CallingConv::ARM_AAPCS);
+      // Conversions between floating types.
+      // RTABI chapter 4.1.2, Table 7
+      { RTLIB::FPROUND_F64_F32, "__aeabi_d2f", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::FPEXT_F32_F64,   "__aeabi_f2d", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
 
-    // Integer to floating-point conversions.
-    // RTABI chapter 4.1.2, Table 8
-    setLibcallName(RTLIB::SINTTOFP_I32_F64, "__aeabi_i2d");
-    setLibcallName(RTLIB::UINTTOFP_I32_F64, "__aeabi_ui2d");
-    setLibcallName(RTLIB::SINTTOFP_I64_F64, "__aeabi_l2d");
-    setLibcallName(RTLIB::UINTTOFP_I64_F64, "__aeabi_ul2d");
-    setLibcallName(RTLIB::SINTTOFP_I32_F32, "__aeabi_i2f");
-    setLibcallName(RTLIB::UINTTOFP_I32_F32, "__aeabi_ui2f");
-    setLibcallName(RTLIB::SINTTOFP_I64_F32, "__aeabi_l2f");
-    setLibcallName(RTLIB::UINTTOFP_I64_F32, "__aeabi_ul2f");
-    setLibcallCallingConv(RTLIB::SINTTOFP_I32_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UINTTOFP_I32_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SINTTOFP_I64_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UINTTOFP_I64_F64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SINTTOFP_I32_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UINTTOFP_I32_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SINTTOFP_I64_F32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UINTTOFP_I64_F32, CallingConv::ARM_AAPCS);
+      // Integer to floating-point conversions.
+      // RTABI chapter 4.1.2, Table 8
+      { RTLIB::SINTTOFP_I32_F64, "__aeabi_i2d",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UINTTOFP_I32_F64, "__aeabi_ui2d", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SINTTOFP_I64_F64, "__aeabi_l2d",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UINTTOFP_I64_F64, "__aeabi_ul2d", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SINTTOFP_I32_F32, "__aeabi_i2f",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UINTTOFP_I32_F32, "__aeabi_ui2f", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SINTTOFP_I64_F32, "__aeabi_l2f",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UINTTOFP_I64_F32, "__aeabi_ul2f", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
 
-    // Long long helper functions
-    // RTABI chapter 4.2, Table 9
-    setLibcallName(RTLIB::MUL_I64,  "__aeabi_lmul");
-    setLibcallName(RTLIB::SHL_I64, "__aeabi_llsl");
-    setLibcallName(RTLIB::SRL_I64, "__aeabi_llsr");
-    setLibcallName(RTLIB::SRA_I64, "__aeabi_lasr");
-    setLibcallCallingConv(RTLIB::MUL_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SDIV_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UDIV_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SHL_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SRL_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SRA_I64, CallingConv::ARM_AAPCS);
+      // Long long helper functions
+      // RTABI chapter 4.2, Table 9
+      { RTLIB::MUL_I64, "__aeabi_lmul", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SHL_I64, "__aeabi_llsl", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SRL_I64, "__aeabi_llsr", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SRA_I64, "__aeabi_lasr", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
 
-    // Integer division functions
-    // RTABI chapter 4.3.1
-    setLibcallName(RTLIB::SDIV_I8,  "__aeabi_idiv");
-    setLibcallName(RTLIB::SDIV_I16, "__aeabi_idiv");
-    setLibcallName(RTLIB::SDIV_I32, "__aeabi_idiv");
-    setLibcallName(RTLIB::SDIV_I64, "__aeabi_ldivmod");
-    setLibcallName(RTLIB::UDIV_I8,  "__aeabi_uidiv");
-    setLibcallName(RTLIB::UDIV_I16, "__aeabi_uidiv");
-    setLibcallName(RTLIB::UDIV_I32, "__aeabi_uidiv");
-    setLibcallName(RTLIB::UDIV_I64, "__aeabi_uldivmod");
-    setLibcallCallingConv(RTLIB::SDIV_I8, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SDIV_I16, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SDIV_I32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::SDIV_I64, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UDIV_I8, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UDIV_I16, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UDIV_I32, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::UDIV_I64, CallingConv::ARM_AAPCS);
+      // Integer division functions
+      // RTABI chapter 4.3.1
+      { RTLIB::SDIV_I8,  "__aeabi_idiv",     CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SDIV_I16, "__aeabi_idiv",     CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SDIV_I32, "__aeabi_idiv",     CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::SDIV_I64, "__aeabi_ldivmod",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UDIV_I8,  "__aeabi_uidiv",    CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UDIV_I16, "__aeabi_uidiv",    CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UDIV_I32, "__aeabi_uidiv",    CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::UDIV_I64, "__aeabi_uldivmod", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
 
-    // Memory operations
-    // RTABI chapter 4.3.4
-    setLibcallName(RTLIB::MEMCPY,  "__aeabi_memcpy");
-    setLibcallName(RTLIB::MEMMOVE, "__aeabi_memmove");
-    setLibcallName(RTLIB::MEMSET,  "__aeabi_memset");
-    setLibcallCallingConv(RTLIB::MEMCPY, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::MEMMOVE, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::MEMSET, CallingConv::ARM_AAPCS);
+      // Memory operations
+      // RTABI chapter 4.3.4
+      { RTLIB::MEMCPY,  "__aeabi_memcpy",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::MEMMOVE, "__aeabi_memmove", CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+      { RTLIB::MEMSET,  "__aeabi_memset",  CallingConv::ARM_AAPCS, ISD::SETCC_INVALID },
+    };
+
+    for (const auto &LC : LibraryCalls) {
+      setLibcallName(LC.Op, LC.Name);
+      setLibcallCallingConv(LC.Op, LC.CC);
+      if (LC.Cond != ISD::SETCC_INVALID)
+        setCmpLibcallCC(LC.Op, LC.Cond);
+    }
+  }
+
+  if (Subtarget->isTargetWindows()) {
+    static const struct {
+      const RTLIB::Libcall Op;
+      const char * const Name;
+      const CallingConv::ID CC;
+    } LibraryCalls[] = {
+      { RTLIB::FPTOSINT_F32_I64, "__stoi64", CallingConv::ARM_AAPCS_VFP },
+      { RTLIB::FPTOSINT_F64_I64, "__dtoi64", CallingConv::ARM_AAPCS_VFP },
+      { RTLIB::FPTOUINT_F32_I64, "__stou64", CallingConv::ARM_AAPCS_VFP },
+      { RTLIB::FPTOUINT_F64_I64, "__dtou64", CallingConv::ARM_AAPCS_VFP },
+      { RTLIB::SINTTOFP_I64_F32, "__i64tos", CallingConv::ARM_AAPCS_VFP },
+      { RTLIB::SINTTOFP_I64_F64, "__i64tod", CallingConv::ARM_AAPCS_VFP },
+      { RTLIB::UINTTOFP_I64_F32, "__u64tos", CallingConv::ARM_AAPCS_VFP },
+      { RTLIB::UINTTOFP_I64_F64, "__u64tod", CallingConv::ARM_AAPCS_VFP },
+    };
+
+    for (const auto &LC : LibraryCalls) {
+      setLibcallName(LC.Op, LC.Name);
+      setLibcallCallingConv(LC.Op, LC.CC);
+    }
   }
 
   // Use divmod compiler-rt calls for iOS 5.0 and later.
@@ -452,6 +414,8 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
     setOperationAction(ISD::SMUL_LOHI, (MVT::SimpleValueType)VT, Expand);
     setOperationAction(ISD::MULHU, (MVT::SimpleValueType)VT, Expand);
     setOperationAction(ISD::UMUL_LOHI, (MVT::SimpleValueType)VT, Expand);
+
+    setOperationAction(ISD::BSWAP, (MVT::SimpleValueType)VT, Expand);
   }
 
   setOperationAction(ISD::ConstantFP, MVT::f32, Custom);
@@ -2357,13 +2321,13 @@ ARMTargetLowering::LowerToTLSGeneralDynamicModel(GlobalAddressSDNode *GA,
   Entry.Node = Argument;
   Entry.Ty = (Type *) Type::getInt32Ty(*DAG.getContext());
   Args.push_back(Entry);
+
   // FIXME: is there useful debug info available here?
-  TargetLowering::CallLoweringInfo CLI(Chain,
-                (Type *) Type::getInt32Ty(*DAG.getContext()),
-                false, false, false, false,
-                0, CallingConv::C, /*isTailCall=*/false,
-                /*doesNotRet=*/false, /*isReturnValueUsed=*/true,
-                DAG.getExternalSymbol("__tls_get_addr", PtrVT), Args, DAG, dl);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(Chain)
+    .setCallee(CallingConv::C, Type::getInt32Ty(*DAG.getContext()),
+               DAG.getExternalSymbol("__tls_get_addr", PtrVT), &Args, 0);
+
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   return CallResult.first;
 }
@@ -3907,14 +3871,16 @@ SDValue ARMTargetLowering::LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const{
 }
 
 SDValue ARMTargetLowering::LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const {
-  MachineFrameInfo *MFI = DAG.getMachineFunction().getFrameInfo();
+  const ARMBaseRegisterInfo &ARI =
+    *static_cast<const ARMBaseRegisterInfo*>(RegInfo);
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
   MFI->setFrameAddressIsTaken(true);
 
   EVT VT = Op.getValueType();
   SDLoc dl(Op);  // FIXME probably not meaningful
   unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
-  unsigned FrameReg = (Subtarget->isThumb() || Subtarget->isTargetMachO())
-    ? ARM::R7 : ARM::R11;
+  unsigned FrameReg = ARI.getFrameRegister(MF);
   SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), dl, FrameReg, VT);
   while (Depth--)
     FrameAddr = DAG.getLoad(VT, dl, DAG.getEntryNode(), FrameAddr,
@@ -3925,7 +3891,8 @@ SDValue ARMTargetLowering::LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const {
 
 // FIXME? Maybe this could be a TableGen attribute on some registers and
 // this table could be generated automatically from RegInfo.
-unsigned ARMTargetLowering::getRegisterByName(const char* RegName) const {
+unsigned ARMTargetLowering::getRegisterByName(const char* RegName,
+                                              EVT VT) const {
   unsigned Reg = StringSwitch<unsigned>(RegName)
                        .Case("sp", ARM::SP)
                        .Default(0);
@@ -3963,8 +3930,15 @@ static SDValue ExpandBITCAST(SDNode *N, SelectionDAG &DAG) {
 
   // Turn f64->i64 into VMOVRRD.
   if (DstVT == MVT::i64 && TLI.isTypeLegal(SrcVT)) {
-    SDValue Cvt = DAG.getNode(ARMISD::VMOVRRD, dl,
-                              DAG.getVTList(MVT::i32, MVT::i32), Op);
+    SDValue Cvt;
+    if (TLI.isBigEndian() && SrcVT.isVector() &&
+        SrcVT.getVectorNumElements() > 1)
+      Cvt = DAG.getNode(ARMISD::VMOVRRD, dl,
+                        DAG.getVTList(MVT::i32, MVT::i32),
+                        DAG.getNode(ARMISD::VREV64, dl, SrcVT, Op));
+    else
+      Cvt = DAG.getNode(ARMISD::VMOVRRD, dl,
+                        DAG.getVTList(MVT::i32, MVT::i32), Op);
     // Merge the pieces into a single i64 value.
     return DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i64, Cvt, Cvt.getValue(1));
   }
@@ -6101,12 +6075,12 @@ SDValue ARMTargetLowering::LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const {
   ? "__sincos_stret" : "__sincosf_stret";
   SDValue Callee = DAG.getExternalSymbol(LibcallName, getPointerTy());
 
-  TargetLowering::
-  CallLoweringInfo CLI(DAG.getEntryNode(), Type::getVoidTy(*DAG.getContext()),
-                       false, false, false, false, 0,
-                       CallingConv::C, /*isTaillCall=*/false,
-                       /*doesNotRet=*/false, /*isReturnValueUsed*/false,
-                       Callee, Args, DAG, dl);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
+    .setCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()), Callee,
+               &Args, 0)
+    .setDiscardResult();
+
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
 
   SDValue LoadSin = DAG.getLoad(ArgVT, dl, CallResult.second, SRet,
@@ -9512,7 +9486,7 @@ ARMTargetLowering::PerformCMOVCombine(SDNode *N, SelectionDAG &DAG) const {
 
   if (Res.getNode()) {
     APInt KnownZero, KnownOne;
-    DAG.ComputeMaskedBits(SDValue(N,0), KnownZero, KnownOne);
+    DAG.computeKnownBits(SDValue(N,0), KnownZero, KnownOne);
     // Capture demanded bits information that would be otherwise lost.
     if (KnownZero == 0xfffffffe)
       Res = DAG.getNode(ISD::AssertZext, dl, MVT::i32, Res,
@@ -10099,11 +10073,11 @@ bool ARMTargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
   return true;
 }
 
-void ARMTargetLowering::computeMaskedBitsForTargetNode(const SDValue Op,
-                                                       APInt &KnownZero,
-                                                       APInt &KnownOne,
-                                                       const SelectionDAG &DAG,
-                                                       unsigned Depth) const {
+void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
+                                                      APInt &KnownZero,
+                                                      APInt &KnownOne,
+                                                      const SelectionDAG &DAG,
+                                                      unsigned Depth) const {
   unsigned BitWidth = KnownOne.getBitWidth();
   KnownZero = KnownOne = APInt(BitWidth, 0);
   switch (Op.getOpcode()) {
@@ -10119,11 +10093,11 @@ void ARMTargetLowering::computeMaskedBitsForTargetNode(const SDValue Op,
     break;
   case ARMISD::CMOV: {
     // Bits are known zero/one if known on the LHS and RHS.
-    DAG.ComputeMaskedBits(Op.getOperand(0), KnownZero, KnownOne, Depth+1);
+    DAG.computeKnownBits(Op.getOperand(0), KnownZero, KnownOne, Depth+1);
     if (KnownZero == 0 && KnownOne == 0) return;
 
     APInt KnownZeroRHS, KnownOneRHS;
-    DAG.ComputeMaskedBits(Op.getOperand(1), KnownZeroRHS, KnownOneRHS, Depth+1);
+    DAG.computeKnownBits(Op.getOperand(1), KnownZeroRHS, KnownOneRHS, Depth+1);
     KnownZero &= KnownZeroRHS;
     KnownOne  &= KnownOneRHS;
     return;
@@ -10495,13 +10469,12 @@ SDValue ARMTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   Type *RetTy = (Type*)StructType::get(Ty, Ty, NULL);
 
   SDLoc dl(Op);
-  TargetLowering::
-  CallLoweringInfo CLI(InChain, RetTy, isSigned, !isSigned, false, true,
-                    0, getLibcallCallingConv(LC), /*isTailCall=*/false,
-                    /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                    Callee, Args, DAG, dl);
-  std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(InChain)
+    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setInRegister().setSExtResult(isSigned).setZExtResult(!isSigned);
 
+  std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
   return CallInfo.first;
 }
 

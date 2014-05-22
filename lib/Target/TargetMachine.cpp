@@ -33,18 +33,8 @@ using namespace llvm;
 //
 
 namespace llvm {
-  bool HasDivModLibcall;
   bool AsmVerbosityDefault(false);
 }
-
-static cl::opt<bool>
-DataSections("fdata-sections",
-  cl::desc("Emit data into separate sections"),
-  cl::init(false));
-static cl::opt<bool>
-FunctionSections("ffunction-sections",
-  cl::desc("Emit functions into separate sections"),
-  cl::init(false));
 
 //---------------------------------------------------------------------------
 // TargetMachine Class
@@ -55,11 +45,6 @@ TargetMachine::TargetMachine(const Target &T,
                              const TargetOptions &Options)
   : TheTarget(T), TargetTriple(TT), TargetCPU(CPU), TargetFS(FS),
     CodeGenInfo(nullptr), AsmInfo(nullptr),
-    MCRelaxAll(false),
-    MCNoExecStack(false),
-    MCSaveTempLabels(false),
-    MCUseCFI(true),
-    MCUseDwarfDirectory(false),
     RequireStructuredCFG(false),
     Options(Options) {
 }
@@ -132,7 +117,7 @@ TLSModel::Model TargetMachine::getTLSModel(const GlobalValue *GV) const {
   // If GV is an alias then use the aliasee for determining
   // thread-localness.
   if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-    GV = GA->getAliasedGlobal();
+    GV = GA->getAliasee();
   const GlobalVariable *Var = cast<GlobalVariable>(GV);
 
   bool isLocal = Var->hasLocalLinkage();
@@ -185,20 +170,20 @@ void TargetMachine::setAsmVerbosityDefault(bool V) {
   AsmVerbosityDefault = V;
 }
 
-bool TargetMachine::getFunctionSections() {
-  return FunctionSections;
+bool TargetMachine::getFunctionSections() const {
+  return Options.FunctionSections;
 }
 
-bool TargetMachine::getDataSections() {
-  return DataSections;
+bool TargetMachine::getDataSections() const {
+  return Options.DataSections;
 }
 
 void TargetMachine::setFunctionSections(bool V) {
-  FunctionSections = V;
+  Options.FunctionSections = V;
 }
 
 void TargetMachine::setDataSections(bool V) {
-  DataSections = V;
+  Options.DataSections = V;
 }
 
 void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,

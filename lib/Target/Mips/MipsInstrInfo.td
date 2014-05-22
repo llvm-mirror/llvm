@@ -146,38 +146,36 @@ def MipsSDR : SDNode<"MipsISD::SDR", SDTStore,
 //===----------------------------------------------------------------------===//
 // Mips Instruction Predicate Definitions.
 //===----------------------------------------------------------------------===//
-def HasSEInReg  :     Predicate<"Subtarget.hasSEInReg()">,
-                      AssemblerPredicate<"FeatureSEInReg">;
-def HasBitCount :     Predicate<"Subtarget.hasBitCount()">,
-                      AssemblerPredicate<"FeatureBitCount">;
-def HasSwap     :     Predicate<"Subtarget.hasSwap()">,
-                      AssemblerPredicate<"FeatureSwap">;
-def HasFPIdx    :     Predicate<"Subtarget.hasFPIdx()">,
-                      AssemblerPredicate<"FeatureFPIdx">;
 def HasMips2     :    Predicate<"Subtarget.hasMips2()">,
                       AssemblerPredicate<"FeatureMips2">;
 def HasMips3_32  :    Predicate<"Subtarget.hasMips3_32()">,
                       AssemblerPredicate<"FeatureMips3_32">;
+def HasMips3_32r2 :   Predicate<"Subtarget.hasMips3_32r2()">,
+                      AssemblerPredicate<"FeatureMips3_32r2">;
 def HasMips3     :    Predicate<"Subtarget.hasMips3()">,
                       AssemblerPredicate<"FeatureMips3">;
 def HasMips4_32  :    Predicate<"Subtarget.hasMips4_32()">,
                       AssemblerPredicate<"FeatureMips4_32">;
+def HasMips4_32r2 :   Predicate<"Subtarget.hasMips4_32r2()">,
+                      AssemblerPredicate<"FeatureMips4_32r2">;
+def HasMips5_32r2 :   Predicate<"Subtarget.hasMips5_32r2()">,
+                      AssemblerPredicate<"FeatureMips5_32r2">;
 def HasMips32    :    Predicate<"Subtarget.hasMips32()">,
                       AssemblerPredicate<"FeatureMips32">;
 def HasMips32r2  :    Predicate<"Subtarget.hasMips32r2()">,
                       AssemblerPredicate<"FeatureMips32r2">;
+def HasMips32r6  :    Predicate<"Subtarget.hasMips32r6()">,
+                      AssemblerPredicate<"FeatureMips32r6">;
 def IsGP64bit    :    Predicate<"Subtarget.isGP64bit()">,
                       AssemblerPredicate<"FeatureGP64Bit">;
 def IsGP32bit    :    Predicate<"!Subtarget.isGP64bit()">,
                       AssemblerPredicate<"!FeatureGP64Bit">;
 def HasMips64    :    Predicate<"Subtarget.hasMips64()">,
                       AssemblerPredicate<"FeatureMips64">;
-def IsGP32       :    Predicate<"!Subtarget.isGP64()">,
-                      AssemblerPredicate<"!FeatureGP64Bit">;
-def IsGP64       :    Predicate<"Subtarget.isGP64()">,
-                      AssemblerPredicate<"FeatureGP64Bit">;
 def HasMips64r2  :    Predicate<"Subtarget.hasMips64r2()">,
                       AssemblerPredicate<"FeatureMips64r2">;
+def HasMips64r6  :    Predicate<"Subtarget.hasMips64r6()">,
+                      AssemblerPredicate<"FeatureMips64r6">;
 def IsN64       :     Predicate<"Subtarget.isABI_N64()">,
                       AssemblerPredicate<"FeatureN64">;
 def InMips16Mode :    Predicate<"Subtarget.inMips16Mode()">,
@@ -205,6 +203,7 @@ def IsNotNaCl    :    Predicate<"!Subtarget.isTargetNaCl()">;
 // They are mutually exclusive.
 //===----------------------------------------------------------------------===//
 
+class GPR_32 { list<Predicate> GPRPredicates = [IsGP32bit]; }
 class GPR_64 { list<Predicate> GPRPredicates = [IsGP64bit]; }
 
 //===----------------------------------------------------------------------===//
@@ -214,17 +213,27 @@ class GPR_64 { list<Predicate> GPRPredicates = [IsGP64bit]; }
 
 class ISA_MIPS2    { list<Predicate> InsnPredicates = [HasMips2]; }
 class ISA_MIPS3    { list<Predicate> InsnPredicates = [HasMips3]; }
+class ISA_MIPS32   { list<Predicate> InsnPredicates = [HasMips32]; }
 class ISA_MIPS32R2 { list<Predicate> InsnPredicates = [HasMips32r2]; }
+class ISA_MIPS64   { list<Predicate> InsnPredicates = [HasMips64]; }
 class ISA_MIPS64R2 { list<Predicate> InsnPredicates = [HasMips64r2]; }
+class ISA_MIPS32R6 { list<Predicate> InsnPredicates = [HasMips32r6]; }
+class ISA_MIPS64R6 { list<Predicate> InsnPredicates = [HasMips64r6]; }
 
 // The portions of MIPS-III that were also added to MIPS32
 class INSN_MIPS3_32 { list<Predicate> InsnPredicates = [HasMips3_32]; }
 
+// The portions of MIPS-III that were also added to MIPS32
+class INSN_MIPS3_32R2 { list<Predicate> InsnPredicates = [HasMips3_32r2]; }
+
 // The portions of MIPS-IV that were also added to MIPS32
 class INSN_MIPS4_32 { list<Predicate> InsnPredicates = [HasMips4_32]; }
 
-class INSN_SWAP { list<Predicate> InsnPredicates = [HasSwap]; }
-class INSN_SEINREG { list<Predicate> InsnPredicates = [HasSEInReg]; }
+// The portions of MIPS-IV that were also added to MIPS32R2
+class INSN_MIPS4_32R2 { list<Predicate> InsnPredicates = [HasMips4_32r2]; }
+
+// The portions of MIPS-V that were also added to MIPS32R2
+class INSN_MIPS5_32R2 { list<Predicate> InsnPredicates = [HasMips5_32r2]; }
 
 //===----------------------------------------------------------------------===//
 
@@ -307,6 +316,11 @@ def simm16      : Operand<i32> {
   let DecoderMethod= "DecodeSimm16";
 }
 
+def simm19_lsl2 : Operand<i32> {
+  let EncoderMethod = "getSimm19Lsl2Encoding";
+  let DecoderMethod = "DecodeSimm19Lsl2";
+}
+
 def simm20      : Operand<i32> {
 }
 
@@ -326,6 +340,14 @@ def uimmz       : Operand<i32> {
 }
 
 // Unsigned Operand
+def uimm2 : Operand<i32> {
+  let PrintMethod = "printUnsignedImm";
+}
+
+def uimm3 : Operand<i32> {
+  let PrintMethod = "printUnsignedImm";
+}
+
 def uimm5       : Operand<i32> {
   let PrintMethod = "printUnsignedImm";
 }
@@ -827,25 +849,22 @@ class EffectiveAddress<string opstr, RegisterOperand RO> :
 // Count Leading Ones/Zeros in Word
 class CountLeading0<string opstr, RegisterOperand RO>:
   InstSE<(outs RO:$rd), (ins RO:$rs), !strconcat(opstr, "\t$rd, $rs"),
-         [(set RO:$rd, (ctlz RO:$rs))], II_CLZ, FrmR, opstr>,
-  AdditionalRequires<[HasBitCount]>;
+         [(set RO:$rd, (ctlz RO:$rs))], II_CLZ, FrmR, opstr>;
 
 class CountLeading1<string opstr, RegisterOperand RO>:
   InstSE<(outs RO:$rd), (ins RO:$rs), !strconcat(opstr, "\t$rd, $rs"),
-         [(set RO:$rd, (ctlz (not RO:$rs)))], II_CLO, FrmR, opstr>,
-  AdditionalRequires<[HasBitCount]>;
+         [(set RO:$rd, (ctlz (not RO:$rs)))], II_CLO, FrmR, opstr>;
 
 // Sign Extend in Register.
 class SignExtInReg<string opstr, ValueType vt, RegisterOperand RO,
                    InstrItinClass itin> :
   InstSE<(outs RO:$rd), (ins RO:$rt), !strconcat(opstr, "\t$rd, $rt"),
-         [(set RO:$rd, (sext_inreg RO:$rt, vt))], itin, FrmR, opstr>,
-  INSN_SEINREG;
+         [(set RO:$rd, (sext_inreg RO:$rt, vt))], itin, FrmR, opstr>;
 
 // Subword Swap
 class SubwordSwap<string opstr, RegisterOperand RO>:
   InstSE<(outs RO:$rd), (ins RO:$rt), !strconcat(opstr, "\t$rd, $rt"), [],
-         NoItinerary, FrmR, opstr>, INSN_SWAP {
+         NoItinerary, FrmR, opstr> {
   let neverHasSideEffects = 1;
 }
 
@@ -1004,7 +1023,7 @@ def SUBu  : MMRel, ArithLogicR<"subu", GPR32Opnd, 0, II_SUBU, sub>,
             ADD_FM<0, 0x23>;
 let Defs = [HI0, LO0] in
 def MUL   : MMRel, ArithLogicR<"mul", GPR32Opnd, 1, II_MUL, mul>,
-            ADD_FM<0x1c, 2>;
+            ADD_FM<0x1c, 2>, ISA_MIPS32;
 def ADD   : MMRel, ArithLogicR<"add", GPR32Opnd>, ADD_FM<0, 0x20>;
 def SUB   : MMRel, ArithLogicR<"sub", GPR32Opnd>, ADD_FM<0, 0x22>;
 def SLT   : MMRel, SetCC_R<"slt", setlt, GPR32Opnd>, ADD_FM<0, 0x2a>;
@@ -1081,10 +1100,10 @@ def SYSCALL : MMRel, SYS_FT<"syscall">, SYS_FM<0xc>;
 def TRAP : TrapBase<BREAK>;
 
 def ERET : MMRel, ER_FT<"eret">, ER_FM<0x18>, INSN_MIPS3_32;
-def DERET : MMRel, ER_FT<"deret">, ER_FM<0x1f>;
+def DERET : MMRel, ER_FT<"deret">, ER_FM<0x1f>, ISA_MIPS32;
 
-def EI : MMRel, DEI_FT<"ei", GPR32Opnd>, EI_FM<1>;
-def DI : MMRel, DEI_FT<"di", GPR32Opnd>, EI_FM<0>;
+def EI : MMRel, DEI_FT<"ei", GPR32Opnd>, EI_FM<1>, ISA_MIPS32R2;
+def DI : MMRel, DEI_FT<"di", GPR32Opnd>, EI_FM<0>, ISA_MIPS32R2;
 
 let EncodingPredicates = []<Predicate>, // FIXME: Lack of HasStdEnc is probably a bug
     AdditionalPredicates = [NotInMicroMips] in {
@@ -1165,15 +1184,17 @@ def MFLO : MMRel, MoveFromLOHI<"mflo", GPR32Opnd, AC0>, MFLO_FM<0x12>;
 }
 
 /// Sign Ext In Register Instructions.
-def SEB : MMRel, SignExtInReg<"seb", i8, GPR32Opnd, II_SEB>, SEB_FM<0x10, 0x20>;
-def SEH : MMRel, SignExtInReg<"seh", i16, GPR32Opnd, II_SEH>, SEB_FM<0x18, 0x20>;
+def SEB : MMRel, SignExtInReg<"seb", i8, GPR32Opnd, II_SEB>,
+          SEB_FM<0x10, 0x20>, ISA_MIPS32R2;
+def SEH : MMRel, SignExtInReg<"seh", i16, GPR32Opnd, II_SEH>,
+          SEB_FM<0x18, 0x20>, ISA_MIPS32R2;
 
 /// Count Leading
-def CLZ : MMRel, CountLeading0<"clz", GPR32Opnd>, CLO_FM<0x20>;
-def CLO : MMRel, CountLeading1<"clo", GPR32Opnd>, CLO_FM<0x21>;
+def CLZ : MMRel, CountLeading0<"clz", GPR32Opnd>, CLO_FM<0x20>, ISA_MIPS32;
+def CLO : MMRel, CountLeading1<"clo", GPR32Opnd>, CLO_FM<0x21>, ISA_MIPS32;
 
 /// Word Swap Bytes Within Halfwords
-def WSBH : MMRel, SubwordSwap<"wsbh", GPR32Opnd>, SEB_FM<2, 0x20>;
+def WSBH : MMRel, SubwordSwap<"wsbh", GPR32Opnd>, SEB_FM<2, 0x20>, ISA_MIPS32R2;
 
 /// No operation.
 def NOP : PseudoSE<(outs), (ins), []>, PseudoInstExpansion<(SLL ZERO, ZERO, 0)>;
@@ -1185,10 +1206,10 @@ def NOP : PseudoSE<(outs), (ins), []>, PseudoInstExpansion<(SLL ZERO, ZERO, 0)>;
 def LEA_ADDiu : MMRel, EffectiveAddress<"addiu", GPR32Opnd>, LW_FM<9>;
 
 // MADD*/MSUB*
-def MADD  : MMRel, MArithR<"madd", II_MADD, 1>, MULT_FM<0x1c, 0>;
-def MADDU : MMRel, MArithR<"maddu", II_MADDU, 1>, MULT_FM<0x1c, 1>;
-def MSUB  : MMRel, MArithR<"msub", II_MSUB>, MULT_FM<0x1c, 4>;
-def MSUBU : MMRel, MArithR<"msubu", II_MSUBU>, MULT_FM<0x1c, 5>;
+def MADD  : MMRel, MArithR<"madd", II_MADD, 1>, MULT_FM<0x1c, 0>, ISA_MIPS32;
+def MADDU : MMRel, MArithR<"maddu", II_MADDU, 1>, MULT_FM<0x1c, 1>, ISA_MIPS32;
+def MSUB  : MMRel, MArithR<"msub", II_MSUB>, MULT_FM<0x1c, 4>, ISA_MIPS32;
+def MSUBU : MMRel, MArithR<"msubu", II_MSUBU>, MULT_FM<0x1c, 5>, ISA_MIPS32;
 
 let AdditionalPredicates = [NotDSP] in {
 def PseudoMULT  : MultDivPseudo<MULT, ACC64, GPR32Opnd, MipsMult, II_MULT>;
@@ -1213,8 +1234,8 @@ def EXT : MMRel, ExtBase<"ext", GPR32Opnd, uimm5, MipsExt>, EXT_FM<0>;
 def INS : MMRel, InsBase<"ins", GPR32Opnd, uimm5, MipsIns>, EXT_FM<4>;
 
 /// Move Control Registers From/To CPU Registers
-def MFC0 : MFC3OP<"mfc0", GPR32Opnd>, MFC3OP_FM<0x10, 0>;
-def MTC0 : MFC3OP<"mtc0", GPR32Opnd>, MFC3OP_FM<0x10, 4>;
+def MFC0 : MFC3OP<"mfc0", GPR32Opnd>, MFC3OP_FM<0x10, 0>, ISA_MIPS32;
+def MTC0 : MFC3OP<"mtc0", GPR32Opnd>, MFC3OP_FM<0x10, 4>, ISA_MIPS32;
 def MFC2 : MFC3OP<"mfc2", GPR32Opnd>, MFC3OP_FM<0x12, 0>;
 def MTC2 : MFC3OP<"mtc2", GPR32Opnd>, MFC3OP_FM<0x12, 4>;
 
@@ -1236,7 +1257,9 @@ def TLBWR : TLB<"tlbwr">, COP0_TLB_FM<0x06>;
 //===----------------------------------------------------------------------===//
 def : MipsInstAlias<"move $dst, $src",
                     (ADDu GPR32Opnd:$dst, GPR32Opnd:$src,ZERO), 1>,
-      Requires<[IsGP32, NotInMicroMips]>;
+      GPR_32 {
+  let AdditionalPredicates = [NotInMicroMips];
+}
 def : MipsInstAlias<"bal $offset", (BGEZAL ZERO, brtarget:$offset), 0>;
 def : MipsInstAlias<"addu $rs, $rt, $imm",
                     (ADDiu GPR32Opnd:$rs, GPR32Opnd:$rt, simm16:$imm), 0>;
@@ -1278,8 +1301,8 @@ def : MipsInstAlias<"beqz $rs,$offset",
                     (BEQ GPR32Opnd:$rs, ZERO, brtarget:$offset), 0>;
 def : MipsInstAlias<"syscall", (SYSCALL 0), 1>;
     
-def : MipsInstAlias<"break $imm", (BREAK uimm10:$imm, 0), 1>;
 def : MipsInstAlias<"break", (BREAK 0, 0), 1>;
+def : MipsInstAlias<"break $imm", (BREAK uimm10:$imm, 0), 1>;
 def : MipsInstAlias<"ei", (EI ZERO), 1>;
 def : MipsInstAlias<"di", (DI ZERO), 1>;
 
@@ -1295,13 +1318,13 @@ def  : MipsInstAlias<"sll $rd, $rt, $rs",
                      (SLLV GPR32Opnd:$rd, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
 def : MipsInstAlias<"sub, $rd, $rs, $imm",
                     (ADDi GPR32Opnd:$rd, GPR32Opnd:$rs,
-                          InvertedImOperand:$imm)>;
+                          InvertedImOperand:$imm), 0>;
 def : MipsInstAlias<"sub $rs, $imm",
                     (ADDi GPR32Opnd:$rs, GPR32Opnd:$rs, InvertedImOperand:$imm),
                     0>;
 def : MipsInstAlias<"subu, $rd, $rs, $imm",
                     (ADDiu GPR32Opnd:$rd, GPR32Opnd:$rs,
-                           InvertedImOperand:$imm)>;
+                           InvertedImOperand:$imm), 0>;
 def : MipsInstAlias<"subu $rs, $imm", (ADDiu GPR32Opnd:$rs, GPR32Opnd:$rs,
                                              InvertedImOperand:$imm), 0>;
 def : MipsInstAlias<"sra $rd, $rt, $rs",

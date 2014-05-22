@@ -33,24 +33,24 @@ foo:
 
         ldur x0, [x1, #-257]
 
-; CHECK-ERRORS: error: index must be a multiple of 8 in range [0, 32760].
+; CHECK-ERRORS: error: invalid offset in memory address.
 ; CHECK-ERRORS:         ldr x0, [x0, #804]
 ; CHECK-ERRORS:                 ^
-; CHECK-ERRORS: error: index must be a multiple of 4 in range [0, 16380].
+; CHECK-ERRORS: error: invalid offset in memory address.
 ; CHECK-ERRORS:         ldr w0, [x0, #802]
 ; CHECK-ERRORS:                 ^
 ; CHECK-ERRORS: error: index must be an integer in range [-256, 255].
 ; CHECK-ERRORS:         ldr x0, [x0, #804]!
 ; CHECK-ERRORS:                 ^
-; CHECK-ERRORS: error: index must be an integer in range [-256, 255].
+; CHECK-ERRORS: error: invalid operand for instruction
 ; CHECK-ERRORS:         ldr w0, [w0, #301]!
-; CHECK-ERRORS:                 ^
+; CHECK-ERRORS:                  ^
 ; CHECK-ERRORS: error: index must be an integer in range [-256, 255].
 ; CHECK-ERRORS:         ldr x0, [x0], #804
 ; CHECK-ERRORS:                       ^
-; CHECK-ERRORS: error: index must be an integer in range [-256, 255].
+; CHECK-ERRORS: error: invalid operand for instruction
 ; CHECK-ERRORS:         ldr w0, [w0], #301
-; CHECK-ERRORS:                       ^
+; CHECK-ERRORS:                  ^
 ; CHECK-ERRORS: error: index must be a multiple of 4 in range [-256, 252].
 ; CHECK-ERRORS:         ldp w3, w4, [x5, #11]!
 ; CHECK-ERRORS:                     ^
@@ -73,6 +73,44 @@ foo:
 ; CHECK-ERRORS:         ldur x0, [x1, #-257]
 ; CHECK-ERRORS:                   ^
 
+
+ldrb   w1, [x3, w3, sxtw #4]
+ldrh   w1, [x3, w3, sxtw #4]
+ldr    w1, [x3, w3, sxtw #4]
+ldr    x1, [x3, w3, sxtw #4]
+ldr    b1, [x3, w3, sxtw #4]
+ldr    h1, [x3, w3, sxtw #4]
+ldr    s1, [x3, w3, sxtw #4]
+ldr    d1, [x3, w3, sxtw #4]
+ldr    q1, [x3, w3, sxtw #1]
+
+; CHECK-ERRORS: error: invalid offset in memory address.
+; CHECK-ERRORS:ldrb   w1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: error: invalid offset in memory address.
+; CHECK-ERRORS:ldrh   w1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: error: invalid offset in memory address.
+; CHECK-ERRORS:ldr    w1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: error: invalid offset in memory address.
+; CHECK-ERRORS:ldr    x1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: error: invalid offset in memory address.
+; CHECK-ERRORS:ldr    b1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: invalid offset in memory address.
+; CHECK-ERRORS:ldr    h1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: invalid offset in memory address.
+; CHECK-ERRORS:ldr    s1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: invalid offset in memory address.
+; CHECK-ERRORS:ldr    d1, [x3, w3, sxtw #4]
+; CHECK-ERRORS:           ^
+; CHECK-ERRORS: invalid offset in memory address.
+; CHECK-ERRORS:ldr    q1, [x3, w3, sxtw #1]
+; CHECK-ERRORS:           ^
 
 ; Check that register offset addressing modes only accept 32-bit offset
 ; registers when using uxtw/sxtw extends. Everything else requires a 64-bit
@@ -176,25 +214,25 @@ foo:
 ; Where the immediate is out of range.
   add w1, w2, w3, lsr #75
 
-; CHECK-ERRORS: error: immediate value too large for shifter operand
+; CHECK-ERRORS: error: expected 'sxtx' 'uxtx' or 'lsl' with optional integer in range [0, 4]
 ; CHECK-ERRORS: add w1, w2, w3, lsr #75
 ; CHECK-ERRORS:                      ^
 
 ; logical instructions on 32-bit regs with shift > 31 is not legal
 orr w0, w0, w0, lsl #32
-; CHECK-ERRORS: error: shift value out of range
+; CHECK-ERRORS: error: expected 'lsl', 'lsr' or 'asr' with optional integer in range [0, 31]
 ; CHECK-ERRORS:        orr w0, w0, w0, lsl #32
 ; CHECK-ERRORS:                        ^
 eor w0, w0, w0, lsl #32
-; CHECK-ERRORS: error: shift value out of range
+; CHECK-ERRORS: error: expected 'lsl', 'lsr' or 'asr' with optional integer in range [0, 31]
 ; CHECK-ERRORS:        eor w0, w0, w0, lsl #32
 ; CHECK-ERRORS:                        ^
 and w0, w0, w0, lsl #32
-; CHECK-ERRORS: error: shift value out of range
+; CHECK-ERRORS: error: expected 'lsl', 'lsr' or 'asr' with optional integer in range [0, 31]
 ; CHECK-ERRORS:        and w0, w0, w0, lsl #32
 ; CHECK-ERRORS:                        ^
 ands w0, w0, w0, lsl #32
-; CHECK-ERRORS: error: shift value out of range
+; CHECK-ERRORS: error: expected 'lsl', 'lsr' or 'asr' with optional integer in range [0, 31]
 ; CHECK-ERRORS:        ands w0, w0, w0, lsl #32
 ; CHECK-ERRORS:                        ^
 

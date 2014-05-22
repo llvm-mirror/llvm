@@ -839,6 +839,20 @@ InstCombiner::EvaluateInDifferentElementOrder(Value *V, ArrayRef<int> Mask) {
   llvm_unreachable("failed to reorder elements of vector instruction!");
 }
 
+static void RecognizeIdentityMask(const SmallVectorImpl<int> &Mask,
+                                  bool &isLHSID, bool &isRHSID) {
+  isLHSID = isRHSID = true;
+
+  for (unsigned i = 0, e = Mask.size(); i != e; ++i) {
+    if (Mask[i] < 0) continue;  // Ignore undef values.
+    // Is this an identity shuffle of the LHS value?
+    isLHSID &= (Mask[i] == (int)i);
+
+    // Is this an identity shuffle of the RHS value?
+    isRHSID &= (Mask[i]-e == i);
+  }
+}
+
 Instruction *InstCombiner::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
   Value *LHS = SVI.getOperand(0);
   Value *RHS = SVI.getOperand(1);
@@ -902,16 +916,8 @@ Instruction *InstCombiner::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
 
   if (VWidth == LHSWidth) {
     // Analyze the shuffle, are the LHS or RHS and identity shuffles?
-    bool isLHSID = true, isRHSID = true;
-
-    for (unsigned i = 0, e = Mask.size(); i != e; ++i) {
-      if (Mask[i] < 0) continue;  // Ignore undef values.
-      // Is this an identity shuffle of the LHS value?
-      isLHSID &= (Mask[i] == (int)i);
-
-      // Is this an identity shuffle of the RHS value?
-      isRHSID &= (Mask[i]-e == i);
-    }
+    bool isLHSID, isRHSID;
+    RecognizeIdentityMask(Mask, isLHSID, isRHSID);
 
     // Eliminate identity shuffles.
     if (isLHSID) return ReplaceInstUsesWith(SVI, LHS);
@@ -1105,6 +1111,13 @@ Instruction *InstCombiner::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
       newRHS = UndefValue::get(newLHS->getType());
     return new ShuffleVectorInst(newLHS, newRHS, ConstantVector::get(Elts));
   }
+
+  // If the result mask is an identity, replace uses of this instruction with
+  // corresponding argument.
+  bool isLHSID, isRHSID;
+  RecognizeIdentityMask(newMask, isLHSID, isRHSID);
+  if (isLHSID && VWidth == LHSOp0Width) return ReplaceInstUsesWith(SVI, newLHS);
+  if (isRHSID && VWidth == RHSOp0Width) return ReplaceInstUsesWith(SVI, newRHS);
 
   return MadeChange ? &SVI : nullptr;
 }

@@ -1652,8 +1652,8 @@ void SelectionDAGLegalize::ExpandDYNAMIC_STACKALLOC(SDNode* Node,
 /// If the SETCC has been legalized using the inverse condcode, then LHS and
 /// RHS will be unchanged, CC will set to the inverted condcode, and NeedInvert
 /// will be set to true. The caller must invert the result of the SETCC with
-/// SelectionDAG::getNOT() or take equivalent action to swap the effect of a
-/// true/false result.
+/// SelectionDAG::getLogicalNOT() or take equivalent action to swap the effect
+/// of a true/false result.
 ///
 /// \returns true if the SetCC has been legalized, false if it hasn't.
 bool SelectionDAGLegalize::LegalizeSetCCCondCode(EVT VT,
@@ -2058,13 +2058,12 @@ SDValue SelectionDAGLegalize::ExpandLibCall(RTLIB::Libcall LC, SDNode *Node,
   if (isTailCall)
     InChain = TCChain;
 
-  TargetLowering::
-  CallLoweringInfo CLI(InChain, RetTy, isSigned, !isSigned, false, false,
-                    0, TLI.getLibcallCallingConv(LC), isTailCall,
-                    /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                    Callee, Args, DAG, SDLoc(Node));
-  std::pair<SDValue, SDValue> CallInfo = TLI.LowerCallTo(CLI);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(SDLoc(Node)).setChain(InChain)
+    .setCallee(TLI.getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setTailCall(isTailCall).setSExtResult(isSigned).setZExtResult(!isSigned);
 
+  std::pair<SDValue, SDValue> CallInfo = TLI.LowerCallTo(CLI);
 
   if (!CallInfo.second.getNode())
     // It's a tailcall, return the chain (which is the DAG root).
@@ -2093,12 +2092,12 @@ SDValue SelectionDAGLegalize::ExpandLibCall(RTLIB::Libcall LC, EVT RetVT,
                                          TLI.getPointerTy());
 
   Type *RetTy = RetVT.getTypeForEVT(*DAG.getContext());
-  TargetLowering::
-  CallLoweringInfo CLI(DAG.getEntryNode(), RetTy, isSigned, !isSigned, false,
-                       false, 0, TLI.getLibcallCallingConv(LC),
-                       /*isTailCall=*/false,
-                  /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                  Callee, Args, DAG, dl);
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
+    .setCallee(TLI.getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setSExtResult(isSigned).setZExtResult(!isSigned);
+
   std::pair<SDValue,SDValue> CallInfo = TLI.LowerCallTo(CLI);
 
   return CallInfo.first;
@@ -2127,11 +2126,12 @@ SelectionDAGLegalize::ExpandChainLibCall(RTLIB::Libcall LC,
                                          TLI.getPointerTy());
 
   Type *RetTy = Node->getValueType(0).getTypeForEVT(*DAG.getContext());
-  TargetLowering::
-  CallLoweringInfo CLI(InChain, RetTy, isSigned, !isSigned, false, false,
-                    0, TLI.getLibcallCallingConv(LC), /*isTailCall=*/false,
-                    /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                    Callee, Args, DAG, SDLoc(Node));
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(SDLoc(Node)).setChain(InChain)
+    .setCallee(TLI.getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setSExtResult(isSigned).setZExtResult(!isSigned);
+
   std::pair<SDValue, SDValue> CallInfo = TLI.LowerCallTo(CLI);
 
   return CallInfo;
@@ -2264,11 +2264,11 @@ SelectionDAGLegalize::ExpandDivRemLibCall(SDNode *Node,
                                          TLI.getPointerTy());
 
   SDLoc dl(Node);
-  TargetLowering::
-  CallLoweringInfo CLI(InChain, RetTy, isSigned, !isSigned, false, false,
-                    0, TLI.getLibcallCallingConv(LC), /*isTailCall=*/false,
-                    /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                    Callee, Args, DAG, dl);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(InChain)
+    .setCallee(TLI.getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setSExtResult(isSigned).setZExtResult(!isSigned);
+
   std::pair<SDValue, SDValue> CallInfo = TLI.LowerCallTo(CLI);
 
   // Remainder is loaded back from the stack frame.
@@ -2378,12 +2378,11 @@ SelectionDAGLegalize::ExpandSinCosLibCall(SDNode *Node,
                                          TLI.getPointerTy());
 
   SDLoc dl(Node);
-  TargetLowering::
-  CallLoweringInfo CLI(InChain, Type::getVoidTy(*DAG.getContext()),
-                       false, false, false, false,
-                       0, TLI.getLibcallCallingConv(LC), /*isTailCall=*/false,
-                       /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                       Callee, Args, DAG, dl);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(InChain)
+    .setCallee(TLI.getLibcallCallingConv(LC),
+               Type::getVoidTy(*DAG.getContext()), Callee, &Args, 0);
+
   std::pair<SDValue, SDValue> CallInfo = TLI.LowerCallTo(CLI);
 
   Results.push_back(DAG.getLoad(RetVT, dl, CallInfo.second, SinPtr,
@@ -2993,15 +2992,13 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     // If the target didn't lower this, lower it to '__sync_synchronize()' call
     // FIXME: handle "fence singlethread" more efficiently.
     TargetLowering::ArgListTy Args;
-    TargetLowering::
-    CallLoweringInfo CLI(Node->getOperand(0),
-                         Type::getVoidTy(*DAG.getContext()),
-                      false, false, false, false, 0, CallingConv::C,
-                      /*isTailCall=*/false,
-                      /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                      DAG.getExternalSymbol("__sync_synchronize",
-                                            TLI.getPointerTy()),
-                      Args, DAG, dl);
+
+    TargetLowering::CallLoweringInfo CLI(DAG);
+    CLI.setDebugLoc(dl).setChain(Node->getOperand(0))
+      .setCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()),
+                 DAG.getExternalSymbol("__sync_synchronize", TLI.getPointerTy()),
+                 &Args, 0);
+
     std::pair<SDValue, SDValue> CallResult = TLI.LowerCallTo(CLI);
 
     Results.push_back(CallResult.second);
@@ -3074,14 +3071,10 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
   case ISD::TRAP: {
     // If this operation is not supported, lower it to 'abort()' call
     TargetLowering::ArgListTy Args;
-    TargetLowering::
-    CallLoweringInfo CLI(Node->getOperand(0),
-                         Type::getVoidTy(*DAG.getContext()),
-                      false, false, false, false, 0, CallingConv::C,
-                      /*isTailCall=*/false,
-                      /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                      DAG.getExternalSymbol("abort", TLI.getPointerTy()),
-                      Args, DAG, dl);
+    TargetLowering::CallLoweringInfo CLI(DAG);
+    CLI.setDebugLoc(dl).setChain(Node->getOperand(0))
+      .setCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()),
+                 DAG.getExternalSymbol("abort", TLI.getPointerTy()), &Args, 0);
     std::pair<SDValue, SDValue> CallResult = TLI.LowerCallTo(CLI);
 
     Results.push_back(CallResult.second);
@@ -3876,7 +3869,7 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       // If we expanded the SETCC by inverting the condition code, then wrap
       // the existing SETCC in a NOT to restore the intended condition.
       if (NeedInvert)
-        Tmp1 = DAG.getNOT(dl, Tmp1, Tmp1->getValueType(0));
+        Tmp1 = DAG.getLogicalNOT(dl, Tmp1, Tmp1->getValueType(0));
 
       Results.push_back(Tmp1);
       break;

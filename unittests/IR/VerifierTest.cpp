@@ -52,9 +52,7 @@ TEST(VerifierTest, AliasUnnamedAddr) {
   GlobalVariable *Aliasee = new GlobalVariable(M, Ty, true,
                                                GlobalValue::ExternalLinkage,
                                                Init, "foo");
-  GlobalAlias *GA = new GlobalAlias(Type::getInt8PtrTy(C),
-                                    GlobalValue::ExternalLinkage,
-                                    "bar", Aliasee, &M);
+  auto *GA = GlobalAlias::create(GlobalValue::ExternalLinkage, "bar", Aliasee);
   GA->setUnnamedAddr(true);
   std::string Error;
   raw_string_ostream ErrorOS(Error);

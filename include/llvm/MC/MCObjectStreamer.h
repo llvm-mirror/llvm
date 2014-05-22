@@ -35,6 +35,8 @@ class MCObjectStreamer : public MCStreamer {
   MCAssembler *Assembler;
   MCSectionData *CurSectionData;
   MCSectionData::iterator CurInsertionPoint;
+  bool EmitEHFrame;
+  bool EmitDebugFrame;
 
   virtual void EmitInstToData(const MCInst &Inst, const MCSubtargetInfo&) = 0;
   void EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame) override;
@@ -57,6 +59,8 @@ public:
   MCSymbolData &getOrCreateSymbolData(const MCSymbol *Symbol) {
     return getAssembler().getOrCreateSymbolData(*Symbol);
   }
+  void EmitFrames(MCAsmBackend *MAB);
+  void EmitCFISections(bool EH, bool Debug) override;
 
 protected:
   MCSectionData *getCurrentSectionData() const {
@@ -114,9 +118,9 @@ public:
                              StringRef FileName) override;
   void EmitDwarfAdvanceLineAddr(int64_t LineDelta, const MCSymbol *LastLabel,
                                 const MCSymbol *Label,
-                                unsigned PointerSize) override;
+                                unsigned PointerSize);
   void EmitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
-                                 const MCSymbol *Label) override;
+                                 const MCSymbol *Label);
   void EmitGPRel32Value(const MCExpr *Value) override;
   void EmitGPRel64Value(const MCExpr *Value) override;
   void EmitFill(uint64_t NumBytes, uint8_t FillValue) override;

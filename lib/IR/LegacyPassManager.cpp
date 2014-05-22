@@ -12,11 +12,11 @@
 //===----------------------------------------------------------------------===//
 
 
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/LegacyPassManagers.h"
 #include "llvm/IR/LegacyPassNameParser.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -1314,8 +1314,6 @@ bool BBPassManager::runOnFunction(Function &F) {
         TimeRegion PassTimer(getPassTimer(BP));
 
         LocalChanged |= BP->runOnBasicBlock(*I);
-
-        F.getContext().notifyPassRun(BP, F.getParent(), &F, &*I);
       }
 
       Changed |= LocalChanged;
@@ -1492,8 +1490,10 @@ bool FunctionPassManagerImpl::run(Function &F) {
   TimingInfo::createTheTimeInfo();
 
   initializeAllAnalysisInfo();
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
     Changed |= getContainedManager(Index)->runOnFunction(F);
+    F.getContext().yield();
+  }
 
   for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
     getContainedManager(Index)->cleanup();
@@ -1554,8 +1554,6 @@ bool FPPassManager::runOnFunction(Function &F) {
     removeNotPreservedAnalysis(FP);
     recordAvailableAnalysis(FP);
     removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
-
-    F.getContext().notifyPassRun(FP, F.getParent(), &F);
   }
   return Changed;
 }
@@ -1635,8 +1633,6 @@ MPPassManager::runOnModule(Module &M) {
     removeNotPreservedAnalysis(MP);
     recordAvailableAnalysis(MP);
     removeDeadPasses(MP, M.getModuleIdentifier(), ON_MODULE_MSG);
-
-    M.getContext().notifyPassRun(MP, &M);
   }
 
   // Finalize module passes
@@ -1730,8 +1726,10 @@ bool PassManagerImpl::run(Module &M) {
   }
 
   initializeAllAnalysisInfo();
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
     Changed |= getContainedManager(Index)->runOnModule(M);
+    M.getContext().yield();
+  }
 
   for (SmallVectorImpl<ImmutablePass *>::const_iterator I = IPV.begin(),
        E = IPV.end(); I != E; ++I) {

@@ -606,21 +606,19 @@ Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
 // Instrument memset/memmove/memcpy
 void AddressSanitizer::instrumentMemIntrinsic(MemIntrinsic *MI) {
   IRBuilder<> IRB(MI);
-  Instruction *Call = nullptr;
   if (isa<MemTransferInst>(MI)) {
-    Call = IRB.CreateCall3(
+    IRB.CreateCall3(
         isa<MemMoveInst>(MI) ? AsanMemmove : AsanMemcpy,
         IRB.CreatePointerCast(MI->getOperand(0), IRB.getInt8PtrTy()),
         IRB.CreatePointerCast(MI->getOperand(1), IRB.getInt8PtrTy()),
         IRB.CreateIntCast(MI->getOperand(2), IntptrTy, false));
   } else if (isa<MemSetInst>(MI)) {
-    Call = IRB.CreateCall3(
+    IRB.CreateCall3(
         AsanMemset,
         IRB.CreatePointerCast(MI->getOperand(0), IRB.getInt8PtrTy()),
         IRB.CreateIntCast(MI->getOperand(1), IRB.getInt32Ty(), false),
         IRB.CreateIntCast(MI->getOperand(2), IntptrTy, false));
   }
-  Call->setDebugLoc(MI->getDebugLoc());
   MI->eraseFromParent();
 }
 
@@ -741,9 +739,7 @@ void AddressSanitizer::instrumentMop(Instruction *I, bool UseCalls) {
   Value *Size = ConstantInt::get(IntptrTy, TypeSize / 8);
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   if (UseCalls) {
-    CallInst *Check =
-        IRB.CreateCall2(AsanMemoryAccessCallbackSized[IsWrite], AddrLong, Size);
-    Check->setDebugLoc(I->getDebugLoc());
+    IRB.CreateCall2(AsanMemoryAccessCallbackSized[IsWrite], AddrLong, Size);
   } else {
     Value *LastByte = IRB.CreateIntToPtr(
         IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, TypeSize / 8 - 1)),
@@ -1526,12 +1522,23 @@ void FunctionStackPoisoner::SetShadowToStackAfterReturnInlined(
   }
 }
 
+static DebugLoc getFunctionEntryDebugLocation(Function &F) {
+  BasicBlock::iterator I = F.getEntryBlock().begin(),
+                       E = F.getEntryBlock().end();
+  for (; I != E; ++I)
+    if (!isa<AllocaInst>(I))
+      break;
+  return I->getDebugLoc();
+}
+
 void FunctionStackPoisoner::poisonStack() {
   int StackMallocIdx = -1;
+  DebugLoc EntryDebugLocation = getFunctionEntryDebugLocation(F);
 
   assert(AllocaVec.size() > 0);
   Instruction *InsBefore = AllocaVec[0];
   IRBuilder<> IRB(InsBefore);
+  IRB.SetCurrentDebugLocation(EntryDebugLocation);
 
   SmallVector<ASanStackVariableDescription, 16> SVD;
   SVD.reserve(AllocaVec.size());
@@ -1555,6 +1562,7 @@ void FunctionStackPoisoner::poisonStack() {
   Type *ByteArrayTy = ArrayType::get(IRB.getInt8Ty(), LocalStackSize);
   AllocaInst *MyAlloca =
       new AllocaInst(ByteArrayTy, "MyAlloca", InsBefore);
+  MyAlloca->setDebugLoc(EntryDebugLocation);
   assert((ClRealignStack & (ClRealignStack - 1)) == 0);
   size_t FrameAlignment = std::max(L.FrameAlignment, (size_t)ClRealignStack);
   MyAlloca->setAlignment(FrameAlignment);
@@ -1575,11 +1583,13 @@ void FunctionStackPoisoner::poisonStack() {
     Instruction *Term = SplitBlockAndInsertIfThen(Cmp, InsBefore, false);
     BasicBlock *CmpBlock = cast<Instruction>(Cmp)->getParent();
     IRBuilder<> IRBIf(Term);
+    IRBIf.SetCurrentDebugLocation(EntryDebugLocation);
     LocalStackBase = IRBIf.CreateCall2(
         AsanStackMallocFunc[StackMallocIdx],
         ConstantInt::get(IntptrTy, LocalStackSize), OrigStackBase);
     BasicBlock *SetBlock = cast<Instruction>(LocalStackBase)->getParent();
     IRB.SetInsertPoint(InsBefore);
+    IRB.SetCurrentDebugLocation(EntryDebugLocation);
     PHINode *Phi = IRB.CreatePHI(IntptrTy, 2);
     Phi->addIncoming(OrigStackBase, CmpBlock);
     Phi->addIncoming(LocalStackBase, SetBlock);

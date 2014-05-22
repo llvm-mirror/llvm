@@ -3021,12 +3021,12 @@ int ARMAsmParser::tryParseShiftRegister(
       EndLoc = Parser.getTok().getEndLoc();
       ShiftReg = tryParseRegister();
       if (ShiftReg == -1) {
-        Error (L, "expected immediate or register in shift operand");
+        Error(L, "expected immediate or register in shift operand");
         return -1;
       }
     } else {
-      Error (Parser.getTok().getLoc(),
-                    "expected immediate or register in shift operand");
+      Error(Parser.getTok().getLoc(),
+            "expected immediate or register in shift operand");
       return -1;
     }
   }
@@ -5094,8 +5094,9 @@ getMnemonicAcceptInfo(StringRef Mnemonic, StringRef FullInst,
 
   if (Mnemonic == "bkpt" || Mnemonic == "cbnz" || Mnemonic == "setend" ||
       Mnemonic == "cps" ||  Mnemonic == "it" ||  Mnemonic == "cbz" ||
-      Mnemonic == "trap" || Mnemonic == "hlt" || Mnemonic.startswith("crc32") ||
-      Mnemonic.startswith("cps") || Mnemonic.startswith("vsel") ||
+      Mnemonic == "trap" || Mnemonic == "hlt" || Mnemonic == "udf" ||
+      Mnemonic.startswith("crc32") || Mnemonic.startswith("cps") ||
+      Mnemonic.startswith("vsel") ||
       Mnemonic == "vmaxnm" || Mnemonic == "vminnm" || Mnemonic == "vcvta" ||
       Mnemonic == "vcvtn" || Mnemonic == "vcvtp" || Mnemonic == "vcvtm" ||
       Mnemonic == "vrinta" || Mnemonic == "vrintn" || Mnemonic == "vrintp" ||

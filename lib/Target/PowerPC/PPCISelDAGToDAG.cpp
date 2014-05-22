@@ -189,7 +189,7 @@ private:
     SDNode *SelectSETCC(SDNode *N);
 
     void PeepholePPC64();
-    void PeepholdCROps();
+    void PeepholeCROps();
 
     bool AllUsersSelectZero(SDNode *N);
     void SwapAllSelectUsers(SDNode *N);
@@ -415,8 +415,8 @@ SDNode *PPCDAGToDAGISel::SelectBitfieldInsert(SDNode *N) {
   SDLoc dl(N);
 
   APInt LKZ, LKO, RKZ, RKO;
-  CurDAG->ComputeMaskedBits(Op0, LKZ, LKO);
-  CurDAG->ComputeMaskedBits(Op1, RKZ, RKO);
+  CurDAG->computeKnownBits(Op0, LKZ, LKO);
+  CurDAG->computeKnownBits(Op1, RKZ, RKO);
 
   unsigned TargetMask = LKZ.getZExtValue();
   unsigned InsertMask = RKZ.getZExtValue();
@@ -463,14 +463,14 @@ SDNode *PPCDAGToDAGISel::SelectBitfieldInsert(SDNode *N) {
        // if we're going to fold the masking with the insert, all bits not
        // know to be zero in the mask are known to be one.
         APInt MKZ, MKO;
-        CurDAG->ComputeMaskedBits(Op1.getOperand(1), MKZ, MKO);
+        CurDAG->computeKnownBits(Op1.getOperand(1), MKZ, MKO);
         bool CanFoldMask = InsertMask == MKO.getZExtValue();
 
         unsigned SHOpc = Op1.getOperand(0).getOpcode();
         if ((SHOpc == ISD::SHL || SHOpc == ISD::SRL) && CanFoldMask &&
             isInt32Immediate(Op1.getOperand(0).getOperand(1), Value)) {
-	  // Note that Value must be in range here (less than 32) because
-	  // otherwise there would not be any bits set in InsertMask.
+          // Note that Value must be in range here (less than 32) because
+          // otherwise there would not be any bits set in InsertMask.
           Op1 = Op1.getOperand(0).getOperand(0);
           SH  = (SHOpc == ISD::SHL) ? Value : 32 - Value;
         }
@@ -1471,8 +1471,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(GA)) {
       const GlobalValue *GValue = G->getGlobal();
       const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
-      const GlobalValue *RealGValue =
-          GAlias ? GAlias->getAliasedGlobal() : GValue;
+      const GlobalValue *RealGValue = GAlias ? GAlias->getAliasee() : GValue;
       const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
       assert((GVar || isa<Function>(RealGValue)) &&
              "Unexpected global value subclass!");
@@ -1574,7 +1573,7 @@ void PPCDAGToDAGISel::PostprocessISelDAG() {
     return;
 
   PeepholePPC64();
-  PeepholdCROps();
+  PeepholeCROps();
 }
 
 // Check if all users of this node will become isel where the second operand
@@ -1645,7 +1644,7 @@ void PPCDAGToDAGISel::SwapAllSelectUsers(SDNode *N) {
   }
 }
 
-void PPCDAGToDAGISel::PeepholdCROps() {
+void PPCDAGToDAGISel::PeepholeCROps() {
   bool IsModified;
   do {
     IsModified = false;

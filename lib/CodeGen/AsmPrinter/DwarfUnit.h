@@ -348,8 +348,10 @@ public:
 
   /// addConstantValue - Add constant value entry in variable DIE.
   void addConstantValue(DIE &Die, const MachineOperand &MO, DIType Ty);
-  void addConstantValue(DIE &Die, const ConstantInt *CI, bool Unsigned);
+  void addConstantValue(DIE &Die, const ConstantInt *CI, DIType Ty);
+  void addConstantValue(DIE &Die, const APInt &Val, DIType Ty);
   void addConstantValue(DIE &Die, const APInt &Val, bool Unsigned);
+  void addConstantValue(DIE &Die, bool Unsigned, uint64_t Val);
 
   /// addConstantFPValue - Add constant value entry in variable DIE.
   void addConstantFPValue(DIE &Die, const MachineOperand &MO);
@@ -575,6 +577,10 @@ public:
            sizeof(uint32_t);                               // Type DIE Offset
   }
   void initSection(const MCSection *Section);
+  // Bring in the base function (taking two args, including the section symbol)
+  // for use when building DWO type units (they don't go in unique comdat
+  // sections)
+  using DwarfUnit::initSection;
   DwarfCompileUnit &getCU() override { return CU; }
 
 protected:

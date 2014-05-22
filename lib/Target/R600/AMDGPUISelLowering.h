@@ -118,11 +118,11 @@ public:
   /// \brief Determine which of the bits specified in \p Mask are known to be
   /// either zero or one and return them in the \p KnownZero and \p KnownOne
   /// bitsets.
-  void computeMaskedBitsForTargetNode(const SDValue Op,
-                                      APInt &KnownZero,
-                                      APInt &KnownOne,
-                                      const SelectionDAG &DAG,
-                                      unsigned Depth = 0) const override;
+  void computeKnownBitsForTargetNode(const SDValue Op,
+                                     APInt &KnownZero,
+                                     APInt &KnownOne,
+                                     const SelectionDAG &DAG,
+                                     unsigned Depth = 0) const override;
 
 // Functions defined in AMDILISelLowering.cpp
 public:
@@ -155,7 +155,6 @@ private:
   SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
   EVT genIntType(uint32_t size = 32, uint32_t numEle = 1) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
 };
 
 namespace AMDGPUISD {

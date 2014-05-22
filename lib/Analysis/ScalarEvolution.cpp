@@ -3362,7 +3362,7 @@ ScalarEvolution::GetMinTrailingZeros(const SCEV *S) {
     // For a SCEVUnknown, ask ValueTracking.
     unsigned BitWidth = getTypeSizeInBits(U->getType());
     APInt Zeros(BitWidth, 0), Ones(BitWidth, 0);
-    ComputeMaskedBits(U->getValue(), Zeros, Ones);
+    computeKnownBits(U->getValue(), Zeros, Ones);
     return Zeros.countTrailingOnes();
   }
 
@@ -3501,7 +3501,7 @@ ScalarEvolution::getUnsignedRange(const SCEV *S) {
   if (const SCEVUnknown *U = dyn_cast<SCEVUnknown>(S)) {
     // For a SCEVUnknown, ask ValueTracking.
     APInt Zeros(BitWidth, 0), Ones(BitWidth, 0);
-    ComputeMaskedBits(U->getValue(), Zeros, Ones, DL);
+    computeKnownBits(U->getValue(), Zeros, Ones, DL);
     if (Ones == ~Zeros + 1)
       return setUnsignedRange(U, ConservativeResult);
     return setUnsignedRange(U,
@@ -3754,13 +3754,13 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
 
       // Instcombine's ShrinkDemandedConstant may strip bits out of
       // constants, obscuring what would otherwise be a low-bits mask.
-      // Use ComputeMaskedBits to compute what ShrinkDemandedConstant
+      // Use computeKnownBits to compute what ShrinkDemandedConstant
       // knew about to reconstruct a low-bits mask value.
       unsigned LZ = A.countLeadingZeros();
       unsigned TZ = A.countTrailingZeros();
       unsigned BitWidth = A.getBitWidth();
       APInt KnownZero(BitWidth, 0), KnownOne(BitWidth, 0);
-      ComputeMaskedBits(U->getOperand(0), KnownZero, KnownOne, DL);
+      computeKnownBits(U->getOperand(0), KnownZero, KnownOne, DL);
 
       APInt EffectiveMask =
           APInt::getLowBitsSet(BitWidth, BitWidth - LZ - TZ).shl(TZ);
@@ -6987,7 +6987,7 @@ public:
       return;
     }
 
-    if (Numerator == D.Zero) {
+    if (Numerator->isZero()) {
       *Quotient = D.Zero;
       *Remainder = D.Zero;
       return;
@@ -7003,7 +7003,7 @@ public:
 
         // Bail out when the Numerator is not divisible by one of the terms of
         // the Denominator.
-        if (R != D.Zero) {
+        if (!R->isZero()) {
           *Quotient = D.Zero;
           *Remainder = Numerator;
           return;
@@ -7091,7 +7091,7 @@ public:
       // Check whether Denominator divides one of the product operands.
       const SCEV *Q, *R;
       divide(SE, Op, Denominator, &Q, &R);
-      if (R != Zero) {
+      if (!R->isZero()) {
         Qs.push_back(Op);
         continue;
       }
@@ -7169,13 +7169,12 @@ findGCD(ScalarEvolution &SE, const SCEV *A, const SCEV *B) {
     return SE.getMulExpr(Qs);
   }
 
-  const SCEV *Zero = SE.getConstant(A->getType(), 0);
   SCEVDivision::divide(SE, A, B, &Q, &R);
-  if (R == Zero)
+  if (R->isZero())
     return B;
 
   SCEVDivision::divide(SE, B, A, &Q, &R);
-  if (R == Zero)
+  if (R->isZero())
     return A;
 
   return One;
@@ -7193,10 +7192,9 @@ findGCD(ScalarEvolution &SE, SmallVectorImpl<const SCEV *> &Terms) {
   return GCD;
 }
 
-static void findArrayDimensionsRec(ScalarEvolution &SE,
+static bool findArrayDimensionsRec(ScalarEvolution &SE,
                                    SmallVectorImpl<const SCEV *> &Terms,
-                                   SmallVectorImpl<const SCEV *> &Sizes,
-                                   const SCEV *Zero, const SCEV *One) {
+                                   SmallVectorImpl<const SCEV *> &Sizes) {
   // The GCD of all Terms is the dimension of the innermost dimension.
   const SCEV *GCD = findGCD(SE, Terms);
 
@@ -7212,15 +7210,19 @@ static void findArrayDimensionsRec(ScalarEvolution &SE,
     }
 
     Sizes.push_back(GCD);
-    return;
+    return true;
   }
 
-  for (unsigned I = 0; I < Terms.size(); ++I) {
+  for (const SCEV *&Term : Terms) {
     // Normalize the terms before the next call to findArrayDimensionsRec.
     const SCEV *Q, *R;
-    SCEVDivision::divide(SE, Terms[I], GCD, &Q, &R);
-    assert(R == Zero && "GCD does not evenly divide one of the terms");
-    Terms[I] = Q;
+    SCEVDivision::divide(SE, Term, GCD, &Q, &R);
+
+    // Bail out when GCD does not evenly divide one of the terms.
+    if (!R->isZero())
+      return false;
+
+    Term = Q;
   }
 
   // Remove all SCEVConstants.
@@ -7230,8 +7232,11 @@ static void findArrayDimensionsRec(ScalarEvolution &SE,
               Terms.end());
 
   if (Terms.size() > 0)
-    findArrayDimensionsRec(SE, Terms, Sizes, Zero, One);
+    if (!findArrayDimensionsRec(SE, Terms, Sizes))
+      return false;
+
   Sizes.push_back(GCD);
+  return true;
 }
 
 namespace {
@@ -7283,8 +7288,8 @@ static inline int numberOfTerms(const SCEV *S) {
 
 /// Second step of delinearization: compute the array dimensions Sizes from the
 /// set of Terms extracted from the memory access function of this SCEVAddRec.
-void SCEVAddRecExpr::findArrayDimensions(
-    ScalarEvolution &SE, SmallVectorImpl<const SCEV *> &Terms,
+void ScalarEvolution::findArrayDimensions(
+    SmallVectorImpl<const SCEV *> &Terms,
     SmallVectorImpl<const SCEV *> &Sizes) const {
 
   if (Terms.size() < 2)
@@ -7316,9 +7321,13 @@ void SCEVAddRecExpr::findArrayDimensions(
         dbgs() << *T << "\n";
     });
 
-  const SCEV *Zero = SE.getConstant(this->getType(), 0);
-  const SCEV *One = SE.getConstant(this->getType(), 1);
-  findArrayDimensionsRec(SE, Terms, Sizes, Zero, One);
+  ScalarEvolution &SE = *const_cast<ScalarEvolution *>(this);
+  bool Res = findArrayDimensionsRec(SE, Terms, Sizes);
+
+  if (!Res) {
+    Sizes.clear();
+    return;
+  }
 
   DEBUG({
       dbgs() << "Sizes:\n";
@@ -7332,11 +7341,12 @@ void SCEVAddRecExpr::findArrayDimensions(
 const SCEV *SCEVAddRecExpr::computeAccessFunctions(
     ScalarEvolution &SE, SmallVectorImpl<const SCEV *> &Subscripts,
     SmallVectorImpl<const SCEV *> &Sizes) const {
-  // Early exit in case this SCEV is not an affine multivariate function.
-  const SCEV *Zero = SE.getConstant(this->getType(), 0);
-  if (!this->isAffine())
-    return Zero;
 
+  // Early exit in case this SCEV is not an affine multivariate function.
+  if (Sizes.empty() || !this->isAffine())
+    return nullptr;
+
+  const SCEV *Zero = SE.getConstant(this->getType(), 0);
   const SCEV *Res = this, *Remainder = Zero;
   int Last = Sizes.size() - 1;
   for (int i = Last; i >= 0; i--) {
@@ -7435,11 +7445,20 @@ SCEVAddRecExpr::delinearize(ScalarEvolution &SE,
   SmallVector<const SCEV *, 4> Terms;
   collectParametricTerms(SE, Terms);
 
+  if (Terms.empty())
+    return nullptr;
+
   // Second step: find subscript sizes.
-  findArrayDimensions(SE, Terms, Sizes);
+  SE.findArrayDimensions(Terms, Sizes);
+
+  if (Sizes.empty())
+    return nullptr;
 
   // Third step: compute the access functions for each subscript.
   const SCEV *Remainder = computeAccessFunctions(SE, Subscripts, Sizes);
+
+  if (!Remainder || Subscripts.empty())
+    return nullptr;
 
   DEBUG({
       dbgs() << "succeeded to delinearize " << *this << "\n";
@@ -7447,8 +7466,8 @@ SCEVAddRecExpr::delinearize(ScalarEvolution &SE,
       for (const SCEV *S : Sizes)
         dbgs() << "[" << *S << "]";
 
-      dbgs() << "ArrayRef";
-      for (const SCEV *S : Sizes)
+      dbgs() << "\nArrayRef";
+      for (const SCEV *S : Subscripts)
         dbgs() << "[" << *S << "]";
       dbgs() << "\n";
     });

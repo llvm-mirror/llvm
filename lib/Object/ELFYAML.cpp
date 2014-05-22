@@ -275,6 +275,8 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCase(EF_MIPS_ARCH_64)
     BCase(EF_MIPS_ARCH_32R2)
     BCase(EF_MIPS_ARCH_64R2)
+    BCase(EF_MIPS_ARCH_32R6)
+    BCase(EF_MIPS_ARCH_64R6)
     break;
   case ELF::EM_HEXAGON:
     BCase(EF_HEXAGON_MACH_V2)
@@ -462,6 +464,15 @@ void ScalarEnumerationTraits<ELFYAML::ELF_REL>::enumeration(
     ECase(R_MIPS_TLS_TPREL_HI16)
     ECase(R_MIPS_TLS_TPREL_LO16)
     ECase(R_MIPS_GLOB_DAT)
+    ECase(R_MIPS_PC21_S2)
+    ECase(R_MIPS_PC26_S2)
+    ECase(R_MIPS_PC18_S3)
+    ECase(R_MIPS_PC19_S2)
+    ECase(R_MIPS_PCHI16)
+    ECase(R_MIPS_PCLO16)
+    ECase(R_MIPS16_GOT16)
+    ECase(R_MIPS16_HI16)
+    ECase(R_MIPS16_LO16)
     ECase(R_MIPS_COPY)
     ECase(R_MIPS_JUMP_SLOT)
     ECase(R_MICROMIPS_26_S1)
@@ -650,14 +661,15 @@ static void commonSectionMapping(IO &IO, ELFYAML::Section &Section) {
   IO.mapRequired("Type", Section.Type);
   IO.mapOptional("Flags", Section.Flags, ELFYAML::ELF_SHF(0));
   IO.mapOptional("Address", Section.Address, Hex64(0));
-  IO.mapOptional("Link", Section.Link);
-  IO.mapOptional("Info", Section.Info);
+  IO.mapOptional("Link", Section.Link, StringRef());
+  IO.mapOptional("Info", Section.Info, StringRef());
   IO.mapOptional("AddressAlign", Section.AddressAlign, Hex64(0));
 }
 
 static void sectionMapping(IO &IO, ELFYAML::RawContentSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapOptional("Content", Section.Content);
+  IO.mapOptional("Size", Section.Size, Hex64(Section.Content.binary_size()));
 }
 
 static void sectionMapping(IO &IO, ELFYAML::RelocationSection &Section) {
@@ -670,7 +682,8 @@ void MappingTraits<std::unique_ptr<ELFYAML::Section>>::mapping(
   ELFYAML::ELF_SHT sectionType;
   if (IO.outputting())
     sectionType = Section->Type;
-  IO.mapRequired("Type", sectionType);
+  else
+    IO.mapRequired("Type", sectionType);
 
   switch (sectionType) {
   case ELF::SHT_REL:
@@ -684,6 +697,14 @@ void MappingTraits<std::unique_ptr<ELFYAML::Section>>::mapping(
       Section.reset(new ELFYAML::RawContentSection());
     sectionMapping(IO, *cast<ELFYAML::RawContentSection>(Section.get()));
   }
+}
+
+StringRef MappingTraits<std::unique_ptr<ELFYAML::Section>>::validate(
+    IO &io, std::unique_ptr<ELFYAML::Section> &Section) {
+  const auto *RawSection = dyn_cast<ELFYAML::RawContentSection>(Section.get());
+  if (!RawSection || RawSection->Size >= RawSection->Content.binary_size())
+    return StringRef();
+  return "Section size must be greater or equal to the content size";
 }
 
 void MappingTraits<ELFYAML::Relocation>::mapping(IO &IO,

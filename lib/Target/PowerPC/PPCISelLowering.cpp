@@ -18,6 +18,7 @@
 #include "PPCTargetMachine.h"
 #include "PPCTargetObjectFile.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -459,6 +460,7 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
       setOperationAction(ISD::SDIVREM, VT, Expand);
       setOperationAction(ISD::SCALAR_TO_VECTOR, VT, Expand);
       setOperationAction(ISD::FPOW, VT, Expand);
+      setOperationAction(ISD::BSWAP, VT, Expand);
       setOperationAction(ISD::CTPOP, VT, Expand);
       setOperationAction(ISD::CTLZ, VT, Expand);
       setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Expand);
@@ -1135,7 +1137,7 @@ SDValue PPC::get_VSPLTI_elt(SDNode *N, unsigned ByteSize, SelectionDAG &DAG) {
 /// sign extension from a 16-bit value.  If so, this returns true and the
 /// immediate.
 static bool isIntS16Immediate(SDNode *N, short &Imm) {
-  if (N->getOpcode() != ISD::Constant)
+  if (!isa<ConstantSDNode>(N))
     return false;
 
   Imm = (short)cast<ConstantSDNode>(N)->getZExtValue();
@@ -1174,12 +1176,12 @@ bool PPCTargetLowering::SelectAddressRegReg(SDValue N, SDValue &Base,
     // disjoint.
     APInt LHSKnownZero, LHSKnownOne;
     APInt RHSKnownZero, RHSKnownOne;
-    DAG.ComputeMaskedBits(N.getOperand(0),
-                          LHSKnownZero, LHSKnownOne);
+    DAG.computeKnownBits(N.getOperand(0),
+                         LHSKnownZero, LHSKnownOne);
 
     if (LHSKnownZero.getBoolValue()) {
-      DAG.ComputeMaskedBits(N.getOperand(1),
-                            RHSKnownZero, RHSKnownOne);
+      DAG.computeKnownBits(N.getOperand(1),
+                           RHSKnownZero, RHSKnownOne);
       // If all of the bits are known zero on the LHS or RHS, the add won't
       // carry.
       if (~(LHSKnownZero | RHSKnownZero) == 0) {
@@ -1279,7 +1281,7 @@ bool PPCTargetLowering::SelectAddressRegImm(SDValue N, SDValue &Disp,
       // (for better address arithmetic) if the LHS and RHS of the OR are
       // provably disjoint.
       APInt LHSKnownZero, LHSKnownOne;
-      DAG.ComputeMaskedBits(N.getOperand(0), LHSKnownZero, LHSKnownOne);
+      DAG.computeKnownBits(N.getOperand(0), LHSKnownZero, LHSKnownOne);
 
       if ((LHSKnownZero.getZExtValue()|~(uint64_t)imm) == ~0ULL) {
         // If all of the bits are known zero on the LHS or RHS, the add won't
@@ -1886,17 +1888,12 @@ SDValue PPCTargetLowering::LowerINIT_TRAMPOLINE(SDValue Op,
   Entry.Node = Nest; Args.push_back(Entry);
 
   // Lower to a call to __trampoline_setup(Trmp, TrampSize, FPtr, ctx_reg)
-  TargetLowering::CallLoweringInfo CLI(Chain,
-                                       Type::getVoidTy(*DAG.getContext()),
-                                       false, false, false, false, 0,
-                                       CallingConv::C,
-                /*isTailCall=*/false,
-                                       /*doesNotRet=*/false,
-                                       /*isReturnValueUsed=*/true,
-                DAG.getExternalSymbol("__trampoline_setup", PtrVT),
-                Args, DAG, dl);
-  std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(Chain)
+    .setCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()),
+               DAG.getExternalSymbol("__trampoline_setup", PtrVT), &Args, 0);
 
+  std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   return CallResult.second;
 }
 
@@ -7354,8 +7351,8 @@ SDValue PPCTargetLowering::DAGCombineTruncBoolExt(SDNode *N,
       // that the high bits are equal.
       APInt Op1Zero, Op1One;
       APInt Op2Zero, Op2One;
-      DAG.ComputeMaskedBits(N->getOperand(0), Op1Zero, Op1One);
-      DAG.ComputeMaskedBits(N->getOperand(1), Op2Zero, Op2One);
+      DAG.computeKnownBits(N->getOperand(0), Op1Zero, Op1One);
+      DAG.computeKnownBits(N->getOperand(1), Op2Zero, Op2One);
 
       // We don't really care about what is known about the first bit (if
       // anything), so clear it in all masks prior to comparing them.
@@ -8405,11 +8402,11 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
 // Inline Assembly Support
 //===----------------------------------------------------------------------===//
 
-void PPCTargetLowering::computeMaskedBitsForTargetNode(const SDValue Op,
-                                                       APInt &KnownZero,
-                                                       APInt &KnownOne,
-                                                       const SelectionDAG &DAG,
-                                                       unsigned Depth) const {
+void PPCTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
+                                                      APInt &KnownZero,
+                                                      APInt &KnownOne,
+                                                      const SelectionDAG &DAG,
+                                                      unsigned Depth) const {
   KnownZero = KnownOne = APInt(KnownZero.getBitWidth(), 0);
   switch (Op.getOpcode()) {
   default: break;
@@ -8755,6 +8752,30 @@ SDValue PPCTargetLowering::LowerFRAMEADDR(SDValue Op,
                             FrameAddr, MachinePointerInfo(), false, false,
                             false, 0);
   return FrameAddr;
+}
+
+// FIXME? Maybe this could be a TableGen attribute on some registers and
+// this table could be generated automatically from RegInfo.
+unsigned PPCTargetLowering::getRegisterByName(const char* RegName,
+                                              EVT VT) const {
+  bool isPPC64 = PPCSubTarget.isPPC64();
+  bool isDarwinABI = PPCSubTarget.isDarwinABI();
+
+  if ((isPPC64 && VT != MVT::i64 && VT != MVT::i32) ||
+      (!isPPC64 && VT != MVT::i32))
+    report_fatal_error("Invalid register global variable type");
+
+  bool is64Bit = isPPC64 && VT == MVT::i64;
+  unsigned Reg = StringSwitch<unsigned>(RegName)
+                   .Case("r1", is64Bit ? PPC::X1 : PPC::R1)
+                   .Case("r2", isDarwinABI ? 0 : (is64Bit ? PPC::X2 : PPC::R2))
+                   .Case("r13", (!isPPC64 && isDarwinABI) ? 0 :
+                                  (is64Bit ? PPC::X13 : PPC::R13))
+                   .Default(0);
+
+  if (Reg)
+    return Reg;
+  report_fatal_error("Invalid register name global variable");
 }
 
 bool

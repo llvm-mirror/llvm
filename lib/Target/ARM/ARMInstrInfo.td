@@ -1967,6 +1967,18 @@ def DBG : AI<(outs), (ins imm0_15:$opt), MiscFrm, NoItinerary, "dbg", "\t$opt",
   let Inst{3-0} = opt;
 }
 
+// A8.8.247  UDF - Undefined (Encoding A1)
+def UDF : AInoP<(outs), (ins imm0_65535:$imm16), MiscFrm, NoItinerary,
+                "udf", "\t$imm16", []> {
+  bits<16> imm16;
+  let Inst{31-28} = 0b1110; // AL
+  let Inst{27-25} = 0b011;
+  let Inst{24-20} = 0b11111;
+  let Inst{19-8} = imm16{15-4};
+  let Inst{7-4} = 0b1111;
+  let Inst{3-0} = imm16{3-0};
+}
+
 /*
  * A5.4 Permanently UNDEFINED instructions.
  *
@@ -4122,6 +4134,11 @@ def REV16 : AMiscA1I<0b01101011, 0b1011, (outs GPR:$Rd), (ins GPR:$Rm),
                Requires<[IsARM, HasV6]>,
            Sched<[WriteALU]>;
 
+def : ARMV6Pat<(srl (bswap (extloadi16 addrmode3:$addr)), (i32 16)),
+              (REV16 (LDRH addrmode3:$addr))>;
+def : ARMV6Pat<(truncstorei16 (srl (bswap GPR:$Rn), (i32 16)), addrmode3:$addr),
+               (STRH (REV16 GPR:$Rn), addrmode3:$addr)>;
+
 let AddedComplexity = 5 in
 def REVSH : AMiscA1I<0b01101111, 0b1011, (outs GPR:$Rd), (ins GPR:$Rm),
                IIC_iUNAr, "revsh", "\t$Rd, $Rm",
@@ -4939,7 +4956,7 @@ def MCR2 : MovRCopro2<"mcr2", 0 /* from ARM core register to coprocessor */,
                       [(int_arm_mcr2 imm:$cop, imm:$opc1, GPR:$Rt, imm:$CRn,
                                      imm:$CRm, imm:$opc2)]>,
                       Requires<[PreV8]>;
-def : ARMInstAlias<"mcr2$ $cop, $opc1, $Rt, $CRn, $CRm",
+def : ARMInstAlias<"mcr2 $cop, $opc1, $Rt, $CRn, $CRm",
                    (MCR2 p_imm:$cop, imm0_7:$opc1, GPR:$Rt, c_imm:$CRn,
                          c_imm:$CRm, 0)>;
 def MRC2 : MovRCopro2<"mrc2", 1 /* from coprocessor to ARM core register */,
@@ -4947,7 +4964,7 @@ def MRC2 : MovRCopro2<"mrc2", 1 /* from coprocessor to ARM core register */,
                       (ins p_imm:$cop, imm0_7:$opc1, c_imm:$CRn, c_imm:$CRm,
                            imm0_7:$opc2), []>,
                       Requires<[PreV8]>;
-def : ARMInstAlias<"mrc2$ $cop, $opc1, $Rt, $CRn, $CRm",
+def : ARMInstAlias<"mrc2 $cop, $opc1, $Rt, $CRn, $CRm",
                    (MRC2 GPRwithAPSR:$Rt, p_imm:$cop, imm0_7:$opc1, c_imm:$CRn,
                          c_imm:$CRm, 0)>;
 

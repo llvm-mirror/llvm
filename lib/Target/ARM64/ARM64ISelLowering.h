@@ -175,9 +175,11 @@ enum {
   ST1x2post,
   ST1x3post,
   ST1x4post,
+  LD1DUPpost,
   LD2DUPpost,
   LD3DUPpost,
   LD4DUPpost,
+  LD1LANEpost,
   LD2LANEpost,
   LD3LANEpost,
   LD4LANEpost,
@@ -201,12 +203,12 @@ public:
   /// value.
   CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg) const;
 
-  /// computeMaskedBitsForTargetNode - Determine which of the bits specified in
+  /// computeKnownBitsForTargetNode - Determine which of the bits specified in
   /// Mask are known to be either zero or one and return them in the
   /// KnownZero/KnownOne bitsets.
-  void computeMaskedBitsForTargetNode(const SDValue Op, APInt &KnownZero,
-                                      APInt &KnownOne, const SelectionDAG &DAG,
-                                      unsigned Depth = 0) const override;
+  void computeKnownBitsForTargetNode(const SDValue Op, APInt &KnownZero,
+                                     APInt &KnownOne, const SelectionDAG &DAG,
+                                     unsigned Depth = 0) const override;
 
   MVT getScalarShiftAmountTy(EVT LHSTy) const override;
 
@@ -353,6 +355,16 @@ private:
       const SmallVectorImpl<SDValue> &OutVals,
       const SmallVectorImpl<ISD::InputArg> &Ins, SelectionDAG &DAG) const;
 
+  /// Finds the incoming stack arguments which overlap the given fixed stack
+  /// object and incorporates their load into the current chain. This prevents
+  /// an upcoming store from clobbering the stack argument before it's used.
+  SDValue addTokenForArgument(SDValue Chain, SelectionDAG &DAG,
+                              MachineFrameInfo *MFI, int ClobberedFI) const;
+
+  bool DoesCalleeRestoreStack(CallingConv::ID CallCC, bool TailCallOpt) const;
+
+  bool IsTailCallConvention(CallingConv::ID CallCC) const;
+
   void saveVarArgRegisters(CCState &CCInfo, SelectionDAG &DAG, SDLoc DL,
                            SDValue &Chain) const;
 
@@ -411,7 +423,7 @@ private:
 
   ConstraintType
   getConstraintType(const std::string &Constraint) const override;
-  unsigned getRegisterByName(const char* RegName) const;
+  unsigned getRegisterByName(const char* RegName, EVT VT) const override;
 
   /// Examine constraint string and operand type and determine a weight value.
   /// The operand object must already have been set up with the operand type.

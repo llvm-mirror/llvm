@@ -824,11 +824,12 @@ enum : unsigned {
   EF_MIPS_ARCH_64   = 0x60000000, // MIPS64 instruction set per linux not elf.h
   EF_MIPS_ARCH_32R2 = 0x70000000, // mips32r2
   EF_MIPS_ARCH_64R2 = 0x80000000, // mips64r2
+  EF_MIPS_ARCH_32R6 = 0x90000000, // mips32r6
+  EF_MIPS_ARCH_64R6 = 0xa0000000, // mips64r6
   EF_MIPS_ARCH      = 0xf0000000  // Mask for applying EF_MIPS_ARCH_ variant
 };
 
 // ELF Relocation types for Mips
-// .
 enum {
   R_MIPS_NONE              =  0,
   R_MIPS_16                =  1,
@@ -881,6 +882,12 @@ enum {
   R_MIPS_TLS_TPREL_HI16    = 49,
   R_MIPS_TLS_TPREL_LO16    = 50,
   R_MIPS_GLOB_DAT          = 51,
+  R_MIPS_PC21_S2           = 60,
+  R_MIPS_PC26_S2           = 61,
+  R_MIPS_PC18_S3           = 62,
+  R_MIPS_PC19_S2           = 63,
+  R_MIPS_PCHI16            = 64,
+  R_MIPS_PCLO16            = 65,
   R_MIPS16_GOT16           = 102,
   R_MIPS16_HI16            = 104,
   R_MIPS16_LO16            = 105,
@@ -1666,6 +1673,7 @@ enum {
   DT_LOPROC       = 0x70000000, // Start of processor specific tags.
   DT_HIPROC       = 0x7FFFFFFF, // End of processor specific tags.
 
+  DT_GNU_HASH     = 0x6FFFFEF5, // Reference to the GNU hash table.
   DT_RELACOUNT    = 0x6FFFFFF9, // ELF32_Rela count.
   DT_RELCOUNT     = 0x6FFFFFFA, // ELF32_Rel count.
 

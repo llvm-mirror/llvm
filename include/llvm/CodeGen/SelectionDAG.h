@@ -565,6 +565,9 @@ public:
   /// getNOT - Create a bitwise NOT operation as (XOR Val, -1).
   SDValue getNOT(SDLoc DL, SDValue Val, EVT VT);
 
+  /// \brief Create a logical NOT operation as (XOR Val, BooleanOne).
+  SDValue getLogicalNOT(SDLoc DL, SDValue Val, EVT VT);
+
   /// getCALLSEQ_START - Return a new CALLSEQ_START node, which always must have
   /// a glue result (to ensure it's not CSE'd).  CALLSEQ_START does not have a
   /// useful SDLoc.
@@ -1076,13 +1079,12 @@ public:
   bool MaskedValueIsZero(SDValue Op, const APInt &Mask, unsigned Depth = 0)
     const;
 
-  /// ComputeMaskedBits - Determine which of the bits specified in Mask are
-  /// known to be either zero or one and return them in the KnownZero/KnownOne
-  /// bitsets.  This code only analyzes bits in Mask, in order to short-circuit
-  /// processing.  Targets can implement the computeMaskedBitsForTargetNode
-  /// method in the TargetLowering class to allow target nodes to be understood.
-  void ComputeMaskedBits(SDValue Op, APInt &KnownZero, APInt &KnownOne,
-                         unsigned Depth = 0) const;
+  /// Determine which bits of Op are known to be either zero or one and return
+  /// them in the KnownZero/KnownOne bitsets.  Targets can implement the
+  /// computeKnownBitsForTargetNode method in the TargetLowering class to allow
+  /// target nodes to be understood.
+  void computeKnownBits(SDValue Op, APInt &KnownZero, APInt &KnownOne,
+                        unsigned Depth = 0) const;
 
   /// ComputeNumSignBits - Return the number of times the sign bit of the
   /// register is replicated into the other bits.  We know that at least 1 bit
