@@ -81,7 +81,7 @@ def X86pinsrb  : SDNode<"X86ISD::PINSRB",
 def X86pinsrw  : SDNode<"X86ISD::PINSRW",
                  SDTypeProfile<1, 3, [SDTCisVT<0, v8i16>, SDTCisSameAs<0,1>,
                                       SDTCisVT<2, i32>, SDTCisPtrTy<3>]>>;
-def X86insrtps : SDNode<"X86ISD::INSERTPS",
+def X86insertps : SDNode<"X86ISD::INSERTPS",
                  SDTypeProfile<1, 3, [SDTCisVT<0, v4f32>, SDTCisSameAs<0,1>,
                                       SDTCisVT<2, v4f32>, SDTCisPtrTy<3>]>>;
 def X86vzmovl  : SDNode<"X86ISD::VZEXT_MOVL",
@@ -175,6 +175,9 @@ def X86select  : SDNode<"X86ISD::SELECT"     , SDTSelect>;
 def X86pmuludq : SDNode<"X86ISD::PMULUDQ",
                         SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisVec<1>,
                                       SDTCisSameAs<1,2>]>>;
+def X86pmuldq  : SDNode<"X86ISD::PMULDQ",
+                         SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisVec<1>,
+                                       SDTCisSameAs<1,2>]>>;
 
 // Specific shuffle nodes - At some point ISD::VECTOR_SHUFFLE will always get
 // translated into one of the target nodes below during lowering.

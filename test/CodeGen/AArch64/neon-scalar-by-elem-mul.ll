@@ -1,5 +1,5 @@
 ; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon -fp-contract=fast | FileCheck %s
-
+; arm64 has separate copy due to intrinsics (aarch64-neon-scalar-by-elem-mul.ll)
 define float @test_fmul_lane_ss2S(float %a, <2 x float> %v) {
   ; CHECK: test_fmul_lane_ss2S
   ; CHECK: fmul {{s[0-9]+}}, {{s[0-9]+}}, {{v[0-9]+}}.s[1]

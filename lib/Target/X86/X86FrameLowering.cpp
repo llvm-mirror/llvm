@@ -182,7 +182,7 @@ void emitSPUpdate(MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI,
       }
     }
 
-    MachineInstr *MI = NULL;
+    MachineInstr *MI = nullptr;
 
     if (UseLEA) {
       MI =  addRegOffset(BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr),
@@ -204,7 +204,7 @@ void emitSPUpdate(MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI,
 /// mergeSPUpdatesUp - Merge two stack-manipulating instructions upper iterator.
 static
 void mergeSPUpdatesUp(MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI,
-                      unsigned StackPtr, uint64_t *NumBytes = NULL) {
+                      unsigned StackPtr, uint64_t *NumBytes = nullptr) {
   if (MBBI == MBB.begin()) return;
 
   MachineBasicBlock::iterator PI = std::prev(MBBI);
@@ -225,11 +225,12 @@ void mergeSPUpdatesUp(MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI,
   }
 }
 
-/// mergeSPUpdatesDown - Merge two stack-manipulating instructions lower iterator.
+/// mergeSPUpdatesDown - Merge two stack-manipulating instructions lower
+/// iterator.
 static
 void mergeSPUpdatesDown(MachineBasicBlock &MBB,
                         MachineBasicBlock::iterator &MBBI,
-                        unsigned StackPtr, uint64_t *NumBytes = NULL) {
+                        unsigned StackPtr, uint64_t *NumBytes = nullptr) {
   // FIXME:  THIS ISN'T RUN!!!
   return;
 
@@ -257,19 +258,19 @@ void mergeSPUpdatesDown(MachineBasicBlock &MBB,
 }
 
 /// mergeSPUpdates - Checks the instruction before/after the passed
-/// instruction. If it is an ADD/SUB/LEA instruction it is deleted argument and the
-/// stack adjustment is returned as a positive value for ADD/LEA and a negative for
-/// SUB.
+/// instruction. If it is an ADD/SUB/LEA instruction it is deleted argument and
+/// the stack adjustment is returned as a positive value for ADD/LEA and a
+/// negative for SUB.
 static int mergeSPUpdates(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator &MBBI,
-                           unsigned StackPtr,
-                           bool doMergeWithPrevious) {
+                          MachineBasicBlock::iterator &MBBI, unsigned StackPtr,
+                          bool doMergeWithPrevious) {
   if ((doMergeWithPrevious && MBBI == MBB.begin()) ||
       (!doMergeWithPrevious && MBBI == MBB.end()))
     return 0;
 
   MachineBasicBlock::iterator PI = doMergeWithPrevious ? std::prev(MBBI) : MBBI;
-  MachineBasicBlock::iterator NI = doMergeWithPrevious ? 0 : std::next(MBBI);
+  MachineBasicBlock::iterator NI = doMergeWithPrevious ? nullptr
+                                                       : std::next(MBBI);
   unsigned Opc = PI->getOpcode();
   int Offset = 0;
 
@@ -366,8 +367,10 @@ void X86FrameLowering::emitCalleeSavedFrameMoves(
 
     unsigned DwarfReg = MRI->getDwarfRegNum(Reg, true);
     unsigned CFIIndex =
-        MMI.addFrameInst(MCCFIInstruction::createOffset(0, DwarfReg, Offset));
-    BuildMI(MBB, MBBI, DL, TII.get(X86::CFI_INSTRUCTION)).addCFIIndex(CFIIndex);
+        MMI.addFrameInst(MCCFIInstruction::createOffset(nullptr, DwarfReg,
+                                                        Offset));
+    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIndex);
   }
 }
 
@@ -511,15 +514,16 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
       // Define the current CFA rule to use the provided offset.
       assert(StackSize);
       unsigned CFIIndex = MMI.addFrameInst(
-          MCCFIInstruction::createDefCfaOffset(0, 2 * stackGrowth));
-      BuildMI(MBB, MBBI, DL, TII.get(X86::CFI_INSTRUCTION))
+          MCCFIInstruction::createDefCfaOffset(nullptr, 2 * stackGrowth));
+      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
 
       // Change the rule for the FramePtr to be an "offset" rule.
       unsigned DwarfFramePtr = RegInfo->getDwarfRegNum(FramePtr, true);
       CFIIndex = MMI.addFrameInst(
-          MCCFIInstruction::createOffset(0, DwarfFramePtr, 2 * stackGrowth));
-      BuildMI(MBB, MBBI, DL, TII.get(X86::CFI_INSTRUCTION))
+          MCCFIInstruction::createOffset(nullptr,
+                                         DwarfFramePtr, 2 * stackGrowth));
+      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
 
@@ -534,8 +538,8 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
       // Define the current CFA to use the EBP/RBP register.
       unsigned DwarfFramePtr = RegInfo->getDwarfRegNum(FramePtr, true);
       unsigned CFIIndex = MMI.addFrameInst(
-          MCCFIInstruction::createDefCfaRegister(0, DwarfFramePtr));
-      BuildMI(MBB, MBBI, DL, TII.get(X86::CFI_INSTRUCTION))
+          MCCFIInstruction::createDefCfaRegister(nullptr, DwarfFramePtr));
+      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
 
@@ -564,7 +568,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
       assert(StackSize);
       unsigned CFIIndex = MMI.addFrameInst(
           MCCFIInstruction::createDefCfaOffset(nullptr, StackOffset));
-      BuildMI(MBB, MBBI, DL, TII.get(X86::CFI_INSTRUCTION))
+      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
       StackOffset += stackGrowth;
     }
@@ -698,9 +702,10 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
       // Define the current CFA rule to use the provided offset.
       assert(StackSize);
       unsigned CFIIndex = MMI.addFrameInst(
-          MCCFIInstruction::createDefCfaOffset(0, -StackSize + stackGrowth));
+          MCCFIInstruction::createDefCfaOffset(nullptr,
+                                               -StackSize + stackGrowth));
 
-      BuildMI(MBB, MBBI, DL, TII.get(X86::CFI_INSTRUCTION))
+      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
     }
 
@@ -905,7 +910,8 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   }
 }
 
-int X86FrameLowering::getFrameIndexOffset(const MachineFunction &MF, int FI) const {
+int X86FrameLowering::getFrameIndexOffset(const MachineFunction &MF,
+                                          int FI) const {
   const X86RegisterInfo *RegInfo =
     static_cast<const X86RegisterInfo*>(MF.getTarget().getRegisterInfo());
   const MachineFrameInfo *MFI = MF.getFrameInfo();
@@ -1256,22 +1262,23 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
         .addReg(0).addImm(0).addReg(0).addImm(TlsOffset).addReg(TlsReg);
     } else if (STI.isTargetDarwin()) {
 
-      // TlsOffset doesn't fit into a mod r/m byte so we need an extra register
+      // TlsOffset doesn't fit into a mod r/m byte so we need an extra register.
       unsigned ScratchReg2;
       bool SaveScratch2;
       if (CompareStackPointer) {
-        // The primary scratch register is available for holding the TLS offset
+        // The primary scratch register is available for holding the TLS offset.
         ScratchReg2 = GetScratchRegister(Is64Bit, MF, true);
         SaveScratch2 = false;
       } else {
         // Need to use a second register to hold the TLS offset
         ScratchReg2 = GetScratchRegister(Is64Bit, MF, false);
 
-        // Unfortunately, with fastcc the second scratch register may hold an arg
+        // Unfortunately, with fastcc the second scratch register may hold an
+        // argument.
         SaveScratch2 = MF.getRegInfo().isLiveIn(ScratchReg2);
       }
 
-      // If Scratch2 is live-in then it needs to be saved
+      // If Scratch2 is live-in then it needs to be saved.
       assert((!MF.getRegInfo().isLiveIn(ScratchReg2) || SaveScratch2) &&
              "Scratch register is live-in and not saved");
 
@@ -1348,14 +1355,14 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
 /// http://publications.uu.se/uu/fulltext/nbn_se_uu_diva-2688.pdf)
 ///
 /// CheckStack:
-///	  temp0 = sp - MaxStack
-///	  if( temp0 < SP_LIMIT(P) ) goto IncStack else goto OldStart
+///       temp0 = sp - MaxStack
+///       if( temp0 < SP_LIMIT(P) ) goto IncStack else goto OldStart
 /// OldStart:
-///	  ...
+///       ...
 /// IncStack:
-///	  call inc_stack   # doubles the stack space
-///	  temp0 = sp - MaxStack
-///	  if( temp0 < SP_LIMIT(P) ) goto IncStack else goto OldStart
+///       call inc_stack   # doubles the stack space
+///       temp0 = sp - MaxStack
+///       if( temp0 < SP_LIMIT(P) ) goto IncStack else goto OldStart
 void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
   const X86InstrInfo &TII = *TM.getInstrInfo();
   MachineFrameInfo *MFI = MF.getFrameInfo();
@@ -1514,7 +1521,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
     unsigned StackAlign = TM.getFrameLowering()->getStackAlignment();
     Amount = (Amount + StackAlign - 1) / StackAlign * StackAlign;
 
-    MachineInstr *New = 0;
+    MachineInstr *New = nullptr;
     if (Opcode == TII.getCallFrameSetupOpcode()) {
       New = BuildMI(MF, DL, TII.get(getSUBriOpcode(IsLP64, Amount)),
                     StackPtr)

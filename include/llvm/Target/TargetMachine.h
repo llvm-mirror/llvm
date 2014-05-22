@@ -84,11 +84,6 @@ protected: // Can only create subclasses.
   ///
   const MCAsmInfo *AsmInfo;
 
-  unsigned MCRelaxAll : 1;
-  unsigned MCNoExecStack : 1;
-  unsigned MCSaveTempLabels : 1;
-  unsigned MCUseCFI : 1;
-  unsigned MCUseDwarfDirectory : 1;
   unsigned RequireStructuredCFG : 1;
 
 public:
@@ -167,42 +162,6 @@ public:
   bool requiresStructuredCFG() const { return RequireStructuredCFG; }
   void setRequiresStructuredCFG(bool Value) { RequireStructuredCFG = Value; }
 
-  /// hasMCRelaxAll - Check whether all machine code instructions should be
-  /// relaxed.
-  bool hasMCRelaxAll() const { return MCRelaxAll; }
-
-  /// setMCRelaxAll - Set whether all machine code instructions should be
-  /// relaxed.
-  void setMCRelaxAll(bool Value) { MCRelaxAll = Value; }
-
-  /// hasMCSaveTempLabels - Check whether temporary labels will be preserved
-  /// (i.e., not treated as temporary).
-  bool hasMCSaveTempLabels() const { return MCSaveTempLabels; }
-
-  /// setMCSaveTempLabels - Set whether temporary labels will be preserved
-  /// (i.e., not treated as temporary).
-  void setMCSaveTempLabels(bool Value) { MCSaveTempLabels = Value; }
-
-  /// hasMCNoExecStack - Check whether an executable stack is not needed.
-  bool hasMCNoExecStack() const { return MCNoExecStack; }
-
-  /// setMCNoExecStack - Set whether an executabel stack is not needed.
-  void setMCNoExecStack(bool Value) { MCNoExecStack = Value; }
-
-  /// hasMCUseCFI - Check whether we should use dwarf's .cfi_* directives.
-  bool hasMCUseCFI() const { return MCUseCFI; }
-
-  /// setMCUseCFI - Set whether all we should use dwarf's .cfi_* directives.
-  void setMCUseCFI(bool Value) { MCUseCFI = Value; }
-
-  /// hasMCUseDwarfDirectory - Check whether we should use .file directives with
-  /// explicit directories.
-  bool hasMCUseDwarfDirectory() const { return MCUseDwarfDirectory; }
-
-  /// setMCUseDwarfDirectory - Set whether all we should use .file directives
-  /// with explicit directories.
-  void setMCUseDwarfDirectory(bool Value) { MCUseDwarfDirectory = Value; }
-
   /// getRelocationModel - Returns the code generation relocation model. The
   /// choices are static, PIC, and dynamic-no-pic, and target default.
   Reloc::Model getRelocationModel() const;
@@ -236,18 +195,18 @@ public:
 
   /// getDataSections - Return true if data objects should be emitted into their
   /// own section, corresponds to -fdata-sections.
-  static bool getDataSections();
+  bool getDataSections() const;
 
   /// getFunctionSections - Return true if functions should be emitted into
   /// their own section, corresponding to -ffunction-sections.
-  static bool getFunctionSections();
+  bool getFunctionSections() const;
 
   /// setDataSections - Set if the data are emit into separate sections.
-  static void setDataSections(bool);
+  void setDataSections(bool);
 
   /// setFunctionSections - Set if the functions are emit into separate
   /// sections.
-  static void setFunctionSections(bool);
+  void setFunctionSections(bool);
 
   /// \brief Register analysis passes for this target with a pass manager.
   virtual void addAnalysisPasses(PassManagerBase &) {}

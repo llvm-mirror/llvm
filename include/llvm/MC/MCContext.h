@@ -147,6 +147,9 @@ namespace llvm {
     /// non-empty.
     StringRef DwarfDebugProducer;
 
+    /// The maximum version of dwarf that we should emit.
+    uint16_t DwarfVersion;
+
     /// Honor temporary labels, this is useful for debugging semantic
     /// differences between temporary and non-temporary labels (primarily on
     /// Darwin).
@@ -396,6 +399,9 @@ namespace llvm {
     void setDwarfDebugProducer(StringRef S) { DwarfDebugProducer = S; }
     StringRef getDwarfDebugProducer() { return DwarfDebugProducer; }
 
+    void setDwarfVersion(uint16_t v) { DwarfVersion = v; }
+    uint16_t getDwarfVersion() const { return DwarfVersion; }
+
     /// @}
 
     char *getSecureLogFile() { return SecureLogFile; }
@@ -417,7 +423,7 @@ namespace llvm {
     // Unrecoverable error has occurred. Display the best diagnostic we can
     // and bail via exit(1). For now, most MC backend errors are unrecoverable.
     // FIXME: We should really do something about that.
-    LLVM_ATTRIBUTE_NORETURN void FatalError(SMLoc L, const Twine &Msg);
+    LLVM_ATTRIBUTE_NORETURN void FatalError(SMLoc L, const Twine &Msg) const;
   };
 
 } // end namespace llvm

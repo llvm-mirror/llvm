@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "asm-printer"
 #include "Sparc.h"
 #include "InstPrinter/SparcInstPrinter.h"
 #include "MCTargetDesc/SparcMCExpr.h"
@@ -35,6 +34,8 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "asm-printer"
+
 namespace {
   class SparcAsmPrinter : public AsmPrinter {
     SparcTargetStreamer &getTargetStreamer() {
@@ -45,18 +46,18 @@ namespace {
     explicit SparcAsmPrinter(TargetMachine &TM, MCStreamer &Streamer)
       : AsmPrinter(TM, Streamer) {}
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "Sparc Assembly Printer";
     }
 
     void printOperand(const MachineInstr *MI, int opNum, raw_ostream &OS);
     void printMemOperand(const MachineInstr *MI, int opNum, raw_ostream &OS,
-                         const char *Modifier = 0);
+                         const char *Modifier = nullptr);
     void printCCOperand(const MachineInstr *MI, int opNum, raw_ostream &OS);
 
-    virtual void EmitFunctionBodyStart();
-    virtual void EmitInstruction(const MachineInstr *MI);
-    virtual void EmitEndOfAsmFile(Module &M);
+    void EmitFunctionBodyStart() override;
+    void EmitInstruction(const MachineInstr *MI) override;
+    void EmitEndOfAsmFile(Module &M) override;
 
     static const char *getRegisterName(unsigned RegNo) {
       return SparcInstPrinter::getRegisterName(RegNo);
@@ -64,10 +65,10 @@ namespace {
 
     bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                          unsigned AsmVariant, const char *ExtraCode,
-                         raw_ostream &O);
+                         raw_ostream &O) override;
     bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                unsigned AsmVariant, const char *ExtraCode,
-                               raw_ostream &O);
+                               raw_ostream &O) override;
 
     void LowerGETPCXAndEmitMCInsts(const MachineInstr *MI,
                                    const MCSubtargetInfo &STI);

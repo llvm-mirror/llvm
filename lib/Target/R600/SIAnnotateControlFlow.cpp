@@ -12,8 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "si-annotate-control-flow"
-
 #include "AMDGPU.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/IR/Constants.h"
@@ -25,6 +23,8 @@
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "si-annotate-control-flow"
 
 namespace {
 
@@ -91,15 +91,15 @@ public:
   SIAnnotateControlFlow():
     FunctionPass(ID) { }
 
-  virtual bool doInitialization(Module &M);
+  bool doInitialization(Module &M) override;
 
-  virtual bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "SI annotate control flow";
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addPreserved<DominatorTreeWrapperPass>();
     FunctionPass::getAnalysisUsage(AU);
@@ -118,7 +118,7 @@ bool SIAnnotateControlFlow::doInitialization(Module &M) {
   Void = Type::getVoidTy(Context);
   Boolean = Type::getInt1Ty(Context);
   Int64 = Type::getInt64Ty(Context);
-  ReturnStruct = StructType::get(Boolean, Int64, (Type *)0);
+  ReturnStruct = StructType::get(Boolean, Int64, (Type *)nullptr);
 
   BoolTrue = ConstantInt::getTrue(Context);
   BoolFalse = ConstantInt::getFalse(Context);
@@ -126,25 +126,25 @@ bool SIAnnotateControlFlow::doInitialization(Module &M) {
   Int64Zero = ConstantInt::get(Int64, 0);
 
   If = M.getOrInsertFunction(
-    IfIntrinsic, ReturnStruct, Boolean, (Type *)0);
+    IfIntrinsic, ReturnStruct, Boolean, (Type *)nullptr);
 
   Else = M.getOrInsertFunction(
-    ElseIntrinsic, ReturnStruct, Int64, (Type *)0);
+    ElseIntrinsic, ReturnStruct, Int64, (Type *)nullptr);
 
   Break = M.getOrInsertFunction(
-    BreakIntrinsic, Int64, Int64, (Type *)0);
+    BreakIntrinsic, Int64, Int64, (Type *)nullptr);
 
   IfBreak = M.getOrInsertFunction(
-    IfBreakIntrinsic, Int64, Boolean, Int64, (Type *)0);
+    IfBreakIntrinsic, Int64, Boolean, Int64, (Type *)nullptr);
 
   ElseBreak = M.getOrInsertFunction(
-    ElseBreakIntrinsic, Int64, Int64, Int64, (Type *)0);
+    ElseBreakIntrinsic, Int64, Int64, Int64, (Type *)nullptr);
 
   Loop = M.getOrInsertFunction(
-    LoopIntrinsic, Boolean, Int64, (Type *)0);
+    LoopIntrinsic, Boolean, Int64, (Type *)nullptr);
 
   EndCf = M.getOrInsertFunction(
-    EndCfIntrinsic, Void, Int64, (Type *)0);
+    EndCfIntrinsic, Void, Int64, (Type *)nullptr);
 
   return false;
 }

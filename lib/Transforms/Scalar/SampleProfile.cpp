@@ -22,8 +22,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "sample-profile"
-
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -53,6 +51,8 @@
 #include <cctype>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "sample-profile"
 
 // Command line option to specify the file to read samples from. This is
 // mainly used for debugging.
@@ -120,8 +120,8 @@ typedef DenseMap<BasicBlock *, SmallVector<BasicBlock *, 8>> BlockEdgeMap;
 class SampleFunctionProfile {
 public:
   SampleFunctionProfile()
-      : TotalSamples(0), TotalHeadSamples(0), HeaderLineno(0), DT(0), PDT(0),
-        LI(0), Ctx(0) {}
+      : TotalSamples(0), TotalHeadSamples(0), HeaderLineno(0), DT(nullptr),
+        PDT(nullptr), LI(nullptr), Ctx(nullptr) {}
 
   unsigned getFunctionLoc(Function &F);
   bool emitAnnotations(Function &F, DominatorTree *DomTree,

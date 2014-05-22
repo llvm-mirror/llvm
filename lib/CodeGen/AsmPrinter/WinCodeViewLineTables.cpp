@@ -29,7 +29,7 @@ StringRef WinCodeViewLineTables::getFullFilepath(const MDNode *S) {
   StringRef Dir = Scope.getDirectory(),
             Filename = Scope.getFilename();
   char *&Result = DirAndFilenameToFilepathMap[std::make_pair(Dir, Filename)];
-  if (Result != 0)
+  if (Result)
     return Result;
 
   // Clang emits directory and relative filename info into the IR, but CodeView
@@ -102,7 +102,7 @@ void WinCodeViewLineTables::maybeRecordLocation(DebugLoc DL,
 }
 
 WinCodeViewLineTables::WinCodeViewLineTables(AsmPrinter *AP)
-    : Asm(0), CurFn(0) {
+    : Asm(nullptr), CurFn(nullptr) {
   MachineModuleInfo *MMI = AP->MMI;
 
   // If module doesn't have named metadata anchors or COFF debug section
@@ -171,7 +171,7 @@ void WinCodeViewLineTables::emitDebugInfoForFunction(const Function *GV) {
   EmitLabelDiff(Asm->OutStreamer, Fn, FI.End);
 
   // PC-to-linenumber lookup table:
-  MCSymbol *FileSegmentEnd = 0;
+  MCSymbol *FileSegmentEnd = nullptr;
   for (size_t J = 0, F = FI.Instrs.size(); J != F; ++J) {
     MCSymbol *Instr = FI.Instrs[J];
     assert(InstrInfo.count(Instr));
@@ -216,7 +216,7 @@ void WinCodeViewLineTables::endModule() {
   if (FnDebugInfo.empty())
     return;
 
-  assert(Asm != 0);
+  assert(Asm != nullptr);
   Asm->OutStreamer.SwitchSection(
       Asm->getObjFileLowering().getCOFFDebugSymbolsSection());
   Asm->EmitInt32(COFF::DEBUG_SECTION_MAGIC);
@@ -277,20 +277,19 @@ void WinCodeViewLineTables::beginFunction(const MachineFunction *MF) {
   // for the first instruction of the function, not the last of the prolog?
   DebugLoc PrologEndLoc;
   bool EmptyPrologue = true;
-  for (MachineFunction::const_iterator I = MF->begin(), E = MF->end();
-       I != E && PrologEndLoc.isUnknown(); ++I) {
-    for (MachineBasicBlock::const_iterator II = I->begin(), IE = I->end();
-         II != IE; ++II) {
-      const MachineInstr *MI = II;
-      if (MI->isDebugValue())
+  for (const auto &MBB : *MF) {
+    if (!PrologEndLoc.isUnknown())
+      break;
+    for (const auto &MI : MBB) {
+      if (MI.isDebugValue())
         continue;
 
       // First known non-DBG_VALUE and non-frame setup location marks
       // the beginning of the function body.
       // FIXME: do we need the first subcondition?
-      if (!MI->getFlag(MachineInstr::FrameSetup) &&
-          (!MI->getDebugLoc().isUnknown())) {
-        PrologEndLoc = MI->getDebugLoc();
+      if (!MI.getFlag(MachineInstr::FrameSetup) &&
+          (!MI.getDebugLoc().isUnknown())) {
+        PrologEndLoc = MI.getDebugLoc();
         break;
       }
       EmptyPrologue = false;
@@ -321,7 +320,7 @@ void WinCodeViewLineTables::endFunction(const MachineFunction *MF) {
     Asm->OutStreamer.EmitLabel(FunctionEndSym);
     CurFn->End = FunctionEndSym;
   }
-  CurFn = 0;
+  CurFn = nullptr;
 }
 
 void WinCodeViewLineTables::beginInstruction(const MachineInstr *MI) {

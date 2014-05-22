@@ -23,7 +23,6 @@
 #include "Thumb1FrameLowering.h"
 #include "Thumb1InstrInfo.h"
 #include "Thumb2InstrInfo.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Target/TargetMachine.h"
@@ -102,7 +101,7 @@ class ARMTargetMachine : public ARMBaseTargetMachine {
 /// ARMLETargetMachine - ARM little endian target machine.
 ///
 class ARMLETargetMachine : public ARMTargetMachine {
-  virtual void anchor();
+  void anchor() override;
 public:
   ARMLETargetMachine(const Target &T, StringRef TT,
                      StringRef CPU, StringRef FS, const TargetOptions &Options,
@@ -113,7 +112,7 @@ public:
 /// ARMBETargetMachine - ARM big endian target machine.
 ///
 class ARMBETargetMachine : public ARMTargetMachine {
-  virtual void anchor();
+  void anchor() override;
 public:
   ARMBETargetMachine(const Target &T, StringRef TT,
                      StringRef CPU, StringRef FS, const TargetOptions &Options,
@@ -128,12 +127,12 @@ public:
 class ThumbTargetMachine : public ARMBaseTargetMachine {
   virtual void anchor();
   // Either Thumb1InstrInfo or Thumb2InstrInfo.
-  OwningPtr<ARMBaseInstrInfo> InstrInfo;
+  std::unique_ptr<ARMBaseInstrInfo> InstrInfo;
   const DataLayout    DL;   // Calculates type size & alignment
   ARMTargetLowering   TLInfo;
   ARMSelectionDAGInfo TSInfo;
   // Either Thumb1FrameLowering or ARMFrameLowering.
-  OwningPtr<ARMFrameLowering> FrameLowering;
+  std::unique_ptr<ARMFrameLowering> FrameLowering;
 public:
   ThumbTargetMachine(const Target &T, StringRef TT,
                      StringRef CPU, StringRef FS,
@@ -169,7 +168,7 @@ public:
 /// ThumbLETargetMachine - Thumb little endian target machine.
 ///
 class ThumbLETargetMachine : public ThumbTargetMachine {
-  virtual void anchor();
+  void anchor() override;
 public:
   ThumbLETargetMachine(const Target &T, StringRef TT,
                      StringRef CPU, StringRef FS, const TargetOptions &Options,
@@ -180,7 +179,7 @@ public:
 /// ThumbBETargetMachine - Thumb big endian target machine.
 ///
 class ThumbBETargetMachine : public ThumbTargetMachine {
-  virtual void anchor();
+  void anchor() override;
 public:
   ThumbBETargetMachine(const Target &T, StringRef TT, StringRef CPU,
                        StringRef FS, const TargetOptions &Options,

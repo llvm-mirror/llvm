@@ -11,9 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "xcore-selectiondag-info"
 #include "XCoreTargetMachine.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "xcore-selectiondag-info"
 
 XCoreSelectionDAGInfo::XCoreSelectionDAGInfo(const XCoreTargetMachine &TM)
   : TargetSelectionDAGInfo(TM) {
@@ -41,13 +42,15 @@ EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl, SDValue Chain,
     Entry.Node = Src; Args.push_back(Entry);
     Entry.Node = Size; Args.push_back(Entry);
 
-    TargetLowering::CallLoweringInfo
-    CLI(Chain, Type::getVoidTy(*DAG.getContext()), false, false, false, false,
-        0, TLI.getLibcallCallingConv(RTLIB::MEMCPY), /*isTailCall=*/false,
-        /*doesNotRet=*/false, /*isReturnValueUsed=*/false,
-        DAG.getExternalSymbol("__memcpy_4", TLI.getPointerTy()), Args, DAG, dl);
-    std::pair<SDValue,SDValue> CallResult =
-      TLI.LowerCallTo(CLI);
+    TargetLowering::CallLoweringInfo CLI(DAG);
+    CLI.setDebugLoc(dl).setChain(Chain)
+      .setCallee(TLI.getLibcallCallingConv(RTLIB::MEMCPY),
+                 Type::getVoidTy(*DAG.getContext()),
+                 DAG.getExternalSymbol("__memcpy_4", TLI.getPointerTy()),
+                 &Args, 0)
+      .setDiscardResult();
+
+    std::pair<SDValue,SDValue> CallResult = TLI.LowerCallTo(CLI);
     return CallResult.second;
   }
 

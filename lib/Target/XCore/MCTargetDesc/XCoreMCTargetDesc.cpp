@@ -23,6 +23,8 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_MC_DESC
 #include "XCoreGenInstrInfo.inc"
 
@@ -31,8 +33,6 @@
 
 #define GET_REGINFO_MC_DESC
 #include "XCoreGenRegisterInfo.inc"
-
-using namespace llvm;
 
 static MCInstrInfo *createXCoreMCInstrInfo() {
   MCInstrInfo *X = new MCInstrInfo();
@@ -58,7 +58,7 @@ static MCAsmInfo *createXCoreMCAsmInfo(const MCRegisterInfo &MRI,
   MCAsmInfo *MAI = new XCoreMCAsmInfo(TT);
 
   // Initial state of the frame pointer is SP.
-  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(0, XCore::SP, 0);
+  MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, XCore::SP, 0);
   MAI->addInitialFrameState(Inst);
 
   return MAI;
@@ -128,12 +128,11 @@ void XCoreTargetAsmStreamer::emitCCBottomFunction(StringRef Name) {
 
 static MCStreamer *
 createXCoreMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
-                         bool isVerboseAsm, bool useCFI, bool useDwarfDirectory,
+                         bool isVerboseAsm, bool useDwarfDirectory,
                          MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                          MCAsmBackend *TAB, bool ShowInst) {
-  MCStreamer *S =
-      llvm::createAsmStreamer(Ctx, OS, isVerboseAsm, useCFI, useDwarfDirectory,
-                              InstPrint, CE, TAB, ShowInst);
+  MCStreamer *S = llvm::createAsmStreamer(
+      Ctx, OS, isVerboseAsm, useDwarfDirectory, InstPrint, CE, TAB, ShowInst);
   new XCoreTargetAsmStreamer(*S, OS);
   return S;
 }

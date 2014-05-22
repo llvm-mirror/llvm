@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "pre-RA-sched"
 #include "ScheduleDAGSDNodes.h"
 #include "InstrEmitter.h"
 #include "SDNodeDbgValue.h"
@@ -34,6 +33,8 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "pre-RA-sched"
 
 STATISTIC(LoadsClustered, "Number of loads clustered together");
 
@@ -152,7 +153,7 @@ static void CloneNodeWithValues(SDNode *N, SelectionDAG *DAG,
     End = MN->memoperands_end();
   }
 
-  DAG->MorphNodeTo(N, N->getOpcode(), VTList, &Ops[0], Ops.size());
+  DAG->MorphNodeTo(N, N->getOpcode(), VTList, Ops);
 
   // Reset the memory references
   if (MN)

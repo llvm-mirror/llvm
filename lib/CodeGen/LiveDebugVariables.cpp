@@ -19,7 +19,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "livedebug"
 #include "LiveDebugVariables.h"
 #include "llvm/ADT/IntervalMap.h"
 #include "llvm/ADT/Statistic.h"
@@ -41,7 +40,11 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 
+#include <memory>
+
 using namespace llvm;
+
+#define DEBUG_TYPE "livedebug"
 
 static cl::opt<bool>
 EnableLDV("live-debug-variables", cl::init(true),
@@ -154,8 +157,8 @@ public:
   UserValue *getNext() const { return next; }
 
   /// match - Does this UserValue match the parameters?
-  bool match(const MDNode *Var, unsigned Offset) const {
-    return Var == variable && Offset == offset;
+  bool match(const MDNode *Var, unsigned Offset, bool indirect) const {
+    return Var == variable && Offset == offset && indirect == IsIndirect;
   }
 
   /// merge - Merge equivalence classes.
@@ -292,7 +295,7 @@ class LDVImpl {
   bool ModifiedMF;
 
   /// userValues - All allocated UserValue instances.
-  SmallVector<UserValue*, 8> userValues;
+  SmallVector<std::unique_ptr<UserValue>, 8> userValues;
 
   /// Map virtual register to eq class leader.
   typedef DenseMap<unsigned, UserValue*> VRMap;
@@ -332,7 +335,6 @@ public:
 
   /// clear - Release all memory.
   void clear() {
-    DeleteContainerPointers(userValues);
     userValues.clear();
     virtRegToEqClass.clear();
     userVarMap.clear();
@@ -425,12 +427,13 @@ UserValue *LDVImpl::getUserValue(const MDNode *Var, unsigned Offset,
     UserValue *UV = Leader->getLeader();
     Leader = UV;
     for (; UV; UV = UV->getNext())
-      if (UV->match(Var, Offset))
+      if (UV->match(Var, Offset, IsIndirect))
         return UV;
   }
 
-  UserValue *UV = new UserValue(Var, Offset, IsIndirect, DL, allocator);
-  userValues.push_back(UV);
+  userValues.push_back(
+      make_unique<UserValue>(Var, Offset, IsIndirect, DL, allocator));
+  UserValue *UV = userValues.back().get();
   Leader = UserValue::merge(Leader, UV);
   return UV;
 }

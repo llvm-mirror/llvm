@@ -42,10 +42,11 @@ public:
     // MOVZ/MOVK.
     VK_PAGE     = 0x010,
     VK_PAGEOFF  = 0x020,
-    VK_G0       = 0x030,
-    VK_G1       = 0x040,
-    VK_G2       = 0x050,
-    VK_G3       = 0x060,
+    VK_HI12     = 0x030,
+    VK_G0       = 0x040,
+    VK_G1       = 0x050,
+    VK_G2       = 0x060,
+    VK_G3       = 0x070,
     VK_AddressFragBits = 0x0f0,
 
     // Whether the final relocation is a checked one (where a linker should
@@ -63,10 +64,13 @@ public:
     VK_ABS_PAGE          = VK_ABS      | VK_PAGE,
     VK_ABS_G3            = VK_ABS      | VK_G3,
     VK_ABS_G2            = VK_ABS      | VK_G2,
+    VK_ABS_G2_S          = VK_SABS     | VK_G2,
     VK_ABS_G2_NC         = VK_ABS      | VK_G2      | VK_NC,
     VK_ABS_G1            = VK_ABS      | VK_G1,
+    VK_ABS_G1_S          = VK_SABS     | VK_G1,
     VK_ABS_G1_NC         = VK_ABS      | VK_G1      | VK_NC,
     VK_ABS_G0            = VK_ABS      | VK_G0,
+    VK_ABS_G0_S          = VK_SABS     | VK_G0,
     VK_ABS_G0_NC         = VK_ABS      | VK_G0      | VK_NC,
     VK_LO12              = VK_ABS      | VK_PAGEOFF | VK_NC,
     VK_GOT_LO12          = VK_GOT      | VK_PAGEOFF | VK_NC,
@@ -76,6 +80,7 @@ public:
     VK_DTPREL_G1_NC      = VK_DTPREL   | VK_G1      | VK_NC,
     VK_DTPREL_G0         = VK_DTPREL   | VK_G0,
     VK_DTPREL_G0_NC      = VK_DTPREL   | VK_G0      | VK_NC,
+    VK_DTPREL_HI12       = VK_DTPREL   | VK_HI12,
     VK_DTPREL_LO12       = VK_DTPREL   | VK_PAGEOFF,
     VK_DTPREL_LO12_NC    = VK_DTPREL   | VK_PAGEOFF | VK_NC,
     VK_GOTTPREL_PAGE     = VK_GOTTPREL | VK_PAGE,
@@ -87,6 +92,7 @@ public:
     VK_TPREL_G1_NC       = VK_TPREL    | VK_G1      | VK_NC,
     VK_TPREL_G0          = VK_TPREL    | VK_G0,
     VK_TPREL_G0_NC       = VK_TPREL    | VK_G0      | VK_NC,
+    VK_TPREL_HI12        = VK_TPREL    | VK_HI12,
     VK_TPREL_LO12        = VK_TPREL    | VK_PAGEOFF,
     VK_TPREL_LO12_NC     = VK_TPREL    | VK_PAGEOFF | VK_NC,
     VK_TLSDESC_LO12      = VK_TLSDESC  | VK_PAGEOFF | VK_NC,
@@ -139,16 +145,16 @@ public:
   /// (e.g. ":got:", ":lo12:").
   StringRef getVariantKindName() const;
 
-  void PrintImpl(raw_ostream &OS) const;
+  void PrintImpl(raw_ostream &OS) const override;
 
-  void AddValueSymbols(MCAssembler *) const;
+  void AddValueSymbols(MCAssembler *) const override;
 
-  const MCSection *FindAssociatedSection() const;
+  const MCSection *FindAssociatedSection() const override;
 
   bool EvaluateAsRelocatableImpl(MCValue &Res,
-                                 const MCAsmLayout *Layout) const;
+                                 const MCAsmLayout *Layout) const override;
 
-  void fixELFSymbolsInTLSFixups(MCAssembler &Asm) const;
+  void fixELFSymbolsInTLSFixups(MCAssembler &Asm) const override;
 
   static bool classof(const MCExpr *E) {
     return E->getKind() == MCExpr::Target;

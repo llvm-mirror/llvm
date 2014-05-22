@@ -14,6 +14,7 @@
 #ifndef LLVM_ANALYSIS_SCALAREVOLUTIONEXPRESSIONS_H
 #define LLVM_ANALYSIS_SCALAREVOLUTIONEXPRESSIONS_H
 
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -151,8 +152,12 @@ namespace llvm {
     }
 
     typedef const SCEV *const *op_iterator;
+    typedef iterator_range<op_iterator> op_range;
     op_iterator op_begin() const { return Operands; }
     op_iterator op_end() const { return Operands + NumOperands; }
+    op_range operands() const {
+      return make_range(op_begin(), op_end());
+    }
 
     Type *getType() const { return getOperand(0)->getType(); }
 
@@ -352,9 +357,81 @@ namespace llvm {
       return S->getSCEVType() == scAddRecExpr;
     }
 
-    /// Splits the SCEV into two vectors of SCEVs representing the subscripts
-    /// and sizes of an array access. Returns the remainder of the
+    /// Collect parametric terms occurring in step expressions.
+    void collectParametricTerms(ScalarEvolution &SE,
+                                SmallVectorImpl<const SCEV *> &Terms) const;
+
+    /// Return in Subscripts the access functions for each dimension in Sizes.
+    const SCEV *
+    computeAccessFunctions(ScalarEvolution &SE,
+                           SmallVectorImpl<const SCEV *> &Subscripts,
+                           SmallVectorImpl<const SCEV *> &Sizes) const;
+
+    /// Split this SCEVAddRecExpr into two vectors of SCEVs representing the
+    /// subscripts and sizes of an array access. Returns the remainder of the
     /// delinearization that is the offset start of the array.
+    ///
+    /// The delinearization is a 3 step process: the first two steps compute the
+    /// sizes of each subscript and the third step computes the access functions
+    /// for the delinearized array:
+    ///
+    /// 1. Find the terms in the step functions
+    /// 2. Compute the array size
+    /// 3. Compute the access function: divide the SCEV by the array size
+    ///    starting with the innermost dimensions found in step 2. The Quotient
+    ///    is the SCEV to be divided in the next step of the recursion. The
+    ///    Remainder is the subscript of the innermost dimension. Loop over all
+    ///    array dimensions computed in step 2.
+    ///
+    /// To compute a uniform array size for several memory accesses to the same
+    /// object, one can collect in step 1 all the step terms for all the memory
+    /// accesses, and compute in step 2 a unique array shape. This guarantees
+    /// that the array shape will be the same across all memory accesses.
+    ///
+    /// FIXME: We could derive the result of steps 1 and 2 from a description of
+    /// the array shape given in metadata.
+    ///
+    /// Example:
+    ///
+    /// A[][n][m]
+    ///
+    /// for i
+    ///   for j
+    ///     for k
+    ///       A[j+k][2i][5i] =
+    ///
+    /// The initial SCEV:
+    ///
+    /// A[{{{0,+,2*m+5}_i, +, n*m}_j, +, n*m}_k]
+    ///
+    /// 1. Find the different terms in the step functions:
+    /// -> [2*m, 5, n*m, n*m]
+    ///
+    /// 2. Compute the array size: sort and unique them
+    /// -> [n*m, 2*m, 5]
+    /// find the GCD of all the terms = 1
+    /// divide by the GCD and erase constant terms
+    /// -> [n*m, 2*m]
+    /// GCD = m
+    /// divide by GCD -> [n, 2]
+    /// remove constant terms
+    /// -> [n]
+    /// size of the array is A[unknown][n][m]
+    ///
+    /// 3. Compute the access function
+    /// a. Divide {{{0,+,2*m+5}_i, +, n*m}_j, +, n*m}_k by the innermost size m
+    /// Quotient: {{{0,+,2}_i, +, n}_j, +, n}_k
+    /// Remainder: {{{0,+,5}_i, +, 0}_j, +, 0}_k
+    /// The remainder is the subscript of the innermost array dimension: [5i].
+    ///
+    /// b. Divide Quotient: {{{0,+,2}_i, +, n}_j, +, n}_k by next outer size n
+    /// Quotient: {{{0,+,0}_i, +, 1}_j, +, 1}_k
+    /// Remainder: {{{0,+,2}_i, +, 0}_j, +, 0}_k
+    /// The Remainder is the subscript of the next array dimension: [2i].
+    ///
+    /// The subscript of the outermost dimension is the Quotient: [j+k].
+    ///
+    /// Overall, we have: A[][n][m], and the access function: A[j+k][2i][5i].
     const SCEV *delinearize(ScalarEvolution &SE,
                             SmallVectorImpl<const SCEV *> &Subscripts,
                             SmallVectorImpl<const SCEV *> &Sizes) const;

@@ -37,8 +37,7 @@ void MCTargetStreamer::finish() {}
 void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
 
 MCStreamer::MCStreamer(MCContext &Ctx)
-    : Context(Ctx), EmitEHFrame(true), EmitDebugFrame(false),
-      CurrentW64UnwindInfo(nullptr), LastSymbol(nullptr) {
+    : Context(Ctx), CurrentW64UnwindInfo(nullptr), LastSymbol(nullptr) {
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
 
@@ -51,8 +50,6 @@ void MCStreamer::reset() {
   for (unsigned i = 0; i < getNumW64UnwindInfos(); ++i)
     delete W64UnwindInfos[i];
   W64UnwindInfos.clear();
-  EmitEHFrame = true;
-  EmitDebugFrame = false;
   CurrentW64UnwindInfo = nullptr;
   LastSymbol = nullptr;
   SectionStack.clear();
@@ -147,8 +144,9 @@ void MCStreamer::EmitAbsValue(const MCExpr *Value, unsigned Size) {
 }
 
 
-void MCStreamer::EmitValue(const MCExpr *Value, unsigned Size) {
-  EmitValueImpl(Value, Size);
+void MCStreamer::EmitValue(const MCExpr *Value, unsigned Size,
+                           const SMLoc &Loc) {
+  EmitValueImpl(Value, Size, Loc);
 }
 
 void MCStreamer::EmitSymbolValue(const MCSymbol *Sym, unsigned Size) {
@@ -258,8 +256,6 @@ void MCStreamer::EmitCompactUnwindEncoding(uint32_t CompactUnwindEncoding) {
 
 void MCStreamer::EmitCFISections(bool EH, bool Debug) {
   assert(EH || Debug);
-  EmitEHFrame = EH;
-  EmitDebugFrame = Debug;
 }
 
 void MCStreamer::EmitCFIStartProc(bool IsSimple) {
@@ -614,17 +610,6 @@ void MCStreamer::EmitRawText(const Twine &T) {
   EmitRawTextImpl(T.toStringRef(Str));
 }
 
-void MCStreamer::EmitFrames(MCAsmBackend *MAB, bool usingCFI) {
-  if (!getNumFrameInfos())
-    return;
-
-  if (EmitEHFrame)
-    MCDwarfFrameEmitter::Emit(*this, MAB, usingCFI, true);
-
-  if (EmitDebugFrame)
-    MCDwarfFrameEmitter::Emit(*this, MAB, usingCFI, false);
-}
-
 void MCStreamer::EmitW64Tables() {
   if (!getNumW64UnwindInfos())
     return;
@@ -641,11 +626,6 @@ void MCStreamer::Finish() {
     TS->finish();
 
   FinishImpl();
-}
-
-MCSymbolData &MCStreamer::getOrCreateSymbolData(const MCSymbol *Symbol) {
-  report_fatal_error("Not supported!");
-  return *(static_cast<MCSymbolData*>(nullptr));
 }
 
 void MCStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {

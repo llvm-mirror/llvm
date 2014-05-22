@@ -51,7 +51,6 @@
 //  note that we saved 2 registers here almostly "for free".
 // ===---------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "global-merge"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -69,6 +68,8 @@
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "global-merge"
 
 static cl::opt<bool>
 EnableGlobalMerge("global-merge", cl::Hidden,
@@ -107,7 +108,7 @@ namespace {
 
   public:
     static char ID;             // Pass identification, replacement for typeid.
-    explicit GlobalMerge(const TargetMachine *TM = 0)
+    explicit GlobalMerge(const TargetMachine *TM = nullptr)
       : FunctionPass(ID), TM(TM) {
       initializeGlobalMergePass(*PassRegistry::getPassRegistry());
     }
@@ -173,7 +174,8 @@ bool GlobalMerge::doMerge(SmallVectorImpl<GlobalVariable*> &Globals,
     GlobalVariable *MergedGV = new GlobalVariable(M, MergedTy, isConst,
                                                   GlobalValue::InternalLinkage,
                                                   MergedInit, "_MergedGlobals",
-                                                  0, GlobalVariable::NotThreadLocal,
+                                                  nullptr,
+                                                  GlobalVariable::NotThreadLocal,
                                                   AddrSpace);
     for (size_t k = i; k < j; ++k) {
       Constant *Idx[2] = {

@@ -189,31 +189,31 @@ class LLVM_LIBRARY_VISIBILITY NVPTXAsmPrinter : public AsmPrinter {
 
   friend class AggBuffer;
 
-  virtual void emitSrcInText(StringRef filename, unsigned line);
+  void emitSrcInText(StringRef filename, unsigned line);
 
 private:
-  virtual const char *getPassName() const { return "NVPTX Assembly Printer"; }
+  const char *getPassName() const override { return "NVPTX Assembly Printer"; }
 
   const Function *F;
   std::string CurrentFnName;
 
-  void EmitFunctionEntryLabel();
-  void EmitFunctionBodyStart();
-  void EmitFunctionBodyEnd();
-  void emitImplicitDef(const MachineInstr *MI) const;
+  void EmitFunctionEntryLabel() override;
+  void EmitFunctionBodyStart() override;
+  void EmitFunctionBodyEnd() override;
+  void emitImplicitDef(const MachineInstr *MI) const override;
 
-  void EmitInstruction(const MachineInstr *);
+  void EmitInstruction(const MachineInstr *) override;
   void lowerToMCInst(const MachineInstr *MI, MCInst &OutMI);
   bool lowerOperand(const MachineOperand &MO, MCOperand &MCOp);
   MCOperand GetSymbolRef(const MCSymbol *Symbol);
   unsigned encodeVirtualRegister(unsigned Reg);
 
-  void EmitAlignment(unsigned NumBits, const GlobalValue *GV = 0) const {}
+  void EmitAlignment(unsigned NumBits, const GlobalValue *GV = nullptr) const {}
 
   void printVecModifiedImmediate(const MachineOperand &MO, const char *Modifier,
                                  raw_ostream &O);
   void printMemOperand(const MachineInstr *MI, int opNum, raw_ostream &O,
-                       const char *Modifier = 0);
+                       const char *Modifier = nullptr);
   void printImplicitDef(const MachineInstr *MI, raw_ostream &O) const;
   void printModuleLevelGV(const GlobalVariable *GVar, raw_ostream &O,
                           bool = false);
@@ -234,15 +234,15 @@ private:
   void printReturnValStr(const MachineFunction &MF, raw_ostream &O);
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        unsigned AsmVariant, const char *ExtraCode,
-                       raw_ostream &);
+                       raw_ostream &) override;
   void printOperand(const MachineInstr *MI, int opNum, raw_ostream &O,
-                    const char *Modifier = 0);
+                    const char *Modifier = nullptr);
   bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                              unsigned AsmVariant, const char *ExtraCode,
-                             raw_ostream &);
+                             raw_ostream &) override;
 protected:
-  bool doInitialization(Module &M);
-  bool doFinalization(Module &M);
+  bool doInitialization(Module &M) override;
+  bool doFinalization(Module &M) override;
 
 private:
   std::string CurrentBankselLabelInBasicBlock;
@@ -312,7 +312,7 @@ public:
       : AsmPrinter(TM, Streamer),
         nvptxSubtarget(TM.getSubtarget<NVPTXSubtarget>()) {
     CurrentBankselLabelInBasicBlock = "";
-    reader = NULL;
+    reader = nullptr;
     EmitGeneric = (nvptxSubtarget.getDrvInterface() == NVPTX::CUDA);
   }
 

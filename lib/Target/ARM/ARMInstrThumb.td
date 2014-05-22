@@ -269,7 +269,8 @@ class T1SystemEncoding<bits<8> opc>
   let Inst{7-0} = opc;
 }
 
-def tHINT : T1pI<(outs), (ins imm0_15:$imm), NoItinerary, "hint", "\t$imm", []>,
+def tHINT : T1pI<(outs), (ins imm0_15:$imm), NoItinerary, "hint", "\t$imm",
+                 [(int_arm_hint imm0_15:$imm)]>,
             T1SystemEncoding<0x00>,
             Requires<[IsThumb, HasV6M]> {
   bits<4> imm;
@@ -288,7 +289,6 @@ def : tHintAlias<"sev$p", (tHINT 4, pred:$p)>; // A8.6.157
 def : tInstAlias<"sevl$p", (tHINT 5, pred:$p)> {
   let Predicates = [IsThumb2, HasV8];
 }
-def : T2Pat<(int_arm_sevl), (tHINT 5)>;
 
 // The imm operand $val can be used by a debugger to store more information
 // about the breakpoint.
@@ -1193,6 +1193,15 @@ def tTST :                      // A8.6.230
                [(ARMcmpZ (and_su tGPR:$Rn, tGPR:$Rm), 0)]>,
                Sched<[WriteALU]>;
 
+// A8.8.247  UDF - Undefined (Encoding T1)
+def tUDF : TI<(outs), (ins imm0_255:$imm8), IIC_Br, "udf\t$imm8", []>,
+           Encoding16 {
+  bits<8> imm8;
+  let Inst{15-12} = 0b1101;
+  let Inst{11-8} = 0b1110;
+  let Inst{7-0} = imm8;
+}
+
 // Zero-extend byte
 def tUXTB :                     // A8.6.262
   T1pIMiscEncode<{0,0,1,0,1,1,?}, (outs tGPR:$Rd), (ins tGPR:$Rm),
@@ -1307,6 +1316,18 @@ def : T1Pat<(addc   tGPR:$lhs, imm8_255_neg:$rhs),
             (tSUBi8 tGPR:$lhs, imm8_255_neg:$rhs)>;
 def : T1Pat<(subc   tGPR:$lhs, tGPR:$rhs),
             (tSUBrr tGPR:$lhs, tGPR:$rhs)>;
+
+// Bswap 16 with load/store
+def : T1Pat<(srl (bswap (extloadi16 t_addrmode_rrs2:$addr)), (i32 16)),
+            (tREV16 (tLDRHr t_addrmode_rrs2:$addr))>;
+def : T1Pat<(srl (bswap (extloadi16 t_addrmode_is2:$addr)), (i32 16)),
+            (tREV16 (tLDRHi t_addrmode_is2:$addr))>;
+def : T1Pat<(truncstorei16 (srl (bswap tGPR:$Rn), (i32 16)),
+                           t_addrmode_rrs2:$addr),
+            (tSTRHr (tREV16 tGPR:$Rn), t_addrmode_rrs2:$addr)>;
+def : T1Pat<(truncstorei16 (srl (bswap tGPR:$Rn), (i32 16)),
+                           t_addrmode_is2:$addr),
+            (tSTRHi(tREV16 tGPR:$Rn), t_addrmode_is2:$addr)>;
 
 // ConstantPool
 def : T1Pat<(ARMWrapper  tconstpool  :$dst), (tLEApcrel tconstpool  :$dst)>;

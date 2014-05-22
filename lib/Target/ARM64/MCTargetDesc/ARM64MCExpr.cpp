@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "aarch64symbolrefexpr"
 #include "ARM64MCExpr.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
@@ -23,6 +22,8 @@
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "aarch64symbolrefexpr"
 
 const ARM64MCExpr *ARM64MCExpr::Create(const MCExpr *Expr, VariantKind Kind,
                                        MCContext &Ctx) {
@@ -35,16 +36,20 @@ StringRef ARM64MCExpr::getVariantKindName() const {
   case VK_LO12:                return ":lo12:";
   case VK_ABS_G3:              return ":abs_g3:";
   case VK_ABS_G2:              return ":abs_g2:";
+  case VK_ABS_G2_S:            return ":abs_g2_s:";
   case VK_ABS_G2_NC:           return ":abs_g2_nc:";
   case VK_ABS_G1:              return ":abs_g1:";
+  case VK_ABS_G1_S:            return ":abs_g1_s:";
   case VK_ABS_G1_NC:           return ":abs_g1_nc:";
   case VK_ABS_G0:              return ":abs_g0:";
+  case VK_ABS_G0_S:            return ":abs_g0_s:";
   case VK_ABS_G0_NC:           return ":abs_g0_nc:";
   case VK_DTPREL_G2:           return ":dtprel_g2:";
   case VK_DTPREL_G1:           return ":dtprel_g1:";
   case VK_DTPREL_G1_NC:        return ":dtprel_g1_nc:";
   case VK_DTPREL_G0:           return ":dtprel_g0:";
   case VK_DTPREL_G0_NC:        return ":dtprel_g0_nc:";
+  case VK_DTPREL_HI12:         return ":dtprel_hi12:";
   case VK_DTPREL_LO12:         return ":dtprel_lo12:";
   case VK_DTPREL_LO12_NC:      return ":dtprel_lo12_nc:";
   case VK_TPREL_G2:            return ":tprel_g2:";
@@ -52,6 +57,7 @@ StringRef ARM64MCExpr::getVariantKindName() const {
   case VK_TPREL_G1_NC:         return ":tprel_g1_nc:";
   case VK_TPREL_G0:            return ":tprel_g0:";
   case VK_TPREL_G0_NC:         return ":tprel_g0_nc:";
+  case VK_TPREL_HI12:          return ":tprel_hi12:";
   case VK_TPREL_LO12:          return ":tprel_lo12:";
   case VK_TPREL_LO12_NC:       return ":tprel_lo12_nc:";
   case VK_TLSDESC_LO12:        return ":tlsdesc_lo12:";

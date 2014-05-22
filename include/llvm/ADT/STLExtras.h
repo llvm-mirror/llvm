@@ -55,6 +55,131 @@ struct greater_ptr : public std::binary_function<Ty, Ty, bool> {
   }
 };
 
+/// An efficient, type-erasing, non-owning reference to a callable. This is
+/// intended for use as the type of a function parameter that is not used
+/// after the function in question returns.
+///
+/// This class does not own the callable, so it is not in general safe to store
+/// a function_ref.
+template<typename Fn> class function_ref;
+
+#if LLVM_HAS_VARIADIC_TEMPLATES
+
+template<typename Ret, typename ...Params>
+class function_ref<Ret(Params...)> {
+  Ret (*callback)(void *callable, Params ...params);
+  void *callable;
+
+  template<typename Callable>
+  static Ret callback_fn(void *callable, Params ...params) {
+    return (*reinterpret_cast<Callable*>(callable))(
+        std::forward<Params>(params)...);
+  }
+
+public:
+  template<typename Callable>
+  function_ref(Callable &&callable)
+      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
+        callable(reinterpret_cast<void *>(&callable)) {}
+  Ret operator()(Params ...params) const {
+    return callback(callable, std::forward<Params>(params)...);
+  }
+};
+
+#else
+
+template<typename Ret>
+class function_ref<Ret()> {
+  Ret (*callback)(void *callable);
+  void *callable;
+
+  template<typename Callable>
+  static Ret callback_fn(void *callable) {
+    return (*reinterpret_cast<Callable*>(callable))();
+  }
+
+public:
+  template<typename Callable>
+  function_ref(Callable &&callable)
+      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
+        callable(reinterpret_cast<void *>(&callable)) {}
+  Ret operator()() const { return callback(callable); }
+};
+
+template<typename Ret, typename Param1>
+class function_ref<Ret(Param1)> {
+  Ret (*callback)(void *callable, Param1 param1);
+  void *callable;
+
+  template<typename Callable>
+  static Ret callback_fn(void *callable, Param1 param1) {
+    return (*reinterpret_cast<Callable*>(callable))(
+        std::forward<Param1>(param1));
+  }
+
+public:
+  template<typename Callable>
+  function_ref(Callable &&callable)
+      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
+        callable(reinterpret_cast<void *>(&callable)) {}
+  Ret operator()(Param1 param1) {
+    return callback(callable, std::forward<Param1>(param1));
+  }
+};
+
+template<typename Ret, typename Param1, typename Param2>
+class function_ref<Ret(Param1, Param2)> {
+  Ret (*callback)(void *callable, Param1 param1, Param2 param2);
+  void *callable;
+
+  template<typename Callable>
+  static Ret callback_fn(void *callable, Param1 param1, Param2 param2) {
+    return (*reinterpret_cast<Callable*>(callable))(
+        std::forward<Param1>(param1),
+        std::forward<Param2>(param2));
+  }
+
+public:
+  template<typename Callable>
+  function_ref(Callable &&callable)
+      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
+        callable(reinterpret_cast<void *>(&callable)) {}
+  Ret operator()(Param1 param1, Param2 param2) {
+    return callback(callable,
+                    std::forward<Param1>(param1),
+                    std::forward<Param2>(param2));
+  }
+};
+
+template<typename Ret, typename Param1, typename Param2, typename Param3>
+class function_ref<Ret(Param1, Param2, Param3)> {
+  Ret (*callback)(void *callable, Param1 param1, Param2 param2, Param3 param3);
+  void *callable;
+
+  template<typename Callable>
+  static Ret callback_fn(void *callable, Param1 param1, Param2 param2,
+                         Param3 param3) {
+    return (*reinterpret_cast<Callable*>(callable))(
+        std::forward<Param1>(param1),
+        std::forward<Param2>(param2),
+        std::forward<Param3>(param3));
+  }
+
+public:
+  template<typename Callable>
+  function_ref(Callable &&callable)
+      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
+        callable(reinterpret_cast<void *>(&callable)) {}
+  Ret operator()(Param1 param1, Param2 param2, Param3 param3) {
+    return callback(callable,
+                    std::forward<Param1>(param1),
+                    std::forward<Param2>(param2),
+                    std::forward<Param3>(param3));
+  }
+};
+
+#endif
+
 // deleter - Very very very simple method that is used to invoke operator
 // delete on something.  It is used like this:
 //
@@ -171,13 +296,14 @@ LLVM_CONSTEXPR inline size_t array_lengthof(T (&)[N]) {
   return N;
 }
 
-/// array_pod_sort_comparator - This is helper function for array_pod_sort,
-/// which just uses operator< on T.
+/// Adapt std::less<T> for array_pod_sort.
 template<typename T>
 inline int array_pod_sort_comparator(const void *P1, const void *P2) {
-  if (*reinterpret_cast<const T*>(P1) < *reinterpret_cast<const T*>(P2))
+  if (std::less<T>()(*reinterpret_cast<const T*>(P1),
+                     *reinterpret_cast<const T*>(P2)))
     return -1;
-  if (*reinterpret_cast<const T*>(P2) < *reinterpret_cast<const T*>(P1))
+  if (std::less<T>()(*reinterpret_cast<const T*>(P2),
+                     *reinterpret_cast<const T*>(P1)))
     return 1;
   return 0;
 }
@@ -200,7 +326,7 @@ inline int (*get_array_pod_sort_comparator(const T &))
 /// possible.
 ///
 /// This function assumes that you have simple POD-like types that can be
-/// compared with operator< and can be moved with memcpy.  If this isn't true,
+/// compared with std::less and can be moved with memcpy.  If this isn't true,
 /// you should use std::sort.
 ///
 /// NOTE: If qsort_r were portable, we could allow a custom comparator and
@@ -403,6 +529,13 @@ make_unique(size_t n) {
 }
 
 #endif
+
+template<typename First, typename Second>
+struct pair_hash {
+  size_t operator()(const std::pair<First, Second> &P) const {
+    return std::hash<First>()(P.first) * 31 + std::hash<Second>()(P.second);
+  }
+};
 
 } // End llvm namespace
 

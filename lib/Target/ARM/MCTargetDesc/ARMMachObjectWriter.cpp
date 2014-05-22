@@ -156,7 +156,7 @@ RecordARMScatteredHalfRelocation(MachObjectWriter *Writer,
 
   // See <reloc.h>.
   const MCSymbol *A = &Target.getSymA()->getSymbol();
-  MCSymbolData *A_SD = &Asm.getSymbolData(*A);
+  const MCSymbolData *A_SD = &Asm.getSymbolData(*A);
 
   if (!A_SD->getFragment())
     Asm.getContext().FatalError(Fixup.getLoc(),
@@ -170,7 +170,7 @@ RecordARMScatteredHalfRelocation(MachObjectWriter *Writer,
   FixedValue += SecAddr;
 
   if (const MCSymbolRefExpr *B = Target.getSymB()) {
-    MCSymbolData *B_SD = &Asm.getSymbolData(B->getSymbol());
+    const MCSymbolData *B_SD = &Asm.getSymbolData(B->getSymbol());
 
     if (!B_SD->getFragment())
       Asm.getContext().FatalError(Fixup.getLoc(),
@@ -206,11 +206,11 @@ RecordARMScatteredHalfRelocation(MachObjectWriter *Writer,
     // The thumb bit shouldn't be set in the 'other-half' bit of the
     // relocation, but it will be set in FixedValue if the base symbol
     // is a thumb function. Clear it out here.
-    if (A_SD->getFlags() & SF_ThumbFunc)
+    if (Asm.isThumbFunc(A))
       FixedValue &= 0xfffffffe;
     break;
   case ARM::fixup_t2_movt_hi16:
-    if (A_SD->getFlags() & SF_ThumbFunc)
+    if (Asm.isThumbFunc(A))
       FixedValue &= 0xfffffffe;
     MovtBit = 1;
     // Fallthrough
@@ -259,7 +259,7 @@ void ARMMachObjectWriter::RecordARMScatteredRelocation(MachObjectWriter *Writer,
 
   // See <reloc.h>.
   const MCSymbol *A = &Target.getSymA()->getSymbol();
-  MCSymbolData *A_SD = &Asm.getSymbolData(*A);
+  const MCSymbolData *A_SD = &Asm.getSymbolData(*A);
 
   if (!A_SD->getFragment())
     Asm.getContext().FatalError(Fixup.getLoc(),
@@ -272,7 +272,7 @@ void ARMMachObjectWriter::RecordARMScatteredRelocation(MachObjectWriter *Writer,
   uint32_t Value2 = 0;
 
   if (const MCSymbolRefExpr *B = Target.getSymB()) {
-    MCSymbolData *B_SD = &Asm.getSymbolData(B->getSymbol());
+    const MCSymbolData *B_SD = &Asm.getSymbolData(B->getSymbol());
 
     if (!B_SD->getFragment())
       Asm.getContext().FatalError(Fixup.getLoc(),
@@ -378,7 +378,7 @@ void ARMMachObjectWriter::RecordRelocation(MachObjectWriter *Writer,
   }
 
   // Get the symbol data, if any.
-  MCSymbolData *SD = 0;
+  const MCSymbolData *SD = nullptr;
   if (Target.getSymA())
     SD = &Asm.getSymbolData(Target.getSymA()->getSymbol());
 

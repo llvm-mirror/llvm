@@ -14,7 +14,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm64tti"
 #include "ARM64.h"
 #include "ARM64TargetMachine.h"
 #include "MCTargetDesc/ARM64AddressingModes.h"
@@ -24,6 +23,8 @@
 #include "llvm/Target/TargetLowering.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "arm64tti"
 
 // Declare the pass initialization routine locally as target-specific passes
 // don't havve a target-wide initialization entry point, and so we rely on the
@@ -44,7 +45,7 @@ class ARM64TTI final : public ImmutablePass, public TargetTransformInfo {
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
 public:
-  ARM64TTI() : ImmutablePass(ID), TM(0), ST(0), TLI(0) {
+  ARM64TTI() : ImmutablePass(ID), TM(nullptr), ST(nullptr), TLI(nullptr) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
@@ -86,16 +87,20 @@ public:
   /// @{
 
   unsigned getNumberOfRegisters(bool Vector) const override {
-    if (Vector)
-      return 32;
-
+    if (Vector) {
+      if (ST->hasNEON())
+        return 32;
+      return 0;
+    }
     return 31;
   }
 
   unsigned getRegisterBitWidth(bool Vector) const override {
-    if (Vector)
-      return 128;
-
+    if (Vector) {
+      if (ST->hasNEON())
+        return 128;
+      return 0;
+    }
     return 64;
   }
 

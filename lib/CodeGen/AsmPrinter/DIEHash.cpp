@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dwarfdebug"
-
 #include "ByteStreamer.h"
 #include "DIEHash.h"
 #include "DIE.h"
@@ -27,6 +25,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "dwarfdebug"
 
 /// \brief Grabs the string in whichever attribute is passed in and returns
 /// a reference to it.
@@ -309,7 +309,7 @@ void DIEHash::hashAttribute(AttrEntry Attr, dwarf::Tag Tag) {
     // ... An attribute that refers to another type entry T is processed as
     // follows:
   case DIEValue::isEntry:
-    hashDIEEntry(Attribute, Tag, *cast<DIEEntry>(Value)->getEntry());
+    hashDIEEntry(Attribute, Tag, cast<DIEEntry>(Value)->getEntry());
     break;
   case DIEValue::isInteger: {
     addULEB128('A');

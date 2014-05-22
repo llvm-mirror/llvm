@@ -76,6 +76,14 @@ unsigned Argument::getArgNo() const {
   return ArgIdx;
 }
 
+/// hasNonNullAttr - Return true if this argument has the nonnull attribute on
+/// it in its containing function.
+bool Argument::hasNonNullAttr() const {
+  if (!getType()->isPointerTy()) return false;
+  return getParent()->getAttributes().
+    hasAttribute(getArgNo()+1, Attribute::NonNull);
+}
+
 /// hasByValAttr - Return true if this argument has the byval attribute on it
 /// in its containing function.
 bool Argument::hasByValAttr() const {
@@ -209,7 +217,7 @@ void Function::eraseFromParent() {
 
 Function::Function(FunctionType *Ty, LinkageTypes Linkage,
                    const Twine &name, Module *ParentModule)
-  : GlobalValue(PointerType::getUnqual(Ty),
+  : GlobalObject(PointerType::getUnqual(Ty),
                 Value::FunctionVal, nullptr, 0, Linkage, name) {
   assert(FunctionType::isValidReturnType(getReturnType()) &&
          "invalid return type");
@@ -361,7 +369,7 @@ void Function::clearGC() {
 /// create a Function) from the Function Src to this one.
 void Function::copyAttributesFrom(const GlobalValue *Src) {
   assert(isa<Function>(Src) && "Expected a Function!");
-  GlobalValue::copyAttributesFrom(Src);
+  GlobalObject::copyAttributesFrom(Src);
   const Function *SrcF = cast<Function>(Src);
   setCallingConv(SrcF->getCallingConv());
   setAttributes(SrcF->getAttributes());

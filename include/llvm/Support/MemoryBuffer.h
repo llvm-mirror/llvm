@@ -24,7 +24,6 @@
 namespace llvm {
 
 class error_code;
-template<class T> class OwningPtr;
 
 /// MemoryBuffer - This interface provides simple read-only access to a block
 /// of memory, and provides simple methods for reading files and standard input
@@ -67,34 +66,39 @@ public:
   /// MemoryBuffer if successful, otherwise returning null.  If FileSize is
   /// specified, this means that the client knows that the file exists and that
   /// it has the specified size.
-  static error_code getFile(Twine Filename, OwningPtr<MemoryBuffer> &Result,
-                            int64_t FileSize = -1,
-                            bool RequiresNullTerminator = true);
+  ///
+  /// \param IsVolatileSize Set to true to indicate that the file size may be
+  /// changing, e.g. when libclang tries to parse while the user is
+  /// editing/updating the file.
   static error_code getFile(Twine Filename,
                             std::unique_ptr<MemoryBuffer> &Result,
                             int64_t FileSize = -1,
-                            bool RequiresNullTerminator = true);
+                            bool RequiresNullTerminator = true,
+                            bool IsVolatileSize = false);
 
   /// Given an already-open file descriptor, map some slice of it into a
   /// MemoryBuffer. The slice is specified by an \p Offset and \p MapSize.
   /// Since this is in the middle of a file, the buffer is not null terminated.
-  static error_code getOpenFileSlice(int FD, const char *Filename,
-                                     OwningPtr<MemoryBuffer> &Result,
-                                     uint64_t MapSize, int64_t Offset);
+  ///
+  /// \param IsVolatileSize Set to true to indicate that the file size may be
+  /// changing, e.g. when libclang tries to parse while the user is
+  /// editing/updating the file.
   static error_code getOpenFileSlice(int FD, const char *Filename,
                                      std::unique_ptr<MemoryBuffer> &Result,
-                                     uint64_t MapSize, int64_t Offset);
+                                     uint64_t MapSize, int64_t Offset,
+                                     bool IsVolatileSize = false);
 
   /// Given an already-open file descriptor, read the file and return a
   /// MemoryBuffer.
-  static error_code getOpenFile(int FD, const char *Filename,
-                                OwningPtr<MemoryBuffer> &Result,
-                                uint64_t FileSize,
-                                bool RequiresNullTerminator = true);
+  ///
+  /// \param IsVolatileSize Set to true to indicate that the file size may be
+  /// changing, e.g. when libclang tries to parse while the user is
+  /// editing/updating the file.
   static error_code getOpenFile(int FD, const char *Filename,
                                 std::unique_ptr<MemoryBuffer> &Result,
                                 uint64_t FileSize,
-                                bool RequiresNullTerminator = true);
+                                bool RequiresNullTerminator = true,
+                                bool IsVolatileSize = false);
 
   /// getMemBuffer - Open the specified memory range as a MemoryBuffer.  Note
   /// that InputData must be null terminated if RequiresNullTerminator is true.
@@ -123,16 +127,12 @@ public:
 
   /// getSTDIN - Read all of stdin into a file buffer, and return it.
   /// If an error occurs, this returns null and sets ec.
-  static error_code getSTDIN(OwningPtr<MemoryBuffer> &Result);
   static error_code getSTDIN(std::unique_ptr<MemoryBuffer> &Result);
 
 
   /// getFileOrSTDIN - Open the specified file as a MemoryBuffer, or open stdin
   /// if the Filename is "-".  If an error occurs, this returns null and sets
   /// ec.
-  static error_code getFileOrSTDIN(StringRef Filename,
-                                   OwningPtr<MemoryBuffer> &Result,
-                                   int64_t FileSize = -1);
   static error_code getFileOrSTDIN(StringRef Filename,
                                    std::unique_ptr<MemoryBuffer> &Result,
                                    int64_t FileSize = -1);

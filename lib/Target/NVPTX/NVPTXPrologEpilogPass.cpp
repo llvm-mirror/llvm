@@ -25,13 +25,15 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "nvptx-prolog-epilog"
+
 namespace {
 class NVPTXPrologEpilogPass : public MachineFunctionPass {
 public:
   static char ID;
   NVPTXPrologEpilogPass() : MachineFunctionPass(ID) {}
 
-  virtual bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
 private:
   void calculateFrameObjectOffsets(MachineFunction &Fn);
@@ -58,7 +60,7 @@ bool NVPTXPrologEpilogPass::runOnMachineFunction(MachineFunction &MF) {
       for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
         if (!MI->getOperand(i).isFI())
           continue;
-        TRI.eliminateFrameIndex(MI, 0, i, NULL);
+        TRI.eliminateFrameIndex(MI, 0, i, nullptr);
         Modified = true;
       }
     }

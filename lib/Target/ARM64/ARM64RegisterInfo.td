@@ -119,7 +119,7 @@ def XZR   : ARM64Reg<31, "xzr", [WZR]>, DwarfRegAlias<WSP>;
 }
 
 // Condition code register.
-def CPSR  : ARM64Reg<0, "cpsr">;
+def NZCV  : ARM64Reg<0, "nzcv">;
 
 // GPR register classes with the intersections of GPR32/GPR32sp and
 // GPR64/GPR64sp for use by the coalescer.
@@ -152,6 +152,9 @@ def GPR64sp : RegisterClass<"ARM64", [i64], 64, (add GPR64common, SP)> {
   let AltOrderSelect = [{ return 1; }];
 }
 
+def GPR32sponly : RegisterClass<"ARM64", [i32], 32, (add WSP)>;
+def GPR64sponly : RegisterClass<"ARM64", [i64], 64, (add SP)>;
+
 // GPR register classes which include WZR/XZR AND SP/WSP. This is not a
 // constraint used by any instructions, it is used as a common super-class.
 def GPR32all : RegisterClass<"ARM64", [i32], 32, (add GPR32common, WZR, WSP)>;
@@ -167,21 +170,25 @@ def tcGPR64 : RegisterClass<"ARM64", [i64], 64, (sub GPR64common, X19, X20, X21,
 // GPR register classes for post increment amount of vector load/store that
 // has alternate printing when Rm=31 and prints a constant immediate value
 // equal to the total number of bytes transferred.
-def GPR64pi1  : RegisterOperand<GPR64, "printPostIncOperand1">;
-def GPR64pi2  : RegisterOperand<GPR64, "printPostIncOperand2">;
-def GPR64pi3  : RegisterOperand<GPR64, "printPostIncOperand3">;
-def GPR64pi4  : RegisterOperand<GPR64, "printPostIncOperand4">;
-def GPR64pi6  : RegisterOperand<GPR64, "printPostIncOperand6">;
-def GPR64pi8  : RegisterOperand<GPR64, "printPostIncOperand8">;
-def GPR64pi12 : RegisterOperand<GPR64, "printPostIncOperand12">;
-def GPR64pi16 : RegisterOperand<GPR64, "printPostIncOperand16">;
-def GPR64pi24 : RegisterOperand<GPR64, "printPostIncOperand24">;
-def GPR64pi32 : RegisterOperand<GPR64, "printPostIncOperand32">;
-def GPR64pi48 : RegisterOperand<GPR64, "printPostIncOperand48">;
-def GPR64pi64 : RegisterOperand<GPR64, "printPostIncOperand64">;
+
+// FIXME: TableGen *should* be able to do these itself now. There appears to be
+// a bug in counting how many operands a Post-indexed MCInst should have which
+// means the aliases don't trigger.
+def GPR64pi1  : RegisterOperand<GPR64, "printPostIncOperand<1>">;
+def GPR64pi2  : RegisterOperand<GPR64, "printPostIncOperand<2>">;
+def GPR64pi3  : RegisterOperand<GPR64, "printPostIncOperand<3>">;
+def GPR64pi4  : RegisterOperand<GPR64, "printPostIncOperand<4>">;
+def GPR64pi6  : RegisterOperand<GPR64, "printPostIncOperand<6>">;
+def GPR64pi8  : RegisterOperand<GPR64, "printPostIncOperand<8>">;
+def GPR64pi12 : RegisterOperand<GPR64, "printPostIncOperand<12>">;
+def GPR64pi16 : RegisterOperand<GPR64, "printPostIncOperand<16>">;
+def GPR64pi24 : RegisterOperand<GPR64, "printPostIncOperand<24>">;
+def GPR64pi32 : RegisterOperand<GPR64, "printPostIncOperand<32>">;
+def GPR64pi48 : RegisterOperand<GPR64, "printPostIncOperand<48>">;
+def GPR64pi64 : RegisterOperand<GPR64, "printPostIncOperand<64>">;
 
 // Condition code regclass.
-def CCR : RegisterClass<"ARM64", [i32], 32, (add CPSR)> {
+def CCR : RegisterClass<"ARM64", [i32], 32, (add NZCV)> {
   let CopyCost = -1;  // Don't allow copying of status registers.
 
   // CCR is not allocatable.
@@ -427,11 +434,26 @@ def QQQQ : RegisterClass<"ARM64", [untyped], 128, (add QSeqQuads)> {
 
 // Vector operand versions of the FP registers. Alternate name printing and
 // assmebler matching.
-def VectorRegAsmOperand : AsmOperandClass { let Name = "VectorReg"; }
-let ParserMatchClass = VectorRegAsmOperand in {
-def V64  : RegisterOperand<FPR64, "printVRegOperand">;
-def V128 : RegisterOperand<FPR128, "printVRegOperand">;
-def V128_lo : RegisterOperand<FPR128_lo, "printVRegOperand">;
+def VectorReg64AsmOperand : AsmOperandClass {
+  let Name = "VectorReg64";
+  let PredicateMethod = "isVectorReg";
+}
+def VectorReg128AsmOperand : AsmOperandClass {
+  let Name = "VectorReg128";
+  let PredicateMethod = "isVectorReg";
+}
+
+def V64  : RegisterOperand<FPR64, "printVRegOperand"> {
+  let ParserMatchClass = VectorReg64AsmOperand;
+}
+
+def V128 : RegisterOperand<FPR128, "printVRegOperand"> {
+  let ParserMatchClass = VectorReg128AsmOperand;
+}
+
+def VectorRegLoAsmOperand : AsmOperandClass { let Name = "VectorRegLo"; }
+def V128_lo : RegisterOperand<FPR128_lo, "printVRegOperand"> {
+  let ParserMatchClass = VectorRegLoAsmOperand;
 }
 
 class TypedVecListAsmOperand<int count, int regsize, int lanes, string kind>

@@ -7,7 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "t2-reduce-size"
 #include "ARM.h"
 #include "ARMBaseInstrInfo.h"
 #include "ARMSubtarget.h"
@@ -24,6 +23,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "t2-reduce-size"
 
 STATISTIC(NumNarrows,  "Number of 32-bit instrs reduced to 16-bit ones");
 STATISTIC(Num2Addrs,   "Number of 32-bit instrs reduced to 2addr 16-bit ones");
@@ -915,9 +916,9 @@ bool Thumb2SizeReduce::ReduceMBB(MachineBasicBlock &MBB) {
 
   // Yes, CPSR could be livein.
   bool LiveCPSR = MBB.isLiveIn(ARM::CPSR);
-  MachineInstr *BundleMI = 0;
+  MachineInstr *BundleMI = nullptr;
 
-  CPSRDef = 0;
+  CPSRDef = nullptr;
   HighLatencyCPSR = false;
 
   // Check predecessors for the latest CPSRDef.
@@ -983,7 +984,7 @@ bool Thumb2SizeReduce::ReduceMBB(MachineBasicBlock &MBB) {
     LiveCPSR = UpdateCPSRDef(*MI, LiveCPSR, DefCPSR);
     if (MI->isCall()) {
       // Calls don't really set CPSR.
-      CPSRDef = 0;
+      CPSRDef = nullptr;
       HighLatencyCPSR = false;
       IsSelfLoop = false;
     } else if (DefCPSR) {

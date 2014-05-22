@@ -1,6 +1,5 @@
 ; RUN: llc -mtriple=aarch64-none-linux-gnu -verify-machineinstrs < %s | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-AARCH64
-; RUN: llc -mtriple=arm64-none-linux-gnu -mcpu=cyclone -verify-machineinstrs -o - %s | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-ARM64
-
+; arm64 has a separate copy of this test.
 @lhs = global fp128 zeroinitializer
 @rhs = global fp128 zeroinitializer
 
@@ -134,7 +133,7 @@ define i1 @test_setcc1() {
   %val = fcmp ole fp128 %lhs, %rhs
 ; CHECK: bl __letf2
 ; CHECK: cmp w0, #0
-; CHECK: csinc w0, wzr, wzr, gt
+; CHECK: cset w0, le
 
   ret i1 %val
 ; CHECK: ret
@@ -153,11 +152,11 @@ define i1 @test_setcc2() {
   %val = fcmp ugt fp128 %lhs, %rhs
 ; CHECK: bl      __gttf2
 ; CHECK: cmp w0, #0
-; CHECK: csinc   [[GT:w[0-9]+]], wzr, wzr, le
+; CHECK: cset   [[GT:w[0-9]+]], gt
 
 ; CHECK: bl      __unordtf2
 ; CHECK: cmp w0, #0
-; CHECK: csinc   [[UNORDERED:w[0-9]+]], wzr, wzr, eq
+; CHECK: cset   [[UNORDERED:w[0-9]+]], ne
 
 ; CHECK: orr     w0, [[UNORDERED]], [[GT]]
 
@@ -177,11 +176,11 @@ define i32 @test_br_cc() {
   %cond = fcmp olt fp128 %lhs, %rhs
 ; CHECK: bl      __getf2
 ; CHECK: cmp w0, #0
-; CHECK: csinc   [[OGE:w[0-9]+]], wzr, wzr, lt
+; CHECK: cset   [[OGE:w[0-9]+]], ge
 
 ; CHECK: bl      __unordtf2
 ; CHECK: cmp w0, #0
-; CHECK: csinc   [[UNORDERED:w[0-9]+]], wzr, wzr, eq
+; CHECK: cset   [[UNORDERED:w[0-9]+]], ne
 
 ; CHECK: orr     [[UGE:w[0-9]+]], [[UNORDERED]], [[OGE]]
 ; CHECK: cbnz [[UGE]], [[RET29:.LBB[0-9]+_[0-9]+]]
@@ -206,8 +205,9 @@ define void @test_select(i1 %cond, fp128 %lhs, fp128 %rhs) {
 
   %val = select i1 %cond, fp128 %lhs, fp128 %rhs
   store fp128 %val, fp128* @lhs
-; CHECK: cmp {{w[0-9]+}}, #0
+; CHECK-AARCH64: cmp {{w[0-9]+}}, #0
 ; CHECK-AARCH64: str q1, [sp]
+; CHECK-ARM64: tst {{w[0-9]+}}, #0x1
 ; CHECK-NEXT: b.eq [[IFFALSE:.LBB[0-9]+_[0-9]+]]
 ; CHECK-NEXT: BB#
 ; CHECK-AARCH64-NEXT: str q0, [sp]

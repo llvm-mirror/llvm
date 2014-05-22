@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "reginfo"
 #include "PPCRegisterInfo.h"
 #include "PPC.h"
 #include "PPCFrameLowering.h"
@@ -42,10 +41,12 @@
 #include "llvm/Target/TargetOptions.h"
 #include <cstdlib>
 
+using namespace llvm;
+
+#define DEBUG_TYPE "reginfo"
+
 #define GET_REGINFO_TARGET_DESC
 #include "PPCGenRegisterInfo.inc"
-
-using namespace llvm;
 
 static cl::opt<bool>
 EnableBasePointer("ppc-use-base-pointer", cl::Hidden, cl::init(true),

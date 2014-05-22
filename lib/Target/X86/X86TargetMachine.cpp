@@ -108,6 +108,13 @@ X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT,
   if (Options.FloatABIType == FloatABI::Default)
     this->Options.FloatABIType = FloatABI::Hard;
 
+  // Windows stack unwinder gets confused when execution flow "falls through"
+  // after a call to 'noreturn' function.
+  // To prevent that, we emit a trap for 'unreachable' IR instructions.
+  // (which on X86, happens to be the 'ud2' instruction)
+  if (Subtarget.isTargetWin64())
+    this->Options.TrapUnreachable = true;
+
   initAsmInfo();
 }
 
@@ -219,7 +226,8 @@ bool X86PassConfig::addPreEmitPass() {
     ShouldPrint = true;
   }
   if (getOptLevel() != CodeGenOpt::None &&
-      getX86Subtarget().LEAusesAG()){
+      (getX86Subtarget().LEAusesAG() ||
+       getX86Subtarget().slowLEA())){
     addPass(createX86FixupLEAs());
     ShouldPrint = true;
   }

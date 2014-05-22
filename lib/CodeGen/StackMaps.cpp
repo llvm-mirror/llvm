@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "stackmaps"
-
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -20,6 +18,7 @@
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -28,6 +27,13 @@
 #include <iterator>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "stackmaps"
+
+static cl::opt<int> StackMapVersion("stackmap-version", cl::init(1),
+  cl::desc("Specify the stackmap encoding version (default = 1)"));
+
+const char *StackMaps::WSMP = "Stack Maps: ";
 
 PatchPointOpers::PatchPointOpers(const MachineInstr *MI)
   : MI(MI),
@@ -62,6 +68,11 @@ unsigned PatchPointOpers::getNextScratchIdx(unsigned StartIdx) const {
 
   assert(ScratchIdx != e && "No scratch register available");
   return ScratchIdx;
+}
+
+StackMaps::StackMaps(AsmPrinter &AP) : AP(AP) {
+  if (StackMapVersion != 1)
+    llvm_unreachable("Unsupported stackmap version!");
 }
 
 MachineInstr::const_mop_iterator
@@ -209,7 +220,8 @@ void StackMaps::recordStackMapOpers(const MachineInstr &MI, uint64_t ID,
     if (I->LocType == Location::Constant &&
         ((I->Offset + (int64_t(1)<<31)) >> 32) != 0) {
       I->LocType = Location::ConstantIndex;
-      I->Offset = ConstPool.getConstantIndex(I->Offset);
+      auto Result = ConstPool.insert(std::make_pair(I->Offset, I->Offset));
+      I->Offset = Result.first - ConstPool.begin();
     }
   }
 
@@ -259,7 +271,7 @@ void StackMaps::recordPatchPoint(const MachineInstr &MI) {
 #endif
 }
 
-/// serializeToStackMapSection conceptually populates the following fields:
+/// Emit the stackmap header.
 ///
 /// Header {
 ///   uint8  : Stack Map Version (currently 1)
@@ -269,11 +281,54 @@ void StackMaps::recordPatchPoint(const MachineInstr &MI) {
 /// uint32 : NumFunctions
 /// uint32 : NumConstants
 /// uint32 : NumRecords
+void StackMaps::emitStackmapHeader(MCStreamer &OS) {
+  // Header.
+  OS.EmitIntValue(StackMapVersion, 1); // Version.
+  OS.EmitIntValue(0, 1); // Reserved.
+  OS.EmitIntValue(0, 2); // Reserved.
+
+  // Num functions.
+  DEBUG(dbgs() << WSMP << "#functions = " << FnStackSize.size() << '\n');
+  OS.EmitIntValue(FnStackSize.size(), 4);
+  // Num constants.
+  DEBUG(dbgs() << WSMP << "#constants = " << ConstPool.size() << '\n');
+  OS.EmitIntValue(ConstPool.size(), 4);
+  // Num callsites.
+  DEBUG(dbgs() << WSMP << "#callsites = " << CSInfos.size() << '\n');
+  OS.EmitIntValue(CSInfos.size(), 4);
+}
+
+/// Emit the function frame record for each function.
+///
 /// StkSizeRecord[NumFunctions] {
 ///   uint64 : Function Address
 ///   uint64 : Stack Size
 /// }
+void StackMaps::emitFunctionFrameRecords(MCStreamer &OS) {
+  // Function Frame records.
+  DEBUG(dbgs() << WSMP << "functions:\n");
+  for (auto const &FR : FnStackSize) {
+    DEBUG(dbgs() << WSMP << "function addr: " << FR.first
+                         << " frame size: " << FR.second);
+    OS.EmitSymbolValue(FR.first, 8);
+    OS.EmitIntValue(FR.second, 8);
+  }
+}
+
+/// Emit the constant pool.
+///
 /// int64  : Constants[NumConstants]
+void StackMaps::emitConstantPoolEntries(MCStreamer &OS) {
+  // Constant pool entries.
+  DEBUG(dbgs() << WSMP << "constants:\n");
+  for (auto ConstEntry : ConstPool) {
+    DEBUG(dbgs() << WSMP << ConstEntry.second << '\n');
+    OS.EmitIntValue(ConstEntry.second, 8);
+  }
+}
+
+/// Emit the callsite info for each callsite.
+///
 /// StkMapRecord[NumRecords] {
 ///   uint64 : PatchPoint ID
 ///   uint32 : Instruction Offset
@@ -301,95 +356,43 @@ void StackMaps::recordPatchPoint(const MachineInstr &MI) {
 ///   0x3, Indirect, [Reg + Offset]      (spilled value)
 ///   0x4, Constant, Offset              (small constant)
 ///   0x5, ConstIndex, Constants[Offset] (large constant)
-///
-void StackMaps::serializeToStackMapSection() {
-  // Bail out if there's no stack map data.
-  if (CSInfos.empty())
-    return;
-
-  MCContext &OutContext = AP.OutStreamer.getContext();
-  const TargetRegisterInfo *TRI = AP.TM.getRegisterInfo();
-
-  // Create the section.
-  const MCSection *StackMapSection =
-    OutContext.getObjectFileInfo()->getStackMapSection();
-  AP.OutStreamer.SwitchSection(StackMapSection);
-
-  // Emit a dummy symbol to force section inclusion.
-  AP.OutStreamer.EmitLabel(
-    OutContext.GetOrCreateSymbol(Twine("__LLVM_StackMaps")));
-
-  // Serialize data.
-  const char *WSMP = "Stack Maps: ";
-  (void)WSMP;
-
-  DEBUG(dbgs() << "********** Stack Map Output **********\n");
-
-  // Header.
-  AP.OutStreamer.EmitIntValue(1, 1); // Version.
-  AP.OutStreamer.EmitIntValue(0, 1); // Reserved.
-  AP.OutStreamer.EmitIntValue(0, 2); // Reserved.
-
-  // Num functions.
-  DEBUG(dbgs() << WSMP << "#functions = " << FnStackSize.size() << '\n');
-  AP.OutStreamer.EmitIntValue(FnStackSize.size(), 4);
-  // Num constants.
-  DEBUG(dbgs() << WSMP << "#constants = " << ConstPool.getNumConstants()
-               << '\n');
-  AP.OutStreamer.EmitIntValue(ConstPool.getNumConstants(), 4);
-  // Num callsites.
-  DEBUG(dbgs() << WSMP << "#callsites = " << CSInfos.size() << '\n');
-  AP.OutStreamer.EmitIntValue(CSInfos.size(), 4);
-
-  // Function stack size entries.
-  for (FnStackSizeMap::iterator I = FnStackSize.begin(), E = FnStackSize.end();
-       I != E; ++I) {
-    AP.OutStreamer.EmitSymbolValue(I->first, 8);
-    AP.OutStreamer.EmitIntValue(I->second, 8);
-  }
-
-  // Constant pool entries.
-  for (unsigned i = 0; i < ConstPool.getNumConstants(); ++i)
-    AP.OutStreamer.EmitIntValue(ConstPool.getConstant(i), 8);
-
+void StackMaps::emitCallsiteEntries(MCStreamer &OS,
+                                    const TargetRegisterInfo *TRI) {
   // Callsite entries.
-  for (CallsiteInfoList::const_iterator CSII = CSInfos.begin(),
-       CSIE = CSInfos.end(); CSII != CSIE; ++CSII) {
-    uint64_t CallsiteID = CSII->ID;
-    const LocationVec &CSLocs = CSII->Locations;
-    const LiveOutVec &LiveOuts = CSII->LiveOuts;
+  DEBUG(dbgs() << WSMP << "callsites:\n");
+  for (const auto &CSI : CSInfos) {
+    const LocationVec &CSLocs = CSI.Locations;
+    const LiveOutVec &LiveOuts = CSI.LiveOuts;
 
-    DEBUG(dbgs() << WSMP << "callsite " << CallsiteID << "\n");
+    DEBUG(dbgs() << WSMP << "callsite " << CSI.ID << "\n");
 
     // Verify stack map entry. It's better to communicate a problem to the
     // runtime than crash in case of in-process compilation. Currently, we do
     // simple overflow checks, but we may eventually communicate other
     // compilation errors this way.
     if (CSLocs.size() > UINT16_MAX || LiveOuts.size() > UINT16_MAX) {
-      AP.OutStreamer.EmitIntValue(UINT64_MAX, 8); // Invalid ID.
-      AP.OutStreamer.EmitValue(CSII->CSOffsetExpr, 4);
-      AP.OutStreamer.EmitIntValue(0, 2); // Reserved.
-      AP.OutStreamer.EmitIntValue(0, 2); // 0 locations.
-      AP.OutStreamer.EmitIntValue(0, 2); // padding.
-      AP.OutStreamer.EmitIntValue(0, 2); // 0 live-out registers.
-      AP.OutStreamer.EmitIntValue(0, 4); // padding.
+      OS.EmitIntValue(UINT64_MAX, 8); // Invalid ID.
+      OS.EmitValue(CSI.CSOffsetExpr, 4);
+      OS.EmitIntValue(0, 2); // Reserved.
+      OS.EmitIntValue(0, 2); // 0 locations.
+      OS.EmitIntValue(0, 2); // padding.
+      OS.EmitIntValue(0, 2); // 0 live-out registers.
+      OS.EmitIntValue(0, 4); // padding.
       continue;
     }
 
-    AP.OutStreamer.EmitIntValue(CallsiteID, 8);
-    AP.OutStreamer.EmitValue(CSII->CSOffsetExpr, 4);
+    OS.EmitIntValue(CSI.ID, 8);
+    OS.EmitValue(CSI.CSOffsetExpr, 4);
 
     // Reserved for flags.
-    AP.OutStreamer.EmitIntValue(0, 2);
+    OS.EmitIntValue(0, 2);
 
     DEBUG(dbgs() << WSMP << "  has " << CSLocs.size() << " locations\n");
 
-    AP.OutStreamer.EmitIntValue(CSLocs.size(), 2);
+    OS.EmitIntValue(CSLocs.size(), 2);
 
-    unsigned operIdx = 0;
-    for (LocationVec::const_iterator LocI = CSLocs.begin(), LocE = CSLocs.end();
-         LocI != LocE; ++LocI, ++operIdx) {
-      const Location &Loc = *LocI;
+    unsigned OperIdx = 0;
+    for (const auto &Loc : CSLocs) {
       unsigned RegNo = 0;
       int Offset = Loc.Offset;
       if(Loc.Reg) {
@@ -410,67 +413,97 @@ void StackMaps::serializeToStackMapSection() {
                "Missing location register");
       }
 
-      DEBUG(
-        dbgs() << WSMP << "  Loc " << operIdx << ": ";
-        switch (Loc.LocType) {
-        case Location::Unprocessed:
-          dbgs() << "<Unprocessed operand>";
-          break;
-        case Location::Register:
-          dbgs() << "Register " << TRI->getName(Loc.Reg);
-          break;
-        case Location::Direct:
-          dbgs() << "Direct " << TRI->getName(Loc.Reg);
-          if (Loc.Offset)
-            dbgs() << " + " << Loc.Offset;
-          break;
-        case Location::Indirect:
-          dbgs() << "Indirect " << TRI->getName(Loc.Reg)
-                 << " + " << Loc.Offset;
-          break;
-        case Location::Constant:
-          dbgs() << "Constant " << Loc.Offset;
-          break;
-        case Location::ConstantIndex:
-          dbgs() << "Constant Index " << Loc.Offset;
-          break;
-        }
-        dbgs() << "     [encoding: .byte " << Loc.LocType
-               << ", .byte " << Loc.Size
-               << ", .short " << RegNo
-               << ", .int " << Offset << "]\n";
-      );
+      DEBUG(dbgs() << WSMP << "  Loc " << OperIdx << ": ";
+            switch (Loc.LocType) {
+            case Location::Unprocessed:
+              dbgs() << "<Unprocessed operand>";
+              break;
+            case Location::Register:
+              dbgs() << "Register " << TRI->getName(Loc.Reg);
+              break;
+            case Location::Direct:
+              dbgs() << "Direct " << TRI->getName(Loc.Reg);
+              if (Loc.Offset)
+              dbgs() << " + " << Loc.Offset;
+              break;
+            case Location::Indirect:
+              dbgs() << "Indirect " << TRI->getName(Loc.Reg)
+              << " + " << Loc.Offset;
+              break;
+            case Location::Constant:
+              dbgs() << "Constant " << Loc.Offset;
+              break;
+            case Location::ConstantIndex:
+              dbgs() << "Constant Index " << Loc.Offset;
+              break;
+              }
+            dbgs() << "     [encoding: .byte " << Loc.LocType
+            << ", .byte " << Loc.Size
+            << ", .short " << RegNo
+            << ", .int " << Offset << "]\n";
+            );
 
-      AP.OutStreamer.EmitIntValue(Loc.LocType, 1);
-      AP.OutStreamer.EmitIntValue(Loc.Size, 1);
-      AP.OutStreamer.EmitIntValue(RegNo, 2);
-      AP.OutStreamer.EmitIntValue(Offset, 4);
+      OS.EmitIntValue(Loc.LocType, 1);
+      OS.EmitIntValue(Loc.Size, 1);
+      OS.EmitIntValue(RegNo, 2);
+      OS.EmitIntValue(Offset, 4);
+      OperIdx++;
     }
 
     DEBUG(dbgs() << WSMP << "  has " << LiveOuts.size()
-                 << " live-out registers\n");
+                         << " live-out registers\n");
 
     // Num live-out registers and padding to align to 4 byte.
-    AP.OutStreamer.EmitIntValue(0, 2);
-    AP.OutStreamer.EmitIntValue(LiveOuts.size(), 2);
+    OS.EmitIntValue(0, 2);
+    OS.EmitIntValue(LiveOuts.size(), 2);
 
-    operIdx = 0;
-    for (LiveOutVec::const_iterator LI = LiveOuts.begin(), LE = LiveOuts.end();
-         LI != LE; ++LI, ++operIdx) {
-      DEBUG(dbgs() << WSMP << "  LO " << operIdx << ": "
-                   << TRI->getName(LI->Reg)
-                   << "     [encoding: .short " << LI->RegNo
-                   << ", .byte 0, .byte " << LI->Size << "]\n");
-
-      AP.OutStreamer.EmitIntValue(LI->RegNo, 2);
-      AP.OutStreamer.EmitIntValue(0, 1);
-      AP.OutStreamer.EmitIntValue(LI->Size, 1);
+    OperIdx = 0;
+    for (const auto &LO : LiveOuts) {
+      DEBUG(dbgs() << WSMP << "  LO " << OperIdx << ": "
+                           << TRI->getName(LO.Reg)
+                           << "     [encoding: .short " << LO.RegNo
+                           << ", .byte 0, .byte " << LO.Size << "]\n");
+      OS.EmitIntValue(LO.RegNo, 2);
+      OS.EmitIntValue(0, 1);
+      OS.EmitIntValue(LO.Size, 1);
     }
     // Emit alignment to 8 byte.
-    AP.OutStreamer.EmitValueToAlignment(8);
+    OS.EmitValueToAlignment(8);
   }
+}
 
-  AP.OutStreamer.AddBlankLine();
+/// Serialize the stackmap data.
+void StackMaps::serializeToStackMapSection() {
+  (void) WSMP;
+  // Bail out if there's no stack map data.
+  assert((!CSInfos.empty() || (CSInfos.empty() && ConstPool.empty())) &&
+         "Expected empty constant pool too!");
+  assert((!CSInfos.empty() || (CSInfos.empty() && FnStackSize.empty())) &&
+         "Expected empty function record too!");
+  if (CSInfos.empty())
+    return;
 
+  MCContext &OutContext = AP.OutStreamer.getContext();
+  MCStreamer &OS = AP.OutStreamer;
+  const TargetRegisterInfo *TRI = AP.TM.getRegisterInfo();
+
+  // Create the section.
+  const MCSection *StackMapSection =
+    OutContext.getObjectFileInfo()->getStackMapSection();
+  OS.SwitchSection(StackMapSection);
+
+  // Emit a dummy symbol to force section inclusion.
+  OS.EmitLabel(OutContext.GetOrCreateSymbol(Twine("__LLVM_StackMaps")));
+
+  // Serialize data.
+  DEBUG(dbgs() << "********** Stack Map Output **********\n");
+  emitStackmapHeader(OS);
+  emitFunctionFrameRecords(OS);
+  emitConstantPoolEntries(OS);
+  emitCallsiteEntries(OS, TRI);
+  OS.AddBlankLine();
+
+  // Clean up.
   CSInfos.clear();
+  ConstPool.clear();
 }

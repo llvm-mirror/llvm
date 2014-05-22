@@ -160,8 +160,16 @@ supported include:
     remaining elements in the list may be arbitrary other values, including
     nested ```dag``' values.
 
-``!strconcat(a, b)``
+``!listconcat(a, b, ...)``
+    A list value that is the result of concatenating the 'a' and 'b' lists.
+    The lists must have the same element type.
+    More than two arguments are accepted with the result being the concatenation
+    of all the lists given.
+
+``!strconcat(a, b, ...)``
     A string value that is the result of concatenating the 'a' and 'b' strings.
+    More than two arguments are accepted with the result being the concatenation
+    of all the strings given.
 
 ``str1#str2``
     "#" (paste) is a shorthand for !strconcat.  It may concatenate things that

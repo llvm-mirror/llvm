@@ -26,6 +26,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_CTOR_DTOR
 #include "XCoreGenInstrInfo.inc"
 
@@ -40,9 +42,6 @@ namespace XCore {
   };
 }
 }
-
-using namespace llvm;
-
 
 // Pin the vtable to this file.
 void XCoreInstrInfo::anchor() {}
@@ -289,7 +288,7 @@ XCoreInstrInfo::InsertBranch(MachineBasicBlock &MBB,MachineBasicBlock *TBB,
   assert((Cond.size() == 2 || Cond.size() == 0) &&
          "Unexpected number of components!");
   
-  if (FBB == 0) { // One way branch.
+  if (!FBB) { // One way branch.
     if (Cond.empty()) {
       // Unconditional branch
       BuildMI(&MBB, DL, get(XCore::BRFU_lu6)).addMBB(TBB);

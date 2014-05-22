@@ -11,8 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "msp430-reg-info"
-
 #include "MSP430RegisterInfo.h"
 #include "MSP430.h"
 #include "MSP430MachineFunctionInfo.h"
@@ -26,10 +24,12 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 
+using namespace llvm;
+
+#define DEBUG_TYPE "msp430-reg-info"
+
 #define GET_REGINFO_TARGET_DESC
 #include "MSP430GenRegisterInfo.inc"
-
-using namespace llvm;
 
 // FIXME: Provide proper call frame setup / destroy opcodes.
 MSP430RegisterInfo::MSP430RegisterInfo(MSP430TargetMachine &tm)

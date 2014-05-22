@@ -27,6 +27,12 @@
 #include "llvm/Support/Host.h"
 #include "llvm/Support/TargetRegistry.h"
 
+#if _MSC_VER
+#include <intrin.h>
+#endif
+
+using namespace llvm;
+
 #define GET_REGINFO_MC_DESC
 #include "X86GenRegisterInfo.inc"
 
@@ -35,13 +41,6 @@
 
 #define GET_SUBTARGETINFO_MC_DESC
 #include "X86GenSubtargetInfo.inc"
-
-#if _MSC_VER
-#include <intrin.h>
-#endif
-
-using namespace llvm;
-
 
 std::string X86_MC::ParseX86Triple(StringRef TT) {
   Triple TheTriple(TT);
@@ -288,13 +287,13 @@ static MCAsmInfo *createX86MCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
   // Initial state of the frame pointer is esp+stackGrowth.
   unsigned StackPtr = is64Bit ? X86::RSP : X86::ESP;
   MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(
-      0, MRI.getDwarfRegNum(StackPtr, true), -stackGrowth);
+      nullptr, MRI.getDwarfRegNum(StackPtr, true), -stackGrowth);
   MAI->addInitialFrameState(Inst);
 
   // Add return address to move list
   unsigned InstPtr = is64Bit ? X86::RIP : X86::EIP;
   MCCFIInstruction Inst2 = MCCFIInstruction::createOffset(
-      0, MRI.getDwarfRegNum(InstPtr, true), stackGrowth);
+      nullptr, MRI.getDwarfRegNum(InstPtr, true), stackGrowth);
   MAI->addInitialFrameState(Inst2);
 
   return MAI;
@@ -359,13 +358,16 @@ static MCStreamer *createMCStreamer(const Target &T, StringRef TT,
                                     bool NoExecStack) {
   Triple TheTriple(TT);
 
-  if (TheTriple.isOSBinFormatMachO())
+  switch (TheTriple.getObjectFormat()) {
+  default: llvm_unreachable("unsupported object format");
+  case Triple::MachO:
     return createMachOStreamer(Ctx, MAB, _OS, _Emitter, RelaxAll);
-
-  if (TheTriple.isOSWindows() && !TheTriple.isOSBinFormatELF())
-    return createWinCOFFStreamer(Ctx, MAB, *_Emitter, _OS, RelaxAll);
-
-  return createELFStreamer(Ctx, MAB, _OS, _Emitter, RelaxAll, NoExecStack);
+  case Triple::COFF:
+    assert(TheTriple.isOSWindows() && "only Windows COFF is supported");
+    return createX86WinCOFFStreamer(Ctx, MAB, _Emitter, _OS, RelaxAll);
+  case Triple::ELF:
+    return createELFStreamer(Ctx, MAB, _OS, _Emitter, RelaxAll, NoExecStack);
+  }
 }
 
 static MCInstPrinter *createX86MCInstPrinter(const Target &T,
@@ -378,7 +380,7 @@ static MCInstPrinter *createX86MCInstPrinter(const Target &T,
     return new X86ATTInstPrinter(MAI, MII, MRI);
   if (SyntaxVariant == 1)
     return new X86IntelInstPrinter(MAI, MII, MRI);
-  return 0;
+  return nullptr;
 }
 
 static MCRelocationInfo *createX86MCRelocationInfo(StringRef TT,

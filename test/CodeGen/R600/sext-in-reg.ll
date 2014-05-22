@@ -74,6 +74,19 @@ define void @sext_in_reg_i8_to_v1i32(<1 x i32> addrspace(1)* %out, <1 x i32> %a,
   ret void
 }
 
+; FUNC-LABEL: @sext_in_reg_i1_to_i64
+; SI: S_ADD_I32 [[VAL:s[0-9]+]],
+; SI: S_BFE_I32 s{{[0-9]+}}, s{{[0-9]+}}, 0x10000
+; SI: S_MOV_B32 {{s[0-9]+}}, -1
+; SI: BUFFER_STORE_DWORDX2
+define void @sext_in_reg_i1_to_i64(i64 addrspace(1)* %out, i64 %a, i64 %b) nounwind {
+  %c = add i64 %a, %b
+  %shl = shl i64 %c, 63
+  %ashr = ashr i64 %shl, 63
+  store i64 %ashr, i64 addrspace(1)* %out, align 8
+  ret void
+}
+
 ; FUNC-LABEL: @sext_in_reg_i8_to_i64
 ; SI: S_ADD_I32 [[VAL:s[0-9]+]],
 ; SI: S_SEXT_I32_I8 [[EXTRACT:s[0-9]+]], [[VAL]]
@@ -350,7 +363,7 @@ define void @vgpr_sext_in_reg_v4i16_to_v4i32(<4 x i32> addrspace(1)* %out, <4 x 
 }
 
 ; FIXME: The BFE should really be eliminated. I think it should happen
-; when computeMaskedBitsForTargetNode is implemented for imax.
+; when computeKnownBitsForTargetNode is implemented for imax.
 
 ; FUNC-LABEL: @sext_in_reg_to_illegal_type
 ; SI: BUFFER_LOAD_SBYTE

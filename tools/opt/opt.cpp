@@ -35,6 +35,7 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/PrettyStackTrace.h"
@@ -295,7 +296,7 @@ static TargetMachine* GetTargetMachine(Triple TheTriple) {
                                                          Error);
   // Some modules don't specify a triple, and this is okay.
   if (!TheTarget) {
-    return 0;
+    return nullptr;
   }
 
   // Package up features to be passed to target/subtarget
@@ -373,7 +374,7 @@ int main(int argc, char **argv) {
   std::unique_ptr<Module> M;
   M.reset(ParseIRFile(InputFilename, Err, Context));
 
-  if (M.get() == 0) {
+  if (!M.get()) {
     Err.print(argv[0], errs());
     return 1;
   }
@@ -453,7 +454,7 @@ int main(int argc, char **argv) {
     Passes.add(new DataLayoutPass(M.get()));
 
   Triple ModuleTriple(M->getTargetTriple());
-  TargetMachine *Machine = 0;
+  TargetMachine *Machine = nullptr;
   if (ModuleTriple.getArch())
     Machine = GetTargetMachine(Triple(ModuleTriple));
   std::unique_ptr<TargetMachine> TM(Machine);
@@ -537,7 +538,7 @@ int main(int argc, char **argv) {
     }
 
     const PassInfo *PassInf = PassList[i];
-    Pass *P = 0;
+    Pass *P = nullptr;
     if (PassInf->getTargetMachineCtor())
       P = PassInf->getTargetMachineCtor()(TM.get());
     else if (PassInf->getNormalCtor())

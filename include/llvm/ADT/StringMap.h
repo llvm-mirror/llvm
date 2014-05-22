@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Allocator.h"
 #include <cstring>
+#include <utility>
 
 namespace llvm {
   template<typename ValueT>
@@ -48,13 +49,20 @@ protected:
   unsigned NumTombstones;
   unsigned ItemSize;
 protected:
-  explicit StringMapImpl(unsigned itemSize) : ItemSize(itemSize) {
-    // Initialize the map with zero buckets to allocation.
-    TheTable = nullptr;
-    NumBuckets = 0;
-    NumItems = 0;
-    NumTombstones = 0;
+  explicit StringMapImpl(unsigned itemSize)
+      : TheTable(nullptr),
+        // Initialize the map with zero buckets to allocation.
+        NumBuckets(0), NumItems(0), NumTombstones(0), ItemSize(itemSize) {}
+  StringMapImpl(StringMapImpl &&RHS)
+      : TheTable(RHS.TheTable), NumBuckets(RHS.NumBuckets),
+        NumItems(RHS.NumItems), NumTombstones(RHS.NumTombstones),
+        ItemSize(RHS.ItemSize) {
+    RHS.TheTable = nullptr;
+    RHS.NumBuckets = 0;
+    RHS.NumItems = 0;
+    RHS.NumTombstones = 0;
   }
+
   StringMapImpl(unsigned InitSize, unsigned ItemSize);
   void RehashTable();
 
@@ -109,8 +117,8 @@ public:
 
   explicit StringMapEntry(unsigned strLen)
     : StringMapEntryBase(strLen), second() {}
-  StringMapEntry(unsigned strLen, const ValueTy &V)
-    : StringMapEntryBase(strLen), second(V) {}
+  StringMapEntry(unsigned strLen, ValueTy V)
+      : StringMapEntryBase(strLen), second(std::move(V)) {}
 
   StringRef getKey() const {
     return StringRef(getKeyData(), getKeyLength());
@@ -146,7 +154,7 @@ public:
       static_cast<StringMapEntry*>(Allocator.Allocate(AllocSize,Alignment));
 
     // Default construct the value.
-    new (NewItem) StringMapEntry(KeyLength, InitVal);
+    new (NewItem) StringMapEntry(KeyLength, std::move(InitVal));
 
     // Copy the string information.
     char *StrBuffer = const_cast<char*>(NewItem->getKeyData());
@@ -166,7 +174,7 @@ public:
   static StringMapEntry *Create(const char *KeyStart, const char *KeyEnd,
                                 InitType InitVal) {
     MallocAllocator A;
-    return Create(KeyStart, KeyEnd, A, InitVal);
+    return Create(KeyStart, KeyEnd, A, std::move(InitVal));
   }
 
   static StringMapEntry *Create(const char *KeyStart, const char *KeyEnd) {
@@ -233,18 +241,16 @@ public:
     : StringMapImpl(InitialSize, static_cast<unsigned>(sizeof(MapEntryTy))),
       Allocator(A) {}
 
-  StringMap(const StringMap &RHS)
-    : StringMapImpl(static_cast<unsigned>(sizeof(MapEntryTy))) {
-    assert(RHS.empty() &&
-           "Copy ctor from non-empty stringmap not implemented yet!");
-    (void)RHS;
+  StringMap(StringMap &&RHS)
+      : StringMapImpl(std::move(RHS)), Allocator(std::move(RHS.Allocator)) {}
+
+  StringMap &operator=(StringMap RHS) {
+    StringMapImpl::swap(RHS);
+    std::swap(Allocator, RHS.Allocator);
+    return *this;
   }
-  void operator=(const StringMap &RHS) {
-    assert(RHS.empty() &&
-           "assignment from non-empty stringmap not implemented yet!");
-    (void)RHS;
-    clear();
-  }
+
+  // FIXME: Implement copy operations if/when they're needed.
 
   AllocatorTy &getAllocator() { return Allocator; }
   const AllocatorTy &getAllocator() const { return Allocator; }
@@ -348,7 +354,7 @@ public:
       return *static_cast<MapEntryTy*>(Bucket);
 
     MapEntryTy *NewItem =
-      MapEntryTy::Create(Key.begin(), Key.end(), Allocator, Val);
+        MapEntryTy::Create(Key.begin(), Key.end(), Allocator, std::move(Val));
 
     if (Bucket == getTombstoneVal())
       --NumTombstones;

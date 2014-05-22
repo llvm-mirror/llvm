@@ -15,7 +15,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "ppc-branch-select"
 #include "PPC.h"
 #include "MCTargetDesc/PPCPredicates.h"
 #include "PPCInstrBuilder.h"
@@ -25,6 +24,8 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "ppc-branch-select"
 
 STATISTIC(NumExpanded, "Number of branches expanded to long format");
 
@@ -42,9 +43,9 @@ namespace {
     /// BlockSizes - The sizes of the basic blocks in the function.
     std::vector<unsigned> BlockSizes;
 
-    virtual bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "PowerPC Branch Selector";
     }
   };
@@ -112,7 +113,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
       unsigned MBBStartOffset = 0;
       for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
            I != E; ++I) {
-        MachineBasicBlock *Dest = 0;
+        MachineBasicBlock *Dest = nullptr;
         if (I->getOpcode() == PPC::BCC && !I->getOperand(2).isImm())
           Dest = I->getOperand(2).getMBB();
         else if ((I->getOpcode() == PPC::BC || I->getOpcode() == PPC::BCn) &&

@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "inline"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/InlineCost.h"
@@ -26,6 +25,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "inline"
+
 namespace {
 
 /// \brief Actual inliner pass implementation.
@@ -37,12 +38,12 @@ class SimpleInliner : public Inliner {
   InlineCostAnalysis *ICA;
 
 public:
-  SimpleInliner() : Inliner(ID), ICA(0) {
+  SimpleInliner() : Inliner(ID), ICA(nullptr) {
     initializeSimpleInlinerPass(*PassRegistry::getPassRegistry());
   }
 
   SimpleInliner(int Threshold)
-      : Inliner(ID, Threshold, /*InsertLifetime*/ true), ICA(0) {
+      : Inliner(ID, Threshold, /*InsertLifetime*/ true), ICA(nullptr) {
     initializeSimpleInlinerPass(*PassRegistry::getPassRegistry());
   }
 

@@ -93,8 +93,8 @@ class MipsInst<dag outs, dag ins, string asmstr, list<dag> pattern,
 // Mips32/64 Instruction Format
 class InstSE<dag outs, dag ins, string asmstr, list<dag> pattern,
              InstrItinClass itin, Format f, string opstr = ""> :
-  MipsInst<outs, ins, asmstr, pattern, itin, f> {
-  let Predicates = [HasStdEnc];
+  MipsInst<outs, ins, asmstr, pattern, itin, f>, PredicateControl {
+  let EncodingPredicates = [HasStdEnc];
   string BaseOpcode = opstr;
   string Arch;
 }
@@ -109,9 +109,9 @@ class MipsPseudo<dag outs, dag ins, list<dag> pattern,
 
 // Mips32/64 Pseudo Instruction Format
 class PseudoSE<dag outs, dag ins, list<dag> pattern,
-               InstrItinClass itin = IIPseudo>:
-  MipsPseudo<outs, ins, pattern, itin> {
-  let Predicates = [HasStdEnc];
+               InstrItinClass itin = IIPseudo> :
+  MipsPseudo<outs, ins, pattern, itin>, PredicateControl {
+  let EncodingPredicates = [HasStdEnc];
 }
 
 // Pseudo-instructions for alternate assembly syntax (never used by codegen).
@@ -842,4 +842,13 @@ class BARRIER_FM<bits<5> op> : StdArch {
   let Inst{15-11} = 0; // rd = 0
   let Inst{10-6} = op; // Operation
   let Inst{5-0} = 0;   // SLL
+}
+
+class COP0_TLB_FM<bits<6> op> : StdArch {
+  bits<32> Inst;
+
+  let Inst{31-26} = 0x10; // COP0
+  let Inst{25} = 1;       // CO
+  let Inst{24-6} = 0;
+  let Inst{5-0} = op;     // Operation
 }

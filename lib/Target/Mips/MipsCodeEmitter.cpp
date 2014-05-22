@@ -12,7 +12,6 @@
 //
 //===---------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "jit"
 #include "Mips.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "MipsInstrInfo.h"
@@ -41,6 +40,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "jit"
+
 STATISTIC(NumEmitted, "Number of machine instructions emitted");
 
 namespace {
@@ -56,7 +57,7 @@ class MipsCodeEmitter : public MachineFunctionPass {
   const std::vector<MachineJumpTableEntry> *MJTEs;
   bool IsPIC;
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<MachineModuleInfo> ();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -65,13 +66,13 @@ class MipsCodeEmitter : public MachineFunctionPass {
 
 public:
   MipsCodeEmitter(TargetMachine &tm, JITCodeEmitter &mce)
-    : MachineFunctionPass(ID), JTI(0), II(0), TD(0),
-      TM(tm), MCE(mce), MCPEs(0), MJTEs(0),
+    : MachineFunctionPass(ID), JTI(nullptr), II(nullptr), TD(nullptr),
+      TM(tm), MCE(mce), MCPEs(nullptr), MJTEs(nullptr),
       IsPIC(TM.getRelocationModel() == Reloc::PIC_) {}
 
-  bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "Mips Machine Code Emitter";
   }
 
@@ -109,6 +110,12 @@ private:
   unsigned getBranchTargetOpValueMM(const MachineInstr &MI,
                                     unsigned OpNo) const;
 
+  unsigned getBranchTarget21OpValue(const MachineInstr &MI,
+                                    unsigned OpNo) const;
+  unsigned getBranchTarget26OpValue(const MachineInstr &MI,
+                                    unsigned OpNo) const;
+  unsigned getJumpOffset16OpValue(const MachineInstr &MI, unsigned OpNo) const;
+
   unsigned getBranchTargetOpValue(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncodingMMImm12(const MachineInstr &MI, unsigned OpNo) const;
@@ -116,6 +123,7 @@ private:
   unsigned getSizeExtEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getSizeInsEncoding(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getLSAImmEncoding(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getSimm19Lsl2Encoding(const MachineInstr &MI, unsigned OpNo) const;
 
   /// Expand pseudo instructions with accumulator register operands.
   void expandACCInstr(MachineBasicBlock::instr_iterator MI,
@@ -138,7 +146,7 @@ bool MipsCodeEmitter::runOnMachineFunction(MachineFunction &MF) {
   TD = Target.getDataLayout();
   Subtarget = &TM.getSubtarget<MipsSubtarget> ();
   MCPEs = &MF.getConstantPool()->getConstants();
-  MJTEs = 0;
+  MJTEs = nullptr;
   if (MF.getJumpTableInfo()) MJTEs = &MF.getJumpTableInfo()->getJumpTables();
   JTI->Initialize(MF, IsPIC, Subtarget->isLittle());
   MCE.setModuleInfo(&getAnalysis<MachineModuleInfo> ());
@@ -201,6 +209,24 @@ unsigned MipsCodeEmitter::getBranchTargetOpValueMM(const MachineInstr &MI,
   return 0;
 }
 
+unsigned MipsCodeEmitter::getBranchTarget21OpValue(const MachineInstr &MI,
+                                                   unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getBranchTarget26OpValue(const MachineInstr &MI,
+                                                   unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getJumpOffset16OpValue(const MachineInstr &MI,
+                                                 unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
 unsigned MipsCodeEmitter::getBranchTargetOpValue(const MachineInstr &MI,
                                                  unsigned OpNo) const {
   MachineOperand MO = MI.getOperand(OpNo);
@@ -243,6 +269,12 @@ unsigned MipsCodeEmitter::getSizeInsEncoding(const MachineInstr &MI,
 
 unsigned MipsCodeEmitter::getLSAImmEncoding(const MachineInstr &MI,
                                             unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getSimm19Lsl2Encoding(const MachineInstr &MI,
+                                                unsigned OpNo) const {
   llvm_unreachable("Unimplemented function.");
   return 0;
 }

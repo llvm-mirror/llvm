@@ -1,6 +1,9 @@
 @ RUN: llvm-mc -triple armv7-eabi -filetype obj -o - %s | llvm-readobj -t \
 @ RUN:   | FileCheck %s
 
+@ RUN: llvm-mc -triple armv7-eabi -filetype asm -o - %s \
+@ RUN:   | FileCheck --check-prefix=ASM %s
+
 	.syntax unified
 
 	.arm
@@ -10,6 +13,11 @@ arm_func:
 	nop
 
 	.thumb_set alias_arm_func, arm_func
+
+        alias_arm_func2 = alias_arm_func
+        alias_arm_func3 = alias_arm_func2
+
+@ ASM: .thumb_set alias_arm_func, arm_func
 
 	.thumb
 
@@ -51,10 +59,20 @@ beta:
 
 	.thumb_set beta, alpha
 
-	.thumb_set alias_undefined, undefined
-
 @ CHECK: Symbol {
 @ CHECK:   Name: alias_arm_func
+@ CHECK:   Value: 0x1
+@ CHECK:   Type: Function
+@ CHECK: }
+
+@ CHECK: Symbol {
+@ CHECK:   Name: alias_arm_func2
+@ CHECK:   Value: 0x1
+@ CHECK:   Type: Function
+@ CHECK: }
+
+@ CHECK: Symbol {
+@ CHECK:   Name: alias_arm_func3
 @ CHECK:   Value: 0x1
 @ CHECK:   Type: Function
 @ CHECK: }
@@ -88,6 +106,16 @@ beta:
 @ CHECK:   Value: 0x0
 @ CHECK:   Type: Function
 @ CHECK: }
+
+@ CHECK:      Symbol {
+@ CHECK:        Name: badblood
+@ CHECK-NEXT:   Value: 0x0
+@ CHECK-NEXT:   Size: 0
+@ CHECK-NEXT:   Binding: Local
+@ CHECK-NEXT:   Type: Object
+@ CHECK-NEXT:   Other: 0
+@ CHECK-NEXT:   Section: .data
+@ CHECK-NEXT: }
 
 @ CHECK: Symbol {
 @ CHECK:   Name: bedazzle
@@ -124,16 +152,3 @@ beta:
 @ CHECK:   Value: 0x5
 @ CHECK:   Type: Function
 @ CHECK: }
-
-@ CHECK: Symbol {
-@ CHECK:   Name: badblood
-@ CHECK:   Value: 0x0
-@ CHECK:   Type: Object
-@ CHECK: }
-
-@ CHECK: Symbol {
-@ CHECK:   Name: undefined
-@ CHECK:   Value: 0x0
-@ CHECK:   Type: None
-@ CHECK: }
-

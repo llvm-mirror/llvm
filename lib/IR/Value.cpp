@@ -301,10 +301,66 @@ void Value::takeName(Value *V) {
     ST->reinsertValue(this);
 }
 
+static GlobalObject &findReplacementForAliasUse(Value &C) {
+  if (auto *GO = dyn_cast<GlobalObject>(&C))
+    return *GO;
+  if (auto *GA = dyn_cast<GlobalAlias>(&C))
+    return *GA->getAliasee();
+  auto *CE = cast<ConstantExpr>(&C);
+  assert(CE->getOpcode() == Instruction::BitCast ||
+         CE->getOpcode() == Instruction::GetElementPtr ||
+         CE->getOpcode() == Instruction::AddrSpaceCast);
+  if (CE->getOpcode() == Instruction::GetElementPtr)
+    assert(cast<GEPOperator>(CE)->hasAllZeroIndices());
+  return findReplacementForAliasUse(*CE->getOperand(0));
+}
+
+static void replaceAliasUseWith(Use &U, Value *New) {
+  GlobalObject &Replacement = findReplacementForAliasUse(*New);
+  assert(&cast<GlobalObject>(*U) != &Replacement &&
+         "replaceAliasUseWith cannot form an alias cycle");
+  U.set(&Replacement);
+}
+
+#ifndef NDEBUG
+static bool contains(SmallPtrSet<ConstantExpr *, 4> &Cache, ConstantExpr *Expr,
+                     Constant *C) {
+  if (!Cache.insert(Expr))
+    return false;
+
+  for (auto &O : Expr->operands()) {
+    if (O == C)
+      return true;
+    auto *CE = dyn_cast<ConstantExpr>(O);
+    if (!CE)
+      continue;
+    if (contains(Cache, CE, C))
+      return true;
+  }
+  return false;
+}
+
+static bool contains(Value *Expr, Value *V) {
+  if (Expr == V)
+    return true;
+
+  auto *C = dyn_cast<Constant>(V);
+  if (!C)
+    return false;
+
+  auto *CE = dyn_cast<ConstantExpr>(Expr);
+  if (!CE)
+    return false;
+
+  SmallPtrSet<ConstantExpr *, 4> Cache;
+  return contains(Cache, CE, C);
+}
+#endif
 
 void Value::replaceAllUsesWith(Value *New) {
   assert(New && "Value::replaceAllUsesWith(<null>) is invalid!");
-  assert(New != this && "this->replaceAllUsesWith(this) is NOT valid!");
+  assert(!contains(New, this) &&
+         "this->replaceAllUsesWith(expr(this)) is NOT valid!");
   assert(New->getType() == getType() &&
          "replaceAllUses of value with new value of different type!");
 
@@ -316,7 +372,11 @@ void Value::replaceAllUsesWith(Value *New) {
     Use &U = *UseList;
     // Must handle Constants specially, we cannot call replaceUsesOfWith on a
     // constant because they are uniqued.
-    if (Constant *C = dyn_cast<Constant>(U.getUser())) {
+    if (auto *C = dyn_cast<Constant>(U.getUser())) {
+      if (isa<GlobalAlias>(C)) {
+        replaceAliasUseWith(U, New);
+        continue;
+      }
       if (!isa<GlobalValue>(C)) {
         C->replaceUsesOfWithOnConstant(this, New, &U);
         continue;

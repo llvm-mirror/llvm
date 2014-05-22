@@ -7,5 +7,7 @@ set(LLVM_LINK_COMPONENTS
 
 add_llvm_unittest(AnalysisTests
   CFGTest.cpp
+  LazyCallGraphTest.cpp
   ScalarEvolutionTest.cpp
+  MixedTBAATest.cpp
   )

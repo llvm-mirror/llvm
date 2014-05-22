@@ -104,7 +104,7 @@ DICompileUnit DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
                                            StringRef SplitName,
                                            DebugEmissionKind Kind) {
 
-  assert(((Lang <= dwarf::DW_LANG_Python && Lang >= dwarf::DW_LANG_C89) ||
+  assert(((Lang <= dwarf::DW_LANG_OCaml && Lang >= dwarf::DW_LANG_C89) ||
           (Lang <= dwarf::DW_LANG_hi_user && Lang >= dwarf::DW_LANG_lo_user)) &&
          "Invalid Language tag");
   assert(!Filename.empty() &&
@@ -355,7 +355,6 @@ DIDerivedType DIBuilder::createReferenceType(unsigned Tag, DIType RTy) {
 DIDerivedType DIBuilder::createTypedef(DIType Ty, StringRef Name, DIFile File,
                                        unsigned LineNo, DIDescriptor Context) {
   // typedefs are encoded in DIDerivedType format.
-  assert(Ty.isType() && "Invalid typedef type!");
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_typedef),
     File.getFileNode(),
@@ -902,6 +901,40 @@ DIBuilder::createForwardDecl(unsigned Tag, StringRef Name, DIDescriptor Scope,
     UniqueIdentifier.empty() ? nullptr
                              : MDString::get(VMContext, UniqueIdentifier)
   };
+  MDNode *Node = MDNode::get(VMContext, Elts);
+  DICompositeType RetTy(Node);
+  assert(RetTy.isCompositeType() &&
+         "createForwardDecl result should be a DIType");
+  if (!UniqueIdentifier.empty())
+    retainType(RetTy);
+  return RetTy;
+}
+
+/// createForwardDecl - Create a temporary forward-declared type that
+/// can be RAUW'd if the full type is seen.
+DICompositeType DIBuilder::createReplaceableForwardDecl(
+    unsigned Tag, StringRef Name, DIDescriptor Scope, DIFile F, unsigned Line,
+    unsigned RuntimeLang, uint64_t SizeInBits, uint64_t AlignInBits,
+    StringRef UniqueIdentifier) {
+  // Create a temporary MDNode.
+  Value *Elts[] = {
+    GetTagConstant(VMContext, Tag),
+    F.getFileNode(),
+    DIScope(getNonCompileUnitScope(Scope)).getRef(),
+    MDString::get(VMContext, Name),
+    ConstantInt::get(Type::getInt32Ty(VMContext), Line),
+    ConstantInt::get(Type::getInt64Ty(VMContext), SizeInBits),
+    ConstantInt::get(Type::getInt64Ty(VMContext), AlignInBits),
+    ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Offset
+    ConstantInt::get(Type::getInt32Ty(VMContext), DIDescriptor::FlagFwdDecl),
+    nullptr,
+    DIArray(),
+    ConstantInt::get(Type::getInt32Ty(VMContext), RuntimeLang),
+    nullptr,
+    nullptr, //TemplateParams
+    UniqueIdentifier.empty() ? nullptr
+                             : MDString::get(VMContext, UniqueIdentifier)
+  };
   MDNode *Node = MDNode::getTemporary(VMContext, Elts);
   DICompositeType RetTy(Node);
   assert(RetTy.isCompositeType() &&
@@ -1126,7 +1159,6 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context, StringRef Name,
   assert(getNonCompileUnitScope(Context) &&
          "Methods should have both a Context and a context that isn't "
          "the compile unit.");
-  Value *TElts[] = { GetTagConstant(VMContext, DW_TAG_base_type) };
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_subprogram),
     F.getFileNode(),
@@ -1146,7 +1178,7 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context, StringRef Name,
     Fn,
     TParam,
     Constant::getNullValue(Type::getInt32Ty(VMContext)),
-    MDNode::getTemporary(VMContext, TElts),
+    nullptr,
     // FIXME: Do we want to use different scope/lines?
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNo)
   };
@@ -1194,6 +1226,13 @@ DILexicalBlockFile DIBuilder::createLexicalBlockFile(DIDescriptor Scope,
 DILexicalBlock DIBuilder::createLexicalBlock(DIDescriptor Scope, DIFile File,
                                              unsigned Line, unsigned Col,
                                              unsigned Discriminator) {
+  // FIXME: This isn't thread safe nor the right way to defeat MDNode uniquing.
+  // I believe the right way is to have a self-referential element in the node.
+  // Also: why do we bother with line/column - they're not used and the
+  // documentation (SourceLevelDebugging.rst) claims the line/col are necessary
+  // for uniquing, yet then we have this other solution (because line/col were
+  // inadequate) anyway. Remove all 3 and replace them with a self-reference.
+
   // Defeat MDNode uniquing for lexical blocks by using unique id.
   static unsigned int unique_id = 0;
   Value *Elts[] = {

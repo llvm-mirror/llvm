@@ -16,7 +16,6 @@
 #include "NVPTX.h"
 #include "NVPTXAllocaHoisting.h"
 #include "NVPTXLowerAggrCopies.h"
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
@@ -116,14 +115,14 @@ public:
     return getTM<NVPTXTargetMachine>();
   }
 
-  virtual void addIRPasses();
-  virtual bool addInstSelector();
-  virtual bool addPreRegAlloc();
-  virtual bool addPostRegAlloc();
+  void addIRPasses() override;
+  bool addInstSelector() override;
+  bool addPreRegAlloc() override;
+  bool addPostRegAlloc() override;
 
-  virtual FunctionPass *createTargetRegisterAllocator(bool) override;
-  virtual void addFastRegAlloc(FunctionPass *RegAllocPass);
-  virtual void addOptimizedRegAlloc(FunctionPass *RegAllocPass);
+  FunctionPass *createTargetRegisterAllocator(bool) override;
+  void addFastRegAlloc(FunctionPass *RegAllocPass) override;
+  void addOptimizedRegAlloc(FunctionPass *RegAllocPass) override;
 };
 } // end anonymous namespace
 
@@ -148,10 +147,23 @@ void NVPTXPassConfig::addIRPasses() {
   addPass(createNVPTXAssignValidGlobalNamesPass());
   addPass(createGenericToNVVMPass());
   addPass(createNVPTXFavorNonGenericAddrSpacesPass());
-  // The FavorNonGenericAddrSpaces pass may remove instructions and leave some
-  // values unused. Therefore, we run a DCE pass right afterwards. We could
-  // remove unused values in an ad-hoc manner, but it requires manual work and
-  // might be error-prone.
+  addPass(createSeparateConstOffsetFromGEPPass());
+  // The SeparateConstOffsetFromGEP pass creates variadic bases that can be used
+  // by multiple GEPs. Run GVN or EarlyCSE to really reuse them. GVN generates
+  // significantly better code than EarlyCSE for some of our benchmarks.
+  if (getOptLevel() == CodeGenOpt::Aggressive)
+    addPass(createGVNPass());
+  else
+    addPass(createEarlyCSEPass());
+  // Both FavorNonGenericAddrSpaces and SeparateConstOffsetFromGEP may leave
+  // some dead code.  We could remove dead code in an ad-hoc manner, but that
+  // requires manual work and might be error-prone.
+  //
+  // The FavorNonGenericAddrSpaces pass shortcuts unnecessary addrspacecasts,
+  // and leave them unused.
+  //
+  // SeparateConstOffsetFromGEP rebuilds a new index from the old index, and the
+  // old index and some of its intermediate results may become unused.
   addPass(createDeadCodeEliminationPass());
 }
 
@@ -176,7 +188,7 @@ bool NVPTXPassConfig::addPostRegAlloc() {
 }
 
 FunctionPass *NVPTXPassConfig::createTargetRegisterAllocator(bool) {
-  return 0; // No reg alloc
+  return nullptr; // No reg alloc
 }
 
 void NVPTXPassConfig::addFastRegAlloc(FunctionPass *RegAllocPass) {

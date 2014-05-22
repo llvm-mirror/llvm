@@ -20,13 +20,12 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_CTOR_DTOR
 #define GET_INSTRINFO_NAMED_OPS
 #define GET_INSTRMAP_INFO
 #include "AMDGPUGenInstrInfo.inc"
-
-using namespace llvm;
-
 
 // Pin the vtable to this file.
 void AMDGPUInstrInfo::anchor() {}
@@ -85,7 +84,7 @@ AMDGPUInstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
                                       MachineBasicBlock::iterator &MBBI,
                                       LiveVariables *LV) const {
 // TODO: Implement this function
-  return NULL;
+  return nullptr;
 }
 bool AMDGPUInstrInfo::getNextBranchInstr(MachineBasicBlock::iterator &iter,
                                         MachineBasicBlock &MBB) const {
@@ -176,7 +175,7 @@ AMDGPUInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
                                       const SmallVectorImpl<unsigned> &Ops,
                                       int FrameIndex) const {
 // TODO: Implement this function
-  return 0;
+  return nullptr;
 }
 MachineInstr*
 AMDGPUInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
@@ -184,7 +183,7 @@ AMDGPUInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
                                       const SmallVectorImpl<unsigned> &Ops,
                                       MachineInstr *LoadMI) const {
   // TODO: Implement this function
-  return 0;
+  return nullptr;
 }
 bool
 AMDGPUInstrInfo::canFoldMemoryOperand(const MachineInstr *MI,
@@ -355,4 +354,15 @@ int AMDGPUInstrInfo::getMaskedMIMGOp(uint16_t Opcode, unsigned Channels) const {
   case 2: return AMDGPU::getMaskedMIMGOp(Opcode, AMDGPU::Channels_2);
   case 3: return AMDGPU::getMaskedMIMGOp(Opcode, AMDGPU::Channels_3);
   }
+}
+
+// Wrapper for Tablegen'd function.  enum Subtarget is not defined in any
+// header files, so we need to wrap it in a function that takes unsigned 
+// instead.
+namespace llvm {
+namespace AMDGPU {
+int getMCOpcode(uint16_t Opcode, unsigned Gen) {
+  return getMCOpcode(Opcode);
+}
+}
 }

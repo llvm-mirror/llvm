@@ -24,31 +24,21 @@
 #include "llvm/Target/TargetMachine.h"
 #include <cstdlib>
 
+using namespace llvm;
+
+#define DEBUG_TYPE "ppc-subtarget"
+
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "PPCGenSubtargetInfo.inc"
 
-using namespace llvm;
-
 PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &CPU,
                            const std::string &FS, bool is64Bit,
                            CodeGenOpt::Level OptLevel)
-  : PPCGenSubtargetInfo(TT, CPU, FS)
-  , IsPPC64(is64Bit)
-  , TargetTriple(TT) {
+    : PPCGenSubtargetInfo(TT, CPU, FS), IsPPC64(is64Bit), TargetTriple(TT),
+      OptLevel(OptLevel) {
   initializeEnvironment();
-
-  std::string FullFS = FS;
-
-  // At -O2 and above, track CR bits as individual registers.
-  if (OptLevel >= CodeGenOpt::Default) {
-    if (!FullFS.empty())
-      FullFS = "+crbits," + FullFS;
-    else
-      FullFS = "+crbits";
-  }
-
-  resetSubtargetFeatures(CPU, FullFS);
+  resetSubtargetFeatures(CPU, FS);
 }
 
 /// SetJITMode - This is called to inform the subtarget info that we are
@@ -136,6 +126,14 @@ void PPCSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
       FullFS = "+64bit," + FullFS;
     else
       FullFS = "+64bit";
+  }
+
+  // At -O2 and above, track CR bits as individual registers.
+  if (OptLevel >= CodeGenOpt::Default) {
+    if (!FullFS.empty())
+      FullFS = "+crbits," + FullFS;
+    else
+      FullFS = "+crbits";
   }
 
   // Parse features string.

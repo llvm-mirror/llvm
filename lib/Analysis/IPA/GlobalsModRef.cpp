@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "globalsmodref-aa"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/Statistic.h"
@@ -32,6 +31,8 @@
 #include "llvm/Support/CommandLine.h"
 #include <set>
 using namespace llvm;
+
+#define DEBUG_TYPE "globalsmodref-aa"
 
 STATISTIC(NumNonAddrTakenGlobalVars,
           "Number of global vars without address taken");
@@ -177,14 +178,14 @@ namespace {
         FunctionInfo.find(F);
       if (I != FunctionInfo.end())
         return &I->second;
-      return 0;
+      return nullptr;
     }
 
     void AnalyzeGlobals(Module &M);
     void AnalyzeCallGraph(CallGraph &CG, Module &M);
     bool AnalyzeUsesOfPointer(Value *V, std::vector<Function*> &Readers,
                               std::vector<Function*> &Writers,
-                              GlobalValue *OkayStoreDest = 0);
+                              GlobalValue *OkayStoreDest = nullptr);
     bool AnalyzeIndirectGlobalMemory(GlobalValue *GV);
   };
 }
@@ -358,7 +359,7 @@ void GlobalsModRef::AnalyzeCallGraph(CallGraph &CG, Module &M) {
   // We do a bottom-up SCC traversal of the call graph.  In other words, we
   // visit all callees before callers (leaf-first).
   for (scc_iterator<CallGraph*> I = scc_begin(&CG); !I.isAtEnd(); ++I) {
-    std::vector<CallGraphNode *> &SCC = *I;
+    const std::vector<CallGraphNode *> &SCC = *I;
     assert(!SCC.empty() && "SCC with no functions?");
 
     if (!SCC[0]->getFunction()) {
@@ -410,10 +411,8 @@ void GlobalsModRef::AnalyzeCallGraph(CallGraph &CG, Module &M) {
             FunctionEffect |= CalleeFR->FunctionEffect;
 
             // Incorporate callee's effects on globals into our info.
-            for (std::map<const GlobalValue*, unsigned>::iterator GI =
-                   CalleeFR->GlobalInfo.begin(), E = CalleeFR->GlobalInfo.end();
-                 GI != E; ++GI)
-              FR.GlobalInfo[GI->first] |= GI->second;
+            for (const auto &G : CalleeFR->GlobalInfo)
+              FR.GlobalInfo[G.first] |= G.second;
             FR.MayReadAnyGlobal |= CalleeFR->MayReadAnyGlobal;
           } else {
             // Can't say anything about it.  However, if it is inside our SCC,
@@ -492,8 +491,8 @@ GlobalsModRef::alias(const Location &LocA,
   if (GV1 || GV2) {
     // If the global's address is taken, pretend we don't know it's a pointer to
     // the global.
-    if (GV1 && !NonAddressTakenGlobals.count(GV1)) GV1 = 0;
-    if (GV2 && !NonAddressTakenGlobals.count(GV2)) GV2 = 0;
+    if (GV1 && !NonAddressTakenGlobals.count(GV1)) GV1 = nullptr;
+    if (GV2 && !NonAddressTakenGlobals.count(GV2)) GV2 = nullptr;
 
     // If the two pointers are derived from two different non-addr-taken
     // globals, or if one is and the other isn't, we know these can't alias.
@@ -507,7 +506,7 @@ GlobalsModRef::alias(const Location &LocA,
   // These pointers may be based on the memory owned by an indirect global.  If
   // so, we may be able to handle this.  First check to see if the base pointer
   // is a direct load from an indirect global.
-  GV1 = GV2 = 0;
+  GV1 = GV2 = nullptr;
   if (const LoadInst *LI = dyn_cast<LoadInst>(UV1))
     if (GlobalVariable *GV = dyn_cast<GlobalVariable>(LI->getOperand(0)))
       if (IndirectGlobals.count(GV))

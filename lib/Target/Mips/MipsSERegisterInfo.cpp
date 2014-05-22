@@ -39,6 +39,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "mips-reg-info"
+
 MipsSERegisterInfo::MipsSERegisterInfo(const MipsSubtarget &ST)
   : MipsRegisterInfo(ST) {}
 
@@ -187,7 +189,7 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
           *static_cast<const MipsSEInstrInfo *>(
                MBB.getParent()->getTarget().getInstrInfo());
       unsigned Reg = TII.loadImmediate(Offset, MBB, II, DL,
-                                       OffsetBitSize == 16 ? &NewImm : NULL);
+                                       OffsetBitSize == 16 ? &NewImm : nullptr);
       BuildMI(MBB, II, DL, TII.get(ADDu), Reg).addReg(FrameReg)
         .addReg(Reg, RegState::Kill);
 

@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "prune-eh"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -29,6 +28,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "prune-eh"
 
 STATISTIC(NumRemoved, "Number of invokes removed");
 STATISTIC(NumUnreach, "Number of noreturn calls optimized");
@@ -85,7 +86,7 @@ bool PruneEH::runOnSCC(CallGraphSCC &SCC) {
   for (CallGraphSCC::iterator I = SCC.begin(), E = SCC.end(); 
        (!SCCMightUnwind || !SCCMightReturn) && I != E; ++I) {
     Function *F = (*I)->getFunction();
-    if (F == 0) {
+    if (!F) {
       SCCMightUnwind = true;
       SCCMightReturn = true;
     } else if (F->isDeclaration() || F->mayBeOverridden()) {

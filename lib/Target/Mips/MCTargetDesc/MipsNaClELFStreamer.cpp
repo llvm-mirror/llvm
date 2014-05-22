@@ -17,14 +17,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mips-mc-nacl"
-
 #include "Mips.h"
 #include "MipsELFStreamer.h"
 #include "MipsMCNaCl.h"
 #include "llvm/MC/MCELFStreamer.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mips-mc-nacl"
 
 namespace {
 
@@ -120,7 +120,8 @@ private:
 public:
   /// This function is the one used to emit instruction data into the ELF
   /// streamer.  We override it to mask dangerous instructions.
-  virtual void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) {
+  void EmitInstruction(const MCInst &Inst,
+                       const MCSubtargetInfo &STI) override {
     // Sandbox indirect jumps.
     if (isIndirectJump(Inst)) {
       if (PendingCall)

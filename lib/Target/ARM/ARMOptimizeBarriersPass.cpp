@@ -8,14 +8,14 @@
 //
 //===------------------------------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "double barriers"
-
 #include "ARM.h"
 #include "ARMMachineFunctionInfo.h"
 #include "ARMInstrInfo.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "double barriers"
 
 STATISTIC(NumDMBsRemoved, "Number of DMBs removed");
 
@@ -25,9 +25,9 @@ public:
   static char ID;
   ARMOptimizeBarriersPass() : MachineFunctionPass(ID) {}
 
-  virtual bool runOnMachineFunction(MachineFunction &Fn);
+  bool runOnMachineFunction(MachineFunction &Fn) override;
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "optimise barriers pass";
   }
 

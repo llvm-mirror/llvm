@@ -56,8 +56,8 @@ RunLoopRerolling("reroll-loops", cl::Hidden,
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
     SizeLevel = 0;
-    LibraryInfo = 0;
-    Inliner = 0;
+    LibraryInfo = nullptr;
+    Inliner = nullptr;
     DisableTailCalls = false;
     DisableUnitAtATime = false;
     DisableUnrollLoops = false;
@@ -129,7 +129,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   if (OptLevel == 0) {
     if (Inliner) {
       MPM.add(Inliner);
-      Inliner = 0;
+      Inliner = nullptr;
     }
 
     // FIXME: This is a HACK! The inliner pass above implicitly creates a CGSCC
@@ -165,7 +165,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
     MPM.add(createPruneEHPass());             // Remove dead EH info
   if (Inliner) {
     MPM.add(Inliner);
-    Inliner = 0;
+    Inliner = nullptr;
   }
   if (!DisableUnitAtATime)
     MPM.add(createFunctionAttrsPass());       // Set readonly/readnone attrs
@@ -340,6 +340,9 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
   PM.add(createIndVarSimplifyPass());
   PM.add(createLoopDeletionPass());
   PM.add(createLoopVectorizePass(true, true));
+
+  // More scalar chains could be vectorized due to more alias information
+  PM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
 
   // Cleanup and simplify the code after the scalar optimizations.
   PM.add(createInstructionCombiningPass());

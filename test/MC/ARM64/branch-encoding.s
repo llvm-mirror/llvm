@@ -31,56 +31,56 @@ foo:
 ; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch26
   b.eq  L1
 ; CHECK: b.eq L1   ; encoding: [0bAAA00000,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.ne  L1
 ; CHECK: b.ne L1   ; encoding: [0bAAA00001,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.cs  L1
-; CHECK: b.cs L1   ; encoding: [0bAAA00010,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: b.hs L1   ; encoding: [0bAAA00010,A,A,0x54]
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.cc  L1
-; CHECK: b.cc L1   ; encoding: [0bAAA00011,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: b.lo L1   ; encoding: [0bAAA00011,A,A,0x54]
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.mi  L1
 ; CHECK: b.mi L1   ; encoding: [0bAAA00100,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.pl  L1
 ; CHECK: b.pl L1   ; encoding: [0bAAA00101,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.vs  L1
 ; CHECK: b.vs L1   ; encoding: [0bAAA00110,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.vc  L1
 ; CHECK: b.vc L1   ; encoding: [0bAAA00111,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.hi  L1
 ; CHECK: b.hi L1   ; encoding: [0bAAA01000,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.ls  L1
 ; CHECK: b.ls L1   ; encoding: [0bAAA01001,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.ge  L1
 ; CHECK: b.ge L1   ; encoding: [0bAAA01010,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.lt  L1
 ; CHECK: b.lt L1   ; encoding: [0bAAA01011,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.gt  L1
 ; CHECK: b.gt L1   ; encoding: [0bAAA01100,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.le  L1
 ; CHECK: b.le L1   ; encoding: [0bAAA01101,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
   b.al  L1
 ; CHECK: b.al L1      ; encoding: [0bAAA01110,A,A,0x54]
-; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_imm19
+; CHECK: fixup A - offset: 0, value: L1, kind: fixup_arm64_pcrel_branch19
 L1:
   b #28
 ; CHECK: b #28
   b.lt #28
 ; CHECK: b.lt #28
   b.cc #1048572
-; CHECK: b.cc	#1048572                ; encoding: [0xe3,0xff,0x7f,0x54]
+; CHECK: b.lo	#1048572                ; encoding: [0xe3,0xff,0x7f,0x54]
   b #134217724
 ; CHECK: b	#134217724              ; encoding: [0xff,0xff,0xff,0x15]
   b #-134217728

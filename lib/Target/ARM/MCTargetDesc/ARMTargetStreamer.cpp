@@ -109,7 +109,7 @@ ConstantPool *
 AssemblerConstantPools::getConstantPool(const MCSection *Section) {
   ConstantPoolMapTy::iterator CP = ConstantPools.find(Section);
   if (CP == ConstantPools.end())
-    return 0;
+    return nullptr;
 
   return &CP->second;
 }
@@ -244,5 +244,9 @@ void ARMTargetStreamer::emitInst(uint32_t Inst, char Suffix) {
 }
 void ARMTargetStreamer::AnnotateTLSDescriptorSequence(
     const MCSymbolRefExpr *SRE) {
+  llvm_unreachable("unimplemented");
+}
+
+void ARMTargetStreamer::emitThumbSet(MCSymbol *Symbol, const MCExpr *Value) {
   llvm_unreachable("unimplemented");
 }

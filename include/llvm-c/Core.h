@@ -165,7 +165,8 @@ typedef enum {
     LLVMStackProtectStrongAttribute = 1ULL<<33,
     LLVMCold = 1ULL << 34,
     LLVMOptimizeNone = 1ULL << 35,
-    LLVMInAllocaAttribute = 1ULL << 36
+    LLVMInAllocaAttribute = 1ULL << 36,
+    LLVMNonNullAttribute = 1ULL << 37
     */
 } LLVMAttribute;
 
@@ -467,6 +468,7 @@ void LLVMEnablePrettyStackTrace(void);
  */
 
 typedef void (*LLVMDiagnosticHandler)(LLVMDiagnosticInfoRef, void *);
+typedef void (*LLVMYieldCallback)(LLVMContextRef, void *);
 
 /**
  * Create a new context.
@@ -487,6 +489,14 @@ LLVMContextRef LLVMGetGlobalContext(void);
 void LLVMContextSetDiagnosticHandler(LLVMContextRef C,
                                      LLVMDiagnosticHandler Handler,
                                      void *DiagnosticContext);
+
+/**
+ * Set the yield callback function for this context.
+ *
+ * @see LLVMContext::setYieldCallback()
+ */
+void LLVMContextSetYieldCallback(LLVMContextRef C, LLVMYieldCallback Callback,
+                                 void *OpaqueHandle);
 
 /**
  * Destroy a context instance.
@@ -1158,9 +1168,10 @@ LLVMTypeRef LLVMX86MMXType(void);
       macro(ConstantStruct)                 \
       macro(ConstantVector)                 \
       macro(GlobalValue)                    \
-        macro(Function)                     \
         macro(GlobalAlias)                  \
-        macro(GlobalVariable)               \
+        macro(GlobalObject)                 \
+          macro(Function)                   \
+          macro(GlobalVariable)             \
       macro(UndefValue)                     \
     macro(Instruction)                      \
       macro(BinaryOperator)                 \

@@ -24,7 +24,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "objc-arc-ap-elim"
 #include "ObjCARC.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Constants.h"
@@ -33,6 +32,8 @@
 
 using namespace llvm;
 using namespace llvm::objcarc;
+
+#define DEBUG_TYPE "objc-arc-ap-elim"
 
 namespace {
   /// \brief Autorelease pool elimination.
@@ -93,7 +94,7 @@ bool ObjCARCAPElim::MayAutorelease(ImmutableCallSite CS, unsigned Depth) {
 bool ObjCARCAPElim::OptimizeBB(BasicBlock *BB) {
   bool Changed = false;
 
-  Instruction *Push = 0;
+  Instruction *Push = nullptr;
   for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ) {
     Instruction *Inst = I++;
     switch (GetBasicInstructionClass(Inst)) {
@@ -112,11 +113,11 @@ bool ObjCARCAPElim::OptimizeBB(BasicBlock *BB) {
         Inst->eraseFromParent();
         Push->eraseFromParent();
       }
-      Push = 0;
+      Push = nullptr;
       break;
     case IC_CallOrUser:
       if (MayAutorelease(ImmutableCallSite(Inst)))
-        Push = 0;
+        Push = nullptr;
       break;
     default:
       break;
@@ -154,8 +155,8 @@ bool ObjCARCAPElim::runOnModule(Module &M) {
   for (User::op_iterator OI = Init->op_begin(), OE = Init->op_end();
        OI != OE; ++OI) {
     Value *Op = *OI;
-    // llvm.global_ctors is an array of pairs where the second members
-    // are constructor functions.
+    // llvm.global_ctors is an array of three-field structs where the second
+    // members are constructor functions.
     Function *F = dyn_cast<Function>(cast<ConstantStruct>(Op)->getOperand(1));
     // If the user used a constructor function with the wrong signature and
     // it got bitcasted or whatever, look the other way.

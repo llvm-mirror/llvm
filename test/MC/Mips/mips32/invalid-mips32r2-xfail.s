@@ -8,12 +8,4 @@
 
 # CHECK-NOT: error
         .set noat
-        cvt.l.d $f24,$f15
-        cvt.l.s $f11,$f29
-        di      $s8
-        ei      $t6
-        luxc1   $f19,$s6($s5)
-        mfhc1   $s8,$f24
-        mthc1   $zero,$f16
         rdhwr   $sp,$11
-        suxc1   $f12,$k1($t5)

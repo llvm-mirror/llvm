@@ -1,4 +1,4 @@
-; RUN: llvm-mc -triple arm64-apple-darwin -output-asm-variant=1 -show-encoding < %s | FileCheck %s
+; RUN: llvm-mc -triple arm64-apple-darwin -mattr=crypto -output-asm-variant=1 -show-encoding < %s | FileCheck %s
 
 foo:
 
@@ -193,10 +193,10 @@ foo:
 
 ; CHECK: smov.s  x3, v2[2]           ; encoding: [0x43,0x2c,0x14,0x4e]
 ; CHECK: smov.s  x3, v2[2]           ; encoding: [0x43,0x2c,0x14,0x4e]
-; CHECK: umov.s  w3, v2[2]           ; encoding: [0x43,0x3c,0x14,0x0e]
-; CHECK: umov.s  w3, v2[2]           ; encoding: [0x43,0x3c,0x14,0x0e]
-; CHECK: umov.d  x3, v2[1]           ; encoding: [0x43,0x3c,0x18,0x4e]
-; CHECK: umov.d  x3, v2[1]           ; encoding: [0x43,0x3c,0x18,0x4e]
+; CHECK: mov.s  w3, v2[2]           ; encoding: [0x43,0x3c,0x14,0x0e]
+; CHECK: mov.s  w3, v2[2]           ; encoding: [0x43,0x3c,0x14,0x0e]
+; CHECK: mov.d  x3, v2[1]           ; encoding: [0x43,0x3c,0x18,0x4e]
+; CHECK: mov.d  x3, v2[1]           ; encoding: [0x43,0x3c,0x18,0x4e]
 
   ; MOV aliases for UMOV instructions above
 
@@ -205,10 +205,10 @@ foo:
   mov.d x11, v13[1]
   mov   x17, v19.d[0]
 
-; CHECK: umov.s  w2, v3[3]               ; encoding: [0x62,0x3c,0x1c,0x0e]
-; CHECK: umov.s  w5, v7[2]               ; encoding: [0xe5,0x3c,0x14,0x0e]
-; CHECK: umov.d  x11, v13[1]             ; encoding: [0xab,0x3d,0x18,0x4e]
-; CHECK: umov.d  x17, v19[0]             ; encoding: [0x71,0x3e,0x08,0x4e]
+; CHECK: mov.s  w2, v3[3]               ; encoding: [0x62,0x3c,0x1c,0x0e]
+; CHECK: mov.s  w5, v7[2]               ; encoding: [0xe5,0x3c,0x14,0x0e]
+; CHECK: mov.d  x11, v13[1]             ; encoding: [0xab,0x3d,0x18,0x4e]
+; CHECK: mov.d  x17, v19[0]             ; encoding: [0x71,0x3e,0x08,0x4e]
 
   ins.d v2[1], x5
   ins.s v2[1], w5
@@ -445,14 +445,14 @@ foo:
   bsl.8b v0, v0, v0
   eor.8b v0, v0, v0
   orn.8b v0, v0, v0
-  orr.8b v0, v0, v0
+  orr.8b v0, v0, v1
 
 ; CHECK: bif.8b	v0, v0, v0              ; encoding: [0x00,0x1c,0xe0,0x2e]
 ; CHECK: bit.8b	v0, v0, v0              ; encoding: [0x00,0x1c,0xa0,0x2e]
 ; CHECK: bsl.8b	v0, v0, v0              ; encoding: [0x00,0x1c,0x60,0x2e]
 ; CHECK: eor.8b	v0, v0, v0              ; encoding: [0x00,0x1c,0x20,0x2e]
 ; CHECK: orn.8b	v0, v0, v0              ; encoding: [0x00,0x1c,0xe0,0x0e]
-; CHECK: orr.8b	v0, v0, v0              ; encoding: [0x00,0x1c,0xa0,0x0e]
+; CHECK: orr.8b v0, v0, v1              ; encoding: [0x00,0x1c,0xa1,0x0e]
 
   sadalp.4h   v0, v0
   sadalp.8h  v0, v0
@@ -534,7 +534,7 @@ foo:
 ; CHECK: frsqrte.2s	v0, v0          ; encoding: [0x00,0xd8,0xa1,0x2e]
 ; CHECK: fsqrt.2s	v0, v0          ; encoding: [0x00,0xf8,0xa1,0x2e]
 ; CHECK: neg.8b	v0, v0                  ; encoding: [0x00,0xb8,0x20,0x2e]
-; CHECK: not.8b	v0, v0                  ; encoding: [0x00,0x58,0x20,0x2e]
+; CHECK: mvn.8b	v0, v0                  ; encoding: [0x00,0x58,0x20,0x2e]
 ; CHECK: rbit.8b	v0, v0                  ; encoding: [0x00,0x58,0x60,0x2e]
 ; CHECK: rev16.8b	v0, v0          ; encoding: [0x00,0x18,0x20,0x0e]
 ; CHECK: rev32.8b	v0, v0          ; encoding: [0x00,0x08,0x20,0x2e]
@@ -608,11 +608,11 @@ foo:
 ; CHECK: cmgt.8b	v0, v0, #0              ; encoding: [0x00,0x88,0x20,0x0e]
 ; CHECK: cmle.8b	v0, v0, #0              ; encoding: [0x00,0x98,0x20,0x2e]
 ; CHECK: cmlt.8b	v0, v0, #0              ; encoding: [0x00,0xa8,0x20,0x0e]
-; CHECK: fcmeq.2s	v0, v0, #0      ; encoding: [0x00,0xd8,0xa0,0x0e]
-; CHECK: fcmge.2s	v0, v0, #0      ; encoding: [0x00,0xc8,0xa0,0x2e]
-; CHECK: fcmgt.2s	v0, v0, #0      ; encoding: [0x00,0xc8,0xa0,0x0e]
-; CHECK: fcmle.2s	v0, v0, #0      ; encoding: [0x00,0xd8,0xa0,0x2e]
-; CHECK: fcmlt.2s	v0, v0, #0      ; encoding: [0x00,0xe8,0xa0,0x0e]
+; CHECK: fcmeq.2s	v0, v0, #0.0      ; encoding: [0x00,0xd8,0xa0,0x0e]
+; CHECK: fcmge.2s	v0, v0, #0.0      ; encoding: [0x00,0xc8,0xa0,0x2e]
+; CHECK: fcmgt.2s	v0, v0, #0.0      ; encoding: [0x00,0xc8,0xa0,0x0e]
+; CHECK: fcmle.2s	v0, v0, #0.0      ; encoding: [0x00,0xd8,0xa0,0x2e]
+; CHECK: fcmlt.2s	v0, v0, #0.0      ; encoding: [0x00,0xe8,0xa0,0x0e]
 ; CHECK: cmlt.8b	v8, v14, #0             ; encoding: [0xc8,0xa9,0x20,0x0e]
 ; CHECK: cmlt.16b	v8, v14, #0     ; encoding: [0xc8,0xa9,0x20,0x4e]
 ; CHECK: cmlt.4h	v8, v14, #0             ; encoding: [0xc8,0xa9,0x60,0x0e]
@@ -780,19 +780,19 @@ foo:
   bic.2s  v0, #1, lsl #16
   bic.2s  v0, #1, lsl #24
 
-; CHECK: bic.2s v0, #1               ; encoding: [0x20,0x14,0x00,0x2f]
-; CHECK: bic.2s v0, #1               ; encoding: [0x20,0x14,0x00,0x2f]
-; CHECK: bic.2s v0, #1, lsl #8       ; encoding: [0x20,0x34,0x00,0x2f]
-; CHECK: bic.2s v0, #1, lsl #16      ; encoding: [0x20,0x54,0x00,0x2f]
-; CHECK: bic.2s v0, #1, lsl #24      ; encoding: [0x20,0x74,0x00,0x2f]
+; CHECK: bic.2s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x2f]
+; CHECK: bic.2s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x2f]
+; CHECK: bic.2s v0, #0x1, lsl #8       ; encoding: [0x20,0x34,0x00,0x2f]
+; CHECK: bic.2s v0, #0x1, lsl #16      ; encoding: [0x20,0x54,0x00,0x2f]
+; CHECK: bic.2s v0, #0x1, lsl #24      ; encoding: [0x20,0x74,0x00,0x2f]
 
   bic.4h  v0, #1
   bic.4h  v0, #1, lsl #0
   bic.4h  v0, #1, lsl #8
 
-; CHECK: bic.4h v0, #1               ; encoding: [0x20,0x94,0x00,0x2f]
-; CHECK: bic.4h v0, #1               ; encoding: [0x20,0x94,0x00,0x2f]
-; CHECK: bic.4h v0, #1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x2f]
+; CHECK: bic.4h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x2f]
+; CHECK: bic.4h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x2f]
+; CHECK: bic.4h v0, #0x1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x2f]
 
   bic.4s  v0, #1
   bic.4s  v0, #1, lsl #0
@@ -800,29 +800,29 @@ foo:
   bic.4s  v0, #1, lsl #16
   bic.4s  v0, #1, lsl #24
 
-; CHECK: bic.4s v0, #1               ; encoding: [0x20,0x14,0x00,0x6f]
-; CHECK: bic.4s v0, #1               ; encoding: [0x20,0x14,0x00,0x6f]
-; CHECK: bic.4s v0, #1, lsl #8       ; encoding: [0x20,0x34,0x00,0x6f]
-; CHECK: bic.4s v0, #1, lsl #16      ; encoding: [0x20,0x54,0x00,0x6f]
-; CHECK: bic.4s v0, #1, lsl #24      ; encoding: [0x20,0x74,0x00,0x6f]
+; CHECK: bic.4s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x6f]
+; CHECK: bic.4s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x6f]
+; CHECK: bic.4s v0, #0x1, lsl #8       ; encoding: [0x20,0x34,0x00,0x6f]
+; CHECK: bic.4s v0, #0x1, lsl #16      ; encoding: [0x20,0x54,0x00,0x6f]
+; CHECK: bic.4s v0, #0x1, lsl #24      ; encoding: [0x20,0x74,0x00,0x6f]
 
   bic.8h  v0, #1
   bic.8h  v0, #1, lsl #0
   bic.8h  v0, #1, lsl #8
 
-; CHECK: bic.8h v0, #1               ; encoding: [0x20,0x94,0x00,0x6f]
-; CHECK: bic.8h v0, #1               ; encoding: [0x20,0x94,0x00,0x6f]
-; CHECK: bic.8h v0, #1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x6f]
+; CHECK: bic.8h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x6f]
+; CHECK: bic.8h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x6f]
+; CHECK: bic.8h v0, #0x1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x6f]
 
   fmov.2d v0, #1.250000e-01
 
-; CHECK: fmov.2d v0, #1.250000e-01             ; encoding: [0x00,0xf4,0x02,0x6f]
+; CHECK: fmov.2d v0, #0.12500000             ; encoding: [0x00,0xf4,0x02,0x6f]
 
   fmov.2s v0, #1.250000e-01
   fmov.4s v0, #1.250000e-01
 
-; CHECK: fmov.2s v0, #1.250000e-01             ; encoding: [0x00,0xf4,0x02,0x0f]
-; CHECK: fmov.4s v0, #1.250000e-01             ; encoding: [0x00,0xf4,0x02,0x4f]
+; CHECK: fmov.2s v0, #0.12500000             ; encoding: [0x00,0xf4,0x02,0x0f]
+; CHECK: fmov.4s v0, #0.12500000             ; encoding: [0x00,0xf4,0x02,0x4f]
 
   orr.2s  v0, #1
   orr.2s  v0, #1, lsl #0
@@ -830,19 +830,19 @@ foo:
   orr.2s  v0, #1, lsl #16
   orr.2s  v0, #1, lsl #24
 
-; CHECK: orr.2s v0, #1               ; encoding: [0x20,0x14,0x00,0x0f]
-; CHECK: orr.2s v0, #1               ; encoding: [0x20,0x14,0x00,0x0f]
-; CHECK: orr.2s v0, #1, lsl #8       ; encoding: [0x20,0x34,0x00,0x0f]
-; CHECK: orr.2s v0, #1, lsl #16      ; encoding: [0x20,0x54,0x00,0x0f]
-; CHECK: orr.2s v0, #1, lsl #24      ; encoding: [0x20,0x74,0x00,0x0f]
+; CHECK: orr.2s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x0f]
+; CHECK: orr.2s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x0f]
+; CHECK: orr.2s v0, #0x1, lsl #8       ; encoding: [0x20,0x34,0x00,0x0f]
+; CHECK: orr.2s v0, #0x1, lsl #16      ; encoding: [0x20,0x54,0x00,0x0f]
+; CHECK: orr.2s v0, #0x1, lsl #24      ; encoding: [0x20,0x74,0x00,0x0f]
 
   orr.4h  v0, #1
   orr.4h  v0, #1, lsl #0
   orr.4h  v0, #1, lsl #8
 
-; CHECK: orr.4h v0, #1               ; encoding: [0x20,0x94,0x00,0x0f]
-; CHECK: orr.4h v0, #1               ; encoding: [0x20,0x94,0x00,0x0f]
-; CHECK: orr.4h v0, #1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x0f]
+; CHECK: orr.4h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x0f]
+; CHECK: orr.4h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x0f]
+; CHECK: orr.4h v0, #0x1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x0f]
 
   orr.4s  v0, #1
   orr.4s  v0, #1, lsl #0
@@ -850,19 +850,19 @@ foo:
   orr.4s  v0, #1, lsl #16
   orr.4s  v0, #1, lsl #24
 
-; CHECK: orr.4s v0, #1               ; encoding: [0x20,0x14,0x00,0x4f]
-; CHECK: orr.4s v0, #1               ; encoding: [0x20,0x14,0x00,0x4f]
-; CHECK: orr.4s v0, #1, lsl #8       ; encoding: [0x20,0x34,0x00,0x4f]
-; CHECK: orr.4s v0, #1, lsl #16      ; encoding: [0x20,0x54,0x00,0x4f]
-; CHECK: orr.4s v0, #1, lsl #24      ; encoding: [0x20,0x74,0x00,0x4f]
+; CHECK: orr.4s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x4f]
+; CHECK: orr.4s v0, #0x1               ; encoding: [0x20,0x14,0x00,0x4f]
+; CHECK: orr.4s v0, #0x1, lsl #8       ; encoding: [0x20,0x34,0x00,0x4f]
+; CHECK: orr.4s v0, #0x1, lsl #16      ; encoding: [0x20,0x54,0x00,0x4f]
+; CHECK: orr.4s v0, #0x1, lsl #24      ; encoding: [0x20,0x74,0x00,0x4f]
 
   orr.8h  v0, #1
   orr.8h  v0, #1, lsl #0
   orr.8h  v0, #1, lsl #8
 
-; CHECK: orr.8h v0, #1               ; encoding: [0x20,0x94,0x00,0x4f]
-; CHECK: orr.8h v0, #1               ; encoding: [0x20,0x94,0x00,0x4f]
-; CHECK: orr.8h v0, #1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x4f]
+; CHECK: orr.8h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x4f]
+; CHECK: orr.8h v0, #0x1               ; encoding: [0x20,0x94,0x00,0x4f]
+; CHECK: orr.8h v0, #0x1, lsl #8       ; encoding: [0x20,0xb4,0x00,0x4f]
 
   movi     d0, #0x000000000000ff
   movi.2d  v0, #0x000000000000ff
@@ -876,11 +876,11 @@ foo:
   movi.2s v0, #1, lsl #16
   movi.2s v0, #1, lsl #24
 
-; CHECK: movi.2s v0, #1              ; encoding: [0x20,0x04,0x00,0x0f]
-; CHECK: movi.2s v0, #1              ; encoding: [0x20,0x04,0x00,0x0f]
-; CHECK: movi.2s v0, #1, lsl #8      ; encoding: [0x20,0x24,0x00,0x0f]
-; CHECK: movi.2s v0, #1, lsl #16     ; encoding: [0x20,0x44,0x00,0x0f]
-; CHECK: movi.2s v0, #1, lsl #24     ; encoding: [0x20,0x64,0x00,0x0f]
+; CHECK: movi.2s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x0f]
+; CHECK: movi.2s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x0f]
+; CHECK: movi.2s v0, #0x1, lsl #8      ; encoding: [0x20,0x24,0x00,0x0f]
+; CHECK: movi.2s v0, #0x1, lsl #16     ; encoding: [0x20,0x44,0x00,0x0f]
+; CHECK: movi.2s v0, #0x1, lsl #24     ; encoding: [0x20,0x64,0x00,0x0f]
 
   movi.4s v0, #1
   movi.4s v0, #1, lsl #0
@@ -888,43 +888,43 @@ foo:
   movi.4s v0, #1, lsl #16
   movi.4s v0, #1, lsl #24
 
-; CHECK: movi.4s v0, #1              ; encoding: [0x20,0x04,0x00,0x4f]
-; CHECK: movi.4s v0, #1              ; encoding: [0x20,0x04,0x00,0x4f]
-; CHECK: movi.4s v0, #1, lsl #8      ; encoding: [0x20,0x24,0x00,0x4f]
-; CHECK: movi.4s v0, #1, lsl #16     ; encoding: [0x20,0x44,0x00,0x4f]
-; CHECK: movi.4s v0, #1, lsl #24     ; encoding: [0x20,0x64,0x00,0x4f]
+; CHECK: movi.4s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x4f]
+; CHECK: movi.4s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x4f]
+; CHECK: movi.4s v0, #0x1, lsl #8      ; encoding: [0x20,0x24,0x00,0x4f]
+; CHECK: movi.4s v0, #0x1, lsl #16     ; encoding: [0x20,0x44,0x00,0x4f]
+; CHECK: movi.4s v0, #0x1, lsl #24     ; encoding: [0x20,0x64,0x00,0x4f]
 
   movi.4h v0, #1
   movi.4h v0, #1, lsl #0
   movi.4h v0, #1, lsl #8
 
-; CHECK: movi.4h v0, #1              ; encoding: [0x20,0x84,0x00,0x0f]
-; CHECK: movi.4h v0, #1              ; encoding: [0x20,0x84,0x00,0x0f]
-; CHECK: movi.4h v0, #1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x0f]
+; CHECK: movi.4h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x0f]
+; CHECK: movi.4h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x0f]
+; CHECK: movi.4h v0, #0x1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x0f]
 
   movi.8h v0, #1
   movi.8h v0, #1, lsl #0
   movi.8h v0, #1, lsl #8
 
-; CHECK: movi.8h v0, #1              ; encoding: [0x20,0x84,0x00,0x4f]
-; CHECK: movi.8h v0, #1              ; encoding: [0x20,0x84,0x00,0x4f]
-; CHECK: movi.8h v0, #1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x4f]
+; CHECK: movi.8h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x4f]
+; CHECK: movi.8h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x4f]
+; CHECK: movi.8h v0, #0x1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x4f]
 
   movi.2s v0, #1, msl #8
   movi.2s v0, #1, msl #16
   movi.4s v0, #1, msl #8
   movi.4s v0, #1, msl #16
 
-; CHECK: movi.2s v0, #1, msl #8      ; encoding: [0x20,0xc4,0x00,0x0f]
-; CHECK: movi.2s v0, #1, msl #16     ; encoding: [0x20,0xd4,0x00,0x0f]
-; CHECK: movi.4s v0, #1, msl #8      ; encoding: [0x20,0xc4,0x00,0x4f]
-; CHECK: movi.4s v0, #1, msl #16     ; encoding: [0x20,0xd4,0x00,0x4f]
+; CHECK: movi.2s v0, #0x1, msl #8      ; encoding: [0x20,0xc4,0x00,0x0f]
+; CHECK: movi.2s v0, #0x1, msl #16     ; encoding: [0x20,0xd4,0x00,0x0f]
+; CHECK: movi.4s v0, #0x1, msl #8      ; encoding: [0x20,0xc4,0x00,0x4f]
+; CHECK: movi.4s v0, #0x1, msl #16     ; encoding: [0x20,0xd4,0x00,0x4f]
 
   movi.8b  v0, #1
   movi.16b v0, #1
 
-; CHECK: movi.8b  v0, #1             ; encoding: [0x20,0xe4,0x00,0x0f]
-; CHECK: movi.16b v0, #1             ; encoding: [0x20,0xe4,0x00,0x4f]
+; CHECK: movi.8b  v0, #0x1             ; encoding: [0x20,0xe4,0x00,0x0f]
+; CHECK: movi.16b v0, #0x1             ; encoding: [0x20,0xe4,0x00,0x4f]
 
   mvni.2s v0, #1
   mvni.2s v0, #1, lsl #0
@@ -932,11 +932,11 @@ foo:
   mvni.2s v0, #1, lsl #16
   mvni.2s v0, #1, lsl #24
 
-; CHECK: mvni.2s v0, #1              ; encoding: [0x20,0x04,0x00,0x2f]
-; CHECK: mvni.2s v0, #1              ; encoding: [0x20,0x04,0x00,0x2f]
-; CHECK: mvni.2s v0, #1, lsl #8      ; encoding: [0x20,0x24,0x00,0x2f]
-; CHECK: mvni.2s v0, #1, lsl #16     ; encoding: [0x20,0x44,0x00,0x2f]
-; CHECK: mvni.2s v0, #1, lsl #24     ; encoding: [0x20,0x64,0x00,0x2f]
+; CHECK: mvni.2s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x2f]
+; CHECK: mvni.2s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x2f]
+; CHECK: mvni.2s v0, #0x1, lsl #8      ; encoding: [0x20,0x24,0x00,0x2f]
+; CHECK: mvni.2s v0, #0x1, lsl #16     ; encoding: [0x20,0x44,0x00,0x2f]
+; CHECK: mvni.2s v0, #0x1, lsl #24     ; encoding: [0x20,0x64,0x00,0x2f]
 
   mvni.4s v0, #1
   mvni.4s v0, #1, lsl #0
@@ -944,37 +944,37 @@ foo:
   mvni.4s v0, #1, lsl #16
   mvni.4s v0, #1, lsl #24
 
-; CHECK: mvni.4s v0, #1              ; encoding: [0x20,0x04,0x00,0x6f]
-; CHECK: mvni.4s v0, #1              ; encoding: [0x20,0x04,0x00,0x6f]
-; CHECK: mvni.4s v0, #1, lsl #8      ; encoding: [0x20,0x24,0x00,0x6f]
-; CHECK: mvni.4s v0, #1, lsl #16     ; encoding: [0x20,0x44,0x00,0x6f]
-; CHECK: mvni.4s v0, #1, lsl #24     ; encoding: [0x20,0x64,0x00,0x6f]
+; CHECK: mvni.4s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x6f]
+; CHECK: mvni.4s v0, #0x1              ; encoding: [0x20,0x04,0x00,0x6f]
+; CHECK: mvni.4s v0, #0x1, lsl #8      ; encoding: [0x20,0x24,0x00,0x6f]
+; CHECK: mvni.4s v0, #0x1, lsl #16     ; encoding: [0x20,0x44,0x00,0x6f]
+; CHECK: mvni.4s v0, #0x1, lsl #24     ; encoding: [0x20,0x64,0x00,0x6f]
 
   mvni.4h v0, #1
   mvni.4h v0, #1, lsl #0
   mvni.4h v0, #1, lsl #8
 
-; CHECK: mvni.4h v0, #1              ; encoding: [0x20,0x84,0x00,0x2f]
-; CHECK: mvni.4h v0, #1              ; encoding: [0x20,0x84,0x00,0x2f]
-; CHECK: mvni.4h v0, #1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x2f]
+; CHECK: mvni.4h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x2f]
+; CHECK: mvni.4h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x2f]
+; CHECK: mvni.4h v0, #0x1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x2f]
 
   mvni.8h v0, #1
   mvni.8h v0, #1, lsl #0
   mvni.8h v0, #1, lsl #8
 
-; CHECK: mvni.8h v0, #1              ; encoding: [0x20,0x84,0x00,0x6f]
-; CHECK: mvni.8h v0, #1              ; encoding: [0x20,0x84,0x00,0x6f]
-; CHECK: mvni.8h v0, #1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x6f]
+; CHECK: mvni.8h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x6f]
+; CHECK: mvni.8h v0, #0x1              ; encoding: [0x20,0x84,0x00,0x6f]
+; CHECK: mvni.8h v0, #0x1, lsl #8      ; encoding: [0x20,0xa4,0x00,0x6f]
 
   mvni.2s v0, #1, msl #8
   mvni.2s v0, #1, msl #16
   mvni.4s v0, #1, msl #8
   mvni.4s v0, #1, msl #16
 
-; CHECK: mvni.2s v0, #1, msl #8      ; encoding: [0x20,0xc4,0x00,0x2f]
-; CHECK: mvni.2s v0, #1, msl #16     ; encoding: [0x20,0xd4,0x00,0x2f]
-; CHECK: mvni.4s v0, #1, msl #8      ; encoding: [0x20,0xc4,0x00,0x6f]
-; CHECK: mvni.4s v0, #1, msl #16     ; encoding: [0x20,0xd4,0x00,0x6f]
+; CHECK: mvni.2s v0, #0x1, msl #8      ; encoding: [0x20,0xc4,0x00,0x2f]
+; CHECK: mvni.2s v0, #0x1, msl #16     ; encoding: [0x20,0xd4,0x00,0x2f]
+; CHECK: mvni.4s v0, #0x1, msl #8      ; encoding: [0x20,0xc4,0x00,0x6f]
+; CHECK: mvni.4s v0, #0x1, msl #16     ; encoding: [0x20,0xd4,0x00,0x6f]
 
 ;===-------------------------------------------------------------------------===
 ; AdvSIMD scalar x index
@@ -1843,8 +1843,8 @@ foo:
 
   mov.16b v0, v0
   mov.2s v0, v0
-; CHECK: orr.16b	v0, v0, v0              ; encoding: [0x00,0x1c,0xa0,0x4e]
-; CHECK: orr.8b	v0, v0, v0              ; encoding: [0x00,0x1c,0xa0,0x0e]
+; CHECK: mov.16b v0, v0              ; encoding: [0x00,0x1c,0xa0,0x4e]
+; CHECK: mov.8b v0, v0              ; encoding: [0x00,0x1c,0xa0,0x0e]
 
 
 ; uadalp/sadalp verbose mode aliases.
@@ -1881,10 +1881,10 @@ foo:
   mvn.8b v10, v6
   mvn.16b v11, v7
 
-; CHECK: not.8b	v1, v4                  ; encoding: [0x81,0x58,0x20,0x2e]
-; CHECK: not.16b	v19, v17                ; encoding: [0x33,0x5a,0x20,0x6e]
-; CHECK: not.8b	v10, v6                 ; encoding: [0xca,0x58,0x20,0x2e]
-; CHECK: not.16b	v11, v7                 ; encoding: [0xeb,0x58,0x20,0x6e]
+; CHECK: mvn.8b	v1, v4                  ; encoding: [0x81,0x58,0x20,0x2e]
+; CHECK: mvn.16b	v19, v17                ; encoding: [0x33,0x5a,0x20,0x6e]
+; CHECK: mvn.8b	v10, v6                 ; encoding: [0xca,0x58,0x20,0x2e]
+; CHECK: mvn.16b	v11, v7                 ; encoding: [0xeb,0x58,0x20,0x6e]
 
 ; sqdmull verbose mode aliases
  sqdmull v10.4s, v12.4h, v12.4h

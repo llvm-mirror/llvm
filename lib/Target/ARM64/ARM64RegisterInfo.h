@@ -37,10 +37,10 @@ public:
 
   /// Code Generation virtual methods...
   const MCPhysReg *
-  getCalleeSavedRegs(const MachineFunction *MF = 0) const override;
+  getCalleeSavedRegs(const MachineFunction *MF = nullptr) const override;
   const uint32_t *getCallPreservedMask(CallingConv::ID) const override;
 
-  unsigned getCSRFirstUseCost() const {
+  unsigned getCSRFirstUseCost() const override {
     // The cost will be compared against BlockFrequency where entry has the
     // value of 1 << 14. A value of 5 will choose to spill or split really
     // cold path instead of using a callee-saved register.
@@ -82,7 +82,7 @@ public:
                          int64_t Offset) const override;
   void eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
                            unsigned FIOperandNum,
-                           RegScavenger *RS = NULL) const override;
+                           RegScavenger *RS = nullptr) const override;
   bool cannotEliminateFrame(const MachineFunction &MF) const;
 
   bool requiresVirtualBaseRegisters(const MachineFunction &MF) const override;

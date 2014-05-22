@@ -22,6 +22,8 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "legalize-types"
+
 static cl::opt<bool>
 EnableExpensiveChecks("enable-legalize-types-checking", cl::Hidden);
 
@@ -488,7 +490,7 @@ SDNode *DAGTypeLegalizer::AnalyzeNewNode(SDNode *N) {
 
   // Some operands changed - update the node.
   if (!NewOps.empty()) {
-    SDNode *M = DAG.UpdateNodeOperands(N, &NewOps[0], NewOps.size());
+    SDNode *M = DAG.UpdateNodeOperands(N, NewOps);
     if (M != N) {
       // The node morphed into a different node.  Normally for this to happen
       // the original node would have to be marked NewNode.  However this can
@@ -1049,11 +1051,12 @@ DAGTypeLegalizer::ExpandChainLibCall(RTLIB::Libcall LC,
                                          TLI.getPointerTy());
 
   Type *RetTy = Node->getValueType(0).getTypeForEVT(*DAG.getContext());
-  TargetLowering::
-  CallLoweringInfo CLI(InChain, RetTy, isSigned, !isSigned, false, false,
-                    0, TLI.getLibcallCallingConv(LC), /*isTailCall=*/false,
-                    /*doesNotReturn=*/false, /*isReturnValueUsed=*/true,
-                    Callee, Args, DAG, SDLoc(Node));
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(SDLoc(Node)).setChain(InChain)
+    .setCallee(TLI.getLibcallCallingConv(LC), RetTy, Callee, &Args, 0)
+    .setSExtResult(isSigned).setZExtResult(!isSigned);
+
   std::pair<SDValue, SDValue> CallInfo = TLI.LowerCallTo(CLI);
 
   return CallInfo;

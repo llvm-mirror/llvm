@@ -17,6 +17,7 @@
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 using namespace llvm;
@@ -612,8 +613,8 @@ bool DarwinAsmParser::parseDirectivePopSection(StringRef, SMLoc) {
 ///   ::= .previous
 bool DarwinAsmParser::parseDirectivePrevious(StringRef DirName, SMLoc) {
   MCSectionSubPair PreviousSection = getStreamer().getPreviousSection();
-  if (PreviousSection.first == NULL)
-      return TokError(".previous without corresponding .section");
+  if (!PreviousSection.first)
+    return TokError(".previous without corresponding .section");
   getStreamer().SwitchSection(PreviousSection.first, PreviousSection.second);
   return false;
 }
@@ -630,13 +631,13 @@ bool DarwinAsmParser::parseDirectiveSecureLogUnique(StringRef, SMLoc IDLoc) {
 
   // Get the secure log path.
   const char *SecureLogFile = getContext().getSecureLogFile();
-  if (SecureLogFile == NULL)
+  if (!SecureLogFile)
     return Error(IDLoc, ".secure_log_unique used but AS_SECURE_LOG_FILE "
                  "environment variable unset.");
 
   // Open the secure log file if we haven't already.
   raw_ostream *OS = getContext().getSecureLog();
-  if (OS == NULL) {
+  if (!OS) {
     std::string Err;
     OS = new raw_fd_ostream(SecureLogFile, Err,
                             sys::fs::F_Append | sys::fs::F_Text);

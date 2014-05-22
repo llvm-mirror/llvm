@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "x86-emitter"
 #include "X86.h"
 #include "X86InstrInfo.h"
 #include "X86JITInfo.h"
@@ -36,6 +35,8 @@
 #include "llvm/Target/TargetOptions.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "x86-emitter"
+
 STATISTIC(NumEmitted, "Number of machine instructions emitted");
 
 namespace {
@@ -52,7 +53,7 @@ namespace {
   public:
     static char ID;
     explicit Emitter(X86TargetMachine &tm, CodeEmitter &mce)
-      : MachineFunctionPass(ID), II(0), TD(0), TM(tm),
+      : MachineFunctionPass(ID), II(nullptr), TD(nullptr), TM(tm),
         MCE(mce), PICBaseOffset(0), Is64BitMode(false),
         IsPIC(TM.getRelocationModel() == Reloc::PIC_) {}
 
@@ -450,7 +451,7 @@ void Emitter<CodeEmitter>::emitMemModRMByte(const MachineInstr &MI,
                                             intptr_t PCAdj) {
   const MachineOperand &Op3 = MI.getOperand(Op+3);
   int DispVal = 0;
-  const MachineOperand *DispForReloc = 0;
+  const MachineOperand *DispForReloc = nullptr;
 
   // Figure out what sort of displacement we have to handle here.
   if (Op3.isGlobal()) {
@@ -1475,7 +1476,7 @@ void Emitter<CodeEmitter>::emitInstruction(MachineInstr &MI,
 #ifndef NDEBUG
     dbgs() << "Cannot encode all operands of: " << MI << "\n";
 #endif
-    llvm_unreachable(0);
+    llvm_unreachable(nullptr);
   }
 
   MCE.processDebugLoc(MI.getDebugLoc(), false);

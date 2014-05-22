@@ -27,6 +27,11 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 
+using namespace llvm;
+using namespace llvm::X86Disassembler;
+
+#define DEBUG_TYPE "x86-disassembler"
+
 #define GET_REGINFO_ENUM
 #include "X86GenRegisterInfo.inc"
 #define GET_INSTRINFO_ENUM
@@ -34,21 +39,18 @@
 #define GET_SUBTARGETINFO_ENUM
 #include "X86GenSubtargetInfo.inc"
 
-using namespace llvm;
-using namespace llvm::X86Disassembler;
-
-void x86DisassemblerDebug(const char *file,
-                          unsigned line,
-                          const char *s) {
+void llvm::X86Disassembler::Debug(const char *file, unsigned line,
+                                  const char *s) {
   dbgs() << file << ":" << line << ": " << s;
 }
 
-const char *x86DisassemblerGetInstrName(unsigned Opcode, const void *mii) {
+const char *llvm::X86Disassembler::GetInstrName(unsigned Opcode,
+                                                const void *mii) {
   const MCInstrInfo *MII = static_cast<const MCInstrInfo *>(mii);
   return MII->getName(Opcode);
 }
 
-#define debug(s) DEBUG(x86DisassemblerDebug(__FILE__, __LINE__, s));
+#define debug(s) DEBUG(Debug(__FILE__, __LINE__, s));
 
 namespace llvm {  
   
@@ -138,7 +140,7 @@ X86GenericDisassembler::getInstruction(MCInst &instr,
 
   dlog_t loggerFn = logger;
   if (&vStream == &nulls())
-    loggerFn = 0; // Disable logging completely if it's going to nulls().
+    loggerFn = nullptr; // Disable logging completely if it's going to nulls().
   
   int ret = decodeInstruction(&internalInstr,
                               regionReader,
@@ -317,7 +319,7 @@ static void translateImmediate(MCInst &mcInst, uint64_t immediate,
   }
   // By default sign-extend all X86 immediates based on their encoding.
   else if (type == TYPE_IMM8 || type == TYPE_IMM16 || type == TYPE_IMM32 ||
-           type == TYPE_IMM64) {
+           type == TYPE_IMM64 || type == TYPE_IMMv) {
     uint32_t Opcode = mcInst.getOpcode();
     switch (operand.encoding) {
     default:
@@ -785,13 +787,11 @@ static bool translateInstruction(MCInst &mcInst,
       mcInst.setOpcode(X86::XACQUIRE_PREFIX);
   }
   
-  int index;
-  
   insn.numImmediatesTranslated = 0;
   
-  for (index = 0; index < X86_MAX_OPERANDS; ++index) {
-    if (insn.operands[index].encoding != ENCODING_NONE) {
-      if (translateOperand(mcInst, insn.operands[index], insn, Dis)) {
+  for (const auto &Op : insn.operands) {
+    if (Op.encoding != ENCODING_NONE) {
+      if (translateOperand(mcInst, Op, insn, Dis)) {
         return true;
       }
     }

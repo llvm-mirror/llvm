@@ -52,8 +52,6 @@
 // http://wiki.dwarfstd.org/index.php?title=Path_Discriminators
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "add-discriminators"
-
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -68,6 +66,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "add-discriminators"
 
 namespace {
   struct AddDiscriminators : public FunctionPass {
@@ -99,7 +99,7 @@ FunctionPass *llvm::createAddDiscriminatorsPass() {
 
 static bool hasDebugInfo(const Function &F) {
   NamedMDNode *CUNodes = F.getParent()->getNamedMetadata("llvm.dbg.cu");
-  return CUNodes != 0;
+  return CUNodes != nullptr;
 }
 
 /// \brief Assign DWARF discriminators.

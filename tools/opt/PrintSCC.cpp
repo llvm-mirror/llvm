@@ -39,7 +39,7 @@ namespace {
     CFGSCC() : FunctionPass(ID) {}
     bool runOnFunction(Function& func) override;
 
-    void print(raw_ostream &O, const Module* = 0) const override { }
+    void print(raw_ostream &O, const Module* = nullptr) const override { }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
@@ -53,7 +53,7 @@ namespace {
     // run - Print out SCCs in the call graph for the specified module.
     bool runOnModule(Module &M) override;
 
-    void print(raw_ostream &O, const Module* = 0) const override { }
+    void print(raw_ostream &O, const Module* = nullptr) const override { }
 
     // getAnalysisUsage - This pass requires the CallGraph.
     void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -75,7 +75,7 @@ bool CFGSCC::runOnFunction(Function &F) {
   unsigned sccNum = 0;
   errs() << "SCCs for Function " << F.getName() << " in PostOrder:";
   for (scc_iterator<Function*> SCCI = scc_begin(&F); !SCCI.isAtEnd(); ++SCCI) {
-    std::vector<BasicBlock*> &nextSCC = *SCCI;
+    const std::vector<BasicBlock *> &nextSCC = *SCCI;
     errs() << "\nSCC #" << ++sccNum << " : ";
     for (std::vector<BasicBlock*>::const_iterator I = nextSCC.begin(),
            E = nextSCC.end(); I != E; ++I)

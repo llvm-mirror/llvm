@@ -15,6 +15,7 @@
 #include "llvm/Option/OptSpecifier.h"
 #include "llvm/Option/Option.h"
 #include <list>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -105,10 +106,14 @@ private:
   arglist_type Args;
 
 protected:
-  ArgList();
+  // Default ctor provided explicitly as it is not provided implicitly due to
+  // the presence of the (deleted) copy ctor above.
+  ArgList() { }
+  // Virtual to provide a vtable anchor and because -Wnon-virtua-dtor warns, not
+  // because this type is ever actually destroyed polymorphically.
+  virtual ~ArgList();
 
 public:
-  virtual ~ArgList();
 
   /// @name Arg Access
   /// @{
@@ -334,7 +339,7 @@ class DerivedArgList : public ArgList {
   const InputArgList &BaseArgs;
 
   /// The list of arguments we synthesized.
-  mutable arglist_type SynthesizedArgs;
+  mutable SmallVector<std::unique_ptr<Arg>, 16> SynthesizedArgs;
 
 public:
   /// Construct a new derived arg list from \p BaseArgs.
@@ -358,9 +363,7 @@ public:
 
   /// AddSynthesizedArg - Add a argument to the list of synthesized arguments
   /// (to be freed).
-  void AddSynthesizedArg(Arg *A) {
-    SynthesizedArgs.push_back(A);
-  }
+  void AddSynthesizedArg(Arg *A);
 
   const char *MakeArgString(StringRef Str) const override;
 

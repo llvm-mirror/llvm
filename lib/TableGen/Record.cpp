@@ -623,9 +623,8 @@ static void ProfileListInit(FoldingSetNodeID &ID,
 ListInit *ListInit::get(ArrayRef<Init *> Range, RecTy *EltTy) {
   typedef FoldingSet<ListInit> Pool;
   static Pool ThePool;
+  static std::vector<std::unique_ptr<ListInit>> TheActualPool;
 
-  // Just use the FoldingSetNodeID to compute a hash.  Use a DenseMap
-  // for actual storage.
   FoldingSetNodeID ID;
   ProfileListInit(ID, Range, EltTy);
 
@@ -635,6 +634,7 @@ ListInit *ListInit::get(ArrayRef<Init *> Range, RecTy *EltTy) {
 
   ListInit *I = new ListInit(Range, EltTy);
   ThePool.InsertNode(I, IP);
+  TheActualPool.push_back(std::unique_ptr<ListInit>(I));
   return I;
 }
 
@@ -918,6 +918,18 @@ Init *BinOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
     }
     break;
   }
+  case LISTCONCAT: {
+    ListInit *LHSs = dyn_cast<ListInit>(LHS);
+    ListInit *RHSs = dyn_cast<ListInit>(RHS);
+    if (LHSs && RHSs) {
+      std::vector<Init *> Args;
+      Args.insert(Args.end(), LHSs->begin(), LHSs->end());
+      Args.insert(Args.end(), RHSs->begin(), RHSs->end());
+      return ListInit::get(
+          Args, static_cast<ListRecTy *>(LHSs->getType())->getElementType());
+    }
+    break;
+  }
   case STRCONCAT: {
     StringInit *LHSs = dyn_cast<StringInit>(LHS);
     StringInit *RHSs = dyn_cast<StringInit>(RHS);
@@ -987,6 +999,7 @@ std::string BinOpInit::getAsString() const {
   case SRA: Result = "!sra"; break;
   case SRL: Result = "!srl"; break;
   case EQ: Result = "!eq"; break;
+  case LISTCONCAT: Result = "!listconcat"; break;
   case STRCONCAT: Result = "!strconcat"; break;
   }
   return Result + "(" + LHS->getAsString() + ", " + RHS->getAsString() + ")";

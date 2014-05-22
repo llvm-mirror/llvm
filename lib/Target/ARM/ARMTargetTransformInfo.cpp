@@ -14,7 +14,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "armtti"
 #include "ARM.h"
 #include "ARMTargetMachine.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -22,6 +21,8 @@
 #include "llvm/Target/CostTable.h"
 #include "llvm/Target/TargetLowering.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "armtti"
 
 // Declare the pass initialization routine locally as target-specific passes
 // don't havve a target-wide initialization entry point, and so we rely on the
@@ -42,7 +43,7 @@ class ARMTTI final : public ImmutablePass, public TargetTransformInfo {
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
 public:
-  ARMTTI() : ImmutablePass(ID), TM(0), ST(0), TLI(0) {
+  ARMTTI() : ImmutablePass(ID), TM(nullptr), ST(nullptr), TLI(nullptr) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 

@@ -35,6 +35,7 @@ protected:
   bool HasFPARMv8;
   bool HasNEON;
   bool HasCrypto;
+  bool HasCRC;
 
   // HasZeroCycleRegMove - Has zero-cycle register mov instructions.
   bool HasZeroCycleRegMove;
@@ -48,11 +49,14 @@ protected:
   /// TargetTriple - What processor and OS we're targeting.
   Triple TargetTriple;
 
+  /// IsLittleEndian - Is the target little endian?
+  bool IsLittleEndian;
+
 public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ARM64Subtarget(const std::string &TT, const std::string &CPU,
-                 const std::string &FS);
+                 const std::string &FS, bool LittleEndian);
 
   bool enableMachineScheduler() const override { return true; }
 
@@ -63,6 +67,9 @@ public:
   bool hasFPARMv8() const { return HasFPARMv8; }
   bool hasNEON() const { return HasNEON; }
   bool hasCrypto() const { return HasCrypto; }
+  bool hasCRC() const { return HasCRC; }
+
+  bool isLittleEndian() const { return IsLittleEndian; }
 
   bool isTargetDarwin() const { return TargetTriple.isOSDarwin(); }
 
@@ -93,7 +100,8 @@ public:
   const char *getBZeroEntry() const;
 
   void overrideSchedPolicy(MachineSchedPolicy &Policy, MachineInstr *begin,
-                           MachineInstr *end, unsigned NumRegionInstrs) const;
+                           MachineInstr *end,
+                           unsigned NumRegionInstrs) const override;
 };
 } // End llvm namespace
 

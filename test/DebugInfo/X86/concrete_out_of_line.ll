@@ -8,22 +8,54 @@
 ; AT_inline.
 
 ; CHECK: DW_TAG_class_type
-; CHECK: DW_TAG_class_type
 ; CHECK:   DW_TAG_subprogram
+; CHECK: [[ASSIGN_DECL:0x........]]:  DW_TAG_subprogram
+
+; CHECK: [[RELEASE:0x........]]: DW_TAG_subprogram
+; CHECK-NEXT:     DW_AT_specification {{.*}} {[[RELEASE_DECL:0x........]]}
+; CHECK: DW_TAG_formal_parameter
+; CHECK-NOT: NULL
+; CHECK-NOT: DW_TAG
+; CHECK: DW_TAG_lexical_block
+; CHECK-NOT: NULL
+; CHECK-NOT: DW_TAG
+; CHECK: DW_TAG_inlined_subroutine
+; CHECK-NEXT: DW_AT_abstract_origin {{.*}} {[[ASSIGN:0x........]]}
+; CHECK-NOT: NULL
+; CHECK-NOT: DW_TAG
+; CHECK: DW_TAG_inlined_subroutine
+; CHECK-NEXT: DW_AT_abstract_origin {{.*}} {[[D1_ABS:0x........]]}
+; CHECK-NOT: NULL
+; CHECK-NOT: DW_TAG
+; CHECK: DW_TAG_inlined_subroutine
+; CHECK-NEXT: DW_AT_abstract_origin {{.*}} {[[D2_ABS:0x........]]}
+
+; CHECK: DW_TAG_class_type
+; CHECK: [[RELEASE_DECL]]:  DW_TAG_subprogram
 ; CHECK: [[DTOR_DECL:0x........]]:  DW_TAG_subprogram
 
-; CHECK: [[DTOR_OOL:0x........]]: DW_TAG_subprogram
-; CHECK-NEXT:     DW_AT_specification {{.*}} {[[DTOR_DECL]]})
+
+; CHECK: [[D1_ABS]]: DW_TAG_subprogram
+; CHECK-NEXT:     DW_AT_specification {{.*}} {[[DTOR_DECL]]}
 ; CHECK-NEXT:     DW_AT_{{.*}}linkage_name
 ; CHECK-NEXT:     DW_AT_inline
-
+; CHECK-NOT:     DW_AT_inline
+; CHECK: [[D2_ABS]]: DW_TAG_subprogram
+; CHECK-NEXT:     DW_AT_specification {{.*}} {[[DTOR_DECL]]}
+; CHECK-NEXT:     DW_AT_{{.*}}linkage_name
+; CHECK-NEXT:     DW_AT_inline
+; CHECK-NOT:     DW_AT_inline
+; CHECK: DW_TAG
 
 ; and then that a TAG_subprogram refers to it with AT_abstract_origin.
 
 ; CHECK: DW_TAG_subprogram
 ; CHECK: DW_TAG_subprogram
-; CHECK: DW_TAG_subprogram
-; CHECK-NEXT: DW_AT_abstract_origin {{.*}} {[[DTOR_OOL]]})
+; CHECK-NEXT: DW_AT_abstract_origin {{.*}} {[[D1_ABS]]}
+; CHECK: DW_TAG_formal_parameter
+; CHECK: DW_TAG_inlined_subroutine
+; CHECK-NEXT: DW_AT_abstract_origin {{.*}} {[[D2_ABS]]}
+
 
 define i32 @_ZN17nsAutoRefCnt7ReleaseEv() {
 entry:
@@ -59,7 +91,7 @@ declare void @_Z8moz_freePv(i8*)
 !15 = metadata !{i32 720942, metadata !6, metadata !13, metadata !"~nsAutoRefCnt", metadata !"~nsAutoRefCnt", metadata !"", i32 12, metadata !16, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 true, null, null, i32 0, metadata !18, i32 12} ; [ DW_TAG_subprogram ]
 !16 = metadata !{i32 720917, i32 0, null, i32 0, i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !17, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !17 = metadata !{null, metadata !10}
-!18 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
+!18 = metadata !{}
 !20 = metadata !{metadata !22}
 !22 = metadata !{i32 786689, metadata !5, metadata !"this", metadata !6, i32 16777230, metadata !10, i32 64, i32 0} ; [ DW_TAG_arg_variable ]
 !23 = metadata !{i32 720942, metadata !6, null, metadata !"~nsAutoRefCnt", metadata !"~nsAutoRefCnt", metadata !"_ZN17nsAutoRefCntD1Ev", i32 18, metadata !16, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32* null, null, metadata !15, metadata !24, i32 18} ; [ DW_TAG_subprogram ] [line 18] [def] [~nsAutoRefCnt]

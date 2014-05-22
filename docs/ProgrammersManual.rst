@@ -263,6 +263,78 @@ almost never be stored or mentioned directly.  They are intended solely for use
 when defining a function which should be able to efficiently accept concatenated
 strings.
 
+.. _function_apis:
+
+Passing functions and other callable objects
+--------------------------------------------
+
+Sometimes you may want a function to be passed a callback object. In order to
+support lambda expressions and other function objects, you should not use the
+traditional C approach of taking a function pointer and an opaque cookie:
+
+.. code-block:: c++
+
+    void takeCallback(bool (*Callback)(Function *, void *), void *Cookie);
+
+Instead, use one of the following approaches:
+
+Function template
+^^^^^^^^^^^^^^^^^
+
+If you don't mind putting the definition of your function into a header file,
+make it a function template that is templated on the callable type.
+
+.. code-block:: c++
+
+    template<typename Callable>
+    void takeCallback(Callable Callback) {
+      Callback(1, 2, 3);
+    }
+
+The ``function_ref`` class template
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``function_ref``
+(`doxygen <http://llvm.org/doxygen/classllvm_1_1function_ref.html>`__) class
+template represents a reference to a callable object, templated over the type
+of the callable. This is a good choice for passing a callback to a function,
+if you don't need to hold onto the callback after the function returns.
+
+``function_ref<Ret(Param1, Param2, ...)>`` can be implicitly constructed from
+any callable object that can be called with arguments of type ``Param1``,
+``Param2``, ..., and returns a value that can be converted to type ``Ret``.
+For example:
+
+.. code-block:: c++
+
+    void visitBasicBlocks(Function *F, function_ref<bool (BasicBlock*)> Callback) {
+      for (BasicBlock &BB : *F)
+        if (Callback(&BB))
+          return;
+    }
+
+can be called using:
+
+.. code-block:: c++
+
+    visitBasicBlocks(F, [&](BasicBlock *BB) {
+      if (process(BB))
+        return isEmpty(BB);
+      return false;
+    });
+
+Note that a ``function_ref`` object contains pointers to external memory, so
+it is not generally safe to store an instance of the class (unless you know
+that the external storage will not be freed).
+``function_ref`` is small enough that it should always be passed by value.
+
+``std::function``
+^^^^^^^^^^^^^^^^^
+
+You cannot use ``std::function`` within LLVM code, because it is not supported
+by all our target toolchains.
+
+
 .. _DEBUG:
 
 The ``DEBUG()`` macro and ``-debug`` option
@@ -1559,14 +1631,14 @@ Iterating over the ``Instruction`` in a ``Function``
 If you're finding that you commonly iterate over a ``Function``'s
 ``BasicBlock``\ s and then that ``BasicBlock``'s ``Instruction``\ s,
 ``InstIterator`` should be used instead.  You'll need to include
-``llvm/Support/InstIterator.h`` (`doxygen
-<http://llvm.org/doxygen/InstIterator_8h-source.html>`__) and then instantiate
+``llvm/IR/InstIterator.h`` (`doxygen
+<http://llvm.org/doxygen/InstIterator_8h.html>`__) and then instantiate
 ``InstIterator``\ s explicitly in your code.  Here's a small example that shows
 how to dump all instructions in a function to the standard error stream:
 
 .. code-block:: c++
 
-  #include "llvm/Support/InstIterator.h"
+  #include "llvm/IR/InstIterator.h"
 
   // F is a pointer to a Function instance
   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
@@ -1738,15 +1810,11 @@ chain of ``F``:
 
   Function *F = ...;
 
-  for (Value::use_iterator i = F->use_begin(), e = F->use_end(); i != e; ++i)
-    if (Instruction *Inst = dyn_cast<Instruction>(*i)) {
+  for (User *U : GV->users()) {    
+    if (Instruction *Inst = dyn_cast<Instruction>(U)) {
       errs() << "F is used in instruction:\n";
       errs() << *Inst << "\n";
     }
-
-Note that dereferencing a ``Value::use_iterator`` is not a very cheap operation.
-Instead of performing ``*i`` above several times, consider doing it only once in
-the loop body and reusing its result.
 
 Alternatively, it's common to have an instance of the ``User`` Class (`doxygen
 <http://llvm.org/doxygen/classllvm_1_1User.html>`__) and need to know what
@@ -1759,8 +1827,8 @@ instruction uses (that is, the operands of the particular ``Instruction``):
 
   Instruction *pi = ...;
 
-  for (User::op_iterator i = pi->op_begin(), e = pi->op_end(); i != e; ++i) {
-    Value *v = *i;
+  for (Use &U : pi->operands()) {
+    Value *v = U.get();
     // ...
   }
 

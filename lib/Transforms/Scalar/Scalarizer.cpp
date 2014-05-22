@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "scalarizer"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
@@ -24,6 +23,8 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "scalarizer"
 
 namespace {
 // Used to store the scattered form of a vector.
@@ -48,7 +49,7 @@ public:
   // insert them before BBI in BB.  If Cache is nonnull, use it to cache
   // the results.
   Scatterer(BasicBlock *bb, BasicBlock::iterator bbi, Value *v,
-            ValueVector *cachePtr = 0);
+            ValueVector *cachePtr = nullptr);
 
   // Return component I, creating a new Value for it if necessary.
   Value *operator[](unsigned I);
@@ -101,7 +102,7 @@ struct BinarySplitter {
 
 // Information about a load or store that we're scalarizing.
 struct VectorLayout {
-  VectorLayout() : VecTy(0), ElemTy(0), VecAlign(0), ElemSize(0) {}
+  VectorLayout() : VecTy(nullptr), ElemTy(nullptr), VecAlign(0), ElemSize(0) {}
 
   // Return the alignment of element I.
   uint64_t getElemAlign(unsigned I) {
@@ -186,9 +187,9 @@ Scatterer::Scatterer(BasicBlock *bb, BasicBlock::iterator bbi, Value *v,
     Ty = PtrTy->getElementType();
   Size = Ty->getVectorNumElements();
   if (!CachePtr)
-    Tmp.resize(Size, 0);
+    Tmp.resize(Size, nullptr);
   else if (CachePtr->empty())
-    CachePtr->resize(Size, 0);
+    CachePtr->resize(Size, nullptr);
   else
     assert(Size == CachePtr->size() && "Inconsistent vector sizes");
 }
@@ -241,7 +242,7 @@ bool Scalarizer::doInitialization(Module &M) {
 
 bool Scalarizer::runOnFunction(Function &F) {
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : 0;
+  DL = DLP ? &DLP->getDataLayout() : nullptr;
   for (Function::iterator BBI = F.begin(), BBE = F.end(); BBI != BBE; ++BBI) {
     BasicBlock *BB = BBI;
     for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE;) {

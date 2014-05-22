@@ -18,6 +18,7 @@
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -51,6 +52,11 @@ EntryPoint("entry",
            cl::desc("Function to call as entry point."),
            cl::init("_main"));
 
+static cl::list<std::string>
+Dylibs("dylib",
+       cl::desc("Add library."),
+       cl::ZeroOrMore);
+
 /* *** */
 
 // A trivial memory manager that doesn't do anything fancy, just uses the
@@ -69,7 +75,7 @@ public:
 
   void *getPointerToNamedFunction(const std::string &Name,
                                   bool AbortOnFailure = true) override {
-    return 0;
+    return nullptr;
   }
 
   bool finalizeMemory(std::string *ErrMsg) override { return false; }
@@ -85,7 +91,7 @@ uint8_t *TrivialMemoryManager::allocateCodeSection(uintptr_t Size,
                                                    unsigned Alignment,
                                                    unsigned SectionID,
                                                    StringRef SectionName) {
-  sys::MemoryBlock MB = sys::Memory::AllocateRWX(Size, 0, 0);
+  sys::MemoryBlock MB = sys::Memory::AllocateRWX(Size, nullptr, nullptr);
   FunctionMemory.push_back(MB);
   return (uint8_t*)MB.base();
 }
@@ -95,7 +101,7 @@ uint8_t *TrivialMemoryManager::allocateDataSection(uintptr_t Size,
                                                    unsigned SectionID,
                                                    StringRef SectionName,
                                                    bool IsReadOnly) {
-  sys::MemoryBlock MB = sys::Memory::AllocateRWX(Size, 0, 0);
+  sys::MemoryBlock MB = sys::Memory::AllocateRWX(Size, nullptr, nullptr);
   DataMemory.push_back(MB);
   return (uint8_t*)MB.base();
 }
@@ -121,9 +127,25 @@ static int Error(const Twine &Msg) {
   return 1;
 }
 
+static void loadDylibs() {
+  for (const std::string &Dylib : Dylibs) {
+    if (sys::fs::is_regular_file(Dylib)) {
+      std::string ErrMsg;
+      if (sys::DynamicLibrary::LoadLibraryPermanently(Dylib.c_str(), &ErrMsg))
+        llvm::errs() << "Error loading '" << Dylib << "': "
+                     << ErrMsg << "\n";
+    } else
+      llvm::errs() << "Dylib not found: '" << Dylib << "'.\n";
+  }
+}
+
+
 /* *** */
 
 static int printLineInfoForInput() {
+  // Load any dylibs requested on the command line.
+  loadDylibs();
+
   // If we don't have any input files, read from stdin.
   if (!InputFileList.size())
     InputFileList.push_back("-");
@@ -182,6 +204,9 @@ static int printLineInfoForInput() {
 }
 
 static int executeInput() {
+  // Load any dylibs requested on the command line.
+  loadDylibs();
+
   // Instantiate a dynamic linker.
   TrivialMemoryManager MemMgr;
   RuntimeDyld Dyld(&MemMgr);
@@ -213,7 +238,7 @@ static int executeInput() {
 
   // Get the address of the entry point (_main by default).
   void *MainAddress = Dyld.getSymbolAddress(EntryPoint);
-  if (MainAddress == 0)
+  if (!MainAddress)
     return Error("no definition for '" + EntryPoint + "'");
 
   // Invalidate the instruction cache for each loaded function.
@@ -234,7 +259,7 @@ static int executeInput() {
   const char **Argv = new const char*[2];
   // Use the name of the first input object module as argv[0] for the target.
   Argv[0] = InputFileList[0].c_str();
-  Argv[1] = 0;
+  Argv[1] = nullptr;
   return Main(1, Argv);
 }
 

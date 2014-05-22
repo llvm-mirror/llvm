@@ -27,6 +27,8 @@
 #include <algorithm>
 using namespace llvm;
 
+#define DEBUG_TYPE "lower-switch"
+
 namespace {
   /// LowerSwitch Pass - Replace all SwitchInst instructions with chained branch
   /// instructions.
@@ -51,7 +53,8 @@ namespace {
       Constant* High;
       BasicBlock* BB;
 
-      CaseRange(Constant *low = 0, Constant *high = 0, BasicBlock *bb = 0) :
+      CaseRange(Constant *low = nullptr, Constant *high = nullptr,
+                BasicBlock *bb = nullptr) :
         Low(low), High(high), BB(bb) { }
     };
 
@@ -182,7 +185,7 @@ BasicBlock* LowerSwitch::newLeafBlock(CaseRange& Leaf, Value* Val,
   F->getBasicBlockList().insert(++FI, NewLeaf);
 
   // Emit comparison
-  ICmpInst* Comp = NULL;
+  ICmpInst* Comp = nullptr;
   if (Leaf.Low == Leaf.High) {
     // Make the seteq instruction...
     Comp = new ICmpInst(*NewLeaf, ICmpInst::ICMP_EQ, Val,

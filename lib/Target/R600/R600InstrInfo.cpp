@@ -23,10 +23,10 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_CTOR_DTOR
 #include "AMDGPUGenDFAPacketizer.inc"
-
-using namespace llvm;
 
 R600InstrInfo::R600InstrInfo(AMDGPUTargetMachine &tm)
   : AMDGPUInstrInfo(tm),
@@ -677,7 +677,7 @@ findFirstPredicateSetterFrom(MachineBasicBlock &MBB,
       return MI;
   }
 
-  return NULL;
+  return nullptr;
 }
 
 static
@@ -797,7 +797,7 @@ R600InstrInfo::InsertBranch(MachineBasicBlock &MBB,
                             DebugLoc DL) const {
   assert(TBB && "InsertBranch must not be told to insert a fallthrough");
 
-  if (FBB == 0) {
+  if (!FBB) {
     if (Cond.empty()) {
       BuildMI(&MBB, DL, get(AMDGPU::JUMP)).addMBB(TBB);
       return 1;

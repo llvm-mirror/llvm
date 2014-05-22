@@ -622,13 +622,19 @@ bool LLParser::ParseStandaloneMetadata() {
   return false;
 }
 
+static bool isValidVisibilityForLinkage(unsigned V, unsigned L) {
+  return !GlobalValue::isLocalLinkage((GlobalValue::LinkageTypes)L) ||
+         (GlobalValue::VisibilityTypes)V == GlobalValue::DefaultVisibility;
+}
+
 /// ParseAlias:
 ///   ::= GlobalVar '=' OptionalVisibility OptionalDLLStorageClass 'alias'
 ///                     OptionalLinkage Aliasee
+///   ::= GlobalVar '=' OptionalVisibility OptionalDLLStorageClass 'alias'
+///                     OptionalLinkage OptionalAddrSpace Type, Aliasee
+///
 /// Aliasee
 ///   ::= TypeAndValue
-///   ::= 'bitcast' '(' TypeAndValue 'to' Type ')'
-///   ::= 'getelementptr' 'inbounds'? '(' ... ')'
 ///
 /// Everything through DLL storage class has already been parsed.
 ///
@@ -646,27 +652,53 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
   if(!GlobalAlias::isValidLinkage(Linkage))
     return Error(LinkageLoc, "invalid linkage type for alias");
 
-  Constant *Aliasee;
-  LocTy AliaseeLoc = Lex.getLoc();
-  if (Lex.getKind() != lltok::kw_bitcast &&
-      Lex.getKind() != lltok::kw_getelementptr) {
-    if (ParseGlobalTypeAndValue(Aliasee)) return true;
+  if (!isValidVisibilityForLinkage(Visibility, L))
+    return Error(LinkageLoc,
+                 "symbol with local linkage must have default visibility");
+
+  bool HasAddrSpace = Lex.getKind() == lltok::kw_addrspace;
+  unsigned AddrSpace;
+  LocTy AddrSpaceLoc = Lex.getLoc();
+  if (ParseOptionalAddrSpace(AddrSpace))
+    return true;
+
+  LocTy TyLoc = Lex.getLoc();
+  Type *Ty = nullptr;
+  if (ParseType(Ty))
+    return true;
+
+  bool DifferentType = EatIfPresent(lltok::comma);
+  if (HasAddrSpace && !DifferentType)
+    return Error(AddrSpaceLoc, "A type is required if addrspace is given");
+
+  Type *AliaseeType = nullptr;
+  if (DifferentType) {
+    if (ParseType(AliaseeType))
+      return true;
   } else {
-    // The bitcast dest type is not present, it is implied by the dest type.
-    ValID ID;
-    if (ParseValID(ID)) return true;
-    if (ID.Kind != ValID::t_Constant)
-      return Error(AliaseeLoc, "invalid aliasee");
-    Aliasee = ID.ConstantVal;
+    AliaseeType = Ty;
+    auto *PTy = dyn_cast<PointerType>(Ty);
+    if (!PTy)
+      return Error(TyLoc, "An alias must have pointer type");
+    Ty = PTy->getElementType();
+    AddrSpace = PTy->getAddressSpace();
   }
 
-  if (!Aliasee->getType()->isPointerTy())
-    return Error(AliaseeLoc, "alias must have pointer type");
+  LocTy AliaseeLoc = Lex.getLoc();
+  Constant *C;
+  if (ParseGlobalValue(AliaseeType, C))
+    return true;
+
+  auto *Aliasee = dyn_cast<GlobalObject>(C);
+  if (!Aliasee)
+    return Error(AliaseeLoc, "Alias must point to function or variable");
+
+  assert(Aliasee->getType()->isPointerTy());
 
   // Okay, create the alias but do not insert it into the module yet.
-  GlobalAlias* GA = new GlobalAlias(Aliasee->getType(),
-                                    (GlobalValue::LinkageTypes)Linkage, Name,
-                                    Aliasee);
+  std::unique_ptr<GlobalAlias> GA(
+      GlobalAlias::create(Ty, AddrSpace, (GlobalValue::LinkageTypes)Linkage,
+                          Name, Aliasee, /*Parent*/ nullptr));
   GA->setVisibility((GlobalValue::VisibilityTypes)Visibility);
   GA->setDLLStorageClass((GlobalValue::DLLStorageClassTypes)DLLStorageClass);
 
@@ -688,14 +720,22 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
 
     // If they agree, just RAUW the old value with the alias and remove the
     // forward ref info.
-    Val->replaceAllUsesWith(GA);
+    for (auto *User : Val->users()) {
+      if (auto *GA = dyn_cast<GlobalAlias>(User))
+        return Error(NameLoc, "Alias is pointed by alias " + GA->getName());
+    }
+
+    Val->replaceAllUsesWith(GA.get());
     Val->eraseFromParent();
     ForwardRefVals.erase(I);
   }
 
   // Insert into the module, we know its name won't collide now.
-  M->getAliasList().push_back(GA);
+  M->getAliasList().push_back(GA.get());
   assert(GA->getName() == Name && "Should not be a name conflict!");
+
+  // The module owns this now
+  GA.release();
 
   return false;
 }
@@ -714,6 +754,10 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc,
 bool LLParser::ParseGlobal(const std::string &Name, LocTy NameLoc,
                            unsigned Linkage, bool HasLinkage,
                            unsigned Visibility, unsigned DLLStorageClass) {
+  if (!isValidVisibilityForLinkage(Visibility, Linkage))
+    return Error(NameLoc,
+                 "symbol with local linkage must have default visibility");
+
   unsigned AddrSpace;
   bool IsConstant, UnnamedAddr, IsExternallyInitialized;
   GlobalVariable::ThreadLocalMode TLM;
@@ -959,6 +1003,7 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
     case lltok::kw_nest:
     case lltok::kw_noalias:
     case lltok::kw_nocapture:
+    case lltok::kw_nonnull:
     case lltok::kw_returned:
     case lltok::kw_sret:
       HaveError |=
@@ -1173,6 +1218,7 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
     case lltok::kw_nest:            B.addAttribute(Attribute::Nest); break;
     case lltok::kw_noalias:         B.addAttribute(Attribute::NoAlias); break;
     case lltok::kw_nocapture:       B.addAttribute(Attribute::NoCapture); break;
+    case lltok::kw_nonnull:         B.addAttribute(Attribute::NonNull); break;
     case lltok::kw_readnone:        B.addAttribute(Attribute::ReadNone); break;
     case lltok::kw_readonly:        B.addAttribute(Attribute::ReadOnly); break;
     case lltok::kw_returned:        B.addAttribute(Attribute::Returned); break;
@@ -1225,6 +1271,7 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
       return HaveError;
     case lltok::kw_inreg:           B.addAttribute(Attribute::InReg); break;
     case lltok::kw_noalias:         B.addAttribute(Attribute::NoAlias); break;
+    case lltok::kw_nonnull:         B.addAttribute(Attribute::NonNull); break;
     case lltok::kw_signext:         B.addAttribute(Attribute::SExt); break;
     case lltok::kw_zeroext:         B.addAttribute(Attribute::ZExt); break;
 
@@ -1366,7 +1413,6 @@ bool LLParser::ParseOptionalDLLStorageClass(unsigned &Res) {
 ///   ::= 'x86_stdcallcc'
 ///   ::= 'x86_fastcallcc'
 ///   ::= 'x86_thiscallcc'
-///   ::= 'x86_cdeclmethodcc'
 ///   ::= 'arm_apcscc'
 ///   ::= 'arm_aapcscc'
 ///   ::= 'arm_aapcs_vfpcc'
@@ -1392,7 +1438,6 @@ bool LLParser::ParseOptionalCallingConv(CallingConv::ID &CC) {
   case lltok::kw_x86_stdcallcc:  CC = CallingConv::X86_StdCall; break;
   case lltok::kw_x86_fastcallcc: CC = CallingConv::X86_FastCall; break;
   case lltok::kw_x86_thiscallcc: CC = CallingConv::X86_ThisCall; break;
-  case lltok::kw_x86_cdeclmethodcc:CC = CallingConv::X86_CDeclMethod; break;
   case lltok::kw_arm_apcscc:     CC = CallingConv::ARM_APCS; break;
   case lltok::kw_arm_aapcscc:    CC = CallingConv::ARM_AAPCS; break;
   case lltok::kw_arm_aapcs_vfpcc:CC = CallingConv::ARM_AAPCS_VFP; break;
@@ -3014,6 +3059,10 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
     return Error(LinkageLoc, "invalid function linkage type");
   }
 
+  if (!isValidVisibilityForLinkage(Visibility, Linkage))
+    return Error(LinkageLoc,
+                 "symbol with local linkage must have default visibility");
+
   if (!FunctionType::isValidReturnType(RetType))
     return Error(RetTypeLoc, "invalid function return type");
 
@@ -3367,8 +3416,10 @@ int LLParser::ParseInstruction(Instruction *&Inst, BasicBlock *BB,
   case lltok::kw_shufflevector:  return ParseShuffleVector(Inst, PFS);
   case lltok::kw_phi:            return ParsePHI(Inst, PFS);
   case lltok::kw_landingpad:     return ParseLandingPad(Inst, PFS);
-  case lltok::kw_call:           return ParseCall(Inst, PFS, false);
-  case lltok::kw_tail:           return ParseCall(Inst, PFS, true);
+  // Call.
+  case lltok::kw_call:     return ParseCall(Inst, PFS, CallInst::TCK_None);
+  case lltok::kw_tail:     return ParseCall(Inst, PFS, CallInst::TCK_Tail);
+  case lltok::kw_musttail: return ParseCall(Inst, PFS, CallInst::TCK_MustTail);
   // Memory.
   case lltok::kw_alloca:         return ParseAlloc(Inst, PFS);
   case lltok::kw_load:           return ParseLoad(Inst, PFS);
@@ -3984,10 +4035,14 @@ bool LLParser::ParseLandingPad(Instruction *&Inst, PerFunctionState &PFS) {
 }
 
 /// ParseCall
-///   ::= 'tail'? 'call' OptionalCallingConv OptionalAttrs Type Value
+///   ::= 'call' OptionalCallingConv OptionalAttrs Type Value
+///       ParameterList OptionalAttrs
+///   ::= 'tail' 'call' OptionalCallingConv OptionalAttrs Type Value
+///       ParameterList OptionalAttrs
+///   ::= 'musttail' 'call' OptionalCallingConv OptionalAttrs Type Value
 ///       ParameterList OptionalAttrs
 bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
-                         bool isTail) {
+                         CallInst::TailCallKind TCK) {
   AttrBuilder RetAttrs, FnAttrs;
   std::vector<unsigned> FwdRefAttrGrps;
   LocTy BuiltinLoc;
@@ -3998,7 +4053,8 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
   SmallVector<ParamInfo, 16> ArgList;
   LocTy CallLoc = Lex.getLoc();
 
-  if ((isTail && ParseToken(lltok::kw_call, "expected 'tail call'")) ||
+  if ((TCK != CallInst::TCK_None &&
+       ParseToken(lltok::kw_call, "expected 'tail call'")) ||
       ParseOptionalCallingConv(CC) ||
       ParseOptionalReturnAttrs(RetAttrs) ||
       ParseType(RetType, RetTypeLoc, true /*void allowed*/) ||
@@ -4074,7 +4130,7 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
 
   CallInst *CI = CallInst::Create(Callee, Args);
-  CI->setTailCall(isTail);
+  CI->setTailCallKind(TCK);
   CI->setCallingConv(CC);
   CI->setAttributes(PAL);
   ForwardRefAttrGroups[CI] = FwdRefAttrGrps;

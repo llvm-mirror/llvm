@@ -5,7 +5,7 @@
     add sp, sp, 32
 
 ; Optional shift
-; CHECK: adds x3, x4, #4194304       ; encoding: [0x83,0x00,0x50,0xb1]
+; CHECK: adds x3, x4, #1024, lsl #12 ; encoding: [0x83,0x00,0x50,0xb1]
 adds x3, x4, 1024, lsl 12
 
 ; Optional extend
@@ -13,7 +13,7 @@ adds x3, x4, 1024, lsl 12
 add sp, x2, x3, uxtx 0
 
 ; FP immediates
-; CHECK: fmov s1, #1.250000e-01      ; encoding: [0x01,0x10,0x28,0x1e]
+; CHECK: fmov s1, #0.12500000      ; encoding: [0x01,0x10,0x28,0x1e]
 fmov s1, 0.125
 
 ; Barrier operand

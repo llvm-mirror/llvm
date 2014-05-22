@@ -46,3 +46,45 @@ declare i32 @llvm.r600.read.tidig.x() #1
 declare i32 @llvm.r600.read.tidig.y() #1
 
 attributes #1 = { nounwind readnone }
+
+; Test moving an SMRD instruction to the VALU
+
+; CHECK-LABEL: @smrd_valu
+; CHECK: BUFFER_LOAD_DWORD [[OUT:v[0-9]+]]
+; CHECK: BUFFER_STORE_DWORD [[OUT]]
+
+define void @smrd_valu(i32 addrspace(2)* addrspace(1)* %in, i32 %a, i32 addrspace(1)* %out) {
+entry:
+  %0 = icmp ne i32 %a, 0
+  br i1 %0, label %if, label %else
+
+if:
+  %1 = load i32 addrspace(2)* addrspace(1)* %in
+  br label %endif
+
+else:
+  %2 = getelementptr i32 addrspace(2)* addrspace(1)* %in
+  %3 = load i32 addrspace(2)* addrspace(1)* %2
+  br label %endif
+
+endif:
+  %4 = phi i32 addrspace(2)*  [%1, %if], [%3, %else]
+  %5 = getelementptr i32 addrspace(2)* %4, i32 3000
+  %6 = load i32 addrspace(2)* %5
+  store i32 %6, i32 addrspace(1)* %out
+  ret void
+}
+
+; Test moving ann SMRD with an immediate offset to the VALU
+
+; CHECK-LABEL: @smrd_valu2
+; CHECK: BUFFER_LOAD_DWORD
+define void @smrd_valu2(i32 addrspace(1)* %out, [8 x i32] addrspace(2)* %in) {
+entry:
+  %0 = call i32 @llvm.r600.read.tidig.x() nounwind readnone
+  %1 = add i32 %0, 4
+  %2 = getelementptr [8 x i32] addrspace(2)* %in, i32 %0, i32 4
+  %3 = load i32 addrspace(2)* %2
+  store i32 %3, i32 addrspace(1)* %out
+  ret void
+}

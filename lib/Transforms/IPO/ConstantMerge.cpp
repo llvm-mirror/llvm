@@ -17,7 +17,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "constmerge"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -30,6 +29,8 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "constmerge"
 
 STATISTIC(NumMerged, "Number of global constants merged");
 
@@ -66,7 +67,7 @@ ModulePass *llvm::createConstantMergePass() { return new ConstantMerge(); }
 /// Find values that are marked as llvm.used.
 static void FindUsedValues(GlobalVariable *LLVMUsed,
                            SmallPtrSet<const GlobalValue*, 8> &UsedValues) {
-  if (LLVMUsed == 0) return;
+  if (!LLVMUsed) return;
   ConstantArray *Inits = cast<ConstantArray>(LLVMUsed->getInitializer());
 
   for (unsigned i = 0, e = Inits->getNumOperands(); i != e; ++i) {
@@ -103,7 +104,7 @@ unsigned ConstantMerge::getAlignment(GlobalVariable *GV) const {
 
 bool ConstantMerge::runOnModule(Module &M) {
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : 0;
+  DL = DLP ? &DLP->getDataLayout() : nullptr;
 
   // Find all the globals that are marked "used".  These cannot be merged.
   SmallPtrSet<const GlobalValue*, 8> UsedGlobals;
@@ -161,7 +162,7 @@ bool ConstantMerge::runOnModule(Module &M) {
       // If this is the first constant we find or if the old one is local,
       // replace with the current one. If the current is externally visible
       // it cannot be replace, but can be the canonical constant we merge with.
-      if (Slot == 0 || IsBetterCanonical(*GV, *Slot))
+      if (!Slot || IsBetterCanonical(*GV, *Slot))
         Slot = GV;
     }
 

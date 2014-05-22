@@ -16,7 +16,6 @@
 // prune the dependence.
 //
 //===----------------------------------------------------------------------===//
-#define DEBUG_TYPE "packets"
 #include "llvm/CodeGen/DFAPacketizer.h"
 #include "Hexagon.h"
 #include "HexagonMachineFunctionInfo.h"
@@ -51,6 +50,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "packets"
+
 static cl::opt<bool> PacketizeVolatiles("hexagon-packetize-volatiles",
       cl::ZeroOrMore, cl::Hidden, cl::init(true),
       cl::desc("Allow non-solo packetization of volatile memory references"));
@@ -69,7 +70,7 @@ namespace {
       initializeHexagonPacketizerPass(*PassRegistry::getPassRegistry());
     }
 
-    void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       AU.addRequired<MachineDominatorTree>();
       AU.addRequired<MachineBranchProbabilityInfo>();
@@ -79,11 +80,11 @@ namespace {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
-    const char *getPassName() const {
+    const char *getPassName() const override {
       return "Hexagon Packetizer";
     }
 
-    bool runOnMachineFunction(MachineFunction &Fn);
+    bool runOnMachineFunction(MachineFunction &Fn) override;
   };
   char HexagonPacketizer::ID = 0;
 
@@ -121,24 +122,25 @@ namespace {
                           const MachineBranchProbabilityInfo *MBPI);
 
     // initPacketizerState - initialize some internal flags.
-    void initPacketizerState();
+    void initPacketizerState() override;
 
     // ignorePseudoInstruction - Ignore bundling of pseudo instructions.
-    bool ignorePseudoInstruction(MachineInstr *MI, MachineBasicBlock *MBB);
+    bool ignorePseudoInstruction(MachineInstr *MI,
+                                 MachineBasicBlock *MBB) override;
 
     // isSoloInstruction - return true if instruction MI can not be packetized
     // with any other instruction, which means that MI itself is a packet.
-    bool isSoloInstruction(MachineInstr *MI);
+    bool isSoloInstruction(MachineInstr *MI) override;
 
     // isLegalToPacketizeTogether - Is it legal to packetize SUI and SUJ
     // together.
-    bool isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ);
+    bool isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) override;
 
     // isLegalToPruneDependencies - Is it legal to prune dependece between SUI
     // and SUJ.
-    bool isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ);
+    bool isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ) override;
 
-    MachineBasicBlock::iterator addToPacket(MachineInstr *MI);
+    MachineBasicBlock::iterator addToPacket(MachineInstr *MI) override;
   private:
     bool IsCallDependent(MachineInstr* MI, SDep::Kind DepType, unsigned DepReg);
     bool PromoteToDotNew(MachineInstr* MI, SDep::Kind DepType,
@@ -603,7 +605,7 @@ bool HexagonPacketizerList::CanPromoteToNewValueStore( MachineInstr *MI,
     // evaluate identically
     unsigned predRegNumSrc = 0;
     unsigned predRegNumDst = 0;
-    const TargetRegisterClass* predRegClass = NULL;
+    const TargetRegisterClass* predRegClass = nullptr;
 
     // Get predicate register used in the source instruction
     for(unsigned opNum = 0; opNum < PacketMI->getNumOperands(); opNum++) {
@@ -1172,7 +1174,7 @@ bool HexagonPacketizerList::isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) {
       // of that (IsCallDependent) function. Bug 6216 is opened for this.
       //
       unsigned DepReg = 0;
-      const TargetRegisterClass* RC = NULL;
+      const TargetRegisterClass* RC = nullptr;
       if (DepType == SDep::Data) {
         DepReg = SUJ->Succs[i].getReg();
         RC = QRI->getMinimalPhysRegClass(DepReg);

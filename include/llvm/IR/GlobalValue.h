@@ -59,11 +59,11 @@ public:
   };
 
 protected:
-  GlobalValue(Type *ty, ValueTy vty, Use *Ops, unsigned NumOps,
-              LinkageTypes linkage, const Twine &Name)
-    : Constant(ty, vty, Ops, NumOps), Linkage(linkage),
-      Visibility(DefaultVisibility), Alignment(0), UnnamedAddr(0),
-      DllStorageClass(DefaultStorageClass), Parent(nullptr) {
+  GlobalValue(Type *Ty, ValueTy VTy, Use *Ops, unsigned NumOps,
+              LinkageTypes Linkage, const Twine &Name)
+      : Constant(Ty, VTy, Ops, NumOps), Linkage(Linkage),
+        Visibility(DefaultVisibility), UnnamedAddr(0),
+        DllStorageClass(DefaultStorageClass), Parent(nullptr) {
     setName(Name);
   }
 
@@ -71,20 +71,29 @@ protected:
   // Linkage and Visibility from turning into negative values.
   LinkageTypes Linkage : 5;   // The linkage of this global
   unsigned Visibility : 2;    // The visibility style of this global
-  unsigned Alignment : 16;    // Alignment of this symbol, must be power of two
   unsigned UnnamedAddr : 1;   // This value's address is not significant
   unsigned DllStorageClass : 2; // DLL storage class
+
+private:
+  // Give subclasses access to what otherwise would be wasted padding.
+  // (22 + 2 + 1 + 2 + 5) == 32.
+  unsigned SubClassData : 22;
+protected:
+  unsigned getGlobalValueSubClassData() const {
+    return SubClassData;
+  }
+  void setGlobalValueSubClassData(unsigned V) {
+    assert(V < (1 << 22) && "It will not fit");
+    SubClassData = V;
+  }
+
   Module *Parent;             // The containing module.
-  std::string Section;        // Section to emit this into, empty mean default
 public:
   ~GlobalValue() {
     removeDeadConstantUsers();   // remove any dead constants using this.
   }
 
-  unsigned getAlignment() const {
-    return (1u << Alignment) >> 1;
-  }
-  void setAlignment(unsigned Align);
+  unsigned getAlignment() const;
 
   bool hasUnnamedAddr() const { return UnnamedAddr; }
   void setUnnamedAddr(bool Val) { UnnamedAddr = Val; }
@@ -95,7 +104,11 @@ public:
   bool hasProtectedVisibility() const {
     return Visibility == ProtectedVisibility;
   }
-  void setVisibility(VisibilityTypes V) { Visibility = V; }
+  void setVisibility(VisibilityTypes V) {
+    assert((!hasLocalLinkage() || V == DefaultVisibility) &&
+           "local linkage requires default visibility");
+    Visibility = V;
+  }
 
   DLLStorageClassTypes getDLLStorageClass() const {
     return DLLStorageClassTypes(DllStorageClass);
@@ -108,22 +121,10 @@ public:
   }
   void setDLLStorageClass(DLLStorageClassTypes C) { DllStorageClass = C; }
 
-  bool hasSection() const { return !Section.empty(); }
-  const std::string &getSection() const { return Section; }
-  void setSection(StringRef S) {
-    assert((getValueID() != Value::GlobalAliasVal || S.empty()) &&
-           "GlobalAlias should not have a section!");
-    Section = S;
-  }
+  bool hasSection() const { return !getSection().empty(); }
+  const std::string &getSection() const;
 
-  /// If the usage is empty (except transitively dead constants), then this
-  /// global value can be safely deleted since the destructor will
-  /// delete the dead constants as well.
-  /// @brief Determine if the usage of this global value is empty except
-  /// for transitively dead constants.
-  bool use_empty_except_constants();
-
-  /// getType - Global values are always pointers.
+  /// Global values are always pointers.
   inline PointerType *getType() const {
     return cast<PointerType>(User::getType());
   }
@@ -144,8 +145,14 @@ public:
   static bool isLinkOnceLinkage(LinkageTypes Linkage) {
     return Linkage == LinkOnceAnyLinkage || Linkage == LinkOnceODRLinkage;
   }
+  static bool isWeakAnyLinkage(LinkageTypes Linkage) {
+    return Linkage == WeakAnyLinkage;
+  }
+  static bool isWeakODRLinkage(LinkageTypes Linkage) {
+    return Linkage == WeakODRLinkage;
+  }
   static bool isWeakLinkage(LinkageTypes Linkage) {
-    return Linkage == WeakAnyLinkage || Linkage == WeakODRLinkage;
+    return isWeakAnyLinkage(Linkage) || isWeakODRLinkage(Linkage);
   }
   static bool isAppendingLinkage(LinkageTypes Linkage) {
     return Linkage == AppendingLinkage;
@@ -166,24 +173,24 @@ public:
     return Linkage == CommonLinkage;
   }
 
-  /// isDiscardableIfUnused - Whether the definition of this global may be
-  /// discarded if it is not used in its compilation unit.
+  /// Whether the definition of this global may be discarded if it is not used
+  /// in its compilation unit.
   static bool isDiscardableIfUnused(LinkageTypes Linkage) {
     return isLinkOnceLinkage(Linkage) || isLocalLinkage(Linkage);
   }
 
-  /// mayBeOverridden - Whether the definition of this global may be replaced
-  /// by something non-equivalent at link time.  For example, if a function has
-  /// weak linkage then the code defining it may be replaced by different code.
+  /// Whether the definition of this global may be replaced by something
+  /// non-equivalent at link time. For example, if a function has weak linkage
+  /// then the code defining it may be replaced by different code.
   static bool mayBeOverridden(LinkageTypes Linkage) {
     return Linkage == WeakAnyLinkage || Linkage == LinkOnceAnyLinkage ||
            Linkage == CommonLinkage || Linkage == ExternalWeakLinkage;
   }
 
-  /// isWeakForLinker - Whether the definition of this global may be replaced at
-  /// link time.  NB: Using this method outside of the code generators is almost
-  /// always a mistake: when working at the IR level use mayBeOverridden instead
-  /// as it knows about ODR semantics.
+  /// Whether the definition of this global may be replaced at link time.  NB:
+  /// Using this method outside of the code generators is almost always a
+  /// mistake: when working at the IR level use mayBeOverridden instead as it
+  /// knows about ODR semantics.
   static bool isWeakForLinker(LinkageTypes Linkage)  {
     return Linkage == AvailableExternallyLinkage || Linkage == WeakAnyLinkage ||
            Linkage == WeakODRLinkage || Linkage == LinkOnceAnyLinkage ||
@@ -201,6 +208,12 @@ public:
   bool hasWeakLinkage() const {
     return isWeakLinkage(Linkage);
   }
+  bool hasWeakAnyLinkage() const {
+    return isWeakAnyLinkage(Linkage);
+  }
+  bool hasWeakODRLinkage() const {
+    return isWeakODRLinkage(Linkage);
+  }
   bool hasAppendingLinkage() const { return isAppendingLinkage(Linkage); }
   bool hasInternalLinkage() const { return isInternalLinkage(Linkage); }
   bool hasPrivateLinkage() const { return isPrivateLinkage(Linkage); }
@@ -208,7 +221,11 @@ public:
   bool hasExternalWeakLinkage() const { return isExternalWeakLinkage(Linkage); }
   bool hasCommonLinkage() const { return isCommonLinkage(Linkage); }
 
-  void setLinkage(LinkageTypes LT) { Linkage = LT; }
+  void setLinkage(LinkageTypes LT) {
+    if (isLocalLinkage(LT))
+      Visibility = DefaultVisibility;
+    Linkage = LT;
+  }
   LinkageTypes getLinkage() const { return Linkage; }
 
   bool isDiscardableIfUnused() const {
@@ -219,13 +236,13 @@ public:
 
   bool isWeakForLinker() const { return isWeakForLinker(Linkage); }
 
-  /// copyAttributesFrom - copy all additional attributes (those not needed to
-  /// create a GlobalValue) from the GlobalValue Src to this one.
+  /// Copy all additional attributes (those not needed to create a GlobalValue)
+  /// from the GlobalValue Src to this one.
   virtual void copyAttributesFrom(const GlobalValue *Src);
 
-  /// getRealLinkageName - If special LLVM prefix that is used to inform the asm
-  /// printer to not emit usual symbol prefix before the symbol name is used
-  /// then return linkage name after skipping this special LLVM prefix.
+  /// If special LLVM prefix that is used to inform the asm printer to not emit
+  /// usual symbol prefix before the symbol name is used then return linkage
+  /// name after skipping this special LLVM prefix.
   static StringRef getRealLinkageName(StringRef Name) {
     if (!Name.empty() && Name[0] == '\1')
       return Name.substr(1);
@@ -238,24 +255,24 @@ public:
 /// BitcodeReader to load the Module.
 /// @{
 
-  /// isMaterializable - If this function's Module is being lazily streamed in
-  /// functions from disk or some other source, this method can be used to check
-  /// to see if the function has been read in yet or not.
+  /// If this function's Module is being lazily streamed in functions from disk
+  /// or some other source, this method can be used to check to see if the
+  /// function has been read in yet or not.
   bool isMaterializable() const;
 
-  /// isDematerializable - Returns true if this function was loaded from a
-  /// GVMaterializer that's still attached to its Module and that knows how to
-  /// dematerialize the function.
+  /// Returns true if this function was loaded from a GVMaterializer that's
+  /// still attached to its Module and that knows how to dematerialize the
+  /// function.
   bool isDematerializable() const;
 
-  /// Materialize - make sure this GlobalValue is fully read.  If the module is
-  /// corrupt, this returns true and fills in the optional string with
-  /// information about the problem.  If successful, this returns false.
+  /// Make sure this GlobalValue is fully read. If the module is corrupt, this
+  /// returns true and fills in the optional string with information about the
+  /// problem.  If successful, this returns false.
   bool Materialize(std::string *ErrInfo = nullptr);
 
-  /// Dematerialize - If this GlobalValue is read in, and if the GVMaterializer
-  /// supports it, release the memory for the function, and set it up to be
-  /// materialized lazily.  If !isDematerializable(), this method is a noop.
+  /// If this GlobalValue is read in, and if the GVMaterializer supports it,
+  /// release the memory for the function, and set it up to be materialized
+  /// lazily. If !isDematerializable(), this method is a noop.
   void Dematerialize();
 
 /// @}
@@ -263,20 +280,18 @@ public:
   /// Override from Constant class.
   void destroyConstant() override;
 
-  /// isDeclaration - Return true if the primary definition of this global 
-  /// value is outside of the current translation unit.
+  /// Return true if the primary definition of this global value is outside of
+  /// the current translation unit.
   bool isDeclaration() const;
 
-  /// removeFromParent - This method unlinks 'this' from the containing module,
-  /// but does not delete it.
+  /// This method unlinks 'this' from the containing module, but does not delete
+  /// it.
   virtual void removeFromParent() = 0;
 
-  /// eraseFromParent - This method unlinks 'this' from the containing module
-  /// and deletes it.
+  /// This method unlinks 'this' from the containing module and deletes it.
   virtual void eraseFromParent() = 0;
 
-  /// getParent - Get the module that this global value is contained inside
-  /// of...
+  /// Get the module that this global value is contained inside of...
   inline Module *getParent() { return Parent; }
   inline const Module *getParent() const { return Parent; }
 

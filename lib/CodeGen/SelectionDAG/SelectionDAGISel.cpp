@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "isel"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "ScheduleDAGSDNodes.h"
 #include "SelectionDAGBuilder.h"
@@ -57,6 +56,8 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <algorithm>
 using namespace llvm;
+
+#define DEBUG_TYPE "isel"
 
 STATISTIC(NumFastIselFailures, "Number of instructions fast isel failed on");
 STATISTIC(NumFastIselSuccess, "Number of instructions fast isel selected");
@@ -509,21 +510,17 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
 
   // Determine if there are any calls in this machine function.
   MachineFrameInfo *MFI = MF->getFrameInfo();
-  for (MachineFunction::const_iterator I = MF->begin(), E = MF->end(); I != E;
-       ++I) {
-
+  for (const auto &MBB : *MF) {
     if (MFI->hasCalls() && MF->hasInlineAsm())
       break;
 
-    const MachineBasicBlock *MBB = I;
-    for (MachineBasicBlock::const_iterator II = MBB->begin(), IE = MBB->end();
-         II != IE; ++II) {
-      const MCInstrDesc &MCID = TM.getInstrInfo()->get(II->getOpcode());
+    for (const auto &MI : MBB) {
+      const MCInstrDesc &MCID = TM.getInstrInfo()->get(MI.getOpcode());
       if ((MCID.isCall() && !MCID.isReturn()) ||
-          II->isStackAligningInlineAsm()) {
+          MI.isStackAligningInlineAsm()) {
         MFI->setHasCalls(true);
       }
-      if (II->isInlineAsm()) {
+      if (MI.isInlineAsm()) {
         MF->setHasInlineAsm(true);
       }
     }
@@ -624,7 +621,7 @@ void SelectionDAGISel::ComputeLiveOutVRegInfo() {
       continue;
 
     unsigned NumSignBits = CurDAG->ComputeNumSignBits(Src);
-    CurDAG->ComputeMaskedBits(Src, KnownZero, KnownOne);
+    CurDAG->computeKnownBits(Src, KnownZero, KnownOne);
     FuncInfo->AddLiveOutRegInfo(DestReg, NumSignBits, KnownZero, KnownOne);
   } while (!Worklist.empty());
 }
@@ -1607,7 +1604,7 @@ bool SelectionDAGISel::CheckOrMask(SDValue LHS, ConstantSDNode *RHS,
   APInt NeededMask = DesiredMask & ~ActualMask;
 
   APInt KnownZero, KnownOne;
-  CurDAG->ComputeMaskedBits(LHS, KnownZero, KnownOne);
+  CurDAG->computeKnownBits(LHS, KnownZero, KnownOne);
 
   // If all the missing bits in the or are already known to be set, match!
   if ((NeededMask & KnownOne) == NeededMask)
@@ -1805,11 +1802,38 @@ SDNode *SelectionDAGISel::Select_INLINEASM(SDNode *N) {
   SelectInlineAsmMemoryOperands(Ops);
 
   EVT VTs[] = { MVT::Other, MVT::Glue };
-  SDValue New = CurDAG->getNode(ISD::INLINEASM, SDLoc(N),
-                                VTs, &Ops[0], Ops.size());
+  SDValue New = CurDAG->getNode(ISD::INLINEASM, SDLoc(N), VTs, Ops);
   New->setNodeId(-1);
   return New.getNode();
 }
+
+SDNode
+*SelectionDAGISel::Select_READ_REGISTER(SDNode *Op) {
+  SDLoc dl(Op);
+  MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(0));
+  const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
+  unsigned Reg = getTargetLowering()->getRegisterByName(
+                 RegStr->getString().data(), Op->getValueType(0));
+  SDValue New = CurDAG->getCopyFromReg(
+                        CurDAG->getEntryNode(), dl, Reg, Op->getValueType(0));
+  New->setNodeId(-1);
+  return New.getNode();
+}
+
+SDNode
+*SelectionDAGISel::Select_WRITE_REGISTER(SDNode *Op) {
+  SDLoc dl(Op);
+  MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(1));
+  const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
+  unsigned Reg = getTargetLowering()->getRegisterByName(
+                 RegStr->getString().data(), Op->getOperand(2).getValueType());
+  SDValue New = CurDAG->getCopyToReg(
+                        CurDAG->getEntryNode(), dl, Reg, Op->getOperand(2));
+  New->setNodeId(-1);
+  return New.getNode();
+}
+
+
 
 SDNode *SelectionDAGISel::Select_UNDEF(SDNode *N) {
   return CurDAG->SelectNodeTo(N, TargetOpcode::IMPLICIT_DEF,N->getValueType(0));
@@ -2080,13 +2104,13 @@ HandleMergeInputChains(SmallVectorImpl<SDNode*> &ChainNodesMatched,
   if (InputChains.size() == 1)
     return InputChains[0];
   return CurDAG->getNode(ISD::TokenFactor, SDLoc(ChainNodesMatched[0]),
-                         MVT::Other, &InputChains[0], InputChains.size());
+                         MVT::Other, InputChains);
 }
 
 /// MorphNode - Handle morphing a node in place for the selector.
 SDNode *SelectionDAGISel::
 MorphNode(SDNode *Node, unsigned TargetOpc, SDVTList VTList,
-          const SDValue *Ops, unsigned NumOps, unsigned EmitNodeInfo) {
+          ArrayRef<SDValue> Ops, unsigned EmitNodeInfo) {
   // It is possible we're using MorphNodeTo to replace a node with no
   // normal results with one that has a normal result (or we could be
   // adding a chain) and the input could have glue and chains as well.
@@ -2106,7 +2130,7 @@ MorphNode(SDNode *Node, unsigned TargetOpc, SDVTList VTList,
 
   // Call the underlying SelectionDAG routine to do the transmogrification. Note
   // that this deletes operands of the old node that become dead.
-  SDNode *Res = CurDAG->MorphNodeTo(Node, ~TargetOpc, VTList, Ops, NumOps);
+  SDNode *Res = CurDAG->MorphNodeTo(Node, ~TargetOpc, VTList, Ops);
 
   // MorphNodeTo can operate in two ways: if an existing node with the
   // specified operands exists, it can just return it.  Otherwise, it
@@ -2403,6 +2427,8 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
                                       NodeToMatch->getOperand(0));
     return nullptr;
   case ISD::INLINEASM: return Select_INLINEASM(NodeToMatch);
+  case ISD::READ_REGISTER: return Select_READ_REGISTER(NodeToMatch);
+  case ISD::WRITE_REGISTER: return Select_WRITE_REGISTER(NodeToMatch);
   case ISD::UNDEF:     return Select_UNDEF(NodeToMatch);
   }
 
@@ -2975,8 +3001,7 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
         }
 
       } else if (NodeToMatch->getOpcode() != ISD::DELETED_NODE) {
-        Res = MorphNode(NodeToMatch, TargetOpc, VTList, Ops.data(), Ops.size(),
-                        EmitNodeInfo);
+        Res = MorphNode(NodeToMatch, TargetOpc, VTList, Ops, EmitNodeInfo);
       } else {
         // NodeToMatch was eliminated by CSE when the target changed the DAG.
         // We will visit the equivalent node later.

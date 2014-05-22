@@ -193,6 +193,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "noinline";
   if (hasAttribute(Attribute::NonLazyBind))
     return "nonlazybind";
+  if (hasAttribute(Attribute::NonNull))
+    return "nonnull";
   if (hasAttribute(Attribute::NoRedZone))
     return "noredzone";
   if (hasAttribute(Attribute::NoReturn))
@@ -392,6 +394,7 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::Builtin:         return 1ULL << 41;
   case Attribute::OptimizeNone:    return 1ULL << 42;
   case Attribute::InAlloca:        return 1ULL << 43;
+  case Attribute::NonNull:         return 1ULL << 44;
   }
   llvm_unreachable("Unsupported attribute type");
 }
@@ -596,7 +599,8 @@ AttributeSet AttributeSet::get(LLVMContext &C,
   return getImpl(C, Attrs);
 }
 
-AttributeSet AttributeSet::get(LLVMContext &C, unsigned Index, AttrBuilder &B) {
+AttributeSet AttributeSet::get(LLVMContext &C, unsigned Index,
+                               const AttrBuilder &B) {
   if (!B.hasAttributes())
     return AttributeSet();
 
@@ -618,9 +622,9 @@ AttributeSet AttributeSet::get(LLVMContext &C, unsigned Index, AttrBuilder &B) {
   }
 
   // Add target-dependent (string) attributes.
-  for (AttrBuilder::td_iterator I = B.td_begin(), E = B.td_end();
-       I != E; ++I)
-    Attrs.push_back(std::make_pair(Index, Attribute::get(C, I->first,I->second)));
+  for (const AttrBuilder::td_type &TDA : B.td_attrs())
+    Attrs.push_back(
+        std::make_pair(Index, Attribute::get(C, TDA.first, TDA.second)));
 
   return get(C, Attrs);
 }
@@ -1176,6 +1180,7 @@ AttributeSet AttributeFuncs::typeIncompatible(Type *Ty, uint64_t Index) {
       .addAttribute(Attribute::Nest)
       .addAttribute(Attribute::NoAlias)
       .addAttribute(Attribute::NoCapture)
+      .addAttribute(Attribute::NonNull)
       .addAttribute(Attribute::ReadNone)
       .addAttribute(Attribute::ReadOnly)
       .addAttribute(Attribute::StructRet)

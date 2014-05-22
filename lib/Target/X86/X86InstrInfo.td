@@ -206,6 +206,8 @@ def X86rep_movs: SDNode<"X86ISD::REP_MOVS", SDTX86RepStr,
 
 def X86rdtsc   : SDNode<"X86ISD::RDTSC_DAG", SDTX86Void,
                         [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>;
+def X86rdtscp  : SDNode<"X86ISD::RDTSCP_DAG", SDTX86Void,
+                        [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>;
 
 def X86Wrapper    : SDNode<"X86ISD::Wrapper",     SDTX86Wrapper>;
 def X86WrapperRIP : SDNode<"X86ISD::WrapperRIP",  SDTX86Wrapper>;
@@ -249,7 +251,6 @@ def X86xor_flag  : SDNode<"X86ISD::XOR",  SDTBinaryArithWithFlags,
 def X86and_flag  : SDNode<"X86ISD::AND",  SDTBinaryArithWithFlags,
                           [SDNPCommutative]>;
 
-def X86bzhi   : SDNode<"X86ISD::BZHI",   SDTIntShiftOp>;
 def X86bextr  : SDNode<"X86ISD::BEXTR",  SDTIntBinOp>;
 
 def X86mul_imm : SDNode<"X86ISD::MUL_IMM", SDTIntBinOp>;
@@ -2001,6 +2002,46 @@ let Predicates = [HasLZCNT], Defs = [EFLAGS] in {
                       (implicit EFLAGS)]>, XS;
 }
 
+let Predicates = [HasLZCNT] in {
+  def : Pat<(X86cmov (ctlz GR16:$src), (i16 16), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))), 
+            (LZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (ctlz GR32:$src), (i32 32), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (LZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (ctlz GR64:$src), (i64 64), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (LZCNT64rr GR64:$src)>;
+  def : Pat<(X86cmov (i16 16), (ctlz GR16:$src), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))),
+            (LZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (i32 32), (ctlz GR32:$src), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (LZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (i64 64), (ctlz GR64:$src), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (LZCNT64rr GR64:$src)>;
+
+  def : Pat<(X86cmov (ctlz (loadi16 addr:$src)), (i16 16), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (LZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (ctlz (loadi32 addr:$src)), (i32 32), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (LZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (ctlz (loadi64 addr:$src)), (i64 64), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (LZCNT64rm addr:$src)>;
+  def : Pat<(X86cmov (i16 16), (ctlz (loadi16 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (LZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (i32 32), (ctlz (loadi32 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (LZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (i64 64), (ctlz (loadi64 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (LZCNT64rm addr:$src)>;
+}
+
 //===----------------------------------------------------------------------===//
 // BMI Instructions
 //
@@ -2077,6 +2118,47 @@ let Predicates = [HasBMI] in {
             (BLSI64rr GR64:$src)>;
 }
 
+let Predicates = [HasBMI] in {
+  def : Pat<(X86cmov (cttz GR16:$src), (i16 16), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))),
+            (TZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (cttz GR32:$src), (i32 32), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (TZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (cttz GR64:$src), (i64 64), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (TZCNT64rr GR64:$src)>;
+  def : Pat<(X86cmov (i16 16), (cttz GR16:$src), (X86_COND_E),
+              (X86cmp GR16:$src, (i16 0))),
+            (TZCNT16rr GR16:$src)>;
+  def : Pat<(X86cmov (i32 32), (cttz GR32:$src), (X86_COND_E),
+              (X86cmp GR32:$src, (i32 0))),
+            (TZCNT32rr GR32:$src)>;
+  def : Pat<(X86cmov (i64 64), (cttz GR64:$src), (X86_COND_E),
+              (X86cmp GR64:$src, (i64 0))),
+            (TZCNT64rr GR64:$src)>;
+
+  def : Pat<(X86cmov (cttz (loadi16 addr:$src)), (i16 16), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (TZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (cttz (loadi32 addr:$src)), (i32 32), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (TZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (cttz (loadi64 addr:$src)), (i64 64), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (TZCNT64rm addr:$src)>;
+  def : Pat<(X86cmov (i16 16), (cttz (loadi16 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi16 addr:$src), (i16 0))), 
+            (TZCNT16rm addr:$src)>;
+  def : Pat<(X86cmov (i32 32), (cttz (loadi32 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi32 addr:$src), (i32 0))), 
+            (TZCNT32rm addr:$src)>;
+  def : Pat<(X86cmov (i64 64), (cttz (loadi64 addr:$src)), (X86_COND_E),
+              (X86cmp (loadi64 addr:$src), (i64 0))), 
+            (TZCNT64rm addr:$src)>;
+}
+
+
 multiclass bmi_bextr_bzhi<bits<8> opc, string mnemonic, RegisterClass RC,
                           X86MemOperand x86memop, Intrinsic Int,
                           PatFrag ld_frag> {
@@ -2104,18 +2186,38 @@ let Predicates = [HasBMI2], Defs = [EFLAGS] in {
                                int_x86_bmi_bzhi_64, loadi64>, VEX_W;
 }
 
-def : Pat<(X86bzhi GR32:$src1, GR8:$src2),
-          (BZHI32rr GR32:$src1,
-                    (INSERT_SUBREG (i32 (IMPLICIT_DEF)), GR8:$src2, sub_8bit))>;
-def : Pat<(X86bzhi (loadi32 addr:$src1), GR8:$src2),
-          (BZHI32rm addr:$src1,
-                    (INSERT_SUBREG (i32 (IMPLICIT_DEF)), GR8:$src2, sub_8bit))>;
-def : Pat<(X86bzhi GR64:$src1, GR8:$src2),
-          (BZHI64rr GR64:$src1,
-                    (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GR8:$src2, sub_8bit))>;
-def : Pat<(X86bzhi (loadi64 addr:$src1), GR8:$src2),
-          (BZHI64rm addr:$src1,
-                    (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GR8:$src2, sub_8bit))>;
+
+def CountTrailingOnes : SDNodeXForm<imm, [{
+  // Count the trailing ones in the immediate.
+  return getI8Imm(CountTrailingOnes_64(N->getZExtValue()));
+}]>;
+
+def BZHIMask : ImmLeaf<i64, [{
+  return isMask_64(Imm) && (CountTrailingOnes_64(Imm) > 32);
+}]>;
+
+let Predicates = [HasBMI2] in {
+  def : Pat<(and GR64:$src, BZHIMask:$mask),
+            (BZHI64rr GR64:$src,
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+                             (MOV8ri (CountTrailingOnes imm:$mask)), sub_8bit))>;
+
+  def : Pat<(and GR32:$src, (add (shl 1, GR8:$lz), -1)),
+            (BZHI32rr GR32:$src,
+              (INSERT_SUBREG (i32 (IMPLICIT_DEF)), GR8:$lz, sub_8bit))>;
+
+  def : Pat<(and (loadi32 addr:$src), (add (shl 1, GR8:$lz), -1)),
+            (BZHI32rm addr:$src,
+              (INSERT_SUBREG (i32 (IMPLICIT_DEF)), GR8:$lz, sub_8bit))>;
+
+  def : Pat<(and GR64:$src, (add (shl 1, GR8:$lz), -1)),
+            (BZHI64rr GR64:$src,
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GR8:$lz, sub_8bit))>;
+
+  def : Pat<(and (loadi64 addr:$src), (add (shl 1, GR8:$lz), -1)),
+            (BZHI64rm addr:$src,
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GR8:$lz, sub_8bit))>;
+} // HasBMI2
 
 let Predicates = [HasBMI] in {
   def : Pat<(X86bextr GR32:$src1, GR32:$src2),
@@ -2617,21 +2719,21 @@ def : InstAlias<"fnstsw"     , (FNSTSW16r)>;
 
 // lcall and ljmp aliases.  This seems to be an odd mapping in 64-bit mode, but
 // this is compatible with what GAS does.
-def : InstAlias<"lcall $seg, $off", (FARCALL32i i32imm:$off, i16imm:$seg)>, Requires<[Not16BitMode]>;
-def : InstAlias<"ljmp $seg, $off",  (FARJMP32i  i32imm:$off, i16imm:$seg)>, Requires<[Not16BitMode]>;
-def : InstAlias<"lcall *$dst",      (FARCALL32m opaque48mem:$dst)>, Requires<[Not16BitMode]>;
-def : InstAlias<"ljmp *$dst",       (FARJMP32m  opaque48mem:$dst)>, Requires<[Not16BitMode]>;
-def : InstAlias<"lcall $seg, $off", (FARCALL16i i16imm:$off, i16imm:$seg)>, Requires<[In16BitMode]>;
-def : InstAlias<"ljmp $seg, $off",  (FARJMP16i  i16imm:$off, i16imm:$seg)>, Requires<[In16BitMode]>;
-def : InstAlias<"lcall *$dst",      (FARCALL16m opaque32mem:$dst)>, Requires<[In16BitMode]>;
-def : InstAlias<"ljmp *$dst",       (FARJMP16m  opaque32mem:$dst)>, Requires<[In16BitMode]>;
+def : InstAlias<"lcall $seg, $off", (FARCALL32i i32imm:$off, i16imm:$seg), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"ljmp $seg, $off",  (FARJMP32i  i32imm:$off, i16imm:$seg), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"lcall *$dst",      (FARCALL32m opaque48mem:$dst), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"ljmp *$dst",       (FARJMP32m  opaque48mem:$dst), 0>, Requires<[Not16BitMode]>;
+def : InstAlias<"lcall $seg, $off", (FARCALL16i i16imm:$off, i16imm:$seg), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"ljmp $seg, $off",  (FARJMP16i  i16imm:$off, i16imm:$seg), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"lcall *$dst",      (FARCALL16m opaque32mem:$dst), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"ljmp *$dst",       (FARJMP16m  opaque32mem:$dst), 0>, Requires<[In16BitMode]>;
 
-def : InstAlias<"call *$dst",       (CALL64m i16mem:$dst)>, Requires<[In64BitMode]>;
-def : InstAlias<"jmp *$dst",        (JMP64m  i16mem:$dst)>, Requires<[In64BitMode]>;
-def : InstAlias<"call *$dst",       (CALL32m i16mem:$dst)>, Requires<[In32BitMode]>;
-def : InstAlias<"jmp *$dst",        (JMP32m  i16mem:$dst)>, Requires<[In32BitMode]>;
-def : InstAlias<"call *$dst",       (CALL16m i16mem:$dst)>, Requires<[In16BitMode]>;
-def : InstAlias<"jmp *$dst",        (JMP16m  i16mem:$dst)>, Requires<[In16BitMode]>;
+def : InstAlias<"call *$dst",       (CALL64m i16mem:$dst), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"jmp *$dst",        (JMP64m  i16mem:$dst), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"call *$dst",       (CALL32m i16mem:$dst), 0>, Requires<[In32BitMode]>;
+def : InstAlias<"jmp *$dst",        (JMP32m  i16mem:$dst), 0>, Requires<[In32BitMode]>;
+def : InstAlias<"call *$dst",       (CALL16m i16mem:$dst), 0>, Requires<[In16BitMode]>;
+def : InstAlias<"jmp *$dst",        (JMP16m  i16mem:$dst), 0>, Requires<[In16BitMode]>;
 
 
 // "imul <imm>, B" is an alias for "imul <imm>, B, B".
@@ -2664,11 +2766,11 @@ def : InstAlias<"jmpl $seg, $off",  (FARJMP32i  i32imm:$off, i16imm:$seg)>;
 // Force mov without a suffix with a segment and mem to prefer the 'l' form of
 // the move.  All segment/mem forms are equivalent, this has the shortest
 // encoding.
-def : InstAlias<"mov $mem, $seg", (MOV32sm SEGMENT_REG:$seg, i32mem:$mem)>;
-def : InstAlias<"mov $seg, $mem", (MOV32ms i32mem:$mem, SEGMENT_REG:$seg)>;
+def : InstAlias<"mov $mem, $seg", (MOV32sm SEGMENT_REG:$seg, i32mem:$mem), 0>;
+def : InstAlias<"mov $seg, $mem", (MOV32ms i32mem:$mem, SEGMENT_REG:$seg), 0>;
 
 // Match 'movq <largeimm>, <reg>' as an alias for movabsq.
-def : InstAlias<"movq $imm, $reg", (MOV64ri GR64:$reg, i64imm:$imm)>;
+def : InstAlias<"movq $imm, $reg", (MOV64ri GR64:$reg, i64imm:$imm), 0>;
 
 // Match 'movq GR64, MMX' as an alias for movd.
 def : InstAlias<"movq $src, $dst",
@@ -2705,7 +2807,7 @@ def : InstAlias<"outl\t$port", (OUT32ir i8imm:$port), 0>;
 // 'sldt <mem>' can be encoded with either sldtw or sldtq with the same
 // effect (both store to a 16-bit mem).  Force to sldtw to avoid ambiguity
 // errors, since its encoding is the most compact.
-def : InstAlias<"sldt $mem", (SLDT16m i16mem:$mem)>;
+def : InstAlias<"sldt $mem", (SLDT16m i16mem:$mem), 0>;
 
 // shld/shrd op,op -> shld op, op, CL
 def : InstAlias<"shld{w}\t{$r2, $r1|$r1, $r2}", (SHLD16rrCL GR16:$r1, GR16:$r2), 0>;
@@ -2751,19 +2853,29 @@ defm : ShiftRotateByOneAlias<"ror", "ROR">;
 FIXME */
 
 // test: We accept "testX <reg>, <mem>" and "testX <mem>, <reg>" as synonyms.
-def : InstAlias<"test{b}\t{$val, $mem|$mem, $val}", (TEST8rm  GR8 :$val, i8mem :$mem)>;
-def : InstAlias<"test{w}\t{$val, $mem|$mem, $val}", (TEST16rm GR16:$val, i16mem:$mem)>;
-def : InstAlias<"test{l}\t{$val, $mem|$mem, $val}", (TEST32rm GR32:$val, i32mem:$mem)>;
-def : InstAlias<"test{q}\t{$val, $mem|$mem, $val}", (TEST64rm GR64:$val, i64mem:$mem)>;
+def : InstAlias<"test{b}\t{$val, $mem|$mem, $val}",
+                (TEST8rm  GR8 :$val, i8mem :$mem), 0>;
+def : InstAlias<"test{w}\t{$val, $mem|$mem, $val}",
+                (TEST16rm GR16:$val, i16mem:$mem), 0>;
+def : InstAlias<"test{l}\t{$val, $mem|$mem, $val}",
+                (TEST32rm GR32:$val, i32mem:$mem), 0>;
+def : InstAlias<"test{q}\t{$val, $mem|$mem, $val}",
+                (TEST64rm GR64:$val, i64mem:$mem), 0>;
 
 // xchg: We accept "xchgX <reg>, <mem>" and "xchgX <mem>, <reg>" as synonyms.
-def : InstAlias<"xchg{b}\t{$mem, $val|$val, $mem}", (XCHG8rm  GR8 :$val, i8mem :$mem)>;
-def : InstAlias<"xchg{w}\t{$mem, $val|$val, $mem}", (XCHG16rm GR16:$val, i16mem:$mem)>;
-def : InstAlias<"xchg{l}\t{$mem, $val|$val, $mem}", (XCHG32rm GR32:$val, i32mem:$mem)>;
-def : InstAlias<"xchg{q}\t{$mem, $val|$val, $mem}", (XCHG64rm GR64:$val, i64mem:$mem)>;
+def : InstAlias<"xchg{b}\t{$mem, $val|$val, $mem}",
+                (XCHG8rm  GR8 :$val, i8mem :$mem), 0>;
+def : InstAlias<"xchg{w}\t{$mem, $val|$val, $mem}",
+                (XCHG16rm GR16:$val, i16mem:$mem), 0>;
+def : InstAlias<"xchg{l}\t{$mem, $val|$val, $mem}",
+                (XCHG32rm GR32:$val, i32mem:$mem), 0>;
+def : InstAlias<"xchg{q}\t{$mem, $val|$val, $mem}",
+                (XCHG64rm GR64:$val, i64mem:$mem), 0>;
 
 // xchg: We accept "xchgX <reg>, %eax" and "xchgX %eax, <reg>" as synonyms.
-def : InstAlias<"xchg{w}\t{%ax, $src|$src, ax}", (XCHG16ar GR16:$src)>;
-def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}", (XCHG32ar GR32:$src)>, Requires<[Not64BitMode]>;
-def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}", (XCHG32ar64 GR32_NOAX:$src)>, Requires<[In64BitMode]>;
-def : InstAlias<"xchg{q}\t{%rax, $src|$src, rax}", (XCHG64ar GR64:$src)>;
+def : InstAlias<"xchg{w}\t{%ax, $src|$src, ax}", (XCHG16ar GR16:$src), 0>;
+def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}",
+                (XCHG32ar GR32:$src), 0>, Requires<[Not64BitMode]>;
+def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}",
+                (XCHG32ar64 GR32_NOAX:$src), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"xchg{q}\t{%rax, $src|$src, rax}", (XCHG64ar GR64:$src), 0>;

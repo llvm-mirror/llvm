@@ -30,6 +30,7 @@
 #include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Threading.h"
@@ -40,6 +41,8 @@
 #include <cstring>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "ir"
 
 void llvm::initializeCore(PassRegistry &Registry) {
   initializeDominatorTreeWrapperPassPass(Registry);
@@ -84,6 +87,13 @@ void LLVMContextSetDiagnosticHandler(LLVMContextRef C,
   unwrap(C)->setDiagnosticHandler(
       LLVM_EXTENSION reinterpret_cast<LLVMContext::DiagnosticHandlerTy>(Handler),
       DiagnosticContext);
+}
+
+void LLVMContextSetYieldCallback(LLVMContextRef C, LLVMYieldCallback Callback,
+                                 void *OpaqueHandle) {
+  auto YieldCallback =
+    LLVM_EXTENSION reinterpret_cast<LLVMContext::YieldCallbackTy>(Callback);
+  unwrap(C)->setYieldCallback(YieldCallback, OpaqueHandle);
 }
 
 void LLVMContextDispose(LLVMContextRef C) {
@@ -1280,7 +1290,7 @@ const char *LLVMGetSection(LLVMValueRef Global) {
 }
 
 void LLVMSetSection(LLVMValueRef Global, const char *Section) {
-  unwrap<GlobalValue>(Global)->setSection(Section);
+  unwrap<GlobalObject>(Global)->setSection(Section);
 }
 
 LLVMVisibility LLVMGetVisibility(LLVMValueRef Global) {
@@ -1330,7 +1340,7 @@ unsigned LLVMGetAlignment(LLVMValueRef V) {
 
 void LLVMSetAlignment(LLVMValueRef V, unsigned Bytes) {
   Value *P = unwrap<Value>(V);
-  if (GlobalValue *GV = dyn_cast<GlobalValue>(P))
+  if (GlobalObject *GV = dyn_cast<GlobalObject>(P))
     GV->setAlignment(Bytes);
   else if (AllocaInst *AI = dyn_cast<AllocaInst>(P))
     AI->setAlignment(Bytes);
@@ -1478,8 +1488,10 @@ void LLVMSetExternallyInitialized(LLVMValueRef GlobalVar, LLVMBool IsExtInit) {
 
 LLVMValueRef LLVMAddAlias(LLVMModuleRef M, LLVMTypeRef Ty, LLVMValueRef Aliasee,
                           const char *Name) {
-  return wrap(new GlobalAlias(unwrap(Ty), GlobalValue::ExternalLinkage, Name,
-                              unwrap<Constant>(Aliasee), unwrap (M)));
+  auto *PTy = cast<PointerType>(unwrap(Ty));
+  return wrap(GlobalAlias::create(PTy->getElementType(), PTy->getAddressSpace(),
+                                  GlobalValue::ExternalLinkage, Name,
+                                  unwrap<GlobalObject>(Aliasee), unwrap(M)));
 }
 
 /*--.. Operations on functions .............................................--*/

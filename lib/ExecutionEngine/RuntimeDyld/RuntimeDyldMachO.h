@@ -25,22 +25,34 @@ using namespace llvm::object;
 
 namespace llvm {
 class RuntimeDyldMachO : public RuntimeDyldImpl {
-  bool resolveI386Relocation(uint8_t *LocalAddress, uint64_t FinalAddress,
-                             uint64_t Value, bool isPCRel, unsigned Type,
-                             unsigned Size, int64_t Addend);
-  bool resolveX86_64Relocation(uint8_t *LocalAddress, uint64_t FinalAddress,
-                               uint64_t Value, bool isPCRel, unsigned Type,
-                               unsigned Size, int64_t Addend);
-  bool resolveARMRelocation(uint8_t *LocalAddress, uint64_t FinalAddress,
-                            uint64_t Value, bool isPCRel, unsigned Type,
-                            unsigned Size, int64_t Addend);
-  bool resolveARM64Relocation(uint8_t *LocalAddress, uint64_t FinalAddress,
-                              uint64_t Value, bool IsPCRel, unsigned Type,
-                              unsigned Size, int64_t Addend);
+private:
 
-  void resolveRelocation(const SectionEntry &Section, uint64_t Offset,
-                         uint64_t Value, uint32_t Type, int64_t Addend,
-                         bool isPCRel, unsigned Size);
+  /// Write the least significant 'Size' bytes in 'Value' out at the address
+  /// pointed to by Addr. Check for overflow.
+  bool applyRelocationValue(uint8_t *Addr, uint64_t Value, unsigned Size) {
+    for (unsigned i = 0; i < Size; ++i) {
+      *Addr++ = (uint8_t)Value;
+      Value >>= 8;
+    }
+
+    if (Value) // Catch overflow
+      return Error("Relocation out of range.");
+
+    return false;
+  }
+
+  bool resolveI386Relocation(const RelocationEntry &RE, uint64_t Value);
+  bool resolveX86_64Relocation(const RelocationEntry &RE, uint64_t Value);
+  bool resolveARMRelocation(const RelocationEntry &RE, uint64_t Value);
+  bool resolveARM64Relocation(const RelocationEntry &RE, uint64_t Value);
+
+  // Populate stubs in __jump_table section.
+  void populateJumpTable(MachOObjectFile &Obj, const SectionRef &JTSection,
+                         unsigned JTSectionID);
+
+  // Populate __pointers section.
+  void populatePointersSection(MachOObjectFile &Obj, const SectionRef &PTSection,
+                               unsigned PTSectionID);
 
   unsigned getMaxStubSize() override {
     if (Arch == Triple::arm || Arch == Triple::thumb)
@@ -52,6 +64,12 @@ class RuntimeDyldMachO : public RuntimeDyldImpl {
   }
 
   unsigned getStubAlignment() override { return 1; }
+
+  relocation_iterator processSECTDIFFRelocation(
+                                             unsigned SectionID,
+                                             relocation_iterator RelI,
+                                             ObjectImage &ObjImg,
+                                             ObjSectionToIDMap &ObjSectionToID);
 
   struct EHFrameRelatedSections {
     EHFrameRelatedSections()
@@ -81,15 +99,16 @@ public:
   bool isCompatibleFormat(const ObjectBuffer *Buffer) const override;
   bool isCompatibleFile(const object::ObjectFile *Obj) const override;
   void registerEHFrames() override;
-  void finalizeLoad(ObjSectionToIDMap &SectionMap) override;
+  void finalizeLoad(ObjectImage &ObjImg,
+                    ObjSectionToIDMap &SectionMap) override;
 
   static ObjectImage *createObjectImage(ObjectBuffer *InputBuffer) {
     return new ObjectImageCommon(InputBuffer);
   }
 
   static ObjectImage *
-  createObjectImageFromFile(object::ObjectFile *InputObject) {
-    return new ObjectImageCommon(InputObject);
+  createObjectImageFromFile(std::unique_ptr<object::ObjectFile> InputObject) {
+    return new ObjectImageCommon(std::move(InputObject));
   }
 };
 

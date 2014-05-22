@@ -52,7 +52,7 @@ foo:
 
 ; Check for error on invalid 'C' operand value.
   sys #2, c16, c5, #7
-; CHECK-ERRORS: invalid operand for instruction
+; CHECK-ERRORS: error: Expected cN operand where 0 <= N <= 15
 
 ;-----------------------------------------------------------------------------
 ; MSR/MRS instructions
@@ -586,14 +586,12 @@ foo:
   msr RMR_EL3, x0
   msr RMR_EL2, x0
   msr RMR_EL1, x0
-  msr CPM_IOACC_CTL_EL3, x0
   msr OSLAR_EL1, x3
   msr DBGDTRTX_EL0, x3
         
 ; CHECK: msr	RMR_EL3, x0             ; encoding: [0x40,0xc0,0x1e,0xd5]
 ; CHECK: msr	RMR_EL2, x0             ; encoding: [0x40,0xc0,0x1c,0xd5]
 ; CHECK: msr	RMR_EL1, x0             ; encoding: [0x40,0xc0,0x18,0xd5]
-; CHECK: msr	CPM_IOACC_CTL_EL3, x0   ; encoding: [0x00,0xf2,0x1f,0xd5]
 ; CHECK: msr	OSLAR_EL1, x3           ; encoding: [0x83,0x10,0x10,0xd5]
 ; CHECK: msr	DBGDTRTX_EL0, x3        ; encoding: [0x03,0x05,0x13,0xd5]
         

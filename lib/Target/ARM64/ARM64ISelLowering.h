@@ -160,7 +160,32 @@ enum {
 
   // {s|u}int to FP within a FP register.
   SITOF,
-  UITOF
+  UITOF,
+
+  // NEON Load/Store with post-increment base updates
+  LD2post = ISD::FIRST_TARGET_MEMORY_OPCODE,
+  LD3post,
+  LD4post,
+  ST2post,
+  ST3post,
+  ST4post,
+  LD1x2post,
+  LD1x3post,
+  LD1x4post,
+  ST1x2post,
+  ST1x3post,
+  ST1x4post,
+  LD1DUPpost,
+  LD2DUPpost,
+  LD3DUPpost,
+  LD4DUPpost,
+  LD1LANEpost,
+  LD2LANEpost,
+  LD3LANEpost,
+  LD4LANEpost,
+  ST2LANEpost,
+  ST3LANEpost,
+  ST4LANEpost
 };
 
 } // end namespace ARM64ISD
@@ -178,19 +203,19 @@ public:
   /// value.
   CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg) const;
 
-  /// computeMaskedBitsForTargetNode - Determine which of the bits specified in
+  /// computeKnownBitsForTargetNode - Determine which of the bits specified in
   /// Mask are known to be either zero or one and return them in the
   /// KnownZero/KnownOne bitsets.
-  void computeMaskedBitsForTargetNode(const SDValue Op, APInt &KnownZero,
-                                      APInt &KnownOne, const SelectionDAG &DAG,
-                                      unsigned Depth = 0) const;
+  void computeKnownBitsForTargetNode(const SDValue Op, APInt &KnownZero,
+                                     APInt &KnownOne, const SelectionDAG &DAG,
+                                     unsigned Depth = 0) const override;
 
   MVT getScalarShiftAmountTy(EVT LHSTy) const override;
 
   /// allowsUnalignedMemoryAccesses - Returns true if the target allows
   /// unaligned memory accesses. of the specified type.
   bool allowsUnalignedMemoryAccesses(EVT VT, unsigned AddrSpace = 0,
-                                     bool *Fast = 0) const override {
+                                     bool *Fast = nullptr) const override {
     if (RequireStrictAlign)
       return false;
     // FIXME: True for Cyclone, but not necessary others.
@@ -284,6 +309,9 @@ public:
 
   const MCPhysReg *getScratchRegisters(CallingConv::ID CC) const override;
 
+  /// \brief Returns false if N is a bit extraction pattern of (X >> C) & Mask.
+  bool isDesirableToCommuteWithShift(const SDNode *N) const override;
+
   /// \brief Returns true if it is beneficial to convert a load of a constant
   /// to just the constant itself.
   bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
@@ -326,6 +354,16 @@ private:
       const SmallVectorImpl<ISD::OutputArg> &Outs,
       const SmallVectorImpl<SDValue> &OutVals,
       const SmallVectorImpl<ISD::InputArg> &Ins, SelectionDAG &DAG) const;
+
+  /// Finds the incoming stack arguments which overlap the given fixed stack
+  /// object and incorporates their load into the current chain. This prevents
+  /// an upcoming store from clobbering the stack argument before it's used.
+  SDValue addTokenForArgument(SDValue Chain, SelectionDAG &DAG,
+                              MachineFrameInfo *MFI, int ClobberedFI) const;
+
+  bool DoesCalleeRestoreStack(CallingConv::ID CallCC, bool TailCallOpt) const;
+
+  bool IsTailCallConvention(CallingConv::ID CallCC) const;
 
   void saveVarArgRegisters(CCState &CCInfo, SelectionDAG &DAG, SDLoc DL,
                            SDValue &Chain) const;
@@ -383,33 +421,37 @@ private:
   SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
 
-  ConstraintType getConstraintType(const std::string &Constraint) const;
+  ConstraintType
+  getConstraintType(const std::string &Constraint) const override;
+  unsigned getRegisterByName(const char* RegName, EVT VT) const override;
 
   /// Examine constraint string and operand type and determine a weight value.
   /// The operand object must already have been set up with the operand type.
-  ConstraintWeight getSingleConstraintMatchWeight(AsmOperandInfo &info,
-                                                  const char *constraint) const;
+  ConstraintWeight
+  getSingleConstraintMatchWeight(AsmOperandInfo &info,
+                                 const char *constraint) const override;
 
   std::pair<unsigned, const TargetRegisterClass *>
-  getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const;
+  getRegForInlineAsmConstraint(const std::string &Constraint,
+                               MVT VT) const override;
   void LowerAsmOperandForConstraint(SDValue Op, std::string &Constraint,
                                     std::vector<SDValue> &Ops,
-                                    SelectionDAG &DAG) const;
+                                    SelectionDAG &DAG) const override;
 
-  bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const;
-  bool mayBeEmittedAsTailCall(CallInst *CI) const;
+  bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const override;
+  bool mayBeEmittedAsTailCall(CallInst *CI) const override;
   bool getIndexedAddressParts(SDNode *Op, SDValue &Base, SDValue &Offset,
                               ISD::MemIndexedMode &AM, bool &IsInc,
                               SelectionDAG &DAG) const;
   bool getPreIndexedAddressParts(SDNode *N, SDValue &Base, SDValue &Offset,
                                  ISD::MemIndexedMode &AM,
-                                 SelectionDAG &DAG) const;
+                                 SelectionDAG &DAG) const override;
   bool getPostIndexedAddressParts(SDNode *N, SDNode *Op, SDValue &Base,
                                   SDValue &Offset, ISD::MemIndexedMode &AM,
-                                  SelectionDAG &DAG) const;
+                                  SelectionDAG &DAG) const override;
 
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
-                          SelectionDAG &DAG) const;
+                          SelectionDAG &DAG) const override;
 };
 
 namespace ARM64 {

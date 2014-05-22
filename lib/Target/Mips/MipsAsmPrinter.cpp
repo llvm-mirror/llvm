@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mips-asm-printer"
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "MCTargetDesc/MipsMCNaCl.h"
@@ -51,6 +50,8 @@
 #include <string>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mips-asm-printer"
 
 MipsTargetStreamer &MipsAsmPrinter::getTargetStreamer() {
   return static_cast<MipsTargetStreamer &>(*OutStreamer.getTargetStreamer());
@@ -147,7 +148,8 @@ void MipsAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // removing another test for this situation downstream in the
     // callchain.
     //
-    if (I->isPseudo() && !Subtarget->inMips16Mode())
+    if (I->isPseudo() && !Subtarget->inMips16Mode()
+        && !isLongBranchPseudo(I->getOpcode()))
       llvm_unreachable("Pseudo opcode found in EmitInstruction()");
 
     MCInst TmpInst0;
@@ -836,7 +838,7 @@ void MipsAsmPrinter::EmitFPCallStub(
   const MCSectionELF *M = OutContext.getELFSection(
       ".mips16.call.fp." + std::string(Symbol), ELF::SHT_PROGBITS,
       ELF::SHF_ALLOC | ELF::SHF_EXECINSTR, SectionKind::getText());
-  OutStreamer.SwitchSection(M, 0);
+  OutStreamer.SwitchSection(M, nullptr);
   //
   // .align 2
   //
@@ -951,6 +953,13 @@ void MipsAsmPrinter::NaClAlignIndirectJumpTargets(MachineFunction &MF) {
     if (MBB->hasAddressTaken())
       MBB->setAlignment(MIPS_NACL_BUNDLE_ALIGN);
   }
+}
+
+bool MipsAsmPrinter::isLongBranchPseudo(int Opcode) const {
+  return (Opcode == Mips::LONG_BRANCH_LUi
+          || Opcode == Mips::LONG_BRANCH_ADDiu
+          || Opcode == Mips::LONG_BRANCH_LUi64
+          || Opcode == Mips::LONG_BRANCH_DADDiu);
 }
 
 // Force static initialization.

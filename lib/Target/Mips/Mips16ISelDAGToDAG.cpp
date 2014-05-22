@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mips-isel"
 #include "Mips16ISelDAGToDAG.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "Mips.h"
@@ -35,6 +34,8 @@
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "mips-isel"
+
 bool Mips16DAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
   if (!Subtarget.inMips16Mode())
     return false;
@@ -44,7 +45,7 @@ bool Mips16DAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
 std::pair<SDNode*, SDNode*>
 Mips16DAGToDAGISel::selectMULT(SDNode *N, unsigned Opc, SDLoc DL, EVT Ty,
                                bool HasLo, bool HasHi) {
-  SDNode *Lo = 0, *Hi = 0;
+  SDNode *Lo = nullptr, *Hi = nullptr;
   SDNode *Mul = CurDAG->getMachineNode(Opc, DL, MVT::Glue, N->getOperand(0),
                                        N->getOperand(1));
   SDValue InFlag = SDValue(Mul, 0);
@@ -224,10 +225,12 @@ bool Mips16DAGToDAGISel::selectAddr16(
     // If an indexed floating point load/store can be emitted, return false.
     const LSBaseSDNode *LS = dyn_cast<LSBaseSDNode>(Parent);
 
-    if (LS &&
-        (LS->getMemoryVT() == MVT::f32 || LS->getMemoryVT() == MVT::f64) &&
-        Subtarget.hasFPIdx())
-      return false;
+    if (LS) {
+      if (LS->getMemoryVT() == MVT::f32 && Subtarget.hasMips4_32r2())
+        return false;
+      if (LS->getMemoryVT() == MVT::f64 && Subtarget.hasMips4_32r2())
+        return false;
+    }
   }
   Base   = Addr;
   Offset = CurDAG->getTargetConstant(0, ValTy);
@@ -297,7 +300,7 @@ std::pair<bool, SDNode*> Mips16DAGToDAGISel::selectNode(SDNode *Node) {
     if (!SDValue(Node, 1).use_empty())
       ReplaceUses(SDValue(Node, 1), SDValue(LoHi.second, 0));
 
-    return std::make_pair(true, (SDNode*)NULL);
+    return std::make_pair(true, nullptr);
   }
 
   case ISD::MULHS:
@@ -308,7 +311,7 @@ std::pair<bool, SDNode*> Mips16DAGToDAGISel::selectNode(SDNode *Node) {
   }
   }
 
-  return std::make_pair(false, (SDNode*)NULL);
+  return std::make_pair(false, nullptr);
 }
 
 FunctionPass *llvm::createMips16ISelDag(MipsTargetMachine &TM) {

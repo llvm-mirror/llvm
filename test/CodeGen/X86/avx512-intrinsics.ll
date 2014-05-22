@@ -78,7 +78,7 @@ declare <8 x double> @llvm.x86.avx512.mask.rndscale.pd.512(<8 x double>, i32, <8
 
 define <8 x double> @test7(<8 x double> %a) {
 ; CHECK: vrndscalepd {{.*}}encoding: [0x62,0xf3,0xfd,0x48,0x09,0xc0,0x0b]
-  %res = call <8 x double> @llvm.x86.avx512.mask.rndscale.pd.512(<8 x double> %a, i32 11, <8 x double> zeroinitializer, i8 -1, i32 4)
+  %res = call <8 x double> @llvm.x86.avx512.mask.rndscale.pd.512(<8 x double> %a, i32 11, <8 x double> %a, i8 -1, i32 4)
   ret <8 x double>%res
 }
 
@@ -86,7 +86,7 @@ declare <16 x float> @llvm.x86.avx512.mask.rndscale.ps.512(<16 x float>, i32, <1
 
 define <16 x float> @test8(<16 x float> %a) {
 ; CHECK: vrndscaleps {{.*}}encoding: [0x62,0xf3,0x7d,0x48,0x08,0xc0,0x0b]
-  %res = call <16 x float> @llvm.x86.avx512.mask.rndscale.ps.512(<16 x float> %a, i32 11, <16 x float> zeroinitializer, i16 -1, i32 4)
+  %res = call <16 x float> @llvm.x86.avx512.mask.rndscale.ps.512(<16 x float> %a, i32 11, <16 x float> %a, i16 -1, i32 4)
   ret <16 x float>%res
 }
 
@@ -537,3 +537,11 @@ define void @test_store2(<8 x double> %data, i8* %ptr, i8 %mask) {
 }
 
 declare void @llvm.x86.avx512.mask.storeu.pd.512(i8*, <8 x double>, i8 )
+
+define <16 x float> @test_vpermt2ps(<16 x float>%x, <16 x float>%y, <16 x i32>%perm) {
+; CHECK: vpermt2ps {{.*}}encoding: [0x62,0xf2,0x6d,0x48,0x7f,0xc1]
+  %res = call <16 x float> @llvm.x86.avx512.mask.vpermt.ps.512(<16 x i32>%perm, <16 x float>%x, <16 x float>%y, i16 -1)
+  ret <16 x float> %res
+}
+
+declare <16 x float> @llvm.x86.avx512.mask.vpermt.ps.512(<16 x i32>, <16 x float>, <16 x float>, i16)

@@ -7,7 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "assembler"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
@@ -28,8 +27,10 @@
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
-
+#include <tuple>
 using namespace llvm;
+
+#define DEBUG_TYPE "assembler"
 
 namespace {
 namespace stats {
@@ -116,36 +117,89 @@ uint64_t MCAsmLayout::getFragmentOffset(const MCFragment *F) const {
   return F->Offset;
 }
 
-uint64_t MCAsmLayout::getSymbolOffset(const MCSymbolData *SD) const {
+// Simple getSymbolOffset helper for the non-varibale case.
+static bool getLabelOffset(const MCAsmLayout &Layout, const MCSymbolData &SD,
+                           bool ReportError, uint64_t &Val) {
+  if (!SD.getFragment()) {
+    if (ReportError)
+      report_fatal_error("unable to evaluate offset to undefined symbol '" +
+                         SD.getSymbol().getName() + "'");
+    return false;
+  }
+  Val = Layout.getFragmentOffset(SD.getFragment()) + SD.getOffset();
+  return true;
+}
+
+static bool getSymbolOffsetImpl(const MCAsmLayout &Layout,
+                                const MCSymbolData *SD, bool ReportError,
+                                uint64_t &Val) {
   const MCSymbol &S = SD->getSymbol();
 
-  // If this is a variable, then recursively evaluate now.
-  if (S.isVariable()) {
-    MCValue Target;
-    if (!S.getVariableValue()->EvaluateAsRelocatable(Target, this))
-      report_fatal_error("unable to evaluate offset for variable '" +
-                         S.getName() + "'");
+  if (!S.isVariable())
+    return getLabelOffset(Layout, *SD, ReportError, Val);
 
-    // Verify that any used symbols are defined.
-    if (Target.getSymA() && Target.getSymA()->getSymbol().isUndefined())
-      report_fatal_error("unable to evaluate offset to undefined symbol '" +
-                         Target.getSymA()->getSymbol().getName() + "'");
-    if (Target.getSymB() && Target.getSymB()->getSymbol().isUndefined())
-      report_fatal_error("unable to evaluate offset to undefined symbol '" +
-                         Target.getSymB()->getSymbol().getName() + "'");
+  // If SD is a variable, evaluate it.
+  MCValue Target;
+  if (!S.getVariableValue()->EvaluateAsValue(Target, &Layout))
+    report_fatal_error("unable to evaluate offset for variable '" +
+                       S.getName() + "'");
 
-    uint64_t Offset = Target.getConstant();
-    if (Target.getSymA())
-      Offset += getSymbolOffset(&Assembler.getSymbolData(
-                                  Target.getSymA()->getSymbol()));
-    if (Target.getSymB())
-      Offset -= getSymbolOffset(&Assembler.getSymbolData(
-                                  Target.getSymB()->getSymbol()));
-    return Offset;
+  uint64_t Offset = Target.getConstant();
+
+  const MCAssembler &Asm = Layout.getAssembler();
+
+  const MCSymbolRefExpr *A = Target.getSymA();
+  if (A) {
+    uint64_t ValA;
+    if (!getLabelOffset(Layout, Asm.getSymbolData(A->getSymbol()), ReportError,
+                        ValA))
+      return false;
+    Offset += ValA;
   }
 
-  assert(SD->getFragment() && "Invalid getOffset() on undefined symbol!");
-  return getFragmentOffset(SD->getFragment()) + SD->getOffset();
+  const MCSymbolRefExpr *B = Target.getSymB();
+  if (B) {
+    uint64_t ValB;
+    if (!getLabelOffset(Layout, Asm.getSymbolData(B->getSymbol()), ReportError,
+                        ValB))
+      return false;
+    Offset -= ValB;
+  }
+
+  Val = Offset;
+  return true;
+}
+
+bool MCAsmLayout::getSymbolOffset(const MCSymbolData *SD, uint64_t &Val) const {
+  return getSymbolOffsetImpl(*this, SD, false, Val);
+}
+
+uint64_t MCAsmLayout::getSymbolOffset(const MCSymbolData *SD) const {
+  uint64_t Val;
+  getSymbolOffsetImpl(*this, SD, true, Val);
+  return Val;
+}
+
+const MCSymbol *MCAsmLayout::getBaseSymbol(const MCSymbol &Symbol) const {
+  if (!Symbol.isVariable())
+    return &Symbol;
+
+  const MCExpr *Expr = Symbol.getVariableValue();
+  MCValue Value;
+  if (!Expr->EvaluateAsValue(Value, this))
+    llvm_unreachable("Invalid Expression");
+
+  const MCSymbolRefExpr *RefB = Value.getSymB();
+  if (RefB)
+    Assembler.getContext().FatalError(
+        SMLoc(), Twine("symbol '") + RefB->getSymbol().getName() +
+                     "' could not be evaluated in a subtraction expression");
+
+  const MCSymbolRefExpr *A = Value.getSymA();
+  if (!A)
+    return nullptr;
+
+  return &A->getSymbol();
 }
 
 uint64_t MCAsmLayout::getSectionAddressSize(const MCSectionData *SD) const {
@@ -320,6 +374,31 @@ void MCAssembler::reset() {
   getEmitter().reset();
   getWriter().reset();
   getLOHContainer().reset();
+}
+
+bool MCAssembler::isThumbFunc(const MCSymbol *Symbol) const {
+  if (ThumbFuncs.count(Symbol))
+    return true;
+
+  if (!Symbol->isVariable())
+    return false;
+
+  // FIXME: It looks like gas supports some cases of the form "foo + 2". It
+  // is not clear if that is a bug or a feature.
+  const MCExpr *Expr = Symbol->getVariableValue();
+  const MCSymbolRefExpr *Ref = dyn_cast<MCSymbolRefExpr>(Expr);
+  if (!Ref)
+    return false;
+
+  if (Ref->getKind() != MCSymbolRefExpr::VK_None)
+    return false;
+
+  const MCSymbol &Sym = Ref->getSymbol();
+  if (!isThumbFunc(&Sym))
+    return false;
+
+  ThumbFuncs.insert(Symbol); // Cache it.
+  return true;
 }
 
 bool MCAssembler::isSymbolLinkerVisible(const MCSymbol &Symbol) const {

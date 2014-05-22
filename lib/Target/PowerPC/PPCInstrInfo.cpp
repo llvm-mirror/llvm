@@ -35,11 +35,13 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 
+using namespace llvm;
+
+#define DEBUG_TYPE "ppc-instr-info"
+
 #define GET_INSTRMAP_INFO
 #define GET_INSTRINFO_CTOR_DTOR
 #include "PPCGenInstrInfo.inc"
-
-using namespace llvm;
 
 static cl::
 opt<bool> DisableCTRLoopAnal("disable-ppc-ctrloop-analysis", cl::Hidden,
@@ -230,7 +232,7 @@ PPCInstrInfo::commuteInstruction(MachineInstr *MI, bool NewMI) const {
 
   // Cannot commute if it has a non-zero rotate count.
   if (MI->getOperand(3).getImm() != 0)
-    return 0;
+    return nullptr;
 
   // If we have a zero rotate count, we have:
   //   M = mask(MB,ME)
@@ -539,7 +541,7 @@ PPCInstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
   bool isPPC64 = TM.getSubtargetImpl()->isPPC64();
 
   // One-way branch.
-  if (FBB == 0) {
+  if (!FBB) {
     if (Cond.empty())   // Unconditional branch
       BuildMI(&MBB, DL, get(PPC::B)).addMBB(TBB);
     else if (Cond[1].getReg() == PPC::CTR || Cond[1].getReg() == PPC::CTR8)
@@ -1399,10 +1401,10 @@ bool PPCInstrInfo::optimizeCompareInstr(MachineInstr *CmpInstr,
   // There are two possible candidates which can be changed to set CR[01].
   // One is MI, the other is a SUB instruction.
   // For CMPrr(r1,r2), we are looking for SUB(r1,r2) or SUB(r2,r1).
-  MachineInstr *Sub = NULL;
+  MachineInstr *Sub = nullptr;
   if (SrcReg2 != 0)
     // MI is not a candidate for CMPrr.
-    MI = NULL;
+    MI = nullptr;
   // FIXME: Conservatively refuse to convert an instruction which isn't in the
   // same BB as the comparison. This is to allow the check below to avoid calls
   // (and other explicit clobbers); instead we should really check for these
@@ -1810,7 +1812,7 @@ protected:
     }
 
 public:
-    virtual bool runOnMachineFunction(MachineFunction &MF) {
+    bool runOnMachineFunction(MachineFunction &MF) override {
       LIS = &getAnalysis<LiveIntervals>();
 
       TM = static_cast<const PPCTargetMachine *>(&MF.getTarget());
@@ -1830,7 +1832,7 @@ public:
       return Changed;
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<LiveIntervals>();
       AU.addPreserved<LiveIntervals>();
       AU.addRequired<SlotIndexes>();
@@ -1962,7 +1964,7 @@ protected:
     }
 
 public:
-    virtual bool runOnMachineFunction(MachineFunction &MF) {
+    bool runOnMachineFunction(MachineFunction &MF) override {
       TM = static_cast<const PPCTargetMachine *>(&MF.getTarget());
       TII = TM->getInstrInfo();
 
@@ -1977,7 +1979,7 @@ public:
       return Changed;
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
   };
@@ -2036,7 +2038,7 @@ protected:
     }
 
 public:
-    virtual bool runOnMachineFunction(MachineFunction &MF) {
+    bool runOnMachineFunction(MachineFunction &MF) override {
       TM = static_cast<const PPCTargetMachine *>(&MF.getTarget());
       TII = TM->getInstrInfo();
 
@@ -2051,7 +2053,7 @@ public:
       return Changed;
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
   };
@@ -2193,7 +2195,7 @@ protected:
     }
 
 public:
-    virtual bool runOnMachineFunction(MachineFunction &MF) {
+    bool runOnMachineFunction(MachineFunction &MF) override {
       TM = static_cast<const PPCTargetMachine *>(&MF.getTarget());
       TII = TM->getInstrInfo();
 
@@ -2213,7 +2215,7 @@ public:
       return Changed;
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
   };

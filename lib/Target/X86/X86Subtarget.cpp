@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "subtarget"
 #include "X86Subtarget.h"
 #include "X86InstrInfo.h"
 #include "llvm/IR/Attributes.h"
@@ -24,15 +23,17 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 
-#define GET_SUBTARGETINFO_TARGET_DESC
-#define GET_SUBTARGETINFO_CTOR
-#include "X86GenSubtargetInfo.inc"
-
-using namespace llvm;
-
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
+
+using namespace llvm;
+
+#define DEBUG_TYPE "subtarget"
+
+#define GET_SUBTARGETINFO_TARGET_DESC
+#define GET_SUBTARGETINFO_CTOR
+#include "X86GenSubtargetInfo.inc"
 
 /// ClassifyBlockAddressReference - Classify a blockaddress reference for the
 /// current subtarget according to how we should reference it in a non-pcrel
@@ -153,7 +154,7 @@ const char *X86Subtarget::getBZeroEntry() const {
       !getTargetTriple().isMacOSXVersionLT(10, 6))
     return "__bzero";
 
-  return 0;
+  return nullptr;
 }
 
 bool X86Subtarget::hasSinCos() const {
@@ -175,14 +176,14 @@ bool X86Subtarget::IsLegalToCallImmediateAddr(const TargetMachine &TM) const {
 
 void X86Subtarget::resetSubtargetFeatures(const MachineFunction *MF) {
   AttributeSet FnAttrs = MF->getFunction()->getAttributes();
-  Attribute CPUAttr = FnAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                           "target-cpu");
-  Attribute FSAttr = FnAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                          "target-features");
+  Attribute CPUAttr =
+      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-cpu");
+  Attribute FSAttr =
+      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-features");
   std::string CPU =
-    !CPUAttr.hasAttribute(Attribute::None) ?CPUAttr.getValueAsString() : "";
+      !CPUAttr.hasAttribute(Attribute::None) ? CPUAttr.getValueAsString() : "";
   std::string FS =
-    !FSAttr.hasAttribute(Attribute::None) ? FSAttr.getValueAsString() : "";
+      !FSAttr.hasAttribute(Attribute::None) ? FSAttr.getValueAsString() : "";
   if (!FS.empty()) {
     initializeEnvironment();
     resetSubtargetFeatures(CPU, FS);
@@ -281,32 +282,30 @@ void X86Subtarget::initializeEnvironment() {
   PadShortFunctions = false;
   CallRegIndirect = false;
   LEAUsesAG = false;
+  SlowLEA = false;
   stackAlignment = 4;
   // FIXME: this is a known good value for Yonah. How about others?
   MaxInlineSizeThreshold = 128;
 }
 
 X86Subtarget::X86Subtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS,
-                           unsigned StackAlignOverride)
-  : X86GenSubtargetInfo(TT, CPU, FS)
-  , X86ProcFamily(Others)
-  , PICStyle(PICStyles::None)
-  , TargetTriple(TT)
-  , StackAlignOverride(StackAlignOverride)
-  , In64BitMode(TargetTriple.getArch() == Triple::x86_64)
-  , In32BitMode(TargetTriple.getArch() == Triple::x86 &&
-                TargetTriple.getEnvironment() != Triple::CODE16)
-  , In16BitMode(TargetTriple.getArch() == Triple::x86 &&
-                TargetTriple.getEnvironment() == Triple::CODE16) {
+                           const std::string &FS, unsigned StackAlignOverride)
+    : X86GenSubtargetInfo(TT, CPU, FS), X86ProcFamily(Others),
+      PICStyle(PICStyles::None), TargetTriple(TT),
+      StackAlignOverride(StackAlignOverride),
+      In64BitMode(TargetTriple.getArch() == Triple::x86_64),
+      In32BitMode(TargetTriple.getArch() == Triple::x86 &&
+                  TargetTriple.getEnvironment() != Triple::CODE16),
+      In16BitMode(TargetTriple.getArch() == Triple::x86 &&
+                  TargetTriple.getEnvironment() == Triple::CODE16) {
   initializeEnvironment();
   resetSubtargetFeatures(CPU, FS);
 }
 
-bool X86Subtarget::enablePostRAScheduler(
-           CodeGenOpt::Level OptLevel,
-           TargetSubtargetInfo::AntiDepBreakMode& Mode,
-           RegClassVector& CriticalPathRCs) const {
+bool
+X86Subtarget::enablePostRAScheduler(CodeGenOpt::Level OptLevel,
+                                    TargetSubtargetInfo::AntiDepBreakMode &Mode,
+                                    RegClassVector &CriticalPathRCs) const {
   Mode = TargetSubtargetInfo::ANTIDEP_CRITICAL;
   CriticalPathRCs.clear();
   return PostRAScheduler && OptLevel >= CodeGenOpt::Default;

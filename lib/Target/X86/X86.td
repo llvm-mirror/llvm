@@ -166,6 +166,8 @@ def FeatureCallRegIndirect : SubtargetFeature<"call-reg-indirect",
                                      "Call register indirect">;
 def FeatureLEAUsesAG : SubtargetFeature<"lea-uses-ag", "LEAUsesAG", "true",
                                    "LEA instruction needs inputs at AG stage">;
+def FeatureSlowLEA : SubtargetFeature<"slow-lea", "SlowLEA", "true",
+                                   "LEA instruction with certain arguments is slow">;
 
 //===----------------------------------------------------------------------===//
 // X86 processors supported.
@@ -195,8 +197,7 @@ def : Proc<"pentium3m",       [FeatureSSE1, FeatureSlowBTMem]>;
 def : Proc<"pentium-m",       [FeatureSSE2, FeatureSlowBTMem]>;
 def : Proc<"pentium4",        [FeatureSSE2]>;
 def : Proc<"pentium4m",       [FeatureSSE2, FeatureSlowBTMem]>;
-def : Proc<"x86-64",          [FeatureSSE2, Feature64Bit, FeatureSlowBTMem,
-                               FeatureFastUAMem]>;
+
 // Intel Core Duo.
 def : ProcessorModel<"yonah", SandyBridgeModel,
                      [FeatureSSE3, FeatureSlowBTMem]>;
@@ -227,6 +228,7 @@ def : ProcessorModel<"slm",  SLMModel, [ProcIntelSLM,
                                FeaturePCLMUL, FeatureAES,
                                FeatureCallRegIndirect,
                                FeaturePRFCHW,
+                               FeatureSlowLEA,
                                FeatureSlowBTMem, FeatureFastUAMem]>;
 // "Arrandale" along with corei3 and corei5
 def : ProcessorModel<"corei7", SandyBridgeModel,
@@ -329,12 +331,33 @@ def : Proc<"bdver3",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
                                FeaturePOPCNT, FeatureBMI,  FeatureTBM,
                                FeatureFMA, FeatureFSGSBase]>;
 
+// Excavator
+def : Proc<"bdver4",          [FeatureAVX2, FeatureXOP, FeatureFMA4,
+                               FeatureCMPXCHG16B, FeatureAES, FeaturePRFCHW,
+                               FeaturePCLMUL, FeatureF16C, FeatureLZCNT,
+                               FeaturePOPCNT, FeatureBMI, FeatureBMI2,
+                               FeatureTBM, FeatureFMA, FeatureFSGSBase]>;
+
 def : Proc<"geode",           [Feature3DNowA]>;
 
 def : Proc<"winchip-c6",      [FeatureMMX]>;
 def : Proc<"winchip2",        [Feature3DNow]>;
 def : Proc<"c3",              [Feature3DNow]>;
 def : Proc<"c3-2",            [FeatureSSE1]>;
+
+// We also provide a generic 64-bit specific x86 processor model which tries to
+// be good for modern chips without enabling instruction set encodings past the
+// basic SSE2 and 64-bit ones. It disables slow things from any mainstream and
+// modern 64-bit x86 chip, and enables features that are generally beneficial.
+// 
+// We currently use the Sandy Bridge model as the default scheduling model as
+// we use it across Nehalem, Westmere, Sandy Bridge, and Ivy Bridge which
+// covers a huge swath of x86 processors. If there are specific scheduling
+// knobs which need to be tuned differently for AMD chips, we might consider
+// forming a common base for them.
+def : ProcessorModel<"x86-64", SandyBridgeModel,
+                     [FeatureSSE2, Feature64Bit, FeatureSlowBTMem,
+                      FeatureFastUAMem]>;
 
 //===----------------------------------------------------------------------===//
 // Register File Description

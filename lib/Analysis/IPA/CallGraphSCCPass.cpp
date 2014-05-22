@@ -15,7 +15,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "cgscc-passmgr"
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/Statistic.h"
@@ -23,11 +22,14 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LegacyPassManagers.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "cgscc-passmgr"
 
 static cl::opt<unsigned> 
 MaxIterations("max-cg-scc-iterations", cl::ReallyHidden, cl::init(4));
@@ -112,7 +114,7 @@ bool CGPassManager::RunPassOnSCC(Pass *P, CallGraphSCC &CurSCC,
   bool Changed = false;
   PMDataManager *PM = P->getAsPMDataManager();
 
-  if (PM == 0) {
+  if (!PM) {
     CallGraphSCCPass *CGSP = (CallGraphSCCPass*)P;
     if (!CallGraphUpToDate) {
       DevirtualizedCall |= RefreshCallGraph(CurSCC, CG, false);
@@ -144,8 +146,11 @@ bool CGPassManager::RunPassOnSCC(Pass *P, CallGraphSCC &CurSCC,
        I != E; ++I) {
     if (Function *F = (*I)->getFunction()) {
       dumpPassInfo(P, EXECUTION_MSG, ON_FUNCTION_MSG, F->getName());
-      TimeRegion PassTimer(getPassTimer(FPP));
-      Changed |= FPP->runOnFunction(*F);
+      {
+        TimeRegion PassTimer(getPassTimer(FPP));
+        Changed |= FPP->runOnFunction(*F);
+      }
+      F->getContext().yield();
     }
   }
   
@@ -190,7 +195,7 @@ bool CGPassManager::RefreshCallGraph(CallGraphSCC &CurSCC,
        SCCIdx != E; ++SCCIdx, ++FunctionNo) {
     CallGraphNode *CGN = *SCCIdx;
     Function *F = CGN->getFunction();
-    if (F == 0 || F->isDeclaration()) continue;
+    if (!F || F->isDeclaration()) continue;
     
     // Walk the function body looking for call sites.  Sync up the call sites in
     // CGN with those actually in the function.
@@ -203,7 +208,7 @@ bool CGPassManager::RefreshCallGraph(CallGraphSCC &CurSCC,
     for (CallGraphNode::iterator I = CGN->begin(), E = CGN->end(); I != E; ) {
       // If this call site is null, then the function pass deleted the call
       // entirely and the WeakVH nulled it out.  
-      if (I->first == 0 ||
+      if (!I->first ||
           // If we've already seen this call site, then the FunctionPass RAUW'd
           // one call with another, which resulted in two "uses" in the edge
           // list of the same call.
@@ -217,7 +222,7 @@ bool CGPassManager::RefreshCallGraph(CallGraphSCC &CurSCC,
                "CallGraphSCCPass did not update the CallGraph correctly!");
         
         // If this was an indirect call site, count it.
-        if (I->second->getFunction() == 0)
+        if (!I->second->getFunction())
           ++NumIndirectRemoved;
         else 
           ++NumDirectRemoved;
@@ -273,7 +278,7 @@ bool CGPassManager::RefreshCallGraph(CallGraphSCC &CurSCC,
           // site could be turned direct), don't reject it in checking mode, and
           // don't tweak it to be more precise.
           if (CheckingMode && CS.getCalledFunction() &&
-              ExistingNode->getFunction() == 0)
+              ExistingNode->getFunction() == nullptr)
             continue;
           
           assert(!CheckingMode &&
@@ -286,7 +291,7 @@ bool CGPassManager::RefreshCallGraph(CallGraphSCC &CurSCC,
             CalleeNode = CG.getOrInsertFunction(Callee);
             // Keep track of whether we turned an indirect call into a direct
             // one.
-            if (ExistingNode->getFunction() == 0) {
+            if (!ExistingNode->getFunction()) {
               DevirtualizedCall = true;
               DEBUG(dbgs() << "  CGSCCPASSMGR: Devirtualized call to '"
                            << Callee->getName() << "'\n");
@@ -434,8 +439,8 @@ bool CGPassManager::runOnModule(Module &M) {
   while (!CGI.isAtEnd()) {
     // Copy the current SCC and increment past it so that the pass can hack
     // on the SCC if it wants to without invalidating our iterator.
-    std::vector<CallGraphNode*> &NodeVec = *CGI;
-    CurSCC.initialize(&NodeVec[0], &NodeVec[0]+NodeVec.size());
+    const std::vector<CallGraphNode *> &NodeVec = *CGI;
+    CurSCC.initialize(NodeVec.data(), NodeVec.data() + NodeVec.size());
     ++CGI;
     
     // At the top level, we run all the passes in this pass manager on the

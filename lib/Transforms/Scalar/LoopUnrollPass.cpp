@@ -12,7 +12,6 @@
 // counts of loops easily.
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "loop-unroll"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/LoopPass.h"
@@ -28,6 +27,8 @@
 #include <climits>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "loop-unroll"
 
 static cl::opt<unsigned>
 UnrollThreshold("unroll-threshold", cl::init(150), cl::Hidden,
@@ -237,9 +238,12 @@ bool LoopUnroll::runOnLoop(Loop *L, LPPassManager &LPM) {
       return false;
     }
     uint64_t Size = (uint64_t)LoopSize*Count;
-    if (TripCount != 1 && Size > Threshold) {
-      DEBUG(dbgs() << "  Too large to fully unroll with count: " << Count
-            << " because size: " << Size << ">" << Threshold << "\n");
+    if (TripCount != 1 &&
+        (Size > Threshold || (Count != TripCount && Size > PartialThreshold))) {
+      if (Size > Threshold)
+        DEBUG(dbgs() << "  Too large to fully unroll with count: " << Count
+                     << " because size: " << Size << ">" << Threshold << "\n");
+
       bool AllowPartial = UserAllowPartial ? CurrentAllowPartial : UP.Partial;
       if (!AllowPartial && !(Runtime && TripCount == 0)) {
         DEBUG(dbgs() << "  will not try to unroll partially because "

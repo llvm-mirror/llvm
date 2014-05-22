@@ -21,6 +21,7 @@ namespace llvm {
 
 class AsmPrinter;
 class MCExpr;
+class MCStreamer;
 
 /// \brief MI-level patchpoint operands.
 ///
@@ -115,7 +116,7 @@ public:
   // OpParser.
   typedef enum { DirectMemRefOp, IndirectMemRefOp, ConstantOp } OpType;
 
-  StackMaps(AsmPrinter &AP) : AP(AP) {}
+  StackMaps(AsmPrinter &AP);
 
   /// \brief Generate a stackmap record for a stackmap instruction.
   ///
@@ -131,8 +132,11 @@ public:
   void serializeToStackMapSection();
 
 private:
+  static const char *WSMP;
+
   typedef SmallVector<Location, 8> LocationVec;
   typedef SmallVector<LiveOutReg, 8> LiveOutVec;
+  typedef MapVector<int64_t, int64_t> ConstantPool;
   typedef MapVector<const MCSymbol *, uint64_t> FnStackSizeMap;
 
   struct CallsiteInfo {
@@ -148,26 +152,6 @@ private:
   };
 
   typedef std::vector<CallsiteInfo> CallsiteInfoList;
-
-  struct ConstantPool {
-  private:
-    typedef std::map<int64_t, size_t> ConstantsMap;
-    std::vector<int64_t> ConstantsList;
-    ConstantsMap ConstantIndexes;
-
-  public:
-    size_t getNumConstants() const { return ConstantsList.size(); }
-    int64_t getConstant(size_t Idx) const { return ConstantsList[Idx]; }
-    size_t getConstantIndex(int64_t ConstVal) {
-      size_t NextIdx = ConstantsList.size();
-      ConstantsMap::const_iterator I =
-        ConstantIndexes.insert(ConstantIndexes.end(),
-                               std::make_pair(ConstVal, NextIdx));
-      if (I->second == NextIdx)
-        ConstantsList.push_back(ConstVal);
-      return I->second;
-    }
-  };
 
   AsmPrinter &AP;
   CallsiteInfoList CSInfos;
@@ -196,6 +180,18 @@ private:
                            MachineInstr::const_mop_iterator MOI,
                            MachineInstr::const_mop_iterator MOE,
                            bool recordResult = false);
+
+  /// \brief Emit the stackmap header.
+  void emitStackmapHeader(MCStreamer &OS);
+
+  /// \brief Emit the function frame record for each function.
+  void emitFunctionFrameRecords(MCStreamer &OS);
+
+  /// \brief Emit the constant pool.
+  void emitConstantPoolEntries(MCStreamer &OS);
+
+  /// \brief Emit the callsite info for each stackmap/patchpoint intrinsic call.
+  void emitCallsiteEntries(MCStreamer &OS, const TargetRegisterInfo *TRI);
 };
 
 }

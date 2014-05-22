@@ -11,11 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "systemz-selectiondag-info"
 #include "SystemZTargetMachine.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "systemz-selectiondag-info"
 
 SystemZSelectionDAGInfo::
 SystemZSelectionDAGInfo(const SystemZTargetMachine &TM)
@@ -230,7 +231,7 @@ EmitTargetCodeForMemchr(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
   Ops.push_back(DAG.getConstant(SystemZ::CCMASK_SRST_FOUND, MVT::i32));
   Ops.push_back(Glue);
   VTs = DAG.getVTList(PtrVT, MVT::Glue);
-  End = DAG.getNode(SystemZISD::SELECT_CCMASK, DL, VTs, &Ops[0], Ops.size());
+  End = DAG.getNode(SystemZISD::SELECT_CCMASK, DL, VTs, Ops);
   return std::make_pair(End, Chain);
 }
 

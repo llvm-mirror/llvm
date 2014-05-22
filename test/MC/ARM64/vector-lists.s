@@ -1,4 +1,4 @@
-// RUN: not llvm-mc -triple arm64 -show-encoding < %s 2>%t | FileCheck %s
+// RUN: not llvm-mc -triple arm64 -mattr=neon -show-encoding < %s 2>%t | FileCheck %s
 // RUN: FileCheck --check-prefix=CHECK-ERRORS < %t %s
 
     ST4     {v0.8B-v3.8B}, [x0]
@@ -14,7 +14,7 @@
     ST4     {v0.8B-},[x0]
 
 // CHECK-ERRORS: error: invalid number of vectors
-// CHECK-ERRORS: error: unexpected token in argument list
+// CHECK-ERRORS: error: '}' expected
 // CHECK-ERRORS: error: mismatched register size suffix
 // CHECK-ERRORS: error: mismatched register size suffix
 // CHECK-ERRORS: error: vector register expected

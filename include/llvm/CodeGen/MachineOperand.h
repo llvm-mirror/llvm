@@ -42,7 +42,7 @@ class MCSymbol;
 ///
 class MachineOperand {
 public:
-  enum MachineOperandType {
+  enum MachineOperandType : unsigned char {
     MO_Register,          ///< Register operand.
     MO_Immediate,         ///< Immediate operand
     MO_CImmediate,        ///< Immediate >64bit operand
@@ -65,7 +65,7 @@ public:
 private:
   /// OpKind - Specify what kind of operand this is.  This discriminates the
   /// union.
-  unsigned char OpKind; // MachineOperandType
+  MachineOperandType OpKind;
 
   /// Subregister number for MO_Register.  A value of 0 indicates the
   /// MO_Register has no subReg.
@@ -227,7 +227,7 @@ public:
   bool isReg() const { return OpKind == MO_Register; }
   /// isImm - Tests if this is a MO_Immediate operand.
   bool isImm() const { return OpKind == MO_Immediate; }
-  /// isCImm - Test if t his is a MO_CImmediate operand.
+  /// isCImm - Test if this is a MO_CImmediate operand.
   bool isCImm() const { return OpKind == MO_CImmediate; }
   /// isFPImm - Tests if this is a MO_FPImmediate operand.
   bool isFPImm() const { return OpKind == MO_FPImmediate; }

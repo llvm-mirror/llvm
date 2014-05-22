@@ -17,7 +17,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm64-ccmp"
 #include "ARM64.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -43,6 +42,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "arm64-ccmp"
+
 // Absolute maximum number of instructions allowed per speculated block.
 // This bypasses all other heuristics, so it should be set fairly high.
 static cl::opt<unsigned> BlockInstrLimit(
@@ -62,8 +63,8 @@ STATISTIC(NumCmpBranchRejs, "Number of ccmps rejected (CmpBB branch)");
 STATISTIC(NumCmpTermRejs, "Number of ccmps rejected (CmpBB is cbz...)");
 STATISTIC(NumImmRangeRejs, "Number of ccmps rejected (Imm out of range)");
 STATISTIC(NumLiveDstRejs, "Number of ccmps rejected (Cmp dest live)");
-STATISTIC(NumMultCPSRUses, "Number of ccmps rejected (CPSR used)");
-STATISTIC(NumUnknCPSRDefs, "Number of ccmps rejected (CPSR def unknown)");
+STATISTIC(NumMultNZCVUses, "Number of ccmps rejected (NZCV used)");
+STATISTIC(NumUnknNZCVDefs, "Number of ccmps rejected (NZCV def unknown)");
 
 STATISTIC(NumSpeculateRejs, "Number of ccmps rejected (Can't speculate)");
 
@@ -297,9 +298,9 @@ static bool parseCond(ArrayRef<MachineOperand> Cond, ARM64CC::CondCode &CC) {
 MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
   MachineBasicBlock::iterator I = MBB->getFirstTerminator();
   if (I == MBB->end())
-    return 0;
+    return nullptr;
   // The terminator must be controlled by the flags.
-  if (!I->readsRegister(ARM64::CPSR)) {
+  if (!I->readsRegister(ARM64::NZCV)) {
     switch (I->getOpcode()) {
     case ARM64::CBZW:
     case ARM64::CBZX:
@@ -310,7 +311,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
     }
     ++NumCmpTermRejs;
     DEBUG(dbgs() << "Flags not used by terminator: " << *I);
-    return 0;
+    return nullptr;
   }
 
   // Now find the instruction controlling the terminator.
@@ -329,7 +330,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
       if (I->getOperand(3).getImm() || !isUInt<5>(I->getOperand(2).getImm())) {
         DEBUG(dbgs() << "Immediate out of range for ccmp: " << *I);
         ++NumImmRangeRejs;
-        return 0;
+        return nullptr;
       }
     // Fall through.
     case ARM64::SUBSWrr:
@@ -340,7 +341,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
         return I;
       DEBUG(dbgs() << "Can't convert compare with live destination: " << *I);
       ++NumLiveDstRejs;
-      return 0;
+      return nullptr;
     case ARM64::FCMPSrr:
     case ARM64::FCMPDrr:
     case ARM64::FCMPESrr:
@@ -350,25 +351,25 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
 
     // Check for flag reads and clobbers.
     MIOperands::PhysRegInfo PRI =
-        MIOperands(I).analyzePhysReg(ARM64::CPSR, TRI);
+        MIOperands(I).analyzePhysReg(ARM64::NZCV, TRI);
 
     if (PRI.Reads) {
       // The ccmp doesn't produce exactly the same flags as the original
       // compare, so reject the transform if there are uses of the flags
       // besides the terminators.
       DEBUG(dbgs() << "Can't create ccmp with multiple uses: " << *I);
-      ++NumMultCPSRUses;
-      return 0;
+      ++NumMultNZCVUses;
+      return nullptr;
     }
 
     if (PRI.Clobbers) {
       DEBUG(dbgs() << "Not convertible compare: " << *I);
-      ++NumUnknCPSRDefs;
-      return 0;
+      ++NumUnknNZCVDefs;
+      return nullptr;
     }
   }
   DEBUG(dbgs() << "Flags not defined in BB#" << MBB->getNumber() << '\n');
-  return 0;
+  return nullptr;
 }
 
 /// Determine if all the instructions in MBB can safely
@@ -378,7 +379,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
 ///
 bool SSACCmpConv::canSpeculateInstrs(MachineBasicBlock *MBB,
                                      const MachineInstr *CmpMI) {
-  // Reject any live-in physregs. It's probably CPSR/EFLAGS, and very hard to
+  // Reject any live-in physregs. It's probably NZCV/EFLAGS, and very hard to
   // get right.
   if (!MBB->livein_empty()) {
     DEBUG(dbgs() << "BB#" << MBB->getNumber() << " has live-ins.\n");
@@ -415,13 +416,13 @@ bool SSACCmpConv::canSpeculateInstrs(MachineBasicBlock *MBB,
 
     // We never speculate stores, so an AA pointer isn't necessary.
     bool DontMoveAcrossStore = true;
-    if (!I.isSafeToMove(TII, 0, DontMoveAcrossStore)) {
+    if (!I.isSafeToMove(TII, nullptr, DontMoveAcrossStore)) {
       DEBUG(dbgs() << "Can't speculate: " << I);
       return false;
     }
 
     // Only CmpMI is allowed to clobber the flags.
-    if (&I != CmpMI && I.modifiesRegister(ARM64::CPSR, TRI)) {
+    if (&I != CmpMI && I.modifiesRegister(ARM64::NZCV, TRI)) {
       DEBUG(dbgs() << "Clobbers flags: " << I);
       return false;
     }
@@ -434,7 +435,7 @@ bool SSACCmpConv::canSpeculateInstrs(MachineBasicBlock *MBB,
 ///
 bool SSACCmpConv::canConvert(MachineBasicBlock *MBB) {
   Head = MBB;
-  Tail = CmpBB = 0;
+  Tail = CmpBB = nullptr;
 
   if (Head->succ_size() != 2)
     return false;
@@ -494,7 +495,7 @@ bool SSACCmpConv::canConvert(MachineBasicBlock *MBB) {
 
   // The branch we're looking to eliminate must be analyzable.
   HeadCond.clear();
-  MachineBasicBlock *TBB = 0, *FBB = 0;
+  MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
   if (TII->AnalyzeBranch(*Head, TBB, FBB, HeadCond)) {
     DEBUG(dbgs() << "Head branch not analyzable.\n");
     ++NumHeadBranchRejs;
@@ -522,7 +523,7 @@ bool SSACCmpConv::canConvert(MachineBasicBlock *MBB) {
   }
 
   CmpBBCond.clear();
-  TBB = FBB = 0;
+  TBB = FBB = nullptr;
   if (TII->AnalyzeBranch(*CmpBB, TBB, FBB, CmpBBCond)) {
     DEBUG(dbgs() << "CmpBB branch not analyzable.\n");
     ++NumCmpBranchRejs;
@@ -735,9 +736,11 @@ class ARM64ConditionalCompares : public MachineFunctionPass {
 public:
   static char ID;
   ARM64ConditionalCompares() : MachineFunctionPass(ID) {}
-  void getAnalysisUsage(AnalysisUsage &AU) const;
-  bool runOnMachineFunction(MachineFunction &MF);
-  const char *getPassName() const { return "ARM64 Conditional Compares"; }
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  bool runOnMachineFunction(MachineFunction &MF) override;
+  const char *getPassName() const override {
+    return "ARM64 Conditional Compares";
+  }
 
 private:
   bool tryConvert(MachineBasicBlock *);
@@ -896,7 +899,7 @@ bool ARM64ConditionalCompares::runOnMachineFunction(MachineFunction &MF) {
   DomTree = &getAnalysis<MachineDominatorTree>();
   Loops = getAnalysisIfAvailable<MachineLoopInfo>();
   Traces = &getAnalysis<MachineTraceMetrics>();
-  MinInstr = 0;
+  MinInstr = nullptr;
   MinSize = MF.getFunction()->getAttributes().hasAttribute(
       AttributeSet::FunctionIndex, Attribute::MinSize);
 

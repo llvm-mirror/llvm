@@ -1,4 +1,5 @@
 ; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon -fp-contract=fast | FileCheck %s
+; arm64 has a separate copy as aarch64-neon-v1i1-setcc.ll
 
 ; This file test the DAG node like "v1i1 SETCC v1i64, v1i64". As the v1i1 type
 ; is illegal in AArch64 backend, the legalizer tries to scalarize this node.

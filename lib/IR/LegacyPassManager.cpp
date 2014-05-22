@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/LegacyPassManagers.h"
@@ -22,6 +23,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
+#include "llvm/Support/TimeValue.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -1158,7 +1160,8 @@ void PMDataManager::dumpPassInfo(Pass *P, enum PassDebuggingString S1,
                                  StringRef Msg) {
   if (PassDebugging < Executions)
     return;
-  dbgs() << (void*)this << std::string(getDepth()*2+1, ' ');
+  dbgs() << "[" << sys::TimeValue::now().str() << "] " << (void *)this
+         << std::string(getDepth() * 2 + 1, ' ');
   switch (S1) {
   case EXECUTION_MSG:
     dbgs() << "Executing Pass '" << P->getPassName();
@@ -1487,8 +1490,10 @@ bool FunctionPassManagerImpl::run(Function &F) {
   TimingInfo::createTheTimeInfo();
 
   initializeAllAnalysisInfo();
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
     Changed |= getContainedManager(Index)->runOnFunction(F);
+    F.getContext().yield();
+  }
 
   for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
     getContainedManager(Index)->cleanup();
@@ -1721,8 +1726,10 @@ bool PassManagerImpl::run(Module &M) {
   }
 
   initializeAllAnalysisInfo();
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
     Changed |= getContainedManager(Index)->runOnModule(M);
+    M.getContext().yield();
+  }
 
   for (SmallVectorImpl<ImmutablePass *>::const_iterator I = IPV.begin(),
        E = IPV.end(); I != E; ++I) {

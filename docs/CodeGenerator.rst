@@ -1993,7 +1993,7 @@ Tail Calls
 
 This box indicates whether the target supports guaranteed tail calls.  These are
 calls marked "`tail <LangRef.html#i_call>`_" and use the fastcc calling
-convention.  Please see the `tail call section more more details`_.
+convention.  Please see the `tail call section`_ for more details.
 
 .. _feat_segstacks:
 
@@ -2011,7 +2011,7 @@ Basic support exists on the X86 backend. Currently vararg doesn't work and the
 object files are not marked the way the gold linker expects, but simple Go
 programs can be built by dragonegg.
 
-.. _tail call section more more details:
+.. _tail call section:
 
 Tail call optimization
 ----------------------
@@ -2144,10 +2144,6 @@ The following target-specific calling conventions are known to backend:
 * **x86_ThisCall** --- Similar to X86_StdCall. Passes first argument in ECX,
   others via stack. Callee is responsible for stack cleaning. This convention is
   used by MSVC by default for methods in its ABI (CC ID = 70).
-
-* **X86_CDeclMethod** --- Identical to the standard x86_32 C calling convention,
-  except that an sret paramter, if present, is placed on the stack after the
-  second parameter, which must an integer or pointer.  (CC ID = 80).
 
 .. _X86 addressing mode:
 

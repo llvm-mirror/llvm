@@ -28,6 +28,7 @@
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -157,7 +158,7 @@ static tool_output_file *GetOutputStream(const char *TargetName,
   if (!error.empty()) {
     errs() << error << '\n';
     delete FDOut;
-    return 0;
+    return nullptr;
   }
 
   return FDOut;
@@ -207,7 +208,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
   // Load the module to be compiled...
   SMDiagnostic Err;
   std::unique_ptr<Module> M;
-  Module *mod = 0;
+  Module *mod = nullptr;
   Triple TheTriple;
 
   bool SkipModule = MCPU == "help" ||
@@ -223,7 +224,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
   if (!SkipModule) {
     M.reset(ParseIRFile(InputFilename, Err, Context));
     mod = M.get();
-    if (mod == 0) {
+    if (mod == nullptr) {
       Err.print(argv[0], errs());
       return 1;
     }
@@ -276,14 +277,15 @@ static int compileModule(char **argv, LLVMContext &Context) {
       TheTarget->createTargetMachine(TheTriple.getTriple(), MCPU, FeaturesStr,
                                      Options, RelocModel, CMModel, OLvl));
   assert(target.get() && "Could not allocate target machine!");
-  assert(mod && "Should have exited after outputting help!");
+
+  // If we don't have a module then just exit now. We do this down
+  // here since the CPU/Feature help is underneath the target machine
+  // creation.
+  if (SkipModule)
+    return 0;
+
+  assert(mod && "Should have exited if we didn't have a module!");
   TargetMachine &Target = *target.get();
-
-  if (DisableCFI)
-    Target.setMCUseCFI(false);
-
-  if (EnableDwarfDirectory)
-    Target.setMCUseDwarfDirectory(true);
 
   if (GenerateSoftFloatCalls)
     FloatABIForCalls = FloatABI::Soft;
@@ -310,19 +312,16 @@ static int compileModule(char **argv, LLVMContext &Context) {
   // Override default to generate verbose assembly.
   Target.setAsmVerbosityDefault(true);
 
-  if (RelaxAll) {
-    if (FileType != TargetMachine::CGFT_ObjectFile)
-      errs() << argv[0]
+  if (RelaxAll.getNumOccurrences() > 0 &&
+      FileType != TargetMachine::CGFT_ObjectFile)
+    errs() << argv[0]
              << ": warning: ignoring -mc-relax-all because filetype != obj";
-    else
-      Target.setMCRelaxAll(true);
-  }
 
   {
     formatted_raw_ostream FOS(Out->os());
 
-    AnalysisID StartAfterID = 0;
-    AnalysisID StopAfterID = 0;
+    AnalysisID StartAfterID = nullptr;
+    AnalysisID StopAfterID = nullptr;
     const PassRegistry *PR = PassRegistry::getPassRegistry();
     if (!StartAfter.empty()) {
       const PassInfo *PI = PR->getPassInfo(StartAfter);

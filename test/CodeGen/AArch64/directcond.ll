@@ -1,6 +1,7 @@
 ; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-AARCH64
 ; RUN: llc -verify-machineinstrs -o - %s -mtriple=arm64-apple-ios7.0 | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-ARM64
 ; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu -mattr=-fp-armv8 | FileCheck --check-prefix=CHECK-NOFP %s
+; RUN: llc -verify-machineinstrs < %s -mtriple=arm64-none-linux-gnu -mattr=-fp-armv8 | FileCheck --check-prefix=CHECK-NOFP %s
 
 define i32 @test_select_i32(i1 %bit, i32 %a, i32 %b) {
 ; CHECK-LABEL: test_select_i32:
@@ -62,7 +63,7 @@ define i1 @test_setcc_float(float %lhs, float %rhs) {
 ; CHECK: test_setcc_float
   %val = fcmp oeq float %lhs, %rhs
 ; CHECK: fcmp s0, s1
-; CHECK: csinc w0, wzr, wzr, ne
+; CHECK: cset w0, eq
 ; CHECK-NOFP-NOT: fcmp
   ret i1 %val
 }
@@ -71,7 +72,7 @@ define i1 @test_setcc_double(double %lhs, double %rhs) {
 ; CHECK: test_setcc_double
   %val = fcmp oeq double %lhs, %rhs
 ; CHECK: fcmp d0, d1
-; CHECK: csinc w0, wzr, wzr, ne
+; CHECK: cset w0, eq
 ; CHECK-NOFP-NOT: fcmp
   ret i1 %val
 }
@@ -80,7 +81,7 @@ define i1 @test_setcc_i32(i32 %lhs, i32 %rhs) {
 ; CHECK: test_setcc_i32
   %val = icmp ugt i32 %lhs, %rhs
 ; CHECK: cmp w0, w1
-; CHECK: csinc w0, wzr, wzr, ls
+; CHECK: cset w0, hi
   ret i1 %val
 }
 
@@ -88,6 +89,6 @@ define i1 @test_setcc_i64(i64 %lhs, i64 %rhs) {
 ; CHECK: test_setcc_i64
   %val = icmp ne i64 %lhs, %rhs
 ; CHECK: cmp x0, x1
-; CHECK: csinc w0, wzr, wzr, eq
+; CHECK: cset w0, ne
   ret i1 %val
 }

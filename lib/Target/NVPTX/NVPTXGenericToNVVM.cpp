@@ -40,10 +40,9 @@ public:
 
   GenericToNVVM() : ModulePass(ID) {}
 
-  virtual bool runOnModule(Module &M);
+  bool runOnModule(Module &M) override;
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-  }
+  void getAnalysisUsage(AnalysisUsage &AU) const override {}
 
 private:
   Value *getOrInsertCVTA(Module *M, Function *F, GlobalVariable *GV,
@@ -88,7 +87,8 @@ bool GenericToNVVM::runOnModule(Module &M) {
         !GV->getName().startswith("llvm.")) {
       GlobalVariable *NewGV = new GlobalVariable(
           M, GV->getType()->getElementType(), GV->isConstant(),
-          GV->getLinkage(), GV->hasInitializer() ? GV->getInitializer() : NULL,
+          GV->getLinkage(),
+          GV->hasInitializer() ? GV->getInitializer() : nullptr,
           "", GV, GV->getThreadLocalMode(), llvm::ADDRESS_SPACE_GLOBAL);
       NewGV->copyAttributesFrom(GV);
       GVMap[GV] = NewGV;
@@ -162,7 +162,7 @@ Value *GenericToNVVM::getOrInsertCVTA(Module *M, Function *F,
                                       GlobalVariable *GV,
                                       IRBuilder<> &Builder) {
   PointerType *GVType = GV->getType();
-  Value *CVTA = NULL;
+  Value *CVTA = nullptr;
 
   // See if the address space conversion requires the operand to be bitcast
   // to i8 addrspace(n)* first.

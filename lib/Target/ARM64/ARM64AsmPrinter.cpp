@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "asm-printer"
 #include "ARM64.h"
 #include "ARM64MachineFunctionInfo.h"
 #include "ARM64MCInstLower.h"
@@ -39,6 +38,8 @@
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "asm-printer"
+
 namespace {
 
 class ARM64AsmPrinter : public AsmPrinter {
@@ -52,10 +53,10 @@ class ARM64AsmPrinter : public AsmPrinter {
 public:
   ARM64AsmPrinter(TargetMachine &TM, MCStreamer &Streamer)
       : AsmPrinter(TM, Streamer), Subtarget(&TM.getSubtarget<ARM64Subtarget>()),
-        MCInstLowering(OutContext, *Mang, *this), SM(*this), ARM64FI(NULL),
+        MCInstLowering(OutContext, *Mang, *this), SM(*this), ARM64FI(nullptr),
         LOHLabelCounter(0) {}
 
-  virtual const char *getPassName() const { return "ARM64 Assembly Printer"; }
+  const char *getPassName() const override { return "ARM64 Assembly Printer"; }
 
   /// \brief Wrapper for MCInstLowering.lowerOperand() for the
   /// tblgen'erated pseudo lowering.
@@ -72,14 +73,14 @@ public:
   bool emitPseudoExpansionLowering(MCStreamer &OutStreamer,
                                    const MachineInstr *MI);
 
-  void EmitInstruction(const MachineInstr *MI);
+  void EmitInstruction(const MachineInstr *MI) override;
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AsmPrinter::getAnalysisUsage(AU);
     AU.setPreservesAll();
   }
 
-  bool runOnMachineFunction(MachineFunction &F) {
+  bool runOnMachineFunction(MachineFunction &F) override {
     ARM64FI = F.getInfo<ARM64FunctionInfo>();
     return AsmPrinter::runOnMachineFunction(F);
   }
@@ -94,17 +95,17 @@ private:
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
                        unsigned AsmVariant, const char *ExtraCode,
-                       raw_ostream &O);
+                       raw_ostream &O) override;
   bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNum,
                              unsigned AsmVariant, const char *ExtraCode,
-                             raw_ostream &O);
+                             raw_ostream &O) override;
 
   void PrintDebugValueComment(const MachineInstr *MI, raw_ostream &OS);
 
-  void EmitFunctionBodyEnd();
+  void EmitFunctionBodyEnd() override;
 
-  MCSymbol *GetCPISymbol(unsigned CPID) const;
-  void EmitEndOfAsmFile(Module &M);
+  MCSymbol *GetCPISymbol(unsigned CPID) const override;
+  void EmitEndOfAsmFile(Module &M) override;
   ARM64FunctionInfo *ARM64FI;
 
   /// \brief Emit the LOHs contained in ARM64FI.
@@ -426,6 +427,7 @@ static unsigned getRealIndexedOpcode(unsigned Opc) {
   switch (Opc) {
   case ARM64::LDRXpre_isel:    return ARM64::LDRXpre;
   case ARM64::LDRWpre_isel:    return ARM64::LDRWpre;
+  case ARM64::LDRQpre_isel:    return ARM64::LDRQpre;
   case ARM64::LDRDpre_isel:    return ARM64::LDRDpre;
   case ARM64::LDRSpre_isel:    return ARM64::LDRSpre;
   case ARM64::LDRBBpre_isel:   return ARM64::LDRBBpre;
@@ -436,6 +438,7 @@ static unsigned getRealIndexedOpcode(unsigned Opc) {
   case ARM64::LDRSHXpre_isel:  return ARM64::LDRSHXpre;
   case ARM64::LDRSWpre_isel:   return ARM64::LDRSWpre;
 
+  case ARM64::LDRQpost_isel:   return ARM64::LDRQpost;
   case ARM64::LDRDpost_isel:   return ARM64::LDRDpost;
   case ARM64::LDRSpost_isel:   return ARM64::LDRSpost;
   case ARM64::LDRXpost_isel:   return ARM64::LDRXpost;
@@ -452,6 +455,7 @@ static unsigned getRealIndexedOpcode(unsigned Opc) {
   case ARM64::STRWpre_isel:    return ARM64::STRWpre;
   case ARM64::STRHHpre_isel:   return ARM64::STRHHpre;
   case ARM64::STRBBpre_isel:   return ARM64::STRBBpre;
+  case ARM64::STRQpre_isel:    return ARM64::STRQpre;
   case ARM64::STRDpre_isel:    return ARM64::STRDpre;
   case ARM64::STRSpre_isel:    return ARM64::STRSpre;
   }
@@ -493,6 +497,7 @@ void ARM64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case ARM64::LDRBBpre_isel:
   case ARM64::LDRXpre_isel:
   case ARM64::LDRWpre_isel:
+  case ARM64::LDRQpre_isel:
   case ARM64::LDRDpre_isel:
   case ARM64::LDRSpre_isel:
   case ARM64::LDRSBWpre_isel:
@@ -500,6 +505,7 @@ void ARM64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case ARM64::LDRSHWpre_isel:
   case ARM64::LDRSHXpre_isel:
   case ARM64::LDRSWpre_isel:
+  case ARM64::LDRQpost_isel:
   case ARM64::LDRDpost_isel:
   case ARM64::LDRSpost_isel:
   case ARM64::LDRXpost_isel:
@@ -524,6 +530,7 @@ void ARM64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case ARM64::STRWpre_isel:
   case ARM64::STRHHpre_isel:
   case ARM64::STRBBpre_isel:
+  case ARM64::STRQpre_isel:
   case ARM64::STRDpre_isel:
   case ARM64::STRSpre_isel: {
     MCInst TmpInst;
@@ -592,5 +599,6 @@ void ARM64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
 // Force static initialization.
 extern "C" void LLVMInitializeARM64AsmPrinter() {
-  RegisterAsmPrinter<ARM64AsmPrinter> X(TheARM64Target);
+  RegisterAsmPrinter<ARM64AsmPrinter> X(TheARM64leTarget);
+  RegisterAsmPrinter<ARM64AsmPrinter> Y(TheARM64beTarget);
 }

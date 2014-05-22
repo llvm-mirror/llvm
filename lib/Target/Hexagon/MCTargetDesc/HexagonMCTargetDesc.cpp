@@ -23,6 +23,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_MC_DESC
 #include "HexagonGenInstrInfo.inc"
 
@@ -31,8 +33,6 @@
 
 #define GET_REGINFO_MC_DESC
 #include "HexagonGenRegisterInfo.inc"
-
-using namespace llvm;
 
 static MCInstrInfo *createHexagonMCInstrInfo() {
   MCInstrInfo *X = new MCInstrInfo();
@@ -60,7 +60,7 @@ static MCAsmInfo *createHexagonMCAsmInfo(const MCRegisterInfo &MRI,
 
   // VirtualFP = (R30 + #0).
   MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(
-      0, Hexagon::R30, 0);
+      nullptr, Hexagon::R30, 0);
   MAI->addInitialFrameState(Inst);
 
   return MAI;

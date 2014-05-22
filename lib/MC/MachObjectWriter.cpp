@@ -26,6 +26,8 @@
 #include <vector>
 using namespace llvm;
 
+#define DEBUG_TYPE "mc"
+
 void MachObjectWriter::reset() {
   Relocations.clear();
   IndirectSymBase.clear();
@@ -348,6 +350,9 @@ void MachObjectWriter::WriteNlist(MachSymbolData &MSD,
       Flags = (Flags & 0xF0FF) | (Log2Size << 8);
     }
   }
+
+  if (Layout.getAssembler().isThumbFunc(&Symbol))
+    Flags |= SF_ThumbFunc;
 
   // struct nlist (12 bytes)
 

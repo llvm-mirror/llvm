@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "arm-atomic-expand"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -24,13 +23,15 @@
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "arm-atomic-expand"
+
 namespace {
   class AtomicExpandLoadLinked : public FunctionPass {
     const TargetLowering *TLI;
   public:
     static char ID; // Pass identification, replacement for typeid
-    explicit AtomicExpandLoadLinked(const TargetMachine *TM = 0)
-      : FunctionPass(ID), TLI(TM ? TM->getTargetLowering() : 0) {
+    explicit AtomicExpandLoadLinked(const TargetMachine *TM = nullptr)
+      : FunctionPass(ID), TLI(TM ? TM->getTargetLowering() : nullptr) {
       initializeAtomicExpandLoadLinkedPass(*PassRegistry::getPassRegistry());
     }
 

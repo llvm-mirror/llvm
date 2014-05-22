@@ -21,8 +21,6 @@
 //
 //
 
-#define DEBUG_TYPE "mips-constant-islands"
-
 #include "Mips.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "Mips16InstrInfo.h"
@@ -46,6 +44,8 @@
 #include <algorithm>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mips-constant-islands"
 
 STATISTIC(NumCPEs,       "Number of constpool entries");
 STATISTIC(NumSplit,      "Number of uncond branches inserted");
@@ -368,14 +368,14 @@ namespace {
       : MachineFunctionPass(ID), TM(tm),
         IsPIC(TM.getRelocationModel() == Reloc::PIC_),
         ABI(TM.getSubtarget<MipsSubtarget>().getTargetABI()),
-        STI(&TM.getSubtarget<MipsSubtarget>()), MF(0), MCP(0),
+        STI(&TM.getSubtarget<MipsSubtarget>()), MF(nullptr), MCP(nullptr),
         PrescannedForConstants(false){}
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "Mips Constant Islands";
     }
 
-    bool runOnMachineFunction(MachineFunction &F);
+    bool runOnMachineFunction(MachineFunction &F) override;
 
     void doInitialPlacement(std::vector<MachineInstr*> &CPEMIs);
     CPEntry *findConstPoolEntry(unsigned CPI, const MachineInstr *CPEMI);
@@ -628,7 +628,7 @@ MipsConstantIslands::CPEntry
     if (CPEs[i].CPEMI == CPEMI)
       return &CPEs[i];
   }
-  return NULL;
+  return nullptr;
 }
 
 /// getCPELogAlign - Returns the required alignment of the constant pool entry
@@ -1065,7 +1065,7 @@ bool MipsConstantIslands::decrementCPEReferenceCount(unsigned CPI,
   assert(CPE && "Unexpected!");
   if (--CPE->RefCount == 0) {
     removeDeadCPEMI(CPEMI);
-    CPE->CPEMI = NULL;
+    CPE->CPEMI = nullptr;
     --NumCPEs;
     return true;
   }
@@ -1098,7 +1098,7 @@ int MipsConstantIslands::findInRangeCPEntry(CPUser& U, unsigned UserOffset)
     if (CPEs[i].CPEMI == CPEMI)
       continue;
     // Removing CPEs can leave empty entries, skip
-    if (CPEs[i].CPEMI == NULL)
+    if (CPEs[i].CPEMI == nullptr)
       continue;
     if (isCPEntryInRange(UserMI, UserOffset, CPEs[i].CPEMI, U.getMaxDisp(),
                      U.NegOk)) {
@@ -1154,7 +1154,7 @@ int MipsConstantIslands::findLongFormInRangeCPEntry
     if (CPEs[i].CPEMI == CPEMI)
       continue;
     // Removing CPEs can leave empty entries, skip
-    if (CPEs[i].CPEMI == NULL)
+    if (CPEs[i].CPEMI == nullptr)
       continue;
     if (isCPEntryInRange(UserMI, UserOffset, CPEs[i].CPEMI,
                          U.getLongFormMaxDisp(), U.NegOk)) {
@@ -1486,7 +1486,7 @@ bool MipsConstantIslands::removeUnusedCPEntries() {
       for (unsigned j = 0, ee = CPEs.size(); j != ee; ++j) {
         if (CPEs[j].RefCount == 0 && CPEs[j].CPEMI) {
           removeDeadCPEMI(CPEs[j].CPEMI);
-          CPEs[j].CPEMI = NULL;
+          CPEs[j].CPEMI = nullptr;
           MadeChange = true;
         }
       }

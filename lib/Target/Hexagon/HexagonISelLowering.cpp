@@ -39,6 +39,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "hexagon-lowering"
+
 static cl::opt<bool>
 EmitJumpTables("hexagon-emit-jump-tables", cl::init(true), cl::Hidden,
                cl::desc("Control jump table emission on Hexagon target"));
@@ -135,7 +137,7 @@ CC_Hexagon_VarArg (unsigned ValNo, MVT ValVT,
     State.addLoc(CCValAssign::getMem(ValNo, ValVT, ofst, LocVT, LocInfo));
     return false;
   }
-  llvm_unreachable(0);
+  llvm_unreachable(nullptr);
 }
 
 
@@ -346,8 +348,7 @@ HexagonTargetLowering::LowerReturn(SDValue Chain,
   if (Flag.getNode())
     RetOps.push_back(Flag);
 
-  return DAG.getNode(HexagonISD::RET_FLAG, dl, MVT::Other,
-                     &RetOps[0], RetOps.size());
+  return DAG.getNode(HexagonISD::RET_FLAG, dl, MVT::Other, RetOps);
 }
 
 
@@ -410,7 +411,7 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   int NumNamedVarArgParams = -1;
   if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(Callee))
   {
-    const Function* CalleeFn = NULL;
+    const Function* CalleeFn = nullptr;
     Callee = DAG.getTargetGlobalAddress(GA->getGlobal(), dl, MVT::i32);
     if ((CalleeFn = dyn_cast<Function>(GA->getGlobal())))
     {
@@ -520,8 +521,7 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // Transform all store nodes into one single node because all store
   // nodes are independent of each other.
   if (!MemOpChains.empty()) {
-    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &MemOpChains[0],
-                        MemOpChains.size());
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, MemOpChains);
   }
 
   if (!isTailCall)
@@ -595,9 +595,9 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   }
 
   if (isTailCall)
-    return DAG.getNode(HexagonISD::TC_RETURN, dl, NodeTys, &Ops[0], Ops.size());
+    return DAG.getNode(HexagonISD::TC_RETURN, dl, NodeTys, Ops);
 
-  Chain = DAG.getNode(HexagonISD::CALL, dl, NodeTys, &Ops[0], Ops.size());
+  Chain = DAG.getNode(HexagonISD::CALL, dl, NodeTys, Ops);
   InFlag = Chain.getValue(1);
 
   // Create the CALLSEQ_END node.
@@ -817,7 +817,7 @@ HexagonTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
                                        Sub);
 
   SDValue Ops[2] = { ArgAdjust, CopyChain };
-  return DAG.getMergeValues(Ops, 2, dl);
+  return DAG.getMergeValues(Ops, dl);
 }
 
 SDValue
@@ -916,8 +916,7 @@ const {
   }
 
   if (!MemOps.empty())
-    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, &MemOps[0],
-                        MemOps.size());
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, MemOps);
 
   if (isVarArg) {
     // This will point to the next argument passed via stack.
@@ -1480,7 +1479,7 @@ HexagonTargetLowering::HexagonTargetLowering(HexagonTargetMachine
 const char*
 HexagonTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
-    default: return 0;
+    default: return nullptr;
     case HexagonISD::CONST32:     return "HexagonISD::CONST32";
     case HexagonISD::CONST32_GP: return "HexagonISD::CONST32_GP";
     case HexagonISD::CONST32_Int_Real: return "HexagonISD::CONST32_Int_Real";

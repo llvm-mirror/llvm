@@ -20,6 +20,8 @@
 using namespace llvm;
 using namespace PatternMatch;
 
+#define DEBUG_TYPE "instcombine"
+
 namespace {
 
   /// Class representing coefficient of floating-point addend.
@@ -112,12 +114,12 @@ namespace {
   ///
   class FAddend {
   public:
-    FAddend() { Val = 0; }
+    FAddend() { Val = nullptr; }
 
     Value *getSymVal (void) const { return Val; }
     const FAddendCoef &getCoef(void) const { return Coeff; }
 
-    bool isConstant() const { return Val == 0; }
+    bool isConstant() const { return Val == nullptr; }
     bool isZero() const { return Coeff.isZero(); }
 
     void set(short Coefficient, Value *V) { Coeff.set(Coefficient), Val = V; }
@@ -154,7 +156,7 @@ namespace {
   ///
   class FAddCombine {
   public:
-    FAddCombine(InstCombiner::BuilderTy *B) : Builder(B), Instr(0) {}
+    FAddCombine(InstCombiner::BuilderTy *B) : Builder(B), Instr(nullptr) {}
     Value *simplify(Instruction *FAdd);
 
   private:
@@ -348,8 +350,8 @@ Value *FAddendCoef::getValue(Type *Ty) const {
 //
 unsigned FAddend::drillValueDownOneStep
   (Value *Val, FAddend &Addend0, FAddend &Addend1) {
-  Instruction *I = 0;
-  if (Val == 0 || !(I = dyn_cast<Instruction>(Val)))
+  Instruction *I = nullptr;
+  if (!Val || !(I = dyn_cast<Instruction>(Val)))
     return 0;
 
   unsigned Opcode = I->getOpcode();
@@ -359,16 +361,16 @@ unsigned FAddend::drillValueDownOneStep
     Value *Opnd0 = I->getOperand(0);
     Value *Opnd1 = I->getOperand(1);
     if ((C0 = dyn_cast<ConstantFP>(Opnd0)) && C0->isZero())
-      Opnd0 = 0;
+      Opnd0 = nullptr;
 
     if ((C1 = dyn_cast<ConstantFP>(Opnd1)) && C1->isZero())
-      Opnd1 = 0;
+      Opnd1 = nullptr;
 
     if (Opnd0) {
       if (!C0)
         Addend0.set(1, Opnd0);
       else
-        Addend0.set(C0, 0);
+        Addend0.set(C0, nullptr);
     }
 
     if (Opnd1) {
@@ -376,7 +378,7 @@ unsigned FAddend::drillValueDownOneStep
       if (!C1)
         Addend.set(1, Opnd1);
       else
-        Addend.set(C1, 0);
+        Addend.set(C1, nullptr);
       if (Opcode == Instruction::FSub)
         Addend.negate();
     }
@@ -385,7 +387,7 @@ unsigned FAddend::drillValueDownOneStep
       return Opnd0 && Opnd1 ? 2 : 1;
 
     // Both operands are zero. Weird!
-    Addend0.set(APFloat(C0->getValueAPF().getSemantics()), 0);
+    Addend0.set(APFloat(C0->getValueAPF().getSemantics()), nullptr);
     return 1;
   }
 
@@ -443,13 +445,13 @@ Value *FAddCombine::performFactorization(Instruction *I) {
   Instruction *I1 = dyn_cast<Instruction>(I->getOperand(1));
 
   if (!I0 || !I1 || I0->getOpcode() != I1->getOpcode())
-    return 0;
+    return nullptr;
 
   bool isMpy = false;
   if (I0->getOpcode() == Instruction::FMul)
     isMpy = true;
   else if (I0->getOpcode() != Instruction::FDiv)
-    return 0;
+    return nullptr;
 
   Value *Opnd0_0 = I0->getOperand(0);
   Value *Opnd0_1 = I0->getOperand(1);
@@ -461,8 +463,8 @@ Value *FAddCombine::performFactorization(Instruction *I) {
   // (x*y) +/- (x*z)        x        y         z
   // (y/x) +/- (z/x)        x        y         z
   //
-  Value *Factor = 0;
-  Value *AddSub0 = 0, *AddSub1 = 0;
+  Value *Factor = nullptr;
+  Value *AddSub0 = nullptr, *AddSub1 = nullptr;
 
   if (isMpy) {
     if (Opnd0_0 == Opnd1_0 || Opnd0_0 == Opnd1_1)
@@ -481,7 +483,7 @@ Value *FAddCombine::performFactorization(Instruction *I) {
   }
 
   if (!Factor)
-    return 0;
+    return nullptr;
 
   FastMathFlags Flags;
   Flags.setUnsafeAlgebra();
@@ -495,7 +497,7 @@ Value *FAddCombine::performFactorization(Instruction *I) {
   if (ConstantFP *CFP = dyn_cast<ConstantFP>(NewAddSub)) {
     const APFloat &F = CFP->getValueAPF();
     if (!F.isNormal())
-      return 0;
+      return nullptr;
   } else if (Instruction *II = dyn_cast<Instruction>(NewAddSub))
     II->setFastMathFlags(Flags);
 
@@ -517,7 +519,7 @@ Value *FAddCombine::simplify(Instruction *I) {
 
   // Currently we are not able to handle vector type.
   if (I->getType()->isVectorTy())
-    return 0;
+    return nullptr;
 
   assert((I->getOpcode() == Instruction::FAdd ||
           I->getOpcode() == Instruction::FSub) && "Expect add/sub");
@@ -568,7 +570,7 @@ Value *FAddCombine::simplify(Instruction *I) {
     // been optimized into "I = Y - X" in the previous steps.
     //
     const FAddendCoef &CE = Opnd0.getCoef();
-    return CE.isOne() ? Opnd0.getSymVal() : 0;
+    return CE.isOne() ? Opnd0.getSymVal() : nullptr;
   }
 
   // step 4: Try to optimize Opnd0 + Opnd1_0 [+ Opnd1_1]
@@ -614,7 +616,7 @@ Value *FAddCombine::simplifyFAdd(AddendVect& Addends, unsigned InstrQuota) {
   // constant close to supper-expr(s) will potentially reveal some optimization
   // opportunities in super-expr(s).
   //
-  const FAddend *ConstAdd = 0;
+  const FAddend *ConstAdd = nullptr;
 
   // Simplified addends are placed <SimpVect>.
   AddendVect SimpVect;
@@ -647,7 +649,7 @@ Value *FAddCombine::simplifyFAdd(AddendVect& Addends, unsigned InstrQuota) {
       if (T && T->getSymVal() == Val) {
         // Set null such that next iteration of the outer loop will not process
         // this addend again.
-        Addends[SameSymIdx] = 0;
+        Addends[SameSymIdx] = nullptr;
         SimpVect.push_back(T);
       }
     }
@@ -661,7 +663,7 @@ Value *FAddCombine::simplifyFAdd(AddendVect& Addends, unsigned InstrQuota) {
 
       // Pop all addends being folded and push the resulting folded addend.
       SimpVect.resize(StartIdx);
-      if (Val != 0) {
+      if (Val) {
         if (!R.isZero()) {
           SimpVect.push_back(&R);
         }
@@ -698,7 +700,7 @@ Value *FAddCombine::createNaryFAdd
   //
   unsigned InstrNeeded = calcInstrNumber(Opnds);
   if (InstrNeeded > InstrQuota)
-    return 0;
+    return nullptr;
 
   initCreateInstNum();
 
@@ -710,7 +712,7 @@ Value *FAddCombine::createNaryFAdd
   // N-ary addition has at most two instructions, and we don't need to worry
   // about tree-height when constructing the N-ary addition.
 
-  Value *LastVal = 0;
+  Value *LastVal = nullptr;
   bool LastValNeedNeg = false;
 
   // Iterate the addends, creating fadd/fsub using adjacent two addends.
@@ -870,10 +872,10 @@ Value *FAddCombine::createAddendVal
 //
 static inline Value *dyn_castFoldableMul(Value *V, Constant *&CST) {
   if (!V->hasOneUse() || !V->getType()->isIntOrIntVectorTy())
-    return 0;
+    return nullptr;
 
   Instruction *I = dyn_cast<Instruction>(V);
-  if (I == 0) return 0;
+  if (!I) return nullptr;
 
   if (I->getOpcode() == Instruction::Mul)
     if ((CST = dyn_cast<Constant>(I->getOperand(1))))
@@ -884,7 +886,7 @@ static inline Value *dyn_castFoldableMul(Value *V, Constant *&CST) {
       CST = ConstantExpr::getShl(ConstantInt::get(V->getType(), 1), CST);
       return I->getOperand(0);
     }
-  return 0;
+  return nullptr;
 }
 
 
@@ -918,6 +920,9 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
   bool Changed = SimplifyAssociativeOrCommutative(I);
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
 
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
+
   if (Value *V = SimplifyAddInst(LHS, RHS, I.hasNoSignedWrap(),
                                  I.hasNoUnsignedWrap(), DL))
     return ReplaceInstUsesWith(I, V);
@@ -942,7 +947,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
       if (ZI->getSrcTy()->isIntegerTy(1))
         return SelectInst::Create(ZI->getOperand(0), AddOne(CI), CI);
 
-    Value *XorLHS = 0; ConstantInt *XorRHS = 0;
+    Value *XorLHS = nullptr; ConstantInt *XorRHS = nullptr;
     if (match(LHS, m_Xor(m_Value(XorLHS), m_ConstantInt(XorRHS)))) {
       uint32_t TySizeBits = I.getType()->getScalarSizeInBits();
       const APInt &RHSVal = CI->getValue();
@@ -974,7 +979,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
         IntegerType *IT = cast<IntegerType>(I.getType());
         APInt LHSKnownOne(IT->getBitWidth(), 0);
         APInt LHSKnownZero(IT->getBitWidth(), 0);
-        ComputeMaskedBits(XorLHS, LHSKnownZero, LHSKnownOne);
+        computeKnownBits(XorLHS, LHSKnownZero, LHSKnownOne);
         if ((XorRHS->getValue() | LHSKnownZero).isAllOnesValue())
           return BinaryOperator::CreateSub(ConstantExpr::getAdd(XorRHS, CI),
                                            XorLHS);
@@ -1042,11 +1047,11 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
   if (IntegerType *IT = dyn_cast<IntegerType>(I.getType())) {
     APInt LHSKnownOne(IT->getBitWidth(), 0);
     APInt LHSKnownZero(IT->getBitWidth(), 0);
-    ComputeMaskedBits(LHS, LHSKnownZero, LHSKnownOne);
+    computeKnownBits(LHS, LHSKnownZero, LHSKnownOne);
     if (LHSKnownZero != 0) {
       APInt RHSKnownOne(IT->getBitWidth(), 0);
       APInt RHSKnownZero(IT->getBitWidth(), 0);
-      ComputeMaskedBits(RHS, RHSKnownZero, RHSKnownOne);
+      computeKnownBits(RHS, RHSKnownZero, RHSKnownOne);
 
       // No bits in common -> bitwise or.
       if ((LHSKnownZero|RHSKnownZero).isAllOnesValue())
@@ -1174,7 +1179,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
 
   // Check for (x & y) + (x ^ y)
   {
-    Value *A = 0, *B = 0;
+    Value *A = nullptr, *B = nullptr;
     if (match(RHS, m_Xor(m_Value(A), m_Value(B))) &&
         (match(LHS, m_And(m_Specific(A), m_Specific(B))) ||
          match(LHS, m_And(m_Specific(B), m_Specific(A)))))
@@ -1186,12 +1191,15 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
       return BinaryOperator::CreateOr(A, B);
   }
 
-  return Changed ? &I : 0;
+  return Changed ? &I : nullptr;
 }
 
 Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
   bool Changed = SimplifyAssociativeOrCommutative(I);
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
+
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyFAddInst(LHS, RHS, I.getFastMathFlags(), DL))
     return ReplaceInstUsesWith(I, V);
@@ -1266,7 +1274,7 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
     if (match(LHS, m_Select(m_Value(C1), m_Value(A1), m_Value(B1))) &&
         match(RHS, m_Select(m_Value(C2), m_Value(A2), m_Value(B2)))) {
       if (C1 == C2) {
-        Constant *Z1=0, *Z2=0;
+        Constant *Z1=nullptr, *Z2=nullptr;
         Value *A, *B, *C=C1;
         if (match(A1, m_AnyZero()) && match(B2, m_AnyZero())) {
             Z1 = dyn_cast<Constant>(A1); A = A2;
@@ -1290,7 +1298,7 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
       return ReplaceInstUsesWith(I, V);
   }
 
-  return Changed ? &I : 0;
+  return Changed ? &I : nullptr;
 }
 
 
@@ -1305,7 +1313,7 @@ Value *InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
   // If LHS is a gep based on RHS or RHS is a gep based on LHS, we can optimize
   // this.
   bool Swapped = false;
-  GEPOperator *GEP1 = 0, *GEP2 = 0;
+  GEPOperator *GEP1 = nullptr, *GEP2 = nullptr;
 
   // For now we require one side to be the base pointer "A" or a constant
   // GEP derived from it.
@@ -1343,9 +1351,9 @@ Value *InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
 
   // Avoid duplicating the arithmetic if GEP2 has non-constant indices and
   // multiple users.
-  if (GEP1 == 0 ||
-      (GEP2 != 0 && !GEP2->hasAllConstantIndices() && !GEP2->hasOneUse()))
-    return 0;
+  if (!GEP1 ||
+      (GEP2 && !GEP2->hasAllConstantIndices() && !GEP2->hasOneUse()))
+    return nullptr;
 
   // Emit the offset of the GEP and an intptr_t.
   Value *Result = EmitGEPOffset(GEP1);
@@ -1367,6 +1375,9 @@ Value *InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
 
 Instruction *InstCombiner::visitSub(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifySubInst(Op0, Op1, I.hasNoSignedWrap(),
                                  I.hasNoUnsignedWrap(), DL))
@@ -1393,7 +1404,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
 
   if (Constant *C = dyn_cast<Constant>(Op0)) {
     // C - ~X == X + (1+C)
-    Value *X = 0;
+    Value *X = nullptr;
     if (match(Op1, m_Not(m_Value(X))))
       return BinaryOperator::CreateAdd(X, AddOne(C));
 
@@ -1451,9 +1462,9 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
   }
 
   if (Op1->hasOneUse()) {
-    Value *X = 0, *Y = 0, *Z = 0;
-    Constant *C = 0;
-    Constant *CI = 0;
+    Value *X = nullptr, *Y = nullptr, *Z = nullptr;
+    Constant *C = nullptr;
+    Constant *CI = nullptr;
 
     // (X - (Y - Z))  -->  (X + (Z - Y)).
     if (match(Op1, m_Sub(m_Value(Y), m_Value(Z))))
@@ -1532,11 +1543,14 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
         return ReplaceInstUsesWith(I, Res);
   }
 
-  return 0;
+  return nullptr;
 }
 
 Instruction *InstCombiner::visitFSub(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+
+  if (Value *V = SimplifyVectorOp(I))
+    return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyFSubInst(Op0, Op1, I.getFastMathFlags(), DL))
     return ReplaceInstUsesWith(I, V);
@@ -1574,5 +1588,5 @@ Instruction *InstCombiner::visitFSub(BinaryOperator &I) {
       return ReplaceInstUsesWith(I, V);
   }
 
-  return 0;
+  return nullptr;
 }

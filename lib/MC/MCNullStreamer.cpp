@@ -41,11 +41,6 @@ namespace {
 
     void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override {}
     void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) override {}
-    void EmitDwarfAdvanceLineAddr(int64_t LineDelta,
-                                  const MCSymbol *LastLabel,
-                                  const MCSymbol *Label,
-                                  unsigned PointerSize) override {}
-
     bool EmitSymbolAttribute(MCSymbol *Symbol,
                              MCSymbolAttr Attribute) override {
       return true;
@@ -70,7 +65,8 @@ namespace {
                         uint64_t Size, unsigned ByteAlignment) override {}
     void EmitBytes(StringRef Data) override {}
 
-    void EmitValueImpl(const MCExpr *Value, unsigned Size) override {}
+    void EmitValueImpl(const MCExpr *Value, unsigned Size,
+                       const SMLoc &Loc = SMLoc()) override {}
     void EmitULEB128Value(const MCExpr *Value) override {}
     void EmitSLEB128Value(const MCExpr *Value) override {}
     void EmitGPRel32Value(const MCExpr *Value) override {}

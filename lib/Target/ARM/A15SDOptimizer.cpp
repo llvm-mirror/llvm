@@ -24,7 +24,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "a15-sd-optimizer"
 #include "ARM.h"
 #include "ARMBaseInstrInfo.h"
 #include "ARMBaseRegisterInfo.h"
@@ -38,6 +37,8 @@
 #include <set>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "a15-sd-optimizer"
 
 namespace {
   struct A15SDOptimizer : public MachineFunctionPass {
@@ -259,7 +260,7 @@ unsigned A15SDOptimizer::optimizeSDPattern(MachineInstr *MI) {
       if (DPRMI && SPRMI) {
         // See if the first operand of this insert_subreg is IMPLICIT_DEF
         MachineInstr *ECDef = elideCopies(DPRMI);
-        if (ECDef != 0 && ECDef->isImplicitDef()) {
+        if (ECDef && ECDef->isImplicitDef()) {
           // Another corner case - if we're inserting something that is purely
           // a subreg copy of a DPR, just use that DPR.
 
@@ -348,10 +349,10 @@ MachineInstr *A15SDOptimizer::elideCopies(MachineInstr *MI) {
   if (!MI->isFullCopy())
     return MI;
   if (!TRI->isVirtualRegister(MI->getOperand(1).getReg()))
-    return NULL;
+    return nullptr;
   MachineInstr *Def = MRI->getVRegDef(MI->getOperand(1).getReg());
   if (!Def)
-    return NULL;
+    return nullptr;
   return elideCopies(Def);
 }
 

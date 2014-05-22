@@ -63,6 +63,8 @@ class VectorLegalizer {
   SDValue ExpandUINT_TO_FLOAT(SDValue Op);
   // Implement expansion for SIGN_EXTEND_INREG using SRL and SRA.
   SDValue ExpandSEXTINREG(SDValue Op);
+  // Expand bswap of vectors into a shuffle if legal.
+  SDValue ExpandBSWAP(SDValue Op);
   // Implement vselect in terms of XOR, AND, OR when blend is not supported
   // by the target.
   SDValue ExpandVSELECT(SDValue Op);
@@ -152,8 +154,7 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   for (unsigned i = 0, e = Node->getNumOperands(); i != e; ++i)
     Ops.push_back(LegalizeOp(Node->getOperand(i)));
 
-  SDValue Result =
-    SDValue(DAG.UpdateNodeOperands(Op.getNode(), Ops.data(), Ops.size()), 0);
+  SDValue Result = SDValue(DAG.UpdateNodeOperands(Op.getNode(), Ops), 0);
 
   if (Op.getOpcode() == ISD::LOAD) {
     LoadSDNode *LD = cast<LoadSDNode>(Op.getNode());
@@ -298,6 +299,8 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   case TargetLowering::Expand:
     if (Node->getOpcode() == ISD::SIGN_EXTEND_INREG)
       Result = ExpandSEXTINREG(Op);
+    else if (Node->getOpcode() == ISD::BSWAP)
+      Result = ExpandBSWAP(Op);
     else if (Node->getOpcode() == ISD::VSELECT)
       Result = ExpandVSELECT(Op);
     else if (Node->getOpcode() == ISD::SELECT)
@@ -343,7 +346,7 @@ SDValue VectorLegalizer::PromoteVectorOp(SDValue Op) {
       Operands[j] = Op.getOperand(j);
   }
 
-  Op = DAG.getNode(Op.getOpcode(), dl, NVT, &Operands[0], Operands.size());
+  Op = DAG.getNode(Op.getOpcode(), dl, NVT, Operands);
 
   return DAG.getNode(ISD::BITCAST, dl, VT, Op);
 }
@@ -377,8 +380,7 @@ SDValue VectorLegalizer::PromoteVectorOpINT_TO_FP(SDValue Op) {
       Operands[j] = Op.getOperand(j);
   }
 
-  return DAG.getNode(Op.getOpcode(), dl, Op.getValueType(), &Operands[0],
-                     Operands.size());
+  return DAG.getNode(Op.getOpcode(), dl, Op.getValueType(), Operands);
 }
 
 // For FP_TO_INT we promote the result type to a vector type with wider
@@ -546,10 +548,9 @@ SDValue VectorLegalizer::ExpandLoad(SDValue Op) {
     }
   }
 
-  SDValue NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
-            &LoadChains[0], LoadChains.size());
+  SDValue NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, LoadChains);
   SDValue Value = DAG.getNode(ISD::BUILD_VECTOR, dl,
-            Op.getNode()->getValueType(0), &Vals[0], Vals.size());
+                              Op.getNode()->getValueType(0), Vals);
 
   AddLegalizedOperand(Op.getValue(0), Value);
   AddLegalizedOperand(Op.getValue(1), NewChain);
@@ -603,8 +604,7 @@ SDValue VectorLegalizer::ExpandStore(SDValue Op) {
 
     Stores.push_back(Store);
   }
-  SDValue TF =  DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
-                            &Stores[0], Stores.size());
+  SDValue TF =  DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Stores);
   AddLegalizedOperand(Op, TF);
   return TF;
 }
@@ -648,7 +648,7 @@ SDValue VectorLegalizer::ExpandSELECT(SDValue Op) {
 
   // Broadcast the mask so that the entire vector is all-one or all zero.
   SmallVector<SDValue, 8> Ops(NumElem, Mask);
-  Mask = DAG.getNode(ISD::BUILD_VECTOR, DL, MaskTy, &Ops[0], Ops.size());
+  Mask = DAG.getNode(ISD::BUILD_VECTOR, DL, MaskTy, Ops);
 
   // Bitcast the operands to be the same type as the mask.
   // This is needed when we select between FP types because
@@ -684,6 +684,29 @@ SDValue VectorLegalizer::ExpandSEXTINREG(SDValue Op) {
   Op = Op.getOperand(0);
   Op =   DAG.getNode(ISD::SHL, DL, VT, Op, ShiftSz);
   return DAG.getNode(ISD::SRA, DL, VT, Op, ShiftSz);
+}
+
+SDValue VectorLegalizer::ExpandBSWAP(SDValue Op) {
+  EVT VT = Op.getValueType();
+
+  // Generate a byte wise shuffle mask for the BSWAP.
+  SmallVector<int, 16> ShuffleMask;
+  int ScalarSizeInBytes = VT.getScalarSizeInBits() / 8;
+  for (int I = 0, E = VT.getVectorNumElements(); I != E; ++I)
+    for (int J = ScalarSizeInBytes - 1; J >= 0; --J)
+      ShuffleMask.push_back((I * ScalarSizeInBytes) + J);
+
+  EVT ByteVT = EVT::getVectorVT(*DAG.getContext(), MVT::i8, ShuffleMask.size());
+
+  // Only emit a shuffle if the mask is legal.
+  if (!TLI.isShuffleMaskLegal(ShuffleMask, ByteVT))
+    return DAG.UnrollVectorOp(Op.getNode());
+
+  SDLoc DL(Op);
+  Op = DAG.getNode(ISD::BITCAST, DL, ByteVT, Op.getOperand(0));
+  Op = DAG.getVectorShuffle(ByteVT, DL, Op, DAG.getUNDEF(ByteVT),
+                            ShuffleMask.data());
+  return DAG.getNode(ISD::BITCAST, DL, VT, Op);
 }
 
 SDValue VectorLegalizer::ExpandVSELECT(SDValue Op) {
@@ -803,7 +826,7 @@ SDValue VectorLegalizer::UnrollVSETCC(SDValue Op) {
                                            (EltVT.getSizeInBits()), EltVT),
                            DAG.getConstant(0, EltVT));
   }
-  return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, &Ops[0], NumElems);
+  return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Ops);
 }
 
 }

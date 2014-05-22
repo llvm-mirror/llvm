@@ -686,15 +686,21 @@ MachOObjectFile::isSectionText(DataRefImpl Sec, bool &Res) const {
   return object_error::success;
 }
 
-error_code MachOObjectFile::isSectionData(DataRefImpl DRI, bool &Result) const {
-  // FIXME: Unimplemented.
-  Result = false;
+error_code MachOObjectFile::isSectionData(DataRefImpl Sec, bool &Result) const {
+  uint32_t Flags = getSectionFlags(this, Sec);
+  unsigned SectionType = Flags & MachO::SECTION_TYPE;
+  Result = !(Flags & MachO::S_ATTR_PURE_INSTRUCTIONS) &&
+           !(SectionType == MachO::S_ZEROFILL ||
+             SectionType == MachO::S_GB_ZEROFILL);
   return object_error::success;
 }
 
-error_code MachOObjectFile::isSectionBSS(DataRefImpl DRI, bool &Result) const {
-  // FIXME: Unimplemented.
-  Result = false;
+error_code MachOObjectFile::isSectionBSS(DataRefImpl Sec, bool &Result) const {
+  uint32_t Flags = getSectionFlags(this, Sec);
+  unsigned SectionType = Flags & MachO::SECTION_TYPE;
+  Result = !(Flags & MachO::S_ATTR_PURE_INSTRUCTIONS) &&
+           (SectionType == MachO::S_ZEROFILL ||
+            SectionType == MachO::S_GB_ZEROFILL);
   return object_error::success;
 }
 
@@ -1158,13 +1164,7 @@ error_code MachOObjectFile::getLibraryPath(DataRefImpl LibData,
 }
 
 basic_symbol_iterator MachOObjectFile::symbol_begin_impl() const {
-  DataRefImpl DRI;
-  if (!SymtabLoadCmd)
-    return basic_symbol_iterator(SymbolRef(DRI, this));
-
-  MachO::symtab_command Symtab = getSymtabLoadCommand();
-  DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Symtab.symoff));
-  return basic_symbol_iterator(SymbolRef(DRI, this));
+  return getSymbolByIndex(0);
 }
 
 basic_symbol_iterator MachOObjectFile::symbol_end_impl() const {
@@ -1179,6 +1179,20 @@ basic_symbol_iterator MachOObjectFile::symbol_end_impl() const {
   unsigned Offset = Symtab.symoff +
     Symtab.nsyms * SymbolTableEntrySize;
   DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Offset));
+  return basic_symbol_iterator(SymbolRef(DRI, this));
+}
+
+basic_symbol_iterator MachOObjectFile::getSymbolByIndex(unsigned Index) const {
+  DataRefImpl DRI;
+  if (!SymtabLoadCmd)
+    return basic_symbol_iterator(SymbolRef(DRI, this));
+
+  MachO::symtab_command Symtab = getSymtabLoadCommand();
+  assert(Index < Symtab.nsyms && "Requested symbol index is out of range.");
+  unsigned SymbolTableEntrySize =
+    is64Bit() ? sizeof(MachO::nlist_64) : sizeof(MachO::nlist);
+  DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Symtab.symoff));
+  DRI.p += Index * SymbolTableEntrySize;
   return basic_symbol_iterator(SymbolRef(DRI, this));
 }
 

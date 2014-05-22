@@ -15,7 +15,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "ipconstprop"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -26,6 +25,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "ipconstprop"
 
 STATISTIC(NumArgumentsProped, "Number of args turned into constants");
 STATISTIC(NumReturnValProped, "Number of return values turned into constants");
@@ -112,7 +113,7 @@ bool IPCP::PropagateConstantsIntoArguments(Function &F) {
         continue;
       
       Constant *C = dyn_cast<Constant>(*AI);
-      if (C && ArgumentConstants[i].first == 0) {
+      if (C && ArgumentConstants[i].first == nullptr) {
         ArgumentConstants[i].first = C;   // First constant seen.
       } else if (C && ArgumentConstants[i].first == C) {
         // Still the constant value we think it is.
@@ -139,7 +140,7 @@ bool IPCP::PropagateConstantsIntoArguments(Function &F) {
       continue;
   
     Value *V = ArgumentConstants[i].first;
-    if (V == 0) V = UndefValue::get(AI->getType());
+    if (!V) V = UndefValue::get(AI->getType());
     AI->replaceAllUsesWith(V);
     ++NumArgumentsProped;
     MadeChange = true;
@@ -209,7 +210,7 @@ bool IPCP::PropagateConstantReturn(Function &F) {
         }
         // Different or no known return value? Don't propagate this return
         // value.
-        RetVals[i] = 0;
+        RetVals[i] = nullptr;
         // All values non-constant? Stop looking.
         if (++NumNonConstant == RetVals.size())
           return false;
@@ -235,7 +236,7 @@ bool IPCP::PropagateConstantReturn(Function &F) {
 
     MadeChange = true;
 
-    if (STy == 0) {
+    if (!STy) {
       Value* New = RetVals[0];
       if (Argument *A = dyn_cast<Argument>(New))
         // Was an argument returned? Then find the corresponding argument in

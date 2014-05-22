@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "packets"
 #include "llvm/Support/Debug.h"
 #include "AMDGPU.h"
 #include "R600InstrInfo.h"
@@ -28,6 +27,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "packets"
+
 namespace {
 
 class R600Packetizer : public MachineFunctionPass {
@@ -36,7 +37,7 @@ public:
   static char ID;
   R600Packetizer(const TargetMachine &TM) : MachineFunctionPass(ID) {}
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     AU.addRequired<MachineDominatorTree>();
     AU.addPreserved<MachineDominatorTree>();
@@ -45,11 +46,11 @@ public:
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
-  const char *getPassName() const {
+  const char *getPassName() const override {
     return "R600 Packetizer";
   }
 
-  bool runOnMachineFunction(MachineFunction &Fn);
+  bool runOnMachineFunction(MachineFunction &Fn) override;
 };
 char R600Packetizer::ID = 0;
 
@@ -155,18 +156,19 @@ public:
   }
 
   // initPacketizerState - initialize some internal flags.
-  void initPacketizerState() {
+  void initPacketizerState() override {
     ConsideredInstUsesAlreadyWrittenVectorElement = false;
   }
 
   // ignorePseudoInstruction - Ignore bundling of pseudo instructions.
-  bool ignorePseudoInstruction(MachineInstr *MI, MachineBasicBlock *MBB) {
+  bool ignorePseudoInstruction(MachineInstr *MI,
+                               MachineBasicBlock *MBB) override {
     return false;
   }
 
   // isSoloInstruction - return true if instruction MI can not be packetized
   // with any other instruction, which means that MI itself is a packet.
-  bool isSoloInstruction(MachineInstr *MI) {
+  bool isSoloInstruction(MachineInstr *MI) override {
     if (TII->isVector(*MI))
       return true;
     if (!TII->isALUInstr(MI->getOpcode()))
@@ -182,7 +184,7 @@ public:
 
   // isLegalToPacketizeTogether - Is it legal to packetize SUI and SUJ
   // together.
-  bool isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) {
+  bool isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) override {
     MachineInstr *MII = SUI->getInstr(), *MIJ = SUJ->getInstr();
     if (getSlot(MII) == getSlot(MIJ))
       ConsideredInstUsesAlreadyWrittenVectorElement = true;
@@ -219,7 +221,9 @@ public:
 
   // isLegalToPruneDependencies - Is it legal to prune dependece between SUI
   // and SUJ.
-  bool isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ) {return false;}
+  bool isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ) override {
+    return false;
+  }
 
   void setIsLastBit(MachineInstr *MI, unsigned Bit) const {
     unsigned LastOp = TII->getOperandIdx(MI->getOpcode(), AMDGPU::OpName::last);
@@ -288,7 +292,7 @@ public:
     return true;
   }
 
-  MachineBasicBlock::iterator addToPacket(MachineInstr *MI) {
+  MachineBasicBlock::iterator addToPacket(MachineInstr *MI) override {
     MachineBasicBlock::iterator FirstInBundle =
         CurrentPacketMIs.empty() ? MI : CurrentPacketMIs.front();
     const DenseMap<unsigned, unsigned> &PV =

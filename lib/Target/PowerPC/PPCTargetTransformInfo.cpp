@@ -14,7 +14,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "ppctti"
 #include "PPC.h"
 #include "PPCTargetMachine.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -23,6 +22,8 @@
 #include "llvm/Target/CostTable.h"
 #include "llvm/Target/TargetLowering.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "ppctti"
 
 static cl::opt<bool> DisablePPCConstHoist("disable-ppc-constant-hoisting",
 cl::desc("disable constant hoisting on PPC"), cl::init(false), cl::Hidden);
@@ -41,7 +42,7 @@ class PPCTTI final : public ImmutablePass, public TargetTransformInfo {
   const PPCTargetLowering *TLI;
 
 public:
-  PPCTTI() : ImmutablePass(ID), ST(0), TLI(0) {
+  PPCTTI() : ImmutablePass(ID), ST(nullptr), TLI(nullptr) {
     llvm_unreachable("This pass cannot be directly constructed");
   }
 

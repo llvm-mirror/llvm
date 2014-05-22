@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "mccodeemitter"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
@@ -30,6 +29,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mccodeemitter"
 
 STATISTIC(MCNumEmitted, "Number of MC instructions emitted.");
 STATISTIC(MCNumCPRelocations, "Number of constant pool relocations created.");
@@ -1028,6 +1029,9 @@ ARMMCCodeEmitter::getHiLo16ImmOpValue(const MCInst &MI, unsigned OpIdx,
     switch (ARM16Expr->getKind()) {
     default: llvm_unreachable("Unsupported ARMFixup");
     case ARMMCExpr::VK_ARM_HI16:
+      if (Triple(STI.getTargetTriple()).isOSWindows())
+        return 0;
+
       Kind = MCFixupKind(isThumb2(STI) ? ARM::fixup_t2_movt_hi16
                                        : ARM::fixup_arm_movt_hi16);
       break;
@@ -1036,6 +1040,7 @@ ARMMCCodeEmitter::getHiLo16ImmOpValue(const MCInst &MI, unsigned OpIdx,
                                        : ARM::fixup_arm_movw_lo16);
       break;
     }
+
     Fixups.push_back(MCFixup::Create(0, E, Kind, MI.getLoc()));
     return 0;
   }

@@ -41,6 +41,8 @@ LLVMContextImpl::LLVMContextImpl(LLVMContext &C)
   InlineAsmDiagContext = nullptr;
   DiagnosticHandler = nullptr;
   DiagnosticContext = nullptr;
+  YieldCallback = nullptr;
+  YieldOpaqueHandle = nullptr;
   NamedStructTypesUniqueID = 0;
 }
 
@@ -52,22 +54,12 @@ namespace {
 /// LLVMContext::emitOptimizationRemark.
 static Regex *OptimizationRemarkPattern = nullptr;
 
-/// \brief String to hold all the values passed via -pass-remarks. Every
-/// instance of -pass-remarks on the command line will be concatenated
-/// to this string. Values are stored inside braces and concatenated with
-/// the '|' operator. This implements the expected semantics that multiple
-/// -pass-remarks are additive.
-static std::string OptimizationRemarkExpr;
-
 struct PassRemarksOpt {
   void operator=(const std::string &Val) const {
     // Create a regexp object to match pass names for emitOptimizationRemark.
     if (!Val.empty()) {
-      if (!OptimizationRemarkExpr.empty())
-        OptimizationRemarkExpr += "|";
-      OptimizationRemarkExpr += "(" + Val + ")";
       delete OptimizationRemarkPattern;
-      OptimizationRemarkPattern = new Regex(OptimizationRemarkExpr);
+      OptimizationRemarkPattern = new Regex(Val);
       std::string RegexError;
       if (!OptimizationRemarkPattern->isValid(RegexError))
         report_fatal_error("Invalid regular expression '" + Val +
@@ -119,12 +111,11 @@ struct DropFirst {
 }
 
 LLVMContextImpl::~LLVMContextImpl() {
-  // NOTE: We need to delete the contents of OwnedModules, but we have to
-  // duplicate it into a temporary vector, because the destructor of Module
-  // will try to remove itself from OwnedModules set.  This would cause
-  // iterator invalidation if we iterated on the set directly.
-  std::vector<Module*> Modules(OwnedModules.begin(), OwnedModules.end());
-  DeleteContainerPointers(Modules);
+  // NOTE: We need to delete the contents of OwnedModules, but Module's dtor
+  // will call LLVMContextImpl::removeModule, thus invalidating iterators into
+  // the container. Avoid iterators during this operation:
+  while (!OwnedModules.empty())
+    delete *OwnedModules.begin();
   
   // Free the constants.  This is important to do here to ensure that they are
   // freed before the LeakDetector is torn down.

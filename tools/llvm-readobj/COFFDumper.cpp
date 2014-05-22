@@ -196,15 +196,13 @@ static error_code resolveSectionAndAddress(const COFFObjectFile *Obj,
 // the function returns the symbol used for the relocation at the offset.
 static error_code resolveSymbol(const std::vector<RelocationRef> &Rels,
                                 uint64_t Offset, SymbolRef &Sym) {
-  for (std::vector<RelocationRef>::const_iterator RelI = Rels.begin(),
-                                                  RelE = Rels.end();
-                                                  RelI != RelE; ++RelI) {
+  for (const auto &Relocation : Rels) {
     uint64_t Ofs;
-    if (error_code EC = RelI->getOffset(Ofs))
+    if (error_code EC = Relocation.getOffset(Ofs))
       return EC;
 
     if (Ofs == Offset) {
-      Sym = *RelI->getSymbol();
+      Sym = *Relocation.getSymbol();
       return readobj_error::success;
     }
   }
@@ -534,7 +532,7 @@ void COFFDumper::printDataDirectory(uint32_t Index, const std::string &FieldName
 
 void COFFDumper::printFileHeaders() {
   // Print COFF header
-  const coff_file_header *COFFHeader = 0;
+  const coff_file_header *COFFHeader = nullptr;
   if (error(Obj->getCOFFHeader(COFFHeader)))
     return;
 
@@ -557,13 +555,13 @@ void COFFDumper::printFileHeaders() {
 
   // Print PE header. This header does not exist if this is an object file and
   // not an executable.
-  const pe32_header *PEHeader = 0;
+  const pe32_header *PEHeader = nullptr;
   if (error(Obj->getPE32Header(PEHeader)))
     return;
   if (PEHeader)
     printPEHeader<pe32_header>(PEHeader);
 
-  const pe32plus_header *PEPlusHeader = 0;
+  const pe32plus_header *PEPlusHeader = nullptr;
   if (error(Obj->getPE32PlusHeader(PEPlusHeader)))
     return;
   if (PEPlusHeader)
@@ -693,7 +691,7 @@ void COFFDumper::printCodeViewLineTables(const SectionRef &Section) {
         break;
       }
       case COFF::DEBUG_STRING_TABLE_SUBSECTION:
-        if (PayloadSize == 0 || StringTable.data() != 0 ||
+        if (PayloadSize == 0 || StringTable.data() != nullptr ||
             Contents.back() != '\0') {
           // Empty or duplicate or non-null-terminated subsection.
           error(object_error::parse_failed);
@@ -705,7 +703,8 @@ void COFFDumper::printCodeViewLineTables(const SectionRef &Section) {
         // Holds the translation table from file indices
         // to offsets in the string table.
 
-        if (PayloadSize == 0 || FileIndexToStringOffsetTable.data() != 0) {
+        if (PayloadSize == 0 ||
+            FileIndexToStringOffsetTable.data() != nullptr) {
           // Empty or duplicate subsection.
           error(object_error::parse_failed);
           return;
@@ -1090,7 +1089,7 @@ void COFFDumper::printRuntimeFunction(
   W.printString("UnwindInfoAddress",
                 formatSymbol(Rels, OffsetInSection + 8, RTF.UnwindInfoOffset));
 
-  const coff_section* XData = 0;
+  const coff_section* XData = nullptr;
   uint64_t UnwindInfoOffset = 0;
   if (error(getSection(Rels, OffsetInSection + 8, &XData, &UnwindInfoOffset)))
     return;

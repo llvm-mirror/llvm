@@ -16,6 +16,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "amdgpu-subtarget"
+
 #define GET_SUBTARGETINFO_ENUM
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
@@ -28,9 +30,6 @@ AMDGPUSubtarget::AMDGPUSubtarget(StringRef TT, StringRef CPU, StringRef FS) :
   // Default card
   StringRef GPU = CPU;
   Is64bit = false;
-  DefaultSize[0] = 64;
-  DefaultSize[1] = 1;
-  DefaultSize[2] = 1;
   HasVertexCache = false;
   TexVTXClauseSize = 0;
   Gen = AMDGPUSubtarget::R600;
@@ -105,14 +104,6 @@ AMDGPUSubtarget::hasCFAluBug() const {
 bool
 AMDGPUSubtarget::isTargetELF() const {
   return false;
-}
-size_t
-AMDGPUSubtarget::getDefaultSize(uint32_t dim) const {
-  if (dim > 2) {
-    return 1;
-  } else {
-    return DefaultSize[dim];
-  }
 }
 
 std::string

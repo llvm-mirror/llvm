@@ -18,6 +18,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Dwarf.h"
@@ -125,7 +126,8 @@ public:
     uint16_t type; // enum AtomType
     uint16_t form; // DWARF DW_FORM_ defines
 
-    Atom(uint16_t type, uint16_t form) : type(type), form(form) {}
+    LLVM_CONSTEXPR Atom(uint16_t type, uint16_t form)
+        : type(type), form(form) {}
 #ifndef NDEBUG
     void print(raw_ostream &O) {
       O << "Type: " << dwarf::AtomTypeString(type) << "\n"
@@ -177,12 +179,19 @@ public:
   };
 
 private:
+  // String Data
+  struct DataArray {
+    MCSymbol *StrSym;
+    std::vector<HashDataContents *> Values;
+    DataArray() : StrSym(nullptr) {}
+  };
+  friend struct HashData;
   struct HashData {
     StringRef Str;
     uint32_t HashValue;
     MCSymbol *Sym;
-    ArrayRef<HashDataContents *> Data; // offsets
-    HashData(StringRef S, ArrayRef<HashDataContents *> Data)
+    DwarfAccelTable::DataArray &Data; // offsets
+    HashData(StringRef S, DwarfAccelTable::DataArray &Data)
         : Str(S), Data(Data) {
       HashValue = DwarfAccelTable::HashDJB(S);
     }
@@ -196,10 +205,10 @@ private:
       else
         O << "<none>";
       O << "\n";
-      for (size_t i = 0; i < Data.size(); i++) {
-        O << "  Offset: " << Data[i]->Die->getOffset() << "\n";
-        O << "  Tag: " << dwarf::TagString(Data[i]->Die->getTag()) << "\n";
-        O << "  Flags: " << Data[i]->Flags << "\n";
+      for (HashDataContents *C : Data.Values) {
+        O << "  Offset: " << C->Die->getOffset() << "\n";
+        O << "  Tag: " << dwarf::TagString(C->Die->getTag()) << "\n";
+        O << "  Flags: " << C->Flags << "\n";
       }
     }
     void dump() { print(dbgs()); }
@@ -224,8 +233,6 @@ private:
   TableHeaderData HeaderData;
   std::vector<HashData *> Data;
 
-  // String Data
-  typedef std::vector<HashDataContents *> DataArray;
   typedef StringMap<DataArray, BumpPtrAllocator &> StringEntries;
   StringEntries Entries;
 
@@ -238,8 +245,8 @@ private:
   // Public Implementation
 public:
   DwarfAccelTable(ArrayRef<DwarfAccelTable::Atom>);
-  ~DwarfAccelTable();
-  void AddName(StringRef, const DIE *, char = 0);
+  void AddName(StringRef Name, MCSymbol *StrSym, const DIE *Die,
+               char Flags = 0);
   void FinalizeTable(AsmPrinter *, StringRef);
   void Emit(AsmPrinter *, MCSymbol *, DwarfFile *);
 #ifndef NDEBUG

@@ -20,6 +20,8 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
 #define GET_INSTRINFO_MC_DESC
 #include "NVPTXGenInstrInfo.inc"
 
@@ -28,8 +30,6 @@
 
 #define GET_REGINFO_MC_DESC
 #include "NVPTXGenRegisterInfo.inc"
-
-using namespace llvm;
 
 static MCInstrInfo *createNVPTXMCInstrInfo() {
   MCInstrInfo *X = new MCInstrInfo();
@@ -66,7 +66,7 @@ static MCInstPrinter *createNVPTXMCInstPrinter(const Target &T,
                                                const MCSubtargetInfo &STI) {
   if (SyntaxVariant == 0)
     return new NVPTXInstPrinter(MAI, MII, MRI, STI);
-  return 0;
+  return nullptr;
 }
 
 // Force static initialization.

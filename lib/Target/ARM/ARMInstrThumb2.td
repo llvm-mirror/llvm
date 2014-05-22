@@ -2407,6 +2407,19 @@ def t2UBFX: T2TwoRegBitFI<
   let Inst{15} = 0;
 }
 
+// A8.8.247  UDF - Undefined (Encoding T2)
+def t2UDF
+    : T2XI<(outs), (ins imm0_65535:$imm16), IIC_Br, "udf.w\t$imm16", []> {
+  bits<16> imm16;
+  let Inst{31-29} = 0b111;
+  let Inst{28-27} = 0b10;
+  let Inst{26-20} = 0b1111111;
+  let Inst{19-16} = imm16{15-12};
+  let Inst{15} = 0b1;
+  let Inst{14-12} = 0b010;
+  let Inst{11-0} = imm16{11-0};
+}
+
 // A8.6.18  BFI - Bitfield insert (Encoding T1)
 let Constraints = "$src = $Rd" in {
   def t2BFI : T2TwoRegBitFI<(outs rGPR:$Rd),
@@ -3671,7 +3684,8 @@ def : t2InstAlias<"cps.w $mode", (t2CPS1p imm0_31:$mode), 0>;
 
 // A6.3.4 Branches and miscellaneous control
 // Table A6-14 Change Processor State, and hint instructions
-def t2HINT : T2I<(outs), (ins imm0_239:$imm), NoItinerary, "hint", ".w\t$imm",[]> {
+def t2HINT : T2I<(outs), (ins imm0_239:$imm), NoItinerary, "hint", ".w\t$imm",
+                  [(int_arm_hint imm0_239:$imm)]> {
   bits<8> imm;
   let Inst{31-3} = 0b11110011101011111000000000000;
   let Inst{7-0} = imm;

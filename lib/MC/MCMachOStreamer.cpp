@@ -237,10 +237,6 @@ void MCMachOStreamer::EmitThumbFunc(MCSymbol *Symbol) {
   // Remember that the function is a thumb function. Fixup and relocation
   // values will need adjusted.
   getAssembler().setIsThumbFunc(Symbol);
-
-  // Mark the thumb bit on the symbol.
-  MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*Symbol);
-  SD.setFlags(SD.getFlags() | SF_ThumbFunc);
 }
 
 bool MCMachOStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
@@ -422,7 +418,7 @@ void MCMachOStreamer::EmitInstToData(const MCInst &Inst,
 }
 
 void MCMachOStreamer::FinishImpl() {
-  EmitFrames(&getAssembler().getBackend(), true);
+  EmitFrames(&getAssembler().getBackend());
 
   // We have to set the fragment atom associations so we can relax properly for
   // Mach-O.

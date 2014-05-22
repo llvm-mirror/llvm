@@ -11,17 +11,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dyld"
 #include "RuntimeDyldMachO.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 using namespace llvm;
 using namespace llvm::object;
 
+#define DEBUG_TYPE "dyld"
+
 namespace llvm {
 
 static unsigned char *processFDE(unsigned char *P, intptr_t DeltaForText,
                                  intptr_t DeltaForEH) {
+  DEBUG(dbgs() << "Processing FDE: Delta for text: " << DeltaForText
+               << ", Delta for EH: " << DeltaForEH << "\n");
   uint32_t Length = *((uint32_t *)P);
   P += 4;
   unsigned char *Ret = P + Length;
@@ -66,7 +69,7 @@ void RuntimeDyldMachO::registerEHFrames() {
       continue;
     SectionEntry *Text = &Sections[SectionInfo.TextSID];
     SectionEntry *EHFrame = &Sections[SectionInfo.EHFrameSID];
-    SectionEntry *ExceptTab = NULL;
+    SectionEntry *ExceptTab = nullptr;
     if (SectionInfo.ExceptTabSID != RTDYLD_INVALID_SECTION_ID)
       ExceptTab = &Sections[SectionInfo.ExceptTabSID];
 
@@ -87,7 +90,8 @@ void RuntimeDyldMachO::registerEHFrames() {
   UnregisteredEHFrameSections.clear();
 }
 
-void RuntimeDyldMachO::finalizeLoad(ObjSectionToIDMap &SectionMap) {
+void RuntimeDyldMachO::finalizeLoad(ObjectImage &ObjImg,
+                                    ObjSectionToIDMap &SectionMap) {
   unsigned EHFrameSID = RTDYLD_INVALID_SECTION_ID;
   unsigned TextSID = RTDYLD_INVALID_SECTION_ID;
   unsigned ExceptTabSID = RTDYLD_INVALID_SECTION_ID;
@@ -102,6 +106,12 @@ void RuntimeDyldMachO::finalizeLoad(ObjSectionToIDMap &SectionMap) {
       TextSID = i->second;
     else if (Name == "__gcc_except_tab")
       ExceptTabSID = i->second;
+    else if (Name == "__jump_table")
+      populateJumpTable(cast<MachOObjectFile>(*ObjImg.getObjectFile()),
+                        Section, i->second);
+    else if (Name == "__pointers")
+      populatePointersSection(cast<MachOObjectFile>(*ObjImg.getObjectFile()),
+                              Section, i->second);
   }
   UnregisteredEHFrameSections.push_back(
       EHFrameRelatedSections(EHFrameSID, TextSID, ExceptTabSID));
@@ -129,91 +139,86 @@ void RuntimeDyldMachO::finalizeLoad(ObjSectionToIDMap &SectionMap) {
 // symbol in the target address space.
 void RuntimeDyldMachO::resolveRelocation(const RelocationEntry &RE,
                                          uint64_t Value) {
-  const SectionEntry &Section = Sections[RE.SectionID];
-  return resolveRelocation(Section, RE.Offset, Value, RE.RelType, RE.Addend,
-                           RE.IsPCRel, RE.Size);
-}
+  DEBUG (
+    const SectionEntry &Section = Sections[RE.SectionID];
+    uint8_t* LocalAddress = Section.Address + RE.Offset;
+    uint64_t FinalAddress = Section.LoadAddress + RE.Offset;
 
-void RuntimeDyldMachO::resolveRelocation(const SectionEntry &Section,
-                                         uint64_t Offset, uint64_t Value,
-                                         uint32_t Type, int64_t Addend,
-                                         bool isPCRel, unsigned LogSize) {
-  uint8_t *LocalAddress = Section.Address + Offset;
-  uint64_t FinalAddress = Section.LoadAddress + Offset;
-  unsigned MachoType = Type;
-  unsigned Size = 1 << LogSize;
-
-  DEBUG(dbgs() << "resolveRelocation LocalAddress: "
-               << format("%p", LocalAddress)
-               << " FinalAddress: " << format("%p", FinalAddress)
-               << " Value: " << format("%p", Value) << " Addend: " << Addend
-               << " isPCRel: " << isPCRel << " MachoType: " << MachoType
-               << " Size: " << Size << "\n");
+    dbgs() << "resolveRelocation Section: " << RE.SectionID
+           << " LocalAddress: " << format("%p", LocalAddress)
+           << " FinalAddress: " << format("%p", FinalAddress)
+           << " Value: " << format("%p", Value)
+           << " Addend: " << RE.Addend
+           << " isPCRel: " << RE.IsPCRel
+           << " MachoType: " << RE.RelType
+           << " Size: " << (1 << RE.Size) << "\n";
+  );
 
   // This just dispatches to the proper target specific routine.
   switch (Arch) {
   default:
     llvm_unreachable("Unsupported CPU type!");
   case Triple::x86_64:
-    resolveX86_64Relocation(LocalAddress, FinalAddress, (uintptr_t)Value,
-                            isPCRel, MachoType, Size, Addend);
+    resolveX86_64Relocation(RE, Value);
     break;
   case Triple::x86:
-    resolveI386Relocation(LocalAddress, FinalAddress, (uintptr_t)Value, isPCRel,
-                          MachoType, Size, Addend);
+    resolveI386Relocation(RE, Value);
     break;
   case Triple::arm: // Fall through.
   case Triple::thumb:
-    resolveARMRelocation(LocalAddress, FinalAddress, (uintptr_t)Value, isPCRel,
-                         MachoType, Size, Addend);
+    resolveARMRelocation(RE, Value);
     break;
   case Triple::arm64:
-    resolveARM64Relocation(LocalAddress, FinalAddress, (uintptr_t)Value,
-                           isPCRel, MachoType, Size, Addend);
+    resolveARM64Relocation(RE, Value);
     break;
   }
 }
 
-bool RuntimeDyldMachO::resolveI386Relocation(uint8_t *LocalAddress,
-                                             uint64_t FinalAddress,
-                                             uint64_t Value, bool isPCRel,
-                                             unsigned Type, unsigned Size,
-                                             int64_t Addend) {
-  if (isPCRel)
-    Value -= FinalAddress + 4; // see resolveX86_64Relocation
+bool RuntimeDyldMachO::resolveI386Relocation(const RelocationEntry &RE,
+                                             uint64_t Value) {
+  const SectionEntry &Section = Sections[RE.SectionID];
+  uint8_t* LocalAddress = Section.Address + RE.Offset;
 
-  switch (Type) {
-  default:
-    llvm_unreachable("Invalid relocation type!");
-  case MachO::GENERIC_RELOC_VANILLA: {
-    uint8_t *p = LocalAddress;
-    uint64_t ValueToWrite = Value + Addend;
-    for (unsigned i = 0; i < Size; ++i) {
-      *p++ = (uint8_t)(ValueToWrite & 0xff);
-      ValueToWrite >>= 8;
-    }
-    return false;
+  if (RE.IsPCRel) {
+    uint64_t FinalAddress = Section.LoadAddress + RE.Offset;
+    Value -= FinalAddress + 4; // see MachOX86_64::resolveRelocation.
   }
-  case MachO::GENERIC_RELOC_SECTDIFF:
-  case MachO::GENERIC_RELOC_LOCAL_SECTDIFF:
-  case MachO::GENERIC_RELOC_PB_LA_PTR:
-    return Error("Relocation type not implemented yet!");
+
+  switch (RE.RelType) {
+    default:
+      llvm_unreachable("Invalid relocation type!");
+    case MachO::GENERIC_RELOC_VANILLA:
+      return applyRelocationValue(LocalAddress, Value + RE.Addend,
+                                  1 << RE.Size);
+    case MachO::GENERIC_RELOC_SECTDIFF:
+    case MachO::GENERIC_RELOC_LOCAL_SECTDIFF: {
+      uint64_t SectionABase = Sections[RE.Sections.SectionA].LoadAddress;
+      uint64_t SectionBBase = Sections[RE.Sections.SectionB].LoadAddress;
+      assert((Value == SectionABase || Value == SectionBBase) &&
+             "Unexpected SECTDIFF relocation value.");
+      Value = SectionABase - SectionBBase + RE.Addend;
+      return applyRelocationValue(LocalAddress, Value, 1 << RE.Size);
+    }
+    case MachO::GENERIC_RELOC_PB_LA_PTR:
+      return Error("Relocation type not implemented yet!");
   }
 }
 
-bool RuntimeDyldMachO::resolveX86_64Relocation(uint8_t *LocalAddress,
-                                               uint64_t FinalAddress,
-                                               uint64_t Value, bool isPCRel,
-                                               unsigned Type, unsigned Size,
-                                               int64_t Addend) {
+bool RuntimeDyldMachO::resolveX86_64Relocation(const RelocationEntry &RE,
+                                               uint64_t Value) {
+  const SectionEntry &Section = Sections[RE.SectionID];
+  uint8_t* LocalAddress = Section.Address + RE.Offset;
+
   // If the relocation is PC-relative, the value to be encoded is the
   // pointer difference.
-  if (isPCRel)
+  if (RE.IsPCRel) {
     // FIXME: It seems this value needs to be adjusted by 4 for an effective PC
     // address. Is that expected? Only for branches, perhaps?
-    Value -= FinalAddress + 4;
+    uint64_t FinalAddress = Section.LoadAddress + RE.Offset;
+    Value -= FinalAddress + 4; // see MachOX86_64::resolveRelocation.
+  }
 
-  switch (Type) {
+  switch (RE.RelType) {
   default:
     llvm_unreachable("Invalid relocation type!");
   case MachO::X86_64_RELOC_SIGNED_1:
@@ -221,17 +226,8 @@ bool RuntimeDyldMachO::resolveX86_64Relocation(uint8_t *LocalAddress,
   case MachO::X86_64_RELOC_SIGNED_4:
   case MachO::X86_64_RELOC_SIGNED:
   case MachO::X86_64_RELOC_UNSIGNED:
-  case MachO::X86_64_RELOC_BRANCH: {
-    Value += Addend;
-    // Mask in the target value a byte at a time (we don't have an alignment
-    // guarantee for the target address, so this is safest).
-    uint8_t *p = (uint8_t *)LocalAddress;
-    for (unsigned i = 0; i < Size; ++i) {
-      *p++ = (uint8_t)Value;
-      Value >>= 8;
-    }
-    return false;
-  }
+  case MachO::X86_64_RELOC_BRANCH:
+    return applyRelocationValue(LocalAddress, Value + RE.Addend, 1 << RE.Size);
   case MachO::X86_64_RELOC_GOT_LOAD:
   case MachO::X86_64_RELOC_GOT:
   case MachO::X86_64_RELOC_SUBTRACTOR:
@@ -240,14 +236,15 @@ bool RuntimeDyldMachO::resolveX86_64Relocation(uint8_t *LocalAddress,
   }
 }
 
-bool RuntimeDyldMachO::resolveARMRelocation(uint8_t *LocalAddress,
-                                            uint64_t FinalAddress,
-                                            uint64_t Value, bool isPCRel,
-                                            unsigned Type, unsigned Size,
-                                            int64_t Addend) {
+bool RuntimeDyldMachO::resolveARMRelocation(const RelocationEntry &RE,
+                                            uint64_t Value) {
+  const SectionEntry &Section = Sections[RE.SectionID];
+  uint8_t* LocalAddress = Section.Address + RE.Offset;
+
   // If the relocation is PC-relative, the value to be encoded is the
   // pointer difference.
-  if (isPCRel) {
+  if (RE.IsPCRel) {
+    uint64_t FinalAddress = Section.LoadAddress + RE.Offset;
     Value -= FinalAddress;
     // ARM PCRel relocations have an effective-PC offset of two instructions
     // (four bytes in Thumb mode, 8 bytes in ARM mode).
@@ -255,19 +252,11 @@ bool RuntimeDyldMachO::resolveARMRelocation(uint8_t *LocalAddress,
     Value -= 8;
   }
 
-  switch (Type) {
+  switch (RE.RelType) {
   default:
     llvm_unreachable("Invalid relocation type!");
-  case MachO::ARM_RELOC_VANILLA: {
-    // Mask in the target value a byte at a time (we don't have an alignment
-    // guarantee for the target address, so this is safest).
-    uint8_t *p = (uint8_t *)LocalAddress;
-    for (unsigned i = 0; i < Size; ++i) {
-      *p++ = (uint8_t)Value;
-      Value >>= 8;
-    }
-    break;
-  }
+  case MachO::ARM_RELOC_VANILLA:
+    return applyRelocationValue(LocalAddress, Value, 1 << RE.Size);
   case MachO::ARM_RELOC_BR24: {
     // Mask the value into the target address. We know instructions are
     // 32-bit aligned, so we can do it all at once.
@@ -275,13 +264,16 @@ bool RuntimeDyldMachO::resolveARMRelocation(uint8_t *LocalAddress,
     // The low two bits of the value are not encoded.
     Value >>= 2;
     // Mask the value to 24 bits.
-    Value &= 0xffffff;
+    uint64_t FinalValue = Value & 0xffffff;
+    // Check for overflow.
+    if (Value != FinalValue)
+      return Error("ARM BR24 relocation out of range.");
     // FIXME: If the destination is a Thumb function (and the instruction
     // is a non-predicated BL instruction), we need to change it to a BLX
     // instruction instead.
 
     // Insert the value into the instruction.
-    *p = (*p & ~0xffffff) | Value;
+    *p = (*p & ~0xffffff) | FinalValue;
     break;
   }
   case MachO::ARM_THUMB_RELOC_BR22:
@@ -297,29 +289,23 @@ bool RuntimeDyldMachO::resolveARMRelocation(uint8_t *LocalAddress,
   return false;
 }
 
-bool RuntimeDyldMachO::resolveARM64Relocation(uint8_t *LocalAddress,
-                                              uint64_t FinalAddress,
-                                              uint64_t Value, bool isPCRel,
-                                              unsigned Type, unsigned Size,
-                                              int64_t Addend) {
+bool RuntimeDyldMachO::resolveARM64Relocation(const RelocationEntry &RE,
+                                              uint64_t Value) {
+  const SectionEntry &Section = Sections[RE.SectionID];
+  uint8_t* LocalAddress = Section.Address + RE.Offset;
+
   // If the relocation is PC-relative, the value to be encoded is the
   // pointer difference.
-  if (isPCRel)
+  if (RE.IsPCRel) {
+    uint64_t FinalAddress = Section.LoadAddress + RE.Offset;
     Value -= FinalAddress;
+  }
 
-  switch (Type) {
+  switch (RE.RelType) {
   default:
     llvm_unreachable("Invalid relocation type!");
-  case MachO::ARM64_RELOC_UNSIGNED: {
-    // Mask in the target value a byte at a time (we don't have an alignment
-    // guarantee for the target address, so this is safest).
-    uint8_t *p = (uint8_t *)LocalAddress;
-    for (unsigned i = 0; i < Size; ++i) {
-      *p++ = (uint8_t)Value;
-      Value >>= 8;
-    }
-    break;
-  }
+  case MachO::ARM64_RELOC_UNSIGNED:
+    return applyRelocationValue(LocalAddress, Value, 1 << RE.Size);
   case MachO::ARM64_RELOC_BRANCH26: {
     // Mask the value into the target address. We know instructions are
     // 32-bit aligned, so we can do it all at once.
@@ -327,9 +313,12 @@ bool RuntimeDyldMachO::resolveARM64Relocation(uint8_t *LocalAddress,
     // The low two bits of the value are not encoded.
     Value >>= 2;
     // Mask the value to 26 bits.
-    Value &= 0x3ffffff;
+    uint64_t FinalValue = Value & 0x3ffffff;
+    // Check for overflow.
+    if (FinalValue != Value)
+      return Error("ARM64 BRANCH26 relocation out of range.");
     // Insert the value into the instruction.
-    *p = (*p & ~0x3ffffff) | Value;
+    *p = (*p & ~0x3ffffff) | FinalValue;
     break;
   }
   case MachO::ARM64_RELOC_SUBTRACTOR:
@@ -344,6 +333,157 @@ bool RuntimeDyldMachO::resolveARM64Relocation(uint8_t *LocalAddress,
     return Error("Relocation type not implemented yet!");
   }
   return false;
+}
+
+void RuntimeDyldMachO::populateJumpTable(MachOObjectFile &Obj,
+                                         const SectionRef &JTSection,
+                                         unsigned JTSectionID) {
+  assert(!Obj.is64Bit() &&
+         "__jump_table section not supported in 64-bit MachO.");
+
+  MachO::dysymtab_command DySymTabCmd = Obj.getDysymtabLoadCommand();
+  MachO::section Sec32 = Obj.getSection(JTSection.getRawDataRefImpl());
+  uint32_t JTSectionSize = Sec32.size;
+  unsigned FirstIndirectSymbol = Sec32.reserved1;
+  unsigned JTEntrySize = Sec32.reserved2;
+  unsigned NumJTEntries = JTSectionSize / JTEntrySize;
+  uint8_t* JTSectionAddr = getSectionAddress(JTSectionID);
+  unsigned JTEntryOffset = 0;
+
+  assert((JTSectionSize % JTEntrySize) == 0 &&
+         "Jump-table section does not contain a whole number of stubs?");
+
+  for (unsigned i = 0; i < NumJTEntries; ++i) {
+    unsigned SymbolIndex =
+      Obj.getIndirectSymbolTableEntry(DySymTabCmd, FirstIndirectSymbol + i);
+    symbol_iterator SI = Obj.getSymbolByIndex(SymbolIndex);
+    StringRef IndirectSymbolName;
+    SI->getName(IndirectSymbolName);
+    uint8_t* JTEntryAddr = JTSectionAddr + JTEntryOffset;
+    createStubFunction(JTEntryAddr);
+    RelocationEntry RE(JTSectionID, JTEntryOffset + 1,
+                       MachO::GENERIC_RELOC_VANILLA, 0, true, 2);
+    addRelocationForSymbol(RE, IndirectSymbolName);
+    JTEntryOffset += JTEntrySize;
+  }
+}
+
+void RuntimeDyldMachO::populatePointersSection(MachOObjectFile &Obj,
+                                               const SectionRef &PTSection,
+                                               unsigned PTSectionID) {
+  assert(!Obj.is64Bit() &&
+         "__pointers section not supported in 64-bit MachO.");
+
+  MachO::dysymtab_command DySymTabCmd = Obj.getDysymtabLoadCommand();
+  MachO::section Sec32 = Obj.getSection(PTSection.getRawDataRefImpl());
+  uint32_t PTSectionSize = Sec32.size;
+  unsigned FirstIndirectSymbol = Sec32.reserved1;
+  const unsigned PTEntrySize = 4;
+  unsigned NumPTEntries = PTSectionSize / PTEntrySize;
+  unsigned PTEntryOffset = 0;
+
+  assert((PTSectionSize % PTEntrySize) == 0 &&
+         "Pointers section does not contain a whole number of stubs?");
+
+  DEBUG(dbgs() << "Populating __pointers, Section ID " << PTSectionID
+               << ", " << NumPTEntries << " entries, "
+               << PTEntrySize << " bytes each:\n");
+
+  for (unsigned i = 0; i < NumPTEntries; ++i) {
+    unsigned SymbolIndex =
+      Obj.getIndirectSymbolTableEntry(DySymTabCmd, FirstIndirectSymbol + i);
+    symbol_iterator SI = Obj.getSymbolByIndex(SymbolIndex);
+    StringRef IndirectSymbolName;
+    SI->getName(IndirectSymbolName);
+    DEBUG(dbgs() << "  " << IndirectSymbolName << ": index " << SymbolIndex
+          << ", PT offset: " << PTEntryOffset << "\n");
+    RelocationEntry RE(PTSectionID, PTEntryOffset,
+                       MachO::GENERIC_RELOC_VANILLA, 0, false, 2);
+    addRelocationForSymbol(RE, IndirectSymbolName);
+    PTEntryOffset += PTEntrySize;
+  }
+}
+
+
+section_iterator getSectionByAddress(const MachOObjectFile &Obj,
+                                     uint64_t Addr) {
+  section_iterator SI = Obj.section_begin();
+  section_iterator SE = Obj.section_end();
+
+  for (; SI != SE; ++SI) {
+    uint64_t SAddr, SSize;
+    SI->getAddress(SAddr);
+    SI->getSize(SSize);
+    if ((Addr >= SAddr) && (Addr < SAddr + SSize))
+      return SI;
+  }
+
+  return SE;
+}
+
+relocation_iterator RuntimeDyldMachO::processSECTDIFFRelocation(
+                                            unsigned SectionID,
+                                            relocation_iterator RelI,
+                                            ObjectImage &Obj,
+                                            ObjSectionToIDMap &ObjSectionToID) {
+  const MachOObjectFile *MachO =
+    static_cast<const MachOObjectFile*>(Obj.getObjectFile());
+  MachO::any_relocation_info RE =
+    MachO->getRelocation(RelI->getRawDataRefImpl());
+
+  SectionEntry &Section = Sections[SectionID];
+  uint32_t RelocType = MachO->getAnyRelocationType(RE);
+  bool IsPCRel = MachO->getAnyRelocationPCRel(RE);
+  unsigned Size = MachO->getAnyRelocationLength(RE);
+  uint64_t Offset;
+  RelI->getOffset(Offset);
+  uint8_t *LocalAddress = Section.Address + Offset;
+  unsigned NumBytes = 1 << Size;
+  int64_t Addend = 0;
+  memcpy(&Addend, LocalAddress, NumBytes);
+
+  ++RelI;
+  MachO::any_relocation_info RE2 =
+    MachO->getRelocation(RelI->getRawDataRefImpl());
+
+  uint32_t AddrA = MachO->getScatteredRelocationValue(RE);
+  section_iterator SAI = getSectionByAddress(*MachO, AddrA);
+  assert(SAI != MachO->section_end() && "Can't find section for address A");
+  uint64_t SectionABase;
+  SAI->getAddress(SectionABase);
+  uint64_t SectionAOffset = AddrA - SectionABase;
+  SectionRef SectionA = *SAI;
+  bool IsCode;
+  SectionA.isText(IsCode);
+  uint32_t SectionAID = findOrEmitSection(Obj, SectionA, IsCode,
+                                          ObjSectionToID);
+
+  uint32_t AddrB = MachO->getScatteredRelocationValue(RE2);
+  section_iterator SBI = getSectionByAddress(*MachO, AddrB);
+  assert(SBI != MachO->section_end() && "Can't find seciton for address B");
+  uint64_t SectionBBase;
+  SBI->getAddress(SectionBBase);
+  uint64_t SectionBOffset = AddrB - SectionBBase;
+  SectionRef SectionB = *SBI;
+  uint32_t SectionBID = findOrEmitSection(Obj, SectionB, IsCode,
+                                          ObjSectionToID);
+
+  if (Addend != AddrA - AddrB)
+    Error("Unexpected SECTDIFF relocation addend.");
+
+  DEBUG(dbgs() << "Found SECTDIFF: AddrA: " << AddrA << ", AddrB: " << AddrB
+               << ", Addend: " << Addend << ", SectionA ID: "
+               << SectionAID << ", SectionAOffset: " << SectionAOffset
+               << ", SectionB ID: " << SectionBID << ", SectionBOffset: "
+               << SectionBOffset << "\n");
+  RelocationEntry R(SectionID, Offset, RelocType, 0,
+                    SectionAID, SectionAOffset, SectionBID, SectionBOffset,
+                    IsPCRel, Size);
+
+  addRelocationForSection(R, SectionAID);
+  addRelocationForSection(R, SectionBID);
+
+  return RelI;
 }
 
 relocation_iterator RuntimeDyldMachO::processRelocationRef(
@@ -363,13 +503,18 @@ relocation_iterator RuntimeDyldMachO::processRelocationRef(
   //        only needs to be reapplied if symbols move relative to one another.
   //        Note: This will fail horribly where the relocations *do* need to be
   //        applied, but that was already the case.
-  if (MachO->isRelocationScattered(RE))
+  if (MachO->isRelocationScattered(RE)) {
+    if (RelType == MachO::GENERIC_RELOC_SECTDIFF ||
+        RelType == MachO::GENERIC_RELOC_LOCAL_SECTDIFF)
+      return processSECTDIFFRelocation(SectionID, RelI, Obj, ObjSectionToID);
+
     return ++RelI;
+  }
 
   RelocationValueRef Value;
   SectionEntry &Section = Sections[SectionID];
 
-  bool isExtern = MachO->getPlainRelocationExternal(RE);
+  bool IsExtern = MachO->getPlainRelocationExternal(RE);
   bool IsPCRel = MachO->getAnyRelocationPCRel(RE);
   unsigned Size = MachO->getAnyRelocationLength(RE);
   uint64_t Offset;
@@ -379,7 +524,7 @@ relocation_iterator RuntimeDyldMachO::processRelocationRef(
   uint64_t Addend = 0;
   memcpy(&Addend, LocalAddress, NumBytes);
 
-  if (isExtern) {
+  if (IsExtern) {
     // Obtain the symbol name which is referenced in the relocation
     symbol_iterator Symbol = RelI->getSymbol();
     StringRef TargetName;
@@ -401,6 +546,17 @@ relocation_iterator RuntimeDyldMachO::processRelocationRef(
         Value.Addend = Addend;
       }
     }
+
+    // Addends for external, PC-rel relocations on i386 point back to the zero
+    // offset. Calculate the final offset from the relocation target instead.
+    // This allows us to use the same logic for both external and internal
+    // relocations in resolveI386RelocationRef.
+    if (Arch == Triple::x86 && IsPCRel) {
+      uint64_t RelocAddr = 0;
+      RelI->getAddress(RelocAddr);
+      Value.Addend += RelocAddr + 4;
+    }
+
   } else {
     SectionRef Sec = MachO->getRelocationSection(RE);
     bool IsCode = false;
@@ -417,6 +573,10 @@ relocation_iterator RuntimeDyldMachO::processRelocationRef(
                                  RelType == MachO::X86_64_RELOC_GOT_LOAD)) {
     assert(IsPCRel);
     assert(Size == 2);
+
+    // FIXME: Teach the generic code above not to prematurely conflate
+    //        relocation addends and symbol offsets.
+    Value.Addend -= Addend;
     StubMap::const_iterator i = Stubs.find(Value);
     uint8_t *Addr;
     if (i != Stubs.end()) {
@@ -424,41 +584,45 @@ relocation_iterator RuntimeDyldMachO::processRelocationRef(
     } else {
       Stubs[Value] = Section.StubOffset;
       uint8_t *GOTEntry = Section.Address + Section.StubOffset;
-      RelocationEntry RE(SectionID, Section.StubOffset,
-                         MachO::X86_64_RELOC_UNSIGNED, 0, false, 3);
+      RelocationEntry GOTRE(SectionID, Section.StubOffset,
+                            MachO::X86_64_RELOC_UNSIGNED, Value.Addend, false,
+                            3);
       if (Value.SymbolName)
-        addRelocationForSymbol(RE, Value.SymbolName);
+        addRelocationForSymbol(GOTRE, Value.SymbolName);
       else
-        addRelocationForSection(RE, Value.SectionID);
+        addRelocationForSection(GOTRE, Value.SectionID);
       Section.StubOffset += 8;
       Addr = GOTEntry;
     }
-    resolveRelocation(Section, Offset, (uint64_t)Addr,
-                      MachO::X86_64_RELOC_UNSIGNED, Value.Addend, true, 2);
+    RelocationEntry TargetRE(SectionID, Offset,
+                             MachO::X86_64_RELOC_UNSIGNED, Addend, true,
+                             2);
+    resolveRelocation(TargetRE, (uint64_t)Addr);
   } else if (Arch == Triple::arm && (RelType & 0xf) == MachO::ARM_RELOC_BR24) {
     // This is an ARM branch relocation, need to use a stub function.
 
     //  Look up for existing stub.
     StubMap::const_iterator i = Stubs.find(Value);
-    if (i != Stubs.end())
-      resolveRelocation(Section, Offset, (uint64_t)Section.Address + i->second,
-                        RelType, 0, IsPCRel, Size);
-    else {
+    uint8_t *Addr;
+    if (i != Stubs.end()) {
+      Addr = Section.Address + i->second;
+    } else {
       // Create a new stub function.
       Stubs[Value] = Section.StubOffset;
       uint8_t *StubTargetAddr =
           createStubFunction(Section.Address + Section.StubOffset);
-      RelocationEntry RE(SectionID, StubTargetAddr - Section.Address,
-                         MachO::GENERIC_RELOC_VANILLA, Value.Addend);
+      RelocationEntry StubRE(SectionID, StubTargetAddr - Section.Address,
+                             MachO::GENERIC_RELOC_VANILLA, Value.Addend);
       if (Value.SymbolName)
-        addRelocationForSymbol(RE, Value.SymbolName);
+        addRelocationForSymbol(StubRE, Value.SymbolName);
       else
-        addRelocationForSection(RE, Value.SectionID);
-      resolveRelocation(Section, Offset,
-                        (uint64_t)Section.Address + Section.StubOffset, RelType,
-                        0, IsPCRel, Size);
+        addRelocationForSection(StubRE, Value.SectionID);
+      Addr = Section.Address + Section.StubOffset;
       Section.StubOffset += getMaxStubSize();
     }
+    RelocationEntry TargetRE(Value.SectionID, Offset, RelType, 0, IsPCRel,
+                             Size);
+    resolveRelocation(TargetRE, (uint64_t)Addr);
   } else {
     RelocationEntry RE(SectionID, Offset, RelType, Value.Addend, IsPCRel, Size);
     if (Value.SymbolName)

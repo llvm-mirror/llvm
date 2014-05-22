@@ -101,6 +101,8 @@ error_code TextInstrProfReader::readNextRecord(InstrProfRecord &Record) {
     return error(instrprof_error::truncated);
   if ((Line++)->getAsInteger(10, NumCounters))
     return error(instrprof_error::malformed);
+  if (NumCounters == 0)
+    return error(instrprof_error::malformed);
 
   // Read each counter and fill our internal storage with the values.
   Counts.clear();
@@ -170,6 +172,29 @@ error_code RawInstrProfReader<IntPtrT>::readHeader() {
   return readHeader(*Header);
 }
 
+template <class IntPtrT>
+error_code RawInstrProfReader<IntPtrT>::readNextHeader(const char *CurrentPos) {
+  const char *End = DataBuffer->getBufferEnd();
+  // Skip zero padding between profiles.
+  while (CurrentPos != End && *CurrentPos == 0)
+    ++CurrentPos;
+  // If there's nothing left, we're done.
+  if (CurrentPos == End)
+    return instrprof_error::eof;
+  // If there isn't enough space for another header, this is probably just
+  // garbage at the end of the file.
+  if (CurrentPos + sizeof(RawHeader) > End)
+    return instrprof_error::malformed;
+  // The magic should have the same byte order as in the previous header.
+  uint64_t Magic = *reinterpret_cast<const uint64_t *>(CurrentPos);
+  if (Magic != swap(getRawMagic<IntPtrT>()))
+    return instrprof_error::bad_magic;
+
+  // There's another profile to read, so we need to process the header.
+  auto *Header = reinterpret_cast<const RawHeader *>(CurrentPos);
+  return readHeader(*Header);
+}
+
 static uint64_t getRawVersion() {
   return 1;
 }
@@ -188,16 +213,17 @@ error_code RawInstrProfReader<IntPtrT>::readHeader(const RawHeader &Header) {
   ptrdiff_t DataOffset = sizeof(RawHeader);
   ptrdiff_t CountersOffset = DataOffset + sizeof(ProfileData) * DataSize;
   ptrdiff_t NamesOffset = CountersOffset + sizeof(uint64_t) * CountersSize;
-  size_t FileSize = NamesOffset + sizeof(char) * NamesSize;
+  size_t ProfileSize = NamesOffset + sizeof(char) * NamesSize;
 
-  if (FileSize != DataBuffer->getBufferSize())
+  auto *Start = reinterpret_cast<const char *>(&Header);
+  if (Start + ProfileSize > DataBuffer->getBufferEnd())
     return error(instrprof_error::bad_header);
 
-  const char *Start = DataBuffer->getBufferStart();
   Data = reinterpret_cast<const ProfileData *>(Start + DataOffset);
   DataEnd = Data + DataSize;
   CountersStart = reinterpret_cast<const uint64_t *>(Start + CountersOffset);
   NamesStart = Start + NamesOffset;
+  ProfileEnd = Start + ProfileSize;
 
   return success();
 }
@@ -206,12 +232,15 @@ template <class IntPtrT>
 error_code
 RawInstrProfReader<IntPtrT>::readNextRecord(InstrProfRecord &Record) {
   if (Data == DataEnd)
-    return error(instrprof_error::eof);
+    if (error_code EC = readNextHeader(ProfileEnd))
+      return EC;
 
   // Get the raw data.
   StringRef RawName(getName(Data->NamePtr), swap(Data->NameSize));
-  auto RawCounts = makeArrayRef(getCounter(Data->CounterPtr),
-                                swap(Data->NumCounters));
+  uint32_t NumCounters = swap(Data->NumCounters);
+  if (NumCounters == 0)
+    return error(instrprof_error::malformed);
+  auto RawCounts = makeArrayRef(getCounter(Data->CounterPtr), NumCounters);
 
   // Check bounds.
   auto *NamesStartAsCounter = reinterpret_cast<const uint64_t *>(NamesStart);
@@ -258,9 +287,10 @@ bool IndexedInstrProfReader::hasFormat(const MemoryBuffer &DataBuffer) {
 }
 
 error_code IndexedInstrProfReader::readHeader() {
-  const unsigned char *Start = (unsigned char *)DataBuffer->getBufferStart();
+  const unsigned char *Start =
+      (const unsigned char *)DataBuffer->getBufferStart();
   const unsigned char *Cur = Start;
-  if ((unsigned char *)DataBuffer->getBufferEnd() - Cur < 24)
+  if ((const unsigned char *)DataBuffer->getBufferEnd() - Cur < 24)
     return error(instrprof_error::truncated);
 
   using namespace support;
