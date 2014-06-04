@@ -1,5 +1,4 @@
-; RUN: llc -mtriple=aarch64-none-linux-gnu < %s | FileCheck %s
-; RUN: llc -mtriple=arm64-linux-gnu -o - %s | FileCheck %s
+; RUN: llc -mtriple=aarch64-linux-gnu -o - %s | FileCheck %s
 
 @var = global i1 0
 

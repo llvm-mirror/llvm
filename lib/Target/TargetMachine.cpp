@@ -88,8 +88,8 @@ CodeModel::Model TargetMachine::getCodeModel() const {
 }
 
 /// Get the IR-specified TLS model for Var.
-static TLSModel::Model getSelectedTLSModel(const GlobalVariable *Var) {
-  switch (Var->getThreadLocalMode()) {
+static TLSModel::Model getSelectedTLSModel(const GlobalValue *GV) {
+  switch (GV->getThreadLocalMode()) {
   case GlobalVariable::NotThreadLocal:
     llvm_unreachable("getSelectedTLSModel for non-TLS variable");
     break;
@@ -106,19 +106,13 @@ static TLSModel::Model getSelectedTLSModel(const GlobalVariable *Var) {
 }
 
 TLSModel::Model TargetMachine::getTLSModel(const GlobalValue *GV) const {
-  // If GV is an alias then use the aliasee for determining
-  // thread-localness.
-  if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-    GV = GA->getAliasee();
-  const GlobalVariable *Var = cast<GlobalVariable>(GV);
-
-  bool isLocal = Var->hasLocalLinkage();
-  bool isDeclaration = Var->isDeclaration();
+  bool isLocal = GV->hasLocalLinkage();
+  bool isDeclaration = GV->isDeclaration();
   bool isPIC = getRelocationModel() == Reloc::PIC_;
   bool isPIE = Options.PositionIndependentExecutable;
   // FIXME: what should we do for protected and internal visibility?
   // For variables, is internal different from hidden?
-  bool isHidden = Var->hasHiddenVisibility();
+  bool isHidden = GV->hasHiddenVisibility();
 
   TLSModel::Model Model;
   if (isPIC && !isPIE) {
@@ -134,7 +128,7 @@ TLSModel::Model TargetMachine::getTLSModel(const GlobalValue *GV) const {
   }
 
   // If the user specified a more specific model, use that.
-  TLSModel::Model SelectedModel = getSelectedTLSModel(Var);
+  TLSModel::Model SelectedModel = getSelectedTLSModel(GV);
   if (SelectedModel > Model)
     return SelectedModel;
 

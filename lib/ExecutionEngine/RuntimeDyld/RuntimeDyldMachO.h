@@ -28,15 +28,12 @@ class RuntimeDyldMachO : public RuntimeDyldImpl {
 private:
 
   /// Write the least significant 'Size' bytes in 'Value' out at the address
-  /// pointed to by Addr. Check for overflow.
+  /// pointed to by Addr.
   bool applyRelocationValue(uint8_t *Addr, uint64_t Value, unsigned Size) {
     for (unsigned i = 0; i < Size; ++i) {
       *Addr++ = (uint8_t)Value;
       Value >>= 8;
     }
-
-    if (Value) // Catch overflow
-      return Error("Relocation out of range.");
 
     return false;
   }
@@ -44,7 +41,7 @@ private:
   bool resolveI386Relocation(const RelocationEntry &RE, uint64_t Value);
   bool resolveX86_64Relocation(const RelocationEntry &RE, uint64_t Value);
   bool resolveARMRelocation(const RelocationEntry &RE, uint64_t Value);
-  bool resolveARM64Relocation(const RelocationEntry &RE, uint64_t Value);
+  bool resolveAArch64Relocation(const RelocationEntry &RE, uint64_t Value);
 
   // Populate stubs in __jump_table section.
   void populateJumpTable(MachOObjectFile &Obj, const SectionRef &JTSection,
@@ -70,6 +67,12 @@ private:
                                              relocation_iterator RelI,
                                              ObjectImage &ObjImg,
                                              ObjSectionToIDMap &ObjSectionToID);
+
+  relocation_iterator processI386ScatteredVANILLA(
+					     unsigned SectionID,
+					     relocation_iterator RelI,
+					     ObjectImage &ObjImg,
+					     ObjSectionToIDMap &ObjSectionToID);
 
   struct EHFrameRelatedSections {
     EHFrameRelatedSections()

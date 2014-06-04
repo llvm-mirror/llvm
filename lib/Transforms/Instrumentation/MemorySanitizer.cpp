@@ -10,8 +10,6 @@
 /// This file is a part of MemorySanitizer, a detector of uninitialized
 /// reads.
 ///
-/// Status: early prototype.
-///
 /// The algorithm of the tool is similar to Memcheck
 /// (http://goo.gl/QKbem). We associate a few shadow bits with every
 /// byte of the application memory, poison the shadow of the malloc-ed
@@ -117,7 +115,6 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
-#include "llvm/Transforms/Utils/SpecialCaseList.h"
 
 using namespace llvm;
 
@@ -178,10 +175,6 @@ static cl::opt<bool> ClDumpStrictInstructions("msan-dump-strict-instructions",
        cl::desc("print out instructions with default strict semantics"),
        cl::Hidden, cl::init(false));
 
-static cl::opt<std::string>  ClBlacklistFile("msan-blacklist",
-       cl::desc("File containing the list of functions where MemorySanitizer "
-                "should not report bugs"), cl::Hidden);
-
 static cl::opt<int> ClInstrumentationWithCallThreshold(
     "msan-instrumentation-with-call-threshold",
     cl::desc(
@@ -211,13 +204,11 @@ namespace {
 /// uninitialized reads.
 class MemorySanitizer : public FunctionPass {
  public:
-  MemorySanitizer(int TrackOrigins = 0,
-                  StringRef BlacklistFile = StringRef())
+  MemorySanitizer(int TrackOrigins = 0)
       : FunctionPass(ID),
         TrackOrigins(std::max(TrackOrigins, (int)ClTrackOrigins)),
         DL(nullptr),
         WarningFn(nullptr),
-        BlacklistFile(BlacklistFile.empty() ? ClBlacklistFile : BlacklistFile),
         WrapIndirectCalls(!ClWrapIndirectCalls.empty()) {}
   const char *getPassName() const override { return "MemorySanitizer"; }
   bool runOnFunction(Function &F) override;
@@ -282,10 +273,6 @@ class MemorySanitizer : public FunctionPass {
   MDNode *ColdCallWeights;
   /// \brief Branch weights for origin store.
   MDNode *OriginStoreWeights;
-  /// \brief Path to blacklist file.
-  SmallString<64> BlacklistFile;
-  /// \brief The blacklist.
-  std::unique_ptr<SpecialCaseList> BL;
   /// \brief An empty volatile inline asm that prevents callback merge.
   InlineAsm *EmptyAsm;
 
@@ -305,9 +292,8 @@ INITIALIZE_PASS(MemorySanitizer, "msan",
                 "MemorySanitizer: detects uninitialized reads.",
                 false, false)
 
-FunctionPass *llvm::createMemorySanitizerPass(int TrackOrigins,
-                                              StringRef BlacklistFile) {
-  return new MemorySanitizer(TrackOrigins, BlacklistFile);
+FunctionPass *llvm::createMemorySanitizerPass(int TrackOrigins) {
+  return new MemorySanitizer(TrackOrigins);
 }
 
 /// \brief Create a non-const global initialized with the given string.
@@ -431,7 +417,6 @@ bool MemorySanitizer::doInitialization(Module &M) {
     report_fatal_error("data layout missing");
   DL = &DLP->getDataLayout();
 
-  BL.reset(SpecialCaseList::createOrDie(BlacklistFile));
   C = &(M.getContext());
   unsigned PtrSize = DL->getPointerSizeInBits(/* AddressSpace */0);
   switch (PtrSize) {
@@ -544,9 +529,8 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
 
   MemorySanitizerVisitor(Function &F, MemorySanitizer &MS)
       : F(F), MS(MS), VAHelper(CreateVarArgHelper(F, MS, *this)) {
-    bool SanitizeFunction = !MS.BL->isIn(F) && F.getAttributes().hasAttribute(
-                                                   AttributeSet::FunctionIndex,
-                                                   Attribute::SanitizeMemory);
+    bool SanitizeFunction = F.getAttributes().hasAttribute(
+        AttributeSet::FunctionIndex, Attribute::SanitizeMemory);
     InsertChecks = SanitizeFunction;
     LoadShadow = SanitizeFunction;
     PoisonStack = SanitizeFunction && ClPoisonStack;
@@ -599,26 +583,26 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
   }
 
   void materializeStores(bool InstrumentWithCalls) {
-    for (size_t i = 0, n = StoreList.size(); i < n; i++) {
-      StoreInst &I = *dyn_cast<StoreInst>(StoreList[i]);
+    for (auto Inst : StoreList) {
+      StoreInst &SI = *dyn_cast<StoreInst>(Inst);
 
-      IRBuilder<> IRB(&I);
-      Value *Val = I.getValueOperand();
-      Value *Addr = I.getPointerOperand();
-      Value *Shadow = I.isAtomic() ? getCleanShadow(Val) : getShadow(Val);
+      IRBuilder<> IRB(&SI);
+      Value *Val = SI.getValueOperand();
+      Value *Addr = SI.getPointerOperand();
+      Value *Shadow = SI.isAtomic() ? getCleanShadow(Val) : getShadow(Val);
       Value *ShadowPtr = getShadowPtr(Addr, Shadow->getType(), IRB);
 
       StoreInst *NewSI =
-          IRB.CreateAlignedStore(Shadow, ShadowPtr, I.getAlignment());
+          IRB.CreateAlignedStore(Shadow, ShadowPtr, SI.getAlignment());
       DEBUG(dbgs() << "  STORE: " << *NewSI << "\n");
       (void)NewSI;
 
-      if (ClCheckAccessAddress) insertShadowCheck(Addr, &I);
+      if (ClCheckAccessAddress) insertShadowCheck(Addr, &SI);
 
-      if (I.isAtomic()) I.setOrdering(addReleaseOrdering(I.getOrdering()));
+      if (SI.isAtomic()) SI.setOrdering(addReleaseOrdering(SI.getOrdering()));
 
       if (MS.TrackOrigins) {
-        unsigned Alignment = std::max(kMinOriginAlignment, I.getAlignment());
+        unsigned Alignment = std::max(kMinOriginAlignment, SI.getAlignment());
         storeOrigin(IRB, Addr, Shadow, getOrigin(Val), Alignment,
                     InstrumentWithCalls);
       }
@@ -662,18 +646,17 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
   }
 
   void materializeChecks(bool InstrumentWithCalls) {
-    for (size_t i = 0, n = InstrumentationList.size(); i < n; i++) {
-      Instruction *OrigIns = InstrumentationList[i].OrigIns;
-      Value *Shadow = InstrumentationList[i].Shadow;
-      Value *Origin = InstrumentationList[i].Origin;
+    for (const auto &ShadowData : InstrumentationList) {
+      Instruction *OrigIns = ShadowData.OrigIns;
+      Value *Shadow = ShadowData.Shadow;
+      Value *Origin = ShadowData.Origin;
       materializeOneCheck(OrigIns, Shadow, Origin, InstrumentWithCalls);
     }
     DEBUG(dbgs() << "DONE:\n" << F);
   }
 
   void materializeIndirectCalls() {
-    for (size_t i = 0, n = IndirectCallList.size(); i < n; i++) {
-      CallSite CS = IndirectCallList[i];
+    for (auto &CS : IndirectCallList) {
       Instruction *I = CS.getInstruction();
       BasicBlock *B = I->getParent();
       IRBuilder<> IRB(I);
@@ -732,8 +715,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
 
 
     // Finalize PHI nodes.
-    for (size_t i = 0, n = ShadowPHINodes.size(); i < n; i++) {
-      PHINode *PN = ShadowPHINodes[i];
+    for (PHINode *PN : ShadowPHINodes) {
       PHINode *PNS = cast<PHINode>(getShadow(PN));
       PHINode *PNO = MS.TrackOrigins ? cast<PHINode>(getOrigin(PN)) : nullptr;
       size_t NumValues = PN->getNumIncomingValues();
@@ -950,22 +932,21 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       Function *F = A->getParent();
       IRBuilder<> EntryIRB(F->getEntryBlock().getFirstNonPHI());
       unsigned ArgOffset = 0;
-      for (Function::arg_iterator AI = F->arg_begin(), AE = F->arg_end();
-           AI != AE; ++AI) {
-        if (!AI->getType()->isSized()) {
+      for (auto &FArg : F->args()) {
+        if (!FArg.getType()->isSized()) {
           DEBUG(dbgs() << "Arg is not sized\n");
           continue;
         }
-        unsigned Size = AI->hasByValAttr()
-          ? MS.DL->getTypeAllocSize(AI->getType()->getPointerElementType())
-          : MS.DL->getTypeAllocSize(AI->getType());
-        if (A == AI) {
-          Value *Base = getShadowPtrForArgument(AI, EntryIRB, ArgOffset);
-          if (AI->hasByValAttr()) {
+        unsigned Size = FArg.hasByValAttr()
+          ? MS.DL->getTypeAllocSize(FArg.getType()->getPointerElementType())
+          : MS.DL->getTypeAllocSize(FArg.getType());
+        if (A == &FArg) {
+          Value *Base = getShadowPtrForArgument(&FArg, EntryIRB, ArgOffset);
+          if (FArg.hasByValAttr()) {
             // ByVal pointer itself has clean shadow. We copy the actual
             // argument shadow to the underlying memory.
             // Figure out maximal valid memcpy alignment.
-            unsigned ArgAlign = AI->getParamAlignment();
+            unsigned ArgAlign = FArg.getParamAlignment();
             if (ArgAlign == 0) {
               Type *EltType = A->getType()->getPointerElementType();
               ArgAlign = MS.DL->getABITypeAlignment(EltType);
@@ -980,10 +961,11 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
           } else {
             *ShadowPtr = EntryIRB.CreateAlignedLoad(Base, kShadowTLSAlignment);
           }
-          DEBUG(dbgs() << "  ARG:    "  << *AI << " ==> " <<
+          DEBUG(dbgs() << "  ARG:    "  << FArg << " ==> " <<
                 **ShadowPtr << "\n");
           if (MS.TrackOrigins) {
-            Value* OriginPtr = getOriginPtrForArgument(AI, EntryIRB, ArgOffset);
+            Value *OriginPtr =
+                getOriginPtrForArgument(&FArg, EntryIRB, ArgOffset);
             setOrigin(A, EntryIRB.CreateLoad(OriginPtr));
           }
         }
@@ -1946,6 +1928,28 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     setOriginForNaryOp(I);
   }
 
+  // \brief Instrument vector shift instrinsic.
+  //
+  // This function instruments intrinsics like x86_mmx_packsswb, that
+  // packs elements of 2 input vectors into half as much bits with saturation.
+  // Shadow is propagated with the same intrinsic applied to
+  // sext(Sa != zeroinitializer), sext(Sb != zeroinitializer).
+  void handleVectorPackIntrinsic(IntrinsicInst &I) {
+    assert(I.getNumArgOperands() == 2);
+    IRBuilder<> IRB(&I);
+    Value *S1 = getShadow(&I, 0);
+    Value *S2 = getShadow(&I, 1);
+    Type *T = S1->getType();
+    Value *S1_ext = IRB.CreateSExt(
+        IRB.CreateICmpNE(S1, llvm::Constant::getNullValue(T)), T);
+    Value *S2_ext = IRB.CreateSExt(
+        IRB.CreateICmpNE(S2, llvm::Constant::getNullValue(T)), T);
+    Value *S = IRB.CreateCall2(I.getCalledValue(), S1_ext, S2_ext,
+                               "_msprop_vector_pack");
+    setShadow(&I, S);
+    setOriginForNaryOp(I);
+  }
+
   void visitIntrinsicInst(IntrinsicInst &I) {
     switch (I.getIntrinsicID()) {
     case llvm::Intrinsic::bswap:
@@ -2061,6 +2065,20 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     // case llvm::Intrinsic::x86_avx2_psrl_dq_bs:
     // case llvm::Intrinsic::x86_sse2_psll_dq_bs:
     // case llvm::Intrinsic::x86_sse2_psrl_dq_bs:
+
+    case llvm::Intrinsic::x86_sse2_packsswb_128:
+    case llvm::Intrinsic::x86_sse2_packssdw_128:
+    case llvm::Intrinsic::x86_sse2_packuswb_128:
+    case llvm::Intrinsic::x86_sse41_packusdw:
+    case llvm::Intrinsic::x86_avx2_packsswb:
+    case llvm::Intrinsic::x86_avx2_packssdw:
+    case llvm::Intrinsic::x86_avx2_packuswb:
+    case llvm::Intrinsic::x86_avx2_packusdw:
+    case llvm::Intrinsic::x86_mmx_packsswb:
+    case llvm::Intrinsic::x86_mmx_packssdw:
+    case llvm::Intrinsic::x86_mmx_packuswb:
+      handleVectorPackIntrinsic(I);
+      break;
 
     default:
       if (!handleUnknownIntrinsic(I))

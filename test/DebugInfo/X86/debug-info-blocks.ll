@@ -5,17 +5,26 @@
 ; rdar://problem/9279956
 ; test that the DW_AT_location of self is at ( fbreg +{{[0-9]+}}, deref, +{{[0-9]+}} )
 
-; CHECK: DW_TAG_subprogram
-; CHECK: DW_AT_name{{.*}}_block_invoke
-; CHECK: DW_AT_object_pointer
+; CHECK: [[A:.*]]:   DW_TAG_structure_type
+; CHECK-NEXT: DW_AT_APPLE_objc_complete_type
+; CHECK-NEXT: DW_AT_name{{.*}}"A"
 
-; CHECK-NOT: DW_TAG_subprogram
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_TAG_subprogram
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_object_pointer
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_name{{.*}}_block_invoke
+
+; CHECK-NOT: {{DW_TAG|NULL}}
 ; CHECK: DW_TAG_formal_parameter
-; CHECK-NEXT: DW_AT_name{{.*}}.block_descriptor
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_name{{.*}}.block_descriptor
 ; CHECK-NOT: DW_TAG
 ; CHECK: DW_AT_location
 
-; CHECK-NOT: DW_TAG_subprogram
+; CHECK-NOT: {{DW_TAG|NULL}}
 ; CHECK: DW_TAG_variable
 ; CHECK-NEXT: DW_AT_name{{.*}}"self"
 ; CHECK-NOT: DW_TAG
@@ -28,10 +37,7 @@
 ; 0x91 = DW_OP_fbreg
 ; CHECK: DW_AT_location{{.*}}91 {{[0-9]+}} 06 23 {{[0-9]+}} )
 
-; CHECK: [[A:.*]]:   DW_TAG_structure_type
-; CHECK-NEXT: DW_AT_APPLE_objc_complete_type
-; CHECK-NEXT: DW_AT_name{{.*}}"A"
-; CHECK: [[APTR]]:   DW_TAG_pointer_type [5]
+; CHECK: [[APTR]]:   DW_TAG_pointer_type
 ; CHECK-NEXT: {[[A]]}
 
 

@@ -1190,15 +1190,8 @@ SDValue SelectionDAG::getGlobalAddress(const GlobalValue *GV, SDLoc DL,
   if (BitWidth < 64)
     Offset = SignExtend64(Offset, BitWidth);
 
-  const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV);
-  if (!GVar) {
-    // If GV is an alias then use the aliasee for determining thread-localness.
-    if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      GVar = dyn_cast_or_null<GlobalVariable>(GA->getAliasee());
-  }
-
   unsigned Opc;
-  if (GVar && GVar->isThreadLocal())
+  if (GV->isThreadLocal())
     Opc = isTargetGA ? ISD::TargetGlobalTLSAddress : ISD::GlobalTLSAddress;
   else
     Opc = isTargetGA ? ISD::TargetGlobalAddress : ISD::GlobalAddress;
@@ -2192,8 +2185,11 @@ void SelectionDAG::computeKnownBits(SDValue Op, APInt &KnownZero,
       const APInt &RA = Rem->getAPIntValue();
       if (RA.isPowerOf2()) {
         APInt LowBits = (RA - 1);
-        KnownZero |= ~LowBits;
-        computeKnownBits(Op.getOperand(0), KnownZero, KnownOne,Depth+1);
+        computeKnownBits(Op.getOperand(0), KnownZero2, KnownOne2, Depth + 1);
+
+        // The upper bits are all zero, the lower ones are unchanged.
+        KnownZero = KnownZero2 | ~LowBits;
+        KnownOne = KnownOne2 & LowBits;
         break;
       }
     }
@@ -5960,7 +5956,7 @@ unsigned SelectionDAG::AssignTopologicalOrder() {
   // count of outstanding operands.
   for (allnodes_iterator I = allnodes_begin(),E = allnodes_end(); I != E; ) {
     SDNode *N = I++;
-    checkForCycles(N);
+    checkForCycles(N, this);
     unsigned Degree = N->getNumOperands();
     if (Degree == 0) {
       // A node with no uses, add it to the result array immediately.
@@ -5980,7 +5976,7 @@ unsigned SelectionDAG::AssignTopologicalOrder() {
   // such that by the time the end is reached all nodes will be sorted.
   for (allnodes_iterator I = allnodes_begin(),E = allnodes_end(); I != E; ++I) {
     SDNode *N = I;
-    checkForCycles(N);
+    checkForCycles(N, this);
     // N is in sorted position, so all its uses have one less operand
     // that needs to be sorted.
     for (SDNode::use_iterator UI = N->use_begin(), UE = N->use_end();
@@ -6005,7 +6001,9 @@ unsigned SelectionDAG::AssignTopologicalOrder() {
 #ifndef NDEBUG
       SDNode *S = ++I;
       dbgs() << "Overran sorted position:\n";
-      S->dumprFull();
+      S->dumprFull(this); dbgs() << "\n";
+      dbgs() << "Checking if this is due to cycles\n";
+      checkForCycles(this, true);
 #endif
       llvm_unreachable(nullptr);
     }
@@ -6591,10 +6589,11 @@ bool ShuffleVectorSDNode::isSplatMask(const int *Mask, EVT VT) {
   return true;
 }
 
-#ifdef XDEBUG
+#ifndef NDEBUG
 static void checkForCyclesHelper(const SDNode *N,
                                  SmallPtrSet<const SDNode*, 32> &Visited,
-                                 SmallPtrSet<const SDNode*, 32> &Checked) {
+                                 SmallPtrSet<const SDNode*, 32> &Checked,
+                                 const llvm::SelectionDAG *DAG) {
   // If this node has already been checked, don't check it again.
   if (Checked.count(N))
     return;
@@ -6602,29 +6601,37 @@ static void checkForCyclesHelper(const SDNode *N,
   // If a node has already been visited on this depth-first walk, reject it as
   // a cycle.
   if (!Visited.insert(N)) {
-    dbgs() << "Offending node:\n";
-    N->dumprFull();
     errs() << "Detected cycle in SelectionDAG\n";
+    dbgs() << "Offending node:\n";
+    N->dumprFull(DAG); dbgs() << "\n";
     abort();
   }
 
   for(unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
-    checkForCyclesHelper(N->getOperand(i).getNode(), Visited, Checked);
+    checkForCyclesHelper(N->getOperand(i).getNode(), Visited, Checked, DAG);
 
   Checked.insert(N);
   Visited.erase(N);
 }
 #endif
 
-void llvm::checkForCycles(const llvm::SDNode *N) {
+void llvm::checkForCycles(const llvm::SDNode *N,
+                          const llvm::SelectionDAG *DAG,
+                          bool force) {
+#ifndef NDEBUG
+  bool check = force;
 #ifdef XDEBUG
-  assert(N && "Checking nonexistent SDNode");
-  SmallPtrSet<const SDNode*, 32> visited;
-  SmallPtrSet<const SDNode*, 32> checked;
-  checkForCyclesHelper(N, visited, checked);
-#endif
+  check = true;
+#endif  // XDEBUG
+  if (check) {
+    assert(N && "Checking nonexistent SDNode");
+    SmallPtrSet<const SDNode*, 32> visited;
+    SmallPtrSet<const SDNode*, 32> checked;
+    checkForCyclesHelper(N, visited, checked, DAG);
+  }
+#endif  // !NDEBUG
 }
 
-void llvm::checkForCycles(const llvm::SelectionDAG *DAG) {
-  checkForCycles(DAG->getRoot().getNode());
+void llvm::checkForCycles(const llvm::SelectionDAG *DAG, bool force) {
+  checkForCycles(DAG->getRoot().getNode(), DAG, force);
 }

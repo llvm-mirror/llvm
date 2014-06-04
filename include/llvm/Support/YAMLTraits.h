@@ -487,6 +487,19 @@ public:
     }
   }
 
+  template <typename T>
+  void maskedBitSetCase(T &Val, const char *Str, T ConstVal, T Mask) {
+    if (bitSetMatch(Str, outputting() && (Val & Mask) == ConstVal))
+      Val = Val | ConstVal;
+  }
+
+  template <typename T>
+  void maskedBitSetCase(T &Val, const char *Str, uint32_t ConstVal,
+                        uint32_t Mask) {
+    if (bitSetMatch(Str, outputting() && (Val & Mask) == ConstVal))
+      Val = Val | ConstVal;
+  }
+
   void *getContext();
   void setContext(void *);
 
@@ -969,7 +982,7 @@ public:
   // These are only used by operator>>. They could be private
   // if those templated things could be made friends.
   bool setCurrentDocument();
-  void nextDocument();
+  bool nextDocument();
 
 private:
   llvm::SourceMgr                     SrcMgr; // must be before Strm

@@ -21,11 +21,13 @@ def isCayman : Predicate<"Subtarget.hasCaymanISA()">;
 let Predicates = [isCayman] in {
 
 def MULADD_INT24_cm : R600_3OP <0x08, "MULADD_INT24",
-  [(set i32:$dst, (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2))], VecALU
+  [(set i32:$dst, (AMDGPUmad_i24 i32:$src0, i32:$src1, i32:$src2))], VecALU
 >;
 def MUL_INT24_cm : R600_2OP <0x5B, "MUL_INT24",
   [(set i32:$dst, (AMDGPUmul_i24 i32:$src0, i32:$src1))], VecALU
 >;
+
+def : IMad24Pat<MULADD_INT24_cm>;
 
 let isVector = 1 in {
 
@@ -47,6 +49,7 @@ def COS_cm : COS_Common<0x8E>;
 def : POW_Common <LOG_IEEE_cm, EXP_IEEE_cm, MUL>;
 
 defm DIV_cm : DIV_Common<RECIP_IEEE_cm>;
+defm : Expand24UBitOps<MULLO_UINT_cm, ADD_INT>;
 
 // RECIP_UINT emulation for Cayman
 // The multiplication scales from [0,1] to the unsigned integer range

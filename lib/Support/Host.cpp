@@ -686,7 +686,7 @@ StringRef sys::getHostCPUName() {
 }
 #endif
 
-#if defined(__linux__) && defined(__arm__)
+#if defined(__linux__) && (defined(__arm__) || defined(__aarch64__))
 bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   std::string Err;
   DataStreamer *DS = getDataFileStreamer("/proc/cpuinfo", &Err);
@@ -715,8 +715,24 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
       break;
     }
 
+#if defined(__aarch64__)
+  // Keep track of which crypto features we have seen
+  enum {
+    CAP_AES   = 0x1,
+    CAP_PMULL = 0x2,
+    CAP_SHA1  = 0x4,
+    CAP_SHA2  = 0x8
+  };
+  uint32_t crypto = 0;
+#endif
+
   for (unsigned I = 0, E = CPUFeatures.size(); I != E; ++I) {
     StringRef LLVMFeatureStr = StringSwitch<StringRef>(CPUFeatures[I])
+#if defined(__aarch64__)
+      .Case("asimd", "neon")
+      .Case("fp", "fp-armv8")
+      .Case("crc32", "crc")
+#else
       .Case("half", "fp16")
       .Case("neon", "neon")
       .Case("vfpv3", "vfp3")
@@ -724,11 +740,31 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
       .Case("vfpv4", "vfp4")
       .Case("idiva", "hwdiv-arm")
       .Case("idivt", "hwdiv")
+#endif
       .Default("");
+
+#if defined(__aarch64__)
+    // We need to check crypto separately since we need all of the crypto
+    // extensions to enable the subtarget feature
+    if (CPUFeatures[I] == "aes")
+      crypto |= CAP_AES;
+    else if (CPUFeatures[I] == "pmull")
+      crypto |= CAP_PMULL;
+    else if (CPUFeatures[I] == "sha1")
+      crypto |= CAP_SHA1;
+    else if (CPUFeatures[I] == "sha2")
+      crypto |= CAP_SHA2;
+#endif
 
     if (LLVMFeatureStr != "")
       Features.GetOrCreateValue(LLVMFeatureStr).setValue(true);
   }
+
+#if defined(__aarch64__)
+  // If we have all crypto bits we can add the feature
+  if (crypto == (CAP_AES | CAP_PMULL | CAP_SHA1 | CAP_SHA2))
+    Features.GetOrCreateValue("crypto").setValue(true);
+#endif
 
   return true;
 }

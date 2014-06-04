@@ -453,8 +453,7 @@ int NewArchiveIterator::getFD() const {
   // Linux cannot open directories with open(2), although
   // cygwin and *bsd can.
   if (NewStatus.type() == sys::fs::file_type::directory_file)
-    failIfError(error_code(errc::is_a_directory, posix_category()),
-                NewFilename);
+    failIfError(make_error_code(errc::is_a_directory), NewFilename);
 
   return NewFD;
 }
@@ -516,7 +515,7 @@ computeInsertAction(ArchiveOperation Operation,
     // We could try to optimize this to a fstat, but it is not a common
     // operation.
     sys::fs::file_status Status;
-    failIfError(sys::fs::status(*MI, Status));
+    failIfError(sys::fs::status(*MI, Status), *MI);
     if (Status.getLastModificationTime() < I->getLastModified()) {
       if (PosName.empty())
         return IA_AddOldMember;

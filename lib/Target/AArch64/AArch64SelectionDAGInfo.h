@@ -11,22 +11,27 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_AARCH64SELECTIONDAGINFO_H
-#define LLVM_AARCH64SELECTIONDAGINFO_H
+#ifndef AArch64SELECTIONDAGINFO_H
+#define AArch64SELECTIONDAGINFO_H
 
 #include "llvm/Target/TargetSelectionDAGInfo.h"
 
 namespace llvm {
 
-class AArch64TargetMachine;
-
 class AArch64SelectionDAGInfo : public TargetSelectionDAGInfo {
+  /// Subtarget - Keep a pointer to the ARMSubtarget around so that we can
+  /// make the right decision when generating code for different targets.
   const AArch64Subtarget *Subtarget;
-public:
-  explicit AArch64SelectionDAGInfo(const AArch64TargetMachine &TM);
-  ~AArch64SelectionDAGInfo();
-};
 
+public:
+  explicit AArch64SelectionDAGInfo(const TargetMachine &TM);
+  ~AArch64SelectionDAGInfo();
+
+  SDValue EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc dl, SDValue Chain,
+                                  SDValue Dst, SDValue Src, SDValue Size,
+                                  unsigned Align, bool isVolatile,
+                                  MachinePointerInfo DstPtrInfo) const override;
+};
 }
 
 #endif

@@ -1,4 +1,4 @@
-//===- AArch64Schedule.td - AArch64 Scheduling Definitions -*- tablegen -*-===//
+//==-- AArch64Schedule.td - AArch64 Scheduling Definitions -*- tablegen -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,74 +7,98 @@
 //
 //===----------------------------------------------------------------------===//
 
-//===----------------------------------------------------------------------===//
-// Generic processor itineraries for legacy compatibility.
+// Define TII for use in SchedVariant Predicates.
+// const MachineInstr *MI and const TargetSchedModel *SchedModel
+// are defined by default.
+def : PredicateProlog<[{
+  const AArch64InstrInfo *TII =
+    static_cast<const AArch64InstrInfo*>(SchedModel->getInstrInfo());
+  (void)TII;
+}]>;
 
-def GenericItineraries : ProcessorItineraries<[], [], []>;
+// AArch64 Scheduler Definitions
 
+def WriteImm       : SchedWrite; // MOVN, MOVZ
+// TODO: Provide variants for MOV32/64imm Pseudos that dynamically
+// select the correct sequence of WriteImms.
 
-//===----------------------------------------------------------------------===//
-// Base SchedReadWrite types
+def WriteI         : SchedWrite; // ALU
+def WriteISReg     : SchedWrite; // ALU of Shifted-Reg
+def WriteIEReg     : SchedWrite; // ALU of Extended-Reg
+def ReadI          : SchedRead;  // ALU
+def ReadISReg      : SchedRead;  // ALU of Shifted-Reg
+def ReadIEReg      : SchedRead;  // ALU of Extended-Reg
+def WriteExtr      : SchedWrite; // EXTR shifts a reg pair
+def ReadExtrHi     : SchedRead;  // Read the high reg of the EXTR pair
+def WriteIS        : SchedWrite; // Shift/Scale
+def WriteID32      : SchedWrite; // 32-bit Divide
+def WriteID64      : SchedWrite; // 64-bit Divide
+def ReadID         : SchedRead;  // 32/64-bit Divide
+def WriteIM32      : SchedWrite; // 32-bit Multiply
+def WriteIM64      : SchedWrite; // 64-bit Multiply
+def ReadIM         : SchedRead;  // 32/64-bit Multiply
+def ReadIMA        : SchedRead;  // 32/64-bit Multiply Accumulate
+def WriteBr        : SchedWrite; // Branch
+def WriteBrReg     : SchedWrite; // Indirect Branch
 
-// Basic ALU
-def WriteALU : SchedWrite;  // Generic: may contain shift and/or ALU operation
-def WriteALUs : SchedWrite; // Shift only with no ALU operation
-def ReadALU : SchedRead;    // Operand not needed for shifting
-def ReadALUs : SchedRead;   // Operand needed for shifting
+def WriteLD        : SchedWrite; // Load from base addr plus immediate offset
+def WriteST        : SchedWrite; // Store to base addr plus immediate offset
+def WriteSTP       : SchedWrite; // Store a register pair.
+def WriteAdr       : SchedWrite; // Address pre/post increment.
 
-// Multiply with optional accumulate
-def WriteMAC : SchedWrite;
-def ReadMAC : SchedRead;
+def WriteLDIdx : SchedWrite; // Load from a register index (maybe scaled).
+def WriteSTIdx : SchedWrite; // Store to a register index (maybe scaled).
+def ReadAdrBase : SchedRead; // Read the base resister of a reg-offset LD/ST.
 
-// Compares
-def WriteCMP : SchedWrite;
-def ReadCMP : SchedRead;
+// Predicate for determining when a shiftable register is shifted.
+def RegShiftedPred : SchedPredicate<[{TII->hasShiftedReg(MI)}]>;
 
-// Division
-def WriteDiv : SchedWrite;
-def ReadDiv : SchedRead;
+// Predicate for determining when a extendedable register is extended.
+def RegExtendedPred : SchedPredicate<[{TII->hasExtendedReg(MI)}]>;
 
-// Loads
-def WriteLd : SchedWrite;
-def WritePreLd : SchedWrite;
-def WriteVecLd : SchedWrite;
-def ReadLd : SchedRead;
-def ReadPreLd : SchedRead;
-def ReadVecLd : SchedRead;
+// ScaledIdxPred is true if a WriteLDIdx operand will be
+// scaled. Subtargets can use this to dynamically select resources and
+// latency for WriteLDIdx and ReadAdrBase.
+def ScaledIdxPred : SchedPredicate<[{TII->isScaledAddr(MI)}]>;
 
-// Stores
-def WriteSt : SchedWrite;
-def WriteVecSt : SchedWrite;
-def ReadSt : SchedRead;
-def ReadVecSt : SchedRead;
+// Serialized two-level address load.
+// EXAMPLE: LOADGot
+def WriteLDAdr : WriteSequence<[WriteAdr, WriteLD]>;
 
-// Branches
-def WriteBr : SchedWrite;
-def WriteBrL : SchedWrite;
-def ReadBr : SchedRead;
+// Serialized two-level address lookup.
+// EXAMPLE: MOVaddr...
+def WriteAdrAdr : WriteSequence<[WriteAdr, WriteAdr]>;
 
-// Floating Point ALU
-def WriteFPALU : SchedWrite;
-def ReadFPALU : SchedRead;
+// The second register of a load-pair.
+// LDP,LDPSW,LDNP,LDXP,LDAXP
+def WriteLDHi : SchedWrite;
 
-// Floating Point MAC, Mul, Div, Sqrt
-//   Most processors will simply send all of these down a dedicated pipe, but
-//   they're explicitly separated here for flexibility of modeling later. May
-//   consider consolidating them into a single WriteFPXXXX type in the future.
-def WriteFPMAC : SchedWrite;
-def WriteFPMul : SchedWrite;
-def WriteFPDiv : SchedWrite;
-def WriteFPSqrt : SchedWrite;
-def ReadFPMAC : SchedRead;
-def ReadFPMul : SchedRead;
-def ReadFPDiv : SchedRead;
-def ReadFPSqrt : SchedRead;
+// Store-exclusive is a store followed by a dependent load.
+def WriteSTX : WriteSequence<[WriteST, WriteLD]>;
 
-// Noop
-def WriteNoop : SchedWrite;
+def WriteSys     : SchedWrite; // Long, variable latency system ops.
+def WriteBarrier : SchedWrite; // Memory barrier.
+def WriteHint    : SchedWrite; // Hint instruction.
 
+def WriteF       : SchedWrite; // General floating-point ops.
+def WriteFCmp    : SchedWrite; // Floating-point compare.
+def WriteFCvt    : SchedWrite; // Float conversion.
+def WriteFCopy   : SchedWrite; // Float-int register copy.
+def WriteFImm    : SchedWrite; // Floating-point immediate.
+def WriteFMul    : SchedWrite; // Floating-point multiply.
+def WriteFDiv    : SchedWrite; // Floating-point division.
 
-//===----------------------------------------------------------------------===//
-// Subtarget specific Machine Models.
+def WriteV   : SchedWrite; // Vector ops.
+def WriteVLD : SchedWrite; // Vector loads.
+def WriteVST : SchedWrite; // Vector stores.
 
-include "AArch64ScheduleA53.td"
+// Read the unwritten lanes of the VLD's destination registers.
+def ReadVLD : SchedRead;
+
+// Sequential vector load and shuffle.
+def WriteVLDShuffle     : WriteSequence<[WriteVLD, WriteV]>;
+def WriteVLDPairShuffle : WriteSequence<[WriteVLD, WriteV, WriteV]>;
+
+// Store a shuffled vector.
+def WriteVSTShuffle : WriteSequence<[WriteV, WriteVST]>;
+def WriteVSTPairShuffle : WriteSequence<[WriteV, WriteV, WriteVST]>;

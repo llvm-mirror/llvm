@@ -155,13 +155,13 @@ def SWR64 : StoreLeftRight<"swr", MipsSWR, GPR64Opnd, II_SWR>, LW_FM<0x2e>;
 }
 
 def LDL   : LoadLeftRight<"ldl", MipsLDL, GPR64Opnd, II_LDL>, LW_FM<0x1a>,
-            ISA_MIPS3;
+            ISA_MIPS3_NOT_32R6_64R6;
 def LDR   : LoadLeftRight<"ldr", MipsLDR, GPR64Opnd, II_LDR>, LW_FM<0x1b>,
-            ISA_MIPS3;
+            ISA_MIPS3_NOT_32R6_64R6;
 def SDL   : StoreLeftRight<"sdl", MipsSDL, GPR64Opnd, II_SDL>, LW_FM<0x2c>,
-            ISA_MIPS3;
+            ISA_MIPS3_NOT_32R6_64R6;
 def SDR   : StoreLeftRight<"sdr", MipsSDR, GPR64Opnd, II_SDR>, LW_FM<0x2d>,
-            ISA_MIPS3;
+            ISA_MIPS3_NOT_32R6_64R6;
 
 /// Load-linked, Store-conditional
 def LLD : LLBase<"lld", GPR64Opnd>, LW_FM<0x34>, ISA_MIPS3;
@@ -245,16 +245,12 @@ let isCodeGenOnly = 1, rs = 0, shamt = 0 in {
                     "sll\t$rd, $rt, 0", [], II_SLL>;
 }
 
-// We need the following two pseudo instructions to avoid offset calculation for
+// We need the following pseudo instruction to avoid offset calculation for
 // long branches.  See the comment in file MipsLongBranch.cpp for detailed
 // explanation.
 
-// Expands to: lui $dst, %highest($tgt - $baltgt)
-def LONG_BRANCH_LUi64 : PseudoSE<(outs GPR64Opnd:$dst),
-  (ins brtarget:$tgt, brtarget:$baltgt), []>;
-
 // Expands to: daddiu $dst, $src, %PART($tgt - $baltgt)
-// where %PART may be %higher, %hi or %lo, depending on the relocation kind
+// where %PART may be %hi or %lo, depending on the relocation kind
 // that $tgt is annotated with.
 def LONG_BRANCH_DADDiu : PseudoSE<(outs GPR64Opnd:$dst),
   (ins GPR64Opnd:$src, brtarget:$tgt, brtarget:$baltgt), []>;

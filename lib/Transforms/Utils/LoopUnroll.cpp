@@ -24,6 +24,7 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -237,9 +238,9 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
   if (CompletelyUnroll) {
     DEBUG(dbgs() << "COMPLETELY UNROLLING loop %" << Header->getName()
           << " with trip count " << TripCount << "!\n");
-    Ctx.emitOptimizationRemark(DEBUG_TYPE, *F, LoopLoc,
-                               Twine("completely unrolled loop with ") +
-                                   Twine(TripCount) + " iterations");
+    emitOptimizationRemark(Ctx, DEBUG_TYPE, *F, LoopLoc,
+                           Twine("completely unrolled loop with ") +
+                               Twine(TripCount) + " iterations");
   } else {
     DEBUG(dbgs() << "UNROLLING loop %" << Header->getName()
           << " by " << Count);
@@ -255,7 +256,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
       DiagMsg.concat(" with run-time trip count");
     }
     DEBUG(dbgs() << "!\n");
-    Ctx.emitOptimizationRemark(DEBUG_TYPE, *F, LoopLoc, DiagMsg);
+    emitOptimizationRemark(Ctx, DEBUG_TYPE, *F, LoopLoc, DiagMsg);
   }
 
   bool ContinueOnTrue = L->contains(BI->getSuccessor(0));
@@ -486,6 +487,15 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
     if (OuterL) {
       ScalarEvolution *SE = PP->getAnalysisIfAvailable<ScalarEvolution>();
       simplifyLoop(OuterL, DT, LI, PP, /*AliasAnalysis*/ nullptr, SE);
+
+      // LCSSA must be performed on the outermost affected loop. The unrolled
+      // loop's last loop latch is guaranteed to be in the outermost loop after
+      // deleteLoopFromQueue updates LoopInfo.
+      Loop *LatchLoop = LI->getLoopFor(Latches.back());
+      if (!OuterL->contains(LatchLoop))
+        while (OuterL->getParentLoop() != LatchLoop)
+          OuterL = OuterL->getParentLoop();
+
       formLCSSARecursively(*OuterL, *DT, SE);
     }
   }

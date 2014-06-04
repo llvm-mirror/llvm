@@ -166,6 +166,14 @@ define i1 @test17(i32 %x) nounwind {
 ; CHECK-NEXT: %cmp = icmp ne i32 %x, 3
 }
 
+define i1 @test17a(i32 %x) nounwind {
+  %shl = shl i32 1, %x
+  %and = and i32 %shl, 7
+  %cmp = icmp eq i32 %and, 0
+  ret i1 %cmp
+; CHECK-LABEL: @test17a(
+; CHECK-NEXT: %cmp = icmp ugt i32 %x, 2
+}
 
 define i1 @test18(i32 %x) nounwind {
   %sh = lshr i32 8, %x
@@ -192,6 +200,15 @@ define i1 @test20(i32 %x) nounwind {
   ret i1 %cmp
 ; CHECK-LABEL: @test20(
 ; CHECK-NEXT: %cmp = icmp eq i32 %x, 3
+}
+
+define i1 @test20a(i32 %x) nounwind {
+  %shl = shl i32 1, %x
+  %and = and i32 %shl, 7
+  %cmp = icmp ne i32 %and, 0
+  ret i1 %cmp
+; CHECK-LABEL: @test20a(
+; CHECK-NEXT: %cmp = icmp ult i32 %x, 3
 }
 
 define i1 @test21(i8 %x, i8 %y) {
@@ -1364,4 +1381,20 @@ define i1 @icmp_neg_cst_slt(i32 %a) {
   %1 = sub nsw i32 0, %a
   %2 = icmp slt i32 %1, -10
   ret i1 %2
+}
+
+; CHECK-LABEL: @exact_ashr_eq_false
+; CHECK-NEXT: icmp eq i32 %a, 1
+define i1 @exact_ashr_eq_false(i32 %a) {
+  %shr = ashr exact i32 -30, %a
+  %cmp = icmp eq i32 %shr, -15
+  ret i1 %cmp
+}
+
+; CHECK-LABEL: @exact_lhsr
+; CHECK-NEXT: icmp eq i32 %a, 3
+define i1 @exact_lhsr(i32 %a) {
+  %shr = lshr exact i32 80, %a
+  %cmp = icmp eq i32 %shr, 10
+  ret i1 %cmp
 }

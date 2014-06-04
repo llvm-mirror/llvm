@@ -1,5 +1,4 @@
-; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-AARCH64
-; RUN: llc < %s -verify-machineinstrs -mtriple=arm64-none-linux-gnu -mattr=+neon | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-ARM64
+; RUN: llc < %s -verify-machineinstrs -mtriple=aarch64-none-linux-gnu -mattr=+neon | FileCheck %s --check-prefix=CHECK
 
 %struct.int8x8x2_t = type { [2 x <8 x i8>] }
 %struct.int16x4x2_t = type { [2 x <4 x i16>] }
@@ -54,8 +53,7 @@ entry:
 
 define <2 x i32> @test_vuzp1_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vuzp1_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i32> %shuffle.i
@@ -71,8 +69,7 @@ entry:
 
 define <2 x i64> @test_vuzp1q_s64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vuzp1q_s64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i64> %shuffle.i
@@ -112,8 +109,7 @@ entry:
 
 define <2 x i32> @test_vuzp1_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vuzp1_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i32> %shuffle.i
@@ -129,8 +125,7 @@ entry:
 
 define <2 x i64> @test_vuzp1q_u64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vuzp1q_u64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i64> %shuffle.i
@@ -138,8 +133,7 @@ entry:
 
 define <2 x float> @test_vuzp1_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vuzp1_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x float> %shuffle.i
@@ -155,8 +149,7 @@ entry:
 
 define <2 x double> @test_vuzp1q_f64(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: test_vuzp1q_f64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x double> %a, <2 x double> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x double> %shuffle.i
@@ -228,8 +221,7 @@ entry:
 
 define <2 x i32> @test_vuzp2_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vuzp2_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i32> %shuffle.i
@@ -245,9 +237,7 @@ entry:
 
 define <2 x i64> @test_vuzp2q_s64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vuzp2q_s64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-AARCH64-NEXT: mov {{v[0-9]+}}.16b, {{v[0-9]+}}.16b
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i64> %shuffle.i
@@ -287,8 +277,7 @@ entry:
 
 define <2 x i32> @test_vuzp2_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vuzp2_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i32> %shuffle.i
@@ -304,9 +293,7 @@ entry:
 
 define <2 x i64> @test_vuzp2q_u64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vuzp2q_u64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-AARCH64-NEXT: mov {{v[0-9]+}}.16b, {{v[0-9]+}}.16b
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i64> %shuffle.i
@@ -314,8 +301,7 @@ entry:
 
 define <2 x float> @test_vuzp2_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vuzp2_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x float> %shuffle.i
@@ -331,9 +317,7 @@ entry:
 
 define <2 x double> @test_vuzp2q_f64(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: test_vuzp2q_f64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-AARCH64-NEXT: mov {{v[0-9]+}}.16b, {{v[0-9]+}}.16b
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x double> %a, <2 x double> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x double> %shuffle.i
@@ -405,8 +389,7 @@ entry:
 
 define <2 x i32> @test_vzip1_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vzip1_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i32> %shuffle.i
@@ -422,8 +405,7 @@ entry:
 
 define <2 x i64> @test_vzip1q_s64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vzip1q_s64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i64> %shuffle.i
@@ -463,8 +445,7 @@ entry:
 
 define <2 x i32> @test_vzip1_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vzip1_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i32> %shuffle.i
@@ -480,8 +461,7 @@ entry:
 
 define <2 x i64> @test_vzip1q_u64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vzip1q_u64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i64> %shuffle.i
@@ -489,8 +469,7 @@ entry:
 
 define <2 x float> @test_vzip1_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vzip1_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x float> %shuffle.i
@@ -506,8 +485,7 @@ entry:
 
 define <2 x double> @test_vzip1q_f64(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: test_vzip1q_f64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x double> %a, <2 x double> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x double> %shuffle.i
@@ -579,8 +557,7 @@ entry:
 
 define <2 x i32> @test_vzip2_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vzip2_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i32> %shuffle.i
@@ -596,8 +573,7 @@ entry:
 
 define <2 x i64> @test_vzip2q_s64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vzip2q_s64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i64> %shuffle.i
@@ -637,8 +613,7 @@ entry:
 
 define <2 x i32> @test_vzip2_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vzip2_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i32> %shuffle.i
@@ -654,8 +629,7 @@ entry:
 
 define <2 x i64> @test_vzip2q_u64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vzip2q_u64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i64> %shuffle.i
@@ -663,8 +637,7 @@ entry:
 
 define <2 x float> @test_vzip2_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vzip2_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x float> %shuffle.i
@@ -680,8 +653,7 @@ entry:
 
 define <2 x double> @test_vzip2q_f64(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: test_vzip2q_f64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x double> %a, <2 x double> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x double> %shuffle.i
@@ -753,8 +725,7 @@ entry:
 
 define <2 x i32> @test_vtrn1_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vtrn1_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i32> %shuffle.i
@@ -770,8 +741,7 @@ entry:
 
 define <2 x i64> @test_vtrn1q_s64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vtrn1q_s64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i64> %shuffle.i
@@ -811,8 +781,7 @@ entry:
 
 define <2 x i32> @test_vtrn1_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vtrn1_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i32> %shuffle.i
@@ -828,8 +797,7 @@ entry:
 
 define <2 x i64> @test_vtrn1q_u64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vtrn1q_u64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x i64> %shuffle.i
@@ -837,8 +805,7 @@ entry:
 
 define <2 x float> @test_vtrn1_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vtrn1_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x float> %shuffle.i
@@ -854,8 +821,7 @@ entry:
 
 define <2 x double> @test_vtrn1q_f64(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: test_vtrn1q_f64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[1], {{v[0-9]+}}.d[0]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip1 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x double> %a, <2 x double> %b, <2 x i32> <i32 0, i32 2>
   ret <2 x double> %shuffle.i
@@ -927,8 +893,7 @@ entry:
 
 define <2 x i32> @test_vtrn2_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vtrn2_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i32> %shuffle.i
@@ -944,8 +909,7 @@ entry:
 
 define <2 x i64> @test_vtrn2q_s64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vtrn2q_s64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i64> %shuffle.i
@@ -985,8 +949,7 @@ entry:
 
 define <2 x i32> @test_vtrn2_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vtrn2_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i32> %shuffle.i
@@ -1002,8 +965,7 @@ entry:
 
 define <2 x i64> @test_vtrn2q_u64(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test_vtrn2q_u64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x i64> %shuffle.i
@@ -1011,8 +973,7 @@ entry:
 
 define <2 x float> @test_vtrn2_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vtrn2_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %shuffle.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x float> %shuffle.i
@@ -1028,8 +989,7 @@ entry:
 
 define <2 x double> @test_vtrn2q_f64(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: test_vtrn2q_f64:
-; CHECK-AARCH64: ins {{v[0-9]+}}.d[0], {{v[0-9]+}}.d[1]
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
+; CHECK: zip2 {{v[0-9]+}}.2d, {{v[0-9]+}}.2d, {{v[0-9]+}}.2d
 entry:
   %shuffle.i = shufflevector <2 x double> %a, <2 x double> %b, <2 x i32> <i32 1, i32 3>
   ret <2 x double> %shuffle.i
@@ -2534,10 +2494,8 @@ entry:
 
 define %struct.int32x2x2_t @test_vuzp_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vuzp_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vuzp.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   %vuzp1.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
@@ -2572,10 +2530,8 @@ entry:
 
 define %struct.uint32x2x2_t @test_vuzp_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vuzp_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vuzp.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   %vuzp1.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
@@ -2586,10 +2542,8 @@ entry:
 
 define %struct.float32x2x2_t @test_vuzp_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vuzp_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vuzp.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 0, i32 2>
   %vuzp1.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 1, i32 3>
@@ -2756,10 +2710,8 @@ entry:
 
 define %struct.int32x2x2_t @test_vzip_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vzip_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vzip.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   %vzip1.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
@@ -2794,10 +2746,8 @@ entry:
 
 define %struct.uint32x2x2_t @test_vzip_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vzip_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vzip.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   %vzip1.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
@@ -2808,10 +2758,8 @@ entry:
 
 define %struct.float32x2x2_t @test_vzip_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vzip_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vzip.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 0, i32 2>
   %vzip1.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 1, i32 3>
@@ -2978,10 +2926,8 @@ entry:
 
 define %struct.int32x2x2_t @test_vtrn_s32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vtrn_s32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vtrn.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   %vtrn1.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
@@ -3016,10 +2962,8 @@ entry:
 
 define %struct.uint32x2x2_t @test_vtrn_u32(<2 x i32> %a, <2 x i32> %b) {
 ; CHECK-LABEL: test_vtrn_u32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vtrn.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 0, i32 2>
   %vtrn1.i = shufflevector <2 x i32> %a, <2 x i32> %b, <2 x i32> <i32 1, i32 3>
@@ -3030,10 +2974,8 @@ entry:
 
 define %struct.float32x2x2_t @test_vtrn_f32(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: test_vtrn_f32:
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[1], {{v[0-9]+}}.s[0]
-; CHECK-AARCH64: ins {{v[0-9]+}}.s[0], {{v[0-9]+}}.s[1]
-; CHECK-ARM64: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
-; CHECK-ARM64: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip1 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
+; CHECK: zip2 {{v[0-9]+}}.2s, {{v[0-9]+}}.2s, {{v[0-9]+}}.2s
 entry:
   %vtrn.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 0, i32 2>
   %vtrn1.i = shufflevector <2 x float> %a, <2 x float> %b, <2 x i32> <i32 1, i32 3>
@@ -3183,7 +3125,4 @@ define %struct.uint8x8x2_t @test_uzp(<16 x i8> %y) {
   %.fca.0.1.insert = insertvalue %struct.uint8x8x2_t %.fca.0.0.insert, <8 x i8> %vuzp1.i, 0, 1
   ret %struct.uint8x8x2_t %.fca.0.1.insert
 
-; CHECK-AARCH64: dup	{{d[0-9]+}}, {{v[0-9]+}}.d[1]
-; CHECK-AARCH64-NEXT: uzp1	{{v[0-9]+}}.8b, {{v[0-9]+}}.8b, {{v[0-9]+}}.8b
-; CHECK-AARCH64-NEXT: uzp2	{{v[0-9]+}}.8b, {{v[0-9]+}}.8b, {{v[0-9]+}}.8b
 }

@@ -1,8 +1,5 @@
 // RUN: not llvm-mc -triple aarch64-none-linux-gnu -mattr=+neon < %s 2> %t
-// RUN: FileCheck --check-prefix=CHECK-ERROR --check-prefix=CHECK-AARCH64-ERROR < %t %s
-
-// RUN: not llvm-mc -triple arm64-none-linux-gnu -mattr=+neon < %s 2> %t
-// RUN: FileCheck --check-prefix=CHECK-ERROR --check-prefix=CHECK-ARM64-ERROR < %t %s
+// RUN: FileCheck --check-prefix=CHECK-ERROR < %t %s
 
 //------------------------------------------------------------------------------
 // Vector Integer Add/sub
@@ -590,19 +587,13 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        fcmgt v0.2d, v31.2s, v16.2s
 // CHECK-ERROR:                         ^
-// CHECK-AARCH64-ERROR: error: expected floating-point constant #0.0 or invalid register type
-// CHECK-AARCH64-ERROR:        fcmgt v4.4s, v7.4s, v15.4h
-// CHECK-AARCH64-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: expected floating-point constant #0.0 or invalid register type
-// CHECK-AARCH64-ERROR:        fcmlt v29.2d, v5.2d, v2.16b
-// CHECK-AARCH64-ERROR:                                ^
 
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR:        fcmgt v4.4s, v7.4s, v15.4h
-// CHECK-ARM64-ERROR:                                ^
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR:        fcmlt v29.2d, v5.2d, v2.16b
-// CHECK-ARM64-ERROR:                                ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR:        fcmgt v4.4s, v7.4s, v15.4h
+// CHECK-ERROR:                                ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR:        fcmlt v29.2d, v5.2d, v2.16b
+// CHECK-ERROR:                                ^
 
 //----------------------------------------------------------------------
 // Vector Compare Mask Equal to Zero (Integer)
@@ -691,19 +682,13 @@
 // CHECK-ERROR:        fcmeq v0.16b, v1.16b, #0.0
 // CHECK-ERROR:                 ^
 
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmeq v0.8b, v1.4h, #1.0
-// CHECK-AARCH64-ERROR:                             ^
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmeq v0.8b, v1.4h, #1
-// CHECK-AARCH64-ERROR:                             ^
 
-// CHECK-ARM64-ERROR: error: expected floating-point constant #0.0
-// CHECK-ARM64-ERROR:        fcmeq v0.8b, v1.4h, #1.0
-// CHECK-ARM64-ERROR:                             ^
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR:        fcmeq v0.8b, v1.4h, #1
-// CHECK-ARM64-ERROR:                             ^
+// CHECK-ERROR: error: expected floating-point constant #0.0
+// CHECK-ERROR:        fcmeq v0.8b, v1.4h, #1.0
+// CHECK-ERROR:                             ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR:        fcmeq v0.8b, v1.4h, #1
+// CHECK-ERROR:                             ^
 
 //----------------------------------------------------------------------
 // Vector Compare Mask Greater Than or Equal to Zero (Floating Point)
@@ -722,19 +707,13 @@
 // CHECK-ERROR:        fcmge v3.8b, v8.2s, #0.0
 // CHECK-ERROR:                 ^
 
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmle v17.8h, v15.2d, #-1.0
-// CHECK-AARCH64-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmle v17.8h, v15.2d, #2
-// CHECK-AARCH64-ERROR:                               ^
 
-// CHECK-ARM64-ERROR: error: expected floating-point constant #0.0
-// CHECK-ARM64-ERROR:        fcmle v17.8h, v15.2d, #-1.0
-// CHECK-ARM64-ERROR:                               ^
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR:        fcmle v17.8h, v15.2d, #2
-// CHECK-ARM64-ERROR:                               ^
+// CHECK-ERROR: error: expected floating-point constant #0.0
+// CHECK-ERROR:        fcmle v17.8h, v15.2d, #-1.0
+// CHECK-ERROR:                               ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR:        fcmle v17.8h, v15.2d, #2
+// CHECK-ERROR:                               ^
 
 //----------------------------------------------------------------------
 // Vector Compare Mask Greater Than Zero (Floating Point)
@@ -752,19 +731,13 @@
 // CHECK-ERROR:        fcmgt v4.4s, v7.4h, #0.0
 // CHECK-ERROR:                        ^
 
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmlt v29.2d, v5.2d, #255.0
-// CHECK-AARCH64-ERROR:                              ^
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmlt v29.2d, v5.2d, #255
-// CHECK-AARCH64-ERROR:                              ^
 
-// CHECK-ARM64-ERROR: error: expected floating-point constant #0.0
-// CHECK-ARM64-ERROR:        fcmlt v29.2d, v5.2d, #255.0
-// CHECK-ARM64-ERROR:                              ^
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR:        fcmlt v29.2d, v5.2d, #255
-// CHECK-ARM64-ERROR:                              ^
+// CHECK-ERROR: error: expected floating-point constant #0.0
+// CHECK-ERROR:        fcmlt v29.2d, v5.2d, #255.0
+// CHECK-ERROR:                              ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR:        fcmlt v29.2d, v5.2d, #255
+// CHECK-ERROR:                              ^
 
 //----------------------------------------------------------------------
 // Vector Compare Mask Less Than or Equal To Zero (Floating Point)
@@ -782,19 +755,13 @@
 // CHECK-ERROR:        fcmge v3.8b, v8.2s, #0.0
 // CHECK-ERROR:                 ^
 
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmle v17.2d, v15.2d, #15.0
-// CHECK-AARCH64-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmle v17.2d, v15.2d, #15
-// CHECK-AARCH64-ERROR:                              ^
 
-// CHECK-ARM64-ERROR: error: expected floating-point constant #0.0
-// CHECK-ARM64-ERROR:        fcmle v17.2d, v15.2d, #15.0
-// CHECK-ARM64-ERROR:                               ^
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR:        fcmle v17.2d, v15.2d, #15
-// CHECK-ARM64-ERROR:                              ^
+// CHECK-ERROR: error: expected floating-point constant #0.0
+// CHECK-ERROR:        fcmle v17.2d, v15.2d, #15.0
+// CHECK-ERROR:                               ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR:        fcmle v17.2d, v15.2d, #15
+// CHECK-ERROR:                              ^
 
 //----------------------------------------------------------------------
 // Vector Compare Mask Less Than Zero (Floating Point)
@@ -812,19 +779,13 @@
 // CHECK-ERROR:        fcmgt v4.4s, v7.4h, #0.0
 // CHECK-ERROR:                        ^
 
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmlt v29.2d, v5.2d, #16.0
-// CHECK-AARCH64-ERROR:                              ^
-// CHECK-AARCH64-ERROR: error: only #0.0 is acceptable as immediate
-// CHECK-AARCH64-ERROR:        fcmlt v29.2d, v5.2d, #2
-// CHECK-AARCH64-ERROR:                              ^
 
-// CHECK-ARM64-ERROR: error: expected floating-point constant #0.0
-// CHECK-ARM64-ERROR:        fcmlt v29.2d, v5.2d, #16.0
-// CHECK-ARM64-ERROR:                              ^
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR:        fcmlt v29.2d, v5.2d, #2
-// CHECK-ARM64-ERROR:                              ^
+// CHECK-ERROR: error: expected floating-point constant #0.0
+// CHECK-ERROR:        fcmlt v29.2d, v5.2d, #16.0
+// CHECK-ERROR:                              ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR:        fcmlt v29.2d, v5.2d, #2
+// CHECK-ERROR:                              ^
 
 /-----------------------------------------------------------------------
 // Vector Integer Halving Add (Signed)
@@ -1337,13 +1298,10 @@
          shl v0.4s, v21.4s, #32
          shl v0.2d, v1.2d, #64
 
-// CHECK-AARCH64-ERROR: error: expected comma before next operand
-// CHECK-AARCH64-ERROR:         shl v0.4s, v15,2s, #3
-// CHECK-AARCH64-ERROR:                         ^
 
-// CHECK-ARM64-ERROR: error: unexpected token in argument list
-// CHECK-ARM64-ERROR:         shl v0.4s, v15,2s, #3
-// CHECK-ARM64-ERROR:                         ^
+// CHECK-ERROR: error: unexpected token in argument list
+// CHECK-ERROR:         shl v0.4s, v15,2s, #3
+// CHECK-ERROR:                         ^
 
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:         shl v0.2d, v17.4s, #3
@@ -2673,13 +2631,10 @@
         pmull2 v0.4s, v1.8h v2.8h
         pmull2 v0.2d, v1.4s, v2.4s
 
-// CHECK-AARCH64-ERROR: error: expected comma before next operand
-// CHECK-AARCH64-ERROR:        pmull2 v0.4s, v1.8h v2.8h
-// CHECK-AARCH64-ERROR:                            ^
 
-// CHECK-ARM64-ERROR: error: unexpected token in argument list
-// CHECK-ARM64-ERROR:        pmull2 v0.4s, v1.8h v2.8h
-// CHECK-ARM64-ERROR:                            ^
+// CHECK-ERROR: error: unexpected token in argument list
+// CHECK-ERROR:        pmull2 v0.4s, v1.8h v2.8h
+// CHECK-ERROR:                            ^
 
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        pmull2 v0.2d, v1.4s, v2.4s
@@ -3003,23 +2958,19 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        mla v0.2d, v1.2d, v16.d[1]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mla v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mla v0.4s, v1.4s, v2.s[4]
 // CHECK-ERROR:                               ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        mla v0.2h, v1.2h, v2.h[1]
 // CHECK-ERROR:            ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mla v0.4h, v1.4h, v2.h[8]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mla v0.8h, v1.8h, v2.h[8]
 // CHECK-ERROR:                               ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3041,23 +2992,19 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        mls v0.2d, v1.2d, v16.d[1]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mls v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mls v0.4s, v1.4s, v2.s[4]
 // CHECK-ERROR:                               ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        mls v0.2h, v1.2h, v2.h[1]
 // CHECK-ERROR:            ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mls v0.4h, v1.4h, v2.h[8]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mls v0.8h, v1.8h, v2.h[8]
 // CHECK-ERROR:                               ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3082,28 +3029,22 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        fmla v0.8h, v1.8h, v2.h[2]
 // CHECK-ERROR:                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmla v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmla v0.2s, v1.2s, v22.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmla v3.4s, v8.4s, v2.s[4]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmla v3.4s, v8.4s, v22.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmla v0.2d, v1.2d, v2.d[2]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmla v0.2d, v1.2d, v22.d[2]
 // CHECK-ERROR:                                 ^
 
@@ -3122,28 +3063,22 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        fmls v0.8h, v1.8h, v2.h[2]
 // CHECK-ERROR:                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmls v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmls v0.2s, v1.2s, v22.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmls v3.4s, v8.4s, v2.s[4]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmls v3.4s, v8.4s, v22.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmls v0.2d, v1.2d, v2.d[2]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmls v0.2d, v1.2d, v22.d[2]
 // CHECK-ERROR:                                 ^
 
@@ -3163,8 +3098,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlal v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlal v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3173,19 +3107,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlal v0.2s, v1.2s, v2.s[1]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlal v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlal v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlal2 v0.4h, v1.8h, v1.h[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlal2 v0.4s, v1.8h, v1.h[8]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3194,12 +3125,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlal2 v0.2s, v1.4s, v1.s[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlal2 v0.2d, v1.4s, v1.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlal2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                   ^
 
@@ -3219,8 +3148,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlsl v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlsl v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3229,19 +3157,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlsl v0.2s, v1.2s, v2.s[1]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlsl v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlsl v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlsl2 v0.4h, v1.8h, v1.h[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlsl2 v0.4s, v1.8h, v1.h[8]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3250,12 +3175,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smlsl2 v0.2s, v1.4s, v1.s[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlsl2 v0.2d, v1.4s, v1.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smlsl2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                   ^
 
@@ -3275,8 +3198,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlal v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlal v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3285,19 +3207,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlal v0.2s, v1.2s, v2.s[1]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlal v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlal v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlal2 v0.4h, v1.8h, v1.h[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlal2 v0.4s, v1.8h, v1.h[8]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3306,12 +3225,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlal2 v0.2s, v1.4s, v1.s[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlal2 v0.2d, v1.4s, v1.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlal2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                   ^
 
@@ -3331,8 +3248,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlsl v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlsl v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3341,19 +3257,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlsl v0.2s, v1.2s, v2.s[3]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlsl v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlsl v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlsl2 v0.4h, v1.8h, v1.h[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlsl2 v0.4s, v1.8h, v1.h[8]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3362,12 +3275,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umlsl2 v0.2s, v1.4s, v1.s[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlsl2 v0.2d, v1.4s, v1.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umlsl2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                   ^
 
@@ -3387,8 +3298,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlal v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlal v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                   ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3397,19 +3307,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlal v0.2s, v1.2s, v2.s[3]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlal v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlal v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlal2 v0.4h, v1.8h, v1.h[2]
 // CHECK-ERROR:                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlal2 v0.4s, v1.8h, v1.h[8]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3418,12 +3325,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlal2 v0.2s, v1.4s, v1.s[2]
 // CHECK-ERROR:                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlal2 v0.2d, v1.4s, v1.s[4]
 // CHECK-ERROR:                                    ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlal2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                     ^
 
@@ -3443,8 +3348,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlsl v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlsl v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                   ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3453,19 +3357,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlsl v0.2s, v1.2s, v2.s[3]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlsl v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlsl v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlsl2 v0.4h, v1.8h, v1.h[2]
 // CHECK-ERROR:                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlsl2 v0.4s, v1.8h, v1.h[8]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3474,12 +3375,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlsl2 v0.2s, v1.4s, v1.s[2]
 // CHECK-ERROR:                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlsl2 v0.2d, v1.4s, v1.s[4]
 // CHECK-ERROR:                                    ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmlsl2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                     ^
 
@@ -3493,36 +3392,28 @@
       mul v0.4s, v1.4s, v22.s[4]
       mul v0.2d, v1.2d, v2.d[1]
 
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mul v0.4h, v1.4h, v2.h[8]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        mul v0.4h, v1.4h, v16.h[8]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mul v0.8h, v1.8h, v2.h[8]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: invalid operand for instruction
+// CHECK-ERROR: invalid operand for instruction
 // CHECK-ERROR:        mul v0.8h, v1.8h, v16.h[8]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mul v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mul v0.2s, v1.2s, v22.s[4]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mul v0.4s, v1.4s, v2.s[4]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        mul v0.4s, v1.4s, v22.s[4]
 // CHECK-ERROR:                                ^
 
@@ -3540,28 +3431,22 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        fmul v0.4h, v1.4h, v2.h[4]
 // CHECK-ERROR:                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmul v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmul v0.2s, v1.2s, v22.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmul v0.4s, v1.4s, v2.s[4]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmul v0.4s, v1.4s, v22.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmul v0.2d, v1.2d, v2.d[2]
 // CHECK-ERROR:                                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmul v0.2d, v1.2d, v22.d[2]
 // CHECK-ERROR:                                 ^
 
@@ -3576,28 +3461,22 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        fmulx v0.4h, v1.4h, v2.h[4]
 // CHECK-ERROR:                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmulx v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmulx v0.2s, v1.2s, v22.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmulx v0.4s, v1.4s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmulx v0.4s, v1.4s, v22.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmulx v0.2d, v1.2d, v2.d[2]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        fmulx v0.2d, v1.2d, v22.d[2]
 // CHECK-ERROR:                                  ^
 
@@ -3617,8 +3496,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smull v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smull v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3627,19 +3505,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smull v0.2s, v1.2s, v2.s[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smull v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smull v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smull2 v0.4h, v1.8h, v2.h[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smull2 v0.4s, v1.8h, v2.h[8]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3648,12 +3523,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        smull2 v0.2s, v1.4s, v2.s[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smull2 v0.2d, v1.4s, v2.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        smull2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                   ^
 
@@ -3673,8 +3546,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umull v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umull v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3683,19 +3555,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umull v0.2s, v1.2s, v2.s[2]
 // CHECK-ERROR:              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umull v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umull v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umull2 v0.4h, v1.8h, v2.h[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umull2 v0.4s, v1.8h, v2.h[8]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3704,12 +3573,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        umull2 v0.2s, v1.4s, v2.s[2]
 // CHECK-ERROR:               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umull2 v0.2d, v1.4s, v2.s[4]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        umull2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                   ^
 
@@ -3729,8 +3596,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmull v0.4h, v1.4h, v2.h[2]
 // CHECK-ERROR:                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmull v0.4s, v1.4h, v2.h[8]
 // CHECK-ERROR:                                   ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3739,19 +3605,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmull v0.2s, v1.2s, v2.s[2]
 // CHECK-ERROR:                ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmull v0.2d, v1.2s, v2.s[4]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmull v0.2d, v1.2s, v22.s[4]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmull2 v0.4h, v1.8h, v2.h[2]
 // CHECK-ERROR:                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmull2 v0.4s, v1.8h, v2.h[8]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3760,12 +3623,10 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmull2 v0.2s, v1.4s, v2.s[2]
 // CHECK-ERROR:                 ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmull2 v0.2d, v1.4s, v2.s[4]
 // CHECK-ERROR:                                    ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmull2 v0.2d, v1.4s, v22.s[4]
 // CHECK-ERROR:                                     ^
 
@@ -3779,34 +3640,28 @@
       sqdmulh v0.4s, v1.4s, v22.s[4]
       sqdmulh v0.2d, v1.2d, v22.d[1]
 
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmulh v0.4h, v1.4h, v2.h[8]
 // CHECK-ERROR:                                   ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmulh v0.4h, v1.4h, v16.h[2]
 // CHECK-ERROR:                              ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmulh v0.8h, v1.8h, v2.h[8]
 // CHECK-ERROR:                                   ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmulh v0.8h, v1.8h, v16.h[2]
 // CHECK-ERROR:                                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmulh v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmulh v0.2s, v1.2s, v22.s[4]
 // CHECK-ERROR:                                    ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmulh v0.4s, v1.4s, v2.s[4]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqdmulh v0.4s, v1.4s, v22.s[4]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -3823,34 +3678,28 @@
       sqrdmulh v0.4s, v1.4s, v22.s[4]
       sqrdmulh v0.2d, v1.2d, v22.d[1]
 
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqrdmulh v0.4h, v1.4h, v2.h[8]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqrdmulh v0.4h, v1.4h, v16.h[2]
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqrdmulh v0.8h, v1.8h, v2.h[8]
 // CHECK-ERROR:                                    ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqrdmulh v0.8h, v1.8h, v16.h[2]
 // CHECK-ERROR:                                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqrdmulh v0.2s, v1.2s, v2.s[4]
 // CHECK-ERROR:                                    ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqrdmulh v0.2s, v1.2s, v22.s[4]
 // CHECK-ERROR:                                     ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqrdmulh v0.4s, v1.4s, v2.s[4]
 // CHECK-ERROR:                                    ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:        sqrdmulh v0.4s, v1.4s, v22.s[4]
 // CHECK-ERROR:                                     ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4068,20 +3917,16 @@
          ld1 {v4}, [x0]
          ld1 {v32.16b}, [x0]
          ld1 {v15.8h}, [x32]
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: vector register expected
+// CHECK-ERROR: error: vector register expected
 // CHECK-ERROR:        ld1 {x3}, [x2]
 // CHECK-ERROR:             ^
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        ld1 {v4}, [x0]
 // CHECK-ERROR:             ^
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: vector register expected
+// CHECK-ERROR: error: vector register expected
 // CHECK-ERROR:        ld1 {v32.16b}, [x0]
 // CHECK-ERROR:             ^
-// CHECK-AARCH64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR: error: register expected
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        ld1 {v15.8h}, [x32]
 // CHECK-ERROR:                       ^
 
@@ -4092,15 +3937,13 @@
          ld1 {v1.8h-v1.8h}, [x0]
          ld1 {v15.8h-v17.4h}, [x15]
          ld1 {v0.8b-v2.8b, [x0]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        ld1 {v0.16b, v2.16b}, [x0]
 // CHECK-ERROR:                     ^
 // CHECK-ERROR: error: invalid number of vectors
 // CHECK-ERROR:        ld1 {v0.8h, v1.8h, v2.8h, v3.8h, v4.8h}, [x0]
 // CHECK-ERROR:                                         ^
-// CHECK-AARCH64-ERROR: error: '{' expected
-// CHECK-ARM64-ERROR: error: unexpected token in argument list
+// CHECK-ERROR: error: unexpected token in argument list
 // CHECK-ERROR:        ld1 v0.8b, v1.8b}, [x0]
 // CHECK-ERROR:            ^
 // CHECK-ERROR: error: invalid number of vectors
@@ -4109,8 +3952,7 @@
 // CHECK-ERROR: error: invalid number of vectors
 // CHECK-ERROR:        ld1 {v1.8h-v1.8h}, [x0]
 // CHECK-ERROR:                   ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld1 {v15.8h-v17.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: '}' expected
@@ -4122,20 +3964,15 @@
          ld2 {v15.4h, v16.4h, v17.4h}, [x32]
          ld2 {v15.8h-v16.4h}, [x15]
          ld2 {v0.2d-v2.2d}, [x0]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld2 {v15.8h, v16.4h}, [x15]
 // CHECK-ERROR:                     ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        ld2 {v0.8b, v2.8b}, [x0]
 // CHECK-ERROR:                    ^
-// CHECK-AARCH64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR: error: register expected
 // CHECK-ERROR:        ld2 {v15.4h, v16.4h, v17.4h}, [x32]
 // CHECK-ERROR:            ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld2 {v15.8h-v16.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4147,20 +3984,16 @@
          ld3 {v0.8b, v2.8b, v3.8b}, [x0]
          ld3 {v15.8h-v17.4h}, [x15]
          ld3 {v31.4s-v2.4s}, [sp]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld3 {v15.8h, v16.8h, v17.4h}, [x15]
 // CHECK-ERROR:                             ^
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld3 {v0.8b, v1,8b, v2.8b, v3.8b}, [x0]
 // CHECK-ERROR:                    ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        ld3 {v0.8b, v2.8b, v3.8b}, [x0]
 // CHECK-ERROR:                    ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld3 {v15.8h-v17.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4172,19 +4005,16 @@
          ld4 {v15.4h, v16.4h, v17.4h, v18.4h, v19.4h}, [x31]
          ld4 {v15.8h-v18.4h}, [x15]
          ld4 {v31.2s-v1.2s}, [x31]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld4 {v15.8h, v16.8h, v17.4h, v18.8h}, [x15]
 // CHECK-ERROR:                             ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        ld4 {v0.8b, v2.8b, v3.8b, v4.8b}, [x0]
 // CHECK-ERROR:                    ^
 // CHECK-ERROR: error: invalid number of vectors
 // CHECK-ERROR:        ld4 {v15.4h, v16.4h, v17.4h, v18.4h, v19.4h}, [x31]
 // CHECK-ERROR:                                             ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        ld4 {v15.8h-v18.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4195,20 +4025,16 @@
          st1 {v4}, [x0]
          st1 {v32.16b}, [x0]
          st1 {v15.8h}, [x32]
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: vector register expected
+// CHECK-ERROR: error: vector register expected
 // CHECK-ERROR:        st1 {x3}, [x2]
 // CHECK-ERROR:             ^
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        st1 {v4}, [x0]
 // CHECK-ERROR:             ^
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: vector register expected
+// CHECK-ERROR: error: vector register expected
 // CHECK-ERROR:        st1 {v32.16b}, [x0]
 // CHECK-ERROR:             ^
-// CHECK-AARCH64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR: error: register expected
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        st1 {v15.8h}, [x32]
 // CHECK-ERROR:                       ^
 
@@ -4219,15 +4045,13 @@
          st1 {v1.8h-v1.8h}, [x0]
          st1 {v15.8h-v17.4h}, [x15]
          st1 {v0.8b-v2.8b, [x0]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        st1 {v0.16b, v2.16b}, [x0]
 // CHECK-ERROR:                     ^
 // CHECK-ERROR: error: invalid number of vectors
 // CHECK-ERROR:        st1 {v0.8h, v1.8h, v2.8h, v3.8h, v4.8h}, [x0]
 // CHECK-ERROR:                                         ^
-// CHECK-AARCH64-ERROR: error: '{' expected
-// CHECK-ARM64-ERROR: error: unexpected token in argument list
+// CHECK-ERROR: error: unexpected token in argument list
 // CHECK-ERROR:        st1 v0.8b, v1.8b}, [x0]
 // CHECK-ERROR:            ^
 // CHECK-ERROR: error: invalid number of vectors
@@ -4236,8 +4060,7 @@
 // CHECK-ERROR: error: invalid number of vectors
 // CHECK-ERROR:        st1 {v1.8h-v1.8h}, [x0]
 // CHECK-ERROR:                   ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st1 {v15.8h-v17.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: '}' expected
@@ -4249,19 +4072,16 @@
          st2 {v15.4h, v16.4h, v17.4h}, [x30]
          st2 {v15.8h-v16.4h}, [x15]
          st2 {v0.2d-v2.2d}, [x0]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st2 {v15.8h, v16.4h}, [x15]
 // CHECK-ERROR:                     ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        st2 {v0.8b, v2.8b}, [x0]
 // CHECK-ERROR:                    ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        st2 {v15.4h, v16.4h, v17.4h}, [x30]
 // CHECK-ERROR:            ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st2 {v15.8h-v16.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4273,20 +4093,16 @@
          st3 {v0.8b, v2.8b, v3.8b}, [x0]
          st3 {v15.8h-v17.4h}, [x15]
          st3 {v31.4s-v2.4s}, [sp]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st3 {v15.8h, v16.8h, v17.4h}, [x15]
 // CHECK-ERROR:                             ^
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st3 {v0.8b, v1,8b, v2.8b, v3.8b}, [x0]
 // CHECK-ERROR:                    ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        st3 {v0.8b, v2.8b, v3.8b}, [x0]
 // CHECK-ERROR:                    ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st3 {v15.8h-v17.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4298,19 +4114,16 @@
          st4 {v15.4h, v16.4h, v17.4h, v18.4h, v19.4h}, [x31]
          st4 {v15.8h-v18.4h}, [x15]
          st4 {v31.2s-v1.2s}, [x31]
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st4 {v15.8h, v16.8h, v17.4h, v18.8h}, [x15]
 // CHECK-ERROR:                             ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: registers must be sequential
+// CHECK-ERROR: error: registers must be sequential
 // CHECK-ERROR:        st4 {v0.8b, v2.8b, v3.8b, v4.8b}, [x0]
 // CHECK-ERROR:                    ^
 // CHECK-ERROR: error: invalid number of vectors
 // CHECK-ERROR:        st4 {v15.4h, v16.4h, v17.4h, v18.4h, v19.4h}, [x31]
 // CHECK-ERROR:                                             ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:        st4 {v15.8h-v18.4h}, [x15]
 // CHECK-ERROR:                        ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4327,8 +4140,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          ld1 {v0.16b}, [x0], #8
 // CHECK-ERROR:                              ^
-// CHECK-AARCH64-ERROR:  error: expected vector type register
-// CHECK-ARM64-ERROR: error: invalid vector kind qualifier
+// CHECK-ERROR: error: invalid vector kind qualifier
 // CHECK-ERROR:          ld1 {v0.8h, v1.16h}, [x0], x1
 // CHECK-ERROR:                      ^
 // CHECK-ERROR:  error: invalid operand for instruction
@@ -4344,8 +4156,7 @@
 // CHECK-ERROR:  error: invalid operand for instruction
 // CHECK-ERROR:          ld3 {v5.2s, v6.2s, v7.2s}, [x1], #48
 // CHECK-ERROR:                                           ^
-// CHECK-AARCH64-ERROR:  error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:          ld4 {v31.2d, v0.2d, v1.2d, v2.1d}, [x3], x1
 // CHECK-ERROR:                                     ^
 
@@ -4355,8 +4166,7 @@
 // CHECK-ERROR:  error: invalid operand for instruction
 // CHECK-ERROR:          st1 {v0.16b}, [x0], #8
 // CHECK-ERROR:                              ^
-// CHECK-AARCH64-ERROR:  error: expected vector type register
-// CHECK-ARM64-ERROR: error: invalid vector kind qualifier
+// CHECK-ERROR: error: invalid vector kind qualifier
 // CHECK-ERROR:          st1 {v0.8h, v1.16h}, [x0], x1
 // CHECK-ERROR:                      ^
 // CHECK-ERROR:  error: invalid operand for instruction
@@ -4372,8 +4182,7 @@
 // CHECK-ERROR:  error: invalid operand for instruction
 // CHECK-ERROR:          st3 {v5.2s, v6.2s, v7.2s}, [x1], #48
 // CHECK-ERROR:                                           ^
-// CHECK-AARCH64-ERROR:  error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR:          st4 {v31.2d, v0.2d, v1.2d, v2.1d}, [x3], x1
 // CHECK-ERROR:                                     ^
 
@@ -4385,19 +4194,16 @@
          ld2r {v31.4s, v0.2s}, [sp]
          ld3r {v0.8b, v1.8b, v2.8b, v3.8b}, [x0]
          ld4r {v31.2s, v0.2s, v1.2d, v2.2s}, [sp]
-// CHECK-AARCH64-ERROR: error: expected vector type register
-// CHECK-ARM64-ERROR: error: vector register expected
+// CHECK-ERROR: error: vector register expected
 // CHECK-ERROR: ld1r {x1}, [x0]
 // CHECK-ERROR:       ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR: ld2r {v31.4s, v0.2s}, [sp]
 // CHECK-ERROR:               ^
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR: ld3r {v0.8b, v1.8b, v2.8b, v3.8b}, [x0]
 // CHECK-ERROR:      ^
-// CHECK-AARCH64-ERROR: error: invalid space between two vectors
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR: ld4r {v31.2s, v0.2s, v1.2d, v2.2s}, [sp]
 // CHECK-ERROR:                      ^
 
@@ -4409,20 +4215,16 @@
          ld2 {v15.h, v16.h}[8], [x15]
          ld3 {v31.s, v0.s, v1.s}[-1], [sp]
          ld4 {v0.d, v1.d, v2.d, v3.d}[2], [x0]
-// CHECK-AARCH64-ERROR:: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR: ld1 {v0.b}[16], [x0]
 // CHECK-ERROR:            ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR: ld2 {v15.h, v16.h}[8], [x15]
 // CHECK-ERROR:                    ^
-// CHECK-AARCH64-ERROR: error: expected lane number
-// CHECK-ARM64-ERROR: error: vector lane must be an integer in range
+// CHECK-ERROR: error: vector lane must be an integer in range
 // CHECK-ERROR: ld3 {v31.s, v0.s, v1.s}[-1], [sp]
 // CHECK-ERROR:                         ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR: ld4 {v0.d, v1.d, v2.d, v3.d}[2], [x0]
 // CHECK-ERROR:                              ^
 
@@ -4430,20 +4232,16 @@
          st2 {v31.s, v0.s}[3], [8]
          st3 {v15.h, v16.h, v17.h}[-1], [x15]
          st4 {v0.d, v1.d, v2.d, v3.d}[2], [x0]
-// CHECK-AARCH64-ERROR:: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR: st1 {v0.d}[16], [x0]
 // CHECK-ERROR:            ^
-// CHECK-AARCH64-ERROR: error: invalid operand for instruction
-// CHECK-ARM64-ERROR: error: register expected
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR: st2 {v31.s, v0.s}[3], [8]
 // CHECK-ERROR:                        ^
-// CHECK-AARCH64-ERROR: error: expected lane number
-// CHECK-ARM64-ERROR: error: vector lane must be an integer in range
+// CHECK-ERROR: error: vector lane must be an integer in range
 // CHECK-ERROR: st3 {v15.h, v16.h, v17.h}[-1], [x15]
 // CHECK-ERROR:                           ^
-// CHECK-AARCH64-ERROR: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR: st4 {v0.d, v1.d, v2.d, v3.d}[2], [x0]
 // CHECK-ERROR:                              ^
 
@@ -4482,8 +4280,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR: ld2 {v15.h, v16.h}[0], [x15], #3
 // CHECK-ERROR:                               ^
-// CHECK-AARCH64-ERROR: error: expected the same vector layout
-// CHECK-ARM64-ERROR: error: mismatched register size suffix
+// CHECK-ERROR: error: mismatched register size suffix
 // CHECK-ERROR: ld3 {v31.s, v0.s, v1.d}[0], [sp], x9
 // CHECK-ERROR:                      ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4517,20 +4314,16 @@
          ins v20.s[1], s30
          ins v1.d[0], d7
 
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:         ins v2.b[16], w1
 // CHECK-ERROR:                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:         ins v7.h[8], w14
 // CHECK-ERROR:                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:         ins v20.s[5], w30
 // CHECK-ERROR:                   ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:         ins v1.d[2], x7
 // CHECK-ERROR:                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -4557,24 +4350,19 @@
          smov x14, v6.d[1]
          smov x20, v9.d[0]
 
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         smov w1, v0.b[16]
 // CHECK-ERROR                       ^
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         smov w14, v6.h[8]
 // CHECK-ERROR                        ^
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         smov x1, v0.b[16]
 // CHECK-ERROR                       ^
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         smov x14, v6.h[8]
 // CHECK-ERROR                        ^
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         smov x20, v9.s[5]
 // CHECK-ERROR                        ^
 // CHECK-ERROR error: invalid operand for instruction
@@ -4601,20 +4389,16 @@
          umov s20, v9.s[2]
          umov d7, v18.d[1]
 
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         umov w1, v0.b[16]
 // CHECK-ERROR                       ^
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         umov w14, v6.h[8]
 // CHECK-ERROR                        ^
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         umov w20, v9.s[5]
 // CHECK-ERROR                        ^
-// CHECK-AARCH64-ERROR error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR         umov x7, v18.d[3]
 // CHECK-ERROR                        ^
 // CHECK-ERROR error: invalid operand for instruction
@@ -5030,8 +4814,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlal s17, h27, s12
 // CHECK-ERROR:                          ^
-// CHECK-AARCH64-ERROR: error: too few operands for instruction
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlal d19, s24, d12
 // CHECK-ERROR:                          ^
 
@@ -5045,8 +4828,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlsl s14, h12, s25
 // CHECK-ERROR:                          ^
-// CHECK-AARCH64-ERROR: error: too few operands for instruction
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmlsl d12, s23, d13
 // CHECK-ERROR:                          ^
 
@@ -5060,8 +4842,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmull s12, h22, s12
 // CHECK-ERROR:                          ^
-// CHECK-AARCH64-ERROR: error: too few operands for instruction
-// CHECK-ARM64-ERROR: error: invalid operand for instruction
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:        sqdmull d15, s22, d12
 // CHECK-ERROR:                          ^
 
@@ -7103,8 +6884,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          fmul    h0, h1, v1.s[0]
 // CHECK-ERROR:                  ^
-// CHECK-AARCH64-ERROR: error:  lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          fmul    s2, s29, v10.s[4]
 // CHECK-ERROR:                                 ^
 
@@ -7123,8 +6903,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          fmulx    h0, h1, v1.d[0]
 // CHECK-ERROR:                   ^
-// CHECK-AARCH64-ERROR: error:  lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          fmulx    d2, d29, v10.d[3]
 // CHECK-ERROR:                                  ^
 
@@ -7143,8 +6922,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          fmla    d30, s11, v1.d[1]
 // CHECK-ERROR:                       ^
-// CHECK-AARCH64-ERROR: error:  lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          fmla    s16, s22, v16.s[5]
 // CHECK-ERROR:                                  ^
 
@@ -7163,8 +6941,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          fmls    h7, h17, v26.s[2]
 // CHECK-ERROR:                  ^
-// CHECK-AARCH64-ERROR: error:  expected lane number
-// CHECK-ARM64-ERROR: error: vector lane must be an integer in range [0, 1]
+// CHECK-ERROR: error: vector lane must be an integer in range [0, 1]
 // CHECK-ERROR:          fmls    d16, d22, v16.d[-1]
 // CHECK-ERROR:                                  ^
 
@@ -7186,8 +6963,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          sqdmlal s8, s9, v14.s[1]
 // CHECK-ERROR:                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          sqdmlal d4, s5, v1.s[5]
 // CHECK-ERROR:                               ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -7212,8 +6988,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          sqdmlsl d1, h1, v13.s[0]
 // CHECK-ERROR:                      ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          sqdmlsl d1, s1, v13.s[4]
 // CHECK-ERROR:                                ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -7240,8 +7015,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          sqdmull s1, s1, v4.s[0]
 // CHECK-ERROR:                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          sqdmull s12, h17, v9.h[9]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -7266,8 +7040,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          sqdmulh s25, s26, v27.h[3]
 // CHECK-ERROR:                  ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          sqdmulh s25, s26, v27.s[4]
 // CHECK-ERROR:                                  ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -7292,8 +7065,7 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          sqrdmulh s5, h6, v7.s[2]
 // CHECK-ERROR:                       ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          sqrdmulh h31, h30, v14.h[9]
 // CHECK-ERROR:                                 ^
 // CHECK-ERROR: error: invalid operand for instruction
@@ -7325,20 +7097,16 @@
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR:          dup d0, v17.s[3]
 // CHECK-ERROR:                      ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          dup d0, v17.d[4]
 // CHECK-ERROR:                        ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          dup s0, v1.s[7]
 // CHECK-ERROR:                       ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          dup h0, v31.h[16]
 // CHECK-ERROR:                        ^
-// CHECK-AARCH64-ERROR: error: lane number incompatible with layout
-// CHECK-ARM64-ERROR: vector lane must be an integer in range
+// CHECK-ERROR: vector lane must be an integer in range
 // CHECK-ERROR:          dup b1, v3.b[16]
 // CHECK-ERROR:                       ^
 

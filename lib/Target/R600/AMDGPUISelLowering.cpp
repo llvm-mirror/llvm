@@ -204,9 +204,6 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
 
   setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
 
-  setOperationAction(ISD::FNEG, MVT::v2f32, Expand);
-  setOperationAction(ISD::FNEG, MVT::v4f32, Expand);
-
   setOperationAction(ISD::UINT_TO_FP, MVT::i64, Custom);
 
   setOperationAction(ISD::MUL, MVT::i64, Expand);
@@ -216,8 +213,6 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::UDIVREM, MVT::i32, Custom);
   setOperationAction(ISD::UDIVREM, MVT::i64, Custom);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
-  setOperationAction(ISD::VSELECT, MVT::v2f32, Expand);
-  setOperationAction(ISD::VSELECT, MVT::v4f32, Expand);
 
   static const MVT::SimpleValueType IntTypes[] = {
     MVT::v2i32, MVT::v4i32
@@ -261,7 +256,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::FSQRT, VT, Expand);
     setOperationAction(ISD::FSIN, VT, Expand);
     setOperationAction(ISD::FSUB, VT, Expand);
+    setOperationAction(ISD::FNEG, VT, Expand);
     setOperationAction(ISD::SELECT, VT, Expand);
+    setOperationAction(ISD::VSELECT, VT, Expand);
   }
 
   setTargetDAGCombine(ISD::MUL);
@@ -739,6 +736,14 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
     case AMDGPUIntrinsic::AMDGPU_imul24:
       return DAG.getNode(AMDGPUISD::MUL_I24, DL, VT,
                          Op.getOperand(1), Op.getOperand(2));
+
+    case AMDGPUIntrinsic::AMDGPU_umad24:
+      return DAG.getNode(AMDGPUISD::MAD_U24, DL, VT,
+                         Op.getOperand(1), Op.getOperand(2), Op.getOperand(3));
+
+    case AMDGPUIntrinsic::AMDGPU_imad24:
+      return DAG.getNode(AMDGPUISD::MAD_I24, DL, VT,
+                         Op.getOperand(1), Op.getOperand(2), Op.getOperand(3));
 
     case AMDGPUIntrinsic::AMDGPU_bfe_i32:
       return DAG.getNode(AMDGPUISD::BFE_I32, DL, VT,
@@ -1284,6 +1289,17 @@ static void simplifyI24(SDValue Op, TargetLowering::DAGCombinerInfo &DCI) {
     DCI.CommitTargetLoweringOpt(TLO);
 }
 
+template <typename IntTy>
+static SDValue constantFoldBFE(SelectionDAG &DAG, IntTy Src0,
+                               uint32_t Offset, uint32_t Width) {
+  if (Width + Offset < 32) {
+    IntTy Result = (Src0 << (32 - Offset - Width)) >> (32 - Width);
+    return DAG.getConstant(Result, MVT::i32);
+  }
+
+  return DAG.getConstant(Src0 >> Offset, MVT::i32);
+}
+
 SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
                                             DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -1330,6 +1346,85 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
     case ISD::SELECT_CC: {
       return CombineMinMax(N, DAG);
     }
+  case AMDGPUISD::BFE_I32:
+  case AMDGPUISD::BFE_U32: {
+    assert(!N->getValueType(0).isVector() &&
+           "Vector handling of BFE not implemented");
+    ConstantSDNode *Width = dyn_cast<ConstantSDNode>(N->getOperand(2));
+    if (!Width)
+      break;
+
+    uint32_t WidthVal = Width->getZExtValue() & 0x1f;
+    if (WidthVal == 0)
+      return DAG.getConstant(0, MVT::i32);
+
+    ConstantSDNode *Offset = dyn_cast<ConstantSDNode>(N->getOperand(1));
+    if (!Offset)
+      break;
+
+    SDValue BitsFrom = N->getOperand(0);
+    uint32_t OffsetVal = Offset->getZExtValue() & 0x1f;
+
+    bool Signed = N->getOpcode() == AMDGPUISD::BFE_I32;
+
+    if (OffsetVal == 0) {
+      // This is already sign / zero extended, so try to fold away extra BFEs.
+      unsigned SignBits =  Signed ? (32 - WidthVal + 1) : (32 - WidthVal);
+
+      unsigned OpSignBits = DAG.ComputeNumSignBits(BitsFrom);
+      if (OpSignBits >= SignBits)
+        return BitsFrom;
+
+      EVT SmallVT = EVT::getIntegerVT(*DAG.getContext(), WidthVal);
+      if (Signed) {
+        // This is a sign_extend_inreg. Replace it to take advantage of existing
+        // DAG Combines. If not eliminated, we will match back to BFE during
+        // selection.
+
+        // TODO: The sext_inreg of extended types ends, although we can could
+        // handle them in a single BFE.
+        return DAG.getNode(ISD::SIGN_EXTEND_INREG, DL, MVT::i32, BitsFrom,
+                           DAG.getValueType(SmallVT));
+      }
+
+      return DAG.getZeroExtendInReg(BitsFrom, DL, SmallVT);
+    }
+
+    if (ConstantSDNode *Val = dyn_cast<ConstantSDNode>(N->getOperand(0))) {
+      if (Signed) {
+        return constantFoldBFE<int32_t>(DAG,
+                                        Val->getSExtValue(),
+                                        OffsetVal,
+                                        WidthVal);
+      }
+
+      return constantFoldBFE<uint32_t>(DAG,
+                                       Val->getZExtValue(),
+                                       OffsetVal,
+                                       WidthVal);
+    }
+
+    APInt Demanded = APInt::getBitsSet(32,
+                                       OffsetVal,
+                                       OffsetVal + WidthVal);
+
+    if ((OffsetVal + WidthVal) >= 32) {
+      SDValue ShiftVal = DAG.getConstant(OffsetVal, MVT::i32);
+      return DAG.getNode(Signed ? ISD::SRA : ISD::SRL, DL, MVT::i32,
+                         BitsFrom, ShiftVal);
+    }
+
+    APInt KnownZero, KnownOne;
+    TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
+                                          !DCI.isBeforeLegalizeOps());
+    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+    if (TLO.ShrinkDemandedConstant(BitsFrom, Demanded) ||
+        TLI.SimplifyDemandedBits(BitsFrom, Demanded, KnownZero, KnownOne, TLO)) {
+      DCI.CommitTargetLoweringOpt(TLO);
+    }
+
+    break;
+  }
   }
   return SDValue();
 }
@@ -1432,6 +1527,8 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(BFM)
   NODE_NAME_CASE(MUL_U24)
   NODE_NAME_CASE(MUL_I24)
+  NODE_NAME_CASE(MAD_U24)
+  NODE_NAME_CASE(MAD_I24)
   NODE_NAME_CASE(URECIP)
   NODE_NAME_CASE(DOT4)
   NODE_NAME_CASE(EXPORT)
@@ -1472,8 +1569,14 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
   unsigned Depth) const {
 
   KnownZero = KnownOne = APInt(KnownOne.getBitWidth(), 0); // Don't know anything.
+
+  APInt KnownZero2;
+  APInt KnownOne2;
   unsigned Opc = Op.getOpcode();
+
   switch (Opc) {
+  default:
+    break;
   case ISD::INTRINSIC_WO_CHAIN: {
     // FIXME: The intrinsic should just use the node.
     switch (cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue()) {
@@ -1497,7 +1600,59 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
     computeKnownBitsForMinMax(Op.getOperand(0), Op.getOperand(1),
                               KnownZero, KnownOne, DAG, Depth);
     break;
-  default:
+
+  case AMDGPUISD::BFE_I32:
+  case AMDGPUISD::BFE_U32: {
+    ConstantSDNode *CWidth = dyn_cast<ConstantSDNode>(Op.getOperand(2));
+    if (!CWidth)
+      return;
+
+    unsigned BitWidth = 32;
+    uint32_t Width = CWidth->getZExtValue() & 0x1f;
+    if (Width == 0) {
+      KnownZero = APInt::getAllOnesValue(BitWidth);
+      KnownOne = APInt::getNullValue(BitWidth);
+      return;
+    }
+
+    // FIXME: This could do a lot more. If offset is 0, should be the same as
+    // sign_extend_inreg implementation, but that involves duplicating it.
+    if (Opc == AMDGPUISD::BFE_I32)
+      KnownOne = APInt::getHighBitsSet(BitWidth, BitWidth - Width);
+    else
+      KnownZero = APInt::getHighBitsSet(BitWidth, BitWidth - Width);
+
     break;
+  }
+  }
+}
+
+unsigned AMDGPUTargetLowering::ComputeNumSignBitsForTargetNode(
+  SDValue Op,
+  const SelectionDAG &DAG,
+  unsigned Depth) const {
+  switch (Op.getOpcode()) {
+  case AMDGPUISD::BFE_I32: {
+    ConstantSDNode *Width = dyn_cast<ConstantSDNode>(Op.getOperand(2));
+    if (!Width)
+      return 1;
+
+    unsigned SignBits = 32 - Width->getZExtValue() + 1;
+    ConstantSDNode *Offset = dyn_cast<ConstantSDNode>(Op.getOperand(1));
+    if (!Offset || !Offset->isNullValue())
+      return SignBits;
+
+    // TODO: Could probably figure something out with non-0 offsets.
+    unsigned Op0SignBits = DAG.ComputeNumSignBits(Op.getOperand(0), Depth + 1);
+    return std::max(SignBits, Op0SignBits);
+  }
+
+  case AMDGPUISD::BFE_U32: {
+    ConstantSDNode *Width = dyn_cast<ConstantSDNode>(Op.getOperand(2));
+    return Width ? 32 - (Width->getZExtValue() & 0x1f) : 1;
+  }
+
+  default:
+    return 1;
   }
 }

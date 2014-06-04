@@ -100,7 +100,7 @@ static error_code TempDir(SmallVectorImpl<char> &result) {
   result.clear();
   StringRef d(dir);
   result.append(d.begin(), d.end());
-  return error_code::success();
+  return error_code();
 }
 
 namespace llvm {
@@ -235,7 +235,7 @@ error_code current_path(SmallVectorImpl<char> &result) {
       !llvm::sys::fs::status(".", DotStatus) &&
       PWDStatus.getUniqueID() == DotStatus.getUniqueID()) {
     result.append(pwd, pwd + strlen(pwd));
-    return error_code::success();
+    return error_code();
   }
 
 #ifdef MAXPATHLEN
@@ -248,7 +248,7 @@ error_code current_path(SmallVectorImpl<char> &result) {
   while (true) {
     if (::getcwd(result.data(), result.capacity()) == nullptr) {
       // See if there was a real error.
-      if (errno != errc::not_enough_memory)
+      if (errno != ENOMEM)
         return error_code(errno, system_category());
       // Otherwise there just wasn't enough space.
       result.reserve(result.capacity() * 2);
@@ -257,7 +257,7 @@ error_code current_path(SmallVectorImpl<char> &result) {
   }
 
   result.set_size(strlen(result.data()));
-  return error_code::success();
+  return error_code();
 }
 
 error_code create_directory(const Twine &path, bool IgnoreExisting) {
@@ -265,11 +265,11 @@ error_code create_directory(const Twine &path, bool IgnoreExisting) {
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
   if (::mkdir(p.begin(), S_IRWXU | S_IRWXG) == -1) {
-    if (errno != errc::file_exists || !IgnoreExisting)
+    if (errno != EEXIST || !IgnoreExisting)
       return error_code(errno, system_category());
   }
 
-  return error_code::success();
+  return error_code();
 }
 
 error_code normalize_separators(SmallVectorImpl<char> &Path) {
@@ -282,7 +282,7 @@ error_code normalize_separators(SmallVectorImpl<char> &Path) {
         *PI = '/';
     }
   }
-  return error_code::success();
+  return error_code();
 }
 
 // Note that we are using symbolic link because hard links are not supported by
@@ -297,7 +297,7 @@ error_code create_link(const Twine &to, const Twine &from) {
   if (::symlink(t.begin(), f.begin()) == -1)
     return error_code(errno, system_category());
 
-  return error_code::success();
+  return error_code();
 }
 
 error_code remove(const Twine &path, bool IgnoreNonExisting) {
@@ -306,9 +306,9 @@ error_code remove(const Twine &path, bool IgnoreNonExisting) {
 
   struct stat buf;
   if (lstat(p.begin(), &buf) != 0) {
-    if (errno != errc::no_such_file_or_directory || !IgnoreNonExisting)
+    if (errno != ENOENT || !IgnoreNonExisting)
       return error_code(errno, system_category());
-    return error_code::success();
+    return error_code();
   }
 
   // Note: this check catches strange situations. In all cases, LLVM should
@@ -320,11 +320,11 @@ error_code remove(const Twine &path, bool IgnoreNonExisting) {
     return make_error_code(errc::operation_not_permitted);
 
   if (::remove(p.begin()) == -1) {
-    if (errno != errc::no_such_file_or_directory || !IgnoreNonExisting)
+    if (errno != ENOENT || !IgnoreNonExisting)
       return error_code(errno, system_category());
   }
 
-  return error_code::success();
+  return error_code();
 }
 
 error_code rename(const Twine &from, const Twine &to) {
@@ -337,7 +337,7 @@ error_code rename(const Twine &from, const Twine &to) {
   if (::rename(f.begin(), t.begin()) == -1)
     return error_code(errno, system_category());
 
-  return error_code::success();
+  return error_code();
 }
 
 error_code resize_file(const Twine &path, uint64_t size) {
@@ -347,7 +347,7 @@ error_code resize_file(const Twine &path, uint64_t size) {
   if (::truncate(p.begin(), size) == -1)
     return error_code(errno, system_category());
 
-  return error_code::success();
+  return error_code();
 }
 
 error_code exists(const Twine &path, bool &result) {
@@ -355,13 +355,13 @@ error_code exists(const Twine &path, bool &result) {
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
   if (::access(p.begin(), F_OK) == -1) {
-    if (errno != errc::no_such_file_or_directory)
+    if (errno != ENOENT)
       return error_code(errno, system_category());
     result = false;
   } else
     result = true;
 
-  return error_code::success();
+  return error_code();
 }
 
 bool can_write(const Twine &Path) {
@@ -395,7 +395,7 @@ error_code equivalent(const Twine &A, const Twine &B, bool &result) {
   if (error_code ec = status(A, fsA)) return ec;
   if (error_code ec = status(B, fsB)) return ec;
   result = equivalent(fsA, fsB);
-  return error_code::success();
+  return error_code();
 }
 
 static error_code fillStatus(int StatRet, const struct stat &Status,
@@ -429,7 +429,7 @@ static error_code fillStatus(int StatRet, const struct stat &Status,
       file_status(Type, Perms, Status.st_dev, Status.st_ino, Status.st_mtime,
                   Status.st_uid, Status.st_gid, Status.st_size);
 
-  return error_code::success();
+  return error_code();
 }
 
 error_code status(const Twine &Path, file_status &Result) {
@@ -455,7 +455,7 @@ error_code setLastModificationAndAccessTime(int FD, TimeValue Time) {
   Times[1] = Times[0];
   if (::futimens(FD, Times))
     return error_code(errno, system_category());
-  return error_code::success();
+  return error_code();
 #elif defined(HAVE_FUTIMES)
   timeval Times[2];
   Times[0].tv_sec = Time.toEpochTime();
@@ -463,7 +463,7 @@ error_code setLastModificationAndAccessTime(int FD, TimeValue Time) {
   Times[1] = Times[0];
   if (::futimes(FD, Times))
     return error_code(errno, system_category());
-  return error_code::success();
+  return error_code();
 #else
 #warning Missing futimes() and futimens()
   return make_error_code(errc::not_supported);
@@ -497,7 +497,7 @@ error_code mapped_file_region::init(int FD, bool CloseFD, uint64_t Offset) {
   Mapping = ::mmap(nullptr, Size, prot, flags, FD, Offset);
   if (Mapping == MAP_FAILED)
     return error_code(errno, system_category());
-  return error_code::success();
+  return error_code();
 }
 
 mapped_file_region::mapped_file_region(const Twine &path,
@@ -602,7 +602,7 @@ error_code detail::directory_iterator_destruct(detail::DirIterState &it) {
     ::closedir(reinterpret_cast<DIR *>(it.IterationHandle));
   it.IterationHandle = 0;
   it.CurrentEntry = directory_entry();
-  return error_code::success();
+  return error_code();
 }
 
 error_code detail::directory_iterator_increment(detail::DirIterState &it) {
@@ -619,7 +619,7 @@ error_code detail::directory_iterator_increment(detail::DirIterState &it) {
   } else
     return directory_iterator_destruct(it);
 
-  return error_code::success();
+  return error_code();
 }
 
 error_code get_magic(const Twine &path, uint32_t len,
@@ -650,36 +650,7 @@ error_code get_magic(const Twine &path, uint32_t len,
   }
   std::fclose(file);
   result.set_size(size);
-  return error_code::success();
-}
-
-error_code map_file_pages(const Twine &path, off_t file_offset, size_t size,  
-                                            bool map_writable, void *&result) {
-  SmallString<128> path_storage;
-  StringRef name = path.toNullTerminatedStringRef(path_storage);
-  int oflags = map_writable ? O_RDWR : O_RDONLY;
-  int ofd = ::open(name.begin(), oflags);
-  if ( ofd == -1 )
-    return error_code(errno, system_category());
-  AutoFD fd(ofd);
-  int flags = map_writable ? MAP_SHARED : MAP_PRIVATE;
-  int prot = map_writable ? (PROT_READ|PROT_WRITE) : PROT_READ;
-#ifdef MAP_FILE
-  flags |= MAP_FILE;
-#endif
-  result = ::mmap(nullptr, size, prot, flags, fd, file_offset);
-  if (result == MAP_FAILED) {
-    return error_code(errno, system_category());
-  }
-  
-  return error_code::success();
-}
-
-error_code unmap_file_pages(void *base, size_t size) {
-  if ( ::munmap(base, size) == -1 )
-    return error_code(errno, system_category());
-   
-  return error_code::success();
+  return error_code();
 }
 
 error_code openFileForRead(const Twine &Name, int &ResultFD) {
@@ -689,7 +660,7 @@ error_code openFileForRead(const Twine &Name, int &ResultFD) {
     if (errno != EINTR)
       return error_code(errno, system_category());
   }
-  return error_code::success();
+  return error_code();
 }
 
 error_code openFileForWrite(const Twine &Name, int &ResultFD,
@@ -719,7 +690,7 @@ error_code openFileForWrite(const Twine &Name, int &ResultFD,
     if (errno != EINTR)
       return error_code(errno, system_category());
   }
-  return error_code::success();
+  return error_code();
 }
 
 } // end namespace fs

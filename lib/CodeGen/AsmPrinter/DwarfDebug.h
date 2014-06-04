@@ -27,6 +27,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/CodeGen/LexicalScopes.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MachineLocation.h"
@@ -77,10 +78,19 @@ class DbgVariable {
   DwarfDebug *DD;
 
 public:
-  // AbsVar may be NULL.
-  DbgVariable(DIVariable V, DbgVariable *AV, DwarfDebug *DD)
-      : Var(V), TheDIE(nullptr), DotDebugLocOffset(~0U), AbsVar(AV),
+  /// Construct a DbgVariable from a DIVariable.
+  /// AbstractVar may be NULL.
+  DbgVariable(DIVariable V, DbgVariable *AbstractVar, DwarfDebug *DD)
+      : Var(V), TheDIE(nullptr), DotDebugLocOffset(~0U), AbsVar(AbstractVar),
         MInsn(nullptr), FrameIndex(~0), DD(DD) {}
+
+  /// Construct a DbgVariable from a DEBUG_VALUE.
+  /// AbstractVar may be NULL.
+  DbgVariable(const MachineInstr *DbgValue, DbgVariable *AbstractVar,
+              DwarfDebug *DD)
+    : Var(DbgValue->getDebugVariable()),
+      TheDIE(nullptr), DotDebugLocOffset(~0U), AbsVar(AbstractVar),
+      MInsn(DbgValue), FrameIndex(~0), DD(DD) {}
 
   // Accessors.
   DIVariable getVariable() const { return Var; }
@@ -91,7 +101,6 @@ public:
   StringRef getName() const { return Var.getName(); }
   DbgVariable *getAbstractVariable() const { return AbsVar; }
   const MachineInstr *getMInsn() const { return MInsn; }
-  void setMInsn(const MachineInstr *M) { MInsn = M; }
   int getFrameIndex() const { return FrameIndex; }
   void setFrameIndex(int FI) { FrameIndex = FI; }
   // Translate tag to proper Dwarf tag.
@@ -389,6 +398,8 @@ class DwarfDebug : public AsmPrinterHandler {
   /// \brief Collect info for variables that were optimized out.
   void collectDeadVariables();
 
+  void finishSubprogramDefinitions();
+
   /// \brief Finish off debug information after all functions have been
   /// processed.
   void finalizeModuleInfo();
@@ -488,9 +499,6 @@ class DwarfDebug : public AsmPrinterHandler {
   /// \brief Create new DwarfCompileUnit for the given metadata node with tag
   /// DW_TAG_compile_unit.
   DwarfCompileUnit &constructDwarfCompileUnit(DICompileUnit DIUnit);
-
-  /// \brief Construct subprogram DIE.
-  void constructSubprogramDIE(DwarfCompileUnit &TheCU, const MDNode *N);
 
   /// \brief Construct imported_module or imported_declaration DIE.
   void constructImportedEntityDIE(DwarfCompileUnit &TheCU, const MDNode *N);

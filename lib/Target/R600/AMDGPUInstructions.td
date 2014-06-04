@@ -252,6 +252,8 @@ int TWO_PI = 0x40c90fdb;
 int PI = 0x40490fdb;
 int TWO_PI_INV = 0x3e22f983;
 int FP_UINT_MAX_PLUS_1 = 0x4f800000;    // 1 << 32 in floating point encoding
+int FP32_NEG_ONE = 0xbf800000;
+int FP32_ONE = 0x3f800000;
 }
 def CONST : Constants;
 
@@ -422,6 +424,40 @@ class UMUL24Pattern <Instruction UMUL24> : Pat <
   (UMUL24 $x, $y)
 >;
 */
+
+class IMad24Pat<Instruction Inst> : Pat <
+  (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2),
+  (Inst $src0, $src1, $src2)
+>;
+
+class UMad24Pat<Instruction Inst> : Pat <
+  (add (AMDGPUmul_u24 i32:$src0, i32:$src1), i32:$src2),
+  (Inst $src0, $src1, $src2)
+>;
+
+multiclass Expand24IBitOps<Instruction MulInst, Instruction AddInst> {
+  def _expand_imad24 : Pat <
+    (AMDGPUmad_i24 i32:$src0, i32:$src1, i32:$src2),
+    (AddInst (MulInst $src0, $src1), $src2)
+  >;
+
+  def _expand_imul24 : Pat <
+    (AMDGPUmul_i24 i32:$src0, i32:$src1),
+    (MulInst $src0, $src1)
+  >;
+}
+
+multiclass Expand24UBitOps<Instruction MulInst, Instruction AddInst> {
+  def _expand_umad24 : Pat <
+    (AMDGPUmad_u24 i32:$src0, i32:$src1, i32:$src2),
+    (AddInst (MulInst $src0, $src1), $src2)
+  >;
+
+  def _expand_umul24 : Pat <
+    (AMDGPUmul_u24 i32:$src0, i32:$src1),
+    (MulInst $src0, $src1)
+  >;
+}
 
 include "R600Instructions.td"
 include "R700Instructions.td"

@@ -977,8 +977,13 @@ defm V_CVT_F64_F32 : VOP1_64_32 <0x00000010, "V_CVT_F64_F32",
 //defm V_CVT_F32_UBYTE1 : VOP1_32 <0x00000012, "V_CVT_F32_UBYTE1", []>;
 //defm V_CVT_F32_UBYTE2 : VOP1_32 <0x00000013, "V_CVT_F32_UBYTE2", []>;
 //defm V_CVT_F32_UBYTE3 : VOP1_32 <0x00000014, "V_CVT_F32_UBYTE3", []>;
-//defm V_CVT_U32_F64 : VOP1_32 <0x00000015, "V_CVT_U32_F64", []>;
-//defm V_CVT_F64_U32 : VOP1_64 <0x00000016, "V_CVT_F64_U32", []>;
+defm V_CVT_U32_F64 : VOP1_32_64 <0x00000015, "V_CVT_U32_F64",
+  [(set i32:$dst, (fp_to_uint f64:$src0))]
+>;
+defm V_CVT_F64_U32 : VOP1_64_32 <0x00000016, "V_CVT_F64_U32",
+  [(set f64:$dst, (uint_to_fp i32:$src0))]
+>;
+
 defm V_FRACT_F32 : VOP1_32 <0x00000020, "V_FRACT_F32",
   [(set f32:$dst, (AMDGPUfract f32:$src0))]
 >;
@@ -1247,15 +1252,18 @@ defm V_CVT_PKRTZ_F16_F32 : VOP2_32 <0x0000002f, "V_CVT_PKRTZ_F16_F32",
 let neverHasSideEffects = 1 in {
 
 defm V_MAD_LEGACY_F32 : VOP3_32 <0x00000140, "V_MAD_LEGACY_F32", []>;
-defm V_MAD_F32 : VOP3_32 <0x00000141, "V_MAD_F32", []>;
+defm V_MAD_F32 : VOP3_32 <0x00000141, "V_MAD_F32",
+  [(set f32:$dst, (fadd (fmul f32:$src0, f32:$src1), f32:$src2))]
+>;
 defm V_MAD_I32_I24 : VOP3_32 <0x00000142, "V_MAD_I32_I24",
-  [(set i32:$dst, (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2))]
+  [(set i32:$dst, (AMDGPUmad_i24 i32:$src0, i32:$src1, i32:$src2))]
 >;
 defm V_MAD_U32_U24 : VOP3_32 <0x00000143, "V_MAD_U32_U24",
-  [(set i32:$dst, (add (AMDGPUmul_u24 i32:$src0, i32:$src1), i32:$src2))]
+  [(set i32:$dst, (AMDGPUmad_u24 i32:$src0, i32:$src1, i32:$src2))]
 >;
 
 } // End neverHasSideEffects
+
 defm V_CUBEID_F32 : VOP3_32 <0x00000144, "V_CUBEID_F32", []>;
 defm V_CUBESC_F32 : VOP3_32 <0x00000145, "V_CUBESC_F32", []>;
 defm V_CUBETC_F32 : VOP3_32 <0x00000146, "V_CUBETC_F32", []>;
@@ -2070,10 +2078,8 @@ def : Pat <
 // VOP3 Patterns
 //===----------------------------------------------------------------------===//
 
-def : Pat <
-  (f32 (fadd (fmul f32:$src0, f32:$src1), f32:$src2)),
-  (V_MAD_F32 $src0, $src1, $src2)
->;
+def : IMad24Pat<V_MAD_I32_I24>;
+def : UMad24Pat<V_MAD_U32_U24>;
 
 def : Pat <
   (fadd f64:$src0, f64:$src1),
@@ -2133,8 +2139,8 @@ multiclass DSWritePat <DS inst, ValueType vt, PatFrag frag> {
   >;
 
   def : Pat <
-    (frag vt:$src1, i32:$src0),
-    (inst 0, $src0, $src1, 0)
+    (frag vt:$val, i32:$ptr),
+    (inst 0, $ptr, $val, 0)
   >;
 }
 
@@ -2386,20 +2392,6 @@ defm : SI_INDIRECT_Pattern <v4i32, i32, SI_INDIRECT_DST_V4>;
 defm : SI_INDIRECT_Pattern <v8i32, i32, SI_INDIRECT_DST_V8>;
 defm : SI_INDIRECT_Pattern <v16i32, i32, SI_INDIRECT_DST_V16>;
 
-/********** =============== **********/
-/**********   Conditions    **********/
-/********** =============== **********/
-
-def : Pat<
-  (i1 (setcc f32:$src0, f32:$src1, SETO)),
-  (V_CMP_O_F32_e64 $src0, $src1)
->;
-
-def : Pat<
-  (i1 (setcc f32:$src0, f32:$src1, SETUO)),
-  (V_CMP_U_F32_e64 $src0, $src1)
->;
-
 //===----------------------------------------------------------------------===//
 // Conversion Patterns
 //===----------------------------------------------------------------------===//
@@ -2431,6 +2423,26 @@ def : Pat <
   (INSERT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
     (S_SEXT_I32_I16 (EXTRACT_SUBREG i64:$src, sub0)), sub0),
     (S_MOV_B32 -1), sub1)
+>;
+
+def : Pat <
+  (f32 (sint_to_fp i1:$src)),
+  (V_CNDMASK_B32_e64 (i32 0), CONST.FP32_NEG_ONE, $src)
+>;
+
+def : Pat <
+  (f32 (uint_to_fp i1:$src)),
+  (V_CNDMASK_B32_e64 (i32 0), CONST.FP32_ONE, $src)
+>;
+
+def : Pat <
+  (f64 (sint_to_fp i1:$src)),
+    (V_CVT_F64_I32_e32 (V_CNDMASK_B32_e64 (i32 0), (i32 -1), $src))
+>;
+
+def : Pat <
+  (f64 (uint_to_fp i1:$src)),
+  (V_CVT_F64_U32_e32 (V_CNDMASK_B32_e64 (i32 0), (i32 1), $src))
 >;
 
 //===----------------------------------------------------------------------===//

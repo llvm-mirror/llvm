@@ -419,7 +419,7 @@ AC_CACHE_CHECK([target architecture],[llvm_cv_target_arch],
   amd64-* | x86_64-*)     llvm_cv_target_arch="x86_64" ;;
   sparc*-*)               llvm_cv_target_arch="Sparc" ;;
   powerpc*-*)             llvm_cv_target_arch="PowerPC" ;;
-  arm64*-*)               llvm_cv_target_arch="ARM64" ;;
+  arm64*-*)               llvm_cv_target_arch="AArch64" ;;
   arm*-*)                 llvm_cv_target_arch="ARM" ;;
   aarch64*-*)             llvm_cv_target_arch="AArch64" ;;
   mips-* | mips64-*)      llvm_cv_target_arch="Mips" ;;
@@ -455,7 +455,7 @@ case $host in
   amd64-* | x86_64-*)     host_arch="x86_64" ;;
   sparc*-*)               host_arch="Sparc" ;;
   powerpc*-*)             host_arch="PowerPC" ;;
-  arm64*-*)               host_arch="ARM64" ;;
+  arm64*-*)               host_arch="AArch64" ;;
   arm*-*)                 host_arch="ARM" ;;
   aarch64*-*)             host_arch="AArch64" ;;
   mips-* | mips64-*)      host_arch="Mips" ;;
@@ -786,7 +786,6 @@ else
     PowerPC)     AC_SUBST(TARGET_HAS_JIT,1) ;;
     x86_64)      AC_SUBST(TARGET_HAS_JIT,1) ;;
     ARM)         AC_SUBST(TARGET_HAS_JIT,1) ;;
-    AArch64)     AC_SUBST(TARGET_HAS_JIT,0) ;;
     Mips)        AC_SUBST(TARGET_HAS_JIT,1) ;;
     XCore)       AC_SUBST(TARGET_HAS_JIT,0) ;;
     MSP430)      AC_SUBST(TARGET_HAS_JIT,0) ;;
@@ -797,7 +796,7 @@ else
   esac
 fi
 
-TARGETS_WITH_JIT="AArch64 ARM ARM64 Mips PowerPC SystemZ X86"
+TARGETS_WITH_JIT="ARM AArch64 Mips PowerPC SystemZ X86"
 AC_SUBST(TARGETS_WITH_JIT,$TARGETS_WITH_JIT)
 
 dnl Allow enablement of building and installing docs
@@ -950,7 +949,7 @@ if test "$llvm_cv_enable_crash_overrides" = "yes" ; then
 fi
 
 dnl List all possible targets
-ALL_TARGETS="X86 Sparc PowerPC AArch64 ARM ARM64 Mips XCore MSP430 CppBackend NVPTX Hexagon SystemZ R600"
+ALL_TARGETS="X86 Sparc PowerPC ARM AArch64 Mips XCore MSP430 CppBackend NVPTX Hexagon SystemZ R600"
 AC_SUBST(ALL_TARGETS,$ALL_TARGETS)
 
 dnl Allow specific targets to be specified for building (or not)
@@ -972,7 +971,7 @@ case "$enableval" in
         sparc)    TARGETS_TO_BUILD="Sparc $TARGETS_TO_BUILD" ;;
         powerpc)  TARGETS_TO_BUILD="PowerPC $TARGETS_TO_BUILD" ;;
         aarch64)  TARGETS_TO_BUILD="AArch64 $TARGETS_TO_BUILD" ;;
-        arm64)    TARGETS_TO_BUILD="ARM64 $TARGETS_TO_BUILD" ;;
+        arm64)    TARGETS_TO_BUILD="AArch64 $TARGETS_TO_BUILD" ;;
         arm)      TARGETS_TO_BUILD="ARM $TARGETS_TO_BUILD" ;;
         mips)     TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
         mipsel)   TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
@@ -1283,16 +1282,6 @@ AC_PATH_PROG(TAR,  [tar],  [gtar])
 AC_PATH_PROG(BINPWD,[pwd],  [pwd])
 
 dnl Looking for misc. graph plotting software
-AC_PATH_PROG(GRAPHVIZ, [Graphviz], [echo Graphviz])
-if test "$GRAPHVIZ" != "echo Graphviz" ; then
-  AC_DEFINE([HAVE_GRAPHVIZ],[1],[Define if the Graphviz program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    GRAPHVIZ=`echo $GRAPHVIZ | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_GRAPHVIZ],"$GRAPHVIZ${EXEEXT}",
-   [Define to path to Graphviz program if found or 'echo Graphviz' otherwise])
-fi
 AC_PATH_PROG(DOT, [dot], [echo dot])
 if test "$DOT" != "echo dot" ; then
   AC_DEFINE([HAVE_DOT],[1],[Define if the dot program is available])
@@ -1302,76 +1291,6 @@ if test "$DOT" != "echo dot" ; then
   fi
   AC_DEFINE_UNQUOTED([LLVM_PATH_DOT],"$DOT${EXEEXT}",
    [Define to path to dot program if found or 'echo dot' otherwise])
-fi
-AC_PATH_PROG(FDP, [fdp], [echo fdp])
-if test "$FDP" != "echo fdp" ; then
-  AC_DEFINE([HAVE_FDP],[1],[Define if the neat program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    FDP=`echo $FDP | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_FDP],"$FDP${EXEEXT}",
-   [Define to path to fdp program if found or 'echo fdp' otherwise])
-fi
-AC_PATH_PROG(NEATO, [neato], [echo neato])
-if test "$NEATO" != "echo neato" ; then
-  AC_DEFINE([HAVE_NEATO],[1],[Define if the neat program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    NEATO=`echo $NEATO | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_NEATO],"$NEATO${EXEEXT}",
-   [Define to path to neato program if found or 'echo neato' otherwise])
-fi
-AC_PATH_PROG(TWOPI, [twopi], [echo twopi])
-if test "$TWOPI" != "echo twopi" ; then
-  AC_DEFINE([HAVE_TWOPI],[1],[Define if the neat program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    TWOPI=`echo $TWOPI | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_TWOPI],"$TWOPI${EXEEXT}",
-   [Define to path to twopi program if found or 'echo twopi' otherwise])
-fi
-AC_PATH_PROG(CIRCO, [circo], [echo circo])
-if test "$CIRCO" != "echo circo" ; then
-  AC_DEFINE([HAVE_CIRCO],[1],[Define if the neat program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    CIRCO=`echo $CIRCO | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_CIRCO],"$CIRCO${EXEEXT}",
-   [Define to path to circo program if found or 'echo circo' otherwise])
-fi
-AC_PATH_PROGS(GV, [gv gsview32], [echo gv])
-if test "$GV" != "echo gv" ; then
-  AC_DEFINE([HAVE_GV],[1],[Define if the gv program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    GV=`echo $GV | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_GV],"$GV${EXEEXT}",
-   [Define to path to gv program if found or 'echo gv' otherwise])
-fi
-AC_PATH_PROG(DOTTY, [dotty], [echo dotty])
-if test "$DOTTY" != "echo dotty" ; then
-  AC_DEFINE([HAVE_DOTTY],[1],[Define if the dotty program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    DOTTY=`echo $DOTTY | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_DOTTY],"$DOTTY${EXEEXT}",
-   [Define to path to dotty program if found or 'echo dotty' otherwise])
-fi
-AC_PATH_PROGS(XDOT, [xdot xdot.py], [echo xdot])
-if test "$XDOT" != "echo xdot" ; then
-  AC_DEFINE([HAVE_XDOT],[1],[Define if the xdot program is available])
-  dnl If we're targeting for mingw we should emit windows paths, not msys
-  if test "$llvm_cv_os_type" = "MingW" ; then
-    XDOT=`echo $XDOT | sed 's/^\/\([[A-Za-z]]\)\//\1:\//' `
-  fi
-  AC_DEFINE_UNQUOTED([LLVM_PATH_XDOT],"$XDOT${EXEEXT}",
-   [Define to path to xdot program if found or 'echo xdot' otherwise])
 fi
 
 dnl Find the install program

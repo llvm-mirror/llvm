@@ -56,7 +56,7 @@ namespace {
 class AArch64ELFStreamer : public MCELFStreamer {
 public:
   AArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
-                     MCCodeEmitter *Emitter)
+                   MCCodeEmitter *Emitter)
       : MCELFStreamer(Context, TAB, OS, Emitter), MappingSymbolCounter(0),
         LastEMS(EMS_None) {}
 
@@ -76,7 +76,7 @@ public:
   /// This function is the one used to emit instruction data into the ELF
   /// streamer. We override it to add the appropriate mapping symbol if
   /// necessary.
-  void EmitInstruction(const MCInst& Inst,
+  void EmitInstruction(const MCInst &Inst,
                        const MCSubtargetInfo &STI) override {
     EmitA64MappingSymbol();
     MCELFStreamer::EmitInstruction(Inst, STI);
@@ -96,7 +96,7 @@ public:
   void EmitValueImpl(const MCExpr *Value, unsigned Size,
                      const SMLoc &Loc) override {
     EmitDataMappingSymbol();
-    MCELFStreamer::EmitValueImpl(Value, Size, Loc);
+    MCELFStreamer::EmitValueImpl(Value, Size);
   }
 
 private:
@@ -107,13 +107,15 @@ private:
   };
 
   void EmitDataMappingSymbol() {
-    if (LastEMS == EMS_Data) return;
+    if (LastEMS == EMS_Data)
+      return;
     EmitMappingSymbol("$d");
     LastEMS = EMS_Data;
   }
 
   void EmitA64MappingSymbol() {
-    if (LastEMS == EMS_A64) return;
+    if (LastEMS == EMS_A64)
+      return;
     EmitMappingSymbol("$x");
     LastEMS = EMS_A64;
   }
@@ -122,15 +124,14 @@ private:
     MCSymbol *Start = getContext().CreateTempSymbol();
     EmitLabel(Start);
 
-    MCSymbol *Symbol =
-      getContext().GetOrCreateSymbol(Name + "." +
-                                     Twine(MappingSymbolCounter++));
+    MCSymbol *Symbol = getContext().GetOrCreateSymbol(
+        Name + "." + Twine(MappingSymbolCounter++));
 
     MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*Symbol);
     MCELF::SetType(SD, ELF::STT_NOTYPE);
     MCELF::SetBinding(SD, ELF::STB_LOCAL);
     SD.setExternal(false);
-    AssignSection(Symbol, getCurrentSection().first);
+    Symbol->setSection(*getCurrentSection().first);
 
     const MCExpr *Value = MCSymbolRefExpr::Create(Start, getContext());
     Symbol->setVariableValue(Value);
@@ -146,16 +147,14 @@ private:
 }
 
 namespace llvm {
-  MCELFStreamer* createAArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB,
-                                      raw_ostream &OS, MCCodeEmitter *Emitter,
-                                      bool RelaxAll, bool NoExecStack) {
-    AArch64ELFStreamer *S = new AArch64ELFStreamer(Context, TAB, OS, Emitter);
-    if (RelaxAll)
-      S->getAssembler().setRelaxAll(true);
-    if (NoExecStack)
-      S->getAssembler().setNoExecStack(true);
-    return S;
-  }
+MCELFStreamer *createAArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB,
+                                        raw_ostream &OS, MCCodeEmitter *Emitter,
+                                        bool RelaxAll, bool NoExecStack) {
+  AArch64ELFStreamer *S = new AArch64ELFStreamer(Context, TAB, OS, Emitter);
+  if (RelaxAll)
+    S->getAssembler().setRelaxAll(true);
+  if (NoExecStack)
+    S->getAssembler().setNoExecStack(true);
+  return S;
 }
-
-
+}

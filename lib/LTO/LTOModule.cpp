@@ -168,7 +168,8 @@ LTOModule *LTOModule::makeLTOModule(MemoryBuffer *buffer,
       CPU = "core2";
     else if (Triple.getArch() == llvm::Triple::x86)
       CPU = "yonah";
-    else if (Triple.getArch() == llvm::Triple::arm64)
+    else if (Triple.getArch() == llvm::Triple::arm64 ||
+             Triple.getArch() == llvm::Triple::aarch64)
       CPU = "cyclone";
   }
 
@@ -800,14 +801,8 @@ bool LTOModule::parseSymbols(std::string &errMsg) {
     return true;
 
   // add aliases
-  for (Module::alias_iterator a = _module->alias_begin(),
-         e = _module->alias_end(); a != e; ++a) {
-    if (isDeclaration(*a->getAliasee()))
-      // Is an alias to a declaration.
-      addPotentialUndefinedSymbol(a, false);
-    else
-      addDefinedDataSymbol(a);
-  }
+  for (const auto &Alias : _module->aliases())
+    addDefinedDataSymbol(&Alias);
 
   // make symbols for all undefines
   for (StringMap<NameAndAttributes>::iterator u =_undefines.begin(),

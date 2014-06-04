@@ -155,16 +155,16 @@ void ARMTargetLowering::addQRTypeForNEON(MVT VT) {
   addTypeForNEON(VT, MVT::v2f64, MVT::v4i32);
 }
 
-static TargetLoweringObjectFile *createTLOF(TargetMachine &TM) {
-  if (TM.getSubtarget<ARMSubtarget>().isTargetMachO())
+static TargetLoweringObjectFile *createTLOF(const Triple &TT) {
+  if (TT.isOSBinFormatMachO())
     return new TargetLoweringObjectFileMachO();
-  if (TM.getSubtarget<ARMSubtarget>().isTargetWindows())
+  if (TT.isOSWindows())
     return new TargetLoweringObjectFileCOFF();
   return new ARMElfTargetObjectFile();
 }
 
 ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
-    : TargetLowering(TM, createTLOF(TM)) {
+    : TargetLowering(TM, createTLOF(Triple(TM.getTargetTriple()))) {
   Subtarget = &TM.getSubtarget<ARMSubtarget>();
   RegInfo = TM.getRegisterInfo();
   Itins = TM.getInstrItineraryData();
@@ -8315,6 +8315,8 @@ static SDValue PerformVMOVRRDCombine(SDNode *N,
                                  std::min(4U, LD->getAlignment() / 2));
 
     DAG.ReplaceAllUsesOfValueWith(SDValue(LD, 1), NewLD2.getValue(1));
+    if (DCI.DAG.getTargetLoweringInfo().isBigEndian())
+      std::swap (NewLD1, NewLD2);
     SDValue Result = DCI.CombineTo(N, NewLD1, NewLD2);
     DCI.RemoveFromWorklist(LD);
     DAG.DeleteNode(LD);
@@ -10778,14 +10780,13 @@ static bool isHomogeneousAggregate(Type *Ty, HABaseType &Base,
 /// \brief Return true if a type is an AAPCS-VFP homogeneous aggregate.
 bool ARMTargetLowering::functionArgumentNeedsConsecutiveRegisters(
     Type *Ty, CallingConv::ID CallConv, bool isVarArg) const {
-  if (getEffectiveCallingConv(CallConv, isVarArg) ==
-      CallingConv::ARM_AAPCS_VFP) {
-    HABaseType Base = HA_UNKNOWN;
-    uint64_t Members = 0;
-    bool result = isHomogeneousAggregate(Ty, Base, Members);
-    DEBUG(dbgs() << "isHA: " << result << " "; Ty->dump(); dbgs() << "\n");
-    return result;
-  } else {
+  if (getEffectiveCallingConv(CallConv, isVarArg) !=
+      CallingConv::ARM_AAPCS_VFP)
     return false;
-  }
+
+  HABaseType Base = HA_UNKNOWN;
+  uint64_t Members = 0;
+  bool result = isHomogeneousAggregate(Ty, Base, Members);
+  DEBUG(dbgs() << "isHA: " << result << " "; Ty->dump(); dbgs() << "\n");
+  return result;
 }

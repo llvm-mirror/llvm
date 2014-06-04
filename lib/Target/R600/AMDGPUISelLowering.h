@@ -124,6 +124,11 @@ public:
                                      const SelectionDAG &DAG,
                                      unsigned Depth = 0) const override;
 
+  virtual unsigned ComputeNumSignBitsForTargetNode(
+    SDValue Op,
+    const SelectionDAG &DAG,
+    unsigned Depth = 0) const override;
+
 // Functions defined in AMDILISelLowering.cpp
 public:
   bool getTgtMemIntrinsic(IntrinsicInfo &Info,
@@ -186,6 +191,8 @@ enum {
   BFM, // Insert a range of bits into a 32-bit word.
   MUL_U24,
   MUL_I24,
+  MAD_U24,
+  MAD_I24,
   TEXTURE_FETCH,
   EXPORT,
   CONST_ADDRESS,

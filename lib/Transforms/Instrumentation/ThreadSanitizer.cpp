@@ -46,8 +46,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "tsan"
 
-static cl::opt<std::string>  ClBlacklistFile("tsan-blacklist",
-       cl::desc("Blacklist file"), cl::Hidden);
 static cl::opt<bool>  ClInstrumentMemoryAccesses(
     "tsan-instrument-memory-accesses", cl::init(true),
     cl::desc("Instrument memory accesses"), cl::Hidden);
@@ -76,11 +74,7 @@ namespace {
 
 /// ThreadSanitizer: instrument the code in module to find races.
 struct ThreadSanitizer : public FunctionPass {
-  ThreadSanitizer(StringRef BlacklistFile = StringRef())
-      : FunctionPass(ID),
-        DL(nullptr),
-        BlacklistFile(BlacklistFile.empty() ? ClBlacklistFile
-                                            : BlacklistFile) { }
+  ThreadSanitizer() : FunctionPass(ID), DL(nullptr) {}
   const char *getPassName() const override;
   bool runOnFunction(Function &F) override;
   bool doInitialization(Module &M) override;
@@ -98,8 +92,6 @@ struct ThreadSanitizer : public FunctionPass {
 
   const DataLayout *DL;
   Type *IntptrTy;
-  SmallString<64> BlacklistFile;
-  std::unique_ptr<SpecialCaseList> BL;
   IntegerType *OrdTy;
   // Callbacks to run-time library are computed in doInitialization.
   Function *TsanFuncEntry;
@@ -129,8 +121,8 @@ const char *ThreadSanitizer::getPassName() const {
   return "ThreadSanitizer";
 }
 
-FunctionPass *llvm::createThreadSanitizerPass(StringRef BlacklistFile) {
-  return new ThreadSanitizer(BlacklistFile);
+FunctionPass *llvm::createThreadSanitizerPass() {
+  return new ThreadSanitizer();
 }
 
 static Function *checkInterfaceFunction(Constant *FuncOrBitcast) {
@@ -228,7 +220,6 @@ bool ThreadSanitizer::doInitialization(Module &M) {
   if (!DLP)
     report_fatal_error("data layout missing");
   DL = &DLP->getDataLayout();
-  BL.reset(SpecialCaseList::createOrDie(BlacklistFile));
 
   // Always insert a call to __tsan_init into the module's CTORs.
   IRBuilder<> IRB(M.getContext());
@@ -322,7 +313,6 @@ static bool isAtomic(Instruction *I) {
 
 bool ThreadSanitizer::runOnFunction(Function &F) {
   if (!DL) return false;
-  if (BL->isIn(F)) return false;
   initializeCallbacks(*F.getParent());
   SmallVector<Instruction*, 8> RetVec;
   SmallVector<Instruction*, 8> AllLoadsAndStores;
@@ -331,22 +321,20 @@ bool ThreadSanitizer::runOnFunction(Function &F) {
   SmallVector<Instruction*, 8> MemIntrinCalls;
   bool Res = false;
   bool HasCalls = false;
+  bool SanitizeFunction = F.hasFnAttribute(Attribute::SanitizeThread);
 
   // Traverse all instructions, collect loads/stores/returns, check for calls.
-  for (Function::iterator FI = F.begin(), FE = F.end();
-       FI != FE; ++FI) {
-    BasicBlock &BB = *FI;
-    for (BasicBlock::iterator BI = BB.begin(), BE = BB.end();
-         BI != BE; ++BI) {
-      if (isAtomic(BI))
-        AtomicAccesses.push_back(BI);
-      else if (isa<LoadInst>(BI) || isa<StoreInst>(BI))
-        LocalLoadsAndStores.push_back(BI);
-      else if (isa<ReturnInst>(BI))
-        RetVec.push_back(BI);
-      else if (isa<CallInst>(BI) || isa<InvokeInst>(BI)) {
-        if (isa<MemIntrinsic>(BI))
-          MemIntrinCalls.push_back(BI);
+  for (auto &BB : F) {
+    for (auto &Inst : BB) {
+      if (isAtomic(&Inst))
+        AtomicAccesses.push_back(&Inst);
+      else if (isa<LoadInst>(Inst) || isa<StoreInst>(Inst))
+        LocalLoadsAndStores.push_back(&Inst);
+      else if (isa<ReturnInst>(Inst))
+        RetVec.push_back(&Inst);
+      else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
+        if (isa<MemIntrinsic>(Inst))
+          MemIntrinCalls.push_back(&Inst);
         HasCalls = true;
         chooseInstructionsToInstrument(LocalLoadsAndStores, AllLoadsAndStores);
       }
@@ -358,21 +346,22 @@ bool ThreadSanitizer::runOnFunction(Function &F) {
   // FIXME: many of these accesses do not need to be checked for races
   // (e.g. variables that do not escape, etc).
 
-  // Instrument memory accesses.
-  if (ClInstrumentMemoryAccesses && F.hasFnAttribute(Attribute::SanitizeThread))
-    for (size_t i = 0, n = AllLoadsAndStores.size(); i < n; ++i) {
-      Res |= instrumentLoadOrStore(AllLoadsAndStores[i]);
+  // Instrument memory accesses only if we want to report bugs in the function.
+  if (ClInstrumentMemoryAccesses && SanitizeFunction)
+    for (auto Inst : AllLoadsAndStores) {
+      Res |= instrumentLoadOrStore(Inst);
     }
 
-  // Instrument atomic memory accesses.
+  // Instrument atomic memory accesses in any case (they can be used to
+  // implement synchronization).
   if (ClInstrumentAtomics)
-    for (size_t i = 0, n = AtomicAccesses.size(); i < n; ++i) {
-      Res |= instrumentAtomic(AtomicAccesses[i]);
+    for (auto Inst : AtomicAccesses) {
+      Res |= instrumentAtomic(Inst);
     }
 
-  if (ClInstrumentMemIntrinsics)
-    for (size_t i = 0, n = MemIntrinCalls.size(); i < n; ++i) {
-      Res |= instrumentMemIntrinsic(MemIntrinCalls[i]);
+  if (ClInstrumentMemIntrinsics && SanitizeFunction)
+    for (auto Inst : MemIntrinCalls) {
+      Res |= instrumentMemIntrinsic(Inst);
     }
 
   // Instrument function entry/exit points if there were instrumented accesses.
@@ -382,8 +371,8 @@ bool ThreadSanitizer::runOnFunction(Function &F) {
         Intrinsic::getDeclaration(F.getParent(), Intrinsic::returnaddress),
         IRB.getInt32(0));
     IRB.CreateCall(TsanFuncEntry, ReturnAddress);
-    for (size_t i = 0, n = RetVec.size(); i < n; ++i) {
-      IRBuilder<> IRBRet(RetVec[i]);
+    for (auto RetInst : RetVec) {
+      IRBuilder<> IRBRet(RetInst);
       IRBRet.CreateCall(TsanFuncExit);
     }
     Res = true;
