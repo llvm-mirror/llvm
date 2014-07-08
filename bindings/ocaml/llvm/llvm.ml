@@ -276,6 +276,16 @@ module ValueKind = struct
   | Instruction of Opcode.t
 end
 
+module FastMathFlags = struct
+  type t =
+  | Clear
+  | Fast
+  | Nnan
+  | Ninf
+  | NSZ
+  | Arcp
+end
+
 exception IoError of string
 
 external register_exns : exn -> unit = "llvm_register_core_exns"
@@ -440,6 +450,17 @@ external undef : lltype -> llvalue = "LLVMGetUndef"
 external is_null : llvalue -> bool = "llvm_is_null"
 external is_undef : llvalue -> bool = "llvm_is_undef"
 external constexpr_opcode : llvalue -> Opcode.t = "llvm_constexpr_get_opcode"
+
+(*--... Operations on fast math operators...................................--*)
+
+external set_fastmathflag : llvalue -> FastMathFlags.t -> unit
+                                = "llvm_set_fastmathflag"
+external get_fastmathflags : llvalue -> FastMathFlags.t array
+                                = "llvm_get_fastmathflag"
+external has_fastmathflags : llvalue -> bool
+                                = "llvm_has_fastmathflags"
+external has_fastmathflag : llvalue -> FastMathFlags.t -> bool 
+  = "llvm_has_fastmathflag"
 
 (*--... Operations on instructions .........................................--*)
 external has_metadata : llvalue -> bool = "llvm_has_metadata"

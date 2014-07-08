@@ -611,6 +611,31 @@ CAMLprim value llvm_constexpr_get_opcode(LLVMValueRef Val) {
       Val_int(LLVMGetConstOpcode(Val)) : Val_int(0);
 }
 
+/*--... Operations on Fast Math operator ...................................--*/
+
+/* llvalue -> FastMathFlags.t -> unit */
+CAMLprim value llvm_set_fastmathflag(LLVMValueRef Val, value Flag){
+  LLVMSetFastMathFlag(Val, Int_val(Flag));
+  return Val_unit;
+}
+
+/* llvalue -> FastMathFlags.t array */
+CAMLprim value llvm_get_fastmathflags(LLVMValueRef Val){
+  value Flags = alloc(LLVMCountFastMathFlags(Val), 0);
+  LLVMGetFastMathFlags(Val, (LLVMFastMathFlags*) Flags);
+  return Flags;
+}
+
+/* llvalue -> bool */
+CAMLprim value llvm_has_fastmathflags(LLVMValueRef Val) {
+  return Val_bool(LLVMHasFastMathFlags(Val));
+}
+
+/* llvalue -> FastMathFlags.t -> bool */
+CAMLprim value llvm_has_fastmathflag(LLVMValueRef Val, value Flag) {
+  return Val_bool(LLVMHasFastMathFlag(Val, Flag));
+}
+
 /*--... Operations on instructions .........................................--*/
 
 /* llvalue -> bool */
@@ -642,7 +667,6 @@ CAMLprim value llvm_clear_metadata(LLVMValueRef Val, value MDKindID) {
   LLVMSetMetadata(Val, Int_val(MDKindID), NULL);
   return Val_unit;
 }
-
 
 /*--... Operations on metadata .............................................--*/
 

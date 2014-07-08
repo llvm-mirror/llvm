@@ -343,6 +343,15 @@ module ValueKind : sig
   | Instruction of Opcode.t
 end
 
+module FastMathFlags: sig
+  type t =
+  | Clear
+  | Fast (* Unsafe algebra -> no verification -> fast*)
+  | Nnan (* Not a nan value *)
+  | Ninf (* Not an infinite value *)
+  | NSZ  (* No signed zeros *)
+  | Arcp (* Allow algebraically optimization *)
+end
 
 (** {6 Iteration} *)
 
@@ -764,6 +773,23 @@ val is_undef : llvalue -> bool
     value [v], or [Opcode.Invalid] if [v] is not a constexpr. *)
 val constexpr_opcode : llvalue -> Opcode.t
 
+(** {7 Operations on fast math operators} *)
+
+(** [set_fastmathflag v fmf] adds [fmf] FastMathFlags.t as [v] llvalue 
+    fast math operator. *)
+val set_fastmathflag : llvalue -> FastMathFlags.t -> unit
+
+(** [get_fastmathflags v ] returns an array of FastMathFlags.t for
+    a given [v] llvalue fast math operator. *)
+val get_fastmathflags : llvalue -> FastMathFlags.t array
+
+(** [has_fastmathflags v ] returns true if the [v] llvalue
+    fast math operator contains any fast mast flag. *)
+val has_fastmathflags : llvalue -> bool
+
+(** [has_fastmathflag v fmf] returns true if the [v] llvalue
+    fast math operator contains the [fmf] FastMathFlags.t flag *)
+val has_fastmathflag : llvalue -> FastMathFlags.t -> bool
 
 (** {7 Operations on instructions} *)
 
