@@ -345,12 +345,12 @@ end
 
 module FastMathFlags: sig
   type t =
-  | Clear
   | Fast (* Unsafe algebra -> no verification -> fast*)
   | Nnan (* Not a nan value *)
   | Ninf (* Not an infinite value *)
   | NSZ  (* No signed zeros *)
   | Arcp (* Allow algebraically optimization *)
+  | Clear (* cleaning fmf from an instruction *)
 end
 
 (** {6 Iteration} *)

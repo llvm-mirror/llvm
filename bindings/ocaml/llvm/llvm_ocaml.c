@@ -615,7 +615,7 @@ CAMLprim value llvm_constexpr_get_opcode(LLVMValueRef Val) {
 
 /* llvalue -> FastMathFlags.t -> unit */
 CAMLprim value llvm_set_fastmathflag(LLVMValueRef Val, value Flag){
-  LLVMSetFastMathFlag(Val, Int_val(Flag));
+  LLVMSetFastMathFlag(Val, (1 << Int_val(Flag)));
   return Val_unit;
 }
 
@@ -633,7 +633,7 @@ CAMLprim value llvm_has_fastmathflags(LLVMValueRef Val) {
 
 /* llvalue -> FastMathFlags.t -> bool */
 CAMLprim value llvm_has_fastmathflag(LLVMValueRef Val, value Flag) {
-  return Val_bool(LLVMHasFastMathFlag(Val, Flag));
+  return Val_bool(LLVMHasFastMathFlag(Val, (1 << Int_val(Flag))));
 }
 
 /*--... Operations on instructions .........................................--*/

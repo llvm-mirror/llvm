@@ -415,15 +415,6 @@ typedef enum {
     LLVMDSNote
 } LLVMDiagnosticSeverity;
 
-typedef enum {
-    LLVMFastMathFlagsNone = 0,  
-    LLVMFastMathFlagsAllowAlgebra,
-    LLVMFastMathFlagsNoNaN,
-    LLVMFastMathFlagsNoInf,
-    LLVMFastMathFlagsNoSignedZero,
-    LLVMFastMathFlagsAllowReciprocal
-} LLVMFastMathFlags;
-
 
 /**
  * @}
@@ -2341,7 +2332,7 @@ void LLVMSetMetadata(LLVMValueRef Val, unsigned KindID, LLVMValueRef Node);
  *                                                                      
  * @see llvm::Instruction::getFastMathFlags()                           
  */
-void LLVMGetFastMathFlags(LLVMValueRef Inst, LLVMFastMathFlags* Dest);
+void LLVMGetFastMathFlags(LLVMValueRef Inst, int* Dest);
 
 /**                                                                     
  * Returns the number of fast math flags setting for an instruction.    
@@ -2364,7 +2355,7 @@ int LLVMCountFastMathFlags(LLVMValueRef Inst);
  * @see llvm::Instruction::hasNoSignedZeros()               
  * @see llvm::Instruction::hasAllowReciproval()             
  */
-int LLVMHasFastMathFlag(LLVMValueRef Inst, LLVMFastMathFlags FMF);
+int LLVMHasFastMathFlag(LLVMValueRef Inst, int Flag);
 
 /**                                                         
  * Returns n != 0 if the individual instruction contains fast math flags.
@@ -2394,7 +2385,7 @@ int LLVMHasFastMathFlags(LLVMValueRef Inst);
  * @see llvm::Instruction::setAllowReciproval()
  * @see llvm::FastMathFlags::clear()            
  */
-void LLVMSetFastMathFlag(LLVMValueRef Inst, LLVMFastMathFlags FMF);
+void LLVMSetFastMathFlag(LLVMValueRef Inst, int Flag);
 
 /**
  * Obtain the basic block to which an instruction belongs.
