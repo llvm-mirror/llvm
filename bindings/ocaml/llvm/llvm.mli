@@ -775,21 +775,21 @@ val constexpr_opcode : llvalue -> Opcode.t
 
 (** {7 Operations on fast math operators} *)
 
-(** [set_fastmathflag v fmf] adds [fmf] FastMathFlags.t as [v] llvalue 
-    fast math operator. *)
-val set_fastmathflag : llvalue -> FastMathFlags.t -> unit
+(** [set_fastmathflag v fmf] adds these [fmf] FastMathFlags.t array 
+    as [v] llvalue fast math operator. *)
+val set_fastmathflags : llvalue -> FastMathFlags.t list -> unit
 
 (** [get_fastmathflags v ] returns an array of FastMathFlags.t for
     a given [v] llvalue fast math operator. *)
 val get_fastmathflags : llvalue -> FastMathFlags.t array
 
 (** [has_fastmathflags v ] returns true if the [v] llvalue
-    fast math operator contains any fast mast flag. *)
-val has_fastmathflags : llvalue -> bool
+    fast math operator contains at least one of any fast math flag. *)
+val has_fastmathflag : llvalue -> bool
 
-(** [has_fastmathflag v fmf] returns true if the [v] llvalue
-    fast math operator contains the [fmf] FastMathFlags.t flag *)
-val has_fastmathflag : llvalue -> FastMathFlags.t -> bool
+(** [has_fastmathflags v fmf] returns true if the [v] llvalue
+    fast math operator contains exactely these [fmf] FastMathFlags.t flags *)
+val has_fastmathflags : llvalue -> FastMathFlags.t array -> bool
 
 (** {7 Operations on instructions} *)
 

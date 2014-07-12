@@ -278,12 +278,12 @@ end
 
 module FastMathFlags = struct
   type t =
-  | Clear
   | Fast
   | Nnan
   | Ninf
   | NSZ
   | Arcp
+  | Clear
 end
 
 exception IoError of string
@@ -453,14 +453,14 @@ external constexpr_opcode : llvalue -> Opcode.t = "llvm_constexpr_get_opcode"
 
 (*--... Operations on fast math operators...................................--*)
 
-external set_fastmathflag : llvalue -> FastMathFlags.t -> unit
-                                = "llvm_set_fastmathflag"
+external set_fastmathflags : llvalue -> FastMathFlags.t list -> unit
+                                = "llvm_set_fastmathflags"
 external get_fastmathflags : llvalue -> FastMathFlags.t array
-                                = "llvm_get_fastmathflag"
-external has_fastmathflags : llvalue -> bool
-                                = "llvm_has_fastmathflags"
-external has_fastmathflag : llvalue -> FastMathFlags.t -> bool 
-  = "llvm_has_fastmathflag"
+                                = "llvm_get_fastmathflags"
+external has_fastmathflag : llvalue -> bool
+                                = "llvm_has_fastmathflag"
+external has_fastmathflags : llvalue -> FastMathFlags.t array -> bool 
+				= "llvm_has_fastmathflags"
 
 (*--... Operations on instructions .........................................--*)
 external has_metadata : llvalue -> bool = "llvm_has_metadata"

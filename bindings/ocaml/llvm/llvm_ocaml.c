@@ -24,6 +24,13 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+
+#define FMF_FAST (1 << 0)
+#define FMF_NNAN (1 << 1)
+#define FMF_NINF (1 << 2)
+#define FMF_NSZ  (1 << 3)
+#define FMF_ARCP (1 << 4)
 
 
 /* Can't use the recommended caml_named_value mechanism for backwards
@@ -613,27 +620,36 @@ CAMLprim value llvm_constexpr_get_opcode(LLVMValueRef Val) {
 
 /*--... Operations on Fast Math operator ...................................--*/
 
-/* llvalue -> FastMathFlags.t -> unit */
-CAMLprim value llvm_set_fastmathflag(LLVMValueRef Val, value Flag){
-  LLVMSetFastMathFlag(Val, (1 << Int_val(Flag)));
+int fmf_mask_of_flag_list(value flag_list){
+  static int flag_tab[] = {FMF_FAST, FMF_NNAN, FMF_NINF, FMF_NSZ, FMF_ARCP};
+  int converted_flags = 0;
+  converted_flags = convert_flag_list(flag_list, flag_tab);
+  return converted_flags;
+}
+
+/* llvalue -> FastMathFlags.t array -> unit */
+CAMLprim value llvm_set_fastmathflags(LLVMValueRef Val, value Flags){
+  int flags_mask = fmf_mask_of_flag_list(Flags);
+  LLVMSetFastMathFlags(Val, flags_mask);
   return Val_unit;
 }
 
 /* llvalue -> FastMathFlags.t array */
 CAMLprim value llvm_get_fastmathflags(LLVMValueRef Val){
   value Flags = alloc(LLVMCountFastMathFlags(Val), 0);
-  LLVMGetFastMathFlags(Val, (LLVMFastMathFlags*) Flags);
+  LLVMGetFastMathFlags(Val, (int*) Flags);
   return Flags;
 }
 
 /* llvalue -> bool */
-CAMLprim value llvm_has_fastmathflags(LLVMValueRef Val) {
-  return Val_bool(LLVMHasFastMathFlags(Val));
+CAMLprim value llvm_has_fastmathflag(LLVMValueRef Val) {
+  return Val_bool(LLVMHasFastMathFlag(Val));
 }
 
-/* llvalue -> FastMathFlags.t -> bool */
-CAMLprim value llvm_has_fastmathflag(LLVMValueRef Val, value Flag) {
-  return Val_bool(LLVMHasFastMathFlag(Val, (1 << Int_val(Flag))));
+/* llvalue -> FastMathFlags.t list -> bool */
+CAMLprim value llvm_has_fastmathflags(LLVMValueRef Val, value Flags) {
+  int flags_mask = fmf_mask_of_flag_list(Flags);
+  return Val_bool(LLVMHasFastMathFlags(Val, flags_mask));
 }
 
 /*--... Operations on instructions .........................................--*/

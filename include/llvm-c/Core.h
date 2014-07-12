@@ -2355,7 +2355,7 @@ int LLVMCountFastMathFlags(LLVMValueRef Inst);
  * @see llvm::Instruction::hasNoSignedZeros()               
  * @see llvm::Instruction::hasAllowReciproval()             
  */
-int LLVMHasFastMathFlag(LLVMValueRef Inst, int Flag);
+int LLVMHasFastMathFlags(LLVMValueRef Inst, int Flags);
 
 /**                                                         
  * Returns n != 0 if the individual instruction contains fast math flags.
@@ -2369,7 +2369,7 @@ int LLVMHasFastMathFlag(LLVMValueRef Inst, int Flag);
  * @see llvm::Instruction::hasNoSignedZeros()               
  * @see llvm::Instruction::hasAllowReciproval()             
  */
-int LLVMHasFastMathFlags(LLVMValueRef Inst);
+int LLVMHasFastMathFlag(LLVMValueRef Inst);
 
 /**                                                         
  * Set an uniq fast math flag on an individual instruction.
@@ -2385,7 +2385,7 @@ int LLVMHasFastMathFlags(LLVMValueRef Inst);
  * @see llvm::Instruction::setAllowReciproval()
  * @see llvm::FastMathFlags::clear()            
  */
-void LLVMSetFastMathFlag(LLVMValueRef Inst, int Flag);
+void LLVMSetFastMathFlags(LLVMValueRef Inst, int Flags);
 
 /**
  * Obtain the basic block to which an instruction belongs.
