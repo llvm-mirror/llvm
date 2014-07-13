@@ -459,7 +459,7 @@ external get_fastmathflags : llvalue -> FastMathFlags.t array
                                 = "llvm_get_fastmathflags"
 external has_fastmathflag : llvalue -> bool
                                 = "llvm_has_fastmathflag"
-external has_fastmathflags : llvalue -> FastMathFlags.t array -> bool 
+external has_fastmathflags : llvalue -> FastMathFlags.t list -> bool 
 				= "llvm_has_fastmathflags"
 
 (*--... Operations on instructions .........................................--*)

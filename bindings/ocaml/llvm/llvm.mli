@@ -789,7 +789,7 @@ val has_fastmathflag : llvalue -> bool
 
 (** [has_fastmathflags v fmf] returns true if the [v] llvalue
     fast math operator contains exactely these [fmf] FastMathFlags.t flags *)
-val has_fastmathflags : llvalue -> FastMathFlags.t array -> bool
+val has_fastmathflags : llvalue -> FastMathFlags.t list -> bool
 
 (** {7 Operations on instructions} *)
 
