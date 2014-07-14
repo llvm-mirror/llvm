@@ -619,7 +619,6 @@ CAMLprim value llvm_constexpr_get_opcode(LLVMValueRef Val) {
 }
 
 /*--... Operations on Fast Math operator ...................................--*/
-
 int fmf_mask_of_flag_list(value flag_list){
   static int flag_tab[] = {FMF_FAST, FMF_NNAN, FMF_NINF, FMF_NSZ, FMF_ARCP};
   int converted_flags = 0;
@@ -636,9 +635,17 @@ CAMLprim value llvm_set_fastmathflags(LLVMValueRef Val, value Flags){
 
 /* llvalue -> FastMathFlags.t array */
 CAMLprim value llvm_get_fastmathflags(LLVMValueRef Val){
-  value Flags = alloc(LLVMCountFastMathFlags(Val), 0);
-  LLVMGetFastMathFlags(Val, (int*) Flags);
-  return Flags;
+  int num = LLVMCountFastMathFlags(Val);
+  value *flags_set = alloc(num, 0);
+  // static value flags_def[] = {Val_int(0), Val_int(1), Val_int(2), Val_int(3), Val_int(4)};
+  int flags = LLVMGetFastMathFlags(Val);
+  static int flag_tab[] = {FMF_FAST, FMF_NNAN, FMF_NINF, FMF_NSZ, FMF_ARCP};
+  int j = 0;
+  for(int i = 0; i < 5; i++){
+    if(flags & flag_tab[i])
+      flags_set[j++] = Val_int(i);
+  }
+  return(flags_set);
 }
 
 /* llvalue -> bool */

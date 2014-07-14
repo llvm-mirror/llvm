@@ -279,8 +279,8 @@ end
 module FastMathFlags = struct
   type t =
   | Fast
-  | Nnan
-  | Ninf
+  | NNaN
+  | NInf
   | NSZ
   | Arcp
   | Clear

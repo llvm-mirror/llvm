@@ -2325,14 +2325,14 @@ LLVMValueRef LLVMGetMetadata(LLVMValueRef Val, unsigned KindID);
 void LLVMSetMetadata(LLVMValueRef Val, unsigned KindID, LLVMValueRef Node);
 
 /**                                                                     
- * Set the fast math flags in Dest for an individual instruction.       
+ * Return all the fast math flags for an individual instruction.       
  *                                                                      
  * This only returns something if concerned operator is a               
  * FastMathoperator extension as frem, fadd, fdiv and fsub.             
  *                                                                      
  * @see llvm::Instruction::getFastMathFlags()                           
  */
-void LLVMGetFastMathFlags(LLVMValueRef Inst, int* Dest);
+int LLVMGetFastMathFlags(LLVMValueRef Inst);
 
 /**                                                                     
  * Returns the number of fast math flags setting for an instruction.    

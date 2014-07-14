@@ -576,7 +576,7 @@ int LLVMHasFastMathFlag(LLVMValueRef Inst) {
 
 /// Has exactly these flags !
 int LLVMHasFastMathFlags(LLVMValueRef Inst, int Flags) {
-  if (0 == Flags) return 0;
+  if (0 == Flags) return false;
   bool has = true;
   if (Flags & FastMathFlags::UnsafeAlgebra)
     has = has && unwrap<Instruction>(Inst)->hasUnsafeAlgebra();
@@ -611,37 +611,37 @@ void LLVMSetFastMathFlags(LLVMValueRef Inst, int Flags){
 }
 
 int LLVMCountFastMathFlags(LLVMValueRef Inst){
-  if (LLVMHasFastMathFlag(Inst) != 0) {
-    unsigned res = 0;
-    FastMathFlags fmf =
-      (unwrap<Instruction>(Inst)->getFastMathFlags());
-    if(fmf.noNaNs()) res++;
-    if(fmf.noInfs()) res++;
-    if(fmf.noSignedZeros()) res++;
-    if(fmf.allowReciprocal()) res++;
-    if(fmf.unsafeAlgebra()) res++;
-    return res;
-  }
-  return 0;
+  unsigned res = 0;
+  FastMathFlags fmf =
+    (unwrap<Instruction>(Inst)->getFastMathFlags());
+  if(fmf.unsafeAlgebra()) res++; // Every flags are setted, we can return 5
+  if(fmf.noNaNs()) res++;
+  if(fmf.noInfs()) res++;
+  if(fmf.noSignedZeros()) res++;
+  if(fmf.allowReciprocal()) res++;
+
+  return res;
 }
 
 /* returns an array of FMF.t through Dest */
-void LLVMGetFastMathFlags(LLVMValueRef Inst, int* Dest){
-  if (LLVMHasFastMathFlag(Inst) != 0) {
-    unsigned i = 0;
-    FastMathFlags fmf =
-      (unwrap<Instruction>(Inst)->getFastMathFlags());
-    if(fmf.unsafeAlgebra())
-      Dest[i++] = 0;
-    if(fmf.noNaNs())
-      Dest[i++] = 1;
-    if(fmf.noInfs())
-      Dest[i++] = 2;
-    if(fmf.noSignedZeros())
-      Dest[i++] = 3;
-    if(fmf.allowReciprocal())
-      Dest[i++] = 4;
+int LLVMGetFastMathFlags(LLVMValueRef Inst){
+  if (LLVMHasFastMathFlag(Inst) == 0) {
+    return 0;
   }
+  int Mask = 0;
+  FastMathFlags fmf =
+    (unwrap<Instruction>(Inst)->getFastMathFlags());
+  if(fmf.unsafeAlgebra())
+    Mask |= FastMathFlags::UnsafeAlgebra;
+  if(fmf.noNaNs())
+    Mask |= FastMathFlags::NoNaNs;
+  if(fmf.noInfs())
+    Mask |= FastMathFlags::NoInfs;
+  if(fmf.noSignedZeros())
+    Mask |= FastMathFlags::NoSignedZeros;
+  if(fmf.allowReciprocal())
+    Mask |= FastMathFlags::AllowReciprocal;
+  return Mask;
 }
 
 

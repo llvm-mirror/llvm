@@ -346,8 +346,8 @@ end
 module FastMathFlags: sig
   type t =
   | Fast (* Unsafe algebra -> no verification -> fast*)
-  | Nnan (* Not a nan value *)
-  | Ninf (* Not an infinite value *)
+  | NNaN (* Not a nan value *)
+  | NInf (* Not an infinite value *)
   | NSZ  (* No signed zeros *)
   | Arcp (* Allow algebraically optimization *)
   | Clear (* cleaning fmf from an instruction *)
