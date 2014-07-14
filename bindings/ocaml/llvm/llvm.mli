@@ -350,7 +350,6 @@ module FastMathFlags: sig
   | NInf (* Not an infinite value *)
   | NSZ  (* No signed zeros *)
   | Arcp (* Allow algebraically optimization *)
-  | Clear (* cleaning fmf from an instruction *)
 end
 
 (** {6 Iteration} *)
@@ -775,8 +774,8 @@ val constexpr_opcode : llvalue -> Opcode.t
 
 (** {7 Operations on fast math operators} *)
 
-(** [set_fastmathflag v fmf] adds these [fmf] FastMathFlags.t array 
-    as [v] llvalue fast math operator. *)
+(** [set_fastmathflag v fmf] adds these [fmf] FastMathFlags.t array as tags
+    for the [v] llvalue fast math operator. Give empty array to clean fmf.*)
 val set_fastmathflags : llvalue -> FastMathFlags.t list -> unit
 
 (** [get_fastmathflags v ] returns an array of FastMathFlags.t for

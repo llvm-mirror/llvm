@@ -283,7 +283,6 @@ module FastMathFlags = struct
   | NInf
   | NSZ
   | Arcp
-  | Clear
 end
 
 exception IoError of string
