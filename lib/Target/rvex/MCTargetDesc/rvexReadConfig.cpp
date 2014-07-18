@@ -6,155 +6,102 @@
 
 #include "rvexReadConfig.h"
 
-using namespace std;
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Regex.h"
 
 vector<Stage_desc> Stages;
 vector<DFAState> Itin;
 int is_generic;
 int is_width;
 
-int read_config (string ConfigFile)
+int read_config (std::string ConfigFile)
 {
-    string str, str2, str3;
-    int getal, getal2, getal3;
-    
-    
-    
-    bool run = true;
-    
-    
     //Opens for reading the file
     ifstream b_file ( ConfigFile.c_str() );
-    //Reads one string from the file
-    b_file>> str;
-    //Should output 'this'
 
-    if (str == "Generic")
-    {
-        b_file>> str;
-        if (str == "=")
-        {
-            run = true;
-            while(run)
-            {
-                b_file>> str;
+    llvm::Regex EqualRegex(llvm::StringRef("([[:alpha:]]+)[[:space:]]*=[[:space:]]*([^;]+);"));
 
-                
-                if (str.at( str.length() -1) == ';')
-                    run = false;
-                
-                str.erase(str.length()-1,1);
+    bool EqualMatch;
 
-                
-                
-                getal = atoi(str.c_str());
+    do {
+        std::string Line;
+        // Read one line from the file
+        getline(b_file, Line);
 
-                
-                is_generic = getal;
+        llvm::SmallVector<llvm::StringRef,3> matches;
+        EqualMatch = EqualRegex.match(Line, &matches);
+
+        if (EqualMatch) {
+            if (matches[1].str() == "Generic") {
+                is_generic = atoi(matches[2].str().c_str());
+            } else if (matches[1].str() == "Width") {
+                is_width = atoi(matches[2].str().c_str());
+            } else if (matches[1].str() == "Stages") {
+                llvm::Regex tuple_regex(llvm::StringRef("\\{ *([[:digit:]]+) *, *([[:digit:]]+) *, *([[:digit:]]+) *\\} *,?(.*)"));
+                llvm::SmallVector<llvm::StringRef,4> tuple_matches;
+
+                llvm::StringRef to_parse = matches[2];
+                do {
+                    bool tuple_match = tuple_regex.match(to_parse, &tuple_matches);
+
+                    if (tuple_match) {
+                        Stage_desc state;
+                        state.delay = atoi(tuple_matches[1].str().c_str());
+                        state.FU = atoi(tuple_matches[2].str().c_str());
+                        state.resources = atoi(tuple_matches[3].str().c_str());
+
+                        Stages.push_back (state);
+
+                        to_parse = tuple_matches[4];
+                    } else {
+                        std::cerr << "Incorrect formatting for stage description in file \""
+                            << ConfigFile
+                            << "\". Could not parse \""
+                            << matches[0].str()
+                            << "\"."
+                            << std::endl;
+                        return 0;
+                    }
+                } while (to_parse.size() > 0);
+            } else if (matches[1].str() == "InstrItinerary") {
+                llvm::Regex tuple_regex(llvm::StringRef("\\{ *([[:digit:]]+) *, *([[:digit:]]+) *\\} *,?(.*)"));
+                llvm::SmallVector<llvm::StringRef,3> tuple_matches;
+
+                llvm::StringRef to_parse = matches[2];
+                do {
+                    bool tuple_match = tuple_regex.match(to_parse, &tuple_matches);
+
+                    if (tuple_match) {
+                        DFAState Itin2;
+                        Itin2.num1 = atoi(tuple_matches[1].str().c_str());
+                        Itin2.num2 = atoi(tuple_matches[2].str().c_str());
+
+                        Itin.push_back (Itin2);
+
+                        to_parse = tuple_matches[3];
+                    } else {
+                        std::cerr << "Incorrect formatting for itinerary description in file \""
+                            << ConfigFile
+                            << "\". Could not parse \""
+                            << matches[0].str()
+                            << "\"."
+                            << std::endl;
+                        return 0;
+                    }
+                } while (to_parse.size() > 0);
+            } else {
+                std::cerr << "Unknown option \""
+                    << matches[1].str()
+                    << "\" in options file \""
+                    << ConfigFile
+                    << "\"."
+                    << std::endl;
+                return 0;
             }
-            
         }
-    } 
-    b_file>> str;
-    if (str == "Width")
-    {
-        b_file>> str;
-        if (str == "=")
-        {
-            run = true;
-            while(run)
-            {
-                b_file>> str;
+    } while (EqualMatch);
 
-                
-                if (str.at( str.length() -1) == ';')
-                    run = false;
-                
-                str.erase(str.length()-1,1);
-
-                
-                
-                getal = atoi(str.c_str());
-
-                
-                is_width = getal;
-            }
-            
-        }
-    } 
-    b_file>> str;
-    if (str == "Stages")
-    {
-        b_file>> str;
-        if (str == "=")
-        {
-            run = true;
-            while(run)
-            {
-                b_file>> str;
-                b_file>> str2;
-                b_file>> str3;
-                
-                if (str3.at( str3.length() -1) == ';')
-                    run = false;
-                
-                str.erase(0,1);
-                str.erase(str.length()-1,1);
-                str2.erase(str2.length()-1,1);
-                str3.erase(str3.length()-2,2);
-                
-                
-                getal = atoi(str.c_str());
-                getal2 = atoi(str2.c_str());
-                getal3 = atoi(str3.c_str());
-                
-                Stage_desc state;
-                state.delay = getal;
-                state.FU = getal2;
-                state.resources = getal3;
-                
-                Stages.push_back (state);
-            }
-            
-        }
-    }
-    
-    //Reads one string from the file
-    b_file>> str;
-    if (str == "InstrItinerary")
-    {
-        b_file>> str;
-        if (str == "=")
-        {
-            run = true;
-            while(run)
-            {
-                b_file>> str;
-                b_file>> str2;
-                
-                if (str2.at( str2.length() -1) == ';')
-                    run = false;
-                
-                str.erase(0,1);
-                str.erase(str.length()-1,1);
-                str2.erase(str2.length()-2,2);
-                
-                
-                getal = atoi(str.c_str());
-                getal2 = atoi(str2.c_str());
-                
-                DFAState Itin2;
-                Itin2.num1 = getal;
-                Itin2.num2 = getal2;
-                
-                Itin.push_back (Itin2);
-            }
-            
-        }
-
-        return 0;
-    }
-    
     Stage_desc state;
     state.delay = 1;
     state.FU = 3;
