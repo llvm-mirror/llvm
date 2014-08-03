@@ -17,69 +17,70 @@
 namespace llvm {
 using namespace object;
 
-ErrorOr<ObjectFile *> ObjectFile::createELFObjectFile(MemoryBuffer *Obj,
-                                                      bool BufferOwned) {
-  std::pair<unsigned char, unsigned char> Ident = getElfArchType(Obj);
+ErrorOr<std::unique_ptr<ObjectFile>>
+ObjectFile::createELFObjectFile(std::unique_ptr<MemoryBuffer> &Obj) {
+  std::pair<unsigned char, unsigned char> Ident =
+      getElfArchType(Obj->getBuffer());
   std::size_t MaxAlignment =
     1ULL << countTrailingZeros(uintptr_t(Obj->getBufferStart()));
 
-  error_code EC;
+  std::error_code EC;
   std::unique_ptr<ObjectFile> R;
   if (Ident.first == ELF::ELFCLASS32 && Ident.second == ELF::ELFDATA2LSB)
 #if !LLVM_IS_UNALIGNED_ACCESS_FAST
     if (MaxAlignment >= 4)
-      R.reset(new ELFObjectFile<ELFType<support::little, 4, false> >(
-          Obj, EC, BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::little, 4, false>>(
+          std::move(Obj), EC));
     else
 #endif
     if (MaxAlignment >= 2)
-      R.reset(new ELFObjectFile<ELFType<support::little, 2, false> >(
-          Obj, EC, BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::little, 2, false>>(
+          std::move(Obj), EC));
     else
-      llvm_unreachable("Invalid alignment for ELF file!");
+      return object_error::parse_failed;
   else if (Ident.first == ELF::ELFCLASS32 && Ident.second == ELF::ELFDATA2MSB)
 #if !LLVM_IS_UNALIGNED_ACCESS_FAST
     if (MaxAlignment >= 4)
-      R.reset(new ELFObjectFile<ELFType<support::big, 4, false> >(Obj, EC,
-                                                                  BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::big, 4, false>>(std::move(Obj),
+                                                                 EC));
     else
 #endif
     if (MaxAlignment >= 2)
-      R.reset(new ELFObjectFile<ELFType<support::big, 2, false> >(Obj, EC,
-                                                                  BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::big, 2, false>>(std::move(Obj),
+                                                                 EC));
     else
-      llvm_unreachable("Invalid alignment for ELF file!");
+      return object_error::parse_failed;
   else if (Ident.first == ELF::ELFCLASS64 && Ident.second == ELF::ELFDATA2MSB)
 #if !LLVM_IS_UNALIGNED_ACCESS_FAST
     if (MaxAlignment >= 8)
-      R.reset(new ELFObjectFile<ELFType<support::big, 8, true> >(Obj, EC,
-                                                                 BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::big, 8, true>>(std::move(Obj),
+                                                                EC));
     else
 #endif
     if (MaxAlignment >= 2)
-      R.reset(new ELFObjectFile<ELFType<support::big, 2, true> >(Obj, EC,
-                                                                 BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::big, 2, true>>(std::move(Obj),
+                                                                EC));
     else
-      llvm_unreachable("Invalid alignment for ELF file!");
+      return object_error::parse_failed;
   else if (Ident.first == ELF::ELFCLASS64 && Ident.second == ELF::ELFDATA2LSB) {
 #if !LLVM_IS_UNALIGNED_ACCESS_FAST
     if (MaxAlignment >= 8)
-      R.reset(new ELFObjectFile<ELFType<support::little, 8, true> >(
-          Obj, EC, BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::little, 8, true>>(
+          std::move(Obj), EC));
     else
 #endif
     if (MaxAlignment >= 2)
-      R.reset(new ELFObjectFile<ELFType<support::little, 2, true> >(
-          Obj, EC, BufferOwned));
+      R.reset(new ELFObjectFile<ELFType<support::little, 2, true>>(
+          std::move(Obj), EC));
     else
-      llvm_unreachable("Invalid alignment for ELF file!");
+      return object_error::parse_failed;
   }
   else
-    report_fatal_error("Buffer is not an ELF object file!");
+    llvm_unreachable("Buffer is not an ELF object file!");
 
   if (EC)
     return EC;
-  return R.release();
+  return std::move(R);
 }
 
 } // end namespace llvm

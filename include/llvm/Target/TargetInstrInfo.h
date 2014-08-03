@@ -29,6 +29,7 @@ class MachineRegisterInfo;
 class MDNode;
 class MCInst;
 class MCSchedModel;
+class MCSymbolRefExpr;
 class SDNode;
 class ScheduleHazardRecognizer;
 class SelectionDAG;
@@ -36,6 +37,7 @@ class ScheduleDAG;
 class TargetRegisterClass;
 class TargetRegisterInfo;
 class BranchProbability;
+class TargetSubtargetInfo;
 
 template<class T> class SmallVectorImpl;
 
@@ -198,6 +200,15 @@ public:
                                  unsigned &Size, unsigned &Offset,
                                  const TargetMachine *TM) const;
 
+  /// isAsCheapAsAMove - Return true if the instruction is as cheap as a move
+  /// instruction.
+  ///
+  /// Targets for different archs need to override this, and different
+  /// micro-architectures can also be finely tuned inside.
+  virtual bool isAsCheapAsAMove(const MachineInstr *MI) const {
+    return MI->isAsCheapAsAMove();
+  }
+
   /// reMaterialize - Re-issue the specified 'original' instruction at the
   /// specific location targeting a new destination register.
   /// The register in Orig->getOperand(0).getReg() will be substituted by
@@ -320,6 +331,20 @@ public:
   /// used by the tail merging pass.
   virtual void ReplaceTailWithBranchTo(MachineBasicBlock::iterator Tail,
                                        MachineBasicBlock *NewDest) const;
+
+  /// getUnconditionalBranch - Get an instruction that performs an unconditional
+  /// branch to the given symbol.
+  virtual void
+  getUnconditionalBranch(MCInst &MI,
+                         const MCSymbolRefExpr *BranchTarget) const {
+    llvm_unreachable("Target didn't implement "
+                     "TargetInstrInfo::getUnconditionalBranch!");
+  }
+
+  /// getTrap - Get a machine trap instruction
+  virtual void getTrap(MCInst &MI) const {
+    llvm_unreachable("Target didn't implement TargetInstrInfo::getTrap!");
+  }
 
   /// isLegalToSplitMBBAt - Return true if it's legal to split the given basic
   /// block at the specified instruction (i.e. instruction would be the start
@@ -728,7 +753,7 @@ public:
   /// use for this target when scheduling the machine instructions before
   /// register allocation.
   virtual ScheduleHazardRecognizer*
-  CreateTargetHazardRecognizer(const TargetMachine *TM,
+  CreateTargetHazardRecognizer(const TargetSubtargetInfo *STI,
                                const ScheduleDAG *DAG) const;
 
   /// CreateTargetMIHazardRecognizer - Allocate and return a hazard recognizer

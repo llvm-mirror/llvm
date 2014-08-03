@@ -9,8 +9,18 @@
         add.d     $f1,$f7,$f29
         add.s     $f8,$f21,$f24
         addi      $13,$9,26322
+        addi      $8,$8,~1             # CHECK: addi $8, $8, -2 # encoding: [0x21,0x08,0xff,0xfe]
         addu      $9,$a0,$a2
         and       $s7,$v0,$12
+        and       $2,4                 # CHECK: andi $2, $2, 4 # encoding: [0x30,0x42,0x00,0x04]
+        bc1f      $fcc0, 4             # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
+        bc1f      4                    # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
+        bc1t      $fcc0, 4             # CHECK: bc1t 4        # encoding: [0x45,0x01,0x00,0x01]
+        bc1t      4                    # CHECK: bc1t 4        # encoding: [0x45,0x01,0x00,0x01]
+        bal       21100                # CHECK: bal 21100     # encoding: [0x04,0x11,0x14,0x9b]
+        bgezal    $0, 21100            # CHECK: bal 21100     # encoding: [0x04,0x11,0x14,0x9b]
+        bgezal    $6, 21100            # CHECK: bgezal $6, 21100 # encoding: [0x04,0xd1,0x14,0x9b]
+        bltzal    $6, 21100            # CHECK: bltzal $6, 21100 # encoding: [0x04,0xd0,0x14,0x9b]
         c.ngl.d   $f29,$f29
         c.ngle.d  $f0,$f16
         c.sf.d    $f30,$f0
@@ -36,7 +46,7 @@
         li        $zero,-29889
         lw        $8,5674($a1)
         lwc1      $f16,10225($k0)
-        lwc2      $18,-841($a2)
+        lwc2      $18,-841($a2)        # CHECK: lwc2 $18, -841($6)     # encoding: [0xc8,0xd2,0xfc,0xb7]
         lwc3      $10,-32265($k0)
         lwl       $s4,-4231($15)
         lwr       $zero,-19147($gp)
@@ -65,6 +75,7 @@
         nop
         nor       $a3,$zero,$a3
         or        $12,$s0,$sp
+        or        $2, 4                # CHECK: ori $2, $2, 4          # encoding: [0x34,0x42,0x00,0x04]
         sb        $s6,-19857($14)
         sh        $14,-6704($15)
         sll       $a3,18               # CHECK: sll $7, $7, 18         # encoding: [0x00,0x07,0x3c,0x80]
@@ -91,7 +102,7 @@
         subu      $sp,$s6,$s6
         sw        $ra,-10160($sp)
         swc1      $f6,-8465($24)
-        swc2      $25,24880($s0)
+        swc2      $25,24880($s0)       # CHECK: swc2 $25, 24880($16)   # encoding: [0xea,0x19,0x61,0x30]
         swc3      $10,-32265($k0)
         swl       $15,13694($s3)
         swr       $s1,-26590($14)

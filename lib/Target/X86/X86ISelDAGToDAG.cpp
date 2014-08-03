@@ -544,7 +544,7 @@ void X86DAGToDAGISel::PreprocessISelDAG() {
                                           false, false, 0);
     SDValue Result = CurDAG->getExtLoad(ISD::EXTLOAD, dl, DstVT, Store, MemTmp,
                                         MachinePointerInfo(),
-                                        MemVT, false, false, 0);
+                                        MemVT, false, false, false, 0);
 
     // We're about to replace all uses of the FP_ROUND/FP_EXTEND with the
     // extload we created.  This will cause general havok on the dag because
@@ -2125,38 +2125,6 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
   case X86ISD::GlobalBaseReg:
     return getGlobalBaseReg();
 
-
-  case X86ISD::ATOMOR64_DAG:
-  case X86ISD::ATOMXOR64_DAG:
-  case X86ISD::ATOMADD64_DAG:
-  case X86ISD::ATOMSUB64_DAG:
-  case X86ISD::ATOMNAND64_DAG:
-  case X86ISD::ATOMAND64_DAG:
-  case X86ISD::ATOMMAX64_DAG:
-  case X86ISD::ATOMMIN64_DAG:
-  case X86ISD::ATOMUMAX64_DAG:
-  case X86ISD::ATOMUMIN64_DAG:
-  case X86ISD::ATOMSWAP64_DAG: {
-    unsigned Opc;
-    switch (Opcode) {
-    default: llvm_unreachable("Impossible opcode");
-    case X86ISD::ATOMOR64_DAG:   Opc = X86::ATOMOR6432;   break;
-    case X86ISD::ATOMXOR64_DAG:  Opc = X86::ATOMXOR6432;  break;
-    case X86ISD::ATOMADD64_DAG:  Opc = X86::ATOMADD6432;  break;
-    case X86ISD::ATOMSUB64_DAG:  Opc = X86::ATOMSUB6432;  break;
-    case X86ISD::ATOMNAND64_DAG: Opc = X86::ATOMNAND6432; break;
-    case X86ISD::ATOMAND64_DAG:  Opc = X86::ATOMAND6432;  break;
-    case X86ISD::ATOMMAX64_DAG:  Opc = X86::ATOMMAX6432;  break;
-    case X86ISD::ATOMMIN64_DAG:  Opc = X86::ATOMMIN6432;  break;
-    case X86ISD::ATOMUMAX64_DAG: Opc = X86::ATOMUMAX6432; break;
-    case X86ISD::ATOMUMIN64_DAG: Opc = X86::ATOMUMIN6432; break;
-    case X86ISD::ATOMSWAP64_DAG: Opc = X86::ATOMSWAP6432; break;
-    }
-    SDNode *RetVal = SelectAtomic64(Node, Opc);
-    if (RetVal)
-      return RetVal;
-    break;
-  }
 
   case ISD::ATOMIC_LOAD_XOR:
   case ISD::ATOMIC_LOAD_AND:

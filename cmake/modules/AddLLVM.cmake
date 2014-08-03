@@ -8,8 +8,13 @@ function(llvm_update_compile_flags name)
     set(update_src_props ON)
   endif()
 
-  if(LLVM_REQUIRES_EH)
-    set(LLVM_REQUIRES_RTTI ON)
+  # LLVM_REQUIRES_EH is an internal flag that individual
+  # targets can use to force EH
+  if(LLVM_REQUIRES_EH OR LLVM_ENABLE_EH)
+    if(NOT (LLVM_REQUIRES_RTTI OR LLVM_ENABLE_RTTI))
+      message(AUTHOR_WARNING "Exception handling requires RTTI. Enabling RTTI for ${name}")
+      set(LLVM_REQUIRES_RTTI ON)
+    endif()
   else()
     if(LLVM_COMPILER_IS_GCC_COMPATIBLE)
       list(APPEND LLVM_COMPILE_FLAGS "-fno-exceptions")
@@ -19,7 +24,9 @@ function(llvm_update_compile_flags name)
     endif()
   endif()
 
-  if(NOT LLVM_REQUIRES_RTTI)
+  # LLVM_REQUIRES_RTTI is an internal flag that individual
+  # targets can use to force RTTI
+  if(NOT (LLVM_REQUIRES_RTTI OR LLVM_ENABLE_RTTI))
     list(APPEND LLVM_COMPILE_DEFINITIONS GTEST_HAS_RTTI=0)
     if (LLVM_COMPILER_IS_GCC_COMPATIBLE)
       list(APPEND LLVM_COMPILE_FLAGS "-fno-rtti")
@@ -150,19 +157,33 @@ endfunction(add_dead_strip)
 # Note: Don't set variables CMAKE_*_OUTPUT_DIRECTORY any more,
 # or a certain builder, for eaxample, msbuild.exe, would be confused.
 function(set_output_directory target bindir libdir)
+  # Do nothing if *_OUTPUT_INTDIR is empty.
+  if("${bindir}" STREQUAL "")
+    return()
+  endif()
+
+  # moddir -- corresponding to LIBRARY_OUTPUT_DIRECTORY.
+  # It affects output of add_library(MODULE).
+  if(WIN32 OR CYGWIN)
+    # DLL platform
+    set(moddir ${bindir})
+  else()
+    set(moddir ${libdir})
+  endif()
   if(NOT "${CMAKE_CFG_INTDIR}" STREQUAL ".")
     foreach(build_mode ${CMAKE_CONFIGURATION_TYPES})
       string(TOUPPER "${build_mode}" CONFIG_SUFFIX)
       string(REPLACE ${CMAKE_CFG_INTDIR} ${build_mode} bi ${bindir})
       string(REPLACE ${CMAKE_CFG_INTDIR} ${build_mode} li ${libdir})
+      string(REPLACE ${CMAKE_CFG_INTDIR} ${build_mode} mi ${moddir})
       set_target_properties(${target} PROPERTIES "RUNTIME_OUTPUT_DIRECTORY_${CONFIG_SUFFIX}" ${bi})
       set_target_properties(${target} PROPERTIES "ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_SUFFIX}" ${li})
-      set_target_properties(${target} PROPERTIES "LIBRARY_OUTPUT_DIRECTORY_${CONFIG_SUFFIX}" ${li})
+      set_target_properties(${target} PROPERTIES "LIBRARY_OUTPUT_DIRECTORY_${CONFIG_SUFFIX}" ${mi})
     endforeach()
   else()
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${bindir})
     set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${libdir})
-    set_target_properties(${target} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${libdir})
+    set_target_properties(${target} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${moddir})
   endif()
 endfunction()
 
@@ -205,7 +226,7 @@ function(llvm_add_library name)
     if(ARG_SHARED OR ARG_STATIC)
       message(WARNING "MODULE with SHARED|STATIC doesn't make sense.")
     endif()
-    if(NOT LLVM_ON_UNIX OR CYGWIN)
+    if(NOT LLVM_ENABLE_PLUGINS)
       message(STATUS "${name} ignored -- Loadable modules not supported on this platform.")
       return()
     endif()
@@ -319,6 +340,13 @@ function(llvm_add_library name)
       ${lib_deps}
       ${llvm_libs}
       )
+  elseif((CYGWIN OR WIN32) AND ARG_SHARED)
+    # Win32's import library may be unaware of its dependent libs.
+    target_link_libraries(${name} PRIVATE
+      ${ARG_LINK_LIBS}
+      ${lib_deps}
+      ${llvm_libs}
+      )
   elseif(ARG_SHARED AND BUILD_SHARED_LIBS)
     # FIXME: It may be PRIVATE since SO knows its dependent libs.
     target_link_libraries(${name} PUBLIC
@@ -359,6 +387,7 @@ macro(add_llvm_library name)
     if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY OR ${name} STREQUAL "LTO")
       install(TARGETS ${name}
         EXPORT LLVMExports
+        RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX}
         ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX})
     endif()
@@ -377,9 +406,15 @@ macro(add_llvm_loadable_module name)
       set_target_properties( ${name} PROPERTIES EXCLUDE_FROM_ALL ON)
     else()
       if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
+        if(WIN32 OR CYGWIN)
+          # DLL platform
+          set(dlldir "bin")
+        else()
+          set(dlldir "lib${LLVM_LIBDIR_SUFFIX}")
+        endif()
         install(TARGETS ${name}
           EXPORT LLVMExports
-          LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX}
+          LIBRARY DESTINATION ${dlldir}
           ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX})
       endif()
       set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${name})
@@ -570,12 +605,6 @@ function(configure_lit_site_cfg input output)
 
   set(SHLIBEXT "${LTDL_SHLIB_EXT}")
 
-  if(BUILD_SHARED_LIBS)
-    set(LLVM_SHARED_LIBS_ENABLED "1")
-  else()
-    set(LLVM_SHARED_LIBS_ENABLED "0")
-  endif(BUILD_SHARED_LIBS)
-
   # Configuration-time: See Unit/lit.site.cfg.in
   if (CMAKE_CFG_INTDIR STREQUAL ".")
     set(LLVM_BUILD_MODE ".")
@@ -590,10 +619,16 @@ function(configure_lit_site_cfg input output)
   string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} LLVM_LIBS_DIR  ${LLVM_LIBRARY_DIR})
 
   # SHLIBDIR points the build tree.
-  string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} SHLIBDIR ${LLVM_LIBRARY_OUTPUT_INTDIR})
+  string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} SHLIBDIR "${LLVM_SHLIB_OUTPUT_INTDIR}")
 
   set(PYTHON_EXECUTABLE ${PYTHON_EXECUTABLE})
-  set(ENABLE_SHARED ${LLVM_SHARED_LIBS_ENABLED})
+  # FIXME: "ENABLE_SHARED" doesn't make sense, since it is used just for
+  # plugins. We may rename it.
+  if(LLVM_ENABLE_PLUGINS)
+    set(ENABLE_SHARED "1")
+  else()
+    set(ENABLE_SHARED "0")
+  endif()
 
   if(LLVM_ENABLE_ASSERTIONS AND NOT MSVC_IDE)
     set(ENABLE_ASSERTIONS "1")
@@ -603,22 +638,6 @@ function(configure_lit_site_cfg input output)
 
   set(HOST_OS ${CMAKE_SYSTEM_NAME})
   set(HOST_ARCH ${CMAKE_SYSTEM_PROCESSOR})
-
-  if (CLANG_ENABLE_ARCMT)
-    set(ENABLE_CLANG_ARCMT "1")
-  else()
-    set(ENABLE_CLANG_ARCMT "0")
-  endif()
-  if (CLANG_ENABLE_REWRITER)
-    set(ENABLE_CLANG_REWRITER "1")
-  else()
-    set(ENABLE_CLANG_REWRITER "0")
-  endif()
-  if (CLANG_ENABLE_STATIC_ANALYZER)
-    set(ENABLE_CLANG_STATIC_ANALYZER "1")
-  else()
-    set(ENABLE_CLANG_STATIC_ANALYZER "0")
-  endif()
 
   configure_file(${input} ${output} @ONLY)
 endfunction()

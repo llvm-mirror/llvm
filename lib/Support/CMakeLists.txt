@@ -41,10 +41,13 @@ add_llvm_library(LLVMSupport
   MD5.cpp
   PluginLoader.cpp
   PrettyStackTrace.cpp
+  RandomNumberGenerator.cpp
   Regex.cpp
+  ScaledNumber.cpp
   SmallPtrSet.cpp
   SmallVector.cpp
   SourceMgr.cpp
+  SpecialCaseList.cpp
   Statistic.cpp
   StreamableMemoryObject.cpp
   StringExtras.cpp
@@ -70,7 +73,6 @@ add_llvm_library(LLVMSupport
 
 # System
   Atomic.cpp
-  Disassembler.cpp
   DynamicLibrary.cpp
   Errno.cpp
   Host.cpp
@@ -83,7 +85,6 @@ add_llvm_library(LLVMSupport
   RWMutex.cpp
   SearchForAddressOfSpecialSymbol.cpp
   Signals.cpp
-  system_error.cpp
   TargetRegistry.cpp
   ThreadLocal.cpp
   Threading.cpp
@@ -100,7 +101,6 @@ add_llvm_library(LLVMSupport
   Unix/Program.inc
   Unix/RWMutex.inc
   Unix/Signals.inc
-  Unix/system_error.inc
   Unix/ThreadLocal.inc
   Unix/TimeValue.inc
   Unix/Watchdog.inc
@@ -113,7 +113,6 @@ add_llvm_library(LLVMSupport
   Windows/Program.inc
   Windows/RWMutex.inc
   Windows/Signals.inc
-  Windows/system_error.inc
   Windows/ThreadLocal.inc
   Windows/TimeValue.inc
   Windows/Watchdog.inc

@@ -32,12 +32,11 @@ private:
   Binary(const Binary &other) LLVM_DELETED_FUNCTION;
 
   unsigned int TypeID;
-  bool BufferOwned;
 
 protected:
-  MemoryBuffer *Data;
+  std::unique_ptr<MemoryBuffer> Data;
 
-  Binary(unsigned int Type, MemoryBuffer *Source, bool BufferOwned = true);
+  Binary(unsigned int Type, std::unique_ptr<MemoryBuffer> Source);
 
   enum {
     ID_Archive,
@@ -79,6 +78,7 @@ public:
   virtual ~Binary();
 
   StringRef getData() const;
+  MemoryBuffer *releaseBuffer() { return Data.release(); }
   StringRef getFileName() const;
 
   // Cast methods.
@@ -125,13 +125,12 @@ public:
 
 /// @brief Create a Binary from Source, autodetecting the file type.
 ///
-/// @param Source The data to create the Binary from. Ownership is transferred
-///        to the Binary if successful. If an error is returned,
-///        Source is destroyed by createBinary before returning.
-ErrorOr<Binary *> createBinary(MemoryBuffer *Source,
-                               LLVMContext *Context = nullptr);
+/// @param Source The data to create the Binary from.
+ErrorOr<std::unique_ptr<Binary>>
+createBinary(std::unique_ptr<MemoryBuffer> Source,
+             LLVMContext *Context = nullptr);
 
-ErrorOr<Binary *> createBinary(StringRef Path);
+ErrorOr<std::unique_ptr<Binary>> createBinary(StringRef Path);
 }
 }
 

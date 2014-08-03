@@ -32,7 +32,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Config/config.h" // Get build system configuration settings
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 #include <windows.h>
 #include <wincrypt.h>
 #include <cassert>
@@ -163,10 +163,9 @@ c_str(SmallVectorImpl<T> &str) {
 
 namespace sys {
 namespace windows {
-error_code UTF8ToUTF16(StringRef utf8,
-                       SmallVectorImpl<wchar_t> &utf16);
-error_code UTF16ToUTF8(const wchar_t *utf16, size_t utf16_len,
-                       SmallVectorImpl<char> &utf8);
+std::error_code UTF8ToUTF16(StringRef utf8, SmallVectorImpl<wchar_t> &utf16);
+std::error_code UTF16ToUTF8(const wchar_t *utf16, size_t utf16_len,
+                            SmallVectorImpl<char> &utf8);
 } // end namespace windows
 } // end namespace sys
 } // end namespace llvm.

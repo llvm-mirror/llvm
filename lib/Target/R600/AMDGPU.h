@@ -17,6 +17,7 @@
 namespace llvm {
 
 class AMDGPUInstrPrinter;
+class AMDGPUSubtarget;
 class AMDGPUTargetMachine;
 class FunctionPass;
 class MCAsmInfo;
@@ -38,8 +39,10 @@ FunctionPass *createAMDGPUCFGStructurizerPass();
 FunctionPass *createSITypeRewriter();
 FunctionPass *createSIAnnotateControlFlowPass();
 FunctionPass *createSILowerI1CopiesPass();
+FunctionPass *createSIShrinkInstructionsPass();
 FunctionPass *createSILowerControlFlowPass(TargetMachine &tm);
 FunctionPass *createSIFixSGPRCopiesPass(TargetMachine &tm);
+FunctionPass *createSIFixSGPRLiveRangesPass();
 FunctionPass *createSICodeEmitterPass(formatted_raw_ostream &OS);
 FunctionPass *createSIInsertWaits(TargetMachine &tm);
 
@@ -47,15 +50,27 @@ void initializeSILowerI1CopiesPass(PassRegistry &);
 extern char &SILowerI1CopiesID;
 
 // Passes common to R600 and SI
+FunctionPass *createAMDGPUPromoteAlloca(const AMDGPUSubtarget &ST);
 Pass *createAMDGPUStructurizeCFGPass();
-FunctionPass *createAMDGPUConvertToISAPass(TargetMachine &tm);
 FunctionPass *createAMDGPUISelDag(TargetMachine &tm);
 
 /// \brief Creates an AMDGPU-specific Target Transformation Info pass.
 ImmutablePass *
 createAMDGPUTargetTransformInfoPass(const AMDGPUTargetMachine *TM);
 
+void initializeSIFixSGPRLiveRangesPass(PassRegistry&);
+extern char &SIFixSGPRLiveRangesID;
+
+
 extern Target TheAMDGPUTarget;
+
+namespace AMDGPU {
+enum TargetIndex {
+  TI_CONSTDATA_START
+};
+}
+
+#define END_OF_TEXT_LABEL_NAME "EndOfTextLabel"
 
 } // End namespace llvm
 

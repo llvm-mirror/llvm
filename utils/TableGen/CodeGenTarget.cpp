@@ -301,7 +301,8 @@ void CodeGenTarget::ComputeInstrsByEnum() const {
       "GC_LABEL",     "KILL",          "EXTRACT_SUBREG",   "INSERT_SUBREG",
       "IMPLICIT_DEF", "SUBREG_TO_REG", "COPY_TO_REGCLASS", "DBG_VALUE",
       "REG_SEQUENCE", "COPY",          "BUNDLE",           "LIFETIME_START",
-      "LIFETIME_END", "STACKMAP",      "PATCHPOINT",       nullptr};
+      "LIFETIME_END", "STACKMAP",      "PATCHPOINT",       "LOAD_STACK_GUARD",
+      nullptr};
   const DenseMap<const Record*, CodeGenInstruction*> &Insts = getInstructions();
   for (const char *const *p = FixedInstrs; *p; ++p) {
     const CodeGenInstruction *Instr = GetInstByName(*p, Insts, Records);
@@ -459,6 +460,8 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
 
   if (R->getValue("GCCBuiltinName"))  // Ignore a missing GCCBuiltinName field.
     GCCBuiltinName = R->getValueAsString("GCCBuiltinName");
+  if (R->getValue("MSBuiltinName"))   // Ignore a missing MSBuiltinName field.
+    MSBuiltinName = R->getValueAsString("MSBuiltinName");
 
   TargetPrefix = R->getValueAsString("TargetPrefix");
   Name = R->getValueAsString("LLVMName");

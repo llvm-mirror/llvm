@@ -377,6 +377,7 @@ ifeq ($(ENABLE_COVERAGE),1)
   BuildMode := $(BuildMode)+Coverage
   CXX.Flags += -ftest-coverage -fprofile-arcs
   C.Flags   += -ftest-coverage -fprofile-arcs
+  LD.Flags   += -ftest-coverage -fprofile-arcs
 endif
 
 # If DISABLE_ASSERTIONS=1 is specified (make command line or configured),
@@ -1724,7 +1725,7 @@ $(ObjDir)/%GenDFAPacketizer.inc.tmp : %.td $(ObjDir)/.dir $(LLVM_TBLGEN)
 
 # Dump all the records to <target>.td.expanded.  This is useful for debugging.
 $(TARGET:%=%.td.expanded): \
-%.td.expanded : %.td $(LLVM_TBLGEN)
+%.td.expanded : %.td $(LLVM_TBLGEN) $(TDFiles)
 	$(Echo) "Building a fully expanded version of $(<F)"
 	$(Verb) $(LLVMTableGen) -o $(call SYSPATH, $@) $<
 

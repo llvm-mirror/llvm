@@ -106,6 +106,7 @@ static void PrintEscapedString(StringRef Name, raw_ostream &Out) {
 
 enum PrefixType {
   GlobalPrefix,
+  ComdatPrefix,
   LabelPrefix,
   LocalPrefix,
   NoPrefix
@@ -119,6 +120,7 @@ static void PrintLLVMName(raw_ostream &OS, StringRef Name, PrefixType Prefix) {
   switch (Prefix) {
   case NoPrefix: break;
   case GlobalPrefix: OS << '@'; break;
+  case ComdatPrefix: OS << '$'; break;
   case LabelPrefix:  break;
   case LocalPrefix:  OS << '%'; break;
   }
@@ -1165,8 +1167,15 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Value *V,
 }
 
 void AssemblyWriter::init() {
-  if (TheModule)
-    TypePrinter.incorporateTypes(*TheModule);
+  if (!TheModule)
+    return;
+  TypePrinter.incorporateTypes(*TheModule);
+  for (const Function &F : *TheModule)
+    if (const Comdat *C = F.getComdat())
+      Comdats.insert(C);
+  for (const GlobalVariable &GV : TheModule->globals())
+    if (const Comdat *C = GV.getComdat())
+      Comdats.insert(C);
 }
 
 
@@ -1307,6 +1316,15 @@ void AssemblyWriter::printModule(const Module *M) {
   }
 
   printTypeIdentities();
+
+  // Output all comdats.
+  if (!Comdats.empty())
+    Out << '\n';
+  for (const Comdat *C : Comdats) {
+    printComdat(C);
+    if (C != Comdats.back())
+      Out << '\n';
+  }
 
   // Output all globals.
   if (!M->global_empty()) Out << '\n';
@@ -1451,10 +1469,11 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   PrintVisibility(GV->getVisibility(), Out);
   PrintDLLStorageClass(GV->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GV->getThreadLocalMode(), Out);
+  if (GV->hasUnnamedAddr())
+    Out << "unnamed_addr ";
 
   if (unsigned AddressSpace = GV->getType()->getAddressSpace())
     Out << "addrspace(" << AddressSpace << ") ";
-  if (GV->hasUnnamedAddr()) Out << "unnamed_addr ";
   if (GV->isExternallyInitialized()) Out << "externally_initialized ";
   Out << (GV->isConstant() ? "constant " : "global ");
   TypePrinter.print(GV->getType()->getElementType(), Out);
@@ -1468,6 +1487,10 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
     Out << ", section \"";
     PrintEscapedString(GV->getSection(), Out);
     Out << '"';
+  }
+  if (GV->hasComdat()) {
+    Out << ", comdat ";
+    PrintLLVMName(Out, GV->getComdat()->getName(), ComdatPrefix);
   }
   if (GV->getAlignment())
     Out << ", align " << GV->getAlignment();
@@ -1486,24 +1509,19 @@ void AssemblyWriter::printAlias(const GlobalAlias *GA) {
     PrintLLVMName(Out, GA);
     Out << " = ";
   }
+  PrintLinkage(GA->getLinkage(), Out);
   PrintVisibility(GA->getVisibility(), Out);
   PrintDLLStorageClass(GA->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GA->getThreadLocalMode(), Out);
+  if (GA->hasUnnamedAddr())
+    Out << "unnamed_addr ";
 
   Out << "alias ";
 
-  PrintLinkage(GA->getLinkage(), Out);
-
-  PointerType *Ty = GA->getType();
   const Constant *Aliasee = GA->getAliasee();
-  if (!Aliasee || Ty != Aliasee->getType()) {
-    if (unsigned AddressSpace = Ty->getAddressSpace())
-      Out << "addrspace(" << AddressSpace << ") ";
-    TypePrinter.print(Ty->getElementType(), Out);
-    Out << ", ";
-  }
 
   if (!Aliasee) {
+    TypePrinter.print(GA->getType(), Out);
     Out << " <<NULL ALIASEE>>";
   } else {
     writeOperand(Aliasee, !isa<ConstantExpr>(Aliasee));
@@ -1511,6 +1529,10 @@ void AssemblyWriter::printAlias(const GlobalAlias *GA) {
 
   printInfoComment(*GA);
   Out << '\n';
+}
+
+void AssemblyWriter::printComdat(const Comdat *C) {
+  C->print(Out);
 }
 
 void AssemblyWriter::printTypeIdentities() {
@@ -1650,6 +1672,10 @@ void AssemblyWriter::printFunction(const Function *F) {
     PrintEscapedString(F->getSection(), Out);
     Out << '"';
   }
+  if (F->hasComdat()) {
+    Out << " comdat ";
+    PrintLLVMName(Out, F->getComdat()->getName(), ComdatPrefix);
+  }
   if (F->getAlignment())
     Out << " align " << F->getAlignment();
   if (F->hasGC())
@@ -1788,6 +1814,9 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
   if ((isa<LoadInst>(I)  && cast<LoadInst>(I).isAtomic()) ||
       (isa<StoreInst>(I) && cast<StoreInst>(I).isAtomic()))
     Out << " atomic";
+
+  if (isa<AtomicCmpXchgInst>(I) && cast<AtomicCmpXchgInst>(I).isWeak())
+    Out << " weak";
 
   // If this is a volatile operation, print out the volatile marker.
   if ((isa<LoadInst>(I)  && cast<LoadInst>(I).isVolatile()) ||
@@ -2158,11 +2187,32 @@ void NamedMDNode::print(raw_ostream &ROS) const {
   W.printNamedMDNode(this);
 }
 
-void Type::print(raw_ostream &OS) const {
-  if (!this) {
-    OS << "<null Type>";
-    return;
+void Comdat::print(raw_ostream &ROS) const {
+  PrintLLVMName(ROS, getName(), ComdatPrefix);
+  ROS << " = comdat ";
+
+  switch (getSelectionKind()) {
+  case Comdat::Any:
+    ROS << "any";
+    break;
+  case Comdat::ExactMatch:
+    ROS << "exactmatch";
+    break;
+  case Comdat::Largest:
+    ROS << "largest";
+    break;
+  case Comdat::NoDuplicates:
+    ROS << "noduplicates";
+    break;
+  case Comdat::SameSize:
+    ROS << "samesize";
+    break;
   }
+
+  ROS << '\n';
+}
+
+void Type::print(raw_ostream &OS) const {
   TypePrinting TP;
   TP.print(const_cast<Type*>(this), OS);
 
@@ -2175,10 +2225,6 @@ void Type::print(raw_ostream &OS) const {
 }
 
 void Value::print(raw_ostream &ROS) const {
-  if (!this) {
-    ROS << "printing a <null> value\n";
-    return;
-  }
   formatted_raw_ostream OS(ROS);
   if (const Instruction *I = dyn_cast<Instruction>(this)) {
     const Function *F = I->getParent() ? I->getParent()->getParent() : nullptr;
@@ -2248,6 +2294,9 @@ void Type::dump() const { print(dbgs()); }
 
 // Module::dump() - Allow printing of Modules from the debugger.
 void Module::dump() const { print(dbgs(), nullptr); }
+
+// \brief Allow printing of Comdats from the debugger.
+void Comdat::dump() const { print(dbgs()); }
 
 // NamedMDNode::dump() - Allow printing of NamedMDNodes from the debugger.
 void NamedMDNode::dump() const { print(dbgs()); }

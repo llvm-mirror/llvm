@@ -45,14 +45,14 @@ static void addRegionIntoQueue(Region &R, std::deque<Region *> &RQ) {
 
 /// Pass Manager itself does not invalidate any analysis info.
 void RGPassManager::getAnalysisUsage(AnalysisUsage &Info) const {
-  Info.addRequired<RegionInfo>();
+  Info.addRequired<RegionInfoPass>();
   Info.setPreservesAll();
 }
 
 /// run - Execute all of the passes scheduled for execution.  Keep track of
 /// whether any of the passes modifies the function, and if so, return true.
 bool RGPassManager::runOnFunction(Function &F) {
-  RI = &getAnalysis<RegionInfo>();
+  RI = &getAnalysis<RegionInfoPass>().getRegionInfo();
   bool Changed = false;
 
   // Collect inherited analysis from Module level pass manager.
@@ -195,8 +195,12 @@ public:
 
   bool runOnRegion(Region *R, RGPassManager &RGM) override {
     Out << Banner;
-    for (const auto &BB : R->blocks())
-      BB->print(Out);
+    for (const auto &BB : R->blocks()) {
+      if (BB)
+        BB->print(Out);
+      else
+        Out << "Printing <null> Block";
+    }
 
     return false;
   }

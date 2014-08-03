@@ -448,13 +448,19 @@ def logical_imm64_XFORM : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(enc, MVT::i32);
 }]>;
 
-def LogicalImm32Operand : AsmOperandClass {
-  let Name = "LogicalImm32";
-  let DiagnosticType = "LogicalSecondSource";
-}
-def LogicalImm64Operand : AsmOperandClass {
-  let Name = "LogicalImm64";
-  let DiagnosticType = "LogicalSecondSource";
+let DiagnosticType = "LogicalSecondSource" in {
+  def LogicalImm32Operand : AsmOperandClass {
+    let Name = "LogicalImm32";
+  }
+  def LogicalImm64Operand : AsmOperandClass {
+    let Name = "LogicalImm64";
+  }
+  def LogicalImm32NotOperand : AsmOperandClass {
+    let Name = "LogicalImm32Not";
+  }
+  def LogicalImm64NotOperand : AsmOperandClass {
+    let Name = "LogicalImm64Not";
+  }
 }
 def logical_imm32 : Operand<i32>, PatLeaf<(imm), [{
   return AArch64_AM::isLogicalImmediate(N->getZExtValue(), 32);
@@ -467,6 +473,12 @@ def logical_imm64 : Operand<i64>, PatLeaf<(imm), [{
 }], logical_imm64_XFORM> {
   let PrintMethod = "printLogicalImm64";
   let ParserMatchClass = LogicalImm64Operand;
+}
+def logical_imm32_not : Operand<i32> {
+  let ParserMatchClass = LogicalImm32NotOperand;
+}
+def logical_imm64_not : Operand<i64> {
+  let ParserMatchClass = LogicalImm64NotOperand;
 }
 
 // imm0_65535 predicate - True if the immediate is in the range [0,65535].
@@ -526,6 +538,11 @@ def imm0_7 : Operand<i64>, ImmLeaf<i64, [{
 }]> {
   let ParserMatchClass = Imm0_7Operand;
 }
+
+// imm32_0_15 predicate - True if the 32-bit immediate is in the range [0,15]
+def imm32_0_15 : Operand<i32>, ImmLeaf<i32, [{
+  return ((uint32_t)Imm) < 16;
+}]>;
 
 // An arithmetic shifter operand:
 //  {7-6} - shift type: 00 = lsl, 01 = lsr, 10 = asr
@@ -764,15 +781,17 @@ def simdimmtype10 : Operand<i32>,
 
 // Base encoding for system instruction operands.
 let mayLoad = 0, mayStore = 0, hasSideEffects = 1 in
-class BaseSystemI<bit L, dag oops, dag iops, string asm, string operands>
-    : I<oops, iops, asm, operands, "", []> {
+class BaseSystemI<bit L, dag oops, dag iops, string asm, string operands,
+                  list<dag> pattern = []>
+    : I<oops, iops, asm, operands, "", pattern> {
   let Inst{31-22} = 0b1101010100;
   let Inst{21}    = L;
 }
 
 // System instructions which do not have an Rt register.
-class SimpleSystemI<bit L, dag iops, string asm, string operands>
-    : BaseSystemI<L, (outs), iops, asm, operands> {
+class SimpleSystemI<bit L, dag iops, string asm, string operands,
+                    list<dag> pattern = []>
+    : BaseSystemI<L, (outs), iops, asm, operands, pattern> {
   let Inst{4-0} = 0b11111;
 }
 
@@ -785,13 +804,17 @@ class RtSystemI<bit L, dag oops, dag iops, string asm, string operands>
 }
 
 // Hint instructions that take both a CRm and a 3-bit immediate.
-class HintI<string mnemonic>
-    : SimpleSystemI<0, (ins imm0_127:$imm), mnemonic#" $imm", "">,
-      Sched<[WriteHint]> {
-  bits <7> imm;
-  let Inst{20-12} = 0b000110010;
-  let Inst{11-5} = imm;
-}
+// NOTE: ideally, this would have mayStore = 0, mayLoad = 0, but we cannot
+// model patterns with sufficiently fine granularity
+let mayStore = 1, mayLoad = 1, hasSideEffects = 1 in
+  class HintI<string mnemonic>
+      : SimpleSystemI<0, (ins imm0_127:$imm), mnemonic#" $imm", "",
+                      [(int_aarch64_hint imm0_127:$imm)]>,
+        Sched<[WriteHint]> {
+    bits <7> imm;
+    let Inst{20-12} = 0b000110010;
+    let Inst{11-5} = imm;
+  }
 
 // System instructions taking a single literal operand which encodes into
 // CRm. op2 differentiates the opcodes.
@@ -803,8 +826,9 @@ def barrier_op : Operand<i32> {
   let PrintMethod = "printBarrierOption";
   let ParserMatchClass = BarrierAsmOperand;
 }
-class CRmSystemI<Operand crmtype, bits<3> opc, string asm>
-    : SimpleSystemI<0, (ins crmtype:$CRm), asm, "\t$CRm">,
+class CRmSystemI<Operand crmtype, bits<3> opc, string asm,
+                 list<dag> pattern = []>
+    : SimpleSystemI<0, (ins crmtype:$CRm), asm, "\t$CRm", pattern>,
       Sched<[WriteBarrier]> {
   bits<4> CRm;
   let Inst{20-12} = 0b000110011;
@@ -963,8 +987,14 @@ def ccode : Operand<i32> {
   let ParserMatchClass = CondCode;
 }
 def inv_ccode : Operand<i32> {
+  // AL and NV are invalid in the aliases which use inv_ccode
   let PrintMethod = "printInverseCondCode";
   let ParserMatchClass = CondCode;
+  let MCOperandPredicate = [{
+    return MCOp.isImm() &&
+           MCOp.getImm() != AArch64CC::AL &&
+           MCOp.getImm() != AArch64CC::NV;
+  }];
 }
 
 // Conditional branch target. 19-bit immediate. The low two bits of the target
@@ -1323,13 +1353,13 @@ class BaseMulAccum<bit isSub, bits<3> opc, RegisterClass multype,
 multiclass MulAccum<bit isSub, string asm, SDNode AccNode> {
   def Wrrr : BaseMulAccum<isSub, 0b000, GPR32, GPR32, asm,
       [(set GPR32:$Rd, (AccNode GPR32:$Ra, (mul GPR32:$Rn, GPR32:$Rm)))]>,
-      Sched<[WriteIM32, ReadIMA, ReadIM, ReadIM]> {
+      Sched<[WriteIM32, ReadIM, ReadIM, ReadIMA]> {
     let Inst{31} = 0;
   }
 
   def Xrrr : BaseMulAccum<isSub, 0b000, GPR64, GPR64, asm,
       [(set GPR64:$Rd, (AccNode GPR64:$Ra, (mul GPR64:$Rn, GPR64:$Rm)))]>,
-      Sched<[WriteIM64, ReadIMA, ReadIM, ReadIM]> {
+      Sched<[WriteIM64, ReadIM, ReadIM, ReadIMA]> {
     let Inst{31} = 1;
   }
 }
@@ -1339,7 +1369,7 @@ class WideMulAccum<bit isSub, bits<3> opc, string asm,
   : BaseMulAccum<isSub, opc, GPR32, GPR64, asm,
     [(set GPR64:$Rd, (AccNode GPR64:$Ra,
                             (mul (ExtNode GPR32:$Rn), (ExtNode GPR32:$Rm))))]>,
-    Sched<[WriteIM32, ReadIMA, ReadIM, ReadIM]> {
+    Sched<[WriteIM32, ReadIM, ReadIM, ReadIMA]> {
   let Inst{31} = 1;
 }
 
@@ -1606,7 +1636,7 @@ class AddSubRegAlias<string asm, Instruction inst, RegisterClass dstRegtype,
 
 multiclass AddSub<bit isSub, string mnemonic,
                   SDPatternOperator OpNode = null_frag> {
-  let hasSideEffects = 0 in {
+  let hasSideEffects = 0, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
   // Add/Subtract immediate
   def Wri  : BaseAddSubImm<isSub, 0, GPR32sp, GPR32sp, addsub_shifted_imm32,
                            mnemonic, OpNode> {
@@ -1738,6 +1768,10 @@ multiclass AddSubS<bit isSub, string mnemonic, SDNode OpNode, string cmp> {
                   WZR, GPR32:$src1, GPR32:$src2, 0), 5>;
   def : InstAlias<cmp#" $src1, $src2", (!cast<Instruction>(NAME#"Xrs")
                   XZR, GPR64:$src1, GPR64:$src2, 0), 5>;
+  def : InstAlias<cmp#" $src1, $src2", (!cast<Instruction>(NAME#"Wrx")
+                  WZR, GPR32sponly:$src1, GPR32:$src2, 16), 5>;
+  def : InstAlias<cmp#" $src1, $src2", (!cast<Instruction>(NAME#"Xrx64")
+                  XZR, GPR64sponly:$src1, GPR64:$src2, 24), 5>;
 
   // Register/register aliases with no shift when SP is not used.
   def : AddSubRegAlias<mnemonic, !cast<Instruction>(NAME#"Wrs"),
@@ -1925,22 +1959,32 @@ class LogicalRegAlias<string asm, Instruction inst, RegisterClass regtype>
     : InstAlias<asm#" $dst, $src1, $src2",
                 (inst regtype:$dst, regtype:$src1, regtype:$src2, 0)>;
 
-let AddedComplexity = 6 in
-multiclass LogicalImm<bits<2> opc, string mnemonic, SDNode OpNode> {
+multiclass LogicalImm<bits<2> opc, string mnemonic, SDNode OpNode,
+                      string Alias> {
+  let AddedComplexity = 6, isReMaterializable = 1, isAsCheapAsAMove = 1 in
   def Wri : BaseLogicalImm<opc, GPR32sp, GPR32, logical_imm32, mnemonic,
                            [(set GPR32sp:$Rd, (OpNode GPR32:$Rn,
                                                logical_imm32:$imm))]> {
     let Inst{31} = 0;
     let Inst{22} = 0; // 64-bit version has an additional bit of immediate.
   }
+  let AddedComplexity = 6, isReMaterializable = 1, isAsCheapAsAMove = 1 in
   def Xri : BaseLogicalImm<opc, GPR64sp, GPR64, logical_imm64, mnemonic,
                            [(set GPR64sp:$Rd, (OpNode GPR64:$Rn,
                                                logical_imm64:$imm))]> {
     let Inst{31} = 1;
   }
+
+  def : InstAlias<Alias # " $Rd, $Rn, $imm",
+                  (!cast<Instruction>(NAME # "Wri") GPR32sp:$Rd, GPR32:$Rn,
+                      logical_imm32_not:$imm), 0>;
+  def : InstAlias<Alias # " $Rd, $Rn, $imm",
+                  (!cast<Instruction>(NAME # "Xri") GPR64sp:$Rd, GPR64:$Rn,
+                       logical_imm64_not:$imm), 0>;
 }
 
-multiclass LogicalImmS<bits<2> opc, string mnemonic, SDNode OpNode> {
+multiclass LogicalImmS<bits<2> opc, string mnemonic, SDNode OpNode,
+                       string Alias> {
   let isCompare = 1, Defs = [NZCV] in {
   def Wri  : BaseLogicalImm<opc, GPR32, GPR32, logical_imm32, mnemonic,
       [(set GPR32:$Rd, (OpNode GPR32:$Rn, logical_imm32:$imm))]> {
@@ -1952,6 +1996,13 @@ multiclass LogicalImmS<bits<2> opc, string mnemonic, SDNode OpNode> {
     let Inst{31} = 1;
   }
   } // end Defs = [NZCV]
+
+  def : InstAlias<Alias # " $Rd, $Rn, $imm",
+                  (!cast<Instruction>(NAME # "Wri") GPR32:$Rd, GPR32:$Rn,
+                      logical_imm32_not:$imm), 0>;
+  def : InstAlias<Alias # " $Rd, $Rn, $imm",
+                  (!cast<Instruction>(NAME # "Xri") GPR64:$Rd, GPR64:$Rn,
+                       logical_imm64_not:$imm), 0>;
 }
 
 class BaseLogicalRegPseudo<RegisterClass regtype, SDPatternOperator OpNode>
@@ -1962,8 +2013,10 @@ class BaseLogicalRegPseudo<RegisterClass regtype, SDPatternOperator OpNode>
 // Split from LogicalImm as not all instructions have both.
 multiclass LogicalReg<bits<2> opc, bit N, string mnemonic,
                       SDPatternOperator OpNode> {
+  let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
   def Wrr : BaseLogicalRegPseudo<GPR32, OpNode>;
   def Xrr : BaseLogicalRegPseudo<GPR64, OpNode>;
+  }
 
   def Wrs : BaseLogicalSReg<opc, N, GPR32, logical_shifted_reg32, mnemonic,
                             [(set GPR32:$Rd, (OpNode GPR32:$Rn,

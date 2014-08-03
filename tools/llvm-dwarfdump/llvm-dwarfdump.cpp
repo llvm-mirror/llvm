@@ -25,11 +25,11 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cstring>
 #include <list>
 #include <string>
+#include <system_error>
 
 using namespace llvm;
 using namespace object;
@@ -66,21 +66,23 @@ DumpType("debug-dump", cl::init(DIDT_All),
         clEnumValEnd));
 
 static void DumpInput(const StringRef &Filename) {
-  std::unique_ptr<MemoryBuffer> Buff;
+  ErrorOr<std::unique_ptr<MemoryBuffer>> Buff =
+      MemoryBuffer::getFileOrSTDIN(Filename);
 
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, Buff)) {
-    errs() << Filename << ": " << ec.message() << "\n";
+  if (std::error_code EC = Buff.getError()) {
+    errs() << Filename << ": " << EC.message() << "\n";
     return;
   }
 
-  ErrorOr<ObjectFile*> ObjOrErr(ObjectFile::createObjectFile(Buff.release()));
-  if (error_code EC = ObjOrErr.getError()) {
+  ErrorOr<std::unique_ptr<ObjectFile>> ObjOrErr =
+      ObjectFile::createObjectFile(Buff.get());
+  if (std::error_code EC = ObjOrErr.getError()) {
     errs() << Filename << ": " << EC.message() << '\n';
     return;
   }
-  std::unique_ptr<ObjectFile> Obj(ObjOrErr.get());
+  std::unique_ptr<ObjectFile> Obj = std::move(ObjOrErr.get());
 
-  std::unique_ptr<DIContext> DICtx(DIContext::getDWARFContext(Obj.get()));
+  std::unique_ptr<DIContext> DICtx(DIContext::getDWARFContext(*Obj));
 
   outs() << Filename
          << ":\tfile format " << Obj->getFileFormatName() << "\n\n";

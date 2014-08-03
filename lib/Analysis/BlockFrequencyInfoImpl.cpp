@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/BlockFrequencyInfoImpl.h"
-#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/Support/raw_ostream.h"
 #include <deque>
@@ -22,300 +21,10 @@ using namespace llvm::bfi_detail;
 
 #define DEBUG_TYPE "block-freq"
 
-//===----------------------------------------------------------------------===//
-//
-// UnsignedFloat implementation.
-//
-//===----------------------------------------------------------------------===//
-#ifndef _MSC_VER
-const int32_t UnsignedFloatBase::MaxExponent;
-const int32_t UnsignedFloatBase::MinExponent;
-#endif
-
-static void appendDigit(std::string &Str, unsigned D) {
-  assert(D < 10);
-  Str += '0' + D % 10;
-}
-
-static void appendNumber(std::string &Str, uint64_t N) {
-  while (N) {
-    appendDigit(Str, N % 10);
-    N /= 10;
-  }
-}
-
-static bool doesRoundUp(char Digit) {
-  switch (Digit) {
-  case '5':
-  case '6':
-  case '7':
-  case '8':
-  case '9':
-    return true;
-  default:
-    return false;
-  }
-}
-
-static std::string toStringAPFloat(uint64_t D, int E, unsigned Precision) {
-  assert(E >= UnsignedFloatBase::MinExponent);
-  assert(E <= UnsignedFloatBase::MaxExponent);
-
-  // Find a new E, but don't let it increase past MaxExponent.
-  int LeadingZeros = UnsignedFloatBase::countLeadingZeros64(D);
-  int NewE = std::min(UnsignedFloatBase::MaxExponent, E + 63 - LeadingZeros);
-  int Shift = 63 - (NewE - E);
-  assert(Shift <= LeadingZeros);
-  assert(Shift == LeadingZeros || NewE == UnsignedFloatBase::MaxExponent);
-  D <<= Shift;
-  E = NewE;
-
-  // Check for a denormal.
-  unsigned AdjustedE = E + 16383;
-  if (!(D >> 63)) {
-    assert(E == UnsignedFloatBase::MaxExponent);
-    AdjustedE = 0;
-  }
-
-  // Build the float and print it.
-  uint64_t RawBits[2] = {D, AdjustedE};
-  APFloat Float(APFloat::x87DoubleExtended, APInt(80, RawBits));
-  SmallVector<char, 24> Chars;
-  Float.toString(Chars, Precision, 0);
-  return std::string(Chars.begin(), Chars.end());
-}
-
-static std::string stripTrailingZeros(const std::string &Float) {
-  size_t NonZero = Float.find_last_not_of('0');
-  assert(NonZero != std::string::npos && "no . in floating point string");
-
-  if (Float[NonZero] == '.')
-    ++NonZero;
-
-  return Float.substr(0, NonZero + 1);
-}
-
-std::string UnsignedFloatBase::toString(uint64_t D, int16_t E, int Width,
-                                        unsigned Precision) {
-  if (!D)
-    return "0.0";
-
-  // Canonicalize exponent and digits.
-  uint64_t Above0 = 0;
-  uint64_t Below0 = 0;
-  uint64_t Extra = 0;
-  int ExtraShift = 0;
-  if (E == 0) {
-    Above0 = D;
-  } else if (E > 0) {
-    if (int Shift = std::min(int16_t(countLeadingZeros64(D)), E)) {
-      D <<= Shift;
-      E -= Shift;
-
-      if (!E)
-        Above0 = D;
-    }
-  } else if (E > -64) {
-    Above0 = D >> -E;
-    Below0 = D << (64 + E);
-  } else if (E > -120) {
-    Below0 = D >> (-E - 64);
-    Extra = D << (128 + E);
-    ExtraShift = -64 - E;
-  }
-
-  // Fall back on APFloat for very small and very large numbers.
-  if (!Above0 && !Below0)
-    return toStringAPFloat(D, E, Precision);
-
-  // Append the digits before the decimal.
-  std::string Str;
-  size_t DigitsOut = 0;
-  if (Above0) {
-    appendNumber(Str, Above0);
-    DigitsOut = Str.size();
-  } else
-    appendDigit(Str, 0);
-  std::reverse(Str.begin(), Str.end());
-
-  // Return early if there's nothing after the decimal.
-  if (!Below0)
-    return Str + ".0";
-
-  // Append the decimal and beyond.
-  Str += '.';
-  uint64_t Error = UINT64_C(1) << (64 - Width);
-
-  // We need to shift Below0 to the right to make space for calculating
-  // digits.  Save the precision we're losing in Extra.
-  Extra = (Below0 & 0xf) << 56 | (Extra >> 8);
-  Below0 >>= 4;
-  size_t SinceDot = 0;
-  size_t AfterDot = Str.size();
-  do {
-    if (ExtraShift) {
-      --ExtraShift;
-      Error *= 5;
-    } else
-      Error *= 10;
-
-    Below0 *= 10;
-    Extra *= 10;
-    Below0 += (Extra >> 60);
-    Extra = Extra & (UINT64_MAX >> 4);
-    appendDigit(Str, Below0 >> 60);
-    Below0 = Below0 & (UINT64_MAX >> 4);
-    if (DigitsOut || Str.back() != '0')
-      ++DigitsOut;
-    ++SinceDot;
-  } while (Error && (Below0 << 4 | Extra >> 60) >= Error / 2 &&
-           (!Precision || DigitsOut <= Precision || SinceDot < 2));
-
-  // Return early for maximum precision.
-  if (!Precision || DigitsOut <= Precision)
-    return stripTrailingZeros(Str);
-
-  // Find where to truncate.
-  size_t Truncate =
-      std::max(Str.size() - (DigitsOut - Precision), AfterDot + 1);
-
-  // Check if there's anything to truncate.
-  if (Truncate >= Str.size())
-    return stripTrailingZeros(Str);
-
-  bool Carry = doesRoundUp(Str[Truncate]);
-  if (!Carry)
-    return stripTrailingZeros(Str.substr(0, Truncate));
-
-  // Round with the first truncated digit.
-  for (std::string::reverse_iterator I(Str.begin() + Truncate), E = Str.rend();
-       I != E; ++I) {
-    if (*I == '.')
-      continue;
-    if (*I == '9') {
-      *I = '0';
-      continue;
-    }
-
-    ++*I;
-    Carry = false;
-    break;
-  }
-
-  // Add "1" in front if we still need to carry.
-  return stripTrailingZeros(std::string(Carry, '1') + Str.substr(0, Truncate));
-}
-
-raw_ostream &UnsignedFloatBase::print(raw_ostream &OS, uint64_t D, int16_t E,
-                                      int Width, unsigned Precision) {
-  return OS << toString(D, E, Width, Precision);
-}
-
-void UnsignedFloatBase::dump(uint64_t D, int16_t E, int Width) {
-  print(dbgs(), D, E, Width, 0) << "[" << Width << ":" << D << "*2^" << E
-                                << "]";
-}
-
-static std::pair<uint64_t, int16_t>
-getRoundedFloat(uint64_t N, bool ShouldRound, int64_t Shift) {
-  if (ShouldRound)
-    if (!++N)
-      // Rounding caused an overflow.
-      return std::make_pair(UINT64_C(1), Shift + 64);
-  return std::make_pair(N, Shift);
-}
-
-std::pair<uint64_t, int16_t> UnsignedFloatBase::divide64(uint64_t Dividend,
-                                                         uint64_t Divisor) {
-  // Input should be sanitized.
-  assert(Divisor);
-  assert(Dividend);
-
-  // Minimize size of divisor.
-  int16_t Shift = 0;
-  if (int Zeros = countTrailingZeros(Divisor)) {
-    Shift -= Zeros;
-    Divisor >>= Zeros;
-  }
-
-  // Check for powers of two.
-  if (Divisor == 1)
-    return std::make_pair(Dividend, Shift);
-
-  // Maximize size of dividend.
-  if (int Zeros = countLeadingZeros64(Dividend)) {
-    Shift -= Zeros;
-    Dividend <<= Zeros;
-  }
-
-  // Start with the result of a divide.
-  uint64_t Quotient = Dividend / Divisor;
-  Dividend %= Divisor;
-
-  // Continue building the quotient with long division.
-  //
-  // TODO: continue with largers digits.
-  while (!(Quotient >> 63) && Dividend) {
-    // Shift Dividend, and check for overflow.
-    bool IsOverflow = Dividend >> 63;
-    Dividend <<= 1;
-    --Shift;
-
-    // Divide.
-    bool DoesDivide = IsOverflow || Divisor <= Dividend;
-    Quotient = (Quotient << 1) | uint64_t(DoesDivide);
-    Dividend -= DoesDivide ? Divisor : 0;
-  }
-
-  // Round.
-  if (Dividend >= getHalf(Divisor))
-    if (!++Quotient)
-      // Rounding caused an overflow in Quotient.
-      return std::make_pair(UINT64_C(1), Shift + 64);
-
-  return getRoundedFloat(Quotient, Dividend >= getHalf(Divisor), Shift);
-}
-
-std::pair<uint64_t, int16_t> UnsignedFloatBase::multiply64(uint64_t L,
-                                                           uint64_t R) {
-  // Separate into two 32-bit digits (U.L).
-  uint64_t UL = L >> 32, LL = L & UINT32_MAX, UR = R >> 32, LR = R & UINT32_MAX;
-
-  // Compute cross products.
-  uint64_t P1 = UL * UR, P2 = UL * LR, P3 = LL * UR, P4 = LL * LR;
-
-  // Sum into two 64-bit digits.
-  uint64_t Upper = P1, Lower = P4;
-  auto addWithCarry = [&](uint64_t N) {
-    uint64_t NewLower = Lower + (N << 32);
-    Upper += (N >> 32) + (NewLower < Lower);
-    Lower = NewLower;
-  };
-  addWithCarry(P2);
-  addWithCarry(P3);
-
-  // Check whether the upper digit is empty.
-  if (!Upper)
-    return std::make_pair(Lower, 0);
-
-  // Shift as little as possible to maximize precision.
-  unsigned LeadingZeros = countLeadingZeros64(Upper);
-  int16_t Shift = 64 - LeadingZeros;
-  if (LeadingZeros)
-    Upper = Upper << LeadingZeros | Lower >> Shift;
-  bool ShouldRound = Shift && (Lower & UINT64_C(1) << (Shift - 1));
-  return getRoundedFloat(Upper, ShouldRound, Shift);
-}
-
-//===----------------------------------------------------------------------===//
-//
-// BlockMass implementation.
-//
-//===----------------------------------------------------------------------===//
-UnsignedFloat<uint64_t> BlockMass::toFloat() const {
+ScaledNumber<uint64_t> BlockMass::toScaled() const {
   if (isFull())
-    return UnsignedFloat<uint64_t>(1, 0);
-  return UnsignedFloat<uint64_t>(getMass() + 1, -64);
+    return ScaledNumber<uint64_t>(1, 0);
+  return ScaledNumber<uint64_t>(getMass() + 1, -64);
 }
 
 void BlockMass::dump() const { print(dbgs()); }
@@ -332,17 +41,12 @@ raw_ostream &BlockMass::print(raw_ostream &OS) const {
   return OS;
 }
 
-//===----------------------------------------------------------------------===//
-//
-// BlockFrequencyInfoImpl implementation.
-//
-//===----------------------------------------------------------------------===//
 namespace {
 
 typedef BlockFrequencyInfoImplBase::BlockNode BlockNode;
 typedef BlockFrequencyInfoImplBase::Distribution Distribution;
 typedef BlockFrequencyInfoImplBase::Distribution::WeightList WeightList;
-typedef BlockFrequencyInfoImplBase::Float Float;
+typedef BlockFrequencyInfoImplBase::Scaled64 Scaled64;
 typedef BlockFrequencyInfoImplBase::LoopData LoopData;
 typedef BlockFrequencyInfoImplBase::Weight Weight;
 typedef BlockFrequencyInfoImplBase::FrequencyData FrequencyData;
@@ -373,7 +77,8 @@ struct DitheringDistributer {
 
   BlockMass takeMass(uint32_t Weight);
 };
-}
+
+} // end namespace
 
 DitheringDistributer::DitheringDistributer(Distribution &Dist,
                                            const BlockMass &Mass) {
@@ -407,11 +112,7 @@ void Distribution::add(const BlockNode &Node, uint64_t Amount,
   Total = NewTotal;
 
   // Save the weight.
-  Weight W;
-  W.TargetNode = Node;
-  W.Amount = Amount;
-  W.Type = Type;
-  Weights.push_back(W);
+  Weights.push_back(Weight(Type, Node, Amount));
 }
 
 static void combineWeight(Weight &W, const Weight &OtherW) {
@@ -622,7 +323,7 @@ bool BlockFrequencyInfoImplBase::addLoopSuccessorsToDist(
 ///
 /// Gives the maximum number of estimated iterations allowed for a loop.  Very
 /// large numbers cause problems downstream (even within 64-bits).
-static Float getMaxLoopScale() { return Float(1, 12); }
+static Scaled64 getMaxLoopScale() { return Scaled64(1, 12); }
 
 /// \brief Compute the loop scale for a loop.
 void BlockFrequencyInfoImplBase::computeLoopScale(LoopData &Loop) {
@@ -634,7 +335,7 @@ void BlockFrequencyInfoImplBase::computeLoopScale(LoopData &Loop) {
   BlockMass ExitMass = BlockMass::getFull() - Loop.BackedgeMass;
 
   // Block scale stores the inverse of the scale.
-  Loop.Scale = ExitMass.toFloat().inverse();
+  Loop.Scale = ExitMass.toScaled().inverse();
 
   DEBUG(dbgs() << " - exit-mass = " << ExitMass << " (" << BlockMass::getFull()
                << " - " << Loop.BackedgeMass << ")\n"
@@ -708,15 +409,16 @@ void BlockFrequencyInfoImplBase::distributeMass(const BlockNode &Source,
 }
 
 static void convertFloatingToInteger(BlockFrequencyInfoImplBase &BFI,
-                                     const Float &Min, const Float &Max) {
+                                     const Scaled64 &Min, const Scaled64 &Max) {
   // Scale the Factor to a size that creates integers.  Ideally, integers would
   // be scaled so that Max == UINT64_MAX so that they can be best
   // differentiated.  However, the register allocator currently deals poorly
   // with large numbers.  Instead, push Min up a little from 1 to give some
   // room to differentiate small, unequal numbers.
   //
-  // TODO: fix issues downstream so that ScalingFactor can be Float(1,64)/Max.
-  Float ScalingFactor = Min.inverse();
+  // TODO: fix issues downstream so that ScalingFactor can be
+  // Scaled64(1,64)/Max.
+  Scaled64 ScalingFactor = Min.inverse();
   if ((Max / Min).lg() < 60)
     ScalingFactor <<= 3;
 
@@ -724,10 +426,10 @@ static void convertFloatingToInteger(BlockFrequencyInfoImplBase &BFI,
   DEBUG(dbgs() << "float-to-int: min = " << Min << ", max = " << Max
                << ", factor = " << ScalingFactor << "\n");
   for (size_t Index = 0; Index < BFI.Freqs.size(); ++Index) {
-    Float Scaled = BFI.Freqs[Index].Floating * ScalingFactor;
+    Scaled64 Scaled = BFI.Freqs[Index].Scaled * ScalingFactor;
     BFI.Freqs[Index].Integer = std::max(UINT64_C(1), Scaled.toInt<uint64_t>());
     DEBUG(dbgs() << " - " << BFI.getBlockName(Index) << ": float = "
-                 << BFI.Freqs[Index].Floating << ", scaled = " << Scaled
+                 << BFI.Freqs[Index].Scaled << ", scaled = " << Scaled
                  << ", int = " << BFI.Freqs[Index].Integer << "\n");
   }
 }
@@ -740,7 +442,7 @@ static void unwrapLoop(BlockFrequencyInfoImplBase &BFI, LoopData &Loop) {
   DEBUG(dbgs() << "unwrap-loop-package: " << BFI.getLoopName(Loop)
                << ": mass = " << Loop.Mass << ", scale = " << Loop.Scale
                << "\n");
-  Loop.Scale *= Loop.Mass.toFloat();
+  Loop.Scale *= Loop.Mass.toScaled();
   Loop.IsPackaged = false;
   DEBUG(dbgs() << "  => combined-scale = " << Loop.Scale << "\n");
 
@@ -749,9 +451,9 @@ static void unwrapLoop(BlockFrequencyInfoImplBase &BFI, LoopData &Loop) {
   // final head scale will be used for updated the rest of the members.
   for (const BlockNode &N : Loop.Nodes) {
     const auto &Working = BFI.Working[N.Index];
-    Float &F = Working.isAPackage() ? Working.getPackagedLoop()->Scale
-                                    : BFI.Freqs[N.Index].Floating;
-    Float New = Loop.Scale * F;
+    Scaled64 &F = Working.isAPackage() ? Working.getPackagedLoop()->Scale
+                                       : BFI.Freqs[N.Index].Scaled;
+    Scaled64 New = Loop.Scale * F;
     DEBUG(dbgs() << " - " << BFI.getBlockName(N) << ": " << F << " => " << New
                  << "\n");
     F = New;
@@ -761,7 +463,7 @@ static void unwrapLoop(BlockFrequencyInfoImplBase &BFI, LoopData &Loop) {
 void BlockFrequencyInfoImplBase::unwrapLoops() {
   // Set initial frequencies from loop-local masses.
   for (size_t Index = 0; Index < Working.size(); ++Index)
-    Freqs[Index].Floating = Working[Index].Mass.toFloat();
+    Freqs[Index].Scaled = Working[Index].Mass.toScaled();
 
   for (LoopData &Loop : Loops)
     unwrapLoop(*this, Loop);
@@ -770,12 +472,12 @@ void BlockFrequencyInfoImplBase::unwrapLoops() {
 void BlockFrequencyInfoImplBase::finalizeMetrics() {
   // Unwrap loop packages in reverse post-order, tracking min and max
   // frequencies.
-  auto Min = Float::getLargest();
-  auto Max = Float::getZero();
+  auto Min = Scaled64::getLargest();
+  auto Max = Scaled64::getZero();
   for (size_t Index = 0; Index < Working.size(); ++Index) {
     // Update min/max scale.
-    Min = std::min(Min, Freqs[Index].Floating);
-    Max = std::max(Max, Freqs[Index].Floating);
+    Min = std::min(Min, Freqs[Index].Scaled);
+    Max = std::max(Max, Freqs[Index].Scaled);
   }
 
   // Convert to integers.
@@ -794,11 +496,11 @@ BlockFrequencyInfoImplBase::getBlockFreq(const BlockNode &Node) const {
     return 0;
   return Freqs[Node.Index].Integer;
 }
-Float
+Scaled64
 BlockFrequencyInfoImplBase::getFloatingBlockFreq(const BlockNode &Node) const {
   if (!Node.isValid())
-    return Float::getZero();
-  return Freqs[Node.Index].Floating;
+    return Scaled64::getZero();
+  return Freqs[Node.Index].Scaled;
 }
 
 std::string
@@ -819,8 +521,8 @@ BlockFrequencyInfoImplBase::printBlockFreq(raw_ostream &OS,
 raw_ostream &
 BlockFrequencyInfoImplBase::printBlockFreq(raw_ostream &OS,
                                            const BlockFrequency &Freq) const {
-  Float Block(Freq.getFrequency(), 0);
-  Float Entry(getEntryFreq(), 0);
+  Scaled64 Block(Freq.getFrequency(), 0);
+  Scaled64 Entry(getEntryFreq(), 0);
 
   return OS << Block / Entry;
 }

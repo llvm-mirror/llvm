@@ -102,6 +102,8 @@ public:
   unsigned getReductionCost(unsigned Opcode, Type *Ty,
                             bool IsPairwiseForm) const override;
 
+  unsigned getIntImmCost(int64_t) const;
+
   unsigned getIntImmCost(const APInt &Imm, Type *Ty) const override;
 
   unsigned getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
@@ -142,13 +144,17 @@ unsigned X86TTI::getNumberOfRegisters(bool Vector) const {
   if (Vector && !ST->hasSSE1())
     return 0;
 
-  if (ST->is64Bit())
+  if (ST->is64Bit()) {
+    if (Vector && ST->hasAVX512())
+      return 32;
     return 16;
+  }
   return 8;
 }
 
 unsigned X86TTI::getRegisterBitWidth(bool Vector) const {
   if (Vector) {
+    if (ST->hasAVX512()) return 512;
     if (ST->hasAVX()) return 256;
     if (ST->hasSSE1()) return 128;
     return 0;
@@ -400,17 +406,117 @@ unsigned X86TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
 
 unsigned X86TTI::getShuffleCost(ShuffleKind Kind, Type *Tp, int Index,
                                 Type *SubTp) const {
-  // We only estimate the cost of reverse shuffles.
-  if (Kind != SK_Reverse)
+  // We only estimate the cost of reverse and alternate shuffles.
+  if (Kind != SK_Reverse && Kind != SK_Alternate)
     return TargetTransformInfo::getShuffleCost(Kind, Tp, Index, SubTp);
 
-  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Tp);
-  unsigned Cost = 1;
-  if (LT.second.getSizeInBits() > 128)
-    Cost = 3; // Extract + insert + copy.
+  if (Kind == SK_Reverse) {
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Tp);
+    unsigned Cost = 1;
+    if (LT.second.getSizeInBits() > 128)
+      Cost = 3; // Extract + insert + copy.
 
-  // Multiple by the number of parts.
-  return Cost * LT.first;
+    // Multiple by the number of parts.
+    return Cost * LT.first;
+  }
+
+  if (Kind == SK_Alternate) {
+    // 64-bit packed float vectors (v2f32) are widened to type v4f32.
+    // 64-bit packed integer vectors (v2i32) are promoted to type v2i64.
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Tp);
+
+    // The backend knows how to generate a single VEX.256 version of
+    // instruction VPBLENDW if the target supports AVX2.
+    if (ST->hasAVX2() && LT.second == MVT::v16i16)
+      return LT.first;
+
+    static const CostTblEntry<MVT::SimpleValueType> AVXAltShuffleTbl[] = {
+      {ISD::VECTOR_SHUFFLE, MVT::v4i64, 1},  // vblendpd
+      {ISD::VECTOR_SHUFFLE, MVT::v4f64, 1},  // vblendpd
+
+      {ISD::VECTOR_SHUFFLE, MVT::v8i32, 1},  // vblendps
+      {ISD::VECTOR_SHUFFLE, MVT::v8f32, 1},  // vblendps
+
+      // This shuffle is custom lowered into a sequence of:
+      //  2x  vextractf128 , 2x vpblendw , 1x vinsertf128
+      {ISD::VECTOR_SHUFFLE, MVT::v16i16, 5},
+
+      // This shuffle is custom lowered into a long sequence of:
+      //  2x vextractf128 , 4x vpshufb , 2x vpor ,  1x vinsertf128
+      {ISD::VECTOR_SHUFFLE, MVT::v32i8, 9}
+    };
+
+    if (ST->hasAVX()) {
+      int Idx = CostTableLookup(AVXAltShuffleTbl, ISD::VECTOR_SHUFFLE, LT.second);
+      if (Idx != -1)
+        return LT.first * AVXAltShuffleTbl[Idx].Cost;
+    }
+
+    static const CostTblEntry<MVT::SimpleValueType> SSE41AltShuffleTbl[] = {
+      // These are lowered into movsd.
+      {ISD::VECTOR_SHUFFLE, MVT::v2i64, 1},
+      {ISD::VECTOR_SHUFFLE, MVT::v2f64, 1},
+
+      // packed float vectors with four elements are lowered into BLENDI dag
+      // nodes. A v4i32/v4f32 BLENDI generates a single 'blendps'/'blendpd'.
+      {ISD::VECTOR_SHUFFLE, MVT::v4i32, 1},
+      {ISD::VECTOR_SHUFFLE, MVT::v4f32, 1},
+
+      // This shuffle generates a single pshufw.
+      {ISD::VECTOR_SHUFFLE, MVT::v8i16, 1},
+
+      // There is no instruction that matches a v16i8 alternate shuffle.
+      // The backend will expand it into the sequence 'pshufb + pshufb + or'.
+      {ISD::VECTOR_SHUFFLE, MVT::v16i8, 3}
+    };
+
+    if (ST->hasSSE41()) {
+      int Idx = CostTableLookup(SSE41AltShuffleTbl, ISD::VECTOR_SHUFFLE, LT.second);
+      if (Idx != -1)
+        return LT.first * SSE41AltShuffleTbl[Idx].Cost;
+    }
+
+    static const CostTblEntry<MVT::SimpleValueType> SSSE3AltShuffleTbl[] = {
+      {ISD::VECTOR_SHUFFLE, MVT::v2i64, 1},  // movsd
+      {ISD::VECTOR_SHUFFLE, MVT::v2f64, 1},  // movsd
+
+      // SSE3 doesn't have 'blendps'. The following shuffles are expanded into
+      // the sequence 'shufps + pshufd'
+      {ISD::VECTOR_SHUFFLE, MVT::v4i32, 2},
+      {ISD::VECTOR_SHUFFLE, MVT::v4f32, 2},
+
+      {ISD::VECTOR_SHUFFLE, MVT::v8i16, 3}, // pshufb + pshufb + or
+      {ISD::VECTOR_SHUFFLE, MVT::v16i8, 3}  // pshufb + pshufb + or
+    };
+ 
+    if (ST->hasSSSE3()) {
+      int Idx = CostTableLookup(SSSE3AltShuffleTbl, ISD::VECTOR_SHUFFLE, LT.second);
+      if (Idx != -1)
+        return LT.first * SSSE3AltShuffleTbl[Idx].Cost;
+    }
+
+    static const CostTblEntry<MVT::SimpleValueType> SSEAltShuffleTbl[] = {
+      {ISD::VECTOR_SHUFFLE, MVT::v2i64, 1},  // movsd
+      {ISD::VECTOR_SHUFFLE, MVT::v2f64, 1},  // movsd
+
+      {ISD::VECTOR_SHUFFLE, MVT::v4i32, 2}, // shufps + pshufd
+      {ISD::VECTOR_SHUFFLE, MVT::v4f32, 2}, // shufps + pshufd
+ 
+      // This is expanded into a long sequence of four extract + four insert.
+      {ISD::VECTOR_SHUFFLE, MVT::v8i16, 8}, // 4 x pextrw + 4 pinsrw.
+
+      // 8 x (pinsrw + pextrw + and + movb + movzb + or)
+      {ISD::VECTOR_SHUFFLE, MVT::v16i8, 48}
+    };
+
+    // Fall-back (SSE3 and SSE2). 
+    int Idx = CostTableLookup(SSEAltShuffleTbl, ISD::VECTOR_SHUFFLE, LT.second);
+    if (Idx != -1)
+      return LT.first * SSEAltShuffleTbl[Idx].Cost;
+    return TargetTransformInfo::getShuffleCost(Kind, Tp, Index, SubTp);
+  }
+
+  return TargetTransformInfo::getShuffleCost(Kind, Tp, Index, SubTp);
 }
 
 unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
@@ -808,6 +914,19 @@ unsigned X86TTI::getReductionCost(unsigned Opcode, Type *ValTy,
   return TargetTransformInfo::getReductionCost(Opcode, ValTy, IsPairwise);
 }
 
+/// \brief Calculate the cost of materializing a 64-bit value. This helper
+/// method might only calculate a fraction of a larger immediate. Therefore it
+/// is valid to return a cost of ZERO.
+unsigned X86TTI::getIntImmCost(int64_t Val) const {
+  if (Val == 0)
+    return TCC_Free;
+
+  if (isInt<32>(Val))
+    return TCC_Basic;
+
+  return 2 * TCC_Basic;
+}
+
 unsigned X86TTI::getIntImmCost(const APInt &Imm, Type *Ty) const {
   assert(Ty->isIntegerTy());
 
@@ -825,11 +944,21 @@ unsigned X86TTI::getIntImmCost(const APInt &Imm, Type *Ty) const {
   if (Imm == 0)
     return TCC_Free;
 
-  if (Imm.getBitWidth() <= 64 &&
-      (isInt<32>(Imm.getSExtValue()) || isUInt<32>(Imm.getZExtValue())))
-    return TCC_Basic;
-  else
-    return 2 * TCC_Basic;
+  // Sign-extend all constants to a multiple of 64-bit.
+  APInt ImmVal = Imm;
+  if (BitSize & 0x3f)
+    ImmVal = Imm.sext((BitSize + 63) & ~0x3fU);
+
+  // Split the constant into 64-bit chunks and calculate the cost for each
+  // chunk.
+  unsigned Cost = 0;
+  for (unsigned ShiftVal = 0; ShiftVal < BitSize; ShiftVal += 64) {
+    APInt Tmp = ImmVal.ashr(ShiftVal).sextOrTrunc(64);
+    int64_t Val = Tmp.getSExtValue();
+    Cost += getIntImmCost(Val);
+  }
+  // We need at least one instruction to materialze the constant.
+  return std::max(1U, Cost);
 }
 
 unsigned X86TTI::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
@@ -889,9 +1018,13 @@ unsigned X86TTI::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
     break;
   }
 
-  if ((Idx == ImmIdx) &&
-      Imm.getBitWidth() <= 64 && isInt<32>(Imm.getSExtValue()))
-    return TCC_Free;
+  if (Idx == ImmIdx) {
+    unsigned NumConstants = (BitSize + 63) / 64;
+    unsigned Cost = X86TTI::getIntImmCost(Imm, Ty);
+    return (Cost <= NumConstants * TCC_Basic)
+      ? static_cast<unsigned>(TCC_Free)
+      : Cost;
+  }
 
   return X86TTI::getIntImmCost(Imm, Ty);
 }

@@ -26,8 +26,9 @@ class Dumper {
   raw_ostream &OS;
 
 public:
-  typedef error_code (*SymbolResolver)(const object::coff_section *, uint64_t,
-                                       object::SymbolRef &, void *);
+  typedef std::error_code (*SymbolResolver)(const object::coff_section *,
+                                            uint64_t, object::SymbolRef &,
+                                            void *);
 
   struct Context {
     const object::COFFObjectFile &COFF;

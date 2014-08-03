@@ -15,8 +15,8 @@
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
-#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCSectionELF.h"
+#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MachO.h"
 using namespace llvm;
@@ -86,7 +86,7 @@ public:
 static unsigned getFixupKindNumBytes(unsigned Kind) {
   switch (Kind) {
   default:
-    assert(0 && "Unknown fixup kind!");
+    llvm_unreachable("Unknown fixup kind!");
 
   case AArch64::fixup_aarch64_tlsdesc_call:
     return 0;

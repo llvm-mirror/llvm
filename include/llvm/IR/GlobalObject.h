@@ -20,7 +20,7 @@
 #include "llvm/IR/GlobalValue.h"
 
 namespace llvm {
-
+class Comdat;
 class Module;
 
 class GlobalObject : public GlobalValue {
@@ -29,20 +29,26 @@ class GlobalObject : public GlobalValue {
 protected:
   GlobalObject(Type *Ty, ValueTy VTy, Use *Ops, unsigned NumOps,
                LinkageTypes Linkage, const Twine &Name)
-      : GlobalValue(Ty, VTy, Ops, NumOps, Linkage, Name) {
+      : GlobalValue(Ty, VTy, Ops, NumOps, Linkage, Name), ObjComdat(nullptr) {
     setGlobalValueSubClassData(0);
   }
 
   std::string Section;     // Section to emit this into, empty means default
+  Comdat *ObjComdat;
 public:
   unsigned getAlignment() const {
     return (1u << getGlobalValueSubClassData()) >> 1;
   }
   void setAlignment(unsigned Align);
 
-  bool hasSection() const { return !getSection().empty(); }
-  const std::string &getSection() const { return Section; }
+  bool hasSection() const { return !StringRef(getSection()).empty(); }
+  const char *getSection() const { return Section.c_str(); }
   void setSection(StringRef S);
+
+  bool hasComdat() const { return getComdat() != nullptr; }
+  const Comdat *getComdat() const { return ObjComdat; }
+  Comdat *getComdat() { return ObjComdat; }
+  void setComdat(Comdat *C) { ObjComdat = C; }
 
   void copyAttributesFrom(const GlobalValue *Src) override;
 

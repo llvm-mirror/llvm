@@ -1113,9 +1113,14 @@ void Emitter<CodeEmitter>::emitInstruction(MachineInstr &MI,
     case TargetOpcode::INLINEASM:
       // We allow inline assembler nodes with empty bodies - they can
       // implicitly define registers, which is ok for JIT.
-      if (MI.getOperand(0).getSymbolName()[0])
+      if (MI.getOperand(0).getSymbolName()[0]) {
+        DebugLoc DL = MI.getDebugLoc();
+        DL.print(MI.getParent()->getParent()->getFunction()->getContext(),
+                 llvm::errs());
         report_fatal_error("JIT does not support inline asm!");
+      }
       break;
+    case TargetOpcode::DBG_VALUE:
     case TargetOpcode::CFI_INSTRUCTION:
       break;
     case TargetOpcode::GC_LABEL:
@@ -1126,6 +1131,16 @@ void Emitter<CodeEmitter>::emitInstruction(MachineInstr &MI,
     case TargetOpcode::IMPLICIT_DEF:
     case TargetOpcode::KILL:
       break;
+
+    case X86::SEH_PushReg:
+    case X86::SEH_SaveReg:
+    case X86::SEH_SaveXMM:
+    case X86::SEH_StackAlloc:
+    case X86::SEH_SetFrame:
+    case X86::SEH_PushFrame:
+    case X86::SEH_EndPrologue:
+      break;
+
     case X86::MOVPC32r: {
       // This emits the "call" portion of this pseudo instruction.
       MCE.emitByte(BaseOpcode);
@@ -1370,20 +1385,21 @@ void Emitter<CodeEmitter>::emitInstruction(MachineInstr &MI,
   case X86II::MRM_C0: case X86II::MRM_C1: case X86II::MRM_C2:
   case X86II::MRM_C3: case X86II::MRM_C4: case X86II::MRM_C8:
   case X86II::MRM_C9: case X86II::MRM_CA: case X86II::MRM_CB:
-  case X86II::MRM_D0: case X86II::MRM_D1: case X86II::MRM_D4:
-  case X86II::MRM_D5: case X86II::MRM_D6: case X86II::MRM_D8:
-  case X86II::MRM_D9: case X86II::MRM_DA: case X86II::MRM_DB:
-  case X86II::MRM_DC: case X86II::MRM_DD: case X86II::MRM_DE:
-  case X86II::MRM_DF: case X86II::MRM_E0: case X86II::MRM_E1:
-  case X86II::MRM_E2: case X86II::MRM_E3: case X86II::MRM_E4:
-  case X86II::MRM_E5: case X86II::MRM_E8: case X86II::MRM_E9:
-  case X86II::MRM_EA: case X86II::MRM_EB: case X86II::MRM_EC:
-  case X86II::MRM_ED: case X86II::MRM_EE: case X86II::MRM_F0:
-  case X86II::MRM_F1: case X86II::MRM_F2: case X86II::MRM_F3:
-  case X86II::MRM_F4: case X86II::MRM_F5: case X86II::MRM_F6:
-  case X86II::MRM_F7: case X86II::MRM_F8: case X86II::MRM_F9:
-  case X86II::MRM_FA: case X86II::MRM_FB: case X86II::MRM_FC:
-  case X86II::MRM_FD: case X86II::MRM_FE: case X86II::MRM_FF:
+  case X86II::MRM_CF: case X86II::MRM_D0: case X86II::MRM_D1:
+  case X86II::MRM_D4: case X86II::MRM_D5: case X86II::MRM_D6:
+  case X86II::MRM_D7: case X86II::MRM_D8: case X86II::MRM_D9:
+  case X86II::MRM_DA: case X86II::MRM_DB: case X86II::MRM_DC:
+  case X86II::MRM_DD: case X86II::MRM_DE: case X86II::MRM_DF:
+  case X86II::MRM_E0: case X86II::MRM_E1: case X86II::MRM_E2:
+  case X86II::MRM_E3: case X86II::MRM_E4: case X86II::MRM_E5:
+  case X86II::MRM_E8: case X86II::MRM_E9: case X86II::MRM_EA:
+  case X86II::MRM_EB: case X86II::MRM_EC: case X86II::MRM_ED:
+  case X86II::MRM_EE: case X86II::MRM_F0: case X86II::MRM_F1:
+  case X86II::MRM_F2: case X86II::MRM_F3: case X86II::MRM_F4:
+  case X86II::MRM_F5: case X86II::MRM_F6: case X86II::MRM_F7:
+  case X86II::MRM_F8: case X86II::MRM_F9: case X86II::MRM_FA:
+  case X86II::MRM_FB: case X86II::MRM_FC: case X86II::MRM_FD:
+  case X86II::MRM_FE: case X86II::MRM_FF:
     MCE.emitByte(BaseOpcode);
 
     unsigned char MRM;
@@ -1398,11 +1414,13 @@ void Emitter<CodeEmitter>::emitInstruction(MachineInstr &MI,
     case X86II::MRM_C9: MRM = 0xC9; break;
     case X86II::MRM_CA: MRM = 0xCA; break;
     case X86II::MRM_CB: MRM = 0xCB; break;
+    case X86II::MRM_CF: MRM = 0xCF; break;
     case X86II::MRM_D0: MRM = 0xD0; break;
     case X86II::MRM_D1: MRM = 0xD1; break;
     case X86II::MRM_D4: MRM = 0xD4; break;
     case X86II::MRM_D5: MRM = 0xD5; break;
     case X86II::MRM_D6: MRM = 0xD6; break;
+    case X86II::MRM_D7: MRM = 0xD7; break;
     case X86II::MRM_D8: MRM = 0xD8; break;
     case X86II::MRM_D9: MRM = 0xD9; break;
     case X86II::MRM_DA: MRM = 0xDA; break;

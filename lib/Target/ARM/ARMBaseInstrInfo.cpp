@@ -32,6 +32,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -102,14 +103,15 @@ ARMBaseInstrInfo::ARMBaseInstrInfo(const ARMSubtarget& STI)
 
 // Use a ScoreboardHazardRecognizer for prepass ARM scheduling. TargetInstrImpl
 // currently defaults to no prepass hazard recognizer.
-ScheduleHazardRecognizer *ARMBaseInstrInfo::
-CreateTargetHazardRecognizer(const TargetMachine *TM,
-                             const ScheduleDAG *DAG) const {
+ScheduleHazardRecognizer *
+ARMBaseInstrInfo::CreateTargetHazardRecognizer(const TargetSubtargetInfo *STI,
+                                               const ScheduleDAG *DAG) const {
   if (usePreRAHazardRecognizer()) {
-    const InstrItineraryData *II = TM->getInstrItineraryData();
+    const InstrItineraryData *II =
+        &static_cast<const ARMSubtarget *>(STI)->getInstrItineraryData();
     return new ScoreboardHazardRecognizer(II, DAG, "pre-RA-sched");
   }
-  return TargetInstrInfo::CreateTargetHazardRecognizer(TM, DAG);
+  return TargetInstrInfo::CreateTargetHazardRecognizer(STI, DAG);
 }
 
 ScheduleHazardRecognizer *ARMBaseInstrInfo::
@@ -1172,7 +1174,20 @@ unsigned ARMBaseInstrInfo::isLoadFromStackSlotPostFE(const MachineInstr *MI,
   return MI->mayLoad() && hasLoadFromStackSlot(MI, Dummy, FrameIndex);
 }
 
-bool ARMBaseInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const{
+bool
+ARMBaseInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
+  MachineFunction &MF = *MI->getParent()->getParent();
+  Reloc::Model RM = MF.getTarget().getRelocationModel();
+
+  if (MI->getOpcode() == TargetOpcode::LOAD_STACK_GUARD) {
+    assert(getSubtarget().getTargetTriple().getObjectFormat() ==
+           Triple::MachO &&
+           "LOAD_STACK_GUARD currently supported only for MachO.");
+    expandLoadStackGuard(MI, RM);
+    MI->getParent()->erase(MI);
+    return true;
+  }
+
   // This hook gets to expand COPY instructions before they become
   // copyPhysReg() calls.  Look for VMOVS instructions that can legally be
   // widened to VMOVD.  We prefer the VMOVD when possible because it may be
@@ -1885,7 +1900,8 @@ bool llvm::tryFoldSPUpdateIntoPushPop(const ARMSubtarget &Subtarget,
                                       unsigned NumBytes) {
   // This optimisation potentially adds lots of load and store
   // micro-operations, it's only really a great benefit to code-size.
-  if (!Subtarget.isMinSize())
+  if (!MF.getFunction()->getAttributes().hasAttribute(
+          AttributeSet::FunctionIndex, Attribute::MinSize))
     return false;
 
   // If only one register is pushed/popped, LLVM can use an LDR/STR
@@ -3930,6 +3946,38 @@ bool ARMBaseInstrInfo::verifyInstruction(const MachineInstr *MI,
   return true;
 }
 
+// LoadStackGuard has so far only been implemented for MachO. Different code
+// sequence is needed for other targets.
+void ARMBaseInstrInfo::expandLoadStackGuardBase(MachineBasicBlock::iterator MI,
+                                                unsigned LoadImmOpc,
+                                                unsigned LoadOpc,
+                                                Reloc::Model RM) const {
+  MachineBasicBlock &MBB = *MI->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  unsigned Reg = MI->getOperand(0).getReg();
+  const GlobalValue *GV =
+      cast<GlobalValue>((*MI->memoperands_begin())->getValue());
+  MachineInstrBuilder MIB;
+
+  BuildMI(MBB, MI, DL, get(LoadImmOpc), Reg)
+      .addGlobalAddress(GV, 0, ARMII::MO_NONLAZY);
+
+  if (Subtarget.GVIsIndirectSymbol(GV, RM)) {
+    MIB = BuildMI(MBB, MI, DL, get(LoadOpc), Reg);
+    MIB.addReg(Reg, RegState::Kill).addImm(0);
+    unsigned Flag = MachineMemOperand::MOLoad | MachineMemOperand::MOInvariant;
+    MachineMemOperand *MMO = MBB.getParent()->
+        getMachineMemOperand(MachinePointerInfo::getGOT(), Flag, 4, 4);
+    MIB.addMemOperand(MMO);
+    AddDefaultPred(MIB);
+  }
+
+  MIB = BuildMI(MBB, MI, DL, get(LoadOpc), Reg);
+  MIB.addReg(Reg, RegState::Kill).addImm(0);
+  MIB.setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+  AddDefaultPred(MIB);
+}
+
 bool
 ARMBaseInstrInfo::isFpMLxInstruction(unsigned Opcode, unsigned &MulOpc,
                                      unsigned &AddSubOpc,
@@ -4356,6 +4404,29 @@ breakPartialRegDependency(MachineBasicBlock::iterator MI,
   AddDefaultPred(BuildMI(*MI->getParent(), MI, MI->getDebugLoc(),
                          get(ARM::FCONSTD), DReg).addImm(96));
   MI->addRegisterKilled(DReg, TRI, true);
+}
+
+void ARMBaseInstrInfo::getUnconditionalBranch(
+    MCInst &Branch, const MCSymbolRefExpr *BranchTarget) const {
+  if (Subtarget.isThumb())
+    Branch.setOpcode(ARM::tB);
+  else if (Subtarget.isThumb2())
+    Branch.setOpcode(ARM::t2B);
+  else
+    Branch.setOpcode(ARM::Bcc);
+
+  Branch.addOperand(MCOperand::CreateExpr(BranchTarget));
+  Branch.addOperand(MCOperand::CreateImm(ARMCC::AL));
+  Branch.addOperand(MCOperand::CreateReg(0));
+}
+
+void ARMBaseInstrInfo::getTrap(MCInst &MI) const {
+  if (Subtarget.isThumb())
+    MI.setOpcode(ARM::tTRAP);
+  else if (Subtarget.useNaClTrap())
+    MI.setOpcode(ARM::TRAPNaCl);
+  else
+    MI.setOpcode(ARM::TRAP);
 }
 
 bool ARMBaseInstrInfo::hasNOP() const {

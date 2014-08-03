@@ -11,6 +11,7 @@
 #include "MCTargetDesc/PPCFixupKinds.h"
 #include "MCTargetDesc/PPCMCExpr.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/MC/MCELF.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCValue.h"
@@ -30,6 +31,9 @@ namespace {
                                        bool IsPCRel) const;
     unsigned GetRelocType(const MCValue &Target, const MCFixup &Fixup,
                           bool IsPCRel) const override;
+
+    bool needsRelocateWithSymbol(const MCSymbolData &SD,
+                                 unsigned Type) const override;
   };
 }
 
@@ -83,7 +87,15 @@ unsigned PPCELFObjectWriter::getRelocTypeInner(const MCValue &Target,
       llvm_unreachable("Unimplemented");
     case PPC::fixup_ppc_br24:
     case PPC::fixup_ppc_br24abs:
-      Type = ELF::R_PPC_REL24;
+      switch (Modifier) {
+      default: llvm_unreachable("Unsupported Modifier");
+      case MCSymbolRefExpr::VK_None:
+        Type = ELF::R_PPC_REL24;
+        break;
+      case MCSymbolRefExpr::VK_PLT:
+        Type = ELF::R_PPC_PLTREL24;
+        break;
+      }
       break;
     case PPC::fixup_ppc_brcond14:
     case PPC::fixup_ppc_brcond14abs:
@@ -224,7 +236,10 @@ unsigned PPCELFObjectWriter::getRelocTypeInner(const MCValue &Target,
         Type = ELF::R_PPC64_DTPREL16_HIGHESTA;
         break;
       case MCSymbolRefExpr::VK_PPC_GOT_TLSGD:
-        Type = ELF::R_PPC64_GOT_TLSGD16;
+        if (is64Bit())
+          Type = ELF::R_PPC64_GOT_TLSGD16;
+        else
+          Type = ELF::R_PPC_GOT_TLSGD16;
         break;
       case MCSymbolRefExpr::VK_PPC_GOT_TLSGD_LO:
         Type = ELF::R_PPC64_GOT_TLSGD16_LO;
@@ -236,7 +251,10 @@ unsigned PPCELFObjectWriter::getRelocTypeInner(const MCValue &Target,
         Type = ELF::R_PPC64_GOT_TLSGD16_HA;
         break;
       case MCSymbolRefExpr::VK_PPC_GOT_TLSLD:
-        Type = ELF::R_PPC64_GOT_TLSLD16;
+        if (is64Bit())
+          Type = ELF::R_PPC64_GOT_TLSLD16;
+        else
+          Type = ELF::R_PPC_GOT_TLSLD16;
         break;
       case MCSymbolRefExpr::VK_PPC_GOT_TLSLD_LO:
         Type = ELF::R_PPC64_GOT_TLSLD16_LO;
@@ -332,13 +350,22 @@ unsigned PPCELFObjectWriter::getRelocTypeInner(const MCValue &Target,
       switch (Modifier) {
       default: llvm_unreachable("Unsupported Modifier");
       case MCSymbolRefExpr::VK_PPC_TLSGD:
-        Type = ELF::R_PPC64_TLSGD;
+        if (is64Bit())
+          Type = ELF::R_PPC64_TLSGD;
+        else
+          Type = ELF::R_PPC_TLSGD;
         break;
       case MCSymbolRefExpr::VK_PPC_TLSLD:
-        Type = ELF::R_PPC64_TLSLD;
+        if (is64Bit())
+          Type = ELF::R_PPC64_TLSLD;
+        else
+          Type = ELF::R_PPC_TLSLD;
         break;
       case MCSymbolRefExpr::VK_PPC_TLS:
-        Type = ELF::R_PPC64_TLS;
+        if (is64Bit())
+          Type = ELF::R_PPC64_TLS;
+        else
+          Type = ELF::R_PPC_TLS;
         break;
       }
       break;
@@ -377,6 +404,23 @@ unsigned PPCELFObjectWriter::GetRelocType(const MCValue &Target,
                                           const MCFixup &Fixup,
                                           bool IsPCRel) const {
   return getRelocTypeInner(Target, Fixup, IsPCRel);
+}
+
+bool PPCELFObjectWriter::needsRelocateWithSymbol(const MCSymbolData &SD,
+                                                 unsigned Type) const {
+  switch (Type) {
+    default:
+      return false;
+
+    case ELF::R_PPC_REL24:
+      // If the target symbol has a local entry point, we must keep the
+      // target symbol to preserve that information for the linker.
+      // The "other" values are stored in the last 6 bits of the second byte.
+      // The traditional defines for STO values assume the full byte and thus
+      // the shift to pack it.
+      unsigned Other = MCELF::getOther(SD) << 2;
+      return (Other & ELF::STO_PPC64_LOCAL_MASK) != 0;
+  }
 }
 
 MCObjectWriter *llvm::createPPCELFObjectWriter(raw_ostream &OS,

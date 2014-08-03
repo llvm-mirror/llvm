@@ -380,7 +380,8 @@ public:
     } else if (N > this->size()) {
       if (this->capacity() < N)
         this->grow(N);
-      std::uninitialized_fill(this->end(), this->begin()+N, T());
+      for (auto I = this->end(), E = this->begin() + N; I != E; ++I)
+        new (&*I) T();
       this->setEnd(this->begin()+N);
     }
   }
@@ -488,9 +489,9 @@ public:
     }
 
     ::new ((void*) this->end()) T(::std::move(this->back()));
-    this->setEnd(this->end()+1);
     // Push everything else over.
     this->move_backward(I, this->end()-1, this->end());
+    this->setEnd(this->end()+1);
 
     // If we just moved the element we're inserting, be sure to update
     // the reference.
@@ -516,10 +517,10 @@ public:
       this->grow();
       I = this->begin()+EltNo;
     }
-    ::new ((void*) this->end()) T(this->back());
-    this->setEnd(this->end()+1);
+    ::new ((void*) this->end()) T(std::move(this->back()));
     // Push everything else over.
     this->move_backward(I, this->end()-1, this->end());
+    this->setEnd(this->end()+1);
 
     // If we just moved the element we're inserting, be sure to update
     // the reference.
@@ -555,7 +556,8 @@ public:
     // reallocate the vector.
     if (size_t(this->end()-I) >= NumToInsert) {
       T *OldEnd = this->end();
-      append(this->end()-NumToInsert, this->end());
+      append(std::move_iterator<iterator>(this->end() - NumToInsert),
+             std::move_iterator<iterator>(this->end()));
 
       // Copy the existing elements that get replaced.
       this->move_backward(I, OldEnd-NumToInsert, OldEnd);
@@ -608,7 +610,8 @@ public:
     // reallocate the vector.
     if (size_t(this->end()-I) >= NumToInsert) {
       T *OldEnd = this->end();
-      append(this->end()-NumToInsert, this->end());
+      append(std::move_iterator<iterator>(this->end() - NumToInsert),
+             std::move_iterator<iterator>(this->end()));
 
       // Copy the existing elements that get replaced.
       this->move_backward(I, OldEnd-NumToInsert, OldEnd);

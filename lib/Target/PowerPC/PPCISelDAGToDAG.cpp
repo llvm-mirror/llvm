@@ -14,6 +14,7 @@
 
 #include "PPC.h"
 #include "MCTargetDesc/PPCPredicates.h"
+#include "PPCMachineFunctionInfo.h"
 #include "PPCTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -275,9 +276,21 @@ SDNode *PPCDAGToDAGISel::getGlobalBaseReg() {
     DebugLoc dl;
 
     if (PPCLowering->getPointerTy() == MVT::i32) {
-      GlobalBaseReg = RegInfo->createVirtualRegister(&PPC::GPRC_NOR0RegClass);
+      if (PPCSubTarget->isTargetELF())
+        GlobalBaseReg = PPC::R30;
+      else
+        GlobalBaseReg =
+          RegInfo->createVirtualRegister(&PPC::GPRC_NOR0RegClass);
       BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MovePCtoLR));
       BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MFLR), GlobalBaseReg);
+      if (PPCSubTarget->isTargetELF()) {
+        unsigned TempReg = RegInfo->createVirtualRegister(&PPC::GPRCRegClass);
+        BuildMI(FirstMBB, MBBI, dl,
+                TII.get(PPC::GetGBRO), TempReg).addReg(GlobalBaseReg);
+        BuildMI(FirstMBB, MBBI, dl,
+                TII.get(PPC::UpdateGBR)).addReg(GlobalBaseReg).addReg(TempReg);
+        MF->getInfo<PPCFunctionInfo>()->setUsesPICBase(true);
+      }
     } else {
       GlobalBaseReg = RegInfo->createVirtualRegister(&PPC::G8RC_NOX0RegClass);
       BuildMI(FirstMBB, MBBI, dl, TII.get(PPC::MovePCtoLR8));
@@ -1445,7 +1458,13 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     return CurDAG->SelectNodeTo(N, Reg, MVT::Other, Chain);
   }
   case PPCISD::TOC_ENTRY: {
-    assert (PPCSubTarget->isPPC64() && "Only supported for 64-bit ABI");
+    if (PPCSubTarget->isSVR4ABI() && !PPCSubTarget->isPPC64()) {
+      SDValue GA = N->getOperand(0);
+      return CurDAG->getMachineNode(PPC::LWZtoc, dl, MVT::i32, GA,
+                                    N->getOperand(1));
+	}
+    assert (PPCSubTarget->isPPC64() &&
+            "Only supported for 64-bit ABI and 32-bit SVR4");
 
     // For medium and large code model, we generate two instructions as
     // described below.  Otherwise we allow SelectCodeCommon to handle this,
@@ -1454,10 +1473,10 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     if (CModel != CodeModel::Medium && CModel != CodeModel::Large)
       break;
 
-    // The first source operand is a TargetGlobalAddress or a
-    // TargetJumpTable.  If it is an externally defined symbol, a symbol
-    // with common linkage, a function address, or a jump table address,
-    // or if we are generating code for large code model, we generate:
+    // The first source operand is a TargetGlobalAddress or a TargetJumpTable.
+    // If it is an externally defined symbol, a symbol with common linkage,
+    // a non-local function address, or a jump table address, or if we are
+    // generating code for large code model, we generate:
     //   LDtocL(<ga:@sym>, ADDIStocHA(%X2, <ga:@sym>))
     // Otherwise we generate:
     //   ADDItocL(ADDIStocHA(%X2, <ga:@sym>), <ga:@sym>)
@@ -1472,7 +1491,8 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
 
     if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(GA)) {
       const GlobalValue *GValue = G->getGlobal();
-      if (GValue->getType()->getElementType()->isFunctionTy() ||
+      if ((GValue->getType()->getElementType()->isFunctionTy() &&
+           (GValue->isDeclaration() || GValue->isWeakForLinker())) ||
           GValue->isDeclaration() || GValue->hasCommonLinkage() ||
           GValue->hasAvailableExternallyLinkage())
         return CurDAG->getMachineNode(PPC::LDtocL, dl, MVT::i64, GA,
@@ -1481,6 +1501,12 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
 
     return CurDAG->getMachineNode(PPC::ADDItocL, dl, MVT::i64,
                                   SDValue(Tmp, 0), GA);
+  }
+  case PPCISD::PPC32_PICGOT: {
+    // Generate a PIC-safe GOT reference.
+    assert(!PPCSubTarget->isPPC64() && PPCSubTarget->isSVR4ABI() &&
+      "PPCISD::PPC32_PICGOT is only supported for 32-bit SVR4");
+    return CurDAG->SelectNodeTo(N, PPC::PPC32PICGOT, PPCLowering->getPointerTy(),  MVT::i32);
   }
   case PPCISD::VADD_SPLAT: {
     // This expands into one of three sequences, depending on whether

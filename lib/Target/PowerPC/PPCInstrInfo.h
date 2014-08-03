@@ -65,7 +65,7 @@ enum PPC970_Unit {
 
 
 class PPCInstrInfo : public PPCGenInstrInfo {
-  PPCTargetMachine &TM;
+  PPCSubtarget &Subtarget;
   const PPCRegisterInfo RI;
 
   bool StoreRegToStackSlot(MachineFunction &MF,
@@ -80,7 +80,7 @@ class PPCInstrInfo : public PPCGenInstrInfo {
                             bool &NonRI, bool &SpillsVRS) const;
   virtual void anchor();
 public:
-  explicit PPCInstrInfo(PPCTargetMachine &TM);
+  explicit PPCInstrInfo(PPCSubtarget &STI);
 
   /// getRegisterInfo - TargetInstrInfo is a superset of MRegister info.  As
   /// such, whenever a client has an instance of instruction info, it should
@@ -89,7 +89,7 @@ public:
   const PPCRegisterInfo &getRegisterInfo() const { return RI; }
 
   ScheduleHazardRecognizer *
-  CreateTargetHazardRecognizer(const TargetMachine *TM,
+  CreateTargetHazardRecognizer(const TargetSubtargetInfo *STI,
                                const ScheduleDAG *DAG) const override;
   ScheduleHazardRecognizer *
   CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,

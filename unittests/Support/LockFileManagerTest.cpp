@@ -19,7 +19,7 @@ namespace {
 
 TEST(LockFileManagerTest, Basic) {
   SmallString<64> TmpDir;
-  error_code EC;
+  std::error_code EC;
   EC = sys::fs::createUniqueDirectory("LockFileManagerTestDir", TmpDir);
   ASSERT_FALSE(EC);
 
@@ -46,7 +46,7 @@ TEST(LockFileManagerTest, Basic) {
 
 TEST(LockFileManagerTest, LinkLockExists) {
   SmallString<64> TmpDir;
-  error_code EC;
+  std::error_code EC;
   EC = sys::fs::createUniqueDirectory("LockFileManagerTestDir", TmpDir);
   ASSERT_FALSE(EC);
 
@@ -89,7 +89,7 @@ TEST(LockFileManagerTest, LinkLockExists) {
 
 TEST(LockFileManagerTest, RelativePath) {
   SmallString<64> TmpDir;
-  error_code EC;
+  std::error_code EC;
   EC = sys::fs::createUniqueDirectory("LockFileManagerTestDir", TmpDir);
   ASSERT_FALSE(EC);
 

@@ -203,8 +203,11 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
       Value *X;
       Constant *C1;
       if (match(Op0, m_OneUse(m_Add(m_Value(X), m_Constant(C1))))) {
-        Value *Add = Builder->CreateMul(X, Op1);
-        return BinaryOperator::CreateAdd(Add, Builder->CreateMul(C1, Op1));
+        Value *Mul = Builder->CreateMul(C1, Op1);
+        // Only go forward with the transform if C1*CI simplifies to a tidier
+        // constant.
+        if (!match(Mul, m_Mul(m_Value(), m_Value())))
+          return BinaryOperator::CreateAdd(Builder->CreateMul(X, Op1), Mul);
       }
     }
   }
@@ -990,6 +993,10 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
   }
 
   if (Constant *RHS = dyn_cast<Constant>(Op1)) {
+    // X/INT_MIN -> X == INT_MIN
+    if (RHS->isMinSignedValue())
+      return new ZExtInst(Builder->CreateICmpEQ(Op0, Op1), I.getType());
+
     // -X/C  -->  X/-C  provided the negation doesn't overflow.
     if (SubOperator *Sub = dyn_cast<SubOperator>(Op0))
       if (match(Sub->getOperand(0), m_Zero()) && Sub->hasNoSignedWrap())

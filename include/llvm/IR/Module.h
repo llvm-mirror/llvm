@@ -16,6 +16,7 @@
 #define LLVM_IR_MODULE_H
 
 #include "llvm/ADT/iterator_range.h"
+#include "llvm/IR/Comdat.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
@@ -23,13 +24,13 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 
 namespace llvm {
-
 class FunctionType;
 class GVMaterializer;
 class LLVMContext;
+class RandomNumberGenerator;
 class StructType;
 template<typename T> struct DenseMapInfo;
 template<typename KeyT, typename ValueT, typename KeyInfoT> class DenseMap;
@@ -123,6 +124,8 @@ public:
   typedef iplist<GlobalAlias> AliasListType;
   /// The type for the list of named metadata.
   typedef ilist<NamedMDNode> NamedMDListType;
+  /// The type of the comdat "symbol" table.
+  typedef StringMap<Comdat> ComdatSymTabType;
 
   /// The Global Variable iterator.
   typedef GlobalListType::iterator                      global_iterator;
@@ -133,6 +136,11 @@ public:
   typedef FunctionListType::iterator                           iterator;
   /// The Function constant iterator
   typedef FunctionListType::const_iterator               const_iterator;
+
+  /// The Function reverse iterator.
+  typedef FunctionListType::reverse_iterator             reverse_iterator;
+  /// The Function constant reverse iterator.
+  typedef FunctionListType::const_reverse_iterator const_reverse_iterator;
 
   /// The Global Alias iterators.
   typedef AliasListType::iterator                        alias_iterator;
@@ -197,11 +205,14 @@ private:
   NamedMDListType NamedMDList;    ///< The named metadata in the module
   std::string GlobalScopeAsm;     ///< Inline Asm at global scope.
   ValueSymbolTable *ValSymTab;    ///< Symbol table for values
+  ComdatSymTabType ComdatSymTab;  ///< Symbol table for COMDATs
   std::unique_ptr<GVMaterializer>
   Materializer;                   ///< Used to materialize GlobalValues
   std::string ModuleID;           ///< Human readable identifier for the module
   std::string TargetTriple;       ///< Platform target triple Module compiled on
   void *NamedMDSymTab;            ///< NamedMDNode names.
+  // Allow lazy initialization in const method.
+  mutable RandomNumberGenerator *RNG; ///< The random number generator for this module.
 
   // We need to keep the string because the C API expects us to own the string
   // representation.
@@ -249,6 +260,11 @@ public:
   /// Get any module-scope inline assembly blocks.
   /// @returns a string containing the module-scope inline assembly blocks.
   const std::string &getModuleInlineAsm() const { return GlobalScopeAsm; }
+
+  /// Get the RandomNumberGenerator for this module. The RNG can be
+  /// seeded via -rng-seed=<uint64> and is salted with the ModuleID.
+  /// The returned RNG should not be shared across threads.
+  RandomNumberGenerator &getRNG() const;
 
 /// @}
 /// @name Module Level Mutators
@@ -397,6 +413,14 @@ public:
   void eraseNamedMetadata(NamedMDNode *NMD);
 
 /// @}
+/// @name Comdat Accessors
+/// @{
+
+  /// Return the Comdat in the module with the specified name. It is created
+  /// if it didn't already exist.
+  Comdat *getOrInsertComdat(StringRef Name);
+
+/// @}
 /// @name Module Flags Accessors
 /// @{
 
@@ -454,12 +478,12 @@ public:
   void Dematerialize(GlobalValue *GV);
 
   /// Make sure all GlobalValues in this Module are fully read.
-  error_code materializeAll();
+  std::error_code materializeAll();
 
   /// Make sure all GlobalValues in this Module are fully read and clear the
   /// Materializer. If the module is corrupt, this DOES NOT clear the old
   /// Materializer.
-  error_code materializeAllPermanently();
+  std::error_code materializeAllPermanently(bool ReleaseBuffer = false);
 
 /// @}
 /// @name Direct access to the globals list, functions list, and symbol table
@@ -497,6 +521,10 @@ public:
   const ValueSymbolTable &getValueSymbolTable() const { return *ValSymTab; }
   /// Get the Module's symbol table of global variable and function identifiers.
   ValueSymbolTable       &getValueSymbolTable()       { return *ValSymTab; }
+  /// Get the Module's symbol table for COMDATs (constant).
+  const ComdatSymTabType &getComdatSymbolTable() const { return ComdatSymTab; }
+  /// Get the Module's symbol table for COMDATs.
+  ComdatSymTabType &getComdatSymbolTable() { return ComdatSymTab; }
 
 /// @}
 /// @name Global Variable Iteration
@@ -523,6 +551,10 @@ public:
   const_iterator          begin() const { return FunctionList.begin(); }
   iterator                end  ()       { return FunctionList.end();   }
   const_iterator          end  () const { return FunctionList.end();   }
+  reverse_iterator        rbegin()      { return FunctionList.rbegin(); }
+  const_reverse_iterator  rbegin() const{ return FunctionList.rbegin(); }
+  reverse_iterator        rend()        { return FunctionList.rend(); }
+  const_reverse_iterator  rend() const  { return FunctionList.rend(); }
   size_t                  size() const  { return FunctionList.size(); }
   bool                    empty() const { return FunctionList.empty(); }
 

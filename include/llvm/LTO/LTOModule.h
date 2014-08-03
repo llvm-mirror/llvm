@@ -16,10 +16,10 @@
 
 #include "llvm-c/lto.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCObjectFileInfo.h"
+#include "llvm/Object/IRObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include <string>
 #include <vector>
@@ -46,9 +46,8 @@ private:
     const GlobalValue *symbol;
   };
 
-  std::unique_ptr<Module> _module;
+  std::unique_ptr<object::IRObjectFile> IRFile;
   std::unique_ptr<TargetMachine> _target;
-  MCObjectFileInfo ObjFileInfo;
   StringSet                               _linkeropt_strings;
   std::vector<const char *>               _deplibs;
   std::vector<const char *>               _linkeropts;
@@ -58,25 +57,22 @@ private:
   StringSet                               _defines;
   StringMap<NameAndAttributes> _undefines;
   std::vector<const char*>                _asm_undefines;
-  MCContext _context;
 
-  // Use mangler to add GlobalPrefix to names to match linker names.
-  Mangler _mangler;
-
-  LTOModule(Module *m, TargetMachine *t);
+  LTOModule(std::unique_ptr<object::IRObjectFile> Obj, TargetMachine *TM);
 
 public:
   /// Returns 'true' if the file or memory contents is LLVM bitcode.
   static bool isBitcodeFile(const void *mem, size_t length);
   static bool isBitcodeFile(const char *path);
 
-  /// Returns 'true' if the file or memory contents is LLVM bitcode for the
-  /// specified triple.
-  static bool isBitcodeFileForTarget(const void *mem,
-                                     size_t length,
-                                     const char *triplePrefix);
-  static bool isBitcodeFileForTarget(const char *path,
-                                     const char *triplePrefix);
+  /// Returns 'true' if the memory buffer is LLVM bitcode for the specified
+  /// triple.
+  static bool isBitcodeForTarget(MemoryBuffer *memBuffer,
+                                 StringRef triplePrefix);
+
+  /// Create a MemoryBuffer from a memory range with an optional name.
+  static MemoryBuffer *makeBuffer(const void *mem, size_t length,
+                                  StringRef name = "");
 
   /// Create an LTOModule. N.B. These methods take ownership of the buffer. The
   /// caller must have initialized the Targets, the TargetMCs, the AsmPrinters,
@@ -86,25 +82,34 @@ public:
   /// InitializeAllTargetMCs();
   /// InitializeAllAsmPrinters();
   /// InitializeAllAsmParsers();
-  static LTOModule *makeLTOModule(const char *path, TargetOptions options,
-                                  std::string &errMsg);
-  static LTOModule *makeLTOModule(int fd, const char *path, size_t size,
-                                  TargetOptions options, std::string &errMsg);
-  static LTOModule *makeLTOModule(int fd, const char *path, size_t map_size,
-                                  off_t offset, TargetOptions options,
-                                  std::string &errMsg);
-  static LTOModule *makeLTOModule(const void *mem, size_t length,
-                                  TargetOptions options, std::string &errMsg,
-                                  StringRef path = "");
+  static LTOModule *createFromFile(const char *path, TargetOptions options,
+                                   std::string &errMsg);
+  static LTOModule *createFromOpenFile(int fd, const char *path, size_t size,
+                                       TargetOptions options,
+                                       std::string &errMsg);
+  static LTOModule *createFromOpenFileSlice(int fd, const char *path,
+                                            size_t map_size, off_t offset,
+                                            TargetOptions options,
+                                            std::string &errMsg);
+  static LTOModule *createFromBuffer(const void *mem, size_t length,
+                                     TargetOptions options, std::string &errMsg,
+                                     StringRef path = "");
+
+  const Module &getModule() const {
+    return const_cast<LTOModule*>(this)->getModule();
+  }
+  Module &getModule() {
+    return IRFile->getModule();
+  }
 
   /// Return the Module's target triple.
-  const char *getTargetTriple() {
-    return _module->getTargetTriple().c_str();
+  const std::string &getTargetTriple() {
+    return getModule().getTargetTriple();
   }
 
   /// Set the Module's target triple.
-  void setTargetTriple(const char *triple) {
-    _module->setTargetTriple(triple);
+  void setTargetTriple(StringRef Triple) {
+    getModule().setTargetTriple(Triple);
   }
 
   /// Get the number of symbols
@@ -150,9 +155,6 @@ public:
     return nullptr;
   }
 
-  /// Return the Module.
-  Module *getLLVVMModule() { return _module.get(); }
-
   const std::vector<const char*> &getAsmUndefinedRefs() {
     return _asm_undefines;
   }
@@ -167,20 +169,20 @@ private:
   bool parseSymbols(std::string &errMsg);
 
   /// Add a symbol which isn't defined just yet to a list to be resolved later.
-  void addPotentialUndefinedSymbol(const GlobalValue *dcl, bool isFunc);
+  void addPotentialUndefinedSymbol(const object::BasicSymbolRef &Sym,
+                                   bool isFunc);
 
   /// Add a defined symbol to the list.
-  void addDefinedSymbol(const GlobalValue *def, bool isFunction);
-
-  /// Add a function symbol as defined to the list.
-  void addDefinedFunctionSymbol(const Function *f);
+  void addDefinedSymbol(const char *Name, const GlobalValue *def,
+                        bool isFunction);
 
   /// Add a data symbol as defined to the list.
-  void addDefinedDataSymbol(const GlobalValue *v);
+  void addDefinedDataSymbol(const object::BasicSymbolRef &Sym);
+  void addDefinedDataSymbol(const char*Name, const GlobalValue *v);
 
-  /// Add global symbols from module-level ASM to the defined or undefined
-  /// lists.
-  bool addAsmGlobalSymbols(std::string &errMsg);
+  /// Add a function symbol as defined to the list.
+  void addDefinedFunctionSymbol(const object::BasicSymbolRef &Sym);
+  void addDefinedFunctionSymbol(const char *Name, const Function *F);
 
   /// Add a global symbol from module-level ASM to the defined list.
   void addAsmGlobalSymbol(const char *, lto_symbol_attributes scope);
@@ -200,17 +202,10 @@ private:
   /// Get string that the data pointer points to.
   bool objcClassNameFromExpression(const Constant *c, std::string &name);
 
-  /// Returns 'true' if the memory buffer is for the specified target triple.
-  static bool isTargetMatch(MemoryBuffer *memBuffer, const char *triplePrefix);
-
   /// Create an LTOModule (private version). N.B. This method takes ownership of
   /// the buffer.
-  static LTOModule *makeLTOModule(MemoryBuffer *buffer, TargetOptions options,
-                                  std::string &errMsg);
-
-  /// Create a MemoryBuffer from a memory range with an optional name.
-  static MemoryBuffer *makeBuffer(const void *mem, size_t length,
-                                  StringRef name = "");
+  static LTOModule *makeLTOModule(std::unique_ptr<MemoryBuffer> Buffer,
+                                  TargetOptions options, std::string &errMsg);
 };
 }
 #endif // LTO_MODULE_H

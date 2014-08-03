@@ -340,6 +340,15 @@ def AFGR64 : RegisterClass<"Mips", [f64], 64, (add
 
 def FGR64 : RegisterClass<"Mips", [f64], 64, (sequence "D%u_64", 0, 31)>;
 
+// Used to reserve odd registers when given -mattr=+nooddspreg
+// FIXME: Remove double precision registers from this set.
+def OddSP : RegisterClass<"Mips", [f32], 32,
+                          (add (decimate (sequence "F%u", 1, 31), 2),
+                               (decimate (sequence "F_HI%u", 1, 31), 2),
+                               (decimate (sequence "D%u", 1, 15), 2),
+                               (decimate (sequence "D%u_64", 1, 31), 2))>,
+            Unallocatable;
+
 // FP control registers.
 def CCR : RegisterClass<"Mips", [i32], 32, (sequence "FCR%u", 0, 31)>,
           Unallocatable;
@@ -347,6 +356,10 @@ def CCR : RegisterClass<"Mips", [i32], 32, (sequence "FCR%u", 0, 31)>,
 // FP condition code registers.
 def FCC : RegisterClass<"Mips", [i32], 32, (sequence "FCC%u", 0, 7)>,
           Unallocatable;
+
+// MIPS32r6/MIPS64r6 store FPU condition codes in normal FGR registers.
+// This class allows us to represent this in codegen patterns.
+def FGRCC : RegisterClass<"Mips", [i32], 32, (sequence "F%u", 0, 31)>;
 
 def MSA128B: RegisterClass<"Mips", [v16i8], 128,
                            (sequence "W%u", 0, 31)>;
@@ -509,6 +522,12 @@ def FGR64Opnd : RegisterOperand<FGR64> {
 }
 
 def FGR32Opnd : RegisterOperand<FGR32> {
+  let ParserMatchClass = FGR32AsmOperand;
+}
+
+def FGRCCOpnd : RegisterOperand<FGRCC> {
+  // The assembler doesn't use register classes so we can re-use
+  // FGR32AsmOperand.
   let ParserMatchClass = FGR32AsmOperand;
 }
 

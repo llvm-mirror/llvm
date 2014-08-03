@@ -30,20 +30,34 @@ static cl::opt<bool>
 EnableEarlyIfConvert("aarch64-early-ifcvt", cl::desc("Enable the early if "
                      "converter pass"), cl::init(true), cl::Hidden);
 
-AArch64Subtarget::AArch64Subtarget(const std::string &TT,
-                                   const std::string &CPU,
-                                   const std::string &FS, bool LittleEndian)
-    : AArch64GenSubtargetInfo(TT, CPU, FS), ARMProcFamily(Others),
-      HasFPARMv8(false), HasNEON(false), HasCrypto(false), HasCRC(false),
-      HasZeroCycleRegMove(false), HasZeroCycleZeroing(false), CPUString(CPU),
-      TargetTriple(TT), IsLittleEndian(LittleEndian) {
+AArch64Subtarget &
+AArch64Subtarget::initializeSubtargetDependencies(StringRef FS) {
   // Determine default and user-specified characteristics
 
   if (CPUString.empty())
     CPUString = "generic";
 
   ParseSubtargetFeatures(CPUString, FS);
+  return *this;
 }
+
+AArch64Subtarget::AArch64Subtarget(const std::string &TT,
+                                   const std::string &CPU,
+                                   const std::string &FS, TargetMachine &TM,
+                                   bool LittleEndian)
+    : AArch64GenSubtargetInfo(TT, CPU, FS), ARMProcFamily(Others),
+      HasFPARMv8(false), HasNEON(false), HasCrypto(false), HasCRC(false),
+      HasZeroCycleRegMove(false), HasZeroCycleZeroing(false), CPUString(CPU),
+      TargetTriple(TT),
+      // This nested ternary is horrible, but DL needs to be properly
+      // initialized
+      // before TLInfo is constructed.
+      DL(isTargetMachO()
+             ? "e-m:o-i64:64-i128:128-n32:64-S128"
+             : (LittleEndian ? "e-m:e-i64:64-i128:128-n32:64-S128"
+                             : "E-m:e-i64:64-i128:128-n32:64-S128")),
+      FrameLowering(), InstrInfo(initializeSubtargetDependencies(FS)),
+      TSInfo(&DL), TLInfo(TM) {}
 
 /// ClassifyGlobalReference - Find the target operand flags that describe
 /// how a global value should be referenced for the current subtarget.

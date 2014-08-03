@@ -298,6 +298,8 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
 
 void ScalarEnumerationTraits<ELFYAML::ELF_SHT>::enumeration(
     IO &IO, ELFYAML::ELF_SHT &Value) {
+  const auto *Object = static_cast<ELFYAML::Object *>(IO.getContext());
+  assert(Object && "The IO context is not initialized");
 #define ECase(X) IO.enumCase(Value, #X, ELF::X);
   ECase(SHT_NULL)
   ECase(SHT_PROGBITS)
@@ -325,15 +327,29 @@ void ScalarEnumerationTraits<ELFYAML::ELF_SHT>::enumeration(
   ECase(SHT_GNU_versym)
   ECase(SHT_HIOS)
   ECase(SHT_LOPROC)
-  ECase(SHT_ARM_EXIDX)
-  ECase(SHT_ARM_PREEMPTMAP)
-  ECase(SHT_ARM_ATTRIBUTES)
-  ECase(SHT_ARM_DEBUGOVERLAY)
-  ECase(SHT_ARM_OVERLAYSECTION)
-  ECase(SHT_HEX_ORDERED)
-  ECase(SHT_X86_64_UNWIND)
-  ECase(SHT_MIPS_REGINFO)
-  ECase(SHT_MIPS_OPTIONS)
+  switch (Object->Header.Machine) {
+  case ELF::EM_ARM:
+    ECase(SHT_ARM_EXIDX)
+    ECase(SHT_ARM_PREEMPTMAP)
+    ECase(SHT_ARM_ATTRIBUTES)
+    ECase(SHT_ARM_DEBUGOVERLAY)
+    ECase(SHT_ARM_OVERLAYSECTION)
+    break;
+  case ELF::EM_HEXAGON:
+    ECase(SHT_HEX_ORDERED)
+    break;
+  case ELF::EM_X86_64:
+    ECase(SHT_X86_64_UNWIND)
+    break;
+  case ELF::EM_MIPS:
+    ECase(SHT_MIPS_REGINFO)
+    ECase(SHT_MIPS_OPTIONS)
+    ECase(SHT_MIPS_ABIFLAGS)
+    break;
+  default:
+    // Nothing to do.
+    break;
+  }
 #undef ECase
 }
 
@@ -365,6 +381,16 @@ void ScalarEnumerationTraits<ELFYAML::ELF_STT>::enumeration(
   ECase(STT_COMMON)
   ECase(STT_TLS)
   ECase(STT_GNU_IFUNC)
+#undef ECase
+}
+
+void ScalarEnumerationTraits<ELFYAML::ELF_STV>::enumeration(
+    IO &IO, ELFYAML::ELF_STV &Value) {
+#define ECase(X) IO.enumCase(Value, #X, ELF::X);
+  ECase(STV_DEFAULT)
+  ECase(STV_INTERNAL)
+  ECase(STV_HIDDEN)
+  ECase(STV_PROTECTED)
 #undef ECase
 }
 
@@ -649,6 +675,7 @@ void MappingTraits<ELFYAML::Symbol>::mapping(IO &IO, ELFYAML::Symbol &Symbol) {
   IO.mapOptional("Section", Symbol.Section, StringRef());
   IO.mapOptional("Value", Symbol.Value, Hex64(0));
   IO.mapOptional("Size", Symbol.Size, Hex64(0));
+  IO.mapOptional("Visibility", Symbol.Visibility, ELFYAML::ELF_STV(0));
 }
 
 void MappingTraits<ELFYAML::LocalGlobalWeakSymbols>::mapping(

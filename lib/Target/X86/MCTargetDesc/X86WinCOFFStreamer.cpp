@@ -19,21 +19,21 @@ public:
                      raw_ostream &OS)
     : MCWinCOFFStreamer(C, AB, *CE, OS) { }
 
-  void EmitWin64EHHandlerData() override;
+  void EmitWinEHHandlerData() override;
   void FinishImpl() override;
 };
 
-void X86WinCOFFStreamer::EmitWin64EHHandlerData() {
-  MCStreamer::EmitWin64EHHandlerData();
+void X86WinCOFFStreamer::EmitWinEHHandlerData() {
+  MCStreamer::EmitWinEHHandlerData();
 
   // We have to emit the unwind info now, because this directive
   // actually switches to the .xdata section!
-  MCWin64EHUnwindEmitter::EmitUnwindInfo(*this, getCurrentW64UnwindInfo());
+  MCWin64EHUnwindEmitter::EmitUnwindInfo(*this, getCurrentWinFrameInfo());
 }
 
 void X86WinCOFFStreamer::FinishImpl() {
   EmitFrames(nullptr);
-  EmitW64Tables();
+  EmitWindowsUnwindTables();
 
   MCWinCOFFStreamer::FinishImpl();
 }

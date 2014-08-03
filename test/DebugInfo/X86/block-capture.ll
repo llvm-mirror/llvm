@@ -6,13 +6,13 @@
 ; Checks that we emit debug info for the block variable declare.
 ; CHECK: DW_TAG_subprogram
 ; CHECK: DW_TAG_variable
-; CHECK: DW_AT_name {{.*}} "block"
 ; CHECK: DW_AT_location [DW_FORM_sec_offset]
+; CHECK: DW_AT_name {{.*}} "block"
 
 ; DWARF3: DW_TAG_subprogram
 ; DWARF3: DW_TAG_variable
-; DWARF3: DW_AT_name {{.*}} "block"
 ; DWARF3: DW_AT_location [DW_FORM_data4]
+; DWARF3: DW_AT_name {{.*}} "block"
 
 %struct.__block_descriptor = type { i64, i64 }
 %struct.__block_literal_generic = type { i8*, i32, i32, i8*, %struct.__block_descriptor* }
@@ -118,15 +118,16 @@ declare i32 @__objc_personality_v0(...)
 !50 = metadata !{i32 786445, metadata !63, metadata !6, metadata !"block", i32 7, i64 64, i64 64, i64 256, i32 0, metadata !9} ; [ DW_TAG_member ]
 !51 = metadata !{i32 7, i32 18, metadata !28, null}
 !52 = metadata !{i32 7, i32 19, metadata !28, null}
-!53 = metadata !{i32 786688, metadata !28, metadata !"block", metadata !6, i32 5, metadata !9, i32 0, i32 0, i64 1, i64 32} ; [ DW_TAG_auto_variable ]
+!53 = metadata !{i32 786688, metadata !28, metadata !"block", metadata !6, i32 5, metadata !9, i32 0, i32 0, metadata !65} ; [ DW_TAG_auto_variable ]
 !54 = metadata !{i32 5, i32 27, metadata !28, null}
 !55 = metadata !{i32 8, i32 22, metadata !56, null}
-!56 = metadata !{i32 786443, metadata !57, i32 7, i32 26, metadata !6, i32 2} ; [ DW_TAG_lexical_block ]
-!57 = metadata !{i32 786443, metadata !28, i32 7, i32 19, metadata !6, i32 1} ; [ DW_TAG_lexical_block ]
+!56 = metadata !{i32 786443, metadata !6, metadata !57, i32 7, i32 26, i32 2} ; [ DW_TAG_lexical_block ]
+!57 = metadata !{i32 786443, metadata !6, metadata !28, i32 7, i32 19, i32 1} ; [ DW_TAG_lexical_block ]
 !58 = metadata !{i32 10, i32 20, metadata !59, null}
-!59 = metadata !{i32 786443, metadata !60, i32 9, i32 35, metadata !6, i32 4} ; [ DW_TAG_lexical_block ]
-!60 = metadata !{i32 786443, metadata !57, i32 9, i32 35, metadata !6, i32 3} ; [ DW_TAG_lexical_block ]
+!59 = metadata !{i32 786443, metadata !6, metadata !60, i32 9, i32 35, i32 4} ; [ DW_TAG_lexical_block ]
+!60 = metadata !{i32 786443, metadata !6, metadata !57, i32 9, i32 35, i32 3} ; [ DW_TAG_lexical_block ]
 !61 = metadata !{i32 10, i32 21, metadata !28, null}
 !62 = metadata !{i32 9, i32 20, metadata !56, null}
 !63 = metadata !{metadata !"foo.m", metadata !"/Users/echristo"}
 !64 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!65 = metadata !{i64 1, i64 32}

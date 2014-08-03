@@ -918,3 +918,58 @@ return:
 ; CHECK: switch i32
 ; CHECK-NOT: @switch.table
 }
+
+; Don't build tables for switches with TLS variables.
+@tls_a = thread_local global i32 0
+@tls_b = thread_local global i32 0
+@tls_c = thread_local global i32 0
+@tls_d = thread_local global i32 0
+define i32* @tls(i32 %x) {
+entry:
+  switch i32 %x, label %sw.default [
+    i32 0, label %return
+    i32 1, label %sw.bb1
+    i32 2, label %sw.bb2
+  ]
+sw.bb1:
+  br label %return
+sw.bb2:
+  br label %return
+sw.default:
+  br label %return
+return:
+  %retval.0 = phi i32* [ @tls_d, %sw.default ], [ @tls_c, %sw.bb2 ], [ @tls_b, %sw.bb1 ], [ @tls_a, %entry ]
+  ret i32* %retval.0
+; CHECK-LABEL: @tls(
+; CHECK: switch i32
+; CHECK-NOT: @switch.table
+}
+
+; Don't build tables for switches with dllimport variables.
+@dllimport_a = external dllimport global [3x i32]
+@dllimport_b = external dllimport global [3x i32]
+@dllimport_c = external dllimport global [3x i32]
+@dllimport_d = external dllimport global [3x i32]
+define i32* @dllimport(i32 %x) {
+entry:
+  switch i32 %x, label %sw.default [
+    i32 0, label %return
+    i32 1, label %sw.bb1
+    i32 2, label %sw.bb2
+  ]
+sw.bb1:
+  br label %return
+sw.bb2:
+  br label %return
+sw.default:
+  br label %return
+return:
+  %retval.0 = phi i32* [ getelementptr inbounds ([3 x i32]* @dllimport_d, i32 0, i32 0), %sw.default ],
+                       [ getelementptr inbounds ([3 x i32]* @dllimport_c, i32 0, i32 0), %sw.bb2 ],
+                       [ getelementptr inbounds ([3 x i32]* @dllimport_b, i32 0, i32 0), %sw.bb1 ],
+                       [ getelementptr inbounds ([3 x i32]* @dllimport_a, i32 0, i32 0), %entry ]
+  ret i32* %retval.0
+; CHECK-LABEL: @dllimport(
+; CHECK: switch i32
+; CHECK-NOT: @switch.table
+}

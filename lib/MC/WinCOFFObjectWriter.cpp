@@ -153,7 +153,7 @@ public:
   void MakeSymbolReal(COFFSymbol &S, size_t Index);
   void MakeSectionReal(COFFSection &S, size_t Number);
 
-  bool ExportSymbol(MCSymbolData const &SymbolData, MCAssembler &Asm);
+  bool ExportSymbol(const MCSymbol &Symbol, MCAssembler &Asm);
 
   bool IsPhysicalSection(COFFSection *S);
 
@@ -347,6 +347,14 @@ void WinCOFFObjectWriter::DefineSection(MCSectionData const &SectionData) {
 
   COFFSection *coff_section = createSection(Sec.getSectionName());
   COFFSymbol  *coff_symbol = createSymbol(Sec.getSectionName());
+  if (Sec.getSelection() != COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE) {
+    if (const MCSymbol *S = Sec.getCOMDATSymbol()) {
+      COFFSymbol *COMDATSymbol = GetOrCreateCOFFSymbol(S);
+      if (COMDATSymbol->Section)
+        report_fatal_error("two sections have the same comdat");
+      COMDATSymbol->Section = coff_section;
+    }
+  }
 
   coff_section->Symbol = coff_symbol;
   coff_symbol->Section = coff_section;
@@ -448,19 +456,28 @@ void WinCOFFObjectWriter::DefineSymbol(MCSymbolData const &SymbolData,
 
     // If no storage class was specified in the streamer, define it here.
     if (coff_symbol->Data.StorageClass == 0) {
-      bool external = ResSymData.isExternal() || !ResSymData.Fragment;
+      bool IsExternal =
+          ResSymData.isExternal() ||
+          (!ResSymData.getFragment() && !ResSymData.getSymbol().isVariable());
 
-      coff_symbol->Data.StorageClass =
-       external ? COFF::IMAGE_SYM_CLASS_EXTERNAL : COFF::IMAGE_SYM_CLASS_STATIC;
+      coff_symbol->Data.StorageClass = IsExternal
+                                           ? COFF::IMAGE_SYM_CLASS_EXTERNAL
+                                           : COFF::IMAGE_SYM_CLASS_STATIC;
     }
 
     if (!Base) {
       coff_symbol->Data.SectionNumber = COFF::IMAGE_SYM_ABSOLUTE;
     } else {
       const MCSymbolData &BaseData = Assembler.getSymbolData(*Base);
-      if (BaseData.Fragment)
-        coff_symbol->Section =
+      if (BaseData.Fragment) {
+        COFFSection *Sec =
             SectionMap[&BaseData.Fragment->getParent()->getSection()];
+
+        if (coff_symbol->Section && coff_symbol->Section != Sec)
+          report_fatal_error("conflicting sections for symbol");
+
+        coff_symbol->Section = Sec;
+      }
     }
 
     coff_symbol->MCData = &ResSymData;
@@ -532,16 +549,24 @@ void WinCOFFObjectWriter::MakeSymbolReal(COFFSymbol &S, size_t Index) {
   S.Index = Index;
 }
 
-bool WinCOFFObjectWriter::ExportSymbol(MCSymbolData const &SymbolData,
+bool WinCOFFObjectWriter::ExportSymbol(const MCSymbol &Symbol,
                                        MCAssembler &Asm) {
   // This doesn't seem to be right. Strings referred to from the .data section
   // need symbols so they can be linked to code in the .text section right?
 
-  // return Asm.isSymbolLinkerVisible (&SymbolData);
+  // return Asm.isSymbolLinkerVisible(Symbol);
+
+  // Non-temporary labels should always be visible to the linker.
+  if (!Symbol.isTemporary())
+    return true;
+
+  // Absolute temporary labels are never visible.
+  if (!Symbol.isInSection())
+    return false;
 
   // For now, all non-variable symbols are exported,
   // the linker will sort the rest out for us.
-  return SymbolData.isExternal() || !SymbolData.getSymbol().isVariable();
+  return !Symbol.isVariable();
 }
 
 bool WinCOFFObjectWriter::IsPhysicalSection(COFFSection *S) {
@@ -675,7 +700,7 @@ void WinCOFFObjectWriter::ExecutePostLayoutBinding(MCAssembler &Asm,
     DefineSection(Section);
 
   for (MCSymbolData &SD : Asm.symbols())
-    if (ExportSymbol(SD, Asm))
+    if (ExportSymbol(SD.getSymbol(), Asm))
       DefineSymbol(SD, Asm, Layout);
 }
 
@@ -819,13 +844,9 @@ void WinCOFFObjectWriter::WriteObject(MCAssembler &Asm,
 
   DenseMap<COFFSection *, uint16_t> SectionIndices;
   for (auto & Section : Sections) {
-    if (Layout.getSectionAddressSize(Section->MCData) > 0) {
-      size_t Number = ++Header.NumberOfSections;
-      SectionIndices[Section.get()] = Number;
-      MakeSectionReal(*Section, Number);
-    } else {
-      Section->Number = -1;
-    }
+    size_t Number = ++Header.NumberOfSections;
+    SectionIndices[Section.get()] = Number;
+    MakeSectionReal(*Section, Number);
   }
 
   Header.NumberOfSymbols = 0;
@@ -865,11 +886,15 @@ void WinCOFFObjectWriter::WriteObject(MCAssembler &Asm,
     const MCSectionCOFF &MCSec =
       static_cast<const MCSectionCOFF &>(Section->MCData->getSection());
 
-    COFFSection *Assoc = SectionMap.lookup(MCSec.getAssocSection());
+    const MCSymbol *COMDAT = MCSec.getCOMDATSymbol();
+    assert(COMDAT);
+    COFFSymbol *COMDATSymbol = GetOrCreateCOFFSymbol(COMDAT);
+    assert(COMDATSymbol);
+    COFFSection *Assoc = COMDATSymbol->Section;
     if (!Assoc)
-      report_fatal_error(Twine("Missing associated COMDAT section ") +
-                         MCSec.getAssocSection()->getSectionName() +
-                         " for section " + MCSec.getSectionName());
+      report_fatal_error(
+          Twine("Missing associated COMDAT section for section ") +
+          MCSec.getSectionName());
 
     // Skip this section if the associated section is unused.
     if (Assoc->Number == -1)

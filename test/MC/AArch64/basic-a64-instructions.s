@@ -601,9 +601,11 @@ _func:
         cmn w0, w3
         cmn wzr, w4
         cmn w5, wzr
+        cmn wsp, w6
 // CHECK: cmn      w0, w3                     // encoding: [0x1f,0x00,0x03,0x2b]
 // CHECK: cmn      wzr, w4                    // encoding: [0xff,0x03,0x04,0x2b]
 // CHECK: cmn      w5, wzr                    // encoding: [0xbf,0x00,0x1f,0x2b]
+// CHECK: cmn      wsp, w6                    // encoding: [0xff,0x43,0x26,0x2b]
 
         cmn w6, w7, lsl #0
         cmn w8, w9, lsl #15
@@ -629,9 +631,11 @@ _func:
         cmn x0, x3
         cmn xzr, x4
         cmn x5, xzr
+        cmn sp, x6
 // CHECK: cmn      x0, x3                     // encoding: [0x1f,0x00,0x03,0xab]
 // CHECK: cmn      xzr, x4                    // encoding: [0xff,0x03,0x04,0xab]
 // CHECK: cmn      x5, xzr                    // encoding: [0xbf,0x00,0x1f,0xab]
+// CHECK: cmn      sp, x6                     // encoding: [0xff,0x63,0x26,0xab]
 
         cmn x6, x7, lsl #0
         cmn x8, x9, lsl #15
@@ -657,9 +661,11 @@ _func:
         cmp w0, w3
         cmp wzr, w4
         cmp w5, wzr
+        cmp wsp, w6
 // CHECK: cmp      w0, w3                     // encoding: [0x1f,0x00,0x03,0x6b]
 // CHECK: cmp      wzr, w4                    // encoding: [0xff,0x03,0x04,0x6b]
 // CHECK: cmp      w5, wzr                    // encoding: [0xbf,0x00,0x1f,0x6b]
+// CHECK: cmp      wsp, w6                    // encoding: [0xff,0x43,0x26,0x6b]
 
         cmp w6, w7, lsl #0
         cmp w8, w9, lsl #15
@@ -685,9 +691,11 @@ _func:
         cmp x0, x3
         cmp xzr, x4
         cmp x5, xzr
+        cmp sp, x6
 // CHECK: cmp      x0, x3                     // encoding: [0x1f,0x00,0x03,0xeb]
 // CHECK: cmp      xzr, x4                    // encoding: [0xff,0x03,0x04,0xeb]
 // CHECK: cmp      x5, xzr                    // encoding: [0xbf,0x00,0x1f,0xeb]
+// CHECK: cmp      sp, x6                     // encoding: [0xff,0x63,0x26,0xeb]
 
         cmp x6, x7, lsl #0
         cmp x8, x9, lsl #15
@@ -3236,6 +3244,17 @@ _func:
         mov x10, #0xaaaaaaaaaaaaaaaa
 // CHECK: orr      w3, wzr, #0xf000f          // encoding: [0xe3,0x8f,0x00,0x32]
 // CHECK: orr x10, xzr, #0xaaaaaaaaaaaaaaaa // encoding: [0xea,0xf3,0x01,0xb2]
+
+        // The Imm field of logicalImm operations has to be truncated to the
+        // register width, i.e. 32 bits
+        and w2, w3, #-3
+        orr w0, w1, #~2
+        eor w16, w17, #-7
+        ands w19, w20, #~15
+// CHECK: and	w2, w3, #0xfffffffd     // encoding: [0x62,0x78,0x1e,0x12]
+// CHECK: orr	w0, w1, #0xfffffffd     // encoding: [0x20,0x78,0x1e,0x32]
+// CHECK: eor	w16, w17, #0xfffffff9   // encoding: [0x30,0x76,0x1d,0x52]
+// CHECK: ands	w19, w20, #0xfffffff0   // encoding: [0x93,0x6e,0x1c,0x72]
 
 //------------------------------------------------------------------------------
 // Logical (shifted register)

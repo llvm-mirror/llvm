@@ -151,19 +151,8 @@ typedef DenseMap<Instruction *, Type *> InstrToOrigTy;
 }
 
 char CodeGenPrepare::ID = 0;
-static void *initializeCodeGenPreparePassOnce(PassRegistry &Registry) {
-  initializeTargetLibraryInfoPass(Registry);
-  PassInfo *PI = new PassInfo(
-      "Optimize for code generation", "codegenprepare", &CodeGenPrepare::ID,
-      PassInfo::NormalCtor_t(callDefaultCtor<CodeGenPrepare>), false, false,
-      PassInfo::TargetMachineCtor_t(callTargetMachineCtor<CodeGenPrepare>));
-  Registry.registerPass(*PI, true);
-  return PI;
-}
-
-void llvm::initializeCodeGenPreparePass(PassRegistry &Registry) {
-  CALL_ONCE_INITIALIZATION(initializeCodeGenPreparePassOnce)
-}
+INITIALIZE_TM_PASS(CodeGenPrepare, "codegenprepare",
+                   "Optimize for code generation", false, false)
 
 FunctionPass *llvm::createCodeGenPreparePass(const TargetMachine *TM) {
   return new CodeGenPrepare(TM);
@@ -673,10 +662,13 @@ SinkShiftAndTruncate(BinaryOperator *ShiftI, Instruction *User, ConstantInt *CI,
     if (!ISDOpcode)
       continue;
 
-    // If the use is actually a legal node, there will not be an implicit
-    // truncate.
+    // If the use is actually a legal node, there will not be an
+    // implicit truncate.
+    // FIXME: always querying the result type is just an
+    // approximation; some nodes' legality is determined by the
+    // operand or other means. There's no good way to find out though.
     if (TLI.isOperationLegalOrCustom(ISDOpcode,
-                                     EVT::getEVT(TruncUser->getType())))
+                                     EVT::getEVT(TruncUser->getType(), true)))
       continue;
 
     // Don't bother for PHI nodes.
@@ -2047,7 +2039,8 @@ bool AddressingModeMatcher::MatchOperationAddr(User *AddrInst, unsigned Opcode,
   case Instruction::Shl: {
     // Can only handle X*C and X << C.
     ConstantInt *RHS = dyn_cast<ConstantInt>(AddrInst->getOperand(1));
-    if (!RHS) return false;
+    if (!RHS)
+      return false;
     int64_t Scale = RHS->getSExtValue();
     if (Opcode == Instruction::Shl)
       Scale = 1LL << Scale;
@@ -2141,8 +2134,11 @@ bool AddressingModeMatcher::MatchOperationAddr(User *AddrInst, unsigned Opcode,
     return true;
   }
   case Instruction::SExt: {
+    Instruction *SExt = dyn_cast<Instruction>(AddrInst);
+    if (!SExt)
+      return false;
+
     // Try to move this sext out of the way of the addressing mode.
-    Instruction *SExt = cast<Instruction>(AddrInst);
     // Ask for a method for doing so.
     TypePromotionHelper::Action TPH = TypePromotionHelper::getAction(
         SExt, InsertedTruncs, TLI, PromotedInsts);

@@ -808,17 +808,23 @@ public:
                                    RegScavenger *RS = nullptr) const = 0;
 
   //===--------------------------------------------------------------------===//
+  /// Subtarget Hooks
+
+  /// \brief SrcRC and DstRC will be morphed into NewRC if this returns true.
+  virtual bool shouldCoalesce(MachineInstr *MI,
+                              const TargetRegisterClass *SrcRC,
+                              unsigned SubReg,
+                              const TargetRegisterClass *DstRC,
+                              unsigned DstSubReg,
+                              const TargetRegisterClass *NewRC) const
+  { return true; }
+
+  //===--------------------------------------------------------------------===//
   /// Debug information queries.
 
   /// getFrameRegister - This method should return the register used as a base
   /// for values allocated in the current stack frame.
   virtual unsigned getFrameRegister(const MachineFunction &MF) const = 0;
-
-  /// getCompactUnwindRegNum - This function maps the register to the number for
-  /// compact unwind encoding. Return -1 if the register isn't valid.
-  virtual int getCompactUnwindRegNum(unsigned, bool) const {
-    return -1;
-  }
 };
 
 

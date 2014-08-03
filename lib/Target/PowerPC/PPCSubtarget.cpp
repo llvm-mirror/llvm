@@ -32,14 +32,56 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_CTOR
 #include "PPCGenSubtargetInfo.inc"
 
-PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, bool is64Bit,
-                           CodeGenOpt::Level OptLevel)
-    : PPCGenSubtargetInfo(TT, CPU, FS), IsPPC64(is64Bit), TargetTriple(TT),
-      OptLevel(OptLevel) {
+/// Return the datalayout string of a subtarget.
+static std::string getDataLayoutString(const PPCSubtarget &ST) {
+  const Triple &T = ST.getTargetTriple();
+
+  std::string Ret;
+
+  // Most PPC* platforms are big endian, PPC64LE is little endian.
+  if (ST.isLittleEndian())
+    Ret = "e";
+  else
+    Ret = "E";
+
+  Ret += DataLayout::getManglingComponent(T);
+
+  // PPC32 has 32 bit pointers. The PS3 (OS Lv2) is a PPC64 machine with 32 bit
+  // pointers.
+  if (!ST.isPPC64() || T.getOS() == Triple::Lv2)
+    Ret += "-p:32:32";
+
+  // Note, the alignment values for f64 and i64 on ppc64 in Darwin
+  // documentation are wrong; these are correct (i.e. "what gcc does").
+  if (ST.isPPC64() || ST.isSVR4ABI())
+    Ret += "-i64:64";
+  else
+    Ret += "-f64:32:64";
+
+  // PPC64 has 32 and 64 bit registers, PPC32 has only 32 bit ones.
+  if (ST.isPPC64())
+    Ret += "-n32:64";
+  else
+    Ret += "-n32";
+
+  return Ret;
+}
+
+PPCSubtarget &PPCSubtarget::initializeSubtargetDependencies(StringRef CPU,
+                                                            StringRef FS) {
   initializeEnvironment();
   resetSubtargetFeatures(CPU, FS);
+  return *this;
 }
+
+PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &CPU,
+                           const std::string &FS, PPCTargetMachine &TM,
+                           bool is64Bit, CodeGenOpt::Level OptLevel)
+    : PPCGenSubtargetInfo(TT, CPU, FS), IsPPC64(is64Bit), TargetTriple(TT),
+      OptLevel(OptLevel), TargetABI(PPC_ABI_UNKNOWN),
+      FrameLowering(initializeSubtargetDependencies(CPU, FS)),
+      DL(getDataLayoutString(*this)), InstrInfo(*this), JITInfo(*this),
+      TLInfo(TM), TSInfo(&DL) {}
 
 /// SetJITMode - This is called to inform the subtarget info that we are
 /// producing code for the JIT.
@@ -156,6 +198,21 @@ void PPCSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
 
   // Determine endianness.
   IsLittleEndian = (TargetTriple.getArch() == Triple::ppc64le);
+
+  // FIXME: For now, we disable VSX in little-endian mode until endian
+  // issues in those instructions can be addressed.
+  if (IsLittleEndian)
+    HasVSX = false;
+
+  // Determine default ABI.
+  if (TargetABI == PPC_ABI_UNKNOWN) {
+    if (!isDarwin() && IsPPC64) {
+      if (IsLittleEndian)
+        TargetABI = PPC_ABI_ELFv2;
+      else
+        TargetABI = PPC_ABI_ELFv1;
+    }
+  }
 }
 
 /// hasLazyResolverStub - Return true if accesses to the specified global have
@@ -175,22 +232,6 @@ bool PPCSubtarget::hasLazyResolverStub(const GlobalValue *GV,
          GV->hasCommonLinkage() || isDecl;
 }
 
-bool PPCSubtarget::enablePostRAScheduler(
-           CodeGenOpt::Level OptLevel,
-           TargetSubtargetInfo::AntiDepBreakMode& Mode,
-           RegClassVector& CriticalPathRCs) const {
-  Mode = TargetSubtargetInfo::ANTIDEP_ALL;
-
-  CriticalPathRCs.clear();
-
-  if (isPPC64())
-    CriticalPathRCs.push_back(&PPC::G8RCRegClass);
-  else
-    CriticalPathRCs.push_back(&PPC::GPRCRegClass);
-    
-  return OptLevel >= CodeGenOpt::Default;
-}
-
 // Embedded cores need aggressive scheduling (and some others also benefit).
 static bool needsAggressiveScheduling(unsigned Directive) {
   switch (Directive) {
@@ -200,6 +241,7 @@ static bool needsAggressiveScheduling(unsigned Directive) {
   case PPC::DIR_E500mc:
   case PPC::DIR_E5500:
   case PPC::DIR_PWR7:
+  case PPC::DIR_PWR8:
     return true;
   }
 }
@@ -209,6 +251,19 @@ bool PPCSubtarget::enableMachineScheduler() const {
   // FIXME: Enable this for all cores (some additional modeling
   // may be necessary).
   return needsAggressiveScheduling(DarwinDirective);
+}
+
+// This overrides the PostRAScheduler bit in the SchedModel for each CPU.
+bool PPCSubtarget::enablePostMachineScheduler() const { return true; }
+
+PPCGenSubtargetInfo::AntiDepBreakMode PPCSubtarget::getAntiDepBreakMode() const {
+  return TargetSubtargetInfo::ANTIDEP_ALL;
+}
+
+void PPCSubtarget::getCriticalPathRCs(RegClassVector &CriticalPathRCs) const {
+  CriticalPathRCs.clear();
+  CriticalPathRCs.push_back(isPPC64() ?
+                            &PPC::G8RCRegClass : &PPC::GPRCRegClass);
 }
 
 void PPCSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,

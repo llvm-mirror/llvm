@@ -429,11 +429,11 @@ MachinePointerInfo MachinePointerInfo::getStack(int64_t Offset) {
 
 MachineMemOperand::MachineMemOperand(MachinePointerInfo ptrinfo, unsigned f,
                                      uint64_t s, unsigned int a,
-                                     const MDNode *TBAAInfo,
+                                     const AAMDNodes &AAInfo,
                                      const MDNode *Ranges)
   : PtrInfo(ptrinfo), Size(s),
     Flags((f & ((1 << MOMaxBits) - 1)) | ((Log2_32(a) + 1) << MOMaxBits)),
-    TBAAInfo(TBAAInfo), Ranges(Ranges) {
+    AAInfo(AAInfo), Ranges(Ranges) {
   assert((PtrInfo.V.isNull() || PtrInfo.V.is<const PseudoSourceValue*>() ||
           isa<PointerType>(PtrInfo.V.get<const Value*>()->getType())) &&
          "invalid pointer value");
@@ -514,10 +514,38 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, const MachineMemOperand &MMO) {
     OS << "(align=" << MMO.getAlignment() << ")";
 
   // Print TBAA info.
-  if (const MDNode *TBAAInfo = MMO.getTBAAInfo()) {
+  if (const MDNode *TBAAInfo = MMO.getAAInfo().TBAA) {
     OS << "(tbaa=";
     if (TBAAInfo->getNumOperands() > 0)
       TBAAInfo->getOperand(0)->printAsOperand(OS, /*PrintType=*/false);
+    else
+      OS << "<unknown>";
+    OS << ")";
+  }
+
+  // Print AA scope info.
+  if (const MDNode *ScopeInfo = MMO.getAAInfo().Scope) {
+    OS << "(alias.scope=";
+    if (ScopeInfo->getNumOperands() > 0)
+      for (unsigned i = 0, ie = ScopeInfo->getNumOperands(); i != ie; ++i) {
+        ScopeInfo->getOperand(i)->printAsOperand(OS, /*PrintType=*/false);
+        if (i != ie-1)
+          OS << ",";
+      }
+    else
+      OS << "<unknown>";
+    OS << ")";
+  }
+
+  // Print AA noalias scope info.
+  if (const MDNode *NoAliasInfo = MMO.getAAInfo().NoAlias) {
+    OS << "(noalias=";
+    if (NoAliasInfo->getNumOperands() > 0)
+      for (unsigned i = 0, ie = NoAliasInfo->getNumOperands(); i != ie; ++i) {
+        NoAliasInfo->getOperand(i)->printAsOperand(OS, /*PrintType=*/false);
+        if (i != ie-1)
+          OS << ",";
+      }
     else
       OS << "<unknown>";
     OS << ")";
@@ -1379,7 +1407,7 @@ bool MachineInstr::isInvariantLoad(AliasAnalysis *AA) const {
       // If we have an AliasAnalysis, ask it whether the memory is constant.
       if (AA && AA->pointsToConstantMemory(
                       AliasAnalysis::Location(V, (*I)->getSize(),
-                                              (*I)->getTBAAInfo())))
+                                              (*I)->getAAInfo())))
         continue;
     }
 

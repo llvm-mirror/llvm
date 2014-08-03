@@ -14,8 +14,13 @@
 #ifndef AArch64SUBTARGET_H
 #define AArch64SUBTARGET_H
 
-#include "llvm/Target/TargetSubtargetInfo.h"
+#include "AArch64FrameLowering.h"
+#include "AArch64ISelLowering.h"
+#include "AArch64InstrInfo.h"
 #include "AArch64RegisterInfo.h"
+#include "AArch64SelectionDAGInfo.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
 
 #define GET_SUBTARGETINFO_HEADER
@@ -49,15 +54,32 @@ protected:
   /// TargetTriple - What processor and OS we're targeting.
   Triple TargetTriple;
 
-  /// IsLittleEndian - Is the target little endian?
-  bool IsLittleEndian;
+  const DataLayout DL;
+  AArch64FrameLowering FrameLowering;
+  AArch64InstrInfo InstrInfo;
+  AArch64SelectionDAGInfo TSInfo;
+  AArch64TargetLowering TLInfo;
+private:
+  /// initializeSubtargetDependencies - Initializes using CPUString and the
+  /// passed in feature string so that we can use initializer lists for
+  /// subtarget initialization.
+  AArch64Subtarget &initializeSubtargetDependencies(StringRef FS);
 
 public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   AArch64Subtarget(const std::string &TT, const std::string &CPU,
-                 const std::string &FS, bool LittleEndian);
+		   const std::string &FS, TargetMachine &TM, bool LittleEndian);
 
+  const AArch64SelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
+  const AArch64FrameLowering *getFrameLowering() const {
+    return &FrameLowering;
+  }
+  const AArch64TargetLowering *getTargetLowering() const {
+    return &TLInfo;
+  }
+  const AArch64InstrInfo *getInstrInfo() const { return &InstrInfo; }
+  const DataLayout *getDataLayout() const { return &DL; }
   bool enableMachineScheduler() const override { return true; }
 
   bool hasZeroCycleRegMove() const { return HasZeroCycleRegMove; }
@@ -69,7 +91,7 @@ public:
   bool hasCrypto() const { return HasCrypto; }
   bool hasCRC() const { return HasCRC; }
 
-  bool isLittleEndian() const { return IsLittleEndian; }
+  bool isLittleEndian() const { return DL.isLittleEndian(); }
 
   bool isTargetDarwin() const { return TargetTriple.isOSDarwin(); }
 
@@ -78,6 +100,8 @@ public:
   bool isTargetMachO() const { return TargetTriple.isOSBinFormatMachO(); }
 
   bool isCyclone() const { return CPUString == "cyclone"; }
+  bool isCortexA57() const { return CPUString == "cortex-a57"; }
+  bool isCortexA53() const { return CPUString == "cortex-a53"; }
 
   /// getMaxInlineSizeThreshold - Returns the maximum memset / memcpy size
   /// that still makes it profitable to inline the call.

@@ -18,6 +18,8 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Analysis/JumpInstrTableInfo.h"
+#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/GCMetadataPrinter.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -46,10 +48,8 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
-#include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
-#include "llvm/Transforms/Utils/GlobalStatus.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "asm-printer"
@@ -232,54 +232,31 @@ bool AsmPrinter::doInitialization(Module &M) {
     }
   }
 
-  DwarfException *DE = nullptr;
+  EHStreamer *ES = nullptr;
   switch (MAI->getExceptionHandlingType()) {
   case ExceptionHandling::None:
     break;
   case ExceptionHandling::SjLj:
   case ExceptionHandling::DwarfCFI:
-    DE = new DwarfCFIException(this);
+    ES = new DwarfCFIException(this);
     break;
   case ExceptionHandling::ARM:
-    DE = new ARMException(this);
+    ES = new ARMException(this);
     break;
-  case ExceptionHandling::Win64:
-    DE = new Win64Exception(this);
+  case ExceptionHandling::WinEH:
+    ES = new Win64Exception(this);
     break;
   }
-  if (DE)
-    Handlers.push_back(HandlerInfo(DE, EHTimerName, DWARFGroupName));
+  if (ES)
+    Handlers.push_back(HandlerInfo(ES, EHTimerName, DWARFGroupName));
   return false;
 }
 
 static bool canBeHidden(const GlobalValue *GV, const MCAsmInfo &MAI) {
-  GlobalValue::LinkageTypes Linkage = GV->getLinkage();
-  if (Linkage != GlobalValue::LinkOnceODRLinkage)
-    return false;
-
   if (!MAI.hasWeakDefCanBeHiddenDirective())
     return false;
 
-  if (GV->hasUnnamedAddr())
-    return true;
-
-  // This is only used for MachO, so right now it doesn't really matter how
-  // we handle alias. Revisit this once the MachO linker implements aliases.
-  if (isa<GlobalAlias>(GV))
-    return false;
-
-  // If it is a non constant variable, it needs to be uniqued across shared
-  // objects.
-  if (const GlobalVariable *Var = dyn_cast<GlobalVariable>(GV)) {
-    if (!Var->isConstant())
-      return false;
-  }
-
-  GlobalStatus GS;
-  if (!GlobalStatus::analyzeGlobal(GV, GS) && !GS.IsCompared)
-    return true;
-
-  return false;
+  return canBeOmittedFromSymbolTable(GV);
 }
 
 void AsmPrinter::EmitLinkage(const GlobalValue *GV, MCSymbol *GVSym) const {
@@ -709,13 +686,12 @@ AsmPrinter::CFIMoveType AsmPrinter::needsCFIMoves() {
 }
 
 bool AsmPrinter::needsSEHMoves() {
-  return MAI->getExceptionHandlingType() == ExceptionHandling::Win64 &&
+  return MAI->getExceptionHandlingType() == ExceptionHandling::WinEH &&
     MF->getFunction()->needsUnwindTableEntry();
 }
 
 void AsmPrinter::emitCFIInstruction(const MachineInstr &MI) {
-  ExceptionHandling::ExceptionsType ExceptionHandlingType =
-      MAI->getExceptionHandlingType();
+  ExceptionHandling ExceptionHandlingType = MAI->getExceptionHandlingType();
   if (ExceptionHandlingType != ExceptionHandling::DwarfCFI &&
       ExceptionHandlingType != ExceptionHandling::ARM)
     return;
@@ -805,6 +781,8 @@ void AsmPrinter::EmitFunctionBody() {
         }
       }
     }
+
+    EmitBasicBlockEnd(MBB);
   }
 
   // If the last instruction was a prolog label, then we have a situation where
@@ -870,6 +848,8 @@ void AsmPrinter::EmitFunctionBody() {
   OutStreamer.AddBlankLine();
 }
 
+static const MCExpr *lowerConstant(const Constant *CV, AsmPrinter &AP);
+
 bool AsmPrinter::doFinalization(Module &M) {
   // Emit global variables.
   for (const auto &G : M.globals())
@@ -885,6 +865,54 @@ bool AsmPrinter::doFinalization(Module &M) {
 
     MCSymbol *Name = getSymbol(&F);
     EmitVisibility(Name, V, false);
+  }
+
+  // Get information about jump-instruction tables to print.
+  JumpInstrTableInfo *JITI = getAnalysisIfAvailable<JumpInstrTableInfo>();
+
+  if (JITI && !JITI->getTables().empty()) {
+    unsigned Arch = Triple(getTargetTriple()).getArch();
+    bool IsThumb = (Arch == Triple::thumb || Arch == Triple::thumbeb);
+    MCInst TrapInst;
+    TM.getInstrInfo()->getTrap(TrapInst);
+    for (const auto &KV : JITI->getTables()) {
+      uint64_t Count = 0;
+      for (const auto &FunPair : KV.second) {
+        // Emit the function labels to make this be a function entry point.
+        MCSymbol *FunSym =
+          OutContext.GetOrCreateSymbol(FunPair.second->getName());
+        OutStreamer.EmitSymbolAttribute(FunSym, MCSA_Global);
+        // FIXME: JumpTableInstrInfo should store information about the required
+        // alignment of table entries and the size of the padding instruction.
+        EmitAlignment(3);
+        if (IsThumb)
+          OutStreamer.EmitThumbFunc(FunSym);
+        if (MAI->hasDotTypeDotSizeDirective())
+          OutStreamer.EmitSymbolAttribute(FunSym, MCSA_ELF_TypeFunction);
+        OutStreamer.EmitLabel(FunSym);
+
+        // Emit the jump instruction to transfer control to the original
+        // function.
+        MCInst JumpToFun;
+        MCSymbol *TargetSymbol =
+          OutContext.GetOrCreateSymbol(FunPair.first->getName());
+        const MCSymbolRefExpr *TargetSymRef =
+          MCSymbolRefExpr::Create(TargetSymbol, MCSymbolRefExpr::VK_PLT,
+                                  OutContext);
+        TM.getInstrInfo()->getUnconditionalBranch(JumpToFun, TargetSymRef);
+        OutStreamer.EmitInstruction(JumpToFun, getSubtargetInfo());
+        ++Count;
+      }
+
+      // Emit enough padding instructions to fill up to the next power of two.
+      // This assumes that the trap instruction takes 8 bytes or fewer.
+      uint64_t Remaining = NextPowerOf2(Count) - Count;
+      for (uint64_t C = 0; C < Remaining; ++C) {
+        EmitAlignment(3);
+        OutStreamer.EmitInstruction(TrapInst, getSubtargetInfo());
+      }
+
+    }
   }
 
   // Emit module flags.
@@ -932,10 +960,6 @@ bool AsmPrinter::doFinalization(Module &M) {
     for (const auto &Alias : M.aliases()) {
       MCSymbol *Name = getSymbol(&Alias);
 
-      const GlobalValue *GV = Alias.getAliasee();
-      assert(!GV->isDeclaration());
-      MCSymbol *Target = getSymbol(GV);
-
       if (Alias.hasExternalLinkage() || !MAI->getWeakRefDirective())
         OutStreamer.EmitSymbolAttribute(Name, MCSA_Global);
       else if (Alias.hasWeakLinkage() || Alias.hasLinkOnceLinkage())
@@ -947,7 +971,7 @@ bool AsmPrinter::doFinalization(Module &M) {
 
       // Emit the directives as assignments aka .set:
       OutStreamer.EmitAssignment(Name,
-                                 MCSymbolRefExpr::Create(Target, OutContext));
+                                 lowerConstant(Alias.getAliasee(), *this));
     }
   }
 
@@ -1017,23 +1041,13 @@ void AsmPrinter::EmitConstantPool() {
     const MachineConstantPoolEntry &CPE = CP[i];
     unsigned Align = CPE.getAlignment();
 
-    SectionKind Kind;
-    switch (CPE.getRelocationInfo()) {
-    default: llvm_unreachable("Unknown section kind");
-    case 2: Kind = SectionKind::getReadOnlyWithRel(); break;
-    case 1:
-      Kind = SectionKind::getReadOnlyWithRelLocal();
-      break;
-    case 0:
-    switch (TM.getDataLayout()->getTypeAllocSize(CPE.getType())) {
-    case 4:  Kind = SectionKind::getMergeableConst4(); break;
-    case 8:  Kind = SectionKind::getMergeableConst8(); break;
-    case 16: Kind = SectionKind::getMergeableConst16();break;
-    default: Kind = SectionKind::getMergeableConst(); break;
-    }
-    }
+    SectionKind Kind = CPE.getSectionKind(TM.getDataLayout());
 
-    const MCSection *S = getObjFileLowering().getSectionForConstant(Kind);
+    const Constant *C = nullptr;
+    if (!CPE.isMachineConstantPoolEntry())
+      C = CPE.Val.ConstVal;
+
+    const MCSection *S = getObjFileLowering().getSectionForConstant(Kind, C);
 
     // The number of sections are small, just do a linear search from the
     // last section to the first.
@@ -1056,13 +1070,22 @@ void AsmPrinter::EmitConstantPool() {
   }
 
   // Now print stuff into the calculated sections.
+  const MCSection *CurSection = nullptr;
+  unsigned Offset = 0;
   for (unsigned i = 0, e = CPSections.size(); i != e; ++i) {
-    OutStreamer.SwitchSection(CPSections[i].S);
-    EmitAlignment(Log2_32(CPSections[i].Alignment));
-
-    unsigned Offset = 0;
     for (unsigned j = 0, ee = CPSections[i].CPEs.size(); j != ee; ++j) {
       unsigned CPI = CPSections[i].CPEs[j];
+      MCSymbol *Sym = GetCPISymbol(CPI);
+      if (!Sym->isUndefined())
+        continue;
+
+      if (CurSection != CPSections[i].S) {
+        OutStreamer.SwitchSection(CPSections[i].S);
+        EmitAlignment(Log2_32(CPSections[i].Alignment));
+        CurSection = CPSections[i].S;
+        Offset = 0;
+      }
+
       MachineConstantPoolEntry CPE = CP[CPI];
 
       // Emit inter-object padding for alignment.
@@ -1072,8 +1095,8 @@ void AsmPrinter::EmitConstantPool() {
 
       Type *Ty = CPE.getType();
       Offset = NewOffset + TM.getDataLayout()->getTypeAllocSize(Ty);
-      OutStreamer.EmitLabel(GetCPISymbol(CPI));
 
+      OutStreamer.EmitLabel(Sym);
       if (CPE.isMachineConstantPoolEntry())
         EmitMachineConstantPoolValue(CPE.Val.MachineCPVal);
       else
@@ -1111,7 +1134,8 @@ void AsmPrinter::EmitJumpTableInfo() {
   } else {
     // Otherwise, drop it in the readonly section.
     const MCSection *ReadOnlySection =
-      getObjFileLowering().getSectionForConstant(SectionKind::getReadOnly());
+        getObjFileLowering().getSectionForConstant(SectionKind::getReadOnly(),
+                                                   /*C=*/nullptr);
     OutStreamer.SwitchSection(ReadOnlySection);
     JTInDiffSection = true;
   }
@@ -1248,7 +1272,7 @@ bool AsmPrinter::EmitSpecialLLVMGlobal(const GlobalVariable *GV) {
   }
 
   // Ignore debug and non-emitted data.  This handles llvm.compiler.used.
-  if (GV->getSection() == "llvm.metadata" ||
+  if (StringRef(GV->getSection()) == "llvm.metadata" ||
       GV->hasAvailableExternallyLinkage())
     return true;
 
@@ -1350,14 +1374,17 @@ void AsmPrinter::EmitXXStructorList(const Constant *List, bool isCtor) {
   for (Structor &S : Structors) {
     const TargetLoweringObjectFile &Obj = getObjFileLowering();
     const MCSymbol *KeySym = nullptr;
-    const MCSection *KeySec = nullptr;
-    if (S.ComdatKey) {
-      KeySym = getSymbol(S.ComdatKey);
-      KeySec = getObjFileLowering().SectionForGlobal(S.ComdatKey, *Mang, TM);
+    if (GlobalValue *GV = S.ComdatKey) {
+      if (GV->hasAvailableExternallyLinkage())
+        // If the associated variable is available_externally, some other TU
+        // will provide its dynamic initializer.
+        continue;
+
+      KeySym = getSymbol(GV);
     }
     const MCSection *OutputSection =
-        (isCtor ? Obj.getStaticCtorSection(S.Priority, KeySym, KeySec)
-                : Obj.getStaticDtorSection(S.Priority, KeySym, KeySec));
+        (isCtor ? Obj.getStaticCtorSection(S.Priority, KeySym)
+                : Obj.getStaticDtorSection(S.Priority, KeySym));
     OutStreamer.SwitchSection(OutputSection);
     if (OutStreamer.getCurrentSection() != OutStreamer.getPreviousSection())
       EmitAlignment(Align);
@@ -1817,7 +1844,10 @@ static void emitGlobalConstantFP(const ConstantFP *CFP, AsmPrinter &AP) {
     SmallString<8> StrVal;
     CFP->getValueAPF().toString(StrVal);
 
-    CFP->getType()->print(AP.OutStreamer.GetCommentOS());
+    if (CFP->getType())
+      CFP->getType()->print(AP.OutStreamer.GetCommentOS());
+    else
+      AP.OutStreamer.GetCommentOS() << "Printing <null> Type";
     AP.OutStreamer.GetCommentOS() << ' ' << StrVal << '\n';
   }
 
@@ -1830,7 +1860,8 @@ static void emitGlobalConstantFP(const ConstantFP *CFP, AsmPrinter &AP) {
 
   // PPC's long double has odd notions of endianness compared to how LLVM
   // handles it: p[0] goes first for *big* endian on PPC.
-  if (AP.TM.getDataLayout()->isBigEndian() != CFP->getType()->isPPC_FP128Ty()) {
+  if (AP.TM.getDataLayout()->isBigEndian() &&
+      !CFP->getType()->isPPC_FP128Ty()) {
     int Chunk = API.getNumWords() - 1;
 
     if (TrailingBytes)

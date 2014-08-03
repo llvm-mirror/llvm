@@ -12,8 +12,8 @@
 
 #include "AArch64.h"
 #include "AArch64TargetMachine.h"
-#include "llvm/PassManager.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
@@ -63,9 +63,7 @@ extern "C" void LLVMInitializeAArch64Target() {
   // Register the target.
   RegisterTargetMachine<AArch64leTargetMachine> X(TheAArch64leTarget);
   RegisterTargetMachine<AArch64beTargetMachine> Y(TheAArch64beTarget);
-
-  RegisterTargetMachine<AArch64leTargetMachine> Z(TheARM64leTarget);
-  RegisterTargetMachine<AArch64beTargetMachine> W(TheARM64beTarget);
+  RegisterTargetMachine<AArch64leTargetMachine> Z(TheARM64Target);
 }
 
 /// TargetMachine ctor - Create an AArch64 architecture model.
@@ -77,16 +75,7 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, StringRef TT,
                                            CodeGenOpt::Level OL,
                                            bool LittleEndian)
     : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-      Subtarget(TT, CPU, FS, LittleEndian),
-      // This nested ternary is horrible, but DL needs to be properly
-      // initialized
-      // before TLInfo is constructed.
-      DL(Subtarget.isTargetMachO()
-             ? "e-m:o-i64:64-i128:128-n32:64-S128"
-             : (LittleEndian ? "e-m:e-i64:64-i128:128-n32:64-S128"
-                             : "E-m:e-i64:64-i128:128-n32:64-S128")),
-      InstrInfo(Subtarget), TLInfo(*this), FrameLowering(*this, Subtarget),
-      TSInfo(*this) {
+      Subtarget(TT, CPU, FS, *this, LittleEndian) {
   initAsmInfo();
 }
 

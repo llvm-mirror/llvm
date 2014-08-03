@@ -92,9 +92,9 @@ protected:
 };
 
 template <typename T>
-typename T::key_type *const DenseMapTest<T>::dummy_key_ptr = 0;
+typename T::key_type *const DenseMapTest<T>::dummy_key_ptr = nullptr;
 template <typename T>
-typename T::mapped_type *const DenseMapTest<T>::dummy_value_ptr = 0;
+typename T::mapped_type *const DenseMapTest<T>::dummy_value_ptr = nullptr;
 
 // Register these types for testing.
 typedef ::testing::Types<DenseMap<uint32_t, uint32_t>,
@@ -345,7 +345,7 @@ TEST(DenseMapCustomTest, FindAsTest) {
   EXPECT_EQ(3u, map.size());
 
   // Normal lookup tests
-  EXPECT_EQ(1, map.count(1));
+  EXPECT_EQ(1u, map.count(1));
   EXPECT_EQ(1u, map.find(0)->second);
   EXPECT_EQ(2u, map.find(1)->second);
   EXPECT_EQ(3u, map.find(2)->second);

@@ -124,6 +124,8 @@ enum {
 };
 
 // Machine architectures
+// See current registered ELF machine architectures at:
+//    http://www.uxsglobal.com/developers/gabi/latest/ch4.eheader.html
 enum {
   EM_NONE          = 0, // No machine
   EM_M32           = 1, // AT&T WE 32100
@@ -287,7 +289,26 @@ enum {
   EM_RL78          = 197, // Renesas RL78 family
   EM_VIDEOCORE5    = 198, // Broadcom VideoCore V processor
   EM_78KOR         = 199, // Renesas 78KOR family
-  EM_56800EX       = 200  // Freescale 56800EX Digital Signal Controller (DSC)
+  EM_56800EX       = 200, // Freescale 56800EX Digital Signal Controller (DSC)
+  EM_BA1           = 201, // Beyond BA1 CPU architecture
+  EM_BA2           = 202, // Beyond BA2 CPU architecture
+  EM_XCORE         = 203, // XMOS xCORE processor family
+  EM_MCHP_PIC      = 204, // Microchip 8-bit PIC(r) family
+  EM_INTEL205      = 205, // Reserved by Intel
+  EM_INTEL206      = 206, // Reserved by Intel
+  EM_INTEL207      = 207, // Reserved by Intel
+  EM_INTEL208      = 208, // Reserved by Intel
+  EM_INTEL209      = 209, // Reserved by Intel
+  EM_KM32          = 210, // KM211 KM32 32-bit processor
+  EM_KMX32         = 211, // KM211 KMX32 32-bit processor
+  EM_KMX16         = 212, // KM211 KMX16 16-bit processor
+  EM_KMX8          = 213, // KM211 KMX8 8-bit processor
+  EM_KVARC         = 214, // KM211 KVARC processor
+  EM_CDP           = 215, // Paneve CDP architecture family
+  EM_COGE          = 216, // Cognitive Smart Memory Processor
+  EM_COOL          = 217, // iCelero CoolEngine
+  EM_NORC          = 218, // Nanoradio Optimized RISC
+  EM_CSR_KALIMBA   = 219  // CSR Kalimba architecture family
 };
 
 // Object file classes.
@@ -437,6 +458,8 @@ enum {
   R_PPC_GOT16_LO              = 15,
   R_PPC_GOT16_HI              = 16,
   R_PPC_GOT16_HA              = 17,
+  R_PPC_PLTREL24              = 18,
+  R_PPC_JMP_SLOT              = 21,
   R_PPC_REL32                 = 26,
   R_PPC_TLS                   = 67,
   R_PPC_DTPMOD32              = 68,
@@ -474,6 +497,37 @@ enum {
   R_PPC_REL16_HA              = 252
 };
 
+// Specific e_flags for PPC64
+enum {
+  // e_flags bits specifying ABI:
+  // 1 for original ABI using function descriptors,
+  // 2 for revised ABI without function descriptors,
+  // 0 for unspecified or not using any features affected by the differences.
+  EF_PPC64_ABI = 3
+};
+
+// Special values for the st_other field in the symbol table entry for PPC64.
+enum {
+  STO_PPC64_LOCAL_BIT = 5,
+  STO_PPC64_LOCAL_MASK = (7 << STO_PPC64_LOCAL_BIT)
+};
+static inline int64_t
+decodePPC64LocalEntryOffset(unsigned Other) {
+  unsigned Val = (Other & STO_PPC64_LOCAL_MASK) >> STO_PPC64_LOCAL_BIT;
+  return ((1 << Val) >> 2) << 2;
+}
+static inline unsigned
+encodePPC64LocalEntryOffset(int64_t Offset) {
+  unsigned Val = (Offset >= 4 * 4
+                  ? (Offset >= 8 * 4
+                     ? (Offset >= 16 * 4 ? 6 : 5)
+                     : 4)
+                  : (Offset >= 2 * 4
+                     ? 3
+                     : (Offset >= 1 * 4 ? 2 : 0)));
+  return Val << STO_PPC64_LOCAL_BIT;
+}
+
 // ELF Relocation types for PPC64
 enum {
   R_PPC64_NONE                = 0,
@@ -494,6 +548,7 @@ enum {
   R_PPC64_GOT16_LO            = 15,
   R_PPC64_GOT16_HI            = 16,
   R_PPC64_GOT16_HA            = 17,
+  R_PPC64_JMP_SLOT            = 21,
   R_PPC64_REL32               = 26,
   R_PPC64_ADDR64              = 38,
   R_PPC64_ADDR16_HIGHER       = 39,
@@ -1278,6 +1333,7 @@ enum : unsigned {
 
   SHT_MIPS_REGINFO        = 0x70000006, // Register usage information
   SHT_MIPS_OPTIONS        = 0x7000000d, // General options
+  SHT_MIPS_ABIFLAGS       = 0x7000002a, // ABI information.
 
   SHT_HIPROC        = 0x7fffffff, // Highest processor arch-specific type.
   SHT_LOUSER        = 0x80000000, // Lowest type reserved for applications.
@@ -1595,7 +1651,8 @@ enum {
   // MIPS program header types.
   PT_MIPS_REGINFO  = 0x70000000,  // Register usage information.
   PT_MIPS_RTPROC   = 0x70000001,  // Runtime procedure table.
-  PT_MIPS_OPTIONS  = 0x70000002   // Options segment.
+  PT_MIPS_OPTIONS  = 0x70000002,  // Options segment.
+  PT_MIPS_ABIFLAGS = 0x70000003   // Abiflags segment.
 };
 
 // Segment flag bits.

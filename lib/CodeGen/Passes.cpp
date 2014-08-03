@@ -30,11 +30,6 @@
 
 using namespace llvm;
 
-namespace llvm {
-extern cl::opt<bool> EnableStackMapLiveness;
-extern cl::opt<bool> EnablePatchPointLiveness;
-}
-
 static cl::opt<bool> DisablePostRA("disable-post-ra", cl::Hidden,
     cl::desc("Disable Post Regalloc"));
 static cl::opt<bool> DisableBranchFold("disable-branch-fold", cl::Hidden,
@@ -76,6 +71,8 @@ static cl::opt<bool> DisableCGP("disable-cgp", cl::Hidden,
     cl::desc("Disable Codegen Prepare"));
 static cl::opt<bool> DisableCopyProp("disable-copyprop", cl::Hidden,
     cl::desc("Disable Copy Propagation pass"));
+static cl::opt<bool> DisablePartialLibcallInlining("disable-partial-libcall-inlining",
+    cl::Hidden, cl::desc("Disable Partial Libcall Inlining"));
 static cl::opt<bool> PrintLSR("print-lsr-output", cl::Hidden,
     cl::desc("Print LLVM IR produced by the loop-reduce pass"));
 static cl::opt<bool> PrintISelInput("print-isel-input", cl::Hidden,
@@ -92,9 +89,9 @@ PrintMachineInstrs("print-machineinstrs", cl::ValueOptional,
 
 // Temporary option to allow experimenting with MachineScheduler as a post-RA
 // scheduler. Targets can "properly" enable this with
-// substitutePass(&PostRASchedulerID, &MachineSchedulerID); Ideally it wouldn't
-// be part of the standard pass pipeline, and the target would just add a PostRA
-// scheduling pass wherever it wants.
+// substitutePass(&PostRASchedulerID, &PostMachineSchedulerID); Ideally it
+// wouldn't be part of the standard pass pipeline, and the target would just add
+// a PostRA scheduling pass wherever it wants.
 static cl::opt<bool> MISchedPostRA("misched-postra", cl::Hidden,
   cl::desc("Run MachineScheduler post regalloc (independent of preRA sched)"));
 
@@ -380,6 +377,7 @@ void TargetPassConfig::addIRPasses() {
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.
   addPass(createTypeBasedAliasAnalysisPass());
+  addPass(createScopedNoAliasAAPass());
   addPass(createBasicAliasAnalysisPass());
 
   // Before running any passes, run the verifier to determine if the input
@@ -404,6 +402,9 @@ void TargetPassConfig::addIRPasses() {
   // Prepare expensive constants for SelectionDAG.
   if (getOptLevel() != CodeGenOpt::None && !DisableConstantHoisting)
     addPass(createConstantHoistingPass());
+
+  if (getOptLevel() != CodeGenOpt::None && !DisablePartialLibcallInlining)
+    addPass(createPartiallyInlineLibCallsPass());
 }
 
 /// Turn exception handling constructs into something the code generators can
@@ -421,7 +422,7 @@ void TargetPassConfig::addPassesToHandleExceptions() {
     // FALLTHROUGH
   case ExceptionHandling::DwarfCFI:
   case ExceptionHandling::ARM:
-  case ExceptionHandling::Win64:
+  case ExceptionHandling::WinEH:
     addPass(createDwarfEHPass(TM));
     break;
   case ExceptionHandling::None:
@@ -566,8 +567,7 @@ void TargetPassConfig::addMachinePasses() {
   if (addPreEmitPass())
     printAndVerify("After PreEmit passes");
 
-  if (EnableStackMapLiveness || EnablePatchPointLiveness)
-    addPass(&StackMapLivenessID);
+  addPass(&StackMapLivenessID);
 }
 
 /// Add passes that optimize machine instructions in SSA form.

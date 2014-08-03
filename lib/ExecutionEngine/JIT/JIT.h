@@ -39,12 +39,12 @@ private:
 public:
   explicit JITState(Module *M) : PM(M), M(M) {}
 
-  FunctionPassManager &getPM(const MutexGuard &L) {
+  FunctionPassManager &getPM() {
     return PM;
   }
 
   Module *getModule() const { return M; }
-  std::vector<AssertingVH<Function> > &getPendingFunctions(const MutexGuard &L){
+  std::vector<AssertingVH<Function> > &getPendingFunctions() {
     return PendingFunctions;
   }
 };
@@ -90,21 +90,6 @@ public:
   /// getJITInfo - Return the target JIT information structure.
   ///
   TargetJITInfo &getJITInfo() const { return TJI; }
-
-  /// create - Create an return a new JIT compiler if there is one available
-  /// for the current target.  Otherwise, return null.
-  ///
-  static ExecutionEngine *create(Module *M,
-                                 std::string *Err,
-                                 JITMemoryManager *JMM,
-                                 CodeGenOpt::Level OptLevel =
-                                   CodeGenOpt::Default,
-                                 bool GVsWithCode = true,
-                                 Reloc::Model RM = Reloc::Default,
-                                 CodeModel::Model CMM = CodeModel::JITDefault) {
-    return ExecutionEngine::createJIT(M, Err, JMM, OptLevel, GVsWithCode,
-                                      RM, CMM);
-  }
 
   void addModule(Module *M) override;
 
@@ -205,7 +190,7 @@ public:
   void NotifyFreeingMachineCode(void *OldPtr);
 
   BasicBlockAddressMapTy &
-  getBasicBlockAddressMap(const MutexGuard &) {
+  getBasicBlockAddressMap() {
     return BasicBlockAddressMap;
   }
 
@@ -213,9 +198,9 @@ public:
 private:
   static JITCodeEmitter *createEmitter(JIT &J, JITMemoryManager *JMM,
                                        TargetMachine &tm);
-  void runJITOnFunctionUnlocked(Function *F, const MutexGuard &locked);
-  void updateFunctionStub(Function *F);
-  void jitTheFunction(Function *F, const MutexGuard &locked);
+  void runJITOnFunctionUnlocked(Function *F);
+  void updateFunctionStubUnlocked(Function *F);
+  void jitTheFunctionUnlocked(Function *F);
 
 protected:
 

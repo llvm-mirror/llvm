@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Casting.h"
@@ -56,9 +57,7 @@ Input::Input(StringRef InputContent,
 Input::~Input() {
 }
 
-error_code Input::error() {
-  return EC;
-}
+std::error_code Input::error() { return EC; }
 
 // Pin the vtables to this file.
 void Input::HNode::anchor() {}

@@ -13,14 +13,14 @@
 #include "AArch64InstrInfo.h"
 #include "AArch64MachineFunctionInfo.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/Support/CommandLine.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "aarch64-branch-relax"
@@ -291,7 +291,7 @@ static bool isConditionalBranch(unsigned Opc) {
 static MachineBasicBlock *getDestBlock(MachineInstr *MI) {
   switch (MI->getOpcode()) {
   default:
-    assert(0 && "unexpected opcode!");
+    llvm_unreachable("unexpected opcode!");
   case AArch64::TBZW:
   case AArch64::TBNZW:
   case AArch64::TBZX:
@@ -309,7 +309,7 @@ static MachineBasicBlock *getDestBlock(MachineInstr *MI) {
 static unsigned getOppositeConditionOpcode(unsigned Opc) {
   switch (Opc) {
   default:
-    assert(0 && "unexpected opcode!");
+    llvm_unreachable("unexpected opcode!");
   case AArch64::TBNZW:   return AArch64::TBZW;
   case AArch64::TBNZX:   return AArch64::TBZX;
   case AArch64::TBZW:    return AArch64::TBNZW;
@@ -325,7 +325,7 @@ static unsigned getOppositeConditionOpcode(unsigned Opc) {
 static unsigned getBranchDisplacementBits(unsigned Opc) {
   switch (Opc) {
   default:
-    assert(0 && "unexpected opcode!");
+    llvm_unreachable("unexpected opcode!");
   case AArch64::TBNZW:
   case AArch64::TBZW:
   case AArch64::TBNZX:

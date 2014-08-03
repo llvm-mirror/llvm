@@ -1032,11 +1032,6 @@ static Type *findCommonType(AllocaSlices::const_iterator B,
       UserTy = SI->getValueOperand()->getType();
     }
 
-    if (!UserTy || (Ty && Ty != UserTy))
-      TyIsCommon = false; // Give up on anything but an iN type.
-    else
-      Ty = UserTy;
-
     if (IntegerType *UserITy = dyn_cast_or_null<IntegerType>(UserTy)) {
       // If the type is larger than the partition, skip it. We only encounter
       // this for split integer operations where we want to use the type of the
@@ -1051,6 +1046,13 @@ static Type *findCommonType(AllocaSlices::const_iterator B,
       if (!ITy || ITy->getBitWidth() < UserITy->getBitWidth())
         ITy = UserITy;
     }
+
+    // To avoid depending on the order of slices, Ty and TyIsCommon must not
+    // depend on types skipped above.
+    if (!UserTy || (Ty && Ty != UserTy))
+      TyIsCommon = false; // Give up on anything but an iN type.
+    else
+      Ty = UserTy;
   }
 
   return TyIsCommon ? Ty : ITy;
@@ -1128,7 +1130,7 @@ static bool isSafePHIToSpeculate(PHINode &PN,
     // If this pointer is always safe to load, or if we can prove that there
     // is already a load in the block, then we can move the load to the pred
     // block.
-    if (InVal->isDereferenceablePointer() ||
+    if (InVal->isDereferenceablePointer(DL) ||
         isSafeToLoadUnconditionally(InVal, TI, MaxAlign, DL))
       continue;
 
@@ -1146,10 +1148,12 @@ static void speculatePHINodeLoads(PHINode &PN) {
   PHINode *NewPN = PHIBuilder.CreatePHI(LoadTy, PN.getNumIncomingValues(),
                                         PN.getName() + ".sroa.speculated");
 
-  // Get the TBAA tag and alignment to use from one of the loads.  It doesn't
+  // Get the AA tags and alignment to use from one of the loads.  It doesn't
   // matter which one we get and if any differ.
   LoadInst *SomeLoad = cast<LoadInst>(PN.user_back());
-  MDNode *TBAATag = SomeLoad->getMetadata(LLVMContext::MD_tbaa);
+
+  AAMDNodes AATags;
+  SomeLoad->getAAMetadata(AATags);
   unsigned Align = SomeLoad->getAlignment();
 
   // Rewrite all loads of the PN to use the new PHI.
@@ -1170,8 +1174,8 @@ static void speculatePHINodeLoads(PHINode &PN) {
         InVal, (PN.getName() + ".sroa.speculate.load." + Pred->getName()));
     ++NumLoadsSpeculated;
     Load->setAlignment(Align);
-    if (TBAATag)
-      Load->setMetadata(LLVMContext::MD_tbaa, TBAATag);
+    if (AATags)
+      Load->setAAMetadata(AATags);
     NewPN->addIncoming(Load, Pred);
   }
 
@@ -1196,8 +1200,8 @@ static bool isSafeSelectToSpeculate(SelectInst &SI,
                                     const DataLayout *DL = nullptr) {
   Value *TValue = SI.getTrueValue();
   Value *FValue = SI.getFalseValue();
-  bool TDerefable = TValue->isDereferenceablePointer();
-  bool FDerefable = FValue->isDereferenceablePointer();
+  bool TDerefable = TValue->isDereferenceablePointer(DL);
+  bool FDerefable = FValue->isDereferenceablePointer(DL);
 
   for (User *U : SI.users()) {
     LoadInst *LI = dyn_cast<LoadInst>(U);
@@ -1236,12 +1240,15 @@ static void speculateSelectInstLoads(SelectInst &SI) {
         IRB.CreateLoad(FV, LI->getName() + ".sroa.speculate.load.false");
     NumLoadsSpeculated += 2;
 
-    // Transfer alignment and TBAA info if present.
+    // Transfer alignment and AA info if present.
     TL->setAlignment(LI->getAlignment());
     FL->setAlignment(LI->getAlignment());
-    if (MDNode *Tag = LI->getMetadata(LLVMContext::MD_tbaa)) {
-      TL->setMetadata(LLVMContext::MD_tbaa, Tag);
-      FL->setMetadata(LLVMContext::MD_tbaa, Tag);
+
+    AAMDNodes Tags;
+    LI->getAAMetadata(Tags);
+    if (Tags) {
+      TL->setAAMetadata(Tags);
+      FL->setAAMetadata(Tags);
     }
 
     Value *V = IRB.CreateSelect(SI.getCondition(), TL, FL,

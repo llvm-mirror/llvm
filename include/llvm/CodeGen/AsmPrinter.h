@@ -52,7 +52,6 @@ class MCSubtargetInfo;
 class MCSymbol;
 class MDNode;
 class DwarfDebug;
-class DwarfException;
 class Mangler;
 class TargetLoweringObjectFile;
 class DataLayout;
@@ -264,6 +263,9 @@ public:
   /// Targets can override this to emit stuff after the last basic block in the
   /// function.
   virtual void EmitFunctionBodyEnd() {}
+
+  /// Targets can override this to emit stuff at the end of a basic block.
+  virtual void EmitBasicBlockEnd(const MachineBasicBlock &MBB) {}
 
   /// Targets should implement this to emit instructions.
   virtual void EmitInstruction(const MachineInstr *) {

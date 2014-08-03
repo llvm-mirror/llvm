@@ -17,12 +17,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/UnrollLoop.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/LLVMContext.h"
@@ -63,10 +65,15 @@ static inline void RemapInstruction(Instruction *I,
 
 /// FoldBlockIntoPredecessor - Folds a basic block into its predecessor if it
 /// only has one predecessor, and that predecessor only has one successor.
-/// The LoopInfo Analysis that is passed will be kept consistent.
-/// Returns the new combined block.
-static BasicBlock *FoldBlockIntoPredecessor(BasicBlock *BB, LoopInfo* LI,
-                                            LPPassManager *LPM) {
+/// The LoopInfo Analysis that is passed will be kept consistent.  If folding is
+/// successful references to the containing loop must be removed from
+/// ScalarEvolution by calling ScalarEvolution::forgetLoop because SE may have
+/// references to the eliminated BB.  The argument ForgottenLoops contains a set
+/// of loops that have already been forgotten to prevent redundant, expensive
+/// calls to ScalarEvolution::forgetLoop.  Returns the new combined block.
+static BasicBlock *
+FoldBlockIntoPredecessor(BasicBlock *BB, LoopInfo* LI, LPPassManager *LPM,
+                         SmallPtrSetImpl<Loop *> &ForgottenLoops) {
   // Merge basic blocks into their predecessor if there is only one distinct
   // pred, and if there is only one distinct successor of the predecessor, and
   // if there are no PHI nodes.
@@ -103,8 +110,10 @@ static BasicBlock *FoldBlockIntoPredecessor(BasicBlock *BB, LoopInfo* LI,
   // ScalarEvolution holds references to loop exit blocks.
   if (LPM) {
     if (ScalarEvolution *SE = LPM->getAnalysisIfAvailable<ScalarEvolution>()) {
-      if (Loop *L = LI->getLoopFor(BB))
-        SE->forgetLoop(L);
+      if (Loop *L = LI->getLoopFor(BB)) {
+        if (ForgottenLoops.insert(L))
+          SE->forgetLoop(L);
+      }
     }
   }
   LI->removeBlock(BB);
@@ -242,21 +251,25 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
                            Twine("completely unrolled loop with ") +
                                Twine(TripCount) + " iterations");
   } else {
+    auto EmitDiag = [&](const Twine &T) {
+      emitOptimizationRemark(Ctx, DEBUG_TYPE, *F, LoopLoc,
+                             "unrolled loop by a factor of " + Twine(Count) +
+                                 T);
+    };
+
     DEBUG(dbgs() << "UNROLLING loop %" << Header->getName()
           << " by " << Count);
-    Twine DiagMsg("unrolled loop by a factor of " + Twine(Count));
     if (TripMultiple == 0 || BreakoutTrip != TripMultiple) {
       DEBUG(dbgs() << " with a breakout at trip " << BreakoutTrip);
-      DiagMsg.concat(" with a breakout at trip " + Twine(BreakoutTrip));
+      EmitDiag(" with a breakout at trip " + Twine(BreakoutTrip));
     } else if (TripMultiple != 1) {
       DEBUG(dbgs() << " with " << TripMultiple << " trips per branch");
-      DiagMsg.concat(" with " + Twine(TripMultiple) + " trips per branch");
+      EmitDiag(" with " + Twine(TripMultiple) + " trips per branch");
     } else if (RuntimeTripCount) {
       DEBUG(dbgs() << " with run-time trip count");
-      DiagMsg.concat(" with run-time trip count");
+      EmitDiag(" with run-time trip count");
     }
     DEBUG(dbgs() << "!\n");
-    emitOptimizationRemark(Ctx, DEBUG_TYPE, *F, LoopLoc, DiagMsg);
   }
 
   bool ContinueOnTrue = L->contains(BI->getSuccessor(0));
@@ -418,11 +431,13 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
   }
 
   // Merge adjacent basic blocks, if possible.
+  SmallPtrSet<Loop *, 4> ForgottenLoops;
   for (unsigned i = 0, e = Latches.size(); i != e; ++i) {
     BranchInst *Term = cast<BranchInst>(Latches[i]->getTerminator());
     if (Term->isUnconditional()) {
       BasicBlock *Dest = Term->getSuccessor(0);
-      if (BasicBlock *Fold = FoldBlockIntoPredecessor(Dest, LI, LPM))
+      if (BasicBlock *Fold = FoldBlockIntoPredecessor(Dest, LI, LPM,
+                                                      ForgottenLoops))
         std::replace(Latches.begin(), Latches.end(), Dest, Fold);
     }
   }
@@ -485,8 +500,10 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
     if (!OuterL && !CompletelyUnroll)
       OuterL = L;
     if (OuterL) {
+      DataLayoutPass *DLP = PP->getAnalysisIfAvailable<DataLayoutPass>();
+      const DataLayout *DL = DLP ? &DLP->getDataLayout() : nullptr;
       ScalarEvolution *SE = PP->getAnalysisIfAvailable<ScalarEvolution>();
-      simplifyLoop(OuterL, DT, LI, PP, /*AliasAnalysis*/ nullptr, SE);
+      simplifyLoop(OuterL, DT, LI, PP, /*AliasAnalysis*/ nullptr, SE, DL);
 
       // LCSSA must be performed on the outermost affected loop. The unrolled
       // loop's last loop latch is guaranteed to be in the outermost loop after

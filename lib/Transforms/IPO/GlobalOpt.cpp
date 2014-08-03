@@ -17,6 +17,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
@@ -1699,9 +1700,6 @@ static bool TryToShrinkGlobalToBoolean(GlobalVariable *GV, Constant *OtherVal) {
 /// possible.  If we make a change, return true.
 bool GlobalOpt::ProcessGlobal(GlobalVariable *GV,
                               Module::global_iterator &GVI) {
-  if (!GV->isDiscardableIfUnused())
-    return false;
-
   // Do more involved optimizations if the global is internal.
   GV->removeDeadConstantUsers();
 
@@ -1910,7 +1908,7 @@ bool GlobalOpt::OptimizeFunctions(Module &M) {
   for (Module::iterator FI = M.begin(), E = M.end(); FI != E; ) {
     Function *F = FI++;
     // Functions without names cannot be referenced outside this module.
-    if (!F->hasName() && !F->isDeclaration())
+    if (!F->hasName() && !F->isDeclaration() && !F->hasLocalLinkage())
       F->setLinkage(GlobalValue::InternalLinkage);
     F->removeDeadConstantUsers();
     if (F->isDefTriviallyDead()) {
@@ -1944,11 +1942,18 @@ bool GlobalOpt::OptimizeFunctions(Module &M) {
 
 bool GlobalOpt::OptimizeGlobalVars(Module &M) {
   bool Changed = false;
+
+  SmallSet<const Comdat *, 8> NotDiscardableComdats;
+  for (const GlobalVariable &GV : M.globals())
+    if (const Comdat *C = GV.getComdat())
+      if (!GV.isDiscardableIfUnused())
+        NotDiscardableComdats.insert(C);
+
   for (Module::global_iterator GVI = M.global_begin(), E = M.global_end();
        GVI != E; ) {
     GlobalVariable *GV = GVI++;
     // Global variables without names cannot be referenced outside this module.
-    if (!GV->hasName() && !GV->isDeclaration())
+    if (!GV->hasName() && !GV->isDeclaration() && !GV->hasLocalLinkage())
       GV->setLinkage(GlobalValue::InternalLinkage);
     // Simplify the initializer.
     if (GV->hasInitializer())
@@ -1958,7 +1963,12 @@ bool GlobalOpt::OptimizeGlobalVars(Module &M) {
           GV->setInitializer(New);
       }
 
-    Changed |= ProcessGlobal(GV, GVI);
+    if (GV->isDiscardableIfUnused()) {
+      if (const Comdat *C = GV->getComdat())
+        if (NotDiscardableComdats.count(C))
+          continue;
+      Changed |= ProcessGlobal(GV, GVI);
+    }
   }
   return Changed;
 }
@@ -1980,10 +1990,13 @@ isSimpleEnoughValueToCommit(Constant *C,
 static bool isSimpleEnoughValueToCommitHelper(Constant *C,
                                    SmallPtrSet<Constant*, 8> &SimpleConstants,
                                    const DataLayout *DL) {
-  // Simple integer, undef, constant aggregate zero, global addresses, etc are
-  // all supported.
-  if (C->getNumOperands() == 0 || isa<BlockAddress>(C) ||
-      isa<GlobalValue>(C))
+  // Simple global addresses are supported, do not allow dllimport or
+  // thread-local globals.
+  if (auto *GV = dyn_cast<GlobalValue>(C))
+    return !GV->hasDLLImportStorageClass() && !GV->isThreadLocal();
+
+  // Simple integer, undef, constant aggregate zero, etc are all supported.
+  if (C->getNumOperands() == 0 || isa<BlockAddress>(C))
     return true;
 
   // Aggregate values are safe if all their elements are.
@@ -2054,8 +2067,7 @@ static bool isSimpleEnoughPointerToCommit(Constant *C) {
     return false;
 
   if (GlobalVariable *GV = dyn_cast<GlobalVariable>(C))
-    // Do not allow weak/*_odr/linkonce/dllimport/dllexport linkage or
-    // external globals.
+    // Do not allow weak/*_odr/linkonce linkage or external globals.
     return GV->hasUniqueInitializer();
 
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(C)) {
@@ -2846,14 +2858,19 @@ bool GlobalOpt::OptimizeGlobalAliases(Module &M) {
        I != E;) {
     Module::alias_iterator J = I++;
     // Aliases without names cannot be referenced outside this module.
-    if (!J->hasName() && !J->isDeclaration())
+    if (!J->hasName() && !J->isDeclaration() && !J->hasLocalLinkage())
       J->setLinkage(GlobalValue::InternalLinkage);
     // If the aliasee may change at link time, nothing can be done - bail out.
     if (J->mayBeOverridden())
       continue;
 
     Constant *Aliasee = J->getAliasee();
-    GlobalValue *Target = cast<GlobalValue>(Aliasee->stripPointerCasts());
+    GlobalValue *Target = dyn_cast<GlobalValue>(Aliasee->stripPointerCasts());
+    // We can't trivially replace the alias with the aliasee if the aliasee is
+    // non-trivial in some way.
+    // TODO: Try to handle non-zero GEPs of local aliasees.
+    if (!Target)
+      continue;
     Target->removeDeadConstantUsers();
 
     // Make all users of the alias use the aliasee instead.

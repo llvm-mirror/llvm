@@ -30,7 +30,8 @@ namespace {
 
     unsigned GetRelocType(const MCValue &Target, const MCFixup &Fixup,
                           bool IsPCRel) const override;
-    bool needsRelocateWithSymbol(unsigned Type) const override;
+    bool needsRelocateWithSymbol(const MCSymbolData &SD,
+                                 unsigned Type) const override;
   };
 }
 
@@ -193,6 +194,12 @@ unsigned MipsELFObjectWriter::GetRelocType(const MCValue &Target,
   case Mips::fixup_MICROMIPS_TLS_TPREL_LO16:
     Type = ELF::R_MICROMIPS_TLS_TPREL_LO16;
     break;
+  case Mips::fixup_MIPS_PC19_S2:
+    Type = ELF::R_MIPS_PC19_S2;
+    break;
+  case Mips::fixup_MIPS_PC18_S3:
+    Type = ELF::R_MIPS_PC18_S3;
+    break;
   case Mips::fixup_MIPS_PC21_S2:
     Type = ELF::R_MIPS_PC21_S2;
     break;
@@ -210,7 +217,8 @@ unsigned MipsELFObjectWriter::GetRelocType(const MCValue &Target,
 }
 
 bool
-MipsELFObjectWriter::needsRelocateWithSymbol(unsigned Type) const {
+MipsELFObjectWriter::needsRelocateWithSymbol(const MCSymbolData &SD,
+                                             unsigned Type) const {
   // FIXME: This is extremelly conservative. This really needs to use a
   // whitelist with a clear explanation for why each realocation needs to
   // point to the symbol, not to the section.

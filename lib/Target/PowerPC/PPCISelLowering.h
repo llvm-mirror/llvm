@@ -18,7 +18,6 @@
 #include "PPC.h"
 #include "PPCInstrInfo.h"
 #include "PPCRegisterInfo.h"
-#include "PPCSubtarget.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
@@ -71,19 +70,14 @@ namespace llvm {
 
       TOC_ENTRY,
 
-      /// The following three target-specific nodes are used for calls through
+      /// The following two target-specific nodes are used for calls through
       /// function pointers in the 64-bit SVR4 ABI.
-
-      /// Restore the TOC from the TOC save area of the current stack frame.
-      /// This is basically a hard coded load instruction which additionally
-      /// takes/produces a flag.
-      TOC_RESTORE,
 
       /// Like a regular LOAD but additionally taking/producing a flag.
       LOAD,
 
-      /// LOAD into r2 (also taking/producing a flag). Like TOC_RESTORE, this is
-      /// a hard coded load instruction.
+      /// Like LOAD (taking/producing a flag), but using r2 as hard-coded
+      /// destination.
       LOAD_TOC,
 
       /// OPRC, CHAIN = DYNALLOC(CHAIN, NEGSIZE, FRAME_INDEX)
@@ -186,6 +180,10 @@ namespace llvm {
       /// GPRC = address of _GLOBAL_OFFSET_TABLE_. Used by initial-exec TLS
       /// on PPC32.
       PPC32_GOT,
+
+      /// GPRC = address of _GLOBAL_OFFSET_TABLE_. Used by general dynamic and
+      /// local dynamic TLS  on PPC32.
+      PPC32_PICGOT,
 
       /// G8RC = ADDIS_GOT_TPREL_HA %X2, Symbol - Used by the initial-exec
       /// TLS model, produces an ADDIS8 instruction that adds the GOT
@@ -303,25 +301,27 @@ namespace llvm {
   namespace PPC {
     /// isVPKUHUMShuffleMask - Return true if this is the shuffle mask for a
     /// VPKUHUM instruction.
-    bool isVPKUHUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary);
+    bool isVPKUHUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary,
+                              SelectionDAG &DAG);
 
     /// isVPKUWUMShuffleMask - Return true if this is the shuffle mask for a
     /// VPKUWUM instruction.
-    bool isVPKUWUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary);
+    bool isVPKUWUMShuffleMask(ShuffleVectorSDNode *N, bool isUnary,
+                              SelectionDAG &DAG);
 
     /// isVMRGLShuffleMask - Return true if this is a shuffle mask suitable for
     /// a VRGL* instruction with the specified unit size (1,2 or 4 bytes).
     bool isVMRGLShuffleMask(ShuffleVectorSDNode *N, unsigned UnitSize,
-                            bool isUnary);
+                            unsigned ShuffleKind, SelectionDAG &DAG);
 
     /// isVMRGHShuffleMask - Return true if this is a shuffle mask suitable for
     /// a VRGH* instruction with the specified unit size (1,2 or 4 bytes).
     bool isVMRGHShuffleMask(ShuffleVectorSDNode *N, unsigned UnitSize,
-                            bool isUnary);
+                            unsigned ShuffleKind, SelectionDAG &DAG);
 
     /// isVSLDOIShuffleMask - If this is a vsldoi shuffle mask, return the shift
     /// amount, otherwise return -1.
-    int isVSLDOIShuffleMask(SDNode *N, bool isUnary);
+    int isVSLDOIShuffleMask(SDNode *N, bool isUnary, SelectionDAG &DAG);
 
     /// isSplatShuffleMask - Return true if the specified VECTOR_SHUFFLE operand
     /// specifies a splat of a single element that is suitable for input to
@@ -334,7 +334,7 @@ namespace llvm {
 
     /// getVSPLTImmediate - Return the appropriate VSPLT* immediate to splat the
     /// specified isSplatShuffleMask VECTOR_SHUFFLE mask.
-    unsigned getVSPLTImmediate(SDNode *N, unsigned EltSize);
+    unsigned getVSPLTImmediate(SDNode *N, unsigned EltSize, SelectionDAG &DAG);
 
     /// get_VSPLTI_elt - If this is a build_vector of constants which can be
     /// formed by using a vspltis[bhw] instruction of the specified element
@@ -343,8 +343,9 @@ namespace llvm {
     SDValue get_VSPLTI_elt(SDNode *N, unsigned ByteSize, SelectionDAG &DAG);
   }
 
+  class PPCSubtarget;
   class PPCTargetLowering : public TargetLowering {
-    const PPCSubtarget &PPCSubTarget;
+    const PPCSubtarget &Subtarget;
 
   public:
     explicit PPCTargetLowering(PPCTargetMachine &TM);
@@ -493,9 +494,10 @@ namespace llvm {
 
     /// Is unaligned memory access allowed for the given type, and is it fast
     /// relative to software emulation.
-    bool allowsUnalignedMemoryAccesses(EVT VT,
-                                       unsigned AddrSpace,
-                                       bool *Fast = nullptr) const override;
+    bool allowsMisalignedMemoryAccesses(EVT VT,
+                                        unsigned AddrSpace,
+                                        unsigned Align = 1,
+                                        bool *Fast = nullptr) const override;
 
     /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
     /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
@@ -512,6 +514,20 @@ namespace llvm {
     /// or null if the target does not support "fast" instruction selection.
     FastISel *createFastISel(FunctionLoweringInfo &FuncInfo,
                              const TargetLibraryInfo *LibInfo) const override;
+
+    /// \brief Returns true if an argument of type Ty needs to be passed in a
+    /// contiguous block of registers in calling convention CallConv.
+    bool functionArgumentNeedsConsecutiveRegisters(
+      Type *Ty, CallingConv::ID CallConv, bool isVarArg) const override {
+      // We support any array type as "consecutive" block in the parameter
+      // save area.  The element type defines the alignment requirement and
+      // whether the argument should go in GPRs, FPRs, or VRs if available.
+      //
+      // Note that clang uses this capability both to implement the ELFv2
+      // homogeneous float/vector aggregate ABI, and to avoid having to use
+      // "byval" when passing aggregates that might fully fit in registers.
+      return Ty->isArrayTy();
+    }
 
   private:
     SDValue getFramePointerFrameIndex(SelectionDAG & DAG) const;
@@ -612,11 +628,6 @@ namespace llvm {
     SDValue
       extendArgForPPC64(ISD::ArgFlagsTy Flags, EVT ObjectVT, SelectionDAG &DAG,
                         SDValue ArgVal, SDLoc dl) const;
-
-    void
-      setMinReservedArea(MachineFunction &MF, SelectionDAG &DAG,
-                         unsigned nAltivecParamsAtEnd,
-                         unsigned MinReservedArea, bool isPPC64) const;
 
     SDValue
       LowerFormalArguments_Darwin(SDValue Chain,

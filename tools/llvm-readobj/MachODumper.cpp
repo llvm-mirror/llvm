@@ -16,6 +16,7 @@
 #include "ObjDumper.h"
 #include "StreamWriter.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/Casting.h"
 
@@ -54,9 +55,9 @@ private:
 
 namespace llvm {
 
-error_code createMachODumper(const object::ObjectFile *Obj,
-                             StreamWriter &Writer,
-                             std::unique_ptr<ObjDumper> &Result) {
+std::error_code createMachODumper(const object::ObjectFile *Obj,
+                                  StreamWriter &Writer,
+                                  std::unique_ptr<ObjDumper> &Result) {
   const MachOObjectFile *MachOObj = dyn_cast<MachOObjectFile>(Obj);
   if (!MachOObj)
     return readobj_error::unsupported_obj_file_format;
@@ -277,7 +278,7 @@ void MachODumper::printSections(const MachOObjectFile *Obj) {
 void MachODumper::printRelocations() {
   ListScope D(W, "Relocations");
 
-  error_code EC;
+  std::error_code EC;
   for (const SectionRef &Section : Obj->sections()) {
     StringRef Name;
     if (error(Section.getName(Name)))
@@ -309,18 +310,29 @@ void MachODumper::printRelocation(const MachOObjectFile *Obj,
                                   const RelocationRef &Reloc) {
   uint64_t Offset;
   SmallString<32> RelocName;
-  StringRef SymbolName;
   if (error(Reloc.getOffset(Offset)))
     return;
   if (error(Reloc.getTypeName(RelocName)))
-    return;
-  symbol_iterator Symbol = Reloc.getSymbol();
-  if (Symbol != Obj->symbol_end() && error(Symbol->getName(SymbolName)))
     return;
 
   DataRefImpl DR = Reloc.getRawDataRefImpl();
   MachO::any_relocation_info RE = Obj->getRelocation(DR);
   bool IsScattered = Obj->isRelocationScattered(RE);
+  SmallString<32> SymbolNameOrOffset("0x");
+  if (IsScattered) {
+    // Scattered relocations don't really have an associated symbol
+    // for some reason, even if one exists in the symtab at the correct address.
+    SymbolNameOrOffset += utohexstr(Obj->getScatteredRelocationValue(RE));
+  } else {
+    symbol_iterator Symbol = Reloc.getSymbol();
+    if (Symbol != Obj->symbol_end()) {
+      StringRef SymbolName;
+      if (error(Symbol->getName(SymbolName)))
+        return;
+      SymbolNameOrOffset = SymbolName;
+    } else
+      SymbolNameOrOffset += utohexstr(Obj->getPlainRelocationSymbolNum(RE));
+  }
 
   if (opts::ExpandRelocs) {
     DictScope Group(W, "Relocation");
@@ -332,7 +344,7 @@ void MachODumper::printRelocation(const MachOObjectFile *Obj,
     else
       W.printNumber("Extern", Obj->getPlainRelocationExternal(RE));
     W.printNumber("Type", RelocName, Obj->getAnyRelocationType(RE));
-    W.printString("Symbol", SymbolName.size() > 0 ? SymbolName : "-");
+    W.printString("Symbol", SymbolNameOrOffset);
     W.printNumber("Scattered", IsScattered);
   } else {
     raw_ostream& OS = W.startLine();
@@ -345,7 +357,7 @@ void MachODumper::printRelocation(const MachOObjectFile *Obj,
       OS << " " << Obj->getPlainRelocationExternal(RE);
     OS << " " << RelocName
        << " " << IsScattered
-       << " " << (SymbolName.size() > 0 ? SymbolName : "-")
+       << " " << SymbolNameOrOffset
        << "\n";
   }
 }

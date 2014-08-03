@@ -95,6 +95,8 @@ namespace llvm {
 
       PRELOAD,      // Preload
 
+      WIN__CHKSTK,  // Windows' __chkstk call to do stack probing.
+
       VCEQ,         // Vector compare equal.
       VCEQZ,        // Vector compare equal to zero.
       VCGE,         // Vector compare greater than or equal.
@@ -264,11 +266,12 @@ namespace llvm {
 
     bool isDesirableToTransformToIntegerOp(unsigned Opc, EVT VT) const override;
 
-    /// allowsUnalignedMemoryAccesses - Returns true if the target allows
+    /// allowsMisalignedMemoryAccesses - Returns true if the target allows
     /// unaligned memory accesses of the specified type. Returns whether it
     /// is "fast" by reference in the second argument.
-    bool allowsUnalignedMemoryAccesses(EVT VT, unsigned AddrSpace,
-                                       bool *Fast) const override;
+    bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AddrSpace,
+                                        unsigned Align,
+                                        bool *Fast) const override;
 
     EVT getOptimalMemOpType(uint64_t Size,
                             unsigned DstAlign, unsigned SrcAlign,
@@ -396,6 +399,8 @@ namespace llvm {
 
     bool shouldExpandAtomicInIR(Instruction *Inst) const override;
 
+    bool useLoadStackGuardNode() const override;
+
   protected:
     std::pair<const TargetRegisterClass*, uint8_t>
     findRepresentativeClass(MVT VT) const override;
@@ -470,6 +475,7 @@ namespace llvm {
                               const ARMSubtarget *ST) const;
     SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerDivRem(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
 
     unsigned getRegisterByName(const char* RegName, EVT VT) const override;
 
@@ -578,6 +584,9 @@ namespace llvm {
 
     MachineBasicBlock *EmitStructByval(MachineInstr *MI,
                                        MachineBasicBlock *MBB) const;
+
+    MachineBasicBlock *EmitLowered__chkstk(MachineInstr *MI,
+                                           MachineBasicBlock *MBB) const;
   };
 
   enum NEONModImmType {

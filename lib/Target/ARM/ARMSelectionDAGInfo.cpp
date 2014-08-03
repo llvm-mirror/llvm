@@ -18,10 +18,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "arm-selectiondag-info"
 
-ARMSelectionDAGInfo::ARMSelectionDAGInfo(const TargetMachine &TM)
-  : TargetSelectionDAGInfo(TM),
-    Subtarget(&TM.getSubtarget<ARMSubtarget>()) {
-}
+ARMSelectionDAGInfo::ARMSelectionDAGInfo(const DataLayout &DL)
+    : TargetSelectionDAGInfo(&DL) {}
 
 ARMSelectionDAGInfo::~ARMSelectionDAGInfo() {
 }
@@ -34,6 +32,7 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
                                              bool isVolatile, bool AlwaysInline,
                                              MachinePointerInfo DstPtrInfo,
                                           MachinePointerInfo SrcPtrInfo) const {
+  const ARMSubtarget &Subtarget = DAG.getTarget().getSubtarget<ARMSubtarget>();
   // Do repeated 4-byte loads and stores. To be improved.
   // This requires 4-byte alignment.
   if ((Align & 3) != 0)
@@ -44,7 +43,7 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
   if (!ConstantSize)
     return SDValue();
   uint64_t SizeVal = ConstantSize->getZExtValue();
-  if (!AlwaysInline && SizeVal > Subtarget->getMaxInlineSizeThreshold())
+  if (!AlwaysInline && SizeVal > Subtarget.getMaxInlineSizeThreshold())
     return SDValue();
 
   unsigned BytesLeft = SizeVal & 3;
@@ -54,7 +53,7 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
   unsigned VTSize = 4;
   unsigned i = 0;
   // Emit a maximum of 4 loads in Thumb1 since we have fewer registers
-  const unsigned MAX_LOADS_IN_LDM = Subtarget->isThumb1Only() ? 4 : 6;
+  const unsigned MAX_LOADS_IN_LDM = Subtarget.isThumb1Only() ? 4 : 6;
   SDValue TFOps[6];
   SDValue Loads[6];
   uint64_t SrcOff = 0, DstOff = 0;
@@ -151,9 +150,10 @@ EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc dl,
                         SDValue Src, SDValue Size,
                         unsigned Align, bool isVolatile,
                         MachinePointerInfo DstPtrInfo) const {
+  const ARMSubtarget &Subtarget = DAG.getTarget().getSubtarget<ARMSubtarget>();
   // Use default for non-AAPCS (or MachO) subtargets
-  if (!Subtarget->isAAPCS_ABI() || Subtarget->isTargetMachO() ||
-      Subtarget->isTargetWindows())
+  if (!Subtarget.isAAPCS_ABI() || Subtarget.isTargetMachO() ||
+      Subtarget.isTargetWindows())
     return SDValue();
 
   const ARMTargetLowering &TLI =
@@ -191,7 +191,7 @@ EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc dl,
     .setCallee(TLI.getLibcallCallingConv(RTLIB::MEMSET),
                Type::getVoidTy(*DAG.getContext()),
                DAG.getExternalSymbol(TLI.getLibcallName(RTLIB::MEMSET),
-                                     TLI.getPointerTy()), &Args, 0)
+                                     TLI.getPointerTy()), std::move(Args), 0)
     .setDiscardResult();
 
   std::pair<SDValue,SDValue> CallResult = TLI.LowerCallTo(CLI);

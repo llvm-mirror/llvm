@@ -13,7 +13,7 @@
 
 #include "PPCJITInfo.h"
 #include "PPCRelocations.h"
-#include "PPCTargetMachine.h"
+#include "PPCSubtarget.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -24,6 +24,11 @@ using namespace llvm;
 #define DEBUG_TYPE "jit"
 
 static TargetJITInfo::JITCompilerFn JITCompilerFunction;
+
+PPCJITInfo::PPCJITInfo(PPCSubtarget &STI)
+    : Subtarget(STI), is64Bit(STI.isPPC64()) {
+  useGOT = 0;
+}
 
 #define BUILD_ADDIS(RD,RS,IMM16) \
   ((15 << 26) | ((RD) << 21) | ((RS) << 16) | ((IMM16) & 65535))
@@ -393,7 +398,7 @@ void *PPCJITInfo::emitFunctionStub(const Function* F, void *Fn,
     JCE.emitWordBE(0xf821ffb1);     // stdu r1,-80(r1)
     JCE.emitWordBE(0x7d6802a6);     // mflr r11
     JCE.emitWordBE(0xf9610060);     // std r11, 96(r1)
-  } else if (TM.getSubtargetImpl()->isDarwinABI()){
+  } else if (Subtarget.isDarwinABI()){
     JCE.emitWordBE(0x9421ffe0);     // stwu r1,-32(r1)
     JCE.emitWordBE(0x7d6802a6);     // mflr r11
     JCE.emitWordBE(0x91610028);     // stw r11, 40(r1)

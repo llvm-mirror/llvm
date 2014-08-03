@@ -44,9 +44,9 @@ public:
   /// always be able to get register info as well (through this method).
   const AArch64RegisterInfo &getRegisterInfo() const { return RI; }
 
-  const AArch64Subtarget &getSubTarget() const { return Subtarget; }
-
   unsigned GetInstSizeInBytes(const MachineInstr *MI) const;
+
+  bool isAsCheapAsAMove(const MachineInstr *MI) const override;
 
   bool isCoalescableExtInstr(const MachineInstr &MI, unsigned &SrcReg,
                              unsigned &DstReg, unsigned &SubIdx) const override;
@@ -119,6 +119,7 @@ public:
                             int FrameIndex, const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
+  using TargetInstrInfo::foldMemoryOperandImpl;
   MachineInstr *
   foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
                         const SmallVectorImpl<unsigned> &Ops,
@@ -156,6 +157,8 @@ public:
                             unsigned SrcReg2, int CmpMask, int CmpValue,
                             const MachineRegisterInfo *MRI) const override;
 
+  bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const override;
+
 private:
   void instantiateCondBranch(MachineBasicBlock &MBB, DebugLoc DL,
                              MachineBasicBlock *TBB,
@@ -168,7 +171,7 @@ private:
 /// if necessary, to be replaced by the scavenger at the end of PEI.
 void emitFrameOffset(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                      DebugLoc DL, unsigned DestReg, unsigned SrcReg, int Offset,
-                     const AArch64InstrInfo *TII,
+                     const TargetInstrInfo *TII,
                      MachineInstr::MIFlag = MachineInstr::NoFlags,
                      bool SetNZCV = false);
 

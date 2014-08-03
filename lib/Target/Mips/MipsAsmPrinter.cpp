@@ -58,10 +58,12 @@ MipsTargetStreamer &MipsAsmPrinter::getTargetStreamer() {
 }
 
 bool MipsAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
+  Subtarget = &TM.getSubtarget<MipsSubtarget>();
+
   // Initialize TargetLoweringObjectFile.
-  if (Subtarget->allowMixed16_32())
-    const_cast<TargetLoweringObjectFile&>(getObjFileLowering())
+  const_cast<TargetLoweringObjectFile &>(getObjFileLowering())
       .Initialize(OutContext, TM);
+
   MipsFI = MF.getInfo<MipsFunctionInfo>();
   if (Subtarget->inMips16Mode())
     for (std::map<
@@ -91,7 +93,46 @@ bool MipsAsmPrinter::lowerOperand(const MachineOperand &MO, MCOperand &MCOp) {
 
 #include "MipsGenMCPseudoLowering.inc"
 
+// Lower PseudoReturn/PseudoIndirectBranch/PseudoIndirectBranch64 to JR, JR_MM,
+// JALR, or JALR64 as appropriate for the target
+void MipsAsmPrinter::emitPseudoIndirectBranch(MCStreamer &OutStreamer,
+                                              const MachineInstr *MI) {
+  bool HasLinkReg = false;
+  MCInst TmpInst0;
+
+  if (Subtarget->hasMips64r6()) {
+    // MIPS64r6 should use (JALR64 ZERO_64, $rs)
+    TmpInst0.setOpcode(Mips::JALR64);
+    HasLinkReg = true;
+  } else if (Subtarget->hasMips32r6()) {
+    // MIPS32r6 should use (JALR ZERO, $rs)
+    TmpInst0.setOpcode(Mips::JALR);
+    HasLinkReg = true;
+  } else if (Subtarget->inMicroMipsMode())
+    // microMIPS should use (JR_MM $rs)
+    TmpInst0.setOpcode(Mips::JR_MM);
+  else {
+    // Everything else should use (JR $rs)
+    TmpInst0.setOpcode(Mips::JR);
+  }
+
+  MCOperand MCOp;
+
+  if (HasLinkReg) {
+    unsigned ZeroReg = Subtarget->isGP64bit() ? Mips::ZERO_64 : Mips::ZERO;
+    TmpInst0.addOperand(MCOperand::CreateReg(ZeroReg));
+  }
+
+  lowerOperand(MI->getOperand(0), MCOp);
+  TmpInst0.addOperand(MCOp);
+
+  EmitToStreamer(OutStreamer, TmpInst0);
+}
+
 void MipsAsmPrinter::EmitInstruction(const MachineInstr *MI) {
+  MipsTargetStreamer &TS = getTargetStreamer();
+  TS.setCanHaveModuleDir(false);
+
   if (MI->isDebugValue()) {
     SmallString<128> Str;
     raw_svector_ostream OS(Str);
@@ -140,6 +181,14 @@ void MipsAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // Do any auto-generated pseudo lowerings.
     if (emitPseudoExpansionLowering(OutStreamer, &*I))
       continue;
+
+    if (I->getOpcode() == Mips::PseudoReturn ||
+        I->getOpcode() == Mips::PseudoReturn64 ||
+        I->getOpcode() == Mips::PseudoIndirectBranch ||
+        I->getOpcode() == Mips::PseudoIndirectBranch64) {
+      emitPseudoIndirectBranch(OutStreamer, &*I);
+      continue;
+    }
 
     // The inMips16Mode() test is not permanent.
     // Some instructions are marked as pseudo right now which
@@ -625,7 +674,7 @@ void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
   bool IsABICalls = true;
   if (IsABICalls) {
     getTargetStreamer().emitDirectiveAbiCalls();
-    Reloc::Model RM = Subtarget->getRelocationModel();
+    Reloc::Model RM = TM.getRelocationModel();
     // FIXME: This condition should be a lot more complicated that it is here.
     //        Ideally it should test for properties of the ABI and not the ABI
     //        itself.
@@ -657,6 +706,23 @@ void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
           OutContext.getELFSection(".gcc_compiled_long64", ELF::SHT_PROGBITS, 0,
                                    SectionKind::getDataRel()));
   }
+
+  getTargetStreamer().updateABIInfo(*Subtarget);
+
+  // We should always emit a '.module fp=...' but binutils 2.24 does not accept
+  // it. We therefore emit it when it contradicts the ABI defaults (-mfpxx or
+  // -mfp64) and omit it otherwise.
+  if (Subtarget->isABI_O32() && (Subtarget->isABI_FPXX() ||
+                                 Subtarget->isFP64bit()))
+    getTargetStreamer().emitDirectiveModuleFP();
+
+  // We should always emit a '.module [no]oddspreg' but binutils 2.24 does not
+  // accept it. We therefore emit it when it contradicts the default or an
+  // option has changed the default (i.e. FPXX) and omit it otherwise.
+  if (Subtarget->isABI_O32() && (!Subtarget->useOddSPReg() ||
+                                 Subtarget->isABI_FPXX()))
+    getTargetStreamer().emitDirectiveModuleOddSPReg(Subtarget->useOddSPReg(),
+                                                    Subtarget->isABI_O32());
 }
 
 void MipsAsmPrinter::EmitJal(MCSymbol *Symbol) {
@@ -852,7 +918,7 @@ void MipsAsmPrinter::EmitFPCallStub(
   TS.emitDirectiveSetNoMicroMips();
   //
   // .ent __call_stub_fp_xxxx
-  // .type	__call_stub_fp_xxxx,@function
+  // .type  __call_stub_fp_xxxx,@function
   //  __call_stub_fp_xxxx:
   //
   std::string x = "__call_stub_fp_" + std::string(Symbol);

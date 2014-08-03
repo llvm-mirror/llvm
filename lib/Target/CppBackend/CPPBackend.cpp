@@ -1577,6 +1577,10 @@ void CppWriter::printInstruction(const Instruction *I,
     nl(Out) << iName << "->setName(\"";
     printEscapedString(cxi->getName());
     Out << "\");";
+    nl(Out) << iName << "->setVolatile("
+            << (cxi->isVolatile() ? "true" : "false") << ");";
+    nl(Out) << iName << "->setWeak("
+            << (cxi->isWeak() ? "true" : "false") << ");";
     break;
   }
   case Instruction::AtomicRMW: {
@@ -1607,6 +1611,8 @@ void CppWriter::printInstruction(const Instruction *I,
     nl(Out) << iName << "->setName(\"";
     printEscapedString(rmwi->getName());
     Out << "\");";
+    nl(Out) << iName << "->setVolatile("
+            << (rmwi->isVolatile() ? "true" : "false") << ");";
     break;
   }
   case Instruction::LandingPad: {

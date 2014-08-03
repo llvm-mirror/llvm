@@ -211,6 +211,7 @@ namespace {
   class GCOVLines : public GCOVRecord {
    public:
     void addLine(uint32_t Line) {
+      assert(Line != 0 && "Line zero is not a valid real line number.");
       Lines.push_back(Line);
     }
 
@@ -453,10 +454,17 @@ static bool functionHasLines(Function *F) {
   for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
     for (BasicBlock::iterator I = BB->begin(), IE = BB->end();
          I != IE; ++I) {
+      // Debug intrinsic locations correspond to the location of the
+      // declaration, not necessarily any statements or expressions.
+      if (isa<DbgInfoIntrinsic>(I)) continue;
+
       const DebugLoc &Loc = I->getDebugLoc();
       if (Loc.isUnknown()) continue;
-      if (Loc.getLine() != 0)
-        return true;
+
+      // Artificial lines such as calls to the global constructors.
+      if (Loc.getLine() == 0) continue; 
+
+      return true;
     }
   }
   return false;
@@ -515,8 +523,16 @@ void GCOVProfiler::emitProfileNotes() {
         uint32_t Line = 0;
         for (BasicBlock::iterator I = BB->begin(), IE = BB->end();
              I != IE; ++I) {
+          // Debug intrinsic locations correspond to the location of the
+          // declaration, not necessarily any statements or expressions.
+          if (isa<DbgInfoIntrinsic>(I)) continue;
+
           const DebugLoc &Loc = I->getDebugLoc();
           if (Loc.isUnknown()) continue;
+
+          // Artificial lines such as calls to the global constructors.
+          if (Loc.getLine() == 0) continue;
+
           if (Line == Loc.getLine()) continue;
           Line = Loc.getLine();
           if (SP != getDISubprogram(Loc.getScope(*Ctx))) continue;

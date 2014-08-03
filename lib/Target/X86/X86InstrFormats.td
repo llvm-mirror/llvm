@@ -36,20 +36,21 @@ def MRM6m  : Format<30>; def MRM7m  : Format<31>;
 def MRM_C0 : Format<32>; def MRM_C1 : Format<33>; def MRM_C2 : Format<34>;
 def MRM_C3 : Format<35>; def MRM_C4 : Format<36>; def MRM_C8 : Format<37>;
 def MRM_C9 : Format<38>; def MRM_CA : Format<39>; def MRM_CB : Format<40>;
-def MRM_D0 : Format<41>; def MRM_D1 : Format<42>; def MRM_D4 : Format<43>;
-def MRM_D5 : Format<44>; def MRM_D6 : Format<45>; def MRM_D8 : Format<46>;
-def MRM_D9 : Format<47>; def MRM_DA : Format<48>; def MRM_DB : Format<49>;
-def MRM_DC : Format<50>; def MRM_DD : Format<51>; def MRM_DE : Format<52>;
-def MRM_DF : Format<53>; def MRM_E0 : Format<54>; def MRM_E1 : Format<55>;
-def MRM_E2 : Format<56>; def MRM_E3 : Format<57>; def MRM_E4 : Format<58>;
-def MRM_E5 : Format<59>; def MRM_E8 : Format<60>; def MRM_E9 : Format<61>;
-def MRM_EA : Format<62>; def MRM_EB : Format<63>; def MRM_EC : Format<64>;
-def MRM_ED : Format<65>; def MRM_EE : Format<66>; def MRM_F0 : Format<67>;
-def MRM_F1 : Format<68>; def MRM_F2 : Format<69>; def MRM_F3 : Format<70>;
-def MRM_F4 : Format<71>; def MRM_F5 : Format<72>; def MRM_F6 : Format<73>;
-def MRM_F7 : Format<74>; def MRM_F8 : Format<75>; def MRM_F9 : Format<76>;
-def MRM_FA : Format<77>; def MRM_FB : Format<78>; def MRM_FC : Format<79>;
-def MRM_FD : Format<80>; def MRM_FE : Format<81>; def MRM_FF : Format<82>;
+def MRM_CF : Format<41>; def MRM_D0 : Format<42>; def MRM_D1 : Format<43>;
+def MRM_D4 : Format<44>; def MRM_D5 : Format<45>; def MRM_D6 : Format<46>;
+def MRM_D7 : Format<47>; def MRM_D8 : Format<48>; def MRM_D9 : Format<49>;
+def MRM_DA : Format<50>; def MRM_DB : Format<51>; def MRM_DC : Format<52>;
+def MRM_DD : Format<53>; def MRM_DE : Format<54>; def MRM_DF : Format<55>;
+def MRM_E0 : Format<56>; def MRM_E1 : Format<57>; def MRM_E2 : Format<58>;
+def MRM_E3 : Format<59>; def MRM_E4 : Format<60>; def MRM_E5 : Format<61>;
+def MRM_E8 : Format<62>; def MRM_E9 : Format<63>; def MRM_EA : Format<64>;
+def MRM_EB : Format<65>; def MRM_EC : Format<66>; def MRM_ED : Format<67>;
+def MRM_EE : Format<68>; def MRM_F0 : Format<69>; def MRM_F1 : Format<70>;
+def MRM_F2 : Format<71>; def MRM_F3 : Format<72>; def MRM_F4 : Format<73>;
+def MRM_F5 : Format<74>; def MRM_F6 : Format<75>; def MRM_F7 : Format<76>;
+def MRM_F8 : Format<77>; def MRM_F9 : Format<78>; def MRM_FA : Format<79>;
+def MRM_FB : Format<80>; def MRM_FC : Format<81>; def MRM_FD : Format<82>;
+def MRM_FE : Format<83>; def MRM_FF : Format<84>;
 
 // ImmType - This specifies the immediate type used by an instruction. This is
 // part of the ad-hoc solution used to emit machine instruction encodings by our
@@ -184,13 +185,16 @@ class EVEX_KZ : EVEX_K { bit hasEVEX_Z = 1; }
 class EVEX_B { bit hasEVEX_B = 1; }
 class EVEX_RC { bit hasEVEX_RC = 1; }
 class EVEX_V512 { bit hasEVEX_L2 = 1; bit hasVEX_L = 0; }
+class EVEX_V256 { bit hasEVEX_L2 = 0; bit hasVEX_L = 1; }
+class EVEX_V128 { bit hasEVEX_L2 = 0; bit hasVEX_L = 0; }
+
+// Specify AVX512 8-bit compressed displacement encoding based on the vector
+// element size in bits (8, 16, 32, 64) and the CDisp8 form.
 class EVEX_CD8<int esize, CD8VForm form> {
-  bits<2> EVEX_CD8E = !if(!eq(esize, 8),  0b00,
-                      !if(!eq(esize, 16), 0b01,
-                      !if(!eq(esize, 32), 0b10,
-                      !if(!eq(esize, 64), 0b11, ?))));
-  bits<3> EVEX_CD8V = form.Value;
+  int CD8_EltSize = !srl(esize, 3);
+  bits<3> CD8_Form = form.Value;
 }
+
 class Has3DNow0F0FOpcode  { bit has3DNow0F0FOpcode = 1; }
 class MemOp4 { bit hasMemOp4Prefix = 1; }
 class XOP { Encoding OpEnc = EncXOP; }
@@ -253,11 +257,31 @@ class X86Inst<bits<8> opcod, Format f, ImmType i, dag outs, dag ins,
   bit hasEVEX_Z = 0;        // Does this inst set the EVEX_Z field?
   bit hasEVEX_L2 = 0;       // Does this inst set the EVEX_L2 field?
   bit hasEVEX_B = 0;        // Does this inst set the EVEX_B field?
-  bits<2> EVEX_CD8E = 0;    // Compressed disp8 form - element-size.
-  bits<3> EVEX_CD8V = 0;    // Compressed disp8 form - vector-width.
+  bits<3> CD8_Form = 0;     // Compressed disp8 form - vector-width.
+  // Declare it int rather than bits<4> so that all bits are defined when
+  // assigning to bits<7>.
+  int CD8_EltSize = 0;      // Compressed disp8 form - element-size in bytes.
   bit has3DNow0F0FOpcode =0;// Wacky 3dNow! encoding?
   bit hasMemOp4Prefix = 0;  // Same bit as VEX_W, but used for swapping operands
   bit hasEVEX_RC = 0;       // Explicitly specified rounding control in FP instruction.
+
+  bits<2> EVEX_LL;
+  let EVEX_LL{0} = hasVEX_L;
+  let EVEX_LL{1} = hasEVEX_L2;
+  // Vector size in bytes.
+  bits<7> VectSize = !shl(16, EVEX_LL);
+
+  // The scaling factor for AVX512's compressed displacement is either
+  //   - the size of a  power-of-two number of elements or
+  //   - the size of a single element for broadcasts or
+  //   - the total vector size divided by a power-of-two number.
+  // Possible values are: 0 (non-AVX512 inst), 1, 2, 4, 8, 16, 32 and 64.
+  bits<7> CD8_Scale = !if (!eq (OpEnc.Value, EncEVEX.Value),
+                           !if (CD8_Form{2},
+                                !shl(CD8_EltSize, CD8_Form{1-0}),
+                                !if (hasEVEX_B,
+                                     CD8_EltSize,
+                                     !srl(VectSize, CD8_Form{1-0}))), 0);
 
   // TSFlags layout should be kept in sync with X86InstrInfo.h.
   let TSFlags{6-0}   = FormBits;
@@ -283,11 +307,11 @@ class X86Inst<bits<8> opcod, Format f, ImmType i, dag outs, dag ins,
   let TSFlags{45}    = hasEVEX_Z;
   let TSFlags{46}    = hasEVEX_L2;
   let TSFlags{47}    = hasEVEX_B;
-  let TSFlags{49-48} = EVEX_CD8E;
-  let TSFlags{52-50} = EVEX_CD8V;
-  let TSFlags{53}    = has3DNow0F0FOpcode;
-  let TSFlags{54}    = hasMemOp4Prefix;
-  let TSFlags{55}    = hasEVEX_RC;
+  // If we run out of TSFlags bits, it's possible to encode this in 3 bits.
+  let TSFlags{54-48} = CD8_Scale;
+  let TSFlags{55}    = has3DNow0F0FOpcode;
+  let TSFlags{56}    = hasMemOp4Prefix;
+  let TSFlags{57}    = hasEVEX_RC;
 }
 
 class PseudoI<dag oops, dag iops, list<dag> pattern>

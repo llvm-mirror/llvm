@@ -37,7 +37,8 @@ using namespace llvm;
 #define DEBUG_TYPE "mips-isel"
 
 bool Mips16DAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
-  if (!Subtarget.inMips16Mode())
+  Subtarget = &TM.getSubtarget<MipsSubtarget>();
+  if (!Subtarget->inMips16Mode())
     return false;
   return MipsDAGToDAGISel::runOnMachineFunction(MF);
 }
@@ -226,9 +227,9 @@ bool Mips16DAGToDAGISel::selectAddr16(
     const LSBaseSDNode *LS = dyn_cast<LSBaseSDNode>(Parent);
 
     if (LS) {
-      if (LS->getMemoryVT() == MVT::f32 && Subtarget.hasMips4_32r2())
+      if (LS->getMemoryVT() == MVT::f32 && Subtarget->hasMips4_32r2())
         return false;
-      if (LS->getMemoryVT() == MVT::f64 && Subtarget.hasMips4_32r2())
+      if (LS->getMemoryVT() == MVT::f64 && Subtarget->hasMips4_32r2())
         return false;
     }
   }

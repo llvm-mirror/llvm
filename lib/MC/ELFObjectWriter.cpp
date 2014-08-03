@@ -28,7 +28,7 @@
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCValue.h"
-#include "llvm/Object/StringTableBuilder.h"
+#include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
@@ -782,7 +782,7 @@ bool ELFObjectWriter::shouldRelocateWithSymbol(const MCAssembler &Asm,
   if (Asm.isThumbFunc(&Sym))
     return true;
 
-  if (TargetObjectWriter->needsRelocateWithSymbol(Type))
+  if (TargetObjectWriter->needsRelocateWithSymbol(*SD, Type))
     return true;
   return false;
 }
@@ -1179,7 +1179,7 @@ prependCompressionHeader(uint64_t Size,
   if (Size <= Magic.size() + sizeof(Size) + CompressedContents.size())
     return false;
   if (sys::IsLittleEndianHost)
-    Size = sys::SwapByteOrder(Size);
+    sys::swapByteOrder(Size);
   CompressedContents.insert(CompressedContents.begin(),
                             Magic.size() + sizeof(Size), 0);
   std::copy(Magic.begin(), Magic.end(), CompressedContents.begin());
@@ -1565,6 +1565,7 @@ void ELFObjectWriter::WriteSection(MCAssembler &Asm,
   case ELF::SHT_X86_64_UNWIND:
   case ELF::SHT_MIPS_REGINFO:
   case ELF::SHT_MIPS_OPTIONS:
+  case ELF::SHT_MIPS_ABIFLAGS:
     // Nothing to do.
     break;
 
@@ -1574,8 +1575,7 @@ void ELFObjectWriter::WriteSection(MCAssembler &Asm,
     break;
 
   default:
-    assert(0 && "FIXME: sh_type value not supported!");
-    break;
+    llvm_unreachable("FIXME: sh_type value not supported!");
   }
 
   if (TargetObjectWriter->getEMachine() == ELF::EM_ARM &&

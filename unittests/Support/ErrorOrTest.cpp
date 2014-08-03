@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/Errc.h"
 #include "gtest/gtest.h"
 #include <memory>
 
@@ -30,7 +31,7 @@ TEST(ErrorOr, SimpleValue) {
 
   a = t2();
   EXPECT_FALSE(a);
-  EXPECT_EQ(errc::invalid_argument, a.getError());
+  EXPECT_EQ(a.getError(), errc::invalid_argument);
 #ifdef EXPECT_DEBUG_DEATH
   EXPECT_DEBUG_DEATH(*a, "Cannot get value when an error exists");
 #endif
@@ -54,10 +55,10 @@ struct B {};
 struct D : B {};
 
 TEST(ErrorOr, Covariant) {
-  ErrorOr<B*> b(ErrorOr<D*>(0));
-  b = ErrorOr<D*>(0);
+  ErrorOr<B*> b(ErrorOr<D*>(nullptr));
+  b = ErrorOr<D*>(nullptr);
 
-  ErrorOr<std::unique_ptr<B> > b1(ErrorOr<std::unique_ptr<D> >(0));
-  b1 = ErrorOr<std::unique_ptr<D> >(0);
+  ErrorOr<std::unique_ptr<B> > b1(ErrorOr<std::unique_ptr<D> >(nullptr));
+  b1 = ErrorOr<std::unique_ptr<D> >(nullptr);
 }
 } // end anon namespace

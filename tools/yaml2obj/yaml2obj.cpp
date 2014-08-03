@@ -22,10 +22,10 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/YAMLTraits.h"
+#include "llvm/Support/raw_ostream.h"
+#include <system_error>
 
 using namespace llvm;
 
@@ -91,8 +91,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::unique_ptr<MemoryBuffer> Buf;
-  if (MemoryBuffer::getFileOrSTDIN(Input, Buf))
+  ErrorOr<std::unique_ptr<MemoryBuffer>> Buf =
+      MemoryBuffer::getFileOrSTDIN(Input);
+  if (!Buf)
     return 1;
 
   ConvertFuncPtr Convert = nullptr;
@@ -105,7 +106,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  yaml::Input YIn(Buf->getBuffer());
+  yaml::Input YIn(Buf.get()->getBuffer());
 
   int Res = convertYAML(YIn, Out->os(), Convert);
   if (Res == 0)

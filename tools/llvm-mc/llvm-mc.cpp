@@ -52,7 +52,8 @@ static cl::opt<bool>
 ShowEncoding("show-encoding", cl::desc("Show instruction encodings"));
 
 static cl::opt<bool>
-CompressDebugSections("compress-debug-sections", cl::desc("Compress DWARF debug sections"));
+CompressDebugSections("compress-debug-sections",
+                      cl::desc("Compress DWARF debug sections"));
 
 static cl::opt<bool>
 ShowInst("show-inst", cl::desc("Show internal instruction representation"));
@@ -64,6 +65,10 @@ ShowInstOperands("show-inst-operands",
 static cl::opt<unsigned>
 OutputAsmVariant("output-asm-variant",
                  cl::desc("Syntax variant to use for output printing"));
+
+static cl::opt<bool>
+PrintImmHex("print-imm-hex", cl::init(false),
+            cl::desc("Prefer hex format for immediate values"));
 
 enum OutputFileType {
   OFT_Null,
@@ -145,9 +150,6 @@ static cl::opt<bool>
 GenDwarfForAssembly("g", cl::desc("Generate dwarf debugging info for assembly "
                                   "source files"));
 
-static cl::opt<int>
-DwarfVersion("dwarf-version", cl::desc("Dwarf version"), cl::init(4));
-
 static cl::opt<std::string>
 DebugCompilationDir("fdebug-compilation-dir",
                     cl::desc("Specifies the debug info's compilation dir"));
@@ -167,7 +169,6 @@ enum ActionType {
   AC_Assemble,
   AC_Disassemble,
   AC_MDisassemble,
-  AC_HDisassemble
 };
 
 static cl::opt<ActionType>
@@ -181,9 +182,6 @@ Action(cl::desc("Action to perform:"),
                              "Disassemble strings of hex bytes"),
                   clEnumValN(AC_MDisassemble, "mdis",
                              "Marked up disassembly of strings of hex bytes"),
-                  clEnumValN(AC_HDisassemble, "hdis",
-                             "Disassemble strings of hex bytes printing "
-                             "immediates as hex"),
                   clEnumValEnd));
 
 static const Target *GetTarget(const char *ProgName) {
@@ -240,10 +238,11 @@ static void setDwarfDebugProducer(void) {
   DwarfDebugProducer += getenv("DEBUG_PRODUCER");
 }
 
-static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI, tool_output_file *Out) {
+static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI,
+                      tool_output_file *Out) {
 
   AsmLexer Lexer(MAI);
-  Lexer.setBuffer(SrcMgr.getMemoryBuffer(0));
+  Lexer.setBuffer(SrcMgr.getMemoryBuffer(SrcMgr.getMainFileID())->getBuffer());
 
   bool Error = false;
   while (Lexer.Lex().isNot(AsmToken::Eof)) {
@@ -320,12 +319,13 @@ static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI, tool_output_file *Out) 
 
 static int AssembleInput(const char *ProgName, const Target *TheTarget,
                          SourceMgr &SrcMgr, MCContext &Ctx, MCStreamer &Str,
-                         MCAsmInfo &MAI, MCSubtargetInfo &STI, MCInstrInfo &MCII) {
+                         MCAsmInfo &MAI, MCSubtargetInfo &STI,
+                         MCInstrInfo &MCII, MCTargetOptions &MCOptions) {
   std::unique_ptr<MCAsmParser> Parser(
       createMCAsmParser(SrcMgr, Ctx, Str, MAI));
   std::unique_ptr<MCTargetAsmParser> TAP(
-      TheTarget->createMCAsmParser(STI, *Parser, MCII,
-                                   InitMCTargetOptionsFromFlags()));
+      TheTarget->createMCAsmParser(STI, *Parser, MCII, MCOptions));
+
   if (!TAP) {
     errs() << ProgName
            << ": error: this target does not support assembly parsing.\n";
@@ -356,6 +356,7 @@ int main(int argc, char **argv) {
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
 
   cl::ParseCommandLineOptions(argc, argv, "llvm machine code playground\n");
+  MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
   TripleName = Triple::normalize(TripleName);
   setDwarfDebugFlags(argc, argv);
 
@@ -366,12 +367,13 @@ int main(int argc, char **argv) {
   if (!TheTarget)
     return 1;
 
-  std::unique_ptr<MemoryBuffer> BufferPtr;
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputFilename, BufferPtr)) {
-    errs() << ProgName << ": " << ec.message() << '\n';
+  ErrorOr<std::unique_ptr<MemoryBuffer>> BufferPtr =
+      MemoryBuffer::getFileOrSTDIN(InputFilename);
+  if (std::error_code EC = BufferPtr.getError()) {
+    errs() << ProgName << ": " << EC.message() << '\n';
     return 1;
   }
-  MemoryBuffer *Buffer = BufferPtr.release();
+  MemoryBuffer *Buffer = BufferPtr->release();
 
   SourceMgr SrcMgr;
 
@@ -390,7 +392,8 @@ int main(int argc, char **argv) {
 
   if (CompressDebugSections) {
     if (!zlib::isAvailable()) {
-      errs() << ProgName << ": build tools with zlib to enable -compress-debug-sections";
+      errs() << ProgName
+             << ": build tools with zlib to enable -compress-debug-sections";
       return 1;
     }
     MAI->setCompressDebugSections(true);
@@ -398,14 +401,16 @@ int main(int argc, char **argv) {
 
   // FIXME: This is not pretty. MCContext has a ptr to MCObjectFileInfo and
   // MCObjectFileInfo needs a MCContext reference in order to initialize itself.
-  std::unique_ptr<MCObjectFileInfo> MOFI(new MCObjectFileInfo());
-  MCContext Ctx(MAI.get(), MRI.get(), MOFI.get(), &SrcMgr);
-  MOFI->InitMCObjectFileInfo(TripleName, RelocModel, CMModel, Ctx);
+  MCObjectFileInfo MOFI;
+  MCContext Ctx(MAI.get(), MRI.get(), &MOFI, &SrcMgr);
+  MOFI.InitMCObjectFileInfo(TripleName, RelocModel, CMModel, Ctx);
 
   if (SaveTempLabels)
     Ctx.setAllowTemporaryLabels(false);
 
   Ctx.setGenDwarfForAssembly(GenDwarfForAssembly);
+  // Default to 4 for dwarf version.
+  unsigned DwarfVersion = MCOptions.DwarfVersion ? MCOptions.DwarfVersion : 4;
   if (DwarfVersion < 2 || DwarfVersion > 4) {
     errs() << ProgName << ": Dwarf version " << DwarfVersion
            << " is not supported." << '\n';
@@ -445,6 +450,11 @@ int main(int argc, char **argv) {
   if (FileType == OFT_AssemblyFile) {
     IP =
       TheTarget->createMCInstPrinter(OutputAsmVariant, *MAI, *MCII, *MRI, *STI);
+
+    // Set the display preference for hex vs. decimal immediates.
+    IP->setPrintImmHex(PrintImmHex);
+
+    // Set up the AsmStreamer.
     MCCodeEmitter *CE = nullptr;
     MCAsmBackend *MAB = nullptr;
     if (ShowEncoding) {
@@ -473,16 +483,12 @@ int main(int argc, char **argv) {
     Res = AsLexInput(SrcMgr, *MAI, Out.get());
     break;
   case AC_Assemble:
-    Res = AssembleInput(ProgName, TheTarget, SrcMgr, Ctx, *Str, *MAI, *STI, *MCII);
+    Res = AssembleInput(ProgName, TheTarget, SrcMgr, Ctx, *Str, *MAI, *STI,
+                        *MCII, MCOptions);
     break;
   case AC_MDisassemble:
     assert(IP && "Expected assembly output");
     IP->setUseMarkup(1);
-    disassemble = true;
-    break;
-  case AC_HDisassemble:
-    assert(IP && "Expected assembly output");
-    IP->setPrintImmHex(1);
     disassemble = true;
     break;
   case AC_Disassemble:

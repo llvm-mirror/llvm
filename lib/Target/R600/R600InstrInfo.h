@@ -32,12 +32,22 @@ namespace llvm {
   class R600InstrInfo : public AMDGPUInstrInfo {
   private:
   const R600RegisterInfo RI;
-  const AMDGPUSubtarget &ST;
 
-  int getBranchInstr(const MachineOperand &op) const;
   std::vector<std::pair<int, unsigned> >
   ExtractSrcs(MachineInstr *MI, const DenseMap<unsigned, unsigned> &PV, unsigned &ConstCount) const;
 
+
+  MachineInstrBuilder buildIndirectRead(MachineBasicBlock *MBB,
+                                        MachineBasicBlock::iterator I,
+                                        unsigned ValueReg, unsigned Address,
+                                        unsigned OffsetReg,
+                                        unsigned AddrChan) const;
+
+  MachineInstrBuilder buildIndirectWrite(MachineBasicBlock *MBB,
+                                        MachineBasicBlock::iterator I,
+                                        unsigned ValueReg, unsigned Address,
+                                        unsigned OffsetReg,
+                                        unsigned AddrChan) const;
   public:
   enum BankSwizzle {
     ALU_VEC_012_SCL_210 = 0,
@@ -48,7 +58,7 @@ namespace llvm {
     ALU_VEC_210
   };
 
-  explicit R600InstrInfo(AMDGPUTargetMachine &tm);
+  explicit R600InstrInfo(const AMDGPUSubtarget &st);
 
   const R600RegisterInfo &getRegisterInfo() const override;
   void copyPhysReg(MachineBasicBlock &MBB,
@@ -142,7 +152,6 @@ namespace llvm {
   /// instruction slots within an instruction group.
   bool isVector(const MachineInstr &MI) const;
 
-  unsigned getIEQOpcode() const override;
   bool isMov(unsigned Opcode) const override;
 
   DFAPacketizer *CreateTargetScheduleState(const TargetMachine *TM,
@@ -196,6 +205,8 @@ namespace llvm {
 
   int getInstrLatency(const InstrItineraryData *ItinData,
                       SDNode *Node) const override { return 1;}
+
+  virtual bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const;
 
   /// \brief Reserve the registers that may be accesed using indirect addressing.
   void reserveIndirectRegisters(BitVector &Reserved,

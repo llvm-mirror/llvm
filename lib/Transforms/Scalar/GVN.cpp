@@ -1464,6 +1464,13 @@ void GVN::AnalyzeLoadAvailability(LoadInst *LI, LoadDepVect &Deps,
       continue;
     }
 
+    // Loading from calloc (which zero initializes memory) -> zero
+    if (isCallocLikeFn(DepInst, TLI)) {
+      ValuesPerBlock.push_back(AvailableValueInBlock::get(
+          DepBB, Constant::getNullValue(LI->getType())));
+      continue;
+    }
+
     if (StoreInst *S = dyn_cast<StoreInst>(DepInst)) {
       // Reject loads and stores that are to the same address but are of
       // different types if we have to.
@@ -1662,9 +1669,11 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
                                         LI->getAlignment(),
                                         UnavailablePred->getTerminator());
 
-    // Transfer the old load's TBAA tag to the new load.
-    if (MDNode *Tag = LI->getMetadata(LLVMContext::MD_tbaa))
-      NewLoad->setMetadata(LLVMContext::MD_tbaa, Tag);
+    // Transfer the old load's AA tags to the new load.
+    AAMDNodes Tags;
+    LI->getAAMetadata(Tags);
+    if (Tags)
+      NewLoad->setAAMetadata(Tags);
 
     // Transfer DebugLoc.
     NewLoad->setDebugLoc(LI->getDebugLoc());
@@ -1782,6 +1791,19 @@ static void patchReplacementInstruction(Instruction *I, Value *Repl) {
       case LLVMContext::MD_tbaa:
         ReplInst->setMetadata(Kind, MDNode::getMostGenericTBAA(IMD, ReplMD));
         break;
+      case LLVMContext::MD_alias_scope:
+      case LLVMContext::MD_noalias:
+        // FIXME: If both the original and replacement value are part of the
+        // same control-flow region (meaning that the execution of one
+        // guarentees the executation of the other), then we can combine the
+        // noalias scopes here and do better than the general conservative
+        // answer.
+
+        // In general, GVN unifies expressions over different control-flow
+        // regions, and so we need a conservative combination of the noalias
+        // scopes.
+        ReplInst->setMetadata(Kind, MDNode::intersect(IMD, ReplMD));
+        break;
       case LLVMContext::MD_range:
         ReplInst->setMetadata(Kind, MDNode::getMostGenericRange(IMD, ReplMD));
         break;
@@ -1790,6 +1812,10 @@ static void patchReplacementInstruction(Instruction *I, Value *Repl) {
         break;
       case LLVMContext::MD_fpmath:
         ReplInst->setMetadata(Kind, MDNode::getMostGenericFPMath(IMD, ReplMD));
+        break;
+      case LLVMContext::MD_invariant_load:
+        // Only set the !invariant.load if it is present in both instructions.
+        ReplInst->setMetadata(Kind, IMD);
         break;
       }
     }
@@ -1986,6 +2012,15 @@ bool GVN::processLoad(LoadInst *L) {
       ++NumGVNLoad;
       return true;
     }
+  }
+
+  // If this load follows a calloc (which zero initializes memory),
+  // then the loaded value is zero
+  if (isCallocLikeFn(DepInst, TLI)) {
+    L->replaceAllUsesWith(Constant::getNullValue(L->getType()));
+    markInstructionForDeletion(L);
+    ++NumGVNLoad;
+    return true;
   }
 
   return false;

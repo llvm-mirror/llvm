@@ -16,9 +16,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "aarch64-selectiondag-info"
 
-AArch64SelectionDAGInfo::AArch64SelectionDAGInfo(const TargetMachine &TM)
-    : TargetSelectionDAGInfo(TM),
-      Subtarget(&TM.getSubtarget<AArch64Subtarget>()) {}
+AArch64SelectionDAGInfo::AArch64SelectionDAGInfo(const DataLayout *DL)
+    : TargetSelectionDAGInfo(DL) {}
 
 AArch64SelectionDAGInfo::~AArch64SelectionDAGInfo() {}
 
@@ -30,7 +29,9 @@ SDValue AArch64SelectionDAGInfo::EmitTargetCodeForMemset(
   ConstantSDNode *V = dyn_cast<ConstantSDNode>(Src);
   ConstantSDNode *SizeValue = dyn_cast<ConstantSDNode>(Size);
   const char *bzeroEntry =
-      (V && V->isNullValue()) ? Subtarget->getBZeroEntry() : nullptr;
+      (V && V->isNullValue())
+          ? DAG.getTarget().getSubtarget<AArch64Subtarget>().getBZeroEntry()
+          : nullptr;
   // For small size (< 256), it is not beneficial to use bzero
   // instead of memset.
   if (bzeroEntry && (!SizeValue || SizeValue->getZExtValue() > 256)) {
@@ -50,7 +51,7 @@ SDValue AArch64SelectionDAGInfo::EmitTargetCodeForMemset(
     TargetLowering::CallLoweringInfo CLI(DAG);
     CLI.setDebugLoc(dl).setChain(Chain)
       .setCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()),
-                 DAG.getExternalSymbol(bzeroEntry, IntPtr), &Args, 0)
+                 DAG.getExternalSymbol(bzeroEntry, IntPtr), std::move(Args), 0)
       .setDiscardResult();
     std::pair<SDValue, SDValue> CallResult = TLI.LowerCallTo(CLI);
     return CallResult.second;

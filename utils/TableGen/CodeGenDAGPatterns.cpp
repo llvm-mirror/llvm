@@ -771,7 +771,7 @@ static unsigned getPatternSize(const TreePatternNode *P,
 
 /// Compute the complexity metric for the input pattern.  This roughly
 /// corresponds to the number of nodes that are covered.
-unsigned PatternToMatch::
+int PatternToMatch::
 getPatternComplexity(const CodeGenDAGPatterns &CGP) const {
   return getPatternSize(getSrcPattern(), CGP) + getAddedComplexity();
 }
@@ -2119,9 +2119,11 @@ InferAllTypes(const StringMap<SmallVector<TreePatternNode*,1> > *InNamedTypes) {
       // If we have input named node types, propagate their types to the named
       // values here.
       if (InNamedTypes) {
-        // FIXME: Should be error?
-        assert(InNamedTypes->count(I->getKey()) &&
-               "Named node in output pattern but not input pattern?");
+        if (!InNamedTypes->count(I->getKey())) {
+          error("Node '" + std::string(I->getKey()) +
+                "' in output pattern but not input pattern");
+          return true;
+        }
 
         const SmallVectorImpl<TreePatternNode*> &InNodes =
           InNamedTypes->find(I->getKey())->second;

@@ -44,6 +44,9 @@ void LLVMAddDeadStoreEliminationPass(LLVMPassManagerRef PM);
 /** See llvm::createScalarizerPass function. */
 void LLVMAddScalarizerPass(LLVMPassManagerRef PM);
 
+/** See llvm::createMergedLoadStoreMotionPass function. */
+void LLVMAddMergedLoadStoreMotionPass(LLVMPassManagerRef PM);
+
 /** See llvm::createGVNPass function. */
 void LLVMAddGVNPass(LLVMPassManagerRef PM);
 
@@ -128,6 +131,9 @@ void LLVMAddLowerExpectIntrinsicPass(LLVMPassManagerRef PM);
 
 /** See llvm::createTypeBasedAliasAnalysisPass function */
 void LLVMAddTypeBasedAliasAnalysisPass(LLVMPassManagerRef PM);
+
+/** See llvm::createScopedNoAliasAAPass function */
+void LLVMAddScopedNoAliasAAPass(LLVMPassManagerRef PM);
 
 /** See llvm::createBasicAliasAnalysisPass function */
 void LLVMAddBasicAliasAnalysisPass(LLVMPassManagerRef PM);

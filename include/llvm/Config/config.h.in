@@ -74,6 +74,9 @@
 /* Define if dlopen() is available on this platform. */
 #undef HAVE_DLOPEN
 
+/* Define if the dot program is available */
+#undef HAVE_DOT
+
 /* Define to 1 if you have the <errno.h> header file. */
 #undef HAVE_ERRNO_H
 
@@ -169,9 +172,6 @@
 
 /* Define to 1 if you have the `shell32' library (-lshell32). */
 #undef HAVE_LIBSHELL32
-
-/* Define to 1 if you have the `udis86' library (-ludis86). */
-#undef HAVE_LIBUDIS86
 
 /* Define to 1 if you have the `z' library (-lz). */
 #undef HAVE_LIBZ
@@ -522,6 +522,9 @@
 /* Define if this is Win32ish platform */
 #undef LLVM_ON_WIN32
 
+/* Define to path to dot program if found or 'echo dot' otherwise */
+#undef LLVM_PATH_DOT
+
 /* Installation prefix directory */
 #undef LLVM_PREFIX
 
@@ -576,9 +579,6 @@
 
 /* Define to 1 if your <sys/time.h> declares `struct tm'. */
 #undef TM_IN_SYS_TIME
-
-/* Define if use udis86 library */
-#undef USE_UDIS86
 
 /* Type of 1st arg on ELM Callback */
 #undef WIN32_ELMCB_PCSTR

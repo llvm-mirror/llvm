@@ -171,9 +171,10 @@ define i64 @test6(i64* %ptr, i64 %val) {
 
 define i64 @test7(i64* %ptr, i64 %val1, i64 %val2) {
 ; CHECK-LABEL: test7:
-; CHECK: dmb {{ish$}}
+; CHECK-DAG: mov [[VAL1LO:r[0-9]+]], r1
+; CHECK-DAG: dmb {{ish$}}
 ; CHECK: ldrexd [[REG1:(r[0-9]?[02468])]], [[REG2:(r[0-9]?[13579])]]
-; CHECK-LE-DAG: eor     [[MISMATCH_LO:r[0-9]+]], [[REG1]], r1
+; CHECK-LE-DAG: eor     [[MISMATCH_LO:r[0-9]+]], [[REG1]], [[VAL1LO]]
 ; CHECK-LE-DAG: eor     [[MISMATCH_HI:r[0-9]+]], [[REG2]], r2
 ; CHECK-BE-DAG: eor     [[MISMATCH_LO:r[0-9]+]], [[REG2]], r2
 ; CHECK-BE-DAG: eor     [[MISMATCH_HI:r[0-9]+]], [[REG1]], r1
@@ -198,7 +199,8 @@ define i64 @test7(i64* %ptr, i64 %val1, i64 %val2) {
 ; CHECK-THUMB: bne
 ; CHECK-THUMB: dmb {{ish$}}
 
-  %r = cmpxchg i64* %ptr, i64 %val1, i64 %val2 seq_cst seq_cst
+  %pair = cmpxchg i64* %ptr, i64 %val1, i64 %val2 seq_cst seq_cst
+  %r = extractvalue { i64, i1 } %pair, 0
   ret i64 %r
 }
 

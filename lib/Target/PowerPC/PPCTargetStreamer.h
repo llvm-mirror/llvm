@@ -19,6 +19,8 @@ public:
   virtual ~PPCTargetStreamer();
   virtual void emitTCEntry(const MCSymbol &S) = 0;
   virtual void emitMachine(StringRef CPU) = 0;
+  virtual void emitAbiVersion(int AbiVersion) = 0;
+  virtual void emitLocalEntry(MCSymbol *S, const MCExpr *LocalOffset) = 0;
 };
 }
 

@@ -15,13 +15,13 @@
 #include "MCTargetDesc/AArch64FixupKinds.h"
 #include "MCTargetDesc/AArch64MCExpr.h"
 #include "Utils/AArch64BaseInfo.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -218,13 +218,9 @@ AArch64MCCodeEmitter::getMachineOpValue(const MCInst &MI, const MCOperand &MO,
                                         const MCSubtargetInfo &STI) const {
   if (MO.isReg())
     return Ctx.getRegisterInfo()->getEncodingValue(MO.getReg());
-  else {
-    assert(MO.isImm() && "did not expect relocated expression");
-    return static_cast<unsigned>(MO.getImm());
-  }
 
-  assert(0 && "Unable to encode MCOperand!");
-  return 0;
+  assert(MO.isImm() && "did not expect relocated expression");
+  return static_cast<unsigned>(MO.getImm());
 }
 
 template<unsigned FixupKind> uint32_t

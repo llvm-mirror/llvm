@@ -13,7 +13,8 @@ define i128 @val_compare_and_swap(i128* %p, i128 %oldval, i128 %newval) {
 ; CHECK: stxp   [[SCRATCH_RES:w[0-9]+]], x4, x5, [x[[ADDR]]]
 ; CHECK: cbnz   [[SCRATCH_RES]], [[LABEL]]
 ; CHECK: [[DONE]]:
-  %val = cmpxchg i128* %p, i128 %oldval, i128 %newval acquire acquire
+  %pair = cmpxchg i128* %p, i128 %oldval, i128 %newval acquire acquire
+  %val = extractvalue { i128, i1 } %pair, 0
   ret i128 %val
 }
 
@@ -21,8 +22,10 @@ define void @fetch_and_nand(i128* %p, i128 %bits) {
 ; CHECK-LABEL: fetch_and_nand:
 ; CHECK: [[LABEL:.?LBB[0-9]+_[0-9]+]]:
 ; CHECK: ldxp  [[DEST_REGLO:x[0-9]+]], [[DEST_REGHI:x[0-9]+]], [x0]
-; CHECK-DAG: bic    [[SCRATCH_REGLO:x[0-9]+]], [[DEST_REGLO]], x2
-; CHECK-DAG: bic    [[SCRATCH_REGHI:x[0-9]+]], [[DEST_REGHI]], x3
+; CHECK-DAG: and    [[TMP_REGLO:x[0-9]+]], [[DEST_REGLO]], x2
+; CHECK-DAG: and    [[TMP_REGHI:x[0-9]+]], [[DEST_REGHI]], x3
+; CHECK-DAG: mvn    [[SCRATCH_REGLO:x[0-9]+]], [[TMP_REGLO]]
+; CHECK-DAG: mvn    [[SCRATCH_REGHI:x[0-9]+]], [[TMP_REGHI]]
 ; CHECK: stlxp  [[SCRATCH_RES:w[0-9]+]], [[SCRATCH_REGLO]], [[SCRATCH_REGHI]], [x0]
 ; CHECK: cbnz   [[SCRATCH_RES]], [[LABEL]]
 

@@ -23,6 +23,7 @@
 
 namespace llvm {
 
+class Comdat;
 class PointerType;
 class Module;
 
@@ -110,6 +111,12 @@ public:
   bool hasUnnamedAddr() const { return UnnamedAddr; }
   void setUnnamedAddr(bool Val) { UnnamedAddr = Val; }
 
+  bool hasComdat() const { return getComdat() != nullptr; }
+  Comdat *getComdat();
+  const Comdat *getComdat() const {
+    return const_cast<GlobalValue *>(this)->getComdat();
+  }
+
   VisibilityTypes getVisibility() const { return VisibilityTypes(Visibility); }
   bool hasDefaultVisibility() const { return Visibility == DefaultVisibility; }
   bool hasHiddenVisibility() const { return Visibility == HiddenVisibility; }
@@ -146,8 +153,14 @@ public:
   }
   void setDLLStorageClass(DLLStorageClassTypes C) { DllStorageClass = C; }
 
-  bool hasSection() const { return !getSection().empty(); }
-  const std::string &getSection() const;
+  bool hasSection() const { return !StringRef(getSection()).empty(); }
+  // It is unfortunate that we have to use "char *" in here since this is
+  // always non NULL, but:
+  // * The C API expects a null terminated string, so we cannot use StringRef.
+  // * The C API expects us to own it, so we cannot use a std:string.
+  // * For GlobalAliases we can fail to find the section and we have to
+  //   return "", so we cannot use a "const std::string &".
+  const char *getSection() const;
 
   /// Global values are always pointers.
   inline PointerType *getType() const {
@@ -166,6 +179,9 @@ public:
   }
   static bool isAvailableExternallyLinkage(LinkageTypes Linkage) {
     return Linkage == AvailableExternallyLinkage;
+  }
+  static bool isLinkOnceODRLinkage(LinkageTypes Linkage) {
+    return Linkage == LinkOnceODRLinkage;
   }
   static bool isLinkOnceLinkage(LinkageTypes Linkage) {
     return Linkage == LinkOnceAnyLinkage || Linkage == LinkOnceODRLinkage;
@@ -230,6 +246,7 @@ public:
   bool hasLinkOnceLinkage() const {
     return isLinkOnceLinkage(Linkage);
   }
+  bool hasLinkOnceODRLinkage() const { return isLinkOnceODRLinkage(Linkage); }
   bool hasWeakLinkage() const {
     return isWeakLinkage(Linkage);
   }

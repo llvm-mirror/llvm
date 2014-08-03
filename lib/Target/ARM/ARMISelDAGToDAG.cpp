@@ -60,22 +60,17 @@ enum AddrMode2Type {
 };
 
 class ARMDAGToDAGISel : public SelectionDAGISel {
-  ARMBaseTargetMachine &TM;
-
   /// Subtarget - Keep a pointer to the ARMSubtarget around so that we can
   /// make the right decision when generating code for different targets.
   const ARMSubtarget *Subtarget;
 
 public:
-  explicit ARMDAGToDAGISel(ARMBaseTargetMachine &tm,
-                           CodeGenOpt::Level OptLevel)
-    : SelectionDAGISel(tm, OptLevel), TM(tm),
-      Subtarget(&TM.getSubtarget<ARMSubtarget>()) {
-  }
+  explicit ARMDAGToDAGISel(ARMBaseTargetMachine &tm, CodeGenOpt::Level OptLevel)
+      : SelectionDAGISel(tm, OptLevel) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override {
     // Reset the subtarget each time through.
-    Subtarget = &TM.getSubtarget<ARMSubtarget>();
+    Subtarget = &MF.getTarget().getSubtarget<ARMSubtarget>();
     SelectionDAGISel::runOnMachineFunction(MF);
     return true;
   }
@@ -429,8 +424,8 @@ bool ARMDAGToDAGISel::hasNoVMLxHazardUse(SDNode *N) const {
   if (Use->getOpcode() == ISD::CopyToReg)
     return true;
   if (Use->isMachineOpcode()) {
-    const ARMBaseInstrInfo *TII =
-      static_cast<const ARMBaseInstrInfo*>(TM.getInstrInfo());
+    const ARMBaseInstrInfo *TII = static_cast<const ARMBaseInstrInfo *>(
+        CurDAG->getTarget().getInstrInfo());
 
     const MCInstrDesc &MCID = TII->get(Use->getMachineOpcode());
     if (MCID.mayStore())
@@ -2366,6 +2361,25 @@ SDNode *ARMDAGToDAGISel::SelectV6T2BitfieldExtractOp(SDNode *N,
       return CurDAG->SelectNodeTo(N, Opc, MVT::i32, Ops);
     }
   }
+
+  if (N->getOpcode() == ISD::SIGN_EXTEND_INREG) {
+    unsigned Width = cast<VTSDNode>(N->getOperand(1))->getVT().getSizeInBits();
+    unsigned LSB = 0;
+    if (!isOpcWithIntImmediate(N->getOperand(0).getNode(), ISD::SRL, LSB) &&
+        !isOpcWithIntImmediate(N->getOperand(0).getNode(), ISD::SRA, LSB))
+      return nullptr;
+
+    if (LSB + Width > 32)
+      return nullptr;
+
+    SDValue Reg0 = CurDAG->getRegister(0, MVT::i32);
+    SDValue Ops[] = { N->getOperand(0).getOperand(0),
+                      CurDAG->getTargetConstant(LSB, MVT::i32),
+                      CurDAG->getTargetConstant(Width - 1, MVT::i32),
+                      getAL(CurDAG), Reg0 };
+    return CurDAG->SelectNodeTo(N, Opc, MVT::i32, Ops);
+  }
+
   return nullptr;
 }
 
@@ -2444,7 +2458,7 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
   case ISD::Constant: {
     unsigned Val = cast<ConstantSDNode>(N)->getZExtValue();
     bool UseCP = true;
-    if (Subtarget->useMovt())
+    if (Subtarget->useMovt(*MF))
       // Thumb2-aware targets have the MOVT instruction, so all immediates can
       // be done with MOV + MOVT, at worst.
       UseCP = false;
@@ -2514,6 +2528,7 @@ SDNode *ARMDAGToDAGISel::Select(SDNode *N) {
     if (SDNode *I = SelectV6T2BitfieldExtractOp(N, false))
       return I;
     break;
+  case ISD::SIGN_EXTEND_INREG:
   case ISD::SRA:
     if (SDNode *I = SelectV6T2BitfieldExtractOp(N, true))
       return I;

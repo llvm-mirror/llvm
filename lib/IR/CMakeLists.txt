@@ -3,6 +3,7 @@ add_llvm_library(LLVMCore
   Attributes.cpp
   AutoUpgrade.cpp
   BasicBlock.cpp
+  Comdat.cpp
   ConstantFold.cpp
   ConstantRange.cpp
   Constants.cpp
@@ -38,6 +39,7 @@ add_llvm_library(LLVMCore
   Type.cpp
   TypeFinder.cpp
   Use.cpp
+  UseListOrder.cpp
   User.cpp
   Value.cpp
   ValueSymbolTable.cpp

@@ -27,11 +27,11 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cctype>
 #include <map>
 #include <string>
+#include <system_error>
 #include <vector>
 using namespace llvm;
 
@@ -49,6 +49,13 @@ CheckPrefixes("check-prefix",
 static cl::opt<bool>
 NoCanonicalizeWhiteSpace("strict-whitespace",
               cl::desc("Do not treat all horizontal whitespace as equivalent"));
+
+static cl::list<std::string> ImplicitCheckNot(
+    "implicit-check-not",
+    cl::desc("Add an implicit negative check with this pattern to every\n"
+             "positive check. This can be used to ensure that no instances of\n"
+             "this pattern occur which are not matched by a positive pattern"),
+    cl::value_desc("pattern"));
 
 typedef cl::list<std::string>::const_iterator prefix_iterator;
 
@@ -820,24 +827,43 @@ static StringRef FindFirstMatchingPrefix(StringRef &Buffer,
 /// Returns true in case of an error, false otherwise.
 static bool ReadCheckFile(SourceMgr &SM,
                           std::vector<CheckString> &CheckStrings) {
-  std::unique_ptr<MemoryBuffer> File;
-  if (error_code ec =
-        MemoryBuffer::getFileOrSTDIN(CheckFilename, File)) {
-    errs() << "Could not open check file '" << CheckFilename << "': "
-           << ec.message() << '\n';
+  ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
+      MemoryBuffer::getFileOrSTDIN(CheckFilename);
+  if (std::error_code EC = FileOrErr.getError()) {
+    errs() << "Could not open check file '" << CheckFilename
+           << "': " << EC.message() << '\n';
     return true;
   }
 
   // If we want to canonicalize whitespace, strip excess whitespace from the
   // buffer containing the CHECK lines. Remove DOS style line endings.
-  MemoryBuffer *F =
-    CanonicalizeInputFile(File.release(), NoCanonicalizeWhiteSpace);
+  MemoryBuffer *F = CanonicalizeInputFile(FileOrErr.get().release(),
+                                          NoCanonicalizeWhiteSpace);
 
   SM.AddNewSourceBuffer(F, SMLoc());
 
   // Find all instances of CheckPrefix followed by : in the file.
   StringRef Buffer = F->getBuffer();
-  std::vector<Pattern> DagNotMatches;
+
+  std::vector<Pattern> ImplicitNegativeChecks;
+  for (const auto &PatternString : ImplicitCheckNot) {
+    // Create a buffer with fake command line content in order to display the
+    // command line option responsible for the specific implicit CHECK-NOT.
+    std::string Prefix = std::string("-") + ImplicitCheckNot.ArgStr + "='";
+    std::string Suffix = "'";
+    MemoryBuffer *CmdLine = MemoryBuffer::getMemBufferCopy(
+        Prefix + PatternString + Suffix, "command line");
+    StringRef PatternInBuffer =
+        CmdLine->getBuffer().substr(Prefix.size(), PatternString.size());
+    SM.AddNewSourceBuffer(CmdLine, SMLoc());
+
+    ImplicitNegativeChecks.push_back(Pattern(Check::CheckNot));
+    ImplicitNegativeChecks.back().ParsePattern(PatternInBuffer,
+                                               "IMPLICIT-CHECK", SM, 0);
+  }
+
+
+  std::vector<Pattern> DagNotMatches = ImplicitNegativeChecks;
 
   // LineNumber keeps track of the line on which CheckPrefix instances are
   // found.
@@ -910,6 +936,7 @@ static bool ReadCheckFile(SourceMgr &SM,
                                        PatternLoc,
                                        CheckTy));
     std::swap(DagNotMatches, CheckStrings.back().DagNotStrings);
+    DagNotMatches = ImplicitNegativeChecks;
   }
 
   // Add an EOF pattern for any trailing CHECK-DAG/-NOTs, and use the first
@@ -1043,7 +1070,7 @@ bool CheckString::CheckNext(const SourceMgr &SM, StringRef Buffer) const {
              SMLoc::getFromPointer(Buffer.data())))->getBufferStart() &&
          "CHECK-NEXT can't be the first check in a file");
 
-  const char *FirstNewLine = 0;
+  const char *FirstNewLine = nullptr;
   unsigned NumNewLines = CountNumNewlinesBetween(Buffer, FirstNewLine);
 
   if (NumNewLines == 0) {
@@ -1185,6 +1212,10 @@ static bool ValidateCheckPrefixes() {
        I != E; ++I) {
     StringRef Prefix(*I);
 
+    // Reject empty prefixes.
+    if (Prefix == "")
+      return false;
+
     if (!PrefixSet.insert(Prefix))
       return false;
 
@@ -1224,13 +1255,14 @@ int main(int argc, char **argv) {
     return 2;
 
   // Open the file to check and add it to SourceMgr.
-  std::unique_ptr<MemoryBuffer> File;
-  if (error_code ec =
-        MemoryBuffer::getFileOrSTDIN(InputFilename, File)) {
-    errs() << "Could not open input file '" << InputFilename << "': "
-           << ec.message() << '\n';
+  ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
+      MemoryBuffer::getFileOrSTDIN(InputFilename);
+  if (std::error_code EC = FileOrErr.getError()) {
+    errs() << "Could not open input file '" << InputFilename
+           << "': " << EC.message() << '\n';
     return 2;
   }
+  std::unique_ptr<MemoryBuffer> File = std::move(FileOrErr.get());
 
   if (File->getBufferSize() == 0) {
     errs() << "FileCheck error: '" << InputFilename << "' is empty.\n";

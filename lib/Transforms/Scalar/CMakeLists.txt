@@ -8,7 +8,6 @@ add_llvm_library(LLVMScalarOpts
   EarlyCSE.cpp
   FlattenCFGPass.cpp
   GVN.cpp
-  GlobalMerge.cpp
   IndVarSimplify.cpp
   JumpThreading.cpp
   LICM.cpp
@@ -23,6 +22,7 @@ add_llvm_library(LLVMScalarOpts
   LoopUnswitch.cpp
   LowerAtomic.cpp
   MemCpyOptimizer.cpp
+  MergedLoadStoreMotion.cpp
   PartiallyInlineLibCalls.cpp
   Reassociate.cpp
   Reg2Mem.cpp

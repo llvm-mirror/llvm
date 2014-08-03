@@ -13,10 +13,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/CFG.h"
@@ -24,13 +29,22 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Support/CommandLine.h"
+#include <algorithm>
 using namespace llvm;
+
+static cl::opt<bool>
+EnableNoAliasConversion("enable-noalias-to-md-conversion", cl::init(false),
+  cl::Hidden,
+  cl::desc("Convert noalias attributes to metadata during inlining."));
 
 bool llvm::InlineFunction(CallInst *CI, InlineFunctionInfo &IFI,
                           bool InsertLifetime) {
@@ -189,6 +203,7 @@ static void HandleCallsInBlockInlinedThroughInvoke(BasicBlock *BB,
     InvokeInst *II = InvokeInst::Create(CI->getCalledValue(), Split,
                                         Invoke.getOuterResumeDest(),
                                         InvokeArgs, CI->getName(), BB);
+    II->setDebugLoc(CI->getDebugLoc());
     II->setCallingConv(CI->getCallingConv());
     II->setAttributes(CI->getAttributes());
     
@@ -257,6 +272,261 @@ static void HandleInlinedInvoke(InvokeInst *II, BasicBlock *FirstNewBlock,
   // invoke instruction. Eliminate these entries (which might even delete the
   // PHI node) now.
   InvokeDest->removePredecessor(II->getParent());
+}
+
+/// CloneAliasScopeMetadata - When inlining a function that contains noalias
+/// scope metadata, this metadata needs to be cloned so that the inlined blocks
+/// have different "unqiue scopes" at every call site. Were this not done, then
+/// aliasing scopes from a function inlined into a caller multiple times could
+/// not be differentiated (and this would lead to miscompiles because the
+/// non-aliasing property communicated by the metadata could have
+/// call-site-specific control dependencies).
+static void CloneAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap) {
+  const Function *CalledFunc = CS.getCalledFunction();
+  SetVector<const MDNode *> MD;
+
+  // Note: We could only clone the metadata if it is already used in the
+  // caller. I'm omitting that check here because it might confuse
+  // inter-procedural alias analysis passes. We can revisit this if it becomes
+  // an efficiency or overhead problem.
+
+  for (Function::const_iterator I = CalledFunc->begin(), IE = CalledFunc->end();
+       I != IE; ++I)
+    for (BasicBlock::const_iterator J = I->begin(), JE = I->end(); J != JE; ++J) {
+      if (const MDNode *M = J->getMetadata(LLVMContext::MD_alias_scope))
+        MD.insert(M);
+      if (const MDNode *M = J->getMetadata(LLVMContext::MD_noalias))
+        MD.insert(M);
+    }
+
+  if (MD.empty())
+    return;
+
+  // Walk the existing metadata, adding the complete (perhaps cyclic) chain to
+  // the set.
+  SmallVector<const Value *, 16> Queue(MD.begin(), MD.end());
+  while (!Queue.empty()) {
+    const MDNode *M = cast<MDNode>(Queue.pop_back_val());
+    for (unsigned i = 0, ie = M->getNumOperands(); i != ie; ++i)
+      if (const MDNode *M1 = dyn_cast<MDNode>(M->getOperand(i)))
+        if (MD.insert(M1))
+          Queue.push_back(M1);
+  }
+
+  // Now we have a complete set of all metadata in the chains used to specify
+  // the noalias scopes and the lists of those scopes.
+  SmallVector<MDNode *, 16> DummyNodes;
+  DenseMap<const MDNode *, TrackingVH<MDNode> > MDMap;
+  for (SetVector<const MDNode *>::iterator I = MD.begin(), IE = MD.end();
+       I != IE; ++I) {
+    MDNode *Dummy = MDNode::getTemporary(CalledFunc->getContext(),
+                                         ArrayRef<Value*>());
+    DummyNodes.push_back(Dummy);
+    MDMap[*I] = Dummy;
+  }
+
+  // Create new metadata nodes to replace the dummy nodes, replacing old
+  // metadata references with either a dummy node or an already-created new
+  // node.
+  for (SetVector<const MDNode *>::iterator I = MD.begin(), IE = MD.end();
+       I != IE; ++I) {
+    SmallVector<Value *, 4> NewOps;
+    for (unsigned i = 0, ie = (*I)->getNumOperands(); i != ie; ++i) {
+      const Value *V = (*I)->getOperand(i);
+      if (const MDNode *M = dyn_cast<MDNode>(V))
+        NewOps.push_back(MDMap[M]);
+      else
+        NewOps.push_back(const_cast<Value *>(V));
+    }
+
+    MDNode *NewM = MDNode::get(CalledFunc->getContext(), NewOps),
+           *TempM = MDMap[*I];
+
+    TempM->replaceAllUsesWith(NewM);
+  }
+
+  // Now replace the metadata in the new inlined instructions with the
+  // repacements from the map.
+  for (ValueToValueMapTy::iterator VMI = VMap.begin(), VMIE = VMap.end();
+       VMI != VMIE; ++VMI) {
+    if (!VMI->second)
+      continue;
+
+    Instruction *NI = dyn_cast<Instruction>(VMI->second);
+    if (!NI)
+      continue;
+
+    if (MDNode *M = NI->getMetadata(LLVMContext::MD_alias_scope))
+      NI->setMetadata(LLVMContext::MD_alias_scope, MDMap[M]);
+
+    if (MDNode *M = NI->getMetadata(LLVMContext::MD_noalias))
+      NI->setMetadata(LLVMContext::MD_noalias, MDMap[M]);
+  }
+
+  // Now that everything has been replaced, delete the dummy nodes.
+  for (unsigned i = 0, ie = DummyNodes.size(); i != ie; ++i)
+    MDNode::deleteTemporary(DummyNodes[i]);
+}
+
+/// AddAliasScopeMetadata - If the inlined function has noalias arguments, then
+/// add new alias scopes for each noalias argument, tag the mapped noalias
+/// parameters with noalias metadata specifying the new scope, and tag all
+/// non-derived loads, stores and memory intrinsics with the new alias scopes.
+static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
+                                  const DataLayout *DL) {
+  if (!EnableNoAliasConversion)
+    return;
+
+  const Function *CalledFunc = CS.getCalledFunction();
+  SmallVector<const Argument *, 4> NoAliasArgs;
+
+  for (Function::const_arg_iterator I = CalledFunc->arg_begin(),
+       E = CalledFunc->arg_end(); I != E; ++I) {
+    if (I->hasNoAliasAttr() && !I->hasNUses(0))
+      NoAliasArgs.push_back(I);
+  }
+
+  if (NoAliasArgs.empty())
+    return;
+
+  // To do a good job, if a noalias variable is captured, we need to know if
+  // the capture point dominates the particular use we're considering.
+  DominatorTree DT;
+  DT.recalculate(const_cast<Function&>(*CalledFunc));
+
+  // noalias indicates that pointer values based on the argument do not alias
+  // pointer values which are not based on it. So we add a new "scope" for each
+  // noalias function argument. Accesses using pointers based on that argument
+  // become part of that alias scope, accesses using pointers not based on that
+  // argument are tagged as noalias with that scope.
+
+  DenseMap<const Argument *, MDNode *> NewScopes;
+  MDBuilder MDB(CalledFunc->getContext());
+
+  // Create a new scope domain for this function.
+  MDNode *NewDomain =
+    MDB.createAnonymousAliasScopeDomain(CalledFunc->getName());
+  for (unsigned i = 0, e = NoAliasArgs.size(); i != e; ++i) {
+    const Argument *A = NoAliasArgs[i];
+
+    std::string Name = CalledFunc->getName();
+    if (A->hasName()) {
+      Name += ": %";
+      Name += A->getName();
+    } else {
+      Name += ": argument ";
+      Name += utostr(i);
+    }
+
+    // Note: We always create a new anonymous root here. This is true regardless
+    // of the linkage of the callee because the aliasing "scope" is not just a
+    // property of the callee, but also all control dependencies in the caller.
+    MDNode *NewScope = MDB.createAnonymousAliasScope(NewDomain, Name);
+    NewScopes.insert(std::make_pair(A, NewScope));
+  }
+
+  // Iterate over all new instructions in the map; for all memory-access
+  // instructions, add the alias scope metadata.
+  for (ValueToValueMapTy::iterator VMI = VMap.begin(), VMIE = VMap.end();
+       VMI != VMIE; ++VMI) {
+    if (const Instruction *I = dyn_cast<Instruction>(VMI->first)) {
+      if (!VMI->second)
+        continue;
+
+      Instruction *NI = dyn_cast<Instruction>(VMI->second);
+      if (!NI)
+        continue;
+
+      SmallVector<const Value *, 2> PtrArgs;
+
+      if (const LoadInst *LI = dyn_cast<LoadInst>(I))
+        PtrArgs.push_back(LI->getPointerOperand());
+      else if (const StoreInst *SI = dyn_cast<StoreInst>(I))
+        PtrArgs.push_back(SI->getPointerOperand());
+      else if (const VAArgInst *VAAI = dyn_cast<VAArgInst>(I))
+        PtrArgs.push_back(VAAI->getPointerOperand());
+      else if (const AtomicCmpXchgInst *CXI = dyn_cast<AtomicCmpXchgInst>(I))
+        PtrArgs.push_back(CXI->getPointerOperand());
+      else if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(I))
+        PtrArgs.push_back(RMWI->getPointerOperand());
+      else if (const MemIntrinsic *MI = dyn_cast<MemIntrinsic>(I)) {
+        PtrArgs.push_back(MI->getRawDest());
+        if (const MemTransferInst *MTI = dyn_cast<MemTransferInst>(MI))
+          PtrArgs.push_back(MTI->getRawSource());
+      }
+
+      // If we found no pointers, then this instruction is not suitable for
+      // pairing with an instruction to receive aliasing metadata.
+      // Simplification during cloning could make this happen, and skip these
+      // cases for now.
+      if (PtrArgs.empty())
+        continue;
+
+      // It is possible that there is only one underlying object, but you
+      // need to go through several PHIs to see it, and thus could be
+      // repeated in the Objects list.
+      SmallPtrSet<const Value *, 4> ObjSet;
+      SmallVector<Value *, 4> Scopes, NoAliases;
+
+      SmallSetVector<const Argument *, 4> NAPtrArgs;
+      for (unsigned i = 0, ie = PtrArgs.size(); i != ie; ++i) {
+        SmallVector<Value *, 4> Objects;
+        GetUnderlyingObjects(const_cast<Value*>(PtrArgs[i]),
+                             Objects, DL, /* MaxLookup = */ 0);
+
+        for (Value *O : Objects)
+          ObjSet.insert(O);
+      }
+
+      // Figure out if we're derived from anyhing that is not a noalias
+      // argument.
+      bool CanDeriveViaCapture = false;
+      for (const Value *V : ObjSet)
+        if (!isIdentifiedFunctionLocal(const_cast<Value*>(V))) {
+          CanDeriveViaCapture = true;
+          break;
+        }
+  
+      // First, we want to figure out all of the sets with which we definitely
+      // don't alias. Iterate over all noalias set, and add those for which:
+      //   1. The noalias argument is not in the set of objects from which we
+      //      definitely derive.
+      //   2. The noalias argument has not yet been captured.
+      for (const Argument *A : NoAliasArgs) {
+        if (!ObjSet.count(A) && (!CanDeriveViaCapture ||
+                                 A->hasNoCaptureAttr() ||
+                                 !PointerMayBeCapturedBefore(A,
+                                   /* ReturnCaptures */ false,
+                                   /* StoreCaptures */ false, I, &DT)))
+          NoAliases.push_back(NewScopes[A]);
+      }
+
+      if (!NoAliases.empty())
+        NI->setMetadata(LLVMContext::MD_noalias, MDNode::concatenate(
+          NI->getMetadata(LLVMContext::MD_noalias),
+            MDNode::get(CalledFunc->getContext(), NoAliases)));
+      // Next, we want to figure out all of the sets to which we might belong.
+      // We might below to a set if:
+      //  1. The noalias argument is in the set of underlying objects
+      // or
+      //  2. There is some non-noalias argument in our list and the no-alias
+      //     argument has been captured.
+      
+      for (const Argument *A : NoAliasArgs) {
+        if (ObjSet.count(A) || (CanDeriveViaCapture &&
+                                PointerMayBeCapturedBefore(A,
+                                  /* ReturnCaptures */ false,
+                                  /* StoreCaptures */ false,
+                                  I, &DT)))
+          Scopes.push_back(NewScopes[A]);
+      }
+
+      if (!Scopes.empty())
+        NI->setMetadata(LLVMContext::MD_alias_scope, MDNode::concatenate(
+          NI->getMetadata(LLVMContext::MD_alias_scope),
+            MDNode::get(CalledFunc->getContext(), Scopes)));
+    }
+  }
 }
 
 /// UpdateCallGraphAfterInlining - Once we have cloned code over from a callee
@@ -466,7 +736,13 @@ static void fixupLineNumbers(Function *Fn, Function::iterator FI,
     for (BasicBlock::iterator BI = FI->begin(), BE = FI->end();
          BI != BE; ++BI) {
       DebugLoc DL = BI->getDebugLoc();
-      if (!DL.isUnknown()) {
+      if (DL.isUnknown()) {
+        // If the inlined instruction has no line number, make it look as if it
+        // originates from the call location. This is important for
+        // ((__always_inline__, __nodebug__)) functions which must use caller
+        // location for all instructions in their function body.
+        BI->setDebugLoc(TheCallDL);
+      } else {
         BI->setDebugLoc(updateInlinedAtInfo(DL, TheCallDL, BI->getContext()));
         if (DbgValueInst *DVI = dyn_cast<DbgValueInst>(BI)) {
           LLVMContext &Ctx = BI->getContext();
@@ -641,6 +917,12 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
 
     // Update inlined instructions' line number information.
     fixupLineNumbers(Caller, FirstNewBlock, TheCall);
+
+    // Clone existing noalias metadata if necessary.
+    CloneAliasScopeMetadata(CS, VMap);
+
+    // Add noalias metadata if necessary.
+    AddAliasScopeMetadata(CS, VMap, IFI.DL);
   }
 
   // If there are any alloca instructions in the block that used to be the entry

@@ -12,11 +12,10 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 #include <utility> // for std::pair
 
 namespace llvm {
-
 /// \brief Class that manages the creation of a lock file to aid
 /// implicit coordination between different processes.
 ///
@@ -56,7 +55,7 @@ private:
   SmallString<128> UniqueLockFileName;
 
   Optional<std::pair<std::string, int> > Owner;
-  Optional<error_code> Error;
+  Optional<std::error_code> Error;
 
   LockFileManager(const LockFileManager &) LLVM_DELETED_FUNCTION;
   LockFileManager &operator=(const LockFileManager &) LLVM_DELETED_FUNCTION;

@@ -72,25 +72,21 @@ class DbgVariable {
   DIVariable Var;             // Variable Descriptor.
   DIE *TheDIE;                // Variable DIE.
   unsigned DotDebugLocOffset; // Offset in DotDebugLocEntries.
-  DbgVariable *AbsVar;        // Corresponding Abstract variable, if any.
   const MachineInstr *MInsn;  // DBG_VALUE instruction of the variable.
   int FrameIndex;
   DwarfDebug *DD;
 
 public:
   /// Construct a DbgVariable from a DIVariable.
-  /// AbstractVar may be NULL.
-  DbgVariable(DIVariable V, DbgVariable *AbstractVar, DwarfDebug *DD)
-      : Var(V), TheDIE(nullptr), DotDebugLocOffset(~0U), AbsVar(AbstractVar),
-        MInsn(nullptr), FrameIndex(~0), DD(DD) {}
+  DbgVariable(DIVariable V, DwarfDebug *DD)
+      : Var(V), TheDIE(nullptr), DotDebugLocOffset(~0U), MInsn(nullptr),
+        FrameIndex(~0), DD(DD) {}
 
   /// Construct a DbgVariable from a DEBUG_VALUE.
   /// AbstractVar may be NULL.
-  DbgVariable(const MachineInstr *DbgValue, DbgVariable *AbstractVar,
-              DwarfDebug *DD)
-    : Var(DbgValue->getDebugVariable()),
-      TheDIE(nullptr), DotDebugLocOffset(~0U), AbsVar(AbstractVar),
-      MInsn(DbgValue), FrameIndex(~0), DD(DD) {}
+  DbgVariable(const MachineInstr *DbgValue, DwarfDebug *DD)
+      : Var(DbgValue->getDebugVariable()), TheDIE(nullptr),
+        DotDebugLocOffset(~0U), MInsn(DbgValue), FrameIndex(~0), DD(DD) {}
 
   // Accessors.
   DIVariable getVariable() const { return Var; }
@@ -99,7 +95,6 @@ public:
   void setDotDebugLocOffset(unsigned O) { DotDebugLocOffset = O; }
   unsigned getDotDebugLocOffset() const { return DotDebugLocOffset; }
   StringRef getName() const { return Var.getName(); }
-  DbgVariable *getAbstractVariable() const { return AbsVar; }
   const MachineInstr *getMInsn() const { return MInsn; }
   int getFrameIndex() const { return FrameIndex; }
   void setFrameIndex(int FI) { FrameIndex = FI; }
@@ -209,6 +204,7 @@ class DwarfDebug : public AsmPrinterHandler {
 
   // Collection of abstract variables.
   DenseMap<const MDNode *, std::unique_ptr<DbgVariable>> AbstractVariables;
+  SmallVector<std::unique_ptr<DbgVariable>, 64> ConcreteVariables;
 
   // Collection of DebugLocEntry. Stored in a linked list so that DIELocLists
   // can refer to them in spite of insertions into this list.
@@ -262,6 +258,7 @@ class DwarfDebug : public AsmPrinterHandler {
   MCSymbol *DwarfDebugLocSectionSym, *DwarfLineSectionSym, *DwarfAddrSectionSym;
   MCSymbol *FunctionBeginSym, *FunctionEndSym;
   MCSymbol *DwarfInfoDWOSectionSym, *DwarfAbbrevDWOSectionSym;
+  MCSymbol *DwarfTypesDWOSectionSym;
   MCSymbol *DwarfStrDWOSectionSym;
   MCSymbol *DwarfGnuPubNamesSectionSym, *DwarfGnuPubTypesSectionSym;
 
@@ -334,6 +331,8 @@ class DwarfDebug : public AsmPrinterHandler {
   DwarfAccelTable AccelNamespace;
   DwarfAccelTable AccelTypes;
 
+  DenseMap<const Function *, DISubprogram> FunctionDIs;
+
   MCDwarfDwoLineTable *getDwoLineTable(const DwarfCompileUnit &);
 
   void addScopeVariable(LexicalScope *LS, DbgVariable *Var);
@@ -343,8 +342,14 @@ class DwarfDebug : public AsmPrinterHandler {
   }
 
   /// \brief Find abstract variable associated with Var.
-  DbgVariable *findAbstractVariable(DIVariable &Var, DebugLoc Loc);
-  DbgVariable *findAbstractVariable(DIVariable &Var, const MDNode *Scope);
+  DbgVariable *getExistingAbstractVariable(const DIVariable &DV,
+                                           DIVariable &Cleansed);
+  DbgVariable *getExistingAbstractVariable(const DIVariable &DV);
+  void createAbstractVariable(const DIVariable &DV, LexicalScope *Scope);
+  void ensureAbstractVariableIsCreated(const DIVariable &Var,
+                                       const MDNode *Scope);
+  void ensureAbstractVariableIsCreatedIfScoped(const DIVariable &Var,
+                                               const MDNode *Scope);
 
   /// \brief Find DIE for the given subprogram and attach appropriate
   /// DW_AT_low_pc and DW_AT_high_pc attributes. If there are global
@@ -397,6 +402,8 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Collect info for variables that were optimized out.
   void collectDeadVariables();
+
+  void finishVariableDefinitions();
 
   void finishSubprogramDefinitions();
 

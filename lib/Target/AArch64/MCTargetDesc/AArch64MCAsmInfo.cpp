@@ -13,8 +13,8 @@
 
 #include "AArch64MCAsmInfo.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/CommandLine.h"
 using namespace llvm;
@@ -66,7 +66,7 @@ const MCExpr *AArch64MCAsmInfoDarwin::getExprForPersonalitySymbol(
 
 AArch64MCAsmInfoELF::AArch64MCAsmInfoELF(StringRef TT) {
   Triple T(TT);
-  if (T.getArch() == Triple::arm64_be || T.getArch() == Triple::aarch64_be)
+  if (T.getArch() == Triple::aarch64_be)
     IsLittleEndian = false;
 
   // We prefer NEON instructions to be printed in the short form.
@@ -96,4 +96,6 @@ AArch64MCAsmInfoELF::AArch64MCAsmInfoELF(StringRef TT) {
   ExceptionsType = ExceptionHandling::DwarfCFI;
 
   UseIntegratedAssembler = true;
+
+  HasIdentDirective = true;
 }

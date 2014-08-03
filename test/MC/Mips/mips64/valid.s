@@ -9,8 +9,21 @@
         add.d     $f1,$f7,$f29
         add.s     $f8,$f21,$f24
         addi      $13,$9,26322
+        addi      $8,$8,~1             # CHECK: addi $8, $8, -2 # encoding: [0x21,0x08,0xff,0xfe]
         addu      $9,$a0,$a2
         and       $s7,$v0,$12
+        and       $2,4                 # CHECK: andi $2, $2, 4 # encoding: [0x30,0x42,0x00,0x04]
+        bc1f      $fcc0, 4             # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
+        bc1f      $fcc1, 4             # CHECK: bc1f $fcc1, 4 # encoding: [0x45,0x04,0x00,0x01]
+        bc1f      4                    # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
+        bc1t      $fcc0, 4             # CHECK: bc1t 4        # encoding: [0x45,0x01,0x00,0x01]
+        bc1t      $fcc1, 4             # CHECK: bc1t $fcc1, 4 # encoding: [0x45,0x05,0x00,0x01]
+        bc1t      4                    # CHECK: bc1t 4        # encoding: [0x45,0x01,0x00,0x01]
+        bal       21100                # CHECK: bal 21100     # encoding: [0x04,0x11,0x14,0x9b]
+        bgezal    $0, 21100            # CHECK: bal 21100     # encoding: [0x04,0x11,0x14,0x9b]
+        bgezal    $6, 21100            # CHECK: bgezal $6, 21100 # encoding: [0x04,0xd1,0x14,0x9b]
+        bltzal    $6, 21100            # CHECK: bltzal $6, 21100 # encoding: [0x04,0xd0,0x14,0x9b]
+        cache     1, 8($5)             # CHECK: cache 1, 8($5)   # encoding: [0xbc,0xa1,0x00,0x08]
         c.ngl.d   $f29,$f29
         c.ngle.d  $f0,$f16
         c.sf.d    $f30,$f0
@@ -20,8 +33,8 @@
         ceil.w.d  $f11,$f25
         ceil.w.s  $f6,$f20
         cfc1      $s1,$21
-        clo       $11,$a1
-        clz       $sp,$gp
+        clo       $11,$a1              # CHECK: clo $11, $5   # encoding: [0x70,0xab,0x58,0x21]
+        clz       $sp,$gp              # CHECK: clz $sp, $gp  # encoding: [0x73,0x9d,0xe8,0x20]
         ctc1      $a2,$26
         cvt.d.l   $f4,$f16
         cvt.d.s   $f22,$f28
@@ -34,11 +47,15 @@
         cvt.w.d   $f20,$f14
         cvt.w.s   $f20,$f24
         dadd      $s3,$at,$ra
+        dadd      $sp,$s4,-27705       # CHECK: daddi $sp, $20, -27705 # encoding: [0x62,0x9d,0x93,0xc7]
+        dadd      $sp,-27705           # CHECK: daddi $sp, $sp, -27705 # encoding: [0x63,0xbd,0x93,0xc7]
         daddi     $sp,$s4,-27705
+        daddi     $sp,$s4,-27705       # CHECK: daddi $sp, $20, -27705 # encoding: [0x62,0x9d,0x93,0xc7]
+        daddi     $sp,-27705           # CHECK: daddi $sp, $sp, -27705 # encoding: [0x63,0xbd,0x93,0xc7]
         daddiu    $k0,$s6,-4586
         daddu     $s3,$at,$ra
-        dclo      $s2,$a2
-        dclz      $s0,$25
+        dclo      $s2,$a2              # CHECK: dclo $18, $6   # encoding: [0x70,0xd2,0x90,0x25]
+        dclz      $s0,$25              # CHECK: dclz $16, $25  # encoding: [0x73,0x30,0x80,0x24]
         deret
         ddiv      $zero,$k0,$s3
         ddivu     $zero,$s0,$s1
@@ -69,8 +86,10 @@
         dsrl32    $s3,$6,23            # CHECK: dsrl32 $19, $6, 23          # encoding: [0x00,0x06,0x9d,0xfe]
         dsrlv     $s3,$6,$s4           # CHECK: dsrlv $19, $6, $20          # encoding: [0x02,0x86,0x98,0x16]
         dsub      $a3,$s6,$8
-        dsubu     $a1,$a1,$k0
-        dsub      $a3,$s6,$8
+        dsub      $sp,$s4,-27705       # CHECK: daddi $sp, $20, 27705  # encoding: [0x62,0x9d,0x6c,0x39]
+        dsub      $sp,-27705           # CHECK: daddi $sp, $sp, 27705  # encoding: [0x63,0xbd,0x6c,0x39]
+        dsubi     $sp,$s4,-27705       # CHECK: daddi $sp, $20, 27705  # encoding: [0x62,0x9d,0x6c,0x39]
+        dsubi     $sp,-27705           # CHECK: daddi $sp, $sp, 27705  # encoding: [0x63,0xbd,0x6c,0x39]
         dsubu     $a1,$a1,$k0
         ehb                            # CHECK: ehb # encoding:  [0x00,0x00,0x00,0xc0]
         eret
@@ -82,7 +101,7 @@
         lbu       $8,30195($v1)
         ld        $sp,-28645($s1)
         ldc1      $f11,16391($s0)
-        ldc2      $8,-21181($at)
+        ldc2      $8,-21181($at)        # CHECK: ldc2 $8, -21181($1)   # encoding: [0xd8,0x28,0xad,0x43]
         ldl       $24,-4167($24)
         ldr       $14,-30358($s4)
         ldxc1     $f8,$s7($15)
@@ -90,12 +109,12 @@
         lhu       $s3,-22851($v0)
         li        $at,-29773
         li        $zero,-29889
-        ll        $v0,-7321($s2)
-        lld       $zero,-14736($ra)
+        ll        $v0,-7321($s2)       # CHECK: ll $2, -7321($18)     # encoding: [0xc2,0x42,0xe3,0x67]
+        lld       $zero,-14736($ra)    # CHECK: lld $zero, -14736($ra) # encoding: [0xd3,0xe0,0xc6,0x70]
         luxc1     $f19,$s6($s5)
         lw        $8,5674($a1)
         lwc1      $f16,10225($k0)
-        lwc2      $18,-841($a2)
+        lwc2      $18,-841($a2)        # CHECK: lwc2 $18, -841($6)     # encoding: [0xc8,0xd2,0xfc,0xb7]
         lwl       $s4,-4231($15)
         lwr       $zero,-19147($gp)
         lwu       $s3,-24086($v1)
@@ -148,16 +167,20 @@
         nop
         nor       $a3,$zero,$a3
         or        $12,$s0,$sp
+        or        $2, 4                # CHECK: ori $2, $2, 4          # encoding: [0x34,0x42,0x00,0x04]
+        pref      1, 8($5)             # CHECK: pref 1, 8($5)          # encoding: [0xcc,0xa1,0x00,0x08]
         round.l.d $f12,$f1
         round.l.s $f25,$f5
         round.w.d $f6,$f4
         round.w.s $f27,$f28
         sb        $s6,-19857($14)
-        sc        $15,18904($s3)
-        scd       $15,-8243($sp)
+        sc        $15,18904($s3)       # CHECK: sc $15, 18904($19)     # encoding: [0xe2,0x6f,0x49,0xd8]
+        scd       $15,-8243($sp)       # CHECK: scd $15, -8243($sp)    # encoding: [0xf3,0xaf,0xdf,0xcd]
+        sdbbp                          # CHECK: sdbbp                  # encoding: [0x70,0x00,0x00,0x3f]
+        sdbbp     34                   # CHECK: sdbbp 34               # encoding: [0x70,0x00,0x08,0xbf]
         sd        $12,5835($10)
         sdc1      $f31,30574($13)
-        sdc2      $20,23157($s2)
+        sdc2      $20,23157($s2)       # CHECK: sdc2 $20, 23157($18)   # encoding: [0xfa,0x54,0x5a,0x75]
         sdl       $a3,-20961($s8)
         sdr       $11,-20423($12)
         sdxc1     $f11,$10($14)
@@ -189,10 +212,12 @@
         suxc1     $f12,$k1($13)
         sw        $ra,-10160($sp)
         swc1      $f6,-8465($24)
-        swc2      $25,24880($s0)
+        swc2      $25,24880($s0)       # CHECK: swc2 $25, 24880($16)   # encoding: [0xea,0x19,0x61,0x30]
         swl       $15,13694($s3)
         swr       $s1,-26590($14)
         swxc1     $f19,$12($k0)
+        sync                           # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
+        sync      1                    # CHECK: sync 1                 # encoding: [0x00,0x00,0x00,0x4f]
         teqi      $s5,-17504
         tgei      $s1,5025
         tgeiu     $sp,-28621

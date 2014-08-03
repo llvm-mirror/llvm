@@ -651,7 +651,7 @@ define void @VACopy(i8* %p1, i8* %p2) nounwind uwtable sanitize_memory {
 declare void @llvm.va_start(i8*) nounwind
 
 ; Function Attrs: nounwind uwtable
-define void @VAStart(i32 %x, ...) {
+define void @VAStart(i32 %x, ...) sanitize_memory {
 entry:
   %x.addr = alloca i32, align 4
   %va = alloca [1 x %struct.__va_list_tag], align 16
@@ -683,7 +683,7 @@ entry:
 ; CHECK: ret void
 
 
-; Test that checks are omitted but shadow propagation is kept if
+; Test that checks are omitted and returned value is always initialized if
 ; sanitize_memory attribute is missing.
 
 define i32 @NoSanitizeMemory(i32 %x) uwtable {
@@ -703,9 +703,7 @@ declare void @bar()
 
 ; CHECK: @NoSanitizeMemory
 ; CHECK-NOT: @__msan_warning
-; CHECK: load i32* {{.*}} @__msan_param_tls
-; CHECK-NOT: @__msan_warning
-; CHECK: store {{.*}} @__msan_retval_tls
+; CHECK: store i32 0, {{.*}} @__msan_retval_tls
 ; CHECK-NOT: @__msan_warning
 ; CHECK: ret i32
 
@@ -742,6 +740,47 @@ declare i32 @NoSanitizeMemoryUndefHelper(i32 %x)
 ; CHECK: @NoSanitizeMemoryAlloca
 ; CHECK: store i32 0, i32* {{.*}} @__msan_param_tls
 ; CHECK: call i32 @NoSanitizeMemoryUndefHelper(i32 undef)
+; CHECK: ret i32
+
+
+; Test PHINode instrumentation in blacklisted functions
+
+define i32 @NoSanitizeMemoryPHI(i32 %x) {
+entry:
+  %tobool = icmp ne i32 %x, 0
+  br i1 %tobool, label %cond.true, label %cond.false
+
+cond.true:                                        ; preds = %entry
+  br label %cond.end
+
+cond.false:                                       ; preds = %entry
+  br label %cond.end
+
+cond.end:                                         ; preds = %cond.false, %cond.true
+  %cond = phi i32 [ undef, %cond.true ], [ undef, %cond.false ]
+  ret i32 %cond
+}
+
+; CHECK: [[A:%.*]] = phi i32 [ undef, %cond.true ], [ undef, %cond.false ]
+; CHECK: store i32 0, i32* bitcast {{.*}} @__msan_retval_tls
+; CHECK: ret i32 [[A]]
+
+
+; Test that there are no __msan_param_origin_tls stores when
+; argument shadow is a compile-time zero constant (which is always the case
+; in functions missing sanitize_memory attribute).
+
+define i32 @NoSanitizeMemoryParamTLS(i32* nocapture readonly %x) {
+entry:
+  %0 = load i32* %x, align 4
+  %call = tail call i32 @NoSanitizeMemoryParamTLSHelper(i32 %0)
+  ret i32 %call
+}
+
+declare i32 @NoSanitizeMemoryParamTLSHelper(i32 %x)
+
+; CHECK-LABEL: define i32 @NoSanitizeMemoryParamTLS(
+; CHECK-NOT: __msan_param_origin_tls
 ; CHECK: ret i32
 
 
@@ -824,4 +863,18 @@ entry:
 ; CHECK: call void @llvm.memcpy.p0i8.p0i8.i64
 ; CHECK: store i64 16, i64* @__msan_va_arg_overflow_size_tls
 ; CHECK: call void (i32, ...)* @VAArgStructFn
+; CHECK: ret void
+
+declare i32 @InnerTailCall(i32 %a)
+
+define void @MismatchedReturnTypeTailCall(i32 %a) sanitize_memory {
+  %b = tail call i32 @InnerTailCall(i32 %a)
+  ret void
+}
+
+; We used to strip off the 'tail' modifier, but now that we unpoison return slot
+; shadow before the call, we don't need to anymore.
+
+; CHECK-LABEL: define void @MismatchedReturnTypeTailCall
+; CHECK: tail call i32 @InnerTailCall
 ; CHECK: ret void

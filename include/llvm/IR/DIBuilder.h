@@ -38,7 +38,6 @@ namespace llvm {
   class DIFile;
   class DIEnumerator;
   class DIType;
-  class DIArray;
   class DIGlobalVariable;
   class DIImportedEntity;
   class DINameSpace;
@@ -108,12 +107,23 @@ namespace llvm {
     ///                 Objective-C.
     /// @param SplitName The name of the file that we'll split debug info out
     ///                  into.
+    /// @param Kind     The kind of debug information to generate.
+    /// @param EmitDebugInfo   A boolean flag which indicates whether debug
+    ///                        information should be written to the final
+    ///                        output or not. When this is false, debug
+    ///                        information annotations will be present in
+    ///                        the IL but they are not written to the final
+    ///                        assembly or object file. This supports tracking
+    ///                        source location information in the back end
+    ///                        without actually changing the output (e.g.,
+    ///                        when using optimization remarks).
     DICompileUnit createCompileUnit(unsigned Lang, StringRef File,
                                     StringRef Dir, StringRef Producer,
                                     bool isOptimized, StringRef Flags,
                                     unsigned RV,
                                     StringRef SplitName = StringRef(),
-                                    DebugEmissionKind Kind = FullDebug);
+                                    DebugEmissionKind Kind = FullDebug,
+                                    bool EmitDebugInfo = true);
 
     /// createFile - Create a file descriptor to hold debugging information
     /// for a file.
@@ -424,8 +434,9 @@ namespace llvm {
     ///                        includes return type at 0th index.
     /// @param Flags           E.g.: LValueReference.
     ///                        These flags are used to emit dwarf attributes.
-    DICompositeType createSubroutineType(DIFile File, DIArray ParameterTypes,
-                                         unsigned Flags = 0);
+    DISubroutineType createSubroutineType(DIFile File,
+                                          DITypeArray ParameterTypes,
+                                          unsigned Flags = 0);
 
     /// createArtificialType - Create a new DIType with "artificial" flag set.
     DIType createArtificialType(DIType Ty);
@@ -452,12 +463,15 @@ namespace llvm {
     /// through debug info anchors.
     void retainType(DIType T);
 
-    /// createUnspecifiedParameter - Create unspecified type descriptor
+    /// createUnspecifiedParameter - Create unspecified parameter type
     /// for a subroutine type.
-    DIDescriptor createUnspecifiedParameter();
+    DIBasicType createUnspecifiedParameter();
 
     /// getOrCreateArray - Get a DIArray, create one if required.
     DIArray getOrCreateArray(ArrayRef<Value *> Elements);
+
+    /// getOrCreateTypeArray - Get a DITypeArray, create one if required.
+    DITypeArray getOrCreateTypeArray(ArrayRef<Value *> Elements);
 
     /// getOrCreateSubrange - Create a descriptor for a value range.  This
     /// implicitly uniques the values returned.

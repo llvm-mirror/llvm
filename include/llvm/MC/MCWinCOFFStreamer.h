@@ -35,7 +35,6 @@ public:
 
   void InitSections() override;
   void EmitLabel(MCSymbol *Symbol) override;
-  void EmitDebugLabel(MCSymbol *Symbol) override;
   void EmitAssemblerFlag(MCAssemblerFlag Flag) override;
   void EmitThumbFunc(MCSymbol *Func) override;
   bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) override;
@@ -57,7 +56,7 @@ public:
                       unsigned ByteAlignment) override;
   void EmitFileDirective(StringRef Filename) override;
   void EmitIdent(StringRef IdentString) override;
-  void EmitWin64EHHandlerData() override;
+  void EmitWinEHHandlerData() override;
   void FinishImpl() override;
 
   /// \}

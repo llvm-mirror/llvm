@@ -32,10 +32,10 @@ dnl===-----------------------------------------------------------------------===
 dnl Initialize autoconf and define the package name, version number and
 dnl address for reporting bugs.
 
-AC_INIT([LLVM],[3.5.0svn],[http://llvm.org/bugs/])
+AC_INIT([LLVM],[3.6.0svn],[http://llvm.org/bugs/])
 
 LLVM_VERSION_MAJOR=3
-LLVM_VERSION_MINOR=5
+LLVM_VERSION_MINOR=6
 LLVM_VERSION_PATCH=0
 LLVM_VERSION_SUFFIX=svn
 
@@ -673,26 +673,6 @@ case "$enableval" in
     ;;
   default) AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[1]);;
   *) AC_MSG_ERROR([Invalid setting for --enable-clang-static-analyzer. Use "yes" or "no"]) ;;
-esac
-
-dnl --enable-clang-rewriter: check whether to enable clang rewriter
-AC_ARG_ENABLE(clang-rewriter,
-              AS_HELP_STRING([--enable-clang-rewriter],
-                             [Enable building of clang rewriter (default is YES)]),,
-                             enableval="yes")
-case "$enableval" in
-  yes) AC_SUBST(ENABLE_CLANG_REWRITER,[1]) ;;
-  no)  
-    if test ${clang_arcmt} != "no" ; then
-      AC_MSG_ERROR([Cannot enable clang ARC Migration Tool while disabling rewriter.])
-    fi
-    if test ${clang_static_analyzer} != "no" ; then
-      AC_MSG_ERROR([Cannot enable clang static analyzer while disabling rewriter.])
-    fi
-    AC_SUBST(ENABLE_CLANG_REWRITER,[0]) 
-    ;;
-  default) AC_SUBST(ENABLE_CLANG_REWRITER,[1]);;
-  *) AC_MSG_ERROR([Invalid setting for --enable-clang-rewriter. Use "yes" or "no"]) ;;
 esac
 
 dnl --enable-optimized : check whether they want to do an optimized build:
@@ -1516,25 +1496,6 @@ dnl zlib is optional; used for compression/uncompression
 if test "$LLVM_ENABLE_ZLIB" -eq 1 ; then
   AC_CHECK_LIB(z, compress2)
 fi
-
-dnl Allow extra x86-disassembler library
-AC_ARG_WITH(udis86,
-  AS_HELP_STRING([--with-udis86=<path>],
-    [Use udis86 external x86 disassembler library]),
-    [
-      AC_SUBST(USE_UDIS86, [1])
-      case "$withval" in
-        /usr/lib|yes) ;;
-        *) LDFLAGS="$LDFLAGS -L${withval}" ;;
-      esac
-      AC_CHECK_LIB(udis86, ud_init, [], [
-        echo "Error! You need to have libudis86 around."
-        exit -1
-      ])
-    ],
-    AC_SUBST(USE_UDIS86, [0]))
-AC_DEFINE_UNQUOTED([USE_UDIS86],$USE_UDIS86,
-                   [Define if use udis86 library])
 
 dnl Allow OProfile support for JIT output.
 AC_ARG_WITH(oprofile,

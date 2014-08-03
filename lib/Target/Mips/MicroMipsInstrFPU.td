@@ -24,13 +24,13 @@ def LDC1_MM : MMRel, LW_FT<"ldc1", AFGR64Opnd, II_LDC1, load>, LW_FM_MM<0x2f>;
 def SDC1_MM : MMRel, SW_FT<"sdc1", AFGR64Opnd, II_SDC1, store>,
               LW_FM_MM<0x2e>;
 def LWXC1_MM : MMRel, LWXC1_FT<"lwxc1", FGR32Opnd, II_LWXC1, load>,
-               LWXC1_FM_MM<0x48>;
+               LWXC1_FM_MM<0x48>, INSN_MIPS4_32R2_NOT_32R6_64R6;
 def SWXC1_MM : MMRel, SWXC1_FT<"swxc1", FGR32Opnd, II_SWXC1, store>,
-               SWXC1_FM_MM<0x88>;
+               SWXC1_FM_MM<0x88>, INSN_MIPS4_32R2_NOT_32R6_64R6;
 def LUXC1_MM : MMRel, LWXC1_FT<"luxc1", AFGR64Opnd, II_LUXC1>,
-               LWXC1_FM_MM<0x148>, INSN_MIPS5_32R2;
+               LWXC1_FM_MM<0x148>, INSN_MIPS5_32R2_NOT_32R6_64R6;
 def SUXC1_MM : MMRel, SWXC1_FT<"suxc1", AFGR64Opnd, II_SUXC1>,
-               SWXC1_FM_MM<0x188>, INSN_MIPS5_32R2;
+               SWXC1_FM_MM<0x188>, INSN_MIPS5_32R2_NOT_32R6_64R6;
 
 def FCMP_S32_MM : MMRel, CEQS_FT<"s", FGR32, II_C_CC_S, MipsFPCmp>,
                   CEQS_FM_MM<0>;
@@ -38,9 +38,9 @@ def FCMP_D32_MM : MMRel, CEQS_FT<"d", AFGR64, II_C_CC_D, MipsFPCmp>,
                   CEQS_FM_MM<1>;
 
 def BC1F_MM : MMRel, BC1F_FT<"bc1f", brtarget_mm, IIBranch, MIPS_BRANCH_F>,
-              BC1F_FM_MM<0x1c>;
+              BC1F_FM_MM<0x1c>, ISA_MIPS1_NOT_32R6_64R6;
 def BC1T_MM : MMRel, BC1F_FT<"bc1t", brtarget_mm, IIBranch, MIPS_BRANCH_T>,
-              BC1F_FM_MM<0x1d>;
+              BC1F_FM_MM<0x1d>, ISA_MIPS1_NOT_32R6_64R6;
 
 def CEIL_W_S_MM  : MMRel, ABSS_FT<"ceil.w.s", FGR32Opnd, FGR32Opnd, II_CEIL>,
                    ROUND_W_FM_MM<0, 0x6c>;

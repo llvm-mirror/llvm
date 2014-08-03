@@ -9,15 +9,15 @@
 
 #include "MCTargetDesc/AArch64FixupKinds.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
-#include "llvm/MC/MCAssembler.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmLayout.h"
+#include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCMachObjectWriter.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCValue.h"
-#include "llvm/ADT/Twine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MachO.h"
 using namespace llvm;
@@ -75,7 +75,7 @@ bool AArch64MachObjectWriter::getAArch64FixupKindMachOInfo(
     Log2Size = llvm::Log2_32(4);
     switch (Sym->getKind()) {
     default:
-      assert(0 && "Unexpected symbol reference variant kind!");
+      llvm_unreachable("Unexpected symbol reference variant kind!");
     case MCSymbolRefExpr::VK_PAGEOFF:
       RelocType = unsigned(MachO::ARM64_RELOC_PAGEOFF12);
       return true;

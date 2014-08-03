@@ -12,14 +12,24 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARMSubtarget.h"
-#include "ARMBaseInstrInfo.h"
-#include "ARMBaseRegisterInfo.h"
+#include "ARMFrameLowering.h"
+#include "ARMISelLowering.h"
+#include "ARMInstrInfo.h"
+#include "ARMJITInfo.h"
+#include "ARMSelectionDAGInfo.h"
+#include "ARMSubtarget.h"
+#include "ARMMachineFunctionInfo.h"
+#include "Thumb1FrameLowering.h"
+#include "Thumb1InstrInfo.h"
+#include "Thumb2InstrInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 
 using namespace llvm;
 
@@ -76,21 +86,88 @@ IT(cl::desc("IT block support"), cl::Hidden, cl::init(DefaultIT),
                          "Allow IT blocks based on ARMv7"),
               clEnumValEnd));
 
-ARMSubtarget::ARMSubtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, bool IsLittle,
-                           const TargetOptions &Options)
-  : ARMGenSubtargetInfo(TT, CPU, FS)
-  , ARMProcFamily(Others)
-  , ARMProcClass(None)
-  , stackAlignment(4)
-  , CPUString(CPU)
-  , IsLittle(IsLittle)
-  , TargetTriple(TT)
-  , Options(Options)
-  , TargetABI(ARM_ABI_UNKNOWN) {
+static std::string computeDataLayout(ARMSubtarget &ST) {
+  std::string Ret = "";
+
+  if (ST.isLittle())
+    // Little endian.
+    Ret += "e";
+  else
+    // Big endian.
+    Ret += "E";
+
+  Ret += DataLayout::getManglingComponent(ST.getTargetTriple());
+
+  // Pointers are 32 bits and aligned to 32 bits.
+  Ret += "-p:32:32";
+
+  // On thumb, i16,i18 and i1 have natural aligment requirements, but we try to
+  // align to 32.
+  if (ST.isThumb())
+    Ret += "-i1:8:32-i8:8:32-i16:16:32";
+
+  // ABIs other than APCS have 64 bit integers with natural alignment.
+  if (!ST.isAPCS_ABI())
+    Ret += "-i64:64";
+
+  // We have 64 bits floats. The APCS ABI requires them to be aligned to 32
+  // bits, others to 64 bits. We always try to align to 64 bits.
+  if (ST.isAPCS_ABI())
+    Ret += "-f64:32:64";
+
+  // We have 128 and 64 bit vectors. The APCS ABI aligns them to 32 bits, others
+  // to 64. We always ty to give them natural alignment.
+  if (ST.isAPCS_ABI())
+    Ret += "-v64:32:64-v128:32:128";
+  else
+    Ret += "-v128:64:128";
+
+  // On thumb and APCS, only try to align aggregates to 32 bits (the default is
+  // 64 bits).
+  if (ST.isThumb() || ST.isAPCS_ABI())
+    Ret += "-a:0:32";
+
+  // Integer registers are 32 bits.
+  Ret += "-n32";
+
+  // The stack is 128 bit aligned on NaCl, 64 bit aligned on AAPCS and 32 bit
+  // aligned everywhere else.
+  if (ST.isTargetNaCl())
+    Ret += "-S128";
+  else if (ST.isAAPCS_ABI())
+    Ret += "-S64";
+  else
+    Ret += "-S32";
+
+  return Ret;
+}
+
+/// initializeSubtargetDependencies - Initializes using a CPU and feature string
+/// so that we can use initializer lists for subtarget initialization.
+ARMSubtarget &ARMSubtarget::initializeSubtargetDependencies(StringRef CPU,
+                                                            StringRef FS) {
   initializeEnvironment();
   resetSubtargetFeatures(CPU, FS);
+  return *this;
 }
+
+ARMSubtarget::ARMSubtarget(const std::string &TT, const std::string &CPU,
+                           const std::string &FS, TargetMachine &TM,
+                           bool IsLittle, const TargetOptions &Options)
+    : ARMGenSubtargetInfo(TT, CPU, FS), ARMProcFamily(Others),
+      ARMProcClass(None), stackAlignment(4), CPUString(CPU), IsLittle(IsLittle),
+      TargetTriple(TT), Options(Options), TargetABI(ARM_ABI_UNKNOWN),
+      DL(computeDataLayout(initializeSubtargetDependencies(CPU, FS))),
+      TSInfo(DL), JITInfo(),
+      InstrInfo(isThumb1Only()
+                    ? (ARMBaseInstrInfo *)new Thumb1InstrInfo(*this)
+                    : !isThumb()
+                          ? (ARMBaseInstrInfo *)new ARMInstrInfo(*this)
+                          : (ARMBaseInstrInfo *)new Thumb2InstrInfo(*this)),
+      TLInfo(TM),
+      FrameLowering(!isThumb1Only()
+                        ? new ARMFrameLowering(*this)
+                        : (ARMFrameLowering *)new Thumb1FrameLowering(*this)) {}
 
 void ARMSubtarget::initializeEnvironment() {
   HasV4TOps = false;
@@ -106,7 +183,6 @@ void ARMSubtarget::initializeEnvironment() {
   HasVFPv4 = false;
   HasFPARMv8 = false;
   HasNEON = false;
-  MinSize = false;
   UseNEONForSinglePrecisionFP = false;
   UseMulOps = UseFusedMulOps;
   SlowFPVMLx = false;
@@ -115,7 +191,6 @@ void ARMSubtarget::initializeEnvironment() {
   InThumbMode = false;
   HasThumb2 = false;
   NoARM = false;
-  PostRAScheduler = false;
   IsR9Reserved = ReserveR9;
   UseMovt = false;
   SupportsTailCall = false;
@@ -157,9 +232,6 @@ void ARMSubtarget::resetSubtargetFeatures(const MachineFunction *MF) {
     initializeEnvironment();
     resetSubtargetFeatures(CPU, FS);
   }
-
-  MinSize =
-      FnAttrs.hasAttribute(AttributeSet::FunctionIndex, Attribute::MinSize);
 }
 
 void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
@@ -234,9 +306,6 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
     IsR9Reserved = ReserveR9;
     SupportsTailCall = !isThumb1Only();
   }
-
-  if (!isThumb() || hasThumb2())
-    PostRAScheduler = true;
 
   switch (Align) {
     case DefaultAlign:
@@ -352,10 +421,20 @@ bool ARMSubtarget::hasSinCos() const {
     !getTargetTriple().isOSVersionLT(7, 0);
 }
 
-bool ARMSubtarget::enablePostRAScheduler(
-           CodeGenOpt::Level OptLevel,
-           TargetSubtargetInfo::AntiDepBreakMode& Mode,
-           RegClassVector& CriticalPathRCs) const {
-  Mode = TargetSubtargetInfo::ANTIDEP_NONE;
-  return PostRAScheduler && OptLevel >= CodeGenOpt::Default;
+// This overrides the PostRAScheduler bit in the SchedModel for any CPU.
+bool ARMSubtarget::enablePostMachineScheduler() const {
+  return (!isThumb() || hasThumb2());
+}
+
+bool ARMSubtarget::enableAtomicExpandLoadLinked() const {
+  return hasAnyDataBarrier() && !isThumb1Only();
+}
+
+bool ARMSubtarget::useMovt(const MachineFunction &MF) const {
+  // NOTE Windows on ARM needs to use mov.w/mov.t pairs to materialise 32-bit
+  // immediates as it is inherently position independent, and may be out of
+  // range otherwise.
+  return UseMovt && (isTargetWindows() ||
+                     !MF.getFunction()->getAttributes().hasAttribute(
+                         AttributeSet::FunctionIndex, Attribute::MinSize));
 }

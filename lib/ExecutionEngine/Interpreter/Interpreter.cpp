@@ -34,7 +34,7 @@ extern "C" void LLVMLinkInInterpreter() { }
 ///
 ExecutionEngine *Interpreter::create(Module *M, std::string* ErrStr) {
   // Tell this Module to materialize everything and release the GVMaterializer.
-  if (error_code EC = M->materializeAllPermanently()) {
+  if (std::error_code EC = M->materializeAllPermanently()) {
     if (ErrStr)
       *ErrStr = EC.message();
     // We got an error, just return 0

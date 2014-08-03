@@ -20,10 +20,9 @@
 using namespace llvm;
 
 namespace llvm {
-
 namespace {
 // Helper for extensive error checking in debug builds.
-error_code Check(error_code Err) {
+std::error_code Check(std::error_code Err) {
   if (Err) {
     report_fatal_error(Err.message());
   }
@@ -59,8 +58,7 @@ class RuntimeDyldELF : public RuntimeDyldImpl {
                                 uint64_t Value, uint32_t Type, int64_t Addend);
 
   unsigned getMaxStubSize() override {
-    if (Arch == Triple::aarch64 || Arch == Triple::arm64 ||
-        Arch == Triple::aarch64_be || Arch == Triple::arm64_be)
+    if (Arch == Triple::aarch64 || Arch == Triple::aarch64_be)
       return 20; // movz; movk; movk; movk; br
     if (Arch == Triple::arm || Arch == Triple::thumb)
       return 8; // 32-bit instruction and 32-bit address
@@ -83,7 +81,8 @@ class RuntimeDyldELF : public RuntimeDyldImpl {
       return 1;
   }
 
-  uint64_t findPPC64TOC() const;
+  void findPPC64TOCSection(ObjectImage &Obj, ObjSectionToIDMap &LocalSections,
+                           RelocationValueRef &Rel);
   void findOPDEntrySection(ObjectImage &Obj, ObjSectionToIDMap &LocalSections,
                            RelocationValueRef &Rel);
 

@@ -44,6 +44,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include <queue>
 
 using namespace llvm;
@@ -78,6 +79,12 @@ static cl::opt<bool>
 ExhaustiveSearch("exhaustive-register-search", cl::NotHidden,
                  cl::desc("Exhaustive Search for registers bypassing the depth "
                           "and interference cutoffs of last chance recoloring"));
+
+static cl::opt<bool> EnableLocalReassignment(
+    "enable-local-reassign", cl::Hidden,
+    cl::desc("Local reassignment can yield better allocation decisions, but "
+             "may be compile time intensive"),
+    cl::init(false));
 
 // FIXME: Find a good default for this flag and remove the flag.
 static cl::opt<unsigned>
@@ -285,6 +292,10 @@ class RAGreedy : public MachineFunctionPass,
   /// Callee-save register cost, calculated once per machine function.
   BlockFrequency CSRCost;
 
+  /// Run or not the local reassignment heuristic. This information is
+  /// obtained from the TargetSubtargetInfo.
+  bool EnableLocalReassign;
+
 public:
   RAGreedy();
 
@@ -475,7 +486,7 @@ void RAGreedy::LRE_DidCloneVirtReg(unsigned New, unsigned Old) {
 }
 
 void RAGreedy::releaseMemory() {
-  SpillerInstance.reset(nullptr);
+  SpillerInstance.reset();
   ExtraRegInfo.clear();
   GlobalCand.clear();
 }
@@ -731,7 +742,7 @@ bool RAGreedy::canEvictInterference(LiveInterval &VirtReg, unsigned PhysReg,
       // Evicting another local live range in this case could lead to suboptimal
       // coloring.
       if (!MaxCost.isMax() && IsLocal && LIS->intervalIsInOneMBB(*Intf) &&
-          !canReassign(*Intf, PhysReg)) {
+          (!EnableLocalReassign || !canReassign(*Intf, PhysReg))) {
         return false;
       }
     }
@@ -2308,9 +2319,14 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
                << "********** Function: " << mf.getName() << '\n');
 
   MF = &mf;
-  TRI = MF->getTarget().getRegisterInfo();
-  TII = MF->getTarget().getInstrInfo();
+  const TargetMachine &TM = MF->getTarget();
+  TRI = TM.getRegisterInfo();
+  TII = TM.getInstrInfo();
   RCI.runOnMachineFunction(mf);
+
+  EnableLocalReassign = EnableLocalReassignment ||
+    TM.getSubtargetImpl()->enableRALocalReassignment(TM.getOptLevel());
+
   if (VerifyEnabled)
     MF->verify(this, "Before greedy register allocator");
 

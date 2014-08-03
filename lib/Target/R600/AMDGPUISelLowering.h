@@ -42,25 +42,53 @@ private:
   SDValue MergeVectorStore(const SDValue &Op, SelectionDAG &DAG) const;
   /// \brief Split a vector store into multiple scalar stores.
   /// \returns The resulting chain.
+
+  SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIV24(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIV32(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIV64(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSREM32(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSREM64(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFCEIL(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFTRUNC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFRINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFNEARBYINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFFLOOR(SDValue Op, SelectionDAG &DAG) const;
+
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
 
-protected:
+  SDValue ExpandSIGN_EXTEND_INREG(SDValue Op,
+                                  unsigned BitsDiff,
+                                  SelectionDAG &DAG) const;
+  SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
 
-  /// \brief Helper function that adds Reg to the LiveIn list of the DAG's
-  /// MachineFunction.
-  ///
-  /// \returns a RegisterSDNode representing Reg.
-  virtual SDValue CreateLiveInRegister(SelectionDAG &DAG,
-                                       const TargetRegisterClass *RC,
-                                       unsigned Reg, EVT VT) const;
-  SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
-                             SelectionDAG &DAG) const;
-  /// \brief Split a vector load into multiple scalar loads.
-  SDValue SplitVectorLoad(const SDValue &Op, SelectionDAG &DAG) const;
+  SDValue performStoreCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performMulCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+
+protected:
+  static EVT getEquivalentMemType(LLVMContext &Context, EVT VT);
+  static EVT getEquivalentLoadRegType(LLVMContext &Context, EVT VT);
+
+  virtual SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
+                                     SelectionDAG &DAG) const;
+
+  /// \brief Split a vector load into a scalar load of each component.
+  SDValue ScalarizeVectorLoad(SDValue Op, SelectionDAG &DAG) const;
+
+  /// \brief Split a vector load into 2 loads of half the vector.
+  SDValue SplitVectorLoad(SDValue Op, SelectionDAG &DAG) const;
+
+  /// \brief Split a vector store into a scalar store of each component.
+  SDValue ScalarizeVectorStore(SDValue Op, SelectionDAG &DAG) const;
+
+  /// \brief Split a vector store into 2 stores of half the vector.
   SDValue SplitVectorStore(SDValue Op, SelectionDAG &DAG) const;
+
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSDIVREM(SDValue Op, SelectionDAG &DAG) const;
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
 
@@ -87,10 +115,16 @@ public:
 
   bool isZExtFree(Type *Src, Type *Dest) const override;
   bool isZExtFree(EVT Src, EVT Dest) const override;
+  bool isZExtFree(SDValue Val, EVT VT2) const override;
 
   bool isNarrowingProfitable(EVT VT1, EVT VT2) const override;
 
   MVT getVectorIdxTy() const override;
+  bool isSelectSupported(SelectSupportKind) const override;
+
+  bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
+  bool ShouldShrinkFPConstant(EVT VT) const override;
+
   bool isLoadBitCastBeneficial(EVT, EVT) const override;
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                       bool isVarArg,
@@ -101,6 +135,7 @@ public:
                     SmallVectorImpl<SDValue> &InVals) const override;
 
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
   void ReplaceNodeResults(SDNode * N,
                           SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
@@ -129,37 +164,13 @@ public:
     const SelectionDAG &DAG,
     unsigned Depth = 0) const override;
 
-// Functions defined in AMDILISelLowering.cpp
-public:
-  bool getTgtMemIntrinsic(IntrinsicInfo &Info,
-                          const CallInst &I, unsigned Intrinsic) const override;
-
-  /// We want to mark f32/f64 floating point values as legal.
-  bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
-
-  /// We don't want to shrink f64/f32 constants.
-  bool ShouldShrinkFPConstant(EVT VT) const override;
-
-  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
-
-private:
-  void InitAMDILLowering();
-  SDValue LowerSREM(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM8(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM16(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM32(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSREM64(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV24(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV32(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerSDIV64(SDValue Op, SelectionDAG &DAG) const;
-
-  SDValue ExpandSIGN_EXTEND_INREG(SDValue Op,
-                                  unsigned BitsDiff,
-                                  SelectionDAG &DAG) const;
-  SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
-  EVT genIntType(uint32_t size = 32, uint32_t numEle = 1) const;
-  SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
+  /// \brief Helper function that adds Reg to the LiveIn list of the DAG's
+  /// MachineFunction.
+  ///
+  /// \returns a RegisterSDNode representing Reg.
+  virtual SDValue CreateLiveInRegister(SelectionDAG &DAG,
+                                       const TargetRegisterClass *RC,
+                                       unsigned Reg, EVT VT) const;
 };
 
 namespace AMDGPUISD {
@@ -169,12 +180,15 @@ enum {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   CALL,        // Function call based on a single integer
   UMUL,        // 32bit unsigned multiplication
-  DIV_INF,      // Divide with infinity returned on zero divisor
   RET_FLAG,
   BRANCH_COND,
   // End AMDIL ISD Opcodes
   DWORDADDR,
   FRACT,
+  CLAMP,
+
+  // SIN_HW, COS_HW - f32 for SI, 1 ULP max error, valid from -100 pi to 100 pi.
+  // Denormals handled on some parts.
   COS_HW,
   SIN_HW,
   FMAX,
@@ -184,11 +198,23 @@ enum {
   SMIN,
   UMIN,
   URECIP,
+  DIV_SCALE,
+  DIV_FMAS,
+  DIV_FIXUP,
+  TRIG_PREOP, // 1 ULP max error for f64
+
+  // RCP, RSQ - For f32, 1 ULP max error, no denormal handling.
+  //            For f64, max error 2^29 ULP, handles denormals.
+  RCP,
+  RSQ,
+  RSQ_LEGACY,
+  RSQ_CLAMPED,
   DOT4,
   BFE_U32, // Extract range of bits with zero extension to 32-bits.
   BFE_I32, // Extract range of bits with sign extension to 32-bits.
   BFI, // (src0 & src1) | (~src0 & src2)
   BFM, // Insert a range of bits into a 32-bit word.
+  BREV, // Reverse bits.
   MUL_U24,
   MUL_I24,
   MAD_U24,
@@ -203,6 +229,23 @@ enum {
   SAMPLEB,
   SAMPLED,
   SAMPLEL,
+
+  // These cvt_f32_ubyte* nodes need to remain consecutive and in order.
+  CVT_F32_UBYTE0,
+  CVT_F32_UBYTE1,
+  CVT_F32_UBYTE2,
+  CVT_F32_UBYTE3,
+  /// This node is for VLIW targets and it is used to represent a vector
+  /// that is stored in consecutive registers with the same channel.
+  /// For example:
+  ///   |X  |Y|Z|W|
+  /// T0|v.x| | | |
+  /// T1|v.y| | | |
+  /// T2|v.z| | | |
+  /// T3|v.w| | | |
+  BUILD_VERTICAL_VECTOR,
+  /// Pointer to the start of the shader's constant data.
+  CONST_DATA_PTR,
   FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
   STORE_MSKOR,
   LOAD_CONSTANT,

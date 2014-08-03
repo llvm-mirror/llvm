@@ -844,6 +844,44 @@ class BARRIER_FM<bits<5> op> : StdArch {
   let Inst{5-0} = 0;   // SLL
 }
 
+class SDBBP_FM : StdArch {
+  bits<20> code_;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0b011100; // SPECIAL2
+  let Inst{25-6} = code_;
+  let Inst{5-0} = 0b111111;   // SDBBP
+}
+
+class JR_HB_FM<bits<6> op> : StdArch{
+  bits<5> rs;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0; // SPECIAL
+  let Inst{25-21} = rs;
+  let Inst{20-11} = 0;
+  let Inst{10} = 1;
+  let Inst{9-6} = 0;
+  let Inst{5-0} = op;
+}
+
+class JALR_HB_FM<bits<6> op> : StdArch {
+  bits<5> rd;
+  bits<5> rs;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0; // SPECIAL
+  let Inst{25-21} = rs;
+  let Inst{20-16} = 0;
+  let Inst{15-11} = rd;
+  let Inst{10} = 1;
+  let Inst{9-6} = 0;
+  let Inst{5-0} = op;
+}
+
 class COP0_TLB_FM<bits<6> op> : StdArch {
   bits<32> Inst;
 
@@ -851,4 +889,18 @@ class COP0_TLB_FM<bits<6> op> : StdArch {
   let Inst{25} = 1;       // CO
   let Inst{24-6} = 0;
   let Inst{5-0} = op;     // Operation
+}
+
+class CACHEOP_FM<bits<6> op> : StdArch {
+  bits<21> addr;
+  bits<5> hint;
+  bits<5> base = addr{20-16};
+  bits<16> offset = addr{15-0};
+
+  bits<32> Inst;
+
+  let Inst{31-26} = op;
+  let Inst{25-21} = base;
+  let Inst{20-16} = hint;
+  let Inst{15-0}  = offset;
 }

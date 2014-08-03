@@ -38,9 +38,9 @@ int merge_main(int argc, const char *argv[]) {
                                cl::desc("<filenames...>"));
 
   cl::opt<std::string> OutputFilename("output", cl::value_desc("output"),
-                                      cl::init("-"),
+                                      cl::init("-"), cl::Required,
                                       cl::desc("Output file"));
-  cl::alias OutputFilenameA("o", cl::desc("Alias for --output"), cl::Required,
+  cl::alias OutputFilenameA("o", cl::desc("Alias for --output"),
                             cl::aliasopt(OutputFilename));
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data merger\n");
@@ -56,11 +56,12 @@ int merge_main(int argc, const char *argv[]) {
   InstrProfWriter Writer;
   for (const auto &Filename : Inputs) {
     std::unique_ptr<InstrProfReader> Reader;
-    if (error_code ec = InstrProfReader::create(Filename, Reader))
+    if (std::error_code ec = InstrProfReader::create(Filename, Reader))
       exitWithError(ec.message(), Filename);
 
     for (const auto &I : *Reader)
-      if (error_code EC = Writer.addFunctionCounts(I.Name, I.Hash, I.Counts))
+      if (std::error_code EC =
+              Writer.addFunctionCounts(I.Name, I.Hash, I.Counts))
         errs() << Filename << ": " << I.Name << ": " << EC.message() << "\n";
     if (Reader->hasError())
       exitWithError(Reader->getError().message(), Filename);
@@ -90,7 +91,7 @@ int show_main(int argc, const char *argv[]) {
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data summary\n");
 
   std::unique_ptr<InstrProfReader> Reader;
-  if (error_code EC = InstrProfReader::create(Filename, Reader))
+  if (std::error_code EC = InstrProfReader::create(Filename, Reader))
     exitWithError(EC.message(), Filename);
 
   if (OutputFilename.empty())

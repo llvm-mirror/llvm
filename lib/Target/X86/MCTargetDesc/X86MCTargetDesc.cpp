@@ -197,14 +197,13 @@ void X86_MC::DetectFamilyModel(unsigned EAX, unsigned &Family,
   }
 }
 
-unsigned X86_MC::getDwarfRegFlavour(StringRef TT, bool isEH) {
-  Triple TheTriple(TT);
-  if (TheTriple.getArch() == Triple::x86_64)
+unsigned X86_MC::getDwarfRegFlavour(Triple TT, bool isEH) {
+  if (TT.getArch() == Triple::x86_64)
     return DWARFFlavour::X86_64;
 
-  if (TheTriple.isOSDarwin())
+  if (TT.isOSDarwin())
     return isEH ? DWARFFlavour::X86_32_DarwinEH : DWARFFlavour::X86_32_Generic;
-  if (TheTriple.isOSCygMing())
+  if (TT.isOSCygMing())
     // Unsupported by now, just quick fallback
     return DWARFFlavour::X86_32_Generic;
   return DWARFFlavour::X86_32_Generic;
@@ -251,8 +250,8 @@ static MCRegisterInfo *createX86MCRegisterInfo(StringRef TT) {
 
   MCRegisterInfo *X = new MCRegisterInfo();
   InitX86MCRegisterInfo(X, RA,
-                        X86_MC::getDwarfRegFlavour(TT, false),
-                        X86_MC::getDwarfRegFlavour(TT, true),
+                        X86_MC::getDwarfRegFlavour(TheTriple, false),
+                        X86_MC::getDwarfRegFlavour(TheTriple, true),
                         RA);
   X86_MC::InitLLVM2SEHRegisterMapping(X);
   return X;
@@ -273,7 +272,8 @@ static MCAsmInfo *createX86MCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
     MAI = new X86ELFMCAsmInfo(TheTriple);
   } else if (TheTriple.isWindowsMSVCEnvironment()) {
     MAI = new X86MCAsmInfoMicrosoft(TheTriple);
-  } else if (TheTriple.isOSCygMing()) {
+  } else if (TheTriple.isOSCygMing() ||
+             TheTriple.isWindowsItaniumEnvironment()) {
     MAI = new X86MCAsmInfoGNUCOFF(TheTriple);
   } else {
     // The default is ELF.

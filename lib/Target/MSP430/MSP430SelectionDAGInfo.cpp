@@ -16,9 +16,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "msp430-selectiondag-info"
 
-MSP430SelectionDAGInfo::MSP430SelectionDAGInfo(const MSP430TargetMachine &TM)
-  : TargetSelectionDAGInfo(TM) {
-}
+MSP430SelectionDAGInfo::MSP430SelectionDAGInfo(const DataLayout &DL)
+    : TargetSelectionDAGInfo(&DL) {}
 
 MSP430SelectionDAGInfo::~MSP430SelectionDAGInfo() {
 }

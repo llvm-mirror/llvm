@@ -153,9 +153,6 @@ public:
   SDNode *SelectStoreLane(SDNode *N, unsigned NumVecs, unsigned Opc);
   SDNode *SelectPostStoreLane(SDNode *N, unsigned NumVecs, unsigned Opc);
 
-  SDNode *SelectSIMDAddSubNarrowing(unsigned IntNo, SDNode *Node);
-  SDNode *SelectSIMDXtnNarrowing(unsigned IntNo, SDNode *Node);
-
   SDNode *SelectBitfieldExtractOp(SDNode *N);
   SDNode *SelectBitfieldInsertOp(SDNode *N);
 
@@ -596,8 +593,9 @@ bool AArch64DAGToDAGISel::SelectAddrModeIndexed(SDValue N, unsigned Size,
     const GlobalValue *GV = GAN->getGlobal();
     unsigned Alignment = GV->getAlignment();
     const DataLayout *DL = TLI->getDataLayout();
-    if (Alignment == 0 && !Subtarget->isTargetDarwin())
-      Alignment = DL->getABITypeAlignment(GV->getType()->getElementType());
+    Type *Ty = GV->getType()->getElementType();
+    if (Alignment == 0 && Ty->isSized() && !Subtarget->isTargetDarwin())
+      Alignment = DL->getABITypeAlignment(Ty);
 
     if (Alignment >= Size)
       return true;
@@ -2111,7 +2109,7 @@ SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
                 .getVectorElementType()
                 .getSizeInBits()) {
     default:
-      assert(0 && "Unexpected vector element type!");
+      llvm_unreachable("Unexpected vector element type!");
     case 64:
       SubReg = AArch64::dsub;
       break;

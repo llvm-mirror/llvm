@@ -16,6 +16,13 @@
 #include "llvm/ExecutionEngine/ObjectBuffer.h"
 #include "llvm/ExecutionEngine/ObjectImage.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
+#include "llvm/ExecutionEngine/RuntimeDyldChecker.h"
+#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCDisassembler.h"
+#include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCInstPrinter.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/DynamicLibrary.h"
@@ -23,9 +30,12 @@
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
+#include "llvm/Support/Signals.h"
+#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetSelect.h"
+#include <system_error>
+
 using namespace llvm;
 using namespace llvm::object;
 
@@ -35,7 +45,8 @@ InputFileList(cl::Positional, cl::ZeroOrMore,
 
 enum ActionType {
   AC_Execute,
-  AC_PrintLineInfo
+  AC_PrintLineInfo,
+  AC_Verify
 };
 
 static cl::opt<ActionType>
@@ -45,6 +56,8 @@ Action(cl::desc("Action to perform:"),
                              "Load, link, and execute the inputs."),
                   clEnumValN(AC_PrintLineInfo, "printline",
                              "Load, link, and print line information for each function."),
+                  clEnumValN(AC_Verify, "verify",
+                             "Load, link and verify the resulting memory image."),
                   clEnumValEnd));
 
 static cl::opt<std::string>
@@ -56,6 +69,34 @@ static cl::list<std::string>
 Dylibs("dylib",
        cl::desc("Add library."),
        cl::ZeroOrMore);
+
+static cl::opt<std::string>
+TripleName("triple", cl::desc("Target triple for disassembler"));
+
+static cl::list<std::string>
+CheckFiles("check",
+           cl::desc("File containing RuntimeDyld verifier checks."),
+           cl::ZeroOrMore);
+
+static cl::opt<uint64_t>
+TargetAddrStart("target-addr-start",
+                cl::desc("For -verify only: start of phony target address "
+                         "range."),
+                cl::init(4096), // Start at "page 1" - no allocating at "null".
+                cl::Hidden);
+
+static cl::opt<uint64_t>
+TargetAddrEnd("target-addr-end",
+              cl::desc("For -verify only: end of phony target address range."),
+              cl::init(~0ULL),
+              cl::Hidden);
+
+static cl::opt<uint64_t>
+TargetSectionSep("target-section-sep",
+                 cl::desc("For -verify only: Separation between sections in "
+                          "phony target address space."),
+                 cl::init(0),
+                 cl::Hidden);
 
 /* *** */
 
@@ -139,7 +180,6 @@ static void loadDylibs() {
   }
 }
 
-
 /* *** */
 
 static int printLineInfoForInput() {
@@ -155,14 +195,16 @@ static int printLineInfoForInput() {
     RuntimeDyld Dyld(&MemMgr);
 
     // Load the input memory buffer.
-    std::unique_ptr<MemoryBuffer> InputBuffer;
-    std::unique_ptr<ObjectImage> LoadedObject;
-    if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputFileList[i],
-                                                     InputBuffer))
-      return Error("unable to read input: '" + ec.message() + "'");
 
+    ErrorOr<std::unique_ptr<MemoryBuffer>> InputBuffer =
+        MemoryBuffer::getFileOrSTDIN(InputFileList[i]);
+    if (std::error_code EC = InputBuffer.getError())
+      return Error("unable to read input: '" + EC.message() + "'");
+
+    std::unique_ptr<ObjectImage> LoadedObject;
     // Load the object file
-    LoadedObject.reset(Dyld.loadObject(new ObjectBuffer(InputBuffer.release())));
+    LoadedObject.reset(
+        Dyld.loadObject(new ObjectBuffer(InputBuffer.get().release())));
     if (!LoadedObject) {
       return Error(Dyld.getErrorString());
     }
@@ -171,7 +213,7 @@ static int printLineInfoForInput() {
     Dyld.resolveRelocations();
 
     std::unique_ptr<DIContext> Context(
-        DIContext::getDWARFContext(LoadedObject->getObjectFile()));
+        DIContext::getDWARFContext(*LoadedObject->getObjectFile()));
 
     // Use symbol info to iterate functions in the object.
     for (object::symbol_iterator I = LoadedObject->begin_symbols(),
@@ -216,14 +258,14 @@ static int executeInput() {
     InputFileList.push_back("-");
   for(unsigned i = 0, e = InputFileList.size(); i != e; ++i) {
     // Load the input memory buffer.
-    std::unique_ptr<MemoryBuffer> InputBuffer;
+    ErrorOr<std::unique_ptr<MemoryBuffer>> InputBuffer =
+        MemoryBuffer::getFileOrSTDIN(InputFileList[i]);
+    if (std::error_code EC = InputBuffer.getError())
+      return Error("unable to read input: '" + EC.message() + "'");
     std::unique_ptr<ObjectImage> LoadedObject;
-    if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputFileList[i],
-                                                     InputBuffer))
-      return Error("unable to read input: '" + ec.message() + "'");
-
     // Load the object file
-    LoadedObject.reset(Dyld.loadObject(new ObjectBuffer(InputBuffer.release())));
+    LoadedObject.reset(
+        Dyld.loadObject(new ObjectBuffer(InputBuffer.get().release())));
     if (!LoadedObject) {
       return Error(Dyld.getErrorString());
     }
@@ -263,12 +305,153 @@ static int executeInput() {
   return Main(1, Argv);
 }
 
+static int checkAllExpressions(RuntimeDyldChecker &Checker) {
+  for (const auto& CheckerFileName : CheckFiles) {
+    ErrorOr<std::unique_ptr<MemoryBuffer>> CheckerFileBuf =
+        MemoryBuffer::getFileOrSTDIN(CheckerFileName);
+    if (std::error_code EC = CheckerFileBuf.getError())
+      return Error("unable to read input '" + CheckerFileName + "': " +
+                   EC.message());
+
+    if (!Checker.checkAllRulesInBuffer("# rtdyld-check:",
+                                       CheckerFileBuf.get().get()))
+      return Error("some checks in '" + CheckerFileName + "' failed");
+  }
+  return 0;
+}
+
+// Scatter sections in all directions!
+// Remaps section addresses for -verify mode. The following command line options
+// can be used to customize the layout of the memory within the phony target's
+// address space:
+// -target-addr-start <s> -- Specify where the phony target addres range starts.
+// -target-addr-end   <e> -- Specify where the phony target address range ends.
+// -target-section-sep <d> -- Specify how big a gap should be left between the
+//                            end of one section and the start of the next.
+//                            Defaults to zero. Set to something big
+//                            (e.g. 1 << 32) to stress-test stubs, GOTs, etc.
+//
+void remapSections(const llvm::Triple &TargetTriple,
+                   const TrivialMemoryManager &MemMgr,
+                   RuntimeDyld &RTDyld) {
+
+  // If the -target-addr-end option wasn't explicitly passed, then set it to a
+  // sensible default based on the target triple.
+  if (TargetAddrEnd.getNumOccurrences() == 0) {
+    if (TargetTriple.isArch16Bit())
+      TargetAddrEnd = (1ULL << 16) - 1;
+    else if (TargetTriple.isArch32Bit())
+      TargetAddrEnd = (1ULL << 32) - 1;
+    // TargetAddrEnd already has a sensible default for 64-bit systems, so
+    // there's nothing to do in the 64-bit case.
+  }
+
+  uint64_t NextSectionAddress = TargetAddrStart;
+
+  // Remap code sections.
+  for (const auto& CodeSection : MemMgr.FunctionMemory) {
+    RTDyld.mapSectionAddress(CodeSection.base(), NextSectionAddress);
+    NextSectionAddress += CodeSection.size() + TargetSectionSep;
+  }
+
+  // Remap data sections.
+  for (const auto& DataSection : MemMgr.DataMemory) {
+    RTDyld.mapSectionAddress(DataSection.base(), NextSectionAddress);
+    NextSectionAddress += DataSection.size() + TargetSectionSep;
+  }
+}
+
+// Load and link the objects specified on the command line, but do not execute
+// anything. Instead, attach a RuntimeDyldChecker instance and call it to
+// verify the correctness of the linked memory.
+static int linkAndVerify() {
+
+  // Check for missing triple.
+  if (TripleName == "") {
+    llvm::errs() << "Error: -triple required when running in -verify mode.\n";
+    return 1;
+  }
+
+  // Look up the target and build the disassembler.
+  Triple TheTriple(Triple::normalize(TripleName));
+  std::string ErrorStr;
+  const Target *TheTarget =
+    TargetRegistry::lookupTarget("", TheTriple, ErrorStr);
+  if (!TheTarget) {
+    llvm::errs() << "Error accessing target '" << TripleName << "': "
+                 << ErrorStr << "\n";
+    return 1;
+  }
+  TripleName = TheTriple.getTriple();
+
+  std::unique_ptr<MCSubtargetInfo> STI(
+    TheTarget->createMCSubtargetInfo(TripleName, "", ""));
+  assert(STI && "Unable to create subtarget info!");
+
+  std::unique_ptr<MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TripleName));
+  assert(MRI && "Unable to create target register info!");
+
+  std::unique_ptr<MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, TripleName));
+  assert(MAI && "Unable to create target asm info!");
+
+  MCContext Ctx(MAI.get(), MRI.get(), nullptr);
+
+  std::unique_ptr<MCDisassembler> Disassembler(
+    TheTarget->createMCDisassembler(*STI, Ctx));
+  assert(Disassembler && "Unable to create disassembler!");
+
+  std::unique_ptr<MCInstrInfo> MII(TheTarget->createMCInstrInfo());
+
+  std::unique_ptr<MCInstPrinter> InstPrinter(
+    TheTarget->createMCInstPrinter(0, *MAI, *MII, *MRI, *STI));
+
+  // Load any dylibs requested on the command line.
+  loadDylibs();
+
+  // Instantiate a dynamic linker.
+  TrivialMemoryManager MemMgr;
+  RuntimeDyld Dyld(&MemMgr);
+  RuntimeDyldChecker Checker(Dyld, Disassembler.get(), InstPrinter.get(),
+                             llvm::dbgs());
+
+  // If we don't have any input files, read from stdin.
+  if (!InputFileList.size())
+    InputFileList.push_back("-");
+  for(unsigned i = 0, e = InputFileList.size(); i != e; ++i) {
+    // Load the input memory buffer.
+    ErrorOr<std::unique_ptr<MemoryBuffer>> InputBuffer =
+        MemoryBuffer::getFileOrSTDIN(InputFileList[i]);
+    if (std::error_code EC = InputBuffer.getError())
+      return Error("unable to read input: '" + EC.message() + "'");
+
+    std::unique_ptr<ObjectImage> LoadedObject;
+    // Load the object file
+    LoadedObject.reset(
+        Dyld.loadObject(new ObjectBuffer(InputBuffer.get().release())));
+    if (!LoadedObject) {
+      return Error(Dyld.getErrorString());
+    }
+  }
+
+  // Re-map the section addresses into the phony target address space.
+  remapSections(TheTriple, MemMgr, Dyld);
+
+  // Resolve all the relocations we can.
+  Dyld.resolveRelocations();
+
+  return checkAllExpressions(Checker);
+}
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal();
   PrettyStackTraceProgram X(argc, argv);
 
   ProgramName = argv[0];
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
+
+  llvm::InitializeAllTargetInfos();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllDisassemblers();
 
   cl::ParseCommandLineOptions(argc, argv, "llvm MC-JIT tool\n");
 
@@ -277,5 +460,7 @@ int main(int argc, char **argv) {
     return executeInput();
   case AC_PrintLineInfo:
     return printLineInfoForInput();
+  case AC_Verify:
+    return linkAndVerify();
   }
 }

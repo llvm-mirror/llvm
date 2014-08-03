@@ -406,6 +406,41 @@ void MDNode::replaceOperand(MDNodeOperand *Op, Value *To) {
   }
 }
 
+MDNode *MDNode::concatenate(MDNode *A, MDNode *B) {
+  if (!A)
+    return B;
+  if (!B)
+    return A;
+
+  SmallVector<Value *, 4> Vals(A->getNumOperands() +
+                               B->getNumOperands());
+
+  unsigned j = 0;
+  for (unsigned i = 0, ie = A->getNumOperands(); i != ie; ++i)
+    Vals[j++] = A->getOperand(i);
+  for (unsigned i = 0, ie = B->getNumOperands(); i != ie; ++i)
+    Vals[j++] = B->getOperand(i);
+
+  return MDNode::get(A->getContext(), Vals);
+}
+
+MDNode *MDNode::intersect(MDNode *A, MDNode *B) {
+  if (!A || !B)
+    return nullptr;
+
+  SmallVector<Value *, 4> Vals;
+  for (unsigned i = 0, ie = A->getNumOperands(); i != ie; ++i) {
+    Value *V = A->getOperand(i);
+    for (unsigned j = 0, je = B->getNumOperands(); j != je; ++j)
+      if (V == B->getOperand(j)) {
+        Vals.push_back(V);
+        break;
+      }
+  }
+
+  return MDNode::get(A->getContext(), Vals);
+}
+
 MDNode *MDNode::getMostGenericFPMath(MDNode *A, MDNode *B) {
   if (!A || !B)
     return nullptr;
@@ -663,7 +698,7 @@ void Instruction::setMetadata(unsigned KindID, MDNode *Node) {
 
   // Otherwise, we're removing metadata from an instruction.
   assert((hasMetadataHashEntry() ==
-          getContext().pImpl->MetadataStore.count(this)) &&
+          (getContext().pImpl->MetadataStore.count(this) > 0)) &&
          "HasMetadata bit out of date!");
   if (!hasMetadataHashEntry())
     return;  // Nothing to remove!
@@ -685,6 +720,12 @@ void Instruction::setMetadata(unsigned KindID, MDNode *Node) {
       return;
     }
   // Otherwise, removing an entry that doesn't exist on the instruction.
+}
+
+void Instruction::setAAMetadata(const AAMDNodes &N) {
+  setMetadata(LLVMContext::MD_tbaa, N.TBAA);
+  setMetadata(LLVMContext::MD_alias_scope, N.Scope);
+  setMetadata(LLVMContext::MD_noalias, N.NoAlias);
 }
 
 MDNode *Instruction::getMetadataImpl(unsigned KindID) const {

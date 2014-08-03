@@ -330,253 +330,51 @@ void NVPTXAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 bool NVPTXAsmPrinter::lowerImageHandleOperand(const MachineInstr *MI,
                                            unsigned OpNo, MCOperand &MCOp) {
   const MachineOperand &MO = MI->getOperand(OpNo);
+  const MCInstrDesc &MCID = MI->getDesc();
 
-  switch (MI->getOpcode()) {
-  default: return false;
-  case NVPTX::TEX_1D_F32_I32:
-  case NVPTX::TEX_1D_F32_F32:
-  case NVPTX::TEX_1D_F32_F32_LEVEL:
-  case NVPTX::TEX_1D_F32_F32_GRAD:
-  case NVPTX::TEX_1D_I32_I32:
-  case NVPTX::TEX_1D_I32_F32:
-  case NVPTX::TEX_1D_I32_F32_LEVEL:
-  case NVPTX::TEX_1D_I32_F32_GRAD:
-  case NVPTX::TEX_1D_ARRAY_F32_I32:
-  case NVPTX::TEX_1D_ARRAY_F32_F32:
-  case NVPTX::TEX_1D_ARRAY_F32_F32_LEVEL:
-  case NVPTX::TEX_1D_ARRAY_F32_F32_GRAD:
-  case NVPTX::TEX_1D_ARRAY_I32_I32:
-  case NVPTX::TEX_1D_ARRAY_I32_F32:
-  case NVPTX::TEX_1D_ARRAY_I32_F32_LEVEL:
-  case NVPTX::TEX_1D_ARRAY_I32_F32_GRAD:
-  case NVPTX::TEX_2D_F32_I32:
-  case NVPTX::TEX_2D_F32_F32:
-  case NVPTX::TEX_2D_F32_F32_LEVEL:
-  case NVPTX::TEX_2D_F32_F32_GRAD:
-  case NVPTX::TEX_2D_I32_I32:
-  case NVPTX::TEX_2D_I32_F32:
-  case NVPTX::TEX_2D_I32_F32_LEVEL:
-  case NVPTX::TEX_2D_I32_F32_GRAD:
-  case NVPTX::TEX_2D_ARRAY_F32_I32:
-  case NVPTX::TEX_2D_ARRAY_F32_F32:
-  case NVPTX::TEX_2D_ARRAY_F32_F32_LEVEL:
-  case NVPTX::TEX_2D_ARRAY_F32_F32_GRAD:
-  case NVPTX::TEX_2D_ARRAY_I32_I32:
-  case NVPTX::TEX_2D_ARRAY_I32_F32:
-  case NVPTX::TEX_2D_ARRAY_I32_F32_LEVEL:
-  case NVPTX::TEX_2D_ARRAY_I32_F32_GRAD:
-  case NVPTX::TEX_3D_F32_I32:
-  case NVPTX::TEX_3D_F32_F32:
-  case NVPTX::TEX_3D_F32_F32_LEVEL:
-  case NVPTX::TEX_3D_F32_F32_GRAD:
-  case NVPTX::TEX_3D_I32_I32:
-  case NVPTX::TEX_3D_I32_F32:
-  case NVPTX::TEX_3D_I32_F32_LEVEL:
-  case NVPTX::TEX_3D_I32_F32_GRAD:
-   {
+  if (MCID.TSFlags & NVPTXII::IsTexFlag) {
     // This is a texture fetch, so operand 4 is a texref and operand 5 is
     // a samplerref
-    if (OpNo == 4) {
+    if (OpNo == 4 && MO.isImm()) {
       lowerImageHandleSymbol(MO.getImm(), MCOp);
       return true;
     }
-    if (OpNo == 5) {
-      lowerImageHandleSymbol(MO.getImm(), MCOp);
-      return true;
-    }
-
-    return false;
-  }
-  case NVPTX::SULD_1D_I8_TRAP:
-  case NVPTX::SULD_1D_I16_TRAP:
-  case NVPTX::SULD_1D_I32_TRAP:
-  case NVPTX::SULD_1D_ARRAY_I8_TRAP:
-  case NVPTX::SULD_1D_ARRAY_I16_TRAP:
-  case NVPTX::SULD_1D_ARRAY_I32_TRAP:
-  case NVPTX::SULD_2D_I8_TRAP:
-  case NVPTX::SULD_2D_I16_TRAP:
-  case NVPTX::SULD_2D_I32_TRAP:
-  case NVPTX::SULD_2D_ARRAY_I8_TRAP:
-  case NVPTX::SULD_2D_ARRAY_I16_TRAP:
-  case NVPTX::SULD_2D_ARRAY_I32_TRAP:
-  case NVPTX::SULD_3D_I8_TRAP:
-  case NVPTX::SULD_3D_I16_TRAP:
-  case NVPTX::SULD_3D_I32_TRAP: {
-    // This is a V1 surface load, so operand 1 is a surfref
-    if (OpNo == 1) {
+    if (OpNo == 5 && MO.isImm() && !(MCID.TSFlags & NVPTXII::IsTexModeUnifiedFlag)) {
       lowerImageHandleSymbol(MO.getImm(), MCOp);
       return true;
     }
 
     return false;
-  }
-  case NVPTX::SULD_1D_V2I8_TRAP:
-  case NVPTX::SULD_1D_V2I16_TRAP:
-  case NVPTX::SULD_1D_V2I32_TRAP:
-  case NVPTX::SULD_1D_ARRAY_V2I8_TRAP:
-  case NVPTX::SULD_1D_ARRAY_V2I16_TRAP:
-  case NVPTX::SULD_1D_ARRAY_V2I32_TRAP:
-  case NVPTX::SULD_2D_V2I8_TRAP:
-  case NVPTX::SULD_2D_V2I16_TRAP:
-  case NVPTX::SULD_2D_V2I32_TRAP:
-  case NVPTX::SULD_2D_ARRAY_V2I8_TRAP:
-  case NVPTX::SULD_2D_ARRAY_V2I16_TRAP:
-  case NVPTX::SULD_2D_ARRAY_V2I32_TRAP:
-  case NVPTX::SULD_3D_V2I8_TRAP:
-  case NVPTX::SULD_3D_V2I16_TRAP:
-  case NVPTX::SULD_3D_V2I32_TRAP: {
-    // This is a V2 surface load, so operand 2 is a surfref
-    if (OpNo == 2) {
+  } else if (MCID.TSFlags & NVPTXII::IsSuldMask) {
+    unsigned VecSize =
+      1 << (((MCID.TSFlags & NVPTXII::IsSuldMask) >> NVPTXII::IsSuldShift) - 1);
+
+    // For a surface load of vector size N, the Nth operand will be the surfref
+    if (OpNo == VecSize && MO.isImm()) {
       lowerImageHandleSymbol(MO.getImm(), MCOp);
       return true;
     }
 
     return false;
-  }
-  case NVPTX::SULD_1D_V4I8_TRAP:
-  case NVPTX::SULD_1D_V4I16_TRAP:
-  case NVPTX::SULD_1D_V4I32_TRAP:
-  case NVPTX::SULD_1D_ARRAY_V4I8_TRAP:
-  case NVPTX::SULD_1D_ARRAY_V4I16_TRAP:
-  case NVPTX::SULD_1D_ARRAY_V4I32_TRAP:
-  case NVPTX::SULD_2D_V4I8_TRAP:
-  case NVPTX::SULD_2D_V4I16_TRAP:
-  case NVPTX::SULD_2D_V4I32_TRAP:
-  case NVPTX::SULD_2D_ARRAY_V4I8_TRAP:
-  case NVPTX::SULD_2D_ARRAY_V4I16_TRAP:
-  case NVPTX::SULD_2D_ARRAY_V4I32_TRAP:
-  case NVPTX::SULD_3D_V4I8_TRAP:
-  case NVPTX::SULD_3D_V4I16_TRAP:
-  case NVPTX::SULD_3D_V4I32_TRAP: {
-    // This is a V4 surface load, so operand 4 is a surfref
-    if (OpNo == 4) {
-      lowerImageHandleSymbol(MO.getImm(), MCOp);
-      return true;
-    }
-
-    return false;
-  }
-  case NVPTX::SUST_B_1D_B8_TRAP:
-  case NVPTX::SUST_B_1D_B16_TRAP:
-  case NVPTX::SUST_B_1D_B32_TRAP:
-  case NVPTX::SUST_B_1D_V2B8_TRAP:
-  case NVPTX::SUST_B_1D_V2B16_TRAP:
-  case NVPTX::SUST_B_1D_V2B32_TRAP:
-  case NVPTX::SUST_B_1D_V4B8_TRAP:
-  case NVPTX::SUST_B_1D_V4B16_TRAP:
-  case NVPTX::SUST_B_1D_V4B32_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_B8_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_B16_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_B32_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_V2B8_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_V2B16_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_V2B32_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_V4B8_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_V4B16_TRAP:
-  case NVPTX::SUST_B_1D_ARRAY_V4B32_TRAP:
-  case NVPTX::SUST_B_2D_B8_TRAP:
-  case NVPTX::SUST_B_2D_B16_TRAP:
-  case NVPTX::SUST_B_2D_B32_TRAP:
-  case NVPTX::SUST_B_2D_V2B8_TRAP:
-  case NVPTX::SUST_B_2D_V2B16_TRAP:
-  case NVPTX::SUST_B_2D_V2B32_TRAP:
-  case NVPTX::SUST_B_2D_V4B8_TRAP:
-  case NVPTX::SUST_B_2D_V4B16_TRAP:
-  case NVPTX::SUST_B_2D_V4B32_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_B8_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_B16_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_B32_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_V2B8_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_V2B16_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_V2B32_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_V4B8_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_V4B16_TRAP:
-  case NVPTX::SUST_B_2D_ARRAY_V4B32_TRAP:
-  case NVPTX::SUST_B_3D_B8_TRAP:
-  case NVPTX::SUST_B_3D_B16_TRAP:
-  case NVPTX::SUST_B_3D_B32_TRAP:
-  case NVPTX::SUST_B_3D_V2B8_TRAP:
-  case NVPTX::SUST_B_3D_V2B16_TRAP:
-  case NVPTX::SUST_B_3D_V2B32_TRAP:
-  case NVPTX::SUST_B_3D_V4B8_TRAP:
-  case NVPTX::SUST_B_3D_V4B16_TRAP:
-  case NVPTX::SUST_B_3D_V4B32_TRAP:
-  case NVPTX::SUST_P_1D_B8_TRAP:
-  case NVPTX::SUST_P_1D_B16_TRAP:
-  case NVPTX::SUST_P_1D_B32_TRAP:
-  case NVPTX::SUST_P_1D_V2B8_TRAP:
-  case NVPTX::SUST_P_1D_V2B16_TRAP:
-  case NVPTX::SUST_P_1D_V2B32_TRAP:
-  case NVPTX::SUST_P_1D_V4B8_TRAP:
-  case NVPTX::SUST_P_1D_V4B16_TRAP:
-  case NVPTX::SUST_P_1D_V4B32_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_B8_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_B16_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_B32_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_V2B8_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_V2B16_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_V2B32_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_V4B8_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_V4B16_TRAP:
-  case NVPTX::SUST_P_1D_ARRAY_V4B32_TRAP:
-  case NVPTX::SUST_P_2D_B8_TRAP:
-  case NVPTX::SUST_P_2D_B16_TRAP:
-  case NVPTX::SUST_P_2D_B32_TRAP:
-  case NVPTX::SUST_P_2D_V2B8_TRAP:
-  case NVPTX::SUST_P_2D_V2B16_TRAP:
-  case NVPTX::SUST_P_2D_V2B32_TRAP:
-  case NVPTX::SUST_P_2D_V4B8_TRAP:
-  case NVPTX::SUST_P_2D_V4B16_TRAP:
-  case NVPTX::SUST_P_2D_V4B32_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_B8_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_B16_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_B32_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_V2B8_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_V2B16_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_V2B32_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_V4B8_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_V4B16_TRAP:
-  case NVPTX::SUST_P_2D_ARRAY_V4B32_TRAP:
-  case NVPTX::SUST_P_3D_B8_TRAP:
-  case NVPTX::SUST_P_3D_B16_TRAP:
-  case NVPTX::SUST_P_3D_B32_TRAP:
-  case NVPTX::SUST_P_3D_V2B8_TRAP:
-  case NVPTX::SUST_P_3D_V2B16_TRAP:
-  case NVPTX::SUST_P_3D_V2B32_TRAP:
-  case NVPTX::SUST_P_3D_V4B8_TRAP:
-  case NVPTX::SUST_P_3D_V4B16_TRAP:
-  case NVPTX::SUST_P_3D_V4B32_TRAP: {
+  } else if (MCID.TSFlags & NVPTXII::IsSustFlag) {
     // This is a surface store, so operand 0 is a surfref
-    if (OpNo == 0) {
+    if (OpNo == 0 && MO.isImm()) {
       lowerImageHandleSymbol(MO.getImm(), MCOp);
       return true;
     }
 
     return false;
-  }
-  case NVPTX::TXQ_CHANNEL_ORDER:
-  case NVPTX::TXQ_CHANNEL_DATA_TYPE:
-  case NVPTX::TXQ_WIDTH:
-  case NVPTX::TXQ_HEIGHT:
-  case NVPTX::TXQ_DEPTH:
-  case NVPTX::TXQ_ARRAY_SIZE:
-  case NVPTX::TXQ_NUM_SAMPLES:
-  case NVPTX::TXQ_NUM_MIPMAP_LEVELS:
-  case NVPTX::SUQ_CHANNEL_ORDER:
-  case NVPTX::SUQ_CHANNEL_DATA_TYPE:
-  case NVPTX::SUQ_WIDTH:
-  case NVPTX::SUQ_HEIGHT:
-  case NVPTX::SUQ_DEPTH:
-  case NVPTX::SUQ_ARRAY_SIZE: {
+  } else if (MCID.TSFlags & NVPTXII::IsSurfTexQueryFlag) {
     // This is a query, so operand 1 is a surfref/texref
-    if (OpNo == 1) {
+    if (OpNo == 1 && MO.isImm()) {
       lowerImageHandleSymbol(MO.getImm(), MCOp);
       return true;
     }
 
     return false;
   }
-  }
+
+  return false;
 }
 
 void NVPTXAsmPrinter::lowerImageHandleSymbol(unsigned Index, MCOperand &MCOp) {
@@ -734,23 +532,7 @@ void NVPTXAsmPrinter::printReturnValStr(const Function *F, raw_ostream &O) {
         << " func_retval0";
     } else {
       if ((Ty->getTypeID() == Type::StructTyID) || isa<VectorType>(Ty)) {
-        SmallVector<EVT, 16> vtparts;
-        ComputeValueVTs(*TLI, Ty, vtparts);
-        unsigned totalsz = 0;
-        for (unsigned i = 0, e = vtparts.size(); i != e; ++i) {
-          unsigned elems = 1;
-          EVT elemtype = vtparts[i];
-          if (vtparts[i].isVector()) {
-            elems = vtparts[i].getVectorNumElements();
-            elemtype = vtparts[i].getVectorElementType();
-          }
-          for (unsigned j = 0, je = elems; j != je; ++j) {
-            unsigned sz = elemtype.getSizeInBits();
-            if (elemtype.isInteger() && (sz < 8))
-              sz = 8;
-            totalsz += sz / 8;
-          }
-        }
+        unsigned totalsz = TD->getTypeAllocSize(Ty);
         unsigned retAlignment = 0;
         if (!llvm::getAlign(*F, 0, retAlignment))
           retAlignment = TD->getABITypeAlignment(Ty);
@@ -1321,6 +1103,10 @@ bool NVPTXAsmPrinter::doFinalization(Module &M) {
 // external global variable with init     -> .visible
 // external without init                  -> .extern
 // appending                              -> not allowed, assert.
+// for any linkage other than
+// internal, private, linker_private,
+// linker_private_weak, linker_private_weak_def_auto,
+// we emit                                -> .weak.
 
 void NVPTXAsmPrinter::emitLinkageDirective(const GlobalValue *V,
                                            raw_ostream &O) {
@@ -1346,6 +1132,9 @@ void NVPTXAsmPrinter::emitLinkageDirective(const GlobalValue *V,
         msg.append(V->getName().str());
       msg.append("has unsupported appending linkage type");
       llvm_unreachable(msg.c_str());
+    } else if (!V->hasInternalLinkage() &&
+               !V->hasPrivateLinkage()) {
+      O << ".weak ";
     }
   }
 }
@@ -1356,9 +1145,14 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
 
   // Skip meta data
   if (GVar->hasSection()) {
-    if (GVar->getSection() == "llvm.metadata")
+    if (GVar->getSection() == StringRef("llvm.metadata"))
       return;
   }
+
+  // Skip LLVM intrinsic global variables
+  if (GVar->getName().startswith("llvm.") ||
+      GVar->getName().startswith("nvvm."))
+    return;
 
   const DataLayout *TD = TM.getDataLayout();
 
@@ -1371,6 +1165,10 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
       O << ".visible ";
     else
       O << ".extern ";
+  } else if (GVar->hasLinkOnceLinkage() || GVar->hasWeakLinkage() ||
+             GVar->hasAvailableExternallyLinkage() ||
+             GVar->hasCommonLinkage()) {
+    O << ".weak ";
   }
 
   if (llvm::isTexture(*GVar)) {
@@ -1438,7 +1236,7 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
         O << "linear";
         break;
       case 2:
-        assert(0 && "Anisotropic filtering is not supported");
+        llvm_unreachable("Anisotropic filtering is not supported");
       default:
         O << "nearest";
         break;
@@ -1480,6 +1278,11 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
 
   O << ".";
   emitPTXAddressSpace(PTy->getAddressSpace(), O);
+
+  if (isManaged(*GVar)) {
+    O << " .attribute(.managed)";
+  }
+
   if (GVar->getAlignment() == 0)
     O << " .align " << (int) TD->getPrefTypeAlignment(ETy);
   else
@@ -1497,13 +1300,24 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
 
     // Ptx allows variable initilization only for constant and global state
     // spaces.
-    if (((PTy->getAddressSpace() == llvm::ADDRESS_SPACE_GLOBAL) ||
-         (PTy->getAddressSpace() == llvm::ADDRESS_SPACE_CONST)) &&
-        GVar->hasInitializer()) {
-      const Constant *Initializer = GVar->getInitializer();
-      if (!Initializer->isNullValue()) {
-        O << " = ";
-        printScalarConstant(Initializer, O);
+    if (GVar->hasInitializer()) {
+      if ((PTy->getAddressSpace() == llvm::ADDRESS_SPACE_GLOBAL) ||
+          (PTy->getAddressSpace() == llvm::ADDRESS_SPACE_CONST)) {
+        const Constant *Initializer = GVar->getInitializer();
+        // 'undef' is treated as there is no value spefied.
+        if (!Initializer->isNullValue() && !isa<UndefValue>(Initializer)) {
+          O << " = ";
+          printScalarConstant(Initializer, O);
+        }
+      } else {
+        // The frontend adds zero-initializer to variables that don't have an
+        // initial value, so skip warning for this case.
+        if (!GVar->getInitializer()->isNullValue()) {
+          std::string warnMsg = "initial value of '" + GVar->getName().str() +
+              "' is not allowed in addrspace(" +
+              llvm::utostr_32(PTy->getAddressSpace()) + ")";
+          report_fatal_error(warnMsg.c_str());
+        }
       }
     }
   } else {
@@ -1562,7 +1376,7 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
       }
       break;
     default:
-      assert(0 && "type not supported yet");
+      llvm_unreachable("type not supported yet");
     }
 
   }
@@ -1682,7 +1496,7 @@ void NVPTXAsmPrinter::emitPTXGlobalVariable(const GlobalVariable *GVar,
     O << "]";
     break;
   default:
-    assert(0 && "type not supported yet");
+    llvm_unreachable("type not supported yet");
   }
   return;
 }
@@ -1994,9 +1808,9 @@ void NVPTXAsmPrinter::setAndEmitFunctionVirtualRegisters(
   // O << "\t.reg .s16 %rc<" << NVPTXNumRegisters << ">;\n";
   // O << "\t.reg .s16 %rs<" << NVPTXNumRegisters << ">;\n";
   // O << "\t.reg .s32 %r<" << NVPTXNumRegisters << ">;\n";
-  // O << "\t.reg .s64 %rl<" << NVPTXNumRegisters << ">;\n";
+  // O << "\t.reg .s64 %rd<" << NVPTXNumRegisters << ">;\n";
   // O << "\t.reg .f32 %f<" << NVPTXNumRegisters << ">;\n";
-  // O << "\t.reg .f64 %fl<" << NVPTXNumRegisters << ">;\n";
+  // O << "\t.reg .f64 %fd<" << NVPTXNumRegisters << ">;\n";
 
   // Emit declaration of the virtual registers or 'physical' registers for
   // each register class

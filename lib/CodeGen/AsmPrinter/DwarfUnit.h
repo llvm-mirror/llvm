@@ -400,6 +400,8 @@ public:
   DIE *getOrCreateSubprogramDIE(DISubprogram SP);
 
   void applySubprogramAttributes(DISubprogram SP, DIE &SPDie);
+  void applySubprogramAttributesToDefinition(DISubprogram SP, DIE &SPDie);
+  void applyVariableAttributes(const DbgVariable &Var, DIE &VariableDie);
 
   /// getOrCreateTypeDIE - Find existing DIE or create new DIE for the
   /// given DIType.
@@ -420,7 +422,7 @@ public:
                                             bool Abstract = false);
 
   /// constructSubprogramArguments - Construct function argument DIEs.
-  void constructSubprogramArguments(DIE &Buffer, DIArray Args);
+  void constructSubprogramArguments(DIE &Buffer, DITypeArray Args);
 
   /// Create a DIE with the given Tag, add the DIE to its parent, and
   /// call insertDIE if MD is not null.
@@ -577,6 +579,10 @@ public:
            sizeof(uint32_t);                               // Type DIE Offset
   }
   void initSection(const MCSection *Section);
+  // Bring in the base function (taking two args, including the section symbol)
+  // for use when building DWO type units (they don't go in unique comdat
+  // sections)
+  using DwarfUnit::initSection;
   DwarfCompileUnit &getCU() override { return CU; }
 
 protected:

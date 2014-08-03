@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MipsSEISELLOWERING_H
-#define MipsSEISELLOWERING_H
+#ifndef MIPSSEISELLOWERING_H
+#define MIPSSEISELLOWERING_H
 
 #include "MipsISelLowering.h"
 #include "MipsRegisterInfo.h"
@@ -20,7 +20,8 @@
 namespace llvm {
   class MipsSETargetLowering : public MipsTargetLowering  {
   public:
-    explicit MipsSETargetLowering(MipsTargetMachine &TM);
+    explicit MipsSETargetLowering(MipsTargetMachine &TM,
+                                  const MipsSubtarget &STI);
 
     /// \brief Enable MSA support for the given integer type and Register
     /// class.
@@ -30,8 +31,9 @@ namespace llvm {
     void addMSAFloatType(MVT::SimpleValueType Ty,
                          const TargetRegisterClass *RC);
 
-    bool allowsUnalignedMemoryAccesses(EVT VT, unsigned AS = 0,
-                                       bool *Fast = nullptr) const override;
+    bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS = 0,
+                                        unsigned Align = 1,
+                                        bool *Fast = nullptr) const override;
 
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
@@ -46,13 +48,7 @@ namespace llvm {
       return false;
     }
 
-    const TargetRegisterClass *getRepRegClassFor(MVT VT) const override {
-      if (VT == MVT::Untyped)
-        return Subtarget->hasDSP() ? &Mips::ACC64DSPRegClass :
-                                     &Mips::ACC64RegClass;
-
-      return TargetLowering::getRepRegClassFor(VT);
-    }
+    const TargetRegisterClass *getRepRegClassFor(MVT VT) const override;
 
   private:
     bool isEligibleForTailCallOptimization(const MipsCC &MipsCCInfo,

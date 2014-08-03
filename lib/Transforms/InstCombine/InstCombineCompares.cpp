@@ -612,9 +612,10 @@ Instruction *InstCombiner::FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
   if (ICmpInst::isSigned(Cond))
     return nullptr;
 
-  // Look through bitcasts.
-  if (BitCastInst *BCI = dyn_cast<BitCastInst>(RHS))
-    RHS = BCI->getOperand(0);
+  // Look through bitcasts and addrspacecasts. We do not however want to remove
+  // 0 GEPs.
+  if (!isa<GetElementPtrInst>(RHS))
+    RHS = RHS->stripPointerCasts();
 
   Value *PtrBase = GEPLHS->getOperand(0);
   if (DL && PtrBase == RHS && GEPLHS->isInBounds()) {
@@ -655,9 +656,24 @@ Instruction *InstCombiner::FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
           (GEPRHS->hasAllConstantIndices() || GEPRHS->hasOneUse()) &&
           PtrBase->stripPointerCasts() ==
             GEPRHS->getOperand(0)->stripPointerCasts()) {
+        Value *LOffset = EmitGEPOffset(GEPLHS);
+        Value *ROffset = EmitGEPOffset(GEPRHS);
+
+        // If we looked through an addrspacecast between different sized address
+        // spaces, the LHS and RHS pointers are different sized
+        // integers. Truncate to the smaller one.
+        Type *LHSIndexTy = LOffset->getType();
+        Type *RHSIndexTy = ROffset->getType();
+        if (LHSIndexTy != RHSIndexTy) {
+          if (LHSIndexTy->getPrimitiveSizeInBits() <
+              RHSIndexTy->getPrimitiveSizeInBits()) {
+            ROffset = Builder->CreateTrunc(ROffset, LHSIndexTy);
+          } else
+            LOffset = Builder->CreateTrunc(LOffset, RHSIndexTy);
+        }
+
         Value *Cmp = Builder->CreateICmp(ICmpInst::getSignedPredicate(Cond),
-                                         EmitGEPOffset(GEPLHS),
-                                         EmitGEPOffset(GEPRHS));
+                                         LOffset, ROffset);
         return ReplaceInstUsesWith(I, Cmp);
       }
 
@@ -667,26 +683,12 @@ Instruction *InstCombiner::FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
     }
 
     // If one of the GEPs has all zero indices, recurse.
-    bool AllZeros = true;
-    for (unsigned i = 1, e = GEPLHS->getNumOperands(); i != e; ++i)
-      if (!isa<Constant>(GEPLHS->getOperand(i)) ||
-          !cast<Constant>(GEPLHS->getOperand(i))->isNullValue()) {
-        AllZeros = false;
-        break;
-      }
-    if (AllZeros)
+    if (GEPLHS->hasAllZeroIndices())
       return FoldGEPICmp(GEPRHS, GEPLHS->getOperand(0),
                          ICmpInst::getSwappedPredicate(Cond), I);
 
     // If the other GEP has all zero indices, recurse.
-    AllZeros = true;
-    for (unsigned i = 1, e = GEPRHS->getNumOperands(); i != e; ++i)
-      if (!isa<Constant>(GEPRHS->getOperand(i)) ||
-          !cast<Constant>(GEPRHS->getOperand(i))->isNullValue()) {
-        AllZeros = false;
-        break;
-      }
-    if (AllZeros)
+    if (GEPRHS->hasAllZeroIndices())
       return FoldGEPICmp(GEPLHS, GEPRHS->getOperand(0), Cond, I);
 
     bool GEPsInBounds = GEPLHS->isInBounds() && GEPRHS->isInBounds();
@@ -1042,6 +1044,90 @@ Instruction *InstCombiner::FoldICmpShrCst(ICmpInst &ICI, BinaryOperator *Shr,
   return nullptr;
 }
 
+/// FoldICmpCstShrCst - Handle "(icmp eq/ne (ashr/lshr const2, A), const1)" ->
+/// (icmp eq/ne A, Log2(const2/const1)) ->
+/// (icmp eq/ne A, Log2(const2) - Log2(const1)).
+Instruction *InstCombiner::FoldICmpCstShrCst(ICmpInst &I, Value *Op, Value *A,
+                                             ConstantInt *CI1,
+                                             ConstantInt *CI2) {
+  assert(I.isEquality() && "Cannot fold icmp gt/lt");
+
+  auto getConstant = [&I, this](bool IsTrue) {
+    if (I.getPredicate() == I.ICMP_NE)
+      IsTrue = !IsTrue;
+    return ReplaceInstUsesWith(I, ConstantInt::get(I.getType(), IsTrue));
+  };
+
+  auto getICmp = [&I](CmpInst::Predicate Pred, Value *LHS, Value *RHS) {
+    if (I.getPredicate() == I.ICMP_NE)
+      Pred = CmpInst::getInversePredicate(Pred);
+    return new ICmpInst(Pred, LHS, RHS);
+  };
+
+  APInt AP1 = CI1->getValue();
+  APInt AP2 = CI2->getValue();
+
+  if (!AP1) {
+    if (!AP2) {
+      // Both Constants are 0.
+      return getConstant(true);
+    }
+
+    if (cast<BinaryOperator>(Op)->isExact())
+      return getConstant(false);
+
+    if (AP2.isNegative()) {
+      // MSB is set, so a lshr with a large enough 'A' would be undefined.
+      return getConstant(false);
+    }
+
+    // 'A' must be large enough to shift out the highest set bit.
+    return getICmp(I.ICMP_UGT, A,
+                   ConstantInt::get(A->getType(), AP2.logBase2()));
+  }
+
+  if (!AP2) {
+    // Shifting 0 by any value gives 0.
+    return getConstant(false);
+  }
+
+  bool IsAShr = isa<AShrOperator>(Op);
+  if (AP1 == AP2) {
+    if (AP1.isAllOnesValue() && IsAShr) {
+      // Arithmatic shift of -1 is always -1.
+      return getConstant(true);
+    }
+    return getICmp(I.ICMP_EQ, A, ConstantInt::getNullValue(A->getType()));
+  }
+
+  if (IsAShr) {
+    if (AP1.isNegative() != AP2.isNegative()) {
+      // Arithmetic shift will never change the sign.
+      return getConstant(false);
+    }
+    // Both the constants are negative, take their positive to calculate
+    // log.
+    if (AP1.isNegative()) {
+      AP1 = -AP1;
+      AP2 = -AP2;
+    }
+  }
+
+  if (AP1.ugt(AP2)) {
+    // Right-shifting will not increase the value.
+    return getConstant(false);
+  }
+
+  // Get the distance between the highest bit that's set.
+  int Shift = AP2.logBase2() - AP1.logBase2();
+
+  // Use lshr here, since we've canonicalized to +ve numbers.
+  if (AP1 == AP2.lshr(Shift))
+    return getICmp(I.ICMP_EQ, A, ConstantInt::get(A->getType(), Shift));
+
+  // Shifting const2 will never be equal to const1.
+  return getConstant(false);
+}
 
 /// visitICmpInstWithInstAndIntCst - Handle "icmp (instr, intcst)".
 ///
@@ -2026,9 +2112,13 @@ static Instruction *ProcessUAddIdiom(Instruction &I, Value *OrigAddV,
 ///          replacement required.
 static Instruction *ProcessUMulZExtIdiom(ICmpInst &I, Value *MulVal,
                                          Value *OtherVal, InstCombiner &IC) {
+  // Don't bother doing this transformation for pointers, don't do it for
+  // vectors.
+  if (!isa<IntegerType>(MulVal->getType()))
+    return nullptr;
+
   assert(I.getOperand(0) == MulVal || I.getOperand(1) == MulVal);
   assert(I.getOperand(0) == OtherVal || I.getOperand(1) == OtherVal);
-  assert(isa<IntegerType>(MulVal->getType()));
   Instruction *MulInstr = cast<Instruction>(MulVal);
   assert(MulInstr->getOpcode() == Instruction::Mul);
 
@@ -2318,32 +2408,6 @@ static bool swapMayExposeCSEOpportunities(const Value * Op0,
   return GlobalSwapBenefits > 0;
 }
 
-// Helper function to check whether Op represents a lshr/ashr exact
-// instruction. For example:
-// (icmp (ashr exact const2, A), const1) -> icmp A, Log2(const2/const1)
-// Here if Op represents -> (ashr exact const2, A), and CI represents
-// const1, we compute Quotient as const2/const1.
-
-static bool checkShrExact(Value *Op, APInt &Quotient, const ConstantInt *CI,
-                          Value *&A) {
-
-  ConstantInt *CI2;
-  if (match(Op, m_AShr(m_ConstantInt(CI2), m_Value(A))) &&
-      (cast<BinaryOperator>(Op)->isExact())) {
-    Quotient = CI2->getValue().sdiv(CI->getValue());
-    return true;
-  }
-
-  // Handle the case for lhsr.
-  if (match(Op, m_LShr(m_ConstantInt(CI2), m_Value(A))) &&
-      (cast<BinaryOperator>(Op)->isExact())) {
-    Quotient = CI2->getValue().udiv(CI->getValue());
-    return true;
-  }
-
-  return false;
-}
-
 Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
   bool Changed = false;
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
@@ -2465,20 +2529,6 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
       return new ICmpInst(I.getPredicate(), A, B);
     }
 
-    // PR19753:
-    // (icmp (ashr exact const2, A), const1) -> icmp A, Log2(const2/const1)
-    // Cases where const1 doesn't divide const2 exactly or Quotient is not
-    // exact of log2 are handled by SimplifyICmpInst call above where we
-    // return false. Similar for lshr.
-    {
-      APInt Quotient;
-      if (checkShrExact(Op0, Quotient, CI, A)) {
-        unsigned shift = Quotient.logBase2();
-        return new ICmpInst(I.getPredicate(), A,
-                            ConstantInt::get(A->getType(), shift));
-      }
-    }
-
     // If we have an icmp le or icmp ge instruction, turn it into the
     // appropriate icmp lt or icmp gt instruction.  This allows us to rely on
     // them being folded in the code below.  The SimplifyICmpInst code has
@@ -2501,6 +2551,15 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
       assert(!CI->isMinValue(true));                  // A >=s MIN -> TRUE
       return new ICmpInst(ICmpInst::ICMP_SGT, Op0,
                           Builder->getInt(CI->getValue()-1));
+    }
+
+    // (icmp eq/ne (ashr/lshr const2, A), const1)
+    if (I.isEquality()) {
+      ConstantInt *CI2;
+      if (match(Op0, m_AShr(m_ConstantInt(CI2), m_Value(A))) ||
+          match(Op0, m_LShr(m_ConstantInt(CI2), m_Value(A)))) {
+        return FoldICmpCstShrCst(I, Op0, A, CI, CI2);
+      }
     }
 
     // If this comparison is a normal comparison, it demands all

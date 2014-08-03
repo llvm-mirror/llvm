@@ -474,7 +474,7 @@ LowerFormalArguments_32(SDValue Chain,
                           DAG.getConstant(Offset, MVT::i32));
       Load = DAG.getExtLoad(LoadOp, dl, MVT::i32, Chain, FIPtr,
                             MachinePointerInfo(),
-                            VA.getValVT(), false, false,0);
+                            VA.getValVT(), false, false, false,0);
       Load = DAG.getNode(ISD::TRUNCATE, dl, VA.getValVT(), Load);
     }
     InVals.push_back(Load);
@@ -2030,7 +2030,7 @@ SparcTargetLowering::LowerF128Op(SDValue Op, SelectionDAG &DAG,
   }
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(SDLoc(Op)).setChain(Chain)
-    .setCallee(CallingConv::C, RetTyABI, Callee, &Args, 0);
+    .setCallee(CallingConv::C, RetTyABI, Callee, std::move(Args), 0);
 
   std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
 
@@ -2086,7 +2086,7 @@ SparcTargetLowering::LowerF128Compare(SDValue LHS, SDValue RHS,
 
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(DL).setChain(Chain)
-    .setCallee(CallingConv::C, RetTy, Callee, &Args, 0);
+    .setCallee(CallingConv::C, RetTy, Callee, std::move(Args), 0);
 
   std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
 

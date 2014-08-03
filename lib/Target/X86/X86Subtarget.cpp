@@ -219,9 +219,6 @@ void X86Subtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
   // Make sure the right MCSchedModel is used.
   InitCPUSchedModel(CPUName);
 
-  if (X86ProcFamily == IntelAtom || X86ProcFamily == IntelSLM)
-    PostRAScheduler = true;
-
   InstrItins = getInstrItineraryForCPU(CPUName);
 
   // It's important to keep the MCSubtargetInfo feature bits in sync with
@@ -275,8 +272,12 @@ void X86Subtarget::initializeEnvironment() {
   HasERI = false;
   HasCDI = false;
   HasPFI = false;
+  HasDQI = false;
+  HasBWI = false;
+  HasVLX = false;
   HasADX = false;
   HasSHA = false;
+  HasSGX = false;
   HasPRFCHW = false;
   HasRDSEED = false;
   IsBTMemSlow = false;
@@ -286,18 +287,64 @@ void X86Subtarget::initializeEnvironment() {
   HasCmpxchg16b = false;
   UseLeaForSP = false;
   HasSlowDivide = false;
-  PostRAScheduler = false;
   PadShortFunctions = false;
   CallRegIndirect = false;
   LEAUsesAG = false;
   SlowLEA = false;
+  SlowIncDec = false;
   stackAlignment = 4;
   // FIXME: this is a known good value for Yonah. How about others?
   MaxInlineSizeThreshold = 128;
 }
 
+static std::string computeDataLayout(const X86Subtarget &ST) {
+  // X86 is little endian
+  std::string Ret = "e";
+
+  Ret += DataLayout::getManglingComponent(ST.getTargetTriple());
+  // X86 and x32 have 32 bit pointers.
+  if (ST.isTarget64BitILP32() || !ST.is64Bit())
+    Ret += "-p:32:32";
+
+  // Some ABIs align 64 bit integers and doubles to 64 bits, others to 32.
+  if (ST.is64Bit() || ST.isOSWindows() || ST.isTargetNaCl())
+    Ret += "-i64:64";
+  else
+    Ret += "-f64:32:64";
+
+  // Some ABIs align long double to 128 bits, others to 32.
+  if (ST.isTargetNaCl())
+    ; // No f80
+  else if (ST.is64Bit() || ST.isTargetDarwin())
+    Ret += "-f80:128";
+  else
+    Ret += "-f80:32";
+
+  // The registers can hold 8, 16, 32 or, in x86-64, 64 bits.
+  if (ST.is64Bit())
+    Ret += "-n8:16:32:64";
+  else
+    Ret += "-n8:16:32";
+
+  // The stack is aligned to 32 bits on some ABIs and 128 bits on others.
+  if (!ST.is64Bit() && ST.isOSWindows())  
+    Ret += "-S32";
+  else
+    Ret += "-S128";
+
+  return Ret;
+}
+
+X86Subtarget &X86Subtarget::initializeSubtargetDependencies(StringRef CPU,
+                                                            StringRef FS) {
+  initializeEnvironment();
+  resetSubtargetFeatures(CPU, FS);
+  return *this;
+}
+
 X86Subtarget::X86Subtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, unsigned StackAlignOverride)
+                           const std::string &FS, X86TargetMachine &TM,
+                           unsigned StackAlignOverride)
     : X86GenSubtargetInfo(TT, CPU, FS), X86ProcFamily(Others),
       PICStyle(PICStyles::None), TargetTriple(TT),
       StackAlignOverride(StackAlignOverride),
@@ -305,21 +352,14 @@ X86Subtarget::X86Subtarget(const std::string &TT, const std::string &CPU,
       In32BitMode(TargetTriple.getArch() == Triple::x86 &&
                   TargetTriple.getEnvironment() != Triple::CODE16),
       In16BitMode(TargetTriple.getArch() == Triple::x86 &&
-                  TargetTriple.getEnvironment() == Triple::CODE16) {
-  initializeEnvironment();
-  resetSubtargetFeatures(CPU, FS);
-}
+                  TargetTriple.getEnvironment() == Triple::CODE16),
+      DL(computeDataLayout(*this)), TSInfo(DL),
+      InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM),
+      FrameLowering(TargetFrameLowering::StackGrowsDown, getStackAlignment(),
+                    is64Bit() ? -8 : -4),
+      JITInfo(hasSSE1()) {}
 
-bool
-X86Subtarget::enablePostRAScheduler(CodeGenOpt::Level OptLevel,
-                                    TargetSubtargetInfo::AntiDepBreakMode &Mode,
-                                    RegClassVector &CriticalPathRCs) const {
-  Mode = TargetSubtargetInfo::ANTIDEP_CRITICAL;
-  CriticalPathRCs.clear();
-  return PostRAScheduler && OptLevel >= CodeGenOpt::Default;
-}
-
-bool
-X86Subtarget::enableEarlyIfConversion() const {
+bool X86Subtarget::enableEarlyIfConversion() const {
   return hasCMov() && X86EarlyIfConv;
 }
+

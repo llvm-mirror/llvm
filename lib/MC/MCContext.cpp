@@ -39,7 +39,7 @@ MCContext::MCContext(const MCAsmInfo *mai, const MCRegisterInfo *mri,
       AllowTemporaryLabels(true), DwarfCompileUnitID(0),
       AutoReset(DoAutoReset) {
 
-  error_code EC = llvm::sys::fs::current_path(CompilationDir);
+  std::error_code EC = llvm::sys::fs::current_path(CompilationDir);
   if (EC)
     CompilationDir.clear();
 
@@ -47,8 +47,9 @@ MCContext::MCContext(const MCAsmInfo *mai, const MCRegisterInfo *mri,
   SecureLog = nullptr;
   SecureLogUsed = false;
 
-  if (SrcMgr && SrcMgr->getNumBuffers() > 0)
-    MainFileName = SrcMgr->getMemoryBuffer(0)->getBufferIdentifier();
+  if (SrcMgr && SrcMgr->getNumBuffers())
+    MainFileName =
+        SrcMgr->getMemoryBuffer(SrcMgr->getMainFileID())->getBufferIdentifier();
 }
 
 MCContext::~MCContext() {
@@ -277,25 +278,26 @@ const MCSectionELF *MCContext::CreateELFGroupSection() {
   return Result;
 }
 
-const MCSectionCOFF *
-MCContext::getCOFFSection(StringRef Section, unsigned Characteristics,
-                          SectionKind Kind, StringRef COMDATSymName,
-                          int Selection, const MCSectionCOFF *Assoc) {
+const MCSectionCOFF *MCContext::getCOFFSection(StringRef Section,
+                                               unsigned Characteristics,
+                                               SectionKind Kind,
+                                               StringRef COMDATSymName,
+                                               int Selection) {
   // Do the lookup, if we have a hit, return it.
 
-  SectionGroupPair P(Section, COMDATSymName);
-  auto IterBool = COFFUniquingMap.insert(std::make_pair(P, nullptr));
+  SectionGroupTriple T(Section, COMDATSymName, Selection);
+  auto IterBool = COFFUniquingMap.insert(std::make_pair(T, nullptr));
   auto Iter = IterBool.first;
   if (!IterBool.second)
     return Iter->second;
 
-  const MCSymbol *COMDATSymbol = nullptr;
+  MCSymbol *COMDATSymbol = nullptr;
   if (!COMDATSymName.empty())
     COMDATSymbol = GetOrCreateSymbol(COMDATSymName);
 
-  StringRef CachedName = Iter->first.first;
-  MCSectionCOFF *Result = new (*this) MCSectionCOFF(
-      CachedName, Characteristics, COMDATSymbol, Selection, Assoc, Kind);
+  StringRef CachedName = std::get<0>(Iter->first);
+  MCSectionCOFF *Result = new (*this)
+      MCSectionCOFF(CachedName, Characteristics, COMDATSymbol, Selection, Kind);
 
   Iter->second = Result;
   return Result;
@@ -308,8 +310,8 @@ MCContext::getCOFFSection(StringRef Section, unsigned Characteristics,
 }
 
 const MCSectionCOFF *MCContext::getCOFFSection(StringRef Section) {
-  SectionGroupPair P(Section, "");
-  auto Iter = COFFUniquingMap.find(P);
+  SectionGroupTriple T(Section, "", 0);
+  auto Iter = COFFUniquingMap.find(T);
   if (Iter == COFFUniquingMap.end())
     return nullptr;
   return Iter->second;
@@ -337,6 +339,29 @@ bool MCContext::isValidDwarfFileNumber(unsigned FileNumber, unsigned CUID) {
     return false;
 
   return !MCDwarfFiles[FileNumber].Name.empty();
+}
+
+/// finalizeDwarfSections - Emit end symbols for each non-empty code section.
+/// Also remove empty sections from SectionStartEndSyms, to avoid generating
+/// useless debug info for them.
+void MCContext::finalizeDwarfSections(MCStreamer &MCOS) {
+  MCContext &context = MCOS.getContext();
+
+  auto sec = SectionStartEndSyms.begin();
+  while (sec != SectionStartEndSyms.end()) {
+    assert(sec->second.first && "Start symbol must be set by now");
+    MCOS.SwitchSection(sec->first);
+    if (MCOS.mayHaveInstructions()) {
+      MCSymbol *SectionEndSym = context.CreateTempSymbol();
+      MCOS.EmitLabel(SectionEndSym);
+      sec->second.second = SectionEndSym;
+      ++sec;
+    } else {
+      MapVector<const MCSection *, std::pair<MCSymbol *, MCSymbol *> >::iterator
+        to_erase = sec;
+      sec = SectionStartEndSyms.erase(to_erase);
+    }
+  }
 }
 
 void MCContext::FatalError(SMLoc Loc, const Twine &Msg) const {

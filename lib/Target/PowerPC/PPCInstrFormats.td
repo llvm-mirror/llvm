@@ -360,20 +360,6 @@ class DSForm_1<bits<6> opcode, bits<2> xo, dag OOL, dag IOL, string asmstr,
   let Inst{30-31} = xo;
 }
 
-class DSForm_1a<bits<6> opcode, bits<2> xo, dag OOL, dag IOL, string asmstr,
-                InstrItinClass itin, list<dag> pattern>
-         : I<opcode, OOL, IOL, asmstr, itin> {
-   bits<5>  RST;
-   bits<14> DS;
-   bits<5>  RA;
- 
-   let Pattern = pattern;
-   
-   let Inst{6-10}  = RST;
-   let Inst{11-15} = RA;
-   let Inst{16-29} = DS;
-   let Inst{30-31} = xo;
-}
 
 // 1.7.6 X-Form
 class XForm_base_r3xo<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr, 
@@ -392,6 +378,11 @@ class XForm_base_r3xo<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asms
   let Inst{16-20} = B;
   let Inst{21-30} = xo;
   let Inst{31}    = RC;
+}
+
+class XForm_tlb<bits<10> xo, dag OOL, dag IOL, string asmstr,
+                InstrItinClass itin> : XForm_base_r3xo<31, xo, OOL, IOL, asmstr, itin, []> {
+  let RST = 0;
 }
 
 // This is the same as XForm_base_r3xo, but the first two operands are swapped
@@ -469,6 +460,37 @@ class XForm_16<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
   let Inst{16-20} = RB;
   let Inst{21-30} = xo;
   let Inst{31}    = 0;
+}
+
+class XForm_sr<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+                InstrItinClass itin>
+         : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<5> RS;
+  bits<4> SR;
+
+  let Inst{6-10} = RS;
+  let Inst{12-15} = SR;
+  let Inst{21-30} = xo;
+}
+
+class XForm_mbar<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+                InstrItinClass itin>
+         : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<5> MO;
+
+  let Inst{6-10} = MO;
+  let Inst{21-30} = xo;
+}
+
+class XForm_srin<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+                InstrItinClass itin>
+         : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<5> RS;
+  bits<5> RB;
+
+  let Inst{6-10} = RS;
+  let Inst{16-20} = RB;
+  let Inst{21-30} = xo;
 }
 
 class XForm_mtmsr<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,

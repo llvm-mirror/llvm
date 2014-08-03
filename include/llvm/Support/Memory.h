@@ -15,8 +15,8 @@
 #define LLVM_SUPPORT_MEMORY_H
 
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/system_error.h"
 #include <string>
+#include <system_error>
 
 namespace llvm {
 namespace sys {
@@ -77,7 +77,7 @@ namespace sys {
     static MemoryBlock allocateMappedMemory(size_t NumBytes,
                                             const MemoryBlock *const NearBlock,
                                             unsigned Flags,
-                                            error_code &EC);
+                                            std::error_code &EC);
 
     /// This method releases a block of memory that was allocated with the
     /// allocateMappedMemory method. It should not be used to release any
@@ -88,7 +88,7 @@ namespace sys {
     /// describing the failure if an error occurred.
     /// 
     /// @brief Release mapped memory.
-    static error_code releaseMappedMemory(MemoryBlock &Block);
+    static std::error_code releaseMappedMemory(MemoryBlock &Block);
 
     /// This method sets the protection flags for a block of memory to the
     /// state specified by /p Flags.  The behavior is not specified if the
@@ -105,8 +105,8 @@ namespace sys {
     /// describing the failure if an error occurred.
     ///
     /// @brief Set memory protection state.
-    static error_code protectMappedMemory(const MemoryBlock &Block,
-                                          unsigned Flags);
+    static std::error_code protectMappedMemory(const MemoryBlock &Block,
+                                               unsigned Flags);
 
     /// This method allocates a block of Read/Write/Execute memory that is
     /// suitable for executing dynamically generated code (e.g. JIT). An
