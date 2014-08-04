@@ -204,9 +204,11 @@ bool FunctionAttrs::AddReadAttrs(const CallGraphSCC &SCC) {
                  CI != CE; ++CI) {
               Value *Arg = *CI;
               if (Arg->getType()->isPointerTy()) {
+                AAMDNodes AAInfo;
+                I->getAAMetadata(AAInfo);
+
                 AliasAnalysis::Location Loc(Arg,
-                                            AliasAnalysis::UnknownSize,
-                                            I->getMetadata(LLVMContext::MD_tbaa));
+                                            AliasAnalysis::UnknownSize, AAInfo);
                 if (!AA->pointsToConstantMemory(Loc, /*OrLocal=*/true)) {
                   if (MRB & AliasAnalysis::Mod)
                     // Writes non-local memory.  Give up.
@@ -449,14 +451,29 @@ determinePointerReadAttrs(Argument *A,
 
     case Instruction::Call:
     case Instruction::Invoke: {
+      bool Captures = true;
+
+      if (I->getType()->isVoidTy())
+        Captures = false;
+
+      auto AddUsersToWorklistIfCapturing = [&] {
+        if (Captures)
+          for (Use &UU : I->uses())
+            if (Visited.insert(&UU))
+              Worklist.push_back(&UU);
+      };
+
       CallSite CS(I);
-      if (CS.doesNotAccessMemory())
+      if (CS.doesNotAccessMemory()) {
+        AddUsersToWorklistIfCapturing();
         continue;
+      }
 
       Function *F = CS.getCalledFunction();
       if (!F) {
         if (CS.onlyReadsMemory()) {
           IsRead = true;
+          AddUsersToWorklistIfCapturing();
           continue;
         }
         return Attribute::None;
@@ -471,6 +488,7 @@ determinePointerReadAttrs(Argument *A,
                    "More params than args in non-varargs call.");
             return Attribute::None;
           }
+          Captures &= !CS.doesNotCapture(A - B);
           if (SCCNodes.count(AI))
             continue;
           if (!CS.onlyReadsMemory() && !CS.onlyReadsMemory(A - B))
@@ -479,6 +497,7 @@ determinePointerReadAttrs(Argument *A,
             IsRead = true;
         }
       }
+      AddUsersToWorklistIfCapturing();
       break;
     }
 

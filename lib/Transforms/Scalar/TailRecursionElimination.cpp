@@ -64,6 +64,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -226,12 +227,10 @@ struct AllocaDerivedValueTracker {
   }
 
   void callUsesLocalStack(CallSite CS, bool IsNocapture) {
-    // Add it to the list of alloca users. If it's already there, skip further
-    // processing.
-    if (!AllocaUsers.insert(CS.getInstruction()))
-      return;
+    // Add it to the list of alloca users.
+    AllocaUsers.insert(CS.getInstruction());
 
-    // If it's nocapture then it can't capture the alloca.
+    // If it's nocapture then it can't capture this alloca.
     if (IsNocapture)
       return;
 
@@ -318,8 +317,8 @@ bool TailCallElim::markTails(Function &F, bool &AllCallsAreTailCalls) {
           break;
         }
         if (SafeToTail) {
-          F.getContext().emitOptimizationRemark(
-              "tailcallelim", F, CI->getDebugLoc(),
+          emitOptimizationRemark(
+              F.getContext(), "tailcallelim", F, CI->getDebugLoc(),
               "marked this readnone call a tail call candidate");
           CI->setTailCall();
           Modified = true;
@@ -365,9 +364,9 @@ bool TailCallElim::markTails(Function &F, bool &AllCallsAreTailCalls) {
     if (Visited[CI->getParent()] != ESCAPED) {
       // If the escape point was part way through the block, calls after the
       // escape point wouldn't have been put into DeferredTails.
-      F.getContext().emitOptimizationRemark(
-          "tailcallelim", F, CI->getDebugLoc(),
-          "marked this call a tail call candidate");
+      emitOptimizationRemark(F.getContext(), "tailcallelim", F,
+                             CI->getDebugLoc(),
+                             "marked this call a tail call candidate");
       CI->setTailCall();
       Modified = true;
     } else {
@@ -678,9 +677,8 @@ bool TailCallElim::EliminateRecursiveTailCall(CallInst *CI, ReturnInst *Ret,
   BasicBlock *BB = Ret->getParent();
   Function *F = BB->getParent();
 
-  F->getContext().emitOptimizationRemark(
-      "tailcallelim", *F, CI->getDebugLoc(),
-      "transforming tail recursion to loop");
+  emitOptimizationRemark(F->getContext(), "tailcallelim", *F, CI->getDebugLoc(),
+                         "transforming tail recursion to loop");
 
   // OK! We can transform this tail call.  If this is the first one found,
   // create the new entry block, allowing us to branch back to the old entry.

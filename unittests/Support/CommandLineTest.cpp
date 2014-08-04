@@ -23,7 +23,7 @@ class TempEnvVar {
   TempEnvVar(const char *name, const char *value)
       : name(name) {
     const char *old_value = getenv(name);
-    EXPECT_EQ(NULL, old_value) << old_value;
+    EXPECT_EQ(nullptr, old_value) << old_value;
 #if HAVE_SETENV
     setenv(name, value, true);
 #else
@@ -211,5 +211,24 @@ TEST(CommandLineTest, AliasesWithArguments) {
     Alias.removeArgument();
   }
 }
+
+void testAliasRequired(int argc, const char *const *argv) {
+  StackOption<std::string> Option("option", cl::Required);
+  cl::alias Alias("o", llvm::cl::aliasopt(Option));
+
+  cl::ParseCommandLineOptions(argc, argv);
+  EXPECT_EQ("x", Option);
+  EXPECT_EQ(1, Option.getNumOccurrences());
+
+  Alias.removeArgument();
+}
+
+TEST(CommandLineTest, AliasRequired) {
+  const char *opts1[] = { "-tool", "-option=x" };
+  const char *opts2[] = { "-tool", "-o", "x" };
+  testAliasRequired(array_lengthof(opts1), opts1);
+  testAliasRequired(array_lengthof(opts2), opts2);
+}
+
 
 }  // anonymous namespace

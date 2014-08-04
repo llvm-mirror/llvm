@@ -13,8 +13,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "AMDGPU.h"
+#include "SIDefines.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "MCTargetDesc/AMDGPUMCCodeEmitter.h"
+#include "MCTargetDesc/AMDGPUFixupKinds.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCFixup.h"
@@ -39,6 +42,7 @@ class SIMCCodeEmitter : public  AMDGPUMCCodeEmitter {
   void operator=(const SIMCCodeEmitter &) LLVM_DELETED_FUNCTION;
   const MCInstrInfo &MCII;
   const MCRegisterInfo &MRI;
+  MCContext &Ctx;
 
   /// \brief Can this operand also contain immediate values?
   bool isSrcOperand(const MCInstrDesc &Desc, unsigned OpNo) const;
@@ -49,7 +53,7 @@ class SIMCCodeEmitter : public  AMDGPUMCCodeEmitter {
 public:
   SIMCCodeEmitter(const MCInstrInfo &mcii, const MCRegisterInfo &mri,
                   MCContext &ctx)
-    : MCII(mcii), MRI(mri) { }
+    : MCII(mcii), MRI(mri), Ctx(ctx) { }
 
   ~SIMCCodeEmitter() { }
 
@@ -60,6 +64,12 @@ public:
 
   /// \returns the encoding for an MCOperand.
   uint64_t getMachineOpValue(const MCInst &MI, const MCOperand &MO,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const override;
+
+  /// \brief Use a fixup to encode the simm16 field for SOPP branch
+  ///        instructions.
+  unsigned getSOPPBrEncoding(const MCInst &MI, unsigned OpNo,
                              SmallVectorImpl<MCFixup> &Fixups,
                              const MCSubtargetInfo &STI) const override;
 };
@@ -75,6 +85,15 @@ MCCodeEmitter *llvm::createSIMCCodeEmitter(const MCInstrInfo &MCII,
 
 bool SIMCCodeEmitter::isSrcOperand(const MCInstrDesc &Desc,
                                    unsigned OpNo) const {
+  // FIXME: We need a better way to figure out which operands can be immediate
+  // values
+  //
+  // Some VOP* instructions like ADDC use VReg32 as the register class
+  // for source 0, because they read VCC and can't take an SGPR as an
+  // argument due to constant bus restrictions.
+  if (OpNo == 1 && (Desc.TSFlags & (SIInstrFlags::VOP1 | SIInstrFlags::VOP2 |
+                                    SIInstrFlags::VOPC)))
+    return true;
 
   unsigned RegClass = Desc.OpInfo[OpNo].RegClass;
   return (AMDGPU::SSrc_32RegClassID == RegClass) ||
@@ -90,6 +109,8 @@ uint32_t SIMCCodeEmitter::getLitEncoding(const MCOperand &MO) const {
     Imm.I = MO.getImm();
   else if (MO.isFPImm())
     Imm.F = MO.getFPImm();
+  else if (MO.isExpr())
+    return 255;
   else
     return ~0;
 
@@ -157,8 +178,13 @@ void SIMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
     IntFloatUnion Imm;
     if (Op.isImm())
       Imm.I = Op.getImm();
-    else
+    else if (Op.isFPImm())
       Imm.F = Op.getFPImm();
+    else {
+      assert(Op.isExpr());
+      // This will be replaced with a fixup value.
+      Imm.I = 0;
+    }
 
     for (unsigned j = 0; j < 4; j++) {
       OS.write((uint8_t) ((Imm.I >> (8 * j)) & 0xff));
@@ -169,6 +195,21 @@ void SIMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   }
 }
 
+unsigned SIMCCodeEmitter::getSOPPBrEncoding(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+
+  if (MO.isExpr()) {
+    const MCExpr *Expr = MO.getExpr();
+    MCFixupKind Kind = (MCFixupKind)AMDGPU::fixup_si_sopp_br;
+    Fixups.push_back(MCFixup::Create(0, Expr, Kind, MI.getLoc()));
+    return 0;
+  }
+
+  return getMachineOpValue(MI, MO, Fixups, STI);
+}
+
 uint64_t SIMCCodeEmitter::getMachineOpValue(const MCInst &MI,
                                             const MCOperand &MO,
                                        SmallVectorImpl<MCFixup> &Fixups,
@@ -177,10 +218,19 @@ uint64_t SIMCCodeEmitter::getMachineOpValue(const MCInst &MI,
     return MRI.getEncodingValue(MO.getReg());
 
   if (MO.isExpr()) {
-    const MCExpr *Expr = MO.getExpr();
-    MCFixupKind Kind = MCFixupKind(FK_PCRel_4);
-    Fixups.push_back(MCFixup::Create(0, Expr, Kind, MI.getLoc()));
-    return 0;
+    const MCSymbolRefExpr *Expr = cast<MCSymbolRefExpr>(MO.getExpr());
+    MCFixupKind Kind;
+    const MCSymbol *Sym =
+        Ctx.GetOrCreateSymbol(StringRef(END_OF_TEXT_LABEL_NAME));
+
+    if (&Expr->getSymbol() == Sym) {
+      // Add the offset to the beginning of the constant values.
+      Kind = (MCFixupKind)AMDGPU::fixup_si_end_of_text;
+    } else {
+      // This is used for constant data stored in .rodata.
+     Kind = (MCFixupKind)AMDGPU::fixup_si_rodata;
+    }
+    Fixups.push_back(MCFixup::Create(4, Expr, Kind, MI.getLoc()));
   }
 
   // Figure out the operand number, needed for isSrcOperand check

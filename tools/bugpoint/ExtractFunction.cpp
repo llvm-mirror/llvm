@@ -366,7 +366,7 @@ Module *BugDriver::ExtractMappedBlocksFromModule(const
                                                  Module *M) {
   SmallString<128> Filename;
   int FD;
-  error_code EC = sys::fs::createUniqueFile(
+  std::error_code EC = sys::fs::createUniqueFile(
       OutputPrefix + "-extractblocks%%%%%%%", FD, Filename);
   if (EC) {
     outs() << "*** Basic Block extraction failed!\n";

@@ -12,7 +12,6 @@ add_llvm_library(LLVMObject
   MachOUniversal.cpp
   Object.cpp
   ObjectFile.cpp
-  StringTableBuilder.cpp
+  RecordStreamer.cpp
   SymbolicFile.cpp
-  YAML.cpp
   )

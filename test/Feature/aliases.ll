@@ -7,17 +7,26 @@
 @bar = global i32 0
 @foo1 = alias i32* @bar
 @foo2 = alias i32* @bar
+@foo3 = alias i32* @foo2
+@foo4 = unnamed_addr alias i32* @foo2
+
+; Make sure the verifier does not complain about references to a global
+; declaration from an initializer.
+@decl = external global i32
+@ptr = global i32* @decl
+@ptr_a = alias i32** @ptr
 
 %FunTy = type i32()
 
 define i32 @foo_f() {
   ret i32 0
 }
-@bar_f = alias weak_odr %FunTy* @foo_f
+@bar_f = weak_odr alias %FunTy* @foo_f
+@bar_ff = alias i32()* @bar_f
 
-@bar_i = alias internal i32* @bar
+@bar_i = internal alias i32* @bar
 
-@A = alias i64, i32* @bar
+@A = alias bitcast (i32* @bar to i64*)
 
 define i32 @test() {
 entry:

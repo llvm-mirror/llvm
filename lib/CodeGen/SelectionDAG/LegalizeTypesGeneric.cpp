@@ -60,12 +60,15 @@ void DAGTypeLegalizer::ExpandRes_BITCAST(SDNode *N, SDValue &Lo, SDValue &Hi) {
     case TargetLowering::TypeExpandFloat:
       // Convert the expanded pieces of the input.
       GetExpandedOp(InOp, Lo, Hi);
+      if (TLI.hasBigEndianPartOrdering(InVT) !=
+          TLI.hasBigEndianPartOrdering(OutVT))
+        std::swap(Lo, Hi);
       Lo = DAG.getNode(ISD::BITCAST, dl, NOutVT, Lo);
       Hi = DAG.getNode(ISD::BITCAST, dl, NOutVT, Hi);
       return;
     case TargetLowering::TypeSplitVector:
       GetSplitVector(InOp, Lo, Hi);
-      if (TLI.isBigEndian())
+      if (TLI.hasBigEndianPartOrdering(OutVT))
         std::swap(Lo, Hi);
       Lo = DAG.getNode(ISD::BITCAST, dl, NOutVT, Lo);
       Hi = DAG.getNode(ISD::BITCAST, dl, NOutVT, Hi);
@@ -82,7 +85,7 @@ void DAGTypeLegalizer::ExpandRes_BITCAST(SDNode *N, SDValue &Lo, SDValue &Hi) {
       EVT LoVT, HiVT;
       std::tie(LoVT, HiVT) = DAG.GetSplitDestVTs(InVT);
       std::tie(Lo, Hi) = DAG.SplitVector(InOp, dl, LoVT, HiVT);
-      if (TLI.isBigEndian())
+      if (TLI.hasBigEndianPartOrdering(OutVT))
         std::swap(Lo, Hi);
       Lo = DAG.getNode(ISD::BITCAST, dl, NOutVT, Lo);
       Hi = DAG.getNode(ISD::BITCAST, dl, NOutVT, Hi);
@@ -176,7 +179,7 @@ void DAGTypeLegalizer::ExpandRes_BITCAST(SDNode *N, SDValue &Lo, SDValue &Hi) {
                    false, false, MinAlign(Alignment, IncrementSize));
 
   // Handle endianness of the load.
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(OutVT))
     std::swap(Lo, Hi);
 }
 
@@ -245,20 +248,21 @@ void DAGTypeLegalizer::ExpandRes_NormalLoad(SDNode *N, SDValue &Lo,
   SDLoc dl(N);
 
   LoadSDNode *LD = cast<LoadSDNode>(N);
-  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), LD->getValueType(0));
+  EVT ValueVT = LD->getValueType(0);
+  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), ValueVT);
   SDValue Chain = LD->getChain();
   SDValue Ptr = LD->getBasePtr();
   unsigned Alignment = LD->getAlignment();
   bool isVolatile = LD->isVolatile();
   bool isNonTemporal = LD->isNonTemporal();
   bool isInvariant = LD->isInvariant();
-  const MDNode *TBAAInfo = LD->getTBAAInfo();
+  AAMDNodes AAInfo = LD->getAAInfo();
 
   assert(NVT.isByteSized() && "Expanded type not byte sized!");
 
   Lo = DAG.getLoad(NVT, dl, Chain, Ptr, LD->getPointerInfo(),
                    isVolatile, isNonTemporal, isInvariant, Alignment,
-                   TBAAInfo);
+                   AAInfo);
 
   // Increment the pointer to the other half.
   unsigned IncrementSize = NVT.getSizeInBits() / 8;
@@ -267,7 +271,7 @@ void DAGTypeLegalizer::ExpandRes_NormalLoad(SDNode *N, SDValue &Lo,
   Hi = DAG.getLoad(NVT, dl, Chain, Ptr,
                    LD->getPointerInfo().getWithOffset(IncrementSize),
                    isVolatile, isNonTemporal, isInvariant,
-                   MinAlign(Alignment, IncrementSize), TBAAInfo);
+                   MinAlign(Alignment, IncrementSize), AAInfo);
 
   // Build a factor node to remember that this load is independent of the
   // other one.
@@ -275,7 +279,7 @@ void DAGTypeLegalizer::ExpandRes_NormalLoad(SDNode *N, SDValue &Lo,
                       Hi.getValue(1));
 
   // Handle endianness of the load.
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(ValueVT))
     std::swap(Lo, Hi);
 
   // Modified the chain - switch anything that used the old chain to use
@@ -295,7 +299,7 @@ void DAGTypeLegalizer::ExpandRes_VAARG(SDNode *N, SDValue &Lo, SDValue &Hi) {
   Hi = DAG.getVAArg(NVT, dl, Lo.getValue(1), Ptr, N->getOperand(2), 0);
 
   // Handle endianness of the load.
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(OVT))
     std::swap(Lo, Hi);
 
   // Modified the chain - switch anything that used the old chain to use
@@ -459,14 +463,14 @@ SDValue DAGTypeLegalizer::ExpandOp_NormalStore(SDNode *N, unsigned OpNo) {
   SDLoc dl(N);
 
   StoreSDNode *St = cast<StoreSDNode>(N);
-  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(),
-                                     St->getValue().getValueType());
+  EVT ValueVT = St->getValue().getValueType();
+  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), ValueVT);
   SDValue Chain = St->getChain();
   SDValue Ptr = St->getBasePtr();
   unsigned Alignment = St->getAlignment();
   bool isVolatile = St->isVolatile();
   bool isNonTemporal = St->isNonTemporal();
-  const MDNode *TBAAInfo = St->getTBAAInfo();
+  AAMDNodes AAInfo = St->getAAInfo();
 
   assert(NVT.isByteSized() && "Expanded type not byte sized!");
   unsigned IncrementSize = NVT.getSizeInBits() / 8;
@@ -474,18 +478,18 @@ SDValue DAGTypeLegalizer::ExpandOp_NormalStore(SDNode *N, unsigned OpNo) {
   SDValue Lo, Hi;
   GetExpandedOp(St->getValue(), Lo, Hi);
 
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(ValueVT))
     std::swap(Lo, Hi);
 
   Lo = DAG.getStore(Chain, dl, Lo, Ptr, St->getPointerInfo(),
-                    isVolatile, isNonTemporal, Alignment, TBAAInfo);
+                    isVolatile, isNonTemporal, Alignment, AAInfo);
 
   Ptr = DAG.getNode(ISD::ADD, dl, Ptr.getValueType(), Ptr,
                     DAG.getConstant(IncrementSize, Ptr.getValueType()));
   Hi = DAG.getStore(Chain, dl, Hi, Ptr,
                     St->getPointerInfo().getWithOffset(IncrementSize),
                     isVolatile, isNonTemporal,
-                    MinAlign(Alignment, IncrementSize), TBAAInfo);
+                    MinAlign(Alignment, IncrementSize), AAInfo);
 
   return DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Lo, Hi);
 }

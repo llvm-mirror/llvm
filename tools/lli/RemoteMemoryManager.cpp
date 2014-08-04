@@ -61,7 +61,7 @@ allocateDataSection(uintptr_t Size, unsigned Alignment,
 }
 
 sys::MemoryBlock RemoteMemoryManager::allocateSection(uintptr_t Size) {
-  error_code ec;
+  std::error_code ec;
   sys::MemoryBlock MB = sys::Memory::allocateMappedMemory(Size,
                                                           &Near,
                                                           sys::Memory::MF_READ |

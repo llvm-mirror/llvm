@@ -12,11 +12,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Target/TargetMachine.h"
+
+#include "llvm/Analysis/Passes.h"
 #include "llvm/CodeGen/AsmPrinter.h"
+#include "llvm/CodeGen/JumpInstrTables.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/IRPrintingPasses.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -42,19 +46,6 @@ using namespace llvm;
 static cl::opt<cl::boolOrDefault>
 EnableFastISelOption("fast-isel", cl::Hidden,
   cl::desc("Enable the \"fast\" instruction selector"));
-
-static cl::opt<cl::boolOrDefault>
-AsmVerbose("asm-verbose", cl::desc("Add comments to directives."),
-           cl::init(cl::BOU_UNSET));
-
-static bool getVerboseAsm() {
-  switch (AsmVerbose) {
-  case cl::BOU_UNSET: return TargetMachine::getAsmVerbosityDefault();
-  case cl::BOU_TRUE:  return true;
-  case cl::BOU_FALSE: return false;
-  }
-  llvm_unreachable("Invalid verbose asm state");
-}
 
 void LLVMTargetMachine::initAsmInfo() {
   MCAsmInfo *TmpAsmInfo = TheTarget.createMCAsmInfo(*getRegisterInfo(),
@@ -95,6 +86,7 @@ static MCContext *addPassesToGenerateCode(LLVMTargetMachine *TM,
                                           bool DisableVerify,
                                           AnalysisID StartAfter,
                                           AnalysisID StopAfter) {
+
   // Add internal analysis passes from the target machine.
   TM->addAnalysisPasses(PM);
 
@@ -149,6 +141,11 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
                                             bool DisableVerify,
                                             AnalysisID StartAfter,
                                             AnalysisID StopAfter) {
+  // Passes to handle jumptable function annotations. These can't be handled at
+  // JIT time, so we don't add them directly to addPassesToGenerateCode.
+  PM.add(createJumpInstrTableInfoPass());
+  PM.add(createJumpInstrTablesPass(Options.JTType));
+
   // Add common CodeGen passes.
   MCContext *Context = addPassesToGenerateCode(this, PM, DisableVerify,
                                                StartAfter, StopAfter);
@@ -188,8 +185,9 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
     MCAsmBackend *MAB = getTarget().createMCAsmBackend(MRI, getTargetTriple(),
                                                        TargetCPU);
     MCStreamer *S = getTarget().createAsmStreamer(
-        *Context, Out, getVerboseAsm(), Options.MCOptions.MCUseDwarfDirectory,
-        InstPrinter, MCE, MAB, Options.MCOptions.ShowMCInst);
+        *Context, Out, Options.MCOptions.AsmVerbose,
+        Options.MCOptions.MCUseDwarfDirectory, InstPrinter, MCE, MAB,
+        Options.MCOptions.ShowMCInst);
     AsmStreamer.reset(S);
     break;
   }
@@ -211,7 +209,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
   case CGFT_Null:
     // The Null output is intended for use for performance analysis and testing,
     // not real users.
-    AsmStreamer.reset(createNullStreamer(*Context));
+    AsmStreamer.reset(getTarget().createNullStreamer(*Context));
     break;
   }
 

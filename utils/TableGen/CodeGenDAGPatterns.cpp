@@ -771,7 +771,7 @@ static unsigned getPatternSize(const TreePatternNode *P,
 
 /// Compute the complexity metric for the input pattern.  This roughly
 /// corresponds to the number of nodes that are covered.
-unsigned PatternToMatch::
+int PatternToMatch::
 getPatternComplexity(const CodeGenDAGPatterns &CGP) const {
   return getPatternSize(getSrcPattern(), CGP) + getAddedComplexity();
 }
@@ -1718,9 +1718,9 @@ bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
         DagInit *MIOpInfo = OperandNode->getValueAsDag("MIOperandInfo");
         if (unsigned NumArgs = MIOpInfo->getNumArgs()) {
           // But don't do that if the whole operand is being provided by
-          // a single ComplexPattern.
-          const ComplexPattern *AM = Child->getComplexPatternInfo(CDP);
-          if (!AM || AM->getNumOperands() < NumArgs) {
+          // a single ComplexPattern-related Operand.
+
+          if (Child->getNumMIResults(CDP) < NumArgs) {
             // Match first sub-operand against the child we already have.
             Record *SubRec = cast<DefInit>(MIOpInfo->getArg(0))->getDef();
             MadeChange |=
@@ -2119,9 +2119,11 @@ InferAllTypes(const StringMap<SmallVector<TreePatternNode*,1> > *InNamedTypes) {
       // If we have input named node types, propagate their types to the named
       // values here.
       if (InNamedTypes) {
-        // FIXME: Should be error?
-        assert(InNamedTypes->count(I->getKey()) &&
-               "Named node in output pattern but not input pattern?");
+        if (!InNamedTypes->count(I->getKey())) {
+          error("Node '" + std::string(I->getKey()) +
+                "' in output pattern but not input pattern");
+          return true;
+        }
 
         const SmallVectorImpl<TreePatternNode*> &InNodes =
           InNamedTypes->find(I->getKey())->second;

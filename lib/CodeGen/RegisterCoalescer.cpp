@@ -751,7 +751,7 @@ bool RegisterCoalescer::reMaterializeTrivialDef(CoalescerPair &CP,
     IsDefCopy = true;
     return false;
   }
-  if (!DefMI->isAsCheapAsAMove())
+  if (!TII->isAsCheapAsAMove(DefMI))
     return false;
   if (!TII->isTriviallyReMaterializable(DefMI, AA))
     return false;
@@ -1035,6 +1035,22 @@ bool RegisterCoalescer::joinCopy(MachineInstr *CopyMI, bool &Again) {
   if (!CP.setRegisters(CopyMI)) {
     DEBUG(dbgs() << "\tNot coalescable.\n");
     return false;
+  }
+
+  if (CP.getNewRC()) {
+    auto SrcRC = MRI->getRegClass(CP.getSrcReg());
+    auto DstRC = MRI->getRegClass(CP.getDstReg());
+    unsigned SrcIdx = CP.getSrcIdx();
+    unsigned DstIdx = CP.getDstIdx();
+    if (CP.isFlipped()) {
+      std::swap(SrcIdx, DstIdx);
+      std::swap(SrcRC, DstRC);
+    }
+    if (!TRI->shouldCoalesce(CopyMI, SrcRC, SrcIdx, DstRC, DstIdx,
+                            CP.getNewRC())) {
+      DEBUG(dbgs() << "\tSubtarget bailed on coalescing.\n");
+      return false;
+    }
   }
 
   // Dead code elimination. This really should be handled by MachineDCE, but

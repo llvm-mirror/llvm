@@ -26,7 +26,7 @@ set(CMAKE_MODULE_PATH
   )
 
 set(LLVM_VERSION_MAJOR 3)
-set(LLVM_VERSION_MINOR 5)
+set(LLVM_VERSION_MINOR 6)
 set(LLVM_VERSION_PATCH 0)
 
 if (NOT PACKAGE_VERSION)
@@ -114,6 +114,12 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
 # They are used as destination of target generators.
 set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
 set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib)
+if(WIN32 OR CYGWIN)
+  # DLL platform -- put DLLs into bin.
+  set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
+else()
+  set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_LIBRARY_OUTPUT_INTDIR})
+endif()
 
 # Each of them corresponds to llvm-config's.
 set(LLVM_TOOLS_BINARY_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR}) # --bindir
@@ -128,7 +134,6 @@ set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name 
 
 set(LLVM_ALL_TARGETS
   AArch64
-  ARM64
   ARM
   CppBackend
   Hexagon
@@ -144,7 +149,7 @@ set(LLVM_ALL_TARGETS
   )
 
 # List of targets with JIT support:
-set(LLVM_TARGETS_WITH_JIT X86 PowerPC AArch64 ARM64 ARM Mips SystemZ)
+set(LLVM_TARGETS_WITH_JIT X86 PowerPC AArch64 ARM Mips SystemZ)
 
 set(LLVM_TARGETS_TO_BUILD "all"
     CACHE STRING "Semicolon-separated list of targets to build, or \"all\".")
@@ -235,7 +240,7 @@ option(LLVM_USE_OPROFILE
 # If enabled, verify we are on a platform that supports oprofile.
 if( LLVM_USE_OPROFILE )
   if( NOT CMAKE_SYSTEM_NAME MATCHES "Linux" )
-    message(FATAL_ERROR "OProfile support is available on Linux only.") 
+    message(FATAL_ERROR "OProfile support is available on Linux only.")
   endif( NOT CMAKE_SYSTEM_NAME MATCHES "Linux" )
 endif( LLVM_USE_OPROFILE )
 
@@ -244,6 +249,9 @@ set(LLVM_USE_SANITIZER "" CACHE STRING
 
 option(LLVM_USE_SPLIT_DWARF
   "Use -gsplit-dwarf when compiling llvm." OFF)
+
+option(WITH_POLLY "Build LLVM with Polly" ON)
+option(LINK_POLLY_INTO_TOOLS "Static link Polly into tools" OFF)
 
 # Define an option controlling whether we should build for 32-bit on 64-bit
 # platforms, where supported.
@@ -497,7 +505,6 @@ add_subdirectory(lib)
 
 if( LLVM_INCLUDE_UTILS )
   add_subdirectory(utils/FileCheck)
-  add_subdirectory(utils/FileUpdate)
   add_subdirectory(utils/PerfectShuffle)
   add_subdirectory(utils/count)
   add_subdirectory(utils/not)
@@ -515,9 +522,6 @@ if(LLVM_INCLUDE_TESTS)
 endif()
 
 add_subdirectory(projects)
-
-option(WITH_POLLY "Build LLVM with Polly" ON)
-option(LINK_POLLY_INTO_TOOLS "Static link Polly into tools" OFF)
 
 if(WITH_POLLY)
   if(NOT EXISTS ${LLVM_MAIN_SRC_DIR}/tools/polly/CMakeLists.txt)
@@ -584,6 +588,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN "*.inc"
     # Exclude include/llvm/CMakeFiles/intrinsics_gen.dir, matched by "*.def"
     PATTERN "CMakeFiles" EXCLUDE
+    PATTERN "config.h" EXCLUDE
     PATTERN ".svn" EXCLUDE
     )
 endif()

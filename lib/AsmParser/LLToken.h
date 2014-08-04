@@ -39,10 +39,9 @@ namespace lltok {
 
     kw_private,
     kw_internal,
-    kw_linker_private,          // NOTE: deprecated, for parser compatibility
-    kw_linker_private_weak,     // NOTE: deprecated, for parser compatibility
     kw_linkonce, kw_linkonce_odr,
-    kw_weak, kw_weak_odr, kw_appending,
+    kw_weak, // Used as a linkage, and a modifier for "cmpxchg".
+    kw_weak_odr, kw_appending,
     kw_dllimport, kw_dllexport, kw_common, kw_available_externally,
     kw_default, kw_hidden, kw_protected,
     kw_unnamed_addr,
@@ -105,8 +104,10 @@ namespace lltok {
     kw_byval,
     kw_inalloca,
     kw_cold,
+    kw_dereferenceable,
     kw_inlinehint,
     kw_inreg,
+    kw_jumptable,
     kw_minsize,
     kw_naked,
     kw_nest,
@@ -139,6 +140,15 @@ namespace lltok {
 
     kw_type,
     kw_opaque,
+
+    kw_comdat,
+
+    // Comdat types
+    kw_any,
+    kw_exactmatch,
+    kw_largest,
+    kw_noduplicates,
+    kw_samesize,
 
     kw_eq, kw_ne, kw_slt, kw_sgt, kw_sle, kw_sge, kw_ult, kw_ugt, kw_ule,
     kw_uge, kw_oeq, kw_one, kw_olt, kw_ogt, kw_ole, kw_oge, kw_ord, kw_uno,
@@ -178,6 +188,7 @@ namespace lltok {
     // String valued tokens (StrVal).
     LabelStr,          // foo:
     GlobalVar,         // @foo @"foo"
+    ComdatVar,         // $foo
     LocalVar,          // %foo %"foo"
     MetadataVar,       // !foo
     StringConstant,    // "foo"

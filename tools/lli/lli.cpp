@@ -285,8 +285,8 @@ public:
     if (!getCacheFilename(ModuleID, CacheName))
       return nullptr;
     // Load the object from the cache filename
-    std::unique_ptr<MemoryBuffer> IRObjectBuffer;
-    MemoryBuffer::getFile(CacheName.c_str(), IRObjectBuffer, -1, false);
+    ErrorOr<std::unique_ptr<MemoryBuffer>> IRObjectBuffer =
+        MemoryBuffer::getFile(CacheName.c_str(), -1, false);
     // If the file isn't there, that's OK.
     if (!IRObjectBuffer)
       return nullptr;
@@ -294,7 +294,7 @@ public:
     // because the file has probably just been mmapped.  Instead we make
     // a copy.  The filed-based buffer will be released when it goes
     // out of scope.
-    return MemoryBuffer::getMemBufferCopy(IRObjectBuffer->getBuffer());
+    return MemoryBuffer::getMemBufferCopy(IRObjectBuffer.get()->getBuffer());
   }
 
 private:
@@ -415,7 +415,7 @@ int main(int argc, char **argv, char * const *envp) {
 
   // If not jitting lazily, load the whole bitcode file eagerly too.
   if (NoLazyCompilation) {
-    if (error_code EC = Mod->materializeAllPermanently()) {
+    if (std::error_code EC = Mod->materializeAllPermanently()) {
       errs() << argv[0] << ": bitcode didn't read correctly.\n";
       errs() << "Reason: " << EC.message() << "\n";
       exit(1);
@@ -528,25 +528,25 @@ int main(int argc, char **argv, char * const *envp) {
   }
 
   for (unsigned i = 0, e = ExtraObjects.size(); i != e; ++i) {
-    ErrorOr<object::ObjectFile *> Obj =
+    ErrorOr<std::unique_ptr<object::ObjectFile>> Obj =
         object::ObjectFile::createObjectFile(ExtraObjects[i]);
     if (!Obj) {
       Err.print(argv[0], errs());
       return 1;
     }
-    EE->addObjectFile(std::unique_ptr<object::ObjectFile>(Obj.get()));
+    EE->addObjectFile(std::move(Obj.get()));
   }
 
   for (unsigned i = 0, e = ExtraArchives.size(); i != e; ++i) {
-    std::unique_ptr<MemoryBuffer> ArBuf;
-    error_code ec;
-    ec = MemoryBuffer::getFileOrSTDIN(ExtraArchives[i], ArBuf);
-    if (ec) {
+    ErrorOr<std::unique_ptr<MemoryBuffer>> ArBuf =
+        MemoryBuffer::getFileOrSTDIN(ExtraArchives[i]);
+    if (!ArBuf) {
       Err.print(argv[0], errs());
       return 1;
     }
-    object::Archive *Ar = new object::Archive(ArBuf.release(), ec);
-    if (ec || !Ar) {
+    std::error_code EC;
+    object::Archive *Ar = new object::Archive(std::move(ArBuf.get()), EC);
+    if (EC || !Ar) {
       Err.print(argv[0], errs());
       return 1;
     }

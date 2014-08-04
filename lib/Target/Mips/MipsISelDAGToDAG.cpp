@@ -47,6 +47,7 @@ using namespace llvm;
 //===----------------------------------------------------------------------===//
 
 bool MipsDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
+  Subtarget = &TM.getSubtarget<MipsSubtarget>();
   bool Ret = SelectionDAGISel::runOnMachineFunction(MF);
 
   processFunctionAfterISel(MF);
@@ -202,8 +203,9 @@ SDNode* MipsDAGToDAGISel::Select(SDNode *Node) {
 #ifndef NDEBUG
   case ISD::LOAD:
   case ISD::STORE:
-    assert(cast<MemSDNode>(Node)->getMemoryVT().getSizeInBits() / 8 <=
-           cast<MemSDNode>(Node)->getAlignment() &&
+    assert((Subtarget->systemSupportsUnalignedAccess() ||
+            cast<MemSDNode>(Node)->getMemoryVT().getSizeInBits() / 8 <=
+            cast<MemSDNode>(Node)->getAlignment()) &&
            "Unexpected unaligned loads/stores.");
     break;
 #endif

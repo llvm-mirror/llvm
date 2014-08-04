@@ -32,7 +32,7 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/ToolOutputFile.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 using namespace llvm;
 
 static cl::opt<std::string>
@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
     M.reset(getStreamedBitcodeModule(DisplayFilename, streamer, Context,
                                      &ErrorMessage));
     if(M.get()) {
-      if (error_code EC = M->materializeAllPermanently()) {
+      if (std::error_code EC = M->materializeAllPermanently()) {
         ErrorMessage = EC.message();
         M.reset();
       }

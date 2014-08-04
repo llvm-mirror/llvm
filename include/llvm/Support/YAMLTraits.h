@@ -24,7 +24,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/YAMLParser.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 
 namespace llvm {
 namespace yaml {
@@ -487,6 +487,19 @@ public:
     }
   }
 
+  template <typename T>
+  void maskedBitSetCase(T &Val, const char *Str, T ConstVal, T Mask) {
+    if (bitSetMatch(Str, outputting() && (Val & Mask) == ConstVal))
+      Val = Val | ConstVal;
+  }
+
+  template <typename T>
+  void maskedBitSetCase(T &Val, const char *Str, uint32_t ConstVal,
+                        uint32_t Mask) {
+    if (bitSetMatch(Str, outputting() && (Val & Mask) == ConstVal))
+      Val = Val | ConstVal;
+  }
+
   void *getContext();
   void setContext(void *);
 
@@ -867,7 +880,7 @@ public:
   ~Input();
 
   // Check if there was an syntax or semantic error during parsing.
-  llvm::error_code error();
+  std::error_code error();
 
 private:
   bool outputting() override;
@@ -969,13 +982,13 @@ public:
   // These are only used by operator>>. They could be private
   // if those templated things could be made friends.
   bool setCurrentDocument();
-  void nextDocument();
+  bool nextDocument();
 
 private:
   llvm::SourceMgr                     SrcMgr; // must be before Strm
   std::unique_ptr<llvm::yaml::Stream> Strm;
   std::unique_ptr<HNode>              TopNode;
-  llvm::error_code                    EC;
+  std::error_code                     EC;
   llvm::BumpPtrAllocator              StringAllocator;
   llvm::yaml::document_iterator       DocIterator;
   std::vector<bool>                   BitValuesUsed;

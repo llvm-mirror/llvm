@@ -230,6 +230,9 @@ static const unsigned char BitReverseTable256[256] = {
 #define R4(n) R2(n), R2(n + 2 * 16), R2(n + 1 * 16), R2(n + 3 * 16)
 #define R6(n) R4(n), R4(n + 2 * 4), R4(n + 1 * 4), R4(n + 3 * 4)
   R6(0), R6(2), R6(1), R6(3)
+#undef R2
+#undef R4
+#undef R6
 };
 
 /// \brief Reverse the bits in \p Val.
@@ -256,6 +259,12 @@ inline uint32_t Hi_32(uint64_t Value) {
 /// Lo_32 - This function returns the low 32 bits of a 64 bit value.
 inline uint32_t Lo_32(uint64_t Value) {
   return static_cast<uint32_t>(Value);
+}
+
+/// Make_64 - This functions makes a 64-bit integer from a high / low pair of
+///           32-bit integers.
+inline uint64_t Make_64(uint32_t High, uint32_t Low) {
+  return ((uint64_t)High << 32) | (uint64_t)Low;
 }
 
 /// isInt - Checks if an integer fits into the given bit width.

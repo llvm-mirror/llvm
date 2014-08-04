@@ -18,7 +18,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 
 using namespace llvm;
 
@@ -29,17 +29,16 @@ namespace llvm {
 static const char *const TimeIRParsingGroupName = "LLVM IR Parsing";
 static const char *const TimeIRParsingName = "Parse IR";
 
-
-Module *llvm::getLazyIRModule(MemoryBuffer *Buffer, SMDiagnostic &Err,
-                              LLVMContext &Context) {
+static Module *getLazyIRModule(MemoryBuffer *Buffer, SMDiagnostic &Err,
+                               LLVMContext &Context) {
   if (isBitcode((const unsigned char *)Buffer->getBufferStart(),
                 (const unsigned char *)Buffer->getBufferEnd())) {
     std::string ErrMsg;
     ErrorOr<Module *> ModuleOrErr = getLazyBitcodeModule(Buffer, Context);
-    if (error_code EC = ModuleOrErr.getError()) {
+    if (std::error_code EC = ModuleOrErr.getError()) {
       Err = SMDiagnostic(Buffer->getBufferIdentifier(), SourceMgr::DK_Error,
                          EC.message());
-      // ParseBitcodeFile does not take ownership of the Buffer in the
+      // getLazyBitcodeModule does not take ownership of the Buffer in the
       // case of an error.
       delete Buffer;
       return nullptr;
@@ -52,14 +51,15 @@ Module *llvm::getLazyIRModule(MemoryBuffer *Buffer, SMDiagnostic &Err,
 
 Module *llvm::getLazyIRFileModule(const std::string &Filename, SMDiagnostic &Err,
                                   LLVMContext &Context) {
-  std::unique_ptr<MemoryBuffer> File;
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, File)) {
+  ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
+      MemoryBuffer::getFileOrSTDIN(Filename);
+  if (std::error_code EC = FileOrErr.getError()) {
     Err = SMDiagnostic(Filename, SourceMgr::DK_Error,
-                       "Could not open input file: " + ec.message());
+                       "Could not open input file: " + EC.message());
     return nullptr;
   }
 
-  return getLazyIRModule(File.release(), Err, Context);
+  return getLazyIRModule(FileOrErr.get().release(), Err, Context);
 }
 
 Module *llvm::ParseIR(MemoryBuffer *Buffer, SMDiagnostic &Err,
@@ -70,29 +70,31 @@ Module *llvm::ParseIR(MemoryBuffer *Buffer, SMDiagnostic &Err,
                 (const unsigned char *)Buffer->getBufferEnd())) {
     ErrorOr<Module *> ModuleOrErr = parseBitcodeFile(Buffer, Context);
     Module *M = nullptr;
-    if (error_code EC = ModuleOrErr.getError())
+    if (std::error_code EC = ModuleOrErr.getError())
       Err = SMDiagnostic(Buffer->getBufferIdentifier(), SourceMgr::DK_Error,
                          EC.message());
     else
       M = ModuleOrErr.get();
     // parseBitcodeFile does not take ownership of the Buffer.
-    delete Buffer;
     return M;
   }
 
-  return ParseAssembly(Buffer, nullptr, Err, Context);
+  return ParseAssembly(MemoryBuffer::getMemBuffer(
+                           Buffer->getBuffer(), Buffer->getBufferIdentifier()),
+                       nullptr, Err, Context);
 }
 
 Module *llvm::ParseIRFile(const std::string &Filename, SMDiagnostic &Err,
                           LLVMContext &Context) {
-  std::unique_ptr<MemoryBuffer> File;
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, File)) {
+  ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
+      MemoryBuffer::getFileOrSTDIN(Filename);
+  if (std::error_code EC = FileOrErr.getError()) {
     Err = SMDiagnostic(Filename, SourceMgr::DK_Error,
-                       "Could not open input file: " + ec.message());
+                       "Could not open input file: " + EC.message());
     return nullptr;
   }
 
-  return ParseIR(File.release(), Err, Context);
+  return ParseIR(FileOrErr.get().get(), Err, Context);
 }
 
 //===----------------------------------------------------------------------===//
@@ -104,7 +106,8 @@ LLVMBool LLVMParseIRInContext(LLVMContextRef ContextRef,
                               char **OutMessage) {
   SMDiagnostic Diag;
 
-  *OutM = wrap(ParseIR(unwrap(MemBuf), Diag, *unwrap(ContextRef)));
+  std::unique_ptr<MemoryBuffer> MB(unwrap(MemBuf));
+  *OutM = wrap(ParseIR(MB.get(), Diag, *unwrap(ContextRef)));
 
   if(!*OutM) {
     if (OutMessage) {

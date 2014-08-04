@@ -14,6 +14,7 @@
 #ifndef TGLEXER_H
 #define TGLEXER_H
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/SMLoc.h"
 #include <cassert>
@@ -21,7 +22,6 @@
 #include <string>
 
 namespace llvm {
-class MemoryBuffer;
 class SourceMgr;
 class SMLoc;
 class Twine;
@@ -63,7 +63,7 @@ class TGLexer {
   SourceMgr &SrcMgr;
   
   const char *CurPtr;
-  const MemoryBuffer *CurBuf;
+  StringRef CurBuf;
 
   // Information about the current token.
   const char *TokStart;
@@ -73,7 +73,7 @@ class TGLexer {
 
   /// CurBuffer - This is the current buffer index we're lexing from as managed
   /// by the SourceMgr object.
-  int CurBuffer;
+  unsigned CurBuffer;
 
 public:
   typedef std::map<std::string, SMLoc> DependenciesMapTy;

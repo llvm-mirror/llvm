@@ -30,8 +30,8 @@ using namespace llvm;
 // Pin the vtable to this file.
 void AMDGPUInstrInfo::anchor() {}
 
-AMDGPUInstrInfo::AMDGPUInstrInfo(TargetMachine &tm)
-  : AMDGPUGenInstrInfo(-1,-1), RI(tm), TM(tm) { }
+AMDGPUInstrInfo::AMDGPUInstrInfo(const AMDGPUSubtarget &st)
+  : AMDGPUGenInstrInfo(-1,-1), RI(st), ST(st) { }
 
 const AMDGPURegisterInfo &AMDGPUInstrInfo::getRegisterInfo() const {
   return RI;
@@ -147,7 +147,6 @@ bool AMDGPUInstrInfo::expandPostRAPseudo (MachineBasicBlock::iterator MI) const 
   } else if (isRegisterStore(*MI)) {
     int ValOpIdx = AMDGPU::getNamedOperandIdx(MI->getOpcode(),
                                               AMDGPU::OpName::val);
-    AMDGPU::getNamedOperandIdx(MI->getOpcode(), AMDGPU::OpName::dst);
     unsigned RegIndex = MI->getOperand(RegOpIdx).getImm();
     unsigned Channel = MI->getOperand(ChanOpIdx).getImm();
     unsigned Address = calculateIndirectAddress(RegIndex, Channel);
@@ -213,6 +212,10 @@ AMDGPUInstrInfo::getOpcodeAfterMemoryUnfold(unsigned Opc,
                                            unsigned *LoadRegIndex) const {
   // TODO: Implement this function
   return 0;
+}
+
+bool AMDGPUInstrInfo::enableClusterLoads() const {
+  return true;
 }
 
 bool AMDGPUInstrInfo::shouldScheduleLoadsNear(SDNode *Load1, SDNode *Load2,
@@ -320,31 +323,9 @@ int AMDGPUInstrInfo::getIndirectIndexEnd(const MachineFunction &MF) const {
     return -1;
   }
 
-  Offset = TM.getFrameLowering()->getFrameIndexOffset(MF, -1);
+  Offset = MF.getTarget().getFrameLowering()->getFrameIndexOffset(MF, -1);
 
   return getIndirectIndexBegin(MF) + Offset;
-}
-
-
-void AMDGPUInstrInfo::convertToISA(MachineInstr & MI, MachineFunction &MF,
-    DebugLoc DL) const {
-  MachineRegisterInfo &MRI = MF.getRegInfo();
-  const AMDGPURegisterInfo & RI = getRegisterInfo();
-
-  for (unsigned i = 0; i < MI.getNumOperands(); i++) {
-    MachineOperand &MO = MI.getOperand(i);
-    // Convert dst regclass to one that is supported by the ISA
-    if (MO.isReg() && MO.isDef()) {
-      if (TargetRegisterInfo::isVirtualRegister(MO.getReg())) {
-        const TargetRegisterClass * oldRegClass = MRI.getRegClass(MO.getReg());
-        const TargetRegisterClass * newRegClass = RI.getISARegClass(oldRegClass);
-
-        assert(newRegClass);
-
-        MRI.setRegClass(MO.getReg(), newRegClass);
-      }
-    }
-  }
 }
 
 int AMDGPUInstrInfo::getMaskedMIMGOp(uint16_t Opcode, unsigned Channels) const {

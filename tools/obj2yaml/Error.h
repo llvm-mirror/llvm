@@ -10,33 +10,26 @@
 #ifndef LLVM_TOOLS_ERROR_H
 #define LLVM_TOOLS_ERROR_H
 
-#include "llvm/Support/system_error.h"
+#include <system_error>
 
 namespace llvm {
+const std::error_category &obj2yaml_category();
 
-const error_category &obj2yaml_category();
-
-struct obj2yaml_error {
-  enum _ {
-    success = 0,
-    file_not_found,
-    unrecognized_file_format,
-    unsupported_obj_file_format
-  };
-  _ v_;
-
-  obj2yaml_error(_ v) : v_(v) {}
-  explicit obj2yaml_error(int v) : v_(_(v)) {}
-  operator int() const {return v_;}
+enum class obj2yaml_error {
+  success = 0,
+  file_not_found,
+  unrecognized_file_format,
+  unsupported_obj_file_format
 };
 
-inline error_code make_error_code(obj2yaml_error e) {
-  return error_code(static_cast<int>(e), obj2yaml_category());
+inline std::error_code make_error_code(obj2yaml_error e) {
+  return std::error_code(static_cast<int>(e), obj2yaml_category());
 }
 
-template <> struct is_error_code_enum<obj2yaml_error> : std::true_type { };
-template <> struct is_error_code_enum<obj2yaml_error::_> : std::true_type { };
-
 } // namespace llvm
+
+namespace std {
+template <> struct is_error_code_enum<llvm::obj2yaml_error> : std::true_type {};
+}
 
 #endif

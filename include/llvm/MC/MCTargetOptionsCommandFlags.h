@@ -33,29 +33,19 @@ cl::opt<bool> RelaxAll("mc-relax-all",
                        cl::desc("When used with filetype=obj, "
                                 "relax all fixups in the emitted object file"));
 
-cl::opt<bool> EnableDwarfDirectory(
-    "enable-dwarf-directory", cl::Hidden,
-    cl::desc("Use .file directives with an explicit directory."));
+cl::opt<int> DwarfVersion("dwarf-version", cl::desc("Dwarf version"),
+                          cl::init(0));
 
-cl::opt<bool> NoExecStack("mc-no-exec-stack",
-                          cl::desc("File doesn't need an exec stack"));
-
-cl::opt<bool> SaveTempLabels("L", cl::desc("Don't discard temporary labels"));
-
-cl::opt<bool> ShowMCEncoding("show-mc-encoding", cl::Hidden,
-                             cl::desc("Show encoding in .s output"));
-cl::opt<bool> ShowMCInst("show-mc-inst", cl::Hidden,
-                         cl::desc("Show instruction structure in .s output"));
+cl::opt<bool> ShowMCInst("asm-show-inst",
+                         cl::desc("Emit internal instruction representation to "
+                                  "assembly file"));
 
 static inline MCTargetOptions InitMCTargetOptionsFromFlags() {
   MCTargetOptions Options;
   Options.SanitizeAddress =
       (AsmInstrumentation == MCTargetOptions::AsmInstrumentationAddress);
   Options.MCRelaxAll = RelaxAll;
-  Options.MCUseDwarfDirectory = EnableDwarfDirectory;
-  Options.MCNoExecStack = NoExecStack;
-  Options.MCSaveTempLabels = SaveTempLabels;
-  Options.ShowMCEncoding = ShowMCEncoding;
+  Options.DwarfVersion = DwarfVersion;
   Options.ShowMCInst = ShowMCInst;
   return Options;
 }

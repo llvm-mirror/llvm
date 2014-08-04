@@ -488,7 +488,7 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
       }
 
 
-      // If the operand is an bitwise operator with a constant RHS, and the
+      // If the operand is a bitwise operator with a constant RHS, and the
       // shift is the only use, we can pull it out of the shift.
       if (ConstantInt *Op0C = dyn_cast<ConstantInt>(Op0BO->getOperand(1))) {
         bool isValid = true;     // Valid only for And, Or, Xor
@@ -789,11 +789,6 @@ Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
     // have a sign-extend idiom.
     Value *X;
     if (match(Op0, m_Shl(m_Value(X), m_Specific(Op1)))) {
-      // If the left shift is just shifting out partial signbits, delete the
-      // extension.
-      if (cast<OverflowingBinaryOperator>(Op0)->hasNoSignedWrap())
-        return ReplaceInstUsesWith(I, X);
-
       // If the input is an extension from the shifted amount value, e.g.
       //   %x = zext i8 %A to i32
       //   %y = shl i32 %x, 24
@@ -819,11 +814,6 @@ Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
   if (MaskedValueIsZero(Op0,
                         APInt::getSignBit(I.getType()->getScalarSizeInBits())))
     return BinaryOperator::CreateLShr(Op0, Op1);
-
-  // Arithmetic shifting an all-sign-bit value is a no-op.
-  unsigned NumSignBits = ComputeNumSignBits(Op0);
-  if (NumSignBits == Op0->getType()->getScalarSizeInBits())
-    return ReplaceInstUsesWith(I, Op0);
 
   return nullptr;
 }

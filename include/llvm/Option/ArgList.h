@@ -150,6 +150,12 @@ public:
     return arg_iterator(Args.end(), *this);
   }
 
+  iterator_range<arg_iterator> filtered(OptSpecifier Id0 = 0U,
+                                        OptSpecifier Id1 = 0U,
+                                        OptSpecifier Id2 = 0U) const {
+    return make_range(filtered_begin(Id0, Id1, Id2), filtered_end());
+  }
+
   /// @}
   /// @name Arg Removal
   /// @{
@@ -328,6 +334,7 @@ public:
   unsigned MakeIndex(StringRef String0) const;
   unsigned MakeIndex(StringRef String0, StringRef String1) const;
 
+  using ArgList::MakeArgString;
   const char *MakeArgString(StringRef Str) const override;
 
   /// @}
@@ -365,6 +372,7 @@ public:
   /// (to be freed).
   void AddSynthesizedArg(Arg *A);
 
+  using ArgList::MakeArgString;
   const char *MakeArgString(StringRef Str) const override;
 
   /// AddFlagArg - Construct a new FlagArg for the given option \p Id and

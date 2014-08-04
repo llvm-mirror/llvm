@@ -78,16 +78,15 @@ protected:
   /// fragment is not a data fragment.
   MCDataFragment *getOrCreateDataFragment() const;
 
-  const MCExpr *AddValueSymbols(const MCExpr *Value);
-
 public:
+  void visitUsedSymbol(const MCSymbol &Sym) override;
+
   MCAssembler &getAssembler() { return *Assembler; }
 
   /// @name MCStreamer Interface
   /// @{
 
   void EmitLabel(MCSymbol *Symbol) override;
-  void EmitDebugLabel(MCSymbol *Symbol) override;
   void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override;
   void EmitValueImpl(const MCExpr *Value, unsigned Size,
                      const SMLoc &Loc = SMLoc()) override;
@@ -126,6 +125,10 @@ public:
   void EmitFill(uint64_t NumBytes, uint8_t FillValue) override;
   void EmitZeros(uint64_t NumBytes) override;
   void FinishImpl() override;
+
+  virtual bool mayHaveInstructions() const {
+    return getCurrentSectionData()->hasInstructions();
+  }
 };
 
 } // end namespace llvm

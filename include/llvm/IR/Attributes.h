@@ -75,6 +75,7 @@ public:
     Cold,                  ///< Marks function as being in a cold path.
     InlineHint,            ///< Source said inlining was desirable
     InReg,                 ///< Force argument to be passed in register
+    JumpTable,             ///< Build jump-instruction tables and replace refs.
     MinSize,               ///< Function must be optimized for size first
     Naked,                 ///< Naked function
     Nest,                  ///< Nested function static chain
@@ -87,6 +88,7 @@ public:
     NonLazyBind,           ///< Function is called early and/or
                            ///< often, so lazy binding isn't worthwhile
     NonNull,               ///< Pointer is known to be not null
+    Dereferenceable,       ///< Pointer is known to be dereferenceable
     NoRedZone,             ///< Disable redzone
     NoReturn,              ///< Mark the function as not returning
     NoUnwind,              ///< Function doesn't unwind stack
@@ -132,6 +134,8 @@ public:
   /// alignment set.
   static Attribute getWithAlignment(LLVMContext &Context, uint64_t Align);
   static Attribute getWithStackAlignment(LLVMContext &Context, uint64_t Align);
+  static Attribute getWithDereferenceableBytes(LLVMContext &Context,
+                                              uint64_t Bytes);
 
   //===--------------------------------------------------------------------===//
   // Attribute Accessors
@@ -140,8 +144,8 @@ public:
   /// \brief Return true if the attribute is an Attribute::AttrKind type.
   bool isEnumAttribute() const;
 
-  /// \brief Return true if the attribute is an alignment attribute.
-  bool isAlignAttribute() const;
+  /// \brief Return true if the attribute is an integer attribute.
+  bool isIntAttribute() const;
 
   /// \brief Return true if the attribute is a string (target-dependent)
   /// attribute.
@@ -176,6 +180,10 @@ public:
   /// \brief Returns the stack alignment field of an attribute as a byte
   /// alignment value.
   unsigned getStackAlignment() const;
+
+  /// \brief Returns the number of dereferenceable bytes from the
+  /// dereferenceable attribute (or zero if unknown).
+  uint64_t getDereferenceableBytes() const;
 
   /// \brief The Attribute is converted to a string of equivalent mnemonic. This
   /// is, presumably, for writing out the mnemonics for the assembly writer.
@@ -315,6 +323,9 @@ public:
   /// \brief Get the stack alignment.
   unsigned getStackAlignment(unsigned Index) const;
 
+  /// \brief Get the number of dereferenceable bytes (or zero if unknown).
+  uint64_t getDereferenceableBytes(unsigned Index) const;
+
   /// \brief Return the attributes at the index as a string.
   std::string getAsString(unsigned Index, bool InAttrGrp = false) const;
 
@@ -394,13 +405,15 @@ class AttrBuilder {
   std::map<std::string, std::string> TargetDepAttrs;
   uint64_t Alignment;
   uint64_t StackAlignment;
+  uint64_t DerefBytes;
 public:
-  AttrBuilder() : Attrs(0), Alignment(0), StackAlignment(0) {}
+  AttrBuilder() : Attrs(0), Alignment(0), StackAlignment(0), DerefBytes(0) {}
   explicit AttrBuilder(uint64_t Val)
-    : Attrs(0), Alignment(0), StackAlignment(0) {
+    : Attrs(0), Alignment(0), StackAlignment(0), DerefBytes(0) {
     addRawValue(Val);
   }
-  AttrBuilder(const Attribute &A) : Attrs(0), Alignment(0), StackAlignment(0) {
+  AttrBuilder(const Attribute &A)
+    : Attrs(0), Alignment(0), StackAlignment(0), DerefBytes(0) {
     addAttribute(A);
   }
   AttrBuilder(AttributeSet AS, unsigned Idx);
@@ -454,6 +467,10 @@ public:
   /// \brief Retrieve the stack alignment attribute, if it exists.
   uint64_t getStackAlignment() const { return StackAlignment; }
 
+  /// \brief Retrieve the number of dereferenceable bytes, if the dereferenceable
+  /// attribute exists (zero is returned otherwise).
+  uint64_t getDereferenceableBytes() const { return DerefBytes; }
+
   /// \brief This turns an int alignment (which must be a power of 2) into the
   /// form used internally in Attribute.
   AttrBuilder &addAlignmentAttr(unsigned Align);
@@ -461,6 +478,10 @@ public:
   /// \brief This turns an int stack alignment (which must be a power of 2) into
   /// the form used internally in Attribute.
   AttrBuilder &addStackAlignmentAttr(unsigned Align);
+
+  /// \brief This turns the number of dereferenceable bytes into the form used
+  /// internally in Attribute.
+  AttrBuilder &addDereferenceableAttr(uint64_t Bytes);
 
   /// \brief Return true if the builder contains no target-independent
   /// attributes.

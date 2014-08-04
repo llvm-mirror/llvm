@@ -17,8 +17,8 @@
 
 #include "AMDGPUFrameLowering.h"
 #include "AMDGPUInstrInfo.h"
+#include "AMDGPUIntrinsicInfo.h"
 #include "AMDGPUSubtarget.h"
-#include "AMDILIntrinsicInfo.h"
 #include "R600ISelLowering.h"
 #include "llvm/IR/DataLayout.h"
 
@@ -27,12 +27,6 @@ namespace llvm {
 class AMDGPUTargetMachine : public LLVMTargetMachine {
 
   AMDGPUSubtarget Subtarget;
-  const DataLayout Layout;
-  AMDGPUFrameLowering FrameLowering;
-  AMDGPUIntrinsicInfo IntrinsicInfo;
-  std::unique_ptr<AMDGPUInstrInfo> InstrInfo;
-  std::unique_ptr<AMDGPUTargetLowering> TLInfo;
-  const InstrItineraryData *InstrItins;
 
 public:
   AMDGPUTargetMachine(const Target &T, StringRef TT, StringRef FS,
@@ -40,27 +34,29 @@ public:
                       CodeModel::Model CM, CodeGenOpt::Level OL);
   ~AMDGPUTargetMachine();
   const AMDGPUFrameLowering *getFrameLowering() const override {
-    return &FrameLowering;
+    return getSubtargetImpl()->getFrameLowering();
   }
   const AMDGPUIntrinsicInfo *getIntrinsicInfo() const override {
-    return &IntrinsicInfo;
+    return getSubtargetImpl()->getIntrinsicInfo();
   }
   const AMDGPUInstrInfo *getInstrInfo() const override {
-    return InstrInfo.get();
+    return getSubtargetImpl()->getInstrInfo();
   }
   const AMDGPUSubtarget *getSubtargetImpl() const override {
     return &Subtarget;
   }
   const AMDGPURegisterInfo *getRegisterInfo() const override {
-    return &InstrInfo->getRegisterInfo();
+    return getSubtargetImpl()->getRegisterInfo();
   }
   AMDGPUTargetLowering *getTargetLowering() const override {
-    return TLInfo.get();
+    return getSubtargetImpl()->getTargetLowering();
   }
   const InstrItineraryData *getInstrItineraryData() const override {
-    return InstrItins;
+    return &getSubtargetImpl()->getInstrItineraryData();
   }
-  const DataLayout *getDataLayout() const override { return &Layout; }
+  const DataLayout *getDataLayout() const override {
+    return getSubtargetImpl()->getDataLayout();
+  }
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
   /// \brief Register R600 analysis passes with a pass manager.

@@ -47,7 +47,6 @@
 using namespace llvm;
 using namespace sys;
 
-
 process::id_type self_process::get_id() {
   return getpid();
 }
@@ -190,12 +189,13 @@ Optional<std::string> Process::GetEnv(StringRef Name) {
   return std::string(Val);
 }
 
-error_code Process::GetArgumentVector(SmallVectorImpl<const char *> &ArgsOut,
-                                      ArrayRef<const char *> ArgsIn,
-                                      SpecificBumpPtrAllocator<char> &) {
+std::error_code
+Process::GetArgumentVector(SmallVectorImpl<const char *> &ArgsOut,
+                           ArrayRef<const char *> ArgsIn,
+                           SpecificBumpPtrAllocator<char> &) {
   ArgsOut.append(ArgsIn.begin(), ArgsIn.end());
 
-  return error_code::success();
+  return std::error_code();
 }
 
 bool Process::StandardInIsUserInput() {

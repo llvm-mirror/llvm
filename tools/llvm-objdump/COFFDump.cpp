@@ -22,9 +22,9 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/Win64EH.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cstring>
+#include <system_error>
 
 using namespace llvm;
 using namespace object;
@@ -157,14 +157,14 @@ static void printAllUnwindCodes(ArrayRef<UnwindCode> UCs) {
 }
 
 // Given a symbol sym this functions returns the address and section of it.
-static error_code resolveSectionAndAddress(const COFFObjectFile *Obj,
-                                           const SymbolRef &Sym,
-                                           const coff_section *&ResolvedSection,
-                                           uint64_t &ResolvedAddr) {
-  if (error_code EC = Sym.getAddress(ResolvedAddr))
+static std::error_code
+resolveSectionAndAddress(const COFFObjectFile *Obj, const SymbolRef &Sym,
+                         const coff_section *&ResolvedSection,
+                         uint64_t &ResolvedAddr) {
+  if (std::error_code EC = Sym.getAddress(ResolvedAddr))
     return EC;
   section_iterator iter(Obj->section_begin());
-  if (error_code EC = Sym.getSection(iter))
+  if (std::error_code EC = Sym.getSection(iter))
     return EC;
   ResolvedSection = Obj->getCOFFSection(*iter);
   return object_error::success;
@@ -172,13 +172,13 @@ static error_code resolveSectionAndAddress(const COFFObjectFile *Obj,
 
 // Given a vector of relocations for a section and an offset into this section
 // the function returns the symbol used for the relocation at the offset.
-static error_code resolveSymbol(const std::vector<RelocationRef> &Rels,
-                                uint64_t Offset, SymbolRef &Sym) {
+static std::error_code resolveSymbol(const std::vector<RelocationRef> &Rels,
+                                     uint64_t Offset, SymbolRef &Sym) {
   for (std::vector<RelocationRef>::const_iterator I = Rels.begin(),
                                                   E = Rels.end();
                                                   I != E; ++I) {
     uint64_t Ofs;
-    if (error_code EC = I->getOffset(Ofs))
+    if (std::error_code EC = I->getOffset(Ofs))
       return EC;
     if (Ofs == Offset) {
       Sym = *I->getSymbol();
@@ -192,18 +192,17 @@ static error_code resolveSymbol(const std::vector<RelocationRef> &Rels,
 // the function resolves the symbol used for the relocation at the offset and
 // returns the section content and the address inside the content pointed to
 // by the symbol.
-static error_code getSectionContents(const COFFObjectFile *Obj,
-                                     const std::vector<RelocationRef> &Rels,
-                                     uint64_t Offset,
-                                     ArrayRef<uint8_t> &Contents,
-                                     uint64_t &Addr) {
+static std::error_code
+getSectionContents(const COFFObjectFile *Obj,
+                   const std::vector<RelocationRef> &Rels, uint64_t Offset,
+                   ArrayRef<uint8_t> &Contents, uint64_t &Addr) {
   SymbolRef Sym;
-  if (error_code EC = resolveSymbol(Rels, Offset, Sym))
+  if (std::error_code EC = resolveSymbol(Rels, Offset, Sym))
     return EC;
   const coff_section *Section;
-  if (error_code EC = resolveSectionAndAddress(Obj, Sym, Section, Addr))
+  if (std::error_code EC = resolveSectionAndAddress(Obj, Sym, Section, Addr))
     return EC;
-  if (error_code EC = Obj->getSectionContents(Section, Contents))
+  if (std::error_code EC = Obj->getSectionContents(Section, Contents))
     return EC;
   return object_error::success;
 }
@@ -211,12 +210,12 @@ static error_code getSectionContents(const COFFObjectFile *Obj,
 // Given a vector of relocations for a section and an offset into this section
 // the function returns the name of the symbol used for the relocation at the
 // offset.
-static error_code resolveSymbolName(const std::vector<RelocationRef> &Rels,
-                                    uint64_t Offset, StringRef &Name) {
+static std::error_code resolveSymbolName(const std::vector<RelocationRef> &Rels,
+                                         uint64_t Offset, StringRef &Name) {
   SymbolRef Sym;
-  if (error_code EC = resolveSymbol(Rels, Offset, Sym))
+  if (std::error_code EC = resolveSymbol(Rels, Offset, Sym))
     return EC;
-  if (error_code EC = Sym.getName(Name))
+  if (std::error_code EC = Sym.getName(Name))
     return EC;
   return object_error::success;
 }

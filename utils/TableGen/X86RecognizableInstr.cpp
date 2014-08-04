@@ -32,48 +32,50 @@ using namespace llvm;
   MAP(C9, 38)           \
   MAP(CA, 39)           \
   MAP(CB, 40)           \
-  MAP(D0, 41)           \
-  MAP(D1, 42)           \
-  MAP(D4, 43)           \
-  MAP(D5, 44)           \
-  MAP(D6, 45)           \
-  MAP(D8, 46)           \
-  MAP(D9, 47)           \
-  MAP(DA, 48)           \
-  MAP(DB, 49)           \
-  MAP(DC, 50)           \
-  MAP(DD, 51)           \
-  MAP(DE, 52)           \
-  MAP(DF, 53)           \
-  MAP(E0, 54)           \
-  MAP(E1, 55)           \
-  MAP(E2, 56)           \
-  MAP(E3, 57)           \
-  MAP(E4, 58)           \
-  MAP(E5, 59)           \
-  MAP(E8, 60)           \
-  MAP(E9, 61)           \
-  MAP(EA, 62)           \
-  MAP(EB, 63)           \
-  MAP(EC, 64)           \
-  MAP(ED, 65)           \
-  MAP(EE, 66)           \
-  MAP(F0, 67)           \
-  MAP(F1, 68)           \
-  MAP(F2, 69)           \
-  MAP(F3, 70)           \
-  MAP(F4, 71)           \
-  MAP(F5, 72)           \
-  MAP(F6, 73)           \
-  MAP(F7, 74)           \
-  MAP(F8, 75)           \
-  MAP(F9, 76)           \
-  MAP(FA, 77)           \
-  MAP(FB, 78)           \
-  MAP(FC, 79)           \
-  MAP(FD, 80)           \
-  MAP(FE, 81)           \
-  MAP(FF, 82)
+  MAP(CF, 41)           \
+  MAP(D0, 42)           \
+  MAP(D1, 43)           \
+  MAP(D4, 44)           \
+  MAP(D5, 45)           \
+  MAP(D6, 46)           \
+  MAP(D7, 47)           \
+  MAP(D8, 48)           \
+  MAP(D9, 49)           \
+  MAP(DA, 50)           \
+  MAP(DB, 51)           \
+  MAP(DC, 52)           \
+  MAP(DD, 53)           \
+  MAP(DE, 54)           \
+  MAP(DF, 55)           \
+  MAP(E0, 56)           \
+  MAP(E1, 57)           \
+  MAP(E2, 58)           \
+  MAP(E3, 59)           \
+  MAP(E4, 60)           \
+  MAP(E5, 61)           \
+  MAP(E8, 62)           \
+  MAP(E9, 63)           \
+  MAP(EA, 64)           \
+  MAP(EB, 65)           \
+  MAP(EC, 66)           \
+  MAP(ED, 67)           \
+  MAP(EE, 68)           \
+  MAP(F0, 69)           \
+  MAP(F1, 70)           \
+  MAP(F2, 71)           \
+  MAP(F3, 72)           \
+  MAP(F4, 73)           \
+  MAP(F5, 74)           \
+  MAP(F6, 75)           \
+  MAP(F7, 76)           \
+  MAP(F8, 77)           \
+  MAP(F9, 78)           \
+  MAP(FA, 79)           \
+  MAP(FB, 80)           \
+  MAP(FC, 81)           \
+  MAP(FD, 82)           \
+  MAP(FE, 83)           \
+  MAP(FF, 84)
 
 // A clone of X86 since we can't depend on something that is generated.
 namespace X86Local {
@@ -205,6 +207,7 @@ RecognizableInstr::RecognizableInstr(DisassemblerTables &tables,
   HasEVEX_B        = Rec->getValueAsBit("hasEVEX_B");
   IsCodeGenOnly    = Rec->getValueAsBit("isCodeGenOnly");
   ForceDisassemble = Rec->getValueAsBit("ForceDisassemble");
+  CD8_Scale        = byteFromRec(Rec, "CD8_Scale");
 
   Name      = Rec->getName();
   AsmString = Rec->getValueAsString("AsmString");
@@ -441,6 +444,16 @@ InstructionContext RecognizableInstr::insnContext() const {
   return insnContext;
 }
 
+void RecognizableInstr::adjustOperandEncoding(OperandEncoding &encoding) {
+  // The scaling factor for AVX512 compressed displacement encoding is an
+  // instruction attribute.  Adjust the ModRM encoding type to include the
+  // scale for compressed displacement.
+  if (encoding != ENCODING_RM || CD8_Scale == 0)
+    return;
+  encoding = (OperandEncoding)(encoding + Log2_32(CD8_Scale));
+  assert(encoding <= ENCODING_RM_CD64 && "Invalid CDisp scaling");
+}
+
 void RecognizableInstr::handleOperand(bool optional, unsigned &operandIndex,
                                       unsigned &physicalOperandIndex,
                                       unsigned &numPhysicalOperands,
@@ -464,8 +477,10 @@ void RecognizableInstr::handleOperand(bool optional, unsigned &operandIndex,
 
   const std::string &typeName = (*Operands)[operandIndex].Rec->getName();
 
-  Spec->operands[operandIndex].encoding = encodingFromString(typeName,
-                                                              OpSize);
+  OperandEncoding encoding = encodingFromString(typeName, OpSize);
+  // Adjust the encoding type for an operand based on the instruction.
+  adjustOperandEncoding(encoding);
+  Spec->operands[operandIndex].encoding = encoding;
   Spec->operands[operandIndex].type = typeFromString(typeName,
                                                      HasREX_WPrefix, OpSize);
 
@@ -756,20 +771,21 @@ void RecognizableInstr::emitInstructionSpecifier() {
   case X86Local::MRM_C0: case X86Local::MRM_C1: case X86Local::MRM_C2:
   case X86Local::MRM_C3: case X86Local::MRM_C4: case X86Local::MRM_C8:
   case X86Local::MRM_C9: case X86Local::MRM_CA: case X86Local::MRM_CB:
-  case X86Local::MRM_D0: case X86Local::MRM_D1: case X86Local::MRM_D4:
-  case X86Local::MRM_D5: case X86Local::MRM_D6: case X86Local::MRM_D8:
-  case X86Local::MRM_D9: case X86Local::MRM_DA: case X86Local::MRM_DB:
-  case X86Local::MRM_DC: case X86Local::MRM_DD: case X86Local::MRM_DE:
-  case X86Local::MRM_DF: case X86Local::MRM_E0: case X86Local::MRM_E1:
-  case X86Local::MRM_E2: case X86Local::MRM_E3: case X86Local::MRM_E4:
-  case X86Local::MRM_E5: case X86Local::MRM_E8: case X86Local::MRM_E9:
-  case X86Local::MRM_EA: case X86Local::MRM_EB: case X86Local::MRM_EC:
-  case X86Local::MRM_ED: case X86Local::MRM_EE: case X86Local::MRM_F0:
-  case X86Local::MRM_F1: case X86Local::MRM_F2: case X86Local::MRM_F3:
-  case X86Local::MRM_F4: case X86Local::MRM_F5: case X86Local::MRM_F6:
-  case X86Local::MRM_F7: case X86Local::MRM_F9: case X86Local::MRM_FA:
-  case X86Local::MRM_FB: case X86Local::MRM_FC: case X86Local::MRM_FD:
-  case X86Local::MRM_FE: case X86Local::MRM_FF:
+  case X86Local::MRM_CF: case X86Local::MRM_D0: case X86Local::MRM_D1:
+  case X86Local::MRM_D4: case X86Local::MRM_D5: case X86Local::MRM_D6:
+  case X86Local::MRM_D7: case X86Local::MRM_D8: case X86Local::MRM_D9:
+  case X86Local::MRM_DA: case X86Local::MRM_DB: case X86Local::MRM_DC:
+  case X86Local::MRM_DD: case X86Local::MRM_DE: case X86Local::MRM_DF:
+  case X86Local::MRM_E0: case X86Local::MRM_E1: case X86Local::MRM_E2:
+  case X86Local::MRM_E3: case X86Local::MRM_E4: case X86Local::MRM_E5:
+  case X86Local::MRM_E8: case X86Local::MRM_E9: case X86Local::MRM_EA:
+  case X86Local::MRM_EB: case X86Local::MRM_EC: case X86Local::MRM_ED:
+  case X86Local::MRM_EE: case X86Local::MRM_F0: case X86Local::MRM_F1:
+  case X86Local::MRM_F2: case X86Local::MRM_F3: case X86Local::MRM_F4:
+  case X86Local::MRM_F5: case X86Local::MRM_F6: case X86Local::MRM_F7:
+  case X86Local::MRM_F9: case X86Local::MRM_FA: case X86Local::MRM_FB:
+  case X86Local::MRM_FC: case X86Local::MRM_FD: case X86Local::MRM_FE:
+  case X86Local::MRM_FF:
     // Ignored.
     break;
   }
@@ -962,10 +978,18 @@ OperandType RecognizableInstr::typeFromString(const std::string &s,
   TYPE("VR512",               TYPE_XMM512)
   TYPE("VK1",                 TYPE_VK1)
   TYPE("VK1WM",               TYPE_VK1)
+  TYPE("VK2",                 TYPE_VK2)
+  TYPE("VK2WM",               TYPE_VK2)
+  TYPE("VK4",                 TYPE_VK4)
+  TYPE("VK4WM",               TYPE_VK4)
   TYPE("VK8",                 TYPE_VK8)
   TYPE("VK8WM",               TYPE_VK8)
   TYPE("VK16",                TYPE_VK16)
   TYPE("VK16WM",              TYPE_VK16)
+  TYPE("VK32",                TYPE_VK32)
+  TYPE("VK32WM",              TYPE_VK32)
+  TYPE("VK64",                TYPE_VK64)
+  TYPE("VK64WM",              TYPE_VK64)
   TYPE("GR16_NOAX",           TYPE_Rv)
   TYPE("GR32_NOAX",           TYPE_Rv)
   TYPE("GR64_NOAX",           TYPE_R64)
@@ -1038,6 +1062,8 @@ RecognizableInstr::rmRegisterEncodingFromString(const std::string &s,
   ENCODING("VK1",             ENCODING_RM)
   ENCODING("VK8",             ENCODING_RM)
   ENCODING("VK16",            ENCODING_RM)
+  ENCODING("VK32",            ENCODING_RM)
+  ENCODING("VK64",            ENCODING_RM)
   errs() << "Unhandled R/M register encoding " << s << "\n";
   llvm_unreachable("Unhandled R/M register encoding");
 }
@@ -1066,6 +1092,8 @@ RecognizableInstr::roRegisterEncodingFromString(const std::string &s,
   ENCODING("VK1",             ENCODING_REG)
   ENCODING("VK8",             ENCODING_REG)
   ENCODING("VK16",            ENCODING_REG)
+  ENCODING("VK32",            ENCODING_REG)
+  ENCODING("VK64",            ENCODING_REG)
   ENCODING("VK1WM",           ENCODING_REG)
   ENCODING("VK8WM",           ENCODING_REG)
   ENCODING("VK16WM",          ENCODING_REG)
@@ -1088,8 +1116,12 @@ RecognizableInstr::vvvvRegisterEncodingFromString(const std::string &s,
   ENCODING("VR256X",          ENCODING_VVVV)
   ENCODING("VR512",           ENCODING_VVVV)
   ENCODING("VK1",             ENCODING_VVVV)
+  ENCODING("VK2",             ENCODING_VVVV)
+  ENCODING("VK4",             ENCODING_VVVV)
   ENCODING("VK8",             ENCODING_VVVV)
   ENCODING("VK16",            ENCODING_VVVV)
+  ENCODING("VK32",            ENCODING_VVVV)
+  ENCODING("VK64",            ENCODING_VVVV)
   errs() << "Unhandled VEX.vvvv register encoding " << s << "\n";
   llvm_unreachable("Unhandled VEX.vvvv register encoding");
 }
@@ -1098,8 +1130,12 @@ OperandEncoding
 RecognizableInstr::writemaskRegisterEncodingFromString(const std::string &s,
                                                        uint8_t OpSize) {
   ENCODING("VK1WM",           ENCODING_WRITEMASK)
+  ENCODING("VK2WM",           ENCODING_WRITEMASK)
+  ENCODING("VK4WM",           ENCODING_WRITEMASK)
   ENCODING("VK8WM",           ENCODING_WRITEMASK)
   ENCODING("VK16WM",          ENCODING_WRITEMASK)
+  ENCODING("VK32WM",          ENCODING_WRITEMASK)
+  ENCODING("VK64WM",          ENCODING_WRITEMASK)
   errs() << "Unhandled mask register encoding " << s << "\n";
   llvm_unreachable("Unhandled mask register encoding");
 }

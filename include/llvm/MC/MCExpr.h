@@ -21,6 +21,7 @@ class MCAssembler;
 class MCContext;
 class MCSection;
 class MCSectionData;
+class MCStreamer;
 class MCSymbol;
 class MCValue;
 class raw_ostream;
@@ -262,6 +263,8 @@ public:
     VK_Mips_GOT_LO16,
     VK_Mips_CALL_HI16,
     VK_Mips_CALL_LO16,
+    VK_Mips_PCREL_HI16,
+    VK_Mips_PCREL_LO16,
 
     VK_COFF_IMGREL32 // symbol@imgrel (image-relative)
   };
@@ -522,7 +525,7 @@ public:
   virtual void PrintImpl(raw_ostream &OS) const = 0;
   virtual bool EvaluateAsRelocatableImpl(MCValue &Res,
                                          const MCAsmLayout *Layout) const = 0;
-  virtual void AddValueSymbols(MCAssembler *) const = 0;
+  virtual void visitUsedExpr(MCStreamer& Streamer) const = 0;
   virtual const MCSection *FindAssociatedSection() const = 0;
 
   virtual void fixELFSymbolsInTLSFixups(MCAssembler &) const = 0;

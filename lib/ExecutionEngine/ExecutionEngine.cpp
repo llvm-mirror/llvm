@@ -57,7 +57,6 @@ ExecutionEngine *(*ExecutionEngine::MCJITCtor)(
   Module *M,
   std::string *ErrorStr,
   RTDyldMemoryManager *MCJMM,
-  bool GVsWithCode,
   TargetMachine *TM) = nullptr;
 ExecutionEngine *(*ExecutionEngine::InterpCtor)(Module *M,
                                                 std::string *ErrorStr) =nullptr;
@@ -148,8 +147,7 @@ Function *ExecutionEngine::FindFunctionNamed(const char *FnName) {
 }
 
 
-void *ExecutionEngineState::RemoveMapping(const MutexGuard &,
-                                          const GlobalValue *ToUnmap) {
+void *ExecutionEngineState::RemoveMapping(const GlobalValue *ToUnmap) {
   GlobalAddressMapTy::iterator I = GlobalAddressMap.find(ToUnmap);
   void *OldVal;
 
@@ -171,14 +169,14 @@ void ExecutionEngine::addGlobalMapping(const GlobalValue *GV, void *Addr) {
 
   DEBUG(dbgs() << "JIT: Map \'" << GV->getName()
         << "\' to [" << Addr << "]\n";);
-  void *&CurVal = EEState.getGlobalAddressMap(locked)[GV];
+  void *&CurVal = EEState.getGlobalAddressMap()[GV];
   assert((!CurVal || !Addr) && "GlobalMapping already established!");
   CurVal = Addr;
 
   // If we are using the reverse mapping, add it too.
-  if (!EEState.getGlobalAddressReverseMap(locked).empty()) {
+  if (!EEState.getGlobalAddressReverseMap().empty()) {
     AssertingVH<const GlobalValue> &V =
-      EEState.getGlobalAddressReverseMap(locked)[Addr];
+      EEState.getGlobalAddressReverseMap()[Addr];
     assert((!V || !GV) && "GlobalMapping already established!");
     V = GV;
   }
@@ -187,41 +185,41 @@ void ExecutionEngine::addGlobalMapping(const GlobalValue *GV, void *Addr) {
 void ExecutionEngine::clearAllGlobalMappings() {
   MutexGuard locked(lock);
 
-  EEState.getGlobalAddressMap(locked).clear();
-  EEState.getGlobalAddressReverseMap(locked).clear();
+  EEState.getGlobalAddressMap().clear();
+  EEState.getGlobalAddressReverseMap().clear();
 }
 
 void ExecutionEngine::clearGlobalMappingsFromModule(Module *M) {
   MutexGuard locked(lock);
 
   for (Module::iterator FI = M->begin(), FE = M->end(); FI != FE; ++FI)
-    EEState.RemoveMapping(locked, FI);
+    EEState.RemoveMapping(FI);
   for (Module::global_iterator GI = M->global_begin(), GE = M->global_end();
        GI != GE; ++GI)
-    EEState.RemoveMapping(locked, GI);
+    EEState.RemoveMapping(GI);
 }
 
 void *ExecutionEngine::updateGlobalMapping(const GlobalValue *GV, void *Addr) {
   MutexGuard locked(lock);
 
   ExecutionEngineState::GlobalAddressMapTy &Map =
-    EEState.getGlobalAddressMap(locked);
+    EEState.getGlobalAddressMap();
 
   // Deleting from the mapping?
   if (!Addr)
-    return EEState.RemoveMapping(locked, GV);
+    return EEState.RemoveMapping(GV);
 
   void *&CurVal = Map[GV];
   void *OldVal = CurVal;
 
-  if (CurVal && !EEState.getGlobalAddressReverseMap(locked).empty())
-    EEState.getGlobalAddressReverseMap(locked).erase(CurVal);
+  if (CurVal && !EEState.getGlobalAddressReverseMap().empty())
+    EEState.getGlobalAddressReverseMap().erase(CurVal);
   CurVal = Addr;
 
   // If we are using the reverse mapping, add it too.
-  if (!EEState.getGlobalAddressReverseMap(locked).empty()) {
+  if (!EEState.getGlobalAddressReverseMap().empty()) {
     AssertingVH<const GlobalValue> &V =
-      EEState.getGlobalAddressReverseMap(locked)[Addr];
+      EEState.getGlobalAddressReverseMap()[Addr];
     assert((!V || !GV) && "GlobalMapping already established!");
     V = GV;
   }
@@ -232,25 +230,25 @@ void *ExecutionEngine::getPointerToGlobalIfAvailable(const GlobalValue *GV) {
   MutexGuard locked(lock);
 
   ExecutionEngineState::GlobalAddressMapTy::iterator I =
-    EEState.getGlobalAddressMap(locked).find(GV);
-  return I != EEState.getGlobalAddressMap(locked).end() ? I->second : nullptr;
+    EEState.getGlobalAddressMap().find(GV);
+  return I != EEState.getGlobalAddressMap().end() ? I->second : nullptr;
 }
 
 const GlobalValue *ExecutionEngine::getGlobalValueAtAddress(void *Addr) {
   MutexGuard locked(lock);
 
   // If we haven't computed the reverse mapping yet, do so first.
-  if (EEState.getGlobalAddressReverseMap(locked).empty()) {
+  if (EEState.getGlobalAddressReverseMap().empty()) {
     for (ExecutionEngineState::GlobalAddressMapTy::iterator
-         I = EEState.getGlobalAddressMap(locked).begin(),
-         E = EEState.getGlobalAddressMap(locked).end(); I != E; ++I)
-      EEState.getGlobalAddressReverseMap(locked).insert(std::make_pair(
+         I = EEState.getGlobalAddressMap().begin(),
+         E = EEState.getGlobalAddressMap().end(); I != E; ++I)
+      EEState.getGlobalAddressReverseMap().insert(std::make_pair(
                                                           I->second, I->first));
   }
 
   std::map<void *, AssertingVH<const GlobalValue> >::iterator I =
-    EEState.getGlobalAddressReverseMap(locked).find(Addr);
-  return I != EEState.getGlobalAddressReverseMap(locked).end() ? I->second : nullptr;
+    EEState.getGlobalAddressReverseMap().find(Addr);
+  return I != EEState.getGlobalAddressReverseMap().end() ? I->second : nullptr;
 }
 
 namespace {
@@ -407,54 +405,25 @@ int ExecutionEngine::runFunctionAsMain(Function *Fn,
   return runFunction(Fn, GVArgs).IntVal.getZExtValue();
 }
 
-ExecutionEngine *ExecutionEngine::create(Module *M,
-                                         bool ForceInterpreter,
-                                         std::string *ErrorStr,
-                                         CodeGenOpt::Level OptLevel,
-                                         bool GVsWithCode) {
-  EngineBuilder EB =  EngineBuilder(M)
-      .setEngineKind(ForceInterpreter
-                     ? EngineKind::Interpreter
-                     : EngineKind::JIT)
-      .setErrorStr(ErrorStr)
-      .setOptLevel(OptLevel)
-      .setAllocateGVsWithCode(GVsWithCode);
+void EngineBuilder::InitEngine() {
+  WhichEngine = EngineKind::Either;
+  ErrorStr = nullptr;
+  OptLevel = CodeGenOpt::Default;
+  MCJMM = nullptr;
+  JMM = nullptr;
+  Options = TargetOptions();
+  AllocateGVsWithCode = false;
+  RelocModel = Reloc::Default;
+  CMModel = CodeModel::JITDefault;
+  UseMCJIT = false;
 
-  return EB.create();
-}
-
-/// createJIT - This is the factory method for creating a JIT for the current
-/// machine, it does not fall back to the interpreter.  This takes ownership
-/// of the module.
-ExecutionEngine *ExecutionEngine::createJIT(Module *M,
-                                            std::string *ErrorStr,
-                                            JITMemoryManager *JMM,
-                                            CodeGenOpt::Level OL,
-                                            bool GVsWithCode,
-                                            Reloc::Model RM,
-                                            CodeModel::Model CMM) {
-  if (!ExecutionEngine::JITCtor) {
-    if (ErrorStr)
-      *ErrorStr = "JIT has not been linked in.";
-    return nullptr;
-  }
-
-  // Use the defaults for extra parameters.  Users can use EngineBuilder to
-  // set them.
-  EngineBuilder EB(M);
-  EB.setEngineKind(EngineKind::JIT);
-  EB.setErrorStr(ErrorStr);
-  EB.setRelocationModel(RM);
-  EB.setCodeModel(CMM);
-  EB.setAllocateGVsWithCode(GVsWithCode);
-  EB.setOptLevel(OL);
-  EB.setJITMemoryManager(JMM);
-
-  // TODO: permit custom TargetOptions here
-  TargetMachine *TM = EB.selectTarget();
-  if (!TM || (ErrorStr && ErrorStr->length() > 0)) return nullptr;
-
-  return ExecutionEngine::JITCtor(M, ErrorStr, JMM, GVsWithCode, TM);
+// IR module verification is enabled by default in debug builds, and disabled
+// by default in release builds.
+#ifndef NDEBUG
+  VerifyModules = true;
+#else
+  VerifyModules = false;
+#endif
 }
 
 ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
@@ -501,7 +470,7 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
     ExecutionEngine *EE = nullptr;
     if (UseMCJIT && ExecutionEngine::MCJITCtor)
       EE = ExecutionEngine::MCJITCtor(M, ErrorStr, MCJMM ? MCJMM : JMM,
-                                      AllocateGVsWithCode, TheTM.release());
+                                      TheTM.release());
     else if (ExecutionEngine::JITCtor)
       EE = ExecutionEngine::JITCtor(M, ErrorStr, JMM,
                                     AllocateGVsWithCode, TheTM.release());
@@ -536,7 +505,7 @@ void *ExecutionEngine::getPointerToGlobal(const GlobalValue *GV) {
     return getPointerToFunction(F);
 
   MutexGuard locked(lock);
-  if (void *P = EEState.getGlobalAddressMap(locked)[GV])
+  if (void *P = EEState.getGlobalAddressMap()[GV])
     return P;
 
   // Global variable might have been added since interpreter started.
@@ -546,7 +515,7 @@ void *ExecutionEngine::getPointerToGlobal(const GlobalValue *GV) {
   else
     llvm_unreachable("Global hasn't had an address allocated yet!");
 
-  return EEState.getGlobalAddressMap(locked)[GV];
+  return EEState.getGlobalAddressMap()[GV];
 }
 
 /// \brief Converts a Constant* into a GenericValue, including handling of

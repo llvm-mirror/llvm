@@ -16,7 +16,7 @@
 #ifndef LLVM_OBJECT_ELFYAML_H
 #define LLVM_OBJECT_ELFYAML_H
 
-#include "llvm/Object/YAML.h"
+#include "llvm/MC/YAML.h"
 #include "llvm/Support/ELF.h"
 
 namespace llvm {
@@ -44,6 +44,7 @@ LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_REL)
 // Just use 64, since it can hold 32-bit values too.
 LLVM_YAML_STRONG_TYPEDEF(uint64_t, ELF_SHF)
 LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STT)
+LLVM_YAML_STRONG_TYPEDEF(uint8_t, ELF_STV)
 
 // For now, hardcode 64 bits everywhere that 32 or 64 would be needed
 // since 64-bit can hold 32-bit values too.
@@ -62,6 +63,7 @@ struct Symbol {
   StringRef Section;
   llvm::yaml::Hex64 Value;
   llvm::yaml::Hex64 Size;
+  ELF_STV Visibility;
 };
 struct LocalGlobalWeakSymbols {
   std::vector<Symbol> Local;
@@ -76,13 +78,12 @@ struct Section {
   ELF_SHF Flags;
   llvm::yaml::Hex64 Address;
   StringRef Link;
-  StringRef Info;
   llvm::yaml::Hex64 AddressAlign;
   Section(SectionKind Kind) : Kind(Kind) {}
   virtual ~Section();
 };
 struct RawContentSection : Section {
-  object::yaml::BinaryRef Content;
+  yaml::BinaryRef Content;
   llvm::yaml::Hex64 Size;
   RawContentSection() : Section(SectionKind::RawContent) {}
   static bool classof(const Section *S) {
@@ -96,6 +97,7 @@ struct Relocation {
   StringRef Symbol;
 };
 struct RelocationSection : Section {
+  StringRef Info;
   std::vector<Relocation> Relocations;
   RelocationSection() : Section(SectionKind::Relocation) {}
   static bool classof(const Section *S) {
@@ -165,6 +167,11 @@ struct ScalarBitSetTraits<ELFYAML::ELF_SHF> {
 template <>
 struct ScalarEnumerationTraits<ELFYAML::ELF_STT> {
   static void enumeration(IO &IO, ELFYAML::ELF_STT &Value);
+};
+
+template <>
+struct ScalarEnumerationTraits<ELFYAML::ELF_STV> {
+  static void enumeration(IO &IO, ELFYAML::ELF_STV &Value);
 };
 
 template <>

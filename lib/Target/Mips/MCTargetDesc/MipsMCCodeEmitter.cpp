@@ -258,7 +258,9 @@ getBranchTarget21OpValue(const MCInst &MI, unsigned OpNo,
   assert(MO.isExpr() &&
          "getBranchTarget21OpValue expects only expressions or immediates");
 
-  // TODO: Push 21 PC fixup.
+  const MCExpr *Expr = MO.getExpr();
+  Fixups.push_back(MCFixup::Create(0, Expr,
+                                   MCFixupKind(Mips::fixup_MIPS_PC21_S2)));
   return 0;
 }
 
@@ -278,7 +280,9 @@ getBranchTarget26OpValue(const MCInst &MI, unsigned OpNo,
   assert(MO.isExpr() &&
          "getBranchTarget26OpValue expects only expressions or immediates");
 
-  // TODO: Push 26 PC fixup.
+  const MCExpr *Expr = MO.getExpr();
+  Fixups.push_back(MCFixup::Create(0, Expr,
+                                   MCFixupKind(Mips::fixup_MIPS_PC26_S2)));
   return 0;
 }
 
@@ -476,6 +480,12 @@ getExprOpValue(const MCExpr *Expr,SmallVectorImpl<MCFixup> &Fixups,
     case MCSymbolRefExpr::VK_Mips_CALL_LO16:
       FixupKind = Mips::fixup_Mips_CALL_LO16;
       break;
+    case MCSymbolRefExpr::VK_Mips_PCREL_HI16:
+      FixupKind = Mips::fixup_MIPS_PCHI16;
+      break;
+    case MCSymbolRefExpr::VK_Mips_PCREL_LO16:
+      FixupKind = Mips::fixup_MIPS_PCLO16;
+      break;
     } // switch
 
     Fixups.push_back(MCFixup::Create(0, Expr, MCFixupKind(FixupKind)));
@@ -611,11 +621,42 @@ unsigned
 MipsMCCodeEmitter::getSimm19Lsl2Encoding(const MCInst &MI, unsigned OpNo,
                                          SmallVectorImpl<MCFixup> &Fixups,
                                          const MCSubtargetInfo &STI) const {
-  assert(MI.getOperand(OpNo).isImm());
-  // The immediate is encoded as 'immediate << 2'.
-  unsigned Res = getMachineOpValue(MI, MI.getOperand(OpNo), Fixups, STI);
-  assert((Res & 3) == 0);
-  return Res >> 2;
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm()) {
+    // The immediate is encoded as 'immediate << 2'.
+    unsigned Res = getMachineOpValue(MI, MO, Fixups, STI);
+    assert((Res & 3) == 0);
+    return Res >> 2;
+  }
+
+  assert(MO.isExpr() &&
+         "getSimm19Lsl2Encoding expects only expressions or an immediate");
+
+  const MCExpr *Expr = MO.getExpr();
+  Fixups.push_back(MCFixup::Create(0, Expr,
+                                   MCFixupKind(Mips::fixup_MIPS_PC19_S2)));
+  return 0;
+}
+
+unsigned
+MipsMCCodeEmitter::getSimm18Lsl3Encoding(const MCInst &MI, unsigned OpNo,
+                                         SmallVectorImpl<MCFixup> &Fixups,
+                                         const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm()) {
+    // The immediate is encoded as 'immediate << 3'.
+    unsigned Res = getMachineOpValue(MI, MI.getOperand(OpNo), Fixups, STI);
+    assert((Res & 7) == 0);
+    return Res >> 3;
+  }
+
+  assert(MO.isExpr() &&
+         "getSimm18Lsl2Encoding expects only expressions or an immediate");
+
+  const MCExpr *Expr = MO.getExpr();
+  Fixups.push_back(MCFixup::Create(0, Expr,
+                                   MCFixupKind(Mips::fixup_MIPS_PC18_S3)));
+  return 0;
 }
 
 #include "MipsGenMCCodeEmitter.inc"

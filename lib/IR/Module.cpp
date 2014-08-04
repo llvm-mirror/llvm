@@ -24,6 +24,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LeakDetector.h"
 #include "llvm/Support/Dwarf.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/RandomNumberGenerator.h"
 #include <algorithm>
 #include <cstdarg>
 #include <cstdlib>
@@ -44,7 +46,7 @@ template class llvm::SymbolTableListTraits<GlobalAlias, Module>;
 //
 
 Module::Module(StringRef MID, LLVMContext &C)
-    : Context(C), Materializer(), ModuleID(MID), DL("") {
+    : Context(C), Materializer(), ModuleID(MID), RNG(nullptr), DL("") {
   ValSymTab = new ValueSymbolTable();
   NamedMDSymTab = new StringMap<NamedMDNode *>();
   Context.addModule(this);
@@ -59,6 +61,7 @@ Module::~Module() {
   NamedMDList.clear();
   delete ValSymTab;
   delete static_cast<StringMap<NamedMDNode *> *>(NamedMDSymTab);
+  delete RNG;
 }
 
 /// getNamedValue - Return the first global value in the module with
@@ -355,6 +358,16 @@ const DataLayout *Module::getDataLayout() const {
   return &DL;
 }
 
+// We want reproducible builds, but ModuleID may be a full path so we just use
+// the filename to salt the RNG (although it is not guaranteed to be unique).
+RandomNumberGenerator &Module::getRNG() const {
+  if (RNG == nullptr) {
+    StringRef Salt = sys::path::filename(ModuleID);
+    RNG = new RandomNumberGenerator(Salt);
+  }
+  return *RNG;
+}
+
 //===----------------------------------------------------------------------===//
 // Methods to control the materialization of GlobalValues in the Module.
 //
@@ -381,7 +394,7 @@ bool Module::Materialize(GlobalValue *GV, std::string *ErrInfo) {
   if (!Materializer)
     return false;
 
-  error_code EC = Materializer->Materialize(GV);
+  std::error_code EC = Materializer->Materialize(GV);
   if (!EC)
     return false;
   if (ErrInfo)
@@ -394,18 +407,21 @@ void Module::Dematerialize(GlobalValue *GV) {
     return Materializer->Dematerialize(GV);
 }
 
-error_code Module::materializeAll() {
+std::error_code Module::materializeAll() {
   if (!Materializer)
-    return error_code::success();
+    return std::error_code();
   return Materializer->MaterializeModule(this);
 }
 
-error_code Module::materializeAllPermanently() {
-  if (error_code EC = materializeAll())
+std::error_code Module::materializeAllPermanently(bool ReleaseBuffer) {
+  if (std::error_code EC = materializeAll())
     return EC;
 
+  if (ReleaseBuffer)
+    Materializer->releaseBuffer();
+
   Materializer.reset();
-  return error_code::success();
+  return std::error_code();
 }
 
 //===----------------------------------------------------------------------===//
@@ -421,14 +437,14 @@ error_code Module::materializeAllPermanently() {
 // has "dropped all references", except operator delete.
 //
 void Module::dropAllReferences() {
-  for(Module::iterator I = begin(), E = end(); I != E; ++I)
-    I->dropAllReferences();
+  for (Function &F : *this)
+    F.dropAllReferences();
 
-  for(Module::global_iterator I = global_begin(), E = global_end(); I != E; ++I)
-    I->dropAllReferences();
+  for (GlobalVariable &GV : globals())
+    GV.dropAllReferences();
 
-  for(Module::alias_iterator I = alias_begin(), E = alias_end(); I != E; ++I)
-    I->dropAllReferences();
+  for (GlobalAlias &GA : aliases())
+    GA.dropAllReferences();
 }
 
 unsigned Module::getDwarfVersion() const {
@@ -436,4 +452,12 @@ unsigned Module::getDwarfVersion() const {
   if (!Val)
     return dwarf::DWARF_VERSION;
   return cast<ConstantInt>(Val)->getZExtValue();
+}
+
+Comdat *Module::getOrInsertComdat(StringRef Name) {
+  Comdat C;
+  StringMapEntry<Comdat> &Entry =
+      ComdatSymTab.GetOrCreateValue(Name, std::move(C));
+  Entry.second.Name = &Entry;
+  return &Entry.second;
 }

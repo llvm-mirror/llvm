@@ -74,8 +74,8 @@ namespace llvm {
                               unsigned& RetSize) const;
 
   public:
-    HexagonTargetMachine &TM;
-    explicit HexagonTargetLowering(HexagonTargetMachine &targetmachine);
+    const TargetMachine &TM;
+    explicit HexagonTargetLowering(const TargetMachine &targetmachine);
 
     /// IsEligibleForTailCallOptimization - Check whether the call is eligible
     /// for tail call optimization. Targets which want to do tail call
@@ -124,7 +124,6 @@ namespace llvm {
                             const SmallVectorImpl<SDValue> &OutVals,
                             SDValue Callee) const;
 
-    SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;

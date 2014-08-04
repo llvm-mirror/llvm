@@ -27,7 +27,8 @@ void SIMachineFunctionInfo::anchor() {}
 SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   : AMDGPUMachineFunction(MF),
     PSInputAddr(0),
-    SpillTracker() { }
+    SpillTracker(),
+    NumUserSGPRs(0) { }
 
 static unsigned createLaneVGPR(MachineRegisterInfo &MRI, MachineFunction *MF) {
   unsigned VGPR = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
@@ -62,8 +63,10 @@ static unsigned createLaneVGPR(MachineRegisterInfo &MRI, MachineFunction *MF) {
       return VGPR;
     }
   }
-  MF->getFunction()->getContext().emitError(
-      "Could not found S_ENGPGM instrtuction.");
+
+  LLVMContext &Ctx = MF->getFunction()->getContext();
+  Ctx.emitError("Could not find S_ENDPGM instruction.");
+
   return VGPR;
 }
 

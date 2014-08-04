@@ -19,7 +19,7 @@
 using namespace llvm;
 using namespace llvm::object;
 
-static error_code dumpObject(const ObjectFile &Obj) {
+static std::error_code dumpObject(const ObjectFile &Obj) {
   if (Obj.isCOFF())
     return coff2yaml(outs(), cast<COFFObjectFile>(Obj));
   if (Obj.isELF())
@@ -28,15 +28,15 @@ static error_code dumpObject(const ObjectFile &Obj) {
   return obj2yaml_error::unsupported_obj_file_format;
 }
 
-static error_code dumpInput(StringRef File) {
+static std::error_code dumpInput(StringRef File) {
   if (File != "-" && !sys::fs::exists(File))
     return obj2yaml_error::file_not_found;
 
-  ErrorOr<Binary *> BinaryOrErr = createBinary(File);
-  if (error_code EC = BinaryOrErr.getError())
+  ErrorOr<std::unique_ptr<Binary>> BinaryOrErr = createBinary(File);
+  if (std::error_code EC = BinaryOrErr.getError())
     return EC;
 
-  std::unique_ptr<Binary> Binary(BinaryOrErr.get());
+  std::unique_ptr<Binary> Binary = std::move(BinaryOrErr.get());
   // TODO: If this is an archive, then burst it and dump each entry
   if (ObjectFile *Obj = dyn_cast<ObjectFile>(Binary.get()))
     return dumpObject(*Obj);
@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
 
-  if (error_code EC = dumpInput(InputFilename)) {
+  if (std::error_code EC = dumpInput(InputFilename)) {
     errs() << "Error: '" << EC.message() << "'\n";
     return 1;
   }

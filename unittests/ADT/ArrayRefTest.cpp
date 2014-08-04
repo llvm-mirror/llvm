@@ -29,5 +29,34 @@ TEST(ArrayRefTest, AllocatorCopy) {
   EXPECT_NE(Array2.data(), Array2c.data());
 }
 
+TEST(ArrayRefTest, DropBack) {
+  static const int TheNumbers[] = {4, 8, 15, 16, 23, 42};
+  ArrayRef<int> AR1(TheNumbers);
+  ArrayRef<int> AR2(TheNumbers, AR1.size() - 1);
+  EXPECT_TRUE(AR1.drop_back().equals(AR2));
+}
+
+TEST(ArrayRefTest, Equals) {
+  static const int A1[] = {1, 2, 3, 4, 5, 6, 7, 8};
+  ArrayRef<int> AR1(A1);
+  EXPECT_TRUE(AR1.equals(1, 2, 3, 4, 5, 6, 7, 8));
+  EXPECT_FALSE(AR1.equals(8, 1, 2, 4, 5, 6, 6, 7));
+  EXPECT_FALSE(AR1.equals(2, 4, 5, 6, 6, 7, 8, 1));
+  EXPECT_FALSE(AR1.equals(0, 1, 2, 4, 5, 6, 6, 7));
+  EXPECT_FALSE(AR1.equals(1, 2, 42, 4, 5, 6, 7, 8));
+  EXPECT_FALSE(AR1.equals(42, 2, 3, 4, 5, 6, 7, 8));
+  EXPECT_FALSE(AR1.equals(1, 2, 3, 4, 5, 6, 7, 42));
+  EXPECT_FALSE(AR1.equals(1, 2, 3, 4, 5, 6, 7));
+  EXPECT_FALSE(AR1.equals(1, 2, 3, 4, 5, 6, 7, 8, 9));
+
+  ArrayRef<int> AR1a = AR1.drop_back();
+  EXPECT_TRUE(AR1a.equals(1, 2, 3, 4, 5, 6, 7));
+  EXPECT_FALSE(AR1a.equals(1, 2, 3, 4, 5, 6, 7, 8));
+
+  ArrayRef<int> AR1b = AR1a.slice(2, 4);
+  EXPECT_TRUE(AR1b.equals(3, 4, 5, 6));
+  EXPECT_FALSE(AR1b.equals(2, 3, 4, 5, 6));
+  EXPECT_FALSE(AR1b.equals(3, 4, 5, 6, 7));
+}
 
 } // end anonymous namespace

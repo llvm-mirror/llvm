@@ -47,7 +47,7 @@ Attribute Attribute::get(LLVMContext &Context, Attribute::AttrKind Kind,
     if (!Val)
       PA = new EnumAttributeImpl(Kind);
     else
-      PA = new AlignAttributeImpl(Kind, Val);
+      PA = new IntAttributeImpl(Kind, Val);
     pImpl->AttrsSet.InsertNode(PA, InsertPoint);
   }
 
@@ -88,6 +88,12 @@ Attribute Attribute::getWithStackAlignment(LLVMContext &Context,
   return get(Context, StackAlignment, Align);
 }
 
+Attribute Attribute::getWithDereferenceableBytes(LLVMContext &Context,
+                                                uint64_t Bytes) {
+  assert(Bytes && "Bytes must be non-zero.");
+  return get(Context, Dereferenceable, Bytes);
+}
+
 //===----------------------------------------------------------------------===//
 // Attribute Accessor Methods
 //===----------------------------------------------------------------------===//
@@ -96,8 +102,8 @@ bool Attribute::isEnumAttribute() const {
   return pImpl && pImpl->isEnumAttribute();
 }
 
-bool Attribute::isAlignAttribute() const {
-  return pImpl && pImpl->isAlignAttribute();
+bool Attribute::isIntAttribute() const {
+  return pImpl && pImpl->isIntAttribute();
 }
 
 bool Attribute::isStringAttribute() const {
@@ -106,15 +112,15 @@ bool Attribute::isStringAttribute() const {
 
 Attribute::AttrKind Attribute::getKindAsEnum() const {
   if (!pImpl) return None;
-  assert((isEnumAttribute() || isAlignAttribute()) &&
+  assert((isEnumAttribute() || isIntAttribute()) &&
          "Invalid attribute type to get the kind as an enum!");
   return pImpl ? pImpl->getKindAsEnum() : None;
 }
 
 uint64_t Attribute::getValueAsInt() const {
   if (!pImpl) return 0;
-  assert(isAlignAttribute() &&
-         "Expected the attribute to be an alignment attribute!");
+  assert(isIntAttribute() &&
+         "Expected the attribute to be an integer attribute!");
   return pImpl ? pImpl->getValueAsInt() : 0;
 }
 
@@ -156,6 +162,14 @@ unsigned Attribute::getStackAlignment() const {
   return pImpl->getValueAsInt();
 }
 
+/// This returns the number of dereferenceable bytes.
+uint64_t Attribute::getDereferenceableBytes() const {
+  assert(hasAttribute(Attribute::Dereferenceable) &&
+         "Trying to get dereferenceable bytes from "
+         "non-dereferenceable attribute!");
+  return pImpl->getValueAsInt();
+}
+
 std::string Attribute::getAsString(bool InAttrGrp) const {
   if (!pImpl) return "";
 
@@ -173,6 +187,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "inlinehint";
   if (hasAttribute(Attribute::InReg))
     return "inreg";
+  if (hasAttribute(Attribute::JumpTable))
+    return "jumptable";
   if (hasAttribute(Attribute::MinSize))
     return "minsize";
   if (hasAttribute(Attribute::Naked))
@@ -261,6 +277,20 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return Result;
   }
 
+  if (hasAttribute(Attribute::Dereferenceable)) {
+    std::string Result;
+    Result += "dereferenceable";
+    if (InAttrGrp) {
+      Result += "=";
+      Result += utostr(getValueAsInt());
+    } else {
+      Result += "(";
+      Result += utostr(getValueAsInt());
+      Result += ")";
+    }
+    return Result;
+  }
+
   // Convert target-dependent attributes to strings of the form:
   //
   //   "kind"
@@ -291,10 +321,10 @@ bool Attribute::operator<(Attribute A) const {
 // AttributeImpl Definition
 //===----------------------------------------------------------------------===//
 
-// Pin the vtabels to this file.
+// Pin the vtables to this file.
 AttributeImpl::~AttributeImpl() {}
 void EnumAttributeImpl::anchor() {}
-void AlignAttributeImpl::anchor() {}
+void IntAttributeImpl::anchor() {}
 void StringAttributeImpl::anchor() {}
 
 bool AttributeImpl::hasAttribute(Attribute::AttrKind A) const {
@@ -308,13 +338,13 @@ bool AttributeImpl::hasAttribute(StringRef Kind) const {
 }
 
 Attribute::AttrKind AttributeImpl::getKindAsEnum() const {
-  assert(isEnumAttribute() || isAlignAttribute());
+  assert(isEnumAttribute() || isIntAttribute());
   return static_cast<const EnumAttributeImpl *>(this)->getEnumKind();
 }
 
 uint64_t AttributeImpl::getValueAsInt() const {
-  assert(isAlignAttribute());
-  return static_cast<const AlignAttributeImpl *>(this)->getAlignment();
+  assert(isIntAttribute());
+  return static_cast<const IntAttributeImpl *>(this)->getValue();
 }
 
 StringRef AttributeImpl::getKindAsString() const {
@@ -332,18 +362,18 @@ bool AttributeImpl::operator<(const AttributeImpl &AI) const {
   // relative to their enum value) and then strings.
   if (isEnumAttribute()) {
     if (AI.isEnumAttribute()) return getKindAsEnum() < AI.getKindAsEnum();
-    if (AI.isAlignAttribute()) return true;
+    if (AI.isIntAttribute()) return true;
     if (AI.isStringAttribute()) return true;
   }
 
-  if (isAlignAttribute()) {
+  if (isIntAttribute()) {
     if (AI.isEnumAttribute()) return false;
-    if (AI.isAlignAttribute()) return getValueAsInt() < AI.getValueAsInt();
+    if (AI.isIntAttribute()) return getValueAsInt() < AI.getValueAsInt();
     if (AI.isStringAttribute()) return true;
   }
 
   if (AI.isEnumAttribute()) return false;
-  if (AI.isAlignAttribute()) return false;
+  if (AI.isIntAttribute()) return false;
   if (getKindAsString() == AI.getKindAsString())
     return getValueAsString() < AI.getValueAsString();
   return getKindAsString() < AI.getKindAsString();
@@ -395,6 +425,9 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::OptimizeNone:    return 1ULL << 42;
   case Attribute::InAlloca:        return 1ULL << 43;
   case Attribute::NonNull:         return 1ULL << 44;
+  case Attribute::JumpTable:       return 1ULL << 45;
+  case Attribute::Dereferenceable:
+    llvm_unreachable("dereferenceable attribute not supported in raw format");
   }
   llvm_unreachable("Unsupported attribute type");
 }
@@ -479,6 +512,13 @@ unsigned AttributeSetNode::getStackAlignment() const {
   return 0;
 }
 
+uint64_t AttributeSetNode::getDereferenceableBytes() const {
+  for (iterator I = begin(), E = end(); I != E; ++I)
+    if (I->hasAttribute(Attribute::Dereferenceable))
+      return I->getDereferenceableBytes();
+  return 0;
+}
+
 std::string AttributeSetNode::getAsString(bool InAttrGrp) const {
   std::string Str;
   for (iterator I = begin(), E = end(); I != E; ++I) {
@@ -512,6 +552,8 @@ uint64_t AttributeSetImpl::Raw(unsigned Index) const {
         Mask |= (Log2_32(ASN->getAlignment()) + 1) << 16;
       else if (Kind == Attribute::StackAlignment)
         Mask |= (Log2_32(ASN->getStackAlignment()) + 1) << 26;
+      else if (Kind == Attribute::Dereferenceable)
+        llvm_unreachable("dereferenceable not supported in bit mask");
       else
         Mask |= AttributeImpl::getAttrMask(Kind);
     }
@@ -617,6 +659,10 @@ AttributeSet AttributeSet::get(LLVMContext &C, unsigned Index,
     else if (Kind == Attribute::StackAlignment)
       Attrs.push_back(std::make_pair(Index, Attribute::
                               getWithStackAlignment(C, B.getStackAlignment())));
+    else if (Kind == Attribute::Dereferenceable)
+      Attrs.push_back(std::make_pair(Index,
+                                     Attribute::getWithDereferenceableBytes(C,
+                                       B.getDereferenceableBytes())));
     else
       Attrs.push_back(std::make_pair(Index, Attribute::get(C, Kind)));
   }
@@ -874,6 +920,11 @@ unsigned AttributeSet::getStackAlignment(unsigned Index) const {
   return ASN ? ASN->getStackAlignment() : 0;
 }
 
+uint64_t AttributeSet::getDereferenceableBytes(unsigned Index) const {
+  AttributeSetNode *ASN = getAttributes(Index);
+  return ASN ? ASN->getDereferenceableBytes() : 0;
+}
+
 std::string AttributeSet::getAsString(unsigned Index,
                                       bool InAttrGrp) const {
   AttributeSetNode *ASN = getAttributes(Index);
@@ -953,7 +1004,7 @@ void AttributeSet::dump() const {
 //===----------------------------------------------------------------------===//
 
 AttrBuilder::AttrBuilder(AttributeSet AS, unsigned Index)
-  : Attrs(0), Alignment(0), StackAlignment(0) {
+  : Attrs(0), Alignment(0), StackAlignment(0), DerefBytes(0) {
   AttributeSetImpl *pImpl = AS.pImpl;
   if (!pImpl) return;
 
@@ -970,13 +1021,14 @@ AttrBuilder::AttrBuilder(AttributeSet AS, unsigned Index)
 
 void AttrBuilder::clear() {
   Attrs.reset();
-  Alignment = StackAlignment = 0;
+  Alignment = StackAlignment = DerefBytes = 0;
 }
 
 AttrBuilder &AttrBuilder::addAttribute(Attribute::AttrKind Val) {
   assert((unsigned)Val < Attribute::EndAttrKinds && "Attribute out of range!");
   assert(Val != Attribute::Alignment && Val != Attribute::StackAlignment &&
-         "Adding alignment attribute without adding alignment value!");
+         Val != Attribute::Dereferenceable &&
+         "Adding integer attribute without adding a value!");
   Attrs[Val] = true;
   return *this;
 }
@@ -994,6 +1046,8 @@ AttrBuilder &AttrBuilder::addAttribute(Attribute Attr) {
     Alignment = Attr.getAlignment();
   else if (Kind == Attribute::StackAlignment)
     StackAlignment = Attr.getStackAlignment();
+  else if (Kind == Attribute::Dereferenceable)
+    DerefBytes = Attr.getDereferenceableBytes();
   return *this;
 }
 
@@ -1010,6 +1064,8 @@ AttrBuilder &AttrBuilder::removeAttribute(Attribute::AttrKind Val) {
     Alignment = 0;
   else if (Val == Attribute::StackAlignment)
     StackAlignment = 0;
+  else if (Val == Attribute::Dereferenceable)
+    DerefBytes = 0;
 
   return *this;
 }
@@ -1026,7 +1082,7 @@ AttrBuilder &AttrBuilder::removeAttributes(AttributeSet A, uint64_t Index) {
 
   for (AttributeSet::iterator I = A.begin(Slot), E = A.end(Slot); I != E; ++I) {
     Attribute Attr = *I;
-    if (Attr.isEnumAttribute() || Attr.isAlignAttribute()) {
+    if (Attr.isEnumAttribute() || Attr.isIntAttribute()) {
       Attribute::AttrKind Kind = I->getKindAsEnum();
       Attrs[Kind] = false;
 
@@ -1034,6 +1090,8 @@ AttrBuilder &AttrBuilder::removeAttributes(AttributeSet A, uint64_t Index) {
         Alignment = 0;
       else if (Kind == Attribute::StackAlignment)
         StackAlignment = 0;
+      else if (Kind == Attribute::Dereferenceable)
+        DerefBytes = 0;
     } else {
       assert(Attr.isStringAttribute() && "Invalid attribute type!");
       std::map<std::string, std::string>::iterator
@@ -1076,6 +1134,14 @@ AttrBuilder &AttrBuilder::addStackAlignmentAttr(unsigned Align) {
   return *this;
 }
 
+AttrBuilder &AttrBuilder::addDereferenceableAttr(uint64_t Bytes) {
+  if (Bytes == 0) return *this;
+
+  Attrs[Attribute::Dereferenceable] = true;
+  DerefBytes = Bytes;
+  return *this;
+}
+
 AttrBuilder &AttrBuilder::merge(const AttrBuilder &B) {
   // FIXME: What if both have alignments, but they don't match?!
   if (!Alignment)
@@ -1083,6 +1149,9 @@ AttrBuilder &AttrBuilder::merge(const AttrBuilder &B) {
 
   if (!StackAlignment)
     StackAlignment = B.StackAlignment;
+
+  if (!DerefBytes)
+    DerefBytes = B.DerefBytes;
 
   Attrs |= B.Attrs;
 
@@ -1114,7 +1183,7 @@ bool AttrBuilder::hasAttributes(AttributeSet A, uint64_t Index) const {
   for (AttributeSet::iterator I = A.begin(Slot), E = A.end(Slot);
        I != E; ++I) {
     Attribute Attr = *I;
-    if (Attr.isEnumAttribute() || Attr.isAlignAttribute()) {
+    if (Attr.isEnumAttribute() || Attr.isIntAttribute()) {
       if (Attrs[I->getKindAsEnum()])
         return true;
     } else {
@@ -1139,7 +1208,8 @@ bool AttrBuilder::operator==(const AttrBuilder &B) {
     if (B.TargetDepAttrs.find(I->first) == B.TargetDepAttrs.end())
       return false;
 
-  return Alignment == B.Alignment && StackAlignment == B.StackAlignment;
+  return Alignment == B.Alignment && StackAlignment == B.StackAlignment &&
+         DerefBytes == B.DerefBytes;
 }
 
 AttrBuilder &AttrBuilder::addRawValue(uint64_t Val) {
@@ -1148,6 +1218,8 @@ AttrBuilder &AttrBuilder::addRawValue(uint64_t Val) {
 
   for (Attribute::AttrKind I = Attribute::None; I != Attribute::EndAttrKinds;
        I = Attribute::AttrKind(I + 1)) {
+    if (I == Attribute::Dereferenceable)
+      continue;
     if (uint64_t A = (Val & AttributeImpl::getAttrMask(I))) {
       Attrs[I] = true;
  
@@ -1181,6 +1253,7 @@ AttributeSet AttributeFuncs::typeIncompatible(Type *Ty, uint64_t Index) {
       .addAttribute(Attribute::NoAlias)
       .addAttribute(Attribute::NoCapture)
       .addAttribute(Attribute::NonNull)
+      .addDereferenceableAttr(1) // the int here is ignored
       .addAttribute(Attribute::ReadNone)
       .addAttribute(Attribute::ReadOnly)
       .addAttribute(Attribute::StructRet)

@@ -20,6 +20,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/ExecutionEngine/ObjectImage.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
+#include "llvm/ExecutionEngine/RuntimeDyldChecker.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -28,8 +29,8 @@
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/SwapByteOrder.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <map>
+#include <system_error>
 
 using namespace llvm;
 using namespace llvm::object;
@@ -158,9 +159,21 @@ public:
 };
 
 class RuntimeDyldImpl {
+  friend class RuntimeDyldCheckerImpl;
+private:
+
+  uint64_t getAnySymbolRemoteAddress(StringRef Symbol) {
+    if (uint64_t InternalSymbolAddr = getSymbolLoadAddress(Symbol))
+      return InternalSymbolAddr;
+    return MemMgr->getSymbolAddress(Symbol);
+  }
+
 protected:
   // The MemoryManager to load objects into.
   RTDyldMemoryManager *MemMgr;
+
+  // Attached RuntimeDyldChecker instance. Null if no instance attached.
+  RuntimeDyldCheckerImpl *Checker;
 
   // A list of all sections emitted by the dynamic linker.  These sections are
   // referenced in the code by means of their index in this list - SectionID.
@@ -200,6 +213,7 @@ protected:
   // external when they aren't found in the global symbol table of all loaded
   // modules.  This map is indexed by symbol name.
   StringMap<RelocationList> ExternalSymbolRelocations;
+
 
   typedef std::map<RelocationValueRef, uintptr_t> StubMap;
 
@@ -245,14 +259,14 @@ protected:
 
   void writeInt16BE(uint8_t *Addr, uint16_t Value) {
     if (IsTargetLittleEndian)
-      Value = sys::SwapByteOrder(Value);
+      sys::swapByteOrder(Value);
     *Addr       = (Value >> 8) & 0xFF;
     *(Addr + 1) = Value & 0xFF;
   }
 
   void writeInt32BE(uint8_t *Addr, uint32_t Value) {
     if (IsTargetLittleEndian)
-      Value = sys::SwapByteOrder(Value);
+      sys::swapByteOrder(Value);
     *Addr       = (Value >> 24) & 0xFF;
     *(Addr + 1) = (Value >> 16) & 0xFF;
     *(Addr + 2) = (Value >> 8) & 0xFF;
@@ -261,7 +275,7 @@ protected:
 
   void writeInt64BE(uint8_t *Addr, uint64_t Value) {
     if (IsTargetLittleEndian)
-      Value = sys::SwapByteOrder(Value);
+      sys::swapByteOrder(Value);
     *Addr       = (Value >> 56) & 0xFF;
     *(Addr + 1) = (Value >> 48) & 0xFF;
     *(Addr + 2) = (Value >> 40) & 0xFF;
@@ -302,7 +316,7 @@ protected:
 
   /// \brief Emits long jump instruction to Addr.
   /// \return Pointer to the memory area for emitting target address.
-  uint8_t *createStubFunction(uint8_t *Addr);
+  uint8_t *createStubFunction(uint8_t *Addr, unsigned AbiVariant = 0);
 
   /// \brief Resolves relocations from Relocs list with address from Value.
   void resolveRelocationList(const RelocationList &Relocs, uint64_t Value);
@@ -339,7 +353,8 @@ protected:
 
 public:
   RuntimeDyldImpl(RTDyldMemoryManager *mm)
-      : MemMgr(mm), ProcessAllSections(false), HasError(false) {}
+    : MemMgr(mm), Checker(nullptr), ProcessAllSections(false), HasError(false) {
+  }
 
   virtual ~RuntimeDyldImpl();
 
@@ -347,9 +362,13 @@ public:
     this->ProcessAllSections = ProcessAllSections;
   }
 
+  void setRuntimeDyldChecker(RuntimeDyldCheckerImpl *Checker) {
+    this->Checker = Checker;
+  }
+
   ObjectImage *loadObject(ObjectImage *InputObject);
 
-  void *getSymbolAddress(StringRef Name) {
+  uint8_t* getSymbolAddress(StringRef Name) {
     // FIXME: Just look up as a function for now. Overly simple of course.
     // Work in progress.
     SymbolTableMap::const_iterator pos = GlobalSymbolTable.find(Name);

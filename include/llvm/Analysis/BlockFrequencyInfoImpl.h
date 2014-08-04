@@ -22,6 +22,7 @@
 #include "llvm/Support/BlockFrequency.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ScaledNumber.h"
 #include "llvm/Support/raw_ostream.h"
 #include <deque>
 #include <list>
@@ -30,684 +31,25 @@
 
 #define DEBUG_TYPE "block-freq"
 
-//===----------------------------------------------------------------------===//
-//
-// UnsignedFloat definition.
-//
-// TODO: Make this private to BlockFrequencyInfoImpl or delete.
-//
-//===----------------------------------------------------------------------===//
 namespace llvm {
 
-class UnsignedFloatBase {
-public:
-  static const int32_t MaxExponent = 16383;
-  static const int32_t MinExponent = -16382;
-  static const int DefaultPrecision = 10;
-
-  static void dump(uint64_t D, int16_t E, int Width);
-  static raw_ostream &print(raw_ostream &OS, uint64_t D, int16_t E, int Width,
-                            unsigned Precision);
-  static std::string toString(uint64_t D, int16_t E, int Width,
-                              unsigned Precision);
-  static int countLeadingZeros32(uint32_t N) { return countLeadingZeros(N); }
-  static int countLeadingZeros64(uint64_t N) { return countLeadingZeros(N); }
-  static uint64_t getHalf(uint64_t N) { return (N >> 1) + (N & 1); }
-
-  static std::pair<uint64_t, bool> splitSigned(int64_t N) {
-    if (N >= 0)
-      return std::make_pair(N, false);
-    uint64_t Unsigned = N == INT64_MIN ? UINT64_C(1) << 63 : uint64_t(-N);
-    return std::make_pair(Unsigned, true);
-  }
-  static int64_t joinSigned(uint64_t U, bool IsNeg) {
-    if (U > uint64_t(INT64_MAX))
-      return IsNeg ? INT64_MIN : INT64_MAX;
-    return IsNeg ? -int64_t(U) : int64_t(U);
-  }
-
-  static int32_t extractLg(const std::pair<int32_t, int> &Lg) {
-    return Lg.first;
-  }
-  static int32_t extractLgFloor(const std::pair<int32_t, int> &Lg) {
-    return Lg.first - (Lg.second > 0);
-  }
-  static int32_t extractLgCeiling(const std::pair<int32_t, int> &Lg) {
-    return Lg.first + (Lg.second < 0);
-  }
-
-  static std::pair<uint64_t, int16_t> divide64(uint64_t L, uint64_t R);
-  static std::pair<uint64_t, int16_t> multiply64(uint64_t L, uint64_t R);
-
-  static int compare(uint64_t L, uint64_t R, int Shift) {
-    assert(Shift >= 0);
-    assert(Shift < 64);
-
-    uint64_t L_adjusted = L >> Shift;
-    if (L_adjusted < R)
-      return -1;
-    if (L_adjusted > R)
-      return 1;
-
-    return L > L_adjusted << Shift ? 1 : 0;
-  }
-};
-
-/// \brief Simple representation of an unsigned floating point.
-///
-/// UnsignedFloat is a unsigned floating point number.  It uses simple
-/// saturation arithmetic, and every operation is well-defined for every value.
-///
-/// The number is split into a signed exponent and unsigned digits.  The number
-/// represented is \c getDigits()*2^getExponent().  In this way, the digits are
-/// much like the mantissa in the x87 long double, but there is no canonical
-/// form, so the same number can be represented by many bit representations
-/// (it's always in "denormal" mode).
-///
-/// UnsignedFloat is templated on the underlying integer type for digits, which
-/// is expected to be one of uint64_t, uint32_t, uint16_t or uint8_t.
-///
-/// Unlike builtin floating point types, UnsignedFloat is portable.
-///
-/// Unlike APFloat, UnsignedFloat does not model architecture floating point
-/// behaviour (this should make it a little faster), and implements most
-/// operators (this makes it usable).
-///
-/// UnsignedFloat is totally ordered.  However, there is no canonical form, so
-/// there are multiple representations of most scalars.  E.g.:
-///
-///     UnsignedFloat(8u, 0) == UnsignedFloat(4u, 1)
-///     UnsignedFloat(4u, 1) == UnsignedFloat(2u, 2)
-///     UnsignedFloat(2u, 2) == UnsignedFloat(1u, 3)
-///
-/// UnsignedFloat implements most arithmetic operations.  Precision is kept
-/// where possible.  Uses simple saturation arithmetic, so that operations
-/// saturate to 0.0 or getLargest() rather than under or overflowing.  It has
-/// some extra arithmetic for unit inversion.  0.0/0.0 is defined to be 0.0.
-/// Any other division by 0.0 is defined to be getLargest().
-///
-/// As a convenience for modifying the exponent, left and right shifting are
-/// both implemented, and both interpret negative shifts as positive shifts in
-/// the opposite direction.
-///
-/// Exponents are limited to the range accepted by x87 long double.  This makes
-/// it trivial to add functionality to convert to APFloat (this is already
-/// relied on for the implementation of printing).
-///
-/// The current plan is to gut this and make the necessary parts of it (even
-/// more) private to BlockFrequencyInfo.
-template <class DigitsT> class UnsignedFloat : UnsignedFloatBase {
-public:
-  static_assert(!std::numeric_limits<DigitsT>::is_signed,
-                "only unsigned floats supported");
-
-  typedef DigitsT DigitsType;
-
-private:
-  typedef std::numeric_limits<DigitsType> DigitsLimits;
-
-  static const int Width = sizeof(DigitsType) * 8;
-  static_assert(Width <= 64, "invalid integer width for digits");
-
-private:
-  DigitsType Digits;
-  int16_t Exponent;
-
-public:
-  UnsignedFloat() : Digits(0), Exponent(0) {}
-
-  UnsignedFloat(DigitsType Digits, int16_t Exponent)
-      : Digits(Digits), Exponent(Exponent) {}
-
-private:
-  UnsignedFloat(const std::pair<uint64_t, int16_t> &X)
-      : Digits(X.first), Exponent(X.second) {}
-
-public:
-  static UnsignedFloat getZero() { return UnsignedFloat(0, 0); }
-  static UnsignedFloat getOne() { return UnsignedFloat(1, 0); }
-  static UnsignedFloat getLargest() {
-    return UnsignedFloat(DigitsLimits::max(), MaxExponent);
-  }
-  static UnsignedFloat getFloat(uint64_t N) { return adjustToWidth(N, 0); }
-  static UnsignedFloat getInverseFloat(uint64_t N) {
-    return getFloat(N).invert();
-  }
-  static UnsignedFloat getFraction(DigitsType N, DigitsType D) {
-    return getQuotient(N, D);
-  }
-
-  int16_t getExponent() const { return Exponent; }
-  DigitsType getDigits() const { return Digits; }
-
-  /// \brief Convert to the given integer type.
-  ///
-  /// Convert to \c IntT using simple saturating arithmetic, truncating if
-  /// necessary.
-  template <class IntT> IntT toInt() const;
-
-  bool isZero() const { return !Digits; }
-  bool isLargest() const { return *this == getLargest(); }
-  bool isOne() const {
-    if (Exponent > 0 || Exponent <= -Width)
-      return false;
-    return Digits == DigitsType(1) << -Exponent;
-  }
-
-  /// \brief The log base 2, rounded.
-  ///
-  /// Get the lg of the scalar.  lg 0 is defined to be INT32_MIN.
-  int32_t lg() const { return extractLg(lgImpl()); }
-
-  /// \brief The log base 2, rounded towards INT32_MIN.
-  ///
-  /// Get the lg floor.  lg 0 is defined to be INT32_MIN.
-  int32_t lgFloor() const { return extractLgFloor(lgImpl()); }
-
-  /// \brief The log base 2, rounded towards INT32_MAX.
-  ///
-  /// Get the lg ceiling.  lg 0 is defined to be INT32_MIN.
-  int32_t lgCeiling() const { return extractLgCeiling(lgImpl()); }
-
-  bool operator==(const UnsignedFloat &X) const { return compare(X) == 0; }
-  bool operator<(const UnsignedFloat &X) const { return compare(X) < 0; }
-  bool operator!=(const UnsignedFloat &X) const { return compare(X) != 0; }
-  bool operator>(const UnsignedFloat &X) const { return compare(X) > 0; }
-  bool operator<=(const UnsignedFloat &X) const { return compare(X) <= 0; }
-  bool operator>=(const UnsignedFloat &X) const { return compare(X) >= 0; }
-
-  bool operator!() const { return isZero(); }
-
-  /// \brief Convert to a decimal representation in a string.
-  ///
-  /// Convert to a string.  Uses scientific notation for very large/small
-  /// numbers.  Scientific notation is used roughly for numbers outside of the
-  /// range 2^-64 through 2^64.
-  ///
-  /// \c Precision indicates the number of decimal digits of precision to use;
-  /// 0 requests the maximum available.
-  ///
-  /// As a special case to make debugging easier, if the number is small enough
-  /// to convert without scientific notation and has more than \c Precision
-  /// digits before the decimal place, it's printed accurately to the first
-  /// digit past zero.  E.g., assuming 10 digits of precision:
-  ///
-  ///     98765432198.7654... => 98765432198.8
-  ///      8765432198.7654... =>  8765432198.8
-  ///       765432198.7654... =>   765432198.8
-  ///        65432198.7654... =>    65432198.77
-  ///         5432198.7654... =>     5432198.765
-  std::string toString(unsigned Precision = DefaultPrecision) {
-    return UnsignedFloatBase::toString(Digits, Exponent, Width, Precision);
-  }
-
-  /// \brief Print a decimal representation.
-  ///
-  /// Print a string.  See toString for documentation.
-  raw_ostream &print(raw_ostream &OS,
-                     unsigned Precision = DefaultPrecision) const {
-    return UnsignedFloatBase::print(OS, Digits, Exponent, Width, Precision);
-  }
-  void dump() const { return UnsignedFloatBase::dump(Digits, Exponent, Width); }
-
-  UnsignedFloat &operator+=(const UnsignedFloat &X);
-  UnsignedFloat &operator-=(const UnsignedFloat &X);
-  UnsignedFloat &operator*=(const UnsignedFloat &X);
-  UnsignedFloat &operator/=(const UnsignedFloat &X);
-  UnsignedFloat &operator<<=(int16_t Shift) { shiftLeft(Shift); return *this; }
-  UnsignedFloat &operator>>=(int16_t Shift) { shiftRight(Shift); return *this; }
-
-private:
-  void shiftLeft(int32_t Shift);
-  void shiftRight(int32_t Shift);
-
-  /// \brief Adjust two floats to have matching exponents.
-  ///
-  /// Adjust \c this and \c X to have matching exponents.  Returns the new \c X
-  /// by value.  Does nothing if \a isZero() for either.
-  ///
-  /// The value that compares smaller will lose precision, and possibly become
-  /// \a isZero().
-  UnsignedFloat matchExponents(UnsignedFloat X);
-
-  /// \brief Increase exponent to match another float.
-  ///
-  /// Increases \c this to have an exponent matching \c X.  May decrease the
-  /// exponent of \c X in the process, and \c this may possibly become \a
-  /// isZero().
-  void increaseExponentToMatch(UnsignedFloat &X, int32_t ExponentDiff);
-
-public:
-  /// \brief Scale a large number accurately.
-  ///
-  /// Scale N (multiply it by this).  Uses full precision multiplication, even
-  /// if Width is smaller than 64, so information is not lost.
-  uint64_t scale(uint64_t N) const;
-  uint64_t scaleByInverse(uint64_t N) const {
-    // TODO: implement directly, rather than relying on inverse.  Inverse is
-    // expensive.
-    return inverse().scale(N);
-  }
-  int64_t scale(int64_t N) const {
-    std::pair<uint64_t, bool> Unsigned = splitSigned(N);
-    return joinSigned(scale(Unsigned.first), Unsigned.second);
-  }
-  int64_t scaleByInverse(int64_t N) const {
-    std::pair<uint64_t, bool> Unsigned = splitSigned(N);
-    return joinSigned(scaleByInverse(Unsigned.first), Unsigned.second);
-  }
-
-  int compare(const UnsignedFloat &X) const;
-  int compareTo(uint64_t N) const {
-    UnsignedFloat Float = getFloat(N);
-    int Compare = compare(Float);
-    if (Width == 64 || Compare != 0)
-      return Compare;
-
-    // Check for precision loss.  We know *this == RoundTrip.
-    uint64_t RoundTrip = Float.template toInt<uint64_t>();
-    return N == RoundTrip ? 0 : RoundTrip < N ? -1 : 1;
-  }
-  int compareTo(int64_t N) const { return N < 0 ? 1 : compareTo(uint64_t(N)); }
-
-  UnsignedFloat &invert() { return *this = UnsignedFloat::getFloat(1) / *this; }
-  UnsignedFloat inverse() const { return UnsignedFloat(*this).invert(); }
-
-private:
-  static UnsignedFloat getProduct(DigitsType L, DigitsType R);
-  static UnsignedFloat getQuotient(DigitsType Dividend, DigitsType Divisor);
-
-  std::pair<int32_t, int> lgImpl() const;
-  static int countLeadingZerosWidth(DigitsType Digits) {
-    if (Width == 64)
-      return countLeadingZeros64(Digits);
-    if (Width == 32)
-      return countLeadingZeros32(Digits);
-    return countLeadingZeros32(Digits) + Width - 32;
-  }
-
-  static UnsignedFloat adjustToWidth(uint64_t N, int32_t S) {
-    assert(S >= MinExponent);
-    assert(S <= MaxExponent);
-    if (Width == 64 || N <= DigitsLimits::max())
-      return UnsignedFloat(N, S);
-
-    // Shift right.
-    int Shift = 64 - Width - countLeadingZeros64(N);
-    DigitsType Shifted = N >> Shift;
-
-    // Round.
-    assert(S + Shift <= MaxExponent);
-    return getRounded(UnsignedFloat(Shifted, S + Shift),
-                      N & UINT64_C(1) << (Shift - 1));
-  }
-
-  static UnsignedFloat getRounded(UnsignedFloat P, bool Round) {
-    if (!Round)
-      return P;
-    if (P.Digits == DigitsLimits::max())
-      // Careful of overflow in the exponent.
-      return UnsignedFloat(1, P.Exponent) <<= Width;
-    return UnsignedFloat(P.Digits + 1, P.Exponent);
-  }
-};
-
-#define UNSIGNED_FLOAT_BOP(op, base)                                           \
-  template <class DigitsT>                                                     \
-  UnsignedFloat<DigitsT> operator op(const UnsignedFloat<DigitsT> &L,          \
-                                     const UnsignedFloat<DigitsT> &R) {        \
-    return UnsignedFloat<DigitsT>(L) base R;                                   \
-  }
-UNSIGNED_FLOAT_BOP(+, += )
-UNSIGNED_FLOAT_BOP(-, -= )
-UNSIGNED_FLOAT_BOP(*, *= )
-UNSIGNED_FLOAT_BOP(/, /= )
-UNSIGNED_FLOAT_BOP(<<, <<= )
-UNSIGNED_FLOAT_BOP(>>, >>= )
-#undef UNSIGNED_FLOAT_BOP
-
-template <class DigitsT>
-raw_ostream &operator<<(raw_ostream &OS, const UnsignedFloat<DigitsT> &X) {
-  return X.print(OS, 10);
-}
-
-#define UNSIGNED_FLOAT_COMPARE_TO_TYPE(op, T1, T2)                             \
-  template <class DigitsT>                                                     \
-  bool operator op(const UnsignedFloat<DigitsT> &L, T1 R) {                    \
-    return L.compareTo(T2(R)) op 0;                                            \
-  }                                                                            \
-  template <class DigitsT>                                                     \
-  bool operator op(T1 L, const UnsignedFloat<DigitsT> &R) {                    \
-    return 0 op R.compareTo(T2(L));                                            \
-  }
-#define UNSIGNED_FLOAT_COMPARE_TO(op)                                          \
-  UNSIGNED_FLOAT_COMPARE_TO_TYPE(op, uint64_t, uint64_t)                       \
-  UNSIGNED_FLOAT_COMPARE_TO_TYPE(op, uint32_t, uint64_t)                       \
-  UNSIGNED_FLOAT_COMPARE_TO_TYPE(op, int64_t, int64_t)                         \
-  UNSIGNED_FLOAT_COMPARE_TO_TYPE(op, int32_t, int64_t)
-UNSIGNED_FLOAT_COMPARE_TO(< )
-UNSIGNED_FLOAT_COMPARE_TO(> )
-UNSIGNED_FLOAT_COMPARE_TO(== )
-UNSIGNED_FLOAT_COMPARE_TO(!= )
-UNSIGNED_FLOAT_COMPARE_TO(<= )
-UNSIGNED_FLOAT_COMPARE_TO(>= )
-#undef UNSIGNED_FLOAT_COMPARE_TO
-#undef UNSIGNED_FLOAT_COMPARE_TO_TYPE
-
-template <class DigitsT>
-uint64_t UnsignedFloat<DigitsT>::scale(uint64_t N) const {
-  if (Width == 64 || N <= DigitsLimits::max())
-    return (getFloat(N) * *this).template toInt<uint64_t>();
-
-  // Defer to the 64-bit version.
-  return UnsignedFloat<uint64_t>(Digits, Exponent).scale(N);
-}
-
-template <class DigitsT>
-UnsignedFloat<DigitsT> UnsignedFloat<DigitsT>::getProduct(DigitsType L,
-                                                          DigitsType R) {
-  // Check for zero.
-  if (!L || !R)
-    return getZero();
-
-  // Check for numbers that we can compute with 64-bit math.
-  if (Width <= 32 || (L <= UINT32_MAX && R <= UINT32_MAX))
-    return adjustToWidth(uint64_t(L) * uint64_t(R), 0);
-
-  // Do the full thing.
-  return UnsignedFloat(multiply64(L, R));
-}
-template <class DigitsT>
-UnsignedFloat<DigitsT> UnsignedFloat<DigitsT>::getQuotient(DigitsType Dividend,
-                                                           DigitsType Divisor) {
-  // Check for zero.
-  if (!Dividend)
-    return getZero();
-  if (!Divisor)
-    return getLargest();
-
-  if (Width == 64)
-    return UnsignedFloat(divide64(Dividend, Divisor));
-
-  // We can compute this with 64-bit math.
-  int Shift = countLeadingZeros64(Dividend);
-  uint64_t Shifted = uint64_t(Dividend) << Shift;
-  uint64_t Quotient = Shifted / Divisor;
-
-  // If Quotient needs to be shifted, then adjustToWidth will round.
-  if (Quotient > DigitsLimits::max())
-    return adjustToWidth(Quotient, -Shift);
-
-  // Round based on the value of the next bit.
-  return getRounded(UnsignedFloat(Quotient, -Shift),
-                    Shifted % Divisor >= getHalf(Divisor));
-}
-
-template <class DigitsT>
-template <class IntT>
-IntT UnsignedFloat<DigitsT>::toInt() const {
-  typedef std::numeric_limits<IntT> Limits;
-  if (*this < 1)
-    return 0;
-  if (*this >= Limits::max())
-    return Limits::max();
-
-  IntT N = Digits;
-  if (Exponent > 0) {
-    assert(size_t(Exponent) < sizeof(IntT) * 8);
-    return N << Exponent;
-  }
-  if (Exponent < 0) {
-    assert(size_t(-Exponent) < sizeof(IntT) * 8);
-    return N >> -Exponent;
-  }
-  return N;
-}
-
-template <class DigitsT>
-std::pair<int32_t, int> UnsignedFloat<DigitsT>::lgImpl() const {
-  if (isZero())
-    return std::make_pair(INT32_MIN, 0);
-
-  // Get the floor of the lg of Digits.
-  int32_t LocalFloor = Width - countLeadingZerosWidth(Digits) - 1;
-
-  // Get the floor of the lg of this.
-  int32_t Floor = Exponent + LocalFloor;
-  if (Digits == UINT64_C(1) << LocalFloor)
-    return std::make_pair(Floor, 0);
-
-  // Round based on the next digit.
-  assert(LocalFloor >= 1);
-  bool Round = Digits & UINT64_C(1) << (LocalFloor - 1);
-  return std::make_pair(Floor + Round, Round ? 1 : -1);
-}
-
-template <class DigitsT>
-UnsignedFloat<DigitsT> UnsignedFloat<DigitsT>::matchExponents(UnsignedFloat X) {
-  if (isZero() || X.isZero() || Exponent == X.Exponent)
-    return X;
-
-  int32_t Diff = int32_t(X.Exponent) - int32_t(Exponent);
-  if (Diff > 0)
-    increaseExponentToMatch(X, Diff);
-  else
-    X.increaseExponentToMatch(*this, -Diff);
-  return X;
-}
-template <class DigitsT>
-void UnsignedFloat<DigitsT>::increaseExponentToMatch(UnsignedFloat &X,
-                                                     int32_t ExponentDiff) {
-  assert(ExponentDiff > 0);
-  if (ExponentDiff >= 2 * Width) {
-    *this = getZero();
-    return;
-  }
-
-  // Use up any leading zeros on X, and then shift this.
-  int32_t ShiftX = std::min(countLeadingZerosWidth(X.Digits), ExponentDiff);
-  assert(ShiftX < Width);
-
-  int32_t ShiftThis = ExponentDiff - ShiftX;
-  if (ShiftThis >= Width) {
-    *this = getZero();
-    return;
-  }
-
-  X.Digits <<= ShiftX;
-  X.Exponent -= ShiftX;
-  Digits >>= ShiftThis;
-  Exponent += ShiftThis;
-  return;
-}
-
-template <class DigitsT>
-UnsignedFloat<DigitsT> &UnsignedFloat<DigitsT>::
-operator+=(const UnsignedFloat &X) {
-  if (isLargest() || X.isZero())
-    return *this;
-  if (isZero() || X.isLargest())
-    return *this = X;
-
-  // Normalize exponents.
-  UnsignedFloat Scaled = matchExponents(X);
-
-  // Check for zero again.
-  if (isZero())
-    return *this = Scaled;
-  if (Scaled.isZero())
-    return *this;
-
-  // Compute sum.
-  DigitsType Sum = Digits + Scaled.Digits;
-  bool DidOverflow = Sum < Digits;
-  Digits = Sum;
-  if (!DidOverflow)
-    return *this;
-
-  if (Exponent == MaxExponent)
-    return *this = getLargest();
-
-  ++Exponent;
-  Digits = UINT64_C(1) << (Width - 1) | Digits >> 1;
-
-  return *this;
-}
-template <class DigitsT>
-UnsignedFloat<DigitsT> &UnsignedFloat<DigitsT>::
-operator-=(const UnsignedFloat &X) {
-  if (X.isZero())
-    return *this;
-  if (*this <= X)
-    return *this = getZero();
-
-  // Normalize exponents.
-  UnsignedFloat Scaled = matchExponents(X);
-  assert(Digits >= Scaled.Digits);
-
-  // Compute difference.
-  if (!Scaled.isZero()) {
-    Digits -= Scaled.Digits;
-    return *this;
-  }
-
-  // Check if X just barely lost its last bit.  E.g., for 32-bit:
-  //
-  //   1*2^32 - 1*2^0 == 0xffffffff != 1*2^32
-  if (*this == UnsignedFloat(1, X.lgFloor() + Width)) {
-    Digits = DigitsType(0) - 1;
-    --Exponent;
-  }
-  return *this;
-}
-template <class DigitsT>
-UnsignedFloat<DigitsT> &UnsignedFloat<DigitsT>::
-operator*=(const UnsignedFloat &X) {
-  if (isZero())
-    return *this;
-  if (X.isZero())
-    return *this = X;
-
-  // Save the exponents.
-  int32_t Exponents = int32_t(Exponent) + int32_t(X.Exponent);
-
-  // Get the raw product.
-  *this = getProduct(Digits, X.Digits);
-
-  // Combine with exponents.
-  return *this <<= Exponents;
-}
-template <class DigitsT>
-UnsignedFloat<DigitsT> &UnsignedFloat<DigitsT>::
-operator/=(const UnsignedFloat &X) {
-  if (isZero())
-    return *this;
-  if (X.isZero())
-    return *this = getLargest();
-
-  // Save the exponents.
-  int32_t Exponents = int32_t(Exponent) - int32_t(X.Exponent);
-
-  // Get the raw quotient.
-  *this = getQuotient(Digits, X.Digits);
-
-  // Combine with exponents.
-  return *this <<= Exponents;
-}
-template <class DigitsT>
-void UnsignedFloat<DigitsT>::shiftLeft(int32_t Shift) {
-  if (!Shift || isZero())
-    return;
-  assert(Shift != INT32_MIN);
-  if (Shift < 0) {
-    shiftRight(-Shift);
-    return;
-  }
-
-  // Shift as much as we can in the exponent.
-  int32_t ExponentShift = std::min(Shift, MaxExponent - Exponent);
-  Exponent += ExponentShift;
-  if (ExponentShift == Shift)
-    return;
-
-  // Check this late, since it's rare.
-  if (isLargest())
-    return;
-
-  // Shift the digits themselves.
-  Shift -= ExponentShift;
-  if (Shift > countLeadingZerosWidth(Digits)) {
-    // Saturate.
-    *this = getLargest();
-    return;
-  }
-
-  Digits <<= Shift;
-  return;
-}
-
-template <class DigitsT>
-void UnsignedFloat<DigitsT>::shiftRight(int32_t Shift) {
-  if (!Shift || isZero())
-    return;
-  assert(Shift != INT32_MIN);
-  if (Shift < 0) {
-    shiftLeft(-Shift);
-    return;
-  }
-
-  // Shift as much as we can in the exponent.
-  int32_t ExponentShift = std::min(Shift, Exponent - MinExponent);
-  Exponent -= ExponentShift;
-  if (ExponentShift == Shift)
-    return;
-
-  // Shift the digits themselves.
-  Shift -= ExponentShift;
-  if (Shift >= Width) {
-    // Saturate.
-    *this = getZero();
-    return;
-  }
-
-  Digits >>= Shift;
-  return;
-}
-
-template <class DigitsT>
-int UnsignedFloat<DigitsT>::compare(const UnsignedFloat &X) const {
-  // Check for zero.
-  if (isZero())
-    return X.isZero() ? 0 : -1;
-  if (X.isZero())
-    return 1;
-
-  // Check for the scale.  Use lgFloor to be sure that the exponent difference
-  // is always lower than 64.
-  int32_t lgL = lgFloor(), lgR = X.lgFloor();
-  if (lgL != lgR)
-    return lgL < lgR ? -1 : 1;
-
-  // Compare digits.
-  if (Exponent < X.Exponent)
-    return UnsignedFloatBase::compare(Digits, X.Digits, X.Exponent - Exponent);
-
-  return -UnsignedFloatBase::compare(X.Digits, Digits, Exponent - X.Exponent);
-}
-
-template <class T> struct isPodLike<UnsignedFloat<T>> {
-  static const bool value = true;
-};
-}
-
-//===----------------------------------------------------------------------===//
-//
-// BlockMass definition.
-//
-// TODO: Make this private to BlockFrequencyInfoImpl or delete.
-//
-//===----------------------------------------------------------------------===//
-namespace llvm {
+class BasicBlock;
+class BranchProbabilityInfo;
+class Function;
+class Loop;
+class LoopInfo;
+class MachineBasicBlock;
+class MachineBranchProbabilityInfo;
+class MachineFunction;
+class MachineLoop;
+class MachineLoopInfo;
+
+namespace bfi_detail {
+
+struct IrreducibleGraph;
+
+// This is part of a workaround for a GCC 4.7 crash on lambdas.
+template <class BT> struct BlockEdgesAdder;
 
 /// \brief Mass of a block.
 ///
@@ -770,11 +112,11 @@ public:
   bool operator<(const BlockMass &X) const { return Mass < X.Mass; }
   bool operator>(const BlockMass &X) const { return Mass > X.Mass; }
 
-  /// \brief Convert to floating point.
+  /// \brief Convert to scaled number.
   ///
-  /// Convert to a float.  \a isFull() gives 1.0, while \a isEmpty() gives
-  /// slightly above 0.0.
-  UnsignedFloat<uint64_t> toFloat() const;
+  /// Convert to \a ScaledNumber.  \a isFull() gives 1.0, while \a isEmpty()
+  /// gives slightly above 0.0.
+  ScaledNumber<uint64_t> toScaled() const;
 
   void dump() const;
   raw_ostream &print(raw_ostream &OS) const;
@@ -797,35 +139,11 @@ inline raw_ostream &operator<<(raw_ostream &OS, const BlockMass &X) {
   return X.print(OS);
 }
 
-template <> struct isPodLike<BlockMass> {
+} // end namespace bfi_detail
+
+template <> struct isPodLike<bfi_detail::BlockMass> {
   static const bool value = true;
 };
-}
-
-//===----------------------------------------------------------------------===//
-//
-// BlockFrequencyInfoImpl definition.
-//
-//===----------------------------------------------------------------------===//
-namespace llvm {
-
-class BasicBlock;
-class BranchProbabilityInfo;
-class Function;
-class Loop;
-class LoopInfo;
-class MachineBasicBlock;
-class MachineBranchProbabilityInfo;
-class MachineFunction;
-class MachineLoop;
-class MachineLoopInfo;
-
-namespace bfi_detail {
-struct IrreducibleGraph;
-
-// This is part of a workaround for a GCC 4.7 crash on lambdas.
-template <class BT> struct BlockEdgesAdder;
-}
 
 /// \brief Base class for BlockFrequencyInfoImpl
 ///
@@ -837,7 +155,8 @@ template <class BT> struct BlockEdgesAdder;
 /// BlockFrequencyInfoImpl.  See there for details.
 class BlockFrequencyInfoImplBase {
 public:
-  typedef UnsignedFloat<uint64_t> Float;
+  typedef ScaledNumber<uint64_t> Scaled64;
+  typedef bfi_detail::BlockMass BlockMass;
 
   /// \brief Representative of a block.
   ///
@@ -866,7 +185,7 @@ public:
 
   /// \brief Stats about a block itself.
   struct FrequencyData {
-    Float Floating;
+    Scaled64 Scaled;
     uint64_t Integer;
   };
 
@@ -884,7 +203,7 @@ public:
     NodeList Nodes;         ///< Header and the members of the loop.
     BlockMass BackedgeMass; ///< Mass returned to loop header.
     BlockMass Mass;
-    Float Scale;
+    Scaled64 Scale;
 
     LoopData(LoopData *Parent, const BlockNode &Header)
         : Parent(Parent), IsPackaged(false), NumHeaders(1), Nodes(1, Header) {}
@@ -1003,6 +322,8 @@ public:
     BlockNode TargetNode;
     uint64_t Amount;
     Weight() : Type(Local), Amount(0) {}
+    Weight(DistType Type, BlockNode TargetNode, uint64_t Amount)
+        : Type(Type), TargetNode(TargetNode), Amount(Amount) {}
   };
 
   /// \brief Distribution of unscaled probability weight.
@@ -1131,7 +452,7 @@ public:
   virtual raw_ostream &print(raw_ostream &OS) const { return OS; }
   void dump() const { print(dbgs()); }
 
-  Float getFloatingBlockFreq(const BlockNode &Node) const;
+  Scaled64 getFloatingBlockFreq(const BlockNode &Node) const;
 
   BlockFrequency getBlockFreq(const BlockNode &Node) const;
 
@@ -1310,7 +631,7 @@ void IrreducibleGraph::addEdges(const BlockNode &Node,
 /// entries point to this block.  Its successors are the headers, which split
 /// the frequency evenly.
 ///
-/// This algorithm leverages BlockMass and UnsignedFloat to maintain precision,
+/// This algorithm leverages BlockMass and ScaledNumber to maintain precision,
 /// separates mass distribution from loop scaling, and dithers to eliminate
 /// probability mass loss.
 ///
@@ -1568,7 +889,7 @@ public:
   BlockFrequency getBlockFreq(const BlockT *BB) const {
     return BlockFrequencyInfoImplBase::getBlockFreq(getNode(BB));
   }
-  Float getFloatingBlockFreq(const BlockT *BB) const {
+  Scaled64 getFloatingBlockFreq(const BlockT *BB) const {
     return BlockFrequencyInfoImplBase::getFloatingBlockFreq(getNode(BB));
   }
 
@@ -1852,7 +1173,8 @@ raw_ostream &BlockFrequencyInfoImpl<BT>::print(raw_ostream &OS) const {
   OS << "\n";
   return OS;
 }
-}
+
+} // end namespace llvm
 
 #undef DEBUG_TYPE
 

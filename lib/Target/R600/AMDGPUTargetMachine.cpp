@@ -33,7 +33,6 @@
 #include "llvm/Transforms/Scalar.h"
 #include <llvm/CodeGen/Passes.h>
 
-
 using namespace llvm;
 
 extern "C" void LLVMInitializeR600Target() {
@@ -49,43 +48,13 @@ static MachineSchedRegistry
 SchedCustomRegistry("r600", "Run R600's custom scheduler",
                     createR600MachineScheduler);
 
-static std::string computeDataLayout(const AMDGPUSubtarget &ST) {
-  std::string Ret = "e-p:32:32";
-
-  if (ST.is64bit()) {
-    // 32-bit private, local, and region pointers. 64-bit global and constant.
-    Ret += "-p1:64:64-p2:64:64-p3:32:32-p4:32:32-p5:64:64";
-  }
-
-  Ret += "-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256"
-         "-v512:512-v1024:1024-v2048:2048-n32:64";
-
-  return Ret;
-}
-
 AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, StringRef TT,
-    StringRef CPU, StringRef FS,
-  TargetOptions Options,
-  Reloc::Model RM, CodeModel::Model CM,
-  CodeGenOpt::Level OptLevel
-)
-:
-  LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OptLevel),
-  Subtarget(TT, CPU, FS),
-  Layout(computeDataLayout(Subtarget)),
-  FrameLowering(TargetFrameLowering::StackGrowsUp,
-                64 * 16 // Maximum stack alignment (long16)
-               , 0),
-  IntrinsicInfo(this),
-  InstrItins(&Subtarget.getInstrItineraryData()) {
-  // TLInfo uses InstrInfo so it must be initialized after.
-  if (Subtarget.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
-    InstrInfo.reset(new R600InstrInfo(*this));
-    TLInfo.reset(new R600TargetLowering(*this));
-  } else {
-    InstrInfo.reset(new SIInstrInfo(*this));
-    TLInfo.reset(new SITargetLowering(*this));
-  }
+                                         StringRef CPU, StringRef FS,
+                                         TargetOptions Options, Reloc::Model RM,
+                                         CodeModel::Model CM,
+                                         CodeGenOpt::Level OptLevel)
+    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OptLevel),
+      Subtarget(TT, CPU, FS, *this) {
   setRequiresStructuredCFG(true);
   initAsmInfo();
 }
@@ -111,6 +80,7 @@ public:
     return nullptr;
   }
 
+  virtual void addCodeGenPrepare();
   bool addPreISel() override;
   bool addInstSelector() override;
   bool addPreRegAlloc() override;
@@ -136,6 +106,16 @@ void AMDGPUTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
   PM.add(createAMDGPUTargetTransformInfoPass(this));
 }
 
+void AMDGPUPassConfig::addCodeGenPrepare() {
+  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+  if (ST.isPromoteAllocaEnabled()) {
+    addPass(createAMDGPUPromoteAlloca(ST));
+    addPass(createSROAPass());
+  }
+
+  TargetPassConfig::addCodeGenPrepare();
+}
+
 bool
 AMDGPUPassConfig::addPreISel() {
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
@@ -159,7 +139,6 @@ bool AMDGPUPassConfig::addInstSelector() {
 }
 
 bool AMDGPUPassConfig::addPreRegAlloc() {
-  addPass(createAMDGPUConvertToISAPass(*TM));
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
 
   if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
@@ -169,6 +148,9 @@ bool AMDGPUPassConfig::addPreRegAlloc() {
     // SIFixSGPRCopies can generate a lot of duplicate instructions,
     // so we need to run MachineCSE afterwards.
     addPass(&MachineCSEID);
+    addPass(createSIShrinkInstructionsPass());
+    initializeSIFixSGPRLiveRangesPass(*PassRegistry::getPassRegistry());
+    insertPass(&RegisterCoalescerID, &SIFixSGPRLiveRangesID);
   }
   return false;
 }
@@ -176,6 +158,7 @@ bool AMDGPUPassConfig::addPreRegAlloc() {
 bool AMDGPUPassConfig::addPostRegAlloc() {
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
 
+  addPass(createSIShrinkInstructionsPass());
   if (ST.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
     addPass(createSIInsertWaits(*TM));
   }

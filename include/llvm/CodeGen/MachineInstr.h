@@ -614,7 +614,6 @@ public:
   /// are not marking copies from and to the same register class with this flag.
   bool isAsCheapAsAMove(QueryType Type = AllInBundle) const {
     // Only returns true for a bundle if all bundled instructions are cheap.
-    // FIXME: This probably requires a target hook.
     return hasProperty(MCID::CheapAsAMove, Type);
   }
 
@@ -726,6 +725,9 @@ public:
   }
   bool isFullCopy() const {
     return isCopy() && !getOperand(0).getSubReg() && !getOperand(1).getSubReg();
+  }
+  bool isExtractSubreg() const {
+    return getOpcode() == TargetOpcode::EXTRACT_SUBREG;
   }
 
   /// isCopyLike - Return true if the instruction behaves like a copy.
@@ -947,7 +949,7 @@ public:
   }
 
   /// isRegTiedToDefOperand - Return true if the use operand of the specified
-  /// index is tied to an def operand. It also returns the def operand index by
+  /// index is tied to a def operand. It also returns the def operand index by
   /// reference if DefOpIdx is not null.
   bool isRegTiedToDefOperand(unsigned UseOpIdx,
                              unsigned *DefOpIdx = nullptr) const {

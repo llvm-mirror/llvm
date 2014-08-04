@@ -14,9 +14,9 @@
 
 #include "yaml2obj.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ELFYAML.h"
-#include "llvm/Object/StringTableBuilder.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
@@ -304,6 +304,7 @@ void ELFState<ELFT>::addSymbols(const std::vector<ELFYAML::Symbol> &Symbols,
       Symbol.st_shndx = Index;
     } // else Symbol.st_shndex == SHN_UNDEF (== 0), since it was zero'd earlier.
     Symbol.st_value = Sym.Value;
+    Symbol.st_other = Sym.Visibility;
     Symbol.st_size = Sym.Size;
     Syms.push_back(Symbol);
   }
@@ -467,8 +468,7 @@ static bool isLittleEndian(const ELFYAML::Object &Doc) {
   return Doc.Header.Data == ELFYAML::ELF_ELFDATA(ELF::ELFDATA2LSB);
 }
 
-int yaml2elf(llvm::raw_ostream &Out, llvm::MemoryBuffer *Buf) {
-  yaml::Input YIn(Buf->getBuffer());
+int yaml2elf(yaml::Input &YIn, raw_ostream &Out) {
   ELFYAML::Object Doc;
   YIn >> Doc;
   if (YIn.error()) {

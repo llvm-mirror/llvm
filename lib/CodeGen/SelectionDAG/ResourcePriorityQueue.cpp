@@ -40,32 +40,31 @@ static cl::opt<signed> RegPressureThreshold(
   "dfa-sched-reg-pressure-threshold", cl::Hidden, cl::ZeroOrMore, cl::init(5),
   cl::desc("Track reg pressure and switch priority to in-depth"));
 
+ResourcePriorityQueue::ResourcePriorityQueue(SelectionDAGISel *IS)
+    : Picker(this),
+      InstrItins(
+          IS->getTargetLowering()->getTargetMachine().getInstrItineraryData()) {
+  const TargetMachine &TM = (*IS->MF).getTarget();
+  TRI = TM.getRegisterInfo();
+  TLI = IS->getTargetLowering();
+  TII = TM.getInstrInfo();
+  ResourcesModel = TII->CreateTargetScheduleState(&TM, nullptr);
+  // This hard requirement could be relaxed, but for now
+  // do not let it procede.
+  assert(ResourcesModel && "Unimplemented CreateTargetScheduleState.");
 
-ResourcePriorityQueue::ResourcePriorityQueue(SelectionDAGISel *IS) :
-  Picker(this),
- InstrItins(IS->getTargetLowering()->getTargetMachine().getInstrItineraryData())
-{
-   TII = IS->getTargetLowering()->getTargetMachine().getInstrInfo();
-   TRI = IS->getTargetLowering()->getTargetMachine().getRegisterInfo();
-   TLI = IS->getTargetLowering();
+  unsigned NumRC = TRI->getNumRegClasses();
+  RegLimit.resize(NumRC);
+  RegPressure.resize(NumRC);
+  std::fill(RegLimit.begin(), RegLimit.end(), 0);
+  std::fill(RegPressure.begin(), RegPressure.end(), 0);
+  for (TargetRegisterInfo::regclass_iterator I = TRI->regclass_begin(),
+                                             E = TRI->regclass_end();
+       I != E; ++I)
+    RegLimit[(*I)->getID()] = TRI->getRegPressureLimit(*I, *IS->MF);
 
-   const TargetMachine &tm = (*IS->MF).getTarget();
-   ResourcesModel = tm.getInstrInfo()->CreateTargetScheduleState(&tm,nullptr);
-   // This hard requirement could be relaxed, but for now
-   // do not let it procede.
-   assert (ResourcesModel && "Unimplemented CreateTargetScheduleState.");
-
-   unsigned NumRC = TRI->getNumRegClasses();
-   RegLimit.resize(NumRC);
-   RegPressure.resize(NumRC);
-   std::fill(RegLimit.begin(), RegLimit.end(), 0);
-   std::fill(RegPressure.begin(), RegPressure.end(), 0);
-   for (TargetRegisterInfo::regclass_iterator I = TRI->regclass_begin(),
-        E = TRI->regclass_end(); I != E; ++I)
-     RegLimit[(*I)->getID()] = TRI->getRegPressureLimit(*I, *IS->MF);
-
-   ParallelLiveRanges = 0;
-   HorizontalVerticalBalance = 0;
+  ParallelLiveRanges = 0;
+  HorizontalVerticalBalance = 0;
 }
 
 unsigned
@@ -442,7 +441,7 @@ signed ResourcePriorityQueue::SUSchedulingCost(SUnit *SU) {
     ResCount -= (regPressureDelta(SU) * ScaleTwo);
   }
 
-  // These are platform specific things.
+  // These are platform-specific things.
   // Will need to go into the back end
   // and accessed from here via a hook.
   for (SDNode *N = SU->getNode(); N; N = N->getGluedNode()) {

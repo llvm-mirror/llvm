@@ -39,7 +39,6 @@ using namespace llvm::PatternMatch;
 enum { RecursionLimit = 3 };
 
 STATISTIC(NumExpand,  "Number of expansions");
-STATISTIC(NumFactor , "Number of factorizations");
 STATISTIC(NumReassoc, "Number of reassociations");
 
 struct Query {
@@ -179,78 +178,6 @@ static Value *ExpandBinOp(unsigned Opcode, Value *LHS, Value *RHS,
           }
         }
     }
-
-  return nullptr;
-}
-
-/// FactorizeBinOp - Simplify "LHS Opcode RHS" by factorizing out a common term
-/// using the operation OpCodeToExtract.  For example, when Opcode is Add and
-/// OpCodeToExtract is Mul then this tries to turn "(A*B)+(A*C)" into "A*(B+C)".
-/// Returns the simplified value, or null if no simplification was performed.
-static Value *FactorizeBinOp(unsigned Opcode, Value *LHS, Value *RHS,
-                             unsigned OpcToExtract, const Query &Q,
-                             unsigned MaxRecurse) {
-  Instruction::BinaryOps OpcodeToExtract = (Instruction::BinaryOps)OpcToExtract;
-  // Recursion is always used, so bail out at once if we already hit the limit.
-  if (!MaxRecurse--)
-    return nullptr;
-
-  BinaryOperator *Op0 = dyn_cast<BinaryOperator>(LHS);
-  BinaryOperator *Op1 = dyn_cast<BinaryOperator>(RHS);
-
-  if (!Op0 || Op0->getOpcode() != OpcodeToExtract ||
-      !Op1 || Op1->getOpcode() != OpcodeToExtract)
-    return nullptr;
-
-  // The expression has the form "(A op' B) op (C op' D)".
-  Value *A = Op0->getOperand(0), *B = Op0->getOperand(1);
-  Value *C = Op1->getOperand(0), *D = Op1->getOperand(1);
-
-  // Use left distributivity, i.e. "X op' (Y op Z) = (X op' Y) op (X op' Z)".
-  // Does the instruction have the form "(A op' B) op (A op' D)" or, in the
-  // commutative case, "(A op' B) op (C op' A)"?
-  if (A == C || (Instruction::isCommutative(OpcodeToExtract) && A == D)) {
-    Value *DD = A == C ? D : C;
-    // Form "A op' (B op DD)" if it simplifies completely.
-    // Does "B op DD" simplify?
-    if (Value *V = SimplifyBinOp(Opcode, B, DD, Q, MaxRecurse)) {
-      // It does!  Return "A op' V" if it simplifies or is already available.
-      // If V equals B then "A op' V" is just the LHS.  If V equals DD then
-      // "A op' V" is just the RHS.
-      if (V == B || V == DD) {
-        ++NumFactor;
-        return V == B ? LHS : RHS;
-      }
-      // Otherwise return "A op' V" if it simplifies.
-      if (Value *W = SimplifyBinOp(OpcodeToExtract, A, V, Q, MaxRecurse)) {
-        ++NumFactor;
-        return W;
-      }
-    }
-  }
-
-  // Use right distributivity, i.e. "(X op Y) op' Z = (X op' Z) op (Y op' Z)".
-  // Does the instruction have the form "(A op' B) op (C op' B)" or, in the
-  // commutative case, "(A op' B) op (B op' D)"?
-  if (B == D || (Instruction::isCommutative(OpcodeToExtract) && B == C)) {
-    Value *CC = B == D ? C : D;
-    // Form "(A op CC) op' B" if it simplifies completely..
-    // Does "A op CC" simplify?
-    if (Value *V = SimplifyBinOp(Opcode, A, CC, Q, MaxRecurse)) {
-      // It does!  Return "V op' B" if it simplifies or is already available.
-      // If V equals A then "V op' B" is just the LHS.  If V equals CC then
-      // "V op' B" is just the RHS.
-      if (V == A || V == CC) {
-        ++NumFactor;
-        return V == A ? LHS : RHS;
-      }
-      // Otherwise return "V op' B" if it simplifies.
-      if (Value *W = SimplifyBinOp(OpcodeToExtract, V, B, Q, MaxRecurse)) {
-        ++NumFactor;
-        return W;
-      }
-    }
-  }
 
   return nullptr;
 }
@@ -634,11 +561,6 @@ static Value *SimplifyAddInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
                                           MaxRecurse))
     return V;
 
-  // Mul distributes over Add.  Try some generic simplifications based on this.
-  if (Value *V = FactorizeBinOp(Instruction::Add, Op0, Op1, Instruction::Mul,
-                                Q, MaxRecurse))
-    return V;
-
   // Threading Add over selects and phi nodes is pointless, so don't bother.
   // Threading over the select in "A + select(cond, B, C)" means evaluating
   // "A+B" and "A+C" and seeing if they are equal; but they are equal if and
@@ -754,16 +676,21 @@ static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
   if (Op0 == Op1)
     return Constant::getNullValue(Op0->getType());
 
-  // (X*2) - X -> X
-  // (X<<1) - X -> X
-  Value *X = nullptr;
-  if (match(Op0, m_Mul(m_Specific(Op1), m_ConstantInt<2>())) ||
-      match(Op0, m_Shl(m_Specific(Op1), m_One())))
-    return Op1;
+  // X - (0 - Y) -> X if the second sub is NUW.
+  // If Y != 0, 0 - Y is a poison value.
+  // If Y == 0, 0 - Y simplifies to 0.
+  if (BinaryOperator::isNeg(Op1)) {
+    if (const auto *BO = dyn_cast<BinaryOperator>(Op1)) {
+      assert(BO->getOpcode() == Instruction::Sub &&
+             "Expected a subtraction operator!");
+      if (BO->hasNoUnsignedWrap())
+        return Op0;
+    }
+  }
 
   // (X + Y) - Z -> X + (Y - Z) or Y + (X - Z) if everything simplifies.
   // For example, (X + Y) - Y -> X; (Y + X) - Y -> X
-  Value *Y = nullptr, *Z = Op1;
+  Value *X = nullptr, *Y = nullptr, *Z = Op1;
   if (MaxRecurse && match(Op0, m_Add(m_Value(X), m_Value(Y)))) { // (X + Y) - Z
     // See if "V === Y - Z" simplifies.
     if (Value *V = SimplifyBinOp(Instruction::Sub, Y, Z, Q, MaxRecurse-1))
@@ -834,11 +761,6 @@ static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
       match(Op1, m_PtrToInt(m_Value(Y))))
     if (Constant *Result = computePointerDifference(Q.DL, X, Y))
       return ConstantExpr::getIntegerCast(Result, Op0->getType(), true);
-
-  // Mul distributes over Sub.  Try some generic simplifications based on this.
-  if (Value *V = FactorizeBinOp(Instruction::Sub, Op0, Op1, Instruction::Mul,
-                                Q, MaxRecurse))
-    return V;
 
   // i1 sub -> xor.
   if (MaxRecurse && Op0->getType()->isIntegerTy(1))
@@ -1436,6 +1358,11 @@ static Value *SimplifyAShrInst(Value *Op0, Value *Op1, bool isExact,
       cast<OverflowingBinaryOperator>(Op0)->hasNoSignedWrap())
     return X;
 
+  // Arithmetic shifting an all-sign-bit value is a no-op.
+  unsigned NumSignBits = ComputeNumSignBits(Op0, Q.DL);
+  if (NumSignBits == Op0->getType()->getScalarSizeInBits())
+    return Op0;
+
   return nullptr;
 }
 
@@ -1516,11 +1443,6 @@ static Value *SimplifyAndInst(Value *Op0, Value *Op1, const Query &Q,
   // And distributes over Xor.  Try some generic simplifications based on this.
   if (Value *V = ExpandBinOp(Instruction::And, Op0, Op1, Instruction::Xor,
                              Q, MaxRecurse))
-    return V;
-
-  // Or distributes over And.  Try some generic simplifications based on this.
-  if (Value *V = FactorizeBinOp(Instruction::And, Op0, Op1, Instruction::Or,
-                                Q, MaxRecurse))
     return V;
 
   // If the operation is with the result of a select instruction, check whether
@@ -1613,17 +1535,44 @@ static Value *SimplifyOrInst(Value *Op0, Value *Op1, const Query &Q,
                              MaxRecurse))
     return V;
 
-  // And distributes over Or.  Try some generic simplifications based on this.
-  if (Value *V = FactorizeBinOp(Instruction::Or, Op0, Op1, Instruction::And,
-                                Q, MaxRecurse))
-    return V;
-
   // If the operation is with the result of a select instruction, check whether
   // operating on either branch of the select always yields the same value.
   if (isa<SelectInst>(Op0) || isa<SelectInst>(Op1))
     if (Value *V = ThreadBinOpOverSelect(Instruction::Or, Op0, Op1, Q,
                                          MaxRecurse))
       return V;
+
+  // (A & C)|(B & D)
+  Value *C = nullptr, *D = nullptr;
+  if (match(Op0, m_And(m_Value(A), m_Value(C))) &&
+      match(Op1, m_And(m_Value(B), m_Value(D)))) {
+    ConstantInt *C1 = dyn_cast<ConstantInt>(C);
+    ConstantInt *C2 = dyn_cast<ConstantInt>(D);
+    if (C1 && C2 && (C1->getValue() == ~C2->getValue())) {
+      // (A & C1)|(B & C2)
+      // If we have: ((V + N) & C1) | (V & C2)
+      // .. and C2 = ~C1 and C2 is 0+1+ and (N & C2) == 0
+      // replace with V+N.
+      Value *V1, *V2;
+      if ((C2->getValue() & (C2->getValue() + 1)) == 0 && // C2 == 0+1+
+          match(A, m_Add(m_Value(V1), m_Value(V2)))) {
+        // Add commutes, try both ways.
+        if (V1 == B && MaskedValueIsZero(V2, C2->getValue()))
+          return A;
+        if (V2 == B && MaskedValueIsZero(V1, C2->getValue()))
+          return A;
+      }
+      // Or commutes, try both ways.
+      if ((C1->getValue() & (C1->getValue() + 1)) == 0 &&
+          match(B, m_Add(m_Value(V1), m_Value(V2)))) {
+        // Add commutes, try both ways.
+        if (V1 == A && MaskedValueIsZero(V2, C1->getValue()))
+          return B;
+        if (V2 == A && MaskedValueIsZero(V1, C1->getValue()))
+          return B;
+      }
+    }
+  }
 
   // If the operation is with the result of a phi instruction, check whether
   // operating on all incoming values of the phi always yields the same value.
@@ -1675,11 +1624,6 @@ static Value *SimplifyXorInst(Value *Op0, Value *Op1, const Query &Q,
   // Try some generic simplifications for associative operations.
   if (Value *V = SimplifyAssociativeBinOp(Instruction::Xor, Op0, Op1, Q,
                                           MaxRecurse))
-    return V;
-
-  // And distributes over Xor.  Try some generic simplifications based on this.
-  if (Value *V = FactorizeBinOp(Instruction::Xor, Op0, Op1, Instruction::And,
-                                Q, MaxRecurse))
     return V;
 
   // Threading Xor over selects and phi nodes is pointless, so don't bother.
@@ -2021,17 +1965,33 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
       if (!CI2->isZero())
         Upper = NegOne.udiv(CI2->getValue()) + 1;
     } else if (match(LHS, m_SDiv(m_ConstantInt(CI2), m_Value()))) {
-      // 'sdiv CI2, x' produces [-|CI2|, |CI2|].
-      Upper = CI2->getValue().abs() + 1;
-      Lower = (-Upper) + 1;
+      if (CI2->isMinSignedValue()) {
+        // 'sdiv INT_MIN, x' produces [INT_MIN, INT_MIN / -2].
+        Lower = CI2->getValue();
+        Upper = Lower.lshr(1) + 1;
+      } else {
+        // 'sdiv CI2, x' produces [-|CI2|, |CI2|].
+        Upper = CI2->getValue().abs() + 1;
+        Lower = (-Upper) + 1;
+      }
     } else if (match(LHS, m_SDiv(m_Value(), m_ConstantInt(CI2)))) {
-      // 'sdiv x, CI2' produces [INT_MIN / CI2, INT_MAX / CI2].
       APInt IntMin = APInt::getSignedMinValue(Width);
       APInt IntMax = APInt::getSignedMaxValue(Width);
-      APInt Val = CI2->getValue().abs();
-      if (!Val.isMinValue()) {
+      APInt Val = CI2->getValue();
+      if (Val.isAllOnesValue()) {
+        // 'sdiv x, -1' produces [INT_MIN + 1, INT_MAX]
+        //    where CI2 != -1 and CI2 != 0 and CI2 != 1
+        Lower = IntMin + 1;
+        Upper = IntMax + 1;
+      } else if (Val.countLeadingZeros() < Width - 1) {
+        // 'sdiv x, CI2' produces [INT_MIN / CI2, INT_MAX / CI2]
+        //    where CI2 != -1 and CI2 != 0 and CI2 != 1
         Lower = IntMin.sdiv(Val);
-        Upper = IntMax.sdiv(Val) + 1;
+        Upper = IntMax.sdiv(Val);
+        if (Lower.sgt(Upper))
+          std::swap(Lower, Upper);
+        Upper = Upper + 1;
+        assert(Upper != Lower && "Upper part of range has wrapped!");
       }
     } else if (match(LHS, m_LShr(m_Value(), m_ConstantInt(CI2)))) {
       // 'lshr x, CI2' produces [0, UINT_MAX >> CI2].
@@ -2238,6 +2198,25 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
           }
         }
       }
+    }
+  }
+
+  // If a bit is known to be zero for A and known to be one for B,
+  // then A and B cannot be equal.
+  if (ICmpInst::isEquality(Pred)) {
+    if (ConstantInt *CI = dyn_cast<ConstantInt>(RHS)) {
+      uint32_t BitWidth = CI->getBitWidth();
+      APInt LHSKnownZero(BitWidth, 0);
+      APInt LHSKnownOne(BitWidth, 0);
+      computeKnownBits(LHS, LHSKnownZero, LHSKnownOne);
+      APInt RHSKnownZero(BitWidth, 0);
+      APInt RHSKnownOne(BitWidth, 0);
+      computeKnownBits(RHS, RHSKnownZero, RHSKnownOne);
+      if (((LHSKnownOne & RHSKnownZero) != 0) ||
+          ((LHSKnownZero & RHSKnownOne) != 0))
+        return (Pred == ICmpInst::ICMP_EQ)
+                   ? ConstantInt::getFalse(CI->getContext())
+                   : ConstantInt::getTrue(CI->getContext());
     }
   }
 

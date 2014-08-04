@@ -64,7 +64,7 @@ protected:
   }
 
   StringMapImpl(unsigned InitSize, unsigned ItemSize);
-  void RehashTable();
+  unsigned RehashTable(unsigned BucketNo = 0);
 
   /// LookupBucketFor - Look up the bucket that the specified string should end
   /// up in.  If it already exists as a key in the map, the Item pointer for the
@@ -139,10 +139,10 @@ public:
   /// Create - Create a StringMapEntry for the specified key and default
   /// construct the value.
   template<typename AllocatorTy, typename InitType>
-  static StringMapEntry *Create(const char *KeyStart, const char *KeyEnd,
+  static StringMapEntry *Create(StringRef Key,
                                 AllocatorTy &Allocator,
                                 InitType InitVal) {
-    unsigned KeyLength = static_cast<unsigned>(KeyEnd-KeyStart);
+    unsigned KeyLength = Key.size();
 
     // Allocate a new item with space for the string at the end and a null
     // terminator.
@@ -158,27 +158,25 @@ public:
 
     // Copy the string information.
     char *StrBuffer = const_cast<char*>(NewItem->getKeyData());
-    memcpy(StrBuffer, KeyStart, KeyLength);
+    memcpy(StrBuffer, Key.data(), KeyLength);
     StrBuffer[KeyLength] = 0;  // Null terminate for convenience of clients.
     return NewItem;
   }
 
   template<typename AllocatorTy>
-  static StringMapEntry *Create(const char *KeyStart, const char *KeyEnd,
-                                AllocatorTy &Allocator) {
-    return Create(KeyStart, KeyEnd, Allocator, 0);
+  static StringMapEntry *Create(StringRef Key, AllocatorTy &Allocator) {
+    return Create(Key, Allocator, ValueTy());
   }
 
   /// Create - Create a StringMapEntry with normal malloc/free.
   template<typename InitType>
-  static StringMapEntry *Create(const char *KeyStart, const char *KeyEnd,
-                                InitType InitVal) {
+  static StringMapEntry *Create(StringRef Key, InitType InitVal) {
     MallocAllocator A;
-    return Create(KeyStart, KeyEnd, A, std::move(InitVal));
+    return Create(Key, A, std::move(InitVal));
   }
 
-  static StringMapEntry *Create(const char *KeyStart, const char *KeyEnd) {
-    return Create(KeyStart, KeyEnd, ValueTy());
+  static StringMapEntry *Create(StringRef Key) {
+    return Create(Key, ValueTy());
   }
 
   /// GetStringMapEntryFromValue - Given a value that is known to be embedded
@@ -325,6 +323,28 @@ public:
     return true;
   }
 
+  /// insert - Inserts the specified key/value pair into the map if the key
+  /// isn't already in the map. The bool component of the returned pair is true
+  /// if and only if the insertion takes place, and the iterator component of
+  /// the pair points to the element with key equivalent to the key of the pair.
+  std::pair<iterator, bool> insert(std::pair<StringRef, ValueTy> KV) {
+    unsigned BucketNo = LookupBucketFor(KV.first);
+    StringMapEntryBase *&Bucket = TheTable[BucketNo];
+    if (Bucket && Bucket != getTombstoneVal())
+      return std::make_pair(iterator(TheTable + BucketNo, false),
+                            false); // Already exists in map.
+
+    if (Bucket == getTombstoneVal())
+      --NumTombstones;
+    Bucket =
+        MapEntryTy::Create(KV.first, Allocator, std::move(KV.second));
+    ++NumItems;
+    assert(NumItems + NumTombstones <= NumBuckets);
+
+    BucketNo = RehashTable(BucketNo);
+    return std::make_pair(iterator(TheTable + BucketNo, false), true);
+  }
+
   // clear - Empties out the StringMap
   void clear() {
     if (empty()) return;
@@ -348,25 +368,7 @@ public:
   /// return.
   template <typename InitTy>
   MapEntryTy &GetOrCreateValue(StringRef Key, InitTy Val) {
-    unsigned BucketNo = LookupBucketFor(Key);
-    StringMapEntryBase *&Bucket = TheTable[BucketNo];
-    if (Bucket && Bucket != getTombstoneVal())
-      return *static_cast<MapEntryTy*>(Bucket);
-
-    MapEntryTy *NewItem =
-        MapEntryTy::Create(Key.begin(), Key.end(), Allocator, std::move(Val));
-
-    if (Bucket == getTombstoneVal())
-      --NumTombstones;
-    ++NumItems;
-    assert(NumItems + NumTombstones <= NumBuckets);
-
-    // Fill in the bucket for the hash table.  The FullHashValue was already
-    // filled in by LookupBucketFor.
-    Bucket = NewItem;
-
-    RehashTable();
-    return *NewItem;
+    return *insert(std::make_pair(Key, std::move(Val))).first;
   }
 
   MapEntryTy &GetOrCreateValue(StringRef Key) {

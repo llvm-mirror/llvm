@@ -40,11 +40,12 @@ StringRef getELFRelocationTypeName(uint32_t Machine, uint32_t Type);
 
 // Subclasses of ELFFile may need this for template instantiation
 inline std::pair<unsigned char, unsigned char>
-getElfArchType(MemoryBuffer *Object) {
-  if (Object->getBufferSize() < ELF::EI_NIDENT)
-    return std::make_pair((uint8_t)ELF::ELFCLASSNONE,(uint8_t)ELF::ELFDATANONE);
-  return std::make_pair((uint8_t) Object->getBufferStart()[ELF::EI_CLASS],
-                        (uint8_t) Object->getBufferStart()[ELF::EI_DATA]);
+getElfArchType(StringRef Object) {
+  if (Object.size() < ELF::EI_NIDENT)
+    return std::make_pair((uint8_t)ELF::ELFCLASSNONE,
+                          (uint8_t)ELF::ELFDATANONE);
+  return std::make_pair((uint8_t)Object[ELF::EI_CLASS],
+                        (uint8_t)Object[ELF::EI_DATA]);
 }
 
 template <class ELFT>
@@ -133,6 +134,7 @@ public:
   typedef Elf_Vernaux_Impl<ELFT> Elf_Vernaux;
   typedef Elf_Versym_Impl<ELFT> Elf_Versym;
   typedef ELFEntityIterator<const Elf_Dyn> Elf_Dyn_Iter;
+  typedef iterator_range<Elf_Dyn_Iter> Elf_Dyn_Range;
   typedef ELFEntityIterator<const Elf_Rela> Elf_Rela_Iter;
   typedef ELFEntityIterator<const Elf_Rel> Elf_Rel_Iter;
   typedef ELFEntityIterator<const Elf_Shdr> Elf_Shdr_Iter;
@@ -229,10 +231,10 @@ private:
   typedef SmallVector<const Elf_Shdr *, 2> Sections_t;
   typedef DenseMap<unsigned, unsigned> IndexMap_t;
 
-  MemoryBuffer *Buf;
+  StringRef Buf;
 
   const uint8_t *base() const {
-    return reinterpret_cast<const uint8_t *>(Buf->getBufferStart());
+    return reinterpret_cast<const uint8_t *>(Buf.data());
   }
 
   const Elf_Ehdr *Header;
@@ -316,7 +318,7 @@ public:
   std::pair<const Elf_Shdr *, const Elf_Sym *>
   getRelocationSymbol(const Elf_Shdr *RelSec, const RelT *Rel) const;
 
-  ELFFile(MemoryBuffer *Object, error_code &ec);
+  ELFFile(StringRef Object, std::error_code &ec);
 
   bool isMipsELF64() const {
     return Header->e_machine == ELF::EM_MIPS &&
@@ -342,6 +344,9 @@ public:
   /// \param NULLEnd use one past the first DT_NULL entry as the end instead of
   /// the section size.
   Elf_Dyn_Iter end_dynamic_table(bool NULLEnd = false) const;
+  Elf_Dyn_Range dynamic_table(bool NULLEnd = false) const {
+    return make_range(begin_dynamic_table(), end_dynamic_table(NULLEnd));
+  }
 
   Elf_Sym_Iter begin_dynamic_symbols() const {
     if (DynSymRegion.Addr)
@@ -532,7 +537,7 @@ ELFFile<ELFT>::getSymbol(uint32_t Index) const {
 template <class ELFT>
 ErrorOr<ArrayRef<uint8_t> >
 ELFFile<ELFT>::getSectionContents(const Elf_Shdr *Sec) const {
-  if (Sec->sh_offset + Sec->sh_size > Buf->getBufferSize())
+  if (Sec->sh_offset + Sec->sh_size > Buf.size())
     return object_error::parse_failed;
   const uint8_t *Start = base() + Sec->sh_offset;
   return ArrayRef<uint8_t>(Start, Sec->sh_size);
@@ -598,7 +603,7 @@ void ELFFile<ELFT>::VerifyStrTab(const Elf_Shdr *sh) const {
 template <class ELFT>
 uint64_t ELFFile<ELFT>::getNumSections() const {
   assert(Header && "Header not initialized!");
-  if (Header->e_shnum == ELF::SHN_UNDEF) {
+  if (Header->e_shnum == ELF::SHN_UNDEF && Header->e_shoff > 0) {
     assert(SectionHeaderTable && "SectionHeaderTable not initialized!");
     return SectionHeaderTable->sh_size;
   }
@@ -617,18 +622,13 @@ typename ELFFile<ELFT>::uintX_t ELFFile<ELFT>::getStringTableIndex() const {
 }
 
 template <class ELFT>
-ELFFile<ELFT>::ELFFile(MemoryBuffer *Object, error_code &ec)
-    : Buf(Object),
-      SectionHeaderTable(nullptr),
-      dot_shstrtab_sec(nullptr),
-      dot_strtab_sec(nullptr),
-      dot_symtab_sec(nullptr),
-      SymbolTableSectionHeaderIndex(nullptr),
-      dot_gnu_version_sec(nullptr),
-      dot_gnu_version_r_sec(nullptr),
-      dot_gnu_version_d_sec(nullptr),
+ELFFile<ELFT>::ELFFile(StringRef Object, std::error_code &ec)
+    : Buf(Object), SectionHeaderTable(nullptr), dot_shstrtab_sec(nullptr),
+      dot_strtab_sec(nullptr), dot_symtab_sec(nullptr),
+      SymbolTableSectionHeaderIndex(nullptr), dot_gnu_version_sec(nullptr),
+      dot_gnu_version_r_sec(nullptr), dot_gnu_version_d_sec(nullptr),
       dt_soname(nullptr) {
-  const uint64_t FileSize = Buf->getBufferSize();
+  const uint64_t FileSize = Buf.size();
 
   if (sizeof(Elf_Ehdr) > FileSize)
     // FIXME: Proper error handling.
@@ -744,7 +744,7 @@ ELFFile<ELFT>::ELFFile(MemoryBuffer *Object, error_code &ec)
     }
   }
 
-  ec = error_code::success();
+  ec = std::error_code();
 }
 
 // Get the symbol table index in the symtab section given a symbol
@@ -823,17 +823,13 @@ ELFFile<ELFT>::end_dynamic_table(bool NULLEnd) const {
 template <class ELFT>
 StringRef ELFFile<ELFT>::getLoadName() const {
   if (!dt_soname) {
+    dt_soname = "";
     // Find the DT_SONAME entry
-    Elf_Dyn_Iter it = begin_dynamic_table();
-    Elf_Dyn_Iter ie = end_dynamic_table();
-    while (it != ie && it->getTag() != ELF::DT_SONAME)
-      ++it;
-
-    if (it != ie) {
-      dt_soname = getDynamicString(it->getVal());
-    } else {
-      dt_soname = "";
-    }
+    for (const auto &Entry : dynamic_table())
+      if (Entry.getTag() == ELF::DT_SONAME) {
+        dt_soname = getDynamicString(Entry.getVal());
+        break;
+      }
   }
   return dt_soname;
 }

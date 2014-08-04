@@ -10,6 +10,7 @@
 #include "gtest/gtest.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/DataTypes.h"
+#include <tuple>
 using namespace llvm;
 
 namespace {
@@ -187,7 +188,7 @@ TEST_F(StringMapTest, IterationTest) {
 TEST_F(StringMapTest, StringMapEntryTest) {
   StringMap<uint32_t>::value_type* entry =
       StringMap<uint32_t>::value_type::Create(
-          testKeyFirst, testKeyFirst + testKeyLength, 1u);
+          StringRef(testKeyFirst, testKeyLength), 1u);
   EXPECT_STREQ(testKey, entry->first().data());
   EXPECT_EQ(1u, entry->second);
   free(entry);
@@ -198,9 +199,46 @@ TEST_F(StringMapTest, InsertTest) {
   SCOPED_TRACE("InsertTest");
   testMap.insert(
       StringMap<uint32_t>::value_type::Create(
-          testKeyFirst, testKeyFirst + testKeyLength, 
+          StringRef(testKeyFirst, testKeyLength),
           testMap.getAllocator(), 1u));
   assertSingleItemMap();
+}
+
+// Test insert(pair<K, V>) method
+TEST_F(StringMapTest, InsertPairTest) {
+  bool Inserted;
+  StringMap<uint32_t>::iterator NewIt;
+  std::tie(NewIt, Inserted) =
+      testMap.insert(std::make_pair(testKeyFirst, testValue));
+  EXPECT_EQ(1u, testMap.size());
+  EXPECT_EQ(testValue, testMap[testKeyFirst]);
+  EXPECT_EQ(testKeyFirst, NewIt->first());
+  EXPECT_EQ(testValue, NewIt->second);
+  EXPECT_TRUE(Inserted);
+
+  StringMap<uint32_t>::iterator ExistingIt;
+  std::tie(ExistingIt, Inserted) =
+      testMap.insert(std::make_pair(testKeyFirst, testValue + 1));
+  EXPECT_EQ(1u, testMap.size());
+  EXPECT_EQ(testValue, testMap[testKeyFirst]);
+  EXPECT_FALSE(Inserted);
+  EXPECT_EQ(NewIt, ExistingIt);
+}
+
+// Test insert(pair<K, V>) method when rehashing occurs
+TEST_F(StringMapTest, InsertRehashingPairTest) {
+  // Check that the correct iterator is returned when the inserted element is
+  // moved to a different bucket during internal rehashing. This depends on
+  // the particular key, and the implementation of StringMap and HashString.
+  // Changes to those might result in this test not actually checking that.
+  StringMap<uint32_t> t(1);
+  EXPECT_EQ(1u, t.getNumBuckets());
+
+  StringMap<uint32_t>::iterator It =
+    t.insert(std::make_pair("abcdef", 42)).first;
+  EXPECT_EQ(2u, t.getNumBuckets());
+  EXPECT_EQ("abcdef", It->first());
+  EXPECT_EQ(42u, It->second);
 }
 
 // Create a non-default constructable value
@@ -228,15 +266,15 @@ struct MoveOnly {
   }
 
 private:
-  MoveOnly(const MoveOnly &);
-  MoveOnly &operator=(const MoveOnly &);
+  MoveOnly(const MoveOnly &) LLVM_DELETED_FUNCTION;
+  MoveOnly &operator=(const MoveOnly &) LLVM_DELETED_FUNCTION;
 };
 
 TEST_F(StringMapTest, MoveOnlyKey) {
   StringMap<MoveOnly> t;
   t.GetOrCreateValue("Test", MoveOnly(42));
   StringRef Key = "Test";
-  StringMapEntry<MoveOnly>::Create(Key.begin(), Key.end(), MoveOnly(42))
+  StringMapEntry<MoveOnly>::Create(Key, MoveOnly(42))
       ->Destroy();
 }
 

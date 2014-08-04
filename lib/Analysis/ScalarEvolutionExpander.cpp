@@ -16,6 +16,7 @@
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/DataLayout.h"
@@ -1442,8 +1443,12 @@ Value *SCEVExpander::visitAddRecExpr(const SCEVAddRecExpr *S) {
     Constant *One = ConstantInt::get(Ty, 1);
     for (pred_iterator HPI = HPB; HPI != HPE; ++HPI) {
       BasicBlock *HP = *HPI;
-      if (!PredSeen.insert(HP))
+      if (!PredSeen.insert(HP)) {
+        // There must be an incoming value for each predecessor, even the
+        // duplicates!
+        CanonicalIV->addIncoming(CanonicalIV->getIncomingValueForBlock(HP), HP);
         continue;
+      }
 
       if (L->contains(HP)) {
         // Insert a unit add instruction right before the terminator
@@ -1706,7 +1711,7 @@ unsigned SCEVExpander::replaceCongruentIVs(Loop *L, const DominatorTree *DT,
 
     // Fold constant phis. They may be congruent to other constant phis and
     // would confuse the logic below that expects proper IVs.
-    if (Value *V = Phi->hasConstantValue()) {
+    if (Value *V = SimplifyInstruction(Phi, SE.DL, SE.TLI, SE.DT)) {
       Phi->replaceAllUsesWith(V);
       DeadInsts.push_back(Phi);
       ++NumElim;

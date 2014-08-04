@@ -320,7 +320,7 @@ private:
   ///   1. Preserve the architecture independence of stack protector generation.
   ///
   ///   2. Preserve the normal IR level stack protector check for platforms like
-  ///      OpenBSD for which we support platform specific stack protector
+  ///      OpenBSD for which we support platform-specific stack protector
   ///      generation.
   ///
   /// The main problem that guided the present solution is that one can not
@@ -338,7 +338,7 @@ private:
   ///      basic block (where the return inst is placed) and then move it back
   ///      later at SelectionDAG/MI time before the stack protector check if the
   ///      tail call optimization failed. The MI level option was nixed
-  ///      immediately since it would require platform specific pattern
+  ///      immediately since it would require platform-specific pattern
   ///      matching. The SelectionDAG level option was nixed because
   ///      SelectionDAG only processes one IR level basic block at a time
   ///      implying one could not create a DAG Combine to move the callinst.
@@ -397,7 +397,8 @@ private:
   class StackProtectorDescriptor {
   public:
     StackProtectorDescriptor() : ParentMBB(nullptr), SuccessMBB(nullptr),
-                                 FailureMBB(nullptr), Guard(nullptr) { }
+                                 FailureMBB(nullptr), Guard(nullptr),
+                                 GuardReg(0) { }
     ~StackProtectorDescriptor() { }
 
     /// Returns true if all fields of the stack protector descriptor are
@@ -455,6 +456,9 @@ private:
     MachineBasicBlock *getFailureMBB() { return FailureMBB; }
     const Value *getGuard() { return Guard; }
 
+    unsigned getGuardReg() const { return GuardReg; }
+    void setGuardReg(unsigned R) { GuardReg = R; }
+
   private:
     /// The basic block for which we are generating the stack protector.
     ///
@@ -476,6 +480,9 @@ private:
     /// The guard variable which we will compare against the stored value in the
     /// stack protector stack slot.
     const Value *Guard;
+
+    /// The virtual register holding the stack guard value.
+    unsigned GuardReg;
 
     /// Add a successor machine basic block to ParentMBB. If the successor mbb
     /// has not been created yet (i.e. if SuccMBB = 0), then the machine basic

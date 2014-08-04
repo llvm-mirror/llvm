@@ -14,16 +14,26 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/Atomic.h"
+#include "llvm/Support/Mutex.h"
+#include "llvm/Support/MutexGuard.h"
 #include <cassert>
 using namespace llvm;
 
 static const ManagedStaticBase *StaticList = nullptr;
 
+static sys::Mutex& getManagedStaticMutex() {
+  // We need to use a function local static here, since this can get called
+  // during a static constructor and we need to guarantee that it's initialized
+  // correctly.
+  static sys::Mutex ManagedStaticMutex;
+  return ManagedStaticMutex;
+}
+
 void ManagedStaticBase::RegisterManagedStatic(void *(*Creator)(),
                                               void (*Deleter)(void*)) const {
   assert(Creator);
   if (llvm_is_multithreaded()) {
-    llvm_acquire_global_lock();
+    MutexGuard Lock(getManagedStaticMutex());
 
     if (!Ptr) {
       void* tmp = Creator();
@@ -43,8 +53,6 @@ void ManagedStaticBase::RegisterManagedStatic(void *(*Creator)(),
       Next = StaticList;
       StaticList = this;
     }
-
-    llvm_release_global_lock();
   } else {
     assert(!Ptr && !DeleterFn && !Next &&
            "Partially initialized ManagedStatic!?");
@@ -75,8 +83,8 @@ void ManagedStaticBase::destroy() const {
 
 /// llvm_shutdown - Deallocate and destroy all ManagedStatic variables.
 void llvm::llvm_shutdown() {
+  MutexGuard Lock(getManagedStaticMutex());
+
   while (StaticList)
     StaticList->destroy();
-
-  if (llvm_is_multithreaded()) llvm_stop_multithreaded();
 }

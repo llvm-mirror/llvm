@@ -158,10 +158,10 @@
 ; Don't emit pubtype entries for type DIEs in the compile unit that just indirect to a type unit.
 ; CHECK-NEXT: unit_size = [[CU_SIZE]]
 ; CHECK-NEXT: Offset Name
-; CHECK-NEXT: [[BAR]] "bar"
-; CHECK-NEXT: [[WOMBAT]] "wombat"
-; CHECK-NEXT: [[FLUFFY]] "echidna::capybara::mongoose::fluffy"
-; CHECK-NEXT: [[WALRUS]] "walrus"
+; CHECK-DAG: [[BAR]] "bar"
+; CHECK-DAG: [[WALRUS]] "(anonymous namespace)::walrus"
+; CHECK-DAG: [[WOMBAT]] "wombat"
+; CHECK-DAG: [[FLUFFY]] "echidna::capybara::mongoose::fluffy"
 
 ; Make sure debug_types are in comdat groups. This could be more rigid to check
 ; that they're the right comdat groups (each type in a separate comdat group,

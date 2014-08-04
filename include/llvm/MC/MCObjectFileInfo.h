@@ -14,13 +14,13 @@
 #ifndef LLVM_MC_MCBJECTFILEINFO_H
 #define LLVM_MC_MCBJECTFILEINFO_H
 
+#include "llvm/ADT/Triple.h"
 #include "llvm/Support/CodeGen.h"
 
 namespace llvm {
   class MCContext;
   class MCSection;
   class StringRef;
-  class Triple;
 
 class MCObjectFileInfo {
 protected:
@@ -32,12 +32,6 @@ protected:
   /// SupportsWeakEmptyEHFrame - True if target object file supports a
   /// weak_definition of constant 0 for an omitted EH frame.
   bool SupportsWeakOmittedEHFrame;
-
-  /// IsFunctionEHFrameSymbolPrivate - This flag is set to true if the
-  /// "EH_frame" symbol for EH information should be an assembler temporary (aka
-  /// private linkage, aka an L or .L label) or false if it should be a normal
-  /// non-.globl label.  This defaults to true.
-  bool IsFunctionEHFrameSymbolPrivate;
 
   /// SupportsCompactUnwindWithoutEHFrame - True if the target object file
   /// supports emitting a compact unwind section without an associated EH frame
@@ -202,9 +196,6 @@ public:
   void InitMCObjectFileInfo(StringRef TT, Reloc::Model RM, CodeModel::Model CM,
                             MCContext &ctx);
 
-  bool isFunctionEHFrameSymbolPrivate() const {
-    return IsFunctionEHFrameSymbolPrivate;
-  }
   bool getSupportsWeakOmittedEHFrame() const {
     return SupportsWeakOmittedEHFrame;
   }
@@ -383,6 +374,7 @@ private:
   Reloc::Model RelocM;
   CodeModel::Model CMModel;
   MCContext *Ctx;
+  Triple TT;
 
   void InitMachOMCObjectFileInfo(Triple T);
   void InitELFMCObjectFileInfo(Triple T);
@@ -391,6 +383,9 @@ private:
   /// InitEHFrameSection - Initialize EHFrameSection on demand.
   ///
   void InitEHFrameSection();
+
+public:
+  const Triple &getTargetTriple() const { return TT; }
 };
 
 } // end namespace llvm

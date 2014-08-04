@@ -39,6 +39,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/CallSite.h"
+#include "llvm/IR/Metadata.h"
 
 namespace llvm {
 
@@ -112,13 +113,14 @@ public:
     /// there are restrictions on stepping out of one object and into another.
     /// See http://llvm.org/docs/LangRef.html#pointeraliasing
     uint64_t Size;
-    /// TBAATag - The metadata node which describes the TBAA type of
-    /// the location, or null if there is no known unique tag.
-    const MDNode *TBAATag;
+    /// AATags - The metadata nodes which describes the aliasing of the
+    /// location (each member is null if that kind of information is
+    /// unavailable)..
+    AAMDNodes AATags;
 
     explicit Location(const Value *P = nullptr, uint64_t S = UnknownSize,
-                      const MDNode *N = nullptr)
-      : Ptr(P), Size(S), TBAATag(N) {}
+                      const AAMDNodes &N = AAMDNodes())
+      : Ptr(P), Size(S), AATags(N) {}
 
     Location getWithNewPtr(const Value *NewPtr) const {
       Location Copy(*this);
@@ -132,9 +134,9 @@ public:
       return Copy;
     }
 
-    Location getWithoutTBAATag() const {
+    Location getWithoutAATags() const {
       Location Copy(*this);
-      Copy.TBAATag = nullptr;
+      Copy.AATags = AAMDNodes();
       return Copy;
     }
   };
@@ -273,6 +275,14 @@ public:
     /// classified into one of the behaviors above.
     UnknownModRefBehavior = Anywhere | ModRef
   };
+
+  /// Get the location associated with a pointer argument of a callsite.
+  /// The mask bits are set to indicate the allowed aliasing ModRef kinds.
+  /// Note that these mask bits do not necessarily account for the overall
+  /// behavior of the function, but rather only provide additional
+  /// per-argument information.
+  virtual Location getArgLocation(ImmutableCallSite CS, unsigned ArgIdx,
+                                  ModRefResult &Mask);
 
   /// getModRefBehavior - Return the behavior when calling the given call site.
   virtual ModRefBehavior getModRefBehavior(ImmutableCallSite CS);
@@ -570,13 +580,13 @@ struct DenseMapInfo<AliasAnalysis::Location> {
   static unsigned getHashValue(const AliasAnalysis::Location &Val) {
     return DenseMapInfo<const Value *>::getHashValue(Val.Ptr) ^
            DenseMapInfo<uint64_t>::getHashValue(Val.Size) ^
-           DenseMapInfo<const MDNode *>::getHashValue(Val.TBAATag);
+           DenseMapInfo<AAMDNodes>::getHashValue(Val.AATags);
   }
   static bool isEqual(const AliasAnalysis::Location &LHS,
                       const AliasAnalysis::Location &RHS) {
     return LHS.Ptr == RHS.Ptr &&
            LHS.Size == RHS.Size &&
-           LHS.TBAATag == RHS.TBAATag;
+           LHS.AATags == RHS.AATags;
   }
 };
 
@@ -596,6 +606,13 @@ bool isNoAliasArgument(const Value *V);
 ///    NoAlias returns (e.g. calls to malloc)
 ///
 bool isIdentifiedObject(const Value *V);
+
+/// isIdentifiedFunctionLocal - Return true if V is umabigously identified
+/// at the function-level. Different IdentifiedFunctionLocals can't alias.
+/// Further, an IdentifiedFunctionLocal can not alias with any function
+/// arguments other than itself, which is not necessarily true for
+/// IdentifiedObjects.
+bool isIdentifiedFunctionLocal(const Value *V);
 
 } // End llvm namespace
 

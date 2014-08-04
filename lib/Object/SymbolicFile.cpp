@@ -19,14 +19,14 @@
 using namespace llvm;
 using namespace object;
 
-SymbolicFile::SymbolicFile(unsigned int Type, MemoryBuffer *Source,
-                           bool BufferOwned)
-    : Binary(Type, Source, BufferOwned) {}
+SymbolicFile::SymbolicFile(unsigned int Type,
+                           std::unique_ptr<MemoryBuffer> Source)
+    : Binary(Type, std::move(Source)) {}
 
 SymbolicFile::~SymbolicFile() {}
 
-ErrorOr<SymbolicFile *>
-SymbolicFile::createSymbolicFile(MemoryBuffer *Object, bool BufferOwned,
+ErrorOr<std::unique_ptr<SymbolicFile>>
+SymbolicFile::createSymbolicFile(std::unique_ptr<MemoryBuffer> &Object,
                                  sys::fs::file_magic Type,
                                  LLVMContext *Context) {
   if (Type == sys::fs::file_magic::unknown)
@@ -35,14 +35,12 @@ SymbolicFile::createSymbolicFile(MemoryBuffer *Object, bool BufferOwned,
   switch (Type) {
   case sys::fs::file_magic::bitcode:
     if (Context)
-      return IRObjectFile::createIRObjectFile(Object, *Context, BufferOwned);
+      return IRObjectFile::createIRObjectFile(std::move(Object), *Context);
   // Fallthrough
   case sys::fs::file_magic::unknown:
   case sys::fs::file_magic::archive:
   case sys::fs::file_magic::macho_universal_binary:
   case sys::fs::file_magic::windows_resource:
-    if (BufferOwned)
-      delete Object;
     return object_error::invalid_file_type;
   case sys::fs::file_magic::elf_relocatable:
   case sys::fs::file_magic::elf_executable:
@@ -61,7 +59,7 @@ SymbolicFile::createSymbolicFile(MemoryBuffer *Object, bool BufferOwned,
   case sys::fs::file_magic::coff_object:
   case sys::fs::file_magic::coff_import_library:
   case sys::fs::file_magic::pecoff_executable:
-    return ObjectFile::createObjectFile(Object, BufferOwned, Type);
+    return ObjectFile::createObjectFile(Object, Type);
   }
   llvm_unreachable("Unexpected Binary File Type");
 }

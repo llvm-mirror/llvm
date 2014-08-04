@@ -52,7 +52,9 @@ public:
     MD_fpmath = 3,  // "fpmath"
     MD_range = 4, // "range"
     MD_tbaa_struct = 5, // "tbaa.struct"
-    MD_invariant_load = 6 // "invariant.load"
+    MD_invariant_load = 6, // "invariant.load"
+    MD_alias_scope = 7, // "alias.scope"
+    MD_noalias = 8 // "noalias"
   };
 
   /// getMDKindID - Return a unique non-zero ID for the specified metadata kind.
@@ -156,15 +158,6 @@ public:
   void emitError(unsigned LocCookie, const Twine &ErrorStr);
   void emitError(const Instruction *I, const Twine &ErrorStr);
   void emitError(const Twine &ErrorStr);
-
-  /// emitOptimizationRemark - Emit an optimization remark message. \p PassName
-  /// is the name of the pass emitting the message. If -Rpass= is given
-  /// and \p PassName matches the regular expression in -Rpass, then the
-  /// remark will be emitted. \p Fn is the function triggering the remark,
-  /// \p DLoc is the debug location where the diagnostic is generated.
-  /// \p Msg is the message string to use.
-  void emitOptimizationRemark(const char *PassName, const Function &Fn,
-                              const DebugLoc &DLoc, const Twine &Msg);
 
 private:
   LLVMContext(LLVMContext&) LLVM_DELETED_FUNCTION;

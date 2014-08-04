@@ -48,7 +48,13 @@ private:
   bool PendingCall;
 
   bool isIndirectJump(const MCInst &MI) {
-    return MI.getOpcode() == Mips::JR || MI.getOpcode() == Mips::RET;
+    if (MI.getOpcode() == Mips::JALR) {
+      // MIPS32r6/MIPS64r6 doesn't have a JR instruction and uses JALR instead.
+      // JALR is an indirect branch if the link register is $0.
+      assert(MI.getOperand(0).isReg());
+      return MI.getOperand(0).getReg() == Mips::ZERO;
+    }
+    return MI.getOpcode() == Mips::JR;
   }
 
   bool isStackPointerFirstOperand(const MCInst &MI) {
@@ -56,7 +62,9 @@ private:
             && MI.getOperand(0).getReg() == Mips::SP);
   }
 
-  bool isCall(unsigned Opcode, bool *IsIndirectCall) {
+  bool isCall(const MCInst &MI, bool *IsIndirectCall) {
+    unsigned Opcode = MI.getOpcode();
+
     *IsIndirectCall = false;
 
     switch (Opcode) {
@@ -64,12 +72,19 @@ private:
       return false;
 
     case Mips::JAL:
+    case Mips::BAL:
     case Mips::BAL_BR:
     case Mips::BLTZAL:
     case Mips::BGEZAL:
       return true;
 
     case Mips::JALR:
+      // JALR is only a call if the link register is not $0. Otherwise it's an
+      // indirect branch.
+      assert(MI.getOperand(0).isReg());
+      if (MI.getOperand(0).getReg() == Mips::ZERO)
+        return false;
+
       *IsIndirectCall = true;
       return true;
     }
@@ -137,24 +152,23 @@ public:
                                                     &IsStore);
     bool IsSPFirstOperand = isStackPointerFirstOperand(Inst);
     if (IsMemAccess || IsSPFirstOperand) {
-      if (PendingCall)
-        report_fatal_error("Dangerous instruction in branch delay slot!");
-
       bool MaskBefore = (IsMemAccess
                          && baseRegNeedsLoadStoreMask(Inst.getOperand(AddrIdx)
                                                           .getReg()));
       bool MaskAfter = IsSPFirstOperand && !IsStore;
-      if (MaskBefore || MaskAfter)
+      if (MaskBefore || MaskAfter) {
+        if (PendingCall)
+          report_fatal_error("Dangerous instruction in branch delay slot!");
         sandboxLoadStoreStackChange(Inst, AddrIdx, STI, MaskBefore, MaskAfter);
-      else
-        MipsELFStreamer::EmitInstruction(Inst, STI);
-      return;
+        return;
+      }
+      // fallthrough
     }
 
     // Sandbox calls by aligning call and branch delay to the bundle end.
     // For indirect calls, emit the mask before the call.
     bool IsIndirectCall;
-    if (isCall(Inst.getOpcode(), &IsIndirectCall)) {
+    if (isCall(Inst, &IsIndirectCall)) {
       if (PendingCall)
         report_fatal_error("Dangerous instruction in branch delay slot!");
 
@@ -203,6 +217,7 @@ bool isBasePlusOffsetMemoryAccess(unsigned Opcode, unsigned *AddrIdx,
   case Mips::LWC1:
   case Mips::LDC1:
   case Mips::LL:
+  case Mips::LL_R6:
   case Mips::LWL:
   case Mips::LWR:
     *AddrIdx = 1;
@@ -223,6 +238,7 @@ bool isBasePlusOffsetMemoryAccess(unsigned Opcode, unsigned *AddrIdx,
 
   // Store instructions with base address register in position 2.
   case Mips::SC:
+  case Mips::SC_R6:
     *AddrIdx = 2;
     if (IsStore)
       *IsStore = true;

@@ -18,6 +18,7 @@
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -29,6 +30,7 @@
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCSectionCOFF.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
@@ -45,6 +47,8 @@ using namespace llvm;
 /// runOnMachineFunction - Emit the function body.
 ///
 bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
+  SMShadowTracker.startFunction(MF);
+
   SetupMachineFunction(MF);
 
   if (Subtarget->isTargetCOFF()) {
@@ -549,6 +553,26 @@ emitNonLazySymbolPointer(MCStreamer &OutStreamer, MCSymbol *StubLabel,
         4 /*size*/);
 }
 
+MCSymbol *X86AsmPrinter::GetCPISymbol(unsigned CPID) const {
+  if (Subtarget->isTargetKnownWindowsMSVC()) {
+    const MachineConstantPoolEntry &CPE =
+        MF->getConstantPool()->getConstants()[CPID];
+    if (!CPE.isMachineConstantPoolEntry()) {
+      SectionKind Kind = CPE.getSectionKind(TM.getDataLayout());
+      const Constant *C = CPE.Val.ConstVal;
+      const MCSectionCOFF *S = cast<MCSectionCOFF>(
+          getObjFileLowering().getSectionForConstant(Kind, C));
+      if (MCSymbol *Sym = S->getCOMDATSymbol()) {
+        if (Sym->isUndefined())
+          OutStreamer.EmitSymbolAttribute(Sym, MCSA_Global);
+        return Sym;
+      }
+    }
+  }
+
+  return AsmPrinter::GetCPISymbol(CPID);
+}
+
 void X86AsmPrinter::GenerateExportDirective(const MCSymbol *Sym, bool IsData) {
   SmallString<128> Directive;
   raw_svector_ostream OS(Directive);
@@ -670,16 +694,12 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
         DLLExportedGlobals.push_back(getSymbol(&Global));
 
     for (const auto &Alias : M.aliases()) {
-      const GlobalValue *GV = &Alias;
-      if (!GV->hasDLLExportStorageClass())
+      if (!Alias.hasDLLExportStorageClass())
         continue;
 
-      while (const GlobalAlias *A = dyn_cast<GlobalAlias>(GV))
-        GV = A->getAliasee();
-
-      if (isa<Function>(GV))
+      if (Alias.getType()->getElementType()->isFunctionTy())
         DLLExportedFns.push_back(getSymbol(&Alias));
-      else if (isa<GlobalVariable>(GV))
+      else
         DLLExportedGlobals.push_back(getSymbol(&Alias));
     }
 

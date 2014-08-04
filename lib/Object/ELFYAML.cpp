@@ -246,16 +246,17 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
   const auto *Object = static_cast<ELFYAML::Object *>(IO.getContext());
   assert(Object && "The IO context is not initialized");
 #define BCase(X) IO.bitSetCase(Value, #X, ELF::X);
+#define BCaseMask(X, M) IO.maskedBitSetCase(Value, #X, ELF::X, ELF::M);
   switch (Object->Header.Machine) {
   case ELF::EM_ARM:
     BCase(EF_ARM_SOFT_FLOAT)
     BCase(EF_ARM_VFP_FLOAT)
-    BCase(EF_ARM_EABI_UNKNOWN)
-    BCase(EF_ARM_EABI_VER1)
-    BCase(EF_ARM_EABI_VER2)
-    BCase(EF_ARM_EABI_VER3)
-    BCase(EF_ARM_EABI_VER4)
-    BCase(EF_ARM_EABI_VER5)
+    BCaseMask(EF_ARM_EABI_UNKNOWN, EF_ARM_EABIMASK)
+    BCaseMask(EF_ARM_EABI_VER1, EF_ARM_EABIMASK)
+    BCaseMask(EF_ARM_EABI_VER2, EF_ARM_EABIMASK)
+    BCaseMask(EF_ARM_EABI_VER3, EF_ARM_EABIMASK)
+    BCaseMask(EF_ARM_EABI_VER4, EF_ARM_EABIMASK)
+    BCaseMask(EF_ARM_EABI_VER5, EF_ARM_EABIMASK)
     break;
   case ELF::EM_MIPS:
     BCase(EF_MIPS_NOREORDER)
@@ -266,17 +267,17 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCase(EF_MIPS_ABI_O32)
     BCase(EF_MIPS_MICROMIPS)
     BCase(EF_MIPS_ARCH_ASE_M16)
-    BCase(EF_MIPS_ARCH_1)
-    BCase(EF_MIPS_ARCH_2)
-    BCase(EF_MIPS_ARCH_3)
-    BCase(EF_MIPS_ARCH_4)
-    BCase(EF_MIPS_ARCH_5)
-    BCase(EF_MIPS_ARCH_32)
-    BCase(EF_MIPS_ARCH_64)
-    BCase(EF_MIPS_ARCH_32R2)
-    BCase(EF_MIPS_ARCH_64R2)
-    BCase(EF_MIPS_ARCH_32R6)
-    BCase(EF_MIPS_ARCH_64R6)
+    BCaseMask(EF_MIPS_ARCH_1, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_2, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_3, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_4, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_5, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_32, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_64, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_32R2, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_64R2, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_32R6, EF_MIPS_ARCH)
+    BCaseMask(EF_MIPS_ARCH_64R6, EF_MIPS_ARCH)
     break;
   case ELF::EM_HEXAGON:
     BCase(EF_HEXAGON_MACH_V2)
@@ -292,10 +293,13 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     llvm_unreachable("Unsupported architecture");
   }
 #undef BCase
+#undef BCaseMask
 }
 
 void ScalarEnumerationTraits<ELFYAML::ELF_SHT>::enumeration(
     IO &IO, ELFYAML::ELF_SHT &Value) {
+  const auto *Object = static_cast<ELFYAML::Object *>(IO.getContext());
+  assert(Object && "The IO context is not initialized");
 #define ECase(X) IO.enumCase(Value, #X, ELF::X);
   ECase(SHT_NULL)
   ECase(SHT_PROGBITS)
@@ -323,15 +327,29 @@ void ScalarEnumerationTraits<ELFYAML::ELF_SHT>::enumeration(
   ECase(SHT_GNU_versym)
   ECase(SHT_HIOS)
   ECase(SHT_LOPROC)
-  ECase(SHT_ARM_EXIDX)
-  ECase(SHT_ARM_PREEMPTMAP)
-  ECase(SHT_ARM_ATTRIBUTES)
-  ECase(SHT_ARM_DEBUGOVERLAY)
-  ECase(SHT_ARM_OVERLAYSECTION)
-  ECase(SHT_HEX_ORDERED)
-  ECase(SHT_X86_64_UNWIND)
-  ECase(SHT_MIPS_REGINFO)
-  ECase(SHT_MIPS_OPTIONS)
+  switch (Object->Header.Machine) {
+  case ELF::EM_ARM:
+    ECase(SHT_ARM_EXIDX)
+    ECase(SHT_ARM_PREEMPTMAP)
+    ECase(SHT_ARM_ATTRIBUTES)
+    ECase(SHT_ARM_DEBUGOVERLAY)
+    ECase(SHT_ARM_OVERLAYSECTION)
+    break;
+  case ELF::EM_HEXAGON:
+    ECase(SHT_HEX_ORDERED)
+    break;
+  case ELF::EM_X86_64:
+    ECase(SHT_X86_64_UNWIND)
+    break;
+  case ELF::EM_MIPS:
+    ECase(SHT_MIPS_REGINFO)
+    ECase(SHT_MIPS_OPTIONS)
+    ECase(SHT_MIPS_ABIFLAGS)
+    break;
+  default:
+    // Nothing to do.
+    break;
+  }
 #undef ECase
 }
 
@@ -363,6 +381,16 @@ void ScalarEnumerationTraits<ELFYAML::ELF_STT>::enumeration(
   ECase(STT_COMMON)
   ECase(STT_TLS)
   ECase(STT_GNU_IFUNC)
+#undef ECase
+}
+
+void ScalarEnumerationTraits<ELFYAML::ELF_STV>::enumeration(
+    IO &IO, ELFYAML::ELF_STV &Value) {
+#define ECase(X) IO.enumCase(Value, #X, ELF::X);
+  ECase(STV_DEFAULT)
+  ECase(STV_INTERNAL)
+  ECase(STV_HIDDEN)
+  ECase(STV_PROTECTED)
 #undef ECase
 }
 
@@ -647,6 +675,7 @@ void MappingTraits<ELFYAML::Symbol>::mapping(IO &IO, ELFYAML::Symbol &Symbol) {
   IO.mapOptional("Section", Symbol.Section, StringRef());
   IO.mapOptional("Value", Symbol.Value, Hex64(0));
   IO.mapOptional("Size", Symbol.Size, Hex64(0));
+  IO.mapOptional("Visibility", Symbol.Visibility, ELFYAML::ELF_STV(0));
 }
 
 void MappingTraits<ELFYAML::LocalGlobalWeakSymbols>::mapping(
@@ -662,7 +691,6 @@ static void commonSectionMapping(IO &IO, ELFYAML::Section &Section) {
   IO.mapOptional("Flags", Section.Flags, ELFYAML::ELF_SHF(0));
   IO.mapOptional("Address", Section.Address, Hex64(0));
   IO.mapOptional("Link", Section.Link, StringRef());
-  IO.mapOptional("Info", Section.Info, StringRef());
   IO.mapOptional("AddressAlign", Section.AddressAlign, Hex64(0));
 }
 
@@ -674,6 +702,7 @@ static void sectionMapping(IO &IO, ELFYAML::RawContentSection &Section) {
 
 static void sectionMapping(IO &IO, ELFYAML::RelocationSection &Section) {
   commonSectionMapping(IO, Section);
+  IO.mapOptional("Info", Section.Info, StringRef());
   IO.mapOptional("Relocations", Section.Relocations);
 }
 

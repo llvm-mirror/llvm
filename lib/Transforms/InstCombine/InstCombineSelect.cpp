@@ -31,13 +31,18 @@ MatchSelectPattern(Value *V, Value *&LHS, Value *&RHS) {
   ICmpInst *ICI = dyn_cast<ICmpInst>(SI->getCondition());
   if (!ICI) return SPF_UNKNOWN;
 
-  LHS = ICI->getOperand(0);
-  RHS = ICI->getOperand(1);
+  ICmpInst::Predicate Pred = ICI->getPredicate();
+  Value *CmpLHS = ICI->getOperand(0);
+  Value *CmpRHS = ICI->getOperand(1);
+  Value *TrueVal = SI->getTrueValue();
+  Value *FalseVal = SI->getFalseValue();
+
+  LHS = CmpLHS;
+  RHS = CmpRHS;
 
   // (icmp X, Y) ? X : Y
-  if (SI->getTrueValue() == ICI->getOperand(0) &&
-      SI->getFalseValue() == ICI->getOperand(1)) {
-    switch (ICI->getPredicate()) {
+  if (TrueVal == CmpLHS && FalseVal == CmpRHS) {
+    switch (Pred) {
     default: return SPF_UNKNOWN; // Equality.
     case ICmpInst::ICMP_UGT:
     case ICmpInst::ICMP_UGE: return SPF_UMAX;
@@ -51,18 +56,35 @@ MatchSelectPattern(Value *V, Value *&LHS, Value *&RHS) {
   }
 
   // (icmp X, Y) ? Y : X
-  if (SI->getTrueValue() == ICI->getOperand(1) &&
-      SI->getFalseValue() == ICI->getOperand(0)) {
-    switch (ICI->getPredicate()) {
-      default: return SPF_UNKNOWN; // Equality.
-      case ICmpInst::ICMP_UGT:
-      case ICmpInst::ICMP_UGE: return SPF_UMIN;
-      case ICmpInst::ICMP_SGT:
-      case ICmpInst::ICMP_SGE: return SPF_SMIN;
-      case ICmpInst::ICMP_ULT:
-      case ICmpInst::ICMP_ULE: return SPF_UMAX;
-      case ICmpInst::ICMP_SLT:
-      case ICmpInst::ICMP_SLE: return SPF_SMAX;
+  if (TrueVal == CmpRHS && FalseVal == CmpLHS) {
+    switch (Pred) {
+    default: return SPF_UNKNOWN; // Equality.
+    case ICmpInst::ICMP_UGT:
+    case ICmpInst::ICMP_UGE: return SPF_UMIN;
+    case ICmpInst::ICMP_SGT:
+    case ICmpInst::ICMP_SGE: return SPF_SMIN;
+    case ICmpInst::ICMP_ULT:
+    case ICmpInst::ICMP_ULE: return SPF_UMAX;
+    case ICmpInst::ICMP_SLT:
+    case ICmpInst::ICMP_SLE: return SPF_SMAX;
+    }
+  }
+
+  if (ConstantInt *C1 = dyn_cast<ConstantInt>(CmpRHS)) {
+    if ((CmpLHS == TrueVal && match(FalseVal, m_Neg(m_Specific(CmpLHS)))) ||
+        (CmpLHS == FalseVal && match(TrueVal, m_Neg(m_Specific(CmpLHS))))) {
+
+      // ABS(X) ==> (X >s 0) ? X : -X and (X >s -1) ? X : -X
+      // NABS(X) ==> (X >s 0) ? -X : X and (X >s -1) ? -X : X
+      if (Pred == ICmpInst::ICMP_SGT && (C1->isZero() || C1->isMinusOne())) {
+        return (CmpLHS == TrueVal) ? SPF_ABS : SPF_NABS;
+      }
+
+      // ABS(X) ==> (X <s 0) ? -X : X and (X <s 1) ? -X : X
+      // NABS(X) ==> (X <s 0) ? X : -X and (X <s 1) ? X : -X
+      if (Pred == ICmpInst::ICMP_SLT && (C1->isZero() || C1->isOne())) {
+        return (CmpLHS == FalseVal) ? SPF_ABS : SPF_NABS;
+      }
     }
   }
 
@@ -365,7 +387,15 @@ static Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
 /// 1. The icmp predicate is inverted
 /// 2. The select operands are reversed
 /// 3. The magnitude of C2 and C1 are flipped
-static Value *foldSelectICmpAndOr(const SelectInst &SI, Value *TrueVal,
+///
+/// This also tries to turn
+/// --- Single bit tests:
+/// if ((x & C) == 0) x |= C	to  x |= C
+/// if ((x & C) != 0) x ^= C	to  x &= ~C
+/// if ((x & C) == 0) x ^= C	to  x |= C
+/// if ((x & C) != 0) x &= ~C	to  x &= ~C
+/// if ((x & C) == 0) x &= ~C	to  nothing
+static Value *foldSelectICmpAndOr(SelectInst &SI, Value *TrueVal,
                                   Value *FalseVal,
                                   InstCombiner::BuilderTy *Builder) {
   const ICmpInst *IC = dyn_cast<ICmpInst>(SI.getCondition());
@@ -384,6 +414,25 @@ static Value *foldSelectICmpAndOr(const SelectInst &SI, Value *TrueVal,
     return nullptr;
 
   const APInt *C2;
+  if (match(TrueVal, m_Specific(X))) {
+    // if ((X & C) != 0) X ^= C becomes X &= ~C
+    if (match(FalseVal, m_Xor(m_Specific(X), m_APInt(C2))) && C1 == C2)
+      return Builder->CreateAnd(X, ~(*C1));
+    // if ((X & C) != 0) X &= ~C becomes X &= ~C
+    if (match(FalseVal, m_And(m_Specific(X), m_APInt(C2))) && *C1 == ~(*C2))
+      return FalseVal;
+  } else if (match(FalseVal, m_Specific(X))) {
+    // if ((X & C) == 0) X ^= C becomes X |= C
+    if (match(TrueVal, m_Xor(m_Specific(X), m_APInt(C2))) && C1 == C2)
+      return Builder->CreateOr(X, *C1);
+    // if ((X & C) == 0) X &= ~C becomes nothing
+    if (match(TrueVal, m_And(m_Specific(X), m_APInt(C2))) && *C1 == ~(*C2))
+      return X;
+    // if ((X & C) == 0) X |= C becomes X |= C
+    if (match(TrueVal, m_Or(m_Specific(X), m_APInt(C2))) && C1 == C2)
+      return TrueVal;
+  }
+
   bool OrOnTrueVal = false;
   bool OrOnFalseVal = match(FalseVal, m_Or(m_Specific(TrueVal), m_Power2(C2)));
   if (!OrOnFalseVal)
@@ -676,6 +725,22 @@ Instruction *InstCombiner::FoldSPFofSPF(Instruction *Inner,
         }
       }
     }
+  }
+
+  // ABS(ABS(X)) -> ABS(X)
+  // NABS(NABS(X)) -> NABS(X)
+  if (SPF1 == SPF2 && (SPF1 == SPF_ABS || SPF1 == SPF_NABS)) {
+    return ReplaceInstUsesWith(Outer, Inner);
+  }
+
+  // ABS(NABS(X)) -> ABS(X)
+  // NABS(ABS(X)) -> NABS(X)
+  if ((SPF1 == SPF_ABS && SPF2 == SPF_NABS) ||
+      (SPF1 == SPF_NABS && SPF2 == SPF_ABS)) {
+    SelectInst *SI = cast<SelectInst>(Inner);
+    Value *NewSI = Builder->CreateSelect(
+        SI->getCondition(), SI->getFalseValue(), SI->getTrueValue());
+    return ReplaceInstUsesWith(Outer, NewSI);
   }
   return nullptr;
 }
@@ -981,7 +1046,6 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
 
     // TODO.
     // ABS(-X) -> ABS(X)
-    // ABS(ABS(X)) -> ABS(X)
   }
 
   // See if we can fold the select into a phi node if the condition is a select.

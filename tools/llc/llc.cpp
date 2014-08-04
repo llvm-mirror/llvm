@@ -75,15 +75,24 @@ OptLevel("O",
 static cl::opt<std::string>
 TargetTriple("mtriple", cl::desc("Override target triple for module"));
 
-cl::opt<bool> NoVerify("disable-verify", cl::Hidden,
-                       cl::desc("Do not verify input module"));
+static cl::opt<bool> NoVerify("disable-verify", cl::Hidden,
+                              cl::desc("Do not verify input module"));
 
-cl::opt<bool>
-DisableSimplifyLibCalls("disable-simplify-libcalls",
-                        cl::desc("Disable simplify-libcalls"),
-                        cl::init(false));
+static cl::opt<bool> DisableSimplifyLibCalls("disable-simplify-libcalls",
+                                             cl::desc("Disable simplify-libcalls"));
 
-static int compileModule(char**, LLVMContext&);
+static cl::opt<bool> ShowMCEncoding("show-mc-encoding", cl::Hidden,
+                                    cl::desc("Show encoding in .s output"));
+
+static cl::opt<bool> EnableDwarfDirectory(
+    "enable-dwarf-directory", cl::Hidden,
+    cl::desc("Use .file directives with an explicit directory."));
+
+static cl::opt<bool> AsmVerbose("asm-verbose",
+                                cl::desc("Add comments to directives."),
+                                cl::init(true));
+
+static int compileModule(char **, LLVMContext &);
 
 // GetFileNameRoot - Helper function to get the basename of a filename.
 static inline std::string
@@ -272,6 +281,9 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
   TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   Options.DisableIntegratedAS = NoIntegratedAssembler;
+  Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
+  Options.MCOptions.MCUseDwarfDirectory = EnableDwarfDirectory;
+  Options.MCOptions.AsmVerbose = AsmVerbose;
 
   std::unique_ptr<TargetMachine> target(
       TheTarget->createTargetMachine(TheTriple.getTriple(), MCPU, FeaturesStr,
@@ -308,9 +320,6 @@ static int compileModule(char **argv, LLVMContext &Context) {
   if (const DataLayout *DL = Target.getDataLayout())
     mod->setDataLayout(DL);
   PM.add(new DataLayoutPass(mod));
-
-  // Override default to generate verbose assembly.
-  Target.setAsmVerbosityDefault(true);
 
   if (RelaxAll.getNumOccurrences() > 0 &&
       FileType != TargetMachine::CGFT_ObjectFile)

@@ -66,6 +66,16 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
   unsigned InvariantLdId = getMDKindID("invariant.load");
   assert(InvariantLdId == MD_invariant_load && "invariant.load kind id drifted");
   (void)InvariantLdId;
+
+  // Create the 'alias.scope' metadata kind.
+  unsigned AliasScopeID = getMDKindID("alias.scope");
+  assert(AliasScopeID == MD_alias_scope && "alias.scope kind id drifted");
+  (void)AliasScopeID;
+
+  // Create the 'noalias' metadata kind.
+  unsigned NoAliasID = getMDKindID("noalias");
+  assert(NoAliasID == MD_noalias && "noalias kind id drifted");
+  (void)NoAliasID;
 }
 LLVMContext::~LLVMContext() { delete pImpl; }
 
@@ -142,14 +152,26 @@ void LLVMContext::diagnose(const DiagnosticInfo &DI) {
     return;
   }
 
-  // Optimization remarks are selective. They need to check whether
-  // the regexp pattern, passed via -pass-remarks, matches the name
-  // of the pass that is emitting the diagnostic. If there is no match,
-  // ignore the diagnostic and return.
-  if (DI.getKind() == llvm::DK_OptimizationRemark &&
-      !pImpl->optimizationRemarksEnabledFor(
-          cast<DiagnosticInfoOptimizationRemark>(DI).getPassName()))
-    return;
+  // Optimization remarks are selective. They need to check whether the regexp
+  // pattern, passed via one of the -pass-remarks* flags, matches the name of
+  // the pass that is emitting the diagnostic. If there is no match, ignore the
+  // diagnostic and return.
+  switch (DI.getKind()) {
+  case llvm::DK_OptimizationRemark:
+    if (!cast<DiagnosticInfoOptimizationRemark>(DI).isEnabled())
+      return;
+    break;
+  case llvm::DK_OptimizationRemarkMissed:
+    if (!cast<DiagnosticInfoOptimizationRemarkMissed>(DI).isEnabled())
+      return;
+    break;
+  case llvm::DK_OptimizationRemarkAnalysis:
+    if (!cast<DiagnosticInfoOptimizationRemarkAnalysis>(DI).isEnabled())
+      return;
+    break;
+  default:
+    break;
+  }
 
   // Otherwise, print the message with a prefix based on the severity.
   std::string MsgStorage;
@@ -175,13 +197,6 @@ void LLVMContext::diagnose(const DiagnosticInfo &DI) {
 
 void LLVMContext::emitError(unsigned LocCookie, const Twine &ErrorStr) {
   diagnose(DiagnosticInfoInlineAsm(LocCookie, ErrorStr));
-}
-
-void LLVMContext::emitOptimizationRemark(const char *PassName,
-                                         const Function &Fn,
-                                         const DebugLoc &DLoc,
-                                         const Twine &Msg) {
-  diagnose(DiagnosticInfoOptimizationRemark(PassName, Fn, DLoc, Msg));
 }
 
 //===----------------------------------------------------------------------===//

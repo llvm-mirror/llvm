@@ -1029,9 +1029,6 @@ ARMMCCodeEmitter::getHiLo16ImmOpValue(const MCInst &MI, unsigned OpIdx,
     switch (ARM16Expr->getKind()) {
     default: llvm_unreachable("Unsupported ARMFixup");
     case ARMMCExpr::VK_ARM_HI16:
-      if (Triple(STI.getTargetTriple()).isOSWindows())
-        return 0;
-
       Kind = MCFixupKind(isThumb2(STI) ? ARM::fixup_t2_movt_hi16
                                        : ARM::fixup_arm_movt_hi16);
       break;
@@ -1050,8 +1047,7 @@ ARMMCCodeEmitter::getHiLo16ImmOpValue(const MCInst &MI, unsigned OpIdx,
   // we have a movt or a movw, but that led to misleadingly results.
   // This is now disallowed in the the AsmParser in validateInstruction()
   // so this should never happen.
-  assert(0 && "expression without :upper16: or :lower16:");
-  return 0;
+  llvm_unreachable("expression without :upper16: or :lower16:");
 }
 
 uint32_t ARMMCCodeEmitter::

@@ -13,11 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-c/lto.h"
-#include "llvm-c/Core.h"
-#include "llvm-c/Target.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/LTO/LTOCodeGenerator.h"
 #include "llvm/LTO/LTOModule.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/TargetSelect.h"
 
 // extra command-line flags needed for LTOCodeGenerator
 static cl::opt<bool>
@@ -46,12 +46,12 @@ static bool parsedOptions = false;
 // Initialize the configured targets if they have not been initialized.
 static void lto_initialize() {
   if (!initialized) {
-    LLVMInitializeAllTargetInfos();
-    LLVMInitializeAllTargets();
-    LLVMInitializeAllTargetMCs();
-    LLVMInitializeAllAsmParsers();
-    LLVMInitializeAllAsmPrinters();
-    LLVMInitializeAllDisassemblers();
+    InitializeAllTargetInfos();
+    InitializeAllTargets();
+    InitializeAllTargetMCs();
+    InitializeAllAsmParsers();
+    InitializeAllAsmPrinters();
+    InitializeAllDisassemblers();
     initialized = true;
   }
 }
@@ -88,7 +88,10 @@ bool lto_module_is_object_file(const char* path) {
 
 bool lto_module_is_object_file_for_target(const char* path,
                                           const char* target_triplet_prefix) {
-  return LTOModule::isBitcodeFileForTarget(path, target_triplet_prefix);
+  ErrorOr<std::unique_ptr<MemoryBuffer>> Buffer = MemoryBuffer::getFile(path);
+  if (!Buffer)
+    return false;
+  return LTOModule::isBitcodeForTarget(Buffer->get(), target_triplet_prefix);
 }
 
 bool lto_module_is_object_file_in_memory(const void* mem, size_t length) {
@@ -99,20 +102,23 @@ bool
 lto_module_is_object_file_in_memory_for_target(const void* mem,
                                             size_t length,
                                             const char* target_triplet_prefix) {
-  return LTOModule::isBitcodeFileForTarget(mem, length, target_triplet_prefix);
+  std::unique_ptr<MemoryBuffer> buffer(LTOModule::makeBuffer(mem, length));
+  if (!buffer)
+    return false;
+  return LTOModule::isBitcodeForTarget(buffer.get(), target_triplet_prefix);
 }
 
 lto_module_t lto_module_create(const char* path) {
   lto_initialize();
   llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
-  return wrap(LTOModule::makeLTOModule(path, Options, sLastErrorString));
+  return wrap(LTOModule::createFromFile(path, Options, sLastErrorString));
 }
 
 lto_module_t lto_module_create_from_fd(int fd, const char *path, size_t size) {
   lto_initialize();
   llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return wrap(
-      LTOModule::makeLTOModule(fd, path, size, Options, sLastErrorString));
+      LTOModule::createFromOpenFile(fd, path, size, Options, sLastErrorString));
 }
 
 lto_module_t lto_module_create_from_fd_at_offset(int fd, const char *path,
@@ -121,14 +127,14 @@ lto_module_t lto_module_create_from_fd_at_offset(int fd, const char *path,
                                                  off_t offset) {
   lto_initialize();
   llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
-  return wrap(LTOModule::makeLTOModule(fd, path, map_size, offset, Options,
-                                       sLastErrorString));
+  return wrap(LTOModule::createFromOpenFileSlice(fd, path, map_size, offset,
+                                                 Options, sLastErrorString));
 }
 
 lto_module_t lto_module_create_from_memory(const void* mem, size_t length) {
   lto_initialize();
   llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
-  return wrap(LTOModule::makeLTOModule(mem, length, Options, sLastErrorString));
+  return wrap(LTOModule::createFromBuffer(mem, length, Options, sLastErrorString));
 }
 
 lto_module_t lto_module_create_from_memory_with_path(const void* mem,
@@ -137,13 +143,13 @@ lto_module_t lto_module_create_from_memory_with_path(const void* mem,
   lto_initialize();
   llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
   return wrap(
-      LTOModule::makeLTOModule(mem, length, Options, sLastErrorString, path));
+      LTOModule::createFromBuffer(mem, length, Options, sLastErrorString, path));
 }
 
 void lto_module_dispose(lto_module_t mod) { delete unwrap(mod); }
 
 const char* lto_module_get_target_triple(lto_module_t mod) {
-  return unwrap(mod)->getTargetTriple();
+  return unwrap(mod)->getTargetTriple().c_str();
 }
 
 void lto_module_set_target_triple(lto_module_t mod, const char *triple) {

@@ -135,11 +135,18 @@ bool TGParser::SetValue(Record *CurRec, SMLoc Loc, Init *ValName,
     V = BitsInit::get(NewBits);
   }
 
-  if (RV->setValue(V))
+  if (RV->setValue(V)) {
+    std::string InitType = "";
+    if (BitsInit *BI = dyn_cast<BitsInit>(V)) {
+      InitType = (Twine("' of type bit initializer with length ") +
+                  Twine(BI->getNumBits())).str();
+    }
     return Error(Loc, "Value '" + ValName->getAsUnquotedString() + "' of type '"
                  + RV->getType()->getAsString() +
                  "' is incompatible with initializer '" + V->getAsString()
+                 + InitType
                  + "'");
+  }
   return false;
 }
 
@@ -360,8 +367,13 @@ bool TGParser::ProcessForeachDefs(Record *CurRec, SMLoc Loc, IterSet &IterVals){
   }
 
   if (Records.getDef(IterRec->getNameInitAsString())) {
-    Error(Loc, "def already exists: " + IterRec->getNameInitAsString());
-    return true;
+    // If this record is anonymous, it's no problem, just generate a new name
+    if (IterRec->isAnonymous())
+      IterRec->setName(GetNewAnonymousName());
+    else {
+      Error(Loc, "def already exists: " + IterRec->getNameInitAsString());
+      return true;
+    }
   }
 
   Records.addDef(IterRec);
@@ -782,7 +794,7 @@ Init *TGParser::ParseIDValue(Record *CurRec,
 ///
 /// Operation ::= XOperator ['<' Type '>'] '(' Args ')'
 ///
-Init *TGParser::ParseOperation(Record *CurRec) {
+Init *TGParser::ParseOperation(Record *CurRec, RecTy *ItemType) {
   switch (Lex.getCode()) {
   default:
     TokError("unknown operation");
@@ -845,7 +857,7 @@ Init *TGParser::ParseOperation(Record *CurRec) {
         ListRecTy *LType = dyn_cast<ListRecTy>(LHSt->getType());
         StringRecTy *SType = dyn_cast<StringRecTy>(LHSt->getType());
         if (!LType && !SType) {
-          TokError("expected list or string type argumnet in unary operator");
+          TokError("expected list or string type argument in unary operator");
           return nullptr;
         }
       }
@@ -853,7 +865,7 @@ Init *TGParser::ParseOperation(Record *CurRec) {
       if (Code == UnOpInit::HEAD
           || Code == UnOpInit::TAIL) {
         if (!LHSl && !LHSt) {
-          TokError("expected list type argumnet in unary operator");
+          TokError("expected list type argument in unary operator");
           return nullptr;
         }
 
@@ -877,7 +889,7 @@ Init *TGParser::ParseOperation(Record *CurRec) {
           assert(LHSt && "expected list type argument in unary operator");
           ListRecTy *LType = dyn_cast<ListRecTy>(LHSt->getType());
           if (!LType) {
-            TokError("expected list type argumnet in unary operator");
+            TokError("expected list type argument in unary operator");
             return nullptr;
           }
           if (Code == UnOpInit::HEAD) {
@@ -1021,8 +1033,9 @@ Init *TGParser::ParseOperation(Record *CurRec) {
     }
     Lex.Lex();  // eat the ','
 
-    Init *MHS = ParseValue(CurRec);
-    if (!MHS) return nullptr;
+    Init *MHS = ParseValue(CurRec, ItemType);
+    if (!MHS)
+      return nullptr;
 
     if (Lex.getCode() != tgtok::comma) {
       TokError("expected ',' in ternary operator");
@@ -1030,8 +1043,9 @@ Init *TGParser::ParseOperation(Record *CurRec) {
     }
     Lex.Lex();  // eat the ','
 
-    Init *RHS = ParseValue(CurRec);
-    if (!RHS) return nullptr;
+    Init *RHS = ParseValue(CurRec, ItemType);
+    if (!RHS)
+      return nullptr;
 
     if (Lex.getCode() != tgtok::r_paren) {
       TokError("expected ')' in binary operator");
@@ -1441,7 +1455,7 @@ Init *TGParser::ParseSimpleValue(Record *CurRec, RecTy *ItemType,
   case tgtok::XIf:
   case tgtok::XForEach:
   case tgtok::XSubst: {  // Value ::= !ternop '(' Value ',' Value ',' Value ')'
-    return ParseOperation(CurRec);
+    return ParseOperation(CurRec, ItemType);
   }
   }
 
@@ -1720,7 +1734,10 @@ Init *TGParser::ParseDeclaration(Record *CurRec,
     Init *Val = ParseValue(CurRec, Type);
     if (!Val ||
         SetValue(CurRec, ValLoc, DeclName, std::vector<unsigned>(), Val))
-      return nullptr;
+      // Return the name, even if an error is thrown.  This is so that we can
+      // continue to make some progress, even without the value having been
+      // initialized.
+      return DeclName;
   }
 
   return DeclName;

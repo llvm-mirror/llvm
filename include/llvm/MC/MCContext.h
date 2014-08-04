@@ -11,15 +11,18 @@
 #define LLVM_MC_MCCONTEXT_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/SectionKind.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/raw_ostream.h"
 #include <map>
+#include <tuple>
 #include <vector> // FIXME: Shouldn't be needed.
 
 namespace llvm {
@@ -129,11 +132,10 @@ namespace llvm {
     /// assembly source files.
     unsigned GenDwarfFileNumber;
 
-    /// The default initial text section that we generate dwarf debugging line
-    /// info for when generating dwarf assembly source files.
-    const MCSection *GenDwarfSection;
-    /// Symbols created for the start and end of this section.
-    MCSymbol *GenDwarfSectionStartSym, *GenDwarfSectionEndSym;
+    /// Symbols created for the start and end of each section, used for
+    /// generating the .debug_ranges and .debug_aranges sections.
+    MapVector<const MCSection *, std::pair<MCSymbol *, MCSymbol *> >
+    SectionStartEndSyms;
 
     /// The information gathered from labels that will have dwarf label
     /// entries when generating dwarf assembly source files.
@@ -159,10 +161,11 @@ namespace llvm {
     unsigned DwarfCompileUnitID;
 
     typedef std::pair<std::string, std::string> SectionGroupPair;
+    typedef std::tuple<std::string, std::string, int> SectionGroupTriple;
 
     StringMap<const MCSectionMachO*> MachOUniquingMap;
     std::map<SectionGroupPair, const MCSectionELF *> ELFUniquingMap;
-    std::map<SectionGroupPair, const MCSectionCOFF *> COFFUniquingMap;
+    std::map<SectionGroupTriple, const MCSectionCOFF *> COFFUniquingMap;
 
     /// Do automatic reset in destructor
     bool AutoReset;
@@ -273,9 +276,7 @@ namespace llvm {
     const MCSectionCOFF *getCOFFSection(StringRef Section,
                                         unsigned Characteristics,
                                         SectionKind Kind,
-                                        StringRef COMDATSymName,
-                                        int Selection,
-                                        const MCSectionCOFF *Assoc = nullptr);
+                                        StringRef COMDATSymName, int Selection);
 
     const MCSectionCOFF *getCOFFSection(StringRef Section,
                                         unsigned Characteristics,
@@ -376,16 +377,18 @@ namespace llvm {
     void setGenDwarfFileNumber(unsigned FileNumber) {
       GenDwarfFileNumber = FileNumber;
     }
-    const MCSection *getGenDwarfSection() { return GenDwarfSection; }
-    void setGenDwarfSection(const MCSection *Sec) { GenDwarfSection = Sec; }
-    MCSymbol *getGenDwarfSectionStartSym() { return GenDwarfSectionStartSym; }
-    void setGenDwarfSectionStartSym(MCSymbol *Sym) {
-      GenDwarfSectionStartSym = Sym;
+    MapVector<const MCSection *, std::pair<MCSymbol *, MCSymbol *> > &
+    getGenDwarfSectionSyms() {
+      return SectionStartEndSyms;
     }
-    MCSymbol *getGenDwarfSectionEndSym() { return GenDwarfSectionEndSym; }
-    void setGenDwarfSectionEndSym(MCSymbol *Sym) {
-      GenDwarfSectionEndSym = Sym;
+    std::pair<MapVector<const MCSection *,
+                        std::pair<MCSymbol *, MCSymbol *> >::iterator,
+              bool>
+    addGenDwarfSection(const MCSection *Sec) {
+      return SectionStartEndSyms.insert(
+          std::make_pair(Sec, std::make_pair(nullptr, nullptr)));
     }
+    void finalizeDwarfSections(MCStreamer &MCOS);
     const std::vector<MCGenDwarfLabelEntry> &getMCGenDwarfLabelEntries() const {
       return MCGenDwarfLabelEntries;
     }

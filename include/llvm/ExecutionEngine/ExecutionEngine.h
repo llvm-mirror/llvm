@@ -54,7 +54,7 @@ namespace object {
 }
 
 /// \brief Helper class for helping synchronize access to the global address map
-/// table.
+/// table.  Access to this class should be serialized under a mutex.
 class ExecutionEngineState {
 public:
   struct AddressMapConfig : public ValueMapConfig<const GlobalValue*> {
@@ -84,19 +84,19 @@ private:
 public:
   ExecutionEngineState(ExecutionEngine &EE);
 
-  GlobalAddressMapTy &getGlobalAddressMap(const MutexGuard &) {
+  GlobalAddressMapTy &getGlobalAddressMap() {
     return GlobalAddressMap;
   }
 
   std::map<void*, AssertingVH<const GlobalValue> > &
-  getGlobalAddressReverseMap(const MutexGuard &) {
+  getGlobalAddressReverseMap() {
     return GlobalAddressReverseMap;
   }
 
   /// \brief Erase an entry from the mapping table.
   ///
   /// \returns The address that \p ToUnmap was happed to.
-  void *RemoveMapping(const MutexGuard &, const GlobalValue *ToUnmap);
+  void *RemoveMapping(const GlobalValue *ToUnmap);
 };
 
 /// \brief Abstract interface for implementation execution of LLVM modules,
@@ -151,7 +151,6 @@ protected:
     Module *M,
     std::string *ErrorStr,
     RTDyldMemoryManager *MCJMM,
-    bool GVsWithCode,
     TargetMachine *TM);
   static ExecutionEngine *(*InterpCtor)(Module *M, std::string *ErrorStr);
 
@@ -171,39 +170,6 @@ public:
   //===--------------------------------------------------------------------===//
 
   virtual ~ExecutionEngine();
-
-  /// create - This is the factory method for creating an execution engine which
-  /// is appropriate for the current machine.  This takes ownership of the
-  /// module.
-  ///
-  /// \param GVsWithCode - Allocating globals with code breaks
-  /// freeMachineCodeForFunction and is probably unsafe and bad for performance.
-  /// However, we have clients who depend on this behavior, so we must support
-  /// it.  Eventually, when we're willing to break some backwards compatibility,
-  /// this flag should be flipped to false, so that by default
-  /// freeMachineCodeForFunction works.
-  static ExecutionEngine *create(Module *M,
-                                 bool ForceInterpreter = false,
-                                 std::string *ErrorStr = nullptr,
-                                 CodeGenOpt::Level OptLevel =
-                                 CodeGenOpt::Default,
-                                 bool GVsWithCode = true);
-
-  /// createJIT - This is the factory method for creating a JIT for the current
-  /// machine, it does not fall back to the interpreter.  This takes ownership
-  /// of the Module and JITMemoryManager if successful.
-  ///
-  /// Clients should make sure to initialize targets prior to calling this
-  /// function.
-  static ExecutionEngine *createJIT(Module *M,
-                                    std::string *ErrorStr = nullptr,
-                                    JITMemoryManager *JMM = nullptr,
-                                    CodeGenOpt::Level OptLevel =
-                                    CodeGenOpt::Default,
-                                    bool GVsWithCode = true,
-                                    Reloc::Model RM = Reloc::Default,
-                                    CodeModel::Model CMM =
-                                    CodeModel::JITDefault);
 
   /// addModule - Add a Module to the list of modules that we can JIT from.
   /// Note that this takes ownership of the Module: when the ExecutionEngine is
@@ -586,26 +552,7 @@ private:
   bool VerifyModules;
 
   /// InitEngine - Does the common initialization of default options.
-  void InitEngine() {
-    WhichEngine = EngineKind::Either;
-    ErrorStr = nullptr;
-    OptLevel = CodeGenOpt::Default;
-    MCJMM = nullptr;
-    JMM = nullptr;
-    Options = TargetOptions();
-    AllocateGVsWithCode = false;
-    RelocModel = Reloc::Default;
-    CMModel = CodeModel::JITDefault;
-    UseMCJIT = false;
-
-  // IR module verification is enabled by default in debug builds, and disabled
-  // by default in release builds.
-#ifndef NDEBUG
-  VerifyModules = true;
-#else
-  VerifyModules = false;
-#endif
-  }
+  void InitEngine();
 
 public:
   /// EngineBuilder - Constructor for EngineBuilder.  If create() is called and

@@ -15,13 +15,13 @@
 #ifndef X86ISELLOWERING_H
 #define X86ISELLOWERING_H
 
-#include "X86Subtarget.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
 
 namespace llvm {
+  class X86Subtarget;
   class X86TargetMachine;
 
   namespace X86ISD {
@@ -85,6 +85,9 @@ namespace llvm {
 
       /// X86 Read Time-Stamp Counter and Processor ID.
       RDTSCP_DAG,
+
+      /// X86 Read Performance Monitoring Counters.
+      RDPMC_DAG,
 
       /// X86 compare and logical compare instructions.
       CMP, COMI, UCOMI,
@@ -315,6 +318,8 @@ namespace llvm {
       KORTEST,
 
       // Several flavors of instructions with vector shuffle behaviors.
+      PACKSS,
+      PACKUS,
       PALIGNR,
       PSHUFD,
       PSHUFHW,
@@ -400,23 +405,8 @@ namespace llvm {
       // XTEST - Test if in transactional execution.
       XTEST,
 
-      // ATOMADD64_DAG, ATOMSUB64_DAG, ATOMOR64_DAG, ATOMAND64_DAG,
-      // ATOMXOR64_DAG, ATOMNAND64_DAG, ATOMSWAP64_DAG -
-      // Atomic 64-bit binary operations.
-      ATOMADD64_DAG = ISD::FIRST_TARGET_MEMORY_OPCODE,
-      ATOMSUB64_DAG,
-      ATOMOR64_DAG,
-      ATOMXOR64_DAG,
-      ATOMAND64_DAG,
-      ATOMNAND64_DAG,
-      ATOMMAX64_DAG,
-      ATOMMIN64_DAG,
-      ATOMUMAX64_DAG,
-      ATOMUMIN64_DAG,
-      ATOMSWAP64_DAG,
-
       // LCMPXCHG_DAG, LCMPXCHG8_DAG, LCMPXCHG16_DAG - Compare and swap.
-      LCMPXCHG_DAG,
+      LCMPXCHG_DAG = ISD::FIRST_TARGET_MEMORY_OPCODE,
       LCMPXCHG8_DAG,
       LCMPXCHG16_DAG,
 
@@ -575,10 +565,10 @@ namespace llvm {
     /// legal as the hook is used before type legalization.
     bool isSafeMemOpType(MVT VT) const override;
 
-    /// allowsUnalignedMemoryAccesses - Returns true if the target allows
+    /// allowsMisalignedMemoryAccesses - Returns true if the target allows
     /// unaligned memory accesses. of the specified type. Returns whether it
     /// is "fast" by reference in the second argument.
-    bool allowsUnalignedMemoryAccesses(EVT VT, unsigned AS,
+    bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS, unsigned Align,
                                        bool *Fast) const override;
 
     /// LowerOperation - Provide custom lowering hooks for some operations.
@@ -766,9 +756,7 @@ namespace llvm {
 
     /// isTargetFTOL - Return true if the target uses the MSVC _ftol2 routine
     /// for fptoui.
-    bool isTargetFTOL() const {
-      return Subtarget->isTargetKnownWindowsMSVC() && !Subtarget->is64Bit();
-    }
+    bool isTargetFTOL() const;
 
     /// isIntegerTypeFTOL - Return true if the MSVC _ftol2 routine should be
     /// used for fptoui to the given type.
@@ -807,6 +795,10 @@ namespace llvm {
 
     /// \brief Reset the operation actions based on target options.
     void resetOperationActions() override;
+
+    bool useLoadStackGuardNode() const override;
+    /// \brief Customize the preferred legalization strategy for certain types.
+    LegalizeTypeAction getPreferredVectorAction(EVT VT) const override;
 
   protected:
     std::pair<const TargetRegisterClass*, uint8_t>

@@ -14,7 +14,13 @@
 #ifndef POWERPCSUBTARGET_H
 #define POWERPCSUBTARGET_H
 
+#include "PPCFrameLowering.h"
+#include "PPCInstrInfo.h"
+#include "PPCISelLowering.h"
+#include "PPCJITInfo.h"
+#include "PPCSelectionDAGInfo.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
@@ -50,6 +56,7 @@ namespace PPC {
     DIR_PWR6,
     DIR_PWR6X,
     DIR_PWR7,
+    DIR_PWR8,
     DIR_64
   };
 }
@@ -102,12 +109,25 @@ protected:
   /// OptLevel - What default optimization level we're emitting code for.
   CodeGenOpt::Level OptLevel;
 
+  enum {
+    PPC_ABI_UNKNOWN,
+    PPC_ABI_ELFv1,
+    PPC_ABI_ELFv2
+  } TargetABI;
+
+  PPCFrameLowering FrameLowering;
+  const DataLayout DL;
+  PPCInstrInfo InstrInfo;
+  PPCJITInfo JITInfo;
+  PPCTargetLowering TLInfo;
+  PPCSelectionDAGInfo TSInfo;
+
 public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ///
   PPCSubtarget(const std::string &TT, const std::string &CPU,
-               const std::string &FS, bool is64Bit,
+               const std::string &FS, PPCTargetMachine &TM, bool is64Bit,
                CodeGenOpt::Level OptLevel);
 
   /// ParseSubtargetFeatures - Parses features string setting specified
@@ -127,9 +147,20 @@ public:
   ///
   unsigned getDarwinDirective() const { return DarwinDirective; }
 
-  /// getInstrItins - Return the instruction itineraies based on subtarget
+  /// getInstrItins - Return the instruction itineraries based on subtarget
   /// selection.
   const InstrItineraryData &getInstrItineraryData() const { return InstrItins; }
+
+  const PPCFrameLowering *getFrameLowering() const { return &FrameLowering; }
+  const DataLayout *getDataLayout() const { return &DL; }
+  const PPCInstrInfo *getInstrInfo() const { return &InstrInfo; }
+  PPCJITInfo *getJITInfo() { return &JITInfo; }
+  const PPCTargetLowering *getTargetLowering() const { return &TLInfo; }
+  const PPCSelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
+
+  /// initializeSubtargetDependencies - Initializes using a CPU and feature string
+  /// so that we can use initializer lists for subtarget initialization.
+  PPCSubtarget &initializeSubtargetDependencies(StringRef CPU, StringRef FS);
 
   /// \brief Reset the features for the PowerPC target.
   void resetSubtargetFeatures(const MachineFunction *MF) override;
@@ -197,16 +228,22 @@ public:
   /// isBGQ - True if this is a BG/Q platform.
   bool isBGQ() const { return TargetTriple.getVendor() == Triple::BGQ; }
 
+  bool isTargetELF() const { return TargetTriple.isOSBinFormatELF(); }
+  bool isTargetMachO() const { return TargetTriple.isOSBinFormatMachO(); }
+
   bool isDarwinABI() const { return isDarwin(); }
   bool isSVR4ABI() const { return !isDarwin(); }
+  bool isELFv2ABI() const { return TargetABI == PPC_ABI_ELFv2; }
 
-  /// enablePostRAScheduler - True at 'More' optimization.
-  bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
-                             TargetSubtargetInfo::AntiDepBreakMode& Mode,
-                             RegClassVector& CriticalPathRCs) const override;
+  bool enableEarlyIfConversion() const override { return hasISEL(); }
 
   // Scheduling customization.
   bool enableMachineScheduler() const override;
+  // This overrides the PostRAScheduler bit in the SchedModel for each CPU.
+  bool enablePostMachineScheduler() const override;
+  AntiDepBreakMode getAntiDepBreakMode() const override;
+  void getCriticalPathRCs(RegClassVector &CriticalPathRCs) const override;
+
   void overrideSchedPolicy(MachineSchedPolicy &Policy,
                            MachineInstr *begin,
                            MachineInstr *end,

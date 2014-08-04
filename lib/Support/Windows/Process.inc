@@ -12,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Allocator.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/WindowsError.h"
 #include <malloc.h>
 
 // The Windows.h header must be after LLVM and standard headers.
@@ -46,7 +48,6 @@
 
 using namespace llvm;
 using namespace sys;
-
 
 process::id_type self_process::get_id() {
   return GetCurrentProcessId();
@@ -178,37 +179,98 @@ Optional<std::string> Process::GetEnv(StringRef Name) {
   return std::string(Res.data());
 }
 
-error_code
-Process::GetArgumentVector(SmallVectorImpl<const char *> &Args,
-                           ArrayRef<const char *>,
-                           SpecificBumpPtrAllocator<char> &ArgAllocator) {
-  int NewArgCount;
-  error_code ec;
+static std::error_code windows_error(DWORD E) {
+  return mapWindowsError(E);
+}
 
-  wchar_t **UnicodeCommandLine = CommandLineToArgvW(GetCommandLineW(),
-                                                    &NewArgCount);
-  if (!UnicodeCommandLine)
-    return windows_error(::GetLastError());
+static void AllocateAndPush(const SmallVectorImpl<char> &S,
+                            SmallVectorImpl<const char *> &Vector,
+                            SpecificBumpPtrAllocator<char> &Allocator) {
+  char *Buffer = Allocator.Allocate(S.size() + 1);
+  ::memcpy(Buffer, S.data(), S.size());
+  Buffer[S.size()] = '\0';
+  Vector.push_back(Buffer);
+}
 
-  Args.reserve(NewArgCount);
+/// Convert Arg from UTF-16 to UTF-8 and push it onto Args.
+static std::error_code
+ConvertAndPushArg(const wchar_t *Arg, SmallVectorImpl<const char *> &Args,
+                  SpecificBumpPtrAllocator<char> &Allocator) {
+  SmallVector<char, MAX_PATH> ArgString;
+  if (std::error_code ec = windows::UTF16ToUTF8(Arg, wcslen(Arg), ArgString))
+    return ec;
+  AllocateAndPush(ArgString, Args, Allocator);
+  return std::error_code();
+}
 
-  for (int i = 0; i < NewArgCount; ++i) {
-    SmallVector<char, MAX_PATH> NewArgString;
-    ec = windows::UTF16ToUTF8(UnicodeCommandLine[i],
-                              wcslen(UnicodeCommandLine[i]),
-                              NewArgString);
+/// \brief Perform wildcard expansion of Arg, or just push it into Args if it
+/// doesn't have wildcards or doesn't match any files.
+static std::error_code
+WildcardExpand(const wchar_t *Arg, SmallVectorImpl<const char *> &Args,
+               SpecificBumpPtrAllocator<char> &Allocator) {
+  if (!wcspbrk(Arg, L"*?")) {
+    // Arg does not contain any wildcard characters. This is the common case.
+    return ConvertAndPushArg(Arg, Args, Allocator);
+  }
+
+  if (wcscmp(Arg, L"/?") == 0 || wcscmp(Arg, L"-?") == 0) {
+    // Don't wildcard expand /?. Always treat it as an option.
+    return ConvertAndPushArg(Arg, Args, Allocator);
+  }
+
+  // Extract any directory part of the argument.
+  SmallVector<char, MAX_PATH> Dir;
+  if (std::error_code ec = windows::UTF16ToUTF8(Arg, wcslen(Arg), Dir))
+    return ec;
+  sys::path::remove_filename(Dir);
+  const int DirSize = Dir.size();
+
+  // Search for matching files.
+  WIN32_FIND_DATAW FileData;
+  HANDLE FindHandle = FindFirstFileW(Arg, &FileData);
+  if (FindHandle == INVALID_HANDLE_VALUE) {
+    return ConvertAndPushArg(Arg, Args, Allocator);
+  }
+
+  std::error_code ec;
+  do {
+    SmallVector<char, MAX_PATH> FileName;
+    ec = windows::UTF16ToUTF8(FileData.cFileName, wcslen(FileData.cFileName),
+                              FileName);
     if (ec)
       break;
 
-    char *Buffer = ArgAllocator.Allocate(NewArgString.size() + 1);
-    ::memcpy(Buffer, NewArgString.data(), NewArgString.size() + 1);
-    Args.push_back(Buffer);
-  }
-  LocalFree(UnicodeCommandLine);
-  if (ec)
-    return ec;
+    // Push the filename onto Dir, and remove it afterwards.
+    llvm::sys::path::append(Dir, StringRef(FileName.data(), FileName.size()));
+    AllocateAndPush(Dir, Args, Allocator);
+    Dir.resize(DirSize);
+  } while (FindNextFileW(FindHandle, &FileData));
 
-  return error_code::success();
+  FindClose(FindHandle);
+  return ec;
+}
+
+std::error_code
+Process::GetArgumentVector(SmallVectorImpl<const char *> &Args,
+                           ArrayRef<const char *>,
+                           SpecificBumpPtrAllocator<char> &ArgAllocator) {
+  int ArgCount;
+  wchar_t **UnicodeCommandLine =
+      CommandLineToArgvW(GetCommandLineW(), &ArgCount);
+  if (!UnicodeCommandLine)
+    return windows_error(::GetLastError());
+
+  Args.reserve(ArgCount);
+  std::error_code ec;
+
+  for (int i = 0; i < ArgCount; ++i) {
+    ec = WildcardExpand(UnicodeCommandLine[i], Args, ArgAllocator);
+    if (ec)
+      break;
+  }
+
+  LocalFree(UnicodeCommandLine);
+  return ec;
 }
 
 bool Process::StandardInIsUserInput() {
@@ -363,12 +425,12 @@ unsigned Process::GetRandomNumber() {
   HCRYPTPROV HCPC;
   if (!::CryptAcquireContextW(&HCPC, NULL, NULL, PROV_RSA_FULL,
                               CRYPT_VERIFYCONTEXT))
-    assert(false && "Could not acquire a cryptographic context");
+    report_fatal_error("Could not acquire a cryptographic context");
 
   ScopedCryptContext CryptoProvider(HCPC);
   unsigned Ret;
   if (!::CryptGenRandom(CryptoProvider, sizeof(Ret),
                         reinterpret_cast<BYTE *>(&Ret)))
-    assert(false && "Could not generate a random number");
+    report_fatal_error("Could not generate a random number");
   return Ret;
 }

@@ -26,6 +26,7 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
@@ -157,6 +158,15 @@ bool JumpThreading::runOnFunction(Function &F) {
   DL = DLP ? &DLP->getDataLayout() : nullptr;
   TLI = &getAnalysis<TargetLibraryInfo>();
   LVI = &getAnalysis<LazyValueInfo>();
+
+  // Remove unreachable blocks from function as they may result in infinite
+  // loop. We do threading if we found something profitable. Jump threading a
+  // branch can create other opportunities. If these opportunities form a cycle
+  // i.e. if any jump treading is undoing previous threading in the path, then
+  // we will loop forever. We take care of this issue by not jump threading for
+  // back edges. This works for normal cases but not for unreachable blocks as
+  // they may have cycle with no back edge.
+  removeUnreachableBlocks(F);
 
   FindLoopHeaders(F);
 
@@ -660,14 +670,9 @@ bool JumpThreading::ProcessBlock(BasicBlock *BB) {
       if (LoopHeaders.erase(SinglePred))
         LoopHeaders.insert(BB);
 
-      // Remember if SinglePred was the entry block of the function.  If so, we
-      // will need to move BB back to the entry position.
-      bool isEntry = SinglePred == &SinglePred->getParent()->getEntryBlock();
       LVI->eraseBlock(SinglePred);
       MergeBasicBlockIntoOnlyPred(BB);
 
-      if (isEntry && BB != &BB->getParent()->getEntryBlock())
-        BB->moveBefore(&BB->getParent()->getEntryBlock());
       return true;
     }
   }
@@ -884,9 +889,10 @@ bool JumpThreading::SimplifyPartiallyRedundantLoad(LoadInst *LI) {
   if (BBIt != LoadBB->begin())
     return false;
 
-  // If all of the loads and stores that feed the value have the same TBAA tag,
-  // then we can propagate it onto any newly inserted loads.
-  MDNode *TBAATag = LI->getMetadata(LLVMContext::MD_tbaa);
+  // If all of the loads and stores that feed the value have the same AA tags,
+  // then we can propagate them onto any newly inserted loads.
+  AAMDNodes AATags;
+  LI->getAAMetadata(AATags);
 
   SmallPtrSet<BasicBlock*, 8> PredsScanned;
   typedef SmallVector<std::pair<BasicBlock*, Value*>, 8> AvailablePredsTy;
@@ -905,16 +911,16 @@ bool JumpThreading::SimplifyPartiallyRedundantLoad(LoadInst *LI) {
 
     // Scan the predecessor to see if the value is available in the pred.
     BBIt = PredBB->end();
-    MDNode *ThisTBAATag = nullptr;
+    AAMDNodes ThisAATags;
     Value *PredAvailable = FindAvailableLoadedValue(LoadedPtr, PredBB, BBIt, 6,
-                                                    nullptr, &ThisTBAATag);
+                                                    nullptr, &ThisAATags);
     if (!PredAvailable) {
       OneUnavailablePred = PredBB;
       continue;
     }
 
-    // If tbaa tags disagree or are not present, forget about them.
-    if (TBAATag != ThisTBAATag) TBAATag = nullptr;
+    // If AA tags disagree or are not present, forget about them.
+    if (AATags != ThisAATags) AATags = AAMDNodes();
 
     // If so, this load is partially redundant.  Remember this info so that we
     // can create a PHI node.
@@ -974,8 +980,8 @@ bool JumpThreading::SimplifyPartiallyRedundantLoad(LoadInst *LI) {
                                  LI->getAlignment(),
                                  UnavailablePred->getTerminator());
     NewVal->setDebugLoc(LI->getDebugLoc());
-    if (TBAATag)
-      NewVal->setMetadata(LLVMContext::MD_tbaa, TBAATag);
+    if (AATags)
+      NewVal->setAAMetadata(AATags);
 
     AvailablePreds.push_back(std::make_pair(UnavailablePred, NewVal));
   }

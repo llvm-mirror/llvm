@@ -88,6 +88,13 @@ namespace llvm {
 
   //===--------------------------------------------------------------------===//
   //
+  // createScopedNoAliasAAPass - This pass implements metadata-based
+  // scoped noalias analysis.
+  //
+  ImmutablePass *createScopedNoAliasAAPass();
+
+  //===--------------------------------------------------------------------===//
+  //
   // createObjCARCAliasAnalysisPass - This pass implements ObjC-ARC-based
   // alias analysis.
   //
@@ -142,6 +149,10 @@ namespace llvm {
   // information and prints it with -analyze.
   //
   FunctionPass *createMemDepPrinter();
+
+  // createJumpInstrTableInfoPass - This creates a pass that stores information
+  // about the jump tables created by JumpInstrTables
+  ImmutablePass *createJumpInstrTableInfoPass();
 }
 
 #endif

@@ -1,8 +1,17 @@
 ; RUN: opt < %s -loop-vectorize -mtriple=x86_64-unknown-linux -S -pass-remarks='loop-vectorize' 2>&1 | FileCheck -check-prefix=VECTORIZED %s
-; RUN: opt < %s -loop-vectorize -force-vector-width=1 -force-vector-unroll=4 -mtriple=x86_64-unknown-linux -S -pass-remarks='.*vectorize.*' 2>&1 | FileCheck -check-prefix=UNROLLED %s
+; RUN: opt < %s -loop-vectorize -force-vector-width=1 -force-vector-unroll=4 -mtriple=x86_64-unknown-linux -S -pass-remarks='loop-vectorize' 2>&1 | FileCheck -check-prefix=UNROLLED %s
+; RUN: opt < %s -loop-vectorize -force-vector-width=1 -force-vector-unroll=1 -mtriple=x86_64-unknown-linux -S -pass-remarks-analysis='loop-vectorize' 2>&1 | FileCheck -check-prefix=NONE %s
 
-; VECTORIZED: remark: {{.*}}.c:17:8: vectorized loop (vectorization factor: 4, unrolling interleave factor: 1)
-; UNROLLED: remark: {{.*}}.c:17:8: unrolled with interleaving factor 4 (vectorization not beneficial)
+; This code has all the !dbg annotations needed to track source line information,
+; but is missing the llvm.dbg.cu annotation. This prevents code generation from
+; emitting debug info in the final output.
+; RUN: llc -mtriple x86_64-pc-linux-gnu %s -o - | FileCheck -check-prefix=DEBUG-OUTPUT %s
+; DEBUG-OUTPUT-NOT: .loc
+; DEBUG-OUTPUT-NOT: {{.*}}.debug_info
+
+; VECTORIZED: remark: vectorization-remarks.c:17:8: vectorized loop (vectorization factor: 4, unrolling interleave factor: 1)
+; UNROLLED: remark: vectorization-remarks.c:17:8: unrolled with interleaving factor 4 (vectorization not beneficial)
+; NONE: remark: vectorization-remarks.c:17:8: loop not vectorized: vector width and interleave count are explicitly set to 1
 
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 
@@ -37,11 +46,9 @@ for.end:                                          ; preds = %for.body
 
 declare void @ibar(i32*) #1
 
-!llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!7, !8}
 !llvm.ident = !{!9}
 
-!0 = metadata !{i32 786449, metadata !1, i32 12, metadata !"clang version 3.5.0 ", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2, metadata !"", i32 2} ; [ DW_TAG_compile_unit ] [./vectorization-remarks.c] [DW_LANG_C99]
 !1 = metadata !{metadata !"vectorization-remarks.c", metadata !"."}
 !2 = metadata !{}
 !3 = metadata !{metadata !4}

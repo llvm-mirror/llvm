@@ -31,7 +31,7 @@ public:
 
 }
 
-static void check(error_code ec) {
+static void check(std::error_code ec) {
   if (ec)
     report_fatal_error(ec.message());
 }
@@ -61,7 +61,7 @@ void COFFDumper::dumpSections(unsigned NumSections) {
 
     ArrayRef<uint8_t> sectionData;
     Obj.getSectionContents(Sect, sectionData);
-    Sec.SectionData = object::yaml::BinaryRef(sectionData);
+    Sec.SectionData = yaml::BinaryRef(sectionData);
 
     std::vector<COFFYAML::Relocation> Relocations;
     for (const auto &Reloc : Section.relocations()) {
@@ -210,7 +210,7 @@ COFFYAML::Object &COFFDumper::getYAMLObj() {
   return YAMLObj;
 }
 
-error_code coff2yaml(raw_ostream &Out, const object::COFFObjectFile &Obj) {
+std::error_code coff2yaml(raw_ostream &Out, const object::COFFObjectFile &Obj) {
   COFFDumper Dumper(Obj);
 
   yaml::Output Yout(Out);

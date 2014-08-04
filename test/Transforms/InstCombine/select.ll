@@ -281,7 +281,7 @@ define i32 @test15i(i32 %X) {
 ; CHECK-NEXT: %t1 = shl i32 %X, 8
 ; CHECK-NEXT: %1 = and i32 %t1, 512
 ; CHECK-NEXT: %2 = xor i32 %1, 512
-; CHECK-NEXT: %3 = add i32 %2, 577
+; CHECK-NEXT: %3 = add nuw nsw i32 %2, 577
 ; CHECK-NEXT: ret i32 %3
 }
 
@@ -294,7 +294,7 @@ define i32 @test15j(i32 %X) {
 ; CHECK-LABEL: @test15j(
 ; CHECK-NEXT: %t1 = shl i32 %X, 8
 ; CHECK-NEXT: %1 = and i32 %t1, 512
-; CHECK-NEXT: %2 = add i32 %1, 577
+; CHECK-NEXT: %2 = add nuw nsw i32 %1, 577
 ; CHECK-NEXT: ret i32 %2
 }
 
@@ -521,7 +521,7 @@ define i32 @test35(i32 %x) {
 ; CHECK-LABEL: @test35(
 ; CHECK: ashr i32 %x, 31
 ; CHECK: and i32 {{.*}}, 40
-; CHECK: add i32 {{.*}}, 60
+; CHECK: add nuw nsw i32 {{.*}}, 60
 ; CHECK: ret
 }
 
@@ -532,7 +532,7 @@ define i32 @test36(i32 %x) {
 ; CHECK-LABEL: @test36(
 ; CHECK: ashr i32 %x, 31
 ; CHECK: and i32 {{.*}}, -40
-; CHECK: add i32 {{.*}}, 100
+; CHECK: add nsw i32 {{.*}}, 100
 ; CHECK: ret
 }
 
@@ -994,6 +994,111 @@ define <2 x i32> @select_icmp_eq_and_1_0_or_vector_of_2s(i32 %x, <2 x i32> %y) {
   %or = or <2 x i32> %y, <i32 2, i32 2>
   %select = select i1 %cmp, <2 x i32> %y, <2 x i32> %or
   ret <2 x i32> %select
+}
+
+; CHECK-LABEL: @select_icmp_and_8_eq_0_or_8(
+; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, 8
+; CHECK-NEXT: ret i32 [[OR]]
+define i32 @select_icmp_and_8_eq_0_or_8(i32 %x) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %or = or i32 %x, 8
+  %or.x = select i1 %cmp, i32 %or, i32 %x
+  ret i32 %or.x
+}
+
+; CHECK-LABEL: @select_icmp_and_8_ne_0_xor_8(
+; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, -9
+; CHECK-NEXT: ret i32 [[AND]]
+define i32 @select_icmp_and_8_ne_0_xor_8(i32 %x) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i32 %x, 8
+  %x.xor = select i1 %cmp, i32 %x, i32 %xor
+  ret i32 %x.xor
+}
+
+; CHECK-LABEL: @select_icmp_and_8_eq_0_xor_8(
+; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, 8
+; CHECK-NEXT: ret i32 [[OR]]
+define i32 @select_icmp_and_8_eq_0_xor_8(i32 %x) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i32 %x, 8
+  %xor.x = select i1 %cmp, i32 %xor, i32 %x
+  ret i32 %xor.x
+}
+
+; CHECK-LABEL: @select_icmp_and_8_ne_0_and_not_8(
+; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, -9
+; CHECK-NEXT: ret i32 [[AND]]
+define i32 @select_icmp_and_8_ne_0_and_not_8(i32 %x) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %and1 = and i32 %x, -9
+  %x.and1 = select i1 %cmp, i32 %x, i32 %and1
+  ret i32 %x.and1
+}
+
+; CHECK-LABEL: @select_icmp_and_8_eq_0_and_not_8(
+; CHECK-NEXT: ret i32 %x
+define i32 @select_icmp_and_8_eq_0_and_not_8(i32 %x) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %and1 = and i32 %x, -9
+  %and1.x = select i1 %cmp, i32 %and1, i32 %x
+  ret i32 %and1.x
+}
+
+; CHECK-LABEL: @select_icmp_x_and_8_eq_0_y_xor_8(
+; CHECK: select i1 %cmp, i64 %y, i64 %xor
+define i64 @select_icmp_x_and_8_eq_0_y_xor_8(i32 %x, i64 %y) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i64 %y, 8
+  %y.xor = select i1 %cmp, i64 %y, i64 %xor
+  ret i64 %y.xor
+}
+
+; CHECK-LABEL: @select_icmp_x_and_8_eq_0_y_and_not_8(
+; CHECK: select i1 %cmp, i64 %y, i64 %and1
+define i64 @select_icmp_x_and_8_eq_0_y_and_not_8(i32 %x, i64 %y) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %and1 = and i64 %y, -9
+  %y.and1 = select i1 %cmp, i64 %y, i64 %and1
+  ret i64 %y.and1
+}
+
+; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_xor_8(
+; CHECK: select i1 %cmp, i64 %xor, i64 %y
+define i64 @select_icmp_x_and_8_ne_0_y_xor_8(i32 %x, i64 %y) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i64 %y, 8
+  %xor.y = select i1 %cmp, i64 %xor, i64 %y
+  ret i64 %xor.y
+}
+
+; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_and_not_8(
+; CHECK: select i1 %cmp, i64 %and1, i64 %y
+define i64 @select_icmp_x_and_8_ne_0_y_and_not_8(i32 %x, i64 %y) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %and1 = and i64 %y, -9
+  %and1.y = select i1 %cmp, i64 %and1, i64 %y
+  ret i64 %and1.y
+}
+
+; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_or_8(
+; CHECK: xor i64 %1, 8
+; CHECK: or i64 %2, %y
+define i64 @select_icmp_x_and_8_ne_0_y_or_8(i32 %x, i64 %y) {
+  %and = and i32 %x, 8
+  %cmp = icmp eq i32 %and, 0
+  %or = or i64 %y, 8
+  %or.y = select i1 %cmp, i64 %or, i64 %y
+  ret i64 %or.y
 }
 
 define i32 @test65(i64 %x) {

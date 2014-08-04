@@ -29,61 +29,14 @@ extern "C" void LLVMInitializeX86Target() {
 
 void X86TargetMachine::anchor() { }
 
-static std::string computeDataLayout(const X86Subtarget &ST) {
-  // X86 is little endian
-  std::string Ret = "e";
-
-  Ret += DataLayout::getManglingComponent(ST.getTargetTriple());
-  // X86 and x32 have 32 bit pointers.
-  if (ST.isTarget64BitILP32() || !ST.is64Bit())
-    Ret += "-p:32:32";
-
-  // Some ABIs align 64 bit integers and doubles to 64 bits, others to 32.
-  if (ST.is64Bit() || ST.isTargetCygMing() || ST.isTargetKnownWindowsMSVC() ||
-      ST.isTargetNaCl())
-    Ret += "-i64:64";
-  else
-    Ret += "-f64:32:64";
-
-  // Some ABIs align long double to 128 bits, others to 32.
-  if (ST.isTargetNaCl())
-    ; // No f80
-  else if (ST.is64Bit() || ST.isTargetDarwin())
-    Ret += "-f80:128";
-  else
-    Ret += "-f80:32";
-
-  // The registers can hold 8, 16, 32 or, in x86-64, 64 bits.
-  if (ST.is64Bit())
-    Ret += "-n8:16:32:64";
-  else
-    Ret += "-n8:16:32";
-
-  // The stack is aligned to 32 bits on some ABIs and 128 bits on others.
-  if (!ST.is64Bit() && (ST.isTargetCygMing() || ST.isTargetKnownWindowsMSVC()))
-    Ret += "-S32";
-  else
-    Ret += "-S128";
-
-  return Ret;
-}
-
 /// X86TargetMachine ctor - Create an X86 target.
 ///
-X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT,
-                                   StringRef CPU, StringRef FS,
-                                   const TargetOptions &Options,
+X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT, StringRef CPU,
+                                   StringRef FS, const TargetOptions &Options,
                                    Reloc::Model RM, CodeModel::Model CM,
                                    CodeGenOpt::Level OL)
-  : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, Options.StackAlignmentOverride),
-    FrameLowering(*this, Subtarget),
-    InstrItins(Subtarget.getInstrItineraryData()),
-    DL(computeDataLayout(*getSubtargetImpl())),
-    InstrInfo(*this),
-    TLInfo(*this),
-    TSInfo(*this),
-    JITInfo(*this) {
+    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+      Subtarget(TT, CPU, FS, *this, Options.StackAlignmentOverride) {
   // Determine the PICStyle based on the target selected.
   if (getRelocationModel() == Reloc::Static) {
     // Unless we're in PIC or DynamicNoPIC mode, set the PIC style to None.
@@ -126,12 +79,6 @@ UseVZeroUpper("x86-use-vzeroupper", cl::Hidden,
   cl::desc("Minimize AVX to SSE transition penalty"),
   cl::init(true));
 
-// Temporary option to control early if-conversion for x86 while adding machine
-// models.
-static cl::opt<bool>
-X86EarlyIfConv("x86-early-ifcvt", cl::Hidden,
-	       cl::desc("Enable early if-conversion on X86"));
-
 //===----------------------------------------------------------------------===//
 // X86 Analysis Pass Setup
 //===----------------------------------------------------------------------===//
@@ -164,6 +111,7 @@ public:
     return *getX86TargetMachine().getSubtargetImpl();
   }
 
+  void addIRPasses() override;
   bool addInstSelector() override;
   bool addILPOpts() override;
   bool addPreRegAlloc() override;
@@ -176,6 +124,12 @@ TargetPassConfig *X86TargetMachine::createPassConfig(PassManagerBase &PM) {
   return new X86PassConfig(this, PM);
 }
 
+void X86PassConfig::addIRPasses() {
+  addPass(createX86AtomicExpandPass(&getX86TargetMachine()));
+
+  TargetPassConfig::addIRPasses();
+}
+
 bool X86PassConfig::addInstSelector() {
   // Install an instruction selector.
   addPass(createX86ISelDag(getX86TargetMachine(), getOptLevel()));
@@ -184,19 +138,14 @@ bool X86PassConfig::addInstSelector() {
   if (getX86Subtarget().isTargetELF() && getOptLevel() != CodeGenOpt::None)
     addPass(createCleanupLocalDynamicTLSPass());
 
-  // For 32-bit, prepend instructions to set the "global base reg" for PIC.
-  if (!getX86Subtarget().is64Bit())
-    addPass(createGlobalBaseRegPass());
+  addPass(createX86GlobalBaseRegPass());
 
   return false;
 }
 
 bool X86PassConfig::addILPOpts() {
-  if (X86EarlyIfConv && getX86Subtarget().hasCMov()) {
-    addPass(&EarlyIfConverterID);
-    return true;
-  }
-  return false;
+  addPass(&EarlyIfConverterID);
+  return true;
 }
 
 bool X86PassConfig::addPreRegAlloc() {
@@ -215,19 +164,13 @@ bool X86PassConfig::addPreEmitPass() {
     ShouldPrint = true;
   }
 
-  if (getX86Subtarget().hasAVX() && UseVZeroUpper) {
+  if (UseVZeroUpper) {
     addPass(createX86IssueVZeroUpperPass());
     ShouldPrint = true;
   }
 
-  if (getOptLevel() != CodeGenOpt::None &&
-      getX86Subtarget().padShortFunctions()) {
+  if (getOptLevel() != CodeGenOpt::None) {
     addPass(createX86PadShortFunctions());
-    ShouldPrint = true;
-  }
-  if (getOptLevel() != CodeGenOpt::None &&
-      (getX86Subtarget().LEAusesAG() ||
-       getX86Subtarget().slowLEA())){
     addPass(createX86FixupLEAs());
     ShouldPrint = true;
   }

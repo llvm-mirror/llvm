@@ -45,19 +45,16 @@ extern "C" void LLVMLinkInMCJIT() {
 ExecutionEngine *MCJIT::createJIT(Module *M,
                                   std::string *ErrorStr,
                                   RTDyldMemoryManager *MemMgr,
-                                  bool GVsWithCode,
                                   TargetMachine *TM) {
   // Try to register the program as a source of symbols to resolve against.
   //
   // FIXME: Don't do this here.
   sys::DynamicLibrary::LoadLibraryPermanently(nullptr, nullptr);
 
-  return new MCJIT(M, TM, MemMgr ? MemMgr : new SectionMemoryManager(),
-                   GVsWithCode);
+  return new MCJIT(M, TM, MemMgr ? MemMgr : new SectionMemoryManager());
 }
 
-MCJIT::MCJIT(Module *m, TargetMachine *tm, RTDyldMemoryManager *MM,
-             bool AllocateGVsWithCode)
+MCJIT::MCJIT(Module *m, TargetMachine *tm, RTDyldMemoryManager *MM)
   : ExecutionEngine(m), TM(tm), Ctx(nullptr), MemMgr(this, MM), Dyld(&MemMgr),
     ObjCache(nullptr) {
 
@@ -305,9 +302,13 @@ uint64_t MCJIT::getSymbolAddress(const std::string &Name,
     // Look for our symbols in each Archive
     object::Archive::child_iterator ChildIt = A->findSym(Name);
     if (ChildIt != A->child_end()) {
-      std::unique_ptr<object::Binary> ChildBin;
       // FIXME: Support nested archives?
-      if (!ChildIt->getAsBinary(ChildBin) && ChildBin->isObject()) {
+      ErrorOr<std::unique_ptr<object::Binary>> ChildBinOrErr =
+          ChildIt->getAsBinary();
+      if (ChildBinOrErr.getError())
+        continue;
+      std::unique_ptr<object::Binary> ChildBin = std::move(ChildBinOrErr.get());
+      if (ChildBin->isObject()) {
         std::unique_ptr<object::ObjectFile> OF(
             static_cast<object::ObjectFile *>(ChildBin.release()));
         // This causes the object file to be loaded.

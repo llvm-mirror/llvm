@@ -32,7 +32,7 @@ namespace {
 class CloneInstruction : public ::testing::Test {
 protected:
   virtual void SetUp() {
-    V = NULL;
+    V = nullptr;
   }
 
   template <typename T>
@@ -232,7 +232,7 @@ protected:
 
     // Function DI
     DIFile File = DBuilder.createFile("filename.c", "/file/dir/");
-    DIArray ParamTypes = DBuilder.getOrCreateArray(ArrayRef<Value*>());
+    DITypeArray ParamTypes = DBuilder.getOrCreateTypeArray(None);
     DICompositeType FuncType = DBuilder.createSubroutineType(File, ParamTypes);
     DICompileUnit CU = DBuilder.createCompileUnit(dwarf::DW_LANG_C99,
         "filename.c", "/file/dir", "CloneFunc", false, "", 0);
@@ -272,7 +272,7 @@ protected:
 
   void CreateNewFunc() {
     ValueToValueMapTy VMap;
-    NewFunc = CloneFunction(OldFunc, VMap, true, NULL);
+    NewFunc = CloneFunction(OldFunc, VMap, true, nullptr);
     M->getFunctionList().push_back(NewFunc);
   }
 

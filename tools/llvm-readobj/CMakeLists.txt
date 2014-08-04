@@ -5,12 +5,14 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_llvm_tool(llvm-readobj
-  llvm-readobj.cpp
-  ObjDumper.cpp
+  ARMAttributeParser.cpp
+  ARMWinEHPrinter.cpp
   COFFDumper.cpp
   ELFDumper.cpp
-  MachODumper.cpp
   Error.cpp
+  llvm-readobj.cpp
+  MachODumper.cpp
+  ObjDumper.cpp
   StreamWriter.cpp
-  ARMAttributeParser.cpp
+  Win64EHDumper.cpp
   )

@@ -86,7 +86,7 @@ class PPCFastISel final : public FastISel {
   const TargetMachine &TM;
   const TargetInstrInfo &TII;
   const TargetLowering &TLI;
-  const PPCSubtarget &PPCSubTarget;
+  const PPCSubtarget *PPCSubTarget;
   LLVMContext *Context;
 
   public:
@@ -96,9 +96,7 @@ class PPCFastISel final : public FastISel {
       TM(FuncInfo.MF->getTarget()),
       TII(*TM.getInstrInfo()),
       TLI(*TM.getTargetLowering()),
-      PPCSubTarget(
-       *((static_cast<const PPCTargetMachine *>(&TM))->getSubtargetImpl())
-      ),
+      PPCSubTarget(&TM.getSubtarget<PPCSubtarget>()),
       Context(&FuncInfo.Fn->getContext()) { }
 
   // Backend specific FastISel code.
@@ -740,7 +738,7 @@ bool PPCFastISel::PPCEmitCmp(const Value *SrcValue1, const Value *SrcValue2,
     return false;
   MVT SrcVT = SrcEVT.getSimpleVT();
 
-  if (SrcVT == MVT::i1 && PPCSubTarget.useCRBits())
+  if (SrcVT == MVT::i1 && PPCSubTarget->useCRBits())
     return false;
 
   // See if operand 2 is an immediate encodeable in the compare.
@@ -901,7 +899,7 @@ unsigned PPCFastISel::PPCMoveToFPReg(MVT SrcVT, unsigned SrcReg,
     if (!IsSigned) {
       LoadOpc = PPC::LFIWZX;
       Addr.Offset = 4;
-    } else if (PPCSubTarget.hasLFIWAX()) {
+    } else if (PPCSubTarget->hasLFIWAX()) {
       LoadOpc = PPC::LFIWAX;
       Addr.Offset = 4;
     }
@@ -942,7 +940,7 @@ bool PPCFastISel::SelectIToFP(const Instruction *I, bool IsSigned) {
 
   // We can only lower an unsigned convert if we have the newer
   // floating-point conversion operations.
-  if (!IsSigned && !PPCSubTarget.hasFPCVT())
+  if (!IsSigned && !PPCSubTarget->hasFPCVT())
     return false;
 
   // FIXME: For now we require the newer floating-point conversion operations
@@ -950,7 +948,7 @@ bool PPCFastISel::SelectIToFP(const Instruction *I, bool IsSigned) {
   // to single-precision float.  Otherwise we have to generate a lot of
   // fiddly code to avoid double rounding.  If necessary, the fiddly code
   // can be found in PPCTargetLowering::LowerINT_TO_FP().
-  if (DstVT == MVT::f32 && !PPCSubTarget.hasFPCVT())
+  if (DstVT == MVT::f32 && !PPCSubTarget->hasFPCVT())
     return false;
 
   // Extend the input if necessary.
@@ -1032,6 +1030,10 @@ bool PPCFastISel::SelectFPToI(const Instruction *I, bool IsSigned) {
   if (DstVT != MVT::i32 && DstVT != MVT::i64)
     return false;
 
+  // If we don't have FCTIDUZ and we need it, punt to SelectionDAG.
+  if (DstVT == MVT::i64 && !IsSigned && !PPCSubTarget->hasFPCVT())
+    return false;
+
   Value *Src = I->getOperand(0);
   Type *SrcTy = Src->getType();
   if (!isTypeLegal(SrcTy, SrcVT))
@@ -1065,7 +1067,7 @@ bool PPCFastISel::SelectFPToI(const Instruction *I, bool IsSigned) {
     if (IsSigned)
       Opc = PPC::FCTIWZ;
     else
-      Opc = PPCSubTarget.hasFPCVT() ? PPC::FCTIWUZ : PPC::FCTIDZ;
+      Opc = PPCSubTarget->hasFPCVT() ? PPC::FCTIWUZ : PPC::FCTIDZ;
   else
     Opc = IsSigned ? PPC::FCTIDZ : PPC::FCTIDUZ;
 
@@ -1199,6 +1201,13 @@ bool PPCFastISel::processCallArgs(SmallVectorImpl<Value*> &Args,
                                   bool IsVarArg) {
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CC, IsVarArg, *FuncInfo.MF, TM, ArgLocs, *Context);
+
+  // Reserve space for the linkage area on the stack.
+  bool isELFv2ABI = PPCSubTarget->isELFv2ABI();
+  unsigned LinkageSize = PPCFrameLowering::getLinkageSize(true, false,
+                                                          isELFv2ABI);
+  CCInfo.AllocateStack(LinkageSize, 8);
+
   CCInfo.AnalyzeCallOperands(ArgVTs, ArgFlags, CC_PPC64_ELF_FIS);
 
   // Bail out if we can't handle any of the arguments.
@@ -1219,6 +1228,14 @@ bool PPCFastISel::processCallArgs(SmallVectorImpl<Value*> &Args,
 
   // Get a count of how many bytes are to be pushed onto the stack.
   NumBytes = CCInfo.getNextStackOffset();
+
+  // The prolog code of the callee may store up to 8 GPR argument registers to
+  // the stack, allowing va_start to index over them in memory if its varargs.
+  // Because we cannot tell if this is needed on the caller side, we have to
+  // conservatively assume that it is needed.  As such, make sure we have at
+  // least enough stack space for the caller to store the 8 GPRs.
+  // FIXME: On ELFv2, it may be unnecessary to allocate the parameter area.
+  NumBytes = std::max(NumBytes, LinkageSize + 64);
 
   // Issue CALLSEQ_START.
   BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
@@ -1483,6 +1500,10 @@ bool PPCFastISel::SelectCall(const Instruction *I) {
   // Add implicit physical register uses to the call.
   for (unsigned II = 0, IE = RegArgs.size(); II != IE; ++II)
     MIB.addReg(RegArgs[II], RegState::Implicit);
+
+  // Direct calls in the ELFv2 ABI need the TOC register live into the call.
+  if (PPCSubTarget->isELFv2ABI())
+    MIB.addReg(PPC::X2, RegState::Implicit);
 
   // Add a register mask with the call-preserved registers.  Proper
   // defs for return values will be added by setPhysRegsDeadExcept().
@@ -1860,16 +1881,9 @@ unsigned PPCFastISel::PPCMaterializeGV(const GlobalValue *GV, MVT VT) {
   // FIXME: Jump tables are not yet required because fast-isel doesn't
   // handle switches; if that changes, we need them as well.  For now,
   // what follows assumes everything's a generic (or TLS) global address.
-  const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV);
-  if (!GVar) {
-    // If GV is an alias, use the aliasee for determining thread-locality.
-    if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(GV))
-      GVar = dyn_cast_or_null<GlobalVariable>(GA->getAliasee());
-  }
 
   // FIXME: We don't yet handle the complexity of TLS.
-  bool IsTLS = GVar && GVar->isThreadLocal();
-  if (IsTLS)
+  if (GV->isThreadLocal())
     return 0;
 
   // For small code model, generate a simple TOC load.
@@ -1879,8 +1893,8 @@ unsigned PPCFastISel::PPCMaterializeGV(const GlobalValue *GV, MVT VT) {
         .addGlobalAddress(GV)
         .addReg(PPC::X2);
   else {
-    // If the address is an externally defined symbol, a symbol with
-    // common or externally available linkage, a function address, or a
+    // If the address is an externally defined symbol, a symbol with common
+    // or externally available linkage, a non-local function address, or a
     // jump table address (not yet needed), or if we are generating code
     // for large code model, we generate:
     //       LDtocL(GV, ADDIStocHA(%X2, GV))
@@ -1891,12 +1905,13 @@ unsigned PPCFastISel::PPCMaterializeGV(const GlobalValue *GV, MVT VT) {
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(PPC::ADDIStocHA),
             HighPartReg).addReg(PPC::X2).addGlobalAddress(GV);
 
-    // !GVar implies a function address.  An external variable is one
-    // without an initializer.
     // If/when switches are implemented, jump tables should be handled
     // on the "if" path here.
-    if (CModel == CodeModel::Large || !GVar || !GVar->hasInitializer() ||
-        GVar->hasCommonLinkage() || GVar->hasAvailableExternallyLinkage())
+    if (CModel == CodeModel::Large ||
+        (GV->getType()->getElementType()->isFunctionTy() &&
+         (GV->isDeclaration() || GV->isWeakForLinker())) ||
+        GV->isDeclaration() || GV->hasCommonLinkage() ||
+        GV->hasAvailableExternallyLinkage())
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(PPC::LDtocL),
               DestReg).addGlobalAddress(GV).addReg(HighPartReg);
     else
@@ -2002,7 +2017,7 @@ unsigned PPCFastISel::PPCMaterialize64BitInt(int64_t Imm,
 unsigned PPCFastISel::PPCMaterializeInt(const Constant *C, MVT VT) {
   // If we're using CR bit registers for i1 values, handle that as a special
   // case first.
-  if (VT == MVT::i1 && PPCSubTarget.useCRBits()) {
+  if (VT == MVT::i1 && PPCSubTarget->useCRBits()) {
     const ConstantInt *CI = cast<ConstantInt>(C);
     unsigned ImmReg = createResultReg(&PPC::CRBITRCRegClass);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
@@ -2176,7 +2191,7 @@ unsigned PPCFastISel::FastEmit_i(MVT Ty, MVT VT, unsigned Opc, uint64_t Imm) {
 
   // If we're using CR bit registers for i1 values, handle that as a special
   // case first.
-  if (VT == MVT::i1 && PPCSubTarget.useCRBits()) {
+  if (VT == MVT::i1 && PPCSubTarget->useCRBits()) {
     unsigned ImmReg = createResultReg(&PPC::CRBITRCRegClass);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
             TII.get(Imm == 0 ? PPC::CRUNSET : PPC::CRSET), ImmReg);

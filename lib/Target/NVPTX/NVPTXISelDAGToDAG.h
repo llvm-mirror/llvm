@@ -24,20 +24,13 @@ namespace {
 
 class LLVM_LIBRARY_VISIBILITY NVPTXDAGToDAGISel : public SelectionDAGISel {
 
-  // If true, generate corresponding FPCONTRACT. This is
-  // language dependent (i.e. CUDA and OpenCL works differently).
-  bool doFMAF64;
-  bool doFMAF32;
-  bool doFMAF64AGG;
-  bool doFMAF32AGG;
-  bool allowFMA;
-
   // If true, generate mul.wide from sext and mul
   bool doMulWide;
 
   int getDivF32Level() const;
   bool usePrecSqrtF32() const;
   bool useF32FTZ() const;
+  bool allowFMA() const;
 
 public:
   explicit NVPTXDAGToDAGISel(NVPTXTargetMachine &tm,
@@ -59,10 +52,11 @@ private:
 
   SDNode *Select(SDNode *N) override;
   SDNode *SelectIntrinsicNoChain(SDNode *N);
+  SDNode *SelectIntrinsicChain(SDNode *N);
   SDNode *SelectTexSurfHandle(SDNode *N);
   SDNode *SelectLoad(SDNode *N);
   SDNode *SelectLoadVector(SDNode *N);
-  SDNode *SelectLDGLDUVector(SDNode *N);
+  SDNode *SelectLDGLDU(SDNode *N);
   SDNode *SelectStore(SDNode *N);
   SDNode *SelectStoreVector(SDNode *N);
   SDNode *SelectLoadParam(SDNode *N);
@@ -71,6 +65,7 @@ private:
   SDNode *SelectAddrSpaceCast(SDNode *N);
   SDNode *SelectTextureIntrinsic(SDNode *N);
   SDNode *SelectSurfaceIntrinsic(SDNode *N);
+  SDNode *SelectBFE(SDNode *N);
         
   inline SDValue getI32Imm(unsigned Imm) {
     return CurDAG->getTargetConstant(Imm, MVT::i32);

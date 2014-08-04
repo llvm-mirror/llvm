@@ -265,7 +265,7 @@ enum attributeBits {
   ENUM_ENTRY(IC_EVEX_L2_W_KZ,        3,  "requires EVEX_KZ, L2 and W")               \
   ENUM_ENTRY(IC_EVEX_L2_W_XS_KZ,     4,  "requires EVEX_KZ, L2, W and XS prefix")    \
   ENUM_ENTRY(IC_EVEX_L2_W_XD_KZ,     4,  "requires EVEX_KZ, L2, W and XD prefix")    \
-  ENUM_ENTRY(IC_EVEX_L2_W_OPSIZE_KZ, 4,  "requires EVEX_KZ, L2, W and OpSize")     
+  ENUM_ENTRY(IC_EVEX_L2_W_OPSIZE_KZ, 4,  "requires EVEX_KZ, L2, W and OpSize")
 
 #define ENUM_ENTRY(n, r, d) n,
 enum InstructionContext {
@@ -325,11 +325,26 @@ enum ModRMDecisionType {
 };
 #undef ENUM_ENTRY
 
+#define CASE_ENCODING_RM     \
+    case ENCODING_RM:        \
+    case ENCODING_RM_CD2:    \
+    case ENCODING_RM_CD4:    \
+    case ENCODING_RM_CD8:    \
+    case ENCODING_RM_CD16:   \
+    case ENCODING_RM_CD32:   \
+    case ENCODING_RM_CD64
+
 // Physical encodings of instruction operands.
 #define ENCODINGS                                                              \
   ENUM_ENTRY(ENCODING_NONE,   "")                                              \
   ENUM_ENTRY(ENCODING_REG,    "Register operand in ModR/M byte.")              \
   ENUM_ENTRY(ENCODING_RM,     "R/M operand in ModR/M byte.")                   \
+  ENUM_ENTRY(ENCODING_RM_CD2, "R/M operand with CDisp scaling of 2")           \
+  ENUM_ENTRY(ENCODING_RM_CD4, "R/M operand with CDisp scaling of 4")           \
+  ENUM_ENTRY(ENCODING_RM_CD8, "R/M operand with CDisp scaling of 8")           \
+  ENUM_ENTRY(ENCODING_RM_CD16,"R/M operand with CDisp scaling of 16")          \
+  ENUM_ENTRY(ENCODING_RM_CD32,"R/M operand with CDisp scaling of 32")          \
+  ENUM_ENTRY(ENCODING_RM_CD64,"R/M operand with CDisp scaling of 64")          \
   ENUM_ENTRY(ENCODING_VVVV,   "Register operand in VEX.vvvv byte.")            \
   ENUM_ENTRY(ENCODING_WRITEMASK, "Register operand in EVEX.aaa byte.")         \
   ENUM_ENTRY(ENCODING_CB,     "1-byte code offset (possible new CS value)")    \
@@ -438,8 +453,12 @@ enum OperandEncoding {
   ENUM_ENTRY(TYPE_XMM256,     "32-byte")                                       \
   ENUM_ENTRY(TYPE_XMM512,     "64-byte")                                       \
   ENUM_ENTRY(TYPE_VK1,        "1-bit")                                         \
+  ENUM_ENTRY(TYPE_VK2,        "2-bit")                                         \
+  ENUM_ENTRY(TYPE_VK4,        "4-bit")                                         \
   ENUM_ENTRY(TYPE_VK8,        "8-bit")                                         \
   ENUM_ENTRY(TYPE_VK16,       "16-bit")                                        \
+  ENUM_ENTRY(TYPE_VK32,       "32-bit")                                        \
+  ENUM_ENTRY(TYPE_VK64,       "64-bit")                                        \
   ENUM_ENTRY(TYPE_XMM0,       "Implicit use of XMM0")                          \
   ENUM_ENTRY(TYPE_SEGMENTREG, "Segment register operand")                      \
   ENUM_ENTRY(TYPE_DEBUGREG,   "Debug register operand")                        \

@@ -67,15 +67,10 @@ SchedCustomRegistry("hexagon", "Run Hexagon's custom scheduler",
 HexagonTargetMachine::HexagonTargetMachine(const Target &T, StringRef TT,
                                            StringRef CPU, StringRef FS,
                                            const TargetOptions &Options,
-                                           Reloc::Model RM,
-                                           CodeModel::Model CM,
+                                           Reloc::Model RM, CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
-  : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    DL("e-m:e-p:32:32-i1:32-i64:64-a:0-n32") ,
-    Subtarget(TT, CPU, FS), InstrInfo(Subtarget), TLInfo(*this),
-    TSInfo(*this),
-    FrameLowering(Subtarget),
-    InstrItins(&Subtarget.getInstrItineraryData()) {
+    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+      Subtarget(TT, CPU, FS, *this) {
     initAsmInfo();
 }
 
@@ -150,16 +145,12 @@ bool HexagonPassConfig::addPostRegAlloc() {
 
 bool HexagonPassConfig::addPreSched2() {
   const HexagonTargetMachine &TM = getHexagonTargetMachine();
-  const HexagonTargetObjectFile &TLOF =
-    (const HexagonTargetObjectFile &)getTargetLowering()->getObjFileLowering();
 
   addPass(createHexagonCopyToCombine());
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&IfConverterID);
-  if (!TLOF.IsSmallDataEnabled()) {
-    addPass(createHexagonSplitConst32AndConst64(TM));
-    printAndVerify("After hexagon split const32/64 pass");
-  }
+  addPass(createHexagonSplitConst32AndConst64(TM));
+  printAndVerify("After hexagon split const32/64 pass");
   return true;
 }
 

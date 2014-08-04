@@ -18,10 +18,10 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Program.h"
-#include "llvm/Support/system_error.h"
 #include <cerrno>
 #include <cstdio>
 #include <string>
+#include <system_error>
 #if !defined(_MSC_VER) && !defined(__MINGW32__)
 #include <unistd.h>
 #else
@@ -64,11 +64,11 @@ public:
     return read(Fd, buf, len);
   }
 
-  error_code OpenFile(const std::string &Filename) {
+  std::error_code OpenFile(const std::string &Filename) {
     if (Filename == "-") {
       Fd = 0;
       sys::ChangeStdinToBinary();
-      return error_code::success();
+      return std::error_code();
     }
 
     return sys::fs::openFileForRead(Filename, Fd);
@@ -81,7 +81,7 @@ namespace llvm {
 DataStreamer *getDataFileStreamer(const std::string &Filename,
                                   std::string *StrError) {
   DataFileStreamer *s = new DataFileStreamer();
-  if (error_code e = s->OpenFile(Filename)) {
+  if (std::error_code e = s->OpenFile(Filename)) {
     *StrError = std::string("Could not open ") + Filename + ": " +
         e.message() + "\n";
     return nullptr;

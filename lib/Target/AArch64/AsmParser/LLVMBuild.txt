@@ -1,4 +1,4 @@
-;===- ./lib/Target/AArch64/AsmParser/LLVMBuild.txt -------------*- Conf -*--===;
+;===- ./lib/Target/AArch64/AsmParser/LLVMBuild.txt ---------------*- Conf -*--===;
 ;
 ;                     The LLVM Compiler Infrastructure
 ;

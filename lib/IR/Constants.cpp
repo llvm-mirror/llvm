@@ -107,6 +107,28 @@ bool Constant::isAllOnesValue() const {
   return false;
 }
 
+bool Constant::isMinSignedValue() const {
+  // Check for INT_MIN integers
+  if (const ConstantInt *CI = dyn_cast<ConstantInt>(this))
+    return CI->isMinValue(/*isSigned=*/true);
+
+  // Check for FP which are bitcasted from INT_MIN integers
+  if (const ConstantFP *CFP = dyn_cast<ConstantFP>(this))
+    return CFP->getValueAPF().bitcastToAPInt().isMinSignedValue();
+
+  // Check for constant vectors which are splats of INT_MIN values.
+  if (const ConstantVector *CV = dyn_cast<ConstantVector>(this))
+    if (Constant *Splat = CV->getSplatValue())
+      return Splat->isMinSignedValue();
+
+  // Check for constant vectors which are splats of INT_MIN values.
+  if (const ConstantDataVector *CV = dyn_cast<ConstantDataVector>(this))
+    if (Constant *Splat = CV->getSplatValue())
+      return Splat->isMinSignedValue();
+
+  return false;
+}
+
 // Constructor to create a '0' constant of arbitrary type...
 Constant *Constant::getNullValue(Type *Ty) {
   switch (Ty->getTypeID()) {
@@ -278,35 +300,48 @@ bool Constant::canTrap() const {
   return canTrapImpl(this, NonTrappingOps);
 }
 
-/// isThreadDependent - Return true if the value can vary between threads.
-bool Constant::isThreadDependent() const {
-  SmallPtrSet<const Constant*, 64> Visited;
-  SmallVector<const Constant*, 64> WorkList;
-  WorkList.push_back(this);
-  Visited.insert(this);
+/// Check if C contains a GlobalValue for which Predicate is true.
+static bool
+ConstHasGlobalValuePredicate(const Constant *C,
+                             bool (*Predicate)(const GlobalValue *)) {
+  SmallPtrSet<const Constant *, 8> Visited;
+  SmallVector<const Constant *, 8> WorkList;
+  WorkList.push_back(C);
+  Visited.insert(C);
 
   while (!WorkList.empty()) {
-    const Constant *C = WorkList.pop_back_val();
-
-    if (const GlobalVariable *GV = dyn_cast<GlobalVariable>(C)) {
-      if (GV->isThreadLocal())
+    const Constant *WorkItem = WorkList.pop_back_val();
+    if (const auto *GV = dyn_cast<GlobalValue>(WorkItem))
+      if (Predicate(GV))
         return true;
-    }
-
-    for (unsigned I = 0, E = C->getNumOperands(); I != E; ++I) {
-      const Constant *D = dyn_cast<Constant>(C->getOperand(I));
-      if (!D)
+    for (const Value *Op : WorkItem->operands()) {
+      const Constant *ConstOp = dyn_cast<Constant>(Op);
+      if (!ConstOp)
         continue;
-      if (Visited.insert(D))
-        WorkList.push_back(D);
+      if (Visited.insert(ConstOp))
+        WorkList.push_back(ConstOp);
     }
   }
-
   return false;
 }
 
-/// isConstantUsed - Return true if the constant has users other than constant
-/// exprs and other dangling things.
+/// Return true if the value can vary between threads.
+bool Constant::isThreadDependent() const {
+  auto DLLImportPredicate = [](const GlobalValue *GV) {
+    return GV->isThreadLocal();
+  };
+  return ConstHasGlobalValuePredicate(this, DLLImportPredicate);
+}
+
+bool Constant::isDLLImportDependent() const {
+  auto DLLImportPredicate = [](const GlobalValue *GV) {
+    return GV->hasDLLImportStorageClass();
+  };
+  return ConstHasGlobalValuePredicate(this, DLLImportPredicate);
+}
+
+/// Return true if the constant has users other than constant exprs and other
+/// dangling things.
 bool Constant::isConstantUsed() const {
   for (const User *U : users()) {
     const Constant *UC = dyn_cast<Constant>(U);
@@ -1698,6 +1733,19 @@ Constant *ConstantExpr::getAddrSpaceCast(Constant *C, Type *DstTy) {
   assert(CastInst::castIsValid(Instruction::AddrSpaceCast, C, DstTy) &&
          "Invalid constantexpr addrspacecast!");
 
+  // Canonicalize addrspacecasts between different pointer types by first
+  // bitcasting the pointer type and then converting the address space.
+  PointerType *SrcScalarTy = cast<PointerType>(C->getType()->getScalarType());
+  PointerType *DstScalarTy = cast<PointerType>(DstTy->getScalarType());
+  Type *DstElemTy = DstScalarTy->getElementType();
+  if (SrcScalarTy->getElementType() != DstElemTy) {
+    Type *MidTy = PointerType::get(DstElemTy, SrcScalarTy->getAddressSpace());
+    if (VectorType *VT = dyn_cast<VectorType>(DstTy)) {
+      // Handle vectors of pointers.
+      MidTy = VectorType::get(MidTy, VT->getNumElements());
+    }
+    C = getBitCast(C, MidTy);
+  }
   return getFoldedCast(Instruction::AddrSpaceCast, C, DstTy);
 }
 

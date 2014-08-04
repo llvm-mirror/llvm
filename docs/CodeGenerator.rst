@@ -1228,7 +1228,7 @@ used. Each virtual register can only be mapped to physical registers of a
 particular class. For instance, in the X86 architecture, some virtuals can only
 be allocated to 8 bit registers.  A register class is described by
 ``TargetRegisterClass`` objects.  To discover if a virtual register is
-compatible with a given physical, this code can be used:</p>
+compatible with a given physical, this code can be used:
 
 .. code-block:: c++
 
@@ -1683,7 +1683,7 @@ ones supported by the matcher), through a Requires clause:
   def : MnemonicAlias<"pushf", "pushfq">, Requires<[In64BitMode]>;
   def : MnemonicAlias<"pushf", "pushfl">, Requires<[In32BitMode]>;
 
-In this example, the mnemonic gets mapped into different a new one depending on
+In this example, the mnemonic gets mapped into a different one depending on
 the current instruction set.
 
 Instruction Aliases
@@ -2027,7 +2027,7 @@ supported on x86/x86-64 and PowerPC. It is performed if:
 
 * Option ``-tailcallopt`` is enabled.
 
-* Platform specific constraints are met.
+* Platform-specific constraints are met.
 
 x86/x86-64 constraints:
 

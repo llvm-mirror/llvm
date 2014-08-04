@@ -16,9 +16,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "xcore-selectiondag-info"
 
-XCoreSelectionDAGInfo::XCoreSelectionDAGInfo(const XCoreTargetMachine &TM)
-  : TargetSelectionDAGInfo(TM) {
-}
+XCoreSelectionDAGInfo::XCoreSelectionDAGInfo(const DataLayout &DL)
+    : TargetSelectionDAGInfo(&DL) {}
 
 XCoreSelectionDAGInfo::~XCoreSelectionDAGInfo() {
 }
@@ -47,7 +46,7 @@ EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl, SDValue Chain,
       .setCallee(TLI.getLibcallCallingConv(RTLIB::MEMCPY),
                  Type::getVoidTy(*DAG.getContext()),
                  DAG.getExternalSymbol("__memcpy_4", TLI.getPointerTy()),
-                 &Args, 0)
+                 std::move(Args), 0)
       .setDiscardResult();
 
     std::pair<SDValue,SDValue> CallResult = TLI.LowerCallTo(CLI);

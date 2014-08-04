@@ -127,6 +127,7 @@ public:
 
   bool isDerivedType() const;
   bool isCompositeType() const;
+  bool isSubroutineType() const;
   bool isBasicType() const;
   bool isVariable() const;
   bool isSubprogram() const;
@@ -140,7 +141,6 @@ public:
   bool isSubrange() const;
   bool isEnumerator() const;
   bool isType() const;
-  bool isUnspecifiedParameter() const;
   bool isTemplateTypeParameter() const;
   bool isTemplateValueParameter() const;
   bool isObjCProperty() const;
@@ -166,16 +166,19 @@ public:
   bool Verify() const;
 };
 
-/// DIArray - This descriptor holds an array of descriptors.
-class DIArray : public DIDescriptor {
+/// DITypedArray - This descriptor holds an array of nodes with type T.
+template <typename T> class DITypedArray : public DIDescriptor {
 public:
-  explicit DIArray(const MDNode *N = nullptr) : DIDescriptor(N) {}
-
-  unsigned getNumElements() const;
-  DIDescriptor getElement(unsigned Idx) const {
-    return getDescriptorField(Idx);
+  explicit DITypedArray(const MDNode *N = nullptr) : DIDescriptor(N) {}
+  unsigned getNumElements() const {
+    return DbgNode ? DbgNode->getNumOperands() : 0;
+  }
+  T getElement(unsigned Idx) const {
+    return getFieldAs<T>(Idx);
   }
 };
+
+typedef DITypedArray<DIDescriptor> DIArray;
 
 /// DIEnumerator - A wrapper for an enumerator (e.g. X and Y in 'enum {X,Y}').
 /// FIXME: it seems strange that this doesn't have either a reference to the
@@ -195,6 +198,7 @@ public:
 template <typename T> class DIRef;
 typedef DIRef<DIScope> DIScopeRef;
 typedef DIRef<DIType> DITypeRef;
+typedef DITypedArray<DITypeRef> DITypeArray;
 
 /// DIScope - A base class for various scopes.
 ///
@@ -393,12 +397,22 @@ public:
 class DICompositeType : public DIDerivedType {
   friend class DIDescriptor;
   void printInternal(raw_ostream &OS) const;
+  void setArraysHelper(MDNode *Elements, MDNode *TParams);
 
 public:
   explicit DICompositeType(const MDNode *N = nullptr) : DIDerivedType(N) {}
 
-  DIArray getTypeArray() const { return getFieldAs<DIArray>(10); }
-  void setTypeArray(DIArray Elements, DIArray TParams = DIArray());
+  DIArray getElements() const {
+    assert(!isSubroutineType() && "no elements for DISubroutineType");
+    return getFieldAs<DIArray>(10);
+  }
+  template <typename T>
+  void setArrays(DITypedArray<T> Elements, DIArray TParams = DIArray()) {
+    assert((!TParams || DbgNode->getNumOperands() == 15) &&
+           "If you're setting the template parameters this should include a slot "
+           "for that!");
+    setArraysHelper(Elements, TParams);
+  }
   unsigned getRunTimeLang() const { return getUnsignedField(11); }
   DITypeRef getContainingType() const { return getFieldAs<DITypeRef>(12); }
   void setContainingType(DICompositeType ContainingType);
@@ -407,6 +421,14 @@ public:
 
   /// Verify - Verify that a composite type descriptor is well formed.
   bool Verify() const;
+};
+
+class DISubroutineType : public DICompositeType {
+public:
+  explicit DISubroutineType(const MDNode *N = nullptr) : DICompositeType(N) {}
+  DITypedArray<DITypeRef> getTypeArray() const {
+    return getFieldAs<DITypedArray<DITypeRef>>(10);
+  }
 };
 
 /// DIFile - This is a wrapper for a file.
@@ -462,7 +484,7 @@ public:
   StringRef getDisplayName() const { return getStringField(4); }
   StringRef getLinkageName() const { return getStringField(5); }
   unsigned getLineNumber() const { return getUnsignedField(6); }
-  DICompositeType getType() const { return getFieldAs<DICompositeType>(7); }
+  DISubroutineType getType() const { return getFieldAs<DISubroutineType>(7); }
 
   /// isLocalToUnit - Return true if this subprogram is local to the current
   /// compile unit, like 'static' in C.
@@ -568,14 +590,6 @@ public:
   DIScope getContext() const { return getFieldAs<DIScope>(2); }
   StringRef getName() const { return getStringField(3); }
   unsigned getLineNumber() const { return getUnsignedField(4); }
-  bool Verify() const;
-};
-
-/// DIUnspecifiedParameter - This is a wrapper for unspecified parameters.
-class DIUnspecifiedParameter : public DIDescriptor {
-public:
-  explicit DIUnspecifiedParameter(const MDNode *N = nullptr)
-    : DIDescriptor(N) {}
   bool Verify() const;
 };
 
@@ -690,11 +704,16 @@ public:
   /// HasComplexAddr - Return true if the variable has a complex address.
   bool hasComplexAddress() const { return getNumAddrElements() > 0; }
 
-  unsigned getNumAddrElements() const;
-
-  uint64_t getAddrElement(unsigned Idx) const {
-    return getUInt64Field(Idx + 8);
+  /// \brief Return the size of this variable's complex address or
+  /// zero if there is none.
+  unsigned getNumAddrElements() const {
+    if (DbgNode->getNumOperands() < 9)
+      return 0;
+    return getDescriptorField(8)->getNumOperands();
   }
+
+  /// \brief return the Idx'th complex address element.
+  uint64_t getAddrElement(unsigned Idx) const;
 
   /// isBlockByrefVariable - Return true if the variable was declared as
   /// a "__block" variable (Apple Blocks).
@@ -929,6 +948,9 @@ private:
   /// Specify if TypeIdentifierMap is initialized.
   bool TypeMapInitialized;
 };
+
+DenseMap<const Function *, DISubprogram> makeSubprogramMap(const Module &M);
+
 } // end namespace llvm
 
 #endif

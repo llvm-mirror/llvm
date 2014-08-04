@@ -29,6 +29,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include <cstring>
 using namespace llvm;
@@ -188,7 +189,8 @@ static void computeKnownBitsMul(Value *Op0, Value *Op1, bool NSW,
     KnownOne.setBit(BitWidth - 1);
 }
 
-void llvm::computeKnownBitsLoad(const MDNode &Ranges, APInt &KnownZero) {
+void llvm::computeKnownBitsFromRangeMetadata(const MDNode &Ranges,
+                                             APInt &KnownZero) {
   unsigned BitWidth = KnownZero.getBitWidth();
   unsigned NumRanges = Ranges.getNumOperands() / 2;
   assert(NumRanges >= 1);
@@ -306,13 +308,9 @@ void llvm::computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
   }
 
   if (Argument *A = dyn_cast<Argument>(V)) {
-    unsigned Align = 0;
+    unsigned Align = A->getType()->isPointerTy() ? A->getParamAlignment() : 0;
 
-    if (A->hasByValOrInAllocaAttr()) {
-      // Get alignment information off byval/inalloca arguments if specified in
-      // the IR.
-      Align = A->getParamAlignment();
-    } else if (TD && A->hasStructRetAttr()) {
+    if (!Align && TD && A->hasStructRetAttr()) {
       // An sret parameter has at least the ABI alignment of the return type.
       Type *EltTy = cast<PointerType>(A->getType())->getElementType();
       if (EltTy->isSized())
@@ -338,7 +336,7 @@ void llvm::computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
   default: break;
   case Instruction::Load:
     if (MDNode *MD = cast<LoadInst>(I)->getMetadata(LLVMContext::MD_range))
-      computeKnownBitsLoad(*MD, KnownZero);
+      computeKnownBitsFromRangeMetadata(*MD, KnownZero);
     break;
   case Instruction::And: {
     // If either the LHS or the RHS are Zero, the result is zero.
@@ -414,6 +412,7 @@ void llvm::computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
     break; // Can't work with floating point.
   case Instruction::PtrToInt:
   case Instruction::IntToPtr:
+  case Instruction::AddrSpaceCast: // Pointers could be different sizes.
     // We can't handle these if we don't know the pointer size.
     if (!TD) break;
     // FALL THROUGH and handle them the same as zext/trunc.
@@ -733,6 +732,12 @@ void llvm::computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
     break;
   }
   case Instruction::Call:
+  case Instruction::Invoke:
+    if (MDNode *MD = cast<Instruction>(I)->getMetadata(LLVMContext::MD_range))
+      computeKnownBitsFromRangeMetadata(*MD, KnownZero);
+    // If a range metadata is attached to this IntrinsicInst, intersect the
+    // explicit range specified by the metadata and the implicit range of
+    // the intrinsic.
     if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
       switch (II->getIntrinsicID()) {
       default: break;
@@ -742,16 +747,16 @@ void llvm::computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
         // If this call is undefined for 0, the result will be less than 2^n.
         if (II->getArgOperand(1) == ConstantInt::getTrue(II->getContext()))
           LowBits -= 1;
-        KnownZero = APInt::getHighBitsSet(BitWidth, BitWidth - LowBits);
+        KnownZero |= APInt::getHighBitsSet(BitWidth, BitWidth - LowBits);
         break;
       }
       case Intrinsic::ctpop: {
         unsigned LowBits = Log2_32(BitWidth)+1;
-        KnownZero = APInt::getHighBitsSet(BitWidth, BitWidth - LowBits);
+        KnownZero |= APInt::getHighBitsSet(BitWidth, BitWidth - LowBits);
         break;
       }
       case Intrinsic::x86_sse42_crc32_64_64:
-        KnownZero = APInt::getHighBitsSet(64, 32);
+        KnownZero |= APInt::getHighBitsSet(64, 32);
         break;
       }
     }
@@ -1724,7 +1729,8 @@ Value *llvm::GetPointerBaseWithConstantOffset(Value *Ptr, int64_t &Offset,
       }
 
       Ptr = GEP->getPointerOperand();
-    } else if (Operator::getOpcode(Ptr) == Instruction::BitCast) {
+    } else if (Operator::getOpcode(Ptr) == Instruction::BitCast ||
+               Operator::getOpcode(Ptr) == Instruction::AddrSpaceCast) {
       Ptr = cast<Operator>(Ptr)->getOperand(0);
     } else if (GlobalAlias *GA = dyn_cast<GlobalAlias>(Ptr)) {
       if (GA->mayBeOverridden())
@@ -1893,7 +1899,8 @@ llvm::GetUnderlyingObject(Value *V, const DataLayout *TD, unsigned MaxLookup) {
   for (unsigned Count = 0; MaxLookup == 0 || Count < MaxLookup; ++Count) {
     if (GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
       V = GEP->getPointerOperand();
-    } else if (Operator::getOpcode(V) == Instruction::BitCast) {
+    } else if (Operator::getOpcode(V) == Instruction::BitCast ||
+               Operator::getOpcode(V) == Instruction::AddrSpaceCast) {
       V = cast<Operator>(V)->getOperand(0);
     } else if (GlobalAlias *GA = dyn_cast<GlobalAlias>(V)) {
       if (GA->mayBeOverridden())
@@ -1977,7 +1984,7 @@ bool llvm::isSafeToSpeculativelyExecute(const Value *V,
     return true;
   case Instruction::UDiv:
   case Instruction::URem:
-    // x / y is undefined if y == 0, but calcuations like x / 3 are safe.
+    // x / y is undefined if y == 0, but calculations like x / 3 are safe.
     return isKnownNonZero(Inst->getOperand(1), TD);
   case Instruction::SDiv:
   case Instruction::SRem: {
@@ -2000,12 +2007,12 @@ bool llvm::isSafeToSpeculativelyExecute(const Value *V,
         // Speculative load may create a race that did not exist in the source.
         LI->getParent()->getParent()->hasFnAttribute(Attribute::SanitizeThread))
       return false;
-    return LI->getPointerOperand()->isDereferenceablePointer();
+    return LI->getPointerOperand()->isDereferenceablePointer(TD);
   }
   case Instruction::Call: {
    if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(Inst)) {
      switch (II->getIntrinsicID()) {
-       // These synthetic intrinsics have no side-effects, and just mark
+       // These synthetic intrinsics have no side-effects and just mark
        // information about their operands.
        // FIXME: There are other no-op synthetic instructions that potentially
        // should be considered at least *safe* to speculate...
@@ -2075,7 +2082,7 @@ bool llvm::isKnownNonNull(const Value *V, const TargetLibraryInfo *TLI) {
     return !GV->hasExternalWeakLinkage();
 
   if (ImmutableCallSite CS = V)
-    if (CS.paramHasAttr(0, Attribute::NonNull))
+    if (CS.isReturnNonNull())
       return true;
 
   // operator new never returns null.

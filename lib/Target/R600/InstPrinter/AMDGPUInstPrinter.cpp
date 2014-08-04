@@ -99,9 +99,9 @@ void AMDGPUInstPrinter::printRegOperand(unsigned reg, raw_ostream &O) {
     return;
   }
 
-  // The low 8 bits encoding value is the register index, for both VGPRs and
-  // SGPRs.
-  unsigned RegIdx = MRI.getEncodingValue(reg) & ((1 << 8)  - 1);
+  // The low 8 bits of the encoding value is the register index, for both VGPRs
+  // and SGPRs.
+  unsigned RegIdx = MRI.getEncodingValue(reg) & ((1 << 8) - 1);
   if (NumRegs == 1) {
     O << Type << RegIdx;
     return;
@@ -216,13 +216,8 @@ void AMDGPUInstPrinter::printClamp(const MCInst *MI, unsigned OpNo,
 
 void AMDGPUInstPrinter::printLiteral(const MCInst *MI, unsigned OpNo,
                                      raw_ostream &O) {
-  union Literal {
-    float f;
-    int32_t i;
-  } L;
-
-  L.i = MI->getOperand(OpNo).getImm();
-  O << L.i << "(" << L.f << ")";
+  int32_t Imm = MI->getOperand(OpNo).getImm();
+  O << Imm << '(' << BitsToFloat(Imm) << ')';
 }
 
 void AMDGPUInstPrinter::printLast(const MCInst *MI, unsigned OpNo,

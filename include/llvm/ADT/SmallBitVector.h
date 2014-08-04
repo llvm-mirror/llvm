@@ -54,6 +54,7 @@ class SmallBitVector {
   };
 
 public:
+  typedef unsigned size_type;
   // Encapsulation of a single bit.
   class reference {
     SmallBitVector &TheVector;
@@ -173,7 +174,7 @@ public:
   }
 
   /// count - Returns the number of bits which are set.
-  unsigned count() const {
+  size_type count() const {
     if (isSmall()) {
       uintptr_t Bits = getSmallBits();
       if (NumBaseBits == 32)

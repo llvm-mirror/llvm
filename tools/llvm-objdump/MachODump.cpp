@@ -37,9 +37,9 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
 #include <cstring>
+#include <system_error>
 using namespace llvm;
 using namespace object;
 
@@ -195,15 +195,15 @@ static void DisassembleInputMachO2(StringRef Filename,
                                    MachOObjectFile *MachOOF);
 
 void llvm::DisassembleInputMachO(StringRef Filename) {
-  std::unique_ptr<MemoryBuffer> Buff;
-
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(Filename, Buff)) {
-    errs() << "llvm-objdump: " << Filename << ": " << ec.message() << "\n";
+  ErrorOr<std::unique_ptr<MemoryBuffer>> Buff =
+      MemoryBuffer::getFileOrSTDIN(Filename);
+  if (std::error_code EC = Buff.getError()) {
+    errs() << "llvm-objdump: " << Filename << ": " << EC.message() << "\n";
     return;
   }
 
-  std::unique_ptr<MachOObjectFile> MachOOF(static_cast<MachOObjectFile *>(
-      ObjectFile::createMachOObjectFile(Buff.release()).get()));
+  std::unique_ptr<MachOObjectFile> MachOOF =
+    std::move(ObjectFile::createMachOObjectFile(Buff.get()).get());
 
   DisassembleInputMachO2(Filename, MachOOF.get());
 }
@@ -288,16 +288,17 @@ static void DisassembleInputMachO2(StringRef Filename,
     // A separate DSym file path was specified, parse it as a macho file,
     // get the sections and supply it to the section name parsing machinery.
     if (!DSYMFile.empty()) {
-      std::unique_ptr<MemoryBuffer> Buf;
-      if (error_code ec = MemoryBuffer::getFileOrSTDIN(DSYMFile, Buf)) {
-        errs() << "llvm-objdump: " << Filename << ": " << ec.message() << '\n';
+      ErrorOr<std::unique_ptr<MemoryBuffer>> Buf =
+          MemoryBuffer::getFileOrSTDIN(DSYMFile);
+      if (std::error_code EC = Buf.getError()) {
+        errs() << "llvm-objdump: " << Filename << ": " << EC.message() << '\n';
         return;
       }
-      DbgObj = ObjectFile::createMachOObjectFile(Buf.release()).get();
+      DbgObj = ObjectFile::createMachOObjectFile(Buf.get()).get().release();
     }
 
     // Setup the DIContext
-    diContext.reset(DIContext::getDWARFContext(DbgObj));
+    diContext.reset(DIContext::getDWARFContext(*DbgObj));
   }
 
   for (unsigned SectIdx = 0; SectIdx != Sections.size(); SectIdx++) {

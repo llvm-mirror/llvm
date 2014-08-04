@@ -39,15 +39,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
@@ -70,6 +74,21 @@ STATISTIC(NumFastIselSuccessIndependent, "Number of insts selected by "
 STATISTIC(NumFastIselSuccessTarget, "Number of insts selected by "
           "target-specific selector");
 STATISTIC(NumFastIselDead, "Number of dead insts removed on failure");
+
+/// \brief Set CallLoweringInfo attribute flags based on a call instruction
+/// and called function attributes.
+void FastISel::ArgListEntry::setAttributes(ImmutableCallSite *CS,
+                                           unsigned AttrIdx) {
+  isSExt     = CS->paramHasAttr(AttrIdx, Attribute::SExt);
+  isZExt     = CS->paramHasAttr(AttrIdx, Attribute::ZExt);
+  isInReg    = CS->paramHasAttr(AttrIdx, Attribute::InReg);
+  isSRet     = CS->paramHasAttr(AttrIdx, Attribute::StructRet);
+  isNest     = CS->paramHasAttr(AttrIdx, Attribute::Nest);
+  isByVal    = CS->paramHasAttr(AttrIdx, Attribute::ByVal);
+  isInAlloca = CS->paramHasAttr(AttrIdx, Attribute::InAlloca);
+  isReturned = CS->paramHasAttr(AttrIdx, Attribute::Returned);
+  Alignment  = CS->getParamAlignment(AttrIdx);
+}
 
 /// startNewBlock - Set the current block to which generated machine
 /// instructions will be appended, and clear the local CSE map.
@@ -558,11 +577,472 @@ bool FastISel::SelectGetElementPtr(const User *I) {
   return true;
 }
 
+/// \brief Add a stackmap or patchpoint intrinsic call's live variable operands
+/// to a stackmap or patchpoint machine instruction.
+bool FastISel::addStackMapLiveVars(SmallVectorImpl<MachineOperand> &Ops,
+                                   const CallInst *CI, unsigned StartIdx) {
+  for (unsigned i = StartIdx, e = CI->getNumArgOperands(); i != e; ++i) {
+    Value *Val = CI->getArgOperand(i);
+    // Check for constants and encode them with a StackMaps::ConstantOp prefix.
+    if (auto *C = dyn_cast<ConstantInt>(Val)) {
+      Ops.push_back(MachineOperand::CreateImm(StackMaps::ConstantOp));
+      Ops.push_back(MachineOperand::CreateImm(C->getSExtValue()));
+    } else if (isa<ConstantPointerNull>(Val)) {
+      Ops.push_back(MachineOperand::CreateImm(StackMaps::ConstantOp));
+      Ops.push_back(MachineOperand::CreateImm(0));
+    } else if (auto *AI = dyn_cast<AllocaInst>(Val)) {
+      // Values coming from a stack location also require a sepcial encoding,
+      // but that is added later on by the target specific frame index
+      // elimination implementation.
+      auto SI = FuncInfo.StaticAllocaMap.find(AI);
+      if (SI != FuncInfo.StaticAllocaMap.end())
+        Ops.push_back(MachineOperand::CreateFI(SI->second));
+      else
+        return false;
+    } else {
+      unsigned Reg = getRegForValue(Val);
+      if (Reg == 0)
+        return false;
+      Ops.push_back(MachineOperand::CreateReg(Reg, /*IsDef=*/false));
+    }
+  }
+
+  return true;
+}
+
+bool FastISel::SelectStackmap(const CallInst *I) {
+  // void @llvm.experimental.stackmap(i64 <id>, i32 <numShadowBytes>,
+  //                                  [live variables...])
+  assert(I->getCalledFunction()->getReturnType()->isVoidTy() &&
+         "Stackmap cannot return a value.");
+
+  // The stackmap intrinsic only records the live variables (the arguments
+  // passed to it) and emits NOPS (if requested). Unlike the patchpoint
+  // intrinsic, this won't be lowered to a function call. This means we don't
+  // have to worry about calling conventions and target-specific lowering code.
+  // Instead we perform the call lowering right here.
+  //
+  // CALLSEQ_START(0)
+  // STACKMAP(id, nbytes, ...)
+  // CALLSEQ_END(0, 0)
+  //
+  SmallVector<MachineOperand, 32> Ops;
+
+  // Add the <id> and <numBytes> constants.
+  assert(isa<ConstantInt>(I->getOperand(PatchPointOpers::IDPos)) &&
+         "Expected a constant integer.");
+  const auto *ID = cast<ConstantInt>(I->getOperand(PatchPointOpers::IDPos));
+  Ops.push_back(MachineOperand::CreateImm(ID->getZExtValue()));
+
+  assert(isa<ConstantInt>(I->getOperand(PatchPointOpers::NBytesPos)) &&
+         "Expected a constant integer.");
+  const auto *NumBytes =
+    cast<ConstantInt>(I->getOperand(PatchPointOpers::NBytesPos));
+  Ops.push_back(MachineOperand::CreateImm(NumBytes->getZExtValue()));
+
+  // Push live variables for the stack map (skipping the first two arguments
+  // <id> and <numBytes>).
+  if (!addStackMapLiveVars(Ops, I, 2))
+    return false;
+
+  // We are not adding any register mask info here, because the stackmap doesn't
+  // clobber anything.
+
+  // Add scratch registers as implicit def and early clobber.
+  CallingConv::ID CC = I->getCallingConv();
+  const MCPhysReg *ScratchRegs = TLI.getScratchRegisters(CC);
+  for (unsigned i = 0; ScratchRegs[i]; ++i)
+    Ops.push_back(MachineOperand::CreateReg(
+      ScratchRegs[i], /*IsDef=*/true, /*IsImp=*/true, /*IsKill=*/false,
+      /*IsDead=*/false, /*IsUndef=*/false, /*IsEarlyClobber=*/true));
+
+  // Issue CALLSEQ_START
+  unsigned AdjStackDown = TII.getCallFrameSetupOpcode();
+  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AdjStackDown))
+    .addImm(0);
+
+  // Issue STACKMAP.
+  MachineInstrBuilder MIB = BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+                                    TII.get(TargetOpcode::STACKMAP));
+  for (auto const &MO : Ops)
+    MIB.addOperand(MO);
+
+  // Issue CALLSEQ_END
+  unsigned AdjStackUp = TII.getCallFrameDestroyOpcode();
+  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AdjStackUp))
+    .addImm(0).addImm(0);
+
+  // Inform the Frame Information that we have a stackmap in this function.
+  FuncInfo.MF->getFrameInfo()->setHasStackMap();
+
+  return true;
+}
+
+/// \brief Lower an argument list according to the target calling convention.
+///
+/// This is a helper for lowering intrinsics that follow a target calling
+/// convention or require stack pointer adjustment. Only a subset of the
+/// intrinsic's operands need to participate in the calling convention.
+bool FastISel::lowerCallOperands(const CallInst *CI, unsigned ArgIdx,
+                                 unsigned NumArgs, const Value *Callee,
+                                 bool ForceRetVoidTy, CallLoweringInfo &CLI) {
+  ArgListTy Args;
+  Args.reserve(NumArgs);
+
+  // Populate the argument list.
+  // Attributes for args start at offset 1, after the return attribute.
+  ImmutableCallSite CS(CI);
+  for (unsigned ArgI = ArgIdx, ArgE = ArgIdx + NumArgs, AttrI = ArgIdx + 1;
+       ArgI != ArgE; ++ArgI) {
+    Value *V = CI->getOperand(ArgI);
+
+    assert(!V->getType()->isEmptyTy() && "Empty type passed to intrinsic.");
+
+    ArgListEntry Entry;
+    Entry.Val = V;
+    Entry.Ty = V->getType();
+    Entry.setAttributes(&CS, AttrI);
+    Args.push_back(Entry);
+  }
+
+  Type *RetTy = ForceRetVoidTy ? Type::getVoidTy(CI->getType()->getContext())
+                               : CI->getType();
+  CLI.setCallee(CI->getCallingConv(), RetTy, Callee, std::move(Args), NumArgs);
+
+  return LowerCallTo(CLI);
+}
+
+bool FastISel::SelectPatchpoint(const CallInst *I) {
+  // void|i64 @llvm.experimental.patchpoint.void|i64(i64 <id>,
+  //                                                 i32 <numBytes>,
+  //                                                 i8* <target>,
+  //                                                 i32 <numArgs>,
+  //                                                 [Args...],
+  //                                                 [live variables...])
+  CallingConv::ID CC = I->getCallingConv();
+  bool IsAnyRegCC = CC == CallingConv::AnyReg;
+  bool HasDef = !I->getType()->isVoidTy();
+  Value *Callee = I->getOperand(PatchPointOpers::TargetPos);
+
+  // Get the real number of arguments participating in the call <numArgs>
+  assert(isa<ConstantInt>(I->getOperand(PatchPointOpers::NArgPos)) &&
+         "Expected a constant integer.");
+  const auto *NumArgsVal =
+    cast<ConstantInt>(I->getOperand(PatchPointOpers::NArgPos));
+  unsigned NumArgs = NumArgsVal->getZExtValue();
+
+  // Skip the four meta args: <id>, <numNopBytes>, <target>, <numArgs>
+  // This includes all meta-operands up to but not including CC.
+  unsigned NumMetaOpers = PatchPointOpers::CCPos;
+  assert(I->getNumArgOperands() >= NumMetaOpers + NumArgs &&
+         "Not enough arguments provided to the patchpoint intrinsic");
+
+  // For AnyRegCC the arguments are lowered later on manually.
+  unsigned NumCallArgs = IsAnyRegCC ? 0 : NumArgs;
+  CallLoweringInfo CLI;
+  if (!lowerCallOperands(I, NumMetaOpers, NumCallArgs, Callee, IsAnyRegCC, CLI))
+    return false;
+
+  assert(CLI.Call && "No call instruction specified.");
+
+  SmallVector<MachineOperand, 32> Ops;
+
+  // Add an explicit result reg if we use the anyreg calling convention.
+  if (IsAnyRegCC && HasDef) {
+    assert(CLI.NumResultRegs == 0 && "Unexpected result register.");
+    CLI.ResultReg = createResultReg(TLI.getRegClassFor(MVT::i64));
+    CLI.NumResultRegs = 1;
+    Ops.push_back(MachineOperand::CreateReg(CLI.ResultReg, /*IsDef=*/true));
+  }
+
+  // Add the <id> and <numBytes> constants.
+  assert(isa<ConstantInt>(I->getOperand(PatchPointOpers::IDPos)) &&
+         "Expected a constant integer.");
+  const auto *ID = cast<ConstantInt>(I->getOperand(PatchPointOpers::IDPos));
+  Ops.push_back(MachineOperand::CreateImm(ID->getZExtValue()));
+
+  assert(isa<ConstantInt>(I->getOperand(PatchPointOpers::NBytesPos)) &&
+         "Expected a constant integer.");
+  const auto *NumBytes =
+    cast<ConstantInt>(I->getOperand(PatchPointOpers::NBytesPos));
+  Ops.push_back(MachineOperand::CreateImm(NumBytes->getZExtValue()));
+
+  // Assume that the callee is a constant address or null pointer.
+  // FIXME: handle function symbols in the future.
+  uint64_t CalleeAddr;
+  if (const auto *C = dyn_cast<IntToPtrInst>(Callee))
+    CalleeAddr = cast<ConstantInt>(C->getOperand(0))->getZExtValue();
+  else if (const auto *C = dyn_cast<ConstantExpr>(Callee)) {
+    if (C->getOpcode() == Instruction::IntToPtr)
+      CalleeAddr = cast<ConstantInt>(C->getOperand(0))->getZExtValue();
+    else
+      llvm_unreachable("Unsupported ConstantExpr.");
+  } else if (isa<ConstantPointerNull>(Callee))
+    CalleeAddr = 0;
+  else
+    llvm_unreachable("Unsupported callee address.");
+
+  Ops.push_back(MachineOperand::CreateImm(CalleeAddr));
+
+  // Adjust <numArgs> to account for any arguments that have been passed on
+  // the stack instead.
+  unsigned NumCallRegArgs = IsAnyRegCC ? NumArgs : CLI.OutRegs.size();
+  Ops.push_back(MachineOperand::CreateImm(NumCallRegArgs));
+
+  // Add the calling convention
+  Ops.push_back(MachineOperand::CreateImm((unsigned)CC));
+
+  // Add the arguments we omitted previously. The register allocator should
+  // place these in any free register.
+  if (IsAnyRegCC) {
+    for (unsigned i = NumMetaOpers, e = NumMetaOpers + NumArgs; i != e; ++i) {
+      unsigned Reg = getRegForValue(I->getArgOperand(i));
+      if (!Reg)
+        return false;
+      Ops.push_back(MachineOperand::CreateReg(Reg, /*IsDef=*/false));
+    }
+  }
+
+  // Push the arguments from the call instruction.
+  for (auto Reg : CLI.OutRegs)
+    Ops.push_back(MachineOperand::CreateReg(Reg, /*IsDef=*/false));
+
+  // Push live variables for the stack map.
+  if (!addStackMapLiveVars(Ops, I, NumMetaOpers + NumArgs))
+    return false;
+
+  // Push the register mask info.
+  Ops.push_back(MachineOperand::CreateRegMask(TRI.getCallPreservedMask(CC)));
+
+  // Add scratch registers as implicit def and early clobber.
+  const MCPhysReg *ScratchRegs = TLI.getScratchRegisters(CC);
+  for (unsigned i = 0; ScratchRegs[i]; ++i)
+    Ops.push_back(MachineOperand::CreateReg(
+      ScratchRegs[i], /*IsDef=*/true, /*IsImp=*/true, /*IsKill=*/false,
+      /*IsDead=*/false, /*IsUndef=*/false, /*IsEarlyClobber=*/true));
+
+  // Add implicit defs (return values).
+  for (auto Reg : CLI.InRegs)
+    Ops.push_back(MachineOperand::CreateReg(Reg, /*IsDef=*/true,
+                                            /*IsImpl=*/true));
+
+  // Insert the patchpoint instruction before the call generated by the target.
+  MachineInstrBuilder MIB = BuildMI(*FuncInfo.MBB, CLI.Call, DbgLoc,
+                                    TII.get(TargetOpcode::PATCHPOINT));
+
+  for (auto &MO : Ops)
+    MIB.addOperand(MO);
+
+  MIB->setPhysRegsDeadExcept(CLI.InRegs, TRI);
+
+  // Delete the original call instruction.
+  CLI.Call->eraseFromParent();
+
+  // Inform the Frame Information that we have a patchpoint in this function.
+  FuncInfo.MF->getFrameInfo()->setHasPatchPoint();
+
+  if (CLI.NumResultRegs)
+    UpdateValueMap(I, CLI.ResultReg, CLI.NumResultRegs);
+  return true;
+}
+
+/// Returns an AttributeSet representing the attributes applied to the return
+/// value of the given call.
+static AttributeSet getReturnAttrs(FastISel::CallLoweringInfo &CLI) {
+  SmallVector<Attribute::AttrKind, 2> Attrs;
+  if (CLI.RetSExt)
+    Attrs.push_back(Attribute::SExt);
+  if (CLI.RetZExt)
+    Attrs.push_back(Attribute::ZExt);
+  if (CLI.IsInReg)
+    Attrs.push_back(Attribute::InReg);
+
+  return AttributeSet::get(CLI.RetTy->getContext(), AttributeSet::ReturnIndex,
+                           Attrs);
+}
+
+bool FastISel::LowerCallTo(const CallInst *CI, const char *SymName,
+                           unsigned NumArgs) {
+  ImmutableCallSite CS(CI);
+
+  PointerType *PT = cast<PointerType>(CS.getCalledValue()->getType());
+  FunctionType *FTy = cast<FunctionType>(PT->getElementType());
+  Type *RetTy = FTy->getReturnType();
+
+  ArgListTy Args;
+  Args.reserve(NumArgs);
+
+  // Populate the argument list.
+  // Attributes for args start at offset 1, after the return attribute.
+  for (unsigned ArgI = 0; ArgI != NumArgs; ++ArgI) {
+    Value *V = CI->getOperand(ArgI);
+
+    assert(!V->getType()->isEmptyTy() && "Empty type passed to intrinsic.");
+
+    ArgListEntry Entry;
+    Entry.Val = V;
+    Entry.Ty = V->getType();
+    Entry.setAttributes(&CS, ArgI + 1);
+    Args.push_back(Entry);
+  }
+
+  CallLoweringInfo CLI;
+  CLI.setCallee(RetTy, FTy, SymName, std::move(Args), CS, NumArgs);
+
+  return LowerCallTo(CLI);
+}
+
+bool FastISel::LowerCallTo(CallLoweringInfo &CLI) {
+  // Handle the incoming return values from the call.
+  CLI.clearIns();
+  SmallVector<EVT, 4> RetTys;
+  ComputeValueVTs(TLI, CLI.RetTy, RetTys);
+
+  SmallVector<ISD::OutputArg, 4> Outs;
+  GetReturnInfo(CLI.RetTy, getReturnAttrs(CLI), Outs, TLI);
+
+  bool CanLowerReturn = TLI.CanLowerReturn(CLI.CallConv, *FuncInfo.MF,
+                                           CLI.IsVarArg, Outs,
+                                           CLI.RetTy->getContext());
+
+  // FIXME: sret demotion isn't supported yet - bail out.
+  if (!CanLowerReturn)
+    return false;
+
+  for (unsigned I = 0, E = RetTys.size(); I != E; ++I) {
+    EVT VT = RetTys[I];
+    MVT RegisterVT = TLI.getRegisterType(CLI.RetTy->getContext(), VT);
+    unsigned NumRegs = TLI.getNumRegisters(CLI.RetTy->getContext(), VT);
+    for (unsigned i = 0; i != NumRegs; ++i) {
+      ISD::InputArg MyFlags;
+      MyFlags.VT = RegisterVT;
+      MyFlags.ArgVT = VT;
+      MyFlags.Used = CLI.IsReturnValueUsed;
+      if (CLI.RetSExt)
+        MyFlags.Flags.setSExt();
+      if (CLI.RetZExt)
+        MyFlags.Flags.setZExt();
+      if (CLI.IsInReg)
+        MyFlags.Flags.setInReg();
+      CLI.Ins.push_back(MyFlags);
+    }
+  }
+
+  // Handle all of the outgoing arguments.
+  CLI.clearOuts();
+  for (auto &Arg : CLI.getArgs()) {
+    Type *FinalType = Arg.Ty;
+    if (Arg.isByVal)
+      FinalType = cast<PointerType>(Arg.Ty)->getElementType();
+    bool NeedsRegBlock = TLI.functionArgumentNeedsConsecutiveRegisters(
+      FinalType, CLI.CallConv, CLI.IsVarArg);
+
+    ISD::ArgFlagsTy Flags;
+    if (Arg.isZExt)
+      Flags.setZExt();
+    if (Arg.isSExt)
+      Flags.setSExt();
+    if (Arg.isInReg)
+      Flags.setInReg();
+    if (Arg.isSRet)
+      Flags.setSRet();
+    if (Arg.isByVal)
+      Flags.setByVal();
+    if (Arg.isInAlloca) {
+      Flags.setInAlloca();
+      // Set the byval flag for CCAssignFn callbacks that don't know about
+      // inalloca. This way we can know how many bytes we should've allocated
+      // and how many bytes a callee cleanup function will pop.  If we port
+      // inalloca to more targets, we'll have to add custom inalloca handling in
+      // the various CC lowering callbacks.
+      Flags.setByVal();
+    }
+    if (Arg.isByVal || Arg.isInAlloca) {
+      PointerType *Ty = cast<PointerType>(Arg.Ty);
+      Type *ElementTy = Ty->getElementType();
+      unsigned FrameSize = DL.getTypeAllocSize(ElementTy);
+      // For ByVal, alignment should come from FE. BE will guess if this info is
+      // not there, but there are cases it cannot get right.
+      unsigned FrameAlign = Arg.Alignment;
+      if (!FrameAlign)
+        FrameAlign = TLI.getByValTypeAlignment(ElementTy);
+      Flags.setByValSize(FrameSize);
+      Flags.setByValAlign(FrameAlign);
+    }
+    if (Arg.isNest)
+      Flags.setNest();
+    if (NeedsRegBlock)
+      Flags.setInConsecutiveRegs();
+    unsigned OriginalAlignment = DL.getABITypeAlignment(Arg.Ty);
+    Flags.setOrigAlign(OriginalAlignment);
+
+    CLI.OutVals.push_back(Arg.Val);
+    CLI.OutFlags.push_back(Flags);
+  }
+
+  if (!FastLowerCall(CLI))
+    return false;
+
+  // Set all unused physreg defs as dead.
+  assert(CLI.Call && "No call instruction specified.");
+  CLI.Call->setPhysRegsDeadExcept(CLI.InRegs, TRI);
+
+  if (CLI.NumResultRegs && CLI.CS)
+    UpdateValueMap(CLI.CS->getInstruction(), CLI.ResultReg, CLI.NumResultRegs);
+
+  return true;
+}
+
+bool FastISel::LowerCall(const CallInst *CI) {
+  ImmutableCallSite CS(CI);
+
+  PointerType *PT = cast<PointerType>(CS.getCalledValue()->getType());
+  FunctionType *FuncTy = cast<FunctionType>(PT->getElementType());
+  Type *RetTy = FuncTy->getReturnType();
+
+  ArgListTy Args;
+  ArgListEntry Entry;
+  Args.reserve(CS.arg_size());
+
+  for (ImmutableCallSite::arg_iterator i = CS.arg_begin(), e = CS.arg_end();
+       i != e; ++i) {
+    Value *V = *i;
+
+    // Skip empty types
+    if (V->getType()->isEmptyTy())
+      continue;
+
+    Entry.Val = V;
+    Entry.Ty = V->getType();
+
+    // Skip the first return-type Attribute to get to params.
+    Entry.setAttributes(&CS, i - CS.arg_begin() + 1);
+    Args.push_back(Entry);
+  }
+
+  // Check if target-independent constraints permit a tail call here.
+  // Target-dependent constraints are checked within FastLowerCall.
+  bool IsTailCall = CI->isTailCall();
+  if (IsTailCall && !isInTailCallPosition(CS, TM))
+    IsTailCall = false;
+
+  CallLoweringInfo CLI;
+  CLI.setCallee(RetTy, FuncTy, CI->getCalledValue(), std::move(Args), CS)
+    .setTailCall(IsTailCall);
+
+  return LowerCallTo(CLI);
+}
+
 bool FastISel::SelectCall(const User *I) {
   const CallInst *Call = cast<CallInst>(I);
 
   // Handle simple inline asms.
   if (const InlineAsm *IA = dyn_cast<InlineAsm>(Call->getCalledValue())) {
+    // If the inline asm has side effects, then make sure that no local value
+    // lives across by flushing the local value map.
+    if (IA->hasSideEffects())
+      flushLocalValueMap();
+
     // Don't attempt to handle constraints.
     if (!IA->getConstraintString().empty())
       return false;
@@ -583,26 +1063,37 @@ bool FastISel::SelectCall(const User *I) {
   MachineModuleInfo &MMI = FuncInfo.MF->getMMI();
   ComputeUsesVAFloatArgument(*Call, &MMI);
 
-  const Function *F = Call->getCalledFunction();
-  if (!F) return false;
+  // Handle intrinsic function calls.
+  if (const auto *II = dyn_cast<IntrinsicInst>(Call))
+    return SelectIntrinsicCall(II);
 
-  // Handle selected intrinsic function calls.
-  switch (F->getIntrinsicID()) {
+  // Usually, it does not make sense to initialize a value,
+  // make an unrelated function call and use the value, because
+  // it tends to be spilled on the stack. So, we move the pointer
+  // to the last local value to the beginning of the block, so that
+  // all the values which have already been materialized,
+  // appear after the call. It also makes sense to skip intrinsics
+  // since they tend to be inlined.
+  flushLocalValueMap();
+
+  return LowerCall(Call);
+}
+
+bool FastISel::SelectIntrinsicCall(const IntrinsicInst *II) {
+  switch (II->getIntrinsicID()) {
   default: break;
-    // At -O0 we don't care about the lifetime intrinsics.
+  // At -O0 we don't care about the lifetime intrinsics.
   case Intrinsic::lifetime_start:
   case Intrinsic::lifetime_end:
-    // The donothing intrinsic does, well, nothing.
+  // The donothing intrinsic does, well, nothing.
   case Intrinsic::donothing:
     return true;
-
   case Intrinsic::dbg_declare: {
-    const DbgDeclareInst *DI = cast<DbgDeclareInst>(Call);
+    const DbgDeclareInst *DI = cast<DbgDeclareInst>(II);
     DIVariable DIVar(DI->getVariable());
     assert((!DIVar || DIVar.isVariable()) &&
-      "Variable in DbgDeclareInst should be either null or a DIVariable.");
-    if (!DIVar ||
-        !FuncInfo.MF->getMMI().hasDebugInfo()) {
+           "Variable in DbgDeclareInst should be either null or a DIVariable.");
+    if (!DIVar || !FuncInfo.MF->getMMI().hasDebugInfo()) {
       DEBUG(dbgs() << "Dropping debug info for " << *DI << "\n");
       return true;
     }
@@ -619,7 +1110,7 @@ bool FastISel::SelectCall(const User *I) {
       // Some arguments' frame index is recorded during argument lowering.
       Offset = FuncInfo.getArgumentFrameIndex(Arg);
     if (Offset)
-        Op = MachineOperand::CreateFI(Offset);
+      Op = MachineOperand::CreateFI(Offset);
     if (!Op)
       if (unsigned Reg = lookUpRegForValue(Address))
         Op = MachineOperand::CreateReg(Reg, false);
@@ -650,9 +1141,9 @@ bool FastISel::SelectCall(const User *I) {
       } else
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
                 TII.get(TargetOpcode::DBG_VALUE))
-            .addOperand(*Op)
-            .addImm(0)
-            .addMetadata(DI->getVariable());
+          .addOperand(*Op)
+          .addImm(0)
+          .addMetadata(DI->getVariable());
     } else {
       // We can't yet handle anything else here because it would require
       // generating code, thus altering codegen because of debug info.
@@ -662,7 +1153,7 @@ bool FastISel::SelectCall(const User *I) {
   }
   case Intrinsic::dbg_value: {
     // This form of DBG_VALUE is target-independent.
-    const DbgValueInst *DI = cast<DbgValueInst>(Call);
+    const DbgValueInst *DI = cast<DbgValueInst>(II);
     const MCInstrDesc &II = TII.get(TargetOpcode::DBG_VALUE);
     const Value *V = DI->getValue();
     if (!V) {
@@ -697,36 +1188,30 @@ bool FastISel::SelectCall(const User *I) {
     return true;
   }
   case Intrinsic::objectsize: {
-    ConstantInt *CI = cast<ConstantInt>(Call->getArgOperand(1));
+    ConstantInt *CI = cast<ConstantInt>(II->getArgOperand(1));
     unsigned long long Res = CI->isZero() ? -1ULL : 0;
-    Constant *ResCI = ConstantInt::get(Call->getType(), Res);
+    Constant *ResCI = ConstantInt::get(II->getType(), Res);
     unsigned ResultReg = getRegForValue(ResCI);
     if (ResultReg == 0)
       return false;
-    UpdateValueMap(Call, ResultReg);
+    UpdateValueMap(II, ResultReg);
     return true;
   }
   case Intrinsic::expect: {
-    unsigned ResultReg = getRegForValue(Call->getArgOperand(0));
+    unsigned ResultReg = getRegForValue(II->getArgOperand(0));
     if (ResultReg == 0)
       return false;
-    UpdateValueMap(Call, ResultReg);
+    UpdateValueMap(II, ResultReg);
     return true;
   }
+  case Intrinsic::experimental_stackmap:
+    return SelectStackmap(II);
+  case Intrinsic::experimental_patchpoint_void:
+  case Intrinsic::experimental_patchpoint_i64:
+    return SelectPatchpoint(II);
   }
 
-  // Usually, it does not make sense to initialize a value,
-  // make an unrelated function call and use the value, because
-  // it tends to be spilled on the stack. So, we move the pointer
-  // to the last local value to the beginning of the block, so that
-  // all the values which have already been materialized,
-  // appear after the call. It also makes sense to skip intrinsics
-  // since they tend to be inlined.
-  if (!isa<IntrinsicInst>(Call))
-    flushLocalValueMap();
-
-  // An arbitrary call. Bail.
-  return false;
+  return FastLowerIntrinsicCall(II);
 }
 
 bool FastISel::SelectCast(const User *I, unsigned Opcode) {
@@ -879,7 +1364,6 @@ FastISel::SelectInstruction(const Instruction *I) {
 /// the CFG.
 void
 FastISel::FastEmitBranch(MachineBasicBlock *MSucc, DebugLoc DbgLoc) {
-
   if (FuncInfo.MBB->getBasicBlock()->size() > 1 &&
       FuncInfo.MBB->isLayoutSuccessor(MSucc)) {
     // For more accurate line information if this is the only instruction
@@ -890,7 +1374,11 @@ FastISel::FastEmitBranch(MachineBasicBlock *MSucc, DebugLoc DbgLoc) {
     TII.InsertBranch(*FuncInfo.MBB, MSucc, nullptr,
                      SmallVector<MachineOperand, 0>(), DbgLoc);
   }
-  FuncInfo.MBB->addSuccessor(MSucc);
+  uint32_t BranchWeight = 0;
+  if (FuncInfo.BPI)
+    BranchWeight = FuncInfo.BPI->getEdgeWeight(FuncInfo.MBB->getBasicBlock(),
+                                               MSucc->getBasicBlock());
+  FuncInfo.MBB->addSuccessor(MSucc, BranchWeight);
 }
 
 /// SelectFNeg - Emit an FNeg operation.
@@ -1101,6 +1589,7 @@ FastISel::SelectOperator(const User *I, unsigned Opcode) {
 FastISel::FastISel(FunctionLoweringInfo &funcInfo,
                    const TargetLibraryInfo *libInfo)
   : FuncInfo(funcInfo),
+    MF(funcInfo.MF),
     MRI(FuncInfo.MF->getRegInfo()),
     MFI(*FuncInfo.MF->getFrameInfo()),
     MCP(*FuncInfo.MF->getConstantPool()),
@@ -1115,6 +1604,14 @@ FastISel::FastISel(FunctionLoweringInfo &funcInfo,
 FastISel::~FastISel() {}
 
 bool FastISel::FastLowerArguments() {
+  return false;
+}
+
+bool FastISel::FastLowerCall(CallLoweringInfo &/*CLI*/) {
+  return false;
+}
+
+bool FastISel::FastLowerIntrinsicCall(const IntrinsicInst * /*II*/) {
   return false;
 }
 
@@ -1635,3 +2132,49 @@ bool FastISel::canFoldAddIntoGEP(const User *GEP, const Value *Add) {
   return isa<ConstantInt>(cast<AddOperator>(Add)->getOperand(1));
 }
 
+MachineMemOperand *
+FastISel::createMachineMemOperandFor(const Instruction *I) const {
+  const Value *Ptr;
+  Type *ValTy;
+  unsigned Alignment;
+  unsigned Flags;
+  bool IsVolatile;
+
+  if (const auto *LI = dyn_cast<LoadInst>(I)) {
+    Alignment = LI->getAlignment();
+    IsVolatile = LI->isVolatile();
+    Flags = MachineMemOperand::MOLoad;
+    Ptr = LI->getPointerOperand();
+    ValTy = LI->getType();
+  } else if (const auto *SI = dyn_cast<StoreInst>(I)) {
+    Alignment = SI->getAlignment();
+    IsVolatile = SI->isVolatile();
+    Flags = MachineMemOperand::MOStore;
+    Ptr = SI->getPointerOperand();
+    ValTy = SI->getValueOperand()->getType();
+  } else {
+    return nullptr;
+  }
+
+  bool IsNonTemporal = I->getMetadata("nontemporal") != nullptr;
+  bool IsInvariant = I->getMetadata("invariant.load") != nullptr;
+  const MDNode *Ranges = I->getMetadata(LLVMContext::MD_range);
+
+  AAMDNodes AAInfo;
+  I->getAAMetadata(AAInfo);
+
+  if (Alignment == 0)  // Ensure that codegen never sees alignment 0.
+    Alignment = DL.getABITypeAlignment(ValTy);
+
+  unsigned Size = TM.getDataLayout()->getTypeStoreSize(ValTy);
+
+  if (IsVolatile)
+    Flags |= MachineMemOperand::MOVolatile;
+  if (IsNonTemporal)
+    Flags |= MachineMemOperand::MONonTemporal;
+  if (IsInvariant)
+    Flags |= MachineMemOperand::MOInvariant;
+
+  return FuncInfo.MF->getMachineMemOperand(MachinePointerInfo(Ptr), Flags, Size,
+                                           Alignment, AAInfo, Ranges);
+}

@@ -37,6 +37,9 @@ namespace llvm {
 
 class ConstantInt;
 class ConstantFP;
+class DiagnosticInfoOptimizationRemark;
+class DiagnosticInfoOptimizationRemarkMissed;
+class DiagnosticInfoOptimizationRemarkAnalysis;
 class LLVMContext;
 class Type;
 class Value;
@@ -370,10 +373,6 @@ public:
   /// operand of an unparented ReturnInst so that the prefix data has a Use.
   typedef DenseMap<const Function *, ReturnInst *> PrefixDataMapTy;
   PrefixDataMapTy PrefixDataMap;
-
-  /// \brief Return true if the given pass name should emit optimization
-  /// remarks.
-  bool optimizationRemarksEnabledFor(const char *PassName) const;
 
   int getOrAddScopeRecordIdxEntry(MDNode *N, int ExistingIdx);
   int getOrAddScopeInlinedAtIdxEntry(MDNode *Scope, MDNode *IA,int ExistingIdx);

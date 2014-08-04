@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmLayout.h"
@@ -81,10 +82,6 @@ void MCWinCOFFStreamer::EmitLabel(MCSymbol *Symbol) {
   MCObjectStreamer::EmitLabel(Symbol);
 }
 
-void MCWinCOFFStreamer::EmitDebugLabel(MCSymbol *Symbol) {
-  EmitLabel(Symbol);
-}
-
 void MCWinCOFFStreamer::EmitAssemblerFlag(MCAssemblerFlag Flag) {
   llvm_unreachable("not implemented");
 }
@@ -125,30 +122,39 @@ void MCWinCOFFStreamer::BeginCOFFSymbolDef(MCSymbol const *Symbol) {
   assert((!Symbol->isInSection() ||
           Symbol->getSection().getVariant() == MCSection::SV_COFF) &&
          "Got non-COFF section in the COFF backend!");
-  assert(!CurSymbol && "starting new symbol definition in a symbol definition");
+
+  if (CurSymbol)
+    FatalError("starting a new symbol definition without completing the "
+               "previous one");
   CurSymbol = Symbol;
 }
 
 void MCWinCOFFStreamer::EmitCOFFSymbolStorageClass(int StorageClass) {
-  assert(CurSymbol && "StorageClass specified outside of symbol definition");
-  assert((StorageClass & ~0xFF) == 0 &&
-         "StorageClass must only have data in the first byte!");
+  if (!CurSymbol)
+    FatalError("storage class specified outside of symbol definition");
+
+  if (StorageClass & ~0xff)
+    FatalError(Twine("storage class value '") + itostr(StorageClass) +
+               "' out of range");
 
   MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*CurSymbol);
   SD.modifyFlags(StorageClass << COFF::SF_ClassShift, COFF::SF_ClassMask);
 }
 
 void MCWinCOFFStreamer::EmitCOFFSymbolType(int Type) {
-  assert(CurSymbol && "SymbolType specified outside of a symbol definition");
-  assert((Type & ~0xFFFF) == 0 &&
-         "Type must only have data in the first 2 bytes");
+  if (!CurSymbol)
+    FatalError("symbol type specified outside of a symbol definition");
+
+  if (Type & ~0xffff)
+    FatalError(Twine("type value '") + itostr(Type) + "' out of range");
 
   MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*CurSymbol);
   SD.modifyFlags(Type << COFF::SF_TypeShift, COFF::SF_TypeMask);
 }
 
 void MCWinCOFFStreamer::EndCOFFSymbolDef() {
-  assert(CurSymbol && "ending symbol definition without beginning one");
+  if (!CurSymbol)
+    FatalError("ending symbol definition without starting one");
   CurSymbol = nullptr;
 }
 
@@ -232,12 +238,17 @@ void MCWinCOFFStreamer::EmitIdent(StringRef IdentString) {
   llvm_unreachable("not implemented");
 }
 
-void MCWinCOFFStreamer::EmitWin64EHHandlerData() {
+void MCWinCOFFStreamer::EmitWinEHHandlerData() {
   llvm_unreachable("not implemented");
 }
 
 void MCWinCOFFStreamer::FinishImpl() {
   MCObjectStreamer::FinishImpl();
+}
+
+LLVM_ATTRIBUTE_NORETURN
+void MCWinCOFFStreamer::FatalError(const Twine &Msg) const {
+  getContext().FatalError(SMLoc(), Msg);
 }
 }
 

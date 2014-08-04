@@ -72,10 +72,10 @@ X86MCAsmInfoDarwin::X86MCAsmInfoDarwin(const Triple &T) {
   if (T.isMacOSX() && T.isMacOSXVersionLT(10, 6))
     HasWeakDefCanBeHiddenDirective = false;
 
-  // FIXME: this should not depend on the target OS version, but on the ld64
-  // version in use.  From at least >= ld64-97.17 (Xcode 3.2.6) the abs-ified
-  // FDE relocs may be used.
-  DwarfFDESymbolsUseAbsDiff = T.isMacOSX() && !T.isMacOSXVersionLT(10, 6);
+  // Assume ld64 is new enough that the abs-ified FDE relocs may be used
+  // (actually, must, since otherwise the non-extern relocations we produce
+  // overwhelm ld64's tiny little mind and it fails).
+  DwarfFDESymbolsUseAbsDiff = true;
 
   UseIntegratedAssembler = true;
 }
@@ -142,8 +142,11 @@ getNonexecutableStackSection(MCContext &Ctx) const {
 void X86MCAsmInfoMicrosoft::anchor() { }
 
 X86MCAsmInfoMicrosoft::X86MCAsmInfoMicrosoft(const Triple &Triple) {
-  if (Triple.getArch() == Triple::x86_64)
+  if (Triple.getArch() == Triple::x86_64) {
     PrivateGlobalPrefix = ".L";
+    PointerSize = 8;
+    ExceptionsType = ExceptionHandling::WinEH;
+  }
 
   AssemblerDialect = AsmWriterFlavor;
 
@@ -157,17 +160,18 @@ X86MCAsmInfoMicrosoft::X86MCAsmInfoMicrosoft(const Triple &Triple) {
 void X86MCAsmInfoGNUCOFF::anchor() { }
 
 X86MCAsmInfoGNUCOFF::X86MCAsmInfoGNUCOFF(const Triple &Triple) {
+  assert(Triple.isOSWindows() && "Windows is the only supported COFF target");
   if (Triple.getArch() == Triple::x86_64) {
     PrivateGlobalPrefix = ".L";
     PointerSize = 8;
+    ExceptionsType = ExceptionHandling::WinEH;
+  } else {
+    ExceptionsType = ExceptionHandling::DwarfCFI;
   }
 
   AssemblerDialect = AsmWriterFlavor;
 
   TextAlignFillValue = 0x90;
-
-  // Exceptions handling
-  ExceptionsType = ExceptionHandling::DwarfCFI;
 
   UseIntegratedAssembler = true;
 }

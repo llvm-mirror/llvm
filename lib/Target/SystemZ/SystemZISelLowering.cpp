@@ -80,9 +80,9 @@ static MachineOperand earlyUseOperand(MachineOperand Op) {
   return Op;
 }
 
-SystemZTargetLowering::SystemZTargetLowering(SystemZTargetMachine &tm)
-  : TargetLowering(tm, new TargetLoweringObjectFileELF()),
-    Subtarget(*tm.getSubtargetImpl()), TM(tm) {
+SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &tm)
+    : TargetLowering(tm, new TargetLoweringObjectFileELF()),
+      Subtarget(tm.getSubtarget<SystemZSubtarget>()) {
   MVT PtrVT = getPointerTy();
 
   // Set up the register classes.
@@ -339,9 +339,10 @@ bool SystemZTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT) const {
   return Imm.isZero() || Imm.isNegZero();
 }
 
-bool SystemZTargetLowering::allowsUnalignedMemoryAccesses(EVT VT,
-                                                          unsigned,
-                                                          bool *Fast) const {
+bool SystemZTargetLowering::allowsMisalignedMemoryAccesses(EVT VT,
+                                                           unsigned,
+                                                           unsigned,
+                                                           bool *Fast) const {
   // Unaligned accesses should never be slower than the expanded version.
   // We check specifically for aligned accesses in the few cases where
   // they are required.
@@ -673,11 +674,13 @@ LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
   MachineRegisterInfo &MRI = MF.getRegInfo();
   SystemZMachineFunctionInfo *FuncInfo =
     MF.getInfo<SystemZMachineFunctionInfo>();
-  auto *TFL = static_cast<const SystemZFrameLowering *>(TM.getFrameLowering());
+  auto *TFL = static_cast<const SystemZFrameLowering *>(
+      DAG.getTarget().getFrameLowering());
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, IsVarArg, MF, TM, ArgLocs, *DAG.getContext());
+  CCState CCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), ArgLocs,
+                 *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_SystemZ);
 
   unsigned NumFixedGPRs = 0;
@@ -815,7 +818,8 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Analyze the operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState ArgCCInfo(CallConv, IsVarArg, MF, TM, ArgLocs, *DAG.getContext());
+  CCState ArgCCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), ArgLocs,
+                    *DAG.getContext());
   ArgCCInfo.AnalyzeCallOperands(Outs, CC_SystemZ);
 
   // We don't support GuaranteedTailCallOpt, only automatically-detected
@@ -911,6 +915,12 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Ops.push_back(DAG.getRegister(RegsToPass[I].first,
                                   RegsToPass[I].second.getValueType()));
 
+  // Add a register mask operand representing the call-preserved registers.
+  const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
+  const uint32_t *Mask = TRI->getCallPreservedMask(CallConv);
+  assert(Mask && "Missing call preserved mask for calling convention");
+  Ops.push_back(DAG.getRegisterMask(Mask));
+
   // Glue the call to the argument copies, if any.
   if (Glue.getNode())
     Ops.push_back(Glue);
@@ -931,7 +941,8 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Assign locations to each value returned by this call.
   SmallVector<CCValAssign, 16> RetLocs;
-  CCState RetCCInfo(CallConv, IsVarArg, MF, TM, RetLocs, *DAG.getContext());
+  CCState RetCCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), RetLocs,
+                    *DAG.getContext());
   RetCCInfo.AnalyzeCallResult(Ins, RetCC_SystemZ);
 
   // Copy all of the result registers out of their specified physreg.
@@ -962,7 +973,8 @@ SystemZTargetLowering::LowerReturn(SDValue Chain,
 
   // Assign locations to each returned value.
   SmallVector<CCValAssign, 16> RetLocs;
-  CCState RetCCInfo(CallConv, IsVarArg, MF, TM, RetLocs, *DAG.getContext());
+  CCState RetCCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), RetLocs,
+                    *DAG.getContext());
   RetCCInfo.AnalyzeReturn(Outs, RetCC_SystemZ);
 
   // Quick exit for void returns
@@ -1180,7 +1192,7 @@ static void adjustSubwordCmp(SelectionDAG &DAG, Comparison &C) {
                            Load->getChain(), Load->getBasePtr(),
                            Load->getPointerInfo(), Load->getMemoryVT(),
                            Load->isVolatile(), Load->isNonTemporal(),
-                           Load->getAlignment());
+                           Load->isInvariant(), Load->getAlignment());
 
   // Make sure that the second operand is an i32 with the right value.
   if (C.Op1.getValueType() != MVT::i32 ||
@@ -1786,8 +1798,8 @@ SDValue SystemZTargetLowering::lowerGlobalAddress(GlobalAddressSDNode *Node,
   const GlobalValue *GV = Node->getGlobal();
   int64_t Offset = Node->getOffset();
   EVT PtrVT = getPointerTy();
-  Reloc::Model RM = TM.getRelocationModel();
-  CodeModel::Model CM = TM.getCodeModel();
+  Reloc::Model RM = DAG.getTarget().getRelocationModel();
+  CodeModel::Model CM = DAG.getTarget().getCodeModel();
 
   SDValue Result;
   if (Subtarget.isPC32DBLSymbol(GV, RM, CM)) {
@@ -1824,7 +1836,7 @@ SDValue SystemZTargetLowering::lowerGlobalTLSAddress(GlobalAddressSDNode *Node,
   SDLoc DL(Node);
   const GlobalValue *GV = Node->getGlobal();
   EVT PtrVT = getPointerTy();
-  TLSModel::Model model = TM.getTLSModel(GV);
+  TLSModel::Model model = DAG.getTarget().getTLSModel(GV);
 
   if (model != TLSModel::LocalExec)
     llvm_unreachable("only local-exec TLS mode supported");
@@ -2287,9 +2299,9 @@ SDValue SystemZTargetLowering::lowerATOMIC_LOAD_SUB(SDValue Op,
       // Use an addition if the operand is constant and either LAA(G) is
       // available or the negative value is in the range of A(G)FHI.
       int64_t Value = (-Op2->getAPIntValue()).getSExtValue();
-      if (isInt<32>(Value) || TM.getSubtargetImpl()->hasInterlockedAccess1())
+      if (isInt<32>(Value) || Subtarget.hasInterlockedAccess1())
         NegSrc2 = DAG.getConstant(Value, MemVT);
-    } else if (TM.getSubtargetImpl()->hasInterlockedAccess1())
+    } else if (Subtarget.hasInterlockedAccess1())
       // Use LAA(G) if available.
       NegSrc2 = DAG.getNode(ISD::SUB, DL, MemVT, DAG.getConstant(0, MemVT),
                             Src2);
@@ -2602,7 +2614,8 @@ static unsigned forceReg(MachineInstr *MI, MachineOperand &Base,
 MachineBasicBlock *
 SystemZTargetLowering::emitSelect(MachineInstr *MI,
                                   MachineBasicBlock *MBB) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
+  const SystemZInstrInfo *TII = static_cast<const SystemZInstrInfo *>(
+      MBB->getParent()->getTarget().getInstrInfo());
 
   unsigned DestReg  = MI->getOperand(0).getReg();
   unsigned TrueReg  = MI->getOperand(1).getReg();
@@ -2650,7 +2663,8 @@ SystemZTargetLowering::emitCondStore(MachineInstr *MI,
                                      MachineBasicBlock *MBB,
                                      unsigned StoreOpcode, unsigned STOCOpcode,
                                      bool Invert) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
+  const SystemZInstrInfo *TII = static_cast<const SystemZInstrInfo *>(
+      MBB->getParent()->getTarget().getInstrInfo());
 
   unsigned SrcReg     = MI->getOperand(0).getReg();
   MachineOperand Base = MI->getOperand(1);
@@ -2665,7 +2679,7 @@ SystemZTargetLowering::emitCondStore(MachineInstr *MI,
   // Use STOCOpcode if possible.  We could use different store patterns in
   // order to avoid matching the index register, but the performance trade-offs
   // might be more complicated in that case.
-  if (STOCOpcode && !IndexReg && TM.getSubtargetImpl()->hasLoadStoreOnCond()) {
+  if (STOCOpcode && !IndexReg && Subtarget.hasLoadStoreOnCond()) {
     if (Invert)
       CCMask ^= CCValid;
     BuildMI(*MBB, MI, DL, TII->get(STOCOpcode))
@@ -2717,8 +2731,9 @@ SystemZTargetLowering::emitAtomicLoadBinary(MachineInstr *MI,
                                             unsigned BinOpcode,
                                             unsigned BitSize,
                                             bool Invert) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
+  const SystemZInstrInfo *TII =
+      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   bool IsSubWord = (BitSize < 32);
 
@@ -2840,8 +2855,9 @@ SystemZTargetLowering::emitAtomicLoadMinMax(MachineInstr *MI,
                                             unsigned CompareOpcode,
                                             unsigned KeepOldMask,
                                             unsigned BitSize) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
+  const SystemZInstrInfo *TII =
+      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   bool IsSubWord = (BitSize < 32);
 
@@ -2951,8 +2967,9 @@ SystemZTargetLowering::emitAtomicLoadMinMax(MachineInstr *MI,
 MachineBasicBlock *
 SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
                                           MachineBasicBlock *MBB) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
+  const SystemZInstrInfo *TII =
+      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   // Extract the operands.  Base can be a register or a frame index.
@@ -3067,8 +3084,9 @@ MachineBasicBlock *
 SystemZTargetLowering::emitExt128(MachineInstr *MI,
                                   MachineBasicBlock *MBB,
                                   bool ClearEven, unsigned SubReg) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
+  const SystemZInstrInfo *TII =
+      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   DebugLoc DL = MI->getDebugLoc();
 
@@ -3098,8 +3116,9 @@ MachineBasicBlock *
 SystemZTargetLowering::emitMemMemWrapper(MachineInstr *MI,
                                          MachineBasicBlock *MBB,
                                          unsigned Opcode) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
+  const SystemZInstrInfo *TII =
+      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   DebugLoc DL = MI->getDebugLoc();
 
@@ -3267,8 +3286,9 @@ MachineBasicBlock *
 SystemZTargetLowering::emitStringWrapper(MachineInstr *MI,
                                          MachineBasicBlock *MBB,
                                          unsigned Opcode) const {
-  const SystemZInstrInfo *TII = TM.getInstrInfo();
   MachineFunction &MF = *MBB->getParent();
+  const SystemZInstrInfo *TII =
+      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   DebugLoc DL = MI->getDebugLoc();
 

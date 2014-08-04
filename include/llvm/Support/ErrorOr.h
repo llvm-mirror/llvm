@@ -18,8 +18,8 @@
 
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/Support/AlignOf.h"
-#include "llvm/Support/system_error.h"
 #include <cassert>
+#include <system_error>
 #include <type_traits>
 
 namespace llvm {
@@ -94,15 +94,16 @@ private:
 
 public:
   template <class E>
-  ErrorOr(E ErrorCode, typename std::enable_if<is_error_code_enum<E>::value ||
-                                               is_error_condition_enum<E>::value,
-                                               void *>::type = 0)
+  ErrorOr(E ErrorCode,
+          typename std::enable_if<std::is_error_code_enum<E>::value ||
+                                      std::is_error_condition_enum<E>::value,
+                                  void *>::type = 0)
       : HasError(true) {
-    new (getErrorStorage()) error_code(make_error_code(ErrorCode));
+    new (getErrorStorage()) std::error_code(make_error_code(ErrorCode));
   }
 
-  ErrorOr(llvm::error_code EC) : HasError(true) {
-    new (getErrorStorage()) error_code(EC);
+  ErrorOr(std::error_code EC) : HasError(true) {
+    new (getErrorStorage()) std::error_code(EC);
   }
 
   ErrorOr(T Val) : HasError(false) {
@@ -162,8 +163,8 @@ public:
   reference get() { return *getStorage(); }
   const_reference get() const { return const_cast<ErrorOr<T> >(this)->get(); }
 
-  error_code getError() const {
-    return HasError ? *getErrorStorage() : error_code::success();
+  std::error_code getError() const {
+    return HasError ? *getErrorStorage() : std::error_code();
   }
 
   pointer operator ->() {
@@ -184,7 +185,7 @@ private:
     } else {
       // Get other's error.
       HasError = true;
-      new (getErrorStorage()) error_code(Other.getError());
+      new (getErrorStorage()) std::error_code(Other.getError());
     }
   }
 
@@ -216,7 +217,7 @@ private:
     } else {
       // Get other's error.
       HasError = true;
-      new (getErrorStorage()) error_code(Other.getError());
+      new (getErrorStorage()) std::error_code(Other.getError());
     }
   }
 
@@ -247,28 +248,29 @@ private:
     return reinterpret_cast<const storage_type*>(TStorage.buffer);
   }
 
-  error_code *getErrorStorage() {
+  std::error_code *getErrorStorage() {
     assert(HasError && "Cannot get error when a value exists!");
-    return reinterpret_cast<error_code*>(ErrorStorage.buffer);
+    return reinterpret_cast<std::error_code *>(ErrorStorage.buffer);
   }
 
-  const error_code *getErrorStorage() const {
+  const std::error_code *getErrorStorage() const {
     return const_cast<ErrorOr<T> *>(this)->getErrorStorage();
   }
 
 
   union {
     AlignedCharArrayUnion<storage_type> TStorage;
-    AlignedCharArrayUnion<error_code> ErrorStorage;
+    AlignedCharArrayUnion<std::error_code> ErrorStorage;
   };
   bool HasError : 1;
 };
 
-template<class T, class E>
-typename std::enable_if<is_error_code_enum<E>::value ||
-                        is_error_condition_enum<E>::value, bool>::type
-operator ==(ErrorOr<T> &Err, E Code) {
-  return error_code(Err) == Code;
+template <class T, class E>
+typename std::enable_if<std::is_error_code_enum<E>::value ||
+                            std::is_error_condition_enum<E>::value,
+                        bool>::type
+operator==(ErrorOr<T> &Err, E Code) {
+  return std::error_code(Err) == Code;
 }
 } // end namespace llvm
 
