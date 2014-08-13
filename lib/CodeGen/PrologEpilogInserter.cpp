@@ -41,6 +41,7 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include <climits>
 
 using namespace llvm;
@@ -110,8 +111,8 @@ typedef SmallSetVector<int, 8> StackObjSet;
 ///
 bool PEI::runOnMachineFunction(MachineFunction &Fn) {
   const Function* F = Fn.getFunction();
-  const TargetRegisterInfo *TRI = Fn.getTarget().getRegisterInfo();
-  const TargetFrameLowering *TFI = Fn.getTarget().getFrameLowering();
+  const TargetRegisterInfo *TRI = Fn.getSubtarget().getRegisterInfo();
+  const TargetFrameLowering *TFI = Fn.getSubtarget().getFrameLowering();
 
   assert(!Fn.getRegInfo().getNumVirtRegs() && "Regalloc must assign all vregs");
 
@@ -185,8 +186,8 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
 /// variables for the function's frame information and eliminate call frame
 /// pseudo instructions.
 void PEI::calculateCallsInformation(MachineFunction &Fn) {
-  const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
-  const TargetFrameLowering *TFI = Fn.getTarget().getFrameLowering();
+  const TargetInstrInfo &TII = *Fn.getSubtarget().getInstrInfo();
+  const TargetFrameLowering *TFI = Fn.getSubtarget().getFrameLowering();
   MachineFrameInfo *MFI = Fn.getFrameInfo();
 
   unsigned MaxCallFrameSize = 0;
@@ -239,8 +240,8 @@ void PEI::calculateCallsInformation(MachineFunction &Fn) {
 /// calculateCalleeSavedRegisters - Scan the function for modified callee saved
 /// registers.
 void PEI::calculateCalleeSavedRegisters(MachineFunction &F) {
-  const TargetRegisterInfo *RegInfo = F.getTarget().getRegisterInfo();
-  const TargetFrameLowering *TFI = F.getTarget().getFrameLowering();
+  const TargetRegisterInfo *RegInfo = F.getSubtarget().getRegisterInfo();
+  const TargetFrameLowering *TFI = F.getSubtarget().getFrameLowering();
   MachineFrameInfo *MFI = F.getFrameInfo();
 
   // Get the callee saved register list...
@@ -337,9 +338,9 @@ void PEI::insertCSRSpillsAndRestores(MachineFunction &Fn) {
   if (CSI.empty())
     return;
 
-  const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
-  const TargetFrameLowering *TFI = Fn.getTarget().getFrameLowering();
-  const TargetRegisterInfo *TRI = Fn.getTarget().getRegisterInfo();
+  const TargetInstrInfo &TII = *Fn.getSubtarget().getInstrInfo();
+  const TargetFrameLowering *TFI = Fn.getSubtarget().getFrameLowering();
+  const TargetRegisterInfo *TRI = Fn.getSubtarget().getRegisterInfo();
   MachineBasicBlock::iterator I;
 
   // Spill using target interface.
@@ -445,7 +446,7 @@ AssignProtectedObjSet(const StackObjSet &UnassignedObjs,
 /// abstract stack objects.
 ///
 void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
-  const TargetFrameLowering &TFI = *Fn.getTarget().getFrameLowering();
+  const TargetFrameLowering &TFI = *Fn.getSubtarget().getFrameLowering();
   StackProtector *SP = &getAnalysis<StackProtector>();
 
   bool StackGrowsDown =
@@ -515,7 +516,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
   // Make sure the special register scavenging spill slot is closest to the
   // incoming stack pointer if a frame pointer is required and is closer
   // to the incoming rather than the final stack pointer.
-  const TargetRegisterInfo *RegInfo = Fn.getTarget().getRegisterInfo();
+  const TargetRegisterInfo *RegInfo = Fn.getSubtarget().getRegisterInfo();
   bool EarlyScavengingSlots = (TFI.hasFP(Fn) &&
                                TFI.isFPCloseToIncomingSP() &&
                                RegInfo->useFPForScavengingIndex(Fn) &&
@@ -670,7 +671,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
 /// prolog and epilog code to the function.
 ///
 void PEI::insertPrologEpilogCode(MachineFunction &Fn) {
-  const TargetFrameLowering &TFI = *Fn.getTarget().getFrameLowering();
+  const TargetFrameLowering &TFI = *Fn.getSubtarget().getFrameLowering();
 
   // Add prologue to the function...
   TFI.emitPrologue(Fn);
@@ -739,10 +740,11 @@ void PEI::replaceFrameIndices(MachineFunction &Fn) {
 void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
                               int &SPAdj) {
   const TargetMachine &TM = Fn.getTarget();
-  assert(TM.getRegisterInfo() && "TM::getRegisterInfo() must be implemented!");
-  const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
-  const TargetRegisterInfo &TRI = *TM.getRegisterInfo();
-  const TargetFrameLowering *TFI = TM.getFrameLowering();
+  assert(TM.getSubtargetImpl()->getRegisterInfo() &&
+         "TM::getRegisterInfo() must be implemented!");
+  const TargetInstrInfo &TII = *Fn.getSubtarget().getInstrInfo();
+  const TargetRegisterInfo &TRI = *TM.getSubtargetImpl()->getRegisterInfo();
+  const TargetFrameLowering *TFI = TM.getSubtargetImpl()->getFrameLowering();
   bool StackGrowsDown =
     TFI->getStackGrowthDirection() == TargetFrameLowering::StackGrowsDown;
   int FrameSetupOpcode   = TII.getCallFrameSetupOpcode();
@@ -837,7 +839,8 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
 /// FIXME: Iterating over the instruction stream is unnecessary. We can simply
 /// iterate over the vreg use list, which at this point only contains machine
 /// operands for which eliminateFrameIndex need a new scratch reg.
-void PEI::scavengeFrameVirtualRegs(MachineFunction &Fn) {
+void
+PEI::scavengeFrameVirtualRegs(MachineFunction &Fn) {
   // Run through the instructions and find any virtual registers.
   for (MachineFunction::iterator BB = Fn.begin(),
        E = Fn.end(); BB != E; ++BB) {
@@ -888,12 +891,16 @@ void PEI::scavengeFrameVirtualRegs(MachineFunction &Fn) {
           // Replace this reference to the virtual register with the
           // scratch register.
           assert (ScratchReg && "Missing scratch register!");
+          MachineRegisterInfo &MRI = Fn.getRegInfo();
           Fn.getRegInfo().replaceRegWith(Reg, ScratchReg);
+          
+          // Make sure MRI now accounts this register as used.
+          MRI.setPhysRegUsed(ScratchReg);
 
           // Because this instruction was processed by the RS before this
           // register was allocated, make sure that the RS now records the
           // register as being used.
-          RS->setUsed(ScratchReg);
+          RS->setRegUsed(ScratchReg);
         }
       }
 

@@ -11,8 +11,8 @@
 // provided IR, this tool shuffles the use-lists and then writes and reads to a
 // separate Module whose use-list orders are compared to the original.
 //
-// The shuffles are deterministic and somewhat naive.  On a given shuffle, some
-// use-lists will not change at all.  The algorithm per iteration is as follows:
+// The shuffles are deterministic, but guarantee that use-lists will change.
+// The algorithm per iteration is as follows:
 //
 //  1. Seed the random number generator.  The seed is different for each
 //     shuffle.  Shuffle 0 uses default+0, shuffle 1 uses default+1, and so on.
@@ -21,14 +21,14 @@
 //
 //  3. Assign a random number to each Use in the Value's use-list in order.
 //
-//  4. Sort the use-list using Value::sortUseList(), which is a stable sort.
+//  4. If the numbers are already in order, reassign numbers until they aren't.
 //
-// Shuffling a larger number of times provides a better statistical guarantee
-// that each use-list has changed at least once.
+//  5. Sort the use-list using Value::sortUseList(), which is a stable sort.
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/LLVMContext.h"
@@ -46,6 +46,8 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/SystemUtils.h"
+#include <random>
+#include <vector>
 
 using namespace llvm;
 
@@ -62,7 +64,7 @@ static cl::opt<bool> SaveTemps("save-temps", cl::desc("Save temp files"),
 static cl::opt<unsigned>
     NumShuffles("num-shuffles",
                 cl::desc("Number of times to shuffle and verify use-lists"),
-                cl::init(5));
+                cl::init(1));
 
 namespace {
 
@@ -153,8 +155,8 @@ std::unique_ptr<Module> TempFile::readBitcode(LLVMContext &Context) const {
     return nullptr;
   }
 
-  std::unique_ptr<MemoryBuffer> Buffer = std::move(BufferOr.get());
-  ErrorOr<Module *> ModuleOr = parseBitcodeFile(Buffer.get(), Context);
+  MemoryBuffer *Buffer = BufferOr.get().get();
+  ErrorOr<Module *> ModuleOr = parseBitcodeFile(Buffer, Context);
   if (!ModuleOr) {
     DEBUG(dbgs() << "error: " << ModuleOr.getError().message() << "\n");
     return nullptr;
@@ -359,6 +361,148 @@ static bool verifyAssemblyUseListOrder(const Module &M) {
   return matches(ValueMapping(M), ValueMapping(*OtherM));
 }
 
+static void verifyUseListOrder(const Module &M) {
+  if (!verifyBitcodeUseListOrder(M))
+    report_fatal_error("bitcode use-list order changed");
+
+  if (shouldPreserveAssemblyUseListOrder())
+    if (!verifyAssemblyUseListOrder(M))
+      report_fatal_error("assembly use-list order changed");
+}
+
+static void shuffleValueUseLists(Value *V, std::minstd_rand0 &Gen,
+                                 DenseSet<Value *> &Seen) {
+  if (!Seen.insert(V).second)
+    return;
+
+  if (auto *C = dyn_cast<Constant>(V))
+    if (!isa<GlobalValue>(C))
+      for (Value *Op : C->operands())
+        shuffleValueUseLists(Op, Gen, Seen);
+
+  if (V->use_empty() || std::next(V->use_begin()) == V->use_end())
+    // Nothing to shuffle for 0 or 1 users.
+    return;
+
+  // Generate random numbers between 10 and 99, which will line up nicely in
+  // debug output.  We're not worried about collisons here.
+  DEBUG(dbgs() << "V = "; V->dump());
+  std::uniform_int_distribution<short> Dist(10, 99);
+  SmallDenseMap<const Use *, short, 16> Order;
+  auto compareUses =
+      [&Order](const Use &L, const Use &R) { return Order[&L] < Order[&R]; };
+  do {
+    for (const Use &U : V->uses()) {
+      auto I = Dist(Gen);
+      Order[&U] = I;
+      DEBUG(dbgs() << " - order: " << I << ", op = " << U.getOperandNo()
+                   << ", U = ";
+            U.getUser()->dump());
+    }
+  } while (std::is_sorted(V->use_begin(), V->use_end(), compareUses));
+
+  DEBUG(dbgs() << " => shuffle\n");
+  V->sortUseList(compareUses);
+
+  DEBUG({
+    for (const Use &U : V->uses()) {
+      dbgs() << " - order: " << Order.lookup(&U)
+             << ", op = " << U.getOperandNo() << ", U = ";
+      U.getUser()->dump();
+    }
+  });
+}
+
+static void reverseValueUseLists(Value *V, DenseSet<Value *> &Seen) {
+  if (!Seen.insert(V).second)
+    return;
+
+  if (auto *C = dyn_cast<Constant>(V))
+    if (!isa<GlobalValue>(C))
+      for (Value *Op : C->operands())
+        reverseValueUseLists(Op, Seen);
+
+  if (V->use_empty() || std::next(V->use_begin()) == V->use_end())
+    // Nothing to shuffle for 0 or 1 users.
+    return;
+
+  DEBUG({
+    dbgs() << "V = ";
+    V->dump();
+    for (const Use &U : V->uses()) {
+      dbgs() << " - order: op = " << U.getOperandNo() << ", U = ";
+      U.getUser()->dump();
+    }
+    dbgs() << " => reverse\n";
+  });
+
+  V->reverseUseList();
+
+  DEBUG({
+    for (const Use &U : V->uses()) {
+      dbgs() << " - order: op = " << U.getOperandNo() << ", U = ";
+      U.getUser()->dump();
+    }
+  });
+}
+
+template <class Changer>
+static void changeUseLists(Module &M, Changer changeValueUseList) {
+  // Visit every value that would be serialized to an IR file.
+  //
+  // Globals.
+  for (GlobalVariable &G : M.globals())
+    changeValueUseList(&G);
+  for (GlobalAlias &A : M.aliases())
+    changeValueUseList(&A);
+  for (Function &F : M)
+    changeValueUseList(&F);
+
+  // Constants used by globals.
+  for (GlobalVariable &G : M.globals())
+    if (G.hasInitializer())
+      changeValueUseList(G.getInitializer());
+  for (GlobalAlias &A : M.aliases())
+    changeValueUseList(A.getAliasee());
+  for (Function &F : M)
+    if (F.hasPrefixData())
+      changeValueUseList(F.getPrefixData());
+
+  // Function bodies.
+  for (Function &F : M) {
+    for (Argument &A : F.args())
+      changeValueUseList(&A);
+    for (BasicBlock &BB : F)
+      changeValueUseList(&BB);
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        changeValueUseList(&I);
+
+    // Constants used by instructions.
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        for (Value *Op : I.operands())
+          if ((isa<Constant>(Op) && !isa<GlobalValue>(*Op)) ||
+              isa<InlineAsm>(Op))
+            changeValueUseList(Op);
+  }
+}
+
+static void shuffleUseLists(Module &M, unsigned SeedOffset) {
+  DEBUG(dbgs() << "*** shuffle-use-lists ***\n");
+  std::minstd_rand0 Gen(std::minstd_rand0::default_seed + SeedOffset);
+  DenseSet<Value *> Seen;
+  changeUseLists(M, [&](Value *V) { shuffleValueUseLists(V, Gen, Seen); });
+  DEBUG(dbgs() << "\n");
+}
+
+static void reverseUseLists(Module &M) {
+  DEBUG(dbgs() << "*** reverse-use-lists ***\n");
+  DenseSet<Value *> Seen;
+  changeUseLists(M, [&](Value *V) { reverseValueUseLists(V, Seen); });
+  DEBUG(dbgs() << "\n");
+}
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal();
   llvm::PrettyStackTraceProgram X(argc, argv);
@@ -391,18 +535,21 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  // Verify the use lists now and after reversing them.
+  verifyUseListOrder(*M);
+  reverseUseLists(*M);
+  verifyUseListOrder(*M);
+
   for (unsigned I = 0, E = NumShuffles; I != E; ++I) {
     DEBUG(dbgs() << "*** iteration: " << I << " ***\n");
 
-    // Shuffle with a different seed each time so that use-lists that aren't
-    // modified the first time are likely to be modified the next time.
+    // Shuffle with a different (deterministic) seed each time.
     shuffleUseLists(*M, I);
-    if (!verifyBitcodeUseListOrder(*M))
-      report_fatal_error("bitcode use-list order changed");
 
-    if (shouldPreserveAssemblyUseListOrder())
-      if (!verifyAssemblyUseListOrder(*M))
-        report_fatal_error("assembly use-list order changed");
+    // Verify again before and after reversing.
+    verifyUseListOrder(*M);
+    reverseUseLists(*M);
+    verifyUseListOrder(*M);
   }
 
   return 0;

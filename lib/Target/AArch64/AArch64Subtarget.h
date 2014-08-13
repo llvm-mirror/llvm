@@ -71,15 +71,20 @@ public:
   AArch64Subtarget(const std::string &TT, const std::string &CPU,
 		   const std::string &FS, TargetMachine &TM, bool LittleEndian);
 
-  const AArch64SelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
-  const AArch64FrameLowering *getFrameLowering() const {
+  const AArch64SelectionDAGInfo *getSelectionDAGInfo() const override {
+    return &TSInfo;
+  }
+  const AArch64FrameLowering *getFrameLowering() const override {
     return &FrameLowering;
   }
-  const AArch64TargetLowering *getTargetLowering() const {
+  const AArch64TargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }
-  const AArch64InstrInfo *getInstrInfo() const { return &InstrInfo; }
-  const DataLayout *getDataLayout() const { return &DL; }
+  const AArch64InstrInfo *getInstrInfo() const override { return &InstrInfo; }
+  const DataLayout *getDataLayout() const override { return &DL; }
+  const AArch64RegisterInfo *getRegisterInfo() const override {
+    return &getInstrInfo()->getRegisterInfo();
+  }
   bool enableMachineScheduler() const override { return true; }
 
   bool hasZeroCycleRegMove() const { return HasZeroCycleRegMove; }
@@ -94,9 +99,12 @@ public:
   bool isLittleEndian() const { return DL.isLittleEndian(); }
 
   bool isTargetDarwin() const { return TargetTriple.isOSDarwin(); }
+  bool isTargetIOS() const { return TargetTriple.isiOS(); }
+  bool isTargetLinux() const { return TargetTriple.isOSLinux(); }
+  bool isTargetWindows() const { return TargetTriple.isOSWindows(); }
 
+  bool isTargetCOFF() const { return TargetTriple.isOSBinFormatCOFF(); }
   bool isTargetELF() const { return TargetTriple.isOSBinFormatELF(); }
-
   bool isTargetMachO() const { return TargetTriple.isOSBinFormatMachO(); }
 
   bool isCyclone() const { return CPUString == "cyclone"; }

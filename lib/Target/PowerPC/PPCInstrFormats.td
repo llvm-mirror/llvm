@@ -422,6 +422,22 @@ class XForm_rs<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
   let B = 0;
 }
 
+class XForm_tlbws<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+              InstrItinClass itin, list<dag> pattern>
+  : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<5> RST;
+  bits<5> A;
+  bits<1> WS;
+
+  let Pattern = pattern;
+
+  let Inst{6-10}  = RST;
+  let Inst{11-15} = A;
+  let Inst{20}    = WS;
+  let Inst{21-30} = xo;
+  let Inst{31}    = 0;
+}
+
 class XForm_6<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
               InstrItinClass itin, list<dag> pattern> 
   : XForm_base_r3xo_swapped<opcode, xo, OOL, IOL, asmstr, itin> {
@@ -800,10 +816,9 @@ class DCB_Form<bits<10> xo, bits<5> immfield, dag OOL, dag IOL, string asmstr,
 
 
 // DSS_Form - Form X instruction, used for altivec dss* instructions.
-class DSS_Form<bits<10> xo, dag OOL, dag IOL, string asmstr, 
+class DSS_Form<bits<1> T, bits<10> xo, dag OOL, dag IOL, string asmstr,
                       InstrItinClass itin, list<dag> pattern>
   : I<31, OOL, IOL, asmstr, itin> {
-  bits<1> T;
   bits<2> STRM;
   bits<5> A;
   bits<5> B;

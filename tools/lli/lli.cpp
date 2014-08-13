@@ -544,13 +544,14 @@ int main(int argc, char **argv, char * const *envp) {
       Err.print(argv[0], errs());
       return 1;
     }
-    std::error_code EC;
-    object::Archive *Ar = new object::Archive(std::move(ArBuf.get()), EC);
-    if (EC || !Ar) {
-      Err.print(argv[0], errs());
+
+    ErrorOr<std::unique_ptr<object::Archive>> ArOrErr =
+        object::Archive::create(std::move(ArBuf.get()));
+    if (std::error_code EC = ArOrErr.getError()) {
+      errs() << EC.message();
       return 1;
     }
-    EE->addArchive(Ar);
+    EE->addArchive(std::move(ArOrErr.get()));
   }
 
   // If the target is Cygwin/MingW and we are generating remote code, we

@@ -39,6 +39,7 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 
 #include <memory>
 
@@ -267,7 +268,7 @@ public:
                        LiveIntervals &LIS, const TargetInstrInfo &TRI);
 
   /// findDebugLoc - Return DebugLoc used for this DBG_VALUE instruction. A
-  /// variable may have more than one corresponding DBG_VALUE instructions. 
+  /// variable may have more than one corresponding DBG_VALUE instructions.
   /// Only first one needs DebugLoc to identify variable's lexical scope
   /// in source file.
   DebugLoc findDebugLoc();
@@ -361,7 +362,7 @@ public:
 
 void UserValue::print(raw_ostream &OS, const TargetMachine *TM) {
   DIVariable DV(variable);
-  OS << "!\""; 
+  OS << "!\"";
   DV.printExtendedName(OS);
   OS << "\"\t";
   if (offset)
@@ -698,7 +699,7 @@ bool LDVImpl::runOnMachineFunction(MachineFunction &mf) {
   MF = &mf;
   LIS = &pass.getAnalysis<LiveIntervals>();
   MDT = &pass.getAnalysis<MachineDominatorTree>();
-  TRI = mf.getTarget().getRegisterInfo();
+  TRI = mf.getSubtarget().getRegisterInfo();
   LS.initialize(mf);
   DEBUG(dbgs() << "********** COMPUTING LIVE DEBUG VARIABLES: "
                << mf.getName() << " **********\n");
@@ -993,7 +994,7 @@ void LDVImpl::emitDebugValues(VirtRegMap *VRM) {
   DEBUG(dbgs() << "********** EMITTING LIVE DEBUG VARIABLES **********\n");
   if (!MF)
     return;
-  const TargetInstrInfo *TII = MF->getTarget().getInstrInfo();
+  const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
   for (unsigned i = 0, e = userValues.size(); i != e; ++i) {
     DEBUG(userValues[i]->print(dbgs(), &MF->getTarget()));
     userValues[i]->rewriteLocations(*VRM, *TRI);

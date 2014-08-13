@@ -3419,6 +3419,12 @@
 # CHECK-BE: mfspr 2, 1                      # encoding: [0x7c,0x41,0x02,0xa6]
 # CHECK-LE: mfspr 2, 1                      # encoding: [0xa6,0x02,0x41,0x7c]
             mfxer 2
+# CHECK-BE: mfspr 2, 4                      # encoding: [0x7c,0x44,0x02,0xa6]
+# CHECK-LE: mfspr 2, 4                      # encoding: [0xa6,0x02,0x44,0x7c]
+            mfrtcu 2
+# CHECK-BE: mfspr 2, 5                      # encoding: [0x7c,0x45,0x02,0xa6]
+# CHECK-LE: mfspr 2, 5                      # encoding: [0xa6,0x02,0x45,0x7c]
+            mfrtcl 2
 # CHECK-BE: mtspr 17, 2                     # encoding: [0x7c,0x51,0x03,0xa6]
 # CHECK-LE: mtspr 17, 2                     # encoding: [0xa6,0x03,0x51,0x7c]
             mtdscr 2
@@ -3586,10 +3592,44 @@
 # CHECK-LE: mtspr 275, 4                    # encoding: [0xa6,0x43,0x93,0x7c]
             mtsprg3 %r4
 
-# e500/e500mc instructions:
-# CHECK-BE: rfdi                            # encoding: [0x4c,0x00,0x00,0x4e]
-# CHECK-LE: rfdi                            # encoding: [0x4e,0x00,0x00,0x4c]
-            rfdi
-# CHECK-BE: rfmci                            # encoding: [0x4c,0x00,0x00,0x4c]
-# CHECK-LE: rfmci                            # encoding: [0x4c,0x00,0x00,0x4c]
-            rfmci
+# Altivec Data Stream instruction:
+# CHECK-BE: dss 3                            # encoding: [0x7c,0x60,0x06,0x6c]
+# CHECK-LE: dss 3                            # encoding: [0x6c,0x06,0x60,0x7c]
+            dss 3
+# CHECK-BE: dssall                           # encoding: [0x7e,0x00,0x06,0x6c]
+# CHECK-LE: dssall                           # encoding: [0x6c,0x06,0x00,0x7e]
+            dssall
+# CHECK-BE: dst 12, 11, 3                    # encoding: [0x7c,0x6c,0x5a,0xac]
+# CHECK-LE: dst 12, 11, 3                    # encoding: [0xac,0x5a,0x6c,0x7c]
+            dst %r12, %r11, 3
+# CHECK-BE: dstt 12, 11, 3                   # encoding: [0x7e,0x6c,0x5a,0xac]
+# CHECK-LE: dstt 12, 11, 3                   # encoding: [0xac,0x5a,0x6c,0x7e]
+            dstt %r12, %r11, 3
+# CHECK-BE: dstst 12, 11, 3                  # encoding: [0x7c,0x6c,0x5a,0xec]
+# CHECK-LE: dstst 12, 11, 3                  # encoding: [0xec,0x5a,0x6c,0x7c]
+            dstst %r12, %r11, 3
+# CHECK-BE: dststt 12, 11, 3                 # encoding: [0x7e,0x6c,0x5a,0xec]
+# CHECK-LE: dststt 12, 11, 3                 # encoding: [0xec,0x5a,0x6c,0x7e]
+            dststt %r12, %r11, 3
+
+# CHECK-BE: tlbia                            # encoding: [0x7c,0x00,0x02,0xe4]
+# CHECK-LE: tlbia                            # encoding: [0xe4,0x02,0x00,0x7c]
+            tlbia
+
+# CHECK-BE: lswi 8, 6, 7                     # encoding: [0x7d,0x06,0x3c,0xaa]
+# CHECK-LE: lswi 8, 6, 7                     # encoding: [0xaa,0x3c,0x06,0x7d]
+            lswi %r8, %r6, 7
+# CHECK-BE: stswi 8, 6, 7                    # encoding: [0x7d,0x06,0x3d,0xaa]
+# CHECK-LE: stswi 8, 6, 7                    # encoding: [0xaa,0x3d,0x06,0x7d]
+            stswi %r8, %r6, 7
+
+# CHECK-BE: rfid                            # encoding: [0x4c,0x00,0x00,0x24]
+# CHECK-LE: rfid                            # encoding: [0x24,0x00,0x00,0x4c]
+            rfid
+
+# CHECK-BE: mfspr 2, 280                     # encoding: [0x7c,0x58,0x42,0xa6]
+# CHECK-LE: mfspr 2, 280                     # encoding: [0xa6,0x42,0x58,0x7c]
+            mfasr 2
+# CHECK-BE: mtspr 280, 2                     # encoding: [0x7c,0x58,0x43,0xa6]
+# CHECK-LE: mtspr 280, 2                     # encoding: [0xa6,0x43,0x58,0x7c]
+            mtasr 2

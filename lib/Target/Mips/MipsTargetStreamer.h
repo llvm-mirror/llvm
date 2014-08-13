@@ -30,6 +30,8 @@ public:
   virtual void emitDirectiveSetNoReorder();
   virtual void emitDirectiveSetMacro();
   virtual void emitDirectiveSetNoMacro();
+  virtual void emitDirectiveSetMsa();
+  virtual void emitDirectiveSetNoMsa();
   virtual void emitDirectiveSetAt();
   virtual void emitDirectiveSetNoAt();
   virtual void emitDirectiveEnd(StringRef Name);
@@ -45,9 +47,17 @@ public:
   virtual void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff);
   virtual void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff);
 
+  virtual void emitDirectiveSetMips1();
+  virtual void emitDirectiveSetMips2();
+  virtual void emitDirectiveSetMips3();
+  virtual void emitDirectiveSetMips4();
+  virtual void emitDirectiveSetMips5();
+  virtual void emitDirectiveSetMips32();
   virtual void emitDirectiveSetMips32R2();
+  virtual void emitDirectiveSetMips32R6();
   virtual void emitDirectiveSetMips64();
   virtual void emitDirectiveSetMips64R2();
+  virtual void emitDirectiveSetMips64R6();
   virtual void emitDirectiveSetDsp();
 
   // PIC support
@@ -106,6 +116,8 @@ public:
   void emitDirectiveSetNoReorder() override;
   void emitDirectiveSetMacro() override;
   void emitDirectiveSetNoMacro() override;
+  void emitDirectiveSetMsa() override;
+  void emitDirectiveSetNoMsa() override;
   void emitDirectiveSetAt() override;
   void emitDirectiveSetNoAt() override;
   void emitDirectiveEnd(StringRef Name) override;
@@ -121,9 +133,17 @@ public:
   void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff) override;
   void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff) override;
 
+  void emitDirectiveSetMips1() override;
+  void emitDirectiveSetMips2() override;
+  void emitDirectiveSetMips3() override;
+  void emitDirectiveSetMips4() override;
+  void emitDirectiveSetMips5() override;
+  void emitDirectiveSetMips32() override;
   void emitDirectiveSetMips32R2() override;
+  void emitDirectiveSetMips32R6() override;
   void emitDirectiveSetMips64() override;
   void emitDirectiveSetMips64R2() override;
+  void emitDirectiveSetMips64R6() override;
   void emitDirectiveSetDsp() override;
 
   // PIC support
@@ -178,9 +198,17 @@ public:
   void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff) override;
   void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff) override;
 
+  void emitDirectiveSetMips1() override;
+  void emitDirectiveSetMips2() override;
+  void emitDirectiveSetMips3() override;
+  void emitDirectiveSetMips4() override;
+  void emitDirectiveSetMips5() override;
+  void emitDirectiveSetMips32() override;
   void emitDirectiveSetMips32R2() override;
+  void emitDirectiveSetMips32R6() override;
   void emitDirectiveSetMips64() override;
   void emitDirectiveSetMips64R2() override;
+  void emitDirectiveSetMips64R6() override;
   void emitDirectiveSetDsp() override;
 
   // PIC support

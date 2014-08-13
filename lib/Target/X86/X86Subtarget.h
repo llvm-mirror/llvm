@@ -253,12 +253,21 @@ public:
                const std::string &FS, X86TargetMachine &TM,
                unsigned StackAlignOverride);
 
-  const X86TargetLowering *getTargetLowering() const { return &TLInfo; }
-  const X86InstrInfo *getInstrInfo() const { return &InstrInfo; }
-  const DataLayout *getDataLayout() const { return &DL; }
-  const X86FrameLowering *getFrameLowering() const { return &FrameLowering; }
-  const X86SelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
-  X86JITInfo *getJITInfo() { return &JITInfo; }
+  const X86TargetLowering *getTargetLowering() const override {
+    return &TLInfo;
+  }
+  const X86InstrInfo *getInstrInfo() const override { return &InstrInfo; }
+  const DataLayout *getDataLayout() const override { return &DL; }
+  const X86FrameLowering *getFrameLowering() const override {
+    return &FrameLowering;
+  }
+  const X86SelectionDAGInfo *getSelectionDAGInfo() const override {
+    return &TSInfo;
+  }
+  const X86RegisterInfo *getRegisterInfo() const override {
+    return &getInstrInfo()->getRegisterInfo();
+  }
+  X86JITInfo *getJITInfo() override { return &JITInfo; }
 
   /// getStackAlignment - Returns the minimum alignment known to hold of the
   /// stack frame on entry to the function and which must be maintained by every
@@ -303,7 +312,8 @@ public:
 
   /// Is this x86_64 with the LP64 programming model (standard AMD64, no x32)?
   bool isTarget64BitLP64() const {
-    return In64BitMode && (TargetTriple.getEnvironment() != Triple::GNUX32);
+    return In64BitMode && (TargetTriple.getEnvironment() != Triple::GNUX32 &&
+                           TargetTriple.getOS() != Triple::NaCl);
   }
 
   PICStyles::Style getPICStyle() const { return PICStyle; }
@@ -470,7 +480,9 @@ public:
 
   /// getInstrItins = Return the instruction itineraries based on the
   /// subtarget selection.
-  const InstrItineraryData &getInstrItineraryData() const { return InstrItins; }
+  const InstrItineraryData *getInstrItineraryData() const override {
+    return &InstrItins;
+  }
 
   AntiDepBreakMode getAntiDepBreakMode() const override {
     return TargetSubtargetInfo::ANTIDEP_CRITICAL;

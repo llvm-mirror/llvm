@@ -106,7 +106,16 @@
 # CHECK-BE: mftb 2, 268                     # encoding: [0x7c,0x4c,0x42,0xe6]
 # CHECK-LE: mftb 2, 268                     # encoding: [0xe6,0x42,0x4c,0x7c]
             mftb 2
+# CHECK-BE: mftb 2, 268                     # encoding: [0x7c,0x4c,0x42,0xe6]
+# CHECK-LE: mftb 2, 268                     # encoding: [0xe6,0x42,0x4c,0x7c]
+            mftbl 2
 # CHECK-BE: mftb 2, 269                     # encoding: [0x7c,0x4d,0x42,0xe6]
 # CHECK-LE: mftb 2, 269                     # encoding: [0xe6,0x42,0x4d,0x7c]
             mftbu 2
 
+# CHECK-BE: mtspr 284, 3                    # encoding: [0x7c,0x7c,0x43,0xa6]
+# CHECK-LE: mtspr 284, 3                    # encoding: [0xa6,0x43,0x7c,0x7c]
+            mttbl 3
+# CHECK-BE: mtspr 285, 3                    # encoding: [0x7c,0x7d,0x43,0xa6]
+# CHECK-LE: mtspr 285, 3                    # encoding: [0xa6,0x43,0x7d,0x7c]
+            mttbu 3

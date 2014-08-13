@@ -11,6 +11,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
@@ -36,7 +37,7 @@ void DbgValueHistoryMap::startInstrRange(const MDNode *Var,
                                          const MachineInstr &MI) {
   // Instruction range should start with a DBG_VALUE instruction for the
   // variable.
-  assert(MI.isDebugValue() && MI.getDebugVariable() == Var);
+  assert(MI.isDebugValue() && getEntireVariable(MI.getDebugVariable()) == Var);
   auto &Ranges = VarInstrRanges[Var];
   if (!Ranges.empty() && Ranges.back().second == nullptr &&
       Ranges.back().first->isIdenticalTo(&MI)) {
@@ -111,15 +112,23 @@ static void clobberRegisterUses(RegDescribedVarsMap &RegVars, unsigned RegNo,
   RegVars.erase(I);
 }
 
-// \brief Collect all registers clobbered by @MI and insert them to @Regs.
-static void collectClobberedRegisters(const MachineInstr &MI,
+// \brief Collect all registers clobbered by @MI and apply the functor
+// @Func to their RegNo.
+// @Func should be a functor with a void(unsigned) signature. We're
+// not using std::function here for performance reasons. It has a
+// small but measurable impact. By using a functor instead of a
+// std::set& here, we can avoid the overhead of constructing
+// temporaries in calculateDbgValueHistory, which has a significant
+// performance impact.
+template<typename Callable>
+static void applyToClobberedRegisters(const MachineInstr &MI,
                                       const TargetRegisterInfo *TRI,
-                                      std::set<unsigned> &Regs) {
+                                      Callable Func) {
   for (const MachineOperand &MO : MI.operands()) {
     if (!MO.isReg() || !MO.isDef() || !MO.getReg())
       continue;
     for (MCRegAliasIterator AI(MO.getReg(), TRI, true); AI.isValid(); ++AI)
-      Regs.insert(*AI);
+      Func(*AI);
   }
 }
 
@@ -145,17 +154,18 @@ static const MachineInstr *getFirstEpilogueInst(const MachineBasicBlock &MBB) {
 }
 
 // \brief Collect registers that are modified in the function body (their
-// contents is changed only in the prologue and epilogue).
+// contents is changed outside of the prologue and epilogue).
 static void collectChangingRegs(const MachineFunction *MF,
                                 const TargetRegisterInfo *TRI,
                                 std::set<unsigned> &Regs) {
   for (const auto &MBB : *MF) {
     auto FirstEpilogueInst = getFirstEpilogueInst(MBB);
-    bool IsInEpilogue = false;
+
     for (const auto &MI : MBB) {
-      IsInEpilogue |= &MI == FirstEpilogueInst;
-      if (!MI.getFlag(MachineInstr::FrameSetup) && !IsInEpilogue)
-        collectClobberedRegisters(MI, TRI, Regs);
+      if (&MI == FirstEpilogueInst)
+        break;
+      if (!MI.getFlag(MachineInstr::FrameSetup))
+        applyToClobberedRegisters(MI, TRI, [&](unsigned r) { Regs.insert(r); });
     }
   }
 }
@@ -172,17 +182,18 @@ void calculateDbgValueHistory(const MachineFunction *MF,
       if (!MI.isDebugValue()) {
         // Not a DBG_VALUE instruction. It may clobber registers which describe
         // some variables.
-        std::set<unsigned> MIClobberedRegs;
-        collectClobberedRegisters(MI, TRI, MIClobberedRegs);
-        for (unsigned RegNo : MIClobberedRegs) {
+        applyToClobberedRegisters(MI, TRI, [&](unsigned RegNo) {
           if (ChangingRegs.count(RegNo))
             clobberRegisterUses(RegVars, RegNo, Result, MI);
-        }
+        });
         continue;
       }
 
       assert(MI.getNumOperands() > 1 && "Invalid DBG_VALUE instruction!");
-      const MDNode *Var = MI.getDebugVariable();
+      // Use the base variable (without any DW_OP_piece expressions)
+      // as index into History. The full variables including the
+      // piece expressions are attached to the MI.
+      DIVariable Var = getEntireVariable(MI.getDebugVariable());
 
       if (unsigned PrevReg = Result.getRegisterForVar(Var))
         dropRegDescribedVar(RegVars, PrevReg, Var);

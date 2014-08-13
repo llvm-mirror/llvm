@@ -18,12 +18,15 @@
 namespace llvm {
 namespace object {
   class COFFObjectFile;
+  class MachOObjectFile;
   class ObjectFile;
   class RelocationRef;
 }
 
 extern cl::opt<std::string> TripleName;
 extern cl::opt<std::string> ArchName;
+extern cl::opt<std::string> MCPU;
+extern cl::list<std::string> MAttrs;
 
 // Various helper functions.
 bool error(std::error_code ec);
@@ -31,6 +34,8 @@ bool RelocAddressLess(object::RelocationRef a, object::RelocationRef b);
 void DumpBytes(StringRef bytes);
 void DisassembleInputMachO(StringRef Filename);
 void printCOFFUnwindInfo(const object::COFFObjectFile* o);
+void printMachOUnwindInfo(const object::MachOObjectFile* o);
+
 void printELFFileHeader(const object::ObjectFile *o);
 void printCOFFFileHeader(const object::ObjectFile *o);
 

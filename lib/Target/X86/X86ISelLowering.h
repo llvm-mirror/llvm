@@ -320,7 +320,10 @@ namespace llvm {
       // Several flavors of instructions with vector shuffle behaviors.
       PACKSS,
       PACKUS,
+      // Intra-lane alignr
       PALIGNR,
+      // AVX512 inter-lane alignr
+      VALIGN,
       PSHUFD,
       PSHUFHW,
       PSHUFLW,
@@ -937,7 +940,7 @@ namespace llvm {
 
     bool mayBeEmittedAsTailCall(CallInst *CI) const override;
 
-    MVT getTypeForExtArgOrReturn(MVT VT,
+    EVT getTypeForExtArgOrReturn(LLVMContext &Context, EVT VT,
                                  ISD::NodeType ExtendKind) const override;
 
     bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,

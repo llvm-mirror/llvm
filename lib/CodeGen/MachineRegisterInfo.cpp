@@ -16,6 +16,7 @@
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -67,7 +68,7 @@ MachineRegisterInfo::constrainRegClass(unsigned Reg,
 
 bool
 MachineRegisterInfo::recomputeRegClass(unsigned Reg, const TargetMachine &TM) {
-  const TargetInstrInfo *TII = TM.getInstrInfo();
+  const TargetInstrInfo *TII = TM.getSubtargetImpl()->getInstrInfo();
   const TargetRegisterClass *OldRC = getRegClass(Reg);
   const TargetRegisterClass *NewRC =
     getTargetRegisterInfo()->getLargestLegalSuperClass(OldRC);
@@ -283,17 +284,24 @@ void MachineRegisterInfo::moveOperands(MachineOperand *Dst,
 /// replaceRegWith - Replace all instances of FromReg with ToReg in the
 /// machine function.  This is like llvm-level X->replaceAllUsesWith(Y),
 /// except that it also changes any definitions of the register as well.
+/// If ToReg is a physical register we apply the sub register to obtain the
+/// final/proper physical register.
 void MachineRegisterInfo::replaceRegWith(unsigned FromReg, unsigned ToReg) {
   assert(FromReg != ToReg && "Cannot replace a reg with itself");
 
+  const TargetRegisterInfo *TRI = getTargetRegisterInfo();
+  
   // TODO: This could be more efficient by bulk changing the operands.
   for (reg_iterator I = reg_begin(FromReg), E = reg_end(); I != E; ) {
     MachineOperand &O = *I;
     ++I;
-    O.setReg(ToReg);
+    if (TargetRegisterInfo::isPhysicalRegister(ToReg)) {
+      O.substPhysReg(ToReg, *TRI);
+    } else {
+      O.setReg(ToReg);
+    }
   }
 }
-
 
 /// getVRegDef - Return the machine instr that defines the specified virtual
 /// register or null if none is found.  This assumes that the code is in SSA

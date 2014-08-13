@@ -31,11 +31,37 @@ enum {
   SWITCH_INST_MAGIC = 0x4B5 // May 2012 => 1205 => Hex
 };
 
-void BitcodeReader::materializeForwardReferencedFunctions() {
-  while (!BlockAddrFwdRefs.empty()) {
-    Function *F = BlockAddrFwdRefs.begin()->first;
-    F->Materialize();
+std::error_code BitcodeReader::materializeForwardReferencedFunctions() {
+  if (WillMaterializeAllForwardRefs)
+    return std::error_code();
+
+  // Prevent recursion.
+  WillMaterializeAllForwardRefs = true;
+
+  while (!BasicBlockFwdRefQueue.empty()) {
+    Function *F = BasicBlockFwdRefQueue.front();
+    BasicBlockFwdRefQueue.pop_front();
+    assert(F && "Expected valid function");
+    if (!BasicBlockFwdRefs.count(F))
+      // Already materialized.
+      continue;
+
+    // Check for a function that isn't materializable to prevent an infinite
+    // loop.  When parsing a blockaddress stored in a global variable, there
+    // isn't a trivial way to check if a function will have a body without a
+    // linear search through FunctionsWithBodies, so just check it here.
+    if (!F->isMaterializable())
+      return Error(BitcodeError::NeverResolvedFunctionFromBlockAddress);
+
+    // Try to materialize F.
+    if (std::error_code EC = Materialize(F))
+      return EC;
   }
+  assert(BasicBlockFwdRefs.empty() && "Function missing from queue");
+
+  // Reset state.
+  WillMaterializeAllForwardRefs = false;
+  return std::error_code();
 }
 
 void BitcodeReader::FreeState() {
@@ -51,7 +77,8 @@ void BitcodeReader::FreeState() {
   DeferredFunctionInfo.clear();
   MDKindMap.clear();
 
-  assert(BlockAddrFwdRefs.empty() && "Unresolved blockaddress fwd references");
+  assert(BasicBlockFwdRefs.empty() && "Unresolved blockaddress fwd references");
+  BasicBlockFwdRefQueue.clear();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1587,26 +1614,34 @@ std::error_code BitcodeReader::ParseConstants() {
       if (!Fn)
         return Error(BitcodeError::InvalidRecord);
 
+      // Don't let Fn get dematerialized.
+      BlockAddressesTaken.insert(Fn);
+
       // If the function is already parsed we can insert the block address right
       // away.
+      BasicBlock *BB;
+      unsigned BBID = Record[2];
+      if (!BBID)
+        // Invalid reference to entry block.
+        return Error(BitcodeError::InvalidID);
       if (!Fn->empty()) {
         Function::iterator BBI = Fn->begin(), BBE = Fn->end();
-        for (size_t I = 0, E = Record[2]; I != E; ++I) {
+        for (size_t I = 0, E = BBID; I != E; ++I) {
           if (BBI == BBE)
             return Error(BitcodeError::InvalidID);
           ++BBI;
         }
-        V = BlockAddress::get(Fn, BBI);
+        BB = BBI;
       } else {
         // Otherwise insert a placeholder and remember it so it can be inserted
         // when the function is parsed.
-        GlobalVariable *FwdRef = new GlobalVariable(*Fn->getParent(),
-                                                    Type::getInt8Ty(Context),
-                                            false, GlobalValue::InternalLinkage,
-                                                    nullptr, "");
-        BlockAddrFwdRefs[Fn].push_back(std::make_pair(Record[2], FwdRef));
-        V = FwdRef;
+        BB = BasicBlock::Create(Context);
+        auto &FwdBBs = BasicBlockFwdRefs[Fn];
+        if (FwdBBs.empty())
+          BasicBlockFwdRefQueue.push_back(Fn);
+        FwdBBs.emplace_back(BBID, BB);
       }
+      V = BlockAddress::get(Fn, BB);
       break;
     }
     }
@@ -2344,15 +2379,45 @@ std::error_code BitcodeReader::ParseFunctionBody(Function *F) {
     switch (BitCode) {
     default: // Default behavior: reject
       return Error(BitcodeError::InvalidValue);
-    case bitc::FUNC_CODE_DECLAREBLOCKS:     // DECLAREBLOCKS: [nblocks]
+    case bitc::FUNC_CODE_DECLAREBLOCKS: {   // DECLAREBLOCKS: [nblocks]
       if (Record.size() < 1 || Record[0] == 0)
         return Error(BitcodeError::InvalidRecord);
       // Create all the basic blocks for the function.
       FunctionBBs.resize(Record[0]);
-      for (unsigned i = 0, e = FunctionBBs.size(); i != e; ++i)
-        FunctionBBs[i] = BasicBlock::Create(Context, "", F);
+
+      // See if anything took the address of blocks in this function.
+      auto BBFRI = BasicBlockFwdRefs.find(F);
+      if (BBFRI == BasicBlockFwdRefs.end()) {
+        for (unsigned i = 0, e = FunctionBBs.size(); i != e; ++i)
+          FunctionBBs[i] = BasicBlock::Create(Context, "", F);
+      } else {
+        auto &BBRefs = BBFRI->second;
+        std::sort(BBRefs.begin(), BBRefs.end(),
+                  [](const std::pair<unsigned, BasicBlock *> &LHS,
+                     const std::pair<unsigned, BasicBlock *> &RHS) {
+          return LHS.first < RHS.first;
+        });
+        unsigned R = 0, RE = BBRefs.size();
+        for (unsigned I = 0, E = FunctionBBs.size(); I != E; ++I)
+          if (R != RE && BBRefs[R].first == I) {
+            assert(I != 0 && "Invalid reference to entry block");
+            BasicBlock *BB = BBRefs[R++].second;
+            BB->insertInto(F);
+            FunctionBBs[I] = BB;
+          } else {
+            FunctionBBs[I] = BasicBlock::Create(Context, "", F);
+          }
+        // Check for invalid basic block references.
+        if (R != RE)
+          return Error(BitcodeError::InvalidID);
+
+        // Erase from the table.
+        BasicBlockFwdRefs.erase(BBFRI);
+      }
+
       CurBB = FunctionBBs[0];
       continue;
+    }
 
     case bitc::FUNC_CODE_DEBUG_LOC_AGAIN:  // DEBUG_LOC_AGAIN
       // This record indicates that the last instruction is at the same
@@ -3187,25 +3252,6 @@ OutOfRecordLoop:
   // FIXME: Check for unresolved forward-declared metadata references
   // and clean up leaks.
 
-  // See if anything took the address of blocks in this function.  If so,
-  // resolve them now.
-  DenseMap<Function*, std::vector<BlockAddrRefTy> >::iterator BAFRI =
-    BlockAddrFwdRefs.find(F);
-  if (BAFRI != BlockAddrFwdRefs.end()) {
-    std::vector<BlockAddrRefTy> &RefList = BAFRI->second;
-    for (unsigned i = 0, e = RefList.size(); i != e; ++i) {
-      unsigned BlockIdx = RefList[i].first;
-      if (BlockIdx >= FunctionBBs.size())
-        return Error(BitcodeError::InvalidID);
-
-      GlobalVariable *FwdRef = RefList[i].second;
-      FwdRef->replaceAllUsesWith(BlockAddress::get(F, FunctionBBs[BlockIdx]));
-      FwdRef->eraseFromParent();
-    }
-
-    BlockAddrFwdRefs.erase(BAFRI);
-  }
-
   // Trim the value list down to the size it was before we parsed this function.
   ValueList.shrinkTo(ModuleValueListSize);
   MDValueList.shrinkTo(ModuleMDValueListSize);
@@ -3274,13 +3320,21 @@ std::error_code BitcodeReader::Materialize(GlobalValue *GV) {
     }
   }
 
-  return std::error_code();
+  // Bring in any functions that this function forward-referenced via
+  // blockaddresses.
+  return materializeForwardReferencedFunctions();
 }
 
 bool BitcodeReader::isDematerializable(const GlobalValue *GV) const {
   const Function *F = dyn_cast<Function>(GV);
   if (!F || F->isDeclaration())
     return false;
+
+  // Dematerializing F would leave dangling references that wouldn't be
+  // reconnected on re-materialization.
+  if (BlockAddressesTaken.count(F))
+    return false;
+
   return DeferredFunctionInfo.count(const_cast<Function*>(F));
 }
 
@@ -3299,6 +3353,10 @@ void BitcodeReader::Dematerialize(GlobalValue *GV) {
 std::error_code BitcodeReader::MaterializeModule(Module *M) {
   assert(M == TheModule &&
          "Can only Materialize the Module this BitcodeReader is attached to.");
+
+  // Promise to materialize all forward references.
+  WillMaterializeAllForwardRefs = true;
+
   // Iterate over the module, deserializing any functions that are still on
   // disk.
   for (Module::iterator F = TheModule->begin(), E = TheModule->end();
@@ -3313,6 +3371,11 @@ std::error_code BitcodeReader::MaterializeModule(Module *M) {
   // of the bits in the module have been read.
   if (NextUnreadBit)
     ParseModule(true);
+
+  // Check that all block address forward references got resolved (as we
+  // promised above).
+  if (!BasicBlockFwdRefs.empty())
+    return Error(BitcodeError::NeverResolvedFunctionFromBlockAddress);
 
   // Upgrade any intrinsic calls that slipped through (should not happen!) and
   // delete the old functions to clean up. We can't do this unless the entire
@@ -3431,6 +3494,8 @@ class BitcodeErrorCategoryType : public std::error_category {
       return "Invalid multiple blocks";
     case BitcodeError::NeverResolvedValueFoundInFunction:
       return "Never resolved value found in function";
+    case BitcodeError::NeverResolvedFunctionFromBlockAddress:
+      return "Never resolved function from blockaddress";
     case BitcodeError::InvalidValue:
       return "Invalid value";
     }
@@ -3448,24 +3513,42 @@ const std::error_category &llvm::BitcodeErrorCategory() {
 // External interface
 //===----------------------------------------------------------------------===//
 
-/// getLazyBitcodeModule - lazy function-at-a-time loading from a file.
+/// \brief Get a lazy one-at-time loading module from bitcode.
 ///
-ErrorOr<Module *> llvm::getLazyBitcodeModule(MemoryBuffer *Buffer,
-                                             LLVMContext &Context) {
+/// This isn't always used in a lazy context.  In particular, it's also used by
+/// \a parseBitcodeFile().  If this is truly lazy, then we need to eagerly pull
+/// in forward-referenced functions from block address references.
+///
+/// \param[in] WillMaterializeAll Set to \c true if the caller promises to
+/// materialize everything -- in particular, if this isn't truly lazy.
+static ErrorOr<Module *> getLazyBitcodeModuleImpl(MemoryBuffer *Buffer,
+                                                  LLVMContext &Context,
+                                                  bool WillMaterializeAll) {
   Module *M = new Module(Buffer->getBufferIdentifier(), Context);
   BitcodeReader *R = new BitcodeReader(Buffer, Context);
   M->setMaterializer(R);
-  if (std::error_code EC = R->ParseBitcodeInto(M)) {
+
+  auto cleanupOnError = [&](std::error_code EC) {
     R->releaseBuffer(); // Never take ownership on error.
     delete M;  // Also deletes R.
     return EC;
-  }
+  };
 
-  R->materializeForwardReferencedFunctions();
+  if (std::error_code EC = R->ParseBitcodeInto(M))
+    return cleanupOnError(EC);
+
+  if (!WillMaterializeAll)
+    // Resolve forward references from blockaddresses.
+    if (std::error_code EC = R->materializeForwardReferencedFunctions())
+      return cleanupOnError(EC);
 
   return M;
 }
 
+ErrorOr<Module *> llvm::getLazyBitcodeModule(MemoryBuffer *Buffer,
+                                             LLVMContext &Context) {
+  return getLazyBitcodeModuleImpl(Buffer, Context, false);
+}
 
 Module *llvm::getStreamedBitcodeModule(const std::string &name,
                                        DataStreamer *streamer,
@@ -3485,7 +3568,8 @@ Module *llvm::getStreamedBitcodeModule(const std::string &name,
 
 ErrorOr<Module *> llvm::parseBitcodeFile(MemoryBuffer *Buffer,
                                          LLVMContext &Context) {
-  ErrorOr<Module *> ModuleOrErr = getLazyBitcodeModule(Buffer, Context);
+  ErrorOr<Module *> ModuleOrErr =
+      getLazyBitcodeModuleImpl(Buffer, Context, true);
   if (!ModuleOrErr)
     return ModuleOrErr;
   Module *M = ModuleOrErr.get();

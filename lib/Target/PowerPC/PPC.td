@@ -56,6 +56,8 @@ def FeatureCRBits    : SubtargetFeature<"crbits", "UseCRBits", "true",
                               "Use condition-register bits individually">;
 def FeatureAltivec   : SubtargetFeature<"altivec","HasAltivec", "true",
                                         "Enable Altivec instructions">;
+def FeatureSPE       : SubtargetFeature<"spe","HasSPE", "true",
+                                        "Enable SPE instructions">;
 def FeatureMFOCRF    : SubtargetFeature<"mfocrf","HasMFOCRF", "true",
                                         "Enable the MFOCRF instruction">;
 def FeatureFSqrt     : SubtargetFeature<"fsqrt","HasFSQRT", "true",
@@ -88,6 +90,12 @@ def FeatureLDBRX     : SubtargetFeature<"ldbrx","HasLDBRX", "true",
                                         "Enable the ldbrx instruction">;
 def FeatureBookE     : SubtargetFeature<"booke", "IsBookE", "true",
                                         "Enable Book E instructions">;
+def FeatureE500      : SubtargetFeature<"e500", "IsE500", "true",
+                                        "Enable E500/E500mc instructions">;
+def FeaturePPC4xx    : SubtargetFeature<"ppc4xx", "IsPPC4xx", "true",
+                                        "Enable PPC 4xx instructions">;
+def FeaturePPC6xx    : SubtargetFeature<"ppc6xx", "IsPPC6xx", "true",
+                                        "Enable PPC 6xx instructions">;
 def FeatureQPX       : SubtargetFeature<"qpx","HasQPX", "true",
                                         "Enable QPX instructions">;
 def FeatureVSX       : SubtargetFeature<"vsx","HasVSX", "true",

@@ -477,8 +477,9 @@ public:
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override {
-    TII=static_cast<const R600InstrInfo *>(MF.getTarget().getInstrInfo());
-    TRI=static_cast<const R600RegisterInfo *>(MF.getTarget().getRegisterInfo());
+    TII = static_cast<const R600InstrInfo *>(MF.getSubtarget().getInstrInfo());
+    TRI = static_cast<const R600RegisterInfo *>(
+        MF.getSubtarget().getRegisterInfo());
     R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
 
     CFStack CFStack(ST, MFI->getShaderType());
