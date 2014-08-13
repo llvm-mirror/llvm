@@ -629,6 +629,10 @@ def In32BitMode  : Predicate<"!PPCSubTarget->isPPC64()">;
 def In64BitMode  : Predicate<"PPCSubTarget->isPPC64()">;
 def IsBookE  : Predicate<"PPCSubTarget->isBookE()">;
 def IsNotBookE  : Predicate<"!PPCSubTarget->isBookE()">;
+def IsPPC4xx  : Predicate<"PPCSubTarget->isPPC4xx()">;
+def IsPPC6xx  : Predicate<"PPCSubTarget->isPPC6xx()">;
+def IsE500  : Predicate<"PPCSubTarget->isE500()">;
+def HasSPE  : Predicate<"PPCSubTarget->HasSPE()">;
 
 //===----------------------------------------------------------------------===//
 // PowerPC Multiclass Definitions.
@@ -2518,6 +2522,7 @@ def : Pat<(fcopysign f32:$frB, f64:$frA),
           (FCPSGNS (COPY_TO_REGCLASS $frA, F4RC), $frB)>;
 
 include "PPCInstrAltivec.td"
+include "PPCInstrSPE.td"
 include "PPCInstr64Bit.td"
 include "PPCInstrVSX.td"
 
@@ -3034,6 +3039,16 @@ def : Pat<(i1 (not (trunc i64:$in))),
 // PowerPC Instructions used for assembler/disassembler only
 //
 
+// FIXME: For B=0 or B > 8, the registers following RT are used.
+// WARNING: Do not add patterns for this instruction without fixing this.
+def LSWI  : XForm_base_r3xo<31, 597, (outs gprc:$RT), (ins gprc:$A, u5imm:$B),
+                            "lswi $RT, $A, $B", IIC_LdStLoad, []>;
+
+// FIXME: For B=0 or B > 8, the registers following RT are used.
+// WARNING: Do not add patterns for this instruction without fixing this.
+def STSWI : XForm_base_r3xo<31, 725, (outs), (ins gprc:$RT, gprc:$A, u5imm:$B),
+                            "stswi $RT, $A, $B", IIC_LdStLoad, []>;
+
 def ISYNC : XLForm_2_ext<19, 150, 0, 0, 0, (outs), (ins),
                          "isync", IIC_SprISYNC, []>;
 
@@ -3077,6 +3092,22 @@ def WRTEEI: I<31, (outs), (ins i1imm:$E), "wrteei $E", IIC_SprMTMSR>,
   let Inst{21-30} = 163;
 }
 
+def DCI: I<31, (outs), (ins u4imm:$CT), "dci $CT", IIC_LdStLoad>,
+              Requires<[IsPPC4xx]> {
+  bits<4> CT;
+
+  let Inst{7-10} = CT;
+  let Inst{21-30} = 454;
+}
+
+def ICI: I<31, (outs), (ins u4imm:$CT), "ici $CT", IIC_LdStLoad>,
+              Requires<[IsPPC4xx]> {
+  bits<4> CT;
+
+  let Inst{7-10} = CT;
+  let Inst{21-30} = 966;
+}
+
 def MFMSR : XForm_rs<31, 83, (outs gprc:$RT), (ins),
                   "mfmsr $RT", IIC_SprMFMSR, []>;
 
@@ -3094,11 +3125,19 @@ def SLBMFEE : XForm_26<31, 915, (outs gprc:$RT), (ins gprc:$RB),
 
 def SLBIA : XForm_0<31, 498, (outs), (ins), "slbia", IIC_SprSLBIA, []>;
 
+def TLBIA : XForm_0<31, 370, (outs), (ins),
+                        "tlbia", IIC_SprTLBIA, []>;
+
 def TLBSYNC : XForm_0<31, 566, (outs), (ins),
                         "tlbsync", IIC_SprTLBSYNC, []>;
 
 def TLBIEL : XForm_16b<31, 274, (outs), (ins gprc:$RB),
                           "tlbiel $RB", IIC_SprTLBIEL, []>;
+
+def TLBLD : XForm_16b<31, 978, (outs), (ins gprc:$RB),
+                          "tlbld $RB", IIC_LdStLoad, []>, Requires<[IsPPC6xx]>;
+def TLBLI : XForm_16b<31, 1010, (outs), (ins gprc:$RB),
+                          "tlbli $RB", IIC_LdStLoad, []>, Requires<[IsPPC6xx]>;
 
 def TLBIE : XForm_26<31, 306, (outs), (ins gprc:$RS, gprc:$RB),
                           "tlbie $RB,$RS", IIC_SprTLBIE, []>;
@@ -3115,13 +3154,36 @@ def TLBRE : XForm_24_eieio<31, 946, (outs), (ins),
 def TLBWE : XForm_24_eieio<31, 978, (outs), (ins),
                            "tlbwe", IIC_LdStLoad, []>, Requires<[IsBookE]>;
 
-def RFI : XForm_0<19, 50, (outs), (ins), "rfi", IIC_BrB, []>,
+def TLBRE2 : XForm_tlbws<31, 946, (outs gprc:$RS), (ins gprc:$A, i1imm:$WS),
+               "tlbre $RS, $A, $WS", IIC_LdStLoad, []>, Requires<[IsPPC4xx]>;
+
+def TLBWE2 : XForm_tlbws<31, 978, (outs), (ins gprc:$RS, gprc:$A, i1imm:$WS),
+               "tlbwe $RS, $A, $WS", IIC_LdStLoad, []>, Requires<[IsPPC4xx]>;
+
+def TLBSX2 : XForm_base_r3xo<31, 914, (outs), (ins gprc:$RST, gprc:$A, gprc:$B),
+                             "tlbsx $RST, $A, $B", IIC_LdStLoad, []>,
+                             Requires<[IsPPC4xx]>;
+def TLBSX2D : XForm_base_r3xo<31, 914, (outs),
+                              (ins gprc:$RST, gprc:$A, gprc:$B),
+                              "tlbsx. $RST, $A, $B", IIC_LdStLoad, []>,
+                              Requires<[IsPPC4xx]>, isDOT;
+
+def RFID : XForm_0<19, 18, (outs), (ins), "rfid", IIC_IntRFID, []>;
+
+def RFI : XForm_0<19, 50, (outs), (ins), "rfi", IIC_SprRFI, []>,
                   Requires<[IsBookE]>;
 def RFCI : XForm_0<19, 51, (outs), (ins), "rfci", IIC_BrB, []>,
                    Requires<[IsBookE]>;
 
-def RFDI : XForm_0<19, 39, (outs), (ins), "rfdi", IIC_BrB, []>;
-def RFMCI : XForm_0<19, 38, (outs), (ins), "rfmci", IIC_BrB, []>;
+def RFDI : XForm_0<19, 39, (outs), (ins), "rfdi", IIC_BrB, []>,
+                   Requires<[IsE500]>;
+def RFMCI : XForm_0<19, 38, (outs), (ins), "rfmci", IIC_BrB, []>,
+                    Requires<[IsE500]>;
+
+def MFDCR : XFXForm_1<31, 323, (outs gprc:$RT), (ins i32imm:$SPR),
+                      "mfdcr $RT, $SPR", IIC_SprMFSPR>, Requires<[IsPPC4xx]>;
+def MTDCR : XFXForm_1<31, 451, (outs), (ins gprc:$RT, i32imm:$SPR),
+                      "mtdcr $SPR, $RT", IIC_SprMTSPR>, Requires<[IsPPC4xx]>;
 
 //===----------------------------------------------------------------------===//
 // PowerPC Assembler Instruction Aliases
@@ -3164,6 +3226,9 @@ def : InstAlias<"crnot $bx, $by", (CRNOR crbitrc:$bx, crbitrc:$by, crbitrc:$by)>
 def : InstAlias<"mtxer $Rx", (MTSPR 1, gprc:$Rx)>;
 def : InstAlias<"mfxer $Rx", (MFSPR gprc:$Rx, 1)>;
 
+def : InstAlias<"mfrtcu $Rx", (MFSPR gprc:$Rx, 4)>;
+def : InstAlias<"mfrtcl $Rx", (MFSPR gprc:$Rx, 5)>;
+
 def : InstAlias<"mtdscr $Rx", (MTSPR 17, gprc:$Rx)>;
 def : InstAlias<"mfdscr $Rx", (MFSPR gprc:$Rx, 17)>;
 
@@ -3185,6 +3250,12 @@ def : InstAlias<"mfsrr0 $Rx", (MFSPR gprc:$Rx, 26)>;
 def : InstAlias<"mtsrr1 $Rx", (MTSPR 27, gprc:$Rx)>;
 def : InstAlias<"mfsrr1 $Rx", (MFSPR gprc:$Rx, 27)>;
 
+def : InstAlias<"mtsrr2 $Rx", (MTSPR 990, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mfsrr2 $Rx", (MFSPR gprc:$Rx, 990)>, Requires<[IsPPC4xx]>;
+
+def : InstAlias<"mtsrr3 $Rx", (MTSPR 991, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mfsrr3 $Rx", (MFSPR gprc:$Rx, 991)>, Requires<[IsPPC4xx]>;
+
 def : InstAlias<"mtcfar $Rx", (MTSPR 28, gprc:$Rx)>;
 def : InstAlias<"mfcfar $Rx", (MFSPR gprc:$Rx, 28)>;
 
@@ -3195,7 +3266,16 @@ def : InstAlias<"mtpid $Rx", (MTSPR 48, gprc:$Rx)>, Requires<[IsBookE]>;
 def : InstAlias<"mfpid $Rx", (MFSPR gprc:$Rx, 48)>, Requires<[IsBookE]>;
 
 def : InstAlias<"mftb $Rx", (MFTB gprc:$Rx, 268)>;
+def : InstAlias<"mftbl $Rx", (MFTB gprc:$Rx, 268)>;
 def : InstAlias<"mftbu $Rx", (MFTB gprc:$Rx, 269)>;
+
+def : InstAlias<"mttbl $Rx", (MTSPR 284, gprc:$Rx)>;
+def : InstAlias<"mttbu $Rx", (MTSPR 285, gprc:$Rx)>;
+
+def : InstAlias<"mftblo $Rx", (MFSPR gprc:$Rx, 989)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mttblo $Rx", (MTSPR 989, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mftbhi $Rx", (MFSPR gprc:$Rx, 988)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mttbhi $Rx", (MTSPR 988, gprc:$Rx)>, Requires<[IsPPC4xx]>;
 
 def : InstAlias<"xnop", (XORI R0, R0, 0)>;
 
@@ -3206,6 +3286,60 @@ def : InstAlias<"not $rA, $rB", (NOR8 g8rc:$rA, g8rc:$rB, g8rc:$rB)>;
 def : InstAlias<"not. $rA, $rB", (NOR8o g8rc:$rA, g8rc:$rB, g8rc:$rB)>;
 
 def : InstAlias<"mtcr $rA", (MTCRF8 255, g8rc:$rA)>;
+
+foreach BATR = 0-3 in {
+    def : InstAlias<"mtdbatu "#BATR#", $Rx",
+                    (MTSPR !add(BATR, !add(BATR, 536)), gprc:$Rx)>,
+                    Requires<[IsPPC6xx]>;
+    def : InstAlias<"mfdbatu $Rx, "#BATR,
+                    (MFSPR gprc:$Rx, !add(BATR, !add(BATR, 536)))>,
+                    Requires<[IsPPC6xx]>;
+    def : InstAlias<"mtdbatl "#BATR#", $Rx",
+                    (MTSPR !add(BATR, !add(BATR, 537)), gprc:$Rx)>,
+                    Requires<[IsPPC6xx]>;
+    def : InstAlias<"mfdbatl $Rx, "#BATR,
+                    (MFSPR gprc:$Rx, !add(BATR, !add(BATR, 537)))>,
+                    Requires<[IsPPC6xx]>;
+    def : InstAlias<"mtibatu "#BATR#", $Rx",
+                    (MTSPR !add(BATR, !add(BATR, 528)), gprc:$Rx)>,
+                    Requires<[IsPPC6xx]>;
+    def : InstAlias<"mfibatu $Rx, "#BATR,
+                    (MFSPR gprc:$Rx, !add(BATR, !add(BATR, 528)))>,
+                    Requires<[IsPPC6xx]>;
+    def : InstAlias<"mtibatl "#BATR#", $Rx",
+                    (MTSPR !add(BATR, !add(BATR, 529)), gprc:$Rx)>,
+                    Requires<[IsPPC6xx]>;
+    def : InstAlias<"mfibatl $Rx, "#BATR,
+                    (MFSPR gprc:$Rx, !add(BATR, !add(BATR, 529)))>,
+                    Requires<[IsPPC6xx]>;
+}
+
+foreach BR = 0-7 in {
+    def : InstAlias<"mfbr"#BR#" $Rx",
+                    (MFDCR gprc:$Rx, !add(BR, 0x80))>,
+                    Requires<[IsPPC4xx]>;
+    def : InstAlias<"mtbr"#BR#" $Rx",
+                    (MTDCR gprc:$Rx, !add(BR, 0x80))>,
+                    Requires<[IsPPC4xx]>;
+}
+
+def : InstAlias<"mtdccr $Rx", (MTSPR 1018, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mfdccr $Rx", (MFSPR gprc:$Rx, 1018)>, Requires<[IsPPC4xx]>;
+
+def : InstAlias<"mticcr $Rx", (MTSPR 1019, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mficcr $Rx", (MFSPR gprc:$Rx, 1019)>, Requires<[IsPPC4xx]>;
+
+def : InstAlias<"mtdear $Rx", (MTSPR 981, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mfdear $Rx", (MFSPR gprc:$Rx, 981)>, Requires<[IsPPC4xx]>;
+
+def : InstAlias<"mtesr $Rx", (MTSPR 980, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mfesr $Rx", (MFSPR gprc:$Rx, 980)>, Requires<[IsPPC4xx]>;
+
+def : InstAlias<"mfspefscr $Rx", (MFSPR gprc:$Rx, 512)>;
+def : InstAlias<"mtspefscr $Rx", (MTSPR 512, gprc:$Rx)>;
+
+def : InstAlias<"mttcr $Rx", (MTSPR 986, gprc:$Rx)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"mftcr $Rx", (MFSPR gprc:$Rx, 986)>, Requires<[IsPPC4xx]>;
 
 def LAx : PPCAsmPseudo<"la $rA, $addr", (ins gprc:$rA, memri:$addr)>;
 
@@ -3226,41 +3360,25 @@ def : InstAlias<"subc. $rA, $rB, $rC", (SUBFC8o g8rc:$rA, g8rc:$rC, g8rc:$rB)>;
 def : InstAlias<"mtmsrd $RS", (MTMSRD gprc:$RS, 0)>;
 def : InstAlias<"mtmsr $RS", (MTMSR gprc:$RS, 0)>;
 
-def : InstAlias<"mfsprg $RT, 0", (MFSPR gprc:$RT, 272)>;
-def : InstAlias<"mfsprg $RT, 1", (MFSPR gprc:$RT, 273)>;
-def : InstAlias<"mfsprg $RT, 2", (MFSPR gprc:$RT, 274)>;
-def : InstAlias<"mfsprg $RT, 3", (MFSPR gprc:$RT, 275)>;
-def : InstAlias<"mfsprg $RT, 4", (MFSPR gprc:$RT, 260)>, Requires<[IsBookE]>;
-def : InstAlias<"mfsprg $RT, 5", (MFSPR gprc:$RT, 261)>, Requires<[IsBookE]>;
-def : InstAlias<"mfsprg $RT, 6", (MFSPR gprc:$RT, 262)>, Requires<[IsBookE]>;
-def : InstAlias<"mfsprg $RT, 7", (MFSPR gprc:$RT, 263)>, Requires<[IsBookE]>;
+def : InstAlias<"mfasr $RT", (MFSPR gprc:$RT, 280)>;
+def : InstAlias<"mtasr $RT", (MTSPR 280, gprc:$RT)>;
 
-def : InstAlias<"mfsprg0 $RT", (MFSPR gprc:$RT, 272)>;
-def : InstAlias<"mfsprg1 $RT", (MFSPR gprc:$RT, 273)>;
-def : InstAlias<"mfsprg2 $RT", (MFSPR gprc:$RT, 274)>;
-def : InstAlias<"mfsprg3 $RT", (MFSPR gprc:$RT, 275)>;
-def : InstAlias<"mfsprg4 $RT", (MFSPR gprc:$RT, 260)>, Requires<[IsBookE]>;
-def : InstAlias<"mfsprg5 $RT", (MFSPR gprc:$RT, 261)>, Requires<[IsBookE]>;
-def : InstAlias<"mfsprg6 $RT", (MFSPR gprc:$RT, 262)>, Requires<[IsBookE]>;
-def : InstAlias<"mfsprg7 $RT", (MFSPR gprc:$RT, 263)>, Requires<[IsBookE]>;
-
-def : InstAlias<"mtsprg 0, $RT", (MTSPR 272, gprc:$RT)>;
-def : InstAlias<"mtsprg 1, $RT", (MTSPR 273, gprc:$RT)>;
-def : InstAlias<"mtsprg 2, $RT", (MTSPR 274, gprc:$RT)>;
-def : InstAlias<"mtsprg 3, $RT", (MTSPR 275, gprc:$RT)>;
-def : InstAlias<"mtsprg 4, $RT", (MTSPR 260, gprc:$RT)>, Requires<[IsBookE]>;
-def : InstAlias<"mtsprg 5, $RT", (MTSPR 261, gprc:$RT)>, Requires<[IsBookE]>;
-def : InstAlias<"mtsprg 6, $RT", (MTSPR 262, gprc:$RT)>, Requires<[IsBookE]>;
-def : InstAlias<"mtsprg 7, $RT", (MTSPR 263, gprc:$RT)>, Requires<[IsBookE]>;
-
-def : InstAlias<"mtsprg0 $RT", (MTSPR 272, gprc:$RT)>;
-def : InstAlias<"mtsprg1 $RT", (MTSPR 273, gprc:$RT)>;
-def : InstAlias<"mtsprg2 $RT", (MTSPR 274, gprc:$RT)>;
-def : InstAlias<"mtsprg3 $RT", (MTSPR 275, gprc:$RT)>;
-def : InstAlias<"mtsprg4 $RT", (MTSPR 260, gprc:$RT)>, Requires<[IsBookE]>;
-def : InstAlias<"mtsprg5 $RT", (MTSPR 261, gprc:$RT)>, Requires<[IsBookE]>;
-def : InstAlias<"mtsprg6 $RT", (MTSPR 262, gprc:$RT)>, Requires<[IsBookE]>;
-def : InstAlias<"mtsprg7 $RT", (MTSPR 263, gprc:$RT)>, Requires<[IsBookE]>;
+foreach SPRG = 0-3 in {
+  def : InstAlias<"mfsprg $RT, "#SPRG, (MFSPR gprc:$RT, !add(SPRG, 272))>;
+  def : InstAlias<"mfsprg"#SPRG#" $RT", (MFSPR gprc:$RT, !add(SPRG, 272))>;
+  def : InstAlias<"mtsprg "#SPRG#", $RT", (MTSPR !add(SPRG, 272), gprc:$RT)>;
+  def : InstAlias<"mtsprg"#SPRG#" $RT", (MTSPR !add(SPRG, 272), gprc:$RT)>;
+}
+foreach SPRG = 4-7 in {
+  def : InstAlias<"mfsprg $RT, "#SPRG, (MFSPR gprc:$RT, !add(SPRG, 256))>,
+                  Requires<[IsBookE]>;
+  def : InstAlias<"mfsprg"#SPRG#" $RT", (MFSPR gprc:$RT, !add(SPRG, 256))>,
+                  Requires<[IsBookE]>;
+  def : InstAlias<"mtsprg "#SPRG#", $RT", (MTSPR !add(SPRG, 256), gprc:$RT)>,
+                  Requires<[IsBookE]>;
+  def : InstAlias<"mtsprg"#SPRG#" $RT", (MTSPR !add(SPRG, 256), gprc:$RT)>,
+                  Requires<[IsBookE]>;
+}
 
 def : InstAlias<"mtasr $RS", (MTSPR 280, gprc:$RS)>;
 
@@ -3278,6 +3396,15 @@ def : InstAlias<"mtsrr0 $RT", (MTSPR 26, gprc:$RT)>;
 def : InstAlias<"mtsrr1 $RT", (MTSPR 27, gprc:$RT)>;
 
 def : InstAlias<"tlbie $RB", (TLBIE R0, gprc:$RB)>;
+
+def : InstAlias<"tlbrehi $RS, $A", (TLBRE2 gprc:$RS, gprc:$A, 0)>,
+                Requires<[IsPPC4xx]>;
+def : InstAlias<"tlbrelo $RS, $A", (TLBRE2 gprc:$RS, gprc:$A, 1)>,
+                Requires<[IsPPC4xx]>;
+def : InstAlias<"tlbwehi $RS, $A", (TLBWE2 gprc:$RS, gprc:$A, 0)>,
+                Requires<[IsPPC4xx]>;
+def : InstAlias<"tlbwelo $RS, $A", (TLBWE2 gprc:$RS, gprc:$A, 1)>,
+                Requires<[IsPPC4xx]>;
 
 def EXTLWI : PPCAsmPseudo<"extlwi $rA, $rS, $n, $b",
                           (ins gprc:$rA, gprc:$rS, u5imm:$n, u5imm:$b)>;
@@ -3526,4 +3653,3 @@ defm : TrapExtendedMnemonic<"lgt", 1>;
 defm : TrapExtendedMnemonic<"lnl", 5>;
 defm : TrapExtendedMnemonic<"lng", 6>;
 defm : TrapExtendedMnemonic<"u", 31>;
-

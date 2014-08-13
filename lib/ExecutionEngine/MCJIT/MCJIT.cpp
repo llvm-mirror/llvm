@@ -28,6 +28,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/MutexGuard.h"
 #include "llvm/Target/TargetLowering.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -59,7 +60,7 @@ MCJIT::MCJIT(Module *m, TargetMachine *tm, RTDyldMemoryManager *MM)
     ObjCache(nullptr) {
 
   OwnedModules.addModule(m);
-  setDataLayout(TM->getDataLayout());
+  setDataLayout(TM->getSubtargetImpl()->getDataLayout());
 }
 
 MCJIT::~MCJIT() {
@@ -87,12 +88,6 @@ MCJIT::~MCJIT() {
   }
   LoadedObjects.clear();
 
-
-  SmallVector<object::Archive *, 2>::iterator ArIt, ArEnd;
-  for (ArIt = Archives.begin(), ArEnd = Archives.end(); ArIt != ArEnd; ++ArIt) {
-    object::Archive *A = *ArIt;
-    delete A;
-  }
   Archives.clear();
 
   delete TM;
@@ -120,8 +115,8 @@ void MCJIT::addObjectFile(std::unique_ptr<object::ObjectFile> Obj) {
   NotifyObjectEmitted(*LoadedObject);
 }
 
-void MCJIT::addArchive(object::Archive *A) {
-  Archives.push_back(A);
+void MCJIT::addArchive(std::unique_ptr<object::Archive> A) {
+  Archives.push_back(std::move(A));
 }
 
 
@@ -139,7 +134,7 @@ ObjectBufferStream* MCJIT::emitObject(Module *M) {
 
   PassManager PM;
 
-  M->setDataLayout(TM->getDataLayout());
+  M->setDataLayout(TM->getSubtargetImpl()->getDataLayout());
   PM.add(new DataLayoutPass(M));
 
   // The RuntimeDyld will take ownership of this shortly
@@ -257,7 +252,7 @@ void *MCJIT::getPointerToBasicBlock(BasicBlock *BB) {
 }
 
 uint64_t MCJIT::getExistingSymbolAddress(const std::string &Name) {
-  Mangler Mang(TM->getDataLayout());
+  Mangler Mang(TM->getSubtargetImpl()->getDataLayout());
   SmallString<128> FullName;
   Mang.getNameWithPrefix(FullName, Name);
   return Dyld.getSymbolLoadAddress(FullName);
@@ -296,9 +291,7 @@ uint64_t MCJIT::getSymbolAddress(const std::string &Name,
   if (Addr)
     return Addr;
 
-  SmallVector<object::Archive*, 2>::iterator I, E;
-  for (I = Archives.begin(), E = Archives.end(); I != E; ++I) {
-    object::Archive *A = *I;
+  for (std::unique_ptr<object::Archive> &A : Archives) {
     // Look for our symbols in each Archive
     object::Archive::child_iterator ChildIt = A->findSym(Name);
     if (ChildIt != A->child_end()) {
@@ -307,7 +300,7 @@ uint64_t MCJIT::getSymbolAddress(const std::string &Name,
           ChildIt->getAsBinary();
       if (ChildBinOrErr.getError())
         continue;
-      std::unique_ptr<object::Binary> ChildBin = std::move(ChildBinOrErr.get());
+      std::unique_ptr<object::Binary> &ChildBin = ChildBinOrErr.get();
       if (ChildBin->isObject()) {
         std::unique_ptr<object::ObjectFile> OF(
             static_cast<object::ObjectFile *>(ChildBin.release()));
@@ -373,7 +366,7 @@ void *MCJIT::getPointerToFunction(Function *F) {
   //
   // This is the accessor for the target address, so make sure to check the
   // load address of the symbol, not the local address.
-  Mangler Mang(TM->getDataLayout());
+  Mangler Mang(TM->getSubtargetImpl()->getDataLayout());
   SmallString<128> Name;
   TM->getNameWithPrefix(Name, F, Mang);
   return (void*)Dyld.getSymbolLoadAddress(Name);

@@ -22,22 +22,19 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "post-RA-sched"
 
-CriticalAntiDepBreaker::
-CriticalAntiDepBreaker(MachineFunction& MFi, const RegisterClassInfo &RCI) :
-  AntiDepBreaker(), MF(MFi),
-  MRI(MF.getRegInfo()),
-  TII(MF.getTarget().getInstrInfo()),
-  TRI(MF.getTarget().getRegisterInfo()),
-  RegClassInfo(RCI),
-  Classes(TRI->getNumRegs(), nullptr),
-  KillIndices(TRI->getNumRegs(), 0),
-  DefIndices(TRI->getNumRegs(), 0),
-  KeepRegs(TRI->getNumRegs(), false) {}
+CriticalAntiDepBreaker::CriticalAntiDepBreaker(MachineFunction &MFi,
+                                               const RegisterClassInfo &RCI)
+    : AntiDepBreaker(), MF(MFi), MRI(MF.getRegInfo()),
+      TII(MF.getSubtarget().getInstrInfo()),
+      TRI(MF.getSubtarget().getRegisterInfo()), RegClassInfo(RCI),
+      Classes(TRI->getNumRegs(), nullptr), KillIndices(TRI->getNumRegs(), 0),
+      DefIndices(TRI->getNumRegs(), 0), KeepRegs(TRI->getNumRegs(), false) {}
 
 CriticalAntiDepBreaker::~CriticalAntiDepBreaker() {
 }
@@ -265,19 +262,10 @@ void CriticalAntiDepBreaker::ScanInstruction(MachineInstr *MI,
       // Ignore two-addr defs.
       if (MI->isRegTiedToUseOperand(i)) continue;
 
-      // FIXME: we should use a SubRegIterator that includes self (as above), so
-      // we don't have to repeat all this code for the reg itself.
-      DefIndices[Reg] = Count;
-      KillIndices[Reg] = ~0u;
-      assert(((KillIndices[Reg] == ~0u) !=
-              (DefIndices[Reg] == ~0u)) &&
-             "Kill and Def maps aren't consistent for Reg!");
-      KeepRegs.reset(Reg);
-      Classes[Reg] = nullptr;
-      RegRefs.erase(Reg);
-      // Repeat, for all subregs.
-      for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs) {
-        unsigned SubregReg = *SubRegs;
+      // For the reg itself and all subregs: update the def to current;
+      // reset the kill state, any restrictions, and references.
+      for (MCSubRegIterator SRI(Reg, TRI, true); SRI.isValid(); ++SRI) {
+        unsigned SubregReg = *SRI;
         DefIndices[SubregReg] = Count;
         KillIndices[SubregReg] = ~0u;
         KeepRegs.reset(SubregReg);
@@ -309,19 +297,9 @@ void CriticalAntiDepBreaker::ScanInstruction(MachineInstr *MI,
 
     RegRefs.insert(std::make_pair(Reg, &MO));
 
-    // FIXME: we should use an MCRegAliasIterator that includes self so we don't
-    // have to repeat all this code for the reg itself.
-    
     // It wasn't previously live but now it is, this is a kill.
-    if (KillIndices[Reg] == ~0u) {
-      KillIndices[Reg] = Count;
-      DefIndices[Reg] = ~0u;
-          assert(((KillIndices[Reg] == ~0u) !=
-                  (DefIndices[Reg] == ~0u)) &&
-               "Kill and Def maps aren't consistent for Reg!");
-    }
-    // Repeat, for all aliases.
-    for (MCRegAliasIterator AI(Reg, TRI, false); AI.isValid(); ++AI) {
+    // Repeat for all aliases.
+    for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI) {
       unsigned AliasReg = *AI;
       if (KillIndices[AliasReg] == ~0u) {
         KillIndices[AliasReg] = Count;

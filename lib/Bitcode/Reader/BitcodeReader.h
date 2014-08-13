@@ -22,6 +22,7 @@
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/ValueHandle.h"
+#include <deque>
 #include <system_error>
 #include <vector>
 
@@ -179,10 +180,11 @@ class BitcodeReader : public GVMaterializer {
   /// stream.
   DenseMap<Function*, uint64_t> DeferredFunctionInfo;
 
-  /// BlockAddrFwdRefs - These are blockaddr references to basic blocks.  These
-  /// are resolved lazily when functions are loaded.
-  typedef std::pair<unsigned, GlobalVariable*> BlockAddrRefTy;
-  DenseMap<Function*, std::vector<BlockAddrRefTy> > BlockAddrFwdRefs;
+  /// These are basic blocks forward-referenced by block addresses.  They are
+  /// inserted lazily into functions when they're loaded.
+  typedef std::pair<unsigned, BasicBlock *> BasicBlockRefTy;
+  DenseMap<Function *, std::vector<BasicBlockRefTy>> BasicBlockFwdRefs;
+  std::deque<Function *> BasicBlockFwdRefQueue;
 
   /// UseRelativeIDs - Indicates that we are using a new encoding for
   /// instruction operands where most operands in the current
@@ -193,20 +195,29 @@ class BitcodeReader : public GVMaterializer {
   /// not need this flag.
   bool UseRelativeIDs;
 
+  /// True if all functions will be materialized, negating the need to process
+  /// (e.g.) blockaddress forward references.
+  bool WillMaterializeAllForwardRefs;
+
+  /// Functions that have block addresses taken.  This is usually empty.
+  SmallPtrSet<const Function *, 4> BlockAddressesTaken;
+
 public:
   std::error_code Error(BitcodeError E) { return make_error_code(E); }
 
   explicit BitcodeReader(MemoryBuffer *buffer, LLVMContext &C)
       : Context(C), TheModule(nullptr), Buffer(buffer), LazyStreamer(nullptr),
         NextUnreadBit(0), SeenValueSymbolTable(false), ValueList(C),
-        MDValueList(C), SeenFirstFunctionBody(false), UseRelativeIDs(false) {}
+        MDValueList(C), SeenFirstFunctionBody(false), UseRelativeIDs(false),
+        WillMaterializeAllForwardRefs(false) {}
   explicit BitcodeReader(DataStreamer *streamer, LLVMContext &C)
       : Context(C), TheModule(nullptr), Buffer(nullptr), LazyStreamer(streamer),
         NextUnreadBit(0), SeenValueSymbolTable(false), ValueList(C),
-        MDValueList(C), SeenFirstFunctionBody(false), UseRelativeIDs(false) {}
+        MDValueList(C), SeenFirstFunctionBody(false), UseRelativeIDs(false),
+        WillMaterializeAllForwardRefs(false) {}
   ~BitcodeReader() { FreeState(); }
 
-  void materializeForwardReferencedFunctions();
+  std::error_code materializeForwardReferencedFunctions();
 
   void FreeState();
 

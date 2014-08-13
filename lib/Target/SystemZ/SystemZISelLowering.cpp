@@ -675,12 +675,11 @@ LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
   SystemZMachineFunctionInfo *FuncInfo =
     MF.getInfo<SystemZMachineFunctionInfo>();
   auto *TFL = static_cast<const SystemZFrameLowering *>(
-      DAG.getTarget().getFrameLowering());
+      DAG.getSubtarget().getFrameLowering());
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), ArgLocs,
-                 *DAG.getContext());
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_SystemZ);
 
   unsigned NumFixedGPRs = 0;
@@ -818,8 +817,7 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Analyze the operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState ArgCCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), ArgLocs,
-                    *DAG.getContext());
+  CCState ArgCCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   ArgCCInfo.AnalyzeCallOperands(Outs, CC_SystemZ);
 
   // We don't support GuaranteedTailCallOpt, only automatically-detected
@@ -916,7 +914,8 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
                                   RegsToPass[I].second.getValueType()));
 
   // Add a register mask operand representing the call-preserved registers.
-  const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
+  const TargetRegisterInfo *TRI =
+      getTargetMachine().getSubtargetImpl()->getRegisterInfo();
   const uint32_t *Mask = TRI->getCallPreservedMask(CallConv);
   assert(Mask && "Missing call preserved mask for calling convention");
   Ops.push_back(DAG.getRegisterMask(Mask));
@@ -941,8 +940,7 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Assign locations to each value returned by this call.
   SmallVector<CCValAssign, 16> RetLocs;
-  CCState RetCCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), RetLocs,
-                    *DAG.getContext());
+  CCState RetCCInfo(CallConv, IsVarArg, MF, RetLocs, *DAG.getContext());
   RetCCInfo.AnalyzeCallResult(Ins, RetCC_SystemZ);
 
   // Copy all of the result registers out of their specified physreg.
@@ -973,8 +971,7 @@ SystemZTargetLowering::LowerReturn(SDValue Chain,
 
   // Assign locations to each returned value.
   SmallVector<CCValAssign, 16> RetLocs;
-  CCState RetCCInfo(CallConv, IsVarArg, MF, DAG.getTarget(), RetLocs,
-                    *DAG.getContext());
+  CCState RetCCInfo(CallConv, IsVarArg, MF, RetLocs, *DAG.getContext());
   RetCCInfo.AnalyzeReturn(Outs, RetCC_SystemZ);
 
   // Quick exit for void returns
@@ -2615,7 +2612,7 @@ MachineBasicBlock *
 SystemZTargetLowering::emitSelect(MachineInstr *MI,
                                   MachineBasicBlock *MBB) const {
   const SystemZInstrInfo *TII = static_cast<const SystemZInstrInfo *>(
-      MBB->getParent()->getTarget().getInstrInfo());
+      MBB->getParent()->getSubtarget().getInstrInfo());
 
   unsigned DestReg  = MI->getOperand(0).getReg();
   unsigned TrueReg  = MI->getOperand(1).getReg();
@@ -2664,7 +2661,7 @@ SystemZTargetLowering::emitCondStore(MachineInstr *MI,
                                      unsigned StoreOpcode, unsigned STOCOpcode,
                                      bool Invert) const {
   const SystemZInstrInfo *TII = static_cast<const SystemZInstrInfo *>(
-      MBB->getParent()->getTarget().getInstrInfo());
+      MBB->getParent()->getSubtarget().getInstrInfo());
 
   unsigned SrcReg     = MI->getOperand(0).getReg();
   MachineOperand Base = MI->getOperand(1);
@@ -2733,7 +2730,7 @@ SystemZTargetLowering::emitAtomicLoadBinary(MachineInstr *MI,
                                             bool Invert) const {
   MachineFunction &MF = *MBB->getParent();
   const SystemZInstrInfo *TII =
-      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
+      static_cast<const SystemZInstrInfo *>(MF.getSubtarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   bool IsSubWord = (BitSize < 32);
 
@@ -2857,7 +2854,7 @@ SystemZTargetLowering::emitAtomicLoadMinMax(MachineInstr *MI,
                                             unsigned BitSize) const {
   MachineFunction &MF = *MBB->getParent();
   const SystemZInstrInfo *TII =
-      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
+      static_cast<const SystemZInstrInfo *>(MF.getSubtarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   bool IsSubWord = (BitSize < 32);
 
@@ -2969,7 +2966,7 @@ SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
                                           MachineBasicBlock *MBB) const {
   MachineFunction &MF = *MBB->getParent();
   const SystemZInstrInfo *TII =
-      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
+      static_cast<const SystemZInstrInfo *>(MF.getSubtarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   // Extract the operands.  Base can be a register or a frame index.
@@ -3086,7 +3083,7 @@ SystemZTargetLowering::emitExt128(MachineInstr *MI,
                                   bool ClearEven, unsigned SubReg) const {
   MachineFunction &MF = *MBB->getParent();
   const SystemZInstrInfo *TII =
-      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
+      static_cast<const SystemZInstrInfo *>(MF.getSubtarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   DebugLoc DL = MI->getDebugLoc();
 
@@ -3118,7 +3115,7 @@ SystemZTargetLowering::emitMemMemWrapper(MachineInstr *MI,
                                          unsigned Opcode) const {
   MachineFunction &MF = *MBB->getParent();
   const SystemZInstrInfo *TII =
-      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
+      static_cast<const SystemZInstrInfo *>(MF.getSubtarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   DebugLoc DL = MI->getDebugLoc();
 
@@ -3288,7 +3285,7 @@ SystemZTargetLowering::emitStringWrapper(MachineInstr *MI,
                                          unsigned Opcode) const {
   MachineFunction &MF = *MBB->getParent();
   const SystemZInstrInfo *TII =
-      static_cast<const SystemZInstrInfo *>(MF.getTarget().getInstrInfo());
+      static_cast<const SystemZInstrInfo *>(MF.getSubtarget().getInstrInfo());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   DebugLoc DL = MI->getDebugLoc();
 

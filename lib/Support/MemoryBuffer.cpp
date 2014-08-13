@@ -142,7 +142,7 @@ MemoryBuffer *MemoryBuffer::getNewUninitMemBuffer(size_t Size,
 }
 
 /// getNewMemBuffer - Allocate a new MemoryBuffer of the specified size that
-/// is completely initialized to zeros.  Note that the caller should
+/// is completely initialized to zeros.  Note that the caller need not
 /// initialize the memory allocated by this method.  The memory is owned by
 /// the MemoryBuffer object.
 MemoryBuffer *MemoryBuffer::getNewMemBuffer(size_t Size, StringRef BufferName) {
@@ -304,6 +304,14 @@ static bool shouldUseMmap(int FD,
   // if we need a null terminator.
   if ((FileSize & (PageSize -1)) == 0)
     return false;
+
+#if defined(__CYGWIN__)
+  // Don't try to map files that are exactly a multiple of the physical page size
+  // if we need a null terminator.
+  // FIXME: We should reorganize again getPageSize() on Win32.
+  if ((FileSize & (4096 - 1)) == 0)
+    return false;
+#endif
 
   return true;
 }

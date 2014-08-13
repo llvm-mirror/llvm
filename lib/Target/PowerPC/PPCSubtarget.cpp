@@ -119,6 +119,7 @@ void PPCSubtarget::initializeEnvironment() {
   Use64BitRegs = false;
   UseCRBits = false;
   HasAltivec = false;
+  HasSPE = false;
   HasQPX = false;
   HasVSX = false;
   HasFCPSGN = false;
@@ -136,6 +137,9 @@ void PPCSubtarget::initializeEnvironment() {
   HasPOPCNTD = false;
   HasLDBRX = false;
   IsBookE = false;
+  IsPPC4xx = false;
+  IsPPC6xx = false;
+  IsE500 = false;
   DeprecatedMFTB = false;
   DeprecatedDST = false;
   HasLazyResolverStubs = false;

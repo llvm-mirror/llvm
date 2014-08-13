@@ -35,7 +35,7 @@ static std::string computeDataLayout(const AMDGPUSubtarget &ST) {
   std::string Ret = "e-p:32:32";
 
   if (ST.is64bit()) {
-    // 32-bit local, and region pointers. 64-bit private, global, and constant.
+    // 32-bit private, local, and region pointers. 64-bit global and constant.
     Ret += "-p1:64:64-p2:64:64-p3:32:32-p4:64:64-p5:32:32-p24:64:64";
   }
 
@@ -83,7 +83,7 @@ AMDGPUSubtarget::AMDGPUSubtarget(StringRef TT, StringRef GPU, StringRef FS,
       FrameLowering(TargetFrameLowering::StackGrowsUp,
                     64 * 16, // Maximum stack alignment (long16)
                     0),
-      IntrinsicInfo(), InstrItins(getInstrItineraryForCPU(GPU)) {
+      InstrItins(getInstrItineraryForCPU(GPU)) {
 
   if (getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
     InstrInfo.reset(new R600InstrInfo(*this));

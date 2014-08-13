@@ -92,12 +92,11 @@ class PPCFastISel final : public FastISel {
   public:
     explicit PPCFastISel(FunctionLoweringInfo &FuncInfo,
                          const TargetLibraryInfo *LibInfo)
-    : FastISel(FuncInfo, LibInfo),
-      TM(FuncInfo.MF->getTarget()),
-      TII(*TM.getInstrInfo()),
-      TLI(*TM.getTargetLowering()),
-      PPCSubTarget(&TM.getSubtarget<PPCSubtarget>()),
-      Context(&FuncInfo.Fn->getContext()) { }
+        : FastISel(FuncInfo, LibInfo), TM(FuncInfo.MF->getTarget()),
+          TII(*TM.getSubtargetImpl()->getInstrInfo()),
+          TLI(*TM.getSubtargetImpl()->getTargetLowering()),
+          PPCSubTarget(&TM.getSubtarget<PPCSubtarget>()),
+          Context(&FuncInfo.Fn->getContext()) {}
 
   // Backend specific FastISel code.
   private:
@@ -1200,7 +1199,7 @@ bool PPCFastISel::processCallArgs(SmallVectorImpl<Value*> &Args,
                                   unsigned &NumBytes,
                                   bool IsVarArg) {
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CC, IsVarArg, *FuncInfo.MF, TM, ArgLocs, *Context);
+  CCState CCInfo(CC, IsVarArg, *FuncInfo.MF, ArgLocs, *Context);
 
   // Reserve space for the linkage area on the stack.
   bool isELFv2ABI = PPCSubTarget->isELFv2ABI();
@@ -1321,7 +1320,7 @@ void PPCFastISel::finishCall(MVT RetVT, SmallVectorImpl<unsigned> &UsedRegs,
   // any real difficulties there.
   if (RetVT != MVT::isVoid) {
     SmallVector<CCValAssign, 16> RVLocs;
-    CCState CCInfo(CC, IsVarArg, *FuncInfo.MF, TM, RVLocs, *Context);
+    CCState CCInfo(CC, IsVarArg, *FuncInfo.MF, RVLocs, *Context);
     CCInfo.AnalyzeCallResult(RetVT, RetCC_PPC64_ELF_FIS);
     CCValAssign &VA = RVLocs[0];
     assert(RVLocs.size() == 1 && "No support for multi-reg return values!");
@@ -1411,7 +1410,7 @@ bool PPCFastISel::SelectCall(const Instruction *I) {
       RetVT != MVT::i32 && RetVT != MVT::i64 && RetVT != MVT::f32 &&
       RetVT != MVT::f64) {
     SmallVector<CCValAssign, 16> RVLocs;
-    CCState CCInfo(CC, IsVarArg, *FuncInfo.MF, TM, RVLocs, *Context);
+    CCState CCInfo(CC, IsVarArg, *FuncInfo.MF, RVLocs, *Context);
     CCInfo.AnalyzeCallResult(RetVT, RetCC_PPC64_ELF_FIS);
     if (RVLocs.size() > 1)
       return false;
@@ -1538,7 +1537,7 @@ bool PPCFastISel::SelectRet(const Instruction *I) {
 
     // Analyze operands of the call, assigning locations to each operand.
     SmallVector<CCValAssign, 16> ValLocs;
-    CCState CCInfo(CC, F.isVarArg(), *FuncInfo.MF, TM, ValLocs, *Context);
+    CCState CCInfo(CC, F.isVarArg(), *FuncInfo.MF, ValLocs, *Context);
     CCInfo.AnalyzeReturn(Outs, RetCC_PPC64_ELF_FIS);
     const Value *RV = Ret->getOperand(0);
     

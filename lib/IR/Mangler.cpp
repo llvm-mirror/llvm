@@ -27,6 +27,13 @@ static void getNameWithPrefixx(raw_ostream &OS, const Twine &GVName,
   StringRef Name = GVName.toStringRef(TmpData);
   assert(!Name.empty() && "getNameWithPrefix requires non-empty name");
 
+  // No need to do anything special if the global has the special "do not
+  // mangle" flag in the name.
+  if (Name[0] == '\1') {
+    OS << Name.substr(1);
+    return;
+  }
+
   if (PrefixTy == Mangler::Private)
     OS << DL.getPrivateGlobalPrefix();
   else if (PrefixTy == Mangler::LinkerPrivate)
@@ -65,6 +72,9 @@ static void AddFastCallStdCallSuffix(raw_ostream &OS, const Function *F,
   unsigned ArgWords = 0;
   for (Function::const_arg_iterator AI = F->arg_begin(), AE = F->arg_end();
        AI != AE; ++AI) {
+    // Skip arguments in registers to handle typical fastcall lowering.
+    if (F->getAttributes().hasAttribute(AI->getArgNo() + 1, Attribute::InReg))
+      continue;
     Type *Ty = AI->getType();
     // 'Dereference' type in case of byval or inalloca parameter attribute.
     if (AI->hasByValOrInAllocaAttr())
@@ -100,17 +110,10 @@ void Mangler::getNameWithPrefix(raw_ostream &OS, const GlobalValue *GV,
 
   StringRef Name = GV->getName();
 
-  // No need to do anything special if the global has the special "do not
-  // mangle" flag in the name.
-  if (Name[0] == '\1') {
-    OS << Name.substr(1);
-    return;
-  }
-
   bool UseAt = false;
   const Function *MSFunc = nullptr;
   CallingConv::ID CC;
-  if (DL->hasMicrosoftFastStdCallMangling()) {
+  if (Name[0] != '\1' && DL->hasMicrosoftFastStdCallMangling()) {
     if ((MSFunc = dyn_cast<Function>(GV))) {
       CC = MSFunc->getCallingConv();
       // fastcall functions need to start with @ instead of _.

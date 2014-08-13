@@ -57,6 +57,11 @@ static cl::list<std::string> ImplicitCheckNot(
              "this pattern occur which are not matched by a positive pattern"),
     cl::value_desc("pattern"));
 
+static cl::opt<bool> AllowEmptyInput(
+    "allow-empty", cl::init(false),
+    cl::desc("Allow the input file to be empty. This is useful when making\n"
+             "checks that some error message does not occur, for example."));
+
 typedef cl::list<std::string>::const_iterator prefix_iterator;
 
 //===----------------------------------------------------------------------===//
@@ -631,7 +636,7 @@ struct CheckString {
 ///
 /// \param PreserveHorizontal Don't squash consecutive horizontal whitespace
 /// characters to a single space.
-static MemoryBuffer *CanonicalizeInputFile(MemoryBuffer *MB,
+static MemoryBuffer *CanonicalizeInputFile(std::unique_ptr<MemoryBuffer> MB,
                                            bool PreserveHorizontal) {
   SmallString<128> NewFile;
   NewFile.reserve(MB->getBufferSize());
@@ -657,12 +662,8 @@ static MemoryBuffer *CanonicalizeInputFile(MemoryBuffer *MB,
       ++Ptr;
   }
 
-  // Free the old buffer and return a new one.
-  MemoryBuffer *MB2 =
-    MemoryBuffer::getMemBufferCopy(NewFile.str(), MB->getBufferIdentifier());
-
-  delete MB;
-  return MB2;
+  return MemoryBuffer::getMemBufferCopy(NewFile.str(),
+                                        MB->getBufferIdentifier());
 }
 
 static bool IsPartOfWord(char c) {
@@ -837,7 +838,7 @@ static bool ReadCheckFile(SourceMgr &SM,
 
   // If we want to canonicalize whitespace, strip excess whitespace from the
   // buffer containing the CHECK lines. Remove DOS style line endings.
-  MemoryBuffer *F = CanonicalizeInputFile(FileOrErr.get().release(),
+  MemoryBuffer *F = CanonicalizeInputFile(std::move(FileOrErr.get()),
                                           NoCanonicalizeWhiteSpace);
 
   SM.AddNewSourceBuffer(F, SMLoc());
@@ -1262,9 +1263,9 @@ int main(int argc, char **argv) {
            << "': " << EC.message() << '\n';
     return 2;
   }
-  std::unique_ptr<MemoryBuffer> File = std::move(FileOrErr.get());
+  std::unique_ptr<MemoryBuffer> &File = FileOrErr.get();
 
-  if (File->getBufferSize() == 0) {
+  if (File->getBufferSize() == 0 && !AllowEmptyInput) {
     errs() << "FileCheck error: '" << InputFilename << "' is empty.\n";
     return 2;
   }
@@ -1272,7 +1273,7 @@ int main(int argc, char **argv) {
   // Remove duplicate spaces in the input file if requested.
   // Remove DOS style line endings.
   MemoryBuffer *F =
-    CanonicalizeInputFile(File.release(), NoCanonicalizeWhiteSpace);
+    CanonicalizeInputFile(std::move(File), NoCanonicalizeWhiteSpace);
 
   SM.AddNewSourceBuffer(F, SMLoc());
 

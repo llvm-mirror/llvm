@@ -24,6 +24,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/Object/Archive.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/DynamicLibrary.h"
@@ -123,6 +124,10 @@ char *ExecutionEngine::getMemoryForGV(const GlobalVariable *GV) {
 
 void ExecutionEngine::addObjectFile(std::unique_ptr<object::ObjectFile> O) {
   llvm_unreachable("ExecutionEngine subclass doesn't implement addObjectFile.");
+}
+
+void ExecutionEngine::addArchive(std::unique_ptr<object::Archive> A) {
+  llvm_unreachable("ExecutionEngine subclass doesn't implement addArchive.");
 }
 
 bool ExecutionEngine::removeModule(Module *M) {

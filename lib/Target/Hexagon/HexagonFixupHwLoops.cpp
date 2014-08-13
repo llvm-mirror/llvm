@@ -160,7 +160,7 @@ bool HexagonFixupHwLoops::fixupLoopInstrs(MachineFunction &MF) {
 void HexagonFixupHwLoops::convertLoopInstr(MachineFunction &MF,
                                            MachineBasicBlock::iterator &MII,
                                            RegScavenger &RS) {
-  const TargetInstrInfo *TII = MF.getTarget().getInstrInfo();
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   MachineBasicBlock *MBB = MII->getParent();
   DebugLoc DL = MII->getDebugLoc();
   unsigned Scratch = RS.scavengeRegister(&Hexagon::IntRegsRegClass, MII, 0);

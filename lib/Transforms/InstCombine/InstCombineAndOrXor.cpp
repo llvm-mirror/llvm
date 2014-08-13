@@ -1295,6 +1295,16 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
       if (match(Op1, m_Xor(m_Specific(B), m_Specific(A))))
         if (Op0->hasOneUse() || cast<BinaryOperator>(Op0)->hasOneUse())
           return BinaryOperator::CreateAnd(Op1, Builder->CreateNot(C));
+
+    // (A | B) & ((~A) ^ B) -> (A & B)
+    if (match(Op0, m_Or(m_Value(A), m_Value(B))) &&
+        match(Op1, m_Xor(m_Not(m_Specific(A)), m_Specific(B))))
+      return BinaryOperator::CreateAnd(A, B);
+
+    // ((~A) ^ B) & (A | B) -> (A & B)
+    if (match(Op0, m_Xor(m_Not(m_Value(A)), m_Value(B))) &&
+        match(Op1, m_Or(m_Specific(A), m_Specific(B))))
+      return BinaryOperator::CreateAnd(A, B);
   }
 
   if (ICmpInst *RHS = dyn_cast<ICmpInst>(Op1))
@@ -2010,6 +2020,16 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
       match(Op1, m_Not(m_Specific(A))))
     return BinaryOperator::CreateOr(Builder->CreateNot(A), B);
 
+  // (A & (~B)) | (A ^ B) -> (A ^ B)
+  if (match(Op0, m_And(m_Value(A), m_Not(m_Value(B)))) &&
+      match(Op1, m_Xor(m_Specific(A), m_Specific(B))))
+    return BinaryOperator::CreateXor(A, B);
+
+  // (A ^ B) | ( A & (~B)) -> (A ^ B)
+  if (match(Op0, m_Xor(m_Value(A), m_Value(B))) &&
+      match(Op1, m_And(m_Specific(A), m_Not(m_Specific(B)))))
+    return BinaryOperator::CreateXor(A, B);
+
   // (A & C)|(B & D)
   Value *C = nullptr, *D = nullptr;
   if (match(Op0, m_And(m_Value(A), m_Value(C))) &&
@@ -2166,6 +2186,16 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
         Value *Not = Builder->CreateNot(NotOp, NotOp->getName()+".not");
         return BinaryOperator::CreateOr(Not, Op0);
       }
+
+  // (A & B) | ((~A) ^ B) -> (~A ^ B)
+  if (match(Op0, m_And(m_Value(A), m_Value(B))) &&
+      match(Op1, m_Xor(m_Not(m_Specific(A)), m_Specific(B))))
+    return BinaryOperator::CreateXor(Builder->CreateNot(A), B);
+
+  // ((~A) ^ B) | (A & B) -> (~A ^ B)
+  if (match(Op0, m_Xor(m_Not(m_Value(A)), m_Value(B))) &&
+      match(Op1, m_And(m_Specific(A), m_Specific(B))))
+    return BinaryOperator::CreateXor(Builder->CreateNot(A), B);
 
   if (SwappedForXor)
     std::swap(Op0, Op1);
@@ -2493,6 +2523,11 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
   if (match(Op0, m_Or(m_Value(A), m_Value(B))) &&
       match(Op1, m_Not(m_Specific(A))))
     return BinaryOperator::CreateOr(A, Builder->CreateNot(B));
+
+  // (A & ~B) ^ (~A) -> ~(A & B)
+  if (match(Op0, m_And(m_Value(A), m_Not(m_Value(B)))) &&
+      match(Op1, m_Not(m_Specific(A))))
+    return BinaryOperator::CreateNot(Builder->CreateAnd(A, B));
 
   // (icmp1 A, B) ^ (icmp2 A, B) --> (icmp3 A, B)
   if (ICmpInst *RHS = dyn_cast<ICmpInst>(I.getOperand(1)))

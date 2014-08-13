@@ -39,37 +39,15 @@ public:
 
   void addAnalysisPasses(PassManagerBase &PM) override;
 
-  const MipsInstrInfo *getInstrInfo() const override {
-    return getSubtargetImpl()->getInstrInfo();
-  }
-  const TargetFrameLowering *getFrameLowering() const override {
-    return getSubtargetImpl()->getFrameLowering();
-  }
   const MipsSubtarget *getSubtargetImpl() const override {
     if (Subtarget)
       return Subtarget;
     return &DefaultSubtarget;
   }
-  const InstrItineraryData *getInstrItineraryData() const override {
-    return Subtarget->inMips16Mode()
-               ? nullptr
-               : &getSubtargetImpl()->getInstrItineraryData();
+  MipsSubtarget *getSubtargetImpl() {
+    return static_cast<MipsSubtarget *>(TargetMachine::getSubtargetImpl());
   }
-  MipsJITInfo *getJITInfo() override {
-    return Subtarget->getJITInfo();
-  }
-  const MipsRegisterInfo *getRegisterInfo()  const override {
-    return getSubtargetImpl()->getRegisterInfo();
-  }
-  const MipsTargetLowering *getTargetLowering() const override {
-    return getSubtargetImpl()->getTargetLowering();
-  }
-  const DataLayout *getDataLayout() const override {
-    return getSubtargetImpl()->getDataLayout();
-  }
-  const MipsSelectionDAGInfo* getSelectionDAGInfo() const override {
-    return getSubtargetImpl()->getSelectionDAGInfo();
-  }
+
   /// \brief Reset the subtarget for the Mips target.
   void resetSubtarget(MachineFunction *MF);
 

@@ -35,7 +35,6 @@ class Target;
 class DataLayout;
 class TargetLibraryInfo;
 class TargetFrameLowering;
-class TargetInstrInfo;
 class TargetIntrinsicInfo;
 class TargetJITInfo;
 class TargetLowering;
@@ -87,6 +86,8 @@ protected: // Can only create subclasses.
   unsigned RequireStructuredCFG : 1;
 
 public:
+  mutable TargetOptions Options;
+
   virtual ~TargetMachine();
 
   const Target &getTarget() const { return TheTarget; }
@@ -100,34 +101,10 @@ public:
   virtual const TargetSubtargetInfo *getSubtargetImpl() const {
     return nullptr;
   }
-
-  mutable TargetOptions Options;
-
-  /// \brief Reset the target options based on the function's attributes.
-  void resetTargetOptions(const MachineFunction *MF) const;
-
-  // Interfaces to the major aspects of target machine information:
-  //
-  // -- Instruction opcode and operand information
-  // -- Pipelines and scheduling information
-  // -- Stack frame information
-  // -- Selection DAG lowering information
-  //
-  // N.B. These objects may change during compilation. It's not safe to cache
-  // them between functions.
-  virtual const TargetInstrInfo  *getInstrInfo() const { return nullptr; }
-  virtual const TargetFrameLowering *getFrameLowering() const {
-    return nullptr;
+  TargetSubtargetInfo *getSubtargetImpl() {
+    const TargetMachine *TM = this;
+    return const_cast<TargetSubtargetInfo *>(TM->getSubtargetImpl());
   }
-  virtual const TargetLowering *getTargetLowering() const { return nullptr; }
-  virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const {
-    return nullptr;
-  }
-  virtual const DataLayout *getDataLayout() const { return nullptr; }
-
-  /// getMCAsmInfo - Return target specific asm information.
-  ///
-  const MCAsmInfo *getMCAsmInfo() const { return AsmInfo; }
 
   /// getSubtarget - This method returns a pointer to the specified type of
   /// TargetSubtargetInfo.  In debug builds, it verifies that the object being
@@ -136,26 +113,17 @@ public:
     return *static_cast<const STC*>(getSubtargetImpl());
   }
 
-  /// getRegisterInfo - If register information is available, return it.  If
-  /// not, return null.  This is kept separate from RegInfo until RegInfo has
-  /// details of graph coloring register allocation removed from it.
+  /// \brief Reset the target options based on the function's attributes.
+  void resetTargetOptions(const MachineFunction *MF) const;
+
+  /// getMCAsmInfo - Return target specific asm information.
   ///
-  virtual const TargetRegisterInfo *getRegisterInfo() const { return nullptr; }
+  const MCAsmInfo *getMCAsmInfo() const { return AsmInfo; }
 
   /// getIntrinsicInfo - If intrinsic information is available, return it.  If
   /// not, return null.
   ///
-  virtual const TargetIntrinsicInfo *getIntrinsicInfo() const { return nullptr;}
-
-  /// getJITInfo - If this target supports a JIT, return information for it,
-  /// otherwise return null.
-  ///
-  virtual TargetJITInfo *getJITInfo() { return nullptr; }
-
-  /// getInstrItineraryData - Returns instruction itinerary data for the target
-  /// or specific subtarget.
-  ///
-  virtual const InstrItineraryData *getInstrItineraryData() const {
+  virtual const TargetIntrinsicInfo *getIntrinsicInfo() const {
     return nullptr;
   }
 

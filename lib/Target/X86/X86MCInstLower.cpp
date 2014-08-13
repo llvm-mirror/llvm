@@ -75,10 +75,10 @@ namespace llvm {
 
   void
   X86AsmPrinter::StackMapShadowTracker::startFunction(MachineFunction &MF) {
-    CodeEmitter.reset(TM.getTarget().createMCCodeEmitter(*TM.getInstrInfo(),
-                                                         *TM.getRegisterInfo(),
-                                                         *TM.getSubtargetImpl(),
-                                                         MF.getContext()));
+    CodeEmitter.reset(TM.getTarget().createMCCodeEmitter(
+        *TM.getSubtargetImpl()->getInstrInfo(),
+        *TM.getSubtargetImpl()->getRegisterInfo(), *TM.getSubtargetImpl(),
+        MF.getContext()));
   }
 
   void X86AsmPrinter::StackMapShadowTracker::count(MCInst &Inst,
@@ -124,7 +124,7 @@ MachineModuleInfoMachO &X86MCInstLower::getMachOMMI() const {
 /// operand to an MCSymbol.
 MCSymbol *X86MCInstLower::
 GetSymbolFromOperand(const MachineOperand &MO) const {
-  const DataLayout *DL = TM.getDataLayout();
+  const DataLayout *DL = TM.getSubtargetImpl()->getDataLayout();
   assert((MO.isGlobal() || MO.isSymbol() || MO.isMBB()) && "Isn't a symbol reference");
 
   SmallString<128> Name;
@@ -826,10 +826,24 @@ void X86AsmPrinter::LowerPATCHPOINT(const MachineInstr &MI) {
            getSubtargetInfo());
 }
 
+// Returns instruction preceding MBBI in MachineFunction.
+// If MBBI is the first instruction of the first basic block, returns null.
+static MachineBasicBlock::const_iterator
+PrevCrossBBInst(MachineBasicBlock::const_iterator MBBI) {
+  const MachineBasicBlock *MBB = MBBI->getParent();
+  while (MBBI == MBB->begin()) {
+    if (MBB == MBB->getParent()->begin())
+      return nullptr;
+    MBB = MBB->getPrevNode();
+    MBBI = MBB->end();
+  }
+  return --MBBI;
+}
+
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(*MF, *this);
-  const X86RegisterInfo *RI =
-      static_cast<const X86RegisterInfo *>(TM.getRegisterInfo());
+  const X86RegisterInfo *RI = static_cast<const X86RegisterInfo *>(
+      TM.getSubtargetImpl()->getRegisterInfo());
 
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
@@ -967,7 +981,23 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     OutStreamer.EmitWinCFIEndProlog();
     return;
 
+  case X86::SEH_Epilogue: {
+    MachineBasicBlock::const_iterator MBBI(MI);
+    // Check if preceded by a call and emit nop if so.
+    for (MBBI = PrevCrossBBInst(MBBI); MBBI; MBBI = PrevCrossBBInst(MBBI)) {
+      // Conservatively assume that pseudo instructions don't emit code and keep
+      // looking for a call. We may emit an unnecessary nop in some cases.
+      if (!MBBI->isPseudo()) {
+        if (MBBI->isCall())
+          EmitAndCountInstruction(MCInstBuilder(X86::NOOP));
+        break;
+      }
+    }
+    return;
+  }
+
   case X86::PSHUFBrm:
+  case X86::VPSHUFBrm:
     // Lower PSHUFB normally but add a comment if we can find a constant
     // shuffle mask. We won't be able to do this at the MC layer because the
     // mask isn't an immediate.
@@ -975,8 +1005,8 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     raw_string_ostream CS(Comment);
     SmallVector<int, 16> Mask;
 
-    assert(MI->getNumOperands() == 7 &&
-           "Wrong number of operansd for PSHUFBrm");
+    assert(MI->getNumOperands() >= 6 &&
+           "Wrong number of operands for PSHUFBrm or VPSHUFBrm");
     const MachineOperand &DstOp = MI->getOperand(0);
     const MachineOperand &SrcOp = MI->getOperand(1);
     const MachineOperand &MaskOp = MI->getOperand(5);
@@ -998,7 +1028,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       ArrayRef<MachineConstantPoolEntry> Constants =
           MI->getParent()->getParent()->getConstantPool()->getConstants();
       const MachineConstantPoolEntry &MaskConstantEntry =
-          Constants[MI->getOperand(5).getIndex()];
+          Constants[MaskOp.getIndex()];
       Type *MaskTy = MaskConstantEntry.getType();
       (void)MaskTy;
       if (!MaskConstantEntry.isMachineConstantPoolEntry())

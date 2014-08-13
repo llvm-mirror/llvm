@@ -92,11 +92,11 @@ class ARMFastISel final : public FastISel {
   public:
     explicit ARMFastISel(FunctionLoweringInfo &funcInfo,
                          const TargetLibraryInfo *libInfo)
-    : FastISel(funcInfo, libInfo),
-      M(const_cast<Module&>(*funcInfo.Fn->getParent())),
-      TM(funcInfo.MF->getTarget()),
-      TII(*TM.getInstrInfo()),
-      TLI(*TM.getTargetLowering()) {
+        : FastISel(funcInfo, libInfo),
+          M(const_cast<Module &>(*funcInfo.Fn->getParent())),
+          TM(funcInfo.MF->getTarget()),
+          TII(*TM.getSubtargetImpl()->getInstrInfo()),
+          TLI(*TM.getSubtargetImpl()->getTargetLowering()) {
       Subtarget = &TM.getSubtarget<ARMSubtarget>();
       AFI = funcInfo.MF->getInfo<ARMFunctionInfo>();
       isThumb2 = AFI->isThumbFunction();
@@ -189,7 +189,9 @@ class ARMFastISel final : public FastISel {
     unsigned ARMSelectCallOp(bool UseReg);
     unsigned ARMLowerPICELF(const GlobalValue *GV, unsigned Align, MVT VT);
 
-    const TargetLowering *getTargetLowering() { return TM.getTargetLowering(); }
+    const TargetLowering *getTargetLowering() {
+      return TM.getSubtargetImpl()->getTargetLowering();
+    }
 
     // Call handling routines.
   private:
@@ -1883,7 +1885,7 @@ bool ARMFastISel::ProcessCallArgs(SmallVectorImpl<Value*> &Args,
                                   unsigned &NumBytes,
                                   bool isVarArg) {
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CC, isVarArg, *FuncInfo.MF, TM, ArgLocs, *Context);
+  CCState CCInfo(CC, isVarArg, *FuncInfo.MF, ArgLocs, *Context);
   CCInfo.AnalyzeCallOperands(ArgVTs, ArgFlags,
                              CCAssignFnForCall(CC, false, isVarArg));
 
@@ -1941,6 +1943,7 @@ bool ARMFastISel::ProcessCallArgs(SmallVectorImpl<Value*> &Args,
   // Process the args.
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
+    const Value *ArgVal = Args[VA.getValNo()];
     unsigned Arg = ArgRegs[VA.getValNo()];
     MVT ArgVT = ArgVTs[VA.getValNo()];
 
@@ -2001,6 +2004,11 @@ bool ARMFastISel::ProcessCallArgs(SmallVectorImpl<Value*> &Args,
     } else {
       assert(VA.isMemLoc());
       // Need to store on the stack.
+
+      // Don't emit stores for undef values.
+      if (isa<UndefValue>(ArgVal))
+        continue;
+
       Address Addr;
       Addr.BaseType = Address::RegBase;
       Addr.Base.Reg = ARM::SP;
@@ -2026,7 +2034,7 @@ bool ARMFastISel::FinishCall(MVT RetVT, SmallVectorImpl<unsigned> &UsedRegs,
   // Now the return value.
   if (RetVT != MVT::isVoid) {
     SmallVector<CCValAssign, 16> RVLocs;
-    CCState CCInfo(CC, isVarArg, *FuncInfo.MF, TM, RVLocs, *Context);
+    CCState CCInfo(CC, isVarArg, *FuncInfo.MF, RVLocs, *Context);
     CCInfo.AnalyzeCallResult(RetVT, CCAssignFnForCall(CC, true, isVarArg));
 
     // Copy all of the result registers out of their specified physreg.
@@ -2087,7 +2095,7 @@ bool ARMFastISel::SelectRet(const Instruction *I) {
 
     // Analyze operands of the call, assigning locations to each operand.
     SmallVector<CCValAssign, 16> ValLocs;
-    CCState CCInfo(CC, F.isVarArg(), *FuncInfo.MF, TM, ValLocs,I->getContext());
+    CCState CCInfo(CC, F.isVarArg(), *FuncInfo.MF, ValLocs, I->getContext());
     CCInfo.AnalyzeReturn(Outs, CCAssignFnForCall(CC, true /* is Ret */,
                                                  F.isVarArg()));
 
@@ -2192,7 +2200,7 @@ bool ARMFastISel::ARMEmitLibcall(const Instruction *I, RTLIB::Libcall Call) {
   // Can't handle non-double multi-reg retvals.
   if (RetVT != MVT::isVoid && RetVT != MVT::i32) {
     SmallVector<CCValAssign, 16> RVLocs;
-    CCState CCInfo(CC, false, *FuncInfo.MF, TM, RVLocs, *Context);
+    CCState CCInfo(CC, false, *FuncInfo.MF, RVLocs, *Context);
     CCInfo.AnalyzeCallResult(RetVT, CCAssignFnForCall(CC, true, false));
     if (RVLocs.size() >= 2 && RetVT != MVT::f64)
       return false;
@@ -2303,7 +2311,7 @@ bool ARMFastISel::SelectCall(const Instruction *I,
   if (RetVT != MVT::isVoid && RetVT != MVT::i1 && RetVT != MVT::i8 &&
       RetVT != MVT::i16 && RetVT != MVT::i32) {
     SmallVector<CCValAssign, 16> RVLocs;
-    CCState CCInfo(CC, isVarArg, *FuncInfo.MF, TM, RVLocs, *Context);
+    CCState CCInfo(CC, isVarArg, *FuncInfo.MF, RVLocs, *Context);
     CCInfo.AnalyzeCallResult(RetVT, CCAssignFnForCall(CC, true, isVarArg));
     if (RVLocs.size() >= 2 && RetVT != MVT::f64)
       return false;
@@ -2487,7 +2495,8 @@ bool ARMFastISel::SelectIntrinsicCall(const IntrinsicInst &I) {
     }
 
     const ARMBaseRegisterInfo *RegInfo =
-          static_cast<const ARMBaseRegisterInfo*>(TM.getRegisterInfo());
+        static_cast<const ARMBaseRegisterInfo *>(
+            TM.getSubtargetImpl()->getRegisterInfo());
     unsigned FramePtr = RegInfo->getFrameRegister(*(FuncInfo.MF));
     unsigned SrcReg = FramePtr;
 

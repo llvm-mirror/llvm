@@ -47,7 +47,7 @@ ARMFrameLowering::ARMFrameLowering(const ARMSubtarget &sti)
 /// pointer register.  This is true if the function has variable sized allocas
 /// or if frame pointer elimination is disabled.
 bool ARMFrameLowering::hasFP(const MachineFunction &MF) const {
-  const TargetRegisterInfo *RegInfo = MF.getTarget().getRegisterInfo();
+  const TargetRegisterInfo *RegInfo = MF.getSubtarget().getRegisterInfo();
 
   // iOS requires FP not to be clobbered for backtracing purpose.
   if (STI.isTargetIOS())
@@ -163,14 +163,15 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
   MCContext &Context = MMI.getContext();
   const TargetMachine &TM = MF.getTarget();
   const MCRegisterInfo *MRI = Context.getRegisterInfo();
-  const ARMBaseRegisterInfo *RegInfo =
-    static_cast<const ARMBaseRegisterInfo*>(TM.getRegisterInfo());
-  const ARMBaseInstrInfo &TII =
-    *static_cast<const ARMBaseInstrInfo*>(TM.getInstrInfo());
+  const ARMBaseRegisterInfo *RegInfo = static_cast<const ARMBaseRegisterInfo *>(
+      TM.getSubtargetImpl()->getRegisterInfo());
+  const ARMBaseInstrInfo &TII = *static_cast<const ARMBaseInstrInfo *>(
+                                    TM.getSubtargetImpl()->getInstrInfo());
   assert(!AFI->isThumb1OnlyFunction() &&
          "This emitPrologue does not support Thumb1!");
   bool isARM = !AFI->isThumbFunction();
-  unsigned Align = TM.getFrameLowering()->getStackAlignment();
+  unsigned Align =
+      TM.getSubtargetImpl()->getFrameLowering()->getStackAlignment();
   unsigned ArgRegsSaveSize = AFI->getArgRegsSaveSize(Align);
   unsigned NumBytes = MFI->getStackSize();
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
@@ -574,14 +575,17 @@ void ARMFrameLowering::emitEpilogue(MachineFunction &MF,
   DebugLoc dl = MBBI->getDebugLoc();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
-  const TargetRegisterInfo *RegInfo = MF.getTarget().getRegisterInfo();
+  const TargetRegisterInfo *RegInfo = MF.getSubtarget().getRegisterInfo();
   const ARMBaseInstrInfo &TII =
-    *static_cast<const ARMBaseInstrInfo*>(MF.getTarget().getInstrInfo());
+      *static_cast<const ARMBaseInstrInfo *>(MF.getSubtarget().getInstrInfo());
   assert(!AFI->isThumb1OnlyFunction() &&
          "This emitEpilogue does not support Thumb1!");
   bool isARM = !AFI->isThumbFunction();
 
-  unsigned Align = MF.getTarget().getFrameLowering()->getStackAlignment();
+  unsigned Align = MF.getTarget()
+                       .getSubtargetImpl()
+                       ->getFrameLowering()
+                       ->getStackAlignment();
   unsigned ArgRegsSaveSize = AFI->getArgRegsSaveSize(Align);
   int NumBytes = (int)MFI->getStackSize();
   unsigned FramePtr = RegInfo->getFrameRegister(MF);
@@ -717,8 +721,8 @@ ARMFrameLowering::ResolveFrameIndexReference(const MachineFunction &MF,
                                              int FI, unsigned &FrameReg,
                                              int SPAdj) const {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
-  const ARMBaseRegisterInfo *RegInfo =
-    static_cast<const ARMBaseRegisterInfo*>(MF.getTarget().getRegisterInfo());
+  const ARMBaseRegisterInfo *RegInfo = static_cast<const ARMBaseRegisterInfo *>(
+      MF.getSubtarget().getRegisterInfo());
   const ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
   int Offset = MFI->getObjectOffset(FI) + MFI->getStackSize();
   int FPOffset = Offset - AFI->getFramePtrSpillOffset();
@@ -803,7 +807,7 @@ void ARMFrameLowering::emitPushInst(MachineBasicBlock &MBB,
                                     unsigned NumAlignedDPRCS2Regs,
                                     unsigned MIFlags) const {
   MachineFunction &MF = *MBB.getParent();
-  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
 
   DebugLoc DL;
   if (MI != MBB.end()) DL = MI->getDebugLoc();
@@ -876,7 +880,7 @@ void ARMFrameLowering::emitPopInst(MachineBasicBlock &MBB,
                                    bool(*Func)(unsigned, bool),
                                    unsigned NumAlignedDPRCS2Regs) const {
   MachineFunction &MF = *MBB.getParent();
-  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
   DebugLoc DL = MI->getDebugLoc();
   unsigned RetOpcode = MI->getOpcode();
@@ -966,7 +970,7 @@ static void emitAlignedDPRCS2Spills(MachineBasicBlock &MBB,
   MachineFunction &MF = *MBB.getParent();
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
   DebugLoc DL = MI->getDebugLoc();
-  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   MachineFrameInfo &MFI = *MF.getFrameInfo();
 
   // Mark the D-register spill slots as properly aligned.  Since MFI computes
@@ -1125,7 +1129,7 @@ static void emitAlignedDPRCS2Restores(MachineBasicBlock &MBB,
   MachineFunction &MF = *MBB.getParent();
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
   DebugLoc DL = MI->getDebugLoc();
-  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
 
   // Find the frame index assigned to d8.
   int D8SpillFI = 0;
@@ -1340,12 +1344,15 @@ static void checkNumAlignedDPRCS2Regs(MachineFunction &MF) {
     return;
 
   // Don't bother if the default stack alignment is sufficiently high.
-  if (MF.getTarget().getFrameLowering()->getStackAlignment() >= 8)
+  if (MF.getTarget()
+          .getSubtargetImpl()
+          ->getFrameLowering()
+          ->getStackAlignment() >= 8)
     return;
 
   // Aligned spills require stack realignment.
-  const ARMBaseRegisterInfo *RegInfo =
-    static_cast<const ARMBaseRegisterInfo*>(MF.getTarget().getRegisterInfo());
+  const ARMBaseRegisterInfo *RegInfo = static_cast<const ARMBaseRegisterInfo *>(
+      MF.getSubtarget().getRegisterInfo());
   if (!RegInfo->canRealignStack(MF))
     return;
 
@@ -1384,10 +1391,10 @@ ARMFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
   unsigned NumGPRSpills = 0;
   SmallVector<unsigned, 4> UnspilledCS1GPRs;
   SmallVector<unsigned, 4> UnspilledCS2GPRs;
-  const ARMBaseRegisterInfo *RegInfo =
-    static_cast<const ARMBaseRegisterInfo*>(MF.getTarget().getRegisterInfo());
+  const ARMBaseRegisterInfo *RegInfo = static_cast<const ARMBaseRegisterInfo *>(
+      MF.getSubtarget().getRegisterInfo());
   const ARMBaseInstrInfo &TII =
-    *static_cast<const ARMBaseInstrInfo*>(MF.getTarget().getInstrInfo());
+      *static_cast<const ARMBaseInstrInfo *>(MF.getSubtarget().getInstrInfo());
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -1628,7 +1635,7 @@ void ARMFrameLowering::
 eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
                               MachineBasicBlock::iterator I) const {
   const ARMBaseInstrInfo &TII =
-    *static_cast<const ARMBaseInstrInfo*>(MF.getTarget().getInstrInfo());
+      *static_cast<const ARMBaseInstrInfo *>(MF.getSubtarget().getInstrInfo());
   if (!hasReservedCallFrame(MF)) {
     // If we have alloca, convert as follows:
     // ADJCALLSTACKDOWN -> sub, sp, sp, amount
@@ -1746,7 +1753,7 @@ void ARMFrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
   MCContext &Context = MMI.getContext();
   const MCRegisterInfo *MRI = Context.getRegisterInfo();
   const ARMBaseInstrInfo &TII =
-      *static_cast<const ARMBaseInstrInfo*>(MF.getTarget().getInstrInfo());
+      *static_cast<const ARMBaseInstrInfo *>(MF.getSubtarget().getInstrInfo());
   ARMFunctionInfo *ARMFI = MF.getInfo<ARMFunctionInfo>();
   DebugLoc DL;
 

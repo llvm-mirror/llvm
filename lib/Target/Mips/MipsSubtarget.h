@@ -65,6 +65,9 @@ protected:
   // IsFPXX - MIPS O32 modeless ABI.
   bool IsFPXX;
 
+  // IsABICalls - SVR4-style position-independent code.
+  bool IsABICalls;
+
   // IsFP64bit - The target processor has 64-bit floating point registers.
   bool IsFP64bit;
 
@@ -200,6 +203,7 @@ public:
   bool hasCnMips() const { return HasCnMips; }
 
   bool isLittle() const { return IsLittle; }
+  bool isABICalls() const { return IsABICalls; }
   bool isFPXX() const { return IsFPXX; }
   bool isFP64bit() const { return IsFP64bit; }
   bool useOddSPReg() const { return UseOddSPReg; }
@@ -241,7 +245,6 @@ public:
   bool hasExtractInsert() const { return !inMips16Mode() && hasMips32r2(); }
   bool hasMTHC1() const { return hasMips32r2(); }
 
-  const InstrItineraryData &getInstrItineraryData() const { return InstrItins; }
   bool allowMixed16_32() const { return inMips16ModeDefault() |
                                         AllowMixed16_32;}
 
@@ -273,17 +276,24 @@ public:
   void setHelperClassesMips16();
   void setHelperClassesMipsSE();
 
-  MipsJITInfo *getJITInfo() { return &JITInfo; }
-  const MipsSelectionDAGInfo *getSelectionDAGInfo() const { return &TSInfo; }
-  const DataLayout *getDataLayout() const { return &DL; }
-  const MipsInstrInfo *getInstrInfo() const { return InstrInfo.get(); }
-  const TargetFrameLowering *getFrameLowering() const {
+  MipsJITInfo *getJITInfo() override { return &JITInfo; }
+  const MipsSelectionDAGInfo *getSelectionDAGInfo() const override {
+    return &TSInfo;
+  }
+  const DataLayout *getDataLayout() const override { return &DL; }
+  const MipsInstrInfo *getInstrInfo() const override { return InstrInfo.get(); }
+  const TargetFrameLowering *getFrameLowering() const override {
     return FrameLowering.get();
   }
-  const MipsRegisterInfo *getRegisterInfo() const {
+  const MipsRegisterInfo *getRegisterInfo() const override {
     return &InstrInfo->getRegisterInfo();
   }
-  const MipsTargetLowering *getTargetLowering() const { return TLInfo.get(); }
+  const MipsTargetLowering *getTargetLowering() const override {
+    return TLInfo.get();
+  }
+  const InstrItineraryData *getInstrItineraryData() const override {
+    return &InstrItins;
+  }
 };
 } // End llvm namespace
 
