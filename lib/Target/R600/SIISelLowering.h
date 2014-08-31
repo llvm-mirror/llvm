@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SIISELLOWERING_H
-#define SIISELLOWERING_H
+#ifndef LLVM_LIB_TARGET_R600_SIISELLOWERING_H
+#define LLVM_LIB_TARGET_R600_SIISELLOWERING_H
 
 #include "AMDGPUISelLowering.h"
 #include "SIInstrInfo.h"
@@ -56,9 +56,16 @@ class SITargetLowering : public AMDGPUTargetLowering {
 
   static SDValue performUCharToFloatCombine(SDNode *N,
                                             DAGCombinerInfo &DCI);
+  SDValue performSHLPtrCombine(SDNode *N,
+                               unsigned AS,
+                               DAGCombinerInfo &DCI) const;
 
 public:
   SITargetLowering(TargetMachine &tm);
+
+  bool isLegalAddressingMode(const AddrMode &AM,
+                             Type *Ty) const override;
+
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
                                       unsigned Align,
                                       bool *IsFast) const override;
@@ -99,4 +106,4 @@ public:
 
 } // End namespace llvm
 
-#endif //SIISELLOWERING_H
+#endif

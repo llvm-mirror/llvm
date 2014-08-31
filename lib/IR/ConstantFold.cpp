@@ -674,6 +674,9 @@ Constant *llvm::ConstantFoldCastInstruction(unsigned opc, Constant *V,
     }
     return nullptr;
   case Instruction::Trunc: {
+    if (V->getType()->isVectorTy())
+      return nullptr;
+
     uint32_t DestBitWidth = cast<IntegerType>(DestTy)->getBitWidth();
     if (ConstantInt *CI = dyn_cast<ConstantInt>(V)) {
       return ConstantInt::get(V->getContext(),
@@ -2144,9 +2147,10 @@ static Constant *ConstantFoldGetElementPtrImpl(Constant *C,
 
   // If all indices are known integers and normalized, we can do a simple
   // check for the "inbounds" property.
-  if (!Unknown && !inBounds &&
-      isa<GlobalVariable>(C) && isInBoundsIndices(Idxs))
-    return ConstantExpr::getInBoundsGetElementPtr(C, Idxs);
+  if (!Unknown && !inBounds)
+    if (auto *GV = dyn_cast<GlobalVariable>(C))
+      if (!GV->hasExternalWeakLinkage() && isInBoundsIndices(Idxs))
+        return ConstantExpr::getInBoundsGetElementPtr(C, Idxs);
 
   return nullptr;
 }

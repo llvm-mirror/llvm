@@ -56,29 +56,6 @@ void MCStreamer::reset() {
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
 
-const MCExpr *MCStreamer::BuildSymbolDiff(MCContext &Context,
-                                          const MCSymbol *A,
-                                          const MCSymbol *B) {
-  MCSymbolRefExpr::VariantKind Variant = MCSymbolRefExpr::VK_None;
-  const MCExpr *ARef =
-    MCSymbolRefExpr::Create(A, Variant, Context);
-  const MCExpr *BRef =
-    MCSymbolRefExpr::Create(B, Variant, Context);
-  const MCExpr *AddrDelta =
-    MCBinaryExpr::Create(MCBinaryExpr::Sub, ARef, BRef, Context);
-  return AddrDelta;
-}
-
-const MCExpr *MCStreamer::ForceExpAbs(const MCExpr* Expr) {
-  assert(!isa<MCSymbolRefExpr>(Expr));
-  if (Context.getAsmInfo()->hasAggressiveSymbolFolding())
-    return Expr;
-
-  MCSymbol *ABS = Context.CreateTempSymbol();
-  EmitAssignment(ABS, Expr);
-  return MCSymbolRefExpr::Create(ABS, Context);
-}
-
 raw_ostream &MCStreamer::GetCommentOS() {
   // By default, discard comments.
   return nulls();
@@ -92,22 +69,10 @@ void MCStreamer::generateCompactUnwindEncodings(MCAsmBackend *MAB) {
         (MAB ? MAB->generateCompactUnwindEncoding(FI.Instructions) : 0);
 }
 
-void MCStreamer::EmitDwarfSetLineAddr(int64_t LineDelta,
-                                      const MCSymbol *Label, int PointerSize) {
-  // emit the sequence to set the address
-  EmitIntValue(dwarf::DW_LNS_extended_op, 1);
-  EmitULEB128IntValue(PointerSize + 1);
-  EmitIntValue(dwarf::DW_LNE_set_address, 1);
-  EmitSymbolValue(Label, PointerSize);
-
-  // emit the sequence for the LineDelta (from 1) and a zero address delta.
-  MCDwarfLineAddr::Emit(this, LineDelta, 0);
-}
-
 /// EmitIntValue - Special case of EmitValue that avoids the client having to
 /// pass in a MCExpr for constant integers.
 void MCStreamer::EmitIntValue(uint64_t Value, unsigned Size) {
-  assert(Size <= 8 && "Invalid size");
+  assert(1 <= Size && Size <= 8 && "Invalid size");
   assert((isUIntN(8 * Size, Value) || isIntN(8 * Size, Value)) &&
          "Invalid size");
   char buf[8];
@@ -136,12 +101,6 @@ void MCStreamer::EmitSLEB128IntValue(int64_t Value) {
   encodeSLEB128(Value, OSE);
   EmitBytes(OSE.str());
 }
-
-void MCStreamer::EmitAbsValue(const MCExpr *Value, unsigned Size) {
-  const MCExpr *ABS = ForceExpAbs(Value);
-  EmitValue(ABS, Size);
-}
-
 
 void MCStreamer::EmitValue(const MCExpr *Value, unsigned Size,
                            const SMLoc &Loc) {
@@ -244,12 +203,6 @@ void MCStreamer::EmitLabel(MCSymbol *Symbol) {
   MCTargetStreamer *TS = getTargetStreamer();
   if (TS)
     TS->emitLabel(Symbol);
-}
-
-void MCStreamer::EmitCompactUnwindEncoding(uint32_t CompactUnwindEncoding) {
-  EnsureValidDwarfFrame();
-  MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
-  CurFrame->CompactUnwindEncoding = CompactUnwindEncoding;
 }
 
 void MCStreamer::EmitCFISections(bool EH, bool Debug) {

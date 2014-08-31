@@ -1390,7 +1390,7 @@ defm V_SUBBREV_U32 : VOP2bInst <0x0000002a, "V_SUBBREV_U32",
 } // End isCommutable = 1, Defs = [VCC]
 
 defm V_LDEXP_F32 : VOP2Inst <0x0000002b, "V_LDEXP_F32",
-  VOP_F32_F32_F32
+  VOP_F32_F32_I32, AMDGPUldexp
 >;
 ////def V_CVT_PKACCUM_U8_F32 : VOP2_U8 <0x0000002c, "V_CVT_PKACCUM_U8_F32", []>;
 ////def V_CVT_PKNORM_I16_F32 : VOP2_I16 <0x0000002d, "V_CVT_PKNORM_I16_F32", []>;
@@ -1509,7 +1509,7 @@ defm V_MAX_F64 : VOP3Inst <0x00000167, "V_MAX_F64",
 } // isCommutable = 1
 
 defm V_LDEXP_F64 : VOP3Inst <0x00000168, "V_LDEXP_F64",
-  VOP_F32_F32_I32
+  VOP_F64_F64_I32, AMDGPUldexp
 >;
 
 let isCommutable = 1 in {
@@ -1729,14 +1729,14 @@ def V_SUB_F64 : InstSI <
 multiclass SI_SPILL_SGPR <RegisterClass sgpr_class> {
 
   def _SAVE : InstSI <
-    (outs VReg_32:$dst),
+    (outs),
     (ins sgpr_class:$src, i32imm:$frame_idx),
     "", []
   >;
 
   def _RESTORE : InstSI <
     (outs sgpr_class:$dst),
-    (ins VReg_32:$src, i32imm:$frame_idx),
+    (ins i32imm:$frame_idx),
     "", []
   >;
 
@@ -2322,44 +2322,50 @@ def : Pat <
 /********** Floating point absolute/negative **********/
 /********** ================================ **********/
 
-// Manipulate the sign bit directly, as e.g. using the source negation modifier
-// in V_ADD_F32_e64 $src, 0, [...] does not result in -0.0 for $src == +0.0,
-// breaking the piglit *s-floatBitsToInt-neg* tests
+// Prevent expanding both fneg and fabs.
 
-// TODO: Look into not implementing isFNegFree/isFAbsFree for SI, and possibly
-// removing these patterns
-
+// FIXME: Should use S_OR_B32
 def : Pat <
   (fneg (fabs f32:$src)),
   (V_OR_B32_e32 $src, (V_MOV_B32_e32 0x80000000)) /* Set sign bit */
 >;
 
-def FABS_SI : AMDGPUShaderInst <
-  (outs VReg_32:$dst),
-  (ins VSrc_32:$src0),
-  "FABS_SI $dst, $src0",
-  []
-> {
-  let usesCustomInserter = 1;
-}
+// FIXME: Should use S_OR_B32
+def : Pat <
+  (fneg (fabs f64:$src)),
+    (f64 (INSERT_SUBREG
+      (INSERT_SUBREG (f64 (IMPLICIT_DEF)),
+       (i32 (EXTRACT_SUBREG f64:$src, sub0)), sub0),
+    (V_OR_B32_e32 (EXTRACT_SUBREG f64:$src, sub1),
+                  (V_MOV_B32_e32 0x80000000)), sub1)) // Set sign bit.
+>;
 
 def : Pat <
   (fabs f32:$src),
-  (FABS_SI f32:$src)
+  (V_AND_B32_e32 $src, (V_MOV_B32_e32 0x7fffffff))
 >;
-
-def FNEG_SI : AMDGPUShaderInst <
-  (outs VReg_32:$dst),
-  (ins VSrc_32:$src0),
-  "FNEG_SI $dst, $src0",
-  []
-> {
-  let usesCustomInserter = 1;
-}
 
 def : Pat <
   (fneg f32:$src),
-  (FNEG_SI f32:$src)
+  (V_XOR_B32_e32 $src, (V_MOV_B32_e32 0x80000000))
+>;
+
+def : Pat <
+  (fabs f64:$src),
+    (f64 (INSERT_SUBREG
+      (INSERT_SUBREG (f64 (IMPLICIT_DEF)),
+       (i32 (EXTRACT_SUBREG f64:$src, sub0)), sub0),
+    (V_AND_B32_e32 (EXTRACT_SUBREG f64:$src, sub1),
+                    (V_MOV_B32_e32 0x7fffffff)), sub1)) // Set sign bit.
+>;
+
+def : Pat <
+  (fneg f64:$src),
+    (f64 (INSERT_SUBREG
+      (INSERT_SUBREG (f64 (IMPLICIT_DEF)),
+       (i32 (EXTRACT_SUBREG f64:$src, sub0)), sub0),
+    (V_XOR_B32_e32 (EXTRACT_SUBREG f64:$src, sub1),
+                    (V_MOV_B32_e32 0x80000000)), sub1))
 >;
 
 /********** ================== **********/
@@ -2514,41 +2520,49 @@ def : ROTRPattern <V_ALIGNBIT_B32>;
 /**********   Load/Store Patterns   **********/
 /********** ======================= **********/
 
-multiclass DSReadPat <DS inst, ValueType vt, PatFrag frag> {
-  def : Pat <
-    (vt (frag (add i32:$ptr, (i32 IMM16bit:$offset)))),
-    (inst (i1 0), $ptr, (as_i16imm $offset))
-  >;
+class DSReadPat <DS inst, ValueType vt, PatFrag frag> : Pat <
+  (vt (frag (DS1Addr1Offset i32:$ptr, i32:$offset))),
+  (inst (i1 0), $ptr, (as_i16imm $offset))
+>;
 
-  def : Pat <
-    (frag i32:$src0),
-    (vt (inst 0, $src0, 0))
-  >;
-}
+def : DSReadPat <DS_READ_I8,  i32, sextloadi8_local>;
+def : DSReadPat <DS_READ_U8,  i32, az_extloadi8_local>;
+def : DSReadPat <DS_READ_I16, i32, sextloadi16_local>;
+def : DSReadPat <DS_READ_U16, i32, az_extloadi16_local>;
+def : DSReadPat <DS_READ_B32, i32, local_load>;
 
-defm : DSReadPat <DS_READ_I8,  i32, sextloadi8_local>;
-defm : DSReadPat <DS_READ_U8,  i32, az_extloadi8_local>;
-defm : DSReadPat <DS_READ_I16, i32, sextloadi16_local>;
-defm : DSReadPat <DS_READ_U16, i32, az_extloadi16_local>;
-defm : DSReadPat <DS_READ_B32, i32, local_load>;
-defm : DSReadPat <DS_READ_B64, v2i32, local_load>;
+let AddedComplexity = 100 in {
 
-multiclass DSWritePat <DS inst, ValueType vt, PatFrag frag> {
-  def : Pat <
-    (frag vt:$value, (add i32:$ptr, (i32 IMM16bit:$offset))),
-    (inst (i1 0), $ptr, $value, (as_i16imm $offset))
-  >;
+def : DSReadPat <DS_READ_B64, v2i32, local_load_aligned8bytes>;
 
-  def : Pat <
-    (frag vt:$val, i32:$ptr),
-    (inst 0, $ptr, $val, 0)
-  >;
-}
+} // End AddedComplexity = 100
 
-defm : DSWritePat <DS_WRITE_B8, i32, truncstorei8_local>;
-defm : DSWritePat <DS_WRITE_B16, i32, truncstorei16_local>;
-defm : DSWritePat <DS_WRITE_B32, i32, local_store>;
-defm : DSWritePat <DS_WRITE_B64, v2i32, local_store>;
+def : Pat <
+  (v2i32 (local_load (DS64Bit4ByteAligned i32:$ptr, i8:$offset0,
+                                                    i8:$offset1))),
+  (DS_READ2_B32 (i1 0), $ptr, $offset0, $offset1)
+>;
+
+class DSWritePat <DS inst, ValueType vt, PatFrag frag> : Pat <
+  (frag vt:$value, (DS1Addr1Offset i32:$ptr, i32:$offset)),
+  (inst (i1 0), $ptr, $value, (as_i16imm $offset))
+>;
+
+def : DSWritePat <DS_WRITE_B8, i32, truncstorei8_local>;
+def : DSWritePat <DS_WRITE_B16, i32, truncstorei16_local>;
+def : DSWritePat <DS_WRITE_B32, i32, local_store>;
+
+let AddedComplexity = 100 in {
+
+def : DSWritePat <DS_WRITE_B64, v2i32, local_store_aligned8bytes>;
+} // End AddedComplexity = 100
+
+def : Pat <
+  (local_store v2i32:$value, (DS64Bit4ByteAligned i32:$ptr, i8:$offset0,
+                                                            i8:$offset1)),
+  (DS_WRITE2_B32 (i1 0), $ptr, (EXTRACT_SUBREG $value, sub0),
+                        (EXTRACT_SUBREG $value, sub1), $offset0, $offset1)
+>;
 
 multiclass DSAtomicRetPat<DS inst, ValueType vt, PatFrag frag> {
   def : Pat <
@@ -2717,18 +2731,16 @@ defm : MUBUF_Load_Dword <v4i32, BUFFER_LOAD_DWORDX4_OFFSET, BUFFER_LOAD_DWORDX4_
                          BUFFER_LOAD_DWORDX4_IDXEN, BUFFER_LOAD_DWORDX4_BOTHEN>;
 
 class MUBUFScratchStorePat <MUBUF Instr, ValueType vt, PatFrag st> : Pat <
-  (st vt:$value, (MUBUFAddr32 v4i32:$srsrc, i32:$vaddr, i32:$soffset,
-                              u16imm:$offset, i1imm:$offen, i1imm:$idxen,
-                              i1imm:$glc, i1imm:$slc, i1imm:$tfe)),
-  (Instr $value, $srsrc, $vaddr, $soffset, $offset, $offen, $idxen,
-         $glc, $slc, $tfe)
+  (st vt:$value, (MUBUFScratch v4i32:$srsrc, i32:$vaddr, i32:$soffset,
+                               u16imm:$offset)),
+  (Instr $value, $srsrc, $vaddr, $soffset, $offset, 0, 0, 0)
 >;
 
-def : MUBUFScratchStorePat <BUFFER_STORE_BYTE, i32, truncstorei8_private>;
-def : MUBUFScratchStorePat <BUFFER_STORE_SHORT, i32, truncstorei16_private>;
-def : MUBUFScratchStorePat <BUFFER_STORE_DWORD, i32, store_private>;
-def : MUBUFScratchStorePat <BUFFER_STORE_DWORDX2, v2i32, store_private>;
-def : MUBUFScratchStorePat <BUFFER_STORE_DWORDX4, v4i32, store_private>;
+def : MUBUFScratchStorePat <BUFFER_STORE_BYTE_OFFEN, i32, truncstorei8_private>;
+def : MUBUFScratchStorePat <BUFFER_STORE_SHORT_OFFEN, i32, truncstorei16_private>;
+def : MUBUFScratchStorePat <BUFFER_STORE_DWORD_OFFEN, i32, store_private>;
+def : MUBUFScratchStorePat <BUFFER_STORE_DWORDX2_OFFEN, v2i32, store_private>;
+def : MUBUFScratchStorePat <BUFFER_STORE_DWORDX4_OFFEN, v4i32, store_private>;
 
 /*
 class MUBUFStore_Pattern <MUBUF Instr, ValueType vt, PatFrag st> : Pat <

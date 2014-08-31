@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TARGET_POWERPC_PPC32ISELLOWERING_H
-#define LLVM_TARGET_POWERPC_PPC32ISELLOWERING_H
+#ifndef LLVM_LIB_TARGET_POWERPC_PPCISELLOWERING_H
+#define LLVM_LIB_TARGET_POWERPC_PPCISELLOWERING_H
 
 #include "PPC.h"
 #include "PPCInstrInfo.h"
@@ -476,6 +476,10 @@ namespace llvm {
                                            Type *Ty) const override;
 
     bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const override;
+
+    bool getTgtMemIntrinsic(IntrinsicInfo &Info,
+                            const CallInst &I,
+                            unsigned Intrinsic) const override;
 
     /// getOptimalMemOpType - Returns the target specific optimal type for load
     /// and store operations as a result of memset, memcpy, and memmove

@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ARMINSTPRINTER_H
-#define ARMINSTPRINTER_H
+#ifndef LLVM_LIB_TARGET_ARM_INSTPRINTER_ARMINSTPRINTER_H
+#define LLVM_LIB_TARGET_ARM_INSTPRINTER_ARMINSTPRINTER_H
 
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -117,6 +117,7 @@ public:
   void printCPSIMod(const MCInst *MI, unsigned OpNum, raw_ostream &O);
   void printCPSIFlag(const MCInst *MI, unsigned OpNum, raw_ostream &O);
   void printMSRMaskOperand(const MCInst *MI, unsigned OpNum, raw_ostream &O);
+  void printBankedRegOperand(const MCInst *MI, unsigned OpNum, raw_ostream &O);
   void printPredicateOperand(const MCInst *MI, unsigned OpNum, raw_ostream &O);
   void printMandatoryPredicateOperand(const MCInst *MI, unsigned OpNum,
                                       raw_ostream &O);

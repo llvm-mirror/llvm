@@ -207,7 +207,7 @@ private:
     size_t FirstNonSymbol = Expr.find_first_not_of("0123456789"
                                                    "abcdefghijklmnopqrstuvwxyz"
                                                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                                   ":_.");
+                                                   ":_.$");
     return std::make_pair(Expr.substr(0, FirstNonSymbol),
                           Expr.substr(FirstNonSymbol).ltrim());
   }
@@ -703,9 +703,21 @@ uint64_t RuntimeDyldCheckerImpl::readMemoryAtAddr(uint64_t SrcAddr,
                                                   unsigned Size) const {
   uintptr_t PtrSizedAddr = static_cast<uintptr_t>(SrcAddr);
   assert(PtrSizedAddr == SrcAddr && "Linker memory pointer out-of-range.");
-  uint8_t *Src = reinterpret_cast<uint8_t *>(PtrSizedAddr);
   uint64_t Result = 0;
-  memcpy(&Result, Src, Size);
+  uint8_t *Src = reinterpret_cast<uint8_t*>(PtrSizedAddr);
+  uint8_t *Dst = reinterpret_cast<uint8_t*>(&Result);
+
+  // If host and target endianness match use memcpy, otherwise copy in reverse
+  // order.
+  if (getRTDyld().IsTargetLittleEndian == sys::IsLittleEndianHost) {
+    if (!sys::IsLittleEndianHost)
+      Dst += sizeof(Result) - Size;
+    memcpy(Dst, Src, Size);
+  } else {
+    Dst += Size - 1;
+    for (unsigned i = 0; i < Size; ++i)
+      *Dst-- = *Src++;
+  }
   return Result;
 }
 

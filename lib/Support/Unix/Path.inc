@@ -87,22 +87,6 @@ namespace {
   };
 }
 
-static std::error_code TempDir(SmallVectorImpl<char> &result) {
-  // FIXME: Don't use TMPDIR if program is SUID or SGID enabled.
-  const char *dir = nullptr;
-  (dir = std::getenv("TMPDIR")) || (dir = std::getenv("TMP")) ||
-      (dir = std::getenv("TEMP")) || (dir = std::getenv("TEMPDIR")) ||
-#ifdef P_tmpdir
-      (dir = P_tmpdir) ||
-#endif
-      (dir = "/tmp");
-
-  result.clear();
-  StringRef d(dir);
-  result.append(d.begin(), d.end());
-  return std::error_code();
-}
-
 namespace llvm {
 namespace sys  {
 namespace fs {
@@ -269,19 +253,6 @@ std::error_code create_directory(const Twine &path, bool IgnoreExisting) {
       return std::error_code(errno, std::generic_category());
   }
 
-  return std::error_code();
-}
-
-std::error_code normalize_separators(SmallVectorImpl<char> &Path) {
-  for (auto PI = Path.begin(), PE = Path.end(); PI < PE; ++PI) {
-    if (*PI == '\\') {
-      auto PN = PI + 1;
-      if (PN < PE && *PN == '\\')
-        ++PI; // increment once, the for loop will move over the escaped slash
-      else
-        *PI = '/';
-    }
-  }
   return std::error_code();
 }
 
@@ -676,6 +647,66 @@ bool home_directory(SmallVectorImpl<char> &result) {
   }
 
   return false;
+}
+
+static const char *getEnvTempDir() {
+  // Check whether the temporary directory is specified by an environment
+  // variable.
+  const char *EnvironmentVariables[] = {"TMPDIR", "TMP", "TEMP", "TEMPDIR"};
+  for (const char *Env : EnvironmentVariables) {
+    if (const char *Dir = std::getenv(Env))
+      return Dir;
+  }
+
+  return nullptr;
+}
+
+static const char *getDefaultTempDir(bool ErasedOnReboot) {
+#ifdef P_tmpdir
+  if ((bool)P_tmpdir)
+    return P_tmpdir;
+#endif
+
+  if (ErasedOnReboot)
+    return "/tmp";
+  return "/var/tmp";
+}
+
+void system_temp_directory(bool ErasedOnReboot, SmallVectorImpl<char> &Result) {
+  Result.clear();
+
+  if (ErasedOnReboot) {
+    // There is no env variable for the cache directory.
+    if (const char *RequestedDir = getEnvTempDir()) {
+      Result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
+      return;
+    }
+  }
+
+#if defined(_CS_DARWIN_USER_TEMP_DIR) && defined(_CS_DARWIN_USER_CACHE_DIR)
+  // On Darwin, use DARWIN_USER_TEMP_DIR or DARWIN_USER_CACHE_DIR.
+  // macros defined in <unistd.h> on darwin >= 9
+  int ConfName = ErasedOnReboot? _CS_DARWIN_USER_TEMP_DIR
+                               : _CS_DARWIN_USER_CACHE_DIR;
+  size_t ConfLen = confstr(ConfName, nullptr, 0);
+  if (ConfLen > 0) {
+    do {
+      Result.resize(ConfLen);
+      ConfLen = confstr(ConfName, Result.data(), Result.size());
+    } while (ConfLen > 0 && ConfLen != Result.size());
+
+    if (ConfLen > 0) {
+      assert(Result.back() == 0);
+      Result.pop_back();
+      return;
+    }
+
+    Result.clear();
+  }
+#endif
+
+  const char *RequestedDir = getDefaultTempDir(ErasedOnReboot);
+  Result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
 }
 
 } // end namespace path

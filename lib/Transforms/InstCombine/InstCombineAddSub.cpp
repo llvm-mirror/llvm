@@ -956,6 +956,52 @@ bool InstCombiner::WillNotOverflowUnsignedAdd(Value *LHS, Value *RHS) {
   return false;
 }
 
+/// \brief Return true if we can prove that:
+///    (sub LHS, RHS)  === (sub nsw LHS, RHS)
+/// This basically requires proving that the add in the original type would not
+/// overflow to change the sign bit or have a carry out.
+/// TODO: Handle this for Vectors.
+bool InstCombiner::WillNotOverflowSignedSub(Value *LHS, Value *RHS) {
+  // If LHS and RHS each have at least two sign bits, the subtraction
+  // cannot overflow.
+  if (ComputeNumSignBits(LHS) > 1 && ComputeNumSignBits(RHS) > 1)
+    return true;
+
+  if (IntegerType *IT = dyn_cast<IntegerType>(LHS->getType())) {
+    unsigned BitWidth = IT->getBitWidth();
+    APInt LHSKnownZero(BitWidth, 0);
+    APInt LHSKnownOne(BitWidth, 0);
+    computeKnownBits(LHS, LHSKnownZero, LHSKnownOne);
+
+    APInt RHSKnownZero(BitWidth, 0);
+    APInt RHSKnownOne(BitWidth, 0);
+    computeKnownBits(RHS, RHSKnownZero, RHSKnownOne);
+
+    // Subtraction of two 2's compliment numbers having identical signs will
+    // never overflow.
+    if ((LHSKnownOne[BitWidth - 1] && RHSKnownOne[BitWidth - 1]) ||
+        (LHSKnownZero[BitWidth - 1] && RHSKnownZero[BitWidth - 1]))
+      return true;
+
+    // TODO: implement logic similar to checkRippleForAdd
+  }
+  return false;
+}
+
+/// \brief Return true if we can prove that:
+///    (sub LHS, RHS)  === (sub nuw LHS, RHS)
+bool InstCombiner::WillNotOverflowUnsignedSub(Value *LHS, Value *RHS) {
+  // If the LHS is negative and the RHS is non-negative, no unsigned wrap.
+  bool LHSKnownNonNegative, LHSKnownNegative;
+  bool RHSKnownNonNegative, RHSKnownNegative;
+  ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, DL, 0);
+  ComputeSignBit(RHS, RHSKnownNonNegative, RHSKnownNegative, DL, 0);
+  if (LHSKnownNegative && RHSKnownNonNegative)
+    return true;
+
+  return false;
+}
+
 // Checks if any operand is negative and we can convert add to sub.
 // This function checks for following negative patterns
 //   ADD(XOR(OR(Z, NOT(C)), C)), 1) == NEG(AND(Z, C))
@@ -1240,7 +1286,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     }
   }
 
-  // Check for (x & y) + (x ^ y)
+  // (add (xor A, B) (and A, B)) --> (or A, B)
   {
     Value *A = nullptr, *B = nullptr;
     if (match(RHS, m_Xor(m_Value(A), m_Value(B))) &&
@@ -1252,6 +1298,28 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
         (match(RHS, m_And(m_Specific(A), m_Specific(B))) ||
          match(RHS, m_And(m_Specific(B), m_Specific(A)))))
       return BinaryOperator::CreateOr(A, B);
+  }
+
+  // (add (or A, B) (and A, B)) --> (add A, B)
+  {
+    Value *A = nullptr, *B = nullptr;
+    if (match(RHS, m_Or(m_Value(A), m_Value(B))) &&
+        (match(LHS, m_And(m_Specific(A), m_Specific(B))) ||
+         match(LHS, m_And(m_Specific(B), m_Specific(A))))) {
+      auto *New = BinaryOperator::CreateAdd(A, B);
+      New->setHasNoSignedWrap(I.hasNoSignedWrap());
+      New->setHasNoUnsignedWrap(I.hasNoUnsignedWrap());
+      return New;
+    }
+
+    if (match(LHS, m_Or(m_Value(A), m_Value(B))) &&
+        (match(RHS, m_And(m_Specific(A), m_Specific(B))) ||
+         match(RHS, m_And(m_Specific(B), m_Specific(A))))) {
+      auto *New = BinaryOperator::CreateAdd(A, B);
+      New->setHasNoSignedWrap(I.hasNoSignedWrap());
+      New->setHasNoUnsignedWrap(I.hasNoUnsignedWrap());
+      return New;
+    }
   }
 
   // TODO(jingyue): Consider WillNotOverflowSignedAdd and
@@ -1471,6 +1539,9 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
              "Expected a subtraction operator!");
       if (BO->hasNoSignedWrap() && I.hasNoSignedWrap())
         Res->setHasNoSignedWrap(true);
+    } else {
+      if (cast<Constant>(Op1)->isNotMinSignedValue() && I.hasNoSignedWrap())
+        Res->setHasNoSignedWrap(true);
     }
 
     return Res;
@@ -1561,7 +1632,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
 
     // 0 - (X sdiv C)  -> (X sdiv -C)  provided the negation doesn't overflow.
     if (match(Op1, m_SDiv(m_Value(X), m_Constant(C))) && match(Op0, m_Zero()) &&
-        !C->isMinSignedValue())
+        C->isNotMinSignedValue() && !C->isOneValue())
       return BinaryOperator::CreateSDiv(X, ConstantExpr::getNeg(C));
 
     // 0 - (X << Y)  -> (-X << Y)   when X is freely negatable.
@@ -1601,7 +1672,17 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
         return ReplaceInstUsesWith(I, Res);
       }
 
-  return nullptr;
+  bool Changed = false;
+  if (!I.hasNoSignedWrap() && WillNotOverflowSignedSub(Op0, Op1)) {
+    Changed = true;
+    I.setHasNoSignedWrap(true);
+  }
+  if (!I.hasNoUnsignedWrap() && WillNotOverflowUnsignedSub(Op0, Op1)) {
+    Changed = true;
+    I.setHasNoUnsignedWrap(true);
+  }
+
+  return Changed ? &I : nullptr;
 }
 
 Instruction *InstCombiner::visitFSub(BinaryOperator &I) {

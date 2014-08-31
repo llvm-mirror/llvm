@@ -65,7 +65,8 @@ bool LTOModule::isBitcodeFile(const char *path) {
 
 bool LTOModule::isBitcodeForTarget(MemoryBuffer *buffer,
                                    StringRef triplePrefix) {
-  std::string Triple = getBitcodeTargetTriple(buffer, getGlobalContext());
+  std::string Triple =
+      getBitcodeTargetTriple(buffer->getMemBufferRef(), getGlobalContext());
   return StringRef(Triple).startswith(triplePrefix);
 }
 
@@ -77,7 +78,8 @@ LTOModule *LTOModule::createFromFile(const char *path, TargetOptions options,
     errMsg = EC.message();
     return nullptr;
   }
-  return makeLTOModule(std::move(BufferOrErr.get()), options, errMsg);
+  std::unique_ptr<MemoryBuffer> Buffer = std::move(BufferOrErr.get());
+  return makeLTOModule(Buffer->getMemBufferRef(), options, errMsg);
 }
 
 LTOModule *LTOModule::createFromOpenFile(int fd, const char *path, size_t size,
@@ -96,23 +98,22 @@ LTOModule *LTOModule::createFromOpenFileSlice(int fd, const char *path,
     errMsg = EC.message();
     return nullptr;
   }
-  return makeLTOModule(std::move(BufferOrErr.get()), options, errMsg);
+  std::unique_ptr<MemoryBuffer> Buffer = std::move(BufferOrErr.get());
+  return makeLTOModule(Buffer->getMemBufferRef(), options, errMsg);
 }
 
 LTOModule *LTOModule::createFromBuffer(const void *mem, size_t length,
                                        TargetOptions options,
                                        std::string &errMsg, StringRef path) {
-  std::unique_ptr<MemoryBuffer> buffer(makeBuffer(mem, length, path));
-  if (!buffer)
-    return nullptr;
-  return makeLTOModule(std::move(buffer), options, errMsg);
+  StringRef Data((const char *)mem, length);
+  MemoryBufferRef Buffer(Data, path);
+  return makeLTOModule(Buffer, options, errMsg);
 }
 
-LTOModule *LTOModule::makeLTOModule(std::unique_ptr<MemoryBuffer> Buffer,
+LTOModule *LTOModule::makeLTOModule(MemoryBufferRef Buffer,
                                     TargetOptions options,
                                     std::string &errMsg) {
-  ErrorOr<Module *> MOrErr =
-      getLazyBitcodeModule(Buffer.get(), getGlobalContext());
+  ErrorOr<Module *> MOrErr = parseBitcodeFile(Buffer, getGlobalContext());
   if (std::error_code EC = MOrErr.getError()) {
     errMsg = EC.message();
     return nullptr;
@@ -146,11 +147,10 @@ LTOModule *LTOModule::makeLTOModule(std::unique_ptr<MemoryBuffer> Buffer,
 
   TargetMachine *target = march->createTargetMachine(TripleStr, CPU, FeatureStr,
                                                      options);
-  M->materializeAllPermanently(true);
   M->setDataLayout(target->getSubtargetImpl()->getDataLayout());
 
   std::unique_ptr<object::IRObjectFile> IRObj(
-      new object::IRObjectFile(std::move(Buffer), std::move(M)));
+      new object::IRObjectFile(Buffer, std::move(M)));
 
   LTOModule *Ret = new LTOModule(std::move(IRObj), target);
 
@@ -165,8 +165,8 @@ LTOModule *LTOModule::makeLTOModule(std::unique_ptr<MemoryBuffer> Buffer,
 }
 
 /// Create a MemoryBuffer from a memory range with an optional name.
-MemoryBuffer *LTOModule::makeBuffer(const void *mem, size_t length,
-                                    StringRef name) {
+std::unique_ptr<MemoryBuffer>
+LTOModule::makeBuffer(const void *mem, size_t length, StringRef name) {
   const char *startPtr = (const char*)mem;
   return MemoryBuffer::getMemBuffer(StringRef(startPtr, length), name, false);
 }

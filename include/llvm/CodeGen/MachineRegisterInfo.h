@@ -17,8 +17,8 @@
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/iterator_range.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <vector>
@@ -40,7 +40,7 @@ public:
   };
 
 private:
-  const TargetMachine &TM;
+  const MachineFunction *MF;
   Delegate *TheDelegate;
 
   /// IsSSA - True when the machine function is in SSA form and virtual
@@ -70,7 +70,7 @@ private:
 
   /// PhysRegUseDefLists - This is an array of the head of the use/def list for
   /// physical registers.
-  MachineOperand **PhysRegUseDefLists;
+  std::vector<MachineOperand *> PhysRegUseDefLists;
 
   /// getRegUseDefListHead - Return the head pointer for the register use/def
   /// list for the specified virtual or physical register.
@@ -123,11 +123,10 @@ private:
   MachineRegisterInfo(const MachineRegisterInfo&) LLVM_DELETED_FUNCTION;
   void operator=(const MachineRegisterInfo&) LLVM_DELETED_FUNCTION;
 public:
-  explicit MachineRegisterInfo(const TargetMachine &TM);
-  ~MachineRegisterInfo();
+  explicit MachineRegisterInfo(const MachineFunction *MF);
 
   const TargetRegisterInfo *getTargetRegisterInfo() const {
-    return TM.getSubtargetImpl()->getRegisterInfo();
+    return MF->getSubtarget().getRegisterInfo();
   }
 
   void resetDelegate(Delegate *delegate) {

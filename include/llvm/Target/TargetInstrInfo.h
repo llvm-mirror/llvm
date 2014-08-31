@@ -264,6 +264,85 @@ public:
   virtual bool findCommutedOpIndices(MachineInstr *MI, unsigned &SrcOpIdx1,
                                      unsigned &SrcOpIdx2) const;
 
+  /// A pair composed of a register and a sub-register index.
+  /// Used to give some type checking when modeling Reg:SubReg.
+  struct RegSubRegPair {
+    unsigned Reg;
+    unsigned SubReg;
+    RegSubRegPair(unsigned Reg = 0, unsigned SubReg = 0)
+        : Reg(Reg), SubReg(SubReg) {}
+  };
+  /// A pair composed of a pair of a register and a sub-register index,
+  /// and another sub-register index.
+  /// Used to give some type checking when modeling Reg:SubReg1, SubReg2.
+  struct RegSubRegPairAndIdx : RegSubRegPair {
+    unsigned SubIdx;
+    RegSubRegPairAndIdx(unsigned Reg = 0, unsigned SubReg = 0,
+                        unsigned SubIdx = 0)
+        : RegSubRegPair(Reg, SubReg), SubIdx(SubIdx) {}
+  };
+
+  /// Build the equivalent inputs of a REG_SEQUENCE for the given \p MI
+  /// and \p DefIdx.
+  /// \p [out] InputRegs of the equivalent REG_SEQUENCE. Each element of
+  /// the list is modeled as <Reg:SubReg, SubIdx>.
+  /// E.g., REG_SEQUENCE vreg1:sub1, sub0, vreg2, sub1 would produce
+  /// two elements:
+  /// - vreg1:sub1, sub0
+  /// - vreg2<:0>, sub1
+  ///
+  /// \returns true if it is possible to build such an input sequence
+  /// with the pair \p MI, \p DefIdx. False otherwise.
+  ///
+  /// \pre MI.isRegSequence() or MI.isRegSequenceLike().
+  ///
+  /// \note The generic implementation does not provide any support for
+  /// MI.isRegSequenceLike(). In other words, one has to override
+  /// getRegSequenceLikeInputs for target specific instructions.
+  bool
+  getRegSequenceInputs(const MachineInstr &MI, unsigned DefIdx,
+                       SmallVectorImpl<RegSubRegPairAndIdx> &InputRegs) const;
+
+  /// Build the equivalent inputs of a EXTRACT_SUBREG for the given \p MI
+  /// and \p DefIdx.
+  /// \p [out] InputReg of the equivalent EXTRACT_SUBREG.
+  /// E.g., EXTRACT_SUBREG vreg1:sub1, sub0, sub1 would produce:
+  /// - vreg1:sub1, sub0
+  ///
+  /// \returns true if it is possible to build such an input sequence
+  /// with the pair \p MI, \p DefIdx. False otherwise.
+  ///
+  /// \pre MI.isExtractSubreg() or MI.isExtractSubregLike().
+  ///
+  /// \note The generic implementation does not provide any support for
+  /// MI.isExtractSubregLike(). In other words, one has to override
+  /// getExtractSubregLikeInputs for target specific instructions.
+  bool
+  getExtractSubregInputs(const MachineInstr &MI, unsigned DefIdx,
+                         RegSubRegPairAndIdx &InputReg) const;
+
+  /// Build the equivalent inputs of a INSERT_SUBREG for the given \p MI
+  /// and \p DefIdx.
+  /// \p [out] BaseReg and \p [out] InsertedReg contain
+  /// the equivalent inputs of INSERT_SUBREG.
+  /// E.g., INSERT_SUBREG vreg0:sub0, vreg1:sub1, sub3 would produce:
+  /// - BaseReg: vreg0:sub0
+  /// - InsertedReg: vreg1:sub1, sub3
+  ///
+  /// \returns true if it is possible to build such an input sequence
+  /// with the pair \p MI, \p DefIdx. False otherwise.
+  ///
+  /// \pre MI.isInsertSubreg() or MI.isInsertSubregLike().
+  ///
+  /// \note The generic implementation does not provide any support for
+  /// MI.isInsertSubregLike(). In other words, one has to override
+  /// getInsertSubregLikeInputs for target specific instructions.
+  bool
+  getInsertSubregInputs(const MachineInstr &MI, unsigned DefIdx,
+                        RegSubRegPair &BaseReg,
+                        RegSubRegPairAndIdx &InsertedReg) const;
+
+
   /// produceSameValue - Return true if two machine instructions would produce
   /// identical values. By default, this is only true when the two instructions
   /// are deemed identical except for defs. If this function is called when the
@@ -630,6 +709,49 @@ protected:
                                           const SmallVectorImpl<unsigned> &Ops,
                                               MachineInstr* LoadMI) const {
     return nullptr;
+  }
+
+  /// \brief Target-dependent implementation of getRegSequenceInputs.
+  ///
+  /// \returns true if it is possible to build the equivalent
+  /// REG_SEQUENCE inputs with the pair \p MI, \p DefIdx. False otherwise.
+  ///
+  /// \pre MI.isRegSequenceLike().
+  ///
+  /// \see TargetInstrInfo::getRegSequenceInputs.
+  virtual bool getRegSequenceLikeInputs(
+      const MachineInstr &MI, unsigned DefIdx,
+      SmallVectorImpl<RegSubRegPairAndIdx> &InputRegs) const {
+    return false;
+  }
+
+  /// \brief Target-dependent implementation of getExtractSubregInputs.
+  ///
+  /// \returns true if it is possible to build the equivalent
+  /// EXTRACT_SUBREG inputs with the pair \p MI, \p DefIdx. False otherwise.
+  ///
+  /// \pre MI.isExtractSubregLike().
+  ///
+  /// \see TargetInstrInfo::getExtractSubregInputs.
+  virtual bool getExtractSubregLikeInputs(
+      const MachineInstr &MI, unsigned DefIdx,
+      RegSubRegPairAndIdx &InputReg) const {
+    return false;
+  }
+
+  /// \brief Target-dependent implementation of getInsertSubregInputs.
+  ///
+  /// \returns true if it is possible to build the equivalent
+  /// INSERT_SUBREG inputs with the pair \p MI, \p DefIdx. False otherwise.
+  ///
+  /// \pre MI.isInsertSubregLike().
+  ///
+  /// \see TargetInstrInfo::getInsertSubregInputs.
+  virtual bool
+  getInsertSubregLikeInputs(const MachineInstr &MI, unsigned DefIdx,
+                            RegSubRegPair &BaseReg,
+                            RegSubRegPairAndIdx &InsertedReg) const {
+    return false;
   }
 
 public:

@@ -159,14 +159,13 @@ static tool_output_file *GetOutputStream(const char *TargetName,
   }
 
   // Open the file.
-  std::string error;
+  std::error_code EC;
   sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
   if (!Binary)
     OpenFlags |= sys::fs::F_Text;
-  tool_output_file *FDOut = new tool_output_file(OutputFilename.c_str(), error,
-                                                 OpenFlags);
-  if (!error.empty()) {
-    errs() << error << '\n';
+  tool_output_file *FDOut = new tool_output_file(OutputFilename, EC, OpenFlags);
+  if (EC) {
+    errs() << EC.message() << '\n';
     delete FDOut;
     return nullptr;
   }
@@ -232,7 +231,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
   // If user just wants to list available options, skip module loading
   if (!SkipModule) {
-    M.reset(ParseIRFile(InputFilename, Err, Context));
+    M = parseIRFile(InputFilename, Err, Context);
     mod = M.get();
     if (mod == nullptr) {
       Err.print(argv[0], errs());

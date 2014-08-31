@@ -7,10 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MIPSTARGETSTREAMER_H
-#define MIPSTARGETSTREAMER_H
+#ifndef LLVM_LIB_TARGET_MIPS_MIPSTARGETSTREAMER_H
+#define LLVM_LIB_TARGET_MIPS_MIPSTARGETSTREAMER_H
 
 #include "llvm/MC/MCELFStreamer.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "MCTargetDesc/MipsABIFlagsSection.h"
 
@@ -47,6 +48,7 @@ public:
   virtual void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff);
   virtual void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff);
 
+  virtual void emitDirectiveSetArch(StringRef Arch);
   virtual void emitDirectiveSetMips1();
   virtual void emitDirectiveSetMips2();
   virtual void emitDirectiveSetMips3();
@@ -82,8 +84,8 @@ public:
   virtual void emitDirectiveModuleOddSPReg(bool Enabled, bool IsO32ABI);
   virtual void emitDirectiveSetFp(MipsABIFlagsSection::FpABIKind Value){};
   virtual void emitMipsAbiFlags(){};
-  void setCanHaveModuleDir(bool Can) { canHaveModuleDirective = Can; }
-  bool getCanHaveModuleDir() { return canHaveModuleDirective; }
+  void forbidModuleDirective() { ModuleDirectiveAllowed = false; }
+  bool isModuleDirectiveAllowed() { return ModuleDirectiveAllowed; }
 
   // This method enables template classes to set internal abi flags
   // structure values.
@@ -97,8 +99,21 @@ public:
 protected:
   MipsABIFlagsSection ABIFlagsSection;
 
+  bool GPRInfoSet;
+  unsigned GPRBitMask;
+  int GPROffset;
+
+  bool FPRInfoSet;
+  unsigned FPRBitMask;
+  int FPROffset;
+
+  bool FrameInfoSet;
+  int FrameOffset;
+  unsigned FrameReg;
+  unsigned ReturnReg;
+
 private:
-  bool canHaveModuleDirective;
+  bool ModuleDirectiveAllowed;
 };
 
 // This part is for ascii assembly output
@@ -133,6 +148,7 @@ public:
   void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff) override;
   void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff) override;
 
+  void emitDirectiveSetArch(StringRef Arch) override;
   void emitDirectiveSetMips1() override;
   void emitDirectiveSetMips2() override;
   void emitDirectiveSetMips3() override;
@@ -177,14 +193,8 @@ public:
   void emitDirectiveSetMicroMips() override;
   void emitDirectiveSetNoMicroMips() override;
   void emitDirectiveSetMips16() override;
-  void emitDirectiveSetNoMips16() override;
 
-  void emitDirectiveSetReorder() override;
   void emitDirectiveSetNoReorder() override;
-  void emitDirectiveSetMacro() override;
-  void emitDirectiveSetNoMacro() override;
-  void emitDirectiveSetAt() override;
-  void emitDirectiveSetNoAt() override;
   void emitDirectiveEnd(StringRef Name) override;
 
   void emitDirectiveEnt(const MCSymbol &Symbol) override;
@@ -197,19 +207,6 @@ public:
                  unsigned ReturnReg) override;
   void emitMask(unsigned CPUBitmask, int CPUTopSavedRegOff) override;
   void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff) override;
-
-  void emitDirectiveSetMips1() override;
-  void emitDirectiveSetMips2() override;
-  void emitDirectiveSetMips3() override;
-  void emitDirectiveSetMips4() override;
-  void emitDirectiveSetMips5() override;
-  void emitDirectiveSetMips32() override;
-  void emitDirectiveSetMips32R2() override;
-  void emitDirectiveSetMips32R6() override;
-  void emitDirectiveSetMips64() override;
-  void emitDirectiveSetMips64R2() override;
-  void emitDirectiveSetMips64R6() override;
-  void emitDirectiveSetDsp() override;
 
   // PIC support
   virtual void emitDirectiveCpload(unsigned RegNo);

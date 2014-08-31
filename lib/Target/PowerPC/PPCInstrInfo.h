@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef POWERPC_INSTRUCTIONINFO_H
-#define POWERPC_INSTRUCTIONINFO_H
+#ifndef LLVM_LIB_TARGET_POWERPC_PPCINSTRINFO_H
+#define LLVM_LIB_TARGET_POWERPC_PPCINSTRINFO_H
 
 #include "PPC.h"
 #include "PPCRegisterInfo.h"
@@ -228,6 +228,8 @@ public:
   /// instruction may be.  This returns the maximum number of bytes.
   ///
   unsigned GetInstSizeInBytes(const MachineInstr *MI) const;
+
+  void getNoopForMachoTarget(MCInst &NopInst) const override;
 };
 
 }

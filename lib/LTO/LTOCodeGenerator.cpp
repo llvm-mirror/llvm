@@ -163,9 +163,9 @@ bool LTOCodeGenerator::writeMergedModules(const char *path,
   applyScopeRestrictions();
 
   // create output file
-  std::string ErrInfo;
-  tool_output_file Out(path, ErrInfo, sys::fs::F_None);
-  if (!ErrInfo.empty()) {
+  std::error_code EC;
+  tool_output_file Out(path, EC, sys::fs::F_None);
+  if (EC) {
     errMsg = "could not open bitcode file for writing: ";
     errMsg += path;
     return false;
@@ -312,9 +312,9 @@ bool LTOCodeGenerator::determineTarget(std::string &errMsg) {
 
 void LTOCodeGenerator::
 applyRestriction(GlobalValue &GV,
-                 const ArrayRef<StringRef> &Libcalls,
+                 ArrayRef<StringRef> Libcalls,
                  std::vector<const char*> &MustPreserveList,
-                 SmallPtrSet<GlobalValue*, 8> &AsmUsed,
+                 SmallPtrSetImpl<GlobalValue*> &AsmUsed,
                  Mangler &Mangler) {
   // There are no restrictions to apply to declarations.
   if (GV.isDeclaration())
@@ -343,7 +343,7 @@ applyRestriction(GlobalValue &GV,
 }
 
 static void findUsedValues(GlobalVariable *LLVMUsed,
-                           SmallPtrSet<GlobalValue*, 8> &UsedValues) {
+                           SmallPtrSetImpl<GlobalValue*> &UsedValues) {
   if (!LLVMUsed) return;
 
   ConstantArray *Inits = cast<ConstantArray>(LLVMUsed->getInitializer());
@@ -458,29 +458,21 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   // Instantiate the pass manager to organize the passes.
   PassManager passes;
 
-  // Start off with a verification pass.
-  passes.add(createVerifierPass());
-  passes.add(createDebugInfoVerifierPass());
-
   // Add an appropriate DataLayout instance for this module...
   mergedModule->setDataLayout(TargetMach->getSubtargetImpl()->getDataLayout());
-  passes.add(new DataLayoutPass(mergedModule));
 
-  // Add appropriate TargetLibraryInfo for this module.
-  passes.add(new TargetLibraryInfo(Triple(TargetMach->getTargetTriple())));
+  Triple TargetTriple(TargetMach->getTargetTriple());
+  PassManagerBuilder PMB;
+  PMB.DisableGVNLoadPRE = DisableGVNLoadPRE;
+  if (!DisableInline)
+    PMB.Inliner = createFunctionInliningPass();
+  PMB.LibraryInfo = new TargetLibraryInfo(TargetTriple);
+  if (DisableOpt)
+    PMB.OptLevel = 0;
+  PMB.VerifyInput = true;
+  PMB.VerifyOutput = true;
 
-  TargetMach->addAnalysisPasses(passes);
-
-  // Enabling internalize here would use its AllButMain variant. It
-  // keeps only main if it exists and does nothing for libraries. Instead
-  // we create the pass ourselves with the symbol list provided by the linker.
-  if (!DisableOpt)
-    PassManagerBuilder().populateLTOPassManager(passes, !DisableInline,
-                                                DisableGVNLoadPRE);
-
-  // Make sure everything is still good.
-  passes.add(createVerifierPass());
-  passes.add(createDebugInfoVerifierPass());
+  PMB.populateLTOPassManager(passes, TargetMach);
 
   PassManager codeGenPasses;
 

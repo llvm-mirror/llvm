@@ -352,6 +352,23 @@ static bool usesTheStack(const MachineFunction &MF) {
   return false;
 }
 
+void X86FrameLowering::getStackProbeFunction(const X86Subtarget &STI,
+                                             unsigned &CallOp,
+                                             const char *&Symbol) {
+  CallOp = STI.is64Bit() ? X86::W64ALLOCA : X86::CALLpcrel32;
+
+  if (STI.is64Bit()) {
+    if (STI.isTargetCygMing()) {
+      Symbol = "___chkstk_ms";
+    } else {
+      Symbol = "__chkstk";
+    }
+  } else if (STI.isTargetCygMing())
+    Symbol = "_alloca";
+  else
+    Symbol = "_chkstk";
+}
+
 /// emitPrologue - Push callee-saved registers onto the stack, which
 /// automatically adjust the stack pointer. Adjust the stack pointer to allocate
 /// space for local variables. Also emit labels used by the exception handler to
@@ -485,6 +502,8 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
     X86FI->setCalleeSavedFrameSize(
       X86FI->getCalleeSavedFrameSize() - TailCallReturnAddrDelta);
 
+  bool UseStackProbe = (STI.isOSWindows() && !STI.isTargetMacho());
+  
   // If this is x86-64 and the Red Zone is not disabled, if we are a leaf
   // function, and use up to 128 bytes of stack space, don't have a frame
   // pointer, calls, or dynamic alloca then we do not need to adjust the
@@ -658,6 +677,8 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
 
   // Adjust stack pointer: ESP -= numbytes.
 
+  static const size_t PageSize = 4096;
+
   // Windows and cygwin/mingw require a prologue helper routine when allocating
   // more than 4K bytes on the stack.  Windows uses __chkstk and cygwin/mingw
   // uses __alloca.  __alloca and the 32-bit version of __chkstk will probe the
@@ -666,19 +687,11 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
   // responsible for adjusting the stack pointer.  Touching the stack at 4K
   // increments is necessary to ensure that the guard pages used by the OS
   // virtual memory manager are allocated in correct sequence.
-  if (NumBytes >= 4096 && STI.isOSWindows() && !STI.isTargetMacho()) {
+  if (NumBytes >= PageSize && UseStackProbe) {
     const char *StackProbeSymbol;
+    unsigned CallOp;
 
-    if (Is64Bit) {
-      if (STI.isTargetCygMing()) {
-        StackProbeSymbol = "___chkstk_ms";
-      } else {
-        StackProbeSymbol = "__chkstk";
-      }
-    } else if (STI.isTargetCygMing())
-      StackProbeSymbol = "_alloca";
-    else
-      StackProbeSymbol = "_chkstk";
+    getStackProbeFunction(STI, CallOp, StackProbeSymbol);
 
     // Check whether EAX is livein for this function.
     bool isEAXAlive = isEAXLiveIn(MF);
@@ -709,7 +722,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
     }
 
     BuildMI(MBB, MBBI, DL,
-            TII.get(Is64Bit ? X86::W64ALLOCA : X86::CALLpcrel32))
+            TII.get(CallOp))
       .addExternalSymbol(StackProbeSymbol)
       .addReg(StackPtr,    RegState::Define | RegState::Implicit)
       .addReg(X86::EFLAGS, RegState::Define | RegState::Implicit)
@@ -725,12 +738,12 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
         .setMIFlag(MachineInstr::FrameSetup);
     }
     if (isEAXAlive) {
-        // Restore EAX
-        MachineInstr *MI = addRegOffset(BuildMI(MF, DL, TII.get(X86::MOV32rm),
-                                                X86::EAX),
-                                        StackPtr, false, NumBytes - 4);
-        MI->setFlag(MachineInstr::FrameSetup);
-        MBB.insert(MBBI, MI);
+      // Restore EAX
+      MachineInstr *MI = addRegOffset(BuildMI(MF, DL, TII.get(X86::MOV32rm),
+                                              X86::EAX),
+                                      StackPtr, false, NumBytes - 4);
+      MI->setFlag(MachineInstr::FrameSetup);
+      MBB.insert(MBBI, MI);
     }
   } else if (NumBytes) {
     emitSPUpdate(MBB, MBBI, StackPtr, -(int64_t)NumBytes, Is64Bit, Uses64BitFramePtr,

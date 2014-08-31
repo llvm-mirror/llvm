@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_EXECUTIONENGINE_MCJIT_H
-#define LLVM_LIB_EXECUTIONENGINE_MCJIT_H
+#ifndef LLVM_LIB_EXECUTIONENGINE_MCJIT_MCJIT_H
+#define LLVM_LIB_EXECUTIONENGINE_MCJIT_MCJIT_H
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -101,7 +101,8 @@ private:
 // called.
 
 class MCJIT : public ExecutionEngine {
-  MCJIT(Module *M, TargetMachine *tm, RTDyldMemoryManager *MemMgr);
+  MCJIT(std::unique_ptr<Module> M, TargetMachine *tm,
+        RTDyldMemoryManager *MemMgr);
 
   typedef llvm::SmallPtrSet<Module *, 4> ModulePtrSet;
 
@@ -124,8 +125,8 @@ class MCJIT : public ExecutionEngine {
     ModulePtrSet::iterator begin_finalized() { return FinalizedModules.begin(); }
     ModulePtrSet::iterator end_finalized() { return FinalizedModules.end(); }
 
-    void addModule(Module *M) {
-      AddedModules.insert(M);
+    void addModule(std::unique_ptr<Module> M) {
+      AddedModules.insert(M.release());
     }
 
     bool removeModule(Module *M) {
@@ -215,7 +216,8 @@ class MCJIT : public ExecutionEngine {
 
   OwningModuleContainer OwnedModules;
 
-  SmallVector<std::unique_ptr<object::Archive>, 2> Archives;
+  SmallVector<object::OwningBinary<object::Archive>, 2> Archives;
+  SmallVector<std::unique_ptr<MemoryBuffer>, 2> Buffers;
 
   typedef SmallVector<ObjectImage *, 2> LoadedObjectList;
   LoadedObjectList  LoadedObjects;
@@ -237,9 +239,10 @@ public:
 
   /// @name ExecutionEngine interface implementation
   /// @{
-  void addModule(Module *M) override;
+  void addModule(std::unique_ptr<Module> M) override;
   void addObjectFile(std::unique_ptr<object::ObjectFile> O) override;
-  void addArchive(std::unique_ptr<object::Archive> O) override;
+  void addObjectFile(object::OwningBinary<object::ObjectFile> O) override;
+  void addArchive(object::OwningBinary<object::Archive> O) override;
   bool removeModule(Module *M) override;
 
   /// FindFunctionNamed - Search all of the active modules to find the one that
@@ -324,7 +327,7 @@ public:
     MCJITCtor = createJIT;
   }
 
-  static ExecutionEngine *createJIT(Module *M,
+  static ExecutionEngine *createJIT(std::unique_ptr<Module> M,
                                     std::string *ErrorStr,
                                     RTDyldMemoryManager *MemMgr,
                                     TargetMachine *TM);

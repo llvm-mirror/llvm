@@ -101,8 +101,7 @@ int main(int argc, char **argv) {
 
   // Use lazy loading, since we only care about selected global values.
   SMDiagnostic Err;
-  std::unique_ptr<Module> M;
-  M.reset(getLazyIRFileModule(InputFilename, Err, Context));
+  std::unique_ptr<Module> M = getLazyIRFileModule(InputFilename, Err, Context);
 
   if (!M.get()) {
     Err.print(argv[0], errs());
@@ -261,10 +260,10 @@ int main(int argc, char **argv) {
   Passes.add(createStripDeadDebugInfoPass());    // Remove dead debug info
   Passes.add(createStripDeadPrototypesPass());   // Remove dead func decls
 
-  std::string ErrorInfo;
-  tool_output_file Out(OutputFilename.c_str(), ErrorInfo, sys::fs::F_None);
-  if (!ErrorInfo.empty()) {
-    errs() << ErrorInfo << '\n';
+  std::error_code EC;
+  tool_output_file Out(OutputFilename, EC, sys::fs::F_None);
+  if (EC) {
+    errs() << EC.message() << '\n';
     return 1;
   }
 

@@ -414,17 +414,10 @@ protected:
   getRelocationValueString(DataRefImpl Rel,
                            SmallVectorImpl<char> &Result) const override;
 
-  std::error_code getLibraryNext(DataRefImpl LibData,
-                                 LibraryRef &Result) const override;
-  std::error_code getLibraryPath(DataRefImpl LibData,
-                                 StringRef &Result) const override;
-
 public:
-  COFFObjectFile(std::unique_ptr<MemoryBuffer> Object, std::error_code &EC);
+  COFFObjectFile(MemoryBufferRef Object, std::error_code &EC);
   basic_symbol_iterator symbol_begin_impl() const override;
   basic_symbol_iterator symbol_end_impl() const override;
-  library_iterator needed_library_begin() const override;
-  library_iterator needed_library_end() const override;
   section_iterator section_begin() const override;
   section_iterator section_end() const override;
 
@@ -435,7 +428,6 @@ public:
   uint8_t getBytesInAddress() const override;
   StringRef getFileFormatName() const override;
   unsigned getArch() const override;
-  StringRef getLoadName() const override;
 
   import_directory_iterator import_directory_begin() const;
   import_directory_iterator import_directory_end() const;
@@ -469,6 +461,8 @@ public:
   std::error_code getRvaPtr(uint32_t Rva, uintptr_t &Res) const;
   std::error_code getHintName(uint32_t Rva, uint16_t &Hint,
                               StringRef &Name) const;
+
+  bool isRelocatableObject() const override;
 
   static inline bool classof(const Binary *v) { return v->isCOFF(); }
 };

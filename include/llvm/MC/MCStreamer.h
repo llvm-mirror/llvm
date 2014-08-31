@@ -20,7 +20,7 @@
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCLinkerOptimizationHint.h"
-#include "llvm/MC/MCWin64EH.h"
+#include "llvm/MC/MCWinEH.h"
 #include "llvm/Support/DataTypes.h"
 #include <string>
 
@@ -195,11 +195,6 @@ class MCStreamer {
 
 protected:
   MCStreamer(MCContext &Ctx);
-
-  const MCExpr *BuildSymbolDiff(MCContext &Context, const MCSymbol *A,
-                                const MCSymbol *B);
-
-  const MCExpr *ForceExpAbs(const MCExpr *Expr);
 
   virtual void EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame);
   virtual void EmitCFIEndProcImpl(MCDwarfFrameInfo &CurFrame);
@@ -552,12 +547,6 @@ public:
   /// to pass in a MCExpr for constant integers.
   virtual void EmitIntValue(uint64_t Value, unsigned Size);
 
-  /// EmitAbsValue - Emit the Value, but try to avoid relocations. On MachO
-  /// this is done by producing
-  /// foo = value
-  /// .long foo
-  void EmitAbsValue(const MCExpr *Value, unsigned Size);
-
   virtual void EmitULEB128Value(const MCExpr *Value);
 
   virtual void EmitSLEB128Value(const MCExpr *Value);
@@ -669,11 +658,6 @@ public:
                                      StringRef FileName);
 
   virtual MCSymbol *getDwarfLineTableSymbol(unsigned CUID);
-
-  void EmitDwarfSetLineAddr(int64_t LineDelta, const MCSymbol *Label,
-                            int PointerSize);
-
-  virtual void EmitCompactUnwindEncoding(uint32_t CompactUnwindEncoding);
   virtual void EmitCFISections(bool EH, bool Debug);
   void EmitCFIStartProc(bool IsSimple);
   void EmitCFIEndProc();

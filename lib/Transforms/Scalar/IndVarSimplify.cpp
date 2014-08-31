@@ -757,6 +757,9 @@ protected:
 
   const SCEVAddRecExpr* GetExtendedOperandRecurrence(NarrowIVDefUse DU);
 
+  const SCEV *GetSCEVByOpCode(const SCEV *LHS, const SCEV *RHS,
+                              unsigned OpCode) const;
+
   Instruction *WidenIVUse(NarrowIVDefUse DU, SCEVExpander &Rewriter);
 
   void pushNarrowIVUsers(Instruction *NarrowDef, Instruction *WideDef);
@@ -833,13 +836,29 @@ Instruction *WidenIV::CloneIVUser(NarrowIVDefUse DU) {
   }
 }
 
+const SCEV *WidenIV::GetSCEVByOpCode(const SCEV *LHS, const SCEV *RHS,
+                                     unsigned OpCode) const {
+  if (OpCode == Instruction::Add)
+    return SE->getAddExpr(LHS, RHS);
+  if (OpCode == Instruction::Sub)
+    return SE->getMinusSCEV(LHS, RHS);
+  if (OpCode == Instruction::Mul)
+    return SE->getMulExpr(LHS, RHS);
+
+  llvm_unreachable("Unsupported opcode.");
+}
+
 /// No-wrap operations can transfer sign extension of their result to their
 /// operands. Generate the SCEV value for the widened operation without
 /// actually modifying the IR yet. If the expression after extending the
 /// operands is an AddRec for this loop, return it.
 const SCEVAddRecExpr* WidenIV::GetExtendedOperandRecurrence(NarrowIVDefUse DU) {
+
   // Handle the common case of add<nsw/nuw>
-  if (DU.NarrowUse->getOpcode() != Instruction::Add)
+  const unsigned OpCode = DU.NarrowUse->getOpcode();
+  // Only Add/Sub/Mul instructions supported yet.
+  if (OpCode != Instruction::Add && OpCode != Instruction::Sub &&
+      OpCode != Instruction::Mul)
     return nullptr;
 
   // One operand (NarrowDef) has already been extended to WideDef. Now determine
@@ -859,14 +878,13 @@ const SCEVAddRecExpr* WidenIV::GetExtendedOperandRecurrence(NarrowIVDefUse DU) {
   else
     return nullptr;
 
-  // When creating this AddExpr, don't apply the current operations NSW or NUW
+  // When creating this SCEV expr, don't apply the current operations NSW or NUW
   // flags. This instruction may be guarded by control flow that the no-wrap
   // behavior depends on. Non-control-equivalent instructions can be mapped to
   // the same SCEV expression, and it would be incorrect to transfer NSW/NUW
   // semantics to those operations.
   const SCEVAddRecExpr *AddRec = dyn_cast<SCEVAddRecExpr>(
-    SE->getAddExpr(SE->getSCEV(DU.WideDef), ExtendOperExpr));
-
+      GetSCEVByOpCode(SE->getSCEV(DU.WideDef), ExtendOperExpr, OpCode));
   if (!AddRec || AddRec->getLoop() != L)
     return nullptr;
   return AddRec;
@@ -1200,7 +1218,7 @@ void IndVarSimplify::SimplifyAndExtend(Loop *L,
 /// BackedgeTakenInfo. If these expressions have not been reduced, then
 /// expanding them may incur additional cost (albeit in the loop preheader).
 static bool isHighCostExpansion(const SCEV *S, BranchInst *BI,
-                                SmallPtrSet<const SCEV*, 8> &Processed,
+                                SmallPtrSetImpl<const SCEV*> &Processed,
                                 ScalarEvolution *SE) {
   if (!Processed.insert(S))
     return false;
@@ -1373,7 +1391,7 @@ static bool needsLFTR(Loop *L, DominatorTree *DT) {
 /// Recursive helper for hasConcreteDef(). Unfortunately, this currently boils
 /// down to checking that all operands are constant and listing instructions
 /// that may hide undef.
-static bool hasConcreteDefImpl(Value *V, SmallPtrSet<Value*, 8> &Visited,
+static bool hasConcreteDefImpl(Value *V, SmallPtrSetImpl<Value*> &Visited,
                                unsigned Depth) {
   if (isa<Constant>(V))
     return !isa<UndefValue>(V);

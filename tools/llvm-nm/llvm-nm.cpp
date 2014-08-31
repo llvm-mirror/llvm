@@ -1010,7 +1010,7 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
 
   LLVMContext &Context = getGlobalContext();
   ErrorOr<std::unique_ptr<Binary>> BinaryOrErr =
-      createBinary(std::move(*BufferOrErr), &Context);
+      createBinary(BufferOrErr.get()->getMemBufferRef(), &Context);
   if (error(BinaryOrErr.getError(), Filename))
     return;
   Binary &Bin = *BinaryOrErr.get();
@@ -1275,8 +1275,7 @@ int main(int argc, char **argv) {
     if (ArchFlags[i] == "all") {
       ArchAll = true;
     } else {
-      Triple T = MachOObjectFile::getArch(ArchFlags[i]);
-      if (T.getArch() == Triple::UnknownArch)
+      if (!MachOObjectFile::isValidArch(ArchFlags[i]))
         error("Unknown architecture named '" + ArchFlags[i] + "'",
               "for the -arch option");
     }

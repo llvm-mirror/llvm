@@ -1,5 +1,5 @@
-; RUN: llc -march=arm64 -aarch64-atomic-cfg-tidy=0                             < %s | FileCheck %s
-; RUN: llc -march=arm64 -aarch64-atomic-cfg-tidy=0 -fast-isel -fast-isel-abort < %s | FileCheck %s
+; RUN: llc -march=arm64 -aarch64-atomic-cfg-tidy=0                             -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc -march=arm64 -aarch64-atomic-cfg-tidy=0 -fast-isel -fast-isel-abort -verify-machineinstrs < %s | FileCheck %s
 
 ;
 ; Get the actual value of the overflow bit.
@@ -49,6 +49,20 @@ entry:
 ; CHECK:        adds {{w[0-9]+}}, w0, {{w[0-9]+}}
 ; CHECK-NEXT:   cset {{w[0-9]+}}, vs
   %t = call {i32, i1} @llvm.sadd.with.overflow.i32(i32 %v1, i32 16777215)
+  %val = extractvalue {i32, i1} %t, 0
+  %obit = extractvalue {i32, i1} %t, 1
+  store i32 %val, i32* %res
+  ret i1 %obit
+}
+
+; Test shift folding.
+define zeroext i1 @saddo5.i32(i32 %v1, i32 %v2, i32* %res) {
+entry:
+; CHECK-LABEL:  saddo5.i32
+; CHECK:        adds {{w[0-9]+}}, w0, w1
+; CHECK-NEXT:   cset {{w[0-9]+}}, vs
+  %lsl = shl i32 %v2, 16
+  %t = call {i32, i1} @llvm.sadd.with.overflow.i32(i32 %v1, i32 %lsl)
   %val = extractvalue {i32, i1} %t, 0
   %obit = extractvalue {i32, i1} %t, 1
   store i32 %val, i32* %res

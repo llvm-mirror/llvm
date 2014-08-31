@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ARMSUBTARGET_H
-#define ARMSUBTARGET_H
+#ifndef LLVM_LIB_TARGET_ARM_ARMSUBTARGET_H
+#define LLVM_LIB_TARGET_ARM_ARMSUBTARGET_H
 
 
 #include "ARMFrameLowering.h"
@@ -436,10 +436,10 @@ public:
   /// True for some subtargets at > -O0.
   bool enablePostMachineScheduler() const override;
 
-  // enableAtomicExpandLoadLinked - True if we need to expand our atomics.
-  bool enableAtomicExpandLoadLinked() const override;
+  // enableAtomicExpand- True if we need to expand our atomics.
+  bool enableAtomicExpand() const override;
 
-  /// getInstrItins - Return the instruction itineraies based on subtarget
+  /// getInstrItins - Return the instruction itineraries based on subtarget
   /// selection.
   const InstrItineraryData *getInstrItineraryData() const {
     return &InstrItins;

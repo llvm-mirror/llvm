@@ -144,7 +144,7 @@ TargetPassConfig *AArch64TargetMachine::createPassConfig(PassManagerBase &PM) {
 void AArch64PassConfig::addIRPasses() {
   // Always expand atomic operations, we don't deal with atomicrmw or cmpxchg
   // ourselves.
-  addPass(createAtomicExpandLoadLinkedPass(TM));
+  addPass(createAtomicExpandPass(TM));
 
   // Cmpxchg instructions are often used with a subsequent comparison to
   // determine whether it succeeded. We can exploit existing control-flow in
@@ -195,8 +195,12 @@ bool AArch64PassConfig::addILPOpts() {
 
 bool AArch64PassConfig::addPreRegAlloc() {
   // Use AdvSIMD scalar instructions whenever profitable.
-  if (TM->getOptLevel() != CodeGenOpt::None && EnableAdvSIMDScalar)
+  if (TM->getOptLevel() != CodeGenOpt::None && EnableAdvSIMDScalar) {
     addPass(createAArch64AdvSIMDScalar());
+    // The AdvSIMD pass may produce copies that can be rewritten to
+    // be register coaleascer friendly.
+    addPass(&PeepholeOptimizerID);
+  }
   return true;
 }
 
@@ -204,6 +208,10 @@ bool AArch64PassConfig::addPostRegAlloc() {
   // Change dead register definitions to refer to the zero register.
   if (TM->getOptLevel() != CodeGenOpt::None && EnableDeadRegisterElimination)
     addPass(createAArch64DeadRegisterDefinitions());
+  if (TM->getOptLevel() != CodeGenOpt::None &&
+      TM->getSubtarget<AArch64Subtarget>().isCortexA57())
+    // Improve performance for some FP/SIMD code for A57.
+    addPass(createAArch64A57FPLoadBalancing());
   return true;
 }
 

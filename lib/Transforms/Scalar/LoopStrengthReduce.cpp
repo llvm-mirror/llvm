@@ -744,7 +744,7 @@ static bool isExistingPhi(const SCEVAddRecExpr *AR, ScalarEvolution &SE) {
 /// TODO: Allow UDivExpr if we can find an existing IV increment that is an
 /// obvious multiple of the UDivExpr.
 static bool isHighCostExpansion(const SCEV *S,
-                                SmallPtrSet<const SCEV*, 8> &Processed,
+                                SmallPtrSetImpl<const SCEV*> &Processed,
                                 ScalarEvolution &SE) {
   // Zero/One operand expressions
   switch (S->getSCEVType()) {
@@ -892,34 +892,34 @@ public:
 
   void RateFormula(const TargetTransformInfo &TTI,
                    const Formula &F,
-                   SmallPtrSet<const SCEV *, 16> &Regs,
+                   SmallPtrSetImpl<const SCEV *> &Regs,
                    const DenseSet<const SCEV *> &VisitedRegs,
                    const Loop *L,
                    const SmallVectorImpl<int64_t> &Offsets,
                    ScalarEvolution &SE, DominatorTree &DT,
                    const LSRUse &LU,
-                   SmallPtrSet<const SCEV *, 16> *LoserRegs = nullptr);
+                   SmallPtrSetImpl<const SCEV *> *LoserRegs = nullptr);
 
   void print(raw_ostream &OS) const;
   void dump() const;
 
 private:
   void RateRegister(const SCEV *Reg,
-                    SmallPtrSet<const SCEV *, 16> &Regs,
+                    SmallPtrSetImpl<const SCEV *> &Regs,
                     const Loop *L,
                     ScalarEvolution &SE, DominatorTree &DT);
   void RatePrimaryRegister(const SCEV *Reg,
-                           SmallPtrSet<const SCEV *, 16> &Regs,
+                           SmallPtrSetImpl<const SCEV *> &Regs,
                            const Loop *L,
                            ScalarEvolution &SE, DominatorTree &DT,
-                           SmallPtrSet<const SCEV *, 16> *LoserRegs);
+                           SmallPtrSetImpl<const SCEV *> *LoserRegs);
 };
 
 }
 
 /// RateRegister - Tally up interesting quantities from the given register.
 void Cost::RateRegister(const SCEV *Reg,
-                        SmallPtrSet<const SCEV *, 16> &Regs,
+                        SmallPtrSetImpl<const SCEV *> &Regs,
                         const Loop *L,
                         ScalarEvolution &SE, DominatorTree &DT) {
   if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(Reg)) {
@@ -967,10 +967,10 @@ void Cost::RateRegister(const SCEV *Reg,
 /// before, rate it. Optional LoserRegs provides a way to declare any formula
 /// that refers to one of those regs an instant loser.
 void Cost::RatePrimaryRegister(const SCEV *Reg,
-                               SmallPtrSet<const SCEV *, 16> &Regs,
+                               SmallPtrSetImpl<const SCEV *> &Regs,
                                const Loop *L,
                                ScalarEvolution &SE, DominatorTree &DT,
-                               SmallPtrSet<const SCEV *, 16> *LoserRegs) {
+                               SmallPtrSetImpl<const SCEV *> *LoserRegs) {
   if (LoserRegs && LoserRegs->count(Reg)) {
     Lose();
     return;
@@ -984,13 +984,13 @@ void Cost::RatePrimaryRegister(const SCEV *Reg,
 
 void Cost::RateFormula(const TargetTransformInfo &TTI,
                        const Formula &F,
-                       SmallPtrSet<const SCEV *, 16> &Regs,
+                       SmallPtrSetImpl<const SCEV *> &Regs,
                        const DenseSet<const SCEV *> &VisitedRegs,
                        const Loop *L,
                        const SmallVectorImpl<int64_t> &Offsets,
                        ScalarEvolution &SE, DominatorTree &DT,
                        const LSRUse &LU,
-                       SmallPtrSet<const SCEV *, 16> *LoserRegs) {
+                       SmallPtrSetImpl<const SCEV *> *LoserRegs) {
   assert(F.isCanonical() && "Cost is accurate only for canonical formula");
   // Tally up the registers.
   if (const SCEV *ScaledReg = F.ScaledReg) {
@@ -1337,10 +1337,9 @@ void LSRUse::RecomputeRegs(size_t LUIdx, RegUseTracker &RegUses) {
   }
 
   // Update the RegTracker.
-  for (SmallPtrSet<const SCEV *, 4>::iterator I = OldRegs.begin(),
-       E = OldRegs.end(); I != E; ++I)
-    if (!Regs.count(*I))
-      RegUses.DropRegister(*I, LUIdx);
+  for (const SCEV *S : OldRegs)
+    if (!Regs.count(S))
+      RegUses.DropRegister(S, LUIdx);
 }
 
 void LSRUse::print(raw_ostream &OS) const {
@@ -2226,13 +2225,12 @@ LSRInstance::OptimizeLoopTermCond() {
   // must dominate all the post-inc comparisons we just set up, and it must
   // dominate the loop latch edge.
   IVIncInsertPos = L->getLoopLatch()->getTerminator();
-  for (SmallPtrSet<Instruction *, 4>::const_iterator I = PostIncs.begin(),
-       E = PostIncs.end(); I != E; ++I) {
+  for (Instruction *Inst : PostIncs) {
     BasicBlock *BB =
       DT.findNearestCommonDominator(IVIncInsertPos->getParent(),
-                                    (*I)->getParent());
-    if (BB == (*I)->getParent())
-      IVIncInsertPos = *I;
+                                    Inst->getParent());
+    if (BB == Inst->getParent())
+      IVIncInsertPos = Inst;
     else if (BB != IVIncInsertPos->getParent())
       IVIncInsertPos = BB->getTerminator();
   }
@@ -2557,7 +2555,7 @@ bool IVChain::isProfitableIncrement(const SCEV *OperExpr,
 ///
 /// TODO: Consider IVInc free if it's already used in another chains.
 static bool
-isProfitableChain(IVChain &Chain, SmallPtrSet<Instruction*, 4> &Users,
+isProfitableChain(IVChain &Chain, SmallPtrSetImpl<Instruction*> &Users,
                   ScalarEvolution &SE, const TargetTransformInfo &TTI) {
   if (StressIVChain)
     return true;
@@ -2567,9 +2565,8 @@ isProfitableChain(IVChain &Chain, SmallPtrSet<Instruction*, 4> &Users,
 
   if (!Users.empty()) {
     DEBUG(dbgs() << "Chain: " << *Chain.Incs[0].UserInst << " users:\n";
-          for (SmallPtrSet<Instruction*, 4>::const_iterator I = Users.begin(),
-                 E = Users.end(); I != E; ++I) {
-            dbgs() << "  " << **I << "\n";
+          for (Instruction *Inst : Users) {
+            dbgs() << "  " << *Inst << "\n";
           });
     return false;
   }
@@ -4302,10 +4299,9 @@ void LSRInstance::SolveRecurse(SmallVectorImpl<const Formula *> &Solution,
   // reference that register in order to be considered. This prunes out
   // unprofitable searching.
   SmallSetVector<const SCEV *, 4> ReqRegs;
-  for (SmallPtrSet<const SCEV *, 16>::const_iterator I = CurRegs.begin(),
-       E = CurRegs.end(); I != E; ++I)
-    if (LU.Regs.count(*I))
-      ReqRegs.insert(*I);
+  for (const SCEV *S : CurRegs)
+    if (LU.Regs.count(S))
+      ReqRegs.insert(S);
 
   SmallPtrSet<const SCEV *, 16> NewRegs;
   Cost NewCost;
@@ -4350,9 +4346,8 @@ void LSRInstance::SolveRecurse(SmallVectorImpl<const Formula *> &Solution,
       } else {
         DEBUG(dbgs() << "New best at "; NewCost.print(dbgs());
               dbgs() << ".\n Regs:";
-              for (SmallPtrSet<const SCEV *, 16>::const_iterator
-                   I = NewRegs.begin(), E = NewRegs.end(); I != E; ++I)
-                dbgs() << ' ' << **I;
+              for (const SCEV *S : NewRegs)
+                dbgs() << ' ' << *S;
               dbgs() << '\n');
 
         SolutionCost = NewCost;

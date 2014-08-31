@@ -154,9 +154,8 @@ static void RemoveDeadConstant(Constant *C) {
       C->destroyConstant();
 
   // If the constant referenced anything, see if we can delete it as well.
-  for (SmallPtrSet<Constant*, 4>::iterator OI = Operands.begin(),
-         OE = Operands.end(); OI != OE; ++OI)
-    RemoveDeadConstant(*OI);
+  for (Constant *O : Operands)
+    RemoveDeadConstant(O);
 }
 
 // Strip the symbol table of its names.
@@ -191,7 +190,7 @@ static void StripTypeNames(Module &M, bool PreserveDbgInfo) {
 
 /// Find values that are marked as llvm.used.
 static void findUsedValues(GlobalVariable *LLVMUsed,
-                           SmallPtrSet<const GlobalValue*, 8> &UsedValues) {
+                           SmallPtrSetImpl<const GlobalValue*> &UsedValues) {
   if (!LLVMUsed) return;
   UsedValues.insert(LLVMUsed);
 

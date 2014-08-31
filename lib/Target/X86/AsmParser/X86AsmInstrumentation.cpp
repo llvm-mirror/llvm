@@ -48,9 +48,11 @@ public:
   virtual ~X86AddressSanitizer() {}
 
   // X86AsmInstrumentation implementation:
-  virtual void InstrumentAndEmitInstruction(
-      const MCInst &Inst, OperandVector &Operands, MCContext &Ctx,
-      const MCInstrInfo &MII, MCStreamer &Out) override {
+  virtual void InstrumentAndEmitInstruction(const MCInst &Inst,
+                                            OperandVector &Operands,
+                                            MCContext &Ctx,
+                                            const MCInstrInfo &MII,
+                                            MCStreamer &Out) override {
     InstrumentMOVS(Inst, Operands, Ctx, MII, Out);
     if (RepPrefix)
       EmitInstruction(Out, MCInstBuilder(X86::REP_PREFIX));
@@ -63,12 +65,14 @@ public:
   }
 
   // Should be implemented differently in x86_32 and x86_64 subclasses.
-  virtual void InstrumentMemOperandSmallImpl(
-      X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-      MCStreamer &Out) = 0;
-  virtual void InstrumentMemOperandLargeImpl(
-      X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-      MCStreamer &Out) = 0;
+  virtual void InstrumentMemOperandSmallImpl(X86Operand &Op,
+                                             unsigned AccessSize, bool IsWrite,
+                                             MCContext &Ctx,
+                                             MCStreamer &Out) = 0;
+  virtual void InstrumentMemOperandLargeImpl(X86Operand &Op,
+                                             unsigned AccessSize, bool IsWrite,
+                                             MCContext &Ctx,
+                                             MCStreamer &Out) = 0;
   virtual void InstrumentMOVSImpl(unsigned AccessSize, MCContext &Ctx,
                                   MCStreamer &Out) = 0;
 
@@ -88,9 +92,10 @@ protected:
   bool RepPrefix;
 };
 
-void X86AddressSanitizer::InstrumentMemOperand(
-    MCParsedAsmOperand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-    MCStreamer &Out) {
+void X86AddressSanitizer::InstrumentMemOperand(MCParsedAsmOperand &Op,
+                                               unsigned AccessSize,
+                                               bool IsWrite, MCContext &Ctx,
+                                               MCStreamer &Out) {
   assert(Op.isMem() && "Op should be a memory operand.");
   assert((AccessSize & (AccessSize - 1)) == 0 && AccessSize <= 16 &&
          "AccessSize should be a power of two, less or equal than 16.");
@@ -107,9 +112,10 @@ void X86AddressSanitizer::InstrumentMemOperand(
     InstrumentMemOperandLargeImpl(MemOp, AccessSize, IsWrite, Ctx, Out);
 }
 
-void X86AddressSanitizer::InstrumentMOVSBase(
-    unsigned DstReg, unsigned SrcReg, unsigned CntReg, unsigned AccessSize,
-    MCContext &Ctx, MCStreamer &Out) {
+void X86AddressSanitizer::InstrumentMOVSBase(unsigned DstReg, unsigned SrcReg,
+                                             unsigned CntReg,
+                                             unsigned AccessSize,
+                                             MCContext &Ctx, MCStreamer &Out) {
   // FIXME: check whole ranges [DstReg .. DstReg + AccessSize * (CntReg - 1)]
   // and [SrcReg .. SrcReg + AccessSize * (CntReg - 1)].
 
@@ -149,9 +155,10 @@ void X86AddressSanitizer::InstrumentMOVSBase(
   }
 }
 
-void X86AddressSanitizer::InstrumentMOVS(
-    const MCInst &Inst, OperandVector &Operands, MCContext &Ctx,
-    const MCInstrInfo &MII, MCStreamer &Out) {
+void X86AddressSanitizer::InstrumentMOVS(const MCInst &Inst,
+                                         OperandVector &Operands,
+                                         MCContext &Ctx, const MCInstrInfo &MII,
+                                         MCStreamer &Out) {
   // Access size in bytes.
   unsigned AccessSize = 0;
 
@@ -175,9 +182,10 @@ void X86AddressSanitizer::InstrumentMOVS(
   InstrumentMOVSImpl(AccessSize, Ctx, Out);
 }
 
-void X86AddressSanitizer::InstrumentMOV(
-    const MCInst &Inst, OperandVector &Operands, MCContext &Ctx,
-    const MCInstrInfo &MII, MCStreamer &Out) {
+void X86AddressSanitizer::InstrumentMOV(const MCInst &Inst,
+                                        OperandVector &Operands, MCContext &Ctx,
+                                        const MCInstrInfo &MII,
+                                        MCStreamer &Out) {
   // Access size in bytes.
   unsigned AccessSize = 0;
 
@@ -229,23 +237,27 @@ public:
       : X86AddressSanitizer(STI) {}
   virtual ~X86AddressSanitizer32() {}
 
-  virtual void InstrumentMemOperandSmallImpl(
-      X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-      MCStreamer &Out) override;
-  virtual void InstrumentMemOperandLargeImpl(
-      X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-      MCStreamer &Out) override;
+  virtual void InstrumentMemOperandSmallImpl(X86Operand &Op,
+                                             unsigned AccessSize, bool IsWrite,
+                                             MCContext &Ctx,
+                                             MCStreamer &Out) override;
+  virtual void InstrumentMemOperandLargeImpl(X86Operand &Op,
+                                             unsigned AccessSize, bool IsWrite,
+                                             MCContext &Ctx,
+                                             MCStreamer &Out) override;
   virtual void InstrumentMOVSImpl(unsigned AccessSize, MCContext &Ctx,
                                   MCStreamer &Out) override;
 
- private:
+private:
   void EmitCallAsanReport(MCContext &Ctx, MCStreamer &Out, unsigned AccessSize,
                           bool IsWrite, unsigned AddressReg) {
     EmitInstruction(Out, MCInstBuilder(X86::CLD));
     EmitInstruction(Out, MCInstBuilder(X86::MMX_EMMS));
 
-    EmitInstruction(Out, MCInstBuilder(X86::AND64ri8).addReg(X86::ESP)
-                             .addReg(X86::ESP).addImm(-16));
+    EmitInstruction(Out, MCInstBuilder(X86::AND64ri8)
+                             .addReg(X86::ESP)
+                             .addReg(X86::ESP)
+                             .addImm(-16));
     EmitInstruction(Out, MCInstBuilder(X86::PUSH32r).addReg(AddressReg));
 
     const std::string &Fn = FuncName(AccessSize, IsWrite);
@@ -256,9 +268,11 @@ public:
   }
 };
 
-void X86AddressSanitizer32::InstrumentMemOperandSmallImpl(
-    X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-    MCStreamer &Out) {
+void X86AddressSanitizer32::InstrumentMemOperandSmallImpl(X86Operand &Op,
+                                                          unsigned AccessSize,
+                                                          bool IsWrite,
+                                                          MCContext &Ctx,
+                                                          MCStreamer &Out) {
   EmitInstruction(Out, MCInstBuilder(X86::PUSH32r).addReg(X86::EAX));
   EmitInstruction(Out, MCInstBuilder(X86::PUSH32r).addReg(X86::ECX));
   EmitInstruction(Out, MCInstBuilder(X86::PUSH32r).addReg(X86::EDX));
@@ -274,8 +288,9 @@ void X86AddressSanitizer32::InstrumentMemOperandSmallImpl(
 
   EmitInstruction(
       Out, MCInstBuilder(X86::MOV32rr).addReg(X86::ECX).addReg(X86::EAX));
-  EmitInstruction(Out, MCInstBuilder(X86::SHR32ri).addReg(X86::ECX)
-                           .addReg(X86::ECX).addImm(3));
+  EmitInstruction(
+      Out,
+      MCInstBuilder(X86::SHR32ri).addReg(X86::ECX).addReg(X86::ECX).addImm(3));
 
   {
     MCInst Inst;
@@ -296,8 +311,9 @@ void X86AddressSanitizer32::InstrumentMemOperandSmallImpl(
 
   EmitInstruction(
       Out, MCInstBuilder(X86::MOV32rr).addReg(X86::EDX).addReg(X86::EAX));
-  EmitInstruction(Out, MCInstBuilder(X86::AND32ri).addReg(X86::EDX)
-                           .addReg(X86::EDX).addImm(7));
+  EmitInstruction(
+      Out,
+      MCInstBuilder(X86::AND32ri).addReg(X86::EDX).addReg(X86::EDX).addImm(7));
 
   switch (AccessSize) {
   case 1:
@@ -315,8 +331,10 @@ void X86AddressSanitizer32::InstrumentMemOperandSmallImpl(
     break;
   }
   case 4:
-    EmitInstruction(Out, MCInstBuilder(X86::ADD32ri8).addReg(X86::EDX)
-                             .addReg(X86::EDX).addImm(3));
+    EmitInstruction(Out, MCInstBuilder(X86::ADD32ri8)
+                             .addReg(X86::EDX)
+                             .addReg(X86::EDX)
+                             .addImm(3));
     break;
   default:
     assert(false && "Incorrect access size");
@@ -338,9 +356,11 @@ void X86AddressSanitizer32::InstrumentMemOperandSmallImpl(
   EmitInstruction(Out, MCInstBuilder(X86::POP32r).addReg(X86::EAX));
 }
 
-void X86AddressSanitizer32::InstrumentMemOperandLargeImpl(
-    X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-    MCStreamer &Out) {
+void X86AddressSanitizer32::InstrumentMemOperandLargeImpl(X86Operand &Op,
+                                                          unsigned AccessSize,
+                                                          bool IsWrite,
+                                                          MCContext &Ctx,
+                                                          MCStreamer &Out) {
   EmitInstruction(Out, MCInstBuilder(X86::PUSH32r).addReg(X86::EAX));
   EmitInstruction(Out, MCInstBuilder(X86::PUSH32r).addReg(X86::ECX));
   EmitInstruction(Out, MCInstBuilder(X86::PUSHF32));
@@ -354,20 +374,21 @@ void X86AddressSanitizer32::InstrumentMemOperandLargeImpl(
   }
   EmitInstruction(
       Out, MCInstBuilder(X86::MOV32rr).addReg(X86::ECX).addReg(X86::EAX));
-  EmitInstruction(Out, MCInstBuilder(X86::SHR32ri).addReg(X86::ECX)
-                           .addReg(X86::ECX).addImm(3));
+  EmitInstruction(
+      Out,
+      MCInstBuilder(X86::SHR32ri).addReg(X86::ECX).addReg(X86::ECX).addImm(3));
   {
     MCInst Inst;
     switch (AccessSize) {
-      case 8:
-        Inst.setOpcode(X86::CMP8mi);
-        break;
-      case 16:
-        Inst.setOpcode(X86::CMP16mi);
-        break;
-      default:
-        assert(false && "Incorrect access size");
-        break;
+    case 8:
+      Inst.setOpcode(X86::CMP8mi);
+      break;
+    case 16:
+      Inst.setOpcode(X86::CMP16mi);
+      break;
+    default:
+      assert(false && "Incorrect access size");
+      break;
     }
     const MCExpr *Disp = MCConstantExpr::Create(kShadowOffset, Ctx);
     std::unique_ptr<X86Operand> Op(
@@ -388,8 +409,9 @@ void X86AddressSanitizer32::InstrumentMemOperandLargeImpl(
   EmitInstruction(Out, MCInstBuilder(X86::POP32r).addReg(X86::EAX));
 }
 
-void X86AddressSanitizer32::InstrumentMOVSImpl(
-    unsigned AccessSize, MCContext &Ctx, MCStreamer &Out) {
+void X86AddressSanitizer32::InstrumentMOVSImpl(unsigned AccessSize,
+                                               MCContext &Ctx,
+                                               MCStreamer &Out) {
   EmitInstruction(Out, MCInstBuilder(X86::PUSHF32));
 
   // No need to test when ECX is equals to zero.
@@ -415,12 +437,14 @@ public:
       : X86AddressSanitizer(STI) {}
   virtual ~X86AddressSanitizer64() {}
 
-  virtual void InstrumentMemOperandSmallImpl(
-      X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-      MCStreamer &Out) override;
-  virtual void InstrumentMemOperandLargeImpl(
-      X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-      MCStreamer &Out) override;
+  virtual void InstrumentMemOperandSmallImpl(X86Operand &Op,
+                                             unsigned AccessSize, bool IsWrite,
+                                             MCContext &Ctx,
+                                             MCStreamer &Out) override;
+  virtual void InstrumentMemOperandLargeImpl(X86Operand &Op,
+                                             unsigned AccessSize, bool IsWrite,
+                                             MCContext &Ctx,
+                                             MCStreamer &Out) override;
   virtual void InstrumentMOVSImpl(unsigned AccessSize, MCContext &Ctx,
                                   MCStreamer &Out) override;
 
@@ -442,8 +466,10 @@ private:
     EmitInstruction(Out, MCInstBuilder(X86::CLD));
     EmitInstruction(Out, MCInstBuilder(X86::MMX_EMMS));
 
-    EmitInstruction(Out, MCInstBuilder(X86::AND64ri8).addReg(X86::RSP)
-                             .addReg(X86::RSP).addImm(-16));
+    EmitInstruction(Out, MCInstBuilder(X86::AND64ri8)
+                             .addReg(X86::RSP)
+                             .addReg(X86::RSP)
+                             .addImm(-16));
 
     const std::string &Fn = FuncName(AccessSize, IsWrite);
     MCSymbol *FnSym = Ctx.GetOrCreateSymbol(StringRef(Fn));
@@ -453,9 +479,11 @@ private:
   }
 };
 
-void X86AddressSanitizer64::InstrumentMemOperandSmallImpl(
-    X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-    MCStreamer &Out) {
+void X86AddressSanitizer64::InstrumentMemOperandSmallImpl(X86Operand &Op,
+                                                          unsigned AccessSize,
+                                                          bool IsWrite,
+                                                          MCContext &Ctx,
+                                                          MCStreamer &Out) {
   EmitAdjustRSP(Ctx, Out, -128);
   EmitInstruction(Out, MCInstBuilder(X86::PUSH64r).addReg(X86::RAX));
   EmitInstruction(Out, MCInstBuilder(X86::PUSH64r).addReg(X86::RCX));
@@ -470,8 +498,9 @@ void X86AddressSanitizer64::InstrumentMemOperandSmallImpl(
   }
   EmitInstruction(
       Out, MCInstBuilder(X86::MOV64rr).addReg(X86::RAX).addReg(X86::RDI));
-  EmitInstruction(Out, MCInstBuilder(X86::SHR64ri).addReg(X86::RAX)
-                           .addReg(X86::RAX).addImm(3));
+  EmitInstruction(
+      Out,
+      MCInstBuilder(X86::SHR64ri).addReg(X86::RAX).addReg(X86::RAX).addImm(3));
   {
     MCInst Inst;
     Inst.setOpcode(X86::MOV8rm);
@@ -491,8 +520,9 @@ void X86AddressSanitizer64::InstrumentMemOperandSmallImpl(
 
   EmitInstruction(
       Out, MCInstBuilder(X86::MOV32rr).addReg(X86::ECX).addReg(X86::EDI));
-  EmitInstruction(Out, MCInstBuilder(X86::AND32ri).addReg(X86::ECX)
-                           .addReg(X86::ECX).addImm(7));
+  EmitInstruction(
+      Out,
+      MCInstBuilder(X86::AND32ri).addReg(X86::ECX).addReg(X86::ECX).addImm(7));
 
   switch (AccessSize) {
   case 1:
@@ -510,8 +540,10 @@ void X86AddressSanitizer64::InstrumentMemOperandSmallImpl(
     break;
   }
   case 4:
-    EmitInstruction(Out, MCInstBuilder(X86::ADD32ri8).addReg(X86::ECX)
-                             .addReg(X86::ECX).addImm(3));
+    EmitInstruction(Out, MCInstBuilder(X86::ADD32ri8)
+                             .addReg(X86::ECX)
+                             .addReg(X86::ECX)
+                             .addImm(3));
     break;
   default:
     assert(false && "Incorrect access size");
@@ -534,9 +566,11 @@ void X86AddressSanitizer64::InstrumentMemOperandSmallImpl(
   EmitAdjustRSP(Ctx, Out, 128);
 }
 
-void X86AddressSanitizer64::InstrumentMemOperandLargeImpl(
-    X86Operand &Op, unsigned AccessSize, bool IsWrite, MCContext &Ctx,
-    MCStreamer &Out) {
+void X86AddressSanitizer64::InstrumentMemOperandLargeImpl(X86Operand &Op,
+                                                          unsigned AccessSize,
+                                                          bool IsWrite,
+                                                          MCContext &Ctx,
+                                                          MCStreamer &Out) {
   EmitAdjustRSP(Ctx, Out, -128);
   EmitInstruction(Out, MCInstBuilder(X86::PUSH64r).addReg(X86::RAX));
   EmitInstruction(Out, MCInstBuilder(X86::PUSHF64));
@@ -548,8 +582,9 @@ void X86AddressSanitizer64::InstrumentMemOperandLargeImpl(
     Op.addMemOperands(Inst, 5);
     EmitInstruction(Out, Inst);
   }
-  EmitInstruction(Out, MCInstBuilder(X86::SHR64ri).addReg(X86::RAX)
-                           .addReg(X86::RAX).addImm(3));
+  EmitInstruction(
+      Out,
+      MCInstBuilder(X86::SHR64ri).addReg(X86::RAX).addReg(X86::RAX).addImm(3));
   {
     MCInst Inst;
     switch (AccessSize) {
@@ -583,8 +618,9 @@ void X86AddressSanitizer64::InstrumentMemOperandLargeImpl(
   EmitAdjustRSP(Ctx, Out, 128);
 }
 
-void X86AddressSanitizer64::InstrumentMOVSImpl(
-    unsigned AccessSize, MCContext &Ctx, MCStreamer &Out) {
+void X86AddressSanitizer64::InstrumentMOVSImpl(unsigned AccessSize,
+                                               MCContext &Ctx,
+                                               MCStreamer &Out) {
   EmitInstruction(Out, MCInstBuilder(X86::PUSHF64));
 
   // No need to test when RCX is equals to zero.

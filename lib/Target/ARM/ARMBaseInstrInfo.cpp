@@ -518,11 +518,50 @@ bool ARMBaseInstrInfo::DefinesPredicate(MachineInstr *MI,
   return Found;
 }
 
+static bool isCPSRDefined(const MachineInstr *MI) {
+  for (const auto &MO : MI->operands())
+    if (MO.isReg() && MO.getReg() == ARM::CPSR && MO.isDef())
+      return true;
+  return false;
+}
+
+static bool isEligibleForITBlock(const MachineInstr *MI) {
+  switch (MI->getOpcode()) {
+  default: return true;
+  case ARM::tADC:   // ADC (register) T1
+  case ARM::tADDi3: // ADD (immediate) T1
+  case ARM::tADDi8: // ADD (immediate) T2
+  case ARM::tADDrr: // ADD (register) T1
+  case ARM::tAND:   // AND (register) T1
+  case ARM::tASRri: // ASR (immediate) T1
+  case ARM::tASRrr: // ASR (register) T1
+  case ARM::tBIC:   // BIC (register) T1
+  case ARM::tEOR:   // EOR (register) T1
+  case ARM::tLSLri: // LSL (immediate) T1
+  case ARM::tLSLrr: // LSL (register) T1
+  case ARM::tLSRri: // LSR (immediate) T1
+  case ARM::tLSRrr: // LSR (register) T1
+  case ARM::tMUL:   // MUL T1
+  case ARM::tMVN:   // MVN (register) T1
+  case ARM::tORR:   // ORR (register) T1
+  case ARM::tROR:   // ROR (register) T1
+  case ARM::tRSB:   // RSB (immediate) T1
+  case ARM::tSBC:   // SBC (register) T1
+  case ARM::tSUBi3: // SUB (immediate) T1
+  case ARM::tSUBi8: // SUB (immediate) T2
+  case ARM::tSUBrr: // SUB (register) T1
+    return !isCPSRDefined(MI);
+  }
+}
+
 /// isPredicable - Return true if the specified instruction can be predicated.
 /// By default, this returns true for every instruction with a
 /// PredicateOperand.
 bool ARMBaseInstrInfo::isPredicable(MachineInstr *MI) const {
   if (!MI->isPredicable())
+    return false;
+
+  if (!isEligibleForITBlock(MI))
     return false;
 
   ARMFunctionInfo *AFI =
@@ -682,7 +721,7 @@ void ARMBaseInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Opc = ARM::VMOVRS;
   else if (SPRDest && GPRSrc)
     Opc = ARM::VMOVSR;
-  else if (ARM::DPRRegClass.contains(DestReg, SrcReg))
+  else if (ARM::DPRRegClass.contains(DestReg, SrcReg) && !Subtarget.isFPOnlySP())
     Opc = ARM::VMOVD;
   else if (ARM::QPRRegClass.contains(DestReg, SrcReg))
     Opc = ARM::VORRq;
@@ -742,6 +781,10 @@ void ARMBaseInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     BeginIdx = ARM::dsub_0;
     SubRegs = 4;
     Spacing = 2;
+  } else if (ARM::DPRRegClass.contains(DestReg, SrcReg) && Subtarget.isFPOnlySP()) {
+    Opc = ARM::VMOVS;
+    BeginIdx = ARM::ssub_0;
+    SubRegs = 2;
   }
 
   assert(Opc && "Impossible reg-to-reg copy");
@@ -1192,7 +1235,8 @@ ARMBaseInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   // copyPhysReg() calls.  Look for VMOVS instructions that can legally be
   // widened to VMOVD.  We prefer the VMOVD when possible because it may be
   // changed into a VORR that can go down the NEON pipeline.
-  if (!WidenVMOVS || !MI->isCopy() || Subtarget.isCortexA15())
+  if (!WidenVMOVS || !MI->isCopy() || Subtarget.isCortexA15() ||
+      Subtarget.isFPOnlySP())
     return false;
 
   // Look for a copy between even S-registers.  That is where we keep floats
@@ -4445,4 +4489,73 @@ bool ARMBaseInstrInfo::isSwiftFastImmShift(const MachineInstr *MI) const {
     return true;
 
   return false;
+}
+
+bool ARMBaseInstrInfo::getRegSequenceLikeInputs(
+    const MachineInstr &MI, unsigned DefIdx,
+    SmallVectorImpl<RegSubRegPairAndIdx> &InputRegs) const {
+  assert(DefIdx < MI.getDesc().getNumDefs() && "Invalid definition index");
+  assert(MI.isRegSequenceLike() && "Invalid kind of instruction");
+
+  switch (MI.getOpcode()) {
+  case ARM::VMOVDRR:
+    // dX = VMOVDRR rY, rZ
+    // is the same as:
+    // dX = REG_SEQUENCE rY, ssub_0, rZ, ssub_1
+    // Populate the InputRegs accordingly.
+    // rY
+    const MachineOperand *MOReg = &MI.getOperand(1);
+    InputRegs.push_back(
+        RegSubRegPairAndIdx(MOReg->getReg(), MOReg->getSubReg(), ARM::ssub_0));
+    // rZ
+    MOReg = &MI.getOperand(2);
+    InputRegs.push_back(
+        RegSubRegPairAndIdx(MOReg->getReg(), MOReg->getSubReg(), ARM::ssub_1));
+    return true;
+  }
+  llvm_unreachable("Target dependent opcode missing");
+}
+
+bool ARMBaseInstrInfo::getExtractSubregLikeInputs(
+    const MachineInstr &MI, unsigned DefIdx,
+    RegSubRegPairAndIdx &InputReg) const {
+  assert(DefIdx < MI.getDesc().getNumDefs() && "Invalid definition index");
+  assert(MI.isExtractSubregLike() && "Invalid kind of instruction");
+
+  switch (MI.getOpcode()) {
+  case ARM::VMOVRRD:
+    // rX, rY = VMOVRRD dZ
+    // is the same as:
+    // rX = EXTRACT_SUBREG dZ, ssub_0
+    // rY = EXTRACT_SUBREG dZ, ssub_1
+    const MachineOperand &MOReg = MI.getOperand(2);
+    InputReg.Reg = MOReg.getReg();
+    InputReg.SubReg = MOReg.getSubReg();
+    InputReg.SubIdx = DefIdx == 0 ? ARM::ssub_0 : ARM::ssub_1;
+    return true;
+  }
+  llvm_unreachable("Target dependent opcode missing");
+}
+
+bool ARMBaseInstrInfo::getInsertSubregLikeInputs(
+    const MachineInstr &MI, unsigned DefIdx, RegSubRegPair &BaseReg,
+    RegSubRegPairAndIdx &InsertedReg) const {
+  assert(DefIdx < MI.getDesc().getNumDefs() && "Invalid definition index");
+  assert(MI.isInsertSubregLike() && "Invalid kind of instruction");
+
+  switch (MI.getOpcode()) {
+  case ARM::VSETLNi32:
+    // dX = VSETLNi32 dY, rZ, imm
+    const MachineOperand &MOBaseReg = MI.getOperand(1);
+    const MachineOperand &MOInsertedReg = MI.getOperand(2);
+    const MachineOperand &MOIndex = MI.getOperand(3);
+    BaseReg.Reg = MOBaseReg.getReg();
+    BaseReg.SubReg = MOBaseReg.getSubReg();
+
+    InsertedReg.Reg = MOInsertedReg.getReg();
+    InsertedReg.SubReg = MOInsertedReg.getSubReg();
+    InsertedReg.SubIdx = MOIndex.getImm() == 0 ? ARM::ssub_0 : ARM::ssub_1;
+    return true;
+  }
+  llvm_unreachable("Target dependent opcode missing");
 }

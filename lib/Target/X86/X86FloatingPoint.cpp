@@ -324,10 +324,8 @@ bool FPS::runOnMachineFunction(MachineFunction &MF) {
   MachineBasicBlock *Entry = MF.begin();
 
   bool Changed = false;
-  for (df_ext_iterator<MachineBasicBlock*, SmallPtrSet<MachineBasicBlock*, 8> >
-         I = df_ext_begin(Entry, Processed), E = df_ext_end(Entry, Processed);
-       I != E; ++I)
-    Changed |= processBasicBlock(MF, **I);
+  for (MachineBasicBlock *BB : depth_first_ext(Entry, Processed))
+    Changed |= processBasicBlock(MF, *BB);
 
   // Process any unreachable blocks in arbitrary order now.
   if (MF.size() != Processed.size())
@@ -1654,6 +1652,9 @@ void FPS::setKillFlags(MachineBasicBlock &MBB) const {
 
   for (MachineBasicBlock::reverse_iterator I = MBB.rbegin(), E = MBB.rend();
        I != E; ++I) {
+    if (I->isDebugValue())
+      continue;
+
     BitVector Defs(8);
     SmallVector<MachineOperand *, 2> Uses;
     MachineInstr &MI = *I;

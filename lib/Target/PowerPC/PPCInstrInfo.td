@@ -458,7 +458,7 @@ def u6imm   : Operand<i32> {
 }
 def PPCS16ImmAsmOperand : AsmOperandClass {
   let Name = "S16Imm"; let PredicateMethod = "isS16Imm";
-  let RenderMethod = "addImmOperands";
+  let RenderMethod = "addS16ImmOperands";
 }
 def s16imm  : Operand<i32> {
   let PrintMethod = "printS16ImmOperand";
@@ -468,7 +468,7 @@ def s16imm  : Operand<i32> {
 }
 def PPCU16ImmAsmOperand : AsmOperandClass {
   let Name = "U16Imm"; let PredicateMethod = "isU16Imm";
-  let RenderMethod = "addImmOperands";
+  let RenderMethod = "addU16ImmOperands";
 }
 def u16imm  : Operand<i32> {
   let PrintMethod = "printU16ImmOperand";
@@ -478,7 +478,7 @@ def u16imm  : Operand<i32> {
 }
 def PPCS17ImmAsmOperand : AsmOperandClass {
   let Name = "S17Imm"; let PredicateMethod = "isS17Imm";
-  let RenderMethod = "addImmOperands";
+  let RenderMethod = "addS16ImmOperands";
 }
 def s17imm  : Operand<i32> {
   // This operand type is used for addis/lis to allow the assembler parser
@@ -554,7 +554,7 @@ def ptr_rc_idx : Operand<iPTR>, PointerLikeRegClass<0> {
 
 def PPCDispRIOperand : AsmOperandClass {
  let Name = "DispRI"; let PredicateMethod = "isS16Imm";
- let RenderMethod = "addImmOperands";
+ let RenderMethod = "addS16ImmOperands";
 }
 def dispRI : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIOperand;
@@ -565,6 +565,27 @@ def PPCDispRIXOperand : AsmOperandClass {
 }
 def dispRIX : Operand<iPTR> {
   let ParserMatchClass = PPCDispRIXOperand;
+}
+def PPCDispSPE8Operand : AsmOperandClass {
+ let Name = "DispSPE8"; let PredicateMethod = "isU8ImmX8";
+ let RenderMethod = "addImmOperands";
+}
+def dispSPE8 : Operand<iPTR> {
+  let ParserMatchClass = PPCDispSPE8Operand;
+}
+def PPCDispSPE4Operand : AsmOperandClass {
+ let Name = "DispSPE4"; let PredicateMethod = "isU7ImmX4";
+ let RenderMethod = "addImmOperands";
+}
+def dispSPE4 : Operand<iPTR> {
+  let ParserMatchClass = PPCDispSPE4Operand;
+}
+def PPCDispSPE2Operand : AsmOperandClass {
+ let Name = "DispSPE2"; let PredicateMethod = "isU6ImmX2";
+ let RenderMethod = "addImmOperands";
+}
+def dispSPE2 : Operand<iPTR> {
+  let ParserMatchClass = PPCDispSPE2Operand;
 }
 
 def memri : Operand<iPTR> {
@@ -582,6 +603,21 @@ def memrix : Operand<iPTR> {   // memri where the imm is 4-aligned.
   let MIOperandInfo = (ops dispRIX:$imm, ptr_rc_nor0:$reg);
   let EncoderMethod = "getMemRIXEncoding";
   let DecoderMethod = "decodeMemRIXOperands";
+}
+def spe8dis : Operand<iPTR> {   // SPE displacement where the imm is 8-aligned.
+  let PrintMethod = "printMemRegImm";
+  let MIOperandInfo = (ops dispSPE8:$imm, ptr_rc_nor0:$reg);
+  let EncoderMethod = "getSPE8DisEncoding";
+}
+def spe4dis : Operand<iPTR> {   // SPE displacement where the imm is 4-aligned.
+  let PrintMethod = "printMemRegImm";
+  let MIOperandInfo = (ops dispSPE4:$imm, ptr_rc_nor0:$reg);
+  let EncoderMethod = "getSPE4DisEncoding";
+}
+def spe2dis : Operand<iPTR> {   // SPE displacement where the imm is 2-aligned.
+  let PrintMethod = "printMemRegImm";
+  let MIOperandInfo = (ops dispSPE2:$imm, ptr_rc_nor0:$reg);
+  let EncoderMethod = "getSPE2DisEncoding";
 }
 
 // A single-register address. This is used with the SjLj
@@ -1267,8 +1303,15 @@ def DCBZL  : DCB_Form<1014, 1, (outs), (ins memrr:$dst), "dcbzl $dst",
                       IIC_LdStDCBF, [(int_ppc_dcbzl xoaddr:$dst)]>,
                       PPC970_DGroup_Single;
 
+def ICBT  : XForm_icbt<31, 22, (outs), (ins u4imm:$CT, memrr:$src),
+                       "icbt $CT, $src", IIC_LdStLoad>, Requires<[IsBookE]>;
+
 def : Pat<(prefetch xoaddr:$dst, (i32 0), imm, (i32 1)),
-          (DCBT xoaddr:$dst)>;
+          (DCBT xoaddr:$dst)>;   // data prefetch for loads
+def : Pat<(prefetch xoaddr:$dst, (i32 1), imm, (i32 1)),
+          (DCBTST xoaddr:$dst)>; // data prefetch for stores
+def : Pat<(prefetch xoaddr:$dst, (i32 0), imm, (i32 0)),
+          (ICBT 0, xoaddr:$dst)>; // inst prefetch (for read)
 
 // Atomic operations
 let usesCustomInserter = 1 in {
@@ -3092,21 +3135,15 @@ def WRTEEI: I<31, (outs), (ins i1imm:$E), "wrteei $E", IIC_SprMTMSR>,
   let Inst{21-30} = 163;
 }
 
-def DCI: I<31, (outs), (ins u4imm:$CT), "dci $CT", IIC_LdStLoad>,
-              Requires<[IsPPC4xx]> {
-  bits<4> CT;
+def DCCCI : XForm_tlb<454, (outs), (ins gprc:$A, gprc:$B),
+               "dccci $A, $B", IIC_LdStLoad>, Requires<[IsPPC4xx]>;
+def ICCCI : XForm_tlb<966, (outs), (ins gprc:$A, gprc:$B),
+               "iccci $A, $B", IIC_LdStLoad>, Requires<[IsPPC4xx]>;
 
-  let Inst{7-10} = CT;
-  let Inst{21-30} = 454;
-}
-
-def ICI: I<31, (outs), (ins u4imm:$CT), "ici $CT", IIC_LdStLoad>,
-              Requires<[IsPPC4xx]> {
-  bits<4> CT;
-
-  let Inst{7-10} = CT;
-  let Inst{21-30} = 966;
-}
+def : InstAlias<"dci 0", (DCCCI R0, R0)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"dccci", (DCCCI R0, R0)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"ici 0", (ICCCI R0, R0)>, Requires<[IsPPC4xx]>;
+def : InstAlias<"iccci", (ICCCI R0, R0)>, Requires<[IsPPC4xx]>;
 
 def MFMSR : XForm_rs<31, 83, (outs gprc:$RT), (ins),
                   "mfmsr $RT", IIC_SprMFMSR, []>;

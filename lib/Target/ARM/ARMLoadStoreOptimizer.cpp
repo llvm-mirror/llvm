@@ -97,10 +97,6 @@ namespace {
     void findUsesOfImpDef(SmallVectorImpl<MachineOperand *> &UsesOfImpDefs,
                           const MemOpQueue &MemOps, unsigned DefReg,
                           unsigned RangeBegin, unsigned RangeEnd);
-    void UpdateBaseRegUses(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator MBBI,
-                           DebugLoc dl, unsigned Base, unsigned WordOffset,
-                           ARMCC::CondCodes Pred, unsigned PredReg);
     bool MergeOps(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                   int Offset, unsigned Base, bool BaseKill, int Opcode,
                   ARMCC::CondCodes Pred, unsigned PredReg, unsigned Scratch,
@@ -311,101 +307,6 @@ static bool isi32Store(unsigned Opc) {
   return Opc == ARM::STRi12 || isT1i32Store(Opc) || isT2i32Store(Opc);
 }
 
-static unsigned getImmScale(unsigned Opc) {
-  switch (Opc) {
-  default: llvm_unreachable("Unhandled opcode!");
-  case ARM::tLDRi:
-  case ARM::tSTRi:
-    return 1;
-  case ARM::tLDRHi:
-  case ARM::tSTRHi:
-    return 2;
-  case ARM::tLDRBi:
-  case ARM::tSTRBi:
-    return 4;
-  }
-}
-
-/// Update future uses of the base register with the offset introduced
-/// due to writeback. This function only works on Thumb1.
-void
-ARMLoadStoreOpt::UpdateBaseRegUses(MachineBasicBlock &MBB,
-                                   MachineBasicBlock::iterator MBBI,
-                                   DebugLoc dl, unsigned Base,
-                                   unsigned WordOffset,
-                                   ARMCC::CondCodes Pred, unsigned PredReg) {
-  assert(isThumb1 && "Can only update base register uses for Thumb1!");
-
-  // Start updating any instructions with immediate offsets. Insert a sub before
-  // the first non-updateable instruction (if any).
-  for (; MBBI != MBB.end(); ++MBBI) {
-    if (MBBI->readsRegister(Base)) {
-      unsigned Opc = MBBI->getOpcode();
-      int Offset;
-      bool InsertSub = false;
-
-      if (Opc == ARM::tLDRi  || Opc == ARM::tSTRi  ||
-          Opc == ARM::tLDRHi || Opc == ARM::tSTRHi ||
-          Opc == ARM::tLDRBi || Opc == ARM::tSTRBi) {
-        // Loads and stores with immediate offsets can be updated, but only if
-        // the new offset isn't negative.
-        // The MachineOperand containing the offset immediate is the last one
-        // before predicates.
-        MachineOperand &MO =
-          MBBI->getOperand(MBBI->getDesc().getNumOperands() - 3);
-        // The offsets are scaled by 1, 2 or 4 depending on the Opcode
-        Offset = MO.getImm() - WordOffset * getImmScale(Opc);
-        if (Offset >= 0)
-          MO.setImm(Offset);
-        else
-          InsertSub = true;
-
-      } else if (Opc == ARM::tSUBi8 || Opc == ARM::tADDi8) {
-        // SUB/ADD using this register. Merge it with the update.
-        // If the merged offset is too large, insert a new sub instead.
-        MachineOperand &MO =
-          MBBI->getOperand(MBBI->getDesc().getNumOperands() - 3);
-        Offset = (Opc == ARM::tSUBi8) ?
-          MO.getImm() + WordOffset * 4 :
-          MO.getImm() - WordOffset * 4 ;
-        if (TL->isLegalAddImmediate(Offset)) {
-          MO.setImm(Offset);
-          // The base register has now been reset, so exit early.
-          return;
-        } else {
-          InsertSub = true;
-        }
-
-      } else {
-        // Can't update the instruction.
-        InsertSub = true;
-      }
-
-      if (InsertSub) {
-        // An instruction above couldn't be updated, so insert a sub.
-        AddDefaultT1CC(BuildMI(MBB, MBBI, dl, TII->get(ARM::tSUBi8), Base))
-          .addReg(Base, getKillRegState(true)).addImm(WordOffset * 4)
-          .addImm(Pred).addReg(PredReg);
-        return;
-      }
-    }
-
-    if (MBBI->killsRegister(Base))
-      // Register got killed. Stop updating.
-      return;
-  }
-
-  // The end of the block was reached. This means register liveness escapes the
-  // block, and it's necessary to insert a sub before the last instruction.
-  if (MBB.succ_size() > 0)
-    // But only insert the SUB if there is actually a successor block.
-    // FIXME: Check more carefully if register is live at this point, e.g. by
-    // also examining the successor block's register liveness information.
-    AddDefaultT1CC(BuildMI(MBB, --MBBI, dl, TII->get(ARM::tSUBi8), Base))
-      .addReg(Base, getKillRegState(true)).addImm(WordOffset * 4)
-      .addImm(Pred).addReg(PredReg);
-}
-
 /// MergeOps - Create and insert a LDM or STM with Base as base register and
 /// registers in Regs as the register operands that would be loaded / stored.
 /// It returns true if the transformation is done.
@@ -459,13 +360,15 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
 
     int BaseOpc =
       isThumb2 ? ARM::t2ADDri :
+      (isThumb1 && Offset < 8) ? ARM::tADDi3 :
       isThumb1 ? ARM::tADDi8  : ARM::ADDri;
 
     if (Offset < 0) {
+      Offset = - Offset;
       BaseOpc =
         isThumb2 ? ARM::t2SUBri :
+        (isThumb1 && Offset < 8) ? ARM::tSUBi3 :
         isThumb1 ? ARM::tSUBi8  : ARM::SUBri;
-      Offset = - Offset;
     }
 
     if (!TL->isLegalAddImmediate(Offset))
@@ -473,22 +376,28 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
       return false; // Probably not worth it then.
 
     if (isThumb1) {
-      if (Base != NewBase) {
+      // Thumb1: depending on immediate size, use either
+      //   ADD NewBase, Base, #imm3
+      // or
+      //   MOV NewBase, Base
+      //   ADD NewBase, #imm8.
+      if (Base != NewBase && Offset >= 8) {
         // Need to insert a MOV to the new base first.
-        // FIXME: If the immediate fits in 3 bits, use ADD instead.
         BuildMI(MBB, MBBI, dl, TII->get(ARM::tMOVr), NewBase)
           .addReg(Base, getKillRegState(BaseKill))
           .addImm(Pred).addReg(PredReg);
+        // Set up BaseKill and Base correctly to insert the ADDS/SUBS below.
+        Base = NewBase;
+        BaseKill = false;
       }
       AddDefaultT1CC(BuildMI(MBB, MBBI, dl, TII->get(BaseOpc), NewBase))
-        .addReg(NewBase, getKillRegState(true)).addImm(Offset)
+        .addReg(Base, getKillRegState(BaseKill)).addImm(Offset)
         .addImm(Pred).addReg(PredReg);
     } else {
       BuildMI(MBB, MBBI, dl, TII->get(BaseOpc), NewBase)
         .addReg(Base, getKillRegState(BaseKill)).addImm(Offset)
         .addImm(Pred).addReg(PredReg).addReg(0);
     }
-
     Base = NewBase;
     BaseKill = true; // New base is always killed straight away.
   }
@@ -512,6 +421,14 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
         break;
       }
 
+  // If the merged instruction has writeback and the base register is not killed
+  // it's not safe to do the merge on Thumb1. This is because resetting the base
+  // register writeback by inserting a SUBS sets the condition flags.
+  // FIXME: Try something clever here to see if resetting the base register can
+  // be avoided, e.g. by updating a later ADD/SUB of the base register with the
+  // writeback.
+  if (isThumb1 && Writeback && !BaseKill) return false;
+
   MachineInstrBuilder MIB;
 
   if (Writeback) {
@@ -524,12 +441,6 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
     // Thumb1: we might need to set base writeback when building the MI.
     MIB.addReg(Base, getDefRegState(true))
        .addReg(Base, getKillRegState(BaseKill));
-
-    // The base isn't dead after a merged instruction with writeback. Update
-    // future uses of the base with the added offset (if possible), or reset
-    // the base register as necessary.
-    if (!BaseKill)
-      UpdateBaseRegUses(MBB, MBBI, dl, Base, NumRegs, Pred, PredReg);
   } else {
     // No writeback, simply build the MachineInstr.
     MIB = BuildMI(MBB, MBBI, dl, TII->get(Opcode));
@@ -721,7 +632,7 @@ ARMLoadStoreOpt::MergeLDR_STR(MachineBasicBlock &MBB, unsigned SIndex,
   unsigned PRegNum = PMO.isUndef() ? UINT_MAX : TRI->getEncodingValue(PReg);
   unsigned Count = 1;
   unsigned Limit = ~0U;
-
+  bool BaseKill = false;
   // vldm / vstm limit are 32 for S variants, 16 for D variants.
 
   switch (Opcode) {
@@ -760,18 +671,24 @@ ARMLoadStoreOpt::MergeLDR_STR(MachineBasicBlock &MBB, unsigned SIndex,
       ++Count;
     } else {
       // Can't merge this in. Try merge the earlier ones first.
-      MergeOpsUpdate(MBB, MemOps, SIndex, i, insertAfter, SOffset,
-                     Base, false, Opcode, Pred, PredReg, Scratch, dl, Merges);
+      // We need to compute BaseKill here because the MemOps may have been
+      // reordered.
+      BaseKill = Loc->killsRegister(Base);
+
+      MergeOpsUpdate(MBB, MemOps, SIndex, i, insertAfter, SOffset, Base,
+                     BaseKill, Opcode, Pred, PredReg, Scratch, dl, Merges);
       MergeLDR_STR(MBB, i, Base, Opcode, Size, Pred, PredReg, Scratch,
                    MemOps, Merges);
       return;
     }
 
-    if (MemOps[i].Position > MemOps[insertAfter].Position)
+    if (MemOps[i].Position > MemOps[insertAfter].Position) {
       insertAfter = i;
+      Loc = MemOps[i].MBBI;
+    }
   }
 
-  bool BaseKill = Loc->findRegisterUseOperandIdx(Base, true) != -1;
+  BaseKill =  Loc->killsRegister(Base);
   MergeOpsUpdate(MBB, MemOps, SIndex, MemOps.size(), insertAfter, SOffset,
                  Base, BaseKill, Opcode, Pred, PredReg, Scratch, dl, Merges);
 }
@@ -1734,12 +1651,6 @@ bool ARMLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
   isThumb2 = AFI->isThumb2Function();
   isThumb1 = AFI->isThumbFunction() && !isThumb2;
 
-  // FIXME: Temporarily disabling for Thumb-1 due to miscompiles
-  if (isThumb1) {
-    delete RS;
-    return false;
-  }
-
   bool Modified = false;
   for (MachineFunction::iterator MFI = Fn.begin(), E = Fn.end(); MFI != E;
        ++MFI) {
@@ -1811,7 +1722,7 @@ bool ARMPreAllocLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
 static bool IsSafeAndProfitableToMove(bool isLd, unsigned Base,
                                       MachineBasicBlock::iterator I,
                                       MachineBasicBlock::iterator E,
-                                      SmallPtrSet<MachineInstr*, 4> &MemOps,
+                                      SmallPtrSetImpl<MachineInstr*> &MemOps,
                                       SmallSet<unsigned, 4> &MemRegs,
                                       const TargetRegisterInfo *TRI) {
   // Are there stores / loads / calls between them?

@@ -2,7 +2,7 @@
 ; situations
 
 ; RUN: llvm-as < %s | llvm-dis | FileCheck %s
-; RUN: verify-uselistorder %s -preserve-bc-use-list-order
+; RUN: verify-uselistorder %s
 
 ; Even give it a datalayout, to tempt folding as much as possible.
 target datalayout = "p:32:32"
@@ -25,3 +25,15 @@ target datalayout = "p:32:32"
 
 ; CHECK: @E = global i64 addrspace(1)* addrspacecast (i64* @A to i64 addrspace(1)*)
 @E = global i64 addrspace(1)* addrspacecast(i64* @A to i64 addrspace(1)*)
+
+; Don't add an inbounds on @weak.gep, since @weak may be null.
+; CHECK: @weak.gep = global i32* getelementptr (i32* @weak, i32 1)
+@weak.gep = global i32* getelementptr (i32* @weak, i32 1)
+@weak = extern_weak global i32
+
+; Don't add an inbounds on @glob.a3, since it's not inbounds.
+; CHECK: @glob.a3 = alias getelementptr (i32* @glob.a2, i32 1)
+@glob = global i32 0
+@glob.a3 = alias getelementptr (i32* @glob.a2, i32 1)
+@glob.a2 = alias getelementptr (i32* @glob.a1, i32 1)
+@glob.a1 = alias i32* @glob

@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef PPC_TARGETMACHINE_H
-#define PPC_TARGETMACHINE_H
+#ifndef LLVM_LIB_TARGET_POWERPC_PPCTARGETMACHINE_H
+#define LLVM_LIB_TARGET_POWERPC_PPCTARGETMACHINE_H
 
 #include "PPCInstrInfo.h"
 #include "PPCSubtarget.h"
@@ -30,7 +30,7 @@ public:
   PPCTargetMachine(const Target &T, StringRef TT,
                    StringRef CPU, StringRef FS, const TargetOptions &Options,
                    Reloc::Model RM, CodeModel::Model CM,
-                   CodeGenOpt::Level OL, bool is64Bit);
+                   CodeGenOpt::Level OL);
 
   const PPCSubtarget *getSubtargetImpl() const override { return &Subtarget; }
 

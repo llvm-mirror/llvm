@@ -513,7 +513,7 @@ unsigned ARMFastISel::ARMMaterializeFP(const ConstantFP *CFP, MVT VT) {
 unsigned ARMFastISel::ARMMaterializeInt(const Constant *C, MVT VT) {
 
   if (VT != MVT::i32 && VT != MVT::i16 && VT != MVT::i8 && VT != MVT::i1)
-    return false;
+    return 0;
 
   // If we can do this in a single instruction without a constant pool entry
   // do so now.
@@ -536,7 +536,9 @@ unsigned ARMFastISel::ARMMaterializeInt(const Constant *C, MVT VT) {
       (ARM_AM::getSOImmVal(Imm) != -1);
     if (UseImm) {
       unsigned Opc = isThumb2 ? ARM::t2MVNi : ARM::MVNi;
-      unsigned ImmReg = createResultReg(TLI.getRegClassFor(MVT::i32));
+      const TargetRegisterClass *RC = isThumb2 ? &ARM::rGPRRegClass :
+                                                 &ARM::GPRRegClass;
+      unsigned ImmReg = createResultReg(RC);
       AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
                               TII.get(Opc), ImmReg)
                       .addImm(Imm));
@@ -544,11 +546,16 @@ unsigned ARMFastISel::ARMMaterializeInt(const Constant *C, MVT VT) {
     }
   }
 
+  unsigned ResultReg = 0;
+  if (Subtarget->useMovt(*FuncInfo.MF))
+    ResultReg = FastEmit_i(VT, VT, ISD::Constant, CI->getZExtValue());
+
+  if (ResultReg)
+    return ResultReg;
+
   // Load from constant pool.  For now 32-bit only.
   if (VT != MVT::i32)
-    return false;
-
-  unsigned DestReg = createResultReg(TLI.getRegClassFor(VT));
+    return 0;
 
   // MachineConstantPool wants an explicit alignment.
   unsigned Align = DL.getPrefTypeAlignment(C->getType());
@@ -557,21 +564,20 @@ unsigned ARMFastISel::ARMMaterializeInt(const Constant *C, MVT VT) {
     Align = DL.getTypeAllocSize(C->getType());
   }
   unsigned Idx = MCP.getConstantPoolIndex(C, Align);
-
+  ResultReg = createResultReg(TLI.getRegClassFor(VT));
   if (isThumb2)
     AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-                            TII.get(ARM::t2LDRpci), DestReg)
-                    .addConstantPoolIndex(Idx));
+                            TII.get(ARM::t2LDRpci), ResultReg)
+                      .addConstantPoolIndex(Idx));
   else {
     // The extra immediate is for addrmode2.
-    DestReg = constrainOperandRegClass(TII.get(ARM::LDRcp), DestReg, 0);
+    ResultReg = constrainOperandRegClass(TII.get(ARM::LDRcp), ResultReg, 0);
     AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-                            TII.get(ARM::LDRcp), DestReg)
-                    .addConstantPoolIndex(Idx)
-                    .addImm(0));
+                            TII.get(ARM::LDRcp), ResultReg)
+                      .addConstantPoolIndex(Idx)
+                      .addImm(0));
   }
-
-  return DestReg;
+  return ResultReg;
 }
 
 unsigned ARMFastISel::ARMMaterializeGV(const GlobalValue *GV, MVT VT) {

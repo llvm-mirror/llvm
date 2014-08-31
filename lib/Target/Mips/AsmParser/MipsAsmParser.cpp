@@ -82,6 +82,10 @@ class MipsAsmParser : public MCTargetAsmParser {
   MCSubtargetInfo &STI;
   MCAsmParser &Parser;
   MipsAssemblerOptions Options;
+  MCSymbol *CurrentFn; // Pointer to the function being parsed. It may be a
+                       // nullptr, which indicates that no function is currently
+                       // selected. This usually happens after an '.end func'
+                       // directive.
 
 #define GET_ASSEMBLER_HEADER
 #include "MipsGenAsmMatcher.inc"
@@ -90,7 +94,7 @@ class MipsAsmParser : public MCTargetAsmParser {
 
   bool MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                OperandVector &Operands, MCStreamer &Out,
-                               unsigned &ErrorInfo,
+                               uint64_t &ErrorInfo,
                                bool MatchingInlineAsm) override;
 
   /// Parse a register as used in CFI directives
@@ -144,6 +148,9 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool expandLoadAddressReg(MCInst &Inst, SMLoc IDLoc,
                             SmallVectorImpl<MCInst> &Instructions);
 
+  void expandLoadAddressSym(MCInst &Inst, SMLoc IDLoc,
+                            SmallVectorImpl<MCInst> &Instructions);
+
   void expandMemInst(MCInst &Inst, SMLoc IDLoc,
                      SmallVectorImpl<MCInst> &Instructions, bool isLoad,
                      bool isImmOpnd);
@@ -156,6 +163,7 @@ class MipsAsmParser : public MCTargetAsmParser {
   const MCExpr *evaluateRelocExpr(const MCExpr *Expr, StringRef RelocStr);
 
   bool isEvaluated(const MCExpr *Expr);
+  bool parseSetArchDirective();
   bool parseSetFeature(uint64_t Feature);
   bool parseDirectiveCPLoad(SMLoc Loc);
   bool parseDirectiveCPSetup();
@@ -285,6 +293,8 @@ public:
 
     if (!isABI_O32() && !useOddSPReg() != 0)
       report_fatal_error("-mno-odd-spreg requires the O32 ABI");
+
+    CurrentFn = nullptr;
   }
 
   MCAsmParser &getParser() const { return Parser; }
@@ -1097,8 +1107,8 @@ bool MipsAsmParser::expandInstruction(MCInst &Inst, SMLoc IDLoc,
 }
 
 namespace {
-template <int Shift, bool PerformShift>
-void createShiftOr(int64_t Value, unsigned RegNo, SMLoc IDLoc,
+template <bool PerformShift>
+void createShiftOr(MCOperand Operand, unsigned RegNo, SMLoc IDLoc,
                    SmallVectorImpl<MCInst> &Instructions) {
   MCInst tmpInst;
   if (PerformShift) {
@@ -1113,10 +1123,17 @@ void createShiftOr(int64_t Value, unsigned RegNo, SMLoc IDLoc,
   tmpInst.setOpcode(Mips::ORi);
   tmpInst.addOperand(MCOperand::CreateReg(RegNo));
   tmpInst.addOperand(MCOperand::CreateReg(RegNo));
-  tmpInst.addOperand(
-      MCOperand::CreateImm(((Value & (0xffffLL << Shift)) >> Shift)));
+  tmpInst.addOperand(Operand);
   tmpInst.setLoc(IDLoc);
   Instructions.push_back(tmpInst);
+}
+
+template <int Shift, bool PerformShift>
+void createShiftOr(int64_t Value, unsigned RegNo, SMLoc IDLoc,
+                   SmallVectorImpl<MCInst> &Instructions) {
+  createShiftOr<PerformShift>(
+      MCOperand::CreateImm(((Value & (0xffffLL << Shift)) >> Shift)), RegNo,
+      IDLoc, Instructions);
 }
 }
 
@@ -1222,7 +1239,12 @@ MipsAsmParser::expandLoadAddressReg(MCInst &Inst, SMLoc IDLoc,
                                     SmallVectorImpl<MCInst> &Instructions) {
   MCInst tmpInst;
   const MCOperand &ImmOp = Inst.getOperand(2);
-  assert(ImmOp.isImm() && "expected immediate operand kind");
+  assert((ImmOp.isImm() || ImmOp.isExpr()) &&
+         "expected immediate operand kind");
+  if (!ImmOp.isImm()) {
+    expandLoadAddressSym(Inst, IDLoc, Instructions);
+    return false;
+  }
   const MCOperand &SrcRegOp = Inst.getOperand(1);
   assert(SrcRegOp.isReg() && "expected register operand kind");
   const MCOperand &DstRegOp = Inst.getOperand(0);
@@ -1266,7 +1288,12 @@ MipsAsmParser::expandLoadAddressImm(MCInst &Inst, SMLoc IDLoc,
                                     SmallVectorImpl<MCInst> &Instructions) {
   MCInst tmpInst;
   const MCOperand &ImmOp = Inst.getOperand(1);
-  assert(ImmOp.isImm() && "expected immediate operand kind");
+  assert((ImmOp.isImm() || ImmOp.isExpr()) &&
+         "expected immediate operand kind");
+  if (!ImmOp.isImm()) {
+    expandLoadAddressSym(Inst, IDLoc, Instructions);
+    return false;
+  }
   const MCOperand &RegOp = Inst.getOperand(0);
   assert(RegOp.isReg() && "expected register operand kind");
   int ImmValue = ImmOp.getImm();
@@ -1294,6 +1321,71 @@ MipsAsmParser::expandLoadAddressImm(MCInst &Inst, SMLoc IDLoc,
     Instructions.push_back(tmpInst);
   }
   return false;
+}
+
+void
+MipsAsmParser::expandLoadAddressSym(MCInst &Inst, SMLoc IDLoc,
+                                    SmallVectorImpl<MCInst> &Instructions) {
+  // FIXME: If we do have a valid at register to use, we should generate a
+  // slightly shorter sequence here.
+  MCInst tmpInst;
+  int ExprOperandNo = 1;
+  // Sometimes the assembly parser will get the immediate expression as
+  // a $zero + an immediate.
+  if (Inst.getNumOperands() == 3) {
+    assert(Inst.getOperand(1).getReg() ==
+           (isGP64bit() ? Mips::ZERO_64 : Mips::ZERO));
+    ExprOperandNo = 2;
+  }
+  const MCOperand &SymOp = Inst.getOperand(ExprOperandNo);
+  assert(SymOp.isExpr() && "expected symbol operand kind");
+  const MCOperand &RegOp = Inst.getOperand(0);
+  unsigned RegNo = RegOp.getReg();
+  const MCSymbolRefExpr *Symbol = cast<MCSymbolRefExpr>(SymOp.getExpr());
+  const MCSymbolRefExpr *HiExpr =
+      MCSymbolRefExpr::Create(Symbol->getSymbol().getName(),
+                              MCSymbolRefExpr::VK_Mips_ABS_HI, getContext());
+  const MCSymbolRefExpr *LoExpr =
+      MCSymbolRefExpr::Create(Symbol->getSymbol().getName(),
+                              MCSymbolRefExpr::VK_Mips_ABS_LO, getContext());
+  if (isGP64bit()) {
+    // If it's a 64-bit architecture, expand to:
+    // la d,sym => lui  d,highest(sym)
+    //             ori  d,d,higher(sym)
+    //             dsll d,d,16
+    //             ori  d,d,hi16(sym)
+    //             dsll d,d,16
+    //             ori  d,d,lo16(sym)
+    const MCSymbolRefExpr *HighestExpr =
+        MCSymbolRefExpr::Create(Symbol->getSymbol().getName(),
+                                MCSymbolRefExpr::VK_Mips_HIGHEST, getContext());
+    const MCSymbolRefExpr *HigherExpr =
+        MCSymbolRefExpr::Create(Symbol->getSymbol().getName(),
+                                MCSymbolRefExpr::VK_Mips_HIGHER, getContext());
+
+    tmpInst.setOpcode(Mips::LUi);
+    tmpInst.addOperand(MCOperand::CreateReg(RegNo));
+    tmpInst.addOperand(MCOperand::CreateExpr(HighestExpr));
+    Instructions.push_back(tmpInst);
+
+    createShiftOr<false>(MCOperand::CreateExpr(HigherExpr), RegNo, SMLoc(),
+                         Instructions);
+    createShiftOr<true>(MCOperand::CreateExpr(HiExpr), RegNo, SMLoc(),
+                        Instructions);
+    createShiftOr<true>(MCOperand::CreateExpr(LoExpr), RegNo, SMLoc(),
+                        Instructions);
+  } else {
+    // Otherwise, expand to:
+    // la d,sym => lui  d,hi16(sym)
+    //             ori  d,d,lo16(sym)
+    tmpInst.setOpcode(Mips::LUi);
+    tmpInst.addOperand(MCOperand::CreateReg(RegNo));
+    tmpInst.addOperand(MCOperand::CreateExpr(HiExpr));
+    Instructions.push_back(tmpInst);
+
+    createShiftOr<false>(MCOperand::CreateExpr(LoExpr), RegNo, SMLoc(),
+                         Instructions);
+  }
 }
 
 void MipsAsmParser::expandMemInst(MCInst &Inst, SMLoc IDLoc,
@@ -1427,7 +1519,7 @@ unsigned MipsAsmParser::checkTargetMatchPredicate(MCInst &Inst) {
 bool MipsAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                             OperandVector &Operands,
                                             MCStreamer &Out,
-                                            unsigned &ErrorInfo,
+                                            uint64_t &ErrorInfo,
                                             bool MatchingInlineAsm) {
 
   MCInst Inst;
@@ -1450,7 +1542,7 @@ bool MipsAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return true;
   case Match_InvalidOperand: {
     SMLoc ErrorLoc = IDLoc;
-    if (ErrorInfo != ~0U) {
+    if (ErrorInfo != ~0ULL) {
       if (ErrorInfo >= Operands.size())
         return Error(IDLoc, "too few operands for instruction");
 
@@ -2312,9 +2404,10 @@ bool MipsAsmParser::ParseBracketSuffix(StringRef Name,
 bool MipsAsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                      SMLoc NameLoc, OperandVector &Operands) {
   DEBUG(dbgs() << "ParseInstruction\n");
-  // We have reached first instruction, module directive after
-  // this is forbidden.
-  getTargetStreamer().setCanHaveModuleDir(false);
+
+  // We have reached first instruction, module directive are now forbidden.
+  getTargetStreamer().forbidModuleDirective();
+
   // Check if we have valid mnemonic
   if (!mnemonicIsValid(Name, 0)) {
     Parser.eatToEndOfStatement();
@@ -2575,6 +2668,41 @@ bool MipsAsmParser::parseSetAssignment() {
   return false;
 }
 
+bool MipsAsmParser::parseSetArchDirective() {
+  Parser.Lex();
+  if (getLexer().isNot(AsmToken::Equal))
+    return reportParseError("unexpected token, expected equals sign");
+
+  Parser.Lex();
+  StringRef Arch;
+  if (Parser.parseIdentifier(Arch))
+    return reportParseError("expected arch identifier");
+
+  StringRef ArchFeatureName =
+      StringSwitch<StringRef>(Arch)
+          .Case("mips1", "mips1")
+          .Case("mips2", "mips2")
+          .Case("mips3", "mips3")
+          .Case("mips4", "mips4")
+          .Case("mips5", "mips5")
+          .Case("mips32", "mips32")
+          .Case("mips32r2", "mips32r2")
+          .Case("mips32r6", "mips32r6")
+          .Case("mips64", "mips64")
+          .Case("mips64r2", "mips64r2")
+          .Case("mips64r6", "mips64r6")
+          .Case("cnmips", "cnmips")
+          .Case("r4000", "mips3") // This is an implementation of Mips3.
+          .Default("");
+
+  if (ArchFeatureName.empty())
+    return reportParseError("unsupported architecture");
+
+  selectArch(ArchFeatureName);
+  getTargetStreamer().emitDirectiveSetArch(Arch);
+  return false;
+}
+
 bool MipsAsmParser::parseSetFeature(uint64_t Feature) {
   Parser.Lex();
   if (getLexer().isNot(AsmToken::EndOfStatement))
@@ -2764,6 +2892,8 @@ bool MipsAsmParser::parseDirectiveSet() {
     return parseSetNoAtDirective();
   } else if (Tok.getString() == "at") {
     return parseSetAtDirective();
+  } else if (Tok.getString() == "arch") {
+    return parseSetArchDirective();
   } else if (Tok.getString() == "fp") {
     return parseSetFpDirective();
   } else if (Tok.getString() == "reorder") {
@@ -2926,7 +3056,7 @@ bool MipsAsmParser::parseDirectiveModule() {
   MCAsmLexer &Lexer = getLexer();
   SMLoc L = Lexer.getLoc();
 
-  if (!getTargetStreamer().getCanHaveModuleDir()) {
+  if (!getTargetStreamer().isModuleDirectiveAllowed()) {
     // TODO : get a better message.
     reportParseError(".module directive must appear before any code");
     return false;
@@ -3055,22 +3185,151 @@ bool MipsAsmParser::ParseDirective(AsmToken DirectiveID) {
     parseDataDirective(8, DirectiveID.getLoc());
     return false;
   }
-
   if (IDVal == ".ent") {
-    // Ignore this directive for now.
-    Parser.Lex();
+    StringRef SymbolName;
+
+    if (Parser.parseIdentifier(SymbolName)) {
+      reportParseError("expected identifier after .ent");
+      return false;
+    }
+
+    // There's an undocumented extension that allows an integer to
+    // follow the name of the procedure which AFAICS is ignored by GAS.
+    // Example: .ent foo,2
+    if (getLexer().isNot(AsmToken::EndOfStatement)) {
+      if (getLexer().isNot(AsmToken::Comma)) {
+        // Even though we accept this undocumented extension for compatibility
+        // reasons, the additional integer argument does not actually change
+        // the behaviour of the '.ent' directive, so we would like to discourage
+        // its use. We do this by not referring to the extended version in
+        // error messages which are not directly related to its use.
+        reportParseError("unexpected token, expected end of statement");
+        return false;
+      }
+      Parser.Lex(); // Eat the comma.
+      const MCExpr *DummyNumber;
+      int64_t DummyNumberVal;
+      // If the user was explicitly trying to use the extended version,
+      // we still give helpful extension-related error messages.
+      if (Parser.parseExpression(DummyNumber)) {
+        reportParseError("expected number after comma");
+        return false;
+      }
+      if (!DummyNumber->EvaluateAsAbsolute(DummyNumberVal)) {
+        reportParseError("expected an absolute expression after comma");
+        return false;
+      }
+    }
+
+    // If this is not the end of the statement, report an error.
+    if (getLexer().isNot(AsmToken::EndOfStatement)) {
+      reportParseError("unexpected token, expected end of statement");
+      return false;
+    }
+
+    MCSymbol *Sym = getContext().GetOrCreateSymbol(SymbolName);
+
+    getTargetStreamer().emitDirectiveEnt(*Sym);
+    CurrentFn = Sym;
     return false;
   }
 
   if (IDVal == ".end") {
-    // Ignore this directive for now.
-    Parser.Lex();
+    StringRef SymbolName;
+
+    if (Parser.parseIdentifier(SymbolName)) {
+      reportParseError("expected identifier after .end");
+      return false;
+    }
+
+    if (getLexer().isNot(AsmToken::EndOfStatement)) {
+      reportParseError("unexpected token, expected end of statement");
+      return false;
+    }
+
+    if (CurrentFn == nullptr) {
+      reportParseError(".end used without .ent");
+      return false;
+    }
+
+    if ((SymbolName != CurrentFn->getName())) {
+      reportParseError(".end symbol does not match .ent symbol");
+      return false;
+    }
+
+    getTargetStreamer().emitDirectiveEnd(SymbolName);
+    CurrentFn = nullptr;
     return false;
   }
 
   if (IDVal == ".frame") {
-    // Ignore this directive for now.
-    Parser.eatToEndOfStatement();
+    // .frame $stack_reg, frame_size_in_bytes, $return_reg
+    SmallVector<std::unique_ptr<MCParsedAsmOperand>, 1> TmpReg;
+    OperandMatchResultTy ResTy = ParseAnyRegister(TmpReg);
+    if (ResTy == MatchOperand_NoMatch || ResTy == MatchOperand_ParseFail) {
+      reportParseError("expected stack register");
+      return false;
+    }
+
+    MipsOperand &StackRegOpnd = static_cast<MipsOperand &>(*TmpReg[0]);
+    if (!StackRegOpnd.isGPRAsmReg()) {
+      reportParseError(StackRegOpnd.getStartLoc(),
+                       "expected general purpose register");
+      return false;
+    }
+    unsigned StackReg = StackRegOpnd.getGPR32Reg();
+
+    if (Parser.getTok().is(AsmToken::Comma))
+      Parser.Lex();
+    else {
+      reportParseError("unexpected token, expected comma");
+      return false;
+    }
+
+    // Parse the frame size.
+    const MCExpr *FrameSize;
+    int64_t FrameSizeVal;
+
+    if (Parser.parseExpression(FrameSize)) {
+      reportParseError("expected frame size value");
+      return false;
+    }
+
+    if (!FrameSize->EvaluateAsAbsolute(FrameSizeVal)) {
+      reportParseError("frame size not an absolute expression");
+      return false;
+    }
+
+    if (Parser.getTok().is(AsmToken::Comma))
+      Parser.Lex();
+    else {
+      reportParseError("unexpected token, expected comma");
+      return false;
+    }
+
+    // Parse the return register.
+    TmpReg.clear();
+    ResTy = ParseAnyRegister(TmpReg);
+    if (ResTy == MatchOperand_NoMatch || ResTy == MatchOperand_ParseFail) {
+      reportParseError("expected return register");
+      return false;
+    }
+
+    MipsOperand &ReturnRegOpnd = static_cast<MipsOperand &>(*TmpReg[0]);
+    if (!ReturnRegOpnd.isGPRAsmReg()) {
+      reportParseError(ReturnRegOpnd.getStartLoc(),
+                       "expected general purpose register");
+      return false;
+    }
+
+    // If this is not the end of the statement, report an error.
+    if (getLexer().isNot(AsmToken::EndOfStatement)) {
+      reportParseError("unexpected token, expected end of statement");
+      return false;
+    }
+
+    getTargetStreamer().emitFrame(StackReg, FrameSizeVal,
+                                  ReturnRegOpnd.getGPR32Reg());
     return false;
   }
 
@@ -3078,15 +3337,61 @@ bool MipsAsmParser::ParseDirective(AsmToken DirectiveID) {
     return parseDirectiveSet();
   }
 
-  if (IDVal == ".fmask") {
-    // Ignore this directive for now.
-    Parser.eatToEndOfStatement();
-    return false;
-  }
+  if (IDVal == ".mask" || IDVal == ".fmask") {
+    // .mask bitmask, frame_offset
+    // bitmask: One bit for each register used.
+    // frame_offset: Offset from Canonical Frame Address ($sp on entry) where
+    //               first register is expected to be saved.
+    // Examples:
+    //   .mask 0x80000000, -4
+    //   .fmask 0x80000000, -4
+    //
 
-  if (IDVal == ".mask") {
-    // Ignore this directive for now.
-    Parser.eatToEndOfStatement();
+    // Parse the bitmask
+    const MCExpr *BitMask;
+    int64_t BitMaskVal;
+
+    if (Parser.parseExpression(BitMask)) {
+      reportParseError("expected bitmask value");
+      return false;
+    }
+
+    if (!BitMask->EvaluateAsAbsolute(BitMaskVal)) {
+      reportParseError("bitmask not an absolute expression");
+      return false;
+    }
+
+    if (Parser.getTok().is(AsmToken::Comma))
+      Parser.Lex();
+    else {
+      reportParseError("unexpected token, expected comma");
+      return false;
+    }
+
+    // Parse the frame_offset
+    const MCExpr *FrameOffset;
+    int64_t FrameOffsetVal;
+
+    if (Parser.parseExpression(FrameOffset)) {
+      reportParseError("expected frame offset value");
+      return false;
+    }
+
+    if (!FrameOffset->EvaluateAsAbsolute(FrameOffsetVal)) {
+      reportParseError("frame offset not an absolute expression");
+      return false;
+    }
+
+    // If this is not the end of the statement, report an error.
+    if (getLexer().isNot(AsmToken::EndOfStatement)) {
+      reportParseError("unexpected token, expected end of statement");
+      return false;
+    }
+
+    if (IDVal == ".mask")
+      getTargetStreamer().emitMask(BitMaskVal, FrameOffsetVal);
+    else
+      getTargetStreamer().emitFMask(BitMaskVal, FrameOffsetVal);
     return false;
   }
 

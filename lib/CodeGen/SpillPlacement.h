@@ -24,8 +24,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CODEGEN_SPILLPLACEMENT_H
-#define LLVM_CODEGEN_SPILLPLACEMENT_H
+#ifndef LLVM_LIB_CODEGEN_SPILLPLACEMENT_H
+#define LLVM_LIB_CODEGEN_SPILLPLACEMENT_H
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -40,7 +40,7 @@ class MachineBasicBlock;
 class MachineLoopInfo;
 class MachineBlockFrequencyInfo;
 
-class SpillPlacement  : public MachineFunctionPass {
+class SpillPlacement : public MachineFunctionPass {
   struct Node;
   const MachineFunction *MF;
   const EdgeBundles *bundles;
@@ -60,7 +60,7 @@ class SpillPlacement  : public MachineFunctionPass {
   SmallVector<unsigned, 8> RecentPositive;
 
   // Block frequencies are computed once. Indexed by block number.
-  SmallVector<BlockFrequency, 4> BlockFrequencies;
+  SmallVector<BlockFrequency, 8> BlockFrequencies;
 
 public:
   static char ID; // Pass identification, replacement for typeid.

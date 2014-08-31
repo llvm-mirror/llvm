@@ -198,29 +198,24 @@ unsigned FastISel::getRegForValue(const Value *V) {
   return Reg;
 }
 
-/// materializeRegForValue - Helper for getRegForValue. This function is
-/// called when the value isn't already available in a register and must
-/// be materialized with new instructions.
-unsigned FastISel::materializeRegForValue(const Value *V, MVT VT) {
+unsigned FastISel::MaterializeConstant(const Value *V, MVT VT) {
   unsigned Reg = 0;
-
   if (const ConstantInt *CI = dyn_cast<ConstantInt>(V)) {
     if (CI->getValue().getActiveBits() <= 64)
       Reg = FastEmit_i(VT, VT, ISD::Constant, CI->getZExtValue());
-  } else if (isa<AllocaInst>(V)) {
+  } else if (isa<AllocaInst>(V))
     Reg = TargetMaterializeAlloca(cast<AllocaInst>(V));
-  } else if (isa<ConstantPointerNull>(V)) {
+  else if (isa<ConstantPointerNull>(V))
     // Translate this as an integer zero so that it can be
     // local-CSE'd with actual integer zeros.
     Reg =
       getRegForValue(Constant::getNullValue(DL.getIntPtrType(V->getContext())));
-  } else if (const ConstantFP *CF = dyn_cast<ConstantFP>(V)) {
-    if (CF->isNullValue()) {
+  else if (const ConstantFP *CF = dyn_cast<ConstantFP>(V)) {
+    if (CF->isNullValue())
       Reg = TargetMaterializeFloatZero(CF);
-    } else {
+    else
       // Try to emit the constant directly.
       Reg = FastEmit_f(VT, VT, ISD::ConstantFP, CF);
-    }
 
     if (!Reg) {
       // Try to emit the constant by using an integer constant with a cast.
@@ -253,15 +248,26 @@ unsigned FastISel::materializeRegForValue(const Value *V, MVT VT) {
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
             TII.get(TargetOpcode::IMPLICIT_DEF), Reg);
   }
+  return Reg;
+}
 
-  // If target-independent code couldn't handle the value, give target-specific
-  // code a try.
-  if (!Reg && isa<Constant>(V))
+/// materializeRegForValue - Helper for getRegForValue. This function is
+/// called when the value isn't already available in a register and must
+/// be materialized with new instructions.
+unsigned FastISel::materializeRegForValue(const Value *V, MVT VT) {
+  unsigned Reg = 0;
+  // Give the target-specific code a try first.
+  if (isa<Constant>(V))
     Reg = TargetMaterializeConstant(cast<Constant>(V));
+
+  // If target-specific code couldn't or didn't want to handle the value, then
+  // give target-independent code a try.
+  if (!Reg)
+    Reg = MaterializeConstant(V, VT);
 
   // Don't cache constant materializations in the general ValueMap.
   // To do so would require tracking what uses they dominate.
-  if (Reg != 0) {
+  if (Reg) {
     LocalValueMap[V] = Reg;
     LastLocalValue = MRI.getVRegDef(Reg);
   }
@@ -1693,7 +1699,6 @@ unsigned FastISel::FastEmit_ri_(MVT VT, unsigned Opcode,
     IntegerType *ITy = IntegerType::get(FuncInfo.Fn->getContext(),
                                               VT.getSizeInBits());
     MaterialReg = getRegForValue(ConstantInt::get(ITy, Imm));
-    assert (MaterialReg != 0 && "Unable to materialize imm.");
     if (MaterialReg == 0) return 0;
   }
   return FastEmit_rr(VT, VT, Opcode,
@@ -1811,8 +1816,7 @@ unsigned FastISel::FastEmitInst_ri(unsigned MachineInstOpcode,
   const MCInstrDesc &II = TII.get(MachineInstOpcode);
 
   unsigned ResultReg = createResultReg(RC);
-  RC = TII.getRegClass(II, II.getNumDefs(), &TRI, *FuncInfo.MF);
-  MRI.constrainRegClass(Op0, RC);
+  Op0 = constrainOperandRegClass(II, Op0, II.getNumDefs());
 
   if (II.getNumDefs() >= 1)
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II, ResultReg)

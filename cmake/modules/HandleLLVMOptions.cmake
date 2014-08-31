@@ -240,6 +240,7 @@ if( MSVC )
     -wd4146 # Suppress 'unary minus operator applied to unsigned type, result still unsigned'
     -wd4180 # Suppress 'qualifier applied to function type has no meaning; ignored'
     -wd4244 # Suppress ''argument' : conversion from 'type1' to 'type2', possible loss of data'
+    -wd4258 # Suppress ''var' : definition from the for loop is ignored; the definition from the enclosing scope is used'
     -wd4267 # Suppress ''var' : conversion from 'size_t' to 'type', possible loss of data'
     -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
     -wd4345 # Suppress 'behavior change: an object of POD type constructed with an initializer of the form () will be default-initialized'
@@ -287,13 +288,25 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
     add_flag_if_supported("-Wcovered-switch-default" COVERED_SWITCH_DEFAULT_FLAG)
     append_if(USE_NO_UNINITIALIZED "-Wno-uninitialized" CMAKE_CXX_FLAGS)
     append_if(USE_NO_MAYBE_UNINITIALIZED "-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
-    check_cxx_compiler_flag("-Werror -Wnon-virtual-dtor" CXX_SUPPORTS_NON_VIRTUAL_DTOR_FLAG)
-    append_if(CXX_SUPPORTS_NON_VIRTUAL_DTOR_FLAG "-Wnon-virtual-dtor" CMAKE_CXX_FLAGS)
+
+    # Check if -Wnon-virtual-dtor warns even though the class is marked final.
+    # If it does, don't add it. So it won't be added on clang 3.4 and older.
+    # This also catches cases when -Wnon-virtual-dtor isn't supported by
+    # the compiler at all.
+    set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -std=c++11 -Werror=non-virtual-dtor")
+    CHECK_CXX_SOURCE_COMPILES("class base {public: virtual void anchor();protected: ~base();};
+                               class derived final : public base { public: ~derived();};
+                               int main() { return 0; }"
+                              CXX_WONT_WARN_ON_FINAL_NONVIRTUALDTOR)
+    set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
+    append_if(CXX_WONT_WARN_ON_FINAL_NONVIRTUALDTOR
+              "-Wnon-virtual-dtor" CMAKE_CXX_FLAGS)
 
     # Check if -Wcomment is OK with an // comment ending with '\' if the next
     # line is also a // comment.
     set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
-    set(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS} -Werror -Wcomment)
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -Werror -Wcomment")
     CHECK_C_SOURCE_COMPILES("// \\\\\\n//\\nint main() {return 0;}"
                             C_WCOMMENT_ALLOWS_LINE_WRAP)
     set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})

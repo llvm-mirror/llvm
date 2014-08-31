@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef X86SUBTARGET_H
-#define X86SUBTARGET_H
+#ifndef LLVM_LIB_TARGET_X86_X86SUBTARGET_H
+#define LLVM_LIB_TARGET_X86_X86SUBTARGET_H
 
 #include "X86FrameLowering.h"
 #include "X86ISelLowering.h"
@@ -148,6 +148,9 @@ protected:
   /// HasRDSEED - Processor has RDSEED instructions.
   bool HasRDSEED;
 
+  /// HasSMAP - Processor has SMAP instructions.
+  bool HasSMAP;
+
   /// IsBTMemSlow - True if BT (bit test) of memory instructions are slow.
   bool IsBTMemSlow;
 
@@ -223,6 +226,9 @@ protected:
   InstrItineraryData InstrItins;
 
 private:
+  // Calculates type size & alignment
+  const DataLayout DL;
+
   /// StackAlignOverride - Override the stack alignment.
   unsigned StackAlignOverride;
 
@@ -235,8 +241,6 @@ private:
   /// In16BitMode - True if compiling for 16-bit, false for 32-bit or 64-bit.
   bool In16BitMode;
 
-  // Calculates type size & alignment
-  const DataLayout DL;
   X86SelectionDAGInfo TSInfo;
   // Ordering here is important. X86InstrInfo initializes X86RegisterInfo which
   // X86TargetLowering needs.
@@ -357,6 +361,7 @@ public:
   bool hasSGX() const { return HasSGX; }
   bool hasPRFCHW() const { return HasPRFCHW; }
   bool hasRDSEED() const { return HasRDSEED; }
+  bool hasSMAP() const { return HasSMAP; }
   bool isBTMemSlow() const { return IsBTMemSlow; }
   bool isSHLDSlow() const { return IsSHLDSlow; }
   bool isUnalignedMemAccessFast() const { return IsUAMemFast; }

@@ -535,8 +535,8 @@ TEST_F(FileSystemTest, Magic) {
                                                                      ++i) {
     SmallString<128> file_pathname(TestDirectory);
     path::append(file_pathname, i->filename);
-    std::string ErrMsg;
-    raw_fd_ostream file(file_pathname.c_str(), ErrMsg, sys::fs::F_None);
+    std::error_code EC;
+    raw_fd_ostream file(file_pathname, EC, sys::fs::F_None);
     ASSERT_FALSE(file.has_error());
     StringRef magic(i->magic_str, i->magic_str_len);
     file << magic;
@@ -549,27 +549,27 @@ TEST_F(FileSystemTest, Magic) {
 #ifdef LLVM_ON_WIN32
 TEST_F(FileSystemTest, CarriageReturn) {
   SmallString<128> FilePathname(TestDirectory);
-  std::string ErrMsg;
+  std::error_code EC;
   path::append(FilePathname, "test");
 
   {
-    raw_fd_ostream File(FilePathname.c_str(), ErrMsg, sys::fs::F_Text);
-    EXPECT_EQ(ErrMsg, "");
+    raw_fd_ostream File(FilePathname, EC, sys::fs::F_Text);
+    ASSERT_NO_ERROR(EC);
     File << '\n';
   }
   {
-    auto Buf = MemoryBuffer::getFile(FilePathname.c_str());
+    auto Buf = MemoryBuffer::getFile(FilePathname.str());
     EXPECT_TRUE((bool)Buf);
     EXPECT_EQ(Buf.get()->getBuffer(), "\r\n");
   }
 
   {
-    raw_fd_ostream File(FilePathname.c_str(), ErrMsg, sys::fs::F_None);
-    EXPECT_EQ(ErrMsg, "");
+    raw_fd_ostream File(FilePathname, EC, sys::fs::F_None);
+    ASSERT_NO_ERROR(EC);
     File << '\n';
   }
   {
-    auto Buf = MemoryBuffer::getFile(FilePathname.c_str());
+    auto Buf = MemoryBuffer::getFile(FilePathname.str());
     EXPECT_TRUE((bool)Buf);
     EXPECT_EQ(Buf.get()->getBuffer(), "\n");
   }
@@ -640,22 +640,22 @@ TEST(Support, NormalizePath) {
   SmallString<64> Path5("\\a");
   SmallString<64> Path6("a\\");
 
-  ASSERT_NO_ERROR(fs::normalize_separators(Path1));
+  path::native(Path1);
   EXPECT_PATH_IS(Path1, "a", "a");
 
-  ASSERT_NO_ERROR(fs::normalize_separators(Path2));
-  EXPECT_PATH_IS(Path2, "a/b", "a/b");
+  path::native(Path2);
+  EXPECT_PATH_IS(Path2, "a\\b", "a/b");
 
-  ASSERT_NO_ERROR(fs::normalize_separators(Path3));
+  path::native(Path3);
   EXPECT_PATH_IS(Path3, "a\\b", "a/b");
 
-  ASSERT_NO_ERROR(fs::normalize_separators(Path4));
+  path::native(Path4);
   EXPECT_PATH_IS(Path4, "a\\\\b", "a\\\\b");
 
-  ASSERT_NO_ERROR(fs::normalize_separators(Path5));
+  path::native(Path5);
   EXPECT_PATH_IS(Path5, "\\a", "/a");
 
-  ASSERT_NO_ERROR(fs::normalize_separators(Path6));
+  path::native(Path6);
   EXPECT_PATH_IS(Path6, "a\\", "a/");
 
 #undef EXPECT_PATH_IS

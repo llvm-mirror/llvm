@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef TARGET_AArch64_H
-#define TARGET_AArch64_H
+#ifndef LLVM_LIB_TARGET_AARCH64_AARCH64_H
+#define LLVM_LIB_TARGET_AARCH64_AARCH64_H
 
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "Utils/AArch64BaseInfo.h"
@@ -37,6 +37,7 @@ FunctionPass *createAArch64ExpandPseudoPass();
 FunctionPass *createAArch64LoadStoreOptimizationPass();
 ModulePass *createAArch64PromoteConstantPass();
 FunctionPass *createAArch64AddressTypePromotionPass();
+FunctionPass *createAArch64A57FPLoadBalancing();
 /// \brief Creates an ARM-specific Target Transformation Info pass.
 ImmutablePass *
 createAArch64TargetTransformInfoPass(const AArch64TargetMachine *TM);

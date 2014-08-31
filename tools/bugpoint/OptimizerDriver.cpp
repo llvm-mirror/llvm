@@ -66,15 +66,15 @@ static bool writeProgramToFileAux(tool_output_file &Out, const Module *M) {
 
 bool BugDriver::writeProgramToFile(const std::string &Filename, int FD,
                                    const Module *M) const {
-  tool_output_file Out(Filename.c_str(), FD);
+  tool_output_file Out(Filename, FD);
   return writeProgramToFileAux(Out, M);
 }
 
 bool BugDriver::writeProgramToFile(const std::string &Filename,
                                    const Module *M) const {
-  std::string ErrInfo;
-  tool_output_file Out(Filename.c_str(), ErrInfo, sys::fs::F_None);
-  if (ErrInfo.empty())
+  std::error_code EC;
+  tool_output_file Out(Filename, EC, sys::fs::F_None);
+  if (!EC)
     return writeProgramToFileAux(Out, M);
   return true;
 }
@@ -149,7 +149,7 @@ bool BugDriver::runPasses(Module *Program,
     return 1;
   }
 
-  tool_output_file InFile(InputFilename.c_str(), InputFD);
+  tool_output_file InFile(InputFilename, InputFD);
 
   WriteBitcodeToFile(Program, InFile.os());
   InFile.os().close();
@@ -247,13 +247,10 @@ bool BugDriver::runPasses(Module *Program,
 }
 
 
-/// runPassesOn - Carefully run the specified set of pass on the specified
-/// module, returning the transformed module on success, or a null pointer on
-/// failure.
-Module *BugDriver::runPassesOn(Module *M,
-                               const std::vector<std::string> &Passes,
-                               bool AutoDebugCrashes, unsigned NumExtraArgs,
-                               const char * const *ExtraArgs) {
+std::unique_ptr<Module>
+BugDriver::runPassesOn(Module *M, const std::vector<std::string> &Passes,
+                       bool AutoDebugCrashes, unsigned NumExtraArgs,
+                       const char *const *ExtraArgs) {
   std::string BitcodeResult;
   if (runPasses(M, Passes, BitcodeResult, false/*delete*/, true/*quiet*/,
                 NumExtraArgs, ExtraArgs)) {
@@ -267,7 +264,7 @@ Module *BugDriver::runPassesOn(Module *M,
     return nullptr;
   }
 
-  Module *Ret = ParseInputFile(BitcodeResult, Context);
+  std::unique_ptr<Module> Ret = parseInputFile(BitcodeResult, Context);
   if (!Ret) {
     errs() << getToolName() << ": Error reading bitcode file '"
            << BitcodeResult << "'!\n";

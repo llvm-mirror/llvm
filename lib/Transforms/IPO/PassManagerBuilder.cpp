@@ -17,11 +17,14 @@
 #include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/Passes.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Vectorize.h"
@@ -77,6 +80,10 @@ PassManagerBuilder::PassManagerBuilder() {
     LoopVectorize = RunLoopVectorization;
     RerollLoops = RunLoopRerolling;
     LoadCombine = RunLoadCombine;
+    DisableGVNLoadPRE = false;
+    VerifyInput = false;
+    VerifyOutput = false;
+    StripDebug = false;
 }
 
 PassManagerBuilder::~PassManagerBuilder() {
@@ -217,7 +224,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
 
   if (OptLevel > 1) {
     MPM.add(createMergedLoadStoreMotionPass()); // Merge load/stores in diamond
-    MPM.add(createGVNPass());                 // Remove redundancies
+    MPM.add(createGVNPass(DisableGVNLoadPRE));  // Remove redundancies
   }
   MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
   MPM.add(createSCCPPass());                  // Constant prop with SCCP
@@ -243,7 +250,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
       MPM.add(createInstructionCombiningPass());
       addExtensionsToPM(EP_Peephole, MPM);
       if (OptLevel > 1 && UseGVNAfterVectorization)
-        MPM.add(createGVNPass());           // Remove redundancies
+        MPM.add(createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
       else
         MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
 
@@ -282,7 +289,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
       MPM.add(createInstructionCombiningPass());
       addExtensionsToPM(EP_Peephole, MPM);
       if (OptLevel > 1 && UseGVNAfterVectorization)
-        MPM.add(createGVNPass());           // Remove redundancies
+        MPM.add(createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
       else
         MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
 
@@ -312,9 +319,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   addExtensionsToPM(EP_OptimizerLast, MPM);
 }
 
-void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
-                                                bool RunInliner,
-                                                bool DisableGVNLoadPRE) {
+void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
   // Provide AliasAnalysis services for optimizations.
   addInitialAliasAnalysisPasses(PM);
 
@@ -341,8 +346,11 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
   addExtensionsToPM(EP_Peephole, PM);
 
   // Inline small functions
-  if (RunInliner)
-    PM.add(createFunctionInliningPass());
+  bool RunInliner = Inliner;
+  if (RunInliner) {
+    PM.add(Inliner);
+    Inliner = nullptr;
+  }
 
   PM.add(createPruneEHPass());   // Remove dead EH info.
 
@@ -400,6 +408,35 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
 
   // Now that we have optimized the program, discard unreachable functions.
   PM.add(createGlobalDCEPass());
+}
+
+void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
+                                                TargetMachine *TM) {
+  if (TM) {
+    const DataLayout *DL = TM->getSubtargetImpl()->getDataLayout();
+    PM.add(new DataLayoutPass(*DL));
+    TM->addAnalysisPasses(PM);
+  }
+
+  if (LibraryInfo)
+    PM.add(new TargetLibraryInfo(*LibraryInfo));
+
+  if (VerifyInput)
+    PM.add(createVerifierPass());
+
+  if (StripDebug)
+    PM.add(createStripSymbolsPass(true));
+
+  if (VerifyInput)
+    PM.add(createDebugInfoVerifierPass());
+
+  if (OptLevel != 0)
+    addLTOOptimizationPasses(PM);
+
+  if (VerifyOutput) {
+    PM.add(createVerifierPass());
+    PM.add(createDebugInfoVerifierPass());
+  }
 }
 
 inline PassManagerBuilder *unwrap(LLVMPassManagerBuilderRef P) {
@@ -483,5 +520,11 @@ void LLVMPassManagerBuilderPopulateLTOPassManager(LLVMPassManagerBuilderRef PMB,
                                                   LLVMBool RunInliner) {
   PassManagerBuilder *Builder = unwrap(PMB);
   PassManagerBase *LPM = unwrap(PM);
-  Builder->populateLTOPassManager(*LPM, RunInliner != 0, false);
+
+  // A small backwards compatibility hack. populateLTOPassManager used to take
+  // an RunInliner option.
+  if (RunInliner && !Builder->Inliner)
+    Builder->Inliner = createFunctionInliningPass();
+
+  Builder->populateLTOPassManager(*LPM);
 }
