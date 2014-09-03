@@ -50,11 +50,13 @@ static cl::opt<bool>
 UseFusedMulOps("arm-use-mulops",
                cl::init(true), cl::Hidden);
 
+namespace {
 enum AlignMode {
   DefaultAlign,
   StrictAlign,
   NoStrictAlign
 };
+}
 
 static cl::opt<AlignMode>
 Align(cl::desc("Load/store alignment support"),
@@ -426,7 +428,7 @@ bool ARMSubtarget::enablePostMachineScheduler() const {
   return (!isThumb() || hasThumb2());
 }
 
-bool ARMSubtarget::enableAtomicExpandLoadLinked() const {
+bool ARMSubtarget::enableAtomicExpand() const {
   return hasAnyDataBarrier() && !isThumb1Only();
 }
 

@@ -104,7 +104,7 @@ public:
     return 64;
   }
 
-  unsigned getMaximumUnrollFactor() const override { return 2; }
+  unsigned getMaximumUnrollFactor() const override;
 
   unsigned getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const
       override;
@@ -112,10 +112,11 @@ public:
   unsigned getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index) const
       override;
 
-  unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
-                                  OperandValueKind Opd1Info = OK_AnyValue,
-                                  OperandValueKind Opd2Info = OK_AnyValue) const
-      override;
+  unsigned getArithmeticInstrCost(
+      unsigned Opcode, Type *Ty, OperandValueKind Opd1Info = OK_AnyValue,
+      OperandValueKind Opd2Info = OK_AnyValue,
+      OperandValueProperties Opd1PropInfo = OP_None,
+      OperandValueProperties Opd2PropInfo = OP_None) const override;
 
   unsigned getAddressComputationCost(Type *Ty, bool IsComplex) const override;
 
@@ -403,9 +404,10 @@ unsigned AArch64TTI::getVectorInstrCost(unsigned Opcode, Type *Val,
   return 2;
 }
 
-unsigned AArch64TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
-                                          OperandValueKind Opd1Info,
-                                          OperandValueKind Opd2Info) const {
+unsigned AArch64TTI::getArithmeticInstrCost(
+    unsigned Opcode, Type *Ty, OperandValueKind Opd1Info,
+    OperandValueKind Opd2Info, OperandValueProperties Opd1PropInfo,
+    OperandValueProperties Opd2PropInfo) const {
   // Legalize the type.
   std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Ty);
 
@@ -413,8 +415,8 @@ unsigned AArch64TTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
 
   switch (ISD) {
   default:
-    return TargetTransformInfo::getArithmeticInstrCost(Opcode, Ty, Opd1Info,
-                                                       Opd2Info);
+    return TargetTransformInfo::getArithmeticInstrCost(
+        Opcode, Ty, Opd1Info, Opd2Info, Opd1PropInfo, Opd2PropInfo);
   case ISD::ADD:
   case ISD::MUL:
   case ISD::XOR:
@@ -512,4 +514,10 @@ unsigned AArch64TTI::getCostOfKeepingLiveOverCall(ArrayRef<Type*> Tys) const {
         getMemoryOpCost(Instruction::Load, I, 128, 0);
   }
   return Cost;
+}
+
+unsigned AArch64TTI::getMaximumUnrollFactor() const {
+  if (ST->isCortexA57() || ST->isCyclone())
+    return 4;
+  return 2;
 }

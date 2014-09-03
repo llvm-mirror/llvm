@@ -202,10 +202,10 @@ static const Target *getTarget(const ObjectFile *Obj = nullptr) {
 static void emitDOTFile(const char *FileName, const MCFunction &f,
                         MCInstPrinter *IP) {
   // Start a new dot file.
-  std::string Error;
-  raw_fd_ostream Out(FileName, Error, sys::fs::F_Text);
-  if (!Error.empty()) {
-    errs() << "llvm-objdump: warning: " << Error << '\n';
+  std::error_code EC;
+  raw_fd_ostream Out(FileName, EC, sys::fs::F_Text);
+  if (EC) {
+    errs() << "llvm-objdump: warning: " << EC.message() << '\n';
     return;
   }
 
@@ -386,10 +386,10 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       }
     }
     if (!YAMLCFG.empty()) {
-      std::string Error;
-      raw_fd_ostream YAMLOut(YAMLCFG.c_str(), Error, sys::fs::F_Text);
-      if (!Error.empty()) {
-        errs() << ToolName << ": warning: " << Error << '\n';
+      std::error_code EC;
+      raw_fd_ostream YAMLOut(YAMLCFG, EC, sys::fs::F_Text);
+      if (EC) {
+        errs() << ToolName << ": warning: " << EC.message() << '\n';
         return;
       }
       mcmodule2yaml(YAMLOut, *Mod, *MII, *MRI);
@@ -494,17 +494,12 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     std::vector<RelocationRef>::const_iterator rel_end = Rels.end();
     // Disassemble symbol by symbol.
     for (unsigned si = 0, se = Symbols.size(); si != se; ++si) {
+
       uint64_t Start = Symbols[si].first;
-      uint64_t End;
-      // The end is either the size of the section or the beginning of the next
-      // symbol.
-      if (si == se - 1)
-        End = SectSize;
-      // Make sure this symbol takes up space.
-      else if (Symbols[si + 1].first != Start)
-        End = Symbols[si + 1].first - 1;
-      else
-        // This symbol has the same address as the next symbol. Skip it.
+      // The end is either the section end or the beginning of the next symbol.
+      uint64_t End = (si == se - 1) ? SectSize : Symbols[si + 1].first;
+      // If this symbol has the same address as the next symbol, then skip it.
+      if (Start == End)
         continue;
 
       outs() << '\n' << Symbols[si].second << ":\n";
@@ -567,6 +562,11 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
 static void PrintRelocations(const ObjectFile *Obj) {
   StringRef Fmt = Obj->getBytesInAddress() > 4 ? "%016" PRIx64 :
                                                  "%08" PRIx64;
+  // Regular objdump doesn't print relocations in non-relocatable object
+  // files.
+  if (!Obj->isRelocatableObject())
+    return;
+
   for (const SectionRef &Section : Obj->sections()) {
     if (Section.relocation_begin() == Section.relocation_end())
       continue;
@@ -834,6 +834,8 @@ static void printPrivateFileHeader(const ObjectFile *o) {
     printELFFileHeader(o);
   } else if (o->isCOFF()) {
     printCOFFFileHeader(o);
+  } else if (o->isMachO()) {
+    printMachOFileHeader(o);
   }
 }
 
@@ -892,12 +894,12 @@ static void DumpInput(StringRef file) {
   }
 
   // Attempt to open the binary.
-  ErrorOr<std::unique_ptr<Binary>> BinaryOrErr = createBinary(file);
+  ErrorOr<OwningBinary<Binary>> BinaryOrErr = createBinary(file);
   if (std::error_code EC = BinaryOrErr.getError()) {
     errs() << ToolName << ": '" << file << "': " << EC.message() << ".\n";
     return;
   }
-  Binary &Binary = *BinaryOrErr.get();
+  Binary &Binary = *BinaryOrErr.get().getBinary();
 
   if (Archive *a = dyn_cast<Archive>(&Binary))
     DumpArchive(a);

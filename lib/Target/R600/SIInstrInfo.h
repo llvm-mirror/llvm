@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 
-#ifndef SIINSTRINFO_H
-#define SIINSTRINFO_H
+#ifndef LLVM_LIB_TARGET_R600_SIINSTRINFO_H
+#define LLVM_LIB_TARGET_R600_SIINSTRINFO_H
 
 #include "AMDGPUInstrInfo.h"
 #include "SIRegisterInfo.h"
@@ -119,6 +119,10 @@ public:
   bool isImmOperandLegal(const MachineInstr *MI, unsigned OpNo,
                          const MachineOperand &MO) const;
 
+  /// \brief Return true if the given offset Size in bytes can be folded into
+  /// the immediate offsets of a memory instruction for the given address space.
+  static bool canFoldOffset(unsigned OffsetSize, unsigned AS) LLVM_READNONE;
+
   /// \brief Return true if this 64-bit VALU instruction has a 32-bit encoding.
   /// This function will return false if you pass it a 32-bit instruction.
   bool hasVALU32BitEncoding(unsigned Opcode) const;
@@ -166,6 +170,12 @@ public:
   /// create new instruction and insert them before \p MI.
   void legalizeOperands(MachineInstr *MI) const;
 
+  /// \brief Split an SMRD instruction into two smaller loads of half the
+  //  size storing the results in \p Lo and \p Hi.
+  void splitSMRD(MachineInstr *MI, const TargetRegisterClass *HalfRC,
+                 unsigned HalfImmOp, unsigned HalfSGPROp,
+                 MachineInstr *&Lo, MachineInstr *&Hi) const;
+
   void moveSMRDToVALU(MachineInstr *MI, MachineRegisterInfo &MRI) const;
 
   /// \brief Replace this instruction's opcode with the equivalent VALU
@@ -209,6 +219,7 @@ namespace AMDGPU {
   int getCommuteRev(uint16_t Opcode);
   int getCommuteOrig(uint16_t Opcode);
   int getMCOpcode(uint16_t Opcode, unsigned Gen);
+  int getAddr64Inst(uint16_t Opcode);
 
   const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
   const uint64_t RSRC_TID_ENABLE = 1LL << 55;
@@ -233,4 +244,4 @@ namespace SISrcMods {
   };
 }
 
-#endif //SIINSTRINFO_H
+#endif

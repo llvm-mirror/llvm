@@ -41,6 +41,39 @@ void RuntimeDyldImpl::registerEHFrames() {}
 
 void RuntimeDyldImpl::deregisterEHFrames() {}
 
+#ifndef NDEBUG
+static void dumpSectionMemory(const SectionEntry &S, StringRef State) {
+  dbgs() << "----- Contents of section " << S.Name << " " << State << " -----";
+
+  const unsigned ColsPerRow = 16;
+
+  uint8_t *DataAddr = S.Address;
+  uint64_t LoadAddr = S.LoadAddress;
+
+  unsigned StartPadding = LoadAddr & 7;
+  unsigned BytesRemaining = S.Size;
+
+  if (StartPadding) {
+    dbgs() << "\n" << format("0x%08x", LoadAddr & ~(ColsPerRow - 1)) << ":";
+    while (StartPadding--)
+      dbgs() << "   ";
+  }
+
+  while (BytesRemaining > 0) {
+    if ((LoadAddr & (ColsPerRow - 1)) == 0)
+      dbgs() << "\n" << format("0x%08x", LoadAddr) << ":";
+
+    dbgs() << " " << format("%02x", *DataAddr);
+
+    ++DataAddr;
+    ++LoadAddr;
+    --BytesRemaining;
+  }
+
+  dbgs() << "\n";
+}
+#endif
+
 // Resolve the relocations for all symbols we currently know about.
 void RuntimeDyldImpl::resolveRelocations() {
   MutexGuard locked(lock);
@@ -56,8 +89,10 @@ void RuntimeDyldImpl::resolveRelocations() {
     // entry provides the section to which the relocation will be applied.
     uint64_t Addr = Sections[i].LoadAddress;
     DEBUG(dbgs() << "Resolving relocations Section #" << i << "\t"
-                 << format("%p", (uint8_t *)Addr) << "\n");
+                 << format("0x%x", Addr) << "\n");
+    DEBUG(dumpSectionMemory(Sections[i], "before relocations"));
     resolveRelocationList(Relocations[i], Addr);
+    DEBUG(dumpSectionMemory(Sections[i], "after relocations"));
     Relocations.erase(i);
   }
 }
@@ -371,7 +406,7 @@ void RuntimeDyldImpl::emitCommonSymbols(ObjectImage &Obj,
   if (!Addr)
     report_fatal_error("Unable to allocate memory for common symbols!");
   uint64_t Offset = 0;
-  Sections.push_back(SectionEntry(StringRef(), Addr, TotalSize, 0));
+  Sections.push_back(SectionEntry("<common symbols>", Addr, TotalSize, 0));
   memset(Addr, 0, TotalSize);
 
   DEBUG(dbgs() << "emitCommonSection SectionID: " << SectionID << " new addr: "

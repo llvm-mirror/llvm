@@ -10,8 +10,8 @@
 // Header for LLVM symbolization library.
 //
 //===----------------------------------------------------------------------===//
-#ifndef LLVM_SYMBOLIZE_H
-#define LLVM_SYMBOLIZE_H
+#ifndef LLVM_TOOLS_LLVM_SYMBOLIZER_LLVMSYMBOLIZE_H
+#define LLVM_TOOLS_LLVM_SYMBOLIZER_LLVMSYMBOLIZE_H
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/DebugInfo/DIContext.h"
@@ -75,6 +75,12 @@ private:
 
   // Owns all the parsed binaries and object files.
   SmallVector<std::unique_ptr<Binary>, 4> ParsedBinariesAndObjects;
+  SmallVector<std::unique_ptr<MemoryBuffer>, 4> MemoryBuffers;
+  void addOwningBinary(OwningBinary<Binary> Bin) {
+    ParsedBinariesAndObjects.push_back(std::move(Bin.getBinary()));
+    MemoryBuffers.push_back(std::move(Bin.getBuffer()));
+  }
+
   // Owns module info objects.
   typedef std::map<std::string, ModuleInfo *> ModuleMapTy;
   ModuleMapTy Modules;
@@ -124,4 +130,4 @@ private:
 } // namespace symbolize
 } // namespace llvm
 
-#endif // LLVM_SYMBOLIZE_H
+#endif

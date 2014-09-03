@@ -901,9 +901,8 @@ CodeGenRegisterClass::getSuperRegClasses(CodeGenSubRegIndex *SubIdx,
     FindI = SuperRegClasses.find(SubIdx);
   if (FindI == SuperRegClasses.end())
     return;
-  for (SmallPtrSet<CodeGenRegisterClass*, 8>::const_iterator I =
-       FindI->second.begin(), E = FindI->second.end(); I != E; ++I)
-    Out.set((*I)->EnumValue);
+  for (CodeGenRegisterClass *RC : FindI->second)
+    Out.set(RC->EnumValue);
 }
 
 // Populate a unique sorted list of units from a register set.
@@ -1533,7 +1532,7 @@ void CodeGenRegBank::computeRegUnitSets() {
   assert(RegUnitSets.empty() && "dirty RegUnitSets");
 
   // Compute a unique RegUnitSet for each RegClass.
-  const ArrayRef<CodeGenRegisterClass*> &RegClasses = getRegClasses();
+  ArrayRef<CodeGenRegisterClass*> RegClasses = getRegClasses();
   unsigned NumRegClasses = RegClasses.size();
   for (unsigned RCIdx = 0, RCEnd = NumRegClasses; RCIdx != RCEnd; ++RCIdx) {
     if (!RegClasses[RCIdx]->Allocatable)

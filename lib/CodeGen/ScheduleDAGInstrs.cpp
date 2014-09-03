@@ -50,12 +50,11 @@ static cl::opt<bool> UseTBAA("use-tbaa-in-sched-mi", cl::Hidden,
     cl::init(true), cl::desc("Enable use of TBAA during MI GAD construction"));
 
 ScheduleDAGInstrs::ScheduleDAGInstrs(MachineFunction &mf,
-                                     const MachineLoopInfo &mli,
-                                     const MachineDominatorTree &mdt,
+                                     const MachineLoopInfo *mli,
                                      bool IsPostRAFlag,
                                      bool RemoveKillFlags,
                                      LiveIntervals *lis)
-  : ScheduleDAG(mf), MLI(mli), MDT(mdt), MFI(mf.getFrameInfo()), LIS(lis),
+  : ScheduleDAG(mf), MLI(mli), MFI(mf.getFrameInfo()), LIS(lis),
     IsPostRA(IsPostRAFlag), RemoveKillFlags(RemoveKillFlags),
     CanHandleTerminators(false), FirstDbgValue(nullptr) {
   assert((IsPostRA || LIS) && "PreRA scheduling requires LiveIntervals");
@@ -575,7 +574,7 @@ static bool MIsNeedChainEdge(AliasAnalysis *AA, const MachineFrameInfo *MFI,
 static unsigned
 iterateChainSucc(AliasAnalysis *AA, const MachineFrameInfo *MFI,
                  SUnit *SUa, SUnit *SUb, SUnit *ExitSU, unsigned *Depth,
-                 SmallPtrSet<const SUnit*, 16> &Visited) {
+                 SmallPtrSetImpl<const SUnit*> &Visited) {
   if (!SUa || !SUb || SUb == ExitSU)
     return *Depth;
 

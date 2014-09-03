@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_PROFILEDATA_COVERAGEMAPPING_READER_H_
-#define LLVM_PROFILEDATA_COVERAGEMAPPING_READER_H_
+#ifndef LLVM_PROFILEDATA_COVERAGEMAPPINGREADER_H
+#define LLVM_PROFILEDATA_COVERAGEMAPPINGREADER_H
 
 #include "llvm/ProfileData/InstrProf.h"
 #include "llvm/ProfileData/CoverageMapping.h"
@@ -33,6 +33,7 @@ class ObjectFileCoverageMappingReader;
 /// \brief Coverage mapping information for a single function.
 struct CoverageMappingRecord {
   StringRef FunctionName;
+  uint64_t FunctionHash;
   ArrayRef<StringRef> Filenames;
   ArrayRef<CounterExpression> Expressions;
   ArrayRef<CounterMappingRegion> MappingRegions;
@@ -143,21 +144,22 @@ public:
   struct ProfileMappingRecord {
     CoverageMappingVersion Version;
     StringRef FunctionName;
+    uint64_t FunctionHash;
     StringRef CoverageMapping;
     size_t FilenamesBegin;
     size_t FilenamesSize;
 
     ProfileMappingRecord(CoverageMappingVersion Version, StringRef FunctionName,
-                         StringRef CoverageMapping, size_t FilenamesBegin,
-                         size_t FilenamesSize)
+                         uint64_t FunctionHash, StringRef CoverageMapping,
+                         size_t FilenamesBegin, size_t FilenamesSize)
         : Version(Version), FunctionName(FunctionName),
-          CoverageMapping(CoverageMapping), FilenamesBegin(FilenamesBegin),
-          FilenamesSize(FilenamesSize) {}
+          FunctionHash(FunctionHash), CoverageMapping(CoverageMapping),
+          FilenamesBegin(FilenamesBegin), FilenamesSize(FilenamesSize) {}
   };
 
 private:
   std::error_code LastError;
-  std::unique_ptr<llvm::object::ObjectFile> Object;
+  object::OwningBinary<object::ObjectFile> Object;
   std::vector<StringRef> Filenames;
   std::vector<ProfileMappingRecord> MappingRecords;
   size_t CurrentRecord;
@@ -204,4 +206,4 @@ public:
 } // end namespace coverage
 } // end namespace llvm
 
-#endif // LLVM_PROFILEDATA_COVERAGEMAPPING_READER_H_
+#endif

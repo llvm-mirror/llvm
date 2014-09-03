@@ -1,4 +1,4 @@
-; RUN: verify-uselistorder < %s -preserve-bc-use-list-order
+; RUN: verify-uselistorder < %s
 
 @a = global [4 x i1] [i1 0, i1 1, i1 0, i1 1]
 @b = alias i1* getelementptr ([4 x i1]* @a, i64 0, i64 2)
@@ -120,7 +120,7 @@ entry:
 }
 
 ; Check for when an instruction is its own user.
-define void @selfUser() {
+define void @selfUser(i1 %a) {
 entry:
   ret void
 
@@ -129,7 +129,7 @@ loop1:
 
 loop2:
   %var = phi i32 [ %var, %loop1 ], [ %var, %loop2 ]
-  br label %loop1
+  br label %loop2
 }
 
 ; Check that block addresses work.

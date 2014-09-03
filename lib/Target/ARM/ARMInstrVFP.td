@@ -515,6 +515,8 @@ def VCVTDS  : ASuI<0b11101, 0b11, 0b0111, 0b11, 0,
   let Inst{5}     = Sm{0};
   let Inst{15-12} = Dd{3-0};
   let Inst{22}    = Dd{4};
+
+  let Predicates = [HasVFP2, HasDPVFP];
 }
 
 // Special case encoding: bits 11-8 is 0b1011.
@@ -625,27 +627,30 @@ def : Pat<(f16_to_fp GPR:$a),
 def : Pat<(f64 (f16_to_fp GPR:$a)),
           (VCVTBHD (COPY_TO_REGCLASS GPR:$a, SPR))>;
 
-
-multiclass vcvt_inst<string opc, bits<2> rm> {
+multiclass vcvt_inst<string opc, bits<2> rm,
+                     SDPatternOperator node = null_frag> {
   let PostEncoderMethod = "", DecoderNamespace = "VFPV8" in {
     def SS : ASuInp<0b11101, 0b11, 0b1100, 0b11, 0,
                     (outs SPR:$Sd), (ins SPR:$Sm),
                     NoItinerary, !strconcat("vcvt", opc, ".s32.f32\t$Sd, $Sm"),
-                    []>, Requires<[HasFPARMv8]> {
+                    [(set SPR:$Sd, (arm_ftosi (node SPR:$Sm)))]>,
+                    Requires<[HasFPARMv8]> {
       let Inst{17-16} = rm;
     }
 
     def US : ASuInp<0b11101, 0b11, 0b1100, 0b01, 0,
                     (outs SPR:$Sd), (ins SPR:$Sm),
                     NoItinerary, !strconcat("vcvt", opc, ".u32.f32\t$Sd, $Sm"),
-                    []>, Requires<[HasFPARMv8]> {
+                    [(set SPR:$Sd, (arm_ftoui (node SPR:$Sm)))]>,
+                    Requires<[HasFPARMv8]> {
       let Inst{17-16} = rm;
     }
 
     def SD : ASuInp<0b11101, 0b11, 0b1100, 0b11, 0,
                     (outs SPR:$Sd), (ins DPR:$Dm),
                     NoItinerary, !strconcat("vcvt", opc, ".s32.f64\t$Sd, $Dm"),
-                    []>, Requires<[HasFPARMv8, HasDPVFP]> {
+                    [(set SPR:$Sd, (arm_ftosi (f64 (node (f64 DPR:$Dm)))))]>,
+                    Requires<[HasFPARMv8, HasDPVFP]> {
       bits<5> Dm;
 
       let Inst{17-16} = rm;
@@ -659,7 +664,8 @@ multiclass vcvt_inst<string opc, bits<2> rm> {
     def UD : ASuInp<0b11101, 0b11, 0b1100, 0b01, 0,
                     (outs SPR:$Sd), (ins DPR:$Dm),
                     NoItinerary, !strconcat("vcvt", opc, ".u32.f64\t$Sd, $Dm"),
-                    []>, Requires<[HasFPARMv8, HasDPVFP]> {
+                    [(set SPR:$Sd, (arm_ftoui (f64 (node (f64 DPR:$Dm)))))]>,
+                    Requires<[HasFPARMv8, HasDPVFP]> {
       bits<5> Dm;
 
       let Inst{17-16} = rm;
@@ -672,10 +678,10 @@ multiclass vcvt_inst<string opc, bits<2> rm> {
   }
 }
 
-defm VCVTA : vcvt_inst<"a", 0b00>;
+defm VCVTA : vcvt_inst<"a", 0b00, frnd>;
 defm VCVTN : vcvt_inst<"n", 0b01>;
-defm VCVTP : vcvt_inst<"p", 0b10>;
-defm VCVTM : vcvt_inst<"m", 0b11>;
+defm VCVTP : vcvt_inst<"p", 0b10, fceil>;
+defm VCVTM : vcvt_inst<"m", 0b11, ffloor>;
 
 def VNEGD  : ADuI<0b11101, 0b11, 0b0001, 0b01, 0,
                   (outs DPR:$Dd), (ins DPR:$Dm),
@@ -691,18 +697,20 @@ def VNEGS  : ASuIn<0b11101, 0b11, 0b0001, 0b01, 0,
   let D = VFPNeonA8Domain;
 }
 
-multiclass vrint_inst_zrx<string opc, bit op, bit op2> {
+multiclass vrint_inst_zrx<string opc, bit op, bit op2, SDPatternOperator node> {
   def S : ASuI<0b11101, 0b11, 0b0110, 0b11, 0,
                (outs SPR:$Sd), (ins SPR:$Sm),
                NoItinerary, !strconcat("vrint", opc), ".f32\t$Sd, $Sm",
-               []>, Requires<[HasFPARMv8]> {
+               [(set (f32 SPR:$Sd), (node (f32 SPR:$Sm)))]>,
+               Requires<[HasFPARMv8]> {
     let Inst{7} = op2;
     let Inst{16} = op;
   }
   def D : ADuI<0b11101, 0b11, 0b0110, 0b11, 0,
                 (outs DPR:$Dd), (ins DPR:$Dm),
                 NoItinerary, !strconcat("vrint", opc), ".f64\t$Dd, $Dm",
-                []>, Requires<[HasFPARMv8, HasDPVFP]> {
+                [(set (f64 DPR:$Dd), (node (f64 DPR:$Dm)))]>,
+                Requires<[HasFPARMv8, HasDPVFP]> {
     let Inst{7} = op2;
     let Inst{16} = op;
   }
@@ -715,22 +723,25 @@ multiclass vrint_inst_zrx<string opc, bit op, bit op2> {
         Requires<[HasFPARMv8,HasDPVFP]>;
 }
 
-defm VRINTZ : vrint_inst_zrx<"z", 0, 1>;
-defm VRINTR : vrint_inst_zrx<"r", 0, 0>;
-defm VRINTX : vrint_inst_zrx<"x", 1, 0>;
+defm VRINTZ : vrint_inst_zrx<"z", 0, 1, ftrunc>;
+defm VRINTR : vrint_inst_zrx<"r", 0, 0, fnearbyint>;
+defm VRINTX : vrint_inst_zrx<"x", 1, 0, frint>;
 
-multiclass vrint_inst_anpm<string opc, bits<2> rm> {
+multiclass vrint_inst_anpm<string opc, bits<2> rm,
+                           SDPatternOperator node = null_frag> {
   let PostEncoderMethod = "", DecoderNamespace = "VFPV8" in {
     def S : ASuInp<0b11101, 0b11, 0b1000, 0b01, 0,
                    (outs SPR:$Sd), (ins SPR:$Sm),
                    NoItinerary, !strconcat("vrint", opc, ".f32\t$Sd, $Sm"),
-                   []>, Requires<[HasFPARMv8]> {
+                   [(set (f32 SPR:$Sd), (node (f32 SPR:$Sm)))]>,
+                   Requires<[HasFPARMv8]> {
       let Inst{17-16} = rm;
     }
     def D : ADuInp<0b11101, 0b11, 0b1000, 0b01, 0,
                    (outs DPR:$Dd), (ins DPR:$Dm),
                    NoItinerary, !strconcat("vrint", opc, ".f64\t$Dd, $Dm"),
-                   []>, Requires<[HasFPARMv8, HasDPVFP]> {
+                   [(set (f64 DPR:$Dd), (node (f64 DPR:$Dm)))]>,
+                   Requires<[HasFPARMv8, HasDPVFP]> {
       let Inst{17-16} = rm;
     }
   }
@@ -743,10 +754,10 @@ multiclass vrint_inst_anpm<string opc, bits<2> rm> {
         Requires<[HasFPARMv8,HasDPVFP]>;
 }
 
-defm VRINTA : vrint_inst_anpm<"a", 0b00>;
+defm VRINTA : vrint_inst_anpm<"a", 0b00, frnd>;
 defm VRINTN : vrint_inst_anpm<"n", 0b01>;
-defm VRINTP : vrint_inst_anpm<"p", 0b10>;
-defm VRINTM : vrint_inst_anpm<"m", 0b11>;
+defm VRINTP : vrint_inst_anpm<"p", 0b10, fceil>;
+defm VRINTM : vrint_inst_anpm<"m", 0b11, ffloor>;
 
 def VSQRTD : ADuI<0b11101, 0b11, 0b0001, 0b11, 0,
                   (outs DPR:$Dd), (ins DPR:$Dm),
@@ -837,6 +848,11 @@ def VMOVRRD  : AVConv3I<0b11000101, 0b1011,
   // Some single precision VFP instructions may be executed on both NEON and VFP
   // pipelines.
   let D = VFPNeonDomain;
+
+  // This instruction is equivalent to
+  // $Rt = EXTRACT_SUBREG $Dm, ssub_0
+  // $Rt2 = EXTRACT_SUBREG $Dm, ssub_1
+  let isExtractSubreg = 1;
 }
 
 def VMOVRRS  : AVConv3I<0b11000101, 0b1010,
@@ -885,6 +901,10 @@ def VMOVDRR : AVConv5I<0b11000100, 0b1011,
   // Some single precision VFP instructions may be executed on both NEON and VFP
   // pipelines.
   let D = VFPNeonDomain;
+
+  // This instruction is equivalent to
+  // $Dm = REG_SEQUENCE $Rt, ssub_0, $Rt2, ssub_1
+  let isRegSequence = 1;
 }
 
 let neverHasSideEffects = 1 in

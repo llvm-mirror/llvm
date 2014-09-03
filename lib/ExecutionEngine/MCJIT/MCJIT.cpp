@@ -43,7 +43,7 @@ static struct RegisterJIT {
 extern "C" void LLVMLinkInMCJIT() {
 }
 
-ExecutionEngine *MCJIT::createJIT(Module *M,
+ExecutionEngine *MCJIT::createJIT(std::unique_ptr<Module> M,
                                   std::string *ErrorStr,
                                   RTDyldMemoryManager *MemMgr,
                                   TargetMachine *TM) {
@@ -52,19 +52,14 @@ ExecutionEngine *MCJIT::createJIT(Module *M,
   // FIXME: Don't do this here.
   sys::DynamicLibrary::LoadLibraryPermanently(nullptr, nullptr);
 
-  return new MCJIT(M, TM, MemMgr ? MemMgr : new SectionMemoryManager());
+  return new MCJIT(std::move(M), TM,
+                   MemMgr ? MemMgr : new SectionMemoryManager());
 }
 
-MCJIT::MCJIT(Module *m, TargetMachine *tm, RTDyldMemoryManager *MM)
-  : ExecutionEngine(m), TM(tm), Ctx(nullptr), MemMgr(this, MM), Dyld(&MemMgr),
-    ObjCache(nullptr) {
-
-  OwnedModules.addModule(m);
-  setDataLayout(TM->getSubtargetImpl()->getDataLayout());
-}
-
-MCJIT::~MCJIT() {
-  MutexGuard locked(lock);
+MCJIT::MCJIT(std::unique_ptr<Module> M, TargetMachine *tm,
+             RTDyldMemoryManager *MM)
+    : ExecutionEngine(std::move(M)), TM(tm), Ctx(nullptr), MemMgr(this, MM),
+      Dyld(&MemMgr), ObjCache(nullptr) {
   // FIXME: We are managing our modules, so we do not want the base class
   // ExecutionEngine to manage them as well. To avoid double destruction
   // of the first (and only) module added in ExecutionEngine constructor
@@ -75,7 +70,16 @@ MCJIT::~MCJIT() {
   // If so, additional functions: addModule, removeModule, FindFunctionNamed,
   // runStaticConstructorsDestructors could be moved back to EE as well.
   //
+  std::unique_ptr<Module> First = std::move(Modules[0]);
   Modules.clear();
+
+  OwnedModules.addModule(std::move(First));
+  setDataLayout(TM->getSubtargetImpl()->getDataLayout());
+}
+
+MCJIT::~MCJIT() {
+  MutexGuard locked(lock);
+
   Dyld.deregisterEHFrames();
 
   LoadedObjectList::iterator it, end;
@@ -93,17 +97,15 @@ MCJIT::~MCJIT() {
   delete TM;
 }
 
-void MCJIT::addModule(Module *M) {
+void MCJIT::addModule(std::unique_ptr<Module> M) {
   MutexGuard locked(lock);
-  OwnedModules.addModule(M);
+  OwnedModules.addModule(std::move(M));
 }
 
 bool MCJIT::removeModule(Module *M) {
   MutexGuard locked(lock);
   return OwnedModules.removeModule(M);
 }
-
-
 
 void MCJIT::addObjectFile(std::unique_ptr<object::ObjectFile> Obj) {
   ObjectImage *LoadedObject = Dyld.loadObject(std::move(Obj));
@@ -115,10 +117,14 @@ void MCJIT::addObjectFile(std::unique_ptr<object::ObjectFile> Obj) {
   NotifyObjectEmitted(*LoadedObject);
 }
 
-void MCJIT::addArchive(std::unique_ptr<object::Archive> A) {
-  Archives.push_back(std::move(A));
+void MCJIT::addObjectFile(object::OwningBinary<object::ObjectFile> Obj) {
+  addObjectFile(std::move(Obj.getBinary()));
+  Buffers.push_back(std::move(Obj.getBuffer()));
 }
 
+void MCJIT::addArchive(object::OwningBinary<object::Archive> A) {
+  Archives.push_back(std::move(A));
+}
 
 void MCJIT::setObjectCache(ObjectCache* NewCache) {
   MutexGuard locked(lock);
@@ -157,8 +163,8 @@ ObjectBufferStream* MCJIT::emitObject(Module *M) {
   if (ObjCache) {
     // MemoryBuffer is a thin wrapper around the actual memory, so it's OK
     // to create a temporary object here and delete it after the call.
-    std::unique_ptr<MemoryBuffer> MB(CompiledObject->getMemBuffer());
-    ObjCache->notifyObjectCompiled(M, MB.get());
+    MemoryBufferRef MB = CompiledObject->getMemBuffer();
+    ObjCache->notifyObjectCompiled(M, MB);
   }
 
   return CompiledObject.release();
@@ -291,7 +297,8 @@ uint64_t MCJIT::getSymbolAddress(const std::string &Name,
   if (Addr)
     return Addr;
 
-  for (std::unique_ptr<object::Archive> &A : Archives) {
+  for (object::OwningBinary<object::Archive> &OB : Archives) {
+    object::Archive *A = OB.getBinary().get();
     // Look for our symbols in each Archive
     object::Archive::child_iterator ChildIt = A->findSym(Name);
     if (ChildIt != A->child_end()) {
@@ -316,13 +323,19 @@ uint64_t MCJIT::getSymbolAddress(const std::string &Name,
 
   // If it hasn't already been generated, see if it's in one of our modules.
   Module *M = findModuleForSymbol(Name, CheckFunctionsOnly);
-  if (!M)
-    return 0;
+  if (M) {
+    generateCodeForModule(M);
 
-  generateCodeForModule(M);
+    // Check the RuntimeDyld table again, it should be there now.
+    return getExistingSymbolAddress(Name);
+  }
 
-  // Check the RuntimeDyld table again, it should be there now.
-  return getExistingSymbolAddress(Name);
+  // If a LazyFunctionCreator is installed, use it to get/create the function.
+  // FIXME: Should we instead have a LazySymbolCreator callback?
+  if (LazyFunctionCreator)
+    Addr = (uint64_t)LazyFunctionCreator(Name);
+
+  return Addr;
 }
 
 uint64_t MCJIT::getGlobalValueAddress(const std::string &Name) {
@@ -383,7 +396,7 @@ void MCJIT::freeMachineCodeForFunction(Function *F) {
 void MCJIT::runStaticConstructorsDestructorsInModulePtrSet(
     bool isDtors, ModulePtrSet::iterator I, ModulePtrSet::iterator E) {
   for (; I != E; ++I) {
-    ExecutionEngine::runStaticConstructorsDestructors(*I, isDtors);
+    ExecutionEngine::runStaticConstructorsDestructors(**I, isDtors);
   }
 }
 
@@ -578,5 +591,7 @@ uint64_t LinkingMemoryManager::getSymbolAddress(const std::string &Name) {
     Result = ParentEngine->getSymbolAddress(Name.substr(1), false);
   if (Result)
     return Result;
+  if (ParentEngine->isSymbolSearchingDisabled())
+    return 0;
   return ClientMM->getSymbolAddress(Name);
 }

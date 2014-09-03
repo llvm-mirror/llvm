@@ -155,7 +155,7 @@ int Type::getFPMantissaWidth() const {
 /// isSizedDerivedType - Derived types like structures and arrays are sized
 /// iff all of the members of the type are sized as well.  Since asking for
 /// their size is relatively uncommon, move this operation out of line.
-bool Type::isSizedDerivedType(SmallPtrSet<const Type*, 4> *Visited) const {
+bool Type::isSizedDerivedType(SmallPtrSetImpl<const Type*> *Visited) const {
   if (const ArrayType *ATy = dyn_cast<ArrayType>(this))
     return ATy->getElementType()->isSized(Visited);
 
@@ -506,7 +506,9 @@ StructType *StructType::get(Type *type, ...) {
     StructFields.push_back(type);
     type = va_arg(ap, llvm::Type*);
   }
-  return llvm::StructType::get(Ctx, StructFields);
+  auto *Ret = llvm::StructType::get(Ctx, StructFields);
+  va_end(ap);
+  return Ret;
 }
 
 StructType *StructType::create(LLVMContext &Context, ArrayRef<Type*> Elements,
@@ -547,10 +549,12 @@ StructType *StructType::create(StringRef Name, Type *type, ...) {
     StructFields.push_back(type);
     type = va_arg(ap, llvm::Type*);
   }
-  return llvm::StructType::create(Ctx, StructFields, Name);
+  auto *Ret = llvm::StructType::create(Ctx, StructFields, Name);
+  va_end(ap);
+  return Ret;
 }
 
-bool StructType::isSized(SmallPtrSet<const Type*, 4> *Visited) const {
+bool StructType::isSized(SmallPtrSetImpl<const Type*> *Visited) const {
   if ((getSubclassData() & SCDB_IsSized) != 0)
     return true;
   if (isOpaque())
@@ -591,6 +595,7 @@ void StructType::setBody(Type *type, ...) {
     type = va_arg(ap, llvm::Type*);
   }
   setBody(StructFields);
+  va_end(ap);
 }
 
 bool StructType::isValidElementType(Type *ElemTy) {

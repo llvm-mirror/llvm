@@ -2,8 +2,10 @@
 
 ; RUN: ld -plugin %llvmshlibdir/LLVMgold.so \
 ; RUN:    --plugin-opt=emit-llvm \
+; RUN:    --plugin-opt=generate-api-file \
 ; RUN:    -shared %t.o -o %t2.o
 ; RUN: llvm-dis %t2.o -o - | FileCheck %s
+; RUN: FileCheck --check-prefix=API %s < %T/../apifile.txt
 
 ; RUN: ld -plugin %llvmshlibdir/LLVMgold.so \
 ; RUN:     -m elf_x86_64 --plugin-opt=also-emit-llvm \
@@ -51,3 +53,13 @@ define linkonce_odr void @f6() unnamed_addr {
   ret void
 }
 @g6 = global void()* @f6
+
+
+; API: f1 PREVAILING_DEF_IRONLY
+; API: f2 PREVAILING_DEF_IRONLY
+; API: f3 PREVAILING_DEF_IRONLY_EXP
+; API: f4 PREVAILING_DEF_IRONLY_EXP
+; API: f5 PREVAILING_DEF_IRONLY_EXP
+; API: f6 PREVAILING_DEF_IRONLY_EXP
+; API: g5 PREVAILING_DEF_IRONLY_EXP
+; API: g6 PREVAILING_DEF_IRONLY_EXP

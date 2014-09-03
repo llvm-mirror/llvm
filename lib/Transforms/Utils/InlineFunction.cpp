@@ -98,7 +98,7 @@ namespace {
     /// split the landing pad block after the landingpad instruction and jump
     /// to there.
     void forwardResume(ResumeInst *RI,
-                       SmallPtrSet<LandingPadInst*, 16> &InlinedLPads);
+                       SmallPtrSetImpl<LandingPadInst*> &InlinedLPads);
 
     /// addIncomingPHIValuesFor - Add incoming-PHI values to the unwind
     /// destination block for the given basic block, using the values for the
@@ -157,7 +157,7 @@ BasicBlock *InvokeInliningInfo::getInnerResumeDest() {
 /// branch. When there is more than one predecessor, we need to split the
 /// landing pad block after the landingpad instruction and jump to there.
 void InvokeInliningInfo::forwardResume(ResumeInst *RI,
-                               SmallPtrSet<LandingPadInst*, 16> &InlinedLPads) {
+                               SmallPtrSetImpl<LandingPadInst*> &InlinedLPads) {
   BasicBlock *Dest = getInnerResumeDest();
   BasicBlock *Src = RI->getParent();
 
@@ -247,9 +247,7 @@ static void HandleInlinedInvoke(InvokeInst *II, BasicBlock *FirstNewBlock,
   // Append the clauses from the outer landing pad instruction into the inlined
   // landing pad instructions.
   LandingPadInst *OuterLPad = Invoke.getLandingPadInst();
-  for (SmallPtrSet<LandingPadInst*, 16>::iterator I = InlinedLPads.begin(),
-         E = InlinedLPads.end(); I != E; ++I) {
-    LandingPadInst *InlinedLPad = *I;
+  for (LandingPadInst *InlinedLPad : InlinedLPads) {
     unsigned OuterNum = OuterLPad->getNumClauses();
     InlinedLPad->reserveClauses(OuterNum);
     for (unsigned OuterIdx = 0; OuterIdx != OuterNum; ++OuterIdx)
@@ -319,8 +317,7 @@ static void CloneAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap) {
   DenseMap<const MDNode *, TrackingVH<MDNode> > MDMap;
   for (SetVector<const MDNode *>::iterator I = MD.begin(), IE = MD.end();
        I != IE; ++I) {
-    MDNode *Dummy = MDNode::getTemporary(CalledFunc->getContext(),
-                                         ArrayRef<Value*>());
+    MDNode *Dummy = MDNode::getTemporary(CalledFunc->getContext(), None);
     DummyNodes.push_back(Dummy);
     MDMap[*I] = Dummy;
   }
@@ -356,11 +353,35 @@ static void CloneAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap) {
     if (!NI)
       continue;
 
-    if (MDNode *M = NI->getMetadata(LLVMContext::MD_alias_scope))
-      NI->setMetadata(LLVMContext::MD_alias_scope, MDMap[M]);
+    if (MDNode *M = NI->getMetadata(LLVMContext::MD_alias_scope)) {
+      MDNode *NewMD = MDMap[M];
+      // If the call site also had alias scope metadata (a list of scopes to
+      // which instructions inside it might belong), propagate those scopes to
+      // the inlined instructions.
+      if (MDNode *CSM =
+          CS.getInstruction()->getMetadata(LLVMContext::MD_alias_scope))
+        NewMD = MDNode::concatenate(NewMD, CSM);
+      NI->setMetadata(LLVMContext::MD_alias_scope, NewMD);
+    } else if (NI->mayReadOrWriteMemory()) {
+      if (MDNode *M =
+          CS.getInstruction()->getMetadata(LLVMContext::MD_alias_scope))
+        NI->setMetadata(LLVMContext::MD_alias_scope, M);
+    }
 
-    if (MDNode *M = NI->getMetadata(LLVMContext::MD_noalias))
-      NI->setMetadata(LLVMContext::MD_noalias, MDMap[M]);
+    if (MDNode *M = NI->getMetadata(LLVMContext::MD_noalias)) {
+      MDNode *NewMD = MDMap[M];
+      // If the call site also had noalias metadata (a list of scopes with
+      // which instructions inside it don't alias), propagate those scopes to
+      // the inlined instructions.
+      if (MDNode *CSM =
+          CS.getInstruction()->getMetadata(LLVMContext::MD_noalias))
+        NewMD = MDNode::concatenate(NewMD, CSM);
+      NI->setMetadata(LLVMContext::MD_noalias, NewMD);
+    } else if (NI->mayReadOrWriteMemory()) {
+      if (MDNode *M =
+          CS.getInstruction()->getMetadata(LLVMContext::MD_noalias))
+        NI->setMetadata(LLVMContext::MD_noalias, M);
+    }
   }
 
   // Now that everything has been replaced, delete the dummy nodes.
@@ -449,17 +470,28 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
         PtrArgs.push_back(CXI->getPointerOperand());
       else if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(I))
         PtrArgs.push_back(RMWI->getPointerOperand());
-      else if (const MemIntrinsic *MI = dyn_cast<MemIntrinsic>(I)) {
-        PtrArgs.push_back(MI->getRawDest());
-        if (const MemTransferInst *MTI = dyn_cast<MemTransferInst>(MI))
-          PtrArgs.push_back(MTI->getRawSource());
+      else if (ImmutableCallSite ICS = ImmutableCallSite(I)) {
+	// If we know that the call does not access memory, then we'll still
+	// know that about the inlined clone of this call site, and we don't
+	// need to add metadata.
+        if (ICS.doesNotAccessMemory())
+          continue;
+
+        for (ImmutableCallSite::arg_iterator AI = ICS.arg_begin(),
+             AE = ICS.arg_end(); AI != AE; ++AI)
+	  // We need to check the underlying objects of all arguments, not just
+	  // the pointer arguments, because we might be passing pointers as
+	  // integers, etc.
+          // FIXME: If we know that the call only accesses pointer arguments,
+          // then we only need to check the pointer arguments.
+          PtrArgs.push_back(*AI);
       }
 
       // If we found no pointers, then this instruction is not suitable for
       // pairing with an instruction to receive aliasing metadata.
-      // Simplification during cloning could make this happen, and skip these
-      // cases for now.
-      if (PtrArgs.empty())
+      // However, if this is a call, this we might just alias with none of the
+      // noalias arguments.
+      if (PtrArgs.empty() && !isa<CallInst>(I) && !isa<InvokeInst>(I))
         continue;
 
       // It is possible that there is only one underlying object, but you
@@ -755,33 +787,6 @@ static void fixupLineNumbers(Function *Fn, Function::iterator FI,
   }
 }
 
-/// Returns a musttail call instruction if one immediately precedes the given
-/// return instruction with an optional bitcast instruction between them.
-static CallInst *getPrecedingMustTailCall(ReturnInst *RI) {
-  Instruction *Prev = RI->getPrevNode();
-  if (!Prev)
-    return nullptr;
-
-  if (Value *RV = RI->getReturnValue()) {
-    if (RV != Prev)
-      return nullptr;
-
-    // Look through the optional bitcast.
-    if (auto *BI = dyn_cast<BitCastInst>(Prev)) {
-      RV = BI->getOperand(0);
-      Prev = BI->getPrevNode();
-      if (!Prev || RV != Prev)
-        return nullptr;
-    }
-  }
-
-  if (auto *CI = dyn_cast<CallInst>(Prev)) {
-    if (CI->isMustTailCall())
-      return CI;
-  }
-  return nullptr;
-}
-
 /// InlineFunction - This function inlines the called function into the basic
 /// block of the caller.  This returns false if it is not possible to inline
 /// this call.  The program is still in a well defined state if this occurs
@@ -1040,7 +1045,8 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       for (ReturnInst *RI : Returns) {
         // Don't insert llvm.lifetime.end calls between a musttail call and a
         // return.  The return kills all local allocas.
-        if (InlinedMustTailCalls && getPrecedingMustTailCall(RI))
+        if (InlinedMustTailCalls &&
+            RI->getParent()->getTerminatingMustTailCall())
           continue;
         IRBuilder<>(RI).CreateLifetimeEnd(AI, AllocaSize);
       }
@@ -1064,7 +1070,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     for (ReturnInst *RI : Returns) {
       // Don't insert llvm.stackrestore calls between a musttail call and a
       // return.  The return will restore the stack pointer.
-      if (InlinedMustTailCalls && getPrecedingMustTailCall(RI))
+      if (InlinedMustTailCalls && RI->getParent()->getTerminatingMustTailCall())
         continue;
       IRBuilder<>(RI).CreateCall(StackRestore, SavedPtr);
     }
@@ -1087,7 +1093,8 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // Handle the returns preceded by musttail calls separately.
     SmallVector<ReturnInst *, 8> NormalReturns;
     for (ReturnInst *RI : Returns) {
-      CallInst *ReturnedMustTail = getPrecedingMustTailCall(RI);
+      CallInst *ReturnedMustTail =
+          RI->getParent()->getTerminatingMustTailCall();
       if (!ReturnedMustTail) {
         NormalReturns.push_back(RI);
         continue;

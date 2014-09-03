@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef POWERPCSUBTARGET_H
-#define POWERPCSUBTARGET_H
+#ifndef LLVM_LIB_TARGET_POWERPC_PPCSUBTARGET_H
+#define LLVM_LIB_TARGET_POWERPC_PPCSUBTARGET_H
 
 #include "PPCFrameLowering.h"
 #include "PPCInstrInfo.h"
@@ -66,6 +66,12 @@ class TargetMachine;
 
 class PPCSubtarget : public PPCGenSubtargetInfo {
 protected:
+  /// TargetTriple - What processor and OS we're targeting.
+  Triple TargetTriple;
+
+  // Calculates type size & alignment
+  const DataLayout DL;
+
   /// stackAlignment - The minimum alignment known to hold of the stack frame on
   /// entry to the function and which must be maintained by every function.
   unsigned StackAlignment;
@@ -107,9 +113,6 @@ protected:
   bool IsJITCodeModel;
   bool IsLittleEndian;
 
-  /// TargetTriple - What processor and OS we're targeting.
-  Triple TargetTriple;
-
   /// OptLevel - What default optimization level we're emitting code for.
   CodeGenOpt::Level OptLevel;
 
@@ -120,7 +123,6 @@ protected:
   } TargetABI;
 
   PPCFrameLowering FrameLowering;
-  const DataLayout DL;
   PPCInstrInfo InstrInfo;
   PPCJITInfo JITInfo;
   PPCTargetLowering TLInfo;
@@ -131,7 +133,7 @@ public:
   /// of the specified triple.
   ///
   PPCSubtarget(const std::string &TT, const std::string &CPU,
-               const std::string &FS, PPCTargetMachine &TM, bool is64Bit,
+               const std::string &FS, PPCTargetMachine &TM,
                CodeGenOpt::Level OptLevel);
 
   /// ParseSubtargetFeatures - Parses features string setting specified

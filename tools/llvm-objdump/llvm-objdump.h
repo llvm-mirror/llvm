@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_OBJDUMP_H
-#define LLVM_OBJDUMP_H
+#ifndef LLVM_TOOLS_LLVM_OBJDUMP_LLVM_OBJDUMP_H
+#define LLVM_TOOLS_LLVM_OBJDUMP_LLVM_OBJDUMP_H
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
@@ -38,6 +38,7 @@ void printMachOUnwindInfo(const object::MachOObjectFile* o);
 
 void printELFFileHeader(const object::ObjectFile *o);
 void printCOFFFileHeader(const object::ObjectFile *o);
+void printMachOFileHeader(const object::ObjectFile *o);
 
 } // end namespace llvm
 

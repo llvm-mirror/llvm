@@ -24,6 +24,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -129,28 +130,11 @@ bool LLParser::ValidateEndOfModule() {
     }
   }
 
-  // If there are entries in ForwardRefBlockAddresses at this point, they are
-  // references after the function was defined.  Resolve those now.
-  while (!ForwardRefBlockAddresses.empty()) {
-    // Okay, we are referencing an already-parsed function, resolve them now.
-    Function *TheFn = nullptr;
-    const ValID &Fn = ForwardRefBlockAddresses.begin()->first;
-    if (Fn.Kind == ValID::t_GlobalName)
-      TheFn = M->getFunction(Fn.StrVal);
-    else if (Fn.UIntVal < NumberedVals.size())
-      TheFn = dyn_cast<Function>(NumberedVals[Fn.UIntVal]);
-
-    if (!TheFn)
-      return Error(Fn.Loc, "unknown function referenced by blockaddress");
-
-    // Resolve all these references.
-    if (ResolveForwardRefBlockAddresses(TheFn,
-                                      ForwardRefBlockAddresses.begin()->second,
-                                        nullptr))
-      return true;
-
-    ForwardRefBlockAddresses.erase(ForwardRefBlockAddresses.begin());
-  }
+  // If there are entries in ForwardRefBlockAddresses at this point, the
+  // function was never defined.
+  if (!ForwardRefBlockAddresses.empty())
+    return Error(ForwardRefBlockAddresses.begin()->first.Loc,
+                 "expected function name in blockaddress");
 
   for (unsigned i = 0, e = NumberedTypes.size(); i != e; ++i)
     if (NumberedTypes[i].second.isValid())
@@ -192,38 +176,6 @@ bool LLParser::ValidateEndOfModule() {
 
   return false;
 }
-
-bool LLParser::ResolveForwardRefBlockAddresses(Function *TheFn,
-                             std::vector<std::pair<ValID, GlobalValue*> > &Refs,
-                                               PerFunctionState *PFS) {
-  // Loop over all the references, resolving them.
-  for (unsigned i = 0, e = Refs.size(); i != e; ++i) {
-    BasicBlock *Res;
-    if (PFS) {
-      if (Refs[i].first.Kind == ValID::t_LocalName)
-        Res = PFS->GetBB(Refs[i].first.StrVal, Refs[i].first.Loc);
-      else
-        Res = PFS->GetBB(Refs[i].first.UIntVal, Refs[i].first.Loc);
-    } else if (Refs[i].first.Kind == ValID::t_LocalID) {
-      return Error(Refs[i].first.Loc,
-       "cannot take address of numeric label after the function is defined");
-    } else {
-      Res = dyn_cast_or_null<BasicBlock>(
-                     TheFn->getValueSymbolTable().lookup(Refs[i].first.StrVal));
-    }
-
-    if (!Res)
-      return Error(Refs[i].first.Loc,
-                   "referenced value is not a basic block");
-
-    // Get the BlockAddress for this and update references to use it.
-    BlockAddress *BA = BlockAddress::get(TheFn, Res);
-    Refs[i].second->replaceAllUsesWith(BA);
-    Refs[i].second->eraseFromParent();
-  }
-  return false;
-}
-
 
 //===----------------------------------------------------------------------===//
 // Top-Level Entities
@@ -287,6 +239,9 @@ bool LLParser::ParseTopLevelEntities() {
     }
 
     case lltok::kw_attributes: if (ParseUnnamedAttrGrp()) return true; break;
+    case lltok::kw_uselistorder: if (ParseUseListOrder()) return true; break;
+    case lltok::kw_uselistorder_bb:
+                                 if (ParseUseListOrderBB()) return true; break;
     }
   }
 }
@@ -1864,7 +1819,8 @@ bool LLParser::ParseType(Type *&Result, bool AllowVoid) {
 ///  Arg
 ///    ::= Type OptionalAttributes Value OptionalAttributes
 bool LLParser::ParseParameterList(SmallVectorImpl<ParamInfo> &ArgList,
-                                  PerFunctionState &PFS) {
+                                  PerFunctionState &PFS, bool IsMustTailCall,
+                                  bool InVarArgsFunc) {
   if (ParseToken(lltok::lparen, "expected '(' in call"))
     return true;
 
@@ -1874,6 +1830,17 @@ bool LLParser::ParseParameterList(SmallVectorImpl<ParamInfo> &ArgList,
     if (!ArgList.empty() &&
         ParseToken(lltok::comma, "expected ',' in argument list"))
       return true;
+
+    // Parse an ellipsis if this is a musttail call in a variadic function.
+    if (Lex.getKind() == lltok::dotdotdot) {
+      const char *Msg = "unexpected ellipsis in argument list for ";
+      if (!IsMustTailCall)
+        return TokError(Twine(Msg) + "non-musttail call");
+      if (!InVarArgsFunc)
+        return TokError(Twine(Msg) + "musttail call in non-varargs function");
+      Lex.Lex();  // Lex the '...', it is purely for readability.
+      return ParseToken(lltok::rparen, "expected ')' at end of argument list");
+    }
 
     // Parse the argument.
     LocTy ArgLoc;
@@ -1890,6 +1857,10 @@ bool LLParser::ParseParameterList(SmallVectorImpl<ParamInfo> &ArgList,
                                                              AttrIndex++,
                                                              ArgAttrs)));
   }
+
+  if (IsMustTailCall && InVarArgsFunc)
+    return TokError("expected '...' at end of argument list for musttail call "
+                    "in varargs function");
 
   Lex.Lex();  // Lex the ')'.
   return false;
@@ -2186,28 +2157,6 @@ LLParser::PerFunctionState::~PerFunctionState() {
 }
 
 bool LLParser::PerFunctionState::FinishFunction() {
-  // Check to see if someone took the address of labels in this block.
-  if (!P.ForwardRefBlockAddresses.empty()) {
-    ValID FunctionID;
-    if (!F.getName().empty()) {
-      FunctionID.Kind = ValID::t_GlobalName;
-      FunctionID.StrVal = F.getName();
-    } else {
-      FunctionID.Kind = ValID::t_GlobalID;
-      FunctionID.UIntVal = FunctionNumber;
-    }
-
-    std::map<ValID, std::vector<std::pair<ValID, GlobalValue*> > >::iterator
-      FRBAI = P.ForwardRefBlockAddresses.find(FunctionID);
-    if (FRBAI != P.ForwardRefBlockAddresses.end()) {
-      // Resolve all these references.
-      if (P.ResolveForwardRefBlockAddresses(&F, FRBAI->second, this))
-        return true;
-
-      P.ForwardRefBlockAddresses.erase(FRBAI);
-    }
-  }
-
   if (!ForwardRefVals.empty())
     return P.Error(ForwardRefVals.begin()->second.second,
                    "use of undefined value '%" + ForwardRefVals.begin()->first +
@@ -2593,12 +2542,56 @@ bool LLParser::ParseValID(ValID &ID, PerFunctionState *PFS) {
     if (Label.Kind != ValID::t_LocalID && Label.Kind != ValID::t_LocalName)
       return Error(Label.Loc, "expected basic block name in blockaddress");
 
-    // Make a global variable as a placeholder for this reference.
-    GlobalVariable *FwdRef = new GlobalVariable(*M, Type::getInt8Ty(Context),
-                                           false, GlobalValue::InternalLinkage,
-                                                nullptr, "");
-    ForwardRefBlockAddresses[Fn].push_back(std::make_pair(Label, FwdRef));
-    ID.ConstantVal = FwdRef;
+    // Try to find the function (but skip it if it's forward-referenced).
+    GlobalValue *GV = nullptr;
+    if (Fn.Kind == ValID::t_GlobalID) {
+      if (Fn.UIntVal < NumberedVals.size())
+        GV = NumberedVals[Fn.UIntVal];
+    } else if (!ForwardRefVals.count(Fn.StrVal)) {
+      GV = M->getNamedValue(Fn.StrVal);
+    }
+    Function *F = nullptr;
+    if (GV) {
+      // Confirm that it's actually a function with a definition.
+      if (!isa<Function>(GV))
+        return Error(Fn.Loc, "expected function name in blockaddress");
+      F = cast<Function>(GV);
+      if (F->isDeclaration())
+        return Error(Fn.Loc, "cannot take blockaddress inside a declaration");
+    }
+
+    if (!F) {
+      // Make a global variable as a placeholder for this reference.
+      GlobalValue *&FwdRef = ForwardRefBlockAddresses[Fn][Label];
+      if (!FwdRef)
+        FwdRef = new GlobalVariable(*M, Type::getInt8Ty(Context), false,
+                                    GlobalValue::InternalLinkage, nullptr, "");
+      ID.ConstantVal = FwdRef;
+      ID.Kind = ValID::t_Constant;
+      return false;
+    }
+
+    // We found the function; now find the basic block.  Don't use PFS, since we
+    // might be inside a constant expression.
+    BasicBlock *BB;
+    if (BlockAddressPFS && F == &BlockAddressPFS->getFunction()) {
+      if (Label.Kind == ValID::t_LocalID)
+        BB = BlockAddressPFS->GetBB(Label.UIntVal, Label.Loc);
+      else
+        BB = BlockAddressPFS->GetBB(Label.StrVal, Label.Loc);
+      if (!BB)
+        return Error(Label.Loc, "referenced value is not a basic block");
+    } else {
+      if (Label.Kind == ValID::t_LocalID)
+        return Error(Label.Loc, "cannot take address of numeric label after "
+                                "the function is defined");
+      BB = dyn_cast_or_null<BasicBlock>(
+          F->getValueSymbolTable().lookup(Label.StrVal));
+      if (!BB)
+        return Error(Label.Loc, "referenced value is not a basic block");
+    }
+
+    ID.ConstantVal = BlockAddress::get(F, BB);
     ID.Kind = ValID::t_Constant;
     return false;
   }
@@ -2913,7 +2906,7 @@ bool LLParser::parseOptionalComdat(Comdat *&C) {
 /// ParseGlobalValueVector
 ///   ::= /*empty*/
 ///   ::= TypeAndValue (',' TypeAndValue)*
-bool LLParser::ParseGlobalValueVector(SmallVectorImpl<Constant*> &Elts) {
+bool LLParser::ParseGlobalValueVector(SmallVectorImpl<Constant *> &Elts) {
   // Empty list.
   if (Lex.getKind() == lltok::rbrace ||
       Lex.getKind() == lltok::rsquare ||
@@ -3341,13 +3334,63 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
                    ArgList[i].Name + "'");
   }
 
+  if (isDefine)
+    return false;
+
+  // Check the a declaration has no block address forward references.
+  ValID ID;
+  if (FunctionName.empty()) {
+    ID.Kind = ValID::t_GlobalID;
+    ID.UIntVal = NumberedVals.size() - 1;
+  } else {
+    ID.Kind = ValID::t_GlobalName;
+    ID.StrVal = FunctionName;
+  }
+  auto Blocks = ForwardRefBlockAddresses.find(ID);
+  if (Blocks != ForwardRefBlockAddresses.end())
+    return Error(Blocks->first.Loc,
+                 "cannot take blockaddress inside a declaration");
   return false;
 }
 
+bool LLParser::PerFunctionState::resolveForwardRefBlockAddresses() {
+  ValID ID;
+  if (FunctionNumber == -1) {
+    ID.Kind = ValID::t_GlobalName;
+    ID.StrVal = F.getName();
+  } else {
+    ID.Kind = ValID::t_GlobalID;
+    ID.UIntVal = FunctionNumber;
+  }
+
+  auto Blocks = P.ForwardRefBlockAddresses.find(ID);
+  if (Blocks == P.ForwardRefBlockAddresses.end())
+    return false;
+
+  for (const auto &I : Blocks->second) {
+    const ValID &BBID = I.first;
+    GlobalValue *GV = I.second;
+
+    assert((BBID.Kind == ValID::t_LocalID || BBID.Kind == ValID::t_LocalName) &&
+           "Expected local id or name");
+    BasicBlock *BB;
+    if (BBID.Kind == ValID::t_LocalName)
+      BB = GetBB(BBID.StrVal, BBID.Loc);
+    else
+      BB = GetBB(BBID.UIntVal, BBID.Loc);
+    if (!BB)
+      return P.Error(BBID.Loc, "referenced value is not a basic block");
+
+    GV->replaceAllUsesWith(BlockAddress::get(&F, BB));
+    GV->eraseFromParent();
+  }
+
+  P.ForwardRefBlockAddresses.erase(Blocks);
+  return false;
+}
 
 /// ParseFunctionBody
-///   ::= '{' BasicBlock+ '}'
-///
+///   ::= '{' BasicBlock+ UseListOrderDirective* '}'
 bool LLParser::ParseFunctionBody(Function &Fn) {
   if (Lex.getKind() != lltok::lbrace)
     return TokError("expected '{' in function body");
@@ -3358,12 +3401,23 @@ bool LLParser::ParseFunctionBody(Function &Fn) {
 
   PerFunctionState PFS(*this, Fn, FunctionNumber);
 
+  // Resolve block addresses and allow basic blocks to be forward-declared
+  // within this function.
+  if (PFS.resolveForwardRefBlockAddresses())
+    return true;
+  SaveAndRestore<PerFunctionState *> ScopeExit(BlockAddressPFS, &PFS);
+
   // We need at least one basic block.
-  if (Lex.getKind() == lltok::rbrace)
+  if (Lex.getKind() == lltok::rbrace || Lex.getKind() == lltok::kw_uselistorder)
     return TokError("function body requires at least one basic block");
 
-  while (Lex.getKind() != lltok::rbrace)
+  while (Lex.getKind() != lltok::rbrace &&
+         Lex.getKind() != lltok::kw_uselistorder)
     if (ParseBasicBlock(PFS)) return true;
+
+  while (Lex.getKind() != lltok::rbrace)
+    if (ParseUseListOrder(&PFS))
+      return true;
 
   // Eat the }.
   Lex.Lex();
@@ -4176,7 +4230,8 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
       ParseOptionalReturnAttrs(RetAttrs) ||
       ParseType(RetType, RetTypeLoc, true /*void allowed*/) ||
       ParseValID(CalleeID) ||
-      ParseParameterList(ArgList, PFS) ||
+      ParseParameterList(ArgList, PFS, TCK == CallInst::TCK_MustTail,
+                         PFS.getFunction().isVarArg()) ||
       ParseFnAttributeValuePairs(FnAttrs, FwdRefAttrGrps, false,
                                  BuiltinLoc))
     return true;
@@ -4622,4 +4677,136 @@ bool LLParser::ParseMDNodeVector(SmallVectorImpl<Value*> &Elts,
   } while (EatIfPresent(lltok::comma));
 
   return false;
+}
+
+//===----------------------------------------------------------------------===//
+// Use-list order directives.
+//===----------------------------------------------------------------------===//
+bool LLParser::sortUseListOrder(Value *V, ArrayRef<unsigned> Indexes,
+                                SMLoc Loc) {
+  if (V->use_empty())
+    return Error(Loc, "value has no uses");
+
+  unsigned NumUses = 0;
+  SmallDenseMap<const Use *, unsigned, 16> Order;
+  for (const Use &U : V->uses()) {
+    if (++NumUses > Indexes.size())
+      break;
+    Order[&U] = Indexes[NumUses - 1];
+  }
+  if (NumUses < 2)
+    return Error(Loc, "value only has one use");
+  if (Order.size() != Indexes.size() || NumUses > Indexes.size())
+    return Error(Loc, "wrong number of indexes, expected " +
+                          Twine(std::distance(V->use_begin(), V->use_end())));
+
+  V->sortUseList([&](const Use &L, const Use &R) {
+    return Order.lookup(&L) < Order.lookup(&R);
+  });
+  return false;
+}
+
+/// ParseUseListOrderIndexes
+///   ::= '{' uint32 (',' uint32)+ '}'
+bool LLParser::ParseUseListOrderIndexes(SmallVectorImpl<unsigned> &Indexes) {
+  SMLoc Loc = Lex.getLoc();
+  if (ParseToken(lltok::lbrace, "expected '{' here"))
+    return true;
+  if (Lex.getKind() == lltok::rbrace)
+    return Lex.Error("expected non-empty list of uselistorder indexes");
+
+  // Use Offset, Max, and IsOrdered to check consistency of indexes.  The
+  // indexes should be distinct numbers in the range [0, size-1], and should
+  // not be in order.
+  unsigned Offset = 0;
+  unsigned Max = 0;
+  bool IsOrdered = true;
+  assert(Indexes.empty() && "Expected empty order vector");
+  do {
+    unsigned Index;
+    if (ParseUInt32(Index))
+      return true;
+
+    // Update consistency checks.
+    Offset += Index - Indexes.size();
+    Max = std::max(Max, Index);
+    IsOrdered &= Index == Indexes.size();
+
+    Indexes.push_back(Index);
+  } while (EatIfPresent(lltok::comma));
+
+  if (ParseToken(lltok::rbrace, "expected '}' here"))
+    return true;
+
+  if (Indexes.size() < 2)
+    return Error(Loc, "expected >= 2 uselistorder indexes");
+  if (Offset != 0 || Max >= Indexes.size())
+    return Error(Loc, "expected distinct uselistorder indexes in range [0, size)");
+  if (IsOrdered)
+    return Error(Loc, "expected uselistorder indexes to change the order");
+
+  return false;
+}
+
+/// ParseUseListOrder
+///   ::= 'uselistorder' Type Value ',' UseListOrderIndexes
+bool LLParser::ParseUseListOrder(PerFunctionState *PFS) {
+  SMLoc Loc = Lex.getLoc();
+  if (ParseToken(lltok::kw_uselistorder, "expected uselistorder directive"))
+    return true;
+
+  Value *V;
+  SmallVector<unsigned, 16> Indexes;
+  if (ParseTypeAndValue(V, PFS) ||
+      ParseToken(lltok::comma, "expected comma in uselistorder directive") ||
+      ParseUseListOrderIndexes(Indexes))
+    return true;
+
+  return sortUseListOrder(V, Indexes, Loc);
+}
+
+/// ParseUseListOrderBB
+///   ::= 'uselistorder_bb' @foo ',' %bar ',' UseListOrderIndexes
+bool LLParser::ParseUseListOrderBB() {
+  assert(Lex.getKind() == lltok::kw_uselistorder_bb);
+  SMLoc Loc = Lex.getLoc();
+  Lex.Lex();
+
+  ValID Fn, Label;
+  SmallVector<unsigned, 16> Indexes;
+  if (ParseValID(Fn) ||
+      ParseToken(lltok::comma, "expected comma in uselistorder_bb directive") ||
+      ParseValID(Label) ||
+      ParseToken(lltok::comma, "expected comma in uselistorder_bb directive") ||
+      ParseUseListOrderIndexes(Indexes))
+    return true;
+
+  // Check the function.
+  GlobalValue *GV;
+  if (Fn.Kind == ValID::t_GlobalName)
+    GV = M->getNamedValue(Fn.StrVal);
+  else if (Fn.Kind == ValID::t_GlobalID)
+    GV = Fn.UIntVal < NumberedVals.size() ? NumberedVals[Fn.UIntVal] : nullptr;
+  else
+    return Error(Fn.Loc, "expected function name in uselistorder_bb");
+  if (!GV)
+    return Error(Fn.Loc, "invalid function forward reference in uselistorder_bb");
+  auto *F = dyn_cast<Function>(GV);
+  if (!F)
+    return Error(Fn.Loc, "expected function name in uselistorder_bb");
+  if (F->isDeclaration())
+    return Error(Fn.Loc, "invalid declaration in uselistorder_bb");
+
+  // Check the basic block.
+  if (Label.Kind == ValID::t_LocalID)
+    return Error(Label.Loc, "invalid numeric label in uselistorder_bb");
+  if (Label.Kind != ValID::t_LocalName)
+    return Error(Label.Loc, "expected basic block name in uselistorder_bb");
+  Value *V = F->getValueSymbolTable().lookup(Label.StrVal);
+  if (!V)
+    return Error(Label.Loc, "invalid basic block in uselistorder_bb");
+  if (!isa<BasicBlock>(V))
+    return Error(Label.Loc, "expected basic block in uselistorder_bb");
+
+  return sortUseListOrder(V, Indexes, Loc);
 }

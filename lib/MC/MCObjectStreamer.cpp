@@ -144,7 +144,6 @@ void MCObjectStreamer::EmitULEB128Value(const MCExpr *Value) {
     EmitULEB128IntValue(IntValue);
     return;
   }
-  Value = ForceExpAbs(Value);
   insert(new MCLEBFragment(*Value, false));
 }
 
@@ -154,7 +153,6 @@ void MCObjectStreamer::EmitSLEB128Value(const MCExpr *Value) {
     EmitSLEB128IntValue(IntValue);
     return;
   }
-  Value = ForceExpAbs(Value);
   insert(new MCLEBFragment(*Value, true));
 }
 
@@ -266,33 +264,54 @@ void MCObjectStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                                           Isa, Discriminator, FileName);
 }
 
+static const MCExpr *buildSymbolDiff(MCObjectStreamer &OS, const MCSymbol *A,
+                                     const MCSymbol *B) {
+  MCContext &Context = OS.getContext();
+  MCSymbolRefExpr::VariantKind Variant = MCSymbolRefExpr::VK_None;
+  const MCExpr *ARef = MCSymbolRefExpr::Create(A, Variant, Context);
+  const MCExpr *BRef = MCSymbolRefExpr::Create(B, Variant, Context);
+  const MCExpr *AddrDelta =
+      MCBinaryExpr::Create(MCBinaryExpr::Sub, ARef, BRef, Context);
+  return AddrDelta;
+}
+
+static void emitDwarfSetLineAddr(MCObjectStreamer &OS, int64_t LineDelta,
+                                 const MCSymbol *Label, int PointerSize) {
+  // emit the sequence to set the address
+  OS.EmitIntValue(dwarf::DW_LNS_extended_op, 1);
+  OS.EmitULEB128IntValue(PointerSize + 1);
+  OS.EmitIntValue(dwarf::DW_LNE_set_address, 1);
+  OS.EmitSymbolValue(Label, PointerSize);
+
+  // emit the sequence for the LineDelta (from 1) and a zero address delta.
+  MCDwarfLineAddr::Emit(&OS, LineDelta, 0);
+}
+
 void MCObjectStreamer::EmitDwarfAdvanceLineAddr(int64_t LineDelta,
                                                 const MCSymbol *LastLabel,
                                                 const MCSymbol *Label,
                                                 unsigned PointerSize) {
   if (!LastLabel) {
-    EmitDwarfSetLineAddr(LineDelta, Label, PointerSize);
+    emitDwarfSetLineAddr(*this, LineDelta, Label, PointerSize);
     return;
   }
-  const MCExpr *AddrDelta = BuildSymbolDiff(getContext(), Label, LastLabel);
+  const MCExpr *AddrDelta = buildSymbolDiff(*this, Label, LastLabel);
   int64_t Res;
   if (AddrDelta->EvaluateAsAbsolute(Res, getAssembler())) {
     MCDwarfLineAddr::Emit(this, LineDelta, Res);
     return;
   }
-  AddrDelta = ForceExpAbs(AddrDelta);
   insert(new MCDwarfLineAddrFragment(LineDelta, *AddrDelta));
 }
 
 void MCObjectStreamer::EmitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
                                                  const MCSymbol *Label) {
-  const MCExpr *AddrDelta = BuildSymbolDiff(getContext(), Label, LastLabel);
+  const MCExpr *AddrDelta = buildSymbolDiff(*this, Label, LastLabel);
   int64_t Res;
   if (AddrDelta->EvaluateAsAbsolute(Res, getAssembler())) {
     MCDwarfFrameEmitter::EmitAdvanceLoc(*this, Res);
     return;
   }
-  AddrDelta = ForceExpAbs(AddrDelta);
   insert(new MCDwarfCallFrameFragment(*AddrDelta));
 }
 

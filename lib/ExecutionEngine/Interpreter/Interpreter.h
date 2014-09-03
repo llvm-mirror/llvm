@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLI_INTERPRETER_H
-#define LLI_INTERPRETER_H
+#ifndef LLVM_LIB_EXECUTIONENGINE_INTERPRETER_INTERPRETER_H
+#define LLVM_LIB_EXECUTIONENGINE_INTERPRETER_INTERPRETER_H
 
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
@@ -94,7 +94,7 @@ class Interpreter : public ExecutionEngine, public InstVisitor<Interpreter> {
   std::vector<Function*> AtExitHandlers;
 
 public:
-  explicit Interpreter(Module *M);
+  explicit Interpreter(std::unique_ptr<Module> M);
   ~Interpreter();
 
   /// runAtExitHandlers - Run any functions registered by the program's calls to
@@ -105,10 +105,11 @@ public:
   static void Register() {
     InterpCtor = create;
   }
-  
-  /// create - Create an interpreter ExecutionEngine. This can never fail.
+
+  /// Create an interpreter ExecutionEngine.
   ///
-  static ExecutionEngine *create(Module *M, std::string *ErrorStr = nullptr);
+  static ExecutionEngine *create(std::unique_ptr<Module> M,
+                                 std::string *ErrorStr = nullptr);
 
   /// run - Start execution with the specified function and arguments.
   ///

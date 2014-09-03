@@ -49,20 +49,20 @@ void ObjectBuffer::anchor() {}
 void ObjectBufferStream::anchor() {}
 
 ExecutionEngine *(*ExecutionEngine::JITCtor)(
-  Module *M,
+  std::unique_ptr<Module> M,
   std::string *ErrorStr,
   JITMemoryManager *JMM,
   bool GVsWithCode,
   TargetMachine *TM) = nullptr;
 ExecutionEngine *(*ExecutionEngine::MCJITCtor)(
-  Module *M,
+  std::unique_ptr<Module >M,
   std::string *ErrorStr,
   RTDyldMemoryManager *MCJMM,
   TargetMachine *TM) = nullptr;
-ExecutionEngine *(*ExecutionEngine::InterpCtor)(Module *M,
+ExecutionEngine *(*ExecutionEngine::InterpCtor)(std::unique_ptr<Module> M,
                                                 std::string *ErrorStr) =nullptr;
 
-ExecutionEngine::ExecutionEngine(Module *M)
+ExecutionEngine::ExecutionEngine(std::unique_ptr<Module> M)
   : EEState(*this),
     LazyFunctionCreator(nullptr) {
   CompilingLazily         = false;
@@ -77,14 +77,12 @@ ExecutionEngine::ExecutionEngine(Module *M)
   VerifyModules = false;
 #endif
 
-  Modules.push_back(M);
   assert(M && "Module is null?");
+  Modules.push_back(std::move(M));
 }
 
 ExecutionEngine::~ExecutionEngine() {
   clearAllGlobalMappings();
-  for (unsigned i = 0, e = Modules.size(); i != e; ++i)
-    delete Modules[i];
 }
 
 namespace {
@@ -126,15 +124,20 @@ void ExecutionEngine::addObjectFile(std::unique_ptr<object::ObjectFile> O) {
   llvm_unreachable("ExecutionEngine subclass doesn't implement addObjectFile.");
 }
 
-void ExecutionEngine::addArchive(std::unique_ptr<object::Archive> A) {
+void
+ExecutionEngine::addObjectFile(object::OwningBinary<object::ObjectFile> O) {
+  llvm_unreachable("ExecutionEngine subclass doesn't implement addObjectFile.");
+}
+
+void ExecutionEngine::addArchive(object::OwningBinary<object::Archive> A) {
   llvm_unreachable("ExecutionEngine subclass doesn't implement addArchive.");
 }
 
 bool ExecutionEngine::removeModule(Module *M) {
-  for(SmallVectorImpl<Module *>::iterator I = Modules.begin(),
-        E = Modules.end(); I != E; ++I) {
-    Module *Found = *I;
+  for (auto I = Modules.begin(), E = Modules.end(); I != E; ++I) {
+    Module *Found = I->get();
     if (Found == M) {
+      I->release();
       Modules.erase(I);
       clearGlobalMappingsFromModule(M);
       return true;
@@ -258,19 +261,9 @@ const GlobalValue *ExecutionEngine::getGlobalValueAtAddress(void *Addr) {
 
 namespace {
 class ArgvArray {
-  char *Array;
-  std::vector<char*> Values;
+  std::unique_ptr<char[]> Array;
+  std::vector<std::unique_ptr<char[]>> Values;
 public:
-  ArgvArray() : Array(nullptr) {}
-  ~ArgvArray() { clear(); }
-  void clear() {
-    delete[] Array;
-    Array = nullptr;
-    for (size_t I = 0, E = Values.size(); I != E; ++I) {
-      delete[] Values[I];
-    }
-    Values.clear();
-  }
   /// Turn a vector of strings into a nice argv style array of pointers to null
   /// terminated strings.
   void *reset(LLVMContext &C, ExecutionEngine *EE,
@@ -279,38 +272,39 @@ public:
 }  // anonymous namespace
 void *ArgvArray::reset(LLVMContext &C, ExecutionEngine *EE,
                        const std::vector<std::string> &InputArgv) {
-  clear();  // Free the old contents.
+  Values.clear();  // Free the old contents.
+  Values.reserve(InputArgv.size());
   unsigned PtrSize = EE->getDataLayout()->getPointerSize();
-  Array = new char[(InputArgv.size()+1)*PtrSize];
+  Array = make_unique<char[]>((InputArgv.size()+1)*PtrSize);
 
-  DEBUG(dbgs() << "JIT: ARGV = " << (void*)Array << "\n");
+  DEBUG(dbgs() << "JIT: ARGV = " << (void*)Array.get() << "\n");
   Type *SBytePtr = Type::getInt8PtrTy(C);
 
   for (unsigned i = 0; i != InputArgv.size(); ++i) {
     unsigned Size = InputArgv[i].size()+1;
-    char *Dest = new char[Size];
-    Values.push_back(Dest);
-    DEBUG(dbgs() << "JIT: ARGV[" << i << "] = " << (void*)Dest << "\n");
+    auto Dest = make_unique<char[]>(Size);
+    DEBUG(dbgs() << "JIT: ARGV[" << i << "] = " << (void*)Dest.get() << "\n");
 
-    std::copy(InputArgv[i].begin(), InputArgv[i].end(), Dest);
+    std::copy(InputArgv[i].begin(), InputArgv[i].end(), Dest.get());
     Dest[Size-1] = 0;
 
     // Endian safe: Array[i] = (PointerTy)Dest;
-    EE->StoreValueToMemory(PTOGV(Dest), (GenericValue*)(Array+i*PtrSize),
-                           SBytePtr);
+    EE->StoreValueToMemory(PTOGV(Dest.get()),
+                           (GenericValue*)(&Array[i*PtrSize]), SBytePtr);
+    Values.push_back(std::move(Dest));
   }
 
   // Null terminate it
   EE->StoreValueToMemory(PTOGV(nullptr),
-                         (GenericValue*)(Array+InputArgv.size()*PtrSize),
+                         (GenericValue*)(&Array[InputArgv.size()*PtrSize]),
                          SBytePtr);
-  return Array;
+  return Array.get();
 }
 
-void ExecutionEngine::runStaticConstructorsDestructors(Module *module,
+void ExecutionEngine::runStaticConstructorsDestructors(Module &module,
                                                        bool isDtors) {
   const char *Name = isDtors ? "llvm.global_dtors" : "llvm.global_ctors";
-  GlobalVariable *GV = module->getNamedGlobal(Name);
+  GlobalVariable *GV = module.getNamedGlobal(Name);
 
   // If this global has internal linkage, or if it has a use, then it must be
   // an old-style (llvmgcc3) static ctor with __main linked in and in use.  If
@@ -348,8 +342,8 @@ void ExecutionEngine::runStaticConstructorsDestructors(Module *module,
 
 void ExecutionEngine::runStaticConstructorsDestructors(bool isDtors) {
   // Execute global ctors/dtors for each module in the program.
-  for (unsigned i = 0, e = Modules.size(); i != e; ++i)
-    runStaticConstructorsDestructors(Modules[i], isDtors);
+  for (std::unique_ptr<Module> &M : Modules)
+    runStaticConstructorsDestructors(*M, isDtors);
 }
 
 #ifndef NDEBUG
@@ -474,10 +468,10 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
 
     ExecutionEngine *EE = nullptr;
     if (UseMCJIT && ExecutionEngine::MCJITCtor)
-      EE = ExecutionEngine::MCJITCtor(M, ErrorStr, MCJMM ? MCJMM : JMM,
-                                      TheTM.release());
+      EE = ExecutionEngine::MCJITCtor(std::move(M), ErrorStr,
+                                      MCJMM ? MCJMM : JMM, TheTM.release());
     else if (ExecutionEngine::JITCtor)
-      EE = ExecutionEngine::JITCtor(M, ErrorStr, JMM,
+      EE = ExecutionEngine::JITCtor(std::move(M), ErrorStr, JMM,
                                     AllocateGVsWithCode, TheTM.release());
 
     if (EE) {
@@ -490,7 +484,7 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
   // an interpreter instead.
   if (WhichEngine & EngineKind::Interpreter) {
     if (ExecutionEngine::InterpCtor)
-      return ExecutionEngine::InterpCtor(M, ErrorStr);
+      return ExecutionEngine::InterpCtor(std::move(M), ErrorStr);
     if (ErrorStr)
       *ErrorStr = "Interpreter has not been linked in.";
     return nullptr;

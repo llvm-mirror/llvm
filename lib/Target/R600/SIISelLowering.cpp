@@ -25,6 +25,7 @@
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
+#include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -196,9 +197,11 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
       case ISD::BITCAST:
       case ISD::EXTRACT_VECTOR_ELT:
       case ISD::INSERT_VECTOR_ELT:
-      case ISD::CONCAT_VECTORS:
       case ISD::INSERT_SUBVECTOR:
       case ISD::EXTRACT_SUBVECTOR:
+        break;
+      case ISD::CONCAT_VECTORS:
+        setOperationAction(Op, VT, Custom);
         break;
       default:
         setOperationAction(Op, VT, Expand);
@@ -221,11 +224,6 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::FRINT, MVT::f64, Legal);
   }
 
-  // FIXME: These should be removed and handled the same was as f32 fneg. Source
-  // modifiers also work for the double instructions.
-  setOperationAction(ISD::FNEG, MVT::f64, Expand);
-  setOperationAction(ISD::FABS, MVT::f64, Expand);
-
   setOperationAction(ISD::FDIV, MVT::f32, Custom);
 
   setTargetDAGCombine(ISD::SELECT_CC);
@@ -233,12 +231,75 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
 
   setTargetDAGCombine(ISD::UINT_TO_FP);
 
+  // All memory operations. Some folding on the pointer operand is done to help
+  // matching the constant offsets in the addressing modes.
+  setTargetDAGCombine(ISD::LOAD);
+  setTargetDAGCombine(ISD::STORE);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD);
+  setTargetDAGCombine(ISD::ATOMIC_STORE);
+  setTargetDAGCombine(ISD::ATOMIC_CMP_SWAP);
+  setTargetDAGCombine(ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS);
+  setTargetDAGCombine(ISD::ATOMIC_SWAP);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_ADD);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_SUB);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_AND);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_OR);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_XOR);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_NAND);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_MIN);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_MAX);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_UMIN);
+  setTargetDAGCombine(ISD::ATOMIC_LOAD_UMAX);
+
   setSchedulingPreference(Sched::RegPressure);
 }
 
 //===----------------------------------------------------------------------===//
 // TargetLowering queries
 //===----------------------------------------------------------------------===//
+
+// FIXME: This really needs an address space argument. The immediate offset
+// size is different for different sets of memory instruction sets.
+
+// The single offset DS instructions have a 16-bit unsigned byte offset.
+//
+// MUBUF / MTBUF have a 12-bit unsigned byte offset, and additionally can do r +
+// r + i with addr64. 32-bit has more addressing mode options. Depending on the
+// resource constant, it can also do (i64 r0) + (i32 r1) * (i14 i).
+//
+// SMRD instructions have an 8-bit, dword offset.
+//
+bool SITargetLowering::isLegalAddressingMode(const AddrMode &AM,
+                                             Type *Ty) const {
+  // No global is ever allowed as a base.
+  if (AM.BaseGV)
+    return false;
+
+  // Allow a 16-bit unsigned immediate field, since this is what DS instructions
+  // use.
+  if (!isUInt<16>(AM.BaseOffs))
+    return false;
+
+  // Only support r+r,
+  switch (AM.Scale) {
+  case 0:  // "r+i" or just "i", depending on HasBaseReg.
+    break;
+  case 1:
+    if (AM.HasBaseReg && AM.BaseOffs)  // "r+r+i" is not allowed.
+      return false;
+    // Otherwise we have r+r or r+i.
+    break;
+  case 2:
+    if (AM.HasBaseReg || AM.BaseOffs)  // 2*r+r  or  2*r+i is not allowed.
+      return false;
+    // Allow 2*r as r+r.
+    break;
+  default: // Don't allow n * r
+    return false;
+  }
+
+  return true;
+}
 
 bool SITargetLowering::allowsMisalignedMemoryAccesses(EVT  VT,
                                                       unsigned AddrSpace,
@@ -351,7 +412,7 @@ SDValue SITargetLowering::LowerFormalArguments(
   assert(CallConv == CallingConv::C);
 
   SmallVector<ISD::InputArg, 16> Splits;
-  uint32_t Skipped = 0;
+  BitVector Skipped(Ins.size());
 
   for (unsigned i = 0, e = Ins.size(), PSInputNum = 0; i != e; ++i) {
     const ISD::InputArg &Arg = Ins[i];
@@ -364,7 +425,7 @@ SDValue SITargetLowering::LowerFormalArguments(
 
       if (!Arg.Used) {
         // We can savely skip PS inputs
-        Skipped |= 1 << i;
+        Skipped.set(i);
         ++PSInputNum;
         continue;
       }
@@ -428,7 +489,7 @@ SDValue SITargetLowering::LowerFormalArguments(
   for (unsigned i = 0, e = Ins.size(), ArgIdx = 0; i != e; ++i) {
 
     const ISD::InputArg &Arg = Ins[i];
-    if (Skipped & (1 << i)) {
+    if (Skipped[i]) {
       InVals.push_back(DAG.getUNDEF(Arg.VT));
       continue;
     }
@@ -444,6 +505,18 @@ SDValue SITargetLowering::LowerFormalArguments(
       SDValue Arg = LowerParameter(DAG, VT, MemVT,  DL, DAG.getRoot(),
                                    36 + VA.getLocMemOffset(),
                                    Ins[i].Flags.isSExt());
+
+      const PointerType *ParamTy =
+          dyn_cast<PointerType>(FType->getParamType(Ins[i].OrigArgIndex));
+      if (Subtarget->getGeneration() == AMDGPUSubtarget::SOUTHERN_ISLANDS &&
+          ParamTy && ParamTy->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS) {
+        // On SI local pointers are just offsets into LDS, so they are always
+        // less than 16-bits.  On CI and newer they could potentially be
+        // real pointers, so we can't guarantee their size.
+        Arg = DAG.getNode(ISD::AssertZext, DL, Arg.getValueType(), Arg,
+                          DAG.getValueType(MVT::i16));
+      }
+
       InVals.push_back(Arg);
       continue;
     }
@@ -584,38 +657,6 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
     MI->eraseFromParent();
     break;
   }
-  case AMDGPU::FABS_SI: {
-    MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
-    const SIInstrInfo *TII = static_cast<const SIInstrInfo *>(
-        getTargetMachine().getSubtargetImpl()->getInstrInfo());
-    DebugLoc DL = MI->getDebugLoc();
-    unsigned DestReg = MI->getOperand(0).getReg();
-    unsigned Reg = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
-
-    BuildMI(*BB, I, DL, TII->get(AMDGPU::V_MOV_B32_e32), Reg)
-      .addImm(0x7fffffff);
-    BuildMI(*BB, I, DL, TII->get(AMDGPU::V_AND_B32_e32), DestReg)
-      .addReg(MI->getOperand(1).getReg())
-      .addReg(Reg);
-    MI->eraseFromParent();
-    break;
-  }
-  case AMDGPU::FNEG_SI: {
-    MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
-    const SIInstrInfo *TII = static_cast<const SIInstrInfo *>(
-        getTargetMachine().getSubtargetImpl()->getInstrInfo());
-    DebugLoc DL = MI->getDebugLoc();
-    unsigned DestReg = MI->getOperand(0).getReg();
-    unsigned Reg = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
-
-    BuildMI(*BB, I, DL, TII->get(AMDGPU::V_MOV_B32_e32), Reg)
-      .addImm(0x80000000);
-    BuildMI(*BB, I, DL, TII->get(AMDGPU::V_XOR_B32_e32), DestReg)
-      .addReg(MI->getOperand(1).getReg())
-      .addReg(Reg);
-    MI->eraseFromParent();
-    break;
-  }
   case AMDGPU::FCLAMP_SI: {
     const SIInstrInfo *TII = static_cast<const SIInstrInfo *>(
         getTargetMachine().getSubtargetImpl()->getInstrInfo());
@@ -715,15 +756,8 @@ static SDNode *findUser(SDValue Value, unsigned Opcode) {
 
 SDValue SITargetLowering::LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const {
 
-  MachineFunction &MF = DAG.getMachineFunction();
-  const SIInstrInfo *TII = static_cast<const SIInstrInfo *>(
-      getTargetMachine().getSubtargetImpl()->getInstrInfo());
-  const SIRegisterInfo &TRI = TII->getRegisterInfo();
   FrameIndexSDNode *FINode = cast<FrameIndexSDNode>(Op);
   unsigned FrameIndex = FINode->getIndex();
-
-  CreateLiveInRegister(DAG, &AMDGPU::SReg_32RegClass,
-    TRI.getPreloadedValue(MF, SIRegisterInfo::SCRATCH_WAVE_OFFSET), MVT::i32);
 
   return DAG.getTargetFrameIndex(FrameIndex, MVT::i32);
 }
@@ -1251,6 +1285,56 @@ SDValue SITargetLowering::performUCharToFloatCombine(SDNode *N,
   return SDValue();
 }
 
+// (shl (add x, c1), c2) -> add (shl x, c2), (shl c1, c2)
+
+// This is a variant of
+// (mul (add x, c1), c2) -> add (mul x, c2), (mul c1, c2),
+//
+// The normal DAG combiner will do this, but only if the add has one use since
+// that would increase the number of instructions.
+//
+// This prevents us from seeing a constant offset that can be folded into a
+// memory instruction's addressing mode. If we know the resulting add offset of
+// a pointer can be folded into an addressing offset, we can replace the pointer
+// operand with the add of new constant offset. This eliminates one of the uses,
+// and may allow the remaining use to also be simplified.
+//
+SDValue SITargetLowering::performSHLPtrCombine(SDNode *N,
+                                               unsigned AddrSpace,
+                                               DAGCombinerInfo &DCI) const {
+  SDValue N0 = N->getOperand(0);
+  SDValue N1 = N->getOperand(1);
+
+  if (N0.getOpcode() != ISD::ADD)
+    return SDValue();
+
+  const ConstantSDNode *CN1 = dyn_cast<ConstantSDNode>(N1);
+  if (!CN1)
+    return SDValue();
+
+  const ConstantSDNode *CAdd = dyn_cast<ConstantSDNode>(N0.getOperand(1));
+  if (!CAdd)
+    return SDValue();
+
+  const SIInstrInfo *TII = static_cast<const SIInstrInfo *>(
+      getTargetMachine().getSubtargetImpl()->getInstrInfo());
+
+  // If the resulting offset is too large, we can't fold it into the addressing
+  // mode offset.
+  APInt Offset = CAdd->getAPIntValue() << CN1->getAPIntValue();
+  if (!TII->canFoldOffset(Offset.getZExtValue(), AddrSpace))
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc SL(N);
+  EVT VT = N->getValueType(0);
+
+  SDValue ShlX = DAG.getNode(ISD::SHL, SL, VT, N0.getOperand(0), N1);
+  SDValue COffset = DAG.getConstant(Offset, MVT::i32);
+
+  return DAG.getNode(ISD::ADD, SL, VT, ShlX, COffset);
+}
+
 SDValue SITargetLowering::PerformDAGCombine(SDNode *N,
                                             DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -1303,8 +1387,45 @@ SDValue SITargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::UINT_TO_FP: {
     return performUCharToFloatCombine(N, DCI);
   }
-  }
+  case ISD::LOAD:
+  case ISD::STORE:
+  case ISD::ATOMIC_LOAD:
+  case ISD::ATOMIC_STORE:
+  case ISD::ATOMIC_CMP_SWAP:
+  case ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS:
+  case ISD::ATOMIC_SWAP:
+  case ISD::ATOMIC_LOAD_ADD:
+  case ISD::ATOMIC_LOAD_SUB:
+  case ISD::ATOMIC_LOAD_AND:
+  case ISD::ATOMIC_LOAD_OR:
+  case ISD::ATOMIC_LOAD_XOR:
+  case ISD::ATOMIC_LOAD_NAND:
+  case ISD::ATOMIC_LOAD_MIN:
+  case ISD::ATOMIC_LOAD_MAX:
+  case ISD::ATOMIC_LOAD_UMIN:
+  case ISD::ATOMIC_LOAD_UMAX: { // TODO: Target mem intrinsics.
+    if (DCI.isBeforeLegalize())
+      break;
 
+    MemSDNode *MemNode = cast<MemSDNode>(N);
+    SDValue Ptr = MemNode->getBasePtr();
+
+    // TODO: We could also do this for multiplies.
+    unsigned AS = MemNode->getAddressSpace();
+    if (Ptr.getOpcode() == ISD::SHL && AS != AMDGPUAS::PRIVATE_ADDRESS) {
+      SDValue NewPtr = performSHLPtrCombine(Ptr.getNode(), AS, DCI);
+      if (NewPtr) {
+        SmallVector<SDValue, 8> NewOps;
+        for (unsigned I = 0, E = MemNode->getNumOperands(); I != E; ++I)
+          NewOps.push_back(MemNode->getOperand(I));
+
+        NewOps[N->getOpcode() == ISD::STORE ? 2 : 1] = NewPtr;
+        return SDValue(DAG.UpdateNodeOperands(MemNode, NewOps), 0);
+      }
+    }
+    break;
+  }
+  }
   return AMDGPUTargetLowering::PerformDAGCombine(N, DCI);
 }
 

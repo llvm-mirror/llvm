@@ -976,6 +976,14 @@ void BoUpSLP::buildTree_rec(ArrayRef<Value *> VL, unsigned Depth) {
   Instruction *VL0 = cast<Instruction>(VL[0]);
   BasicBlock *BB = cast<Instruction>(VL0)->getParent();
 
+  if (!DT->isReachableFromEntry(BB)) {
+    // Don't go into unreachable blocks. They may contain instructions with
+    // dependency cycles which confuse the final scheduling.
+    DEBUG(dbgs() << "SLP: bundle in unreachable block.\n");
+    newTreeEntry(VL, false);
+    return;
+  }
+  
   // Check that every instructions appears once in this bundle.
   for (unsigned i = 0, e = VL.size(); i < e; ++i)
     for (unsigned j = i+1; j < e; ++j)
@@ -1176,6 +1184,16 @@ void BoUpSLP::buildTree_rec(ArrayRef<Value *> VL, unsigned Depth) {
       for (unsigned j = 0; j < VL.size(); ++j) {
         if (cast<Instruction>(VL[j])->getNumOperands() != 2) {
           DEBUG(dbgs() << "SLP: not-vectorizable GEP (nested indexes).\n");
+          BS.cancelScheduling(VL);
+          newTreeEntry(VL, false);
+          return;
+        }
+      }
+
+      // We combine only GEPs with a single use.
+      for (unsigned j = 0; j < VL.size(); ++j) {
+        if (cast<Instruction>(VL[j])->getNumUses() > 1) {
+          DEBUG(dbgs() << "SLP: not-vectorizable GEP (multiple uses).\n");
           BS.cancelScheduling(VL);
           newTreeEntry(VL, false);
           return;
@@ -1417,6 +1435,10 @@ int BoUpSLP::getEntryCost(TreeEntry *E) {
             TargetTransformInfo::OK_AnyValue;
         TargetTransformInfo::OperandValueKind Op2VK =
             TargetTransformInfo::OK_UniformConstantValue;
+        TargetTransformInfo::OperandValueProperties Op1VP =
+            TargetTransformInfo::OP_None;
+        TargetTransformInfo::OperandValueProperties Op2VP =
+            TargetTransformInfo::OP_None;
 
         // If all operands are exactly the same ConstantInt then set the
         // operand kind to OK_UniformConstantValue.
@@ -1438,11 +1460,17 @@ int BoUpSLP::getEntryCost(TreeEntry *E) {
               CInt != cast<ConstantInt>(I->getOperand(1)))
             Op2VK = TargetTransformInfo::OK_NonUniformConstantValue;
         }
+        // FIXME: Currently cost of model modification for division by
+        // power of 2 is handled only for X86. Add support for other targets.
+        if (Op2VK == TargetTransformInfo::OK_UniformConstantValue && CInt &&
+            CInt->getValue().isPowerOf2())
+          Op2VP = TargetTransformInfo::OP_PowerOf2;
 
-        ScalarCost =
-            VecTy->getNumElements() *
-            TTI->getArithmeticInstrCost(Opcode, ScalarTy, Op1VK, Op2VK);
-        VecCost = TTI->getArithmeticInstrCost(Opcode, VecTy, Op1VK, Op2VK);
+        ScalarCost = VecTy->getNumElements() *
+                     TTI->getArithmeticInstrCost(Opcode, ScalarTy, Op1VK, Op2VK,
+                                                 Op1VP, Op2VP);
+        VecCost = TTI->getArithmeticInstrCost(Opcode, VecTy, Op1VK, Op2VK,
+                                              Op1VP, Op2VP);
       }
       return VecCost - ScalarCost;
     }
@@ -3298,8 +3326,7 @@ public:
     unsigned i = 0;
 
     for (; i < NumReducedVals - ReduxWidth + 1; i += ReduxWidth) {
-      ArrayRef<Value *> ValsToReduce(&ReducedVals[i], ReduxWidth);
-      V.buildTree(ValsToReduce, ReductionOps);
+      V.buildTree(makeArrayRef(&ReducedVals[i], ReduxWidth), ReductionOps);
 
       // Estimate cost.
       int Cost = V.getTreeCost() + getReductionCost(TTI, ReducedVals[i]);
@@ -3491,8 +3518,7 @@ bool SLPVectorizer::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
       // Try to vectorize them.
       unsigned NumElts = (SameTypeIt - IncIt);
       DEBUG(errs() << "SLP: Trying to vectorize starting at PHIs (" << NumElts << ")\n");
-      if (NumElts > 1 &&
-          tryToVectorizeList(ArrayRef<Value *>(IncIt, NumElts), R)) {
+      if (NumElts > 1 && tryToVectorizeList(makeArrayRef(IncIt, NumElts), R)) {
         // Success start over because instructions might have been changed.
         HaveVectorizedPhiNodes = true;
         Changed = true;
@@ -3634,8 +3660,8 @@ bool SLPVectorizer::vectorizeStoreChains(BoUpSLP &R) {
     // Process the stores in chunks of 16.
     for (unsigned CI = 0, CE = it->second.size(); CI < CE; CI+=16) {
       unsigned Len = std::min<unsigned>(CE - CI, 16);
-      ArrayRef<StoreInst *> Chunk(&it->second[CI], Len);
-      Changed |= vectorizeStores(Chunk, -SLPCostThreshold, R);
+      Changed |= vectorizeStores(makeArrayRef(&it->second[CI], Len),
+                                 -SLPCostThreshold, R);
     }
   }
   return Changed;

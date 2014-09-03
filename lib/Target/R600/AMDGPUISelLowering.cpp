@@ -250,7 +250,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   const MVT ScalarIntVTs[] = { MVT::i32, MVT::i64 };
   for (MVT VT : ScalarIntVTs) {
     setOperationAction(ISD::SREM, VT, Expand);
-    setOperationAction(ISD::SDIV, VT, Custom);
+    setOperationAction(ISD::SDIV, VT, Expand);
 
     // GPU does not have divrem function for signed or unsigned.
     setOperationAction(ISD::SDIVREM, VT, Custom);
@@ -310,7 +310,6 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::SUB,  VT, Expand);
     setOperationAction(ISD::SINT_TO_FP, VT, Expand);
     setOperationAction(ISD::UINT_TO_FP, VT, Expand);
-    // TODO: Implement custom UREM / SREM routines.
     setOperationAction(ISD::SDIV, VT, Expand);
     setOperationAction(ISD::UDIV, VT, Expand);
     setOperationAction(ISD::SREM, VT, Expand);
@@ -376,13 +375,18 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setSchedulingPreference(Sched::RegPressure);
   setJumpIsExpensive(true);
 
+  // SI at least has hardware support for floating point exceptions, but no way
+  // of using or handling them is implemented. They are also optional in OpenCL
+  // (Section 7.3)
+  setHasFloatingPointExceptions(false);
+
   setSelectIsExpensive(false);
   PredictableSelectIsExpensive = false;
 
   // There are no integer divide instructions, and these expand to a pretty
   // large sequence of instructions.
   setIntDivIsCheap(false);
-  setPow2DivIsCheap(false);
+  setPow2SDivIsCheap(false);
 
   // TODO: Investigate this when 64-bit divides are implemented.
   addBypassSlowDiv(64, 32);
@@ -437,12 +441,12 @@ bool AMDGPUTargetLowering::isLoadBitCastBeneficial(EVT LoadTy,
 
 bool AMDGPUTargetLowering::isFAbsFree(EVT VT) const {
   assert(VT.isFloatingPoint());
-  return VT == MVT::f32;
+  return VT == MVT::f32 || VT == MVT::f64;
 }
 
 bool AMDGPUTargetLowering::isFNegFree(EVT VT) const {
   assert(VT.isFloatingPoint());
-  return VT == MVT::f32;
+  return VT == MVT::f32 || VT == MVT::f64;
 }
 
 bool AMDGPUTargetLowering::isTruncateFree(EVT Source, EVT Dest) const {
@@ -542,8 +546,6 @@ SDValue AMDGPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::EXTRACT_SUBVECTOR: return LowerEXTRACT_SUBVECTOR(Op, DAG);
   case ISD::FrameIndex: return LowerFrameIndex(Op, DAG);
   case ISD::INTRINSIC_WO_CHAIN: return LowerINTRINSIC_WO_CHAIN(Op, DAG);
-  case ISD::SDIV: return LowerSDIV(Op, DAG);
-  case ISD::SREM: return LowerSREM(Op, DAG);
   case ISD::UDIVREM: return LowerUDIVREM(Op, DAG);
   case ISD::SDIVREM: return LowerSDIVREM(Op, DAG);
   case ISD::FCEIL: return LowerFCEIL(Op, DAG);
@@ -850,6 +852,10 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
 
     case Intrinsic::AMDGPU_rsq_clamped:
       return DAG.getNode(AMDGPUISD::RSQ_CLAMPED, DL, VT, Op.getOperand(1));
+
+    case Intrinsic::AMDGPU_ldexp:
+      return DAG.getNode(AMDGPUISD::LDEXP, DL, VT, Op.getOperand(1),
+                                                   Op.getOperand(2));
 
     case AMDGPUIntrinsic::AMDGPU_imax:
       return DAG.getNode(AMDGPUISD::SMAX, DL, VT, Op.getOperand(1),
@@ -1385,13 +1391,16 @@ SDValue AMDGPUTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
 // This is a shortcut for integer division because we have fast i32<->f32
 // conversions, and fast f32 reciprocal instructions. The fractional part of a
 // float is enough to accurately represent up to a 24-bit integer.
-SDValue AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
+SDValue AMDGPUTargetLowering::LowerDIVREM24(SDValue Op, SelectionDAG &DAG, bool sign) const {
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
   MVT IntVT = MVT::i32;
   MVT FltVT = MVT::f32;
+
+  ISD::NodeType ToFp  = sign ? ISD::SINT_TO_FP : ISD::UINT_TO_FP;
+  ISD::NodeType ToInt = sign ? ISD::FP_TO_SINT : ISD::FP_TO_UINT;
 
   if (VT.isVector()) {
     unsigned NElts = VT.getVectorNumElements();
@@ -1401,29 +1410,35 @@ SDValue AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
 
   unsigned BitSize = VT.getScalarType().getSizeInBits();
 
-  // char|short jq = ia ^ ib;
-  SDValue jq = DAG.getNode(ISD::XOR, DL, VT, LHS, RHS);
+  SDValue jq = DAG.getConstant(1, IntVT);
 
-  // jq = jq >> (bitsize - 2)
-  jq = DAG.getNode(ISD::SRA, DL, VT, jq, DAG.getConstant(BitSize - 2, VT));
+  if (sign) {
+    // char|short jq = ia ^ ib;
+    jq = DAG.getNode(ISD::XOR, DL, VT, LHS, RHS);
 
-  // jq = jq | 0x1
-  jq = DAG.getNode(ISD::OR, DL, VT, jq, DAG.getConstant(1, VT));
+    // jq = jq >> (bitsize - 2)
+    jq = DAG.getNode(ISD::SRA, DL, VT, jq, DAG.getConstant(BitSize - 2, VT));
 
-  // jq = (int)jq
-  jq = DAG.getSExtOrTrunc(jq, DL, IntVT);
+    // jq = jq | 0x1
+    jq = DAG.getNode(ISD::OR, DL, VT, jq, DAG.getConstant(1, VT));
+
+    // jq = (int)jq
+    jq = DAG.getSExtOrTrunc(jq, DL, IntVT);
+  }
 
   // int ia = (int)LHS;
-  SDValue ia = DAG.getSExtOrTrunc(LHS, DL, IntVT);
+  SDValue ia = sign ?
+    DAG.getSExtOrTrunc(LHS, DL, IntVT) : DAG.getZExtOrTrunc(LHS, DL, IntVT);
 
   // int ib, (int)RHS;
-  SDValue ib = DAG.getSExtOrTrunc(RHS, DL, IntVT);
+  SDValue ib = sign ?
+    DAG.getSExtOrTrunc(RHS, DL, IntVT) : DAG.getZExtOrTrunc(RHS, DL, IntVT);
 
   // float fa = (float)ia;
-  SDValue fa = DAG.getNode(ISD::SINT_TO_FP, DL, FltVT, ia);
+  SDValue fa = DAG.getNode(ToFp, DL, FltVT, ia);
 
   // float fb = (float)ib;
-  SDValue fb = DAG.getNode(ISD::SINT_TO_FP, DL, FltVT, ib);
+  SDValue fb = DAG.getNode(ToFp, DL, FltVT, ib);
 
   // float fq = native_divide(fa, fb);
   SDValue fq = DAG.getNode(ISD::FMUL, DL, FltVT,
@@ -1440,7 +1455,7 @@ SDValue AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
                            DAG.getNode(ISD::FMUL, DL, FltVT, fqneg, fb), fa);
 
   // int iq = (int)fq;
-  SDValue iq = DAG.getNode(ISD::FP_TO_SINT, DL, IntVT, fq);
+  SDValue iq = DAG.getNode(ToInt, DL, IntVT, fq);
 
   // fr = fabs(fr);
   fr = DAG.getNode(ISD::FABS, DL, FltVT, fr);
@@ -1456,174 +1471,21 @@ SDValue AMDGPUTargetLowering::LowerSDIV24(SDValue Op, SelectionDAG &DAG) const {
   // jq = (cv ? jq : 0);
   jq = DAG.getNode(ISD::SELECT, DL, VT, cv, jq, DAG.getConstant(0, VT));
 
+  // dst = trunc/extend to legal type
+  iq = sign ? DAG.getSExtOrTrunc(iq, DL, VT) : DAG.getZExtOrTrunc(iq, DL, VT);
+
   // dst = iq + jq;
-  iq = DAG.getSExtOrTrunc(iq, DL, VT);
-  return DAG.getNode(ISD::ADD, DL, VT, iq, jq);
-}
+  SDValue Div = DAG.getNode(ISD::ADD, DL, VT, iq, jq);
 
-SDValue AMDGPUTargetLowering::LowerSDIV32(SDValue Op, SelectionDAG &DAG) const {
-  SDLoc DL(Op);
-  EVT OVT = Op.getValueType();
-  SDValue LHS = Op.getOperand(0);
-  SDValue RHS = Op.getOperand(1);
-  // The LowerSDIV32 function generates equivalent to the following IL.
-  // mov r0, LHS
-  // mov r1, RHS
-  // ilt r10, r0, 0
-  // ilt r11, r1, 0
-  // iadd r0, r0, r10
-  // iadd r1, r1, r11
-  // ixor r0, r0, r10
-  // ixor r1, r1, r11
-  // udiv r0, r0, r1
-  // ixor r10, r10, r11
-  // iadd r0, r0, r10
-  // ixor DST, r0, r10
+  // Rem needs compensation, it's easier to recompute it
+  SDValue Rem = DAG.getNode(ISD::MUL, DL, VT, Div, RHS);
+  Rem = DAG.getNode(ISD::SUB, DL, VT, LHS, Rem);
 
-  // mov r0, LHS
-  SDValue r0 = LHS;
-
-  // mov r1, RHS
-  SDValue r1 = RHS;
-
-  // ilt r10, r0, 0
-  SDValue r10 = DAG.getSelectCC(DL,
-      r0, DAG.getConstant(0, OVT),
-      DAG.getConstant(-1, OVT),
-      DAG.getConstant(0, OVT),
-      ISD::SETLT);
-
-  // ilt r11, r1, 0
-  SDValue r11 = DAG.getSelectCC(DL,
-      r1, DAG.getConstant(0, OVT),
-      DAG.getConstant(-1, OVT),
-      DAG.getConstant(0, OVT),
-      ISD::SETLT);
-
-  // iadd r0, r0, r10
-  r0 = DAG.getNode(ISD::ADD, DL, OVT, r0, r10);
-
-  // iadd r1, r1, r11
-  r1 = DAG.getNode(ISD::ADD, DL, OVT, r1, r11);
-
-  // ixor r0, r0, r10
-  r0 = DAG.getNode(ISD::XOR, DL, OVT, r0, r10);
-
-  // ixor r1, r1, r11
-  r1 = DAG.getNode(ISD::XOR, DL, OVT, r1, r11);
-
-  // udiv r0, r0, r1
-  r0 = DAG.getNode(ISD::UDIV, DL, OVT, r0, r1);
-
-  // ixor r10, r10, r11
-  r10 = DAG.getNode(ISD::XOR, DL, OVT, r10, r11);
-
-  // iadd r0, r0, r10
-  r0 = DAG.getNode(ISD::ADD, DL, OVT, r0, r10);
-
-  // ixor DST, r0, r10
-  SDValue DST = DAG.getNode(ISD::XOR, DL, OVT, r0, r10);
-  return DST;
-}
-
-SDValue AMDGPUTargetLowering::LowerSDIV64(SDValue Op, SelectionDAG &DAG) const {
-  return SDValue(Op.getNode(), 0);
-}
-
-SDValue AMDGPUTargetLowering::LowerSDIV(SDValue Op, SelectionDAG &DAG) const {
-  EVT OVT = Op.getValueType().getScalarType();
-
-  if (OVT == MVT::i32) {
-    if (DAG.ComputeNumSignBits(Op.getOperand(0)) > 8 &&
-        DAG.ComputeNumSignBits(Op.getOperand(1)) > 8) {
-      // TODO: We technically could do this for i64, but shouldn't that just be
-      // handled by something generally reducing 64-bit division on 32-bit
-      // values to 32-bit?
-      return LowerSDIV24(Op, DAG);
-    }
-
-    return LowerSDIV32(Op, DAG);
-  }
-
-  assert(OVT == MVT::i64);
-  return LowerSDIV64(Op, DAG);
-}
-
-SDValue AMDGPUTargetLowering::LowerSREM32(SDValue Op, SelectionDAG &DAG) const {
-  SDLoc DL(Op);
-  EVT OVT = Op.getValueType();
-  SDValue LHS = Op.getOperand(0);
-  SDValue RHS = Op.getOperand(1);
-  // The LowerSREM32 function generates equivalent to the following IL.
-  // mov r0, LHS
-  // mov r1, RHS
-  // ilt r10, r0, 0
-  // ilt r11, r1, 0
-  // iadd r0, r0, r10
-  // iadd r1, r1, r11
-  // ixor r0, r0, r10
-  // ixor r1, r1, r11
-  // udiv r20, r0, r1
-  // umul r20, r20, r1
-  // sub r0, r0, r20
-  // iadd r0, r0, r10
-  // ixor DST, r0, r10
-
-  // mov r0, LHS
-  SDValue r0 = LHS;
-
-  // mov r1, RHS
-  SDValue r1 = RHS;
-
-  // ilt r10, r0, 0
-  SDValue r10 = DAG.getSetCC(DL, OVT, r0, DAG.getConstant(0, OVT), ISD::SETLT);
-
-  // ilt r11, r1, 0
-  SDValue r11 = DAG.getSetCC(DL, OVT, r1, DAG.getConstant(0, OVT), ISD::SETLT);
-
-  // iadd r0, r0, r10
-  r0 = DAG.getNode(ISD::ADD, DL, OVT, r0, r10);
-
-  // iadd r1, r1, r11
-  r1 = DAG.getNode(ISD::ADD, DL, OVT, r1, r11);
-
-  // ixor r0, r0, r10
-  r0 = DAG.getNode(ISD::XOR, DL, OVT, r0, r10);
-
-  // ixor r1, r1, r11
-  r1 = DAG.getNode(ISD::XOR, DL, OVT, r1, r11);
-
-  // udiv r20, r0, r1
-  SDValue r20 = DAG.getNode(ISD::UREM, DL, OVT, r0, r1);
-
-  // umul r20, r20, r1
-  r20 = DAG.getNode(AMDGPUISD::UMUL, DL, OVT, r20, r1);
-
-  // sub r0, r0, r20
-  r0 = DAG.getNode(ISD::SUB, DL, OVT, r0, r20);
-
-  // iadd r0, r0, r10
-  r0 = DAG.getNode(ISD::ADD, DL, OVT, r0, r10);
-
-  // ixor DST, r0, r10
-  SDValue DST = DAG.getNode(ISD::XOR, DL, OVT, r0, r10);
-  return DST;
-}
-
-SDValue AMDGPUTargetLowering::LowerSREM64(SDValue Op, SelectionDAG &DAG) const {
-  return SDValue(Op.getNode(), 0);
-}
-
-SDValue AMDGPUTargetLowering::LowerSREM(SDValue Op, SelectionDAG &DAG) const {
-  EVT OVT = Op.getValueType();
-
-  if (OVT.getScalarType() == MVT::i64)
-    return LowerSREM64(Op, DAG);
-
-  if (OVT.getScalarType() == MVT::i32)
-    return LowerSREM32(Op, DAG);
-
-  return SDValue(Op.getNode(), 0);
+  SDValue Res[2] = {
+    Div,
+    Rem
+  };
+  return DAG.getMergeValues(Res, DL);
 }
 
 SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
@@ -1633,6 +1495,16 @@ SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
 
   SDValue Num = Op.getOperand(0);
   SDValue Den = Op.getOperand(1);
+
+  if (VT == MVT::i32) {
+    if (DAG.MaskedValueIsZero(Op.getOperand(0), APInt(32, 0xff << 24)) &&
+        DAG.MaskedValueIsZero(Op.getOperand(1), APInt(32, 0xff << 24))) {
+      // TODO: We technically could do this for i64, but shouldn't that just be
+      // handled by something generally reducing 64-bit division on 32-bit
+      // values to 32-bit?
+      return LowerDIVREM24(Op, DAG, false);
+    }
+  }
 
   // RCP =  URECIP(Den) = 2^32 / Den + e
   // e is rounding error.
@@ -1735,11 +1607,21 @@ SDValue AMDGPUTargetLowering::LowerSDIVREM(SDValue Op,
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
 
-  SDValue Zero = DAG.getConstant(0, VT);
-  SDValue NegOne = DAG.getConstant(-1, VT);
-
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
+
+  if (VT == MVT::i32) {
+    if (DAG.ComputeNumSignBits(Op.getOperand(0)) > 8 &&
+        DAG.ComputeNumSignBits(Op.getOperand(1)) > 8) {
+      // TODO: We technically could do this for i64, but shouldn't that just be
+      // handled by something generally reducing 64-bit division on 32-bit
+      // values to 32-bit?
+      return LowerDIVREM24(Op, DAG, true);
+    }
+  }
+
+  SDValue Zero = DAG.getConstant(0, VT);
+  SDValue NegOne = DAG.getConstant(-1, VT);
 
   SDValue LHSign = DAG.getSelectCC(DL, LHS, Zero, NegOne, Zero, ISD::SETLT);
   SDValue RHSign = DAG.getSelectCC(DL, RHS, Zero, NegOne, Zero, ISD::SETLT);
@@ -2290,6 +2172,7 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(RSQ)
   NODE_NAME_CASE(RSQ_LEGACY)
   NODE_NAME_CASE(RSQ_CLAMPED)
+  NODE_NAME_CASE(LDEXP)
   NODE_NAME_CASE(DOT4)
   NODE_NAME_CASE(BFE_U32)
   NODE_NAME_CASE(BFE_I32)

@@ -223,8 +223,8 @@ public:
     return BypassSlowDivWidths;
   }
 
-  /// Return true if pow2 div is cheaper than a chain of srl/add/sra.
-  bool isPow2DivCheap() const { return Pow2DivIsCheap; }
+  /// Return true if pow2 sdiv is cheaper than a chain of sra/srl/add/sra.
+  bool isPow2SDivCheap() const { return Pow2SDivIsCheap; }
 
   /// Return true if Flow Control is an expensive operation that should be
   /// avoided.
@@ -260,6 +260,11 @@ public:
   /// \endcode
   bool isMaskAndBranchFoldingLegal() const {
     return MaskAndBranchFoldingIsLegal;
+  }
+  
+  /// Return true if target supports floating point exceptions.
+  bool hasFloatingPointExceptions() const {
+    return HasFloatingPointExceptions;
   }
 
   /// Return the ValueType of the result of SETCC operations.  Also used to
@@ -426,10 +431,15 @@ public:
     EVT          memVT;       // memory VT
     const Value* ptrVal;      // value representing memory location
     int          offset;      // offset off of ptrVal
+    unsigned     size;        // the size of the memory location
+                              // (taken from memVT if zero)
     unsigned     align;       // alignment
     bool         vol;         // is volatile?
     bool         readMem;     // reads memory?
     bool         writeMem;    // writes memory?
+
+    IntrinsicInfo() : opc(0), ptrVal(nullptr), offset(0), size(0), align(1),
+                      vol(false), readMem(false), writeMem(false) {}
   };
 
   /// Given an intrinsic, checks if on the target the intrinsic will need to map
@@ -927,7 +937,7 @@ public:
   /// @}
 
   //===--------------------------------------------------------------------===//
-  /// \name Helpers for load-linked/store-conditional atomic expansion.
+  /// \name Helpers for atomic expansion.
   /// @{
 
   /// Perform a load-linked operation on Addr, returning a "Value *" with the
@@ -946,8 +956,28 @@ public:
     llvm_unreachable("Store conditional unimplemented on this target");
   }
 
+  /// Inserts in the IR a target-specific intrinsic specifying a fence.
+  /// It is called by AtomicExpandPass before expanding an
+  ///   AtomicRMW/AtomicCmpXchg/AtomicStore/AtomicLoad.
+  /// RMW and CmpXchg set both IsStore and IsLoad to true.
+  /// Backends with !getInsertFencesForAtomic() should keep a no-op here
+  virtual void emitLeadingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
+          bool IsStore, bool IsLoad) const {
+    assert(!getInsertFencesForAtomic());
+  }
+
+  /// Inserts in the IR a target-specific intrinsic specifying a fence.
+  /// It is called by AtomicExpandPass after expanding an
+  ///   AtomicRMW/AtomicCmpXchg/AtomicStore/AtomicLoad.
+  /// RMW and CmpXchg set both IsStore and IsLoad to true.
+  /// Backends with !getInsertFencesForAtomic() should keep a no-op here
+  virtual void emitTrailingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
+          bool IsStore, bool IsLoad) const {
+    assert(!getInsertFencesForAtomic());
+  }
+
   /// Return true if the given (atomic) instruction should be expanded by the
-  /// IR-level AtomicExpandLoadLinked pass into a loop involving
+  /// IR-level AtomicExpand pass into a loop involving
   /// load-linked/store-conditional pairs. Atomic stores will be expanded in the
   /// same way as "atomic xchg" operations which ignore their output if needed.
   virtual bool shouldExpandAtomicInIR(Instruction *Inst) const {
@@ -1063,15 +1093,21 @@ protected:
   /// possible, should be replaced by an alternate sequence of instructions not
   /// containing an integer divide.
   void setIntDivIsCheap(bool isCheap = true) { IntDivIsCheap = isCheap; }
+  
+  /// Tells the code generator that this target supports floating point
+  /// exceptions and cares about preserving floating point exception behavior.
+  void setHasFloatingPointExceptions(bool FPExceptions = true) {
+    HasFloatingPointExceptions = FPExceptions;
+  }
 
   /// Tells the code generator which bitwidths to bypass.
   void addBypassSlowDiv(unsigned int SlowBitWidth, unsigned int FastBitWidth) {
     BypassSlowDivWidths[SlowBitWidth] = FastBitWidth;
   }
 
-  /// Tells the code generator that it shouldn't generate srl/add/sra for a
-  /// signed divide by power of two, and let the target handle it.
-  void setPow2DivIsCheap(bool isCheap = true) { Pow2DivIsCheap = isCheap; }
+  /// Tells the code generator that it shouldn't generate sra/srl/add/sra for a
+  /// signed divide by power of two; let the target handle it.
+  void setPow2SDivIsCheap(bool isCheap = true) { Pow2SDivIsCheap = isCheap; }
 
   /// Add the specified register class as an available regclass for the
   /// specified value type. This indicates the selector can handle values of
@@ -1490,14 +1526,18 @@ private:
   /// div/rem when the operands are positive and less than 256.
   DenseMap <unsigned int, unsigned int> BypassSlowDivWidths;
 
-  /// Tells the code generator that it shouldn't generate srl/add/sra for a
-  /// signed divide by power of two, and let the target handle it.
-  bool Pow2DivIsCheap;
+  /// Tells the code generator that it shouldn't generate sra/srl/add/sra for a
+  /// signed divide by power of two; let the target handle it.
+  bool Pow2SDivIsCheap;
 
   /// Tells the code generator that it shouldn't generate extra flow control
   /// instructions and should attempt to combine flow control instructions via
   /// predication.
   bool JumpIsExpensive;
+
+  /// Whether the target supports or cares about preserving floating point
+  /// exception behavior.
+  bool HasFloatingPointExceptions;
 
   /// This target prefers to use _setjmp to implement llvm.setjmp.
   ///

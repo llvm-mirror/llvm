@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LIB_ASMPARSER_LLLEXER_H
-#define LIB_ASMPARSER_LLLEXER_H
+#ifndef LLVM_LIB_ASMPARSER_LLLEXER_H
+#define LLVM_LIB_ASMPARSER_LLLEXER_H
 
 #include "LLToken.h"
 #include "llvm/ADT/APFloat.h"
@@ -28,7 +28,7 @@ namespace llvm {
 
   class LLLexer {
     const char *CurPtr;
-    MemoryBuffer *CurBuf;
+    StringRef CurBuf;
     SMDiagnostic &ErrorInfo;
     SourceMgr &SM;
     LLVMContext &Context;
@@ -43,7 +43,7 @@ namespace llvm {
     APSInt  APSIntVal;
 
   public:
-    explicit LLLexer(MemoryBuffer *StartBuf, SourceMgr &SM, SMDiagnostic &,
+    explicit LLLexer(StringRef StartBuf, SourceMgr &SM, SMDiagnostic &,
                      LLVMContext &C);
     ~LLLexer() {}
 
@@ -66,8 +66,6 @@ namespace llvm {
 
     void Warning(LocTy WarningLoc, const Twine &Msg) const;
     void Warning(const Twine &Msg) const { return Warning(getLoc(), Msg); }
-
-    std::string getFilename() const;
 
   private:
     lltok::Kind LexToken();

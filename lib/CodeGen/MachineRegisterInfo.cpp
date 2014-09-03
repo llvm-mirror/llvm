@@ -23,22 +23,15 @@ using namespace llvm;
 // Pin the vtable to this file.
 void MachineRegisterInfo::Delegate::anchor() {}
 
-MachineRegisterInfo::MachineRegisterInfo(const TargetMachine &TM)
-  : TM(TM), TheDelegate(nullptr), IsSSA(true), TracksLiveness(true) {
+MachineRegisterInfo::MachineRegisterInfo(const MachineFunction *MF)
+  : MF(MF), TheDelegate(nullptr), IsSSA(true), TracksLiveness(true) {
   VRegInfo.reserve(256);
   RegAllocHints.reserve(256);
   UsedRegUnits.resize(getTargetRegisterInfo()->getNumRegUnits());
   UsedPhysRegMask.resize(getTargetRegisterInfo()->getNumRegs());
 
   // Create the physreg use/def lists.
-  PhysRegUseDefLists =
-    new MachineOperand*[getTargetRegisterInfo()->getNumRegs()];
-  memset(PhysRegUseDefLists, 0,
-         sizeof(MachineOperand*)*getTargetRegisterInfo()->getNumRegs());
-}
-
-MachineRegisterInfo::~MachineRegisterInfo() {
-  delete [] PhysRegUseDefLists;
+  PhysRegUseDefLists.resize(getTargetRegisterInfo()->getNumRegs(), nullptr);
 }
 
 /// setRegClass - Set the register class of the specified virtual register.

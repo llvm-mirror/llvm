@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef X86_SHUFFLE_DECODE_H
-#define X86_SHUFFLE_DECODE_H
+#ifndef LLVM_LIB_TARGET_X86_UTILS_X86SHUFFLEDECODE_H
+#define LLVM_LIB_TARGET_X86_UTILS_X86SHUFFLEDECODE_H
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -69,6 +69,9 @@ void DecodePSHUFBMask(const ConstantDataSequential *C,
 /// BUILD_VECTOR.
 void DecodePSHUFBMask(ArrayRef<uint64_t> RawMask,
                       SmallVectorImpl<int> &ShuffleMask);
+
+/// \brief Decode a BLEND immediate mask into a shuffle mask.
+void DecodeBLENDMask(MVT VT, unsigned Imm, SmallVectorImpl<int> &ShuffleMask);
 
 void DecodeVPERM2X128Mask(MVT VT, unsigned Imm,
                           SmallVectorImpl<int> &ShuffleMask);

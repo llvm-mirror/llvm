@@ -573,9 +573,8 @@ void PMTopLevelManager::collectLastUses(SmallVectorImpl<Pass *> &LastUses,
     return;
 
   SmallPtrSet<Pass *, 8> &LU = DMI->second;
-  for (SmallPtrSet<Pass *, 8>::iterator I = LU.begin(),
-         E = LU.end(); I != E; ++I) {
-    LastUses.push_back(*I);
+  for (Pass *LUP : LU) {
+    LastUses.push_back(LUP);
   }
 
 }
@@ -1684,7 +1683,7 @@ void MPPassManager::addLowerLevelRequiredPass(Pass *P, Pass *RequiredPass) {
   if (!FoundPass) {
     FoundPass = RequiredPass;
     // This should be guaranteed to add RequiredPass to the passmanager given
-    // that we checked for an avaiable analysis above.
+    // that we checked for an available analysis above.
     FPP->add(RequiredPass);
   }
   // Register P as the last user of FoundPass or RequiredPass.

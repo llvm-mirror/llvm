@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef BITCODE_READER_H
-#define BITCODE_READER_H
+#ifndef LLVM_LIB_BITCODE_READER_BITCODEREADER_H
+#define LLVM_LIB_BITCODE_READER_BITCODEREADER_H
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Bitcode/BitstreamReader.h"
@@ -181,9 +181,9 @@ class BitcodeReader : public GVMaterializer {
   DenseMap<Function*, uint64_t> DeferredFunctionInfo;
 
   /// These are basic blocks forward-referenced by block addresses.  They are
-  /// inserted lazily into functions when they're loaded.
-  typedef std::pair<unsigned, BasicBlock *> BasicBlockRefTy;
-  DenseMap<Function *, std::vector<BasicBlockRefTy>> BasicBlockFwdRefs;
+  /// inserted lazily into functions when they're loaded.  The basic block ID is
+  /// its index into the vector.
+  DenseMap<Function *, std::vector<BasicBlock *>> BasicBlockFwdRefs;
   std::deque<Function *> BasicBlockFwdRefQueue;
 
   /// UseRelativeIDs - Indicates that we are using a new encoding for
@@ -221,7 +221,7 @@ public:
 
   void FreeState();
 
-  void releaseBuffer() override;
+  void releaseBuffer();
 
   bool isMaterializable(const GlobalValue *GV) const override;
   bool isDematerializable(const GlobalValue *GV) const override;

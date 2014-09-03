@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef CODEGEN_ASMPRINTER_DWARFACCELTABLE_H__
-#define CODEGEN_ASMPRINTER_DWARFACCELTABLE_H__
+#ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DWARFACCELTABLE_H
+#define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFACCELTABLE_H
 
 #include "DIE.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -140,7 +140,7 @@ public:
 private:
   struct TableHeaderData {
     uint32_t die_offset_base;
-    SmallVector<Atom, 1> Atoms;
+    SmallVector<Atom, 3> Atoms;
 
     TableHeaderData(ArrayRef<Atom> AtomList, uint32_t offset = 0)
         : die_offset_base(offset), Atoms(AtomList.begin(), AtomList.end()) {}

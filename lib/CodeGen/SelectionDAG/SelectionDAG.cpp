@@ -907,7 +907,7 @@ unsigned SelectionDAG::getEVTAlignment(EVT VT) const {
 
 // EntryNode could meaningfully have debug info if we can find it...
 SelectionDAG::SelectionDAG(const TargetMachine &tm, CodeGenOpt::Level OL)
-    : TM(tm), TSI(*tm.getSubtargetImpl()->getSelectionDAGInfo()), TLI(nullptr),
+    : TM(tm), TSI(tm.getSubtargetImpl()->getSelectionDAGInfo()), TLI(nullptr),
       OptLevel(OL),
       EntryNode(ISD::EntryToken, 0, DebugLoc(), getVTList(MVT::Other)),
       Root(getEntryNode()), NewNodesMustHaveLegalTypes(false),
@@ -3402,6 +3402,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1,
   }
 
   // Constant fold FP operations.
+  bool HasFPExceptions = TLI->hasFloatingPointExceptions();
   ConstantFPSDNode *N1CFP = dyn_cast<ConstantFPSDNode>(N1.getNode());
   ConstantFPSDNode *N2CFP = dyn_cast<ConstantFPSDNode>(N2.getNode());
   if (N1CFP) {
@@ -3415,28 +3416,32 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1,
       switch (Opcode) {
       case ISD::FADD:
         s = V1.add(V2, APFloat::rmNearestTiesToEven);
-        if (s != APFloat::opInvalidOp)
+        if (!HasFPExceptions || s != APFloat::opInvalidOp)
           return getConstantFP(V1, VT);
         break;
       case ISD::FSUB:
         s = V1.subtract(V2, APFloat::rmNearestTiesToEven);
-        if (s!=APFloat::opInvalidOp)
+        if (!HasFPExceptions || s!=APFloat::opInvalidOp)
           return getConstantFP(V1, VT);
         break;
       case ISD::FMUL:
         s = V1.multiply(V2, APFloat::rmNearestTiesToEven);
-        if (s!=APFloat::opInvalidOp)
+        if (!HasFPExceptions || s!=APFloat::opInvalidOp)
           return getConstantFP(V1, VT);
         break;
       case ISD::FDIV:
         s = V1.divide(V2, APFloat::rmNearestTiesToEven);
-        if (s!=APFloat::opInvalidOp && s!=APFloat::opDivByZero)
+        if (!HasFPExceptions || (s!=APFloat::opInvalidOp &&
+                                 s!=APFloat::opDivByZero)) {
           return getConstantFP(V1, VT);
+        }
         break;
       case ISD::FREM :
         s = V1.mod(V2, APFloat::rmNearestTiesToEven);
-        if (s!=APFloat::opInvalidOp && s!=APFloat::opDivByZero)
+        if (!HasFPExceptions || (s!=APFloat::opInvalidOp &&
+                                 s!=APFloat::opDivByZero)) {
           return getConstantFP(V1, VT);
+        }
         break;
       case ISD::FCOPYSIGN:
         V1.copySign(V2);
@@ -4223,9 +4228,8 @@ SDValue SelectionDAG::getMemcpy(SDValue Chain, SDLoc dl, SDValue Dst,
   // Then check to see if we should lower the memcpy with target-specific
   // code. If the target chooses to do this, this is the next best.
   SDValue Result =
-    TSI.EmitTargetCodeForMemcpy(*this, dl, Chain, Dst, Src, Size, Align,
-                                isVol, AlwaysInline,
-                                DstPtrInfo, SrcPtrInfo);
+      TSI->EmitTargetCodeForMemcpy(*this, dl, Chain, Dst, Src, Size, Align,
+                                   isVol, AlwaysInline, DstPtrInfo, SrcPtrInfo);
   if (Result.getNode())
     return Result;
 
@@ -4291,9 +4295,8 @@ SDValue SelectionDAG::getMemmove(SDValue Chain, SDLoc dl, SDValue Dst,
 
   // Then check to see if we should lower the memmove with target-specific
   // code. If the target chooses to do this, this is the next best.
-  SDValue Result =
-    TSI.EmitTargetCodeForMemmove(*this, dl, Chain, Dst, Src, Size, Align, isVol,
-                                 DstPtrInfo, SrcPtrInfo);
+  SDValue Result = TSI->EmitTargetCodeForMemmove(
+      *this, dl, Chain, Dst, Src, Size, Align, isVol, DstPtrInfo, SrcPtrInfo);
   if (Result.getNode())
     return Result;
 
@@ -4346,9 +4349,8 @@ SDValue SelectionDAG::getMemset(SDValue Chain, SDLoc dl, SDValue Dst,
 
   // Then check to see if we should lower the memset with target-specific
   // code. If the target chooses to do this, this is the next best.
-  SDValue Result =
-    TSI.EmitTargetCodeForMemset(*this, dl, Chain, Dst, Src, Size, Align, isVol,
-                                DstPtrInfo);
+  SDValue Result = TSI->EmitTargetCodeForMemset(*this, dl, Chain, Dst, Src,
+                                                Size, Align, isVol, DstPtrInfo);
   if (Result.getNode())
     return Result;
 
@@ -4562,7 +4564,7 @@ SelectionDAG::getMemIntrinsicNode(unsigned Opcode, SDLoc dl, SDVTList VTList,
                                   ArrayRef<SDValue> Ops,
                                   EVT MemVT, MachinePointerInfo PtrInfo,
                                   unsigned Align, bool Vol,
-                                  bool ReadMem, bool WriteMem) {
+                                  bool ReadMem, bool WriteMem, unsigned Size) {
   if (Align == 0)  // Ensure that codegen never sees alignment 0
     Align = getEVTAlignment(MemVT);
 
@@ -4574,8 +4576,10 @@ SelectionDAG::getMemIntrinsicNode(unsigned Opcode, SDLoc dl, SDVTList VTList,
     Flags |= MachineMemOperand::MOLoad;
   if (Vol)
     Flags |= MachineMemOperand::MOVolatile;
+  if (!Size)
+    Size = MemVT.getStoreSize();
   MachineMemOperand *MMO =
-    MF.getMachineMemOperand(PtrInfo, Flags, MemVT.getStoreSize(), Align);
+    MF.getMachineMemOperand(PtrInfo, Flags, Size, Align);
 
   return getMemIntrinsicNode(Opcode, dl, VTList, Ops, MemVT, MMO);
 }
@@ -5098,7 +5102,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, SDVTList VTList,
 }
 
 SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, SDVTList VTList) {
-  return getNode(Opcode, DL, VTList, ArrayRef<SDValue>());
+  return getNode(Opcode, DL, VTList, None);
 }
 
 SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, SDVTList VTList,
@@ -5550,10 +5554,9 @@ SDNode *SelectionDAG::MorphNodeTo(SDNode *N, unsigned Opc,
   // new operands.
   if (!DeadNodeSet.empty()) {
     SmallVector<SDNode *, 16> DeadNodes;
-    for (SmallPtrSet<SDNode *, 16>::iterator I = DeadNodeSet.begin(),
-         E = DeadNodeSet.end(); I != E; ++I)
-      if ((*I)->use_empty())
-        DeadNodes.push_back(*I);
+    for (SDNode *N : DeadNodeSet)
+      if (N->use_empty())
+        DeadNodes.push_back(N);
     RemoveDeadNodes(DeadNodes);
   }
 
@@ -6391,7 +6394,7 @@ bool SDNode::hasPredecessor(const SDNode *N) const {
 
 bool
 SDNode::hasPredecessorHelper(const SDNode *N,
-                             SmallPtrSet<const SDNode *, 32> &Visited,
+                             SmallPtrSetImpl<const SDNode *> &Visited,
                              SmallVectorImpl<const SDNode *> &Worklist) const {
   if (Visited.empty()) {
     Worklist.push_back(this);
@@ -6769,8 +6772,8 @@ bool ShuffleVectorSDNode::isSplatMask(const int *Mask, EVT VT) {
 
 #ifndef NDEBUG
 static void checkForCyclesHelper(const SDNode *N,
-                                 SmallPtrSet<const SDNode*, 32> &Visited,
-                                 SmallPtrSet<const SDNode*, 32> &Checked,
+                                 SmallPtrSetImpl<const SDNode*> &Visited,
+                                 SmallPtrSetImpl<const SDNode*> &Checked,
                                  const llvm::SelectionDAG *DAG) {
   // If this node has already been checked, don't check it again.
   if (Checked.count(N))
