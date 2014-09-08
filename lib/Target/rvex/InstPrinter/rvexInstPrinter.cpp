@@ -75,12 +75,12 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
   default:                                 llvm_unreachable("Invalid kind!");
   case MCSymbolRefExpr::VK_None:           break;
 // rvex_GPREL is for llc -march=rvex -relocation-model=static
-  case MCSymbolRefExpr::VK_Cpu0_GPREL:     OS << "%gp_rel("; break;
-  case MCSymbolRefExpr::VK_Cpu0_GOT_CALL:  OS << "%call24("; break;
-  case MCSymbolRefExpr::VK_Cpu0_GOT16:     OS << "%got(";    break;
-  case MCSymbolRefExpr::VK_Cpu0_GOT:       OS << "%got(";    break;
-  case MCSymbolRefExpr::VK_Cpu0_ABS_HI:    OS << "%hi(";     break;
-  case MCSymbolRefExpr::VK_Cpu0_ABS_LO:    OS << "%lo(";     break;
+  case MCSymbolRefExpr::VK_Mips_GPREL:     OS << "%gp_rel("; break;
+  case MCSymbolRefExpr::VK_Mips_GOT_CALL:  OS << "%call24("; break;
+  case MCSymbolRefExpr::VK_Mips_GOT16:     OS << "%got(";    break;
+  case MCSymbolRefExpr::VK_Mips_GOT:       OS << "%got(";    break;
+  case MCSymbolRefExpr::VK_Mips_ABS_HI:    OS << "%hi(";     break;
+  case MCSymbolRefExpr::VK_Mips_ABS_LO:    OS << "%lo(";     break;
   }
 
   OS << SRE->getSymbol();
@@ -91,8 +91,8 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
     OS << Offset;
   }
 
-  if ((Kind == MCSymbolRefExpr::VK_Cpu0_GPOFF_HI) ||
-      (Kind == MCSymbolRefExpr::VK_Cpu0_GPOFF_LO))
+  if ((Kind == MCSymbolRefExpr::VK_Mips_GPOFF_HI) ||
+      (Kind == MCSymbolRefExpr::VK_Mips_GPOFF_LO))
     OS << ")))";
   else if (Kind != MCSymbolRefExpr::VK_None)
     OS << ')';

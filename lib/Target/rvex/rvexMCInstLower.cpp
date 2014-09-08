@@ -49,14 +49,14 @@ MCOperand rvexMCInstLower::LowerSymbolOperand(const MachineOperand &MO,
   case rvexII::MO_NO_FLAG:   Kind = MCSymbolRefExpr::VK_None; break;
 // rvex_GPREL is for llc -march=rvex -relocation-model=static -rvex-islinux-
 //  format=false (global var in .sdata).
-  case rvexII::MO_GPREL:     Kind = MCSymbolRefExpr::VK_Cpu0_GPREL; break;
-  case rvexII::MO_GOT_CALL:  Kind = MCSymbolRefExpr::VK_Cpu0_GOT_CALL; break;
-  case rvexII::MO_GOT16:     Kind = MCSymbolRefExpr::VK_Cpu0_GOT16; break;
-  case rvexII::MO_GOT:       Kind = MCSymbolRefExpr::VK_Cpu0_GOT; break;
+  case rvexII::MO_GPREL:     Kind = MCSymbolRefExpr::VK_Mips_GPREL; break;
+  case rvexII::MO_GOT_CALL:  Kind = MCSymbolRefExpr::VK_Mips_GOT_CALL; break;
+  case rvexII::MO_GOT16:     Kind = MCSymbolRefExpr::VK_Mips_GOT16; break;
+  case rvexII::MO_GOT:       Kind = MCSymbolRefExpr::VK_Mips_GOT; break;
 // ABS_HI and ABS_LO is for llc -march=rvex -relocation-model=static (global 
 //  var in .data).
-  case rvexII::MO_ABS_HI:    Kind = MCSymbolRefExpr::VK_Cpu0_ABS_HI; break;
-  case rvexII::MO_ABS_LO:    Kind = MCSymbolRefExpr::VK_Cpu0_ABS_LO; break;
+  case rvexII::MO_ABS_HI:    Kind = MCSymbolRefExpr::VK_Mips_ABS_HI; break;
+  case rvexII::MO_ABS_LO:    Kind = MCSymbolRefExpr::VK_Mips_ABS_LO; break;
   }
 
   switch (MOTy) {
