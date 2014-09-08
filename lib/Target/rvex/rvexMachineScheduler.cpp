@@ -22,8 +22,6 @@
 
 using namespace llvm;
 
-bool isNoop = false;
-
 /// Platform specific modifications to DAG.
 void rvexVLIWMachineScheduler::postprocessDAG() {
   SUnit* LastSequentialCall = NULL;
@@ -193,16 +191,10 @@ void rvexVLIWMachineScheduler::schedule() {
     if (!checkSchedLimit())
       break;
 
-
-    if (!isNoop) {
-      scheduleMI(SU, IsTopNode, isNoop);
-      if (!isNoop)
-        updateQueues(SU, IsTopNode);
+    if (SU != NULL) {
+      scheduleMI(SU, IsTopNode, false);
+      updateQueues(SU, IsTopNode);
     }
-
-    isNoop = false;
-
-
   }
   assert(CurrentTop == CurrentBottom && "Nonempty unscheduled zone.");
 
@@ -815,10 +807,8 @@ SUnit *ConvergingrvexVLIWScheduler::pickNode(bool &IsTopNode) {
 
     Top.HazardRec->EmitNoop();  
     // Top.bumpCycle();    
-    SUnit *NOP;
-    isNoop = true;
-      
-    return NOP;
+    
+    return NULL;
   }
   if (SU->isTopReady())
     Top.removeReady(SU);
