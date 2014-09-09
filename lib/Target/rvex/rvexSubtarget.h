@@ -24,10 +24,6 @@
 namespace llvm {
 class StringRef;
 
-  extern int rvexDFAStateInputTable[][2];
-
-  extern unsigned int rvexDFAStateEntryTable[];
-
 class rvexSubtarget : public rvexGenSubtargetInfo {
   virtual void anchor();
 

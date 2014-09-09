@@ -21,23 +21,7 @@
 #define GET_INSTRINFO_CTOR
 //#define GET_INSTRINFO_ENUM
 #include "rvexGenInstrInfo.inc"
-
-namespace llvm {
-
-  extern int rvexDFAStateInputTable[][2];
-
-  extern unsigned int rvexDFAStateEntryTable[];
-} // namespace
-
-/*
-#include "llvm/CodeGen/DFAPacketizer.h"
-namespace llvm {
-  DFAPacketizer *rvexGenSubtargetInfo::createDFAPacketizer(const InstrItineraryData *IID) const {
-     return new DFAPacketizer(IID, rvexDFAStateInputTable, rvexDFAStateEntryTable);
-}
-
-} // End llvm namespace 
-*/
+#include "rvexGenDFAPacketizer.inc"
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -416,8 +400,7 @@ CreateTargetScheduleState(const TargetMachine *TM,
   
   const InstrItineraryData *II = TM->getInstrItineraryData();
 
-  //DFAPacketizer *temp = TM->getSubtarget<rvexGenSubtargetInfo>().createDFAPacketizer(II);
-  DFAPacketizer *temp = new DFAPacketizer(II, rvexDFAStateInputTable, rvexDFAStateEntryTable);
+  DFAPacketizer *temp = TM->getSubtarget<rvexGenSubtargetInfo>().createDFAPacketizer(II);
   
   return temp;
 }

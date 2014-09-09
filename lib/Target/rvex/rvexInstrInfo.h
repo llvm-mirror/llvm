@@ -26,10 +26,6 @@
 
 namespace llvm {
 
-  extern int rvexDFAStateInputTable[][2];
-
-  extern unsigned int rvexDFAStateEntryTable[];
-
 class rvexInstrInfo : public rvexGenInstrInfo {
   rvexTargetMachine &TM;
 
