@@ -11,7 +11,7 @@ tablegen(LLVM rvexGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM rvexGenInstrInfo.inc -gen-instr-info)
 
 tablegen(LLVM rvexGenCodeEmitter.inc -gen-emitter)
-tablegen(LLVM rvexGenMCCodeEmitter.inc -gen-emitter -mc-emitter)
+tablegen(LLVM rvexGenMCCodeEmitter.inc -gen-emitter)
 
 tablegen(LLVM rvexGenAsmWriter.inc -gen-asm-writer)
 tablegen(LLVM rvexGenDAGISel.inc -gen-dag-isel)

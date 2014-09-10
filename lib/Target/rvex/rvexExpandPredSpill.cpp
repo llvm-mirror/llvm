@@ -18,6 +18,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 
+#define DEBUG_TYPE "rvex-expand-pred-spill"
 
 using namespace llvm;
 

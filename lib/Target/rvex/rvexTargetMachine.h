@@ -17,7 +17,6 @@
 #include "rvexFrameLowering.h"
 #include "rvexInstrInfo.h"
 #include "rvexISelLowering.h"
-#include "rvexSelectionDAGInfo.h"
 #include "rvexSubtarget.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/IR/DataLayout.h"
@@ -31,7 +30,6 @@ namespace llvm {
     const DataLayout    DL; // Calculates type size & alignment
     rvexInstrInfo       InstrInfo;	//- Instructions
     rvexTargetLowering  TLInfo;	//- Stack(Frame) and Stack direction
-    rvexSelectionDAGInfo TSInfo;	//- Map .bc DAG to backend DAG
     rvexFrameLowering   FrameLowering;  //- Stack(Frame) and Stack direction
     const InstrItineraryData *InstrItins;
 
@@ -57,10 +55,6 @@ namespace llvm {
 
     virtual const rvexTargetLowering *getTargetLowering() const {
       return &TLInfo;
-    }
-
-    virtual const rvexSelectionDAGInfo* getSelectionDAGInfo() const {
-      return &TSInfo;
     }
 
     virtual const InstrItineraryData *getInstrItineraryData() const {

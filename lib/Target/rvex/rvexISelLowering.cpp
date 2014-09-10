@@ -54,7 +54,7 @@ static SDValue getTargetNode(SDValue Op, SelectionDAG &DAG, unsigned Flag) {
   EVT Ty = Op.getValueType();
 
   if (GlobalAddressSDNode *N = dyn_cast<GlobalAddressSDNode>(Op))
-    return DAG.getTargetGlobalAddress(N->getGlobal(), Op.getDebugLoc(), Ty, 0,
+    return DAG.getTargetGlobalAddress(N->getGlobal(), SDLoc(Op), Ty, 0,
                                       Flag);
   if (ExternalSymbolSDNode *N = dyn_cast<ExternalSymbolSDNode>(Op))
     return DAG.getTargetExternalSymbol(N->getSymbol(), Ty, Flag);
@@ -72,7 +72,7 @@ static SDValue getTargetNode(SDValue Op, SelectionDAG &DAG, unsigned Flag) {
 
 SDValue rvexTargetLowering::getAddrLocal(SDValue Op, SelectionDAG &DAG,
                                          bool Hasrvex64) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL = SDLoc(Op);
   EVT Ty = Op.getValueType();
   unsigned GOTFlag = Hasrvex64 ? rvexII::MO_GOT_PAGE : rvexII::MO_GOT;
   SDValue GOT = DAG.getNode(rvexISD::Wrapper, DL, Ty, GetGlobalReg(DAG, Ty),
@@ -87,7 +87,7 @@ SDValue rvexTargetLowering::getAddrLocal(SDValue Op, SelectionDAG &DAG,
 
 SDValue rvexTargetLowering::getAddrGlobal(SDValue Op, SelectionDAG &DAG,
                                           unsigned Flag) const {
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL = SDLoc(Op);
   EVT Ty = Op.getValueType();
   SDValue Tgt = DAG.getNode(rvexISD::Wrapper, DL, Ty, GetGlobalReg(DAG, Ty),
                             getTargetNode(Op, DAG, Flag));
@@ -350,7 +350,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   computeRegisterProperties();
 }
 
-EVT rvexTargetLowering::getSetCCResultType(EVT VT) const {
+EVT rvexTargetLowering::getSetCCResultType(LLVMContext &Context, EVT VT) const {
   return MVT::i32;
 }
 
@@ -370,7 +370,7 @@ SDValue rvexTargetLowering::lowerVASTART(SDValue Op, SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
   rvexFunctionInfo *FuncInfo = MF.getInfo<rvexFunctionInfo>();
 
-  DebugLoc DL = Op.getDebugLoc();
+  SDLoc DL = SDLoc(Op);
   SDValue FI = DAG.getFrameIndex(FuncInfo->getVarArgsFrameIndex(),
                                  getPointerTy());
 
@@ -386,8 +386,7 @@ SDValue rvexTargetLowering::
 LowerAddCG(SDValue Op, SelectionDAG &DAG) const
 {
   unsigned Opc = Op.getOpcode();
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
 
   DEBUG(errs() << "LowerADDCG!\n");
   SDValue ADDCG;
@@ -419,8 +418,7 @@ SDValue rvexTargetLowering::
 LowerSUBE(SDValue Op, SelectionDAG &DAG) const
 {
   unsigned Opc = Op.getOpcode();
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
 
   DEBUG(errs() << "LowerSUBC!\n");
   SDValue ADDCG;
@@ -460,8 +458,7 @@ SDValue rvexTargetLowering::
 LowerUDIV(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerUDIV!\n");
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
 
   SDValue DIVS;
 
@@ -537,8 +534,7 @@ SDValue rvexTargetLowering::
 LowerSDIV(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerSDIV!\n");
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
 
   SDValue DIVS, DIVSNeg;
 
@@ -647,8 +643,7 @@ SDValue rvexTargetLowering::
 LowerMULHS(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerMULHS!\n");
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
 
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
@@ -702,8 +697,7 @@ SDValue rvexTargetLowering::
 LowerMULHU(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerMULHU!\n");
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
 
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
@@ -737,8 +731,7 @@ SDValue rvexTargetLowering::
 LowerConstant(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerConstant!\n");
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
   SDValue Zero = DAG.getRegister(rvex::R0, MVT::i32);
   SDValue ZeroImm = DAG.getTargetConstant(0, MVT::i32);
 
@@ -750,8 +743,7 @@ SDValue rvexTargetLowering::
 LowerZeroExtend(SDValue Op, SelectionDAG &DAG) const
 {
   DEBUG(errs() << "LowerZeroExtend!\n");
-  SDNode* N = Op.getNode();
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(Op.getNode());
 
   SDValue Zero = DAG.getRegister(rvex::R0, MVT::i32);
 
@@ -816,7 +808,7 @@ LowerBRCOND(SDValue Op, SelectionDAG &DAG) const
 SDValue rvexTargetLowering::LowerGlobalAddress(SDValue Op,
                                                SelectionDAG &DAG) const {
   // FIXME there isn't actually debug info here
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl = SDLoc(Op);
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
 
   SDVTList VTs = DAG.getVTList(MVT::i32);
@@ -826,7 +818,7 @@ SDValue rvexTargetLowering::LowerGlobalAddress(SDValue Op,
 
   SDValue GA = DAG.getTargetGlobalAddress(GV, dl, MVT::i32, 0,
                                           rvexII::MO_NO_FLAG);
-  SDValue GPRelNode = DAG.getNode(rvexISD::GPRel, dl, VTs, &GA, 1);
+  SDValue GPRelNode = DAG.getNode(rvexISD::GPRel, dl, VTs, GA);
   SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i32);
   return DAG.getNode(ISD::ADD, dl, MVT::i32, GOT, GPRelNode);
 
@@ -913,7 +905,7 @@ static bool CC_rvexO32(unsigned ValNo, MVT ValVT,
 
 SDValue
 rvexTargetLowering::passArgOnStack(SDValue StackPtr, unsigned Offset,
-                                   SDValue Chain, SDValue Arg, DebugLoc DL,
+                                   SDValue Chain, SDValue Arg, SDLoc DL,
                                    bool IsTailCall, SelectionDAG &DAG) const {
   if (!IsTailCall) {
     SDValue PtrOff = DAG.getNode(ISD::ADD, DL, getPointerTy(), StackPtr,
@@ -958,7 +950,7 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
                                       RegsToPass[i].second.getValueType()));
 
   // Add a register mask operand representing the call-preserved registers.
-  const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
+  const TargetRegisterInfo *TRI = CLI.DAG.getMachineFunction().getSubtarget().getRegisterInfo();
   const uint32_t *Mask = TRI->getCallPreservedMask(CLI.CallConv);
   assert(Mask && "Missing call preserved mask for calling convention");
   Ops.push_back(CLI.DAG.getRegisterMask(Mask));
@@ -973,7 +965,7 @@ SDValue
 rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                               SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG                     = CLI.DAG;
-  DebugLoc &DL                          = CLI.DL;
+  SDLoc &DL                             = CLI.DL;
   SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
   SmallVector<SDValue, 32> &OutVals     = CLI.OutVals;
   SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
@@ -985,13 +977,13 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
-  const TargetFrameLowering *TFL = MF.getTarget().getFrameLowering();
+  const TargetFrameLowering *TFL = MF.getSubtarget().getFrameLowering();
   bool IsPIC = getTargetMachine().getRelocationModel() == Reloc::PIC_;
 
   // Analyze operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(),
-                 getTargetMachine(), ArgLocs, *DAG.getContext());
+                 ArgLocs, *DAG.getContext());
   rvexCC rvexCCInfo(CallConv, true, CCInfo);
 
   rvexCCInfo.analyzeCallOperands(Outs, IsVarArg,
@@ -1015,7 +1007,7 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SDValue NextStackOffsetVal = DAG.getIntPtrConstant(NextStackOffset, true);
 
   if (!IsTailCall)
-    Chain = DAG.getCALLSEQ_START(Chain, NextStackOffsetVal);
+    Chain = DAG.getCALLSEQ_START(Chain, NextStackOffsetVal, DL);
 
   SDValue StackPtr = DAG.getCopyFromReg(Chain, DL, rvex::R1,
                                         getPointerTy());
@@ -1101,7 +1093,7 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // nodes are independent of each other.
   if (!MemOpChains.empty())
     Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
-                        &MemOpChains[0], MemOpChains.size());
+                        MemOpChains);
 
   // If the callee is a GlobalAddress/ExternalSymbol node (quite common, every
   // direct call is) turn it into a TargetGlobalAddress/TargetExternalSymbol
@@ -1151,14 +1143,14 @@ rvexTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
               CLI, Callee, Chain);
 
   if (IsTailCall)
-    return DAG.getNode(rvexISD::JmpLink, DL, MVT::Other, &Ops[0], Ops.size());
+    return DAG.getNode(rvexISD::JmpLink, DL, MVT::Other, Ops);
 
-  Chain  = DAG.getNode(rvexISD::JmpLink, DL, NodeTys, &Ops[0], Ops.size());
+  Chain  = DAG.getNode(rvexISD::JmpLink, DL, NodeTys, Ops);
   InFlag = Chain.getValue(1);
 
   // Create the CALLSEQ_END node.
   Chain = DAG.getCALLSEQ_END(Chain, NextStackOffsetVal,
-                             DAG.getIntPtrConstant(0, true), InFlag);
+                             DAG.getIntPtrConstant(0, true), InFlag, DL);
   InFlag = Chain.getValue(1);
 
   // Handle result values, copying them out of physregs into vregs that we
@@ -1173,14 +1165,14 @@ SDValue
 rvexTargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
                                     CallingConv::ID CallConv, bool IsVarArg,
                                     const SmallVectorImpl<ISD::InputArg> &Ins,
-                                    DebugLoc DL, SelectionDAG &DAG,
+                                    SDLoc DL, SelectionDAG &DAG,
                                     SmallVectorImpl<SDValue> &InVals,
                                     const SDNode *CallNode,
                                     const Type *RetTy) const {
   // Assign locations to each value returned by this call.
   SmallVector<CCValAssign, 16> RVLocs;
   CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(),
-                 getTargetMachine(), RVLocs, *DAG.getContext());
+                 RVLocs, *DAG.getContext());
   rvexCC rvexCCInfo(CallConv, true, CCInfo);
 
   rvexCCInfo.analyzeCallResult(Ins, getTargetMachine().Options.UseSoftFloat,
@@ -1212,7 +1204,7 @@ rvexTargetLowering::LowerFormalArguments(SDValue Chain,
                                          CallingConv::ID CallConv,
                                          bool IsVarArg,
                                       const SmallVectorImpl<ISD::InputArg> &Ins,
-                                         DebugLoc DL, SelectionDAG &DAG,
+                                         SDLoc DL, SelectionDAG &DAG,
                                          SmallVectorImpl<SDValue> &InVals)
                                           const {
   MachineFunction &MF = DAG.getMachineFunction();
@@ -1227,7 +1219,7 @@ rvexTargetLowering::LowerFormalArguments(SDValue Chain,
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(),
-                 getTargetMachine(), ArgLocs, *DAG.getContext());
+                 ArgLocs, *DAG.getContext());
   rvexCC rvexCCInfo(CallConv, true, CCInfo);
   Function::const_arg_iterator FuncArg =
     DAG.getMachineFunction().getFunction()->arg_begin();
@@ -1345,7 +1337,7 @@ rvexTargetLowering::LowerFormalArguments(SDValue Chain,
   if (!OutChains.empty()) {
     OutChains.push_back(Chain);
     Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
-                        &OutChains[0], OutChains.size());
+                        OutChains);
   }
 
   return Chain;
@@ -1361,7 +1353,7 @@ rvexTargetLowering::CanLowerReturn(CallingConv::ID CallConv,
                                    const SmallVectorImpl<ISD::OutputArg> &Outs,
                                    LLVMContext &Context) const {
   SmallVector<CCValAssign, 16> RVLocs;
-  CCState CCInfo(CallConv, IsVarArg, MF, getTargetMachine(),
+  CCState CCInfo(CallConv, IsVarArg, MF,
                  RVLocs, Context);
   return CCInfo.CheckReturn(Outs, RetCC_rvex);
 }
@@ -1371,14 +1363,14 @@ rvexTargetLowering::LowerReturn(SDValue Chain,
                                 CallingConv::ID CallConv, bool IsVarArg,
                                 const SmallVectorImpl<ISD::OutputArg> &Outs,
                                 const SmallVectorImpl<SDValue> &OutVals,
-                                DebugLoc DL, SelectionDAG &DAG) const {
+                                SDLoc DL, SelectionDAG &DAG) const {
   // CCValAssign - represent the assignment of
   // the return value to a location
   SmallVector<CCValAssign, 16> RVLocs;
   MachineFunction &MF = DAG.getMachineFunction();
 
   // CCState - Info about the registers and stack slot.
-  CCState CCInfo(CallConv, IsVarArg, MF, getTargetMachine(), RVLocs,
+  CCState CCInfo(CallConv, IsVarArg, MF, RVLocs,
                  *DAG.getContext());
   rvexCC rvexCCInfo(CallConv, true, CCInfo);
 
@@ -1433,7 +1425,7 @@ rvexTargetLowering::LowerReturn(SDValue Chain,
     RetOps.push_back(Flag);
 
   // Return on rvex is always a "jr $ra"
-  return DAG.getNode(rvexISD::Ret, DL, MVT::Other, &RetOps[0], RetOps.size());
+  return DAG.getNode(rvexISD::Ret, DL, MVT::Other, RetOps);
 }
 
 
@@ -1634,7 +1626,7 @@ MVT rvexTargetLowering::rvexCC::getRegVT(MVT VT, const Type *OrigTy,
 }
 
 void rvexTargetLowering::
-copyByValRegs(SDValue Chain, DebugLoc DL, std::vector<SDValue> &OutChains,
+copyByValRegs(SDValue Chain, SDLoc DL, std::vector<SDValue> &OutChains,
               SelectionDAG &DAG, const ISD::ArgFlagsTy &Flags,
               SmallVectorImpl<SDValue> &InVals, const Argument *FuncArg,
               const rvexCC &CC, const ByValArgInfo &ByVal) const {
@@ -1678,7 +1670,7 @@ copyByValRegs(SDValue Chain, DebugLoc DL, std::vector<SDValue> &OutChains,
 
 // Copy byVal arg to registers and stack.
 void rvexTargetLowering::
-passByValArg(SDValue Chain, DebugLoc DL,
+passByValArg(SDValue Chain, SDLoc DL,
              std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
              SmallVector<SDValue, 8> &MemOpChains, SDValue StackPtr,
              MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg,
@@ -1730,7 +1722,7 @@ passByValArg(SDValue Chain, DebugLoc DL,
         SDValue LoadVal =
           DAG.getExtLoad(ISD::ZEXTLOAD, DL, RegTy, Chain, LoadPtr,
                          MachinePointerInfo(), MVT::getIntegerVT(LoadSize * 8),
-                         false, false, Alignment);
+                         false, false, false, Alignment);
         MemOpChains.push_back(LoadVal.getValue(1));
 
         // Shift the loaded value.
@@ -1769,14 +1761,14 @@ passByValArg(SDValue Chain, DebugLoc DL,
   Chain = DAG.getMemcpy(Chain, DL, Dst, Src,
                         DAG.getConstant(MemCpySize, PtrTy), Alignment,
                         /*isVolatile=*/false, /*AlwaysInline=*/false,
-                        MachinePointerInfo(0), MachinePointerInfo(0));
+                        MachinePointerInfo(), MachinePointerInfo());
   MemOpChains.push_back(Chain);
 }
 
 void
 rvexTargetLowering::writeVarArgRegs(std::vector<SDValue> &OutChains,
                                     const rvexCC &CC, SDValue Chain,
-                                    DebugLoc DL, SelectionDAG &DAG) const {
+                                    SDLoc DL, SelectionDAG &DAG) const {
   unsigned NumRegs = CC.numIntArgRegs();
   const uint16_t *ArgRegs = CC.intArgRegs();
   const CCState &CCInfo = CC.getCCInfo();
@@ -1813,7 +1805,7 @@ rvexTargetLowering::writeVarArgRegs(std::vector<SDValue> &OutChains,
     SDValue PtrOff = DAG.getFrameIndex(FI, getPointerTy());
     SDValue Store = DAG.getStore(Chain, DL, ArgValue, PtrOff,
                                  MachinePointerInfo(), false, false, 0);
-    cast<StoreSDNode>(Store.getNode())->getMemOperand()->setValue(0);
+    cast<StoreSDNode>(Store.getNode())->getMemOperand()->setValue((Value*)nullptr);
     OutChains.push_back(Store);
   }
 }

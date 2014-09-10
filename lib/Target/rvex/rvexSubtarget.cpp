@@ -17,6 +17,8 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 
+#define DEBUG_TYPE "rvex-subtarget"
+
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "rvexGenSubtargetInfo.inc"
@@ -32,6 +34,7 @@ void rvexSubtarget::anchor() { }
 rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
                              const std::string &FS, bool little) :
   rvexGenSubtargetInfo(TT, CPU, FS),
+  SchedModel(getSchedModelForCPU(CPU.empty() ? "rvex32" : CPU)),
   rvexABI(UnknownABI), IsLittle(little), IsLinux(IsLinuxOpt)
 {
   std::string CPUName = CPU;
@@ -43,8 +46,6 @@ rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
 
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUName);
-
-  SchedModel = getSchedModelForCPU(CPUName);
 
   // Set rvexABI if it hasn't been set yet.
   if (rvexABI == UnknownABI)

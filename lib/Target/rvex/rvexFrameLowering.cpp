@@ -30,6 +30,8 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "rvex-framelowering"
+
 //- emitPrologue() and emitEpilogue must exist for main(). 
 
 //===----------------------------------------------------------------------===//
@@ -98,8 +100,9 @@ void rvexFrameLowering::emitPrologue(MachineFunction &MF) const {
   MachineBasicBlock &MBB   = MF.front();
   MachineFrameInfo *MFI    = MF.getFrameInfo();
   rvexFunctionInfo *rvexFI = MF.getInfo<rvexFunctionInfo>();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   const rvexInstrInfo &TII =
-    *static_cast<const rvexInstrInfo*>(MF.getTarget().getInstrInfo());
+    *static_cast<const rvexInstrInfo*>(MF.getTarget().getSubtargetImpl()->getInstrInfo());
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc dl = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
   unsigned SP = rvex::R1;
@@ -117,8 +120,6 @@ void rvexFrameLowering::emitPrologue(MachineFunction &MF) const {
   if (StackSize == 0 && !MFI->adjustsStack()) return;
 
   MachineModuleInfo &MMI = MF.getMMI();
-  std::vector<MachineMove> &Moves = MMI.getFrameMoves();
-  MachineLocation DstML, SrcML;
 
   // Adjust stack.
   if (isInt<16>(-StackSize)) // addiu sp, sp, (-stacksize)
@@ -129,12 +130,10 @@ void rvexFrameLowering::emitPrologue(MachineFunction &MF) const {
   }
 
   // emit ".cfi_def_cfa_offset StackSize"
-  MCSymbol *AdjustSPLabel = MMI.getContext().CreateTempSymbol();
-  BuildMI(MBB, MBBI, dl,
-          TII.get(TargetOpcode::PROLOG_LABEL)).addSym(AdjustSPLabel);
-  DstML = MachineLocation(MachineLocation::VirtualFP);
-  SrcML = MachineLocation(MachineLocation::VirtualFP, -StackSize);
-  Moves.push_back(MachineMove(AdjustSPLabel, DstML, SrcML));
+  unsigned CFIIndex = MMI.addFrameInst(
+      MCCFIInstruction::createDefCfaOffset(nullptr, StackSize));
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
 
@@ -146,20 +145,16 @@ void rvexFrameLowering::emitPrologue(MachineFunction &MF) const {
 
     // Iterate over list of callee-saved registers and emit .cfi_offset
     // directives.
-    MCSymbol *CSLabel = MMI.getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl,
-            TII.get(TargetOpcode::PROLOG_LABEL)).addSym(CSLabel);
-
     for (std::vector<CalleeSavedInfo>::const_iterator I = CSI.begin(),
            E = CSI.end(); I != E; ++I) {
       int64_t Offset = MFI->getObjectOffset(I->getFrameIdx());
-      unsigned Reg = I->getReg();
-      {
-        // Reg is either in CPURegs or FGR32.
-        DstML = MachineLocation(MachineLocation::VirtualFP, Offset);
-        SrcML = MachineLocation(Reg);
-        Moves.push_back(MachineMove(CSLabel, DstML, SrcML));
-      }
+      unsigned DwarfReg = TRI->getDwarfRegNum(I->getReg(), true);
+
+      // Reg is either in CPURegs or FGR32.
+      CFIIndex = MMI.addFrameInst(
+          MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
+      BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+          .addCFIIndex(CFIIndex);
     }
   }
 }
@@ -167,14 +162,15 @@ void rvexFrameLowering::emitPrologue(MachineFunction &MF) const {
 void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
                                  MachineBasicBlock &MBB) const {
 
-  MachineBasicBlock::iterator MBBI = prior(MBB.end());
+  MachineBasicBlock::iterator MBBI = MBB.end();
+  MBBI--;
 
 
   MachineFrameInfo *MFI = MF.getFrameInfo();
   int NumBytes = (int) MFI->getStackSize();
 
     const rvexInstrInfo &TII =
-    *static_cast<const rvexInstrInfo*>(MF.getTarget().getInstrInfo());
+    *static_cast<const rvexInstrInfo*>(MF.getSubtarget().getInstrInfo());
 
   // Replace return with return that can change the stackpointer
 
@@ -229,10 +225,11 @@ void rvexFrameLowering::emitEpilogue(MachineFunction &MF,
     if (found_lr) {
       DEBUG(dbgs() << "insert " << nop_count << " nops\n");
       MachineBasicBlock::iterator I = MBB.end();
+      --I;
       DebugLoc DL;
 
       for (unsigned i = 0; i <= nop_count; i++)
-        BuildMI(MBB, llvm::prior(I), DL, TII.get(rvex::NOP));
+        BuildMI(MBB, I, DL, TII.get(rvex::NOP));
 
     }
     

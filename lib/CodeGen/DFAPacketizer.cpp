@@ -121,16 +121,11 @@ static bool isImmInstructon(MachineInstr *MI) {
   for (i = 0; i < MI->getNumOperands(); i++){
     if (MI->getOperand(i).isImm()) {
       int temp = MI->getOperand(i).getImm();
-//      DEBUG(errs() << "Imm operand found 1: "<<temp<<"\n");
       if(!isInt<9>(temp)) {
-//        DEBUG(errs() << "Imm operand found 2: "<<temp<<"\n");
-//        MI->dump();
         return true;
       }
     }
     if (MI->getOperand(i).isGlobal()) {
-//      DEBUG(errs() << "Global found!\n");
-//      MI->dump();
       return true;
     }
   }
@@ -211,7 +206,6 @@ VLIWPacketizerList::~VLIWPacketizerList() {
 // DFA state.
 void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB,
                                          MachineInstr *MI) {
-  DEBUG(dbgs() << "end packet\n");
   if (CurrentPacketMIs.size() > 1) {
     MachineInstr *MIFirst = CurrentPacketMIs.front();
     finalizeBundle(*MBB, MIFirst, MI);

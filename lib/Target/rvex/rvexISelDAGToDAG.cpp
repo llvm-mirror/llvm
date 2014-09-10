@@ -21,7 +21,7 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/Support/CFG.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Type.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -108,7 +109,7 @@ bool rvexDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
 /// GOT address into a register.
 SDNode *rvexDAGToDAGISel::getGlobalBaseReg() {
   unsigned GlobalBaseReg = MF->getInfo<rvexFunctionInfo>()->getGlobalBaseReg();
-  return CurDAG->getRegister(GlobalBaseReg, TLI.getPointerTy()).getNode();
+  return CurDAG->getRegister(GlobalBaseReg, getTargetLowering()->getPointerTy()).getNode();
 }
 
 /// ComplexPattern used on rvexInstrInfo
@@ -126,7 +127,7 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
     EVT VT = LS->getMemoryVT();
 
     if (VT.getSizeInBits() / 8 > LS->getAlignment()) {
-      assert(TLI.allowsUnalignedMemoryAccesses(VT) &&
+      assert(getTargetLowering()->allowsMisalignedMemoryAccesses(VT) &&
              "Unaligned loads/stores not supported for this type.");
       if (VT == MVT::f32)
         return false;
@@ -162,7 +163,7 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
                 dyn_cast<FrameIndexSDNode>(Addr.getOperand(0))) {
           // Constant offset from frame ref.
           Base = CurDAG->getTargetFrameIndex(FIN->getIndex(),
-                                             TLI.getPointerTy());
+                                             getTargetLowering()->getPointerTy());
         } else {
           Base = Addr.getOperand(0);
         }
@@ -178,7 +179,7 @@ SelectAddr(SDNode *Parent, SDValue Addr, SDValue &Base, SDValue &Offset) {
 
 SDNode *rvexDAGToDAGISel::SelectConstant(SDNode *N) {
   DEBUG(errs() << "SelectConstant!\n");
-  DebugLoc dl = N->getDebugLoc();
+  SDLoc dl = SDLoc(N);
   if(N->getValueType(0) == MVT::i1) {
     SDNode *Result;
 
@@ -207,7 +208,7 @@ SDNode *rvexDAGToDAGISel::SelectConstant(SDNode *N) {
 /// expanded, promoted and normal instructions
 SDNode* rvexDAGToDAGISel::Select(SDNode *Node) {
   unsigned Opcode = Node->getOpcode();
-  DebugLoc dl = Node->getDebugLoc();
+  SDLoc dl = SDLoc(Node);
 
   // Dump information about the Node being selected
   DEBUG(errs() << "Selecting: "; Node->dump(CurDAG); errs() << "\n");

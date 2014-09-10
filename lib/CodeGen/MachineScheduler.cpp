@@ -481,11 +481,11 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler) {
       // }
 
       // Close the current region.
-      Scheduler->exitRegion();      
+      Scheduler.exitRegion();      
 
       // Scheduling has invalidated the current iterator 'I'. Ask the
       // scheduler for the top of it's scheduled region.
-      RegionEnd = Scheduler->begin();    
+      RegionEnd = Scheduler.begin();    
     }
     assert(RemainingInstrs == 0 && "Instruction count mismatch!");
     Scheduler.finishBlock();
@@ -1236,13 +1236,13 @@ void ScheduleDAGMILive::scheduleMI(SUnit *SU, bool IsTopNode) {
 }
 
 /// Move an instruction and update register pressure.
-void ScheduleDAGMI::scheduleMI(SUnit *SU, bool IsTopNode, bool isNoop) {
+void ScheduleDAGMILive::scheduleMI(SUnit *SU, bool IsTopNode, bool isNoop) {
   // Move the instruction to its new location in the instruction stream.
 
   if (SU->InsertNop) {
     DEBUG(dbgs() << "Time for nops!\n");
     DEBUG(dbgs() << "Delay: " << SU->NopDelay << "\n");
-    const TargetInstrInfo *TII = MF.getTarget().getInstrInfo();
+    const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
 
     unsigned delay = SU->NopDelay - 1;
     for (unsigned i = 0; i < delay; i++)

@@ -134,27 +134,20 @@
     {0,  0,  0}, // Invalid
   }; // rvexReadAdvanceTable
 
-  static const llvm::MCSchedModel NoSchedModel(
-    MCSchedModel::DefaultIssueWidth,
-    MCSchedModel::DefaultMinLatency,
-    MCSchedModel::DefaultLoadLatency,
-    MCSchedModel::DefaultHighLatency,
-    MCSchedModel::DefaultILPWindow,
-    MCSchedModel::DefaultMispredictPenalty,
-    0, // Processor ID
-    0, 0, 0, 0, // No instruction-level machine model.
-    NoItineraries);
+  static const llvm::MCSchedModel NoSchedModel = llvm::MCSchedModel::GetDefaultSchedModel();
 
-  static llvm::MCSchedModel rvexModel(
+  static llvm::MCSchedModel rvexModel = {
     8, // IssueWidth
-    MCSchedModel::DefaultMinLatency,
-    2,
+    MCSchedModel::DefaultMicroOpBufferSize,
+    MCSchedModel::DefaultLoopMicroOpBufferSize,
+    2, // LoadLatency
     MCSchedModel::DefaultHighLatency,
-    MCSchedModel::DefaultILPWindow,
     MCSchedModel::DefaultMispredictPenalty,
+    false,
+    true,
     1, // Processor ID
-    0, 0, 0, 0, // No instruction-level machine model.
-    rvexGenericItineraries);
+    nullptr, nullptr, 0, 0, // No instruction-level machine model.
+    rvexGenericItineraries};
 
   // Sorted (by key) array of itineraries for CPU subtype.
   extern const llvm::SubtargetInfoKV rvexProcSchedKV[] = {
@@ -165,7 +158,7 @@
   static inline void InitrvexMCSubtargetInfo(MCSubtargetInfo *II, StringRef TT, StringRef CPU, StringRef FS) {
     II->InitMCSubtargetInfo(TT, CPU, FS, rvexFeatureKV, rvexSubTypeKV, 
                         rvexProcSchedKV, rvexWriteProcResTable, rvexWriteLatencyTable, rvexReadAdvanceTable, 
-                        rvexStages, rvexOperandCycles, rvexForwardingPaths, 1, 2);
+                        rvexStages, rvexOperandCycles, rvexForwardingPaths);
   }
 
 } // End llvm namespace 
@@ -242,7 +235,8 @@ extern "C" void LLVMInitializervexTargetMC() {
     // Init InstrItin from config file
     for (i = 0; i < (int)Itin.size(); i++)
     {
-      llvm::InstrItinerary TempItin = {0, Itin[i].num1, Itin[i].num2, 0, 0};
+      llvm::InstrItinerary TempItin = {0, static_cast<unsigned int>(Itin[i].num1),
+          static_cast<unsigned int>(Itin[i].num2), 0, 0};
       rvexGenericItineraries[i + 1] = TempItin;
     }
     llvm::InstrItinerary TempItin = { 0, ~0U, ~0U, ~0U, ~0U }; // end marker

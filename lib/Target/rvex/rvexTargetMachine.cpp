@@ -45,7 +45,7 @@ rvexTargetMachine(const Target &T, StringRef TT,
     DL(isLittle ?
                ("e-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32") :
                ("E-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32")),
-    InstrInfo(*this), TLInfo(*this), TSInfo(*this),
+    InstrInfo(*this), TLInfo(*this),
     FrameLowering(Subtarget),
     InstrItins(&Subtarget.getInstItineraryData()) {
 }
@@ -62,7 +62,7 @@ rvexebTargetMachine(const Target &T, StringRef TT,
 void rvexelTargetMachine::anchor() { }
 
 static ScheduleDAGInstrs *createVLIWMachineSched(MachineSchedContext *C) {
-  return new rvexVLIWMachineScheduler(C, new ConvergingrvexVLIWScheduler());
+  return new rvexVLIWMachineScheduler(C, make_unique<ConvergingrvexVLIWScheduler>());
 }
 
 static MachineSchedRegistry
@@ -82,7 +82,6 @@ public:
   rvexPassConfig(rvexTargetMachine *TM, PassManagerBase &PM)
     : TargetPassConfig(TM, PM) {
       enablePass(&MachineSchedulerID);
-      MachineSchedRegistry::setDefault(createVLIWMachineSched);      
     }
 
   rvexTargetMachine &getrvexTargetMachine() const {

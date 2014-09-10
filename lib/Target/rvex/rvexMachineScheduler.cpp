@@ -112,7 +112,6 @@ bool rvexVLIWResourceModel::reserveResources(SUnit *SU) {
   case TargetOpcode::REG_SEQUENCE:
   case TargetOpcode::IMPLICIT_DEF:
   case TargetOpcode::KILL:
-  case TargetOpcode::PROLOG_LABEL:
   case TargetOpcode::EH_LABEL:
   case TargetOpcode::COPY:
   case TargetOpcode::INLINEASM:
@@ -152,7 +151,7 @@ void rvexVLIWMachineScheduler::schedule() {
         << "********** MI Converging Scheduling VLIW BB#" << BB->getNumber()
         << " " << BB->getName()
         << " in_func " << BB->getParent()->getFunction()->getName()
-        << " at loop depth "  << MLI.getLoopDepth(BB)
+        << " at loop depth "  << MLI->getLoopDepth(BB)
         << " \n");
 
   buildDAGWithRegPressure();
@@ -215,8 +214,8 @@ void ConvergingrvexVLIWScheduler::initialize(ScheduleDAGMI *dag) {
   const TargetMachine &TM = DAG->MF.getTarget();
   delete Top.HazardRec;
   delete Bot.HazardRec;
-  Top.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
-  Bot.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
+  Top.HazardRec = TM.getSubtargetImpl()->getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
+  Bot.HazardRec = TM.getSubtargetImpl()->getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
 
   Top.ResourceModel = new rvexVLIWResourceModel(TM, DAG->getSchedModel());
   Bot.ResourceModel = new rvexVLIWResourceModel(TM, DAG->getSchedModel());
@@ -232,7 +231,7 @@ void ConvergingrvexVLIWScheduler::releaseTopNode(SUnit *SU) {
   for (SUnit::succ_iterator I = SU->Preds.begin(), E = SU->Preds.end();
        I != E; ++I) {
     unsigned PredReadyCycle = I->getSUnit()->TopReadyCycle;
-    unsigned MinLatency = I->getMinLatency();
+    unsigned MinLatency = I->getLatency();
 #ifndef NDEBUG
     Top.MaxMinLatency = std::max(MinLatency, Top.MaxMinLatency);
 #endif
@@ -251,7 +250,7 @@ void ConvergingrvexVLIWScheduler::releaseBottomNode(SUnit *SU) {
   for (SUnit::succ_iterator I = SU->Succs.begin(), E = SU->Succs.end();
        I != E; ++I) {
     unsigned SuccReadyCycle = I->getSUnit()->BotReadyCycle;
-    unsigned MinLatency = I->getMinLatency();
+    unsigned MinLatency = I->getLatency();
 #ifndef NDEBUG
     Bot.MaxMinLatency = std::max(MinLatency, Bot.MaxMinLatency);
 #endif
@@ -426,10 +425,10 @@ SUnit *ConvergingrvexVLIWScheduler::SchedBoundary::pickOnlyChoice() {
 #ifndef NDEBUG
 void ConvergingrvexVLIWScheduler::traceCandidate(const char *Label,
                                              const ReadyQueue &Q,
-                                             SUnit *SU, PressureElement P) {
+                                             SUnit *SU, PressureChange P) {
   dbgs() << Label << " " << Q.getName() << " ";
   if (P.isValid())
-    dbgs() << TRI->getRegPressureSetName(P.PSetID) << ":" << P.UnitIncrease
+    dbgs() << TRI->getRegPressureSetName(P.getPSet()) << ":" << P.getUnitInc()
            << " ";
   else
     dbgs() << "     ";
@@ -536,8 +535,8 @@ int ConvergingrvexVLIWScheduler::SchedulingCost(ReadyQueue &Q, SUnit *SU,
   ResCount += (NumNodesBlocking * ScaleTwo);
 
   // Factor in reg pressure as a heuristic.
-  ResCount -= (Delta.Excess.UnitIncrease*PriorityThree);
-  ResCount -= (Delta.CriticalMax.UnitIncrease*PriorityThree);
+  ResCount -= (Delta.Excess.getUnitInc()*PriorityThree);
+  ResCount -= (Delta.CriticalMax.getUnitInc()*PriorityThree);
 
   DEBUG(if (verbose) dbgs() << " Total(" << ResCount << ")");
 

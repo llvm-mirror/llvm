@@ -49,6 +49,7 @@
 #include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "rvex-post-ra-scheduler"
 
 STATISTIC(NumNoops, "Number of noops inserted");
 STATISTIC(NumFixedAnti, "Number of fixed anti-dependencies");
@@ -107,9 +108,15 @@ namespace {
     /// The schedule. Null SUnit*'s represent noop instructions.
     std::vector<SUnit*> Sequence;
 
+    /// The index in BB of RegionEnd.
+    ///
+    /// This is the instruction number from the top of the current block, not
+    /// the SlotIndex. It is only used by the AntiDepBreaker.
+    unsigned EndIndex;
+
   public:
     SchedulePostRATDList(
-      MachineFunction &MF, MachineLoopInfo &MLI, MachineDominatorTree &MDT,
+      MachineFunction &MF, MachineLoopInfo &MLI,
       AliasAnalysis *AA, const RegisterClassInfo&,
       TargetSubtargetInfo::AntiDepBreakMode AntiDepMode,
       SmallVectorImpl<const TargetRegisterClass*> &CriticalPathRCs);
@@ -120,6 +127,9 @@ namespace {
     /// this block.
     ///
     void startBlock(MachineBasicBlock *BB);
+
+    // Set the index of RegionEnd within the current BB.
+    void setEndIndex(unsigned EndIdx) { EndIndex = EndIdx; }
 
     /// Initialize the scheduler state for the next scheduling region.
     virtual void enterRegion(MachineBasicBlock *bb,
@@ -173,17 +183,17 @@ namespace {
 
 
 SchedulePostRATDList::SchedulePostRATDList(
-  MachineFunction &MF, MachineLoopInfo &MLI, MachineDominatorTree &MDT,
+  MachineFunction &MF, MachineLoopInfo &MLI,
   AliasAnalysis *AA, const RegisterClassInfo &RCI,
   TargetSubtargetInfo::AntiDepBreakMode AntiDepMode,
   SmallVectorImpl<const TargetRegisterClass*> &CriticalPathRCs)
-  : ScheduleDAGInstrs(MF, MLI, MDT, /*IsPostRA=*/true), AA(AA),
-    LiveRegs(TRI->getNumRegs())
+  : ScheduleDAGInstrs(MF, &MLI, /*IsPostRA=*/true), AA(AA),
+    LiveRegs(TRI->getNumRegs()), EndIndex(0)
 {
   const TargetMachine &TM = MF.getTarget();
-  const InstrItineraryData *InstrItins = TM.getInstrItineraryData();
+  const InstrItineraryData *InstrItins = TM.getSubtargetImpl()->getInstrItineraryData();
   HazardRec =
-    TM.getInstrInfo()->CreateTargetPostRAHazardRecognizer(InstrItins, this);
+    TM.getSubtargetImpl()->getInstrInfo()->CreateTargetPostRAHazardRecognizer(InstrItins, this);
 
   assert((AntiDepMode == TargetSubtargetInfo::ANTIDEP_NONE ||
           MRI.tracksLiveness()) &&
@@ -232,9 +242,8 @@ void SchedulePostRATDList::dumpSchedule() const {
 #endif
 
 bool rvexPostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
-  TII = Fn.getTarget().getInstrInfo();
+  TII = Fn.getSubtarget().getInstrInfo();
   MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
-  MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
   AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
   //TargetPassConfig *PassConfig = &getAnalysis<TargetPassConfig>();
 
@@ -262,7 +271,7 @@ bool rvexPostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
 
   DEBUG(dbgs() << "PostRAScheduler\n");
 
-  SchedulePostRATDList Scheduler(Fn, MLI, MDT, AA, RegClassInfo, AntiDepMode,
+  SchedulePostRATDList Scheduler(Fn, MLI, AA, RegClassInfo, AntiDepMode,
                                  CriticalPathRCs);
 
   // Loop over all of the basic blocks
@@ -278,12 +287,13 @@ bool rvexPostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
     MachineBasicBlock::iterator Current = MBB->end();
     unsigned Count = MBB->size(), CurrentCount = Count;
     for (MachineBasicBlock::iterator I = Current; I != MBB->begin(); ) {
-      MachineInstr *MI = llvm::prior(I);
+      MachineInstr *MI = std::prev(I);
       // Calls are not scheduling boundaries before register allocation, but
       // post-ra we don't gain anything by scheduling across calls since we
       // don't need to worry about register pressure.
       if (MI->isCall() || TII->isSchedulingBoundary(MI, MBB, Fn)) {
         Scheduler.enterRegion(MBB, I, Current, CurrentCount);
+        Scheduler.setEndIndex(CurrentCount);
         Scheduler.schedule();
         Scheduler.exitRegion();
         Scheduler.EmitSchedule();
@@ -300,6 +310,7 @@ bool rvexPostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
     assert((MBB->begin() == Current || CurrentCount != 0) &&
            "Instruction count mismatch!");
     Scheduler.enterRegion(MBB, MBB->begin(), Current, CurrentCount);
+    Scheduler.setEndIndex(CurrentCount);
     Scheduler.schedule();
     Scheduler.exitRegion();
     Scheduler.EmitSchedule();
@@ -446,7 +457,7 @@ void SchedulePostRATDList::FixupLoads(MachineBasicBlock *MBB) {
       DEBUG(dbgs() << "Found Load\n");
       // DEBUG(MI->dump());
 
-      TII->insertNoop(*MBB, llvm::next(I));
+      TII->insertNoop(*MBB, std::next(I));
     }
   }
 }
@@ -543,7 +554,7 @@ void SchedulePostRATDList::FixupKills(MachineBasicBlock *MBB) {
 
         if (MI->getDesc().mayLoad()) {
           DEBUG(dbgs() << "Found Load\n");
-          TII->insertNoop(*MBB, llvm::next(I));
+          TII->insertNoop(*MBB, std::next(I));
         }
 
         // Warning: ToggleKillFlag may invalidate MO.
@@ -776,13 +787,13 @@ void SchedulePostRATDList::EmitSchedule() {
     // Update the Begin iterator, as the first instruction in the block
     // may have been scheduled later.
     if (i == 0)
-      RegionBegin = prior(RegionEnd);
+      RegionBegin = std::prev(RegionEnd);
   }
 
   // Reinsert any remaining debug_values.
   for (std::vector<std::pair<MachineInstr *, MachineInstr *> >::iterator
          DI = DbgValues.end(), DE = DbgValues.begin(); DI != DE; --DI) {
-    std::pair<MachineInstr *, MachineInstr *> P = *prior(DI);
+    std::pair<MachineInstr *, MachineInstr *> P = *std::prev(DI);
     MachineInstr *DbgValue = P.first;
     MachineBasicBlock::iterator OrigPrivMI = P.second;
     BB->splice(++OrigPrivMI, BB, DbgValue);

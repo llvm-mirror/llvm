@@ -41,6 +41,7 @@
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
 
 #include "llvm/Support/Debug.h"
@@ -93,8 +94,7 @@ namespace {
 
   public:
     // Ctor.
-    rvexVLIWPacketizerList(MachineFunction &MF, MachineLoopInfo &MLI,
-                             MachineDominatorTree &MDT);
+    rvexVLIWPacketizerList(MachineFunction &MF, MachineLoopInfo &MLI);
 
 		//default implementation of virtual function addToPacket will do
 
@@ -146,19 +146,17 @@ namespace {
 
 // rvexVLIWPacketizerList Ctor.
 rvexVLIWPacketizerList::rvexVLIWPacketizerList(MachineFunction &MF,
-                                                   MachineLoopInfo &MLI,
-                                                   MachineDominatorTree &MDT)
-  : VLIWPacketizerList(MF, MLI, MDT, true){
+                                                   MachineLoopInfo &MLI)
+  : VLIWPacketizerList(MF, MLI, true){
 }
 
 bool rvexVLIWPacketizer::runOnMachineFunction(MachineFunction &Fn) {
   DEBUG(errs() << "Voor VLIW packetizer!\n");
-  const TargetInstrInfo *TII = Fn.getTarget().getInstrInfo();
+  const TargetInstrInfo *TII = Fn.getSubtarget().getInstrInfo();
   MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
-  MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
 
   // Instantiate the packetizer.
-  rvexVLIWPacketizerList Packetizer(Fn, MLI, MDT);
+  rvexVLIWPacketizerList Packetizer(Fn, MLI);
 
   // DFA state table should not be empty.
   assert(Packetizer.getResourceTracker() && "Empty DFA table!");
@@ -176,12 +174,12 @@ bool rvexVLIWPacketizer::runOnMachineFunction(MachineFunction &Fn) {
       // instruction stream until we find the nearest boundary.
       MachineBasicBlock::iterator I = RegionEnd;
       for(; I != MBBb; --I) {
-        if (TII->isSchedulingBoundary(llvm::prior(I), MBB, Fn))
+        if (TII->isSchedulingBoundary(std::prev(I), MBB, Fn))
           break;
       }
 
       // Skip empty regions and regions with one instruction.
-      MachineBasicBlock::iterator priorEnd = llvm::prior(RegionEnd);
+      MachineBasicBlock::iterator priorEnd = std::prev(RegionEnd);
       if (I == RegionEnd || I == priorEnd) {
         RegionEnd = priorEnd;
         continue;

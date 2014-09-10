@@ -199,7 +199,7 @@ void LiveRangeCalc::extendToUses(LiveRange &LR, unsigned Reg, unsigned Mask) {
       // DEBUG(dbgs() << "start index: " << IndexEnd << "\n");
 
       SlotIndex Start2, End2;
-      tie(Start2, End2) = Indexes->getMBBRange(MI->getParent());
+      std::tie(Start2, End2) = Indexes->getMBBRange(MI->getParent());
       DEBUG(dbgs() << "start: " << Start2 << "\n");
       DEBUG(dbgs() << "end: " << End2 << "\n");
       // Idx = Idx.getNextIndex();

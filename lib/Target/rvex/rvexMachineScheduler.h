@@ -14,7 +14,6 @@
 #ifndef rvexASMPRINTER_H
 #define rvexASMPRINTER_H
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/PriorityQueue.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
@@ -58,8 +57,9 @@ class rvexVLIWResourceModel {
 public:
 rvexVLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
     SchedModel(SM), TotalPackets(0) {
-    ResourcesModel = TM.getInstrInfo()->CreateTargetScheduleState(&TM,NULL);
-    TRI = TM.getRegisterInfo(); 
+    const TargetSubtargetInfo *STI = TM.getSubtargetImpl();
+    ResourcesModel = STI->getInstrInfo()->CreateTargetScheduleState(&TM,NULL);
+    TRI = STI->getRegisterInfo(); 
     // This hard requirement could be relaxed,
     // but for now do not let it proceed.
     assert(ResourcesModel && "Unimplemented CreateTargetScheduleState.");
@@ -96,10 +96,10 @@ rvexVLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
 
 /// Extend the standard ScheduleDAGMI to provide more context and override the
 /// top-level schedule() driver.
-class rvexVLIWMachineScheduler : public ScheduleDAGMI {
+class rvexVLIWMachineScheduler : public ScheduleDAGMILive {
 public:
-  rvexVLIWMachineScheduler(MachineSchedContext *C, MachineSchedStrategy *S):
-    ScheduleDAGMI(C, S) {}
+  rvexVLIWMachineScheduler(MachineSchedContext *C, std::unique_ptr<MachineSchedStrategy> S):
+    ScheduleDAGMILive(C, std::move(S)) {}
 
   /// Schedule - This is called back from ScheduleDAGInstrs::Run() when it's
   /// time to do some work.
@@ -238,7 +238,7 @@ protected:
                                SchedCandidate &Candidate);
 #ifndef NDEBUG
   void traceCandidate(const char *Label, const ReadyQueue &Q, SUnit *SU,
-                      PressureElement P = PressureElement());
+                      PressureChange P = PressureChange());
 #endif
 };
 

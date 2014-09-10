@@ -23,6 +23,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -34,7 +35,6 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/Mangler.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 
@@ -83,7 +83,7 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
       MCInst TmpInst0;
       MCInstLowering.Lower(BMI, TmpInst0);
-      OutStreamer.EmitInstruction(TmpInst0);
+      OutStreamer.EmitInstruction(TmpInst0, *Subtarget);
       // TmpInst0.dump();
 
       // int i;
@@ -102,7 +102,7 @@ void rvexAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     MCInst TmpInst0;
     // MI->dump();
     MCInstLowering.Lower(MI, TmpInst0);
-    OutStreamer.EmitInstruction(TmpInst0);
+    OutStreamer.EmitInstruction(TmpInst0, *Subtarget);
     OutStreamer.EmitRawText(StringRef(";;\n\n"));
   }
 
@@ -240,7 +240,7 @@ void rvexAsmPrinter::EmitFunctionEntryLabel() {
 /// EmitFunctionBodyStart - Targets can override this to emit stuff before
 /// the first basic block in the function.
 void rvexAsmPrinter::EmitFunctionBodyStart() {
-  MCInstLowering.Initialize(Mang, &MF->getContext());
+  MCInstLowering.Initialize(&MF->getContext());
 
   //emitFrameDirective();
 

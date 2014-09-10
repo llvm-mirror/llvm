@@ -15,7 +15,7 @@
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Assembly/PrintModulePass.h"
+#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/LinkAllAsmWriterComponents.h"
 #include "llvm/CodeGen/LinkAllCodegenComponents.h"
@@ -27,6 +27,7 @@
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -39,6 +40,7 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include <memory>
 #include <iostream>
 using namespace llvm;
@@ -151,13 +153,13 @@ static tool_output_file *GetOutputStream(const char *TargetName,
   }
 
   // Open the file.
-  std::string error;
-  unsigned OpenFlags = 0;
-  if (Binary) OpenFlags |= raw_fd_ostream::F_Binary;
+  std::error_code error;
+  sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
+  if (!Binary) OpenFlags |= sys::fs::F_Text;
   tool_output_file *FDOut = new tool_output_file(OutputFilename.c_str(), error,
                                                  OpenFlags);
-  if (!error.empty()) {
-    errs() << error << '\n';
+  if (error) {
+    errs() << error.message() << '\n';
     delete FDOut;
     return 0;
   }
@@ -212,8 +214,7 @@ int main(int argc, char **argv) {
 static int compileModule(char **argv, LLVMContext &Context) {
   // Load the module to be compiled...
   SMDiagnostic Err;
-  OwningPtr<Module> M;
-  Module *mod = 0;
+  std::unique_ptr<Module> mod;
   Triple TheTriple;
 
 
@@ -223,9 +224,8 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
   // If user just wants to list available options, skip module loading
   if (!SkipModule) {
-    M.reset(ParseIRFile(InputFilename, Err, Context));
-    mod = M.get();
-    if (mod == 0) {
+    mod = parseIRFile(InputFilename, Err, Context);
+    if (!mod) {
       Err.print(argv[0], errs());
       return 1;
     }
@@ -272,31 +272,9 @@ static int compileModule(char **argv, LLVMContext &Context) {
   case '3': OLvl = CodeGenOpt::Aggressive; break;
   }
 
-  TargetOptions Options;
-  Options.LessPreciseFPMADOption = EnableFPMAD;
-  Options.NoFramePointerElim = DisableFPElim;
-  Options.NoFramePointerElimNonLeaf = DisableFPElimNonLeaf;
-  Options.AllowFPOpFusion = FuseFPOps;
-  Options.UnsafeFPMath = EnableUnsafeFPMath;
-  Options.NoInfsFPMath = EnableNoInfsFPMath;
-  Options.NoNaNsFPMath = EnableNoNaNsFPMath;
-  Options.HonorSignDependentRoundingFPMathOption =
-      EnableHonorSignDependentRoundingFPMath;
-  Options.UseSoftFloat = GenerateSoftFloatCalls;
-  if (FloatABIForCalls != FloatABI::Default)
-    Options.FloatABIType = FloatABIForCalls;
-  Options.NoZerosInBSS = DontPlaceZerosInBSS;
-  Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
-  Options.DisableTailCalls = DisableTailCalls;
-  Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.RealignStack = EnableRealignStack;
-  Options.TrapFuncName = TrapFuncName;
-  Options.PositionIndependentExecutable = EnablePIE;
-  Options.EnableSegmentedStacks = SegmentedStacks;
-  Options.UseInitArray = UseInitArray;
-  Options.SSPBufferSize = SSPBufferSize;
+  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
 
-  OwningPtr<TargetMachine>
+  std::unique_ptr<TargetMachine>
     target(TheTarget->createTargetMachine(TheTriple.getTriple(),
                                           MCPU, FeaturesStr, Options,
                                           RelocModel, CMModel, OLvl));
@@ -304,25 +282,11 @@ static int compileModule(char **argv, LLVMContext &Context) {
   assert(mod && "Should have exited after outputting help!");
   TargetMachine &Target = *target.get();
 
-  if (DisableDotLoc)
-    Target.setMCUseLoc(false);
-
-  if (DisableCFI)
-    Target.setMCUseCFI(false);
-
-  if (EnableDwarfDirectory)
-    Target.setMCUseDwarfDirectory(true);
-
   if (GenerateSoftFloatCalls)
     FloatABIForCalls = FloatABI::Soft;
 
-  // Disable .loc support for older OS X versions.
-  if (TheTriple.isMacOSX() &&
-      TheTriple.isMacOSXVersionLT(10, 6))
-    Target.setMCUseLoc(false);
-
   // Figure out where we are going to send the output.
-  OwningPtr<tool_output_file> Out
+  std::unique_ptr<tool_output_file> Out
     (GetOutputStream(TheTarget->getName(), TheTriple.getOS(), argv[0]));
   if (!Out) return 1;
 
@@ -339,21 +303,13 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Target.addAnalysisPasses(PM);
 
   // Add the target data from the target machine, if it exists, or the module.
-  if (const DataLayout *TD = Target.getDataLayout())
-    PM.add(new DataLayout(*TD));
+  if (const DataLayout *TD = Target.getSubtargetImpl()->getDataLayout())
+    PM.add(new DataLayoutPass(*TD));
   else
-    PM.add(new DataLayout(mod));
+    PM.add(new DataLayoutPass(mod.get()));
 
   // Override default to generate verbose assembly.
   Target.setAsmVerbosityDefault(true);
-
-  if (RelaxAll) {
-    if (FileType != TargetMachine::CGFT_ObjectFile)
-      errs() << argv[0]
-             << ": warning: ignoring -mc-relax-all because filetype != obj";
-    else
-      Target.setMCRelaxAll(true);
-  }
 
   {
     formatted_raw_ostream FOS(Out->os());

@@ -22,7 +22,7 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/Target/Mangler.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -33,8 +33,7 @@ using namespace llvm;
 rvexMCInstLower::rvexMCInstLower(rvexAsmPrinter &asmprinter)
   : AsmPrinter(asmprinter) {}
 
-void rvexMCInstLower::Initialize(Mangler *M, MCContext* C) {
-  Mang = M;
+void rvexMCInstLower::Initialize(MCContext* C) {
   Ctx = C;
 }
 
@@ -65,7 +64,7 @@ MCOperand rvexMCInstLower::LowerSymbolOperand(const MachineOperand &MO,
     break;
 
   case MachineOperand::MO_GlobalAddress:
-    Symbol = Mang->getSymbol(MO.getGlobal());
+    Symbol = AsmPrinter.getSymbol(MO.getGlobal());
     break;
 
   case MachineOperand::MO_ExternalSymbol:

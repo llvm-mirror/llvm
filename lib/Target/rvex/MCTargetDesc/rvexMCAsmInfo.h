@@ -31,7 +31,7 @@ namespace llvm {
   class Target;
 
   struct rvexELFMCAsmInfo : public MCAsmInfo {
-    explicit rvexELFMCAsmInfo(const Target &T, StringRef TT);
+    explicit rvexELFMCAsmInfo(StringRef TT);
   };
 
 } // namespace llvm

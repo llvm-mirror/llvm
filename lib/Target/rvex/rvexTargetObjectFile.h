@@ -31,7 +31,7 @@ namespace llvm {
 
     const MCSection *SelectSectionForGlobal(const GlobalValue *GV,
                                             SectionKind Kind,
-                                            Mangler *Mang,
+                                            Mangler &Mang,
                                             const TargetMachine &TM) const;
 
     // TODO: Classify globals as rvex wishes.

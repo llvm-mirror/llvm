@@ -26,7 +26,7 @@
 
 using namespace llvm;
 
-rvexELFMCAsmInfo::rvexELFMCAsmInfo(const Target &T, StringRef TT) {
+rvexELFMCAsmInfo::rvexELFMCAsmInfo(StringRef TT) {
   //Only members with inappropriate default values are listed here.
 
   CommentString = "##";
@@ -40,14 +40,12 @@ rvexELFMCAsmInfo::rvexELFMCAsmInfo(const Target &T, StringRef TT) {
   ZeroDirective = "\t.skip\t";
 
   GlobalDirective = "\t.global\t";
-  ExternDirective = "\t.globl\t";
 
   SupportsDebugInformation = true;
   
   UsesELFSectionDirectiveForBSS = true;
 
   //===--- Alignment Information ----------------------------------------===//
-  AlignDirective = "\t.align\t";
   AlignmentIsInBytes = true;
   TextAlignFillValue = 0;
 }

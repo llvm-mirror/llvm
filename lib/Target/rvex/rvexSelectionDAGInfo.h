@@ -22,7 +22,7 @@ class rvexTargetMachine;
 
 class rvexSelectionDAGInfo : public TargetSelectionDAGInfo {
 public:
-  explicit rvexSelectionDAGInfo(const rvexTargetMachine &TM);
+  explicit rvexSelectionDAGInfo(const DataLayout &DL);
   ~rvexSelectionDAGInfo();
 };
 

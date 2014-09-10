@@ -12,11 +12,12 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "rvex-selectiondag-info"
+#include "rvexSelectionDAGInfo.h"
 #include "rvexTargetMachine.h"
 using namespace llvm;
 
-rvexSelectionDAGInfo::rvexSelectionDAGInfo(const rvexTargetMachine &TM)
-  : TargetSelectionDAGInfo(TM) {
+rvexSelectionDAGInfo::rvexSelectionDAGInfo(const DataLayout &DL)
+  : TargetSelectionDAGInfo(&DL) {
 }
 
 rvexSelectionDAGInfo::~rvexSelectionDAGInfo() {

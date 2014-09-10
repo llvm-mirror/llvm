@@ -18,7 +18,7 @@
 #include "rvexSubtarget.h"
 #include "rvexMachineFunction.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/DebugInfo.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Function.h"
 #include "llvm/CodeGen/ValueTypes.h"

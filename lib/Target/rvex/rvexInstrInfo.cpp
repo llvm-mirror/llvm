@@ -18,8 +18,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "rvexHazardRecognizers.h"
 
-#define GET_INSTRINFO_CTOR
-//#define GET_INSTRINFO_ENUM
+#define GET_INSTRINFO_CTOR_DTOR
 #include "rvexGenInstrInfo.inc"
 #include "rvexGenDFAPacketizer.inc"
 
@@ -28,6 +27,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "rvex-instrInfo"
 
 
 
@@ -398,7 +399,7 @@ DFAPacketizer *rvexInstrInfo::
 CreateTargetScheduleState(const TargetMachine *TM,
                           const ScheduleDAG *DAG) const {
   
-  const InstrItineraryData *II = TM->getInstrItineraryData();
+  const InstrItineraryData *II = TM->getSubtarget<rvexGenSubtargetInfo>().getInstrItineraryData();
 
   DFAPacketizer *temp = TM->getSubtarget<rvexGenSubtargetInfo>().createDFAPacketizer(II);
   
