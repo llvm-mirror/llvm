@@ -14,12 +14,8 @@
 #ifndef rvexTARGETMACHINE_H
 #define rvexTARGETMACHINE_H
 
-#include "rvexFrameLowering.h"
-#include "rvexInstrInfo.h"
-#include "rvexISelLowering.h"
 #include "rvexSubtarget.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetFrameLowering.h"
 
 namespace llvm {
@@ -27,11 +23,6 @@ namespace llvm {
 
   class rvexTargetMachine : public LLVMTargetMachine {
     rvexSubtarget       Subtarget;
-    const DataLayout    DL; // Calculates type size & alignment
-    rvexInstrInfo       InstrInfo;	//- Instructions
-    rvexTargetLowering  TLInfo;	//- Stack(Frame) and Stack direction
-    rvexFrameLowering   FrameLowering;  //- Stack(Frame) and Stack direction
-    const InstrItineraryData *InstrItins;
 
   public:
     rvexTargetMachine(const Target &T, StringRef TT,
@@ -40,26 +31,8 @@ namespace llvm {
                       CodeGenOpt::Level OL,
                       bool isLittle);
 
-    virtual const rvexInstrInfo   *getInstrInfo()     const
-    { return &InstrInfo; }
-    virtual const TargetFrameLowering *getFrameLowering()     const
-    { return &FrameLowering; }
     virtual const rvexSubtarget   *getSubtargetImpl() const
     { return &Subtarget; }
-    virtual const DataLayout *getDataLayout()    const
-    { return &DL;}
-
-    virtual const rvexRegisterInfo *getRegisterInfo()  const {
-      return &InstrInfo.getRegisterInfo();
-    }
-
-    virtual const rvexTargetLowering *getTargetLowering() const {
-      return &TLInfo;
-    }
-
-    virtual const InstrItineraryData *getInstrItineraryData() const {
-      return InstrItins;
-    }
 
     // Pass Pipeline Configuration
     virtual TargetPassConfig *createPassConfig(PassManagerBase &PM);

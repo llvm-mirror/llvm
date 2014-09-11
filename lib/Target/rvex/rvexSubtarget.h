@@ -14,6 +14,10 @@
 #ifndef rvexSUBTARGET_H
 #define rvexSUBTARGET_H
 
+#include "rvexFrameLowering.h"
+#include "rvexInstrInfo.h"
+#include "rvexISelLowering.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include <string>
@@ -28,9 +32,13 @@ class rvexSubtarget : public rvexGenSubtargetInfo {
   virtual void anchor();
 
   bool IsVLIWEnabled;
-  InstrItineraryData InstrItins;
+  const InstrItineraryData InstrItins;
 
   const MCSchedModel SchedModel;
+  const DataLayout    DL; // Calculates type size & alignment
+  const rvexInstrInfo       InstrInfo; //- Instructions
+  const rvexTargetLowering  TLInfo; //- Stack(Frame) and Stack direction
+  const rvexFrameLowering   FrameLowering; //- Stack(Frame) and Stack direction
 
 public:
 
@@ -71,9 +79,20 @@ public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   rvexSubtarget(const std::string &TT, const std::string &CPU,
-                const std::string &FS, bool little);
+                const std::string &FS, bool little,
+                rvexTargetMachine &TM);
 
-  const InstrItineraryData &getInstItineraryData() const { return InstrItins; }
+  virtual const InstrItineraryData *getInstrItineraryData() const { return &InstrItins; }
+
+  virtual const DataLayout *getDataLayout() const { return &DL;}
+  virtual const rvexInstrInfo *getInstrInfo() const { return &InstrInfo; }
+  virtual const TargetFrameLowering *getFrameLowering() const { return &FrameLowering; }
+
+  virtual const rvexRegisterInfo *getRegisterInfo() const {
+      return &InstrInfo.getRegisterInfo();
+  }
+
+  virtual const rvexTargetLowering *getTargetLowering() const { return &TLInfo; }
 
 //- Vitual function, must have
   /// ParseSubtargetFeatures - Parses features string setting specified

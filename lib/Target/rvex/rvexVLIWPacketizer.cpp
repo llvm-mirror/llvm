@@ -205,7 +205,9 @@ void rvexVLIWPacketizerList::initPacketizerState() {
 bool rvexVLIWPacketizerList::ignorePseudoInstruction(MachineInstr *MI,
                                                        MachineBasicBlock *MBB) {
   assert(!isSoloInstruction(MI) && "Solo instruction should not be here!");
-  if((MI->getOpcode() == TargetOpcode::IMPLICIT_DEF) || (MI->isDebugValue())) {
+  if((MI->getOpcode() == TargetOpcode::IMPLICIT_DEF)
+          || (MI->getOpcode() == TargetOpcode::CFI_INSTRUCTION)
+          || (MI->isDebugValue())) {
     return true;
   } else {
     //all other instructions should have functional unit mapped to them.

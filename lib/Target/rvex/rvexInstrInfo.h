@@ -27,11 +27,9 @@
 namespace llvm {
 
 class rvexInstrInfo : public rvexGenInstrInfo {
-  rvexTargetMachine &TM;
-
   const rvexRegisterInfo RI;
 public:
-  explicit rvexInstrInfo(rvexTargetMachine &TM);
+  explicit rvexInstrInfo(rvexSubtarget &STM);
 
   /// getRegisterInfo - TargetInstrInfo is a superset of MRegister info.  As
   /// such, whenever a client has an instance of instruction info, it should

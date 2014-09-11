@@ -41,13 +41,9 @@ rvexTargetMachine(const Target &T, StringRef TT,
                   bool isLittle)
   //- Default is big endian
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, isLittle),
-    DL(isLittle ?
-               ("e-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32") :
-               ("E-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32")),
-    InstrInfo(*this), TLInfo(*this),
-    FrameLowering(Subtarget),
-    InstrItins(&Subtarget.getInstItineraryData()) {
+    Subtarget(TT, CPU, FS, isLittle, *this)
+     {
+    initAsmInfo();
 }
 
 void rvexebTargetMachine::anchor() { }
@@ -112,7 +108,7 @@ bool rvexPassConfig::addInstSelector() {
 
 
 bool rvexPassConfig::addPreEmitPass() {
-  if(static_cast<rvexTargetMachine*>(TM)->getSubtargetImpl()->isVLIWEnabled()) {
+  if(TM->getSubtarget<rvexSubtarget>().isVLIWEnabled()) {
     // addPass(creatervexPostRAScheduler());
     addPass(creatervexExpandPredSpillCode(getrvexTargetMachine()));    
     addPass(creatervexVLIWPacketizer());

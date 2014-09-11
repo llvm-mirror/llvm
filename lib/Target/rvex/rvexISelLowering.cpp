@@ -154,7 +154,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::GlobalAddress,      MVT::i32,   Custom);
   
   //TODO: scheduling modes: None, Source, RegPressure, Hybrid, ILP, VLIW
-  bool isVLIWEnabled = static_cast<rvexTargetMachine*>(&TM)->getSubtargetImpl()->isVLIWEnabled();
+  bool isVLIWEnabled = TM.getSubtarget<rvexSubtarget>().isVLIWEnabled();
   setSchedulingPreference(isVLIWEnabled ? Sched::VLIW : Sched::Hybrid);
 
   // Used by legalize types to correctly generate the setcc result.

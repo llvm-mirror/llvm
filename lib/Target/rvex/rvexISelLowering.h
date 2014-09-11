@@ -16,7 +16,6 @@
 #define rvexISELLOWERING_H
 
 #include "rvex.h"
-#include "rvexSubtarget.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/IR/Function.h"
@@ -24,6 +23,8 @@
 #include <deque>
 
 namespace llvm {
+  class rvexSubtarget;
+
   namespace rvexISD {
     enum NodeType {
       // Start the numbering from where ISD NodeType finishes.

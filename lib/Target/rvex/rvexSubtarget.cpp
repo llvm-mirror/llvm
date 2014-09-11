@@ -32,9 +32,15 @@ IsLinuxOpt("rvex-islinux-format", cl::Hidden, cl::init(true),
 void rvexSubtarget::anchor() { }
 
 rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
-                             const std::string &FS, bool little) :
+                             const std::string &FS, bool little,
+                             rvexTargetMachine &TM) :
   rvexGenSubtargetInfo(TT, CPU, FS),
+  InstrItins(getInstrItineraryForCPU(CPU.empty() ? "rvex32" : CPU)), // Initialize scheduling itinerary for the specified CPU.
   SchedModel(getSchedModelForCPU(CPU.empty() ? "rvex32" : CPU)),
+  DL(little ? ("e-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32") :
+              ("E-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32")),
+  InstrInfo(*this), TLInfo(TM),
+  FrameLowering(*this),
   rvexABI(UnknownABI), IsLittle(little), IsLinux(IsLinuxOpt)
 {
   std::string CPUName = CPU;
@@ -43,9 +49,6 @@ rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
 
   // Parse features string.
   ParseSubtargetFeatures(CPUName, FS);
-
-  // Initialize scheduling itinerary for the specified CPU.
-  InstrItins = getInstrItineraryForCPU(CPUName);
 
   // Set rvexABI if it hasn't been set yet.
   if (rvexABI == UnknownABI)

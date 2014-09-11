@@ -10,11 +10,10 @@
 //
 //
 //===----------------------------------------------------------------------===//
-#ifndef rvex_FRAMEINFO_H
-#define rvex_FRAMEINFO_H
+#ifndef rvex_FRAMELOWERING_H
+#define rvex_FRAMELOWERING_H
 
 #include "rvex.h"
-#include "rvexSubtarget.h"
 #include "llvm/Target/TargetFrameLowering.h"
 
 namespace llvm {

@@ -32,10 +32,9 @@ using namespace llvm;
 
 
 
-rvexInstrInfo::rvexInstrInfo(rvexTargetMachine &tm)
+rvexInstrInfo::rvexInstrInfo(rvexSubtarget &STM)
   : rvexGenInstrInfo(rvex::ADJCALLSTACKDOWN, rvex::ADJCALLSTACKUP), 
-    TM(tm),
-    RI(*TM.getSubtargetImpl(), *this) {}
+    RI(STM, *this) {}
 
 const rvexRegisterInfo &rvexInstrInfo::getRegisterInfo() const {
   return RI;
@@ -421,7 +420,7 @@ bool rvexInstrInfo::isSchedulingBoundary(const MachineInstr *MI,
     return false;
  
   // Terminators and labels can't be scheduled around.
-  if (MI->getDesc().isTerminator() || MI->isLabel() || MI->isInlineAsm() || MI->isReturn()) {
+  if (MI->getDesc().isTerminator() || MI->isPosition() || MI->isInlineAsm() || MI->isReturn()) {
     return true;
   }
 
