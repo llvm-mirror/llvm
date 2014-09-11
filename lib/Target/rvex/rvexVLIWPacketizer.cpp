@@ -99,28 +99,28 @@ namespace {
 		//default implementation of virtual function addToPacket will do
 
     // initPacketizerState - initialize some internal flags.
-    virtual void initPacketizerState(void);
+    void initPacketizerState(void) override;
 
 
     // ignorePseudoInstruction - Ignore bundling of pseudo instructions.
-    virtual bool ignorePseudoInstruction(MachineInstr *MI,
-                                         MachineBasicBlock *MBB);
+    bool ignorePseudoInstruction(MachineInstr *MI,
+                                 MachineBasicBlock *MBB) override;
 
-    virtual MachineBasicBlock::iterator addToPacket(MachineInstr *MI);  
+    MachineBasicBlock::iterator addToPacket(MachineInstr *MI) override;
 
     // isSoloInstruction - return true if instruction MI can not be packetized
     // with any other instruction, which means that MI itself is a packet.
-    virtual bool isSoloInstruction(MachineInstr *MI);
+    bool isSoloInstruction(MachineInstr *MI) override;
 
 
 
     // isLegalToPacketizeTogether - Is it legal to packetize SUI and SUJ
     // together.
-    virtual bool isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ);
+    bool isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) override;
 
     // isLegalToPruneDependencies - Is it legal to prune dependece between SUI
     // and SUJ.
-    virtual bool isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ);
+    bool isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ) override;
 
   private:
     // isDirectJump - Return true if the instruction is a direct jump.

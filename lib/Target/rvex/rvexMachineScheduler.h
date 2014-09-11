@@ -103,7 +103,7 @@ public:
 
   /// Schedule - This is called back from ScheduleDAGInstrs::Run() when it's
   /// time to do some work.
-  virtual void schedule();
+  void schedule() override;
   /// Perform platform specific DAG postprocessing.
   void postprocessDAG();
 };
@@ -211,15 +211,15 @@ public:
   ConvergingrvexVLIWScheduler():
     DAG(0), SchedModel(0), TRI(0), Top(TopQID, "TopQ"), Bot(BotQID, "BotQ") {}
 
-  virtual void initialize(ScheduleDAGMI *dag);
+  void initialize(ScheduleDAGMI *dag) override;
 
-  virtual SUnit *pickNode(bool &IsTopNode);
+  SUnit *pickNode(bool &IsTopNode) override;
 
-  virtual void schedNode(SUnit *SU, bool IsTopNode);
+  void schedNode(SUnit *SU, bool IsTopNode) override;
 
-  virtual void releaseTopNode(SUnit *SU);
+  void releaseTopNode(SUnit *SU) override;
 
-  virtual void releaseBottomNode(SUnit *SU);
+  void releaseBottomNode(SUnit *SU) override;
 
   unsigned ReportPackets() {
     return Top.ResourceModel->getTotalPackets() +

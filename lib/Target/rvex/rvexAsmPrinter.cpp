@@ -273,16 +273,6 @@ void rvexAsmPrinter::EmitStartOfAsmFile(Module &M) {
 
 }
 
-MachineLocation
-rvexAsmPrinter::getDebugValueLocation(const MachineInstr *MI) const {
-  // Handles frame addresses emitted in rvexInstrInfo::emitFrameIndexDebugValue.
-  assert(MI->getNumOperands() == 4 && "Invalid no. of machine operands!");
-  assert(MI->getOperand(0).isReg() && MI->getOperand(1).isImm() &&
-         "Unexpected MachineOperand types");
-  return MachineLocation(MI->getOperand(0).getReg(),
-                         MI->getOperand(1).getImm());
-}
-
 void rvexAsmPrinter::PrintDebugValueComment(const MachineInstr *MI,
                                            raw_ostream &OS) {
   // TODO: implement

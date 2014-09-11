@@ -99,15 +99,14 @@ namespace llvm {
   public:
     explicit rvexTargetLowering(rvexTargetMachine &TM);
 
-    virtual MVT getShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
     /// LowerOperation - Provide custom lowering hooks for some operations.
-    virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
     /// getTargetNodeName - This method returns the name of a target specific
     //  DAG node.
-    virtual const char *getTargetNodeName(unsigned Opcode) const;
+    const char *getTargetNodeName(unsigned Opcode) const override;
 
-    virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+    SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
 
 
@@ -132,16 +131,16 @@ namespace llvm {
 
 
 	//- must be exist without function all
-    virtual SDValue
+    SDValue
       LowerFormalArguments(SDValue Chain,
                            CallingConv::ID CallConv, bool isVarArg,
                            const SmallVectorImpl<ISD::InputArg> &Ins,
                            SDLoc dl, SelectionDAG &DAG,
-                           SmallVectorImpl<SDValue> &InVals) const;
+                           SmallVectorImpl<SDValue> &InVals) const override;
 
-    virtual SDValue
+    SDValue
       LowerCall(TargetLowering::CallLoweringInfo &CLI,
-                SmallVectorImpl<SDValue> &InVals) const;
+                SmallVectorImpl<SDValue> &InVals) const override;
 
     SDValue LowerAddCG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSUBE(SDValue Op, SelectionDAG &DAG) const;
@@ -156,18 +155,18 @@ namespace llvm {
     SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
 
 	//- must be exist without function all
-    virtual SDValue
+    SDValue
       LowerReturn(SDValue Chain,
                   CallingConv::ID CallConv, bool isVarArg,
                   const SmallVectorImpl<ISD::OutputArg> &Outs,
                   const SmallVectorImpl<SDValue> &OutVals,
-                  SDLoc dl, SelectionDAG &DAG) const;
+                  SDLoc dl, SelectionDAG &DAG) const override;
 
     SDValue passArgOnStack(SDValue StackPtr, unsigned Offset, SDValue Chain,
                            SDValue Arg, SDLoc DL, bool IsTailCall,
                            SelectionDAG &DAG) const;      
 
-    virtual bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const;
+    bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const override;
 
   protected:
 
@@ -177,7 +176,7 @@ namespace llvm {
     /// This function fills Ops, which is the list of operands that will later
     /// be used when a function call node is created. It also generates
     /// copyToReg nodes to set up argument registers.
-    virtual void
+    void
     getOpndList(SmallVectorImpl<SDValue> &Ops,
                 std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
                 bool IsPICCall, bool GlobalOrExternal, bool InternalLinkage,
@@ -295,11 +294,11 @@ namespace llvm {
     /// argument.
     void writeVarArgRegs(std::vector<SDValue> &OutChains, const rvexCC &CC,
                          SDValue Chain, SDLoc DL, SelectionDAG &DAG) const; 
-    virtual bool
+    bool
       CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
                      bool isVarArg,
                      const SmallVectorImpl<ISD::OutputArg> &Outs,
-                     LLVMContext &Context) const; 
+                     LLVMContext &Context) const override;
 
     bool isEligibleForTailCallOptimization(const rvexCC &rvexCCInfo,
                                       unsigned NextStackOffset) const;                                                    

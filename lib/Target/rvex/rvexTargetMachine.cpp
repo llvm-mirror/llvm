@@ -87,9 +87,8 @@ public:
   const rvexSubtarget &getrvexSubtarget() const {
     return *getrvexTargetMachine().getSubtargetImpl();
   }
-  // virtual bool addPreRewrite();
-  virtual bool addInstSelector();
-  virtual bool addPreEmitPass();
+  bool addInstSelector() override;
+  bool addPreEmitPass() override;
 };
 } // namespace
 

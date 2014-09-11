@@ -132,13 +132,13 @@ namespace {
     void setEndIndex(unsigned EndIdx) { EndIndex = EndIdx; }
 
     /// Initialize the scheduler state for the next scheduling region.
-    virtual void enterRegion(MachineBasicBlock *bb,
-                             MachineBasicBlock::iterator begin,
-                             MachineBasicBlock::iterator end,
-                             unsigned endcount);
+    void enterRegion(MachineBasicBlock *bb,
+                     MachineBasicBlock::iterator begin,
+                     MachineBasicBlock::iterator end,
+                     unsigned endcount) override;
 
     /// Notify that the scheduler has finished scheduling the current region.
-    virtual void exitRegion();
+    void exitRegion() override;
 
     /// Schedule - Schedule the instruction range using list scheduling.
     ///

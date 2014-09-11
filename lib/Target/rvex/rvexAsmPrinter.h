@@ -46,11 +46,11 @@ public:
     Subtarget = &TM.getSubtarget<rvexSubtarget>();
   }
 
-  virtual const char *getPassName() const {
+  const char *getPassName() const override {
     return "rvex Assembly Printer";
   }
 
-  virtual bool runOnMachineFunction(MachineFunction &MF);
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
 //- EmitInstruction() must exists or will have run time error.
 
@@ -61,11 +61,10 @@ public:
   void printHex32(unsigned int Value, raw_ostream &O);
   void emitFrameDirective();
   const char *getCurrentABIString() const;
-  virtual void EmitFunctionEntryLabel();
-  virtual void EmitFunctionBodyStart();
-  virtual void EmitFunctionBodyEnd();
+  void EmitFunctionEntryLabel() override;
+  void EmitFunctionBodyStart() override;
+  void EmitFunctionBodyEnd() override;
   void EmitStartOfAsmFile(Module &M);
-  virtual MachineLocation getDebugValueLocation(const MachineInstr *MI) const;
   void PrintDebugValueComment(const MachineInstr *MI, raw_ostream &OS);
 };
 }

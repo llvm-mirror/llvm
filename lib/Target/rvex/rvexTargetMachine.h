@@ -31,11 +31,10 @@ namespace llvm {
                       CodeGenOpt::Level OL,
                       bool isLittle);
 
-    virtual const rvexSubtarget   *getSubtargetImpl() const
-    { return &Subtarget; }
+    const rvexSubtarget *getSubtargetImpl() const override { return &Subtarget; }
 
     // Pass Pipeline Configuration
-    virtual TargetPassConfig *createPassConfig(PassManagerBase &PM);
+    TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
   };
 
 /// rvexebTargetMachine - rvex32 big endian target machine.

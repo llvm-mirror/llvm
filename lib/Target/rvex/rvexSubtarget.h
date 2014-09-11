@@ -82,17 +82,17 @@ public:
                 const std::string &FS, bool little,
                 rvexTargetMachine &TM);
 
-  virtual const InstrItineraryData *getInstrItineraryData() const { return &InstrItins; }
+  const InstrItineraryData *getInstrItineraryData() const override { return &InstrItins; }
 
-  virtual const DataLayout *getDataLayout() const { return &DL;}
-  virtual const rvexInstrInfo *getInstrInfo() const { return &InstrInfo; }
-  virtual const TargetFrameLowering *getFrameLowering() const { return &FrameLowering; }
+  const DataLayout *getDataLayout() const override { return &DL;}
+  const rvexInstrInfo *getInstrInfo() const override { return &InstrInfo; }
+  const TargetFrameLowering *getFrameLowering() const override { return &FrameLowering; }
 
-  virtual const rvexRegisterInfo *getRegisterInfo() const {
+  const rvexRegisterInfo *getRegisterInfo() const override {
       return &InstrInfo.getRegisterInfo();
   }
 
-  virtual const rvexTargetLowering *getTargetLowering() const { return &TLInfo; }
+  const rvexTargetLowering *getTargetLowering() const override { return &TLInfo; }
 
 //- Vitual function, must have
   /// ParseSubtargetFeatures - Parses features string setting specified

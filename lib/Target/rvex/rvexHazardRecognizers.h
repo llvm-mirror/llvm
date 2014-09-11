@@ -108,12 +108,11 @@ public:
   rvexHazardRecognizer(const InstrItineraryData *II,
                            const ScheduleDAG *SchedDAG,
                            const char *ParentDebugType);
-  virtual HazardType getHazardType(SUnit *SU, int Stalls);
-  virtual bool atIssueLimit() const;
-  virtual void Reset();
-  virtual void EmitInstruction(SUnit *SU);
-  virtual void AdvanceCycle();
-  //virtual void RecedeCycle();
+  HazardType getHazardType(SUnit *SU, int Stalls) override;
+  bool atIssueLimit() const override;
+  void Reset() override;
+  void EmitInstruction(SUnit *SU) override;
+  void AdvanceCycle() override;
 };
 }
 
