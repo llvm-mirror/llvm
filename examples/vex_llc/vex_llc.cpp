@@ -311,6 +311,14 @@ static int compileModule(char **argv, LLVMContext &Context) {
   // Override default to generate verbose assembly.
   Target.setAsmVerbosityDefault(true);
 
+  if (RelaxAll) {
+    if (FileType != TargetMachine::CGFT_ObjectFile)
+      errs() << argv[0]
+             << ": warning: ignoring -mc-relax-all because filetype != obj";
+    else
+      Target.Options.MCOptions.MCRelaxAll = true;
+  }
+
   {
     formatted_raw_ostream FOS(Out->os());
 
