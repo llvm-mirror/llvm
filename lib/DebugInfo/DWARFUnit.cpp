@@ -17,12 +17,13 @@
 using namespace llvm;
 using namespace dwarf;
 
-DWARFUnit::DWARFUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef RS,
-                     StringRef SS, StringRef SOS, StringRef AOS,
-                     const RelocAddrMap *M, bool LE)
-    : Abbrev(DA), InfoSection(IS), RangeSection(RS), StringSection(SS),
-      StringOffsetSection(SOS), AddrOffsetSection(AOS), RelocMap(M),
-      isLittleEndian(LE) {
+DWARFUnit::DWARFUnit(DWARFContext &DC, const DWARFDebugAbbrev *DA,
+                     StringRef IS, StringRef RS, StringRef SS, StringRef SOS,
+                     StringRef AOS, const RelocAddrMap *M, bool LE,
+                     const DWARFUnitSectionBase& UnitSection)
+  : Context(DC), Abbrev(DA), InfoSection(IS), RangeSection(RS),
+    StringSection(SS), StringOffsetSection(SOS), AddrOffsetSection(AOS),
+    RelocMap(M), isLittleEndian(LE), UnitSection(UnitSection)  {
   clear();
 }
 
@@ -235,11 +236,14 @@ size_t DWARFUnit::extractDIEsIfNeeded(bool CUDieOnly) {
   return DieArray.size();
 }
 
-DWARFUnit::DWOHolder::DWOHolder(std::unique_ptr<object::ObjectFile> DWOFile)
-    : DWOFile(std::move(DWOFile)),
-      DWOContext(
-          cast<DWARFContext>(DIContext::getDWARFContext(*this->DWOFile))),
-      DWOU(nullptr) {
+DWARFUnit::DWOHolder::DWOHolder(StringRef DWOPath)
+    : DWOFile(), DWOContext(), DWOU(nullptr) {
+  auto Obj = object::ObjectFile::createObjectFile(DWOPath);
+  if (!Obj)
+    return;
+  DWOFile = std::move(Obj.get());
+  DWOContext.reset(
+      cast<DWARFContext>(DIContext::getDWARFContext(*DWOFile.getBinary())));
   if (DWOContext->getNumDWOCompileUnits() > 0)
     DWOU = DWOContext->getDWOCompileUnitAtIndex(0);
 }
@@ -261,12 +265,7 @@ bool DWARFUnit::parseDWO() {
     sys::path::append(AbsolutePath, CompilationDir);
   }
   sys::path::append(AbsolutePath, DWOFileName);
-  ErrorOr<object::OwningBinary<object::ObjectFile>> DWOFile =
-      object::ObjectFile::createObjectFile(AbsolutePath);
-  if (!DWOFile)
-    return false;
-  // Reset DWOHolder.
-  DWO = llvm::make_unique<DWOHolder>(std::move(DWOFile->getBinary()));
+  DWO = llvm::make_unique<DWOHolder>(AbsolutePath);
   DWARFUnit *DWOCU = DWO->getUnit();
   // Verify that compile unit in .dwo file is valid.
   if (!DWOCU || DWOCU->getDWOId() != getDWOId()) {

@@ -613,7 +613,8 @@ static void EmitGenDwarfAranges(MCStreamer *MCOS,
   // The 4 byte offset to the compile unit in the .debug_info from the start
   // of the .debug_info.
   if (InfoSectionSymbol)
-    MCOS->EmitSymbolValue(InfoSectionSymbol, 4);
+    MCOS->EmitSymbolValue(InfoSectionSymbol, 4,
+                          asmInfo->needsDwarfSectionOffsetDirective());
   else
     MCOS->EmitIntValue(0, 4);
   // The 1 byte size of an address.
@@ -693,11 +694,11 @@ static void EmitGenDwarfInfo(MCStreamer *MCOS,
 
   // DW_AT_stmt_list, a 4 byte offset from the start of the .debug_line section,
   // which is at the start of that section so this is zero.
-  if (LineSectionSymbol) {
-    MCOS->EmitSymbolValue(LineSectionSymbol, 4);
-  } else {
+  if (LineSectionSymbol)
+    MCOS->EmitSymbolValue(LineSectionSymbol, 4,
+                          AsmInfo.needsDwarfSectionOffsetDirective());
+  else
     MCOS->EmitIntValue(0, 4);
-  }
 
   if (RangesSectionSymbol) {
     // There are multiple sections containing code, so we must use the

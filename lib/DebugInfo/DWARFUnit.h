@@ -22,11 +22,60 @@ namespace object {
 class ObjectFile;
 }
 
+class DWARFContext;
 class DWARFDebugAbbrev;
 class StringRef;
 class raw_ostream;
+class DWARFUnit;
+
+/// Base class for all DWARFUnitSection classes. This provides the
+/// functionality common to all unit types.
+class DWARFUnitSectionBase {
+public:
+  /// Returns the Unit that contains the given section offset in the
+  /// same section this Unit originated from.
+  virtual DWARFUnit *getUnitForOffset(uint32_t Offset) const = 0;
+
+  virtual ~DWARFUnitSectionBase() {}
+};
+
+/// Concrete instance of DWARFUnitSection, specialized for one Unit type.
+template<typename UnitType>
+class DWARFUnitSection : public SmallVector<std::unique_ptr<UnitType>, 1>,
+                         public DWARFUnitSectionBase {
+
+  struct UnitOffsetComparator {
+    bool operator()(const std::unique_ptr<UnitType> &LHS,
+                    const std::unique_ptr<UnitType> &RHS) const {
+      return LHS->getOffset() < RHS->getOffset();
+    }
+    bool operator()(const std::unique_ptr<UnitType> &LHS,
+                    uint32_t RHS) const {
+      return LHS->getOffset() < RHS;
+    }
+    bool operator()(uint32_t LHS,
+                    const std::unique_ptr<UnitType> &RHS) const {
+      return LHS < RHS->getOffset();
+    }
+  };
+
+public:
+  typedef llvm::SmallVectorImpl<std::unique_ptr<UnitType>> UnitVector;
+  typedef typename UnitVector::iterator iterator;
+  typedef llvm::iterator_range<typename UnitVector::iterator> iterator_range;
+
+  UnitType *getUnitForOffset(uint32_t Offset) const {
+    auto *CU = std::lower_bound(this->begin(), this->end(), Offset,
+                                UnitOffsetComparator());
+    if (CU != this->end())
+      return CU->get();
+    return nullptr;
+  }
+};
 
 class DWARFUnit {
+  DWARFContext &Context;
+
   const DWARFDebugAbbrev *Abbrev;
   StringRef InfoSection;
   StringRef RangeSection;
@@ -37,6 +86,7 @@ class DWARFUnit {
   uint32_t AddrOffsetSectionBase;
   const RelocAddrMap *RelocMap;
   bool isLittleEndian;
+  const DWARFUnitSectionBase &UnitSection;
 
   uint32_t Offset;
   uint32_t Length;
@@ -48,11 +98,11 @@ class DWARFUnit {
   std::vector<DWARFDebugInfoEntryMinimal> DieArray;
 
   class DWOHolder {
-    std::unique_ptr<object::ObjectFile> DWOFile;
+    object::OwningBinary<object::ObjectFile> DWOFile;
     std::unique_ptr<DWARFContext> DWOContext;
     DWARFUnit *DWOU;
   public:
-    DWOHolder(std::unique_ptr<object::ObjectFile> DWOFile);
+    DWOHolder(StringRef DWOPath);
     DWARFUnit *getUnit() const { return DWOU; }
   };
   std::unique_ptr<DWOHolder> DWO;
@@ -63,11 +113,13 @@ protected:
   virtual uint32_t getHeaderSize() const { return 11; }
 
 public:
-  DWARFUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef RS,
-            StringRef SS, StringRef SOS, StringRef AOS, const RelocAddrMap *M,
-            bool LE);
+  DWARFUnit(DWARFContext& Context, const DWARFDebugAbbrev *DA, StringRef IS,
+            StringRef RS, StringRef SS, StringRef SOS, StringRef AOS,
+            const RelocAddrMap *M, bool LE, const DWARFUnitSectionBase &UnitSection);
 
   virtual ~DWARFUnit();
+
+  DWARFContext& getContext() const { return Context; }
 
   StringRef getStringSection() const { return StringSection; }
   StringRef getStringOffsetSection() const { return StringOffsetSection; }
@@ -130,6 +182,9 @@ public:
   /// Returns empty chain if there is no subprogram containing address. The
   /// chain is valid as long as parsed compile unit DIEs are not cleared.
   DWARFDebugInfoEntryInlinedChain getInlinedChainForAddress(uint64_t Address);
+
+  /// getUnitSection - Return the DWARFUnitSection containing this unit.
+  const DWARFUnitSectionBase &getUnitSection() const { return UnitSection; }
 
 private:
   /// Size in bytes of the .debug_info data associated with this compile unit.

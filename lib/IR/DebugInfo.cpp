@@ -363,7 +363,7 @@ bool DIDescriptor::isImportedEntity() const {
 
 /// replaceAllUsesWith - Replace all uses of the MDNode used by this
 /// type with the one in the passed descriptor.
-void DIType::replaceAllUsesWith(LLVMContext &VMContext, DIDescriptor D) {
+void DIDescriptor::replaceAllUsesWith(LLVMContext &VMContext, DIDescriptor D) {
 
   assert(DbgNode && "Trying to replace an unverified type!");
 
@@ -384,12 +384,12 @@ void DIType::replaceAllUsesWith(LLVMContext &VMContext, DIDescriptor D) {
   const Value *V = cast_or_null<Value>(DN);
   Node->replaceAllUsesWith(const_cast<Value *>(V));
   MDNode::deleteTemporary(Node);
-  DbgNode = D;
+  DbgNode = DN;
 }
 
 /// replaceAllUsesWith - Replace all uses of the MDNode used by this
 /// type with the one in D.
-void DIType::replaceAllUsesWith(MDNode *D) {
+void DIDescriptor::replaceAllUsesWith(MDNode *D) {
 
   assert(DbgNode && "Trying to replace an unverified type!");
   assert(DbgNode != D && "This replacement should always happen");
@@ -489,6 +489,7 @@ bool DIType::Verify() const {
       Tag != dwarf::DW_TAG_inheritance && Tag != dwarf::DW_TAG_friend &&
       getFilename().empty())
     return false;
+
   // DIType is abstract, it should be a BasicType, a DerivedType or
   // a CompositeType.
   if (isBasicType())
@@ -1344,6 +1345,8 @@ void DIType::printInternal(raw_ostream &OS) const {
     OS << " [private]";
   else if (isProtected())
     OS << " [protected]";
+  else if (isPublic())
+    OS << " [public]";
 
   if (isArtificial())
     OS << " [artificial]";
@@ -1403,6 +1406,8 @@ void DISubprogram::printInternal(raw_ostream &OS) const {
     OS << " [private]";
   else if (isProtected())
     OS << " [protected]";
+  else if (isPublic())
+    OS << " [public]";
 
   if (isLValueReference())
     OS << " [reference]";

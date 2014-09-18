@@ -598,6 +598,7 @@ const char *llvm::dwarf::LanguageString(unsigned Language) {
   case DW_LANG_C_plus_plus_11:           return "DW_LANG_C_plus_plus_11";
   case DW_LANG_OCaml:                    return "DW_LANG_OCaml";
   case DW_LANG_lo_user:                  return "DW_LANG_lo_user";
+  case DW_LANG_Mips_Assembler:           return "DW_LANG_Mips_Assembler";
   case DW_LANG_hi_user:                  return "DW_LANG_hi_user";
   }
   return nullptr;
@@ -794,4 +795,35 @@ const char *llvm::dwarf::GDBIndexEntryLinkageString(GDBIndexEntryLinkage Linkage
     return "STATIC";
   }
   llvm_unreachable("Unknown GDBIndexEntryLinkage value");
+}
+
+const char *llvm::dwarf::AttributeValueString(uint16_t Attr, unsigned Val) {
+  switch (Attr) {
+  case DW_AT_accessibility:
+    return AccessibilityString(Val);
+  case DW_AT_virtuality:
+    return VirtualityString(Val);
+  case DW_AT_language:
+    return LanguageString(Val);
+  case DW_AT_encoding:
+    return AttributeEncodingString(Val);
+  case DW_AT_decimal_sign:
+    return DecimalSignString(Val);
+  case DW_AT_endianity:
+    return EndianityString(Val);
+  case DW_AT_visibility:
+    return VisibilityString(Val);
+  case DW_AT_identifier_case:
+    return CaseString(Val);
+  case DW_AT_calling_convention:
+    return ConventionString(Val);
+  case DW_AT_inline:
+    return InlineCodeString(Val);
+  case DW_AT_ordering:
+    return ArrayOrderString(Val);
+  case DW_AT_discr_value:
+    return DiscriminantString(Val);
+  }
+
+  return nullptr;
 }

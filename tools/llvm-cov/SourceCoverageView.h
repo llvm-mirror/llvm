@@ -110,7 +110,7 @@ public:
 private:
   const MemoryBuffer &File;
   const CoverageViewOptions &Options;
-  unsigned LineStart, LineCount;
+  unsigned LineOffset;
   SubViewKind Kind;
   coverage::CounterMappingRegion ExpansionRegion;
   std::vector<std::unique_ptr<SourceCoverageView>> Children;
@@ -118,6 +118,9 @@ private:
   std::vector<HighlightRange> HighlightRanges;
   std::vector<RegionMarker> Markers;
   StringRef FunctionName;
+
+  /// \brief Initialize the visible source range for this view.
+  void setUpVisibleRange(SourceCoverageDataManager &Data);
 
   /// \brief Create the line coverage information using the coverage data.
   void createLineCoverageInfo(SourceCoverageDataManager &Data);
@@ -138,7 +141,7 @@ private:
   void renderLine(raw_ostream &OS, StringRef Line,
                   ArrayRef<HighlightRange> Ranges);
 
-  void renderOffset(raw_ostream &OS, unsigned I);
+  void renderIndent(raw_ostream &OS, unsigned Level);
 
   void renderViewDivider(unsigned Offset, unsigned Length, raw_ostream &OS);
 
@@ -157,31 +160,19 @@ private:
 public:
   SourceCoverageView(const MemoryBuffer &File,
                      const CoverageViewOptions &Options)
-      : File(File), Options(Options), LineStart(1), Kind(View),
-        ExpansionRegion(coverage::Counter(), 0, 0, 0, 0, 0) {
-    LineCount = File.getBuffer().count('\n') + 1;
-  }
-
-  SourceCoverageView(const MemoryBuffer &File,
-                     const CoverageViewOptions &Options, unsigned LineStart,
-                     unsigned LineEnd)
-      : File(File), Options(Options), LineStart(LineStart),
-        LineCount(LineEnd - LineStart + 1), Kind(View),
+      : File(File), Options(Options), LineOffset(0), Kind(View),
         ExpansionRegion(coverage::Counter(), 0, 0, 0, 0, 0) {}
 
-  SourceCoverageView(SourceCoverageView &Parent, unsigned LineStart,
-                     unsigned LineEnd, StringRef FunctionName)
-      : File(Parent.File), Options(Parent.Options), LineStart(LineStart),
-        LineCount(LineEnd - LineStart + 1), Kind(InstantiationView),
-        ExpansionRegion(coverage::Counter(), 0, LineEnd, 0, LineEnd, 0),
+  SourceCoverageView(SourceCoverageView &Parent, StringRef FunctionName)
+      : File(Parent.File), Options(Parent.Options), LineOffset(0),
+        Kind(InstantiationView),
+        ExpansionRegion(coverage::Counter(), 0, 0, 0, 0, 0),
         FunctionName(FunctionName) {}
 
   SourceCoverageView(const MemoryBuffer &File,
-                     const CoverageViewOptions &Options, unsigned LineStart,
-                     unsigned LineEnd,
+                     const CoverageViewOptions &Options,
                      const coverage::CounterMappingRegion &ExpansionRegion)
-      : File(File), Options(Options), LineStart(LineStart),
-        LineCount(LineEnd - LineStart + 1), Kind(ExpansionView),
+      : File(File), Options(Options), LineOffset(0), Kind(ExpansionView),
         ExpansionRegion(ExpansionRegion) {}
 
   const CoverageViewOptions &getOptions() const { return Options; }
@@ -201,7 +192,7 @@ public:
 
   /// \brief Print the code coverage information for a specific
   /// portion of a source file to the output stream.
-  void render(raw_ostream &OS, unsigned Offset = 0);
+  void render(raw_ostream &OS, unsigned IndentLevel = 0);
 
   /// \brief Load the coverage information required for rendering
   /// from the mapping regions in the data manager.

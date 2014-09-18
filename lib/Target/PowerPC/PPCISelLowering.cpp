@@ -688,11 +688,6 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
   if (Subtarget.isDarwin())
     setPrefFunctionAlignment(4);
 
-  if (isPPC64 && Subtarget.isJITCodeModel())
-    // Temporary workaround for the inability of PPC64 JIT to handle jump
-    // tables.
-    setSupportJumpTables(false);
-
   setInsertFencesForAtomic(true);
 
   if (Subtarget.enableMachineScheduler())
@@ -2509,7 +2504,7 @@ PPCTargetLowering::LowerFormalArguments_32SVR4(
 
     // Make room for NumGPArgRegs and NumFPArgRegs.
     int Depth = NumGPArgRegs * PtrVT.getSizeInBits()/8 +
-                NumFPArgRegs * EVT(MVT::f64).getSizeInBits()/8;
+                NumFPArgRegs * MVT(MVT::f64).getSizeInBits()/8;
 
     FuncInfo->setVarArgsStackOffset(
       MFI->CreateFixedObject(PtrVT.getSizeInBits()/8,
@@ -2551,7 +2546,7 @@ PPCTargetLowering::LowerFormalArguments_32SVR4(
                                    MachinePointerInfo(), false, false, 0);
       MemOps.push_back(Store);
       // Increment the address by eight for the next argument to store
-      SDValue PtrOff = DAG.getConstant(EVT(MVT::f64).getSizeInBits()/8,
+      SDValue PtrOff = DAG.getConstant(MVT(MVT::f64).getSizeInBits()/8,
                                          PtrVT);
       FIN = DAG.getNode(ISD::ADD, dl, PtrOff.getValueType(), FIN, PtrOff);
     }
@@ -3570,33 +3565,27 @@ unsigned PrepareCall(SelectionDAG &DAG, SDValue &Callee, SDValue &InFlag,
     }
 
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
-    // XXX Work around for http://llvm.org/bugs/show_bug.cgi?id=5201
-    // Use indirect calls for ALL functions calls in JIT mode, since the
-    // far-call stubs may be outside relocation limits for a BL instruction.
-    if (!DAG.getTarget().getSubtarget<PPCSubtarget>().isJITCodeModel()) {
-      unsigned OpFlags = 0;
-      if ((DAG.getTarget().getRelocationModel() != Reloc::Static &&
-          (Subtarget.getTargetTriple().isMacOSX() &&
-           Subtarget.getTargetTriple().isMacOSXVersionLT(10, 5)) &&
-          (G->getGlobal()->isDeclaration() ||
-           G->getGlobal()->isWeakForLinker())) ||
-          (Subtarget.isTargetELF() && !isPPC64 &&
-           !G->getGlobal()->hasLocalLinkage() &&
-           DAG.getTarget().getRelocationModel() == Reloc::PIC_)) {
-        // PC-relative references to external symbols should go through $stub,
-        // unless we're building with the leopard linker or later, which
-        // automatically synthesizes these stubs.
-        OpFlags = PPCII::MO_PLT_OR_STUB;
-      }
-
-      // If the callee is a GlobalAddress/ExternalSymbol node (quite common,
-      // every direct call is) turn it into a TargetGlobalAddress /
-      // TargetExternalSymbol node so that legalize doesn't hack it.
-      Callee = DAG.getTargetGlobalAddress(G->getGlobal(), dl,
-                                          Callee.getValueType(),
-                                          0, OpFlags);
-      needIndirectCall = false;
+    unsigned OpFlags = 0;
+    if ((DAG.getTarget().getRelocationModel() != Reloc::Static &&
+         (Subtarget.getTargetTriple().isMacOSX() &&
+          Subtarget.getTargetTriple().isMacOSXVersionLT(10, 5)) &&
+         (G->getGlobal()->isDeclaration() ||
+          G->getGlobal()->isWeakForLinker())) ||
+        (Subtarget.isTargetELF() && !isPPC64 &&
+         !G->getGlobal()->hasLocalLinkage() &&
+         DAG.getTarget().getRelocationModel() == Reloc::PIC_)) {
+      // PC-relative references to external symbols should go through $stub,
+      // unless we're building with the leopard linker or later, which
+      // automatically synthesizes these stubs.
+      OpFlags = PPCII::MO_PLT_OR_STUB;
     }
+
+    // If the callee is a GlobalAddress/ExternalSymbol node (quite common,
+    // every direct call is) turn it into a TargetGlobalAddress /
+    // TargetExternalSymbol node so that legalize doesn't hack it.
+    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), dl,
+                                        Callee.getValueType(), 0, OpFlags);
+    needIndirectCall = false;
   }
 
   if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {

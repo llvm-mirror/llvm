@@ -35,7 +35,11 @@ void DumpBytes(StringRef bytes);
 void DisassembleInputMachO(StringRef Filename);
 void printCOFFUnwindInfo(const object::COFFObjectFile* o);
 void printMachOUnwindInfo(const object::MachOObjectFile* o);
-
+void printMachOExportsTrie(const object::MachOObjectFile* o);
+void printMachORebaseTable(const object::MachOObjectFile* o);
+void printMachOBindTable(const object::MachOObjectFile* o);
+void printMachOLazyBindTable(const object::MachOObjectFile* o);
+void printMachOWeakBindTable(const object::MachOObjectFile* o);
 void printELFFileHeader(const object::ObjectFile *o);
 void printCOFFFileHeader(const object::ObjectFile *o);
 void printMachOFileHeader(const object::ObjectFile *o);

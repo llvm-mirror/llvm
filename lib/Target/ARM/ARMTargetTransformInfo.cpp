@@ -104,7 +104,7 @@ public:
     return 32;
   }
 
-  unsigned getMaximumUnrollFactor() const override {
+  unsigned getMaxInterleaveFactor() const override {
     // These are out of order CPUs:
     if (ST->isCortexA15() || ST->isSwift())
       return 2;
@@ -388,6 +388,13 @@ unsigned ARMTTI::getVectorInstrCost(unsigned Opcode, Type *ValTy,
       Opcode == Instruction::InsertElement &&
       ValTy->isVectorTy() &&
       ValTy->getScalarSizeInBits() <= 32)
+    return 3;
+
+  // Cross-class copies are expensive on many microarchitectures,
+  // so assume they are expensive by default.
+  if ((Opcode == Instruction::InsertElement ||
+       Opcode == Instruction::ExtractElement) &&
+      ValTy->getVectorElementType()->isIntegerTy())
     return 3;
 
   return TargetTransformInfo::getVectorInstrCost(Opcode, ValTy, Index);

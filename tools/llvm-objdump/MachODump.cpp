@@ -308,8 +308,6 @@ static void DisassembleInputMachO2(StringRef Filename,
 
   MachO::mach_header Header = MachOOF->getHeader();
 
-  // FIXME: FoundFns isn't used anymore. Using symbols/LC_FUNCTION_STARTS to
-  // determine function locations will eventually go in MCObjectDisassembler.
   // FIXME: Using the -cfg command line option, this code used to be able to
   // annotate relocations with the referenced symbol's name, and if this was
   // inside a __[cf]string section, the data it points to. This is now replaced
@@ -651,6 +649,9 @@ static void printUnwindRelocDest(const MachOObjectFile *Obj,
                                  uint64_t Addr) {
   StringRef Name;
   uint64_t Addend;
+
+  if (!Reloc.getObjectFile())
+    return;
 
   findUnwindRelocNameAddend(Obj, Symbols, Reloc, Addr, Name, Addend);
 
@@ -1114,7 +1115,7 @@ static void PrintMachHeader(uint32_t magic, uint32_t cputype,
       break;
     }
     if ((cpusubtype & MachO::CPU_SUBTYPE_MASK) == MachO::CPU_SUBTYPE_LIB64) {
-      outs() << " LIB64 ";
+      outs() << " LIB64";
     } else {
       outs() << format("  0x%02" PRIx32,
                        (cpusubtype & MachO::CPU_SUBTYPE_MASK) >> 24);
@@ -1272,22 +1273,1098 @@ static void PrintMachHeader(uint32_t magic, uint32_t cputype,
   outs() << "\n";
 }
 
-static void getAndPrintMachHeader(const MachOObjectFile *Obj, bool verbose) {
+static void PrintSegmentCommand(uint32_t cmd, uint32_t cmdsize,
+                                StringRef SegName, uint64_t vmaddr,
+                                uint64_t vmsize, uint64_t fileoff,
+                                uint64_t filesize, uint32_t maxprot,
+                                uint32_t initprot, uint32_t nsects,
+                                uint32_t flags, uint32_t object_size,
+                                bool verbose) {
+  uint64_t expected_cmdsize;
+  if (cmd == MachO::LC_SEGMENT) {
+    outs() << "      cmd LC_SEGMENT\n";
+    expected_cmdsize = nsects;
+    expected_cmdsize *= sizeof(struct MachO::section);
+    expected_cmdsize += sizeof(struct MachO::segment_command);
+  } else {
+    outs() << "      cmd LC_SEGMENT_64\n";
+    expected_cmdsize = nsects;
+    expected_cmdsize *= sizeof(struct MachO::section_64);
+    expected_cmdsize += sizeof(struct MachO::segment_command_64);
+  }
+  outs() << "  cmdsize " << cmdsize;
+  if (cmdsize != expected_cmdsize)
+    outs() << " Inconsistent size\n";
+  else
+    outs() << "\n";
+  outs() << "  segname " << SegName << "\n";
+  if (cmd == MachO::LC_SEGMENT_64) {
+    outs() << "   vmaddr " << format("0x%016" PRIx64, vmaddr) << "\n";
+    outs() << "   vmsize " << format("0x%016" PRIx64, vmsize) << "\n";
+  } else {
+    outs() << "   vmaddr " << format("0x%08" PRIx32, vmaddr) << "\n";
+    outs() << "   vmsize " << format("0x%08" PRIx32, vmsize) << "\n";
+  }
+  outs() << "  fileoff " << fileoff;
+  if (fileoff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << " filesize " << filesize;
+  if (fileoff + filesize > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  if (verbose) {
+    if ((maxprot &
+         ~(MachO::VM_PROT_READ | MachO::VM_PROT_WRITE |
+           MachO::VM_PROT_EXECUTE)) != 0)
+      outs() << "  maxprot ?" << format("0x%08" PRIx32, maxprot) << "\n";
+    else {
+      if (maxprot & MachO::VM_PROT_READ)
+        outs() << "  maxprot r";
+      else
+        outs() << "  maxprot -";
+      if (maxprot & MachO::VM_PROT_WRITE)
+        outs() << "w";
+      else
+        outs() << "-";
+      if (maxprot & MachO::VM_PROT_EXECUTE)
+        outs() << "x\n";
+      else
+        outs() << "-\n";
+    }
+    if ((initprot &
+         ~(MachO::VM_PROT_READ | MachO::VM_PROT_WRITE |
+           MachO::VM_PROT_EXECUTE)) != 0)
+      outs() << "  initprot ?" << format("0x%08" PRIx32, initprot) << "\n";
+    else {
+      if (initprot & MachO::VM_PROT_READ)
+        outs() << " initprot r";
+      else
+        outs() << " initprot -";
+      if (initprot & MachO::VM_PROT_WRITE)
+        outs() << "w";
+      else
+        outs() << "-";
+      if (initprot & MachO::VM_PROT_EXECUTE)
+        outs() << "x\n";
+      else
+        outs() << "-\n";
+    }
+  } else {
+    outs() << "  maxprot " << format("0x%08" PRIx32, maxprot) << "\n";
+    outs() << " initprot " << format("0x%08" PRIx32, initprot) << "\n";
+  }
+  outs() << "   nsects " << nsects << "\n";
+  if (verbose) {
+    outs() << "    flags";
+    if (flags == 0)
+      outs() << " (none)\n";
+    else {
+      if (flags & MachO::SG_HIGHVM) {
+        outs() << " HIGHVM";
+        flags &= ~MachO::SG_HIGHVM;
+      }
+      if (flags & MachO::SG_FVMLIB) {
+        outs() << " FVMLIB";
+        flags &= ~MachO::SG_FVMLIB;
+      }
+      if (flags & MachO::SG_NORELOC) {
+        outs() << " NORELOC";
+        flags &= ~MachO::SG_NORELOC;
+      }
+      if (flags & MachO::SG_PROTECTED_VERSION_1) {
+        outs() << " PROTECTED_VERSION_1";
+        flags &= ~MachO::SG_PROTECTED_VERSION_1;
+      }
+      if (flags)
+        outs() << format(" 0x%08" PRIx32, flags) << " (unknown flags)\n";
+      else
+        outs() << "\n";
+    }
+  } else {
+    outs() << "    flags " << format("0x%" PRIx32, flags) << "\n";
+  }
+}
+
+static void PrintSection(const char *sectname, const char *segname,
+                         uint64_t addr, uint64_t size, uint32_t offset,
+                         uint32_t align, uint32_t reloff, uint32_t nreloc,
+                         uint32_t flags, uint32_t reserved1, uint32_t reserved2,
+                         uint32_t cmd, const char *sg_segname,
+                         uint32_t filetype, uint32_t object_size,
+                         bool verbose) {
+  outs() << "Section\n";
+  outs() << "  sectname " << format("%.16s\n", sectname);
+  outs() << "   segname " << format("%.16s", segname);
+  if (filetype != MachO::MH_OBJECT && strncmp(sg_segname, segname, 16) != 0)
+    outs() << " (does not match segment)\n";
+  else
+    outs() << "\n";
+  if (cmd == MachO::LC_SEGMENT_64) {
+    outs() << "      addr " << format("0x%016" PRIx64, addr) << "\n";
+    outs() << "      size " << format("0x%016" PRIx64, size);
+  } else {
+    outs() << "      addr " << format("0x%08" PRIx32, addr) << "\n";
+    outs() << "      size " << format("0x%08" PRIx32, size);
+  }
+  if ((flags & MachO::S_ZEROFILL) != 0 && offset + size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "    offset " << offset;
+  if (offset > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  uint32_t align_shifted = 1 << align;
+  outs() << "     align 2^" << align << " (" << align_shifted << ")\n";
+  outs() << "    reloff " << reloff;
+  if (reloff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "    nreloc " << nreloc;
+  if (reloff + nreloc * sizeof(struct MachO::relocation_info) > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  uint32_t section_type = flags & MachO::SECTION_TYPE;
+  if (verbose) {
+    outs() << "      type";
+    if (section_type == MachO::S_REGULAR)
+      outs() << " S_REGULAR\n";
+    else if (section_type == MachO::S_ZEROFILL)
+      outs() << " S_ZEROFILL\n";
+    else if (section_type == MachO::S_CSTRING_LITERALS)
+      outs() << " S_CSTRING_LITERALS\n";
+    else if (section_type == MachO::S_4BYTE_LITERALS)
+      outs() << " S_4BYTE_LITERALS\n";
+    else if (section_type == MachO::S_8BYTE_LITERALS)
+      outs() << " S_8BYTE_LITERALS\n";
+    else if (section_type == MachO::S_16BYTE_LITERALS)
+      outs() << " S_16BYTE_LITERALS\n";
+    else if (section_type == MachO::S_LITERAL_POINTERS)
+      outs() << " S_LITERAL_POINTERS\n";
+    else if (section_type == MachO::S_NON_LAZY_SYMBOL_POINTERS)
+      outs() << " S_NON_LAZY_SYMBOL_POINTERS\n";
+    else if (section_type == MachO::S_LAZY_SYMBOL_POINTERS)
+      outs() << " S_LAZY_SYMBOL_POINTERS\n";
+    else if (section_type == MachO::S_SYMBOL_STUBS)
+      outs() << " S_SYMBOL_STUBS\n";
+    else if (section_type == MachO::S_MOD_INIT_FUNC_POINTERS)
+      outs() << " S_MOD_INIT_FUNC_POINTERS\n";
+    else if (section_type == MachO::S_MOD_TERM_FUNC_POINTERS)
+      outs() << " S_MOD_TERM_FUNC_POINTERS\n";
+    else if (section_type == MachO::S_COALESCED)
+      outs() << " S_COALESCED\n";
+    else if (section_type == MachO::S_INTERPOSING)
+      outs() << " S_INTERPOSING\n";
+    else if (section_type == MachO::S_DTRACE_DOF)
+      outs() << " S_DTRACE_DOF\n";
+    else if (section_type == MachO::S_LAZY_DYLIB_SYMBOL_POINTERS)
+      outs() << " S_LAZY_DYLIB_SYMBOL_POINTERS\n";
+    else if (section_type == MachO::S_THREAD_LOCAL_REGULAR)
+      outs() << " S_THREAD_LOCAL_REGULAR\n";
+    else if (section_type == MachO::S_THREAD_LOCAL_ZEROFILL)
+      outs() << " S_THREAD_LOCAL_ZEROFILL\n";
+    else if (section_type == MachO::S_THREAD_LOCAL_VARIABLES)
+      outs() << " S_THREAD_LOCAL_VARIABLES\n";
+    else if (section_type == MachO::S_THREAD_LOCAL_VARIABLE_POINTERS)
+      outs() << " S_THREAD_LOCAL_VARIABLE_POINTERS\n";
+    else if (section_type == MachO::S_THREAD_LOCAL_INIT_FUNCTION_POINTERS)
+      outs() << " S_THREAD_LOCAL_INIT_FUNCTION_POINTERS\n";
+    else
+      outs() << format("0x%08" PRIx32, section_type) << "\n";
+    outs() << "attributes";
+    uint32_t section_attributes = flags & MachO::SECTION_ATTRIBUTES;
+    if (section_attributes & MachO::S_ATTR_PURE_INSTRUCTIONS)
+      outs() << " PURE_INSTRUCTIONS";
+    if (section_attributes & MachO::S_ATTR_NO_TOC)
+      outs() << " NO_TOC";
+    if (section_attributes & MachO::S_ATTR_STRIP_STATIC_SYMS)
+      outs() << " STRIP_STATIC_SYMS";
+    if (section_attributes & MachO::S_ATTR_NO_DEAD_STRIP)
+      outs() << " NO_DEAD_STRIP";
+    if (section_attributes & MachO::S_ATTR_LIVE_SUPPORT)
+      outs() << " LIVE_SUPPORT";
+    if (section_attributes & MachO::S_ATTR_SELF_MODIFYING_CODE)
+      outs() << " SELF_MODIFYING_CODE";
+    if (section_attributes & MachO::S_ATTR_DEBUG)
+      outs() << " DEBUG";
+    if (section_attributes & MachO::S_ATTR_SOME_INSTRUCTIONS)
+      outs() << " SOME_INSTRUCTIONS";
+    if (section_attributes & MachO::S_ATTR_EXT_RELOC)
+      outs() << " EXT_RELOC";
+    if (section_attributes & MachO::S_ATTR_LOC_RELOC)
+      outs() << " LOC_RELOC";
+    if (section_attributes == 0)
+      outs() << " (none)";
+    outs() << "\n";
+  } else
+    outs() << "     flags " << format("0x%08" PRIx32, flags) << "\n";
+  outs() << " reserved1 " << reserved1;
+  if (section_type == MachO::S_SYMBOL_STUBS ||
+      section_type == MachO::S_LAZY_SYMBOL_POINTERS ||
+      section_type == MachO::S_LAZY_DYLIB_SYMBOL_POINTERS ||
+      section_type == MachO::S_NON_LAZY_SYMBOL_POINTERS ||
+      section_type == MachO::S_THREAD_LOCAL_VARIABLE_POINTERS)
+    outs() << " (index into indirect symbol table)\n";
+  else
+    outs() << "\n";
+  outs() << " reserved2 " << reserved2;
+  if (section_type == MachO::S_SYMBOL_STUBS)
+    outs() << " (size of stubs)\n";
+  else
+    outs() << "\n";
+}
+
+static void PrintSymtabLoadCommand(MachO::symtab_command st, uint32_t cputype,
+                                   uint32_t object_size) {
+  outs() << "     cmd LC_SYMTAB\n";
+  outs() << " cmdsize " << st.cmdsize;
+  if (st.cmdsize != sizeof(struct MachO::symtab_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "  symoff " << st.symoff;
+  if (st.symoff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "   nsyms " << st.nsyms;
+  uint64_t big_size;
+  if (cputype & MachO::CPU_ARCH_ABI64) {
+    big_size = st.nsyms;
+    big_size *= sizeof(struct MachO::nlist_64);
+    big_size += st.symoff;
+    if (big_size > object_size)
+      outs() << " (past end of file)\n";
+    else
+      outs() << "\n";
+  } else {
+    big_size = st.nsyms;
+    big_size *= sizeof(struct MachO::nlist);
+    big_size += st.symoff;
+    if (big_size > object_size)
+      outs() << " (past end of file)\n";
+    else
+      outs() << "\n";
+  }
+  outs() << "  stroff " << st.stroff;
+  if (st.stroff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << " strsize " << st.strsize;
+  big_size = st.stroff;
+  big_size += st.strsize;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+}
+
+static void PrintDysymtabLoadCommand(MachO::dysymtab_command dyst,
+                                     uint32_t nsyms, uint32_t object_size,
+                                     uint32_t cputype) {
+  outs() << "            cmd LC_DYSYMTAB\n";
+  outs() << "        cmdsize " << dyst.cmdsize;
+  if (dyst.cmdsize != sizeof(struct MachO::dysymtab_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "      ilocalsym " << dyst.ilocalsym;
+  if (dyst.ilocalsym > nsyms)
+    outs() << " (greater than the number of symbols)\n";
+  else
+    outs() << "\n";
+  outs() << "      nlocalsym " << dyst.nlocalsym;
+  uint64_t big_size;
+  big_size = dyst.ilocalsym;
+  big_size += dyst.nlocalsym;
+  if (big_size > nsyms)
+    outs() << " (past the end of the symbol table)\n";
+  else
+    outs() << "\n";
+  outs() << "     iextdefsym " << dyst.iextdefsym;
+  if (dyst.iextdefsym > nsyms)
+    outs() << " (greater than the number of symbols)\n";
+  else
+    outs() << "\n";
+  outs() << "     nextdefsym " << dyst.nextdefsym;
+  big_size = dyst.iextdefsym;
+  big_size += dyst.nextdefsym;
+  if (big_size > nsyms)
+    outs() << " (past the end of the symbol table)\n";
+  else
+    outs() << "\n";
+  outs() << "      iundefsym " << dyst.iundefsym;
+  if (dyst.iundefsym > nsyms)
+    outs() << " (greater than the number of symbols)\n";
+  else
+    outs() << "\n";
+  outs() << "      nundefsym " << dyst.nundefsym;
+  big_size = dyst.iundefsym;
+  big_size += dyst.nundefsym;
+  if (big_size > nsyms)
+    outs() << " (past the end of the symbol table)\n";
+  else
+    outs() << "\n";
+  outs() << "         tocoff " << dyst.tocoff;
+  if (dyst.tocoff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "           ntoc " << dyst.ntoc;
+  big_size = dyst.ntoc;
+  big_size *= sizeof(struct MachO::dylib_table_of_contents);
+  big_size += dyst.tocoff;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "      modtaboff " << dyst.modtaboff;
+  if (dyst.modtaboff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "        nmodtab " << dyst.nmodtab;
+  uint64_t modtabend;
+  if (cputype & MachO::CPU_ARCH_ABI64) {
+    modtabend = dyst.nmodtab;
+    modtabend *= sizeof(struct MachO::dylib_module_64);
+    modtabend += dyst.modtaboff;
+  } else {
+    modtabend = dyst.nmodtab;
+    modtabend *= sizeof(struct MachO::dylib_module);
+    modtabend += dyst.modtaboff;
+  }
+  if (modtabend > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "   extrefsymoff " << dyst.extrefsymoff;
+  if (dyst.extrefsymoff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "    nextrefsyms " << dyst.nextrefsyms;
+  big_size = dyst.nextrefsyms;
+  big_size *= sizeof(struct MachO::dylib_reference);
+  big_size += dyst.extrefsymoff;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << " indirectsymoff " << dyst.indirectsymoff;
+  if (dyst.indirectsymoff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "  nindirectsyms " << dyst.nindirectsyms;
+  big_size = dyst.nindirectsyms;
+  big_size *= sizeof(uint32_t);
+  big_size += dyst.indirectsymoff;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "      extreloff " << dyst.extreloff;
+  if (dyst.extreloff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "        nextrel " << dyst.nextrel;
+  big_size = dyst.nextrel;
+  big_size *= sizeof(struct MachO::relocation_info);
+  big_size += dyst.extreloff;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "      locreloff " << dyst.locreloff;
+  if (dyst.locreloff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "        nlocrel " << dyst.nlocrel;
+  big_size = dyst.nlocrel;
+  big_size *= sizeof(struct MachO::relocation_info);
+  big_size += dyst.locreloff;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+}
+
+static void PrintDyldInfoLoadCommand(MachO::dyld_info_command dc,
+                                     uint32_t object_size) {
+  if (dc.cmd == MachO::LC_DYLD_INFO)
+    outs() << "            cmd LC_DYLD_INFO\n";
+  else
+    outs() << "            cmd LC_DYLD_INFO_ONLY\n";
+  outs() << "        cmdsize " << dc.cmdsize;
+  if (dc.cmdsize != sizeof(struct MachO::dyld_info_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "     rebase_off " << dc.rebase_off;
+  if (dc.rebase_off > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "    rebase_size " << dc.rebase_size;
+  uint64_t big_size;
+  big_size = dc.rebase_off;
+  big_size += dc.rebase_size;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "       bind_off " << dc.bind_off;
+  if (dc.bind_off > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "      bind_size " << dc.bind_size;
+  big_size = dc.bind_off;
+  big_size += dc.bind_size;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "  weak_bind_off " << dc.weak_bind_off;
+  if (dc.weak_bind_off > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << " weak_bind_size " << dc.weak_bind_size;
+  big_size = dc.weak_bind_off;
+  big_size += dc.weak_bind_size;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "  lazy_bind_off " << dc.lazy_bind_off;
+  if (dc.lazy_bind_off > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << " lazy_bind_size " << dc.lazy_bind_size;
+  big_size = dc.lazy_bind_off;
+  big_size += dc.lazy_bind_size;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "     export_off " << dc.export_off;
+  if (dc.export_off > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << "    export_size " << dc.export_size;
+  big_size = dc.export_off;
+  big_size += dc.export_size;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+}
+
+static void PrintDyldLoadCommand(MachO::dylinker_command dyld,
+                                 const char *Ptr) {
+  if (dyld.cmd == MachO::LC_ID_DYLINKER)
+    outs() << "          cmd LC_ID_DYLINKER\n";
+  else if (dyld.cmd == MachO::LC_LOAD_DYLINKER)
+    outs() << "          cmd LC_LOAD_DYLINKER\n";
+  else if (dyld.cmd == MachO::LC_DYLD_ENVIRONMENT)
+    outs() << "          cmd LC_DYLD_ENVIRONMENT\n";
+  else
+    outs() << "          cmd ?(" << dyld.cmd << ")\n";
+  outs() << "      cmdsize " << dyld.cmdsize;
+  if (dyld.cmdsize < sizeof(struct MachO::dylinker_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  if (dyld.name >= dyld.cmdsize)
+    outs() << "         name ?(bad offset " << dyld.name << ")\n";
+  else {
+    const char *P = (const char *)(Ptr)+dyld.name;
+    outs() << "         name " << P << " (offset " << dyld.name << ")\n";
+  }
+}
+
+static void PrintUuidLoadCommand(MachO::uuid_command uuid) {
+  outs() << "     cmd LC_UUID\n";
+  outs() << " cmdsize " << uuid.cmdsize;
+  if (uuid.cmdsize != sizeof(struct MachO::uuid_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "    uuid ";
+  outs() << format("%02" PRIX32, uuid.uuid[0]);
+  outs() << format("%02" PRIX32, uuid.uuid[1]);
+  outs() << format("%02" PRIX32, uuid.uuid[2]);
+  outs() << format("%02" PRIX32, uuid.uuid[3]);
+  outs() << "-";
+  outs() << format("%02" PRIX32, uuid.uuid[4]);
+  outs() << format("%02" PRIX32, uuid.uuid[5]);
+  outs() << "-";
+  outs() << format("%02" PRIX32, uuid.uuid[6]);
+  outs() << format("%02" PRIX32, uuid.uuid[7]);
+  outs() << "-";
+  outs() << format("%02" PRIX32, uuid.uuid[8]);
+  outs() << format("%02" PRIX32, uuid.uuid[9]);
+  outs() << "-";
+  outs() << format("%02" PRIX32, uuid.uuid[10]);
+  outs() << format("%02" PRIX32, uuid.uuid[11]);
+  outs() << format("%02" PRIX32, uuid.uuid[12]);
+  outs() << format("%02" PRIX32, uuid.uuid[13]);
+  outs() << format("%02" PRIX32, uuid.uuid[14]);
+  outs() << format("%02" PRIX32, uuid.uuid[15]);
+  outs() << "\n";
+}
+
+static void PrintVersionMinLoadCommand(MachO::version_min_command vd) {
+  if (vd.cmd == MachO::LC_VERSION_MIN_MACOSX)
+    outs() << "      cmd LC_VERSION_MIN_MACOSX\n";
+  else if (vd.cmd == MachO::LC_VERSION_MIN_IPHONEOS)
+    outs() << "      cmd LC_VERSION_MIN_IPHONEOS\n";
+  else
+    outs() << "      cmd " << vd.cmd << " (?)\n";
+  outs() << "  cmdsize " << vd.cmdsize;
+  if (vd.cmdsize != sizeof(struct MachO::version_min_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "  version " << ((vd.version >> 16) & 0xffff) << "."
+         << ((vd.version >> 8) & 0xff);
+  if ((vd.version & 0xff) != 0)
+    outs() << "." << (vd.version & 0xff);
+  outs() << "\n";
+  if (vd.sdk == 0)
+    outs() << "      sdk n/a\n";
+  else {
+    outs() << "      sdk " << ((vd.sdk >> 16) & 0xffff) << "."
+           << ((vd.sdk >> 8) & 0xff);
+  }
+  if ((vd.sdk & 0xff) != 0)
+    outs() << "." << (vd.sdk & 0xff);
+  outs() << "\n";
+}
+
+static void PrintSourceVersionCommand(MachO::source_version_command sd) {
+  outs() << "      cmd LC_SOURCE_VERSION\n";
+  outs() << "  cmdsize " << sd.cmdsize;
+  if (sd.cmdsize != sizeof(struct MachO::source_version_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  uint64_t a = (sd.version >> 40) & 0xffffff;
+  uint64_t b = (sd.version >> 30) & 0x3ff;
+  uint64_t c = (sd.version >> 20) & 0x3ff;
+  uint64_t d = (sd.version >> 10) & 0x3ff;
+  uint64_t e = sd.version & 0x3ff;
+  outs() << "  version " << a << "." << b;
+  if (e != 0)
+    outs() << "." << c << "." << d << "." << e;
+  else if (d != 0)
+    outs() << "." << c << "." << d;
+  else if (c != 0)
+    outs() << "." << c;
+  outs() << "\n";
+}
+
+static void PrintEntryPointCommand(MachO::entry_point_command ep) {
+  outs() << "       cmd LC_MAIN\n";
+  outs() << "   cmdsize " << ep.cmdsize;
+  if (ep.cmdsize != sizeof(struct MachO::entry_point_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "  entryoff " << ep.entryoff << "\n";
+  outs() << " stacksize " << ep.stacksize << "\n";
+}
+
+static void PrintDylibCommand(MachO::dylib_command dl, const char *Ptr) {
+  if (dl.cmd == MachO::LC_ID_DYLIB)
+    outs() << "          cmd LC_ID_DYLIB\n";
+  else if (dl.cmd == MachO::LC_LOAD_DYLIB)
+    outs() << "          cmd LC_LOAD_DYLIB\n";
+  else if (dl.cmd == MachO::LC_LOAD_WEAK_DYLIB)
+    outs() << "          cmd LC_LOAD_WEAK_DYLIB\n";
+  else if (dl.cmd == MachO::LC_REEXPORT_DYLIB)
+    outs() << "          cmd LC_REEXPORT_DYLIB\n";
+  else if (dl.cmd == MachO::LC_LAZY_LOAD_DYLIB)
+    outs() << "          cmd LC_LAZY_LOAD_DYLIB\n";
+  else if (dl.cmd == MachO::LC_LOAD_UPWARD_DYLIB)
+    outs() << "          cmd LC_LOAD_UPWARD_DYLIB\n";
+  else
+    outs() << "          cmd " << dl.cmd << " (unknown)\n";
+  outs() << "      cmdsize " << dl.cmdsize;
+  if (dl.cmdsize < sizeof(struct MachO::dylib_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  if (dl.dylib.name < dl.cmdsize) {
+    const char *P = (const char *)(Ptr)+dl.dylib.name;
+    outs() << "         name " << P << " (offset " << dl.dylib.name << ")\n";
+  } else {
+    outs() << "         name ?(bad offset " << dl.dylib.name << ")\n";
+  }
+  outs() << "   time stamp " << dl.dylib.timestamp << " ";
+  time_t t = dl.dylib.timestamp;
+  outs() << ctime(&t);
+  outs() << "      current version ";
+  if (dl.dylib.current_version == 0xffffffff)
+    outs() << "n/a\n";
+  else
+    outs() << ((dl.dylib.current_version >> 16) & 0xffff) << "."
+           << ((dl.dylib.current_version >> 8) & 0xff) << "."
+           << (dl.dylib.current_version & 0xff) << "\n";
+  outs() << "compatibility version ";
+  if (dl.dylib.compatibility_version == 0xffffffff)
+    outs() << "n/a\n";
+  else
+    outs() << ((dl.dylib.compatibility_version >> 16) & 0xffff) << "."
+           << ((dl.dylib.compatibility_version >> 8) & 0xff) << "."
+           << (dl.dylib.compatibility_version & 0xff) << "\n";
+}
+
+static void PrintLinkEditDataCommand(MachO::linkedit_data_command ld,
+                                     uint32_t object_size) {
+  if (ld.cmd == MachO::LC_CODE_SIGNATURE)
+    outs() << "      cmd LC_FUNCTION_STARTS\n";
+  else if (ld.cmd == MachO::LC_SEGMENT_SPLIT_INFO)
+    outs() << "      cmd LC_SEGMENT_SPLIT_INFO\n";
+  else if (ld.cmd == MachO::LC_FUNCTION_STARTS)
+    outs() << "      cmd LC_FUNCTION_STARTS\n";
+  else if (ld.cmd == MachO::LC_DATA_IN_CODE)
+    outs() << "      cmd LC_DATA_IN_CODE\n";
+  else if (ld.cmd == MachO::LC_DYLIB_CODE_SIGN_DRS)
+    outs() << "      cmd LC_DYLIB_CODE_SIGN_DRS\n";
+  else if (ld.cmd == MachO::LC_LINKER_OPTIMIZATION_HINT)
+    outs() << "      cmd LC_LINKER_OPTIMIZATION_HINT\n";
+  else
+    outs() << "      cmd " << ld.cmd << " (?)\n";
+  outs() << "  cmdsize " << ld.cmdsize;
+  if (ld.cmdsize != sizeof(struct MachO::linkedit_data_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "  dataoff " << ld.dataoff;
+  if (ld.dataoff > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+  outs() << " datasize " << ld.datasize;
+  uint64_t big_size = ld.dataoff;
+  big_size += ld.datasize;
+  if (big_size > object_size)
+    outs() << " (past end of file)\n";
+  else
+    outs() << "\n";
+}
+
+static void PrintLoadCommands(const MachOObjectFile *Obj, uint32_t ncmds,
+                              uint32_t filetype, uint32_t cputype,
+                              bool verbose) {
+  StringRef Buf = Obj->getData();
+  MachOObjectFile::LoadCommandInfo Command = Obj->getFirstLoadCommandInfo();
+  for (unsigned i = 0;; ++i) {
+    outs() << "Load command " << i << "\n";
+    if (Command.C.cmd == MachO::LC_SEGMENT) {
+      MachO::segment_command SLC = Obj->getSegmentLoadCommand(Command);
+      const char *sg_segname = SLC.segname;
+      PrintSegmentCommand(SLC.cmd, SLC.cmdsize, SLC.segname, SLC.vmaddr,
+                          SLC.vmsize, SLC.fileoff, SLC.filesize, SLC.maxprot,
+                          SLC.initprot, SLC.nsects, SLC.flags, Buf.size(),
+                          verbose);
+      for (unsigned j = 0; j < SLC.nsects; j++) {
+        MachO::section_64 S = Obj->getSection64(Command, j);
+        PrintSection(S.sectname, S.segname, S.addr, S.size, S.offset, S.align,
+                     S.reloff, S.nreloc, S.flags, S.reserved1, S.reserved2,
+                     SLC.cmd, sg_segname, filetype, Buf.size(), verbose);
+      }
+    } else if (Command.C.cmd == MachO::LC_SEGMENT_64) {
+      MachO::segment_command_64 SLC_64 = Obj->getSegment64LoadCommand(Command);
+      const char *sg_segname = SLC_64.segname;
+      PrintSegmentCommand(SLC_64.cmd, SLC_64.cmdsize, SLC_64.segname,
+                          SLC_64.vmaddr, SLC_64.vmsize, SLC_64.fileoff,
+                          SLC_64.filesize, SLC_64.maxprot, SLC_64.initprot,
+                          SLC_64.nsects, SLC_64.flags, Buf.size(), verbose);
+      for (unsigned j = 0; j < SLC_64.nsects; j++) {
+        MachO::section_64 S_64 = Obj->getSection64(Command, j);
+        PrintSection(S_64.sectname, S_64.segname, S_64.addr, S_64.size,
+                     S_64.offset, S_64.align, S_64.reloff, S_64.nreloc,
+                     S_64.flags, S_64.reserved1, S_64.reserved2, SLC_64.cmd,
+                     sg_segname, filetype, Buf.size(), verbose);
+      }
+    } else if (Command.C.cmd == MachO::LC_SYMTAB) {
+      MachO::symtab_command Symtab = Obj->getSymtabLoadCommand();
+      PrintSymtabLoadCommand(Symtab, cputype, Buf.size());
+    } else if (Command.C.cmd == MachO::LC_DYSYMTAB) {
+      MachO::dysymtab_command Dysymtab = Obj->getDysymtabLoadCommand();
+      MachO::symtab_command Symtab = Obj->getSymtabLoadCommand();
+      PrintDysymtabLoadCommand(Dysymtab, Symtab.nsyms, Buf.size(), cputype);
+    } else if (Command.C.cmd == MachO::LC_DYLD_INFO ||
+               Command.C.cmd == MachO::LC_DYLD_INFO_ONLY) {
+      MachO::dyld_info_command DyldInfo = Obj->getDyldInfoLoadCommand(Command);
+      PrintDyldInfoLoadCommand(DyldInfo, Buf.size());
+    } else if (Command.C.cmd == MachO::LC_LOAD_DYLINKER ||
+               Command.C.cmd == MachO::LC_ID_DYLINKER ||
+               Command.C.cmd == MachO::LC_DYLD_ENVIRONMENT) {
+      MachO::dylinker_command Dyld = Obj->getDylinkerCommand(Command);
+      PrintDyldLoadCommand(Dyld, Command.Ptr);
+    } else if (Command.C.cmd == MachO::LC_UUID) {
+      MachO::uuid_command Uuid = Obj->getUuidCommand(Command);
+      PrintUuidLoadCommand(Uuid);
+    } else if (Command.C.cmd == MachO::LC_VERSION_MIN_MACOSX) {
+      MachO::version_min_command Vd = Obj->getVersionMinLoadCommand(Command);
+      PrintVersionMinLoadCommand(Vd);
+    } else if (Command.C.cmd == MachO::LC_SOURCE_VERSION) {
+      MachO::source_version_command Sd = Obj->getSourceVersionCommand(Command);
+      PrintSourceVersionCommand(Sd);
+    } else if (Command.C.cmd == MachO::LC_MAIN) {
+      MachO::entry_point_command Ep = Obj->getEntryPointCommand(Command);
+      PrintEntryPointCommand(Ep);
+    } else if (Command.C.cmd == MachO::LC_LOAD_DYLIB) {
+      MachO::dylib_command Dl = Obj->getDylibIDLoadCommand(Command);
+      PrintDylibCommand(Dl, Command.Ptr);
+    } else if (Command.C.cmd == MachO::LC_CODE_SIGNATURE ||
+               Command.C.cmd == MachO::LC_SEGMENT_SPLIT_INFO ||
+               Command.C.cmd == MachO::LC_FUNCTION_STARTS ||
+               Command.C.cmd == MachO::LC_DATA_IN_CODE ||
+               Command.C.cmd == MachO::LC_DYLIB_CODE_SIGN_DRS ||
+               Command.C.cmd == MachO::LC_LINKER_OPTIMIZATION_HINT) {
+      MachO::linkedit_data_command Ld =
+          Obj->getLinkeditDataLoadCommand(Command);
+      PrintLinkEditDataCommand(Ld, Buf.size());
+    } else {
+      outs() << "      cmd ?(" << format("0x%08" PRIx32, Command.C.cmd)
+             << ")\n";
+      outs() << "  cmdsize " << Command.C.cmdsize << "\n";
+      // TODO: get and print the raw bytes of the load command.
+    }
+    // TODO: print all the other kinds of load commands.
+    if (i == ncmds - 1)
+      break;
+    else
+      Command = Obj->getNextLoadCommandInfo(Command);
+  }
+}
+
+static void getAndPrintMachHeader(const MachOObjectFile *Obj, uint32_t &ncmds,
+                                  uint32_t &filetype, uint32_t &cputype,
+                                  bool verbose) {
   if (Obj->is64Bit()) {
     MachO::mach_header_64 H_64;
     H_64 = Obj->getHeader64();
     PrintMachHeader(H_64.magic, H_64.cputype, H_64.cpusubtype, H_64.filetype,
                     H_64.ncmds, H_64.sizeofcmds, H_64.flags, verbose);
+    ncmds = H_64.ncmds;
+    filetype = H_64.filetype;
+    cputype = H_64.cputype;
   } else {
     MachO::mach_header H;
     H = Obj->getHeader();
     PrintMachHeader(H.magic, H.cputype, H.cpusubtype, H.filetype, H.ncmds,
                     H.sizeofcmds, H.flags, verbose);
+    ncmds = H.ncmds;
+    filetype = H.filetype;
+    cputype = H.cputype;
   }
 }
 
 void llvm::printMachOFileHeader(const object::ObjectFile *Obj) {
   const MachOObjectFile *file = dyn_cast<const MachOObjectFile>(Obj);
-  getAndPrintMachHeader(file, true);
-  // TODO: next get and print the load commands.
+  uint32_t ncmds = 0;
+  uint32_t filetype = 0;
+  uint32_t cputype = 0;
+  getAndPrintMachHeader(file, ncmds, filetype, cputype, true);
+  PrintLoadCommands(file, ncmds, filetype, cputype, true);
 }
+
+//===----------------------------------------------------------------------===//
+// export trie dumping
+//===----------------------------------------------------------------------===//
+
+void llvm::printMachOExportsTrie(const object::MachOObjectFile *Obj) {
+  for (const llvm::object::ExportEntry &Entry : Obj->exports()) {
+    uint64_t Flags = Entry.flags();
+    bool ReExport = (Flags & MachO::EXPORT_SYMBOL_FLAGS_REEXPORT);
+    bool WeakDef = (Flags & MachO::EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION);
+    bool ThreadLocal = ((Flags & MachO::EXPORT_SYMBOL_FLAGS_KIND_MASK) ==
+                        MachO::EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL);
+    bool Abs = ((Flags & MachO::EXPORT_SYMBOL_FLAGS_KIND_MASK) ==
+                MachO::EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE);
+    bool Resolver = (Flags & MachO::EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER);
+    if (ReExport)
+      outs() << "[re-export] ";
+    else
+      outs()
+          << format("0x%08llX  ", Entry.address()); // FIXME:add in base address
+    outs() << Entry.name();
+    if (WeakDef || ThreadLocal || Resolver || Abs) {
+      bool NeedsComma = false;
+      outs() << " [";
+      if (WeakDef) {
+        outs() << "weak_def";
+        NeedsComma = true;
+      }
+      if (ThreadLocal) {
+        if (NeedsComma)
+          outs() << ", ";
+        outs() << "per-thread";
+        NeedsComma = true;
+      }
+      if (Abs) {
+        if (NeedsComma)
+          outs() << ", ";
+        outs() << "absolute";
+        NeedsComma = true;
+      }
+      if (Resolver) {
+        if (NeedsComma)
+          outs() << ", ";
+        outs() << format("resolver=0x%08llX", Entry.other());
+        NeedsComma = true;
+      }
+      outs() << "]";
+    }
+    if (ReExport) {
+      StringRef DylibName = "unknown";
+      int Ordinal = Entry.other() - 1;
+      Obj->getLibraryShortNameByIndex(Ordinal, DylibName);
+      if (Entry.otherName().empty())
+        outs() << " (from " << DylibName << ")";
+      else
+        outs() << " (" << Entry.otherName() << " from " << DylibName << ")";
+    }
+    outs() << "\n";
+  }
+}
+
+
+//===----------------------------------------------------------------------===//
+// rebase table dumping
+//===----------------------------------------------------------------------===//
+
+namespace {
+class SegInfo {
+public:
+  SegInfo(const object::MachOObjectFile *Obj);
+
+  StringRef segmentName(uint32_t SegIndex);
+  StringRef sectionName(uint32_t SegIndex, uint64_t SegOffset);
+  uint64_t address(uint32_t SegIndex, uint64_t SegOffset);
+
+private:
+  struct SectionInfo {
+    uint64_t Address;
+    uint64_t Size;
+    StringRef SectionName;
+    StringRef SegmentName;
+    uint64_t OffsetInSegment;
+    uint64_t SegmentStartAddress;
+    uint32_t SegmentIndex;
+  };
+  const SectionInfo &findSection(uint32_t SegIndex, uint64_t SegOffset);
+  SmallVector<SectionInfo, 32> Sections;
+};
+}
+
+SegInfo::SegInfo(const object::MachOObjectFile *Obj) {
+  // Build table of sections so segIndex/offset pairs can be translated.
+  uint32_t CurSegIndex = Obj->hasPageZeroSegment() ? 1 : 0;
+  StringRef CurSegName;
+  uint64_t CurSegAddress;
+  for (const SectionRef &Section : Obj->sections()) {
+    SectionInfo Info;
+    if (error(Section.getName(Info.SectionName)))
+      return;
+    if (error(Section.getAddress(Info.Address)))
+      return;
+    if (error(Section.getSize(Info.Size)))
+      return;
+    Info.SegmentName =
+        Obj->getSectionFinalSegmentName(Section.getRawDataRefImpl());
+    if (!Info.SegmentName.equals(CurSegName)) {
+      ++CurSegIndex;
+      CurSegName = Info.SegmentName;
+      CurSegAddress = Info.Address;
+    }
+    Info.SegmentIndex = CurSegIndex - 1;
+    Info.OffsetInSegment = Info.Address - CurSegAddress;
+    Info.SegmentStartAddress = CurSegAddress;
+    Sections.push_back(Info);
+  }
+}
+
+StringRef SegInfo::segmentName(uint32_t SegIndex) {
+  for (const SectionInfo &SI : Sections) {
+    if (SI.SegmentIndex == SegIndex)
+      return SI.SegmentName;
+  }
+  llvm_unreachable("invalid segIndex");
+}
+
+const SegInfo::SectionInfo &SegInfo::findSection(uint32_t SegIndex,
+                                                 uint64_t OffsetInSeg) {
+  for (const SectionInfo &SI : Sections) {
+    if (SI.SegmentIndex != SegIndex)
+      continue;
+    if (SI.OffsetInSegment > OffsetInSeg)
+      continue;
+    if (OffsetInSeg >= (SI.OffsetInSegment + SI.Size))
+      continue;
+    return SI;
+  }
+  llvm_unreachable("segIndex and offset not in any section");
+}
+
+StringRef SegInfo::sectionName(uint32_t SegIndex, uint64_t OffsetInSeg) {
+  return findSection(SegIndex, OffsetInSeg).SectionName;
+}
+
+uint64_t SegInfo::address(uint32_t SegIndex, uint64_t OffsetInSeg) {
+  const SectionInfo &SI = findSection(SegIndex, OffsetInSeg);
+  return SI.SegmentStartAddress + OffsetInSeg;
+}
+
+void llvm::printMachORebaseTable(const object::MachOObjectFile *Obj) {
+  // Build table of sections so names can used in final output.
+  SegInfo sectionTable(Obj);
+
+  outs() << "segment  section            address     type\n";
+  for (const llvm::object::MachORebaseEntry &Entry : Obj->rebaseTable()) {
+    uint32_t SegIndex = Entry.segmentIndex();
+    uint64_t OffsetInSeg = Entry.segmentOffset();
+    StringRef SegmentName = sectionTable.segmentName(SegIndex);
+    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
+    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+
+    // Table lines look like: __DATA  __nl_symbol_ptr  0x0000F00C  pointer
+    outs() << format("%-8s %-18s 0x%08" PRIX64 "  %s\n", 
+                     SegmentName.str().c_str(),
+                     SectionName.str().c_str(), Address,
+                     Entry.typeName().str().c_str());
+  }
+}
+
+static StringRef ordinalName(const object::MachOObjectFile *Obj, int Ordinal) {
+  StringRef DylibName;
+  switch (Ordinal) {
+  case MachO::BIND_SPECIAL_DYLIB_SELF:
+    return "this-image";
+  case MachO::BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE:
+    return "main-executable";
+  case MachO::BIND_SPECIAL_DYLIB_FLAT_LOOKUP:
+    return "flat-namespace";
+  default:
+    Obj->getLibraryShortNameByIndex(Ordinal-1, DylibName);
+    return DylibName;
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// bind table dumping
+//===----------------------------------------------------------------------===//
+
+void llvm::printMachOBindTable(const object::MachOObjectFile *Obj) {
+  // Build table of sections so names can used in final output.
+  SegInfo sectionTable(Obj);
+
+  outs() << "segment  section            address     type     "
+            "addend   dylib               symbol\n";
+  for (const llvm::object::MachOBindEntry &Entry : Obj->bindTable()) {
+    uint32_t SegIndex = Entry.segmentIndex();
+    uint64_t OffsetInSeg = Entry.segmentOffset();
+    StringRef SegmentName = sectionTable.segmentName(SegIndex);
+    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
+    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+
+    // Table lines look like:
+    //  __DATA  __got  0x00012010    pointer   0 libSystem ___stack_chk_guard
+    outs() << format("%-8s %-18s 0x%08" PRIX64 "  %-8s %-8" PRId64 " %-20s",
+                     SegmentName.str().c_str(),
+                     SectionName.str().c_str(),
+                     Address,
+                     Entry.typeName().str().c_str(),
+                     Entry.addend(),
+                     ordinalName(Obj, Entry.ordinal()))
+           << Entry.symbolName();
+    if (Entry.flags() & MachO::BIND_SYMBOL_FLAGS_WEAK_IMPORT)
+      outs() << " (weak_import)\n";
+    else
+      outs() << "\n";
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// lazy bind table dumping
+//===----------------------------------------------------------------------===//
+
+void llvm::printMachOLazyBindTable(const object::MachOObjectFile *Obj) {
+  // Build table of sections so names can used in final output.
+  SegInfo sectionTable(Obj);
+
+  outs() << "segment  section            address      "
+            "dylib               symbol\n";
+  for (const llvm::object::MachOBindEntry &Entry : Obj->lazyBindTable()) {
+    uint32_t SegIndex = Entry.segmentIndex();
+    uint64_t OffsetInSeg = Entry.segmentOffset();
+    StringRef SegmentName = sectionTable.segmentName(SegIndex);
+    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
+    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+
+    // Table lines look like:
+    //  __DATA  __got  0x00012010 libSystem ___stack_chk_guard
+    outs() << format("%-8s %-18s 0x%08" PRIX64 "   %-20s",
+                     SegmentName.str().c_str(),
+                     SectionName.str().c_str(),
+                     Address,
+                     ordinalName(Obj, Entry.ordinal()))
+           << Entry.symbolName() << "\n";
+  }
+}
+
+
+//===----------------------------------------------------------------------===//
+// weak bind table dumping
+//===----------------------------------------------------------------------===//
+
+void llvm::printMachOWeakBindTable(const object::MachOObjectFile *Obj) {
+  // Build table of sections so names can used in final output.
+  SegInfo sectionTable(Obj);
+
+  outs() << "segment  section            address      "
+            "type     addend   symbol\n";
+  for (const llvm::object::MachOBindEntry &Entry : Obj->weakBindTable()) {
+    // Strong symbols don't have a location to update.
+    if (Entry.flags() & MachO::BIND_SYMBOL_FLAGS_NON_WEAK_DEFINITION) {
+      outs() << "                                          strong            "
+             << Entry.symbolName() << "\n";
+      continue;
+    }
+    uint32_t SegIndex = Entry.segmentIndex();
+    uint64_t OffsetInSeg = Entry.segmentOffset();
+    StringRef SegmentName = sectionTable.segmentName(SegIndex);
+    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
+    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+
+    // Table lines look like:
+    // __DATA  __data  0x00001000  pointer    0   _foo
+    outs() << format("%-8s %-18s 0x%08" PRIX64 "   %-8s %-8" PRId64 " ",
+                     SegmentName.str().c_str(),
+                     SectionName.str().c_str(),
+                     Address,
+                     Entry.typeName().str().c_str(),
+                     Entry.addend())
+           << Entry.symbolName() << "\n";
+  }
+}
+
+

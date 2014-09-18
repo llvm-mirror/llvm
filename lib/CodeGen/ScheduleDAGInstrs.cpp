@@ -63,7 +63,7 @@ ScheduleDAGInstrs::ScheduleDAGInstrs(MachineFunction &mf,
          "Virtual registers must be removed prior to PostRA scheduling");
 
   const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
-  SchedModel.init(*ST.getSchedModel(), &ST, TII);
+  SchedModel.init(ST.getSchedModel(), &ST, TII);
 }
 
 /// getUnderlyingObjectFromInt - This is the function that does the work of
@@ -511,9 +511,18 @@ static inline bool isUnsafeMemoryObject(MachineInstr *MI,
 static bool MIsNeedChainEdge(AliasAnalysis *AA, const MachineFrameInfo *MFI,
                              MachineInstr *MIa,
                              MachineInstr *MIb) {
+  const MachineFunction *MF = MIa->getParent()->getParent();
+  const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
+
   // Cover a trivial case - no edge is need to itself.
   if (MIa == MIb)
     return false;
+ 
+  // Let the target decide if memory accesses cannot possibly overlap.
+  if ((MIa->mayLoad() || MIa->mayStore()) &&
+      (MIb->mayLoad() || MIb->mayStore()))
+    if (TII->areMemAccessesTriviallyDisjoint(MIa, MIb, AA))
+      return false;
 
   // FIXME: Need to handle multiple memory operands to support all targets.
   if (!MIa->hasOneMemOperand() || !MIb->hasOneMemOperand())
@@ -655,7 +664,7 @@ void addChainDependency (AliasAnalysis *AA, const MachineFrameInfo *MFI,
                          bool isNormalMemory = false) {
   // If this is a false dependency,
   // do not add the edge, but rememeber the rejected node.
-  if (!AA || MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
+  if (MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
     SDep Dep(SUa, isNormalMemory ? SDep::MayAliasMem : SDep::Barrier);
     Dep.setLatency(TrueMemOrderLatency);
     SUb->addPred(Dep);

@@ -87,7 +87,7 @@ public:
                             const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
-  virtual bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const;
+  bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const override;
 
   unsigned commuteOpcode(unsigned Opcode) const;
 
@@ -108,6 +108,7 @@ public:
   bool isSMRD(uint16_t Opcode) const;
   bool isMUBUF(uint16_t Opcode) const;
   bool isMTBUF(uint16_t Opcode) const;
+  bool isFLAT(uint16_t Opcode) const;
   bool isVOP1(uint16_t Opcode) const;
   bool isVOP2(uint16_t Opcode) const;
   bool isVOP3(uint16_t Opcode) const;
@@ -220,6 +221,8 @@ namespace AMDGPU {
   int getCommuteOrig(uint16_t Opcode);
   int getMCOpcode(uint16_t Opcode, unsigned Gen);
   int getAddr64Inst(uint16_t Opcode);
+  int getAtomicRetOp(uint16_t Opcode);
+  int getAtomicNoRetOp(uint16_t Opcode);
 
   const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
   const uint64_t RSRC_TID_ENABLE = 1LL << 55;

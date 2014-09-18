@@ -17,7 +17,6 @@
 #include "MipsFrameLowering.h"
 #include "MipsISelLowering.h"
 #include "MipsInstrInfo.h"
-#include "MipsJITInfo.h"
 #include "MipsSelectionDAGInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCInstrItineraries.h"
@@ -148,7 +147,6 @@ protected:
 
   const DataLayout DL; // Calculates type size & alignment
   const MipsSelectionDAGInfo TSInfo;
-  MipsJITInfo JITInfo;
   std::unique_ptr<const MipsInstrInfo> InstrInfo;
   std::unique_ptr<const MipsFrameLowering> FrameLowering;
   std::unique_ptr<const MipsTargetLowering> TLInfo;
@@ -209,11 +207,10 @@ public:
   bool useOddSPReg() const { return UseOddSPReg; }
   bool noOddSPReg() const { return !UseOddSPReg; }
   bool isNaN2008() const { return IsNaN2008bit; }
-  bool isNotFP64bit() const { return !IsFP64bit; }
   bool isGP64bit() const { return IsGP64bit; }
   bool isGP32bit() const { return !IsGP64bit; }
+  unsigned getGPRSizeInBytes() const { return isGP64bit() ? 8 : 4; }
   bool isSingleFloat() const { return IsSingleFloat; }
-  bool isNotSingleFloat() const { return !IsSingleFloat; }
   bool hasVFPU() const { return HasVFPU; }
   bool inMips16Mode() const { return InMips16Mode; }
   bool inMips16ModeDefault() const {
@@ -251,7 +248,6 @@ public:
   bool os16() const { return Os16;};
 
   bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
-  bool isNotTargetNaCl() const { return !TargetTriple.isOSNaCl(); }
 
   // for now constant islands are on for the whole compilation unit but we only
   // really use them if in addition we are in mips16 mode
@@ -276,7 +272,6 @@ public:
   void setHelperClassesMips16();
   void setHelperClassesMipsSE();
 
-  MipsJITInfo *getJITInfo() override { return &JITInfo; }
   const MipsSelectionDAGInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }

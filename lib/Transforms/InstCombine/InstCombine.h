@@ -11,12 +11,14 @@
 #define LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
 
 #include "InstCombineWorklist.h"
+#include "llvm/Analysis/AssumptionTracker.h"
 #include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Pass.h"
 #include "llvm/Transforms/Utils/SimplifyLibCalls.h"
 
@@ -25,6 +27,7 @@
 namespace llvm {
 class CallSite;
 class DataLayout;
+class DominatorTree;
 class TargetLibraryInfo;
 class DbgDeclareInst;
 class MemIntrinsic;
@@ -71,14 +74,20 @@ static inline Constant *SubOne(Constant *C) {
 class LLVM_LIBRARY_VISIBILITY InstCombineIRInserter
     : public IRBuilderDefaultInserter<true> {
   InstCombineWorklist &Worklist;
+  AssumptionTracker *AT;
 
 public:
-  InstCombineIRInserter(InstCombineWorklist &WL) : Worklist(WL) {}
+  InstCombineIRInserter(InstCombineWorklist &WL, AssumptionTracker *AT)
+    : Worklist(WL), AT(AT) {}
 
   void InsertHelper(Instruction *I, const Twine &Name, BasicBlock *BB,
                     BasicBlock::iterator InsertPt) const {
     IRBuilderDefaultInserter<true>::InsertHelper(I, Name, BB, InsertPt);
     Worklist.Add(I);
+
+    using namespace llvm::PatternMatch;
+    if ((match(I, m_Intrinsic<Intrinsic::assume>(m_Value()))))
+      AT->registerAssumption(cast<CallInst>(I));
   }
 };
 
@@ -86,8 +95,10 @@ public:
 class LLVM_LIBRARY_VISIBILITY InstCombiner
     : public FunctionPass,
       public InstVisitor<InstCombiner, Instruction *> {
+  AssumptionTracker *AT;
   const DataLayout *DL;
   TargetLibraryInfo *TLI;
+  DominatorTree *DT; // not required
   bool MadeIRChange;
   LibCallSimplifier *Simplifier;
   bool MinimizeSize;
@@ -114,7 +125,11 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
+  AssumptionTracker *getAssumptionTracker() const { return AT; }
+
   const DataLayout *getDataLayout() const { return DL; }
+  
+  DominatorTree *getDominatorTree() const { return DT; }
 
   TargetLibraryInfo *getTargetLibraryInfo() const { return TLI; }
 
@@ -148,7 +163,7 @@ public:
   Value *FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS);
   Value *FoldAndOfFCmps(FCmpInst *LHS, FCmpInst *RHS);
   Instruction *visitAnd(BinaryOperator &I);
-  Value *FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS);
+  Value *FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS, Instruction *CxtI);
   Value *FoldOrOfFCmps(FCmpInst *LHS, FCmpInst *RHS);
   Instruction *FoldOrWithConstants(BinaryOperator &I, Value *Op, Value *A,
                                    Value *B, Value *C);
@@ -217,6 +232,7 @@ public:
   Instruction *visitStoreInst(StoreInst &SI);
   Instruction *visitBranchInst(BranchInst &BI);
   Instruction *visitSwitchInst(SwitchInst &SI);
+  Instruction *visitReturnInst(ReturnInst &RI);
   Instruction *visitInsertValueInst(InsertValueInst &IV);
   Instruction *visitInsertElementInst(InsertElementInst &IE);
   Instruction *visitExtractElementInst(ExtractElementInst &EI);
@@ -250,10 +266,10 @@ private:
   Instruction *transformZExtICmp(ICmpInst *ICI, Instruction &CI,
                                  bool DoXform = true);
   Instruction *transformSExtICmp(ICmpInst *ICI, Instruction &CI);
-  bool WillNotOverflowSignedAdd(Value *LHS, Value *RHS);
-  bool WillNotOverflowUnsignedAdd(Value *LHS, Value *RHS);
-  bool WillNotOverflowSignedSub(Value *LHS, Value *RHS);
-  bool WillNotOverflowUnsignedSub(Value *LHS, Value *RHS);
+  bool WillNotOverflowSignedAdd(Value *LHS, Value *RHS, Instruction *CxtI);
+  bool WillNotOverflowUnsignedAdd(Value *LHS, Value *RHS, Instruction *CxtI);
+  bool WillNotOverflowSignedSub(Value *LHS, Value *RHS, Instruction *CxtI);
+  bool WillNotOverflowUnsignedSub(Value *LHS, Value *RHS, Instruction *CxtI);
   Value *EmitGEPOffset(User *GEP);
   Instruction *scalarizePHI(ExtractElementInst &EI, PHINode *PN);
   Value *EvaluateInDifferentElementOrder(Value *V, ArrayRef<int> Mask);
@@ -322,16 +338,19 @@ public:
   }
 
   void computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
-                        unsigned Depth = 0) const {
-    return llvm::computeKnownBits(V, KnownZero, KnownOne, DL, Depth);
+                        unsigned Depth = 0, Instruction *CxtI = nullptr) const {
+    return llvm::computeKnownBits(V, KnownZero, KnownOne, DL, Depth,
+                                  AT, CxtI, DT);
   }
 
   bool MaskedValueIsZero(Value *V, const APInt &Mask,
-                         unsigned Depth = 0) const {
-    return llvm::MaskedValueIsZero(V, Mask, DL, Depth);
+                         unsigned Depth = 0,
+                         Instruction *CxtI = nullptr) const {
+    return llvm::MaskedValueIsZero(V, Mask, DL, Depth, AT, CxtI, DT);
   }
-  unsigned ComputeNumSignBits(Value *Op, unsigned Depth = 0) const {
-    return llvm::ComputeNumSignBits(Op, DL, Depth);
+  unsigned ComputeNumSignBits(Value *Op, unsigned Depth = 0,
+                              Instruction *CxtI = nullptr) const {
+    return llvm::ComputeNumSignBits(Op, DL, Depth, AT, CxtI, DT);
   }
 
 private:
@@ -349,7 +368,8 @@ private:
   /// SimplifyDemandedUseBits - Attempts to replace V with a simpler value
   /// based on the demanded bits.
   Value *SimplifyDemandedUseBits(Value *V, APInt DemandedMask, APInt &KnownZero,
-                                 APInt &KnownOne, unsigned Depth);
+                                 APInt &KnownOne, unsigned Depth,
+                                 Instruction *CxtI = nullptr);
   bool SimplifyDemandedBits(Use &U, APInt DemandedMask, APInt &KnownZero,
                             APInt &KnownOne, unsigned Depth = 0);
   /// Helper routine of SimplifyDemandedUseBits. It tries to simplify demanded

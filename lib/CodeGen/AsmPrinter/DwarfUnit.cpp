@@ -225,10 +225,8 @@ void DwarfUnit::addLocalString(DIE &Die, dwarf::Attribute Attribute,
   DIEValue *Value;
   if (Asm->MAI->doesDwarfUseRelocationsAcrossSections())
     Value = new (DIEValueAllocator) DIELabel(Symb);
-  else {
-    MCSymbol *StringPool = DU->getStringPool().getSectionSymbol();
-    Value = new (DIEValueAllocator) DIEDelta(Symb, StringPool);
-  }
+  else
+    Value = new (DIEValueAllocator) DIEDelta(Symb, DD->getDebugStrSym());
   DIEValue *Str = new (DIEValueAllocator) DIEString(Value, String);
   Die.addValue(Attribute, dwarf::DW_FORM_strp, Str);
 }
@@ -288,7 +286,12 @@ void DwarfUnit::addSectionOffset(DIE &Die, dwarf::Attribute Attribute,
 void DwarfCompileUnit::addLabelAddress(DIE &Die, dwarf::Attribute Attribute,
                                        const MCSymbol *Label) {
 
-  if (!DD->useSplitDwarf())
+  // Don't use the address pool in non-fission or in the skeleton unit itself.
+  // FIXME: Once GDB supports this, it's probably worthwhile using the address
+  // pool from the skeleton - maybe even in non-fission (possibly fewer
+  // relocations by sharing them in the pool, but we have other ideas about how
+  // to reduce the number of relocations as well/instead).
+  if (!DD->useSplitDwarf() || !Skeleton)
     return addLocalLabelAddress(Die, Attribute, Label);
 
   if (Label)
@@ -1543,7 +1546,7 @@ void DwarfUnit::applySubprogramAttributes(DISubprogram SP, DIE &SPDie) {
   else if (SP.isPrivate())
     addUInt(SPDie, dwarf::DW_AT_accessibility, dwarf::DW_FORM_data1,
             dwarf::DW_ACCESS_private);
-  else
+  else if (SP.isPublic())
     addUInt(SPDie, dwarf::DW_AT_accessibility, dwarf::DW_FORM_data1,
             dwarf::DW_ACCESS_public);
 
@@ -1960,7 +1963,7 @@ void DwarfUnit::constructMemberDIE(DIE &Buffer, DIDerivedType DT) {
     addUInt(MemberDie, dwarf::DW_AT_accessibility, dwarf::DW_FORM_data1,
             dwarf::DW_ACCESS_private);
   // Otherwise C++ member and base classes are considered public.
-  else
+  else if (DT.isPublic())
     addUInt(MemberDie, dwarf::DW_AT_accessibility, dwarf::DW_FORM_data1,
             dwarf::DW_ACCESS_public);
   if (DT.isVirtual())
@@ -2009,7 +2012,7 @@ DIE *DwarfUnit::getOrCreateStaticMemberDIE(DIDerivedType DT) {
   else if (DT.isPrivate())
     addUInt(StaticMemberDIE, dwarf::DW_AT_accessibility, dwarf::DW_FORM_data1,
             dwarf::DW_ACCESS_private);
-  else
+  else if (DT.isPublic())
     addUInt(StaticMemberDIE, dwarf::DW_AT_accessibility, dwarf::DW_FORM_data1,
             dwarf::DW_ACCESS_public);
 
@@ -2037,23 +2040,22 @@ void DwarfUnit::emitHeader(const MCSymbol *ASectionSym) const {
   Asm->EmitInt8(Asm->getDataLayout().getPointerSize());
 }
 
-void DwarfUnit::addRange(RangeSpan Range) {
+void DwarfCompileUnit::addRange(RangeSpan Range) {
   // Only add a range for this unit if we're emitting full debug.
   if (getCUNode().getEmissionKind() == DIBuilder::FullDebug) {
+    bool SameAsPrevCU = this == DD->getPrevCU();
+    DD->setPrevCU(this);
     // If we have no current ranges just add the range and return, otherwise,
     // check the current section and CU against the previous section and CU we
     // emitted into and the subprogram was contained within. If these are the
     // same then extend our current range, otherwise add this as a new range.
-    if (CURanges.size() == 0 ||
-        this != DD->getPrevCU() ||
-        Asm->getCurrentSection() != DD->getPrevSection()) {
+    if (CURanges.empty() || !SameAsPrevCU ||
+        (&CURanges.back().getEnd()->getSection() !=
+         &Range.getEnd()->getSection())) {
       CURanges.push_back(Range);
       return;
     }
 
-    assert(&(CURanges.back().getEnd()->getSection()) ==
-               &(Range.getEnd()->getSection()) &&
-           "We can only append to a range in the same section!");
     CURanges.back().setEnd(Range.getEnd());
   }
 }

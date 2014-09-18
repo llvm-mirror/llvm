@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "DwarfDebug.h"
 #include "DwarfException.h"
+#include "Win64Exception.h"
 #include "WinCodeViewLineTables.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
@@ -243,7 +244,12 @@ bool AsmPrinter::doInitialization(Module &M) {
     ES = new ARMException(this);
     break;
   case ExceptionHandling::WinEH:
-    ES = new Win64Exception(this);
+    switch (MAI->getWinEHEncodingType()) {
+    default: llvm_unreachable("unsupported unwinding information encoding");
+    case WinEH::EncodingType::Itanium:
+      ES = new Win64Exception(this);
+      break;
+    }
     break;
   }
   if (ES)
@@ -616,7 +622,7 @@ static bool emitDebugValueComment(const MachineInstr *MI, AsmPrinter &AP) {
   raw_svector_ostream OS(Str);
   OS << "DEBUG_VALUE: ";
 
-  DIVariable V(MI->getOperand(2).getMetadata());
+  DIVariable V = MI->getDebugVariable();
   if (V.getContext().isSubprogram()) {
     StringRef Name = DISubprogram(V.getContext()).getDisplayName();
     if (!Name.empty())
@@ -725,12 +731,10 @@ void AsmPrinter::EmitFunctionBody() {
 
   // Print out code for the function.
   bool HasAnyRealCode = false;
-  const MachineInstr *LastMI = nullptr;
   for (auto &MBB : *MF) {
     // Print a label for the basic block.
     EmitBasicBlockStart(MBB);
     for (auto &MI : MBB) {
-      LastMI = &MI;
 
       // Print the assembly for the instruction.
       if (!MI.isPosition() && !MI.isImplicitDef() && !MI.isKill() &&
@@ -791,24 +795,14 @@ void AsmPrinter::EmitFunctionBody() {
     EmitBasicBlockEnd(MBB);
   }
 
-  // If the last instruction was a prolog label, then we have a situation where
-  // we emitted a prolog but no function body. This results in the ending prolog
-  // label equaling the end of function label and an invalid "row" in the
-  // FDE. We need to emit a noop in this situation so that the FDE's rows are
-  // valid.
-  bool RequiresNoop = LastMI && LastMI->isCFIInstruction();
-
   // If the function is empty and the object file uses .subsections_via_symbols,
   // then we need to emit *something* to the function body to prevent the
   // labels from collapsing together.  Just emit a noop.
-  if ((MAI->hasSubsectionsViaSymbols() && !HasAnyRealCode) || RequiresNoop) {
+  if ((MAI->hasSubsectionsViaSymbols() && !HasAnyRealCode)) {
     MCInst Noop;
     TM.getSubtargetImpl()->getInstrInfo()->getNoopForMachoTarget(Noop);
-    if (Noop.getOpcode()) {
-      OutStreamer.AddComment("avoids zero-length function");
-      OutStreamer.EmitInstruction(Noop, getSubtargetInfo());
-    } else  // Target not mc-ized yet.
-      OutStreamer.EmitRawText(StringRef("\tnop\n"));
+    OutStreamer.AddComment("avoids zero-length function");
+    OutStreamer.EmitInstruction(Noop, getSubtargetInfo());
   }
 
   const Function *F = MF->getFunction();

@@ -28,13 +28,17 @@ using namespace llvm;
 /// EmitAnyX86InstComments - This function decodes x86 instructions and prints
 /// newline terminated strings to the specified string if desired.  This
 /// information is shown in disassembly dumps when verbose assembly is enabled.
-void llvm::EmitAnyX86InstComments(const MCInst *MI, raw_ostream &OS,
+bool llvm::EmitAnyX86InstComments(const MCInst *MI, raw_ostream &OS,
                                   const char *(*getRegName)(unsigned)) {
   // If this is a shuffle operation, the switch should fill in this state.
   SmallVector<int, 8> ShuffleMask;
   const char *DestName = nullptr, *Src1Name = nullptr, *Src2Name = nullptr;
 
   switch (MI->getOpcode()) {
+  default:
+    // Not an instruction for which we can decode comments.
+    return false;
+
   case X86::BLENDPDrri:
   case X86::VBLENDPDrri:
     Src2Name = getRegName(MI->getOperand(2).getReg());
@@ -122,6 +126,42 @@ void llvm::EmitAnyX86InstComments(const MCInst *MI, raw_ostream &OS,
     Src1Name = getRegName(MI->getOperand(1).getReg());
     DestName = getRegName(MI->getOperand(0).getReg());
     DecodeMOVHLPSMask(2, ShuffleMask);
+    break;
+
+  case X86::MOVSLDUPrr:
+  case X86::VMOVSLDUPrr:
+    Src1Name = getRegName(MI->getOperand(1).getReg());
+    // FALL THROUGH.
+  case X86::MOVSLDUPrm:
+  case X86::VMOVSLDUPrm:
+    DestName = getRegName(MI->getOperand(0).getReg());
+    DecodeMOVSLDUPMask(MVT::v4f32, ShuffleMask);
+    break;
+
+  case X86::VMOVSHDUPYrr:
+    Src1Name = getRegName(MI->getOperand(1).getReg());
+    // FALL THROUGH.
+  case X86::VMOVSHDUPYrm:
+    DestName = getRegName(MI->getOperand(0).getReg());
+    DecodeMOVSHDUPMask(MVT::v8f32, ShuffleMask);
+    break;
+
+  case X86::VMOVSLDUPYrr:
+    Src1Name = getRegName(MI->getOperand(1).getReg());
+    // FALL THROUGH.
+  case X86::VMOVSLDUPYrm:
+    DestName = getRegName(MI->getOperand(0).getReg());
+    DecodeMOVSLDUPMask(MVT::v8f32, ShuffleMask);
+    break;
+
+  case X86::MOVSHDUPrr:
+  case X86::VMOVSHDUPrr:
+    Src1Name = getRegName(MI->getOperand(1).getReg());
+    // FALL THROUGH.
+  case X86::MOVSHDUPrm:
+  case X86::VMOVSHDUPrm:
+    DestName = getRegName(MI->getOperand(0).getReg());
+    DecodeMOVSHDUPMask(MVT::v4f32, ShuffleMask);
     break;
 
   case X86::PALIGNR128rr:
@@ -553,54 +593,57 @@ void llvm::EmitAnyX86InstComments(const MCInst *MI, raw_ostream &OS,
     break;
   }
 
+  // The only comments we decode are shuffles, so give up if we were unable to
+  // decode a shuffle mask.
+  if (ShuffleMask.empty())
+    return false;
 
-  // If this was a shuffle operation, print the shuffle mask.
-  if (!ShuffleMask.empty()) {
-    if (!DestName) DestName = Src1Name;
-    OS << (DestName ? DestName : "mem") << " = ";
+  if (!DestName) DestName = Src1Name;
+  OS << (DestName ? DestName : "mem") << " = ";
 
-    // If the two sources are the same, canonicalize the input elements to be
-    // from the first src so that we get larger element spans.
-    if (Src1Name == Src2Name) {
-      for (unsigned i = 0, e = ShuffleMask.size(); i != e; ++i) {
-        if ((int)ShuffleMask[i] >= 0 && // Not sentinel.
-            ShuffleMask[i] >= (int)e)        // From second mask.
-          ShuffleMask[i] -= e;
-      }
-    }
-
-    // The shuffle mask specifies which elements of the src1/src2 fill in the
-    // destination, with a few sentinel values.  Loop through and print them
-    // out.
+  // If the two sources are the same, canonicalize the input elements to be
+  // from the first src so that we get larger element spans.
+  if (Src1Name == Src2Name) {
     for (unsigned i = 0, e = ShuffleMask.size(); i != e; ++i) {
-      if (i != 0)
-        OS << ',';
-      if (ShuffleMask[i] == SM_SentinelZero) {
-        OS << "zero";
-        continue;
-      }
-
-      // Otherwise, it must come from src1 or src2.  Print the span of elements
-      // that comes from this src.
-      bool isSrc1 = ShuffleMask[i] < (int)ShuffleMask.size();
-      const char *SrcName = isSrc1 ? Src1Name : Src2Name;
-      OS << (SrcName ? SrcName : "mem") << '[';
-      bool IsFirst = true;
-      while (i != e &&
-             (int)ShuffleMask[i] >= 0 &&
-             (ShuffleMask[i] < (int)ShuffleMask.size()) == isSrc1) {
-        if (!IsFirst)
-          OS << ',';
-        else
-          IsFirst = false;
-        OS << ShuffleMask[i] % ShuffleMask.size();
-        ++i;
-      }
-      OS << ']';
-      --i;  // For loop increments element #.
+      if ((int)ShuffleMask[i] >= 0 && // Not sentinel.
+          ShuffleMask[i] >= (int)e)        // From second mask.
+        ShuffleMask[i] -= e;
     }
-    //MI->print(OS, 0);
-    OS << "\n";
   }
 
+  // The shuffle mask specifies which elements of the src1/src2 fill in the
+  // destination, with a few sentinel values.  Loop through and print them
+  // out.
+  for (unsigned i = 0, e = ShuffleMask.size(); i != e; ++i) {
+    if (i != 0)
+      OS << ',';
+    if (ShuffleMask[i] == SM_SentinelZero) {
+      OS << "zero";
+      continue;
+    }
+
+    // Otherwise, it must come from src1 or src2.  Print the span of elements
+    // that comes from this src.
+    bool isSrc1 = ShuffleMask[i] < (int)ShuffleMask.size();
+    const char *SrcName = isSrc1 ? Src1Name : Src2Name;
+    OS << (SrcName ? SrcName : "mem") << '[';
+    bool IsFirst = true;
+    while (i != e &&
+           (int)ShuffleMask[i] >= 0 &&
+           (ShuffleMask[i] < (int)ShuffleMask.size()) == isSrc1) {
+      if (!IsFirst)
+        OS << ',';
+      else
+        IsFirst = false;
+      OS << ShuffleMask[i] % ShuffleMask.size();
+      ++i;
+    }
+    OS << ']';
+    --i;  // For loop increments element #.
+  }
+  //MI->print(OS, 0);
+  OS << "\n";
+
+  // We successfully added a comment to this instruction.
+  return true;
 }

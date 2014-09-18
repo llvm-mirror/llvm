@@ -69,7 +69,7 @@ static std::string getDataLayoutString(const Triple &T) {
 PPCSubtarget &PPCSubtarget::initializeSubtargetDependencies(StringRef CPU,
                                                             StringRef FS) {
   initializeEnvironment();
-  resetSubtargetFeatures(CPU, FS);
+  initSubtargetFeatures(CPU, FS);
   return *this;
 }
 
@@ -82,35 +82,7 @@ PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &CPU,
               TargetTriple.getArch() == Triple::ppc64le),
       OptLevel(OptLevel), TargetABI(PPC_ABI_UNKNOWN),
       FrameLowering(initializeSubtargetDependencies(CPU, FS)), InstrInfo(*this),
-      JITInfo(*this), TLInfo(TM), TSInfo(&DL) {}
-
-/// SetJITMode - This is called to inform the subtarget info that we are
-/// producing code for the JIT.
-void PPCSubtarget::SetJITMode() {
-  // JIT mode doesn't want lazy resolver stubs, it knows exactly where
-  // everything is.  This matters for PPC64, which codegens in PIC mode without
-  // stubs.
-  HasLazyResolverStubs = false;
-
-  // Calls to external functions need to use indirect calls
-  IsJITCodeModel = true;
-}
-
-void PPCSubtarget::resetSubtargetFeatures(const MachineFunction *MF) {
-  AttributeSet FnAttrs = MF->getFunction()->getAttributes();
-  Attribute CPUAttr = FnAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                           "target-cpu");
-  Attribute FSAttr = FnAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                          "target-features");
-  std::string CPU =
-    !CPUAttr.hasAttribute(Attribute::None) ? CPUAttr.getValueAsString() : "";
-  std::string FS =
-    !FSAttr.hasAttribute(Attribute::None) ? FSAttr.getValueAsString() : "";
-  if (!FS.empty()) {
-    initializeEnvironment();
-    resetSubtargetFeatures(CPU, FS);
-  }
-}
+      TLInfo(TM), TSInfo(&DL) {}
 
 void PPCSubtarget::initializeEnvironment() {
   StackAlignment = 16;
@@ -144,10 +116,9 @@ void PPCSubtarget::initializeEnvironment() {
   DeprecatedMFTB = false;
   DeprecatedDST = false;
   HasLazyResolverStubs = false;
-  IsJITCodeModel = false;
 }
 
-void PPCSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
+void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   // Determine default and user specified characteristics
   std::string CPUName = CPU;
   if (CPUName.empty())

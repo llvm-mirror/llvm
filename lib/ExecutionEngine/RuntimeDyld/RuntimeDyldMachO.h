@@ -101,10 +101,21 @@ protected:
   /// Dump information about the relocation entry (RE) and resolved value.
   void dumpRelocationToResolve(const RelocationEntry &RE, uint64_t Value) const;
 
+  // Return a section iterator for the section containing the given address.
+  static section_iterator getSectionByAddress(const MachOObjectFile &Obj,
+                                              uint64_t Addr);
+
+
+  // Populate __pointers section.
+  void populateIndirectSymbolPointersSection(MachOObjectFile &Obj,
+                                             const SectionRef &PTSection,
+                                             unsigned PTSectionID);
+
 public:
   /// Create an ObjectImage from the given ObjectBuffer.
-  static ObjectImage *createObjectImage(ObjectBuffer *InputBuffer) {
-    return new ObjectImageCommon(InputBuffer);
+  static std::unique_ptr<ObjectImage>
+  createObjectImage(std::unique_ptr<ObjectBuffer> InputBuffer) {
+    return llvm::make_unique<ObjectImageCommon>(std::move(InputBuffer));
   }
 
   /// Create an ObjectImage from the given ObjectFile.
@@ -117,15 +128,10 @@ public:
   static std::unique_ptr<RuntimeDyldMachO> create(Triple::ArchType Arch,
                                                   RTDyldMemoryManager *mm);
 
-  /// Write the least significant 'Size' bytes in 'Value' out at the address
-  /// pointed to by Addr. Check for overflow.
-  bool writeBytesUnaligned(uint8_t *Dst, uint64_t Value, unsigned Size);
-
   SectionEntry &getSection(unsigned SectionID) { return Sections[SectionID]; }
 
   bool isCompatibleFormat(const ObjectBuffer *Buffer) const override;
   bool isCompatibleFile(const object::ObjectFile *Obj) const override;
-  void registerEHFrames() override;
 };
 
 /// RuntimeDyldMachOTarget - Templated base class for generic MachO linker
@@ -141,31 +147,15 @@ private:
   Impl &impl() { return static_cast<Impl &>(*this); }
   const Impl &impl() const { return static_cast<const Impl &>(*this); }
 
+  unsigned char *processFDE(unsigned char *P, int64_t DeltaForText,
+                            int64_t DeltaForEH);
+
 public:
   RuntimeDyldMachOCRTPBase(RTDyldMemoryManager *mm) : RuntimeDyldMachO(mm) {}
 
-  void finalizeLoad(ObjectImage &ObjImg, ObjSectionToIDMap &SectionMap) {
-    unsigned EHFrameSID = RTDYLD_INVALID_SECTION_ID;
-    unsigned TextSID = RTDYLD_INVALID_SECTION_ID;
-    unsigned ExceptTabSID = RTDYLD_INVALID_SECTION_ID;
-    ObjSectionToIDMap::iterator i, e;
-
-    for (i = SectionMap.begin(), e = SectionMap.end(); i != e; ++i) {
-      const SectionRef &Section = i->first;
-      StringRef Name;
-      Section.getName(Name);
-      if (Name == "__eh_frame")
-        EHFrameSID = i->second;
-      else if (Name == "__text")
-        TextSID = i->second;
-      else if (Name == "__gcc_except_tab")
-        ExceptTabSID = i->second;
-      else
-        impl().finalizeSection(ObjImg, i->second, Section);
-    }
-    UnregisteredEHFrameSections.push_back(
-        EHFrameRelatedSections(EHFrameSID, TextSID, ExceptTabSID));
-  }
+  void finalizeLoad(ObjectImage &ObjImg,
+                    ObjSectionToIDMap &SectionMap) override;
+  void registerEHFrames() override;
 };
 
 } // end namespace llvm

@@ -372,6 +372,10 @@ static const TargetRegisterClass *canFoldCopy(const MachineInstr *MI,
   return nullptr;
 }
 
+void TargetInstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
+  llvm_unreachable("Not a MachO target");
+}
+
 bool TargetInstrInfo::
 canFoldMemoryOperand(const MachineInstr *MI,
                      const SmallVectorImpl<unsigned> &Ops) const {
@@ -746,14 +750,14 @@ TargetInstrInfo::getNumMicroOps(const InstrItineraryData *ItinData,
 }
 
 /// Return the default expected latency for a def based on it's opcode.
-unsigned TargetInstrInfo::defaultDefLatency(const MCSchedModel *SchedModel,
+unsigned TargetInstrInfo::defaultDefLatency(const MCSchedModel &SchedModel,
                                             const MachineInstr *DefMI) const {
   if (DefMI->isTransient())
     return 0;
   if (DefMI->mayLoad())
-    return SchedModel->LoadLatency;
+    return SchedModel.LoadLatency;
   if (isHighLatencyDef(DefMI->getOpcode()))
-    return SchedModel->HighLatency;
+    return SchedModel.HighLatency;
   return 1;
 }
 

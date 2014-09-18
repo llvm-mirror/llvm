@@ -36,11 +36,9 @@ class AMDGPUPromoteAlloca : public FunctionPass,
 public:
   AMDGPUPromoteAlloca(const AMDGPUSubtarget &st) : FunctionPass(ID), ST(st),
                                                    LocalMemAvailable(0) { }
-  virtual bool doInitialization(Module &M);
-  virtual bool runOnFunction(Function &F);
-  virtual const char *getPassName() const {
-    return "AMDGPU Promote Alloca";
-  }
+  bool doInitialization(Module &M) override;
+  bool runOnFunction(Function &F) override;
+  const char *getPassName() const override { return "AMDGPU Promote Alloca"; }
   void visitAlloca(AllocaInst &I);
 };
 
@@ -331,6 +329,13 @@ void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
     if (!Call) {
       Type *EltTy = V->getType()->getPointerElementType();
       PointerType *NewTy = PointerType::get(EltTy, AMDGPUAS::LOCAL_ADDRESS);
+
+      // The operand's value should be corrected on its own.
+      if (isa<AddrSpaceCastInst>(V))
+        continue;
+
+      // FIXME: It doesn't really make sense to try to do this for all
+      // instructions.
       V->mutateType(NewTy);
       continue;
     }

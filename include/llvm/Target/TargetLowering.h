@@ -31,6 +31,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Target/TargetCallingConv.h"
@@ -838,11 +839,6 @@ public:
     return UseUnderscoreLongJmp;
   }
 
-  /// Return whether the target can generate code for jump tables.
-  bool supportJumpTables() const {
-    return SupportJumpTables;
-  }
-
   /// Return integer threshold on number of blocks to use jump tables rather
   /// than if sequence.
   int getMinimumJumpTableEntries() const {
@@ -960,7 +956,7 @@ public:
   /// It is called by AtomicExpandPass before expanding an
   ///   AtomicRMW/AtomicCmpXchg/AtomicStore/AtomicLoad.
   /// RMW and CmpXchg set both IsStore and IsLoad to true.
-  /// Backends with !getInsertFencesForAtomic() should keep a no-op here
+  /// Backends with !getInsertFencesForAtomic() should keep a no-op here.
   virtual void emitLeadingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
           bool IsStore, bool IsLoad) const {
     assert(!getInsertFencesForAtomic());
@@ -970,20 +966,28 @@ public:
   /// It is called by AtomicExpandPass after expanding an
   ///   AtomicRMW/AtomicCmpXchg/AtomicStore/AtomicLoad.
   /// RMW and CmpXchg set both IsStore and IsLoad to true.
-  /// Backends with !getInsertFencesForAtomic() should keep a no-op here
+  /// Backends with !getInsertFencesForAtomic() should keep a no-op here.
   virtual void emitTrailingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
           bool IsStore, bool IsLoad) const {
     assert(!getInsertFencesForAtomic());
   }
 
-  /// Return true if the given (atomic) instruction should be expanded by the
-  /// IR-level AtomicExpand pass into a loop involving
-  /// load-linked/store-conditional pairs. Atomic stores will be expanded in the
-  /// same way as "atomic xchg" operations which ignore their output if needed.
-  virtual bool shouldExpandAtomicInIR(Instruction *Inst) const {
+  /// Returns true if the given (atomic) store should be expanded by the
+  /// IR-level AtomicExpand pass into an "atomic xchg" which ignores its input.
+  virtual bool shouldExpandAtomicStoreInIR(StoreInst *SI) const {
     return false;
   }
 
+  /// Returns true if the given (atomic) load should be expanded by the
+  /// IR-level AtomicExpand pass into a load-linked instruction
+  /// (through emitLoadLinked()).
+  virtual bool shouldExpandAtomicLoadInIR(LoadInst *LI) const { return false; }
+
+  /// Returns true if the given AtomicRMW should be expanded by the
+  /// IR-level AtomicExpand pass into a loop using LoadLinked/StoreConditional.
+  virtual bool shouldExpandAtomicRMWInIR(AtomicRMWInst *RMWI) const {
+    return false;
+  }
 
   //===--------------------------------------------------------------------===//
   // TargetLowering Configuration Methods - These methods should be invoked by
@@ -1029,11 +1033,6 @@ protected:
   /// llvm.longjmp or the version without _.  Defaults to false.
   void setUseUnderscoreLongJmp(bool Val) {
     UseUnderscoreLongJmp = Val;
-  }
-
-  /// Indicate whether the target can generate code for jump tables.
-  void setSupportJumpTables(bool Val) {
-    SupportJumpTables = Val;
   }
 
   /// Indicate the number of blocks to generate jump tables rather than if
@@ -1548,10 +1547,6 @@ private:
   ///
   /// Defaults to false.
   bool UseUnderscoreLongJmp;
-
-  /// Whether the target can generate code for jumptables.  If it's not true,
-  /// then each jumptable must be lowered into if-then-else's.
-  bool SupportJumpTables;
 
   /// Number of blocks threshold to use jump tables.
   int MinimumJumpTableEntries;

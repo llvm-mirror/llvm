@@ -40,6 +40,7 @@
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/ASanStackFrameLayout.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -134,7 +135,8 @@ static cl::opt<bool> ClUseAfterReturn("asan-use-after-return",
 static cl::opt<bool> ClGlobals("asan-globals",
        cl::desc("Handle global objects"), cl::Hidden, cl::init(true));
 static cl::opt<int> ClCoverage("asan-coverage",
-       cl::desc("ASan coverage. 0: none, 1: entry block, 2: all blocks"),
+       cl::desc("ASan coverage. 0: none, 1: entry block, 2: all blocks, "
+                "3: all blocks and critical edges"),
        cl::Hidden, cl::init(false));
 static cl::opt<int> ClCoverageBlockThreshold("asan-coverage-block-threshold",
        cl::desc("Add coverage instrumentation only to the entry block if there "
@@ -352,7 +354,9 @@ static size_t RedzoneSizeForScale(int MappingScale) {
 
 /// AddressSanitizer: instrument the code in module to find memory bugs.
 struct AddressSanitizer : public FunctionPass {
-  AddressSanitizer() : FunctionPass(ID) {}
+  AddressSanitizer() : FunctionPass(ID) {
+    initializeBreakCriticalEdgesPass(*PassRegistry::getPassRegistry());
+  }
   const char *getPassName() const override {
     return "AddressSanitizerFunctionPass";
   }
@@ -372,6 +376,11 @@ struct AddressSanitizer : public FunctionPass {
   bool maybeInsertAsanInitAtFunctionEntry(Function &F);
   bool doInitialization(Module &M) override;
   static char ID;  // Pass identification, replacement for typeid
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    if (ClCoverage >= 3)
+      AU.addRequiredID(BreakCriticalEdgesID);
+  }
 
  private:
   void initializeCallbacks(Module &M);
@@ -870,8 +879,11 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
   TerminatorInst *CrashTerm = nullptr;
 
   if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
+    // We use branch weights for the slow path check, to indicate that the slow
+    // path is rarely taken. This seems to be the case for SPEC benchmarks.
     TerminatorInst *CheckTerm =
-        SplitBlockAndInsertIfThen(Cmp, InsertBefore, false);
+        SplitBlockAndInsertIfThen(Cmp, InsertBefore, false,
+            MDBuilder(*C).createBranchWeights(1, 100000));
     assert(dyn_cast<BranchInst>(CheckTerm)->isUnconditional());
     BasicBlock *NextBB = CheckTerm->getSuccessor(0);
     IRB.SetInsertPoint(CheckTerm);
@@ -1309,7 +1321,9 @@ void AddressSanitizer::InjectCoverageAtBlock(Function &F, BasicBlock &BB) {
       break;
   }
 
-  DebugLoc EntryLoc = IP->getDebugLoc().getFnDebugLoc(*C);
+  DebugLoc EntryLoc = &BB == &F.getEntryBlock()
+                          ? IP->getDebugLoc().getFnDebugLoc(*C)
+                          : IP->getDebugLoc();
   IRBuilder<> IRB(IP);
   IRB.SetCurrentDebugLocation(EntryLoc);
   Type *Int8Ty = IRB.getInt8Ty();

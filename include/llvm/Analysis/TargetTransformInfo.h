@@ -183,7 +183,7 @@ public:
   /// should probably move to simpler cost metrics using the above.
   /// Alternatively, we could split the cost interface into distinct code-size
   /// and execution-speed costs. This would allow modelling the core of this
-  /// query more accurately as the a call is a single small instruction, but
+  /// query more accurately as a call is a single small instruction, but
   /// incurs significant execution cost.
   virtual bool isLoweredToCall(const Function *F) const;
 
@@ -346,10 +346,10 @@ public:
   /// \return The width of the largest scalar or vector register type.
   virtual unsigned getRegisterBitWidth(bool Vector) const;
 
-  /// \return The maximum unroll factor that the vectorizer should try to
+  /// \return The maximum interleave factor that any transform should try to
   /// perform for this target. This number depends on the level of parallelism
   /// and the number of execution units in the CPU.
-  virtual unsigned getMaximumUnrollFactor() const;
+  virtual unsigned getMaxInterleaveFactor() const;
 
   /// \return The expected cost of arithmetic ops, such as mul, xor, fsub, etc.
   virtual unsigned

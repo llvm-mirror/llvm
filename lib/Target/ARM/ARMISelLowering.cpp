@@ -29,6 +29,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
@@ -2722,7 +2723,7 @@ static SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG,
 
   ConstantSDNode *OrdN = cast<ConstantSDNode>(Op.getOperand(1));
   AtomicOrdering Ord = static_cast<AtomicOrdering>(OrdN->getZExtValue());
-  unsigned Domain = ARM_MB::ISH;
+  ARM_MB::MemBOpt Domain = ARM_MB::ISH;
   if (Subtarget->isMClass()) {
     // Only a full system barrier exists in the M-class architectures.
     Domain = ARM_MB::SY;
@@ -10981,23 +10982,86 @@ bool ARMTargetLowering::shouldConvertConstantLoadToIntImm(const APInt &Imm,
   return true;
 }
 
-bool ARMTargetLowering::shouldExpandAtomicInIR(Instruction *Inst) const {
-  // Loads and stores less than 64-bits are already atomic; ones above that
-  // are doomed anyway, so defer to the default libcall and blame the OS when
-  // things go wrong. Cortex M doesn't have ldrexd/strexd though, so don't emit
-  // anything for those.
-  bool IsMClass = Subtarget->isMClass();
-  if (StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
-    unsigned Size = SI->getValueOperand()->getType()->getPrimitiveSizeInBits();
-    return Size == 64 && !IsMClass;
-  } else if (LoadInst *LI = dyn_cast<LoadInst>(Inst)) {
-    return LI->getType()->getPrimitiveSizeInBits() == 64 && !IsMClass;
-  }
+static void makeDMB(IRBuilder<> &Builder, ARM_MB::MemBOpt Domain) {
+  Module *M = Builder.GetInsertBlock()->getParent()->getParent();
+  Function *DMB = llvm::Intrinsic::getDeclaration(M, Intrinsic::arm_dmb);
+  Constant *CDomain = Builder.getInt32(Domain);
+  Builder.CreateCall(DMB, CDomain);
+}
 
-  // For the real atomic operations, we have ldrex/strex up to 32 bits,
-  // and up to 64 bits on the non-M profiles
-  unsigned AtomicLimit = IsMClass ? 32 : 64;
-  return Inst->getType()->getPrimitiveSizeInBits() <= AtomicLimit;
+// Based on http://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html
+void ARMTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
+                                         AtomicOrdering Ord, bool IsStore,
+                                         bool IsLoad) const {
+  if (!getInsertFencesForAtomic())
+    return;
+
+  switch (Ord) {
+  case NotAtomic:
+  case Unordered:
+    llvm_unreachable("Invalid fence: unordered/non-atomic");
+  case Monotonic:
+  case Acquire:
+    return; // Nothing to do
+  case SequentiallyConsistent:
+    if (!IsStore)
+      return; // Nothing to do
+              /*FALLTHROUGH*/
+  case Release:
+  case AcquireRelease:
+    if (Subtarget->isSwift())
+      makeDMB(Builder, ARM_MB::ISHST);
+    // FIXME: add a comment with a link to documentation justifying this.
+    else
+      makeDMB(Builder, ARM_MB::ISH);
+    return;
+  }
+}
+
+void ARMTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
+                                          AtomicOrdering Ord, bool IsStore,
+                                          bool IsLoad) const {
+  if (!getInsertFencesForAtomic())
+    return;
+
+  switch (Ord) {
+  case NotAtomic:
+  case Unordered:
+    llvm_unreachable("Invalid fence: unordered/not-atomic");
+  case Monotonic:
+  case Release:
+    return; // Nothing to do
+  case Acquire:
+  case AcquireRelease:
+    case SequentiallyConsistent:
+    makeDMB(Builder, ARM_MB::ISH);
+    return;
+  }
+}
+
+// Loads and stores less than 64-bits are already atomic; ones above that
+// are doomed anyway, so defer to the default libcall and blame the OS when
+// things go wrong. Cortex M doesn't have ldrexd/strexd though, so don't emit
+// anything for those.
+bool ARMTargetLowering::shouldExpandAtomicStoreInIR(StoreInst *SI) const {
+  unsigned Size = SI->getValueOperand()->getType()->getPrimitiveSizeInBits();
+  return (Size == 64) && !Subtarget->isMClass();
+}
+
+// Loads and stores less than 64-bits are already atomic; ones above that
+// are doomed anyway, so defer to the default libcall and blame the OS when
+// things go wrong. Cortex M doesn't have ldrexd/strexd though, so don't emit
+// anything for those.
+bool ARMTargetLowering::shouldExpandAtomicLoadInIR(LoadInst *LI) const {
+  unsigned Size = LI->getType()->getPrimitiveSizeInBits();
+  return (Size == 64) && !Subtarget->isMClass();
+}
+
+// For the real atomic operations, we have ldrex/strex up to 32 bits,
+// and up to 64 bits on the non-M profiles
+bool ARMTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const {
+  unsigned Size = AI->getType()->getPrimitiveSizeInBits();
+  return Size <= (Subtarget->isMClass() ? 32U : 64U);
 }
 
 // This has so far only been implemented for MachO.

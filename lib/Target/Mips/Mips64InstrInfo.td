@@ -442,13 +442,13 @@ def : MipsInstAlias<"move $dst, $src",
       GPR_64;
 def : MipsInstAlias<"daddu $rs, $rt, $imm",
                     (DADDiu GPR64Opnd:$rs, GPR64Opnd:$rt, simm16_64:$imm),
-                    0>;
+                    0>, ISA_MIPS3;
 def : MipsInstAlias<"dadd $rs, $rt, $imm",
                     (DADDi GPR64Opnd:$rs, GPR64Opnd:$rt, simm16_64:$imm),
                     0>, ISA_MIPS3_NOT_32R6_64R6;
 def : MipsInstAlias<"daddu $rs, $imm",
                     (DADDiu GPR64Opnd:$rs, GPR64Opnd:$rs, simm16_64:$imm),
-                    0>;
+                    0>, ISA_MIPS3;
 def : MipsInstAlias<"dadd $rs, $imm",
                     (DADDi GPR64Opnd:$rs, GPR64Opnd:$rs, simm16_64:$imm),
                     0>, ISA_MIPS3_NOT_32R6_64R6;
@@ -463,7 +463,7 @@ def : MipsInstAlias<"dsll $rd, $rt, $rs",
                     ISA_MIPS3;
 def : MipsInstAlias<"dsubu $rt, $rs, $imm",
                     (DADDiu GPR64Opnd:$rt, GPR64Opnd:$rs,
-                            InvertedImOperand64:$imm), 0>;
+                            InvertedImOperand64:$imm), 0>, ISA_MIPS3;
 def : MipsInstAlias<"dsubi $rs, $rt, $imm",
                     (DADDi GPR64Opnd:$rs, GPR64Opnd:$rt,
                            InvertedImOperand64:$imm),
@@ -483,7 +483,7 @@ def : MipsInstAlias<"dsub $rs, $imm",
 def : MipsInstAlias<"dsubu $rs, $imm",
                     (DADDiu GPR64Opnd:$rs, GPR64Opnd:$rs,
                             InvertedImOperand64:$imm),
-                    0>;
+                    0>, ISA_MIPS3;
 def : MipsInstAlias<"dsra $rd, $rt, $rs",
                     (DSRAV GPR64Opnd:$rd, GPR64Opnd:$rt, GPR32Opnd:$rs), 0>,
                     ISA_MIPS3;
@@ -510,3 +510,9 @@ def : MipsInstAlias<"dmtc0 $rt, $rd", (DMTC0 GPR64Opnd:$rt, GPR64Opnd:$rd, 0), 0
 def : MipsInstAlias<"dmfc2 $rt, $rd", (DMFC2 GPR64Opnd:$rt, GPR64Opnd:$rd, 0), 0>;
 def : MipsInstAlias<"dmtc2 $rt, $rd", (DMTC2 GPR64Opnd:$rt, GPR64Opnd:$rd, 0), 0>;
 
+let Predicates = [HasMips64, HasCnMips] in {
+def : MipsInstAlias<"synciobdma", (SYNC 0x2), 0>;
+def : MipsInstAlias<"syncs",      (SYNC 0x6), 0>;
+def : MipsInstAlias<"syncw",      (SYNC 0x4), 0>;
+def : MipsInstAlias<"syncws",     (SYNC 0x5), 0>;
+}

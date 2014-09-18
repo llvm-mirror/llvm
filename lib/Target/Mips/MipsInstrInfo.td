@@ -331,7 +331,7 @@ include "MipsInstrFormats.td"
 
 def MipsJumpTargetAsmOperand : AsmOperandClass {
   let Name = "JumpTarget";
-  let ParserMethod = "ParseJumpTarget";
+  let ParserMethod = "parseJumpTarget";
   let PredicateMethod = "isImm";
   let RenderMethod = "addImmOperands";
 }
@@ -1148,12 +1148,13 @@ def SWR : StoreLeftRight<"swr", MipsSWR, GPR32Opnd, II_SWR>, LW_FM<0x2e>,
 }
 
 def SYNC : MMRel, SYNC_FT<"sync">, SYNC_FM, ISA_MIPS32;
-def TEQ : MMRel, TEQ_FT<"teq", GPR32Opnd>, TEQ_FM<0x34>;
-def TGE : MMRel, TEQ_FT<"tge", GPR32Opnd>, TEQ_FM<0x30>;
-def TGEU : MMRel, TEQ_FT<"tgeu", GPR32Opnd>, TEQ_FM<0x31>;
-def TLT : MMRel, TEQ_FT<"tlt", GPR32Opnd>, TEQ_FM<0x32>;
-def TLTU : MMRel, TEQ_FT<"tltu", GPR32Opnd>, TEQ_FM<0x33>;
-def TNE : MMRel, TEQ_FT<"tne", GPR32Opnd>, TEQ_FM<0x36>;
+
+def TEQ : MMRel, TEQ_FT<"teq", GPR32Opnd>, TEQ_FM<0x34>, ISA_MIPS2;
+def TGE : MMRel, TEQ_FT<"tge", GPR32Opnd>, TEQ_FM<0x30>, ISA_MIPS2;
+def TGEU : MMRel, TEQ_FT<"tgeu", GPR32Opnd>, TEQ_FM<0x31>, ISA_MIPS2;
+def TLT : MMRel, TEQ_FT<"tlt", GPR32Opnd>, TEQ_FM<0x32>, ISA_MIPS2;
+def TLTU : MMRel, TEQ_FT<"tltu", GPR32Opnd>, TEQ_FM<0x33>, ISA_MIPS2;
+def TNE : MMRel, TEQ_FT<"tne", GPR32Opnd>, TEQ_FM<0x36>, ISA_MIPS2;
 
 def TEQI : MMRel, TEQI_FT<"teqi", GPR32Opnd>, TEQI_FM<0xc>,
            ISA_MIPS2_NOT_32R6_64R6;
@@ -1408,11 +1409,11 @@ def JR_HB : JR_HB_DESC, JR_HB_ENC, ISA_MIPS32_NOT_32R6_64R6;
 def JALR_HB : JALR_HB_DESC, JALR_HB_ENC, ISA_MIPS32;
 
 class TLB<string asmstr> : InstSE<(outs), (ins), asmstr, [], NoItinerary,
-                                      FrmOther>;
-def TLBP : TLB<"tlbp">, COP0_TLB_FM<0x08>;
-def TLBR : TLB<"tlbr">, COP0_TLB_FM<0x01>;
-def TLBWI : TLB<"tlbwi">, COP0_TLB_FM<0x02>;
-def TLBWR : TLB<"tlbwr">, COP0_TLB_FM<0x06>;
+                                      FrmOther, asmstr>;
+def TLBP : MMRel, TLB<"tlbp">, COP0_TLB_FM<0x08>;
+def TLBR : MMRel, TLB<"tlbr">, COP0_TLB_FM<0x01>;
+def TLBWI : MMRel, TLB<"tlbwi">, COP0_TLB_FM<0x02>;
+def TLBWR : MMRel, TLB<"tlbwr">, COP0_TLB_FM<0x06>;
 
 class CacheOp<string instr_asm, Operand MemOpnd, RegisterOperand GPROpnd> :
     InstSE<(outs), (ins  MemOpnd:$addr, uimm5:$hint),
@@ -1483,14 +1484,19 @@ def : MipsInstAlias<"break $imm", (BREAK uimm10:$imm, 0), 1>;
 def : MipsInstAlias<"ei", (EI ZERO), 1>;
 def : MipsInstAlias<"di", (DI ZERO), 1>;
 
-def  : MipsInstAlias<"teq $rs, $rt", (TEQ GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
-def  : MipsInstAlias<"tge $rs, $rt", (TGE GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
-def  : MipsInstAlias<"tgeu $rs, $rt", (TGEU GPR32Opnd:$rs, GPR32Opnd:$rt, 0),
-                     1>;
-def  : MipsInstAlias<"tlt $rs, $rt", (TLT GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
-def  : MipsInstAlias<"tltu $rs, $rt", (TLTU GPR32Opnd:$rs, GPR32Opnd:$rt, 0),
-                     1>;
-def  : MipsInstAlias<"tne $rs, $rt", (TNE GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>;
+def : MipsInstAlias<"teq $rs, $rt",
+                    (TEQ GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>, ISA_MIPS2;
+def : MipsInstAlias<"tge $rs, $rt",
+                    (TGE GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>, ISA_MIPS2;
+def : MipsInstAlias<"tgeu $rs, $rt",
+                    (TGEU GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>, ISA_MIPS2;
+def : MipsInstAlias<"tlt $rs, $rt",
+                    (TLT GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>, ISA_MIPS2;
+def : MipsInstAlias<"tltu $rs, $rt",
+                    (TLTU GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>, ISA_MIPS2;
+def : MipsInstAlias<"tne $rs, $rt",
+                    (TNE GPR32Opnd:$rs, GPR32Opnd:$rt, 0), 1>, ISA_MIPS2;
+
 def  : MipsInstAlias<"sll $rd, $rt, $rs",
                      (SLLV GPR32Opnd:$rd, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
 def : MipsInstAlias<"sub, $rd, $rs, $imm",

@@ -330,7 +330,8 @@ namespace llvm {
 
     enum ExportSymbolKind {
       EXPORT_SYMBOL_FLAGS_KIND_REGULAR        = 0x00u,
-      EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL   = 0x01u
+      EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL   = 0x01u,
+      EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE       = 0x02u
     };
 
 
@@ -846,7 +847,7 @@ namespace llvm {
                           // LC_VERSION_MIN_IPHONEOS
       uint32_t cmdsize;   // sizeof(struct version_min_command)
       uint32_t version;   // X.Y.Z is encoded in nibbles xxxx.yy.zz
-      uint32_t reserved;
+      uint32_t sdk;       // X.Y.Z is encoded in nibbles xxxx.yy.zz
     };
 
     struct dyld_info_command {
@@ -1103,6 +1104,17 @@ namespace llvm {
       sys::swapByteOrder(d.name);
     }
 
+    inline void swapStruct(uuid_command &u) {
+      sys::swapByteOrder(u.cmd);
+      sys::swapByteOrder(u.cmdsize);
+    }
+
+    inline void swapStruct(source_version_command &s) {
+      sys::swapByteOrder(s.cmd);
+      sys::swapByteOrder(s.cmdsize);
+      sys::swapByteOrder(s.version);
+    }
+
     inline void swapStruct(entry_point_command &e) {
       sys::swapByteOrder(e.cmd);
       sys::swapByteOrder(e.cmdsize);
@@ -1172,7 +1184,7 @@ namespace llvm {
       sys::swapByteOrder(C.cmd);
       sys::swapByteOrder(C.cmdsize);
       sys::swapByteOrder(C.version);
-      sys::swapByteOrder(C.reserved);
+      sys::swapByteOrder(C.sdk);
     }
 
     inline void swapStruct(data_in_code_entry &C) {

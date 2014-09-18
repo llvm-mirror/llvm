@@ -2,7 +2,7 @@ set(LLVM_TARGET_DEFINITIONS AArch64.td)
 
 tablegen(LLVM AArch64GenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM AArch64GenInstrInfo.inc -gen-instr-info)
-tablegen(LLVM AArch64GenMCCodeEmitter.inc -gen-emitter -mc-emitter)
+tablegen(LLVM AArch64GenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM AArch64GenMCPseudoLowering.inc -gen-pseudo-lowering)
 tablegen(LLVM AArch64GenAsmWriter.inc -gen-asm-writer)
 tablegen(LLVM AArch64GenAsmWriter1.inc -gen-asm-writer -asmwriternum=1)
@@ -27,12 +27,14 @@ add_llvm_target(AArch64CodeGen
   AArch64ExpandPseudoInsts.cpp
   AArch64FastISel.cpp
   AArch64FrameLowering.cpp
+  AArch64ConditionOptimizer.cpp
   AArch64ISelDAGToDAG.cpp
   AArch64ISelLowering.cpp
   AArch64InstrInfo.cpp
   AArch64LoadStoreOptimizer.cpp
   AArch64MCInstLower.cpp
   AArch64PromoteConstant.cpp
+  AArch64PBQPRegAlloc.cpp
   AArch64RegisterInfo.cpp
   AArch64SelectionDAGInfo.cpp
   AArch64StorePairSuppress.cpp

@@ -243,10 +243,6 @@ class DwarfDebug : public AsmPrinterHandler {
   // If nonnull, stores the current machine instruction we're processing.
   const MachineInstr *CurMI;
 
-  // If nonnull, stores the section that the previous function was allocated to
-  // emitting.
-  const MCSection *PrevSection;
-
   // If nonnull, stores the CU in which the previous subprogram was contained.
   const DwarfCompileUnit *PrevCU;
 
@@ -377,9 +373,9 @@ class DwarfDebug : public AsmPrinterHandler {
                                                 LexicalScope *Scope);
 
   /// \brief Construct a DIE for this scope.
-  std::unique_ptr<DIE> constructScopeDIE(DwarfCompileUnit &TheCU,
-                                         LexicalScope *Scope);
-  void createAndAddScopeChildren(DwarfCompileUnit &TheCU, LexicalScope *Scope,
+  void constructScopeDIE(DwarfCompileUnit &TheCU, LexicalScope *Scope,
+                         SmallVectorImpl<std::unique_ptr<DIE>> &FinalChildren);
+  DIE *createAndAddScopeChildren(DwarfCompileUnit &TheCU, LexicalScope *Scope,
                                  DIE &ScopeDIE);
   /// \brief Construct a DIE for this abstract scope.
   void constructAbstractSubprogramScopeDIE(DwarfCompileUnit &TheCU,
@@ -389,7 +385,8 @@ class DwarfDebug : public AsmPrinterHandler {
                                    LexicalScope *Scope);
   /// A helper function to create children of a Scope DIE.
   DIE *createScopeChildrenDIE(DwarfCompileUnit &TheCU, LexicalScope *Scope,
-                              SmallVectorImpl<std::unique_ptr<DIE>> &Children);
+                              SmallVectorImpl<std::unique_ptr<DIE>> &Children,
+                              unsigned *ChildScopeCount = nullptr);
 
   /// \brief Emit initial Dwarf sections with a label at the start of each one.
   void emitSectionLabels();
@@ -424,6 +421,10 @@ class DwarfDebug : public AsmPrinterHandler {
   /// \brief Emit the last address of the section and the end of
   /// the line matrix.
   void emitEndOfLineMatrix(unsigned SectionEnd);
+
+  /// \brief Emit a specified accelerator table.
+  void emitAccel(DwarfAccelTable &Accel, const MCSection *Section,
+                 StringRef TableName, StringRef SymName);
 
   /// \brief Emit visible names into a hashed accelerator table section.
   void emitAccelNames();
@@ -508,15 +509,13 @@ class DwarfDebug : public AsmPrinterHandler {
   DwarfCompileUnit &constructDwarfCompileUnit(DICompileUnit DIUnit);
 
   /// \brief Construct imported_module or imported_declaration DIE.
-  void constructImportedEntityDIE(DwarfCompileUnit &TheCU, const MDNode *N);
+  void constructAndAddImportedEntityDIE(DwarfCompileUnit &TheCU,
+                                        const MDNode *N);
 
   /// \brief Construct import_module DIE.
-  void constructImportedEntityDIE(DwarfCompileUnit &TheCU, const MDNode *N,
-                                  DIE &Context);
-
-  /// \brief Construct import_module DIE.
-  void constructImportedEntityDIE(DwarfCompileUnit &TheCU,
-                                  const DIImportedEntity &Module, DIE &Context);
+  std::unique_ptr<DIE>
+  constructImportedEntityDIE(DwarfCompileUnit &TheCU,
+                             const DIImportedEntity &Module);
 
   /// \brief Register a source line with debug info. Returns the unique
   /// label that was emitted and which provides correspondence to the
@@ -562,8 +561,8 @@ class DwarfDebug : public AsmPrinterHandler {
 
   void attachRangesOrLowHighPC(DwarfCompileUnit &Unit, DIE &D,
                                const SmallVectorImpl<InsnRange> &Ranges);
-  void attachLowHighPC(DwarfCompileUnit &Unit, DIE &D, MCSymbol *Begin,
-                       MCSymbol *End);
+  void attachLowHighPC(DwarfCompileUnit &Unit, DIE &D, const MCSymbol *Begin,
+                       const MCSymbol *End);
 
 public:
   //===--------------------------------------------------------------------===//
@@ -632,11 +631,12 @@ public:
   /// Returns the section symbol for the .debug_loc section.
   MCSymbol *getDebugLocSym() const { return DwarfDebugLocSectionSym; }
 
-  /// Returns the previous section that was emitted into.
-  const MCSection *getPrevSection() const { return PrevSection; }
+  /// Returns the section symbol for the .debug_str section.
+  MCSymbol *getDebugStrSym() const { return DwarfStrSectionSym; }
 
   /// Returns the previous CU that was being updated
   const DwarfCompileUnit *getPrevCU() const { return PrevCU; }
+  void setPrevCU(const DwarfCompileUnit *PrevCU) { this->PrevCU = PrevCU; }
 
   /// Returns the entries for the .debug_loc section.
   const SmallVectorImpl<DebugLocList> &

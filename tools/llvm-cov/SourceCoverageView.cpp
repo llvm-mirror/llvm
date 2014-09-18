@@ -49,19 +49,30 @@ void SourceCoverageView::renderLine(raw_ostream &OS, StringRef Line,
   // Show the rest of the line
   OS << Line.substr(Start - 1, Line.size() - Start + 1);
   OS << "\n";
+
+  if (Options.Debug) {
+    for (const auto &Range : Ranges) {
+      errs() << "Highlighted line " << Range.Line << ", " << Range.ColumnStart
+             << " -> ";
+      if (Range.ColumnEnd == std::numeric_limits<unsigned>::max()) {
+        errs() << "?\n";
+      } else {
+        errs() << Range.ColumnEnd << "\n";
+      }
+    }
+  }
 }
 
-void SourceCoverageView::renderOffset(raw_ostream &OS, unsigned I) {
-  for (unsigned J = 0; J < I; ++J)
+void SourceCoverageView::renderIndent(raw_ostream &OS, unsigned Level) {
+  for (unsigned I = 0; I < Level; ++I)
     OS << "  |";
 }
 
-void SourceCoverageView::renderViewDivider(unsigned Offset, unsigned Length,
+void SourceCoverageView::renderViewDivider(unsigned Level, unsigned Length,
                                            raw_ostream &OS) {
-  for (unsigned J = 1; J < Offset; ++J)
-    OS << "  |";
-  if (Offset != 0)
-    OS.indent(2);
+  assert(Level != 0 && "Cannot render divider at top level");
+  renderIndent(OS, Level - 1);
+  OS.indent(2);
   for (unsigned I = 0; I < Length; ++I)
     OS << "-";
 }
@@ -118,6 +129,13 @@ void SourceCoverageView::renderRegionMarkers(raw_ostream &OS,
     Buffer.clear();
   }
   OS << "\n";
+
+  if (Options.Debug) {
+    for (const auto &Region : Regions) {
+      errs() << "Marker at " << Region.Line << ":" << Region.Column << " = "
+             << Region.ExecutionCount << "\n";
+    }
+  }
 }
 
 /// \brief Insert a new highlighting range into the line's highlighting ranges
@@ -206,11 +224,10 @@ gatherLineSubViews(size_t &CurrentIdx,
   while (CurrentIdx < E &&
          Items[CurrentIdx]->getSubViewsExpansionLine() == LineNo)
     ++CurrentIdx;
-  return ArrayRef<std::unique_ptr<SourceCoverageView>>(Items.data() + PrevIdx,
-                                                       CurrentIdx - PrevIdx);
+  return Items.slice(PrevIdx, CurrentIdx - PrevIdx);
 }
 
-void SourceCoverageView::render(raw_ostream &OS, unsigned Offset) {
+void SourceCoverageView::render(raw_ostream &OS, unsigned IndentLevel) {
   // Make sure that the children are in sorted order.
   sortChildren();
 
@@ -221,7 +238,7 @@ void SourceCoverageView::render(raw_ostream &OS, unsigned Offset) {
 
   line_iterator Lines(File);
   // Advance the line iterator to the first line.
-  while (Lines.line_number() < LineStart)
+  while (Lines.line_number() < LineOffset)
     ++Lines;
 
   // The width of the leading columns
@@ -232,13 +249,13 @@ void SourceCoverageView::render(raw_ostream &OS, unsigned Offset) {
   // subviews.
   unsigned DividerWidth = CombinedColumnWidth + 4;
 
-  for (size_t I = 0; I < LineCount; ++I) {
-    unsigned LineNo = I + LineStart;
+  for (size_t I = 0, E = LineStats.size(); I < E; ++I) {
+    unsigned LineNo = I + LineOffset;
 
     // Gather the child subviews that are visible on this line.
     auto LineSubViews = gatherLineSubViews(CurrentChild, Children, LineNo);
 
-    renderOffset(OS, Offset);
+    renderIndent(OS, IndentLevel);
     if (Options.ShowLineStats)
       renderLineCoverageColumn(OS, LineStats[I]);
     if (Options.ShowLineNumbers)
@@ -272,7 +289,7 @@ void SourceCoverageView::render(raw_ostream &OS, unsigned Offset) {
                        LineStats[I].hasMultipleRegions();
     auto LineMarkers = gatherLineItems(CurrentRegionMarker, Markers, LineNo);
     if (ShowMarkers && !LineMarkers.empty()) {
-      renderOffset(OS, Offset);
+      renderIndent(OS, IndentLevel);
       OS.indent(CombinedColumnWidth);
       renderRegionMarkers(OS, LineMarkers);
     }
@@ -281,14 +298,14 @@ void SourceCoverageView::render(raw_ostream &OS, unsigned Offset) {
     bool FirstChildExpansion = true;
     if (LineSubViews.empty())
       continue;
-    unsigned NewOffset = Offset + 1;
-    renderViewDivider(NewOffset, DividerWidth, OS);
+    unsigned NestedIndent = IndentLevel + 1;
+    renderViewDivider(NestedIndent, DividerWidth, OS);
     OS << "\n";
     for (const auto &Child : LineSubViews) {
       // If this subview shows a function instantiation, render the function's
       // name.
       if (Child->isInstantiationSubView()) {
-        renderOffset(OS, NewOffset);
+        renderIndent(OS, NestedIndent);
         OS << ' ';
         Options.colored_ostream(OS, raw_ostream::CYAN) << Child->FunctionName
                                                        << ":";
@@ -301,70 +318,82 @@ void SourceCoverageView::render(raw_ostream &OS, unsigned Offset) {
           insertHighlightRange(LineHighlightRanges,
                                Child->getExpansionHighlightRange(),
                                AdjustedLineHighlightRanges);
-          renderOffset(OS, Offset);
-          OS.indent(CombinedColumnWidth + (Offset == 0 ? 0 : 1));
+          renderIndent(OS, IndentLevel);
+          OS.indent(CombinedColumnWidth + (IndentLevel == 0 ? 0 : 1));
           renderLine(OS, Line, AdjustedLineHighlightRanges);
-          renderViewDivider(NewOffset, DividerWidth, OS);
+          renderViewDivider(NestedIndent, DividerWidth, OS);
           OS << "\n";
         } else
           FirstChildExpansion = false;
       }
       // Render the child subview
-      Child->render(OS, NewOffset);
-      renderViewDivider(NewOffset, DividerWidth, OS);
+      Child->render(OS, NestedIndent);
+      renderViewDivider(NestedIndent, DividerWidth, OS);
       OS << "\n";
     }
   }
 }
 
+void SourceCoverageView::setUpVisibleRange(SourceCoverageDataManager &Data) {
+  auto CountedRegions = Data.getSourceRegions();
+  if (!CountedRegions.size())
+    return;
+
+  unsigned Start = CountedRegions.front().LineStart, End = 0;
+  for (const auto &CR : CountedRegions) {
+    Start = std::min(Start, CR.LineStart);
+    End = std::max(End, CR.LineEnd);
+  }
+  LineOffset = Start;
+  LineStats.resize(End - Start + 1);
+}
+
 void
 SourceCoverageView::createLineCoverageInfo(SourceCoverageDataManager &Data) {
-  LineStats.resize(LineCount);
-  for (const auto &Region : Data.getSourceRegions()) {
-    auto Value = Region.second;
-    LineStats[Region.first.LineStart - LineStart].addRegionStartCount(Value);
-    for (unsigned Line = Region.first.LineStart + 1;
-         Line <= Region.first.LineEnd; ++Line)
-      LineStats[Line - LineStart].addRegionCount(Value);
-  }
-
-  // Reset the line stats for skipped regions.
-  for (const auto &Region : Data.getSkippedRegions()) {
-    for (unsigned Line = Region.LineStart; Line <= Region.LineEnd; ++Line)
-      LineStats[Line - LineStart] = LineCoverageInfo();
+  auto CountedRegions = Data.getSourceRegions();
+  for (const auto &CR : CountedRegions) {
+    if (CR.Kind == coverage::CounterMappingRegion::SkippedRegion) {
+      // Reset the line stats for skipped regions.
+      for (unsigned Line = CR.LineStart; Line <= CR.LineEnd;
+           ++Line)
+        LineStats[Line - LineOffset] = LineCoverageInfo();
+      continue;
+    }
+    LineStats[CR.LineStart - LineOffset].addRegionStartCount(CR.ExecutionCount);
+    for (unsigned Line = CR.LineStart + 1; Line <= CR.LineEnd; ++Line)
+      LineStats[Line - LineOffset].addRegionCount(CR.ExecutionCount);
   }
 }
 
 void
 SourceCoverageView::createHighlightRanges(SourceCoverageDataManager &Data) {
-  auto Regions = Data.getSourceRegions();
+  auto CountedRegions = Data.getSourceRegions();
   std::vector<bool> AlreadyHighlighted;
-  AlreadyHighlighted.resize(Regions.size(), false);
+  AlreadyHighlighted.resize(CountedRegions.size(), false);
 
-  for (size_t I = 0, S = Regions.size(); I < S; ++I) {
-    const auto &Region = Regions[I];
-    auto Value = Region.second;
-    auto SrcRange = Region.first;
-    if (Value != 0)
+  for (size_t I = 0, S = CountedRegions.size(); I < S; ++I) {
+    const auto &CR = CountedRegions[I];
+    if (CR.Kind == coverage::CounterMappingRegion::SkippedRegion ||
+        CR.ExecutionCount != 0)
       continue;
     if (AlreadyHighlighted[I])
       continue;
     for (size_t J = 0; J < S; ++J) {
-      if (SrcRange.contains(Regions[J].first)) {
+      if (CR.contains(CountedRegions[J])) {
         AlreadyHighlighted[J] = true;
       }
     }
-    if (SrcRange.LineStart == SrcRange.LineEnd) {
+    if (CR.LineStart == CR.LineEnd) {
       HighlightRanges.push_back(HighlightRange(
-          SrcRange.LineStart, SrcRange.ColumnStart, SrcRange.ColumnEnd));
+          CR.LineStart, CR.ColumnStart, CR.ColumnEnd));
       continue;
     }
     HighlightRanges.push_back(
-        HighlightRange(SrcRange.LineStart, SrcRange.ColumnStart,
+        HighlightRange(CR.LineStart, CR.ColumnStart,
                        std::numeric_limits<unsigned>::max()));
     HighlightRanges.push_back(
-        HighlightRange(SrcRange.LineEnd, 1, SrcRange.ColumnEnd));
-    for (unsigned Line = SrcRange.LineStart + 1; Line < SrcRange.LineEnd;
+        HighlightRange(CR.LineEnd, 1, CR.ColumnEnd));
+    for (unsigned Line = CR.LineStart + 1; Line < CR.LineEnd;
          ++Line) {
       HighlightRanges.push_back(
           HighlightRange(Line, 1, std::numeric_limits<unsigned>::max()));
@@ -372,36 +401,17 @@ SourceCoverageView::createHighlightRanges(SourceCoverageDataManager &Data) {
   }
 
   std::sort(HighlightRanges.begin(), HighlightRanges.end());
-
-  if (Options.Debug) {
-    for (const auto &Range : HighlightRanges) {
-      outs() << "Highlighted line " << Range.Line << ", " << Range.ColumnStart
-             << " -> ";
-      if (Range.ColumnEnd == std::numeric_limits<unsigned>::max()) {
-        outs() << "?\n";
-      } else {
-        outs() << Range.ColumnEnd << "\n";
-      }
-    }
-  }
 }
 
 void SourceCoverageView::createRegionMarkers(SourceCoverageDataManager &Data) {
-  for (const auto &Region : Data.getSourceRegions()) {
-    if (Region.first.LineStart >= LineStart)
-      Markers.push_back(RegionMarker(Region.first.LineStart,
-                                     Region.first.ColumnStart, Region.second));
-  }
-
-  if (Options.Debug) {
-    for (const auto &Marker : Markers) {
-      outs() << "Marker at " << Marker.Line << ":" << Marker.Column << " = "
-             << Marker.ExecutionCount << "\n";
-    }
-  }
+  for (const auto &CR : Data.getSourceRegions())
+    if (CR.Kind != coverage::CounterMappingRegion::SkippedRegion)
+      Markers.push_back(
+          RegionMarker(CR.LineStart, CR.ColumnStart, CR.ExecutionCount));
 }
 
 void SourceCoverageView::load(SourceCoverageDataManager &Data) {
+  setUpVisibleRange(Data);
   if (Options.ShowLineStats)
     createLineCoverageInfo(Data);
   if (Options.Colors)

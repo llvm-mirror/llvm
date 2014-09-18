@@ -372,6 +372,43 @@ private:
     return std::make_pair(EvalResult(StubAddr), RemainingExpr);
   }
 
+  std::pair<EvalResult, StringRef> evalSectionAddr(StringRef Expr,
+                                                   ParseContext PCtx) const {
+    if (!Expr.startswith("("))
+      return std::make_pair(unexpectedToken(Expr, Expr, "expected '('"), "");
+    StringRef RemainingExpr = Expr.substr(1).ltrim();
+
+    // Handle file-name specially, as it may contain characters that aren't
+    // legal for symbols.
+    StringRef FileName;
+    size_t ComaIdx = RemainingExpr.find(',');
+    FileName = RemainingExpr.substr(0, ComaIdx).rtrim();
+    RemainingExpr = RemainingExpr.substr(ComaIdx).ltrim();
+
+    if (!RemainingExpr.startswith(","))
+      return std::make_pair(
+          unexpectedToken(RemainingExpr, Expr, "expected ','"), "");
+    RemainingExpr = RemainingExpr.substr(1).ltrim();
+
+    StringRef SectionName;
+    std::tie(SectionName, RemainingExpr) = parseSymbol(RemainingExpr);
+
+    if (!RemainingExpr.startswith(")"))
+      return std::make_pair(
+          unexpectedToken(RemainingExpr, Expr, "expected ')'"), "");
+    RemainingExpr = RemainingExpr.substr(1).ltrim();
+
+    uint64_t StubAddr;
+    std::string ErrorMsg = "";
+    std::tie(StubAddr, ErrorMsg) = Checker.getSectionAddr(
+        FileName, SectionName, PCtx.IsInsideLoad);
+
+    if (ErrorMsg != "")
+      return std::make_pair(EvalResult(ErrorMsg), "");
+
+    return std::make_pair(EvalResult(StubAddr), RemainingExpr);
+  }
+
   // Evaluate an identiefer expr, which may be a symbol, or a call to
   // one of the builtin functions: get_insn_opcode or get_insn_length.
   // Return the result, plus the expression remaining to be parsed.
@@ -388,6 +425,8 @@ private:
       return evalNextPC(RemainingExpr, PCtx);
     else if (Symbol == "stub_addr")
       return evalStubAddr(RemainingExpr, PCtx);
+    else if (Symbol == "section_addr")
+      return evalSectionAddr(RemainingExpr, PCtx);
 
     if (!Checker.isSymbolValid(Symbol)) {
       std::string ErrMsg("No known address for symbol '");
@@ -524,6 +563,10 @@ private:
       std::tie(SubExprResult, RemainingExpr) = evalIdentifierExpr(Expr, PCtx);
     else if (isdigit(Expr[0]))
       std::tie(SubExprResult, RemainingExpr) = evalNumberExpr(Expr);
+    else
+      return std::make_pair(
+          unexpectedToken(Expr, Expr,
+                          "expected '(', '*', identifier, or number"), "");
 
     if (SubExprResult.hasError())
       return std::make_pair(SubExprResult, RemainingExpr);
@@ -703,30 +746,17 @@ uint64_t RuntimeDyldCheckerImpl::readMemoryAtAddr(uint64_t SrcAddr,
                                                   unsigned Size) const {
   uintptr_t PtrSizedAddr = static_cast<uintptr_t>(SrcAddr);
   assert(PtrSizedAddr == SrcAddr && "Linker memory pointer out-of-range.");
-  uint64_t Result = 0;
   uint8_t *Src = reinterpret_cast<uint8_t*>(PtrSizedAddr);
-  uint8_t *Dst = reinterpret_cast<uint8_t*>(&Result);
-
-  // If host and target endianness match use memcpy, otherwise copy in reverse
-  // order.
-  if (getRTDyld().IsTargetLittleEndian == sys::IsLittleEndianHost) {
-    if (!sys::IsLittleEndianHost)
-      Dst += sizeof(Result) - Size;
-    memcpy(Dst, Src, Size);
-  } else {
-    Dst += Size - 1;
-    for (unsigned i = 0; i < Size; ++i)
-      *Dst-- = *Src++;
-  }
-  return Result;
+  return getRTDyld().readBytesUnaligned(Src, Size);
 }
 
-std::pair<uint64_t, std::string> RuntimeDyldCheckerImpl::getStubAddrFor(
-    StringRef FileName, StringRef SectionName, StringRef SymbolName,
-    bool IsInsideLoad) const {
 
-  auto SI1 = Stubs.find(FileName);
-  if (SI1 == Stubs.end()) {
+std::pair<const RuntimeDyldCheckerImpl::SectionAddressInfo*, std::string>
+RuntimeDyldCheckerImpl::findSectionAddrInfo(StringRef FileName,
+                                            StringRef SectionName) const {
+
+  auto SectionMapItr = Stubs.find(FileName);
+  if (SectionMapItr == Stubs.end()) {
     std::string ErrorMsg = "File '";
     ErrorMsg += FileName;
     ErrorMsg += "' not found. ";
@@ -741,23 +771,66 @@ std::pair<uint64_t, std::string> RuntimeDyldCheckerImpl::getStubAddrFor(
       }
     }
     ErrorMsg += "\n";
-    return std::make_pair(0, ErrorMsg);
+    return std::make_pair(nullptr, ErrorMsg);
   }
 
-  const SectionStubMap &SectionStubs = SI1->second;
-  auto SI2 = SectionStubs.find(SectionName);
-  if (SI2 == SectionStubs.end())
-    return std::make_pair(0,
-                          ("Section '" + SectionName + "' not found.\n").str());
+  auto SectionInfoItr = SectionMapItr->second.find(SectionName);
+  if (SectionInfoItr == SectionMapItr->second.end())
+    return std::make_pair(nullptr,
+                          ("Section '" + SectionName + "' not found in file '" +
+                           FileName + "'\n").str());
 
-  const SymbolStubMap &SymbolStubs = SI2->second;
-  auto SI3 = SymbolStubs.find(SymbolName);
-  if (SI3 == SymbolStubs.end())
-    return std::make_pair(0,
-                          ("Symbol '" + SymbolName + "' not found.\n").str());
+  return std::make_pair(&SectionInfoItr->second, std::string(""));
+}
 
-  unsigned SectionID = SI3->second.first;
-  uint64_t StubOffset = SI3->second.second;
+std::pair<uint64_t, std::string> RuntimeDyldCheckerImpl::getSectionAddr(
+    StringRef FileName, StringRef SectionName, bool IsInsideLoad) const {
+
+  const SectionAddressInfo *SectionInfo = nullptr;
+  {
+    std::string ErrorMsg;
+    std::tie(SectionInfo, ErrorMsg) =
+      findSectionAddrInfo(FileName, SectionName);
+    if (ErrorMsg != "")
+      return std::make_pair(0, ErrorMsg);
+  }
+
+  unsigned SectionID = SectionInfo->SectionID;
+  uint64_t Addr;
+  if (IsInsideLoad)
+    Addr =
+      static_cast<uint64_t>(
+        reinterpret_cast<uintptr_t>(getRTDyld().Sections[SectionID].Address));
+  else
+    Addr = getRTDyld().Sections[SectionID].LoadAddress;
+
+  return std::make_pair(Addr, std::string(""));
+}
+
+std::pair<uint64_t, std::string> RuntimeDyldCheckerImpl::getStubAddrFor(
+    StringRef FileName, StringRef SectionName, StringRef SymbolName,
+    bool IsInsideLoad) const {
+
+  const SectionAddressInfo *SectionInfo = nullptr;
+  {
+    std::string ErrorMsg;
+    std::tie(SectionInfo, ErrorMsg) =
+      findSectionAddrInfo(FileName, SectionName);
+    if (ErrorMsg != "")
+      return std::make_pair(0, ErrorMsg);
+  }
+
+  unsigned SectionID = SectionInfo->SectionID;
+  const StubOffsetsMap &SymbolStubs = SectionInfo->StubOffsets;
+  auto StubOffsetItr = SymbolStubs.find(SymbolName);
+  if (StubOffsetItr == SymbolStubs.end())
+    return std::make_pair(0,
+                          ("Stub for symbol '" + SymbolName + "' not found. "
+                           "If '" + SymbolName + "' is an internal symbol this "
+                           "may indicate that the stub target offset is being "
+                           "computed incorrectly.\n").str());
+
+  uint64_t StubOffset = StubOffsetItr->second;
 
   uint64_t Addr;
   if (IsInsideLoad) {
@@ -784,12 +857,24 @@ RuntimeDyldCheckerImpl::getSubsectionStartingAt(StringRef Name) const {
                    getRTDyld().Sections[Loc.first].Size - Loc.second);
 }
 
+void RuntimeDyldCheckerImpl::registerSection(
+    StringRef FilePath, unsigned SectionID) {
+  StringRef FileName = sys::path::filename(FilePath);
+  const SectionEntry &Section = getRTDyld().Sections[SectionID];
+  StringRef SectionName = Section.Name;
+
+  Stubs[FileName][SectionName].SectionID = SectionID;
+}
+
 void RuntimeDyldCheckerImpl::registerStubMap(
     StringRef FilePath, unsigned SectionID,
     const RuntimeDyldImpl::StubMap &RTDyldStubs) {
   StringRef FileName = sys::path::filename(FilePath);
   const SectionEntry &Section = getRTDyld().Sections[SectionID];
   StringRef SectionName = Section.Name;
+
+  Stubs[FileName][SectionName].SectionID = SectionID;
+
   for (auto &StubMapEntry : RTDyldStubs) {
     std::string SymbolName = "";
 
@@ -801,7 +886,7 @@ void RuntimeDyldCheckerImpl::registerStubMap(
       for (auto &GSTEntry : getRTDyld().GlobalSymbolTable) {
         if (GSTEntry.second.first == StubMapEntry.first.SectionID &&
             GSTEntry.second.second ==
-                static_cast<uint64_t>(StubMapEntry.first.Addend)) {
+                static_cast<uint64_t>(StubMapEntry.first.Offset)) {
           SymbolName = GSTEntry.first();
           break;
         }
@@ -809,8 +894,8 @@ void RuntimeDyldCheckerImpl::registerStubMap(
     }
 
     if (SymbolName != "")
-      Stubs[FileName][SectionName][SymbolName] =
-          StubLoc(SectionID, StubMapEntry.second);
+      Stubs[FileName][SectionName].StubOffsets[SymbolName] =
+        StubMapEntry.second;
   }
 }
 
@@ -823,6 +908,14 @@ RuntimeDyldChecker::RuntimeDyldChecker(RuntimeDyld &RTDyld,
 
 RuntimeDyldChecker::~RuntimeDyldChecker() {}
 
+RuntimeDyld& RuntimeDyldChecker::getRTDyld() {
+  return Impl->RTDyld;
+}
+
+const RuntimeDyld& RuntimeDyldChecker::getRTDyld() const {
+  return Impl->RTDyld;
+}
+
 bool RuntimeDyldChecker::check(StringRef CheckExpr) const {
   return Impl->check(CheckExpr);
 }
@@ -830,4 +923,10 @@ bool RuntimeDyldChecker::check(StringRef CheckExpr) const {
 bool RuntimeDyldChecker::checkAllRulesInBuffer(StringRef RulePrefix,
                                                MemoryBuffer *MemBuf) const {
   return Impl->checkAllRulesInBuffer(RulePrefix, MemBuf);
+}
+
+std::pair<uint64_t, std::string>
+RuntimeDyldChecker::getSectionAddr(StringRef FileName, StringRef SectionName,
+                                   bool LinkerAddress) {
+  return Impl->getSectionAddr(FileName, SectionName, LinkerAddress);
 }

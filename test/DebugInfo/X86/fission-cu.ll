@@ -65,7 +65,7 @@
 ; CHECK: .debug_info.dwo contents:
 ; CHECK: DW_TAG_compile_unit
 ; CHECK: DW_AT_producer [DW_FORM_GNU_str_index] ( indexed (00000000) string = "clang version 3.3 (trunk 169021) (llvm/trunk 169020)")
-; CHECK: DW_AT_language [DW_FORM_data2]        (0x000c)
+; CHECK: DW_AT_language [DW_FORM_data2]        (DW_LANG_C99)
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]    ( indexed (00000001) string = "baz.c")
 ; CHECK-NOT: DW_AT_low_pc
 ; CHECK-NOT: DW_AT_stmt_list
@@ -76,7 +76,7 @@
 ; CHECK: DW_AT_type [DW_FORM_ref4]       (cu + 0x{{[0-9a-f]*}} => {[[TYPE:0x[0-9a-f]*]]})
 ; CHECK: DW_AT_external [DW_FORM_flag_present]   (true)
 ; CHECK: DW_AT_decl_file [DW_FORM_data1] (0x01)
-; CHECK: DW_AT_decl_line [DW_FORM_data1] (0x01)
+; CHECK: DW_AT_decl_line [DW_FORM_data1] (1)
 ; CHECK: DW_AT_location [DW_FORM_exprloc] (<0x2> fb 00 )
 ; CHECK: [[TYPE]]: DW_TAG_base_type
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]     ( indexed (00000003) string = "int")

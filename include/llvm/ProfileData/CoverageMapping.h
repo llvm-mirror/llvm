@@ -16,6 +16,7 @@
 #define LLVM_PROFILEDATA_COVERAGEMAPPING_H_
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <system_error>
 
@@ -163,13 +164,37 @@ struct CounterMappingRegion {
         ColumnStart(ColumnStart), LineEnd(LineEnd), ColumnEnd(ColumnEnd),
         Kind(Kind), HasCodeBefore(HasCodeBefore) {}
 
+  inline std::pair<unsigned, unsigned> startLoc() const {
+    return std::pair<unsigned, unsigned>(LineStart, ColumnStart);
+  }
+
+  inline std::pair<unsigned, unsigned> endLoc() const {
+    return std::pair<unsigned, unsigned>(LineEnd, ColumnEnd);
+  }
+
   bool operator<(const CounterMappingRegion &Other) const {
     if (FileID != Other.FileID)
       return FileID < Other.FileID;
-    if (LineStart == Other.LineStart)
-      return ColumnStart < Other.ColumnStart;
-    return LineStart < Other.LineStart;
+    return startLoc() < Other.startLoc();
   }
+
+  bool contains(const CounterMappingRegion &Other) const {
+    if (FileID != Other.FileID)
+      return false;
+    if (startLoc() > Other.startLoc())
+      return false;
+    if (endLoc() < Other.endLoc())
+      return false;
+    return true;
+  }
+};
+
+/// \brief Associates a source range with an execution count.
+struct CountedRegion : public CounterMappingRegion {
+  uint64_t ExecutionCount;
+
+  CountedRegion(const CounterMappingRegion &R, uint64_t ExecutionCount)
+      : CounterMappingRegion(R), ExecutionCount(ExecutionCount) {}
 };
 
 /// \brief A Counter mapping context is used to connect the counters,
@@ -186,13 +211,22 @@ public:
   void dump(const Counter &C, llvm::raw_ostream &OS) const;
   void dump(const Counter &C) const { dump(C, llvm::outs()); }
 
-  /// \brief Return the number of times that a region of code
-  /// associated with this counter was executed.
-  int64_t evaluate(const Counter &C, std::error_code *Error) const;
-  int64_t evaluate(const Counter &C, std::error_code &Error) const {
-    Error.clear();
-    return evaluate(C, &Error);
-  }
+  /// \brief Return the number of times that a region of code associated with
+  /// this counter was executed.
+  ErrorOr<int64_t> evaluate(const Counter &C) const;
+};
+
+/// \brief Code coverage information for a single function.
+struct FunctionCoverageMapping {
+  /// \brief Raw function name.
+  std::string Name;
+  /// \brief Associated files.
+  std::vector<std::string> Filenames;
+  /// \brief Regions in the function along with their counts.
+  std::vector<CountedRegion> CountedRegions;
+
+  FunctionCoverageMapping(StringRef Name, ArrayRef<StringRef> Filenames)
+      : Name(Name), Filenames(Filenames.begin(), Filenames.end()) {}
 };
 
 } // end namespace coverage

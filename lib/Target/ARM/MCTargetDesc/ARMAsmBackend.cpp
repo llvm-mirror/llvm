@@ -44,11 +44,11 @@ class ARMAsmBackend : public MCAsmBackend {
   bool isThumbMode;     // Currently emitting Thumb code.
   bool IsLittleEndian;  // Big or little endian.
 public:
-  ARMAsmBackend(const Target &T, const StringRef TT, bool IsLittle)
+  ARMAsmBackend(const Target &T, StringRef TT, bool IsLittle)
     : MCAsmBackend(), STI(ARM_MC::createARMMCSubtargetInfo(TT, "", "")),
       isThumbMode(TT.startswith("thumb")), IsLittleEndian(IsLittle) {}
 
-  ~ARMAsmBackend() {
+  ~ARMAsmBackend() override {
     delete STI;
   }
 
@@ -761,7 +761,7 @@ namespace {
 // FIXME: This should be in a separate file.
 class ARMWinCOFFAsmBackend : public ARMAsmBackend {
 public:
-  ARMWinCOFFAsmBackend(const Target &T, const StringRef &Triple)
+  ARMWinCOFFAsmBackend(const Target &T, StringRef Triple)
     : ARMAsmBackend(T, Triple, true) { }
   MCObjectWriter *createObjectWriter(raw_ostream &OS) const override {
     return createARMWinCOFFObjectWriter(OS, /*Is64Bit=*/false);
@@ -773,7 +773,7 @@ public:
 class ELFARMAsmBackend : public ARMAsmBackend {
 public:
   uint8_t OSABI;
-  ELFARMAsmBackend(const Target &T, const StringRef TT,
+  ELFARMAsmBackend(const Target &T, StringRef TT,
                    uint8_t OSABI, bool IsLittle)
     : ARMAsmBackend(T, TT, IsLittle), OSABI(OSABI) { }
 
@@ -786,7 +786,7 @@ public:
 class DarwinARMAsmBackend : public ARMAsmBackend {
 public:
   const MachO::CPUSubTypeARM Subtype;
-  DarwinARMAsmBackend(const Target &T, const StringRef TT,
+  DarwinARMAsmBackend(const Target &T, StringRef TT,
                       MachO::CPUSubTypeARM st)
     : ARMAsmBackend(T, TT, /* IsLittleEndian */ true), Subtype(st) {
       HasDataInCodeSupport = true;
@@ -857,4 +857,3 @@ MCAsmBackend *llvm::createThumbBEAsmBackend(const Target &T,
                                           StringRef TT, StringRef CPU) {
   return createARMAsmBackend(T, MRI, TT, CPU, false);
 }
-

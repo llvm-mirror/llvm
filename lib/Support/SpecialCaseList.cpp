@@ -48,10 +48,10 @@ struct SpecialCaseList::Entry {
 
 SpecialCaseList::SpecialCaseList() : Entries() {}
 
-SpecialCaseList *SpecialCaseList::create(
-    const StringRef Path, std::string &Error) {
+std::unique_ptr<SpecialCaseList> SpecialCaseList::create(StringRef Path,
+                                                         std::string &Error) {
   if (Path.empty())
-    return new SpecialCaseList();
+    return std::unique_ptr<SpecialCaseList>(new SpecialCaseList());
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
       MemoryBuffer::getFile(Path);
   if (std::error_code EC = FileOrErr.getError()) {
@@ -61,17 +61,17 @@ SpecialCaseList *SpecialCaseList::create(
   return create(FileOrErr.get().get(), Error);
 }
 
-SpecialCaseList *SpecialCaseList::create(
-    const MemoryBuffer *MB, std::string &Error) {
+std::unique_ptr<SpecialCaseList> SpecialCaseList::create(const MemoryBuffer *MB,
+                                                         std::string &Error) {
   std::unique_ptr<SpecialCaseList> SCL(new SpecialCaseList());
   if (!SCL->parse(MB, Error))
     return nullptr;
-  return SCL.release();
+  return SCL;
 }
 
-SpecialCaseList *SpecialCaseList::createOrDie(const StringRef Path) {
+std::unique_ptr<SpecialCaseList> SpecialCaseList::createOrDie(StringRef Path) {
   std::string Error;
-  if (SpecialCaseList *SCL = create(Path, Error))
+  if (auto SCL = create(Path, Error))
     return SCL;
   report_fatal_error(Error);
 }
@@ -157,8 +157,8 @@ bool SpecialCaseList::parse(const MemoryBuffer *MB, std::string &Error) {
 
 SpecialCaseList::~SpecialCaseList() {}
 
-bool SpecialCaseList::inSection(const StringRef Section, const StringRef Query,
-                                const StringRef Category) const {
+bool SpecialCaseList::inSection(StringRef Section, StringRef Query,
+                                StringRef Category) const {
   StringMap<StringMap<Entry> >::const_iterator I = Entries.find(Section);
   if (I == Entries.end()) return false;
   StringMap<Entry>::const_iterator II = I->second.find(Category);

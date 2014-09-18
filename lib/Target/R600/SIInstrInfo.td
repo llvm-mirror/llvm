@@ -209,6 +209,7 @@ def VOP3Mods  : ComplexPattern<untyped, 2, "SelectVOP3Mods">;
 def SIOperand {
   int ZERO = 0x80;
   int VCC = 0x6A;
+  int FLAT_SCR = 0x68;
 }
 
 def SRCMODS {
@@ -513,6 +514,11 @@ class VOP2_REV <string revOp, bit isOrig> {
   bit IsOrig = isOrig;
 }
 
+class AtomicNoRet <string noRetOp, bit isRet> {
+  string NoRetOp = noRetOp;
+  bit IsRet = isRet;
+}
+
 class SIMCInstr <string pseudo, int subtarget> {
   string PseudoInstr = pseudo;
   int Subtarget = subtarget;
@@ -796,6 +802,17 @@ multiclass VOP3b_64 <bits<9> op, string opName, list<dag> pattern> :
 multiclass VOP3b_32 <bits<9> op, string opName, list<dag> pattern> :
   VOP3b_Helper <op, VReg_32, VSrc_32, opName, pattern>;
 
+
+class Vop3ModPat<Instruction Inst, VOPProfile P, SDPatternOperator node> : Pat<
+  (node (P.Src0VT (VOP3Mods0 P.Src0VT:$src0, i32:$src0_modifiers, i32:$clamp, i32:$omod)),
+        (P.Src1VT (VOP3Mods P.Src1VT:$src1, i32:$src1_modifiers)),
+        (P.Src2VT (VOP3Mods P.Src2VT:$src2, i32:$src2_modifiers))),
+  (Inst i32:$src0_modifiers, P.Src0VT:$src0,
+        i32:$src1_modifiers, P.Src1VT:$src1,
+        i32:$src2_modifiers, P.Src2VT:$src2,
+        i32:$clamp,
+        i32:$omod)>;
+
 //===----------------------------------------------------------------------===//
 // Vector I/O classes
 //===----------------------------------------------------------------------===//
@@ -858,47 +875,54 @@ class DS_Store2_Helper <bits<8> op, string asm, RegisterClass regClass> : DS <
 }
 
 // 1 address, 1 data.
-class DS_1A1D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+class DS_1A1D_RET <bits<8> op, string asm, RegisterClass rc, string noRetOp = ""> : DS_1A <
   op,
   (outs rc:$vdst),
   (ins i1imm:$gds, VReg_32:$addr, rc:$data0, u16imm:$offset),
-  asm#" $vdst, $addr, $data0, $offset, [M0]",
-  []> {
+  asm#" $vdst, $addr, $data0, $offset, [M0]", []>,
+  AtomicNoRet<noRetOp, 1> {
 
   let data1 = 0;
   let mayStore = 1;
   let mayLoad = 1;
+
+  let hasPostISelHook = 1; // Adjusted to no return version.
 }
 
 // 1 address, 2 data.
-class DS_1A2D_RET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+class DS_1A2D_RET <bits<8> op, string asm, RegisterClass rc, string noRetOp = ""> : DS_1A <
   op,
   (outs rc:$vdst),
   (ins i1imm:$gds, VReg_32:$addr, rc:$data0, rc:$data1, u16imm:$offset),
   asm#" $vdst, $addr, $data0, $data1, $offset, [M0]",
-  []> {
+  []>,
+  AtomicNoRet<noRetOp, 1> {
   let mayStore = 1;
   let mayLoad = 1;
+
+  let hasPostISelHook = 1; // Adjusted to no return version.
 }
 
 // 1 address, 2 data.
-class DS_1A2D_NORET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+class DS_1A2D_NORET <bits<8> op, string asm, RegisterClass rc, string noRetOp = asm> : DS_1A <
   op,
   (outs),
   (ins i1imm:$gds, VReg_32:$addr, rc:$data0, rc:$data1, u16imm:$offset),
   asm#" $addr, $data0, $data1, $offset, [M0]",
-  []> {
+  []>,
+  AtomicNoRet<noRetOp, 0> {
   let mayStore = 1;
   let mayLoad = 1;
 }
 
 // 1 address, 1 data.
-class DS_1A1D_NORET <bits<8> op, string asm, RegisterClass rc> : DS_1A <
+class DS_1A1D_NORET <bits<8> op, string asm, RegisterClass rc, string noRetOp = asm> : DS_1A <
   op,
   (outs),
   (ins i1imm:$gds, VReg_32:$addr, rc:$data0, u16imm:$offset),
   asm#" $addr, $data0, $offset, [M0]",
-  []> {
+  []>,
+  AtomicNoRet<noRetOp, 0> {
 
   let data1 = 0;
   let mayStore = 1;
@@ -1038,6 +1062,30 @@ multiclass MUBUF_Store_Helper <bits<7> op, string name, RegisterClass vdataClass
       let tfe = 0;
       let soffset = 128; // ZERO
    }
+}
+
+class FLAT_Load_Helper <bits<7> op, string asm, RegisterClass regClass> :
+      FLAT <op, (outs regClass:$data),
+                (ins VReg_64:$addr),
+            asm#" $data, $addr, [M0, FLAT_SCRATCH]", []> {
+  let glc = 0;
+  let slc = 0;
+  let tfe = 0;
+  let mayLoad = 1;
+}
+
+class FLAT_Store_Helper <bits<7> op, string name, RegisterClass vdataClass> :
+      FLAT <op, (outs), (ins vdataClass:$data, VReg_64:$addr),
+          name#" $data, $addr, [M0, FLAT_SCRATCH]",
+         []> {
+
+  let mayLoad = 0;
+  let mayStore = 1;
+
+  // Encoding
+  let glc = 0;
+  let slc = 0;
+  let tfe = 0;
 }
 
 class MTBUF_Load_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
@@ -1248,6 +1296,24 @@ def getAddr64Inst : InstrMapping {
   let ColFields = ["IsAddr64"];
   let KeyCol = ["0"];
   let ValueCols = [["1"]];
+}
+
+// Maps an atomic opcode to its version with a return value.
+def getAtomicRetOp : InstrMapping {
+  let FilterClass = "AtomicNoRet";
+  let RowFields = ["NoRetOp"];
+  let ColFields = ["IsRet"];
+  let KeyCol = ["0"];
+  let ValueCols = [["1"]];
+}
+
+// Maps an atomic opcode to its returnless version.
+def getAtomicNoRetOp : InstrMapping {
+  let FilterClass = "AtomicNoRet";
+  let RowFields = ["NoRetOp"];
+  let ColFields = ["IsRet"];
+  let KeyCol = ["1"];
+  let ValueCols = [["0"]];
 }
 
 include "SIInstructions.td"

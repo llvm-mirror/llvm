@@ -37,7 +37,7 @@ public:
   /// These describe abbreviations that all blocks of the specified ID inherit.
   struct BlockInfo {
     unsigned BlockID;
-    std::vector<BitCodeAbbrev*> Abbrevs;
+    std::vector<IntrusiveRefCntPtr<BitCodeAbbrev>> Abbrevs;
     std::string Name;
 
     std::vector<std::pair<unsigned, std::string> > RecordNames;
@@ -58,13 +58,25 @@ public:
   BitstreamReader() : IgnoreBlockInfoNames(true) {
   }
 
-  BitstreamReader(const unsigned char *Start, const unsigned char *End) {
-    IgnoreBlockInfoNames = true;
+  BitstreamReader(const unsigned char *Start, const unsigned char *End)
+      : IgnoreBlockInfoNames(true) {
     init(Start, End);
   }
 
-  BitstreamReader(StreamableMemoryObject *bytes) {
+  BitstreamReader(StreamableMemoryObject *bytes) : IgnoreBlockInfoNames(true) {
     BitcodeBytes.reset(bytes);
+  }
+
+  BitstreamReader(BitstreamReader &&Other) {
+    *this = std::move(Other);
+  }
+
+  BitstreamReader &operator=(BitstreamReader &&Other) {
+    BitcodeBytes = std::move(Other.BitcodeBytes);
+    // Explicitly swap block info, so that nothing gets destroyed twice.
+    std::swap(BlockInfoRecords, Other.BlockInfoRecords);
+    IgnoreBlockInfoNames = Other.IgnoreBlockInfoNames;
+    return *this;
   }
 
   void init(const unsigned char *Start, const unsigned char *End) {
@@ -73,18 +85,6 @@ public:
   }
 
   StreamableMemoryObject &getBitcodeBytes() { return *BitcodeBytes; }
-
-  ~BitstreamReader() {
-    // Free the BlockInfoRecords.
-    while (!BlockInfoRecords.empty()) {
-      BlockInfo &Info = BlockInfoRecords.back();
-      // Free blockinfo abbrev info.
-      for (unsigned i = 0, e = static_cast<unsigned>(Info.Abbrevs.size());
-           i != e; ++i)
-        Info.Abbrevs[i]->dropRef();
-      BlockInfoRecords.pop_back();
-    }
-  }
 
   /// CollectBlockInfoNames - This is called by clients that want block/record
   /// name information.
@@ -122,6 +122,15 @@ public:
     BlockInfoRecords.push_back(BlockInfo());
     BlockInfoRecords.back().BlockID = BlockID;
     return BlockInfoRecords.back();
+  }
+
+  /// Takes block info from the other bitstream reader.
+  ///
+  /// This is a "take" operation because BlockInfo records are non-trivial, and
+  /// indeed rather expensive.
+  void takeBlockInfo(BitstreamReader &&Other) {
+    assert(!hasBlockInfoRecords());
+    BlockInfoRecords = std::move(Other.BlockInfoRecords);
   }
 };
 
@@ -187,11 +196,11 @@ class BitstreamCursor {
   unsigned CurCodeSize;
 
   /// CurAbbrevs - Abbrevs installed at in this block.
-  std::vector<BitCodeAbbrev*> CurAbbrevs;
+  std::vector<IntrusiveRefCntPtr<BitCodeAbbrev>> CurAbbrevs;
 
   struct Block {
     unsigned PrevCodeSize;
-    std::vector<BitCodeAbbrev*> PrevAbbrevs;
+    std::vector<IntrusiveRefCntPtr<BitCodeAbbrev>> PrevAbbrevs;
     explicit Block(unsigned PCS) : PrevCodeSize(PCS) {}
   };
 
@@ -201,10 +210,6 @@ class BitstreamCursor {
 
 public:
   BitstreamCursor() : BitStream(nullptr), NextChar(0) {}
-  BitstreamCursor(const BitstreamCursor &RHS)
-      : BitStream(nullptr), NextChar(0) {
-    operator=(RHS);
-  }
 
   explicit BitstreamCursor(BitstreamReader &R) : BitStream(&R) {
     NextChar = 0;
@@ -222,12 +227,6 @@ public:
     BitsInCurWord = 0;
     CurCodeSize = 2;
   }
-
-  ~BitstreamCursor() {
-    freeState();
-  }
-
-  void operator=(const BitstreamCursor &RHS);
 
   void freeState();
 
@@ -508,12 +507,7 @@ private:
   void popBlockScope() {
     CurCodeSize = BlockScope.back().PrevCodeSize;
 
-    // Delete abbrevs from popped scope.
-    for (unsigned i = 0, e = static_cast<unsigned>(CurAbbrevs.size());
-         i != e; ++i)
-      CurAbbrevs[i]->dropRef();
-
-    BlockScope.back().PrevAbbrevs.swap(CurAbbrevs);
+    CurAbbrevs = std::move(BlockScope.back().PrevAbbrevs);
     BlockScope.pop_back();
   }
 
@@ -534,7 +528,7 @@ public:
   const BitCodeAbbrev *getAbbrev(unsigned AbbrevID) {
     unsigned AbbrevNo = AbbrevID-bitc::FIRST_APPLICATION_ABBREV;
     assert(AbbrevNo < CurAbbrevs.size() && "Invalid abbrev #!");
-    return CurAbbrevs[AbbrevNo];
+    return CurAbbrevs[AbbrevNo].get();
   }
 
   /// skipRecord - Read the current record and discard it.

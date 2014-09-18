@@ -216,9 +216,6 @@ public:
   /// hasContent - Return true if this compile unit has something to write out.
   bool hasContent() const { return !UnitDie.getChildren().empty(); }
 
-  /// addRange - Add an address range to the list of ranges for this unit.
-  void addRange(RangeSpan Range);
-
   /// getRanges - Get the list of ranges for this unit.
   const SmallVectorImpl<RangeSpan> &getRanges() const { return CURanges; }
   SmallVectorImpl<RangeSpan> &getRanges() { return CURanges; }
@@ -275,11 +272,11 @@ public:
   void addSInt(DIELoc &Die, Optional<dwarf::Form> Form, int64_t Integer);
 
   /// addString - Add a string attribute data and value.
-  void addString(DIE &Die, dwarf::Attribute Attribute, const StringRef Str);
+  void addString(DIE &Die, dwarf::Attribute Attribute, StringRef Str);
 
   /// addLocalString - Add a string attribute data and value.
   void addLocalString(DIE &Die, dwarf::Attribute Attribute,
-                      const StringRef Str);
+                      StringRef Str);
 
   /// addExpr - Add a Dwarf expression attribute data and value.
   void addExpr(DIELoc &Die, dwarf::Form Form, const MCExpr *Expr);
@@ -555,6 +552,9 @@ public:
   DwarfCompileUnit &getCU() override { return *this; }
 
   unsigned getOrCreateSourceID(StringRef FileName, StringRef DirName) override;
+
+  /// addRange - Add an address range to the list of ranges for this unit.
+  void addRange(RangeSpan Range);
 };
 
 class DwarfTypeUnit : public DwarfUnit {

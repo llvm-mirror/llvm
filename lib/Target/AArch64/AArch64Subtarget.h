@@ -86,6 +86,9 @@ public:
     return &getInstrInfo()->getRegisterInfo();
   }
   bool enableMachineScheduler() const override { return true; }
+  bool enablePostMachineScheduler() const override {
+    return isCortexA53() || isCortexA57();
+  }
 
   bool hasZeroCycleRegMove() const { return HasZeroCycleRegMove; }
 
@@ -110,6 +113,8 @@ public:
   bool isCyclone() const { return CPUString == "cyclone"; }
   bool isCortexA57() const { return CPUString == "cortex-a57"; }
   bool isCortexA53() const { return CPUString == "cortex-a53"; }
+
+  bool useAA() const override { return isCortexA53() || isCortexA57(); }
 
   /// getMaxInlineSizeThreshold - Returns the maximum memset / memcpy size
   /// that still makes it profitable to inline the call.

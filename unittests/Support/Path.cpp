@@ -334,9 +334,7 @@ TEST_F(FileSystemTest, TempFiles) {
       fs::createTemporaryFile("prefix", "temp", FileDescriptor, TempPath));
 
   // Make sure it exists.
-  bool TempFileExists;
-  ASSERT_NO_ERROR(sys::fs::exists(Twine(TempPath), TempFileExists));
-  EXPECT_TRUE(TempFileExists);
+  ASSERT_TRUE(sys::fs::exists(Twine(TempPath)));
 
   // Create another temp tile.
   int FD2;
@@ -363,8 +361,8 @@ TEST_F(FileSystemTest, TempFiles) {
   EXPECT_EQ(B.type(), fs::file_type::file_not_found);
 
   // Make sure Temp2 doesn't exist.
-  ASSERT_NO_ERROR(fs::exists(Twine(TempPath2), TempFileExists));
-  EXPECT_FALSE(TempFileExists);
+  ASSERT_EQ(fs::access(Twine(TempPath2), sys::fs::AccessMode::Exist),
+            errc::no_such_file_or_directory);
 
   SmallString<64> TempPath3;
   ASSERT_NO_ERROR(fs::createTemporaryFile("prefix", "", TempPath3));
@@ -387,8 +385,8 @@ TEST_F(FileSystemTest, TempFiles) {
   ASSERT_NO_ERROR(fs::remove(Twine(TempPath2)));
 
   // Make sure Temp1 doesn't exist.
-  ASSERT_NO_ERROR(fs::exists(Twine(TempPath), TempFileExists));
-  EXPECT_FALSE(TempFileExists);
+  ASSERT_EQ(fs::access(Twine(TempPath), sys::fs::AccessMode::Exist),
+            errc::no_such_file_or_directory);
 
 #ifdef LLVM_ON_WIN32
   // Path name > 260 chars should get an error.
@@ -485,6 +483,8 @@ TEST_F(FileSystemTest, DirectoryIteration) {
 const char archive[] = "!<arch>\x0A";
 const char bitcode[] = "\xde\xc0\x17\x0b";
 const char coff_object[] = "\x00\x00......";
+const char coff_bigobj[] = "\x00\x00\xff\xff\x00\x02......"
+    "\xc7\xa1\xba\xd1\xee\xba\xa9\x4b\xaf\x20\xfa\xf6\x6a\xa4\xdc\xb8";
 const char coff_import_library[] = "\x00\x00\xff\xff....";
 const char elf_relocatable[] = { 0x7f, 'E', 'L', 'F', 1, 2, 1, 0, 0,
                                  0,    0,   0,   0,   0, 0, 0, 0, 1 };
@@ -514,6 +514,7 @@ TEST_F(FileSystemTest, Magic) {
     DEFINE(archive),
     DEFINE(bitcode),
     DEFINE(coff_object),
+    { "coff_bigobj", coff_bigobj, sizeof(coff_bigobj), fs::file_magic::coff_object },
     DEFINE(coff_import_library),
     DEFINE(elf_relocatable),
     DEFINE(macho_universal_binary),
