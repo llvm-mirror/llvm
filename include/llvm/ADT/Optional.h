@@ -29,6 +29,8 @@ class Optional {
   AlignedCharArrayUnion<T> storage;
   bool hasVal;
 public:
+  typedef T value_type;
+
   Optional(NoneType) : hasVal(false) {}
   explicit Optional() : hasVal(false) {}
   Optional(const T &y) : hasVal(true) {
@@ -117,9 +119,19 @@ public:
   const T& operator*() const LLVM_LVALUE_FUNCTION { assert(hasVal); return *getPointer(); }
   T& operator*() LLVM_LVALUE_FUNCTION { assert(hasVal); return *getPointer(); }
 
+  template <typename U>
+  LLVM_CONSTEXPR T getValueOr(U &&value) const LLVM_LVALUE_FUNCTION {
+    return hasValue() ? getValue() : std::forward<U>(value);
+  }
+
 #if LLVM_HAS_RVALUE_REFERENCE_THIS
   T&& getValue() && { assert(hasVal); return std::move(*getPointer()); }
   T&& operator*() && { assert(hasVal); return std::move(*getPointer()); }
+
+  template <typename U>
+  T getValueOr(U &&value) && {
+    return hasValue() ? std::move(getValue()) : std::forward<U>(value);
+  }
 #endif
 };
 

@@ -18,6 +18,7 @@
 
 #include "AMDGPU.h"
 #include "AMDGPUSubtarget.h"
+#include "SIDefines.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"

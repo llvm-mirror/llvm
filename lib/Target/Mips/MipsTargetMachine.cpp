@@ -56,7 +56,8 @@ MipsTargetMachine::MipsTargetMachine(const Target &T, StringRef TT,
                                      Reloc::Model RM, CodeModel::Model CM,
                                      CodeGenOpt::Level OL, bool isLittle)
     : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-      Subtarget(nullptr), DefaultSubtarget(TT, CPU, FS, isLittle, this),
+      isLittle(isLittle), Subtarget(nullptr),
+      DefaultSubtarget(TT, CPU, FS, isLittle, this),
       NoMips16Subtarget(TT, CPU, FS.empty() ? "-mips16" : FS.str() + ",-mips16",
                         isLittle, this),
       Mips16Subtarget(TT, CPU, FS.empty() ? "+mips16" : FS.str() + ",+mips16",
@@ -83,20 +84,59 @@ MipselTargetMachine(const Target &T, StringRef TT,
                     CodeGenOpt::Level OL)
   : MipsTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
 
+const MipsSubtarget *
+MipsTargetMachine::getSubtargetImpl(const Function &F) const {
+  AttributeSet FnAttrs = F.getAttributes();
+  Attribute CPUAttr =
+      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-cpu");
+  Attribute FSAttr =
+      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-features");
+
+  std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
+                        ? CPUAttr.getValueAsString().str()
+                        : TargetCPU;
+  std::string FS = !FSAttr.hasAttribute(Attribute::None)
+                       ? FSAttr.getValueAsString().str()
+                       : TargetFS;
+  bool hasMips16Attr =
+      !FnAttrs.getAttribute(AttributeSet::FunctionIndex, "mips16")
+           .hasAttribute(Attribute::None);
+  bool hasNoMips16Attr =
+      !FnAttrs.getAttribute(AttributeSet::FunctionIndex, "nomips16")
+           .hasAttribute(Attribute::None);
+
+  // FIXME: This is related to the code below to reset the target options,
+  // we need to know whether or not the soft float flag is set on the
+  // function before we can generate a subtarget. We also need to use
+  // it as a key for the subtarget since that can be the only difference
+  // between two functions.
+  Attribute SFAttr =
+      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "use-soft-float");
+  bool softFloat = !SFAttr.hasAttribute(Attribute::None)
+                       ? SFAttr.getValueAsString() == "true"
+                       : Options.UseSoftFloat;
+
+  if (hasMips16Attr)
+    FS += FS.empty() ? "+mips16" : ",+mips16";
+  else if (hasNoMips16Attr)
+    FS += FS.empty() ? "-mips16" : ",-mips16";
+
+  auto &I = SubtargetMap[CPU + FS + (softFloat ? "use-soft-float=true"
+                                               : "use-soft-float=false")];
+  if (!I) {
+    // This needs to be done before we create a new subtarget since any
+    // creation will depend on the TM and the code generation flags on the
+    // function that reside in TargetOptions.
+    resetTargetOptions(F);
+    I = llvm::make_unique<MipsSubtarget>(TargetTriple, CPU, FS, isLittle, this);
+  }
+  return I.get();
+}
+
 void MipsTargetMachine::resetSubtarget(MachineFunction *MF) {
   DEBUG(dbgs() << "resetSubtarget\n");
-  AttributeSet FnAttrs = MF->getFunction()->getAttributes();
-  bool Mips16Attr = FnAttrs.hasAttribute(AttributeSet::FunctionIndex, "mips16");
-  bool NoMips16Attr =
-      FnAttrs.hasAttribute(AttributeSet::FunctionIndex, "nomips16");
-  assert(!(Mips16Attr && NoMips16Attr) &&
-         "mips16 and nomips16 specified on the same function");
-  if (Mips16Attr)
-    Subtarget = &Mips16Subtarget;
-  else if (NoMips16Attr)
-    Subtarget = &NoMips16Subtarget;
-  else
-    Subtarget = &DefaultSubtarget;
+
+  Subtarget = const_cast<MipsSubtarget *>(getSubtargetImpl(*MF->getFunction()));
   MF->setSubtarget(Subtarget);
   return;
 }

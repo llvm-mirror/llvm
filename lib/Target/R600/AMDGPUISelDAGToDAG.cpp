@@ -79,11 +79,6 @@ private:
   bool isLocalLoad(const LoadSDNode *N) const;
   bool isRegionLoad(const LoadSDNode *N) const;
 
-  /// \returns True if the current basic block being selected is at control
-  ///          flow depth 0.  Meaning that the current block dominates the
-  //           exit block.
-  bool isCFDepth0() const;
-
   const TargetRegisterClass *getOperandRegClass(SDNode *N, unsigned OpNo) const;
   bool SelectGlobalValueConstantOffset(SDValue Addr, SDValue& IntPtr);
   bool SelectGlobalValueVariableOffset(SDValue Addr, SDValue &BaseReg,
@@ -101,11 +96,16 @@ private:
                    SDValue &TFE) const;
   bool SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc, SDValue &VAddr,
                          SDValue &Offset) const;
+  bool SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
+                         SDValue &VAddr, SDValue &Offset,
+                         SDValue &SLC) const;
   bool SelectMUBUFScratch(SDValue Addr, SDValue &RSrc, SDValue &VAddr,
                           SDValue &SOffset, SDValue &ImmOffset) const;
   bool SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc, SDValue &SOffset,
                          SDValue &Offset, SDValue &GLC, SDValue &SLC,
                          SDValue &TFE) const;
+  bool SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc, SDValue &Soffset,
+                         SDValue &Offset, SDValue &GLC) const;
   SDNode *SelectAddrSpaceCast(SDNode *N);
   bool SelectVOP3Mods(SDValue In, SDValue &Src, SDValue &SrcMods) const;
   bool SelectVOP3Mods0(SDValue In, SDValue &Src, SDValue &SrcMods,
@@ -605,14 +605,6 @@ bool AMDGPUDAGToDAGISel::isPrivateLoad(const LoadSDNode *N) const {
   return false;
 }
 
-bool AMDGPUDAGToDAGISel::isCFDepth0() const {
-  // FIXME: Figure out a way to use DominatorTree analysis here.
-  const BasicBlock *CurBlock = FuncInfo->MBB->getBasicBlock();
-  const Function *Fn = FuncInfo->Fn;
-  return &Fn->front() == CurBlock || &Fn->back() == CurBlock;
-}
-
-
 const char *AMDGPUDAGToDAGISel::getPassName() const {
   return "AMDGPU DAG->DAG Pattern Instruction Selection";
 }
@@ -718,11 +710,6 @@ SDNode *AMDGPUDAGToDAGISel::SelectADD_SUB_I64(SDNode *N) {
   unsigned Opc = IsAdd ? AMDGPU::S_ADD_U32 : AMDGPU::S_SUB_U32;
   unsigned CarryOpc = IsAdd ? AMDGPU::S_ADDC_U32 : AMDGPU::S_SUBB_U32;
 
-  if (!isCFDepth0()) {
-    Opc = IsAdd ? AMDGPU::V_ADD_I32_e32 : AMDGPU::V_SUB_I32_e32;
-    CarryOpc = IsAdd ? AMDGPU::V_ADDC_U32_e32 : AMDGPU::V_SUBB_U32_e32;
-  }
-
   SDNode *AddLo = CurDAG->getMachineNode( Opc, DL, VTList, AddLoArgs);
   SDValue Carry(AddLo, 1);
   SDNode *AddHi
@@ -749,15 +736,16 @@ SDNode *AMDGPUDAGToDAGISel::SelectDIV_SCALE(SDNode *N) {
     = (VT == MVT::f64) ? AMDGPU::V_DIV_SCALE_F64 : AMDGPU::V_DIV_SCALE_F32;
 
   const SDValue Zero = CurDAG->getTargetConstant(0, MVT::i32);
-
+  const SDValue False = CurDAG->getTargetConstant(0, MVT::i1);
   SDValue Ops[] = {
-    N->getOperand(0),
-    N->getOperand(1),
-    N->getOperand(2),
-    Zero,
-    Zero,
-    Zero,
-    Zero
+    Zero,             // src0_modifiers
+    N->getOperand(0), // src0
+    Zero,             // src1_modifiers
+    N->getOperand(1), // src1
+    Zero,             // src2_modifiers
+    N->getOperand(2), // src2
+    False,            // clamp
+    Zero              // omod
   };
 
   return CurDAG->SelectNodeTo(N, Opc, VT, MVT::i1, Ops);
@@ -909,6 +897,14 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
   return false;
 }
 
+bool AMDGPUDAGToDAGISel::SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
+                                           SDValue &VAddr, SDValue &Offset,
+                                           SDValue &SLC) const {
+  SLC = CurDAG->getTargetConstant(0, MVT::i1);
+
+  return SelectMUBUFAddr64(Addr, SRsrc, VAddr, Offset);
+}
+
 static SDValue buildRSRC(SelectionDAG *DAG, SDLoc DL, SDValue Ptr,
                          uint32_t RsrcDword1, uint64_t RsrcDword2And3) {
 
@@ -1017,6 +1013,14 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
     return true;
   }
   return false;
+}
+
+bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
+                                           SDValue &Soffset, SDValue &Offset,
+                                           SDValue &GLC) const {
+  SDValue SLC, TFE;
+
+  return SelectMUBUFOffset(Addr, SRsrc, Soffset, Offset, GLC, SLC, TFE);
 }
 
 // FIXME: This is incorrect and only enough to be able to compile.

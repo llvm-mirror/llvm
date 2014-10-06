@@ -1,5 +1,5 @@
-; RUN: llc -mtriple=aarch64-apple-darwin                      -verify-machineinstrs < %s | FileCheck %s --check-prefix=CHECK --check-prefix=SDAG
-; RUN: llc -mtriple=aarch64-apple-darwin -O0 -fast-isel-abort -verify-machineinstrs < %s | FileCheck %s --check-prefix=CHECK --check-prefix=FAST
+; RUN: llc -mtriple=aarch64-apple-darwin                             -verify-machineinstrs < %s | FileCheck %s --check-prefix=CHECK --check-prefix=SDAG
+; RUN: llc -mtriple=aarch64-apple-darwin -fast-isel -fast-isel-abort -verify-machineinstrs < %s | FileCheck %s --check-prefix=CHECK --check-prefix=FAST
 
 ; Load / Store Base Register only
 define zeroext i1 @load_breg_i1(i1* %a) {
@@ -130,12 +130,9 @@ define i32 @load_breg_immoff_1(i64 %a) {
 
 ; Min not-supported negative offset
 define i32 @load_breg_immoff_2(i64 %a) {
-; SDAG-LABEL: load_breg_immoff_2
-; SDAG:       sub [[REG:x[0-9]+]], x0, #257
-; SDAG-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
-; FAST-LABEL: load_breg_immoff_2
-; FAST:       add [[REG:x[0-9]+]], x0, {{x[0-9]+}}
-; FAST-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
+; CHECK-LABEL: load_breg_immoff_2
+; CHECK:       sub [[REG:x[0-9]+]], x0, #257
+; CHECK-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
   %1 = add i64 %a, -257
   %2 = inttoptr i64 %1 to i32*
   %3 = load i32* %2
@@ -154,12 +151,9 @@ define i32 @load_breg_immoff_3(i64 %a) {
 
 ; Min un-supported unscaled offset
 define i32 @load_breg_immoff_4(i64 %a) {
-; SDAG-LABEL: load_breg_immoff_4
-; SDAG:       add [[REG:x[0-9]+]], x0, #257
-; SDAG-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
-; FAST-LABEL: load_breg_immoff_4
-; FAST:       add [[REG:x[0-9]+]], x0, {{x[0-9]+}}
-; FAST-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
+; CHECK-LABEL: load_breg_immoff_4
+; CHECK:       add [[REG:x[0-9]+]], x0, #257
+; CHECK-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
   %1 = add i64 %a, 257
   %2 = inttoptr i64 %1 to i32*
   %3 = load i32* %2
@@ -178,12 +172,9 @@ define i32 @load_breg_immoff_5(i64 %a) {
 
 ; Min un-supported scaled offset
 define i32 @load_breg_immoff_6(i64 %a) {
-; SDAG-LABEL: load_breg_immoff_6
-; SDAG:       add [[REG:x[0-9]+]], x0, #4, lsl #12
-; SDAG-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
-; FAST-LABEL: load_breg_immoff_6
-; FAST:       add [[REG:x[0-9]+]], x0, {{x[0-9]+}}
-; FAST-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
+; CHECK-LABEL: load_breg_immoff_6
+; CHECK:       add [[REG:x[0-9]+]], x0, #4, lsl #12
+; CHECK-NEXT:  ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
   %1 = add i64 %a, 16384
   %2 = inttoptr i64 %1 to i32*
   %3 = load i32* %2
@@ -202,12 +193,9 @@ define void @store_breg_immoff_1(i64 %a) {
 
 ; Min not-supported negative offset
 define void @store_breg_immoff_2(i64 %a) {
-; SDAG-LABEL: store_breg_immoff_2
-; SDAG:       sub [[REG:x[0-9]+]], x0, #257
-; SDAG-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
-; FAST-LABEL: store_breg_immoff_2
-; FAST:       add [[REG:x[0-9]+]], x0, {{x[0-9]+}}
-; FAST-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
+; CHECK-LABEL: store_breg_immoff_2
+; CHECK:       sub [[REG:x[0-9]+]], x0, #257
+; CHECK-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
   %1 = add i64 %a, -257
   %2 = inttoptr i64 %1 to i32*
   store i32 0, i32* %2
@@ -226,12 +214,9 @@ define void @store_breg_immoff_3(i64 %a) {
 
 ; Min un-supported unscaled offset
 define void @store_breg_immoff_4(i64 %a) {
-; SDAG-LABEL: store_breg_immoff_4
-; SDAG:       add [[REG:x[0-9]+]], x0, #257
-; SDAG-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
-; FAST-LABEL: store_breg_immoff_4
-; FAST:       add [[REG:x[0-9]+]], x0, {{x[0-9]+}}
-; FAST-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
+; CHECK-LABEL: store_breg_immoff_4
+; CHECK:       add [[REG:x[0-9]+]], x0, #257
+; CHECK-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
   %1 = add i64 %a, 257
   %2 = inttoptr i64 %1 to i32*
   store i32 0, i32* %2
@@ -250,12 +235,9 @@ define void @store_breg_immoff_5(i64 %a) {
 
 ; Min un-supported scaled offset
 define void @store_breg_immoff_6(i64 %a) {
-; SDAG-LABEL: store_breg_immoff_6
-; SDAG:       add [[REG:x[0-9]+]], x0, #4, lsl #12
-; SDAG-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
-; FAST-LABEL: store_breg_immoff_6
-; FAST:       add [[REG:x[0-9]+]], x0, {{x[0-9]+}}
-; FAST-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
+; CHECK-LABEL: store_breg_immoff_6
+; CHECK:       add [[REG:x[0-9]+]], x0, #4, lsl #12
+; CHECK-NEXT:  str wzr, {{\[}}[[REG]]{{\]}}
   %1 = add i64 %a, 16384
   %2 = inttoptr i64 %1 to i32*
   store i32 0, i32* %2
@@ -319,7 +301,7 @@ define i64 @load_breg_offreg_immoff_2(i64 %a, i64 %b) {
 ; SDAG-NEXT:  add [[REG2:x[0-9]+]], [[REG1]], #15, lsl #12
 ; SDAG-NEXT:  ldr x0, {{\[}}[[REG2]]{{\]}}
 ; FAST-LABEL: load_breg_offreg_immoff_2
-; FAST:       add [[REG:x[0-9]+]], x0, {{x[0-9]+}}
+; FAST:       add [[REG:x[0-9]+]], x0, #15, lsl #12
 ; FAST-NEXT:  ldr x0, {{\[}}[[REG]], x1{{\]}}
   %1 = add i64 %a, %b
   %2 = add i64 %1, 61440
@@ -334,6 +316,16 @@ define i32 @load_shift_offreg_1(i64 %a) {
 ; CHECK:       lsl [[REG:x[0-9]+]], x0, #2
 ; CHECK:       ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
   %1 = shl i64 %a, 2
+  %2 = inttoptr i64 %1 to i32*
+  %3 = load i32* %2
+  ret i32 %3
+}
+
+define i32 @load_mul_offreg_1(i64 %a) {
+; CHECK-LABEL: load_mul_offreg_1
+; CHECK:       lsl [[REG:x[0-9]+]], x0, #2
+; CHECK:       ldr {{w[0-9]+}}, {{\[}}[[REG]]{{\]}}
+  %1 = mul i64 %a, 4
   %2 = inttoptr i64 %1 to i32*
   %3 = load i32* %2
   ret i32 %3
@@ -405,6 +397,82 @@ define i32 @load_breg_shift_offreg_5(i64 %a, i64 %b) {
   ret i32 %5
 }
 
+define i32 @load_breg_mul_offreg_1(i64 %a, i64 %b) {
+; CHECK-LABEL: load_breg_mul_offreg_1
+; CHECK:       ldr {{w[0-9]+}}, [x1, x0, lsl #2]
+  %1 = mul i64 %a, 4
+  %2 = add i64 %1, %b
+  %3 = inttoptr i64 %2 to i32*
+  %4 = load i32* %3
+  ret i32 %4
+}
+
+define zeroext i8 @load_breg_and_offreg_1(i64 %a, i64 %b) {
+; CHECK-LABEL: load_breg_and_offreg_1
+; CHECK:       ldrb {{w[0-9]+}}, [x1, w0, uxtw]
+  %1 = and i64 %a, 4294967295
+  %2 = add i64 %1, %b
+  %3 = inttoptr i64 %2 to i8*
+  %4 = load i8* %3
+  ret i8 %4
+}
+
+define zeroext i16 @load_breg_and_offreg_2(i64 %a, i64 %b) {
+; CHECK-LABEL: load_breg_and_offreg_2
+; CHECK:       ldrh {{w[0-9]+}}, [x1, w0, uxtw #1]
+  %1 = and i64 %a, 4294967295
+  %2 = shl i64 %1, 1
+  %3 = add i64 %2, %b
+  %4 = inttoptr i64 %3 to i16*
+  %5 = load i16* %4
+  ret i16 %5
+}
+
+define i32 @load_breg_and_offreg_3(i64 %a, i64 %b) {
+; CHECK-LABEL: load_breg_and_offreg_3
+; CHECK:       ldr {{w[0-9]+}}, [x1, w0, uxtw #2]
+  %1 = and i64 %a, 4294967295
+  %2 = shl i64 %1, 2
+  %3 = add i64 %2, %b
+  %4 = inttoptr i64 %3 to i32*
+  %5 = load i32* %4
+  ret i32 %5
+}
+
+define i64 @load_breg_and_offreg_4(i64 %a, i64 %b) {
+; CHECK-LABEL: load_breg_and_offreg_4
+; CHECK:       ldr {{x[0-9]+}}, [x1, w0, uxtw #3]
+  %1 = and i64 %a, 4294967295
+  %2 = shl i64 %1, 3
+  %3 = add i64 %2, %b
+  %4 = inttoptr i64 %3 to i64*
+  %5 = load i64* %4
+  ret i64 %5
+}
+
+; Not all 'and' instructions have immediates.
+define i64 @load_breg_and_offreg_5(i64 %a, i64 %b, i64 %c) {
+; CHECK-LABEL: load_breg_and_offreg_5
+; CHECK:       and [[REG:x[0-9]+]], x0, x2
+; CHECK-NEXT:  ldr {{x[0-9]+}}, {{\[}}[[REG]], x1{{\]}}
+  %1 = and i64 %a, %c
+  %2 = add i64 %1, %b
+  %3 = inttoptr i64 %2 to i64*
+  %4 = load i64* %3
+  ret i64 %4
+}
+
+define i64 @load_breg_and_offreg_6(i64 %a, i64 %b, i64 %c) {
+; CHECK-LABEL: load_breg_and_offreg_6
+; CHECK:       and [[REG:x[0-9]+]], x0, x2
+; CHECK-NEXT:  ldr {{x[0-9]+}}, {{\[}}x1, [[REG]], lsl #3{{\]}}
+  %1 = and i64 %a, %c
+  %2 = shl i64 %1, 3
+  %3 = add i64 %2, %b
+  %4 = inttoptr i64 %3 to i64*
+  %5 = load i64* %4
+  ret i64 %5
+}
 
 ; Load Base Register + Scaled Register Offset + Sign/Zero extension
 define i32 @load_breg_zext_shift_offreg_1(i32 %a, i64 %b) {
@@ -429,6 +497,17 @@ define i32 @load_breg_zext_shift_offreg_2(i32 %a, i64 %b) {
   ret i32 %5
 }
 
+define i32 @load_breg_zext_mul_offreg_1(i32 %a, i64 %b) {
+; CHECK-LABEL: load_breg_zext_mul_offreg_1
+; CHECK:       ldr {{w[0-9]+}}, [x1, w0, uxtw #2]
+  %1 = zext i32 %a to i64
+  %2 = mul i64 %1, 4
+  %3 = add i64 %2, %b
+  %4 = inttoptr i64 %3 to i32*
+  %5 = load i32* %4
+  ret i32 %5
+}
+
 define i32 @load_breg_sext_shift_offreg_1(i32 %a, i64 %b) {
 ; CHECK-LABEL: load_breg_sext_shift_offreg_1
 ; CHECK:       ldr {{w[0-9]+}}, [x1, w0, sxtw #2]
@@ -446,6 +525,32 @@ define i32 @load_breg_sext_shift_offreg_2(i32 %a, i64 %b) {
   %1 = sext i32 %a to i64
   %2 = shl i64 %1, 2
   %3 = add i64 %b, %2
+  %4 = inttoptr i64 %3 to i32*
+  %5 = load i32* %4
+  ret i32 %5
+}
+
+; Make sure that we don't drop the first 'add' instruction.
+define i32 @load_breg_sext_shift_offreg_3(i32 %a, i64 %b) {
+; CHECK-LABEL: load_breg_sext_shift_offreg_3
+; CHECK:       add [[REG:w[0-9]+]], w0, #4
+; CHECK:       ldr {{w[0-9]+}}, {{\[}}x1, [[REG]], sxtw #2{{\]}}
+  %1 = add i32 %a, 4
+  %2 = sext i32 %1 to i64
+  %3 = shl i64 %2, 2
+  %4 = add i64 %b, %3
+  %5 = inttoptr i64 %4 to i32*
+  %6 = load i32* %5
+  ret i32 %6
+}
+
+
+define i32 @load_breg_sext_mul_offreg_1(i32 %a, i64 %b) {
+; CHECK-LABEL: load_breg_sext_mul_offreg_1
+; CHECK:       ldr {{w[0-9]+}}, [x1, w0, sxtw #2]
+  %1 = sext i32 %a to i64
+  %2 = mul i64 %1, 4
+  %3 = add i64 %2, %b
   %4 = inttoptr i64 %3 to i32*
   %5 = load i32* %4
   ret i32 %5

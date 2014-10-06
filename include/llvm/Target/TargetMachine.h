@@ -99,6 +99,9 @@ public:
   virtual const TargetSubtargetInfo *getSubtargetImpl() const {
     return nullptr;
   }
+  virtual const TargetSubtargetInfo *getSubtargetImpl(const Function &) const {
+    return getSubtargetImpl();
+  }
 
   /// getSubtarget - This method returns a pointer to the specified type of
   /// TargetSubtargetInfo.  In debug builds, it verifies that the object being
@@ -106,9 +109,14 @@ public:
   template<typename STC> const STC &getSubtarget() const {
     return *static_cast<const STC*>(getSubtargetImpl());
   }
+  template <typename STC> const STC &getSubtarget(const Function *) const {
+    return *static_cast<const STC*>(getSubtargetImpl());
+  }
 
   /// \brief Reset the target options based on the function's attributes.
-  void resetTargetOptions(const MachineFunction *MF) const;
+  // FIXME: Remove TargetOptions that affect per-function code generation
+  // from TargetMachine.
+  void resetTargetOptions(const Function &F) const;
 
   /// getMCAsmInfo - Return target specific asm information.
   ///

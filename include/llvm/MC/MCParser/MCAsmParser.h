@@ -52,6 +52,8 @@ public:
   virtual void *LookupInlineAsmIdentifier(StringRef &LineBuf,
                                           InlineAsmIdentifierInfo &Info,
                                           bool IsUnevaluatedContext) = 0;
+  virtual StringRef LookupInlineAsmLabel(StringRef Identifier, SourceMgr &SM,
+                                         SMLoc Location, bool Create) = 0;
 
   virtual bool LookupInlineAsmField(StringRef Base, StringRef Member,
                                     unsigned &Offset) = 0;

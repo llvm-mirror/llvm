@@ -48,10 +48,12 @@ MCStreamer::~MCStreamer() {
 }
 
 void MCStreamer::reset() {
+  DwarfFrameInfos.clear();
   for (unsigned i = 0; i < getNumWinFrameInfos(); ++i)
     delete WinFrameInfos[i];
   WinFrameInfos.clear();
   CurrentWinFrameInfo = nullptr;
+  SymbolOrdering.clear();
   SectionStack.clear();
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }

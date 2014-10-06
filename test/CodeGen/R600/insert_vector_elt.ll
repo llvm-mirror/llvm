@@ -49,7 +49,7 @@ define void @insertelement_v4i32_0(<4 x i32> addrspace(1)* %out, <4 x i32> %a) n
 }
 
 ; SI-LABEL: @dynamic_insertelement_v2f32:
-; SI: V_MOV_B32_e32 [[CONST:v[0-9]+]], 5.000000e+00
+; SI: V_MOV_B32_e32 [[CONST:v[0-9]+]], 0x40a00000
 ; SI: V_MOVRELD_B32_e32 v[[LOW_RESULT_REG:[0-9]+]], [[CONST]]
 ; SI: BUFFER_STORE_DWORDX2 {{v\[}}[[LOW_RESULT_REG]]:
 define void @dynamic_insertelement_v2f32(<2 x float> addrspace(1)* %out, <2 x float> %a, i32 %b) nounwind {
@@ -59,7 +59,7 @@ define void @dynamic_insertelement_v2f32(<2 x float> addrspace(1)* %out, <2 x fl
 }
 
 ; SI-LABEL: @dynamic_insertelement_v4f32:
-; SI: V_MOV_B32_e32 [[CONST:v[0-9]+]], 5.000000e+00
+; SI: V_MOV_B32_e32 [[CONST:v[0-9]+]], 0x40a00000
 ; SI: V_MOVRELD_B32_e32 v[[LOW_RESULT_REG:[0-9]+]], [[CONST]]
 ; SI: BUFFER_STORE_DWORDX4 {{v\[}}[[LOW_RESULT_REG]]:
 define void @dynamic_insertelement_v4f32(<4 x float> addrspace(1)* %out, <4 x float> %a, i32 %b) nounwind {
@@ -197,5 +197,55 @@ else:
 endif:
   %7 = phi <2 x i32> [%3, %if], [%6, %else]
   store <2 x i32> %7, <2 x i32> addrspace(1)* %out
+  ret void
+}
+
+; SI-LABEL: @dynamic_insertelement_v2f64:
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: S_ENDPGM
+define void @dynamic_insertelement_v2f64(<2 x double> addrspace(1)* %out, <2 x double> %a, i32 %b) nounwind {
+  %vecins = insertelement <2 x double> %a, double 8.0, i32 %b
+  store <2 x double> %vecins, <2 x double> addrspace(1)* %out, align 16
+  ret void
+}
+
+; SI-LABEL: @dynamic_insertelement_v2i64:
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: S_ENDPGM
+define void @dynamic_insertelement_v2i64(<2 x i64> addrspace(1)* %out, <2 x i64> %a, i32 %b) nounwind {
+  %vecins = insertelement <2 x i64> %a, i64 5, i32 %b
+  store <2 x i64> %vecins, <2 x i64> addrspace(1)* %out, align 8
+  ret void
+}
+
+; SI-LABEL: @dynamic_insertelement_v4f64:
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: S_ENDPGM
+define void @dynamic_insertelement_v4f64(<4 x double> addrspace(1)* %out, <4 x double> %a, i32 %b) nounwind {
+  %vecins = insertelement <4 x double> %a, double 8.0, i32 %b
+  store <4 x double> %vecins, <4 x double> addrspace(1)* %out, align 16
+  ret void
+}
+
+; SI-LABEL: @dynamic_insertelement_v8f64:
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: BUFFER_STORE_DWORDX2
+; SI: S_ENDPGM
+define void @dynamic_insertelement_v8f64(<8 x double> addrspace(1)* %out, <8 x double> %a, i32 %b) nounwind {
+  %vecins = insertelement <8 x double> %a, double 8.0, i32 %b
+  store <8 x double> %vecins, <8 x double> addrspace(1)* %out, align 16
   ret void
 }

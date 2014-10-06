@@ -133,6 +133,7 @@ private:
   bool selectShift(const Instruction *I);
   bool selectBitCast(const Instruction *I);
   bool selectFRem(const Instruction *I);
+  bool selectSDiv(const Instruction *I);
 
   // Utility helper routines.
   bool isTypeLegal(Type *Ty, MVT &VT);
@@ -172,11 +173,12 @@ private:
                          bool WantResult = true);
 
   // Emit functions.
+  bool emitCompareAndBranch(const BranchInst *BI);
   bool emitCmp(const Value *LHS, const Value *RHS, bool IsZExt);
   bool emitICmp(MVT RetVT, const Value *LHS, const Value *RHS, bool IsZExt);
   bool emitICmp_ri(MVT RetVT, unsigned LHSReg, bool LHSIsKill, uint64_t Imm);
   bool emitFCmp(MVT RetVT, const Value *LHS, const Value *RHS);
-  bool emitLoad(MVT VT, unsigned &ResultReg, Address Addr,
+  bool emitLoad(MVT VT, unsigned &ResultReg, Address Addr, bool WantZExt = true,
                 MachineMemOperand *MMO = nullptr);
   bool emitStore(MVT VT, unsigned SrcReg, Address Addr,
                  MachineMemOperand *MMO = nullptr);
@@ -253,6 +255,43 @@ public:
 } // end anonymous namespace
 
 #include "AArch64GenCallingConv.inc"
+
+/// \brief Check if the sign-/zero-extend will be a noop.
+static bool isIntExtFree(const Instruction *I) {
+  assert((isa<ZExtInst>(I) || isa<SExtInst>(I)) &&
+         "Unexpected integer extend instruction.");
+  bool IsZExt = isa<ZExtInst>(I);
+
+  if (const auto *LI = dyn_cast<LoadInst>(I->getOperand(0)))
+    if (LI->hasOneUse())
+      return true;
+
+  if (const auto *Arg = dyn_cast<Argument>(I->getOperand(0)))
+    if ((IsZExt && Arg->hasZExtAttr()) || (!IsZExt && Arg->hasSExtAttr()))
+      return true;
+
+  return false;
+}
+
+/// \brief Determine the implicit scale factor that is applied by a memory
+/// operation for a given value type.
+static unsigned getImplicitScaleFactor(MVT VT) {
+  switch (VT.SimpleTy) {
+  default:
+    return 0;    // invalid
+  case MVT::i1:  // fall-through
+  case MVT::i8:
+    return 1;
+  case MVT::i16:
+    return 2;
+  case MVT::i32: // fall-through
+  case MVT::f32:
+    return 4;
+  case MVT::i64: // fall-through
+  case MVT::f64:
+    return 8;
+  }
+}
 
 CCAssignFn *AArch64FastISel::CCAssignFnForCall(CallingConv::ID CC) const {
   if (CC == CallingConv::WebKit_JS)
@@ -425,6 +464,19 @@ unsigned AArch64FastISel::fastMaterializeFloatZero(const ConstantFP* CFP) {
   return fastEmitInst_r(Opc, TLI.getRegClassFor(VT), ZReg, /*IsKill=*/true);
 }
 
+/// \brief Check if the multiply is by a power-of-2 constant.
+static bool isMulPowOf2(const Value *I) {
+  if (const auto *MI = dyn_cast<MulOperator>(I)) {
+    if (const auto *C = dyn_cast<ConstantInt>(MI->getOperand(0)))
+      if (C->getValue().isPowerOf2())
+        return true;
+    if (const auto *C = dyn_cast<ConstantInt>(MI->getOperand(1)))
+      if (C->getValue().isPowerOf2())
+        return true;
+  }
+  return false;
+}
+
 // Computes the address to get to an object.
 bool AArch64FastISel::computeAddress(const Value *Obj, Address &Addr, Type *Ty)
 {
@@ -547,49 +599,171 @@ bool AArch64FastISel::computeAddress(const Value *Obj, Address &Addr, Type *Ty)
 
     break;
   }
-  case Instruction::Shl:
+  case Instruction::Shl: {
     if (Addr.getOffsetReg())
       break;
 
-    if (const auto *CI = dyn_cast<ConstantInt>(U->getOperand(1))) {
-      unsigned Val = CI->getZExtValue();
-      if (Val < 1 || Val > 3)
-        break;
+    const auto *CI = dyn_cast<ConstantInt>(U->getOperand(1));
+    if (!CI)
+      break;
 
-      uint64_t NumBytes = 0;
-      if (Ty && Ty->isSized()) {
-        uint64_t NumBits = DL.getTypeSizeInBits(Ty);
-        NumBytes = NumBits / 8;
-        if (!isPowerOf2_64(NumBits))
-          NumBytes = 0;
+    unsigned Val = CI->getZExtValue();
+    if (Val < 1 || Val > 3)
+      break;
+
+    uint64_t NumBytes = 0;
+    if (Ty && Ty->isSized()) {
+      uint64_t NumBits = DL.getTypeSizeInBits(Ty);
+      NumBytes = NumBits / 8;
+      if (!isPowerOf2_64(NumBits))
+        NumBytes = 0;
+    }
+
+    if (NumBytes != (1ULL << Val))
+      break;
+
+    Addr.setShift(Val);
+    Addr.setExtendType(AArch64_AM::LSL);
+
+    const Value *Src = U->getOperand(0);
+    if (const auto *I = dyn_cast<Instruction>(Src))
+      if (FuncInfo.MBBMap[I->getParent()] == FuncInfo.MBB)
+        Src = I;
+
+    // Fold the zext or sext when it won't become a noop.
+    if (const auto *ZE = dyn_cast<ZExtInst>(Src)) {
+      if (!isIntExtFree(ZE) && ZE->getOperand(0)->getType()->isIntegerTy(32)) {
+          Addr.setExtendType(AArch64_AM::UXTW);
+          Src = ZE->getOperand(0);
+      }
+    } else if (const auto *SE = dyn_cast<SExtInst>(Src)) {
+      if (!isIntExtFree(SE) && SE->getOperand(0)->getType()->isIntegerTy(32)) {
+        Addr.setExtendType(AArch64_AM::SXTW);
+        Src = SE->getOperand(0);
+      }
+    }
+
+    if (const auto *AI = dyn_cast<BinaryOperator>(Src))
+      if (AI->getOpcode() == Instruction::And) {
+        const Value *LHS = AI->getOperand(0);
+        const Value *RHS = AI->getOperand(1);
+
+        if (const auto *C = dyn_cast<ConstantInt>(LHS))
+          if (C->getValue() == 0xffffffff)
+            std::swap(LHS, RHS);
+
+        if (const auto *C = dyn_cast<ConstantInt>(RHS))
+          if (C->getValue() == 0xffffffff) {
+            Addr.setExtendType(AArch64_AM::UXTW);
+            unsigned Reg = getRegForValue(LHS);
+            if (!Reg)
+              return false;
+            bool RegIsKill = hasTrivialKill(LHS);
+            Reg = fastEmitInst_extractsubreg(MVT::i32, Reg, RegIsKill,
+                                             AArch64::sub_32);
+            Addr.setOffsetReg(Reg);
+            return true;
+          }
       }
 
-      if (NumBytes != (1ULL << Val))
-        break;
+    unsigned Reg = getRegForValue(Src);
+    if (!Reg)
+      return false;
+    Addr.setOffsetReg(Reg);
+    return true;
+  }
+  case Instruction::Mul: {
+    if (Addr.getOffsetReg())
+      break;
 
-      Addr.setShift(Val);
-      Addr.setExtendType(AArch64_AM::LSL);
+    if (!isMulPowOf2(U))
+      break;
 
-      if (const auto *I = dyn_cast<Instruction>(U->getOperand(0)))
-        if (FuncInfo.MBBMap[I->getParent()] == FuncInfo.MBB)
-          U = I;
+    const Value *LHS = U->getOperand(0);
+    const Value *RHS = U->getOperand(1);
 
-      if (const auto *ZE = dyn_cast<ZExtInst>(U))
-        if (ZE->getOperand(0)->getType()->isIntegerTy(32))
-          Addr.setExtendType(AArch64_AM::UXTW);
+    // Canonicalize power-of-2 value to the RHS.
+    if (const auto *C = dyn_cast<ConstantInt>(LHS))
+      if (C->getValue().isPowerOf2())
+        std::swap(LHS, RHS);
 
-      if (const auto *SE = dyn_cast<SExtInst>(U))
-        if (SE->getOperand(0)->getType()->isIntegerTy(32))
-          Addr.setExtendType(AArch64_AM::SXTW);
+    assert(isa<ConstantInt>(RHS) && "Expected an ConstantInt.");
+    const auto *C = cast<ConstantInt>(RHS);
+    unsigned Val = C->getValue().logBase2();
+    if (Val < 1 || Val > 3)
+      break;
 
-      unsigned Reg = getRegForValue(U->getOperand(0));
-      if (!Reg)
-        return false;
-      Addr.setOffsetReg(Reg);
-      return true;
+    uint64_t NumBytes = 0;
+    if (Ty && Ty->isSized()) {
+      uint64_t NumBits = DL.getTypeSizeInBits(Ty);
+      NumBytes = NumBits / 8;
+      if (!isPowerOf2_64(NumBits))
+        NumBytes = 0;
     }
+
+    if (NumBytes != (1ULL << Val))
+      break;
+
+    Addr.setShift(Val);
+    Addr.setExtendType(AArch64_AM::LSL);
+
+    const Value *Src = LHS;
+    if (const auto *I = dyn_cast<Instruction>(Src))
+      if (FuncInfo.MBBMap[I->getParent()] == FuncInfo.MBB)
+        Src = I;
+
+
+    // Fold the zext or sext when it won't become a noop.
+    if (const auto *ZE = dyn_cast<ZExtInst>(Src)) {
+      if (!isIntExtFree(ZE) && ZE->getOperand(0)->getType()->isIntegerTy(32)) {
+        Addr.setExtendType(AArch64_AM::UXTW);
+        Src = ZE->getOperand(0);
+      }
+    } else if (const auto *SE = dyn_cast<SExtInst>(Src)) {
+      if (!isIntExtFree(SE) && SE->getOperand(0)->getType()->isIntegerTy(32)) {
+        Addr.setExtendType(AArch64_AM::SXTW);
+        Src = SE->getOperand(0);
+      }
+    }
+
+    unsigned Reg = getRegForValue(Src);
+    if (!Reg)
+      return false;
+    Addr.setOffsetReg(Reg);
+    return true;
+  }
+  case Instruction::And: {
+    if (Addr.getOffsetReg())
+      break;
+
+    if (DL.getTypeSizeInBits(Ty) != 8)
+      break;
+
+    const Value *LHS = U->getOperand(0);
+    const Value *RHS = U->getOperand(1);
+
+    if (const auto *C = dyn_cast<ConstantInt>(LHS))
+      if (C->getValue() == 0xffffffff)
+        std::swap(LHS, RHS);
+
+    if (const auto *C = dyn_cast<ConstantInt>(RHS))
+      if (C->getValue() == 0xffffffff) {
+        Addr.setShift(0);
+        Addr.setExtendType(AArch64_AM::LSL);
+        Addr.setExtendType(AArch64_AM::UXTW);
+
+        unsigned Reg = getRegForValue(LHS);
+        if (!Reg)
+          return false;
+        bool RegIsKill = hasTrivialKill(LHS);
+        Reg = fastEmitInst_extractsubreg(MVT::i32, Reg, RegIsKill,
+                                         AArch64::sub_32);
+        Addr.setOffsetReg(Reg);
+        return true;
+      }
     break;
   }
+  } // end switch
 
   if (Addr.getReg()) {
     if (!Addr.getOffsetReg()) {
@@ -707,17 +881,9 @@ bool AArch64FastISel::isValueAvailable(const Value *V) const {
 }
 
 bool AArch64FastISel::simplifyAddress(Address &Addr, MVT VT) {
-  unsigned ScaleFactor;
-  switch (VT.SimpleTy) {
-  default: return false;
-  case MVT::i1:  // fall-through
-  case MVT::i8:  ScaleFactor = 1; break;
-  case MVT::i16: ScaleFactor = 2; break;
-  case MVT::i32: // fall-through
-  case MVT::f32: ScaleFactor = 4; break;
-  case MVT::i64: // fall-through
-  case MVT::f64: ScaleFactor = 8; break;
-  }
+  unsigned ScaleFactor = getImplicitScaleFactor(VT);
+  if (!ScaleFactor)
+    return false;
 
   bool ImmediateOffsetNeedsLowering = false;
   bool RegisterOffsetNeedsLowering = false;
@@ -792,11 +958,21 @@ bool AArch64FastISel::simplifyAddress(Address &Addr, MVT VT) {
   // Since the offset is too large for the load/store instruction get the
   // reg+offset into a register.
   if (ImmediateOffsetNeedsLowering) {
-    unsigned ResultReg = 0;
-    if (Addr.getReg())
-      ResultReg = fastEmit_ri_(MVT::i64, ISD::ADD, Addr.getReg(),
-                               /*IsKill=*/false, Offset, MVT::i64);
-    else
+    unsigned ResultReg;
+    if (Addr.getReg()) {
+      // Try to fold the immediate into the add instruction.
+      if (Offset < 0)
+        ResultReg = emitAddSub_ri(/*UseAdd=*/false, MVT::i64, Addr.getReg(),
+                                  /*IsKill=*/false, -Offset);
+      else
+        ResultReg = emitAddSub_ri(/*UseAdd=*/true, MVT::i64, Addr.getReg(),
+                                  /*IsKill=*/false, Offset);
+      if (!ResultReg) {
+        unsigned ImmReg = fastEmit_i(MVT::i64, MVT::i64, ISD::Constant, Offset);
+        ResultReg = emitAddSub_rr(/*UseAdd=*/true, MVT::i64, Addr.getReg(),
+                                  /*IsKill=*/false, ImmReg, /*IsKill=*/true);
+      }
+    } else
       ResultReg = fastEmit_i(MVT::i64, MVT::i64, ISD::Constant, Offset);
 
     if (!ResultReg)
@@ -879,8 +1055,13 @@ unsigned AArch64FastISel::emitAddSub(bool UseAdd, MVT RetVT, const Value *LHS,
   if (UseAdd && isa<ConstantInt>(LHS) && !isa<ConstantInt>(RHS))
     std::swap(LHS, RHS);
 
+  // Canonicalize mul by power of 2 to the RHS.
+  if (UseAdd && LHS->hasOneUse() && isValueAvailable(LHS))
+    if (isMulPowOf2(LHS))
+      std::swap(LHS, RHS);
+
   // Canonicalize shift immediate to the RHS.
-  if (UseAdd && isValueAvailable(LHS))
+  if (UseAdd && LHS->hasOneUse() && isValueAvailable(LHS))
     if (const auto *SI = dyn_cast<BinaryOperator>(LHS))
       if (isa<ConstantInt>(SI->getOperand(1)))
         if (SI->getOpcode() == Instruction::Shl  ||
@@ -910,7 +1091,8 @@ unsigned AArch64FastISel::emitAddSub(bool UseAdd, MVT RetVT, const Value *LHS,
     return ResultReg;
 
   // Only extend the RHS within the instruction if there is a valid extend type.
-  if (ExtendType != AArch64_AM::InvalidShiftExtend && isValueAvailable(RHS)) {
+  if (ExtendType != AArch64_AM::InvalidShiftExtend && RHS->hasOneUse() &&
+      isValueAvailable(RHS)) {
     if (const auto *SI = dyn_cast<BinaryOperator>(RHS))
       if (const auto *C = dyn_cast<ConstantInt>(SI->getOperand(1)))
         if ((SI->getOpcode() == Instruction::Shl) && (C->getZExtValue() < 4)) {
@@ -930,8 +1112,28 @@ unsigned AArch64FastISel::emitAddSub(bool UseAdd, MVT RetVT, const Value *LHS,
                          ExtendType, 0, SetFlags, WantResult);
   }
 
+  // Check if the mul can be folded into the instruction.
+  if (RHS->hasOneUse() && isValueAvailable(RHS))
+    if (isMulPowOf2(RHS)) {
+      const Value *MulLHS = cast<MulOperator>(RHS)->getOperand(0);
+      const Value *MulRHS = cast<MulOperator>(RHS)->getOperand(1);
+
+      if (const auto *C = dyn_cast<ConstantInt>(MulLHS))
+        if (C->getValue().isPowerOf2())
+          std::swap(MulLHS, MulRHS);
+
+      assert(isa<ConstantInt>(MulRHS) && "Expected a ConstantInt.");
+      uint64_t ShiftVal = cast<ConstantInt>(MulRHS)->getValue().logBase2();
+      unsigned RHSReg = getRegForValue(MulLHS);
+      if (!RHSReg)
+        return 0;
+      bool RHSIsKill = hasTrivialKill(MulLHS);
+      return emitAddSub_rs(UseAdd, RetVT, LHSReg, LHSIsKill, RHSReg, RHSIsKill,
+                           AArch64_AM::LSL, ShiftVal, SetFlags, WantResult);
+    }
+
   // Check if the shift can be folded into the instruction.
-  if (isValueAvailable(RHS))
+  if (RHS->hasOneUse() && isValueAvailable(RHS))
     if (const auto *SI = dyn_cast<BinaryOperator>(RHS)) {
       if (const auto *C = dyn_cast<ConstantInt>(SI->getOperand(1))) {
         AArch64_AM::ShiftExtendType ShiftType = AArch64_AM::InvalidShiftExtend;
@@ -1226,12 +1428,16 @@ unsigned AArch64FastISel::emitLogicalOp(unsigned ISDOpc, MVT RetVT,
   if (isa<ConstantInt>(LHS) && !isa<ConstantInt>(RHS))
     std::swap(LHS, RHS);
 
+  // Canonicalize mul by power-of-2 to the RHS.
+  if (LHS->hasOneUse() && isValueAvailable(LHS))
+    if (isMulPowOf2(LHS))
+      std::swap(LHS, RHS);
+
   // Canonicalize shift immediate to the RHS.
-  if (isValueAvailable(LHS))
-    if (const auto *SI = dyn_cast<BinaryOperator>(LHS))
+  if (LHS->hasOneUse() && isValueAvailable(LHS))
+    if (const auto *SI = dyn_cast<ShlOperator>(LHS))
       if (isa<ConstantInt>(SI->getOperand(1)))
-        if (SI->getOpcode() == Instruction::Shl)
-          std::swap(LHS, RHS);
+        std::swap(LHS, RHS);
 
   unsigned LHSReg = getRegForValue(LHS);
   if (!LHSReg)
@@ -1246,19 +1452,39 @@ unsigned AArch64FastISel::emitLogicalOp(unsigned ISDOpc, MVT RetVT,
   if (ResultReg)
     return ResultReg;
 
+  // Check if the mul can be folded into the instruction.
+  if (RHS->hasOneUse() && isValueAvailable(RHS))
+    if (isMulPowOf2(RHS)) {
+      const Value *MulLHS = cast<MulOperator>(RHS)->getOperand(0);
+      const Value *MulRHS = cast<MulOperator>(RHS)->getOperand(1);
+
+      if (const auto *C = dyn_cast<ConstantInt>(MulLHS))
+        if (C->getValue().isPowerOf2())
+          std::swap(MulLHS, MulRHS);
+
+      assert(isa<ConstantInt>(MulRHS) && "Expected a ConstantInt.");
+      uint64_t ShiftVal = cast<ConstantInt>(MulRHS)->getValue().logBase2();
+
+      unsigned RHSReg = getRegForValue(MulLHS);
+      if (!RHSReg)
+        return 0;
+      bool RHSIsKill = hasTrivialKill(MulLHS);
+      return emitLogicalOp_rs(ISDOpc, RetVT, LHSReg, LHSIsKill, RHSReg,
+                              RHSIsKill, ShiftVal);
+    }
+
   // Check if the shift can be folded into the instruction.
-  if (isValueAvailable(RHS))
-    if (const auto *SI = dyn_cast<BinaryOperator>(RHS))
-      if (const auto *C = dyn_cast<ConstantInt>(SI->getOperand(1)))
-        if (SI->getOpcode() == Instruction::Shl) {
-          uint64_t ShiftVal = C->getZExtValue();
-          unsigned RHSReg = getRegForValue(SI->getOperand(0));
-          if (!RHSReg)
-            return 0;
-          bool RHSIsKill = hasTrivialKill(SI->getOperand(0));
-          return emitLogicalOp_rs(ISDOpc, RetVT, LHSReg, LHSIsKill, RHSReg,
-                                  RHSIsKill, ShiftVal);
-        }
+  if (RHS->hasOneUse() && isValueAvailable(RHS))
+    if (const auto *SI = dyn_cast<ShlOperator>(RHS))
+      if (const auto *C = dyn_cast<ConstantInt>(SI->getOperand(1))) {
+        uint64_t ShiftVal = C->getZExtValue();
+        unsigned RHSReg = getRegForValue(SI->getOperand(0));
+        if (!RHSReg)
+          return 0;
+        bool RHSIsKill = hasTrivialKill(SI->getOperand(0));
+        return emitLogicalOp_rs(ISDOpc, RetVT, LHSReg, LHSIsKill, RHSReg,
+                                RHSIsKill, ShiftVal);
+      }
 
   unsigned RHSReg = getRegForValue(RHS);
   if (!RHSReg)
@@ -1364,22 +1590,14 @@ unsigned AArch64FastISel::emitAnd_ri(MVT RetVT, unsigned LHSReg, bool LHSIsKill,
 }
 
 bool AArch64FastISel::emitLoad(MVT VT, unsigned &ResultReg, Address Addr,
-                               MachineMemOperand *MMO) {
+                               bool WantZExt, MachineMemOperand *MMO) {
   // Simplify this down to something we can handle.
   if (!simplifyAddress(Addr, VT))
     return false;
 
-  unsigned ScaleFactor;
-  switch (VT.SimpleTy) {
-  default: llvm_unreachable("Unexpected value type.");
-  case MVT::i1:  // fall-through
-  case MVT::i8:  ScaleFactor = 1; break;
-  case MVT::i16: ScaleFactor = 2; break;
-  case MVT::i32: // fall-through
-  case MVT::f32: ScaleFactor = 4; break;
-  case MVT::i64: // fall-through
-  case MVT::f64: ScaleFactor = 8; break;
-  }
+  unsigned ScaleFactor = getImplicitScaleFactor(VT);
+  if (!ScaleFactor)
+    llvm_unreachable("Unexpected value type.");
 
   // Negative offsets require unscaled, 9-bit, signed immediate offsets.
   // Otherwise, we try using scaled, 12-bit, unsigned immediate offsets.
@@ -1389,20 +1607,38 @@ bool AArch64FastISel::emitLoad(MVT VT, unsigned &ResultReg, Address Addr,
     ScaleFactor = 1;
   }
 
-  static const unsigned OpcTable[4][6] = {
-    { AArch64::LDURBBi,  AArch64::LDURHHi,  AArch64::LDURWi,  AArch64::LDURXi,
-      AArch64::LDURSi,   AArch64::LDURDi },
-    { AArch64::LDRBBui,  AArch64::LDRHHui,  AArch64::LDRWui,  AArch64::LDRXui,
-      AArch64::LDRSui,   AArch64::LDRDui },
-    { AArch64::LDRBBroX, AArch64::LDRHHroX, AArch64::LDRWroX, AArch64::LDRXroX,
-      AArch64::LDRSroX,  AArch64::LDRDroX },
-    { AArch64::LDRBBroW, AArch64::LDRHHroW, AArch64::LDRWroW, AArch64::LDRXroW,
-      AArch64::LDRSroW,  AArch64::LDRDroW }
+  static const unsigned GPOpcTable[2][4][4] = {
+    // Sign-extend.
+    { { AArch64::LDURSBWi,  AArch64::LDURSHWi,  AArch64::LDURSWi,
+        AArch64::LDURXi  },
+      { AArch64::LDRSBWui,  AArch64::LDRSHWui,  AArch64::LDRSWui,
+        AArch64::LDRXui  },
+      { AArch64::LDRSBWroX, AArch64::LDRSHWroX, AArch64::LDRSWroX,
+        AArch64::LDRXroX },
+      { AArch64::LDRSBWroW, AArch64::LDRSHWroW, AArch64::LDRSWroW,
+        AArch64::LDRXroW },
+    },
+    // Zero-extend.
+    { { AArch64::LDURBBi,   AArch64::LDURHHi,   AArch64::LDURWi,
+        AArch64::LDURXi  },
+      { AArch64::LDRBBui,   AArch64::LDRHHui,   AArch64::LDRWui,
+        AArch64::LDRXui  },
+      { AArch64::LDRBBroX,  AArch64::LDRHHroX,  AArch64::LDRWroX,
+        AArch64::LDRXroX },
+      { AArch64::LDRBBroW,  AArch64::LDRHHroW,  AArch64::LDRWroW,
+        AArch64::LDRXroW }
+    }
+  };
+
+  static const unsigned FPOpcTable[4][2] = {
+    { AArch64::LDURSi,  AArch64::LDURDi  },
+    { AArch64::LDRSui,  AArch64::LDRDui  },
+    { AArch64::LDRSroX, AArch64::LDRDroX },
+    { AArch64::LDRSroW, AArch64::LDRDroW }
   };
 
   unsigned Opc;
   const TargetRegisterClass *RC;
-  bool VTIsi1 = false;
   bool UseRegOffset = Addr.isRegBase() && !Addr.getOffset() && Addr.getReg() &&
                       Addr.getOffsetReg();
   unsigned Idx = UseRegOffset ? 2 : UseScaled ? 1 : 0;
@@ -1411,14 +1647,33 @@ bool AArch64FastISel::emitLoad(MVT VT, unsigned &ResultReg, Address Addr,
     Idx++;
 
   switch (VT.SimpleTy) {
-  default: llvm_unreachable("Unexpected value type.");
-  case MVT::i1:  VTIsi1 = true; // Intentional fall-through.
-  case MVT::i8:  Opc = OpcTable[Idx][0]; RC = &AArch64::GPR32RegClass; break;
-  case MVT::i16: Opc = OpcTable[Idx][1]; RC = &AArch64::GPR32RegClass; break;
-  case MVT::i32: Opc = OpcTable[Idx][2]; RC = &AArch64::GPR32RegClass; break;
-  case MVT::i64: Opc = OpcTable[Idx][3]; RC = &AArch64::GPR64RegClass; break;
-  case MVT::f32: Opc = OpcTable[Idx][4]; RC = &AArch64::FPR32RegClass; break;
-  case MVT::f64: Opc = OpcTable[Idx][5]; RC = &AArch64::FPR64RegClass; break;
+  default:
+    llvm_unreachable("Unexpected value type.");
+  case MVT::i1: // Intentional fall-through.
+  case MVT::i8:
+    Opc = GPOpcTable[WantZExt][Idx][0];
+    RC = &AArch64::GPR32RegClass;
+    break;
+  case MVT::i16:
+    Opc = GPOpcTable[WantZExt][Idx][1];
+    RC = &AArch64::GPR32RegClass;
+    break;
+  case MVT::i32:
+    Opc = GPOpcTable[WantZExt][Idx][2];
+    RC = WantZExt ? &AArch64::GPR32RegClass : &AArch64::GPR64RegClass;
+    break;
+  case MVT::i64:
+    Opc = GPOpcTable[WantZExt][Idx][3];
+    RC = &AArch64::GPR64RegClass;
+    break;
+  case MVT::f32:
+    Opc = FPOpcTable[Idx][0];
+    RC = &AArch64::FPR32RegClass;
+    break;
+  case MVT::f64:
+    Opc = FPOpcTable[Idx][1];
+    RC = &AArch64::FPR64RegClass;
+    break;
   }
 
   // Create the base instruction, then add the operands.
@@ -1427,8 +1682,14 @@ bool AArch64FastISel::emitLoad(MVT VT, unsigned &ResultReg, Address Addr,
                                     TII.get(Opc), ResultReg);
   addLoadStoreOperands(Addr, MIB, MachineMemOperand::MOLoad, ScaleFactor, MMO);
 
+  // For 32bit loads we do sign-extending loads to 64bit and then extract the
+  // subreg. In the end this is just a NOOP.
+  if (VT == MVT::i32 && !WantZExt)
+    ResultReg = fastEmitInst_extractsubreg(MVT::i32, ResultReg, /*IsKill=*/true,
+                                           AArch64::sub_32);
+
   // Loading an i1 requires special handling.
-  if (VTIsi1) {
+  if (VT == MVT::i1) {
     unsigned ANDReg = emitAnd_ri(MVT::i32, ResultReg, /*IsKill=*/true, 1);
     assert(ANDReg && "Unexpected AND instruction emission failure.");
     ResultReg = ANDReg;
@@ -1505,8 +1766,12 @@ bool AArch64FastISel::selectLoad(const Instruction *I) {
   if (!computeAddress(I->getOperand(0), Addr, I->getType()))
     return false;
 
+  bool WantZExt = true;
+  if (I->hasOneUse() && isa<SExtInst>(I->use_begin()->getUser()))
+    WantZExt = false;
+
   unsigned ResultReg;
-  if (!emitLoad(VT, ResultReg, Addr, createMachineMemOperandFor(I)))
+  if (!emitLoad(VT, ResultReg, Addr, WantZExt, createMachineMemOperandFor(I)))
     return false;
 
   updateValueMap(I, ResultReg);
@@ -1519,17 +1784,9 @@ bool AArch64FastISel::emitStore(MVT VT, unsigned SrcReg, Address Addr,
   if (!simplifyAddress(Addr, VT))
     return false;
 
-  unsigned ScaleFactor;
-  switch (VT.SimpleTy) {
-  default: llvm_unreachable("Unexpected value type.");
-  case MVT::i1:  // fall-through
-  case MVT::i8:  ScaleFactor = 1; break;
-  case MVT::i16: ScaleFactor = 2; break;
-  case MVT::i32: // fall-through
-  case MVT::f32: ScaleFactor = 4; break;
-  case MVT::i64: // fall-through
-  case MVT::f64: ScaleFactor = 8; break;
-  }
+  unsigned ScaleFactor = getImplicitScaleFactor(VT);
+  if (!ScaleFactor)
+    llvm_unreachable("Unexpected value type.");
 
   // Negative offsets require unscaled, 9-bit, signed immediate offsets.
   // Otherwise, we try using scaled, 12-bit, unsigned immediate offsets.
@@ -1538,7 +1795,6 @@ bool AArch64FastISel::emitStore(MVT VT, unsigned SrcReg, Address Addr,
     UseScaled = false;
     ScaleFactor = 1;
   }
-
 
   static const unsigned OpcTable[4][6] = {
     { AArch64::STURBBi,  AArch64::STURHHi,  AArch64::STURWi,  AArch64::STURXi,
@@ -1549,7 +1805,6 @@ bool AArch64FastISel::emitStore(MVT VT, unsigned SrcReg, Address Addr,
       AArch64::STRSroX,  AArch64::STRDroX },
     { AArch64::STRBBroW, AArch64::STRHHroW, AArch64::STRWroW, AArch64::STRXroW,
       AArch64::STRSroW,  AArch64::STRDroW }
-
   };
 
   unsigned Opc;
@@ -1673,6 +1928,127 @@ static AArch64CC::CondCode getCompareCC(CmpInst::Predicate Pred) {
   }
 }
 
+/// \brief Try to emit a combined compare-and-branch instruction.
+bool AArch64FastISel::emitCompareAndBranch(const BranchInst *BI) {
+  assert(isa<CmpInst>(BI->getCondition()) && "Expected cmp instruction");
+  const CmpInst *CI = cast<CmpInst>(BI->getCondition());
+  CmpInst::Predicate Predicate = optimizeCmpPredicate(CI);
+
+  const Value *LHS = CI->getOperand(0);
+  const Value *RHS = CI->getOperand(1);
+
+  Type *Ty = LHS->getType();
+    if (!Ty->isIntegerTy())
+      return false;
+
+  unsigned BW = cast<IntegerType>(Ty)->getBitWidth();
+  if (BW != 1 && BW != 8 && BW != 16 && BW != 32 && BW != 64)
+    return false;
+
+  MachineBasicBlock *TBB = FuncInfo.MBBMap[BI->getSuccessor(0)];
+  MachineBasicBlock *FBB = FuncInfo.MBBMap[BI->getSuccessor(1)];
+
+  // Try to take advantage of fallthrough opportunities.
+  if (FuncInfo.MBB->isLayoutSuccessor(TBB)) {
+    std::swap(TBB, FBB);
+    Predicate = CmpInst::getInversePredicate(Predicate);
+  }
+
+  int TestBit = -1;
+  bool IsCmpNE;
+  if ((Predicate == CmpInst::ICMP_EQ) || (Predicate == CmpInst::ICMP_NE)) {
+    if (const auto *C = dyn_cast<ConstantInt>(LHS))
+      if (C->isNullValue())
+        std::swap(LHS, RHS);
+
+    if (!isa<ConstantInt>(RHS))
+      return false;
+
+    if (!cast<ConstantInt>(RHS)->isNullValue())
+      return false;
+
+    if (const auto *AI = dyn_cast<BinaryOperator>(LHS))
+      if (AI->getOpcode() == Instruction::And) {
+        const Value *AndLHS = AI->getOperand(0);
+        const Value *AndRHS = AI->getOperand(1);
+
+        if (const auto *C = dyn_cast<ConstantInt>(AndLHS))
+          if (C->getValue().isPowerOf2())
+            std::swap(AndLHS, AndRHS);
+
+        if (const auto *C = dyn_cast<ConstantInt>(AndRHS))
+          if (C->getValue().isPowerOf2()) {
+            TestBit = C->getValue().logBase2();
+            LHS = AndLHS;
+          }
+      }
+    IsCmpNE = Predicate == CmpInst::ICMP_NE;
+  } else if (Predicate == CmpInst::ICMP_SLT) {
+    if (!isa<ConstantInt>(RHS))
+      return false;
+
+    if (!cast<ConstantInt>(RHS)->isNullValue())
+      return false;
+
+    TestBit = BW - 1;
+    IsCmpNE = true;
+  } else if (Predicate == CmpInst::ICMP_SGT) {
+    if (!isa<ConstantInt>(RHS))
+      return false;
+
+    if (cast<ConstantInt>(RHS)->getValue() != -1)
+      return false;
+
+    TestBit = BW - 1;
+    IsCmpNE = false;
+  } else
+    return false;
+
+  static const unsigned OpcTable[2][2][2] = {
+    { {AArch64::CBZW,  AArch64::CBZX },
+      {AArch64::CBNZW, AArch64::CBNZX} },
+    { {AArch64::TBZW,  AArch64::TBZX },
+      {AArch64::TBNZW, AArch64::TBNZX} }
+  };
+
+  bool IsBitTest = TestBit != -1;
+  bool Is64Bit = BW == 64;
+  if (TestBit < 32 && TestBit >= 0)
+    Is64Bit = false;
+  
+  unsigned Opc = OpcTable[IsBitTest][IsCmpNE][Is64Bit];
+  const MCInstrDesc &II = TII.get(Opc);
+
+  unsigned SrcReg = getRegForValue(LHS);
+  if (!SrcReg)
+    return false;
+  bool SrcIsKill = hasTrivialKill(LHS);
+
+  if (BW == 64 && !Is64Bit) {
+    SrcReg = fastEmitInst_extractsubreg(MVT::i32, SrcReg, SrcIsKill,
+                                        AArch64::sub_32);
+    SrcReg = constrainOperandRegClass(II, SrcReg,  II.getNumDefs());
+  }
+
+  // Emit the combined compare and branch instruction.
+  MachineInstrBuilder MIB =
+      BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(Opc))
+          .addReg(SrcReg, getKillRegState(SrcIsKill));
+  if (IsBitTest)
+    MIB.addImm(TestBit);
+  MIB.addMBB(TBB);
+
+  // Obtain the branch weight and add the TrueBB to the successor list.
+  uint32_t BranchWeight = 0;
+  if (FuncInfo.BPI)
+    BranchWeight = FuncInfo.BPI->getEdgeWeight(BI->getParent(),
+                                               TBB->getBasicBlock());
+  FuncInfo.MBB->addSuccessor(TBB, BranchWeight);
+  fastEmitBranch(FBB, DbgLoc);
+
+  return true;
+}
+
 bool AArch64FastISel::selectBranch(const Instruction *I) {
   const BranchInst *BI = cast<BranchInst>(I);
   if (BI->isUnconditional()) {
@@ -1686,15 +2062,58 @@ bool AArch64FastISel::selectBranch(const Instruction *I) {
 
   AArch64CC::CondCode CC = AArch64CC::NE;
   if (const CmpInst *CI = dyn_cast<CmpInst>(BI->getCondition())) {
-    if (CI->hasOneUse() && (CI->getParent() == I->getParent())) {
-      // We may not handle every CC for now.
-      CC = getCompareCC(CI->getPredicate());
-      if (CC == AArch64CC::AL)
-        return false;
+    if (CI->hasOneUse() && isValueAvailable(CI)) {
+      // Try to optimize or fold the cmp.
+      CmpInst::Predicate Predicate = optimizeCmpPredicate(CI);
+      switch (Predicate) {
+      default:
+        break;
+      case CmpInst::FCMP_FALSE:
+        fastEmitBranch(FBB, DbgLoc);
+        return true;
+      case CmpInst::FCMP_TRUE:
+        fastEmitBranch(TBB, DbgLoc);
+        return true;
+      }
+
+      // Try to emit a combined compare-and-branch first.
+      if (emitCompareAndBranch(BI))
+        return true;
+
+      // Try to take advantage of fallthrough opportunities.
+      if (FuncInfo.MBB->isLayoutSuccessor(TBB)) {
+        std::swap(TBB, FBB);
+        Predicate = CmpInst::getInversePredicate(Predicate);
+      }
 
       // Emit the cmp.
       if (!emitCmp(CI->getOperand(0), CI->getOperand(1), CI->isUnsigned()))
         return false;
+
+      // FCMP_UEQ and FCMP_ONE cannot be checked with a single branch
+      // instruction.
+      CC = getCompareCC(Predicate);
+      AArch64CC::CondCode ExtraCC = AArch64CC::AL;
+      switch (Predicate) {
+      default:
+        break;
+      case CmpInst::FCMP_UEQ:
+        ExtraCC = AArch64CC::EQ;
+        CC = AArch64CC::VS;
+        break;
+      case CmpInst::FCMP_ONE:
+        ExtraCC = AArch64CC::MI;
+        CC = AArch64CC::GT;
+        break;
+      }
+      assert((CC != AArch64CC::AL) && "Unexpected condition code.");
+
+      // Emit the extra branch for FCMP_UEQ and FCMP_ONE.
+      if (ExtraCC != AArch64CC::AL) {
+        BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::Bcc))
+            .addImm(ExtraCC)
+            .addMBB(TBB);
+      }
 
       // Emit the branch.
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::Bcc))
@@ -1713,8 +2132,8 @@ bool AArch64FastISel::selectBranch(const Instruction *I) {
     }
   } else if (TruncInst *TI = dyn_cast<TruncInst>(BI->getCondition())) {
     MVT SrcVT;
-    if (TI->hasOneUse() && TI->getParent() == I->getParent() &&
-        (isTypeSupported(TI->getOperand(0)->getType(), SrcVT))) {
+    if (TI->hasOneUse() && isValueAvailable(TI) &&
+        isTypeSupported(TI->getOperand(0)->getType(), SrcVT)) {
       unsigned CondReg = getRegForValue(TI->getOperand(0));
       if (!CondReg)
         return false;
@@ -1749,8 +2168,7 @@ bool AArch64FastISel::selectBranch(const Instruction *I) {
       fastEmitBranch(FBB, DbgLoc);
       return true;
     }
-  } else if (const ConstantInt *CI =
-                 dyn_cast<ConstantInt>(BI->getCondition())) {
+  } else if (const auto *CI = dyn_cast<ConstantInt>(BI->getCondition())) {
     uint64_t Imm = CI->getZExtValue();
     MachineBasicBlock *Target = (Imm == 0) ? FBB : TBB;
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::B))
@@ -2522,19 +2940,53 @@ bool AArch64FastISel::foldXALUIntrinsic(AArch64CC::CondCode &CC,
   if (RetVT != MVT::i32 && RetVT != MVT::i64)
     return false;
 
+  const Value *LHS = II->getArgOperand(0);
+  const Value *RHS = II->getArgOperand(1);
+
+  // Canonicalize immediate to the RHS.
+  if (isa<ConstantInt>(LHS) && !isa<ConstantInt>(RHS) &&
+      isCommutativeIntrinsic(II))
+    std::swap(LHS, RHS);
+
+  // Simplify multiplies.
+  unsigned IID = II->getIntrinsicID();
+  switch (IID) {
+  default:
+    break;
+  case Intrinsic::smul_with_overflow:
+    if (const auto *C = dyn_cast<ConstantInt>(RHS))
+      if (C->getValue() == 2)
+        IID = Intrinsic::sadd_with_overflow;
+    break;
+  case Intrinsic::umul_with_overflow:
+    if (const auto *C = dyn_cast<ConstantInt>(RHS))
+      if (C->getValue() == 2)
+        IID = Intrinsic::uadd_with_overflow;
+    break;
+  }
+
   AArch64CC::CondCode TmpCC;
-  switch (II->getIntrinsicID()) {
-    default: return false;
-    case Intrinsic::sadd_with_overflow:
-    case Intrinsic::ssub_with_overflow: TmpCC = AArch64CC::VS; break;
-    case Intrinsic::uadd_with_overflow: TmpCC = AArch64CC::HS; break;
-    case Intrinsic::usub_with_overflow: TmpCC = AArch64CC::LO; break;
-    case Intrinsic::smul_with_overflow:
-    case Intrinsic::umul_with_overflow: TmpCC = AArch64CC::NE; break;
+  switch (IID) {
+  default:
+    return false;
+  case Intrinsic::sadd_with_overflow:
+  case Intrinsic::ssub_with_overflow:
+    TmpCC = AArch64CC::VS;
+    break;
+  case Intrinsic::uadd_with_overflow:
+    TmpCC = AArch64CC::HS;
+    break;
+  case Intrinsic::usub_with_overflow:
+    TmpCC = AArch64CC::LO;
+    break;
+  case Intrinsic::smul_with_overflow:
+  case Intrinsic::umul_with_overflow:
+    TmpCC = AArch64CC::NE;
+    break;
   }
 
   // Check if both instructions are in the same basic block.
-  if (II->getParent() != I->getParent())
+  if (!isValueAvailable(II))
     return false;
 
   // Make sure nothing is in the way
@@ -2739,9 +3191,30 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
         isCommutativeIntrinsic(II))
       std::swap(LHS, RHS);
 
+    // Simplify multiplies.
+    unsigned IID = II->getIntrinsicID();
+    switch (IID) {
+    default:
+      break;
+    case Intrinsic::smul_with_overflow:
+      if (const auto *C = dyn_cast<ConstantInt>(RHS))
+        if (C->getValue() == 2) {
+          IID = Intrinsic::sadd_with_overflow;
+          RHS = LHS;
+        }
+      break;
+    case Intrinsic::umul_with_overflow:
+      if (const auto *C = dyn_cast<ConstantInt>(RHS))
+        if (C->getValue() == 2) {
+          IID = Intrinsic::uadd_with_overflow;
+          RHS = LHS;
+        }
+      break;
+    }
+
     unsigned ResultReg1 = 0, ResultReg2 = 0, MulReg = 0;
     AArch64CC::CondCode CC = AArch64CC::Invalid;
-    switch (II->getIntrinsicID()) {
+    switch (IID) {
     default: llvm_unreachable("Unexpected intrinsic!");
     case Intrinsic::sadd_with_overflow:
       ResultReg1 = emitAdd(VT, LHS, RHS, /*SetFlags=*/true);
@@ -3104,8 +3577,9 @@ unsigned AArch64FastISel::emitLSL_ri(MVT RetVT, MVT SrcVT, unsigned Op0,
                                      bool IsZext) {
   assert(RetVT.SimpleTy >= SrcVT.SimpleTy &&
          "Unexpected source/return type pair.");
-  assert((SrcVT == MVT::i8 || SrcVT == MVT::i16 || SrcVT == MVT::i32 ||
-          SrcVT == MVT::i64) && "Unexpected source value type.");
+  assert((SrcVT == MVT::i1 || SrcVT == MVT::i8 || SrcVT == MVT::i16 ||
+          SrcVT == MVT::i32 || SrcVT == MVT::i64) &&
+         "Unexpected source value type.");
   assert((RetVT == MVT::i8 || RetVT == MVT::i16 || RetVT == MVT::i32 ||
           RetVT == MVT::i64) && "Unexpected return value type.");
 
@@ -3432,46 +3906,60 @@ unsigned AArch64FastISel::emitIntExt(MVT SrcVT, unsigned SrcReg, MVT DestVT,
 }
 
 bool AArch64FastISel::selectIntExt(const Instruction *I) {
-  // On ARM, in general, integer casts don't involve legal types; this code
-  // handles promotable integers.  The high bits for a type smaller than
-  // the register size are assumed to be undefined.
-  Type *DestTy = I->getType();
-  Value *Src = I->getOperand(0);
-  Type *SrcTy = Src->getType();
+  assert((isa<ZExtInst>(I) || isa<SExtInst>(I)) &&
+         "Unexpected integer extend instruction.");
+  MVT RetVT;
+  MVT SrcVT;
+  if (!isTypeSupported(I->getType(), RetVT))
+    return false;
 
-  unsigned SrcReg = getRegForValue(Src);
+  if (!isTypeSupported(I->getOperand(0)->getType(), SrcVT))
+    return false;
+
+  if (isIntExtFree(I)) {
+    unsigned SrcReg = getRegForValue(I->getOperand(0));
+    if (!SrcReg)
+      return false;
+    bool SrcIsKill = hasTrivialKill(I->getOperand(0));
+
+    const TargetRegisterClass *RC = (RetVT == MVT::i64) ?
+        &AArch64::GPR64RegClass : &AArch64::GPR32RegClass;
+    unsigned ResultReg = createResultReg(RC);
+    if (RetVT == MVT::i64 && SrcVT != MVT::i64) {
+      BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+              TII.get(AArch64::SUBREG_TO_REG), ResultReg)
+          .addImm(0)
+          .addReg(SrcReg, getKillRegState(SrcIsKill))
+          .addImm(AArch64::sub_32);
+    } else {
+      BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+              TII.get(TargetOpcode::COPY), ResultReg)
+          .addReg(SrcReg, getKillRegState(SrcIsKill));
+    }
+    updateValueMap(I, ResultReg);
+    return true;
+  }
+
+  unsigned SrcReg = getRegForValue(I->getOperand(0));
   if (!SrcReg)
     return false;
+  bool SrcRegIsKill = hasTrivialKill(I->getOperand(0));
 
-  EVT SrcEVT = TLI.getValueType(SrcTy, true);
-  EVT DestEVT = TLI.getValueType(DestTy, true);
-  if (!SrcEVT.isSimple())
-    return false;
-  if (!DestEVT.isSimple())
-    return false;
-
-  MVT SrcVT = SrcEVT.getSimpleVT();
-  MVT DestVT = DestEVT.getSimpleVT();
   unsigned ResultReg = 0;
-
-  bool IsZExt = isa<ZExtInst>(I);
-  // Check if it is an argument and if it is already zero/sign-extended.
-  if (const auto *Arg = dyn_cast<Argument>(Src)) {
-    if ((IsZExt && Arg->hasZExtAttr()) || (!IsZExt && Arg->hasSExtAttr())) {
-      if (DestVT == MVT::i64) {
-        ResultReg = createResultReg(TLI.getRegClassFor(DestVT));
-        BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-                TII.get(AArch64::SUBREG_TO_REG), ResultReg)
+  if (isIntExtFree(I)) {
+    if (RetVT == MVT::i64) {
+      ResultReg = createResultReg(&AArch64::GPR64RegClass);
+      BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+              TII.get(AArch64::SUBREG_TO_REG), ResultReg)
           .addImm(0)
-          .addReg(SrcReg)
+          .addReg(SrcReg, getKillRegState(SrcRegIsKill))
           .addImm(AArch64::sub_32);
-      } else
-        ResultReg = SrcReg;
-    }
+    } else
+      ResultReg = SrcReg;
   }
 
   if (!ResultReg)
-    ResultReg = emitIntExt(SrcVT, SrcReg, DestVT, IsZExt);
+    ResultReg = emitIntExt(SrcVT, SrcReg, RetVT, isa<ZExtInst>(I));
 
   if (!ResultReg)
     return false;
@@ -3527,15 +4015,58 @@ bool AArch64FastISel::selectRem(const Instruction *I, unsigned ISDOpcode) {
 }
 
 bool AArch64FastISel::selectMul(const Instruction *I) {
-  EVT SrcEVT = TLI.getValueType(I->getOperand(0)->getType(), true);
-  if (!SrcEVT.isSimple())
+  MVT VT;
+  if (!isTypeSupported(I->getType(), VT, /*IsVectorAllowed=*/true))
     return false;
-  MVT SrcVT = SrcEVT.getSimpleVT();
 
-  // Must be simple value type.  Don't handle vectors.
-  if (SrcVT != MVT::i64 && SrcVT != MVT::i32 && SrcVT != MVT::i16 &&
-      SrcVT != MVT::i8)
-    return false;
+  if (VT.isVector())
+    return selectBinaryOp(I, ISD::MUL);
+
+  const Value *Src0 = I->getOperand(0);
+  const Value *Src1 = I->getOperand(1);
+  if (const auto *C = dyn_cast<ConstantInt>(Src0))
+    if (C->getValue().isPowerOf2())
+      std::swap(Src0, Src1);
+
+  // Try to simplify to a shift instruction.
+  if (const auto *C = dyn_cast<ConstantInt>(Src1))
+    if (C->getValue().isPowerOf2()) {
+      uint64_t ShiftVal = C->getValue().logBase2();
+      MVT SrcVT = VT;
+      bool IsZExt = true;
+      if (const auto *ZExt = dyn_cast<ZExtInst>(Src0)) {
+        if (!isIntExtFree(ZExt)) {
+          MVT VT;
+          if (isValueAvailable(ZExt) && isTypeSupported(ZExt->getSrcTy(), VT)) {
+            SrcVT = VT;
+            IsZExt = true;
+            Src0 = ZExt->getOperand(0);
+          }
+        }
+      } else if (const auto *SExt = dyn_cast<SExtInst>(Src0)) {
+        if (!isIntExtFree(SExt)) {
+          MVT VT;
+          if (isValueAvailable(SExt) && isTypeSupported(SExt->getSrcTy(), VT)) {
+            SrcVT = VT;
+            IsZExt = false;
+            Src0 = SExt->getOperand(0);
+          }
+        }
+      }
+
+      unsigned Src0Reg = getRegForValue(Src0);
+      if (!Src0Reg)
+        return false;
+      bool Src0IsKill = hasTrivialKill(Src0);
+
+      unsigned ResultReg =
+          emitLSL_ri(VT, SrcVT, Src0Reg, Src0IsKill, ShiftVal, IsZExt);
+
+      if (ResultReg) {
+        updateValueMap(I, ResultReg);
+        return true;
+      }
+    }
 
   unsigned Src0Reg = getRegForValue(I->getOperand(0));
   if (!Src0Reg)
@@ -3547,8 +4078,7 @@ bool AArch64FastISel::selectMul(const Instruction *I) {
     return false;
   bool Src1IsKill = hasTrivialKill(I->getOperand(1));
 
-  unsigned ResultReg =
-      emitMul_rr(SrcVT, Src0Reg, Src0IsKill, Src1Reg, Src1IsKill);
+  unsigned ResultReg = emitMul_rr(VT, Src0Reg, Src0IsKill, Src1Reg, Src1IsKill);
 
   if (!ResultReg)
     return false;
@@ -3572,18 +4102,22 @@ bool AArch64FastISel::selectShift(const Instruction *I) {
     bool IsZExt = (I->getOpcode() == Instruction::AShr) ? false : true;
     const Value *Op0 = I->getOperand(0);
     if (const auto *ZExt = dyn_cast<ZExtInst>(Op0)) {
-      MVT TmpVT;
-      if (isValueAvailable(ZExt) && isTypeSupported(ZExt->getSrcTy(), TmpVT)) {
-        SrcVT = TmpVT;
-        IsZExt = true;
-        Op0 = ZExt->getOperand(0);
+      if (!isIntExtFree(ZExt)) {
+        MVT TmpVT;
+        if (isValueAvailable(ZExt) && isTypeSupported(ZExt->getSrcTy(), TmpVT)) {
+          SrcVT = TmpVT;
+          IsZExt = true;
+          Op0 = ZExt->getOperand(0);
+        }
       }
     } else if (const auto *SExt = dyn_cast<SExtInst>(Op0)) {
-      MVT TmpVT;
-      if (isValueAvailable(SExt) && isTypeSupported(SExt->getSrcTy(), TmpVT)) {
-        SrcVT = TmpVT;
-        IsZExt = false;
-        Op0 = SExt->getOperand(0);
+      if (!isIntExtFree(SExt)) {
+        MVT TmpVT;
+        if (isValueAvailable(SExt) && isTypeSupported(SExt->getSrcTy(), TmpVT)) {
+          SrcVT = TmpVT;
+          IsZExt = false;
+          Op0 = SExt->getOperand(0);
+        }
       }
     }
 
@@ -3720,6 +4254,75 @@ bool AArch64FastISel::selectFRem(const Instruction *I) {
   return true;
 }
 
+bool AArch64FastISel::selectSDiv(const Instruction *I) {
+  MVT VT;
+  if (!isTypeLegal(I->getType(), VT))
+    return false;
+
+  if (!isa<ConstantInt>(I->getOperand(1)))
+    return selectBinaryOp(I, ISD::SDIV);
+
+  const APInt &C = cast<ConstantInt>(I->getOperand(1))->getValue();
+  if ((VT != MVT::i32 && VT != MVT::i64) || !C ||
+      !(C.isPowerOf2() || (-C).isPowerOf2()))
+    return selectBinaryOp(I, ISD::SDIV);
+
+  unsigned Lg2 = C.countTrailingZeros();
+  unsigned Src0Reg = getRegForValue(I->getOperand(0));
+  if (!Src0Reg)
+    return false;
+  bool Src0IsKill = hasTrivialKill(I->getOperand(0));
+
+  if (cast<BinaryOperator>(I)->isExact()) {
+    unsigned ResultReg = emitASR_ri(VT, VT, Src0Reg, Src0IsKill, Lg2);
+    if (!ResultReg)
+      return false;
+    updateValueMap(I, ResultReg);
+    return true;
+  }
+
+  unsigned Pow2MinusOne = (1 << Lg2) - 1;
+  unsigned AddReg = emitAddSub_ri(/*UseAdd=*/true, VT, Src0Reg,
+                                  /*IsKill=*/false, Pow2MinusOne);
+  if (!AddReg)
+    return false;
+
+  // (Src0 < 0) ? Pow2 - 1 : 0;
+  if (!emitICmp_ri(VT, Src0Reg, /*IsKill=*/false, 0))
+    return false;
+
+  unsigned SelectOpc;
+  const TargetRegisterClass *RC;
+  if (VT == MVT::i64) {
+    SelectOpc = AArch64::CSELXr;
+    RC = &AArch64::GPR64RegClass;
+  } else {
+    SelectOpc = AArch64::CSELWr;
+    RC = &AArch64::GPR32RegClass;
+  }
+  unsigned SelectReg =
+      fastEmitInst_rri(SelectOpc, RC, AddReg, /*IsKill=*/true, Src0Reg,
+                       Src0IsKill, AArch64CC::LT);
+  if (!SelectReg)
+    return false;
+
+  // Divide by Pow2 --> ashr. If we're dividing by a negative value we must also
+  // negate the result.
+  unsigned ZeroReg = (VT == MVT::i64) ? AArch64::XZR : AArch64::WZR;
+  unsigned ResultReg;
+  if (C.isNegative())
+    ResultReg = emitAddSub_rs(/*UseAdd=*/false, VT, ZeroReg, /*IsKill=*/true,
+                              SelectReg, /*IsKill=*/true, AArch64_AM::ASR, Lg2);
+  else
+    ResultReg = emitASR_ri(VT, VT, SelectReg, /*IsKill=*/true, Lg2);
+
+  if (!ResultReg)
+    return false;
+
+  updateValueMap(I, ResultReg);
+  return true;
+}
+
 bool AArch64FastISel::fastSelectInstruction(const Instruction *I) {
   switch (I->getOpcode()) {
   default:
@@ -3728,9 +4331,9 @@ bool AArch64FastISel::fastSelectInstruction(const Instruction *I) {
   case Instruction::Sub:
     return selectAddSub(I);
   case Instruction::Mul:
-    if (!selectBinaryOp(I, ISD::MUL))
-      return selectMul(I);
-    return true;
+    return selectMul(I);
+  case Instruction::SDiv:
+    return selectSDiv(I);
   case Instruction::SRem:
     if (!selectBinaryOp(I, ISD::SREM))
       return selectRem(I, ISD::SREM);
@@ -3762,13 +4365,8 @@ bool AArch64FastISel::fastSelectInstruction(const Instruction *I) {
   case Instruction::FPToUI:
     return selectFPToInt(I, /*Signed=*/false);
   case Instruction::ZExt:
-    if (!selectCast(I, ISD::ZERO_EXTEND))
-      return selectIntExt(I);
-    return true;
   case Instruction::SExt:
-    if (!selectCast(I, ISD::SIGN_EXTEND))
-      return selectIntExt(I);
-    return true;
+    return selectIntExt(I);
   case Instruction::Trunc:
     if (!selectCast(I, ISD::TRUNCATE))
       return selectTrunc(I);

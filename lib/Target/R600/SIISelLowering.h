@@ -47,10 +47,8 @@ class SITargetLowering : public AMDGPUTargetLowering {
                                                 const SDValue &Op) const;
   bool fitsRegClass(SelectionDAG &DAG, const SDValue &Op,
                     unsigned RegClass) const;
-  void ensureSRegLimit(SelectionDAG &DAG, SDValue &Operand,
-                       unsigned RegClass, bool &ScalarSlotUsed) const;
 
-  SDNode *foldOperands(MachineSDNode *N, SelectionDAG &DAG) const;
+  SDNode *legalizeOperands(MachineSDNode *N, SelectionDAG &DAG) const;
   void adjustWritemask(MachineSDNode *&N, SelectionDAG &DAG) const;
   MachineSDNode *AdjustRegClass(MachineSDNode *N, SelectionDAG &DAG) const;
 

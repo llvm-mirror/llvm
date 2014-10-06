@@ -1482,6 +1482,10 @@ void DwarfUnit::applySubprogramAttributes(DISubprogram SP, DIE &SPDie) {
   if (!SP.getName().empty())
     addString(SPDie, dwarf::DW_AT_name, SP.getName());
 
+  // Skip the rest of the attributes under -gmlt to save space.
+  if(getCUNode().getEmissionKind() == DIBuilder::LineTablesOnly)
+    return;
+
   addSourceLine(SPDie, SP);
 
   // Add the prototype if we have a prototype and we have a C like
@@ -1592,11 +1596,11 @@ static const ConstantExpr *getMergedGlobalExpr(const Value *V) {
   return CE;
 }
 
-/// createGlobalVariableDIE - create global variable DIE.
-void DwarfCompileUnit::createGlobalVariableDIE(DIGlobalVariable GV) {
+/// getOrCreateGlobalVariableDIE - get or create global variable DIE.
+DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(DIGlobalVariable GV) {
   // Check for pre-existence.
-  if (getDIE(GV))
-    return;
+  if (DIE *Die = getDIE(GV))
+    return Die;
 
   assert(GV.isGlobalVariable());
 
@@ -1670,6 +1674,9 @@ void DwarfCompileUnit::createGlobalVariableDIE(DIGlobalVariable GV) {
       DD->addArangeLabel(SymbolCU(this, Sym));
       addOpAddress(*Loc, Sym);
     }
+    // A static member's declaration is already flagged as such.
+    if (!SDMDecl.Verify() && !GV.isDefinition())
+      addFlag(*VariableDIE, dwarf::DW_AT_declaration);
     // Do not create specification DIE if context is either compile unit
     // or a subprogram.
     if (GVContext && GV.isDefinition() && !GVContext.isCompileUnit() &&
@@ -1718,18 +1725,19 @@ void DwarfCompileUnit::createGlobalVariableDIE(DIGlobalVariable GV) {
     addBlock(*VariableDIE, dwarf::DW_AT_location, Loc);
   }
 
+  DIE *ResultDIE = VariableSpecDIE ? VariableSpecDIE : VariableDIE;
+
   if (addToAccelTable) {
-    DIE &AddrDIE = VariableSpecDIE ? *VariableSpecDIE : *VariableDIE;
-    DD->addAccelName(GV.getName(), AddrDIE);
+    DD->addAccelName(GV.getName(), *ResultDIE);
 
     // If the linkage name is different than the name, go ahead and output
     // that as well into the name table.
     if (GV.getLinkageName() != "" && GV.getName() != GV.getLinkageName())
-      DD->addAccelName(GV.getLinkageName(), AddrDIE);
+      DD->addAccelName(GV.getLinkageName(), *ResultDIE);
   }
 
-  addGlobalName(GV.getName(), VariableSpecDIE ? *VariableSpecDIE : *VariableDIE,
-                GV.getContext());
+  addGlobalName(GV.getName(), *ResultDIE, GV.getContext());
+  return ResultDIE;
 }
 
 /// constructSubrangeDIE - Construct subrange DIE from DISubrange.
@@ -2041,23 +2049,20 @@ void DwarfUnit::emitHeader(const MCSymbol *ASectionSym) const {
 }
 
 void DwarfCompileUnit::addRange(RangeSpan Range) {
-  // Only add a range for this unit if we're emitting full debug.
-  if (getCUNode().getEmissionKind() == DIBuilder::FullDebug) {
-    bool SameAsPrevCU = this == DD->getPrevCU();
-    DD->setPrevCU(this);
-    // If we have no current ranges just add the range and return, otherwise,
-    // check the current section and CU against the previous section and CU we
-    // emitted into and the subprogram was contained within. If these are the
-    // same then extend our current range, otherwise add this as a new range.
-    if (CURanges.empty() || !SameAsPrevCU ||
-        (&CURanges.back().getEnd()->getSection() !=
-         &Range.getEnd()->getSection())) {
-      CURanges.push_back(Range);
-      return;
-    }
-
-    CURanges.back().setEnd(Range.getEnd());
+  bool SameAsPrevCU = this == DD->getPrevCU();
+  DD->setPrevCU(this);
+  // If we have no current ranges just add the range and return, otherwise,
+  // check the current section and CU against the previous section and CU we
+  // emitted into and the subprogram was contained within. If these are the
+  // same then extend our current range, otherwise add this as a new range.
+  if (CURanges.empty() || !SameAsPrevCU ||
+      (&CURanges.back().getEnd()->getSection() !=
+       &Range.getEnd()->getSection())) {
+    CURanges.push_back(Range);
+    return;
   }
+
+  CURanges.back().setEnd(Range.getEnd());
 }
 
 void DwarfCompileUnit::initStmtList(MCSymbol *DwarfLineSectionSym) {

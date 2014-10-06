@@ -214,10 +214,10 @@ namespace llvm {
   class MipsTargetLowering : public TargetLowering  {
     bool isMicroMips;
   public:
-    explicit MipsTargetLowering(MipsTargetMachine &TM,
+    explicit MipsTargetLowering(const MipsTargetMachine &TM,
                                 const MipsSubtarget &STI);
 
-    static const MipsTargetLowering *create(MipsTargetMachine &TM,
+    static const MipsTargetLowering *create(const MipsTargetMachine &TM,
                                             const MipsSubtarget &STI);
 
     /// createFastISel - This method returns a target specific FastISel object,
@@ -367,13 +367,6 @@ namespace llvm {
                                   bool IsSoftFloat,
                                   Function::const_arg_iterator FuncArg);
 
-      void analyzeCallResult(const SmallVectorImpl<ISD::InputArg> &Ins,
-                             bool IsSoftFloat, const SDNode *CallNode,
-                             const Type *RetTy) const;
-
-      void analyzeReturn(const SmallVectorImpl<ISD::OutputArg> &Outs,
-                         bool IsSoftFloat, const Type *RetTy) const;
-
       const CCState &getCCInfo() const { return CCInfo; }
 
       /// hasByValArg - Returns true if function has byval arguments.
@@ -456,13 +449,13 @@ namespace llvm {
                           unsigned Flag) const;
 
     MipsCC::SpecialCallingConvType getSpecialCallingConv(SDValue Callee) const;
+
     // Lower Operand helpers
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
-                            const SmallVectorImpl<ISD::InputArg> &Ins,
-                            SDLoc dl, SelectionDAG &DAG,
-                            SmallVectorImpl<SDValue> &InVals,
-                            const SDNode *CallNode, const Type *RetTy) const;
+                            const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc dl,
+                            SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals,
+                            TargetLowering::CallLoweringInfo &CLI) const;
 
     // Lower Operand specifics
     SDValue lowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
@@ -609,9 +602,11 @@ namespace llvm {
 
   /// Create MipsTargetLowering objects.
   const MipsTargetLowering *
-  createMips16TargetLowering(MipsTargetMachine &TM, const MipsSubtarget &STI);
+  createMips16TargetLowering(const MipsTargetMachine &TM,
+                             const MipsSubtarget &STI);
   const MipsTargetLowering *
-  createMipsSETargetLowering(MipsTargetMachine &TM, const MipsSubtarget &STI);
+  createMipsSETargetLowering(const MipsTargetMachine &TM,
+                             const MipsSubtarget &STI);
 
   namespace Mips {
     FastISel *createFastISel(FunctionLoweringInfo &funcInfo,

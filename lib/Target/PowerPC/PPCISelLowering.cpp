@@ -826,6 +826,11 @@ EVT PPCTargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
   return VT.changeVectorElementTypeToInteger();
 }
 
+bool PPCTargetLowering::enableAggressiveFMAFusion(EVT VT) const {
+  assert(VT.isFloatingPoint() && "Non-floating-point FMA?");
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // Node matching predicates, for use by the tblgen matching code.
 //===----------------------------------------------------------------------===//
@@ -6533,6 +6538,38 @@ void PPCTargetLowering::ReplaceNodeResults(SDNode *N,
 //  Other Lowering Code
 //===----------------------------------------------------------------------===//
 
+static Instruction* callIntrinsic(IRBuilder<> &Builder, Intrinsic::ID Id) {
+  Module *M = Builder.GetInsertBlock()->getParent()->getParent();
+  Function *Func = Intrinsic::getDeclaration(M, Id);
+  return Builder.CreateCall(Func);
+}
+
+// The mappings for emitLeading/TrailingFence is taken from
+// http://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html
+Instruction* PPCTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
+                                         AtomicOrdering Ord, bool IsStore,
+                                         bool IsLoad) const {
+  if (Ord == SequentiallyConsistent)
+    return callIntrinsic(Builder, Intrinsic::ppc_sync);
+  else if (isAtLeastRelease(Ord))
+    return callIntrinsic(Builder, Intrinsic::ppc_lwsync);
+  else
+    return nullptr;
+}
+
+Instruction* PPCTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
+                                          AtomicOrdering Ord, bool IsStore,
+                                          bool IsLoad) const {
+  if (IsLoad && isAtLeastAcquire(Ord))
+    return callIntrinsic(Builder, Intrinsic::ppc_lwsync);
+  // FIXME: this is too conservative, a dependent branch + isync is enough.
+  // See http://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html and
+  // http://www.rdrop.com/users/paulmck/scalability/paper/N2745r.2011.03.04a.html
+  // and http://www.cl.cam.ac.uk/~pes20/cppppc/ for justification.
+  else
+    return nullptr;
+}
+
 MachineBasicBlock *
 PPCTargetLowering::EmitAtomicBinary(MachineInstr *MI, MachineBasicBlock *BB,
                                     bool is64bit, unsigned BinOpcode) const {
@@ -7421,138 +7458,43 @@ PPCTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 // Target Optimization Hooks
 //===----------------------------------------------------------------------===//
 
-SDValue PPCTargetLowering::DAGCombineFastRecip(SDValue Op,
-                                               DAGCombinerInfo &DCI) const {
-  if (DCI.isAfterLegalizeVectorOps())
-    return SDValue();
-
-  EVT VT = Op.getValueType();
-
-  if ((VT == MVT::f32 && Subtarget.hasFRES()) ||
-      (VT == MVT::f64 && Subtarget.hasFRE())  ||
-      (VT == MVT::v4f32 && Subtarget.hasAltivec()) ||
-      (VT == MVT::v2f64 && Subtarget.hasVSX())) {
-
-    // Newton iteration for a function: F(X) is X_{i+1} = X_i - F(X_i)/F'(X_i)
-    // For the reciprocal, we need to find the zero of the function:
-    //   F(X) = A X - 1 [which has a zero at X = 1/A]
-    //     =>
-    //   X_{i+1} = X_i (2 - A X_i) = X_i + X_i (1 - A X_i) [this second form
-    //     does not require additional intermediate precision]
-
-    // Convergence is quadratic, so we essentially double the number of digits
-    // correct after every iteration. The minimum architected relative
-    // accuracy is 2^-5. When hasRecipPrec(), this is 2^-14. IEEE float has
-    // 23 digits and double has 52 digits.
-    int Iterations = Subtarget.hasRecipPrec() ? 1 : 3;
-    if (VT.getScalarType() == MVT::f64)
-      ++Iterations;
-
-    SelectionDAG &DAG = DCI.DAG;
-    SDLoc dl(Op);
-
-    SDValue FPOne =
-      DAG.getConstantFP(1.0, VT.getScalarType());
-    if (VT.isVector()) {
-      assert(VT.getVectorNumElements() == 4 &&
-             "Unknown vector type");
-      FPOne = DAG.getNode(ISD::BUILD_VECTOR, dl, VT,
-                          FPOne, FPOne, FPOne, FPOne);
-    }
-
-    SDValue Est = DAG.getNode(PPCISD::FRE, dl, VT, Op);
-    DCI.AddToWorklist(Est.getNode());
-
-    // Newton iterations: Est = Est + Est (1 - Arg * Est)
-    for (int i = 0; i < Iterations; ++i) {
-      SDValue NewEst = DAG.getNode(ISD::FMUL, dl, VT, Op, Est);
-      DCI.AddToWorklist(NewEst.getNode());
-
-      NewEst = DAG.getNode(ISD::FSUB, dl, VT, FPOne, NewEst);
-      DCI.AddToWorklist(NewEst.getNode());
-
-      NewEst = DAG.getNode(ISD::FMUL, dl, VT, Est, NewEst);
-      DCI.AddToWorklist(NewEst.getNode());
-
-      Est = DAG.getNode(ISD::FADD, dl, VT, Est, NewEst);
-      DCI.AddToWorklist(Est.getNode());
-    }
-
-    return Est;
-  }
-
-  return SDValue();
-}
-
-SDValue PPCTargetLowering::DAGCombineFastRecipFSQRT(SDValue Op,
-                                             DAGCombinerInfo &DCI) const {
-  if (DCI.isAfterLegalizeVectorOps())
-    return SDValue();
-
-  EVT VT = Op.getValueType();
-
+SDValue PPCTargetLowering::getRsqrtEstimate(SDValue Operand,
+                                            DAGCombinerInfo &DCI,
+                                            unsigned &RefinementSteps) const {
+  EVT VT = Operand.getValueType();
   if ((VT == MVT::f32 && Subtarget.hasFRSQRTES()) ||
       (VT == MVT::f64 && Subtarget.hasFRSQRTE())  ||
       (VT == MVT::v4f32 && Subtarget.hasAltivec()) ||
       (VT == MVT::v2f64 && Subtarget.hasVSX())) {
-
-    // Newton iteration for a function: F(X) is X_{i+1} = X_i - F(X_i)/F'(X_i)
-    // For the reciprocal sqrt, we need to find the zero of the function:
-    //   F(X) = 1/X^2 - A [which has a zero at X = 1/sqrt(A)]
-    //     =>
-    //   X_{i+1} = X_i (1.5 - A X_i^2 / 2)
-    // As a result, we precompute A/2 prior to the iteration loop.
-
     // Convergence is quadratic, so we essentially double the number of digits
-    // correct after every iteration. The minimum architected relative
-    // accuracy is 2^-5. When hasRecipPrec(), this is 2^-14. IEEE float has
-    // 23 digits and double has 52 digits.
-    int Iterations = Subtarget.hasRecipPrec() ? 1 : 3;
+    // correct after every iteration. For both FRE and FRSQRTE, the minimum
+    // architected relative accuracy is 2^-5. When hasRecipPrec(), this is
+    // 2^-14. IEEE float has 23 digits and double has 52 digits.
+    RefinementSteps = Subtarget.hasRecipPrec() ? 1 : 3;
     if (VT.getScalarType() == MVT::f64)
-      ++Iterations;
-
-    SelectionDAG &DAG = DCI.DAG;
-    SDLoc dl(Op);
-
-    SDValue FPThreeHalves =
-      DAG.getConstantFP(1.5, VT.getScalarType());
-    if (VT.isVector()) {
-      assert(VT.getVectorNumElements() == 4 &&
-             "Unknown vector type");
-      FPThreeHalves = DAG.getNode(ISD::BUILD_VECTOR, dl, VT,
-                                  FPThreeHalves, FPThreeHalves,
-                                  FPThreeHalves, FPThreeHalves);
-    }
-
-    SDValue Est = DAG.getNode(PPCISD::FRSQRTE, dl, VT, Op);
-    DCI.AddToWorklist(Est.getNode());
-
-    // We now need 0.5*Arg which we can write as (1.5*Arg - Arg) so that
-    // this entire sequence requires only one FP constant.
-    SDValue HalfArg = DAG.getNode(ISD::FMUL, dl, VT, FPThreeHalves, Op);
-    DCI.AddToWorklist(HalfArg.getNode());
-
-    HalfArg = DAG.getNode(ISD::FSUB, dl, VT, HalfArg, Op);
-    DCI.AddToWorklist(HalfArg.getNode());
-
-    // Newton iterations: Est = Est * (1.5 - HalfArg * Est * Est)
-    for (int i = 0; i < Iterations; ++i) {
-      SDValue NewEst = DAG.getNode(ISD::FMUL, dl, VT, Est, Est);
-      DCI.AddToWorklist(NewEst.getNode());
-
-      NewEst = DAG.getNode(ISD::FMUL, dl, VT, HalfArg, NewEst);
-      DCI.AddToWorklist(NewEst.getNode());
-
-      NewEst = DAG.getNode(ISD::FSUB, dl, VT, FPThreeHalves, NewEst);
-      DCI.AddToWorklist(NewEst.getNode());
-
-      Est = DAG.getNode(ISD::FMUL, dl, VT, Est, NewEst);
-      DCI.AddToWorklist(Est.getNode());
-    }
-
-    return Est;
+      ++RefinementSteps;
+    return DCI.DAG.getNode(PPCISD::FRSQRTE, SDLoc(Operand), VT, Operand);
   }
+  return SDValue();
+}
 
+SDValue PPCTargetLowering::getRecipEstimate(SDValue Operand,
+                                            DAGCombinerInfo &DCI,
+                                            unsigned &RefinementSteps) const {
+  EVT VT = Operand.getValueType();
+  if ((VT == MVT::f32 && Subtarget.hasFRES()) ||
+      (VT == MVT::f64 && Subtarget.hasFRE())  ||
+      (VT == MVT::v4f32 && Subtarget.hasAltivec()) ||
+      (VT == MVT::v2f64 && Subtarget.hasVSX())) {
+    // Convergence is quadratic, so we essentially double the number of digits
+    // correct after every iteration. For both FRE and FRSQRTE, the minimum
+    // architected relative accuracy is 2^-5. When hasRecipPrec(), this is
+    // 2^-14. IEEE float has 23 digits and double has 52 digits.
+    RefinementSteps = Subtarget.hasRecipPrec() ? 1 : 3;
+    if (VT.getScalarType() == MVT::f64)
+      ++RefinementSteps;
+    return DCI.DAG.getNode(PPCISD::FRE, SDLoc(Operand), VT, Operand);
+  }
   return SDValue();
 }
 
@@ -8280,92 +8222,6 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::SETCC:
   case ISD::SELECT_CC:
     return DAGCombineTruncBoolExt(N, DCI);
-  case ISD::FDIV: {
-    assert(TM.Options.UnsafeFPMath &&
-           "Reciprocal estimates require UnsafeFPMath");
-
-    if (N->getOperand(1).getOpcode() == ISD::FSQRT) {
-      SDValue RV =
-        DAGCombineFastRecipFSQRT(N->getOperand(1).getOperand(0), DCI);
-      if (RV.getNode()) {
-        DCI.AddToWorklist(RV.getNode());
-        return DAG.getNode(ISD::FMUL, dl, N->getValueType(0),
-                           N->getOperand(0), RV);
-      }
-    } else if (N->getOperand(1).getOpcode() == ISD::FP_EXTEND &&
-               N->getOperand(1).getOperand(0).getOpcode() == ISD::FSQRT) {
-      SDValue RV =
-        DAGCombineFastRecipFSQRT(N->getOperand(1).getOperand(0).getOperand(0),
-                                 DCI);
-      if (RV.getNode()) {
-        DCI.AddToWorklist(RV.getNode());
-        RV = DAG.getNode(ISD::FP_EXTEND, SDLoc(N->getOperand(1)),
-                         N->getValueType(0), RV);
-        DCI.AddToWorklist(RV.getNode());
-        return DAG.getNode(ISD::FMUL, dl, N->getValueType(0),
-                           N->getOperand(0), RV);
-      }
-    } else if (N->getOperand(1).getOpcode() == ISD::FP_ROUND &&
-               N->getOperand(1).getOperand(0).getOpcode() == ISD::FSQRT) {
-      SDValue RV =
-        DAGCombineFastRecipFSQRT(N->getOperand(1).getOperand(0).getOperand(0),
-                                 DCI);
-      if (RV.getNode()) {
-        DCI.AddToWorklist(RV.getNode());
-        RV = DAG.getNode(ISD::FP_ROUND, SDLoc(N->getOperand(1)),
-                         N->getValueType(0), RV,
-                         N->getOperand(1).getOperand(1));
-        DCI.AddToWorklist(RV.getNode());
-        return DAG.getNode(ISD::FMUL, dl, N->getValueType(0),
-                           N->getOperand(0), RV);
-      }
-    }
-
-    SDValue RV = DAGCombineFastRecip(N->getOperand(1), DCI);
-    if (RV.getNode()) {
-      DCI.AddToWorklist(RV.getNode());
-      return DAG.getNode(ISD::FMUL, dl, N->getValueType(0),
-                         N->getOperand(0), RV);
-    }
-
-    }
-    break;
-  case ISD::FSQRT: {
-    assert(TM.Options.UnsafeFPMath &&
-           "Reciprocal estimates require UnsafeFPMath");
-
-    // Compute this as 1/(1/sqrt(X)), which is the reciprocal of the
-    // reciprocal sqrt.
-    SDValue RV = DAGCombineFastRecipFSQRT(N->getOperand(0), DCI);
-    if (RV.getNode()) {
-      DCI.AddToWorklist(RV.getNode());
-      RV = DAGCombineFastRecip(RV, DCI);
-      if (RV.getNode()) {
-        // Unfortunately, RV is now NaN if the input was exactly 0. Select out
-        // this case and force the answer to 0.
-
-        EVT VT = RV.getValueType();
-
-        SDValue Zero = DAG.getConstantFP(0.0, VT.getScalarType());
-        if (VT.isVector()) {
-          assert(VT.getVectorNumElements() == 4 && "Unknown vector type");
-          Zero = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Zero, Zero, Zero, Zero);
-        }
-
-        SDValue ZeroCmp =
-          DAG.getSetCC(dl, getSetCCResultType(*DAG.getContext(), VT),
-                       N->getOperand(0), Zero, ISD::SETEQ);
-        DCI.AddToWorklist(ZeroCmp.getNode());
-        DCI.AddToWorklist(RV.getNode());
-
-        RV = DAG.getNode(VT.isVector() ? ISD::VSELECT : ISD::SELECT, dl, VT,
-                         ZeroCmp, Zero, RV);
-        return RV;
-      }
-    }
-
-    }
-    break;
   case ISD::SINT_TO_FP:
     if (TM.getSubtarget<PPCSubtarget>().has64BitSupport()) {
       if (N->getOperand(0).getOpcode() == ISD::FP_TO_SINT) {

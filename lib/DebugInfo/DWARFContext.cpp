@@ -86,15 +86,17 @@ void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType) {
 
   if ((DumpType == DIDT_All || DumpType == DIDT_Types) && getNumTypeUnits()) {
     OS << "\n.debug_types contents:\n";
-    for (const auto &TU : type_units())
-      TU->dump(OS);
+    for (const auto &TUS : type_unit_sections())
+      for (const auto &TU : TUS)
+        TU->dump(OS);
   }
 
   if ((DumpType == DIDT_All || DumpType == DIDT_TypesDwo) &&
       getNumDWOTypeUnits()) {
     OS << "\n.debug_types.dwo contents:\n";
-    for (const auto &DWOTU : dwo_type_units())
-      DWOTU->dump(OS);
+    for (const auto &DWOTUS : dwo_type_unit_sections())
+      for (const auto &DWOTU : DWOTUS)
+        DWOTU->dump(OS);
   }
 
   if (DumpType == DIDT_All || DumpType == DIDT_Loc) {
@@ -337,15 +339,17 @@ void DWARFContext::parseTypeUnits() {
     uint32_t offset = 0;
     const DataExtractor &DIData =
         DataExtractor(I.second.Data, isLittleEndian(), 0);
+    TUs.push_back(DWARFUnitSection<DWARFTypeUnit>());
+    auto &TUS = TUs.back();
     while (DIData.isValidOffset(offset)) {
       std::unique_ptr<DWARFTypeUnit> TU(new DWARFTypeUnit(*this,
            getDebugAbbrev(), I.second.Data, getRangeSection(),
            getStringSection(), StringRef(), getAddrSection(),
-           &I.second.Relocs, isLittleEndian(), TUs));
+           &I.second.Relocs, isLittleEndian(), TUS));
       if (!TU->extract(DIData, &offset))
         break;
-      TUs.push_back(std::move(TU));
-      offset = TUs.back()->getNextUnitOffset();
+      TUS.push_back(std::move(TU));
+      offset = TUS.back()->getNextUnitOffset();
     }
   }
 }
@@ -376,15 +380,17 @@ void DWARFContext::parseDWOTypeUnits() {
     uint32_t offset = 0;
     const DataExtractor &DIData =
         DataExtractor(I.second.Data, isLittleEndian(), 0);
+    DWOTUs.push_back(DWARFUnitSection<DWARFTypeUnit>());
+    auto &TUS = DWOTUs.back();
     while (DIData.isValidOffset(offset)) {
       std::unique_ptr<DWARFTypeUnit> TU(new DWARFTypeUnit(*this,
           getDebugAbbrevDWO(), I.second.Data, getRangeDWOSection(),
           getStringDWOSection(), getStringOffsetDWOSection(), getAddrSection(),
-          &I.second.Relocs, isLittleEndian(), DWOTUs));
+          &I.second.Relocs, isLittleEndian(), TUS));
       if (!TU->extract(DIData, &offset))
         break;
-      DWOTUs.push_back(std::move(TU));
-      offset = DWOTUs.back()->getNextUnitOffset();
+      TUS.push_back(std::move(TU));
+      offset = TUS.back()->getNextUnitOffset();
     }
   }
 }
@@ -399,47 +405,6 @@ DWARFCompileUnit *DWARFContext::getCompileUnitForAddress(uint64_t Address) {
   uint32_t CUOffset = getDebugAranges()->findAddress(Address);
   // Retrieve the compile unit.
   return getCompileUnitForOffset(CUOffset);
-}
-
-static bool getFileNameForUnit(DWARFCompileUnit *U,
-                               const DWARFLineTable *LineTable,
-                               uint64_t FileIndex, FileLineInfoKind Kind,
-                               std::string &FileName) {
-  if (!U || !LineTable || Kind == FileLineInfoKind::None ||
-      !LineTable->getFileNameByIndex(FileIndex, Kind, FileName))
-    return false;
-  if (Kind == FileLineInfoKind::AbsoluteFilePath &&
-      sys::path::is_relative(FileName)) {
-    // We may still need to append compilation directory of compile unit.
-    SmallString<16> AbsolutePath;
-    if (const char *CompilationDir = U->getCompilationDir()) {
-      sys::path::append(AbsolutePath, CompilationDir);
-    }
-    sys::path::append(AbsolutePath, FileName);
-    FileName = AbsolutePath.str();
-  }
-  return true;
-}
-
-static bool getFileLineInfoForCompileUnit(DWARFCompileUnit *CU,
-                                          const DWARFLineTable *LineTable,
-                                          uint64_t Address,
-                                          FileLineInfoKind Kind,
-                                          DILineInfo &Result) {
-  if (!CU || !LineTable)
-    return false;
-  // Get the index of row we're looking for in the line table.
-  uint32_t RowIndex = LineTable->lookupAddress(Address);
-  if (RowIndex == -1U)
-    return false;
-  // Take file number and line/column from the row.
-  const DWARFDebugLine::Row &Row = LineTable->Rows[RowIndex];
-  if (!getFileNameForUnit(CU, LineTable, Row.File, Kind,
-                          Result.FileName))
-    return false;
-  Result.Line = Row.Line;
-  Result.Column = Row.Column;
-  return true;
 }
 
 static bool getFunctionNameForAddress(DWARFCompileUnit *CU, uint64_t Address,
@@ -472,8 +437,9 @@ DILineInfo DWARFContext::getLineInfoForAddress(uint64_t Address,
     return Result;
   getFunctionNameForAddress(CU, Address, Spec.FNKind, Result.FunctionName);
   if (Spec.FLIKind != FileLineInfoKind::None) {
-    const DWARFLineTable *LineTable = getLineTableForUnit(CU);
-    getFileLineInfoForCompileUnit(CU, LineTable, Address, Spec.FLIKind, Result);
+    if (const DWARFLineTable *LineTable = getLineTableForUnit(CU))
+      LineTable->getFileLineInfoForAddress(Address, CU->getCompilationDir(),
+                                           Spec.FLIKind, Result);
   }
   return Result;
 }
@@ -509,8 +475,8 @@ DWARFContext::getLineInfoForAddressRange(uint64_t Address, uint64_t Size,
     // Take file number and line/column from the row.
     const DWARFDebugLine::Row &Row = LineTable->Rows[RowIndex];
     DILineInfo Result;
-    getFileNameForUnit(CU, LineTable, Row.File, Spec.FLIKind,
-                       Result.FileName);
+    LineTable->getFileNameByIndex(Row.File, CU->getCompilationDir(),
+                                  Spec.FLIKind, Result.FileName);
     Result.FunctionName = FunctionName;
     Result.Line = Row.Line;
     Result.Column = Row.Column;
@@ -538,10 +504,10 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
     if (Spec.FLIKind != FileLineInfoKind::None) {
       DILineInfo Frame;
       LineTable = getLineTableForUnit(CU);
-      if (getFileLineInfoForCompileUnit(CU, LineTable, Address, Spec.FLIKind,
-                                        Frame)) {
+      if (LineTable &&
+          LineTable->getFileLineInfoForAddress(Address, CU->getCompilationDir(),
+                                               Spec.FLIKind, Frame))
         InliningInfo.addFrame(Frame);
-      }
     }
     return InliningInfo;
   }
@@ -560,13 +526,15 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
         // compile unit and fetch file/line info from it.
         LineTable = getLineTableForUnit(CU);
         // For the topmost routine, get file/line info from line table.
-        getFileLineInfoForCompileUnit(CU, LineTable, Address, Spec.FLIKind,
-                                      Frame);
+        if (LineTable)
+          LineTable->getFileLineInfoForAddress(Address, CU->getCompilationDir(),
+                                               Spec.FLIKind, Frame);
       } else {
         // Otherwise, use call file, call line and call column from
         // previous DIE in inlined chain.
-        getFileNameForUnit(CU, LineTable, CallFile, Spec.FLIKind,
-                           Frame.FileName);
+        if (LineTable)
+          LineTable->getFileNameByIndex(CallFile, CU->getCompilationDir(),
+                                        Spec.FLIKind, Frame.FileName);
         Frame.Line = CallLine;
         Frame.Column = CallColumn;
       }
@@ -603,6 +571,15 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile &Obj)
   for (const SectionRef &Section : Obj.sections()) {
     StringRef name;
     Section.getName(name);
+    // Skip BSS and Virtual sections, they aren't interesting.
+    bool IsBSS;
+    Section.isBSS(IsBSS);
+    if (IsBSS)
+      continue;
+    bool IsVirtual;
+    Section.isVirtual(IsVirtual);
+    if (IsVirtual)
+      continue;
     StringRef data;
     Section.getContents(data);
 

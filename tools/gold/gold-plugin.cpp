@@ -300,7 +300,9 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
   ErrorOr<std::unique_ptr<object::IRObjectFile>> ObjOrErr =
       object::IRObjectFile::createIRObjectFile(BufferRef, Context);
   std::error_code EC = ObjOrErr.getError();
-  if (EC == BitcodeError::InvalidBitcodeSignature)
+  if (EC == BitcodeError::InvalidBitcodeSignature ||
+      EC == object::object_error::invalid_file_type ||
+      EC == object::object_error::bitcode_section_not_found)
     return LDPS_OK;
 
   *claimed = 1;
@@ -548,8 +550,15 @@ getModuleForFile(LLVMContext &Context, claimed_file &F, raw_fd_ostream *ApiFile,
   if (get_view(F.handle, &View) != LDPS_OK)
     message(LDPL_FATAL, "Failed to get a view of file");
 
-  std::unique_ptr<MemoryBuffer> Buffer = MemoryBuffer::getMemBuffer(
-      StringRef((char *)View, File.filesize), "", false);
+  llvm::ErrorOr<MemoryBufferRef> MBOrErr =
+      object::IRObjectFile::findBitcodeInMemBuffer(
+          MemoryBufferRef(StringRef((const char *)View, File.filesize), ""));
+  if (std::error_code EC = MBOrErr.getError())
+    message(LDPL_FATAL, "Could not read bitcode from file : %s",
+            EC.message().c_str());
+
+  std::unique_ptr<MemoryBuffer> Buffer =
+      MemoryBuffer::getMemBuffer(MBOrErr->getBuffer(), "", false);
 
   if (release_input_file(F.handle) != LDPS_OK)
     message(LDPL_FATAL, "Failed to release file information");
@@ -578,10 +587,12 @@ getModuleForFile(LLVMContext &Context, claimed_file &F, raw_fd_ostream *ApiFile,
     if (!GV)
       continue; // Asm symbol.
 
-    if (GV->hasCommonLinkage()) {
+    if (Resolution != LDPR_PREVAILING_DEF_IRONLY && GV->hasCommonLinkage()) {
       // Common linkage is special. There is no single symbol that wins the
       // resolution. Instead we have to collect the maximum alignment and size.
       // The IR linker does that for us if we just pass it every common GV.
+      // We still have to keep track of LDPR_PREVAILING_DEF_IRONLY so we
+      // internalize once the IR linker has done its job.
       continue;
     }
 

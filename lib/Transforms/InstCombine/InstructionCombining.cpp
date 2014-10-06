@@ -70,10 +70,11 @@ STATISTIC(NumExpand,    "Number of expansions");
 STATISTIC(NumFactor   , "Number of factorizations");
 STATISTIC(NumReassoc  , "Number of reassociations");
 
-static cl::opt<bool> UnsafeFPShrink("enable-double-float-shrink", cl::Hidden,
-                                   cl::init(false),
-                                   cl::desc("Enable unsafe double to float "
-                                            "shrinking for math lib calls"));
+static cl::opt<bool>
+    EnableUnsafeFPShrink("enable-double-float-shrink", cl::Hidden,
+                         cl::init(false),
+                         cl::desc("Enable unsafe double to float "
+                                  "shrinking for math lib calls"));
 
 // Initialization Routines
 void llvm::initializeInstCombine(PassRegistry &Registry) {
@@ -2907,13 +2908,13 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
 }
 
 namespace {
-class InstCombinerLibCallSimplifier : public LibCallSimplifier {
+class InstCombinerLibCallSimplifier final : public LibCallSimplifier {
   InstCombiner *IC;
 public:
   InstCombinerLibCallSimplifier(const DataLayout *DL,
                                 const TargetLibraryInfo *TLI,
                                 InstCombiner *IC)
-    : LibCallSimplifier(DL, TLI, UnsafeFPShrink) {
+    : LibCallSimplifier(DL, TLI, EnableUnsafeFPShrink) {
     this->IC = IC;
   }
 

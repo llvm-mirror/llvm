@@ -187,9 +187,6 @@ namespace llvm {
       /// PSIGN - Copy integer sign.
       PSIGN,
 
-      /// BLENDV - Blend where the selector is a register.
-      BLENDV,
-
       /// BLENDI - Blend where the selector is an immediate.
       BLENDI,
 
@@ -343,7 +340,8 @@ namespace llvm {
       MOVSS,
       UNPCKL,
       UNPCKH,
-      VPERMILP,
+      VPERMILPV,
+      VPERMILPI,
       VPERMV,
       VPERMV3,
       VPERMIV3,
@@ -963,6 +961,15 @@ namespace llvm {
 
     const MCPhysReg *getScratchRegisters(CallingConv::ID CC) const override;
 
+    bool shouldExpandAtomicLoadInIR(LoadInst *SI) const override;
+    bool shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
+    bool shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override;
+
+    LoadInst *
+    lowerIdempotentRMWIntoFencedLoad(AtomicRMWInst *AI) const override;
+
+    bool needsCmpXchgNb(const Type *MemType) const;
+
     /// Utility function to emit atomic-load-arith operations (and, or, xor,
     /// nand, max, min, umax, umin). It takes the corresponding instruction to
     /// expand, the associated machine basic block, and the associated X86
@@ -992,8 +999,7 @@ namespace llvm {
                                               MachineBasicBlock *BB) const;
 
     MachineBasicBlock *EmitLoweredSegAlloca(MachineInstr *MI,
-                                            MachineBasicBlock *BB,
-                                            bool Is64Bit) const;
+                                            MachineBasicBlock *BB) const;
 
     MachineBasicBlock *EmitLoweredTLSCall(MachineInstr *MI,
                                           MachineBasicBlock *BB) const;

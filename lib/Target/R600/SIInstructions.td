@@ -33,12 +33,9 @@ def isCI : Predicate<"Subtarget.getGeneration() "
                       ">= AMDGPUSubtarget::SEA_ISLANDS">;
 def HasFlatAddressSpace : Predicate<"Subtarget.hasFlatAddressSpace()">;
 
-def isCFDepth0 : Predicate<"isCFDepth0()">;
-
 def WAIT_FLAG : InstFlag<"printWaitFlag">;
 
 let SubtargetPredicate = isSI in {
-let OtherPredicates  = [isCFDepth0] in {
 
 //===----------------------------------------------------------------------===//
 // SMRD Instructions
@@ -364,8 +361,6 @@ def S_SETREG_B32 : SOPK_32 <0x00000013, "S_SETREG_B32", []>;
 def S_GETREG_REGRD_B32 : SOPK_32 <0x00000014, "S_GETREG_REGRD_B32", []>;
 //def S_SETREG_IMM32_B32 : SOPK_32 <0x00000015, "S_SETREG_IMM32_B32", []>;
 //def EXP : EXP_ <0x00000000, "EXP", []>;
-
-} // End let OtherPredicates = [isCFDepth0]
 
 //===----------------------------------------------------------------------===//
 // SOPP Instructions
@@ -896,7 +891,9 @@ defm BUFFER_STORE_DWORDX4 : MUBUF_Store_Helper <
 >;
 //def BUFFER_ATOMIC_SWAP : MUBUF_ <0x00000030, "BUFFER_ATOMIC_SWAP", []>;
 //def BUFFER_ATOMIC_CMPSWAP : MUBUF_ <0x00000031, "BUFFER_ATOMIC_CMPSWAP", []>;
-//def BUFFER_ATOMIC_ADD : MUBUF_ <0x00000032, "BUFFER_ATOMIC_ADD", []>;
+defm BUFFER_ATOMIC_ADD : MUBUF_Atomic <
+  0x00000032, "BUFFER_ATOMIC_ADD", VReg_32, i32, atomic_add_global
+>;
 //def BUFFER_ATOMIC_SUB : MUBUF_ <0x00000033, "BUFFER_ATOMIC_SUB", []>;
 //def BUFFER_ATOMIC_RSUB : MUBUF_ <0x00000034, "BUFFER_ATOMIC_RSUB", []>;
 //def BUFFER_ATOMIC_SMIN : MUBUF_ <0x00000035, "BUFFER_ATOMIC_SMIN", []>;
@@ -1317,9 +1314,8 @@ def V_CNDMASK_B32_e32 : VOP2 <0x00000000, (outs VReg_32:$dst),
 }
 
 def V_CNDMASK_B32_e64 : VOP3 <0x00000100, (outs VReg_32:$dst),
-  (ins VSrc_32:$src0, VSrc_32:$src1, SSrc_64:$src2,
-   InstFlag:$abs, InstFlag:$clamp, InstFlag:$omod, InstFlag:$neg),
-  "V_CNDMASK_B32_e64 $dst, $src0, $src1, $src2, $abs, $clamp, $omod, $neg",
+  (ins VSrc_32:$src0, VSrc_32:$src1, SSrc_64:$src2),
+  "V_CNDMASK_B32_e64 $dst, $src0, $src1, $src2",
   [(set i32:$dst, (select i1:$src2, i32:$src1, i32:$src0))]
 > {
   let src0_modifiers = 0;
@@ -1653,6 +1649,10 @@ def V_XOR_I1 : InstSI <
   [(set i1:$dst, (xor i1:$src0, i1:$src1))]
 >;
 
+let hasSideEffects = 1 in {
+def SGPR_USE : InstSI <(outs),(ins), "", []>;
+}
+
 // SI pseudo instructions. These are used by the CFG structurizer pass
 // and should be lowered to ISA instructions prior to codegen.
 
@@ -1827,6 +1827,27 @@ defm SI_SPILL_S128 : SI_SPILL_SGPR <SReg_128>;
 defm SI_SPILL_S256 : SI_SPILL_SGPR <SReg_256>;
 defm SI_SPILL_S512 : SI_SPILL_SGPR <SReg_512>;
 
+multiclass SI_SPILL_VGPR <RegisterClass vgpr_class> {
+  def _SAVE : InstSI <
+    (outs),
+    (ins vgpr_class:$src, i32imm:$frame_idx),
+    "", []
+  >;
+
+  def _RESTORE : InstSI <
+    (outs vgpr_class:$dst),
+    (ins i32imm:$frame_idx),
+    "", []
+  >;
+}
+
+defm SI_SPILL_V32  : SI_SPILL_VGPR <VReg_32>;
+defm SI_SPILL_V64  : SI_SPILL_VGPR <VReg_64>;
+defm SI_SPILL_V96  : SI_SPILL_VGPR <VReg_96>;
+defm SI_SPILL_V128 : SI_SPILL_VGPR <VReg_128>;
+defm SI_SPILL_V256 : SI_SPILL_VGPR <VReg_256>;
+defm SI_SPILL_V512 : SI_SPILL_VGPR <VReg_512>;
+
 let Defs = [SCC] in {
 
 def SI_CONSTDATA_PTR : InstSI <
@@ -1920,8 +1941,6 @@ def : Pat <
 // SOP1 Patterns
 //===----------------------------------------------------------------------===//
 
-let Predicates = [isSI, isCFDepth0] in {
-
 def : Pat <
   (i64 (ctpop i64:$src)),
   (INSERT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
@@ -1939,8 +1958,6 @@ def : Pat <
   (i32 (addc i32:$src0, i32:$src1)),
   (S_ADD_U32 $src0, $src1)
 >;
-
-} // Predicates = [isSI, isCFDepth0]
 
 let  Predicates = [isSI] in {
 

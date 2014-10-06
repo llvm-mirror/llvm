@@ -2313,9 +2313,15 @@ bool ARMTargetLowering::isUsedByReturnOnly(SDNode *N, SDValue &Chain) const {
       if (Copies.count(UseChain.getNode()))
         // Second CopyToReg
         Copy = *UI;
-      else
+      else {
+        // We are at the top of this chain.
+        // If the copy has a glue operand, we conservatively assume it
+        // isn't safe to perform a tail call.
+        if (UI->getOperand(UI->getNumOperands()-1).getValueType() == MVT::Glue)
+          return false;
         // First CopyToReg
         TCChain = UseChain;
+      }
     }
   } else if (Copy->getOpcode() == ISD::BITCAST) {
     // f32 returned in a single GPR.
@@ -2323,6 +2329,10 @@ bool ARMTargetLowering::isUsedByReturnOnly(SDNode *N, SDValue &Chain) const {
       return false;
     Copy = *Copy->use_begin();
     if (Copy->getOpcode() != ISD::CopyToReg || !Copy->hasNUsesOfValue(1, 0))
+      return false;
+    // If the copy has a glue operand, we conservatively assume it isn't safe to
+    // perform a tail call.
+    if (Copy->getOperand(Copy->getNumOperands()-1).getValueType() == MVT::Glue)
       return false;
     TCChain = Copy->getOperand(0);
   } else {
@@ -7658,12 +7668,6 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 
 void ARMTargetLowering::AdjustInstrPostInstrSelection(MachineInstr *MI,
                                                       SDNode *Node) const {
-  if (!MI->hasPostISelHook()) {
-    assert(!convertAddSubFlagsOpcode(MI->getOpcode()) &&
-           "Pseudo flag-setting opcodes must be marked with 'hasPostISelHook'");
-    return;
-  }
-
   const MCInstrDesc *MCID = &MI->getDesc();
   // Adjust potentially 's' setting instructions after isel, i.e. ADC, SBC, RSB,
   // RSC. Coming out of isel, they have an implicit CPSR def, but the optional
@@ -10982,19 +10986,43 @@ bool ARMTargetLowering::shouldConvertConstantLoadToIntImm(const APInt &Imm,
   return true;
 }
 
-static void makeDMB(IRBuilder<> &Builder, ARM_MB::MemBOpt Domain) {
+bool ARMTargetLowering::hasLoadLinkedStoreConditional() const { return true; }
+
+Instruction* ARMTargetLowering::makeDMB(IRBuilder<> &Builder,
+                                        ARM_MB::MemBOpt Domain) const {
   Module *M = Builder.GetInsertBlock()->getParent()->getParent();
-  Function *DMB = llvm::Intrinsic::getDeclaration(M, Intrinsic::arm_dmb);
-  Constant *CDomain = Builder.getInt32(Domain);
-  Builder.CreateCall(DMB, CDomain);
+
+  // First, if the target has no DMB, see what fallback we can use.
+  if (!Subtarget->hasDataBarrier()) {
+    // Some ARMv6 cpus can support data barriers with an mcr instruction.
+    // Thumb1 and pre-v6 ARM mode use a libcall instead and should never get
+    // here.
+    if (Subtarget->hasV6Ops() && !Subtarget->isThumb()) {
+      Function *MCR = llvm::Intrinsic::getDeclaration(M, Intrinsic::arm_mcr);
+      Value* args[6] = {Builder.getInt32(15), Builder.getInt32(0),
+                        Builder.getInt32(0), Builder.getInt32(7),
+                        Builder.getInt32(10), Builder.getInt32(5)};
+      return Builder.CreateCall(MCR, args);
+    } else {
+      // Instead of using barriers, atomic accesses on these subtargets use
+      // libcalls.
+      llvm_unreachable("makeDMB on a target so old that it has no barriers");
+    }
+  } else {
+    Function *DMB = llvm::Intrinsic::getDeclaration(M, Intrinsic::arm_dmb);
+    // Only a full system barrier exists in the M-class architectures.
+    Domain = Subtarget->isMClass() ? ARM_MB::SY : Domain;
+    Constant *CDomain = Builder.getInt32(Domain);
+    return Builder.CreateCall(DMB, CDomain);
+  }
 }
 
 // Based on http://www.cl.cam.ac.uk/~pes20/cpp/cpp0xmappings.html
-void ARMTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
+Instruction* ARMTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
                                          AtomicOrdering Ord, bool IsStore,
                                          bool IsLoad) const {
   if (!getInsertFencesForAtomic())
-    return;
+    return nullptr;
 
   switch (Ord) {
   case NotAtomic:
@@ -11002,27 +11030,27 @@ void ARMTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
     llvm_unreachable("Invalid fence: unordered/non-atomic");
   case Monotonic:
   case Acquire:
-    return; // Nothing to do
+    return nullptr; // Nothing to do
   case SequentiallyConsistent:
     if (!IsStore)
-      return; // Nothing to do
-              /*FALLTHROUGH*/
+      return nullptr; // Nothing to do
+    /*FALLTHROUGH*/
   case Release:
   case AcquireRelease:
     if (Subtarget->isSwift())
-      makeDMB(Builder, ARM_MB::ISHST);
+      return makeDMB(Builder, ARM_MB::ISHST);
     // FIXME: add a comment with a link to documentation justifying this.
     else
-      makeDMB(Builder, ARM_MB::ISH);
-    return;
+      return makeDMB(Builder, ARM_MB::ISH);
   }
+  llvm_unreachable("Unknown fence ordering in emitLeadingFence");
 }
 
-void ARMTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
+Instruction* ARMTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
                                           AtomicOrdering Ord, bool IsStore,
                                           bool IsLoad) const {
   if (!getInsertFencesForAtomic())
-    return;
+    return nullptr;
 
   switch (Ord) {
   case NotAtomic:
@@ -11030,13 +11058,13 @@ void ARMTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
     llvm_unreachable("Invalid fence: unordered/not-atomic");
   case Monotonic:
   case Release:
-    return; // Nothing to do
+    return nullptr; // Nothing to do
   case Acquire:
   case AcquireRelease:
-    case SequentiallyConsistent:
-    makeDMB(Builder, ARM_MB::ISH);
-    return;
+  case SequentiallyConsistent:
+    return makeDMB(Builder, ARM_MB::ISH);
   }
+  llvm_unreachable("Unknown fence ordering in emitTrailingFence");
 }
 
 // Loads and stores less than 64-bits are already atomic; ones above that
@@ -11052,6 +11080,9 @@ bool ARMTargetLowering::shouldExpandAtomicStoreInIR(StoreInst *SI) const {
 // are doomed anyway, so defer to the default libcall and blame the OS when
 // things go wrong. Cortex M doesn't have ldrexd/strexd though, so don't emit
 // anything for those.
+// FIXME: ldrd and strd are atomic if the CPU has LPAE (e.g. A15 has that
+// guarantee, see DDI0406C ARM architecture reference manual,
+// sections A8.8.72-74 LDRD)
 bool ARMTargetLowering::shouldExpandAtomicLoadInIR(LoadInst *LI) const {
   unsigned Size = LI->getType()->getPrimitiveSizeInBits();
   return (Size == 64) && !Subtarget->isMClass();

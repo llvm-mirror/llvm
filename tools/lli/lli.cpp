@@ -23,7 +23,6 @@
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/Interpreter.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
-#include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -444,13 +443,10 @@ int main(int argc, char **argv, char * const *envp) {
     else
       RTDyldMM = new SectionMemoryManager();
     builder.setMCJITMemoryManager(RTDyldMM);
-  } else {
-    if (RemoteMCJIT) {
-      errs() << "error: Remote process execution requires -use-mcjit\n";
-      exit(1);
-    }
-    builder.setJITMemoryManager(ForceInterpreter ? nullptr :
-                                JITMemoryManager::CreateDefaultMemManager());
+  } else if (RemoteMCJIT) {
+    errs() << "error: Remote process execution does not work with the "
+              "interpreter.\n";
+    exit(1);
   }
 
   CodeGenOpt::Level OLvl = CodeGenOpt::Default;

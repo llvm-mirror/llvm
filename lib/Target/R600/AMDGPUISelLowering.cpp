@@ -392,9 +392,6 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setIntDivIsCheap(false);
   setPow2SDivIsCheap(false);
 
-  // TODO: Investigate this when 64-bit divides are implemented.
-  addBypassSlowDiv(64, 32);
-
   // FIXME: Need to really handle these.
   MaxStoresPerMemcpy  = 4096;
   MaxStoresPerMemmove = 4096;
@@ -828,6 +825,12 @@ SDValue AMDGPUTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
       // first parameter must be the same as the first instruction.
       SDValue Numerator = Op.getOperand(1);
       SDValue Denominator = Op.getOperand(2);
+
+      // Note this order is opposite of the machine instruction's operations,
+      // which is s0.f = Quotient, s1.f = Denominator, s2.f = Numerator. The
+      // intrinsic has the numerator as the first operand to match a normal
+      // division operation.
+
       SDValue Src0 = Param->isAllOnesValue() ? Numerator : Denominator;
 
       return DAG.getNode(AMDGPUISD::DIV_SCALE, DL, Op->getVTList(), Src0,
@@ -1515,8 +1518,8 @@ SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
   // e is rounding error.
   SDValue RCP = DAG.getNode(AMDGPUISD::URECIP, DL, VT, Den);
 
-  // RCP_LO = umulo(RCP, Den) */
-  SDValue RCP_LO = DAG.getNode(ISD::UMULO, DL, VT, RCP, Den);
+  // RCP_LO = mul(RCP, Den) */
+  SDValue RCP_LO = DAG.getNode(ISD::MUL, DL, VT, RCP, Den);
 
   // RCP_HI = mulhu (RCP, Den) */
   SDValue RCP_HI = DAG.getNode(ISD::MULHU, DL, VT, RCP, Den);
@@ -1547,7 +1550,7 @@ SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
   SDValue Quotient = DAG.getNode(ISD::MULHU, DL, VT, Tmp0, Num);
 
   // Num_S_Remainder = Quotient * Den
-  SDValue Num_S_Remainder = DAG.getNode(ISD::UMULO, DL, VT, Quotient, Den);
+  SDValue Num_S_Remainder = DAG.getNode(ISD::MUL, DL, VT, Quotient, Den);
 
   // Remainder = Num - Num_S_Remainder
   SDValue Remainder = DAG.getNode(ISD::SUB, DL, VT, Num, Num_S_Remainder);
@@ -1896,7 +1899,8 @@ template <typename IntTy>
 static SDValue constantFoldBFE(SelectionDAG &DAG, IntTy Src0,
                                uint32_t Offset, uint32_t Width) {
   if (Width + Offset < 32) {
-    IntTy Result = (Src0 << (32 - Offset - Width)) >> (32 - Width);
+    uint32_t Shl = static_cast<uint32_t>(Src0) << (32 - Offset - Width);
+    IntTy Result = static_cast<IntTy>(Shl) >> (32 - Width);
     return DAG.getConstant(Result, MVT::i32);
   }
 
@@ -2048,16 +2052,19 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
       return DAG.getZeroExtendInReg(BitsFrom, DL, SmallVT);
     }
 
-    if (ConstantSDNode *Val = dyn_cast<ConstantSDNode>(N->getOperand(0))) {
+    if (ConstantSDNode *CVal = dyn_cast<ConstantSDNode>(N->getOperand(0))) {
       if (Signed) {
+        // Avoid undefined left shift of a negative in the constant fold.
+        // TODO: I'm not sure what the behavior of the hardware is, this should
+        // probably follow that instead.
         return constantFoldBFE<int32_t>(DAG,
-                                        Val->getSExtValue(),
+                                        CVal->getSExtValue(),
                                         OffsetVal,
                                         WidthVal);
       }
 
       return constantFoldBFE<uint32_t>(DAG,
-                                       Val->getZExtValue(),
+                                       CVal->getZExtValue(),
                                        OffsetVal,
                                        WidthVal);
     }

@@ -41,7 +41,6 @@ class Function;
 class GlobalVariable;
 class GlobalValue;
 class JITEventListener;
-class JITMemoryManager;
 class MachineCodeInfo;
 class MutexGuard;
 class ObjectCache;
@@ -494,7 +493,6 @@ private:
   std::string *ErrorStr;
   CodeGenOpt::Level OptLevel;
   RTDyldMemoryManager *MCJMM;
-  JITMemoryManager *JMM;
   TargetOptions Options;
   Reloc::Model RelocModel;
   CodeModel::Model CMModel;
@@ -524,24 +522,9 @@ public:
   /// is only appropriate for the MCJIT; setting this and configuring the builder
   /// to create anything other than MCJIT will cause a runtime error. If create()
   /// is called and is successful, the created engine takes ownership of the
-  /// memory manager. This option defaults to NULL. Using this option nullifies
-  /// the setJITMemoryManager() option.
+  /// memory manager. This option defaults to NULL.
   EngineBuilder &setMCJITMemoryManager(RTDyldMemoryManager *mcjmm) {
     MCJMM = mcjmm;
-    JMM = nullptr;
-    return *this;
-  }
-
-  /// setJITMemoryManager - Sets the JIT memory manager to use.  This allows
-  /// clients to customize their memory allocation policies.  This is only
-  /// appropriate for either JIT or MCJIT; setting this and configuring the
-  /// builder to create an interpreter will cause a runtime error. If create()
-  /// is called and is successful, the created engine takes ownership of the
-  /// memory manager.  This option defaults to NULL. This option overrides
-  /// setMCJITMemoryManager() as well.
-  EngineBuilder &setJITMemoryManager(JITMemoryManager *jmm) {
-    MCJMM = nullptr;
-    JMM = jmm;
     return *this;
   }
 

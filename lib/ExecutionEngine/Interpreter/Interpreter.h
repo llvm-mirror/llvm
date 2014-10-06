@@ -41,7 +41,8 @@ class AllocaHolder {
 
 public:
   AllocaHolder() {}
-  // Make this type move-only.
+
+  // Make this type move-only. Define explicit move special members for MSVC.
   AllocaHolder(AllocaHolder &&RHS) : Allocations(std::move(RHS.Allocations)) {}
   AllocaHolder &operator=(AllocaHolder &&RHS) {
     Allocations = std::move(RHS.Allocations);
@@ -65,11 +66,29 @@ struct ExecutionContext {
   Function             *CurFunction;// The currently executing function
   BasicBlock           *CurBB;      // The currently executing BB
   BasicBlock::iterator  CurInst;    // The next instruction to execute
-  std::map<Value *, GenericValue> Values; // LLVM values used in this invocation
-  std::vector<GenericValue>  VarArgs; // Values passed through an ellipsis
   CallSite             Caller;     // Holds the call that called subframes.
                                    // NULL if main func or debugger invoked fn
+  std::map<Value *, GenericValue> Values; // LLVM values used in this invocation
+  std::vector<GenericValue>  VarArgs; // Values passed through an ellipsis
   AllocaHolder Allocas;            // Track memory allocated by alloca
+
+  ExecutionContext() : CurFunction(nullptr), CurBB(nullptr), CurInst(nullptr) {}
+
+  ExecutionContext(ExecutionContext &&O)
+      : CurFunction(O.CurFunction), CurBB(O.CurBB), CurInst(O.CurInst),
+        Caller(O.Caller), Values(std::move(O.Values)),
+        VarArgs(std::move(O.VarArgs)), Allocas(std::move(O.Allocas)) {}
+
+  ExecutionContext &operator=(ExecutionContext &&O) {
+    CurFunction = O.CurFunction;
+    CurBB = O.CurBB;
+    CurInst = O.CurInst;
+    Caller = O.Caller;
+    Values = std::move(O.Values);
+    VarArgs = std::move(O.VarArgs);
+    Allocas = std::move(O.Allocas);
+    return *this;
+  }
 };
 
 // Interpreter - This class represents the entirety of the interpreter.

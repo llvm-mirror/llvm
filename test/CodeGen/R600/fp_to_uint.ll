@@ -1,6 +1,16 @@
 ; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck %s --check-prefix=EG --check-prefix=FUNC
 ; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs < %s | FileCheck %s --check-prefix=SI --check-prefix=FUNC
 
+; FUNC-LABEL: @fp_to_uint_i32
+; EG: FLT_TO_UINT {{\** *}}T{{[0-9]+\.[XYZW], PV\.[XYZW]}}
+; SI: V_CVT_U32_F32_e32
+; SI: S_ENDPGM
+define void @fp_to_uint_i32 (i32 addrspace(1)* %out, float %in) {
+  %conv = fptoui float %in to i32
+  store i32 %conv, i32 addrspace(1)* %out
+  ret void
+}
+
 ; FUNC-LABEL: @fp_to_uint_v2i32
 ; EG: FLT_TO_UINT {{\** *}}T{{[0-9]+\.[XYZW], PV\.[XYZW]}}
 ; EG: FLT_TO_UINT {{\** *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
@@ -29,8 +39,6 @@ define void @fp_to_uint_v4i32(<4 x i32> addrspace(1)* %out, <4 x float> addrspac
   store <4 x i32> %result, <4 x i32> addrspace(1)* %out
   ret void
 }
-; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs < %s | FileCheck --check-prefix=SI --check-prefix=FUNC %s
-; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck --check-prefix=EG --check-prefix=FUNC %s
 
 ; FUNC: @fp_to_uint_i64
 ; EG-DAG: AND_INT

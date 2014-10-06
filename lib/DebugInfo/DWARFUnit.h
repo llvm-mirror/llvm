@@ -36,36 +36,33 @@ public:
   /// same section this Unit originated from.
   virtual DWARFUnit *getUnitForOffset(uint32_t Offset) const = 0;
 
-  virtual ~DWARFUnitSectionBase() {}
+protected:
+  ~DWARFUnitSectionBase() {}
 };
 
 /// Concrete instance of DWARFUnitSection, specialized for one Unit type.
 template<typename UnitType>
-class DWARFUnitSection : public SmallVector<std::unique_ptr<UnitType>, 1>,
-                         public DWARFUnitSectionBase {
+class DWARFUnitSection final : public SmallVector<std::unique_ptr<UnitType>, 1>,
+                               public DWARFUnitSectionBase {
 
   struct UnitOffsetComparator {
-    bool operator()(const std::unique_ptr<UnitType> &LHS,
-                    const std::unique_ptr<UnitType> &RHS) const {
-      return LHS->getOffset() < RHS->getOffset();
-    }
-    bool operator()(const std::unique_ptr<UnitType> &LHS,
-                    uint32_t RHS) const {
-      return LHS->getOffset() < RHS;
-    }
     bool operator()(uint32_t LHS,
                     const std::unique_ptr<UnitType> &RHS) const {
-      return LHS < RHS->getOffset();
+      return LHS < RHS->getNextUnitOffset();
     }
   };
 
 public:
+  DWARFUnitSection() {}
+  DWARFUnitSection(DWARFUnitSection &&DUS) :
+    SmallVector<std::unique_ptr<UnitType>, 1>(std::move(DUS)) {}
+
   typedef llvm::SmallVectorImpl<std::unique_ptr<UnitType>> UnitVector;
   typedef typename UnitVector::iterator iterator;
   typedef llvm::iterator_range<typename UnitVector::iterator> iterator_range;
 
   UnitType *getUnitForOffset(uint32_t Offset) const {
-    auto *CU = std::lower_bound(this->begin(), this->end(), Offset,
+    auto *CU = std::upper_bound(this->begin(), this->end(), Offset,
                                 UnitOffsetComparator());
     if (CU != this->end())
       return CU->get();

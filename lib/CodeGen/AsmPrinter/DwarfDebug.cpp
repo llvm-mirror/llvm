@@ -171,6 +171,7 @@ DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
       GlobalRangeCount(0), InfoHolder(A, "info_string", DIEValueAllocator),
       UsedNonDefaultText(false),
       SkeletonHolder(A, "skel_string", DIEValueAllocator),
+      IsDarwin(Triple(A->getTargetTriple()).isOSDarwin()),
       AccelNames(DwarfAccelTable::Atom(dwarf::DW_ATOM_die_offset,
                                        dwarf::DW_FORM_data4)),
       AccelObjC(DwarfAccelTable::Atom(dwarf::DW_ATOM_die_offset,
@@ -190,8 +191,6 @@ DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
 
   // Turn on accelerator tables for Darwin by default, pubnames by
   // default for non-Darwin, and handle split dwarf.
-  bool IsDarwin = Triple(A->getTargetTriple()).isOSDarwin();
-
   if (DwarfAccelTables == Default)
     HasDwarfAccelTables = IsDarwin;
   else
@@ -319,9 +318,13 @@ DIE &DwarfDebug::updateSubprogramScopeDIE(DwarfCompileUnit &SPCU,
 
   attachLowHighPC(SPCU, *SPDie, FunctionBeginSym, FunctionEndSym);
 
-  const TargetRegisterInfo *RI = Asm->TM.getSubtargetImpl()->getRegisterInfo();
-  MachineLocation Location(RI->getFrameRegister(*Asm->MF));
-  SPCU.addAddress(*SPDie, dwarf::DW_AT_frame_base, Location);
+  // Only include DW_AT_frame_base in full debug info
+  if (SPCU.getCUNode().getEmissionKind() != DIBuilder::LineTablesOnly) {
+    const TargetRegisterInfo *RI =
+        Asm->TM.getSubtargetImpl()->getRegisterInfo();
+    MachineLocation Location(RI->getFrameRegister(*Asm->MF));
+    SPCU.addAddress(*SPDie, dwarf::DW_AT_frame_base, Location);
+  }
 
   // Add name to the name table, we do this here because we're guaranteed
   // to have concrete versions of our DW_TAG_subprogram nodes.
@@ -779,7 +782,7 @@ void DwarfDebug::beginModule() {
               ScopesWithImportedEntities.end(), less_first());
     DIArray GVs = CUNode.getGlobalVariables();
     for (unsigned i = 0, e = GVs.getNumElements(); i != e; ++i)
-      CU.createGlobalVariableDIE(DIGlobalVariable(GVs.getElement(i)));
+      CU.getOrCreateGlobalVariableDIE(DIGlobalVariable(GVs.getElement(i)));
     DIArray SPs = CUNode.getSubprograms();
     for (unsigned i = 0, e = SPs.getNumElements(); i != e; ++i)
       SPMap.insert(std::make_pair(SPs.getElement(i), &CU));
@@ -852,12 +855,14 @@ void DwarfDebug::finishSubprogramDefinitions() {
           // If this subprogram has an abstract definition, reference that
           SPCU->addDIEEntry(*D, dwarf::DW_AT_abstract_origin, *AbsSPDIE);
       } else {
-        if (!D)
+        if (!D && TheCU.getEmissionKind() != DIBuilder::LineTablesOnly)
           // Lazily construct the subprogram if we didn't see either concrete or
-          // inlined versions during codegen.
+          // inlined versions during codegen. (except in -gmlt ^ where we want
+          // to omit these entirely)
           D = SPCU->getOrCreateSubprogramDIE(SP);
-        // And attach the attributes
-        SPCU->applySubprogramAttributesToDefinition(SP, *D);
+        if (D)
+          // And attach the attributes
+          SPCU->applySubprogramAttributesToDefinition(SP, *D);
       }
     }
   }
@@ -1686,6 +1691,24 @@ void DwarfDebug::endFunction(const MachineFunction *MF) {
   LexicalScope *FnScope = LScopes.getCurrentFunctionScope();
   DwarfCompileUnit &TheCU = *SPMap.lookup(FnScope->getScopeNode());
 
+  // Add the range of this function to the list of ranges for the CU.
+  TheCU.addRange(RangeSpan(FunctionBeginSym, FunctionEndSym));
+
+  // Under -gmlt, skip building the subprogram if there are no inlined
+  // subroutines inside it.
+  if (TheCU.getCUNode().getEmissionKind() == DIBuilder::LineTablesOnly &&
+      LScopes.getAbstractScopesList().empty() && !IsDarwin) {
+    assert(ScopeVariables.empty());
+    assert(CurrentFnArguments.empty());
+    assert(DbgValues.empty());
+    assert(AbstractVariables.empty());
+    LabelsBeforeInsn.clear();
+    LabelsAfterInsn.clear();
+    PrevLabel = nullptr;
+    CurFn = nullptr;
+    return;
+  }
+
   // Construct abstract scopes.
   for (LexicalScope *AScope : LScopes.getAbstractScopesList()) {
     DISubprogram SP(AScope->getScopeNode());
@@ -1705,10 +1728,6 @@ void DwarfDebug::endFunction(const MachineFunction *MF) {
   DIE &CurFnDIE = constructSubprogramScopeDIE(TheCU, FnScope);
   if (!CurFn->getTarget().Options.DisableFramePointerElim(*CurFn))
     TheCU.addFlag(CurFnDIE, dwarf::DW_AT_APPLE_omit_frame_ptr);
-
-  // Add the range of this function to the list of ranges for the CU.
-  RangeSpan Span(FunctionBeginSym, FunctionEndSym);
-  TheCU.addRange(std::move(Span));
 
   // Clear debug info
   // Ownership of DbgVariables is a bit subtle - ScopeVariables owns all the

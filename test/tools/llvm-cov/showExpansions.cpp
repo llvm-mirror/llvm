@@ -16,16 +16,14 @@
     else                   \
       ANOTHER_THING();     \
   } while (0)
+// CHECK-DAG: Expansion at line [[@LINE-4]], 7 -> 24
+// CHECK-DAG: Expansion at line [[@LINE-3]], 7 -> 20
 
 int main(int argc, const char *argv[]) {
   for (int i = 0; i < 100; ++i)
-    DO_SOMETHING(i);
+    DO_SOMETHING(i); // CHECK-DAG: Expansion at line [[@LINE]], 5 -> 17
   return 0;
 }
-
-// CHECK: Expansion of {{[0-9]+}}:13 -> 18 @ {{[0-9]+}}, 22:5
-// CHECK: Expansion of {{[0-9]+}}:4 -> 5 @ {{[0-9]+}}, 15:7
-// CHECK: Expansion of {{[0-9]+}}:7 -> 10 @ {{[0-9]+}}, 17:7
 
 // llvm-cov doesn't work on big endian yet
 // XFAIL: powerpc64-, s390x, mips-, mips64-, sparc

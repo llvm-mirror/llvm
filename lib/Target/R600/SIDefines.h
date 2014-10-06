@@ -27,6 +27,31 @@ enum {
 };
 }
 
+namespace SIInstrFlags {
+  enum Flags {
+    // First 4 bits are the instruction encoding
+    VM_CNT = 1 << 0,
+    EXP_CNT = 1 << 1,
+    LGKM_CNT = 1 << 2
+  };
+}
+
+namespace SISrcMods {
+  enum {
+   NEG = 1 << 0,
+   ABS = 1 << 1
+  };
+}
+
+namespace SIOutMods {
+  enum {
+    NONE = 0,
+    MUL2 = 1,
+    MUL4 = 2,
+    DIV2 = 3
+  };
+}
+
 #define R_00B028_SPI_SHADER_PGM_RSRC1_PS                                0x00B028
 #define R_00B02C_SPI_SHADER_PGM_RSRC2_PS                                0x00B02C
 #define   S_00B02C_EXTRA_LDS_SIZE(x)                                  (((x) & 0xFF) << 8)

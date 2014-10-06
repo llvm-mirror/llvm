@@ -8,7 +8,6 @@ declare float @llvm.sqrt.f32(float)
 declare <4 x float> @llvm.sqrt.v4f32(<4 x float>)
 
 define double @foo(double %a, double %b) nounwind {
-entry:
   %x = call double @llvm.sqrt.f64(double %b)
   %r = fdiv double %a, %x
   ret double %r
@@ -17,12 +16,12 @@ entry:
 ; CHECK-DAG: frsqrte
 ; CHECK-DAG: fnmsub
 ; CHECK: fmul
-; CHECK: fmadd
-; CHECK: fmul
-; CHECK: fmul
-; CHECK: fmadd
-; CHECK: fmul
-; CHECK: fmul
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fmul
 ; CHECK: blr
 
 ; CHECK-SAFE: @foo
@@ -32,7 +31,6 @@ entry:
 }
 
 define double @foof(double %a, float %b) nounwind {
-entry:
   %x = call float @llvm.sqrt.f32(float %b)
   %y = fpext float %x to double
   %r = fdiv double %a, %y
@@ -42,10 +40,10 @@ entry:
 ; CHECK-DAG: frsqrtes
 ; CHECK-DAG: fnmsubs
 ; CHECK: fmuls
-; CHECK: fmadds
-; CHECK: fmuls
-; CHECK: fmul
-; CHECK: blr
+; CHECK-NEXT: fmadds
+; CHECK-NEXT: fmuls
+; CHECK-NEXT: fmul
+; CHECK-NEXT: blr
 
 ; CHECK-SAFE: @foof
 ; CHECK-SAFE: fsqrts
@@ -54,7 +52,6 @@ entry:
 }
 
 define float @food(float %a, double %b) nounwind {
-entry:
   %x = call double @llvm.sqrt.f64(double %b)
   %y = fptrunc double %x to float
   %r = fdiv float %a, %y
@@ -64,14 +61,14 @@ entry:
 ; CHECK-DAG: frsqrte
 ; CHECK-DAG: fnmsub
 ; CHECK: fmul
-; CHECK: fmadd
-; CHECK: fmul
-; CHECK: fmul
-; CHECK: fmadd
-; CHECK: fmul
-; CHECK: frsp
-; CHECK: fmuls
-; CHECK: blr
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fmul
+; CHECK-NEXT: frsp
+; CHECK-NEXT: fmuls
+; CHECK-NEXT: blr
 
 ; CHECK-SAFE: @foo
 ; CHECK-SAFE: fsqrt
@@ -80,7 +77,6 @@ entry:
 }
 
 define float @goo(float %a, float %b) nounwind {
-entry:
   %x = call float @llvm.sqrt.f32(float %b)
   %r = fdiv float %a, %x
   ret float %r
@@ -89,10 +85,10 @@ entry:
 ; CHECK-DAG: frsqrtes
 ; CHECK-DAG: fnmsubs
 ; CHECK: fmuls
-; CHECK: fmadds
-; CHECK: fmuls
-; CHECK: fmuls
-; CHECK: blr
+; CHECK-NEXT: fmadds
+; CHECK-NEXT: fmuls
+; CHECK-NEXT: fmuls
+; CHECK-NEXT: blr
 
 ; CHECK-SAFE: @goo
 ; CHECK-SAFE: fsqrts
@@ -101,7 +97,6 @@ entry:
 }
 
 define <4 x float> @hoo(<4 x float> %a, <4 x float> %b) nounwind {
-entry:
   %x = call <4 x float> @llvm.sqrt.v4f32(<4 x float> %b)
   %r = fdiv <4 x float> %a, %x
   ret <4 x float> %r
@@ -115,7 +110,6 @@ entry:
 }
 
 define double @foo2(double %a, double %b) nounwind {
-entry:
   %r = fdiv double %a, %b
   ret double %r
 
@@ -123,10 +117,10 @@ entry:
 ; CHECK-DAG: fre
 ; CHECK-DAG: fnmsub
 ; CHECK: fmadd
-; CHECK: fnmsub
-; CHECK: fmadd
-; CHECK: fmul
-; CHECK: blr
+; CHECK-NEXT: fnmsub
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fmul
+; CHECK-NEXT: blr
 
 ; CHECK-SAFE: @foo2
 ; CHECK-SAFE: fdiv
@@ -134,7 +128,6 @@ entry:
 }
 
 define float @goo2(float %a, float %b) nounwind {
-entry:
   %r = fdiv float %a, %b
   ret float %r
 
@@ -142,8 +135,8 @@ entry:
 ; CHECK-DAG: fres
 ; CHECK-DAG: fnmsubs
 ; CHECK: fmadds
-; CHECK: fmuls
-; CHECK: blr
+; CHECK-NEXT: fmuls
+; CHECK-NEXT: blr
 
 ; CHECK-SAFE: @goo2
 ; CHECK-SAFE: fdivs
@@ -151,7 +144,6 @@ entry:
 }
 
 define <4 x float> @hoo2(<4 x float> %a, <4 x float> %b) nounwind {
-entry:
   %r = fdiv <4 x float> %a, %b
   ret <4 x float> %r
 
@@ -164,7 +156,6 @@ entry:
 }
 
 define double @foo3(double %a) nounwind {
-entry:
   %r = call double @llvm.sqrt.f64(double %a)
   ret double %r
 
@@ -173,16 +164,16 @@ entry:
 ; CHECK-DAG: frsqrte
 ; CHECK-DAG: fnmsub
 ; CHECK: fmul
-; CHECK: fmadd
-; CHECK: fmul
-; CHECK: fmul
-; CHECK: fmadd
-; CHECK: fmul
-; CHECK: fre
-; CHECK: fnmsub
-; CHECK: fmadd
-; CHECK: fnmsub
-; CHECK: fmadd
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fmul
+; CHECK-NEXT: fre
+; CHECK-NEXT: fnmsub
+; CHECK-NEXT: fmadd
+; CHECK-NEXT: fnmsub
+; CHECK-NEXT: fmadd
 ; CHECK: blr
 
 ; CHECK-SAFE: @foo3
@@ -191,7 +182,6 @@ entry:
 }
 
 define float @goo3(float %a) nounwind {
-entry:
   %r = call float @llvm.sqrt.f32(float %a)
   ret float %r
 
@@ -200,11 +190,11 @@ entry:
 ; CHECK-DAG: frsqrtes
 ; CHECK-DAG: fnmsubs
 ; CHECK: fmuls
-; CHECK: fmadds
-; CHECK: fmuls
-; CHECK: fres
-; CHECK: fnmsubs
-; CHECK: fmadds
+; CHECK-NEXT: fmadds
+; CHECK-NEXT: fmuls
+; CHECK-NEXT: fres
+; CHECK-NEXT: fnmsubs
+; CHECK-NEXT: fmadds
 ; CHECK: blr
 
 ; CHECK-SAFE: @goo3
@@ -213,7 +203,6 @@ entry:
 }
 
 define <4 x float> @hoo3(<4 x float> %a) nounwind {
-entry:
   %r = call <4 x float> @llvm.sqrt.v4f32(<4 x float> %a)
   ret <4 x float> %r
 

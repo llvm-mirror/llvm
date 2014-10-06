@@ -195,7 +195,7 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
         continue;
 
       if (!canShrink(MI, TII, TRI, MRI)) {
-        // Try commtuing the instruction and see if that enables us to shrink
+        // Try commuting the instruction and see if that enables us to shrink
         // it.
         if (!MI.isCommutable() || !TII->commuteInstruction(&MI) ||
             !canShrink(MI, TII, TRI, MRI))
@@ -221,10 +221,9 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
           // vreg1 = VOPC;
           // S_AND_B64 vreg0, vreg1
           //
-          // So, instead of forcing the instruction to write to VCC, we provide a
-          // hint to the register allocator to use VCC and then we
-          // we will run this pass again after RA and shrink it if it outpus to
-          // VCC.
+          // So, instead of forcing the instruction to write to VCC, we provide
+          // a hint to the register allocator to use VCC and then we we will run
+          // this pass again after RA and shrink it if it outputs to VCC.
           MRI.setRegAllocationHint(MI.getOperand(0).getReg(), 0, AMDGPU::VCC);
           continue;
         }
