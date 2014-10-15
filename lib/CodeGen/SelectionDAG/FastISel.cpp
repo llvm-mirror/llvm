@@ -1125,13 +1125,14 @@ bool FastISel::selectIntrinsicCall(const IntrinsicInst *II) {
         Op->setIsDebug(true);
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
                 TII.get(TargetOpcode::DBG_VALUE), false, Op->getReg(), 0,
-                DI->getVariable());
+                DI->getVariable(), DI->getExpression());
       } else
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
                 TII.get(TargetOpcode::DBG_VALUE))
             .addOperand(*Op)
             .addImm(0)
-            .addMetadata(DI->getVariable());
+            .addMetadata(DI->getVariable())
+            .addMetadata(DI->getExpression());
     } else {
       // We can't yet handle anything else here because it would require
       // generating code, thus altering codegen because of debug info.
@@ -1150,28 +1151,32 @@ bool FastISel::selectIntrinsicCall(const IntrinsicInst *II) {
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II)
           .addReg(0U)
           .addImm(DI->getOffset())
-          .addMetadata(DI->getVariable());
+          .addMetadata(DI->getVariable())
+          .addMetadata(DI->getExpression());
     } else if (const auto *CI = dyn_cast<ConstantInt>(V)) {
       if (CI->getBitWidth() > 64)
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II)
             .addCImm(CI)
             .addImm(DI->getOffset())
-            .addMetadata(DI->getVariable());
+            .addMetadata(DI->getVariable())
+            .addMetadata(DI->getExpression());
       else
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II)
             .addImm(CI->getZExtValue())
             .addImm(DI->getOffset())
-            .addMetadata(DI->getVariable());
+            .addMetadata(DI->getVariable())
+            .addMetadata(DI->getExpression());
     } else if (const auto *CF = dyn_cast<ConstantFP>(V)) {
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II)
           .addFPImm(CF)
           .addImm(DI->getOffset())
-          .addMetadata(DI->getVariable());
+          .addMetadata(DI->getVariable())
+          .addMetadata(DI->getExpression());
     } else if (unsigned Reg = lookUpRegForValue(V)) {
       // FIXME: This does not handle register-indirect values at offset 0.
       bool IsIndirect = DI->getOffset() != 0;
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II, IsIndirect, Reg,
-              DI->getOffset(), DI->getVariable());
+              DI->getOffset(), DI->getVariable(), DI->getExpression());
     } else {
       // We can't yet handle anything else here because it would require
       // generating code, thus altering codegen because of debug info.
@@ -1574,10 +1579,10 @@ FastISel::FastISel(FunctionLoweringInfo &FuncInfo,
                    bool SkipTargetIndependentISel)
     : FuncInfo(FuncInfo), MF(FuncInfo.MF), MRI(FuncInfo.MF->getRegInfo()),
       MFI(*FuncInfo.MF->getFrameInfo()), MCP(*FuncInfo.MF->getConstantPool()),
-      TM(FuncInfo.MF->getTarget()), DL(*TM.getSubtargetImpl()->getDataLayout()),
-      TII(*TM.getSubtargetImpl()->getInstrInfo()),
-      TLI(*TM.getSubtargetImpl()->getTargetLowering()),
-      TRI(*TM.getSubtargetImpl()->getRegisterInfo()), LibInfo(LibInfo),
+      TM(FuncInfo.MF->getTarget()), DL(*MF->getSubtarget().getDataLayout()),
+      TII(*MF->getSubtarget().getInstrInfo()),
+      TLI(*MF->getSubtarget().getTargetLowering()),
+      TRI(*MF->getSubtarget().getRegisterInfo()), LibInfo(LibInfo),
       SkipTargetIndependentISel(SkipTargetIndependentISel) {}
 
 FastISel::~FastISel() {}
@@ -1995,9 +2000,7 @@ bool FastISel::handlePHINodesInSuccessorBlocks(const BasicBlock *LLVMBB) {
       EVT VT = TLI.getValueType(PN->getType(), /*AllowUnknown=*/true);
       if (VT == MVT::Other || !TLI.isTypeLegal(VT)) {
         // Handle integer promotions, though, because they're common and easy.
-        if (VT == MVT::i1 || VT == MVT::i8 || VT == MVT::i16)
-          VT = TLI.getTypeToTransformTo(LLVMBB->getContext(), VT);
-        else {
+        if (!(VT == MVT::i1 || VT == MVT::i8 || VT == MVT::i16)) {
           FuncInfo.PHINodesToUpdate.resize(FuncInfo.OrigNumPHINodesToUpdate);
           return false;
         }
@@ -2129,8 +2132,7 @@ FastISel::createMachineMemOperandFor(const Instruction *I) const {
   if (Alignment == 0) // Ensure that codegen never sees alignment 0.
     Alignment = DL.getABITypeAlignment(ValTy);
 
-  unsigned Size =
-      TM.getSubtargetImpl()->getDataLayout()->getTypeStoreSize(ValTy);
+  unsigned Size = DL.getTypeStoreSize(ValTy);
 
   if (IsVolatile)
     Flags |= MachineMemOperand::MOVolatile;

@@ -1643,8 +1643,11 @@ void MachineInstr::print(raw_ostream &OS, const TargetMachine *TM,
     if (isDebugValue() && MO.isMetadata()) {
       // Pretty print DBG_VALUE instructions.
       const MDNode *MD = MO.getMetadata();
-      if (const MDString *MDS = dyn_cast<MDString>(MD->getOperand(2)))
-        OS << "!\"" << MDS->getString() << '\"';
+      DIDescriptor DI(MD);
+      DIVariable DIV(MD);
+
+      if (DI.isVariable() && !DIV.getName().empty())
+        OS << "!\"" << DIV.getName() << '\"';
       else
         MO.print(OS, TM);
     } else if (TM && (isInsertSubreg() || isRegSequence()) && MO.isImm()) {
@@ -1747,6 +1750,8 @@ void MachineInstr::print(raw_ostream &OS, const TargetMachine *TM,
         OS << " ]";
       }
     }
+    if (isIndirectDebugValue())
+      OS << " indirect";
   } else if (!debugLoc.isUnknown() && MF) {
     if (!HaveSemi) OS << ";";
     OS << " dbg:";

@@ -169,6 +169,9 @@ enum {
   /// mode without emitting such REV instructions.
   NVCAST,
 
+  SMULL,
+  UMULL,
+
   // NEON Load/Store with post-increment base updates
   LD2post = ISD::FIRST_TARGET_MEMORY_OPCODE,
   LD3post,
@@ -204,7 +207,7 @@ class AArch64TargetLowering : public TargetLowering {
   bool RequireStrictAlign;
 
 public:
-  explicit AArch64TargetLowering(TargetMachine &TM);
+  explicit AArch64TargetLowering(const TargetMachine &TM);
 
   /// Selects the correct CCAssignFn for a given CallingConvention value.
   CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg) const;

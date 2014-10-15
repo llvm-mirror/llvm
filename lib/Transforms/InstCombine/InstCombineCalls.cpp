@@ -16,6 +16,7 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -1016,6 +1017,14 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
                           II->getName());
       return EraseInstFromFunction(*II);
     }
+
+    // If there is a dominating assume with the same condition as this one,
+    // then this one is redundant, and should be removed.
+    APInt KnownZero(1, 0), KnownOne(1, 0);
+    computeKnownBits(IIOperand, KnownZero, KnownOne, 0, II);
+    if (KnownOne.isAllOnesValue())
+      return EraseInstFromFunction(*II);
+
     break;
   }
   }

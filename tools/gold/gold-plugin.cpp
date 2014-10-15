@@ -491,21 +491,36 @@ static GlobalObject *makeInternalReplacement(GlobalObject *GO) {
   Module *M = GO->getParent();
   GlobalObject *Ret;
   if (auto *F = dyn_cast<Function>(GO)) {
-    auto *NewF = Function::Create(
-        F->getFunctionType(), GlobalValue::InternalLinkage, F->getName(), M);
+    auto *NewF = Function::Create(F->getFunctionType(), F->getLinkage(),
+                                  F->getName(), M);
+
+    ValueToValueMapTy VM;
+    Function::arg_iterator NewI = NewF->arg_begin();
+    for (auto &Arg : F->args()) {
+      NewI->setName(Arg.getName());
+      VM[&Arg] = NewI;
+      ++NewI;
+    }
+
     NewF->getBasicBlockList().splice(NewF->end(), F->getBasicBlockList());
+    for (auto &BB : *NewF) {
+      for (auto &Inst : BB)
+        RemapInstruction(&Inst, VM, RF_IgnoreMissingEntries);
+    }
+
     Ret = NewF;
     F->deleteBody();
   } else {
     auto *Var = cast<GlobalVariable>(GO);
     Ret = new GlobalVariable(
         *M, Var->getType()->getElementType(), Var->isConstant(),
-        GlobalValue::InternalLinkage, Var->getInitializer(), Var->getName(),
+        Var->getLinkage(), Var->getInitializer(), Var->getName(),
         nullptr, Var->getThreadLocalMode(), Var->getType()->getAddressSpace(),
         Var->isExternallyInitialized());
     Var->setInitializer(nullptr);
   }
   Ret->copyAttributesFrom(GO);
+  Ret->setLinkage(GlobalValue::InternalLinkage);
   Ret->setComdat(GO->getComdat());
 
   return Ret;
@@ -622,8 +637,14 @@ getModuleForFile(LLVMContext &Context, claimed_file &F, raw_fd_ostream *ApiFile,
       keepGlobalValue(*GV, KeptAliases);
       break;
 
-    case LDPR_PREEMPTED_REG:
     case LDPR_PREEMPTED_IR:
+      // Gold might have selected a linkonce_odr and preempted a weak_odr.
+      // In that case we have to make sure we don't end up internalizing it.
+      if (!GV->isDiscardableIfUnused())
+        Maybe.erase(Sym.name);
+
+      // fall-through
+    case LDPR_PREEMPTED_REG:
       Drop.insert(GV);
       break;
 

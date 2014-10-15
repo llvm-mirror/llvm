@@ -18,11 +18,17 @@
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/MutexGuard.h"
 #include "llvm/Support/TimeValue.h"
+#if HAVE_FCNTL_H
+#include <fcntl.h>
+#endif
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/resource.h>
+#endif
+#if HAVE_SIGNAL_H
+#include <signal.h>
 #endif
 // DragonFlyBSD, OpenBSD, and Bitrig have deprecated <malloc.h> for
 // <stdlib.h> instead. Unix.h includes this for us already.
@@ -197,6 +203,97 @@ Process::GetArgumentVector(SmallVectorImpl<const char *> &ArgsOut,
   ArgsOut.append(ArgsIn.begin(), ArgsIn.end());
 
   return std::error_code();
+}
+
+namespace {
+class FDCloser {
+public:
+  FDCloser(int &FD) : FD(FD), KeepOpen(false) {}
+  void keepOpen() { KeepOpen = true; }
+  ~FDCloser() {
+    if (!KeepOpen && FD >= 0)
+      ::close(FD);
+  }
+
+private:
+  FDCloser(const FDCloser &) LLVM_DELETED_FUNCTION;
+  void operator=(const FDCloser &) LLVM_DELETED_FUNCTION;
+
+  int &FD;
+  bool KeepOpen;
+};
+}
+
+std::error_code Process::FixupStandardFileDescriptors() {
+  int NullFD = -1;
+  FDCloser FDC(NullFD);
+  const int StandardFDs[] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+  for (int StandardFD : StandardFDs) {
+    struct stat st;
+    errno = 0;
+    while (fstat(StandardFD, &st) < 0) {
+      assert(errno && "expected errno to be set if fstat failed!");
+      // fstat should return EBADF if the file descriptor is closed.
+      if (errno == EBADF)
+        break;
+      // retry fstat if we got EINTR, otherwise bubble up the failure.
+      if (errno != EINTR)
+        return std::error_code(errno, std::generic_category());
+    }
+    // if fstat succeeds, move on to the next FD.
+    if (!errno)
+      continue;
+    assert(errno == EBADF && "expected errno to have EBADF at this point!");
+
+    if (NullFD < 0) {
+      while ((NullFD = open("/dev/null", O_RDWR)) < 0) {
+        if (errno == EINTR)
+          continue;
+        return std::error_code(errno, std::generic_category());
+      }
+    }
+
+    if (NullFD == StandardFD)
+      FDC.keepOpen();
+    else if (dup2(NullFD, StandardFD) < 0)
+      return std::error_code(errno, std::generic_category());
+  }
+  return std::error_code();
+}
+
+std::error_code Process::SafelyCloseFileDescriptor(int FD) {
+  // Create a signal set filled with *all* signals.
+  sigset_t FullSet;
+  if (sigfillset(&FullSet) < 0)
+    return std::error_code(errno, std::generic_category());
+  // Atomically swap our current signal mask with a full mask.
+  sigset_t SavedSet;
+#if LLVM_ENABLE_THREADS
+  if (int EC = pthread_sigmask(SIG_SETMASK, &FullSet, &SavedSet))
+    return std::error_code(EC, std::generic_category());
+#else
+  if (sigprocmask(SIG_SETMASK, &FullSet, &SavedSet) < 0)
+    return std::error_code(errno, std::generic_category());
+#endif
+  // Attempt to close the file descriptor.
+  // We need to save the error, if one occurs, because our subsequent call to
+  // pthread_sigmask might tamper with errno.
+  int ErrnoFromClose = 0;
+  if (::close(FD) < 0)
+    ErrnoFromClose = errno;
+  // Restore the signal mask back to what we saved earlier.
+  int EC = 0;
+#if LLVM_ENABLE_THREADS
+  EC = pthread_sigmask(SIG_SETMASK, &SavedSet, nullptr);
+#else
+  if (sigprocmask(SIG_SETMASK, &SavedSet, nullptr) < 0)
+    EC = errno;
+#endif
+  // The error code from close takes precedence over the one from
+  // pthread_sigmask.
+  if (ErrnoFromClose)
+    return std::error_code(ErrnoFromClose, std::generic_category());
+  return std::error_code(EC, std::generic_category());
 }
 
 bool Process::StandardInIsUserInput() {

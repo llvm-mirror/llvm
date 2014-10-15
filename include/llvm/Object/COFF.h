@@ -25,9 +25,14 @@ template <typename T> class ArrayRef;
 
 namespace object {
 class ImportDirectoryEntryRef;
+class DelayImportDirectoryEntryRef;
 class ExportDirectoryEntryRef;
+class ImportedSymbolRef;
 typedef content_iterator<ImportDirectoryEntryRef> import_directory_iterator;
+typedef content_iterator<DelayImportDirectoryEntryRef>
+    delay_import_directory_iterator;
 typedef content_iterator<ExportDirectoryEntryRef> export_directory_iterator;
+typedef content_iterator<ImportedSymbolRef> imported_symbol_iterator;
 
 /// The DOS compatible header at the front of all PE/COFF executables.
 struct dos_header {
@@ -160,20 +165,38 @@ struct import_directory_table_entry {
   support::ulittle32_t ImportAddressTableRVA;
 };
 
-struct import_lookup_table_entry32 {
-  support::ulittle32_t data;
+template <typename IntTy>
+struct import_lookup_table_entry {
+  IntTy Data;
 
-  bool isOrdinal() const { return data & 0x80000000; }
+  bool isOrdinal() const { return Data < 0; }
 
   uint16_t getOrdinal() const {
     assert(isOrdinal() && "ILT entry is not an ordinal!");
-    return data & 0xFFFF;
+    return Data & 0xFFFF;
   }
 
   uint32_t getHintNameRVA() const {
     assert(!isOrdinal() && "ILT entry is not a Hint/Name RVA!");
-    return data;
+    return Data & 0xFFFFFFFF;
   }
+};
+
+typedef import_lookup_table_entry<support::little32_t>
+    import_lookup_table_entry32;
+typedef import_lookup_table_entry<support::little64_t>
+    import_lookup_table_entry64;
+
+struct delay_import_directory_table_entry {
+  // dumpbin reports this field as "Characteristics" instead of "Attributes".
+  support::ulittle32_t Attributes;
+  support::ulittle32_t Name;
+  support::ulittle32_t ModuleHandle;
+  support::ulittle32_t DelayImportAddressTable;
+  support::ulittle32_t DelayImportNameTable;
+  support::ulittle32_t BoundDelayImportTable;
+  support::ulittle32_t UnloadDelayImportTable;
+  support::ulittle32_t TimeStamp;
 };
 
 struct export_directory_table_entry {
@@ -432,6 +455,8 @@ private:
   uint32_t StringTableSize;
   const import_directory_table_entry *ImportDirectory;
   uint32_t NumberOfImportDirectory;
+  const delay_import_directory_table_entry *DelayImportDirectory;
+  uint32_t NumberOfDelayImportDirectory;
   const export_directory_table_entry *ExportDirectory;
 
   std::error_code getString(uint32_t offset, StringRef &Res) const;
@@ -443,6 +468,7 @@ private:
 
   std::error_code initSymbolTablePtr();
   std::error_code initImportTablePtr();
+  std::error_code initDelayImportTablePtr();
   std::error_code initExportTablePtr();
 
 public:
@@ -520,24 +546,19 @@ protected:
   void moveSectionNext(DataRefImpl &Sec) const override;
   std::error_code getSectionName(DataRefImpl Sec,
                                  StringRef &Res) const override;
-  std::error_code getSectionAddress(DataRefImpl Sec,
-                                    uint64_t &Res) const override;
-  std::error_code getSectionSize(DataRefImpl Sec, uint64_t &Res) const override;
+  uint64_t getSectionAddress(DataRefImpl Sec) const override;
+  uint64_t getSectionSize(DataRefImpl Sec) const override;
   std::error_code getSectionContents(DataRefImpl Sec,
                                      StringRef &Res) const override;
-  std::error_code getSectionAlignment(DataRefImpl Sec,
-                                      uint64_t &Res) const override;
-  std::error_code isSectionText(DataRefImpl Sec, bool &Res) const override;
-  std::error_code isSectionData(DataRefImpl Sec, bool &Res) const override;
-  std::error_code isSectionBSS(DataRefImpl Sec, bool &Res) const override;
-  std::error_code isSectionVirtual(DataRefImpl Sec, bool &Res) const override;
-  std::error_code isSectionZeroInit(DataRefImpl Sec, bool &Res) const override;
-  std::error_code isSectionReadOnlyData(DataRefImpl Sec,
-                                        bool &Res) const override;
-  std::error_code isSectionRequiredForExecution(DataRefImpl Sec,
-                                                bool &Res) const override;
-  std::error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
-                                        bool &Result) const override;
+  uint64_t getSectionAlignment(DataRefImpl Sec) const override;
+  bool isSectionText(DataRefImpl Sec) const override;
+  bool isSectionData(DataRefImpl Sec) const override;
+  bool isSectionBSS(DataRefImpl Sec) const override;
+  bool isSectionVirtual(DataRefImpl Sec) const override;
+  bool isSectionZeroInit(DataRefImpl Sec) const override;
+  bool isSectionReadOnlyData(DataRefImpl Sec) const override;
+  bool isSectionRequiredForExecution(DataRefImpl Sec) const override;
+  bool sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb) const override;
   relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
 
@@ -574,8 +595,15 @@ public:
 
   import_directory_iterator import_directory_begin() const;
   import_directory_iterator import_directory_end() const;
+  delay_import_directory_iterator delay_import_directory_begin() const;
+  delay_import_directory_iterator delay_import_directory_end() const;
   export_directory_iterator export_directory_begin() const;
   export_directory_iterator export_directory_end() const;
+
+  iterator_range<import_directory_iterator> import_directories() const;
+  iterator_range<delay_import_directory_iterator>
+      delay_import_directories() const;
+  iterator_range<export_directory_iterator> export_directories() const;
 
   std::error_code getPE32Header(const pe32_header *&Res) const;
   std::error_code getPE32PlusHeader(const pe32plus_header *&Res) const;
@@ -650,7 +678,14 @@ public:
 
   bool operator==(const ImportDirectoryEntryRef &Other) const;
   void moveNext();
+
+  imported_symbol_iterator imported_symbol_begin() const;
+  imported_symbol_iterator imported_symbol_end() const;
+  iterator_range<imported_symbol_iterator> imported_symbols() const;
+
   std::error_code getName(StringRef &Result) const;
+  std::error_code getImportLookupTableRVA(uint32_t &Result) const;
+  std::error_code getImportAddressTableRVA(uint32_t &Result) const;
 
   std::error_code
   getImportTableEntry(const import_directory_table_entry *&Result) const;
@@ -660,6 +695,30 @@ public:
 
 private:
   const import_directory_table_entry *ImportTable;
+  uint32_t Index;
+  const COFFObjectFile *OwningObject;
+};
+
+class DelayImportDirectoryEntryRef {
+public:
+  DelayImportDirectoryEntryRef() : OwningObject(nullptr) {}
+  DelayImportDirectoryEntryRef(const delay_import_directory_table_entry *T,
+                               uint32_t I, const COFFObjectFile *Owner)
+      : Table(T), Index(I), OwningObject(Owner) {}
+
+  bool operator==(const DelayImportDirectoryEntryRef &Other) const;
+  void moveNext();
+
+  imported_symbol_iterator imported_symbol_begin() const;
+  imported_symbol_iterator imported_symbol_end() const;
+  iterator_range<imported_symbol_iterator> imported_symbols() const;
+
+  std::error_code getName(StringRef &Result) const;
+  std::error_code getDelayImportTable(
+      const delay_import_directory_table_entry *&Result) const;
+
+private:
+  const delay_import_directory_table_entry *Table;
   uint32_t Index;
   const COFFObjectFile *OwningObject;
 };
@@ -683,6 +742,29 @@ public:
 
 private:
   const export_directory_table_entry *ExportTable;
+  uint32_t Index;
+  const COFFObjectFile *OwningObject;
+};
+
+class ImportedSymbolRef {
+public:
+  ImportedSymbolRef() : OwningObject(nullptr) {}
+  ImportedSymbolRef(const import_lookup_table_entry32 *Entry, uint32_t I,
+                    const COFFObjectFile *Owner)
+      : Entry32(Entry), Entry64(nullptr), Index(I), OwningObject(Owner) {}
+  ImportedSymbolRef(const import_lookup_table_entry64 *Entry, uint32_t I,
+                    const COFFObjectFile *Owner)
+      : Entry32(nullptr), Entry64(Entry), Index(I), OwningObject(Owner) {}
+
+  bool operator==(const ImportedSymbolRef &Other) const;
+  void moveNext();
+
+  std::error_code getSymbolName(StringRef &Result) const;
+  std::error_code getOrdinal(uint16_t &Result) const;
+
+private:
+  const import_lookup_table_entry32 *Entry32;
+  const import_lookup_table_entry64 *Entry64;
   uint32_t Index;
   const COFFObjectFile *OwningObject;
 };

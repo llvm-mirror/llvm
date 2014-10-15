@@ -164,7 +164,7 @@ static TargetLoweringObjectFile *createTLOF(const Triple &TT) {
   return new ARMElfTargetObjectFile();
 }
 
-ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
+ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM)
     : TargetLowering(TM, createTLOF(Triple(TM.getTargetTriple()))) {
   Subtarget = &TM.getSubtarget<ARMSubtarget>();
   RegInfo = TM.getSubtargetImpl()->getRegisterInfo();
@@ -881,8 +881,8 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
       setOperationAction(ISD::FP_TO_SINT, MVT::i32, Custom);
     }
 
-    // v8 adds f64 <-> f16 conversion. Before that it should be expanded.
-    if (!Subtarget->hasV8Ops()) {
+    // FP-ARMv8 adds f64 <-> f16 conversion. Before that it should be expanded.
+    if (!Subtarget->hasFPARMv8() || Subtarget->isFPOnlySP()) {
       setOperationAction(ISD::FP16_TO_FP, MVT::f64, Expand);
       setOperationAction(ISD::FP_TO_FP16, MVT::f64, Expand);
     }
@@ -898,7 +898,7 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
   if (Subtarget->hasSinCos()) {
     setLibcallName(RTLIB::SINCOS_F32, "sincosf");
     setLibcallName(RTLIB::SINCOS_F64, "sincos");
-    if (Subtarget->getTargetTriple().getOS() == Triple::IOS) {
+    if (Subtarget->getTargetTriple().isiOS()) {
       // For iOS, we don't want to the normal expansion of a libcall to
       // sincos. We want to issue a libcall to __sincos_stret.
       setOperationAction(ISD::FSINCOS, MVT::f64, Custom);
@@ -906,16 +906,21 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
     }
   }
 
-  // ARMv8 implements a lot of rounding-like FP operations.
-  if (Subtarget->hasV8Ops()) {
-    static MVT RoundingTypes[] = {MVT::f32, MVT::f64};
-    for (const auto Ty : RoundingTypes) {
-      setOperationAction(ISD::FFLOOR, Ty, Legal);
-      setOperationAction(ISD::FCEIL, Ty, Legal);
-      setOperationAction(ISD::FROUND, Ty, Legal);
-      setOperationAction(ISD::FTRUNC, Ty, Legal);
-      setOperationAction(ISD::FNEARBYINT, Ty, Legal);
-      setOperationAction(ISD::FRINT, Ty, Legal);
+  // FP-ARMv8 implements a lot of rounding-like FP operations.
+  if (Subtarget->hasFPARMv8()) {
+    setOperationAction(ISD::FFLOOR, MVT::f32, Legal);
+    setOperationAction(ISD::FCEIL, MVT::f32, Legal);
+    setOperationAction(ISD::FROUND, MVT::f32, Legal);
+    setOperationAction(ISD::FTRUNC, MVT::f32, Legal);
+    setOperationAction(ISD::FNEARBYINT, MVT::f32, Legal);
+    setOperationAction(ISD::FRINT, MVT::f32, Legal);
+    if (!Subtarget->isFPOnlySP()) {
+      setOperationAction(ISD::FFLOOR, MVT::f64, Legal);
+      setOperationAction(ISD::FCEIL, MVT::f64, Legal);
+      setOperationAction(ISD::FROUND, MVT::f64, Legal);
+      setOperationAction(ISD::FTRUNC, MVT::f64, Legal);
+      setOperationAction(ISD::FNEARBYINT, MVT::f64, Legal);
+      setOperationAction(ISD::FRINT, MVT::f64, Legal);
     }
   }
   // We have target-specific dag combine patterns for the following nodes:

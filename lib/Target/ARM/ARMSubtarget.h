@@ -236,8 +236,7 @@ protected:
   /// of the specified triple.
   ///
   ARMSubtarget(const std::string &TT, const std::string &CPU,
-               const std::string &FS, TargetMachine &TM, bool IsLittle,
-               const TargetOptions &Options);
+               const std::string &FS, const TargetMachine &TM, bool IsLittle);
 
   /// getMaxInlineSizeThreshold - Returns the maximum memset / memcpy size
   /// that still makes it profitable to inline the call.
@@ -405,6 +404,10 @@ public:
   bool isMClass() const { return ARMProcClass == MClass; }
   bool isRClass() const { return ARMProcClass == RClass; }
   bool isAClass() const { return ARMProcClass == AClass; }
+
+  bool isV6M() const {
+    return isThumb1Only() && isMClass();
+  }
 
   bool isR9Reserved() const { return IsR9Reserved; }
 

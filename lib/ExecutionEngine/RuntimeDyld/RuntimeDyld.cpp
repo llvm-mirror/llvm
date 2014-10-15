@@ -45,6 +45,11 @@ void RuntimeDyldImpl::deregisterEHFrames() {}
 static void dumpSectionMemory(const SectionEntry &S, StringRef State) {
   dbgs() << "----- Contents of section " << S.Name << " " << State << " -----";
 
+  if (S.Address == nullptr) {
+    dbgs() << "\n          <section not emitted>\n";
+    return;
+  }
+
   const unsigned ColsPerRow = 16;
 
   uint8_t *DataAddr = S.Address;
@@ -124,15 +129,12 @@ static std::error_code getOffset(const SymbolRef &Sym, uint64_t &Result) {
   if (std::error_code EC = Sym.getSection(SecI))
     return EC;
 
- if (SecI == Obj->section_end()) {
-   Result = UnknownAddressOrSize;
-   return object_error::success;
- }
+  if (SecI == Obj->section_end()) {
+    Result = UnknownAddressOrSize;
+    return object_error::success;
+  }
 
-  uint64_t SectionAddress;
-  if (std::error_code EC = SecI->getAddress(SectionAddress))
-    return EC;
-
+  uint64_t SectionAddress = SecI->getAddress();
   Result = Address - SectionAddress;
   return object_error::success;
 }
@@ -194,14 +196,13 @@ RuntimeDyldImpl::loadObject(std::unique_ptr<ObjectImage> Obj) {
           SymType == object::SymbolRef::ST_Unknown) {
         uint64_t SectOffset;
         StringRef SectionData;
-        bool IsCode;
         section_iterator SI = Obj->end_sections();
         Check(getOffset(*I, SectOffset));
         Check(I->getSection(SI));
         if (SI == Obj->end_sections())
           continue;
         Check(SI->getContents(SectionData));
-        Check(SI->isText(IsCode));
+        bool IsCode = SI->isText();
         unsigned SectionID =
             findOrEmitSection(*Obj, *SI, IsCode, LocalSections);
         LocalSymbols[Name.data()] = SymbolLoc(SectionID, SectOffset);
@@ -231,8 +232,7 @@ RuntimeDyldImpl::loadObject(std::unique_ptr<ObjectImage> Obj) {
     if (I == E && !ProcessAllSections)
       continue;
 
-    bool IsCode = false;
-    Check(RelocatedSection->isText(IsCode));
+    bool IsCode = RelocatedSection->isText();
     SectionID =
         findOrEmitSection(*Obj, *RelocatedSection, IsCode, LocalSections);
     DEBUG(dbgs() << "\tSectionID: " << SectionID << "\n");
@@ -286,20 +286,15 @@ void RuntimeDyldImpl::computeTotalAllocSize(ObjectImage &Obj,
        SI != SE; ++SI) {
     const SectionRef &Section = *SI;
 
-    bool IsRequired;
-    Check(Section.isRequiredForExecution(IsRequired));
+    bool IsRequired = Section.isRequiredForExecution();
 
     // Consider only the sections that are required to be loaded for execution
     if (IsRequired) {
-      uint64_t DataSize = 0;
-      uint64_t Alignment64 = 0;
-      bool IsCode = false;
-      bool IsReadOnly = false;
       StringRef Name;
-      Check(Section.getSize(DataSize));
-      Check(Section.getAlignment(Alignment64));
-      Check(Section.isText(IsCode));
-      Check(Section.isReadOnlyData(IsReadOnly));
+      uint64_t DataSize = Section.getSize();
+      uint64_t Alignment64 = Section.getAlignment();
+      bool IsCode = Section.isText();
+      bool IsReadOnly = Section.isReadOnlyData();
       Check(Section.getName(Name));
       unsigned Alignment = (unsigned)Alignment64 & 0xffffffffL;
 
@@ -381,10 +376,8 @@ unsigned RuntimeDyldImpl::computeSectionStubBufSize(ObjectImage &Obj,
   }
 
   // Get section data size and alignment
-  uint64_t Alignment64;
-  uint64_t DataSize;
-  Check(Section.getSize(DataSize));
-  Check(Section.getAlignment(Alignment64));
+  uint64_t DataSize = Section.getSize();
+  uint64_t Alignment64 = Section.getAlignment();
 
   // Add stubbuf size alignment
   unsigned Alignment = (unsigned)Alignment64 & 0xffffffffL;
@@ -468,24 +461,18 @@ unsigned RuntimeDyldImpl::emitSection(ObjectImage &Obj,
                                       const SectionRef &Section, bool IsCode) {
 
   StringRef data;
-  uint64_t Alignment64;
   Check(Section.getContents(data));
-  Check(Section.getAlignment(Alignment64));
+  uint64_t Alignment64 = Section.getAlignment();
 
   unsigned Alignment = (unsigned)Alignment64 & 0xffffffffL;
-  bool IsRequired;
-  bool IsVirtual;
-  bool IsZeroInit;
-  bool IsReadOnly;
-  uint64_t DataSize;
   unsigned PaddingSize = 0;
   unsigned StubBufSize = 0;
   StringRef Name;
-  Check(Section.isRequiredForExecution(IsRequired));
-  Check(Section.isVirtual(IsVirtual));
-  Check(Section.isZeroInit(IsZeroInit));
-  Check(Section.isReadOnlyData(IsReadOnly));
-  Check(Section.getSize(DataSize));
+  bool IsRequired = Section.isRequiredForExecution();
+  bool IsVirtual = Section.isVirtual();
+  bool IsZeroInit = Section.isZeroInit();
+  bool IsReadOnly = Section.isReadOnlyData();
+  uint64_t DataSize = Section.getSize();
   Check(Section.getName(Name));
 
   StubBufSize = computeSectionStubBufSize(Obj, Section);

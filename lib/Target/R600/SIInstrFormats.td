@@ -60,6 +60,15 @@ class Enc64 {
   int Size = 8;
 }
 
+class VOP1Common <dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI <outs, ins, asm, pattern> {
+  let mayLoad = 0;
+  let mayStore = 0;
+  let hasSideEffects = 0;
+  let UseNamedOperandTable = 1;
+  let VOP1 = 1;
+}
+
 class VOP3Common <dag outs, dag ins, string asm, list<dag> pattern> :
     InstSI <outs, ins, asm, pattern> {
 
@@ -206,8 +215,8 @@ class SOPP <bits<7> op, dag ins, string asm, list<dag> pattern> :
   let UseNamedOperandTable = 1;
 }
 
-class SMRD <bits<5> op, bits<1> imm, dag outs, dag ins, string asm,
-            list<dag> pattern> : InstSI<outs, ins, asm, pattern>, SMRDe<op, imm> {
+class SMRD <dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI<outs, ins, asm, pattern> {
 
   let LGKM_CNT = 1;
   let SMRD = 1;
@@ -485,14 +494,8 @@ class EXPe : Enc64 {
 let Uses = [EXEC] in {
 
 class VOP1 <bits<8> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    InstSI <outs, ins, asm, pattern>, VOP1e<op> {
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-  let UseNamedOperandTable = 1;
-  let VOP1 = 1;
-}
+    VOP1Common <outs, ins, asm, pattern>,
+    VOP1e<op>;
 
 class VOP2 <bits<6> op, dag outs, dag ins, string asm, list<dag> pattern> :
     InstSI <outs, ins, asm, pattern>, VOP2e<op> {
@@ -555,8 +558,8 @@ class MUBUF <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let UseNamedOperandTable = 1;
 }
 
-class MTBUF <bits<3> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    InstSI<outs, ins, asm, pattern>, MTBUFe <op> {
+class MTBUF <dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI<outs, ins, asm, pattern> {
 
   let VM_CNT = 1;
   let EXP_CNT = 1;
@@ -589,14 +592,6 @@ class MIMG <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let MIMG = 1;
 }
 
-def EXP : InstSI<
-  (outs),
-  (ins i32imm:$en, i32imm:$tgt, i32imm:$compr, i32imm:$done, i32imm:$vm,
-       VReg_32:$src0, VReg_32:$src1, VReg_32:$src2, VReg_32:$src3),
-  "EXP $en, $tgt, $compr, $done, $vm, $src0, $src1, $src2, $src3",
-  [] >, EXPe {
 
-  let EXP_CNT = 1;
-}
 
 } // End Uses = [EXEC]

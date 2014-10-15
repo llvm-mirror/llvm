@@ -175,8 +175,12 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
 
       if (NewCst) {
         BinaryOperator *Shl = BinaryOperator::CreateShl(NewOp, NewCst);
-        if (I.hasNoSignedWrap()) Shl->setHasNoSignedWrap();
-        if (I.hasNoUnsignedWrap()) Shl->setHasNoUnsignedWrap();
+
+        if (I.hasNoSignedWrap())
+          Shl->setHasNoSignedWrap();
+        if (I.hasNoUnsignedWrap())
+          Shl->setHasNoUnsignedWrap();
+
         return Shl;
       }
     }
@@ -531,10 +535,15 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
     }
   }
 
+  // sqrt(X) * sqrt(X) -> X
+  if (AllowReassociate && (Op0 == Op1))
+    if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(Op0))
+      if (II->getIntrinsicID() == Intrinsic::sqrt)
+        return ReplaceInstUsesWith(I, II->getOperand(0));
 
   // Under unsafe algebra do:
   // X * log2(0.5*Y) = X*log2(Y) - X
-  if (I.hasUnsafeAlgebra()) {
+  if (AllowReassociate) {
     Value *OpX = nullptr;
     Value *OpY = nullptr;
     IntrinsicInst *Log2;
@@ -877,7 +886,8 @@ static Instruction *foldUDivPow2Cst(Value *Op0, Value *Op1,
   const APInt &C = cast<Constant>(Op1)->getUniqueInteger();
   BinaryOperator *LShr = BinaryOperator::CreateLShr(
       Op0, ConstantInt::get(Op0->getType(), C.logBase2()));
-  if (I.isExact()) LShr->setIsExact();
+  if (I.isExact())
+    LShr->setIsExact();
   return LShr;
 }
 
@@ -905,7 +915,8 @@ static Instruction *foldUDivShl(Value *Op0, Value *Op1, const BinaryOperator &I,
   if (ZExtInst *Z = dyn_cast<ZExtInst>(Op1))
     N = IC.Builder->CreateZExt(N, Z->getDestTy());
   BinaryOperator *LShr = BinaryOperator::CreateLShr(Op0, N);
-  if (I.isExact()) LShr->setIsExact();
+  if (I.isExact())
+    LShr->setIsExact();
   return LShr;
 }
 
@@ -976,9 +987,9 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
   // (zext A) udiv (zext B) --> zext (A udiv B)
   if (ZExtInst *ZOp0 = dyn_cast<ZExtInst>(Op0))
     if (Value *ZOp1 = dyn_castZExtVal(Op1, ZOp0->getSrcTy()))
-      return new ZExtInst(Builder->CreateUDiv(ZOp0->getOperand(0), ZOp1, "div",
-                                              I.isExact()),
-                          I.getType());
+      return new ZExtInst(
+          Builder->CreateUDiv(ZOp0->getOperand(0), ZOp1, "div", I.isExact()),
+          I.getType());
 
   // (LHS udiv (select (select (...)))) -> (LHS >> (select (select (...))))
   SmallVector<UDivFoldAction, 6> UDivActions;
@@ -1083,8 +1094,7 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
 /// If the conversion was successful, the simplified expression "X * 1/C" is
 /// returned; otherwise, NULL is returned.
 ///
-static Instruction *CvtFDivConstToReciprocal(Value *Dividend,
-                                             Constant *Divisor,
+static Instruction *CvtFDivConstToReciprocal(Value *Dividend, Constant *Divisor,
                                              bool AllowReciprocal) {
   if (!isa<ConstantFP>(Divisor)) // TODO: handle vectors.
     return nullptr;

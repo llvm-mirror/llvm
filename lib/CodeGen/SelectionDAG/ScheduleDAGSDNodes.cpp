@@ -29,7 +29,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
@@ -38,9 +37,9 @@ using namespace llvm;
 
 STATISTIC(LoadsClustered, "Number of loads clustered together");
 
-// This allows latency based scheduler to notice high latency instructions
-// without a target itinerary. The choise if number here has more to do with
-// balancing scheduler heursitics than with the actual machine latency.
+// This allows the latency-based scheduler to notice high latency instructions
+// without a target itinerary. The choice of number here has more to do with
+// balancing scheduler heuristics than with the actual machine latency.
 static cl::opt<int> HighLatencyCycles(
   "sched-high-latency-cycles", cl::Hidden, cl::init(10),
   cl::desc("Roughly estimate the number of cycles that 'long latency'"
@@ -425,7 +424,7 @@ void ScheduleDAGSDNodes::BuildSchedUnits() {
 }
 
 void ScheduleDAGSDNodes::AddSchedEdges() {
-  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+  const TargetSubtargetInfo &ST = MF.getSubtarget();
 
   // Check to see if the scheduler cares about latencies.
   bool UnitLatencies = forceUnitLatencies();

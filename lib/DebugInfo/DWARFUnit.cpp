@@ -17,13 +17,26 @@
 using namespace llvm;
 using namespace dwarf;
 
-DWARFUnit::DWARFUnit(DWARFContext &DC, const DWARFDebugAbbrev *DA,
-                     StringRef IS, StringRef RS, StringRef SS, StringRef SOS,
-                     StringRef AOS, const RelocAddrMap *M, bool LE,
-                     const DWARFUnitSectionBase& UnitSection)
-  : Context(DC), Abbrev(DA), InfoSection(IS), RangeSection(RS),
-    StringSection(SS), StringOffsetSection(SOS), AddrOffsetSection(AOS),
-    RelocMap(M), isLittleEndian(LE), UnitSection(UnitSection)  {
+void DWARFUnitSectionBase::parse(DWARFContext &C, const DWARFSection &Section) {
+  parseImpl(C, Section, C.getDebugAbbrev(), C.getRangeSection(),
+            C.getStringSection(), StringRef(), C.getAddrSection(),
+            C.isLittleEndian());
+}
+
+void DWARFUnitSectionBase::parseDWO(DWARFContext &C,
+                                    const DWARFSection &DWOSection) {
+  parseImpl(C, DWOSection, C.getDebugAbbrevDWO(), C.getRangeDWOSection(),
+            C.getStringDWOSection(), C.getStringOffsetDWOSection(),
+            C.getAddrSection(), C.isLittleEndian());
+}
+
+DWARFUnit::DWARFUnit(DWARFContext &DC, const DWARFSection &Section,
+                     const DWARFDebugAbbrev *DA, StringRef RS, StringRef SS,
+                     StringRef SOS, StringRef AOS, bool LE,
+                     const DWARFUnitSectionBase &UnitSection)
+    : Context(DC), InfoSection(Section), Abbrev(DA), RangeSection(RS),
+      StringSection(SS), StringOffsetSection(SOS), AddrOffsetSection(AOS),
+      isLittleEndian(LE), UnitSection(UnitSection) {
   clear();
 }
 

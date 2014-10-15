@@ -64,7 +64,7 @@ static TargetLoweringObjectFile *createTLOF(const Triple &TT) {
   return new PPC64LinuxTargetObjectFile();
 }
 
-PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
+PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM)
     : TargetLowering(TM, createTLOF(Triple(TM.getTargetTriple()))),
       Subtarget(*TM.getSubtargetImpl()) {
   setPow2SDivIsCheap();
@@ -613,10 +613,10 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
     setOperationAction(ISD::READCYCLECOUNTER, MVT::i64, Legal);
   }
 
-  setOperationAction(ISD::ATOMIC_LOAD,  MVT::i32, Expand);
-  setOperationAction(ISD::ATOMIC_STORE, MVT::i32, Expand);
-  setOperationAction(ISD::ATOMIC_LOAD,  MVT::i64, Expand);
-  setOperationAction(ISD::ATOMIC_STORE, MVT::i64, Expand);
+  if (!isPPC64) {
+    setOperationAction(ISD::ATOMIC_LOAD,  MVT::i64, Expand);
+    setOperationAction(ISD::ATOMIC_STORE, MVT::i64, Expand);
+  }
 
   setBooleanContents(ZeroOrOneBooleanContent);
   // Altivec instructions set fields to all zeros or all ones.

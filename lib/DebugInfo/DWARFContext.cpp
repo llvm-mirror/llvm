@@ -314,84 +314,28 @@ DWARFContext::getLineTableForUnit(DWARFUnit *cu) {
 }
 
 void DWARFContext::parseCompileUnits() {
-  if (!CUs.empty())
-    return;
-  uint32_t offset = 0;
-  const DataExtractor &DIData = DataExtractor(getInfoSection().Data,
-                                              isLittleEndian(), 0);
-  while (DIData.isValidOffset(offset)) {
-    std::unique_ptr<DWARFCompileUnit> CU(new DWARFCompileUnit(*this,
-        getDebugAbbrev(), getInfoSection().Data, getRangeSection(),
-        getStringSection(), StringRef(), getAddrSection(),
-        &getInfoSection().Relocs, isLittleEndian(), CUs));
-    if (!CU->extract(DIData, &offset)) {
-      break;
-    }
-    CUs.push_back(std::move(CU));
-    offset = CUs.back()->getNextUnitOffset();
-  }
+  CUs.parse(*this, getInfoSection());
 }
 
 void DWARFContext::parseTypeUnits() {
   if (!TUs.empty())
     return;
   for (const auto &I : getTypesSections()) {
-    uint32_t offset = 0;
-    const DataExtractor &DIData =
-        DataExtractor(I.second.Data, isLittleEndian(), 0);
     TUs.push_back(DWARFUnitSection<DWARFTypeUnit>());
-    auto &TUS = TUs.back();
-    while (DIData.isValidOffset(offset)) {
-      std::unique_ptr<DWARFTypeUnit> TU(new DWARFTypeUnit(*this,
-           getDebugAbbrev(), I.second.Data, getRangeSection(),
-           getStringSection(), StringRef(), getAddrSection(),
-           &I.second.Relocs, isLittleEndian(), TUS));
-      if (!TU->extract(DIData, &offset))
-        break;
-      TUS.push_back(std::move(TU));
-      offset = TUS.back()->getNextUnitOffset();
-    }
+    TUs.back().parse(*this, I.second);
   }
 }
 
 void DWARFContext::parseDWOCompileUnits() {
-  if (!DWOCUs.empty())
-    return;
-  uint32_t offset = 0;
-  const DataExtractor &DIData =
-      DataExtractor(getInfoDWOSection().Data, isLittleEndian(), 0);
-  while (DIData.isValidOffset(offset)) {
-    std::unique_ptr<DWARFCompileUnit> DWOCU(new DWARFCompileUnit(*this,
-        getDebugAbbrevDWO(), getInfoDWOSection().Data, getRangeDWOSection(),
-        getStringDWOSection(), getStringOffsetDWOSection(), getAddrSection(),
-        &getInfoDWOSection().Relocs, isLittleEndian(), DWOCUs));
-    if (!DWOCU->extract(DIData, &offset)) {
-      break;
-    }
-    DWOCUs.push_back(std::move(DWOCU));
-    offset = DWOCUs.back()->getNextUnitOffset();
-  }
+  DWOCUs.parseDWO(*this, getInfoDWOSection());
 }
 
 void DWARFContext::parseDWOTypeUnits() {
   if (!DWOTUs.empty())
     return;
   for (const auto &I : getTypesDWOSections()) {
-    uint32_t offset = 0;
-    const DataExtractor &DIData =
-        DataExtractor(I.second.Data, isLittleEndian(), 0);
     DWOTUs.push_back(DWARFUnitSection<DWARFTypeUnit>());
-    auto &TUS = DWOTUs.back();
-    while (DIData.isValidOffset(offset)) {
-      std::unique_ptr<DWARFTypeUnit> TU(new DWARFTypeUnit(*this,
-          getDebugAbbrevDWO(), I.second.Data, getRangeDWOSection(),
-          getStringDWOSection(), getStringOffsetDWOSection(), getAddrSection(),
-          &I.second.Relocs, isLittleEndian(), TUS));
-      if (!TU->extract(DIData, &offset))
-        break;
-      TUS.push_back(std::move(TU));
-      offset = TUS.back()->getNextUnitOffset();
-    }
+    DWOTUs.back().parseDWO(*this, I.second);
   }
 }
 
@@ -572,12 +516,10 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile &Obj)
     StringRef name;
     Section.getName(name);
     // Skip BSS and Virtual sections, they aren't interesting.
-    bool IsBSS;
-    Section.isBSS(IsBSS);
+    bool IsBSS = Section.isBSS();
     if (IsBSS)
       continue;
-    bool IsVirtual;
-    Section.isVirtual(IsVirtual);
+    bool IsVirtual = Section.isVirtual();
     if (IsVirtual)
       continue;
     StringRef data;
@@ -668,23 +610,19 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile &Obj)
     }
 
     if (Section.relocation_begin() != Section.relocation_end()) {
-      uint64_t SectionSize;
-      RelocatedSection->getSize(SectionSize);
+      uint64_t SectionSize = RelocatedSection->getSize();
       for (const RelocationRef &Reloc : Section.relocations()) {
         uint64_t Address;
         Reloc.getOffset(Address);
         uint64_t Type;
         Reloc.getType(Type);
         uint64_t SymAddr = 0;
-        // ELF relocations may need the symbol address
-        if (Obj.isELF()) {
-          object::symbol_iterator Sym = Reloc.getSymbol();
+        object::symbol_iterator Sym = Reloc.getSymbol();
+        if (Sym != Obj.symbol_end())
           Sym->getAddress(SymAddr);
-        }
 
-        object::RelocVisitor V(Obj.getFileFormatName());
-        // The section address is always 0 for debug sections.
-        object::RelocToApply R(V.visit(Type, Reloc, 0, SymAddr));
+        object::RelocVisitor V(Obj);
+        object::RelocToApply R(V.visit(Type, Reloc, SymAddr));
         if (V.error()) {
           SmallString<32> Name;
           std::error_code ec(Reloc.getTypeName(Name));

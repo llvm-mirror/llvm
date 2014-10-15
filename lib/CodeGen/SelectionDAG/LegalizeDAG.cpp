@@ -1627,7 +1627,7 @@ void SelectionDAGLegalize::ExpandDYNAMIC_STACKALLOC(SDNode* Node,
   Chain = SP.getValue(1);
   unsigned Align = cast<ConstantSDNode>(Tmp3)->getZExtValue();
   unsigned StackAlign =
-      TM.getSubtargetImpl()->getFrameLowering()->getStackAlignment();
+      DAG.getSubtarget().getFrameLowering()->getStackAlignment();
   Tmp1 = DAG.getNode(ISD::SUB, dl, VT, SP, Size);       // Value
   if (Align > StackAlign)
     Tmp1 = DAG.getNode(ISD::AND, dl, VT, Tmp1,
@@ -1881,7 +1881,8 @@ ExpandBVWithShuffles(SDNode *Node, SelectionDAG &DAG,
                                          ShuffleVec.data());
         else if (!TLI.isShuffleMaskLegal(ShuffleVec, VT))
           return false;
-        NewIntermedVals.push_back(std::make_pair(Shuffle, FinalIndices));
+        NewIntermedVals.push_back(
+            std::make_pair(Shuffle, std::move(FinalIndices)));
       }
 
       // If we had an odd number of defined values, then append the last
