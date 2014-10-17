@@ -15,11 +15,14 @@
 #include "llvm/ProfileData/CoverageMappingReader.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/LEB128.h"
 
 using namespace llvm;
 using namespace coverage;
 using namespace object;
+
+#define DEBUG_TYPE "coverage-mapping"
 
 void CoverageMappingIterator::increment() {
   // Check if all the records were read or if an error occurred while reading
@@ -198,6 +201,18 @@ std::error_code RawCoverageMappingReader::readMappingRegionsSubArray(
       ColumnStart = 1;
       ColumnEnd = std::numeric_limits<unsigned>::max();
     }
+
+    DEBUG({
+      dbgs() << "Counter in file " << InferredFileID << " " << LineStart << ":"
+             << ColumnStart << " -> " << (LineStart + NumLines) << ":"
+             << ColumnEnd << ", ";
+      if (Kind == CounterMappingRegion::ExpansionRegion)
+        dbgs() << "Expands to file " << ExpandedFileID;
+      else
+        CounterMappingContext(Expressions).dump(C, dbgs());
+      dbgs() << "\n";
+    });
+
     MappingRegions.push_back(CounterMappingRegion(
         C, InferredFileID, LineStart, ColumnStart, LineStart + NumLines,
         ColumnEnd, HasCodeBefore, Kind));
@@ -318,7 +333,8 @@ struct SectionData {
   std::error_code load(SectionRef &Section) {
     if (auto Err = Section.getContents(Data))
       return Err;
-    return Section.getAddress(Address);
+    Address = Section.getAddress();
+    return instrprof_error::success;
   }
 
   std::error_code get(uint64_t Pointer, size_t Size, StringRef &Result) {

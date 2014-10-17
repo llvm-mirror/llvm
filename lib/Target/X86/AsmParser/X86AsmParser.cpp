@@ -720,7 +720,7 @@ private:
     llvm_unreachable("invalid mode");
   }
 
-  virtual bool OmitRegisterFromClobberLists(unsigned RegNo) override;
+  bool OmitRegisterFromClobberLists(unsigned RegNo) override;
 
   /// doSrcDstMatch - Returns true if operands are matching in their
   /// word size (%si and %di, %esi and %edi, etc.). Order depends on
@@ -787,6 +787,8 @@ public:
   }
 
   bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc) override;
+
+  void SetFrameRegister(unsigned RegNo) override;
 
   bool ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
@@ -968,6 +970,10 @@ bool X86AsmParser::ParseRegister(unsigned &RegNo,
 
   Parser.Lex(); // Eat identifier token.
   return false;
+}
+
+void X86AsmParser::SetFrameRegister(unsigned RegNo) {
+  Instrumentation->SetInitialFrameRegister(RegNo);
 }
 
 std::unique_ptr<X86Operand> X86AsmParser::DefaultMemSIOperand(SMLoc Loc) {
@@ -1314,9 +1320,11 @@ bool X86AsmParser::ParseIntelIdentifier(const MCExpr *&Val,
   Val = nullptr;
 
   StringRef LineBuf(Identifier.data());
-  SemaCallback->LookupInlineAsmIdentifier(LineBuf, Info, IsUnevaluatedOperand);
+  void *Result =
+    SemaCallback->LookupInlineAsmIdentifier(LineBuf, Info, IsUnevaluatedOperand);
 
   const AsmToken &Tok = Parser.getTok();
+  SMLoc Loc = Tok.getLoc();
 
   // Advance the token stream until the end of the current token is
   // after the end of what the frontend claimed.
@@ -1328,9 +1336,22 @@ bool X86AsmParser::ParseIntelIdentifier(const MCExpr *&Val,
     assert(End.getPointer() <= EndPtr && "frontend claimed part of a token?");
     if (End.getPointer() == EndPtr) break;
   }
+  Identifier = LineBuf;
+
+  // If the identifier lookup was unsuccessful, assume that we are dealing with
+  // a label.
+  if (!Result) {
+    StringRef InternalName =
+      SemaCallback->LookupInlineAsmLabel(Identifier, getSourceManager(),
+                                         Loc, false);
+    assert(InternalName.size() && "We should have an internal name here.");
+    // Push a rewrite for replacing the identifier name with the internal name.
+    InstInfo->AsmRewrites->push_back(AsmRewrite(AOK_Label, Loc,
+                                                Identifier.size(),
+                                                InternalName));
+  }
 
   // Create the symbol reference.
-  Identifier = LineBuf;
   MCSymbol *Sym = getContext().GetOrCreateSymbol(Identifier);
   MCSymbolRefExpr::VariantKind Variant = MCSymbolRefExpr::VK_None;
   Val = MCSymbolRefExpr::Create(Sym, Variant, getParser().getContext());

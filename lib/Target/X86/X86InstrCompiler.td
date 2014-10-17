@@ -46,11 +46,11 @@ let Defs = [ESP, EFLAGS], Uses = [ESP] in {
 def ADJCALLSTACKDOWN32 : I<0, Pseudo, (outs), (ins i32imm:$amt),
                            "#ADJCALLSTACKDOWN",
                            [(X86callseq_start timm:$amt)]>,
-                          Requires<[Not64BitMode]>;
+                          Requires<[NotLP64]>;
 def ADJCALLSTACKUP32   : I<0, Pseudo, (outs), (ins i32imm:$amt1, i32imm:$amt2),
                            "#ADJCALLSTACKUP",
                            [(X86callseq_end timm:$amt1, timm:$amt2)]>,
-                          Requires<[Not64BitMode]>;
+                          Requires<[NotLP64]>;
 }
 
 // ADJCALLSTACKDOWN/UP implicitly use/def RSP because they may be expanded into
@@ -62,11 +62,11 @@ let Defs = [RSP, EFLAGS], Uses = [RSP] in {
 def ADJCALLSTACKDOWN64 : I<0, Pseudo, (outs), (ins i32imm:$amt),
                            "#ADJCALLSTACKDOWN",
                            [(X86callseq_start timm:$amt)]>,
-                          Requires<[In64BitMode]>;
+                          Requires<[IsLP64]>;
 def ADJCALLSTACKUP64   : I<0, Pseudo, (outs), (ins i32imm:$amt1, i32imm:$amt2),
                            "#ADJCALLSTACKUP",
                            [(X86callseq_end timm:$amt1, timm:$amt2)]>,
-                          Requires<[In64BitMode]>;
+                          Requires<[IsLP64]>;
 }
 
 
@@ -118,7 +118,7 @@ def SEG_ALLOCA_32 : I<0, Pseudo, (outs GR32:$dst), (ins GR32:$size),
                       "# variable sized alloca for segmented stacks",
                       [(set GR32:$dst,
                          (X86SegAlloca GR32:$size))]>,
-                    Requires<[Not64BitMode]>;
+                    Requires<[NotLP64]>;
 
 let Defs = [RAX, RSP, EFLAGS], Uses = [RSP] in
 def SEG_ALLOCA_64 : I<0, Pseudo, (outs GR64:$dst), (ins GR64:$size),
@@ -751,18 +751,88 @@ defm LXADD : ATOMIC_LOAD_BINOP<0xc0, 0xc1, "xadd", "atomic_load_add",
                                IIC_XADD_LOCK_MEM8, IIC_XADD_LOCK_MEM>,
              TB, LOCK;
 
-def ACQUIRE_MOV8rm  : I<0, Pseudo, (outs GR8 :$dst), (ins i8mem :$src),
-                      "#ACQUIRE_MOV PSEUDO!",
-                      [(set GR8:$dst,  (atomic_load_8  addr:$src))]>;
-def ACQUIRE_MOV16rm : I<0, Pseudo, (outs GR16:$dst), (ins i16mem:$src),
-                      "#ACQUIRE_MOV PSEUDO!",
-                      [(set GR16:$dst, (atomic_load_16 addr:$src))]>;
-def ACQUIRE_MOV32rm : I<0, Pseudo, (outs GR32:$dst), (ins i32mem:$src),
-                      "#ACQUIRE_MOV PSEUDO!",
-                      [(set GR32:$dst, (atomic_load_32 addr:$src))]>;
-def ACQUIRE_MOV64rm : I<0, Pseudo, (outs GR64:$dst), (ins i64mem:$src),
-                      "#ACQUIRE_MOV PSEUDO!",
-                      [(set GR64:$dst, (atomic_load_64 addr:$src))]>;
+/* The following multiclass tries to make sure that in code like
+ *    x.store (immediate op x.load(acquire), release)
+ * an operation directly on memory is generated instead of wasting a register.
+ * It is not automatic as atomic_store/load are only lowered to MOV instructions
+ * extremely late to prevent them from being accidentally reordered in the backend
+ * (see below the RELEASE_MOV* / ACQUIRE_MOV* pseudo-instructions)
+ */
+multiclass RELEASE_BINOP_MI<string op> {
+    def NAME#8mi : I<0, Pseudo, (outs), (ins i8mem:$dst, i8imm:$src),
+        "#RELEASE_BINOP PSEUDO!",
+        [(atomic_store_8 addr:$dst, (!cast<PatFrag>(op)
+            (atomic_load_8 addr:$dst), (i8 imm:$src)))]>;
+    // NAME#16 is not generated as 16-bit arithmetic instructions are considered
+    // costly and avoided as far as possible by this backend anyway
+    def NAME#32mi : I<0, Pseudo, (outs), (ins i32mem:$dst, i32imm:$src),
+        "#RELEASE_BINOP PSEUDO!",
+        [(atomic_store_32 addr:$dst, (!cast<PatFrag>(op)
+            (atomic_load_32 addr:$dst), (i32 imm:$src)))]>;
+    def NAME#64mi32 : I<0, Pseudo, (outs), (ins i64mem:$dst, i64i32imm:$src),
+        "#RELEASE_BINOP PSEUDO!",
+        [(atomic_store_64 addr:$dst, (!cast<PatFrag>(op)
+            (atomic_load_64 addr:$dst), (i64immSExt32:$src)))]>;
+}
+defm RELEASE_ADD : RELEASE_BINOP_MI<"add">;
+defm RELEASE_AND : RELEASE_BINOP_MI<"and">;
+defm RELEASE_OR  : RELEASE_BINOP_MI<"or">;
+defm RELEASE_XOR : RELEASE_BINOP_MI<"xor">;
+// Note: we don't deal with sub, because substractions of constants are
+// optimized into additions before this code can run
+
+multiclass RELEASE_UNOP<dag dag8, dag dag16, dag dag32, dag dag64> {
+    def NAME#8m : I<0, Pseudo, (outs), (ins i8mem:$dst),
+        "#RELEASE_UNOP PSEUDO!",
+        [(atomic_store_8 addr:$dst, dag8)]>;
+    def NAME#16m : I<0, Pseudo, (outs), (ins i16mem:$dst),
+        "#RELEASE_UNOP PSEUDO!",
+        [(atomic_store_16 addr:$dst, dag16)]>;
+    def NAME#32m : I<0, Pseudo, (outs), (ins i32mem:$dst),
+        "#RELEASE_UNOP PSEUDO!",
+        [(atomic_store_32 addr:$dst, dag32)]>;
+    def NAME#64m : I<0, Pseudo, (outs), (ins i64mem:$dst),
+        "#RELEASE_UNOP PSEUDO!",
+        [(atomic_store_64 addr:$dst, dag64)]>;
+}
+
+defm RELEASE_INC : RELEASE_UNOP<
+    (add (atomic_load_8  addr:$dst), (i8 1)),
+    (add (atomic_load_16 addr:$dst), (i16 1)),
+    (add (atomic_load_32 addr:$dst), (i32 1)),
+    (add (atomic_load_64 addr:$dst), (i64 1))>, Requires<[NotSlowIncDec]>;
+defm RELEASE_DEC : RELEASE_UNOP<
+    (add (atomic_load_8  addr:$dst), (i8 -1)),
+    (add (atomic_load_16 addr:$dst), (i16 -1)),
+    (add (atomic_load_32 addr:$dst), (i32 -1)),
+    (add (atomic_load_64 addr:$dst), (i64 -1))>, Requires<[NotSlowIncDec]>;
+/*
+TODO: These don't work because the type inference of TableGen fails.
+TODO: find a way to fix it.
+defm RELEASE_NEG : RELEASE_UNOP<
+    (ineg (atomic_load_8  addr:$dst)),
+    (ineg (atomic_load_16 addr:$dst)),
+    (ineg (atomic_load_32 addr:$dst)),
+    (ineg (atomic_load_64 addr:$dst))>;
+defm RELEASE_NOT : RELEASE_UNOP<
+    (not (atomic_load_8  addr:$dst)),
+    (not (atomic_load_16 addr:$dst)),
+    (not (atomic_load_32 addr:$dst)),
+    (not (atomic_load_64 addr:$dst))>;
+*/
+
+def RELEASE_MOV8mi : I<0, Pseudo, (outs), (ins i8mem:$dst, i8imm:$src),
+			"#RELEASE_MOV PSEUDO !",
+			[(atomic_store_8 addr:$dst, (i8 imm:$src))]>;
+def RELEASE_MOV16mi : I<0, Pseudo, (outs), (ins i16mem:$dst, i16imm:$src),
+			"#RELEASE_MOV PSEUDO !",
+			[(atomic_store_16 addr:$dst, (i16 imm:$src))]>;
+def RELEASE_MOV32mi : I<0, Pseudo, (outs), (ins i32mem:$dst, i32imm:$src),
+			"#RELEASE_MOV PSEUDO !",
+			[(atomic_store_32 addr:$dst, (i32 imm:$src))]>;
+def RELEASE_MOV64mi32 : I<0, Pseudo, (outs), (ins i64mem:$dst, i64i32imm:$src),
+			"#RELEASE_MOV PSEUDO !",
+			[(atomic_store_64 addr:$dst, i64immSExt32:$src)]>;
 
 def RELEASE_MOV8mr  : I<0, Pseudo, (outs), (ins i8mem :$dst, GR8 :$src),
                         "#RELEASE_MOV PSEUDO!",
@@ -777,10 +847,21 @@ def RELEASE_MOV64mr : I<0, Pseudo, (outs), (ins i64mem:$dst, GR64:$src),
                         "#RELEASE_MOV PSEUDO!",
                         [(atomic_store_64 addr:$dst, GR64:$src)]>;
 
+def ACQUIRE_MOV8rm  : I<0, Pseudo, (outs GR8 :$dst), (ins i8mem :$src),
+                      "#ACQUIRE_MOV PSEUDO!",
+                      [(set GR8:$dst,  (atomic_load_8  addr:$src))]>;
+def ACQUIRE_MOV16rm : I<0, Pseudo, (outs GR16:$dst), (ins i16mem:$src),
+                      "#ACQUIRE_MOV PSEUDO!",
+                      [(set GR16:$dst, (atomic_load_16 addr:$src))]>;
+def ACQUIRE_MOV32rm : I<0, Pseudo, (outs GR32:$dst), (ins i32mem:$src),
+                      "#ACQUIRE_MOV PSEUDO!",
+                      [(set GR32:$dst, (atomic_load_32 addr:$src))]>;
+def ACQUIRE_MOV64rm : I<0, Pseudo, (outs GR64:$dst), (ins i64mem:$src),
+                      "#ACQUIRE_MOV PSEUDO!",
+                      [(set GR64:$dst, (atomic_load_64 addr:$src))]>;
 //===----------------------------------------------------------------------===//
 // Conditional Move Pseudo Instructions.
 //===----------------------------------------------------------------------===//
-
 
 // CMOV* - Used to implement the SSE SELECT DAG operation.  Expanded after
 // instruction selection into a branch sequence.

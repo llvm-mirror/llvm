@@ -908,6 +908,13 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     return nullptr;   // Already selected.
   }
 
+  // In case any misguided DAG-level optimizations form an ADD with a
+  // TargetConstant operand, crash here instead of miscompiling (by selecting
+  // an r+r add instead of some kind of r+i add).
+  if (N->getOpcode() == ISD::ADD &&
+      N->getOperand(1).getOpcode() == ISD::TargetConstant)
+    llvm_unreachable("Invalid ADD with TargetConstant operand");
+
   switch (N->getOpcode()) {
   default: break;
 
@@ -1433,7 +1440,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       SDValue GA = N->getOperand(0);
       return CurDAG->getMachineNode(PPC::LWZtoc, dl, MVT::i32, GA,
                                     N->getOperand(1));
-	}
+    }
     assert (PPCSubTarget->isPPC64() &&
             "Only supported for 64-bit ABI and 32-bit SVR4");
 

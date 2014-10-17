@@ -457,7 +457,7 @@ public:
     return Offset;
   }
 
-  const StringRef getValues() const {
+  StringRef getValues() const {
     assert(Operation == OpEscape);
     return StringRef(&Values[0], Values.size());
   }
@@ -466,13 +466,15 @@ public:
 struct MCDwarfFrameInfo {
   MCDwarfFrameInfo()
       : Begin(nullptr), End(nullptr), Personality(nullptr), Lsda(nullptr),
-        Instructions(), PersonalityEncoding(), LsdaEncoding(0),
-        CompactUnwindEncoding(0), IsSignalFrame(false), IsSimple(false) {}
+        Instructions(), CurrentCfaRegister(0), PersonalityEncoding(),
+        LsdaEncoding(0), CompactUnwindEncoding(0), IsSignalFrame(false),
+        IsSimple(false) {}
   MCSymbol *Begin;
   MCSymbol *End;
   const MCSymbol *Personality;
   const MCSymbol *Lsda;
   std::vector<MCCFIInstruction> Instructions;
+  unsigned CurrentCfaRegister;
   unsigned PersonalityEncoding;
   unsigned LsdaEncoding;
   uint32_t CompactUnwindEncoding;

@@ -673,24 +673,23 @@ Verifier::visitModuleFlag(const MDNode *Op,
   // constant int), the flag ID (an MDString), and the value.
   Assert1(Op->getNumOperands() == 3,
           "incorrect number of operands in module flag", Op);
-  ConstantInt *Behavior = dyn_cast<ConstantInt>(Op->getOperand(0));
+  Module::ModFlagBehavior MFB;
+  if (!Module::isValidModFlagBehavior(Op->getOperand(0), MFB)) {
+    Assert1(
+        dyn_cast<ConstantInt>(Op->getOperand(0)),
+        "invalid behavior operand in module flag (expected constant integer)",
+        Op->getOperand(0));
+    Assert1(false,
+            "invalid behavior operand in module flag (unexpected constant)",
+            Op->getOperand(0));
+  }
   MDString *ID = dyn_cast<MDString>(Op->getOperand(1));
-  Assert1(Behavior,
-          "invalid behavior operand in module flag (expected constant integer)",
-          Op->getOperand(0));
-  unsigned BehaviorValue = Behavior->getZExtValue();
   Assert1(ID,
           "invalid ID operand in module flag (expected metadata string)",
           Op->getOperand(1));
 
   // Sanity check the values for behaviors with additional requirements.
-  switch (BehaviorValue) {
-  default:
-    Assert1(false,
-            "invalid behavior operand in module flag (unexpected constant)",
-            Op->getOperand(0));
-    break;
-
+  switch (MFB) {
   case Module::Error:
   case Module::Warning:
   case Module::Override:
@@ -726,7 +725,7 @@ Verifier::visitModuleFlag(const MDNode *Op,
   }
 
   // Unless this is a "requires" flag, check the ID is unique.
-  if (BehaviorValue != Module::Require) {
+  if (MFB != Module::Require) {
     bool Inserted = SeenIDs.insert(std::make_pair(ID, Op)).second;
     Assert1(Inserted,
             "module flag identifiers must be unique (or of 'require' type)",
@@ -1055,20 +1054,19 @@ void Verifier::visitFunction(const Function &F) {
           "Attribute 'builtin' can only be applied to a callsite.", &F);
 
   // Check that this function meets the restrictions on this calling convention.
+  // Sometimes varargs is used for perfectly forwarding thunks, so some of these
+  // restrictions can be lifted.
   switch (F.getCallingConv()) {
   default:
-    break;
   case CallingConv::C:
     break;
   case CallingConv::Fast:
   case CallingConv::Cold:
-  case CallingConv::X86_FastCall:
-  case CallingConv::X86_ThisCall:
   case CallingConv::Intel_OCL_BI:
   case CallingConv::PTX_Kernel:
   case CallingConv::PTX_Device:
-    Assert1(!F.isVarArg(),
-            "Varargs functions must have C calling conventions!", &F);
+    Assert1(!F.isVarArg(), "Calling convention does not support varargs or "
+                           "perfect forwarding!", &F);
     break;
   }
 

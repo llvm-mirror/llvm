@@ -31,6 +31,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Target/TargetCallingConv.h"
@@ -267,10 +268,14 @@ public:
     return HasFloatingPointExceptions;
   }
 
-  /// Return the ValueType of the result of SETCC operations.  Also used to
-  /// obtain the target's preferred type for the condition operand of SELECT and
-  /// BRCOND nodes.  In the case of BRCOND the argument passed is MVT::Other
-  /// since there are no other operands to get a type hint from.
+  /// Return true if target always beneficiates from combining into FMA for a
+  /// given value type. This must typically return false on targets where FMA
+  /// takes more cycles to execute than FADD.
+  virtual bool enableAggressiveFMAFusion(EVT VT) const {
+    return false;
+  }
+
+  /// Return the ValueType of the result of SETCC operations.
   virtual EVT getSetCCResultType(LLVMContext &Context, EVT VT) const;
 
   /// Return the ValueType for comparison libcalls. Comparions libcalls include
@@ -838,11 +843,6 @@ public:
     return UseUnderscoreLongJmp;
   }
 
-  /// Return whether the target can generate code for jump tables.
-  bool supportJumpTables() const {
-    return SupportJumpTables;
-  }
-
   /// Return integer threshold on number of blocks to use jump tables rather
   /// than if sequence.
   int getMinimumJumpTableEntries() const {
@@ -940,6 +940,10 @@ public:
   /// \name Helpers for atomic expansion.
   /// @{
 
+  /// True if AtomicExpandPass should use emitLoadLinked/emitStoreConditional
+  /// and expand AtomicCmpXchgInst.
+  virtual bool hasLoadLinkedStoreConditional() const { return false; }
+
   /// Perform a load-linked operation on Addr, returning a "Value *" with the
   /// corresponding pointee type. This may entail some non-trivial operations to
   /// truncate or reconstruct types that will be illegal in the backend. See
@@ -960,31 +964,61 @@ public:
   /// It is called by AtomicExpandPass before expanding an
   ///   AtomicRMW/AtomicCmpXchg/AtomicStore/AtomicLoad.
   /// RMW and CmpXchg set both IsStore and IsLoad to true.
-  /// Backends with !getInsertFencesForAtomic() should keep a no-op here
-  virtual void emitLeadingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
+  /// Backends with !getInsertFencesForAtomic() should keep a no-op here.
+  /// This function should either return a nullptr, or a pointer to an IR-level
+  ///   Instruction*. Even complex fence sequences can be represented by a
+  ///   single Instruction* through an intrinsic to be lowered later.
+  virtual Instruction* emitLeadingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
           bool IsStore, bool IsLoad) const {
     assert(!getInsertFencesForAtomic());
+    return nullptr;
   }
 
   /// Inserts in the IR a target-specific intrinsic specifying a fence.
   /// It is called by AtomicExpandPass after expanding an
   ///   AtomicRMW/AtomicCmpXchg/AtomicStore/AtomicLoad.
   /// RMW and CmpXchg set both IsStore and IsLoad to true.
-  /// Backends with !getInsertFencesForAtomic() should keep a no-op here
-  virtual void emitTrailingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
+  /// Backends with !getInsertFencesForAtomic() should keep a no-op here.
+  /// This function should either return a nullptr, or a pointer to an IR-level
+  ///   Instruction*. Even complex fence sequences can be represented by a
+  ///   single Instruction* through an intrinsic to be lowered later.
+  virtual Instruction* emitTrailingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
           bool IsStore, bool IsLoad) const {
     assert(!getInsertFencesForAtomic());
+    return nullptr;
   }
 
-  /// Return true if the given (atomic) instruction should be expanded by the
-  /// IR-level AtomicExpand pass into a loop involving
-  /// load-linked/store-conditional pairs. Atomic stores will be expanded in the
-  /// same way as "atomic xchg" operations which ignore their output if needed.
-  virtual bool shouldExpandAtomicInIR(Instruction *Inst) const {
+  /// Returns true if the given (atomic) store should be expanded by the
+  /// IR-level AtomicExpand pass into an "atomic xchg" which ignores its input.
+  virtual bool shouldExpandAtomicStoreInIR(StoreInst *SI) const {
     return false;
   }
 
+  /// Returns true if the given (atomic) load should be expanded by the
+  /// IR-level AtomicExpand pass into a load-linked instruction
+  /// (through emitLoadLinked()).
+  virtual bool shouldExpandAtomicLoadInIR(LoadInst *LI) const { return false; }
 
+  /// Returns true if the given AtomicRMW should be expanded by the
+  /// IR-level AtomicExpand pass into a loop using LoadLinked/StoreConditional.
+  virtual bool shouldExpandAtomicRMWInIR(AtomicRMWInst *RMWI) const {
+    return false;
+  }
+
+  /// On some platforms, an AtomicRMW that never actually modifies the value
+  /// (such as fetch_add of 0) can be turned into a fence followed by an
+  /// atomic load. This may sound useless, but it makes it possible for the
+  /// processor to keep the cacheline shared, dramatically improving
+  /// performance. And such idempotent RMWs are useful for implementing some
+  /// kinds of locks, see for example (justification + benchmarks):
+  /// http://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf
+  /// This method tries doing that transformation, returning the atomic load if
+  /// it succeeds, and nullptr otherwise.
+  /// If shouldExpandAtomicLoadInIR returns true on that load, it will undergo
+  /// another round of expansion.
+  virtual LoadInst *lowerIdempotentRMWIntoFencedLoad(AtomicRMWInst *RMWI) const {
+    return nullptr;
+  }
   //===--------------------------------------------------------------------===//
   // TargetLowering Configuration Methods - These methods should be invoked by
   // the derived class constructor to configure this object for the target.
@@ -1029,11 +1063,6 @@ protected:
   /// llvm.longjmp or the version without _.  Defaults to false.
   void setUseUnderscoreLongJmp(bool Val) {
     UseUnderscoreLongJmp = Val;
-  }
-
-  /// Indicate whether the target can generate code for jump tables.
-  void setSupportJumpTables(bool Val) {
-    SupportJumpTables = Val;
   }
 
   /// Indicate the number of blocks to generate jump tables rather than if
@@ -1548,10 +1577,6 @@ private:
   ///
   /// Defaults to false.
   bool UseUnderscoreLongJmp;
-
-  /// Whether the target can generate code for jumptables.  If it's not true,
-  /// then each jumptable must be lowered into if-then-else's.
-  bool SupportJumpTables;
 
   /// Number of blocks threshold to use jump tables.
   int MinimumJumpTableEntries;
@@ -2519,11 +2544,10 @@ public:
     unsigned getMatchedOperand() const;
 
     /// Copy constructor for copying from a ConstraintInfo.
-    AsmOperandInfo(const InlineAsm::ConstraintInfo &info)
-      : InlineAsm::ConstraintInfo(info),
-        ConstraintType(TargetLowering::C_Unknown),
-        CallOperandVal(nullptr), ConstraintVT(MVT::Other) {
-    }
+    AsmOperandInfo(InlineAsm::ConstraintInfo Info)
+        : InlineAsm::ConstraintInfo(std::move(Info)),
+          ConstraintType(TargetLowering::C_Unknown), CallOperandVal(nullptr),
+          ConstraintVT(MVT::Other) {}
   };
 
   typedef std::vector<AsmOperandInfo> AsmOperandInfoVector;
@@ -2593,6 +2617,37 @@ public:
   virtual SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor,
                                 SelectionDAG &DAG,
                                 std::vector<SDNode *> *Created) const {
+    return SDValue();
+  }
+
+  /// Hooks for building estimates in place of slower divisions and square
+  /// roots.
+  
+  /// Return a reciprocal square root estimate value for the input operand.
+  /// The RefinementSteps output is the number of Newton-Raphson refinement
+  /// iterations required to generate a sufficient (though not necessarily
+  /// IEEE-754 compliant) estimate for the value type.
+  /// A target may choose to implement its own refinement within this function.
+  /// If that's true, then return '0' as the number of RefinementSteps to avoid
+  /// any further refinement of the estimate.
+  /// An empty SDValue return means no estimate sequence can be created.
+  virtual SDValue getRsqrtEstimate(SDValue Operand,
+                              DAGCombinerInfo &DCI,
+                              unsigned &RefinementSteps) const {
+    return SDValue();
+  }
+
+  /// Return a reciprocal estimate value for the input operand.
+  /// The RefinementSteps output is the number of Newton-Raphson refinement
+  /// iterations required to generate a sufficient (though not necessarily
+  /// IEEE-754 compliant) estimate for the value type.
+  /// A target may choose to implement its own refinement within this function.
+  /// If that's true, then return '0' as the number of RefinementSteps to avoid
+  /// any further refinement of the estimate.
+  /// An empty SDValue return means no estimate sequence can be created.
+  virtual SDValue getRecipEstimate(SDValue Operand,
+                                   DAGCombinerInfo &DCI,
+                                   unsigned &RefinementSteps) const {
     return SDValue();
   }
 

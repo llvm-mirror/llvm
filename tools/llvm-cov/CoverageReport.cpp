@@ -85,7 +85,7 @@ static Column column(StringRef Str, unsigned Width, const T &Value) {
   return Column(Str, Width).set(Value);
 }
 
-static const unsigned FileReportColumns[] = {25, 10, 8, 8, 10, 8};
+static const unsigned FileReportColumns[] = {25, 10, 8, 8, 10, 10};
 static const unsigned FunctionReportColumns[] = {25, 10, 8, 8, 10, 8, 8};
 
 /// \brief Prints a horizontal divider which spans across the given columns.
@@ -110,17 +110,17 @@ static raw_ostream::Colors determineCoveragePercentageColor(const T &Info) {
 
 void CoverageReport::render(const FileCoverageSummary &File, raw_ostream &OS) {
   OS << column(File.Name, FileReportColumns[0], Column::LeftTrim)
-     << format("%*zd", FileReportColumns[1], File.RegionCoverage.NumRegions);
+     << format("%*u", FileReportColumns[1], (unsigned)File.RegionCoverage.NumRegions);
   Options.colored_ostream(OS, File.RegionCoverage.isFullyCovered()
                                   ? raw_ostream::GREEN
                                   : raw_ostream::RED)
-      << format("%*zd", FileReportColumns[2], File.RegionCoverage.NotCovered);
+      << format("%*u", FileReportColumns[2], (unsigned)File.RegionCoverage.NotCovered);
   Options.colored_ostream(OS,
                           determineCoveragePercentageColor(File.RegionCoverage))
       << format("%*.2f", FileReportColumns[3] - 1,
                 File.RegionCoverage.getPercentCovered()) << '%';
-  OS << format("%*zd", FileReportColumns[4],
-               File.FunctionCoverage.NumFunctions);
+  OS << format("%*u", FileReportColumns[4],
+               (unsigned)File.FunctionCoverage.NumFunctions);
   Options.colored_ostream(
       OS, determineCoveragePercentageColor(File.FunctionCoverage))
       << format("%*.2f", FileReportColumns[5] - 1,
@@ -131,24 +131,24 @@ void CoverageReport::render(const FileCoverageSummary &File, raw_ostream &OS) {
 void CoverageReport::render(const FunctionCoverageSummary &Function,
                             raw_ostream &OS) {
   OS << column(Function.Name, FunctionReportColumns[0], Column::RightTrim)
-     << format("%*zd", FunctionReportColumns[1],
-               Function.RegionCoverage.NumRegions);
+     << format("%*u", FunctionReportColumns[1],
+               (unsigned)Function.RegionCoverage.NumRegions);
   Options.colored_ostream(OS, Function.RegionCoverage.isFullyCovered()
                                   ? raw_ostream::GREEN
                                   : raw_ostream::RED)
-      << format("%*zd", FunctionReportColumns[2],
-                Function.RegionCoverage.NotCovered);
+      << format("%*u", FunctionReportColumns[2],
+                (unsigned)Function.RegionCoverage.NotCovered);
   Options.colored_ostream(
       OS, determineCoveragePercentageColor(Function.RegionCoverage))
       << format("%*.2f", FunctionReportColumns[3] - 1,
                 Function.RegionCoverage.getPercentCovered()) << '%';
-  OS << format("%*zd", FunctionReportColumns[4],
-               Function.LineCoverage.NumLines);
+  OS << format("%*u", FunctionReportColumns[4],
+               (unsigned)Function.LineCoverage.NumLines);
   Options.colored_ostream(OS, Function.LineCoverage.isFullyCovered()
                                   ? raw_ostream::GREEN
                                   : raw_ostream::RED)
-      << format("%*zd", FunctionReportColumns[5],
-                Function.LineCoverage.NotCovered);
+      << format("%*u", FunctionReportColumns[5],
+                (unsigned)Function.LineCoverage.NotCovered);
   Options.colored_ostream(
       OS, determineCoveragePercentageColor(Function.LineCoverage))
       << format("%*.2f", FunctionReportColumns[6] - 1,
@@ -178,8 +178,8 @@ void CoverageReport::renderFunctionReports(raw_ostream &OS) {
       render(Function, OS);
     renderDivider(FunctionReportColumns, OS);
     OS << "\n";
-    render(FunctionCoverageSummary("TOTAL", File.RegionCoverage,
-                                   File.LineCoverage),
+    render(FunctionCoverageSummary("TOTAL", /*ExecutionCount=*/0,
+                                   File.RegionCoverage, File.LineCoverage),
            OS);
   }
 }
@@ -190,7 +190,8 @@ void CoverageReport::renderFileReports(raw_ostream &OS) {
      << column("Miss", FileReportColumns[2], Column::RightAlignment)
      << column("Cover", FileReportColumns[3], Column::RightAlignment)
      << column("Functions", FileReportColumns[4], Column::RightAlignment)
-     << column("Cover", FileReportColumns[5], Column::RightAlignment) << "\n";
+     << column("Executed", FileReportColumns[5], Column::RightAlignment)
+     << "\n";
   renderDivider(FileReportColumns, OS);
   OS << "\n";
   for (const auto &File : Summary.getFileSummaries())

@@ -25,6 +25,8 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/ManagedStatic.h"
+
 using namespace llvm;
 
 enum {
@@ -3345,7 +3347,7 @@ void BitcodeReader::Dematerialize(GlobalValue *GV) {
   assert(DeferredFunctionInfo.count(F) && "No info to read function later?");
 
   // Just forget the function body, we can remat it later.
-  F->deleteBody();
+  F->dropAllReferences();
 }
 
 std::error_code BitcodeReader::MaterializeModule(Module *M) {
@@ -3502,9 +3504,10 @@ class BitcodeErrorCategoryType : public std::error_category {
 };
 }
 
+static ManagedStatic<BitcodeErrorCategoryType> ErrorCategory;
+
 const std::error_category &llvm::BitcodeErrorCategory() {
-  static BitcodeErrorCategoryType O;
-  return O;
+  return *ErrorCategory;
 }
 
 //===----------------------------------------------------------------------===//
@@ -3520,7 +3523,7 @@ const std::error_category &llvm::BitcodeErrorCategory() {
 /// \param[in] WillMaterializeAll Set to \c true if the caller promises to
 /// materialize everything -- in particular, if this isn't truly lazy.
 static ErrorOr<Module *>
-getLazyBitcodeModuleImpl(std::unique_ptr<MemoryBuffer> &Buffer,
+getLazyBitcodeModuleImpl(std::unique_ptr<MemoryBuffer> &&Buffer,
                          LLVMContext &Context, bool WillMaterializeAll) {
   Module *M = new Module(Buffer->getBufferIdentifier(), Context);
   BitcodeReader *R = new BitcodeReader(Buffer.get(), Context);
@@ -3545,9 +3548,9 @@ getLazyBitcodeModuleImpl(std::unique_ptr<MemoryBuffer> &Buffer,
 }
 
 ErrorOr<Module *>
-llvm::getLazyBitcodeModule(std::unique_ptr<MemoryBuffer> &Buffer,
+llvm::getLazyBitcodeModule(std::unique_ptr<MemoryBuffer> &&Buffer,
                            LLVMContext &Context) {
-  return getLazyBitcodeModuleImpl(Buffer, Context, false);
+  return getLazyBitcodeModuleImpl(std::move(Buffer), Context, false);
 }
 
 Module *llvm::getStreamedBitcodeModule(const std::string &name,
@@ -3569,7 +3572,8 @@ Module *llvm::getStreamedBitcodeModule(const std::string &name,
 ErrorOr<Module *> llvm::parseBitcodeFile(MemoryBufferRef Buffer,
                                          LLVMContext &Context) {
   std::unique_ptr<MemoryBuffer> Buf = MemoryBuffer::getMemBuffer(Buffer, false);
-  ErrorOr<Module *> ModuleOrErr = getLazyBitcodeModuleImpl(Buf, Context, true);
+  ErrorOr<Module *> ModuleOrErr =
+      getLazyBitcodeModuleImpl(std::move(Buf), Context, true);
   if (!ModuleOrErr)
     return ModuleOrErr;
   Module *M = ModuleOrErr.get();

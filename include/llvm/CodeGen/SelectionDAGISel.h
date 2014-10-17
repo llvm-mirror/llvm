@@ -51,15 +51,16 @@ public:
   AliasAnalysis *AA;
   GCFunctionInfo *GFI;
   CodeGenOpt::Level OptLevel;
+  const TargetInstrInfo *TII;
+  const TargetLowering *TLI;
+
   static char ID;
 
   explicit SelectionDAGISel(TargetMachine &tm,
                             CodeGenOpt::Level OL = CodeGenOpt::Default);
   virtual ~SelectionDAGISel();
 
-  const TargetLowering *getTargetLowering() const {
-    return TM.getSubtargetImpl()->getTargetLowering();
-  }
+  const TargetLowering *getTargetLowering() const { return TLI; }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
@@ -238,6 +239,12 @@ public:
   SDNode *SelectCodeCommon(SDNode *NodeToMatch,
                            const unsigned char *MatcherTable,
                            unsigned TableSize);
+
+  /// \brief Return true if complex patterns for this target can mutate the
+  /// DAG.
+  virtual bool ComplexPatternFuncMutatesDAG() const {
+    return false;
+  }
 
 private:
 

@@ -246,7 +246,7 @@ class ELFObjectWriter : public MCObjectWriter {
     /// \param NumRegularSections - Number of non-relocation sections.
     void computeSymbolTable(MCAssembler &Asm, const MCAsmLayout &Layout,
                             const SectionIndexMapTy &SectionIndexMap,
-                            RevGroupMapTy RevGroupMap,
+                            const RevGroupMapTy &RevGroupMap,
                             unsigned NumRegularSections);
 
     void ComputeIndexMap(MCAssembler &Asm,
@@ -770,8 +770,9 @@ bool ELFObjectWriter::shouldRelocateWithSymbol(const MCAssembler &Asm,
   }
 
   // Most TLS relocations use a got, so they need the symbol. Even those that
-  // are just an offset (@tpoff), require a symbol in some linkers (gold,
-  // but not bfd ld).
+  // are just an offset (@tpoff), require a symbol in gold versions before
+  // 5efeedf61e4fe720fd3e9a08e6c91c10abb66d42 (2014-09-26) which fixed
+  // http://sourceware.org/PR16773.
   if (Flags & ELF::SHF_TLS)
     return true;
 
@@ -991,7 +992,7 @@ void ELFObjectWriter::ComputeIndexMap(MCAssembler &Asm,
 void
 ELFObjectWriter::computeSymbolTable(MCAssembler &Asm, const MCAsmLayout &Layout,
                                     const SectionIndexMapTy &SectionIndexMap,
-                                    RevGroupMapTy RevGroupMap,
+                                    const RevGroupMapTy &RevGroupMap,
                                     unsigned NumRegularSections) {
   // FIXME: Is this the correct place to do this?
   // FIXME: Why is an undefined reference to _GLOBAL_OFFSET_TABLE_ needed?
@@ -1037,7 +1038,7 @@ ELFObjectWriter::computeSymbolTable(MCAssembler &Asm, const MCAsmLayout &Layout,
       MSD.SectionIndex = ELF::SHN_COMMON;
     } else if (BaseSymbol->isUndefined()) {
       if (isSignature && !Used)
-        MSD.SectionIndex = SectionIndexMap.lookup(RevGroupMap[&Symbol]);
+        MSD.SectionIndex = SectionIndexMap.lookup(RevGroupMap.lookup(&Symbol));
       else
         MSD.SectionIndex = ELF::SHN_UNDEF;
       if (!Used && WeakrefUsed)
@@ -1073,7 +1074,7 @@ ELFObjectWriter::computeSymbolTable(MCAssembler &Asm, const MCAsmLayout &Layout,
   for (auto i = Asm.file_names_begin(), e = Asm.file_names_end(); i != e; ++i)
     StrTabBuilder.add(*i);
 
-  StrTabBuilder.finalize();
+  StrTabBuilder.finalize(StringTableBuilder::ELF);
 
   for (auto i = Asm.file_names_begin(), e = Asm.file_names_end(); i != e; ++i)
     FileSymbolData.push_back(StrTabBuilder.getOffset(*i));
@@ -1446,7 +1447,7 @@ void ELFObjectWriter::CreateMetadataSections(MCAssembler &Asm,
       static_cast<const MCSectionELF&>(it->getSection());
     ShStrTabBuilder.add(Section.getSectionName());
   }
-  ShStrTabBuilder.finalize();
+  ShStrTabBuilder.finalize(StringTableBuilder::ELF);
   F->getContents().append(ShStrTabBuilder.data().begin(),
                           ShStrTabBuilder.data().end());
 }

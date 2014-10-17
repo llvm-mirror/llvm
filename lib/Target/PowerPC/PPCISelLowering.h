@@ -349,7 +349,7 @@ namespace llvm {
     const PPCSubtarget &Subtarget;
 
   public:
-    explicit PPCTargetLowering(PPCTargetMachine &TM);
+    explicit PPCTargetLowering(const PPCTargetMachine &TM);
 
     /// getTargetNodeName() - This method returns the name of a target specific
     /// DAG node.
@@ -359,6 +359,11 @@ namespace llvm {
 
     /// getSetCCResultType - Return the ISD::SETCC ValueType
     EVT getSetCCResultType(LLVMContext &Context, EVT VT) const override;
+
+    /// Return true if target always beneficiates from combining into FMA for a
+    /// given value type. This must typically return false on targets where FMA
+    /// takes more cycles to execute than FADD.
+    bool enableAggressiveFMAFusion(EVT VT) const override;
 
     /// getPreIndexedAddressParts - returns true by value, base pointer and
     /// offset pointer and addressing mode by reference if the node's address
@@ -407,6 +412,11 @@ namespace llvm {
                                        APInt &KnownOne,
                                        const SelectionDAG &DAG,
                                        unsigned Depth = 0) const override;
+
+    Instruction* emitLeadingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
+                                  bool IsStore, bool IsLoad) const override;
+    Instruction* emitTrailingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
+                                   bool IsStore, bool IsLoad) const override;
 
     MachineBasicBlock *
       EmitInstrWithCustomInserter(MachineInstr *MI,
@@ -690,8 +700,11 @@ namespace llvm {
 
     SDValue DAGCombineExtBoolTrunc(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue DAGCombineTruncBoolExt(SDNode *N, DAGCombinerInfo &DCI) const;
-    SDValue DAGCombineFastRecip(SDValue Op, DAGCombinerInfo &DCI) const;
-    SDValue DAGCombineFastRecipFSQRT(SDValue Op, DAGCombinerInfo &DCI) const;
+
+    SDValue getRsqrtEstimate(SDValue Operand, DAGCombinerInfo &DCI,
+                             unsigned &RefinementSteps) const override;
+    SDValue getRecipEstimate(SDValue Operand, DAGCombinerInfo &DCI,
+                             unsigned &RefinementSteps) const override;
 
     CCAssignFn *useFastISelCCs(unsigned Flag) const;
   };

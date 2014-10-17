@@ -143,6 +143,11 @@ void Instruction::setFastMathFlags(FastMathFlags FMF) {
   cast<FPMathOperator>(this)->setFastMathFlags(FMF);
 }
 
+void Instruction::copyFastMathFlags(FastMathFlags FMF) {
+  assert(isa<FPMathOperator>(this) && "copying fast-math flag on invalid op");
+  cast<FPMathOperator>(this)->copyFastMathFlags(FMF);
+}
+
 /// Determine whether the unsafe-algebra flag is set.
 bool Instruction::hasUnsafeAlgebra() const {
   assert(isa<FPMathOperator>(this) && "getting fast-math flag on invalid op");
@@ -175,7 +180,7 @@ bool Instruction::hasAllowReciprocal() const {
 
 /// Convenience function for getting all the fast-math flags, which must be an
 /// operator which supports these flags. See LangRef.html for the meaning of
-/// these flats.
+/// these flags.
 FastMathFlags Instruction::getFastMathFlags() const {
   assert(isa<FPMathOperator>(this) && "getting fast-math flag on invalid op");
   return cast<FPMathOperator>(this)->getFastMathFlags();
@@ -183,7 +188,7 @@ FastMathFlags Instruction::getFastMathFlags() const {
 
 /// Copy I's fast-math flags
 void Instruction::copyFastMathFlags(const Instruction *I) {
-  setFastMathFlags(I->getFastMathFlags());
+  copyFastMathFlags(I->getFastMathFlags());
 }
 
 
@@ -435,6 +440,21 @@ bool Instruction::mayWriteToMemory() const {
     return !cast<InvokeInst>(this)->onlyReadsMemory();
   case Instruction::Load:
     return !cast<LoadInst>(this)->isUnordered();
+  }
+}
+
+bool Instruction::isAtomic() const {
+  switch (getOpcode()) {
+  default:
+    return false;
+  case Instruction::AtomicCmpXchg:
+  case Instruction::AtomicRMW:
+  case Instruction::Fence:
+    return true;
+  case Instruction::Load:
+    return cast<LoadInst>(this)->getOrdering() != NotAtomic;
+  case Instruction::Store:
+    return cast<StoreInst>(this)->getOrdering() != NotAtomic;
   }
 }
 

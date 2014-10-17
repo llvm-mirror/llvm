@@ -15,7 +15,6 @@
 #include "ARMFrameLowering.h"
 #include "ARMISelLowering.h"
 #include "ARMInstrInfo.h"
-#include "ARMJITInfo.h"
 #include "ARMSelectionDAGInfo.h"
 #include "ARMSubtarget.h"
 #include "ARMMachineFunctionInfo.h"
@@ -149,18 +148,18 @@ static std::string computeDataLayout(ARMSubtarget &ST) {
 ARMSubtarget &ARMSubtarget::initializeSubtargetDependencies(StringRef CPU,
                                                             StringRef FS) {
   initializeEnvironment();
-  resetSubtargetFeatures(CPU, FS);
+  initSubtargetFeatures(CPU, FS);
   return *this;
 }
 
 ARMSubtarget::ARMSubtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, TargetMachine &TM,
-                           bool IsLittle, const TargetOptions &Options)
+                           const std::string &FS, const TargetMachine &TM,
+                           bool IsLittle)
     : ARMGenSubtargetInfo(TT, CPU, FS), ARMProcFamily(Others),
       ARMProcClass(None), stackAlignment(4), CPUString(CPU), IsLittle(IsLittle),
-      TargetTriple(TT), Options(Options), TargetABI(ARM_ABI_UNKNOWN),
+      TargetTriple(TT), Options(TM.Options), TargetABI(ARM_ABI_UNKNOWN),
       DL(computeDataLayout(initializeSubtargetDependencies(CPU, FS))),
-      TSInfo(DL), JITInfo(),
+      TSInfo(DL),
       InstrInfo(isThumb1Only()
                     ? (ARMBaseInstrInfo *)new Thumb1InstrInfo(*this)
                     : !isThumb()
@@ -220,23 +219,7 @@ void ARMSubtarget::initializeEnvironment() {
   UnsafeFPMath = false;
 }
 
-void ARMSubtarget::resetSubtargetFeatures(const MachineFunction *MF) {
-  AttributeSet FnAttrs = MF->getFunction()->getAttributes();
-  Attribute CPUAttr = FnAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                           "target-cpu");
-  Attribute FSAttr = FnAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                          "target-features");
-  std::string CPU =
-    !CPUAttr.hasAttribute(Attribute::None) ?CPUAttr.getValueAsString() : "";
-  std::string FS =
-    !FSAttr.hasAttribute(Attribute::None) ? FSAttr.getValueAsString() : "";
-  if (!FS.empty()) {
-    initializeEnvironment();
-    resetSubtargetFeatures(CPU, FS);
-  }
-}
-
-void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
+void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   if (CPUString.empty()) {
     if (isTargetIOS() && TargetTriple.getArchName().endswith("v7s"))
       // Default to the Swift CPU when targeting armv7s/thumbv7s.
@@ -302,45 +285,38 @@ void ARMSubtarget::resetSubtargetFeatures(StringRef CPU, StringRef FS) {
   UseMovt = hasV6T2Ops() && ArmUseMOVT;
 
   if (isTargetMachO()) {
-    IsR9Reserved = ReserveR9 | !HasV6Ops;
+    IsR9Reserved = ReserveR9 || !HasV6Ops;
     SupportsTailCall = !isTargetIOS() || !getTargetTriple().isOSVersionLT(5, 0);
   } else {
     IsR9Reserved = ReserveR9;
     SupportsTailCall = !isThumb1Only();
   }
 
-  switch (Align) {
-    case DefaultAlign:
-      // Assume pre-ARMv6 doesn't support unaligned accesses.
-      //
-      // ARMv6 may or may not support unaligned accesses depending on the
-      // SCTLR.U bit, which is architecture-specific. We assume ARMv6
-      // Darwin and NetBSD targets support unaligned accesses, and others don't.
-      //
-      // ARMv7 always has SCTLR.U set to 1, but it has a new SCTLR.A bit
-      // which raises an alignment fault on unaligned accesses. Linux
-      // defaults this bit to 0 and handles it as a system-wide (not
-      // per-process) setting. It is therefore safe to assume that ARMv7+
-      // Linux targets support unaligned accesses. The same goes for NaCl.
-      //
-      // The above behavior is consistent with GCC.
-      AllowsUnalignedMem =
-          (hasV7Ops() && (isTargetLinux() || isTargetNaCl() ||
-                          isTargetNetBSD())) ||
-          (hasV6Ops() && (isTargetMachO() || isTargetNetBSD()));
-      // The one exception is cortex-m0, which despite being v6, does not
-      // support unaligned accesses. Rather than make the above boolean
-      // expression even more obtuse, just override the value here.
-      if (isThumb1Only() && isMClass())
-        AllowsUnalignedMem = false;
-      break;
-    case StrictAlign:
-      AllowsUnalignedMem = false;
-      break;
-    case NoStrictAlign:
-      AllowsUnalignedMem = true;
-      break;
+  if (Align == DefaultAlign) {
+    // Assume pre-ARMv6 doesn't support unaligned accesses.
+    //
+    // ARMv6 may or may not support unaligned accesses depending on the
+    // SCTLR.U bit, which is architecture-specific. We assume ARMv6
+    // Darwin and NetBSD targets support unaligned accesses, and others don't.
+    //
+    // ARMv7 always has SCTLR.U set to 1, but it has a new SCTLR.A bit
+    // which raises an alignment fault on unaligned accesses. Linux
+    // defaults this bit to 0 and handles it as a system-wide (not
+    // per-process) setting. It is therefore safe to assume that ARMv7+
+    // Linux targets support unaligned accesses. The same goes for NaCl.
+    //
+    // The above behavior is consistent with GCC.
+    AllowsUnalignedMem =
+      (hasV7Ops() && (isTargetLinux() || isTargetNaCl() ||
+                      isTargetNetBSD())) ||
+      (hasV6Ops() && (isTargetMachO() || isTargetNetBSD()));
+  } else {
+    AllowsUnalignedMem = !(Align == StrictAlign);
   }
+
+  // No v6M core supports unaligned memory access (v6M ARM ARM A3.2)
+  if (isV6M())
+    AllowsUnalignedMem = false;
 
   switch (IT) {
   case DefaultIT:
@@ -415,12 +391,11 @@ ARMSubtarget::GVIsIndirectSymbol(const GlobalValue *GV,
 }
 
 unsigned ARMSubtarget::getMispredictionPenalty() const {
-  return SchedModel->MispredictPenalty;
+  return SchedModel.MispredictPenalty;
 }
 
 bool ARMSubtarget::hasSinCos() const {
-  return getTargetTriple().getOS() == Triple::IOS &&
-    !getTargetTriple().isOSVersionLT(7, 0);
+  return getTargetTriple().isiOS() && !getTargetTriple().isOSVersionLT(7, 0);
 }
 
 // This overrides the PostRAScheduler bit in the SchedModel for any CPU.

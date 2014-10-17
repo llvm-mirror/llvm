@@ -358,44 +358,59 @@ TargetLoweringObjectFileELF::getSectionForConstant(SectionKind Kind,
   return DataRelROSection;
 }
 
-const MCSection *TargetLoweringObjectFileELF::getStaticCtorSection(
-    unsigned Priority, const MCSymbol *KeySym) const {
-  // The default scheme is .ctor / .dtor, so we have to invert the priority
-  // numbering.
-  if (Priority == 65535)
-    return StaticCtorSection;
+static const MCSectionELF *getStaticStructorSection(MCContext &Ctx,
+                                                    bool UseInitArray,
+                                                    bool IsCtor,
+                                                    unsigned Priority,
+                                                    const MCSymbol *KeySym) {
+  std::string Name;
+  unsigned Type;
+  unsigned Flags = ELF::SHF_ALLOC | ELF::SHF_WRITE;
+  SectionKind Kind = SectionKind::getDataRel();
+  StringRef COMDAT = KeySym ? KeySym->getName() : "";
+
+  if (KeySym)
+    Flags |= ELF::SHF_GROUP;
 
   if (UseInitArray) {
-    std::string Name = std::string(".init_array.") + utostr(Priority);
-    return getContext().getELFSection(Name, ELF::SHT_INIT_ARRAY,
-                                      ELF::SHF_ALLOC | ELF::SHF_WRITE,
-                                      SectionKind::getDataRel());
+    if (IsCtor) {
+      Type = ELF::SHT_INIT_ARRAY;
+      Name = ".init_array";
+    } else {
+      Type = ELF::SHT_FINI_ARRAY;
+      Name = ".fini_array";
+    }
+    if (Priority != 65535) {
+      Name += '.';
+      Name += utostr(Priority);
+    }
   } else {
-    std::string Name = std::string(".ctors.") + utostr(65535 - Priority);
-    return getContext().getELFSection(Name, ELF::SHT_PROGBITS,
-                                      ELF::SHF_ALLOC |ELF::SHF_WRITE,
-                                      SectionKind::getDataRel());
+    // The default scheme is .ctor / .dtor, so we have to invert the priority
+    // numbering.
+    if (IsCtor)
+      Name = ".ctors";
+    else
+      Name = ".dtors";
+    if (Priority != 65535) {
+      Name += '.';
+      Name += utostr(65535 - Priority);
+    }
+    Type = ELF::SHT_PROGBITS;
   }
+
+  return Ctx.getELFSection(Name, Type, Flags, Kind, 0, COMDAT);
+}
+
+const MCSection *TargetLoweringObjectFileELF::getStaticCtorSection(
+    unsigned Priority, const MCSymbol *KeySym) const {
+  return getStaticStructorSection(getContext(), UseInitArray, true, Priority,
+                                  KeySym);
 }
 
 const MCSection *TargetLoweringObjectFileELF::getStaticDtorSection(
     unsigned Priority, const MCSymbol *KeySym) const {
-  // The default scheme is .ctor / .dtor, so we have to invert the priority
-  // numbering.
-  if (Priority == 65535)
-    return StaticDtorSection;
-
-  if (UseInitArray) {
-    std::string Name = std::string(".fini_array.") + utostr(Priority);
-    return getContext().getELFSection(Name, ELF::SHT_FINI_ARRAY,
-                                      ELF::SHF_ALLOC | ELF::SHF_WRITE,
-                                      SectionKind::getDataRel());
-  } else {
-    std::string Name = std::string(".dtors.") + utostr(65535 - Priority);
-    return getContext().getELFSection(Name, ELF::SHT_PROGBITS,
-                                      ELF::SHF_ALLOC |ELF::SHF_WRITE,
-                                      SectionKind::getDataRel());
-  }
+  return getStaticStructorSection(getContext(), UseInitArray, false, Priority,
+                                  KeySym);
 }
 
 void
@@ -626,7 +641,9 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
           cast<GlobalVariable>(GV)) < 32)
     return UStringSection;
 
-  if (Kind.isMergeableConst()) {
+  // With MachO only variables whose corresponding symbol starts with 'l' or
+  // 'L' can be merged, so we only try merging GVs with private linkage.
+  if (GV->hasPrivateLinkage() && Kind.isMergeableConst()) {
     if (Kind.isMergeableConst4())
       return FourByteConstantSection;
     if (Kind.isMergeableConst8())
@@ -744,7 +761,7 @@ getCOFFSectionFlags(SectionKind K) {
       COFF::IMAGE_SCN_MEM_EXECUTE |
       COFF::IMAGE_SCN_MEM_READ |
       COFF::IMAGE_SCN_CNT_CODE;
-  else if (K.isBSS ())
+  else if (K.isBSS())
     Flags |=
       COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA |
       COFF::IMAGE_SCN_MEM_READ |
@@ -754,7 +771,7 @@ getCOFFSectionFlags(SectionKind K) {
       COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
       COFF::IMAGE_SCN_MEM_READ |
       COFF::IMAGE_SCN_MEM_WRITE;
-  else if (K.isReadOnly())
+  else if (K.isReadOnly() || K.isReadOnlyWithRel())
     Flags |=
       COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
       COFF::IMAGE_SCN_MEM_READ;
@@ -779,7 +796,7 @@ static const GlobalValue *getComdatGVForCOFF(const GlobalValue *GV) {
 
   if (ComdatGV->getComdat() != C)
     report_fatal_error("Associative COMDAT symbol '" + ComdatGVName +
-                       "' is not a key for it's COMDAT.");
+                       "' is not a key for its COMDAT.");
 
   return ComdatGV;
 }
@@ -848,9 +865,9 @@ static const char *getCOFFSectionNameForUniqueGlobal(SectionKind Kind) {
     return ".bss";
   if (Kind.isThreadLocal())
     return ".tls$";
-  if (Kind.isWriteable())
-    return ".data";
-  return ".rdata";
+  if (Kind.isReadOnly() || Kind.isReadOnlyWithRel())
+    return ".rdata";
+  return ".data";
 }
 
 
@@ -898,7 +915,7 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
   if (Kind.isThreadLocal())
     return TLSDataSection;
 
-  if (Kind.isReadOnly())
+  if (Kind.isReadOnly() || Kind.isReadOnlyWithRel())
     return ReadOnlySection;
 
   // Note: we claim that common symbols are put in BSSSection, but they are
@@ -965,29 +982,14 @@ emitModuleFlags(MCStreamer &Streamer,
   }
 }
 
-static const MCSection *getAssociativeCOFFSection(MCContext &Ctx,
-                                                  const MCSection *Sec,
-                                                  const MCSymbol *KeySym) {
-  // Return the normal section if we don't have to be associative.
-  if (!KeySym)
-    return Sec;
-
-  // Make an associative section with the same name and kind as the normal
-  // section.
-  const MCSectionCOFF *SecCOFF = cast<MCSectionCOFF>(Sec);
-  unsigned Characteristics =
-      SecCOFF->getCharacteristics() | COFF::IMAGE_SCN_LNK_COMDAT;
-  return Ctx.getCOFFSection(SecCOFF->getSectionName(), Characteristics,
-                            SecCOFF->getKind(), KeySym->getName(),
-                            COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE);
-}
-
 const MCSection *TargetLoweringObjectFileCOFF::getStaticCtorSection(
     unsigned Priority, const MCSymbol *KeySym) const {
-  return getAssociativeCOFFSection(getContext(), StaticCtorSection, KeySym);
+  return getContext().getAssociativeCOFFSection(
+      cast<MCSectionCOFF>(StaticCtorSection), KeySym);
 }
 
 const MCSection *TargetLoweringObjectFileCOFF::getStaticDtorSection(
     unsigned Priority, const MCSymbol *KeySym) const {
-  return getAssociativeCOFFSection(getContext(), StaticDtorSection, KeySym);
+  return getContext().getAssociativeCOFFSection(
+      cast<MCSectionCOFF>(StaticDtorSection), KeySym);
 }

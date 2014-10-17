@@ -7,7 +7,7 @@ declare <4 x i32> @llvm.ctpop.v4i32(<4 x i32>) nounwind readnone
 declare <8 x i32> @llvm.ctpop.v8i32(<8 x i32>) nounwind readnone
 declare <16 x i32> @llvm.ctpop.v16i32(<16 x i32>) nounwind readnone
 
-; FUNC-LABEL: @s_ctpop_i32:
+; FUNC-LABEL: {{^}}s_ctpop_i32:
 ; SI: S_LOAD_DWORD [[SVAL:s[0-9]+]],
 ; SI: S_BCNT1_I32_B32 [[SRESULT:s[0-9]+]], [[SVAL]]
 ; SI: V_MOV_B32_e32 [[VRESULT:v[0-9]+]], [[SRESULT]]
@@ -22,7 +22,7 @@ define void @s_ctpop_i32(i32 addrspace(1)* noalias %out, i32 %val) nounwind {
 }
 
 ; XXX - Why 0 in register?
-; FUNC-LABEL: @v_ctpop_i32:
+; FUNC-LABEL: {{^}}v_ctpop_i32:
 ; SI: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]],
 ; SI: V_MOV_B32_e32 [[VZERO:v[0-9]+]], 0
 ; SI: V_BCNT_U32_B32_e32 [[RESULT:v[0-9]+]], [[VAL]], [[VZERO]]
@@ -37,13 +37,12 @@ define void @v_ctpop_i32(i32 addrspace(1)* noalias %out, i32 addrspace(1)* noali
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_add_chain_i32
+; FUNC-LABEL: {{^}}v_ctpop_add_chain_i32:
 ; SI: BUFFER_LOAD_DWORD [[VAL0:v[0-9]+]],
 ; SI: BUFFER_LOAD_DWORD [[VAL1:v[0-9]+]],
 ; SI: V_MOV_B32_e32 [[VZERO:v[0-9]+]], 0
 ; SI: V_BCNT_U32_B32_e32 [[MIDRESULT:v[0-9]+]], [[VAL1]], [[VZERO]]
-; SI-NOT: ADD
-; SI: V_BCNT_U32_B32_e32 [[RESULT:v[0-9]+]], [[VAL0]], [[MIDRESULT]]
+; SI-NEXT: V_BCNT_U32_B32_e32 [[RESULT:v[0-9]+]], [[VAL0]], [[MIDRESULT]]
 ; SI: BUFFER_STORE_DWORD [[RESULT]],
 ; SI: S_ENDPGM
 
@@ -59,7 +58,21 @@ define void @v_ctpop_add_chain_i32(i32 addrspace(1)* noalias %out, i32 addrspace
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_v2i32:
+; FUNC-LABEL: {{^}}v_ctpop_add_sgpr_i32:
+; SI: BUFFER_LOAD_DWORD [[VAL0:v[0-9]+]],
+; SI-NEXT: S_WAITCNT
+; SI-NEXT: V_BCNT_U32_B32_e64 [[RESULT:v[0-9]+]], [[VAL0]], s{{[0-9]+}}
+; SI-NEXT: BUFFER_STORE_DWORD [[RESULT]],
+; SI: S_ENDPGM
+define void @v_ctpop_add_sgpr_i32(i32 addrspace(1)* noalias %out, i32 addrspace(1)* noalias %in0, i32 addrspace(1)* noalias %in1, i32 %sval) nounwind {
+  %val0 = load i32 addrspace(1)* %in0, align 4
+  %ctpop0 = call i32 @llvm.ctpop.i32(i32 %val0) nounwind readnone
+  %add = add i32 %ctpop0, %sval
+  store i32 %add, i32 addrspace(1)* %out, align 4
+  ret void
+}
+
+; FUNC-LABEL: {{^}}v_ctpop_v2i32:
 ; SI: V_BCNT_U32_B32_e32
 ; SI: V_BCNT_U32_B32_e32
 ; SI: S_ENDPGM
@@ -73,7 +86,7 @@ define void @v_ctpop_v2i32(<2 x i32> addrspace(1)* noalias %out, <2 x i32> addrs
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_v4i32:
+; FUNC-LABEL: {{^}}v_ctpop_v4i32:
 ; SI: V_BCNT_U32_B32_e32
 ; SI: V_BCNT_U32_B32_e32
 ; SI: V_BCNT_U32_B32_e32
@@ -91,7 +104,7 @@ define void @v_ctpop_v4i32(<4 x i32> addrspace(1)* noalias %out, <4 x i32> addrs
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_v8i32:
+; FUNC-LABEL: {{^}}v_ctpop_v8i32:
 ; SI: V_BCNT_U32_B32_e32
 ; SI: V_BCNT_U32_B32_e32
 ; SI: V_BCNT_U32_B32_e32
@@ -117,7 +130,7 @@ define void @v_ctpop_v8i32(<8 x i32> addrspace(1)* noalias %out, <8 x i32> addrs
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_v16i32:
+; FUNC-LABEL: {{^}}v_ctpop_v16i32:
 ; SI: V_BCNT_U32_B32_e32
 ; SI: V_BCNT_U32_B32_e32
 ; SI: V_BCNT_U32_B32_e32
@@ -159,7 +172,7 @@ define void @v_ctpop_v16i32(<16 x i32> addrspace(1)* noalias %out, <16 x i32> ad
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_i32_add_inline_constant:
+; FUNC-LABEL: {{^}}v_ctpop_i32_add_inline_constant:
 ; SI: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]],
 ; SI: V_BCNT_U32_B32_e64 [[RESULT:v[0-9]+]], [[VAL]], 4
 ; SI: BUFFER_STORE_DWORD [[RESULT]],
@@ -174,7 +187,7 @@ define void @v_ctpop_i32_add_inline_constant(i32 addrspace(1)* noalias %out, i32
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_i32_add_inline_constant_inv:
+; FUNC-LABEL: {{^}}v_ctpop_i32_add_inline_constant_inv:
 ; SI: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]],
 ; SI: V_BCNT_U32_B32_e64 [[RESULT:v[0-9]+]], [[VAL]], 4
 ; SI: BUFFER_STORE_DWORD [[RESULT]],
@@ -189,7 +202,7 @@ define void @v_ctpop_i32_add_inline_constant_inv(i32 addrspace(1)* noalias %out,
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_i32_add_literal:
+; FUNC-LABEL: {{^}}v_ctpop_i32_add_literal:
 ; SI: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]],
 ; SI: V_MOV_B32_e32 [[LIT:v[0-9]+]], 0x1869f
 ; SI: V_BCNT_U32_B32_e32 [[RESULT:v[0-9]+]], [[VAL]], [[LIT]]
@@ -203,7 +216,7 @@ define void @v_ctpop_i32_add_literal(i32 addrspace(1)* noalias %out, i32 addrspa
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_i32_add_var:
+; FUNC-LABEL: {{^}}v_ctpop_i32_add_var:
 ; SI-DAG: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]],
 ; SI-DAG: S_LOAD_DWORD [[VAR:s[0-9]+]],
 ; SI: V_BCNT_U32_B32_e64 [[RESULT:v[0-9]+]], [[VAL]], [[VAR]]
@@ -219,7 +232,7 @@ define void @v_ctpop_i32_add_var(i32 addrspace(1)* noalias %out, i32 addrspace(1
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_i32_add_var_inv:
+; FUNC-LABEL: {{^}}v_ctpop_i32_add_var_inv:
 ; SI-DAG: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]],
 ; SI-DAG: S_LOAD_DWORD [[VAR:s[0-9]+]],
 ; SI: V_BCNT_U32_B32_e64 [[RESULT:v[0-9]+]], [[VAL]], [[VAR]]
@@ -235,7 +248,7 @@ define void @v_ctpop_i32_add_var_inv(i32 addrspace(1)* noalias %out, i32 addrspa
   ret void
 }
 
-; FUNC-LABEL: @v_ctpop_i32_add_vvar_inv
+; FUNC-LABEL: {{^}}v_ctpop_i32_add_vvar_inv:
 ; SI-DAG: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]], s[{{[0-9]+:[0-9]+}}], {{0$}}
 ; SI-DAG: BUFFER_LOAD_DWORD [[VAR:v[0-9]+]], s[{{[0-9]+:[0-9]+}}], 0 offset:0x10
 ; SI: V_BCNT_U32_B32_e32 [[RESULT:v[0-9]+]], [[VAL]], [[VAR]]
@@ -256,29 +269,29 @@ define void @v_ctpop_i32_add_vvar_inv(i32 addrspace(1)* noalias %out, i32 addrsp
 ; FIXME: We currently disallow SALU instructions in all branches,
 ; but there are some cases when the should be allowed.
 
-; FUNC-LABEL: @ctpop_i32_in_br
-; SI: BUFFER_LOAD_DWORD [[VAL:v[0-9]+]],
-; SI: V_BCNT_U32_B32_e64 [[RESULT:v[0-9]+]], [[VAL]], 0
+; FUNC-LABEL: {{^}}ctpop_i32_in_br:
+; SI: S_LOAD_DWORD [[VAL:s[0-9]+]], s[{{[0-9]+:[0-9]+}}], 0xd
+; SI: S_BCNT1_I32_B32  [[SRESULT:s[0-9]+]], [[VAL]]
+; SI: V_MOV_B32_e32 [[RESULT]], [[SRESULT]]
 ; SI: BUFFER_STORE_DWORD [[RESULT]],
 ; SI: S_ENDPGM
 ; EG: BCNT_INT
-define void @ctpop_i32_in_br(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %cond) {
+define void @ctpop_i32_in_br(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %ctpop_arg, i32 %cond) {
 entry:
-  %0 = icmp eq i32 %cond, 0
-  br i1 %0, label %if, label %else
+  %tmp0 = icmp eq i32 %cond, 0
+  br i1 %tmp0, label %if, label %else
 
 if:
-  %1 = load i32 addrspace(1)* %in
-  %2 = call i32 @llvm.ctpop.i32(i32 %1)
+  %tmp2 = call i32 @llvm.ctpop.i32(i32 %ctpop_arg)
   br label %endif
 
 else:
-  %3 = getelementptr i32 addrspace(1)* %in, i32 1
-  %4 = load i32 addrspace(1)* %3
+  %tmp3 = getelementptr i32 addrspace(1)* %in, i32 1
+  %tmp4 = load i32 addrspace(1)* %tmp3
   br label %endif
 
 endif:
-  %5 = phi i32 [%2, %if], [%4, %else]
-  store i32 %5, i32 addrspace(1)* %out
+  %tmp5 = phi i32 [%tmp2, %if], [%tmp4, %else]
+  store i32 %tmp5, i32 addrspace(1)* %out
   ret void
 }

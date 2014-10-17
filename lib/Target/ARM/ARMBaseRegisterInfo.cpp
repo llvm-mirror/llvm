@@ -182,7 +182,7 @@ ARMBaseRegisterInfo::getPointerRegClass(const MachineFunction &MF, unsigned Kind
 const TargetRegisterClass *
 ARMBaseRegisterInfo::getCrossCopyRegClass(const TargetRegisterClass *RC) const {
   if (RC == &ARM::CCRRegClass)
-    return nullptr;  // Can't copy CCR registers.
+    return &ARM::rGPRRegClass;  // Can't copy CCR registers.
   return RC;
 }
 
@@ -421,11 +421,6 @@ emitLoadConstPool(MachineBasicBlock &MBB,
     .addConstantPoolIndex(Idx)
     .addImm(0).addImm(Pred).addReg(PredReg)
     .setMIFlags(MIFlags);
-}
-
-bool ARMBaseRegisterInfo::mayOverrideLocalAssignment() const {
-  // The native linux build hits a downstream codegen bug when this is enabled.
-  return STI.isTargetDarwin();
 }
 
 bool ARMBaseRegisterInfo::

@@ -162,6 +162,16 @@ enum {
   SITOF,
   UITOF,
 
+  /// Natural vector cast. ISD::BITCAST is not natural in the big-endian
+  /// world w.r.t vectors; which causes additional REV instructions to be
+  /// generated to compensate for the byte-swapping. But sometimes we do
+  /// need to re-interpret the data in SIMD vector registers in big-endian
+  /// mode without emitting such REV instructions.
+  NVCAST,
+
+  SMULL,
+  UMULL,
+
   // NEON Load/Store with post-increment base updates
   LD2post = ISD::FIRST_TARGET_MEMORY_OPCODE,
   LD3post,
@@ -197,10 +207,9 @@ class AArch64TargetLowering : public TargetLowering {
   bool RequireStrictAlign;
 
 public:
-  explicit AArch64TargetLowering(TargetMachine &TM);
+  explicit AArch64TargetLowering(const TargetMachine &TM);
 
-  /// Selects the correct CCAssignFn for a the given CallingConvention
-  /// value.
+  /// Selects the correct CCAssignFn for a given CallingConvention value.
   CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg) const;
 
   /// computeKnownBitsForTargetNode - Determine which of the bits specified in
@@ -318,12 +327,15 @@ public:
   bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                          Type *Ty) const override;
 
+  bool hasLoadLinkedStoreConditional() const override;
   Value *emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
                         AtomicOrdering Ord) const override;
   Value *emitStoreConditional(IRBuilder<> &Builder, Value *Val,
                               Value *Addr, AtomicOrdering Ord) const override;
 
-  bool shouldExpandAtomicInIR(Instruction *Inst) const override;
+  bool shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
+  bool shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
+  bool shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override;
 
   bool useLoadStackGuardNode() const override;
   TargetLoweringBase::LegalizeTypeAction
@@ -427,7 +439,7 @@ private:
   SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
-                        std::vector<SDNode *> *Created) const;
+                        std::vector<SDNode *> *Created) const override;
 
   ConstraintType
   getConstraintType(const std::string &Constraint) const override;

@@ -16,10 +16,11 @@ namespace llvm {
 
 class DWARFCompileUnit : public DWARFUnit {
 public:
-  DWARFCompileUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef RS,
-                   StringRef SS, StringRef SOS, StringRef AOS,
-                   const RelocAddrMap *M, bool LE)
-      : DWARFUnit(DA, IS, RS, SS, SOS, AOS, M, LE) {}
+  DWARFCompileUnit(DWARFContext &Context, const DWARFSection &Section,
+                   const DWARFDebugAbbrev *DA, StringRef RS, StringRef SS,
+                   StringRef SOS, StringRef AOS, bool LE,
+                   const DWARFUnitSectionBase &UnitSection)
+      : DWARFUnit(Context, Section, DA, RS, SS, SOS, AOS, LE, UnitSection) {}
   void dump(raw_ostream &OS);
   // VTable anchor.
   ~DWARFCompileUnit() override;

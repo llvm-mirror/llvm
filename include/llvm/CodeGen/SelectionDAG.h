@@ -268,7 +268,7 @@ public:
   /// init - Prepare this SelectionDAG to process code in the given
   /// MachineFunction.
   ///
-  void init(MachineFunction &mf, const TargetLowering *TLI);
+  void init(MachineFunction &mf);
 
   /// clear - Clear state and free memory necessary to make this
   /// SelectionDAG ready to process a new block.
@@ -749,7 +749,7 @@ public:
                    SDValue SV, unsigned Align);
 
   /// getAtomicCmpSwap - Gets a node for an atomic cmpxchg op. There are two
-  /// valid Opcodes. ISD::ATOMIC_CMO_SWAP produces a the value loaded and a
+  /// valid Opcodes. ISD::ATOMIC_CMO_SWAP produces the value loaded and a
   /// chain result. ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS produces the value loaded,
   /// a success flag (initially i1), and a chain.
   SDValue getAtomicCmpSwap(unsigned Opcode, SDLoc dl, EVT MemVT, SDVTList VTs,
@@ -984,15 +984,18 @@ public:
 
   /// getDbgValue - Creates a SDDbgValue node.
   ///
-  SDDbgValue *getDbgValue(MDNode *MDPtr, SDNode *N, unsigned R,
-			  bool IsIndirect, uint64_t Off,
-                          DebugLoc DL, unsigned O);
-  /// Constant.
-  SDDbgValue *getConstantDbgValue(MDNode *MDPtr, const Value *C, uint64_t Off,
-				  DebugLoc DL, unsigned O);
-  /// Frame index.
-  SDDbgValue *getFrameIndexDbgValue(MDNode *MDPtr, unsigned FI, uint64_t Off,
-				    DebugLoc DL, unsigned O);
+  /// SDNode
+  SDDbgValue *getDbgValue(MDNode *Var, MDNode *Expr, SDNode *N, unsigned R,
+                          bool IsIndirect, uint64_t Off, DebugLoc DL,
+                          unsigned O);
+
+  /// Constant
+  SDDbgValue *getConstantDbgValue(MDNode *Var, MDNode *Expr, const Value *C,
+                                  uint64_t Off, DebugLoc DL, unsigned O);
+
+  /// FrameIndex
+  SDDbgValue *getFrameIndexDbgValue(MDNode *Var, MDNode *Expr, unsigned FI,
+                                    uint64_t Off, DebugLoc DL, unsigned O);
 
   /// RemoveDeadNode - Remove the specified node from the system. If any of its
   /// operands then becomes dead, remove them as well. Inform UpdateListener

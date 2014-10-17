@@ -154,8 +154,8 @@ namespace llvm {
 
   bool isMov(unsigned Opcode) const override;
 
-  DFAPacketizer *CreateTargetScheduleState(const TargetMachine *TM,
-                                           const ScheduleDAG *DAG) const override;
+  DFAPacketizer *
+  CreateTargetScheduleState(const TargetSubtargetInfo &) const override;
 
   bool ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
 
@@ -206,7 +206,7 @@ namespace llvm {
   int getInstrLatency(const InstrItineraryData *ItinData,
                       SDNode *Node) const override { return 1;}
 
-  virtual bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const;
+  bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const override;
 
   /// \brief Reserve the registers that may be accesed using indirect addressing.
   void reserveIndirectRegisters(BitVector &Reserved,

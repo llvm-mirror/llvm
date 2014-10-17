@@ -28,23 +28,10 @@ using namespace llvm::object;
 namespace llvm {
 
 int64_t RuntimeDyldMachO::memcpyAddend(const RelocationEntry &RE) const {
-  const SectionEntry &Section = Sections[RE.SectionID];
   unsigned NumBytes = 1 << RE.Size;
-  int64_t Addend = 0;
-  uint8_t *LocalAddress = Section.Address + RE.Offset;
-  uint8_t *Dst = reinterpret_cast<uint8_t*>(&Addend);
+  uint8_t *Src = Sections[RE.SectionID].Address + RE.Offset;
 
-  if (IsTargetLittleEndian == sys::IsLittleEndianHost) {
-    if (!sys::IsLittleEndianHost)
-      Dst += sizeof(Addend) - NumBytes;
-    memcpy(Dst, LocalAddress, NumBytes);
-  } else {
-    Dst += NumBytes - 1;
-    for (unsigned i = 0; i < NumBytes; ++i)
-      *Dst-- = *LocalAddress++;
-  }
-
-  return Addend;
+  return static_cast<int64_t>(readBytesUnaligned(Src, NumBytes));
 }
 
 RelocationValueRef RuntimeDyldMachO::getRelocationValueRef(
@@ -66,25 +53,23 @@ RelocationValueRef RuntimeDyldMachO::getRelocationValueRef(
     SymbolTableMap::const_iterator SI = Symbols.find(TargetName.data());
     if (SI != Symbols.end()) {
       Value.SectionID = SI->second.first;
-      Value.Addend = SI->second.second + RE.Addend;
+      Value.Offset = SI->second.second + RE.Addend;
     } else {
       SI = GlobalSymbolTable.find(TargetName.data());
       if (SI != GlobalSymbolTable.end()) {
         Value.SectionID = SI->second.first;
-        Value.Addend = SI->second.second + RE.Addend;
+        Value.Offset = SI->second.second + RE.Addend;
       } else {
         Value.SymbolName = TargetName.data();
-        Value.Addend = RE.Addend;
+        Value.Offset = RE.Addend;
       }
     }
   } else {
     SectionRef Sec = Obj.getRelocationSection(RelInfo);
-    bool IsCode = false;
-    Sec.isText(IsCode);
+    bool IsCode = Sec.isText();
     Value.SectionID = findOrEmitSection(ObjImg, Sec, IsCode, ObjSectionToID);
-    uint64_t Addr;
-    Sec.getAddress(Addr);
-    Value.Addend = RE.Addend - Addr;
+    uint64_t Addr = Sec.getAddress();
+    Value.Offset = RE.Addend - Addr;
   }
 
   return Value;
@@ -103,7 +88,7 @@ void RuntimeDyldMachO::makeValueAddendPCRel(RelocationValueRef &Value,
   if (IsPCRel) {
     uint64_t RelocAddr = 0;
     RI->getAddress(RelocAddr);
-    Value.Addend += RelocAddr + OffsetToNextPC;
+    Value.Offset += RelocAddr + OffsetToNextPC;
   }
 }
 
@@ -115,29 +100,67 @@ void RuntimeDyldMachO::dumpRelocationToResolve(const RelocationEntry &RE,
 
   dbgs() << "resolveRelocation Section: " << RE.SectionID
          << " LocalAddress: " << format("%p", LocalAddress)
-         << " FinalAddress: " << format("0x%x", FinalAddress)
-         << " Value: " << format("0x%x", Value) << " Addend: " << RE.Addend
+         << " FinalAddress: " << format("0x%016" PRIx64, FinalAddress)
+         << " Value: " << format("0x%016" PRIx64, Value) << " Addend: " << RE.Addend
          << " isPCRel: " << RE.IsPCRel << " MachoType: " << RE.RelType
          << " Size: " << (1 << RE.Size) << "\n";
 }
 
-bool RuntimeDyldMachO::writeBytesUnaligned(uint8_t *Dst, uint64_t Value,
-                                           unsigned Size) {
+section_iterator
+RuntimeDyldMachO::getSectionByAddress(const MachOObjectFile &Obj,
+                                      uint64_t Addr) {
+  section_iterator SI = Obj.section_begin();
+  section_iterator SE = Obj.section_end();
 
-  uint8_t *Src = reinterpret_cast<uint8_t*>(&Value);
-  // If host and target endianness match use memcpy, otherwise copy in reverse
-  // order.
-  if (IsTargetLittleEndian == sys::IsLittleEndianHost) {
-    if (!sys::IsLittleEndianHost)
-      Src += sizeof(Value) - Size;
-    memcpy(Dst, Src, Size);
-  } else {
-    Src += Size - 1;
-    for (unsigned i = 0; i < Size; ++i)
-      *Dst++ = *Src--;
+  for (; SI != SE; ++SI) {
+    uint64_t SAddr = SI->getAddress();
+    uint64_t SSize = SI->getSize();
+    if ((Addr >= SAddr) && (Addr < SAddr + SSize))
+      return SI;
   }
 
-  return false;
+  return SE;
+}
+
+
+// Populate __pointers section.
+void RuntimeDyldMachO::populateIndirectSymbolPointersSection(
+                                                    MachOObjectFile &Obj,
+                                                    const SectionRef &PTSection,
+                                                    unsigned PTSectionID) {
+  assert(!Obj.is64Bit() &&
+         "Pointer table section not supported in 64-bit MachO.");
+
+  MachO::dysymtab_command DySymTabCmd = Obj.getDysymtabLoadCommand();
+  MachO::section Sec32 = Obj.getSection(PTSection.getRawDataRefImpl());
+  uint32_t PTSectionSize = Sec32.size;
+  unsigned FirstIndirectSymbol = Sec32.reserved1;
+  const unsigned PTEntrySize = 4;
+  unsigned NumPTEntries = PTSectionSize / PTEntrySize;
+  unsigned PTEntryOffset = 0;
+
+  assert((PTSectionSize % PTEntrySize) == 0 &&
+         "Pointers section does not contain a whole number of stubs?");
+
+  DEBUG(dbgs() << "Populating pointer table section "
+               << Sections[PTSectionID].Name
+               << ", Section ID " << PTSectionID << ", "
+               << NumPTEntries << " entries, " << PTEntrySize
+               << " bytes each:\n");
+
+  for (unsigned i = 0; i < NumPTEntries; ++i) {
+    unsigned SymbolIndex =
+      Obj.getIndirectSymbolTableEntry(DySymTabCmd, FirstIndirectSymbol + i);
+    symbol_iterator SI = Obj.getSymbolByIndex(SymbolIndex);
+    StringRef IndirectSymbolName;
+    SI->getName(IndirectSymbolName);
+    DEBUG(dbgs() << "  " << IndirectSymbolName << ": index " << SymbolIndex
+          << ", PT offset: " << PTEntryOffset << "\n");
+    RelocationEntry RE(PTSectionID, PTEntryOffset,
+                       MachO::GENERIC_RELOC_VANILLA, 0, false, 2);
+    addRelocationForSymbol(RE, IndirectSymbolName);
+    PTEntryOffset += PTEntrySize;
+  }
 }
 
 bool
@@ -160,8 +183,37 @@ bool RuntimeDyldMachO::isCompatibleFile(const object::ObjectFile *Obj) const {
   return Obj->isMachO();
 }
 
-static unsigned char *processFDE(unsigned char *P, intptr_t DeltaForText,
-                                 intptr_t DeltaForEH) {
+template <typename Impl>
+void RuntimeDyldMachOCRTPBase<Impl>::finalizeLoad(ObjectImage &ObjImg,
+                                                  ObjSectionToIDMap &SectionMap) {
+  unsigned EHFrameSID = RTDYLD_INVALID_SECTION_ID;
+  unsigned TextSID = RTDYLD_INVALID_SECTION_ID;
+  unsigned ExceptTabSID = RTDYLD_INVALID_SECTION_ID;
+  ObjSectionToIDMap::iterator i, e;
+
+  for (i = SectionMap.begin(), e = SectionMap.end(); i != e; ++i) {
+    const SectionRef &Section = i->first;
+    StringRef Name;
+    Section.getName(Name);
+    if (Name == "__eh_frame")
+      EHFrameSID = i->second;
+    else if (Name == "__text")
+      TextSID = i->second;
+    else if (Name == "__gcc_except_tab")
+      ExceptTabSID = i->second;
+    else
+      impl().finalizeSection(ObjImg, i->second, Section);
+  }
+  UnregisteredEHFrameSections.push_back(
+    EHFrameRelatedSections(EHFrameSID, TextSID, ExceptTabSID));
+}
+
+template <typename Impl>
+unsigned char *RuntimeDyldMachOCRTPBase<Impl>::processFDE(unsigned char *P,
+                                                          int64_t DeltaForText,
+                                                          int64_t DeltaForEH) {
+  typedef typename Impl::TargetPtrT TargetPtrT;
+
   DEBUG(dbgs() << "Processing FDE: Delta for text: " << DeltaForText
                << ", Delta for EH: " << DeltaForEH << "\n");
   uint32_t Length = *((uint32_t *)P);
@@ -172,32 +224,33 @@ static unsigned char *processFDE(unsigned char *P, intptr_t DeltaForText,
     return Ret;
 
   P += 4;
-  intptr_t FDELocation = *((intptr_t *)P);
-  intptr_t NewLocation = FDELocation - DeltaForText;
-  *((intptr_t *)P) = NewLocation;
-  P += sizeof(intptr_t);
+  TargetPtrT FDELocation = *((TargetPtrT*)P);
+  TargetPtrT NewLocation = FDELocation - DeltaForText;
+  *((TargetPtrT*)P) = NewLocation;
+  P += sizeof(TargetPtrT);
 
   // Skip the FDE address range
-  P += sizeof(intptr_t);
+  P += sizeof(TargetPtrT);
 
   uint8_t Augmentationsize = *P;
   P += 1;
   if (Augmentationsize != 0) {
-    intptr_t LSDA = *((intptr_t *)P);
-    intptr_t NewLSDA = LSDA - DeltaForEH;
-    *((intptr_t *)P) = NewLSDA;
+    TargetPtrT LSDA = *((TargetPtrT *)P);
+    TargetPtrT NewLSDA = LSDA - DeltaForEH;
+    *((TargetPtrT *)P) = NewLSDA;
   }
 
   return Ret;
 }
 
-static intptr_t computeDelta(SectionEntry *A, SectionEntry *B) {
-  intptr_t ObjDistance = A->ObjAddress - B->ObjAddress;
-  intptr_t MemDistance = A->LoadAddress - B->LoadAddress;
+static int64_t computeDelta(SectionEntry *A, SectionEntry *B) {
+  int64_t ObjDistance = A->ObjAddress - B->ObjAddress;
+  int64_t MemDistance = A->LoadAddress - B->LoadAddress;
   return ObjDistance - MemDistance;
 }
 
-void RuntimeDyldMachO::registerEHFrames() {
+template <typename Impl>
+void RuntimeDyldMachOCRTPBase<Impl>::registerEHFrames() {
 
   if (!MemMgr)
     return;
@@ -212,8 +265,8 @@ void RuntimeDyldMachO::registerEHFrames() {
     if (SectionInfo.ExceptTabSID != RTDYLD_INVALID_SECTION_ID)
       ExceptTab = &Sections[SectionInfo.ExceptTabSID];
 
-    intptr_t DeltaForText = computeDelta(Text, EHFrame);
-    intptr_t DeltaForEH = 0;
+    int64_t DeltaForText = computeDelta(Text, EHFrame);
+    int64_t DeltaForEH = 0;
     if (ExceptTab)
       DeltaForEH = computeDelta(ExceptTab, EHFrame);
 

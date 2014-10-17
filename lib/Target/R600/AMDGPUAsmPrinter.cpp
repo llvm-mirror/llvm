@@ -97,9 +97,13 @@ void AMDGPUAsmPrinter::EmitEndOfAsmFile(Module &M) {
 }
 
 bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
+
+  // The starting address of all shader programs must be 256 bytes aligned.
+  MF.setAlignment(8);
+
   SetupMachineFunction(MF);
 
-  OutStreamer.emitRawComment(Twine('@') + MF.getName() + Twine(':'));
+  EmitFunctionHeader();
 
   MCContext &Context = getObjFileLowering().getContext();
   const MCSectionELF *ConfigSection = Context.getELFSection(".AMDGPU.config",
@@ -240,6 +244,7 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   unsigned MaxSGPR = 0;
   unsigned MaxVGPR = 0;
   bool VCCUsed = false;
+  bool FlatUsed = false;
   const SIRegisterInfo *RI = static_cast<const SIRegisterInfo *>(
       TM.getSubtargetImpl()->getRegisterInfo());
 
@@ -261,6 +266,11 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
         if (reg == AMDGPU::VCC || reg == AMDGPU::VCC_LO ||
 	    reg == AMDGPU::VCC_HI) {
           VCCUsed = true;
+          continue;
+        } else if (reg == AMDGPU::FLAT_SCR ||
+                   reg == AMDGPU::FLAT_SCR_LO ||
+                   reg == AMDGPU::FLAT_SCR_HI) {
+          FlatUsed = true;
           continue;
         }
 
@@ -322,8 +332,13 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   if (VCCUsed)
     MaxSGPR += 2;
 
-  ProgInfo.NumVGPR = MaxVGPR;
-  ProgInfo.NumSGPR = MaxSGPR;
+  if (FlatUsed)
+    MaxSGPR += 2;
+
+  // We found the maximum register index. They start at 0, so add one to get the
+  // number of registers.
+  ProgInfo.NumVGPR = MaxVGPR + 1;
+  ProgInfo.NumSGPR = MaxSGPR + 1;
 
   // Set the value to initialize FP_ROUND and FP_DENORM parts of the mode
   // register.
@@ -338,6 +353,8 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   const MachineFrameInfo *FrameInfo = MF.getFrameInfo();
   ProgInfo.ScratchSize = FrameInfo->estimateStackSize(MF);
 
+  ProgInfo.FlatUsed = FlatUsed;
+  ProgInfo.VCCUsed = VCCUsed;
   ProgInfo.CodeLen = CodeSize;
 }
 
@@ -364,8 +381,12 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(const MachineFunction &MF,
     LDSAlignShift = 9;
   }
 
+  unsigned LDSSpillSize = MFI->LDSWaveSpillSize *
+                          MFI->getMaximumWorkGroupSize(MF);
+
   unsigned LDSBlocks =
-    RoundUpToAlignment(MFI->LDSSize, 1 << LDSAlignShift) >> LDSAlignShift;
+     RoundUpToAlignment(MFI->LDSSize + LDSSpillSize,
+	                      1 << LDSAlignShift) >> LDSAlignShift;
 
   // Scratch is allocated in 256 dword blocks.
   unsigned ScratchAlignShift = 10;
@@ -376,12 +397,15 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(const MachineFunction &MF,
     RoundUpToAlignment(KernelInfo.ScratchSize * STM.getWavefrontSize(),
                        1 << ScratchAlignShift) >> ScratchAlignShift;
 
+  unsigned VGPRBlocks = (KernelInfo.NumVGPR - 1) / 4;
+  unsigned SGPRBlocks = (KernelInfo.NumSGPR - 1) / 8;
+
   if (MFI->getShaderType() == ShaderType::COMPUTE) {
     OutStreamer.EmitIntValue(R_00B848_COMPUTE_PGM_RSRC1, 4);
 
     const uint32_t ComputePGMRSrc1 =
-      S_00B848_VGPRS(KernelInfo.NumVGPR / 4) |
-      S_00B848_SGPRS(KernelInfo.NumSGPR / 8) |
+      S_00B848_VGPRS(VGPRBlocks) |
+      S_00B848_SGPRS(SGPRBlocks) |
       S_00B848_PRIORITY(KernelInfo.Priority) |
       S_00B848_FLOAT_MODE(KernelInfo.FloatMode) |
       S_00B848_PRIV(KernelInfo.Priv) |
@@ -400,10 +424,13 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(const MachineFunction &MF,
 
     OutStreamer.EmitIntValue(R_00B860_COMPUTE_TMPRING_SIZE, 4);
     OutStreamer.EmitIntValue(S_00B860_WAVESIZE(ScratchBlocks), 4);
+
+    // TODO: Should probably note flat usage somewhere. SC emits a "FlatPtr32 =
+    // 0" comment but I don't see a corresponding field in the register spec.
   } else {
     OutStreamer.EmitIntValue(RsrcReg, 4);
-    OutStreamer.EmitIntValue(S_00B028_VGPRS(KernelInfo.NumVGPR / 4) |
-                             S_00B028_SGPRS(KernelInfo.NumSGPR / 8), 4);
+    OutStreamer.EmitIntValue(S_00B028_VGPRS(VGPRBlocks) |
+                             S_00B028_SGPRS(SGPRBlocks), 4);
   }
 
   if (MFI->getShaderType() == ShaderType::PIXEL) {

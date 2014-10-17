@@ -290,10 +290,10 @@ the opcode, the number of operands, the list of implicit register uses and defs,
 whether the instruction has certain target-independent properties (accesses
 memory, is commutable, etc), and holds any target-specific flags.
 
-The ``TargetFrameInfo`` class
------------------------------
+The ``TargetFrameLowering`` class
+---------------------------------
 
-The ``TargetFrameInfo`` class is used to provide information about the stack
+The ``TargetFrameLowering`` class is used to provide information about the stack
 frame layout of the target. It holds the direction of stack growth, the known
 stack alignment on entry to each function, and the offset to the local area.
 The offset to the local area is the offset from the stack pointer on function
@@ -769,7 +769,9 @@ provide an ordering between nodes that have side effects (such as loads, stores,
 calls, returns, etc).  All nodes that have side effects should take a token
 chain as input and produce a new one as output.  By convention, token chain
 inputs are always operand #0, and chain results are always the last value
-produced by an operation.
+produced by an operation. However, after instruction selection, the
+machine nodes have their chain after the instruction's operands, and
+may be followed by glue nodes.
 
 A SelectionDAG has designated "Entry" and "Root" nodes.  The Entry node is
 always a marker node with an Opcode of ``ISD::EntryToken``.  The Root node is

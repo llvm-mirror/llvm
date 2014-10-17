@@ -50,7 +50,7 @@
 ; X86-NEXT: ret
 ; X86-NEXT: [[END_OF_F:.*]]:
 ;
-; X86-LABEL: .section        .debug$S,"rnd"
+; X86-LABEL: .section        .debug$S,"rd"
 ; X86-NEXT: .long   4
 ; Line table subsection for x
 ; X86-NEXT: .long   242
@@ -58,6 +58,7 @@
 ; X86-NEXT: [[F2_START]]:
 ; X86-NEXT: .secrel32       _x
 ; X86-NEXT: .secidx _x
+; X86-NEXT: .short 0
 ; X86-NEXT: .long [[END_OF_X]]-_x
 ; X86-NEXT: [[FILE_SEGMENT_START:[^:]*]]:
 ; X86-NEXT: .long   0
@@ -75,6 +76,7 @@
 ; X86-NEXT: [[F2_START]]:
 ; X86-NEXT: .secrel32       _y
 ; X86-NEXT: .secidx _y
+; X86-NEXT: .short 0
 ; X86-NEXT: .long [[END_OF_Y]]-_y
 ; X86-NEXT: [[FILE_SEGMENT_START:[^:]*]]:
 ; X86-NEXT: .long   0
@@ -92,6 +94,7 @@
 ; X86-NEXT: [[F2_START]]:
 ; X86-NEXT: .secrel32 _f
 ; X86-NEXT: .secidx _f
+; X86-NEXT: .short 0
 ; X86-NEXT: .long [[END_OF_F]]-_f
 ; X86-NEXT: [[FILE_SEGMENT_START:[^:]*]]:
 ; X86-NEXT: .long   0
@@ -200,7 +203,7 @@
 ; X64-NEXT: ret
 ; X64-NEXT: [[END_OF_F:.*]]:
 ;
-; X64-LABEL: .section        .debug$S,"rnd"
+; X64-LABEL: .section        .debug$S,"rd"
 ; X64-NEXT: .long   4
 ; Line table subsection for x
 ; X64-NEXT: .long   242
@@ -208,6 +211,7 @@
 ; X64-NEXT: [[F2_START]]:
 ; X64-NEXT: .secrel32 x
 ; X64-NEXT: .secidx x
+; X64-NEXT: .short 0
 ; X64-NEXT: .long [[END_OF_X]]-x
 ; X64-NEXT: [[FILE_SEGMENT_START:[^:]*]]:
 ; X64-NEXT: .long   0
@@ -227,6 +231,7 @@
 ; X64-NEXT: [[F2_START]]:
 ; X64-NEXT: .secrel32 y
 ; X64-NEXT: .secidx y
+; X64-NEXT: .short 0
 ; X64-NEXT: .long [[END_OF_Y]]-y
 ; X64-NEXT: [[FILE_SEGMENT_START:[^:]*]]:
 ; X64-NEXT: .long   0
@@ -246,6 +251,7 @@
 ; X64-NEXT: [[F2_START]]:
 ; X64-NEXT: .secrel32 f
 ; X64-NEXT: .secidx f
+; X64-NEXT: .short 0
 ; X64-NEXT: .long [[END_OF_F]]-f
 ; X64-NEXT: [[FILE_SEGMENT_START:[^:]*]]:
 ; X64-NEXT: .long   0
@@ -354,23 +360,23 @@ attributes #1 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "
 !llvm.module.flags = !{!11, !12}
 !llvm.ident = !{!13}
 
-!0 = metadata !{i32 786449, metadata !1, i32 12, metadata !"clang version 3.5 ", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [D:\/<unknown>] [DW_LANG_C99]
+!0 = metadata !{metadata !"0x11\0012\00clang version 3.5 \000\00\000\00\000", metadata !1, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2} ; [ DW_TAG_compile_unit ] [D:\/<unknown>] [DW_LANG_C99]
 !1 = metadata !{metadata !"<unknown>", metadata !"D:\5C"}
 !2 = metadata !{i32 0}
 !3 = metadata !{metadata !4, metadata !9, metadata !10}
-!4 = metadata !{i32 786478, metadata !5, metadata !6, metadata !"x", metadata !"x", metadata !"", i32 3, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @x, null, null, metadata !2, i32 3} ; [ DW_TAG_subprogram ] [line 3] [def] [x]
+!4 = metadata !{metadata !"0x2e\00x\00x\00\003\000\001\000\006\00256\000\003", metadata !5, metadata !6, metadata !7, null, void ()* @x, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 3] [def] [x]
 !5 = metadata !{metadata !"source.c", metadata !"D:\5C"}
-!6 = metadata !{i32 786473, metadata !5}          ; [ DW_TAG_file_type ] [D:\/source.c]
-!7 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!6 = metadata !{metadata !"0x29", metadata !5}          ; [ DW_TAG_file_type ] [D:\/source.c]
+!7 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !8, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !8 = metadata !{null}
-!9 = metadata !{i32 786478, metadata !5, metadata !6, metadata !"y", metadata !"y", metadata !"", i32 7, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @y, null, null, metadata !2, i32 7} ; [ DW_TAG_subprogram ] [line 7] [def] [y]
-!10 = metadata !{i32 786478, metadata !5, metadata !6, metadata !"f", metadata !"f", metadata !"", i32 11, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @f, null, null, metadata !2, i32 11} ; [ DW_TAG_subprogram ] [line 11] [def] [f]
+!9 = metadata !{metadata !"0x2e\00y\00y\00\007\000\001\000\006\00256\000\007", metadata !5, metadata !6, metadata !7, null, void ()* @y, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 7] [def] [y]
+!10 = metadata !{metadata !"0x2e\00f\00f\00\0011\000\001\000\006\00256\000\0011", metadata !5, metadata !6, metadata !7, null, void ()* @f, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 11] [def] [f]
 !11 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!12 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!12 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
 !13 = metadata !{metadata !"clang version 3.5 "}
 !14 = metadata !{i32 4, i32 0, metadata !4, null}
 !15 = metadata !{i32 5, i32 0, metadata !4, null}
-!16 = metadata !{i32 8, i32 0, metadata !9, null} ; [ DW_TAG_imported_declaration ]
+!16 = metadata !{i32 8, i32 0, metadata !9, null}
 !17 = metadata !{i32 9, i32 0, metadata !9, null}
 !18 = metadata !{i32 12, i32 0, metadata !10, null}
 !19 = metadata !{i32 13, i32 0, metadata !10, null}

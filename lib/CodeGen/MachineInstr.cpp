@@ -106,21 +106,39 @@ void MachineOperand::setIsDef(bool Val) {
   IsDef = Val;
 }
 
+// If this operand is currently a register operand, and if this is in a
+// function, deregister the operand from the register's use/def list.
+void MachineOperand::removeRegFromUses() {
+  if (!isReg() || !isOnRegUseList())
+    return;
+
+  if (MachineInstr *MI = getParent()) {
+    if (MachineBasicBlock *MBB = MI->getParent()) {
+      if (MachineFunction *MF = MBB->getParent())
+        MF->getRegInfo().removeRegOperandFromUseList(this);
+    }
+  }
+}
+
 /// ChangeToImmediate - Replace this operand with a new immediate operand of
 /// the specified value.  If an operand is known to be an immediate already,
 /// the setImm method should be used.
 void MachineOperand::ChangeToImmediate(int64_t ImmVal) {
   assert((!isReg() || !isTied()) && "Cannot change a tied operand into an imm");
-  // If this operand is currently a register operand, and if this is in a
-  // function, deregister the operand from the register's use/def list.
-  if (isReg() && isOnRegUseList())
-    if (MachineInstr *MI = getParent())
-      if (MachineBasicBlock *MBB = MI->getParent())
-        if (MachineFunction *MF = MBB->getParent())
-          MF->getRegInfo().removeRegOperandFromUseList(this);
+
+  removeRegFromUses();
 
   OpKind = MO_Immediate;
   Contents.ImmVal = ImmVal;
+}
+
+void MachineOperand::ChangeToFPImmediate(const ConstantFP *FPImm) {
+  assert((!isReg() || !isTied()) && "Cannot change a tied operand into an imm");
+
+  removeRegFromUses();
+
+  OpKind = MO_FPImmediate;
+  Contents.CFP = FPImm;
 }
 
 /// ChangeToRegister - Replace this operand with a new register operand of
@@ -1625,8 +1643,11 @@ void MachineInstr::print(raw_ostream &OS, const TargetMachine *TM,
     if (isDebugValue() && MO.isMetadata()) {
       // Pretty print DBG_VALUE instructions.
       const MDNode *MD = MO.getMetadata();
-      if (const MDString *MDS = dyn_cast<MDString>(MD->getOperand(2)))
-        OS << "!\"" << MDS->getString() << '\"';
+      DIDescriptor DI(MD);
+      DIVariable DIV(MD);
+
+      if (DI.isVariable() && !DIV.getName().empty())
+        OS << "!\"" << DIV.getName() << '\"';
       else
         MO.print(OS, TM);
     } else if (TM && (isInsertSubreg() || isRegSequence()) && MO.isImm()) {
@@ -1729,6 +1750,8 @@ void MachineInstr::print(raw_ostream &OS, const TargetMachine *TM,
         OS << " ]";
       }
     }
+    if (isIndirectDebugValue())
+      OS << " indirect";
   } else if (!debugLoc.isUnknown() && MF) {
     if (!HaveSemi) OS << ";";
     OS << " dbg:";

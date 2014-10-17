@@ -80,7 +80,7 @@ public:
     return nullptr;
   }
 
-  virtual void addCodeGenPrepare();
+  void addCodeGenPrepare() override;
   bool addPreISel() override;
   bool addInstSelector() override;
   bool addPreRegAlloc() override;
@@ -149,8 +149,7 @@ bool AMDGPUPassConfig::addPreRegAlloc() {
     // so we need to run MachineCSE afterwards.
     addPass(&MachineCSEID);
     addPass(createSIShrinkInstructionsPass());
-    initializeSIFixSGPRLiveRangesPass(*PassRegistry::getPassRegistry());
-    insertPass(&RegisterCoalescerID, &SIFixSGPRLiveRangesID);
+    addPass(createSIFixSGPRLiveRangesPass());
   }
   return false;
 }

@@ -37,29 +37,24 @@ typedef generic_gep_type_iterator<User::const_op_iterator> gep_type_iterator;
 // stack, which causes the dtor to be run, which frees all the alloca'd memory.
 //
 class AllocaHolder {
-  friend class AllocaHolderHandle;
-  std::vector<void*> Allocations;
-  unsigned RefCnt;
+  std::vector<void *> Allocations;
+
 public:
-  AllocaHolder() : RefCnt(0) {}
-  void add(void *mem) { Allocations.push_back(mem); }
-  ~AllocaHolder() {
-    for (unsigned i = 0; i < Allocations.size(); ++i)
-      free(Allocations[i]);
+  AllocaHolder() {}
+
+  // Make this type move-only. Define explicit move special members for MSVC.
+  AllocaHolder(AllocaHolder &&RHS) : Allocations(std::move(RHS.Allocations)) {}
+  AllocaHolder &operator=(AllocaHolder &&RHS) {
+    Allocations = std::move(RHS.Allocations);
+    return *this;
   }
-};
 
-// AllocaHolderHandle gives AllocaHolder value semantics so we can stick it into
-// a vector...
-//
-class AllocaHolderHandle {
-  AllocaHolder *H;
-public:
-  AllocaHolderHandle() : H(new AllocaHolder()) { H->RefCnt++; }
-  AllocaHolderHandle(const AllocaHolderHandle &AH) : H(AH.H) { H->RefCnt++; }
-  ~AllocaHolderHandle() { if (--H->RefCnt == 0) delete H; }
+  ~AllocaHolder() {
+    for (void *Allocation : Allocations)
+      free(Allocation);
+  }
 
-  void add(void *mem) { H->add(mem); }
+  void add(void *Mem) { Allocations.push_back(Mem); }
 };
 
 typedef std::vector<GenericValue> ValuePlaneTy;
@@ -71,11 +66,29 @@ struct ExecutionContext {
   Function             *CurFunction;// The currently executing function
   BasicBlock           *CurBB;      // The currently executing BB
   BasicBlock::iterator  CurInst;    // The next instruction to execute
-  std::map<Value *, GenericValue> Values; // LLVM values used in this invocation
-  std::vector<GenericValue>  VarArgs; // Values passed through an ellipsis
   CallSite             Caller;     // Holds the call that called subframes.
                                    // NULL if main func or debugger invoked fn
-  AllocaHolderHandle    Allocas;    // Track memory allocated by alloca
+  std::map<Value *, GenericValue> Values; // LLVM values used in this invocation
+  std::vector<GenericValue>  VarArgs; // Values passed through an ellipsis
+  AllocaHolder Allocas;            // Track memory allocated by alloca
+
+  ExecutionContext() : CurFunction(nullptr), CurBB(nullptr), CurInst(nullptr) {}
+
+  ExecutionContext(ExecutionContext &&O)
+      : CurFunction(O.CurFunction), CurBB(O.CurBB), CurInst(O.CurInst),
+        Caller(O.Caller), Values(std::move(O.Values)),
+        VarArgs(std::move(O.VarArgs)), Allocas(std::move(O.Allocas)) {}
+
+  ExecutionContext &operator=(ExecutionContext &&O) {
+    CurFunction = O.CurFunction;
+    CurBB = O.CurBB;
+    CurInst = O.CurInst;
+    Caller = O.Caller;
+    Values = std::move(O.Values);
+    VarArgs = std::move(O.VarArgs);
+    Allocas = std::move(O.Allocas);
+    return *this;
+  }
 };
 
 // Interpreter - This class represents the entirety of the interpreter.
@@ -116,22 +129,11 @@ public:
   GenericValue runFunction(Function *F,
                            const std::vector<GenericValue> &ArgValues) override;
 
-  void *getPointerToNamedFunction(const std::string &Name,
+  void *getPointerToNamedFunction(StringRef Name,
                                   bool AbortOnFailure = true) override {
     // FIXME: not implemented.
     return nullptr;
   }
-
-  /// recompileAndRelinkFunction - For the interpreter, functions are always
-  /// up-to-date.
-  ///
-  void *recompileAndRelinkFunction(Function *F) override {
-    return getPointerToFunction(F);
-  }
-
-  /// freeMachineCodeForFunction - The interpreter does not generate any code.
-  ///
-  void freeMachineCodeForFunction(Function *F) override { }
 
   // Methods used to execute code:
   // Place a call on the stack
@@ -214,7 +216,6 @@ private:  // Helper functions
   void SwitchToNewBasicBlock(BasicBlock *Dest, ExecutionContext &SF);
 
   void *getPointerToFunction(Function *F) override { return (void*)F; }
-  void *getPointerToBasicBlock(BasicBlock *BB) override { return (void*)BB; }
 
   void initializeExecutionEngine() { }
   void initializeExternalFunctions();

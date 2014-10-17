@@ -118,6 +118,12 @@ public:
 
   StackMaps(AsmPrinter &AP);
 
+  void reset() {
+    CSInfos.clear();
+    ConstPool.clear();
+    FnStackSize.clear();
+  }
+
   /// \brief Generate a stackmap record for a stackmap instruction.
   ///
   /// MI must be a raw STACKMAP, not a PATCHPOINT.
@@ -146,9 +152,9 @@ private:
     LiveOutVec LiveOuts;
     CallsiteInfo() : CSOffsetExpr(nullptr), ID(0) {}
     CallsiteInfo(const MCExpr *CSOffsetExpr, uint64_t ID,
-                 LocationVec &Locations, LiveOutVec &LiveOuts)
-      : CSOffsetExpr(CSOffsetExpr), ID(ID), Locations(Locations),
-        LiveOuts(LiveOuts) {}
+                 LocationVec &&Locations, LiveOutVec &&LiveOuts)
+      : CSOffsetExpr(CSOffsetExpr), ID(ID), Locations(std::move(Locations)),
+        LiveOuts(std::move(LiveOuts)) {}
   };
 
   typedef std::vector<CallsiteInfo> CallsiteInfoList;

@@ -45,13 +45,13 @@ public:
   SIShrinkInstructions() : MachineFunctionPass(ID) {
   }
 
-  virtual bool runOnMachineFunction(MachineFunction &MF) override;
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
-  virtual const char *getPassName() const override {
+  const char *getPassName() const override {
     return "SI Shrink Instructions";
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -195,7 +195,7 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
         continue;
 
       if (!canShrink(MI, TII, TRI, MRI)) {
-        // Try commtuing the instruction and see if that enables us to shrink
+        // Try commuting the instruction and see if that enables us to shrink
         // it.
         if (!MI.isCommutable() || !TII->commuteInstruction(&MI) ||
             !canShrink(MI, TII, TRI, MRI))
@@ -213,18 +213,17 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
         unsigned DstReg = MI.getOperand(0).getReg();
         if (TargetRegisterInfo::isVirtualRegister(DstReg)) {
           // VOPC instructions can only write to the VCC register.  We can't
-          // force them to use VCC here, because the register allocator
-          // has trouble with sequences like this, which cause the allocator
-          // to run out of registes if vreg0 and vreg1 belong to the VCCReg
-          // register class:
+          // force them to use VCC here, because the register allocator has
+          // trouble with sequences like this, which cause the allocator to run
+          // out of registers if vreg0 and vreg1 belong to the VCCReg register
+          // class:
           // vreg0 = VOPC;
           // vreg1 = VOPC;
           // S_AND_B64 vreg0, vreg1
           //
-          // So, instead of forcing the instruction to write to VCC, we provide a
-          // hint to the register allocator to use VCC and then we
-          // we will run this pass again after RA and shrink it if it outpus to
-          // VCC.
+          // So, instead of forcing the instruction to write to VCC, we provide
+          // a hint to the register allocator to use VCC and then we we will run
+          // this pass again after RA and shrink it if it outputs to VCC.
           MRI.setRegAllocationHint(MI.getOperand(0).getReg(), 0, AMDGPU::VCC);
           continue;
         }

@@ -418,8 +418,6 @@ define i1 @nonexact_lshr_ne_shift_gt(i8 %a) {
  ret i1 %cmp
 }
 
-
-
 ; CHECK-LABEL: @exact_ashr_eq
 ; CHECK-NEXT: icmp eq i8 %a, 7
 define i1 @exact_ashr_eq(i8 %a) {
@@ -674,4 +672,19 @@ define i1 @nonexact_ashr_ne_noexactlog(i8 %a) {
  %shr = ashr i8 -90, %a
  %cmp = icmp ne i8 %shr, -30
  ret i1 %cmp
+}
+
+; Don't try to fold the entire body of function @PR20945 into a
+; single `ret i1 true` statement.
+; If %B is equal to 1, then this function would return false.
+; As a consequence, the instruction combiner is not allowed to fold %cmp
+; to 'true'. Instead, it should replace %cmp with a simpler comparison
+; between %B and 1.
+
+; CHECK-LABEL: @PR20945(
+; CHECK: icmp ne i32 %B, 1
+define i1 @PR20945(i32 %B) {
+  %shr = ashr i32 -9, %B
+  %cmp = icmp ne i32 %shr, -5
+  ret i1 %cmp
 }

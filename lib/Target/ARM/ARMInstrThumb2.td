@@ -3309,7 +3309,8 @@ def t2LDREXD : T2I_ldrex<0b0111, (outs rGPR:$Rt, rGPR:$Rt2),
                          (ins addr_offset_none:$addr),
                          AddrModeNone, 4, NoItinerary,
                          "ldrexd", "\t$Rt, $Rt2, $addr", "",
-                         [], {?, ?, ?, ?}> {
+                         [], {?, ?, ?, ?}>,
+               Requires<[IsThumb2, IsNotMClass]> {
   bits<4> Rt2;
   let Inst{11-8} = Rt2;
 }
@@ -3385,7 +3386,8 @@ def t2STREXD : T2I_strex<0b0111, (outs rGPR:$Rd),
                          (ins rGPR:$Rt, rGPR:$Rt2, addr_offset_none:$addr),
                          AddrModeNone, 4, NoItinerary,
                          "strexd", "\t$Rd, $Rt, $Rt2, $addr", "", [],
-                         {?, ?, ?, ?}> {
+                         {?, ?, ?, ?}>,
+               Requires<[IsThumb2, IsNotMClass]> {
   bits<4> Rt2;
   let Inst{11-8} = Rt2;
 }
@@ -3632,7 +3634,7 @@ def t2IT : Thumb2XI<(outs), (ins it_pred:$cc, it_mask:$mask),
 // Branch and Exchange Jazelle -- for disassembly only
 // Rm = Inst{19-16}
 def t2BXJ : T2I<(outs), (ins rGPR:$func), NoItinerary, "bxj", "\t$func", []>,
-    Sched<[WriteBr]> {
+    Sched<[WriteBr]>, Requires<[IsThumb2, IsNotMClass, PreV8]> {
   bits<4> func;
   let Inst{31-27} = 0b11110;
   let Inst{26} = 0;
@@ -3674,7 +3676,8 @@ let isBranch = 1, isTerminator = 1 in {
 // operands, create 3 versions of the same instruction. Once there's a clean
 // framework to represent optional operands, change this behavior.
 class t2CPS<dag iops, string asm_op> : T2XI<(outs), iops, NoItinerary,
-            !strconcat("cps", asm_op), []> {
+            !strconcat("cps", asm_op), []>,
+          Requires<[IsThumb2, IsNotMClass]> {
   bits<2> imod;
   bits<3> iflags;
   bits<5> mode;
@@ -4013,15 +4016,17 @@ def t2MRSbanked : T2I<(outs rGPR:$Rd), (ins banked_reg:$banked),
 //
 // This MRS has a mask field in bits 7-0 and can take more values than
 // the A/R class (a full msr_mask).
-def t2MRS_M : T2I<(outs rGPR:$Rd), (ins msr_mask:$mask), NoItinerary,
-                  "mrs", "\t$Rd, $mask", []>,
+def t2MRS_M : T2I<(outs rGPR:$Rd), (ins msr_mask:$SYSm), NoItinerary,
+                  "mrs", "\t$Rd, $SYSm", []>,
               Requires<[IsThumb,IsMClass]> {
   bits<4> Rd;
-  bits<8> mask;
+  bits<8> SYSm;
   let Inst{31-12} = 0b11110011111011111000;
   let Inst{11-8} = Rd;
-  let Inst{19-16} = 0b1111;
-  let Inst{7-0} = mask;
+  let Inst{7-0} = SYSm;
+
+  let Unpredictable{20-16} = 0b11111;
+  let Unpredictable{13} = 0b1;
 }
 
 
@@ -4077,7 +4082,13 @@ def t2MSR_M : T2I<(outs), (ins msr_mask:$SYSm, rGPR:$Rn),
   let Inst{20}    = 0b0;
   let Inst{19-16} = Rn;
   let Inst{15-12} = 0b1000;
-  let Inst{11-0}  = SYSm;
+  let Inst{11-10} = SYSm{11-10};
+  let Inst{9-8}   = 0b00;
+  let Inst{7-0}   = SYSm{7-0};
+
+  let Unpredictable{20} = 0b1;
+  let Unpredictable{13} = 0b1;
+  let Unpredictable{9-8} = 0b11;
 }
 
 

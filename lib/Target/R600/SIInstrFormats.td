@@ -26,6 +26,7 @@ class InstSI <dag outs, dag ins, string asm, list<dag> pattern> :
   field bits<1> SALU = 0;
   field bits<1> MUBUF = 0;
   field bits<1> MTBUF = 0;
+  field bits<1> FLAT = 0;
 
   // These need to be kept in sync with the enum in SIInstrFlags.
   let TSFlags{0} = VM_CNT;
@@ -40,6 +41,11 @@ class InstSI <dag outs, dag ins, string asm, list<dag> pattern> :
   let TSFlags{9} = SALU;
   let TSFlags{10} = MUBUF;
   let TSFlags{11} = MTBUF;
+  let TSFlags{12} = FLAT;
+
+  // Most instructions require adjustments after selection to satisfy
+  // operand requirements.
+  let hasPostISelHook = 1;
 }
 
 class Enc32 {
@@ -52,6 +58,15 @@ class Enc64 {
 
   field bits<64> Inst;
   int Size = 8;
+}
+
+class VOP1Common <dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI <outs, ins, asm, pattern> {
+  let mayLoad = 0;
+  let mayStore = 0;
+  let hasSideEffects = 0;
+  let UseNamedOperandTable = 1;
+  let VOP1 = 1;
 }
 
 class VOP3Common <dag outs, dag ins, string asm, list<dag> pattern> :
@@ -162,6 +177,8 @@ class SOP2 <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let mayStore = 0;
   let hasSideEffects = 0;
   let SALU = 1;
+
+  let UseNamedOperandTable = 1;
 }
 
 class SOPC <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
@@ -172,6 +189,8 @@ class SOPC <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let mayStore = 0;
   let hasSideEffects = 0;
   let SALU = 1;
+
+  let UseNamedOperandTable = 1;
 }
 
 class SOPK <bits<5> op, dag outs, dag ins, string asm, list<dag> pattern> :
@@ -181,6 +200,8 @@ class SOPK <bits<5> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let mayStore = 0;
   let hasSideEffects = 0;
   let SALU = 1;
+
+  let UseNamedOperandTable = 1;
 }
 
 class SOPP <bits<7> op, dag ins, string asm, list<dag> pattern> :
@@ -190,10 +211,12 @@ class SOPP <bits<7> op, dag ins, string asm, list<dag> pattern> :
   let mayStore = 0;
   let hasSideEffects = 0;
   let SALU = 1;
+
+  let UseNamedOperandTable = 1;
 }
 
-class SMRD <bits<5> op, bits<1> imm, dag outs, dag ins, string asm,
-            list<dag> pattern> : InstSI<outs, ins, asm, pattern>, SMRDe<op, imm> {
+class SMRD <dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI<outs, ins, asm, pattern> {
 
   let LGKM_CNT = 1;
   let SMRD = 1;
@@ -425,8 +448,27 @@ class MIMGe <bits<7> op> : Enc64 {
   let Inst{57-53} = SSAMP{6-2};
 }
 
-class EXPe : Enc64 {
+class FLATe<bits<7> op> : Enc64 {
+  bits<8> addr;
+  bits<8> data;
+  bits<8> vdst;
+  bits<1> slc;
+  bits<1> glc;
+  bits<1> tfe;
 
+  // 15-0 is reserved.
+  let Inst{16} = glc;
+  let Inst{17} = slc;
+  let Inst{24-18} = op;
+  let Inst{31-26} = 0x37; // Encoding.
+  let Inst{39-32} = addr;
+  let Inst{47-40} = data;
+  // 54-48 is reserved.
+  let Inst{55} = tfe;
+  let Inst{63-56} = vdst;
+}
+
+class EXPe : Enc64 {
   bits<4> EN;
   bits<6> TGT;
   bits<1> COMPR;
@@ -452,14 +494,8 @@ class EXPe : Enc64 {
 let Uses = [EXEC] in {
 
 class VOP1 <bits<8> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    InstSI <outs, ins, asm, pattern>, VOP1e<op> {
-
-  let mayLoad = 0;
-  let mayStore = 0;
-  let hasSideEffects = 0;
-  let UseNamedOperandTable = 1;
-  let VOP1 = 1;
-}
+    VOP1Common <outs, ins, asm, pattern>,
+    VOP1e<op>;
 
 class VOP2 <bits<6> op, dag outs, dag ins, string asm, list<dag> pattern> :
     InstSI <outs, ins, asm, pattern>, VOP2e<op> {
@@ -522,14 +558,30 @@ class MUBUF <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let UseNamedOperandTable = 1;
 }
 
-class MTBUF <bits<3> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    InstSI<outs, ins, asm, pattern>, MTBUFe <op> {
+class MTBUF <dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI<outs, ins, asm, pattern> {
 
   let VM_CNT = 1;
   let EXP_CNT = 1;
   let MTBUF = 1;
 
   let neverHasSideEffects = 1;
+  let UseNamedOperandTable = 1;
+}
+
+class FLAT <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI<outs, ins, asm, pattern>, FLATe <op> {
+  let FLAT = 1;
+  // Internally, FLAT instruction are executed as both an LDS and a
+  // Buffer instruction; so, they increment both VM_CNT and LGKM_CNT
+  // and are not considered done until both have been decremented.
+  let VM_CNT = 1;
+  let LGKM_CNT = 1;
+
+  let Uses = [EXEC, FLAT_SCR]; // M0
+
+  let UseNamedOperandTable = 1;
+  let hasSideEffects = 0;
 }
 
 class MIMG <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
@@ -540,14 +592,6 @@ class MIMG <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let MIMG = 1;
 }
 
-def EXP : InstSI<
-  (outs),
-  (ins i32imm:$en, i32imm:$tgt, i32imm:$compr, i32imm:$done, i32imm:$vm,
-       VReg_32:$src0, VReg_32:$src1, VReg_32:$src2, VReg_32:$src3),
-  "EXP $en, $tgt, $compr, $done, $vm, $src0, $src1, $src2, $src3",
-  [] >, EXPe {
 
-  let EXP_CNT = 1;
-}
 
 } // End Uses = [EXEC]

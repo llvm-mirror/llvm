@@ -2299,10 +2299,11 @@ AArch64AsmParser::tryParseOptionalShiftExtend(OperandVector &Operands) {
   if (Hash)
     Parser.Lex(); // Eat the '#'.
 
-  // Make sure we do actually have a number
-  if (!Parser.getTok().is(AsmToken::Integer)) {
-    Error(Parser.getTok().getLoc(),
-          "expected integer shift amount");
+  // Make sure we do actually have a number or a parenthesized expression.
+  SMLoc E = Parser.getTok().getLoc();
+  if (!Parser.getTok().is(AsmToken::Integer) &&
+      !Parser.getTok().is(AsmToken::LParen)) {
+    Error(E, "expected integer shift amount");
     return MatchOperand_ParseFail;
   }
 
@@ -2312,11 +2313,11 @@ AArch64AsmParser::tryParseOptionalShiftExtend(OperandVector &Operands) {
 
   const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(ImmVal);
   if (!MCE) {
-    TokError("expected #imm after shift specifier");
+    Error(E, "expected constant '#imm' after shift specifier");
     return MatchOperand_ParseFail;
   }
 
-  SMLoc E = SMLoc::getFromPointer(getLoc().getPointer() - 1);
+  E = SMLoc::getFromPointer(getLoc().getPointer() - 1);
   Operands.push_back(AArch64Operand::CreateShiftExtend(
       ShOp, MCE->getValue(), true, S, E, getContext()));
   return MatchOperand_Success;
@@ -3985,10 +3986,9 @@ bool AArch64AsmParser::parseDirectiveLOH(StringRef IDVal, SMLoc Loc) {
     // We successfully get a numeric value for the identifier.
     // Check if it is valid.
     int64_t Id = getParser().getTok().getIntVal();
-    Kind = (MCLOHType)Id;
-    // Check that Id does not overflow MCLOHType.
-    if (!isValidMCLOHType(Kind) || Id != Kind)
+    if (Id <= -1U && !isValidMCLOHType(Id))
       return TokError("invalid numeric identifier in directive");
+    Kind = (MCLOHType)Id;
   } else {
     StringRef Name = getTok().getIdentifier();
     // We successfully parse an identifier.

@@ -44,13 +44,20 @@ private:
   /// \returns The resulting chain.
 
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFCEIL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFTRUNC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRINT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFNEARBYINT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFFLOOR(SDValue Op, SelectionDAG &DAG) const;
 
+  SDValue LowerINT_TO_FP64(SDValue Op, SelectionDAG &DAG, bool Signed) const;
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue LowerFP64_TO_INT(SDValue Op, SelectionDAG &DAG, bool Signed) const;
+  SDValue LowerFP_TO_UINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFP_TO_SINT(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue ExpandSIGN_EXTEND_INREG(SDValue Op,
                                   unsigned BitsDiff,
@@ -153,10 +160,8 @@ public:
                                      const SelectionDAG &DAG,
                                      unsigned Depth = 0) const override;
 
-  virtual unsigned ComputeNumSignBitsForTargetNode(
-    SDValue Op,
-    const SelectionDAG &DAG,
-    unsigned Depth = 0) const override;
+  unsigned ComputeNumSignBitsForTargetNode(SDValue Op, const SelectionDAG &DAG,
+                                           unsigned Depth = 0) const override;
 
   /// \brief Helper function that adds Reg to the LiveIn list of the DAG's
   /// MachineFunction.
@@ -180,6 +185,7 @@ enum {
   DWORDADDR,
   FRACT,
   CLAMP,
+  MAD, // Multiply + add with same result as the separate operations.
 
   // SIN_HW, COS_HW - f32 for SI, 1 ULP max error, valid from -100 pi to 100 pi.
   // Denormals handled on some parts.

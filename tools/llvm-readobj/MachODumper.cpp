@@ -31,12 +31,12 @@ public:
     : ObjDumper(Writer)
     , Obj(Obj) { }
 
-  virtual void printFileHeaders() override;
-  virtual void printSections() override;
-  virtual void printRelocations() override;
-  virtual void printSymbols() override;
-  virtual void printDynamicSymbols() override;
-  virtual void printUnwindInfo() override;
+  void printFileHeaders() override;
+  void printSections() override;
+  void printRelocations() override;
+  void printSymbols() override;
+  void printDynamicSymbols() override;
+  void printUnwindInfo() override;
 
 private:
   void printSymbol(const SymbolRef &Symbol);
@@ -257,8 +257,7 @@ void MachODumper::printSections(const MachOObjectFile *Obj) {
     if (opts::SectionSymbols) {
       ListScope D(W, "Symbols");
       for (const SymbolRef &Symbol : Obj->symbols()) {
-        bool Contained = false;
-        if (Section.containsSymbol(Symbol, Contained) || !Contained)
+        if (!Section.containsSymbol(Symbol))
           continue;
 
         printSymbol(Symbol);
@@ -266,11 +265,14 @@ void MachODumper::printSections(const MachOObjectFile *Obj) {
     }
 
     if (opts::SectionData) {
-      StringRef Data;
-      if (error(Section.getContents(Data)))
-        break;
+      bool IsBSS = Section.isBSS();
+      if (!IsBSS) {
+        StringRef Data;
+        if (error(Section.getContents(Data)))
+          break;
 
-      W.printBinaryBlock("SectionData", Data);
+        W.printBinaryBlock("SectionData", Data);
+      }
     }
   }
 }

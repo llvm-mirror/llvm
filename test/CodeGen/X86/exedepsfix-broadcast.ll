@@ -95,7 +95,8 @@ define <4 x double> @ExeDepsFix_broadcastsd256(<4 x double> %arg, <4 x double> %
 ; CHECK-LABEL: ExeDepsFix_broadcastsd_inreg
 ; ExeDepsFix works top down, thus it coalesces vpunpcklqdq domain with
 ; vpand and there is nothing more you can do to match vmaxpd.
-; CHECK: vpunpcklqdq
+; CHECK: vmovq
+; CHECK: vpbroadcastq
 ; CHECK: vpand
 ; CHECK: vmaxpd
 ; CHECK: ret

@@ -11,7 +11,6 @@
 #include "MCTargetDesc/X86FixupKinds.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/MC/MCAsmBackend.h"
-#include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixupKindInfo.h"
@@ -437,10 +436,30 @@ class DarwinX86AsmBackend : public X86AsmBackend {
   bool Is64Bit;
 
   unsigned OffsetSize;                   ///< Offset of a "push" instruction.
-  unsigned PushInstrSize;                ///< Size of a "push" instruction.
   unsigned MoveInstrSize;                ///< Size of a "move" instruction.
-  unsigned StackDivide;                  ///< Amount to adjust stack stize by.
+  unsigned StackDivide;                  ///< Amount to adjust stack size by.
 protected:
+  /// \brief Size of a "push" instruction for the given register.
+  unsigned PushInstrSize(unsigned Reg) const {
+    switch (Reg) {
+      case X86::EBX:
+      case X86::ECX:
+      case X86::EDX:
+      case X86::EDI:
+      case X86::ESI:
+      case X86::EBP:
+      case X86::RBX:
+      case X86::RBP:
+        return 1;
+      case X86::R12:
+      case X86::R13:
+      case X86::R14:
+      case X86::R15:
+        return 2;
+    }
+    return 1;
+  }
+
   /// \brief Implementation of algorithm to generate the compact unwind encoding
   /// for the CFI instructions.
   uint32_t
@@ -530,7 +549,7 @@ protected:
         unsigned Reg = MRI.getLLVMRegNum(Inst.getRegister(), true);
         SavedRegs[SavedRegIdx++] = Reg;
         StackAdjust += OffsetSize;
-        InstrOffset += PushInstrSize;
+        InstrOffset += PushInstrSize(Reg);
         break;
       }
       }
@@ -724,7 +743,6 @@ public:
     OffsetSize = Is64Bit ? 8 : 4;
     MoveInstrSize = Is64Bit ? 3 : 2;
     StackDivide = Is64Bit ? 8 : 4;
-    PushInstrSize = 1;
   }
 };
 

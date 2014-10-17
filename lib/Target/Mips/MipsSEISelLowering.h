@@ -20,7 +20,7 @@
 namespace llvm {
   class MipsSETargetLowering : public MipsTargetLowering  {
   public:
-    explicit MipsSETargetLowering(MipsTargetMachine &TM,
+    explicit MipsSETargetLowering(const MipsTargetMachine &TM,
                                   const MipsSubtarget &STI);
 
     /// \brief Enable MSA support for the given integer type and Register
@@ -59,7 +59,7 @@ namespace llvm {
     getOpndList(SmallVectorImpl<SDValue> &Ops,
                 std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
                 bool IsPICCall, bool GlobalOrExternal, bool InternalLinkage,
-                CallLoweringInfo &CLI, SDValue Callee,
+                bool IsCallReloc, CallLoweringInfo &CLI, SDValue Callee,
                 SDValue Chain) const override;
 
     SDValue lowerLOAD(SDValue Op, SelectionDAG &DAG) const;

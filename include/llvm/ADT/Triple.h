@@ -72,7 +72,11 @@ public:
     nvptx,      // NVPTX: 32-bit
     nvptx64,    // NVPTX: 64-bit
     le32,       // le32: generic little-endian 32-bit CPU (PNaCl / Emscripten)
-    amdil,      // amdil: amd IL
+    le64,       // le64: generic little-endian 64-bit CPU (PNaCl / Emscripten)
+    amdil,      // AMDIL
+    amdil64,    // AMDIL with 64-bit pointers
+    hsail,      // AMD HSAIL
+    hsail64,    // AMD HSAIL with 64-bit pointers
     spir,       // SPIR: standard portable IR for OpenCL 32-bit version
     spir64,     // SPIR: standard portable IR for OpenCL 64-bit version
     kalimba     // Kalimba: generic kalimba
@@ -90,7 +94,11 @@ public:
     ARMSubArch_v6t2,
     ARMSubArch_v5,
     ARMSubArch_v5te,
-    ARMSubArch_v4t
+    ARMSubArch_v4t,
+
+    KalimbaSubArch_v3,
+    KalimbaSubArch_v4,
+    KalimbaSubArch_v5
   };
   enum VendorType {
     UnknownVendor,

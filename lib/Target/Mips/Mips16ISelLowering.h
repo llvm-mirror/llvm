@@ -19,7 +19,7 @@
 namespace llvm {
   class Mips16TargetLowering : public MipsTargetLowering  {
   public:
-    explicit Mips16TargetLowering(MipsTargetMachine &TM,
+    explicit Mips16TargetLowering(const MipsTargetMachine &TM,
                                   const MipsSubtarget &STI);
 
     bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AddrSpace,
@@ -47,7 +47,7 @@ namespace llvm {
     getOpndList(SmallVectorImpl<SDValue> &Ops,
                 std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
                 bool IsPICCall, bool GlobalOrExternal, bool InternalLinkage,
-                CallLoweringInfo &CLI, SDValue Callee,
+                bool IsCallReloc, CallLoweringInfo &CLI, SDValue Callee,
                 SDValue Chain) const override;
 
     MachineBasicBlock *emitSel16(unsigned Opc, MachineInstr *MI,

@@ -22,6 +22,8 @@ class Module;
 class GlobalValue;
 
 namespace object {
+class ObjectFile;
+
 class IRObjectFile : public SymbolicFile {
   std::unique_ptr<Module> M;
   std::unique_ptr<Mangler> Mang;
@@ -49,8 +51,18 @@ public:
     return v->isIR();
   }
 
-  static ErrorOr<IRObjectFile *> createIRObjectFile(MemoryBufferRef Object,
-                                                    LLVMContext &Context);
+  /// \brief Finds and returns bitcode embedded in the given object file, or an
+  /// error code if not found.
+  static ErrorOr<MemoryBufferRef> findBitcodeInObject(const ObjectFile &Obj);
+
+  /// \brief Finds and returns bitcode in the given memory buffer (which may
+  /// be either a bitcode file or a native object file with embedded bitcode),
+  /// or an error code if not found.
+  static ErrorOr<MemoryBufferRef>
+  findBitcodeInMemBuffer(MemoryBufferRef Object);
+
+  static ErrorOr<std::unique_ptr<IRObjectFile>>
+  createIRObjectFile(MemoryBufferRef Object, LLVMContext &Context);
 };
 }
 }

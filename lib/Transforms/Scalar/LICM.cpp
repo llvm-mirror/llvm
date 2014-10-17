@@ -130,6 +130,9 @@ namespace {
     /// set.
     void deleteAnalysisValue(Value *V, Loop *L) override;
 
+    /// Simple Analysis hook. Delete loop L from alias set map.
+    void deleteAnalysisLoop(Loop *L) override;
+
     /// SinkRegion - Walk the specified region of the CFG (defined by all blocks
     /// dominated by the specified block, and that are in the current loop) in
     /// reverse depth first order w.r.t the DominatorTree.  This allows us to
@@ -597,8 +600,13 @@ void LICM::sink(Instruction &I) {
   // PHI nodes in exit blocks due to LCSSA form. Just RAUW them with clones of
   // the instruction.
   while (!I.use_empty()) {
+    Instruction *User = I.user_back();
+    if (!DT->isReachableFromEntry(User->getParent())) {
+      User->replaceUsesOfWith(&I, UndefValue::get(I.getType()));
+      continue;
+    }
     // The user must be a PHI node.
-    PHINode *PN = cast<PHINode>(I.user_back());
+    PHINode *PN = cast<PHINode>(User);
 
     BasicBlock *ExitBlock = PN->getParent();
     assert(ExitBlockSet.count(ExitBlock) &&
@@ -937,4 +945,14 @@ void LICM::deleteAnalysisValue(Value *V, Loop *L) {
     return;
 
   AST->deleteValue(V);
+}
+
+/// Simple Analysis hook. Delete value L from alias set map.
+void LICM::deleteAnalysisLoop(Loop *L) {
+  AliasSetTracker *AST = LoopToAliasSetMap.lookup(L);
+  if (!AST)
+    return;
+
+  delete AST;
+  LoopToAliasSetMap.erase(L);
 }

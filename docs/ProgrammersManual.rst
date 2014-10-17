@@ -425,6 +425,9 @@ name is specified.  This allows, for example, all debug information for
 instruction scheduling to be enabled with ``-debug-only=InstrSched``, even if
 the source lives in multiple files.
 
+For performance reasons, -debug-only is not available in optimized build
+(``--enable-optimized``) of LLVM.
+
 The ``DEBUG_WITH_TYPE`` macro is also available for situations where you would
 like to set ``DEBUG_TYPE``, but only for one specific ``DEBUG`` statement.  It
 takes an additional first parameter, which is the type to use.  For example, the
@@ -873,7 +876,7 @@ variety of customizations.
 llvm/ADT/ilist_node.h
 ^^^^^^^^^^^^^^^^^^^^^
 
-``ilist_node<T>`` implements a the forward and backward links that are expected
+``ilist_node<T>`` implements the forward and backward links that are expected
 by the ``ilist<T>`` (and analogous containers) in the default manner.
 
 ``ilist_node<T>``\ s are meant to be embedded in the node type ``T``, usually

@@ -27,6 +27,7 @@ extern cl::opt<std::string> TripleName;
 extern cl::opt<std::string> ArchName;
 extern cl::opt<std::string> MCPU;
 extern cl::list<std::string> MAttrs;
+extern cl::opt<bool> NoShowRawInsn;
 
 // Various helper functions.
 bool error(std::error_code ec);
@@ -35,7 +36,11 @@ void DumpBytes(StringRef bytes);
 void DisassembleInputMachO(StringRef Filename);
 void printCOFFUnwindInfo(const object::COFFObjectFile* o);
 void printMachOUnwindInfo(const object::MachOObjectFile* o);
-
+void printMachOExportsTrie(const object::MachOObjectFile* o);
+void printMachORebaseTable(const object::MachOObjectFile* o);
+void printMachOBindTable(const object::MachOObjectFile* o);
+void printMachOLazyBindTable(const object::MachOObjectFile* o);
+void printMachOWeakBindTable(const object::MachOObjectFile* o);
 void printELFFileHeader(const object::ObjectFile *o);
 void printCOFFFileHeader(const object::ObjectFile *o);
 void printMachOFileHeader(const object::ObjectFile *o);

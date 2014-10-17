@@ -33,10 +33,11 @@ using namespace llvm;
 // functions can all be passed as NULL.  If successful, this returns a
 // disassembler context.  If not, it returns NULL.
 //
-LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU,
-                                         void *DisInfo, int TagType,
-                                         LLVMOpInfoCallback GetOpInfo,
-                                         LLVMSymbolLookupCallback SymbolLookUp){
+LLVMDisasmContextRef
+LLVMCreateDisasmCPUFeatures(const char *Triple, const char *CPU,
+                            const char *Features, void *DisInfo, int TagType,
+                            LLVMOpInfoCallback GetOpInfo,
+                            LLVMSymbolLookupCallback SymbolLookUp) {
   // Get the target.
   std::string Error;
   const Target *TheTarget = TargetRegistry::lookupTarget(Triple, Error);
@@ -56,11 +57,8 @@ LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU,
   if (!MII)
     return nullptr;
 
-  // Package up features to be passed to target/subtarget
-  std::string FeaturesStr;
-
   const MCSubtargetInfo *STI = TheTarget->createMCSubtargetInfo(Triple, CPU,
-                                                                FeaturesStr);
+                                                                Features);
   if (!STI)
     return nullptr;
 
@@ -101,11 +99,19 @@ LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU,
   return DC;
 }
 
+LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU,
+                                         void *DisInfo, int TagType,
+                                         LLVMOpInfoCallback GetOpInfo,
+                                         LLVMSymbolLookupCallback SymbolLookUp){
+  return LLVMCreateDisasmCPUFeatures(Triple, CPU, "", DisInfo, TagType,
+                                     GetOpInfo, SymbolLookUp);
+}
+
 LLVMDisasmContextRef LLVMCreateDisasm(const char *Triple, void *DisInfo,
                                       int TagType, LLVMOpInfoCallback GetOpInfo,
                                       LLVMSymbolLookupCallback SymbolLookUp) {
-  return LLVMCreateDisasmCPU(Triple, "", DisInfo, TagType, GetOpInfo,
-                             SymbolLookUp);
+  return LLVMCreateDisasmCPUFeatures(Triple, "", "", DisInfo, TagType,
+                                     GetOpInfo, SymbolLookUp);
 }
 
 //
@@ -202,19 +208,19 @@ static int getItineraryLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
 static int getLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
   // Try to compute scheduling information.
   const MCSubtargetInfo *STI = DC->getSubtargetInfo();
-  const MCSchedModel *SCModel = STI->getSchedModel();
+  const MCSchedModel SCModel = STI->getSchedModel();
   const int NoInformationAvailable = -1;
 
   // Check if we have a scheduling model for instructions.
-  if (!SCModel || !SCModel->hasInstrSchedModel())
-    // Try to fall back to the itinerary model if we do not have a
-    // scheduling model.
+  if (!SCModel.hasInstrSchedModel())
+    // Try to fall back to the itinerary model if the scheduling model doesn't
+    // have a scheduling table.  Note the default does not have a table.
     return getItineraryLatency(DC, Inst);
 
   // Get the scheduling class of the requested instruction.
   const MCInstrDesc& Desc = DC->getInstrInfo()->get(Inst.getOpcode());
   unsigned SCClass = Desc.getSchedClass();
-  const MCSchedClassDesc *SCDesc = SCModel->getSchedClassDesc(SCClass);
+  const MCSchedClassDesc *SCDesc = SCModel.getSchedClassDesc(SCClass);
   // Resolving the variant SchedClass requires an MI to pass to
   // SubTargetInfo::resolveSchedClass.
   if (!SCDesc || !SCDesc->isValid() || SCDesc->isVariant())

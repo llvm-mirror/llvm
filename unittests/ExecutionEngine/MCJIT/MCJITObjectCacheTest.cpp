@@ -11,7 +11,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/ExecutionEngine/JIT.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -34,7 +33,7 @@ public:
     ObjMap[ModuleID] = copyBuffer(Obj);
   }
 
-  virtual std::unique_ptr<MemoryBuffer> getObject(const Module* M) {
+  virtual std::unique_ptr<MemoryBuffer> getObject(const Module* M) override {
     const MemoryBuffer* BufferFound = getObjectInternal(M);
     ModulesLookedUp.insert(M->getModuleIdentifier());
     if (!BufferFound)

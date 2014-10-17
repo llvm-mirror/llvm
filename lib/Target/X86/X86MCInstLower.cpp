@@ -583,14 +583,38 @@ ReSimplify:
   // Atomic load and store require a separate pseudo-inst because Acquire
   // implies mayStore and Release implies mayLoad; fix these to regular MOV
   // instructions here
-  case X86::ACQUIRE_MOV8rm:  OutMI.setOpcode(X86::MOV8rm); goto ReSimplify;
-  case X86::ACQUIRE_MOV16rm: OutMI.setOpcode(X86::MOV16rm); goto ReSimplify;
-  case X86::ACQUIRE_MOV32rm: OutMI.setOpcode(X86::MOV32rm); goto ReSimplify;
-  case X86::ACQUIRE_MOV64rm: OutMI.setOpcode(X86::MOV64rm); goto ReSimplify;
-  case X86::RELEASE_MOV8mr:  OutMI.setOpcode(X86::MOV8mr); goto ReSimplify;
-  case X86::RELEASE_MOV16mr: OutMI.setOpcode(X86::MOV16mr); goto ReSimplify;
-  case X86::RELEASE_MOV32mr: OutMI.setOpcode(X86::MOV32mr); goto ReSimplify;
-  case X86::RELEASE_MOV64mr: OutMI.setOpcode(X86::MOV64mr); goto ReSimplify;
+  case X86::ACQUIRE_MOV8rm:    OutMI.setOpcode(X86::MOV8rm); goto ReSimplify;
+  case X86::ACQUIRE_MOV16rm:   OutMI.setOpcode(X86::MOV16rm); goto ReSimplify;
+  case X86::ACQUIRE_MOV32rm:   OutMI.setOpcode(X86::MOV32rm); goto ReSimplify;
+  case X86::ACQUIRE_MOV64rm:   OutMI.setOpcode(X86::MOV64rm); goto ReSimplify;
+  case X86::RELEASE_MOV8mr:    OutMI.setOpcode(X86::MOV8mr); goto ReSimplify;
+  case X86::RELEASE_MOV16mr:   OutMI.setOpcode(X86::MOV16mr); goto ReSimplify;
+  case X86::RELEASE_MOV32mr:   OutMI.setOpcode(X86::MOV32mr); goto ReSimplify;
+  case X86::RELEASE_MOV64mr:   OutMI.setOpcode(X86::MOV64mr); goto ReSimplify;
+  case X86::RELEASE_MOV8mi:    OutMI.setOpcode(X86::MOV8mi); goto ReSimplify;
+  case X86::RELEASE_MOV16mi:   OutMI.setOpcode(X86::MOV16mi); goto ReSimplify;
+  case X86::RELEASE_MOV32mi:   OutMI.setOpcode(X86::MOV32mi); goto ReSimplify;
+  case X86::RELEASE_MOV64mi32: OutMI.setOpcode(X86::MOV64mi32); goto ReSimplify;
+  case X86::RELEASE_ADD8mi:    OutMI.setOpcode(X86::ADD8mi); goto ReSimplify;
+  case X86::RELEASE_ADD32mi:   OutMI.setOpcode(X86::ADD32mi); goto ReSimplify;
+  case X86::RELEASE_ADD64mi32: OutMI.setOpcode(X86::ADD64mi32); goto ReSimplify;
+  case X86::RELEASE_AND8mi:    OutMI.setOpcode(X86::AND8mi); goto ReSimplify;
+  case X86::RELEASE_AND32mi:   OutMI.setOpcode(X86::AND32mi); goto ReSimplify;
+  case X86::RELEASE_AND64mi32: OutMI.setOpcode(X86::AND64mi32); goto ReSimplify;
+  case X86::RELEASE_OR8mi:     OutMI.setOpcode(X86::OR8mi); goto ReSimplify;
+  case X86::RELEASE_OR32mi:    OutMI.setOpcode(X86::OR32mi); goto ReSimplify;
+  case X86::RELEASE_OR64mi32:  OutMI.setOpcode(X86::OR64mi32); goto ReSimplify;
+  case X86::RELEASE_XOR8mi:    OutMI.setOpcode(X86::XOR8mi); goto ReSimplify;
+  case X86::RELEASE_XOR32mi:   OutMI.setOpcode(X86::XOR32mi); goto ReSimplify;
+  case X86::RELEASE_XOR64mi32: OutMI.setOpcode(X86::XOR64mi32); goto ReSimplify;
+  case X86::RELEASE_INC8m:     OutMI.setOpcode(X86::INC8m); goto ReSimplify;
+  case X86::RELEASE_INC16m:    OutMI.setOpcode(X86::INC16m); goto ReSimplify;
+  case X86::RELEASE_INC32m:    OutMI.setOpcode(X86::INC32m); goto ReSimplify;
+  case X86::RELEASE_INC64m:    OutMI.setOpcode(X86::INC64m); goto ReSimplify;
+  case X86::RELEASE_DEC8m:     OutMI.setOpcode(X86::DEC8m); goto ReSimplify;
+  case X86::RELEASE_DEC16m:    OutMI.setOpcode(X86::DEC16m); goto ReSimplify;
+  case X86::RELEASE_DEC32m:    OutMI.setOpcode(X86::DEC32m); goto ReSimplify;
+  case X86::RELEASE_DEC64m:    OutMI.setOpcode(X86::DEC64m); goto ReSimplify;
 
   // We don't currently select the correct instruction form for instructions
   // which have a short %eax, etc. form. Handle this by custom lowering, for
@@ -840,6 +864,80 @@ PrevCrossBBInst(MachineBasicBlock::const_iterator MBBI) {
   return --MBBI;
 }
 
+static const Constant *getConstantFromPool(const MachineInstr &MI,
+                                           const MachineOperand &Op) {
+  if (!Op.isCPI())
+    return nullptr;
+
+  ArrayRef<MachineConstantPoolEntry> Constants =
+      MI.getParent()->getParent()->getConstantPool()->getConstants();
+  const MachineConstantPoolEntry &ConstantEntry =
+      Constants[Op.getIndex()];
+
+  // Bail if this is a machine constant pool entry, we won't be able to dig out
+  // anything useful.
+  if (ConstantEntry.isMachineConstantPoolEntry())
+    return nullptr;
+
+  auto *C = dyn_cast<Constant>(ConstantEntry.Val.ConstVal);
+  assert((!C || ConstantEntry.getType() == C->getType()) &&
+         "Expected a constant of the same type!");
+  return C;
+}
+
+static std::string getShuffleComment(const MachineOperand &DstOp,
+                                     const MachineOperand &SrcOp,
+                                     ArrayRef<int> Mask) {
+  std::string Comment;
+
+  // Compute the name for a register. This is really goofy because we have
+  // multiple instruction printers that could (in theory) use different
+  // names. Fortunately most people use the ATT style (outside of Windows)
+  // and they actually agree on register naming here. Ultimately, this is
+  // a comment, and so its OK if it isn't perfect.
+  auto GetRegisterName = [](unsigned RegNum) -> StringRef {
+    return X86ATTInstPrinter::getRegisterName(RegNum);
+  };
+
+  StringRef DstName = DstOp.isReg() ? GetRegisterName(DstOp.getReg()) : "mem";
+  StringRef SrcName = SrcOp.isReg() ? GetRegisterName(SrcOp.getReg()) : "mem";
+
+  raw_string_ostream CS(Comment);
+  CS << DstName << " = ";
+  bool NeedComma = false;
+  bool InSrc = false;
+  for (int M : Mask) {
+    // Wrap up any prior entry...
+    if (M == SM_SentinelZero && InSrc) {
+      InSrc = false;
+      CS << "]";
+    }
+    if (NeedComma)
+      CS << ",";
+    else
+      NeedComma = true;
+
+    // Print this shuffle...
+    if (M == SM_SentinelZero) {
+      CS << "zero";
+    } else {
+      if (!InSrc) {
+        InSrc = true;
+        CS << SrcName << "[";
+      }
+      if (M == SM_SentinelUndef)
+        CS << "u";
+      else
+        CS << M;
+    }
+  }
+  if (InSrc)
+    CS << "]";
+  CS.flush();
+
+  return Comment;
+}
+
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(*MF, *this);
   const X86RegisterInfo *RI = static_cast<const X86RegisterInfo *>(
@@ -996,82 +1094,114 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     return;
   }
 
+    // Lower PSHUFB and VPERMILP normally but add a comment if we can find
+    // a constant shuffle mask. We won't be able to do this at the MC layer
+    // because the mask isn't an immediate.
   case X86::PSHUFBrm:
   case X86::VPSHUFBrm:
-    // Lower PSHUFB normally but add a comment if we can find a constant
-    // shuffle mask. We won't be able to do this at the MC layer because the
-    // mask isn't an immediate.
-    std::string Comment;
-    raw_string_ostream CS(Comment);
-    SmallVector<int, 16> Mask;
-
-    assert(MI->getNumOperands() >= 6 &&
-           "Wrong number of operands for PSHUFBrm or VPSHUFBrm");
+  case X86::VPSHUFBYrm: {
+    if (!OutStreamer.isVerboseAsm())
+      break;
+    assert(MI->getNumOperands() > 5 &&
+           "We should always have at least 5 operands!");
     const MachineOperand &DstOp = MI->getOperand(0);
     const MachineOperand &SrcOp = MI->getOperand(1);
     const MachineOperand &MaskOp = MI->getOperand(5);
 
-    // Compute the name for a register. This is really goofy because we have
-    // multiple instruction printers that could (in theory) use different
-    // names. Fortunately most people use the ATT style (outside of Windows)
-    // and they actually agree on register naming here. Ultimately, this is
-    // a comment, and so its OK if it isn't perfect.
-    auto GetRegisterName = [](unsigned RegNum) -> StringRef {
-      return X86ATTInstPrinter::getRegisterName(RegNum);
-    };
-
-    StringRef DstName = DstOp.isReg() ? GetRegisterName(DstOp.getReg()) : "mem";
-    StringRef SrcName = SrcOp.isReg() ? GetRegisterName(SrcOp.getReg()) : "mem";
-    CS << DstName << " = ";
-
-    if (MaskOp.isCPI()) {
-      ArrayRef<MachineConstantPoolEntry> Constants =
-          MI->getParent()->getParent()->getConstantPool()->getConstants();
-      const MachineConstantPoolEntry &MaskConstantEntry =
-          Constants[MaskOp.getIndex()];
-      Type *MaskTy = MaskConstantEntry.getType();
-      (void)MaskTy;
-      if (!MaskConstantEntry.isMachineConstantPoolEntry())
-        if (auto *C = dyn_cast<ConstantDataSequential>(
-                MaskConstantEntry.Val.ConstVal)) {
-          assert(MaskTy == C->getType() &&
-                 "Expected a constant of the same type!");
-
-          DecodePSHUFBMask(C, Mask);
-          assert(Mask.size() == MaskTy->getVectorNumElements() &&
-                 "Shuffle mask has a different size than its type!");
-        }
+    if (auto *C = getConstantFromPool(*MI, MaskOp)) {
+      SmallVector<int, 16> Mask;
+      DecodePSHUFBMask(C, Mask);
+      if (!Mask.empty())
+        OutStreamer.AddComment(getShuffleComment(DstOp, SrcOp, Mask));
     }
+    break;
+  }
+  case X86::VPERMILPSrm:
+  case X86::VPERMILPDrm:
+  case X86::VPERMILPSYrm:
+  case X86::VPERMILPDYrm: {
+    if (!OutStreamer.isVerboseAsm())
+      break;
+    assert(MI->getNumOperands() > 5 &&
+           "We should always have at least 5 operands!");
+    const MachineOperand &DstOp = MI->getOperand(0);
+    const MachineOperand &SrcOp = MI->getOperand(1);
+    const MachineOperand &MaskOp = MI->getOperand(5);
 
-    if (!Mask.empty()) {
-      bool NeedComma = false;
-      bool InSrc = false;
-      for (int M : Mask) {
-        // Wrap up any prior entry...
-        if (M == SM_SentinelZero && InSrc) {
-          InSrc = false;
-          CS << "]";
-        }
-        if (NeedComma)
-          CS << ",";
-        else
-          NeedComma = true;
+    if (auto *C = getConstantFromPool(*MI, MaskOp)) {
+      SmallVector<int, 16> Mask;
+      DecodeVPERMILPMask(C, Mask);
+      if (!Mask.empty())
+        OutStreamer.AddComment(getShuffleComment(DstOp, SrcOp, Mask));
+    }
+    break;
+  }
 
-        // Print this shuffle...
-        if (M == SM_SentinelZero) {
-          CS << "zero";
-        } else {
-          if (!InSrc) {
-            InSrc = true;
-            CS << SrcName << "[";
-          }
-          CS << M;
+    // For loads from a constant pool to a vector register, print the constant
+    // loaded.
+  case X86::MOVAPDrm:
+  case X86::VMOVAPDrm:
+  case X86::VMOVAPDYrm:
+  case X86::MOVUPDrm:
+  case X86::VMOVUPDrm:
+  case X86::VMOVUPDYrm:
+  case X86::MOVAPSrm:
+  case X86::VMOVAPSrm:
+  case X86::VMOVAPSYrm:
+  case X86::MOVUPSrm:
+  case X86::VMOVUPSrm:
+  case X86::VMOVUPSYrm:
+  case X86::MOVDQArm:
+  case X86::VMOVDQArm:
+  case X86::VMOVDQAYrm:
+  case X86::MOVDQUrm:
+  case X86::VMOVDQUrm:
+  case X86::VMOVDQUYrm:
+    if (!OutStreamer.isVerboseAsm())
+      break;
+    if (MI->getNumOperands() > 4)
+    if (auto *C = getConstantFromPool(*MI, MI->getOperand(4))) {
+      std::string Comment;
+      raw_string_ostream CS(Comment);
+      const MachineOperand &DstOp = MI->getOperand(0);
+      CS << X86ATTInstPrinter::getRegisterName(DstOp.getReg()) << " = ";
+      if (auto *CDS = dyn_cast<ConstantDataSequential>(C)) {
+        CS << "[";
+        for (int i = 0, NumElements = CDS->getNumElements(); i < NumElements; ++i) {
+          if (i != 0)
+            CS << ",";
+          if (CDS->getElementType()->isIntegerTy())
+            CS << CDS->getElementAsInteger(i);
+          else if (CDS->getElementType()->isFloatTy())
+            CS << CDS->getElementAsFloat(i);
+          else if (CDS->getElementType()->isDoubleTy())
+            CS << CDS->getElementAsDouble(i);
+          else
+            CS << "?";
         }
-      }
-      if (InSrc)
         CS << "]";
-
-      OutStreamer.AddComment(CS.str());
+        OutStreamer.AddComment(CS.str());
+      } else if (auto *CV = dyn_cast<ConstantVector>(C)) {
+        CS << "<";
+        for (int i = 0, NumOperands = CV->getNumOperands(); i < NumOperands; ++i) {
+          if (i != 0)
+            CS << ",";
+          Constant *COp = CV->getOperand(i);
+          if (isa<UndefValue>(COp)) {
+            CS << "u";
+          } else if (auto *CI = dyn_cast<ConstantInt>(COp)) {
+            CS << CI->getZExtValue();
+          } else if (auto *CF = dyn_cast<ConstantFP>(COp)) {
+            SmallString<32> Str;
+            CF->getValueAPF().toString(Str);
+            CS << Str;
+          } else {
+            CS << "?";
+          }
+        }
+        CS << ">";
+        OutStreamer.AddComment(CS.str());
+      }
     }
     break;
   }

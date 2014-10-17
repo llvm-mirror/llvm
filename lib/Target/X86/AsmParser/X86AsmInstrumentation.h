@@ -34,10 +34,15 @@ class X86AsmInstrumentation {
 public:
   virtual ~X86AsmInstrumentation();
 
+  // Sets frame register corresponding to a current frame.
+  void SetInitialFrameRegister(unsigned RegNo) {
+    InitialFrameReg = RegNo;
+  }
+
   // Tries to instrument and emit instruction.
   virtual void InstrumentAndEmitInstruction(
       const MCInst &Inst,
-      SmallVectorImpl<std::unique_ptr<MCParsedAsmOperand>> &Operands,
+      SmallVectorImpl<std::unique_ptr<MCParsedAsmOperand> > &Operands,
       MCContext &Ctx, const MCInstrInfo &MII, MCStreamer &Out);
 
 protected:
@@ -47,9 +52,13 @@ protected:
 
   X86AsmInstrumentation(const MCSubtargetInfo &STI);
 
+  unsigned GetFrameRegGeneric(const MCContext &Ctx, MCStreamer &Out);
+
   void EmitInstruction(MCStreamer &Out, const MCInst &Inst);
 
   const MCSubtargetInfo &STI;
+
+  unsigned InitialFrameReg;
 };
 
 } // End llvm namespace

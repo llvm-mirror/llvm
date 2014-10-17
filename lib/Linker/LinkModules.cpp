@@ -420,6 +420,8 @@ namespace {
     bool run();
 
   private:
+    bool shouldLinkFromSource(const GlobalValue &Dest, const GlobalValue &Src);
+
     /// emitError - Helper method for setting a message and returning an error
     /// code.
     bool emitError(const Twine &Message) {
@@ -670,11 +672,79 @@ bool ModuleLinker::getComdatResult(const Comdat *SrcC,
                                        LinkFromSrc);
 }
 
-/// getLinkageResult - This analyzes the two global values and determines what
-/// the result will look like in the destination module.  In particular, it
-/// computes the resultant linkage type and visibility, computes whether the
-/// global in the source should be copied over to the destination (replacing
-/// the existing one), and computes whether this linkage is an error or not.
+// FIXME: Duplicated from the gold plugin. This should be refactored somewhere.
+static bool isDeclaration(const GlobalValue &V) {
+  if (V.hasAvailableExternallyLinkage())
+    return true;
+
+  if (V.isMaterializable())
+    return false;
+
+  return V.isDeclaration();
+}
+
+bool ModuleLinker::shouldLinkFromSource(const GlobalValue &Dest,
+                                        const GlobalValue &Src) {
+  bool SrcIsDeclaration = isDeclaration(Src);
+  bool DestIsDeclaration = isDeclaration(Dest);
+
+  // FIXME: Make datalayout mandatory and just use getDataLayout().
+  DataLayout DL(Dest.getParent());
+
+  if (SrcIsDeclaration) {
+    // If Src is external or if both Src & Dest are external..  Just link the
+    // external globals, we aren't adding anything.
+    if (Src.hasDLLImportStorageClass())
+      // If one of GVs is marked as DLLImport, result should be dllimport'ed.
+      return DestIsDeclaration;
+    // If the Dest is weak, use the source linkage.
+    return Dest.hasExternalWeakLinkage();
+  }
+
+  if (DestIsDeclaration)
+    // If Dest is external but Src is not:
+    return true;
+
+  if (Src.hasCommonLinkage()) {
+    if (Dest.hasLinkOnceLinkage() || Dest.hasWeakLinkage())
+      return true;
+
+    if (!Dest.hasCommonLinkage())
+      return false;
+
+    uint64_t DestSize = DL.getTypeAllocSize(Dest.getType()->getElementType());
+    uint64_t SrcSize = DL.getTypeAllocSize(Src.getType()->getElementType());
+    return SrcSize > DestSize;
+  }
+
+  if (Src.isWeakForLinker()) {
+    assert(!Dest.hasExternalWeakLinkage());
+    assert(!Dest.hasAvailableExternallyLinkage());
+
+    if (Dest.hasLinkOnceLinkage() && Src.hasWeakLinkage())
+      return true;
+
+    return false;
+  }
+
+  if (Dest.isWeakForLinker()) {
+    assert(Src.hasExternalLinkage());
+    return true;
+  }
+
+  assert(!Src.hasExternalWeakLinkage());
+  assert(!Dest.hasExternalWeakLinkage());
+  assert(Dest.hasExternalLinkage() && Src.hasExternalLinkage() &&
+         "Unexpected linkage type!");
+  return emitError("Linking globals named '" + Src.getName() +
+                   "': symbol multiply defined!");
+}
+
+/// This analyzes the two global values and determines what the result will look
+/// like in the destination module. In particular, it computes the resultant
+/// linkage type and visibility, computes whether the global in the source
+/// should be copied over to the destination (replacing the existing one), and
+/// computes whether this linkage is an error or not.
 bool ModuleLinker::getLinkageResult(GlobalValue *Dest, const GlobalValue *Src,
                                     GlobalValue::LinkageTypes &LT,
                                     GlobalValue::VisibilityTypes &Vis,
@@ -683,59 +753,15 @@ bool ModuleLinker::getLinkageResult(GlobalValue *Dest, const GlobalValue *Src,
   assert(!Src->hasLocalLinkage() &&
          "If Src has internal linkage, Dest shouldn't be set!");
 
-  bool SrcIsDeclaration = Src->isDeclaration() && !Src->isMaterializable();
-  bool DestIsDeclaration = Dest->isDeclaration();
+  assert(ErrorMsg.empty());
+  LinkFromSrc = shouldLinkFromSource(*Dest, *Src);
+  if (!ErrorMsg.empty())
+    return true;
 
-  if (SrcIsDeclaration) {
-    // If Src is external or if both Src & Dest are external..  Just link the
-    // external globals, we aren't adding anything.
-    if (Src->hasDLLImportStorageClass()) {
-      // If one of GVs is marked as DLLImport, result should be dllimport'ed.
-      if (DestIsDeclaration) {
-        LinkFromSrc = true;
-        LT = Src->getLinkage();
-      }
-    } else if (Dest->hasExternalWeakLinkage()) {
-      // If the Dest is weak, use the source linkage.
-      LinkFromSrc = true;
-      LT = Src->getLinkage();
-    } else {
-      LinkFromSrc = false;
-      LT = Dest->getLinkage();
-    }
-  } else if (DestIsDeclaration && !Dest->hasDLLImportStorageClass()) {
-    // If Dest is external but Src is not:
-    LinkFromSrc = true;
+  if (LinkFromSrc)
     LT = Src->getLinkage();
-  } else if (Src->isWeakForLinker()) {
-    // At this point we know that Dest has LinkOnce, External*, Weak, Common,
-    // or DLL* linkage.
-    if (Dest->hasExternalWeakLinkage() ||
-        Dest->hasAvailableExternallyLinkage() ||
-        (Dest->hasLinkOnceLinkage() &&
-         (Src->hasWeakLinkage() || Src->hasCommonLinkage()))) {
-      LinkFromSrc = true;
-      LT = Src->getLinkage();
-    } else {
-      LinkFromSrc = false;
-      LT = Dest->getLinkage();
-    }
-  } else if (Dest->isWeakForLinker()) {
-    // At this point we know that Src has External* or DLL* linkage.
-    if (Src->hasExternalWeakLinkage()) {
-      LinkFromSrc = false;
-      LT = Dest->getLinkage();
-    } else {
-      LinkFromSrc = true;
-      LT = GlobalValue::ExternalLinkage;
-    }
-  } else {
-    assert((Dest->hasExternalLinkage()  || Dest->hasExternalWeakLinkage()) &&
-           (Src->hasExternalLinkage()   || Src->hasExternalWeakLinkage()) &&
-           "Unexpected linkage type!");
-    return emitError("Linking globals named '" + Src->getName() +
-                 "': symbol multiply defined!");
-  }
+  else
+    LT = Dest->getLinkage();
 
   // Compute the visibility. We follow the rules in the System V Application
   // Binary Interface.
@@ -975,6 +1001,7 @@ bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
   GlobalValue *DGV = getLinkedToGlobal(SGV);
   llvm::Optional<GlobalValue::VisibilityTypes> NewVisibility;
   bool HasUnnamedAddr = SGV->hasUnnamedAddr();
+  unsigned Alignment = SGV->getAlignment();
 
   bool LinkFromSrc = false;
   Comdat *DC = nullptr;
@@ -999,15 +1026,22 @@ bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
         return true;
       NewVisibility = NV;
       HasUnnamedAddr = HasUnnamedAddr && DGV->hasUnnamedAddr();
+      if (DGV->hasCommonLinkage() && SGV->hasCommonLinkage())
+        Alignment = std::max(Alignment, DGV->getAlignment());
+      else if (!LinkFromSrc)
+        Alignment = DGV->getAlignment();
 
       // If we're not linking from the source, then keep the definition that we
       // have.
       if (!LinkFromSrc) {
         // Special case for const propagation.
-        if (GlobalVariable *DGVar = dyn_cast<GlobalVariable>(DGV))
+        if (GlobalVariable *DGVar = dyn_cast<GlobalVariable>(DGV)) {
+          DGVar->setAlignment(Alignment);
+
           if (DGVar->isDeclaration() && SGV->isConstant() &&
               !DGVar->isConstant())
             DGVar->setConstant(true);
+        }
 
         // Set calculated linkage, visibility and unnamed_addr.
         DGV->setLinkage(NewLinkage);
@@ -1045,6 +1079,7 @@ bool ModuleLinker::linkGlobalProto(GlobalVariable *SGV) {
                        SGV->getType()->getAddressSpace());
   // Propagate alignment, visibility and section info.
   copyGVAttributes(NewDGV, SGV);
+  NewDGV->setAlignment(Alignment);
   if (NewVisibility)
     NewDGV->setVisibility(*NewVisibility);
   NewDGV->setUnnamedAddr(HasUnnamedAddr);
@@ -1223,14 +1258,34 @@ static void getArrayElements(Constant *C, SmallVectorImpl<Constant*> &Dest) {
 
 void ModuleLinker::linkAppendingVarInit(const AppendingVarInfo &AVI) {
   // Merge the initializer.
-  SmallVector<Constant*, 16> Elements;
-  getArrayElements(AVI.DstInit, Elements);
+  SmallVector<Constant *, 16> DstElements;
+  getArrayElements(AVI.DstInit, DstElements);
 
-  Constant *SrcInit = MapValue(AVI.SrcInit, ValueMap, RF_None, &TypeMap, &ValMaterializer);
-  getArrayElements(SrcInit, Elements);
+  SmallVector<Constant *, 16> SrcElements;
+  getArrayElements(AVI.SrcInit, SrcElements);
 
   ArrayType *NewType = cast<ArrayType>(AVI.NewGV->getType()->getElementType());
-  AVI.NewGV->setInitializer(ConstantArray::get(NewType, Elements));
+
+  StringRef Name = AVI.NewGV->getName();
+  bool IsNewStructor =
+      (Name == "llvm.global_ctors" || Name == "llvm.global_dtors") &&
+      cast<StructType>(NewType->getElementType())->getNumElements() == 3;
+
+  for (auto *V : SrcElements) {
+    if (IsNewStructor) {
+      Constant *Key = V->getAggregateElement(2);
+      if (DoNotLinkFromSource.count(Key))
+        continue;
+    }
+    DstElements.push_back(
+        MapValue(V, ValueMap, RF_None, &TypeMap, &ValMaterializer));
+  }
+  if (IsNewStructor) {
+    NewType = ArrayType::get(NewType->getElementType(), DstElements.size());
+    AVI.NewGV->mutateType(PointerType::get(NewType, 0));
+  }
+
+  AVI.NewGV->setInitializer(ConstantArray::get(NewType, DstElements));
 }
 
 /// linkGlobalInits - Update the initializers in the Dest module now that all

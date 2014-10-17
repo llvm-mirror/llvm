@@ -212,15 +212,15 @@ skipLeadingZeroesAndAnyDot(StringRef::iterator begin, StringRef::iterator end,
 {
   StringRef::iterator p = begin;
   *dot = end;
-  while (*p == '0' && p != end)
+  while (p != end && *p == '0')
     p++;
 
-  if (*p == '.') {
+  if (p != end && *p == '.') {
     *dot = p++;
 
     assert(end - begin != 1 && "Significand has no digits");
 
-    while (*p == '0' && p != end)
+    while (p != end && *p == '0')
       p++;
   }
 
@@ -3377,7 +3377,9 @@ void APFloat::makeLargest(bool Negative) {
   // internal consistency.
   const unsigned NumUnusedHighBits =
     PartCount*integerPartWidth - semantics->precision;
-  significand[PartCount - 1] = ~integerPart(0) >> NumUnusedHighBits;
+  significand[PartCount - 1] = (NumUnusedHighBits < integerPartWidth)
+                                   ? (~integerPart(0) >> NumUnusedHighBits)
+                                   : 0;
 }
 
 /// Make this number the smallest magnitude denormal number in the given

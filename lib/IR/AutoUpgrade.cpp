@@ -17,6 +17,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
@@ -38,6 +39,22 @@ static bool UpgradeSSE41Function(Function* F, Intrinsic::ID IID,
     return false;
 
   // Yes, it's old, replace it with new version.
+  F->setName(F->getName() + ".old");
+  NewFn = Intrinsic::getDeclaration(F->getParent(), IID);
+  return true;
+}
+
+// Upgrade the declarations of intrinsic functions whose 8-bit immediate mask
+// arguments have changed their type from i32 to i8.
+static bool UpgradeX86IntrinsicsWith8BitMask(Function *F, Intrinsic::ID IID,
+                                             Function *&NewFn) {
+  // Check that the last argument is an i32.
+  Type *LastArgType = F->getFunctionType()->getParamType(
+     F->getFunctionType()->getNumParams() - 1);
+  if (!LastArgType->isIntegerTy(32))
+    return false;
+
+  // Move this function aside and map down.
   F->setName(F->getName() + ".old");
   NewFn = Intrinsic::getDeclaration(F->getParent(), IID);
   return true;
@@ -90,6 +107,20 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
     }
     break;
   }
+  case 'd': {
+    if (Name.startswith("dbg.declare") && F->arg_size() == 2) {
+      F->setName(Name + ".old");
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::dbg_declare);
+      return true;
+    }
+    if (Name.startswith("dbg.value") && F->arg_size() == 3) {
+      F->setName(Name + ".old");
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::dbg_value);
+      return true;
+    }
+    break;
+  }
+
   case 'o':
     // We only need to change the name to match the mangling including the
     // address space.
@@ -130,6 +161,51 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
       if (Name == "x86.sse41.ptestnzc")
         return UpgradeSSE41Function(F, Intrinsic::x86_sse41_ptestnzc, NewFn);
     }
+    // Several blend and other instructions with maskes used the wrong number of
+    // bits.
+    if (Name == "x86.sse41.pblendw")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_pblendw,
+                                              NewFn);
+    if (Name == "x86.sse41.blendpd")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_blendpd,
+                                              NewFn);
+    if (Name == "x86.sse41.blendps")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_blendps,
+                                              NewFn);
+    if (Name == "x86.sse41.insertps")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_insertps,
+                                              NewFn);
+    if (Name == "x86.sse41.dppd")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_dppd,
+                                              NewFn);
+    if (Name == "x86.sse41.dpps")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_dpps,
+                                              NewFn);
+    if (Name == "x86.sse41.mpsadbw")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_mpsadbw,
+                                              NewFn);
+    if (Name == "x86.avx.blend.pd.256")
+      return UpgradeX86IntrinsicsWith8BitMask(
+          F, Intrinsic::x86_avx_blend_pd_256, NewFn);
+    if (Name == "x86.avx.blend.ps.256")
+      return UpgradeX86IntrinsicsWith8BitMask(
+          F, Intrinsic::x86_avx_blend_ps_256, NewFn);
+    if (Name == "x86.avx.dp.ps.256")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_avx_dp_ps_256,
+                                              NewFn);
+    if (Name == "x86.avx2.pblendw")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_avx2_pblendw,
+                                              NewFn);
+    if (Name == "x86.avx2.pblendd.128")
+      return UpgradeX86IntrinsicsWith8BitMask(
+          F, Intrinsic::x86_avx2_pblendd_128, NewFn);
+    if (Name == "x86.avx2.pblendd.256")
+      return UpgradeX86IntrinsicsWith8BitMask(
+          F, Intrinsic::x86_avx2_pblendd_256, NewFn);
+    if (Name == "x86.avx2.mpsadbw")
+      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_avx2_mpsadbw,
+                                              NewFn);
+
     // frcz.ss/sd may need to have an argument dropped
     if (Name.startswith("x86.xop.vfrcz.ss") && F->arg_size() == 2) {
       F->setName(Name + ".old");
@@ -176,6 +252,22 @@ bool llvm::UpgradeIntrinsicFunction(Function *F, Function *&NewFn) {
 bool llvm::UpgradeGlobalVariable(GlobalVariable *GV) {
   // Nothing to do yet.
   return false;
+}
+
+static MDNode *getNodeField(const MDNode *DbgNode, unsigned Elt) {
+  if (!DbgNode || Elt >= DbgNode->getNumOperands())
+    return nullptr;
+  return dyn_cast_or_null<MDNode>(DbgNode->getOperand(Elt));
+}
+
+static DIExpression getExpression(Value *VarOperand, Function *F) {
+  // Old-style DIVariables have an optional expression as the 8th element.
+  DIExpression Expr(getNodeField(cast<MDNode>(VarOperand), 8));
+  if (!Expr) {
+    DIBuilder DIB(*F->getParent());
+    Expr = DIB.createExpression();
+  }
+  return Expr;
 }
 
 // UpgradeIntrinsicCall - Upgrade a call to an old intrinsic to be a call the
@@ -341,12 +433,32 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
   }
 
   std::string Name = CI->getName().str();
-  CI->setName(Name + ".old");
+  if (!Name.empty())
+    CI->setName(Name + ".old");
 
   switch (NewFn->getIntrinsicID()) {
   default:
     llvm_unreachable("Unknown function for CallInst upgrade.");
 
+  // Upgrade debug intrinsics to use an additional DIExpression argument.
+  case Intrinsic::dbg_declare: {
+    auto NewCI =
+        Builder.CreateCall3(NewFn, CI->getArgOperand(0), CI->getArgOperand(1),
+                            getExpression(CI->getArgOperand(1), F), Name);
+    NewCI->setDebugLoc(CI->getDebugLoc());
+    CI->replaceAllUsesWith(NewCI);
+    CI->eraseFromParent();
+    return;
+  }
+  case Intrinsic::dbg_value: {
+    auto NewCI = Builder.CreateCall4(
+        NewFn, CI->getArgOperand(0), CI->getArgOperand(1), CI->getArgOperand(2),
+        getExpression(CI->getArgOperand(2), F), Name);
+    NewCI->setDebugLoc(CI->getDebugLoc());
+    CI->replaceAllUsesWith(NewCI);
+    CI->eraseFromParent();
+    return;
+  }
   case Intrinsic::ctlz:
   case Intrinsic::cttz:
     assert(CI->getNumArgOperands() == 1 &&
@@ -409,6 +521,34 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
                             "cast");
 
     CallInst* NewCall = Builder.CreateCall2(NewFn, BC0, BC1, Name);
+    CI->replaceAllUsesWith(NewCall);
+    CI->eraseFromParent();
+    return;
+  }
+
+  case Intrinsic::x86_sse41_pblendw:
+  case Intrinsic::x86_sse41_blendpd:
+  case Intrinsic::x86_sse41_blendps:
+  case Intrinsic::x86_sse41_insertps:
+  case Intrinsic::x86_sse41_dppd:
+  case Intrinsic::x86_sse41_dpps:
+  case Intrinsic::x86_sse41_mpsadbw:
+  case Intrinsic::x86_avx_blend_pd_256:
+  case Intrinsic::x86_avx_blend_ps_256:
+  case Intrinsic::x86_avx_dp_ps_256:
+  case Intrinsic::x86_avx2_pblendw:
+  case Intrinsic::x86_avx2_pblendd_128:
+  case Intrinsic::x86_avx2_pblendd_256:
+  case Intrinsic::x86_avx2_mpsadbw: {
+    // Need to truncate the last argument from i32 to i8 -- this argument models
+    // an inherently 8-bit immediate operand to these x86 instructions.
+    SmallVector<Value *, 4> Args(CI->arg_operands().begin(),
+                                 CI->arg_operands().end());
+
+    // Replace the last argument with a trunc.
+    Args.back() = Builder.CreateTrunc(Args.back(), Type::getInt8Ty(C), "trunc");
+
+    CallInst *NewCall = Builder.CreateCall(NewFn, Args);
     CI->replaceAllUsesWith(NewCall);
     CI->eraseFromParent();
     return;

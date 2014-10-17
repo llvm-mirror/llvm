@@ -69,8 +69,8 @@ struct MCAsmMacro {
   MCAsmMacroParameters Parameters;
 
 public:
-  MCAsmMacro(StringRef N, StringRef B, ArrayRef<MCAsmMacroParameter> P) :
-    Name(N), Body(B), Parameters(P) {}
+  MCAsmMacro(StringRef N, StringRef B, MCAsmMacroParameters P)
+      : Name(N), Body(B), Parameters(std::move(P)) {}
 };
 
 /// \brief Helper class for storing information about an active macro
@@ -121,7 +121,7 @@ private:
   SourceMgr &SrcMgr;
   SourceMgr::DiagHandlerTy SavedDiagHandler;
   void *SavedDiagContext;
-  MCAsmParserExtension *PlatformParser;
+  std::unique_ptr<MCAsmParserExtension> PlatformParser;
 
   /// This is the current buffer index we're lexing from as managed by the
   /// SourceMgr object.
@@ -136,7 +136,7 @@ private:
   StringMap<ExtensionDirectiveHandler> ExtensionDirectiveMap;
 
   /// \brief Map of currently defined macros.
-  StringMap<MCAsmMacro*> MacroMap;
+  StringMap<MCAsmMacro> MacroMap;
 
   /// \brief Stack of active macro instantiations.
   std::vector<MacroInstantiation*> ActiveMacros;
@@ -238,7 +238,8 @@ public:
 
 private:
 
-  bool parseStatement(ParseStatementInfo &Info);
+  bool parseStatement(ParseStatementInfo &Info,
+                      MCAsmParserSemaCallback *SI);
   void eatToEndOfLine();
   bool parseCppHashLineFilenameComment(const SMLoc &L);
 
@@ -261,7 +262,7 @@ private:
   const MCAsmMacro* lookupMacro(StringRef Name);
 
   /// \brief Define a new macro with the given name and information.
-  void defineMacro(StringRef Name, const MCAsmMacro& Macro);
+  void defineMacro(StringRef Name, MCAsmMacro Macro);
 
   /// \brief Undefine a macro. If no such macro was defined, it's a no-op.
   void undefineMacro(StringRef Name);
@@ -501,34 +502,24 @@ AsmParser::AsmParser(SourceMgr &_SM, MCContext &_Ctx, MCStreamer &_Out,
   // Initialize the platform / file format parser.
   switch (_Ctx.getObjectFileInfo()->getObjectFileType()) {
   case MCObjectFileInfo::IsCOFF:
-      PlatformParser = createCOFFAsmParser();
-      PlatformParser->Initialize(*this);
-      break;
+    PlatformParser.reset(createCOFFAsmParser());
+    break;
   case MCObjectFileInfo::IsMachO:
-      PlatformParser = createDarwinAsmParser();
-      PlatformParser->Initialize(*this);
-      IsDarwin = true;
-      break;
+    PlatformParser.reset(createDarwinAsmParser());
+    IsDarwin = true;
+    break;
   case MCObjectFileInfo::IsELF:
-      PlatformParser = createELFAsmParser();
-      PlatformParser->Initialize(*this);
-      break;
+    PlatformParser.reset(createELFAsmParser());
+    break;
   }
 
+  PlatformParser->Initialize(*this);
   initializeDirectiveKindMap();
 }
 
 AsmParser::~AsmParser() {
   assert((HadError || ActiveMacros.empty()) &&
          "Unexpected active macro instantiation!");
-
-  // Destroy any macros.
-  for (StringMap<MCAsmMacro *>::iterator it = MacroMap.begin(),
-                                         ie = MacroMap.end();
-       it != ie; ++it)
-    delete it->getValue();
-
-  delete PlatformParser;
 }
 
 void AsmParser::printMacroInstantiations() {
@@ -640,7 +631,7 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
   // While we have input, parse each statement.
   while (Lexer.isNot(AsmToken::Eof)) {
     ParseStatementInfo Info;
-    if (!parseStatement(Info))
+    if (!parseStatement(Info, nullptr))
       continue;
 
     // We had an error, validate that one was emitted and recover by skipping to
@@ -1185,7 +1176,8 @@ bool AsmParser::parseBinOpRHS(unsigned Precedence, const MCExpr *&Res,
 ///   ::= EndOfStatement
 ///   ::= Label* Directive ...Operands... EndOfStatement
 ///   ::= Label* Identifier OperandList* EndOfStatement
-bool AsmParser::parseStatement(ParseStatementInfo &Info) {
+bool AsmParser::parseStatement(ParseStatementInfo &Info,
+                               MCAsmParserSemaCallback *SI) {
   if (Lexer.is(AsmToken::EndOfStatement)) {
     Out.AddBlankLine();
     Lex();
@@ -1295,9 +1287,16 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info) {
     // FIXME: This doesn't diagnose assignment to a symbol which has been
     // implicitly marked as external.
     MCSymbol *Sym;
-    if (LocalLabelVal == -1)
+    if (LocalLabelVal == -1) {
+      if (ParsingInlineAsm && SI) {
+        StringRef RewrittenLabel = SI->LookupInlineAsmLabel(IDVal, getSourceManager(), IDLoc, true);
+        assert(RewrittenLabel.size() && "We should have an internal name here.");
+        Info.AsmRewrites->push_back(AsmRewrite(AOK_Label, IDLoc,
+                                               IDVal.size(), RewrittenLabel));
+        IDVal = RewrittenLabel;
+      }
       Sym = getContext().GetOrCreateSymbol(IDVal);
-    else
+    } else
       Sym = Ctx.CreateDirectionalLocalSymbol(LocalLabelVal);
     if (!Sym->isUndefined() || Sym->isVariable())
       return Error(IDLoc, "invalid symbol redefinition");
@@ -2079,21 +2078,15 @@ bool AsmParser::parseMacroArguments(const MCAsmMacro *M,
 }
 
 const MCAsmMacro *AsmParser::lookupMacro(StringRef Name) {
-  StringMap<MCAsmMacro *>::iterator I = MacroMap.find(Name);
-  return (I == MacroMap.end()) ? nullptr : I->getValue();
+  StringMap<MCAsmMacro>::iterator I = MacroMap.find(Name);
+  return (I == MacroMap.end()) ? nullptr : &I->getValue();
 }
 
-void AsmParser::defineMacro(StringRef Name, const MCAsmMacro &Macro) {
-  MacroMap[Name] = new MCAsmMacro(Macro);
+void AsmParser::defineMacro(StringRef Name, MCAsmMacro Macro) {
+  MacroMap.insert(std::make_pair(Name, std::move(Macro)));
 }
 
-void AsmParser::undefineMacro(StringRef Name) {
-  StringMap<MCAsmMacro *>::iterator I = MacroMap.find(Name);
-  if (I != MacroMap.end()) {
-    delete I->getValue();
-    MacroMap.erase(I);
-  }
-}
+void AsmParser::undefineMacro(StringRef Name) { MacroMap.erase(Name); }
 
 bool AsmParser::handleMacroEntry(const MCAsmMacro *M, SMLoc NameLoc) {
   // Arbitrarily limit macro nesting depth, to match 'as'. We can eliminate
@@ -2601,13 +2594,14 @@ bool AsmParser::parseDirectiveFill() {
   if (!isUInt<32>(FillExpr) && FillSize > 4)
     Warning(ExprLoc, "'.fill' directive pattern has been truncated to 32-bits");
 
-  int64_t NonZeroFillSize = FillSize > 4 ? 4 : FillSize;
-  FillExpr &= ~0ULL >> (64 - NonZeroFillSize * 8);
-
-  for (uint64_t i = 0, e = NumValues; i != e; ++i) {
-    getStreamer().EmitIntValue(FillExpr, NonZeroFillSize);
-    if (NonZeroFillSize < FillSize)
-      getStreamer().EmitIntValue(0, FillSize - NonZeroFillSize);
+  if (NumValues > 0) {
+    int64_t NonZeroFillSize = FillSize > 4 ? 4 : FillSize;
+    FillExpr &= ~0ULL >> (64 - NonZeroFillSize * 8);
+    for (uint64_t i = 0, e = NumValues; i != e; ++i) {
+      getStreamer().EmitIntValue(FillExpr, NonZeroFillSize);
+      if (NonZeroFillSize < FillSize)
+        getStreamer().EmitIntValue(0, FillSize - NonZeroFillSize);
+    }
   }
 
   return false;
@@ -3315,7 +3309,7 @@ bool AsmParser::parseDirectiveMacro(SMLoc DirectiveLoc) {
                 "'" + Parameter.Name + "' in macro '" + Name + "'");
     }
 
-    Parameters.push_back(Parameter);
+    Parameters.push_back(std::move(Parameter));
 
     if (getLexer().is(AsmToken::Comma))
       Lex();
@@ -3367,7 +3361,7 @@ bool AsmParser::parseDirectiveMacro(SMLoc DirectiveLoc) {
   const char *BodyEnd = EndToken.getLoc().getPointer();
   StringRef Body = StringRef(BodyStart, BodyEnd - BodyStart);
   checkForBadMacro(DirectiveLoc, Name, Body, Parameters);
-  defineMacro(Name, MCAsmMacro(Name, Body, Parameters));
+  defineMacro(Name, MCAsmMacro(Name, Body, std::move(Parameters)));
   return false;
 }
 
@@ -4296,7 +4290,8 @@ MCAsmMacro *AsmParser::parseMacroLikeBody(SMLoc DirectiveLoc) {
   StringRef Body = StringRef(BodyStart, BodyEnd - BodyStart);
 
   // We Are Anonymous.
-  MacroLikeBodies.push_back(MCAsmMacro(StringRef(), Body, None));
+  MacroLikeBodies.push_back(
+      MCAsmMacro(StringRef(), Body, MCAsmMacroParameters()));
   return &MacroLikeBodies.back();
 }
 
@@ -4540,7 +4535,7 @@ bool AsmParser::parseMSInlineAsm(
   unsigned OutputIdx = 0;
   while (getLexer().isNot(AsmToken::Eof)) {
     ParseStatementInfo Info(&AsmStrRewrites);
-    if (parseStatement(Info))
+    if (parseStatement(Info, &SI))
       return true;
 
     if (Info.ParseError)
@@ -4665,6 +4660,9 @@ bool AsmParser::parseMSInlineAsm(
       break;
     case AOK_ImmPrefix:
       OS << "$$";
+      break;
+    case AOK_Label:
+      OS << Ctx.getAsmInfo()->getPrivateGlobalPrefix() << AR.Label;
       break;
     case AOK_Input:
       OS << '$' << InputIdx++;

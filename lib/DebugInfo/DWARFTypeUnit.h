@@ -19,10 +19,11 @@ private:
   uint64_t TypeHash;
   uint32_t TypeOffset;
 public:
-  DWARFTypeUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef RS,
-                StringRef SS, StringRef SOS, StringRef AOS,
-                const RelocAddrMap *M, bool LE)
-      : DWARFUnit(DA, IS, RS, SS, SOS, AOS, M, LE) {}
+  DWARFTypeUnit(DWARFContext &Context, const DWARFSection &Section,
+                const DWARFDebugAbbrev *DA, StringRef RS, StringRef SS,
+                StringRef SOS, StringRef AOS, bool LE,
+                const DWARFUnitSectionBase &UnitSection)
+      : DWARFUnit(Context, Section, DA, RS, SS, SOS, AOS, LE, UnitSection) {}
   uint32_t getHeaderSize() const override {
     return DWARFUnit::getHeaderSize() + 12;
   }

@@ -85,25 +85,27 @@ define i32 @test6(i32 %x) {
 
 
 ; (A | B) ^ (~A) -> (A | ~B)
-define i32 @test7(i32 %a, i32 %b) #0 {
+define i32 @test7(i32 %a, i32 %b) {
  %or = or i32 %a, %b
  %neg = xor i32 %a, -1
  %xor = xor i32 %or, %neg
  ret i32 %xor
 ; CHECK-LABEL: @test7(
-; CHECK-NEXT: %1 = xor i32 %b, -1
-; CHECK-NEXT: %xor = or i32 %a, %1
+; CHECK-NEXT: %[[b_not:.*]] = xor i32 %b, -1
+; CHECK-NEXT: %[[or:.*]] = or i32 %a, %[[b_not]]
+; CHECK-NEXT: ret i32 %[[or]]
 }
 
 ; (~A) ^ (A | B) -> (A | ~B)
-define i32 @test8(i32 %a, i32 %b) #0 {
+define i32 @test8(i32 %a, i32 %b) {
  %neg = xor i32 %a, -1
  %or = or i32 %a, %b
  %xor = xor i32 %neg, %or
  ret i32 %xor
 ; CHECK-LABEL: @test8(
-; CHECK-NEXT: %1 = xor i32 %b, -1
-; CHECK-NEXT: %xor = or i32 %a, %1
+; CHECK-NEXT: %[[b_not:.*]] = xor i32 %b, -1
+; CHECK-NEXT: %[[or:.*]] = or i32 %a, %[[b_not]]
+; CHECK-NEXT: ret i32 %[[or]]
 }
 
 ; (A & B) ^ (A ^ B) -> (A | B)
@@ -136,34 +138,37 @@ define i32 @test11(i32 %A, i32 %B) {
 ; CHECK-NEXT: ret i32 0
 }
 
-define i32 @test12(i32 %A, i32 %B) {
-  %xor1 = xor i32 %B, %A
-  %not = xor i32 %A, -1
-  %xor2 = xor i32 %not, %B
-  %and = and i32 %xor1, %xor2
-  ret i32 %and
-; CHECK-LABEL: @test12(
-; CHECK-NEXT: ret i32 0
-}
-
-define i32 @test13(i32 %a, i32 %b) {
+define i32 @test12(i32 %a, i32 %b) {
  %negb = xor i32 %b, -1
  %and = and i32 %a, %negb
  %nega = xor i32 %a, -1
  %xor = xor i32 %and, %nega
+ ret i32 %xor
+; CHECK-LABEL: @test12(
+; CHECK-NEXT: %1 = and i32 %a, %b
+; CHECK-NEXT: %xor = xor i32 %1, -1
+}
+
+define i32 @test13(i32 %a, i32 %b) {
+ %nega = xor i32 %a, -1
+ %negb = xor i32 %b, -1
+ %and = and i32 %a, %negb
+ %xor = xor i32 %nega, %and
  ret i32 %xor
 ; CHECK-LABEL: @test13(
 ; CHECK-NEXT: %1 = and i32 %a, %b
 ; CHECK-NEXT: %xor = xor i32 %1, -1
 }
 
-define i32 @test14(i32 %a, i32 %b) {
- %nega = xor i32 %a, -1
- %negb = xor i32 %b, -1
- %and = and i32 %a, %negb
- %xor = xor i32 %nega, %and
+; (A ^ C) ^ (A | B) -> ((~A) & B) ^ C
+define i32 @test14(i32 %a, i32 %b, i32 %c) {
+ %neg = xor i32 %a, %c
+ %or = or i32 %a, %b
+ %xor = xor i32 %neg, %or
  ret i32 %xor
 ; CHECK-LABEL: @test14(
-; CHECK-NEXT: %1 = and i32 %a, %b
-; CHECK-NEXT: %xor = xor i32 %1, -1
+; CHECK-NEXT: %[[not:.*]] = xor i32 %a, -1
+; CHECK-NEXT: %[[and:.*]] = and i32 %[[not]], %b
+; CHECK-NEXT: %[[xor:.*]] = xor i32 %[[and]], %c
+; CHECK-NEXT: ret i32 %[[xor]]
 }

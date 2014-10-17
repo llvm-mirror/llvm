@@ -14,6 +14,7 @@
 #include "DWARFDebugInfoEntry.h"
 #include "DWARFDebugRangeList.h"
 #include "DWARFRelocMap.h"
+#include "DWARFSection.h"
 #include <vector>
 
 namespace llvm {
@@ -22,21 +23,96 @@ namespace object {
 class ObjectFile;
 }
 
+class DWARFContext;
 class DWARFDebugAbbrev;
+class DWARFUnit;
 class StringRef;
 class raw_ostream;
 
+/// Base class for all DWARFUnitSection classes. This provides the
+/// functionality common to all unit types.
+class DWARFUnitSectionBase {
+public:
+  /// Returns the Unit that contains the given section offset in the
+  /// same section this Unit originated from.
+  virtual DWARFUnit *getUnitForOffset(uint32_t Offset) const = 0;
+
+  void parse(DWARFContext &C, const DWARFSection &Section);
+  void parseDWO(DWARFContext &C, const DWARFSection &DWOSection);
+
+protected:
+  virtual void parseImpl(DWARFContext &Context, const DWARFSection &Section,
+                         const DWARFDebugAbbrev *DA, StringRef RS, StringRef SS,
+                         StringRef SOS, StringRef AOS, bool isLittleEndian) = 0;
+
+  ~DWARFUnitSectionBase() {}
+};
+
+/// Concrete instance of DWARFUnitSection, specialized for one Unit type.
+template<typename UnitType>
+class DWARFUnitSection final : public SmallVector<std::unique_ptr<UnitType>, 1>,
+                               public DWARFUnitSectionBase {
+
+  struct UnitOffsetComparator {
+    bool operator()(uint32_t LHS,
+                    const std::unique_ptr<UnitType> &RHS) const {
+      return LHS < RHS->getNextUnitOffset();
+    }
+  };
+
+  bool Parsed;
+
+public:
+  DWARFUnitSection() : Parsed(false) {}
+  DWARFUnitSection(DWARFUnitSection &&DUS) :
+    SmallVector<std::unique_ptr<UnitType>, 1>(std::move(DUS)), Parsed(DUS.Parsed) {}
+
+  typedef llvm::SmallVectorImpl<std::unique_ptr<UnitType>> UnitVector;
+  typedef typename UnitVector::iterator iterator;
+  typedef llvm::iterator_range<typename UnitVector::iterator> iterator_range;
+
+  UnitType *getUnitForOffset(uint32_t Offset) const {
+    auto *CU = std::upper_bound(this->begin(), this->end(), Offset,
+                                UnitOffsetComparator());
+    if (CU != this->end())
+      return CU->get();
+    return nullptr;
+  }
+
+private:
+  void parseImpl(DWARFContext &Context, const DWARFSection &Section,
+                 const DWARFDebugAbbrev *DA, StringRef RS, StringRef SS,
+                 StringRef SOS, StringRef AOS, bool LE) override {
+    if (Parsed)
+      return;
+    DataExtractor Data(Section.Data, LE, 0);
+    uint32_t Offset = 0;
+    while (Data.isValidOffset(Offset)) {
+      auto U = llvm::make_unique<UnitType>(Context, Section, DA, RS, SS, SOS,
+                                           AOS, LE, *this);
+      if (!U->extract(Data, &Offset))
+        break;
+      this->push_back(std::move(U));
+      Offset = this->back()->getNextUnitOffset();
+    }
+    Parsed = true;
+  }
+};
+
 class DWARFUnit {
+  DWARFContext &Context;
+  // Section containing this DWARFUnit.
+  const DWARFSection &InfoSection;
+
   const DWARFDebugAbbrev *Abbrev;
-  StringRef InfoSection;
   StringRef RangeSection;
   uint32_t RangeSectionBase;
   StringRef StringSection;
   StringRef StringOffsetSection;
   StringRef AddrOffsetSection;
   uint32_t AddrOffsetSectionBase;
-  const RelocAddrMap *RelocMap;
   bool isLittleEndian;
+  const DWARFUnitSectionBase &UnitSection;
 
   uint32_t Offset;
   uint32_t Length;
@@ -48,11 +124,11 @@ class DWARFUnit {
   std::vector<DWARFDebugInfoEntryMinimal> DieArray;
 
   class DWOHolder {
-    std::unique_ptr<object::ObjectFile> DWOFile;
+    object::OwningBinary<object::ObjectFile> DWOFile;
     std::unique_ptr<DWARFContext> DWOContext;
     DWARFUnit *DWOU;
   public:
-    DWOHolder(std::unique_ptr<object::ObjectFile> DWOFile);
+    DWOHolder(StringRef DWOPath);
     DWARFUnit *getUnit() const { return DWOU; }
   };
   std::unique_ptr<DWOHolder> DWO;
@@ -63,11 +139,14 @@ protected:
   virtual uint32_t getHeaderSize() const { return 11; }
 
 public:
-  DWARFUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef RS,
-            StringRef SS, StringRef SOS, StringRef AOS, const RelocAddrMap *M,
-            bool LE);
+  DWARFUnit(DWARFContext &Context, const DWARFSection &Section,
+            const DWARFDebugAbbrev *DA, StringRef RS, StringRef SS,
+            StringRef SOS, StringRef AOS, bool LE,
+            const DWARFUnitSectionBase &UnitSection);
 
   virtual ~DWARFUnit();
+
+  DWARFContext& getContext() const { return Context; }
 
   StringRef getStringSection() const { return StringSection; }
   StringRef getStringOffsetSection() const { return StringOffsetSection; }
@@ -85,13 +164,13 @@ public:
   bool getStringOffsetSectionItem(uint32_t Index, uint32_t &Result) const;
 
   DataExtractor getDebugInfoExtractor() const {
-    return DataExtractor(InfoSection, isLittleEndian, AddrSize);
+    return DataExtractor(InfoSection.Data, isLittleEndian, AddrSize);
   }
   DataExtractor getStringExtractor() const {
     return DataExtractor(StringSection, false, 0);
   }
 
-  const RelocAddrMap *getRelocMap() const { return RelocMap; }
+  const RelocAddrMap *getRelocMap() const { return &InfoSection.Relocs; }
 
   bool extract(DataExtractor debug_info, uint32_t* offset_ptr);
 
@@ -130,6 +209,9 @@ public:
   /// Returns empty chain if there is no subprogram containing address. The
   /// chain is valid as long as parsed compile unit DIEs are not cleared.
   DWARFDebugInfoEntryInlinedChain getInlinedChainForAddress(uint64_t Address);
+
+  /// getUnitSection - Return the DWARFUnitSection containing this unit.
+  const DWARFUnitSectionBase &getUnitSection() const { return UnitSection; }
 
 private:
   /// Size in bytes of the .debug_info data associated with this compile unit.

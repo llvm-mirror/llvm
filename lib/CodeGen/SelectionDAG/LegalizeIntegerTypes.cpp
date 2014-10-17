@@ -342,9 +342,10 @@ SDValue DAGTypeLegalizer::PromoteIntRes_CTLZ(SDNode *N) {
   EVT NVT = Op.getValueType();
   Op = DAG.getNode(N->getOpcode(), dl, NVT, Op);
   // Subtract off the extra leading bits in the bigger type.
-  return DAG.getNode(ISD::SUB, dl, NVT, Op,
-                     DAG.getConstant(NVT.getSizeInBits() -
-                                     OVT.getSizeInBits(), NVT));
+  return DAG.getNode(
+      ISD::SUB, dl, NVT, Op,
+      DAG.getConstant(NVT.getScalarSizeInBits() - OVT.getScalarSizeInBits(),
+                      NVT));
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_CTPOP(SDNode *N) {
@@ -362,8 +363,8 @@ SDValue DAGTypeLegalizer::PromoteIntRes_CTTZ(SDNode *N) {
     // The count is the same in the promoted type except if the original
     // value was zero.  This can be handled by setting the bit just off
     // the top of the original type.
-    APInt TopBit(NVT.getSizeInBits(), 0);
-    TopBit.setBit(OVT.getSizeInBits());
+    auto TopBit = APInt::getOneBitSet(NVT.getScalarSizeInBits(),
+                                      OVT.getScalarSizeInBits());
     Op = DAG.getNode(ISD::OR, dl, NVT, Op, DAG.getConstant(TopBit, NVT));
   }
   return DAG.getNode(N->getOpcode(), dl, NVT, Op);
@@ -861,7 +862,26 @@ void DAGTypeLegalizer::PromoteSetCCOperands(SDValue &NewLHS,SDValue &NewRHS,
   switch (CCCode) {
   default: llvm_unreachable("Unknown integer comparison!");
   case ISD::SETEQ:
-  case ISD::SETNE:
+  case ISD::SETNE: {
+    SDValue OpL = GetPromotedInteger(NewLHS);
+    SDValue OpR = GetPromotedInteger(NewRHS);
+
+    // We would prefer to promote the comparison operand with sign extension,
+    // if we find the operand is actually to truncate an AssertSext. With this
+    // optimization, we can avoid inserting real truncate instruction, which
+    // is redudant eventually.
+    if (OpL->getOpcode() == ISD::AssertSext &&
+        cast<VTSDNode>(OpL->getOperand(1))->getVT() == NewLHS.getValueType() &&
+        OpR->getOpcode() == ISD::AssertSext &&
+        cast<VTSDNode>(OpR->getOperand(1))->getVT() == NewRHS.getValueType()) {
+      NewLHS = OpL;
+      NewRHS = OpR;
+    } else {
+      NewLHS = ZExtPromotedInteger(NewLHS);
+      NewRHS = ZExtPromotedInteger(NewRHS);
+    }
+    break;
+  }
   case ISD::SETUGE:
   case ISD::SETUGT:
   case ISD::SETULE:

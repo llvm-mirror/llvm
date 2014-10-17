@@ -10,11 +10,42 @@
 //===----------------------------------------------------------------------===//
 
 /// CCIfSubtarget - Match if the current subtarget has a feature F.
-class CCIfSubtarget<string F, CCAction A>
-    : CCIf<!strconcat("static_cast<const MipsSubtarget&>"
+class CCIfSubtarget<string F, CCAction A, string Invert = "">
+    : CCIf<!strconcat(Invert,
+                      "static_cast<const MipsSubtarget&>"
 			"(State.getMachineFunction().getSubtarget()).",
                       F),
            A>;
+
+// The inverse of CCIfSubtarget
+class CCIfSubtargetNot<string F, CCAction A> : CCIfSubtarget<F, A, "!">;
+
+// For soft-float, f128 values are returned in A0_64 rather than V1_64.
+def RetCC_F128SoftFloat : CallingConv<[
+  CCAssignToReg<[V0_64, A0_64]>
+]>;
+
+// For hard-float, f128 values are returned as a pair of f64's rather than a
+// pair of i64's.
+def RetCC_F128HardFloat : CallingConv<[
+  CCBitConvertToType<f64>,
+
+  // Contrary to the ABI documentation, a struct containing a long double is
+  // returned in $f0, and $f1 instead of the usual $f0, and $f2. This is to
+  // match the de facto ABI as implemented by GCC.
+  CCIfInReg<CCAssignToReg<[D0_64, D1_64]>>,
+
+  CCAssignToReg<[D0_64, D2_64]>
+]>;
+
+// Handle F128 specially since we can't identify the original type during the
+// tablegen-erated code.
+def RetCC_F128 : CallingConv<[
+  CCIfSubtarget<"abiUsesSoftFloat()",
+      CCIfType<[i64], CCDelegateTo<RetCC_F128SoftFloat>>>,
+  CCIfSubtargetNot<"abiUsesSoftFloat()",
+      CCIfType<[i64], CCDelegateTo<RetCC_F128HardFloat>>>
+]>;
 
 //===----------------------------------------------------------------------===//
 // Mips O32 Calling Convention
@@ -32,7 +63,7 @@ def RetCC_MipsO32 : CallingConv<[
   // f64 arguments are returned in D0_64 and D2_64 in FP64bit mode or
   // in D0 and D1 in FP32bit mode.
   CCIfType<[f64], CCIfSubtarget<"isFP64bit()", CCAssignToReg<[D0_64, D2_64]>>>,
-  CCIfType<[f64], CCIfSubtarget<"isNotFP64bit()", CCAssignToReg<[D0, D1]>>>
+  CCIfType<[f64], CCIfSubtargetNot<"isFP64bit()", CCAssignToReg<[D0, D1]>>>
 ]>;
 
 //===----------------------------------------------------------------------===//
@@ -88,6 +119,28 @@ def CC_MipsN_VarArg : CallingConv<[
 ]>;
 
 def RetCC_MipsN : CallingConv<[
+  // f128 needs to be handled similarly to f32 and f64. However, f128 is not
+  // legal and is lowered to i128 which is further lowered to a pair of i64's.
+  // This presents us with a problem for the calling convention since hard-float
+  // still needs to pass them in FPU registers, and soft-float needs to use $v0,
+  // and $a0 instead of the usual $v0, and $v1. We therefore resort to a
+  // pre-analyze (see PreAnalyzeReturnForF128()) step to pass information on
+  // whether the result was originally an f128 into the tablegen-erated code.
+  //
+  // f128 should only occur for the N64 ABI where long double is 128-bit. On
+  // N32, long double is equivalent to double.
+  CCIfType<[i64],
+      CCIf<"static_cast<MipsCCState *>(&State)->WasOriginalArgF128(ValNo)",
+           CCDelegateTo<RetCC_F128>>>,
+
+  // Aggregate returns are positioned at the lowest address in the slot for
+  // both little and big-endian targets. When passing in registers, this
+  // requires that big-endian targets shift the value into the upper bits.
+  CCIfSubtarget<"isLittle()",
+      CCIfType<[i8, i16, i32], CCIfInReg<CCPromoteToType<i64>>>>,
+  CCIfSubtargetNot<"isLittle()",
+      CCIfType<[i8, i16, i32], CCIfInReg<CCPromoteToUpperBitsInType<i64>>>>,
+
   // i32 are returned in registers V0, V1
   CCIfType<[i32], CCAssignToReg<[V0, V1]>>,
 
@@ -99,12 +152,6 @@ def RetCC_MipsN : CallingConv<[
 
   // f64 are returned in registers D0, D2
   CCIfType<[f64], CCAssignToReg<[D0_64, D2_64]>>
-]>;
-
-// In soft-mode, register A0_64, instead of V1_64, is used to return a long
-// double value.
-def RetCC_F128Soft : CallingConv<[
-  CCIfType<[i64], CCAssignToReg<[V0_64, A0_64]>>
 ]>;
 
 //===----------------------------------------------------------------------===//
@@ -122,11 +169,11 @@ def CC_MipsEABI : CallingConv<[
   CCIfType<[f32], CCIfSubtarget<"isSingleFloat()",
                   CCAssignToReg<[F12, F13, F14, F15, F16, F17, F18, F19]>>>,
 
-  CCIfType<[f32], CCIfSubtarget<"isNotSingleFloat()",
+  CCIfType<[f32], CCIfSubtargetNot<"isSingleFloat()",
                   CCAssignToReg<[F12, F14, F16, F18]>>>,
 
   // The first 4 double fp arguments are passed in single fp registers.
-  CCIfType<[f64], CCIfSubtarget<"isNotSingleFloat()",
+  CCIfType<[f64], CCIfSubtargetNot<"isSingleFloat()",
                   CCAssignToReg<[D6, D7, D8, D9]>>>,
 
   // Integer values get stored in stack slots that are 4 bytes in
@@ -135,7 +182,7 @@ def CC_MipsEABI : CallingConv<[
 
   // Integer values get stored in stack slots that are 8 bytes in
   // size and 8-byte aligned.
-  CCIfType<[f64], CCIfSubtarget<"isNotSingleFloat()", CCAssignToStack<8, 8>>>
+  CCIfType<[f64], CCIfSubtargetNot<"isSingleFloat()", CCAssignToStack<8, 8>>>
 ]>;
 
 def RetCC_MipsEABI : CallingConv<[
@@ -146,7 +193,7 @@ def RetCC_MipsEABI : CallingConv<[
   CCIfType<[f32], CCAssignToReg<[F0, F1]>>,
 
   // f64 are returned in register D0
-  CCIfType<[f64], CCIfSubtarget<"isNotSingleFloat()", CCAssignToReg<[D0]>>>
+  CCIfType<[f64], CCIfSubtargetNot<"isSingleFloat()", CCAssignToReg<[D0]>>>
 ]>;
 
 //===----------------------------------------------------------------------===//
@@ -154,9 +201,9 @@ def RetCC_MipsEABI : CallingConv<[
 //===----------------------------------------------------------------------===//
 def CC_MipsO32_FastCC : CallingConv<[
   // f64 arguments are passed in double-precision floating pointer registers.
-  CCIfType<[f64], CCIfSubtarget<"isNotFP64bit()",
-                                CCAssignToReg<[D0, D1, D2, D3, D4, D5, D6, D7,
-                                               D8, D9]>>>,
+  CCIfType<[f64], CCIfSubtargetNot<"isFP64bit()",
+                                   CCAssignToReg<[D0, D1, D2, D3, D4, D5, D6,
+                                                  D7, D8, D9]>>>,
   CCIfType<[f64], CCIfSubtarget<"isFP64bit()", CCIfSubtarget<"useOddSPReg()",
                                 CCAssignToReg<[D0_64, D1_64, D2_64, D3_64,
                                                D4_64, D5_64, D6_64, D7_64,
@@ -199,7 +246,7 @@ def CC_Mips_FastCC : CallingConv<[
 
   // Integer arguments are passed in integer registers. All scratch registers,
   // except for AT, V0 and T9, are available to be used as argument registers.
-  CCIfType<[i32], CCIfSubtarget<"isNotTargetNaCl()",
+  CCIfType<[i32], CCIfSubtargetNot<"isTargetNaCl()",
       CCAssignToReg<[A0, A1, A2, A3, T0, T1, T2, T3, T4, T5, T6, T7, T8, V1]>>>,
 
   // In NaCl, T6, T7 and T8 are reserved and not available as argument

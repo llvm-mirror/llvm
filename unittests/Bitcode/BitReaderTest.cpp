@@ -53,8 +53,33 @@ static std::unique_ptr<Module> getLazyModuleFromAssembly(LLVMContext &Context,
   writeModuleToBuffer(parseAssembly(Assembly), Mem);
   std::unique_ptr<MemoryBuffer> Buffer =
       MemoryBuffer::getMemBuffer(Mem.str(), "test", false);
-  ErrorOr<Module *> ModuleOrErr = getLazyBitcodeModule(Buffer, Context);
+  ErrorOr<Module *> ModuleOrErr =
+      getLazyBitcodeModule(std::move(Buffer), Context);
   return std::unique_ptr<Module>(ModuleOrErr.get());
+}
+
+TEST(BitReaderTest, DematerializeFunctionPreservesLinkageType) {
+  SmallString<1024> Mem;
+
+  LLVMContext Context;
+  std::unique_ptr<Module> M = getLazyModuleFromAssembly(
+      Context, Mem, "define internal i32 @func() {\n"
+                      "ret i32 0\n"
+                    "}\n");
+
+  EXPECT_FALSE(verifyModule(*M, &dbgs()));
+
+  M->getFunction("func")->Materialize();
+  EXPECT_FALSE(M->getFunction("func")->empty());
+  EXPECT_TRUE(M->getFunction("func")->getLinkage() ==
+              GlobalValue::InternalLinkage);
+
+  // Check that the linkage type is preserved after dematerialization.
+  M->getFunction("func")->Dematerialize();
+  EXPECT_TRUE(M->getFunction("func")->empty());
+  EXPECT_TRUE(M->getFunction("func")->getLinkage() ==
+              GlobalValue::InternalLinkage);
+  EXPECT_FALSE(verifyModule(*M, &dbgs()));
 }
 
 TEST(BitReaderTest, MaterializeFunctionsForBlockAddr) { // PR11677

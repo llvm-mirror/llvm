@@ -667,7 +667,9 @@ void ARMAsmPrinter::emitAttributes() {
                         ARMBuildAttrs::AllowNeonARMv8);
   } else {
     if (Subtarget->hasFPARMv8())
-      ATS.emitFPU(ARM::FP_ARMV8);
+      // FPv5 and FP-ARMv8 have the same instructions, so are modeled as one
+      // FPU, but there are two different names for it depending on the CPU.
+      ATS.emitFPU(Subtarget->hasD16() ? ARM::FPV5_D16 : ARM::FP_ARMV8);
     else if (Subtarget->hasVFP4())
       ATS.emitFPU(Subtarget->hasD16() ? ARM::VFPV4_D16 : ARM::VFPV4);
     else if (Subtarget->hasVFP3())
@@ -703,6 +705,13 @@ void ARMAsmPrinter::emitAttributes() {
   else
     ATS.emitAttribute(ARMBuildAttrs::ABI_FP_number_model,
                       ARMBuildAttrs::AllowIEE754);
+
+  if (Subtarget->allowsUnalignedMem())
+    ATS.emitAttribute(ARMBuildAttrs::CPU_unaligned_access,
+                      ARMBuildAttrs::Allowed);
+  else
+    ATS.emitAttribute(ARMBuildAttrs::CPU_unaligned_access,
+                      ARMBuildAttrs::Not_Allowed);
 
   // FIXME: add more flags to ARMBuildAttributes.h
   // 8-bytes alignment stuff.

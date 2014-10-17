@@ -29,9 +29,15 @@ public:
     return StringIndexMap.GetOrCreateValue(s, 0).getKey();
   }
 
+  enum Kind {
+    ELF,
+    WinCOFF,
+    MachO
+  };
+
   /// \brief Analyze the strings and build the final table. No more strings can
   /// be added after this point.
-  void finalize();
+  void finalize(Kind kind);
 
   /// \brief Retrieve the string table data. Can only be used after the table
   /// is finalized.
@@ -47,6 +53,8 @@ public:
     assert(StringIndexMap.count(s) && "String is not in table!");
     return StringIndexMap[s];
   }
+
+  void clear();
 
 private:
   bool isFinalized() {

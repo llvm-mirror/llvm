@@ -21,12 +21,7 @@ namespace llvm {
 
 class FunctionPass;
 class ImmutablePass;
-class JITCodeEmitter;
 class X86TargetMachine;
-
-/// createX86AtomicExpandPass - This pass expands atomic operations that cannot
-/// be handled natively in terms of a loop using cmpxchg.
-FunctionPass *createX86AtomicExpandPass(const X86TargetMachine *TM);
 
 /// createX86ISelDag - This pass converts a legalized DAG into a
 /// X86-specific DAG, ready for instruction scheduling.
@@ -53,11 +48,6 @@ FunctionPass *createX86FloatingPointStackifierPass();
 /// before each call to avoid transition penalty between functions encoded with
 /// AVX and SSE.
 FunctionPass *createX86IssueVZeroUpperPass();
-
-/// createX86CodeEmitterPass - Return a pass that emits the collected X86 code
-/// to the specified MCE object.
-FunctionPass *createX86JITCodeEmitterPass(X86TargetMachine &TM,
-                                          JITCodeEmitter &JCE);
 
 /// createX86EmitCodeToMemory - Returns a pass that converts a register
 /// allocated function into raw machine code in a dynamically

@@ -18,6 +18,7 @@
 #include "llvm-c/Core.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Casting.h"
 
 namespace llvm {
@@ -324,7 +325,7 @@ public:
   }
 
   /// \see DiagnosticInfoOptimizationBase::isEnabled.
-  virtual bool isEnabled() const override;
+  bool isEnabled() const override;
 };
 
 /// Diagnostic information for missed-optimization remarks.
@@ -350,7 +351,7 @@ public:
   }
 
   /// \see DiagnosticInfoOptimizationBase::isEnabled.
-  virtual bool isEnabled() const override;
+  bool isEnabled() const override;
 };
 
 /// Diagnostic information for optimization analysis remarks.
@@ -377,7 +378,7 @@ public:
   }
 
   /// \see DiagnosticInfoOptimizationBase::isEnabled.
-  virtual bool isEnabled() const override;
+  bool isEnabled() const override;
 };
 
 // Create wrappers for C Binding types (see CBindingWrapping.h).
@@ -432,7 +433,7 @@ public:
   }
 
   /// \see DiagnosticInfoOptimizationBase::isEnabled.
-  virtual bool isEnabled() const override;
+  bool isEnabled() const override;
 };
 
 /// Emit a warning when loop vectorization is specified but fails. \p Fn is the

@@ -24,6 +24,7 @@ namespace llvm {
 class AArch64TargetMachine : public LLVMTargetMachine {
 protected:
   AArch64Subtarget Subtarget;
+  mutable StringMap<std::unique_ptr<AArch64Subtarget>> SubtargetMap;
 
 public:
   AArch64TargetMachine(const Target &T, StringRef TT, StringRef CPU,
@@ -34,12 +35,20 @@ public:
   const AArch64Subtarget *getSubtargetImpl() const override {
     return &Subtarget;
   }
+  const AArch64Subtarget *getSubtargetImpl(const Function &F) const override;
 
   // Pass Pipeline Configuration
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
   /// \brief Register AArch64 analysis passes with a pass manager.
   void addAnalysisPasses(PassManagerBase &PM) override;
+
+  /// \brief Query if the PBQP register allocator is being used
+  bool isPBQPUsed() const { return usingPBQP; }
+
+private:
+  bool isLittle;
+  bool usingPBQP;
 };
 
 // AArch64leTargetMachine - AArch64 little endian target machine.

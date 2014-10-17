@@ -48,10 +48,12 @@ MCStreamer::~MCStreamer() {
 }
 
 void MCStreamer::reset() {
+  DwarfFrameInfos.clear();
   for (unsigned i = 0; i < getNumWinFrameInfos(); ++i)
     delete WinFrameInfos[i];
   WinFrameInfos.clear();
   CurrentWinFrameInfo = nullptr;
+  SymbolOrdering.clear();
   SectionStack.clear();
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
@@ -218,6 +220,16 @@ void MCStreamer::EmitCFIStartProc(bool IsSimple) {
   Frame.IsSimple = IsSimple;
   EmitCFIStartProcImpl(Frame);
 
+  const MCAsmInfo* MAI = Context.getAsmInfo();
+  if (MAI) {
+    for (const MCCFIInstruction& Inst : MAI->getInitialFrameState()) {
+      if (Inst.getOperation() == MCCFIInstruction::OpDefCfa ||
+          Inst.getOperation() == MCCFIInstruction::OpDefCfaRegister) {
+        Frame.CurrentCfaRegister = Inst.getRegister();
+      }
+    }
+  }
+
   DwarfFrameInfos.push_back(Frame);
 }
 
@@ -249,6 +261,7 @@ void MCStreamer::EmitCFIDefCfa(int64_t Register, int64_t Offset) {
     MCCFIInstruction::createDefCfa(Label, Register, Offset);
   MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
   CurFrame->Instructions.push_back(Instruction);
+  CurFrame->CurrentCfaRegister = static_cast<unsigned>(Register);
 }
 
 void MCStreamer::EmitCFIDefCfaOffset(int64_t Offset) {
@@ -273,6 +286,7 @@ void MCStreamer::EmitCFIDefCfaRegister(int64_t Register) {
     MCCFIInstruction::createDefCfaRegister(Label, Register);
   MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
   CurFrame->Instructions.push_back(Instruction);
+  CurFrame->CurrentCfaRegister = static_cast<unsigned>(Register);
 }
 
 void MCStreamer::EmitCFIOffset(int64_t Register, int64_t Offset) {

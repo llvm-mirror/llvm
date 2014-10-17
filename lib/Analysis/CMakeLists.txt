@@ -5,12 +5,14 @@ add_llvm_library(LLVMAnalysis
   AliasDebugger.cpp
   AliasSetTracker.cpp
   Analysis.cpp
+  AssumptionTracker.cpp
   BasicAliasAnalysis.cpp
   BlockFrequencyInfo.cpp
   BlockFrequencyInfoImpl.cpp
   BranchProbabilityInfo.cpp
   CFG.cpp
   CFGPrinter.cpp
+  CFLAliasAnalysis.cpp
   CGSCCPassManager.cpp
   CaptureTracking.cpp
   CostModel.cpp
@@ -20,6 +22,7 @@ add_llvm_library(LLVMAnalysis
   DependenceAnalysis.cpp
   DomPrinter.cpp
   DominanceFrontier.cpp
+  FunctionTargetTransformInfo.cpp
   IVUsers.cpp
   InstCount.cpp
   InstructionSimplify.cpp

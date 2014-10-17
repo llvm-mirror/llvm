@@ -22,8 +22,34 @@ enum {
   VOPC = 1 << 8,
   SALU = 1 << 9,
   MUBUF = 1 << 10,
-  MTBUF = 1 << 11
+  MTBUF = 1 << 11,
+  FLAT = 1 << 12
 };
+}
+
+namespace SIInstrFlags {
+  enum Flags {
+    // First 4 bits are the instruction encoding
+    VM_CNT = 1 << 0,
+    EXP_CNT = 1 << 1,
+    LGKM_CNT = 1 << 2
+  };
+}
+
+namespace SISrcMods {
+  enum {
+   NEG = 1 << 0,
+   ABS = 1 << 1
+  };
+}
+
+namespace SIOutMods {
+  enum {
+    NONE = 0,
+    MUL2 = 1,
+    MUL4 = 2,
+    DIV2 = 3
+  };
 }
 
 #define R_00B028_SPI_SHADER_PGM_RSRC1_PS                                0x00B028

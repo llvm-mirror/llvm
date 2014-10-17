@@ -588,7 +588,7 @@ static DecodeStatus DecodeFixedPointScaleImm32(llvm::MCInst &Inst, unsigned Imm,
                                                uint64_t Addr,
                                                const void *Decoder) {
   // scale{5} is asserted as 1 in tblgen.
-  Imm |= 0x20;  
+  Imm |= 0x20;
   Inst.addOperand(MCOperand::CreateImm(64 - Imm));
   return Success;
 }
@@ -610,7 +610,7 @@ static DecodeStatus DecodePCRelLabel19(llvm::MCInst &Inst, unsigned Imm,
   if (ImmVal & (1 << (19 - 1)))
     ImmVal |= ~((1LL << 19) - 1);
 
-  if (!Dis->tryAddingSymbolicOperand(Inst, ImmVal << 2, Addr,
+  if (!Dis->tryAddingSymbolicOperand(Inst, ImmVal *  4, Addr,
                                      Inst.getOpcode() != AArch64::LDRXl, 0, 4))
     Inst.addOperand(MCOperand::CreateImm(ImmVal));
   return Success;
@@ -626,35 +626,19 @@ static DecodeStatus DecodeMemExtend(llvm::MCInst &Inst, unsigned Imm,
 static DecodeStatus DecodeMRSSystemRegister(llvm::MCInst &Inst, unsigned Imm,
                                             uint64_t Address,
                                             const void *Decoder) {
-  const AArch64Disassembler *Dis =
-      static_cast<const AArch64Disassembler *>(Decoder);
-  const MCSubtargetInfo &STI = Dis->getSubtargetInfo();
-
-  Imm |= 0x8000;
   Inst.addOperand(MCOperand::CreateImm(Imm));
 
-  bool ValidNamed;
-  (void)AArch64SysReg::MRSMapper(STI.getFeatureBits())
-      .toString(Imm, ValidNamed);
-
-  return ValidNamed ? Success : Fail;
+  // Every system register in the encoding space is valid with the syntax
+  // S<op0>_<op1>_<Cn>_<Cm>_<op2>, so decoding system registers always succeeds.
+  return Success;
 }
 
 static DecodeStatus DecodeMSRSystemRegister(llvm::MCInst &Inst, unsigned Imm,
                                             uint64_t Address,
                                             const void *Decoder) {
-  const AArch64Disassembler *Dis =
-      static_cast<const AArch64Disassembler *>(Decoder);
-  const MCSubtargetInfo &STI = Dis->getSubtargetInfo();
-
-  Imm |= 0x8000;
   Inst.addOperand(MCOperand::CreateImm(Imm));
 
-  bool ValidNamed;
-  (void)AArch64SysReg::MSRMapper(STI.getFeatureBits())
-      .toString(Imm, ValidNamed);
-
-  return ValidNamed ? Success : Fail;
+  return Success;
 }
 
 static DecodeStatus DecodeFMOVLaneInstruction(llvm::MCInst &Inst, unsigned Insn,
@@ -1506,7 +1490,7 @@ static DecodeStatus DecodeUnconditionalBranch(llvm::MCInst &Inst, uint32_t insn,
   if (imm & (1 << (26 - 1)))
     imm |= ~((1LL << 26) - 1);
 
-  if (!Dis->tryAddingSymbolicOperand(Inst, imm << 2, Addr, true, 0, 4))
+  if (!Dis->tryAddingSymbolicOperand(Inst, imm * 4, Addr, true, 0, 4))
     Inst.addOperand(MCOperand::CreateImm(imm));
 
   return Success;
@@ -1526,7 +1510,7 @@ static DecodeStatus DecodeSystemPStateInstruction(llvm::MCInst &Inst,
 
   bool ValidNamed;
   (void)AArch64PState::PStateMapper().toString(pstate_field, ValidNamed);
-  
+
   return ValidNamed ? Success : Fail;
 }
 
@@ -1548,7 +1532,7 @@ static DecodeStatus DecodeTestAndBranch(llvm::MCInst &Inst, uint32_t insn,
   else
     DecodeGPR64RegisterClass(Inst, Rt, Addr, Decoder);
   Inst.addOperand(MCOperand::CreateImm(bit));
-  if (!Dis->tryAddingSymbolicOperand(Inst, dst << 2, Addr, true, 0, 4))
+  if (!Dis->tryAddingSymbolicOperand(Inst, dst * 4, Addr, true, 0, 4))
     Inst.addOperand(MCOperand::CreateImm(dst));
 
   return Success;

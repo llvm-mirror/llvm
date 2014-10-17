@@ -12,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 #include "Mips16ISelLowering.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
+#include "Mips16HardFloatInfo.h"
+#include "MipsMachineFunction.h"
 #include "MipsRegisterInfo.h"
 #include "MipsTargetMachine.h"
 #include "llvm/ADT/StringRef.h"
@@ -118,7 +120,7 @@ static const Mips16IntrinsicHelperType Mips16IntrinsicHelper[] = {
   {"truncf", "__mips16_call_stub_sf_1"},
 };
 
-Mips16TargetLowering::Mips16TargetLowering(MipsTargetMachine &TM,
+Mips16TargetLowering::Mips16TargetLowering(const MipsTargetMachine &TM,
                                            const MipsSubtarget &STI)
     : MipsTargetLowering(TM, STI) {
 
@@ -151,7 +153,7 @@ Mips16TargetLowering::Mips16TargetLowering(MipsTargetMachine &TM,
 }
 
 const MipsTargetLowering *
-llvm::createMips16TargetLowering(MipsTargetMachine &TM,
+llvm::createMips16TargetLowering(const MipsTargetMachine &TM,
                                  const MipsSubtarget &STI) {
   return new Mips16TargetLowering(TM, STI);
 }
@@ -320,7 +322,7 @@ unsigned int Mips16TargetLowering::getMips16HelperFunctionStubNumber
 }
 
 //
-// prefixs are attached to stub numbers depending on the return type .
+// Prefixes are attached to stub numbers depending on the return type.
 // return type: float  sf_
 //              double df_
 //              single complex sc_
@@ -331,17 +333,16 @@ unsigned int Mips16TargetLowering::getMips16HelperFunctionStubNumber
 // The full name of a helper function is__mips16_call_stub +
 //    return type dependent prefix + stub number
 //
-//
-// This is something that probably should be in a different source file and
-// perhaps done differently but my main purpose is to not waste runtime
+// FIXME: This is something that probably should be in a different source file
+// and perhaps done differently but my main purpose is to not waste runtime
 // on something that we can enumerate in the source. Another possibility is
 // to have a python script to generate these mapping tables. This will do
 // for now. There are a whole series of helper function mapping arrays, one
 // for each return type class as outlined above. There there are 11 possible
-//  entries. Ones with 0 are ones which should never be selected
+// entries. Ones with 0 are ones which should never be selected.
 //
 // All the arrays are similar except for ones which return neither
-// sf, df, sc, dc, in which only care about ones which have sf or df as a
+// sf, df, sc, dc, in which we only care about ones which have sf or df as a
 // first parameter.
 //
 #define P_ "__mips16_call_stub_"
@@ -423,7 +424,8 @@ void Mips16TargetLowering::
 getOpndList(SmallVectorImpl<SDValue> &Ops,
             std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
             bool IsPICCall, bool GlobalOrExternal, bool InternalLinkage,
-            CallLoweringInfo &CLI, SDValue Callee, SDValue Chain) const {
+            bool IsCallReloc, CallLoweringInfo &CLI, SDValue Callee,
+            SDValue Chain) const {
   SelectionDAG &DAG = CLI.DAG;
   MachineFunction &MF = DAG.getMachineFunction();
   MipsFunctionInfo *FuncInfo = MF.getInfo<MipsFunctionInfo>();
@@ -513,7 +515,8 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
   Ops.push_back(JumpTarget);
 
   MipsTargetLowering::getOpndList(Ops, RegsToPass, IsPICCall, GlobalOrExternal,
-                                  InternalLinkage, CLI, Callee, Chain);
+                                  InternalLinkage, IsCallReloc, CLI, Callee,
+                                  Chain);
 }
 
 MachineBasicBlock *Mips16TargetLowering::
