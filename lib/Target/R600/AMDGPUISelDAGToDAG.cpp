@@ -487,9 +487,16 @@ SDNode *AMDGPUDAGToDAGISel::Select(SDNode *N) {
   case AMDGPUISD::DIV_SCALE: {
     return SelectDIV_SCALE(N);
   }
+  case ISD::CopyToReg: {
+    const SITargetLowering& Lowering =
+      *static_cast<const SITargetLowering*>(getTargetLowering());
+    Lowering.legalizeTargetIndependentNode(N, *CurDAG);
+    break;
+  }
   case ISD::ADDRSPACECAST:
     return SelectAddrSpaceCast(N);
   }
+
   return SelectCode(N);
 }
 
@@ -780,6 +787,21 @@ bool AMDGPUDAGToDAGISel::SelectDS1Addr1Offset(SDValue Addr, SDValue &Base,
     }
   }
 
+  // If we have a constant address, prefer to put the constant into the
+  // offset. This can save moves to load the constant address since multiple
+  // operations can share the zero base address register, and enables merging
+  // into read2 / write2 instructions.
+  if (const ConstantSDNode *CAddr = dyn_cast<ConstantSDNode>(Addr)) {
+    if (isUInt<16>(CAddr->getZExtValue())) {
+      SDValue Zero = CurDAG->getTargetConstant(0, MVT::i32);
+      MachineSDNode *MovZero = CurDAG->getMachineNode(AMDGPU::V_MOV_B32_e32,
+                                 SDLoc(Addr), MVT::i32, Zero);
+      Base = SDValue(MovZero, 0);
+      Offset = Addr;
+      return true;
+    }
+  }
+
   // default case
   Base = Addr;
   Offset = CurDAG->getTargetConstant(0, MVT::i16);
@@ -798,6 +820,23 @@ bool AMDGPUDAGToDAGISel::SelectDS64Bit4ByteAligned(SDValue Addr, SDValue &Base,
     // (add n0, c0)
     if (isDSOffsetLegal(N0, DWordOffset1, 8)) {
       Base = N0;
+      Offset0 = CurDAG->getTargetConstant(DWordOffset0, MVT::i8);
+      Offset1 = CurDAG->getTargetConstant(DWordOffset1, MVT::i8);
+      return true;
+    }
+  }
+
+  if (const ConstantSDNode *CAddr = dyn_cast<ConstantSDNode>(Addr)) {
+    unsigned DWordOffset0 = CAddr->getZExtValue() / 4;
+    unsigned DWordOffset1 = DWordOffset0 + 1;
+    assert(4 * DWordOffset0 == CAddr->getZExtValue());
+
+    if (isUInt<8>(DWordOffset0) && isUInt<8>(DWordOffset1)) {
+      SDValue Zero = CurDAG->getTargetConstant(0, MVT::i32);
+      MachineSDNode *MovZero
+        = CurDAG->getMachineNode(AMDGPU::V_MOV_B32_e32,
+                                 SDLoc(Addr), MVT::i32, Zero);
+      Base = SDValue(MovZero, 0);
       Offset0 = CurDAG->getTargetConstant(DWordOffset0, MVT::i8);
       Offset1 = CurDAG->getTargetConstant(DWordOffset1, MVT::i8);
       return true;
@@ -905,21 +944,38 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
   return SelectMUBUFAddr64(Addr, SRsrc, VAddr, Offset);
 }
 
+static SDValue buildSMovImm32(SelectionDAG *DAG, SDLoc DL, uint64_t Val) {
+  SDValue K = DAG->getTargetConstant(Val, MVT::i32);
+  return SDValue(DAG->getMachineNode(AMDGPU::S_MOV_B32, DL, MVT::i32, K), 0);
+}
+
 static SDValue buildRSRC(SelectionDAG *DAG, SDLoc DL, SDValue Ptr,
                          uint32_t RsrcDword1, uint64_t RsrcDword2And3) {
 
   SDValue PtrLo = DAG->getTargetExtractSubreg(AMDGPU::sub0, DL, MVT::i32, Ptr);
   SDValue PtrHi = DAG->getTargetExtractSubreg(AMDGPU::sub1, DL, MVT::i32, Ptr);
-  if (RsrcDword1)
+  if (RsrcDword1) {
     PtrHi = SDValue(DAG->getMachineNode(AMDGPU::S_OR_B32, DL, MVT::i32, PtrHi,
                                     DAG->getConstant(RsrcDword1, MVT::i32)), 0);
+  }
 
-  SDValue DataLo = DAG->getTargetConstant(
-      RsrcDword2And3 & APInt::getAllOnesValue(32).getZExtValue(), MVT::i32);
-  SDValue DataHi = DAG->getTargetConstant(RsrcDword2And3 >> 32, MVT::i32);
+  SDValue DataLo = buildSMovImm32(DAG, DL,
+                                  RsrcDword2And3 & UINT64_C(0xFFFFFFFF));
+  SDValue DataHi = buildSMovImm32(DAG, DL, RsrcDword2And3 >> 32);
 
-  const SDValue Ops[] = { PtrLo, PtrHi, DataLo, DataHi };
-  return SDValue(DAG->getMachineNode(AMDGPU::SI_BUFFER_RSRC, DL,
+  const SDValue Ops[] = {
+    DAG->getTargetConstant(AMDGPU::SReg_128RegClassID, MVT::i32),
+    PtrLo,
+    DAG->getTargetConstant(AMDGPU::sub0, MVT::i32),
+    PtrHi,
+    DAG->getTargetConstant(AMDGPU::sub1, MVT::i32),
+    DataLo,
+    DAG->getTargetConstant(AMDGPU::sub2, MVT::i32),
+    DataHi,
+    DAG->getTargetConstant(AMDGPU::sub3, MVT::i32)
+  };
+
+  return SDValue(DAG->getMachineNode(AMDGPU::REG_SEQUENCE, DL,
                                      MVT::v4i32, Ops), 0);
 }
 

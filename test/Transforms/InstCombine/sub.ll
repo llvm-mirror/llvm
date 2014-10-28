@@ -142,8 +142,9 @@ define i32 @test15(i32 %A, i32 %B) {
 	%D = srem i32 %B, %C
 	ret i32 %D
 ; CHECK-LABEL: @test15(
-; CHECK: %D = srem i32 %B, %A
-; CHECK: ret i32 %D
+; CHECK:      %[[sub:.*]] = sub i32 0, %A
+; CHECK-NEXT: %[[rem:.*]] = srem i32 %B, %[[sub]]
+; CHECK: ret i32 %[[rem]]
 }
 
 define i32 @test16(i32 %A) {
@@ -528,4 +529,14 @@ define i32 @test44(i32 %x) {
 ; CHECK-LABEL: @test44(
 ; CHECK-NEXT: [[ADD:%.*]] = add nsw i32 %x, -32768
 ; CHECK: ret i32 [[ADD]]
+}
+
+define i32 @test45(i32 %x, i32 %y) {
+  %or = or i32 %x, %y
+  %xor = xor i32 %x, %y
+  %sub = sub i32 %or, %xor
+  ret i32 %sub
+; CHECK-LABEL: @test45(
+; CHECK-NEXT: %sub = and i32 %x, %y
+; CHECK: ret i32 %sub
 }

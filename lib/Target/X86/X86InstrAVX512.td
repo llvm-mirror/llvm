@@ -2,9 +2,10 @@
 // EltVT).  These are things like the register class for the writemask, etc.
 // The idea is to pass one of these as the template argument rather than the
 // individual arguments.
-class X86VectorVTInfo<int NumElts, ValueType EltVT, RegisterClass rc,
+class X86VectorVTInfo<int numelts, ValueType EltVT, RegisterClass rc,
                       string suffix = ""> {
   RegisterClass RC = rc;
+  int NumElts = numelts;
 
   // Corresponding mask register class.
   RegisterClass KRC = !cast<RegisterClass>("VK" # NumElts);
@@ -72,6 +73,11 @@ class X86VectorVTInfo<int NumElts, ValueType EltVT, RegisterClass rc,
 
   // The string to specify embedded broadcast in assembly.
   string BroadcastStr = "{1to" # NumElts # "}";
+
+  // 8-bit compressed displacement tuple/subvector format.  This is only
+  // defined for NumElts <= 8.
+  CD8VForm CD8TupleForm = !if (!eq (!srl(NumElts, 4), 0),
+                               !cast<CD8VForm>("CD8VT" # NumElts), ?);
 
   SubRegIndex SubRegIdx = !if (!eq (Size, 128), sub_xmm,
                           !if (!eq (Size, 256), sub_ymm, ?));
@@ -341,15 +347,15 @@ def : Pat<(v8f64 immAllZerosV), (AVX512_512_SET0)>;
 // AVX-512 - VECTOR INSERT
 //
 
-multiclass vinsert_for_size<int Opcode,
-                             X86VectorVTInfo From, X86VectorVTInfo To,
-                             X86VectorVTInfo AltFrom, X86VectorVTInfo AltTo,
-                             PatFrag vinsert_insert,
-                             SDNodeXForm INSERT_get_vinsert_imm> {
+multiclass vinsert_for_size_no_alt<int Opcode,
+                                   X86VectorVTInfo From, X86VectorVTInfo To,
+                                   PatFrag vinsert_insert,
+                                   SDNodeXForm INSERT_get_vinsert_imm> {
   let hasSideEffects = 0, ExeDomain = To.ExeDomain in {
     def rr : AVX512AIi8<Opcode, MRMSrcReg, (outs VR512:$dst),
                (ins VR512:$src1, From.RC:$src2, i8imm:$src3),
-               "vinsert" # From.EltTypeName # "x4\t{$src3, $src2, $src1, $dst|"
+               "vinsert" # From.EltTypeName # "x" # From.NumElts #
+                                                "\t{$src3, $src2, $src1, $dst|"
                                                    "$dst, $src1, $src2, $src3}",
                [(set To.RC:$dst, (vinsert_insert:$src3 (To.VT VR512:$src1),
                                                        (From.VT From.RC:$src2),
@@ -359,36 +365,60 @@ multiclass vinsert_for_size<int Opcode,
     let mayLoad = 1 in
     def rm : AVX512AIi8<Opcode, MRMSrcMem, (outs VR512:$dst),
                (ins VR512:$src1, From.MemOp:$src2, i8imm:$src3),
-               "vinsert" # From.EltTypeName # "x4\t{$src3, $src2, $src1, $dst|"
+               "vinsert" # From.EltTypeName # "x" # From.NumElts #
+                                                "\t{$src3, $src2, $src1, $dst|"
                                                    "$dst, $src1, $src2, $src3}",
-               []>, EVEX_4V, EVEX_V512, EVEX_CD8<From.EltSize, CD8VT4>;
+               []>,
+             EVEX_4V, EVEX_V512, EVEX_CD8<From.EltSize, From.CD8TupleForm>;
   }
-
-  // Codegen pattern with the alternative types, e.g. v2i64 -> v8i64 for
-  // vinserti32x4
-  def : Pat<(vinsert_insert:$ins
-               (AltTo.VT VR512:$src1), (AltFrom.VT From.RC:$src2), (iPTR imm)),
-            (AltTo.VT (!cast<Instruction>(NAME # From.EltSize # "x4rr")
-                          VR512:$src1, From.RC:$src2,
-                          (INSERT_get_vinsert_imm VR512:$ins)))>;
 }
 
-multiclass vinsert_for_type<ValueType EltVT32, int Opcode32,
-                            ValueType EltVT64, int Opcode64> {
-  defm NAME # "32x4" : vinsert_for_size<Opcode32,
+multiclass vinsert_for_size<int Opcode,
+                            X86VectorVTInfo From, X86VectorVTInfo To,
+                            X86VectorVTInfo AltFrom, X86VectorVTInfo AltTo,
+                            PatFrag vinsert_insert,
+                            SDNodeXForm INSERT_get_vinsert_imm> :
+  vinsert_for_size_no_alt<Opcode, From, To,
+                          vinsert_insert, INSERT_get_vinsert_imm> {
+  // Codegen pattern with the alternative types, e.g. v2i64 -> v8i64 for
+  // vinserti32x4.  Only add this if 64x2 and friends are not supported
+  // natively via AVX512DQ.
+  let Predicates = [NoDQI] in
+    def : Pat<(vinsert_insert:$ins
+                 (AltTo.VT VR512:$src1), (AltFrom.VT From.RC:$src2), (iPTR imm)),
+              (AltTo.VT (!cast<Instruction>(NAME # From.EltSize # "x4rr")
+                            VR512:$src1, From.RC:$src2,
+                            (INSERT_get_vinsert_imm VR512:$ins)))>;
+}
+
+multiclass vinsert_for_type<ValueType EltVT32, int Opcode128,
+                            ValueType EltVT64, int Opcode256> {
+  defm NAME # "32x4" : vinsert_for_size<Opcode128,
                                  X86VectorVTInfo< 4, EltVT32, VR128X>,
                                  X86VectorVTInfo<16, EltVT32, VR512>,
                                  X86VectorVTInfo< 2, EltVT64, VR128X>,
                                  X86VectorVTInfo< 8, EltVT64, VR512>,
                                  vinsert128_insert,
                                  INSERT_get_vinsert128_imm>;
-  defm NAME # "64x4" : vinsert_for_size<Opcode64,
+  let Predicates = [HasDQI] in
+    defm NAME # "64x2" : vinsert_for_size_no_alt<Opcode128,
+                                 X86VectorVTInfo< 2, EltVT64, VR128X>,
+                                 X86VectorVTInfo< 8, EltVT64, VR512>,
+                                 vinsert128_insert,
+                                 INSERT_get_vinsert128_imm>, VEX_W;
+  defm NAME # "64x4" : vinsert_for_size<Opcode256,
                                  X86VectorVTInfo< 4, EltVT64, VR256X>,
                                  X86VectorVTInfo< 8, EltVT64, VR512>,
                                  X86VectorVTInfo< 8, EltVT32, VR256>,
                                  X86VectorVTInfo<16, EltVT32, VR512>,
                                  vinsert256_insert,
                                  INSERT_get_vinsert256_imm>, VEX_W;
+  let Predicates = [HasDQI] in
+    defm NAME # "32x8" : vinsert_for_size_no_alt<Opcode256,
+                                 X86VectorVTInfo< 8, EltVT32, VR256X>,
+                                 X86VectorVTInfo<16, EltVT32, VR512>,
+                                 vinsert256_insert,
+                                 INSERT_get_vinsert256_imm>;
 }
 
 defm VINSERTF : vinsert_for_type<f32, 0x18, f64, 0x1a>;
@@ -2517,7 +2547,7 @@ multiclass avx512_binop_rm<bits<8> opc, string OpcodeStr, SDNode OpNode,
                     itins.rr, IsCommutable>,
             AVX512BIBase, EVEX_4V;
 
-  let mayLoad = 1 in {
+  let mayLoad = 1 in
     defm rm : AVX512_maskable<opc, MRMSrcMem, _, (outs _.RC:$dst),
                     (ins _.RC:$src1, _.MemOp:$src2), OpcodeStr##_.Suffix,
                     "$src2, $src1", "$src1, $src2",
@@ -2525,6 +2555,13 @@ multiclass avx512_binop_rm<bits<8> opc, string OpcodeStr, SDNode OpNode,
                                   (bitconvert (_.LdFrag addr:$src2)))),
                     itins.rm>,
               AVX512BIBase, EVEX_4V;
+}
+
+multiclass avx512_binop_rmb<bits<8> opc, string OpcodeStr, SDNode OpNode,
+                            X86VectorVTInfo _, OpndItins itins,
+                            bit IsCommutable = 0> :
+           avx512_binop_rm<opc, OpcodeStr, OpNode, _, itins, IsCommutable> {
+  let mayLoad = 1 in
     defm rmb : AVX512_maskable<opc, MRMSrcMem, _, (outs _.RC:$dst),
                     (ins _.RC:$src1, _.ScalarMemOp:$src2), OpcodeStr##_.Suffix,
                     "${src2}"##_.BroadcastStr##", $src1",
@@ -2534,7 +2571,95 @@ multiclass avx512_binop_rm<bits<8> opc, string OpcodeStr, SDNode OpNode,
                                       (_.ScalarLdFrag addr:$src2)))),
                     itins.rm>,
                AVX512BIBase, EVEX_4V, EVEX_B;
+}
+
+multiclass avx512_binop_rm_vl<bits<8> opc, string OpcodeStr, SDNode OpNode,
+                              AVX512VLVectorVTInfo VTInfo, OpndItins itins,
+                              Predicate prd, bit IsCommutable = 0> {
+  let Predicates = [prd] in
+    defm Z : avx512_binop_rm<opc, OpcodeStr, OpNode, VTInfo.info512, itins,
+                             IsCommutable>, EVEX_V512;
+
+  let Predicates = [prd, HasVLX] in {
+    defm Z256 : avx512_binop_rm<opc, OpcodeStr, OpNode, VTInfo.info256, itins,
+                             IsCommutable>, EVEX_V256;
+    defm Z128 : avx512_binop_rm<opc, OpcodeStr, OpNode, VTInfo.info128, itins,
+                             IsCommutable>, EVEX_V128;
   }
+}
+
+multiclass avx512_binop_rmb_vl<bits<8> opc, string OpcodeStr, SDNode OpNode,
+                               AVX512VLVectorVTInfo VTInfo, OpndItins itins,
+                               Predicate prd, bit IsCommutable = 0> {
+  let Predicates = [prd] in
+    defm Z : avx512_binop_rmb<opc, OpcodeStr, OpNode, VTInfo.info512, itins,
+                             IsCommutable>, EVEX_V512;
+
+  let Predicates = [prd, HasVLX] in {
+    defm Z256 : avx512_binop_rmb<opc, OpcodeStr, OpNode, VTInfo.info256, itins,
+                             IsCommutable>, EVEX_V256;
+    defm Z128 : avx512_binop_rmb<opc, OpcodeStr, OpNode, VTInfo.info128, itins,
+                             IsCommutable>, EVEX_V128;
+  }
+}
+
+multiclass avx512_binop_rm_vl_q<bits<8> opc, string OpcodeStr, SDNode OpNode,
+                                OpndItins itins, Predicate prd,
+                                bit IsCommutable = 0> {
+  defm NAME : avx512_binop_rmb_vl<opc, OpcodeStr, OpNode, avx512vl_i64_info,
+                               itins, prd, IsCommutable>,
+                               VEX_W, EVEX_CD8<64, CD8VF>;
+}
+
+multiclass avx512_binop_rm_vl_d<bits<8> opc, string OpcodeStr, SDNode OpNode,
+                                OpndItins itins, Predicate prd,
+                                bit IsCommutable = 0> {
+  defm NAME : avx512_binop_rmb_vl<opc, OpcodeStr, OpNode, avx512vl_i32_info,
+                               itins, prd, IsCommutable>, EVEX_CD8<32, CD8VF>;
+}
+
+multiclass avx512_binop_rm_vl_w<bits<8> opc, string OpcodeStr, SDNode OpNode,
+                                OpndItins itins, Predicate prd,
+                                bit IsCommutable = 0> {
+  defm NAME : avx512_binop_rm_vl<opc, OpcodeStr, OpNode, avx512vl_i16_info,
+                              itins, prd, IsCommutable>, EVEX_CD8<16, CD8VF>;
+}
+
+multiclass avx512_binop_rm_vl_b<bits<8> opc, string OpcodeStr, SDNode OpNode,
+                                OpndItins itins, Predicate prd,
+                                bit IsCommutable = 0> {
+  defm NAME : avx512_binop_rm_vl<opc, OpcodeStr, OpNode, avx512vl_i8_info,
+                              itins, prd, IsCommutable>, EVEX_CD8<8, CD8VF>;
+}
+
+multiclass avx512_binop_rm_vl_dq<bits<8> opc_d, bits<8> opc_q, string OpcodeStr,
+                                 SDNode OpNode, OpndItins itins, Predicate prd,
+                                 bit IsCommutable = 0> {
+  defm Q : avx512_binop_rm_vl_q<opc_q, OpcodeStr, OpNode, itins, prd,
+                                   IsCommutable>;
+
+  defm D : avx512_binop_rm_vl_d<opc_d, OpcodeStr, OpNode, itins, prd,
+                                   IsCommutable>;
+}
+
+multiclass avx512_binop_rm_vl_bw<bits<8> opc_b, bits<8> opc_w, string OpcodeStr,
+                                 SDNode OpNode, OpndItins itins, Predicate prd,
+                                 bit IsCommutable = 0> {
+  defm W : avx512_binop_rm_vl_w<opc_w, OpcodeStr, OpNode, itins, prd,
+                                   IsCommutable>;
+
+  defm B : avx512_binop_rm_vl_b<opc_b, OpcodeStr, OpNode, itins, prd,
+                                   IsCommutable>;
+}
+
+multiclass avx512_binop_rm_vl_all<bits<8> opc_b, bits<8> opc_w,
+                                  bits<8> opc_d, bits<8> opc_q,
+                                  string OpcodeStr, SDNode OpNode,
+                                  OpndItins itins, bit IsCommutable = 0> {
+  defm NAME : avx512_binop_rm_vl_dq<opc_d, opc_q, OpcodeStr, OpNode,
+                                    itins, HasAVX512, IsCommutable>,
+              avx512_binop_rm_vl_bw<opc_b, opc_w, OpcodeStr, OpNode,
+                                    itins, HasBWI, IsCommutable>;
 }
 
 multiclass avx512_binop_rm2<bits<8> opc, string OpcodeStr, ValueType DstVT,
@@ -2594,20 +2719,16 @@ multiclass avx512_binop_rm2<bits<8> opc, string OpcodeStr, ValueType DstVT,
   }
 }
 
-defm VPADDDZ : avx512_binop_rm<0xFE, "vpadd", add, v16i32_info,
-                   SSE_INTALU_ITINS_P, 1>, EVEX_V512, EVEX_CD8<32, CD8VF>;
-
-defm VPSUBDZ : avx512_binop_rm<0xFA, "vpsub", sub, v16i32_info,
-                   SSE_INTALU_ITINS_P, 0>, EVEX_V512, EVEX_CD8<32, CD8VF>;
-
-defm VPMULLDZ : avx512_binop_rm<0x40, "vpmull", mul, v16i32_info,
-                   SSE_INTALU_ITINS_P, 1>, T8PD, EVEX_V512, EVEX_CD8<32, CD8VF>;
-
-defm VPADDQZ : avx512_binop_rm<0xD4, "vpadd", add, v8i64_info,
-                   SSE_INTALU_ITINS_P, 1>, EVEX_CD8<64, CD8VF>, EVEX_V512, VEX_W;
-
-defm VPSUBQZ : avx512_binop_rm<0xFB, "vpsub", sub, v8i64_info,
-                   SSE_INTALU_ITINS_P, 0>, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+defm VPADD : avx512_binop_rm_vl_all<0xFC, 0xFD, 0xFE, 0xD4, "vpadd", add,
+                                    SSE_INTALU_ITINS_P, 1>;
+defm VPSUB : avx512_binop_rm_vl_all<0xF8, 0xF9, 0xFA, 0xFB, "vpsub", sub,
+                                    SSE_INTALU_ITINS_P, 0>;
+defm VPMULLD : avx512_binop_rm_vl_d<0x40, "vpmull", mul,
+                                   SSE_INTALU_ITINS_P, HasAVX512, 1>, T8PD;
+defm VPMULLW : avx512_binop_rm_vl_w<0xD5, "vpmull", mul,
+                                   SSE_INTALU_ITINS_P, HasBWI, 1>;
+defm VPMULLQ : avx512_binop_rm_vl_q<0x40, "vpmull", mul,
+                                   SSE_INTALU_ITINS_P, HasDQI, 1>, T8PD;
 
 defm VPMULDQZ : avx512_binop_rm2<0x28, "vpmuldq", v8i64, v16i32, VK8WM, VR512,
                    memopv8i64, i512mem, loadi64, i64mem, "{1to8}",
@@ -2628,33 +2749,33 @@ def : Pat<(v8i64 (int_x86_avx512_mask_pmul_dq_512 (v16i32 VR512:$src1),
            (v16i32 VR512:$src2), (bc_v8i64 (v16i32 immAllZerosV)), (i8 -1))),
           (VPMULDQZrr VR512:$src1, VR512:$src2)>;
 
-defm VPMAXUDZ : avx512_binop_rm<0x3F, "vpmaxu", X86umax, v16i32_info,
-                   SSE_INTALU_ITINS_P, 1>,
-                   T8PD, EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPMAXUQZ : avx512_binop_rm<0x3F, "vpmaxu", X86umax, v8i64_info,
-                   SSE_INTALU_ITINS_P, 0>,
-                   T8PD, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+defm VPMAXSB : avx512_binop_rm_vl_b<0x3C, "vpmaxs", X86smax,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>, T8PD;
+defm VPMAXSW : avx512_binop_rm_vl_w<0xEE, "vpmaxs", X86smax,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>;
+defm VPMAXS : avx512_binop_rm_vl_dq<0x3D, 0x3D, "vpmaxs", X86smax,
+                                     SSE_INTALU_ITINS_P, HasAVX512, 1>, T8PD;
 
-defm VPMAXSDZ : avx512_binop_rm<0x3D, "vpmaxs", X86smax, v16i32_info,
-                   SSE_INTALU_ITINS_P, 1>,
-                   T8PD, EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPMAXSQZ : avx512_binop_rm<0x3D, "vpmaxs", X86smax, v8i64_info,
-                   SSE_INTALU_ITINS_P, 0>,
-                   T8PD, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+defm VPMAXUB : avx512_binop_rm_vl_b<0xDE, "vpmaxu", X86umax,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>;
+defm VPMAXUW : avx512_binop_rm_vl_w<0x3E, "vpmaxu", X86umax,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>, T8PD;
+defm VPMAXU : avx512_binop_rm_vl_dq<0x3F, 0x3F, "vpmaxu", X86umax,
+                                     SSE_INTALU_ITINS_P, HasAVX512, 1>, T8PD;
 
-defm VPMINUDZ : avx512_binop_rm<0x3B, "vpminu", X86umin, v16i32_info,
-                   SSE_INTALU_ITINS_P, 1>,
-                   T8PD, EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPMINUQZ : avx512_binop_rm<0x3B, "vpminu", X86umin, v8i64_info,
-                   SSE_INTALU_ITINS_P, 0>,
-                   T8PD, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+defm VPMINSB : avx512_binop_rm_vl_b<0x38, "vpmins", X86smin,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>, T8PD;
+defm VPMINSW : avx512_binop_rm_vl_w<0xEA, "vpmins", X86smin,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>;
+defm VPMINS : avx512_binop_rm_vl_dq<0x39, 0x39, "vpmins", X86smin,
+                                     SSE_INTALU_ITINS_P, HasAVX512, 1>, T8PD;
 
-defm VPMINSDZ : avx512_binop_rm<0x39, "vpmins", X86smin, v16i32_info,
-                   SSE_INTALU_ITINS_P, 1>,
-                   T8PD, EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPMINSQZ : avx512_binop_rm<0x39, "vpmins", X86smin, v8i64_info,
-                   SSE_INTALU_ITINS_P, 0>,
-                   T8PD, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+defm VPMINUB : avx512_binop_rm_vl_b<0xDA, "vpminu", X86umin,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>;
+defm VPMINUW : avx512_binop_rm_vl_w<0x3A, "vpminu", X86umin,
+                                     SSE_INTALU_ITINS_P, HasBWI, 1>, T8PD;
+defm VPMINU : avx512_binop_rm_vl_dq<0x3B, 0x3B, "vpminu", X86umin,
+                                     SSE_INTALU_ITINS_P, HasAVX512, 1>, T8PD;
 
 def : Pat <(v16i32 (int_x86_avx512_mask_pmaxs_d_512 (v16i32 VR512:$src1),
                     (v16i32 VR512:$src2), (v16i32 immAllZerosV), (i16 -1))),
@@ -2785,22 +2906,14 @@ def : Pat<(v8i64 (X86VPermilpi VR512:$src1, (i8 imm:$imm))),
 // AVX-512  Logical Instructions
 //===----------------------------------------------------------------------===//
 
-defm VPANDDZ : avx512_binop_rm<0xDB, "vpand", and, v16i32_info, SSE_BIT_ITINS_P, 1>,
-                      EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPANDQZ : avx512_binop_rm<0xDB, "vpand", and, v8i64_info, SSE_BIT_ITINS_P, 1>,
-                      EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
-defm VPORDZ  : avx512_binop_rm<0xEB, "vpor", or, v16i32_info, SSE_BIT_ITINS_P, 1>,
-                      EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPORQZ  : avx512_binop_rm<0xEB, "vpor", or, v8i64_info, SSE_BIT_ITINS_P, 1>,
-                      EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
-defm VPXORDZ : avx512_binop_rm<0xEF, "vpxor", xor, v16i32_info, SSE_BIT_ITINS_P, 1>,
-                      EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPXORQZ : avx512_binop_rm<0xEF, "vpxor", xor, v8i64_info, SSE_BIT_ITINS_P, 1>,
-                      EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
-defm VPANDNDZ : avx512_binop_rm<0xDF, "vpandn", X86andnp, v16i32_info,
-                      SSE_BIT_ITINS_P, 0>, EVEX_V512, EVEX_CD8<32, CD8VF>;
-defm VPANDNQZ : avx512_binop_rm<0xDF, "vpandn", X86andnp, v8i64_info,
-                      SSE_BIT_ITINS_P, 0>, EVEX_V512, VEX_W, EVEX_CD8<64, CD8VF>;
+defm VPAND : avx512_binop_rm_vl_dq<0xDB, 0xDB, "vpand", and,
+                                  SSE_INTALU_ITINS_P, HasAVX512, 1>;
+defm VPOR : avx512_binop_rm_vl_dq<0xEB, 0xEB, "vpor", or,
+                                  SSE_INTALU_ITINS_P, HasAVX512, 1>;
+defm VPXOR : avx512_binop_rm_vl_dq<0xEF, 0xEF, "vpxor", xor,
+                                  SSE_INTALU_ITINS_P, HasAVX512, 1>;
+defm VPANDN : avx512_binop_rm_vl_dq<0xDF, 0xDF, "vpandn", X86andnp,
+                                  SSE_INTALU_ITINS_P, HasAVX512, 1>;
 
 //===----------------------------------------------------------------------===//
 // AVX-512  FP arithmetic

@@ -97,20 +97,19 @@ static bool canShrink(MachineInstr &MI, const SIInstrInfo *TII,
   if (Src1 && (!isVGPR(Src1, TRI, MRI) || (Src1Mod && Src1Mod->getImm() != 0)))
     return false;
 
-  // We don't need to check src0, all input types are legal, so just make
-  // sure src0 isn't using any modifiers.
-  const MachineOperand *Src0Mod =
-      TII->getNamedOperand(MI, AMDGPU::OpName::src0_modifiers);
-  if (Src0Mod && Src0Mod->getImm() != 0)
+  // We don't need to check src0, all input types are legal, so just make sure
+  // src0 isn't using any modifiers.
+  if (TII->hasModifiersSet(MI, AMDGPU::OpName::src0_modifiers))
     return false;
 
   // Check output modifiers
-  const MachineOperand *Omod = TII->getNamedOperand(MI, AMDGPU::OpName::omod);
-  if (Omod && Omod->getImm() != 0)
+  if (TII->hasModifiersSet(MI, AMDGPU::OpName::omod))
     return false;
 
-  const MachineOperand *Clamp = TII->getNamedOperand(MI, AMDGPU::OpName::clamp);
-  return !Clamp || Clamp->getImm() == 0;
+  if (TII->hasModifiersSet(MI, AMDGPU::OpName::clamp))
+    return false;
+
+  return true;
 }
 
 /// \brief This function checks \p MI for operands defined by a move immediate
@@ -131,7 +130,7 @@ static void foldImmediates(MachineInstr &MI, const SIInstrInfo *TII,
 
   // Only one literal constant is allowed per instruction, so if src0 is a
   // literal constant then we can't do any folding.
-  if (Src0->isImm() && TII->isLiteralConstant(*Src0))
+  if ((Src0->isImm() || Src0->isFPImm()) && TII->isLiteralConstant(*Src0))
     return;
 
 
@@ -153,10 +152,9 @@ static void foldImmediates(MachineInstr &MI, const SIInstrInfo *TII,
         Src0->ChangeToImmediate(MovSrc.getImm());
         ConstantFolded = true;
       } else if (MovSrc.isFPImm()) {
-        const APFloat &APF = MovSrc.getFPImm()->getValueAPF();
-        if (&APF.getSemantics() == &APFloat::IEEEsingle) {
-          MRI.removeRegOperandFromUseList(Src0);
-          Src0->ChangeToImmediate(APF.bitcastToAPInt().getZExtValue());
+        const ConstantFP *CFP = MovSrc.getFPImm();
+        if (&CFP->getValueAPF().getSemantics() == &APFloat::IEEEsingle) {
+          Src0->ChangeToFPImmediate(CFP);
           ConstantFolded = true;
         }
       }

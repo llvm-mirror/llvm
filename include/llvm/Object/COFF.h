@@ -328,8 +328,7 @@ public:
     bool isAppdomainGlobal =
         getStorageClass() == COFF::IMAGE_SYM_CLASS_EXTERNAL &&
         getSectionNumber() == COFF::IMAGE_SYM_ABSOLUTE;
-    bool isOrdinarySection =
-        getStorageClass() == COFF::IMAGE_SYM_CLASS_STATIC && getValue() == 0;
+    bool isOrdinarySection = getStorageClass() == COFF::IMAGE_SYM_CLASS_STATIC;
     return isAppdomainGlobal || isOrdinarySection;
   }
 
@@ -655,6 +654,7 @@ public:
   }
 
   std::error_code getSectionName(const coff_section *Sec, StringRef &Res) const;
+  uint64_t getSectionSize(const coff_section *Sec) const;
   std::error_code getSectionContents(const coff_section *Sec,
                                      ArrayRef<uint8_t> &Res) const;
 

@@ -94,6 +94,7 @@ void PPCSubtarget::initializeEnvironment() {
   HasSPE = false;
   HasQPX = false;
   HasVSX = false;
+  HasP8Vector = false;
   HasFCPSGN = false;
   HasFSQRT = false;
   HasFRE = false;
@@ -155,8 +156,10 @@ void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
 
   // FIXME: For now, we disable VSX in little-endian mode until endian
   // issues in those instructions can be addressed.
-  if (IsLittleEndian)
+  if (IsLittleEndian) {
     HasVSX = false;
+    HasP8Vector = false;
+  }
 
   // Determine default ABI.
   if (TargetABI == PPC_ABI_UNKNOWN) {

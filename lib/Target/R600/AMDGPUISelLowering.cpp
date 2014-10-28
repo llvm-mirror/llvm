@@ -1918,18 +1918,6 @@ SDValue AMDGPUTargetLowering::LowerFP_TO_UINT(SDValue Op,
   return SDValue();
 }
 
-SDValue AMDGPUTargetLowering::ExpandSIGN_EXTEND_INREG(SDValue Op,
-                                                      unsigned BitsDiff,
-                                                      SelectionDAG &DAG) const {
-  MVT VT = Op.getSimpleValueType();
-  SDLoc DL(Op);
-  SDValue Shift = DAG.getConstant(BitsDiff, VT);
-  // Shift left by 'Shift' bits.
-  SDValue Shl = DAG.getNode(ISD::SHL, DL, VT, Op.getOperand(0), Shift);
-  // Signed shift Right by 'Shift' bits.
-  return DAG.getNode(ISD::SRA, DL, VT, Shl, Shift);
-}
-
 SDValue AMDGPUTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
                                                      SelectionDAG &DAG) const {
   EVT ExtraVT = cast<VTSDNode>(Op.getOperand(1))->getVT();
@@ -2146,11 +2134,8 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
       return DAG.getZeroExtendInReg(BitsFrom, DL, SmallVT);
     }
 
-    if (ConstantSDNode *CVal = dyn_cast<ConstantSDNode>(N->getOperand(0))) {
+    if (ConstantSDNode *CVal = dyn_cast<ConstantSDNode>(BitsFrom)) {
       if (Signed) {
-        // Avoid undefined left shift of a negative in the constant fold.
-        // TODO: I'm not sure what the behavior of the hardware is, this should
-        // probably follow that instead.
         return constantFoldBFE<int32_t>(DAG,
                                         CVal->getSExtValue(),
                                         OffsetVal,
@@ -2163,23 +2148,26 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
                                        WidthVal);
     }
 
-    APInt Demanded = APInt::getBitsSet(32,
-                                       OffsetVal,
-                                       OffsetVal + WidthVal);
-
     if ((OffsetVal + WidthVal) >= 32) {
       SDValue ShiftVal = DAG.getConstant(OffsetVal, MVT::i32);
       return DAG.getNode(Signed ? ISD::SRA : ISD::SRL, DL, MVT::i32,
                          BitsFrom, ShiftVal);
     }
 
-    APInt KnownZero, KnownOne;
-    TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
-                                          !DCI.isBeforeLegalizeOps());
-    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-    if (TLO.ShrinkDemandedConstant(BitsFrom, Demanded) ||
-        TLI.SimplifyDemandedBits(BitsFrom, Demanded, KnownZero, KnownOne, TLO)) {
-      DCI.CommitTargetLoweringOpt(TLO);
+    if (BitsFrom.hasOneUse()) {
+      APInt Demanded = APInt::getBitsSet(32,
+                                         OffsetVal,
+                                         OffsetVal + WidthVal);
+
+      APInt KnownZero, KnownOne;
+      TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
+                                            !DCI.isBeforeLegalizeOps());
+      const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+      if (TLO.ShrinkDemandedConstant(BitsFrom, Demanded) ||
+          TLI.SimplifyDemandedBits(BitsFrom, Demanded,
+                                   KnownZero, KnownOne, TLO)) {
+        DCI.CommitTargetLoweringOpt(TLO);
+      }
     }
 
     break;
@@ -2388,17 +2376,8 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
 
     unsigned BitWidth = 32;
     uint32_t Width = CWidth->getZExtValue() & 0x1f;
-    if (Width == 0) {
-      KnownZero = APInt::getAllOnesValue(BitWidth);
-      KnownOne = APInt::getNullValue(BitWidth);
-      return;
-    }
 
-    // FIXME: This could do a lot more. If offset is 0, should be the same as
-    // sign_extend_inreg implementation, but that involves duplicating it.
-    if (Opc == AMDGPUISD::BFE_I32)
-      KnownOne = APInt::getHighBitsSet(BitWidth, BitWidth - Width);
-    else
+    if (Opc == AMDGPUISD::BFE_U32)
       KnownZero = APInt::getHighBitsSet(BitWidth, BitWidth - Width);
 
     break;

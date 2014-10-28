@@ -1,7 +1,8 @@
+; RUN: opt < %s -instcombine -S | FileCheck %s
 ; This test makes sure that these instructions are properly eliminated.
 ; PR1822
 
-; RUN: opt < %s -instcombine -S | FileCheck %s
+target datalayout = "e-p:64:64-p1:16:16-p2:32:32:32-p3:64:64:64"
 
 define i32 @test1(i32 %A, i32 %B) {
         %C = select i1 false, i32 %A, i32 %B            
@@ -916,9 +917,9 @@ define i32 @select_icmp_eq_and_4096_0_or_4096(i32 %x, i32 %y) {
 }
 
 ; CHECK-LABEL: @select_icmp_eq_0_and_1_or_1(
-; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i64 %x, 1
-; CHECK-NEXT: [[ZEXT:%[a-z0-9]+]] = trunc i64 [[AND]] to i32
-; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 [[XOR]], %y
+; CHECK-NEXT: [[TRUNC:%.+]] = trunc i64 %x to i32
+; CHECK-NEXT: [[AND:%.+]] = and i32 [[TRUNC]], 1
+; CHECK-NEXT: [[OR:%.+]] = or i32 [[XOR]], %y
 ; CHECK-NEXT: ret i32 [[OR]]
 define i32 @select_icmp_eq_0_and_1_or_1(i64 %x, i32 %y) {
   %and = and i64 %x, 1
@@ -957,11 +958,11 @@ define i32 @select_icmp_ne_0_and_32_or_4096(i32 %x, i32 %y) {
 }
 
 ; CHECK-LABEL: @select_icmp_ne_0_and_1073741824_or_8(
-; CHECK-NEXT: [[LSHR:%[a-z0-9]+]] = lshr i32 %x, 27
-; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 [[LSHR]], 8
-; CHECK-NEXT: [[TRUNC:%[a-z0-9]+]] = trunc i32 [[AND]] to i8
-; CHECK-NEXT: [[XOR:%[a-z0-9]+]] = xor i8 [[TRUNC]], 8
-; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i8 [[XOR]], %y
+; CHECK-NEXT: [[LSHR:%.+]] = lshr i32 %x, 27
+; CHECK-NEXT: [[TRUNC:%.+]] = trunc i32 [[LSHR]] to i8
+; CHECK-NEXT: [[AND:%.+]] = and i8 [[TRUNC]], 8
+; CHECK-NEXT: [[XOR:%.+]] = xor i8 [[AND]], 8
+; CHECK-NEXT: [[OR:%.+]] = or i8 [[XOR]], %y
 ; CHECK-NEXT: ret i8 [[OR]]
 define i8 @select_icmp_ne_0_and_1073741824_or_8(i32 %x, i8 %y) {
   %and = and i32 %x, 1073741824
@@ -1108,10 +1109,11 @@ define i32 @test65(i64 %x) {
   ret i32 %3
 
 ; CHECK-LABEL: @test65(
-; CHECK: and i64 %x, 16
-; CHECK: trunc i64 %1 to i32
-; CHECK: lshr exact i32 %2, 3
-; CHECK: xor i32 %3, 42
+; CHECK: %[[TRUNC:.*]] = trunc i64 %x to i32
+; CHECK: %[[LSHR:.*]] = lshr i32 %[[TRUNC]], 3
+; CHECK: %[[AND:.*]] = and i32 %[[LSHR]], 2
+; CHECK: %[[XOR:.*]] = xor i32 %[[AND]], 42
+; CHECK: ret i32 %[[XOR]]
 }
 
 define i32 @test66(i64 %x) {
@@ -1235,4 +1237,203 @@ define i32 @test75(i32 %x) {
 ; CHECK-NEXT: [[CMP:%[a-z0-9]+]] = icmp ult i32 %x, 68
 ; CHECK-NEXT: [[SEL:%[a-z0-9]+]] = select i1 [[CMP]], i32 68, i32 %x
 ; CHECK-NEXT: ret i32 [[SEL]]
+}
+
+@under_aligned = external global i32, align 1
+
+define i32 @test76(i1 %flag, i32* %x) {
+; The load here must not be speculated around the select. One side of the
+; select is trivially dereferencable but may have a lower alignment than the
+; load does.
+; CHECK-LABEL: @test76(
+; CHECK: store i32 0, i32* %x
+; CHECK: %[[P:.*]] = select i1 %flag, i32* @under_aligned, i32* %x
+; CHECK: load i32* %[[P]]
+
+  store i32 0, i32* %x
+  %p = select i1 %flag, i32* @under_aligned, i32* %x
+  %v = load i32* %p
+  ret i32 %v
+}
+
+declare void @scribble_on_i32(i32*)
+
+define i32 @test77(i1 %flag, i32* %x) {
+; The load here must not be speculated around the select. One side of the
+; select is trivially dereferencable but may have a lower alignment than the
+; load does.
+; CHECK-LABEL: @test77(
+; CHECK: %[[A:.*]] = alloca i32, align 1
+; CHECK: call void @scribble_on_i32(i32* %[[A]])
+; CHECK: store i32 0, i32* %x
+; CHECK: %[[P:.*]] = select i1 %flag, i32* %[[A]], i32* %x
+; CHECK: load i32* %[[P]]
+
+  %under_aligned = alloca i32, align 1
+  call void @scribble_on_i32(i32* %under_aligned)
+  store i32 0, i32* %x
+  %p = select i1 %flag, i32* %under_aligned, i32* %x
+  %v = load i32* %p
+  ret i32 %v
+}
+
+define i32 @test78(i1 %flag, i32* %x, i32* %y, i32* %z) {
+; Test that we can speculate the loads around the select even when we can't
+; fold the load completely away.
+; CHECK-LABEL: @test78(
+; CHECK:         %[[V1:.*]] = load i32* %x
+; CHECK-NEXT:    %[[V2:.*]] = load i32* %y
+; CHECK-NEXT:    %[[S:.*]] = select i1 %flag, i32 %[[V1]], i32 %[[V2]]
+; CHECK-NEXT:    ret i32 %[[S]]
+entry:
+  store i32 0, i32* %x
+  store i32 0, i32* %y
+  ; Block forwarding by storing to %z which could alias either %x or %y.
+  store i32 42, i32* %z
+  %p = select i1 %flag, i32* %x, i32* %y
+  %v = load i32* %p
+  ret i32 %v
+}
+
+define float @test79(i1 %flag, float* %x, i32* %y, i32* %z) {
+; Test that we can speculate the loads around the select even when we can't
+; fold the load completely away.
+; CHECK-LABEL: @test79(
+; CHECK:         %[[V1:.*]] = load float* %x
+; CHECK-NEXT:    %[[V2:.*]] = load float* %y
+; CHECK-NEXT:    %[[S:.*]] = select i1 %flag, float %[[V1]], float %[[V2]]
+; CHECK-NEXT:    ret float %[[S]]
+entry:
+  %x1 = bitcast float* %x to i32*
+  %y1 = bitcast i32* %y to float*
+  store i32 0, i32* %x1
+  store i32 0, i32* %y
+  ; Block forwarding by storing to %z which could alias either %x or %y.
+  store i32 42, i32* %z
+  %p = select i1 %flag, float* %x, float* %y1
+  %v = load float* %p
+  ret float %v
+}
+
+define i32 @test80(i1 %flag) {
+; Test that when we speculate the loads around the select they fold throug
+; load->load folding and load->store folding.
+; CHECK-LABEL: @test80(
+; CHECK:         %[[X:.*]] = alloca i32
+; CHECK-NEXT:    %[[Y:.*]] = alloca i32
+; CHECK:         %[[V:.*]] = load i32* %[[X]]
+; CHECK-NEXT:    store i32 %[[V]], i32* %[[Y]]
+; CHECK-NEXT:    ret i32 %[[V]]
+entry:
+  %x = alloca i32
+  %y = alloca i32
+  call void @scribble_on_i32(i32* %x)
+  call void @scribble_on_i32(i32* %y)
+  %tmp = load i32* %x
+  store i32 %tmp, i32* %y
+  %p = select i1 %flag, i32* %x, i32* %y
+  %v = load i32* %p
+  ret i32 %v
+}
+
+define float @test81(i1 %flag) {
+; Test that we can speculate the load around the select even though they use
+; differently typed pointers.
+; CHECK-LABEL: @test81(
+; CHECK:         %[[X:.*]] = alloca i32
+; CHECK-NEXT:    %[[Y:.*]] = alloca i32
+; CHECK:         %[[V:.*]] = load i32* %[[X]]
+; CHECK-NEXT:    store i32 %[[V]], i32* %[[Y]]
+; CHECK-NEXT:    %[[C:.*]] = bitcast i32 %[[V]] to float
+; CHECK-NEXT:    ret float %[[C]]
+entry:
+  %x = alloca float
+  %y = alloca i32
+  %x1 = bitcast float* %x to i32*
+  %y1 = bitcast i32* %y to float*
+  call void @scribble_on_i32(i32* %x1)
+  call void @scribble_on_i32(i32* %y)
+  %tmp = load i32* %x1
+  store i32 %tmp, i32* %y
+  %p = select i1 %flag, float* %x, float* %y1
+  %v = load float* %p
+  ret float %v
+}
+
+define i32 @test82(i1 %flag) {
+; Test that we can speculate the load around the select even though they use
+; differently typed pointers.
+; CHECK-LABEL: @test82(
+; CHECK:         %[[X:.*]] = alloca float
+; CHECK-NEXT:    %[[Y:.*]] = alloca i32
+; CHECK-NEXT:    %[[X1:.*]] = bitcast float* %[[X]] to i32*
+; CHECK-NEXT:    %[[Y1:.*]] = bitcast i32* %[[Y]] to float*
+; CHECK:         %[[V:.*]] = load float* %[[X]]
+; CHECK-NEXT:    store float %[[V]], float* %[[Y1]]
+; CHECK-NEXT:    %[[C:.*]] = bitcast float %[[V]] to i32
+; CHECK-NEXT:    ret i32 %[[C]]
+entry:
+  %x = alloca float
+  %y = alloca i32
+  %x1 = bitcast float* %x to i32*
+  %y1 = bitcast i32* %y to float*
+  call void @scribble_on_i32(i32* %x1)
+  call void @scribble_on_i32(i32* %y)
+  %tmp = load float* %x
+  store float %tmp, float* %y1
+  %p = select i1 %flag, i32* %x1, i32* %y
+  %v = load i32* %p
+  ret i32 %v
+}
+
+declare void @scribble_on_i64(i64*)
+
+define i8* @test83(i1 %flag) {
+; Test that we can speculate the load around the select even though they use
+; differently typed pointers and requires inttoptr casts.
+; CHECK-LABEL: @test83(
+; CHECK:         %[[X:.*]] = alloca i8*
+; CHECK-NEXT:    %[[Y:.*]] = alloca i8*
+; CHECK:         %[[V:.*]] = load i64* %[[X]]
+; CHECK-NEXT:    %[[C1:.*]] = inttoptr i64 %[[V]] to i8*
+; CHECK-NEXT:    store i8* %[[C1]], i8** %[[Y]]
+; CHECK-NEXT:    %[[C2:.*]] = inttoptr i64 %[[V]] to i8*
+; CHECK-NEXT:    %[[S:.*]] = select i1 %flag, i8* %[[C2]], i8* %[[C1]]
+; CHECK-NEXT:    ret i8* %[[S]]
+entry:
+  %x = alloca i8*
+  %y = alloca i64
+  %x1 = bitcast i8** %x to i64*
+  %y1 = bitcast i64* %y to i8**
+  call void @scribble_on_i64(i64* %x1)
+  call void @scribble_on_i64(i64* %y)
+  %tmp = load i64* %x1
+  store i64 %tmp, i64* %y
+  %p = select i1 %flag, i8** %x, i8** %y1
+  %v = load i8** %p
+  ret i8* %v
+}
+
+define i64 @test84(i1 %flag) {
+; Test that we can speculate the load around the select even though they use
+; differently typed pointers and requires a ptrtoint cast.
+; CHECK-LABEL: @test84(
+; CHECK:         %[[X:.*]] = alloca i8*
+; CHECK-NEXT:    %[[Y:.*]] = alloca i8*
+; CHECK:         %[[V:.*]] = load i8** %[[X]]
+; CHECK-NEXT:    store i8* %[[V]], i8** %[[Y]]
+; CHECK-NEXT:    %[[C:.*]] = ptrtoint i8* %[[V]] to i64
+; CHECK-NEXT:    ret i64 %[[C]]
+entry:
+  %x = alloca i8*
+  %y = alloca i64
+  %x1 = bitcast i8** %x to i64*
+  %y1 = bitcast i64* %y to i8**
+  call void @scribble_on_i64(i64* %x1)
+  call void @scribble_on_i64(i64* %y)
+  %tmp = load i8** %x
+  store i8* %tmp, i8** %y1
+  %p = select i1 %flag, i64* %x1, i64* %y
+  %v = load i64* %p
+  ret i64 %v
 }

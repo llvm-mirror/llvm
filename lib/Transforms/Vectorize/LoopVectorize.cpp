@@ -55,7 +55,9 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AliasSetTracker.h"
+#include "llvm/Analysis/AssumptionTracker.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
+#include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/LoopPass.h"
@@ -884,8 +886,12 @@ public:
                              LoopVectorizationLegality *Legal,
                              const TargetTransformInfo &TTI,
                              const DataLayout *DL, const TargetLibraryInfo *TLI,
-                             const Function *F, const LoopVectorizeHints *Hints)
-      : TheLoop(L), SE(SE), LI(LI), Legal(Legal), TTI(TTI), DL(DL), TLI(TLI), TheFunction(F), Hints(Hints) {}
+                             AssumptionTracker *AT, const Function *F,
+                             const LoopVectorizeHints *Hints)
+      : TheLoop(L), SE(SE), LI(LI), Legal(Legal), TTI(TTI), DL(DL), TLI(TLI),
+        TheFunction(F), Hints(Hints) {
+    CodeMetrics::collectEphemeralValues(L, AT, EphValues);
+  }
 
   /// Information about vectorization costs
   struct VectorizationFactor {
@@ -953,6 +959,9 @@ private:
     emitOptimizationRemarkAnalysis(TheFunction->getContext(), DEBUG_TYPE,
                                    *TheFunction, DL, Message.str());
   }
+
+  /// Values used only by @llvm.assume calls.
+  SmallPtrSet<const Value *, 32> EphValues;
 
   /// The loop that we evaluate.
   Loop *TheLoop;
@@ -1251,6 +1260,7 @@ struct LoopVectorize : public FunctionPass {
   BlockFrequencyInfo *BFI;
   TargetLibraryInfo *TLI;
   AliasAnalysis *AA;
+  AssumptionTracker *AT;
   bool DisableUnrolling;
   bool AlwaysVectorize;
 
@@ -1266,6 +1276,7 @@ struct LoopVectorize : public FunctionPass {
     BFI = &getAnalysis<BlockFrequencyInfo>();
     TLI = getAnalysisIfAvailable<TargetLibraryInfo>();
     AA = &getAnalysis<AliasAnalysis>();
+    AT = &getAnalysis<AssumptionTracker>();
 
     // Compute some weights outside of the loop over the loops. Compute this
     // using a BranchProbability to re-use its scaling math.
@@ -1360,8 +1371,7 @@ struct LoopVectorize : public FunctionPass {
 
     // Check the loop for a trip count threshold:
     // do not vectorize loops with a tiny trip count.
-    BasicBlock *Latch = L->getLoopLatch();
-    const unsigned TC = SE->getSmallConstantTripCount(L, Latch);
+    const unsigned TC = SE->getSmallConstantTripCount(L);
     if (TC > 0u && TC < TinyTripCountVectorThreshold) {
       DEBUG(dbgs() << "LV: Found a loop with a very small trip count. "
                    << "This loop is not worth vectorizing.");
@@ -1385,7 +1395,8 @@ struct LoopVectorize : public FunctionPass {
     }
 
     // Use the cost model.
-    LoopVectorizationCostModel CM(L, SE, LI, &LVL, *TTI, DL, TLI, F, &Hints);
+    LoopVectorizationCostModel CM(L, SE, LI, &LVL, *TTI, DL, TLI, AT, F,
+                                  &Hints);
 
     // Check the function attributes to find out if this function should be
     // optimized for size.
@@ -1472,6 +1483,7 @@ struct LoopVectorize : public FunctionPass {
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<AssumptionTracker>();
     AU.addRequiredID(LoopSimplifyID);
     AU.addRequiredID(LCSSAID);
     AU.addRequired<BlockFrequencyInfo>();
@@ -3362,6 +3374,7 @@ void InnerLoopVectorizer::vectorizeBlockInLoop(BasicBlock *BB, PhiVector *PV) {
       Intrinsic::ID ID = getIntrinsicIDForCall(CI, TLI);
       assert(ID && "Not an intrinsic call!");
       switch (ID) {
+      case Intrinsic::assume:
       case Intrinsic::lifetime_end:
       case Intrinsic::lifetime_start:
         scalarizeInstruction(it);
@@ -5352,7 +5365,7 @@ LoopVectorizationCostModel::selectVectorizationFactor(bool OptForSize) {
   }
 
   // Find the trip count.
-  unsigned TC = SE->getSmallConstantTripCount(TheLoop, TheLoop->getLoopLatch());
+  unsigned TC = SE->getSmallConstantTripCount(TheLoop);
   DEBUG(dbgs() << "LV: Found trip count: " << TC << '\n');
 
   unsigned WidestType = getWidestType();
@@ -5458,6 +5471,10 @@ unsigned LoopVectorizationCostModel::getWidestType() {
     for (BasicBlock::iterator it = BB->begin(), e = BB->end(); it != e; ++it) {
       Type *T = it->getType();
 
+      // Ignore ephemeral values.
+      if (EphValues.count(it))
+        continue;
+
       // Only examine Loads, Stores and PHINodes.
       if (!isa<LoadInst>(it) && !isa<StoreInst>(it) && !isa<PHINode>(it))
         continue;
@@ -5518,8 +5535,7 @@ LoopVectorizationCostModel::selectUnrollFactor(bool OptForSize,
     return 1;
 
   // Do not unroll loops with a relatively small trip count.
-  unsigned TC = SE->getSmallConstantTripCount(TheLoop,
-                                              TheLoop->getLoopLatch());
+  unsigned TC = SE->getSmallConstantTripCount(TheLoop);
   if (TC > 1 && TC < TinyTripCountUnrollThreshold)
     return 1;
 
@@ -5721,6 +5737,10 @@ LoopVectorizationCostModel::calculateRegisterUsage() {
     // Ignore instructions that are never used within the loop.
     if (!Ends.count(I)) continue;
 
+    // Ignore ephemeral values.
+    if (EphValues.count(I))
+      continue;
+
     // Remove all of the instructions that end at this location.
     InstrList &List = TransposeEnds[i];
     for (unsigned int j=0, e = List.size(); j < e; ++j)
@@ -5759,6 +5779,10 @@ unsigned LoopVectorizationCostModel::expectedCost(unsigned VF) {
     for (BasicBlock::iterator it = BB->begin(), e = BB->end(); it != e; ++it) {
       // Skip dbg intrinsics.
       if (isa<DbgInfoIntrinsic>(it))
+        continue;
+
+      // Ignore ephemeral values.
+      if (EphValues.count(it))
         continue;
 
       unsigned C = getInstructionCost(it, VF);
@@ -6061,6 +6085,7 @@ static const char lv_name[] = "Loop Vectorization";
 INITIALIZE_PASS_BEGIN(LoopVectorize, LV_NAME, lv_name, false, false)
 INITIALIZE_AG_DEPENDENCY(TargetTransformInfo)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
+INITIALIZE_PASS_DEPENDENCY(AssumptionTracker)
 INITIALIZE_PASS_DEPENDENCY(BlockFrequencyInfo)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)

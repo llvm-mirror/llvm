@@ -519,11 +519,11 @@ SDValue SITargetLowering::LowerFormalArguments(
     if (VA.isMemLoc()) {
       VT = Ins[i].VT;
       EVT MemVT = Splits[i].VT;
+      const unsigned Offset = 36 + VA.getLocMemOffset();
       // The first 36 bytes of the input buffer contains information about
       // thread group and global sizes.
       SDValue Arg = LowerParameter(DAG, VT, MemVT,  DL, DAG.getRoot(),
-                                   36 + VA.getLocMemOffset(),
-                                   Ins[i].Flags.isSExt());
+                                   Offset, Ins[i].Flags.isSExt());
 
       const PointerType *ParamTy =
           dyn_cast<PointerType>(FType->getParamType(Ins[i].OrigArgIndex));
@@ -537,6 +537,7 @@ SDValue SITargetLowering::LowerFormalArguments(
       }
 
       InVals.push_back(Arg);
+      Info->ABIArgOffset = Offset + MemVT.getStoreSize();
       continue;
     }
     assert(VA.isRegLoc() && "Parameter must be in a register!");
@@ -619,36 +620,6 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
             .addImm(AMDGPU::sub0_sub1)
             .addReg(SubRegHi)
             .addImm(AMDGPU::sub2_sub3);
-    MI->eraseFromParent();
-    break;
-  }
-  case AMDGPU::SI_BUFFER_RSRC: {
-    unsigned SuperReg = MI->getOperand(0).getReg();
-    unsigned Args[4];
-    for (unsigned i = 0, e = 4; i < e; ++i) {
-      MachineOperand &Arg = MI->getOperand(i + 1);
-
-      if (Arg.isReg()) {
-        Args[i] = Arg.getReg();
-        continue;
-      }
-
-      assert(Arg.isImm());
-      unsigned Reg = MRI.createVirtualRegister(&AMDGPU::SGPR_32RegClass);
-      BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::S_MOV_B32), Reg)
-              .addImm(Arg.getImm());
-      Args[i] = Reg;
-    }
-    BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::REG_SEQUENCE),
-            SuperReg)
-            .addReg(Args[0])
-            .addImm(AMDGPU::sub0)
-            .addReg(Args[1])
-            .addImm(AMDGPU::sub1)
-            .addReg(Args[2])
-            .addImm(AMDGPU::sub2)
-            .addReg(Args[3])
-            .addImm(AMDGPU::sub3);
     MI->eraseFromParent();
     break;
   }
@@ -927,6 +898,12 @@ SDValue SITargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
   case Intrinsic::r600_read_local_size_z:
     return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(),
                           SI::KernelInputOffsets::LOCAL_SIZE_Z, false);
+
+  case Intrinsic::AMDGPU_read_workdim:
+    return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(),
+                          MF.getInfo<SIMachineFunctionInfo>()->ABIArgOffset,
+                          false);
+
   case Intrinsic::r600_read_tgid_x:
     return CreateLiveInRegister(DAG, &AMDGPU::SReg_32RegClass,
       TRI->getPreloadedValue(MF, SIRegisterInfo::TGID_X), VT);
@@ -1920,6 +1897,28 @@ void SITargetLowering::adjustWritemask(MachineSDNode *&Node,
   }
 }
 
+/// \brief Legalize target independent instructions (e.g. INSERT_SUBREG)
+/// with frame index operands.
+/// LLVM assumes that inputs are to these instructions are registers.
+void SITargetLowering::legalizeTargetIndependentNode(SDNode *Node,
+                                                     SelectionDAG &DAG) const {
+
+  SmallVector<SDValue, 8> Ops;
+  for (unsigned i = 0; i < Node->getNumOperands(); ++i) {
+    if (!isa<FrameIndexSDNode>(Node->getOperand(i))) {
+      Ops.push_back(Node->getOperand(i));
+      continue;
+    }
+
+    SDLoc DL(Node);
+    Ops.push_back(SDValue(DAG.getMachineNode(AMDGPU::S_MOV_B32, DL,
+                                     Node->getOperand(i).getValueType(),
+                                     Node->getOperand(i)), 0));
+  }
+
+  DAG.UpdateNodeOperands(Node, Ops);
+}
+
 /// \brief Fold the instructions after selecting them.
 SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
                                           SelectionDAG &DAG) const {
@@ -1929,6 +1928,11 @@ SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
 
   if (TII->isMIMG(Node->getMachineOpcode()))
     adjustWritemask(Node, DAG);
+
+  if (Node->getMachineOpcode() == AMDGPU::INSERT_SUBREG) {
+    legalizeTargetIndependentNode(Node, DAG);
+    return Node;
+  }
 
   return legalizeOperands(Node, DAG);
 }

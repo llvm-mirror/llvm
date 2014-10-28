@@ -239,7 +239,7 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
     : ObjectFile(getMachOType(IsLittleEndian, Is64bits), Object),
       SymtabLoadCmd(nullptr), DysymtabLoadCmd(nullptr),
       DataInCodeLoadCmd(nullptr), DyldInfoLoadCmd(nullptr),
-      HasPageZeroSegment(false) {
+      UuidLoadCmd(nullptr), HasPageZeroSegment(false) {
   uint32_t LoadCommandCount = this->getHeader().ncmds;
   MachO::LoadCommandType SegmentLoadType = is64Bit() ?
     MachO::LC_SEGMENT_64 : MachO::LC_SEGMENT;
@@ -259,6 +259,9 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
                Load.C.cmd == MachO::LC_DYLD_INFO_ONLY) {
       assert(!DyldInfoLoadCmd && "Multiple dyldinfo load commands");
       DyldInfoLoadCmd = Load.Ptr;
+    } else if (Load.C.cmd == MachO::LC_UUID) {
+      assert(!UuidLoadCmd && "Multiple UUID load commands");
+      UuidLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == SegmentLoadType) {
       uint32_t NumSections = getSegmentLoadCommandNumSections(this, Load);
       for (unsigned J = 0; J < NumSections; ++J) {
@@ -1971,20 +1974,20 @@ void MachOBindEntry::moveNext() {
                                              SegmentOffset) << "\n");
       return;
      case MachO::BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-      AdvanceAmount = readULEB128();
+      AdvanceAmount = readULEB128() + PointerSize;
       RemainingLoopCount = 0;
       if (TableKind == Kind::Lazy)
         Malformed = true;
       DEBUG_WITH_TYPE(
           "mach-o-bind",
-          llvm::dbgs() << "BIND_OPCODE_DO_BIND_IMM_TIMES: "
+          llvm::dbgs() << "BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB: "
                        << format("SegmentOffset=0x%06X", SegmentOffset)
                        << ", AdvanceAmount=" << AdvanceAmount
                        << ", RemainingLoopCount=" << RemainingLoopCount
                        << "\n");
       return;
     case MachO::BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-      AdvanceAmount = ImmValue * PointerSize;
+      AdvanceAmount = ImmValue * PointerSize + PointerSize;
       RemainingLoopCount = 0;
       if (TableKind == Kind::Lazy)
         Malformed = true;
@@ -2418,6 +2421,12 @@ ArrayRef<uint8_t> MachOObjectFile::getDyldInfoExportsTrie() const {
   return ArrayRef<uint8_t>(Ptr, DyldInfo.export_size);
 }
 
+ArrayRef<uint8_t> MachOObjectFile::getUuid() const {
+  if (!UuidLoadCmd)
+    return ArrayRef<uint8_t>();
+  MachO::uuid_command Uuid = getStruct<MachO::uuid_command>(this, UuidLoadCmd);
+  return ArrayRef<uint8_t>(Uuid.uuid, 16);
+}
 
 StringRef MachOObjectFile::getStringTableData() const {
   MachO::symtab_command S = getSymtabLoadCommand();

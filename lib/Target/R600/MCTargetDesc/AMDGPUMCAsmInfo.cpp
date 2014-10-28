@@ -35,7 +35,6 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(StringRef &TT) : MCAsmInfoELF() {
 
   //===--- Global Variable Emission Directives --------------------------===//
   GlobalDirective = ".global";
-  HasSetDirective = false;
   HasAggressiveSymbolFolding = true;
   COMMDirectiveAlignmentIsInBytes = false;
   HasDotTypeDotSizeDirective = false;
@@ -43,9 +42,4 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(StringRef &TT) : MCAsmInfoELF() {
   WeakRefDirective = ".weakref\t";
   //===--- Dwarf Emission Directives -----------------------------------===//
   SupportsDebugInformation = true;
-}
-
-const MCSection*
-AMDGPUMCAsmInfo::getNonexecutableStackSection(MCContext &CTX) const {
-  return nullptr;
 }

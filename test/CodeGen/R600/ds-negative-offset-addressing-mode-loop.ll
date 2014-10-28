@@ -1,5 +1,5 @@
-; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs < %s | FileCheck -check-prefix=SI --check-prefix=CHECK %s
-; RUN: llc -march=r600 -mcpu=bonaire -verify-machineinstrs < %s | FileCheck -check-prefix=CI --check-prefix=CHECK %s
+; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs -mattr=+load-store-opt -enable-misched < %s | FileCheck -check-prefix=SI --check-prefix=CHECK %s
+; RUN: llc -march=r600 -mcpu=bonaire -verify-machineinstrs -mattr=+load-store-opt -enable-misched < %s | FileCheck -check-prefix=CI --check-prefix=CHECK %s
 
 declare i32 @llvm.r600.read.tidig.x() #0
 declare void @llvm.AMDGPU.barrier.local() #1
@@ -8,21 +8,19 @@ declare void @llvm.AMDGPU.barrier.local() #1
 ; CHECK-LABEL: {{^}}signed_ds_offset_addressing_loop:
 ; CHECK: BB0_1:
 ; CHECK: V_ADD_I32_e32 [[VADDR:v[0-9]+]],
-; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]], 0x0
+; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]]
 ; SI-DAG: V_ADD_I32_e32 [[VADDR4:v[0-9]+]], 4, [[VADDR]]
-; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR4]], 0x0
+; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR4]]
 ; SI-DAG: V_ADD_I32_e32 [[VADDR0x80:v[0-9]+]], 0x80, [[VADDR]]
-; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR0x80]], 0x0
+; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR0x80]]
 ; SI-DAG: V_ADD_I32_e32 [[VADDR0x84:v[0-9]+]], 0x84, [[VADDR]]
-; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR0x84]], 0x0
+; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR0x84]]
 ; SI-DAG: V_ADD_I32_e32 [[VADDR0x100:v[0-9]+]], 0x100, [[VADDR]]
-; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR0x100]], 0x0
+; SI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR0x100]]
 
-; CI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]], 0x0
-; CI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]], 0x4
-; CI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]], 0x80
-; CI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]], 0x84
-; CI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]], 0x100
+; CI-DAG: DS_READ2_B32 v{{\[[0-9]+:[0-9]+\]}}, [[VADDR]] offset0:0 offset1:1
+; CI-DAG: DS_READ2_B32 v{{\[[0-9]+:[0-9]+\]}}, [[VADDR]] offset0:32 offset1:33
+; CI-DAG: DS_READ_B32 v{{[0-9]+}}, [[VADDR]] offset:256
 ; CHECK: S_ENDPGM
 define void @signed_ds_offset_addressing_loop(float addrspace(1)* noalias nocapture %out, float addrspace(3)* noalias nocapture readonly %lptr, i32 %n) #2 {
 entry:

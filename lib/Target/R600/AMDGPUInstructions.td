@@ -386,7 +386,16 @@ class global_binary_atomic_op<SDNode atomic_op> : PatFrag<
   [{return cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS;}]
 >;
 
+def atomic_swap_global : global_binary_atomic_op<atomic_swap>;
 def atomic_add_global : global_binary_atomic_op<atomic_load_add>;
+def atomic_and_global : global_binary_atomic_op<atomic_load_and>;
+def atomic_max_global : global_binary_atomic_op<atomic_load_max>;
+def atomic_min_global : global_binary_atomic_op<atomic_load_min>;
+def atomic_or_global : global_binary_atomic_op<atomic_load_or>;
+def atomic_sub_global : global_binary_atomic_op<atomic_load_sub>;
+def atomic_umax_global : global_binary_atomic_op<atomic_load_umax>;
+def atomic_umin_global : global_binary_atomic_op<atomic_load_umin>;
+def atomic_xor_global : global_binary_atomic_op<atomic_load_xor>;
 
 //===----------------------------------------------------------------------===//
 // Misc Pattern Fragments

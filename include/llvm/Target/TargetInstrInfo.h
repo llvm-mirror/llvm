@@ -16,7 +16,6 @@
 
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/CodeGen/DFAPacketizer.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineCombinerPattern.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -41,6 +40,7 @@ class TargetRegisterClass;
 class TargetRegisterInfo;
 class BranchProbability;
 class TargetSubtargetInfo;
+class DFAPacketizer;
 
 template<class T> class SmallVectorImpl;
 
@@ -952,6 +952,7 @@ public:
                                     const MachineRegisterInfo *MRI) const {
     return false;
   }
+  virtual bool optimizeCondBranch(MachineInstr *MI) const { return false; }
 
   /// optimizeLoadInstr - Try to remove the load by folding it to a register
   /// operand at the use. We fold the load instructions if and only if the

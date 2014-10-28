@@ -710,6 +710,7 @@ def HasCDI       : Predicate<"Subtarget->hasCDI()">;
 def HasPFI       : Predicate<"Subtarget->hasPFI()">;
 def HasERI       : Predicate<"Subtarget->hasERI()">;
 def HasDQI       : Predicate<"Subtarget->hasDQI()">;
+def NoDQI        : Predicate<"!Subtarget->hasDQI()">;
 def HasBWI       : Predicate<"Subtarget->hasBWI()">;
 def HasVLX       : Predicate<"Subtarget->hasVLX()">,
                      AssemblerPredicate<"FeatureVLX", "AVX-512 VLX ISA">;
@@ -2510,7 +2511,7 @@ def : MnemonicAlias<"fldcww",   "fldcw",    "att">;
 def : MnemonicAlias<"fnstcww",  "fnstcw",   "att">;
 def : MnemonicAlias<"fnstsww",  "fnstsw",   "att">;
 def : MnemonicAlias<"fucomip",  "fucompi",  "att">;
-def : MnemonicAlias<"fwait",    "wait",     "att">;
+def : MnemonicAlias<"fwait",    "wait">;
 
 
 class CondCodeAlias<string Prefix,string Suffix, string OldCond, string NewCond,

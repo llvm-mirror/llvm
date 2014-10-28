@@ -102,11 +102,6 @@ static std::string computeDataLayout(ARMSubtarget &ST) {
   // Pointers are 32 bits and aligned to 32 bits.
   Ret += "-p:32:32";
 
-  // On thumb, i16,i18 and i1 have natural aligment requirements, but we try to
-  // align to 32.
-  if (ST.isThumb())
-    Ret += "-i1:8:32-i8:8:32-i16:16:32";
-
   // ABIs other than APCS have 64 bit integers with natural alignment.
   if (!ST.isAPCS_ABI())
     Ret += "-i64:64";
@@ -123,10 +118,9 @@ static std::string computeDataLayout(ARMSubtarget &ST) {
   else
     Ret += "-v128:64:128";
 
-  // On thumb and APCS, only try to align aggregates to 32 bits (the default is
-  // 64 bits).
-  if (ST.isThumb() || ST.isAPCS_ABI())
-    Ret += "-a:0:32";
+  // Try to align aggregates to 32 bits (the default is 64 bits, which has no
+  // particular hardware support on 32-bit ARM).
+  Ret += "-a:0:32";
 
   // Integer registers are 32 bits.
   Ret += "-n32";
@@ -261,9 +255,8 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
       TargetABI = ARM_ABI_AAPCS;
       break;
     default:
-      if ((isTargetIOS() && isMClass()) ||
-          (TargetTriple.isOSBinFormatMachO() &&
-           TargetTriple.getOS() == Triple::UnknownOS))
+      if (TargetTriple.isOSBinFormatMachO() &&
+          TargetTriple.getOS() == Triple::UnknownOS)
         TargetABI = ARM_ABI_AAPCS;
       else
         TargetABI = ARM_ABI_APCS;
