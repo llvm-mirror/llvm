@@ -27,7 +27,6 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/ValueHandle.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLibraryInfo.h"
@@ -37,20 +36,6 @@ using namespace llvm;
 using namespace PatternMatch;
 
 #define DEBUG_TYPE "lazy-value-info"
-
-// Experimentally derived threshold for the number of basic blocks lowered for
-// lattice value overdefined.
-static cl::opt<unsigned>
-OverdefinedBBThreshold("lvi-overdefined-BB-threshold",
-    cl::init(1500), cl::Hidden,
-    cl::desc("Threshold of the number of basic blocks lowered for lattice value"
-             "'overdefined'."));
-
-// Experimentally derived threshold for additional lowering lattice values
-// overdefined per block.
-static cl::opt<unsigned>
-OverdefinedThreshold("lvi-overdefined-threshold", cl::init(10), cl::Hidden,
-    cl::desc("Threshold of lowering lattice value 'overdefined'."));
 
 char LazyValueInfo::ID = 0;
 INITIALIZE_PASS_BEGIN(LazyValueInfo, "lazy-value-info",
@@ -363,9 +348,6 @@ namespace {
     const DataLayout *DL;
     /// An optional DT pointer.
     DominatorTree *DT;
-    /// A counter to record how many times Overdefined has been tried to be
-    /// lowered.
-    DenseMap<BasicBlock *, unsigned> LoweringOverdefinedTimes;
     
     friend struct LVIValueHandle;
     
@@ -498,9 +480,6 @@ void LazyValueInfoCache::eraseBlock(BasicBlock *BB) {
 }
 
 void LazyValueInfoCache::solve() {
-  // Reset the counter of lowering overdefined value.
-  LoweringOverdefinedTimes.clear();
-
   while (!BlockValueStack.empty()) {
     std::pair<BasicBlock*, Value*> &e = BlockValueStack.top();
     if (solveBlockValue(e.second, e.first)) {
@@ -559,7 +538,6 @@ bool LazyValueInfoCache::solveBlockValue(Value *Val, BasicBlock *BB) {
   // lattice value to overdefined, so that cycles will terminate and be
   // conservatively correct.
   BBLV.markOverdefined();
-  ++LoweringOverdefinedTimes[BB];
   
   Instruction *BBI = dyn_cast<Instruction>(Val);
   if (!BBI || BBI->getParent() != BB) {
@@ -714,6 +692,9 @@ bool LazyValueInfoCache::solveBlockValuePHINode(LVILatticeVal &BBLV,
     BasicBlock *PhiBB = PN->getIncomingBlock(i);
     Value *PhiVal = PN->getIncomingValue(i);
     LVILatticeVal EdgeResult;
+    // Note that we can provide PN as the context value to getEdgeValue, even
+    // though the results will be cached, because PN is the value being used as
+    // the cache key in the caller.
     EdgesMissing |= !getEdgeValue(PhiVal, PhiBB, BB, EdgeResult, PN);
     if (EdgesMissing)
       continue;
@@ -976,6 +957,9 @@ bool LazyValueInfoCache::getEdgeValue(Value *Val, BasicBlock *BBFrom,
 
     // Try to intersect ranges of the BB and the constraint on the edge.
     LVILatticeVal InBlock = getBlockValue(Val, BBFrom);
+    mergeAssumeBlockValueConstantRange(Val, InBlock, BBFrom->getTerminator());
+    // See note on the use of the CxtI with mergeAssumeBlockValueConstantRange,
+    // and caching, below.
     mergeAssumeBlockValueConstantRange(Val, InBlock, CxtI);
     if (!InBlock.isConstantRange())
       return true;
@@ -993,6 +977,15 @@ bool LazyValueInfoCache::getEdgeValue(Value *Val, BasicBlock *BBFrom,
 
   // if we couldn't compute the value on the edge, use the value from the BB
   Result = getBlockValue(Val, BBFrom);
+  mergeAssumeBlockValueConstantRange(Val, Result, BBFrom->getTerminator());
+  // We can use the context instruction (generically the ultimate instruction
+  // the calling pass is trying to simplify) here, even though the result of
+  // this function is generally cached when called from the solve* functions
+  // (and that cached result might be used with queries using a different
+  // context instruction), because when this function is called from the solve*
+  // functions, the context instruction is not provided. When called from
+  // LazyValueInfoCache::getValueOnEdge, the context instruction is provided,
+  // but then the result is not cached.
   mergeAssumeBlockValueConstantRange(Val, Result, CxtI);
   return true;
 }

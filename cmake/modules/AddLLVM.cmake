@@ -143,10 +143,14 @@ endfunction(add_llvm_symbol_exports)
 function(add_dead_strip target_name)
   if(NOT LLVM_NO_DEAD_STRIP)
     if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+      # ld64's implementation of -dead_strip breaks tools that use plugins.
       set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                    LINK_FLAGS " -Wl,-dead_strip")
     elseif(NOT WIN32)
       # Object files are compiled with -ffunction-data-sections.
+      # Versions of bfd ld < 2.23.1 have a bug in --gc-sections that breaks
+      # tools that use plugins. Always pass --gc-sections once we require
+      # a newer linker.
       set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                    LINK_FLAGS " -Wl,--gc-sections")
     endif()
@@ -650,6 +654,10 @@ function(configure_lit_site_cfg input output)
 
   set(HOST_OS ${CMAKE_SYSTEM_NAME})
   set(HOST_ARCH ${CMAKE_SYSTEM_PROCESSOR})
+
+  set(HOST_CC "${CMAKE_C_COMPILER} ${CMAKE_C_COMPILER_ARG1}")
+  set(HOST_CXX "${CMAKE_CXX_COMPILER} ${CMAKE_CXX_COMPILER_ARG1}")
+  set(HOST_LDFLAGS "${CMAKE_EXE_LINKER_FLAGS}")
 
   configure_file(${input} ${output} @ONLY)
 endfunction()

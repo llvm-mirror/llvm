@@ -174,7 +174,7 @@ class DwarfDebug : public AsmPrinterHandler {
   MapVector<const MDNode *, DwarfCompileUnit *> CUMap;
 
   // Maps subprogram MDNode with its corresponding DwarfCompileUnit.
-  DenseMap<const MDNode *, DwarfCompileUnit *> SPMap;
+  MapVector<const MDNode *, DwarfCompileUnit *> SPMap;
 
   // Maps a CU DIE with its corresponding DwarfCompileUnit.
   DenseMap<const DIE *, DwarfCompileUnit *> CUDieMap;
@@ -349,14 +349,8 @@ class DwarfDebug : public AsmPrinterHandler {
   void ensureAbstractVariableIsCreatedIfScoped(const DIVariable &Var,
                                                const MDNode *Scope);
 
-  DIE *createAndAddScopeChildren(DwarfCompileUnit &TheCU, LexicalScope *Scope,
-                                 DIE &ScopeDIE);
   /// \brief Construct a DIE for this abstract scope.
-  void constructAbstractSubprogramScopeDIE(DwarfCompileUnit &TheCU,
-                                           LexicalScope *Scope);
-  /// \brief Construct a DIE for this subprogram scope.
-  void constructSubprogramScopeDIE(DwarfCompileUnit &TheCU,
-                                   LexicalScope *Scope);
+  void constructAbstractSubprogramScopeDIE(LexicalScope *Scope);
 
   /// \brief Emit initial Dwarf sections with a label at the start of each one.
   void emitSectionLabels();
@@ -661,30 +655,33 @@ public:
   /// going to be null.
   bool isLexicalScopeDIENull(LexicalScope *Scope);
 
-  // FIXME: Sink these functions down into DwarfFile/Dwarf*Unit.
-
-  /// \brief Construct new DW_TAG_lexical_block for this scope and
-  /// attach DW_AT_low_pc/DW_AT_high_pc labels.
-  std::unique_ptr<DIE> constructLexicalScopeDIE(DwarfCompileUnit &TheCU,
-                                                LexicalScope *Scope);
-
-  /// \brief This scope represents inlined body of a function. Construct
-  /// DIE to represent this concrete inlined copy of the function.
-  std::unique_ptr<DIE> constructInlinedScopeDIE(DwarfCompileUnit &TheCU,
-                                                LexicalScope *Scope);
-
-  /// A helper function to create children of a Scope DIE.
-  DIE *createScopeChildrenDIE(DwarfCompileUnit &TheCU, LexicalScope *Scope,
-                              SmallVectorImpl<std::unique_ptr<DIE>> &Children,
-                              unsigned *ChildScopeCount = nullptr);
-
   /// \brief Return Label preceding the instruction.
   MCSymbol *getLabelBeforeInsn(const MachineInstr *MI);
 
   /// \brief Return Label immediately following the instruction.
   MCSymbol *getLabelAfterInsn(const MachineInstr *MI);
 
+  // FIXME: Consider rolling ranges up into DwarfDebug since we use a single
+  // range_base anyway, so there's no need to keep them as separate per-CU range
+  // lists. (though one day we might end up with a range.dwo section, in which
+  // case it'd go to DwarfFile)
   unsigned getNextRangeNumber() { return GlobalRangeCount++; }
+
+  // FIXME: Sink these functions down into DwarfFile/Dwarf*Unit.
+
+  DenseMap<const MDNode *, DIE *> &getAbstractSPDies() {
+    return AbstractSPDies;
+  }
+
+  ScopeVariablesMap &getScopeVariables() { return ScopeVariables; }
+
+  SmallPtrSet<const MDNode *, 16> &getProcessedSPNodes() {
+    return ProcessedSPNodes;
+  }
+
+  SmallVector<DbgVariable *, 8> &getCurrentFnArguments() {
+    return CurrentFnArguments;
+  }
 };
 } // End of namespace llvm
 

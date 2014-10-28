@@ -896,19 +896,38 @@ defm BUFFER_STORE_DWORDX4 : MUBUF_Store_Helper <
   0x0000001e, "BUFFER_STORE_DWORDX4", VReg_128, v4i32, global_store
 >;
 //def BUFFER_ATOMIC_SWAP : MUBUF_ <0x00000030, "BUFFER_ATOMIC_SWAP", []>;
+defm BUFFER_ATOMIC_SWAP : MUBUF_Atomic <
+  0x00000030, "BUFFER_ATOMIC_SWAP", VReg_32, i32, atomic_swap_global
+>;
 //def BUFFER_ATOMIC_CMPSWAP : MUBUF_ <0x00000031, "BUFFER_ATOMIC_CMPSWAP", []>;
 defm BUFFER_ATOMIC_ADD : MUBUF_Atomic <
   0x00000032, "BUFFER_ATOMIC_ADD", VReg_32, i32, atomic_add_global
 >;
-//def BUFFER_ATOMIC_SUB : MUBUF_ <0x00000033, "BUFFER_ATOMIC_SUB", []>;
+defm BUFFER_ATOMIC_SUB : MUBUF_Atomic <
+  0x00000033, "BUFFER_ATOMIC_SUB", VReg_32, i32, atomic_sub_global
+>;
 //def BUFFER_ATOMIC_RSUB : MUBUF_ <0x00000034, "BUFFER_ATOMIC_RSUB", []>;
-//def BUFFER_ATOMIC_SMIN : MUBUF_ <0x00000035, "BUFFER_ATOMIC_SMIN", []>;
-//def BUFFER_ATOMIC_UMIN : MUBUF_ <0x00000036, "BUFFER_ATOMIC_UMIN", []>;
-//def BUFFER_ATOMIC_SMAX : MUBUF_ <0x00000037, "BUFFER_ATOMIC_SMAX", []>;
-//def BUFFER_ATOMIC_UMAX : MUBUF_ <0x00000038, "BUFFER_ATOMIC_UMAX", []>;
-//def BUFFER_ATOMIC_AND : MUBUF_ <0x00000039, "BUFFER_ATOMIC_AND", []>;
-//def BUFFER_ATOMIC_OR : MUBUF_ <0x0000003a, "BUFFER_ATOMIC_OR", []>;
-//def BUFFER_ATOMIC_XOR : MUBUF_ <0x0000003b, "BUFFER_ATOMIC_XOR", []>;
+defm BUFFER_ATOMIC_SMIN : MUBUF_Atomic <
+  0x00000035, "BUFFER_ATOMIC_SMIN", VReg_32, i32, atomic_min_global
+>;
+defm BUFFER_ATOMIC_UMIN : MUBUF_Atomic <
+  0x00000036, "BUFFER_ATOMIC_UMIN", VReg_32, i32, atomic_umin_global
+>;
+defm BUFFER_ATOMIC_SMAX : MUBUF_Atomic <
+  0x00000037, "BUFFER_ATOMIC_SMAX", VReg_32, i32, atomic_max_global
+>;
+defm BUFFER_ATOMIC_UMAX : MUBUF_Atomic <
+  0x00000038, "BUFFER_ATOMIC_UMAX", VReg_32, i32, atomic_umax_global
+>;
+defm BUFFER_ATOMIC_AND : MUBUF_Atomic <
+  0x00000039, "BUFFER_ATOMIC_AND", VReg_32, i32, atomic_and_global
+>;
+defm BUFFER_ATOMIC_OR : MUBUF_Atomic <
+  0x0000003a, "BUFFER_ATOMIC_OR", VReg_32, i32, atomic_or_global
+>;
+defm BUFFER_ATOMIC_XOR : MUBUF_Atomic <
+  0x0000003b, "BUFFER_ATOMIC_XOR", VReg_32, i32, atomic_xor_global
+>;
 //def BUFFER_ATOMIC_INC : MUBUF_ <0x0000003c, "BUFFER_ATOMIC_INC", []>;
 //def BUFFER_ATOMIC_DEC : MUBUF_ <0x0000003d, "BUFFER_ATOMIC_DEC", []>;
 //def BUFFER_ATOMIC_FCMPSWAP : MUBUF_ <0x0000003e, "BUFFER_ATOMIC_FCMPSWAP", []>;
@@ -1509,16 +1528,12 @@ defm V_CUBETC_F32 : VOP3Inst <vop3<0x146>, "V_CUBETC_F32",
 defm V_CUBEMA_F32 : VOP3Inst <vop3<0x147>, "V_CUBEMA_F32",
   VOP_F32_F32_F32_F32
 >;
-
-let neverHasSideEffects = 1, mayLoad = 0, mayStore = 0 in {
 defm V_BFE_U32 : VOP3Inst <vop3<0x148>, "V_BFE_U32",
   VOP_I32_I32_I32_I32, AMDGPUbfe_u32
 >;
 defm V_BFE_I32 : VOP3Inst <vop3<0x149>, "V_BFE_I32",
   VOP_I32_I32_I32_I32, AMDGPUbfe_i32
 >;
-}
-
 defm V_BFI_B32 : VOP3Inst <vop3<0x14a>, "V_BFI_B32",
   VOP_I32_I32_I32_I32, AMDGPUbfi
 >;
@@ -1794,12 +1809,6 @@ def SI_ADDR64_RSRC : InstSI <
   "", []
 >;
 
-def SI_BUFFER_RSRC : InstSI <
-  (outs SReg_128:$srsrc),
-  (ins SReg_32:$ptr_lo, SReg_32:$ptr_hi, SSrc_32:$data_lo, SSrc_32:$data_hi),
-  "", []
->;
-
 def V_SUB_F64 : InstSI <
   (outs VReg_64:$dst),
   (ins VReg_64:$src0, VReg_64:$src1),
@@ -1988,50 +1997,9 @@ defm : RsqPat<V_RSQ_F32_e32, f32>;
 // VOP2 Patterns
 //===----------------------------------------------------------------------===//
 
-class BinOp64Pat <SDNode node, Instruction inst> : Pat <
-  (node i64:$src0, i64:$src1),
-  (INSERT_SUBREG (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
-    (inst  (EXTRACT_SUBREG i64:$src0, sub0),
-                  (EXTRACT_SUBREG i64:$src1, sub0)), sub0),
-    (inst (EXTRACT_SUBREG i64:$src0, sub1),
-                  (EXTRACT_SUBREG i64:$src1, sub1)), sub1)
->;
-
-def : BinOp64Pat <and, V_AND_B32_e64>;
-def : BinOp64Pat <or, V_OR_B32_e64>;
-def : BinOp64Pat <xor, V_XOR_B32_e64>;
-
-class SextInReg <ValueType vt, int ShiftAmt> : Pat <
-  (sext_inreg i32:$src0, vt),
-  (V_ASHRREV_I32_e32 ShiftAmt, (V_LSHLREV_B32_e32 ShiftAmt, $src0))
->;
-
-def : SextInReg <i8, 24>;
-def : SextInReg <i16, 16>;
-
 def : Pat <
   (i32 (add (i32 (ctpop i32:$popcnt)), i32:$val)),
   (V_BCNT_U32_B32_e64 $popcnt, $val)
->;
-
-def : Pat <
-   (i32 (ctpop i32:$popcnt)),
-   (V_BCNT_U32_B32_e64 $popcnt, 0)
->;
-
-def : Pat <
-  (i64 (ctpop i64:$src)),
-  (INSERT_SUBREG
-    (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
-      (V_BCNT_U32_B32_e32 (EXTRACT_SUBREG $src, sub1),
-        (V_BCNT_U32_B32_e64 (EXTRACT_SUBREG $src, sub0), 0)),
-      sub0),
-    (V_MOV_B32_e32 0), sub1)
->;
-
-def : Pat <
-  (addc i32:$src0, i32:$src1),
-  (V_ADD_I32_e64 $src0, $src1)
 >;
 
 /********** ======================= **********/
@@ -2600,11 +2568,6 @@ def : IMad24Pat<V_MAD_I32_I24>;
 def : UMad24Pat<V_MAD_U32_U24>;
 
 def : Pat <
-  (mul i32:$src0, i32:$src1),
-  (V_MUL_LO_I32 $src0, $src1)
->;
-
-def : Pat <
   (mulhu i32:$src0, i32:$src1),
   (V_MUL_HI_U32 $src0, $src1)
 >;
@@ -2742,10 +2705,9 @@ def : DSAtomicCmpXChg<DS_CMPST_RTN_B64, i64, atomic_cmp_swap_64_local>;
 multiclass MUBUFLoad_Pattern <MUBUF Instr_ADDR64, ValueType vt,
                               PatFrag constant_ld> {
   def : Pat <
-     (vt (constant_ld (add i64:$ptr, i64:$offset))),
-     (Instr_ADDR64 (SI_ADDR64_RSRC $ptr), $offset, 0)
+     (vt (constant_ld (MUBUFAddr64 v4i32:$srsrc, i64:$vaddr, i16:$offset))),
+     (Instr_ADDR64 $srsrc, $vaddr, $offset)
   >;
-
 }
 
 defm : MUBUFLoad_Pattern <BUFFER_LOAD_SBYTE_ADDR64, i32, sextloadi8_constant>;

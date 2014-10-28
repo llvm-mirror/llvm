@@ -21,6 +21,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetLowering.h"
 #include <vector>
 
 namespace llvm {
@@ -200,7 +201,7 @@ private:
     }
   };
 
-  size_t Clusterify(CaseVector &Cases, const SwitchInst &SI);
+  void Clusterify(CaseVector &Cases, const SwitchInst &SI);
 
   /// CaseBlock - This structure is used to communicate between
   /// SelectionDAGBuilder and SDISel for the code generation of additional basic
@@ -633,17 +634,23 @@ public:
   void LowerCallTo(ImmutableCallSite CS, SDValue Callee, bool IsTailCall,
                    MachineBasicBlock *LandingPad = nullptr);
 
-  std::pair<SDValue, SDValue> LowerCallOperands(const CallInst &CI,
-                                                unsigned ArgIdx,
-                                                unsigned NumArgs,
-                                                SDValue Callee,
-                                                bool useVoidTy = false);
+  std::pair<SDValue, SDValue> lowerCallOperands(
+          ImmutableCallSite CS,
+          unsigned ArgIdx,
+          unsigned NumArgs,
+          SDValue Callee,
+          bool UseVoidTy = false,
+          MachineBasicBlock *LandingPad = nullptr);
 
   /// UpdateSplitBlock - When an MBB was split during scheduling, update the
   /// references that need to refer to the last resulting block.
   void UpdateSplitBlock(MachineBasicBlock *First, MachineBasicBlock *Last);
 
 private:
+  std::pair<SDValue, SDValue> lowerInvokable(
+          TargetLowering::CallLoweringInfo &CLI,
+          MachineBasicBlock *LandingPad);
+
   // Terminator instructions.
   void visitRet(const ReturnInst &I);
   void visitBr(const BranchInst &I);
@@ -665,7 +672,6 @@ private:
   bool handleBTSplitSwitchCase(CaseRec& CR,
                                CaseRecVector& WorkList,
                                const Value* SV,
-                               MachineBasicBlock* Default,
                                MachineBasicBlock *SwitchBB);
   bool handleBitTestsSwitchCase(CaseRec& CR,
                                 CaseRecVector& WorkList,
@@ -774,7 +780,8 @@ private:
   void visitVAEnd(const CallInst &I);
   void visitVACopy(const CallInst &I);
   void visitStackmap(const CallInst &I);
-  void visitPatchpoint(const CallInst &I);
+  void visitPatchpoint(ImmutableCallSite CS,
+                       MachineBasicBlock *LandingPad = nullptr);
 
   void visitUserOp1(const Instruction &I) {
     llvm_unreachable("UserOp1 should not exist at instruction selection time!");

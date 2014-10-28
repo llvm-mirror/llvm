@@ -19,13 +19,27 @@
         bc1f      $fcc0, 4             # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
         bc1f      $fcc1, 4             # CHECK: bc1f $fcc1, 4 # encoding: [0x45,0x04,0x00,0x01]
         bc1f      4                    # CHECK: bc1f 4        # encoding: [0x45,0x00,0x00,0x01]
+        bc1fl     $fcc0,4688           # CHECK: bc1fl 4688      # encoding: [0x45,0x02,0x04,0x94]
+        bc1fl     4688                 # CHECK: bc1fl 4688      # encoding: [0x45,0x02,0x04,0x94]
+        bc1fl     $fcc7,27             # CHECK: bc1fl $fcc7, 27 # encoding: [0x45,0x1e,0x00,0x06]
         bc1t      $fcc0, 4             # CHECK: bc1t 4        # encoding: [0x45,0x01,0x00,0x01]
         bc1t      $fcc1, 4             # CHECK: bc1t $fcc1, 4 # encoding: [0x45,0x05,0x00,0x01]
         bc1t      4                    # CHECK: bc1t 4        # encoding: [0x45,0x01,0x00,0x01]
+        bc1tl     $fcc0,4688           # CHECK: bc1tl 4688      # encoding: [0x45,0x03,0x04,0x94]
+        bc1tl     4688                 # CHECK: bc1tl 4688      # encoding: [0x45,0x03,0x04,0x94]
+        bc1tl     $fcc7,27             # CHECK: bc1tl $fcc7, 27 # encoding: [0x45,0x1f,0x00,0x06]
         bal       21100                # CHECK: bal 21100     # encoding: [0x04,0x11,0x14,0x9b]
         bgezal    $0, 21100            # CHECK: bal 21100     # encoding: [0x04,0x11,0x14,0x9b]
         bgezal    $6, 21100            # CHECK: bgezal $6, 21100 # encoding: [0x04,0xd1,0x14,0x9b]
         bltzal    $6, 21100            # CHECK: bltzal $6, 21100 # encoding: [0x04,0xd0,0x14,0x9b]
+        beql      $14,$s3,12544        # CHECK: beql $14, $19, 12544 # encoding: [0x51,0xd3,0x0c,0x40]
+        bgezall   $12,7293             # CHECK: bgezall $12, 7293    # encoding: [0x05,0x93,0x07,0x1f]
+        bgezl     $4,-6858             # CHECK: bgezl $4, -6858      # encoding: [0x04,0x83,0xf9,0x4d]
+        bgtzl     $10,-3738            # CHECK: bgtzl $10, -3738     # encoding: [0x5d,0x40,0xfc,0x59]
+        blezl     $6,2974              # CHECK: blezl $6, 2974       # encoding: [0x58,0xc0,0x02,0xe7]
+        bltzall   $6,488               # CHECK: bltzall $6, 488      # encoding: [0x04,0xd2,0x00,0x7a]
+        bltzl     $s1,-9964            # CHECK: bltzl $17, -9964     # encoding: [0x06,0x22,0xf6,0x45]
+        bnel      $gp,$s4,5107         # CHECK: bnel $gp, $20, 5107  # encoding: [0x57,0x94,0x04,0xfc]
         cache     1, 8($5)             # CHECK: cache 1, 8($5)   # encoding: [0xbc,0xa1,0x00,0x08]
         c.ngl.d   $f29,$f29
         c.ngle.d  $f0,$f16
@@ -62,7 +76,8 @@
         dclo      $s2,$a2              # CHECK: dclo $18, $6   # encoding: [0x70,0xd2,0x90,0x25]
         dclz      $s0,$25              # CHECK: dclz $16, $25  # encoding: [0x73,0x30,0x80,0x24]
         deret
-        di        $s8
+        di        $s8                  # CHECK: di  $fp        # encoding: [0x41,0x7e,0x60,0x00]
+        di                             # CHECK: di             # encoding: [0x41,0x60,0x60,0x00]
         ddiv      $zero,$k0,$s3
         ddivu     $zero,$s0,$s1
         div       $zero,$25,$11
@@ -109,7 +124,8 @@
         dsubu     $15,$11,5025         # CHECK: daddiu $15, $11, -5025 # encoding: [0x65,0x6f,0xec,0x5f]
         dsubu     $14,-4586            # CHECK: daddiu $14, $14, 4586  # encoding: [0x65,0xce,0x11,0xea]
         ehb                            # CHECK: ehb # encoding:  [0x00,0x00,0x00,0xc0]
-        ei        $14
+        ei        $14                  # CHECK: ei  $14       # encoding: [0x41,0x6e,0x60,0x20]
+        ei                             # CHECK: ei            # encoding: [0x41,0x60,0x60,0x20]
         eret
         floor.l.d $f26,$f7
         floor.l.s $f12,$f5

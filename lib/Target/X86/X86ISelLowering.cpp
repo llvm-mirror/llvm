@@ -7449,7 +7449,7 @@ static SDValue lowerVectorShuffleAsDecomposedShuffleBlend(SDLoc DL, MVT VT,
 /// \brief Try to lower a vector shuffle as a byte rotation.
 ///
 /// We have a generic PALIGNR instruction in x86 that will do an arbitrary
-/// byte-rotation of a the concatentation of two vectors. This routine will
+/// byte-rotation of the concatenation of two vectors. This routine will
 /// try to generically lower a vector shuffle through such an instruction. It
 /// does not check for the availability of PALIGNR-based lowerings, only the
 /// applicability of this strategy to the given mask. This matches shuffle
@@ -7895,10 +7895,42 @@ static SDValue lowerVectorShuffleAsBroadcast(MVT VT, SDLoc DL, SDValue V,
                                             "a sorted mask where the broadcast "
                                             "comes from V1.");
 
-  // Check if this is a broadcast of a scalar. We special case lowering for
-  // scalars so that we can more effectively fold with loads.
+  // Go up the chain of (vector) values to try and find a scalar load that
+  // we can combine with the broadcast.
+  for (;;) {
+    switch (V.getOpcode()) {
+    case ISD::CONCAT_VECTORS: {
+      int OperandSize = Mask.size() / V.getNumOperands();
+      V = V.getOperand(BroadcastIdx / OperandSize);
+      BroadcastIdx %= OperandSize;
+      continue;
+    }
+
+    case ISD::INSERT_SUBVECTOR: {
+      SDValue VOuter = V.getOperand(0), VInner = V.getOperand(1);
+      auto ConstantIdx = dyn_cast<ConstantSDNode>(V.getOperand(2));
+      if (!ConstantIdx)
+        break;
+
+      int BeginIdx = (int)ConstantIdx->getZExtValue();
+      int EndIdx =
+          BeginIdx + (int)VInner.getValueType().getVectorNumElements();
+      if (BroadcastIdx >= BeginIdx && BroadcastIdx < EndIdx) {
+        BroadcastIdx -= BeginIdx;
+        V = VInner;
+      } else {
+        V = VOuter;
+      }
+      continue;
+    }
+    }
+    break;
+  }
+
+  // Check if this is a broadcast of a scalar. We special case lowering
+  // for scalars so that we can more effectively fold with loads.
   if (V.getOpcode() == ISD::BUILD_VECTOR ||
-        (V.getOpcode() == ISD::SCALAR_TO_VECTOR && BroadcastIdx == 0)) {
+      (V.getOpcode() == ISD::SCALAR_TO_VECTOR && BroadcastIdx == 0)) {
     V = V.getOperand(BroadcastIdx);
 
     // If the scalar isn't a load we can't broadcast from it in AVX1, only with
@@ -9017,7 +9049,8 @@ static SDValue lowerV8I16VectorShuffle(SDValue Op, SDValue V1, SDValue V2,
 
   // Try to use rotation instructions if available.
   if (Subtarget->hasSSSE3())
-    if (SDValue Rotate = lowerVectorShuffleAsByteRotate(DL, MVT::v8i16, V1, V2, Mask, DAG))
+    if (SDValue Rotate = lowerVectorShuffleAsByteRotate(
+            DL, MVT::v8i16, V1, V2, Mask, DAG))
       return Rotate;
 
   if (NumV1Inputs + NumV2Inputs <= 4)
@@ -9151,8 +9184,8 @@ static SDValue lowerV16I8VectorShuffle(SDValue Op, SDValue V1, SDValue V2,
 
   // Try to use rotation instructions if available.
   if (Subtarget->hasSSSE3())
-    if (SDValue Rotate = lowerVectorShuffleAsByteRotate(DL, MVT::v16i8, V1, V2,
-                                                        OrigMask, DAG))
+    if (SDValue Rotate = lowerVectorShuffleAsByteRotate(
+            DL, MVT::v16i8, V1, V2, OrigMask, DAG))
       return Rotate;
 
   // Try to use a zext lowering.
@@ -22565,7 +22598,12 @@ static SDValue PerformSELECTCombine(SDNode *N, SelectionDAG &DAG,
     TargetLowering::TargetLoweringOpt TLO(DAG, DCI.isBeforeLegalize(),
                                           DCI.isBeforeLegalizeOps());
     if (TLO.ShrinkDemandedConstant(Cond, DemandedMask) ||
-        TLI.SimplifyDemandedBits(Cond, DemandedMask, KnownZero, KnownOne, TLO))
+        (TLI.SimplifyDemandedBits(Cond, DemandedMask, KnownZero, KnownOne,
+                                  TLO) &&
+         // Don't optimize vector of constants. Those are handled by
+         // the generic code and all the bits must be properly set for
+         // the generic optimizer.
+         !ISD::isBuildVectorOfConstantSDNodes(TLO.New.getNode())))
       DCI.CommitTargetLoweringOpt(TLO);
   }
 

@@ -17,6 +17,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/CommandLine.h"
+#include "llvm-c/Support.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -113,9 +114,15 @@ void Option::addArgument() {
 }
 
 void Option::removeArgument() {
-  assert(NextRegistered && "argument never registered");
-  assert(RegisteredOptionList == this && "argument is not the last registered");
-  RegisteredOptionList = NextRegistered;
+  if (RegisteredOptionList == this) {
+    RegisteredOptionList = NextRegistered;
+    MarkOptionsChanged();
+    return;
+  }
+  Option *O = RegisteredOptionList;
+  for (; O->NextRegistered != this; O = O->NextRegistered)
+    ;
+  O->NextRegistered = NextRegistered;
   MarkOptionsChanged();
 }
 
@@ -1832,4 +1839,9 @@ void cl::getRegisteredOptions(StringMap<Option*> &Map)
   assert(Map.size() == 0 && "StringMap must be empty");
   GetOptionInfo(PositionalOpts, SinkOpts, Map);
   return;
+}
+
+void LLVMParseCommandLineOptions(int argc, const char *const *argv,
+                                 const char *Overview) {
+  llvm::cl::ParseCommandLineOptions(argc, argv, Overview);
 }

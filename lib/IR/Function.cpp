@@ -474,7 +474,7 @@ std::string Intrinsic::getName(ID id, ArrayRef<Type*> Tys) {
 ///
 /// NOTE: This must be kept in synch with the copy in TblGen/IntrinsicEmitter!
 enum IIT_Info {
-  // Common values should be encoded with 0-16.
+  // Common values should be encoded with 0-15.
   IIT_Done = 0,
   IIT_I1   = 1,
   IIT_I8   = 2,
@@ -489,11 +489,11 @@ enum IIT_Info {
   IIT_V8   = 11,
   IIT_V16  = 12,
   IIT_V32  = 13,
-  IIT_V64  = 14,
-  IIT_PTR  = 15,
-  IIT_ARG  = 16,
+  IIT_PTR  = 14,
+  IIT_ARG  = 15,
 
-  // Values from 17+ are only encodable with the inefficient encoding.
+  // Values from 16+ are only encodable with the inefficient encoding.
+  IIT_V64  = 16,
   IIT_MMX  = 17,
   IIT_METADATA = 18,
   IIT_EMPTYSTRUCT = 19,
@@ -739,6 +739,12 @@ FunctionType *Intrinsic::getType(LLVMContext &Context,
   while (!TableRef.empty())
     ArgTys.push_back(DecodeFixedType(TableRef, Tys, Context));
 
+  // DecodeFixedType returns Void for IITDescriptor::Void and IITDescriptor::VarArg
+  // If we see void type as the type of the last argument, it is vararg intrinsic
+  if (!ArgTys.empty() && ArgTys.back()->isVoidTy()) {
+    ArgTys.pop_back();
+    return FunctionType::get(ResultTy, ArgTys, true);
+  }
   return FunctionType::get(ResultTy, ArgTys, false);
 }
 

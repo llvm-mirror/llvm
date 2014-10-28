@@ -810,7 +810,7 @@ define double @test71(double *%p, i64 %i) {
 
 define double @test72(double *%p, i32 %i) {
 ; CHECK-LABEL: @test72(
-  %so = mul nsw i32 %i, 8
+  %so = shl nsw i32 %i, 3
   %o = sext i32 %so to i64
 ; CHECK-NEXT: sext i32 %i to i64
   %q = bitcast double* %p to i8*
@@ -825,7 +825,7 @@ define double @test72(double *%p, i32 %i) {
 
 define double @test73(double *%p, i128 %i) {
 ; CHECK-LABEL: @test73(
-  %lo = mul nsw i128 %i, 8
+  %lo = shl nsw i128 %i, 3
   %o = trunc i128 %lo to i64
 ; CHECK-NEXT: trunc i128 %i to i64
   %q = bitcast double* %p to i8*
@@ -937,7 +937,7 @@ define %s @test79(%s *%p, i64 %i, i32 %j) {
 
 define double @test80([100 x double]* %p, i32 %i) {
 ; CHECK-LABEL: @test80(
-  %tmp = mul nsw i32 %i, 8
+  %tmp = shl nsw i32 %i, 3
 ; CHECK-NEXT: sext i32 %i to i64
   %q = bitcast [100 x double]* %p to i8*
   %pp = getelementptr i8* %q, i32 %tmp
@@ -954,7 +954,7 @@ define double @test80_addrspacecast([100 x double] addrspace(1)* %p, i32 %i) {
 ; CHECK-NEXT: getelementptr [100 x double] addrspace(1)* %p
 ; CHECK-NEXT: load double addrspace(1)*
 ; CHECK-NEXT: ret double
-  %tmp = mul nsw i32 %i, 8
+  %tmp = shl nsw i32 %i, 3
   %q = addrspacecast [100 x double] addrspace(1)* %p to i8 addrspace(2)*
   %pp = getelementptr i8 addrspace(2)* %q, i32 %tmp
   %r = addrspacecast i8 addrspace(2)* %pp to double addrspace(1)*
@@ -968,7 +968,7 @@ define double @test80_addrspacecast_2([100 x double] addrspace(1)* %p, i32 %i) {
 ; CHECK-NEXT: addrspacecast double addrspace(1)*
 ; CHECK-NEXT: load double addrspace(3)*
 ; CHECK-NEXT: ret double
-  %tmp = mul nsw i32 %i, 8
+  %tmp = shl nsw i32 %i, 3
   %q = addrspacecast [100 x double] addrspace(1)* %p to i8 addrspace(2)*
   %pp = getelementptr i8 addrspace(2)* %q, i32 %tmp
   %r = addrspacecast i8 addrspace(2)* %pp to double addrspace(3)*
@@ -978,7 +978,7 @@ define double @test80_addrspacecast_2([100 x double] addrspace(1)* %p, i32 %i) {
 
 define double @test80_as1([100 x double] addrspace(1)* %p, i16 %i) {
 ; CHECK-LABEL: @test80_as1(
-  %tmp = mul nsw i16 %i, 8
+  %tmp = shl nsw i16 %i, 3
 ; CHECK-NEXT: sext i16 %i to i32
   %q = bitcast [100 x double] addrspace(1)* %p to i8 addrspace(1)*
   %pp = getelementptr i8 addrspace(1)* %q, i16 %tmp
@@ -1050,3 +1050,37 @@ define i8 @test85(i32 %a) {
 ; CHECK: [[SHR:%.*]] = lshr exact i32 [[ADD]], 23
 ; CHECK: [[CST:%.*]] = trunc i32 [[SHR]] to i8
 }
+
+; Overflow on a float to int or int to float conversion is undefined (PR21130).
+
+define i8 @overflow_fptosi() {
+  %i = fptosi double 1.56e+02 to i8
+  ret i8 %i
+; CHECK-LABEL: @overflow_fptosi(
+; CHECK-NEXT: ret i8 undef 
+}
+
+define i8 @overflow_fptoui() {
+  %i = fptoui double 2.56e+02 to i8
+  ret i8 %i
+; CHECK-LABEL: @overflow_fptoui(
+; CHECK-NEXT: ret i8 undef 
+}
+
+; The maximum float is approximately 2 ** 128 which is 3.4E38. 
+; The constant below is 4E38. Use a 130 bit integer to hold that
+; number; 129-bits for the value + 1 bit for the sign.
+define float @overflow_uitofp() {
+  %i = uitofp i130 400000000000000000000000000000000000000 to float
+  ret float %i
+; CHECK-LABEL: @overflow_uitofp(
+; CHECK-NEXT: ret float undef 
+}
+
+define float @overflow_sitofp() {
+  %i = sitofp i130 400000000000000000000000000000000000000 to float
+  ret float %i
+; CHECK-LABEL: @overflow_sitofp(
+; CHECK-NEXT: ret float undef 
+}
+

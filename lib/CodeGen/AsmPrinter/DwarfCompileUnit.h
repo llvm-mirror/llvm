@@ -33,6 +33,11 @@ class DwarfCompileUnit : public DwarfUnit {
   /// the need to search for it in applyStmtList.
   unsigned stmtListIndex;
 
+  /// \brief Construct a DIE for the given DbgVariable without initializing the
+  /// DbgVariable's DIE reference.
+  std::unique_ptr<DIE> constructVariableDIEImpl(const DbgVariable &DV,
+                                                bool Abstract);
+
 public:
   DwarfCompileUnit(unsigned UID, DICompileUnit Node, AsmPrinter *A,
                    DwarfDebug *DW, DwarfFile *DWU);
@@ -89,6 +94,36 @@ public:
 
   void attachRangesOrLowHighPC(DIE &D,
                                const SmallVectorImpl<InsnRange> &Ranges);
+
+  /// \brief This scope represents inlined body of a function. Construct
+  /// DIE to represent this concrete inlined copy of the function.
+  std::unique_ptr<DIE> constructInlinedScopeDIE(LexicalScope *Scope);
+
+  /// \brief Construct new DW_TAG_lexical_block for this scope and
+  /// attach DW_AT_low_pc/DW_AT_high_pc labels.
+  std::unique_ptr<DIE> constructLexicalScopeDIE(LexicalScope *Scope);
+
+  /// constructVariableDIE - Construct a DIE for the given DbgVariable.
+  std::unique_ptr<DIE> constructVariableDIE(DbgVariable &DV,
+                                            bool Abstract = false);
+
+  std::unique_ptr<DIE> constructVariableDIE(DbgVariable &DV,
+                                            const LexicalScope &Scope,
+                                            DIE *&ObjectPointer);
+
+  /// A helper function to create children of a Scope DIE.
+  DIE *createScopeChildrenDIE(LexicalScope *Scope,
+                              SmallVectorImpl<std::unique_ptr<DIE>> &Children,
+                              unsigned *ChildScopeCount = nullptr);
+
+  /// \brief Construct a DIE for this subprogram scope.
+  void constructSubprogramScopeDIE(LexicalScope *Scope);
+
+  DIE *createAndAddScopeChildren(LexicalScope *Scope, DIE &ScopeDIE);
+
+  DIE &constructAbstractSubprogramScopeDIE(LexicalScope *Scope);
+
+  void finishSubprogramDefinition(DISubprogram SP);
 };
 
 } // end llvm namespace
