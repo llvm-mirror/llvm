@@ -193,7 +193,7 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::SUBC, MVT::i32, Custom);  
 
   setLoadExtAction(ISD::EXTLOAD,  MVT::i1,  Promote);
-  //setLoadExtAction(ISD::ZEXTLOAD, MVT::i1,  Promote);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i1,  Promote);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i1,  Promote);
 
   setOperationAction(ISD::BR_CC,            MVT::Other, Expand);
