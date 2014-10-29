@@ -564,6 +564,96 @@ void LLVMSetMetadata(LLVMValueRef Inst, unsigned KindID, LLVMValueRef MD) {
                                          MD ? unwrap<MDNode>(MD) : nullptr);
 }
 
+
+/*--... Operations on Fast Math operator ...................................--*/
+/// Has at least on flag setted
+int LLVMHasFastMathFlag(LLVMValueRef Inst) {
+  return
+    (unwrap<Instruction>(Inst)->hasUnsafeAlgebra()
+     || unwrap<Instruction>(Inst)->hasNoNaNs()
+     || unwrap<Instruction>(Inst)->hasNoInfs()
+     || unwrap<Instruction>(Inst)->hasNoSignedZeros()
+     || unwrap<Instruction>(Inst)->hasAllowReciprocal());
+}
+
+/// Has exactly these flags !
+int LLVMHasFastMathFlags(LLVMValueRef Inst, int Flags) {
+  if (0 == Flags) return false;
+  bool has = true;
+  if (Flags & FastMathFlags::UnsafeAlgebra)
+    has = has && unwrap<Instruction>(Inst)->hasUnsafeAlgebra();
+  if (Flags & FastMathFlags::NoNaNs)
+    has = has && unwrap<Instruction>(Inst)->hasNoNaNs();
+  if (Flags & FastMathFlags::NoInfs)
+    has = has && unwrap<Instruction>(Inst)->hasNoInfs();
+  if (Flags & FastMathFlags::NoSignedZeros)
+    has = has && unwrap<Instruction>(Inst)->hasNoSignedZeros();
+  if (Flags & FastMathFlags::AllowReciprocal)
+    has = has && unwrap<Instruction>(Inst)->hasAllowReciprocal();
+  return has; 
+}
+
+void LLVMSetFastMathFlags(LLVMValueRef Inst, int Flags){
+  if (0 == Flags){
+    FastMathFlags fmf =
+      (unwrap<Instruction>(Inst)->getFastMathFlags());
+    fmf.clear();
+    unwrap<Instruction>(Inst)->setFastMathFlags(fmf);
+    unwrap<Instruction>(Inst)->setHasUnsafeAlgebra(false);
+    unwrap<Instruction>(Inst)->setHasNoNaNs(false);
+    unwrap<Instruction>(Inst)->setHasNoInfs(false);
+    unwrap<Instruction>(Inst)->setHasNoSignedZeros(false);
+    unwrap<Instruction>(Inst)->setHasAllowReciprocal(false);
+    return;
+  }
+
+  if (Flags & FastMathFlags::UnsafeAlgebra)
+    unwrap<Instruction>(Inst)->setHasUnsafeAlgebra(true);
+  if (Flags & FastMathFlags::NoNaNs)
+    unwrap<Instruction>(Inst)->setHasNoNaNs(true);
+  if (Flags & FastMathFlags::NoInfs)
+    unwrap<Instruction>(Inst)->setHasNoInfs(true);
+  if (Flags & FastMathFlags::NoSignedZeros)
+    unwrap<Instruction>(Inst)->setHasNoSignedZeros(true);
+  if (Flags & FastMathFlags::AllowReciprocal)
+    unwrap<Instruction>(Inst)->setHasAllowReciprocal(true);
+}
+
+int LLVMCountFastMathFlags(LLVMValueRef Inst){
+  unsigned res = 0;
+  FastMathFlags fmf =
+    (unwrap<Instruction>(Inst)->getFastMathFlags());
+  if(fmf.unsafeAlgebra()) res++; // Every flags are setted, we can return 5
+  if(fmf.noNaNs()) res++;
+  if(fmf.noInfs()) res++;
+  if(fmf.noSignedZeros()) res++;
+  if(fmf.allowReciprocal()) res++;
+
+  return res;
+}
+
+/* returns an array of FMF.t through Dest */
+int LLVMGetFastMathFlags(LLVMValueRef Inst){
+  if (LLVMHasFastMathFlag(Inst) == 0) {
+    return 0;
+  }
+  int Mask = 0;
+  FastMathFlags fmf =
+    (unwrap<Instruction>(Inst)->getFastMathFlags());
+  if(fmf.unsafeAlgebra())
+    Mask |= FastMathFlags::UnsafeAlgebra;
+  if(fmf.noNaNs())
+    Mask |= FastMathFlags::NoNaNs;
+  if(fmf.noInfs())
+    Mask |= FastMathFlags::NoInfs;
+  if(fmf.noSignedZeros())
+    Mask |= FastMathFlags::NoSignedZeros;
+  if(fmf.allowReciprocal())
+    Mask |= FastMathFlags::AllowReciprocal;
+  return Mask;
+}
+
+
 /*--.. Conversion functions ................................................--*/
 
 #define LLVM_DEFINE_VALUE_CAST(name)                                       \

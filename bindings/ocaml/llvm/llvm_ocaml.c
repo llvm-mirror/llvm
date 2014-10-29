@@ -24,7 +24,14 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <stdio.h>
+#define FMF_CLEAR 0
+#define FMF_FAST (1 << 0)
+#define FMF_NNAN (1 << 1)
+#define FMF_NINF (1 << 2)
+#define FMF_NSZ  (1 << 3)
+#define FMF_ARCP (1 << 4)
+#define FMF_ARRAY {FMF_FAST, FMF_NNAN, FMF_NINF, FMF_NSZ, FMF_ARCP, FMF_CLEAR}
 
 /* Can't use the recommended caml_named_value mechanism for backwards
    compatibility reasons. This is largely equivalent. */
@@ -616,6 +623,47 @@ CAMLprim value llvm_constexpr_get_opcode(LLVMValueRef Val) {
       Val_int(LLVMGetConstOpcode(Val)) : Val_int(0);
 }
 
+/*--... Operations on Fast Math operator ...................................--*/
+int fmf_mask_of_flag_list(value flag_list){
+  static int flag_tab[] = FMF_ARRAY;
+  int converted_flags = 0;
+  converted_flags = convert_flag_list(flag_list, flag_tab);
+  return converted_flags;
+}
+
+/* llvalue -> FastMathFlags.t array -> unit */
+CAMLprim value llvm_set_fastmathflags(LLVMValueRef Val, value Flags){
+  int flags_mask = fmf_mask_of_flag_list(Flags);
+  LLVMSetFastMathFlags(Val, flags_mask);
+  return Val_unit;
+}
+
+/* llvalue -> FastMathFlags.t array */
+CAMLprim value llvm_get_fastmathflags(LLVMValueRef Val){
+  int num = LLVMCountFastMathFlags(Val);
+  value *flags_set = alloc(num, 0);
+  // static value flags_def[] = {Val_int(0), Val_int(1), Val_int(2), Val_int(3), Val_int(4)};
+  int flags = LLVMGetFastMathFlags(Val);
+  static int flag_tab[] = FMF_ARRAY;
+  int j = 0;
+  for(int i = 0; i < 5; i++){
+    if(flags & flag_tab[i])
+      flags_set[j++] = Val_int(i);
+  }
+  return(flags_set);
+}
+
+/* llvalue -> bool */
+CAMLprim value llvm_has_fastmathflag(LLVMValueRef Val) {
+  return Val_bool(LLVMHasFastMathFlag(Val));
+}
+
+/* llvalue -> FastMathFlags.t list -> bool */
+CAMLprim value llvm_has_fastmathflags(LLVMValueRef Val, value Flags) {
+  int flags_mask = fmf_mask_of_flag_list(Flags);
+  return Val_bool(LLVMHasFastMathFlags(Val, flags_mask));
+}
+
 /*--... Operations on instructions .........................................--*/
 
 /* llvalue -> bool */
@@ -647,7 +695,6 @@ CAMLprim value llvm_clear_metadata(LLVMValueRef Val, value MDKindID) {
   LLVMSetMetadata(Val, Int_val(MDKindID), NULL);
   return Val_unit;
 }
-
 
 /*--... Operations on metadata .............................................--*/
 

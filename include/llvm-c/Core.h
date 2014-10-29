@@ -416,6 +416,7 @@ typedef enum {
     LLVMDSNote
 } LLVMDiagnosticSeverity;
 
+
 /**
  * @}
  */
@@ -2363,6 +2364,69 @@ LLVMValueRef LLVMGetMetadata(LLVMValueRef Val, unsigned KindID);
  * Set metadata associated with an instruction value.
  */
 void LLVMSetMetadata(LLVMValueRef Val, unsigned KindID, LLVMValueRef Node);
+
+/**                                                                     
+ * Return all the fast math flags for an individual instruction.       
+ *                                                                      
+ * This only returns something if concerned operator is a               
+ * FastMathoperator extension as frem, fadd, fdiv and fsub.             
+ *                                                                      
+ * @see llvm::Instruction::getFastMathFlags()                           
+ */
+int LLVMGetFastMathFlags(LLVMValueRef Inst);
+
+/**                                                                     
+ * Returns the number of fast math flags setting for an instruction.    
+ *                                                                      
+ * This only returns something if concerned operator is a               
+ * FastMathoperator extension as frem, fadd, fdiv and fsub.             
+ *                                                                      
+ */
+int LLVMCountFastMathFlags(LLVMValueRef Inst);
+
+/**                                                         
+ * Returns n != 0 if the individual instruction contains fast math flags.
+ *                                                          
+ * This only returns something if concerned operator is a   
+ * FastMathoperator extension as frem, fadd, fdiv and fsub.
+ *                                                          
+ * @see llvm::Instruction::hasUnsafeAlgebra()               
+ * @see llvm::Instruction::hasNoNans()                      
+ * @see llvm::Instruction::hasNoInfs()                      
+ * @see llvm::Instruction::hasNoSignedZeros()               
+ * @see llvm::Instruction::hasAllowReciproval()             
+ */
+int LLVMHasFastMathFlags(LLVMValueRef Inst, int Flags);
+
+/**                                                         
+ * Returns n != 0 if the individual instruction contains fast math flags.
+ *                                                          
+ * This only returns something if concerned operator is a   
+ * FastMathoperator extension as frem, fadd, fdiv and fsub.
+ *                                                          
+ * @see llvm::Instruction::hasUnsafeAlgebra()               
+ * @see llvm::Instruction::hasNoNans()                      
+ * @see llvm::Instruction::hasNoInfs()                      
+ * @see llvm::Instruction::hasNoSignedZeros()               
+ * @see llvm::Instruction::hasAllowReciproval()             
+ */
+int LLVMHasFastMathFlag(LLVMValueRef Inst);
+
+/**                                                         
+ * Set an uniq fast math flag on an individual instruction.
+ *                                                          
+ * This only returns something if concerned operator is a   
+ * FastMathoperator extension as frem, fadd, fdiv and fsub.
+ *                                              
+ * @see llvm::Instruction::setFastMathFlags()   
+ * @see llvm::Instruction::setUnsafeAlgebra()   
+ * @see llvm::Instruction::setNoNans()          
+ * @see llvm::Instruction::setNoInfs()          
+ * @see llvm::Instruction::setNoSignedZeros()   
+ * @see llvm::Instruction::setAllowReciproval()
+ * @see llvm::FastMathFlags::clear()            
+ */
+void LLVMSetFastMathFlags(LLVMValueRef Inst, int Flags);
 
 /**
  * Obtain the basic block to which an instruction belongs.
