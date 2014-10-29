@@ -37,8 +37,8 @@
 using namespace llvm;
 
 namespace llvm {
-    int rvexDFAStateInputTable[100][2];
-    unsigned int rvexDFAStateEntryTable[100];
+    int rvexDFAStateInputTable[256][2];
+    unsigned int rvexDFAStateEntryTable[256];
 }
 
 //
