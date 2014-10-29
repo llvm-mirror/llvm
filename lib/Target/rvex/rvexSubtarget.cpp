@@ -39,7 +39,7 @@ rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
   SchedModel(getSchedModelForCPU(CPU.empty() ? "rvex32" : CPU)),
   DL(little ? ("e-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32") :
               ("E-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32")),
-  InstrInfo(*this), TLInfo(TM),
+  InstrInfo(*this), TLInfo(TM), TSInfo(DL),
   FrameLowering(*this),
   rvexABI(UnknownABI), IsLittle(little), IsLinux(IsLinuxOpt)
 {

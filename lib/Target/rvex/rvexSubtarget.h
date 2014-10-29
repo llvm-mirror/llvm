@@ -17,6 +17,7 @@
 #include "rvexFrameLowering.h"
 #include "rvexInstrInfo.h"
 #include "rvexISelLowering.h"
+#include "rvexSelectionDAGInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
@@ -38,6 +39,7 @@ class rvexSubtarget : public rvexGenSubtargetInfo {
   const DataLayout    DL; // Calculates type size & alignment
   const rvexInstrInfo       InstrInfo; //- Instructions
   const rvexTargetLowering  TLInfo; //- Stack(Frame) and Stack direction
+  const rvexSelectionDAGInfo TSInfo; // Selection DAG information
   const rvexFrameLowering   FrameLowering; //- Stack(Frame) and Stack direction
 
 public:
@@ -93,6 +95,8 @@ public:
   }
 
   const rvexTargetLowering *getTargetLowering() const override { return &TLInfo; }
+
+  const rvexSelectionDAGInfo* getSelectionDAGInfo() const override { return &TSInfo; }
 
 //- Vitual function, must have
   /// ParseSubtargetFeatures - Parses features string setting specified
