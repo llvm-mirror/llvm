@@ -17,10 +17,12 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 
+#include "MCTargetDesc/rvexSubtargetInfo.h"
+#include "MCTargetDesc/rvexBuildDFA.h"
+
 #define DEBUG_TYPE "rvex-subtarget"
 
 #define GET_SUBTARGETINFO_TARGET_DESC
-#define GET_SUBTARGETINFO_CTOR
 #include "rvexGenSubtargetInfo.inc"
 
 using namespace llvm;
@@ -34,15 +36,22 @@ void rvexSubtarget::anchor() { }
 rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
                              const std::string &FS, bool little,
                              rvexTargetMachine &TM) :
-  rvexGenSubtargetInfo(TT, CPU, FS),
-  InstrItins(getInstrItineraryForCPU(CPU.empty() ? "rvex32" : CPU)), // Initialize scheduling itinerary for the specified CPU.
-  SchedModel(getSchedModelForCPU(CPU.empty() ? "rvex32" : CPU)),
+  TargetSubtargetInfo(),
+  InstrItins(), // We can initizialize InstrItins and SchedModel only after
+  SchedModel(), // having called InitrvexMCSubtargetInfo
   DL(little ? ("e-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32") :
               ("E-p:32:32:32-i8:8:32-i16:16:32-i64:64:64-n32")),
   InstrInfo(*this), TLInfo(TM), TSInfo(DL),
   FrameLowering(*this),
   rvexABI(UnknownABI), IsLittle(little), IsLinux(IsLinuxOpt)
 {
+  rvexUpdateSubtargetInfoFromConfig();
+
+  InitrvexMCSubtargetInfo(this, TT, CPU, FS);
+
+  InstrItins = getInstrItineraryForCPU(CPU.empty() ? "rvex32" : CPU);
+  SchedModel = getSchedModelForCPU(CPU.empty() ? "rvex32" : CPU);
+
   std::string CPUName = CPU;
   if (CPUName.empty())
     CPUName = "rvex32";
@@ -64,4 +73,10 @@ rvexSubtarget::rvexSubtarget(const std::string &TT, const std::string &CPU,
  //   CriticalPathRCs.push_back(&rvex::CPURegsRegClass);
  //   return OptLevel >= CodeGenOpt::Default;
  // }
+
+DFAPacketizer * rvexSubtarget::createDFAPacketizer(const InstrItineraryData *IID) const {
+  DFAStateTables stateTables = rvexGetDFAStateTables();
+
+  return new DFAPacketizer(IID, std::get<0>(stateTables), std::get<1>(stateTables));
+}
 

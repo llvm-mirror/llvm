@@ -36,9 +36,18 @@
 
 using namespace llvm;
 
-namespace llvm {
-    int rvexDFAStateInputTable[256][2];
-    unsigned int rvexDFAStateEntryTable[256];
+namespace {
+    std::vector<int> rvexDFAStateInputTable; //[][2];
+    std::vector<unsigned int> rvexDFAStateEntryTable;
+}
+
+DFAStateTables rvexGetDFAStateTables() {
+    assert(!rvexDFAStateInputTable.empty() && !rvexDFAStateEntryTable.empty()
+        && "rvexBuildDFA has not been called");
+    assert(rvexDFAStateInputTable.size() % 2 == 0
+        && "rvexDFAStateInputTable should have an even number of entries");
+
+    return std::make_tuple((int (*)[2])rvexDFAStateInputTable.data(), rvexDFAStateEntryTable.data());
 }
 
 //
@@ -270,7 +279,6 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
     // Tracks the total valid transitions encountered so far. It is used
     // to construct the StateEntry table.
     int ValidTransitions = 0;
-    int counter = 0;
     for (unsigned i = 0; i < states.size(); ++i, ++SI) {
         assert (((*SI)->stateNum == (int) i) && "Mismatch in state numbers");
         StateEntry[i] = ValidTransitions;
@@ -279,18 +287,16 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
              II != IE; ++II) {
 
 
-            rvexDFAStateInputTable[counter][0] = II->first;
-            rvexDFAStateInputTable[counter][1] = II->second->stateNum;
-            counter++;
+            rvexDFAStateInputTable.push_back(II->first);
+            rvexDFAStateInputTable.push_back(II->second->stateNum);
         }
         ValidTransitions += (*SI)->Transitions.size();
         
         // If there are no valid transitions from this stage, we need a sentinel
         // transition.
         if (ValidTransitions == StateEntry[i]) {
-            rvexDFAStateInputTable[counter][0] = -1;
-            rvexDFAStateInputTable[counter][1] = -1;
-            counter++;
+            rvexDFAStateInputTable.push_back(-1);
+            rvexDFAStateInputTable.push_back(-1);
             ++ValidTransitions;
         }
         
@@ -299,17 +305,17 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
     // Print out a sentinel entry at the end of the StateInputTable. This is
     // needed to iterate over StateInputTable in DFAPacketizer::ReadTable()
     
-    rvexDFAStateInputTable[counter][0] = -1;
-    rvexDFAStateInputTable[counter][1] = -1;
+    rvexDFAStateInputTable.push_back(-1);
+    rvexDFAStateInputTable.push_back(-1);
     
     // Multiply i by 2 since each entry in DFAStateInputTable is a set of
     // two numbers.
 
     for (unsigned i = 0; i < states.size(); ++i)
-        rvexDFAStateEntryTable[i] = StateEntry[i];
+        rvexDFAStateEntryTable.push_back(StateEntry[i]);
     
     // Print out the index to the sentinel entry in StateInputTable
-    rvexDFAStateEntryTable[states.size()] = ValidTransitions;
+    rvexDFAStateEntryTable.push_back(ValidTransitions);
 
 }
 
@@ -317,7 +323,7 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
 //
 // Run the worklist algorithm to generate the DFA.
 //
-int rvexBuildDFA (std::vector<Stage_desc>& isnStages) {
+int rvexBuildDFA (const std::vector<Stage_desc>& isnStages) {
     //
     // Run a worklist algorithm to generate the DFA.
     //
@@ -351,7 +357,7 @@ int rvexBuildDFA (std::vector<Stage_desc>& isnStages) {
     while (!WorkList.empty()) {
         State *current = WorkList.pop_back_val();
 
-        for (std::vector<Stage_desc>::iterator i = isnStages.begin(); i < isnStages.end(); i++)
+        for (std::vector<Stage_desc>::const_iterator i = isnStages.begin(); i < isnStages.end(); i++)
         {
             Stage_desc InsnClass = *i;
 

@@ -20,7 +20,6 @@
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "rvexGenInstrInfo.inc"
-#include "rvexGenDFAPacketizer.inc"
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -398,9 +397,9 @@ DFAPacketizer *rvexInstrInfo::
 CreateTargetScheduleState(const TargetMachine *TM,
                           const ScheduleDAG *DAG) const {
   
-  const InstrItineraryData *II = TM->getSubtarget<rvexGenSubtargetInfo>().getInstrItineraryData();
+  const InstrItineraryData *II = TM->getSubtarget<rvexSubtarget>().getInstrItineraryData();
 
-  DFAPacketizer *temp = TM->getSubtarget<rvexGenSubtargetInfo>().createDFAPacketizer(II);
+  DFAPacketizer *temp = TM->getSubtarget<rvexSubtarget>().createDFAPacketizer(II);
   
   return temp;
 }

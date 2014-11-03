@@ -50,6 +50,8 @@
 
 #include "rvexFlags.h"
 
+#include "MCTargetDesc/rvexSubtargetInfo.h"
+
 
 using namespace llvm;
 using namespace rvexII;
@@ -346,7 +348,7 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
 
       // Skip over anti-dependences. Two instructions that are
       // anti-dependent can share a packet
-      else if(DepType == SDep::Anti && Is_Generic_flag) {
+      else if(DepType == SDep::Anti && rvexIsGeneric()) {
         DEBUG(errs() << "anti dependencies\n");
         FoundSequentialDependence = true;
       }

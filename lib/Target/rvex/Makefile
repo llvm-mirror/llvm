@@ -14,8 +14,7 @@ TARGET = rvex
 # Make sure that tblgen is run, first thing.
 BUILT_SOURCES = rvexGenRegisterInfo.inc rvexGenInstrInfo.inc \
 		rvexGenAsmWriter.inc rvexGenDAGISel.inc \
-		rvexGenSubtargetInfo.inc rvexGenCallingConv.inc \
-		rvexGenDFAPacketizer.inc
+		rvexGenSubtargetInfo.inc rvexGenCallingConv.inc
 
 DIRS = TargetInfo MCTargetDesc
 

@@ -12,7 +12,11 @@
 #include <vector>
 #include "rvexReadConfig.h"
 
+// Tuple of StateInputTable and StateEntryTable
+typedef std::tuple<int (*)[2], unsigned int *> DFAStateTables;
 
-int rvexBuildDFA (std::vector<Stage_desc>& isnStages);
+DFAStateTables rvexGetDFAStateTables();
+
+int rvexBuildDFA (const std::vector<Stage_desc>& isnStages);
 
 #endif /* defined(__hello__BUILDDFA__) */

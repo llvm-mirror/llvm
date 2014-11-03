@@ -3,6 +3,7 @@ add_llvm_library(LLVMrvexDesc
   rvexMCAsmInfo.cpp
   rvexReadConfig.cpp
   rvexBuildDFA.cpp
+  rvexSubtargetInfo.cpp
   )
 
 add_dependencies(LLVMrvexDesc rvexCommonTableGen)

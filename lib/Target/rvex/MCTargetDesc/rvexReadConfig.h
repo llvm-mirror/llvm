@@ -6,31 +6,28 @@
 //  Copyright (c) 2013 Maurice Daverveldt. All rights reserved.
 //
 
-#ifndef __hello__hallo__
-#define __hello__hallo__
+#ifndef rvexREADCONFIG_H
+#define rvexREADCONFIG_H
 
-#include <iostream>
+#include <string>
+#include <tuple>
+#include <vector>
 
 struct DFAState
 {
-    int num1;
-    int num2;
+    unsigned int num1;
+    unsigned int num2;
 };
 
 struct Stage_desc
 {
-    int delay;
-    int FU;
+    unsigned int delay;
+    unsigned int FU;
     int resources;
 };
 
-using namespace std;
+typedef std::tuple<std::vector<Stage_desc> const *, std::vector<DFAState> const *, bool, int> RVexConfig;
 
-extern vector<Stage_desc> Stages;
-extern vector<DFAState> Itin;
-extern int is_generic;
-extern int is_width;
+RVexConfig read_config (std::string ConfigFile);
 
-int read_config (string ConfigFile);
-
-#endif /* defined(__hello__hallo__) */
+#endif

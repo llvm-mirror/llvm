@@ -18,8 +18,6 @@ tablegen(LLVM rvexGenDAGISel.inc -gen-dag-isel)
 tablegen(LLVM rvexGenCallingConv.inc -gen-callingconv)
 tablegen(LLVM rvexGenSubtargetInfo.inc -gen-subtarget)
 
-tablegen(LLVM rvexGenDFAPacketizer.inc -gen-dfa-packetizer)
-
 # rvexCommonTableGen must be defined
 add_public_tablegen_target(rvexCommonTableGen)
 
