@@ -5,7 +5,6 @@ add_subdirectory(Kaleidoscope)
 add_subdirectory(ModuleMaker)
 add_subdirectory(vex_llc)
 add_subdirectory(vex-desc)
-add_subdirectory(DFA)
 
 if( ( NOT WIN32 ) AND ( NOT "${LLVM_NATIVE_ARCH}" STREQUAL "ARM" ) )
     add_subdirectory(ExceptionDemo)
