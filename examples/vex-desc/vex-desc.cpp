@@ -21,7 +21,6 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/YAMLParser.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 
 using namespace llvm;
 
@@ -100,13 +99,13 @@ namespace yaml {
 int main(int argc, char **argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv);
   if (Buffer.getNumOccurrences()) {
-    OwningPtr<MemoryBuffer> Buf;
-    if (MemoryBuffer::getFileOrSTDIN(Buffer, Buf))
+    ErrorOr<std::unique_ptr<MemoryBuffer>> Buf = MemoryBuffer::getFileOrSTDIN(Buffer);
+    if (Buf)
       return 1;
 
     using llvm::yaml::Input;
     Config doc;
-    Input yin(Buf->getBuffer());
+    Input yin(Buf.get()->getBuffer());
     yin >> doc;
       
     if ( yin.error() )
