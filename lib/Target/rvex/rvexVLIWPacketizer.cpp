@@ -345,13 +345,6 @@ bool rvexVLIWPacketizerList::isLegalToPacketizeTogether(SUnit *SUI,
         // Ignore artificial dependencies
         // do nothing
       }
-
-      // Skip over anti-dependences. Two instructions that are
-      // anti-dependent can share a packet
-      else if(DepType == SDep::Anti && rvexIsGeneric()) {
-        DEBUG(errs() << "anti dependencies\n");
-        FoundSequentialDependence = true;
-      }
     }
 
     if(FoundSequentialDependence) {

@@ -14,9 +14,6 @@
 #include "LiveRangeCalc.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Support/Debug.h"
-
-#include "../Target/rvex/MCTargetDesc/rvexSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -189,23 +186,6 @@ void LiveRangeCalc::extendToUses(LiveRange &LR, unsigned Reg, unsigned Mask) {
         isEarlyClobber = MI->getOperand(DefIdx).isEarlyClobber();
       }
       UseIdx = Indexes->getInstructionIndex(MI).getRegSlot(isEarlyClobber);
-    }
-
-    if (rvexIsGeneric())
-    {
-      DEBUG(dbgs() << "Kill index old: " << UseIdx << "\n");
-      // Kill.setIndex(temp + 100);
-      // SlotIndex IndexEnd = Indexes->getMBBStartIdx(MI->getParent());
-      // DEBUG(dbgs() << "start index: " << IndexEnd << "\n");
-
-      SlotIndex Start2, End2;
-      std::tie(Start2, End2) = Indexes->getMBBRange(MI->getParent());
-      DEBUG(dbgs() << "start: " << Start2 << "\n");
-      DEBUG(dbgs() << "end: " << End2 << "\n");
-      // UseIdx = Idx.getNextIndex();
-      // UseIdx = Idx.getNextIndex();
-      UseIdx = End2;
-      DEBUG(dbgs() << "Kill index new: " << UseIdx << "\n");
     }
 
     // MI is reading Reg. We may have visited MI before if it happens to be
