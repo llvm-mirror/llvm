@@ -198,7 +198,6 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("mipsel", mipsel)
     .Case("mips64", mips64)
     .Case("mips64el", mips64el)
-    .Case("rvex", rvex)
     .Case("msp430", msp430)
     .Case("ppc64", ppc64)
     .Case("ppc32", ppc)
@@ -206,6 +205,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("ppc64le", ppc64le)
     .Case("r600", r600)
     .Case("amdgcn", amdgcn)
+    .Case("rvex", rvex)
     .Case("hexagon", hexagon)
     .Case("sparc", sparc)
     .Case("sparcv9", sparcv9)
@@ -303,9 +303,9 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Cases("mipsel", "mipsallegrexel", Triple::mipsel)
     .Cases("mips64", "mips64eb", Triple::mips64)
     .Case("mips64el", Triple::mips64el)
-    .Case("rvex", Triple::rvex)
     .Case("r600", Triple::r600)
     .Case("amdgcn", Triple::amdgcn)
+    .Case("rvex", Triple::rvex)
     .Case("hexagon", Triple::hexagon)
     .Case("s390x", Triple::systemz)
     .Case("sparc", Triple::sparc)
@@ -870,10 +870,10 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::le32:
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
-  case llvm::Triple::rvex:
   case llvm::Triple::nvptx:
   case llvm::Triple::ppc:
   case llvm::Triple::r600:
+  case llvm::Triple::rvex:
   case llvm::Triple::sparc:
   case llvm::Triple::tce:
   case llvm::Triple::thumb:
@@ -941,10 +941,10 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::le32:
   case Triple::mips:
   case Triple::mipsel:
-  case Triple::rvex:
   case Triple::nvptx:
   case Triple::ppc:
   case Triple::r600:
+  case Triple::rvex:
   case Triple::sparc:
   case Triple::tce:
   case Triple::thumb:
@@ -978,11 +978,11 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::kalimba:
   case Triple::msp430:
   case Triple::r600:
+  case Triple::rvex:
   case Triple::tce:
   case Triple::thumb:
   case Triple::thumbeb:
   case Triple::xcore:
-  case Triple::rvex:
     T.setArch(UnknownArch);
     break;
 
