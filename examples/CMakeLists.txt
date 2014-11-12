@@ -3,7 +3,6 @@ add_subdirectory(Fibonacci)
 add_subdirectory(HowToUseJIT)
 add_subdirectory(Kaleidoscope)
 add_subdirectory(ModuleMaker)
-add_subdirectory(vex_llc)
 add_subdirectory(vex-desc)
 
 if( ( NOT WIN32 ) AND ( NOT "${LLVM_NATIVE_ARCH}" STREQUAL "ARM" ) )
