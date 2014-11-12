@@ -394,12 +394,11 @@ ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const
 }
 
 DFAPacketizer *rvexInstrInfo::
-CreateTargetScheduleState(const TargetMachine *TM,
-                          const ScheduleDAG *DAG) const {
+CreateTargetScheduleState(const TargetSubtargetInfo &STI) const {
   
-  const InstrItineraryData *II = TM->getSubtarget<rvexSubtarget>().getInstrItineraryData();
+  const InstrItineraryData *II = STI.getInstrItineraryData();
 
-  DFAPacketizer *temp = TM->getSubtarget<rvexSubtarget>().createDFAPacketizer(II);
+  DFAPacketizer *temp = static_cast<const rvexSubtarget &>(STI).createDFAPacketizer(II);
   
   return temp;
 }

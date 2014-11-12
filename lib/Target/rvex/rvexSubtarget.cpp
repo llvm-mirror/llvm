@@ -14,6 +14,7 @@
 #include "rvexSubtarget.h"
 #include "rvex.h"
 #include "rvexRegisterInfo.h"
+#include "llvm/CodeGen/DFAPacketizer.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 

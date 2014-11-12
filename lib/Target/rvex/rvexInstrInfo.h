@@ -67,8 +67,7 @@ public:
                             const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
-  DFAPacketizer *CreateTargetScheduleState(const TargetMachine *TM,
-                                          const ScheduleDAG *DAG) const override;
+  DFAPacketizer *CreateTargetScheduleState(const TargetSubtargetInfo &STI) const override;
 
   bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,

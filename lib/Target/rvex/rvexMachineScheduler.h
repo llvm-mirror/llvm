@@ -58,7 +58,7 @@ public:
 rvexVLIWResourceModel(const TargetMachine &TM, const TargetSchedModel *SM) :
     SchedModel(SM), TotalPackets(0) {
     const TargetSubtargetInfo *STI = TM.getSubtargetImpl();
-    ResourcesModel = STI->getInstrInfo()->CreateTargetScheduleState(&TM,NULL);
+    ResourcesModel = STI->getInstrInfo()->CreateTargetScheduleState(*STI);
     TRI = STI->getRegisterInfo(); 
     // This hard requirement could be relaxed,
     // but for now do not let it proceed.
