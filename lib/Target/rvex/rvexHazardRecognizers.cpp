@@ -93,6 +93,7 @@ void rvexHazardRecognizer::Reset() {
   IssueCount = 0;
   RequiredScoreboard.reset();
   ReservedScoreboard.reset();
+  Hazards.clear();
 }
 
 bool rvexHazardRecognizer::atIssueLimit() const {
@@ -102,8 +103,63 @@ bool rvexHazardRecognizer::atIssueLimit() const {
   return IssueCount == IssueWidth;
 }
 
+bool rvexHazardRecognizer::isDataHazard(SUnit const* SU) {
+  const MachineInstr *instr = SU->getInstr();
+
+  if (!instr) {
+    return false;
+  }
+
+  for (auto const& op : instr->uses()) {
+    for (auto const& haz : Hazards) {
+      if(op.getReg() == haz.Register) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+void rvexHazardRecognizer::updateDataHazard(SUnit const* SU) {
+  const MachineInstr *instr = SU->getInstr();
+
+  if (!instr) {
+    return;
+  }
+
+  uint8_t stalls;
+
+  switch (instr->getDesc().getSchedClass()) {
+    case rvex::Sched::IIBranch:
+    case rvex::Sched::IILoadStore:
+    case rvex::Sched::IIImul:
+      stalls = 2;
+    default:
+      stalls = 0;
+  }
+
+  if (stalls == 0) {
+    return;
+  }
+
+  for (auto const &op : instr->defs()) {
+#ifndef NDEBUG
+    for (auto const &haz : Hazards) {
+      assert(op.getReg() != haz.Register && "Defining register should not be in hazards.");
+    }
+#endif
+
+    Hazards.push_back( DataHazard {op.getReg(), stalls} );
+  }
+}
+
 ScheduleHazardRecognizer::HazardType
 rvexHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
+  if (isDataHazard(SU)) {
+    return NoopHazard;
+  }
+
   if (!ItinData || ItinData->isEmpty())
     return NoHazard;
 
@@ -164,6 +220,8 @@ rvexHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
 }
 
 void rvexHazardRecognizer::EmitInstruction(SUnit *SU) {
+  updateDataHazard(SU);
+
   if (!ItinData || ItinData->isEmpty())
     return;
 
@@ -222,6 +280,13 @@ void rvexHazardRecognizer::EmitInstruction(SUnit *SU) {
 }
 
 void rvexHazardRecognizer::AdvanceCycle() {
+  for (auto it = Hazards.begin(); it != Hazards.end(); ++it) {
+    it->Cycles--;
+    if (it->Cycles == 0) {
+      it = Hazards.erase(it);
+    }
+  }
+
   IssueCount = 0;
   ReservedScoreboard[0] = 0; ReservedScoreboard.advance();
   RequiredScoreboard[0] = 0; RequiredScoreboard.advance();

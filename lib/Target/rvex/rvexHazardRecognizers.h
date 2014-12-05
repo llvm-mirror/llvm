@@ -15,9 +15,13 @@
 #define rvexHAZRECS_H
 
 #include "rvexInstrInfo.h"
+
+#include "MCTargetDesc/rvexMCTargetDesc.h"
+
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/ScoreboardHazardRecognizer.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+
 
 namespace llvm {
 
@@ -79,13 +83,10 @@ class rvexHazardRecognizer : public ScheduleHazardRecognizer {
     // Print the scoreboard.
     void dump() const;
   };  
-public:
 
 
   // Itinerary data for the target.
   const InstrItineraryData *ItinData;
-
- 
 
   /// IssueWidth - Max issue per cycle. 0=Unknown.
   unsigned IssueWidth;
@@ -93,9 +94,18 @@ public:
   /// IssueCount - Count instructions issued in this cycle.
   unsigned IssueCount;
 
+  struct DataHazard {
+      unsigned Register;
+      uint8_t Cycles;
+  };
+  SmallVector<DataHazard,8> Hazards;
+
 
   Scoreboard ReservedScoreboard;
   Scoreboard RequiredScoreboard;
+
+  bool isDataHazard (SUnit const* s);
+  void updateDataHazard (SUnit const* s);
 
 public:
 
