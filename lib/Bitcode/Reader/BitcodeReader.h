@@ -223,9 +223,8 @@ public:
 
   void releaseBuffer();
 
-  bool isMaterializable(const GlobalValue *GV) const override;
   bool isDematerializable(const GlobalValue *GV) const override;
-  std::error_code Materialize(GlobalValue *GV) override;
+  std::error_code materialize(GlobalValue *GV) override;
   std::error_code MaterializeModule(Module *M) override;
   void Dematerialize(GlobalValue *GV) override;
 

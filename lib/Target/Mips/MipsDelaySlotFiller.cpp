@@ -196,6 +196,9 @@ namespace {
   private:
     bool runOnMachineBasicBlock(MachineBasicBlock &MBB);
 
+    Iter replaceWithCompactBranch(MachineBasicBlock &MBB,
+                                  Iter Branch, DebugLoc DL);
+
     /// This function checks if it is valid to move Candidate to the delay slot
     /// and returns true if it isn't. It also updates memory and register
     /// dependence information.
@@ -455,7 +458,8 @@ bool MemDefsUses::hasHazard_(const MachineInstr &MI) {
 
 bool MemDefsUses::updateDefsUses(ValueType V, bool MayStore) {
   if (MayStore)
-    return !Defs.insert(V) || Uses.count(V) || SeenNoObjStore || SeenNoObjLoad;
+    return !Defs.insert(V).second || Uses.count(V) || SeenNoObjStore ||
+           SeenNoObjLoad;
 
   Uses.insert(V);
   return Defs.count(V) || SeenNoObjStore;
@@ -493,10 +497,55 @@ getUnderlyingObjects(const MachineInstr &MI,
   return true;
 }
 
+// Replace Branch with the compact branch instruction.
+Iter Filler::replaceWithCompactBranch(MachineBasicBlock &MBB,
+                                      Iter Branch, DebugLoc DL) {
+  const MipsInstrInfo *TII= static_cast<const MipsInstrInfo *>(
+    TM.getSubtargetImpl()->getInstrInfo());
+
+  unsigned NewOpcode =
+    (((unsigned) Branch->getOpcode()) == Mips::BEQ) ? Mips::BEQZC_MM
+                                                    : Mips::BNEZC_MM;
+
+  const MCInstrDesc &NewDesc = TII->get(NewOpcode);
+  MachineInstrBuilder MIB = BuildMI(MBB, Branch, DL, NewDesc);
+
+  MIB.addReg(Branch->getOperand(0).getReg());
+  MIB.addMBB(Branch->getOperand(2).getMBB());
+
+  Iter tmpIter = Branch;
+  Branch = std::prev(Branch);
+  MBB.erase(tmpIter);
+
+  return Branch;
+}
+
+// For given opcode returns opcode of corresponding instruction with short
+// delay slot.
+static int getEquivalentCallShort(int Opcode) {
+  switch (Opcode) {
+  case Mips::BGEZAL:
+    return Mips::BGEZALS_MM;
+  case Mips::BLTZAL:
+    return Mips::BLTZALS_MM;
+  case Mips::JAL:
+    return Mips::JALS_MM;
+  case Mips::JALR:
+    return Mips::JALRS_MM;
+  case Mips::JALR16_MM:
+    return Mips::JALRS16_MM;
+  default:
+    llvm_unreachable("Unexpected call instruction for microMIPS.");
+  }
+}
+
 /// runOnMachineBasicBlock - Fill in delay slots for the given basic block.
 /// We assume there is only one delay slot per delayed instruction.
 bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
   bool Changed = false;
+  bool InMicroMipsMode = TM.getSubtarget<MipsSubtarget>().inMicroMipsMode();
+  const MipsInstrInfo *TII =
+      static_cast<const MipsInstrInfo *>(TM.getSubtargetImpl()->getInstrInfo());
 
   for (Iter I = MBB.begin(); I != MBB.end(); ++I) {
     if (!hasUnoccupiedSlot(&*I))
@@ -507,22 +556,48 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
 
     // Delay slot filling is disabled at -O0.
     if (!DisableDelaySlotFiller && (TM.getOptLevel() != CodeGenOpt::None)) {
-      if (searchBackward(MBB, I))
-        continue;
+      bool Filled = false;
 
-      if (I->isTerminator()) {
-        if (searchSuccBBs(MBB, I))
-          continue;
+      if (searchBackward(MBB, I)) {
+        Filled = true;
+      } else if (I->isTerminator()) {
+        if (searchSuccBBs(MBB, I)) {
+          Filled = true;
+        }
       } else if (searchForward(MBB, I)) {
+        Filled = true;
+      }
+
+      if (Filled) {
+        // Get instruction with delay slot.
+        MachineBasicBlock::instr_iterator DSI(I);
+
+        if (InMicroMipsMode && TII->GetInstSizeInBytes(std::next(DSI)) == 2 &&
+            DSI->isCall()) {
+          // If instruction in delay slot is 16b change opcode to
+          // corresponding instruction with short delay slot.
+          DSI->setDesc(TII->get(getEquivalentCallShort(DSI->getOpcode())));
+        }
+
         continue;
       }
     }
 
-    // Bundle the NOP to the instruction with the delay slot.
-    const MipsInstrInfo *TII = static_cast<const MipsInstrInfo *>(
-        TM.getSubtargetImpl()->getInstrInfo());
-    BuildMI(MBB, std::next(I), I->getDebugLoc(), TII->get(Mips::NOP));
-    MIBundleBuilder(MBB, I, std::next(I, 2));
+    // If instruction is BEQ or BNE with one ZERO register, then instead of
+    // adding NOP replace this instruction with the corresponding compact
+    // branch instruction, i.e. BEQZC or BNEZC.
+    unsigned Opcode = I->getOpcode();
+    if (InMicroMipsMode &&
+        (Opcode == Mips::BEQ || Opcode == Mips::BNE) &&
+        ((unsigned) I->getOperand(1).getReg()) == Mips::ZERO) {
+
+      I = replaceWithCompactBranch(MBB, I, I->getDebugLoc());
+
+    } else {
+      // Bundle the NOP to the instruction with the delay slot.
+      BuildMI(MBB, std::next(I), I->getDebugLoc(), TII->get(Mips::NOP));
+      MIBundleBuilder(MBB, I, std::next(I, 2));
+    }
   }
 
   return Changed;

@@ -17,6 +17,7 @@
 #define LLVM_LIB_TARGET_R600_SIINSTRINFO_H
 
 #include "AMDGPUInstrInfo.h"
+#include "SIDefines.h"
 #include "SIRegisterInfo.h"
 
 namespace llvm {
@@ -52,8 +53,13 @@ private:
 
   void splitScalar64BitBCNT(SmallVectorImpl<MachineInstr *> &Worklist,
                             MachineInstr *Inst) const;
+  void splitScalar64BitBFE(SmallVectorImpl<MachineInstr *> &Worklist,
+                           MachineInstr *Inst) const;
 
   void addDescImplicitUseDef(const MCInstrDesc &Desc, MachineInstr *MI) const;
+
+  bool checkInstOffsetsDoNotOverlap(MachineInstr *MIa,
+                                    MachineInstr *MIb) const;
 
   unsigned findUsedSGPR(const MachineInstr *MI, int OpIndices[3]) const;
 
@@ -113,22 +119,85 @@ public:
   bool isTriviallyReMaterializable(const MachineInstr *MI,
                                    AliasAnalysis *AA = nullptr) const;
 
+  bool areMemAccessesTriviallyDisjoint(
+    MachineInstr *MIa, MachineInstr *MIb,
+    AliasAnalysis *AA = nullptr) const override;
+
   MachineInstr *buildMovInstr(MachineBasicBlock *MBB,
                               MachineBasicBlock::iterator I,
                               unsigned DstReg, unsigned SrcReg) const override;
   bool isMov(unsigned Opcode) const override;
 
   bool isSafeToMoveRegClassDefs(const TargetRegisterClass *RC) const override;
-  bool isDS(uint16_t Opcode) const;
-  bool isMIMG(uint16_t Opcode) const;
-  bool isSMRD(uint16_t Opcode) const;
-  bool isMUBUF(uint16_t Opcode) const;
-  bool isMTBUF(uint16_t Opcode) const;
-  bool isFLAT(uint16_t Opcode) const;
-  bool isVOP1(uint16_t Opcode) const;
-  bool isVOP2(uint16_t Opcode) const;
-  bool isVOP3(uint16_t Opcode) const;
-  bool isVOPC(uint16_t Opcode) const;
+
+  bool isSALU(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SALU;
+  }
+
+  bool isVALU(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VALU;
+  }
+
+  bool isSOP1(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOP1;
+  }
+
+  bool isSOP2(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOP2;
+  }
+
+  bool isSOPC(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOPC;
+  }
+
+  bool isSOPK(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOPK;
+  }
+
+  bool isSOPP(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOPP;
+  }
+
+  bool isVOP1(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOP1;
+  }
+
+  bool isVOP2(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOP2;
+  }
+
+  bool isVOP3(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOP3;
+  }
+
+  bool isVOPC(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOPC;
+  }
+
+  bool isMUBUF(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::MUBUF;
+  }
+
+  bool isMTBUF(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::MTBUF;
+  }
+
+  bool isSMRD(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SMRD;
+  }
+
+  bool isDS(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::DS;
+  }
+
+  bool isMIMG(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::MIMG;
+  }
+
+  bool isFLAT(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::FLAT;
+  }
+
   bool isInlineConstant(const APInt &Imm) const;
   bool isInlineConstant(const MachineOperand &MO) const;
   bool isLiteralConstant(const MachineOperand &MO) const;
@@ -158,7 +227,6 @@ public:
   bool verifyInstruction(const MachineInstr *MI,
                          StringRef &ErrInfo) const override;
 
-  bool isSALUInstr(const MachineInstr &MI) const;
   static unsigned getVALUOp(const MachineInstr &MI);
 
   bool isSALUOpSupportedOnVALU(const MachineInstr &MI) const;

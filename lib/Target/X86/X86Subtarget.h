@@ -159,6 +159,9 @@ protected:
   /// IsUAMemFast - True if unaligned memory access is fast.
   bool IsUAMemFast;
 
+  /// True if unaligned 32-byte memory accesses are slow.
+  bool IsUAMem32Slow;
+  
   /// HasVectorUAMem - True if SIMD operations can have unaligned memory
   /// operands. This may require setting a feature bit in the processor.
   bool HasVectorUAMem;
@@ -171,9 +174,13 @@ protected:
   /// the stack pointer. This is an optimization for Intel Atom processors.
   bool UseLeaForSP;
 
-  /// HasSlowDivide - True if smaller divides are significantly faster than
-  /// full divides and should be used when possible.
-  bool HasSlowDivide;
+  /// HasSlowDivide32 - True if 8-bit divisions are significantly faster than
+  /// 32-bit divisions and should be used when possible.
+  bool HasSlowDivide32;
+
+  /// HasSlowDivide64 - True if 16-bit divides are significantly faster than
+  /// 64-bit divisions and should be used when possible.
+  bool HasSlowDivide64;
 
   /// PadShortFunctions - True if the short functions should be padded to prevent
   /// a stall when returning too early.
@@ -192,6 +199,16 @@ protected:
   /// SlowIncDec - True if INC and DEC instructions are slow when writing to flags
   bool SlowIncDec;
 
+  /// Use the RSQRT* instructions to optimize square root calculations.
+  /// For this to be profitable, the cost of FSQRT and FDIV must be
+  /// substantially higher than normal FP ops like FADD and FMUL.
+  bool UseSqrtEst;
+
+  /// Use the RCP* instructions to optimize FP division calculations.
+  /// For this to be profitable, the cost of FDIV must be
+  /// substantially higher than normal FP ops like FADD and FMUL.
+  bool UseReciprocalEst;
+  
   /// Processor has AVX-512 PreFetch Instructions
   bool HasPFI;
 
@@ -306,13 +323,13 @@ public:
   /// Is this x86_64 with the ILP32 programming model (x32 ABI)?
   bool isTarget64BitILP32() const {
     return In64BitMode && (TargetTriple.getEnvironment() == Triple::GNUX32 ||
-                           TargetTriple.getOS() == Triple::NaCl);
+                           TargetTriple.isOSNaCl());
   }
 
   /// Is this x86_64 with the LP64 programming model (standard AMD64, no x32)?
   bool isTarget64BitLP64() const {
     return In64BitMode && (TargetTriple.getEnvironment() != Triple::GNUX32 &&
-                           TargetTriple.getOS() != Triple::NaCl);
+                           !TargetTriple.isOSNaCl());
   }
 
   PICStyles::Style getPICStyle() const { return PICStyle; }
@@ -360,15 +377,19 @@ public:
   bool isBTMemSlow() const { return IsBTMemSlow; }
   bool isSHLDSlow() const { return IsSHLDSlow; }
   bool isUnalignedMemAccessFast() const { return IsUAMemFast; }
+  bool isUnalignedMem32Slow() const { return IsUAMem32Slow; }
   bool hasVectorUAMem() const { return HasVectorUAMem; }
   bool hasCmpxchg16b() const { return HasCmpxchg16b; }
   bool useLeaForSP() const { return UseLeaForSP; }
-  bool hasSlowDivide() const { return HasSlowDivide; }
+  bool hasSlowDivide32() const { return HasSlowDivide32; }
+  bool hasSlowDivide64() const { return HasSlowDivide64; }
   bool padShortFunctions() const { return PadShortFunctions; }
   bool callRegIndirect() const { return CallRegIndirect; }
   bool LEAusesAG() const { return LEAUsesAG; }
   bool slowLEA() const { return SlowLEA; }
   bool slowIncDec() const { return SlowIncDec; }
+  bool useSqrtEst() const { return UseSqrtEst; }
+  bool useReciprocalEst() const { return UseReciprocalEst; }
   bool hasCDI() const { return HasCDI; }
   bool hasPFI() const { return HasPFI; }
   bool hasERI() const { return HasERI; }
@@ -382,12 +403,8 @@ public:
   const Triple &getTargetTriple() const { return TargetTriple; }
 
   bool isTargetDarwin() const { return TargetTriple.isOSDarwin(); }
-  bool isTargetFreeBSD() const {
-    return TargetTriple.getOS() == Triple::FreeBSD;
-  }
-  bool isTargetSolaris() const {
-    return TargetTriple.getOS() == Triple::Solaris;
-  }
+  bool isTargetFreeBSD() const { return TargetTriple.isOSFreeBSD(); }
+  bool isTargetSolaris() const { return TargetTriple.isOSSolaris(); }
 
   bool isTargetELF() const { return TargetTriple.isOSBinFormatELF(); }
   bool isTargetCOFF() const { return TargetTriple.isOSBinFormatCOFF(); }
@@ -412,6 +429,10 @@ public:
 
   bool isTargetWindowsGNU() const {
     return TargetTriple.isWindowsGNUEnvironment();
+  }
+
+  bool isTargetWindowsItanium() const {
+    return TargetTriple.isWindowsItaniumEnvironment();
   }
 
   bool isTargetCygMing() const { return TargetTriple.isOSCygMing(); }

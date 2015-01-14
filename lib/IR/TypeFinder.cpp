@@ -40,7 +40,7 @@ void TypeFinder::run(const Module &M, bool onlyNamed) {
   }
 
   // Get types from functions.
-  SmallVector<std::pair<unsigned, MDNode*>, 4> MDForInst;
+  SmallVector<std::pair<unsigned, MDNode *>, 4> MDForInst;
   for (Module::const_iterator FI = M.begin(), E = M.end(); FI != E; ++FI) {
     incorporateType(FI->getType());
 

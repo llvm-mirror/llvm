@@ -62,45 +62,184 @@ public:
     delete[] ColCounts;
   }
 
-  ~MatrixMetadata() {
-    delete[] UnsafeRows;
-    delete[] UnsafeCols;
-  }
-
   unsigned getWorstRow() const { return WorstRow; }
   unsigned getWorstCol() const { return WorstCol; }
-  const bool* getUnsafeRows() const { return UnsafeRows; }
-  const bool* getUnsafeCols() const { return UnsafeCols; }
+  const bool* getUnsafeRows() const { return UnsafeRows.get(); }
+  const bool* getUnsafeCols() const { return UnsafeCols.get(); }
 
 private:
   unsigned WorstRow, WorstCol;
-  bool* UnsafeRows;
-  bool* UnsafeCols;
+  std::unique_ptr<bool[]> UnsafeRows;
+  std::unique_ptr<bool[]> UnsafeCols;
 };
 
+/// \brief Holds a vector of the allowed physical regs for a vreg.
+class AllowedRegVector {
+  friend hash_code hash_value(const AllowedRegVector &);
+public:
+
+  AllowedRegVector() : NumOpts(0), Opts(nullptr) {}
+
+  AllowedRegVector(const std::vector<unsigned> &OptVec)
+    : NumOpts(OptVec.size()), Opts(new unsigned[NumOpts]) {
+    std::copy(OptVec.begin(), OptVec.end(), Opts.get());
+  }
+
+  AllowedRegVector(const AllowedRegVector &Other)
+    : NumOpts(Other.NumOpts), Opts(new unsigned[NumOpts]) {
+    std::copy(Other.Opts.get(), Other.Opts.get() + NumOpts, Opts.get());
+  }
+
+  AllowedRegVector(AllowedRegVector &&Other)
+    : NumOpts(std::move(Other.NumOpts)), Opts(std::move(Other.Opts)) {}
+
+  AllowedRegVector& operator=(const AllowedRegVector &Other) {
+    NumOpts = Other.NumOpts;
+    Opts.reset(new unsigned[NumOpts]);
+    std::copy(Other.Opts.get(), Other.Opts.get() + NumOpts, Opts.get());
+    return *this;
+  }
+
+  AllowedRegVector& operator=(AllowedRegVector &&Other) {
+    NumOpts = std::move(Other.NumOpts);
+    Opts = std::move(Other.Opts);
+    return *this;
+  }
+
+  unsigned size() const { return NumOpts; }
+  unsigned operator[](size_t I) const { return Opts[I]; }
+
+  bool operator==(const AllowedRegVector &Other) const {
+    if (NumOpts != Other.NumOpts)
+      return false;
+    return std::equal(Opts.get(), Opts.get() + NumOpts, Other.Opts.get());
+  }
+
+  bool operator!=(const AllowedRegVector &Other) const {
+    return !(*this == Other);
+  }
+
+private:
+  unsigned NumOpts;
+  std::unique_ptr<unsigned[]> Opts;
+};
+
+inline hash_code hash_value(const AllowedRegVector &OptRegs) {
+  unsigned *OStart = OptRegs.Opts.get();
+  unsigned *OEnd = OptRegs.Opts.get() + OptRegs.NumOpts;
+  return hash_combine(OptRegs.NumOpts,
+                      hash_combine_range(OStart, OEnd));
+}
+
+/// \brief Holds graph-level metadata relevent to PBQP RA problems.
+class GraphMetadata {
+private:
+  typedef ValuePool<AllowedRegVector> AllowedRegVecPool;
+public:
+
+  typedef AllowedRegVecPool::PoolRef AllowedRegVecRef;
+
+  GraphMetadata(MachineFunction &MF,
+                LiveIntervals &LIS,
+                MachineBlockFrequencyInfo &MBFI)
+    : MF(MF), LIS(LIS), MBFI(MBFI) {}
+
+  MachineFunction &MF;
+  LiveIntervals &LIS;
+  MachineBlockFrequencyInfo &MBFI;
+
+  void setNodeIdForVReg(unsigned VReg, GraphBase::NodeId NId) {
+    VRegToNodeId[VReg] = NId;
+  }
+
+  GraphBase::NodeId getNodeIdForVReg(unsigned VReg) const {
+    auto VRegItr = VRegToNodeId.find(VReg);
+    if (VRegItr == VRegToNodeId.end())
+      return GraphBase::invalidNodeId();
+    return VRegItr->second;
+  }
+
+  void eraseNodeIdForVReg(unsigned VReg) {
+    VRegToNodeId.erase(VReg);
+  }
+
+  AllowedRegVecRef getAllowedRegs(AllowedRegVector Allowed) {
+    return AllowedRegVecs.getValue(std::move(Allowed));
+  }
+
+private:
+  DenseMap<unsigned, GraphBase::NodeId> VRegToNodeId;
+  AllowedRegVecPool AllowedRegVecs;
+};
+
+/// \brief Holds solver state and other metadata relevant to each PBQP RA node.
 class NodeMetadata {
 public:
-  typedef std::vector<unsigned> OptionToRegMap;
+  typedef RegAlloc::AllowedRegVector AllowedRegVector;
 
   typedef enum { Unprocessed,
                  OptimallyReducible,
                  ConservativelyAllocatable,
                  NotProvablyAllocatable } ReductionState;
 
-  NodeMetadata() : RS(Unprocessed), DeniedOpts(0), OptUnsafeEdges(nullptr){}
-  ~NodeMetadata() { delete[] OptUnsafeEdges; }
+  NodeMetadata()
+    : RS(Unprocessed), NumOpts(0), DeniedOpts(0), OptUnsafeEdges(nullptr),
+      VReg(0) {}
+
+  // FIXME: Re-implementing default behavior to work around MSVC. Remove once
+  // MSVC synthesizes move constructors properly.
+  NodeMetadata(const NodeMetadata &Other)
+    : RS(Other.RS), NumOpts(Other.NumOpts), DeniedOpts(Other.DeniedOpts),
+      OptUnsafeEdges(new unsigned[NumOpts]), VReg(Other.VReg),
+      AllowedRegs(Other.AllowedRegs) {
+    std::copy(&Other.OptUnsafeEdges[0], &Other.OptUnsafeEdges[NumOpts],
+              &OptUnsafeEdges[0]);
+  }
+
+  // FIXME: Re-implementing default behavior to work around MSVC. Remove once
+  // MSVC synthesizes move constructors properly.
+  NodeMetadata(NodeMetadata &&Other)
+    : RS(Other.RS), NumOpts(Other.NumOpts), DeniedOpts(Other.DeniedOpts),
+      OptUnsafeEdges(std::move(Other.OptUnsafeEdges)), VReg(Other.VReg),
+      AllowedRegs(std::move(Other.AllowedRegs)) {}
+
+  // FIXME: Re-implementing default behavior to work around MSVC. Remove once
+  // MSVC synthesizes move constructors properly.
+  NodeMetadata& operator=(const NodeMetadata &Other) {
+    RS = Other.RS;
+    NumOpts = Other.NumOpts;
+    DeniedOpts = Other.DeniedOpts;
+    OptUnsafeEdges.reset(new unsigned[NumOpts]);
+    std::copy(Other.OptUnsafeEdges.get(), Other.OptUnsafeEdges.get() + NumOpts,
+              OptUnsafeEdges.get());
+    VReg = Other.VReg;
+    AllowedRegs = Other.AllowedRegs;
+    return *this;
+  }
+
+  // FIXME: Re-implementing default behavior to work around MSVC. Remove once
+  // MSVC synthesizes move constructors properly.
+  NodeMetadata& operator=(NodeMetadata &&Other) {
+    RS = Other.RS;
+    NumOpts = Other.NumOpts;
+    DeniedOpts = Other.DeniedOpts;
+    OptUnsafeEdges = std::move(Other.OptUnsafeEdges);
+    VReg = Other.VReg;
+    AllowedRegs = std::move(Other.AllowedRegs);
+    return *this;
+  }
 
   void setVReg(unsigned VReg) { this->VReg = VReg; }
   unsigned getVReg() const { return VReg; }
 
-  void setOptionRegs(OptionToRegMap OptionRegs) {
-    this->OptionRegs = std::move(OptionRegs);
+  void setAllowedRegs(GraphMetadata::AllowedRegVecRef AllowedRegs) {
+    this->AllowedRegs = std::move(AllowedRegs);
   }
-  const OptionToRegMap& getOptionRegs() const { return OptionRegs; }
+  const AllowedRegVector& getAllowedRegs() const { return *AllowedRegs; }
 
   void setup(const Vector& Costs) {
     NumOpts = Costs.getLength() - 1;
-    OptUnsafeEdges = new unsigned[NumOpts]();
+    OptUnsafeEdges = std::unique_ptr<unsigned[]>(new unsigned[NumOpts]());
   }
 
   ReductionState getReductionState() const { return RS; }
@@ -124,17 +263,17 @@ public:
 
   bool isConservativelyAllocatable() const {
     return (DeniedOpts < NumOpts) ||
-      (std::find(OptUnsafeEdges, OptUnsafeEdges + NumOpts, 0) !=
-       OptUnsafeEdges + NumOpts);
+      (std::find(&OptUnsafeEdges[0], &OptUnsafeEdges[NumOpts], 0) !=
+       &OptUnsafeEdges[NumOpts]);
   }
 
 private:
   ReductionState RS;
   unsigned NumOpts;
   unsigned DeniedOpts;
-  unsigned* OptUnsafeEdges;
+  std::unique_ptr<unsigned[]> OptUnsafeEdges;
   unsigned VReg;
-  OptionToRegMap OptionRegs;
+  GraphMetadata::AllowedRegVecRef AllowedRegs;
 };
 
 class RegAllocSolverImpl {
@@ -151,38 +290,8 @@ public:
   typedef GraphBase::EdgeId EdgeId;
 
   typedef RegAlloc::NodeMetadata NodeMetadata;
-
   struct EdgeMetadata { };
-
-  class GraphMetadata {
-  public:
-    GraphMetadata(MachineFunction &MF,
-                  LiveIntervals &LIS,
-                  MachineBlockFrequencyInfo &MBFI)
-      : MF(MF), LIS(LIS), MBFI(MBFI) {}
-
-    MachineFunction &MF;
-    LiveIntervals &LIS;
-    MachineBlockFrequencyInfo &MBFI;
-
-    void setNodeIdForVReg(unsigned VReg, GraphBase::NodeId NId) {
-      VRegToNodeId[VReg] = NId;
-    }
-
-    GraphBase::NodeId getNodeIdForVReg(unsigned VReg) const {
-      auto VRegItr = VRegToNodeId.find(VReg);
-      if (VRegItr == VRegToNodeId.end())
-        return GraphBase::invalidNodeId();
-      return VRegItr->second;
-    }
-
-    void eraseNodeIdForVReg(unsigned VReg) {
-      VRegToNodeId.erase(VReg);
-    }
-
-  private:
-    DenseMap<unsigned, NodeId> VRegToNodeId;
-  };
+  typedef RegAlloc::GraphMetadata GraphMetadata;
 
   typedef PBQP::Graph<RegAllocSolverImpl> Graph;
 

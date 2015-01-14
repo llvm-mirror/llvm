@@ -150,11 +150,17 @@ public:
   void apply(PBQPRAGraph &G) override {
     LiveIntervals &LIS = G.getMetadata().LIS;
 
+    // A minimum spill costs, so that register constraints can can be set
+    // without normalization in the [0.0:MinSpillCost( interval.
+    const PBQP::PBQPNum MinSpillCost = 10.0;
+
     for (auto NId : G.nodeIds()) {
       PBQP::PBQPNum SpillCost =
         LIS.getInterval(G.getNodeMetadata(NId).getVReg()).weight;
       if (SpillCost == 0.0)
         SpillCost = std::numeric_limits<PBQP::PBQPNum>::min();
+      else
+        SpillCost += MinSpillCost;
       PBQPRAGraph::RawVector NodeCosts(G.getNodeCosts(NId));
       NodeCosts[PBQP::RegAlloc::getSpillOptionIdx()] = SpillCost;
       G.setNodeCosts(NId, std::move(NodeCosts));
@@ -165,6 +171,12 @@ public:
 /// @brief Add interference edges between overlapping vregs.
 class Interference : public PBQPRAConstraint {
 private:
+
+private:
+
+  typedef const PBQP::RegAlloc::AllowedRegVector* AllowedRegVecPtr;
+  typedef std::pair<AllowedRegVecPtr, AllowedRegVecPtr> IMatrixKey;
+  typedef DenseMap<IMatrixKey, PBQPRAGraph::MatrixPtr> IMatrixCache;
 
   // Holds (Interval, CurrentSegmentID, and NodeId). The first two are required
   // for the fast interference graph construction algorithm. The last is there
@@ -226,8 +238,11 @@ public:
     // number of registers, but rather the size of the largest clique in the
     // graph. Still, we expect this to be better than N^2.
     LiveIntervals &LIS = G.getMetadata().LIS;
-    const TargetRegisterInfo &TRI =
-      *G.getMetadata().MF.getTarget().getSubtargetImpl()->getRegisterInfo();
+
+    // Interferenc matrices are incredibly regular - they're only a function of
+    // the allowed sets, so we cache them to avoid the overhead of constructing
+    // and uniquing them.
+    IMatrixCache C;
 
     typedef std::set<IntervalInfo, decltype(&lowestEndPoint)> IntervalSet;
     typedef std::priority_queue<IntervalInfo, std::vector<IntervalInfo>,
@@ -275,13 +290,11 @@ public:
         // Check that we haven't already added this edge
         // FIXME: findEdge is expensive in the worst case (O(max_clique(G))).
         //        It might be better to replace this with a local bit-matrix.
-        if (G.findEdge(NId, MId) != PBQP::GraphBase::invalidEdgeId())
+        if (G.findEdge(NId, MId) != PBQPRAGraph::invalidEdgeId())
           continue;
 
         // This is a new edge - add it to the graph.
-        const auto &NOpts = G.getNodeMetadata(NId).getOptionRegs();
-        const auto &MOpts = G.getNodeMetadata(MId).getOptionRegs();
-        G.addEdge(NId, MId, createInterferenceMatrix(TRI, NOpts, MOpts));
+        createInterferenceEdge(G, NId, MId, C);
       }
 
       // Finally, add Cur to the Active set.
@@ -291,21 +304,35 @@ public:
 
 private:
 
-  PBQPRAGraph::RawMatrix createInterferenceMatrix(
-                       const TargetRegisterInfo &TRI,
-                       const PBQPRAGraph::NodeMetadata::OptionToRegMap &NOpts,
-                       const PBQPRAGraph::NodeMetadata::OptionToRegMap &MOpts) {
-    PBQPRAGraph::RawMatrix M(NOpts.size() + 1, MOpts.size() + 1, 0);
-    for (unsigned I = 0; I != NOpts.size(); ++I) {
-      unsigned PRegN = NOpts[I];
-      for (unsigned J = 0; J != MOpts.size(); ++J) {
-        unsigned PRegM = MOpts[J];
+  void createInterferenceEdge(PBQPRAGraph &G, PBQPRAGraph::NodeId NId,
+                              PBQPRAGraph::NodeId MId, IMatrixCache &C) {
+
+    const TargetRegisterInfo &TRI =
+      *G.getMetadata().MF.getTarget().getSubtargetImpl()->getRegisterInfo();
+
+    const auto &NRegs = G.getNodeMetadata(NId).getAllowedRegs();
+    const auto &MRegs = G.getNodeMetadata(MId).getAllowedRegs();
+
+    // Try looking the edge costs up in the IMatrixCache first.
+    IMatrixKey K(&NRegs, &MRegs);
+    IMatrixCache::iterator I = C.find(K);
+    if (I != C.end()) {
+      G.addEdgeBypassingCostAllocator(NId, MId, I->second);
+      return;
+    }
+
+    PBQPRAGraph::RawMatrix M(NRegs.size() + 1, MRegs.size() + 1, 0);
+    for (unsigned I = 0; I != NRegs.size(); ++I) {
+      unsigned PRegN = NRegs[I];
+      for (unsigned J = 0; J != MRegs.size(); ++J) {
+        unsigned PRegM = MRegs[J];
         if (TRI.regsOverlap(PRegN, PRegM))
           M[I + 1][J + 1] = std::numeric_limits<PBQP::PBQPNum>::infinity();
       }
     }
 
-    return M;
+    PBQPRAGraph::EdgeId EId = G.addEdge(NId, MId, std::move(M));
+    C[K] = G.getEdgeCostsPtr(EId);
   }
 };
 
@@ -329,11 +356,8 @@ public:
         unsigned DstReg = CP.getDstReg();
         unsigned SrcReg = CP.getSrcReg();
 
-        const float CopyFactor = 0.5; // Cost of copy relative to load. Current
-                                      // value plucked randomly out of the air.
-
-        PBQP::PBQPNum CBenefit =
-          CopyFactor * LiveIntervals::getSpillWeight(false, true, &MBFI, &MI);
+        const float Scale = 1.0f / MBFI.getEntryFreq();
+        PBQP::PBQPNum CBenefit = MBFI.getBlockFreq(&MBB).getFrequency() * Scale;
 
         if (CP.isPhys()) {
           if (!MF.getRegInfo().isAllocatable(DstReg))
@@ -341,8 +365,8 @@ public:
 
           PBQPRAGraph::NodeId NId = G.getMetadata().getNodeIdForVReg(SrcReg);
 
-          const PBQPRAGraph::NodeMetadata::OptionToRegMap &Allowed =
-            G.getNodeMetadata(NId).getOptionRegs();
+          const PBQPRAGraph::NodeMetadata::AllowedRegVector &Allowed =
+            G.getNodeMetadata(NId).getAllowedRegs();
 
           unsigned PRegOpt = 0;
           while (PRegOpt < Allowed.size() && Allowed[PRegOpt] != DstReg)
@@ -350,16 +374,16 @@ public:
 
           if (PRegOpt < Allowed.size()) {
             PBQPRAGraph::RawVector NewCosts(G.getNodeCosts(NId));
-            NewCosts[PRegOpt + 1] += CBenefit;
+            NewCosts[PRegOpt + 1] -= CBenefit;
             G.setNodeCosts(NId, std::move(NewCosts));
           }
         } else {
           PBQPRAGraph::NodeId N1Id = G.getMetadata().getNodeIdForVReg(DstReg);
           PBQPRAGraph::NodeId N2Id = G.getMetadata().getNodeIdForVReg(SrcReg);
-          const PBQPRAGraph::NodeMetadata::OptionToRegMap *Allowed1 =
-            &G.getNodeMetadata(N1Id).getOptionRegs();
-          const PBQPRAGraph::NodeMetadata::OptionToRegMap *Allowed2 =
-            &G.getNodeMetadata(N2Id).getOptionRegs();
+          const PBQPRAGraph::NodeMetadata::AllowedRegVector *Allowed1 =
+            &G.getNodeMetadata(N1Id).getAllowedRegs();
+          const PBQPRAGraph::NodeMetadata::AllowedRegVector *Allowed2 =
+            &G.getNodeMetadata(N2Id).getAllowedRegs();
 
           PBQPRAGraph::EdgeId EId = G.findEdge(N1Id, N2Id);
           if (EId == G.invalidEdgeId()) {
@@ -384,10 +408,10 @@ public:
 private:
 
   void addVirtRegCoalesce(
-                      PBQPRAGraph::RawMatrix &CostMat,
-                      const PBQPRAGraph::NodeMetadata::OptionToRegMap &Allowed1,
-                      const PBQPRAGraph::NodeMetadata::OptionToRegMap &Allowed2,
-                      PBQP::PBQPNum Benefit) {
+                    PBQPRAGraph::RawMatrix &CostMat,
+                    const PBQPRAGraph::NodeMetadata::AllowedRegVector &Allowed1,
+                    const PBQPRAGraph::NodeMetadata::AllowedRegVector &Allowed2,
+                    PBQP::PBQPNum Benefit) {
     assert(CostMat.getRows() == Allowed1.size() + 1 && "Size mismatch.");
     assert(CostMat.getCols() == Allowed2.size() + 1 && "Size mismatch.");
     for (unsigned I = 0; I != Allowed1.size(); ++I) {
@@ -395,7 +419,7 @@ private:
       for (unsigned J = 0; J != Allowed2.size(); ++J) {
         unsigned PReg2 = Allowed2[J];
         if (PReg1 == PReg2)
-          CostMat[I + 1][J + 1] += -Benefit;
+          CostMat[I + 1][J + 1] -= Benefit;
       }
     }
   }
@@ -455,6 +479,15 @@ void RegAllocPBQP::findVRegIntervalsToAlloc(const MachineFunction &MF,
   }
 }
 
+static bool isACalleeSavedRegister(unsigned reg, const TargetRegisterInfo &TRI,
+                                   const MachineFunction &MF) {
+  const MCPhysReg *CSR = TRI.getCalleeSavedRegs(&MF);
+  for (unsigned i = 0; CSR[i] != 0; ++i)
+    if (TRI.regsOverlap(reg, CSR[i]))
+      return true;
+  return false;
+}
+
 void RegAllocPBQP::initializeGraph(PBQPRAGraph &G) {
   MachineFunction &MF = G.getMetadata().MF;
 
@@ -499,9 +532,17 @@ void RegAllocPBQP::initializeGraph(PBQPRAGraph &G) {
     }
 
     PBQPRAGraph::RawVector NodeCosts(VRegAllowed.size() + 1, 0);
+
+    // Tweak cost of callee saved registers, as using then force spilling and
+    // restoring them. This would only happen in the prologue / epilogue though.
+    for (unsigned i = 0; i != VRegAllowed.size(); ++i)
+      if (isACalleeSavedRegister(VRegAllowed[i], TRI, MF))
+        NodeCosts[1 + i] += 1.0;
+
     PBQPRAGraph::NodeId NId = G.addNode(std::move(NodeCosts));
     G.getNodeMetadata(NId).setVReg(VReg);
-    G.getNodeMetadata(NId).setOptionRegs(std::move(VRegAllowed));
+    G.getNodeMetadata(NId).setAllowedRegs(
+      G.getMetadata().getAllowedRegs(std::move(VRegAllowed)));
     G.getMetadata().setNodeIdForVReg(VReg, NId);
   }
 }
@@ -529,7 +570,7 @@ bool RegAllocPBQP::mapPBQPToRegAlloc(const PBQPRAGraph &G,
     unsigned AllocOption = Solution.getSelection(NId);
 
     if (AllocOption != PBQP::RegAlloc::getSpillOptionIdx()) {
-      unsigned PReg = G.getNodeMetadata(NId).getOptionRegs()[AllocOption - 1];
+      unsigned PReg = G.getNodeMetadata(NId).getAllowedRegs()[AllocOption - 1];
       DEBUG(dbgs() << "VREG " << PrintReg(VReg, &TRI) << " -> "
             << TRI.getName(PReg) << "\n");
       assert(PReg != 0 && "Invalid preg selected.");
@@ -563,7 +604,6 @@ bool RegAllocPBQP::mapPBQPToRegAlloc(const PBQPRAGraph &G,
   return !AnotherRoundNeeded;
 }
 
-
 void RegAllocPBQP::finalizeAlloc(MachineFunction &MF,
                                  LiveIntervals &LIS,
                                  VirtRegMap &VRM) const {
@@ -586,12 +626,20 @@ void RegAllocPBQP::finalizeAlloc(MachineFunction &MF,
   }
 }
 
+static inline float normalizePBQPSpillWeight(float UseDefFreq, unsigned Size,
+                                         unsigned NumInstr) {
+  // All intervals have a spill weight that is mostly proportional to the number
+  // of uses, with uses in loops having a bigger weight.
+  return NumInstr * normalizeSpillWeight(UseDefFreq, Size, 1);
+}
+
 bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
   LiveIntervals &LIS = getAnalysis<LiveIntervals>();
   MachineBlockFrequencyInfo &MBFI =
     getAnalysis<MachineBlockFrequencyInfo>();
 
-  calculateSpillWeightsAndHints(LIS, MF, getAnalysis<MachineLoopInfo>(), MBFI);
+  calculateSpillWeightsAndHints(LIS, MF, getAnalysis<MachineLoopInfo>(), MBFI,
+                                normalizePBQPSpillWeight);
 
   VirtRegMap &VRM = getAnalysis<VirtRegMap>();
 

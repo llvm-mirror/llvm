@@ -184,9 +184,8 @@ entry:
 define <8 x float> @G(<8 x float> %a, <8 x float> %b) nounwind uwtable readnone ssp {
 ; ALL-LABEL: G:
 ; ALL:       ## BB#0: ## %entry
-; ALL-NEXT:    vperm2f128 {{.*#+}} ymm0 = ymm0[0,1,0,1]
-; ALL-NEXT:    vpermilps {{.*#+}} ymm1 = ymm1[0,0,2,3,4,4,6,7]
-; ALL-NEXT:    vblendpd {{.*#+}} ymm0 = ymm1[0],ymm0[1],ymm1[2,3]
+; ALL-NEXT:    vperm2f128 {{.*#+}} ymm0 = ymm0[2,3],ymm1[2,3]
+; ALL-NEXT:    vpermilps {{.*#+}} ymm0 = ymm0[0,0,2,3,4,4,6,7]
 ; ALL-NEXT:    retq
 entry:
   %shuffle = shufflevector <8 x float> %a, <8 x float> %b, <8 x i32> <i32 undef, i32 undef, i32 6, i32 7, i32 undef, i32 12, i32 undef, i32 15>

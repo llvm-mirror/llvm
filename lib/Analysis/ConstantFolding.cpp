@@ -55,7 +55,8 @@ static Constant *FoldBitCast(Constant *C, Type *DestTy,
   // Catch the obvious splat cases.
   if (C->isNullValue() && !DestTy->isX86_MMXTy())
     return Constant::getNullValue(DestTy);
-  if (C->isAllOnesValue() && !DestTy->isX86_MMXTy())
+  if (C->isAllOnesValue() && !DestTy->isX86_MMXTy() &&
+      !DestTy->isPtrOrPtrVectorTy()) // Don't get ones for ptr types!
     return Constant::getAllOnesValue(DestTy);
 
   // Handle a vector->integer cast.
@@ -197,7 +198,7 @@ static Constant *FoldBitCast(Constant *C, Type *DestTy,
 
   // Handle: bitcast (<2 x i64> <i64 0, i64 1> to <4 x i32>)
   unsigned Ratio = NumDstElt/NumSrcElt;
-  unsigned DstBitSize = DstEltTy->getPrimitiveSizeInBits();
+  unsigned DstBitSize = TD.getTypeSizeInBits(DstEltTy);
 
   // Loop over each source value, expanding into multiple results.
   for (unsigned i = 0; i != NumSrcElt; ++i) {
@@ -212,6 +213,15 @@ static Constant *FoldBitCast(Constant *C, Type *DestTy,
       Constant *Elt = ConstantExpr::getLShr(Src,
                                   ConstantInt::get(Src->getType(), ShiftAmt));
       ShiftAmt += isLittleEndian ? DstBitSize : -DstBitSize;
+
+      // Truncate the element to an integer with the same pointer size and
+      // convert the element back to a pointer using a inttoptr.
+      if (DstEltTy->isPointerTy()) {
+        IntegerType *DstIntTy = Type::getIntNTy(C->getContext(), DstBitSize);
+        Constant *CE = ConstantExpr::getTrunc(Elt, DstIntTy);
+        Result.push_back(ConstantExpr::getIntToPtr(CE, DstEltTy));
+        continue;
+      }
 
       // Truncate and remember this piece.
       Result.push_back(ConstantExpr::getTrunc(Elt, DstEltTy));
@@ -971,7 +981,7 @@ ConstantFoldConstantExpressionImpl(const ConstantExpr *CE, const DataLayout *TD,
     // Recursively fold the ConstantExpr's operands. If we have already folded
     // a ConstantExpr, we don't have to process it again.
     if (ConstantExpr *NewCE = dyn_cast<ConstantExpr>(NewC)) {
-      if (FoldedOps.insert(NewCE))
+      if (FoldedOps.insert(NewCE).second)
         NewC = ConstantFoldConstantExpressionImpl(NewCE, TD, TLI, FoldedOps);
     }
     Ops.push_back(NewC);
@@ -1229,6 +1239,8 @@ Constant *llvm::ConstantFoldLoadThroughGEPIndices(Constant *C,
 bool llvm::canConstantFoldCallTo(const Function *F) {
   switch (F->getIntrinsicID()) {
   case Intrinsic::fabs:
+  case Intrinsic::minnum:
+  case Intrinsic::maxnum:
   case Intrinsic::log:
   case Intrinsic::log2:
   case Intrinsic::log10:
@@ -1625,6 +1637,19 @@ static Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID,
           V1.copySign(V2);
           return ConstantFP::get(Ty->getContext(), V1);
         }
+
+        if (IntrinsicID == Intrinsic::minnum) {
+          const APFloat &C1 = Op1->getValueAPF();
+          const APFloat &C2 = Op2->getValueAPF();
+          return ConstantFP::get(Ty->getContext(), minnum(C1, C2));
+        }
+
+        if (IntrinsicID == Intrinsic::maxnum) {
+          const APFloat &C1 = Op1->getValueAPF();
+          const APFloat &C2 = Op2->getValueAPF();
+          return ConstantFP::get(Ty->getContext(), maxnum(C1, C2));
+        }
+
         if (!TLI)
           return nullptr;
         if (Name == "pow" && TLI->has(LibFunc::pow))

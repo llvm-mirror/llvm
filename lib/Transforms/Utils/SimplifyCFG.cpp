@@ -70,8 +70,10 @@ static cl::opt<bool> HoistCondStores(
     cl::desc("Hoist conditional stores if an unconditional store precedes"));
 
 STATISTIC(NumBitMaps, "Number of switch instructions turned into bitmaps");
+STATISTIC(NumLinearMaps, "Number of switch instructions turned into linear mapping");
 STATISTIC(NumLookupTables, "Number of switch instructions turned into lookup tables");
 STATISTIC(NumLookupTablesHoles, "Number of switch instructions turned into lookup tables (holes checked)");
+STATISTIC(NumTableCmpReuses, "Number of reused switch table lookup compares");
 STATISTIC(NumSinkCommons, "Number of common instructions sunk down to the end block");
 STATISTIC(NumSpeculations, "Number of speculative executed instructions");
 
@@ -356,114 +358,177 @@ static ConstantInt *GetConstantInt(Value *V, const DataLayout *DL) {
   return nullptr;
 }
 
-/// GatherConstantCompares - Given a potentially 'or'd or 'and'd together
-/// collection of icmp eq/ne instructions that compare a value against a
-/// constant, return the value being compared, and stick the constant into the
-/// Values vector.
-static Value *
-GatherConstantCompares(Value *V, std::vector<ConstantInt*> &Vals, Value *&Extra,
-                       const DataLayout *DL, bool isEQ, unsigned &UsedICmps) {
-  Instruction *I = dyn_cast<Instruction>(V);
-  if (!I) return nullptr;
+namespace {
 
-  // If this is an icmp against a constant, handle this as one of the cases.
-  if (ICmpInst *ICI = dyn_cast<ICmpInst>(I)) {
-    if (ConstantInt *C = GetConstantInt(I->getOperand(1), DL)) {
-      Value *RHSVal;
-      ConstantInt *RHSC;
+/// Given a chain of or (||) or and (&&) comparison of a value against a
+/// constant, this will try to recover the information required for a switch
+/// structure.
+/// It will depth-first traverse the chain of comparison, seeking for patterns
+/// like %a == 12 or %a < 4 and combine them to produce a set of integer
+/// representing the different cases for the switch.
+/// Note that if the chain is composed of '||' it will build the set of elements
+/// that matches the comparisons (i.e. any of this value validate the chain)
+/// while for a chain of '&&' it will build the set elements that make the test
+/// fail.
+struct ConstantComparesGatherer {
 
-      if (ICI->getPredicate() == (isEQ ? ICmpInst::ICMP_EQ:ICmpInst::ICMP_NE)) {
-        // (x & ~2^x) == y --> x == y || x == y|2^x
-        // This undoes a transformation done by instcombine to fuse 2 compares.
-        if (match(ICI->getOperand(0),
-                  m_And(m_Value(RHSVal), m_ConstantInt(RHSC)))) {
-          APInt Not = ~RHSC->getValue();
-          if (Not.isPowerOf2()) {
-            Vals.push_back(C);
-            Vals.push_back(
-                ConstantInt::get(C->getContext(), C->getValue() | Not));
-            UsedICmps++;
-            return RHSVal;
-          }
+  Value *CompValue; /// Value found for the switch comparison
+  Value *Extra;     /// Extra clause to be checked before the switch
+  SmallVector<ConstantInt *, 8> Vals; /// Set of integers to match in switch
+  unsigned UsedICmps; /// Number of comparisons matched in the and/or chain
+
+  /// Construct and compute the result for the comparison instruction Cond
+  ConstantComparesGatherer(Instruction *Cond, const DataLayout *DL)
+      : CompValue(nullptr), Extra(nullptr), UsedICmps(0) {
+    gather(Cond, DL);
+  }
+
+  /// Prevent copy
+  ConstantComparesGatherer(const ConstantComparesGatherer &)
+      LLVM_DELETED_FUNCTION;
+  ConstantComparesGatherer &
+  operator=(const ConstantComparesGatherer &) LLVM_DELETED_FUNCTION;
+
+private:
+
+  /// Try to set the current value used for the comparison, it succeeds only if
+  /// it wasn't set before or if the new value is the same as the old one
+  bool setValueOnce(Value *NewVal) {
+    if(CompValue && CompValue != NewVal) return false;
+    CompValue = NewVal;
+    return (CompValue != nullptr);
+  }
+
+  /// Try to match Instruction "I" as a comparison against a constant and
+  /// populates the array Vals with the set of values that match (or do not
+  /// match depending on isEQ).
+  /// Return false on failure. On success, the Value the comparison matched
+  /// against is placed in CompValue.
+  /// If CompValue is already set, the function is expected to fail if a match
+  /// is found but the value compared to is different.
+  bool matchInstruction(Instruction *I, const DataLayout *DL, bool isEQ) {
+    // If this is an icmp against a constant, handle this as one of the cases.
+    ICmpInst *ICI;
+    ConstantInt *C;
+    if (!((ICI = dyn_cast<ICmpInst>(I)) &&
+             (C = GetConstantInt(I->getOperand(1), DL)))) {
+      return false;
+    }
+
+    Value *RHSVal;
+    ConstantInt *RHSC;
+
+    // Pattern match a special case
+    // (x & ~2^x) == y --> x == y || x == y|2^x
+    // This undoes a transformation done by instcombine to fuse 2 compares.
+    if (ICI->getPredicate() == (isEQ ? ICmpInst::ICMP_EQ:ICmpInst::ICMP_NE)) {
+      if (match(ICI->getOperand(0),
+                m_And(m_Value(RHSVal), m_ConstantInt(RHSC)))) {
+        APInt Not = ~RHSC->getValue();
+        if (Not.isPowerOf2()) {
+          // If we already have a value for the switch, it has to match!
+          if(!setValueOnce(RHSVal))
+            return false;
+
+          Vals.push_back(C);
+          Vals.push_back(ConstantInt::get(C->getContext(),
+                                          C->getValue() | Not));
+          UsedICmps++;
+          return true;
         }
-
-        UsedICmps++;
-        Vals.push_back(C);
-        return I->getOperand(0);
       }
 
-      // If we have "x ult 3" comparison, for example, then we can add 0,1,2 to
-      // the set.
-      ConstantRange Span =
-        ConstantRange::makeICmpRegion(ICI->getPredicate(), C->getValue());
+      // If we already have a value for the switch, it has to match!
+      if(!setValueOnce(ICI->getOperand(0)))
+        return false;
 
-      // Shift the range if the compare is fed by an add. This is the range
-      // compare idiom as emitted by instcombine.
-      bool hasAdd =
-          match(I->getOperand(0), m_Add(m_Value(RHSVal), m_ConstantInt(RHSC)));
-      if (hasAdd)
-        Span = Span.subtract(RHSC->getValue());
-
-      // If this is an and/!= check then we want to optimize "x ugt 2" into
-      // x != 0 && x != 1.
-      if (!isEQ)
-        Span = Span.inverse();
-
-      // If there are a ton of values, we don't want to make a ginormous switch.
-      if (Span.getSetSize().ugt(8) || Span.isEmptySet())
-        return nullptr;
-
-      for (APInt Tmp = Span.getLower(); Tmp != Span.getUpper(); ++Tmp)
-        Vals.push_back(ConstantInt::get(V->getContext(), Tmp));
       UsedICmps++;
-      return hasAdd ? RHSVal : I->getOperand(0);
-    }
-    return nullptr;
-  }
-
-  // Otherwise, we can only handle an | or &, depending on isEQ.
-  if (I->getOpcode() != (isEQ ? Instruction::Or : Instruction::And))
-    return nullptr;
-
-  unsigned NumValsBeforeLHS = Vals.size();
-  unsigned UsedICmpsBeforeLHS = UsedICmps;
-  if (Value *LHS = GatherConstantCompares(I->getOperand(0), Vals, Extra, DL,
-                                          isEQ, UsedICmps)) {
-    unsigned NumVals = Vals.size();
-    unsigned UsedICmpsBeforeRHS = UsedICmps;
-    if (Value *RHS = GatherConstantCompares(I->getOperand(1), Vals, Extra, DL,
-                                            isEQ, UsedICmps)) {
-      if (LHS == RHS)
-        return LHS;
-      Vals.resize(NumVals);
-      UsedICmps = UsedICmpsBeforeRHS;
+      Vals.push_back(C);
+      return ICI->getOperand(0);
     }
 
-    // The RHS of the or/and can't be folded in and we haven't used "Extra" yet,
-    // set it and return success.
-    if (Extra == nullptr || Extra == I->getOperand(1)) {
-      Extra = I->getOperand(1);
-      return LHS;
+    // If we have "x ult 3", for example, then we can add 0,1,2 to the set.
+    ConstantRange Span = ConstantRange::makeICmpRegion(ICI->getPredicate(),
+                                                       C->getValue());
+
+    // Shift the range if the compare is fed by an add. This is the range
+    // compare idiom as emitted by instcombine.
+    Value *CandidateVal = I->getOperand(0);
+    if(match(I->getOperand(0), m_Add(m_Value(RHSVal), m_ConstantInt(RHSC)))) {
+      Span = Span.subtract(RHSC->getValue());
+      CandidateVal = RHSVal;
     }
 
-    Vals.resize(NumValsBeforeLHS);
-    UsedICmps = UsedICmpsBeforeLHS;
-    return nullptr;
+    // If this is an and/!= check, then we are looking to build the set of
+    // value that *don't* pass the and chain. I.e. to turn "x ugt 2" into
+    // x != 0 && x != 1.
+    if (!isEQ)
+      Span = Span.inverse();
+
+    // If there are a ton of values, we don't want to make a ginormous switch.
+    if (Span.getSetSize().ugt(8) || Span.isEmptySet()) {
+      return false;
+    }
+
+    // If we already have a value for the switch, it has to match!
+    if(!setValueOnce(CandidateVal))
+      return false;
+
+    // Add all values from the range to the set
+    for (APInt Tmp = Span.getLower(); Tmp != Span.getUpper(); ++Tmp)
+      Vals.push_back(ConstantInt::get(I->getContext(), Tmp));
+
+    UsedICmps++;
+    return true;
+
   }
 
-  // If the LHS can't be folded in, but Extra is available and RHS can, try to
-  // use LHS as Extra.
-  if (Extra == nullptr || Extra == I->getOperand(0)) {
-    Value *OldExtra = Extra;
-    Extra = I->getOperand(0);
-    if (Value *RHS = GatherConstantCompares(I->getOperand(1), Vals, Extra, DL,
-                                            isEQ, UsedICmps))
-      return RHS;
-    assert(Vals.size() == NumValsBeforeLHS);
-    Extra = OldExtra;
-  }
+  /// gather - Given a potentially 'or'd or 'and'd together collection of icmp
+  /// eq/ne/lt/gt instructions that compare a value against a constant, extract
+  /// the value being compared, and stick the list constants into the Vals
+  /// vector.
+  /// One "Extra" case is allowed to differ from the other.
+  void gather(Value *V, const DataLayout *DL) {
+    Instruction *I = dyn_cast<Instruction>(V);
+    bool isEQ = (I->getOpcode() == Instruction::Or);
 
-  return nullptr;
+    // Keep a stack (SmallVector for efficiency) for depth-first traversal
+    SmallVector<Value *, 8> DFT;
+
+    // Initialize
+    DFT.push_back(V);
+
+    while(!DFT.empty()) {
+      V = DFT.pop_back_val();
+
+      if (Instruction *I = dyn_cast<Instruction>(V)) {
+        // If it is a || (or && depending on isEQ), process the operands.
+        if (I->getOpcode() == (isEQ ? Instruction::Or : Instruction::And)) {
+          DFT.push_back(I->getOperand(1));
+          DFT.push_back(I->getOperand(0));
+          continue;
+        }
+
+        // Try to match the current instruction
+        if (matchInstruction(I, DL, isEQ))
+          // Match succeed, continue the loop
+          continue;
+      }
+
+      // One element of the sequence of || (or &&) could not be match as a
+      // comparison against the same value as the others.
+      // We allow only one "Extra" case to be checked before the switch
+      if (!Extra) {
+        Extra = V;
+        continue;
+      }
+      // Failed to parse a proper sequence, abort now
+      CompValue = nullptr;
+      break;
+    }
+  }
+};
+
 }
 
 static void EraseTerminatorInstAndDCECond(TerminatorInst *TI) {
@@ -643,7 +708,7 @@ SimplifyEqualityComparisonWithOnlyPredecessor(TerminatorInst *TI,
 
     // Collect branch weights into a vector.
     SmallVector<uint32_t, 8> Weights;
-    MDNode* MD = SI->getMetadata(LLVMContext::MD_prof);
+    MDNode *MD = SI->getMetadata(LLVMContext::MD_prof);
     bool HasWeight = MD && (MD->getNumOperands() == 2 + SI->getNumCases());
     if (HasWeight)
       for (unsigned MD_i = 1, MD_e = MD->getNumOperands(); MD_i < MD_e;
@@ -738,7 +803,7 @@ static int ConstantIntSortPredicate(ConstantInt *const *P1,
 }
 
 static inline bool HasBranchWeights(const Instruction* I) {
-  MDNode* ProfMD = I->getMetadata(LLVMContext::MD_prof);
+  MDNode *ProfMD = I->getMetadata(LLVMContext::MD_prof);
   if (ProfMD && ProfMD->getOperand(0))
     if (MDString* MDS = dyn_cast<MDString>(ProfMD->getOperand(0)))
       return MDS->getString().equals("branch_weights");
@@ -751,7 +816,7 @@ static inline bool HasBranchWeights(const Instruction* I) {
 /// metadata.
 static void GetBranchWeights(TerminatorInst *TI,
                              SmallVectorImpl<uint64_t> &Weights) {
-  MDNode* MD = TI->getMetadata(LLVMContext::MD_prof);
+  MDNode *MD = TI->getMetadata(LLVMContext::MD_prof);
   assert(MD);
   for (unsigned i = 1, e = MD->getNumOperands(); i < e; ++i) {
     ConstantInt *CI = cast<ConstantInt>(MD->getOperand(i));
@@ -1061,7 +1126,8 @@ static bool HoistThenElseCodeToIf(BranchInst *BI, const DataLayout *DL) {
       LLVMContext::MD_tbaa,
       LLVMContext::MD_range,
       LLVMContext::MD_fpmath,
-      LLVMContext::MD_invariant_load
+      LLVMContext::MD_invariant_load,
+      LLVMContext::MD_nonnull
     };
     combineMetadata(I1, I2, KnownIDs);
     I2->eraseFromParent();
@@ -1311,6 +1377,8 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
     if (!I2->use_empty())
       I2->replaceAllUsesWith(I1);
     I1->intersectOptionalDataWith(I2);
+    // TODO: Use combineMetadata here to preserve what metadata we can
+    // (analogous to the hoisting case above).
     I2->eraseFromParent();
 
     if (UpdateRE1)
@@ -2761,24 +2829,17 @@ static bool SimplifyBranchOnICmpChain(BranchInst *BI, const DataLayout *DL,
   Instruction *Cond = dyn_cast<Instruction>(BI->getCondition());
   if (!Cond) return false;
 
-
   // Change br (X == 0 | X == 1), T, F into a switch instruction.
   // If this is a bunch of seteq's or'd together, or if it's a bunch of
   // 'setne's and'ed together, collect them.
-  Value *CompVal = nullptr;
-  std::vector<ConstantInt*> Values;
-  bool TrueWhenEqual = true;
-  Value *ExtraCase = nullptr;
-  unsigned UsedICmps = 0;
 
-  if (Cond->getOpcode() == Instruction::Or) {
-    CompVal = GatherConstantCompares(Cond, Values, ExtraCase, DL, true,
-                                     UsedICmps);
-  } else if (Cond->getOpcode() == Instruction::And) {
-    CompVal = GatherConstantCompares(Cond, Values, ExtraCase, DL, false,
-                                     UsedICmps);
-    TrueWhenEqual = false;
-  }
+  // Try to gather values from a chain of and/or to be turned into a switch
+  ConstantComparesGatherer ConstantCompare(Cond, DL);
+  // Unpack the result
+  SmallVectorImpl<ConstantInt*> &Values = ConstantCompare.Vals;
+  Value *CompVal = ConstantCompare.CompValue;
+  unsigned UsedICmps = ConstantCompare.UsedICmps;
+  Value *ExtraCase = ConstantCompare.Extra;
 
   // If we didn't have a multiply compared value, fail.
   if (!CompVal) return false;
@@ -2786,6 +2847,8 @@ static bool SimplifyBranchOnICmpChain(BranchInst *BI, const DataLayout *DL,
   // Avoid turning single icmps into a switch.
   if (UsedICmps <= 1)
     return false;
+
+  bool TrueWhenEqual = (Cond->getOpcode() == Instruction::Or);
 
   // There might be duplicate constants in the list, which the switch
   // instruction can't handle, remove them now.
@@ -3653,6 +3716,11 @@ namespace {
       // store that single value and return it for each lookup.
       SingleValueKind,
 
+      // For tables where there is a linear relationship between table index
+      // and values. We calculate the result with a simple multiplication
+      // and addition instead of a table lookup.
+      LinearMapKind,
+
       // For small tables with integer elements, we can pack them into a bitmap
       // that fits into a target-legal register. Values are retrieved by
       // shift and mask operations.
@@ -3670,6 +3738,10 @@ namespace {
     ConstantInt *BitMap;
     IntegerType *BitMapElementTy;
 
+    // For LinearMapKind, these are the constants used to derive the value.
+    ConstantInt *LinearOffset;
+    ConstantInt *LinearMultiplier;
+
     // For ArrayKind, this is the array.
     GlobalVariable *Array;
   };
@@ -3682,7 +3754,7 @@ SwitchLookupTable::SwitchLookupTable(Module &M,
                                      Constant *DefaultValue,
                                      const DataLayout *DL)
     : SingleValue(nullptr), BitMap(nullptr), BitMapElementTy(nullptr),
-      Array(nullptr) {
+      LinearOffset(nullptr), LinearMultiplier(nullptr), Array(nullptr) {
   assert(Values.size() && "Can't build lookup table without values!");
   assert(TableSize >= Values.size() && "Can't fit values in table!");
 
@@ -3727,6 +3799,43 @@ SwitchLookupTable::SwitchLookupTable(Module &M,
     return;
   }
 
+  // Check if we can derive the value with a linear transformation from the
+  // table index.
+  if (isa<IntegerType>(ValueType)) {
+    bool LinearMappingPossible = true;
+    APInt PrevVal;
+    APInt DistToPrev;
+    assert(TableSize >= 2 && "Should be a SingleValue table.");
+    // Check if there is the same distance between two consecutive values.
+    for (uint64_t I = 0; I < TableSize; ++I) {
+      ConstantInt *ConstVal = dyn_cast<ConstantInt>(TableContents[I]);
+      if (!ConstVal) {
+        // This is an undef. We could deal with it, but undefs in lookup tables
+        // are very seldom. It's probably not worth the additional complexity.
+        LinearMappingPossible = false;
+        break;
+      }
+      APInt Val = ConstVal->getValue();
+      if (I != 0) {
+        APInt Dist = Val - PrevVal;
+        if (I == 1) {
+          DistToPrev = Dist;
+        } else if (Dist != DistToPrev) {
+          LinearMappingPossible = false;
+          break;
+        }
+      }
+      PrevVal = Val;
+    }
+    if (LinearMappingPossible) {
+      LinearOffset = cast<ConstantInt>(TableContents[0]);
+      LinearMultiplier = ConstantInt::get(M.getContext(), DistToPrev);
+      Kind = LinearMapKind;
+      ++NumLinearMaps;
+      return;
+    }
+  }
+
   // If the type is integer and the table fits in a register, build a bitmap.
   if (WouldFitInRegister(DL, TableSize, ValueType)) {
     IntegerType *IT = cast<IntegerType>(ValueType);
@@ -3762,6 +3871,16 @@ Value *SwitchLookupTable::BuildLookup(Value *Index, IRBuilder<> &Builder) {
   switch (Kind) {
     case SingleValueKind:
       return SingleValue;
+    case LinearMapKind: {
+      // Derive the result value from the input value.
+      Value *Result = Builder.CreateIntCast(Index, LinearMultiplier->getType(),
+                                            false, "switch.idx.cast");
+      if (!LinearMultiplier->isOne())
+        Result = Builder.CreateMul(Result, LinearMultiplier, "switch.idx.mult");
+      if (!LinearOffset->isZero())
+        Result = Builder.CreateAdd(Result, LinearOffset, "switch.offset");
+      return Result;
+    }
     case BitMapKind: {
       // Type of the bitmap (e.g. i59).
       IntegerType *MapTy = BitMap->getType();
@@ -3833,9 +3952,8 @@ static bool ShouldBuildLookupTable(SwitchInst *SI,
 
   bool AllTablesFitInRegister = true;
   bool HasIllegalType = false;
-  for (SmallDenseMap<PHINode*, Type*>::const_iterator I = ResultTypes.begin(),
-       E = ResultTypes.end(); I != E; ++I) {
-    Type *Ty = I->second;
+  for (const auto &I : ResultTypes) {
+    Type *Ty = I.second;
 
     // Saturate this flag to true.
     HasIllegalType = HasIllegalType || !TTI.isTypeLegal(Ty);
@@ -3863,6 +3981,89 @@ static bool ShouldBuildLookupTable(SwitchInst *SI,
   // jump tables, see SelectionDAGBuilder::handleJTSwitchCase.
   // FIXME: Find the best cut-off.
   return SI->getNumCases() * 10 >= TableSize * 4;
+}
+
+/// Try to reuse the switch table index compare. Following pattern:
+/// \code
+///     if (idx < tablesize)
+///        r = table[idx]; // table does not contain default_value
+///     else
+///        r = default_value;
+///     if (r != default_value)
+///        ...
+/// \endcode
+/// Is optimized to:
+/// \code
+///     cond = idx < tablesize;
+///     if (cond)
+///        r = table[idx];
+///     else
+///        r = default_value;
+///     if (cond)
+///        ...
+/// \endcode
+/// Jump threading will then eliminate the second if(cond).
+static void reuseTableCompare(User *PhiUser, BasicBlock *PhiBlock,
+          BranchInst *RangeCheckBranch, Constant *DefaultValue,
+          const SmallVectorImpl<std::pair<ConstantInt*, Constant*> >& Values) {
+
+  ICmpInst *CmpInst = dyn_cast<ICmpInst>(PhiUser);
+  if (!CmpInst)
+    return;
+
+  // We require that the compare is in the same block as the phi so that jump
+  // threading can do its work afterwards.
+  if (CmpInst->getParent() != PhiBlock)
+    return;
+
+  Constant *CmpOp1 = dyn_cast<Constant>(CmpInst->getOperand(1));
+  if (!CmpOp1)
+    return;
+
+  Value *RangeCmp = RangeCheckBranch->getCondition();
+  Constant *TrueConst = ConstantInt::getTrue(RangeCmp->getType());
+  Constant *FalseConst = ConstantInt::getFalse(RangeCmp->getType());
+
+  // Check if the compare with the default value is constant true or false.
+  Constant *DefaultConst = ConstantExpr::getICmp(CmpInst->getPredicate(),
+                                                 DefaultValue, CmpOp1, true);
+  if (DefaultConst != TrueConst && DefaultConst != FalseConst)
+    return;
+
+  // Check if the compare with the case values is distinct from the default
+  // compare result.
+  for (auto ValuePair : Values) {
+    Constant *CaseConst = ConstantExpr::getICmp(CmpInst->getPredicate(),
+                              ValuePair.second, CmpOp1, true);
+    if (!CaseConst || CaseConst == DefaultConst)
+      return;
+    assert((CaseConst == TrueConst || CaseConst == FalseConst) &&
+           "Expect true or false as compare result.");
+  }
+ 
+  // Check if the branch instruction dominates the phi node. It's a simple
+  // dominance check, but sufficient for our needs.
+  // Although this check is invariant in the calling loops, it's better to do it
+  // at this late stage. Practically we do it at most once for a switch.
+  BasicBlock *BranchBlock = RangeCheckBranch->getParent();
+  for (auto PI = pred_begin(PhiBlock), E = pred_end(PhiBlock); PI != E; ++PI) {
+    BasicBlock *Pred = *PI;
+    if (Pred != BranchBlock && Pred->getUniquePredecessor() != BranchBlock)
+      return;
+  }
+
+  if (DefaultConst == FalseConst) {
+    // The compare yields the same result. We can replace it.
+    CmpInst->replaceAllUsesWith(RangeCmp);
+    ++NumTableCmpReuses;
+  } else {
+    // The compare yields the same result, just inverted. We can replace it.
+    Value *InvertedTableCmp = BinaryOperator::CreateXor(RangeCmp,
+                ConstantInt::get(RangeCmp->getType(), 1), "inverted.cmp",
+                RangeCheckBranch);
+    CmpInst->replaceAllUsesWith(InvertedTableCmp);
+    ++NumTableCmpReuses;
+  }
 }
 
 /// SwitchToLookupTable - If the switch is only used to initialize one or more
@@ -3919,16 +4120,17 @@ static bool SwitchToLookupTable(SwitchInst *SI,
       return false;
 
     // Append the result from this case to the list for each phi.
-    for (ResultsTy::iterator I = Results.begin(), E = Results.end(); I!=E; ++I) {
-      if (!ResultLists.count(I->first))
-        PHIs.push_back(I->first);
-      ResultLists[I->first].push_back(std::make_pair(CaseVal, I->second));
+    for (const auto &I : Results) {
+      PHINode *PHI = I.first;
+      Constant *Value = I.second;
+      if (!ResultLists.count(PHI))
+        PHIs.push_back(PHI);
+      ResultLists[PHI].push_back(std::make_pair(CaseVal, Value));
     }
   }
 
   // Keep track of the result types.
-  for (size_t I = 0, E = PHIs.size(); I != E; ++I) {
-    PHINode *PHI = PHIs[I];
+  for (PHINode *PHI : PHIs) {
     ResultTypes[PHI] = ResultLists[PHI][0].second->getType();
   }
 
@@ -3940,11 +4142,9 @@ static bool SwitchToLookupTable(SwitchInst *SI,
   // If the table has holes, we need a constant result for the default case
   // or a bitmask that fits in a register.
   SmallVector<std::pair<PHINode*, Constant*>, 4> DefaultResultsList;
-  bool HasDefaultResults = false;
-  if (TableHasHoles) {
-    HasDefaultResults = GetCaseResults(SI, nullptr, SI->getDefaultDest(),
+  bool HasDefaultResults = GetCaseResults(SI, nullptr, SI->getDefaultDest(),
                                        &CommonDest, DefaultResultsList, DL);
-  }
+
   bool NeedMask = (TableHasHoles && !HasDefaultResults);
   if (NeedMask) {
     // As an extra penalty for the validity test we require more cases.
@@ -3954,9 +4154,9 @@ static bool SwitchToLookupTable(SwitchInst *SI,
       return false;
   }
 
-  for (size_t I = 0, E = DefaultResultsList.size(); I != E; ++I) {
-    PHINode *PHI = DefaultResultsList[I].first;
-    Constant *Result = DefaultResultsList[I].second;
+  for (const auto &I : DefaultResultsList) {
+    PHINode *PHI = I.first;
+    Constant *Result = I.second;
     DefaultResults[PHI] = Result;
   }
 
@@ -3987,6 +4187,8 @@ static bool SwitchToLookupTable(SwitchInst *SI,
   // lookup table BB. Otherwise, check if the condition value is within the case
   // range. If it is so, branch to the new BB. Otherwise branch to SI's default
   // destination.
+  BranchInst *RangeCheckBranch = nullptr;
+
   const bool GeneratingCoveredLookupTable = MaxTableSize == TableSize;
   if (GeneratingCoveredLookupTable) {
     Builder.CreateBr(LookupBB);
@@ -3997,7 +4199,7 @@ static bool SwitchToLookupTable(SwitchInst *SI,
   } else {
     Value *Cmp = Builder.CreateICmpULT(TableIndex, ConstantInt::get(
                                        MinCaseVal->getType(), TableSize));
-    Builder.CreateCondBr(Cmp, LookupBB, SI->getDefaultDest());
+    RangeCheckBranch = Builder.CreateCondBr(Cmp, LookupBB, SI->getDefaultDest());
   }
 
   // Populate the BB that does the lookups.
@@ -4014,9 +4216,12 @@ static bool SwitchToLookupTable(SwitchInst *SI,
                                   CommonDest->getParent(),
                                   CommonDest);
 
+    // Make the mask's bitwidth at least 8bit and a power-of-2 to avoid
+    // unnecessary illegal types.
+    uint64_t TableSizePowOf2 = NextPowerOf2(std::max(7ULL, TableSize - 1ULL));
+    APInt MaskInt(TableSizePowOf2, 0);
+    APInt One(TableSizePowOf2, 1);
     // Build bitmask; fill in a 1 bit for every case.
-    APInt MaskInt(TableSize, 0);
-    APInt One(TableSize, 1);
     const ResultListTy &ResultList = ResultLists[PHIs[0]];
     for (size_t I = 0, E = ResultList.size(); I != E; ++I) {
       uint64_t Idx = (ResultList[I].first->getValue() -
@@ -4045,11 +4250,11 @@ static bool SwitchToLookupTable(SwitchInst *SI,
   bool ReturnedEarly = false;
   for (size_t I = 0, E = PHIs.size(); I != E; ++I) {
     PHINode *PHI = PHIs[I];
+    const ResultListTy &ResultList = ResultLists[PHI];
 
     // If using a bitmask, use any value to fill the lookup table holes.
     Constant *DV = NeedMask ? ResultLists[PHI][0].second : DefaultResults[PHI];
-    SwitchLookupTable Table(Mod, TableSize, MinCaseVal, ResultLists[PHI],
-                            DV, DL);
+    SwitchLookupTable Table(Mod, TableSize, MinCaseVal, ResultList, DV, DL);
 
     Value *Result = Table.BuildLookup(TableIndex, Builder);
 
@@ -4060,6 +4265,16 @@ static bool SwitchToLookupTable(SwitchInst *SI,
       Builder.CreateRet(Result);
       ReturnedEarly = true;
       break;
+    }
+
+    // Do a small peephole optimization: re-use the switch table compare if
+    // possible.
+    if (!TableHasHoles && HasDefaultResults && RangeCheckBranch) {
+      BasicBlock *PhiBlock = PHI->getParent();
+      // Search for compare instructions which use the phi.
+      for (auto *User : PHI->users()) {
+        reuseTableCompare(User, PhiBlock, RangeCheckBranch, DV, ResultList);
+      }
     }
 
     PHI->addIncoming(Result, LookupBB);
@@ -4138,7 +4353,7 @@ bool SimplifyCFGOpt::SimplifyIndirectBr(IndirectBrInst *IBI) {
   SmallPtrSet<Value *, 8> Succs;
   for (unsigned i = 0, e = IBI->getNumDestinations(); i != e; ++i) {
     BasicBlock *Dest = IBI->getDestination(i);
-    if (!Dest->hasAddressTaken() || !Succs.insert(Dest)) {
+    if (!Dest->hasAddressTaken() || !Succs.insert(Dest).second) {
       Dest->removePredecessor(BB);
       IBI->removeDestination(i);
       --i; --e;

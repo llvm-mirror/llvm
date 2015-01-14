@@ -1724,7 +1724,7 @@ int BoUpSLP::getTreeCost() {
   for (UserList::iterator I = ExternalUses.begin(), E = ExternalUses.end();
        I != E; ++I) {
     // We only add extract cost once for the same scalar.
-    if (!ExtractCostCalculated.insert(I->Scalar))
+    if (!ExtractCostCalculated.insert(I->Scalar).second)
       continue;
 
     // Uses by ephemeral values are free (because the ephemeral value will be
@@ -1922,7 +1922,7 @@ Value *BoUpSLP::vectorizeTree(TreeEntry *E) {
         ValueList Operands;
         BasicBlock *IBB = PH->getIncomingBlock(i);
 
-        if (!VisitedBBs.insert(IBB)) {
+        if (!VisitedBBs.insert(IBB).second) {
           NewPhi->addIncoming(NewPhi->getIncomingValueForBlock(IBB), IBB);
           continue;
         }
@@ -3632,7 +3632,7 @@ bool SLPVectorizer::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
 
   for (BasicBlock::iterator it = BB->begin(), e = BB->end(); it != e; it++) {
     // We may go through BB multiple times so skip the one we have checked.
-    if (!VisitedInstrs.insert(it))
+    if (!VisitedInstrs.insert(it).second)
       continue;
 
     if (isa<DbgInfoIntrinsic>(it))
@@ -3689,6 +3689,21 @@ bool SLPVectorizer::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
           if (((HorRdx.matchAssociativeReduction(nullptr, BinOp, DL) &&
                 HorRdx.tryToReduce(R, TTI)) ||
                tryToVectorize(BinOp, R))) {
+            Changed = true;
+            it = BB->begin();
+            e = BB->end();
+            continue;
+          }
+        }
+
+    // Try to vectorize horizontal reductions feeding into a return.
+    if (ReturnInst *RI = dyn_cast<ReturnInst>(it))
+      if (RI->getNumOperands() != 0)
+        if (BinaryOperator *BinOp =
+                dyn_cast<BinaryOperator>(RI->getOperand(0))) {
+          DEBUG(dbgs() << "SLP: Found a return to vectorize.\n");
+          if (tryToVectorizePair(BinOp->getOperand(0),
+                                 BinOp->getOperand(1), R)) {
             Changed = true;
             it = BB->begin();
             e = BB->end();

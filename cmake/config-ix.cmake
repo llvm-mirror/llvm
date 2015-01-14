@@ -42,7 +42,6 @@ function(check_type_exists type files variable)
 endfunction()
 
 # include checks
-check_include_file_cxx(cxxabi.h HAVE_CXXABI_H)
 check_include_file(dirent.h HAVE_DIRENT_H)
 check_include_file(dlfcn.h HAVE_DLFCN_H)
 check_include_file(errno.h HAVE_ERRNO_H)
@@ -80,6 +79,13 @@ check_symbol_exists(FE_INEXACT "fenv.h" HAVE_DECL_FE_INEXACT)
 
 check_include_file(mach/mach.h HAVE_MACH_MACH_H)
 check_include_file(mach-o/dyld.h HAVE_MACH_O_DYLD_H)
+
+# size_t must be defined before including cxxabi.h on FreeBSD 10.0.
+check_cxx_source_compiles("
+#include <stddef.h>
+#include <cxxabi.h>
+int main() { return 0; }
+" HAVE_CXXABI_H)
 
 # library checks
 if( NOT PURE_WINDOWS )
@@ -493,16 +499,42 @@ else()
 endif()
 
 set(LLVM_BINDINGS "")
-find_program(GO_EXECUTABLE NAMES go DOC "go executable")
-if(GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
+if(WIN32)
   message(STATUS "Go bindings disabled.")
 else()
-  execute_process(COMMAND ${GO_EXECUTABLE} run ${CMAKE_SOURCE_DIR}/bindings/go/conftest.go
-                  RESULT_VARIABLE GO_CONFTEST)
-  if(GO_CONFTEST STREQUAL "0")
-    set(LLVM_BINDINGS "${LLVM_BINDINGS} go")
-    message(STATUS "Go bindings enabled.")
+  find_program(GO_EXECUTABLE NAMES go DOC "go executable")
+  if(GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
+    message(STATUS "Go bindings disabled.")
   else()
-    message(STATUS "Go bindings disabled, need at least Go 1.2.")
+    execute_process(COMMAND ${GO_EXECUTABLE} run ${CMAKE_SOURCE_DIR}/bindings/go/conftest.go
+                    RESULT_VARIABLE GO_CONFTEST)
+    if(GO_CONFTEST STREQUAL "0")
+      set(LLVM_BINDINGS "${LLVM_BINDINGS} go")
+      message(STATUS "Go bindings enabled.")
+    else()
+      message(STATUS "Go bindings disabled, need at least Go 1.2.")
+    endif()
   endif()
 endif()
+
+include(FindOCaml)
+include(AddOCaml)
+if(WIN32)
+  message(STATUS "OCaml bindings disabled.")
+else()
+  find_package(OCaml)
+  if( NOT OCAML_FOUND )
+    message(STATUS "OCaml bindings disabled.")
+  else()
+    if( OCAML_VERSION VERSION_LESS "4.00.0" )
+      message(STATUS "OCaml bindings disabled, need OCaml >=4.00.0.")
+    else()
+      message(STATUS "OCaml bindings enabled.")
+      find_ocamlfind_package(ctypes VERSION 0.3)
+      find_ocamlfind_package(oUnit VERSION 2 OPTIONAL)
+      set(LLVM_BINDINGS "${LLVM_BINDINGS} ocaml")
+    endif()
+  endif()
+endif()
+
+string(REPLACE " " ";" LLVM_BINDINGS_LIST "${LLVM_BINDINGS}")

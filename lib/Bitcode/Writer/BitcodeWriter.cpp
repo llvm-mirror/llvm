@@ -756,13 +756,13 @@ static void WriteMDNode(const MDNode *N,
 static void WriteModuleMetadata(const Module *M,
                                 const ValueEnumerator &VE,
                                 BitstreamWriter &Stream) {
-  const ValueEnumerator::ValueList &Vals = VE.getMDValues();
+  const auto &Vals = VE.getMDValues();
   bool StartedMetadataBlock = false;
   unsigned MDSAbbrev = 0;
   SmallVector<uint64_t, 64> Record;
   for (unsigned i = 0, e = Vals.size(); i != e; ++i) {
 
-    if (const MDNode *N = dyn_cast<MDNode>(Vals[i].first)) {
+    if (const MDNode *N = dyn_cast<MDNode>(Vals[i])) {
       if (!N->isFunctionLocal() || !N->getFunction()) {
         if (!StartedMetadataBlock) {
           Stream.EnterSubblock(bitc::METADATA_BLOCK_ID, 3);
@@ -770,7 +770,7 @@ static void WriteModuleMetadata(const Module *M,
         }
         WriteMDNode(N, VE, Stream, Record);
       }
-    } else if (const MDString *MDS = dyn_cast<MDString>(Vals[i].first)) {
+    } else if (const MDString *MDS = dyn_cast<MDString>(Vals[i])) {
       if (!StartedMetadataBlock)  {
         Stream.EnterSubblock(bitc::METADATA_BLOCK_ID, 3);
 
@@ -848,7 +848,7 @@ static void WriteMetadataAttachment(const Function &F,
 
   // Write metadata attachments
   // METADATA_ATTACHMENT - [m x [value, [n x [id, mdnode]]]
-  SmallVector<std::pair<unsigned, MDNode*>, 4> MDs;
+  SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
 
   for (Function::const_iterator BB = F.begin(), E = F.end(); BB != E; ++BB)
     for (BasicBlock::const_iterator I = BB->begin(), E = BB->end();
@@ -1877,7 +1877,7 @@ static void WriteModule(const Module *M, BitstreamWriter &Stream) {
   Stream.EmitRecord(bitc::MODULE_CODE_VERSION, Vals);
 
   // Analyze the module, enumerating globals, functions, etc.
-  ValueEnumerator VE(M);
+  ValueEnumerator VE(*M);
 
   // Emit blockinfo, which defines the standard abbreviations etc.
   WriteBlockInfo(VE, Stream);

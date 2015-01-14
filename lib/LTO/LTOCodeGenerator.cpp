@@ -64,10 +64,24 @@ const char* LTOCodeGenerator::getVersionString() {
 }
 
 LTOCodeGenerator::LTOCodeGenerator()
-    : Context(getGlobalContext()), IRLinker(new Module("ld-temp.o", Context)),
-      TargetMach(nullptr), EmitDwarfDebugInfo(false),
-      ScopeRestrictionsDone(false), CodeModel(LTO_CODEGEN_PIC_MODEL_DEFAULT),
-      DiagHandler(nullptr), DiagContext(nullptr) {
+    : Context(getGlobalContext()), IRLinker(new Module("ld-temp.o", Context)) {
+  initialize();
+}
+
+LTOCodeGenerator::LTOCodeGenerator(std::unique_ptr<LLVMContext> Context)
+    : OwnedContext(std::move(Context)), Context(*OwnedContext),
+      IRLinker(new Module("ld-temp.o", *OwnedContext)) {
+  initialize();
+}
+
+void LTOCodeGenerator::initialize() {
+  TargetMach = nullptr;
+  EmitDwarfDebugInfo = false;
+  ScopeRestrictionsDone = false;
+  CodeModel = LTO_CODEGEN_PIC_MODEL_DEFAULT;
+  DiagHandler = nullptr;
+  DiagContext = nullptr;
+
   initializeLTOPasses();
 }
 
@@ -113,8 +127,11 @@ void LTOCodeGenerator::initializeLTOPasses() {
   initializeCFGSimplifyPassPass(R);
 }
 
-bool LTOCodeGenerator::addModule(LTOModule* mod, std::string& errMsg) {
-  bool ret = IRLinker.linkInModule(&mod->getModule(), &errMsg);
+bool LTOCodeGenerator::addModule(LTOModule *mod) {
+  assert(&mod->getModule().getContext() == &Context &&
+         "Expected module in same context");
+
+  bool ret = IRLinker.linkInModule(&mod->getModule());
 
   const std::vector<const char*> &undefs = mod->getAsmUndefinedRefs();
   for (int i = 0, e = undefs.size(); i != e; ++i)
@@ -188,6 +205,7 @@ bool LTOCodeGenerator::compile_to_file(const char** name,
                                        bool disableOpt,
                                        bool disableInline,
                                        bool disableGVNLoadPRE,
+                                       bool disableVectorization,
                                        std::string& errMsg) {
   // make unique temp .o file to put generated object file
   SmallString<128> Filename;
@@ -202,8 +220,9 @@ bool LTOCodeGenerator::compile_to_file(const char** name,
   // generate object file
   tool_output_file objFile(Filename.c_str(), FD);
 
-  bool genResult = generateObjectFile(objFile.os(), disableOpt, disableInline,
-                                      disableGVNLoadPRE, errMsg);
+  bool genResult =
+      generateObjectFile(objFile.os(), disableOpt, disableInline,
+                         disableGVNLoadPRE, disableVectorization, errMsg);
   objFile.os().close();
   if (objFile.os().has_error()) {
     objFile.os().clear_error();
@@ -226,10 +245,11 @@ const void* LTOCodeGenerator::compile(size_t* length,
                                       bool disableOpt,
                                       bool disableInline,
                                       bool disableGVNLoadPRE,
+                                      bool disableVectorization,
                                       std::string& errMsg) {
   const char *name;
   if (!compile_to_file(&name, disableOpt, disableInline, disableGVNLoadPRE,
-                       errMsg))
+                       disableVectorization, errMsg))
     return nullptr;
 
   // read .o file into memory buffer
@@ -441,6 +461,7 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
                                           bool DisableOpt,
                                           bool DisableInline,
                                           bool DisableGVNLoadPRE,
+                                          bool DisableVectorization,
                                           std::string &errMsg) {
   if (!this->determineTarget(errMsg))
     return false;
@@ -459,6 +480,8 @@ bool LTOCodeGenerator::generateObjectFile(raw_ostream &out,
   Triple TargetTriple(TargetMach->getTargetTriple());
   PassManagerBuilder PMB;
   PMB.DisableGVNLoadPRE = DisableGVNLoadPRE;
+  PMB.LoopVectorize = !DisableVectorization;
+  PMB.SLPVectorize = !DisableVectorization;
   if (!DisableInline)
     PMB.Inliner = createFunctionInliningPass();
   PMB.LibraryInfo = new TargetLibraryInfo(TargetTriple);

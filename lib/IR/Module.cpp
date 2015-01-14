@@ -389,28 +389,17 @@ void Module::setMaterializer(GVMaterializer *GVM) {
   Materializer.reset(GVM);
 }
 
-bool Module::isMaterializable(const GlobalValue *GV) const {
-  if (Materializer)
-    return Materializer->isMaterializable(GV);
-  return false;
-}
-
 bool Module::isDematerializable(const GlobalValue *GV) const {
   if (Materializer)
     return Materializer->isDematerializable(GV);
   return false;
 }
 
-bool Module::Materialize(GlobalValue *GV, std::string *ErrInfo) {
+std::error_code Module::materialize(GlobalValue *GV) {
   if (!Materializer)
-    return false;
+    return std::error_code();
 
-  std::error_code EC = Materializer->Materialize(GV);
-  if (!EC)
-    return false;
-  if (ErrInfo)
-    *ErrInfo = EC.message();
-  return true;
+  return Materializer->materialize(GV);
 }
 
 void Module::Dematerialize(GlobalValue *GV) {
@@ -463,9 +452,20 @@ unsigned Module::getDwarfVersion() const {
 }
 
 Comdat *Module::getOrInsertComdat(StringRef Name) {
-  Comdat C;
-  StringMapEntry<Comdat> &Entry =
-      ComdatSymTab.GetOrCreateValue(Name, std::move(C));
+  auto &Entry = *ComdatSymTab.insert(std::make_pair(Name, Comdat())).first;
   Entry.second.Name = &Entry;
   return &Entry.second;
+}
+
+PICLevel::Level Module::getPICLevel() const {
+  Value *Val = getModuleFlag("PIC Level");
+
+  if (Val == NULL)
+    return PICLevel::Default;
+
+  return static_cast<PICLevel::Level>(cast<ConstantInt>(Val)->getZExtValue());
+}
+
+void Module::setPICLevel(PICLevel::Level PL) {
+  addModuleFlag(ModFlagBehavior::Error, "PIC Level", PL);
 }

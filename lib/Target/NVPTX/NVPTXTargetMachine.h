@@ -25,6 +25,7 @@ namespace llvm {
 /// NVPTXTargetMachine
 ///
 class NVPTXTargetMachine : public LLVMTargetMachine {
+  std::unique_ptr<TargetLoweringObjectFile> TLOF;
   NVPTXSubtarget Subtarget;
 
   // Hold Strings that can be free'd all together with NVPTXTargetMachine
@@ -34,6 +35,8 @@ public:
   NVPTXTargetMachine(const Target &T, StringRef TT, StringRef CPU, StringRef FS,
                      const TargetOptions &Options, Reloc::Model RM,
                      CodeModel::Model CM, CodeGenOpt::Level OP, bool is64bit);
+
+  ~NVPTXTargetMachine() override;
 
   const NVPTXSubtarget *getSubtargetImpl() const override { return &Subtarget; }
 
@@ -48,6 +51,12 @@ public:
                          bool = true) override {
     return true;
   }
+  TargetLoweringObjectFile *getObjFileLowering() const override {
+    return TLOF.get();
+  }
+
+  /// \brief Register NVPTX analysis passes with a pass manager.
+  void addAnalysisPasses(PassManagerBase &PM) override;
 
 }; // NVPTXTargetMachine.
 

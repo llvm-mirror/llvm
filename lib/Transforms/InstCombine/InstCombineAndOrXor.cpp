@@ -665,8 +665,8 @@ static unsigned foldLogOpOfMaskedICmpsHelper(Value*& A,
 /// foldLogOpOfMaskedICmps:
 /// try to fold (icmp(A & B) ==/!= C) &/| (icmp(A & D) ==/!= E)
 /// into a single (icmp(A & X) ==/!= Y)
-static Value* foldLogOpOfMaskedICmps(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
-                                     llvm::InstCombiner::BuilderTy* Builder) {
+static Value *foldLogOpOfMaskedICmps(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
+                                     llvm::InstCombiner::BuilderTy *Builder) {
   Value *A = nullptr, *B = nullptr, *C = nullptr, *D = nullptr, *E = nullptr;
   ICmpInst::Predicate LHSCC = LHS->getPredicate(), RHSCC = RHS->getPredicate();
   unsigned mask = foldLogOpOfMaskedICmpsHelper(A, B, C, D, E, LHS, RHS,
@@ -697,26 +697,26 @@ static Value* foldLogOpOfMaskedICmps(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
   if (mask & FoldMskICmp_Mask_AllZeroes) {
     // (icmp eq (A & B), 0) & (icmp eq (A & D), 0)
     // -> (icmp eq (A & (B|D)), 0)
-    Value* newOr = Builder->CreateOr(B, D);
-    Value* newAnd = Builder->CreateAnd(A, newOr);
+    Value *newOr = Builder->CreateOr(B, D);
+    Value *newAnd = Builder->CreateAnd(A, newOr);
     // we can't use C as zero, because we might actually handle
     //   (icmp ne (A & B), B) & (icmp ne (A & D), D)
     // with B and D, having a single bit set
-    Value* zero = Constant::getNullValue(A->getType());
+    Value *zero = Constant::getNullValue(A->getType());
     return Builder->CreateICmp(NEWCC, newAnd, zero);
   }
   if (mask & FoldMskICmp_BMask_AllOnes) {
     // (icmp eq (A & B), B) & (icmp eq (A & D), D)
     // -> (icmp eq (A & (B|D)), (B|D))
-    Value* newOr = Builder->CreateOr(B, D);
-    Value* newAnd = Builder->CreateAnd(A, newOr);
+    Value *newOr = Builder->CreateOr(B, D);
+    Value *newAnd = Builder->CreateAnd(A, newOr);
     return Builder->CreateICmp(NEWCC, newAnd, newOr);
   }
   if (mask & FoldMskICmp_AMask_AllOnes) {
     // (icmp eq (A & B), A) & (icmp eq (A & D), A)
     // -> (icmp eq (A & (B&D)), A)
-    Value* newAnd1 = Builder->CreateAnd(B, D);
-    Value* newAnd = Builder->CreateAnd(A, newAnd1);
+    Value *newAnd1 = Builder->CreateAnd(B, D);
+    Value *newAnd = Builder->CreateAnd(A, newAnd1);
     return Builder->CreateICmp(NEWCC, newAnd, A);
   }
 
@@ -766,19 +766,17 @@ static Value* foldLogOpOfMaskedICmps(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
     // with B and D, having a single bit set
     ConstantInt *CCst = dyn_cast<ConstantInt>(C);
     if (!CCst) return nullptr;
-    if (LHSCC != NEWCC)
-      CCst = dyn_cast<ConstantInt>( ConstantExpr::getXor(BCst, CCst) );
     ConstantInt *ECst = dyn_cast<ConstantInt>(E);
     if (!ECst) return nullptr;
+    if (LHSCC != NEWCC)
+      CCst = cast<ConstantInt>(ConstantExpr::getXor(BCst, CCst));
     if (RHSCC != NEWCC)
-      ECst = dyn_cast<ConstantInt>( ConstantExpr::getXor(DCst, ECst) );
-    ConstantInt* MCst = dyn_cast<ConstantInt>(
-      ConstantExpr::getAnd(ConstantExpr::getAnd(BCst, DCst),
-                           ConstantExpr::getXor(CCst, ECst)) );
+      ECst = cast<ConstantInt>(ConstantExpr::getXor(DCst, ECst));
     // if there is a conflict we should actually return a false for the
     // whole construct
-    if (!MCst->isZero())
-      return nullptr;
+    if (((BCst->getValue() & DCst->getValue()) &
+         (CCst->getValue() ^ ECst->getValue())) != 0)
+      return ConstantInt::get(LHS->getType(), !IsAnd);
     Value *newOr1 = Builder->CreateOr(B, D);
     Value *newOr2 = ConstantExpr::getOr(CCst, ECst);
     Value *newAnd = Builder->CreateAnd(A, newOr1);
@@ -2307,10 +2305,33 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
   if (SwappedForXor)
     std::swap(Op0, Op1);
 
-  if (ICmpInst *RHS = dyn_cast<ICmpInst>(I.getOperand(1)))
-    if (ICmpInst *LHS = dyn_cast<ICmpInst>(I.getOperand(0)))
+  {
+    ICmpInst *LHS = dyn_cast<ICmpInst>(Op0);
+    ICmpInst *RHS = dyn_cast<ICmpInst>(Op1);
+    if (LHS && RHS)
       if (Value *Res = FoldOrOfICmps(LHS, RHS, &I))
         return ReplaceInstUsesWith(I, Res);
+
+    // TODO: Make this recursive; it's a little tricky because an arbitrary
+    // number of 'or' instructions might have to be created.
+    Value *X, *Y;
+    if (LHS && match(Op1, m_OneUse(m_Or(m_Value(X), m_Value(Y))))) {
+      if (auto *Cmp = dyn_cast<ICmpInst>(X))
+        if (Value *Res = FoldOrOfICmps(LHS, Cmp, &I))
+          return ReplaceInstUsesWith(I, Builder->CreateOr(Res, Y));
+      if (auto *Cmp = dyn_cast<ICmpInst>(Y))
+        if (Value *Res = FoldOrOfICmps(LHS, Cmp, &I))
+          return ReplaceInstUsesWith(I, Builder->CreateOr(Res, X));
+    }
+    if (RHS && match(Op0, m_OneUse(m_Or(m_Value(X), m_Value(Y))))) {
+      if (auto *Cmp = dyn_cast<ICmpInst>(X))
+        if (Value *Res = FoldOrOfICmps(Cmp, RHS, &I))
+          return ReplaceInstUsesWith(I, Builder->CreateOr(Res, Y));
+      if (auto *Cmp = dyn_cast<ICmpInst>(Y))
+        if (Value *Res = FoldOrOfICmps(Cmp, RHS, &I))
+          return ReplaceInstUsesWith(I, Builder->CreateOr(Res, X));
+    }
+  }
 
   // (fcmp uno x, c) | (fcmp uno y, c)  -> (fcmp uno x, y)
   if (FCmpInst *LHS = dyn_cast<FCmpInst>(I.getOperand(0)))

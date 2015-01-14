@@ -32,7 +32,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Operator.h"
 
 namespace llvm {
@@ -1158,8 +1158,10 @@ struct IntrinsicID_match {
 
   template<typename OpTy>
   bool match(OpTy *V) {
-    IntrinsicInst *II = dyn_cast<IntrinsicInst>(V);
-    return II && II->getIntrinsicID() == ID;
+    if (const CallInst *CI = dyn_cast<CallInst>(V))
+      if (const Function *F = CI->getCalledFunction())
+        return F->getIntrinsicID() == ID;
+    return false;
   }
 };
 
@@ -1226,6 +1228,18 @@ template<typename Opnd0>
 inline typename m_Intrinsic_Ty<Opnd0>::Ty
 m_BSwap(const Opnd0 &Op0) {
   return m_Intrinsic<Intrinsic::bswap>(Op0);
+}
+
+template<typename Opnd0, typename Opnd1>
+inline typename m_Intrinsic_Ty<Opnd0, Opnd1>::Ty
+m_FMin(const Opnd0 &Op0, const Opnd1 &Op1) {
+  return m_Intrinsic<Intrinsic::minnum>(Op0, Op1);
+}
+
+template<typename Opnd0, typename Opnd1>
+inline typename m_Intrinsic_Ty<Opnd0, Opnd1>::Ty
+m_FMax(const Opnd0 &Op0, const Opnd1 &Op1) {
+  return m_Intrinsic<Intrinsic::maxnum>(Op0, Op1);
 }
 
 } // end namespace PatternMatch

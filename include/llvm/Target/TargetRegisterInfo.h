@@ -18,7 +18,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include <cassert>
@@ -51,10 +51,6 @@ public:
   /// getID() - Return the register class ID number.
   ///
   unsigned getID() const { return MC->getID(); }
-
-  /// getName() - Return the register class name for debugging.
-  ///
-  const char *getName() const { return MC->getName(); }
 
   /// begin/end - Return all of the registers in this class.
   ///
@@ -101,9 +97,9 @@ public:
 
   /// hasType - return true if this TargetRegisterClass has the ValueType vt.
   ///
-  bool hasType(EVT vt) const {
+  bool hasType(MVT vt) const {
     for(int i = 0; VTs[i] != MVT::Other; ++i)
-      if (EVT(VTs[i]) == vt)
+      if (MVT(VTs[i]) == vt)
         return true;
     return false;
   }
@@ -306,7 +302,7 @@ public:
   /// register of the given type, picking the most sub register class of
   /// the right type that contains this physreg.
   const TargetRegisterClass *
-    getMinimalPhysRegClass(unsigned Reg, EVT VT = MVT::Other) const;
+    getMinimalPhysRegClass(unsigned Reg, MVT VT = MVT::Other) const;
 
   /// getAllocatableClass - Return the maximal subclass of the given register
   /// class that is alloctable, or NULL.
@@ -506,6 +502,10 @@ public:
     return composeSubRegIndicesImpl(a, b);
   }
 
+  /// Debugging helper: dump register in human readable form to dbgs() stream.
+  static void dumpReg(unsigned Reg, unsigned SubRegIndex = 0,
+                      const TargetRegisterInfo* TRI = nullptr);
+
 protected:
   /// Overridden by TableGen in targets that have sub-registers.
   virtual unsigned composeSubRegIndicesImpl(unsigned, unsigned) const {
@@ -559,6 +559,11 @@ public:
   const TargetRegisterClass *getRegClass(unsigned i) const {
     assert(i < getNumRegClasses() && "Register Class ID out of range");
     return RegClassBegin[i];
+  }
+
+  /// getRegClassName - Returns the name of the register class.
+  const char *getRegClassName(const TargetRegisterClass *Class) const {
+    return MCRegisterInfo::getRegClassName(Class->MC);
   }
 
   /// getCommonSubClass - find the largest common subclass of A and B. Return

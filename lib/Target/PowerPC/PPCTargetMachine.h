@@ -24,6 +24,7 @@ namespace llvm {
 /// PPCTargetMachine - Common code between 32-bit and 64-bit PowerPC targets.
 ///
 class PPCTargetMachine : public LLVMTargetMachine {
+  std::unique_ptr<TargetLoweringObjectFile> TLOF;
   PPCSubtarget Subtarget;
 
   mutable StringMap<std::unique_ptr<PPCSubtarget>> SubtargetMap;
@@ -34,6 +35,8 @@ public:
                    Reloc::Model RM, CodeModel::Model CM,
                    CodeGenOpt::Level OL);
 
+  ~PPCTargetMachine() override;
+
   const PPCSubtarget *getSubtargetImpl() const override { return &Subtarget; }
   const PPCSubtarget *getSubtargetImpl(const Function &F) const override;
 
@@ -42,6 +45,9 @@ public:
 
   /// \brief Register PPC analysis passes with a pass manager.
   void addAnalysisPasses(PassManagerBase &PM) override;
+  TargetLoweringObjectFile *getObjFileLowering() const override {
+    return TLOF.get();
+  }
 };
 
 /// PPC32TargetMachine - PowerPC 32-bit target machine.

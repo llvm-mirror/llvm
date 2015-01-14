@@ -165,7 +165,7 @@ static void GetOptionInfo(SmallVectorImpl<Option*> &PositionalOpts,
     // Handle named options.
     for (size_t i = 0, e = OptionNames.size(); i != e; ++i) {
       // Add argument to the argument map!
-      if (OptionsMap.GetOrCreateValue(OptionNames[i], O).second != O) {
+      if (!OptionsMap.insert(std::make_pair(OptionNames[i], O)).second) {
         errs() << ProgramName << ": CommandLine Error: Option '"
                << OptionNames[i] << "' registered more than once!\n";
         HadErrors = true;
@@ -1455,7 +1455,7 @@ sortOpts(StringMap<Option*> &OptMap,
       continue;
 
     // If we've already seen this option, don't add it to the list again.
-    if (!OptionSet.insert(I->second))
+    if (!OptionSet.insert(I->second).second)
       continue;
 
     Opts.push_back(std::pair<const char *, Option*>(I->getKey().data(),

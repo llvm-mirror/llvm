@@ -28,7 +28,7 @@
 #include "llvm/Support/CBindingWrapping.h"
 
 namespace llvm {
-  class MDNode;
+class MDNode;
 
 /// \brief This provides the default implementation of the IRBuilder
 /// 'InsertHelper' method that is called whenever an instruction is created by

@@ -17,6 +17,7 @@
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/DataExtractor.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <map>
 #include <memory>
@@ -81,9 +82,12 @@ private:
   // Owns all the parsed binaries and object files.
   SmallVector<std::unique_ptr<Binary>, 4> ParsedBinariesAndObjects;
   SmallVector<std::unique_ptr<MemoryBuffer>, 4> MemoryBuffers;
-  void addOwningBinary(OwningBinary<Binary> Bin) {
-    ParsedBinariesAndObjects.push_back(std::move(Bin.getBinary()));
-    MemoryBuffers.push_back(std::move(Bin.getBuffer()));
+  void addOwningBinary(OwningBinary<Binary> OwningBin) {
+    std::unique_ptr<Binary> Bin;
+    std::unique_ptr<MemoryBuffer> MemBuf;
+    std::tie(Bin, MemBuf) = OwningBin.takeBinary();
+    ParsedBinariesAndObjects.push_back(std::move(Bin));
+    MemoryBuffers.push_back(std::move(MemBuf));
   }
 
   // Owns module info objects.
@@ -112,7 +116,11 @@ private:
   bool getNameFromSymbolTable(SymbolRef::Type Type, uint64_t Address,
                               std::string &Name, uint64_t &Addr,
                               uint64_t &Size) const;
-  void addSymbol(const SymbolRef &Symbol);
+  // For big-endian PowerPC64 ELF, OpdAddress is the address of the .opd
+  // (function descriptor) section and OpdExtractor refers to its contents.
+  void addSymbol(const SymbolRef &Symbol,
+                 DataExtractor *OpdExtractor = nullptr,
+                 uint64_t OpdAddress = 0);
   ObjectFile *Module;
   std::unique_ptr<DIContext> DebugInfoContext;
 

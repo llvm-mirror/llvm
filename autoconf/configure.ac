@@ -42,6 +42,7 @@ LLVM_VERSION_SUFFIX=svn
 AC_DEFINE_UNQUOTED([LLVM_VERSION_MAJOR], $LLVM_VERSION_MAJOR, [Major version of the LLVM API])
 AC_DEFINE_UNQUOTED([LLVM_VERSION_MINOR], $LLVM_VERSION_MINOR, [Minor version of the LLVM API])
 AC_DEFINE_UNQUOTED([LLVM_VERSION_PATCH], $LLVM_VERSION_PATCH, [Patch version of the LLVM API])
+AC_DEFINE_UNQUOTED([LLVM_VERSION_STRING], "$PACKAGE_VERSION", [LLVM version string])
 
 AC_SUBST([LLVM_VERSION_MAJOR])
 AC_SUBST([LLVM_VERSION_MINOR])
@@ -658,11 +659,11 @@ AC_ARG_ENABLE(clang-static-analyzer,
                              enableval="yes")
 case "$enableval" in
   yes) AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[1]) ;;
-  no)  
+  no)
     if test ${clang_arcmt} != "no" ; then
       AC_MSG_ERROR([Cannot enable clang ARC Migration Tool while disabling static analyzer.])
     fi
-    AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[0]) 
+    AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[0])
     ;;
   default) AC_SUBST(ENABLE_CLANG_STATIC_ANALYZER,[1]);;
   *) AC_MSG_ERROR([Invalid setting for --enable-clang-static-analyzer. Use "yes" or "no"]) ;;
@@ -1288,10 +1289,7 @@ AC_PATH_PROG(GZIPBIN, [gzip])
 AC_PATH_PROG(PDFROFF, [pdfroff])
 AC_PATH_PROG(ZIP, [zip])
 AC_PATH_PROG(GO, [go])
-AC_PATH_PROGS(OCAMLC, [ocamlc])
-AC_PATH_PROGS(OCAMLOPT, [ocamlopt])
-AC_PATH_PROGS(OCAMLDEP, [ocamldep])
-AC_PATH_PROGS(OCAMLDOC, [ocamldoc])
+AC_PATH_PROGS(OCAMLFIND, [ocamlfind])
 AC_PATH_PROGS(GAS, [gas as])
 
 dnl Get the version of the linker in use.
@@ -1389,7 +1387,27 @@ then
     CXX_FLAG_CHECK(NO_UNINITIALIZED, [-Wno-uninitialized])
   fi
 fi
-AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED])
+
+dnl Check for misbehaving -Wcomment (gcc-4.7 has this) and maybe add
+dnl -Wno-comment to the flags.
+no_comment=
+llvm_cv_old_cxxflags="$CXXFLAGS"
+CXXFLAGS="$CXXFLAGS -Wcomment -Werror"
+AC_COMPILE_IFELSE(
+[
+  AC_LANG_SOURCE([[// Comment \o\
+// Another comment
+int main() { return 0; }
+  ]])
+],
+[
+  no_comment=-Wno-comment
+],
+[])
+AC_SUBST(NO_COMMENT, [$no_comment])
+CXXFLAGS="$llvm_cv_old_cxxflags"
+
+AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED $NO_COMMENT])
 
 AC_ARG_WITH([python],
             [AS_HELP_STRING([--with-python], [path to python])],
@@ -1524,7 +1542,7 @@ AC_ARG_WITH(oprofile,
           fi ;;
         *)
           AC_MSG_ERROR([OProfile support is available on Linux only.]) ;;
-      esac 
+      esac
     ],
     [
       AC_SUBST(USE_OPROFILE, [0])
@@ -1592,8 +1610,12 @@ AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
 
 AC_LANG_PUSH([C++])
-AC_CHECK_HEADERS([cxxabi.h])
+dnl size_t must be defined before including cxxabi.h on FreeBSD 10.0.
+AC_CHECK_HEADERS([cxxabi.h], [], [],
+[#include <stddef.h>
+])
 AC_LANG_POP([C++])
+
 AC_CHECK_HEADERS([dlfcn.h execinfo.h fcntl.h inttypes.h link.h])
 AC_CHECK_HEADERS([malloc.h setjmp.h signal.h stdint.h termios.h unistd.h])
 AC_CHECK_HEADERS([utime.h])
@@ -1865,7 +1887,7 @@ AC_DEFINE_UNQUOTED(LLVM_DEFAULT_TARGET_TRIPLE, "$target",
 dnl Determine which bindings to build.
 if test "$BINDINGS_TO_BUILD" = auto ; then
   BINDINGS_TO_BUILD=""
-  if test "x$OCAMLC" != x -a "x$OCAMLDEP" != x ; then
+  if test "x$OCAMLFIND" != x ; then
     BINDINGS_TO_BUILD="ocaml $BINDINGS_TO_BUILD"
   fi
   if test "x$GO" != x ; then
@@ -1881,22 +1903,36 @@ binding_prereqs_failed=0
 for a_binding in $BINDINGS_TO_BUILD ; do
   case "$a_binding" in
   ocaml)
-    if test "x$OCAMLC" = x ; then
-      AC_MSG_WARN([--enable-bindings=ocaml specified, but ocamlc not found. Try configure OCAMLC=/path/to/ocamlc])
+    if test "x$OCAMLFIND" = x ; then
+      AC_MSG_WARN([--enable-bindings=ocaml specified, but ocamlfind not found. Try configure OCAMLFIND=/path/to/ocamlfind])
       binding_prereqs_failed=1
     fi
-    if test "x$OCAMLDEP" = x ; then
-      AC_MSG_WARN([--enable-bindings=ocaml specified, but ocamldep not found. Try configure OCAMLDEP=/path/to/ocamldep])
+
+    if $OCAMLFIND opt -version >/dev/null 2>/dev/null ; then
+      HAVE_OCAMLOPT=1
+    else
+      HAVE_OCAMLOPT=0
+    fi
+    AC_SUBST(HAVE_OCAMLOPT)
+
+    if ! $OCAMLFIND query ctypes >/dev/null 2>/dev/null; then
+      AC_MSG_WARN([--enable-bindings=ocaml specified, but ctypes is not installed])
       binding_prereqs_failed=1
     fi
-    if test "x$OCAMLOPT" = x ; then
-      AC_MSG_WARN([--enable-bindings=ocaml specified, but ocamlopt not found. Try configure OCAMLOPT=/path/to/ocamlopt])
-      dnl ocamlopt is optional!
+
+    if $OCAMLFIND query oUnit >/dev/null 2>/dev/null; then
+      HAVE_OCAML_OUNIT=1
+    else
+      HAVE_OCAML_OUNIT=0
+      AC_MSG_WARN([--enable-bindings=ocaml specified, but OUnit 2 is not installed. Tests will not run])
+      dnl oUnit is optional!
     fi
+    AC_SUBST(HAVE_OCAML_OUNIT)
+
     if test "x$with_ocaml_libdir" != xauto ; then
       AC_SUBST(OCAML_LIBDIR,$with_ocaml_libdir)
     else
-      ocaml_stdlib="`"$OCAMLC" -where`"
+      ocaml_stdlib="`"$OCAMLFIND" ocamlc -where`"
       if test "$LLVM_PREFIX" '<' "$ocaml_stdlib" -a "$ocaml_stdlib" '<' "$LLVM_PREFIX~"
       then
         # ocaml stdlib is beneath our prefix; use stdlib

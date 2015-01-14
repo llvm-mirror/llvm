@@ -377,8 +377,8 @@ void Verifier::visit(Instruction &I) {
 
 
 void Verifier::visitGlobalValue(const GlobalValue &GV) {
-  Assert1(!GV.isDeclaration() || GV.isMaterializable() ||
-              GV.hasExternalLinkage() || GV.hasExternalWeakLinkage(),
+  Assert1(!GV.isDeclaration() || GV.hasExternalLinkage() ||
+              GV.hasExternalWeakLinkage(),
           "Global is external, but doesn't have external or weak linkage!",
           &GV);
 
@@ -480,7 +480,7 @@ void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
 
   while (!WorkStack.empty()) {
     const Value *V = WorkStack.pop_back_val();
-    if (!Visited.insert(V))
+    if (!Visited.insert(V).second)
       continue;
 
     if (const User *U = dyn_cast<User>(V)) {
@@ -510,7 +510,7 @@ void Verifier::visitAliaseeSubExpr(SmallPtrSetImpl<const GlobalAlias*> &Visited,
     Assert1(!GV->isDeclaration(), "Alias must point to a definition", &GA);
 
     if (const auto *GA2 = dyn_cast<GlobalAlias>(GV)) {
-      Assert1(Visited.insert(GA2), "Aliases cannot form a cycle", &GA);
+      Assert1(Visited.insert(GA2).second, "Aliases cannot form a cycle", &GA);
 
       Assert1(!GA2->mayBeOverridden(), "Alias cannot point to a weak alias",
               &GA);
@@ -568,7 +568,7 @@ void Verifier::visitNamedMDNode(const NamedMDNode &NMD) {
 void Verifier::visitMDNode(MDNode &MD, Function *F) {
   // Only visit each node once.  Metadata can be mutually recursive, so this
   // avoids infinite recursion here, as well as being an optimization.
-  if (!MDNodes.insert(&MD))
+  if (!MDNodes.insert(&MD).second)
     return;
 
   for (unsigned i = 0, e = MD.getNumOperands(); i != e; ++i) {
@@ -1176,6 +1176,12 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
       }
     }
   }
+
+  // Check that all instructions have their parent pointers set up correctly.
+  for (auto &I : BB)
+  {
+    Assert(I.getParent() == &BB, "Instruction has bogus parent pointer!");
+  }
 }
 
 void Verifier::visitTerminatorInst(TerminatorInst &I) {
@@ -1218,7 +1224,7 @@ void Verifier::visitSwitchInst(SwitchInst &SI) {
   for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end(); i != e; ++i) {
     Assert1(i.getCaseValue()->getType() == SwitchTy,
             "Switch constants must all be same type as switch value!", &SI);
-    Assert2(Constants.insert(i.getCaseValue()),
+    Assert2(Constants.insert(i.getCaseValue()).second,
             "Duplicate integer as switch case", &SI, i.getCaseValue());
   }
 
@@ -2253,7 +2259,7 @@ void Verifier::visitInstruction(Instruction &I) {
 
         while (!Stack.empty()) {
           const ConstantExpr *V = Stack.pop_back_val();
-          if (!Visited.insert(V))
+          if (!Visited.insert(V).second)
             continue;
 
           VerifyConstantExprBitcastType(V);
@@ -2285,6 +2291,14 @@ void Verifier::visitInstruction(Instruction &I) {
     Assert1(isa<LoadInst>(I) || isa<CallInst>(I) || isa<InvokeInst>(I),
             "Ranges are only for loads, calls and invokes!", &I);
     visitRangeMetadata(I, Range, I.getType());
+  }
+
+  if (I.getMetadata(LLVMContext::MD_nonnull)) {
+    Assert1(I.getType()->isPointerTy(),
+            "nonnull applies only to pointer types", &I);
+    Assert1(isa<LoadInst>(I),
+            "nonnull applies only to load instructions, use attributes"
+            " for calls or invokes", &I);
   }
 
   InstsInThisBlock.insert(&I);
@@ -2545,7 +2559,88 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
     Assert1(isa<ConstantInt>(CI.getArgOperand(1)),
             "llvm.invariant.end parameter #2 must be a constant integer", &CI);
     break;
+ 
+  case Intrinsic::experimental_gc_statepoint: {
+    // target, # call args = 0, # deopt args = 0, #gc args = 0 -> 4 args
+    assert(CI.getNumArgOperands() >= 4 &&
+           "not enough arguments to statepoint");
+    for (User* U : CI.users()) {
+      const CallInst* GCRelocCall = cast<const CallInst>(U);
+      const Function *GCRelocFn = GCRelocCall->getCalledFunction();
+      Assert1(GCRelocFn && GCRelocFn->isDeclaration() &&
+              (GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_int ||
+               GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_float ||
+               GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_ptr ||
+               GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_relocate),
+              "gc.result or gc.relocate are the only value uses of statepoint", &CI);
+      if (GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_int ||
+          GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_float ||
+          GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_ptr ) {
+        Assert1(GCRelocCall->getNumArgOperands() == 1, "wrong number of arguments", &CI);
+        Assert2(GCRelocCall->getArgOperand(0) == &CI, "connected to wrong statepoint", &CI, GCRelocCall);
+      } else if (GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_relocate) {
+        Assert1(GCRelocCall->getNumArgOperands() == 3, "wrong number of arguments", &CI);
+        Assert2(GCRelocCall->getArgOperand(0) == &CI, "connected to wrong statepoint", &CI, GCRelocCall);
+      } else {
+        llvm_unreachable("unsupported use type - how'd we get past the assert?");
+      }
+    }
+
+    // Note: It is legal for a single derived pointer to be listed multiple
+    // times.  It's non-optimal, but it is legal.  It can also happen after
+    // insertion if we strip a bitcast away.
+    // Note: It is really tempting to check that each base is relocated and
+    // that a derived pointer is never reused as a base pointer.  This turns
+    // out to be problematic since optimizations run after safepoint insertion
+    // can recognize equality properties that the insertion logic doesn't know
+    // about.  See example statepoint.ll in the verifier subdirectory
+    break;
   }
+  case Intrinsic::experimental_gc_result_int:
+  case Intrinsic::experimental_gc_result_float:
+  case Intrinsic::experimental_gc_result_ptr: {
+    Assert1(CI.getNumArgOperands() == 1, "wrong number of arguments", &CI);
+
+    // Are we tied to a statepoint properly?
+    CallSite StatepointCS(CI.getArgOperand(0));
+    const Function *StatepointFn = StatepointCS.getCalledFunction();
+    Assert2(StatepointFn && StatepointFn->isDeclaration() &&
+            StatepointFn->getIntrinsicID() == Intrinsic::experimental_gc_statepoint,
+            "token must be from a statepoint", &CI, CI.getArgOperand(0));
+    break;
+  }
+  case Intrinsic::experimental_gc_relocate: {
+    // Some checks to ensure gc.relocate has the correct set of
+    // parameters.  TODO: we can make these tests much stricter.
+    Assert1(CI.getNumArgOperands() == 3, "wrong number of arguments", &CI);
+
+    // Are we tied to a statepoint properly?
+    CallSite StatepointCS(CI.getArgOperand(0));
+    const Function *StatepointFn =
+        StatepointCS.getInstruction() ? StatepointCS.getCalledFunction() : NULL;
+    Assert2(StatepointFn && StatepointFn->isDeclaration() &&
+            StatepointFn->getIntrinsicID() == Intrinsic::experimental_gc_statepoint,
+            "token must be from a statepoint", &CI, CI.getArgOperand(0));
+
+    // Both the base and derived must be piped through the safepoint
+    Value* Base = CI.getArgOperand(1);
+    Assert1( isa<ConstantInt>(Base), "must be integer offset", &CI);
+    
+    Value* Derived = CI.getArgOperand(2);
+    Assert1( isa<ConstantInt>(Derived), "must be integer offset", &CI);
+
+    const int BaseIndex = cast<ConstantInt>(Base)->getZExtValue();
+    const int DerivedIndex = cast<ConstantInt>(Derived)->getZExtValue();
+    // Check the bounds
+    Assert1(0 <= BaseIndex &&
+            BaseIndex < (int)StatepointCS.arg_size(),
+            "index out of bounds", &CI);
+    Assert1(0 <= DerivedIndex &&
+            DerivedIndex < (int)StatepointCS.arg_size(),
+            "index out of bounds", &CI);
+    break;
+  }
+  };
 }
 
 void DebugInfoVerifier::verifyDebugInfo() {
@@ -2624,7 +2719,7 @@ bool llvm::verifyModule(const Module &M, raw_ostream *OS) {
 
   bool Broken = false;
   for (Module::const_iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (!I->isDeclaration())
+    if (!I->isDeclaration() && !I->isMaterializable())
       Broken |= !V.verify(*I);
 
   // Note that this function's return value is inverted from what you would

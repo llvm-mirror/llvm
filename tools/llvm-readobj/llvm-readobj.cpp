@@ -149,7 +149,12 @@ namespace opts {
   // -coff-directives
   cl::opt<bool>
   COFFDirectives("coff-directives",
-                 cl::desc("Display the contents PE/COFF .drectve section"));
+                 cl::desc("Display the PE/COFF .drectve section"));
+
+  // -coff-basereloc
+  cl::opt<bool>
+  COFFBaseRelocs("coff-basereloc",
+                 cl::desc("Display the PE/COFF .reloc section"));
 } // namespace opts
 
 static int ReturnValue = EXIT_SUCCESS;
@@ -168,8 +173,8 @@ bool error(std::error_code EC) {
 
 bool relocAddressLess(RelocationRef a, RelocationRef b) {
   uint64_t a_addr, b_addr;
-  if (error(a.getOffset(a_addr))) return false;
-  if (error(b.getOffset(b_addr))) return false;
+  if (error(a.getOffset(a_addr))) exit(ReturnValue);
+  if (error(b.getOffset(b_addr))) exit(ReturnValue);
   return a_addr < b_addr;
 }
 
@@ -279,6 +284,8 @@ static void dumpObject(const ObjectFile *Obj) {
     Dumper->printCOFFImports();
   if (opts::COFFDirectives)
     Dumper->printCOFFDirectives();
+  if (opts::COFFBaseRelocs)
+    Dumper->printCOFFBaseReloc();
 }
 
 

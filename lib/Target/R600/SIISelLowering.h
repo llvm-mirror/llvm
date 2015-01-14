@@ -59,8 +59,13 @@ class SITargetLowering : public AMDGPUTargetLowering {
                                unsigned AS,
                                DAGCombinerInfo &DCI) const;
 
+  SDValue performMin3Max3Combine(SDNode *N, DAGCombinerInfo &DCI) const;
+
 public:
   SITargetLowering(TargetMachine &tm);
+
+  bool isShuffleMaskLegal(const SmallVectorImpl<int> &/*Mask*/,
+                          EVT /*VT*/) const override;
 
   bool isLegalAddressingMode(const AddrMode &AM,
                              Type *Ty) const override;
@@ -102,6 +107,16 @@ public:
   SDValue CreateLiveInRegister(SelectionDAG &DAG, const TargetRegisterClass *RC,
                                unsigned Reg, EVT VT) const override;
   void legalizeTargetIndependentNode(SDNode *Node, SelectionDAG &DAG) const;
+
+  MachineSDNode *wrapAddr64Rsrc(SelectionDAG &DAG, SDLoc DL, SDValue Ptr) const;
+  MachineSDNode *buildRSRC(SelectionDAG &DAG,
+                           SDLoc DL,
+                           SDValue Ptr,
+                           uint32_t RsrcDword1,
+                           uint64_t RsrcDword2And3) const;
+  MachineSDNode *buildScratchRSRC(SelectionDAG &DAG,
+                                  SDLoc DL,
+                                  SDValue Ptr) const;
 };
 
 } // End namespace llvm

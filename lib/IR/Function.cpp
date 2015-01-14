@@ -213,6 +213,12 @@ void Argument::removeAttr(AttributeSet AS) {
 // Helper Methods in Function
 //===----------------------------------------------------------------------===//
 
+bool Function::isMaterializable() const {
+  return getGlobalObjectSubClassData();
+}
+
+void Function::setIsMaterializable(bool V) { setGlobalObjectSubClassData(V); }
+
 LLVMContext &Function::getContext() const {
   return getType()->getContext();
 }
@@ -241,12 +247,13 @@ void Function::eraseFromParent() {
 // Function Implementation
 //===----------------------------------------------------------------------===//
 
-Function::Function(FunctionType *Ty, LinkageTypes Linkage,
-                   const Twine &name, Module *ParentModule)
-  : GlobalObject(PointerType::getUnqual(Ty),
-                Value::FunctionVal, nullptr, 0, Linkage, name) {
+Function::Function(FunctionType *Ty, LinkageTypes Linkage, const Twine &name,
+                   Module *ParentModule)
+    : GlobalObject(PointerType::getUnqual(Ty), Value::FunctionVal, nullptr, 0,
+                   Linkage, name) {
   assert(FunctionType::isValidReturnType(getReturnType()) &&
          "invalid return type");
+  setIsMaterializable(false);
   SymTab = new ValueSymbolTable();
 
   // If the function has arguments, mark them as lazily built.
@@ -318,6 +325,8 @@ void Function::setParent(Module *parent) {
 // delete.
 //
 void Function::dropAllReferences() {
+  setIsMaterializable(false);
+
   for (iterator I = begin(), E = end(); I != E; ++I)
     I->dropAllReferences();
 
@@ -446,6 +455,42 @@ unsigned Function::lookupIntrinsicID() const {
   return 0;
 }
 
+/// Returns a stable mangling for the type specified for use in the name
+/// mangling scheme used by 'any' types in intrinsic signatures.  The mangling
+/// of named types is simply their name.  Manglings for unnamed types consist
+/// of a prefix ('p' for pointers, 'a' for arrays, 'f_' for functions)
+/// combined with the mangling of their component types.  A vararg function
+/// type will have a suffix of 'vararg'.  Since function types can contain
+/// other function types, we close a function type mangling with suffix 'f'
+/// which can't be confused with it's prefix.  This ensures we don't have
+/// collisions between two unrelated function types. Otherwise, you might
+/// parse ffXX as f(fXX) or f(fX)X.  (X is a placeholder for any other type.)
+static std::string getMangledTypeStr(Type* Ty) {
+  std::string Result;
+  if (PointerType* PTyp = dyn_cast<PointerType>(Ty)) {
+    Result += "p" + llvm::utostr(PTyp->getAddressSpace()) +
+      getMangledTypeStr(PTyp->getElementType());
+  } else if (ArrayType* ATyp = dyn_cast<ArrayType>(Ty)) {
+    Result += "a" + llvm::utostr(ATyp->getNumElements()) +
+      getMangledTypeStr(ATyp->getElementType());
+  } else if (StructType* STyp = dyn_cast<StructType>(Ty)) {
+    if (!STyp->isLiteral())
+      Result += STyp->getName();
+    else
+      llvm_unreachable("TODO: implement literal types");
+  } else if (FunctionType* FT = dyn_cast<FunctionType>(Ty)) {
+    Result += "f_" + getMangledTypeStr(FT->getReturnType());
+    for (size_t i = 0; i < FT->getNumParams(); i++)
+      Result += getMangledTypeStr(FT->getParamType(i));
+    if (FT->isVarArg())
+      Result += "vararg";
+    // Ensure nested function types are distinguishable.
+    Result += "f"; 
+  } else if (Ty)
+    Result += EVT::getEVT(Ty).getEVTString();
+  return Result;
+}
+
 std::string Intrinsic::getName(ID id, ArrayRef<Type*> Tys) {
   assert(id < num_intrinsics && "Invalid intrinsic ID!");
   static const char * const Table[] = {
@@ -458,12 +503,7 @@ std::string Intrinsic::getName(ID id, ArrayRef<Type*> Tys) {
     return Table[id];
   std::string Result(Table[id]);
   for (unsigned i = 0; i < Tys.size(); ++i) {
-    if (PointerType* PTyp = dyn_cast<PointerType>(Tys[i])) {
-      Result += ".p" + llvm::utostr(PTyp->getAddressSpace()) +
-                EVT::getEVT(PTyp->getElementType()).getEVTString();
-    }
-    else if (Tys[i])
-      Result += "." + EVT::getEVT(Tys[i]).getEVTString();
+    Result += "." + getMangledTypeStr(Tys[i]);
   }
   return Result;
 }

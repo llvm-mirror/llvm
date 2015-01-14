@@ -19,6 +19,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Object/COFFYAML.h"
+#include "llvm/Object/COFF.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
@@ -30,14 +31,25 @@ using namespace llvm;
 /// This parses a yaml stream that represents a COFF object file.
 /// See docs/yaml2obj for the yaml scheema.
 struct COFFParser {
-  COFFParser(COFFYAML::Object &Obj) : Obj(Obj) {
+  COFFParser(COFFYAML::Object &Obj)
+      : Obj(Obj), SectionTableStart(0), SectionTableSize(0) {
     // A COFF string table always starts with a 4 byte size field. Offsets into
     // it include this size, so allocate it now.
     StringTable.append(4, char(0));
   }
 
   bool useBigObj() const {
-    return Obj.Sections.size() > COFF::MaxNumberOfSections16;
+    return static_cast<int32_t>(Obj.Sections.size()) >
+           COFF::MaxNumberOfSections16;
+  }
+
+  bool isPE() const { return Obj.OptionalHeader.hasValue(); }
+  bool is64Bit() const {
+    return Obj.Header.Machine == COFF::IMAGE_FILE_MACHINE_AMD64;
+  }
+
+  uint32_t getFileAlignment() const {
+    return Obj.OptionalHeader->Header.FileAlignment;
   }
 
   unsigned getHeaderSize() const {
@@ -123,39 +135,61 @@ struct COFFParser {
 
   StringMap<unsigned> StringTableMap;
   std::string StringTable;
+  uint32_t SectionTableStart;
+  uint32_t SectionTableSize;
 };
 
 // Take a CP and assign addresses and sizes to everything. Returns false if the
 // layout is not valid to do.
-static bool layoutCOFF(COFFParser &CP) {
-  uint32_t SectionTableStart = 0;
-  uint32_t SectionTableSize  = 0;
+static bool layoutOptionalHeader(COFFParser &CP) {
+  if (!CP.isPE())
+    return true;
+  unsigned PEHeaderSize = CP.is64Bit() ? sizeof(object::pe32plus_header)
+                                       : sizeof(object::pe32_header);
+  CP.Obj.Header.SizeOfOptionalHeader =
+      PEHeaderSize +
+      sizeof(object::data_directory) * (COFF::NUM_DATA_DIRECTORIES + 1);
+  return true;
+}
 
+namespace {
+enum { DOSStubSize = 128 };
+}
+
+// Take a CP and assign addresses and sizes to everything. Returns false if the
+// layout is not valid to do.
+static bool layoutCOFF(COFFParser &CP) {
   // The section table starts immediately after the header, including the
   // optional header.
-  SectionTableStart = CP.getHeaderSize() + CP.Obj.Header.SizeOfOptionalHeader;
-  SectionTableSize = COFF::SectionSize * CP.Obj.Sections.size();
+  CP.SectionTableStart =
+      CP.getHeaderSize() + CP.Obj.Header.SizeOfOptionalHeader;
+  if (CP.isPE())
+    CP.SectionTableStart += DOSStubSize + sizeof(COFF::PEMagic);
+  CP.SectionTableSize = COFF::SectionSize * CP.Obj.Sections.size();
 
-  uint32_t CurrentSectionDataOffset = SectionTableStart + SectionTableSize;
+  uint32_t CurrentSectionDataOffset =
+      CP.SectionTableStart + CP.SectionTableSize;
 
   // Assign each section data address consecutively.
-  for (std::vector<COFFYAML::Section>::iterator i = CP.Obj.Sections.begin(),
-                                                e = CP.Obj.Sections.end();
-                                                i != e; ++i) {
-    if (i->SectionData.binary_size() > 0) {
-      i->Header.SizeOfRawData = i->SectionData.binary_size();
-      i->Header.PointerToRawData = CurrentSectionDataOffset;
-      CurrentSectionDataOffset += i->Header.SizeOfRawData;
-      if (!i->Relocations.empty()) {
-        i->Header.PointerToRelocations = CurrentSectionDataOffset;
-        i->Header.NumberOfRelocations = i->Relocations.size();
-        CurrentSectionDataOffset += i->Header.NumberOfRelocations *
-          COFF::RelocationSize;
+  for (COFFYAML::Section &S : CP.Obj.Sections) {
+    if (S.SectionData.binary_size() > 0) {
+      CurrentSectionDataOffset = RoundUpToAlignment(
+          CurrentSectionDataOffset, CP.isPE() ? CP.getFileAlignment() : 4);
+      S.Header.SizeOfRawData = S.SectionData.binary_size();
+      if (CP.isPE())
+        S.Header.SizeOfRawData =
+            RoundUpToAlignment(S.Header.SizeOfRawData, CP.getFileAlignment());
+      S.Header.PointerToRawData = CurrentSectionDataOffset;
+      CurrentSectionDataOffset += S.Header.SizeOfRawData;
+      if (!S.Relocations.empty()) {
+        S.Header.PointerToRelocations = CurrentSectionDataOffset;
+        S.Header.NumberOfRelocations = S.Relocations.size();
+        CurrentSectionDataOffset +=
+            S.Header.NumberOfRelocations * COFF::RelocationSize;
       }
-      // TODO: Handle alignment.
     } else {
-      i->Header.SizeOfRawData = 0;
-      i->Header.PointerToRawData = 0;
+      S.Header.SizeOfRawData = 0;
+      S.Header.PointerToRawData = 0;
     }
   }
 
@@ -187,7 +221,10 @@ static bool layoutCOFF(COFFParser &CP) {
   // Store all the allocated start addresses in the header.
   CP.Obj.Header.NumberOfSections = CP.Obj.Sections.size();
   CP.Obj.Header.NumberOfSymbols = NumberOfSymbols;
-  CP.Obj.Header.PointerToSymbolTable = SymbolTableStart;
+  if (NumberOfSymbols > 0 || CP.StringTable.size() > 4)
+    CP.Obj.Header.PointerToSymbolTable = SymbolTableStart;
+  else
+    CP.Obj.Header.PointerToSymbolTable = 0;
 
   *reinterpret_cast<support::ulittle32_t *>(&CP.StringTable[0])
     = CP.StringTable.size();
@@ -250,7 +287,88 @@ num_zeros_impl num_zeros(size_t N) {
   return NZI;
 }
 
-bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
+template <typename T>
+static uint32_t initializeOptionalHeader(COFFParser &CP, uint16_t Magic, T Header) {
+  memset(Header, 0, sizeof(*Header));
+  Header->Magic = Magic;
+  Header->SectionAlignment = CP.Obj.OptionalHeader->Header.SectionAlignment;
+  Header->FileAlignment = CP.Obj.OptionalHeader->Header.FileAlignment;
+  uint32_t SizeOfCode = 0, SizeOfInitializedData = 0,
+           SizeOfUninitializedData = 0;
+  uint32_t SizeOfHeaders = RoundUpToAlignment(
+      CP.SectionTableStart + CP.SectionTableSize, Header->FileAlignment);
+  uint32_t SizeOfImage =
+      RoundUpToAlignment(SizeOfHeaders, Header->SectionAlignment);
+  uint32_t BaseOfData = 0;
+  for (const COFFYAML::Section &S : CP.Obj.Sections) {
+    if (S.Header.Characteristics & COFF::IMAGE_SCN_CNT_CODE)
+      SizeOfCode += S.Header.SizeOfRawData;
+    if (S.Header.Characteristics & COFF::IMAGE_SCN_CNT_INITIALIZED_DATA)
+      SizeOfInitializedData += S.Header.SizeOfRawData;
+    if (S.Header.Characteristics & COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA)
+      SizeOfUninitializedData += S.Header.SizeOfRawData;
+    if (S.Name.equals(".text"))
+      Header->BaseOfCode = S.Header.VirtualAddress; // RVA
+    else if (S.Name.equals(".data"))
+      BaseOfData = S.Header.VirtualAddress; // RVA
+    if (S.Header.VirtualAddress)
+      SizeOfImage +=
+          RoundUpToAlignment(S.Header.VirtualSize, Header->SectionAlignment);
+  }
+  Header->SizeOfCode = SizeOfCode;
+  Header->SizeOfInitializedData = SizeOfInitializedData;
+  Header->SizeOfUninitializedData = SizeOfUninitializedData;
+  Header->AddressOfEntryPoint =
+      CP.Obj.OptionalHeader->Header.AddressOfEntryPoint; // RVA
+  Header->ImageBase = CP.Obj.OptionalHeader->Header.ImageBase;
+  Header->MajorOperatingSystemVersion =
+      CP.Obj.OptionalHeader->Header.MajorOperatingSystemVersion;
+  Header->MinorOperatingSystemVersion =
+      CP.Obj.OptionalHeader->Header.MinorOperatingSystemVersion;
+  Header->MajorImageVersion =
+      CP.Obj.OptionalHeader->Header.MajorImageVersion;
+  Header->MinorImageVersion =
+      CP.Obj.OptionalHeader->Header.MinorImageVersion;
+  Header->MajorSubsystemVersion =
+      CP.Obj.OptionalHeader->Header.MajorSubsystemVersion;
+  Header->MinorSubsystemVersion =
+      CP.Obj.OptionalHeader->Header.MinorSubsystemVersion;
+  Header->SizeOfImage = SizeOfImage;
+  Header->SizeOfHeaders = SizeOfHeaders;
+  Header->Subsystem = CP.Obj.OptionalHeader->Header.Subsystem;
+  Header->DLLCharacteristics = CP.Obj.OptionalHeader->Header.DLLCharacteristics;
+  Header->SizeOfStackReserve = CP.Obj.OptionalHeader->Header.SizeOfStackReserve;
+  Header->SizeOfStackCommit = CP.Obj.OptionalHeader->Header.SizeOfStackCommit;
+  Header->SizeOfHeapReserve = CP.Obj.OptionalHeader->Header.SizeOfHeapReserve;
+  Header->SizeOfHeapCommit = CP.Obj.OptionalHeader->Header.SizeOfHeapCommit;
+  Header->NumberOfRvaAndSize = COFF::NUM_DATA_DIRECTORIES + 1;
+  return BaseOfData;
+}
+
+static bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
+  if (CP.isPE()) {
+    // PE files start with a DOS stub.
+    object::dos_header DH;
+    memset(&DH, 0, sizeof(DH));
+
+    // DOS EXEs start with "MZ" magic.
+    DH.Magic[0] = 'M';
+    DH.Magic[1] = 'Z';
+    // Initializing the AddressOfRelocationTable is strictly optional but
+    // mollifies certain tools which expect it to have a value greater than
+    // 0x40.
+    DH.AddressOfRelocationTable = sizeof(DH);
+    // This is the address of the PE signature.
+    DH.AddressOfNewExeHeader = DOSStubSize;
+
+    // Write out our DOS stub.
+    OS.write(reinterpret_cast<char *>(&DH), sizeof(DH));
+    // Write padding until we reach the position of where our PE signature
+    // should live.
+    OS << num_zeros(DOSStubSize - sizeof(DH));
+    // Write out the PE signature.
+    OS.write(COFF::PEMagic, sizeof(COFF::PEMagic));
+  }
   if (CP.useBigObj()) {
     OS << binary_le(static_cast<uint16_t>(COFF::IMAGE_FILE_MACHINE_UNKNOWN))
        << binary_le(static_cast<uint16_t>(0xffff))
@@ -274,7 +392,32 @@ bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
        << binary_le(CP.Obj.Header.SizeOfOptionalHeader)
        << binary_le(CP.Obj.Header.Characteristics);
   }
+  if (CP.isPE()) {
+    if (CP.is64Bit()) {
+      object::pe32plus_header PEH;
+      initializeOptionalHeader(CP, COFF::PE32Header::PE32_PLUS, &PEH);
+      OS.write(reinterpret_cast<char *>(&PEH), sizeof(PEH));
+    } else {
+      object::pe32_header PEH;
+      uint32_t BaseOfData = initializeOptionalHeader(CP, COFF::PE32Header::PE32, &PEH);
+      PEH.BaseOfData = BaseOfData;
+      OS.write(reinterpret_cast<char *>(&PEH), sizeof(PEH));
+    }
+    for (const Optional<COFF::DataDirectory> &DD :
+         CP.Obj.OptionalHeader->DataDirectories) {
+      if (!DD.hasValue()) {
+        OS << zeros(uint32_t(0));
+        OS << zeros(uint32_t(0));
+      } else {
+        OS << binary_le(DD->RelativeVirtualAddress);
+        OS << binary_le(DD->Size);
+      }
+    }
+    OS << zeros(uint32_t(0));
+    OS << zeros(uint32_t(0));
+  }
 
+  assert(OS.tell() == CP.SectionTableStart);
   // Output section table.
   for (std::vector<COFFYAML::Section>::iterator i = CP.Obj.Sections.begin(),
                                                 e = CP.Obj.Sections.end();
@@ -290,6 +433,7 @@ bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
        << binary_le(i->Header.NumberOfLineNumbers)
        << binary_le(i->Header.Characteristics);
   }
+  assert(OS.tell() == CP.SectionTableStart + CP.SectionTableSize);
 
   unsigned CurSymbol = 0;
   StringMap<unsigned> SymbolTableIndexMap;
@@ -301,12 +445,15 @@ bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
   }
 
   // Output section data.
-  for (std::vector<COFFYAML::Section>::iterator i = CP.Obj.Sections.begin(),
-                                                e = CP.Obj.Sections.end();
-                                                i != e; ++i) {
-    i->SectionData.writeAsBinary(OS);
-    for (unsigned I2 = 0, E2 = i->Relocations.size(); I2 != E2; ++I2) {
-      const COFFYAML::Relocation &R = i->Relocations[I2];
+  for (const COFFYAML::Section &S : CP.Obj.Sections) {
+    if (!S.Header.SizeOfRawData)
+      continue;
+    assert(S.Header.PointerToRawData >= OS.tell());
+    OS << num_zeros(S.Header.PointerToRawData - OS.tell());
+    S.SectionData.writeAsBinary(OS);
+    assert(S.Header.SizeOfRawData >= S.SectionData.binary_size());
+    OS << num_zeros(S.Header.SizeOfRawData - S.SectionData.binary_size());
+    for (const COFFYAML::Relocation &R : S.Relocations) {
       uint32_t SymbolTableIndex = SymbolTableIndexMap[R.SymbolName];
       OS << binary_le(R.VirtualAddress)
          << binary_le(SymbolTableIndex)
@@ -376,7 +523,8 @@ bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
   }
 
   // Output string table.
-  OS.write(&CP.StringTable[0], CP.StringTable.size());
+  if (CP.Obj.Header.PointerToSymbolTable)
+    OS.write(&CP.StringTable[0], CP.StringTable.size());
   return true;
 }
 
@@ -394,6 +542,10 @@ int yaml2coff(yaml::Input &YIn, raw_ostream &Out) {
     return 1;
   }
 
+  if (!layoutOptionalHeader(CP)) {
+    errs() << "yaml2obj: Failed to layout optional header for COFF file!\n";
+    return 1;
+  }
   if (!layoutCOFF(CP)) {
     errs() << "yaml2obj: Failed to layout COFF file!\n";
     return 1;

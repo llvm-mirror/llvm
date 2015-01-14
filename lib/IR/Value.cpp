@@ -292,7 +292,7 @@ void Value::takeName(Value *V) {
 #ifndef NDEBUG
 static bool contains(SmallPtrSetImpl<ConstantExpr *> &Cache, ConstantExpr *Expr,
                      Constant *C) {
-  if (!Cache.insert(Expr))
+  if (!Cache.insert(Expr).second)
     return false;
 
   for (auto &O : Expr->operands()) {
@@ -353,6 +353,28 @@ void Value::replaceAllUsesWith(Value *New) {
     BB->replaceSuccessorsPhiUsesWith(cast<BasicBlock>(New));
 }
 
+// Like replaceAllUsesWith except it does not handle constants or basic blocks.
+// This routine leaves uses within BB.
+void Value::replaceUsesOutsideBlock(Value *New, BasicBlock *BB) {
+  assert(New && "Value::replaceUsesOutsideBlock(<null>, BB) is invalid!");
+  assert(!contains(New, this) &&
+         "this->replaceUsesOutsideBlock(expr(this), BB) is NOT valid!");
+  assert(New->getType() == getType() &&
+         "replaceUses of value with new value of different type!");
+  assert(BB && "Basic block that may contain a use of 'New' must be defined\n");
+
+  use_iterator UI = use_begin(), E = use_end();
+  for (; UI != E;) {
+    Use &U = *UI;
+    ++UI;
+    auto *Usr = dyn_cast<Instruction>(U.getUser());
+    if (Usr && Usr->getParent() == BB)
+      continue;
+    U.set(New);
+  }
+  return;
+}
+
 namespace {
 // Various metrics for how much to strip off of pointers.
 enum PointerStripKind {
@@ -401,7 +423,7 @@ static Value *stripPointerCastsAndOffsets(Value *V) {
       return V;
     }
     assert(V->getType()->isPointerTy() && "Unexpected operand type!");
-  } while (Visited.insert(V));
+  } while (Visited.insert(V).second);
 
   return V;
 }
@@ -451,7 +473,7 @@ Value *Value::stripAndAccumulateInBoundsConstantOffsets(const DataLayout &DL,
       return V;
     }
     assert(V->getType()->isPointerTy() && "Unexpected operand type!");
-  } while (Visited.insert(V));
+  } while (Visited.insert(V).second);
 
   return V;
 }
@@ -522,7 +544,7 @@ static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
   // For GEPs, determine if the indexing lands within the allocated object.
   if (const GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
     // Conservatively require that the base pointer be fully dereferenceable.
-    if (!Visited.insert(GEP->getOperand(0)))
+    if (!Visited.insert(GEP->getOperand(0)).second)
       return false;
     if (!isDereferenceablePointer(GEP->getOperand(0), DL, Visited))
       return false;
@@ -773,6 +795,8 @@ void ValueHandleBase::ValueIsDeleted(Value *V) {
 void ValueHandleBase::ValueIsRAUWd(Value *Old, Value *New) {
   assert(Old->HasValueHandle &&"Should only be called if ValueHandles present");
   assert(Old != New && "Changing value into itself!");
+  assert(Old->getType() == New->getType() &&
+         "replaceAllUses of value with new value of different type!");
 
   // Get the linked list base, which is guaranteed to exist since the
   // HasValueHandle flag is set.

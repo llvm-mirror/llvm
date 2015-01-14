@@ -3,7 +3,7 @@
 add_llvm_library(LLVMExecutionEngine
   ExecutionEngine.cpp
   ExecutionEngineBindings.cpp
-  JITEventListener.cpp
+  GDBRegistrationListener.cpp
   RTDyldMemoryManager.cpp
   TargetSelect.cpp
   )

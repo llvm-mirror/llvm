@@ -23,7 +23,7 @@ namespace llvm {
 class StringRef;
 
 class X86TargetMachine final : public LLVMTargetMachine {
-  virtual void anchor();
+  std::unique_ptr<TargetLoweringObjectFile> TLOF;
   X86Subtarget       Subtarget;
 
   mutable StringMap<std::unique_ptr<X86Subtarget>> SubtargetMap;
@@ -33,6 +33,8 @@ public:
                    StringRef CPU, StringRef FS, const TargetOptions &Options,
                    Reloc::Model RM, CodeModel::Model CM,
                    CodeGenOpt::Level OL);
+  ~X86TargetMachine() override;
+
   const X86Subtarget *getSubtargetImpl() const override { return &Subtarget; }
   const X86Subtarget *getSubtargetImpl(const Function &F) const override;
 
@@ -41,6 +43,9 @@ public:
 
   // Set up the pass pipeline.
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+  TargetLoweringObjectFile *getObjFileLowering() const override {
+    return TLOF.get();
+  }
 };
 
 } // End llvm namespace

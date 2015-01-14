@@ -216,31 +216,28 @@ int main(int argc, char **argv) {
   if (!DeleteFn)
     for (size_t i = 0, e = GVs.size(); i != e; ++i) {
       GlobalValue *GV = GVs[i];
-      if (GV->isMaterializable()) {
-        std::string ErrInfo;
-        if (GV->Materialize(&ErrInfo)) {
-          errs() << argv[0] << ": error reading input: " << ErrInfo << "\n";
-          return 1;
-        }
+      if (std::error_code EC = GV->materialize()) {
+        errs() << argv[0] << ": error reading input: " << EC.message() << "\n";
+        return 1;
       }
     }
   else {
     // Deleting. Materialize every GV that's *not* in GVs.
     SmallPtrSet<GlobalValue *, 8> GVSet(GVs.begin(), GVs.end());
     for (auto &G : M->globals()) {
-      if (!GVSet.count(&G) && G.isMaterializable()) {
-        std::string ErrInfo;
-        if (G.Materialize(&ErrInfo)) {
-          errs() << argv[0] << ": error reading input: " << ErrInfo << "\n";
+      if (!GVSet.count(&G)) {
+        if (std::error_code EC = G.materialize()) {
+          errs() << argv[0] << ": error reading input: " << EC.message()
+                 << "\n";
           return 1;
         }
       }
     }
     for (auto &F : *M) {
-      if (!GVSet.count(&F) && F.isMaterializable()) {
-        std::string ErrInfo;
-        if (F.Materialize(&ErrInfo)) {
-          errs() << argv[0] << ": error reading input: " << ErrInfo << "\n";
+      if (!GVSet.count(&F)) {
+        if (std::error_code EC = F.materialize()) {
+          errs() << argv[0] << ": error reading input: " << EC.message()
+                 << "\n";
           return 1;
         }
       }

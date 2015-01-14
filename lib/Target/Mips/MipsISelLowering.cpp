@@ -14,6 +14,7 @@
 #include "MipsISelLowering.h"
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
+#include "MipsCCState.h"
 #include "MipsMachineFunction.h"
 #include "MipsSubtarget.h"
 #include "MipsTargetMachine.h"
@@ -57,78 +58,10 @@ EnableMipsFastISel("mips-fast-isel", cl::Hidden,
   cl::desc("Allow mips-fast-isel to be used"),
   cl::init(false));
 
-static const MCPhysReg O32IntRegs[4] = {
-  Mips::A0, Mips::A1, Mips::A2, Mips::A3
-};
-
-static const MCPhysReg Mips64IntRegs[8] = {
-  Mips::A0_64, Mips::A1_64, Mips::A2_64, Mips::A3_64,
-  Mips::T0_64, Mips::T1_64, Mips::T2_64, Mips::T3_64
-};
-
 static const MCPhysReg Mips64DPRegs[8] = {
   Mips::D12_64, Mips::D13_64, Mips::D14_64, Mips::D15_64,
   Mips::D16_64, Mips::D17_64, Mips::D18_64, Mips::D19_64
 };
-
-static bool originalTypeIsF128(const Type *Ty, const SDNode *CallNode);
-
-namespace {
-class MipsCCState : public CCState {
-private:
-  /// Identify lowered values that originated from f128 arguments and record
-  /// this for use by RetCC_MipsN.
-  void
-  PreAnalyzeCallResultForF128(const SmallVectorImpl<ISD::InputArg> &Ins,
-                              const TargetLowering::CallLoweringInfo &CLI) {
-    for (unsigned i = 0; i < Ins.size(); ++i)
-      OriginalArgWasF128.push_back(
-          originalTypeIsF128(CLI.RetTy, CLI.Callee.getNode()));
-  }
-
-  /// Identify lowered values that originated from f128 arguments and record
-  /// this for use by RetCC_MipsN.
-  void PreAnalyzeReturnForF128(const SmallVectorImpl<ISD::OutputArg> &Outs) {
-    const MachineFunction &MF = getMachineFunction();
-    for (unsigned i = 0; i < Outs.size(); ++i)
-      OriginalArgWasF128.push_back(
-          originalTypeIsF128(MF.getFunction()->getReturnType(), nullptr));
-  }
-
-  /// Records whether the value has been lowered from an f128.
-  SmallVector<bool, 4> OriginalArgWasF128;
-
-public:
-  MipsCCState(CallingConv::ID CC, bool isVarArg, MachineFunction &MF,
-              SmallVectorImpl<CCValAssign> &locs, LLVMContext &C)
-      : CCState(CC, isVarArg, MF, locs, C) {}
-
-  void AnalyzeCallResult(const SmallVectorImpl<ISD::InputArg> &Ins,
-                         CCAssignFn Fn,
-                         const TargetLowering::CallLoweringInfo &CLI) {
-    PreAnalyzeCallResultForF128(Ins, CLI);
-    CCState::AnalyzeCallResult(Ins, Fn);
-    OriginalArgWasF128.clear();
-  }
-
-  void AnalyzeReturn(const SmallVectorImpl<ISD::OutputArg> &Outs,
-                     CCAssignFn Fn) {
-    PreAnalyzeReturnForF128(Outs);
-    CCState::AnalyzeReturn(Outs, Fn);
-    OriginalArgWasF128.clear();
-  }
-
-  bool CheckReturn(const SmallVectorImpl<ISD::OutputArg> &ArgsFlags,
-                   CCAssignFn Fn) {
-    PreAnalyzeReturnForF128(ArgsFlags);
-    bool Return = CCState::CheckReturn(ArgsFlags, Fn);
-    OriginalArgWasF128.clear();
-    return Return;
-  }
-
-  bool WasOriginalArgF128(unsigned ValNo) { return OriginalArgWasF128[ValNo]; }
-};
-}
 
 // If I is a shifted mask, set the size (Size) and the first bit of the
 // mask (Pos), and return true.
@@ -270,7 +203,7 @@ const char *MipsTargetLowering::getTargetNodeName(unsigned Opcode) const {
 
 MipsTargetLowering::MipsTargetLowering(const MipsTargetMachine &TM,
                                        const MipsSubtarget &STI)
-    : TargetLowering(TM, new MipsTargetObjectFile()), Subtarget(STI) {
+    : TargetLowering(TM), Subtarget(STI) {
   // Mips does not have i1 type, so use i32 for
   // setcc operations results (slt, sgt, ...).
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -1643,8 +1576,6 @@ SDValue MipsTargetLowering::lowerSETCC(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue MipsTargetLowering::lowerGlobalAddress(SDValue Op,
                                                SelectionDAG &DAG) const {
-  // FIXME there isn't actually debug info here
-  SDLoc DL(Op);
   EVT Ty = Op.getValueType();
   GlobalAddressSDNode *N = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = N->getGlobal();
@@ -1654,15 +1585,9 @@ SDValue MipsTargetLowering::lowerGlobalAddress(SDValue Op,
     const MipsTargetObjectFile &TLOF =
       (const MipsTargetObjectFile&)getObjFileLowering();
 
-    // %gp_rel relocation
-    if (TLOF.IsGlobalInSmallSection(GV, getTargetMachine())) {
-      SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, 0,
-                                              MipsII::MO_GPREL);
-      SDValue GPRelNode = DAG.getNode(MipsISD::GPRel, DL,
-                                      DAG.getVTList(MVT::i32), GA);
-      SDValue GPReg = DAG.getRegister(Mips::GP, MVT::i32);
-      return DAG.getNode(ISD::ADD, DL, MVT::i32, GPReg, GPRelNode);
-    }
+    if (TLOF.IsGlobalInSmallSection(GV, getTargetMachine()))
+      // %gp_rel relocation
+      return getAddrGPRel(N, Ty, DAG);
 
     // %hi/%lo relocation
     return getAddrNonPIC(N, Ty, DAG);
@@ -1793,21 +1718,20 @@ lowerJumpTable(SDValue Op, SelectionDAG &DAG) const
 SDValue MipsTargetLowering::
 lowerConstantPool(SDValue Op, SelectionDAG &DAG) const
 {
-  // gp_rel relocation
-  // FIXME: we should reference the constant pool using small data sections,
-  // but the asm printer currently doesn't support this feature without
-  // hacking it. This feature should come soon so we can uncomment the
-  // stuff below.
-  //if (IsInSmallSection(C->getType())) {
-  //  SDValue GPRelNode = DAG.getNode(MipsISD::GPRel, MVT::i32, CP);
-  //  SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i32);
-  //  ResNode = DAG.getNode(ISD::ADD, MVT::i32, GOT, GPRelNode);
   ConstantPoolSDNode *N = cast<ConstantPoolSDNode>(Op);
   EVT Ty = Op.getValueType();
 
   if (getTargetMachine().getRelocationModel() != Reloc::PIC_ &&
-      !Subtarget.isABI_N64())
+      !Subtarget.isABI_N64()) {
+    const MipsTargetObjectFile &TLOF =
+      (const MipsTargetObjectFile&)getObjFileLowering();
+
+    if (TLOF.IsConstantInSmallSection(N->getConstVal(), getTargetMachine()))
+      // %gp_rel relocation
+      return getAddrGPRel(N, Ty, DAG);
+
     return getAddrNonPIC(N, Ty, DAG);
+  }
 
   return getAddrLocal(N, Ty, DAG,
                       Subtarget.isABI_N32() || Subtarget.isABI_N64());
@@ -2432,6 +2356,10 @@ static bool CC_MipsO32_FP64(unsigned ValNo, MVT ValVT,
   return CC_MipsO32(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State, F64Regs);
 }
 
+static bool CC_MipsO32(unsigned ValNo, MVT ValVT, MVT LocVT,
+                       CCValAssign::LocInfo LocInfo, ISD::ArgFlagsTy ArgFlags,
+                       CCState &State) LLVM_ATTRIBUTE_UNUSED;
+
 #include "MipsGenCallingConv.inc"
 
 //===----------------------------------------------------------------------===//
@@ -2546,24 +2474,24 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // Analyze operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
-                 *DAG.getContext());
-  MipsCC::SpecialCallingConvType SpecialCallingConv =
-    getSpecialCallingConv(Callee);
-  MipsCC MipsCCInfo(CallConv, Subtarget, CCInfo, SpecialCallingConv);
+  MipsCCState CCInfo(
+      CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs, *DAG.getContext(),
+      MipsCCState::getSpecialCallingConvForCallee(Callee.getNode(), Subtarget));
 
-  MipsCCInfo.analyzeCallOperands(Outs, IsVarArg,
-                                 Subtarget.abiUsesSoftFloat(),
-                                 Callee.getNode(), CLI.getArgs());
+  // Allocate the reserved argument area. It seems strange to do this from the
+  // caller side but removing it breaks the frame size calculation.
+  const MipsABIInfo &ABI = Subtarget.getABI();
+  CCInfo.AllocateStack(ABI.GetCalleeAllocdArgSizeInBytes(CallConv), 1);
+
+  CCInfo.AnalyzeCallOperands(Outs, CC_Mips, CLI.getArgs(), Callee.getNode());
 
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NextStackOffset = CCInfo.getNextStackOffset();
 
   // Check if it's really possible to do a tail call.
   if (IsTailCall)
-    IsTailCall =
-      isEligibleForTailCallOptimization(MipsCCInfo, NextStackOffset,
-                                        *MF.getInfo<MipsFunctionInfo>());
+    IsTailCall = isEligibleForTailCallOptimization(
+        CCInfo, NextStackOffset, *MF.getInfo<MipsFunctionInfo>());
 
   if (!IsTailCall && CLI.CS && CLI.CS->isMustTailCall())
     report_fatal_error("failed to perform tail call elimination on a call "
@@ -2589,7 +2517,8 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // With EABI is it possible to have 16 args on registers.
   std::deque< std::pair<unsigned, SDValue> > RegsToPass;
   SmallVector<SDValue, 8> MemOpChains;
-  MipsCC::byval_iterator ByValArg = MipsCCInfo.byval_begin();
+
+  CCInfo.rewindByValRegsInfo();
 
   // Walk the register/memloc assignments, inserting copies/loads.
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
@@ -2597,23 +2526,30 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     CCValAssign &VA = ArgLocs[i];
     MVT ValVT = VA.getValVT(), LocVT = VA.getLocVT();
     ISD::ArgFlagsTy Flags = Outs[i].Flags;
+    bool UseUpperBits = false;
 
     // ByVal Arg.
     if (Flags.isByVal()) {
+      unsigned FirstByValReg, LastByValReg;
+      unsigned ByValIdx = CCInfo.getInRegsParamsProcessed();
+      CCInfo.getInRegsParamInfo(ByValIdx, FirstByValReg, LastByValReg);
+
       assert(Flags.getByValSize() &&
              "ByVal args of size 0 should have been ignored by front-end.");
-      assert(ByValArg != MipsCCInfo.byval_end());
+      assert(ByValIdx < CCInfo.getInRegsParamsCount());
       assert(!IsTailCall &&
              "Do not tail-call optimize if there is a byval argument.");
       passByValArg(Chain, DL, RegsToPass, MemOpChains, StackPtr, MFI, DAG, Arg,
-                   MipsCCInfo, *ByValArg, Flags, Subtarget.isLittle());
-      ++ByValArg;
+                   FirstByValReg, LastByValReg, Flags, Subtarget.isLittle(),
+                   VA);
+      CCInfo.nextInRegsParam();
       continue;
     }
 
     // Promote the value if needed.
     switch (VA.getLocInfo()) {
-    default: llvm_unreachable("Unknown loc info!");
+    default:
+      llvm_unreachable("Unknown loc info!");
     case CCValAssign::Full:
       if (VA.isRegLoc()) {
         if ((ValVT == MVT::f32 && LocVT == MVT::i32) ||
@@ -2635,15 +2571,35 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         }
       }
       break;
+    case CCValAssign::BCvt:
+      Arg = DAG.getNode(ISD::BITCAST, DL, LocVT, Arg);
+      break;
+    case CCValAssign::SExtUpper:
+      UseUpperBits = true;
+      // Fallthrough
     case CCValAssign::SExt:
       Arg = DAG.getNode(ISD::SIGN_EXTEND, DL, LocVT, Arg);
       break;
+    case CCValAssign::ZExtUpper:
+      UseUpperBits = true;
+      // Fallthrough
     case CCValAssign::ZExt:
       Arg = DAG.getNode(ISD::ZERO_EXTEND, DL, LocVT, Arg);
       break;
+    case CCValAssign::AExtUpper:
+      UseUpperBits = true;
+      // Fallthrough
     case CCValAssign::AExt:
       Arg = DAG.getNode(ISD::ANY_EXTEND, DL, LocVT, Arg);
       break;
+    }
+
+    if (UseUpperBits) {
+      unsigned ValSizeInBits = Outs[i].ArgVT.getSizeInBits();
+      unsigned LocSizeInBits = VA.getLocVT().getSizeInBits();
+      Arg = DAG.getNode(
+          ISD::SHL, DL, VA.getLocVT(), Arg,
+          DAG.getConstant(LocSizeInBits - ValSizeInBits, VA.getLocVT()));
     }
 
     // Arguments that can be passed on register must be kept at
@@ -2808,6 +2764,60 @@ SDValue MipsTargetLowering::LowerCallResult(
   return Chain;
 }
 
+static SDValue UnpackFromArgumentSlot(SDValue Val, const CCValAssign &VA,
+                                      EVT ArgVT, SDLoc DL, SelectionDAG &DAG) {
+  MVT LocVT = VA.getLocVT();
+  EVT ValVT = VA.getValVT();
+
+  // Shift into the upper bits if necessary.
+  switch (VA.getLocInfo()) {
+  default:
+    break;
+  case CCValAssign::AExtUpper:
+  case CCValAssign::SExtUpper:
+  case CCValAssign::ZExtUpper: {
+    unsigned ValSizeInBits = ArgVT.getSizeInBits();
+    unsigned LocSizeInBits = VA.getLocVT().getSizeInBits();
+    unsigned Opcode =
+        VA.getLocInfo() == CCValAssign::ZExtUpper ? ISD::SRL : ISD::SRA;
+    Val = DAG.getNode(
+        Opcode, DL, VA.getLocVT(), Val,
+        DAG.getConstant(LocSizeInBits - ValSizeInBits, VA.getLocVT()));
+    break;
+  }
+  }
+
+  // If this is an value smaller than the argument slot size (32-bit for O32,
+  // 64-bit for N32/N64), it has been promoted in some way to the argument slot
+  // size. Extract the value and insert any appropriate assertions regarding
+  // sign/zero extension.
+  switch (VA.getLocInfo()) {
+  default:
+    llvm_unreachable("Unknown loc info!");
+  case CCValAssign::Full:
+    break;
+  case CCValAssign::AExtUpper:
+  case CCValAssign::AExt:
+    Val = DAG.getNode(ISD::TRUNCATE, DL, ValVT, Val);
+    break;
+  case CCValAssign::SExtUpper:
+  case CCValAssign::SExt:
+    Val = DAG.getNode(ISD::AssertSext, DL, LocVT, Val, DAG.getValueType(ValVT));
+    Val = DAG.getNode(ISD::TRUNCATE, DL, ValVT, Val);
+    break;
+  case CCValAssign::ZExtUpper:
+  case CCValAssign::ZExt:
+    Val = DAG.getNode(ISD::AssertZext, DL, LocVT, Val, DAG.getValueType(ValVT));
+    Val = DAG.getNode(ISD::TRUNCATE, DL, ValVT, Val);
+    break;
+  case CCValAssign::BCvt:
+    Val = DAG.getNode(ISD::BITCAST, DL, ValVT, Val);
+    break;
+  }
+
+  return Val;
+}
+
 //===----------------------------------------------------------------------===//
 //             Formal Arguments Calling Convention Implementation
 //===----------------------------------------------------------------------===//
@@ -2832,19 +2842,19 @@ MipsTargetLowering::LowerFormalArguments(SDValue Chain,
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
-                 *DAG.getContext());
-  MipsCC MipsCCInfo(CallConv, Subtarget, CCInfo);
+  MipsCCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
+                     *DAG.getContext());
+  const MipsABIInfo &ABI = Subtarget.getABI();
+  CCInfo.AllocateStack(ABI.GetCalleeAllocdArgSizeInBytes(CallConv), 1);
   Function::const_arg_iterator FuncArg =
     DAG.getMachineFunction().getFunction()->arg_begin();
-  bool UseSoftFloat = Subtarget.abiUsesSoftFloat();
 
-  MipsCCInfo.analyzeFormalArguments(Ins, UseSoftFloat, FuncArg);
+  CCInfo.AnalyzeFormalArguments(Ins, CC_Mips_FixedArg);
   MipsFI->setFormalArgInfo(CCInfo.getNextStackOffset(),
-                           MipsCCInfo.hasByValArg());
+                           CCInfo.getInRegsParamsCount() > 0);
 
   unsigned CurArgIdx = 0;
-  MipsCC::byval_iterator ByValArg = MipsCCInfo.byval_begin();
+  CCInfo.rewindByValRegsInfo();
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
@@ -2855,12 +2865,16 @@ MipsTargetLowering::LowerFormalArguments(SDValue Chain,
     bool IsRegLoc = VA.isRegLoc();
 
     if (Flags.isByVal()) {
+      unsigned FirstByValReg, LastByValReg;
+      unsigned ByValIdx = CCInfo.getInRegsParamsProcessed();
+      CCInfo.getInRegsParamInfo(ByValIdx, FirstByValReg, LastByValReg);
+
       assert(Flags.getByValSize() &&
              "ByVal args of size 0 should have been ignored by front-end.");
-      assert(ByValArg != MipsCCInfo.byval_end());
+      assert(ByValIdx < CCInfo.getInRegsParamsCount());
       copyByValRegs(Chain, DL, OutChains, DAG, Flags, InVals, &*FuncArg,
-                    MipsCCInfo, *ByValArg);
-      ++ByValArg;
+                    FirstByValReg, LastByValReg, VA, CCInfo);
+      CCInfo.nextInRegsParam();
       continue;
     }
 
@@ -2875,20 +2889,7 @@ MipsTargetLowering::LowerFormalArguments(SDValue Chain,
       unsigned Reg = addLiveIn(DAG.getMachineFunction(), ArgReg, RC);
       SDValue ArgValue = DAG.getCopyFromReg(Chain, DL, Reg, RegVT);
 
-      // If this is an 8 or 16-bit value, it has been passed promoted
-      // to 32 bits.  Insert an assert[sz]ext to capture this, then
-      // truncate to the right size.
-      if (VA.getLocInfo() != CCValAssign::Full) {
-        unsigned Opcode = 0;
-        if (VA.getLocInfo() == CCValAssign::SExt)
-          Opcode = ISD::AssertSext;
-        else if (VA.getLocInfo() == CCValAssign::ZExt)
-          Opcode = ISD::AssertZext;
-        if (Opcode)
-          ArgValue = DAG.getNode(Opcode, DL, RegVT, ArgValue,
-                                 DAG.getValueType(ValVT));
-        ArgValue = DAG.getNode(ISD::TRUNCATE, DL, ValVT, ArgValue);
-      }
+      ArgValue = UnpackFromArgumentSlot(ArgValue, VA, Ins[i].ArgVT, DL, DAG);
 
       // Handle floating point arguments passed in integer registers and
       // long double arguments passed in floating point registers.
@@ -2909,21 +2910,34 @@ MipsTargetLowering::LowerFormalArguments(SDValue Chain,
 
       InVals.push_back(ArgValue);
     } else { // VA.isRegLoc()
+      MVT LocVT = VA.getLocVT();
+
+      if (Subtarget.isABI_O32()) {
+        // We ought to be able to use LocVT directly but O32 sets it to i32
+        // when allocating floating point values to integer registers.
+        // This shouldn't influence how we load the value into registers unless
+        // we are targetting softfloat.
+        if (VA.getValVT().isFloatingPoint() && !Subtarget.abiUsesSoftFloat())
+          LocVT = VA.getValVT();
+      }
 
       // sanity check
       assert(VA.isMemLoc());
 
       // The stack pointer offset is relative to the caller stack frame.
-      int FI = MFI->CreateFixedObject(ValVT.getSizeInBits()/8,
+      int FI = MFI->CreateFixedObject(LocVT.getSizeInBits() / 8,
                                       VA.getLocMemOffset(), true);
 
       // Create load nodes to retrieve arguments from the stack
       SDValue FIN = DAG.getFrameIndex(FI, getPointerTy());
-      SDValue Load = DAG.getLoad(ValVT, DL, Chain, FIN,
-                                 MachinePointerInfo::getFixedStack(FI),
-                                 false, false, false, 0);
-      InVals.push_back(Load);
-      OutChains.push_back(Load.getValue(1));
+      SDValue ArgValue = DAG.getLoad(LocVT, DL, Chain, FIN,
+                                     MachinePointerInfo::getFixedStack(FI),
+                                     false, false, false, 0);
+      OutChains.push_back(ArgValue.getValue(1));
+
+      ArgValue = UnpackFromArgumentSlot(ArgValue, VA, Ins[i].ArgVT, DL, DAG);
+
+      InVals.push_back(ArgValue);
     }
   }
 
@@ -2945,7 +2959,7 @@ MipsTargetLowering::LowerFormalArguments(SDValue Chain,
   }
 
   if (IsVarArg)
-    writeVarArgRegs(OutChains, MipsCCInfo, Chain, DL, DAG);
+    writeVarArgRegs(OutChains, Chain, DL, DAG, CCInfo);
 
   // All stores are grouped in one node to allow the matching between
   // the size of Ins and InVals. This only happens when on varg functions
@@ -2984,7 +2998,6 @@ MipsTargetLowering::LowerReturn(SDValue Chain,
 
   // CCState - Info about the registers and stack slot.
   MipsCCState CCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
-  MipsCC MipsCCInfo(CallConv, Subtarget, CCInfo);
 
   // Analyze return values.
   CCInfo.AnalyzeReturn(Outs, RetCC_Mips);
@@ -3470,258 +3483,27 @@ unsigned MipsTargetLowering::getJumpTableEncoding() const {
   return TargetLowering::getJumpTableEncoding();
 }
 
-/// This function returns true if CallSym is a long double emulation routine.
-static bool isF128SoftLibCall(const char *CallSym) {
-  const char *const LibCalls[] =
-    {"__addtf3", "__divtf3", "__eqtf2", "__extenddftf2", "__extendsftf2",
-     "__fixtfdi", "__fixtfsi", "__fixtfti", "__fixunstfdi", "__fixunstfsi",
-     "__fixunstfti", "__floatditf", "__floatsitf", "__floattitf",
-     "__floatunditf", "__floatunsitf", "__floatuntitf", "__getf2", "__gttf2",
-     "__letf2", "__lttf2", "__multf3", "__netf2", "__powitf2", "__subtf3",
-     "__trunctfdf2", "__trunctfsf2", "__unordtf2",
-     "ceill", "copysignl", "cosl", "exp2l", "expl", "floorl", "fmal", "fmodl",
-     "log10l", "log2l", "logl", "nearbyintl", "powl", "rintl", "sinl", "sqrtl",
-     "truncl"};
-
-  const char *const *End = LibCalls + array_lengthof(LibCalls);
-
-  // Check that LibCalls is sorted alphabetically.
-  MipsTargetLowering::LTStr Comp;
-
-#ifndef NDEBUG
-  for (const char *const *I = LibCalls; I < End - 1; ++I)
-    assert(Comp(*I, *(I + 1)));
-#endif
-
-  return std::binary_search(LibCalls, End, CallSym, Comp);
-}
-
-/// This function returns true if Ty is fp128, {f128} or i128 which was
-/// originally a fp128.
-static bool originalTypeIsF128(const Type *Ty, const SDNode *CallNode) {
-  if (Ty->isFP128Ty())
-    return true;
-
-  if (Ty->isStructTy() && Ty->getStructNumElements() == 1 &&
-      Ty->getStructElementType(0)->isFP128Ty())
-    return true;
-
-  const ExternalSymbolSDNode *ES =
-    dyn_cast_or_null<const ExternalSymbolSDNode>(CallNode);
-
-  // If the Ty is i128 and the function being called is a long double emulation
-  // routine, then the original type is f128.
-  return (ES && Ty->isIntegerTy(128) && isF128SoftLibCall(ES->getSymbol()));
-}
-
-MipsTargetLowering::MipsCC::SpecialCallingConvType
-  MipsTargetLowering::getSpecialCallingConv(SDValue Callee) const {
-  MipsCC::SpecialCallingConvType SpecialCallingConv =
-    MipsCC::NoSpecialCallingConv;
-  if (Subtarget.inMips16HardFloat()) {
-    if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
-      llvm::StringRef Sym = G->getGlobal()->getName();
-      Function *F = G->getGlobal()->getParent()->getFunction(Sym);
-      if (F && F->hasFnAttribute("__Mips16RetHelper")) {
-        SpecialCallingConv = MipsCC::Mips16RetHelperConv;
-      }
-    }
-  }
-  return SpecialCallingConv;
-}
-
-MipsTargetLowering::MipsCC::MipsCC(
-    CallingConv::ID CC, const MipsSubtarget &Subtarget_, CCState &Info,
-    MipsCC::SpecialCallingConvType SpecialCallingConv_)
-    : CCInfo(Info), CallConv(CC), Subtarget(Subtarget_),
-      SpecialCallingConv(SpecialCallingConv_) {
-  // Pre-allocate reserved argument area.
-  CCInfo.AllocateStack(reservedArgArea(), 1);
-}
-
-
-void MipsTargetLowering::MipsCC::
-analyzeCallOperands(const SmallVectorImpl<ISD::OutputArg> &Args,
-                    bool IsVarArg, bool IsSoftFloat, const SDNode *CallNode,
-                    std::vector<ArgListEntry> &FuncArgs) {
-  assert((CallConv != CallingConv::Fast || !IsVarArg) &&
-         "CallingConv::Fast shouldn't be used for vararg functions.");
-
-  unsigned NumOpnds = Args.size();
-  llvm::CCAssignFn *FixedFn = fixedArgFn(), *VarFn = varArgFn();
-
-  for (unsigned I = 0; I != NumOpnds; ++I) {
-    MVT ArgVT = Args[I].VT;
-    ISD::ArgFlagsTy ArgFlags = Args[I].Flags;
-    bool R;
-
-    if (ArgFlags.isByVal()) {
-      handleByValArg(I, ArgVT, ArgVT, CCValAssign::Full, ArgFlags);
-      continue;
-    }
-
-    if (IsVarArg && !Args[I].IsFixed)
-      R = VarFn(I, ArgVT, ArgVT, CCValAssign::Full, ArgFlags, CCInfo);
-    else {
-      MVT RegVT = getRegVT(ArgVT, FuncArgs[Args[I].OrigArgIndex].Ty, CallNode,
-                           IsSoftFloat);
-      R = FixedFn(I, ArgVT, RegVT, CCValAssign::Full, ArgFlags, CCInfo);
-    }
-
-    if (R) {
-#ifndef NDEBUG
-      dbgs() << "Call operand #" << I << " has unhandled type "
-             << EVT(ArgVT).getEVTString();
-#endif
-      llvm_unreachable(nullptr);
-    }
-  }
-}
-
-void MipsTargetLowering::MipsCC::
-analyzeFormalArguments(const SmallVectorImpl<ISD::InputArg> &Args,
-                       bool IsSoftFloat, Function::const_arg_iterator FuncArg) {
-  unsigned NumArgs = Args.size();
-  llvm::CCAssignFn *FixedFn = fixedArgFn();
-  unsigned CurArgIdx = 0;
-
-  for (unsigned I = 0; I != NumArgs; ++I) {
-    MVT ArgVT = Args[I].VT;
-    ISD::ArgFlagsTy ArgFlags = Args[I].Flags;
-    std::advance(FuncArg, Args[I].OrigArgIndex - CurArgIdx);
-    CurArgIdx = Args[I].OrigArgIndex;
-
-    if (ArgFlags.isByVal()) {
-      handleByValArg(I, ArgVT, ArgVT, CCValAssign::Full, ArgFlags);
-      continue;
-    }
-
-    MVT RegVT = getRegVT(ArgVT, FuncArg->getType(), nullptr, IsSoftFloat);
-
-    if (!FixedFn(I, ArgVT, RegVT, CCValAssign::Full, ArgFlags, CCInfo))
-      continue;
-
-#ifndef NDEBUG
-    dbgs() << "Formal Arg #" << I << " has unhandled type "
-           << EVT(ArgVT).getEVTString();
-#endif
-    llvm_unreachable(nullptr);
-  }
-}
-
-void MipsTargetLowering::MipsCC::handleByValArg(unsigned ValNo, MVT ValVT,
-                                                MVT LocVT,
-                                                CCValAssign::LocInfo LocInfo,
-                                                ISD::ArgFlagsTy ArgFlags) {
-  assert(ArgFlags.getByValSize() && "Byval argument's size shouldn't be 0.");
-
-  struct ByValArgInfo ByVal;
-  unsigned RegSizeInBytes = Subtarget.getGPRSizeInBytes();
-  unsigned ByValSize =
-      RoundUpToAlignment(ArgFlags.getByValSize(), RegSizeInBytes);
-  unsigned Align = std::min(std::max(ArgFlags.getByValAlign(), RegSizeInBytes),
-                            RegSizeInBytes * 2);
-
-  if (useRegsForByval())
-    allocateRegs(ByVal, ByValSize, Align);
-
-  // Allocate space on caller's stack.
-  ByVal.Address =
-      CCInfo.AllocateStack(ByValSize - RegSizeInBytes * ByVal.NumRegs, Align);
-  CCInfo.addLoc(CCValAssign::getMem(ValNo, ValVT, ByVal.Address, LocVT,
-                                    LocInfo));
-  ByValArgs.push_back(ByVal);
-}
-
-unsigned MipsTargetLowering::MipsCC::reservedArgArea() const {
-  return (Subtarget.isABI_O32() && (CallConv != CallingConv::Fast)) ? 16 : 0;
-}
-
-const ArrayRef<MCPhysReg> MipsTargetLowering::MipsCC::intArgRegs() const {
-  if (Subtarget.isABI_O32())
-    return makeArrayRef(O32IntRegs);
-  return makeArrayRef(Mips64IntRegs);
-}
-
-llvm::CCAssignFn *MipsTargetLowering::MipsCC::fixedArgFn() const {
-  if (CallConv == CallingConv::Fast)
-    return CC_Mips_FastCC;
-
-  if (SpecialCallingConv == Mips16RetHelperConv)
-    return CC_Mips16RetHelper;
-  return Subtarget.isABI_O32()
-             ? (Subtarget.isFP64bit() ? CC_MipsO32_FP64 : CC_MipsO32_FP32)
-             : CC_MipsN;
-}
-
-llvm::CCAssignFn *MipsTargetLowering::MipsCC::varArgFn() const {
-  return Subtarget.isABI_O32()
-             ? (Subtarget.isFP64bit() ? CC_MipsO32_FP64 : CC_MipsO32_FP32)
-             : CC_MipsN_VarArg;
-}
-
-const MCPhysReg *MipsTargetLowering::MipsCC::shadowRegs() const {
-  return Subtarget.isABI_O32() ? O32IntRegs : Mips64DPRegs;
-}
-
-void MipsTargetLowering::MipsCC::allocateRegs(ByValArgInfo &ByVal,
-                                              unsigned ByValSize,
-                                              unsigned Align) {
-  unsigned RegSizeInBytes = Subtarget.getGPRSizeInBytes();
-  const ArrayRef<MCPhysReg> IntArgRegs = intArgRegs();
-  const MCPhysReg *ShadowRegs = shadowRegs();
-  assert(!(ByValSize % RegSizeInBytes) && !(Align % RegSizeInBytes) &&
-         "Byval argument's size and alignment should be a multiple of"
-         "RegSizeInBytes.");
-
-  ByVal.FirstIdx =
-      CCInfo.getFirstUnallocated(IntArgRegs.data(), IntArgRegs.size());
-
-  // If Align > RegSizeInBytes, the first arg register must be even.
-  if ((Align > RegSizeInBytes) && (ByVal.FirstIdx % 2)) {
-    CCInfo.AllocateReg(IntArgRegs[ByVal.FirstIdx], ShadowRegs[ByVal.FirstIdx]);
-    ++ByVal.FirstIdx;
-  }
-
-  // Mark the registers allocated.
-  for (unsigned I = ByVal.FirstIdx; ByValSize && (I < IntArgRegs.size());
-       ByValSize -= RegSizeInBytes, ++I, ++ByVal.NumRegs)
-    CCInfo.AllocateReg(IntArgRegs[I], ShadowRegs[I]);
-}
-
-MVT MipsTargetLowering::MipsCC::getRegVT(MVT VT, const Type *OrigTy,
-                                         const SDNode *CallNode,
-                                         bool IsSoftFloat) const {
-  if (IsSoftFloat || Subtarget.isABI_O32())
-    return VT;
-
-  // Check if the original type was fp128.
-  if (originalTypeIsF128(OrigTy, CallNode)) {
-    assert(VT == MVT::i64);
-    return MVT::f64;
-  }
-
-  return VT;
-}
-
-void MipsTargetLowering::
-copyByValRegs(SDValue Chain, SDLoc DL, std::vector<SDValue> &OutChains,
-              SelectionDAG &DAG, const ISD::ArgFlagsTy &Flags,
-              SmallVectorImpl<SDValue> &InVals, const Argument *FuncArg,
-              const MipsCC &CC, const ByValArgInfo &ByVal) const {
+void MipsTargetLowering::copyByValRegs(
+    SDValue Chain, SDLoc DL, std::vector<SDValue> &OutChains, SelectionDAG &DAG,
+    const ISD::ArgFlagsTy &Flags, SmallVectorImpl<SDValue> &InVals,
+    const Argument *FuncArg, unsigned FirstReg, unsigned LastReg,
+    const CCValAssign &VA, MipsCCState &State) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   unsigned GPRSizeInBytes = Subtarget.getGPRSizeInBytes();
-  unsigned RegAreaSize = ByVal.NumRegs * GPRSizeInBytes;
+  unsigned NumRegs = LastReg - FirstReg;
+  unsigned RegAreaSize = NumRegs * GPRSizeInBytes;
   unsigned FrameObjSize = std::max(Flags.getByValSize(), RegAreaSize);
   int FrameObjOffset;
+  const MipsABIInfo &ABI = Subtarget.getABI();
+  ArrayRef<MCPhysReg> ByValArgRegs = ABI.GetByValArgRegs();
 
   if (RegAreaSize)
     FrameObjOffset =
-        (int)CC.reservedArgArea() -
-        (int)((CC.intArgRegs().size() - ByVal.FirstIdx) * GPRSizeInBytes);
+        (int)ABI.GetCalleeAllocdArgSizeInBytes(State.getCallingConv()) -
+        (int)((ByValArgRegs.size() - FirstReg) * GPRSizeInBytes);
   else
-    FrameObjOffset = ByVal.Address;
+    FrameObjOffset = VA.getLocMemOffset();
 
   // Create frame object.
   EVT PtrTy = getPointerTy();
@@ -3729,15 +3511,15 @@ copyByValRegs(SDValue Chain, SDLoc DL, std::vector<SDValue> &OutChains,
   SDValue FIN = DAG.getFrameIndex(FI, PtrTy);
   InVals.push_back(FIN);
 
-  if (!ByVal.NumRegs)
+  if (!NumRegs)
     return;
 
   // Copy arg registers.
   MVT RegTy = MVT::getIntegerVT(GPRSizeInBytes * 8);
   const TargetRegisterClass *RC = getRegClassFor(RegTy);
 
-  for (unsigned I = 0; I < ByVal.NumRegs; ++I) {
-    unsigned ArgReg = CC.intArgRegs()[ByVal.FirstIdx + I];
+  for (unsigned I = 0; I < NumRegs; ++I) {
+    unsigned ArgReg = ByValArgRegs[FirstReg + I];
     unsigned VReg = addLiveIn(MF, ArgReg, RC);
     unsigned Offset = I * GPRSizeInBytes;
     SDValue StorePtr = DAG.getNode(ISD::ADD, DL, PtrTy, FIN,
@@ -3750,34 +3532,34 @@ copyByValRegs(SDValue Chain, SDLoc DL, std::vector<SDValue> &OutChains,
 }
 
 // Copy byVal arg to registers and stack.
-void MipsTargetLowering::
-passByValArg(SDValue Chain, SDLoc DL,
-             std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
-             SmallVectorImpl<SDValue> &MemOpChains, SDValue StackPtr,
-             MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg,
-             const MipsCC &CC, const ByValArgInfo &ByVal,
-             const ISD::ArgFlagsTy &Flags, bool isLittle) const {
+void MipsTargetLowering::passByValArg(
+    SDValue Chain, SDLoc DL,
+    std::deque<std::pair<unsigned, SDValue>> &RegsToPass,
+    SmallVectorImpl<SDValue> &MemOpChains, SDValue StackPtr,
+    MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg, unsigned FirstReg,
+    unsigned LastReg, const ISD::ArgFlagsTy &Flags, bool isLittle,
+    const CCValAssign &VA) const {
   unsigned ByValSizeInBytes = Flags.getByValSize();
   unsigned OffsetInBytes = 0; // From beginning of struct
   unsigned RegSizeInBytes = Subtarget.getGPRSizeInBytes();
   unsigned Alignment = std::min(Flags.getByValAlign(), RegSizeInBytes);
   EVT PtrTy = getPointerTy(), RegTy = MVT::getIntegerVT(RegSizeInBytes * 8);
+  unsigned NumRegs = LastReg - FirstReg;
 
-  if (ByVal.NumRegs) {
-    const ArrayRef<MCPhysReg> ArgRegs = CC.intArgRegs();
-    bool LeftoverBytes = (ByVal.NumRegs * RegSizeInBytes > ByValSizeInBytes);
+  if (NumRegs) {
+    const ArrayRef<MCPhysReg> ArgRegs = Subtarget.getABI().GetByValArgRegs();
+    bool LeftoverBytes = (NumRegs * RegSizeInBytes > ByValSizeInBytes);
     unsigned I = 0;
 
     // Copy words to registers.
-    for (; I < ByVal.NumRegs - LeftoverBytes;
-         ++I, OffsetInBytes += RegSizeInBytes) {
+    for (; I < NumRegs - LeftoverBytes; ++I, OffsetInBytes += RegSizeInBytes) {
       SDValue LoadPtr = DAG.getNode(ISD::ADD, DL, PtrTy, Arg,
                                     DAG.getConstant(OffsetInBytes, PtrTy));
       SDValue LoadVal = DAG.getLoad(RegTy, DL, Chain, LoadPtr,
                                     MachinePointerInfo(), false, false, false,
                                     Alignment);
       MemOpChains.push_back(LoadVal.getValue(1));
-      unsigned ArgReg = ArgRegs[ByVal.FirstIdx + I];
+      unsigned ArgReg = ArgRegs[FirstReg + I];
       RegsToPass.push_back(std::make_pair(ArgReg, LoadVal));
     }
 
@@ -3787,9 +3569,6 @@ passByValArg(SDValue Chain, SDLoc DL,
 
     // Copy the remainder of the byval argument with sub-word loads and shifts.
     if (LeftoverBytes) {
-      assert((ByValSizeInBytes > OffsetInBytes) &&
-             (ByValSizeInBytes < OffsetInBytes + RegSizeInBytes) &&
-             "Size of the remainder should be smaller than RegSizeInBytes.");
       SDValue Val;
 
       for (unsigned LoadSizeInBytes = RegSizeInBytes / 2, TotalBytesLoaded = 0;
@@ -3829,7 +3608,7 @@ passByValArg(SDValue Chain, SDLoc DL,
         Alignment = std::min(Alignment, LoadSizeInBytes);
       }
 
-      unsigned ArgReg = ArgRegs[ByVal.FirstIdx + I];
+      unsigned ArgReg = ArgRegs[FirstReg + I];
       RegsToPass.push_back(std::make_pair(ArgReg, Val));
       return;
     }
@@ -3840,7 +3619,7 @@ passByValArg(SDValue Chain, SDLoc DL,
   SDValue Src = DAG.getNode(ISD::ADD, DL, PtrTy, Arg,
                             DAG.getConstant(OffsetInBytes, PtrTy));
   SDValue Dst = DAG.getNode(ISD::ADD, DL, PtrTy, StackPtr,
-                            DAG.getIntPtrConstant(ByVal.Address));
+                            DAG.getIntPtrConstant(VA.getLocMemOffset()));
   Chain = DAG.getMemcpy(Chain, DL, Dst, Src, DAG.getConstant(MemCpySize, PtrTy),
                         Alignment, /*isVolatile=*/false, /*AlwaysInline=*/false,
                         MachinePointerInfo(), MachinePointerInfo());
@@ -3848,11 +3627,11 @@ passByValArg(SDValue Chain, SDLoc DL,
 }
 
 void MipsTargetLowering::writeVarArgRegs(std::vector<SDValue> &OutChains,
-                                         const MipsCC &CC, SDValue Chain,
-                                         SDLoc DL, SelectionDAG &DAG) const {
-  const ArrayRef<MCPhysReg> ArgRegs = CC.intArgRegs();
-  const CCState &CCInfo = CC.getCCInfo();
-  unsigned Idx = CCInfo.getFirstUnallocated(ArgRegs.data(), ArgRegs.size());
+                                         SDValue Chain, SDLoc DL,
+                                         SelectionDAG &DAG,
+                                         CCState &State) const {
+  const ArrayRef<MCPhysReg> ArgRegs = Subtarget.getABI().GetVarArgRegs();
+  unsigned Idx = State.getFirstUnallocated(ArgRegs.data(), ArgRegs.size());
   unsigned RegSizeInBytes = Subtarget.getGPRSizeInBytes();
   MVT RegTy = MVT::getIntegerVT(RegSizeInBytes * 8);
   const TargetRegisterClass *RC = getRegClassFor(RegTy);
@@ -3865,10 +3644,13 @@ void MipsTargetLowering::writeVarArgRegs(std::vector<SDValue> &OutChains,
 
   if (ArgRegs.size() == Idx)
     VaArgOffset =
-        RoundUpToAlignment(CCInfo.getNextStackOffset(), RegSizeInBytes);
-  else
-    VaArgOffset = (int)CC.reservedArgArea() -
-                  (int)(RegSizeInBytes * (ArgRegs.size() - Idx));
+        RoundUpToAlignment(State.getNextStackOffset(), RegSizeInBytes);
+  else {
+    const MipsABIInfo &ABI = Subtarget.getABI();
+    VaArgOffset =
+        (int)ABI.GetCalleeAllocdArgSizeInBytes(State.getCallingConv()) -
+        (int)(RegSizeInBytes * (ArgRegs.size() - Idx));
+  }
 
   // Record the frame index of the first variable argument
   // which is a value necessary to VASTART.
@@ -3891,4 +3673,50 @@ void MipsTargetLowering::writeVarArgRegs(std::vector<SDValue> &OutChains,
         (Value *)nullptr);
     OutChains.push_back(Store);
   }
+}
+
+void MipsTargetLowering::HandleByVal(CCState *State, unsigned &Size,
+                                     unsigned Align) const {
+  MachineFunction &MF = State->getMachineFunction();
+  const TargetFrameLowering *TFL = MF.getSubtarget().getFrameLowering();
+
+  assert(Size && "Byval argument's size shouldn't be 0.");
+
+  Align = std::min(Align, TFL->getStackAlignment());
+
+  unsigned FirstReg = 0;
+  unsigned NumRegs = 0;
+
+  if (State->getCallingConv() != CallingConv::Fast) {
+    unsigned RegSizeInBytes = Subtarget.getGPRSizeInBytes();
+    const ArrayRef<MCPhysReg> IntArgRegs = Subtarget.getABI().GetByValArgRegs();
+    // FIXME: The O32 case actually describes no shadow registers.
+    const MCPhysReg *ShadowRegs =
+        Subtarget.isABI_O32() ? IntArgRegs.data() : Mips64DPRegs;
+
+    // We used to check the size as well but we can't do that anymore since
+    // CCState::HandleByVal() rounds up the size after calling this function.
+    assert(!(Align % RegSizeInBytes) &&
+           "Byval argument's alignment should be a multiple of"
+           "RegSizeInBytes.");
+
+    FirstReg = State->getFirstUnallocated(IntArgRegs.data(), IntArgRegs.size());
+
+    // If Align > RegSizeInBytes, the first arg register must be even.
+    // FIXME: This condition happens to do the right thing but it's not the
+    //        right way to test it. We want to check that the stack frame offset
+    //        of the register is aligned.
+    if ((Align > RegSizeInBytes) && (FirstReg % 2)) {
+      State->AllocateReg(IntArgRegs[FirstReg], ShadowRegs[FirstReg]);
+      ++FirstReg;
+    }
+
+    // Mark the registers allocated.
+    Size = RoundUpToAlignment(Size, RegSizeInBytes);
+    for (unsigned I = FirstReg; Size > 0 && (I < IntArgRegs.size());
+         Size -= RegSizeInBytes, ++I, ++NumRegs)
+      State->AllocateReg(IntArgRegs[I], ShadowRegs[I]);
+  }
+
+  State->addInRegsParamInfo(FirstReg, FirstReg + NumRegs);
 }

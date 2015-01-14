@@ -347,14 +347,14 @@ bool HexagonInstrInfo::analyzeCompare(const MachineInstr *MI,
   // Set mask and the first source register.
   switch (Opc) {
     case Hexagon::CMPEHexagon4rr:
-    case Hexagon::CMPEQri:
-    case Hexagon::CMPEQrr:
+    case Hexagon::C2_cmpeqi:
+    case Hexagon::C2_cmpeq:
     case Hexagon::CMPGT64rr:
     case Hexagon::CMPGTU64rr:
-    case Hexagon::CMPGTUri:
-    case Hexagon::CMPGTUrr:
-    case Hexagon::CMPGTri:
-    case Hexagon::CMPGTrr:
+    case Hexagon::C2_cmpgtui:
+    case Hexagon::C2_cmpgtu:
+    case Hexagon::C2_cmpgti:
+    case Hexagon::C2_cmpgt:
       SrcReg = MI->getOperand(1).getReg();
       Mask = ~0;
       break;
@@ -381,11 +381,11 @@ bool HexagonInstrInfo::analyzeCompare(const MachineInstr *MI,
   // Set the value/second source register.
   switch (Opc) {
     case Hexagon::CMPEHexagon4rr:
-    case Hexagon::CMPEQrr:
+    case Hexagon::C2_cmpeq:
     case Hexagon::CMPGT64rr:
     case Hexagon::CMPGTU64rr:
-    case Hexagon::CMPGTUrr:
-    case Hexagon::CMPGTrr:
+    case Hexagon::C2_cmpgtu:
+    case Hexagon::C2_cmpgt:
     case Hexagon::CMPbEQrr_sbsb_V4:
     case Hexagon::CMPbEQrr_ubub_V4:
     case Hexagon::CMPbGTUrr_V4:
@@ -397,9 +397,9 @@ bool HexagonInstrInfo::analyzeCompare(const MachineInstr *MI,
       SrcReg2 = MI->getOperand(2).getReg();
       return true;
 
-    case Hexagon::CMPEQri:
-    case Hexagon::CMPGTUri:
-    case Hexagon::CMPGTri:
+    case Hexagon::C2_cmpeqi:
+    case Hexagon::C2_cmpgtui:
+    case Hexagon::C2_cmpgti:
     case Hexagon::CMPbEQri_V4:
     case Hexagon::CMPbGTUri_V4:
     case Hexagon::CMPhEQri_V4:
@@ -713,12 +713,12 @@ bool HexagonInstrInfo::isPredicable(MachineInstr *MI) const {
   case Hexagon::ADD_ri:
     return isInt<8>(MI->getOperand(2).getImm());
 
-  case Hexagon::ASLH:
-  case Hexagon::ASRH:
-  case Hexagon::SXTB:
-  case Hexagon::SXTH:
-  case Hexagon::ZXTB:
-  case Hexagon::ZXTH:
+  case Hexagon::A2_aslh:
+  case Hexagon::A2_asrh:
+  case Hexagon::A2_sxtb:
+  case Hexagon::A2_sxth:
+  case Hexagon::A2_zxtb:
+  case Hexagon::A2_zxth:
     return Subtarget.hasV4TOps();
   }
 
@@ -1264,12 +1264,12 @@ isSpillPredRegOp(const MachineInstr *MI) const {
 bool HexagonInstrInfo::isNewValueJumpCandidate(const MachineInstr *MI) const {
   switch (MI->getOpcode()) {
     default: return false;
-    case Hexagon::CMPEQrr:
-    case Hexagon::CMPEQri:
-    case Hexagon::CMPGTrr:
-    case Hexagon::CMPGTri:
-    case Hexagon::CMPGTUrr:
-    case Hexagon::CMPGTUri:
+    case Hexagon::C2_cmpeq:
+    case Hexagon::C2_cmpeqi:
+    case Hexagon::C2_cmpgt:
+    case Hexagon::C2_cmpgti:
+    case Hexagon::C2_cmpgtu:
+    case Hexagon::C2_cmpgtui:
       return true;
   }
 }
@@ -1291,38 +1291,58 @@ isConditionalTransfer (const MachineInstr *MI) const {
 }
 
 bool HexagonInstrInfo::isConditionalALU32 (const MachineInstr* MI) const {
-  const HexagonRegisterInfo& QRI = getRegisterInfo();
   switch (MI->getOpcode())
   {
     default: return false;
+    case Hexagon::A2_paddf:
+    case Hexagon::A2_paddfnew:
+    case Hexagon::A2_paddt:
+    case Hexagon::A2_paddtnew:
+    case Hexagon::A2_pandf:
+    case Hexagon::A2_pandfnew:
+    case Hexagon::A2_pandt:
+    case Hexagon::A2_pandtnew:
+    case Hexagon::A4_paslhf:
+    case Hexagon::A4_paslhfnew:
+    case Hexagon::A4_paslht:
+    case Hexagon::A4_paslhtnew:
+    case Hexagon::A4_pasrhf:
+    case Hexagon::A4_pasrhfnew:
+    case Hexagon::A4_pasrht:
+    case Hexagon::A4_pasrhtnew:
+    case Hexagon::A2_porf:
+    case Hexagon::A2_porfnew:
+    case Hexagon::A2_port:
+    case Hexagon::A2_portnew:
+    case Hexagon::A2_psubf:
+    case Hexagon::A2_psubfnew:
+    case Hexagon::A2_psubt:
+    case Hexagon::A2_psubtnew:
+    case Hexagon::A2_pxorf:
+    case Hexagon::A2_pxorfnew:
+    case Hexagon::A2_pxort:
+    case Hexagon::A2_pxortnew:
+    case Hexagon::A4_psxthf:
+    case Hexagon::A4_psxthfnew:
+    case Hexagon::A4_psxtht:
+    case Hexagon::A4_psxthtnew:
+    case Hexagon::A4_psxtbf:
+    case Hexagon::A4_psxtbfnew:
+    case Hexagon::A4_psxtbt:
+    case Hexagon::A4_psxtbtnew:
+    case Hexagon::A4_pzxtbf:
+    case Hexagon::A4_pzxtbfnew:
+    case Hexagon::A4_pzxtbt:
+    case Hexagon::A4_pzxtbtnew:
+    case Hexagon::A4_pzxthf:
+    case Hexagon::A4_pzxthfnew:
+    case Hexagon::A4_pzxtht:
+    case Hexagon::A4_pzxthtnew:
     case Hexagon::ADD_ri_cPt:
     case Hexagon::ADD_ri_cNotPt:
-    case Hexagon::ADD_rr_cPt:
-    case Hexagon::ADD_rr_cNotPt:
-    case Hexagon::XOR_rr_cPt:
-    case Hexagon::XOR_rr_cNotPt:
-    case Hexagon::AND_rr_cPt:
-    case Hexagon::AND_rr_cNotPt:
-    case Hexagon::OR_rr_cPt:
-    case Hexagon::OR_rr_cNotPt:
-    case Hexagon::SUB_rr_cPt:
-    case Hexagon::SUB_rr_cNotPt:
     case Hexagon::COMBINE_rr_cPt:
     case Hexagon::COMBINE_rr_cNotPt:
       return true;
-    case Hexagon::ASLH_cPt_V4:
-    case Hexagon::ASLH_cNotPt_V4:
-    case Hexagon::ASRH_cPt_V4:
-    case Hexagon::ASRH_cNotPt_V4:
-    case Hexagon::SXTB_cPt_V4:
-    case Hexagon::SXTB_cNotPt_V4:
-    case Hexagon::SXTH_cPt_V4:
-    case Hexagon::SXTH_cNotPt_V4:
-    case Hexagon::ZXTB_cPt_V4:
-    case Hexagon::ZXTB_cNotPt_V4:
-    case Hexagon::ZXTH_cPt_V4:
-    case Hexagon::ZXTH_cNotPt_V4:
-      return QRI.Subtarget.hasV4TOps();
   }
 }
 

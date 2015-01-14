@@ -328,9 +328,11 @@ static bool printSymbolizedStackTrace(void **StackTrace, int Depth, FILE *FD) {
   // FIXME: Subtract necessary number from StackTrace entries to turn return addresses
   // into actual instruction addresses.
   // Use llvm-symbolizer tool to symbolize the stack traces.
-  std::string LLVMSymbolizerPath = sys::FindProgramByName("llvm-symbolizer");
-  if (LLVMSymbolizerPath.empty())
+  ErrorOr<std::string> LLVMSymbolizerPathOrErr =
+      sys::findProgramByName("llvm-symbolizer");
+  if (!LLVMSymbolizerPathOrErr)
     return false;
+  const std::string &LLVMSymbolizerPath = *LLVMSymbolizerPathOrErr;
   // We don't know argv0 or the address of main() at this point, but try
   // to guess it anyway (it's possible on some platforms).
   std::string MainExecutableName = sys::fs::getMainExecutable(nullptr, nullptr);
@@ -349,13 +351,6 @@ static bool printSymbolizedStackTrace(void **StackTrace, int Depth, FILE *FD) {
   sys::fs::createTemporaryFile("symbolizer-output", "", OutputFile);
   FileRemover InputRemover(InputFile.c_str());
   FileRemover OutputRemover(OutputFile.c_str());
-  std::vector<const StringRef *> Redirects(3, nullptr);
-  StringRef InputFileStr(InputFile);
-  StringRef OutputFileStr(OutputFile);
-  StringRef StderrFileStr;
-  Redirects[0] = &InputFileStr;
-  Redirects[1] = &OutputFileStr;
-  Redirects[2] = &StderrFileStr;
 
   {
     raw_fd_ostream Input(InputFD, true);
@@ -365,10 +360,15 @@ static bool printSymbolizedStackTrace(void **StackTrace, int Depth, FILE *FD) {
     }
   }
 
+  StringRef InputFileStr(InputFile);
+  StringRef OutputFileStr(OutputFile);
+  StringRef StderrFileStr;
+  const StringRef *Redirects[] = {&InputFileStr, &OutputFileStr,
+                                  &StderrFileStr};
   const char *Args[] = {"llvm-symbolizer", "--functions=linkage", "--inlining",
                         "--demangle", nullptr};
   int RunResult =
-      sys::ExecuteAndWait(LLVMSymbolizerPath, Args, nullptr, Redirects.data());
+      sys::ExecuteAndWait(LLVMSymbolizerPath, Args, nullptr, Redirects);
   if (RunResult != 0)
     return false;
 

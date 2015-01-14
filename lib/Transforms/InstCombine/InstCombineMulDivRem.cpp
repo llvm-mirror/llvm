@@ -136,8 +136,13 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   if (Value *V = SimplifyUsingDistributiveLaws(I))
     return ReplaceInstUsesWith(I, V);
 
-  if (match(Op1, m_AllOnes()))  // X * -1 == 0 - X
-    return BinaryOperator::CreateNeg(Op0, I.getName());
+  // X * -1 == 0 - X
+  if (match(Op1, m_AllOnes())) {
+    BinaryOperator *BO = BinaryOperator::CreateNeg(Op0, I.getName());
+    if (I.hasNoSignedWrap())
+      BO->setHasNoSignedWrap();
+    return BO;
+  }
 
   // Also allow combining multiply instructions on vectors.
   {
@@ -146,9 +151,18 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
     const APInt *IVal;
     if (match(&I, m_Mul(m_Shl(m_Value(NewOp), m_Constant(C2)),
                         m_Constant(C1))) &&
-        match(C1, m_APInt(IVal)))
-      // ((X << C1)*C2) == (X * (C2 << C1))
-      return BinaryOperator::CreateMul(NewOp, ConstantExpr::getShl(C1, C2));
+        match(C1, m_APInt(IVal))) {
+      // ((X << C2)*C1) == (X * (C1 << C2))
+      Constant *Shl = ConstantExpr::getShl(C1, C2);
+      BinaryOperator *Mul = cast<BinaryOperator>(I.getOperand(0));
+      BinaryOperator *BO = BinaryOperator::CreateMul(NewOp, Shl);
+      if (I.hasNoUnsignedWrap() && Mul->hasNoUnsignedWrap())
+        BO->setHasNoUnsignedWrap();
+      if (I.hasNoSignedWrap() && Mul->hasNoSignedWrap() &&
+          Shl->isNotMinSignedValue())
+        BO->setHasNoSignedWrap();
+      return BO;
+    }
 
     if (match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
       Constant *NewCst = nullptr;
@@ -165,6 +179,8 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
 
         if (I.hasNoUnsignedWrap())
           Shl->setHasNoUnsignedWrap();
+        if (I.hasNoSignedWrap() && NewCst->isNotMinSignedValue())
+          Shl->setHasNoSignedWrap();
 
         return Shl;
       }
@@ -221,9 +237,16 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
     }
   }
 
-  if (Value *Op0v = dyn_castNegVal(Op0))     // -X * -Y = X*Y
-    if (Value *Op1v = dyn_castNegVal(Op1))
-      return BinaryOperator::CreateMul(Op0v, Op1v);
+  if (Value *Op0v = dyn_castNegVal(Op0)) {   // -X * -Y = X*Y
+    if (Value *Op1v = dyn_castNegVal(Op1)) {
+      BinaryOperator *BO = BinaryOperator::CreateMul(Op0v, Op1v);
+      if (I.hasNoSignedWrap() &&
+          match(Op0, m_NSWSub(m_Value(), m_Value())) &&
+          match(Op1, m_NSWSub(m_Value(), m_Value())))
+        BO->setHasNoSignedWrap();
+      return BO;
+    }
+  }
 
   // (X / Y) *  Y = X - (X % Y)
   // (X / Y) * -Y = (X % Y) - X
@@ -272,10 +295,22 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   // (1 << Y)*X --> X << Y
   {
     Value *Y;
-    if (match(Op0, m_Shl(m_One(), m_Value(Y))))
-      return BinaryOperator::CreateShl(Op1, Y);
-    if (match(Op1, m_Shl(m_One(), m_Value(Y))))
-      return BinaryOperator::CreateShl(Op0, Y);
+    BinaryOperator *BO = nullptr;
+    bool ShlNSW = false;
+    if (match(Op0, m_Shl(m_One(), m_Value(Y)))) {
+      BO = BinaryOperator::CreateShl(Op1, Y);
+      ShlNSW = cast<BinaryOperator>(Op0)->hasNoSignedWrap();
+    } else if (match(Op1, m_Shl(m_One(), m_Value(Y)))) {
+      BO = BinaryOperator::CreateShl(Op0, Y);
+      ShlNSW = cast<BinaryOperator>(Op1)->hasNoSignedWrap();
+    }
+    if (BO) {
+      if (I.hasNoUnsignedWrap())
+        BO->setHasNoUnsignedWrap();
+      if (I.hasNoSignedWrap() && ShlNSW)
+        BO->setHasNoSignedWrap();
+      return BO;
+    }
   }
 
   // If one of the operands of the multiply is a cast from a boolean value, then
@@ -961,9 +996,14 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
         match(Op1, m_APInt(C2))) {
       bool Overflow;
       APInt C2ShlC1 = C2->ushl_ov(*C1, Overflow);
-      if (!Overflow)
-        return BinaryOperator::CreateUDiv(
+      if (!Overflow) {
+        bool IsExact = I.isExact() && match(Op0, m_Exact(m_Value()));
+        BinaryOperator *BO = BinaryOperator::CreateUDiv(
             X, ConstantInt::get(X->getType(), C2ShlC1));
+        if (IsExact)
+          BO->setIsExact();
+        return BO;
+      }
     }
   }
 
@@ -1041,10 +1081,12 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
       return new ZExtInst(Builder->CreateICmpEQ(Op0, Op1), I.getType());
 
     // -X/C  -->  X/-C  provided the negation doesn't overflow.
-    if (SubOperator *Sub = dyn_cast<SubOperator>(Op0))
-      if (match(Sub->getOperand(0), m_Zero()) && Sub->hasNoSignedWrap())
-        return BinaryOperator::CreateSDiv(Sub->getOperand(1),
-                                          ConstantExpr::getNeg(RHS));
+    Value *X;
+    if (match(Op0, m_NSWSub(m_Zero(), m_Value(X)))) {
+      auto *BO = BinaryOperator::CreateSDiv(X, ConstantExpr::getNeg(RHS));
+      BO->setIsExact(I.isExact());
+      return BO;
+    }
   }
 
   // If the sign bits of both operands are zero (i.e. we can prove they are
@@ -1054,15 +1096,19 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
     if (MaskedValueIsZero(Op0, Mask, 0, &I)) {
       if (MaskedValueIsZero(Op1, Mask, 0, &I)) {
         // X sdiv Y -> X udiv Y, iff X and Y don't have sign bit set
-        return BinaryOperator::CreateUDiv(Op0, Op1, I.getName());
+        auto *BO = BinaryOperator::CreateUDiv(Op0, Op1, I.getName());
+        BO->setIsExact(I.isExact());
+        return BO;
       }
 
-      if (match(Op1, m_Shl(m_Power2(), m_Value()))) {
+      if (isKnownToBeAPowerOfTwo(Op1, /*OrZero*/true, 0, AT, &I, DT)) {
         // X sdiv (1 << Y) -> X udiv (1 << Y) ( -> X u>> Y)
         // Safe because the only negative value (1 << Y) can take on is
         // INT_MIN, and X sdiv INT_MIN == X udiv INT_MIN == 0 if X doesn't have
         // the sign bit set.
-        return BinaryOperator::CreateUDiv(Op0, Op1, I.getName());
+        auto *BO = BinaryOperator::CreateUDiv(Op0, Op1, I.getName());
+        BO->setIsExact(I.isExact());
+        return BO;
       }
     }
   }

@@ -226,7 +226,7 @@ public:
   LLVMContext &getContext() const;
 
   // \brief All values can potentially be named.
-  bool hasName() const { return Name != nullptr && SubclassID != MDStringVal; }
+  bool hasName() const { return Name != nullptr; }
   ValueName *getValueName() const { return Name; }
   void setValueName(ValueName *VN) { Name = VN; }
 
@@ -257,6 +257,13 @@ public:
   /// "V" instead of "this".  After this completes, 'this's use list is
   /// guaranteed to be empty.
   void replaceAllUsesWith(Value *V);
+
+  /// replaceUsesOutsideBlock - Go through the uses list for this definition and
+  /// make each use point to "V" instead of "this" when the use is outside the
+  /// block. 'This's use list is expected to have at least one element.
+  /// Unlike replaceAllUsesWith this function does not support basic block
+  /// values or constant users.
+  void replaceUsesOutsideBlock(Value *V, BasicBlock *BB);
 
   //----------------------------------------------------------------------
   // Methods for handling the chain of uses of this Value.
@@ -345,7 +352,8 @@ public:
     ConstantStructVal,        // This is an instance of ConstantStruct
     ConstantVectorVal,        // This is an instance of ConstantVector
     ConstantPointerNullVal,   // This is an instance of ConstantPointerNull
-    MDNodeVal,                // This is an instance of MDNode
+    GenericMDNodeVal,         // This is an instance of GenericMDNode
+    MDNodeFwdDeclVal,         // This is an instance of MDNodeFwdDecl
     MDStringVal,              // This is an instance of MDString
     InlineAsmVal,             // This is an instance of InlineAsm
     InstructionVal,           // This is an instance of Instruction
@@ -681,7 +689,8 @@ template <> struct isa_impl<GlobalObject, Value> {
 
 template <> struct isa_impl<MDNode, Value> {
   static inline bool doit(const Value &Val) {
-    return Val.getValueID() == Value::MDNodeVal;
+    return Val.getValueID() == Value::GenericMDNodeVal ||
+           Val.getValueID() == Value::MDNodeFwdDeclVal;
   }
 };
 

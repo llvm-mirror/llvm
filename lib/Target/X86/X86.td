@@ -79,9 +79,16 @@ def FeatureSlowBTMem : SubtargetFeature<"slow-bt-mem", "IsBTMemSlow", "true",
                                        "Bit testing of memory is slow">;
 def FeatureSlowSHLD : SubtargetFeature<"slow-shld", "IsSHLDSlow", "true",
                                        "SHLD instruction is slow">;
+// FIXME: This is a 16-byte (SSE/AVX) feature; we should rename it to make that
+// explicit. Also, it seems this would be the default state for most chips
+// going forward, so it would probably be better to negate the logic and
+// match the 32-byte "slow mem" feature below.
 def FeatureFastUAMem : SubtargetFeature<"fast-unaligned-mem",
                                         "IsUAMemFast", "true",
                                         "Fast unaligned memory access">;
+def FeatureSlowUAMem32 : SubtargetFeature<"slow-unaligned-mem-32",
+                            "IsUAMem32Slow", "true",
+                            "Slow unaligned 32-byte memory access">;
 def FeatureSSE4A   : SubtargetFeature<"sse4a", "HasSSE4A", "true",
                                       "Support SSE 4a instructions",
                                       [FeatureSSE3]>;
@@ -167,9 +174,12 @@ def FeatureSMAP    : SubtargetFeature<"smap", "HasSMAP", "true",
                                       "Support SMAP instructions">;
 def FeatureLeaForSP : SubtargetFeature<"lea-sp", "UseLeaForSP", "true",
                                      "Use LEA for adjusting the stack pointer">;
-def FeatureSlowDivide : SubtargetFeature<"idiv-to-divb",
-                                     "HasSlowDivide", "true",
-                                     "Use small divide for positive values less than 256">;
+def FeatureSlowDivide32 : SubtargetFeature<"idivl-to-divb",
+                                     "HasSlowDivide32", "true",
+                                     "Use 8-bit divide for positive values less than 256">;
+def FeatureSlowDivide64 : SubtargetFeature<"idivq-to-divw",
+                                     "HasSlowDivide64", "true",
+                                     "Use 16-bit divide for positive values less than 65536">;
 def FeaturePadShortFunctions : SubtargetFeature<"pad-short-functions",
                                      "PadShortFunctions", "true",
                                      "Pad short functions">;
@@ -182,6 +192,10 @@ def FeatureSlowLEA : SubtargetFeature<"slow-lea", "SlowLEA", "true",
                                    "LEA instruction with certain arguments is slow">;
 def FeatureSlowIncDec : SubtargetFeature<"slow-incdec", "SlowIncDec", "true",
                                    "INC and DEC instructions are slower than ADD and SUB">;
+def FeatureUseSqrtEst : SubtargetFeature<"use-sqrt-est", "UseSqrtEst", "true",
+                            "Use RSQRT* to optimize square root calculations">;
+def FeatureUseRecipEst : SubtargetFeature<"use-recip-est", "UseReciprocalEst",
+                          "true", "Use RCP* to optimize division calculations">;
 
 //===----------------------------------------------------------------------===//
 // X86 processors supported.
@@ -230,7 +244,7 @@ def : ProcessorModel<"penryn", SandyBridgeModel,
 def : ProcessorModel<"atom", AtomModel,
                      [ProcIntelAtom, FeatureSSSE3, FeatureCMPXCHG16B,
                       FeatureMOVBE, FeatureSlowBTMem, FeatureLeaForSP,
-                      FeatureSlowDivide,
+                      FeatureSlowDivide32, FeatureSlowDivide64,
                       FeatureCallRegIndirect,
                       FeatureLEAUsesAG,
                       FeaturePadShortFunctions]>;
@@ -240,6 +254,7 @@ def : ProcessorModel<"slm",  SLMModel, [ProcIntelSLM,
                                FeatureSSE42, FeatureCMPXCHG16B,
                                FeatureMOVBE, FeaturePOPCNT,
                                FeaturePCLMUL, FeatureAES,
+                               FeatureSlowDivide64,
                                FeatureCallRegIndirect,
                                FeaturePRFCHW,
                                FeatureSlowLEA, FeatureSlowIncDec,
@@ -263,12 +278,14 @@ def : ProcessorModel<"westmere", SandyBridgeModel,
 // rather than a superset.
 def : ProcessorModel<"corei7-avx", SandyBridgeModel,
                      [FeatureAVX, FeatureCMPXCHG16B, FeatureFastUAMem,
-                      FeaturePOPCNT, FeatureAES, FeaturePCLMUL]>;
+                      FeatureSlowUAMem32, FeaturePOPCNT, FeatureAES,
+                      FeaturePCLMUL]>;
 // Ivy Bridge
 def : ProcessorModel<"core-avx-i", SandyBridgeModel,
                      [FeatureAVX, FeatureCMPXCHG16B, FeatureFastUAMem,
-                      FeaturePOPCNT, FeatureAES, FeaturePCLMUL, FeatureRDRAND,
-                      FeatureF16C, FeatureFSGSBase]>;
+                      FeatureSlowUAMem32, FeaturePOPCNT, FeatureAES,
+                      FeaturePCLMUL, FeatureRDRAND, FeatureF16C,
+                      FeatureFSGSBase]>;
 
 // Haswell
 def : ProcessorModel<"core-avx2", HaswellModel,
@@ -276,7 +293,7 @@ def : ProcessorModel<"core-avx2", HaswellModel,
                       FeaturePOPCNT, FeatureAES, FeaturePCLMUL, FeatureRDRAND,
                       FeatureF16C, FeatureFSGSBase, FeatureMOVBE, FeatureLZCNT,
                       FeatureBMI, FeatureBMI2, FeatureFMA, FeatureRTM,
-                      FeatureHLE]>;
+                      FeatureHLE, FeatureSlowIncDec]>;
 
 // Broadwell
 def : ProcessorModel<"broadwell", HaswellModel,
@@ -284,7 +301,8 @@ def : ProcessorModel<"broadwell", HaswellModel,
                       FeaturePOPCNT, FeatureAES, FeaturePCLMUL, FeatureRDRAND,
                       FeatureF16C, FeatureFSGSBase, FeatureMOVBE, FeatureLZCNT,
                       FeatureBMI, FeatureBMI2, FeatureFMA, FeatureRTM,
-                      FeatureHLE, FeatureADX, FeatureRDSEED, FeatureSMAP]>;
+                      FeatureHLE, FeatureADX, FeatureRDSEED, FeatureSMAP,
+                      FeatureSlowIncDec]>;
 // KNL
 // FIXME: define KNL model
 def : ProcessorModel<"knl", HaswellModel,
@@ -347,32 +365,38 @@ def : ProcessorModel<"btver2", BtVer2Model,
                      [FeatureAVX, FeatureSSE4A, FeatureCMPXCHG16B,
                       FeaturePRFCHW, FeatureAES, FeaturePCLMUL,
                       FeatureBMI, FeatureF16C, FeatureMOVBE,
-                      FeatureLZCNT, FeaturePOPCNT, FeatureSlowSHLD]>;
+                      FeatureLZCNT, FeaturePOPCNT, FeatureFastUAMem,
+                      FeatureSlowSHLD, FeatureUseSqrtEst, FeatureUseRecipEst]>;
+
+// TODO: We should probably add 'FeatureFastUAMem' to all of the AMD chips.
 
 // Bulldozer
 def : Proc<"bdver1",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
                                FeatureAES, FeaturePRFCHW, FeaturePCLMUL,
-                               FeatureLZCNT, FeaturePOPCNT, FeatureSlowSHLD]>;
+                               FeatureAVX, FeatureSSE4A, FeatureLZCNT,
+                               FeaturePOPCNT, FeatureSlowSHLD]>;
 // Piledriver
 def : Proc<"bdver2",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
                                FeatureAES, FeaturePRFCHW, FeaturePCLMUL,
-                               FeatureF16C, FeatureLZCNT,
-                               FeaturePOPCNT, FeatureBMI, FeatureTBM,
-                               FeatureFMA, FeatureSlowSHLD]>;
+                               FeatureAVX, FeatureSSE4A, FeatureF16C,
+                               FeatureLZCNT, FeaturePOPCNT, FeatureBMI,
+                               FeatureTBM, FeatureFMA, FeatureSlowSHLD]>;
 
 // Steamroller
 def : Proc<"bdver3",          [FeatureXOP, FeatureFMA4, FeatureCMPXCHG16B,
                                FeatureAES, FeaturePRFCHW, FeaturePCLMUL,
-                               FeatureF16C, FeatureLZCNT,
-                               FeaturePOPCNT, FeatureBMI,  FeatureTBM,
-                               FeatureFMA, FeatureFSGSBase]>;
+                               FeatureAVX, FeatureSSE4A, FeatureF16C,
+                               FeatureLZCNT, FeaturePOPCNT, FeatureBMI,
+                               FeatureTBM, FeatureFMA, FeatureSlowSHLD,
+                               FeatureFSGSBase]>;
 
 // Excavator
 def : Proc<"bdver4",          [FeatureAVX2, FeatureXOP, FeatureFMA4,
                                FeatureCMPXCHG16B, FeatureAES, FeaturePRFCHW,
                                FeaturePCLMUL, FeatureF16C, FeatureLZCNT,
                                FeaturePOPCNT, FeatureBMI, FeatureBMI2,
-                               FeatureTBM, FeatureFMA, FeatureFSGSBase]>;
+                               FeatureTBM, FeatureFMA, FeatureSSE4A,
+                               FeatureFSGSBase]>;
 
 def : Proc<"geode",           [Feature3DNowA]>;
 

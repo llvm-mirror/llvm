@@ -8,6 +8,12 @@ else(WITH_POLLY)
   list(APPEND LLVM_IMPLICIT_PROJECT_IGNORE "${LLVM_MAIN_SRC_DIR}/tools/polly")
 endif(WITH_POLLY)
 
+if( LLVM_BUILD_LLVM_DYLIB )
+  add_llvm_tool_subdirectory(llvm-shlib)
+else()
+  ignore_llvm_tool_subdirectory(llvm-shlib)
+endif()
+
 add_llvm_tool_subdirectory(opt)
 add_llvm_tool_subdirectory(llvm-as)
 add_llvm_tool_subdirectory(llvm-dis)
@@ -52,6 +58,8 @@ add_llvm_tool_subdirectory(llvm-c-test)
 add_llvm_tool_subdirectory(obj2yaml)
 add_llvm_tool_subdirectory(yaml2obj)
 
+add_llvm_tool_subdirectory(llvm-go)
+
 if(NOT CYGWIN AND LLVM_ENABLE_PIC)
   add_llvm_tool_subdirectory(lto)
   add_llvm_tool_subdirectory(llvm-lto)
@@ -73,6 +81,7 @@ else()
 endif()
 
 add_llvm_external_project(clang)
+add_llvm_external_project(llgo)
 
 if( NOT LLVM_INCLUDE_TOOLS STREQUAL "bootstrap-only" )
   add_llvm_external_project(lld)

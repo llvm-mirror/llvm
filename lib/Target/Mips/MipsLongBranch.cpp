@@ -65,8 +65,8 @@ namespace {
     MipsLongBranch(TargetMachine &tm)
       : MachineFunctionPass(ID), TM(tm),
         IsPIC(TM.getRelocationModel() == Reloc::PIC_),
-        ABI(TM.getSubtarget<MipsSubtarget>().getTargetABI()),
-        LongBranchSeqSize(!IsPIC ? 2 : (ABI == MipsSubtarget::N64 ? 10 :
+        ABI(TM.getSubtarget<MipsSubtarget>().getABI()),
+        LongBranchSeqSize(!IsPIC ? 2 : (ABI.IsN64() ? 10 :
             (!TM.getSubtarget<MipsSubtarget>().isTargetNaCl() ? 9 : 10))) {}
 
     const char *getPassName() const override {
@@ -87,7 +87,7 @@ namespace {
     MachineFunction *MF;
     SmallVector<MBBInfo, 16> MBBInfos;
     bool IsPIC;
-    unsigned ABI;
+    MipsABIInfo ABI;
     unsigned LongBranchSeqSize;
   };
 
@@ -237,11 +237,13 @@ void MipsLongBranch::replaceBranch(MachineBasicBlock &MBB, Iter Br,
 
   MIB.addMBB(MBBOpnd);
 
-  // Bundle the instruction in the delay slot to the newly created branch
-  // and erase the original branch.
-  assert(Br->isBundledWithSucc());
-  MachineBasicBlock::instr_iterator II(Br);
-  MIBundleBuilder(&*MIB).append((++II)->removeFromBundle());
+  if (Br->hasDelaySlot()) {
+    // Bundle the instruction in the delay slot to the newly created branch
+    // and erase the original branch.
+    assert(Br->isBundledWithSucc());
+    MachineBasicBlock::instr_iterator II(Br);
+    MIBundleBuilder(&*MIB).append((++II)->removeFromBundle());
+  }
   Br->eraseFromParent();
 }
 
@@ -274,7 +276,7 @@ void MipsLongBranch::expandToLongBranch(MBBInfo &I) {
     const MipsSubtarget &Subtarget = TM.getSubtarget<MipsSubtarget>();
     unsigned BalOp = Subtarget.hasMips32r6() ? Mips::BAL : Mips::BAL_BR;
 
-    if (ABI != MipsSubtarget::N64) {
+    if (!ABI.IsN64()) {
       // $longbr:
       //  addiu $sp, $sp, -8
       //  sw $ra, 0($sp)

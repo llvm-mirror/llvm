@@ -173,7 +173,8 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   // Unfortunately in MIPS both NOP and SLL will come in with Binary == 0
   // so we have to special check for them.
   unsigned Opcode = TmpInst.getOpcode();
-  if ((Opcode != Mips::NOP) && (Opcode != Mips::SLL) && !Binary)
+  if ((Opcode != Mips::NOP) && (Opcode != Mips::SLL) &&
+      (Opcode != Mips::SLL_MM) && !Binary)
     llvm_unreachable("unimplemented opcode in EncodeInstruction()");
 
   if (STI.getFeatureBits() & Mips::FeatureMicroMips) {
@@ -359,6 +360,34 @@ getUImm5Lsl2Encoding(const MCInst &MI, unsigned OpNo,
 
   assert(MO.isExpr() &&
          "getUImm5Lsl2Encoding expects only expressions or an immediate");
+
+  return 0;
+}
+
+unsigned MipsMCCodeEmitter::
+getSImm3Lsa2Value(const MCInst &MI, unsigned OpNo,
+                  SmallVectorImpl<MCFixup> &Fixups,
+                  const MCSubtargetInfo &STI) const {
+
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm()) {
+    int Value = MO.getImm();
+    return Value >> 2;
+  }
+
+  return 0;
+}
+
+unsigned MipsMCCodeEmitter::
+getUImm6Lsl2Encoding(const MCInst &MI, unsigned OpNo,
+                     SmallVectorImpl<MCFixup> &Fixups,
+                     const MCSubtargetInfo &STI) const {
+
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm()) {
+    unsigned Value = MO.getImm();
+    return Value >> 2;
+  }
 
   return 0;
 }
@@ -607,15 +636,92 @@ MipsMCCodeEmitter::getMemEncoding(const MCInst &MI, unsigned OpNo,
 }
 
 unsigned MipsMCCodeEmitter::
+getMemEncodingMMImm4(const MCInst &MI, unsigned OpNo,
+                     SmallVectorImpl<MCFixup> &Fixups,
+                     const MCSubtargetInfo &STI) const {
+  // Base register is encoded in bits 6-4, offset is encoded in bits 3-0.
+  assert(MI.getOperand(OpNo).isReg());
+  unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo),
+                                       Fixups, STI) << 4;
+  unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1),
+                                       Fixups, STI);
+
+  return (OffBits & 0xF) | RegBits;
+}
+
+unsigned MipsMCCodeEmitter::
+getMemEncodingMMImm4Lsl1(const MCInst &MI, unsigned OpNo,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const {
+  // Base register is encoded in bits 6-4, offset is encoded in bits 3-0.
+  assert(MI.getOperand(OpNo).isReg());
+  unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo),
+                                       Fixups, STI) << 4;
+  unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1),
+                                       Fixups, STI) >> 1;
+
+  return (OffBits & 0xF) | RegBits;
+}
+
+unsigned MipsMCCodeEmitter::
+getMemEncodingMMImm4Lsl2(const MCInst &MI, unsigned OpNo,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const {
+  // Base register is encoded in bits 6-4, offset is encoded in bits 3-0.
+  assert(MI.getOperand(OpNo).isReg());
+  unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo),
+                                       Fixups, STI) << 4;
+  unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1),
+                                       Fixups, STI) >> 2;
+
+  return (OffBits & 0xF) | RegBits;
+}
+
+unsigned MipsMCCodeEmitter::
 getMemEncodingMMImm12(const MCInst &MI, unsigned OpNo,
                       SmallVectorImpl<MCFixup> &Fixups,
                       const MCSubtargetInfo &STI) const {
+  // opNum can be invalid if instruction had reglist as operand.
+  // MemOperand is always last operand of instruction (base + offset).
+  switch (MI.getOpcode()) {
+  default:
+    break;
+  case Mips::SWM32_MM:
+  case Mips::LWM32_MM:
+    OpNo = MI.getNumOperands() - 2;
+    break;
+  }
+
   // Base register is encoded in bits 20-16, offset is encoded in bits 11-0.
   assert(MI.getOperand(OpNo).isReg());
   unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo), Fixups, STI) << 16;
   unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1), Fixups, STI);
 
   return (OffBits & 0x0FFF) | RegBits;
+}
+
+unsigned MipsMCCodeEmitter::
+getMemEncodingMMImm4sp(const MCInst &MI, unsigned OpNo,
+                       SmallVectorImpl<MCFixup> &Fixups,
+                       const MCSubtargetInfo &STI) const {
+  // opNum can be invalid if instruction had reglist as operand
+  // MemOperand is always last operand of instruction (base + offset)
+  switch (MI.getOpcode()) {
+  default:
+    break;
+  case Mips::SWM16_MM:
+  case Mips::LWM16_MM:
+    OpNo = MI.getNumOperands() - 2;
+    break;
+  }
+
+  // Offset is encoded in bits 4-0.
+  assert(MI.getOperand(OpNo).isReg());
+  // Base register is always SP - thus it is not encoded.
+  assert(MI.getOperand(OpNo+1).isImm());
+  unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1), Fixups, STI);
+
+  return ((OffBits >> 2) & 0x0F);
 }
 
 unsigned
@@ -690,6 +796,70 @@ MipsMCCodeEmitter::getSimm18Lsl3Encoding(const MCInst &MI, unsigned OpNo,
   Fixups.push_back(MCFixup::Create(0, Expr,
                                    MCFixupKind(Mips::fixup_MIPS_PC18_S3)));
   return 0;
+}
+
+unsigned
+MipsMCCodeEmitter::getUImm3Mod8Encoding(const MCInst &MI, unsigned OpNo,
+                                        SmallVectorImpl<MCFixup> &Fixups,
+                                        const MCSubtargetInfo &STI) const {
+  assert(MI.getOperand(OpNo).isImm());
+  const MCOperand &MO = MI.getOperand(OpNo);
+  return MO.getImm() % 8;
+}
+
+unsigned
+MipsMCCodeEmitter::getUImm4AndValue(const MCInst &MI, unsigned OpNo,
+                                    SmallVectorImpl<MCFixup> &Fixups,
+                                    const MCSubtargetInfo &STI) const {
+  assert(MI.getOperand(OpNo).isImm());
+  const MCOperand &MO = MI.getOperand(OpNo);
+  unsigned Value = MO.getImm();
+  switch (Value) {
+    case 128:   return 0x0;
+    case 1:     return 0x1;
+    case 2:     return 0x2;
+    case 3:     return 0x3;
+    case 4:     return 0x4;
+    case 7:     return 0x5;
+    case 8:     return 0x6;
+    case 15:    return 0x7;
+    case 16:    return 0x8;
+    case 31:    return 0x9;
+    case 32:    return 0xa;
+    case 63:    return 0xb;
+    case 64:    return 0xc;
+    case 255:   return 0xd;
+    case 32768: return 0xe;
+    case 65535: return 0xf;
+  }
+  llvm_unreachable("Unexpected value");
+}
+
+unsigned
+MipsMCCodeEmitter::getRegisterListOpValue(const MCInst &MI, unsigned OpNo,
+                                          SmallVectorImpl<MCFixup> &Fixups,
+                                          const MCSubtargetInfo &STI) const {
+  unsigned res = 0;
+
+  // Register list operand is always first operand of instruction and it is
+  // placed before memory operand (register + imm).
+
+  for (unsigned I = OpNo, E = MI.getNumOperands() - 2; I < E; ++I) {
+    unsigned Reg = MI.getOperand(I).getReg();
+    unsigned RegNo = Ctx.getRegisterInfo()->getEncodingValue(Reg);
+    if (RegNo != 31)
+      res++;
+    else
+      res |= 0x10;
+  }
+  return res;
+}
+
+unsigned
+MipsMCCodeEmitter::getRegisterListOpValue16(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  return (MI.getNumOperands() - 4);
 }
 
 #include "MipsGenMCCodeEmitter.inc"

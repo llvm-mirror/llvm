@@ -900,6 +900,10 @@ Instruction *InstCombiner::transformSExtICmp(ICmpInst *ICI, Instruction &CI) {
   Value *Op0 = ICI->getOperand(0), *Op1 = ICI->getOperand(1);
   ICmpInst::Predicate Pred = ICI->getPredicate();
 
+  // Don't bother if Op1 isn't of vector or integer type.
+  if (!Op1->getType()->isIntOrIntVectorTy())
+    return nullptr;
+
   if (Constant *Op1C = dyn_cast<Constant>(Op1)) {
     // (x <s  0) ? -1 : 0 -> ashr x, 31        -> all ones if negative
     // (x >s -1) ? -1 : 0 -> not (ashr x, 31)  -> all ones if positive
@@ -1269,10 +1273,12 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
           LHSOrig = Builder->CreateFPExt(LHSOrig, RHSOrig->getType());
         else if (RHSWidth <= SrcWidth)
           RHSOrig = Builder->CreateFPExt(RHSOrig, LHSOrig->getType());
-        Value *ExactResult = Builder->CreateFRem(LHSOrig, RHSOrig);
-        if (Instruction *RI = dyn_cast<Instruction>(ExactResult))
-          RI->copyFastMathFlags(OpI);
-        return CastInst::CreateFPCast(ExactResult, CI.getType());
+        if (LHSOrig != OpI->getOperand(0) || RHSOrig != OpI->getOperand(1)) {
+          Value *ExactResult = Builder->CreateFRem(LHSOrig, RHSOrig);
+          if (Instruction *RI = dyn_cast<Instruction>(ExactResult))
+            RI->copyFastMathFlags(OpI);
+          return CastInst::CreateFPCast(ExactResult, CI.getType());
+        }
     }
 
     // (fptrunc (fneg x)) -> (fneg (fptrunc x))
@@ -1314,42 +1320,6 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
         Value *Args[] = { InnerTrunc };
         return CallInst::Create(Overload, Args, II->getName());
       }
-    }
-  }
-
-  // Fold (fptrunc (sqrt (fpext x))) -> (sqrtf x)
-  // Note that we restrict this transformation based on
-  // TLI->has(LibFunc::sqrtf), even for the sqrt intrinsic, because
-  // TLI->has(LibFunc::sqrtf) is sufficient to guarantee that the
-  // single-precision intrinsic can be expanded in the backend.
-  CallInst *Call = dyn_cast<CallInst>(CI.getOperand(0));
-  if (Call && Call->getCalledFunction() && TLI->has(LibFunc::sqrtf) &&
-      (Call->getCalledFunction()->getName() == TLI->getName(LibFunc::sqrt) ||
-       Call->getCalledFunction()->getIntrinsicID() == Intrinsic::sqrt) &&
-      Call->getNumArgOperands() == 1 &&
-      Call->hasOneUse()) {
-    CastInst *Arg = dyn_cast<CastInst>(Call->getArgOperand(0));
-    if (Arg && Arg->getOpcode() == Instruction::FPExt &&
-        CI.getType()->isFloatTy() &&
-        Call->getType()->isDoubleTy() &&
-        Arg->getType()->isDoubleTy() &&
-        Arg->getOperand(0)->getType()->isFloatTy()) {
-      Function *Callee = Call->getCalledFunction();
-      Module *M = CI.getParent()->getParent()->getParent();
-      Constant *SqrtfFunc = (Callee->getIntrinsicID() == Intrinsic::sqrt) ?
-        Intrinsic::getDeclaration(M, Intrinsic::sqrt, Builder->getFloatTy()) :
-        M->getOrInsertFunction("sqrtf", Callee->getAttributes(),
-                               Builder->getFloatTy(), Builder->getFloatTy(),
-                               NULL);
-      CallInst *ret = CallInst::Create(SqrtfFunc, Arg->getOperand(0),
-                                       "sqrtfcall");
-      ret->setAttributes(Callee->getAttributes());
-
-
-      // Remove the old Call.  With -fmath-errno, it won't get marked readnone.
-      ReplaceInstUsesWith(*Call, UndefValue::get(Call->getType()));
-      EraseInstFromFunction(*Call);
-      return ret;
     }
   }
 

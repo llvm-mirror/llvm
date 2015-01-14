@@ -199,15 +199,6 @@ define i1 @test24(i1 %C) {
 ; CHECK: ret i1 true
 }
 
-define void @test25(i32** %P) {
-        %c = bitcast i32** %P to float**                ; <float**> [#uses=1]
-        ;; Fold cast into null
-        store float* null, float** %c
-        ret void
-; CHECK: store i32* null, i32** %P
-; CHECK: ret void
-}
-
 define i32 @test26(float %F) {
         ;; no need to cast from float->double.
         %c = fpext float %F to double           ; <double> [#uses=1]
@@ -1084,3 +1075,12 @@ define float @overflow_sitofp() {
 ; CHECK-NEXT: ret float undef 
 }
 
+define i32 @PR21388(i32* %v) {
+  %icmp = icmp slt i32* %v, null
+  %sext = sext i1 %icmp to i32
+  ret i32 %sext
+; CHECK-LABEL: @PR21388(
+; CHECK-NEXT: %[[icmp:.*]] = icmp slt i32* %v, null
+; CHECK-NEXT: %[[sext:.*]] = sext i1 %[[icmp]] to i32
+; CHECK-NEXT: ret i32 %[[sext]]
+}

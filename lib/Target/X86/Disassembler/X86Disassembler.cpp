@@ -23,7 +23,6 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -97,16 +96,26 @@ X86GenericDisassembler::X86GenericDisassembler(
   }
 }
 
-/// regionReader - a callback function that wraps the readByte method from
-///   MemoryObject.
+struct Region {
+  ArrayRef<uint8_t> Bytes;
+  uint64_t Base;
+  Region(ArrayRef<uint8_t> Bytes, uint64_t Base) : Bytes(Bytes), Base(Base) {}
+};
+
+/// A callback function that wraps the readByte method from Region.
 ///
-/// @param arg      - The generic callback parameter.  In this case, this should
-///                   be a pointer to a MemoryObject.
-/// @param byte     - A pointer to the byte to be read.
-/// @param address  - The address to be read.
-static int regionReader(const void* arg, uint8_t* byte, uint64_t address) {
-  const MemoryObject* region = static_cast<const MemoryObject*>(arg);
-  return region->readByte(address, byte);
+/// @param Arg      - The generic callback parameter.  In this case, this should
+///                   be a pointer to a Region.
+/// @param Byte     - A pointer to the byte to be read.
+/// @param Address  - The address to be read.
+static int regionReader(const void *Arg, uint8_t *Byte, uint64_t Address) {
+  auto *R = static_cast<const Region *>(Arg);
+  ArrayRef<uint8_t> Bytes = R->Bytes;
+  unsigned Index = Address - R->Base;
+  if (Bytes.size() <= Index)
+    return -1;
+  *Byte = Bytes[Index];
+  return 0;
 }
 
 /// logger - a callback function that wraps the operator<< method from
@@ -127,38 +136,29 @@ static void logger(void* arg, const char* log) {
 // Public interface for the disassembler
 //
 
-MCDisassembler::DecodeStatus
-X86GenericDisassembler::getInstruction(MCInst &instr,
-                                       uint64_t &size,
-                                       const MemoryObject &region,
-                                       uint64_t address,
-                                       raw_ostream &vStream,
-                                       raw_ostream &cStream) const {
-  CommentStream = &cStream;
+MCDisassembler::DecodeStatus X86GenericDisassembler::getInstruction(
+    MCInst &Instr, uint64_t &Size, ArrayRef<uint8_t> Bytes, uint64_t Address,
+    raw_ostream &VStream, raw_ostream &CStream) const {
+  CommentStream = &CStream;
 
-  InternalInstruction internalInstr;
+  InternalInstruction InternalInstr;
 
-  dlog_t loggerFn = logger;
-  if (&vStream == &nulls())
-    loggerFn = nullptr; // Disable logging completely if it's going to nulls().
-  
-  int ret = decodeInstruction(&internalInstr,
-                              regionReader,
-                              (const void*)&region,
-                              loggerFn,
-                              (void*)&vStream,
-                              (const void*)MII.get(),
-                              address,
-                              fMode);
+  dlog_t LoggerFn = logger;
+  if (&VStream == &nulls())
+    LoggerFn = nullptr; // Disable logging completely if it's going to nulls().
 
-  if (ret) {
-    size = internalInstr.readerCursor - address;
+  Region R(Bytes, Address);
+
+  int Ret = decodeInstruction(&InternalInstr, regionReader, (const void *)&R,
+                              LoggerFn, (void *)&VStream,
+                              (const void *)MII.get(), Address, fMode);
+
+  if (Ret) {
+    Size = InternalInstr.readerCursor - Address;
     return Fail;
-  }
-  else {
-    size = internalInstr.length;
-    return (!translateInstruction(instr, internalInstr, this)) ?
-            Success : Fail;
+  } else {
+    Size = InternalInstr.length;
+    return (!translateInstruction(Instr, InternalInstr, this)) ? Success : Fail;
   }
 }
 

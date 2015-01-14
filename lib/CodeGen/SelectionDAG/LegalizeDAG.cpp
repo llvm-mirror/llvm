@@ -40,7 +40,7 @@ using namespace llvm;
 #define DEBUG_TYPE "legalizedag"
 
 //===----------------------------------------------------------------------===//
-/// SelectionDAGLegalize - This takes an arbitrary SelectionDAG as input and
+/// This takes an arbitrary SelectionDAG as input and
 /// hacks on it until the target machine can handle it.  This involves
 /// eliminating value sizes the machine cannot handle (promoting small sizes to
 /// large sizes or splitting up large values into small values) as well as
@@ -86,7 +86,7 @@ private:
   void LegalizeLoadOps(SDNode *Node);
   void LegalizeStoreOps(SDNode *Node);
 
-  /// PerformInsertVectorEltInMemory - Some target cannot handle a variable
+  /// Some targets cannot handle a variable
   /// insertion index for the INSERT_VECTOR_ELT instruction.  In this case, it
   /// is necessary to spill the vector being inserted into to memory, perform
   /// the insert there, and then read the result back.
@@ -95,7 +95,7 @@ private:
   SDValue ExpandINSERT_VECTOR_ELT(SDValue Vec, SDValue Val,
                                   SDValue Idx, SDLoc dl);
 
-  /// ShuffleWithNarrowerEltType - Return a vector shuffle operation which
+  /// Return a vector shuffle operation which
   /// performs the same shuffe in terms of order or result bytes, but on a type
   /// whose vector element type is narrower than the original shuffle type.
   /// e.g. <v4i32> <0, 1, 0, 1> -> v8i16 <0, 1, 2, 3, 0, 1, 2, 3>
@@ -200,7 +200,7 @@ public:
 };
 }
 
-/// ShuffleWithNarrowerEltType - Return a vector shuffle operation which
+/// Return a vector shuffle operation which
 /// performs the same shuffe in terms of order or result bytes, but on a type
 /// whose vector element type is narrower than the original shuffle type.
 /// e.g. <v4i32> <0, 1, 0, 1> -> v8i16 <0, 1, 2, 3, 0, 1, 2, 3>
@@ -232,7 +232,7 @@ SelectionDAGLegalize::ShuffleWithNarrowerEltType(EVT NVT, EVT VT,  SDLoc dl,
   return DAG.getVectorShuffle(NVT, dl, N1, N2, &NewMask[0]);
 }
 
-/// ExpandConstantFP - Expands the ConstantFP node to an integer constant or
+/// Expands the ConstantFP node to an integer constant or
 /// a load from the constant pool.
 SDValue
 SelectionDAGLegalize::ExpandConstantFP(ConstantFPSDNode *CFP, bool UseCP) {
@@ -286,7 +286,7 @@ SelectionDAGLegalize::ExpandConstantFP(ConstantFPSDNode *CFP, bool UseCP) {
   return Result;
 }
 
-/// ExpandUnalignedStore - Expands an unaligned store to 2 half-size stores.
+/// Expands an unaligned store to 2 half-size stores.
 static void ExpandUnalignedStore(StoreSDNode *ST, SelectionDAG &DAG,
                                  const TargetLowering &TLI,
                                  SelectionDAGLegalize *DAGLegalize) {
@@ -409,7 +409,7 @@ static void ExpandUnalignedStore(StoreSDNode *ST, SelectionDAG &DAG,
   DAGLegalize->ReplaceNode(SDValue(ST, 0), Result);
 }
 
-/// ExpandUnalignedLoad - Expands an unaligned load to 2 half-size loads.
+/// Expands an unaligned load to 2 half-size loads.
 static void
 ExpandUnalignedLoad(LoadSDNode *LD, SelectionDAG &DAG,
                     const TargetLowering &TLI,
@@ -561,8 +561,8 @@ ExpandUnalignedLoad(LoadSDNode *LD, SelectionDAG &DAG,
   ChainResult = TF;
 }
 
-/// PerformInsertVectorEltInMemory - Some target cannot handle a variable
-/// insertion index for the INSERT_VECTOR_ELT instruction.  In this case, it
+/// Some target cannot handle a variable insertion index for the
+/// INSERT_VECTOR_ELT instruction.  In this case, it
 /// is necessary to spill the vector being inserted into to memory, perform
 /// the insert there, and then read the result back.
 SDValue SelectionDAGLegalize::
@@ -725,8 +725,7 @@ void SelectionDAGLegalize::LegalizeStoreOps(SDNode *Node) {
             Type *Ty = ST->getMemoryVT().getTypeForEVT(*DAG.getContext());
             unsigned ABIAlignment= TLI.getDataLayout()->getABITypeAlignment(Ty);
             if (Align < ABIAlignment)
-              ExpandUnalignedStore(cast<StoreSDNode>(Node),
-                                   DAG, TLI, this);
+              ExpandUnalignedStore(cast<StoreSDNode>(Node), DAG, TLI, this);
           }
           break;
         }
@@ -766,8 +765,7 @@ void SelectionDAGLegalize::LegalizeStoreOps(SDNode *Node) {
         Value = DAG.getZeroExtendInReg(Value, dl, StVT);
         SDValue Result =
           DAG.getTruncStore(Chain, dl, Value, Ptr, ST->getPointerInfo(),
-                            NVT, isVolatile, isNonTemporal, Alignment,
-                            AAInfo);
+                            NVT, isVolatile, isNonTemporal, Alignment, AAInfo);
         ReplaceNode(SDValue(Node, 0), Result);
       } else if (StWidth & (StWidth - 1)) {
         // If not storing a power-of-2 number of bits, expand as two stores.
@@ -1080,23 +1078,18 @@ void SelectionDAGLegalize::LegalizeLoadOps(SDNode *Node) {
         unsigned AS = LD->getAddressSpace();
         unsigned Align = LD->getAlignment();
         if (!TLI.allowsMisalignedMemoryAccesses(MemVT, AS, Align)) {
-          Type *Ty =
-            LD->getMemoryVT().getTypeForEVT(*DAG.getContext());
-          unsigned ABIAlignment =
-            TLI.getDataLayout()->getABITypeAlignment(Ty);
+          Type *Ty = LD->getMemoryVT().getTypeForEVT(*DAG.getContext());
+          unsigned ABIAlignment = TLI.getDataLayout()->getABITypeAlignment(Ty);
           if (Align < ABIAlignment){
-            ExpandUnalignedLoad(cast<LoadSDNode>(Node),
-                                DAG, TLI, Value, Chain);
+            ExpandUnalignedLoad(cast<LoadSDNode>(Node), DAG, TLI, Value, Chain);
           }
         }
       }
       break;
     }
     case TargetLowering::Expand:
-      if (!TLI.isLoadExtLegal(ISD::EXTLOAD, SrcVT) &&
-          TLI.isTypeLegal(SrcVT)) {
-        SDValue Load = DAG.getLoad(SrcVT, dl, Chain, Ptr,
-                                   LD->getMemOperand());
+      if (!TLI.isLoadExtLegal(ISD::EXTLOAD, SrcVT) && TLI.isTypeLegal(SrcVT)) {
+        SDValue Load = DAG.getLoad(SrcVT, dl, Chain, Ptr, LD->getMemOperand());
         unsigned ExtendOp;
         switch (ExtType) {
         case ISD::EXTLOAD:
@@ -1133,8 +1126,7 @@ void SelectionDAGLegalize::LegalizeLoadOps(SDNode *Node) {
                              Result.getValueType(),
                              Result, DAG.getValueType(SrcVT));
       else
-        ValRes = DAG.getZeroExtendInReg(Result, dl,
-                                        SrcVT.getScalarType());
+        ValRes = DAG.getZeroExtendInReg(Result, dl, SrcVT.getScalarType());
       Value = ValRes;
       Chain = Result.getValue(1);
       break;
@@ -1155,8 +1147,7 @@ void SelectionDAGLegalize::LegalizeLoadOps(SDNode *Node) {
   }
 }
 
-/// LegalizeOp - Return a legal replacement for the given operation, with
-/// all legal operands.
+/// Return a legal replacement for the given operation, with all legal operands.
 void SelectionDAGLegalize::LegalizeOp(SDNode *Node) {
   DEBUG(dbgs() << "\nLegalizing: "; Node->dump(&DAG));
 
@@ -1486,7 +1477,7 @@ SDValue SelectionDAGLegalize::ExpandInsertToVectorThroughStack(SDValue Op) {
                                     StackPtr);
 
   // Store the subvector.
-  Ch = DAG.getStore(DAG.getEntryNode(), dl, Part, SubStackPtr,
+  Ch = DAG.getStore(Ch, dl, Part, SubStackPtr,
                     MachinePointerInfo(), false, false, 0);
 
   // Finally, load the updated vector.
@@ -1642,8 +1633,8 @@ void SelectionDAGLegalize::ExpandDYNAMIC_STACKALLOC(SDNode* Node,
   Results.push_back(Tmp2);
 }
 
-/// LegalizeSetCCCondCode - Legalize a SETCC with given LHS and RHS and
-/// condition code CC on the current target.
+/// Legalize a SETCC with given LHS and RHS and condition code CC on the current
+/// target.
 ///
 /// If the SETCC has been legalized using AND / OR, then the legalized node
 /// will be stored in LHS. RHS and CC will be set to SDValue(). NeedInvert
@@ -1757,7 +1748,7 @@ bool SelectionDAGLegalize::LegalizeSetCCCondCode(EVT VT,
   return false;
 }
 
-/// EmitStackConvert - Emit a store/load combination to the stack.  This stores
+/// Emit a store/load combination to the stack.  This stores
 /// SrcOp to a stack slot of type SlotVT, truncating it if needed.  It then does
 /// a load from the stack slot to DestVT, extending it if needed.
 /// The resultant code need not be legal.
@@ -1917,7 +1908,7 @@ ExpandBVWithShuffles(SDNode *Node, SelectionDAG &DAG,
   return true;
 }
 
-/// ExpandBUILD_VECTOR - Expand a BUILD_VECTOR node on targets that don't
+/// Expand a BUILD_VECTOR node on targets that don't
 /// support the operation, but do support the resultant vector type.
 SDValue SelectionDAGLegalize::ExpandBUILD_VECTOR(SDNode *Node) {
   unsigned NumElems = Node->getNumOperands();
@@ -2029,7 +2020,7 @@ SDValue SelectionDAGLegalize::ExpandBUILD_VECTOR(SDNode *Node) {
   return ExpandVectorBuildThroughStack(Node);
 }
 
-// ExpandLibCall - Expand a node into a call to a libcall.  If the result value
+// Expand a node into a call to a libcall.  If the result value
 // does not fit into a register, return the lo part and set the hi part to the
 // by-reg argument.  If it does fit into a single register, return the result
 // and leave the Hi part unset.
@@ -2077,7 +2068,7 @@ SDValue SelectionDAGLegalize::ExpandLibCall(RTLIB::Libcall LC, SDNode *Node,
   return CallInfo.first;
 }
 
-/// ExpandLibCall - Generate a libcall taking the given operands as arguments
+/// Generate a libcall taking the given operands as arguments
 /// and returning a result of type RetVT.
 SDValue SelectionDAGLegalize::ExpandLibCall(RTLIB::Libcall LC, EVT RetVT,
                                             const SDValue *Ops, unsigned NumOps,
@@ -2108,7 +2099,7 @@ SDValue SelectionDAGLegalize::ExpandLibCall(RTLIB::Libcall LC, EVT RetVT,
   return CallInfo.first;
 }
 
-// ExpandChainLibCall - Expand a node into a call to a libcall. Similar to
+// Expand a node into a call to a libcall. Similar to
 // ExpandLibCall except that the first operand is the in-chain.
 std::pair<SDValue, SDValue>
 SelectionDAGLegalize::ExpandChainLibCall(RTLIB::Libcall LC,
@@ -2178,7 +2169,7 @@ SDValue SelectionDAGLegalize::ExpandIntLibCall(SDNode* Node, bool isSigned,
   return ExpandLibCall(LC, Node, isSigned);
 }
 
-/// isDivRemLibcallAvailable - Return true if divmod libcall is available.
+/// Return true if divmod libcall is available.
 static bool isDivRemLibcallAvailable(SDNode *Node, bool isSigned,
                                      const TargetLowering &TLI) {
   RTLIB::Libcall LC;
@@ -2194,8 +2185,7 @@ static bool isDivRemLibcallAvailable(SDNode *Node, bool isSigned,
   return TLI.getLibcallName(LC) != nullptr;
 }
 
-/// useDivRem - Only issue divrem libcall if both quotient and remainder are
-/// needed.
+/// Only issue divrem libcall if both quotient and remainder are needed.
 static bool useDivRem(SDNode *Node, bool isSigned, bool isDIV) {
   // The other use might have been replaced with a divrem already.
   unsigned DivRemOpc = isSigned ? ISD::SDIVREM : ISD::UDIVREM;
@@ -2220,8 +2210,7 @@ static bool useDivRem(SDNode *Node, bool isSigned, bool isDIV) {
   return false;
 }
 
-/// ExpandDivRemLibCall - Issue libcalls to __{u}divmod to compute div / rem
-/// pairs.
+/// Issue libcalls to __{u}divmod to compute div / rem pairs.
 void
 SelectionDAGLegalize::ExpandDivRemLibCall(SDNode *Node,
                                           SmallVectorImpl<SDValue> &Results) {
@@ -2283,7 +2272,7 @@ SelectionDAGLegalize::ExpandDivRemLibCall(SDNode *Node,
   Results.push_back(Rem);
 }
 
-/// isSinCosLibcallAvailable - Return true if sincos libcall is available.
+/// Return true if sincos libcall is available.
 static bool isSinCosLibcallAvailable(SDNode *Node, const TargetLowering &TLI) {
   RTLIB::Libcall LC;
   switch (Node->getSimpleValueType(0).SimpleTy) {
@@ -2297,8 +2286,8 @@ static bool isSinCosLibcallAvailable(SDNode *Node, const TargetLowering &TLI) {
   return TLI.getLibcallName(LC) != nullptr;
 }
 
-/// canCombineSinCosLibcall - Return true if sincos libcall is available and
-/// can be used to combine sin and cos.
+/// Return true if sincos libcall is available and can be used to combine sin
+/// and cos.
 static bool canCombineSinCosLibcall(SDNode *Node, const TargetLowering &TLI,
                                     const TargetMachine &TM) {
   if (!isSinCosLibcallAvailable(Node, TLI))
@@ -2311,8 +2300,7 @@ static bool canCombineSinCosLibcall(SDNode *Node, const TargetLowering &TLI,
   return true;
 }
 
-/// useSinCos - Only issue sincos libcall if both sin and cos are
-/// needed.
+/// Only issue sincos libcall if both sin and cos are needed.
 static bool useSinCos(SDNode *Node) {
   unsigned OtherOpcode = Node->getOpcode() == ISD::FSIN
     ? ISD::FCOS : ISD::FSIN;
@@ -2330,8 +2318,7 @@ static bool useSinCos(SDNode *Node) {
   return false;
 }
 
-/// ExpandSinCosLibCall - Issue libcalls to sincos to compute sin / cos
-/// pairs.
+/// Issue libcalls to sincos to compute sin / cos pairs.
 void
 SelectionDAGLegalize::ExpandSinCosLibCall(SDNode *Node,
                                           SmallVectorImpl<SDValue> &Results) {
@@ -2396,7 +2383,7 @@ SelectionDAGLegalize::ExpandSinCosLibCall(SDNode *Node,
                                 MachinePointerInfo(), false, false, false, 0));
 }
 
-/// ExpandLegalINT_TO_FP - This function is responsible for legalizing a
+/// This function is responsible for legalizing a
 /// INT_TO_FP operation of the specified operand when the target requests that
 /// we expand it.  At this point, we know that the result and operand types are
 /// legal for the target.
@@ -2594,7 +2581,7 @@ SDValue SelectionDAGLegalize::ExpandLegalINT_TO_FP(bool isSigned,
   return DAG.getNode(ISD::FADD, dl, DestVT, Tmp1, FudgeInReg);
 }
 
-/// PromoteLegalINT_TO_FP - This function is responsible for legalizing a
+/// This function is responsible for legalizing a
 /// *INT_TO_FP operation of the specified operand when the target requests that
 /// we promote it.  At this point, we know that the result and operand types are
 /// legal for the target, and that there is a legal UINT_TO_FP or SINT_TO_FP
@@ -2636,7 +2623,7 @@ SDValue SelectionDAGLegalize::PromoteLegalINT_TO_FP(SDValue LegalOp,
                                  dl, NewInTy, LegalOp));
 }
 
-/// PromoteLegalFP_TO_INT - This function is responsible for legalizing a
+/// This function is responsible for legalizing a
 /// FP_TO_*INT operation of the specified operand when the target requests that
 /// we promote it.  At this point, we know that the result and operand types are
 /// legal for the target, and that there is a legal FP_TO_UINT or FP_TO_SINT
@@ -2680,8 +2667,7 @@ SDValue SelectionDAGLegalize::PromoteLegalFP_TO_INT(SDValue LegalOp,
   return DAG.getNode(ISD::TRUNCATE, dl, DestVT, Operation);
 }
 
-/// ExpandBSWAP - Open code the operations for BSWAP of the specified operation.
-///
+/// Open code the operations for BSWAP of the specified operation.
 SDValue SelectionDAGLegalize::ExpandBSWAP(SDValue Op, SDLoc dl) {
   EVT VT = Op.getValueType();
   EVT SHVT = TLI.getShiftAmountTy(VT);
@@ -2727,8 +2713,7 @@ SDValue SelectionDAGLegalize::ExpandBSWAP(SDValue Op, SDLoc dl) {
   }
 }
 
-/// ExpandBitCount - Expand the specified bitcount instruction into operations.
-///
+/// Expand the specified bitcount instruction into operations.
 SDValue SelectionDAGLegalize::ExpandBitCount(unsigned Opc, SDValue Op,
                                              SDLoc dl) {
   switch (Opc) {
@@ -3400,6 +3385,16 @@ void SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     Results.push_back(Tmp1);
     break;
   }
+  case ISD::FMINNUM:
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::FMIN_F32, RTLIB::FMIN_F64,
+                                      RTLIB::FMIN_F80, RTLIB::FMIN_F128,
+                                      RTLIB::FMIN_PPCF128));
+    break;
+  case ISD::FMAXNUM:
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::FMAX_F32, RTLIB::FMAX_F64,
+                                      RTLIB::FMAX_F80, RTLIB::FMAX_F128,
+                                      RTLIB::FMAX_PPCF128));
+    break;
   case ISD::FSQRT:
     Results.push_back(ExpandFPLibCall(Node, RTLIB::SQRT_F32, RTLIB::SQRT_F64,
                                       RTLIB::SQRT_F80, RTLIB::SQRT_F128,
@@ -4309,8 +4304,7 @@ void SelectionDAGLegalize::PromoteNode(SDNode *Node) {
     ReplaceNode(Node, Results.data());
 }
 
-// SelectionDAG::Legalize - This is the entry point for the file.
-//
+/// This is the entry point for the file.
 void SelectionDAG::Legalize() {
   AssignTopologicalOrder();
 
@@ -4333,7 +4327,7 @@ void SelectionDAG::Legalize() {
         continue;
       }
 
-      if (LegalizedNodes.insert(N)) {
+      if (LegalizedNodes.insert(N).second) {
         AnyLegalized = true;
         Legalizer.LegalizeOp(N);
 

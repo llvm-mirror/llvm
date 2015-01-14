@@ -565,6 +565,8 @@ unsigned BasicTTI::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
   case Intrinsic::log10:   ISD = ISD::FLOG10; break;
   case Intrinsic::log2:    ISD = ISD::FLOG2;  break;
   case Intrinsic::fabs:    ISD = ISD::FABS;   break;
+  case Intrinsic::minnum:  ISD = ISD::FMINNUM; break;
+  case Intrinsic::maxnum:  ISD = ISD::FMAXNUM; break;
   case Intrinsic::copysign: ISD = ISD::FCOPYSIGN; break;
   case Intrinsic::floor:   ISD = ISD::FFLOOR; break;
   case Intrinsic::ceil:    ISD = ISD::FCEIL;  break;
@@ -587,7 +589,7 @@ unsigned BasicTTI::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
 
   if (TLI->isOperationLegalOrPromote(ISD, LT.second)) {
     // The operation is legal. Assume it costs 1.
-    // If the type is split to multiple registers, assume that thre is some
+    // If the type is split to multiple registers, assume that there is some
     // overhead to this.
     // TODO: Once we have extract/insert subvector cost we need to use them.
     if (LT.first > 1)

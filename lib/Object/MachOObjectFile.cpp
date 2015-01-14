@@ -219,11 +219,6 @@ static unsigned getPlainRelocationType(const MachOObjectFile *O,
   return RE.r_word1 & 0xf;
 }
 
-static unsigned
-getScatteredRelocationType(const MachO::any_relocation_info &RE) {
-  return (RE.r_word0 >> 24) & 0xf;
-}
-
 static uint32_t getSectionFlags(const MachOObjectFile *O,
                                 DataRefImpl Sec) {
   if (O->is64Bit()) {
@@ -247,20 +242,40 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
   MachOObjectFile::LoadCommandInfo Load = getFirstLoadCommandInfo();
   for (unsigned I = 0; ; ++I) {
     if (Load.C.cmd == MachO::LC_SYMTAB) {
-      assert(!SymtabLoadCmd && "Multiple symbol tables");
+      // Multiple symbol tables
+      if (SymtabLoadCmd) {
+        EC = object_error::parse_failed;
+        return;
+      }
       SymtabLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == MachO::LC_DYSYMTAB) {
-      assert(!DysymtabLoadCmd && "Multiple dynamic symbol tables");
+      // Multiple dynamic symbol tables
+      if (DysymtabLoadCmd) {
+        EC = object_error::parse_failed;
+        return;
+      }
       DysymtabLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == MachO::LC_DATA_IN_CODE) {
-      assert(!DataInCodeLoadCmd && "Multiple data in code tables");
+      // Multiple data in code tables
+      if (DataInCodeLoadCmd) {
+        EC = object_error::parse_failed;
+        return;
+      }
       DataInCodeLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == MachO::LC_DYLD_INFO || 
                Load.C.cmd == MachO::LC_DYLD_INFO_ONLY) {
-      assert(!DyldInfoLoadCmd && "Multiple dyldinfo load commands");
+      // Multiple dyldinfo load commands
+      if (DyldInfoLoadCmd) {
+        EC = object_error::parse_failed;
+        return;
+      }
       DyldInfoLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == MachO::LC_UUID) {
-      assert(!UuidLoadCmd && "Multiple UUID load commands");
+      // Multiple UUID load commands
+      if (UuidLoadCmd) {
+        EC = object_error::parse_failed;
+        return;
+      }
       UuidLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == SegmentLoadType) {
       uint32_t NumSections = getSegmentLoadCommandNumSections(this, Load);
@@ -1232,16 +1247,9 @@ StringRef MachOObjectFile::getFileFormatName() const {
     case llvm::MachO::CPU_TYPE_POWERPC:
       return "Mach-O 32-bit ppc";
     default:
-      assert((CPUType & llvm::MachO::CPU_ARCH_ABI64) == 0 &&
-             "64-bit object file when we're not 64-bit?");
       return "Mach-O 32-bit unknown";
     }
   }
-
-  // Make sure the cpu type has the correct mask.
-  assert((CPUType & llvm::MachO::CPU_ARCH_ABI64)
-         == llvm::MachO::CPU_ARCH_ABI64 &&
-         "32-bit object file when we're 64-bit?");
 
   switch (CPUType) {
   case llvm::MachO::CPU_TYPE_X86_64:
@@ -1609,7 +1617,7 @@ void ExportEntry::pushDownUntilBottom() {
 // string that is the accumulation of all edge strings along the parent chain
 // to this point.
 //
-// There is one “export” node for each exported symbol.  But because some
+// There is one "export" node for each exported symbol.  But because some
 // symbols may be a prefix of another symbol (e.g. _dup and _dup2), an export
 // node may have child nodes too.  
 //
@@ -2150,6 +2158,11 @@ uint32_t MachOObjectFile::getScatteredRelocationValue(
   return RE.r_word1;
 }
 
+uint32_t MachOObjectFile::getScatteredRelocationType(
+    const MachO::any_relocation_info &RE) const {
+  return (RE.r_word0 >> 24) & 0xf;
+}
+
 unsigned MachOObjectFile::getAnyRelocationAddress(
     const MachO::any_relocation_info &RE) const {
   if (isRelocationScattered(RE))
@@ -2345,11 +2358,47 @@ MachOObjectFile::getDataInCodeTableEntry(uint32_t DataOffset,
 }
 
 MachO::symtab_command MachOObjectFile::getSymtabLoadCommand() const {
-  return getStruct<MachO::symtab_command>(this, SymtabLoadCmd);
+  if (SymtabLoadCmd)
+    return getStruct<MachO::symtab_command>(this, SymtabLoadCmd);
+
+  // If there is no SymtabLoadCmd return a load command with zero'ed fields.
+  MachO::symtab_command Cmd;
+  Cmd.cmd = MachO::LC_SYMTAB;
+  Cmd.cmdsize = sizeof(MachO::symtab_command);
+  Cmd.symoff = 0;
+  Cmd.nsyms = 0;
+  Cmd.stroff = 0;
+  Cmd.strsize = 0;
+  return Cmd;
 }
 
 MachO::dysymtab_command MachOObjectFile::getDysymtabLoadCommand() const {
-  return getStruct<MachO::dysymtab_command>(this, DysymtabLoadCmd);
+  if (DysymtabLoadCmd)
+    return getStruct<MachO::dysymtab_command>(this, DysymtabLoadCmd);
+
+  // If there is no DysymtabLoadCmd return a load command with zero'ed fields.
+  MachO::dysymtab_command Cmd;
+  Cmd.cmd = MachO::LC_DYSYMTAB;
+  Cmd.cmdsize = sizeof(MachO::dysymtab_command);
+  Cmd.ilocalsym = 0;
+  Cmd.nlocalsym = 0;
+  Cmd.iextdefsym = 0;
+  Cmd.nextdefsym = 0;
+  Cmd.iundefsym = 0;
+  Cmd.nundefsym = 0;
+  Cmd.tocoff = 0;
+  Cmd.ntoc = 0;
+  Cmd.modtaboff = 0;
+  Cmd.nmodtab = 0;
+  Cmd.extrefsymoff = 0;
+  Cmd.nextrefsyms = 0;
+  Cmd.indirectsymoff = 0;
+  Cmd.nindirectsyms = 0;
+  Cmd.extreloff = 0;
+  Cmd.nextrel = 0;
+  Cmd.locreloff = 0;
+  Cmd.nlocrel = 0;
+  return Cmd;
 }
 
 MachO::linkedit_data_command
@@ -2424,8 +2473,9 @@ ArrayRef<uint8_t> MachOObjectFile::getDyldInfoExportsTrie() const {
 ArrayRef<uint8_t> MachOObjectFile::getUuid() const {
   if (!UuidLoadCmd)
     return ArrayRef<uint8_t>();
-  MachO::uuid_command Uuid = getStruct<MachO::uuid_command>(this, UuidLoadCmd);
-  return ArrayRef<uint8_t>(Uuid.uuid, 16);
+  // Returning a pointer is fine as uuid doesn't need endian swapping.
+  const char *Ptr = UuidLoadCmd + offsetof(MachO::uuid_command, uuid);
+  return ArrayRef<uint8_t>(reinterpret_cast<const uint8_t *>(Ptr), 16);
 }
 
 StringRef MachOObjectFile::getStringTableData() const {

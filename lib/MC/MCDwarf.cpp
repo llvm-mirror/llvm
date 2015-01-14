@@ -344,18 +344,6 @@ void MCDwarfLineTable::EmitCU(MCObjectStreamer *MCOS) const {
   for (const auto &LineSec : MCLineSections.getMCLineEntries())
     EmitDwarfLineTable(MCOS, LineSec.first, LineSec.second);
 
-  if (MCOS->getContext().getAsmInfo()->getLinkerRequiresNonEmptyDwarfLines() &&
-      MCLineSections.getMCLineEntries().empty()) {
-    // The darwin9 linker has a bug (see PR8715). For for 32-bit architectures
-    // it requires:
-    // total_length >= prologue_length + 10
-    // We are 4 bytes short, since we have total_length = 51 and
-    // prologue_length = 45
-
-    // The regular end_sequence should be sufficient.
-    MCDwarfLineAddr::Emit(MCOS, INT64_MAX, 0);
-  }
-
   // This is the end of the section, so set the value of the symbol at the end
   // of this section (that was used in a previous expression).
   MCOS->EmitLabel(LineEndSym);
@@ -380,10 +368,10 @@ unsigned MCDwarfLineTableHeader::getFile(StringRef &Directory,
     FileNumber = SourceIdMap.size() + 1;
     assert((MCDwarfFiles.empty() || FileNumber == MCDwarfFiles.size()) &&
            "Don't mix autonumbered and explicit numbered line table usage");
-    StringMapEntry<unsigned> &Ent = SourceIdMap.GetOrCreateValue(
-        (Directory + Twine('\0') + FileName).str(), FileNumber);
-    if (Ent.getValue() != FileNumber)
-      return Ent.getValue();
+    auto IterBool = SourceIdMap.insert(
+        std::make_pair((Directory + Twine('\0') + FileName).str(), FileNumber));
+    if (!IterBool.second)
+      return IterBool.first->second;
   }
   // Make space for this FileNumber in the MCDwarfFiles vector if needed.
   MCDwarfFiles.resize(FileNumber + 1);

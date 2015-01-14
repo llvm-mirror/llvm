@@ -578,7 +578,7 @@ unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
     { ISD::SINT_TO_FP, MVT::v2f64, MVT::v16i8, 16*10 },
     // There are faster sequences for float conversions.
     { ISD::UINT_TO_FP, MVT::v4f32, MVT::v2i64, 15 },
-    { ISD::UINT_TO_FP, MVT::v4f32, MVT::v4i32, 15 },
+    { ISD::UINT_TO_FP, MVT::v4f32, MVT::v4i32, 8 },
     { ISD::UINT_TO_FP, MVT::v4f32, MVT::v8i16, 15 },
     { ISD::UINT_TO_FP, MVT::v4f32, MVT::v16i8, 8 },
     { ISD::SINT_TO_FP, MVT::v4f32, MVT::v2i64, 15 },
@@ -618,6 +618,13 @@ unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
     { ISD::SIGN_EXTEND, MVT::v8i64,  MVT::v16i32, 3 },
     { ISD::ZERO_EXTEND, MVT::v8i64,  MVT::v16i32, 3 },
 
+    { ISD::SINT_TO_FP,  MVT::v16f32, MVT::v16i1,  3 },
+    { ISD::SINT_TO_FP,  MVT::v16f32, MVT::v16i8,  2 },
+    { ISD::SINT_TO_FP,  MVT::v16f32, MVT::v16i16, 2 },
+    { ISD::SINT_TO_FP,  MVT::v16f32, MVT::v16i32, 1 },
+    { ISD::SINT_TO_FP,  MVT::v8f64,  MVT::v8i1,   4 },
+    { ISD::SINT_TO_FP,  MVT::v8f64,  MVT::v8i16,  2 },
+    { ISD::SINT_TO_FP,  MVT::v8f64,  MVT::v8i32,  1 },
   };
 
   if (ST->hasAVX512()) {
@@ -661,6 +668,8 @@ unsigned X86TTI::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) const {
 
     { ISD::FP_EXTEND,   MVT::v8f64,  MVT::v8f32,  3 },
     { ISD::FP_ROUND,    MVT::v8f32,  MVT::v8f64,  3 },
+
+    { ISD::UINT_TO_FP,  MVT::v8f32,  MVT::v8i32,  8 },
   };
 
   static const TypeConversionCostTblEntry<MVT::SimpleValueType>

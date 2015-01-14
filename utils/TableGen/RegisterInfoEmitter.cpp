@@ -53,10 +53,10 @@ public:
   void run(raw_ostream &o);
 
 private:
-  void EmitRegMapping(raw_ostream &o,
-                      const std::vector<CodeGenRegister*> &Regs, bool isCtor);
+  void EmitRegMapping(raw_ostream &o, const std::deque<CodeGenRegister> &Regs,
+                      bool isCtor);
   void EmitRegMappingTables(raw_ostream &o,
-                            const std::vector<CodeGenRegister*> &Regs,
+                            const std::deque<CodeGenRegister> &Regs,
                             bool isCtor);
   void EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
                            const std::string &ClassName);
@@ -68,12 +68,13 @@ private:
 // runEnums - Print out enum values for all of the registers.
 void RegisterInfoEmitter::runEnums(raw_ostream &OS,
                                    CodeGenTarget &Target, CodeGenRegBank &Bank) {
-  const std::vector<CodeGenRegister*> &Registers = Bank.getRegisters();
+  const auto &Registers = Bank.getRegisters();
 
   // Register enums are stored as uint16_t in the tables. Make sure we'll fit.
   assert(Registers.size() <= 0xffff && "Too many regs to fit in tables");
 
-  std::string Namespace = Registers[0]->TheDef->getValueAsString("Namespace");
+  std::string Namespace =
+      Registers.front().TheDef->getValueAsString("Namespace");
 
   emitSourceFileHeader("Target Register Enum Values", OS);
 
@@ -90,10 +91,9 @@ void RegisterInfoEmitter::runEnums(raw_ostream &OS,
     OS << "namespace " << Namespace << " {\n";
   OS << "enum {\n  NoRegister,\n";
 
-  for (unsigned i = 0, e = Registers.size(); i != e; ++i)
-    OS << "  " << Registers[i]->getName() << " = " <<
-      Registers[i]->EnumValue << ",\n";
-  assert(Registers.size() == Registers[Registers.size()-1]->EnumValue &&
+  for (const auto &Reg : Registers)
+    OS << "  " << Reg.getName() << " = " << Reg.EnumValue << ",\n";
+  assert(Registers.size() == Registers.back().EnumValue &&
          "Register enum value mismatch!");
   OS << "  NUM_TARGET_REGS \t// " << Registers.size()+1 << "\n";
   OS << "};\n";
@@ -137,23 +137,36 @@ void RegisterInfoEmitter::runEnums(raw_ostream &OS,
       OS << "}\n";
   }
 
-  ArrayRef<CodeGenSubRegIndex*> SubRegIndices = Bank.getSubRegIndices();
+  auto &SubRegIndices = Bank.getSubRegIndices();
   if (!SubRegIndices.empty()) {
     OS << "\n// Subregister indices\n";
-    std::string Namespace =
-      SubRegIndices[0]->getNamespace();
+    std::string Namespace = SubRegIndices.front().getNamespace();
     if (!Namespace.empty())
       OS << "namespace " << Namespace << " {\n";
     OS << "enum {\n  NoSubRegister,\n";
-    for (unsigned i = 0, e = SubRegIndices.size(); i != e; ++i)
-      OS << "  " << SubRegIndices[i]->getName() << ",\t// " << i+1 << "\n";
+    unsigned i = 0;
+    for (const auto &Idx : SubRegIndices)
+      OS << "  " << Idx.getName() << ",\t// " << ++i << "\n";
     OS << "  NUM_TARGET_SUBREGS\n};\n";
     if (!Namespace.empty())
       OS << "}\n";
   }
 
-  OS << "} // End llvm namespace \n";
+  OS << "} // End llvm namespace\n";
   OS << "#endif // GET_REGINFO_ENUM\n\n";
+}
+
+static void printInt(raw_ostream &OS, int Val) {
+  OS << Val;
+}
+
+static const char *getMinimalTypeForRange(uint64_t Range) {
+  assert(Range < 0xFFFFFFFFULL && "Enum too large");
+  if (Range > 0xFFFF)
+    return "uint32_t";
+  if (Range > 0xFF)
+    return "uint16_t";
+  return "uint8_t";
 }
 
 void RegisterInfoEmitter::
@@ -179,7 +192,7 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
     }
     OS << "},  \t// " << RC.getName() << "\n";
   }
-  OS << "    {0, 0} };\n"
+  OS << "  };\n"
      << "  return RCWeightTable[RC->getID()];\n"
      << "}\n\n";
 
@@ -204,7 +217,7 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
       assert(RU.Weight < 256 && "RegUnit too heavy");
       OS << RU.Weight << ", ";
     }
-    OS << "0 };\n"
+    OS << "};\n"
        << "  return RUWeightTable[RegUnit];\n";
   }
   else {
@@ -222,8 +235,11 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
      << "const char *" << ClassName << "::\n"
      << "getRegPressureSetName(unsigned Idx) const {\n"
      << "  static const char *PressureNameTable[] = {\n";
+  unsigned MaxRegUnitWeight = 0;
   for (unsigned i = 0; i < NumSets; ++i ) {
-    OS << "    \"" << RegBank.getRegSetAt(i).Name << "\",\n";
+    const RegUnitSet &RegUnits = RegBank.getRegSetAt(i);
+    MaxRegUnitWeight = std::max(MaxRegUnitWeight, RegUnits.Weight);
+    OS << "    \"" << RegUnits.Name << "\",\n";
   }
   OS << "    nullptr };\n"
      << "  return PressureNameTable[Idx];\n"
@@ -233,63 +249,54 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
      << "// This limit must be adjusted dynamically for reserved registers.\n"
      << "unsigned " << ClassName << "::\n"
      << "getRegPressureSetLimit(unsigned Idx) const {\n"
-     << "  static const unsigned PressureLimitTable[] = {\n";
+     << "  static const " << getMinimalTypeForRange(MaxRegUnitWeight)
+     << " PressureLimitTable[] = {\n";
   for (unsigned i = 0; i < NumSets; ++i ) {
     const RegUnitSet &RegUnits = RegBank.getRegSetAt(i);
     OS << "    " << RegUnits.Weight << ",  \t// " << i << ": "
        << RegUnits.Name << "\n";
   }
-  OS << "    0 };\n"
+  OS << "  };\n"
      << "  return PressureLimitTable[Idx];\n"
      << "}\n\n";
+
+  SequenceToOffsetTable<std::vector<int>> PSetsSeqs;
 
   // This table may be larger than NumRCs if some register units needed a list
   // of unit sets that did not correspond to a register class.
   unsigned NumRCUnitSets = RegBank.getNumRegClassPressureSetLists();
-  OS << "/// Table of pressure sets per register class or unit.\n"
-     << "static const int RCSetsTable[] = {\n    ";
-  std::vector<unsigned> RCSetStarts(NumRCUnitSets);
-  for (unsigned i = 0, StartIdx = 0, e = NumRCUnitSets; i != e; ++i) {
-    RCSetStarts[i] = StartIdx;
+  std::vector<std::vector<int>> PSets(NumRCUnitSets);
+
+  for (unsigned i = 0, e = NumRCUnitSets; i != e; ++i) {
     ArrayRef<unsigned> PSetIDs = RegBank.getRCPressureSetIDs(i);
-    std::vector<unsigned> PSets;
-    PSets.reserve(PSetIDs.size());
+    PSets[i].reserve(PSetIDs.size());
     for (ArrayRef<unsigned>::iterator PSetI = PSetIDs.begin(),
            PSetE = PSetIDs.end(); PSetI != PSetE; ++PSetI) {
-      PSets.push_back(RegBank.getRegPressureSet(*PSetI).Order);
+      PSets[i].push_back(RegBank.getRegPressureSet(*PSetI).Order);
     }
-    std::sort(PSets.begin(), PSets.end());
-    for (unsigned j = 0, e = PSets.size(); j < e; ++j) {
-      OS << PSets[j] << ",  ";
-      ++StartIdx;
-    }
-    OS << "-1,  \t// #" << RCSetStarts[i] << " ";
-    if (i < NumRCs)
-      OS << RegBank.getRegClasses()[i]->getName();
-    else {
-      OS << "inferred";
-      for (ArrayRef<unsigned>::iterator PSetI = PSetIDs.begin(),
-             PSetE = PSetIDs.end(); PSetI != PSetE; ++PSetI) {
-        OS << "~" << RegBank.getRegSetAt(*PSetI).Name;
-      }
-    }
-    OS << "\n    ";
-    ++StartIdx;
+    std::sort(PSets[i].begin(), PSets[i].end());
+    PSetsSeqs.add(PSets[i]);
   }
-  OS << "-1 };\n\n";
+
+  PSetsSeqs.layout();
+
+  OS << "/// Table of pressure sets per register class or unit.\n"
+     << "static const int RCSetsTable[] = {\n";
+  PSetsSeqs.emit(OS, printInt, "-1");
+  OS << "};\n\n";
 
   OS << "/// Get the dimensions of register pressure impacted by this "
      << "register class.\n"
      << "/// Returns a -1 terminated array of pressure set IDs\n"
      << "const int* " << ClassName << "::\n"
      << "getRegClassPressureSets(const TargetRegisterClass *RC) const {\n";
-  OS << "  static const unsigned RCSetStartTable[] = {\n    ";
+  OS << "  static const " << getMinimalTypeForRange(PSetsSeqs.size()-1)
+     << " RCSetStartTable[] = {\n    ";
   for (unsigned i = 0, e = NumRCs; i != e; ++i) {
-    OS << RCSetStarts[i] << ",";
+    OS << PSetsSeqs.get(PSets[i]) << ",";
   }
-  OS << "0 };\n"
-     << "  unsigned SetListStart = RCSetStartTable[RC->getID()];\n"
-     << "  return &RCSetsTable[SetListStart];\n"
+  OS << "};\n"
+     << "  return &RCSetsTable[RCSetStartTable[RC->getID()]];\n"
      << "}\n\n";
 
   OS << "/// Get the dimensions of register pressure impacted by this "
@@ -299,29 +306,28 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
      << "getRegUnitPressureSets(unsigned RegUnit) const {\n"
      << "  assert(RegUnit < " << RegBank.getNumNativeRegUnits()
      << " && \"invalid register unit\");\n";
-  OS << "  static const unsigned RUSetStartTable[] = {\n    ";
+  OS << "  static const " << getMinimalTypeForRange(PSetsSeqs.size()-1)
+     << " RUSetStartTable[] = {\n    ";
   for (unsigned UnitIdx = 0, UnitEnd = RegBank.getNumNativeRegUnits();
        UnitIdx < UnitEnd; ++UnitIdx) {
-    OS << RCSetStarts[RegBank.getRegUnit(UnitIdx).RegClassUnitSetsIdx] << ",";
+    OS << PSetsSeqs.get(PSets[RegBank.getRegUnit(UnitIdx).RegClassUnitSetsIdx])
+       << ",";
   }
-  OS << "0 };\n"
-     << "  unsigned SetListStart = RUSetStartTable[RegUnit];\n"
-     << "  return &RCSetsTable[SetListStart];\n"
+  OS << "};\n"
+     << "  return &RCSetsTable[RUSetStartTable[RegUnit]];\n"
      << "}\n\n";
 }
 
-void
-RegisterInfoEmitter::EmitRegMappingTables(raw_ostream &OS,
-                                       const std::vector<CodeGenRegister*> &Regs,
-                                          bool isCtor) {
+void RegisterInfoEmitter::EmitRegMappingTables(
+    raw_ostream &OS, const std::deque<CodeGenRegister> &Regs, bool isCtor) {
   // Collect all information about dwarf register numbers
   typedef std::map<Record*, std::vector<int64_t>, LessRecordRegister> DwarfRegNumsMapTy;
   DwarfRegNumsMapTy DwarfRegNums;
 
   // First, just pull all provided information to the map
   unsigned maxLength = 0;
-  for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
-    Record *Reg = Regs[i]->TheDef;
+  for (auto &RE : Regs) {
+    Record *Reg = RE.TheDef;
     std::vector<int64_t> RegNums = Reg->getValueAsListOfInts("DwarfNumbers");
     maxLength = std::max((size_t)maxLength, RegNums.size());
     if (DwarfRegNums.count(Reg))
@@ -339,7 +345,7 @@ RegisterInfoEmitter::EmitRegMappingTables(raw_ostream &OS,
     for (unsigned i = I->second.size(), e = maxLength; i != e; ++i)
       I->second.push_back(-1);
 
-  std::string Namespace = Regs[0]->TheDef->getValueAsString("Namespace");
+  std::string Namespace = Regs.front().TheDef->getValueAsString("Namespace");
 
   OS << "// " << Namespace << " Dwarf<->LLVM register mappings.\n";
 
@@ -379,16 +385,16 @@ RegisterInfoEmitter::EmitRegMappingTables(raw_ostream &OS,
       OS << "extern const unsigned " << Namespace
          << (j == 0 ? "DwarfFlavour" : "EHFlavour") << i << "Dwarf2LSize";
       if (!isCtor)
-        OS << " = sizeof(" << Namespace
+        OS << " = array_lengthof(" << Namespace
            << (j == 0 ? "DwarfFlavour" : "EHFlavour") << i
-           << "Dwarf2L)/sizeof(MCRegisterInfo::DwarfLLVMRegPair);\n\n";
+           << "Dwarf2L);\n\n";
       else
         OS << ";\n\n";
     }
   }
 
-  for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
-    Record *Reg = Regs[i]->TheDef;
+  for (auto &RE : Regs) {
+    Record *Reg = RE.TheDef;
     const RecordVal *V = Reg->getValue("DwarfAlias");
     if (!V || !V->getValue())
       continue;
@@ -427,24 +433,21 @@ RegisterInfoEmitter::EmitRegMappingTables(raw_ostream &OS,
       OS << "extern const unsigned " << Namespace
          << (j == 0 ? "DwarfFlavour" : "EHFlavour") << i << "L2DwarfSize";
       if (!isCtor)
-        OS << " = sizeof(" << Namespace
-           << (j == 0 ? "DwarfFlavour" : "EHFlavour") << i
-           << "L2Dwarf)/sizeof(MCRegisterInfo::DwarfLLVMRegPair);\n\n";
+        OS << " = array_lengthof(" << Namespace
+           << (j == 0 ? "DwarfFlavour" : "EHFlavour") << i << "L2Dwarf);\n\n";
       else
         OS << ";\n\n";
     }
   }
 }
 
-void
-RegisterInfoEmitter::EmitRegMapping(raw_ostream &OS,
-                                    const std::vector<CodeGenRegister*> &Regs,
-                                    bool isCtor) {
+void RegisterInfoEmitter::EmitRegMapping(
+    raw_ostream &OS, const std::deque<CodeGenRegister> &Regs, bool isCtor) {
   // Emit the initializer so the tables from EmitRegMappingTables get wired up
   // to the MCRegisterInfo object.
   unsigned maxLength = 0;
-  for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
-    Record *Reg = Regs[i]->TheDef;
+  for (auto &RE : Regs) {
+    Record *Reg = RE.TheDef;
     maxLength = std::max((size_t)maxLength,
                          Reg->getValueAsListOfInts("DwarfNumbers").size());
   }
@@ -452,7 +455,7 @@ RegisterInfoEmitter::EmitRegMapping(raw_ostream &OS,
   if (!maxLength)
     return;
 
-  std::string Namespace = Regs[0]->TheDef->getValueAsString("Namespace");
+  std::string Namespace = Regs.front().TheDef->getValueAsString("Namespace");
 
   // Emit reverse information about the dwarf register numbers.
   for (unsigned j = 0; j < 2; ++j) {
@@ -617,20 +620,11 @@ static bool combine(const CodeGenSubRegIndex *Idx,
   return true;
 }
 
-static const char *getMinimalTypeForRange(uint64_t Range) {
-  assert(Range < 0xFFFFFFFFULL && "Enum too large");
-  if (Range > 0xFFFF)
-    return "uint32_t";
-  if (Range > 0xFF)
-    return "uint16_t";
-  return "uint8_t";
-}
-
 void
 RegisterInfoEmitter::emitComposeSubRegIndices(raw_ostream &OS,
                                               CodeGenRegBank &RegBank,
                                               const std::string &ClName) {
-  ArrayRef<CodeGenSubRegIndex*> SubRegIndices = RegBank.getSubRegIndices();
+  const auto &SubRegIndices = RegBank.getSubRegIndices();
   OS << "unsigned " << ClName
      << "::composeSubRegIndicesImpl(unsigned IdxA, unsigned IdxB) const {\n";
 
@@ -645,10 +639,12 @@ RegisterInfoEmitter::emitComposeSubRegIndices(raw_ostream &OS,
   SmallVector<unsigned, 4> RowMap;
   SmallVector<SmallVector<CodeGenSubRegIndex*, 4>, 4> Rows;
 
-  for (unsigned i = 0, e = SubRegIndices.size(); i != e; ++i) {
+  auto SubRegIndicesSize =
+      std::distance(SubRegIndices.begin(), SubRegIndices.end());
+  for (const auto &Idx : SubRegIndices) {
     unsigned Found = ~0u;
     for (unsigned r = 0, re = Rows.size(); r != re; ++r) {
-      if (combine(SubRegIndices[i], Rows[r])) {
+      if (combine(&Idx, Rows[r])) {
         Found = r;
         break;
       }
@@ -656,27 +652,27 @@ RegisterInfoEmitter::emitComposeSubRegIndices(raw_ostream &OS,
     if (Found == ~0u) {
       Found = Rows.size();
       Rows.resize(Found + 1);
-      Rows.back().resize(SubRegIndices.size());
-      combine(SubRegIndices[i], Rows.back());
+      Rows.back().resize(SubRegIndicesSize);
+      combine(&Idx, Rows.back());
     }
     RowMap.push_back(Found);
   }
 
   // Output the row map if there is multiple rows.
   if (Rows.size() > 1) {
-    OS << "  static const " << getMinimalTypeForRange(Rows.size())
-       << " RowMap[" << SubRegIndices.size() << "] = {\n    ";
-    for (unsigned i = 0, e = SubRegIndices.size(); i != e; ++i)
+    OS << "  static const " << getMinimalTypeForRange(Rows.size()) << " RowMap["
+       << SubRegIndicesSize << "] = {\n    ";
+    for (unsigned i = 0, e = SubRegIndicesSize; i != e; ++i)
       OS << RowMap[i] << ", ";
     OS << "\n  };\n";
   }
 
   // Output the rows.
-  OS << "  static const " << getMinimalTypeForRange(SubRegIndices.size()+1)
-     << " Rows[" << Rows.size() << "][" << SubRegIndices.size() << "] = {\n";
+  OS << "  static const " << getMinimalTypeForRange(SubRegIndicesSize + 1)
+     << " Rows[" << Rows.size() << "][" << SubRegIndicesSize << "] = {\n";
   for (unsigned r = 0, re = Rows.size(); r != re; ++r) {
     OS << "    { ";
-    for (unsigned i = 0, e = SubRegIndices.size(); i != e; ++i)
+    for (unsigned i = 0, e = SubRegIndicesSize; i != e; ++i)
       if (Rows[r][i])
         OS << Rows[r][i]->EnumValue << ", ";
       else
@@ -685,8 +681,8 @@ RegisterInfoEmitter::emitComposeSubRegIndices(raw_ostream &OS,
   }
   OS << "  };\n\n";
 
-  OS << "  --IdxA; assert(IdxA < " << SubRegIndices.size() << ");\n"
-     << "  --IdxB; assert(IdxB < " << SubRegIndices.size() << ");\n";
+  OS << "  --IdxA; assert(IdxA < " << SubRegIndicesSize << ");\n"
+     << "  --IdxB; assert(IdxB < " << SubRegIndicesSize << ");\n";
   if (Rows.size() > 1)
     OS << "  return Rows[RowMap[IdxA]][IdxB];\n";
   else
@@ -705,9 +701,9 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   OS << "\n#ifdef GET_REGINFO_MC_DESC\n";
   OS << "#undef GET_REGINFO_MC_DESC\n";
 
-  const std::vector<CodeGenRegister*> &Regs = RegBank.getRegisters();
+  const auto &Regs = RegBank.getRegisters();
 
-  ArrayRef<CodeGenSubRegIndex*> SubRegIndices = RegBank.getSubRegIndices();
+  auto &SubRegIndices = RegBank.getSubRegIndices();
   // The lists of sub-registers and super-registers go in the same array.  That
   // allows us to share suffixes.
   typedef std::vector<const CodeGenRegister*> RegVec;
@@ -728,27 +724,27 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   SequenceToOffsetTable<std::string> RegStrings;
 
   // Precompute register lists for the SequenceToOffsetTable.
-  for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
-    const CodeGenRegister *Reg = Regs[i];
-
-    RegStrings.add(Reg->getName());
+  unsigned i = 0;
+  for (auto I = Regs.begin(), E = Regs.end(); I != E; ++I) {
+    const auto &Reg = *I;
+    RegStrings.add(Reg.getName());
 
     // Compute the ordered sub-register list.
     SetVector<const CodeGenRegister*> SR;
-    Reg->addSubRegsPreOrder(SR, RegBank);
-    diffEncode(SubRegLists[i], Reg->EnumValue, SR.begin(), SR.end());
+    Reg.addSubRegsPreOrder(SR, RegBank);
+    diffEncode(SubRegLists[i], Reg.EnumValue, SR.begin(), SR.end());
     DiffSeqs.add(SubRegLists[i]);
 
     // Compute the corresponding sub-register indexes.
     SubRegIdxVec &SRIs = SubRegIdxLists[i];
     for (unsigned j = 0, je = SR.size(); j != je; ++j)
-      SRIs.push_back(Reg->getSubRegIndex(SR[j]));
+      SRIs.push_back(Reg.getSubRegIndex(SR[j]));
     SubRegIdxSeqs.add(SRIs);
 
     // Super-registers are already computed.
-    const RegVec &SuperRegList = Reg->getSuperRegs();
-    diffEncode(SuperRegLists[i], Reg->EnumValue,
-               SuperRegList.begin(), SuperRegList.end());
+    const RegVec &SuperRegList = Reg.getSuperRegs();
+    diffEncode(SuperRegLists[i], Reg.EnumValue, SuperRegList.begin(),
+               SuperRegList.end());
     DiffSeqs.add(SuperRegLists[i]);
 
     // Differentially encode the register unit list, seeded by register number.
@@ -763,18 +759,20 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
     //
     // Check the neighboring registers for arithmetic progressions.
     unsigned ScaleA = ~0u, ScaleB = ~0u;
-    ArrayRef<unsigned> RUs = Reg->getNativeRegUnits();
-    if (i > 0 && Regs[i-1]->getNativeRegUnits().size() == RUs.size())
-      ScaleB = RUs.front() - Regs[i-1]->getNativeRegUnits().front();
-    if (i+1 != Regs.size() &&
-        Regs[i+1]->getNativeRegUnits().size() == RUs.size())
-      ScaleA = Regs[i+1]->getNativeRegUnits().front() - RUs.front();
+    ArrayRef<unsigned> RUs = Reg.getNativeRegUnits();
+    if (I != Regs.begin() &&
+        std::prev(I)->getNativeRegUnits().size() == RUs.size())
+      ScaleB = RUs.front() - std::prev(I)->getNativeRegUnits().front();
+    if (std::next(I) != Regs.end() &&
+        std::next(I)->getNativeRegUnits().size() == RUs.size())
+      ScaleA = std::next(I)->getNativeRegUnits().front() - RUs.front();
     unsigned Scale = std::min(ScaleB, ScaleA);
     // Default the scale to 0 if it can't be encoded in 4 bits.
     if (Scale >= 16)
       Scale = 0;
     RegUnitInitScale[i] = Scale;
-    DiffSeqs.add(diffEncode(RegUnitLists[i], Scale * Reg->EnumValue, RUs));
+    DiffSeqs.add(diffEncode(RegUnitLists[i], Scale * Reg.EnumValue, RUs));
+    ++i;
   }
 
   // Compute the final layout of the sequence table.
@@ -799,12 +797,9 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   OS << "extern const MCRegisterInfo::SubRegCoveredBits "
      << TargetName << "SubRegIdxRanges[] = {\n";
   OS << "  { " << (uint16_t)-1 << ", " << (uint16_t)-1 << " },\n";
-  for (ArrayRef<CodeGenSubRegIndex*>::const_iterator
-         SRI = SubRegIndices.begin(), SRE = SubRegIndices.end();
-         SRI != SRE; ++SRI) {
-    OS << "  { " << (*SRI)->Offset << ", "
-                 << (*SRI)->Size
-       << " },\t// " << (*SRI)->getName() << "\n";
+  for (const auto &Idx : SubRegIndices) {
+    OS << "  { " << Idx.Offset << ", " << Idx.Size << " },\t// "
+       << Idx.getName() << "\n";
   }
   OS << "};\n\n";
 
@@ -819,13 +814,13 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   OS << "  { " << RegStrings.get("") << ", 0, 0, 0, 0 },\n";
 
   // Emit the register descriptors now.
-  for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
-    const CodeGenRegister *Reg = Regs[i];
-    OS << "  { " << RegStrings.get(Reg->getName()) << ", "
-       << DiffSeqs.get(SubRegLists[i]) << ", "
-       << DiffSeqs.get(SuperRegLists[i]) << ", "
-       << SubRegIdxSeqs.get(SubRegIdxLists[i]) << ", "
-       << (DiffSeqs.get(RegUnitLists[i])*16 + RegUnitInitScale[i]) << " },\n";
+  i = 0;
+  for (const auto &Reg : Regs) {
+    OS << "  { " << RegStrings.get(Reg.getName()) << ", "
+       << DiffSeqs.get(SubRegLists[i]) << ", " << DiffSeqs.get(SuperRegLists[i])
+       << ", " << SubRegIdxSeqs.get(SubRegIdxLists[i]) << ", "
+       << (DiffSeqs.get(RegUnitLists[i]) * 16 + RegUnitInitScale[i]) << " },\n";
+    ++i;
   }
   OS << "};\n\n";      // End of register descriptors...
 
@@ -848,6 +843,8 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   // Loop over all of the register classes... emitting each one.
   OS << "namespace {     // Register classes...\n";
 
+  SequenceToOffsetTable<std::string> RegClassStrings;
+
   // Emit the register enum value arrays for each RegisterClass
   for (unsigned rc = 0, e = RegisterClasses.size(); rc != e; ++rc) {
     const CodeGenRegisterClass &RC = *RegisterClasses[rc];
@@ -855,6 +852,8 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
 
     // Give the register class a legal C name if it's anonymous.
     std::string Name = RC.getName();
+
+    RegClassStrings.add(Name);
 
     // Emit the register list now.
     OS << "  // " << Name << " Register Class...\n"
@@ -880,6 +879,11 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   }
   OS << "}\n\n";
 
+  RegClassStrings.layout();
+  OS << "extern const char " << TargetName << "RegClassStrings[] = {\n";
+  RegClassStrings.emit(OS, printChar);
+  OS << "};\n\n";
+
   OS << "extern const MCRegisterClass " << TargetName
      << "MCRegisterClasses[] = {\n";
 
@@ -892,8 +896,8 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
     assert((RC.SpillAlignment/8) <= 0xffff && "SpillAlignment too large.");
     assert(RC.CopyCost >= -128 && RC.CopyCost <= 127 && "Copy cost too large.");
 
-    OS << "  { " << '\"' << RC.getName() << "\", "
-       << RC.getName() << ", " << RC.getName() << "Bits, "
+    OS << "  { " << RC.getName() << ", " << RC.getName() << "Bits, "
+       << RegClassStrings.get(RC.getName()) << ", "
        << RC.getOrder().size() << ", sizeof(" << RC.getName() << "Bits), "
        << RC.getQualifiedName() + "RegClassID" << ", "
        << RC.SpillSize/8 << ", "
@@ -911,8 +915,8 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   OS << "RegEncodingTable[] = {\n";
   // Add entry for NoRegister
   OS << "  0,\n";
-  for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
-    Record *Reg = Regs[i]->TheDef;
+  for (const auto &RE : Regs) {
+    Record *Reg = RE.TheDef;
     BitsInit *BI = Reg->getValueAsBitsInit("HWEncoding");
     uint64_t Value = 0;
     for (unsigned b = 0, be = BI->getNumBits(); b != be; ++b) {
@@ -926,24 +930,23 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
   // MCRegisterInfo initialization routine.
   OS << "static inline void Init" << TargetName
      << "MCRegisterInfo(MCRegisterInfo *RI, unsigned RA, "
-     << "unsigned DwarfFlavour = 0, unsigned EHFlavour = 0, unsigned PC = 0) {\n"
+     << "unsigned DwarfFlavour = 0, unsigned EHFlavour = 0, unsigned PC = 0) "
+        "{\n"
      << "  RI->InitMCRegisterInfo(" << TargetName << "RegDesc, "
-     << Regs.size()+1 << ", RA, PC, " << TargetName << "MCRegisterClasses, "
-     << RegisterClasses.size() << ", "
-     << TargetName << "RegUnitRoots, "
-     << RegBank.getNumNativeRegUnits() << ", "
-     << TargetName << "RegDiffLists, "
-     << TargetName << "RegStrings, "
+     << Regs.size() + 1 << ", RA, PC, " << TargetName << "MCRegisterClasses, "
+     << RegisterClasses.size() << ", " << TargetName << "RegUnitRoots, "
+     << RegBank.getNumNativeRegUnits() << ", " << TargetName << "RegDiffLists, "
+     << TargetName << "RegStrings, " << TargetName << "RegClassStrings, "
      << TargetName << "SubRegIdxLists, "
-     << (SubRegIndices.size() + 1) << ",\n"
-     << TargetName << "SubRegIdxRanges, "
-     << "  " << TargetName << "RegEncodingTable);\n\n";
+     << (std::distance(SubRegIndices.begin(), SubRegIndices.end()) + 1) << ",\n"
+     << TargetName << "SubRegIdxRanges, " << TargetName
+     << "RegEncodingTable);\n\n";
 
   EmitRegMapping(OS, Regs, false);
 
   OS << "}\n\n";
 
-  OS << "} // End llvm namespace \n";
+  OS << "} // End llvm namespace\n";
   OS << "#endif // GET_REGINFO_MC_DESC\n\n";
 }
 
@@ -1000,7 +1003,7 @@ RegisterInfoEmitter::runTargetHeader(raw_ostream &OS, CodeGenTarget &Target,
     }
     OS << "} // end of namespace " << TargetName << "\n\n";
   }
-  OS << "} // End llvm namespace \n";
+  OS << "} // End llvm namespace\n";
   OS << "#endif // GET_REGINFO_HEADER\n\n";
 }
 
@@ -1023,7 +1026,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
 
   // Start out by emitting each of the register classes.
   ArrayRef<CodeGenRegisterClass*> RegisterClasses = RegBank.getRegClasses();
-  ArrayRef<CodeGenSubRegIndex*> SubRegIndices = RegBank.getSubRegIndices();
+  const auto &SubRegIndices = RegBank.getSubRegIndices();
 
   // Collect all registers belonging to any allocatable class.
   std::set<Record*> AllocatableRegs;
@@ -1048,18 +1051,17 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
 
   // Emit SubRegIndex names, skipping 0.
   OS << "\nstatic const char *const SubRegIndexNameTable[] = { \"";
-  for (unsigned i = 0, e = SubRegIndices.size(); i != e; ++i) {
-    OS << SubRegIndices[i]->getName();
-    if (i + 1 != e)
-      OS << "\", \"";
+
+  for (const auto &Idx : SubRegIndices) {
+    OS << Idx.getName();
+    OS << "\", \"";
   }
   OS << "\" };\n\n";
 
   // Emit SubRegIndex lane masks, including 0.
   OS << "\nstatic const unsigned SubRegIndexLaneMaskTable[] = {\n  ~0u,\n";
-  for (unsigned i = 0, e = SubRegIndices.size(); i != e; ++i) {
-    OS << format("  0x%08x, // ", SubRegIndices[i]->LaneMask)
-       << SubRegIndices[i]->getName() << '\n';
+  for (const auto &Idx : SubRegIndices) {
+    OS << format("  0x%08x, // ", Idx.LaneMask) << Idx.getName() << '\n';
   }
   OS << " };\n\n";
 
@@ -1102,16 +1104,15 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
       // Emit super-reg class masks for any relevant SubRegIndices that can
       // project into RC.
       IdxList &SRIList = SuperRegIdxLists[rc];
-      for (unsigned sri = 0, sre = SubRegIndices.size(); sri != sre; ++sri) {
-        CodeGenSubRegIndex *Idx = SubRegIndices[sri];
+      for (auto &Idx : SubRegIndices) {
         MaskBV.reset();
-        RC.getSuperRegClasses(Idx, MaskBV);
+        RC.getSuperRegClasses(&Idx, MaskBV);
         if (MaskBV.none())
           continue;
-        SRIList.push_back(Idx);
+        SRIList.push_back(&Idx);
         OS << "\n  ";
         printBitVectorAsHex(OS, MaskBV, 32);
-        OS << "// " << Idx->getName();
+        OS << "// " << Idx.getName();
       }
       SuperRegIdxSeqs.add(SRIList);
       OS << "\n};\n\n";
@@ -1172,7 +1173,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
     }
 
     // Now emit the actual value-initialized register class instances.
-    OS << "namespace " << RegisterClasses[0]->Namespace
+    OS << "\nnamespace " << RegisterClasses[0]->Namespace
        << " {   // Register class instances\n";
 
     for (unsigned i = 0, e = RegisterClasses.size(); i != e; ++i) {
@@ -1212,9 +1213,8 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
      << TargetName << "RegInfoDesc[] = { // Extra Descriptors\n";
   OS << "  { 0, 0 },\n";
 
-  const std::vector<CodeGenRegister*> &Regs = RegBank.getRegisters();
-  for (unsigned i = 0, e = Regs.size(); i != e; ++i) {
-    const CodeGenRegister &Reg = *Regs[i];
+  const auto &Regs = RegBank.getRegisters();
+  for (const auto &Reg : Regs) {
     OS << "  { ";
     OS << Reg.CostPerUse << ", "
        << int(AllocatableRegs.count(Reg.TheDef)) << " },\n";
@@ -1223,6 +1223,9 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
 
 
   std::string ClassName = Target.getName() + "GenRegisterInfo";
+
+  auto SubRegIndicesSize =
+      std::distance(SubRegIndices.begin(), SubRegIndices.end());
 
   if (!SubRegIndices.empty())
     emitComposeSubRegIndices(OS, RegBank, ClassName);
@@ -1240,23 +1243,22 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
       OS << "  static const uint16_t Table[";
     else
       PrintFatalError("Too many register classes.");
-    OS << RegisterClasses.size() << "][" << SubRegIndices.size() << "] = {\n";
+    OS << RegisterClasses.size() << "][" << SubRegIndicesSize << "] = {\n";
     for (unsigned rci = 0, rce = RegisterClasses.size(); rci != rce; ++rci) {
       const CodeGenRegisterClass &RC = *RegisterClasses[rci];
       OS << "    {\t// " << RC.getName() << "\n";
-      for (unsigned sri = 0, sre = SubRegIndices.size(); sri != sre; ++sri) {
-        CodeGenSubRegIndex *Idx = SubRegIndices[sri];
-        if (CodeGenRegisterClass *SRC = RC.getSubClassWithSubReg(Idx))
-          OS << "      " << SRC->EnumValue + 1 << ",\t// " << Idx->getName()
+      for (auto &Idx : SubRegIndices) {
+        if (CodeGenRegisterClass *SRC = RC.getSubClassWithSubReg(&Idx))
+          OS << "      " << SRC->EnumValue + 1 << ",\t// " << Idx.getName()
              << " -> " << SRC->getName() << "\n";
         else
-          OS << "      0,\t// " << Idx->getName() << "\n";
+          OS << "      0,\t// " << Idx.getName() << "\n";
       }
       OS << "    },\n";
     }
     OS << "  };\n  assert(RC && \"Missing regclass\");\n"
        << "  if (!Idx) return RC;\n  --Idx;\n"
-       << "  assert(Idx < " << SubRegIndices.size() << " && \"Bad subreg\");\n"
+       << "  assert(Idx < " << SubRegIndicesSize << " && \"Bad subreg\");\n"
        << "  unsigned TV = Table[RC->getID()][Idx];\n"
        << "  return TV ? getRegClass(TV - 1) : nullptr;\n}\n\n";
   }
@@ -1267,6 +1269,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
   OS << "extern const MCRegisterDesc " << TargetName << "RegDesc[];\n";
   OS << "extern const MCPhysReg " << TargetName << "RegDiffLists[];\n";
   OS << "extern const char " << TargetName << "RegStrings[];\n";
+  OS << "extern const char " << TargetName << "RegClassStrings[];\n";
   OS << "extern const MCPhysReg " << TargetName << "RegUnitRoots[][2];\n";
   OS << "extern const uint16_t " << TargetName << "SubRegIdxLists[];\n";
   OS << "extern const MCRegisterInfo::SubRegCoveredBits "
@@ -1282,15 +1285,16 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
      << "             SubRegIndexNameTable, SubRegIndexLaneMaskTable, 0x";
   OS.write_hex(RegBank.CoveringLanes);
   OS << ") {\n"
-     << "  InitMCRegisterInfo(" << TargetName << "RegDesc, "
-     << Regs.size()+1 << ", RA, PC,\n                     " << TargetName
+     << "  InitMCRegisterInfo(" << TargetName << "RegDesc, " << Regs.size() + 1
+     << ", RA, PC,\n                     " << TargetName
      << "MCRegisterClasses, " << RegisterClasses.size() << ",\n"
      << "                     " << TargetName << "RegUnitRoots,\n"
      << "                     " << RegBank.getNumNativeRegUnits() << ",\n"
      << "                     " << TargetName << "RegDiffLists,\n"
      << "                     " << TargetName << "RegStrings,\n"
+     << "                     " << TargetName << "RegClassStrings,\n"
      << "                     " << TargetName << "SubRegIdxLists,\n"
-     << "                     " << SubRegIndices.size() + 1 << ",\n"
+     << "                     " << SubRegIndicesSize + 1 << ",\n"
      << "                     " << TargetName << "SubRegIdxRanges,\n"
      << "                     " << TargetName << "RegEncodingTable);\n\n";
 
@@ -1334,7 +1338,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
   }
   OS << "\n\n";
 
-  OS << "} // End llvm namespace \n";
+  OS << "} // End llvm namespace\n";
   OS << "#endif // GET_REGINFO_TARGET_DESC\n\n";
 }
 

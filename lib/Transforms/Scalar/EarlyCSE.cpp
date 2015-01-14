@@ -21,6 +21,8 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/RecyclingAllocator.h"
@@ -28,6 +30,7 @@
 #include "llvm/Transforms/Utils/Local.h"
 #include <deque>
 using namespace llvm;
+using namespace llvm::PatternMatch;
 
 #define DEBUG_TYPE "early-cse"
 
@@ -435,6 +438,15 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
       continue;
     }
 
+    // Skip assume intrinsics, they don't really have side effects (although
+    // they're marked as such to ensure preservation of control dependencies),
+    // and this pass will not disturb any of the assumption's control
+    // dependencies.
+    if (match(Inst, m_Intrinsic<Intrinsic::assume>())) {
+      DEBUG(dbgs() << "EarlyCSE skipping assumption: " << *Inst << '\n');
+      continue;
+    }
+
     // If the instruction can be simplified (e.g. X+0 = X) then replace it with
     // its simpler value.
     if (Value *V = SimplifyInstruction(Inst, DL, TLI, DT, AT)) {
@@ -534,7 +546,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
           Changed = true;
           ++NumDSE;
           LastStore = nullptr;
-          continue;
+          // fallthrough - we can exploit information about this store
         }
 
         // Okay, we just invalidated anything we knew about loaded values.  Try

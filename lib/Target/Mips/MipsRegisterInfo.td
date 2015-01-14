@@ -212,8 +212,13 @@ let Namespace = "Mips" in {
   // PC register
   def PC : Register<"pc">;
 
-  // Hardware register $29
-  foreach I = 0-31 in
+  // Hardware registers
+  def HWR0 : MipsReg<0, "hwr_cpunum">;
+  def HWR1 : MipsReg<1, "hwr_synci_step">;
+  def HWR2 : MipsReg<2, "hwr_cc">;
+  def HWR3 : MipsReg<3, "hwr_ccres">;
+
+  foreach I = 4-31 in
   def HWR#I : MipsReg<#I, ""#I>;
 
   // Accum registers
@@ -284,10 +289,18 @@ def GPR32 : GPR32Class<[i32]>;
 def DSPR  : GPR32Class<[v4i8, v2i16]>;
 
 def GPRMM16 : RegisterClass<"Mips", [i32], 32, (add
-  // Return Values and Arguments
-  V0, V1, A0, A1, A2, A3,
   // Callee save
-  S0, S1)>;
+  S0, S1,
+  // Return Values and Arguments
+  V0, V1, A0, A1, A2, A3)>;
+
+def GPRMM16Zero : RegisterClass<"Mips", [i32], 32, (add
+  // Reserved
+  ZERO,
+  // Callee save
+  S1,
+  // Return Values and Arguments
+  V0, V1, A0, A1, A2, A3)>;
 
 def GPR64 : RegisterClass<"Mips", [i64], 64, (add
 // Reserved
@@ -441,6 +454,11 @@ def GPRMM16AsmOperand : MipsAsmRegOperand {
   let PredicateMethod = "isMM16AsmReg";
 }
 
+def GPRMM16AsmOperandZero : MipsAsmRegOperand {
+  let Name = "GPRMM16AsmRegZero";
+  let PredicateMethod = "isMM16AsmRegZero";
+}
+
 def ACC64DSPAsmOperand : MipsAsmRegOperand {
   let Name = "ACC64DSPAsmReg";
   let PredicateMethod = "isACCAsmReg";
@@ -498,6 +516,10 @@ def GPR32Opnd : RegisterOperand<GPR32> {
 
 def GPRMM16Opnd : RegisterOperand<GPRMM16> {
   let ParserMatchClass = GPRMM16AsmOperand;
+}
+
+def GPRMM16OpndZero : RegisterOperand<GPRMM16Zero> {
+  let ParserMatchClass = GPRMM16AsmOperandZero;
 }
 
 def GPR64Opnd : RegisterOperand<GPR64> {

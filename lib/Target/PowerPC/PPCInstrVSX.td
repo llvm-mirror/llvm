@@ -42,7 +42,7 @@ multiclass XX3Form_Rcr<bits<6> opcode, bits<7> xo, dag OOL, dag IOL,
 def HasVSX : Predicate<"PPCSubTarget->hasVSX()">;
 let Predicates = [HasVSX] in {
 let AddedComplexity = 400 in { // Prefer VSX patterns over non-VSX patterns.
-let neverHasSideEffects = 1 in { // VSX instructions don't have side effects.
+let hasSideEffects = 0 in { // VSX instructions don't have side effects.
 let Uses = [RM] in {
 
   // Load indexed instructions
@@ -55,7 +55,7 @@ let Uses = [RM] in {
     def LXVD2X : XX1Form<31, 844,
                          (outs vsrc:$XT), (ins memrr:$src),
                          "lxvd2x $XT, $src", IIC_LdStLFD,
-                         [(set v2f64:$XT, (load xoaddr:$src))]>;
+                         [(set v2f64:$XT, (int_ppc_vsx_lxvd2x xoaddr:$src))]>;
 
     def LXVDSX : XX1Form<31, 332,
                          (outs vsrc:$XT), (ins memrr:$src),
@@ -64,7 +64,7 @@ let Uses = [RM] in {
     def LXVW4X : XX1Form<31, 780,
                          (outs vsrc:$XT), (ins memrr:$src),
                          "lxvw4x $XT, $src", IIC_LdStLFD,
-                         [(set v4i32:$XT, (load xoaddr:$src))]>;
+                         [(set v4i32:$XT, (int_ppc_vsx_lxvw4x xoaddr:$src))]>;
   }
 
   // Store indexed instructions
@@ -77,12 +77,12 @@ let Uses = [RM] in {
     def STXVD2X : XX1Form<31, 972,
                          (outs), (ins vsrc:$XT, memrr:$dst),
                          "stxvd2x $XT, $dst", IIC_LdStSTFD,
-                         [(store v2f64:$XT, xoaddr:$dst)]>;
+                         [(int_ppc_vsx_stxvd2x v2f64:$XT, xoaddr:$dst)]>;
 
     def STXVW4X : XX1Form<31, 908,
                          (outs), (ins vsrc:$XT, memrr:$dst),
                          "stxvw4x $XT, $dst", IIC_LdStSTFD,
-                         [(store v4i32:$XT, xoaddr:$dst)]>;
+                         [(int_ppc_vsx_stxvw4x v4i32:$XT, xoaddr:$dst)]>;
   }
 
   // Add/Mul Instructions
@@ -643,24 +643,36 @@ let Uses = [RM] in {
   let isCommutable = 1 in {
   def XSMAXDP : XX3Form<60, 160,
                         (outs vsfrc:$XT), (ins vsfrc:$XA, vsfrc:$XB),
-                        "xsmaxdp $XT, $XA, $XB", IIC_VecFP, []>;
+                        "xsmaxdp $XT, $XA, $XB", IIC_VecFP,
+                        [(set vsfrc:$XT,
+                              (int_ppc_vsx_xsmaxdp vsfrc:$XA, vsfrc:$XB))]>;
   def XSMINDP : XX3Form<60, 168,
                         (outs vsfrc:$XT), (ins vsfrc:$XA, vsfrc:$XB),
-                        "xsmindp $XT, $XA, $XB", IIC_VecFP, []>;
+                        "xsmindp $XT, $XA, $XB", IIC_VecFP,
+                        [(set vsfrc:$XT,
+                              (int_ppc_vsx_xsmindp vsfrc:$XA, vsfrc:$XB))]>;
 
   def XVMAXDP : XX3Form<60, 224,
                         (outs vsrc:$XT), (ins vsrc:$XA, vsrc:$XB),
-                        "xvmaxdp $XT, $XA, $XB", IIC_VecFP, []>;
+                        "xvmaxdp $XT, $XA, $XB", IIC_VecFP,
+                        [(set vsrc:$XT,
+                              (int_ppc_vsx_xvmaxdp vsrc:$XA, vsrc:$XB))]>;
   def XVMINDP : XX3Form<60, 232,
                         (outs vsrc:$XT), (ins vsrc:$XA, vsrc:$XB),
-                        "xvmindp $XT, $XA, $XB", IIC_VecFP, []>;
+                        "xvmindp $XT, $XA, $XB", IIC_VecFP,
+                        [(set vsrc:$XT,
+                              (int_ppc_vsx_xvmindp vsrc:$XA, vsrc:$XB))]>;
 
   def XVMAXSP : XX3Form<60, 192,
                         (outs vsrc:$XT), (ins vsrc:$XA, vsrc:$XB),
-                        "xvmaxsp $XT, $XA, $XB", IIC_VecFP, []>;
+                        "xvmaxsp $XT, $XA, $XB", IIC_VecFP,
+                        [(set vsrc:$XT,
+                              (int_ppc_vsx_xvmaxsp vsrc:$XA, vsrc:$XB))]>;
   def XVMINSP : XX3Form<60, 200,
                         (outs vsrc:$XT), (ins vsrc:$XA, vsrc:$XB),
-                        "xvminsp $XT, $XA, $XB", IIC_VecFP, []>;
+                        "xvminsp $XT, $XA, $XB", IIC_VecFP,
+                        [(set vsrc:$XT,
+                              (int_ppc_vsx_xvminsp vsrc:$XA, vsrc:$XB))]>;
   } // isCommutable
 } // Uses = [RM]
 
@@ -716,7 +728,32 @@ let Uses = [RM] in {
   def XXSPLTW : XX2Form_2<60, 164,
                        (outs vsrc:$XT), (ins vsrc:$XB, u2imm:$UIM),
                        "xxspltw $XT, $XB, $UIM", IIC_VecPerm, []>;
-} // neverHasSideEffects
+} // hasSideEffects
+
+// SELECT_CC_* - Used to implement the SELECT_CC DAG operation.  Expanded after
+// instruction selection into a branch sequence.
+let usesCustomInserter = 1,    // Expanded after instruction selection.
+    PPC970_Single = 1 in {
+
+  def SELECT_CC_VSRC: Pseudo<(outs vsrc:$dst),
+                             (ins crrc:$cond, vsrc:$T, vsrc:$F, i32imm:$BROPC),
+                             "#SELECT_CC_VSRC",
+                             []>;
+  def SELECT_VSRC: Pseudo<(outs vsrc:$dst),
+                          (ins crbitrc:$cond, vsrc:$T, vsrc:$F),
+                          "#SELECT_VSRC",
+                          [(set v2f64:$dst,
+                                (select i1:$cond, v2f64:$T, v2f64:$F))]>;
+  def SELECT_CC_VSFRC: Pseudo<(outs f8rc:$dst),
+                              (ins crrc:$cond, f8rc:$T, f8rc:$F,
+                               i32imm:$BROPC), "#SELECT_CC_VSFRC",
+                              []>;
+  def SELECT_VSFRC: Pseudo<(outs f8rc:$dst),
+                           (ins crbitrc:$cond, f8rc:$T, f8rc:$F),
+                           "#SELECT_VSFRC",
+                           [(set f64:$dst,
+                                 (select i1:$cond, f64:$T, f64:$F))]>;
+} // usesCustomInserter
 } // AddedComplexity
 
 def : InstAlias<"xvmovdp $XT, $XB",
@@ -814,11 +851,47 @@ def : Pat<(v2f64 (sint_to_fp (sext_inreg v2i64:$C, v2i32))),
           (XVCVSXWDP (XXSLDWI $C, $C, 1))>;
 
 // Loads.
+def : Pat<(v2f64 (load xoaddr:$src)), (LXVD2X xoaddr:$src)>;
+def : Pat<(v2i64 (load xoaddr:$src)), (LXVD2X xoaddr:$src)>;
 def : Pat<(v4i32 (load xoaddr:$src)), (LXVW4X xoaddr:$src)>;
 
 // Stores.
-def : Pat<(store v4i32:$rS, xoaddr:$dst),
-          (STXVW4X $rS, xoaddr:$dst)>;
+def : Pat<(store v2f64:$rS, xoaddr:$dst), (STXVD2X $rS, xoaddr:$dst)>;
+def : Pat<(store v2i64:$rS, xoaddr:$dst), (STXVD2X $rS, xoaddr:$dst)>;
+def : Pat<(store v4i32:$rS, xoaddr:$dst), (STXVW4X $rS, xoaddr:$dst)>;
+
+// Selects.
+def : Pat<(v2f64 (selectcc i1:$lhs, i1:$rhs, v2f64:$tval, v2f64:$fval, SETLT)),
+          (SELECT_VSRC (CRANDC $rhs, $lhs), $tval, $fval)>;
+def : Pat<(v2f64 (selectcc i1:$lhs, i1:$rhs, v2f64:$tval, v2f64:$fval, SETLE)),
+          (SELECT_VSRC (CRORC  $rhs, $lhs), $tval, $fval)>;
+def : Pat<(v2f64 (selectcc i1:$lhs, i1:$rhs, v2f64:$tval, v2f64:$fval, SETEQ)),
+          (SELECT_VSRC (CREQV $lhs, $rhs), $tval, $fval)>;
+def : Pat<(v2f64 (selectcc i1:$lhs, i1:$rhs, v2f64:$tval, v2f64:$fval, SETGE)),
+          (SELECT_VSRC (CRORC  $lhs, $rhs), $tval, $fval)>;
+def : Pat<(v2f64 (selectcc i1:$lhs, i1:$rhs, v2f64:$tval, v2f64:$fval, SETGT)),
+          (SELECT_VSRC (CRANDC $lhs, $rhs), $tval, $fval)>;
+def : Pat<(v2f64 (selectcc i1:$lhs, i1:$rhs, v2f64:$tval, v2f64:$fval, SETNE)),
+          (SELECT_VSRC (CRXOR $lhs, $rhs), $tval, $fval)>;
+
+def : Pat<(f64 (selectcc i1:$lhs, i1:$rhs, f64:$tval, f64:$fval, SETLT)),
+          (SELECT_VSFRC (CRANDC $rhs, $lhs), $tval, $fval)>;
+def : Pat<(f64 (selectcc i1:$lhs, i1:$rhs, f64:$tval, f64:$fval, SETLE)),
+          (SELECT_VSFRC (CRORC  $rhs, $lhs), $tval, $fval)>;
+def : Pat<(f64 (selectcc i1:$lhs, i1:$rhs, f64:$tval, f64:$fval, SETEQ)),
+          (SELECT_VSFRC (CREQV $lhs, $rhs), $tval, $fval)>;
+def : Pat<(f64 (selectcc i1:$lhs, i1:$rhs, f64:$tval, f64:$fval, SETGE)),
+          (SELECT_VSFRC (CRORC  $lhs, $rhs), $tval, $fval)>;
+def : Pat<(f64 (selectcc i1:$lhs, i1:$rhs, f64:$tval, f64:$fval, SETGT)),
+          (SELECT_VSFRC (CRANDC $lhs, $rhs), $tval, $fval)>;
+def : Pat<(f64 (selectcc i1:$lhs, i1:$rhs, f64:$tval, f64:$fval, SETNE)),
+          (SELECT_VSFRC (CRXOR $lhs, $rhs), $tval, $fval)>;
+
+// Divides.
+def : Pat<(int_ppc_vsx_xvdivsp v4f32:$A, v4f32:$B),
+          (XVDIVSP $A, $B)>;
+def : Pat<(int_ppc_vsx_xvdivdp v2f64:$A, v2f64:$B),
+          (XVDIVDP $A, $B)>;
 
 } // AddedComplexity
 } // HasVSX

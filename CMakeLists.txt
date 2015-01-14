@@ -16,7 +16,28 @@ else()
   endif()
 endif()
 
+if(CMAKE_VERSION VERSION_LESS 3.1.20141117)
+  set(cmake_3_2_USES_TERMINAL)
+else()
+  set(cmake_3_2_USES_TERMINAL USES_TERMINAL)
+endif()
+
 project(LLVM)
+
+# The following only works with the Ninja generator in CMake >= 3.0.
+set(LLVM_PARALLEL_COMPILE_JOBS "" CACHE STRING
+  "Define the maximum number of concurrent compilation jobs.")
+if(LLVM_PARALLEL_COMPILE_JOBS)
+  set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_job_pool=${LLVM_PARALLEL_COMPILE_JOBS})
+  set(CMAKE_JOB_POOL_COMPILE compile_job_pool)
+endif()
+
+set(LLVM_PARALLEL_LINK_JOBS "" CACHE STRING
+  "Define the maximum number of concurrent link jobs.")
+if(LLVM_PARALLEL_LINK_JOBS)
+  set_property(GLOBAL APPEND PROPERTY JOB_POOLS link_job_pool=${LLVM_PARALLEL_LINK_JOBS})
+  set(CMAKE_JOB_POOL_LINK link_job_pool)
+endif()
 
 # Add path for custom modules
 set(CMAKE_MODULE_PATH
@@ -302,6 +323,8 @@ option (LLVM_ENABLE_SPHINX "Use Sphinx to generate llvm documentation." OFF)
 option (LLVM_BUILD_EXTERNAL_COMPILER_RT
   "Build compiler-rt as an external project." OFF)
 
+option(LLVM_BUILD_LLVM_DYLIB "Build libllvm dynamic library" OFF)
+
 # All options referred to from HandleLLVMOptions have to be specified
 # BEFORE this include, otherwise options will not be correctly set on
 # first cmake run
@@ -467,6 +490,16 @@ else(UNIX)
   endif(NOT DEFINED CMAKE_INSTALL_RPATH)
 endif()
 
+# Work around a broken bfd ld behavior. When linking a binary with a
+# foo.so library, it will try to find any library that foo.so uses and
+# check its symbols. This is wasteful (the check was done when foo.so
+# was created) and can fail since it is not the dynamic linker and
+# doesn't know how to handle search paths correctly.
+if (UNIX AND NOT APPLE)
+  set(CMAKE_EXE_LINKER_FLAGS
+      "${CMAKE_EXE_LINKER_FLAGS} -Wl,-allow-shlib-undefined")
+endif()
+
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include_directories( ${LLVM_INCLUDE_DIR} ${LLVM_MAIN_INCLUDE_DIR})
@@ -527,6 +560,12 @@ endif()
 if(LLVM_INCLUDE_TESTS)
   add_subdirectory(utils/unittest)
 endif()
+
+foreach( binding ${LLVM_BINDINGS_LIST} )
+  if( EXISTS "${LLVM_MAIN_SRC_DIR}/bindings/${binding}/CMakeLists.txt" )
+    add_subdirectory(bindings/${binding})
+  endif()
+endforeach()
 
 add_subdirectory(projects)
 

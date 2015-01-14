@@ -23,6 +23,7 @@ namespace llvm {
 
 class AArch64TargetMachine : public LLVMTargetMachine {
 protected:
+  std::unique_ptr<TargetLoweringObjectFile> TLOF;
   AArch64Subtarget Subtarget;
   mutable StringMap<std::unique_ptr<AArch64Subtarget>> SubtargetMap;
 
@@ -31,6 +32,8 @@ public:
                        StringRef FS, const TargetOptions &Options,
                        Reloc::Model RM, CodeModel::Model CM,
                        CodeGenOpt::Level OL, bool IsLittleEndian);
+
+  ~AArch64TargetMachine() override;
 
   const AArch64Subtarget *getSubtargetImpl() const override {
     return &Subtarget;
@@ -43,12 +46,12 @@ public:
   /// \brief Register AArch64 analysis passes with a pass manager.
   void addAnalysisPasses(PassManagerBase &PM) override;
 
-  /// \brief Query if the PBQP register allocator is being used
-  bool isPBQPUsed() const { return usingPBQP; }
+  TargetLoweringObjectFile* getObjFileLowering() const override {
+    return TLOF.get();
+  }
 
 private:
   bool isLittle;
-  bool usingPBQP;
 };
 
 // AArch64leTargetMachine - AArch64 little endian target machine.

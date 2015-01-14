@@ -515,12 +515,14 @@ namespace COFF {
     uint32_t SizeOfHeaders;
     uint32_t CheckSum;
     uint16_t Subsystem;
+    // FIXME: This should be DllCharacteristics to match the COFF spec.
     uint16_t DLLCharacteristics;
     uint32_t SizeOfStackReserve;
     uint32_t SizeOfStackCommit;
     uint32_t SizeOfHeapReserve;
     uint32_t SizeOfHeapCommit;
     uint32_t LoaderFlags;
+    // FIXME: This should be NumberOfRvaAndSizes to match the COFF spec.
     uint32_t NumberOfRvaAndSize;
   };
 
@@ -544,7 +546,9 @@ namespace COFF {
     BOUND_IMPORT,
     IAT,
     DELAY_IMPORT_DESCRIPTOR,
-    CLR_RUNTIME_HEADER
+    CLR_RUNTIME_HEADER,
+
+    NUM_DATA_DIRECTORIES
   };
 
   enum WindowsSubsystem {
@@ -662,9 +666,14 @@ namespace COFF {
 
   enum CodeViewLineTableIdentifiers {
     DEBUG_SECTION_MAGIC           = 0x4,
+    DEBUG_SYMBOL_SUBSECTION       = 0xF1,
     DEBUG_LINE_TABLE_SUBSECTION   = 0xF2,
     DEBUG_STRING_TABLE_SUBSECTION = 0xF3,
-    DEBUG_INDEX_SUBSECTION        = 0xF4
+    DEBUG_INDEX_SUBSECTION        = 0xF4,
+
+    // Symbol subsections are split into records of different types.
+    DEBUG_SYMBOL_TYPE_PROC_START = 0x1147,
+    DEBUG_SYMBOL_TYPE_PROC_END   = 0x114F
   };
 
   inline bool isReservedSectionNumber(int32_t SectionNumber) {

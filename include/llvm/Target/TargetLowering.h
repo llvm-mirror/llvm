@@ -137,10 +137,9 @@ public:
     llvm_unreachable("Invalid content kind");
   }
 
-  /// NOTE: The constructor takes ownership of TLOF.
-  explicit TargetLoweringBase(const TargetMachine &TM,
-                              const TargetLoweringObjectFile *TLOF);
-  virtual ~TargetLoweringBase();
+  /// NOTE: The TargetMachine owns TLOF.
+  explicit TargetLoweringBase(const TargetMachine &TM);
+  virtual ~TargetLoweringBase() {}
 
 protected:
   /// \brief Initialize all of the actions to default values.
@@ -149,7 +148,9 @@ protected:
 public:
   const TargetMachine &getTargetMachine() const { return TM; }
   const DataLayout *getDataLayout() const { return DL; }
-  const TargetLoweringObjectFile &getObjFileLowering() const { return TLOF; }
+  const TargetLoweringObjectFile &getObjFileLowering() const {
+    return *TM.getObjFileLowering();
+  }
 
   bool isBigEndian() const { return !IsLittleEndian; }
   bool isLittleEndian() const { return IsLittleEndian; }
@@ -262,7 +263,15 @@ public:
   bool isMaskAndBranchFoldingLegal() const {
     return MaskAndBranchFoldingIsLegal;
   }
-  
+
+  /// Return true if the target can combine store(extractelement VectorTy,
+  /// Idx).
+  /// \p Cost[out] gives the cost of that transformation when this is true.
+  virtual bool canCombineStoreAndExtract(Type *VectorTy, Value *Idx,
+                                         unsigned &Cost) const {
+    return false;
+  }
+
   /// Return true if target supports floating point exceptions.
   bool hasFloatingPointExceptions() const {
     return HasFloatingPointExceptions;
@@ -1546,7 +1555,6 @@ public:
 private:
   const TargetMachine &TM;
   const DataLayout *DL;
-  const TargetLoweringObjectFile &TLOF;
 
   /// True if this is a little endian target.
   bool IsLittleEndian;
@@ -1956,9 +1964,8 @@ class TargetLowering : public TargetLoweringBase {
   void operator=(const TargetLowering&) LLVM_DELETED_FUNCTION;
 
 public:
-  /// NOTE: The constructor takes ownership of TLOF.
-  explicit TargetLowering(const TargetMachine &TM,
-                          const TargetLoweringObjectFile *TLOF);
+  /// NOTE: The TargetMachine owns TLOF.
+  explicit TargetLowering(const TargetMachine &TM);
 
   /// Returns true by value, base pointer and offset pointer and addressing mode
   /// by reference if the node's address can be legally represented as
@@ -2645,6 +2652,12 @@ public:
     return SDValue();
   }
 
+  /// Indicate whether this target prefers to combine the given number of FDIVs
+  /// with the same divisor.
+  virtual bool combineRepeatedFPDivisors(unsigned NumUsers) const {
+    return false;
+  }
+
   /// Hooks for building estimates in place of slower divisions and square
   /// roots.
   
@@ -2652,13 +2665,16 @@ public:
   /// The RefinementSteps output is the number of Newton-Raphson refinement
   /// iterations required to generate a sufficient (though not necessarily
   /// IEEE-754 compliant) estimate for the value type.
+  /// The boolean UseOneConstNR output is used to select a Newton-Raphson
+  /// algorithm implementation that uses one constant or two constants.
   /// A target may choose to implement its own refinement within this function.
   /// If that's true, then return '0' as the number of RefinementSteps to avoid
   /// any further refinement of the estimate.
   /// An empty SDValue return means no estimate sequence can be created.
   virtual SDValue getRsqrtEstimate(SDValue Operand,
                               DAGCombinerInfo &DCI,
-                              unsigned &RefinementSteps) const {
+                              unsigned &RefinementSteps,
+                              bool &UseOneConstNR) const {
     return SDValue();
   }
 

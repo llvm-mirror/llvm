@@ -1026,8 +1026,6 @@ class LoopVectorizeHints {
   Hint Interleave;
   /// Vectorization forced
   Hint Force;
-  /// Array to help iterating through all hints.
-  Hint *Hints[3]; // avoiding initialisation due to MSVC2012
 
   /// Return the loop metadata prefix.
   static StringRef Prefix() { return "llvm.loop."; }
@@ -1044,11 +1042,6 @@ public:
         Interleave("interleave.count", DisableInterleaving, HK_UNROLL),
         Force("vectorize.enable", FK_Undefined, HK_FORCE),
         TheLoop(L) {
-    // FIXME: Move this up initialisation when MSVC requirement is 2013+
-    Hints[0] = &Width;
-    Hints[1] = &Interleave;
-    Hints[2] = &Force;
-
     // Populate values with existing loop metadata.
     getHintsFromMetadata();
 
@@ -1063,13 +1056,8 @@ public:
   /// Mark the loop L as already vectorized by setting the width to 1.
   void setAlreadyVectorized() {
     Width.Value = Interleave.Value = 1;
-    // FIXME: Change all lines below for this when we can use MSVC 2013+
-    //writeHintsToMetadata({ Width, Unroll });
-    std::vector<Hint> hints;
-    hints.reserve(2);
-    hints.emplace_back(Width);
-    hints.emplace_back(Interleave);
-    writeHintsToMetadata(std::move(hints));
+    Hint Hints[] = {Width, Interleave};
+    writeHintsToMetadata(Hints);
   }
 
   /// Dumps all the hint information.
@@ -1144,6 +1132,7 @@ private:
     if (!C) return;
     unsigned Val = C->getZExtValue();
 
+    Hint *Hints[] = {&Width, &Interleave, &Force};
     for (auto H : Hints) {
       if (Name == H->Name) {
         if (H->validate(Val))
@@ -1158,26 +1147,25 @@ private:
   /// Create a new hint from name / value pair.
   MDNode *createHintMetadata(StringRef Name, unsigned V) const {
     LLVMContext &Context = TheLoop->getHeader()->getContext();
-    SmallVector<Value*, 2> Vals;
-    Vals.push_back(MDString::get(Context, Name));
-    Vals.push_back(ConstantInt::get(Type::getInt32Ty(Context), V));
+    Value *Vals[] = {MDString::get(Context, Name),
+                     ConstantInt::get(Type::getInt32Ty(Context), V)};
     return MDNode::get(Context, Vals);
   }
 
   /// Matches metadata with hint name.
-  bool matchesHintMetadataName(MDNode *Node, std::vector<Hint> &HintTypes) {
+  bool matchesHintMetadataName(MDNode *Node, ArrayRef<Hint> HintTypes) {
     MDString* Name = dyn_cast<MDString>(Node->getOperand(0));
     if (!Name)
       return false;
 
     for (auto H : HintTypes)
-      if (Name->getName().endswith(H.Name))
+      if (Name->getString().endswith(H.Name))
         return true;
     return false;
   }
 
   /// Sets current hints into loop metadata, keeping other values intact.
-  void writeHintsToMetadata(std::vector<Hint> HintTypes) {
+  void writeHintsToMetadata(ArrayRef<Hint> HintTypes) {
     if (HintTypes.size() == 0)
       return;
 
@@ -2993,7 +2981,7 @@ void InnerLoopVectorizer::fixLCSSAPHIs() {
       LCSSAPhi->addIncoming(UndefValue::get(LCSSAPhi->getType()),
                             LoopMiddleBlock);
   }
-} 
+}
 
 InnerLoopVectorizer::VectorParts
 InnerLoopVectorizer::createEdgeMask(BasicBlock *Src, BasicBlock *Dst) {
@@ -3262,7 +3250,7 @@ void InnerLoopVectorizer::vectorizeBlockInLoop(BasicBlock *BB, PhiVector *PV) {
 
         if (BinaryOperator *VecOp = dyn_cast<BinaryOperator>(V))
           VecOp->copyIRFlags(BinOp);
-        
+
         Entry[Part] = V;
       }
 
@@ -3440,7 +3428,7 @@ void InnerLoopVectorizer::updateAnalysis() {
   DT->addNewBlock(LoopMiddleBlock, LoopBypassBlocks[1]);
   DT->addNewBlock(LoopScalarPreHeader, LoopBypassBlocks[0]);
   DT->changeImmediateDominator(LoopScalarBody, LoopScalarPreHeader);
-  DT->changeImmediateDominator(LoopExitBlock, LoopMiddleBlock);
+  DT->changeImmediateDominator(LoopExitBlock, LoopBypassBlocks[0]);
 
   DEBUG(DT->verifyDomTree());
 }
@@ -4280,9 +4268,9 @@ void AccessAnalysis::processMemAccesses() {
         if (IsWrite)
           SetHasWrite = true;
 
-	// Create sets of pointers connected by a shared alias set and
-	// underlying object.
-        typedef SmallVector<Value*, 16> ValueVector;
+        // Create sets of pointers connected by a shared alias set and
+        // underlying object.
+        typedef SmallVector<Value *, 16> ValueVector;
         ValueVector TempObjects;
         GetUnderlyingObjects(Ptr, TempObjects, DL);
         for (Value *UnderlyingObj : TempObjects) {
@@ -4813,7 +4801,7 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
 
     // If we did *not* see this pointer before, insert it to  the read-write
     // list. At this phase it is only a 'write' list.
-    if (Seen.insert(Ptr)) {
+    if (Seen.insert(Ptr).second) {
       ++NumReadWrites;
 
       AliasAnalysis::Location Loc = AA->getLocation(ST);
@@ -4846,7 +4834,8 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
     // read a few words, modify, and write a few words, and some of the
     // words may be written to the same address.
     bool IsReadOnlyPtr = false;
-    if (Seen.insert(Ptr) || !isStridedPtr(SE, DL, Ptr, TheLoop, Strides)) {
+    if (Seen.insert(Ptr).second ||
+        !isStridedPtr(SE, DL, Ptr, TheLoop, Strides)) {
       ++NumReads;
       IsReadOnlyPtr = true;
     }
@@ -5109,7 +5098,7 @@ bool LoopVectorizationLegality::AddReductionVar(PHINode *Phi,
       // value must only be used once, except by phi nodes and min/max
       // reductions which are represented as a cmp followed by a select.
       ReductionInstDesc IgnoredVal(false, nullptr);
-      if (VisitedInsts.insert(UI)) {
+      if (VisitedInsts.insert(UI).second) {
         if (isa<PHINode>(UI))
           PHIs.push_back(UI);
         else
@@ -5277,7 +5266,13 @@ LoopVectorizationLegality::isInductionVariable(PHINode *Phi) {
     return IK_NoInduction;
 
   assert(PhiTy->isPointerTy() && "The PHI must be a pointer");
-  uint64_t Size = DL->getTypeAllocSize(PhiTy->getPointerElementType());
+  Type *PointerElementType = PhiTy->getPointerElementType();
+  // The pointer stride cannot be determined if the pointer element type is not
+  // sized.
+  if (!PointerElementType->isSized())
+    return IK_NoInduction;
+
+  uint64_t Size = DL->getTypeAllocSize(PointerElementType);
   if (C->getValue()->equalsInt(Size))
     return IK_PtrInduction;
   else if (C->getValue()->equalsInt(0 - Size))
@@ -5408,7 +5403,10 @@ LoopVectorizationCostModel::selectVectorizationFactor(bool OptForSize) {
     // If the trip count that we found modulo the vectorization factor is not
     // zero then we require a tail.
     if (VF < 2) {
-      emitAnalysis(Report() << "cannot optimize for size and vectorize at the same time. Enable vectorization of this loop with '#pragma clang loop vectorize(enable)' when compiling with -Os"); 
+      emitAnalysis(Report() << "cannot optimize for size and vectorize at the "
+                               "same time. Enable vectorization of this loop "
+                               "with '#pragma clang loop vectorize(enable)' "
+                               "when compiling with -Os");
       DEBUG(dbgs() << "LV: Aborting. A tail loop is required in Os.\n");
       return Factor;
     }

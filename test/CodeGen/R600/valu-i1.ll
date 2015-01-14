@@ -1,9 +1,9 @@
-; RUN: llc < %s -march=r600 -mcpu=SI | FileCheck --check-prefix=SI %s
+; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
 
 ; Make sure the i1 values created by the cfg structurizer pass are
 ; moved using VALU instructions
-; SI-NOT: S_MOV_B64 s[{{[0-9]:[0-9]}}], -1
-; SI: V_MOV_B32_e32 v{{[0-9]}}, -1
+; SI-NOT: s_mov_b64 s[{{[0-9]:[0-9]}}], -1
+; SI: v_mov_b32_e32 v{{[0-9]}}, -1
 define void @test_if(i32 %a, i32 %b, i32 addrspace(1)* %src, i32 addrspace(1)* %dst) {
 entry:
   switch i32 %a, label %default [

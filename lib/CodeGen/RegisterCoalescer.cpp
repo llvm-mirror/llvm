@@ -965,7 +965,7 @@ void RegisterCoalescer::updateRegDefsUses(unsigned SrcReg,
     // the UseMI operands removes them from the SrcReg use-def chain, but when
     // SrcReg is DstReg we could encounter UseMI twice if it has multiple
     // operands mentioning the virtual register.
-    if (SrcReg == DstReg && !Visited.insert(UseMI))
+    if (SrcReg == DstReg && !Visited.insert(UseMI).second)
       continue;
 
     SmallVector<unsigned,8> Ops;
@@ -1105,9 +1105,14 @@ bool RegisterCoalescer::joinCopy(MachineInstr *CopyMI, bool &Again) {
       return false;
     }
   } else {
+    // When possible, let DstReg be the larger interval.
+    if (!CP.isPartial() && LIS->getInterval(CP.getSrcReg()).size() >
+                           LIS->getInterval(CP.getDstReg()).size())
+      CP.flip();
+
     DEBUG({
-      dbgs() << "\tConsidering merging to " << CP.getNewRC()->getName()
-             << " with ";
+      dbgs() << "\tConsidering merging to "
+             << TRI->getRegClassName(CP.getNewRC()) << " with ";
       if (CP.getDstIdx() && CP.getSrcIdx())
         dbgs() << PrintReg(CP.getDstReg()) << " in "
                << TRI->getSubRegIndexName(CP.getDstIdx()) << " and "
@@ -1117,11 +1122,6 @@ bool RegisterCoalescer::joinCopy(MachineInstr *CopyMI, bool &Again) {
         dbgs() << PrintReg(CP.getSrcReg(), TRI) << " in "
                << PrintReg(CP.getDstReg(), TRI, CP.getSrcIdx()) << '\n';
     });
-
-    // When possible, let DstReg be the larger interval.
-    if (!CP.isPartial() && LIS->getInterval(CP.getSrcReg()).size() >
-                           LIS->getInterval(CP.getDstReg()).size())
-      CP.flip();
   }
 
   // Okay, attempt to join these two intervals.  On failure, this returns false.
@@ -1186,7 +1186,9 @@ bool RegisterCoalescer::joinCopy(MachineInstr *CopyMI, bool &Again) {
   TRI->UpdateRegAllocHint(CP.getSrcReg(), CP.getDstReg(), *MF);
 
   DEBUG({
-    dbgs() << "\tJoined. Result = ";
+    dbgs() << "\tSuccess: " << PrintReg(CP.getSrcReg(), TRI, CP.getSrcIdx())
+           << " -> " << PrintReg(CP.getDstReg(), TRI, CP.getDstIdx()) << '\n';
+    dbgs() << "\tResult = ";
     if (CP.isPhys())
       dbgs() << PrintReg(CP.getDstReg(), TRI);
     else
@@ -2264,7 +2266,7 @@ bool RegisterCoalescer::runOnMachineFunction(MachineFunction &fn) {
       continue;
     if (MRI->recomputeRegClass(Reg, *TM)) {
       DEBUG(dbgs() << PrintReg(Reg) << " inflated to "
-                   << MRI->getRegClass(Reg)->getName() << '\n');
+                   << TRI->getRegClassName(MRI->getRegClass(Reg)) << '\n');
       ++NumInflated;
     }
   }

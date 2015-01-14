@@ -42,11 +42,11 @@ enum class EncodingType {
 }
 
 enum class ExceptionHandling {
-  None,     /// No exception support
-  DwarfCFI, /// DWARF-like instruction based exceptions
-  SjLj,     /// setjmp/longjmp based exceptions
-  ARM,      /// ARM EHABI
-  WinEH,    /// Windows Exception Handling
+  None,         /// No exception support
+  DwarfCFI,     /// DWARF-like instruction based exceptions
+  SjLj,         /// setjmp/longjmp based exceptions
+  ARM,          /// ARM EHABI
+  ItaniumWinEH, /// Itanium EH built on Windows unwind info (.pdata and .xdata)
 };
 
 namespace LCOMM {
@@ -91,11 +91,6 @@ protected:
   /// list.  This directive is only emitted in Static relocation model.  Default
   /// is false.
   bool HasStaticCtorDtorReferenceInStaticMode;
-
-  /// True if the linker has a bug and requires that the debug_line section be
-  /// of a minimum size. In practice such a linker requires a non-empty line
-  /// sequence if a file is present.  Default to false.
-  bool LinkerRequiresNonEmptyDwarfLines;
 
   /// This is the maximum possible length of an instruction, which is needed to
   /// compute the size of an inline asm.  Defaults to 4.
@@ -220,7 +215,8 @@ protected:
 
   //===--- Global Variable Emission Directives --------------------------===//
 
-  /// This is the directive used to declare a global entity.  Defaults to NULL.
+  /// This is the directive used to declare a global entity. Defaults to
+  /// ".globl".
   const char *GlobalDirective;
 
   /// True if the expression
@@ -268,6 +264,9 @@ protected:
   /// True if this target supports the MachO .no_dead_strip directive.  Defaults
   /// to false.
   bool HasNoDeadStrip;
+
+  /// Used to declare a global as being a weak symbol. Defaults to ".weak".
+  const char *WeakDirective;
 
   /// This directive, if non-null, is used to declare a global as being a weak
   /// undefined symbol.  Defaults to NULL.
@@ -405,9 +404,6 @@ public:
   bool hasStaticCtorDtorReferenceInStaticMode() const {
     return HasStaticCtorDtorReferenceInStaticMode;
   }
-  bool getLinkerRequiresNonEmptyDwarfLines() const {
-    return LinkerRequiresNonEmptyDwarfLines;
-  }
   unsigned getMaxInstLength() const { return MaxInstLength; }
   unsigned getMinInstAlignment() const { return MinInstAlignment; }
   bool getDollarIsPC() const { return DollarIsPC; }
@@ -460,6 +456,7 @@ public:
   bool hasSingleParameterDotFile() const { return HasSingleParameterDotFile; }
   bool hasIdentDirective() const { return HasIdentDirective; }
   bool hasNoDeadStrip() const { return HasNoDeadStrip; }
+  const char *getWeakDirective() const { return WeakDirective; }
   const char *getWeakRefDirective() const { return WeakRefDirective; }
   bool hasWeakDefDirective() const { return HasWeakDefDirective; }
   bool hasWeakDefCanBeHiddenDirective() const {
@@ -480,12 +477,16 @@ public:
   }
   ExceptionHandling getExceptionHandlingType() const { return ExceptionsType; }
   WinEH::EncodingType getWinEHEncodingType() const { return WinEHEncodingType; }
-  bool isExceptionHandlingDwarf() const {
+
+  /// Return true if the exception handling type uses the language-specific data
+  /// area (LSDA) format specified by the Itanium C++ ABI.
+  bool usesItaniumLSDAForExceptions() const {
     return (ExceptionsType == ExceptionHandling::DwarfCFI ||
             ExceptionsType == ExceptionHandling::ARM ||
-            // Windows handler data still uses DWARF LSDA encoding.
-            ExceptionsType == ExceptionHandling::WinEH);
+            // This Windows EH type uses the Itanium LSDA encoding.
+            ExceptionsType == ExceptionHandling::ItaniumWinEH);
   }
+
   bool doesDwarfUseRelocationsAcrossSections() const {
     return DwarfUsesRelocationsAcrossSections;
   }

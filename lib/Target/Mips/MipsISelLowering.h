@@ -210,6 +210,7 @@ namespace llvm {
   //===--------------------------------------------------------------------===//
   class MipsFunctionInfo;
   class MipsSubtarget;
+  class MipsCCState;
 
   class MipsTargetLowering : public TargetLowering  {
     bool isMicroMips;
@@ -258,6 +259,8 @@ namespace llvm {
         return strcmp(S1, S2) < 0;
       }
     };
+
+    void HandleByVal(CCState *, unsigned &, unsigned) const override;
 
   protected:
     SDValue getGlobalReg(SelectionDAG &DAG, EVT Ty) const;
@@ -329,6 +332,21 @@ namespace llvm {
                          DAG.getNode(MipsISD::Lo, DL, Ty, Lo));
     }
 
+    // This method creates the following nodes, which are necessary for
+    // computing a symbol's address using gp-relative addressing:
+    //
+    // (add $gp, %gp_rel(sym))
+    template<class NodeTy>
+    SDValue getAddrGPRel(NodeTy *N, EVT Ty, SelectionDAG &DAG) const {
+      SDLoc DL(N);
+      assert(Ty == MVT::i32);
+      SDValue GPRel = getTargetNode(N, Ty, DAG, MipsII::MO_GPREL);
+      return DAG.getNode(ISD::ADD, DL, Ty,
+                         DAG.getRegister(Mips::GP, Ty),
+                         DAG.getNode(MipsISD::GPRel, DL, DAG.getVTList(Ty),
+                                     GPRel));
+    }
+
     /// This function fills Ops, which is the list of operands that will later
     /// be used when a function call node is created. It also generates
     /// copyToReg nodes to set up argument registers.
@@ -339,88 +357,6 @@ namespace llvm {
                 bool IsCallReloc, CallLoweringInfo &CLI, SDValue Callee,
                 SDValue Chain) const;
 
-    /// ByValArgInfo - Byval argument information.
-    struct ByValArgInfo {
-      unsigned FirstIdx; // Index of the first register used.
-      unsigned NumRegs;  // Number of registers used for this argument.
-      unsigned Address;  // Offset of the stack area used to pass this argument.
-
-      ByValArgInfo() : FirstIdx(0), NumRegs(0), Address(0) {}
-    };
-
-    /// MipsCC - This class provides methods used to analyze formal and call
-    /// arguments and inquire about calling convention information.
-    class MipsCC {
-    public:
-      enum SpecialCallingConvType {
-        Mips16RetHelperConv, NoSpecialCallingConv
-      };
-
-      MipsCC(CallingConv::ID CallConv, const MipsSubtarget &Subtarget,
-             CCState &Info,
-             SpecialCallingConvType SpecialCallingConv = NoSpecialCallingConv);
-
-      void analyzeCallOperands(const SmallVectorImpl<ISD::OutputArg> &Outs,
-                               bool IsVarArg, bool IsSoftFloat,
-                               const SDNode *CallNode,
-                               std::vector<ArgListEntry> &FuncArgs);
-      void analyzeFormalArguments(const SmallVectorImpl<ISD::InputArg> &Ins,
-                                  bool IsSoftFloat,
-                                  Function::const_arg_iterator FuncArg);
-
-      const CCState &getCCInfo() const { return CCInfo; }
-
-      /// hasByValArg - Returns true if function has byval arguments.
-      bool hasByValArg() const { return !ByValArgs.empty(); }
-
-      /// reservedArgArea - The size of the area the caller reserves for
-      /// register arguments. This is 16-byte if ABI is O32.
-      unsigned reservedArgArea() const;
-
-      /// Return pointer to array of integer argument registers.
-      const ArrayRef<MCPhysReg> intArgRegs() const;
-
-      typedef SmallVectorImpl<ByValArgInfo>::const_iterator byval_iterator;
-      byval_iterator byval_begin() const { return ByValArgs.begin(); }
-      byval_iterator byval_end() const { return ByValArgs.end(); }
-
-    private:
-      void handleByValArg(unsigned ValNo, MVT ValVT, MVT LocVT,
-                          CCValAssign::LocInfo LocInfo,
-                          ISD::ArgFlagsTy ArgFlags);
-
-      /// useRegsForByval - Returns true if the calling convention allows the
-      /// use of registers to pass byval arguments.
-      bool useRegsForByval() const { return CallConv != CallingConv::Fast; }
-
-      /// Return the function that analyzes fixed argument list functions.
-      llvm::CCAssignFn *fixedArgFn() const;
-
-      /// Return the function that analyzes variable argument list functions.
-      llvm::CCAssignFn *varArgFn() const;
-
-      const MCPhysReg *shadowRegs() const;
-
-      void allocateRegs(ByValArgInfo &ByVal, unsigned ByValSize,
-                        unsigned Align);
-
-      /// Return the type of the register which is used to pass an argument or
-      /// return a value. This function returns f64 if the argument is an i64
-      /// value which has been generated as a result of softening an f128 value.
-      /// Otherwise, it just returns VT.
-      MVT getRegVT(MVT VT, const Type *OrigTy, const SDNode *CallNode,
-                   bool IsSoftFloat) const;
-
-      template<typename Ty>
-      void analyzeReturn(const SmallVectorImpl<Ty> &RetVals, bool IsSoftFloat,
-                         const SDNode *CallNode, const Type *RetTy) const;
-
-      CCState &CCInfo;
-      CallingConv::ID CallConv;
-      const MipsSubtarget &Subtarget;
-      SpecialCallingConvType SpecialCallingConv;
-      SmallVector<ByValArgInfo, 2> ByValArgs;
-    };
   protected:
     SDValue lowerLOAD(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerSTORE(SDValue Op, SelectionDAG &DAG) const;
@@ -448,8 +384,6 @@ namespace llvm {
     // Create a TargetConstantPool node.
     SDValue getTargetNode(ConstantPoolSDNode *N, EVT Ty, SelectionDAG &DAG,
                           unsigned Flag) const;
-
-    MipsCC::SpecialCallingConvType getSpecialCallingConv(SDValue Callee) const;
 
     // Lower Operand helpers
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
@@ -486,33 +420,34 @@ namespace llvm {
     /// isEligibleForTailCallOptimization - Check whether the call is eligible
     /// for tail call optimization.
     virtual bool
-    isEligibleForTailCallOptimization(const MipsCC &MipsCCInfo,
+    isEligibleForTailCallOptimization(const CCState &CCInfo,
                                       unsigned NextStackOffset,
-                                      const MipsFunctionInfo& FI) const = 0;
+                                      const MipsFunctionInfo &FI) const = 0;
 
     /// copyByValArg - Copy argument registers which were used to pass a byval
     /// argument to the stack. Create a stack frame object for the byval
     /// argument.
-    void copyByValRegs(SDValue Chain, SDLoc DL,
-                       std::vector<SDValue> &OutChains, SelectionDAG &DAG,
-                       const ISD::ArgFlagsTy &Flags,
+    void copyByValRegs(SDValue Chain, SDLoc DL, std::vector<SDValue> &OutChains,
+                       SelectionDAG &DAG, const ISD::ArgFlagsTy &Flags,
                        SmallVectorImpl<SDValue> &InVals,
-                       const Argument *FuncArg,
-                       const MipsCC &CC, const ByValArgInfo &ByVal) const;
+                       const Argument *FuncArg, unsigned FirstReg,
+                       unsigned LastReg, const CCValAssign &VA,
+                       MipsCCState &State) const;
 
     /// passByValArg - Pass a byval argument in registers or on stack.
     void passByValArg(SDValue Chain, SDLoc DL,
-                      std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
+                      std::deque<std::pair<unsigned, SDValue>> &RegsToPass,
                       SmallVectorImpl<SDValue> &MemOpChains, SDValue StackPtr,
                       MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg,
-                      const MipsCC &CC, const ByValArgInfo &ByVal,
-                      const ISD::ArgFlagsTy &Flags, bool isLittle) const;
+                      unsigned FirstReg, unsigned LastReg,
+                      const ISD::ArgFlagsTy &Flags, bool isLittle,
+                      const CCValAssign &VA) const;
 
     /// writeVarArgRegs - Write variable function arguments passed in registers
     /// to the stack. Also create a stack frame object for the first variable
     /// argument.
-    void writeVarArgRegs(std::vector<SDValue> &OutChains, const MipsCC &CC,
-                         SDValue Chain, SDLoc DL, SelectionDAG &DAG) const;
+    void writeVarArgRegs(std::vector<SDValue> &OutChains, SDValue Chain,
+                         SDLoc DL, SelectionDAG &DAG, CCState &State) const;
 
     SDValue
       LowerFormalArguments(SDValue Chain,

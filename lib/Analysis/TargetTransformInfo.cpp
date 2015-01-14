@@ -403,6 +403,10 @@ struct NoTTI final : ImmutablePass, TargetTransformInfo {
     case Intrinsic::objectsize:
     case Intrinsic::ptr_annotation:
     case Intrinsic::var_annotation:
+    case Intrinsic::experimental_gc_result_int:
+    case Intrinsic::experimental_gc_result_float:
+    case Intrinsic::experimental_gc_result_ptr:
+    case Intrinsic::experimental_gc_relocate:
       // These intrinsics don't actually represent code after lowering.
       return TCC_Free;
     }
@@ -475,6 +479,8 @@ struct NoTTI final : ImmutablePass, TargetTransformInfo {
     // These will all likely lower to a single selection DAG node.
     if (Name == "copysign" || Name == "copysignf" || Name == "copysignl" ||
         Name == "fabs" || Name == "fabsf" || Name == "fabsl" || Name == "sin" ||
+        Name == "fmin" || Name == "fminf" || Name == "fminl" ||
+        Name == "fmax" || Name == "fmaxf" || Name == "fmaxl" ||
         Name == "sinf" || Name == "sinl" || Name == "cos" || Name == "cosf" ||
         Name == "cosl" || Name == "sqrt" || Name == "sqrtf" || Name == "sqrtl")
       return false;

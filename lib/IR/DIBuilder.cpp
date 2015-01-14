@@ -64,7 +64,7 @@ void DIBuilder::finalize() {
   // TrackingVHs back into Values.
   SmallPtrSet<Value *, 16> RetainSet;
   for (unsigned I = 0, E = AllRetainTypes.size(); I < E; I++)
-    if (RetainSet.insert(AllRetainTypes[I]))
+    if (RetainSet.insert(AllRetainTypes[I]).second)
       RetainValues.push_back(AllRetainTypes[I]);
   DIArray RetainTypes = getOrCreateArray(RetainValues);
   DIType(TempRetainTypes).replaceAllUsesWith(RetainTypes);
@@ -190,10 +190,13 @@ DIImportedEntity DIBuilder::createImportedModule(DIScope Context,
 }
 
 DIImportedEntity DIBuilder::createImportedDeclaration(DIScope Context,
-                                                      DIScope Decl,
+                                                      DIDescriptor Decl,
                                                       unsigned Line, StringRef Name) {
+  // Make sure to use the unique identifier based metadata reference for
+  // types that have one.
+  Value *V = Decl.isType() ? static_cast<Value*>(DIType(Decl).getRef()) : Decl;
   return ::createImportedModule(VMContext, dwarf::DW_TAG_imported_declaration,
-                                Context, Decl.getRef(), Line, Name,
+                                Context, V, Line, Name,
                                 AllImportedModules);
 }
 
@@ -403,11 +406,11 @@ DIDerivedType DIBuilder::createMemberType(DIDescriptor Scope, StringRef Name,
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
 
-DIDerivedType
-DIBuilder::createStaticMemberType(DIDescriptor Scope, StringRef Name,
-                                  DIFile File, unsigned LineNumber,
-                                  DIType Ty, unsigned Flags,
-                                  llvm::Value *Val) {
+DIDerivedType DIBuilder::createStaticMemberType(DIDescriptor Scope,
+                                                StringRef Name, DIFile File,
+                                                unsigned LineNumber, DIType Ty,
+                                                unsigned Flags,
+                                                llvm::Constant *Val) {
   // TAG_member is encoded in DIDerivedType format.
   Flags |= DIDescriptor::FlagStaticMember;
   Value *Elts[] = {HeaderBuilder::get(dwarf::DW_TAG_member)
@@ -473,12 +476,9 @@ DIBuilder::createTemplateTypeParameter(DIDescriptor Context, StringRef Name,
   return DITemplateTypeParameter(MDNode::get(VMContext, Elts));
 }
 
-DITemplateValueParameter
-DIBuilder::createTemplateValueParameter(unsigned Tag, DIDescriptor Context,
-                                        StringRef Name, DIType Ty,
-                                        Value *Val, MDNode *File,
-                                        unsigned LineNo,
-                                        unsigned ColumnNo) {
+static DITemplateValueParameter createTemplateValueParameterHelper(
+    LLVMContext &VMContext, unsigned Tag, DIDescriptor Context, StringRef Name,
+    DIType Ty, Value *Val, MDNode *File, unsigned LineNo, unsigned ColumnNo) {
   Value *Elts[] = {
       HeaderBuilder::get(Tag).concat(Name).concat(LineNo).concat(ColumnNo).get(
           VMContext),
@@ -489,12 +489,11 @@ DIBuilder::createTemplateValueParameter(unsigned Tag, DIDescriptor Context,
 
 DITemplateValueParameter
 DIBuilder::createTemplateValueParameter(DIDescriptor Context, StringRef Name,
-                                        DIType Ty, Value *Val,
-                                        MDNode *File, unsigned LineNo,
-                                        unsigned ColumnNo) {
-  return createTemplateValueParameter(dwarf::DW_TAG_template_value_parameter,
-                                      Context, Name, Ty, Val, File, LineNo,
-                                      ColumnNo);
+                                        DIType Ty, Constant *Val, MDNode *File,
+                                        unsigned LineNo, unsigned ColumnNo) {
+  return createTemplateValueParameterHelper(
+      VMContext, dwarf::DW_TAG_template_value_parameter, Context, Name, Ty, Val,
+      File, LineNo, ColumnNo);
 }
 
 DITemplateValueParameter
@@ -502,8 +501,8 @@ DIBuilder::createTemplateTemplateParameter(DIDescriptor Context, StringRef Name,
                                            DIType Ty, StringRef Val,
                                            MDNode *File, unsigned LineNo,
                                            unsigned ColumnNo) {
-  return createTemplateValueParameter(
-      dwarf::DW_TAG_GNU_template_template_param, Context, Name, Ty,
+  return createTemplateValueParameterHelper(
+      VMContext, dwarf::DW_TAG_GNU_template_template_param, Context, Name, Ty,
       MDString::get(VMContext, Val), File, LineNo, ColumnNo);
 }
 
@@ -512,9 +511,9 @@ DIBuilder::createTemplateParameterPack(DIDescriptor Context, StringRef Name,
                                        DIType Ty, DIArray Val,
                                        MDNode *File, unsigned LineNo,
                                        unsigned ColumnNo) {
-  return createTemplateValueParameter(dwarf::DW_TAG_GNU_template_parameter_pack,
-                                      Context, Name, Ty, Val, File, LineNo,
-                                      ColumnNo);
+  return createTemplateValueParameterHelper(
+      VMContext, dwarf::DW_TAG_GNU_template_parameter_pack, Context, Name, Ty,
+      Val, File, LineNo, ColumnNo);
 }
 
 DICompositeType DIBuilder::createClassType(DIDescriptor Context, StringRef Name,
@@ -832,12 +831,18 @@ DISubrange DIBuilder::getOrCreateSubrange(int64_t Lo, int64_t Count) {
   return DISubrange(MDNode::get(VMContext, Elts));
 }
 
-static DIGlobalVariable
-createGlobalVariableHelper(LLVMContext &VMContext, DIDescriptor Context,
-                           StringRef Name, StringRef LinkageName, DIFile F,
-                           unsigned LineNumber, DITypeRef Ty, bool isLocalToUnit,
-                           Value *Val, MDNode *Decl, bool isDefinition,
-                           std::function<MDNode *(ArrayRef<Value *>)> CreateFunc) {
+static DIGlobalVariable createGlobalVariableHelper(
+    LLVMContext &VMContext, DIDescriptor Context, StringRef Name,
+    StringRef LinkageName, DIFile F, unsigned LineNumber, DITypeRef Ty,
+    bool isLocalToUnit, Constant *Val, MDNode *Decl, bool isDefinition,
+    std::function<MDNode *(ArrayRef<Value *>)> CreateFunc) {
+
+  MDNode *TheCtx = getNonCompileUnitScope(Context);
+  if (DIScope(TheCtx).isCompositeType()) {
+    assert(!DICompositeType(TheCtx).getIdentifier() &&
+           "Context of a global variable should not be a type with identifier");
+  }
+
   Value *Elts[] = {HeaderBuilder::get(dwarf::DW_TAG_variable)
                        .concat(Name)
                        .concat(Name)
@@ -846,19 +851,16 @@ createGlobalVariableHelper(LLVMContext &VMContext, DIDescriptor Context,
                        .concat(isLocalToUnit)
                        .concat(isDefinition)
                        .get(VMContext),
-                   getNonCompileUnitScope(Context), F, Ty, Val,
+                   TheCtx, F, Ty, Val,
                    DIDescriptor(Decl)};
 
   return DIGlobalVariable(CreateFunc(Elts));
 }
 
-DIGlobalVariable DIBuilder::createGlobalVariable(DIDescriptor Context,
-                                                 StringRef Name,
-                                                 StringRef LinkageName,
-                                                 DIFile F, unsigned LineNumber,
-                                                 DITypeRef Ty,
-                                                 bool isLocalToUnit,
-                                                 Value *Val, MDNode *Decl) {
+DIGlobalVariable DIBuilder::createGlobalVariable(
+    DIDescriptor Context, StringRef Name, StringRef LinkageName, DIFile F,
+    unsigned LineNumber, DITypeRef Ty, bool isLocalToUnit, Constant *Val,
+    MDNode *Decl) {
   return createGlobalVariableHelper(VMContext, Context, Name, LinkageName, F,
                                     LineNumber, Ty, isLocalToUnit, Val, Decl, true,
                                     [&] (ArrayRef<Value *> Elts) -> MDNode * {
@@ -868,14 +870,10 @@ DIGlobalVariable DIBuilder::createGlobalVariable(DIDescriptor Context,
                                     });
 }
 
-DIGlobalVariable
-DIBuilder::createTempGlobalVariableFwdDecl(DIDescriptor Context,
-                                           StringRef Name,
-                                           StringRef LinkageName,
-                                           DIFile F, unsigned LineNumber,
-                                           DITypeRef Ty,
-                                           bool isLocalToUnit,
-                                           Value *Val, MDNode *Decl) {
+DIGlobalVariable DIBuilder::createTempGlobalVariableFwdDecl(
+    DIDescriptor Context, StringRef Name, StringRef LinkageName, DIFile F,
+    unsigned LineNumber, DITypeRef Ty, bool isLocalToUnit, Constant *Val,
+    MDNode *Decl) {
   return createGlobalVariableHelper(VMContext, Context, Name, LinkageName, F,
                                     LineNumber, Ty, isLocalToUnit, Val, Decl, false,
                                     [&] (ArrayRef<Value *> Elts) {
@@ -946,11 +944,10 @@ createFunctionHelper(LLVMContext &VMContext, DIDescriptor Context, StringRef Nam
                      StringRef LinkageName, DIFile File, unsigned LineNo,
                      DICompositeType Ty, bool isLocalToUnit, bool isDefinition,
                      unsigned ScopeLine, unsigned Flags, bool isOptimized,
-                     Function *Fn, MDNode *TParams, MDNode *Decl,
+                     Function *Fn, MDNode *TParams, MDNode *Decl, MDNode *Vars,
                      std::function<MDNode *(ArrayRef<Value *>)> CreateFunc) {
   assert(Ty.getTag() == dwarf::DW_TAG_subroutine_type &&
          "function types should be subroutines");
-  Value *TElts[] = {HeaderBuilder::get(DW_TAG_base_type).get(VMContext)};
   Value *Elts[] = {
       HeaderBuilder::get(dwarf::DW_TAG_subprogram)
           .concat(Name)
@@ -966,7 +963,7 @@ createFunctionHelper(LLVMContext &VMContext, DIDescriptor Context, StringRef Nam
           .concat(ScopeLine)
           .get(VMContext),
       File.getFileNode(), DIScope(getNonCompileUnitScope(Context)).getRef(), Ty,
-      nullptr, Fn, TParams, Decl, MDNode::getTemporary(VMContext, TElts)};
+      nullptr, Fn, TParams, Decl, Vars};
 
   DISubprogram S(CreateFunc(Elts));
   assert(S.isSubprogram() &&
@@ -985,6 +982,7 @@ DISubprogram DIBuilder::createFunction(DIDescriptor Context, StringRef Name,
   return createFunctionHelper(VMContext, Context, Name, LinkageName, File,
                               LineNo, Ty, isLocalToUnit, isDefinition, ScopeLine,
                               Flags, isOptimized, Fn, TParams, Decl,
+                              MDNode::getTemporary(VMContext, None),
                               [&] (ArrayRef<Value *> Elts) -> MDNode *{
                                 MDNode *Node = MDNode::get(VMContext, Elts);
                                 // Create a named metadata so that we
@@ -1005,7 +1003,7 @@ DIBuilder::createTempFunctionFwdDecl(DIDescriptor Context, StringRef Name,
                                      MDNode *TParams, MDNode *Decl) {
   return createFunctionHelper(VMContext, Context, Name, LinkageName, File,
                               LineNo, Ty, isLocalToUnit, isDefinition, ScopeLine,
-                              Flags, isOptimized, Fn, TParams, Decl,
+                              Flags, isOptimized, Fn, TParams, Decl, nullptr,
                               [&] (ArrayRef<Value *> Elts) {
                                 return MDNode::getTemporary(VMContext, Elts);
                               });

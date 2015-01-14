@@ -93,19 +93,27 @@ bool SILowerI1Copies::runOnMachineFunction(MachineFunction &MF) {
 
       if (MI.getOpcode() == AMDGPU::V_AND_I1) {
         I1Defs.push_back(MI.getOperand(0).getReg());
-        MI.setDesc(TII->get(AMDGPU::V_AND_B32_e32));
+        MI.setDesc(TII->get(AMDGPU::V_AND_B32_e64));
         continue;
       }
 
       if (MI.getOpcode() == AMDGPU::V_OR_I1) {
         I1Defs.push_back(MI.getOperand(0).getReg());
-        MI.setDesc(TII->get(AMDGPU::V_OR_B32_e32));
+        MI.setDesc(TII->get(AMDGPU::V_OR_B32_e64));
         continue;
       }
 
       if (MI.getOpcode() == AMDGPU::V_XOR_I1) {
         I1Defs.push_back(MI.getOperand(0).getReg());
-        MI.setDesc(TII->get(AMDGPU::V_XOR_B32_e32));
+        MI.setDesc(TII->get(AMDGPU::V_XOR_B32_e64));
+        continue;
+      }
+
+      if (MI.getOpcode() == AMDGPU::IMPLICIT_DEF) {
+        unsigned Reg = MI.getOperand(0).getReg();
+        const TargetRegisterClass *RC = MRI.getRegClass(Reg);
+        if (RC == &AMDGPU::VReg_1RegClass)
+          MRI.setRegClass(Reg, &AMDGPU::SReg_64RegClass);
         continue;
       }
 

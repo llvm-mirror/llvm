@@ -20,7 +20,6 @@
 ; RUN: llc < %s -mtriple=armv7-linux-gnueabi -mcpu=cortex-a9 -float-abi=hard | FileCheck %s --check-prefix=CORTEX-A9-HARD
 ; RUN: llc < %s -mtriple=armv7-linux-gnueabi -mcpu=cortex-a12 | FileCheck %s --check-prefix=CORTEX-A12-DEFAULT
 ; RUN: llc < %s -mtriple=armv7-linux-gnueabi -mcpu=cortex-a12 -mattr=-vfp2 | FileCheck %s --check-prefix=CORTEX-A12-NOFPU
-; RUN: llc < %s -mtriple=armv7-linux-gnueabi -mcpu=cortex-a9-mp | FileCheck %s --check-prefix=CORTEX-A9-MP
 ; RUN: llc < %s -mtriple=armv7-linux-gnueabi -mcpu=cortex-a15 | FileCheck %s --check-prefix=CORTEX-A15
 ; RUN: llc < %s -mtriple=armv7-linux-gnueabi -mcpu=cortex-a17 | FileCheck %s --check-prefix=CORTEX-A17-DEFAULT
 ; RUN: llc < %s -mtriple=armv7-linux-gnueabi -mcpu=cortex-a17 -mattr=-vfp2 | FileCheck %s --check-prefix=CORTEX-A17-NOFPU
@@ -49,26 +48,35 @@
 ; ARMv8a (AArch32)
 ; RUN: llc < %s -mtriple=armv8-none-linux-gnueabi -mcpu=cortex-a57 -arm-no-strict-align | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; RUN: llc < %s -mtriple=armv8-none-linux-gnueabi -mcpu=cortex-a57 -arm-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=armv8-none-linux-gnueabi -mcpu=cortex-a57 | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; ARMv7a
 ; RUN: llc < %s -mtriple=armv7-none-linux-gnueabi -mcpu=cortex-a7 -arm-no-strict-align | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; RUN: llc < %s -mtriple=armv7-none-linux-gnueabi -mcpu=cortex-a7 -arm-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=armv7-none-linux-gnueabi -mcpu=cortex-a7 | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; ARMv7r
 ; RUN: llc < %s -mtriple=armv7r-none-linux-gnueabi -mcpu=cortex-r5 -arm-no-strict-align | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; RUN: llc < %s -mtriple=armv7r-none-linux-gnueabi -mcpu=cortex-r5 -arm-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=armv7r-none-linux-gnueabi -mcpu=cortex-r5 | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; ARMv7m
 ; RUN: llc < %s -mtriple=thumbv7m-none-linux-gnueabi -mcpu=cortex-m3 -arm-no-strict-align | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; RUN: llc < %s -mtriple=thumbv7m-none-linux-gnueabi -mcpu=cortex-m3 -arm-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=thumbv7m-none-linux-gnueabi -mcpu=cortex-m3 | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; ARMv6
 ; RUN: llc < %s -mtriple=armv6-none-netbsd-gnueabi -mcpu=arm1136j-s | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; RUN: llc < %s -mtriple=armv6-none-linux-gnueabi -mcpu=arm1136j-s | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=armv6-none-linux-gnueabi -mcpu=arm1136j-s -arm-no-strict-align | FileCheck %s --check-prefix=NO-STRICT-ALIGN
+; RUN: llc < %s -mtriple=armv6-none-linux-gnueabi -mcpu=arm1136j-s -arm-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
 ; ARMv6m
 ; RUN: llc < %s -mtriple=thumb-none-linux-gnueabi -arm-no-strict-align -mcpu=cortex-m0 | FileCheck %s --check-prefix=STRICT-ALIGN
 ; RUN: llc < %s -mtriple=thumb-none-linux-gnueabi -arm-strict-align -mcpu=cortex-m0 | FileCheck %s --check-prefix=STRICT-ALIGN
 ; RUN: llc < %s -mtriple=thumbv6m-none-linux-gnueabi -arm-no-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
 ; RUN: llc < %s -mtriple=thumbv6m-none-linux-gnueabi -arm-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=thumb-none-linux-gnueabi -mcpu=cortex-m0 | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=thumb-none-linux-gnueabi -mcpu=cortex-m0 | FileCheck %s --check-prefix=STRICT-ALIGN
 ; ARMv5
 ; RUN: llc < %s -mtriple=armv5-none-linux-gnueabi -mcpu=arm1022e -arm-no-strict-align | FileCheck %s --check-prefix=NO-STRICT-ALIGN
 ; RUN: llc < %s -mtriple=armv5-none-linux-gnueabi -mcpu=arm1022e -arm-strict-align | FileCheck %s --check-prefix=STRICT-ALIGN
+; RUN: llc < %s -mtriple=armv5-none-linux-gnueabi -mcpu=arm1022e | FileCheck %s --check-prefix=STRICT-ALIGN
 
 ; XSCALE:      .eabi_attribute 6, 5
 ; XSCALE:      .eabi_attribute 8, 1
@@ -292,7 +300,7 @@
 ; CORTEX-A9-SOFT-NOT:  .eabi_attribute 27
 ; CORTEX-A9-SOFT-NOT:  .eabi_attribute 28
 ; CORTEX-A9-SOFT:  .eabi_attribute 36, 1
-; CORTEX-A9-SOFT-NOT:  .eabi_attribute 42
+; CORTEX-A9-SOFT:  .eabi_attribute 42, 1
 ; CORTEX-A9-SOFT:  .eabi_attribute 68, 1
 
 ; CORTEX-A9-HARD:  .cpu cortex-a9
@@ -309,25 +317,8 @@
 ; CORTEX-A9-HARD-NOT:  .eabi_attribute 27
 ; CORTEX-A9-HARD:  .eabi_attribute 28, 1
 ; CORTEX-A9-HARD:  .eabi_attribute 36, 1
-; CORTEX-A9-HARD-NOT:  .eabi_attribute 42
+; CORTEX-A9-HARD:  .eabi_attribute 42, 1
 ; CORTEX-A9-HARD:  .eabi_attribute 68, 1
-
-; CORTEX-A9-MP:  .cpu cortex-a9-mp
-; CORTEX-A9-MP:  .eabi_attribute 6, 10
-; CORTEX-A9-MP:  .eabi_attribute 7, 65
-; CORTEX-A9-MP:  .eabi_attribute 8, 1
-; CORTEX-A9-MP:  .eabi_attribute 9, 2
-; CORTEX-A9-MP:  .fpu neon
-; CORTEX-A9-MP:  .eabi_attribute 20, 1
-; CORTEX-A9-MP:  .eabi_attribute 21, 1
-; CORTEX-A9-MP:  .eabi_attribute 23, 3
-; CORTEX-A9-MP:  .eabi_attribute 24, 1
-; CORTEX-A9-MP:  .eabi_attribute 25, 1
-; CORTEX-A9-MP-NOT:  .eabi_attribute 27
-; CORTEX-A9-MP-NOT:  .eabi_attribute 28
-; CORTEX-A9-MP:  .eabi_attribute 36, 1
-; CORTEX-A9-MP:  .eabi_attribute 42, 1
-; CORTEX-A9-MP:  .eabi_attribute 68, 1
 
 ; CORTEX-A12-DEFAULT:  .cpu cortex-a12
 ; CORTEX-A12-DEFAULT:  .eabi_attribute 6, 10

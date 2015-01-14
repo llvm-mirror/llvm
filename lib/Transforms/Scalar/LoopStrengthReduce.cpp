@@ -762,7 +762,7 @@ static bool isHighCostExpansion(const SCEV *S,
                                Processed, SE);
   }
 
-  if (!Processed.insert(S))
+  if (!Processed.insert(S).second)
     return false;
 
   if (const SCEVAddExpr *Add = dyn_cast<SCEVAddExpr>(S)) {
@@ -975,7 +975,7 @@ void Cost::RatePrimaryRegister(const SCEV *Reg,
     Lose();
     return;
   }
-  if (Regs.insert(Reg)) {
+  if (Regs.insert(Reg).second) {
     RateRegister(Reg, Regs, L, SE, DT);
     if (LoserRegs && isLoser())
       LoserRegs->insert(Reg);
@@ -2802,7 +2802,7 @@ void LSRInstance::CollectChains() {
       User::op_iterator IVOpIter = findIVOperand(I->op_begin(), IVOpEnd, L, SE);
       while (IVOpIter != IVOpEnd) {
         Instruction *IVOpInst = cast<Instruction>(*IVOpIter);
-        if (UniqueOperands.insert(IVOpInst))
+        if (UniqueOperands.insert(IVOpInst).second)
           ChainInstruction(I, IVOpInst, ChainUsersVec);
         IVOpIter = findIVOperand(std::next(IVOpIter), IVOpEnd, L, SE);
       }
@@ -3116,10 +3116,14 @@ bool LSRInstance::InsertFormula(LSRUse &LU, unsigned LUIdx, const Formula &F) {
 void
 LSRInstance::CollectLoopInvariantFixupsAndFormulae() {
   SmallVector<const SCEV *, 8> Worklist(RegUses.begin(), RegUses.end());
-  SmallPtrSet<const SCEV *, 8> Inserted;
+  SmallPtrSet<const SCEV *, 32> Visited;
 
   while (!Worklist.empty()) {
     const SCEV *S = Worklist.pop_back_val();
+
+    // Don't process the same SCEV twice
+    if (!Visited.insert(S).second)
+      continue;
 
     if (const SCEVNAryExpr *N = dyn_cast<SCEVNAryExpr>(S))
       Worklist.append(N->op_begin(), N->op_end());
@@ -3129,7 +3133,6 @@ LSRInstance::CollectLoopInvariantFixupsAndFormulae() {
       Worklist.push_back(D->getLHS());
       Worklist.push_back(D->getRHS());
     } else if (const SCEVUnknown *US = dyn_cast<SCEVUnknown>(S)) {
-      if (!Inserted.insert(US)) continue;
       const Value *V = US->getValue();
       if (const Instruction *Inst = dyn_cast<Instruction>(V)) {
         // Look for instructions defined outside the loop.
@@ -3771,7 +3774,7 @@ void LSRInstance::GenerateCrossUseConstantOffsets() {
         for (int LUIdx = UsedByIndices.find_first(); LUIdx != -1;
              LUIdx = UsedByIndices.find_next(LUIdx))
           // Make a memo of this use, offset, and register tuple.
-          if (UniqueItems.insert(std::make_pair(LUIdx, Imm)))
+          if (UniqueItems.insert(std::make_pair(LUIdx, Imm)).second)
             WorkItems.push_back(WorkItem(LUIdx, Imm, OrigReg));
       }
     }

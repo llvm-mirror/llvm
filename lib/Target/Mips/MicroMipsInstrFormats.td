@@ -55,6 +55,19 @@ class ARITH_FM_MM16<bit funct> {
   let Inst{0}     = funct;
 }
 
+class ANDI_FM_MM16<bits<6> funct> {
+  bits<3> rd;
+  bits<3> rs;
+  bits<4> imm;
+
+  bits<16> Inst;
+
+  let Inst{15-10} = funct;
+  let Inst{9-7}   = rd;
+  let Inst{6-4}   = rs;
+  let Inst{3-0}   = imm;
+}
+
 class LOGIC_FM_MM16<bits<4> funct> {
   bits<3> rt;
   bits<3> rs;
@@ -65,6 +78,46 @@ class LOGIC_FM_MM16<bits<4> funct> {
   let Inst{9-6}   = funct;
   let Inst{5-3}   = rt;
   let Inst{2-0}   = rs;
+}
+
+class SHIFT_FM_MM16<bits<1> funct> {
+  bits<3> rd;
+  bits<3> rt;
+  bits<3> shamt;
+
+  bits<16> Inst;
+
+  let Inst{15-10} = 0x09;
+  let Inst{9-7}   = rd;
+  let Inst{6-4}   = rt;
+  let Inst{3-1}   = shamt;
+  let Inst{0}     = funct;
+}
+
+class ADDIUR2_FM_MM16 {
+  bits<3> rd;
+  bits<3> rs;
+  bits<3> imm;
+
+  bits<16> Inst;
+
+  let Inst{15-10} = 0x1b;
+  let Inst{9-7}   = rd;
+  let Inst{6-4}   = rs;
+  let Inst{3-1}   = imm;
+  let Inst{0}     = 0;
+}
+
+class LOAD_STORE_FM_MM16<bits<6> op> {
+  bits<3> rt;
+  bits<7> addr;
+
+  bits<16> Inst;
+
+  let Inst{15-10} = op;
+  let Inst{9-7}   = rt;
+  let Inst{6-4}   = addr{6-4};
+  let Inst{3-0}   = addr{3-0};
 }
 
 class ADDIUS5_FM_MM16 {
@@ -100,6 +153,17 @@ class MOVE_FM_MM16<bits<6> funct> {
   let Inst{4-0}   = rs;
 }
 
+class LI_FM_MM16 {
+  bits<3> rd;
+  bits<7> imm;
+
+  bits<16> Inst;
+
+  let Inst{15-10} = 0x3b;
+  let Inst{9-7}   = rd;
+  let Inst{6-0}   = imm;
+}
+
 class JALR_FM_MM16<bits<5> op> {
   bits<5> rs;
 
@@ -129,6 +193,27 @@ class JRADDIUSP_FM_MM16<bits<5> op> {
   let Inst{15-10} = 0x11;
   let Inst{9-5}   = op;
   let Inst{4-0}   = imm;
+}
+
+class ADDIUR1SP_FM_MM16 {
+  bits<3> rd;
+  bits<6> imm;
+
+  bits<16> Inst;
+
+  let Inst{15-10} = 0x1b;
+  let Inst{9-7}   = rd;
+  let Inst{6-1}   = imm;
+  let Inst{0}     = 1;
+}
+
+class BRKSDBBP16_FM_MM<bits<6> op> {
+  bits<4> code_;
+  bits<16> Inst;
+
+  let Inst{15-10} = 0x11;
+  let Inst{9-4}   = op;
+  let Inst{3-0}   = code_;
 }
 
 //===----------------------------------------------------------------------===//
@@ -700,4 +785,68 @@ class COP0_TLB_FM_MM<bits<10> op> : MMArch {
   let Inst{25-16} = 0x0;
   let Inst{15-6}  = op;
   let Inst{5-0}   = 0x3c;
+}
+
+class SDBBP_FM_MM : MMArch {
+  bits<10> code_;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0x0;
+  let Inst{25-16} = code_;
+  let Inst{15-6}  = 0x36d;
+  let Inst{5-0}   = 0x3c;
+}
+
+class RDHWR_FM_MM : MMArch {
+  bits<5> rt;
+  bits<5> rd;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0x0;
+  let Inst{25-21} = rt;
+  let Inst{20-16} = rd;
+  let Inst{15-6}  = 0x1ac;
+  let Inst{5-0}   = 0x3c;
+}
+
+class LWXS_FM_MM<bits<10> funct> {
+  bits<5> rd;
+  bits<5> base;
+  bits<5> index;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0x0;
+  let Inst{25-21} = index;
+  let Inst{20-16} = base;
+  let Inst{15-11} = rd;
+  let Inst{10}    = 0;
+  let Inst{9-0}   = funct;
+}
+
+class LWM_FM_MM<bits<4> funct> : MMArch {
+  bits<5> rt;
+  bits<21> addr;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0x8;
+  let Inst{25-21} = rt;
+  let Inst{20-16} = addr{20-16};
+  let Inst{15-12} = funct;
+  let Inst{11-0}  = addr{11-0};
+}
+
+class LWM_FM_MM16<bits<4> funct> : MMArch {
+  bits<2> rt;
+  bits<4> addr;
+
+  bits<16> Inst;
+
+  let Inst{15-10} = 0x11;
+  let Inst{9-6}   = funct;
+  let Inst{5-4}   = rt;
+  let Inst{3-0}   = addr;
 }

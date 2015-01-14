@@ -448,6 +448,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::CVTSD2SIrr,      X86::CVTSD2SIrm,          0 },
     { X86::CVTSS2SI64rr,    X86::CVTSS2SI64rm,        0 },
     { X86::CVTSS2SIrr,      X86::CVTSS2SIrm,          0 },
+    { X86::CVTDQ2PSrr,      X86::CVTDQ2PSrm,          TB_ALIGN_16 },
+    { X86::CVTPD2DQrr,      X86::CVTPD2DQrm,          TB_ALIGN_16 },
+    { X86::CVTPS2DQrr,      X86::CVTPS2DQrm,          TB_ALIGN_16 },
     { X86::CVTTPD2DQrr,     X86::CVTTPD2DQrm,         TB_ALIGN_16 },
     { X86::CVTTPS2DQrr,     X86::CVTTPS2DQrm,         TB_ALIGN_16 },
     { X86::Int_CVTTSD2SI64rr,X86::Int_CVTTSD2SI64rm,  0 },
@@ -526,6 +529,11 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VCVTSD2SIrr,     X86::VCVTSD2SIrm,         0 },
     { X86::VCVTSS2SI64rr,   X86::VCVTSS2SI64rm,       0 },
     { X86::VCVTSS2SIrr,     X86::VCVTSS2SIrm,         0 },
+    { X86::VCVTDQ2PSrr,     X86::VCVTDQ2PSrm,         0 },
+    { X86::VCVTPD2DQrr,     X86::VCVTPD2DQXrm,        0 },
+    { X86::VCVTPS2DQrr,     X86::VCVTPS2DQrm,         0 },
+    { X86::VCVTTPD2DQrr,    X86::VCVTTPD2DQXrm,       0 },
+    { X86::VCVTTPS2DQrr,    X86::VCVTTPS2DQrm,        0 },
     { X86::VMOV64toPQIrr,   X86::VMOVQI2PQIrm,        0 },
     { X86::VMOV64toSDrr,    X86::VMOV64toSDrm,        0 },
     { X86::VMOVAPDrr,       X86::VMOVAPDrm,           TB_ALIGN_16 },
@@ -559,6 +567,11 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VBROADCASTSSrr,  X86::VBROADCASTSSrm,      TB_NO_REVERSE },
 
     // AVX 256-bit foldable instructions
+    { X86::VCVTDQ2PSYrr,    X86::VCVTDQ2PSYrm,        0 },
+    { X86::VCVTPD2DQYrr,    X86::VCVTPD2DQYrm,        0 },
+    { X86::VCVTPS2DQYrr,    X86::VCVTPS2DQYrm,        0 },
+    { X86::VCVTTPD2DQYrr,   X86::VCVTTPD2DQYrm,       0 },
+    { X86::VCVTTPS2DQYrr,   X86::VCVTTPS2DQYrm,       0 },
     { X86::VMOVAPDYrr,      X86::VMOVAPDYrm,          TB_ALIGN_32 },
     { X86::VMOVAPSYrr,      X86::VMOVAPSYrm,          TB_ALIGN_32 },
     { X86::VMOVDQAYrr,      X86::VMOVDQAYrm,          TB_ALIGN_32 },
@@ -566,6 +579,13 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VMOVUPSYrr,      X86::VMOVUPSYrm,          0 },
     { X86::VPERMILPDYri,    X86::VPERMILPDYmi,        0 },
     { X86::VPERMILPSYri,    X86::VPERMILPSYmi,        0 },
+    { X86::VRCPPSYr,        X86::VRCPPSYm,            0 },
+    { X86::VRCPPSYr_Int,    X86::VRCPPSYm_Int,        0 },
+    { X86::VRSQRTPSYr,      X86::VRSQRTPSYm,          0 },
+    { X86::VSQRTPDYr,       X86::VSQRTPDYm,           0 },
+    { X86::VSQRTPSYr,       X86::VSQRTPSYm,           0 },
+    { X86::VBROADCASTSSYrr, X86::VBROADCASTSSYrm,     TB_NO_REVERSE },
+    { X86::VBROADCASTSDYrr, X86::VBROADCASTSDYrm,     TB_NO_REVERSE },
 
     // AVX2 foldable instructions
     { X86::VPABSBrr256,     X86::VPABSBrm256,         0 },
@@ -574,13 +594,6 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPSHUFDYri,      X86::VPSHUFDYmi,          0 },
     { X86::VPSHUFHWYri,     X86::VPSHUFHWYmi,         0 },
     { X86::VPSHUFLWYri,     X86::VPSHUFLWYmi,         0 },
-    { X86::VRCPPSYr,        X86::VRCPPSYm,            0 },
-    { X86::VRCPPSYr_Int,    X86::VRCPPSYm_Int,        0 },
-    { X86::VRSQRTPSYr,      X86::VRSQRTPSYm,          0 },
-    { X86::VSQRTPDYr,       X86::VSQRTPDYm,           0 },
-    { X86::VSQRTPSYr,       X86::VSQRTPSYm,           0 },
-    { X86::VBROADCASTSSYrr, X86::VBROADCASTSSYrm,     TB_NO_REVERSE },
-    { X86::VBROADCASTSDYrr, X86::VBROADCASTSDYrm,     TB_NO_REVERSE },
 
     // BMI/BMI2/LZCNT/POPCNT/TBM foldable instructions
     { X86::BEXTR32rr,       X86::BEXTR32rm,           0 },
@@ -930,8 +943,6 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::Int_VCVTSI2SSrr,   X86::Int_VCVTSI2SSrm,    0 },
     { X86::VCVTSS2SDrr,       X86::VCVTSS2SDrm,        0 },
     { X86::Int_VCVTSS2SDrr,   X86::Int_VCVTSS2SDrm,    0 },
-    { X86::VCVTTPD2DQrr,      X86::VCVTTPD2DQXrm,      0 },
-    { X86::VCVTTPS2DQrr,      X86::VCVTTPS2DQrm,       0 },
     { X86::VRSQRTSSr,         X86::VRSQRTSSm,          0 },
     { X86::VSQRTSDr,          X86::VSQRTSDm,           0 },
     { X86::VSQRTSSr,          X86::VSQRTSSm,           0 },
@@ -1604,8 +1615,11 @@ static bool isFrameLoadOpcode(int Opcode) {
   case X86::VMOVAPSrm:
   case X86::VMOVAPDrm:
   case X86::VMOVDQArm:
+  case X86::VMOVUPSYrm:
   case X86::VMOVAPSYrm:
+  case X86::VMOVUPDYrm:
   case X86::VMOVAPDYrm:
+  case X86::VMOVDQUYrm:
   case X86::VMOVDQAYrm:
   case X86::MMX_MOVD64rm:
   case X86::MMX_MOVQ64rm:
@@ -1633,8 +1647,11 @@ static bool isFrameStoreOpcode(int Opcode) {
   case X86::VMOVAPSmr:
   case X86::VMOVAPDmr:
   case X86::VMOVDQAmr:
+  case X86::VMOVUPSYmr:
   case X86::VMOVAPSYmr:
+  case X86::VMOVUPDYmr:
   case X86::VMOVAPDYmr:
+  case X86::VMOVDQUYmr:
   case X86::VMOVDQAYmr:
   case X86::VMOVUPSZmr:
   case X86::VMOVAPSZmr:
@@ -2420,6 +2437,42 @@ X86InstrInfo::commuteInstruction(MachineInstr *MI, bool NewMI) const {
     MI->getOperand(3).setImm(Size-Amt);
     return TargetInstrInfo::commuteInstruction(MI, NewMI);
   }
+  case X86::BLENDPDrri:
+  case X86::BLENDPSrri:
+  case X86::PBLENDWrri:
+  case X86::VBLENDPDrri:
+  case X86::VBLENDPSrri:
+  case X86::VBLENDPDYrri:
+  case X86::VBLENDPSYrri:
+  case X86::VPBLENDDrri:
+  case X86::VPBLENDWrri:
+  case X86::VPBLENDDYrri:
+  case X86::VPBLENDWYrri:{
+    unsigned Mask;
+    switch (MI->getOpcode()) {
+    default: llvm_unreachable("Unreachable!");
+    case X86::BLENDPDrri:    Mask = 0x03; break;
+    case X86::BLENDPSrri:    Mask = 0x0F; break;
+    case X86::PBLENDWrri:    Mask = 0xFF; break;
+    case X86::VBLENDPDrri:   Mask = 0x03; break;
+    case X86::VBLENDPSrri:   Mask = 0x0F; break;
+    case X86::VBLENDPDYrri:  Mask = 0x0F; break;
+    case X86::VBLENDPSYrri:  Mask = 0xFF; break;
+    case X86::VPBLENDDrri:   Mask = 0x0F; break;
+    case X86::VPBLENDWrri:   Mask = 0xFF; break;
+    case X86::VPBLENDDYrri:  Mask = 0xFF; break;
+    case X86::VPBLENDWYrri:  Mask = 0xFF; break;
+    }
+    // Only the least significant bits of Imm are used.
+    unsigned Imm = MI->getOperand(3).getImm() & Mask;
+    if (NewMI) {
+      MachineFunction &MF = *MI->getParent()->getParent();
+      MI = MF.CloneMachineInstr(MI);
+      NewMI = false;
+    }
+    MI->getOperand(3).setImm(Mask ^ Imm);
+    return TargetInstrInfo::commuteInstruction(MI, NewMI);
+  }
   case X86::CMOVB16rr:  case X86::CMOVB32rr:  case X86::CMOVB64rr:
   case X86::CMOVAE16rr: case X86::CMOVAE32rr: case X86::CMOVAE64rr:
   case X86::CMOVE16rr:  case X86::CMOVE32rr:  case X86::CMOVE64rr:
@@ -2504,6 +2557,20 @@ X86InstrInfo::commuteInstruction(MachineInstr *MI, bool NewMI) const {
 bool X86InstrInfo::findCommutedOpIndices(MachineInstr *MI, unsigned &SrcOpIdx1,
                                          unsigned &SrcOpIdx2) const {
   switch (MI->getOpcode()) {
+    case X86::BLENDPDrri:
+    case X86::BLENDPSrri:
+    case X86::PBLENDWrri:
+    case X86::VBLENDPDrri:
+    case X86::VBLENDPSrri:
+    case X86::VBLENDPDYrri:
+    case X86::VBLENDPSYrri:
+    case X86::VPBLENDDrri:
+    case X86::VPBLENDDYrri:
+    case X86::VPBLENDWrri:
+    case X86::VPBLENDWYrri:
+      SrcOpIdx1 = 1;
+      SrcOpIdx2 = 2;
+      return true;
     case X86::VFMADDPDr231r:
     case X86::VFMADDPSr231r:
     case X86::VFMADDSDr231r:
@@ -3992,7 +4059,7 @@ static void expandLoadStackGuard(MachineInstrBuilder &MIB,
   unsigned Flag = MachineMemOperand::MOLoad | MachineMemOperand::MOInvariant;
   MachineMemOperand *MMO = MBB.getParent()->
       getMachineMemOperand(MachinePointerInfo::getGOT(), Flag, 8, 8);
-  MachineBasicBlock::iterator I = MIB;
+  MachineBasicBlock::iterator I = MIB.getInstr();
 
   BuildMI(MBB, I, DL, TII.get(X86::MOV64rm), Reg).addReg(X86::RIP).addImm(1)
       .addReg(0).addGlobalAddress(GV, 0, X86II::MO_GOTPCREL).addReg(0)
@@ -5416,14 +5483,30 @@ void X86InstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
   NopInst.setOpcode(X86::NOOP);
 }
 
+// This code must remain in sync with getJumpInstrTableEntryBound in this class!
+// In particular, getJumpInstrTableEntryBound must always return an upper bound
+// on the encoding lengths of the instructions generated by
+// getUnconditionalBranch and getTrap.
 void X86InstrInfo::getUnconditionalBranch(
     MCInst &Branch, const MCSymbolRefExpr *BranchTarget) const {
   Branch.setOpcode(X86::JMP_4);
   Branch.addOperand(MCOperand::CreateExpr(BranchTarget));
 }
 
+// This code must remain in sync with getJumpInstrTableEntryBound in this class!
+// In particular, getJumpInstrTableEntryBound must always return an upper bound
+// on the encoding lengths of the instructions generated by
+// getUnconditionalBranch and getTrap.
 void X86InstrInfo::getTrap(MCInst &MI) const {
   MI.setOpcode(X86::TRAP);
+}
+
+// See getTrap and getUnconditionalBranch for conditions on the value returned
+// by this function.
+unsigned X86InstrInfo::getJumpInstrTableEntryBound() const {
+  // 5 bytes suffice: JMP_4 Symbol@PLT is uses 1 byte (E9) for the JMP_4 and 4
+  // bytes for the symbol offset. And TRAP is ud2, which is two bytes (0F 0B).
+  return 5;
 }
 
 bool X86InstrInfo::isHighLatencyDef(int opc) const {
@@ -5468,10 +5551,10 @@ bool X86InstrInfo::isHighLatencyDef(int opc) const {
   case X86::VSQRTSSm:
   case X86::VSQRTSSm_Int:
   case X86::VSQRTSSr:
-  case X86::VSQRTPDZrm:
-  case X86::VSQRTPDZrr:
-  case X86::VSQRTPSZrm:
-  case X86::VSQRTPSZrr:
+  case X86::VSQRTPDZm:
+  case X86::VSQRTPDZr:
+  case X86::VSQRTPSZm:
+  case X86::VSQRTPSZr:
   case X86::VSQRTSDZm:
   case X86::VSQRTSDZm_Int:
   case X86::VSQRTSDZr:

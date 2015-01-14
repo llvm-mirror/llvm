@@ -475,13 +475,13 @@ class ExportBufWord1 {
 multiclass ExportPattern<Instruction ExportInst, bits<8> cf_inst> {
   def : Pat<(int_R600_store_pixel_depth R600_Reg32:$reg),
     (ExportInst
-        (INSERT_SUBREG (v4f32 (IMPLICIT_DEF)), R600_Reg32:$reg, sub0),
+        (INSERT_SUBREG (v4f32 (IMPLICIT_DEF)), $reg, sub0),
         0, 61, 0, 7, 7, 7, cf_inst, 0)
   >;
 
   def : Pat<(int_R600_store_pixel_stencil R600_Reg32:$reg),
     (ExportInst
-        (INSERT_SUBREG (v4f32 (IMPLICIT_DEF)), R600_Reg32:$reg, sub0),
+        (INSERT_SUBREG (v4f32 (IMPLICIT_DEF)), $reg, sub0),
         0, 61, 7, 0, 7, 7, cf_inst, 0)
   >;
 
@@ -513,17 +513,17 @@ multiclass SteamOutputExportPattern<Instruction ExportInst,
 // Stream1
   def : Pat<(int_R600_store_stream_output (v4f32 R600_Reg128:$src),
       (i32 imm:$arraybase), (i32 1), (i32 imm:$mask)),
-      (ExportInst R600_Reg128:$src, 0, imm:$arraybase,
+      (ExportInst $src, 0, imm:$arraybase,
       4095, imm:$mask, buf1inst, 0)>;
 // Stream2
   def : Pat<(int_R600_store_stream_output (v4f32 R600_Reg128:$src),
       (i32 imm:$arraybase), (i32 2), (i32 imm:$mask)),
-      (ExportInst R600_Reg128:$src, 0, imm:$arraybase,
+      (ExportInst $src, 0, imm:$arraybase,
       4095, imm:$mask, buf2inst, 0)>;
 // Stream3
   def : Pat<(int_R600_store_stream_output (v4f32 R600_Reg128:$src),
       (i32 imm:$arraybase), (i32 3), (i32 imm:$mask)),
-      (ExportInst R600_Reg128:$src, 0, imm:$arraybase,
+      (ExportInst $src, 0, imm:$arraybase,
       4095, imm:$mask, buf3inst, 0)>;
 }
 
@@ -674,8 +674,9 @@ def ADD : R600_2OP_Helper <0x0, "ADD", fadd>;
 // Non-IEEE MUL: 0 * anything = 0
 def MUL : R600_2OP_Helper <0x1, "MUL NON-IEEE", int_AMDGPU_mul>;
 def MUL_IEEE : R600_2OP_Helper <0x2, "MUL_IEEE", fmul>;
-def MAX : R600_2OP_Helper <0x3, "MAX", AMDGPUfmax>;
-def MIN : R600_2OP_Helper <0x4, "MIN", AMDGPUfmin>;
+// TODO: Do these actually match the regular fmin/fmax behavior?
+def MAX : R600_2OP_Helper <0x3, "MAX", AMDGPUfmax_legacy>;
+def MIN : R600_2OP_Helper <0x4, "MIN", AMDGPUfmin_legacy>;
 
 // For the SET* instructions there is a naming conflict in TargetSelectionDAG.td,
 // so some of the instruction names don't match the asm string.
@@ -1363,7 +1364,7 @@ def CONST_COPY : Instruction {
   let Pattern =
       [(set R600_Reg32:$dst, (CONST_ADDRESS ADDRGA_CONST_OFFSET:$src))];
   let AsmString = "CONST_COPY";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
   let isAsCheapAsAMove = 1;
   let Itinerary = NullALU;
 }
@@ -1495,6 +1496,7 @@ class ILFormat<dag outs, dag ins, string asmstr, list<dag> pattern>
      let mayLoad = 0;
      let mayStore = 0;
      let hasSideEffects = 0;
+     let isCodeGenOnly = 1;
 }
 
 multiclass BranchConditional<SDNode Op, RegisterClass rci, RegisterClass rcf> {

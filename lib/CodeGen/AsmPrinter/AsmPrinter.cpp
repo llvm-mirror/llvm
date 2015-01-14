@@ -222,14 +222,12 @@ bool AsmPrinter::doInitialization(Module &M) {
   }
 
   if (MAI->doesSupportDebugInformation()) {
-    if (Triple(TM.getTargetTriple()).isKnownWindowsMSVCEnvironment()) {
+    if (Triple(TM.getTargetTriple()).isKnownWindowsMSVCEnvironment())
       Handlers.push_back(HandlerInfo(new WinCodeViewLineTables(this),
                                      DbgTimerName,
                                      CodeViewLineTablesGroupName));
-    } else {
-      DD = new DwarfDebug(this, &M);
-      Handlers.push_back(HandlerInfo(DD, DbgTimerName, DWARFGroupName));
-    }
+    DD = new DwarfDebug(this, &M);
+    Handlers.push_back(HandlerInfo(DD, DbgTimerName, DWARFGroupName));
   }
 
   EHStreamer *ES = nullptr;
@@ -243,7 +241,7 @@ bool AsmPrinter::doInitialization(Module &M) {
   case ExceptionHandling::ARM:
     ES = new ARMException(this);
     break;
-  case ExceptionHandling::WinEH:
+  case ExceptionHandling::ItaniumWinEH:
     switch (MAI->getWinEHEncodingType()) {
     default: llvm_unreachable("unsupported unwinding information encoding");
     case WinEH::EncodingType::Itanium:
@@ -703,8 +701,8 @@ AsmPrinter::CFIMoveType AsmPrinter::needsCFIMoves() {
 }
 
 bool AsmPrinter::needsSEHMoves() {
-  return MAI->getExceptionHandlingType() == ExceptionHandling::WinEH &&
-    MF->getFunction()->needsUnwindTableEntry();
+  return MAI->getExceptionHandlingType() == ExceptionHandling::ItaniumWinEH &&
+         MF->getFunction()->needsUnwindTableEntry();
 }
 
 void AsmPrinter::emitCFIInstruction(const MachineInstr &MI) {
@@ -881,16 +879,17 @@ bool AsmPrinter::doFinalization(Module &M) {
     bool IsThumb = (Arch == Triple::thumb || Arch == Triple::thumbeb);
     MCInst TrapInst;
     TM.getSubtargetImpl()->getInstrInfo()->getTrap(TrapInst);
+    unsigned LogAlignment = llvm::Log2_64(JITI->entryByteAlignment());
+
+    // Emit the right section for these functions.
+    OutStreamer.SwitchSection(OutContext.getObjectFileInfo()->getTextSection());
     for (const auto &KV : JITI->getTables()) {
       uint64_t Count = 0;
       for (const auto &FunPair : KV.second) {
         // Emit the function labels to make this be a function entry point.
         MCSymbol *FunSym =
           OutContext.GetOrCreateSymbol(FunPair.second->getName());
-        OutStreamer.EmitSymbolAttribute(FunSym, MCSA_Global);
-        // FIXME: JumpTableInstrInfo should store information about the required
-        // alignment of table entries and the size of the padding instruction.
-        EmitAlignment(3);
+        EmitAlignment(LogAlignment);
         if (IsThumb)
           OutStreamer.EmitThumbFunc(FunSym);
         if (MAI->hasDotTypeDotSizeDirective())
@@ -912,10 +911,9 @@ bool AsmPrinter::doFinalization(Module &M) {
       }
 
       // Emit enough padding instructions to fill up to the next power of two.
-      // This assumes that the trap instruction takes 8 bytes or fewer.
       uint64_t Remaining = NextPowerOf2(Count) - Count;
       for (uint64_t C = 0; C < Remaining; ++C) {
-        EmitAlignment(3);
+        EmitAlignment(LogAlignment);
         OutStreamer.EmitInstruction(TrapInst, getSubtargetInfo());
       }
 
@@ -1169,7 +1167,8 @@ void AsmPrinter::EmitJumpTableInfo() {
       const MCExpr *Base = TLI->getPICJumpTableRelocBaseExpr(MF,JTI,OutContext);
       for (unsigned ii = 0, ee = JTBBs.size(); ii != ee; ++ii) {
         const MachineBasicBlock *MBB = JTBBs[ii];
-        if (!EmittedSets.insert(MBB)) continue;
+        if (!EmittedSets.insert(MBB).second)
+          continue;
 
         // .set LJTSet, LBB32-base
         const MCExpr *LHS =
@@ -1249,8 +1248,9 @@ void AsmPrinter::EmitJumpTableEntry(const MachineJumpTableInfo *MJTI,
       break;
     }
     Value = MCSymbolRefExpr::Create(MBB->getSymbol(), OutContext);
-    const MCExpr *JTI = MCSymbolRefExpr::Create(GetJTISymbol(UID), OutContext);
-    Value = MCBinaryExpr::CreateSub(Value, JTI, OutContext);
+    const TargetLowering *TLI = TM.getSubtargetImpl()->getTargetLowering();
+    const MCExpr *Base = TLI->getPICJumpTableRelocBaseExpr(MF, UID, OutContext);
+    Value = MCBinaryExpr::CreateSub(Value, Base, OutContext);
     break;
   }
   }

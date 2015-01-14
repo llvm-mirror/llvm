@@ -190,6 +190,11 @@ namespace llvm {
       /// BLENDI - Blend where the selector is an immediate.
       BLENDI,
 
+      /// SHRUNKBLEND - Blend where the condition has been shrunk.
+      /// This is used to emphasize that the condition mask is
+      /// no more valid for generic VSELECT optimizations.
+      SHRUNKBLEND,
+
       /// ADDSUB - Combined add and sub on an FP vector.
       ADDSUB,
 
@@ -301,6 +306,13 @@ namespace llvm {
 
       UMUL, // LOW, HI, FLAGS = umul LHS, RHS
 
+      // 8-bit SMUL/UMUL - AX, FLAGS = smul8/umul8 AL, RHS
+      SMUL8, UMUL8,
+
+      // 8-bit divrem that zero-extend the high result (AH).
+      UDIVREM8_ZEXT_HREG,
+      SDIVREM8_SEXT_HREG,
+
       // MUL_IMM - X86 specific multiply by immediate.
       MUL_IMM,
 
@@ -406,6 +418,9 @@ namespace llvm {
 
       // Test if in transactional execution.
       XTEST,
+
+      // ERI instructions
+      RSQRT28, RCP28, EXP2,
 
       // Compare and swap.
       LCMPXCHG_DAG = ISD::FIRST_TARGET_MEMORY_OPCODE,
@@ -1014,6 +1029,15 @@ namespace llvm {
 
     /// Convert a comparison if required by the subtarget.
     SDValue ConvertCmpIfNecessary(SDValue Cmp, SelectionDAG &DAG) const;
+
+    /// Use rsqrt* to speed up sqrt calculations.
+    SDValue getRsqrtEstimate(SDValue Operand, DAGCombinerInfo &DCI,
+                             unsigned &RefinementSteps,
+                             bool &UseOneConstNR) const override;
+
+    /// Use rcp* to speed up fdiv calculations.
+    SDValue getRecipEstimate(SDValue Operand, DAGCombinerInfo &DCI,
+                             unsigned &RefinementSteps) const override;
   };
 
   namespace X86 {

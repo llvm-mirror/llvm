@@ -396,11 +396,7 @@ class Instruction {
   //  hasSideEffects - The instruction has side effects that are not
   //    captured by any operands of the instruction or other flags.
   //
-  //  neverHasSideEffects (deprecated) - Set on an instruction with no pattern
-  //    if it has no side effects. This is now equivalent to setting
-  //    "hasSideEffects = 0".
   bit hasSideEffects = ?;
-  bit neverHasSideEffects = 0;
 
   // Is this instruction a "real" instruction (with a distinct machine
   // encoding), or is it a pseudo instruction used for codegen modeling
@@ -734,7 +730,7 @@ def INLINEASM : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let AsmString = "";
-  let neverHasSideEffects = 1;  // Note side effect is encoded in an operand.
+  let hasSideEffects = 0;  // Note side effect is encoded in an operand.
 }
 def CFI_INSTRUCTION : Instruction {
   let OutOperandList = (outs);
@@ -761,26 +757,26 @@ def KILL : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
 }
 def EXTRACT_SUBREG : Instruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$supersrc, i32imm:$subidx);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
 }
 def INSERT_SUBREG : Instruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$supersrc, unknown:$subsrc, i32imm:$subidx);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
   let Constraints = "$supersrc = $dst";
 }
 def IMPLICIT_DEF : Instruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
   let isReMaterializable = 1;
   let isAsCheapAsAMove = 1;
 }
@@ -788,33 +784,33 @@ def SUBREG_TO_REG : Instruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$implsrc, unknown:$subsrc, i32imm:$subidx);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
 }
 def COPY_TO_REGCLASS : Instruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$src, i32imm:$regclass);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
   let isAsCheapAsAMove = 1;
 }
 def DBG_VALUE : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let AsmString = "DBG_VALUE";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
 }
 def REG_SEQUENCE : Instruction {
   let OutOperandList = (outs unknown:$dst);
-  let InOperandList = (ins variable_ops);
+  let InOperandList = (ins unknown:$supersrc, variable_ops);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
   let isAsCheapAsAMove = 1;
 }
 def COPY : Instruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$src);
   let AsmString = "";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
   let isAsCheapAsAMove = 1;
 }
 def BUNDLE : Instruction {
@@ -826,13 +822,13 @@ def LIFETIME_START : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "LIFETIME_START";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
 }
 def LIFETIME_END : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "LIFETIME_END";
-  let neverHasSideEffects = 1;
+  let hasSideEffects = 0;
 }
 def STACKMAP : Instruction {
   let OutOperandList = (outs);
@@ -848,6 +844,15 @@ def PATCHPOINT : Instruction {
   let isCall = 1;
   let mayLoad = 1;
   let usesCustomInserter = 1;
+}
+def STATEPOINT : Instruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins variable_ops);
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+  let hasSideEffects = 1;
+  let isCall = 1;
 }
 def LOAD_STACK_GUARD : Instruction {
   let OutOperandList = (outs ptr_rc:$dst);
@@ -1005,9 +1010,6 @@ class AsmWriter {
   // will specify which alternative to use.  For example "{x|y|z}" with Variant
   // == 1, will expand to "y".
   int Variant = 0;
-
-  // OperandSpacing - Space between operand columns.
-  int OperandSpacing = -1;
 }
 def DefaultAsmWriter : AsmWriter;
 

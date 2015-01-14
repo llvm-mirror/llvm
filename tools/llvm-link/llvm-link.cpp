@@ -14,6 +14,8 @@
 
 #include "llvm/Linker/Linker.h"
 #include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
@@ -62,11 +64,32 @@ static std::unique_ptr<Module>
 loadFile(const char *argv0, const std::string &FN, LLVMContext &Context) {
   SMDiagnostic Err;
   if (Verbose) errs() << "Loading '" << FN << "'\n";
-  std::unique_ptr<Module> Result = parseIRFile(FN, Err, Context);
+  std::unique_ptr<Module> Result = getLazyIRFileModule(FN, Err, Context);
   if (!Result)
     Err.print(argv0, errs());
 
   return Result;
+}
+
+static void diagnosticHandler(const DiagnosticInfo &DI) {
+  unsigned Severity = DI.getSeverity();
+  switch (Severity) {
+  case DS_Error:
+    errs() << "ERROR: ";
+    break;
+  case DS_Warning:
+    if (SuppressWarnings)
+      return;
+    errs() << "WARNING: ";
+    break;
+  case DS_Remark:
+  case DS_Note:
+    llvm_unreachable("Only expecting warnings and errors");
+  }
+
+  DiagnosticPrinterRawOStream DP(errs());
+  DI.print(DP);
+  errs() << '\n';
 }
 
 int main(int argc, char **argv) {
@@ -78,19 +101,10 @@ int main(int argc, char **argv) {
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
   cl::ParseCommandLineOptions(argc, argv, "llvm linker\n");
 
-  unsigned BaseArg = 0;
-  std::string ErrorMessage;
+  auto Composite = make_unique<Module>("llvm-link", Context);
+  Linker L(Composite.get(), diagnosticHandler);
 
-  std::unique_ptr<Module> Composite =
-      loadFile(argv[0], InputFilenames[BaseArg], Context);
-  if (!Composite.get()) {
-    errs() << argv[0] << ": error loading file '"
-           << InputFilenames[BaseArg] << "'\n";
-    return 1;
-  }
-
-  Linker L(Composite.get(), SuppressWarnings);
-  for (unsigned i = BaseArg+1; i < InputFilenames.size(); ++i) {
+  for (unsigned i = 0; i < InputFilenames.size(); ++i) {
     std::unique_ptr<Module> M = loadFile(argv[0], InputFilenames[i], Context);
     if (!M.get()) {
       errs() << argv[0] << ": error loading file '" <<InputFilenames[i]<< "'\n";
@@ -99,11 +113,8 @@ int main(int argc, char **argv) {
 
     if (Verbose) errs() << "Linking in '" << InputFilenames[i] << "'\n";
 
-    if (L.linkInModule(M.get(), &ErrorMessage)) {
-      errs() << argv[0] << ": link error in '" << InputFilenames[i]
-             << "': " << ErrorMessage << "\n";
+    if (L.linkInModule(M.get()))
       return 1;
-    }
   }
 
   if (DumpAsm) errs() << "Here's the assembly:\n" << *Composite;

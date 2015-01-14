@@ -28,6 +28,7 @@
 #include "llvm/PassManager.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
+#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
@@ -78,10 +79,14 @@ static std::vector<std::string> Cleanup;
 static llvm::TargetOptions TargetOpts;
 
 namespace options {
-  enum generate_bc { BC_NO, BC_ALSO, BC_ONLY };
+  enum OutputType {
+    OT_NORMAL,
+    OT_DISABLE,
+    OT_BC_ONLY,
+    OT_SAVE_TEMPS
+  };
   static bool generate_api_file = false;
-  static generate_bc generate_bc_file = BC_NO;
-  static std::string bc_path;
+  static OutputType TheOutputType = OT_NORMAL;
   static std::string obj_path;
   static std::string extra_library_path;
   static std::string triple;
@@ -110,19 +115,11 @@ namespace options {
     } else if (opt.startswith("obj-path=")) {
       obj_path = opt.substr(strlen("obj-path="));
     } else if (opt == "emit-llvm") {
-      generate_bc_file = BC_ONLY;
-    } else if (opt == "also-emit-llvm") {
-      generate_bc_file = BC_ALSO;
-    } else if (opt.startswith("also-emit-llvm=")) {
-      llvm::StringRef path = opt.substr(strlen("also-emit-llvm="));
-      generate_bc_file = BC_ALSO;
-      if (!bc_path.empty()) {
-        message(LDPL_WARNING, "Path to the output IL file specified twice. "
-                              "Discarding %s",
-                opt_);
-      } else {
-        bc_path = path;
-      }
+      TheOutputType = OT_BC_ONLY;
+    } else if (opt == "save-temps") {
+      TheOutputType = OT_SAVE_TEMPS;
+    } else if (opt == "disable-output") {
+      TheOutputType = OT_DISABLE;
     } else {
       // Save this option to pass to the code generator.
       // ParseCommandLineOptions() expects argv[0] to be program name. Lazily
@@ -278,7 +275,7 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
       message(LDPL_ERROR, "Failed to get a view of %s", file->name);
       return LDPS_ERR;
     }
-    BufferRef = MemoryBufferRef(StringRef((char *)view, file->filesize), "");
+    BufferRef = MemoryBufferRef(StringRef((const char *)view, file->filesize), "");
   } else {
     int64_t offset = 0;
     // Gold has found what might be IR part-way inside of a file, such as
@@ -418,18 +415,8 @@ static void keepGlobalValue(GlobalValue &GV,
   assert(!GV.isDiscardableIfUnused());
 }
 
-static bool isDeclaration(const GlobalValue &V) {
-  if (V.hasAvailableExternallyLinkage())
-    return true;
-
-  if (V.isMaterializable())
-    return false;
-
-  return V.isDeclaration();
-}
-
 static void internalize(GlobalValue &GV) {
-  if (isDeclaration(GV))
+  if (GV.isDeclarationForLinker())
     return; // We get here if there is a matching asm definition.
   if (!GV.hasLocalLinkage())
     GV.setLinkage(GlobalValue::InternalLinkage);
@@ -492,6 +479,9 @@ static GlobalObject *makeInternalReplacement(GlobalObject *GO) {
   Module *M = GO->getParent();
   GlobalObject *Ret;
   if (auto *F = dyn_cast<Function>(GO)) {
+    if (F->materialize())
+      message(LDPL_FATAL, "LLVM gold plugin has failed to read a function");
+
     auto *NewF = Function::Create(F->getFunctionType(), F->getLinkage(),
                                   F->getName(), M);
 
@@ -620,7 +610,7 @@ getModuleForFile(LLVMContext &Context, claimed_file &F, raw_fd_ostream *ApiFile,
     case LDPR_RESOLVED_EXEC:
     case LDPR_RESOLVED_DYN:
     case LDPR_UNDEF:
-      assert(isDeclaration(*GV));
+      assert(GV->isDeclarationForLinker());
       break;
 
     case LDPR_PREVAILING_DEF_IRONLY: {
@@ -667,12 +657,6 @@ getModuleForFile(LLVMContext &Context, claimed_file &F, raw_fd_ostream *ApiFile,
     Sym.comdat_key = nullptr;
   }
 
-  if (!Drop.empty())
-    // This is horrible. Given how lazy loading is implemented, dropping
-    // the body while there is a materializer present doesn't work, the
-    // linker will just read the body back.
-    M->materializeAllPermanently();
-
   ValueToValueMapTy VM;
   LocalValueMaterializer Materializer(Drop);
   for (GlobalAlias *GA : KeptAliases) {
@@ -697,8 +681,18 @@ static void runLTOPasses(Module &M, TargetMachine &TM) {
   PMB.Inliner = createFunctionInliningPass();
   PMB.VerifyInput = true;
   PMB.VerifyOutput = true;
+  PMB.LoopVectorize = true;
+  PMB.SLPVectorize = true;
   PMB.populateLTOPassManager(passes, &TM);
   passes.run(M);
+}
+
+static void saveBCFile(StringRef Path, Module &M) {
+  std::error_code EC;
+  raw_fd_ostream OS(Path, EC, sys::fs::OpenFlags::F_None);
+  if (EC)
+    message(LDPL_FATAL, "Failed to write the output file.");
+  WriteBitcodeToFile(&M, OS);
 }
 
 static void codegen(Module &M) {
@@ -725,6 +719,9 @@ static void codegen(Module &M) {
 
   runLTOPasses(M, *TM);
 
+  if (options::TheOutputType == options::OT_SAVE_TEMPS)
+    saveBCFile(output_name + ".opt.bc", M);
+
   PassManager CodeGenPasses;
   CodeGenPasses.add(new DataLayoutPass());
 
@@ -734,7 +731,7 @@ static void codegen(Module &M) {
     std::error_code EC =
         sys::fs::createTemporaryFile("lto-llvm", "o", FD, Filename);
     if (EC)
-      message(LDPL_FATAL, "Could not create temorary file: %s",
+      message(LDPL_FATAL, "Could not create temporary file: %s",
               EC.message().c_str());
   } else {
     Filename = options::obj_path;
@@ -787,9 +784,8 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
       M->setTargetTriple(DefaultTriple);
     }
 
-    std::string ErrMsg;
-    if (L.linkInModule(M.get(), &ErrMsg))
-      message(LDPL_FATAL, "Failed to link module: %s", ErrMsg.c_str());
+    if (L.linkInModule(M.get()))
+      message(LDPL_FATAL, "Failed to link module");
   }
 
   for (const auto &Name : Internalize) {
@@ -807,22 +803,17 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
       internalize(*GV);
   }
 
-  if (options::generate_bc_file != options::BC_NO) {
+  if (options::TheOutputType == options::OT_DISABLE)
+    return LDPS_OK;
+
+  if (options::TheOutputType != options::OT_NORMAL) {
     std::string path;
-    if (options::generate_bc_file == options::BC_ONLY)
+    if (options::TheOutputType == options::OT_BC_ONLY)
       path = output_name;
-    else if (!options::bc_path.empty())
-      path = options::bc_path;
     else
       path = output_name + ".bc";
-    {
-      std::error_code EC;
-      raw_fd_ostream OS(path, EC, sys::fs::OpenFlags::F_None);
-      if (EC)
-        message(LDPL_FATAL, "Failed to write the output file.");
-      WriteBitcodeToFile(L.getModule(), OS);
-    }
-    if (options::generate_bc_file == options::BC_ONLY)
+    saveBCFile(path, *L.getModule());
+    if (options::TheOutputType == options::OT_BC_ONLY)
       return LDPS_OK;
   }
 
@@ -848,7 +839,10 @@ static ld_plugin_status all_symbols_read_hook(void) {
     Ret = allSymbolsReadHook(&ApiFile);
   }
 
-  if (options::generate_bc_file == options::BC_ONLY)
+  llvm_shutdown();
+
+  if (options::TheOutputType == options::OT_BC_ONLY ||
+      options::TheOutputType == options::OT_DISABLE)
     exit(0);
 
   return Ret;

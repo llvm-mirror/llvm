@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/StackProtector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/Passes.h"
@@ -31,6 +32,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
@@ -169,7 +171,7 @@ bool StackProtector::HasAddressTaken(const Instruction *AI) {
     } else if (const PHINode *PN = dyn_cast<PHINode>(U)) {
       // Keep track of what PHI nodes we have already visited to ensure
       // they are only visited once.
-      if (VisitedPHIs.insert(PN))
+      if (VisitedPHIs.insert(PN).second)
         if (HasAddressTaken(PN))
           return true;
     } else if (const GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(U)) {
@@ -346,7 +348,7 @@ static bool CreatePrologue(Function *F, Module *M, ReturnInst *RI,
 
     StackGuardVar = ConstantExpr::getIntToPtr(
         OffsetVal, PointerType::get(PtrTy, AddressSpace));
-  } else if (Trip.getOS() == llvm::Triple::OpenBSD) {
+  } else if (Trip.isOSOpenBSD()) {
     StackGuardVar = M->getOrInsertGlobal("__guard_local", PtrTy);
     cast<GlobalValue>(StackGuardVar)
         ->setVisibility(GlobalValue::HiddenVisibility);
@@ -459,7 +461,13 @@ bool StackProtector::InsertStackProtectors() {
       LoadInst *LI1 = B.CreateLoad(StackGuardVar);
       LoadInst *LI2 = B.CreateLoad(AI);
       Value *Cmp = B.CreateICmpEQ(LI1, LI2);
-      B.CreateCondBr(Cmp, NewBB, FailBB);
+      unsigned SuccessWeight =
+          BranchProbabilityInfo::getBranchWeightStackProtector(true);
+      unsigned FailureWeight =
+          BranchProbabilityInfo::getBranchWeightStackProtector(false);
+      MDNode *Weights = MDBuilder(F->getContext())
+                            .createBranchWeights(SuccessWeight, FailureWeight);
+      B.CreateCondBr(Cmp, NewBB, FailBB, Weights);
     }
   }
 
@@ -477,15 +485,15 @@ BasicBlock *StackProtector::CreateFailBB() {
   LLVMContext &Context = F->getContext();
   BasicBlock *FailBB = BasicBlock::Create(Context, "CallStackCheckFailBlk", F);
   IRBuilder<> B(FailBB);
-  if (Trip.getOS() == llvm::Triple::OpenBSD) {
+  if (Trip.isOSOpenBSD()) {
     Constant *StackChkFail = M->getOrInsertFunction(
         "__stack_smash_handler", Type::getVoidTy(Context),
-        Type::getInt8PtrTy(Context), NULL);
+        Type::getInt8PtrTy(Context), nullptr);
 
     B.CreateCall(StackChkFail, B.CreateGlobalStringPtr(F->getName(), "SSH"));
   } else {
     Constant *StackChkFail = M->getOrInsertFunction(
-        "__stack_chk_fail", Type::getVoidTy(Context), NULL);
+        "__stack_chk_fail", Type::getVoidTy(Context), nullptr);
     B.CreateCall(StackChkFail);
   }
   B.CreateUnreachable();

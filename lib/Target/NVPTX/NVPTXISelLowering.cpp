@@ -107,7 +107,7 @@ static void ComputePTXValueVTs(const TargetLowering &TLI, Type *Ty,
 
 // NVPTXTargetLowering Constructor.
 NVPTXTargetLowering::NVPTXTargetLowering(const NVPTXTargetMachine &TM)
-    : TargetLowering(TM, new NVPTXTargetObjectFile()), nvTM(&TM),
+    : TargetLowering(TM), nvTM(&TM),
       nvptxSubtarget(TM.getSubtarget<NVPTXSubtarget>()) {
 
   // always lower memset, memcpy, and memmove intrinsics to load/store
@@ -1355,7 +1355,12 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     //  .param .align 16 .b8 retval0[<size-in-bytes>], or
     //  .param .b<size-in-bits> retval0
     unsigned resultsz = TD->getTypeAllocSizeInBits(retTy);
-    if (retTy->isSingleValueType()) {
+    // Emit ".param .b<size-in-bits> retval0" instead of byte arrays only for
+    // these three types to match the logic in
+    // NVPTXAsmPrinter::printReturnValStr and NVPTXTargetLowering::getPrototype.
+    // Plus, this behavior is consistent with nvcc's.
+    if (retTy->isFloatingPointTy() || retTy->isIntegerTy() ||
+        retTy->isPointerTy()) {
       // Scalar needs to be at least 32bit wide
       if (resultsz < 32)
         resultsz = 32;
@@ -4490,4 +4495,11 @@ NVPTXTargetObjectFile::~NVPTXTargetObjectFile() {
   delete DwarfARangesSection;
   delete DwarfRangesSection;
   delete DwarfMacroInfoSection;
+}
+
+const MCSection *
+NVPTXTargetObjectFile::SelectSectionForGlobal(const GlobalValue *GV,
+                                              SectionKind Kind, Mangler &Mang,
+                                              const TargetMachine &TM) const {
+  return getDataSection();
 }

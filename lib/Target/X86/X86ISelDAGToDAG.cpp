@@ -2131,6 +2131,16 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
   case X86ISD::GlobalBaseReg:
     return getGlobalBaseReg();
 
+  case X86ISD::SHRUNKBLEND: {
+    // SHRUNKBLEND selects like a regular VSELECT.
+    SDValue VSelect = CurDAG->getNode(
+        ISD::VSELECT, SDLoc(Node), Node->getValueType(0), Node->getOperand(0),
+        Node->getOperand(1), Node->getOperand(2));
+    ReplaceUses(SDValue(Node, 0), VSelect);
+    SelectCode(VSelect.getNode());
+    // We already called ReplaceUses.
+    return nullptr;
+  }
 
   case ISD::ATOMIC_LOAD_XOR:
   case ISD::ATOMIC_LOAD_AND:
@@ -2218,6 +2228,25 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
     return CurDAG->SelectNodeTo(Node, ShlOp, NVT, SDValue(New, 0),
                                 getI8Imm(ShlVal));
   }
+  case X86ISD::UMUL8:
+  case X86ISD::SMUL8: {
+    SDValue N0 = Node->getOperand(0);
+    SDValue N1 = Node->getOperand(1);
+
+    Opc = (Opcode == X86ISD::SMUL8 ? X86::IMUL8r : X86::MUL8r);
+
+    SDValue InFlag = CurDAG->getCopyToReg(CurDAG->getEntryNode(), dl, X86::AL,
+                                          N0, SDValue()).getValue(1);
+
+    SDVTList VTs = CurDAG->getVTList(NVT, MVT::i32);
+    SDValue Ops[] = {N1, InFlag};
+    SDNode *CNode = CurDAG->getMachineNode(Opc, dl, VTs, Ops);
+
+    ReplaceUses(SDValue(Node, 0), SDValue(CNode, 0));
+    ReplaceUses(SDValue(Node, 1), SDValue(CNode, 1));
+    return nullptr;
+  }
+
   case X86ISD::UMUL: {
     SDValue N0 = Node->getOperand(0);
     SDValue N1 = Node->getOperand(1);
@@ -2393,11 +2422,14 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
   }
 
   case ISD::SDIVREM:
-  case ISD::UDIVREM: {
+  case ISD::UDIVREM:
+  case X86ISD::SDIVREM8_SEXT_HREG:
+  case X86ISD::UDIVREM8_ZEXT_HREG: {
     SDValue N0 = Node->getOperand(0);
     SDValue N1 = Node->getOperand(1);
 
-    bool isSigned = Opcode == ISD::SDIVREM;
+    bool isSigned = (Opcode == ISD::SDIVREM ||
+                     Opcode == X86ISD::SDIVREM8_SEXT_HREG);
     if (!isSigned) {
       switch (NVT.SimpleTy) {
       default: llvm_unreachable("Unsupported VT!");
@@ -2513,33 +2545,43 @@ SDNode *X86DAGToDAGISel::Select(SDNode *Node) {
         SDValue(CurDAG->getMachineNode(Opc, dl, MVT::Glue, N1, InFlag), 0);
     }
 
-    // Prevent use of AH in a REX instruction by referencing AX instead.
-    // Shift it down 8 bits.
+    // Prevent use of AH in a REX instruction by explicitly copying it to
+    // an ABCD_L register.
     //
     // The current assumption of the register allocator is that isel
-    // won't generate explicit references to the GPR8_NOREX registers. If
+    // won't generate explicit references to the GR8_ABCD_H registers. If
     // the allocator and/or the backend get enhanced to be more robust in
     // that regard, this can be, and should be, removed.
-    if (HiReg == X86::AH && Subtarget->is64Bit() &&
-        !SDValue(Node, 1).use_empty()) {
-      SDValue Result = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl,
-                                              X86::AX, MVT::i16, InFlag);
-      InFlag = Result.getValue(2);
+    if (HiReg == X86::AH && !SDValue(Node, 1).use_empty()) {
+      SDValue AHCopy = CurDAG->getRegister(X86::AH, MVT::i8);
+      unsigned AHExtOpcode =
+          isSigned ? X86::MOVSX32_NOREXrr8 : X86::MOVZX32_NOREXrr8;
 
-      // If we also need AL (the quotient), get it by extracting a subreg from
-      // Result. The fast register allocator does not like multiple CopyFromReg
-      // nodes using aliasing registers.
-      if (!SDValue(Node, 0).use_empty())
-        ReplaceUses(SDValue(Node, 0),
-          CurDAG->getTargetExtractSubreg(X86::sub_8bit, dl, MVT::i8, Result));
+      SDNode *RNode = CurDAG->getMachineNode(AHExtOpcode, dl, MVT::i32,
+                                             MVT::Glue, AHCopy, InFlag);
+      SDValue Result(RNode, 0);
+      InFlag = SDValue(RNode, 1);
 
-      // Shift AX right by 8 bits instead of using AH.
-      Result = SDValue(CurDAG->getMachineNode(X86::SHR16ri, dl, MVT::i16,
-                                         Result,
-                                         CurDAG->getTargetConstant(8, MVT::i8)),
-                       0);
-      ReplaceUses(SDValue(Node, 1),
-        CurDAG->getTargetExtractSubreg(X86::sub_8bit, dl, MVT::i8, Result));
+      if (Opcode == X86ISD::UDIVREM8_ZEXT_HREG ||
+          Opcode == X86ISD::SDIVREM8_SEXT_HREG) {
+        if (Node->getValueType(1) == MVT::i64) {
+          // It's not possible to directly movsx AH to a 64bit register, because
+          // the latter needs the REX prefix, but the former can't have it.
+          assert(Opcode != X86ISD::SDIVREM8_SEXT_HREG &&
+                 "Unexpected i64 sext of h-register");
+          Result =
+              SDValue(CurDAG->getMachineNode(
+                          TargetOpcode::SUBREG_TO_REG, dl, MVT::i64,
+                          CurDAG->getTargetConstant(0, MVT::i64), Result,
+                          CurDAG->getTargetConstant(X86::sub_32bit, MVT::i32)),
+                      0);
+        }
+      } else {
+        Result =
+            CurDAG->getTargetExtractSubreg(X86::sub_8bit, dl, MVT::i8, Result);
+      }
+      ReplaceUses(SDValue(Node, 1), Result);
+      DEBUG(dbgs() << "=> "; Result.getNode()->dump(CurDAG); dbgs() << '\n');
     }
     // Copy the division (low) result, if it is needed.
     if (!SDValue(Node, 0).use_empty()) {

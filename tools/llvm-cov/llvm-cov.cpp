@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Path.h"
 #include <string>
@@ -19,40 +20,44 @@
 using namespace llvm;
 
 /// \brief The main entry point for the 'show' subcommand.
-int show_main(int argc, const char **argv);
+int showMain(int argc, const char *argv[]);
 
 /// \brief The main entry point for the 'report' subcommand.
-int report_main(int argc, const char **argv);
+int reportMain(int argc, const char *argv[]);
 
 /// \brief The main entry point for the 'convert-for-testing' subcommand.
-int convert_for_testing_main(int argc, const char **argv);
+int convertForTestingMain(int argc, const char *argv[]);
 
 /// \brief The main entry point for the gcov compatible coverage tool.
-int gcov_main(int argc, const char **argv);
+int gcovMain(int argc, const char *argv[]);
+
+/// \brief Top level help.
+int helpMain(int argc, const char *argv[]) {
+  errs() << "OVERVIEW: LLVM code coverage tool\n\n"
+         << "USAGE: llvm-cov {gcov|report|show}\n";
+  return 0;
+}
 
 int main(int argc, const char **argv) {
   // If argv[0] is or ends with 'gcov', always be gcov compatible
   if (sys::path::stem(argv[0]).endswith_lower("gcov"))
-    return gcov_main(argc, argv);
+    return gcovMain(argc, argv);
 
   // Check if we are invoking a specific tool command.
   if (argc > 1) {
-    int (*func)(int, const char **) = nullptr;
+    typedef int (*MainFunction)(int, const char *[]);
+    MainFunction Func = StringSwitch<MainFunction>(argv[1])
+                            .Case("convert-for-testing", convertForTestingMain)
+                            .Case("gcov", gcovMain)
+                            .Case("report", reportMain)
+                            .Case("show", showMain)
+                            .Cases("-h", "-help", "--help", helpMain)
+                            .Default(nullptr);
 
-    StringRef command = argv[1];
-    if (command.equals_lower("show"))
-      func = show_main;
-    else if (command.equals_lower("report"))
-      func = report_main;
-    else if (command.equals_lower("convert-for-testing"))
-      func = convert_for_testing_main;
-    else if (command.equals_lower("gcov"))
-      func = gcov_main;
-
-    if (func) {
+    if (Func) {
       std::string Invocation = std::string(argv[0]) + " " + argv[1];
       argv[1] = Invocation.c_str();
-      return func(argc - 1, argv + 1);
+      return Func(argc - 1, argv + 1);
     }
   }
 
@@ -69,5 +74,5 @@ int main(int argc, const char **argv) {
   errs().resetColor();
   errs() << "\n";
 
-  return gcov_main(argc, argv);
+  return gcovMain(argc, argv);
 }

@@ -237,7 +237,7 @@ computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
       // instruction between the previous try-range and this one may throw,
       // create a call-site entry with no landing pad for the region between the
       // try-ranges.
-      if (SawPotentiallyThrowing && Asm->MAI->isExceptionHandlingDwarf()) {
+      if (SawPotentiallyThrowing && Asm->MAI->usesItaniumLSDAForExceptions()) {
         CallSiteEntry Site = { LastLabel, BeginLabel, nullptr, 0 };
         CallSites.push_back(Site);
         PreviousIsInvoke = false;
@@ -259,7 +259,7 @@ computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
         };
 
         // Try to merge with the previous call-site. SJLJ doesn't do this
-        if (PreviousIsInvoke && Asm->MAI->isExceptionHandlingDwarf()) {
+        if (PreviousIsInvoke && Asm->MAI->usesItaniumLSDAForExceptions()) {
           CallSiteEntry &Prev = CallSites.back();
           if (Site.PadLabel == Prev.PadLabel && Site.Action == Prev.Action) {
             // Extend the range of the previous entry.
@@ -269,7 +269,7 @@ computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
         }
 
         // Otherwise, create a new call-site.
-        if (Asm->MAI->isExceptionHandlingDwarf())
+        if (Asm->MAI->usesItaniumLSDAForExceptions())
           CallSites.push_back(Site);
         else {
           // SjLj EH must maintain the call sites in the order assigned
@@ -287,7 +287,7 @@ computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
   // If some instruction between the previous try-range and the end of the
   // function may throw, create a call-site entry with no landing pad for the
   // region following the try-range.
-  if (SawPotentiallyThrowing && Asm->MAI->isExceptionHandlingDwarf()) {
+  if (SawPotentiallyThrowing && Asm->MAI->usesItaniumLSDAForExceptions()) {
     CallSiteEntry Site = { LastLabel, nullptr, nullptr, 0 };
     CallSites.push_back(Site);
   }
@@ -314,7 +314,7 @@ computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
 ///  3. Type ID table contains references to all the C++ typeinfo for all
 ///     catches in the function.  This tables is reverse indexed base 1.
 void EHStreamer::emitExceptionTable() {
-  const std::vector<const GlobalVariable *> &TypeInfos = MMI->getTypeInfos();
+  const std::vector<const GlobalValue *> &TypeInfos = MMI->getTypeInfos();
   const std::vector<unsigned> &FilterIds = MMI->getFilterIds();
   const std::vector<LandingPadInfo> &PadInfos = MMI->getLandingPads();
 
@@ -520,7 +520,7 @@ void EHStreamer::emitExceptionTable() {
     }
   } else {
     // DWARF Exception handling
-    assert(Asm->MAI->isExceptionHandlingDwarf());
+    assert(Asm->MAI->usesItaniumLSDAForExceptions());
 
     // The call-site table is a list of all call sites that may throw an
     // exception (including C++ 'throw' statements) in the procedure
@@ -649,7 +649,7 @@ void EHStreamer::emitExceptionTable() {
 }
 
 void EHStreamer::emitTypeInfos(unsigned TTypeEncoding) {
-  const std::vector<const GlobalVariable *> &TypeInfos = MMI->getTypeInfos();
+  const std::vector<const GlobalValue *> &TypeInfos = MMI->getTypeInfos();
   const std::vector<unsigned> &FilterIds = MMI->getFilterIds();
 
   bool VerboseAsm = Asm->OutStreamer.isVerboseAsm();
@@ -662,9 +662,9 @@ void EHStreamer::emitTypeInfos(unsigned TTypeEncoding) {
     Entry = TypeInfos.size();
   }
 
-  for (std::vector<const GlobalVariable *>::const_reverse_iterator
+  for (std::vector<const GlobalValue *>::const_reverse_iterator
          I = TypeInfos.rbegin(), E = TypeInfos.rend(); I != E; ++I) {
-    const GlobalVariable *GV = *I;
+    const GlobalValue *GV = *I;
     if (VerboseAsm)
       Asm->OutStreamer.AddComment("TypeInfo " + Twine(Entry--));
     Asm->EmitTTypeReference(GV, TTypeEncoding);

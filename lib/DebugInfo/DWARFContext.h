@@ -192,6 +192,10 @@ public:
   virtual StringRef getStringOffsetDWOSection() = 0;
   virtual StringRef getRangeDWOSection() = 0;
   virtual StringRef getAddrSection() = 0;
+  virtual const DWARFSection& getAppleNamesSection() = 0;
+  virtual const DWARFSection& getAppleTypesSection() = 0;
+  virtual const DWARFSection& getAppleNamespacesSection() = 0;
+  virtual const DWARFSection& getAppleObjCSection() = 0;
 
   static bool isSupportedVersion(unsigned version) {
     return version == 2 || version == 3 || version == 4;
@@ -236,6 +240,10 @@ class DWARFContextInMemory : public DWARFContext {
   StringRef StringOffsetDWOSection;
   StringRef RangeDWOSection;
   StringRef AddrSection;
+  DWARFSection AppleNamesSection;
+  DWARFSection AppleTypesSection;
+  DWARFSection AppleNamespacesSection;
+  DWARFSection AppleObjCSection;
 
   SmallVector<SmallString<32>, 4> UncompressedSections;
 
@@ -256,6 +264,10 @@ public:
   StringRef getPubTypesSection() override { return PubTypesSection; }
   StringRef getGnuPubNamesSection() override { return GnuPubNamesSection; }
   StringRef getGnuPubTypesSection() override { return GnuPubTypesSection; }
+  const DWARFSection& getAppleNamesSection() override { return AppleNamesSection; }
+  const DWARFSection& getAppleTypesSection() override { return AppleTypesSection; }
+  const DWARFSection& getAppleNamespacesSection() override { return AppleNamespacesSection; }
+  const DWARFSection& getAppleObjCSection() override { return AppleObjCSection; }
 
   // Sections for DWARF5 split dwarf proposal.
   const DWARFSection &getInfoDWOSection() override { return InfoDWOSection; }

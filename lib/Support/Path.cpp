@@ -958,6 +958,9 @@ file_magic identify_magic(StringRef Magic) {
             case 3: return file_magic::elf_shared_object;
             case 4: return file_magic::elf_core;
           }
+        else
+          // It's still some type of ELF file.
+          return file_magic::elf;
       }
       break;
 
@@ -1020,12 +1023,13 @@ file_magic identify_magic(StringRef Magic) {
         return file_magic::coff_object;
       break;
 
-    case 0x4d: // Possible MS-DOS stub on Windows PE file
-      if (Magic[1] == 0x5a) {
+    case 'M': // Possible MS-DOS stub on Windows PE file
+      if (Magic[1] == 'Z') {
         uint32_t off =
           *reinterpret_cast<const support::ulittle32_t*>(Magic.data() + 0x3c);
         // PE/COFF file, either EXE or DLL.
-        if (off < Magic.size() && memcmp(Magic.data() + off, "PE\0\0",4) == 0)
+        if (off < Magic.size() &&
+            memcmp(Magic.data()+off, COFF::PEMagic, sizeof(COFF::PEMagic)) == 0)
           return file_magic::pecoff_executable;
       }
       break;

@@ -548,7 +548,7 @@ RAFast::LiveRegMap::iterator RAFast::allocVirtReg(MachineInstr *MI,
   }
 
   DEBUG(dbgs() << "Allocating " << PrintReg(VirtReg) << " from "
-               << RC->getName() << "\n");
+               << TRI->getRegClassName(RC) << "\n");
 
   unsigned BestReg = 0, BestCost = spillImpossible;
   for (ArrayRef<MCPhysReg>::iterator I = AO.begin(), E = AO.end(); I != E; ++I){
@@ -708,7 +708,7 @@ void RAFast::handleThroughOperands(MachineInstr *MI,
       continue;
     if (MO.isEarlyClobber() || MI->isRegTiedToDefOperand(i) ||
         (MO.getSubReg() && MI->readsVirtualRegister(Reg))) {
-      if (ThroughRegs.insert(Reg))
+      if (ThroughRegs.insert(Reg).second)
         DEBUG(dbgs() << ' ' << PrintReg(Reg));
     }
   }

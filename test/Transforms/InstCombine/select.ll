@@ -997,17 +997,6 @@ define <2 x i32> @select_icmp_eq_and_1_0_or_vector_of_2s(i32 %x, <2 x i32> %y) {
   ret <2 x i32> %select
 }
 
-; CHECK-LABEL: @select_icmp_and_8_eq_0_or_8(
-; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, 8
-; CHECK-NEXT: ret i32 [[OR]]
-define i32 @select_icmp_and_8_eq_0_or_8(i32 %x) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %or = or i32 %x, 8
-  %or.x = select i1 %cmp, i32 %or, i32 %x
-  ret i32 %or.x
-}
-
 ; CHECK-LABEL: @select_icmp_and_8_ne_0_xor_8(
 ; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, -9
 ; CHECK-NEXT: ret i32 [[AND]]
@@ -1030,27 +1019,6 @@ define i32 @select_icmp_and_8_eq_0_xor_8(i32 %x) {
   ret i32 %xor.x
 }
 
-; CHECK-LABEL: @select_icmp_and_8_ne_0_and_not_8(
-; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, -9
-; CHECK-NEXT: ret i32 [[AND]]
-define i32 @select_icmp_and_8_ne_0_and_not_8(i32 %x) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i32 %x, -9
-  %x.and1 = select i1 %cmp, i32 %x, i32 %and1
-  ret i32 %x.and1
-}
-
-; CHECK-LABEL: @select_icmp_and_8_eq_0_and_not_8(
-; CHECK-NEXT: ret i32 %x
-define i32 @select_icmp_and_8_eq_0_and_not_8(i32 %x) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i32 %x, -9
-  %and1.x = select i1 %cmp, i32 %and1, i32 %x
-  ret i32 %and1.x
-}
-
 ; CHECK-LABEL: @select_icmp_x_and_8_eq_0_y_xor_8(
 ; CHECK: select i1 %cmp, i64 %y, i64 %xor
 define i64 @select_icmp_x_and_8_eq_0_y_xor_8(i32 %x, i64 %y) {
@@ -1061,16 +1029,6 @@ define i64 @select_icmp_x_and_8_eq_0_y_xor_8(i32 %x, i64 %y) {
   ret i64 %y.xor
 }
 
-; CHECK-LABEL: @select_icmp_x_and_8_eq_0_y_and_not_8(
-; CHECK: select i1 %cmp, i64 %y, i64 %and1
-define i64 @select_icmp_x_and_8_eq_0_y_and_not_8(i32 %x, i64 %y) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i64 %y, -9
-  %y.and1 = select i1 %cmp, i64 %y, i64 %and1
-  ret i64 %y.and1
-}
-
 ; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_xor_8(
 ; CHECK: select i1 %cmp, i64 %xor, i64 %y
 define i64 @select_icmp_x_and_8_ne_0_y_xor_8(i32 %x, i64 %y) {
@@ -1079,16 +1037,6 @@ define i64 @select_icmp_x_and_8_ne_0_y_xor_8(i32 %x, i64 %y) {
   %xor = xor i64 %y, 8
   %xor.y = select i1 %cmp, i64 %xor, i64 %y
   ret i64 %xor.y
-}
-
-; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_and_not_8(
-; CHECK: select i1 %cmp, i64 %and1, i64 %y
-define i64 @select_icmp_x_and_8_ne_0_y_and_not_8(i32 %x, i64 %y) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i64 %y, -9
-  %and1.y = select i1 %cmp, i64 %and1, i64 %y
-  ret i64 %and1.y
 }
 
 ; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_or_8(
@@ -1387,6 +1335,7 @@ entry:
 }
 
 declare void @scribble_on_i64(i64*)
+declare void @scribble_on_i128(i128*)
 
 define i8* @test83(i1 %flag) {
 ; Test that we can speculate the load around the select even though they use
@@ -1394,11 +1343,11 @@ define i8* @test83(i1 %flag) {
 ; CHECK-LABEL: @test83(
 ; CHECK:         %[[X:.*]] = alloca i8*
 ; CHECK-NEXT:    %[[Y:.*]] = alloca i8*
-; CHECK:         %[[V:.*]] = load i64* %[[X]]
-; CHECK-NEXT:    %[[C1:.*]] = inttoptr i64 %[[V]] to i8*
-; CHECK-NEXT:    store i8* %[[C1]], i8** %[[Y]]
-; CHECK-NEXT:    %[[C2:.*]] = inttoptr i64 %[[V]] to i8*
-; CHECK-NEXT:    %[[S:.*]] = select i1 %flag, i8* %[[C2]], i8* %[[C1]]
+; CHECK-DAG:     %[[X2:.*]] = bitcast i8** %[[X]] to i64*
+; CHECK-DAG:     %[[Y2:.*]] = bitcast i8** %[[Y]] to i64*
+; CHECK:         %[[V:.*]] = load i64* %[[X2]]
+; CHECK-NEXT:    store i64 %[[V]], i64* %[[Y2]]
+; CHECK-NEXT:    %[[C:.*]] = inttoptr i64 %[[V]] to i8*
 ; CHECK-NEXT:    ret i8* %[[S]]
 entry:
   %x = alloca i8*
@@ -1436,4 +1385,57 @@ entry:
   %p = select i1 %flag, i64* %x1, i64* %y
   %v = load i64* %p
   ret i64 %v
+}
+
+define i8* @test85(i1 %flag) {
+; Test that we can't speculate the load around the select. The load of the
+; pointer doesn't load all of the stored integer bits. We could fix this, but it
+; would require endianness checks and other nastiness.
+; CHECK-LABEL: @test85(
+; CHECK:         %[[T:.*]] = load i128*
+; CHECK-NEXT:    store i128 %[[T]], i128*
+; CHECK-NEXT:    %[[X:.*]] = load i8**
+; CHECK-NEXT:    %[[Y:.*]] = load i8**
+; CHECK-NEXT:    %[[V:.*]] = select i1 %flag, i8* %[[X]], i8* %[[Y]]
+; CHECK-NEXT:    ret i8* %[[V]]
+entry:
+  %x = alloca [2 x i8*]
+  %y = alloca i128
+  %x1 = bitcast [2 x i8*]* %x to i8**
+  %x2 = bitcast i8** %x1 to i128*
+  %y1 = bitcast i128* %y to i8**
+  call void @scribble_on_i128(i128* %x2)
+  call void @scribble_on_i128(i128* %y)
+  %tmp = load i128* %x2
+  store i128 %tmp, i128* %y
+  %p = select i1 %flag, i8** %x1, i8** %y1
+  %v = load i8** %p
+  ret i8* %v
+}
+
+define i128 @test86(i1 %flag) {
+; Test that we can't speculate the load around the select when the integer size
+; is larger than the pointer size. The store of the pointer doesn't store to all
+; the bits of the integer.
+;
+; CHECK-LABEL: @test86(
+; CHECK:         %[[T:.*]] = load i8**
+; CHECK-NEXT:    store i8* %[[T]], i8**
+; CHECK-NEXT:    %[[X:.*]] = load i128*
+; CHECK-NEXT:    %[[Y:.*]] = load i128*
+; CHECK-NEXT:    %[[V:.*]] = select i1 %flag, i128 %[[X]], i128 %[[Y]]
+; CHECK-NEXT:    ret i128 %[[V]]
+entry:
+  %x = alloca [2 x i8*]
+  %y = alloca i128
+  %x1 = bitcast [2 x i8*]* %x to i8**
+  %x2 = bitcast i8** %x1 to i128*
+  %y1 = bitcast i128* %y to i8**
+  call void @scribble_on_i128(i128* %x2)
+  call void @scribble_on_i128(i128* %y)
+  %tmp = load i8** %x1
+  store i8* %tmp, i8** %y1
+  %p = select i1 %flag, i128* %x2, i128* %y
+  %v = load i128* %p
+  ret i128 %v
 }

@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PPCTargetMachine.h"
+#include "PPCTargetObjectFile.h"
 #include "PPC.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
@@ -21,6 +22,7 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Transforms/Scalar.h"
 using namespace llvm;
 
 static cl::
@@ -30,6 +32,11 @@ opt<bool> DisableCTRLoops("disable-ppc-ctrloops", cl::Hidden,
 static cl::opt<bool>
 VSXFMAMutateEarly("schedule-ppc-vsx-fma-mutation-early",
   cl::Hidden, cl::desc("Schedule VSX FMA instruction mutation early"));
+
+static cl::opt<bool>
+EnableGEPOpt("ppc-gep-opt", cl::Hidden,
+             cl::desc("Enable optimizations on complex GEPs"),
+             cl::init(true));
 
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
@@ -60,6 +67,15 @@ static std::string computeFSAdditions(StringRef FS, CodeGenOpt::Level OL, String
   return FullFS;
 }
 
+static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
+  // If it isn't a Mach-O file then it's going to be a linux ELF
+  // object file.
+  if (TT.isOSDarwin())
+    return make_unique<TargetLoweringObjectFileMachO>();
+
+  return make_unique<PPC64LinuxTargetObjectFile>();
+}
+
 // The FeatureString here is a little subtle. We are modifying the feature string
 // with what are (currently) non-function specific overrides as it goes into the
 // LLVMTargetMachine constructor and then using the stored value in the
@@ -70,9 +86,12 @@ PPCTargetMachine::PPCTargetMachine(const Target &T, StringRef TT, StringRef CPU,
                                    CodeGenOpt::Level OL)
     : LLVMTargetMachine(T, TT, CPU, computeFSAdditions(FS, OL, TT), Options, RM,
                         CM, OL),
+      TLOF(createTLOF(Triple(getTargetTriple()))),
       Subtarget(TT, CPU, TargetFS, *this) {
   initAsmInfo();
 }
+
+PPCTargetMachine::~PPCTargetMachine() {}
 
 void PPC32TargetMachine::anchor() { }
 
@@ -155,6 +174,20 @@ TargetPassConfig *PPCTargetMachine::createPassConfig(PassManagerBase &PM) {
 
 void PPCPassConfig::addIRPasses() {
   addPass(createAtomicExpandPass(&getPPCTargetMachine()));
+
+  if (TM->getOptLevel() == CodeGenOpt::Aggressive && EnableGEPOpt) {
+    // Call SeparateConstOffsetFromGEP pass to extract constants within indices
+    // and lower a GEP with multiple indices to either arithmetic operations or
+    // multiple GEPs with single index.
+    addPass(createSeparateConstOffsetFromGEPPass(TM, true));
+    // Call EarlyCSE pass to find and remove subexpressions in the lowered
+    // result.
+    addPass(createEarlyCSEPass());
+    // Do loop invariant code motion in case part of the lowered result is
+    // invariant.
+    addPass(createLICMPass());
+  }
+
   TargetPassConfig::addIRPasses();
 }
 

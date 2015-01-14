@@ -40,8 +40,10 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Analysis/AssumptionTracker.h"
+#include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
@@ -70,12 +72,6 @@ STATISTIC(NumExpand,    "Number of expansions");
 STATISTIC(NumFactor   , "Number of factorizations");
 STATISTIC(NumReassoc  , "Number of reassociations");
 
-static cl::opt<bool>
-    EnableUnsafeFPShrink("enable-double-float-shrink", cl::Hidden,
-                         cl::init(false),
-                         cl::desc("Enable unsafe double to float "
-                                  "shrinking for math lib calls"));
-
 // Initialization Routines
 void llvm::initializeInstCombine(PassRegistry &Registry) {
   initializeInstCombinerPass(Registry);
@@ -90,6 +86,7 @@ INITIALIZE_PASS_BEGIN(InstCombiner, "instcombine",
                 "Combine redundant instructions", false, false)
 INITIALIZE_PASS_DEPENDENCY(AssumptionTracker)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_END(InstCombiner, "instcombine",
                 "Combine redundant instructions", false, false)
 
@@ -97,6 +94,8 @@ void InstCombiner::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
   AU.addRequired<AssumptionTracker>();
   AU.addRequired<TargetLibraryInfo>();
+  AU.addRequired<DominatorTreeWrapperPass>();
+  AU.addPreserved<DominatorTreeWrapperPass>();
 }
 
 
@@ -800,13 +799,14 @@ Instruction *InstCombiner::FoldOpIntoPhi(Instruction &I) {
     // If the incoming non-constant value is in I's block, we will remove one
     // instruction, but insert another equivalent one, leading to infinite
     // instcombine.
-    if (NonConstBB == I.getParent())
+    if (isPotentiallyReachable(I.getParent(), NonConstBB, DT,
+                               getAnalysisIfAvailable<LoopInfo>()))
       return nullptr;
   }
 
   // If there is exactly one non-constant value, we can insert a copy of the
   // operation in that block.  However, if this is a critical edge, we would be
-  // inserting the computation one some other paths (e.g. inside a loop).  Only
+  // inserting the computation on some other paths (e.g. inside a loop).  Only
   // do this if the pred block is unconditionally branching into the phi block.
   if (NonConstBB != nullptr) {
     BranchInst *BI = dyn_cast<BranchInst>(NonConstBB->getTerminator());
@@ -2095,7 +2095,8 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
   // the largest legal integer type. We need to be conservative here since
   // x86 generates redundant zero-extenstion instructions if the operand is
   // truncated to i8 or i16.
-  if (BitWidth > NewWidth && NewWidth >= DL->getLargestLegalIntTypeSize()) {
+  if (DL && BitWidth > NewWidth &&
+      NewWidth >= DL->getLargestLegalIntTypeSize()) {
     IntegerType *Ty = IntegerType::get(SI.getContext(), NewWidth);
     Builder->SetInsertPoint(&SI);
     Value *NewCond = Builder->CreateTrunc(SI.getCondition(), Ty, "trunc");
@@ -2344,7 +2345,7 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
 
       // If we already saw this clause, there is no point in having a second
       // copy of it.
-      if (AlreadyCaught.insert(TypeInfo)) {
+      if (AlreadyCaught.insert(TypeInfo).second) {
         // This catch clause was not already seen.
         NewClauses.push_back(CatchClause);
       } else {
@@ -2426,7 +2427,7 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
             continue;
           // There is no point in having multiple copies of the same typeinfo in
           // a filter, so only add it if we didn't already.
-          if (SeenInFilter.insert(TypeInfo))
+          if (SeenInFilter.insert(TypeInfo).second)
             NewFilterElts.push_back(cast<Constant>(Elt));
         }
         // A filter containing a catch-all cannot match anything by definition.
@@ -2678,7 +2679,8 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB,
     BB = Worklist.pop_back_val();
 
     // We have now visited this block!  If we've already been here, ignore it.
-    if (!Visited.insert(BB)) continue;
+    if (!Visited.insert(BB).second)
+      continue;
 
     for (BasicBlock::iterator BBI = BB->begin(), E = BB->end(); BBI != E; ) {
       Instruction *Inst = BBI++;
@@ -2945,7 +2947,7 @@ public:
   InstCombinerLibCallSimplifier(const DataLayout *DL,
                                 const TargetLibraryInfo *TLI,
                                 InstCombiner *IC)
-    : LibCallSimplifier(DL, TLI, EnableUnsafeFPShrink) {
+    : LibCallSimplifier(DL, TLI) {
     this->IC = IC;
   }
 
@@ -2964,11 +2966,8 @@ bool InstCombiner::runOnFunction(Function &F) {
   AT = &getAnalysis<AssumptionTracker>();
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
   DL = DLP ? &DLP->getDataLayout() : nullptr;
+  DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   TLI = &getAnalysis<TargetLibraryInfo>();
-
-  DominatorTreeWrapperPass *DTWP =
-      getAnalysisIfAvailable<DominatorTreeWrapperPass>();
-  DT = DTWP ? &DTWP->getDomTree() : nullptr;
 
   // Minimizing size?
   MinimizeSize = F.getAttributes().hasAttribute(AttributeSet::FunctionIndex,

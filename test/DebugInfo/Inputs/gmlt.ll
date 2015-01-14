@@ -14,7 +14,7 @@
 ;    describes those subprograms
 
 ; CHECK: DW_TAG_compile_unit
-; CHECK:   DW_AT_ranges [DW_FORM_sec_offset] (0x00000000)
+; CHECK:   DW_AT_ranges [DW_FORM_sec_offset] (0x00000000
 ; CHECK-NOT: {{DW_TAG|NULL}}
 
 ; Omitting the subprograms without inlined subroutines is not possible
@@ -94,6 +94,8 @@
 
 ; CHECK: .debug_pubtypes contents:
 ; CHECK-NOT: Offset
+
+; CHECK: .apple{{.*}} contents:
 
 ; Function Attrs: nounwind uwtable
 define void @_Z2f1v() #0 {

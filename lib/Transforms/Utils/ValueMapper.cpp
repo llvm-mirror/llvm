@@ -210,8 +210,10 @@ void llvm::RemapInstruction(Instruction *I, ValueToValueMapTy &VMap,
   // Remap attached metadata.
   SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
   I->getAllMetadata(MDs);
-  for (SmallVectorImpl<std::pair<unsigned, MDNode *> >::iterator
-       MI = MDs.begin(), ME = MDs.end(); MI != ME; ++MI) {
+  for (SmallVectorImpl<std::pair<unsigned, MDNode *>>::iterator
+           MI = MDs.begin(),
+           ME = MDs.end();
+       MI != ME; ++MI) {
     MDNode *Old = MI->second;
     MDNode *New = MapValue(Old, VMap, Flags, TypeMapper, Materializer);
     if (New != Old)

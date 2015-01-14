@@ -9,6 +9,7 @@
 
 #include "DWARFContext.h"
 #include "DWARFDebugArangeSet.h"
+#include "DWARFAcceleratorTable.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -57,6 +58,18 @@ static void dumpPubSection(raw_ostream &OS, StringRef Name, StringRef Data,
       OS << '\"' << pubNames.getCStr(&offset) << "\"\n";
     }
   }
+}
+
+static void dumpAccelSection(raw_ostream &OS, StringRef Name,
+                             const DWARFSection& Section, StringRef StringSection,
+                             bool LittleEndian) {
+  DataExtractor AccelSection(Section.Data, LittleEndian, 0);
+  DataExtractor StrData(StringSection, LittleEndian, 0);
+  OS << "\n." << Name << " contents:\n";
+  DWARFAcceleratorTable Accel(AccelSection, StrData, Section.Relocs);
+  if (!Accel.extract())
+    return;
+  Accel.dump(OS);
 }
 
 void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType) {
@@ -218,6 +231,22 @@ void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType) {
       OS << format("%8.8x\n", strOffsetExt.getU32(&offset));
     }
   }
+
+  if (DumpType == DIDT_All || DumpType == DIDT_AppleNames)
+    dumpAccelSection(OS, "apple_names", getAppleNamesSection(),
+                     getStringSection(), isLittleEndian());
+
+  if (DumpType == DIDT_All || DumpType == DIDT_AppleTypes)
+    dumpAccelSection(OS, "apple_types", getAppleTypesSection(),
+                     getStringSection(), isLittleEndian());
+
+  if (DumpType == DIDT_All || DumpType == DIDT_AppleNamespaces)
+    dumpAccelSection(OS, "apple_namespaces", getAppleNamespacesSection(),
+                     getStringSection(), isLittleEndian());
+
+  if (DumpType == DIDT_All || DumpType == DIDT_AppleObjC)
+    dumpAccelSection(OS, "apple_objc", getAppleObjCSection(),
+                     getStringSection(), isLittleEndian());
 }
 
 const DWARFDebugAbbrev *DWARFContext::getDebugAbbrev() {
@@ -565,6 +594,11 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj)
             .Case("debug_str.dwo", &StringDWOSection)
             .Case("debug_str_offsets.dwo", &StringOffsetDWOSection)
             .Case("debug_addr", &AddrSection)
+            .Case("apple_names", &AppleNamesSection.Data)
+            .Case("apple_types", &AppleTypesSection.Data)
+            .Case("apple_namespaces", &AppleNamespacesSection.Data)
+            .Case("apple_namespac", &AppleNamespacesSection.Data)
+            .Case("apple_objc", &AppleObjCSection.Data)
             // Any more debug info sections go here.
             .Default(nullptr);
     if (SectionData) {
@@ -597,6 +631,11 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj)
         .Case("debug_loc", &LocSection.Relocs)
         .Case("debug_info.dwo", &InfoDWOSection.Relocs)
         .Case("debug_line", &LineSection.Relocs)
+        .Case("apple_names", &AppleNamesSection.Relocs)
+        .Case("apple_types", &AppleTypesSection.Relocs)
+        .Case("apple_namespaces", &AppleNamespacesSection.Relocs)
+        .Case("apple_namespac", &AppleNamespacesSection.Relocs)
+        .Case("apple_objc", &AppleObjCSection.Relocs)
         .Default(nullptr);
     if (!Map) {
       // Find debug_types relocs by section rather than name as there are
